@@ -61,6 +61,13 @@ type commentBili struct {
 	// ⚠️ **它是给「长正文」那一条用的**：真 fixture 里那一条正文只有一百来
 	// 个字，在宽窗口上根本折不到 6 行——于是「折起来」那条压根触发不了。
 	mainRaw []byte
+	// page2Raw 是「第二页回这一份」（nil = 回 `files[page2]`）。
+	//
+	// ⚠️ **它是给「翻页重叠」那一条用的**：B 站的分页是按热度切的，不是按
+	// rpid 切的，所以同一条评论挪了名次就会在两页里各出现一次——而这一页的
+	// 行身份就是 rpid（不去重的话同一个父节点下有两个一样的 key，框架直接
+	// panic）。
+	page2Raw []byte
 	// hold 非 nil 时，**第二页那一趟卡在这个闸门上**（用来验「正在拉」）。
 	hold chan struct{}
 	// calls 记着主列表那几趟的查询串。
@@ -104,6 +111,9 @@ func newCommentBili(t *testing.T, mainFile string) *commentBili {
 		switch {
 		case q.Get("pagination_str") != "":
 			raw = b.files[b.page2]
+			if b.page2Raw != nil {
+				raw = b.page2Raw
+			}
 			// ⚠️ **只有翻页那一趟卡闸门**：第一页必须回来（不然界面上是
 			// 「正在拉评论…」，而那条要验的是**末尾那一行**的样子。
 			hold = b.hold
@@ -187,6 +197,72 @@ func commentFixtureWithLongBody(t *testing.T, name string) []byte {
 	first, _ := replies[0].(map[string]any)
 	content, _ := first["content"].(map[string]any)
 	content["message"] = strings.Repeat(commentLongBody, 12)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("fixture %s 编不出来：%v", name, err)
+	}
+	return raw
+}
+
+// commentFixtureWithRepeatedComment 是「第二页把第一页的第一条原样再来一次」
+// 那一份 fixture。
+//
+// 🔴 **翻页重叠是常事**：B 站的分页是按热度切的，不是按 rpid 切的，所以同一条
+// 评论挪了名次就会在两页里各出现一次。
+//
+// ⚠️ **它必须只有那一条重复的**（不掺新的）：那样「一页没有带来任何新东西」
+// 这一档才验得到（应用层要把它当成到底了，不许再空转拉页）。
+func commentFixtureWithRepeatedComment(t *testing.T, name string) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(commentFixtureBytes(t, name), &doc); err != nil {
+		t.Fatalf("fixture %s 读不懂：%v", name, err)
+	}
+	data, _ := doc["data"].(map[string]any)
+	replies, _ := data["replies"].([]any)
+	if len(replies) == 0 {
+		t.Fatalf("fixture %s 里一条评论都没有", name)
+	}
+	data["replies"] = []any{replies[0]}
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("fixture %s 编不出来：%v", name, err)
+	}
+	return raw
+}
+
+// commentFixtureWithLongBodyAndEmote 是「正文很长、而正文里有表情占位符」那
+// 一份 fixture。
+//
+// 🔴 **它验的是两件事同时成立**：长正文被折起来（末尾是省略号），而那枚
+// 表情**仍然是图**（不是 `[妙啊]` 三个字）。
+//
+// ⚠️ **表情占位符摆在正文的最前面**：那样它一定落在折叠之后还看得见的那几行
+// 里——而「折叠线正好切在占位符里面」的那一档由
+// `TestALongCommentIsNeverCutInTheMiddleOfAnEmote` 扫前缀长度来验。
+func commentFixtureWithLongBodyAndEmote(t *testing.T, name string) []byte {
+	t.Helper()
+	var doc map[string]any
+	if err := json.Unmarshal(commentFixtureBytes(t, name), &doc); err != nil {
+		t.Fatalf("fixture %s 读不懂：%v", name, err)
+	}
+	data, _ := doc["data"].(map[string]any)
+	replies, _ := data["replies"].([]any)
+	if len(replies) == 0 {
+		t.Fatalf("fixture %s 里一条评论都没有", name)
+	}
+	first, _ := replies[0].(map[string]any)
+	content, _ := first["content"].(map[string]any)
+	content["message"] = "[妙啊]" + strings.Repeat(commentLongBody, 12)
+	content["emote"] = map[string]any{
+		"[妙啊]": map[string]any{
+			"id": 435, "package_id": 1, "state": 0, "type": 1, "attr": 0,
+			"text":  "[妙啊]",
+			"url":   "https://i0.hdslb.com/bfs/emote/b4cb77159d58614a9b787b91b1cd22a81f383535.png",
+			"meta":  map[string]any{"size": 1, "suggest": []string{""}},
+			"mtime": 1668688325, "jump_title": "妙啊",
+		},
+	}
 	raw, err := json.Marshal(doc)
 	if err != nil {
 		t.Fatalf("fixture %s 编不出来：%v", name, err)
@@ -490,6 +566,92 @@ func magentaPixels(tt *mygoui.Tester) int {
 // 长正文折叠
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TestALongCommentIsNeverCutInTheMiddleOfAnEmote 断**截断不会把表情占位符切
+// 成半个**。
+//
+// 🔴 **这是评审在票 #573 上抓到的那一条**：截断是按 rune 二分切的，而切点落在
+// `[妙啊]` 里面的话，正文里就剩下半个 `[妙啊`——**表情不再成图，而正文里出现
+// 字面量**（那是「表情成图」那条验收直接破掉的形状）。
+//
+// ⚠️ **前缀长度要扫一遍**：切点落在占位符里面只在**某几个**前缀长度上发生
+// （前缀越长，能塞下的字越多，切点就越往右挪）——只试一个长度的话，一个
+// 「碰巧没切到」的实现照样绿。
+//
+// ⚠️ **要在真上下文里排版**：正文在哪几个字那里折行取决于字体和宽度，而那
+// 两样只有真框架才给得出（`shapeCommentBody` 要一个 `*ui.Context`）。
+func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
+	const emote = "[妙啊]"
+	emotes := map[string]bili.CommentEmote{
+		emote: {URL: "https://i0.hdslb.com/bfs/emote/b4cb77159d58614a9b787b91b1cd22a81f383535.png"},
+	}
+
+	// bodies 是每一档前缀长度排出来的那一份正文（连着它那一句话）。
+	type shaped struct {
+		msg  string
+		body *commentBody
+	}
+	var bodies []shaped
+	ts := newTestShell(t, at(1200, 900), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.applyFrameTheme(c)
+			for n := 0; n <= 400; n++ {
+				cm := bili.Comment{
+					Rpid:    1,
+					Message: strings.Repeat("填", n) + emote + strings.Repeat("后", 300),
+					Emotes:  emotes,
+				}
+				bodies = append(bodies, shaped{
+					msg:  cm.Message,
+					body: shapeCommentBody(c, cm, 900, commentBodyLines),
+				})
+			}
+		}
+	}))
+	ts.tt.Frame()
+
+	if len(bodies) == 0 {
+		t.Fatal("一档正文都没排出来——那一帧没有跑到")
+	}
+	// ⚠️ **得真的折起来过**：正文够长，截断一定触发（而截断才是这一条要验的
+	// 那一档）。
+	folded := 0
+	withEmote := 0
+	for i, sh := range bodies {
+		b := sh.body
+		// ⚠️ **先分清「折起来了」和「整段都放得下」**：前缀够长的时候整段
+		// 正文放得下 6 行，那一档压根不截断（而这一条要验的是截断那一档）。
+		_, _, full := commentSpans(sh.msg, emotes)
+		if b.plain == full {
+			continue
+		}
+		if !strings.HasSuffix(b.plain, "…") {
+			t.Errorf("第 %d 档：正文末尾不是省略号，而是 %q", i, b.plain)
+			continue
+		}
+		folded++
+		// 🔴 **不许留下半个占位符**：那一句在画面上就是字面量。
+		if strings.Contains(b.plain, "[") {
+			t.Errorf("第 %d 档：正文里留着半个表情占位符 %q——"+
+				"表情被切坏了（而它该是整枚出现，或者整枚不出现）", i, b.plain)
+		}
+		// ⚠️ **占位符要么是图，要么没有**：不许有「半个」。
+		if len(b.objects) != len(b.emotes) {
+			t.Errorf("第 %d 档：正文里有 %d 枚表情图的位置，却有 %d 张图——"+
+				"它们对不上", i, len(b.objects), len(b.emotes))
+		}
+		if strings.Contains(b.plain, "［表情］") {
+			withEmote++
+		}
+	}
+	if folded == 0 {
+		t.Error("一档都没折起来——正文不够长，截断压根没触发（这一条就白跑了）")
+	}
+	if withEmote == 0 {
+		t.Error("一档里都没有那枚表情——前缀扫得不够宽（切点一次也没落在占位符附近）")
+	}
+}
+
 // TestALongCommentIsFoldedWithoutBreakingTheRow 断**长正文被折起来**。
 //
 // 🔴 **「折起来」是看画面**：第一条评论的正文很长（真 fixture 里那一段
@@ -537,6 +699,85 @@ func TestALongCommentIsFoldedWithoutBreakingTheRow(t *testing.T) {
 	if maxH := float32(commentBodyLines) * body.lineH; body.h > maxH+0.5 {
 		t.Errorf("折起来的那一格有 %.1f 高，而 %d 行只有 %.1f——它破版了",
 			body.h, commentBodyLines, maxH)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 翻页重叠
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestAPageThatRepeatsACommentDoesNotBreakThePage 断**翻页重叠不会把评论页
+// 打成错误页**。
+//
+// 🔴 **这是评审在票 #573 上抓到的那一条**：第二页把第一页的一条评论原样再给了
+// 一次，而这一页的行身份就是 rpid——两条一样的 rpid 摆成两行的话，框架见同一
+// 个父节点下有两个一样的 key 就 panic：
+//
+//	ui: two elements under one parent have the key 321942994928
+//
+// ⇒ **整页变成错误页**（而用户只是滚到底了一下）。
+//
+// ⚠️ **判据是三样**：页面没崩、重复的那一条只摆一遍、而且**不再空转拉页**
+// （一页全是重样的 ⇒ 那是到底了）。
+func TestAPageThatRepeatsACommentDoesNotBreakThePage(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	b.page2Raw = commentFixtureWithRepeatedComment(t, "reply-main.json")
+	s, tt := newCommentsShell(t, b, mvItem(), 1400, 1400)
+
+	// 等第二页回来（末尾那一行进画面了就自动续拉）。
+	commentsWait(t, tt, "第二页拉回来了", func() bool {
+		return b.mainCallCount() >= 2
+	})
+	// 等它被处理掉：一页全是重样的 ⇒ 视为到底（不再有下一页）。
+	commentsWait(t, tt, "第二页被处理掉了", func() bool {
+		return !s.app.CommentsHasMore()
+	})
+
+	if s.crash != nil {
+		t.Fatalf("评论页崩了（%v）——翻页重叠让同一个 key 出现了两次", s.crash)
+	}
+	// 重复的那一条只摆一遍。
+	if n := countExactText(tt, "大圆镜科普"); n != 1 {
+		t.Errorf("画面上有 %d 条「大圆镜科普」，want 1——重复的那一条被摆了两遍", n)
+	}
+	// 不再空转拉页：那一页什么新东西都没带来 ⇒ 不该有第三趟。
+	time.Sleep(200 * time.Millisecond)
+	tt.Frame()
+	if got := b.mainCallCount(); got != 2 {
+		t.Errorf("主列表被问了 %d 趟，want 2——一页全是重样的之后不该再拉", got)
+	}
+}
+
+// TestTheCommentRowsHaveOneKeyEach 断**行身份各自唯一**。
+//
+// 🔴 **框架见同一个父节点下有两个一样的 key 就 panic**，而这一页的行身份是
+// rpid——所以「同一条评论进来两次」必须在**建行**那一层就挡掉（应用层那一层
+// 已经去过重，这里是第二道）。
+//
+// ⚠️ **主评论和楼中楼要分开算**：楼中楼是**另一条评论**（它自己的 rpid），而
+// 它的行身份不许跟主评论那一行撞。
+func TestTheCommentRowsHaveOneKeyEach(t *testing.T) {
+	p := &commentsPage{}
+	p.rebuildRows([]bili.Comment{
+		{Rpid: 1, Message: "第一条"},
+		{Rpid: 1, Message: "第一条（重复的那一条）"},
+		{Rpid: 2, Message: "第二条"},
+	}, nil)
+
+	if len(p.rows) != 2 {
+		t.Fatalf("建出来 %d 行，want 2（重复的那一条只算一次）", len(p.rows))
+	}
+	seen := map[int64]bool{}
+	for _, row := range p.rows {
+		key, ok := row.key.(int64)
+		if !ok {
+			t.Fatalf("行身份是 %T，want int64（框架算哈希那一档只认整数和字符串）",
+				row.key)
+		}
+		if seen[key] {
+			t.Errorf("两行的身份都是 %d——框架会 panic（同一个 key 出现两次）", key)
+		}
+		seen[key] = true
 	}
 }
 

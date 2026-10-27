@@ -589,6 +589,121 @@ func TestTheAVIDIsRememberedAcrossRestarts(t *testing.T) {
 	}
 }
 
+// TestARepeatedCommentIsNotAddedTwice 钉住「翻页重叠不会把同一条评论摆两遍」。
+//
+// 🔴 **翻页重叠是常事**：B 站的分页是按热度切的，不是按 rpid 切的，所以同一条
+// 评论挪了名次就会在两页里各出现一次。
+//
+// ⚠️ **不去重的坏处是「整页变成错误页」**：这一页的行身份就是 rpid（界面层
+// `internal/ui/comments.go` 的 `commentRowKey`），而框架见同一个父节点下有两个
+// 一样的 key 就 panic（`ui: two elements under one parent have the key ...`）。
+func TestARepeatedCommentIsNotAddedTwice(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		if next == "" {
+			return commentPage([]bili.Comment{
+				{Rpid: 1, Message: "第一条"},
+				{Rpid: 2, Message: "第二条"},
+			}, "OFFSET-2", false), nil
+		}
+		// 🔴 **第二页把第一条原样再来一次**（翻页重叠），外加一条新的。
+		return commentPage([]bili.Comment{
+			{Rpid: 1, Message: "第一条"},
+			{Rpid: 3, Message: "第三条"},
+		}, "", true), nil
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	waitComments(t, a, 2, "第一页")
+	if !a.LoadMoreComments() {
+		t.Fatal("翻不了第二页")
+	}
+	waitComments(t, a, 3, "第二页")
+
+	got := a.Comments()
+	seen := map[int64]int{}
+	for _, c := range got {
+		seen[c.Rpid]++
+	}
+	if seen[1] != 1 {
+		t.Errorf("rpid 1 出现了 %d 次，want 1——翻页重叠没有去重", seen[1])
+	}
+	if seen[2] != 1 || seen[3] != 1 {
+		t.Errorf("翻页之后的内容不对：%v", got)
+	}
+}
+
+// TestAPageThatBringsNothingNewIsTheEnd 钉住「一页没有带来任何新东西就是到底
+// 了」。
+//
+// 🔴 **那是「无进展保护」**：接口在重复给同一批（或者这一页是空的），而
+// `cursor.is_end` 还说「还有」——于是自动补屏会一直拉下去，每拉一次一个往返，
+// 而用户看着末尾那一行转圈转到天荒地老。
+//
+// ⚠️ **判据是「不再有下一页」**：翻页那一趟回来之后 `CommentsHasMore()` 要是
+// false，而且**再翻也翻不动**。
+func TestAPageThatBringsNothingNewIsTheEnd(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 1, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		if next == "" {
+			return commentPage([]bili.Comment{{Rpid: 1, Message: "第一条"}}, "OFFSET-2", false), nil
+		}
+		// 🔴 **第二页全是重样的**，而游标还说「还有下一页」。
+		return commentPage([]bili.Comment{{Rpid: 1, Message: "第一条"}}, "OFFSET-3", false), nil
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "130191"})
+	a.queue.selectAt(0)
+
+	waitComments(t, a, 1, "第一页")
+	if !a.LoadMoreComments() {
+		t.Fatal("翻不了第二页")
+	}
+	// 等第二页那一趟回来（条数不变，所以只能等「问了几趟」）。
+	waitCommentListCalls(t, calls, 2)
+	// 等它被记下来（去重 + 无进展保护）。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && a.CommentsHasMore() {
+		time.Sleep(time.Millisecond)
+	}
+	if a.CommentsHasMore() {
+		t.Errorf("一页全是重样的之后还说「还有下一页」——自动补屏会一直空转拉页")
+	}
+	if got := len(a.Comments()); got != 1 {
+		t.Errorf("翻页之后有 %d 条，want 1（重复的那一条只算一次）", got)
+	}
+	if a.LoadMoreComments() {
+		t.Error("已经到底了还能翻——那是空转（每次都要一个往返）")
+	}
+}
+
+// waitCommentListCalls 等主列表被问到了 want 趟。
+func waitCommentListCalls(t *testing.T, c *commentCalls, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if c.listCount() >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("主列表被问了 %d 趟，want %d", c.listCount(), want)
+}
+
 // TestLoadMoreUsesTheCursor 钉住「按游标翻下一页」。
 func TestLoadMoreUsesTheCursor(t *testing.T) {
 	a := New()

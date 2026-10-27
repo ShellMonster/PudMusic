@@ -19,6 +19,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -116,4 +117,44 @@ func TestRenderCommentsLongTitleShot(t *testing.T) {
 		return tt.HasText("大圆镜科普")
 	})
 	save(t, dir, "16-评论页-长标题.png", tt)
+}
+
+// TestRenderCommentsFoldedEmoteShot 出**长正文被折起来、而那枚表情仍然是图**
+// 那一张。
+//
+// 🔴 **这一张是评审提的那条缺陷的画面证据**（票 #573 第三轮）：截断不许把
+// 表情占位符切成半个——切坏了的话，画面上留下的是 `[妙啊` 三个字（而不是
+// 一枚图）。
+func TestRenderCommentsFoldedEmoteShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	b := newCommentBili(t, "reply-main.json")
+	b.mainRaw = commentFixtureWithLongBodyAndEmote(t, "reply-main.json")
+	_, tt := newCommentsShell(t, b, mvItem(), 1400, 1000)
+
+	// 等表情图下来（图片是后台下的，图好了才画得出来）。
+	commentsWait(t, tt, "表情图下来了", func() bool {
+		return magentaPixels(tt) > 0
+	})
+
+	// 画面上不许有表情的字面量。
+	for _, txt := range tt.Texts() {
+		if strings.Contains(txt, "[妙啊") {
+			t.Fatalf("画面上留着表情的字面量 %q——它该是一张图", txt)
+		}
+	}
+
+	if r, ok := tt.Find("大圆镜科普"); ok {
+		saveRect(t, dir, "18-评论页-长正文带表情.png", tt,
+			int(r.X)-52, int(r.Y)-26, 1140, 320)
+		// ⚠️ **正文那一列比这一张宽**（窗口 1400，而这一张只裁了 1140）：
+		// 而**折叠的末尾（那个省略号）在正文那一列的最右端**——所以另裁一张
+		// 右半边，那里有「折起来了」的那句话。
+		saveRect(t, dir, "19-评论页-长正文折起来.png", tt,
+			int(r.X)-52+1000, int(r.Y)-26, 340, 320)
+	} else {
+		t.Fatalf("画面上没有第一条评论，文字有 %q", tt.Texts())
+	}
 }

@@ -61,6 +61,7 @@ package ui
 import (
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
@@ -159,6 +160,11 @@ type commentRow struct {
 	//
 	// ⚠️ **它是提前装箱好的 `any`**：框架每帧要问 `ListState.Key(i)`，而
 	// `int64 → any` 那一步每次都要在堆上分配一次（票 #339 那族的道理）。
+	//
+	// ⚠️ **它是 `commentRowKey` 算出来的那个 int64**（不是 rpid 本身）：
+	// 主评论和楼中楼要分开算，而框架那边见**同一个父节点下有两个一样的
+	// key** 就 panic（`ui: two elements under one parent have the key ...`）——
+	// 症状是整页变成错误页。
 	key any
 	// cm 是这一条评论。
 	cm bili.Comment
@@ -182,6 +188,24 @@ type commentRow struct {
 	likeText string
 	// replyText 是回复数那几个字（「共52条回复」）；空串 = 这一条没有楼中楼。
 	replyText string
+}
+
+// commentRowKey 算一行的身份。
+//
+// 🔴 **主评论和楼中楼必须分开**：rpid 各自唯一，但**行身份要在同一个父节点
+// 下唯一**——所以主评论用 `rpid<<1`，楼中楼用 `rpid<<1|1`。
+//
+// ⚠️ **必须是 int64，不能是结构体**：框架算 key 的哈希时，走结构体那条路要
+// `fmt.Sprintf`（`mygo/ui/context.go` 的 `keyHash`）——那是**每帧每一行一次
+// 分配**，而这一页的每帧分配预算只剩几个（见 `framebudget_test.go`）。
+//
+// ⚠️ **左移不会溢出**：rpid 是 B 站的 int64（实测在 10^11 那一档），左移
+// 一位离 int64 的上限还远得很。
+func commentRowKey(rpid int64, reply bool) int64 {
+	if reply {
+		return rpid<<1 | 1
+	}
+	return rpid << 1
 }
 
 // commentBody 是一条评论正文的排版结果。
@@ -740,10 +764,15 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 		// O(log n) 次排版，而这一次排版的结果是**记着的**（见 `commentBodyOf`），
 		// 所以代价只付一次。
 		runes := []rune(cm.Message)
+		// 🔴 **截断点不许落在表情占位符里面**（理由见 `safeCommentCut`）。
+		ranges := commentEmoteRanges(cm.Message, cm.Emotes)
 		lo, hi := 0, len(runes)
 		for lo < hi {
 			mid := (lo + hi + 1) / 2
-			sp, _, _ := commentSpans(string(runes[:mid]), cm.Emotes)
+			// ⚠️ **量的是「安全切点」那一段**：切点落在占位符里面的话，量出来
+			// 的那一份和最后摆出来的那一份不是同一句话（一个是半个占位符的
+			// 字面量，一个是整枚表情）——二分就会照着一个不存在的东西收敛。
+			sp, _, _ := commentSpans(string(runes[:safeCommentCut(ranges, mid)]), cm.Emotes)
 			sp = append(sp, ui.Span{Text: "…"})
 			l := ui.ShapeRichText(sp, font, w)
 			_, hh := l.Size()
@@ -753,7 +782,7 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 				hi = mid - 1
 			}
 		}
-		spans, emotes, plain = commentSpans(string(runes[:lo]), cm.Emotes)
+		spans, emotes, plain = commentSpans(string(runes[:safeCommentCut(ranges, lo)]), cm.Emotes)
 		spans = append(spans, ui.Span{Text: "…"})
 		plain = plain + "…"
 		layout = ui.ShapeRichText(spans, font, w)
@@ -777,6 +806,10 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 // 返回的第二样是那些表情图的地址，**与 inline object 一一对应**（按出现的
 // 顺序）——画的时候靠这个对应关系把图贴到位置上。第三样是**给辅助技术和
 // 无头 Tester 的那份文字**（表情占位符换成「［表情］」）。
+//
+// 🔴 **认占位符的口径只有这一处**：截断那一档（`safeCommentCut`）要认的是
+// **同一批**占位符——认错了的话，截断会把一段普通文字里的方括号也当成表情
+// 切掉。
 func commentSpans(msg string, emotes map[string]bili.CommentEmote) ([]ui.Span, []string, string) {
 	var spans []ui.Span
 	var urls []string
@@ -815,6 +848,71 @@ func commentSpans(msg string, emotes map[string]bili.CommentEmote) ([]ui.Span, [
 		rest = rest[i+j+1:]
 	}
 	return spans, urls, plain.String()
+}
+
+// commentEmoteRange 是正文里一枚表情占位符占的字符区间（**按 rune 数**，
+// 左闭右开）。
+type commentEmoteRange struct {
+	start int
+	end   int
+}
+
+// commentEmoteRanges 找出正文里那些**表情占位符**占的字符区间。
+//
+// 🔴 **口径必须和 `commentSpans` 一模一样**（那里怎么认占位符，这里就怎么
+// 认）：那一处是「`[` 到下一个 `]` 之间的那一段，**在表情表里**」才算占位符。
+//
+// ⚠️ **区间按 rune 数算**：截断是按 rune 切的（`[]rune`），而按字节算的
+// 区间跟切点对不上——中文一个字三个字节。
+func commentEmoteRanges(msg string, emotes map[string]bili.CommentEmote) []commentEmoteRange {
+	var out []commentEmoteRange
+	rest := msg
+	// base 是 rest 之前已经过去了多少个 rune。
+	base := 0
+	for len(rest) > 0 {
+		i := strings.IndexByte(rest, '[')
+		if i < 0 {
+			break
+		}
+		j := strings.IndexByte(rest[i:], ']')
+		if j < 0 {
+			break
+		}
+		token := rest[i : i+j+1]
+		head := utf8.RuneCountInString(rest[:i])
+		tok := utf8.RuneCountInString(token)
+		if _, ok := emotes[token]; ok {
+			out = append(out, commentEmoteRange{
+				start: base + head,
+				end:   base + head + tok,
+			})
+		}
+		// ⚠️ **不管是不是表情，都从这枚 token 后面接着找**：那一段已经被
+		// `commentSpans` 吃掉了（不是表情就是普通文字），找法得一样。
+		rest = rest[i+j+1:]
+		base += head + tok
+	}
+	return out
+}
+
+// safeCommentCut 把截断点**挪到占位符外面**。
+//
+// 🔴 **切点不许落在占位符里面**：落在里面的话，正文里会剩下半个 `[妙啊`——
+// 表情不再成图，而正文里出现字面量（那是「表情成图」那条验收直接破掉的
+// 形状，评审在票 #573 上抓到过）。
+//
+// ⇒ 落在里面就**退回占位符的开头**（整枚占位符不出现），而不是留在半个
+// 占位符上。退回只会让正文更短 ⇒ 高度更小 ⇒ 「最多几行」那一档还成立。
+//
+// ⚠️ **切在占位符的前后都合法**：切在开头 = 整枚不出现，切在结尾 = 整枚
+// 出现（表情成图）。
+func safeCommentCut(ranges []commentEmoteRange, n int) int {
+	for _, r := range ranges {
+		if n > r.start && n < r.end {
+			return r.start
+		}
+	}
+	return n
 }
 
 // commentImageURL 把 B 站给的地址补成能直接拉的。
@@ -920,12 +1018,28 @@ func (s *Shell) syncComments(c *ui.Context) {
 //
 // ⚠️ **楼中楼是从 `replies` 那个函数拿的**，不在这里发请求（铁律三）：
 // 应用层那一句 `CommentReplies` 自己会把请求递到后台。
+//
+// 🔴 **行身份必须唯一**（铁律四）：框架见**同一个父节点下有两个一样的 key**
+// 就 panic（`ui: two elements under one parent have the key ...`）——而翻页
+// 重叠会让同一条评论进两页（应用层那一层已经去过重了，这里再挡一道：
+// **两行共用一份状态**和**整页变成错误页**，症状都比「多一行」严重得多）。
 func (p *commentsPage) rebuildRows(cm []bili.Comment, replies func(int64) []bili.Comment) {
 	rows := make([]commentRow, 0, len(cm))
+	seen := make(map[int64]bool, len(cm))
 	for _, c := range cm {
+		key := commentRowKey(c.Rpid, false)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
 		rows = append(rows, newCommentRow(c, false, 0))
 		if p.expanded[c.Rpid] {
 			for _, r := range replies(c.Rpid) {
+				key := commentRowKey(r.Rpid, true)
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
 				rows = append(rows, newCommentRow(r, true, c.Rpid))
 			}
 		}
@@ -940,7 +1054,7 @@ func (p *commentsPage) rebuildRows(cm []bili.Comment, replies func(int64) []bili
 // `internal/ui/framebudget_test.go` 那一档盯着的「每帧现算」）。
 func newCommentRow(c bili.Comment, reply bool, root int64) commentRow {
 	row := commentRow{
-		key:      c.Rpid,
+		key:      commentRowKey(c.Rpid, reply),
 		cm:       c,
 		reply:    reply,
 		root:     root,

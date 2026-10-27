@@ -1340,7 +1340,10 @@ func budgetCommentRows(n int) []commentRow {
 	rows := make([]commentRow, n)
 	for i := range rows {
 		rows[i] = commentRow{
-			key: int64(1000 + i),
+			// ⚠️ **身份走 `commentRowKey`**（跟真的行一样）：那一档量的是
+			// 「画一页评论要多少」，而行的身份是**建行的时候算好的那个 int64**
+			//（框架算哈希那一档只认整数和字符串，见 `comments.go`）。
+			key: commentRowKey(int64(1000+i), false),
 			cm: bili.Comment{
 				Rpid:  int64(1000 + i),
 				Mid:   int64(2000 + i),

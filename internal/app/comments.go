@@ -725,16 +725,28 @@ func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 		a.commentsMu.Unlock()
 		return
 	}
+	// added 是「这一趟新加进来几条」（翻页那一趟用；见下面那句判据）。
+	added := 0
 	if res.append {
 		// ⚠️ **新拼一份，不往已经发出去的那一段上追加**：`a.comments` 可能正被
 		// 界面那一帧拿着（见 Comments 的注释）。往它的底层数组里写就是**后台在改
 		// 界面正在读的东西**——数据竞争，而症状是界面上偶发地显示一条半截的评论。
-		merged := make([]bili.Comment, 0, len(a.comments)+len(res.comments))
-		merged = append(merged, a.comments...)
-		merged = append(merged, res.comments...)
+		//
+		// 🔴 **按 rpid 去重**：翻页重叠是常事——同一条评论挪了名次就会在两页
+		// 里各出现一次（B 站的分页是按热度切的，不是按 rpid 切的）。不去重的
+		// 话同一条评论会在界面上摆两行，而这一页的行身份就是 rpid（框架见同一
+		// 个父节点下有两个一样的 key 就 panic，见 `internal/ui/comments.go`）。
+		//
+		// 第二个返回值是**这一页新加进来几条**：0 = 什么新东西都没带来（理由见
+		// 下面那一句判据）。
+		merged, n := mergeCommentPages(a.comments, res.comments)
 		a.comments = merged
+		added = n
 	} else if res.comments != nil {
-		a.comments = res.comments
+		// ⚠️ **第一页也去重**：一页之内出现两条一样的 rpid 是接口的事，但
+		// 界面上那两行会共用一份状态（框架还会 panic）。
+		merged, _ := mergeCommentPages(nil, res.comments)
+		a.comments = merged
 	}
 	if res.loaded {
 		a.commentsLoaded = true
@@ -752,6 +764,21 @@ func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 	if res.loaded {
 		a.commentsNext = res.next
 		a.commentsIsEnd = res.isEnd
+		// 🔴 **无进展保护：一页没有带来任何新东西就是到底了**。
+		//
+		// 两条坏处一样（用户看着末尾那一行转圈转到天荒地老）：
+		//
+		//   - 一页空的还说「还有」：接口在骗人，或者已经到头了。
+		//   - 一页**全是重样的**：接口在重复给同一批，翻页翻不动了——而「还有」
+		//     会让自动补屏一直拉下去（每次都要一个往返）。
+		//
+		// ⇒ **加不进去就是没有**（理由同 `widgets/list/paged.go` 的那一档）。
+		//
+		// ⚠️ **只对翻页那一趟这么判**：第一页本来就可能是空的（那一首还没有
+		// 人评论），而那一档是 B 站自己说的 `is_end`。
+		if res.append && added == 0 {
+			a.commentsIsEnd = true
+		}
 		a.commentsAllCount = res.allCount
 		// ⚠️ **「还没有人评论」只在第一页说**：翻页途中碰到一个空页而
 		// `is_end` 还是 false，那是**翻页没翻完**——说成「还没有人评论」的话，
@@ -775,6 +802,42 @@ func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 	a.commentsMu.Unlock()
 
 	a.wakeComments()
+}
+
+// mergeCommentPages 把新的一页接到旧的那一页后面，**按 rpid 去重**。
+//
+// 🔴 **去重是必须的**：翻页重叠是常事——B 站的分页是按热度切的，不是按 rpid
+// 切的，所以同一条评论挪了名次就会在两页里各出现一次。而这一页的行身份就是
+// rpid（`internal/ui/comments.go` 的 `commentRowKey`），两条一样的 rpid 摆成
+// 两行的话，框架见同一个父节点下有两个一样的 key 就 panic（`ui: two elements
+// under one parent have the key ...`）——症状是**整页变成错误页**。
+//
+// ⚠️ **保留的是第一次出现的那一条**：翻页重叠时两页里那一条内容是一样的，
+// 而先来的那一页是用户已经读过的。
+//
+// 第二个返回值是**新加进去的条数**：0 = 这一页没有带来任何新东西（接口在重复
+// 给同一批，或者这一页是空的）⇒ 那是「到底了」，不许再空转拉页（理由见
+// `finishComments` 里那一句）。
+func mergeCommentPages(old, page []bili.Comment) ([]bili.Comment, int) {
+	merged := make([]bili.Comment, 0, len(old)+len(page))
+	seen := make(map[int64]bool, len(old)+len(page))
+	for _, c := range old {
+		if seen[c.Rpid] {
+			continue
+		}
+		seen[c.Rpid] = true
+		merged = append(merged, c)
+	}
+	added := 0
+	for _, c := range page {
+		if seen[c.Rpid] {
+			continue
+		}
+		seen[c.Rpid] = true
+		merged = append(merged, c)
+		added++
+	}
+	return merged, added
 }
 
 // wakeComments 叫醒界面（铁律三）。
