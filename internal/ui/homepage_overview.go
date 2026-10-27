@@ -42,7 +42,7 @@ const (
 	// 元素上的缝写 space.Px16（间距 lint 不认常量），块与块之间的竖向缝是 space.Px28。
 	homeOverviewCellGap = 16
 
-	homeTileH      = 84
+	homeTileH      = 96
 	homeBoardHeroH = 112
 	homeMiniRowH   = 64
 	homeMiniCover  = 48
@@ -249,10 +249,20 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 	ui.Row(c).Key("home:tiles").FillWidth().Gap(space.Px16).Children(func() {
 		for _, tile := range homeTiles {
 			name := homeTabs[tile.tab]
-			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(t.Radius+2).
+			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(t.Radius+2).Clip().
 				Gradient(tile.from, tile.to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
+				// 磁贴右侧压一张该榜第一名的封面当「插画」，向左渐隐进磁贴底色；没有数据就只剩渐变。
+				if items := h.lists[tile.tab].Items(); len(items) > 0 && items[0].Cover != "" && h.newGrid.cache.Get(items[0].Cover).Ready() {
+					iw := cw * 0.5
+					ui.Box(c).Key("home:tile:art:"+name).Size(iw, homeTileH).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
+						Children(func() {
+							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, items[0].Cover, "", iw, homeTileH, 0, nil)
+							ui.Box(c).Key("home:tile:fade:"+name).Size(iw, homeTileH).
+								Gradient(tile.to, tile.to.Alpha(0), 90).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+						})
+				}
 				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
 				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(ui.RGBA(255, 255, 255, 0.78)).MaxLines(1)
@@ -362,6 +372,9 @@ func (h *homePage) viewMiniBoard(c *ui.Context, idx, tab int, w float32) {
 						ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 					}
 				})
+				if m.Duration > 0 {
+					ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+				}
 			})
 		}
 	})
