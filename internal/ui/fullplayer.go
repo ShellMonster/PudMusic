@@ -983,7 +983,8 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		x = area.X + area.W - fullStagePadX - w
 	}
 	box := shadow.FullCover(ui.Box(c).Key("full-cover").
-		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius))
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius).
+		ContextMenu(s.coverMenu))
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}

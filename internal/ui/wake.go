@@ -3,6 +3,7 @@ package ui
 import (
 	"sync"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -80,5 +81,15 @@ func (h *wakeHandle) writeClipboard(text string) {
 	h.mu.Unlock()
 	if held {
 		svc.WriteClipboard(text)
+	}
+}
+
+// writePNG 把一张 PNG 放进系统剪贴板。要在界面线程上调。
+func (h *wakeHandle) writePNG(b []byte) {
+	h.mu.Lock()
+	svc, held := h.svc, h.held
+	h.mu.Unlock()
+	if held {
+		svc.WriteClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.PNG, b))))
 	}
 }
