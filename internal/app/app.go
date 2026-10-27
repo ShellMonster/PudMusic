@@ -484,10 +484,6 @@ type App struct {
 	// ⚠️ **它和 `HasLyrics` 不是一回事**：有词的时候它也可能是真的（换源、重新
 	// 取一份），而界面那一档只在**一条都没有**的时候才画。
 	lyricLoading bool
-	// lyricWaiting 是「歌词这一摊已经发起过一次取数（读盘 / 字幕 / 自动找）」。
-	//
-	// ⚠️ **看它才判得出「这一首压根不会有歌词」**：没有发起过时也不能说「没有」。
-	lyricWaiting bool
 	// lyricOffsetMS / lyricFontSize 是用户调过的值，切歌时同步重置成默认值。
 	lyricOffsetMS int
 	lyricFontSize float32

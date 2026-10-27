@@ -295,30 +295,32 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 // ⚠️ **表头也在里面**：头图说的是下面这些歌是哪张榜，表头说的是下面那些歌
 // 叫什么列——两样都是「这一屏的上半」，滚下去就该一起走（同 `viewPopLead`）。
 //
-// ⚠️ **页头内容拿不到时这一行什么都不画**（返回空）：`list.Lead` 一旦装上就
-// 固定占一行，而「这一期还没拉回来」时头图那块本来就不存在（见
-// `viewBoardCaption` 的那两句早退）——不画的话那一行是 0 高，列表照常从顶上开始。
+// 🔴 **两样各自判各自的**（2026-10-27 的评审）：「这一期是哪一期」那个元信息
+// 和「下面那些歌」是**两趟**请求（`loads.board` 与翻页列表）。头图拿不到时把
+// 表头也一起藏掉，用户看到的是**一屏没有列名的歌**——而列名和期数没有关系。
+// 所以：
+//
+//	期数信息回来了 → 头图 + 表头
+//	期数信息没回来 → 只有表头（那一块照旧钉在顶上这件事不影响：它在列表第 0 行，
+//	                  只有一行表头，滚下去就没了）
 func (h *homePage) viewBoardLead(c *ui.Context, tab int) {
-	if !h.boardHeroVisible(tab) {
-		return
-	}
+	showHero := h.boardHeroVisible(tab)
 	ui.Column(c).FillWidth().Gap(space.Px12).
 		Padding(space.None, space.None, space.Px12).Children(func() {
-		h.viewBoardCaption(c, tab)
+		if showHero {
+			h.viewBoardCaption(c, tab)
+		}
 		h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
 	})
 }
 
 // boardHeroVisible 报这一档的榜单头图这一帧画不画。
 //
-// ⚠️ **和 `viewBoardCaption` 用同一组判据**（同一个函数算出来的）：两处各判
-// 一遍的话，页内头部那一行的高度会按另一套算——那正是「表头离上面那块 0 还是
-// 12」这种对不上的来源。
+// ⚠️ **判据和 `viewBoardCaption` 那两句早退逐条对齐**：头图那一块和这一句要是
+// 各判一套，页内头部的高度就会和「实际画出来的东西」对不上（`Lead.Height` 是
+// 一个估的数，见 `list.Lead`）。
 func (h *homePage) boardHeroVisible(tab int) bool {
-	if tab != homeHotTab && tab != homeOriginalTab {
-		return false
-	}
-	if h.loads.board == nil {
+	if (tab != homeHotTab && tab != homeOriginalTab) || h.loads.board == nil {
 		return false
 	}
 	n, at, ok := h.loads.board(tab)

@@ -261,15 +261,19 @@ func (a *App) setLyricTrack(it Item) {
 	a.stopLyricLoadingTimer()
 	if key != "" {
 		a.lyricLoadingTimer = a.after(lyricsLoadingGrace, func() {
+			// ⚠️ **一次取锁把该做的都做完**（判断还在不在这一首、清 loading、
+			// 清自己的槽、取唤醒函数）：分两次取锁的话中间那一小段换歌，
+			// 前一首的定时器就会去关新一首的加载态——症状是「切歌之后那一格
+			// 一闪就没了」，而它其实还在等。
+			//
+			// ⚠️ **判的是 key 不是 gen**：这一道兜底只关心「还是不是同一首」。
+			// 同一首之内换歌词源（gen 变）不该把兜底作废——它还在这首歌上。
+			//
+			// ⚠️ **判 `lyricLoadingTimer != nil`**：换歌时 `stopLyricLoadingTimer`
+			// 会把槽清空，所以「槽还指着这一轮」等于「这一轮没有被取消过」。
 			a.mu.Lock()
-			a.lyricLoadingTimer = nil
-			stale := a.lyricKey != key
-			a.mu.Unlock()
-			if stale {
-				return
-			}
-			a.mu.Lock()
-			if a.lyricKey == key {
+			if a.lyricLoadingTimer != nil && a.lyricKey == key {
+				a.lyricLoadingTimer = nil
 				a.lyricLoading = false
 			}
 			wake := a.wake
@@ -298,10 +302,6 @@ func (a *App) loadLyrics(key string, gen int) {
 	a.mu.Lock()
 	c := a.lyricCache
 	wake := a.wake
-	// 🔴 **读盘那一趟已经发起了**（2026-10-27）：`lyricWaiting` 是「这一首的歌词
-	// 至少有一个来源试过了」，没有它时界面不能断言「没有歌词」（那会把「还没开始」
-	// 说成「没有」）。
-	a.lyricWaiting = true
 	a.mu.Unlock()
 
 	if c == nil || key == "" {
@@ -431,7 +431,6 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 	// 🔴 **拿到词了，就不是「加载中」**（2026-10-27）：这一趟可能来自自动找歌词、
 	// 用户手动换源、或者从缓存读回来的那一份。三种都算「有着落了」。
 	a.lyricLoading = false
-	a.lyricWaiting = true
 	return entry, a.lyricCache
 }
 

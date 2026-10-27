@@ -9,6 +9,7 @@ package ui
 import (
 	"image"
 	"net/http"
+	"sort"
 	"strconv"
 	"testing"
 
@@ -20,27 +21,74 @@ import (
 // TestTheCoverLoadingFillIsVisibleOnALightPage 钉住「封面加载中」那一档的底色
 // **在浅色页面上看得出来**。
 //
-// 🔴 **判据是像素差**：那一档原先是一个 `Surface` 往 `Background` 混一半的平色
-// （#fafafa），压在 #ffffff 的页面上**每通道只差 4** —— 一屏 48 像素的封面在
-// 浅色下仍然是一排空白。现在它是**前景色 8%**（约 #ebebeb），每通道差 20。
+// 🔴 **判据是「实打实画出来的像素」**：那一档原先是一个 `Surface` 往
+// `Background` 混一半的平色（#fafafa），压在 #ffffff 的页面上**每通道只差 4**
+// ——一屏 48 像素的封面在浅色下仍然是一排空白。现在它是**前景色 8%**
+// （约 #ebebeb），每通道差 20。
 //
-// ⚠️ **量的是「和页面底色的距离」，不是「等于某个具体色值」**：具体值会随主题
-// 走（用户能改底色），而「看得出是一块占位」这件事有个下限。40 这个门槛是
-// 对着两条实测值定的（旧的差 12、新的差 60）。
+// ⚠️ **取样点必须在「高光带扫不到」的位置，而且要真的画一遍**：上一版这一条
+// 是拿 `shimmer.BaseAlpha` 现算一遍数学——把实现改回旧的混色它照样绿（实测过），
+// 那是**假测试**。现在画一格、读像素。
+//
+// ⚠️ **怎么保证取样点不在高光带上**：`shimmer` 的高光是一道 35% 宽的竖带，
+// 按钟从左扫到右。取**左上角往里 10 像素**那个点，然后在若干个相位上各取一次——
+// 只要**有一点**落在带外，那一点就是纯底色。判据用「最暗的那一次」（带外的
+// 那一次），因为高光只会把它提亮。
 func TestTheCoverLoadingFillIsVisibleOnALightPage(t *testing.T) {
-	b := newTestShell(t, at(1200, 800))
-	theme := BuildTheme(b.s.app.SettingsSnapshot(), false)
+	b := newTestShell(t, at(400, 300), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.applyFrameTheme(c)
+			imgcache.Loading(c, 200, 200, imgcache.Shape{})
+		}
+	}))
+	// 🔴 **判据不认主题色，只认「这一格和它旁边的空白页差多少」**：
+	//
+	// 上一版拿 `BuildTheme(设置, 浅色)` 去算页面底色——而画面上那一份是
+	// `applyFrameTheme` 装的（默认主题方案把底色换成了 #f8f4ed），两者差 4~8 个
+	// 通道值，于是在门槛边上翻脸（实测量到 27，真实值 48）。
+	//
+	// 现在两边都从**同一张图**上取：那一格里的取样点 vs 它右边那块空白页。
+	b.tt.Frame()
 
-	// 那一格自己没有底，`shimmer.Paint` 是直接铺一层半透明的前景——所以压在
-	// 页面白上的实际颜色是它 `Over` 页面底色。
-	onPage := theme.Text.Alpha(shimmer.BaseAlpha).Over(theme.Background)
-	dist := absChannel(onPage.R, theme.Background.R) +
-		absChannel(onPage.G, theme.Background.G) +
-		absChannel(onPage.B, theme.Background.B)
-	if dist < 40 {
-		t.Fatalf("封面加载中那一档压在页面底色上只差 %d（%v vs %v）——"+
-			"浅色下那等于一块空白，用户分不出「还在加载」和「压根没有图」",
-			dist, onPage, theme.Background)
+	// ⚠️ **多取几个点、每个点扫几个相位、最后取最小值**：高光是一道 35% 宽的
+	// 竖带按钟扫过，单点单次很可能正落在带上（那就量成了「带里最亮的色」）。
+	// 取最小值等于「这个格子最暗的那一处、最暗的那一次」——也就是**纯底色**。
+	//
+	// 往里 8 稳住：避开抗锯齿的边，也避开正中那枚音符图标（它是 `TextMuted`
+	// 再往背景色混 25%，比底色深，会把「差多少」量成图标和底色的差）。
+	// 那一格是 200×200，画在 (0,0)。页面底从**窗口里**取——(250,150) 是那一格
+	// 右边那块空白页（别取到 300,300：那已经在窗口外，读回来是全透明，差值算出
+	// 来是个假数）。
+	const pageX, pageY = 250, 150
+
+	// 🔴 **判据是「整格像素里和页面底色的距离的中位数」**：
+	//
+	// 扫光是一道 35% 宽的竖带在走，**任何单点都可能正落在带上**（实测最小差
+	// 21 = 带上最亮那一处）；而正中那枚音符又把中间那一块拉深。取**中位数**
+	// 等于「这个格子里占面积最大的那个色」，也就是**底色本身**——它不随相位变
+	// （实测六个相位都是 48）。
+	b.tt.Frame()
+	base := b.tt.Image().RGBAAt(pageX, pageY)
+	page := [3]uint8{base.R, base.G, base.B}
+
+	img := b.tt.Image()
+	var ds []int
+	for y := 4; y < 196; y++ {
+		for x := 4; x < 196; x++ {
+			// 跳过正中那枚音符（`placeholderIconRatio * 200 = 80` 见方那一块）。
+			if x > 60 && x < 140 && y > 60 && y < 140 {
+				continue
+			}
+			p := img.RGBAAt(x, y)
+			ds = append(ds, absChannel(p.R, page[0])+
+				absChannel(p.G, page[1])+absChannel(p.B, page[2]))
+		}
+	}
+	sort.Ints(ds)
+	worst := ds[len(ds)/2]
+	if worst < 40 {
+		t.Fatalf("封面加载中那一档压在页面底色上**最暗**只差 %d（门槛 40）——"+
+			"浅色下那等于一块空白，用户分不出「还在加载」和「压根没有图」", worst)
 	}
 }
 
@@ -155,7 +203,7 @@ func TestTheBoardHeroScrollsAwayWithTheList(t *testing.T) {
 		}
 		uiExploreJSON(w, 0, map[string]any{"list": list})
 	})
-	_, tt, _ := newHomeShell(t, b)
+	s_, tt, _ := newHomeShell(t, b)
 	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "排行榜") })
 	if err := tt.Click("热榜"); err != nil {
 		t.Fatal(err)
@@ -175,13 +223,26 @@ func TestTheBoardHeroScrollsAwayWithTheList(t *testing.T) {
 	tt.Scroll(homeW/2, homeH/2, 0, 1200)
 	homeFrame(tt)
 
-	after, stillThere := tt.Find("榜单头图")
-	if !stillThere {
-		return // 已经滚出画面 —— 正是跟随滚动的样子
+	// 🔴 **判据是「滚过之后那一块要么往上走了、要么已经不在画面上」**。
+	//
+	// ⚠️ **「不在画面上」单独不算过**：那一块要是**压根没画出来**（或者被别处
+	// 一起删了），`Find` 同样拿不到——那也是「不在画面上」，但页头并没有跟着滚。
+	// 所以先断「滚之前它确实在、而且位置合理」，再断「滚之后它不在了或者往上」。
+	//
+	// ⚠️ **`before.Y` 那一句不是在断「它在顶上」**（它本来就在列表第 0 行、
+	// Tab 条下面），而是留一个能核对的数：出问题时那句话里带着两个 y。
+	if before.Y <= 0 || before.Y > homeH {
+		t.Fatalf("滚之前页头的位置就不在窗口里（y=%.0f）——这一条量不下去", before.Y)
 	}
-	if after.Y >= before.Y-1 {
-		t.Errorf("滚了 200 之后头图还在 y=%.0f（滚之前 y=%.0f）——"+
+	after, stillThere := tt.Find("榜单头图")
+	if stillThere && after.Y >= before.Y-1 {
+		t.Errorf("滚了 1200 之后头图还在 y=%.0f（滚之前 y=%.0f）——"+
 			"它是钉在顶上的，不是跟着列表滚走", after.Y, before.Y)
+	}
+	// 顺带把「滚动真的发生了」钉一下：`ScrollOffset` 得往前走过。
+	if off := s_.home.lists[homeHotTab].ScrollOffset(); off <= 0 {
+		t.Errorf("滚了 1200，列表报的滚动量还是 %.0f——滚动压根没发生，"+
+			"上面那条「位置上移」就不成立", off)
 	}
 }
 
