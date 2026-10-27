@@ -735,6 +735,23 @@ type App struct {
 	// ⚠️ **它是原子计数器**：它被后台那个 goroutine 加，而测试在另一个
 	// goroutine 里读它。
 	danmakuDropped atomic.Int64
+	// playPositionNS 是**给界面画进度条用**的位置，纳秒，原子读。
+	//
+	// # 为什么不能只靠 `a.position`（那一个要拿 `a.mu`）
+	//
+	// 进度条那根线要在 `Draw` 回调里读位置，而 `a.mu` 是整份应用状态那把锁
+	// （`Snapshot()` 拿它、tick 拿它、换歌拿它）——在 `Draw` 里抢它等于把整份
+	// 应用状态的锁拽进绘制路径。
+	//
+	// # 它和 `a.position` 的关系
+	//
+	// `a.position` 仍是**唯一的事实来源**（tick 每 50ms 从播放器读回来、同一
+	// 把锁里写）；这一栏是它的一份只读镜像。读的一侧只用来画那根线——差一拍
+	// （50ms）在画面上看不出来（那根线一秒挪不到一个像素）。
+	//
+	// ⚠️ **它让进度条不必靠整树重建来走**：没有这一栏时，界面只能从 `State`
+	// 里拿到建树那一刻的位置，于是「让那根线往前走」只能靠每 50ms 重建整棵树。
+	playPositionNS atomic.Int64
 	// danmakuSeq 是**在途序号**。每发起一趟取弹幕就加一（**不管是哪一集**）。
 	//
 	// 🔴 **它挡的是「同一个 key 上慢的那一趟把新的盖掉」**：代次
@@ -1016,6 +1033,35 @@ func (a *App) publishWake(n int) {
 }
 
 // Snapshot 返回当前状态的拷贝。
+// setPositionLocked 改 `a.position`，并同步界面那一份镜像（`playPositionNS`）。
+//
+// ⚠️ **调用它的时候必须已经拿着 `a.mu`**（所以名字里带 Locked）。这一层
+// 不自己加锁：调用点大多已经在锁里，再套一层就是死锁。
+//
+// # 为什么要有它
+//
+// 位置有**九处**会直接改（tick 读回来、换音质、重连、清曲目、停止、
+// giveUpSkipping、Seek、开新的一首、进度条拖完）。每一处都要同步那份原子
+// 镜像，漏一处就是「界面停在旧位置」——而界面上看不出异样。
+//
+// 收成一个函数之后，「忘了同步」这件事在一处就看不到了：只剩「有没有用它」。
+func (a *App) setPositionLocked(pos time.Duration) {
+	a.position = pos
+	a.playPositionNS.Store(int64(pos))
+}
+
+// PlayPosition 是当前播放位置，**不拿锁**，给进度条在 `Draw` 回调里读。
+//
+// 它的精度是 tick 的（50ms），和 `a.position` 同一份值——差别只在于这一条
+// 不会把整份应用状态的锁拽进绘制路径（见 `playPositionNS`）。
+//
+// ⚠️ **它不是 `Snapshot().Position` 的替代品**：`Snapshot` 那份是**建树那一刻**
+// 的一致快照（歌名、时长、位置是同一套）；这一条只回答「那根线此刻画到哪儿」。
+// 拿它去判「换歌了没有」是用错了工具。
+func (a *App) PlayPosition() time.Duration {
+	return time.Duration(a.playPositionNS.Load())
+}
+
 func (a *App) Snapshot() State {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -1261,7 +1307,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 			pos = d
 		}
 	}
-	a.position = pos
+	a.setPositionLocked(pos)
 	if paused {
 		// 恢复：**停在那个位置，不出声**。
 		//
@@ -1527,7 +1573,7 @@ func (a *App) ScrubEnd(fraction float64) {
 
 	// 立刻把位置改过来：暂停状态下 tick 不跑，界面下一帧读的就是这里写的值。
 	a.mu.Lock()
-	a.position = t
+	a.setPositionLocked(t)
 	a.playing = p.Playing()
 	// 用户动过时间线了，「停到开头」这件事就过去了。系统那边跟着回到
 	// playing / paused——它看到的进度条此刻在 t 上，状态却说「停在开头」，
@@ -1586,7 +1632,8 @@ func (a *App) ClearTrack() {
 	a.title, a.path, a.cover = "", "", ""
 	a.artist = ""
 	a.artistMid = 0
-	a.position, a.duration = 0, 0
+	a.setPositionLocked(0)
+	a.duration = 0
 	a.wantPlay = false
 	a.clearErrLocked()
 	// 🔴 **「正在重连」也收掉**（票 #315）：清掉当前曲目 = 用户不要这一首了，
@@ -1711,6 +1758,17 @@ func (a *App) Close() {
 func (a *App) tick() {
 	t := time.NewTicker(tickInterval)
 	defer t.Stop()
+	// shown 是**上一次叫醒界面时报出去的位置**，只属于这一个循环。
+	//
+	// ⚠️ **它故意是局部变量，不是 App 的字段**：位置还有五处会直接改
+	// （换音质、重连、清曲目、停止、giveUpSkipping），做成字段就得在**每一处**
+	// 手工同步——漏一处就是「界面停在一个不动的读数上」，而它在画面上和
+	// 「本来就该这样」长得一模一样。局部变量没有这个口子：换歌之后第一次
+	// 读数大概率就和它不同（位置从 0 起），判「变了」而报一帧；就算撞上同一
+	// 个秒数，那条路径自己会 `wake()`（换歌、停止、出错都各自叫醒）。
+	//
+	// 代价是「换歌后第一拍可能多报一帧」——一帧，只在切歌那一下。
+	var shown time.Duration
 	for {
 		select {
 		case <-a.done:
@@ -1761,9 +1819,9 @@ func (a *App) tick() {
 					// 回到开头（见 AdvanceStop 那支），而播放器那边的 Seek(0)
 					// 还没生效——这一拍读到的是**放完之前**的位置（实测是歌曲
 					// 的全长），报出去就成了「进度条卡在末尾」。
-					a.position = 0
+					a.setPositionLocked(0)
 				} else {
-					a.position = pos
+					a.setPositionLocked(pos)
 				}
 				a.playing = playing
 			}
@@ -1828,8 +1886,36 @@ func (a *App) tick() {
 			// 理由见 `reportTick` 那段。
 			a.reportTick(ended && p != nil && p.Err() == nil)
 
-			if live && wake != nil {
-				wake()
+			// 「这一拍要不要叫醒界面」——**跟着读数走，不跟着播放器的时钟走**
+			// （见 `readoutMoved`）。
+			//
+			// 以前这里是 `if live && wake != nil { wake() }`：20Hz 的 ticker 一拍
+			// 叫一次，于是放歌的时候每一秒整棵树重建 20 遍。而屏幕上真在变的
+			// 只有进度条那个读数（一秒一变）和那根线的位置——后者是**局部重绘**
+			// （`playbar.go` 的滑块自己 `p.AnimationFrame()`），不需要整窗重建。
+			//
+			// 上游 mygo-cloudmusic 是同一个口径：`tickTimes` 只在下一次秒变化前
+			// `c.After` 要一帧。
+			//
+			// ⚠️ **位置仍旧每一拍更新**（上面那几句已经写了 `a.position`）：
+			// 淡出、上报、落盘、`Seek` 的返回值都要 50ms 的精度。这里改的只是
+			// **「要不要重画」**。
+			//
+			// ⚠️ **换歌、暂停、停止、出错那些不经过这里**：它们各自走 `a.wake()` /
+			// `a.invalidate()`（`SetCover`、`checkPlayback`、`onTrackFinished`
+			// 等），一秒之内就到。这一句只负责「歌在往前走」这一种变化。
+			// ⚠️ **`ended` 那一拍强制唤醒**：放完/出错/断流都会让界面上那一行
+			// 换一句话（「已停止」「这一串放完了」、错误那一条），而位置可能
+			// 正好回到同一个秒数上（放完是回到 0，从 0:59.x 放完也是回到 0）。
+			// 只按读数判的话那一帧就漏了——症状是「歌放完了，播放条还写着在放」。
+			if (live || ended) && wake != nil {
+				a.mu.Lock()
+				pos := a.position
+				a.mu.Unlock()
+				if ended || readoutMoved(shown, pos) {
+					shown = pos
+					wake()
+				}
 			}
 			// 「自然放完」才按播放模式往下走一档。**只判 ended 不够**：
 			// 暂停、停止、关闭在 `Playing()` 眼里和放完了一样（见下面那句）。

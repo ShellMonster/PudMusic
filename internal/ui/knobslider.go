@@ -222,6 +222,14 @@ func knobSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 		Height(t.Space(5)).MinWidth(t.Space(20))
 }
 
+// knobSliderLive 是 `knobSlider` 加「那根线自己走」（见 `selfSliderLive`）：
+// 满屏播放器那根进度用它，它和播放条那根一样是一直在走的那一根。
+func knobSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live func() float32) ui.Element {
+	t := c.Theme()
+	return selfSliderLive(c, value, lo, hi, look, live).
+		Height(t.Space(5)).MinWidth(t.Space(20))
+}
+
 // playbarProgressSlider 是播放条上那根进度：轨道 4 像素，旋钮只在悬停或按下时画。
 //
 // ⚠️ **它不是 `ui.Slider`**：框架那一颗的旋钮全程亮着，而且按住的时候会褪成一圈
@@ -231,12 +239,44 @@ func playbarProgressSlider(c *ui.Context, value *float64, lo, hi float64) ui.Ele
 		Height(20).MinWidth(16)
 }
 
+// playbarProgressSliderLive 是 `playbarProgressSlider` 加「那根线自己走」
+// （`live` 的来历见 `selfSliderLive`）。
+//
+// 播放条和满屏播放器那两根都用它：它们是**一直在放**的那一根，而以前它们
+// 靠整窗 20Hz 重建来走。
+func playbarProgressSliderLive(c *ui.Context, value *float64, lo, hi float64, live func() float32) ui.Element {
+	return selfSliderLive(c, value, lo, hi, knobHoverLook, live).
+		Height(20).MinWidth(16)
+}
+
 // selfSlider 造一根自绘的滑块：框架的基座（值、拖动、点击跳转、键盘、无障碍
 // 全是框架的），画出来的那部分归我们。
 //
 // 旋钮的**位置和粗细**由 look 定；元素**多大**由调用方摆（`.Width` / `.Height` /
 // `.Grow`）——竖着的那根（音量）全程是调用方说了算。
 func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) ui.Element {
+	return selfSliderLive(c, value, lo, hi, look, nil)
+}
+
+// selfSliderLive 是 `selfSlider` 加一档「**画的时候现算**的值」。
+//
+// # 它解决的是「那根线怎么自己往前走」
+//
+// 平常那个 `frac` 是**建树那一刻**算的：值不变，画面就不变；要让它动，只能
+// 整棵树重建一遍。播放条上那根进度每一拍都在变——于是它以前靠 `tick` 每
+// 50ms 叫醒整窗（20Hz 重建）来走。那是**为了画一根线，把整棵树重建二十遍**。
+//
+// `live` 给了另一条路：`Draw` 回调里问一次**当前**的分数，画的就是当下的位置；
+// 顺带 `p.AnimationFrame()` 要下一帧——那一帧**不重建**（框架只重画，见
+// `Painter.AnimationFrame` 的注释）。整树于是只在**读数**变了时重建（一秒一次）。
+//
+// ⚠️ **只在「不在拖」的时候用 `live`**：拖的时候用户的手指才是事实来源，
+// 那时候画的是拖动值（`st.v`），不是播放器走到哪儿了。上游也是这么分的
+// （`mygo-cloudmusic` 的 `scrubber`：`if !st.active { at = pl.Position() }`）。
+//
+// ⚠️ **`live` 必须便宜**：它在每帧的绘制路径里被调，一帧可能好几遍。
+// 拿锁、算快照、分配字符串之类的都别往里放。
+func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live func() float32) ui.Element {
 	t := c.Theme()
 
 	sl := ui.SliderBase(c, value, lo, hi).
@@ -293,6 +333,15 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 	sl.Draw(func(p *ui.Painter, r ui.Rect) {
 		var track ui.Rect
 		var cx, cy float32 // 旋钮的中心
+
+		// 「画的时候现算」的那一档（见 `selfSliderLive` 的注释）：给了 `live`
+		// 就把 `frac` 换成它此刻的值，并要下一帧——那一帧**不重建**。
+		//
+		// ⚠️ **只在没被按着的时候**：按着的时候用户的手指是事实来源，画拖动值。
+		if live != nil && !sl.Pressed() && !sl.IsDisabled() {
+			frac = min(max(live(), 0), 1)
+			p.AnimationFrame()
+		}
 
 		// 🔴 **填过的那一段的三档颜色**（票 #218 / #248）：平时前景色、悬停/按下
 		// 才主色、**禁用**时是中性色。
