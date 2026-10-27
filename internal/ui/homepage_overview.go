@@ -146,7 +146,7 @@ func (h *homePage) heroSongs() []list.Music {
 func (h *homePage) viewHero(c *ui.Context, w float32) {
 	t := c.Theme()
 	songs := h.heroSongs()
-	ch := min(w*0.34, 300)
+	ch := min(w*0.26, 260)
 	if len(songs) == 0 {
 		if !h.feed.newTab.loading && h.feed.newTab.started {
 			return
@@ -206,25 +206,34 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur
 		card = card.Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
 	}
 	card = card.AnimatePose(ui.Pose{Fade: fade}, anim)
+	card = card.Background(ui.RGBA(28, 23, 20, 1))
 	card.Children(func() {
-		imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, w, hgt)
-		ui.Box(c).Key("home:hero:bar:"+m.ID).Size(w, hgt*0.55).
-			Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.78), 180).
-			Attach(ui.AnchorBottomLeft, ui.AnchorBottomLeft).
-			Padding(space.None, space.Px48, space.Px12, space.Px16).
-			AlignItems(ui.Start).Justify(ui.End).Children(func() {
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size18)).Bold().
+		// 封面多是 16:9：按原比例贴右，不再拉满整条横幅（拉满会被放大裁掉大半，还糊）；
+		// 左边一段渐变把它融进深色底，文字落在深色底上。
+		cw := min(hgt*16/9, w*0.7)
+		ui.Box(c).Key("home:hero:img:"+m.ID).Size(cw, hgt).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
+			Children(func() {
+				imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, hgt, 0, nil)
+				ui.Box(c).Key("home:hero:fade:"+m.ID).Size(cw*0.45, hgt).
+					Gradient(ui.RGBA(28, 23, 20, 1), ui.RGBA(28, 23, 20, 0), 90).
+					Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+			})
+		ui.Column(c).Key("home:hero:txt:"+m.ID).Size(max(w-cw*0.7, w*0.3), hgt).
+			Padding(space.Px24, space.Px24, space.Px24, space.Px28).Gap(space.Px8).Justify(ui.Center).AlignItems(ui.Start).
+			Attach(ui.AnchorTopLeft, ui.AnchorTopLeft).Children(func() {
+			ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size12)).Bold().TextColor(t.Accent)
+			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).Bold().
 				TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(2).Ellipsis("…")
 			if sh.Owner != "" {
-				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size13)).
-					TextColor(ui.RGBA(255, 255, 255, 0.8)).MaxLines(1).Ellipsis("…")
+				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size14)).
+					TextColor(ui.RGBA(255, 255, 255, 0.75)).MaxLines(1).Ellipsis("…")
 			}
-		})
-		ui.Box(c).Key("home:hero:play:"+m.ID).Size(36, 36).Radius(18).Background(t.Accent).Center().
-			Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(space.Px12).Bottom(space.Px12).
-			Children(func() {
-				ui.Icon(c, icon(iconPlayFill)).FontSize(18).TextColor(t.AccentText)
+			ui.Row(c).Key("home:hero:play:"+m.ID).Gap(space.Px6).Padding(space.Px8, space.Px16, space.Px8, space.Px12).
+				Radius(18).Background(t.Accent).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.AccentText)
+				ui.Text(c, "立即播放").FontSize(scale.Font(c, scale.Size13)).Bold().TextColor(t.AccentText)
 			})
+		})
 	})
 }
 
