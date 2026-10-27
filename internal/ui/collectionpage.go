@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -601,7 +602,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 		Radius(t.Radius * 2).LinearGradient(glow).
 		Children(func() {
 			// ① 封面。空地址时 imgcache 画空框（没给封面的收藏夹真的有）。
-			imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH)
+			shadow.TailwindLG(imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH))
 
 			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Children(func() {
 				// ⚠️ **这个标题是 30（`scale.CollectionTitle`），不是页标题那个数**：
