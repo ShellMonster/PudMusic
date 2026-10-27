@@ -524,6 +524,10 @@ func TestTheTopImagesStayWhenTheListIsEmpty(t *testing.T) {
 	if !shows(tt, "新歌速递") {
 		t.Errorf("下面那一档没歌的时候顶图不见了，文字有 %q", tt.Texts())
 	}
+	// 新歌速递是两行大封面，空状态在它下面：窗口不高时要往下滚才看得到。
+	tt.Scroll(700, 400, 0, 600)
+	homeFrame(tt)
+	settleHome(tt)
 	if !shows(tt, lookup(homePath).Empty.Title) {
 		t.Errorf("下面那一档没歌的时候空状态不见了，文字有 %q", tt.Texts())
 	}

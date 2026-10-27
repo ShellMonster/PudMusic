@@ -8,6 +8,7 @@ package ui
 // 按提示找过去，扫到右上角只看见一行小字，**很可能以为那只是说明文字**。
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"image"
 	"image/color"
 	"testing"
@@ -22,15 +23,20 @@ const (
 	localScanY1 = 650
 )
 
-// localAccent 是主色（`app.DefaultPrimaryColor`）：画面上那一块**实心**主色。
-var localAccent = color.RGBA{R: 0x1e, G: 0xd7, B: 0x60, A: 255}
+// localAccent 是当前主题的主色：画面上那一块**实心**主色。
+//
+// ⚠️ **取主题里的，不写死色值**：默认主题换过配色，写死的字面色一换就找不到那一块。
+func localAccent() color.RGBA {
+	return rgbaOf(BuildTheme(app.DefaultSettings(""), false).Accent)
+}
 
 // findAccentBlock 找出画面上那一块实心主色，返回它的框。
 func findAccentBlock(img *image.RGBA) (image.Rectangle, bool) {
+	accent := localAccent()
 	minX, minY, maxX, maxY := -1, -1, -1, -1
 	for y := localScanY0; y < localScanY1 && y < img.Bounds().Dy(); y++ {
 		for x := 0; x < img.Bounds().Dx(); x++ {
-			if img.RGBAAt(x, y) != localAccent {
+			if img.RGBAAt(x, y) != accent {
 				continue
 			}
 			if minX < 0 {

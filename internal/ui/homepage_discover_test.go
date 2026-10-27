@@ -114,7 +114,7 @@ func TestTheBoardCaptionNamesThePeriodAndTheUpdateDate(t *testing.T) {
 		at   time.Time
 		want string
 	}{
-		{3, at, "第 3 期 · 2024-05-12 更新"}, {3, time.Time{}, "第 3 期"},
+		{3, at, "第 3 期（周榜） · 2024-05-12 更新"}, {3, time.Time{}, "第 3 期（周榜）"},
 		{0, at, "2024-05-12 更新"}, {0, time.Time{}, ""},
 	} {
 		if got := boardCaptionText(tc.n, tc.at); got != tc.want {
@@ -130,7 +130,8 @@ func TestTheBoardTabShowsItsPeriodAboveTheList(t *testing.T) {
 	if err := tt.Click(homeTabs[homeHotTab]); err != nil {
 		t.Fatalf("点不到热榜：%v", err)
 	}
-	waitFramesClock(t, tt, "热榜的期数", func() bool { return showsText(tt, "第 3 期 · 1970-01-01 更新") })
+	waitFramesClock(t, tt, "热榜的期数", func() bool { return showsText(tt, "第 3 期（周榜） · 1970-01-01 更新") })
+	waitFramesClock(t, tt, "榜单头图上的加入播放列表", func() bool { return showsText(tt, "加入播放列表") })
 }
 
 // TestTheSixTabsAndPlayAllFitAtTheSmallestWindow 量最小窗口下 Tab 那一排：六个 Tab 一个

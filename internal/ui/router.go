@@ -429,5 +429,8 @@ func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
 func (s *Shell) navigate(target string) {
 	s.clearToasts()
 	s.crash = nil
+	if target == homePath && s.router.Path() == homePath && s.home != nil {
+		s.home.backToOverview()
+	}
 	s.router.Push(target)
 }
