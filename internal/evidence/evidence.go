@@ -562,8 +562,11 @@ var Items = []Item{
 		//	       上一首的评论。
 		//	缓存  同一首歌第二次进是**瞬时的**（不发请求）；TTL 一小时；
 		//	       键带 type（`1-12345` 和 `14-12345` 是两个文件）。
+		//	时序  零评论的对象**也要落缓存**（不然第二次进又要问一遍）；
+		//	       同一对象上有两趟时，**较早的那一趟不许盖掉较新的那一份**
+		//	       （界面上的和盘上的都不许）。
 		//	local 本地文件不摆入口，**一个请求都不发**。
-		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；本地文件不摆入口也不发请求",
+		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求",
 		Tests: []string{
 			"TestTheMVCommentOIDIsTheNumericAVID",
 			"TestTheAudioCommentOIDIsTheAUID",
@@ -581,6 +584,9 @@ var Items = []Item{
 			"TestTheKeyCarriesTheType",
 			"TestTheTwoObjectsGetTwoFiles",
 			"TestAnExpiredEntryIsAsGoodAsMissing",
+			"TestAnObjectWithNoCommentsIsCached",
+			"TestAnOlderRequestDoesNotOverwriteTheRefresh",
+			"TestAnOlderRequestDoesNotOverwriteTheCache",
 		},
 	},
 	{

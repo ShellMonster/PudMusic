@@ -219,12 +219,22 @@ func (a *App) LoadMoreComments() bool {
 	a.commentsMoreTriedAt = time.Now()
 	gen := a.commentsGen
 	next := a.commentsNext
+	// 🔴 **在途序号**：翻页也是一趟，也要占一个序号（理由见 `ensureComments`）。
+	//
+	// ⚠️ **翻页那一趟写不了缓存**（缓存里放的是「第一页 + 它的游标」），但它
+	// **会改界面**——而界面上的那一份必须是**最后发起的那一趟**的。
+	a.commentsSeq++
+	seq := a.commentsSeq
+	if a.commentsSeqs == nil {
+		a.commentsSeqs = map[string]int{}
+	}
+	a.commentsSeqs[slot] = seq
 	a.commentsMu.Unlock()
 
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, next, true, listFetch, archiveFetch)
+	go a.loadComments(it, slot, gen, seq, next, true, listFetch, archiveFetch)
 	return true
 }
 
@@ -377,12 +387,30 @@ func (a *App) ensureComments(it Item, slot string) {
 	// 清掉上一次的失败原因：这一趟正在问，界面上那句「问不出评论」就该撤了。
 	a.commentsErr = nil
 	gen := a.commentsGen
+	// 🔴 **在途序号**：每发起一趟就加一（**不管槽位**）。
+	//
+	// 代次（`commentsGen`）答的是「这一趟还属不属于**当前这一首**」——它挡的是
+	// 「旧歌的结果盖到新歌上」。而**这一趟**要挡的是另一件事：**同一个对象**上
+	// 一趟旧的（先发出去的）和一趟新的（后发出去的）会**先后写同一个缓存文件**，
+	// 而慢的那一趟写得更晚——于是它把新的那份盖掉了。
+	//
+	// ⚠️ **症状是「重新进这一首，拿到的是几分钟前的那一份」**：用户看到的是
+	// 「评论怎么变了」，而他什么都没做。
+	//
+	// ⇒ 每一趟都带上它的序号，回来的时候对一遍：只有**最后发起的那一趟**能写
+	// 界面、也只有它能写盘。
+	a.commentsSeq++
+	seq := a.commentsSeq
+	if a.commentsSeqs == nil {
+		a.commentsSeqs = map[string]int{}
+	}
+	a.commentsSeqs[slot] = seq
 	a.commentsMu.Unlock()
 
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, 0, false, listFetch, archiveFetch)
+	go a.loadComments(it, slot, gen, seq, 0, false, listFetch, archiveFetch)
 }
 
 // resetCommentsLocked 把评论这一摊整个清空，换成另一个槽位。
@@ -412,7 +440,11 @@ func (a *App) resetCommentsLocked(slot string) {
 //
 // listFetch / archiveFetch 是**界面那一侧取好的**替身（nil = 走真的那个 B 站
 // 客户端）。goroutine 不碰 `App` 上那两个字段。
-func (a *App) loadComments(it Item, slot string, gen int, next int64, more bool,
+//
+// 🔴 **seq 是这一趟的在途序号**：它挡的是「同一个对象上有两趟」——较早的那一趟
+// 回来时既不许盖掉界面上的新结果，也不许盖掉盘上的新缓存（理由见
+// `ensureComments` 里那一段）。
+func (a *App) loadComments(it Item, slot string, gen, seq int, next int64, more bool,
 	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
 	typ, oid, ok, err := a.resolveCommentTarget(it, archiveFetch)
 	if err != nil {
@@ -425,13 +457,13 @@ func (a *App) loadComments(it Item, slot string, gen int, next int64, more bool,
 		// 所以这里**不置 `commentsLoaded`**：隔 `commentsRetryAfter` 之后界面
 		// 下一帧调 `Comments()` 时会重新问一次（还是不发评论请求—— avid 换到
 		// 了才发）。
-		a.finishComments(slot, gen, commentResult{})
+		a.finishComments(slot, gen, seq, commentResult{})
 		return
 	}
 	if !ok {
 		// ⚠️ **这一首压根没有可问的身份**（sid 认不出来之类）：当「没有评论」
 		// （不发请求、也不报错），而且**不再问**——这一条等下去也不会变。
-		a.finishComments(slot, gen, commentResult{loaded: true, noComments: true})
+		a.finishComments(slot, gen, seq, commentResult{loaded: true, noComments: true})
 		return
 	}
 	a.rememberCommentOID(slot, gen, typ, oid)
@@ -441,7 +473,7 @@ func (a *App) loadComments(it Item, slot string, gen int, next int64, more bool,
 		// ⚠️ **「刷新」那枚绕过这一段**——它是给用户主动要新的一份用的。
 		refresh := a.commentsRefreshFlag()
 		if e, hit := a.loadCommentsCache(typ, oid); hit && !refresh {
-			a.finishComments(slot, gen, commentResult{
+			a.finishComments(slot, gen, seq, commentResult{
 				comments:   e.Comments,
 				next:       e.Next,
 				isEnd:      e.IsEnd,
@@ -459,7 +491,22 @@ func (a *App) loadComments(it Item, slot string, gen int, next int64, more bool,
 		// 照常有值（`AllCount` / `UpperMid` 那些）。混成失败的话，界面上会说
 		// 「问不出评论」，而真实情况是「还没有人评论」。
 		if errors.Is(err, bili.ErrCommentNoComments) {
-			a.finishComments(slot, gen, commentResult{
+			// 🔴 **「还没有人评论」也要落缓存**：B 站说「这个对象在，只是没人
+			// 评论」是**一份完整的答案**。不存的话每进一次就要重新问一次——而
+			// 验收要求「同一首歌第二次进是**瞬时的**（不发请求）」。
+			//
+			// ⚠️ **存的是「没有人评论」这一条**（`NoComments: true`），不是一份
+			// 空列表：空列表和「还没问」在界面上分不开，会一直显示「正在问」。
+			if !more {
+				a.saveCommentsCache(slot, seq, typ, oid, commentResult{
+					noComments: true,
+					loaded:     true,
+					next:       page.Next,
+					isEnd:      page.IsEnd,
+					allCount:   page.AllCount,
+				})
+			}
+			a.finishComments(slot, gen, seq, commentResult{
 				comments:   page.Replies,
 				next:       page.Next,
 				isEnd:      page.IsEnd,
@@ -470,15 +517,21 @@ func (a *App) loadComments(it Item, slot string, gen int, next int64, more bool,
 			})
 			return
 		}
-		a.finishComments(slot, gen, commentResult{err: errors.New(bili.CommentFriendly(err))})
+		a.finishComments(slot, gen, seq, commentResult{err: errors.New(bili.CommentFriendly(err))})
 		return
 	}
 
 	// 第一页顺手写进缓存（翻页不写：缓存里放的是「第一页 + 它的游标」）。
 	if !more {
-		a.saveCommentsCache(typ, oid, page)
+		a.saveCommentsCache(slot, seq, typ, oid, commentResult{
+			comments: page.Replies,
+			next:     page.Next,
+			isEnd:    page.IsEnd,
+			allCount: page.AllCount,
+			loaded:   true,
+		})
 	}
-	a.finishComments(slot, gen, commentResult{
+	a.finishComments(slot, gen, seq, commentResult{
 		comments: page.Replies,
 		next:     page.Next,
 		isEnd:    page.IsEnd,
@@ -492,9 +545,39 @@ func (a *App) loadComments(it Item, slot string, gen int, next int64, more bool,
 //
 // ⚠️ **对不上就丢**：换歌之后上一首那一趟可能还在路上，它回来的时候不能把
 // 上一首的评论写到当前这一首的格子里。
-func (a *App) finishComments(slot string, gen int, res commentResult) {
+//
+// 🔴 **seq 是这一趟的在途序号**（`0` = 不参与这个判据，见 `loadComments` 的
+// 调用点）：用户按了「刷新」，而首次加载那一趟还在途——两趟回来的时候，
+// **较早的那一趟不许盖掉刷新拉回来的那一份**。
+//
+// ⚠️ **代次（`gen`）挡不住这个**：代次是「换歌才加」，而刷新不换歌。
+func (a *App) finishComments(slot string, gen, seq int, res commentResult) {
 	a.commentsMu.Lock()
 	if a.commentsSlot != slot || a.commentsGen != gen {
+		// ⚠️ **这一趟已经被换歌作废了**：它自己那条序号也用不上了——留着的话
+		// 表会一直长（用户听过的每一首都会留一条）。
+		//
+		// ⚠️ **只删自己那一条**：A → B → A 时，新的 A 那一趟已经占了这个位置，
+		// 删了它的话新 A 那一趟回来时会被当成「不是最新的一趟」⇒ **它拉回来的
+		// 那份就落不了盘了**（而界面上还是对的——那就成了「界面对、盘上错」）。
+		if seq != 0 && a.commentsSeqs[slot] == seq {
+			delete(a.commentsSeqs, slot)
+		}
+		a.commentsMu.Unlock()
+		return
+	}
+	// 🔴 **较早的那一趟不许盖掉较新的那一份**：界面上摆的是「最后发起的那一趟」
+	// 的结果。
+	//
+	// ⚠️ **症状是「用户按了刷新，界面却又变回刷新之前的那一份」**——而刷新那一
+	// 趟明明已经回来了。
+	if seq != 0 && a.commentsSeqs[slot] != seq {
+		// ⚠️ **「正在问」那个标记**这里**不动**：较新的那一趟还在途，它回来时
+		// 自己会清（`commentsWanted = false`）。这里清了的话，那一趟还在途却
+		// 没人标记「正在问」⇒ 界面下一帧就会**再发一趟**（变成三趟）。
+		//
+		// ⚠️ **而较新的那一趟已经回来了的情形也不受影响**：它回来时已经把标记
+		// 清了。
 		a.commentsMu.Unlock()
 		return
 	}
@@ -534,6 +617,17 @@ func (a *App) finishComments(slot string, gen int, res commentResult) {
 		}
 	}
 	a.commentsWanted = false
+	// ⚠️ **这一趟走完了，它那条序号也用不上了**——留着的话表会一直长（用户听过的
+	// 每一首都会留一条）。
+	//
+	// ⚠️ **只删自己那一条**：删掉了新的一趟那条的话，它回来时就分不出「自己是
+	// 最新的」了。
+	//
+	// ⚠️ **删掉之后「查不到」就等于「不是最新的一趟」**：那些旧的一趟照样被挡
+	// 住（见 `saveCommentsCache` 与上面那个序号判据）。
+	if seq != 0 && a.commentsSeqs[slot] == seq {
+		delete(a.commentsSeqs, slot)
+	}
 	a.commentsMu.Unlock()
 
 	a.wakeComments()
@@ -774,18 +868,51 @@ func (a *App) loadCommentsCache(typ, oid int64) (comments.Entry, bool) {
 }
 
 // saveCommentsCache 把第一页写进缓存。
-func (a *App) saveCommentsCache(typ, oid int64, page bili.CommentPage) {
-	c := a.commentsCacheSnapshot()
-	if c == nil {
+//
+// 🔴 **seq 是这一趟的在途序号**，它挡的是「较早的那一趟把较新的那一份盖掉」：
+//
+//	同一首歌换了两次（A → B → A），A 的**旧**那一趟还在途，而新的 A 已经问完
+//	并写进盘上了。旧那一趟回来时**在可见状态上**是被代次丢掉的（界面上摆的是
+//	新 A 的）——但它**照样会写盘**，于是盘上那份被改回旧的。
+//
+// ⚠️ **症状是「重进这一首，拿到的是几分钟前的那一份」**：用户看到的是「评论怎么
+// 变了」，而他什么都没做。
+//
+// ⇒ 只有**最后发起的那一趟**能写盘。
+func (a *App) saveCommentsCache(slot string, seq int, typ, oid int64, res commentResult) {
+	// 🔴 **写盘走这把专锁**：「检查我是不是最新的一趟」和「真的写下去」必须在
+	// **同一个临界区**里——分开的话，中间发起的新一趟会让旧的那一趟以为自己
+	// 还是最新的，于是它写得更晚、把新的盖掉。
+	//
+	// ⚠️ **它不是 `commentsMu`**：写盘是阻塞 IO，而 `commentsMu` 是界面每一帧
+	// 都要的（`App.Comments`）。
+	a.commentsWriteMu.Lock()
+	defer a.commentsWriteMu.Unlock()
+
+	a.commentsMu.Lock()
+	c := a.commentsCache
+	// 🔴 **对一遍这一趟的序号**：只有**最后发起的那一趟**能写盘。
+	//
+	// ⚠️ **不能拿全局序号对**：全局的序号会把「另一首的新一趟」也算成「比这一
+	// 首新」，于是切到另一首之后，上一首那份就落不了盘了——而下次进上一首就得
+	// 重新拉一次（那就不是「第二次进是瞬时的」了）。
+	//
+	// ⇒ 按**槽位**记（`slot`），而槽位与对象是一一对应的（同一个对象在同一个
+	// 槽位上）。
+	latest, known := a.commentsSeqs[slot]
+	stale := !known || seq != latest
+	a.commentsMu.Unlock()
+	if c == nil || stale {
+		// ⚠️ **过时的那一趟不许写**（它会把新写的那份盖掉）。
 		return
 	}
 	_ = c.Save(typ, oid, comments.Entry{
 		FetchedAt:  time.Now().Unix(),
-		Next:       page.Next,
-		IsEnd:      page.IsEnd,
-		AllCount:   page.AllCount,
-		NoComments: len(page.Replies) == 0,
-		Comments:   page.Replies,
+		Next:       res.next,
+		IsEnd:      res.isEnd,
+		AllCount:   res.allCount,
+		NoComments: res.noComments,
+		Comments:   res.comments,
 	})
 }
 

@@ -676,6 +676,26 @@ type App struct {
 	commentsRepliesFetch commentsRepliesFetchFunc
 	// commentsArchiveIDFetch 是 bvid → avid 那一趟。
 	commentsArchiveIDFetch commentsArchiveIDFetchFunc
+	// commentsSeq 是**在途序号**。每发起一趟问评论就加一（不管问的是哪一页）。
+	//
+	// 🔴 **它挡的是「同一个对象上有两趟」**：用户按了「刷新」，而首次加载那一趟
+	// 还在途——两趟回来的时候，**较早的那一趟不能盖掉刷新拉回来的那一份**。
+	//
+	// ⚠️ **代次（`commentsGen`）挡不住这个**：代次是「换歌才加」，而刷新不换歌。
+	commentsSeq int
+	// commentsSeqs 记着**每个槽位最后发起的那一趟**的序号。
+	//
+	// ⚠️ **按槽位记**（不是全局序号）：全局的序号会把「另一首歌的新一趟」也算
+	// 成「比这一首新」，于是切到另一首之后，上一首那份就落不了盘了——而下次进
+	// 上一首就得重新拉一次（那就不是「第二次进是瞬时的」了）。
+	commentsSeqs map[string]int
+	// commentsWriteMu 是**写盘那把专锁**。它把「检查我是不是最新的一趟」和
+	// 「真的写下去」包在同一个临界区里——分开的话，中间发起的新一趟会让旧的
+	// 那一趟以为自己还是最新的，于是它写得更晚、把新的盖掉。
+	//
+	// ⚠️ **它不是 `commentsMu`**：写盘是阻塞 IO，而 `commentsMu` 是界面每一帧
+	// 都要的（`App.Comments`）。
+	commentsWriteMu sync.Mutex
 
 	// 弹幕这一摊，见 danmaku.go。挂上缓存之前 danmakuCache 是 nil。
 	//
