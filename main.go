@@ -148,6 +148,11 @@ func main() {
 		log.Printf("biu: 挂下载失败，这次的下载功能用不了：%v", err)
 	}
 
+	// 系统通知也挂在开窗口之前：它要接住「点通知把应用唤起来」那一次，而那是
+	// 启动参数交付的一部分（框架的 `App.OnNotificationClick` 必须在 `App.Run`
+	// 之前装，见 `internal/ui/lifecycle.go` 的 `installNotification`）。
+	ui.MountNotifications(a)
+
 	// 系统媒体会话（浮窗 / 锁屏 / 任务栏缩略图按钮）也必须在开窗口之前挂：
 	// macOS 那一半建的时候要注册 Objective-C 的类，而注册必须在还没有 ObjC
 	// 回调在跑的时候做。Windows 那一半反过来要等窗口（它的会话是按窗口算的），

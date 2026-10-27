@@ -718,8 +718,8 @@ func TestTheProfileGlyphIsNotAPlayTriangle(t *testing.T) {
 	}
 	// ② 「进他的 UP 空间」那一处**不是**实的：那儿没有播放三角。
 	profPix := img.RGBAAt(int(prof.X+prof.W*0.2), int(prof.Y+prof.H*0.5))
-	if diff(profPix, bg) > 60 {
-		t.Errorf("「进他的 UP 空间」那一枚画的还是那枚播放三角（%v，底色 %v）", profPix, bg)
+	if diff(profPix, bg2) > 60 {
+		t.Errorf("「进他的 UP 空间」那一枚画的还是那枚播放三角（%v，底色 %v）", profPix, bg2)
 	}
 	// ③ 而它**画了东西**：那一枚不是空的。
 	if n := inkIn(img, prof, bg); n == 0 {

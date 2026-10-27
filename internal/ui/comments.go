@@ -68,6 +68,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -277,7 +278,7 @@ func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 			}
 			s.viewCommentRow(c, p, p.rows[rowIdx])
 		}, func(rec any) { s.onPanicAt("评论那一行", rec) })
-		list := ui.List(c, &p.state, len(p.rows)+1).
+		lst := ui.List(c, &p.state, len(p.rows)+1).
 			Grow(1).FillWidth().
 			// ⚠️ **行间距由列表给**：行与行之间 12（`space.Px12`）。
 			GapY(space.Px12).
@@ -285,11 +286,21 @@ func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 				rowIdx = r.Index
 				guarded(r.Context)
 			})
-		s.trackScrollbar(list)
+		s.trackScrollbar(lst)
+
+		// 🔴 **登记焦点**（`focus.go` 的 `registerContentFocus`）：这一页**自己
+		// 画列表**（不是 `widgets/list` 那个包建的），所以**登记也得自己写
+		// 一遍**——漏一遍的症状是「侧栏按 ↓ 进不去这一页的内容区」，而用户
+		// 只以为这个应用有时候键盘不好使（见 `focus_test.go` 的
+		// `TestEveryPageThatDrawsItsOwnListRegistersIt`）。
+		//
+		// ⚠️ **它是裸的 `ui.List`**（行是自己画的），所以焦点句柄是框架的
+		// `ui.ListState.Handle`——跟 `dynamicfeed.go` 那一档同一个写法。
+		s.registerContentFocus(list.HandleFocus(&p.state.Handle))
 
 		// 量这一帧的容器宽，**下一帧**用（`Bounds` 报的是上一帧的盒子）。
 		// 正文排版按它算宽度——而排版是**按宽度折行**的，宽度不对就折错位置。
-		if bw := list.Bounds().W; bw > 0 {
+		if bw := lst.Bounds().W; bw > 0 {
 			p.listW = bw
 		}
 	})

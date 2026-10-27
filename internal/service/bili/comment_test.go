@@ -667,8 +667,9 @@ func TestTheEmptyListAndTheMissingObjectSayDifferentThings(t *testing.T) {
 
 // TestCommentSectionClosedHasItsOwnSentinel 钉住「评论区被关了」这一档。
 //
-// 实测（2026-10-26，oid=117502252158200）：UP 主关了评论区时 B 站回的是
-// **12061**，不是 -404 也不是空列表。
+// ⚠️ **12061 是旧码**（2026-10-26 实测，oid=117502252158200 时的那个码）：
+// B 站**现在**回的是 **12002**（见 `TestTheClosedCommentSectionCodeIs12002`）。
+// 旧码**也要认**：多认一个码不会错，而少认一个这一档就触发不到。
 func TestCommentSectionClosedHasItsOwnSentinel(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathReplyMain, func(w http.ResponseWriter, _ *http.Request) {
@@ -684,6 +685,96 @@ func TestCommentSectionClosedHasItsOwnSentinel(t *testing.T) {
 	}
 	if msg := CommentFriendly(err); !strings.Contains(msg, "关掉") {
 		t.Errorf("话里没说评论区被关了：%q", msg)
+	}
+}
+
+// TestTheClosedCommentSectionCodeIs12002 钉住「B 站现在回的是 12002」。
+//
+// 🔴 **2026-10-27 真机回归实测**（票 #592；BMG-303 / issue #575 / PR #605）：
+// 评论区被关掉时，**所有**评论接口一律回 `12002`「当前页面评论功能已关闭」，
+// 而 **`12061` 一次都没出现过**。
+//
+// ⇒ 只认旧码的话这一档**基本触发不到**，界面上说不出「这个评论区被关掉了」
+// （走的是 `Friendly` 的兜底：「B 站返回了一个看不懂的错误（12002）」）。
+func TestTheClosedCommentSectionCodeIs12002(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathReplyMain, func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, jsonData(t, 12002, "当前页面评论功能已关闭", nil))
+	})
+	c := f.client(t, Options{})
+	_, err := c.CommentList(context.Background(), CommentTypeVideo, 1187010, int(CommentSortHot), "", 20)
+	if err == nil {
+		t.Fatal("12002 被当成了成功")
+	}
+	if !errors.Is(err, ErrCommentSectionClosed) {
+		t.Fatalf("err = %v，want ErrCommentSectionClosed", err)
+	}
+	// 🔴 **这一档和另外两档必须分开**（票 #571 的验收）：说成「对象不在了」，
+	// 用户会以为歌没了而重新下载；说成「还没有人评论」则更离谱。
+	if errors.Is(err, ErrCommentTargetMissing) {
+		t.Error("「评论区关了」被认成了「对象不在了」")
+	}
+	if errors.Is(err, ErrCommentNoComments) {
+		t.Error("「评论区关了」被认成了「还没有人评论」")
+	}
+	// 界面上那一句话必须是「评论区被关掉了」，**不是**兜底那句。
+	msg := CommentFriendly(err)
+	if !strings.Contains(msg, "关掉") {
+		t.Errorf("话里没说评论区被关了：%q", msg)
+	}
+	if strings.Contains(msg, "看不懂") {
+		t.Errorf("界面上摆的是兜底那句：%q", msg)
+	}
+	// ⚠️ **原始的码和接口地址不许漏到界面上**（`Friendly` 的纪律）：
+	// 兜底那句「B 站返回了一个看不懂的错误（12002）」和
+	// 「评论区被关掉了: /x/v2/reply/main」都不算人话。
+	if strings.Contains(msg, "12002") {
+		t.Errorf("话里漏出了原始的码：%q", msg)
+	}
+	if strings.Contains(msg, "/") {
+		t.Errorf("话里漏出了接口地址：%q", msg)
+	}
+	// 两个码说的是**同一件事** ⇒ 界面上那一句话必须一模一样。
+	if want := CommentFriendly(ErrCommentSectionClosed); want != msg {
+		t.Errorf("12002 的话（%q）和这一档的话（%q）不一样", msg, want)
+	}
+}
+
+// TestTheOtherCommentCodesAreNotTheClosedSection 钉住「别的码不被误吞」。
+//
+// 🔴 这一档**只认 12002 和 12061 两个码**（票 #592 的验收）。多认一个就把别的
+// 错说成「评论区被关掉了」——用户以为是自己白按了，而真正的原因（对象不在了、
+// 楼中楼那条被删了、请求被拒了）全被盖住。
+func TestTheOtherCommentCodesAreNotTheClosedSection(t *testing.T) {
+	for _, tc := range []struct {
+		code int
+		msg  string
+	}{
+		// 挨着 12002 的那几个码（拿来当探针用，测的是「只认两个」）。
+		{12001, "别的错"},
+		{12003, "别的错"},
+		{12004, "别的错"},
+		// 这一档**自己有一档**（楼中楼那条被删了）。
+		{12006, "没有该评论"},
+		// 这一档**自己有一档**（对象不存在）。
+		{-404, "啥都木有"},
+		// 别的接口的码也不许被吞进这一档。
+		{-400, "请求错误"},
+		{-403, "访问权限不足"},
+	} {
+		f := newFakeBili(t)
+		f.on(pathReplyMain, func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, jsonData(t, tc.code, tc.msg, nil))
+		})
+		c := f.client(t, Options{})
+		_, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), "", 20)
+		if err == nil {
+			t.Errorf("码 %d 被当成了成功", tc.code)
+			continue
+		}
+		if errors.Is(err, ErrCommentSectionClosed) {
+			t.Errorf("码 %d 被误吞成「评论区被关掉了」：%v", tc.code, err)
+		}
 	}
 }
 
