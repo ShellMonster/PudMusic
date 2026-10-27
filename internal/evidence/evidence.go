@@ -673,6 +673,41 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Paging,
+		// 🔴 **评论页 v2：只看提到歌名的评论**（票 #574）：
+		//
+		//	为什么  `mv` 那一档拿到的是**这个视频**的评论，里面大部分不是在
+		//	        聊这首歌（研究票 #537 报告 §4.1 实测）⇒ 页面上给一枚
+		//	        开关，让用户自己挑那个窄视图（**默认是关的**：这一页默
+		//	        认摆的是这一首的**全部**评论）。
+		//	别名表 「提到这首歌」没法只拿一个歌名去判（标题里全是视频的痕
+		//	        迹，用户写的也是各种写法）⇒ 一张表、一处算
+		//	        （`internal/ui/songname`），界面层不自己再拼一份。
+		//	零命中 「这个视频的 N 条评论里没有提到这首歌」这句话**只有在翻完
+		//	        之后**才说得出来（只翻了第一页就说「没有」，那是撒谎）⇒
+		//	        零命中时界面自己把这一首的评论翻完（翻到 B 站说到底了）。
+		Spec: "评论页 v2：只看提到歌名的评论这一枚开关默认关着；按歌名 + 别名表 + 简称筛正文；别名表只有一处（internal/ui/songname）；一条都没命中时说清「这个视频的 N 条评论里没有提到这首歌」（翻完之后才说），并给一条「看全部评论」的退路",
+		Tests: []string{
+			"TestTheMentionFilterIsOffByDefault",
+			"TestTheMentionFilterShowsOnlyTheCommentsThatMentionTheSong",
+			"TestTheMentionFilterSaysThatNobodyMentionedTheSong",
+			"TestTheMentionFilterLooksThroughTheWholeVideoBeforeItSaysNobodyDid",
+			"TestTheMentionFilterCanBeTurnedOffFromTheEmptyState",
+			"TestTheMentionFilterSwitchSitsAtTheRightEdge",
+			"TestRenderCommentsMentionFilterShots",
+			"TestTheCleanedSongNameIsInTheTable",
+			"TestThePlainTitleIsAlsoInTheTable",
+			"TestTheBookTitleMarksAreStripped",
+			"TestTheShortNameOfAPlainTitleIsInTheTable",
+			"TestTheArtistSegmentIsNotAnAliasWhenTheArtistIsKnown",
+			"TestAPromoSegmentIsNotAnAlias",
+			"TestOneCharacterAliasesAreNotUsed",
+			"TestAnEmptyTitleGivesAnEmptyTable",
+			"TestTheBodyIsMatched",
+			"TestTheMatchIgnoresCaseAndSpaces",
+		},
+	},
+	{
 		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次

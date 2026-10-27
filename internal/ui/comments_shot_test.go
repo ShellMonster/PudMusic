@@ -158,3 +158,53 @@ func TestRenderCommentsFoldedEmoteShot(t *testing.T) {
 		t.Fatalf("画面上没有第一条评论，文字有 %q", tt.Texts())
 	}
 }
+
+// TestRenderCommentsMentionFilterShots 出「只看提到歌名的」那一枚开关（关 /
+// 开）和「一条都没提到」那一块，深浅各一套。
+//
+// ⚠️ **这一票的画面验收看三样**：开关摆在页头第二行的哪一头、它旁边那句字
+// 有没有跟「共 N 条」挤在一起、以及零命中时那一块说的是不是「这个视频的 N 条
+// 评论里没有提到这首歌」。
+func TestRenderCommentsMentionFilterShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newCommentBili(t, "reply-main.json")
+			b.mainRaw = commentFixtureMentionNoMore(t, "晴天")
+			_, tt := newCommentsShell(t, b, mentionItem(), 1400, 1000, systemIsDark(dark))
+
+			// 关的那一枚（页头第二行的右端）。
+			saveRect(t, dir, fmt.Sprintf("20-评论页-筛选开关-关-%s.png", name), tt,
+				1150, 100, 250, 44)
+
+			// 打开它。
+			if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
+				t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
+			}
+			commentsWait(t, tt, "筛完了", func() bool {
+				return tt.HasText("1 条提到这首歌")
+			})
+			saveRect(t, dir, fmt.Sprintf("21-评论页-筛选开关-开-%s.png", name), tt,
+				1150, 100, 250, 44)
+
+			// 零命中那一块：这一份 fixture 里没有一条提到「晴天」。
+			b2 := newCommentBili(t, "reply-main.json")
+			b2.mainRaw = commentFixtureWithNoMore(t, "reply-main.json")
+			_, tt2 := newCommentsShell(t, b2, mentionItem(), 1400, 1000, systemIsDark(dark))
+			if err := tt2.Click("开关：只看提到歌名的评论"); err != nil {
+				t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt2.Texts())
+			}
+			commentsWait(t, tt2, "说清了没有提到这首歌", func() bool {
+				return tt2.HasText("没有提到这首歌")
+			})
+			save(t, dir, fmt.Sprintf("22-评论页-没有提到这首歌-%s.png", name), tt2)
+		})
+	}
+}
