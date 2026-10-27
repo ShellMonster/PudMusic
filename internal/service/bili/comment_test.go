@@ -100,7 +100,7 @@ func lastCommentRequest(t *testing.T, f *fakeBili) recordedRequest {
 // 钉的方式是**看发出去的头**——不是看代码里有没有写那个字段。
 func TestCommentListNeverSendsBuvid(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -143,7 +143,7 @@ func TestCommentListNeverSendsTheBuvidThatLivesInTheJar(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -235,7 +235,7 @@ func TestCommentRepliesNeverSendsBuvid(t *testing.T) {
 // 一份**已经被这个客户端缓存住**的 buvid。
 func TestCommentListDoesNotAskForBuvid(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20); err != nil {
 		t.Fatal(err)
 	}
 	for _, rec := range f.requests() {
@@ -256,7 +256,7 @@ func TestCommentListDoesNotAskForBuvid(t *testing.T) {
 // **不带 WBI 的** `/x/v2/reply/main`，请求串里**不该有** `w_rid`。
 func TestCommentListIsNotSigned(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -280,7 +280,7 @@ func TestCommentListIsNotSigned(t *testing.T) {
 // 路径就是「必须签名」的那一个。
 func TestCommentListGoesToTheUnsignedEndpoint(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -302,7 +302,7 @@ func TestCommentListGoesToTheUnsignedEndpoint(t *testing.T) {
 // 一批，而界面上看不出任何异样（总数在那儿，列表在增长，唯独中间少了一段）。
 func TestCommentListNeverAsksForMoreThanThirty(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 100); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 100); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -339,7 +339,7 @@ func TestCommentRepliesNeverAsksForMoreThanTwenty(t *testing.T) {
 // （那会让每一页都比用户要的��，而翻页的节奏是界面说了算）。
 func TestCommentPageSizeWithinTheLimitIsNotChanged(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 5); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 5); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -364,7 +364,7 @@ func TestCommentPageSizeWithinTheLimitIsNotChanged(t *testing.T) {
 //	回复数文案在 `reply_control.sub_reply_entry_text`（「共52条回复」）
 func TestCommentListReadsTheFieldsOffTheRealShape(t *testing.T) {
 	_, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -449,7 +449,7 @@ func TestCommentListReadsTheFieldsOffTheRealShape(t *testing.T) {
 // `page.Mode`，别认自己传的那个。
 func TestCommentListReadsThePageMeta(t *testing.T) {
 	_, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +486,7 @@ func TestCommentListReadsThePageMeta(t *testing.T) {
 // 它们会被错标成「UP 主发的」。
 func TestIsUpperMarksOnlyTheUpAuthorsOwnComment(t *testing.T) {
 	_, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 117506312373775, int(CommentSortHot), "", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -516,7 +516,7 @@ func TestIsUpperMarksOnlyTheUpAuthorsOwnComment(t *testing.T) {
 // UP 主发的。
 func TestUpReplyCommentsAreNotMarkedAsTheUpper(t *testing.T) {
 	_, c := commentFake(t, commentFixture(t, "reply-main-upreply.json"))
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 114256632618805, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 114256632618805, int(CommentSortHot), "", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,7 +577,7 @@ func TestCommentListReadsTheRawUpReplyFlag(t *testing.T) {
 // 「没人评论」和「拉失败了」。
 func TestCommentListReadsTheEmptyPage(t *testing.T) {
 	_, c := commentFake(t, commentFixture(t, "reply-main-empty.json"))
-	page, err := c.CommentList(context.Background(), CommentTypeAudio, 563526, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeAudio, 563526, int(CommentSortHot), "", 20)
 	if !errors.Is(err, ErrCommentNoComments) {
 		t.Fatalf("err = %v，want ErrCommentNoComments", err)
 	}
@@ -612,7 +612,7 @@ func TestCommentListSaysTheObjectIsGoneWhenBiliSays404(t *testing.T) {
 		writeJSON(w, jsonData(t, -404, "啥都木有", nil))
 	})
 	c := f.client(t, Options{})
-	_, err := c.CommentList(context.Background(), CommentTypeVideo, 999999999999, int(CommentSortHot), 0, 20)
+	_, err := c.CommentList(context.Background(), CommentTypeVideo, 999999999999, int(CommentSortHot), "", 20)
 	if err == nil {
 		t.Fatal("-404 被当成了成功")
 	}
@@ -675,7 +675,7 @@ func TestCommentSectionClosedHasItsOwnSentinel(t *testing.T) {
 		writeJSON(w, jsonData(t, 12061, "UP主已关闭评论区", nil))
 	})
 	c := f.client(t, Options{})
-	_, err := c.CommentList(context.Background(), CommentTypeVideo, 117502252158200, int(CommentSortHot), 0, 20)
+	_, err := c.CommentList(context.Background(), CommentTypeVideo, 117502252158200, int(CommentSortHot), "", 20)
 	if !errors.Is(err, ErrCommentSectionClosed) {
 		t.Fatalf("err = %v，want ErrCommentSectionClosed", err)
 	}
@@ -717,7 +717,7 @@ func TestCommentTreatsForbiddenAsWorthRetrying(t *testing.T) {
 		writeJSON(w, jsonData(t, -403, "访问权限不足", nil))
 	})
 	c := f.client(t, Options{})
-	_, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), 0, 20)
+	_, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), "", 20)
 	if err == nil {
 		t.Fatal("-403 被当成了成功")
 	}
@@ -858,7 +858,7 @@ func TestCommentListSendsTheTypeAndOid(t *testing.T) {
 	} {
 		t.Run(tc.what, func(t *testing.T) {
 			f, cl := commentFake(t, commentFixture(t, "reply-main.json"))
-			if _, err := cl.CommentList(context.Background(), int64(tc.typ), tc.oid, int(CommentSortHot), 0, 20); err != nil {
+			if _, err := cl.CommentList(context.Background(), int64(tc.typ), tc.oid, int(CommentSortHot), "", 20); err != nil {
 				t.Fatal(err)
 			}
 			rec := lastCommentRequest(t, f)
@@ -915,37 +915,50 @@ func TestCommentRepliesSendsTheTypeAndOid(t *testing.T) {
 	}
 }
 
-// TestCommentListSendsTheCursorAsGiven 钉住「游标原样带回去」。
+// TestCommentListSendsTheCursorAsGiven 钉住「偏移量原样带回去」。
 //
-// 🔴 **`next` 的含义随排序变**（实测 2026-10-26，oid=170001）：
+// 🔴 **偏移量是 B 站给的字符串，一个字都不能改**（实测 2026-10-27）：
 //
-//	最热档（mode=3）  next 是**页码**（1 → 2 → 3 …）
-//	最新档（mode=2）  next 是**楼层号**（160595 → 160592 → …，递减）
+//	`cursor.pagination_reply.next_offset` = "CAESEDE4MzYx…/2za8JMgQIu+YJ"
+//	（带 base64 里的 `+` `/` `=`）
 //
-// 所以它是**不透明游标**：B 站给什么就原样带回去，**别自己加一**。
+// ⚠️ **改一个字符 B 站不报错**——它回的是**第一页**（实测：拿一个乱写的
+// offset 去问，它回 code 0 + 第一页）。所以「原样带回去」不是讲究，是**必须**。
 func TestCommentListSendsTheCursorAsGiven(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortLatest), 160592, 20); err != nil {
+	const offset = "CAESEDE4MzYxMTQ3MTIyOTA0NjAaCAoGgN/2za8JMgQIu+YJ"
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortLatest), offset, 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
-	if got := rec.Query.Get("next"); got != "160592" {
-		t.Fatalf("next = %q，want 160592（原样带回去）", got)
+	// ⚠️ **走的是 `pagination_str`，不是 `next`**：`cursor.next` 在「评论」那一档
+	// （mode=1）上带上去 B 站回 `-400 min_score … must be <= max_score …`。
+	if rec.Query.Has("next") {
+		t.Fatalf("带了 next=%q，want 不带（翻页走 pagination_str）", rec.Query.Get("next"))
+	}
+	var got struct {
+		Offset string `json:"offset"`
+	}
+	if err := json.Unmarshal([]byte(rec.Query.Get("pagination_str")), &got); err != nil {
+		t.Fatalf("pagination_str 不是合法 JSON：%v（值 %q）", err, rec.Query.Get("pagination_str"))
+	}
+	if got.Offset != offset {
+		t.Fatalf("offset = %q，want %q（原样带回去）", got.Offset, offset)
 	}
 }
 
-// TestCommentListOmitsTheCursorOnTheFirstPage 钉住「第一页不带 next」。
+// TestCommentListOmitsTheCursorOnTheFirstPage 钉住「第一页不带游标」。
 //
-// 实测 `next=0` 和**不带** `next` 在最热档是同一页，但在最新档（mode=2）上
-// 带一个 0 会被当成「从第 0 层开始」——那不是第一页。
+// ⚠️ **带了空的 offset 是不对的**：实测 `pagination_str={"offset":""}` 回的是
+// **第一页**（code 0 + 第一页那 19 条）——而空串的意思本来就是「从头」。
 func TestCommentListOmitsTheCursorOnTheFirstPage(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortLatest), 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortLatest), "", 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
-	if rec.Query.Has("next") {
-		t.Fatalf("第一页带了 next=%q，want 不带", rec.Query.Get("next"))
+	if rec.Query.Has("pagination_str") {
+		t.Fatalf("第一页带了 pagination_str=%q，want 不带", rec.Query.Get("pagination_str"))
 	}
 }
 
@@ -955,7 +968,7 @@ func TestCommentListOmitsTheCursorOnTheFirstPage(t *testing.T) {
 // **认得出来的**档上，而不是把 0 原样发出去。
 func TestCommentListFallsBackToAKnownSort(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, 99, 0, 20); err != nil {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, 99, "", 20); err != nil {
 		t.Fatal(err)
 	}
 	rec := lastCommentRequest(t, f)
@@ -970,7 +983,7 @@ func TestCommentListFallsBackToAKnownSort(t *testing.T) {
 // TestCommentListRejectsAnEmptyObject 钉住「oid 不对」不发给 B 站。
 func TestCommentListRejectsAnEmptyObject(t *testing.T) {
 	f, c := commentFake(t, commentFixture(t, "reply-main.json"))
-	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 0, int(CommentSortHot), 0, 20); !errors.Is(err, ErrCommentTargetMissing) {
+	if _, err := c.CommentList(context.Background(), CommentTypeVideo, 0, int(CommentSortHot), "", 20); !errors.Is(err, ErrCommentTargetMissing) {
 		t.Fatalf("err = %v，want ErrCommentTargetMissing", err)
 	}
 	if len(f.requests()) != 0 {
@@ -1047,7 +1060,7 @@ func TestAPictureWithAFractionalSizeDoesNotTakeTheWholePageDown(t *testing.T) {
 		}]}}`
 
 	_, c := commentFake(t, body)
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), "", 20)
 	if err != nil {
 		t.Fatalf("一条带小数大小图片的评论把整页带崩了：%v", err)
 	}
@@ -1083,7 +1096,7 @@ func TestAnIntegerPictureSizeStillWorks(t *testing.T) {
 		}]}}`
 
 	_, c := commentFake(t, body)
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), 0, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), "", 20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1109,7 +1122,7 @@ func TestAnEmptyPageMidwayIsNotNoComments(t *testing.T) {
 		"replies":[]}}`
 
 	_, c := commentFake(t, body)
-	page, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), 2, 20)
+	page, err := c.CommentList(context.Background(), CommentTypeVideo, 170001, int(CommentSortHot), "OFFSET-2", 20)
 	if err != nil {
 		t.Fatalf("翻页途中的空页被当成了「还没有人评论」：%v", err)
 	}
@@ -1119,9 +1132,16 @@ func TestAnEmptyPageMidwayIsNotNoComments(t *testing.T) {
 	if page.IsEnd {
 		t.Error("is_end 应该是 false")
 	}
-	// 但**这一页照样返回**（翻页还要靠 `Next` 继续）。
+	// 但**这一页照样返回**（翻页还要靠游标继续）。
+	//
+	// ⚠️ **判「能不能继续翻」看的是 `NextOffset`**（`cursor.pagination_reply
+	// .next_offset`），不是 `cursor.next`——后者在「评论」档上带上去必挂。
+	if page.NextOffset != "" {
+		t.Errorf("下一页偏移量 = %q，want 空串（这一档没给）", page.NextOffset)
+	}
+	// `cursor.next` 那一栏仍然读得出来（B 站确实给），但**翻页不用它**。
 	if page.Next != 3 {
-		t.Errorf("下一页游标 = %d，want 3", page.Next)
+		t.Errorf("cursor.next = %d，want 3（读得出来，但翻页不走它）", page.Next)
 	}
 }
 

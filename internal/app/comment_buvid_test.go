@@ -68,7 +68,7 @@ func TestTheLoginCookiesDoNotMakeTheCommentRequestCarryBuvid(t *testing.T) {
 	}
 
 	if _, err := cli.CommentList(context.Background(),
-		bili.CommentTypeVideo, 170001, int(bili.CommentSortHot), 0, 20); err != nil {
+		bili.CommentTypeVideo, 170001, int(bili.CommentSortHot), "", 20); err != nil {
 		t.Fatal(err)
 	}
 
