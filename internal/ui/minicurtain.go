@@ -583,7 +583,8 @@ func (s *Shell) miniCurtainMaxHeight() int {
 // 只在应用 ready 之后才走到。
 //
 // ⚠️ **它走的是 `miniWindow` 那一层接口**：于是测试实现（假窗）可以把工作区
-// **摆进来**，不必真的问系统——而生产那一档问的是真的（`mygo.Screen`）。
+// **摆进来**，不必真的问系统——而生产那一档问的是真的（`miniWorkAreaOf`，
+// 它底下是 `mygo.Screen`，理由见 `minidisplays.go`）。
 func (s *Shell) miniCurtainWorkAreaOf(w miniWindow) mygo.Rectangle {
 	if w == nil || w.IsDestroyed() {
 		return mygo.Rectangle{}
