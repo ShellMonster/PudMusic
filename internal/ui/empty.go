@@ -285,7 +285,7 @@ func loadingCell(text string) func(c *ui.Context) {
 
 // skeletonRowH / skeletonRows 是列表首屏骨架屏的行高与行数（一屏大约放得下的量）。
 const (
-	skeletonRowH = 56
+	skeletonRowH = 64
 	skeletonRows = 8
 )
 

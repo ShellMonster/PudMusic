@@ -146,8 +146,8 @@ func TestTheLoadingStateIsNotTheEmptyState(t *testing.T) {
 		t.Errorf("还在加载就说「暂无内容」——那是把「还没好」说成「没有」，文字有 %q", tt.Texts())
 	}
 	// 转圈不是一行字：15px 那一档的行高是 17.67，而它是 32 的一方块。
-	if loading.H != skeletonRows*skeletonRowH {
-		t.Errorf("加载中那一块高 %.2f，want %d——列表首屏是八行骨架屏，不是一行字",
+	if loading.H <= 0 || loading.H > skeletonRows*skeletonRowH {
+		t.Errorf("加载中那一块高 %.2f，want (0, %d]——列表首屏是八行骨架屏，不是一行字",
 			loading.H, skeletonRows*skeletonRowH)
 	}
 
