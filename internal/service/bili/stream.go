@@ -242,7 +242,7 @@ type playurlData struct {
 
 // PlayURL 问 B 站要一条音频流。
 //
-// pref 是用户选的音质档（`AudioAuto` 是默认）。bvid / cid 指向一个条目。
+// pref 是用户选的音质档（默认是 `AudioHigh`，见 `quality.go`）。bvid / cid 指向一个条目。
 //
 // ⚠️ **这一条只管投稿（mv）**。音乐库条目（sid）走的是另一个接口、另一套档位
 // 编号，见 `audio.go` 的 `AudioStreamURL`。
@@ -288,12 +288,8 @@ func refFrom(d *playurlData, bvid, cid string, pref AudioQuality) (*StreamRef, e
 
 	s, q, ok := pickAudio(d.Dash, pref)
 	if !ok || s.BaseURL == "" {
-		// 区分两种「没有」：点名要无损却没有，和根本就没流。
-		// 前者要给用户说「要大会员」，后者要说「这个稿件放不了」——
-		// 合成一句话就变成了「没能取到可播的音频流」，用户不知道该干什么。
-		if pref == AudioLossless {
-			return nil, fmt.Errorf("%w: 这一首没有无损（要的是「%s」），换一档音质或用大会员账号", ErrNoStream, pref.Label())
-		}
+		// 点名的档拿不到时 `pickAudio` 自己会退档（票 #581）；走到这里只剩一种
+		// 「没有」：有损的 `dash.audio` 一条都没有——这个稿件压根放不了。
 		return nil, fmt.Errorf("%w：稿件 %s 的第 %s 集没有音频", ErrNoAudioFlow, bvid, cid)
 	}
 

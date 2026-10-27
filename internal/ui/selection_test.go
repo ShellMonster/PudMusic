@@ -72,7 +72,7 @@ func shotHomeList(t *testing.T, dark bool) (*Shell, *ui.Tester) {
 	b := newTestShell(t, systemIsDark(dark), withSettings(st))
 	s := b.s
 	songs := homeSongs{new: homeSongsOf("新歌", 4)}
-	for i, tab := range homeTabs {
+	for i, tab := range homeTabs[:homeSongTabs] {
 		rows := homeSongsOf(tab, 12)
 		songs.tabs[i] = rows
 	}

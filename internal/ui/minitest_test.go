@@ -48,8 +48,15 @@ func newMiniShell(t *testing.T, toggle func()) (*Shell, *app.App) {
 }
 
 // miniTester 开一扇 320×100 的 Tester，跑迷你窗口这一窗的 view。
+//
+// ⚠️ **它把那一扇的 `repaint` 接成自己的 `Frame()`**（理由见
+// `Shell.repaint` 的注释）：框架的 `invalidate` 只置一个标记，而无头 Tester
+// 只在有人叫它的时候才画——所以「那句话在画面上」在测试里得靠这一格。
+// 而**迷你那一扇和主窗口是两次不同的画**：只接一扇的话，另一扇停在旧帧上。
 func miniTester(s *Shell) *mygoui.Tester {
-	return mygoui.NewTester(s.View, miniWidth, miniHeight)
+	tt := mygoui.NewTester(s.View, miniWidth, miniHeight)
+	s.repaint = tt.Frame
+	return tt
 }
 
 // enqueueTwo 往队列里放两首**能真的出声**的本地文件，第一首开始放。

@@ -452,7 +452,7 @@ func TestNormalizeClampsBadValues(t *testing.T) {
 	if s.ThemeMode != app.ThemeModeSystem {
 		t.Errorf("不认识的 themeMode 没退回默认：%q", s.ThemeMode)
 	}
-	if s.DisplayMode != app.DisplayModeList || s.AudioQuality != app.AudioQualityAuto {
+	if s.DisplayMode != app.DisplayModeList || s.AudioQuality != app.AudioQualityHigh {
 		t.Errorf("枚举没退回默认：%q / %q", s.DisplayMode, s.AudioQuality)
 	}
 	if s.CloseWindowOption != app.CloseWindowHide || s.ProxySettings.Type != app.ProxyNone {

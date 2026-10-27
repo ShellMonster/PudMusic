@@ -107,33 +107,40 @@ const (
 //
 // 界面上给的是这几档，不是 B 站的 id：用户要选的是「无损」还是「省流量」，
 // 「30251」对谁都没有意义。
+//
+// 🔴 **零值是 `AudioHigh`，而且这是故意的**（票 #581）：裸的 `AudioQuality{}`
+// ——没挂设置、字段没填——必须落在一档**能立刻出声**的有损上，而不是「无损」
+// （无损很多稿件没有，整条在线播放会被它拖死）。
+//
+// 🔴 **点名的档拿不到就自动降档，不报错**（票 #581）：无损/杜比不是每首都有，
+// 报错等于「这首歌放不出来」，而降档放出来再加一句提示是更好的答案。降档的
+// 提示在 app 那一层发（`SetAudioQuality` 换档那一趟），这一层只负责挑流。
 type AudioQuality int
 
 const (
-	// AudioAuto 是默认档：有无损给无损，没有就给能拿到的最好的。
-	//
-	// Biu 上游的 auto 行为就是这个（`common/utils/audio.ts` 里
-	// `quality === "auto" || quality === "lossless"` 都先找 flac）。
-	// 两者唯一的区别是：auto 找不到无损不会报错，lossless 会。
-	AudioAuto AudioQuality = iota
-	// AudioLossless 只要无损。拿不到就报错，不要偷偷降到有损——
-	// 用户为无损付了钱，静默降级比报错更糟。
-	AudioLossless
-	// AudioHigh 只要 192K（投稿侧最高的有损档）。
-	AudioHigh
+	// AudioHigh 是**默认档**：投稿给最高有损（192K），音乐库给 320K。
+	// 无损/杜比只有显式选了才要——FLAC 的码率是有损档的 9 倍上下
+	// （实测 1609~1821 Kbps），把它当默认等于让每一次起播都多等几倍的首缓冲。
+	AudioHigh AudioQuality = iota
 	// AudioMedium 只要 128K。
 	AudioMedium
 	// AudioLow 只要 64K。
 	AudioLow
+	// AudioDolby 要杜比全景声（`dash.dolby`）。这一首没有就退到最高有损。
+	AudioDolby
+	// AudioLossless 要无损（`dash.flac`）。这一首没有就退到最高有损。
+	AudioLossless
 )
 
 // Label 是这一档偏好在设置页里显示的字。
 //
 // ⚠️ 不是给 `Quality.Label` 用的：那个说的是「B 站给了什么」，
-// 这个说的是「用户要什么」。降级发生之后界面上要同时出现两句时，
-// 混起来会看成「用户要无损，系统给了无损」而看不出降级。
+// 这个说的是「用户要什么」。降档发生之后界面上要同时出现两句时，
+// 混起来会看成「用户要无损，系统给了无损」而看不出降了档。
 func (q AudioQuality) Label() string {
 	switch q {
+	case AudioDolby:
+		return "杜比全景声"
 	case AudioLossless:
 		return "无损"
 	case AudioHigh:
@@ -143,7 +150,7 @@ func (q AudioQuality) Label() string {
 	case AudioLow:
 		return "省流量"
 	}
-	return "自动"
+	return "高音质"
 }
 
 // qualityRank 是「从低到高」的排序键。B 站的 id 本身不是可比的
@@ -292,11 +299,16 @@ func (t MusicTier) Label() string {
 //
 // 退的规矩和 `pickAudio` 一样（点名的档没有就退到不高于它的那一档里最好的），
 // 只是**这里退不了**——这是一个请求参数，退不动。所以退不动的那一档由
-// `audio.go` 在**拿到 `qualities` 之后**再问一次（见 `ErrPreviewOnly`）。
+// `audio.go` 在**拿到 `qualities` 之后**再问一次（见「试听片段」那一节）。
 func MusicTierFor(pref AudioQuality) MusicTier {
 	switch pref {
 	case AudioLossless:
 		return MusicTierFLAC
+	case AudioDolby:
+		// 🔴 **音乐库没有杜比这一档**（它只有 128/192/320/FLAC 四档）：点名
+		// 「杜比」在这条路上按 **320K**（最高有损）要，理由和 `wantedTier` 那条
+		// 一样——点名的档没有，退到最高有损。实际拿到哪一档由 app 那一层提示。
+		return MusicTier320
 	case AudioHigh:
 		return MusicTier320
 	case AudioMedium, AudioLow:
@@ -306,18 +318,8 @@ func MusicTierFor(pref AudioQuality) MusicTier {
 		// 那段注释说的反例。
 		return MusicTier128
 	}
-	// 自动档要 **320K，不冒然要无损**。
-	//
-	// ⚠️ 这个 320K 是**音乐库**的 320K（`type=2`）。投稿侧没有 320K——
-	// 那边最高的有损是 192K（`QualityHigh192`）。两套编号，别混。
-	//
-	// B 站对「没权限的那一档」不报错，回的是试听片段（`MusicTierPreview`），
-	// 而这一层拿不到「这个号有没有会员」——所以自动档不去赌那一档，否则
-	// 每一个没会员的号每放一首都要多问一次。会员想听无损请显式选「无损」：
-	// 那一档拿到了就是 FLAC，拿不到会如实报错而不是给一段试听。
-	//
-	// 上游 Biu 是同一个取舍，只是它那边知道有没有会员
-	// （`common/utils/audio.ts` 的 `vipStatus ? 3 : 2`）。
+	// 零值/认不出来的兜底（见 `AudioQuality` 的注释：零值必须是一档能立刻
+	// 出声的有损）——和高品质同档。
 	return MusicTier320
 }
 
@@ -353,7 +355,7 @@ type dashInfo struct {
 		Display bool         `json:"display"`
 		Audio   *audioStream `json:"audio"`
 	} `json:"flac"`
-	// Dolby 是杜比全景声那一档。
+	// Dolby 是杜比全景声那一档。用户点名「杜比」时从这里拿。
 	//
 	// ⚠️ **实测形状（同上）**：`codecs` 是 `"ec-3"`，`id` 是 **30250**，
 	// 容器也是 MP4 盒。
@@ -365,10 +367,10 @@ type dashInfo struct {
 
 // pickAudio 按偏好挑一条音频流，连同它的音质档位。
 //
-// 顺序照 Biu 上游（`common/utils/audio.ts` 的 `getDashUrl`）：
-// **先**找 flac，**再**找 dolby，**最后**才在 `dash.audio` 里按档位挑。
-// 不是因为无损更重要，而是 B 站的 `dash.audio` 里**根本不含 FLAC**——
-// 无损只在 `dash.flac` 那个独立字段里。先翻 dash.audio 会永远拿不到无损。
+// 🔴 **点名的档拿不到就自动降档，不报错**（票 #581）：无损/杜比不是每首都有，
+// 退路是**最高有损**（192K）——放出来比报错好，实际拿到了哪一档由 app 那一层
+// 提示（`SetAudioQuality` 换档那一趟）。默认档和有损三档的挑选在 `dash.audio`
+// 里按码率挑——字段名分不出档位，只能靠码率和 id 排。
 //
 // 返回的档位按「**字段定类别、id 定档位名**」来（见 `quality.go` 的文件头）。
 func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
@@ -380,32 +382,26 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 	if d.Dolby != nil {
 		dolby = playable(d.Dolby.Audio)
 	}
-	hasDolby := len(dolby) > 0
 	hasFlac := d.Flac != nil && d.Flac.Audio != nil && d.Flac.Audio.BaseURL != ""
 
-	// 只要无损/自动：先看 flac，再看 dolby。
-	//
-	// ⚠️ 这两条**不盲信流里的 id**：`dash.flac` 就是 FLAC、`dash.dolby` 就是杜比
-	// 全景声——**字段名本身才是权威的**，id 是 B 站的内部编号，而且**改过**：
-	// FLAC 那一档在老资料里是 30257，2026-10-23 实测是 30251。按 id 猜的话，
-	// B 站一改，无损流就会挂上「杜比 Hi-Res」这种完全不相干的标签（票 #255）。
+	// 无损看 flac、杜比看 `dash.dolby`——这两处**不盲信流里的 id**：**字段名
+	// 本身才是权威的**，id 是 B 站的内部编号，而且**改过**：FLAC 那一档在老
+	// 资料里是 30257，2026-10-23 实测是 30251。按 id 猜的话，B 站一改，无损
+	// 流就会挂上完全不相干的标签（票 #255）。
 	//
 	// 有损那几档（`dash.audio[]`）反过来**只能**靠 id：同一个字段里躺着好几档，
 	// 字段名分不出来。
-	if (pref == AudioAuto || pref == AudioLossless) && hasFlac {
+	if pref == AudioLossless && hasFlac {
 		s := *d.Flac.Audio
 		return s, QualityHiResLossless, true
 	}
-	if pref == AudioAuto && hasDolby {
+	if pref == AudioDolby && len(dolby) > 0 {
 		s := bestOf(dolby)
 		return s, QualityDolby, true
 	}
 
 	list := sortStreams(playable(d.Audio))
 	switch pref {
-	case AudioLossless:
-		// 到这里还没有无损，而无损是被点名要的：不给。
-		return audioStream{}, QualityUnknown, false
 	case AudioHigh:
 		if s, ok := pickExact(list, QualityHigh192); ok {
 			return s, QualityHigh192, true
@@ -420,28 +416,25 @@ func pickAudio(d *dashInfo, pref AudioQuality) (audioStream, Quality, bool) {
 		}
 	}
 
-	// 点名的档位没有：退到**不高于**它的那一档里最好的（Biu 上游对 high 的
-	// 处理是直接取 sortedList[0]，那对「省流量」是反的——用户为了少流量点了
-	// 64K，拿到 192K，流量翻三倍）。真的一个都没有（比如 B 站只给了 192K），
-	// 退到最低的那一档：宁可少要一档，也不要多给——用户可以再点一次提高。
-	//
-	// 自动档不走这条路：它的意思就是「能给的多好就多好」，直接拿最好的那条。
+	// 点名的档位没有——要么是 B 站没给那一条（无损/杜比在这首稿件上不存在），
+	// 要么是点名的有损档没有：退到**不高于**点名档的那一档里最好的
+	// （无损/杜比的退路按 192K 算，见 `wantedTier`）。
+	// 「不高于」是给省流量那两档留的规矩：用户为了少流量点了 64K，拿到 192K，
+	// 流量翻三倍。真的一个都没有（比如 B 站只给了听不懂的新档），退到最低的
+	// 那一档：宁可少要一档，也不要多给——用户可以再点一次提高。
 	if len(list) == 0 {
 		return audioStream{}, QualityUnknown, false
-	}
-	if pref == AudioAuto {
-		s := list[0]
-		return s, Quality(s.ID), true
 	}
 	s := closestTo(list, wantedTier(pref))
 	return s, Quality(s.ID), true
 }
 
-// wantedTier 是这一档偏好点名要的那一档。取不到时按它比高低。
+// wantedTier 是这一档偏好点名要的那一档，取不到时按它比高低、退档也退到它。
+//
+// 无损/杜比不是每首都有，它们的退路是**最高有损**（192K）——降档要降得
+// 说得出道理：都是「点名的档没有」，退到同一个地方，提示也好写。
 func wantedTier(pref AudioQuality) Quality {
 	switch pref {
-	case AudioHigh:
-		return QualityHigh192
 	case AudioMedium:
 		return QualityMid128
 	case AudioLow:

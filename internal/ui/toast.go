@@ -162,7 +162,20 @@ type toast struct {
 // ⚠️ **后台那条线也调它**（比如 `download_mount.go` 的 `sayDownloadDone`），而播报
 // 那一头是带锁的（`announceQueue` 自己有锁），所以这里不用管自己在哪条线上。
 func (s *Shell) addToast(text string, tone notice.Tone) {
-	s.addToastWith(text, tone, false)
+	s.addToastWith(text, tone, toastLifetime, false)
+}
+
+// addToastFor 是 `addToast` 加一个「待多久」。
+//
+// ⚠️ **为什么有些话要待得久一点**：一条提示默认两秒（上游 Biu 的
+// `timeout: 2000`），而那两秒是给「用户正在看界面、按完一个键」准备的。
+// 但**系统交给我们的文件被拒**那一类不是用户按出来的——他双击了访达里的
+// 一个文件，然后**注意力已经回到别处了**（或者他正等着歌放起来）。两秒之后
+// 那句话就没了，而「没看到」和「没有提示」在用户那里是同一件事。
+//
+// 那一类话走 `fileNoticeLifetime`（五秒，见 `openfile.go`）。
+func (s *Shell) addToastFor(text string, tone notice.Tone, lifetime time.Duration) {
+	s.addToastWith(text, tone, lifetime, false)
 }
 
 // addStickyToast 弹一条**不自己到期**的提示。
@@ -174,18 +187,25 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 // ⚠️ **它到期的条件是「用户回来了」**：那时它已经被人看见，于是它按正常的两秒
 // 走（见 `unstickToasts`）。
 func (s *Shell) addStickyToast(text string, tone notice.Tone) {
-	s.addToastWith(text, tone, true)
+	s.addToastWith(text, tone, toastLifetime, true)
 }
 
-// addToastWith 是「弹一条提示」那一个动作，`sticky` 说它是不是不自己到期。
-func (s *Shell) addToastWith(text string, tone notice.Tone, sticky bool) {
+// addToastWith 是「弹一条提示」那一个动作。
+//
+// `lifetime` 是它待多久（`until` 从**现在**起算），`sticky` 说它是不是**不自己
+// 到期**——粘着的那一条等的是「用户回来」（见 `unstickToasts`），而不是时间。
+//
+// ⚠️ **两个参数各自解决一个静默故障**：少了 `lifetime`，「系统交给我们的文件被
+// 拒」那一类话两秒就没了（见 `addToastFor`）；少了 `sticky`，「系统通知发不出去
+// 时的降级提示」在用户回来之前就没了（见 `addStickyToast`）。
+func (s *Shell) addToastWith(text string, tone notice.Tone, lifetime time.Duration, sticky bool) {
 	s.toastMu.Lock()
 	s.toastSeq++
 	t := toast{
 		id:     s.toastSeq,
 		text:   text,
 		tone:   tone,
-		until:  time.Now().Add(toastLifetime),
+		until:  time.Now().Add(lifetime),
 		sticky: sticky,
 	}
 	s.toasts = append(s.toasts, t)
@@ -197,6 +217,27 @@ func (s *Shell) addToastWith(text string, tone notice.Tone, sticky bool) {
 	// 念出去（无障碍）。**排在解锁之后**：播报那一头有自己的锁，而这一段
 	// 不该在握着 toast 那把锁的时候去拿另一把。
 	s.announce(text)
+
+	// 🔴 **要一帧**（铁律三：投递完状态必须叫醒界面）。
+	//
+	// ⚠️ **少了这一行，那句话在画面上不存在**（这一票第二轮评审抓到的那个
+	// 静默故障）：`addToast` 只写状态，而**按需绘制的界面不会因为状态变了
+	// 就自己画一帧**——`invalidate` 只在**收走**那一刻才调（`expire` 里那两
+	// 句），于是新加的那一条要等到「下一个别的原因碰巧重画界面」时才出现。
+	//
+	// 而「下一个别的原因」可能一直没有（界面静止的时候一帧都不画）。
+	// 症状是「用户双击了一个放不了的文件，什么都没发生」——而界面上**连
+	// 状态都记着**（`s.toasts` 里那句话在），只有画面上没有。
+	//
+	// ⚠️ **用 `invalidate` 而不是 `invalidateNow`**：`invalidate` 会问「这一
+	// 扇窗现在看不看得见」，而看不见的窗**不该**为一条提示重画（票 #156 的
+	// 风扇问题）。`invalidateNow` 会绕过那道闸门。
+	//
+	// ⚠️ **它在「粘着的那一条」那个 return 之前**：那一档同样要一帧——它弹在
+	// 用户**不在**的时候（系统通知发不出去的那一档多半就是他不在的时候），
+	// 而它一直摆着等人回来；少了这一帧，界面停在旧帧上，那一句就**不在画面
+	// 上**（状态在、画面没有，正是上面说的那个静默故障）。
+	s.wake.invalidate()
 
 	// ⚠️ **粘着的那一条不排收它的 goroutine**：它等的是「用户回来」，而那是
 	// `syncFocusTracker` 那一头的事（见 `unstickToasts`）。而它**照样要在界面

@@ -205,11 +205,16 @@ const (
 var DefaultThemePreset = ThemePresetWarmPaper
 
 // 音质档位。Biu 的 `AudioQuality`。
+//
+// 🔴 **没有「自动」这一档**（票 #581）：默认是有损的高品质档（音乐库 320K /
+// 投稿 192K），无损/杜比是显式选项——拿不到时由取流那层自动退到最高有损，
+// 不报错。以前这里有过 `auto`（有无损先给无损），已删：老设置文件里存着的
+// `"auto"` 由 `normalize` 的 `pickEnum` 兜底归一成 `AudioQualityHigh`，不写迁移。
 type AudioQuality string
 
 const (
-	AudioQualityAuto     AudioQuality = "auto"
 	AudioQualityLossless AudioQuality = "lossless"
+	AudioQualityDolby    AudioQuality = "dolby"
 	AudioQualityHigh     AudioQuality = "high"
 	AudioQualityMedium   AudioQuality = "medium"
 	AudioQualityLow      AudioQuality = "low"
@@ -613,7 +618,7 @@ func DefaultSettings(downloadPath string) Settings {
 		DownloadPath:      downloadPath,
 		PrimaryColor:      DefaultPrimaryColor,
 		BackgroundColor:   "",
-		AudioQuality:      AudioQualityAuto,
+		AudioQuality:      AudioQualityHigh,
 		HiddenMenuKeys:    []string{},
 		DisplayMode:       DisplayModeList,
 		FFmpegPath:        "",
@@ -861,8 +866,11 @@ func (s *Settings) normalize() {
 		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach,
 		ThemePresetCeladon, ThemePresetInkPaper, ThemePresetSandalwood,
 		ThemePresetIndigoNight, ThemePresetClassic)
-	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityAuto,
-		AudioQualityAuto, AudioQualityLossless, AudioQualityHigh,
+	// 🔴 **兜底是 `AudioQualityHigh` 不是无损**：认不出来的值（包括老设置文件
+	// 里存着的 `"auto"`，票 #581 删掉的那一档）归一成默认的有损档——裸的
+	// 「无损」拿不到就退档、杜比同理，但拿不到的前提是先得有声音。
+	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityHigh,
+		AudioQualityLossless, AudioQualityDolby, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)
 	s.DisplayMode = pickEnum(s.DisplayMode, DisplayModeList,
 		DisplayModeCard, DisplayModeList, DisplayModeCompact)

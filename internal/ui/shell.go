@@ -47,6 +47,31 @@ type Shell struct {
 	// wake 是这个窗口的唤醒句柄，由 view 每帧重新登记。
 	wake wakeHandle
 
+	// repaint 是「**立刻**要一帧新画面」的那一下。
+	//
+	// 生产上它就是 `wake.invalidateNow`（要一帧，而且**绕过**「看不看得见」
+	// 那道闸门——理由见那个函数的注释）。
+	//
+	// 而**无头 Tester 只在有人明确叫它的时候才画**（`mygo/ui/headless.go`
+	// 的 `invalidate` 只置一个标记，`Tester.Frame()` 才真的画），所以测试基座
+	// 把它换成 Tester 的 `Frame()`——于是「那句话在画面上」这件事在测试里
+	// 当场成立，而不是「等下一帧」。
+	//
+	// ⚠️ **它只用在「用户马上要看见」的那几处**（系统交给我们的文件被拒了、
+	// 放起来了）。别把它接到 `addToast` 那一层：那一层每条提示都要一帧，
+	// 而无头环境里那一帧要画二十遍（提示的入场动画一直要下一帧，而钟站着
+	// 不动）——几百条测试各多二十帧，这一包就慢得没法用了。
+	repaint func()
+
+	// notice 是「系统交给我们的一个文件，收下了没有」那一句的状态。
+	//
+	// ⚠️ **它和 `toasts` 是两件事**：toast 画在**主窗口**的右下角
+	//（`viewToasts` 只在主窗口那一支调），而**迷你播放器那一扇根本不画
+	// toast**——而迷你常常就是用户眼前那一扇。所以这一句另有一份**迷你也画**
+	// 的状态，而**迷你那一份和主窗口那一份是同一个对象**（迷你建外壳时接
+	// 主窗口那一份，见 `adoptShared`）。
+	notice *fileNotice
+
 	// presence 是「用户现在看得到这一扇窗吗」（见 presence.go）。
 	//
 	// 窗口自己的生命周期回调改它；`wake.invalidate` 拿它决定这一帧要不要画；
@@ -94,6 +119,14 @@ type Shell struct {
 
 	// tint 是封面取色的状态（见 covertint.go）。
 	tint coverTint
+	// glowWake 是满屏光晕取色用的叫醒函数，建一次存着（每帧现写方法值会建闭包）。
+	glowWake func()
+	// fullCoverKey 是满屏封面格子的键，fullCoverKeyURL 是它对应的封面地址。
+	fullCoverKey    any
+	fullCoverKeyURL string
+	// fullCoverTr 是满屏封面的共享元素转场，fullCoverTrID 是它对应的身份。
+	fullCoverTr   ui.ElementTransition
+	fullCoverTrID string
 
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
@@ -301,16 +334,23 @@ type Shell struct {
 
 	// scrub 是进度条的值（0..1），held 是指针有没有按在它上面。
 	// 两个都只由 view 读写——view 永远跑在主线程上。
-	scrub float64
-	held  bool
+	//
+	// scrubPressX / scrubPressPos 是**按下去那一帧**的指针位置和播放位置：
+	// 松手的时候拿它们分「这一下是点还是拖」（章节点吸附只认点，票 #585）。
+	scrub         float64
+	held          bool
+	scrubPressX   float32
+	scrubPressPos time.Duration
 
 	// fullScrub / fullHeld 是**全屏播放器上那条**进度条自己的一份。
 	//
 	// ⚠️ 不能和上面那一份共用：两处会各自按住、各自 `ScrubStart`/`ScrubEnd`，
 	// 而 `ScrubEnd` 是一次真的 seek。共用的话在全屏里拖一下进度条，底下那条
 	// 也会跟着跳（而它这会儿压根没被按着）。
-	fullScrub float64
-	fullHeld  bool
+	fullScrub    float64
+	fullHeld     bool
+	fullPressX   float32
+	fullPressPos time.Duration
 
 	// full 是全屏播放器自己那一摊，见 fullplayer.go。
 	// **只由 view 在主线程上读写**，不跨 goroutine（铁律一）。
@@ -896,6 +936,10 @@ type Shell struct {
 	// seek」——那一半就靠这对标记守住）。
 	miniScrub float64
 	miniHeld  bool
+	// miniPressX / miniPressPos 是迷你进度条按下去那一帧的记账
+	// （和播放条那一对同一个用途，见上面 scrubPressX）。
+	miniPressX   float32
+	miniPressPos time.Duration
 	// builds 记着「各个界面一共建了几遍」。**给测试看的**（见 builds.go 与
 	// framebudget_test.go）：「一帧建两遍」是静默的坏处——画面上看着没差，
 	// 而帧成本翻倍。
@@ -956,9 +1000,24 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		// 「这一扇窗看不看得见」那一个**活的**开关（见上面那个字段的注释）。
 		// 零值必须是「看得见」——理由同 `presence` 那两句。
 		visible: hover.NewVisibleFlag(),
+		// 「系统交给我们的那个文件」那一句的状态（见 filenotice.go）。
+		notice: newFileNotice(),
 	}
 	// 唤醒句柄问的是**这个外壳**的可见性（wake.go 的规则三）。
 	s.wake.seen = s.presence.seen
+	// 「立刻要一帧」那一半：生产上就是绕过可见性闸门地要一帧（理由见
+	// `wakeHandle.invalidateNow`）。
+	//
+	// ⚠️ **绕过闸门是故意的**：这一句是「系统交给我们的文件被拒了」那一类
+	// ——用户双击了访达里的一个文件，而**用户眼前那一扇窗可能正好是收着的**
+	// （迷你开着的时候主窗口收着）。那时候这一帧要是不画，那句话就还不在
+	// 画面上——而用户切回来的时候才看见（或者看不见）。
+	//
+	// ⚠️ **无头环境里换成 Tester 的 `Frame()`**：框架的 `invalidate` 只置一个
+	// 标记，Tester 要有人叫它才画（`mygo/ui/headless.go`）。所以测试基座
+	// 把这一格换成 `tt.Frame()`（见 `shelltest_test.go`），于是「那句话在画面
+	// 上」在测试里当场成立。
+	s.repaint = s.wake.invalidateNow
 	// 快捷键那两条路的动作都落到它。方法值在这儿绑一次就够：runShortcut 只碰
 	// s.app 和 s.router，两个都是建好之后就一直在的。
 	s.onShortcut = s.runShortcut
@@ -975,6 +1034,10 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		mounted: func() bool { return s.app.RecommendOf().Mounted() },
 		tab:     s.fetchHomeTab,
 		new:     s.fetchHomeNewMusic,
+		board: func(tab int) (int, time.Time, bool) {
+			p, ok := s.app.RecommendOf().BoardPeriod(tab)
+			return p.Number, p.PublishedAt, ok
+		},
 		selfMid: s.app.SelfMid,
 		wake:    s.wake.invalidate,
 	})

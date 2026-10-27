@@ -49,28 +49,35 @@ var displayModes = []struct {
 	{app.DisplayModeCompact, "紧凑", iconFileList},
 }
 
-// audioQualities 是音质那五档。Biu 用的是 `w-[180px]` 的下拉（`:247`），
+// audioQualities 是音质那几档。Biu 用的是 `w-[180px]` 的下拉（`:247`），
 // 键值一字不差（`app.AudioQuality` 那边对过）。
+//
+// 🔴 **没有「自动」这一档**（票 #581）：默认是「高品质」（音乐库 320K / 投稿
+// 192K），无损/杜比是显式选项——以前这里的「自动」有无损先抢无损，每一首
+// 投稿都按 9 倍于 192K 的码率起播。设置文件里存着的 `"auto"` 由
+// `app.Settings` 归一化兜底成「高品质」，这里不用管。
 var audioQualities = []struct {
 	quality app.AudioQuality
 	label   string
 }{
-	{app.AudioQualityAuto, "自动"},
 	{app.AudioQualityLossless, "无损"},
+	{app.AudioQualityDolby, "杜比全景声"},
 	{app.AudioQualityHigh, "高品质"},
 	{app.AudioQualityMedium, "中等"},
 	{app.AudioQualityLow, "低品质"},
 }
 
-// audioQualityHint 是每一档底下那句话，逐条抄 Biu 的（`system-settings.tsx:236-241`）。
-// 它跟着选中的那一档变：用户从「自动」换到「无损」时底下那句话要跟着换，否则
-// 「这一档到底是什么」还是没地方看。
+// audioQualityHint 是每一档底下那句话。它跟着选中的那一档变：用户从「无损」
+// 换到「高品质」时底下那句话要跟着换，否则「这一档到底是什么」还是没地方看。
+//
+// ⚠️ **无损/杜比的两句要说清「拿不到会退档」**（票 #581）：点名档不是每首
+// 都有，拿不到时自动退到最高有损，界面上另有一句提示说了实际用的哪一档。
 var audioQualityHint = map[app.AudioQuality]string{
-	app.AudioQualityAuto:     "自动选择最高音质",
-	app.AudioQualityLossless: "FLAC / Hi-Res",
-	app.AudioQualityHigh:     "180-320 kbps",
-	app.AudioQualityMedium:   "100-140 kbps",
-	app.AudioQualityLow:      "60-80 kbps",
+	app.AudioQualityLossless: "FLAC / Hi-Res（这首没有就自动用 192K）",
+	app.AudioQualityDolby:    "杜比全景声（这首没有就自动用 192K）",
+	app.AudioQualityHigh:     "192~320 kbps（默认）",
+	app.AudioQualityMedium:   "128 kbps",
+	app.AudioQualityLow:      "64 kbps",
 }
 
 // settingsGeneral 是常规那一页。
@@ -250,6 +257,9 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 	enumSelect(c, &quality, items, "选择音质偏好", s.settingsControlFitW(c, selectWidth), 0, ro)
 	if quality != st.AudioQuality {
 		s.applySetting("音质偏好", func(cur *app.Settings) { cur.AudioQuality = quality })
+		// 应用层把这一笔同步给正在放的那首（`UpdateSettings` → `SetAudioQuality`）。
+		// 切到无损/杜比的那一下说一句降档规矩——只在切换时说，理由见那边的注释。
+		qualitySwitchToast(s, app.PrefToBili(quality))
 	}
 }
 

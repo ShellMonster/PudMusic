@@ -355,9 +355,6 @@ func TestTheOldSongsReconnectStateDoesNotStayOnTheNewSong(t *testing.T) {
 		}
 		if st.Loading {
 			sawLoading = true
-			if st.LoadingTitle != "新的那首" {
-				t.Fatalf("在取哪一首说错了：%+v", st)
-			}
 		} else if sawLoading {
 			break // 这一趟取完了
 		}

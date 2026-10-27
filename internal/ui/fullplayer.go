@@ -35,7 +35,6 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
@@ -584,11 +583,12 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 			s.viewFullBackdropCanvas(c, url)
 			// 封面主色的光晕：压在压暗层**底下**，所以压暗层照样统一压住，字的对比度
 			// 按「压暗层盖白底」算出来的最坏情况不变。自上而下 45% → 0，取不到色时没有。
-			if hue, sat := s.tint.sync(url, s.wake.invalidate); sat > 0 {
-				if col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(true)); ok {
-					ui.Box(c).Key("full-glow").Absolute().Left(0).Top(0).Right(0).Bottom(0).
-						LinearGradient(ui.LinearGradient{From: col.Alpha(0.45), To: col.Alpha(0), Angle: 180})
-				}
+			if s.glowWake == nil {
+				s.glowWake = s.wake.invalidate
+			}
+			if col, ok := s.tint.glow(url, s.glowWake); ok {
+				ui.Box(c).Key("full-glow").Absolute().Left(0).Top(0).Right(0).Bottom(0).
+					LinearGradient(ui.LinearGradient{From: col.Alpha(0.45), To: col.Alpha(0), Angle: 180})
 			}
 			ui.Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(fullScrim)
 		})
@@ -983,16 +983,22 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		x = area.X + area.W - fullStagePadX - w
 	}
 	box := shadow.FullCover(ui.Box(c).Key("full-cover").
-		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius))
+		Absolute().Left(x).Top(area.Y+(area.H-h)/2).Size(w, h).Radius(c.Theme().Radius).
+		ContextMenu(s.coverMenu))
 	if hidden {
 		box = box.Cursor(ui.CursorNone)
 	}
 	box.Children(func() {
 		// 共享元素转场的身份：**两处封面用的是同一个**（这里和播放条上那一张）。
 		id := coverIdentity(s, st)
-		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面")
+		// 切歌时新旧封面交叉淡入淡出：封面按封面地址起键，旧的退场时留一份淡出的
+		// 影子，新的同时淡入。
+		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面").
+			Key(s.fullCoverKeyFor(st.CoverURL))
 		if phase == app.VideoOff || phase == app.VideoFailed {
-			cover = cover.Transition(coverTransition(id))
+			cover = cover.Transition(s.fullCoverMatchFor(id))
+		} else {
+			cover = cover.Transition(fullCoverFade)
 		}
 		switch {
 		case phase == app.VideoLoading || phase == app.VideoOn:
@@ -1017,6 +1023,35 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	if box.Clicked() {
 		s.like.swallowClick()
 	}
+}
+
+// fullCoverFade 是满屏封面切歌时的交叉淡入淡出：进场从全透明、退场到全透明，300ms。
+// 包级变量：每帧现造会多一次分配（见 framebudget_test.go）。
+var fullCoverFade = ui.ElementTransition{
+	Duration: 300 * time.Millisecond, Ease: motion.Unified,
+	Enter: &fullCoverGhost, Exit: &fullCoverGhost,
+}
+
+// fullCoverGhost 是封面进场的起点和退场的终点：全透明。
+var fullCoverGhost = ui.Motion{Opacity: 0}
+
+// fullCoverKeyFor 是满屏封面格子的键（带封面地址）。拼出来的字符串缓存着，
+// 地址不变就不再拼——每帧拼一次就是每帧一次分配。
+func (s *Shell) fullCoverKeyFor(url string) any {
+	if s.fullCoverKey == nil || s.fullCoverKeyURL != url {
+		s.fullCoverKeyURL, s.fullCoverKey = url, "full-cover-art:"+url
+	}
+	return s.fullCoverKey
+}
+
+// fullCoverMatchFor 是「共享元素 + 淡入淡出」的转场。它里面的 Match 装着一个 any，
+// 每次现造都是一次分配，所以按身份缓存，身份不变就原样返回。
+func (s *Shell) fullCoverMatchFor(id string) ui.ElementTransition {
+	if s.fullCoverTrID != id || s.fullCoverTr.Match == nil {
+		s.fullCoverTrID, s.fullCoverTr = id, coverTransition(id)
+		s.fullCoverTr.Enter, s.fullCoverTr.Exit = &fullCoverGhost, &fullCoverGhost
+	}
+	return s.fullCoverTr
 }
 
 // coverIdentity 是共享元素这一次的身份：当前这一首的判重标识。
@@ -1183,18 +1218,27 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, hidden bool) {
 // 悬停那一档（主色）比它**亮**——「悬停让这一段更显眼」，不是更不显眼。
 func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	known := st.Duration > 0
+	chs := st.Chapters
+	base := s.fullRowBase(c)
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size12)).TextColor(dim).
 			MinWidth(48).MaxLines(1)
-		sl := knobSlider(c, &s.fullScrub, 0, 1, knobFullLook(dim, s.fullRowBase(c))).
+		sl := knobSlider(c, &s.fullScrub, 0, 1, knobFullLook(dim, base)).
 			Grow(1).Label("全屏播放进度").Disabled(!known)
+		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
+		// 那半个宽 10，点比 6 像素的轨道粗 3；「缺口」用这一行坐着的底色，
+		// 让它熔进背景里——票 #585）。
+		sl = withChapterDots(sl, chs, st.Duration, 10, 9, base)
 		switch held := sl.Pressed(); {
 		case held && !s.fullHeld:
 			s.fullHeld = true
+			// 记下按下那一帧的指针和位置：松手时拿它们分「点 / 拖」。
+			s.fullPressX, _, _ = sl.PointerPosition()
+			s.fullPressPos = st.Position
 			s.app.ScrubStart()
 		case !held && s.fullHeld:
 			s.fullHeld = false
-			s.app.ScrubEnd(s.fullScrub)
+			s.app.ScrubEnd(snappedScrub(sl, s.fullScrub, s.fullPressX, s.fullPressPos, st.Duration, chs))
 		case !s.fullHeld && known:
 			s.fullScrub = float64(st.Position) / float64(st.Duration)
 		}

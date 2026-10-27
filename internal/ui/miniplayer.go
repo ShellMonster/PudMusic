@@ -35,6 +35,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/Biu_Go/internal/notice"
 	"github.com/ShellMonster/Biu_Go/internal/platform"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -336,6 +337,17 @@ func (s *Shell) adoptShared(main *Shell) {
 		s.hist = main.hist
 		s.shared = true
 	}
+	// 「系统交给我们的那个文件」那一句接主窗口那一份。
+	//
+	// ⚠️ **必须是同一份**：那句话是**一件事**（系统交给我们一个文件，我们
+	// 收下了没有），而**两扇窗都要画它**——迷你那一扇不画 toast（`viewToasts`
+	// 只在主窗口那一支调），而迷你常常就是用户眼前那一扇。
+	//
+	// 两份的话，主窗口那一份上的话迷你看不见，而迷你那一份上的话主窗口
+	// 看不见——于是「用户眼前那一扇没有那句话」照旧发生，而症状一模一样。
+	if main.notice != nil && main.notice != s.notice {
+		s.notice = main.notice
+	}
 }
 
 // openMiniPlayer 开出迷你播放器那个窗口，并把主窗口收起来。
@@ -542,11 +554,70 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 页内那些卡片（关注卡、下载表那张、新歌速递那块空状态板）才是「同色靠影」
 	// 那一族，它们已经归一（票 #239）。
 	// 圆角跟着主题走，用户在设置页调圆角时这一块跟着变，和别处一致。
+	// 🔴 **「系统交给我们的那个文件，收下了没有」那一句话**（见 filenotice.go）：
+	// **它占掉整个迷你窗**。
+	//
+	// ⚠️ **为什么是整个窗而不是一小条**：这一扇只有 320×84，而那一句话最长
+	// 的一档是「这个格式我们放不了（支持 .mp3 .flac …）」——几十个字。挤成
+	// 一小条的话，那句话会被裁成几个字，而用户看到的是「弹了一小块红」，
+	// 还是不知道出了什么事。
+	//
+	// ⚠️ **为什么迷你要画它**：迷你那一扇**不画 toast**（`viewToasts` 只在
+	// 主窗口那一支调），而迷你常常就是用户眼前那一扇——于是「说了话但用户
+	// 眼前什么也没有」，症状和「双击没反应」一样。
+	noticeText, noticeTone, hasNotice := s.miniNotice()
+
+	// 底色：有那句话的时候是**语义色**（红的那一档和主窗口那条 toast 一样），
+	// 没有的时候是 `t.Surface`。
+	//
+	// ⚠️ **语义色要盖住整张卡片**：迷你那一张卡片是浮在桌面上的，而深色主题
+	// 下 `t.Surface` 和桌面糊在一起——那一行字压着灰底读不清。
+	cardBG := s.coverWash(t, t.Surface)
+	noticeFG := t.Text
+	if hasNotice {
+		cardBG, noticeFG = toastColors(noticeTone, t)
+	}
+
 	ui.Row(c).Key("mini").Fill().Radius(t.Radius).
-		Background(s.coverWash(t, t.Surface)).DragWindow().Children(func() {
+		Background(cardBG).DragWindow().Children(func() {
+		if hasNotice {
+			s.viewMiniNotice(c, noticeText, noticeFG)
+			return
+		}
 		// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
 		s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
 		s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
+	})
+}
+
+// miniNotice 报此刻迷你那一扇要显示的那句话（没有就报 false）。
+//
+// ⚠️ **它和主窗口那一条是两套**：主窗口那边是一条 toast（右下角那张卡片，
+// 见 `viewToasts`），而迷你这一扇**不画 toast**——所以这一句另有一份
+// **两扇窗共看**的状态（见 `filenotice.go`）。
+func (s *Shell) miniNotice() (text string, tone notice.Tone, ok bool) {
+	if s.notice == nil {
+		return "", 0, false
+	}
+	return s.notice.current()
+}
+
+// viewMiniNotice 画「系统交给我们的那个文件」那一句。**它占掉整个迷你窗**。
+//
+// ⚠️ **底色是外层那张卡片画的**（`viewMini` 里按语义色换掉 `t.Surface`），
+// 而这一段只画那句话——所以它不需要自己的底，也不会盖掉圆角。
+func (s *Shell) viewMiniNotice(c *ui.Context, text string, fg ui.Color) {
+	// ⚠️ **三行封顶**：这一扇只有 84 高（减去上下 12 的内边距还剩 60，
+	// 而 12 号字一行约 16）——最多三行半。而那一句话最长的一档是
+	// 「这个格式我们放不了（支持 .mp3 .flac .wav …）」，四行放不下。
+	//
+	// 放不下就**省略号**（而不是把字压到窗外）：用户看到的是「这句话被截了」，
+	// 而完整的那一句在主窗口那条 toast 上（两扇窗看的是同一件事）。
+	ui.Column(c).Key("mini-notice").Grow(1).FillHeight().
+		Padding(space.Px12, space.Px12, space.Px12, space.Px12).
+		Justify(ui.Center).Children(func() {
+		ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).
+			FontWeight(weightMedium).TextColor(fg).MaxLines(3).Ellipsis("…")
 	})
 }
 
@@ -654,19 +725,28 @@ func (s *Shell) miniTip(c *ui.Context, anchor ui.Element, text string) ui.Elemen
 // ⚠️ 按住看的是 `Pressed()`，不是 `Dragging()`：后者报的是 Drag / Draggable
 // 两套机制，普通 Slider 对它永远是 false（实测：按下滑块移动 200 DIP，
 // Dragging 仍为 false，Pressed 为 true）。理由见 `viewProgress`。
+//
+// 章节点画在滑块自己的画法**之上**（`withChapterDotsCore`，`DrawOver`）；松手
+// 那一下按「点 / 拖」分流——点在两个章节点之间要吸附到点上，拖动原样
+// （票 #585，规则见 `chapters.go`）。
 func (s *Shell) viewMiniProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
+	chs := st.Chapters
 
 	// key 装在 `c` 上：滑块的状态是建出来那一刻就初始化的（见上面那一条）。
 	sl := ui.Slider(c.Key("mini-progress"), &s.miniScrub, 0, 1).Grow(1).
 		Height(12).Label("播放进度").Disabled(!known)
+	sl = withChapterDotsCore(sl, chs, st.Duration)
 	switch held := sl.Pressed(); {
 	case held && !s.miniHeld:
 		s.miniHeld = true
+		// 记下按下那一帧的指针和位置：松手时拿它们分「点 / 拖」。
+		s.miniPressX, _, _ = sl.PointerPosition()
+		s.miniPressPos = st.Position
 		s.app.ScrubStart()
 	case !held && s.miniHeld:
 		s.miniHeld = false
-		s.app.ScrubEnd(s.miniScrub)
+		s.app.ScrubEnd(snappedScrub(sl, s.miniScrub, s.miniPressX, s.miniPressPos, st.Duration, chs))
 	case !s.miniHeld && known:
 		s.miniScrub = float64(st.Position) / float64(st.Duration)
 	}
