@@ -312,7 +312,7 @@ func TestTheGridCardCoverGrowsOnHover(t *testing.T) {
 	hovered := tt.Image()
 	// 那枚播放钮在封面的**右下角**（离右边和下边各 8），所以它的位置量得出
 	// 封面那一块的右下角。
-	btn, ok := tt.Find(hover.FromLabel(title))
+	btn, ok := tt.Find(hover.PlayLabel(title))
 	if !ok {
 		t.Fatalf("hover 之后封面上没有那个播放钮：%q", tt.Texts())
 	}

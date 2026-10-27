@@ -60,7 +60,7 @@ var menuSeparator = menuItem{sep: true}
 //
 // 这一段菜单现在是**四档**，名字各说各的事：
 //
-//	立即播放        加这一首到队尾并打断，马上播放
+//	立即播放        队列里有它就定位过去，没有才追加到队尾，马上播放
 //	从这一首往后听  换成这一首到这一页末尾，并从这一首播放
 //	下一首播放      这一首排在正在放的那首后面
 //	添加到队列      这一首排到队尾
@@ -69,8 +69,10 @@ var menuSeparator = menuItem{sep: true}
 // 原来那项叫「播放」的那一枚**改了名**：菜单里同时摆着「播放」和「立即播放」
 // 两枚，用户按的是哪一枚只能靠试，而试错的那一下会把用户的队列换掉。
 //
-// 「立即播放」是**拍板定的语义**（票 #337）：加当前这一首并立即打断播放。它
-// 对应上游 v1.16 行级 `play()`（`src/store/play-list.ts:627`）的追加 + 起播。
+// 「立即播放」的语义照上游 Biu 的 `play()`（票 #608，2026-10-27 按上游对齐）：
+// 队列里**已经有这一首就定位过去**（当前项挪到它、不重复入队），没有才追加再播。
+// 双击一行 / 回车 / 封面播放钮走的是**同一条**（`rowPlay`），只有「从这一首
+// 往后听」才换队列。
 //
 // # 放不了的那一类：先别给入口
 //
@@ -192,7 +194,8 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)) {
 	switch item.key {
 	case "play-now":
-		// 「立即播放」= **加这一首并立即播**（票 #337）：原队列保留。
+		// 「立即播放」= **放这一首**（票 #608 照上游的 `play()`）：队列里已经有
+		// 它就定位过去，没有才追加；原队列里别的歌都留着。
 		if acts.PlayNow == nil {
 			// 说清楚比按了没反应好（和下面几项同一个道理）。
 			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
