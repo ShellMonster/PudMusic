@@ -346,15 +346,19 @@ func TestTheDisplayModeCellHasOnlyOneSelectedSignal(t *testing.T) {
 					t.Fatalf("设置页上没有 %q 那张预览——预览是我们自己的增强，"+
 						"不能被删掉（文字有 %q）", label, tt.Texts())
 				}
-				edge := previewEdgePixel(tt.Image(), r)
+				// ⚠️ `t.Border` 是半透明色，画面上量到的是它叠在卡片底色上的结果；
+				// 底色取卡片左边外侧（卡片不另填底色，里面是示意线条，不能取）。
+				base := tt.Image().RGBAAt(int(r.X)-4, int(r.Y+r.H/2))
+				wantEdge := rgbaOf(theme.Border.Over(rgbaToColor(base)))
+				edge := previewEdgePixel(tt.Image(), r, wantEdge)
 				if nearRGBA(edge, rgbaOf(theme.Accent), 8) {
 					t.Errorf("%s 那张预览描的是主色边（%v）——那一格里就有**两种**"+
 						"选中信号了（药丸 + 预览的绿框），票 #297 裁掉的就是这个",
 						label, edge)
 				}
-				if !nearRGBA(edge, rgbaOf(theme.Border), 8) {
-					t.Errorf("%s 那张预览的描边是 %v，want %v（中性色）",
-						label, edge, rgbaOf(theme.Border))
+				if !nearRGBA(edge, wantEdge, 8) {
+					t.Errorf("%s 那张预览的描边是 %v，want %v（中性色叠在底色上）",
+						label, edge, wantEdge)
 				}
 			}
 		})
@@ -366,13 +370,21 @@ func TestTheDisplayModeCellHasOnlyOneSelectedSignal(t *testing.T) {
 // ⚠️ **取左边那一列，不取上边**：那一列在圆角的直边上，是描边本身；上边
 // 那一行落在**圆角**上（预览是圆角的），量到的是描边和底色揉出来的那几个
 // 中间色。
-func previewEdgePixel(img *image.RGBA, r mygoui.Rect) color.RGBA {
-	x := int(r.X)
+//
+// ⚠️ **卡片的 X 是小数**：描边落在哪一列取决于抗锯齿，所以在 X 左右各一列里取
+// 最接近 want 的那个。
+func previewEdgePixel(img *image.RGBA, r mygoui.Rect, want color.RGBA) color.RGBA {
 	y := int(r.Y + r.H/2)
-	if x < 0 || y < 0 || x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
-		return color.RGBA{}
+	best, bestD := color.RGBA{}, 1<<30
+	for x := int(r.X) - 1; x <= int(r.X)+1; x++ {
+		if x < 0 || y < 0 || x >= img.Bounds().Dx() || y >= img.Bounds().Dy() {
+			continue
+		}
+		if p := img.RGBAAt(x, y); maxDiff(p, want) < bestD {
+			best, bestD = p, maxDiff(p, want)
+		}
 	}
-	return img.RGBAAt(x, y)
+	return best
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
