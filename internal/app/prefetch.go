@@ -2,10 +2,11 @@
 //
 // # 这一票要治的症状
 //
-// `App.step`（手动切歌）和 `App.onTrackFinished`（自动切歌）都是**切歌那一刻
-// 才去取流**：点下一首到出声之间有一段空档——取流要跑一趟带 WBI 签名的网络
-// 往返（实测 200~400 毫秒），再叠上开解码器、等第一批样本。用户听到的是
-// 「点下一首 → 空档 → 出声」。
+// `App.onTrackFinished`（自动切歌）在**切歌那一刻才去取流**：歌放完到下一首
+// 出声之间有一段空档——取流要跑一趟带 WBI 签名的网络往返（实测 200~400 毫秒），
+// 再叠上开解码器、等第一批样本。用户听到的是「切歌 → 空档 → 出声」。
+// （后来票 #581 把手动按「下一首」也接到了这一层：`App.step` 用
+// `peekPreparedNext` 吃备好的那一份，不再重新取。）
 //
 // 这一层把那一段挪走：**当前这首快结束的时候，后台把下一首的流地址备好**，
 // 真播它的时候直接用（见 `App.takePrefetch`）。
@@ -342,6 +343,25 @@ func (a *App) prefetchFailed(gen int, it Item, err error) {
 	a.logf("biu: 下一首的流地址备不出来（安静退回真播那一趟）：%q：%v", it.Title, err)
 }
 
+// peekPreparedNext 把「备好的那一份」的**值**摸出来，不消费——预取层的
+// 状态（代次、在途的取消、黑名单）一动不动。
+//
+// 它是「下一首按钮」那一头（`App.step`）用的。直接用 `takePrefetch` 不行：
+// 队列的 `MoveNext` 自己就会作废预取（「下一首变了」的钩子），而消费式的
+// 取用必须赶在它**之前**、那时候又还不知道下一首是谁——所以只能先把值
+// 摸出来，挪完队列再比对（比对判据同 `takePrefetch` 的那一半）。
+// 挪完之后 `MoveNext` 的作废把状态清干净，两头不冲突。
+//
+// 返回的 ref 为 nil 表示手上没有备好的那一份（没备过、在备、备失败）。
+func (a *App) peekPreparedNext() (Item, *bili.StreamRef) {
+	a.prefetchMu.Lock()
+	defer a.prefetchMu.Unlock()
+	if a.prefetch == nil || a.prefetch.state != prefetchReady {
+		return Item{}, nil
+	}
+	return a.prefetch.item, a.prefetch.ref
+}
+
 // takePrefetch 取出「备好的那一份」，给真播下一首用。
 //
 // 它同时是**黑名单的出口**：备失败的那一份在这里被丢掉（状态清空），于是
@@ -359,6 +379,9 @@ func (a *App) prefetchFailed(gen int, it Item, err error) {
 //
 // ⚠️ **它同时清掉全局停用那一档**：下一首开始了，那一次失败（或被丢弃）
 // 不该压着后面几首——「这一首失败就不重试」说的是这一首，不是以后每一首。
+//
+// 🔴 **只有自动切歌走这里**（`onTrackFinished` 的 `AdvancePlay` 那一支）。
+// 手动按下一首走的是 `step`，它用 `peekPreparedNext`——见那边的注释。
 func (a *App) takePrefetch(next Item) (Item, *bili.StreamRef, bool) {
 	a.prefetchMu.Lock()
 	e := a.prefetch

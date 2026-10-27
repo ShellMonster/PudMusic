@@ -1,14 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-  <g opacity="0.16">
-    <circle cx="120" cy="80" r="70"/>
-    <circle cx="120" cy="80" r="48" stroke-dasharray="4 9"/>
-  </g>
-  <g opacity="0.9">
-    <circle cx="120" cy="64" r="20"/>
-    <path d="M84 118a36 32 0 0 1 72 0"/>
-  </g>
-  <g>
-    <circle cx="160" cy="52" r="22" fill="currentColor" fill-opacity="0.16"/>
-    <path d="M152 52h16M160 44v16"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <ellipse cx="120" cy="132" rx="70" ry="9" fill="currentColor" opacity="0.10" stroke="none"/>
+  <circle cx="112" cy="61" r="23" fill="currentColor" opacity="0.22" stroke="none"/>
+  <circle cx="112" cy="61" r="19" stroke-width="5" opacity="0.72"/>
+  <path d="M69 126c2-28 20-42 43-42s41 14 43 42" fill="currentColor" opacity="0.18" stroke="none"/>
+  <path d="M69 126c2-28 20-42 43-42s41 14 43 42" stroke-width="5" opacity="0.72"/>
+  <rect x="151" y="45" width="43" height="31" rx="6" fill="currentColor" opacity="0.20" stroke="none"/>
+  <path d="M160 55h25M160 65h17" stroke-width="4" opacity="0.62"/>
 </svg>

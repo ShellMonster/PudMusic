@@ -64,7 +64,7 @@ func TestRightClickOpensTheBiuMenu(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
-	want := []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列", "-", "在 B 站打开", "-", "收藏", "下载音频"}
+	want := []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列", "-", "在 B 站打开", "复制歌曲信息", "-", "收藏", "下载音频"}
 	if !slices.Equal(got, want) {
 		t.Errorf("菜单上有 %q，want %q", got, want)
 	}
@@ -467,7 +467,7 @@ func TestALocalSongStillHasAPlayEntry(t *testing.T) {
 	// ⚠️ **菜单项要在点之前数**：点完菜单就关了，而 `tt.Menu()` 读的是
 	// **当前开着的那一份**。
 	items := tt.Menu()
-	if len(items) != 9 {
+	if len(items) != 10 {
 		t.Errorf("菜单上有 %d 项：%q", len(items), items)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
@@ -475,5 +475,43 @@ func TestALocalSongStillHasAPlayEntry(t *testing.T) {
 	}
 	if len(rec.played) != 1 {
 		t.Errorf("本地文件的「从这一首往后听」没接上（动作记了 %d 次）", len(rec.played))
+	}
+}
+
+// TestChoosingCopyInfoPutsTitleOwnerAndLinkOnTheClipboard 钉「复制歌曲信息」：第一行
+// 歌名 - 歌手，第二行 B 站地址；复制完说一句。
+func TestChoosingCopyInfoPutsTitleOwnerAndLinkOnTheClipboard(t *testing.T) {
+	rec := &recorded{}
+	acts := rec.actions()
+	var copied []string
+	acts.Copy = func(text string) { copied = append(copied, text) }
+	_, tt := newList(t, acts, onlineSongs(3))
+
+	if err := tt.RightClick("在线的歌 B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("复制歌曲信息"); err != nil {
+		t.Fatal(err)
+	}
+	want := "在线的歌 B - UP 主\n" + app.BiliLink(app.Item{Source: "online", Type: "mv", Bvid: "BV2"})
+	if len(copied) != 1 || copied[0] != want {
+		t.Errorf("复制了 %q，want %q", copied, want)
+	}
+	if !slices.Contains(rec.notices, "已复制歌曲信息") {
+		t.Errorf("复制完没说话：%q", rec.notices)
+	}
+}
+
+func TestCopyInfoSaysSoWhenNothingIsWired(t *testing.T) {
+	rec := &recorded{}
+	_, tt := newList(t, rec.actions(), onlineSongs(2))
+	if err := tt.RightClick("在线的歌 A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("复制歌曲信息"); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.notices) != 1 || !strings.Contains(rec.notices[0], "复制歌曲信息") {
+		t.Errorf("说的话 = %q", rec.notices)
 	}
 }

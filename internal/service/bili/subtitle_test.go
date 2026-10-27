@@ -88,7 +88,7 @@ func TestPlayURLHandsBackTheSubtitleItWasGiven(t *testing.T) {
 		}},
 	}))
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestTheSecondSubtitleAddressIsKeptToo(t *testing.T) {
 		}},
 	}))
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestNoSubtitleMeansNoAddress(t *testing.T) {
 		}, map[string]any{"subtitles": []any{map[string]any{"subtitle_url": ""}}})},
 	} {
 		cli := subtitleClient(t, c.body)
-		ref, err := cli.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+		ref, err := cli.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +190,7 @@ func TestAnAddressThatIsNotAnAddressIsIgnored(t *testing.T) {
 		"subtitles": []any{map[string]any{"subtitle_url": "/bfs/ai_subtitle/prod/one.json"}},
 	}))
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}

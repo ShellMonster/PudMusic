@@ -388,7 +388,14 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	// 摆一句自己的话（`suggestFailedNote`），而不是空着——空着的话「B 站没给
 	// 联想」和「这一趟没拉到」在画面上长得一模一样。
 	failed := state.Failed && len(terms) == 0
-	if !showHistory && len(terms) == 0 && !failed {
+	// 框里还没敲字：多一档「大家在听」（热榜前几首），免得面板空着。敲了字就是联想的天下。
+	var hot []string
+	if strings.TrimSpace(s.searchKeyword) == "" {
+		rec := s.app.RecommendOf()
+		rec.RefreshHotSongs(s.wake.invalidate)
+		hot = rec.HotSongTitles()
+	}
+	if !showHistory && len(terms) == 0 && !failed && len(hot) == 0 {
 		// 面板**还不存在**（两档都空着）：等有内容了、它第一次出现在画面上，
 		// 那一下才是「进场」。
 		//
@@ -476,6 +483,12 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
 					s.viewSuggestTerms(c, terms, failed)
+				}
+				if len(hot) > 0 && len(terms) == 0 && !failed {
+					if showHistory {
+						ui.Box(c).FillWidth().Height(suggestTermsGap)
+					}
+					s.viewSuggestHot(c, hot)
 				}
 			})
 			s.trackScrollbar(suggestScroll)

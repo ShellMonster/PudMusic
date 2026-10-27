@@ -1584,17 +1584,17 @@ var Items = []Item{
 		// 一个「等够了就当它失败」的上限。于是用户面对的是一个不动的界面和
 		// 一片沉默——比「报错」更糟。
 		//
-		// 这一组盯三件事：**有反馈**（界面上说在取流）、**有上限**（超时按失败
-		// 处理，给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
+		// 这一组盯三件事：**有反馈**（取流时播放键上有那一圈光，票 #581 之后
+		// 界面上不再有「正在取流」的文字）、**有上限**（超时按失败处理，
+		// 给一句能看懂的话）、**有痕迹**（代次变了和失败都写进日志，
 		// 而日志真的落在文件里）。
-		Spec: "点了歌一直不开始：界面上说在取流、超过阈值按失败处理、代次变了和失败都写进日志",
+		Spec: "点了歌一直不开始：取流时播放键上有光圈、超过阈值按失败处理、代次变了和失败都写进日志",
 		Tests: []string{
 			"TestAPlayThatNeverStartsTurnsIntoASentence",
 			"TestAnotherSongsFailureDoesNotCancelTheWatchdog",
 			"TestTheDiscardedPlayIsWrittenDown",
 			"TestTheFailureIsWrittenDown",
-			"TestThePlayBarSaysItIsLoading",
-			"TestTheLoadingLineHasASpinner",
+			"TestThePlayBarStaysQuietWhileLoading",
 			"TestThePauseKeyIsStillThereWhileLoading",
 			"TestAFailedPlayGivesASentenceInsteadOfASpinner",
 			"TestTheFailureSentenceFitsOnOneLine",
@@ -2589,6 +2589,42 @@ var Items = []Item{
 			// 「从侧栏移除」要清的是**它所在的那一组**（否则提示就是谎话）。
 			"TestForgettingClearsTheRowOutOfWhicheverGroupItIsIn",
 			"TestForgettingTakesTheRowOutOfBothGroups",
+		},
+	},
+	{
+		Category: HTTP,
+		// 弹幕这一条路（应用层 + 缓存那一层）：
+		//
+		//   - **代次**：换歌之后旧的那一趟回来时必须被丢掉——症状是「在听 B，
+		//     屏幕上滚着 A 的弹幕」，而弹幕盖住封面的时候本来就不好认。
+		//   - **防重入**：界面每一帧问一次，不挡住的话一次播放能发几百个请求
+		//     （B 站会风控，而症状是「怎么问不出弹幕」）。
+		//   - **缓存**：7 天之内再进是瞬时的（不发请求），过期了会重新拉。
+		//   - **没有 cid**：快照为空，且**一个请求都不发**（本地文件和音乐库条目
+		//     走这一支，而它们永远没有弹幕）。
+		Spec: "弹幕：换歌之后旧的那一趟作废、界面每帧问一次只发一趟、7 天内再进是瞬时的（不发请求）、没有 cid 时快照为空且不发任何请求",
+		Tests: []string{
+			"TestALateDanmakuFromTheOldSongNeverLands",
+			"TestEveryFrameAsksButOnlyOneGoesOut",
+			"TestTheSecondTimeIsInstant",
+			"TestAnExpiredCacheIsFetchedAgain",
+			"TestNoCidMeansNoSnapshotAndNoRequest",
+			"TestSevenDaysLaterItIsGone",
+			"TestTheFileIsNamedAfterTheBvidAndTheCid",
+			// 生产那一档（真 `bili.Client`）：前面那些都替掉了那一趟。
+			"TestTheProductionPathActuallyAsksBili",
+			// 端到端：cid 是取流那一趟问出来的（搜索结果那一路）。
+			"TestTheDanmakuComesForASongWhoseCidHadToBeAsked",
+			// 评审提的三条：
+			//  - 同一个 bvid 的新选择（cid 还没问出来）不许拿上一分 P 的弹幕
+			//  - 同一个 key 上慢的那一趟不许盖掉新写的那份缓存
+			//  - Close 之后缓存不再被写
+			"TestReviewUnresolvedSameBVidShowsThePreviousPartsDanmaku",
+			"TestReviewAStaleSameKeyFetchOverwritesTheFreshCache",
+			"TestReviewCloseStillWritesTheCache",
+			// 同一个 bvid 的**另一分 P** 的在途那一趟也不许把自己的 cid 写上
+			// （bvid 对得上不够——多 P 的投稿 bvid 是同一个）。
+			"TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid",
 		},
 	},
 	{
@@ -3823,12 +3859,12 @@ var Items = []Item{
 		// 白费了——**界面上看不出任何异样**。
 		Category: Play,
 		// 票 #366（2026-10-24）。
-		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动切歌重新取；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
+		Spec: "下一首的流地址在当前这首快结束时就备好（只解析地址，不预下载字节）；真播下一首不再重新取流；手动按下一首也吃备好的那一份（票 #581）；队列一改就作废；预取失败无声退回且不重试；地址快过期就放弃；暂停时不预取；备的和真播的是同一首（含随机模式）",
 		Tests: []string{
 			// 主线：备好的那一份在切歌那一刻**被用掉**（取流接口的次数停在 2）。
 			"TestTheNextTrackIsPreparedBeforeTheSwitch",
-			// 手动切歌重新取地址（次数到 3）。
-			"TestAManualSwitchResolvesTheAddressAgain",
+			// 手动按下一首吃备好的那一份（次数停在 2，票 #581）。
+			"TestAManualNextUsesThePreparedAddress",
 			// 队列一改 → 已备好的立刻作废（会重新备一份）。
 			"TestReorderingTheQueueThrowsThePreparedAddressAway",
 			// 失败无声退回（真播时按正常路径取一次），且不会每 50ms 重试。

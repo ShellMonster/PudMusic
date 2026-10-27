@@ -92,6 +92,14 @@ type emptyState struct {
 	// ⚠️ **它和「空」不是同一档东西，但走同一个出口**（`drawEmpty`）：那一句话
 	// （`Title`）在这一档是**转圈的无障碍名字**，不是画出来的一行字。
 	Loading bool
+	// Skeleton 在 Loading 之上再加一档：这一格画八行歌曲占位（扫光骨架屏），
+	// 而不是一枚转圈。那一句话（`Title`）仍是这一块的无障碍名字。
+	Skeleton bool
+}
+
+// skeletonState 是「列表首屏在拉」那一档：和 `loadingState` 同一个出口，画法是骨架屏。
+func skeletonState(text string) emptyState {
+	return emptyState{Title: text, Loading: true, Skeleton: true}
 }
 
 // loadingState 是「正在加载…」那一档。
@@ -140,6 +148,10 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 	if e.Loading {
 		// 「还在拉」那一档：一枚转圈，**不摆插画、不摆提示句**（理由见
 		// `emptyState.Loading`）。画法在 `loading.go` 的 `drawLoading`。
+		if e.Skeleton {
+			drawSkeletonRows(c, key, e.Title)
+			return
+		}
 		drawLoading(c, key, e.Title)
 		return
 	}
@@ -253,7 +265,7 @@ func (s *Shell) viewEmpty(c *ui.Context, key string, e emptyState) {
 // 的症状是「这一格用的是系统色」，和旁边的界面对不上。
 func (s *Shell) viewLoading(c *ui.Context, key, text string) {
 	s.applyFrameTheme(c)
-	drawEmpty(c, key, loadingState(text), emptyPagePad)
+	drawEmpty(c, key, skeletonState(text), emptyPagePad)
 }
 
 // loadingCell 是**列表里**「第一页在途」那一格的画法。
@@ -267,13 +279,13 @@ func (s *Shell) viewLoading(c *ui.Context, key, text string) {
 // 那一块里，四周全是行，留白大了就只剩字飘在当中（理由同 `emptyRowPad`）。
 func loadingCell(text string) func(c *ui.Context) {
 	return func(c *ui.Context) {
-		drawSkeletonRows(c, text)
+		drawSkeletonRows(c, "", text)
 	}
 }
 
 // skeletonRowH / skeletonRows 是列表首屏骨架屏的行高与行数（一屏大约放得下的量）。
 const (
-	skeletonRowH = 56
+	skeletonRowH = 64
 	skeletonRows = 8
 )
 
@@ -281,11 +293,27 @@ const (
 // docs/design-mockups/skeleton.png）。
 //
 // ⚠️ **text 是这一块的无障碍名字**（和转圈那一档同一句话），读屏软件与测试靠它认出
-// 「这一格在加载」。页面级首屏（`viewLoading`）仍是一枚转圈，没有改。
-func drawSkeletonRows(c *ui.Context, text string) {
-	ui.Column(c).FillWidth().Label(text).Children(func() {
+// 「这一格在加载」。页面级列表首屏（`viewLoading`、分页列表第一页）也画它；首页和本地音乐仍是转圈。
+func drawSkeletonRows(c *ui.Context, key, text string) {
+	col := ui.Column(c)
+	if key != "" {
+		col = col.Key(key)
+	}
+	col.FillWidth().Label(text).Children(func() {
 		for i := range skeletonRows {
 			skeleton.Row(c, "skel:"+strconv.Itoa(i), skeletonRowH)
+		}
+	})
+}
+
+// postSkeletons 是动态首屏骨架屏的条数。
+const postSkeletons = 3
+
+// drawPostSkeletons 画动态流「第一页在途」的骨架屏：几条动态占位。name 同 `drawSkeletonRows`。
+func drawPostSkeletons(c *ui.Context, key, text string) {
+	ui.Column(c).Key(key).FillWidth().Label(text).Children(func() {
+		for i := range postSkeletons {
+			skeleton.Post(c, "post:"+strconv.Itoa(i))
 		}
 	})
 }

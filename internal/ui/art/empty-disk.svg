@@ -1,17 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-  <g opacity="0.16">
-    <circle cx="120" cy="80" r="70"/>
-    <circle cx="120" cy="80" r="48" stroke-dasharray="4 9"/>
-  </g>
-  <g opacity="0.9">
-    <rect x="84" y="62" width="72" height="44" rx="10"/>
-    <path d="M84 88h72"/>
-  </g>
-  <g>
-    <circle cx="156" cy="52" r="22" fill="currentColor" fill-opacity="0.16"/>
-    <path d="M148 54V42l12-3v12"/>
-    <circle cx="146" cy="54" r="3.2" fill="currentColor" stroke="none"/>
-    <circle cx="158" cy="51" r="3.2" fill="currentColor" stroke="none"/>
-    <circle cx="140" cy="97" r="2.6" fill="currentColor" stroke="none"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 160" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">
+  <ellipse cx="120" cy="132" rx="78" ry="10" fill="currentColor" opacity="0.10" stroke="none"/>
+  <rect x="70" y="56" width="100" height="65" rx="8" fill="currentColor" opacity="0.18" stroke="none"/>
+  <path d="M70 72h100M84 54h72a8 8 0 0 1 8 8v59H76V62a8 8 0 0 1 8-8z" stroke-width="5" opacity="0.68"/>
+  <circle cx="120" cy="88" r="18" fill="currentColor" opacity="0.48" stroke="none"/>
+  <path d="M120 78v13l8 5" stroke-width="4" opacity="0.72"/>
+  <path d="M88 42v18M79 51h18" stroke-width="4" opacity="0.48"/>
 </svg>
