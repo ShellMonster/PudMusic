@@ -20,17 +20,32 @@
 // 别名——两份口径迟早分叉，而分叉出来的那种差异极难查（一个界面上筛出三条，
 // 另一个筛出五条，而两边看着都「对」）。
 //
-// # 表里有什么
+// # 歌名是从标题里**认出来**的
 //
-//	歌名   清洗过的标题（`widgets/title` 那一套：去【】[]、去宣传词、括号里
-//	       的歌手名挪到副标题）
-//	别名   原标题（用户可能把整个标题抄进评论里）、去掉书名号的写法、
-//	       《》里那一段、标题里空格分开的那些段（宣传词那一段丢掉）
-//	简称   「歌手 - 歌名」那种标题里的**歌名那一段**
+// B 站音乐视频的标题有几种常见形状（每一种都把歌名藏在里面）：
 //
-// ⚠️ **简称认不准的时候宁可多算一条**：分不出「歌手 - 歌名」哪一段是歌名
-// 时，两段都进表——漏掉的症状是「筛选开着却一条都筛不出来」（用户以为这个
-// 功能坏了），而多算一条的症状只是多摆一条本来也在谈这首歌的评论。
+//	【晴天】              去掉方括号之后剩下「晴天」⇒ 歌名是「晴天」
+//	【周杰伦】晴天         去掉方括号之后剩下「周杰伦 晴天」⇒ 歌名是**后**
+//	                      一段（前面那一段是歌手）
+//	歌手《晴天》           书名号里那一段就是歌名
+//	周杰伦 - 晴天          破折号**后**那一段是歌名（前面那一段是署名）
+//	周杰伦-晴天            紧凑连字符，同上
+//	晴天：电影主题曲         冒号前后都可能是歌名（两种写法 B 站都有）
+//	Let It Go             英文标题：空格是**词的一部分**，不拆
+//
+// ⇒ `New` 按这些形状把歌名认出来，收进一张表；匹配是「小写 + 去空白 +
+// 子串」。
+//
+// ⚠️ **方括号只当分隔符**（`stripSpans` 去掉那对括号、留下里面的字）：B 站
+// 的方括号里装的多半是**歌手**（「【周杰伦】晴天」），把它当歌名的话，评论
+// 里写「周杰伦」就会被算成「提到了这首歌」。
+//
+// ⇒ 歌名从**去掉括号之后剩下的那一段**里认，而那一段的**最后一段**就是歌
+// 名（「【晴天】」⇒「晴天」；「【周杰伦】晴天」⇒「晴天」）。
+//
+// ⚠️ **宁可多算一条，也不要一条都找不到**：漏掉的症状是「筛选开着却一条都
+// 筛不出来」（用户以为这个功能坏了），而多算一条的症状只是多摆一条本来也
+// 在谈这首歌的评论。
 package songname
 
 import (
@@ -68,9 +83,12 @@ func New(rawTitle, artist string) Table {
 			return
 		}
 		k := normalize(s)
-		// ⚠️ **一个字的别名不收**：一个字的歌名会命中满屏的评论（正文里
-		// 到处是那个字），而筛选出来的那些跟「提到这首歌」没关系。
-		if utf8.RuneCountInString(k) < 2 {
+		if k == "" {
+			return
+		}
+		// ⚠️ **一个字的别名**：汉字收（那是真歌名——《鱼》《光》），拉丁字母
+		// 不收（一个字母会命中满屏的评论，而那不是歌名）。
+		if utf8.RuneCountInString(k) < 2 && !isHanRune(k) {
 			return
 		}
 		for _, old := range t.keys {
@@ -84,52 +102,34 @@ func New(rawTitle, artist string) Table {
 
 	cleaned := tclean.Clean(rawTitle)
 	hints := artistHints(artist, cleaned.Extra)
-	// 歌名：清洗过的那一份（界面上摆的就是它）。
+
+	// ① 《歌名》：「歌手《歌名》」里那一段就是歌名。
+	//
+	// ⚠️ **书名号里装的几乎总是歌名**（而【】里装的常常是歌手），所以这一档
+	// 不看别的——它就是歌名。
+	for _, s := range bookSpans(rawTitle) {
+		if tclean.IsPromoOnly(s) || isQualifier(s) {
+			continue
+		}
+		add(s)
+	}
+
+	// ② 去掉各种括号之后剩下那一段里的歌名。
+	//
+	// ⚠️ **方括号只当分隔符**（`stripSpans` 去掉那对括号、留下里面的字）：
+	// B 站的方括号里装的多半是**歌手**（「【周杰伦】晴天」），把它当歌名
+	// 的话，评论里写「周杰伦」就会被算成「提到了这首歌」。
+	//
+	// ⇒ 歌名从**去掉括号之后剩下的那一段**里认，而那一段的**最后一段**就是
+	// 歌名（「【晴天】」⇒「晴天」；「【周杰伦】晴天」⇒「晴天」）。
+	plain := stripSpans(rawTitle)
+	for _, s := range songSegments(plain, hints) {
+		add(s)
+	}
+
+	// ③ 清洗过的标题与原标题：用户可能把整个标题抄进评论里。
 	add(cleaned.Title)
-	// 别名：原标题（用户可能把整个标题抄进评论里）。
 	add(rawTitle)
-	// 别名：去掉书名号那一层（「《晴天》」→「晴天」）。
-	add(stripMarks(cleaned.Title))
-	add(stripMarks(rawTitle))
-	// 别名：《》/「」里那一段（「周杰伦《晴天》」里的「晴天」）。
-	for _, inner := range markedSpans(cleaned.Title) {
-		add(inner)
-	}
-	for _, inner := range markedSpans(rawTitle) {
-		add(inner)
-	}
-	// 简称：「歌手 - 歌名」那种形状里的歌名那一段。
-	//
-	// ⚠️ **这一段不收英文**：英文标题里的空格是**词的一部分**（"Let It Go"
-	// 拆成 "Go" 之后，「good」那种评论也会命中）。
-	for _, seg := range splitDash(cleaned.Title) {
-		// 歌手那一段不是歌名（评论里写「周杰伦」不等于提到「晴天」）。
-		if isArtist(seg, hints) {
-			continue
-		}
-		// 「官方MV」那一段是宣传词（宣传词那张表在 `widgets/title` 里，
-		// 别处不抄第二份）。
-		if tclean.IsPromoOnly(seg) {
-			continue
-		}
-		add(seg)
-	}
-	// 别名：标题里**空格分开的**那些段（「官方MV 晴天」里的「晴天」）。
-	//
-	// ⚠️ **中文标题里的空格是分隔符，英文标题里的空格是词的一部分**——所以
-	// 这一档只收**含汉字**的那些段（理由同上面那一条）。
-	for _, seg := range splitSpaces(cleaned.Title) {
-		if isArtist(seg, hints) {
-			continue
-		}
-		if tclean.IsPromoOnly(seg) {
-			continue
-		}
-		if !hasHan(seg) {
-			continue
-		}
-		add(seg)
-	}
 	return t
 }
 
@@ -162,6 +162,200 @@ func (t Table) Empty() bool { return len(t.keys) == 0 }
 // Forms 是别名表里的那些写法（原始写法，给人看的）。
 func (t Table) Forms() []string { return t.forms }
 
+// songSegments 从「标题去掉各种括号之后的那一段」里取出**歌名那几段**。
+//
+// ⚠️ **三种分隔符三种取法**（B 站的标题语法）：
+//
+//	破折号「歌手 - 歌名」  歌名在**后**那一段——前面那一段是署名，而提到
+//	                      歌手不等于提到这首歌（票 #574 的评审：提到「周杰
+//	                      伦」的那些评论不该被算成提到了「晴天」）。
+//	冒号「歌名：说明」      两侧**都**可能是歌名（「歌名：说明」与「歌手：
+//	                      歌名」两种写法 B 站都有）⇒ 两侧都当候选，宁可多
+//	                      算一条，也不要一条都找不到。
+//	空白「官方MV 歌名」    歌名在**后**那一段。
+func songSegments(plain string, hints []string) []string {
+	s := strings.TrimSpace(plain)
+	if s == "" {
+		return nil
+	}
+	if head, tail, ok := cutSep(s, dashSeps, true); ok {
+		if got := plainSegments(tail, hints); len(got) > 0 {
+			return got
+		}
+		// 「晴天 - 官方MV」那一档：后一段全是宣传词 ⇒ 回前一段。
+		if got := plainSegments(head, hints); len(got) > 0 {
+			return got
+		}
+		return nil
+	}
+	if head, tail, ok := cutSep(s, colonSeps, false); ok {
+		got := plainSegments(head, hints)
+		return append(got, plainSegments(tail, hints)...)
+	}
+	return plainSegments(s, hints)
+}
+
+// plainSegments 把一段文字拆成候选，并去掉宣传词、歌手名与版本说明。
+func plainSegments(s string, hints []string) []string {
+	var kept []string
+	for _, seg := range strings.Fields(s) {
+		if tclean.IsPromoOnly(seg) || isQualifier(seg) {
+			continue
+		}
+		if isArtist(seg, hints) {
+			continue
+		}
+		kept = append(kept, seg)
+	}
+	if len(kept) == 0 {
+		return nil
+	}
+	// ⚠️ **全英文的时候空格是词的一部分**（"Let It Go" 拆成 "Go" 之后，
+	// 「good」那种评论也会命中）⇒ 整段就是歌名。
+	if !anyHan(kept) {
+		return []string{strings.Join(kept, " ")}
+	}
+	// 中文标题里的空格是分隔符（「官方MV 晴天」「歌手 歌名」）⇒ 歌名是**后**
+	// 那一段。
+	return []string{kept[len(kept)-1]}
+}
+
+// dashSeps 是「标题里分隔两段」的那些破折号。
+//
+// ⚠️ **紧凑的连字符也算**（"周杰伦-晴天"）：那是 B 站上最常见的写法之一。
+var dashSeps = []string{" - ", " – ", " — ", "－", "-", "–", "—"}
+
+// colonSeps 是「标题里分隔两段」的那些冒号。
+var colonSeps = []string{"：", ":"}
+
+// cutSep 在分隔符那一处把 s 切成两段。
+//
+// ⚠️ **只有汉字标题才切**：英文标题里的连字符和冒号是**名字的一部分**
+// （"Rock-N-Roll"、"Let It Go: Official"），拆开之后 "Roll" / "Official"
+// 会变成两条别名（而正文里一个 "roll" 满屏都是）。
+//
+// ⚠️ **fromEnd 说的是取哪一个**：破折号取**最后**那一处（"歌手 - 歌名"），
+// 冒号取**最前**那一处（"歌名：说明：更多"）。
+func cutSep(s string, seps []string, fromEnd bool) (head, tail string, ok bool) {
+	idx := -1
+	sep := ""
+	for _, sp := range seps {
+		i := strings.Index(s, sp)
+		if fromEnd {
+			i = strings.LastIndex(s, sp)
+		}
+		if i < 0 {
+			continue
+		}
+		if idx < 0 || (fromEnd && i > idx) || (!fromEnd && i < idx) {
+			idx, sep = i, sp
+		}
+	}
+	if idx < 0 {
+		return "", "", false
+	}
+	head = strings.TrimSpace(s[:idx])
+	tail = strings.TrimSpace(s[idx+len(sep):])
+	if !hasHan(head) && !hasHan(tail) {
+		return "", "", false
+	}
+	return head, tail, true
+}
+
+// spanPairs 是标题里那些成对的括号。
+var spanPairs = []struct{ open, close string }{
+	{"【", "】"}, {"[", "]"},
+	{"（", "）"}, {"(", ")"},
+	{"《", "》"}, {"「", "」"}, {"『", "』"},
+}
+
+// bookSpans 是「书名号」里那些段（「歌手《晴天》」里的「晴天」）。
+//
+// ⚠️ **它认的是《》「」『』**：中文歌名常这么摆，而用户在评论里写的是里面
+// 那一段。
+func bookSpans(s string) []string {
+	var out []string
+	for _, pair := range []struct{ open, close string }{
+		{"《", "》"}, {"「", "」"}, {"『", "』"},
+	} {
+		out = append(out, spansOf(s, pair.open, pair.close)...)
+	}
+	return out
+}
+
+// spansOf 取出 open/close 之间那些段。
+func spansOf(s, open, close string) []string {
+	var out []string
+	rest := s
+	for {
+		i := strings.Index(rest, open)
+		if i < 0 {
+			break
+		}
+		rest = rest[i+len(open):]
+		j := strings.Index(rest, close)
+		if j < 0 {
+			break
+		}
+		inner := strings.TrimSpace(rest[:j])
+		if inner != "" {
+			out = append(out, inner)
+		}
+		rest = rest[j+len(close):]
+	}
+	return out
+}
+
+// stripSpans 把标题里那些成对的括号**去掉**（**内容留着**）。
+//
+// ⚠️ **内容留着是故意的**：方括号里那一段（「【周杰伦】」）有可能是**歌名**
+// （「【晴天】」）——真正把它剔掉的是后面那一步（「那一段的最后一段就是歌
+// 名」与「版本说明那一族不算歌名」）。
+//
+// ⚠️ **圆括号也去**：「晴天（Live版）」去掉括号之后是「晴天 Live版」，而
+// 「Live版」是版本说明（`isQualifier`）⇒ 剩下的就是歌名。
+func stripSpans(s string) string {
+	for _, pair := range spanPairs {
+		s = strings.ReplaceAll(s, pair.open, " ")
+		s = strings.ReplaceAll(s, pair.close, " ")
+	}
+	return strings.TrimSpace(s)
+}
+
+// qualifiers 是「版本说明 / 副标题」那一族（「纯音乐版」「现场版」「电影主题
+// 曲」「副标题」…）。
+//
+// ⚠️ **它们不是歌名**：标题写成「歌名 纯音乐版」的时候，歌名是前面那一段。
+var qualifiers = []string{
+	"版", "现场", "live", "纯音乐", "伴奏", "原声", "片尾", "片头", "翻唱",
+	"钢琴", "二胡", "弦乐", "吉他", "cover", "remix", "official", "字幕",
+	"歌词", "纯享", "instrumental", "demo", "试听",
+	"主题曲", "插曲", "片尾曲", "片头曲", "原声带", "副标题", "说明",
+}
+
+// isQualifier 报这一段是不是版本说明那一族。
+//
+// ⚠️ **带后缀的那一档只认短的**（5 个字以内）：「告白气球新版」是**歌名的一
+// 部分**，不是说明——而子串匹配照样能命中「告白气球」那一条（"告白气球" ⊂
+// "告白气球新版"）。
+func isQualifier(s string) bool {
+	l := strings.ToLower(strings.TrimSpace(s))
+	if l == "" {
+		return false
+	}
+	for _, q := range qualifiers {
+		if l == q {
+			return true
+		}
+	}
+	for _, suf := range []string{"版", "主题曲", "插曲", "原声带", "副标题"} {
+		if strings.HasSuffix(l, suf) && utf8.RuneCountInString(l) <= 5 {
+			return true
+		}
+	}
+	return false
+}
+
 // normalize 是「匹配用的写法」：小写 + 去掉空白。
 //
 // ⚠️ **去空白是有意的**：歌名「Let It Go」在评论里常被写成「letitgo」，而
@@ -178,89 +372,6 @@ func normalize(s string) string {
 	return b.String()
 }
 
-// stripMarks 去掉书名号和引号那一层。
-//
-// ⚠️ **它不去【】**：那是 `widgets/title` 的活（那一层去掉的是「视频的痕迹」
-// 和「宣传词」，而这里是「用户抄进评论里的写法」）。
-func stripMarks(s string) string {
-	return strings.Map(func(r rune) rune {
-		switch r {
-		case '《', '》', '「', '」', '『', '』', '“', '”', '‘', '’', '"', '\'':
-			return -1
-		}
-		return r
-	}, s)
-}
-
-// dashSeps 是「标题里分隔两段」的那些写法。
-//
-// ⚠️ **不带空格的连字符不算**：「Rock-N-Roll」拆成三段之后，「N」会变成
-// 一条别名（而正文里一个「n」满屏都是）。
-var dashSeps = []string{" - ", " – ", " — ", "－"}
-
-// splitDash 按分隔符把标题拆成几段。
-//
-// ⚠️ **拆不出两段就返回 nil**：那一句不是「歌手 - 歌名」那种形状，没有
-// 简称可认。
-func splitDash(s string) []string {
-	for _, sep := range dashSeps {
-		if !strings.Contains(s, sep) {
-			continue
-		}
-		parts := strings.Split(s, sep)
-		out := make([]string, 0, len(parts))
-		for _, p := range parts {
-			p = strings.TrimSpace(p)
-			if p != "" {
-				out = append(out, p)
-			}
-		}
-		if len(out) >= 2 {
-			return out
-		}
-	}
-	return nil
-}
-
-// splitSpaces 按空白把标题拆成几段。
-//
-// ⚠️ **它拆的是空白，不是词**：中文标题里的空格是分隔符（「官方MV 晴天」），
-// 而英文标题里的空格是词的一部分（"Let It Go"）——所以调用方只收含汉字的
-// 那些段（见 `New`）。
-func splitSpaces(s string) []string {
-	return strings.Fields(s)
-}
-
-// markedSpans 取出书名号里那些段（「周杰伦《晴天》」里的「晴天」）。
-//
-// ⚠️ **它认的是《》和「」**：中文歌名常这么摆，而用户在评论里写的是里面
-// 那一段。
-func markedSpans(s string) []string {
-	var out []string
-	for _, pair := range []struct{ open, close string }{
-		{"《", "》"}, {"「", "」"}, {"『", "』"},
-	} {
-		rest := s
-		for {
-			i := strings.Index(rest, pair.open)
-			if i < 0 {
-				break
-			}
-			rest = rest[i+len(pair.open):]
-			j := strings.Index(rest, pair.close)
-			if j < 0 {
-				break
-			}
-			inner := strings.TrimSpace(rest[:j])
-			if inner != "" {
-				out = append(out, inner)
-			}
-			rest = rest[j+len(pair.close):]
-		}
-	}
-	return out
-}
-
 // hasHan 报这一段里有没有汉字。
 func hasHan(s string) bool {
 	for _, r := range s {
@@ -271,10 +382,26 @@ func hasHan(s string) bool {
 	return false
 }
 
+// anyHan 报这几段里有没有汉字。
+func anyHan(segs []string) bool {
+	for _, s := range segs {
+		if hasHan(s) {
+			return true
+		}
+	}
+	return false
+}
+
+// isHanRune 报这个写法是不是**一个汉字**。
+func isHanRune(s string) bool {
+	r, size := utf8.DecodeRuneInString(s)
+	return size == len(s) && unicode.Is(unicode.Han, r)
+}
+
 // artistHints 是「这一首的艺人」那几个可能的写法。
 //
 // ⚠️ **两处**：条目自己的艺人（音乐库音频是歌手，mv 是 UP 主），加上标题
-// 方括号里挪出来的那一段（`widgets/title` 的 `Extra`，多半也是歌手）。
+// 方括号里挪出来的那一段（`widgets/title` 那样拼的）。
 func artistHints(artist, extra string) []string {
 	var out []string
 	add := func(s string) {

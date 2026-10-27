@@ -685,13 +685,20 @@ var Items = []Item{
 		//	        （`internal/ui/songname`），界面层不自己再拼一份。
 		//	零命中 「这个视频的 N 条评论里没有提到这首歌」这句话**只有在翻完
 		//	        之后**才说得出来（只翻了第一页就说「没有」，那是撒谎）⇒
-		//	        零命中时界面自己把这一首的评论翻完（翻到 B 站说到底了）。
-		Spec: "评论页 v2：只看提到歌名的评论这一枚开关默认关着；按歌名 + 别名表 + 简称筛正文；别名表只有一处（internal/ui/songname）；一条都没命中时说清「这个视频的 N 条评论里没有提到这首歌」（翻完之后才说），并给一条「看全部评论」的退路",
+		//	        零命中时界面自己把这一首的评论翻完（翻到**翻到的条数盖住
+		//	        B 站给的总数**为止——不是「B 站说到底了」为止：那一档
+		//	        它自己的总数可能还有十万条，而我们就翻到了十几条）。
+		//	楼中楼 楼中楼按**它自己的正文**留：主评论提到了而楼中楼没提到
+		//	        ⇒ 楼中楼不摆；只有楼中楼提到了 ⇒ 主评论照摆（上下文）。
+		Spec: "评论页 v2：只看提到歌名的评论这一枚开关默认关着；按歌名 + 别名表 + 简称筛正文；别名表只有一处（internal/ui/songname），常见标题形状（【晴天】/「歌手 - 歌名」/紧凑连字符/冒号）都认得出歌名，歌手那一段不进表；楼中楼按各自的正文留；一条都没命中时说清「这个视频的 N 条评论里没有提到这首歌」（查完之后才说，查没完只说「已翻到的 N 条」），并给一条「看全部评论」的退路",
 		Tests: []string{
 			"TestTheMentionFilterIsOffByDefault",
 			"TestTheMentionFilterShowsOnlyTheCommentsThatMentionTheSong",
+			"TestTheMentionFilterFindsTheSongNameInsideTheTitle",
 			"TestTheMentionFilterSaysThatNobodyMentionedTheSong",
+			"TestTheMentionFilterDoesNotClaimToHaveCheckedEveryComment",
 			"TestTheMentionFilterLooksThroughTheWholeVideoBeforeItSaysNobodyDid",
+			"TestTheMentionFilterAlsoLooksAtTheReplies",
 			"TestTheMentionFilterCanBeTurnedOffFromTheEmptyState",
 			"TestTheMentionFilterSwitchSitsAtTheRightEdge",
 			"TestRenderCommentsMentionFilterShots",
@@ -699,9 +706,16 @@ var Items = []Item{
 			"TestThePlainTitleIsAlsoInTheTable",
 			"TestTheBookTitleMarksAreStripped",
 			"TestTheShortNameOfAPlainTitleIsInTheTable",
+			"TestTheArtistSegmentIsNotAnAlias",
 			"TestTheArtistSegmentIsNotAnAliasWhenTheArtistIsKnown",
+			"TestTheBracketedSongNameIsInTheTable",
+			"TestTheBracketHoldsTheArtistWhenThereIsMoreThanIt",
+			"TestTheCompactDashTitleGivesTheSongName",
+			"TestTheColonTitleGivesTheSongName",
+			"TestTheEnglishTitleIsNotSplit",
 			"TestAPromoSegmentIsNotAnAlias",
 			"TestOneCharacterAliasesAreNotUsed",
+			"TestOneCharacterChineseSongNamesAreUsable",
 			"TestAnEmptyTitleGivesAnEmptyTable",
 			"TestTheBodyIsMatched",
 			"TestTheMatchIgnoresCaseAndSpaces",

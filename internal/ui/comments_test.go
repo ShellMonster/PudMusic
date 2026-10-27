@@ -68,6 +68,14 @@ type commentBili struct {
 	// 行身份就是 rpid（不去重的话同一个父节点下有两个一样的 key，框架直接
 	// panic）。
 	page2Raw []byte
+	// pageSeq 是「第二页、第三页、第四页…」（nil = 一直回第二页那一份）。
+	//
+	// ⚠️ **它是给「翻页那一族」用的**：默认那一档是「翻不动了」（第二页之后
+	// 一直是同一份 ⇒ 应用层那一档「无进展保护」会把它当成到底），而要验
+	// 「翻了好几十页」就得一份一份给不同的。
+	//
+	// ⚠️ **最后一份一直回**（列表比 `pageSeq` 长的时候）。
+	pageSeq [][]byte
 	// hold 非 nil 时，**第二页那一趟卡在这个闸门上**（用来验「正在拉」）。
 	hold chan struct{}
 	// calls 记着主列表那几趟的查询串。
@@ -113,6 +121,19 @@ func newCommentBili(t *testing.T, mainFile string) *commentBili {
 			raw = b.files[b.page2]
 			if b.page2Raw != nil {
 				raw = b.page2Raw
+			}
+			// ⚠️ **第三页往后按 `pageSeq` 给**：翻页请求的序号（第一趟翻页是 0）。
+			if n := len(b.pageSeq); n > 0 {
+				idx := 0
+				for _, c := range b.calls[:len(b.calls)-1] {
+					if c.Get("pagination_str") != "" {
+						idx++
+					}
+				}
+				if idx >= n {
+					idx = n - 1
+				}
+				raw = b.pageSeq[idx]
 			}
 			// ⚠️ **只有翻页那一趟卡闸门**：第一页必须回来（不然界面上是
 			// 「正在拉评论…」，而那条要验的是**末尾那一行**的样子。

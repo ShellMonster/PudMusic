@@ -6,8 +6,9 @@
 // 再拼一份歌名或别名——两份口径迟早分叉，而分叉出来的那种差异极难查（一个
 // 界面上筛出三条，另一个筛出五条，而两边看着都「对」）。
 //
-// ⇒ 这一族断的是那张表的**内容**：歌名在不在里面、歌手那一段在不在里面、
-// 宣传词那一段在不在里面，以及「一个字的别名」收不收。
+// ⇒ 这一族断的是那张表的**内容**：常见标题形状（【晴天】/「歌手 - 歌名」/
+// 紧凑连字符/冒号）里歌名认不认得出来、歌手那一段在不在里面、宣传词那一段
+// 在不在里面，以及「一个字的歌名」收不收。
 package songname
 
 import (
@@ -70,6 +71,23 @@ func TestTheShortNameOfAPlainTitleIsInTheTable(t *testing.T) {
 	}
 }
 
+// TestTheArtistSegmentIsNotAnAlias 断「破折号前那一段是署名，不进表」。
+//
+// 🔴 **提到歌手不等于提到这首歌**（票 #574 的评审）：`mv` 那一档的艺人栏是
+// **UP 主**，跟标题里的歌手没关系——所以认不出歌手的时候也不能把署名当歌名。
+func TestTheArtistSegmentIsNotAnAlias(t *testing.T) {
+	tab := New("周杰伦 - 晴天", "某个 UP 主")
+	if has(t, tab, "周杰伦") {
+		t.Errorf("表里有「周杰伦」——那是署名，不是歌名：%q", tab.Forms())
+	}
+	if tab.Mentions("周杰伦") {
+		t.Errorf("正文里只有「周杰伦」却命中了")
+	}
+	if !tab.Mentions("晴天真好听") {
+		t.Errorf("正文里明明有「晴天」，却没命中")
+	}
+}
+
 // TestTheArtistSegmentIsNotAnAliasWhenTheArtistIsKnown 断「认得出歌手的时候，
 // 歌手那一段不进表」。
 //
@@ -98,17 +116,112 @@ func TestAPromoSegmentIsNotAnAlias(t *testing.T) {
 	}
 }
 
-// TestOneCharacterAliasesAreNotUsed 断「一个字的别名不收」。
+// TestTheBracketedSongNameIsInTheTable 断「【晴天】」那一档。
 //
-// 🔴 **一个字的歌名会命中满屏的评论**：正文里到处是那个字，而筛出来的那些跟
-// 「提到这首歌」没关系。
+// 🔴 **方括号里那一段有时候就是歌名**（票 #574 的评审：「New("【晴天】") 只
+// 认出了「【晴天】」，正文里提到「晴天」的那一条被判成没提到」）。
+func TestTheBracketedSongNameIsInTheTable(t *testing.T) {
+	tab := New("【晴天】", "某个 UP 主")
+	if !has(t, tab, "晴天") {
+		t.Errorf("表里没有「晴天」：%q", tab.Forms())
+	}
+	if !tab.Mentions("晴天太好听了") {
+		t.Errorf("正文里明明有「晴天」，却没命中")
+	}
+}
+
+// TestTheBracketHoldsTheArtistWhenThereIsMoreThanIt 断「【周杰伦】晴天」那一档
+// 里方括号装的是歌手。
+//
+// 🔴 **方括号里是歌手的时候不能把它当歌名**：那会让「评论里写「周杰伦」」
+// 被算成「提到了这首歌」。
+func TestTheBracketHoldsTheArtistWhenThereIsMoreThanIt(t *testing.T) {
+	tab := New("【周杰伦】晴天", "某个 UP 主")
+	if has(t, tab, "周杰伦") {
+		t.Errorf("表里有「周杰伦」——那一段是歌手，不是歌名：%q", tab.Forms())
+	}
+	if !has(t, tab, "晴天") {
+		t.Errorf("表里没有「晴天」：%q", tab.Forms())
+	}
+}
+
+// TestTheCompactDashTitleGivesTheSongName 断「周杰伦-晴天」那一档。
+//
+// 🔴 **紧凑的连字符也是分隔符**（票 #574 的评审：「New("周杰伦-晴天") 只认出
+// 了整个标题」）。
+func TestTheCompactDashTitleGivesTheSongName(t *testing.T) {
+	tab := New("周杰伦-晴天", "某个 UP 主")
+	if !has(t, tab, "晴天") {
+		t.Errorf("表里没有「晴天」：%q", tab.Forms())
+	}
+	if has(t, tab, "周杰伦") {
+		t.Errorf("表里有「周杰伦」——那是署名，不是歌名：%q", tab.Forms())
+	}
+	if !tab.Mentions("晴天真好听") {
+		t.Errorf("正文里明明有「晴天」，却没命中")
+	}
+}
+
+// TestTheColonTitleGivesTheSongName 断「晴天：电影主题曲」那一档。
+//
+// 🔴 **冒号两侧都可能是歌名**（「歌名：说明」与「歌手：歌名」两种写法 B 站
+// 都有）⇒ 两侧都当候选，免得一条都找不到。
+//
+// ⚠️ **全角和半角两种冒号都算**（B 站上两种都有）。
+func TestTheColonTitleGivesTheSongName(t *testing.T) {
+	for _, title := range []string{"晴天：电影主题曲", "晴天:电影主题曲"} {
+		tab := New(title, "某个 UP 主")
+		if !has(t, tab, "晴天") {
+			t.Errorf("标题 %q 的表里没有「晴天」：%q", title, tab.Forms())
+		}
+		if !tab.Mentions("晴天的前奏一响就泪目") {
+			t.Errorf("标题 %q：正文里明明有「晴天」，却没命中", title)
+		}
+	}
+}
+
+// TestTheEnglishTitleIsNotSplit 断「英文标题的空格是词的一部分」。
+//
+// 🔴 **"Let It Go" 拆成 "Go" 之后，「good」那种评论也会命中**——所以英文标题
+// 不拆。
+func TestTheEnglishTitleIsNotSplit(t *testing.T) {
+	tab := New("Let It Go", "某个歌手")
+	if has(t, tab, "Go") {
+		t.Errorf("表里有「Go」——英文标题的空格是词的一部分：%q", tab.Forms())
+	}
+	if !has(t, tab, "Let It Go") {
+		t.Errorf("表里没有整个「Let It Go」：%q", tab.Forms())
+	}
+}
+
+// TestOneCharacterAliasesAreNotUsed 断「一个字的**拉丁字母**别名不收」。
+//
+// 🔴 **一个字母的标题会命中满屏的评论**：正文里到处是那个字母，而筛出来的那些
+// 跟「提到这首歌」没关系。
 func TestOneCharacterAliasesAreNotUsed(t *testing.T) {
 	tab := New("A", "某个 UP 主")
 	if !tab.Empty() {
-		t.Errorf("一个字的歌名进了表：%q", tab.Forms())
+		t.Errorf("一个字母的标题进了表：%q", tab.Forms())
 	}
 	if tab.Mentions("这是一个 A") {
-		t.Errorf("一个字的别名命中了正文")
+		t.Errorf("一个字母的别名命中了正文")
+	}
+}
+
+// TestOneCharacterChineseSongNamesAreUsable 断「一个字的**汉字**歌名收」。
+//
+// 🔴 **《鱼》《光》那样的歌名是真的**（票 #574 的评审：「New("鱼", "周深") 给出
+// 了空表，整个开关被按灰了」）。
+func TestOneCharacterChineseSongNamesAreUsable(t *testing.T) {
+	tab := New("鱼", "周深")
+	if tab.Empty() {
+		t.Fatalf("一个字的汉字歌名给出了空表")
+	}
+	if !has(t, tab, "鱼") {
+		t.Errorf("表里没有「鱼」：%q", tab.Forms())
+	}
+	if !tab.Mentions("这条鱼真好吃") {
+		t.Errorf("正文里明明有「鱼」，却没命中")
 	}
 }
 
@@ -139,7 +252,7 @@ func TestTheBodyIsMatched(t *testing.T) {
 // TestTheMatchIgnoresCaseAndSpaces 断「大小写和空格不算」。
 //
 // ⚠️ **英文歌名常被写成连着的**（「letitgo」），而中文标题里的空格也常是可有
-// 可无的（「大 鱼」）。
+// 无的（「大 鱼」）。
 func TestTheMatchIgnoresCaseAndSpaces(t *testing.T) {
 	tab := New("Let It Go", "某个歌手")
 	if !tab.Mentions("letitgo!!!") {

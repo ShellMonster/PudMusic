@@ -123,6 +123,26 @@ const (
 // ⚠️ **600 条 = 20 页**（一页 30 条，`internal/app` 那一档）。
 const commentsMentionScanMax = 600
 
+// commentsMentionCovered 报「这一首的评论我们已经查完了吗」。
+//
+// 🔴 **不能用「B 站说到底了」当查完了**（票 #574 的评审）：B 站说到底了只
+// 说的是「没有下一页了」，而它自己的总数（`cursor.all_count`）可能还有十万
+// 条——实测有一档是「翻了 12 条，B 站说到底了，而它给的总数是 184226」。
+// 那一档里说「这个视频的 184226 条评论里没有提到这首歌」是**撒谎**：我们只
+// 看过 12 条。
+//
+// ⇒ **查完的判据是「翻到的条数盖住了它给的总数」**：
+//
+//	给了总数   翻到的 >= 总数 ⇒ 查完了
+//	没给总数   B 站说到底了 ⇒ 查完了（它给 0 就是「还不知道有多少」，
+//	           而那时候「没有下一页」就是全部）
+func commentsMentionCovered(loaded int, allCount int64, hasMore bool) bool {
+	if allCount > 0 {
+		return int64(loaded) >= allCount
+	}
+	return !hasMore
+}
+
 // commentsPage 是评论页自己的一摊状态。
 //
 // ⚠️ **它挂在壳上而不是每帧新建**：列表的滚动位置、行身份、展开的楼中楼
@@ -180,6 +200,16 @@ type commentsPage struct {
 	hits int
 	// loaded 是「已经拿到多少条评论了」（这一页一共拿到了多少条）。
 	loaded int
+	// covered 是「这一首的评论我们已经查完了吗」。
+	//
+	// 🔴 **它是「那句『没有提到这首歌』能不能说」的判据**（票 #574 的评审）：
+	// B 站说「到底了」（`CommentsHasMore` 为假）**不等于**我们查完了——它
+	// 自己的总数（`cursor.all_count`）说还有十万条，而我们就翻到了 12 条
+	// （接口重复给同一批的时候，应用层那一档「无进展保护」会把它当成到底）。
+	//
+	// ⇒ 查完了才说那句完整的话，没查完只说「已翻到的 N 条评论里还没有提到
+	// 这首歌」（理由见 `commentsMentionCovered`）。
+	covered bool
 
 	// rows 是摊平之后的行：主评论 + 展开的楼中楼。
 	rows []commentRow
@@ -416,9 +446,14 @@ func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 // ⇒ 还在翻的时候说老实的那一句（「已翻到的 30 条评论里还没有提到这首歌」），
 // 翻完了才说那一句完整的话。
 //
-// ⚠️ **翻到上限（`commentsMentionScanMax`）也说不完整那一句**：那时候就实话
-// 实说「这一页最多翻 600 条评论，剩下的没翻」——说「还在往下翻」而其实已经
-// 停手了，用户会一直等下去。
+// ⚠️ **三种「没查完」各有一句**（票 #574 的评审）：
+//
+//	还在翻        「还在往下翻这一首的评论，翻到底才知道有没有」
+//	翻到上限      「这一页最多翻 600 条评论，剩下的没翻」
+//	B 站提前说到底 「B 站说这一页之后就没有了，可它给的总数是 N 条」
+//
+// ⚠️ **说「还在往下翻」而其实已经停手了，用户会一直等下去**——所以那三种
+// 得分开说。
 func (s *Shell) viewCommentsNoMention(c *ui.Context, p *commentsPage) {
 	// ⚠️ **「这个视频」还是「这一首」**：看的是这一条是什么条目——
 	// `mv` 那一档的评论是**这个视频**的，而音乐库音频那一档是**这一首**的
@@ -435,14 +470,20 @@ func (s *Shell) viewCommentsNoMention(c *ui.Context, p *commentsPage) {
 	showAll := &emptyAction{Label: "看全部评论", Do: func() {
 		p.mentionOnly = false
 	}}
-	if s.app.CommentsHasMore() {
-		// 还在翻：这一句只说**翻到的那几条**。
+	if !p.covered {
+		// 还没查完：这一句只说**翻到的那几条**。
 		//
-		// 🔴 **到了上限就实话实说**：说「还在往下翻」而其实已经停手了，用户
+		// ⚠️ **三种没查完各有一句**：说「还在往下翻」而其实已经停手了，用户
 		// 会一直等下去——而这一页等下去也不会有下文（上限就是上限）。
 		hint := "还在往下翻这一首的评论，翻到底才知道有没有"
-		if p.loaded >= commentsMentionScanMax {
+		switch {
+		case p.loaded >= commentsMentionScanMax:
 			hint = fmt.Sprintf("这一页最多翻 %d 条评论，剩下的没翻", commentsMentionScanMax)
+		case !s.app.CommentsHasMore():
+			// 🔴 **B 站说到底了，而它自己的总数说还有更多**（接口重复给同一
+			// 批的时候就是这样）：那句话不能按「查完了」说。
+			hint = fmt.Sprintf("B 站说这一页之后就没有了，可它给的总数是 %d 条",
+				s.app.CommentsAllCount())
 		}
 		s.viewEmpty(c, "page:comments:nomention", emptyState{
 			Title: fmt.Sprintf("已翻到的 %d 条评论里还没有提到这首歌", p.loaded),
@@ -455,7 +496,7 @@ func (s *Shell) viewCommentsNoMention(c *ui.Context, p *commentsPage) {
 		})
 		return
 	}
-	// 翻完了：B 站给的评论总数就是这一首的条数（它给 0 就是还不知道）。
+	// 查完了：B 站给的评论总数就是这一首的条数（它给 0 就是还不知道）。
 	n := s.app.CommentsAllCount()
 	if n <= 0 {
 		n = int64(p.loaded)
@@ -1188,6 +1229,9 @@ func (s *Shell) syncComments(c *ui.Context) {
 	// 评论列表：问一次（`Comments()` 自己会保证在问），顺便把楼中楼也问上。
 	cm := s.app.Comments()
 	p.loaded = len(cm)
+	// 🔴 **查完了没有**：那句「这个视频的 N 条评论里没有提到这首歌」只有查完
+	// 了才说得出来（理由见 `commentsMentionCovered`）。
+	p.covered = commentsMentionCovered(len(cm), s.app.CommentsAllCount(), s.app.CommentsHasMore())
 	sig := 0
 	for _, root := range p.expandedRoots() {
 		sig += len(s.app.CommentReplies(root))
@@ -1235,7 +1279,11 @@ func (s *Shell) syncComments(c *ui.Context) {
 	// 🔴 **筛选开着而一条都没命中时，不走这一条**：那一档翻页是「筛选自己
 	// 在翻」（`commentsMentionScanMax` 那个上限），不是「用户滚到底了」——
 	// 两边都翻的话上限就是空的（列表空着，哨兵那一行一直看得见 ⇒ 一直翻）。
-	scanning := p.mentionOnly && p.hits == 0 && !p.names.Empty()
+	//
+	// ⚠️ **查完了就不翻了**：查完的判据是「翻到的条数盖住了 B 站给的总数」
+	// （`commentsMentionCovered`），不是「B 站说没有下一页了」——那一档说过
+	// 头的话，这一句就不诚实。
+	scanning := p.mentionOnly && p.hits == 0 && !p.names.Empty() && !p.covered
 	if !scanning {
 		first, last := p.state.Visible()
 		if list.DecideNextPage(st, first, last, len(p.rows)+1).Action == list.PagingLoadNext {
@@ -1267,8 +1315,15 @@ func (s *Shell) syncComments(c *ui.Context) {
 // 拿到的是**这个视频**的评论，里面大部分不是在聊这首歌（研究票 #537 报告
 // §4.1 实测）——而这一枚开关是用户自己挑出来的窄视图。
 //
-// ⚠️ **判的是主评论的正文**：楼中楼跟着它那条主评论走（父评论不摆，它的
-// 楼中楼也就没有摆的地方）。
+// 🔴 **楼中楼按它自己的正文判**（票 #574 的评审）：
+//
+//	主评论提到了、楼中楼没提到   楼中楼**不摆**（它跟这首歌没关系）
+//	主评论没提到、楼中楼提到了   主评论**照摆**（它是那段对话的上下文），
+//	                          摆的是那条提到了的楼中楼
+//
+// ⚠️ **没展开的主评论看不到它的楼中楼**：楼中楼是**展开的时候**才问的
+// （`replies` 那一趟请求），而问遍所有主评论的楼中楼就是几百趟请求（打的是
+// B 站的服务器）——所以没展开的那些只按主评论自己的正文判。
 //
 // ⚠️ **空表不筛**：这一首没有名字的时候（`songname.Table.Empty`）按下去只会
 // 把评论全筛掉，而界面上一句话都说不清为什么。
@@ -1278,11 +1333,31 @@ func (p *commentsPage) rebuildRows(cm []bili.Comment, replies func(int64) []bili
 	filter := p.mentionOnly && !p.names.Empty()
 	hits := 0
 	for _, c := range cm {
+		// 楼中楼：**展开了的才有**（没展开的那一条我们没问过它）。
+		var rs []bili.Comment
+		if p.expanded[c.Rpid] {
+			rs = replies(c.Rpid)
+		}
+		// ⚠️ **筛选开着的时候，楼中楼按它自己的正文留**（票 #574 的评审）。
+		kept := rs
+		rootHit := true
 		if filter {
-			if !p.names.Mentions(c.Message) {
+			rootHit = p.names.Mentions(c.Message)
+			kept = nil
+			for _, r := range rs {
+				if p.names.Mentions(r.Message) {
+					kept = append(kept, r)
+					hits++
+				}
+			}
+			// 🔴 **只有楼中楼提到了，主评论也照摆**：它是那段对话的上下文，
+			// 而整条藏起来的话，用户看不到「有人在这条下面提到了这首歌」。
+			if !rootHit && len(kept) == 0 {
 				continue
 			}
-			hits++
+			if rootHit {
+				hits++
+			}
 		}
 		key := commentRowKey(c.Rpid, false)
 		if seen[key] {
@@ -1290,15 +1365,13 @@ func (p *commentsPage) rebuildRows(cm []bili.Comment, replies func(int64) []bili
 		}
 		seen[key] = true
 		rows = append(rows, newCommentRow(c, false, 0))
-		if p.expanded[c.Rpid] {
-			for _, r := range replies(c.Rpid) {
-				key := commentRowKey(r.Rpid, true)
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				rows = append(rows, newCommentRow(r, true, c.Rpid))
+		for _, r := range kept {
+			key := commentRowKey(r.Rpid, true)
+			if seen[key] {
+				continue
 			}
+			seen[key] = true
+			rows = append(rows, newCommentRow(r, true, c.Rpid))
 		}
 	}
 	p.rows = rows
