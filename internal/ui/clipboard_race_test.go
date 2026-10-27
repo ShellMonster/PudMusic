@@ -23,7 +23,6 @@ package ui
 
 import (
 	"bytes"
-	"errors"
 	"image"
 	"image/color"
 	"image/png"
@@ -318,22 +317,125 @@ func TestAnEarlierCoverDoesNotOverwriteALaterCover(t *testing.T) {
 	}
 }
 
-// TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText 断**「已经进了写剪贴板
-// 那一步」的旧封面不会盖掉后来那一段文字**。
+// TestOnlyOneSectionRunsAtATimeOnTheMainThread 断**主线程是单线程的**。
 //
-// ⚠️ **这一条量的是另外两条量不到的那个缝隙**：前两条里，旧封面那一趟
-// **整个被作废了**（它在**写之前**就发现号过时了，于是什么都没写）。
-// 而这一条是**另一种交错**——旧封面那一趟**已经通过了那个检查、已经进了写
-// 剪贴板那一步**，而那一步**还没落地**：
+// ⚠️ **这一条量的是「串行」这个前提本身**：整个修法（「判据和写放进同一个
+// 主线程段」）**就靠这一条**——主线程是单线程的，所以同一时刻只有一段在跑，
+// 于是「判号」到「写」之间插不进另一次复制。
 //
-//	10:00:00  按「复制封面」
-//	10:00:01  旧封面通过了检查，进了写剪贴板那一步（**卡着**：那一步要走到
-//	          主线程，可能慢）
-//	10:00:02  按「复制歌曲信息」——**写完了**，剪贴板里是那段文字
-//	10:00:03  旧封面的那一步**落地**——剪贴板里又变成那张旧封面
+// ⚠️ **而这个前提是「模型」给的，不是「框架」给的**：框架那一档
+// （`mygo.RunOnMain`）在**主线程上直接执行**（`mygo/loop.go:94` 的
+// `isMainThread()` 短路），而在**后台**调它会**排队并等它跑完**——排的那条
+// 队列由**主线程**排空。所以「同一时刻只有一段在跑」这件事，取决于**执行段
+// 的那个线程只有一个**。
 //
-// 用户最后按的是文字，而剪贴板里是图。**「比过了号」不等于「写进去的时候
-// 仍然是那一档」**——中间还夹着一次真正的写（这正是评审指出来的那一处）。
+// ⚠️ **测试里怎么保证这一点**：假主线程（`mainThreadStub`）的**两档都拿同一
+// 把锁**——那把锁就是「单线程」在测试里的替身（见 `mainThreadStub` 的文件头）。
+func TestOnlyOneSectionRunsAtATimeOnTheMainThread(t *testing.T) {
+	main := newMainThreadStub(t)
+
+	// ⚠️ **第一段卡住**：它跑着的期间，第二段**进不来**。
+	arrived := make(chan struct{})
+	release := make(chan struct{})
+	firstDone := make(chan struct{})
+
+	go main.run(func() {
+		close(arrived)
+		<-release
+		close(firstDone)
+	})
+	<-arrived
+
+	// ⚠️ **第二段排进去**：它**排在第一段后面**，所以第一段不放行，它就
+	// 进不来——而这正是「串行」。
+	secondRan := make(chan struct{})
+	go main.run(func() { close(secondRan) })
+
+	select {
+	case <-secondRan:
+		t.Fatal("第一段还卡着，第二段却跑起来了——主线程不是单线程的，" +
+			"「判据和写放进同一段」这个修法的前提就不成立")
+	case <-time.After(200 * time.Millisecond):
+		// 正是要的样子：第二段进不来。
+	}
+
+	close(release)
+	<-firstDone
+	select {
+	case <-secondRan:
+	case <-time.After(10 * time.Second):
+		t.Fatal("第一段放行之后第二段没跑起来")
+	}
+}
+
+// TestTheMainThreadSectionGoesStraightThroughWhileABackgroundOneWaits 断**主线程
+// 档绕过队列、后台档排队**。
+//
+// ⚠️ **这个差别就是 F1 那个竞态的机制**：后台那一趟（封面）把段**投进队列**
+// ——它**还在排队**，没执行；而用户按文本走的是**主线程档**，那一档**绕过
+// 队列直接执行**——于是文本**先**落地，队列里那个旧封面的段**随后**才执行。
+//
+// ⚠️ **所以判据必须在那一段里**：若它在**投递之前**就判了（旧封面的号那时
+// 还是最新的），它执行时会把文本**覆盖掉**——见
+// `TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText`（那条测的就是
+// 「判据在段里」挡住了它）。
+//
+// ⚠️ **而这一条量的是「两档真的是两档」**：如果桩把两档**混成一样**（都排队），
+// 那个交错**压根不会发生**，而测它的那些用例**照样是绿的**——于是那条修法
+// 就成了一个没人验证过的传说。
+func TestTheMainThreadSectionGoesStraightThroughWhileABackgroundOneWaits(t *testing.T) {
+	main := newMainThreadStub(t)
+
+	// ⚠️ **后台那一段排进队列，然后被闸门卡住**：它**还在排队**，没执行。
+	release := main.blockNext()
+	backgroundDone := make(chan struct{})
+	go func() {
+		defer close(backgroundDone)
+		main.runBackground(func() {})
+	}()
+	waitFor(t, "后台那一段被取出来了", func() bool {
+		return main.queuedCount() >= 1
+	})
+
+	// ⚠️ **主线程档直接跑**：它**不等**队列里那一段。
+	mainThreadRan := make(chan struct{})
+	go func() {
+		main.run(func() { close(mainThreadRan) })
+	}()
+	select {
+	case <-mainThreadRan:
+		// 正是要的样子：主线程档绕过了队列。
+	case <-time.After(5 * time.Second):
+		t.Fatal("主线程档被队列里那一段挡住了——「主线程档绕过队列」" +
+			"这个前提不成立，而那个竞态的机制也就不成立")
+	}
+
+	release()
+	<-backgroundDone
+}
+
+// TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText 断**「已经进了主线程
+// 那一段」的旧封面不会盖掉后来那一段文字**。
+//
+// ⚠️ **这一条量的正是「判据在主线程段里」**：判据若在**投递之前**（段外），
+// 旧封面那时候还是最新的一档，于是它执行的时候会**把文本盖掉**——那就是
+// F1 那个 bug。
+//
+// # 场景怎么造的
+//
+// 假主线程（`mainThreadStub`）有**两档**（见它的文件头）：**主线程档**
+// 直接执行、**后台档**排队。而封面那一趟走的是**后台档**——于是它的段
+// **可以还在队列里排队**。闸门（`blockNext`）就卡在那个段的**开头**：
+//
+//	10:00:00  按「复制封面」——后台编 PNG，然后要把段投进主线程队列
+//	10:00:01  那一段**进了后台队列**，但被**闸门卡在段的开头**
+//	          （判号还没跑，写还没发生）——**它还在排队**
+//	10:00:02  用户按「复制歌曲信息」——**主线程档，绕过队列直接执行**
+//	          ⇒ 文本**先**落地
+//	10:00:03  放行闸门：旧封面的段这才执行（判号 → 写 → 说）
+//
+// ⚠️ **判据是「旧封面一档都不写」**：它执行的时候文本已经占过号了——所以它
+// **压根不写**。剪贴板里从头到尾**只有那段文字**。
 //
 // ⚠️ **判据是「一个格子」**：真的剪贴板是**一个**格子（后来的覆盖先来的），
 // 而 `clipStub` 把文本和图**分开记**，所以「图把文本盖掉了」在它那儿
@@ -345,66 +447,88 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	sh, tt, clip := copyShell(t, app.State{
+	// ⚠️ **自己拿一个假主线程**：这一条要**看着它**放行闸门，而基座里那个
+	// 拿不到闸门（见 `copyShellWith`）。
+	main := newMainThreadStub(t)
+	sh, tt, clip := copyShellWith(t, app.State{
 		HasTrack: true, Title: "一首歌", CoverURL: srv.URL + "/cover.png",
+	}, func(s *Shell) {
+		s.runOnMain = main.run
+		s.runOnMainBackground = main.runBackground
 	})
 
 	slot := &clipSlot{}
-	// ⚠️ **旧封面的那一步卡住**：模拟「那一步还没落地」的那一刻。
-	arrived := make(chan struct{})
-	release := make(chan struct{})
-	var once bool
-	sh.writeClipboardImage = func(data []byte) error {
-		if !once {
-			once = true
-			close(arrived)
-		}
-		<-release
-		slot.write("cover")
-		return clip.writeImage(data)
-	}
 	sh.writeClipboardText = func(text string) error {
 		slot.write("text")
 		return clip.writeText(text)
 	}
+	sh.writeClipboardImage = func(data []byte) error {
+		slot.write("cover")
+		return clip.writeImage(data)
+	}
 
-	// 第一次：复制封面（卡在写剪贴板那一步）。
+	// ⚠️ **闸门先装上**：它卡的是「**接下来那一段**」——而**接下来那一段就是
+	// 旧封面那一段**（封面那一趟是**唯一**走后台档的那一趟）。
+	//
+	// ⚠️ **为什么必须先装**：闸门在段**从队列里被取出来**的时候读，而那一段
+	// 是封面那一趟在**编完 PNG 之后**才投进来的——那时候再装，它已经跑过了。
+	release := main.blockNext()
+
+	// 第一次：复制封面（后台编完 PNG 之后要把段投进主线程队列）。
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
 	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
-	select {
-	case <-arrived:
-	case <-time.After(10 * time.Second):
-		t.Fatal("旧封面那一趟没进写剪贴板那一步")
-	}
 
-	// 第二次：复制歌曲信息（这一趟**写完了**）。
-	if err := tt.RightClick("当前封面"); err != nil {
-		t.Fatalf("右键不了封面：%v", err)
-	}
-	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
-		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
-	}
+	// ⚠️ **等封面那一趟的段被取出来**：它**卡在闸门上**，函数体还没跑——
+	// 所以判号和写都还没发生，而它**占着队列**。
+	waitFor(t, "封面那一趟的段被取出来了", func() bool {
+		return main.queuedCount() >= 1
+	})
+
+	// 第二次：复制歌曲信息（**用户最后按的是这个**）。
+	//
+	// ⚠️ **主线程档**：**绕过队列直接执行**——所以它**不等**旧封面那一段，
+	// 于是文本**先**落地。这正是生产上发生的事（菜单回调跑在主线程上，而
+	// `onMain` 在主线程上短路，见 `mygo/loop.go:94`）。
+	//
+	// ⚠️ **在测试自己的 goroutine 里调**：那正是「主线程档」（直接执行）。
+	//
+	// ⚠️ **不碰 Tester**：Tester 的 `Frame`/`Find` 读的是帧里的状态，而那一段
+	// 还卡着——从另一个 goroutine 碰它会有数据竞争。这里直接调**菜单回调
+	// 调的那一个函数**（`viewCopyMenu` → `copySongInfo`），而它就是生产上
+	// 「用户按下去」走的路。
+	sh.copySongInfo(app.State{HasTrack: true, Title: "一首歌"})
+
+	// ⚠️ **判据一：文本已经落地了**——它绕过了队列。
 	if got := slot.is(); got != "text" {
-		t.Fatalf("复制歌曲信息之后剪贴板里是 %q，want \"text\"", got)
+		t.Fatalf("复制歌曲信息之后剪贴板里是 %q，want \"text\""+
+			"（写的顺序：%v）", got, slot.writes())
 	}
 
-	// 放行旧封面那一步（它现在才落地——**盖掉**了刚才那段文字）。
-	close(release)
+	// 放行旧封面那一段：它现在才执行。
+	release()
+	// 等那一趟后台复制结束（它跑完时什么都没写——判号不通过）。
 	clip.waitDone(t, 10*time.Second)
 
-	// ⚠️ **判据是「最后留在剪贴板里的是哪一份」**：用户最后按的是文字，
-	// 所以最后必须是文字。
+	// ⚠️ **判据二：剪贴板里最后还是那段文字**——旧封面**没进来**。
 	if got := slot.is(); got != "text" {
 		t.Errorf("剪贴板里最后是 %q，want \"text\"（用户最后按的是歌曲信息）"+
 			"——写的顺序：%v", got, slot.writes())
 	}
-	// ⚠️ **过时的封面那一趟不许说「封面已复制」**：它收敛之后剪贴板里是**那段
-	// 文字**，而用户最后按的也是文字——说「封面已复制」是在骗人（用户会以为
-	// 剪贴板里是那张图，粘出去却是文字）。
+	// ⚠️ **判据三：旧封面那一趟**一个字都没写**——不是「写进去又被改回来」。
+	// 而「收敛」那一套会写**三次**（`[text cover text]`）——那正是它造出来的
+	// 窗口。
+	writes := slot.writes()
+	if len(writes) != 1 || writes[0] != "text" {
+		t.Errorf("写的顺序是 %v，want [text]——"+
+			"旧封面那一趟**一个字都不该写**（它执行的时候文本已经占过号了）", writes)
+	}
+	// ⚠️ **过时的封面那一趟不许说「封面已复制」**：剪贴板里是**那段文字**，
+	// 而用户最后按的也是文字——说「封面已复制」是在骗人（用户会以为剪贴板里
+	// 是那张图，粘出去却是文字）。
 	//
 	// ⚠️ **要画帧才看得到**：提示是**画面上的状态**，而 `HasText` 读的是
 	// **最后一帧**——那一趟跑完之后还没画过帧，所以这里先画几帧。
@@ -412,88 +536,6 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 	tt.Frame()
 	if tt.HasText("封面已复制") {
 		t.Errorf("过时的封面那一趟说了「封面已复制」——剪贴板里其实是歌曲信息"+
-			"（写的顺序：%v）", slot.writes())
+			"（写的顺序：%v）", writes)
 	}
-}
-
-// TestAFailedConvergeSaysSo 断**收敛写回去失败有看得见的反馈**。
-//
-// ⚠️ **这一条量的是「收敛的那一下写失败了」**：旧封面那一趟已经把剪贴板盖成
-// 了它那张过时的图，而**把后来那一份写回去**这一步失败了——于是剪贴板里留着
-// 的**不是用户要的那一份**，而用户刚被告知「歌曲信息已复制」。
-//
-// ⚠️ **这一种失败最静默**：画面上什么提示都没有，而用户粘出来的是一张他没
-// 要过的图。票面写着「不静默失败」，所以这一档**必须说一句话**。
-//
-// ⚠️ **它不能被「过时的那一趟不吵用户」那条门吞掉**：那一条挡的是「我这一趟
-// 过时了」（用户后来按了别的，那一档会自己说），而这一种是「**剪贴板里不是
-// 你要的那一份**」——两件事不一样。
-func TestAFailedConvergeSaysSo(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write(headerPNG(t, 8))
-	}))
-	defer srv.Close()
-
-	sh, tt, clip := copyShell(t, app.State{
-		HasTrack: true, Title: "一首歌", CoverURL: srv.URL + "/cover.png",
-	})
-
-	slot := &clipSlot{}
-	arrived := make(chan struct{})
-	release := make(chan struct{})
-	var once bool
-	// ⚠️ **旧封面那一步卡住**：模拟「那一步还没落地」的那一刻。
-	sh.writeClipboardImage = func(data []byte) error {
-		if !once {
-			once = true
-			close(arrived)
-		}
-		<-release
-		slot.write("cover")
-		return clip.writeImage(data)
-	}
-	// ⚠️ **文本的写：第一次成功、第二次失败**。
-	//
-	// ⚠️ **第二次是「收敛写回去」那一下**：收敛写回去的是**剪贴板里那一档**
-	// （也就是文本那一档）的写——而文本那一档的写函数**是在它自己被发起的
-	// 那一刻就被捕获了的**（`copySongInfo` 里 `write := s.writeClipboardText`
-	// 之后闭包才拿着它）。所以这一桩必须**在文本那一趟发起之前**就装好——
-	// 事后再改接缝不生效（那一趟闭包里拿的是旧的）。
-	var textWrites int
-	sh.writeClipboardText = func(text string) error {
-		textWrites++
-		if textWrites > 1 {
-			return errors.New("剪贴板写不进去了")
-		}
-		slot.write("text")
-		return clip.writeText(text)
-	}
-
-	if err := tt.RightClick("当前封面"); err != nil {
-		t.Fatalf("右键不了封面：%v", err)
-	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
-		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
-	}
-	select {
-	case <-arrived:
-	case <-time.After(10 * time.Second):
-		t.Fatal("旧封面那一趟没进写剪贴板那一步")
-	}
-
-	// 后按的那一次：复制歌曲信息。
-	if err := tt.RightClick("当前封面"); err != nil {
-		t.Fatalf("右键不了封面：%v", err)
-	}
-	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
-		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
-	}
-
-	close(release)
-	clip.waitDone(t, 10*time.Second)
-
-	// ⚠️ **判据：必须有看得见的反馈**（提示是画面上的状态，要画帧才看得到）。
-	waitFrames(t, tt, "收敛失败那一句说出来了", func() bool {
-		return tt.HasText("剪贴板里现在是别的内容")
-	})
 }

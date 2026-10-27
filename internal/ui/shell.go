@@ -216,6 +216,30 @@ type Shell struct {
 	// 而且它**会验一遍是不是 PNG**（`mygo/modules.go:184`）——不是 PNG 就返回错。
 	writeClipboardImage func(png []byte) error
 
+	// runOnMain 把一段代码放到**主线程**上执行。
+	//
+	// ⚠️ **默认是生产那一档**（`mygo.RunOnMain`）：它在主线程上**直接执行**
+	// （`mygo/loop.go:94` 的 `onMain` 里有 `isMainThread()` 短路，不排队也不
+	// 阻塞），从后台调则**排队并等它跑完**。
+	//
+	// ⚠️ **为什么「复制」这一族要它**：判号和写剪贴板必须**在同一个主线程
+	// 段里**（理由见 `clipboard.go` 的 `copyClipboard`）——主线程是**单线程
+	// 事件循环**，所以同一时刻只有一段在跑，两次写天然串行。
+	//
+	// ⚠️ **runOnMainBackground 是「从后台调」的那一档**：它**排队**并**等它跑
+	// 完**——而 **runOnMain 是「在主线程上调」的那一档**：它**直接执行**。这个
+	// 差别**就是那个竞态的机制**：后台那一趟（封面）把段投进队列（**还在排
+	// 队**），而用户按文本走的是主线程档，**绕过队列直接执行**——于是文本
+	// **先**落地，队列里那个旧封面的段**随后**才执行（理由见 `clipboard.go`）。
+	//
+	// ⚠️ **无头 Tester 里不能用生产那一档**：那一档会 `needsApp`（没跑过
+	// `App.Run` 就 panic，见 `mygo/app.go:128`），而从后台调它还会**等一个
+	// 永远不来的人**（无头环境里没有事件循环在排空那个队列）。所以测试把
+	// 它换成**一个假主线程**（见 `shelltest_test.go` 的 `mainThreadStub`）。
+	runOnMain func(fn func())
+	// runOnMainBackground 是「从后台调主线程」的那一档（排队 + 等）。
+	runOnMainBackground func(fn func())
+
 	// coverImage 是「拿这一张封面那张**能编码的图**」的那一下。
 	//
 	// ⚠️ **默认是空的**，空的时候走 `s.images.SourceImage`（也就是生产那一档）。

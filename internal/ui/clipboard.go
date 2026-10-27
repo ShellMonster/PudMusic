@@ -74,41 +74,6 @@ const copyNoCoverNote = "这一首没有封面，复制不了"
 // 读屏会把两个名字都念一遍——用户听到的是「当前封面，当前封面的操作」。
 const copyCoverActionsLabel = "当前封面的操作"
 
-// copyAction 是**一次复制动作**：它拿到的号，和把它的内容写进剪贴板的那一下。
-type copyAction struct {
-	// gen 是这次动作的号（见 `copyClipboard.next`）。
-	gen uint64
-	// write 把这一档的内容写进剪贴板（接缝那一下）。
-	write func() error
-}
-
-// copyConvergeError 是「**收敛**时把后来那一份写回去失败」。
-//
-// ⚠️ **它和「自己那一趟写失败」是两回事**，得分开说：
-//
-//   - 自己那一趟写失败 → 剪贴板里还是**原来那份**（用户没丢东西）→
-//     提示「复制不了…」；
-//   - 收敛写回去失败 → 剪贴板里**已经被我盖成过时的内容了**，而用户刚被
-//     告知「歌曲信息已复制」——**那句话这时是假的**。
-//
-// ⚠️ **所以这一档不能被「过时的那一趟不吵用户」那条门吞掉**：它说的不是
-// 「我这一趟过时了」，而是「剪贴板里现在留着的东西不是你以为的那一份」。
-// 票面写着「不静默失败」，而这一种失败**最静默**：画面上什么提示都没有，
-// 而用户粘出来的是一张他没要过的图。
-type copyConvergeError struct {
-	err error
-}
-
-func (e copyConvergeError) Error() string { return e.err.Error() }
-
-func (e copyConvergeError) Unwrap() error { return e.err }
-
-// isConvergeError 报 err 是不是「收敛写回去失败」。
-func isConvergeError(err error) bool {
-	var ce copyConvergeError
-	return errors.As(err, &ce)
-}
-
 // copyClipboard 是「复制」这一族**全进程一份**的状态。
 //
 // # 它挡的是什么
@@ -140,29 +105,38 @@ func isConvergeError(err error) bool {
 // 用户最后按的是文字，而剪贴板里是图。**「比过了」不等于「写进去的时候
 // 仍然是那一档」**——中间还有一次真正的写。
 //
-// # 怎么挡：**写之前比一比 + 写之后收敛**
+// # 怎么挡：**判据和写放进同一个主线程段**
+//
+// 主线程是**单线程事件循环** ⇒ 同一时刻只有一段在跑 ⇒ **两次写天然串行**。
+// 所以只要「比号」和「写」在**同一个主线程回调**里，过时的那一份就**根本
+// 不会落地**——而不是落地了再改回来。
 //
 // **写之前**比一比号（`isLatest`）：**不是最新的一趟什么都不写**——剪贴板里
 // **压根不出现**过时的东西（这是大多数情形：旧封面还在下网络，文本早就写完了）。
 //
-// 而**写之后**还要再比一次——因为「写」和「比」之间夹着一次真正的写（要走
-// 主线程，可能慢），而那一次里用户可能又按了别的。所以这里多记一样东西：
-// **剪贴板里现在是什么**（`committed`，连着写下它那一档的号）。每一趟写完
-// 之后**比一比**：
+// # 为什么前一版的「写之前比 + 写之后收敛」不够
 //
-//   - 自己那一趟的号 **≥** 剪贴板里那一档的号 → 我写的这一份就是最新的 →
-//     记下来，收工；
-//   - **小于** → 有一档**更新的**内容在我写之前就已经写进剪贴板了，而我这一趟
-//     **把它盖掉了** → **把那一档再写回去**（然后再比一次）。
+// 前一版是「写完了再比一次，发现盖掉了更新的就**写回去**」——而**那个修法
+// 自己造出了一个新的窗口**：盖掉的那一刻已经过去了，而剪贴板是**一个全局的
+// 格子**，别的应用可能正好在读它。于是用户粘出来的东西**在那一瞬间是错的**，
+// 而那一瞬间正是「收敛写回去」之前。
 //
-// ⚠️ **「盖掉了就写回去」**：盖掉的那一刻已经过去了，而剪贴板是**一个全局的
-// 格子**——别的应用可能正好在读它。要让**最后**留在剪贴板里的一定是用户最后
-// 按的那一份，只能这样收敛。
+// ⚠️ **所以那一整套删掉了**（`committed` 记账 + 收敛循环 + 收敛失败那句
+// 提示）：它造出的那个窗口（写进去 → 盖掉 → 再写回去，中间那一瞬间剪贴板里
+// 是过时的那一份）正是「判据和写放进同一段」要消除的东西。有了同一段，
+// **过时的那一份压根不会落地**——于是没有「要收敛回去」的东西，记账和循环
+// 一起没了。
 //
-// ⚠️ **收敛留着一小段「过时内容在剪贴板里」的窗口**（盖掉的那一下到写回去
-// 的那一下之间）：**握着锁写是走不通的**——框架那一档要走主线程并**等**它
-// （`mygo.Clipboard.Write` → `onMain`），而主线程可能正在按「复制歌曲信息」
-// 并**等同一把锁**，那就是死锁。所以这里**不握着锁写**，改用收敛。
+// # 为什么「握着锁写」也走不通
+//
+// 框架那一档要走主线程并**等**它（`mygo.Clipboard.Write` → `clipboardOnMain`
+// → `onMain`），而主线程可能正在按「复制歌曲信息」并**等同一把锁**——那就是
+// **死锁**。所以这里**不握着锁写**，而是**进主线程段**。
+//
+// ⚠️ **在主线程上调 `WriteImage` 不会死锁**：框架那一档走
+// `mygo.Clipboard.Write` → `clipboardOnMain` → `onMain`，而 `onMain` 在
+// **主线程上直接执行** `fn`（`mygo/loop.go:94` 的 `isMainThread()` 短路，
+// 不排队也不阻塞）。
 //
 // ⚠️ **文本那一档也要占号**：文本是同步写的（不等网络），但它**照样要作废
 // 前面那一趟封面**——否则「先按封面（慢）、再按文本」最后留着的还是那张图。
@@ -172,11 +146,6 @@ type copyClipboard struct {
 	mu sync.Mutex
 	// gen 是用户到这一刻为止一共按过几次复制。
 	gen uint64
-	// committed 是「剪贴板里现在是什么」：那一档，和写下它的那次动作的号。
-	//
-	// ⚠️ **零值是「还没有复制过」**（号 0）：于是第一次写的那一趟（号 ≥ 1）
-	// 一定赢——而它也确实该赢（剪贴板里本来就是空的）。
-	committed copyAction
 }
 
 // copyClip 是**全进程一份**的那一份状态。
@@ -209,57 +178,146 @@ func (c *copyClipboard) isLatest(gen uint64) bool {
 	return gen == c.gen
 }
 
-// commit 把这一档写进剪贴板，并且**保证最后留在剪贴板里的是用户最后按的那一份**。
+// onMain 是「**在主线程上调**主线程」的那一档：**直接执行**。
 //
-// 它报「**该不该说「已复制」**」——不是的话这一趟**什么也不说**（用户后来
-// 按了别的，那一档会自己说；这一趟说了就是骗人）。
+// ⚠️ **默认是生产那一档**（`mygo.RunOnMain`）：它在主线程上**直接执行**
+// （`mygo/loop.go:94` 的 `isMainThread()` 短路，不排队也不阻塞）。
+// 测试把它换成**一个假主线程**（见 `shelltest_test.go` 的 `mainThreadStub`）。
+func (s *Shell) onMain(fn func()) {
+	run := s.runOnMain
+	if run == nil {
+		run = systemRunOnMain
+	}
+	run(fn)
+}
+
+// onMainBackground 是「**从后台**调主线程」的那一档：**排队**，并等它跑完。
 //
-// ⚠️ **写的时候不握着那把锁**（理由见类型注释里那一条「不会死锁」）。
-func (c *copyClipboard) commit(a copyAction) (bool, error) {
-	// ⚠️ **mine 是「我这一趟」的号**：收敛会把 `a` 换成**别的**那一档（把它
-	// 写回去），所以最后回答「剪贴板里是不是我这一份」时要比的是 `mine`，
-	// 不是 `a.gen`——否则**过时的封面那一趟会以为自己赢了**（它收敛之后
-	// `a.gen` 是**新**那一档的号），于是弹一句「封面已复制」——而剪贴板里
-	// 其实是那段文字。
-	mine := a.gen
-	// ⚠️ **写之前先比一次**：不是最新的一趟**什么都不写**——剪贴板里压根不
-	// 出现过时的内容（这是大多数情形：旧封面还在下网络，而文本早就写完了）。
-	if !c.isLatest(mine) {
-		return false, nil
+// ⚠️ **它和 `onMain` 的差别就是 F1 那个竞态的机制**：框架的 `onMain` 在
+// **主线程上直接执行** `fn`（`mygo/loop.go:94` 的 `isMainThread()` 短路），
+// 而从后台调它会**投递到主线程的队列里**——那一档**还在排队**，没执行。
+//
+// 于是这一种交错是真的：
+//
+//	10:00:00  封面那一趟（后台）把段**投进队列**——还在排队
+//	10:00:01  用户按「复制歌曲信息」——**主线程档**，绕过队列直接执行
+//	          ⇒ 文本**先**落地
+//	10:00:02  主线程排空队列 ⇒ 旧封面的段执行
+//
+// ⚠️ **所以判据必须在那段里**：如果它在**投递之前**就判了（旧封面的号那时
+// 还是最新的），它执行的时候会把文本**覆盖掉**。而在段里判，那一段执行时
+// 文本已经占过号了——旧封面**压根不写**（见 `commitLater`）。
+func (s *Shell) onMainBackground(fn func()) {
+	run := s.runOnMainBackground
+	if run == nil {
+		run = systemRunOnMain
 	}
-	for {
-		err := a.write()
-		// ⚠️ **收敛写回去失败**：剪贴板里已经被我盖成过时的内容，而那份
-		// 内容**写不回去**了——用户粘出来的是一张他没要过的图。
-		//
-		// ⚠️ **它不能被「过时的那一趟不吵用户」那条门吞掉**：那一条挡的是
-		// 「我这一趟过时了」（用户后来按了别的，那一档会自己说），而这一种
-		// 是「**剪贴板里现在留着的东西不是你以为的那一份**」——票面写着
-		// 「不静默失败」，而这一种失败**最静默**：画面上什么提示都没有。
-		converging := a.gen != mine
-		c.mu.Lock()
-		if err != nil {
-			c.mu.Unlock()
-			if converging {
-				return false, copyConvergeError{err: err}
-			}
-			// 没写进去 → 剪贴板里还是原来那份 → 不用收敛。
-			return false, err
+	run(fn)
+}
+
+// systemRunOnMain 是生产那一档：把 fn 放到主线程上执行。
+//
+// ⚠️ **主线程上直接执行**（`mygo/loop.go:94` 的 `isMainThread()` 短路）——
+// 所以在主线程回调里调它**不会死锁**，而那正是「判据 + 写」能在同一个
+// 主线程段里做完的前提。
+func systemRunOnMain(fn func()) { mygo.RunOnMain(fn) }
+
+// commitNow 是「这一趟现在就要写」：**取号 + 写**都在**同一个主线程段**里。
+//
+// ⚠️ **为什么取号也在这一段里**：号记的是「用户按复制的次序」，而**按复制本身
+// 就是主线程上的事**（菜单回调跑在主线程上）。取号和写既然都在同一段里，那
+// 一段跑着的期间**不可能**插进另一次复制——于是「用户最后按的那一份」一定
+// 是剪贴板里最后那一份。
+//
+// ⚠️ **这一段里没有「判据」**：判据是「我是不是最新的一趟」，而**这一段跑着的
+// 期间没人能取新号**（取号也在这类段里）——所以这一段跑完时它**必然**还是
+// 最新的。判据只对**号早就取好了**的那一趟有意义（封面那一趟，见
+// `commitLater`）。
+//
+// ⚠️ **在主线程上调 `WriteText` 不会死锁**：框架那一档走
+// `mygo.Clipboard.Write` → `clipboardOnMain` → `onMain`，而 `onMain` 在
+// **主线程上直接执行** `fn`（`mygo/loop.go:94` 的 `isMainThread()` 短路，
+// 不排队也不阻塞）。
+func (s *Shell) commitNow(write func() error) error {
+	var err error
+	s.onMain(func() {
+		// ⚠️ **号在这一段里取**：这样「取号」和「写」之间**没有缝隙**。
+		copyClip.next()
+		err = write()
+	})
+	return err
+}
+
+// commitLater 是「这一趟的号早就取好了，现在才轮到它写」（封面那一趟：号在
+// 用户按下去那一刻就取了，而写要等后台把图编完）。
+//
+// # 判据和写在**同一个主线程段**里
+//
+// 主线程是**单线程事件循环** ⇒ 同一时刻只有一段在跑 ⇒ 两次写天然串行。
+// 于是「这一趟还是不是最新的」这个判据和「写」之间**没有缝隙**——过时的那
+// 一份**根本不会落地**（而不是落地了再改回来）。
+//
+// ⚠️ **这一段跑在主线程上**：而主线程是单线程的，所以这一段跑着的期间，
+// **用户按不了任何菜单**（菜单回调也要主线程）——于是「比号」到「写」
+// 之间**不可能**插进一次新的复制动作。
+func (s *Shell) commitLater(gen uint64, write func() error) {
+	// ⚠️ **判据和写必须在一起**：在后台先比一次只是**省事的预检**（省掉一次
+	// 主线程往返），**权威判据在主线程段里**。
+	//
+	// ⚠️ **走后台那一档**（排队 + 等）：这一段是**从后台**发起的（封面那一趟
+	// 编完 PNG 才走到这里），而「从后台调主线程」和「在主线程上调主线程」
+	// **不是一回事**（见 `onMainBackground` 的注释）——那差别正是那个竞态的
+	// 机制。
+	s.onMainBackground(func() {
+		// ⚠️ **权威判据在这里**：不是最新的一趟**什么都不写**——剪贴板里压根
+		// 不出现过时的内容（这是大多数情形：旧封面还在下网络，而文本早就写
+		// 完了）。
+		if !copyClip.isLatest(gen) {
+			// ⚠️ **作废的那一趟什么也不说**：用户后来按了别的，那一档会自己
+			// 说。而**这一趟也结束了**（测试要靠这个信号知道「它没写成」）。
+			s.copyDoneLater(gen)
+			return
 		}
-		if a.gen >= c.committed.gen {
-			c.committed = a
-			c.mu.Unlock()
-			// ⚠️ **「我这一份现在在剪贴板里」还不够**：用户可能又按了别的
-			// （那一档还没写进去）。那时候说「已复制」是在骗人——它马上就要
-			// 被换掉。而**那一档会自己说**。
-			return c.isLatest(mine), nil
+		// ⚠️ **写和「说」在同一个段里**：剪贴板里是什么，屏幕上就该说
+		// 什么——而这两句必须**同时**落地，否则用户会看到一句和剪贴板对不
+		// 上的话（比如剪贴板里已经是文字了，屏幕上还在说「封面已复制」）。
+		if err := write(); err != nil {
+			s.addToast("复制不了封面："+err.Error(), notice.Danger)
+			s.wake.invalidate()
+			s.copyDoneLater(gen)
+			return
 		}
-		// 有一档比我新的，它在我写之前就写进去了，而我把它盖掉了 →
-		// **把它写回去**（然后再比一次）。
-		newer := c.committed
-		c.mu.Unlock()
-		a = newer
+		s.addToast("封面已复制", notice.Success)
+		s.wake.invalidate()
+		s.copyDoneLater(gen)
+	})
+}
+
+// copyDoneLater 是那个「某一趟后台复制结束了」测试钩子。
+//
+// ⚠️ **它在主线程段里调**：测试要靠它知道「先发起的那一趟跑完了」——而那一
+// 趟**可能什么都没写**（被后来的动作作废了），所以**光看剪贴板里的内容是
+// 等不到它结束的**。
+func (s *Shell) copyDoneLater(gen uint64) {
+	if s.copyDone != nil {
+		s.copyDone(gen)
 	}
+}
+
+// claim 在**主线程段里**取一个新号。
+//
+// ⚠️ **封面那一趟的号是在「用户按下去那一刻」取的**：那一趟的写要等后台把
+// 图编完（几百毫秒），而号必须**那时候**就发出去——否则「先按封面（慢）、
+// 再按文本（快）」这一趟的号会被后来的文本占掉，于是它跑完发现自己不是最新
+// 的（那是对的），但反过来「先按文本、再按封面」要是占晚了，就会把**用户最后
+// 按的那一次**作废掉。
+//
+// ⚠️ **取号也在主线程段里**：按复制本身就是主线程上的事，所以号和「用户真的
+// 按了」的先后得对得上。
+func (s *Shell) claim() uint64 {
+	var gen uint64
+	s.onMain(func() { gen = copyClip.next() })
+	return gen
 }
 
 // viewCopyMenu 建当前这一首的「复制」菜单。播放条上那一张封面和满屏里那一张
@@ -379,9 +437,6 @@ func formatSongDuration(d time.Duration) string {
 // ⚠️ **失败了要说得出来**（票面要求「不静默失败」）：剪贴板写失败就弹一句
 // 提示，而不是什么都不做。
 func (s *Shell) copySongInfo(st app.State) {
-	// ⚠️ **先占号**：这一档虽然是同步写完的，但它**照样要作废前面那一趟封面**
-	// （「先按封面（慢）、再按文本」最后留着的必须是那段文字，见 `copyClipboard`）。
-	gen := copyClip.next()
 	text := songInfoText(st)
 	if text == "" {
 		s.addToast("这一首没有可复制的信息", notice.Warning)
@@ -391,29 +446,25 @@ func (s *Shell) copySongInfo(st app.State) {
 	if write == nil {
 		write = systemWriteClipboardText
 	}
-	// ⚠️ **走 `commit` 而不是「比一比再写」**：这一档是同步的，但**写剪贴板
-	// 本身要走到主线程**（框架那一档），而用户在那段时间里按了「复制封面」
-	// 是可能的——「比过了」不等于「写进去的时候仍然是这一档」（见
-	// `copyClipboard` 的注释）。
-	mine, err := copyClip.commit(copyAction{gen: gen, write: func() error {
-		return write(text)
-	}})
-	if err != nil {
-		// ⚠️ **收敛写回去失败**：剪贴板里现在留着的是**别的内容**，而用户
-		// 刚被告知「歌曲信息已复制」——那一句话这时是假的（见
-		// `copyConvergeError`）。
-		if isConvergeError(err) {
-			s.addToast("剪贴板里现在是别的内容："+err.Error(), notice.Danger)
-			return
+	// ⚠️ **取号 + 写 + 说在同一个主线程段里**（`commitNow`）：这一档是同步
+	// 的，但**写剪贴板本身要走到主线程**（框架那一档），而用户在那段时间里
+	// 按了「复制封面」是可能的——「比过了」不等于「写进去的时候仍然是这一档」
+	// （见 `copyClipboard` 的注释）。
+	//
+	// ⚠️ **这一档照样要作废前面那一趟封面**（「先按封面（慢）、再按文本」最后
+	// 留着的必须是那段文字）——而那正是**取号**干的事：取号就是作废前面所有
+	// 的号。
+	s.commitNow(func() error {
+		if err := write(text); err != nil {
+			s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
+			s.wake.invalidate()
+			return err
 		}
-		s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)
-		return
-	}
-	// ⚠️ **不是我这一份就不说「已复制」**：用户后来按了别的，那一档会自己说。
-	if !mine {
-		return
-	}
-	s.addToast("歌曲信息已复制", notice.Success)
+		// ⚠️ **「说」和「写」在同一段里**：剪贴板里是什么，屏幕上就该说什么。
+		s.addToast("歌曲信息已复制", notice.Success)
+		s.wake.invalidate()
+		return nil
+	})
 }
 
 // copyCover 把当前封面编码成 PNG 放进剪贴板。
@@ -439,7 +490,10 @@ func (s *Shell) copyCover(st app.State) {
 	// 但反过来「先按文本、再按封面」要是占晚了，就会把**用户最后按的那一次**
 	// 作废掉（文本那一趟已经写完了，而封面这一趟被自己作废）——剪贴板里留着
 	// 的是文本，而用户最后按的是封面。所以号必须在**动作开始的那一刻**发。
-	gen := copyClip.next()
+	//
+	// ⚠️ **取号在主线程段里**（`claim`）：按复制本身就是主线程上的事，而
+	// 「取号」和「写」要在同一段里才没有缝隙（见 `copyClipboard`）。
+	gen := s.claim()
 	url := st.CoverURL
 	go s.copyCoverInBackground(url, gen)
 }
@@ -450,61 +504,49 @@ func (s *Shell) copyCover(st app.State) {
 // `copyClipboard`）。不是最新就**什么都不写**——用户后来按的那一次才是
 // 他要的。
 func (s *Shell) copyCoverInBackground(url string, gen uint64) {
-	// ⚠️ **收尾那一句话在最后**：这一趟可能什么都没写（被后来的动作作废了），
-	// 所以「它结束了」这件事**不能靠剪贴板里的内容判断**——测试要靠这一句。
-	defer func() {
-		if s.copyDone != nil {
-			s.copyDone(gen)
-		}
-	}()
 	data, err := s.coverPNG(url)
 	if err != nil {
-		// ⚠️ **只有还是最新的那一趟才说话**：过时的失败不用吵用户——
-		// 用户后来已经按了别的，他要的是那一个的结果。
-		if copyClip.isLatest(gen) {
-			s.addToast("复制不了封面："+err.Error(), notice.Danger)
-			s.wake.invalidate()
-		}
+		// ⚠️ **判和说也在同一个主线程段里**：过时的失败不用吵用户——用户
+		// 后来已经按了别的，他要的是那一个的结果。而「这一趟结束了」那个
+		// 信号也在同一段里（见 `copyDoneLater` 的注释）。
+		s.failLater(gen, "复制不了封面："+err.Error())
 		return
 	}
 	write := s.writeClipboardImage
 	if write == nil {
 		write = systemWriteClipboardImage
 	}
-	// ⚠️ **走 `commit`**：这一段是整趟里最贵的一步（编一张 PNG），而它在
+	// ⚠️ **走 `commitLater`**：这一段是整趟里最贵的一步（编一张 PNG），而它在
 	// 后台跑着——用户完全可能在它跑的时候又按了一次。
 	// 而「比过了号」**不等于**「写进去的时候仍然是这一档」：中间还夹着一次
 	// 真正的写（要走主线程，可能慢），而那一次里用户可能又按了文本——
 	// 那样的话旧封面会盖掉那段文字（见 `copyClipboard` 的注释）。
-	mine, err := copyClip.commit(copyAction{gen: gen, write: func() error {
-		return write(data)
-	}})
-	if err != nil {
-		// ⚠️ **收敛写回去失败**：剪贴板里现在留着的是**过时的封面**，而用户
-		// 刚被告知「歌曲信息已复制」——那一句话这时是假的。
-		//
-		// ⚠️ **这一档不能被「过时的那一趟不吵用户」那条门吞掉**：那一条挡的
-		// 是「我这一趟过时了」，而这一种是「**剪贴板里不是你要的那一份**」。
-		// 静默的话，用户粘出来的是一张他没要过的图，而界面一个字都不说。
-		if isConvergeError(err) {
-			s.addToast("剪贴板里现在是别的内容："+err.Error(), notice.Danger)
-			s.wake.invalidate()
-			return
-		}
+	//
+	// ⚠️ **`commitLater` 自己进主线程**：判据和写在**同一个主线程段**里。旧
+	// 的封面那一趟进到那一段的时候，如果用户已经按过文本了，它**压根不写**
+	// ——剪贴板里**不会**先出现那张过时的图再被改回来。
+	s.commitLater(gen, func() error { return write(data) })
+}
+
+// failLater 说「这一趟失败了」——**判据和说在同一个主线程段里**。
+//
+// ⚠️ **为什么失败也要进主线程段**：号是在主线程段里取的，而「这一趟是不是
+// 最新的」这个判据**必须和取号那一段互斥**——否则判完到开口说话之间可能
+// 插进一次新的复制，于是用户已经按了文本，却还收到一句「复制不了封面」。
+// 那是**过时的话**，而它是给用户看的最后一句。
+//
+// ⚠️ **而这一段里没有写剪贴板**：失败的时候**什么都不写**（写进去的是半个
+// 东西，或者干脆没有）——所以「失败」这一档不会留下一个坏掉的剪贴板。
+func (s *Shell) failLater(gen uint64, msg string) {
+	s.onMainBackground(func() {
 		if copyClip.isLatest(gen) {
-			s.addToast("复制不了封面："+err.Error(), notice.Danger)
+			s.addToast(msg, notice.Danger)
 			s.wake.invalidate()
 		}
-		return
-	}
-	// ⚠️ **不是我这一份就不说「已复制」**：用户后来按了别的，那一档会自己说。
-	// 而**过时的那一趟不叫醒界面**：它什么也没说、什么也没改成，画面上
-	// 没有变化——叫醒只是白画一帧。
-	if !mine {
-		return
-	}
-	s.addToast("封面已复制", notice.Success)
-	s.wake.invalidate()
+		// ⚠️ **这一趟也结束了**：测试要靠这个信号知道「它没写成」（见
+		// `copyDoneLater` 的注释）。
+		s.copyDoneLater(gen)
+	})
 }
 
 // coverPNG 拿这张封面的 **PNG 字节**。

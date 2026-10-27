@@ -164,6 +164,16 @@ func (c *clipStub) textCalls() int {
 // 同一个理由）。
 func copyShell(t *testing.T, st app.State) (*Shell, *mygoui.Tester, *clipStub) {
 	t.Helper()
+	return copyShellWith(t, st, nil)
+}
+
+// copyShellWith 是 `copyShell` 加一个「把外壳改成这样的」的口子（测试要换
+// 剪贴板接缝、或者**换掉那个假主线程**时用）。
+//
+// ⚠️ **tweak 跑在基座装完假主线程之后**：不然它**被基座盖回去**，而测试
+// 还以为自己换掉了——症状是「造出来的交错压根没发生，而那条测试照样是绿的」。
+func copyShellWith(t *testing.T, st app.State, tweak func(s *Shell)) (*Shell, *mygoui.Tester, *clipStub) {
+	t.Helper()
 	clip := &clipStub{}
 	sh := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
@@ -178,6 +188,11 @@ func copyShell(t *testing.T, st app.State) (*Shell, *mygoui.Tester, *clipStub) {
 		s.writeClipboardText = clip.writeText
 		s.writeClipboardImage = clip.writeImage
 		s.copyDone = clip.done
+		// ⚠️ **假主线程由基座装**（`shelltest_test.go` 的 `newTestShell`）——
+		// 生产那一档在无头环境里会挂死，而它压根不该有「被撞上」的机会。
+		if tweak != nil {
+			tweak(s)
+		}
 	}))
 	return sh.s, sh.tt, clip
 }

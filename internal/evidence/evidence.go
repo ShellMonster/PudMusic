@@ -4201,13 +4201,17 @@ var Items = []Item{
 			// 可以不一样——先发起的封面那一趟**不许覆盖**后来的复制内容。
 			"TestTheLastCopyActionWinsOverAnEarlierCover",
 			"TestAnEarlierCoverDoesNotOverwriteALaterCover",
-			// **连「已经进了写剪贴板那一步」的旧封面也不许赢**：比号和写是
-			// 两件事，中间夹着一次真正的写——那一段里用户可能又按了文本。
+			// **判号和写在同一个主线程段里**：旧封面的段**还在队列里排队**
+			// 的时候，用户按的文本**先**落地；旧封面的段随后执行时，判号
+			// 已经不通过了——所以它**一个字都不写**（不是落地了再改回来）。
 			"TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText",
-			// **收敛写回去失败也要说话**：那一步失败时剪贴板里留着的是
-			// 过时的封面，而用户刚被告知「歌曲信息已复制」——这一种失败
-			// **最静默**（画面上什么提示都没有，用户粘出来的是他没要过的图）。
-			"TestAFailedConvergeSaysSo",
+			// **一轮里只有一段在跑**：主线程是单线程的，所以一个段跑着的
+			// 期间另一个段进不来（这一条量的是「串行」这个前提本身）。
+			"TestOnlyOneSectionRunsAtATimeOnTheMainThread",
+			// **两档真的是两档**：主线程档**绕过队列**直接执行，后台档
+			// **排队**——而那个差别**就是那个竞态的机制**（桩把两档混成
+			// 一样的话，那个交错压根不会发生，而测它的用例照样是绿的）。
+			"TestTheMainThreadSectionGoesStraightThroughWhileABackgroundOneWaits",
 			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
 			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
 		},
