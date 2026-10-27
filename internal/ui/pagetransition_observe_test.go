@@ -11,6 +11,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -35,7 +36,9 @@ func observeShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 	coverCacheDir = func() string { return t.TempDir() }
 	t.Cleanup(func() { coverCacheDir = orig })
 
-	hover.SetVisibleFlag(hover.NewVisibleFlag())
+	flag := hover.NewVisibleFlag()
+	hover.SetVisibleFlag(flag)
+	shimmer.SetVisibleFlag(flag)
 	a := app.New()
 	s := New(a)
 	tt := mygoui.NewTester(s.View, 1200, 800)

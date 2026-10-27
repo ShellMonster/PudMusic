@@ -587,7 +587,11 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		// 焦点都还在。
 		HandleInput(p.keys.Input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
-		OnSubmit(func() { p.playFrom(p.sel) }).
+		//
+		// ⚠️ **走的是「这一首」那一档**（`p.playNowOne` → `App.EnqueueAndPlayNow`，
+		// 票 #608 照上游 Biu 的 `play()`），不是「从这一首往后」：点一首歌不清空
+		// 用户已经排好的队列。那一档在右键菜单里（`Play` / `p.playFrom`）。
+		OnSubmit(func() { p.playNowOne(p.sel) }).
 		// ⚠️ **焦点环只留在「还没选中任何一行」的时候**（票 #197）：框架默认给**整张
 		// 列表**画一圈焦点环，而票面要的是「键盘走到**哪一行**都要有可见焦点指示」
 		// ——指示落在那一行上（见 `widgets/list/selection.go`）。两处都画就是两圈环。
@@ -639,10 +643,11 @@ func (p *pagedRows) drawGrid(c *ui.Context) {
 	e := ui.List(c, &p.state, rows).
 		Grow(1).
 		FillWidth().
-		// 双击一格 = 从那一首往后播（列表那一行是同一个意思，Biu 的
-		// `onDoubleClick`）。网格里没有「双击哪一格」的问题——双击的那一格就是
-		// 选中的那一格。
-		OnSubmit(func() { p.playFrom(p.sel) }).
+		// 双击一格 = 放这一首（列表那一行是同一个意思，Biu 的 `onDoubleClick`）。
+		// 网格里没有「双击哪一格」的问题——双击的那一格就是选中的那一格。
+		//
+		// ⚠️ **走「这一首」那一档**（票 #608），理由同上面列表那一处。
+		OnSubmit(func() { p.playNowOne(p.sel) }).
 		Children(func() { p.viewEmptyState(c, t) }).
 		Rows(func(r ui.ListRow) { p.viewGridRow(r, cols) }).
 		TrackScroll(&p.scroll)

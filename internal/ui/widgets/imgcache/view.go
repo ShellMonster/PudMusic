@@ -6,6 +6,7 @@ import (
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
@@ -72,9 +73,80 @@ func ViewPlaceholderTitled(c *ui.Context, cache *Cache, url, label string, w, h,
 			drawGlyphCover(c, label, w, h, radius)
 			return
 		}
-		drawCover(c, cache, url, w, h, radius, empty)
+		drawCover(c, cache, url, w, h, radius, empty, Shape{})
 	})
 }
+
+// States 画一张网络图的**有地址那三态**（正在加载 / 就绪 / 拉失败）。
+//
+// ⚠️ **它和 `View*` 那一族的分工**：那一族连「空地址」也管（画一枚图片图标或
+// 歌名首字），而**头像、头图、缩略图**的「空地址」有自己的口径——头像没有图时
+// 要一块和所在底面差得开的底（卡片上的头像尤其：占位圆和卡片同色就整个看不见，
+// 见 `spaceAvatarWith`），头图没有图时要铺页面底色。所以这一档交回调用方，
+// 这里只画有地址的那三态。
+//
+// 于是「四种状态怎么画」仍然只有一份（`drawCover`），而调用方只管自己那一种
+// 「本来就没有」。
+func States(c *ui.Context, cache *Cache, url string, w, h, radius float32, shape Shape) {
+	drawCover(c, cache, url, w, h, radius, shape.emptyIcon(), shape)
+}
+
+// Loading 画「这一格还在等」那一档，**不经过缓存**。
+//
+// ⚠️ **它给的是「元信息还没回来」那种等**：调用方手上有一个**将来会是地址**
+// 的字段，而那一刻它是空串（或者压根还没有）。传空串给 `States` 会被画成
+// 「本来就没有」——两档的含义是相反的（一个是「等一等就有」，一个是「永远没有」）。
+//
+// ⚠️ **别拿一个假地址去骗缓存**：那种做法会让缓存里多一条永远失败的记录、
+// 每开一次页面多发一次注定失败的请求，而且失败之后它落到**失败态**上
+// （`isPermanent` 判它永久失败）——界面从「在等」变成「拉失败了」。
+func Loading(c *ui.Context, w, h float32, shape Shape) ui.Element {
+	return ui.Column(c).Size(w, h).Children(func() {
+		drawSkeleton(c, w, h, shape.loadingGlyph())
+	})
+}
+
+// shapeKind 是 `States` 那三态要用的形状参数。
+type Shape struct {
+	// Icon 是失败那一格中间那枚图形（nil = 图片图标）。
+	//
+	// ⚠️ **头像传人形、头图传图片图标**：同一屏里「一个人没有头像」和「一张
+	// 头图拉不到」是两件事，图形一样的话用户分不出哪一格在说什么。
+	Icon *ui.SVG
+	// Loading 是加载中那一格的图形（nil = 音符）。
+	//
+	// ⚠️ **它是「正在加载」的记号，不是「这是什么」的记号**：一张封面正在加载 =
+	// 一首歌，所以是音符；一张头像正在加载不等于一首歌，调这个字段换成合适的。
+	Loading *ui.SVG
+}
+
+// emptyIcon 是失败那一档用的图形（nil 就是默认的图片图标）。
+func (s Shape) emptyIcon() *ui.SVG {
+	if s.Icon != nil {
+		return s.Icon
+	}
+	return placeholderIcon
+}
+
+// loadingGlyph 是加载中那一档用的图形（nil 就是音符）。
+func (s Shape) loadingGlyph() *ui.SVG {
+	if s.Loading != nil {
+		return s.Loading
+	}
+	return loadingIcon
+}
+
+// AvatarShape 是「头像」那一套形状：失败是**人形**（这一位没有头像，不是
+// 「一张图坏了」），加载中是**人形**（还在拉他的脸）。
+func AvatarShape() Shape {
+	return Shape{Icon: avatarIcon, Loading: avatarIcon}
+}
+
+// avatarIcon 是头像那一套的图形（「一个人」）。
+//
+// ⚠️ 从 `iconset` 取而**不是**界面层的 `iconEmptyUser`：这一格住在
+// `widgets/imgcache`，而界面层 import 这个包——反过来 import 是个环。
+var avatarIcon = iconset.Must("User & Faces/user-line.svg")
 
 // glyphRatio 是首字占封面较短边的比例。
 const glyphRatio = 0.44
@@ -140,8 +212,17 @@ func drawGlyphCover(c *ui.Context, label string, w, h, radius float32) {
 // 一排空白，**分不出「还在加载」和「压根没有图」**。现在那一档压一枚**更淡的
 // 音符**：淡到「这是占位」而不是「这是一首歌」，但看得见。
 //
-// ⚠️ **它不闪**（上游那个骨架屏会闪）：框架没有现成的骨架屏动画，而闪起来在
-// 一屏几十张封面时是灾难（报告 §5.3 的建议②：保留静态）。
+// 🔴 **底色那一档在浅色下不够**（2026-10-27）：`Surface`（#f4f4f5）往 `Background`
+// 混一半得到的近似 #fafafa，压在 #ffffff 的页面上**每通道只差 4**——48 像素的
+// 小封面在浅色下依旧是一块看不出边界的白。所以那一档改成**前景色 8% 叠出来的
+// 灰**（`shimmer.BaseAlpha`，约 #ebebeb），和骨架屏那一档**同一个配方**：同一屏
+// 上下两块占位是同一个灰，用户不会以为它们是两种状态。
+//
+// ⚠️ **它扫光**（2026-10-27 改）：原先这里写着「框架没有现成的骨架屏动画」，
+// 而 `widgets/shimmer` 就是那条动画。一屏封面全在等的时候，扫光让「在等」这件事
+// 一眼可见，和列表首屏的骨架屏也是同一个节奏（同一个钟、同一条高光）。
+// ⚠️ **别按「一屏几十张各自闪」去担心**：相位只由钟决定，于是它们**同步**扫过，
+// 看起来是一道光，不是一堆各自闪的块（理由见 `shimmer` 的文件头）。
 //
 // ⚠️ **一个字都不写**：上游那一格也没有文字。写字的代价是它在 32 像素那一档
 // 会换行，而换行之后那行字压到封面上，看起来像叠了一层说明。要说的话在它
@@ -154,13 +235,11 @@ func drawGlyphCover(c *ui.Context, label string, w, h, radius float32) {
 // 一张被压扁的封面上（收藏夹头图那种宽扁的）那枚图标会大到出格。
 const placeholderIconRatio = 0.4
 
-// skeletonMix 是骨架屏那一块的底色：从 `Surface` 往 `Background` 那头挪的
-// 比例（0 = 原色，1 = 全背景色）。
+// skeletonMix 是「拉失败 / 没有地址」那两档的底色：从 `Surface` 往 `Background`
+// 那头挪的比例（0 = 原色，1 = 全背景色）。
 //
-// 往背景色挪是为了让它在**浅色底下也看得出是一块占位**——`Surface` 和
-// `Background` 在浅色主题里差得很小，原样画出来那一格和一块空白没区别。
-// 深色主题里两个色本来就分得开，往背景色挪反而更淡——但「更深/更浅」在一块
-// 没有边框也没有图形的方块上是看不出来的，骨架屏靠的是「不是白的」这一层。
+// ⚠️ **它只管那两档**（2026-10-27）：加载中那一档不再用它——那个混出来的色在
+// 浅色下几乎就是白的（见上面那段）。加载中走 `shimmer` 的「前景色 8%」。
 const skeletonMix = 0.5
 
 // loadingIconFade 是「正在加载」那一格里那枚音符往背景色那边挪的比例。
@@ -199,7 +278,10 @@ var placeholderIcon = iconset.Must("Media/image-line.svg")
 var loadingIcon = iconset.Must("Media/music-2-line.svg")
 
 // drawCover 是 View 里面的那一支，分成四种情形。
-func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, empty *ui.SVG) {
+//
+// shape 决定「加载中」和「拉失败」那两档中间摆哪枚图形（默认：音符 / 图片图标）。
+// 「没有地址」那一档用的是 empty（调用方给的那一枚）。
+func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, empty *ui.SVG, shape Shape) {
 	// 没有地址：压根没有东西可显示，不是「加载失败」——两者画同一张（上游也是
 	// 同一个分支），但底色浅一档（`emptyMix` 往背景色那边挪），扫一眼就知道
 	// 这一格是空的而不是坏的。
@@ -231,9 +313,9 @@ func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, em
 		ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h).
 			Border(1, c.Theme().Border).Radius(radius)
 	case st.Loading:
-		drawSkeleton(c, w, h)
+		drawSkeleton(c, w, h, shape.loadingGlyph())
 	default:
-		drawPlaceholder(c, w, h, 0, radius, placeholderIcon)
+		drawPlaceholder(c, w, h, 0, radius, shape.emptyIcon())
 	}
 }
 
@@ -247,14 +329,27 @@ func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, em
 // 首歌」，但看得见。两档靠**深浅**分开（边框是「拿不到」的标记，骨架屏连它都
 // 不画——见上面那段三态的说明）。
 //
-// ⚠️ **它不闪**：上游那个骨架屏会闪，而框架没有现成的骨架屏动画（见上面那段）。
-func drawSkeleton(c *ui.Context, w, h float32) {
+// ⚠️ **它扫光**（`widgets/shimmer`）：一屏封面全在等的时候，「在等」这件事
+// 靠那道往前走的高光一眼可见；相位只由钟决定，所以一屏是**同一道光**扫过。
+func drawSkeleton(c *ui.Context, w, h float32, glyph *ui.SVG) {
 	t := c.Theme()
 	size := placeholderIconRatio * min32(w, h)
-	ui.Column(c).Size(w, h).Background(t.Surface.Mix(t.Background, skeletonMix)).
+	// ⚠️ **底色不能再是 Surface 往 Background 混**：浅色下那个混出来的色和页面
+	// 白几乎一样（见上面 `skeletonMix` 那一段）。用前景色 8% 是骨架屏那一档的
+	// 配方，两处于是同一个灰。
+	base := t.Text.Alpha(shimmer.BaseAlpha)
+	glow := t.Background.Alpha(shimmer.GlowAlpha)
+	visible := shimmer.VisibleFlag()
+	ui.Column(c).Size(w, h).
+		Draw(func(p *ui.Painter, r ui.Rect) {
+			// 不描边、不裁圆角：外层那个 `ViewPlaceholderTitled` 的 Box 已经
+			// `Radius(radius).Clip()` 过一次，这里画到边就行（多画一圈圆角会把
+			// 那一道边描在裁剪之后的直角上）。
+			shimmer.Paint(p, r, 0, base, glow, visible)
+		}).
 		Center().Children(func() {
 		// 再往背景色那边挪一档：它说的是「还没到」，不是「在这儿」。
-		ui.Icon(c, loadingIcon).FontSize(size).
+		ui.Icon(c, glyph).FontSize(size).
 			TextColor(t.TextMuted.Mix(t.Background, loadingIconFade))
 	})
 }

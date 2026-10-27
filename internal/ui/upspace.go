@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
@@ -882,6 +883,19 @@ func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withSh
 }
 
 // spaceAvatarOn 是头像的画法本身：占位圆的颜色由调用方给。
+//
+// 🔴 **有地址的三态交给 `imgcache`**（2026-10-27）：这一格原先只判 `Ready()`，
+// 其余三种（正在加载 / 拉失败 / 没有地址）画的是**同一块纯色圆**——一屏头像在
+// 拉的时候全是灰饼，而拉失败之后那块灰饼**永远不会变**（那种失败在缓存里是
+// 终态，不重试）。
+//
+// 现在：加载中是一块**带扫光**的灰 + 一枚淡人形，失败是描边框 + 人形（说明
+// 「这一位没有头像」而不是「一张图坏了」）。两档于是和「没有地址」分得开——
+// 那正是这个仓库对网络图的既有要求（见 `imgcache/view.go` 顶上那段）。
+//
+// ⚠️ **`placeholder` 仍然管「压根没有地址」那一档**：卡片上那些头像的占位圆
+// 必须和卡片底差得开（理由见 `spaceAvatarWith`），而那是**调用方**才知道的
+// 事（卡片底还是页面底）。所以空地址那一档由这里自己画。
 func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool, placeholder ui.Color) {
 	box := ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face)
 	if withShadow {
@@ -891,11 +905,11 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 		box = motion.HoverZoom(box, zoomKey, on)
 	}
 	box.Children(func() {
-		if st := s.images.Get(face); face != "" && st.Ready() {
-			ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
+		if face == "" {
+			ui.Box(c).Size(side, side).Radius(side / 2).Background(placeholder)
 			return
 		}
-		ui.Box(c).Size(side, side).Radius(side / 2).Background(placeholder)
+		imgcache.States(c, s.images, face, side, side, side/2, imgcache.AvatarShape())
 	})
 }
 
@@ -908,16 +922,21 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 //
 // 形状上不裁圆角：头图是横幅，方角是本来的样子（`space-info.tsx:86` 的
 // `bg-cover bg-center` + 一层黑色蒙版）。
+//
+// ⚠️ **有地址的三态走 `imgcache`**（2026-10-27）：原先它只判 `Ready()`，
+// 拉的时候和拉失败之后都是一块 `Surface` 纯色——而头图占 132 高、通栏，
+// 那一块纯色是这一屏最大的一片空白，用户分不清「在拉」和「他压根没设头图」。
+// 现在加载中是一块带扫光的灰，失败是描边框 + 图片图标；空地址仍然是调用方
+// 那一块（这一处是页面底色，见 `viewSpaceHeader`：没有头图的 UP 主占多数，
+// 那时画的是主题色渐变，压根走不到这里）。
 func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
 	t := c.Theme()
 	ui.Box(c).Height(h).FillWidth().Clip().Children(func() {
-		if st := s.images.Get(url); st.Ready() {
-			// ⚠️ **`FillWidth().Height(h)` 不能省**：只写 `Fit(ui.Cover)` 的话，
-			// 图片按**自己的像素尺寸**摆，小图只铺满左边一截，右边露出底色。
-			ui.Image(c, st.Bitmap).Fit(ui.Cover).FillWidth().Height(h)
+		if url == "" {
+			ui.Box(c).Height(h).FillWidth().Background(t.Surface)
 			return
 		}
-		ui.Box(c).Height(h).FillWidth().Background(t.Surface)
+		imgcache.States(c, s.images, url, 0, h, 0, imgcache.Shape{})
 	})
 }
 
@@ -944,20 +963,28 @@ func (s *Shell) spaceThumb(c *ui.Context, url string, w, h float32) {
 //
 // ⚠️ **标签挂在外面的框上**：外面那个框**不放大**（放大的是框里那张图），所以
 // 标签挂在框上，量到的就是**框**的尺寸——而框不动正是上游的样子。
+//
+// ⚠️ **有地址的三态走 `imgcache`**（2026-10-27）：原先只判 `Ready()`，拉的时候
+// 和拉失败之后都是一块 `Surface` 纯色——动态图文、投稿封面、收藏夹/合集封面
+// 全是这一条路，于是整屏图片在差网络下是一排灰块，而且失败之后不会变。
 func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey string, on bool) {
 	t := c.Theme()
 	ui.Box(c).Size(w, h).Radius(t.Radius).Clip().Label(url).Children(func() {
-		if st := s.images.Get(url); url != "" && st.Ready() {
+		if url == "" {
+			ui.Box(c).Size(w, h).Background(t.Surface)
+			return
+		}
+		// ⚠️ **还没下下来的那一格不放大**：放大的是**那张图**，还没下下来的图
+		// 没有可放大的东西。上游也一样（`emptyPlaceholder` 是另一个元素，那个
+		// `scale-105` 加在 `<Image>` 上）。
+		if st := s.images.Get(url); st.Ready() {
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {
 				motion.HoverZoom(img, zoomKey, on)
 			}
 			return
 		}
-		// ⚠️ **还没下下来的那一格不放大**：放大的是**那张图**，还没下下来的图
-		// 没有可放大的东西。上游也一样（`emptyPlaceholder` 是另一个元素，那个
-		// `scale-105` 加在 `<Image>` 上）。
-		ui.Box(c).Size(w, h).Background(t.Surface)
+		imgcache.States(c, s.images, url, w, h, t.Radius, imgcache.Shape{})
 	})
 }
 

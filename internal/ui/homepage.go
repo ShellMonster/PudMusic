@@ -275,7 +275,56 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		Label:  "继续播放",
 		Height: func() float32 { return homeRecentLeadH },
 	})
+	// 🔴 **两张榜的页头也进列表**（2026-10-27，用户要求「顶部改成跟着滚」）：
+	// 原先榜单那张头图（`viewBoardCaption`）和表头都在列表**外面**，滚列表时
+	// 它们钉在顶上不动——一屏只剩半屏能看歌。现在它们是列表的第 0 行，
+	// 跟着内容一起滚走（和「流行」那一档的顶图、UP 空间那四张 Tab 的页内头部
+	// 同一个做法，见 `list.Lead`）。
+	for _, tab := range [2]int{homeHotTab, homeOriginalTab} {
+		h.lists[tab].SetLead(&list.Lead{
+			Draw:   func(c *ui.Context) { h.viewBoardLead(c, tab) },
+			Label:  "榜单头图",
+			Height: func() float32 { return homeBoardHeroH + 12 + 36 },
+		})
+	}
 	return h
+}
+
+// viewBoardLead 是热榜 / 原创榜那一档的页内头部：**榜单头图 + 表头**。
+//
+// ⚠️ **表头也在里面**：头图说的是下面这些歌是哪张榜，表头说的是下面那些歌
+// 叫什么列——两样都是「这一屏的上半」，滚下去就该一起走（同 `viewPopLead`）。
+//
+// 🔴 **两样各自判各自的**（2026-10-27 的评审）：「这一期是哪一期」那个元信息
+// 和「下面那些歌」是**两趟**请求（`loads.board` 与翻页列表）。头图拿不到时把
+// 表头也一起藏掉，用户看到的是**一屏没有列名的歌**——而列名和期数没有关系。
+// 所以：
+//
+//	期数信息回来了 → 头图 + 表头
+//	期数信息没回来 → 只有表头（那一块照旧钉在顶上这件事不影响：它在列表第 0 行，
+//	                  只有一行表头，滚下去就没了）
+func (h *homePage) viewBoardLead(c *ui.Context, tab int) {
+	showHero := h.boardHeroVisible(tab)
+	ui.Column(c).FillWidth().Gap(space.Px12).
+		Padding(space.None, space.None, space.Px12).Children(func() {
+		if showHero {
+			h.viewBoardCaption(c, tab)
+		}
+		h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
+	})
+}
+
+// boardHeroVisible 报这一档的榜单头图这一帧画不画。
+//
+// ⚠️ **判据和 `viewBoardCaption` 那两句早退逐条对齐**：头图那一块和这一句要是
+// 各判一套，页内头部的高度就会和「实际画出来的东西」对不上（`Lead.Height` 是
+// 一个估的数，见 `list.Lead`）。
+func (h *homePage) boardHeroVisible(tab int) bool {
+	if (tab != homeHotTab && tab != homeOriginalTab) || h.loads.board == nil {
+		return false
+	}
+	n, at, ok := h.loads.board(tab)
+	return ok && boardCaptionText(n, at) != ""
 }
 
 // homeEndRow 是末尾「没有更多了」那一行。
@@ -571,11 +620,15 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。
 		//
-		// ⚠️ **「流行」那一档除外**：那一档的表头在**页内头部里面**（跟着新歌速递
-		// 那一块一起滚走，见 `viewPopLead`）——表头说的是下面那些歌，而新歌速递在
-		// 它们上面，表头留在列表外面就会跑到新歌速递上面去。
-		h.viewBoardCaption(c, tab)
-		if tab != homePopTab && tab != homeRecentTab {
+		// ⚠️ **两个例外**：这两档的表头在**页内头部里面**（跟着顶上那一块一起滚走）：
+		//
+		//	「流行」   新歌速递那一块（`viewPopLead`）
+		//	两张榜     榜单头图 + 表头（`viewBoardLead`，2026-10-27 用户要求
+		//	           把固定的顶栏改成跟着滚）
+		//
+		// 表头说的是下面那些歌，而顶上那一块在它们上面——表头留在列表外面就会
+		// 跑到顶上那一块上面去。
+		if tab != homePopTab && tab != homeRecentTab && tab != homeHotTab && tab != homeOriginalTab {
 			h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
 		}
 		h.lists[tab].View(c)

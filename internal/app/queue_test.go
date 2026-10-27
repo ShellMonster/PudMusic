@@ -160,20 +160,21 @@ func TestEnqueueAndPlayNowAppendsAndStartsTheNewSong(t *testing.T) {
 	}
 }
 
-// TestEnqueueAndPlayNowAppendsTheSameSongTwice 钉住「这一首已经在队列里」的
-// 情形：**照样再加一份**（票 #337 拍板的是「追加这一首到队尾」）。
+// TestEnqueueAndPlayNowSelectsTheSameSongInsteadOfAppending 钉住「这一首已经在
+// 队列里」的情形：**定位过去，不再追加一份**（票 #608 照上游 Biu 的 `play()`
+// 改的；上游那一支是 `existItem` → `set({ playId: existItem.id })`，
+// `_research/biu/src/store/play-list.ts:572-583`）。
 //
-// ⚠️ **这一条与上游不同**，所以它必须被钉住：上游 Biu v1.16 的 `play()`
-// （`src/store/play-list.ts`）遇到已经在列表里的条目是**选中现有那一份**
-// （`existItem`），**不**重复入队。改成跟它一样的话，这一条会红——
-// 而它红了才说明「本项目与上游的那处不同」没有被人顺手改掉。
+// ⚠️ **这一条覆盖了票 #337 的旧裁决**（原来钉的是「照样再加一份」）：用户把一批
+// 歌加进播放列表之后，回到投稿 / 搜索结果里点其中一首，要的是「跳过去放它」——
+// 重复入队会让抽屉里同一首出现两份，而用户按「下一首」会连着听到同一首歌。
 //
 // 三个判据：
 //
-//   - 队列长度从 1 变成 2（**多了一份**，不是替换、不是选中）；
-//   - 两份是同一首（路径相同）；
-//   - 正在放的是**新追加的那一份**（队列第 2 项）。
-func TestEnqueueAndPlayNowAppendsTheSameSongTwice(t *testing.T) {
+//   - 队列长度还是 1（没有多一份）；
+//   - 当前项还在第 0 项（唯一的那个）；
+//   - 放的是这一首。
+func TestEnqueueAndPlayNowSelectsTheSameSongInsteadOfAppending(t *testing.T) {
 	a := newApp(t)
 	paths := copies(t, 1)
 
@@ -188,16 +189,14 @@ func TestEnqueueAndPlayNowAppendsTheSameSongTwice(t *testing.T) {
 	waitFor(t, 2*time.Second, "同一首又起播了一遍", func() bool { return a.Snapshot().HasTrack })
 
 	got := a.Queue().Items()
-	if len(got) != 2 {
-		t.Fatalf("队列里有 %d 首，want 2（同一首排了两份）", len(got))
+	if len(got) != 1 {
+		t.Fatalf("队列里有 %d 首，want 1（已经在队列里的那一首不该再加一份）", len(got))
 	}
-	for i, g := range got {
-		if g.Path != paths[0] {
-			t.Errorf("队列第 %d 首是 %q，want %q（两份是同一首）", i+1, g.Path, paths[0])
-		}
+	if got[0].Path != paths[0] {
+		t.Errorf("队列里那一首是 %q，want %q", got[0].Path, paths[0])
 	}
-	if idx := a.Queue().CurrentIndex(); idx != 1 {
-		t.Errorf("正在放的是队列第 %d 首，want 第 2 首（新追加的那一份）", idx+1)
+	if idx := a.Queue().CurrentIndex(); idx != 0 {
+		t.Errorf("正在放的是队列第 %d 首，want 第 1 首（唯一的那一份）", idx+1)
 	}
 }
 

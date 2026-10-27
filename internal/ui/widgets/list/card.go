@@ -294,12 +294,16 @@ func (l *List) viewCard(r ui.ListRow) {
 		// ⚠️ **「用户」那一档的行不是歌**（`isUserItem`）：那一行按下去是进他的
 		// 空间，所以那一圈反馈换一套——图形、提示、无障碍名三样都换（理由见
 		// `hover.ProfileTip`）。只换一样的话，另一样还在说「放歌」。
+		//
+		// ⚠️ **两边都走 `l.rowPlay`**（票 #608）：歌是「放这一首、不换队列」
+		// （`Actions.PlayNow`），UP 主是「进他的空间」（`Actions.Play`）。分流在
+		// `rowPlay` 一处，那双击和这一枚钮不会各说各话。
 		if isUserItem(m) {
 			hover.RowCoverProfile(c, l.cache, m.Cover, coverSize, onRow, m.Title,
-				func() { l.playFrom(i) })
+				func() { l.rowPlay(i) })
 		} else {
 			hover.RowCover(c, l.cache, m.Cover, coverSize, onRow, m.Title,
-				func() { l.playFrom(i) })
+				func() { l.rowPlay(i) })
 		}
 
 		// ③ 标题 + UP 名。这一列 Grow(1)，把剩下的宽度都吃掉。

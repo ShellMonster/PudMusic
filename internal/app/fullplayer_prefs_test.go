@@ -41,6 +41,12 @@ func TestTheDefaultsMatchBiusStore(t *testing.T) {
 	if !p.ShowBlurredBackground {
 		t.Error("默认虚化背景是关的，Biu 是开着的")
 	}
+	// ⚠️ **弹幕那一格不是 Biu 的**：上游 Biu 没有弹幕（研究票 #538 报告 §6
+	// 第 6 条），所以它是我们自己加的开关——而产品要求它**默认开着**
+	// （用户 2026-10-26 明确要的）。
+	if !p.ShowDanmaku {
+		t.Error("默认弹幕是关的，产品要求默认开着")
+	}
 	// 颜色空串 = 走默认（频谱落到 #666，歌词落到白，背景落到主题色）。
 	if p.LyricsColor != "" || p.SpectrumColor != "" || p.BackgroundColor != "" {
 		t.Errorf("默认颜色不是空串：歌词 %q、频谱 %q、背景 %q",
@@ -71,6 +77,11 @@ func TestAnOldPrefsFileKeepsTheNewDefaults(t *testing.T) {
 	if !p.ShowLyrics || !p.ShowCover || !p.ShowBlurredBackground {
 		t.Errorf("老文件里没有的三个开关没有落回默认：歌词 %v、封面 %v、虚化 %v",
 			p.ShowLyrics, p.ShowCover, p.ShowBlurredBackground)
+	}
+	// ⚠️ **老文件里也没有弹幕那一格**：它同样要落回默认（开着）——用户在那份
+	// 文件里一个字节都没改过。
+	if !p.ShowDanmaku {
+		t.Error("老文件里没有弹幕那一格，它没有落回默认（开着）")
 	}
 }
 
@@ -132,7 +143,7 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 		t.Fatalf("文件里没有 fullPlayer 那一段：%s", b)
 	}
 	// ⚠️ 三个默认开着的开关**一定**在文件里（true 不能靠 omitempty 省）；两个
-	// 颜色和频谱开关这次也写了值，所以七个键一个不少。
+	// 颜色和频谱开关这次也写了值，所以 Biu 那七个键一个不少。
 	for _, k := range []string{
 		"showLyrics", "showSpectrum", "showCover", "showBlurredBackground",
 		"lyricsColor", "spectrumColor", "backgroundColor",
@@ -140,6 +151,11 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 		if _, ok := inner[k]; !ok {
 			t.Errorf("Biu 那一个 store 里的键 %q 不见了：%s", k, b)
 		}
+	}
+	// ⚠️ **弹幕那一格不是 Biu 的键**（上游没有弹幕），所以它**不在上面那张
+	// 表里**——但它得在文件里（否则用户关掉弹幕这件事存不下来）。
+	if _, ok := inner["showDanmaku"]; !ok {
+		t.Errorf("弹幕那一格不在文件里：%s", b)
 	}
 }
 

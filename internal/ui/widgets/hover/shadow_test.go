@@ -68,7 +68,7 @@ func TestTheGridPlayButtonHasAShadow(t *testing.T) {
 	// 淡入要走完（200ms），不然影还在半路上。
 	settle(on)
 
-	btn, ok := on.Find(FromLabel("甲"))
+	btn, ok := on.Find(PlayLabel("甲"))
 	if !ok {
 		t.Fatalf("指针移上去之后没有那个播放钮：%q", on.Texts())
 	}
@@ -100,7 +100,7 @@ func TestTheNewMusicCoverHasAShadow(t *testing.T) {
 	on = true
 	tt.Frame()
 	settle(tt)
-	play, ok := tt.Find(PlayLabel("甲"))
+	play, ok := tt.Find(CardOneLabel("甲"))
 	if !ok {
 		t.Fatalf("指针移上去之后没有那个播放钮：%q", tt.Texts())
 	}

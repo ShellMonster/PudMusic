@@ -2706,6 +2706,50 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 满屏播放器左边那张封面上的弹幕（**界面**那一层；取弹幕那一半是
+		// 上面那一条）。
+		//
+		// 钉的是五个「界面上看不出坏了」的点：
+		//
+		//   - **画在浮层里**：满屏整个是浮层，而浮层画在主树**之上**——弹幕
+		//     画在主树里会被满屏那层不透明的底盖住。🔴 **那个症状是静默的**：
+		//     文字**在树里**（`Texts()` 查得到），而画面上一个像素也没有。
+		//     ⇒ 「树上有没有那几行字」验不出这个坑，得看画面。
+		//   - **位移走 pose**：位置要是算在 view 里（`Absolute().Left(x)`），它
+		//     只在重建时更新——而满屏开着时界面 20 帧/秒重建，于是弹幕是 20fps
+		//     跳着走的。走 pose（只重绘那一族）是 60fps 平滑。
+		//   - **按当前位置起步**：弹幕的时间是**视频时间**，我们放的就是这个视频
+		//     的音轨 ⇒ 没有额外 offset。「从第 3 分钟开始听」就从第 3 分钟那一条
+		//     开始滚（**不是**按「播放了多久」滚）。
+		//   - **key 用弹幕自己的 rowid**：动态列表的 key 必须稳定且唯一——用下标
+		//     的话「前面插一条」会让后面所有条的状态整体错配。
+		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
+		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
+		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
+		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
+		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
+		//     像素宽的字滚了 1.8 秒之后尾巴还在封面里，下一条就进来了 ⇒
+		//     重叠 88 像素，两句话没法读）。
+		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
+		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
+		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		Tests: []string{
+			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
+			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
+			"TestTheDanmakuStartsFromTheCurrentPosition",
+			"TestTheDanmakuGlidesInsteadOfTeleporting",
+			"TestTheDanmakuJumpsWhenMotionIsReduced",
+			"TestEveryDanmakuHasItsOwnKey",
+			"TestTheDanmakuCanBeTurnedOff",
+			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
+			"TestTwoDanmakuOnTheSameLaneNeverOverlap",
+			"TestTheSameLaneWaitsForThePreviousDanmakuToClearTheEdge",
+			"TestALongDanmakuStaysUntilItHasLeftTheCover",
+		},
+	},
+	{
+		Category: Play,
 		// 「多 P 的投稿只能播第一集」（BMG-47 的 A12）那一张票的界面那一半：
 		// 播放条上有分集入口 → 打开是浮层列表、每一集有编号和标题 → 标出正在播的
 		// 那一集 → 点一集就切过去 → **单 P 不摆这个入口**。
@@ -3326,7 +3370,13 @@ var Items = []Item{
 		// （上游那几页的首屏，见 `internal/ui/loading.go` 的文件头）。所以这一条
 		// 里关于加载态的两句都改了：不再是「同一个格子」，而是「同一枚转圈 +
 		// 40vh 那一格」。
-		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页**没有页内输入框**，当前关键词显示在**顶栏**那个框里（且切页回来不覆盖用户正在敲的字）；「加载中」在每一页上都是**同一枚居中的转圈**（32，落在 40vh 那一格的正中），而它和「没有结果」是**两档**（转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
+		//
+		// ⚠️ **2026-10-27 又分了一档**：**列表首屏**（搜索 / 收藏夹 / 稍后再看 /
+		// 历史 / 关注 / 动态 / UP 空间投稿）成八行骨架屏（`loadingCell`），
+		// **页面级**（首页三个 Tab、本地音乐扫描）仍是那枚转圈。「同一件事在每一页
+		// 上长得一样」现在按「同一类列表用同一种骨架」读（见 DESIGN.md「加载态」，
+		// `TestEveryLoadingStateIsDrawnTheSameWay` 判的是骨架高度，不是转圈直径）。
+		Spec: "页面节奏：七页的横向页边距是同一个数、页标题是同一个字号（收藏夹那一页的大标题另算，是 30）；主 Tab 与次级排序不是同一个样子；搜索页**没有页内输入框**，当前关键词显示在**顶栏**那个框里（且切页回来不覆盖用户正在敲的字）；「加载中」分两档——**列表首屏是八行骨架屏**（同一类列表同一种骨架），**页面级首屏是同一枚居中的转圈**（32，落在 40vh 那一格的正中）；它和「没有结果」是**两档**（骨架/转圈 vs 插画 + 两行字）；没登录时那一页说「先登录」而不摆空列表；小字的行高是定好的；搜索联想浮层里命中的那几个字被标出来",
 		Tests: []string{
 			// 页边距（七页逐页量内容区最靠左的那一笔）+ 页标题（代码里同一个常量，
 			// 画面上墨迹一样宽）。
@@ -3891,12 +3941,26 @@ var Items = []Item{
 	},
 	{
 		// 票 #337 覆盖 #299：单首保留队列，显式批量/区段替换队列。
+		// 票 #608 覆盖 #337 的那一处「同一首已经在队列里时照样再加一份」：
+		// 照上游 Biu 的 `play()` 改成**定位已有那一份**，不再重复入队。
 		Category: Play,
-		Spec:     "立即播放追加这一首并打断，旧队列保留；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
+		Spec:     "点一首歌保留旧队列（已在队列里就定位、不在才追加）；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
 		Tests: []string{
 			"TestEnqueueAndPlayNowAppendsAndStartsTheNewSong",
-			// 同一首已经在队列里时**照样再加一份**（与上游那一处不同）。
-			"TestEnqueueAndPlayNowAppendsTheSameSongTwice",
+			// 同一首已经在队列里时**定位过去，不再追加一份**（照上游）。
+			"TestEnqueueAndPlayNowSelectsTheSameSongInsteadOfAppending",
+			// 已经在队列里的那一首：长度不变、当前项指过去、放的是它（票 #608）。
+			"TestEnqueueAndPlayNowSelectsAnItemThatIsAlreadyInTheQueue",
+			// 不在队列里的那一首：追加到队尾并立即播（票 #608）。
+			"TestEnqueueAndPlayNowAppendsASongThatIsNotInTheQueue",
+			// 队列里同一首排了两遍时，定位到用户点的那一份（票 #608）。
+			"TestEnqueueAndPlayNowLocatesTheDuplicateNotTheFirstCopy",
+			// 点一首歌不清空周围的歌（票 #608）。
+			"TestEnqueueAndPlayNowDoesNotClearTheQueueAroundIt",
+			// E2E：投稿页 112 首「全部播放」之后双击第 59 首，队列还是 112 首，
+			// 当前项是第 59 首；点一首不在队列里的会追加（票 #608）。
+			"TestDoubleClickingAnUpSubmissionKeepsThePlaylist",
+			"TestDoubleClickingASongOutsideTheQueueAppendsIt",
 			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
 			"TestThePlayNowEntryAppendsAndStartsThatSong",
 			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
@@ -4556,6 +4620,44 @@ var Items = []Item{
 			"TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable",
 			// 交给回收站的是**词法上的那一条**（符号链接那条安全线的另一半）。
 			"TestDeleteHandsTheLexicalPathToTheTrash",
+		},
+	},
+	{
+		// 归「双平台」那一组：这一票修的是**「有加载态、但画得看不见」**那一整族。
+		//
+		// 🔴 **每一条的错法都是静默的**：不报错、不崩、不写日志，界面只是
+		// 「看着不对劲」——
+		//
+		//	① 封面/头像/头图「加载中」那一档的底色是 Surface 往 Background 混一半，
+		//	   浅色下每通道只差 4：48 像素的封面在浅色页面上**等于一块空白**
+		//	② 头像 / 头图 / 缩略图只判 Ready()，其余三种画**同一块纯色**；
+		//	   而失败之后那块纯色**永远不变**
+		//	③ 服务层有的接口补了图片协议头、有的没补：没补的那些
+		//	   `http.NewRequest` 报 `unsupported protocol scheme ""`，
+		//	   被 `isPermanent` 判成**永久失败**（一次都不重试）
+		//	④ 换歌那一刻歌词立刻说「暂无歌词」——那是一个**结论**，而真相是
+		//	   读盘 / 字幕 / 自动找词那一串**过程**（最长 30 秒）
+		//	⑤ 动态流左栏第一页在途时画的是「全部」那一行，和「一个都没关注」
+		//	   一模一样
+		//	⑥ 总览的新歌速递 / 排行榜在没数据时**整块消失**，数据到了整块冒出来，
+		//	   下面的内容跟着跳一截
+		//	⑦ 收藏夹页头在元信息没回来时写「公开收藏夹 • **0** 条视频」——那个 0
+		//	   是假数（和 UP 空间「粉丝数 0」同一种错），创建者那一行整行不画
+		Category: Platform,
+		Spec:     "「在等」这件事在每一处都看得见、而且和「没有」分得开：封面 / 头像 / 头图 / 缩略图的加载档是**带扫光的灰块 + 一枚淡图形**（浅色下也看得出是一块占位），失败档是描边框 + 图形，没有地址档是描边框 + 调用方给的图形——三档在画面上分得开；歌词在切歌之后先报「正在加载」，有条目之前不写「暂无歌词」，最长 30 秒兜底落到「暂无歌词」；动态流左栏第一页在途时说「正在加载关注的人…」；首页总览的新歌速递和排行榜在拉时摆骨架（不是整块消失）；收藏夹页头在元信息没回来时不写「0 条视频」（只写类型），封面走加载档，创建者那一行留位；图片地址协议相对的也能真的拉下来（服务层补 + `imgcache.absoluteURL` 兜底）；热榜 / 原创榜那一档的页头（榜名 + 期数 + 表头）**跟着列表一起滚走**，不钉在顶上",
+		Tests: []string{
+			"TestTheCoverLoadingFillIsVisibleOnALightPage",
+			"TestTheCoverLoadingCellShimmers",
+			"TestTheAuthorPaneSaysItIsLoading",
+			"TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing",
+			"TestTheCollectionHeaderDoesNotClaimZeroMedia",
+			"TestTheCollectionOwnerRowKeepsItsSlot",
+			"TestTheBoardHeroScrollsAwayWithTheList",
+			"TestTheShimmerFlagIsTheWindowsOwnFlag",
+			"TestAbsoluteURLMakesProtocolRelativeAddressesFetchable",
+			"TestProtocolRelativeAddressesAreNotPermanentFailures",
+			"TestLyricsReportLoadingUntilTheyHaveSomething",
+			"TestLyricsLoadingFallsBackWhenNothingWillEverArrive",
 		},
 	},
 }

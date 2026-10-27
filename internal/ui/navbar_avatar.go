@@ -66,6 +66,7 @@ import (
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -311,20 +312,25 @@ func (s *Shell) askLogout() {
 
 // avatarLook 是这一帧该画成什么样。
 //
-// ⚠️ **只有三档，而它们分的是「画什么」不是「为什么」**。为什么在 `note` 里。
-// 拆成「未登录一种、载入中一种、没有头像一种、失效一种」四五个相位看起来更齐，
-// 可它们在 40 宽的一格里（`avatarSize`）**画出来是同一样东西**——那个人形。
-// 相位拆得再细，
-// 界面上分不出来，而「界面上分不出来的两种状态用两种相位记着」正是下一次
-// 有人把它们合并时找不到证据的那一票。
+// ⚠️ **为什么「载入中」现在单列一档**（2026-10-27）：它原先是和「未登录」共用
+// 那个人形——理由是「40 宽的一格画出来是同一样东西」。可用户看到的是：**已经
+// 登录了，右上角却显示一个「没有人」的头像**，而且一直不消失（网络慢的那几秒，
+// 或者头像那台机器抽风）。两件事在画面上同形，就等于在最显眼的一格上说错话。
 //
-// 该分开的是**看得见**的那三档：人形、图、出问题的人形。
+// 所以现在四档：人形（未登录 / 这个账号没有头像）、**载入中**（人形 + 一道
+// 扫光）、图、出问题的人形。「载入中」和「未登录」的区别不靠颜色靠**动**：
+// 一道高光扫过去是「我在等」，静止的人形是「这儿没有人」。
 type avatarLook int
 
 const (
-	// avatarSilhouette 是那个人形。**没登录、图还在路上、这个账号压根没头像
-	// 都是它**——那三种在界面上本来就没有分别。
+	// avatarSilhouette 是那个人形。**没登录、这个账号压根没头像都是它**
+	// ——那两种在界面上本来就没有分别（都是「这儿没有人」）。
 	avatarSilhouette avatarLook = iota
+	// avatarLoading 是「有地址、图还在路上」：人形 + 一道扫光。
+	//
+	// ⚠️ **它不能和未登录同形**：同形的代价是「已登录的用户看见未登录的记号」
+	// （见 `avatarLook` 顶上那一段）。
+	avatarLoading
 	// avatarPicture 是封面缓存给的那张真头像。
 	avatarPicture
 	// avatarTrouble 是出问题了：人形染成告警色，`note` 说清是什么问题。
@@ -866,9 +872,8 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 		// 并且把那句话挂上去。
 		s.drawAvatar(c, avatarTrouble, avatarNoteNoPicture)
 	default:
-		// 有地址、在路上：这一帧画的是人形，而说的是「加载中」——和未登录
-		// 画出来一样、说的话不一样（理由见 avatarLook 那一段）。
-		s.drawAvatar(c, avatarSilhouette, avatarNoteWaiting)
+		// 有地址、在路上：人形 + **一道扫光**，说的是「在等」（不是「没有人」）。
+		s.drawAvatar(c, avatarLoading, avatarNoteWaiting)
 	}
 }
 
@@ -898,6 +903,26 @@ func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
 	if look == avatarTrouble {
 		ink = t.Danger
 		col = col.Background(t.Danger.Alpha(0.18))
+	}
+	if look == avatarLoading {
+		// 🔴 **一道扫光**（`widgets/shimmer`）：这是「在等」唯一的记号。
+		//
+		// ⚠️ **它必须动**：静止的人形和「未登录」是同一张图，只靠无障碍名字
+		// 分开的话，看屏幕的用户读到的仍然是「已登录却显示未登录」。
+		//
+		// ⚠️ **不铺底色、不描边**：这一格在顶栏上只有 40 见方，铺一块灰会让它
+		// 比旁边三枚图标（18）重得多（票 #241 / 报告 F-16 那一笔账）。扫光画在
+		// 人形**背后**那一层，只在那几块形状上看得见——实际做法是画一层
+		// `Draw`，它扫过整格；人形本身仍然是 `TextMuted` 的两块。
+		//
+		// ⚠️ **圆角是 `side/2`**：这一格外面裁成了圆，扫光那一层不跟着裁的话
+		// 四个角上会露出方角。
+		base := t.Text.Alpha(shimmer.BaseAlpha)
+		glow := t.Background.Alpha(shimmer.GlowAlpha)
+		visible := shimmer.VisibleFlag()
+		col = col.Radius(side / 2).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
+			shimmer.Paint(p, r, side/2, base, glow, visible)
+		})
 	}
 
 	// ⚠️ `Label` 和悬停提示用的是**同一句话**：这一格只有 40 见方，写不下

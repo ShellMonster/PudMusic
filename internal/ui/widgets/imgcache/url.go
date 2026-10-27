@@ -48,3 +48,18 @@ func FormatURLProtocol(url string) string {
 	}
 	return "https:" + url
 }
+
+// absoluteURL 是**每一条下载路径上的兜底**：把协议相对的地址补成 https。
+//
+// ⚠️ **为什么缓存自己还要补一遍**：补协议的活儿本来归服务层（`bili` 那一层
+// 的 `normalizeImageURL` / `avatarURL`）。可它是**逐接口手写**的，漏一处就是
+// 那一个接口的图永远出不来——而且症状最阴：`http.NewRequest` 对
+// `//i0.hdslb.com/…` 报 `unsupported protocol scheme ""`，那被 `isPermanent`
+// 判成**永久失败**（一次都不重试），界面上只是那一格一直是占位。
+//
+// 所以这里再兜一道：补协议这一步**变成幂等的**（已经有 `http` 前缀的原样返回），
+// 服务层补过也不会被改坏。它不替服务层收拾其余的不规范（比如相对路径 `/x.png`
+// 仍会失败并如实报错）——那一种是真数据问题，应该看得出来。
+func absoluteURL(url string) string {
+	return FormatURLProtocol(url)
+}
