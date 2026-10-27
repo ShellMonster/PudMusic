@@ -36,8 +36,8 @@ const (
 	homeHeroCount = 3
 	homeMiniRows  = 5
 
-	// homeOverviewGap 是总览里块与块之间的竖向缝；横幅、磁贴、封面行的横向缝是 homeOverviewCellGap。
-	homeOverviewGap     = 28
+	// homeOverviewCellGap 是横幅、磁贴、封面行的横向缝（16）。算格宽用它；
+	// 元素上的缝写 space.Px16（间距 lint 不认常量），块与块之间的竖向缝是 space.Px28。
 	homeOverviewCellGap = 16
 
 	homeTileH      = 84
@@ -102,7 +102,7 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 
 	scroll := ui.Scroll(c).Key("home:overview").Grow(1).TrackScroll(&h.ovScroll)
 	scroll.Children(func() {
-		col := ui.Column(c).Key("home:overview:body").FillWidth().Gap(homeOverviewGap).
+		col := ui.Column(c).Key("home:overview:body").FillWidth().Gap(space.Px28).
 			Padding(space.Px4, scrollbar.HotZone, space.Px24, space.None)
 		col.Children(func() {
 			h.viewHero(c, w)
@@ -149,7 +149,7 @@ func (h *homePage) viewHero(c *ui.Context, w float32) {
 		if !h.feed.newTab.loading && h.feed.newTab.started {
 			return
 		}
-		ui.Row(c).Key("home:hero:skel").FillWidth().Gap(homeOverviewCellGap).Label("正在加载新歌速递").Children(func() {
+		ui.Row(c).Key("home:hero:skel").FillWidth().Gap(space.Px16).Label("正在加载新歌速递").Children(func() {
 			for i := range n {
 				ui.Box(c).Key("home:hero:skel:"+strconv.Itoa(i)).Size(cw, ch).Radius(t.Radius + 4).
 					Background(t.Text.Alpha(0.06))
@@ -157,7 +157,7 @@ func (h *homePage) viewHero(c *ui.Context, w float32) {
 		})
 		return
 	}
-	ui.Row(c).Key("home:hero").FillWidth().Gap(homeOverviewCellGap).Children(func() {
+	ui.Row(c).Key("home:hero").FillWidth().Gap(space.Px16).Children(func() {
 		for _, m := range songs {
 			h.viewHeroCard(c, m, cw, ch)
 		}
@@ -174,7 +174,7 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32) {
 		ui.Box(c).Key("home:hero:bar:"+m.ID).Size(w, hgt*0.55).
 			Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.78), 180).
 			Attach(ui.AnchorBottomLeft, ui.AnchorBottomLeft).
-			Padding(space.None, 64, 14, space.Px16).
+			Padding(space.None, space.Px48, space.Px12, space.Px16).
 			AlignItems(ui.Start).Justify(ui.End).Children(func() {
 			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size18)).Bold().
 				TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(2).Ellipsis("…")
@@ -184,7 +184,7 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32) {
 			}
 		})
 		ui.Box(c).Key("home:hero:play:"+m.ID).Size(36, 36).Radius(18).Background(t.Accent).Center().
-			Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(14).Bottom(14).
+			Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(space.Px12).Bottom(space.Px12).
 			Children(func() {
 				ui.Icon(c, icon(iconPlayFill)).FontSize(18).TextColor(t.AccentText)
 			})
@@ -200,11 +200,11 @@ func (h *homePage) playNow(m list.Music) {
 func (h *homePage) viewTiles(c *ui.Context, w float32) {
 	t := c.Theme()
 	cw := cellW(w, len(homeTiles), homeOverviewCellGap)
-	ui.Row(c).Key("home:tiles").FillWidth().Gap(homeOverviewCellGap).Children(func() {
+	ui.Row(c).Key("home:tiles").FillWidth().Gap(space.Px16).Children(func() {
 		for _, tile := range homeTiles {
 			name := homeTabs[tile.tab]
 			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(t.Radius+2).
-				Gradient(tile.from, tile.to, 135).Padding(14, space.Px16).Justify(ui.Center).Gap(space.Px4).
+				Gradient(tile.from, tile.to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
 				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
@@ -245,7 +245,7 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 	cw := cellW(w, cols, homeOverviewCellGap)
 	ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:new:head", "新歌速递", "查看更多", func() { h.openTab(homePopTab) })
-		ui.Row(c).Key("home:new:row").FillWidth().Gap(homeOverviewCellGap).Children(func() {
+		ui.Row(c).Key("home:new:row").FillWidth().Gap(space.Px16).Children(func() {
 			for _, m := range songs {
 				sh := list.ShowOf(m)
 				card := ui.Column(c).Key("home:new:" + m.ID).Width(cw).Gap(space.Px6).
@@ -274,7 +274,7 @@ func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
 	cw := cellW(w, 2, homeOverviewCellGap*2)
 	ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
-		ui.Row(c).Key("home:boards:row").FillWidth().Gap(homeOverviewCellGap * 2).Children(func() {
+		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).Children(func() {
 			for i, tab := range [2]int{homeHotTab, homeOriginalTab} {
 				h.viewMiniBoard(c, i, tab, cw)
 			}
