@@ -28,9 +28,20 @@ func resetNotifier(t *testing.T) {
 	defer notifier.mu.Unlock()
 	notifier.sink = nil
 	notifier.failSink = nil
-	notifier.supported = -1
+	notifier.supported = supportUnknown
 	notifier.denied = false
 }
+
+// initialSupportedState 记下「刚起来的进程」那一份账的初值。
+//
+// 🔴 **它是包级变量初始化，而 Go 按依赖顺序初始化包级变量**——这一份依赖
+// `notifier`，所以 Go 会**先把 `notifier` 初始化完再算这一份**。于是它记下的
+// **就是**「没人动过它」的那份初值，而**不是**任何一条用例跑过之后的值。
+//
+// ⚠️ **而它是必要的**：直接读 `notifier.supported` 的那一条用例**依赖执行
+// 顺序**（前面的用例若把它设成「能发」，它就红）——而「这一份的零值落在哪一
+// 档」这件事**根本不该依赖执行顺序**。
+var initialSupportedState = notifier.supported
 
 // TestANotificationIsNotSupportedBeforeTheAppIsReady 钉住「应用还没 ready 时
 // 不去问框架」。
@@ -53,9 +64,54 @@ func TestANotificationIsNotSupportedBeforeTheAppIsReady(t *testing.T) {
 	notifier.mu.Lock()
 	known := notifier.supported
 	notifier.mu.Unlock()
-	if known != -1 {
-		t.Errorf("应用还没 ready 就把答案记成了 %d，want -1（还没问过）—— "+
-			"那等于把这一轮永久判成「不支持」", known)
+	if known != supportUnknown {
+		t.Errorf("应用还没 ready 就把答案记成了 %d，want %d（还没问过）—— "+
+			"那等于把这一轮永久判成「不支持」", known, supportUnknown)
+	}
+}
+
+// TestAFreshProcessHasNotAskedYet 钉住「一个刚起来的进程，那份账是「还没问过」
+// 那一档」。
+//
+// 🔴 **这一条量的是包级变量的零值**（票 #559，2026-10-27 的真机验出来的）：
+// `notifier` 是**包级变量**，而 int 的零值是 0——零值落在「问过了：发不了」那一
+// 档上。于是 `NotificationsSupported()` 一进来就「已经问过了」那一支返回
+// false，**框架那一问一次都没问过**。
+//
+// ⚠️ **症状是静默的**：那一档报「不支持」，上层于是**静默降级**成应用内的
+// 一句提示（票面第 5 条那一档）——于是「打包的 macOS 应用弹不出系统通知」这
+// 件事，在真机上跑出来是「应用内提示照旧出现，一切正常」。
+//
+// ⚠️ **而上面那一条量不到它**：它的 `resetNotifier` **显式**把这一份设成 -1
+// （那是「还没问过」那一档）——于是零值那个坑被**测试自己**挡住了。
+//
+// ⚠️ **所以这一条不许调 `resetNotifier`**：它量的就是「**没人动过它**」的那
+// 个初值。
+func TestAFreshProcessHasNotAskedYet(t *testing.T) {
+	// ⚠️ **这一条量的是初值**（`initialSupportedState` 是包级变量初始化，它依赖
+	// `notifier`，Go 会先初始化 `notifier`）——于是它**与执行顺序无关**：
+	// 前面那些用例把它设成「能发」也不影响这一条。
+	if initialSupportedState != supportUnknown {
+		t.Errorf("一份刚起来的进程，那份「能不能发通知」的账是 %d，want %d"+
+			"（还没问过）—— 而零值落在「问过了：发不了」那一档上，于是"+
+			"框架那一问一次都没问过，打包的 macOS 应用弹不出系统通知",
+			initialSupportedState, supportUnknown)
+	}
+}
+
+// TestTheZeroValueOfTheSupportStateMeansNotAskedYet 钉住「这一档的**零值**就是
+// 「还没问过」」。
+//
+// 🔴 **这一条与执行顺序、与包级变量的初值都无关**（票 #559，2026-10-27 的
+// 真机验出来的）：那个坑是「**零值**落在「问过了：发不了」那一档上」，所以
+// 承重的判据是**类型自己的零值**。
+func TestTheZeroValueOfTheSupportStateMeansNotAskedYet(t *testing.T) {
+	var s supportState
+	if s != supportUnknown {
+		t.Errorf("这一档的零值是 %d，want %d（还没问过）—— 而它住在**包级变量**"+
+			"里，于是「刚起来的进程」一次都不会去问框架，打包的 macOS 应用"+
+			"弹不出系统通知（而它静默降级成应用内提示，界面上看不出任何异样）",
+			s, supportUnknown)
 	}
 }
 
@@ -68,7 +124,7 @@ func TestTheSupportAnswerIsAskedOnlyOnce(t *testing.T) {
 
 	// 假装应用 ready 了（这一层只在 ready 之后才问框架）。
 	notifier.mu.Lock()
-	notifier.supported = 1
+	notifier.supported = supportYes
 	notifier.mu.Unlock()
 
 	for i := 0; i < 3; i++ {

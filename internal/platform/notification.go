@@ -83,12 +83,26 @@ var notifier struct {
 	// （`needsApp`）。而「第一次失败之后记住，不再反复请求」这条规矩要的
 	// 就是这个记号。
 	//
-	// 三态：
+	// supported 报「这台机器能不能发通知」。
 	//
-	//	-1  还没问过（应用还没 ready）
-	//	 0  问过了：发不了（没打包 / 这台机器不支持）
-	//	 1  问过了：能发
-	supported int
+	// 🔴 **它是三态，而「还没问过」那一档必须由类型自己保证**（票 #559，
+	// 2026-10-27 的真机验出来的）：这一份是**包级变量**，而如果它是一个裸
+	// int，零值 0 就落在「问过了：发不了」那一档上——于是
+	// `NotificationsSupported()` 一进来就「已经问过了」那一支返回 false，
+	// **框架那一问一次都没问过**。
+	//
+	// ⚠️ **症状是静默的**：那一档报「不支持」，上层于是**静默降级**成应用内的
+	// 一句提示（票面第 5 条那一档），而界面上看不出任何异样——于是「打包的
+	// 应用在 macOS 上弹不出系统通知」这件事，在真机上跑出来是「应用内提示照
+	// 旧出现，一切正常」。
+	//
+	// ⚠️ **而单元测试量不到它**：测试的 `resetNotifier` 显式把它设成「还没问过」
+	// 那一档，于是零值那个坑被**测试自己**挡住了。
+	//
+	// ⚠️ **所以这里用的是一个自定义类型**，而它的**零值就是「还没问过」**：
+	// 「忘了初始化」这件事于是**编译不出来也跑不出来**——int 的零值落在「发不
+	// 了」那一档上，而这一类型的零值落在「还没问过」那一档上。
+	supported supportState
 
 	// denied 记着「用户已经说过不让发通知」。
 	//
@@ -97,6 +111,26 @@ var notifier struct {
 	// 不该再去弹那个系统权限框**了）。
 	denied bool
 }
+
+// supportState 是「能不能发系统通知」那三档。
+//
+// 🔴 **它的零值是「还没问过」**（票 #559，2026-10-27 的真机验出来的）：
+// 这一份住在**包级变量**里，而裸 int 的零值会落在「问过了：发不了」那一档
+// 上——于是「刚起来的进程」一次都不会去问框架，打包的 macOS 应用于是弹不
+// 出系统通知（而它静默降级成应用内提示，界面上看不出任何异样）。
+//
+// ⚠️ **零值落在「还没问过」那一档，是因为那三档的顺序就是这么排的**：第一档
+// 是「还没问过」，第二档是「发不了」，第三档是「能发」。
+type supportState int
+
+const (
+	// supportUnknown 是「还没问过」（**零值**）。
+	supportUnknown supportState = iota
+	// supportNo 是「问过了：发不了」（没打包 / 这台机器不支持）。
+	supportNo
+	// supportYes 是「问过了：能发」。
+	supportYes
+)
 
 // NotificationsSupported 报「这一次运行能不能发系统通知」。
 //
@@ -107,8 +141,8 @@ func NotificationsSupported() bool {
 	notifier.mu.Lock()
 	known := notifier.supported
 	notifier.mu.Unlock()
-	if known >= 0 {
-		return known == 1
+	if known != supportUnknown {
+		return known == supportYes
 	}
 	// 还没问过：应用 ready 了才问一次，然后把答案记下来。
 	//
@@ -122,17 +156,12 @@ func NotificationsSupported() bool {
 	}
 	supported := mygo.NotificationsSupported()
 	notifier.mu.Lock()
-	notifier.supported = boolToInt(supported)
+	notifier.supported = supportNo
+	if supported {
+		notifier.supported = supportYes
+	}
 	notifier.mu.Unlock()
 	return supported
-}
-
-// boolToInt 把 bool 变成三态记号里的那个数。
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // Notify 发一条系统通知。
@@ -226,7 +255,7 @@ func ClearNotifications() {
 	notifier.mu.Lock()
 	known := notifier.supported
 	notifier.mu.Unlock()
-	if known != 1 {
+	if known != supportYes {
 		// 没发过通知就不用清（清的那一句也要过主线程）。
 		return
 	}

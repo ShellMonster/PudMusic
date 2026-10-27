@@ -566,7 +566,7 @@ func TestTheSameVersionIsNotNotifiedTwice(t *testing.T) {
 	p.add(false) // 用户不在
 
 	got := captureNotify(t, func() {
-		notifyUpdateAvailable("1.2.3")
+		notifyUpdateAvailable(nil, "1.2.3")
 	})
 	time.Sleep(notifyGrace + 200*time.Millisecond)
 	if got.len() != 1 {
@@ -575,7 +575,7 @@ func TestTheSameVersionIsNotNotifiedTwice(t *testing.T) {
 
 	// 第二次查同一个版本（后台又查了一遍）。
 	got2 := captureNotify(t, func() {
-		notifyUpdateAvailable("1.2.3")
+		notifyUpdateAvailable(nil, "1.2.3")
 	})
 	time.Sleep(notifyGrace + 200*time.Millisecond)
 	if got2.len() != 0 {
@@ -594,7 +594,7 @@ func TestANewVersionIsNotifiedAgain(t *testing.T) {
 	p.add(false)
 
 	got := captureNotify(t, func() {
-		notifyUpdateAvailable("1.2.3")
+		notifyUpdateAvailable(nil, "1.2.3")
 	})
 	time.Sleep(notifyGrace + 200*time.Millisecond)
 	if got.len() != 1 {
@@ -602,11 +602,91 @@ func TestANewVersionIsNotifiedAgain(t *testing.T) {
 	}
 
 	got2 := captureNotify(t, func() {
-		notifyUpdateAvailable("1.3.0")
+		notifyUpdateAvailable(nil, "1.3.0")
 	})
 	time.Sleep(notifyGrace + 200*time.Millisecond)
 	if got2.len() != 1 {
 		t.Errorf("换了版本却只提醒了 %d 次，want 1 次（%v）", got2.len(), got2.items)
+	}
+}
+
+// TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave 钉住「用户在前台
+// 发现新版本，等他离开之后**仍然**能收到那一条通知」。
+//
+// 🔴 **这是票 #559 那一段的真判据**（2026-10-27 的评审）：
+//
+//	第一次后台检查（用户**在前台**）→ 不发通知（他正盯着应用）
+//	用户随后**离开**
+//	第二次后台检查 → **发出一条通知**
+//
+// ⚠️ **而这一条量的是「两层合起来」**：应用层记着「这个版本已经提醒过了」
+// （`internal/app/update.go` 的 `claimUpdateNotification`），而界面层记着
+// 「这个进程已经为这个版本发过通知了」（`notifiedVersions`）。**两层的语义
+// 不一样**——应用层那一份是「更新器说过这个版本了」，而它记下的时候**还不知
+// 道用户在不在线**（那一档是界面层判的）。
+//
+// ⚠️ **只退界面层那一份就是这一条 bug**：应用层那一份仍然记着「说过了」，
+// 于是第二次后台检查被它挡住，那一条通知**永远发不出去**——而界面上看不出任
+// 何异样。
+func TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave(t *testing.T) {
+	p := newFocusProbe(t)
+	resetNotifiedVersions(t)
+
+	// ⚠️ **这一条必须走**真的后台检查**那一条路**（`App.StartAutoChecks` →
+	// `updater.check(false)` → `claimUpdateNotification`），而**不是**直接调
+	// `notifyUpdateAvailable`。
+	//
+	// ⚠️ **为什么**：应用层那一份记账（`updater.notifiedVersion`）是**在
+	// `check` 里记的**——直接调 `notifyUpdateAvailable` 的话，那一份根本不存在，
+	// 量到的就只有界面层那一半，而这一条量的是**两层合起来**的行为。
+	//
+	// ⚠️ **而这一层那一半也退**：只退界面层那一份的话，应用层那一份仍然记着
+	// 「说过了」，第二次后台检查被它挡住——那一条通知**永远发不出去**。
+	be := newFakeUpdate("0.1.0", &app.UpdateRelease{Version: "1.2.3"})
+	a := app.New()
+	t.Cleanup(a.Close)
+	a.MountUpdates(be, filepath.Join(t.TempDir(), "app-update.json"))
+	// ⚠️ **要装的是真的那一套接线**（`MountNotifications`）：它装上
+	// `SetUpdateNotifier`——而**没有它的话应用层根本不会把「查到了新版本」递到
+	// 界面层**，那一条通知压根不会有人去发。
+	//
+	// ⚠️ **而它绑的是那个 App**（`MountNotifications` 里装的是闭包）：那一层
+	// 判出「用户在里面」时要**把应用层那一份记账退回来**，而退的那一头就是
+	// 这个 App。
+	MountNotifications(a)
+
+	// 用户**在前台**：主窗有焦点。
+	main := p.add(true)
+	p.set(main, true)
+
+	// 第一次后台检查：界面层判出「用户在里面」，那一条**没发出去**。
+	got := captureNotify(t, func() {
+		stop := a.StartAutoChecks()
+		defer stop()
+		waitFor(t, "后台那一次查到了新版本", func() bool { return a.UpdateSnapshot().Available() })
+	})
+	time.Sleep(notifyGrace + 200*time.Millisecond)
+	if got.len() != 0 {
+		t.Fatalf("用户正盯着应用，却还是发了 %d 条系统通知（%v）", got.len(), got.items)
+	}
+
+	// 用户随后离开：主窗失焦（**还看得见**）。
+	p.set(main, false)
+
+	// 第二次后台检查：**该发出一条**。
+	got2 := captureNotify(t, func() {
+		stop := a.StartAutoChecks()
+		defer stop()
+		waitFor(t, "后台那一次又查了一遍", func() bool { return be.checksDone() >= 2 })
+	})
+	time.Sleep(notifyGrace + 200*time.Millisecond)
+	if got2.len() != 1 {
+		t.Fatalf("用户离开之后同一个版本只发了 %d 条通知（%v），want 1 条 —— "+
+			"而他在前台发现新版本时那一条没发出去，于是他永远不知道有新版",
+			got2.len(), got2.items)
+	}
+	if !strings.Contains(got2.at(0).body, "1.2.3") {
+		t.Errorf("通知里没有版本号：%q", got2.at(0).body)
 	}
 }
 

@@ -530,14 +530,54 @@ func MountNotifications(a *app.App) {
 	// ⚠️ **而它和下载那一档的差别在「谁发起的」**：查更新是后台自动查的
 	//（用户多半不在），而用户自己按「检查更新」的那一档不发（他正盯着看）。
 	// 那一档的判据在应用层（见 `internal/app/update.go` 的 `check`）。
-	a.SetUpdateNotifier(notifyUpdateAvailable)
+	//
+	// 🔴 **而这里绑的是那个 App**（票 #559，2026-10-27 的评审）：「这个版本
+	// 已经提醒过了」那一份**记在应用层**（`internal/app/update.go` 的
+	// `claimUpdateNotification`），而**记下它的那一层还不知道用户在不在线**——
+	// 那一档是这一层判的。于是这一层判完「用户在里面」（所以那条系统通知**没
+	// 发出去**）就得**把那一份退回去**——不退回的话，用户在前台时那一次后台
+	// 检查会把版本**永久**记成「说过了」（而它**根本没说过**），用户随后离开，
+	// 下一次后台检查被挡住，那一条通知**永远发不出去**。
+	//
+	// ⚠️ **绑成闭包，而不是记一个包级的 App 指针**：那一份是**只写一次、
+	// 只读一次**的（装的时候写，通知那条线上读），而闭包**天生**就是那样——
+	// 它不需要锁，也不需要「谁来装、谁来卸」那一份额外的约定。而一个包级指针
+	// 是**可变的全局状态**：换掉它的时候正好有一条后台线在读它。
+	a.SetUpdateNotifier(func(version string) { notifyUpdateAvailable(a, version) })
+}
+
+// releaseUpdateReminder 把「这个版本已经提醒过了」那两份记账都退回去。
+//
+// 🔴 **它是票 #559 那一段的收尾**（2026-10-27 的评审）：**「说过了」这句话
+// 只有在真的说过之后才成立**。而这一次**没有说**——通知没发出去（用户正盯着
+// 应用），所以两份记账都得退：
+//
+//	界面层那一份  `notifiedVersions`——这一层自己记的
+//	应用层那一份  `updater.notifiedVersion`——**那一层记它的时候还不知道用户
+//	              在不在线**（那是在 `check` 里判完「用户自己按的」之后立刻
+//	              记的，而「用户在不在线」是这一层判的）
+//
+// ⚠️ **只退界面层那一份就是这一条 bug**：用户在前台时那一次后台检查把版本
+// 记死在应用层（而它**根本没说过**），用户随后离开，下一次后台检查被挡住——
+// 那一条通知**永远发不出去**，而界面上看不出任何异样。
+//
+// ⚠️ **a 可能是 nil**：那是**没有装应用层**的那一档（界面层的用例直接调
+// `notifyUpdateAvailable`）。那一档没有应用层那份账可退，退了就是空操作。
+func releaseUpdateReminder(a *app.App, version string) {
+	releaseNotifiedVersion(version)
+	if a != nil {
+		a.ReleaseUpdateNotification(version)
+	}
 }
 
 // notifyUpdateAvailable 是「查到了新版本」那一段。
 //
 // ⚠️ **它从任何 goroutine 都能调**（应用层在检查更新的那条线上调它），而它读
 // 的那本账是带锁的（见 `focusTracker`）——所以跨 goroutine 调它不违反铁律一。
-func notifyUpdateAvailable(version string) {
+//
+// ⚠️ **a 是「那个 App」**：界面层判出「用户在里面」时要**把应用层那一份记账
+// 退回来**（见 `releaseUpdateReminder`），而退的那一头在应用层。
+func notifyUpdateAvailable(a *app.App, version string) {
 	if version == "" {
 		return
 	}
@@ -563,14 +603,18 @@ func notifyUpdateAvailable(version string) {
 		// ⚠️ **这就是「提醒过」必须在「真发出去了」之后才记**的原因**：先记
 		// 再发的话，用户在应用里时那一次就把它吃掉了，于是**他永远收不到**
 		// 那一条通知。
-		releaseNotifiedVersion(version)
+		//
+		// 🔴 **而要退的是**两份**：界面层那一份和**应用层那一份**——后者是
+		// 在 `check` 里记的，而记它的时候还不知道用户在不在线（见
+		// `releaseUpdateReminder` 的注释）。
+		releaseUpdateReminder(a, version)
 		return
 	}
 	// ⚠️ **和下载那一档一样等一小会儿再判**（理由见文件头）：焦点正在两扇窗
 	// 之间搬家的时候，此刻「没有一扇有焦点」而用户**并没有离开**。
 	time.AfterFunc(notifyGrace, func() {
 		if !tracker().snapshot().idle() {
-			releaseNotifiedVersion(version)
+			releaseUpdateReminder(a, version)
 			return
 		}
 		sendNotification(notifyUpdateID(version), "有更新了", "BiuGo "+version+" 可更新")

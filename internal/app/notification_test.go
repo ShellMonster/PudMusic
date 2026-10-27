@@ -191,6 +191,65 @@ func TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice(t *testing.T) {
 	}
 }
 
+// TestAReleasedVersionIsNotifiedAgain 钉住「界面层退回那一份之后，同一个版本
+// 还能再提醒一次」。
+//
+// 🔴 **它是票 #559 那一段的另一半**（2026-10-27 的评审）：**「说过了」这句话
+// 只有在真的说过之后才成立**。而应用层记下那一份的时候**还不知道用户在不
+// 在线**——「用户在前台」那一档是界面层判的（见 `internal/ui/notification.go`），
+// 所以界面层判出「用户在里面」（通知**没发出去**）就调
+// `ReleaseUpdateNotification` 把它退回来。
+//
+// ⚠️ **不退回的话就是这一条 bug**：用户在前台时那一次后台检查把版本**永久**
+// 记成「说过了」（而它**根本没说过**），用户随后离开，下一次后台检查被挡住
+// ——那一条通知**永远发不出去**，而界面上看不出任何异样。
+func TestAReleasedVersionIsNotifiedAgain(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	var got []string
+	f.app.SetUpdateNotifier(func(version string) { got = append(got, version) })
+
+	// 第一次后台检查：用户多半在前台（界面层于是会退回来）。
+	f.checkAndWait(t, false)
+	if len(got) != 1 {
+		t.Fatalf("第一次提醒了 %d 次（%v），want 1 次", len(got), got)
+	}
+
+	// 界面层判出「用户在里面」，那一条没发出去 → 退回来。
+	f.app.ReleaseUpdateNotification("0.2.0")
+
+	// 用户随后离开，下一次后台检查：**该再提醒一次**。
+	f.checkAndWait(t, false)
+	if len(got) != 2 {
+		t.Fatalf("退回来之后同一个版本只提醒了 %d 次（%v），want 2 次 —— "+
+			"而用户随后离开就再也收不到那一条通知了", len(got), got)
+	}
+	if got[1] != "0.2.0" {
+		t.Errorf("第二次提醒的是 %q，want %q", got[1], "0.2.0")
+	}
+}
+
+// TestAReleaseDoesNotClearAnotherVersion 钉住「退回来只退同一个版本」。
+//
+// ⚠️ **退错了版本就等于把「用户已经知道的新版本」又提醒一次**：更新器记着
+// 的是「最新那个版本」，而界面层退回来的是它判的那一个版本。
+func TestAReleaseDoesNotClearAnotherVersion(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	var got []string
+	f.app.SetUpdateNotifier(func(version string) { got = append(got, version) })
+
+	f.checkAndWait(t, false)
+
+	// 退回来的是**另一个**版本：不许把 0.2.0 那一份也带走。
+	f.app.ReleaseUpdateNotification("0.9.9")
+	f.checkAndWait(t, false)
+
+	if len(got) != 1 {
+		t.Fatalf("退了另一个版本，同一个版本却提醒了 %d 次（%v），want 1 次", len(got), got)
+	}
+}
+
 // TestANewVersionIsNotifiedAgain 钉住「换了版本就该再提醒一次」。
 //
 // ⚠️ **去重不许把「整个更新提醒」关掉**：用户要看的正是「哪一个版本」，而

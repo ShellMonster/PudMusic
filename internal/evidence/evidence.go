@@ -4150,16 +4150,28 @@ var Items = []Item{
 			// 同一个版本只提醒一次（稳定 ID 不代替它）。
 			"TestTheSameVersionIsNotNotifiedTwice",
 			"TestANewVersionIsNotifiedAgain",
+			// 用户在前台发现新版本，等他离开之后**仍然**能收到那一条（两层
+			// 合起来量：应用层那一份记账也得退回来）。
+			"TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave",
 			// 「更新提醒」那一格在设置页上摆着。
 			"TestTheUpdateNotificationSwitchIsOnTheSettingsPage",
 			// 应用层那一段接线（下载完成 / 后台查到更新会递出去）。
 			"TestADownloadThatFinishedReachesTheNotifier",
 			"TestABackgroundCheckTellsTheNotifier",
 			"TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice",
+			// 退回来那一份之后，同一个版本还能再提醒一次。
+			"TestAReleasedVersionIsNotifiedAgain",
+			"TestAReleaseDoesNotClearAnotherVersion",
 			"TestTheUpdateNotificationSwitchTurnsItOff",
 			"TestTheUpdateNotificationSwitchIsOnByDefault",
 			// 平台层那一段（问过没有 / 拒了不再问 / 失败交给上层）。
 			"TestANotificationIsNotSupportedBeforeTheAppIsReady",
+			// 「刚起来的进程」那一份账是「还没问过」那一档——
+			// 而**零值**就是那一档（否则打包的 macOS 应用一次都不会去问
+			// 框架，于是弹不出系统通知，而它静默降级成应用内提示）。
+			"TestAFreshProcessHasNotAskedYet",
+			"TestTheZeroValueOfTheSupportStateMeansNotAskedYet",
+			"TestTheSupportAnswerIsAskedOnlyOnce",
 			"TestADeniedNotificationIsNeverAskedForAgain",
 			"TestTheFailureIsHandedToTheUpperLayer",
 		},
