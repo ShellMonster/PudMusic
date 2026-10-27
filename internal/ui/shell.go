@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"image"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -198,6 +199,67 @@ type Shell struct {
 	// ⚠️ **别改成包级变量**：包级的可变全局会让两个窗口（主窗口 + 迷你）共享
 	// 一个桩，而这一栏是**每扇窗一份**的。
 	openExternal func(url string) error
+
+	// writeClipboardText 是「把一段文字放进剪贴板」的那一下。
+	//
+	// ⚠️ **默认是 `systemWriteClipboardText`，而无头 Tester 里那一句会 panic**
+	// （`mygo.Clipboard.WriteText` 里的 `needsApp` 见到 `App.Run` 没跑过就直接
+	// panic，见 `mygo/app.go:128`）——所以**测试会把它换成记下内容的桩**。
+	// 这一栏就是那个桩的插口。
+	//
+	// ⚠️ **别改成包级变量**：同一个理由——两个窗口各有一份。
+	writeClipboardText func(text string) error
+
+	// writeClipboardImage 是「把一张 PNG 放进剪贴板」的那一下。
+	//
+	// ⚠️ **同一份顾虑**（无头 Tester 里 `mygo.Clipboard.WriteImage` 会 panic），
+	// 而且它**会验一遍是不是 PNG**（`mygo/modules.go:184`）——不是 PNG 就返回错。
+	writeClipboardImage func(png []byte) error
+
+	// runOnMain 把一段代码放到**主线程**上执行。
+	//
+	// ⚠️ **默认是生产那一档**（`mygo.RunOnMain`）：它在主线程上**直接执行**
+	// （`mygo/loop.go:94` 的 `onMain` 里有 `isMainThread()` 短路，不排队也不
+	// 阻塞），从后台调则**排队并等它跑完**。
+	//
+	// ⚠️ **为什么「复制」这一族要它**：判号和写剪贴板必须**在同一个主线程
+	// 段里**（理由见 `clipboard.go` 的 `copyClipboard`）——主线程是**单线程
+	// 事件循环**，所以同一时刻只有一段在跑，两次写天然串行。
+	//
+	// ⚠️ **runOnMainBackground 是「从后台调」的那一档**：它**排队**并**等它跑
+	// 完**——而 **runOnMain 是「在主线程上调」的那一档**：它**直接执行**。这个
+	// 差别**就是那个竞态的机制**：后台那一趟（封面）把段投进队列（**还在排
+	// 队**），而用户按文本走的是主线程档，**绕过队列直接执行**——于是文本
+	// **先**落地，队列里那个旧封面的段**随后**才执行（理由见 `clipboard.go`）。
+	//
+	// ⚠️ **无头 Tester 里不能用生产那一档**：那一档会 `needsApp`（没跑过
+	// `App.Run` 就 panic，见 `mygo/app.go:128`），而从后台调它还会**等一个
+	// 永远不来的人**（无头环境里没有事件循环在排空那个队列）。所以测试把
+	// 它换成**一个假主线程**（见 `shelltest_test.go` 的 `mainThreadStub`）。
+	runOnMain func(fn func())
+	// runOnMainBackground 是「从后台调主线程」的那一档（排队 + 等）。
+	runOnMainBackground func(fn func())
+
+	// coverImage 是「拿这一张封面那张**能编码的图**」的那一下。
+	//
+	// ⚠️ **默认是空的**，空的时候走 `s.images.SourceImage`（也就是生产那一档）。
+	//
+	// ⚠️ **它只给测试用**：编码失败那一档（`png.Encode` 报错）在生产上**几乎
+	// 不会发生**——而正因如此，它**必须有测试**，否则那一档的代码被删了也没有
+	// 任何东西会红。测试要造出「一张编码不了的图」，而造它的最直接的办法就是
+	// 把「取图」这一下换成一张尺寸为 0 的图（`png.Encode` 对它报
+	// "invalid image size"）。
+	coverImage func(url string) (image.Image, error)
+
+	// copyDone 是「某一趟后台复制**结束了**」的那个信号。
+	//
+	// ⚠️ **它只给测试用**：生产那一档是 nil（没有这一层）。测试要靠它知道
+	// 「先发起的那一趟跑完了」——而那一趟**可能什么都没写**（被后来的动作
+	// 作废了），所以**光看剪贴板里的内容是等不到它结束的**。
+	//
+	// ⚠️ **它带一个参数**：那个号（`copyGeneration` 发的）——这样测试能
+	// 分辨「结束的是哪一趟」。
+	copyDone func(gen uint64)
 
 	// images 是网络封面缓存。整个窗口共用一份；迷你窗口借的是主窗口那一份
 	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
