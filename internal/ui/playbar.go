@@ -1180,7 +1180,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	//
 	// `queue_drawer.go` 的 `viewQueueRow` 本来就是这个形状——可点的行是封面的
 	// **祖先**，所以那边浮层里画 ▶ 还是 ⤢ 都吃不掉点击。
-	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize)
+	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize).ContextMenu(s.coverMenu)
 	wrap.Children(func() {
 		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
 		//

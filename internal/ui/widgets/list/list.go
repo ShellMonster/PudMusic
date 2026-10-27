@@ -143,6 +143,8 @@ type Music struct {
 // 画行，压根不走这一个）——「摆一列这一页没有内容的」比不摆更糟（见
 // `header.go` 文件头）。
 type Columns struct {
+	// Rank 报序号那一列是不是「名次」：榜单页开它，前三名用主色加粗放大。
+	Rank bool
 	// PlayCount 报播放量那一列画不画。
 	PlayCount bool
 	// PubTime 报时间那一列画不画。

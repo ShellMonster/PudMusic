@@ -57,6 +57,10 @@ const (
 	// `suggest-history` 分开，于是两栏是两块而不是一栏。
 	suggestTermsKey = "suggest-terms"
 
+	// suggestHotHeading / suggestHotKey 是「大家在听」那一档的标题和键。
+	suggestHotHeading = "大家在听"
+	suggestHotKey     = "suggest-hot"
+
 	// suggestFailedNote 是「这一趟没拉到」时那一档自己的一句话。
 	//
 	// ⚠️ **它不许是「没有联想词」**：那一句说的是「B 站没给联想」，而没拉到是另一
@@ -232,6 +236,16 @@ func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
 		}
 		for _, term := range items {
 			s.viewSuggestTerm(c, term)
+		}
+	})
+}
+
+// viewSuggestHot 画框里还没敲字时的「大家在听」那一档：热榜前几首的歌名，点一个就搜。
+func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
+	ui.Column(c).Key(suggestHotKey).FillWidth().Gap(space.Px2).Children(func() {
+		ui.Text(c, suggestHotHeading).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		for _, title := range titles {
+			s.viewSuggestTerm(c, title)
 		}
 	})
 }

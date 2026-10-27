@@ -26,10 +26,13 @@
 package imgcache
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/png"
 	"io"
 	"log"
 	"net/http"
@@ -685,6 +688,43 @@ func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
 	}
 
 	return io.ReadAll(io.LimitReader(resp.Body, maxImageBytes))
+}
+
+// PNG 返回这张封面的 PNG 字节（给「复制封面」放剪贴板用）。先看磁盘缓存，没有才
+// 下载；原字节已经是 PNG 就原样返回，否则解码后重新编码。
+//
+// ⚠️ 要在后台 goroutine 里调：下载和编码都是慢活，不许在 view 里调。
+func (c *Cache) PNG(ctx context.Context, url string) ([]byte, error) {
+	if c == nil || url == "" {
+		return nil, errors.New("imgcache: 没有封面地址")
+	}
+	var data []byte
+	if name := c.diskName(url); name != "" {
+		data, _ = c.disk.open(name)
+	}
+	if len(data) == 0 {
+		var err error
+		if data, err = c.download(ctx, url); err != nil {
+			return nil, err
+		}
+	}
+	return toPNG(data)
+}
+
+// toPNG 把一张图的字节变成 PNG 字节。
+func toPNG(data []byte) ([]byte, error) {
+	if bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
+		return data, nil
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 // diskName 是这个 url 在磁盘缓存里的文件名，空表示不落盘。

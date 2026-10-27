@@ -482,9 +482,18 @@ func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, tit
 		hover.Wave(c, "wave:"+l.songs[i].ID, width, color, title)
 		return
 	}
+	if l.cols.Rank && i < 3 {
+		ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).Bold().
+			FontSize(scale.Font(c, font+rankTopFontBoost)).TextColor(ink.AccentOn(t)).MaxLines(1)
+		return
+	}
 	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).
 		FontSize(scale.Font(c, font)).TextColor(t.TextMuted).MaxLines(1)
 }
+
+// rankTopFontBoost 是榜单前三名的序号比普通序号大几号：名次是榜单这一页的主角，
+// 前三名用主色加粗放大，其余名次与普通序号一样是淡色。
+const rankTopFontBoost = 4
 
 // viewPlayCount 画播放量那一列。**这一页没装这一列时一个元素都不建**——
 // 建一个空盒子的话，那些页的右边几列会白白让出一列的宽。

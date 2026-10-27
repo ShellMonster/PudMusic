@@ -113,6 +113,14 @@ type Shell struct {
 
 	// tint 是封面取色的状态（见 covertint.go）。
 	tint coverTint
+	// glowWake 是满屏光晕取色用的叫醒函数，建一次存着（每帧现写方法值会建闭包）。
+	glowWake func()
+	// fullCoverKey 是满屏封面格子的键，fullCoverKeyURL 是它对应的封面地址。
+	fullCoverKey    any
+	fullCoverKeyURL string
+	// fullCoverTr 是满屏封面的共享元素转场，fullCoverTrID 是它对应的身份。
+	fullCoverTr   ui.ElementTransition
+	fullCoverTrID string
 
 	// shownPath 是上一帧画的是哪一页，syncRoute 拿它认出「换页了」。
 	shownPath string
@@ -1020,6 +1028,10 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		mounted: func() bool { return s.app.RecommendOf().Mounted() },
 		tab:     s.fetchHomeTab,
 		new:     s.fetchHomeNewMusic,
+		board: func(tab int) (int, time.Time, bool) {
+			p, ok := s.app.RecommendOf().BoardPeriod(tab)
+			return p.Number, p.PublishedAt, ok
+		},
 		selfMid: s.app.SelfMid,
 		wake:    s.wake.invalidate,
 	})
