@@ -257,14 +257,15 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 // 底部被程序坞占着。Biu 那边是居中（`center: true`）**而且不记位置**（一个普通
 // BrowserWindow 没有位置持久化），我们两条都要：第一次贴边，之后跟着用户走。
 //
-// work 是主显示器的工作区（`mygo.Screen.PrimaryDisplay().WorkArea`）。传零值就
-// 退回 (0,0)，让框架去居中——单元测试里没有真显示器，走的就是这一支。
+// ⚠️ **work 是哪一块屏的工作区**：现在它跟着**指针所在那块屏**走
+// （`miniPlanFirst`，票 #555）——而**主显示器**只是「问不到系统」时的兜底。
+// 传零值就退回 (0,0)，让框架去居中——单元测试里没有真显示器，走的就是这一支。
 func miniCorner(work mygo.Rectangle) (x, y int) {
-	const margin = 12
 	if work.Width <= 0 || work.Height <= 0 {
 		return 0, 0
 	}
-	return work.X + work.Width - miniWidth - margin, work.Y + margin
+	r := miniCornerRect(work, mygo.Rectangle{Width: miniWidth, Height: miniHeight})
+	return r.X, r.Y
 }
 
 // NewMini 建迷你播放器那个外壳。**状态和主窗口共用同一个 App。**
@@ -433,9 +434,35 @@ func (s *Shell) ensureMiniWindow() {
 		}
 		opts := MiniWindowOptions(mini.View)
 		// `mygo.Screen` 头上有 `needsApp`，所以位置只能在 ready 之后取。
-		opts.X, opts.Y = miniCorner(mygo.Screen.PrimaryDisplay().WorkArea)
+		//
+		// ⚠️ **跟着指针走**（票 #555）：以前这一句取的是**主显示器**的工作
+		// 区——于是在第二块屏上点「迷你」的人，窗却开在主屏上，而**他看不见
+		// 它**（症状和「点了没反应」一模一样）。
+		opts.X, opts.Y = miniFirstPosition()
 		mini.attachMiniWindow(mygo.NewWindow(opts))
+		// 🔴 **位置恢复之后要再判一次**（票 #555）：`StateKey` 记住的位置会
+		// **盖掉**上面那两句（`mygo/window_state.go` 的 `restoreWindowState`），
+		// 而那一块屏要是已经被拔了（或者改了分辨率），窗就停在**谁都看不见**
+		// 的地方——所以建出来之后立刻按当下的显示器重新判一次。
+		mini.miniReconcileDisplayNow()
 	})
+}
+
+// miniFirstPosition 算迷你窗**第一次**该在哪儿：跟着指针走。
+//
+// ⚠️ **问不到系统时退回主显示器**（`miniCorner`）：那只是兜底——正常路径上
+// 这一句在 `App.WhenReady` 之后跑，而那时候系统是问得到的。
+func miniFirstPosition() (x, y int) {
+	displays := miniDisplayList()
+	cursor, ok := miniCursorPoint()
+	if len(displays) == 0 || !ok {
+		return miniCorner(mygo.Screen.PrimaryDisplay().WorkArea)
+	}
+	plan := miniPlanFirst(displays, cursor, mygo.Rectangle{Width: miniWidth, Height: miniHeight})
+	if plan.Rect.Width == 0 {
+		return miniCorner(mygo.Screen.PrimaryDisplay().WorkArea)
+	}
+	return plan.Rect.X, plan.Rect.Y
 }
 
 // bindMiniWindow 是「这个外壳现在代表一扇画着迷你播放器的窗口」那一半：
@@ -492,7 +519,25 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	// 话，用户点一下播放键进度条就不再动了（见 presence.go）。
 	if native != nil {
 		s.watchWindow(native)
+		// ⚠️ **「显示器变了」那一档**（票 #555）：插上 / 拔掉一块屏、或者改
+		// 分辨率之后，窗原来那个位置可能已经没人看得见了——这一档把它夹回
+		// 还剩下的那块屏的工作区里。
+		//
+		// ⚠️ **退订句柄要留着**：这个订阅是**全局**的（`mygo.Screen` 上的一个
+		// 列表），而迷你窗会开开关关——不摘的话，每开一次就多留一个回调，
+		// 而那个回调还**拿着这一扇窗**（窗关了它照样跑）。
+		s.miniDisplaysOff = mygo.Screen.OnDisplaysChanged(func() { s.miniOnDisplaysChanged() })
 	}
+
+	// 🔴 **窗被挪动了 ⇒ 重新判它落在哪块屏上**（票 #555）。
+	//
+	// ⚠️ **它装在 `miniWindow` 那一层上**，而不是 `*mygo.Window`——于是无头
+	// 那一档能手动触发它（`minidisplays_test.go` 里就是这么验「窗不会掉到
+	// 屏幕外」的）。
+	//
+	// ⚠️ **它不跟用户对着干**：只有一块屏都看不见这扇窗的时候才把它拉回来
+	// （理由见 `miniOnWindowMoved`）。
+	w.OnMove(func() { s.miniOnWindowMoved() })
 
 	// 🔴 **应用真的成了前台的时候，再抢一次 key 窗口**（票 #536，评审实测
 	// 抓到的那个 Esc 路径）。
@@ -541,6 +586,11 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 		}
 		if _, ok := s.miniWin.(miniWindowOf); ok {
 			s.miniWin = nil
+		}
+		// ⚠️ **退订「显示器变了」那一档**（票 #555）：理由见上面装它的那一段。
+		if s.miniDisplaysOff != nil {
+			s.miniDisplaysOff()
+			s.miniDisplaysOff = nil
 		}
 		// 唤醒句柄的摘除在 `closePerWindow` 里（`releaseMini` 走的就是它）。
 		s.releaseMini()
