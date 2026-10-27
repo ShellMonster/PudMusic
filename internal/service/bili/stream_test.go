@@ -99,7 +99,7 @@ func TestPlayURLTakesTheBestAvailable(t *testing.T) {
 		},
 	})
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestPlayURLPrefersFLAC(t *testing.T) {
 		},
 	})
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioLossless)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestPlayURLTrustsTheFlacFieldNotTheIdInsideIt(t *testing.T) {
 		},
 	})
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioLossless)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,11 +198,12 @@ func TestPlayURLTrustsTheFlacFieldNotTheIdInsideIt(t *testing.T) {
 	}
 }
 
-// TestPlayURLLosslessRefusesToFallBack 盯「要无损就必须要无损」。
+// TestPlayURLLosslessFallsBackToTheBestLossy 盯「点名的档没有就退到最高有损」。
 //
-// 静默降级比报错更糟：用户为无损付了钱，界面上还写着「Hi-Res 无损」，
-// 而实际放的是 192K。Biu 上游这里是不管的（auto 与 lossless 都往下退）。
-func TestPlayURLLosslessRefusesToFallBack(t *testing.T) {
+// 报错等于这首歌放不出来（票 #581 改掉的旧规矩）；退档放出来照样是答案，
+// 实际拿到了哪一档由 app 那一层在切换时说清。退的方向是**不高于**点名的档：
+// 点了无损退到 192K，而不是 128K。
+func TestPlayURLLosslessFallsBackToTheBestLossy(t *testing.T) {
 	exp := time.Unix(1702204169+7200, 0)
 	_, c := playurlClient(t, map[string]any{
 		"duration": 100,
@@ -211,13 +212,90 @@ func TestPlayURLLosslessRefusesToFallBack(t *testing.T) {
 		},
 	})
 
-	_, err := c.PlayURL(context.Background(), testBvid, testCid, AudioLossless)
-	if !errors.Is(err, ErrNoStream) {
-		t.Fatalf("err = %v，want ErrNoStream", err)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioLossless)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "无损") {
-		t.Errorf("错里没有说「是因为没有无损」：%v", err)
+	if ref.Quality != QualityHigh192 {
+		t.Errorf("音质 = %d，want 30280（退到最高有损，不报错）", ref.Quality)
 	}
+	if ref.Label != "192K" {
+		t.Errorf("徽章 = %q，want 192K", ref.Label)
+	}
+}
+
+// TestTheDefaultTierLeavesTheFlacFieldAlone 盯「默认档不碰无损」。
+//
+// `dash.flac` 在返回里躺着，但用户没有点名要无损——那就一个字节都别多下：
+// FLAC 的码率是 192K 的 9 倍上下，把无损混进默认档的回退路径里，等于让
+// 每一次起播都多等几倍的首缓冲（票 #581 改掉的旧规矩）。
+func TestTheDefaultTierLeavesTheFlacFieldAlone(t *testing.T) {
+	exp := time.Unix(1702204169+7200, 0)
+	_, c := playurlClient(t, map[string]any{
+		"duration": 100,
+		"audio": []any{
+			audioItem(30280, 203786, "mp4a.40.2", streamURL(exp, "-192.m4s")),
+		},
+		"flac": map[string]any{
+			"display": true,
+			"audio":   audioItem(30251, 1_609_860, "fLaC", streamURL(exp, "-flac.m4s")),
+		},
+	})
+
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Quality != QualityHigh192 {
+		t.Errorf("音质 = %d，want 30280（默认档是无损优先的时代已经过去了）", ref.Quality)
+	}
+}
+
+// TestPlayURLDolbyComesFromTheDolbyField 盯杜比那一档：用户点名「杜比」时
+// 从 `dash.dolby` 拿，拿不到退到最高有损（同一套降档规矩，票 #581）。
+func TestPlayURLDolbyComesFromTheDolbyField(t *testing.T) {
+	exp := time.Unix(1702204169+7200, 0)
+	t.Run("有杜比给杜比", func(t *testing.T) {
+		_, c := playurlClient(t, map[string]any{
+			"duration": 100,
+			"audio": []any{
+				audioItem(30280, 203786, "mp4a.40.2", streamURL(exp, "-192.m4s")),
+			},
+			"dolby": map[string]any{
+				"type": 1,
+				"audio": []any{
+					audioItem(30250, 1024203, "ec-3", streamURL(exp, "-dolby.m4s")),
+				},
+			},
+		})
+
+		ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioDolby)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ref.Quality != QualityDolby {
+			t.Errorf("音质 = %d，want 30250", ref.Quality)
+		}
+		if ref.Label != "杜比全景声" {
+			t.Errorf("徽章 = %q，want 杜比全景声", ref.Label)
+		}
+	})
+	t.Run("没有杜比退到 192K", func(t *testing.T) {
+		_, c := playurlClient(t, map[string]any{
+			"duration": 100,
+			"audio": []any{
+				audioItem(30280, 110836, "mp4a.40.2", streamURL(exp, "-320.m4s")),
+			},
+		})
+
+		ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioDolby)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ref.Quality != QualityHigh192 {
+			t.Errorf("音质 = %d，want 30280（退到最高有损，不报错）", ref.Quality)
+		}
+	})
 }
 
 // TestPlayURLPicksTheNamedTier 盯用户点名的档位。
@@ -335,7 +413,7 @@ func TestPlayURLIgnoresStreamsWithoutAnAddress(t *testing.T) {
 		}},
 	})
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatalf("自动档被一条没有地址的流带偏了：%v", err)
 	}
@@ -383,7 +461,7 @@ func TestPlayURLReadsTheDeadline(t *testing.T) {
 		"audio":    []any{audioItem(30280, 110836, "mp4a.40.2", streamURL(exp, ".m4s"))},
 	})
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +521,7 @@ func TestPlayURLKeepsBackupURLs(t *testing.T) {
 			streamURL(exp, "-main.m4s"), streamURL(exp, "-b1.m4s"), streamURL(exp, "-b2.m4s"))},
 	})
 
-	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	ref, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +573,7 @@ func TestPlayURLNeedsBothBvidAndCid(t *testing.T) {
 	for _, tc := range []struct{ bvid, cid string }{
 		{"", testCid}, {testBvid, ""}, {"", ""},
 	} {
-		if _, err := c.PlayURL(context.Background(), tc.bvid, tc.cid, AudioAuto); !errors.Is(err, ErrNoStream) {
+		if _, err := c.PlayURL(context.Background(), tc.bvid, tc.cid, AudioHigh); !errors.Is(err, ErrNoStream) {
 			t.Errorf("bvid=%q cid=%q：err = %v，want ErrNoStream", tc.bvid, tc.cid, err)
 		}
 	}
@@ -508,7 +586,7 @@ func TestPlayURLNeedsBothBvidAndCid(t *testing.T) {
 
 func TestPlayURLSaysWhyThereIsNoStream(t *testing.T) {
 	_, c := playurlClient(t, map[string]any{"duration": 100})
-	_, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto)
+	_, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh)
 	if !errors.Is(err, ErrNoStream) {
 		t.Fatalf("err = %v，want ErrNoStream", err)
 	}
@@ -678,7 +756,7 @@ func TestWBIKeysComeBackEvenWhenNotLoggedIn(t *testing.T) {
 	})
 	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
 
-	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto); !errors.Is(err, ErrNoStream) {
+	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh); !errors.Is(err, ErrNoStream) {
 		// 这里要的不是「取到了流」（dash 是空的），而是「走到了取流接口」。
 		t.Fatalf("err = %v，want ErrNoStream（说明请求发出去了）", err)
 	}
@@ -805,7 +883,7 @@ func TestPlayURLSurvivesAVoucherAndSendsBuvid(t *testing.T) {
 			audioItem(30280, 110836, "mp4a.40.2", streamURL(exp, "-30280.m4s"))}}))
 	})
 
-	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto); err != nil {
+	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh); err != nil {
 		t.Fatal(err)
 	}
 	for _, rec := range f.requests() {
@@ -820,7 +898,7 @@ func TestPlayURLReportsRiskControlWhenVoucherPersists(t *testing.T) {
 	f.on(playurlPath, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, `{"code":0,"message":"0","ttl":1,"data":{"v_voucher":"voucher_x"}}`)
 	})
-	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioAuto); !errors.Is(err, ErrRiskControl) {
+	if _, err := c.PlayURL(context.Background(), testBvid, testCid, AudioHigh); !errors.Is(err, ErrRiskControl) {
 		t.Fatalf("err = %v，want ErrRiskControl", err)
 	}
 }

@@ -159,7 +159,7 @@ func TestPlayURLRefusesAMissingCid(t *testing.T) {
 	})
 	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
 
-	if _, err := c.PlayURL(context.Background(), "BV1", "", AudioAuto); !errors.Is(err, ErrNoStream) {
+	if _, err := c.PlayURL(context.Background(), "BV1", "", AudioHigh); !errors.Is(err, ErrNoStream) {
 		t.Errorf("没有 cid 也放行了，err = %v", err)
 	}
 	// 而且**一个请求都不该发**：参数不全时发出去也是白费一次带签名的往返。

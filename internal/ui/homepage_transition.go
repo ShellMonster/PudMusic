@@ -162,6 +162,9 @@ var homeBodyKeys = [homeTabCount]any{
 	"home:body:0",
 	"home:body:1",
 	"home:body:2",
+	"home:body:3",
+	"home:body:4",
+	"home:body:5",
 }
 
 // homeSwapPhase 是切 Tab 那一段现在处在哪一段。

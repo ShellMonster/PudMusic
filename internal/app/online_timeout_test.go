@@ -151,9 +151,6 @@ func TestAPlayThatNeverStartsTurnsIntoASentence(t *testing.T) {
 	if st := a.Snapshot(); st.Err != "" {
 		t.Fatalf("还没到阈值就有错了：%q", st.Err)
 	}
-	if st := a.Snapshot(); st.LoadingTitle != "取不来的那一首" {
-		t.Errorf("不知道在取哪一首：%q", st.LoadingTitle)
-	}
 
 	// 三、**超过阈值**：按失败处理——一句话，转圈收掉。
 	clock.fire()

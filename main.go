@@ -129,6 +129,10 @@ func main() {
 	// 评论缓存同理：建目录（阻塞 IO），排在开窗口之前。
 	ui.MountComments(a)
 
+	// 弹幕缓存也是同一件事：建目录是阻塞 IO，排在开窗口之前。
+	// 它不发请求——真正开始取是界面第一帧问 `App.Danmaku()` 的时候。
+	ui.MountDanmaku(a)
+
 	// 自动更新也挂在开窗口之前：`mygo.Updater.Enabled()` 要在应用旁边建一个
 	// 临时目录试写，那是阻塞 IO，而它的结果（能不能更新）要在界面第一帧上就
 	// 是对的。真正开始查是 `ui.Run` 的 WhenReady 里（见那里）。

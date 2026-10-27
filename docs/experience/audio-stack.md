@@ -28,6 +28,29 @@
 注册表认不出来、而头几个字节是 `fLaC` 的，落回 `flacdec`——那是**本地裸 `.flac` 文件**
 的路子（MyGo 的表是对字面量做匹配的，给变长的 magic 注册不了）。
 
+### 双击打开登记的那一份扩展名
+
+**出处**：`README.md`《支持什么》「双击打开」那一档
+
+系统把一个音频文件交给本应用时（访达 / 资源管理器双击、拖到程序坞图标上），认的是
+`mygo.json` 的 `fileAssociations`：
+
+```
+.mp3 .flac .wav .m4a .aac .ogg .aiff .aif .aifc
+```
+
+⚠️ **这一份就是上表里真放得出声的那一份，`.wma` 不在里面**——而
+`internal/service/localmusic` 的**扫描白名单**里有 `.wma`（见下面《本地音乐不支持
+WMA》那一节）。两份清单不一样是有意的：登记 `.wma` 的话，用户双击一首 WMA 会
+得到一句「这个格式我们放不了」——那比「双击没反应」更坏。
+
+⚠️ **扩展名一律不带点**：MyGo 的 `FileAssociation.Ext` 明确要求不带点，带点的写法
+会被配置校验器拒绝（**失败在打包读配置那一步**）。
+
+**口径记在 `internal/platform/fileassoc.go`**（`AssociatedAudioExts`），界面层与
+`mygo.json` 两边的一致性由 `internal/platform/fileassoc_test.go` 钉住——两份口径
+对不上时的症状是「应用起来了，什么也没放」，而界面上看不出任何异样。
+
 ### ⚠️ B 站在线的无损流不是裸 FLAC
 
 实测（2026-10-23，issue #252）它的头 16 字节是

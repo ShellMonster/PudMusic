@@ -45,7 +45,7 @@ func newDownloadApp(t *testing.T, f *streamFixture, dlDir, queueFile string) *ap
 	cli := bili.NewClient(bili.Options{})
 	cli.TestOnlyPointHostsAtFixture(f.URL)
 	// ⚠️ 音质偏好要照 `ui.MountStreaming` 那样**从设置里读**（#67 加的）。
-	// 少了这一行，下载拿到的是零值 `AudioAuto`——于是「用户选了省流量、
+	// 少了这一行，下载拿到的是零值 `AudioHigh`——于是「用户选了省流量、
 	// 下回来的却是 192K」这条在测试里看不出来。
 	a.MountStreaming(app.Streaming{
 		Client:  cli,

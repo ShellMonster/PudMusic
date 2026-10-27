@@ -2,71 +2,48 @@ package ui
 
 import (
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/app"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// 播放条上的「正在取流」（票 #282）。
+// 播放条上的取流反馈（票 #282 立的「要说话」，票 #581 改成「光圈说话」）。
 //
 // # 这一组盯的是「点了歌一直不开始」时用户看到什么
 //
-// 用户实测：点了一首，**加载动画转了好几秒，始终没出声，也没有任何报错提示**。
-// 改之前这一档在界面上**一个字都没有**——用户既不知道应用在干什么，也不知道
-// 出了什么事。
-//
-// 改之后是两句：
-//
-//	「正在取流：<歌名>」	在等的这一段（灰字，不是红字——红字是「出错了」）
-//	一句失败的话		等够了（阈值见 app.onlinePlayTimeout）
-//
-// 两条互斥：出错的那句优先——一句错比一枚转圈信息量大，而转圈还在转说明还有
-// 希望。
+// 取流这一趟里界面的反馈只有**播放键上那一圈光**（loadhalo_test 那一族断的是
+// 光圈本身），播放条左下角**不写字**——那一行留给出错/重连/停住那三档。
+// 等够了（阈值见 app 的 onlinePlayTimeout）上屏的是一句失败的话，不是一直转圈。
 
-// TestThePlayBarSaysItIsLoading 盯「正在取流」那一句话。
+// TestThePlayBarStaysQuietWhileLoading 盯「取流的时候那一行不说话」（票 #581）。
 //
-// 🔴 **判据是画面上有没有那句话**（不是「有没有转圈」）：转圈是动着的，
-// 无头 Tester 抓不住它；而那句话是用户真正读到的东西（「它在准备」）。
-func TestThePlayBarSaysItIsLoading(t *testing.T) {
+// 🔴 **判据是「没有那句话」**：以前这里有「正在取流：<歌名>」（票 #282）和
+// 「取流很慢」（票 #220），用户不要这两行——反馈集中在播放键的光圈上。
+// 歌名和 UP 名照旧，位置不挪。
+func TestThePlayBarStaysQuietWhileLoading(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
-		Loading: true, LoadingTitle: "取不来的那一首",
+		HasTrack: true, Title: "还在放的那一首", Loading: true,
 	}, 1000)
 
-	if !tt.HasText("正在取流") {
-		t.Errorf("播放条上没有「正在取流」：%q", tt.Texts())
+	if tt.HasText("正在取流") || tt.HasText("取流很慢") {
+		t.Errorf("取流的时候播放条上不该有取流的字：%q", tt.Texts())
 	}
-	// 说清是**哪一首**——用户刚点的和正在放的不是同一首时，光说「正在取流」
-	// 是不够的。
-	if !tt.HasText("取不来的那一首") {
-		t.Errorf("不知道在取哪一首：%q", tt.Texts())
-	}
-}
-
-// TestTheLoadingLineHasASpinner 盯「正在取流」那一行里有一枚转圈。
-//
-// ⚠️ **判据是它的无障碍名字**：转圈没有可见的字，而它是唯一能认出「这里在
-// 等」的凭据（无头 Tester 也只认字和名字）。
-func TestTheLoadingLineHasASpinner(t *testing.T) {
-	tt, _ := metaBarTester(t, app.State{
-		Loading: true, LoadingTitle: "取不来的那一首",
-	}, 1000)
-
-	if _, ok := tt.Find("正在取流"); !ok {
-		t.Errorf("「正在取流」那一行里没有转圈：%q", tt.Texts())
+	// 上一首的歌名照旧：取流这一趟里正在放的还是它。
+	if !tt.HasText("还在放的那一首") {
+		t.Errorf("取流的时候歌名不见了：%q", tt.Texts())
 	}
 }
 
 // TestThePauseKeyIsStillThereWhileLoading 盯**取流期间还能按暂停**。
 //
-// 🔴 **这一条是评审挑出来的**：取流这一趟里**上一首还在放**（在线流是后台
-// 建的），而把播放/暂停那一枚换成转圈的话，用户就按不了暂停了——迷你窗和
-// 满屏播放器里还有，播放条上没有了。
+// 🔴 **这一条是票 #282 的评审挑出来的**：取流这一趟里**上一首还在放**（在线流
+// 是后台建的），而把播放/暂停那一枚换成转圈的话，用户就按不了暂停了——光圈
+// 绕的是那一枚键，键本身照旧。
 func TestThePauseKeyIsStillThereWhileLoading(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "还在放的那一首", Playing: true,
-		Loading: true, LoadingTitle: "取不来的那一首",
+		Loading: true,
 	}, 1000)
 
 	if _, ok := tt.Find("暂停"); !ok {
@@ -74,7 +51,7 @@ func TestThePauseKeyIsStillThereWhileLoading(t *testing.T) {
 	}
 	// 反过来：没在放的时候那一枚是「播放」，不能因为在取流就变成别的。
 	tt2, _ := metaBarTester(t, app.State{
-		Loading: true, LoadingTitle: "取不来的那一首",
+		Loading: true,
 	}, 1000)
 	if _, ok := tt2.Find("播放"); !ok {
 		t.Errorf("取流时播放条上那一枚不是「播放」：%q", tt2.Texts())
@@ -126,53 +103,5 @@ func TestTheFailureSentenceFitsOnOneLine(t *testing.T) {
 	if measured > box.W {
 		t.Errorf("「打不开：%s」宽 %.1f，而那一格只有 %.1f——放不下，屏幕上只剩碎片",
 			short, measured, box.W)
-	}
-}
-
-// TestTheSlowLoadingLineSaysItIsSlow 盯「慢的时候界面上有一句能看懂的话」
-// （票 #220）。
-//
-// 🔴 **这是这一票的验收项**：用户抱怨的是「取流非常慢」——而「正在取流：
-// <歌名>」那句话从头到尾不变，他等三秒和等三十秒看到的都是同一句，于是
-// 「慢」这件事在界面上**根本不存在**。
-//
-// 慢的时候屏幕上换成「取流很慢：<歌名>」：一样长（歌名那一截不变），但
-// 多了一件**新**的事——用户第一次知道「它慢」。
-func TestTheSlowLoadingLineSaysItIsSlow(t *testing.T) {
-	tt, _ := metaBarTester(t, app.State{
-		Loading: true, LoadingTitle: "取不来的那一首",
-		LoadingSlow: true, LoadingStage: "下音频", LoadingWait: 12 * time.Second,
-	}, 1000)
-
-	if !tt.HasText("取流很慢") {
-		t.Errorf("慢的时候界面上没有说「慢」：%q", tt.Texts())
-	}
-	// 🔴 **歌名不许丢**：用户要知道自己在等的是哪一首。
-	if !tt.HasText("取不来的那一首") {
-		t.Errorf("慢的时候不知道在等哪一首：%q", tt.Texts())
-	}
-	// 🔴 **转圈还得在**：它还是「还在等」的凭据。
-	if _, ok := tt.Find("正在取流"); !ok {
-		t.Errorf("「正在取流」那一行里没有转圈：%q", tt.Texts())
-	}
-}
-
-// TestTheSlowLineIsNoLongerThanTheNormalOne 盯**慢的那一句不比正常那句长**。
-//
-// 🔴 **播放条上那一行只有 140 像素宽**（1200 宽的窗口，实测），12 号字放得下
-// 十来个字。「取流很慢：」和「正在取流：」一样是五个字——所以换成「慢」的
-// 那一版**不花掉歌名那截的任何宽度**。要是慢的那句更长，挤掉的就是歌名，
-// 而用户恰恰在等的时候最需要知道自己在等哪一首。
-func TestTheSlowLineIsNoLongerThanTheNormalOne(t *testing.T) {
-	var slow, normal float32
-	mygoui.NewTester(func(c *mygoui.Context) {
-		slow, _ = c.MeasureText(0, mygoui.Span{
-			Text: "取流很慢：那一首", Size: scale.Font(c, scale.Size12)})
-		normal, _ = c.MeasureText(0, mygoui.Span{
-			Text: "正在取流：那一首", Size: scale.Font(c, scale.Size12)})
-	}, 300, 60).Frame()
-
-	if slow > normal {
-		t.Errorf("慢的那一句更宽（%.1f > %.1f）——挤掉的是歌名那截", slow, normal)
 	}
 }

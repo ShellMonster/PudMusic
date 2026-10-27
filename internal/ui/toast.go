@@ -148,13 +148,26 @@ type toast struct {
 // ⚠️ **后台那条线也调它**（比如 `download_mount.go` 的 `sayDownloadDone`），而播报
 // 那一头是带锁的（`announceQueue` 自己有锁），所以这里不用管自己在哪条线上。
 func (s *Shell) addToast(text string, tone notice.Tone) {
+	s.addToastFor(text, tone, toastLifetime)
+}
+
+// addToastFor 是 `addToast` 加一个「待多久」。
+//
+// ⚠️ **为什么有些话要待得久一点**：一条提示默认两秒（上游 Biu 的
+// `timeout: 2000`），而那两秒是给「用户正在看界面、按完一个键」准备的。
+// 但**系统交给我们的文件被拒**那一类不是用户按出来的——他双击了访达里的
+// 一个文件，然后**注意力已经回到别处了**（或者他正等着歌放起来）。两秒之后
+// 那句话就没了，而「没看到」和「没有提示」在用户那里是同一件事。
+//
+// 那一类话走 `openFileErrorLifetime`（五秒，见 `openfile.go`）。
+func (s *Shell) addToastFor(text string, tone notice.Tone, lifetime time.Duration) {
 	s.toastMu.Lock()
 	s.toastSeq++
 	t := toast{
 		id:    s.toastSeq,
 		text:  text,
 		tone:  tone,
-		until: time.Now().Add(toastLifetime),
+		until: time.Now().Add(lifetime),
 	}
 	s.toasts = append(s.toasts, t)
 	if len(s.toasts) > toastLimit {
@@ -165,6 +178,22 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 	// 念出去（无障碍）。**排在解锁之后**：播报那一头有自己的锁，而这一段
 	// 不该在握着 toast 那把锁的时候去拿另一把。
 	s.announce(text)
+
+	// 🔴 **要一帧**（铁律三：投递完状态必须叫醒界面）。
+	//
+	// ⚠️ **少了这一行，那句话在画面上不存在**（这一票第二轮评审抓到的那个
+	// 静默故障）：`addToast` 只写状态，而**按需绘制的界面不会因为状态变了
+	// 就自己画一帧**——`invalidate` 只在**收走**那一刻才调（`expire` 里那两
+	// 句），于是新加的那一条要等到「下一个别的原因碰巧重画界面」时才出现。
+	//
+	// 而「下一个别的原因」可能一直没有（界面静止的时候一帧都不画）。
+	// 症状是「用户双击了一个放不了的文件，什么都没发生」——而界面上**连
+	// 状态都记着**（`s.toasts` 里那句话在），只有画面上没有。
+	//
+	// ⚠️ **用 `invalidate` 而不是 `invalidateNow`**：`invalidate` 会问「这一
+	// 扇窗现在看不看得见」，而看不见的窗**不该**为一条提示重画（票 #156 的
+	// 风扇问题）。`invalidateNow` 会绕过那道闸门。
+	s.wake.invalidate()
 
 	go s.expire(t)
 }

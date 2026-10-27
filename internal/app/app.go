@@ -10,12 +10,14 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/media"
 	"github.com/ShellMonster/Biu_Go/internal/service/audio"
 	"github.com/ShellMonster/Biu_Go/internal/service/bili"
 	"github.com/ShellMonster/Biu_Go/internal/service/comments"
+	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
 	"github.com/ShellMonster/Biu_Go/internal/service/download"
 	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
 )
@@ -140,32 +142,10 @@ type State struct {
 	// 🔴 **它必须有超时**：这一栏要是能一直亮着，它就成了另一种「什么都不说」
 	// （票 #282）。超过 `onlinePlayTimeout` 就按失败处理，界面上换成一句人话。
 	Loading bool
-	// LoadingTitle 是正在取的那一首的名字。空串 = 没有在取流。
+	// 🔴 **界面上没有「正在取流」的文字**（票 #581）：取流的反馈只有播放键上
+	// 那一圈光（`loadhalo.go`）。卡在哪一段、等了多久这些细节只进日志和
+	// 超时之后的那句错误话——不占播放条上的一行。
 	//
-	// ⚠️ **它不是 `Title`**：`Title` 是「正在放的那首」，而取流这一趟里正在放
-	// 的还是上一首。用户要知道的是「我刚才点的那一首在准备」，不是上一首。
-	LoadingTitle string
-	// LoadingStage 是这一趟取流**现在卡在哪一段**（票 #220）。
-	//
-	// 取值是那几个短词（见 `internal/app/online.go` 的 `loadStage*`）：
-	// 「问分集」/「问地址」/「下音频」/「解码」。
-	//
-	// 🔴 **它是为「慢」准备的**：界面上说一句「卡在『下音频』这一步」，
-	// 比一枚不说话的转圈有用得多——而分不清「网络慢」和「解码慢」的
-	// 话，用户只会觉得应用坏了。
-	LoadingStage string
-	// LoadingSlow 是「这一段已经慢到该说出来了」（票 #220）。
-	//
-	// ⚠️ **它和 `Loading` 是两件事**：`Loading` 说「还在准备」，
-	// 这一栏说「**准备得慢**」——后者要换一句**不一样的话**上屏，
-	// 否则用户看到的还是那一句「正在取流」，而他等的那个「非常慢」
-	// 一句话都没说。
-	LoadingSlow bool
-	// LoadingWait 是**当前这一段**已经等了多久。
-	//
-	// ⚠️ **它记的是「这一段」**：取流是三段串行的网络往返，每一段都
-	// 重新起算——所以这一栏是「用户此刻正在等的那一件事」。
-	LoadingWait time.Duration
 	// Starting 是「**应用还在启动中**」（票 #478）。
 	//
 	// ⚠️ **它和 `Loading` 不是一回事**：`Loading` 说「这一首还没放起来」，
@@ -176,7 +156,7 @@ type State struct {
 	// 歌名，用户看得见应用已经准备好了。
 	//
 	// 🔴 **它不是「有没有在取流」**：应用准备好了之后，用户再点一首歌，
-	// 那一趟取流**不是**「启动」——那一句「正在取流」已经说清了在等什么。
+	// 那一趟取流**不是**「启动」——播放键上那圈光已经说清了在等什么。
 	Starting bool
 	// Reconnecting 是「**正在重连**」：断流之后应用在救这一首。
 	//
@@ -230,6 +210,14 @@ type State struct {
 	// ⚠️ **它可以是 0 而 Artist 不是空串**：有的来源只给名字不给编号（动态流
 	// 那一批）。那种情况下 UP 名照样显示，只是**点不动**（见 `Item.ArtistMid`）。
 	ArtistMid int64
+
+	// Chapters 是当前这一首（投稿）的章节，进度条上的点画的就是它们的起点
+	// （票 #585）。空 = 没有章节（本地文件、音乐库、没问回来、或者这一条
+	// 本来就没有）——三种种情况界面上是同一个样子：一根光滑的进度条。
+	//
+	// ⚠️ **取的那一趟是异步的**：Snapshot 第一次给 nil，问回来了叫醒界面，
+	// 下一帧就有了。取数那一摊见 `chapters.go`。
+	Chapters []Chapter
 
 	// Quality 是当前这条流的音质徽章（「Hi-Res 无损」/「192K」）。
 	//
@@ -362,19 +350,6 @@ type App struct {
 	// 往返（见 `onlinePlayTimeout` 那段注释），每一段都重新起算——所以
 	// 「这一段等了多久」才是用户此刻真正在等的那件事。
 	loadingSince time.Time
-	// loadingSlow 是「这一段已经慢到该说出来了」（见 State.LoadingSlow）。
-	//
-	// ⚠️ **它是一个闹钟的结果，不是一个比较的结果**：界面是**按需绘制**
-	// 的（见 AGENTS.md「静默出错的几条铁律」第 3 条），所以「刚刚变慢」
-	// 这一刻必须有人去叫醒界面——比较出来的值在界面不动的时候不会变。
-	loadingSlow bool
-	// loadSlowStop 是「变慢」那个闹钟的停掉函数。
-	//
-	// ⚠️ **它和 `loadStop` 各存各的**：那一个管「这一段超时了判失败」，
-	// 这一个管「这一段慢到要告诉用户」。共用一个字段的话，先停掉另一个
-	// 就把另一个的闹钟弄丢了（那一个丢了 = 永远转圈，这一个丢了 =
-	// 慢了也不说）。
-	loadSlowStop func()
 	// loadFilled 是**上一次检查时**字节源已经下到的字节数。
 	//
 	// ⚠️ **它是「下载那一段还有没有进展」的比对基准**（见 `downloadProgressLocked`）：
@@ -597,6 +572,24 @@ type App struct {
 	// 测试里替成一个假函数，才能量「失败之后到底有没有再问」。
 	partsFetch func(context.Context, string) ([]bili.VideoPart, error)
 
+	// chapters 是当前这一首（投稿）的章节，chaptersKey 是它们属于哪一集
+	// （bvid+cid，多 P 的章节按集给）。见 chapters.go。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：理由和 like 那一组一样——写它的
+	// 是网络往返回来的 goroutine，不该去抢每帧都在拿的那把。
+	chaptersMu      sync.Mutex
+	chapters        []Chapter
+	chaptersKey     string
+	chaptersLoaded  bool
+	chaptersWanted  bool
+	chaptersTriedAt time.Time
+	// chaptersFetch 是问章节的那一趟，nil = 走取流零件上的 `bili.Client.Chapters`。
+	//
+	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureChapters` 在
+	// 那里把它取出来递给后台那个 goroutine）。生产上永远是 nil；测试里替成
+	// 假函数。
+	chaptersFetch func(context.Context, string, string) ([]bili.Chapter, error)
+
 	// like 是当前这一首的赞 / 藏状态，likeBvid 是它属于哪一个稿件。见 like.go。
 	//
 	// ⚠️ **它自己的锁，不在 `a.mu` 里**：写它的是网络往返回来的那个 goroutine，
@@ -683,6 +676,75 @@ type App struct {
 	commentsRepliesFetch commentsRepliesFetchFunc
 	// commentsArchiveIDFetch 是 bvid → avid 那一趟。
 	commentsArchiveIDFetch commentsArchiveIDFetchFunc
+
+	// 弹幕这一摊，见 danmaku.go。挂上缓存之前 danmakuCache 是 nil。
+	//
+	// ⚠️ **它自己的锁，不在 `a.mu` 里**：理由和 `likeMu` 一样——写它的是网络
+	// 往返回来的那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要
+	// 它）。弹幕区也是**每一帧**问一次的（`App.Danmaku`），混进 `a.mu` 的话，
+	// 界面那一帧的等待时间就变成了「网络那一趟」。
+	danmakuMu     sync.Mutex
+	danmakuCache  *danmaku.Cache
+	danmakuKey    string
+	danmakuItems  []DanmakuItem
+	danmakuErr    error
+	danmakuReady  bool
+	danmakuLoaded bool
+	danmakuWanted bool
+	// danmakuGen 是**弹幕代次**。每换一次歌（或换一次集）就加一，迟到的结果回来
+	// 发现代次变了直接走人（见 `finishDanmaku`）。
+	//
+	// ⚠️ **少了它的症状是「在听 B，滚着 A 的弹幕」**：慢一拍的那一趟回来时把
+	// 旧歌的弹幕装了上去，而用户看不出发生了什么。
+	danmakuGen int
+	// danmakuDropped 是**被丢掉的那一趟**的计数（代次对不上的那一种）。
+	//
+	// ⚠️ **它只是给测试看的**：被丢掉的那一趟**什么都不改**（状态没变，就不该
+	// 叫醒界面），于是从外面看不出来「它到底处理了没有」——测试要等的正是
+	// 「旧的那一趟已经走了，而新歌的弹幕没被盖掉」。
+	//
+	// ⚠️ **它是原子计数器**：它被后台那个 goroutine 加，而测试在另一个
+	// goroutine 里读它。
+	danmakuDropped atomic.Int64
+	// danmakuSeq 是**在途序号**。每发起一趟取弹幕就加一（**不管是哪一集**）。
+	//
+	// 🔴 **它挡的是「同一个 key 上慢的那一趟把新的盖掉」**：代次
+	// （`danmakuGen`）答的是「这一趟还属不属于当前这一集」，而写盘要挡的是
+	// 另一件事——同一个 key 上两趟先后写同一个文件，慢的那一趟写得更晚。
+	// 那一趟在**可见状态**上是按代次丢掉的，但它照样会写盘，于是盘上留下的是
+	// 旧的那一份。⇒ 只有**最后发起的那一趟**能写（见 `saveDanmakuCache`）。
+	//
+	// ⚠️ **它按 key 记**（`danmakuSeqs`）：全局的序号会把「另一集的新一趟」也
+	// 算成「比这一集新」，于是切到另一集之后，上一集那份就落不了盘了——而下次
+	// 进上一集就得重新拉一次（那就不是「7 天内再进是瞬时的」了）。
+	//
+	// ⇒ per-key：每个 key 记它**自己**最后发起的那一趟的序号。
+	danmakuSeq int
+	// danmakuSeqs 是**每个 key 最后发起的那一趟的序号**（见 `danmakuSeq`）。
+	//
+	// ⚠️ **写盘成功之后就把这一条删掉**：留着的话它会一直长（用户听过的每一集
+	// 都留一条）。删掉是安全的——任何旧的一趟的序号都大于 0，而删掉之后
+	// 「查不到」就等于「不是最新的一趟」，那些旧的一趟照样被挡住。
+	danmakuSeqs map[string]int
+	// danmakuWriteMu 是**写盘那把专锁**。它把「检查我是不是最新的一一趟」和
+	// 「真的写下去」包在同一个临界区里——分开的话，中间发起的新一趟会让旧的
+	// 那一趟以为自己还是最新的。
+	//
+	// ⚠️ **它不是 `danmakuMu`**：写盘是阻塞 IO，而 `danmakuMu` 是界面每一帧
+	// 都要的（`App.Danmaku`）。
+	//
+	// ⚠️ **它也是「退出前等在途写盘」那把锁**（见 `closeDanmaku`）：Close 持它
+	// 一下就是在途写盘结束的那一刻。
+	danmakuWriteMu sync.Mutex
+	// danmakuTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
+	// （`danmakuRetryAfter`）。成功之后用不上——`danmakuLoaded` 已经挡住了。
+	danmakuTriedAt time.Time
+	// danmakuFetch 是取弹幕的那一趟，nil = 走取流零件上的 `bili.Client.Danmaku`。
+	//
+	// 和 `partsFetch` / `likeFetch` 同一条规矩：**只由界面那一侧读写**
+	//（`ensureDanmaku` 在那里就把它取出来递给那个 goroutine，goroutine 不碰这个
+	// 字段）。生产上永远是 nil。
+	danmakuFetch func(context.Context, string) ([]bili.Danmaku, error)
 
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
@@ -909,7 +971,7 @@ func (a *App) Snapshot() State {
 	defer a.mu.Unlock()
 	// ⚠️ 偏好直接从 `a.streaming` 读，**不能**调 `a.AudioQuality()`：那把锁
 	// 已经在手里了，sync.Mutex 不可重入，那样写是当场死锁。
-	pref := AudioQualityAuto
+	pref := AudioQualityHigh
 	if a.streaming != nil {
 		pref = BiliToPref(a.streaming.Quality)
 	}
@@ -943,14 +1005,6 @@ func (a *App) Snapshot() State {
 		Err:             a.errText,
 		ErrDetail:       a.errDetail,
 		Loading:         a.loading,
-		LoadingTitle:    a.loadingTitle,
-		// 🔴 **「慢」这一档是三样东西**：卡在哪一段、够不够慢、等了多久。
-		// 「够了多久」用**这一段开始的时刻**现算（见 App 里 loadingSince
-		// 那段注释）——界面每一帧都要读这一栏，而现算比另外存一栏更不容易
-		// 走偏（那一栏要跟着每一次「重新起算」一起改）。
-		LoadingStage: a.loadingStage,
-		LoadingSlow:  a.loadingSlow,
-		LoadingWait:  a.loadingWaitLocked(),
 		// 🔴 **「启动中」只在「还没有歌」的时候才为真**（见 State 里
 		// `Starting` 那段注释）：有歌的时候界面上摆的是歌名，用户看得见
 		// 应用已经准备好了。
@@ -965,6 +1019,9 @@ func (a *App) Snapshot() State {
 		QualityPref:      pref,
 		Artist:           a.artist,
 		ArtistMid:        a.artistMid,
+		// 章节走的是它自己的锁和队列的锁（形状和上面 `PlayMode` 那两行一样），
+		// 顺手把没问过的那一趟问出去——见 `chapters.go`。
+		Chapters: a.chaptersForSnapshotLocked(),
 
 		// 播放模式在队列自己的锁里，不在 `a.mu` 里——它是队列的形状，不是
 		// 播放器的状态。顺着一句一句取：`a.mu` 已经拿在手里，而 `a.queue`
@@ -1097,7 +1154,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		//
 		// ⚠️ **说人话，不念英文系统错**：读屏软件是**逐字念**的，而
 		// `err.Error()` 是 "open /Users/x/a.m4a: no such file or directory"。
-		a.announce("播放失败：" + announceErrText(err))
+		a.announce("播放失败：" + FriendlyErrText(err))
 		if wake != nil {
 			wake()
 		}
@@ -1223,6 +1280,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
 	a.setLyricTrack(LocalItem(path))
+	// 弹幕也跟着换歌一起换（见 danmaku.go）：本地文件压根没有弹幕，所以旧的那
+	// 一份得**作废**——不清的话界面上会继续滚上一首的弹幕。
+	a.startDanmaku(LocalItem(path))
 	if wake != nil {
 		wake()
 	}
@@ -1572,6 +1632,10 @@ func (a *App) Close() {
 	}
 	// 歌词偏移/字号那一次防抖写可能还欠着，退出前落完。
 	a.closeLyrics()
+	// 弹幕那一摊也收掉：在途的那一趟回来时会发现代次变了，可见状态直接丢掉；
+	// 而**缓存写入**由 `closeDanmaku` 自己那把锁挡着（它等在途的写盘结束，
+	// 且之后不许再写）——代次只管可见状态，管不到写盘。
+	a.closeDanmaku()
 	// 下载要**停掉并落盘**。停掉是为了别让在飞的请求在应用退出时还在往盘上
 	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。
