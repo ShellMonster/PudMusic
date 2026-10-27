@@ -193,6 +193,15 @@ type homePage struct {
 	// 荐」那一格（票 #368 明令不许出现的）。
 	want      int
 	wantReady bool
+
+	// overview 为真时首页画「发现」总览（homepage_overview.go），不画 Tab 列表。
+	overview bool
+	// ovScroll / ovWidth 是总览的滚动位置和上一帧量到的内容宽。
+	ovScroll ui.ScrollState
+	ovWidth  float32
+	// miniTop 是两张榜（热榜、原创榜）的前几名；miniLoaded 记着取它时榜上有几首。
+	miniTop    [2][]list.Music
+	miniLoaded [2]int
 }
 
 // newHomePage 建首页这一摊状态。
@@ -204,7 +213,7 @@ type homePage struct {
 // wake 是「要一帧新画面」的动作：新歌速递那一块自己包了一层 recover，崩了靠它
 // 要下一帧（那一帧只建了一半，画出来是半张，见 guard 包的注释）。
 func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePage {
-	h := &homePage{acts: acts, newGrid: newNewMusic(cache, acts, wake)}
+	h := &homePage{acts: acts, newGrid: newNewMusic(cache, acts, wake), overview: homeStartsOnOverview}
 	// 新歌速递的「重试」回到这一页：那一块自己管不着取数（它只管画），
 	// 而重试要能重新拉那一摊。
 	h.newGrid.SetRetry(func() { h.retryNew() })
@@ -216,7 +225,8 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// ⚠️ **投稿时间不画**：上游首页自己就是 `hidePubTime`
 		// （`pages/music-recommend/list.tsx:49` 与 `:60`），而它那一层的
 		// `RecommendItem` 也没把 `pubdate` 带上来——照它。
-		l.SetColumns(list.Columns{PlayCount: i != homeRecentTab, Rank: i == homeHotTab || i == homeOriginalTab})
+		l.SetColumns(list.Columns{PlayCount: i != homeRecentTab, Rank: i == homeHotTab || i == homeOriginalTab,
+			PubTime: i == homeRecentTab, PubTimeTitle: "观看时间"})
 		// 「没有更多了」那一行（票 #370 的验收第 2 条）：别的页到底了就是到底了，
 		// 而这一屏要说得清——不然用户只看到列表停在半截。
 		l.SetEndView(homeEndRow)
@@ -351,6 +361,12 @@ func (s *Shell) syncHome(c *ui.Context) {
 	// 画面上留着上一档）——但**它得有人收结果、有人起第一拉**，所以同步的是
 	// 它，而画出来的那一档由它自己的 `View` 同步（见 `PagedList.view`）。
 	h.lists[h.tab].Sync(c)
+	if h.overview {
+		// 总览要用两张榜的前几名：没切到那两档也得有人替它们起第一拉。
+		h.lists[homeHotTab].Sync(c)
+		h.lists[homeOriginalTab].Sync(c)
+		h.refreshMini()
+	}
 
 	// 算「要换到哪一档」和「它到了没有」。
 	//
@@ -390,6 +406,13 @@ func (s *Shell) syncHome(c *ui.Context) {
 // `syncHome` 那一层了（票 #161）——满屏开着的时候这一页不画，而那三样是「每帧
 // 都要跑」的副作用，停在画的那一半里就等于停更。
 func (h *homePage) view(c *ui.Context, s *Shell) {
+	if h.overview {
+		ui.Column(c).Key("page:"+homePath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
+			AlignItems(ui.Stretch).Children(func() {
+			h.viewOverview(c, s)
+		})
+		return
+	}
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	ui.Column(c).Key("page:"+homePath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
 		AlignItems(ui.Stretch).Children(func() {
@@ -571,8 +594,21 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 	if text == "" {
 		return
 	}
-	ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-		TextColor(c.Theme().TextMuted).MaxLines(1)
+	// 榜单头图：和总览上那张磁贴同一套渐变，大字榜名 + 期数更新日期，
+	// 让二级页一眼认得出是从哪张磁贴进来的。
+	var from, to ui.Color
+	for _, tile := range homeTiles {
+		if tile.tab == tab {
+			from, to = tile.from, tile.to
+		}
+	}
+	t := c.Theme()
+	ui.Column(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
+		Gradient(from, to, 135).Padding(space.Px16, space.Px24).Justify(ui.Center).Gap(space.Px6).Children(func() {
+		ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+		ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
+			TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+	})
 }
 
 // viewTabs 画那三个 Tab 和「全部播放」。
@@ -606,12 +642,17 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 		// 构造的时候就已经读过了，构造之后再 `.Key()` 会 panic（`ui/element.go`
 		// 的 Key 注释：自带输入的控件都不能构造后 Key，只能构造前 `Context.Key`）。
 		// 中间的语句会把它抢走，所以这两句要紧挨着。
-		c.Key("home:tabs")
 		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
 		// 和次级排序那几排不是同一个样子（票 #138）。
 		//
 		// 首页这一排上游是 `size="lg"`（44），其余三处是 md（40）。
-		mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
+		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+			if iconKey(c, iconSideCollapse, "返回发现", 20, false).Size(36, 36).Padding(space.None, space.Px8).Clicked() {
+				h.backToOverview()
+			}
+			c.Key("home:tabs")
+			mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
+		})
 
 		// 「全部播放」：这一档的歌（**当前这一档 Tab 的**，不是三个 Tab 加起来）。
 		//
