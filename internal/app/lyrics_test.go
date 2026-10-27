@@ -507,3 +507,65 @@ func TestLocalSongsKeyOnTheirFullPath(t *testing.T) {
 		t.Errorf("换歌那一刻偏移是 %d，want 0", got)
 	}
 }
+
+// TestLyricsReportLoadingUntilTheyHaveSomething 钉住「切歌那一刻**不是**『没有歌词』，
+// 而是『还在加载』」（2026-10-27）。
+//
+// 🔴 **这一条钉的是一个结论 vs 一个过程**：换歌之后歌词要先读一次盘、等 B 站字幕、
+// 必要时自动找一次（最慢 25 秒，`lyrics_auto.go` 那个 ctx 超时）。这段时间原先
+// 界面上一直写「暂无歌词」——那是一句**结论**，而真相是**过程**（上游那三选一里
+// 就有「歌词加载中...」这一档，见 `empty.go` 的注释）。
+//
+// 三件事都要成立：
+//
+//	① 换歌那一刻 `Loading` 是真
+//	② 这一首真的没有词时，最后还是落到 `Loading=false`（不能一直转）
+//	③ 拿到了词之后 `Loading` 也是 false
+func TestLyricsReportLoadingUntilTheyHaveSomething(t *testing.T) {
+	a, c := lyricsApp(t)
+	// 这一首没有缓存：读盘回来就是「没有」。
+	if err := c.Save(lyricKeyOf(onlineSong("BV9", "9")), lyrics.Entry{
+		Lyrics: "[00:01.00]有的那一首", OffsetMS: 0, FontSize: DefaultLyricsFontSize,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	a.setLyricTrack(onlineSong("BV9", "9"))
+	if !a.Lyrics().Loading {
+		t.Fatal("换歌那一刻 `Loading` 是 false——界面会立刻写「暂无歌词」，" +
+			"而那是一个结论（这一刻什么都还不知道）")
+	}
+	waitLyrics(t, 2*time.Second, "有词那一首读回来", func() bool {
+		return a.Lyrics().HasLyrics
+	})
+	if a.Lyrics().Loading {
+		t.Error("词已经到了，`Loading` 还是真——界面那一档会一直转着")
+	}
+
+}
+
+// TestLyricsLoadingFallsBackWhenNothingWillEverArrive 钉住兜底：一首**注定没有词**
+// 的歌（没缓存、没字幕、也没配歌词源）**不会一直转下去**。
+//
+// 🔴 **这条判据只能用假钟量**：兜底窗口是 30 秒（`lyricsLoadingGrace`，比自动找
+// 歌词那 25 秒的 ctx 超时长一点），真的等 30 秒的测试没人跑得动——而「过了窗口
+// 还是转着」正是这一档最难受的坏法：用户没法判断是网络慢还是应用坏了。
+func TestLyricsLoadingFallsBackWhenNothingWillEverArrive(t *testing.T) {
+	a, _, fake := lyricsAppOnFakeClock(t)
+	a.setLyricTrack(onlineSong("BV-none", "none"))
+	if !a.Lyrics().Loading {
+		t.Fatal("换歌那一刻 `Loading` 是 false")
+	}
+	if a.Lyrics().HasLyrics {
+		t.Fatal("这一条的前提是「没有词」")
+	}
+
+	fake.advance(lyricsLoadingGrace + time.Second)
+	if a.Lyrics().Loading {
+		t.Fatalf("过了 %v 兜底窗口，`Loading` 还是真——界面会一直转着，"+
+			"而这一首注定不会有词", lyricsLoadingGrace)
+	}
+	if a.Lyrics().HasLyrics {
+		t.Error("这一首不该有词")
+	}
+}

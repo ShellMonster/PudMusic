@@ -337,6 +337,9 @@ func (c *Cache) notify() {
 // ⚠️ **每一次 Get 都是「这一张正画在画面上」**：挤缓存时正画着的那几张不许
 // 挤（票 #358，理由见 `entry.drawn`）。
 func (c *Cache) Get(url string) State {
+	// ⚠️ **协议相对的地址在这里兜一道**（理由见 `absoluteURL`）：拿它当 key
+	// 也是同一条规范化之后的串，于是同一个地址无论服务层补没补过都是同一格。
+	url = absoluteURL(url)
 	if url == "" {
 		return State{}
 	}
@@ -446,6 +449,9 @@ func (c *Cache) start(e *entry) bool {
 //
 // 真的取消：请求带的就是这个 context，服务端收得到。
 func (c *Cache) Cancel(url string) {
+	// key 要和 `Get` 里那一个同一条规范化之后的串（见 `absoluteURL`），
+	// 否则取消的是一个永远不会被查的键。
+	url = absoluteURL(url)
 	if v, ok := c.entries.LoadAndDelete(url); ok {
 		e := v.(*entry)
 		c.forget(e)
@@ -669,6 +675,9 @@ func (c *Cache) fetch(e *entry) {
 
 // download 从网络拿这张图的字节。
 func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
+	// ⚠️ **兜一道协议**（理由见 `absoluteURL`）：漏了它，协议相对的地址会以
+	// `unsupported protocol scheme ""` 落到 `permanentError` 上，一次都不重试。
+	url = absoluteURL(url)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		// 地址本身不合法：再试多少次也是同一个结果。
@@ -715,6 +724,7 @@ func (c *Cache) download(ctx context.Context, url string) ([]byte, error) {
 //
 // ⚠️ **不落盘的那一份不缓存**：拿到的字节直接交给调用方，调用方用完就扔。
 func (c *Cache) Source(url string) ([]byte, error) {
+	url = absoluteURL(url)
 	if url == "" {
 		return nil, errors.New("imgcache: 没有地址")
 	}
@@ -770,6 +780,7 @@ func (c *Cache) SourceImage(url string) (image.Image, error) {
 //
 // ⚠️ 要在后台 goroutine 里调：下载和编码都是慢活，不许在 view 里调。
 func (c *Cache) PNG(ctx context.Context, url string) ([]byte, error) {
+	url = absoluteURL(url)
 	if c == nil || url == "" {
 		return nil, errors.New("imgcache: 没有封面地址")
 	}
@@ -803,11 +814,15 @@ func toPNG(data []byte) ([]byte, error) {
 }
 
 // diskName 是这个 url 在磁盘缓存里的文件名，空表示不落盘。
+//
+// ⚠️ **先补协议再算名**：盘上那份是按 URL 算出来的文件名，补没补过协议算出来
+// 是两个不同的名字——不统一的话同一张图会在盘上存两份，而第二次启动读不到
+// 第一次那份（读的是一个永远不会被写到的名字）。
 func (c *Cache) diskName(url string) string {
 	if c.disk == nil {
 		return ""
 	}
-	return diskNameFor(url)
+	return diskNameFor(absoluteURL(url))
 }
 
 // decodeWorker 是解码池的一个 worker。

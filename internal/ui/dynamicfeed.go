@@ -49,6 +49,15 @@ const authorPaneW = 256
 // 9 × 4 = 36。
 const authorAvatarS = 36
 
+// loadingAuthorsText 是作者栏第一页在途时那一句。
+//
+// ⚠️ **它是「还没好」，不是「没有」**：这一栏原先在 `auth.started` 还是 false
+// 的时候直接画「全部」那一行，和「我一个都没关注」长得一模一样（2026-10-27）。
+//
+// ⚠️ **字号 12、次要色**：和 `follow.go` 左栏那一条「正在加载分组…」同一档
+// （那一列也是 200 宽的小栏）。
+const loadingAuthorsText = "正在加载关注的人…"
+
 // paneDividerA 是两栏之间那条分界线的浓度。上游写的是
 // `border-divider/40`（`author-list.tsx:107`、`follow-list/index.tsx:204`），
 // 也就是分隔线本身再乘 40%。
@@ -306,6 +315,23 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 				if ctx := auth.begin(); ctx != nil {
 					go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
 				}
+			})
+			return
+		}
+		// 🔴 **第一页在途：说「正在加载」，不是「一个都没有」**（2026-10-27）。
+		//
+		// 原先这一支没有：`auth.started` 还是 false 时直接往下走，画出来是
+		// **标题 + 一行「全部」**——和「我真的一个都没关注」长得一模一样。
+		//
+		// ⚠️ **左栏只有 200 宽**（`authorPaneW`），摆不下 List 那一格八行骨架；
+		// 这里给一行转圈 + 一句话（和 `follow.go` 左栏那一条「正在加载分组…」
+		// 同一个形状、同一个字号）。
+		if !auth.started {
+			ui.Row(c).Key("feed-authors:loading").Gap(space.Px8).
+				Padding(space.Px8, space.Px8).AlignItems(ui.Center).Children(func() {
+				ui.Spinner(c).Label(loadingAuthorsText)
+				ui.Text(c, loadingAuthorsText).FontSize(scale.Font(c, scale.Size12)).
+					TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			})
 			return
 		}

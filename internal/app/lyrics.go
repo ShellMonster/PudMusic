@@ -62,7 +62,22 @@ const (
 	//
 	// 拖偏移滑块时每 50ms 就变一次值，没有防抖就是每秒 20 次写盘。
 	lyricsSaveDelay = 500 * time.Millisecond
+
+	// lyricsLoadingGrace 是「歌词加载中」那一档最长挂多久（2026-10-27）。
+	//
+	// 取 30 秒：自动找歌词那条最慢的路是 25 秒（`lyrics_auto.go` 的 ctx 超时），
+	// 加一点余量。到点还没有词就落到「暂无歌词」——一直转下去比说「没有」更糟
+	// （用户没法判断是网络慢还是应用坏了）。
+	lyricsLoadingGrace = 30 * time.Second
 )
+
+// stopLyricLoadingTimer 停掉「加载中」那道兜底窗口。**必须拿着 a.mu 调**。
+func (a *App) stopLyricLoadingTimer() {
+	if a.lyricLoadingTimer != nil {
+		a.lyricLoadingTimer()
+		a.lyricLoadingTimer = nil
+	}
+}
 
 // LyricsSnapshot 是歌词区一帧要读的全部状态。
 //
@@ -78,6 +93,19 @@ type LyricsSnapshot struct {
 	FontSize float32
 	// HasLyrics 报有没有歌词。界面据此在「歌词」和「暂无歌词」之间选。
 	HasLyrics bool
+	// Loading 报「这一首的歌词还在路上」。
+	//
+	// 🔴 **它和 `HasLyrics` 是两件事**（2026-10-27）：`HasLyrics` 是**结论**
+	// （这一首没有词），`Loading` 是**过程**（还没读完 / 还没取回来）。三者合起来
+	// 是三档，界面上必须是三种样子（上游那三选一里也有「歌词加载中...」）：
+	//
+	//	Loading && !HasLyrics    加载中（一枚转圈 / 一行淡字）
+	//	!Loading && !HasLyrics   暂无歌词
+	//	HasLyrics                歌词
+	//
+	// ⚠️ **有词的时候这一栏可能是真的**（换源、重新取一份），而那时界面照旧画
+	// 手上那一份——不闪回加载态。
+	Loading bool
 	// Origin 是这一份歌词的**来路**：`lyrics.OriginBili`（B 站自动带出来的）/
 	// `lyrics.OriginSearch`（用户在歌词搜索里找来的）/ 空串 = 不知道。
 	//
@@ -96,6 +124,7 @@ func (a *App) Lyrics() LyricsSnapshot {
 		OffsetMS:  a.lyricOffsetMS,
 		FontSize:  a.lyricFontSize,
 		HasLyrics: len(a.lyricRows) > 0,
+		Loading:   a.lyricLoading,
 		Origin:    a.lyricOrigin,
 	}
 }
@@ -218,6 +247,38 @@ func (a *App) setLyricTrack(it Item) {
 	a.lyricRows = nil
 	a.lyricEntry = lyrics.Entry{}
 	a.lyricOrigin = ""
+	// 🔴 **换歌就进「加载中」**（2026-10-27）：这一向后要读盘、要等字幕、还可能
+	// 自动找一次词。在那之前界面上不该说「暂无歌词」——那是一个结论，而这一刻
+	// 我们还什么都不知道（理由见 `LyricsSnapshot.Loading`）。
+	//
+	// ⚠️ **没有键（本地文件还没有可用信息）就不算在等**：那种情况下这一趟
+	// 压根不会发生，说「加载中」会永远转下去。
+	a.lyricLoading = key != ""
+	// ⚠️ **另排一道兜底**：这一首要是既没缓存、又没字幕地址、也不跑自动找
+	// （没配歌词源 / 已经试过同一首），那就**没有任何东西会回来**——加载态会
+	// 一直转到下一首。所以排一个「过一会儿收掉」的窗口，到点还没词就落到
+	// 「暂无歌词」。窗口比自动找那 25 秒长一点（它是最慢的那条路）。
+	a.stopLyricLoadingTimer()
+	if key != "" {
+		a.lyricLoadingTimer = a.after(lyricsLoadingGrace, func() {
+			a.mu.Lock()
+			a.lyricLoadingTimer = nil
+			stale := a.lyricKey != key
+			a.mu.Unlock()
+			if stale {
+				return
+			}
+			a.mu.Lock()
+			if a.lyricKey == key {
+				a.lyricLoading = false
+			}
+			wake := a.wake
+			a.mu.Unlock()
+			if wake != nil {
+				wake()
+			}
+		})
+	}
 	// 同步重置到默认值。恢复要等读盘回来，中间这一段界面上是默认值——
 	// 见文件头「切歌时先重置为默认值」那一节讲的是哪一条。
 	a.lyricOffsetMS = 0
@@ -237,10 +298,22 @@ func (a *App) loadLyrics(key string, gen int) {
 	a.mu.Lock()
 	c := a.lyricCache
 	wake := a.wake
+	// 🔴 **读盘那一趟已经发起了**（2026-10-27）：`lyricWaiting` 是「这一首的歌词
+	// 至少有一个来源试过了」，没有它时界面不能断言「没有歌词」（那会把「还没开始」
+	// 说成「没有」）。
+	a.lyricWaiting = true
 	a.mu.Unlock()
 
 	if c == nil || key == "" {
 		// 没挂缓存：就是没有歌词，界面会照实说「暂无歌词」。
+		//
+		// ⚠️ **这里要收掉「加载中」**：没有缓存就没有任何东西会再回来，一直转
+		// 下去就是骗人。
+		a.mu.Lock()
+		if a.lyricKey == key && a.lyricGen == gen {
+			a.lyricLoading = false
+		}
+		a.mu.Unlock()
 		if wake != nil {
 			wake()
 		}
@@ -273,6 +346,22 @@ func (a *App) loadLyrics(key string, gen int) {
 		// 来路跟着缓存里那一栏走：老记录没有这一栏，那就是「不知道」，
 		// 而**不知道不该被当成「搜索来的」**（界面上那句话会因此说错）。
 		a.lyricOrigin = entry.Origin
+		// 🔴 **读盘回来了，这一趟就结束了**（2026-10-27）：
+		//
+		//   缓存里有词   → 有结论了（`lyricRows` 非空）
+		//   缓存里没有   → **也是结论**：这一首没有本地缓存
+		//
+		// 后一种之后还可能有两件事在路上（B 站字幕、自动找歌词），而它们的起
+		// 点不在这一层（字幕那一路在 `fetchBiliSubtitle`，自动找在下面那个
+		// `defer`）。所以这里**只在这两种情况下把加载态收掉**：有词，或者没词
+		// 而且没有后续的那条路。
+		//
+		// ⚠️ **不在这里一刀切地关掉**：本地文件那一支会 `defer autoSearchLyrics`，
+		// 那一次要跑到 25 秒——现在关掉的话，界面上先闪一下「暂无歌词」，然后
+		// 词才出现（用户会以为他看错了）。
+		if ok && len(rows) > 0 {
+			a.lyricLoading = false
+		}
 		wake := a.wake
 		a.mu.Unlock()
 
@@ -339,6 +428,10 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 	a.lyricEntry = entry
 	a.lyricOrigin = origin
 	a.lyricRows = lyrics.Rows(lrc, translated)
+	// 🔴 **拿到词了，就不是「加载中」**（2026-10-27）：这一趟可能来自自动找歌词、
+	// 用户手动换源、或者从缓存读回来的那一份。三种都算「有着落了」。
+	a.lyricLoading = false
+	a.lyricWaiting = true
 	return entry, a.lyricCache
 }
 

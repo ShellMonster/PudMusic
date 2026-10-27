@@ -800,7 +800,11 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 		Author: DynamicAuthor{
 			Mid:  r.Modules.Author.Mid.Int64(),
 			Name: decodeEntities(r.Modules.Author.Name.String()),
-			Face: r.Modules.Author.Face.String(),
+			// ⚠️ **头像要补协议头**（`normalizeImageURL`）：B 站给的是协议相对地址
+			// （`//i0.hdslb.com/bfs/face/…`），而封面缓存是拿 `http.Client` 抓的
+			// ——那种地址在 Go 那边是 `unsupported protocol scheme ""`，抓不到，
+			// 而且被当成**永久失败**（一次都不重试），界面上那一格永远是一块占位。
+			Face: normalizeImageURL(r.Modules.Author.Face.String()),
 		},
 		Time:      dynamicTime(r.Modules.Author.PubTime.String(), r.Modules.Author.PubTS.Int64()),
 		Text:      strings.TrimSpace(r.Modules.Dynamic.Desc.Text.String()),
@@ -844,7 +848,9 @@ func parseDynamic(raw json.RawMessage) (Dynamic, DroppedDynamic, bool) {
 		}
 		d.Kind = DynamicVideo
 		d.Video = &DynamicArchive{
-			Bvid: a.Bvid.String(), Title: decodeEntities(a.Title.String()), Cover: a.Cover.String(),
+			Bvid: a.Bvid.String(), Title: decodeEntities(a.Title.String()),
+			// ⚠️ 封面同样要补协议（理由见上面作者头像那一处）。
+			Cover:    normalizeImageURL(a.Cover.String()),
 			Duration: a.DurationTxt.String(), Play: a.Stat.Play.String(), Desc: a.Desc.String(),
 		}
 		if d.Text == "" {
@@ -971,7 +977,9 @@ func picsOf(opus *rawOpus, draw *rawDraw) ([]string, string) {
 	}
 	pics := make([]string, 0, len(items))
 	for _, p := range items {
-		if u := p.URL(); u != "" {
+		// ⚠️ **图地址要补协议**（理由同作者头像那一处）：九宫格里漏了它，
+		// 那几张图就是每张一个永久的空框。
+		if u := normalizeImageURL(p.URL()); u != "" {
 			pics = append(pics, u)
 		}
 	}
@@ -1055,7 +1063,7 @@ func (c *Client) Followings(ctx context.Context, vmid int64, page int) (FollowPa
 		if u.Mid == 0 {
 			continue
 		}
-		out.Authors = append(out.Authors, FollowAuthor{Mid: u.Mid, Name: u.Uname, Face: u.Face})
+		out.Authors = append(out.Authors, FollowAuthor{Mid: u.Mid, Name: u.Uname, Face: normalizeImageURL(u.Face)})
 	}
 	// ⚠️ 空页一律收口，和投稿那边同一条理由：B 站在页码超了的时候给的是空
 	// list 而不是报错，不收口的话作者栏会永远转圈。
