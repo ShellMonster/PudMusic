@@ -326,10 +326,10 @@ func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
 }
 
 // TestThePlayTrianglePlaysThatSongAndTheRestAfterIt 钉住播放三角的**语义**和双击
-// 同一行一样：从这一首往后接。
+// 那一行一样：**只放这一首，不换队列**（`Actions.PlayNow`，票 #608 照上游 Biu 的
+// `play()`）。
 //
-// 不一样的话用户第一次按它就会拿到一个自己没点过的动作（比如只加一首、或者只跳到
-// 这一首）。
+// 不一样的话用户第一次按它就会拿到一个自己没点过的动作（比如换掉整条队列）。
 func TestThePlayTrianglePlaysThatSongAndTheRestAfterIt(t *testing.T) {
 	rec := &recorded{}
 	songs := onlineSongs(5)
@@ -341,17 +341,14 @@ func TestThePlayTrianglePlaysThatSongAndTheRestAfterIt(t *testing.T) {
 		t.Fatalf("点不了封面上那个播放三角：%v（画面：%q）", err, tt.Texts())
 	}
 
-	if len(rec.played) != 1 {
-		t.Fatalf("收到 %d 次播放，want 1 次", len(rec.played))
+	if len(rec.nowed) != 1 {
+		t.Fatalf("收到 %d 次「立即播放」，want 1 次", len(rec.nowed))
 	}
-	got := rec.played[0]
-	if len(got) != 4 {
-		t.Fatalf("从第二首开始，队列里进了 %d 首，want 4 首（它和它后面那三首）", len(got))
+	if got := rec.nowed[0].Bvid; got != "BV2" {
+		t.Errorf("点第二首的播放三角放出来的是 %q，want BV2", got)
 	}
-	for i, want := range []string{"BV2", "BV3", "BV4", "BV5"} {
-		if got[i].Bvid != want {
-			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Bvid, want)
-		}
+	if len(rec.played) != 0 {
+		t.Errorf("这一枚三角顺手把队列换成了「从这一首往后」那一段（收到 %d 次）", len(rec.played))
 	}
 }
 
@@ -615,7 +612,10 @@ func TestTheCardGradientBarSaysThePlayCount(t *testing.T) {
 }
 
 // TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt 钉住网格那个圆播放钮的**语义**
-// 和双击那一格一样：从这一首往后接。
+// 和双击那一格一样：**只放这一首，不换队列**（票 #608，照上游 Biu 的 `play()`）。
+//
+// ⚠️ **它不再「从这一首往后接」**：那是右键菜单「从这一首往后听」的活儿。这一枚钮
+// 是「放这一首」——用户已经排好的队列要留着。
 func TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt(t *testing.T) {
 	rec := &recorded{}
 	songs := onlineSongs(8)
@@ -627,12 +627,14 @@ func TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt(t *testing.T) {
 		t.Fatalf("点不了封面上那个播放钮：%v（画面：%q）", err, tt.Texts())
 	}
 
-	if len(rec.played) != 1 {
-		t.Fatalf("收到 %d 次播放，want 1 次", len(rec.played))
+	if len(rec.nowed) != 1 {
+		t.Fatalf("收到 %d 次「立即播放」，want 1 次", len(rec.nowed))
 	}
-	if got := rec.played[0]; len(got) != 7 || got[0].Bvid != "BV2" {
-		t.Errorf("从第二格开始接进去的是 %d 首（第一首 %q），want 7 首（它和它后面那六首）",
-			len(got), got[0].Bvid)
+	if got := rec.nowed[0].Bvid; got != "BV2" {
+		t.Errorf("点第二格的播放钮放出来的是 %q，want BV2", got)
+	}
+	if len(rec.played) != 0 {
+		t.Errorf("这一枚钮顺手把队列换成了「从这一首往后」那一段（收到 %d 次）", len(rec.played))
 	}
 }
 

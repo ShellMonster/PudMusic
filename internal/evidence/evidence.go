@@ -3856,12 +3856,26 @@ var Items = []Item{
 	},
 	{
 		// 票 #337 覆盖 #299：单首保留队列，显式批量/区段替换队列。
+		// 票 #608 覆盖 #337 的那一处「同一首已经在队列里时照样再加一份」：
+		// 照上游 Biu 的 `play()` 改成**定位已有那一份**，不再重复入队。
 		Category: Play,
-		Spec:     "立即播放追加这一首并打断，旧队列保留；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
+		Spec:     "点一首歌保留旧队列（已在队列里就定位、不在才追加）；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
 		Tests: []string{
 			"TestEnqueueAndPlayNowAppendsAndStartsTheNewSong",
-			// 同一首已经在队列里时**照样再加一份**（与上游那一处不同）。
-			"TestEnqueueAndPlayNowAppendsTheSameSongTwice",
+			// 同一首已经在队列里时**定位过去，不再追加一份**（照上游）。
+			"TestEnqueueAndPlayNowSelectsTheSameSongInsteadOfAppending",
+			// 已经在队列里的那一首：长度不变、当前项指过去、放的是它（票 #608）。
+			"TestEnqueueAndPlayNowSelectsAnItemThatIsAlreadyInTheQueue",
+			// 不在队列里的那一首：追加到队尾并立即播（票 #608）。
+			"TestEnqueueAndPlayNowAppendsASongThatIsNotInTheQueue",
+			// 队列里同一首排了两遍时，定位到用户点的那一份（票 #608）。
+			"TestEnqueueAndPlayNowLocatesTheDuplicateNotTheFirstCopy",
+			// 点一首歌不清空周围的歌（票 #608）。
+			"TestEnqueueAndPlayNowDoesNotClearTheQueueAroundIt",
+			// E2E：投稿页 112 首「全部播放」之后双击第 59 首，队列还是 112 首，
+			// 当前项是第 59 首；点一首不在队列里的会追加（票 #608）。
+			"TestDoubleClickingAnUpSubmissionKeepsThePlaylist",
+			"TestDoubleClickingASongOutsideTheQueueAppendsIt",
 			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
 			"TestThePlayNowEntryAppendsAndStartsThatSong",
 			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",

@@ -73,6 +73,9 @@ func guardFailed(failed *map[string]bool, what, id string, draw func()) {
 // 给的是**从这一首起的全部**，和 Biu 的「在 B 站打开这一首从这儿听」一致：
 // 点了一首，接下来的队列就应该是它和它后面那些，不是整个歌单从头。
 // i 不在范围里是什么都不做——双击事件偶尔会落在已经被换掉的那一帧上。
+//
+// ⚠️ **它只接「从这一首往后听」那一档**（右键菜单，票 #337）：双击 / 回车 /
+// 封面播放钮走的是 `playNow`（票 #608），那是「放这一首」，不换队列。
 func playFrom(songs []Music, acts Actions, i int) {
 	if i < 0 || i >= len(songs) {
 		return
@@ -84,6 +87,45 @@ func playFrom(songs []Music, acts Actions, i int) {
 	if acts.Play != nil {
 		acts.Play(items)
 	}
+}
+
+// playNow 让第 i 首成为正在放的那首——**不换队列**。
+//
+// 这是双击一行 / 回车 / 点封面上那枚播放三角的手势（票 #608，照上游 Biu 的
+// `play()`）：用户已经排好的队列要留着，这一首已经在里面就定位过去，不在就追加。
+//
+// ⚠️ **和 `playFrom` 的分界**：这一条只动「这一首」，那一条换掉整个队列。
+// 用错地方的后果差得很远——用户在订阅里点了一首歌，队列里原来那 112 首全没了。
+func playNow(songs []Music, acts Actions, i int) {
+	if i < 0 || i >= len(songs) {
+		return
+	}
+	if acts.PlayNow != nil {
+		acts.PlayNow(songs[i].Item)
+	}
+}
+
+// rowPlay 是**一行的主操作**（双击 / 回车 / 封面播放钮）该做的那件事。
+//
+// 分两档，判据和那两处的菜单、封面反馈**是同一个**（`isUserItem`）：
+//
+//	歌     → `playNow`（放这一首，不换队列，票 #608）
+//	UP 主  → `Play`（进他的空间，`searchresults.go` 的 `openSearchUser`）
+//
+// ⚠️ **别把两档合成一个 `PlayNow`**：搜索页「用户」那一档的 `Play` 是**进空间**，
+// 而它的 `PlayNow` 是一句「UP 主不是歌」的说明（菜单里「立即播放」用的）。合成
+// 一处的话，双击一个用户行会弹出那句话，而不是进他的空间——用户想进进不去。
+func rowPlay(songs []Music, acts Actions, i int) {
+	if i < 0 || i >= len(songs) {
+		return
+	}
+	if isUserItem(songs[i]) {
+		// ⚠️ **这里给的是「从这一首往后」那一段**：`Play` 的协议就是那一段
+		//（`playFrom` 那一段注释），而用户 Tab 的接线只取第一个（`openSearchUser`）。
+		playFrom(songs, acts, i)
+		return
+	}
+	playNow(songs, acts, i)
 }
 
 // notify 说一句话。给按不动的操作用：按了没反应最难解释，说一句就好解释。

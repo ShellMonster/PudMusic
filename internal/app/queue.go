@@ -779,6 +779,26 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	return it, true
 }
 
+// indexByIdentity 是队列里**第一项**判重标识等于 id 的下标，找不到是 -1。
+//
+// 「第一项」是有意的：抽屉按判重标识去重、只画第一份（`queueRowsFor`），
+// 定位到第一份才和用户看见的那一行对得上。
+//
+// id 是空串时一律找不到（认不出是哪一首的项不参与判重，理由见 `Item.Identity`）。
+func (q *Queue) indexByIdentity(id string) (int, bool) {
+	if id == "" {
+		return -1, false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i := range q.items {
+		if q.items[i].Identity() == id {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
 // RemoveIdentity 把队列里**所有**判重标识等于 id 的项删掉，返回删掉的是哪几项、
 // 被删的里面有没有正在放的那首、以及有没有删掉东西。id 是空串时一概不删。
 //
@@ -1304,38 +1324,62 @@ func (a *App) Enqueue(items ...Item) error {
 	return a.play(item)
 }
 
-// EnqueueAndPlayNow 把**这一首**加到队列末尾（队列里原来有的那几首**保留**），
-// 并**打断**现在放的那首——现在播它。
+// EnqueueAndPlayNow 让**这一首**成为正在放的那首——队列里原来有的那几首**保留**。
 //
-// 这是行级「立即播放」那一枚的语义（票 #337，2026-10-24 人定的）：点一首歌
+// 这是行级播放入口（双击一行、点封面上的播放钮、菜单那枚「立即播放」）共同的
+// 语义（票 #337 定的方向，票 #608 按上游补齐了「已经在队列里」那一支）：点一首歌
 // **不许**把用户已经排好的队列清掉。
+//
+// # 两种情形，照上游 Biu 的 `play()`
+//
+//   - **队列里已经有这一首** → 把当前项**定位到它**再播，**不再追加一份**。
+//     上游那一支是 `set({ playId: existItem.id })`（`_research/biu/src/store/
+//     play-list.ts:572-583`）。
+//   - **队列里没有** → 追加到队尾再播。
+//
+// 两种情形都不动队列里别的项——这是它和 `PlayFrom` 的分界。
+//
+// # 判重标识找不到时的兜底
+//
+// `Identity()` 认不出是哪一首时是空串（还没接来源的占位项）。**空串不参与
+// 「已有」判断**：两首都认不出的话，认成同一首会让「点一行」变成「什么都不做」
+// （和 `sameSong` 同一条理由）。所以那种项一律走追加。
 //
 // # 和另外三个方法的分界：加在哪 + 打不打断
 //
 //	Enqueue          加到队尾；队列原本空着才起播（不打断）
 //	EnqueueNext      插到**正在放的那首后面**（不打断）
-//	EnqueueAndPlayNow 加到队尾 + 打断（现在播它）
+//	EnqueueAndPlayNow 定位已有的 / 追加没有的；都打断（现在播它）
 //	PlayFrom         **换掉整个队列**，从第一首起播（打断）
 //
-// 加在队尾；后续切歌仍按用户选择的播放模式走。这里只接一首，批量入口用 PlayFrom。
-// 同步起播失败时保留新加的这一首，并把当前项退回原位；异步取流失败由播放状态处理。
-//
-// ⚠️ **这一首已经在队列里的时候，照样再加一份**（票 #337 拍板的是「追加这一首
-// 到队尾」）。所以同一首可能在队列里出现两次——上游 Biu v1.16 的 `play()` 那一支
-// 是**选中已有那一份**（`existItem`），本项目跟它不一样，理由见 `DESIGN.md`
-// §十第 4 条。
+// 后续切歌仍按用户选择的播放模式走。这里只接一首，批量入口用 PlayFrom。
+// 同步起播失败时把队列的当前项退回原位；异步取流失败由播放状态处理。
 func (a *App) EnqueueAndPlayNow(item Item) error {
+	// 已经在队列里：定位过去，不追加。
+	//
+	// ⚠️ **取第一份**（`at` 那个下标）：抽屉按判重标识去重、只画第一份
+	// （`queueRowsFor`），而用户是照着抽屉/列表点的那一行——定位到抽屉画的那一份，
+	// 两边说的是同一行。
+	if at, ok := a.queue.indexByIdentity(item.Identity()); ok {
+		a.queue.selectAt(at)
+		if err := a.play(item); err != nil {
+			// 退回原来那一首：队列的下标要和正在放的那首对得上（和 `step` 同一个
+			// 道理——用户点的是这一首，不该因为放不开就被放到另一首上）。
+			//
+			// ⚠️ 退的是**刚才那一跳**（UndoStep），不是「再指回去」：随机模式里这
+			// 一跳把刚才那首压进了历史栈。
+			a.queue.UndoStep()
+			return err
+		}
+		return nil
+	}
+
 	start := a.queue.Len()
 	a.queue.Append(item)
 	// 选中新加进去的那一项（它必然在 `start` 那个下标上：`Append` 刚把它放在
 	// 队尾，而 `selectAt` 只在下标越界时才失败）。
 	a.queue.selectAt(start)
 	if err := a.play(item); err != nil {
-		// 退回原来那一首：队列的下标要和正在放的那首对得上（和 `step` 同一个
-		// 道理——用户点的是这一首，不该因为放不开就被放到另一首上）。
-		//
-		// ⚠️ 退的是**刚才那一跳**（UndoStep），不是「再指回去」：随机模式里这
-		// 一跳把刚才那首压进了历史栈。
 		a.queue.UndoStep()
 		return err
 	}

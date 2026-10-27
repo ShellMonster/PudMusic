@@ -715,14 +715,14 @@ func (g *Grid) scrollCursorIntoView(i int) {
 
 // submitCursor 是回车：放游标那一格那一首。
 //
-// ⚠️ **和列表那一档同一个手势**：列表的 `OnSubmit` 走的是 `playFrom`
-// （`card.go` 的 `viewCard`），网格的双击走的也是它——回车走同一条路，
+// ⚠️ **和列表那一档同一个手势**：列表的 `OnSubmit` 走的是 `rowPlay`
+// （`list.go`），网格的双击 / 回车走的也是它——三个入口走同一条路，
 // 免得「列表里回车放歌、网格里回车没反应」。
 func (g *Grid) submitCursor() {
 	if g.sel < 0 || g.sel >= len(g.songs) {
 		return
 	}
-	g.playFrom(g.sel)
+	g.rowPlay(g.sel)
 }
 
 // keepAnchor 是「换列数时滚动锚点保持」的那一段（验收第 2 条）。
@@ -1014,8 +1014,11 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	// 在不在这一格上，而封面上面那圈反馈要等 Children 才建得出来。
 	onCell := box.Hovered()
 
-	// 双击这一格 = 从这一首往后播，和列表双击那一行是一个意思
+	// 双击这一格 = 放这一首，和列表双击那一行是一个意思
 	//（Biu 的 `onDoubleClick`）。两个视图别一个能双击播放一个不能。
+	//
+	// ⚠️ **走 `rowPlay`**（票 #608）：歌是「放这一首、不换队列」，UP 主是
+	// 「进他的空间」——和列表那一行同一个出口。
 	//
 	// ⚠️ 这是**在 view 里查**出来的，不是回调：`DoubleClicked` 报的是「这一帧
 	// 这一格被双击了」，查了它就置上 `rt.consumed`，框架会**把这一帧重建一遍**
@@ -1023,7 +1026,7 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	// change what was built before it: build again」），所以队列换完这一帧画出来
 	// 就是换完的样子。一个双击只报一次——`endPass` 每遍画完就把这一遍的输入忘掉。
 	if box.DoubleClicked() {
-		g.playFrom(i)
+		g.rowPlay(i)
 	}
 
 	box.Children(func() {
@@ -1046,16 +1049,19 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// ⚠️ **「用户」那一档的格子不是歌**（`isUserItem`）：那一格按下去是进他的
 		// 空间，所以那一圈反馈换一套——图形、提示、无障碍名三样都换（理由见
 		// `hover.ProfileTip`）。
+		//
+		// ⚠️ **两边都走 `g.rowPlay`**（票 #608）：分流和双击、和列表那一档是
+		// 同一个出口。
 		if isUserItem(m) {
 			hover.CardCoverProfile(c, g.cache, m.Cover, cell, gridCoverH, onCell,
 				g.countText.At(i, m.View, PlayCountText),
 				g.durText.At(i, m.Duration, formatDuration), m.Title,
-				func() { g.playFrom(i) })
+				func() { g.rowPlay(i) })
 		} else {
 			hover.CardCover(c, g.cache, m.Cover, cell, gridCoverH, onCell,
 				g.countText.At(i, m.View, PlayCountText),
 				g.durText.At(i, m.Duration, formatDuration), m.Title,
-				func() { g.playFrom(i) })
+				func() { g.rowPlay(i) })
 		}
 
 		// ② 歌名 + UP 名/时长。
@@ -1107,8 +1113,12 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	})
 }
 
-// playFrom 把队列**换成**第 i 首往后的那一段并开始播。菜单的「播放」和双击这一格都用它。
+// playFrom 把队列**换成**第 i 首往后的那一段并开始播。只有菜单的「从这一首往后听」还用它。
 func (g *Grid) playFrom(i int) { playFrom(g.songs, g.acts, i) }
+
+// rowPlay 是这一格的主操作（双击 / 回车 / 封面播放钮，票 #608）：
+// 歌就放这一首（不换队列），UP 主就进他的空间。
+func (g *Grid) rowPlay(i int) { rowPlay(g.songs, g.acts, i) }
 
 // gridRowHeight 是网格那一行**大概**多高。
 //
