@@ -774,6 +774,21 @@ type App struct {
 	//（`ensureDanmaku` 在那里就把它取出来递给那个 goroutine，goroutine 不碰这个
 	// 字段）。生产上永远是 nil。
 	danmakuFetch func(context.Context, string) ([]bili.Danmaku, error)
+	// danmakuTestSet / danmakuTest 是**给测试摆的那一份弹幕**。生产上永远是
+	// 「没摆」。
+	//
+	// ⚠️ **它为什么需要**：界面那一层（`internal/ui`）要验「弹幕画在封面上」
+	// 「弹幕按当前位置起步」这些**画面上的事**，而生产那一路要一个**在线的、
+	// 有 cid 的**队列项 + 一趟真的 HTTP——界面的测试不该去连 B 站，更不该
+	// 拿真登录态去写东西（AGENTS §6）。
+	//
+	// ⇒ 它是**一个入口**，不是一条旁路：`App.Danmaku` 见到它就直接给这一份，
+	// **一个请求都不发**（生产那一段整个被跳过）。
+	//
+	// ⚠️ **两个字段而不是一个**：空的那一份（`[]DanmakuItem{}`）和「没摆」
+	// 必须分得开——前者是「这一集没有弹幕」，后者是「走生产那一路」。
+	danmakuTestSet bool
+	danmakuTest    []DanmakuItem
 
 	// 本地音乐库，见 localmusic.go。挂上去之前是 nil，界面要判空。
 	localMusic *localLibrary
