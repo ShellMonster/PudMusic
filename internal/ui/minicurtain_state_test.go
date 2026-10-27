@@ -277,7 +277,7 @@ func TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses(t *testing.T) {
 	}
 
 	// 收起
-	s.miniCurtainCollapse()
+	s.miniCurtainCollapse(tt.Now())
 	if s.miniCurtainWantsKey {
 		t.Fatal("收起之后那个「我要键盘」的凭据还留着")
 	}

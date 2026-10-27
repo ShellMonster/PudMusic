@@ -714,6 +714,28 @@ type Shell struct {
 	// 那时候应用已经是前台了，`makeKeyAndOrderFront:` 这一句**一定**成。
 	miniCurtainWantsKey bool
 
+	// miniCurtainAppActive 是「应用此刻是前台吗」（票 #307 修 F1）。
+	//
+	// ⚠️ **它管的是「还要不要重试激活」**：`activateIgnoringOtherApps:` 不是
+	// 每次都成（评审实测：点封面之后应用压根没被激活），所以要**失败了就
+	// 再试**——而「再试」只在**应用还没成前台**的时候才有意义。
+	//
+	// ⚠️ **它由两个应用级回调维护**：`OnDidBecomeActive` 置真、
+	// `OnDidResignActive` 置假（见 `attachMiniWindowTo`）。
+	//
+	// ⚠️ **零值是「不是前台」**：应用刚起来、还没拿到过前台时它就是假——而
+	// 那正是**该重试**的那种情况。
+	miniCurtainAppActive bool
+
+	// miniCurtainFocus 是「把键盘抢到迷你窗这一扇」那一档的状态（票 #307 修
+	// F1）。
+	//
+	// ⚠️ **它为什么是一份而不是三个散字段**：`need` / `done` 这两位是**一对**
+	// ——「点封面那一刻应用**不是**前台」才需要重试，而「**已经激活过**了」
+	// 就收手。分开写的话很容易写成「用户自己切走 ⇒ `active` 变假 ⇒ 又开始
+	// 重试 ⇒ **把用户从他自己那件事上拽走**」。
+	miniCurtainFocus miniCurtainFocusState
+
 	// miniLyric 是**卷帘里那个歌词区**自己那一摊（滚动位置、上一帧量到的两个
 	// 框、正在滚向哪一句）。
 	//

@@ -267,7 +267,7 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 		t.Errorf("窗高被改成了 %d，want %d（84 + 卷帘 %d）", got, want, miniCurtainH)
 	}
 	// 收起之后窗高回到 84。
-	s.miniCurtainCollapse()
+	s.miniCurtainCollapse(tt.Now())
 	settleCurtain(t, tt, false)
 	if got, want := s.miniCurtain.setHeight, miniHeight; got != want {
 		t.Errorf("收起之后窗高是 %d，want %d：收起之后窗必须回到 84"+

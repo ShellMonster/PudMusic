@@ -510,6 +510,19 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	// `Shell.miniCurtainWantsKey` 也是迷你这一份的状态。
 	mygo.App.OnDidBecomeActive(func() { s.miniCurtainEnsureKey() })
 
+	// 🔴 **应用退出前台时，收手**（票 #307 修 F1）。
+	//
+	// ⚠️ **为什么**：重试激活那一档（`miniCurtainFocusTick`）在「应用还没成
+	// 前台」的时候会**反复调 `activateIgnoringOtherApps:`**——而用户要是
+	// 已经**自己切到别的应用**去了，我们还在重试 ⇒ **把用户从他自己那件事
+	// 上拽走**。
+	//
+	// ⚠️ **这一档只做「收手」**：应用**真的**成了前台时，`OnDidBecomeActive`
+	// 那一档会把 `miniCurtainAppActive` 置真，重试于是自动停；用户又切走时，
+	// 这一档把它置回假——而**重试的窗口本身**（`miniCurtainFocusUntil`）
+	// 只有 1200ms，早就过了。
+	mygo.App.OnDidResignActive(func() { s.miniCurtainAppActive = false })
+
 	// ⚠️ **逐窗口的那些生命周期钩子装在这一层上**（`miniWindow` 那一层接口），
 	// 而不是直接装在 `*mygo.Window` 上——理由见 `attachMiniWindowLifecycle`
 	// 那一段。
@@ -745,7 +758,11 @@ func (s *Shell) viewMini(c *ui.Context) {
 	}
 	panel := ui.Column(c).Key("mini-root").Fill()
 	if expanded {
-		panel = panel.Radius(t.Radius, t.Radius, space.None, space.None)
+		// ⚠️ **下两个角是 7，不是方的**（票 #307）：展开的时候窗的下沿就是
+		// **下轴（地轴）那一根**——而那根杆是胶囊形（半径 = 14 的一半 = 7）。
+		// ⇒ 面板的下圆角也取 7，**两个圆弧正好对上**，于是窗的下沿看起来
+		// 就是那根杆的下沿（而不是「一块方板底上贴一根圆杆」）。
+		panel = panel.Radius(t.Radius, t.Radius, miniCurtainAxisH/2, miniCurtainAxisH/2)
 	} else {
 		panel = panel.Radius(t.Radius)
 	}
@@ -753,6 +770,14 @@ func (s *Shell) viewMini(c *ui.Context) {
 	if expanded {
 		panel = shadow.Popover(panel, t)
 	}
+	// ⚠️ **裁到面板自己的圆角里**（票 #307）：那两道轴是**绝对定位**的孩子，
+	// 而上轴贴着窗的顶边——面板顶边两个角是圆的（`t.Radius`，可调到 24），
+	// 不裁的话**轴的两头会戳到面板外面**（那儿是透明的桌面）。
+	//
+	// ⚠️ **裁的是孩子，不是这一段自己**：框架的 `Clip` 只裁**子元素**画出来
+	// 的东西，而根自己的底和影是**裁之前**画的（`mygo/ui/paint.go` 的
+	// `p.background` / `p.shadow` 在 `pushClip` 之前）——所以那圈影还在。
+	panel = panel.Clip()
 	panel.Children(func() {
 		// ⚠️ **高度那一段推在这里**（而不是 `viewMini` 的开头）：它要建的那个
 		// 「动画值的宿主」元素得是**根的子节点**（框架按「键 + 父」认元素），
@@ -779,6 +804,13 @@ func (s *Shell) viewMini(c *ui.Context) {
 		// ⚠️ **有提示的时候也不画**（理由见上面那一段：那句话占掉整扇窗）。
 		if !hasNotice {
 			s.viewMiniCurtain(c, st, t, s.miniCurtain.height)
+		}
+		// ⚠️ **两道轴画在最后**（绝对定位的孩子最后画）：上轴是**迷你窗顶边**
+		// 那一道（一直都在），下轴是**卷帘下沿**那一道（跟着下沿走，回弹时
+		// 跟着抖）——理由见 `minicurtain_axis.go` 的文件头。
+		s.viewMiniCurtainAxisTop(c, t, cardBG)
+		if expanded {
+			s.viewMiniCurtainAxisBottom(c, t, cardBG)
 		}
 	})
 }
@@ -864,7 +896,7 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 			imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, miniCover, miniCover)
 		})
 	if trigger.Clicked() {
-		s.miniCurtainToggle()
+		s.miniCurtainToggle(c.Now())
 	}
 }
 

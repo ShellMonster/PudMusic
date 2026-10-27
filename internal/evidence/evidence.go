@@ -4185,6 +4185,19 @@ var Items = []Item{
 			"TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive",
 			// 收起了就不再惦记抢键盘（不然用户在做别的事时会被抢走）。
 			"TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses",
+			// 票 #307：卷轴展开（弹簧回弹 + 两道轴）。
+			//
+			// ⚠️ **这一组是「动画」那一类**：它量的是**逐帧**的东西——几帧到
+			// 全开、回弹几下、每一帧的窗高。
+			//
+			// - 展开是弹簧：150~180ms 到全开，回弹两三下、幅度递减。
+			"TestTheMiniCurtainUnrollsWithASpring",
+			// - 收起不弹（过阻尼），一路收回 84。
+			"TestTheMiniCurtainRollsUpWithoutBouncing",
+			// - 两道轴：上轴在顶边，下轴贴着下沿（改窗高它也贴着）。
+			"TestTheMiniCurtainHasTwoAxes",
+			// - 激活失败了就再试（F1 那个判据）。
+			"TestTheMiniCurtainRetriesTheActivation",
 		},
 	},
 	{
