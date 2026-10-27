@@ -4401,6 +4401,29 @@ var Items = []Item{
 			"TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive",
 			// 收起了就不再惦记抢键盘（不然用户在做别的事时会被抢走）。
 			"TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses",
+			// 票 #307：卷轴展开（弹簧回弹 + 两道轴）。
+			//
+			// ⚠️ **这一组是「动画」那一类**：它量的是**逐帧**的东西——几帧到
+			// 全开、回弹几下、每一帧的窗高。
+			//
+			// - 展开是弹簧：150~180ms 到全开，回弹两三下、幅度递减。
+			"TestTheMiniCurtainUnrollsWithASpring",
+			// - 收起不弹（过阻尼），一路收回 84。
+			"TestTheMiniCurtainRollsUpWithoutBouncing",
+			// - 两道轴：上轴在顶边，下轴贴着下沿（改窗高它也贴着）。
+			"TestTheMiniCurtainHasTwoAxes",
+			// - 激活失败了就再试（F1 那个判据）。
+			"TestTheMiniCurtainRetriesTheActivation",
+			// - 展开到一半就收起：**不许先长高**（换目标 = 速度归零）。
+			"TestTheMiniCurtainReverseNeverGrows",
+			// - 重试窗口开着的时候**还要得出帧**（迷你窗是失焦照画的，
+			//   帧是「谁要」才出的——弹簧停稳之后帧源就断了）。
+			"TestTheMiniCurtainKeepsAFrameWhileTheActivationRetryIsOpen",
+			// - 歌词**贴着下沿排**（票 #307 §②）：当前句的下沿压在下轴的
+			//   上沿上，而当前句**不在中间**。
+			"TestTheMiniCurtainLyricsHugTheBottom",
+			// - **普通点击**（指针那一跳）封面 ⇒ 激活那一档跑了 ⇒ Esc 收得起。
+			"TestTheMiniCurtainAnswersAPointerClickAndTakesTheKeyboard",
 		},
 	},
 	{
