@@ -306,6 +306,18 @@ func drawSkeletonRows(c *ui.Context, key, text string) {
 	})
 }
 
+// postSkeletons 是动态首屏骨架屏的条数。
+const postSkeletons = 3
+
+// drawPostSkeletons 画动态流「第一页在途」的骨架屏：几条动态占位。name 同 `drawSkeletonRows`。
+func drawPostSkeletons(c *ui.Context, key, text string) {
+	ui.Column(c).Key(key).FillWidth().Label(text).Children(func() {
+		for i := range postSkeletons {
+			skeleton.Post(c, "post:"+strconv.Itoa(i))
+		}
+	})
+}
+
 // dynamicShapesNote 是「我们只画得出三种形态」那句话。
 //
 // ⚠️ **别说成「B 站坏了」**：那些动态是好的，只是**这一版画不出来**——B 站的
