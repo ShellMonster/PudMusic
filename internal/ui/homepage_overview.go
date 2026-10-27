@@ -293,32 +293,48 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 	if cols > 6 {
 		cols = 6
 	}
-	if len(songs) > cols {
-		songs = songs[:cols]
-	}
 	if len(songs) == 0 {
 		return
 	}
+	total := len(songs)
+	if h.newOff+cols > total {
+		h.newOff = max(total-cols, 0)
+	}
+	songs = songs[h.newOff:min(h.newOff+cols, total)]
 	cw := cellW(w, cols, homeOverviewCellGap)
 	ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:new:head", "新歌速递", "查看更多", func() { h.openTab(homePopTab) })
-		ui.Row(c).Key("home:new:row").FillWidth().Gap(space.Px16).Children(func() {
-			for _, m := range songs {
-				sh := list.ShowOf(m)
-				card := ui.Column(c).Key("home:new:" + m.ID).Width(cw).Gap(space.Px6).
-					Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
-				on := card.Hovered()
-				card.Children(func() {
-					imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, cw)
-					col := t.Text
-					if on || (h.acts.IsPlaying != nil && h.acts.IsPlaying(m.Item)) {
-						col = ink.AccentOn(t)
-					}
-					ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size14)).TextColor(col).MaxLines(1).Ellipsis("…")
-					if sh.Owner != "" {
-						ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-					}
-				})
+		ui.Box(c).Key("home:new:stage").FillWidth().Children(func() {
+			ui.Row(c).Key("home:new:row").FillWidth().Gap(space.Px16).Children(func() {
+				for _, m := range songs {
+					sh := list.ShowOf(m)
+					card := ui.Column(c).Key("home:new:" + m.ID).Width(cw).Gap(space.Px6).
+						Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
+					on := card.Hovered()
+					card.Children(func() {
+						imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, cw)
+						col := t.Text
+						if on || (h.acts.IsPlaying != nil && h.acts.IsPlaying(m.Item)) {
+							col = ink.AccentOn(t)
+						}
+						ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size14)).TextColor(col).MaxLines(1).Ellipsis("…")
+						if sh.Owner != "" {
+							ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+						}
+					})
+				}
+			})
+			arrow := func(key, label, glyph string, anchor ui.Anchor, to int) {
+				b := ui.Box(c).Key(key).Size(36, 36).Radius(18).Center().Background(t.Surface).Border(1, t.Border).
+					Attach(anchor, anchor).Top(cw/2 - 18).Focusable().Role(ui.RoleButton).Label(label).
+					OnClick(func() { h.newOff = to })
+				b.Children(func() { ui.Text(c, glyph).FontSize(scale.Font(c, scale.Size20)).TextColor(t.Text) })
+			}
+			if h.newOff > 0 {
+				arrow("home:new:prev", "上一页", "‹", ui.AnchorTopLeft, max(h.newOff-cols, 0))
+			}
+			if h.newOff+cols < total {
+				arrow("home:new:next", "下一页", "›", ui.AnchorTopRight, min(h.newOff+cols, total-cols))
 			}
 		})
 	})
