@@ -131,6 +131,7 @@ func TestTheBoardTabShowsItsPeriodAboveTheList(t *testing.T) {
 		t.Fatalf("点不到热榜：%v", err)
 	}
 	waitFramesClock(t, tt, "热榜的期数", func() bool { return showsText(tt, "第 3 期（周榜） · 1970-01-01 更新") })
+	waitFramesClock(t, tt, "榜单头图上的加入播放列表", func() bool { return showsText(tt, "加入播放列表") })
 }
 
 // TestTheSixTabsAndPlayAllFitAtTheSmallestWindow 量最小窗口下 Tab 那一排：六个 Tab 一个

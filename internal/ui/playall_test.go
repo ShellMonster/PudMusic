@@ -140,9 +140,9 @@ func TestThePlayAllButtonHasThePlayIcon(t *testing.T) {
 				t.Fatalf("画面上找不到主色那一块——「全部播放」那一枚不见了")
 			}
 			// 图标盒子在绿块的左边：内边距 16（`px-4`），然后是 18 宽的图标。
-			ink, ok := darkInk(img, image.Rect(
+			ink, ok := inkAgainst(img, image.Rect(
 				box.Min.X+playAllPadX, box.Min.Y+2,
-				box.Min.X+playAllPadX+playAllIconSize, box.Max.Y-2))
+				box.Min.X+playAllPadX+playAllIconSize, box.Max.Y-2), rgb(th.Accent))
 			if !ok {
 				t.Fatalf("绿块左边那一格没有黑的——那枚 ▶ 图标不见了（上游是 " +
 					"`<RiPlayFill size={18} />`）")
@@ -201,6 +201,32 @@ func accentBlock(img *image.RGBA, accent color.RGBA, region image.Rectangle) (im
 			if maxY < 0 || y > maxY {
 				maxY = y
 			}
+		}
+	}
+	if minX < 0 {
+		return image.Rectangle{}, false
+	}
+	return image.Rect(minX, minY, maxX+1, maxY+1), true
+}
+
+// inkAgainst 找 region 里「和主色底差得远的那一片」的盒子：图标的颜色跟着主题走
+// （深底配浅字、浅底配深字），所以不按「黑」判，按「离底色远」判。
+func inkAgainst(img *image.RGBA, region image.Rectangle, bg color.RGBA) (image.Rectangle, bool) {
+	minX, minY, maxX, maxY := -1, -1, -1, -1
+	for y := max(region.Min.Y, img.Rect.Min.Y); y < min(region.Max.Y, img.Rect.Max.Y); y++ {
+		for x := max(region.Min.X, img.Rect.Min.X); x < min(region.Max.X, img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if absInt(int(p.R)-int(bg.R))+absInt(int(p.G)-int(bg.G))+absInt(int(p.B)-int(bg.B)) < 300 {
+				continue
+			}
+			if minX < 0 || x < minX {
+				minX = x
+			}
+			maxX = max(maxX, x)
+			if minY < 0 || y < minY {
+				minY = y
+			}
+			maxY = max(maxY, y)
 		}
 	}
 	if minX < 0 {

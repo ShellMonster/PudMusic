@@ -69,7 +69,10 @@ func MountLyrics(a *app.App) {
 func appDataDir() string {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，这次的歌词关掉就没了：%v", err)
+		// ⚠️ **这句话是给「所有挂在用户数据目录底下的东西」说的**（歌词缓存、
+		// 评论缓存……），不是只给歌词：写死「歌词」的话，评论缓存拿不到目录时
+		// 用户看到的是一句跟评论无关的话。
+		log.Printf("biu: 拿不到应用数据目录，这次的歌词和评论关掉就没了：%v", err)
 		return ""
 	}
 	return dir

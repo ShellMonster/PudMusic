@@ -91,7 +91,7 @@ func (s *Shell) viewVideoBadge(c *ui.Context) {
 		Radius(fullVideoBadgeSize / 2).Background(ui.RGBA(0, 0, 0, scrim.Media)).
 		Center().Cursor(ui.CursorPointer)
 	b.Children(func() {
-		ui.Icon(c, icon(iconPlay)).FontSize(24).TextColor(ui.RGBA(255, 255, 255, 0.95))
+		ui.Icon(c, icon(transportIcon(false))).FontSize(24).TextColor(ui.RGBA(255, 255, 255, 0.95))
 	})
 	if b.Clicked() {
 		s.app.StartVideo()
