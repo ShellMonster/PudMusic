@@ -1236,11 +1236,14 @@ func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 		//
 		// ⚠️ **只在「在放」时给**：暂停时位置不动，每帧重画是纯浪费，
 		// 而且会一直要下一帧，窗口停不下来。
-		var live func() float32
+		var live sliderLive
 		if known && st.Playing {
 			dur := float64(st.Duration)
-			live = func() float32 {
-				return float32(float64(s.app.PlayPosition()) / dur)
+			live = sliderLive{
+				frac: func() float32 {
+					return float32(float64(s.app.PlayPosition()) / dur)
+				},
+				visible: s.presence.seen,
 			}
 		}
 		sl := knobSliderLive(c, &s.fullScrub, 0, 1, knobFullLook(dim, base), live).

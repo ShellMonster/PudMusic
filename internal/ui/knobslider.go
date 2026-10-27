@@ -224,7 +224,7 @@ func knobSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 
 // knobSliderLive 是 `knobSlider` 加「那根线自己走」（见 `selfSliderLive`）：
 // 满屏播放器那根进度用它，它和播放条那根一样是一直在走的那一根。
-func knobSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live func() float32) ui.Element {
+func knobSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live sliderLive) ui.Element {
 	t := c.Theme()
 	return selfSliderLive(c, value, lo, hi, look, live).
 		Height(t.Space(5)).MinWidth(t.Space(20))
@@ -244,9 +244,20 @@ func playbarProgressSlider(c *ui.Context, value *float64, lo, hi float64) ui.Ele
 //
 // 播放条和满屏播放器那两根都用它：它们是**一直在放**的那一根，而以前它们
 // 靠整窗 20Hz 重建来走。
-func playbarProgressSliderLive(c *ui.Context, value *float64, lo, hi float64, live func() float32) ui.Element {
+func playbarProgressSliderLive(c *ui.Context, value *float64, lo, hi float64, live sliderLive) ui.Element {
 	return selfSliderLive(c, value, lo, hi, knobHoverLook, live).
 		Height(20).MinWidth(16)
+}
+
+// sliderLive 是「画的时候现算」那一档的两个回调，空的一档表示不用。
+//
+// 两个都做成回调而不是值，是因为它们要在**绘制**那一刻问：
+//
+//	frac    那根线此刻画到哪儿（0~1）
+//	visible 用户现在看不看得见这一扇窗（见下面那道闸的注释）
+type sliderLive struct {
+	frac    func() float32
+	visible func() bool
 }
 
 // selfSlider 造一根自绘的滑块：框架的基座（值、拖动、点击跳转、键盘、无障碍
@@ -255,7 +266,7 @@ func playbarProgressSliderLive(c *ui.Context, value *float64, lo, hi float64, li
 // 旋钮的**位置和粗细**由 look 定；元素**多大**由调用方摆（`.Width` / `.Height` /
 // `.Grow`）——竖着的那根（音量）全程是调用方说了算。
 func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) ui.Element {
-	return selfSliderLive(c, value, lo, hi, look, nil)
+	return selfSliderLive(c, value, lo, hi, look, sliderLive{})
 }
 
 // selfSliderLive 是 `selfSlider` 加一档「**画的时候现算**的值」。
@@ -276,7 +287,7 @@ func selfSlider(c *ui.Context, value *float64, lo, hi float64, look sliderLook) 
 //
 // ⚠️ **`live` 必须便宜**：它在每帧的绘制路径里被调，一帧可能好几遍。
 // 拿锁、算快照、分配字符串之类的都别往里放。
-func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live func() float32) ui.Element {
+func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live sliderLive) ui.Element {
 	t := c.Theme()
 
 	sl := ui.SliderBase(c, value, lo, hi).
@@ -338,9 +349,27 @@ func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLo
 		// 就把 `frac` 换成它此刻的值，并要下一帧——那一帧**不重建**。
 		//
 		// ⚠️ **只在没被按着的时候**：按着的时候用户的手指是事实来源，画拖动值。
-		if live != nil && !sl.Pressed() && !sl.IsDisabled() {
-			frac = min(max(live(), 0), 1)
-			p.AnimationFrame()
+		//
+		// 🔴 **要下一帧之前必须问「这一帧用户看不看得见」**（票 #156 那条纪律，
+		// 和波形 `hover.go` / 频谱 `fullplayer_spectrum.go` 同一个口径）。
+		//
+		// 失焦（但没最小化）这一档**框架自己不管**：macOS 的
+		// `occlusionState` 那时还是 visible，`next()` 里那条 `occluded()`
+		// 拦不住——所以只能在这一层挡。不挡的话这一帧画完又要下一帧，
+		// 链子自己续下去，一扇收在后台的窗口按显示器刷新率一直重绘
+		// （用户能感到的是风扇和电池）。
+		//
+		// 原来没有这一道：tick 每 50ms 叫醒一次、而 `wakeHandle.invalidate`
+		// 自己有可见性闸门，所以看不见的窗口本来就不画。改成「进度条自己
+		// 要帧」之后，那条闸门管不着绘制路径发起的帧了——闸门得挪到这儿。
+		if live.frac != nil && !sl.Pressed() && !sl.IsDisabled() {
+			frac = min(max(live.frac(), 0), 1)
+			// ⚠️ **`live.visible` 为 nil 时算看得见**（和 `wakeHandle.seen` 的
+			// 同一条约定）：只有「有人管可见性」的调用方才会装它，没装的那个
+			// （测试里手搓的滑块）不该被当成看不见。
+			if live.visible == nil || live.visible() {
+				p.AnimationFrame()
+			}
 		}
 
 		// 🔴 **填过的那一段的三档颜色**（票 #218 / #248）：平时前景色、悬停/按下
