@@ -95,6 +95,7 @@ var ourOwnKeys = []string{
 	"playback",
 	"themePreset",
 	"dynamicSeen",
+	"updateNotification",
 	// 「迷你播放器点封面展开歌词卷帘」那一格（票 #536）。
 	//
 	// ⚠️ **它是 Biu 没有的键**——上游迷你播放器压根没有歌词区（BMG-280 §6
@@ -999,6 +1000,7 @@ const ourOwnKeysJSON = `{
 	"playback": {"items": [], "current": "", "positionMs": 0},
 	"themePreset": "warm-paper",
 	"dynamicSeen": {"baselines": []},
+	"updateNotification": true,
 	"miniLyricsCurtain": true
 }`
 

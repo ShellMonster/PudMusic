@@ -4412,6 +4412,80 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #559（板子任务 #297，2026-10-26）：后台下载完成时弹一条系统通知。
+		//
+		// ⚠️ **判据是「一扇窗都没有『有焦点**且**看得见』」**：「窗口全部隐藏」是
+		// 一档**独立**的状态，不许靠「隐藏必然先失焦」那个隐含顺序——`OnHide` 与
+		// `OnBlur` 是两个回调，谁先到不由我们决定。
+		//
+		// ⚠️ **迷你播放器那一扇的焦点要算**：它是 Panel（点它不激活应用），可它
+		// 在 macOS 上照样能拿 key（实测 2026-10-26，真窗口）。不算它的话，迷你
+		// 模式下每一次后台下载完成都会弹一条通知，而用户正看着迷你播放器听歌。
+		//
+		// ⚠️ **「互相切换」那一瞬靠「等一等」而不是「判得准」**：主窗失焦到迷你窗
+		// 拿到焦点之间有一个「两扇都没有焦点」的瞬间（实测 35~60 毫秒），而通知
+		// 是立刻弹的——所以判定延后一小会儿再判一次。
+		Category: Platform,
+		Spec:     "用户不在应用里（没有任何一扇窗『有焦点且看得见』，或窗口全部隐藏）时，后台下载完成弹一条系统通知；用户在应用里时不弹；主窗与迷你窗互相切换不误判；点通知回主窗的下载记录页；权限拒绝 / 不支持时静默降级成应用内提示而不丢事件（那句话要等用户回来还在）；同一任务用稳定 ID，同一版本不重复提醒；「有更新了」那一档另有一个独立开关；任一扇窗重新拿到焦点时清掉通知中心里的那些（**包括上一次运行留下的**——哪怕这一轮一次通知都没发过）",
+		Tests: []string{
+			// 判据本身：聚焦 / 失焦 / 迷你那一扇 / 全隐藏 / 窗口还没建出来 /
+			// 关掉的那一扇窗要摘掉。
+			"TestTheFocusSnapshotSaysWhenTheUserIsAway",
+			"TestTheMiniPlayerCountsAsTheUserBeingHere",
+			"TestAllWindowsHiddenMeansTheUserIsAway",
+			"TestAHiddenWindowDoesNotCountAsTheUserBeingHere",
+			"TestAHiddenWindowIsAwayEvenWhileItStillHasFocus",
+			"TestNoWindowYetIsNotTheUserBeingAway",
+			"TestAClosedWindowIsNotCounted",
+			// 互相切换那一瞬不误判（靠宽限期）。
+			"TestSwitchingBetweenOurOwnWindowsIsNotLeavingTheApp",
+			// 该发的时候真发了、该静默的时候真静默。
+			"TestDownloadDoneIsAnnouncedWhenTheUserIsAway",
+			"TestDownloadDoneIsSilentWhileTheUserIsHere",
+			// 稳定 ID（同一任务不堆两条）。
+			"TestTheNotificationIDIsStable",
+			// 点通知回到对应页面。
+			"TestTheNotificationGoesToTheDownloadList",
+			"TestTheUpdateNotificationGoesToTheSettings",
+			"TestAnUnknownNotificationGoesNowhere",
+			// 任一扇窗重新拿到焦点就把通知清掉（**包括上一次运行留下的那些**）。
+			"TestReturningToTheAppClearsTheNotifications",
+			"TestAFreshProcessStillClearsTheNotificationsOfEarlierRuns",
+			// 发不出去时不丢事件。
+			"TestAFailedNotificationStillSaysItInTheApp",
+			"TestAFailedNotificationStillSaysItWhenTheUserReturns",
+			"TestTheStickyNoticeIsReleasedWhenTheUserComesBack",
+			"TestTheStickyNoticeIsOnScreenWhenTheUserComesBack",
+			// 同一个版本只提醒一次（稳定 ID 不代替它）。
+			"TestTheSameVersionIsNotNotifiedTwice",
+			"TestANewVersionIsNotifiedAgain",
+			// 用户在前台发现新版本，等他离开之后**仍然**能收到那一条（两层
+			// 合起来量：应用层那一份记账也得退回来）。
+			"TestAVersionFoundWhileTheUserIsHereIsNotifiedWhenTheyLeave",
+			// 「更新提醒」那一格在设置页上摆着。
+			"TestTheUpdateNotificationSwitchIsOnTheSettingsPage",
+			// 应用层那一段接线（下载完成 / 后台查到更新会递出去）。
+			"TestADownloadThatFinishedReachesTheNotifier",
+			"TestABackgroundCheckTellsTheNotifier",
+			"TestTwoBackgroundChecksDoNotNotifyTheSameVersionTwice",
+			// 退回来那一份之后，同一个版本还能再提醒一次。
+			"TestAReleasedVersionIsNotifiedAgain",
+			"TestAReleaseDoesNotClearAnotherVersion",
+			"TestTheUpdateNotificationSwitchTurnsItOff",
+			"TestTheUpdateNotificationSwitchIsOnByDefault",
+			// 平台层那一段（问过没有 / 拒了不再问 / 失败交给上层）。
+			"TestANotificationIsNotSupportedBeforeTheAppIsReady",
+			// 「刚起来的进程」那一份账是「还没问过」那一档——
+			// 而**零值**就是那一档（否则打包的 macOS 应用一次都不会去问
+			// 框架，于是弹不出系统通知，而它静默降级成应用内提示）。
+			"TestAFreshProcessHasNotAskedYet",
+			"TestTheZeroValueOfTheSupportStateMeansNotAskedYet",
+			"TestTheSupportAnswerIsAskedOnlyOnce",
+			"TestADeniedNotificationIsNeverAskedForAgain",
+			"TestTheFailureIsHandedToTheUpperLayer",
+		},
+	},
+	{
 		// 票 #558：删本地音乐文件**改成移到系统废纸篓**（原来是永久删除）。
 		//
 		// ⚠️ **语义变了，而那一半是静默的**：以前界面上写着「不可恢复」，

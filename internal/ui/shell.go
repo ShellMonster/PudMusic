@@ -79,6 +79,12 @@ type Shell struct {
 	// `View` 拿它决定这一帧的逐帧动画要不要继续要下一帧。
 	presence windowPresence
 
+	// notify 是这一扇窗在「活跃态」那本账上的登记号（见 notification.go）。
+	//
+	// ⚠️ **它是逐窗口一份**（主窗一个、迷你窗一个），而那本账是**整个进程
+	// 一份**——因为「用户在不在这几扇窗里」问的是全部窗。
+	notify notifyWindow
+
 	// visible 是「这一扇窗看不看得见」那一个**活的**开关，给「每帧都要一帧」
 	// 的动画用（波形那一格，见 `hover.SetVisibleFlag`）。
 	//

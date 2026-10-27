@@ -481,6 +481,20 @@ type Settings struct {
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
 
+	// UpdateNotification 是「有更新了弹系统通知」开关（票 #559）。默认**开**。
+	//
+	// ⚠️ **它默认开，而它的零值是 false**：所以「这一格不存在」（老版本写的
+	// 设置文件）和「用户把它关了」在读回来之后分不开——两者的读回来都是 false，
+	// 而老用户升级上来之后**不该**平白多一条系统通知的打扰。
+	//
+	// ⚠️ **所以这一格是指针**（`*bool`），跟 `Volume` 同一个理由：
+	// `*bool` 能把「没设过」（nil → 默认开）和「用户关了」（false）分开。
+	// 用裸 bool 的话，要么老用户升级上来就被静默关掉（那也是错的方向），要么
+	// 拿不到「用户关了」这一档。
+	//
+	// 键名是我们自己的（Biu 那边没有这一格）。
+	UpdateNotification *bool `json:"updateNotification"`
+
 	// CoverHue / CoverSat 是界面从当前封面取出来的色相（0~360）和饱和度（0~1），只在
 	// 内存里传给主题，不落盘。CoverSat 为 0 表示还没取到（或封面没颜色）。
 	CoverHue, CoverSat float64 `json:"-"`
@@ -631,6 +645,10 @@ func DefaultSettings(downloadPath string) Settings {
 	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
 	// 有人改了 `*s.Volume` 就把全局的默认值改了。
 	vol := DefaultVolume
+	// 「有更新了弹系统通知」那一格也是**指针**（理由见 `Settings.UpdateNotification`
+	// 那一格），而且它默认**开**——系统通知是低频的好事，而新装的用户还没说过
+	// 「不要」。
+	updateNotif := true
 	// 「迷你播放器点封面展开歌词卷帘」那一格同样是**指针**（理由见那个字段的
 	// 注释），而它**默认是开的**（票 #536）。
 	curtain := DefaultMiniLyricsCurtain
@@ -670,6 +688,8 @@ func DefaultSettings(downloadPath string) Settings {
 		// 音量：默认 100%（老版本每一次启动都是这一档，见 DefaultVolume）。
 		Volume: &vol,
 		Muted:  false,
+		// 「有更新了弹系统通知」：默认开。
+		UpdateNotification: &updateNotif,
 
 		// 迷你播放器的歌词卷帘：**默认开**（票 #536）。
 		//
@@ -691,6 +711,20 @@ func DefaultSettings(downloadPath string) Settings {
 		PlayMode:                             DefaultPlayMode,
 		ShouldKeepPagesOrderInRandomPlayMode: true,
 	}
+}
+
+// UpdateNotificationEnabled 报「有更新了要不要弹系统通知」。
+//
+// ⚠️ **它把「没设过」和「用户关了」分开**（理由见 `Settings.UpdateNotification`
+// 那一格）：`nil`（老版本写的文件）按**默认开**算，而 `false`（用户明确关了）
+// 是关。
+//
+// ⚠️ **裸 bool 的零值做不到这件事**：false 既是「没设过」又是「用户关了」。
+func (s Settings) UpdateNotificationEnabled() bool {
+	if s.UpdateNotification == nil {
+		return true
+	}
+	return *s.UpdateNotification
 }
 
 // 设置文件的三种坏法。三种要分开，因为要分开处理。
@@ -938,6 +972,12 @@ func (s *Settings) normalize() {
 	} else {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
+	}
+	// 「有更新了弹系统通知」：nil = 「这一格不存在」（老版本写的文件）→ **默认
+	// 开**。理由见 `Settings.UpdateNotification` 那一格。
+	if s.UpdateNotification == nil {
+		v := true
+		s.UpdateNotification = &v
 	}
 	// 迷你播放器的歌词卷帘：nil = 这份设置里**没有这一格** = 默认**开**
 	// （票 #536）。
