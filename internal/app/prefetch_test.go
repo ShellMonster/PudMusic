@@ -162,6 +162,17 @@ func TestAManualNextUsesThePreparedAddress(t *testing.T) {
 	waitFor(t, 15*time.Second, "第二首的地址备好了", func() bool {
 		return f.playCalls.Load() >= 2
 	})
+	// ⚠️ **等的是「地址备好了」，不是「请求发出去了」**——这两件事之间有一整个
+	// 带签名的网络往返（B 站取流接口几十到几百毫秒），而「按下一首吃预取」
+	// **只在地址回来了的时候才成立**（在途的时候手上压根没有地址可用，
+	// 按下一首照常重新取一次流是对的）。
+	//
+	// 只等「请求发出去了」的话，机器一忙就正好落在那个窗口里 ⇒ 按下一首
+	// 必然重新取流 ⇒ 下面那个计数判据多一次 ⇒ **用例自己把自己判红**
+	// （实测：200 次里飘红 2 次；那个窗口被撑到 200ms 时 6 轮全红）。
+	waitFor(t, 15*time.Second, "第二首的地址备好了（就绪）", func() bool {
+		return a.TestOnlyPrefetchReady()
+	})
 
 	// 用户自己按了「下一首」。
 	a.Next()

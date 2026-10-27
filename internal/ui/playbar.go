@@ -1180,7 +1180,19 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	//
 	// `queue_drawer.go` 的 `viewQueueRow` 本来就是这个形状——可点的行是封面的
 	// **祖先**，所以那边浮层里画 ▶ 还是 ⤢ 都吃不掉点击。
-	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize).ContextMenu(s.coverMenu)
+	wrap := ui.Row(c).Key("playbar-cover").Size(coverSize, coverSize).
+		// 🔴 **可聚焦**：没有它，键盘（菜单键 / Shift+F10）**够不着**这一份
+		// 菜单——框架的 `menuKey` 找的是「焦点链上最里层那个带菜单的元素」
+		// （`mygo/ui/menu.go` 的 `menuTarget`），而焦点链上得先有这一层。
+		//
+		// ⚠️ **焦点环画在元素外面 3 像素**（`mygo/ui/paint.go` 的 `FocusRing`），
+		// 所以它会盖到封面旁边那一圈留白上——**不改布局**（留白是 8，见
+		// `coverGap`），只是焦点在的时候多一圈线。
+		Focusable().
+		// ⚠️ **名字不能叫「当前封面」**：里面那张图已经有一个了
+		// （`imgcache.View…(...).Label("当前封面")`），读屏会把两个都念一遍。
+		Label(copyCoverActionsLabel).
+		ContextMenu(func(m *ui.Menu) { s.viewCopyMenu(st, m) })
 	wrap.Children(func() {
 		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
 		//

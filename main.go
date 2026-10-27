@@ -126,6 +126,9 @@ func main() {
 	// 排在开窗口之前只是「所有零件都齐了」这件事在开窗口之前看得见一点。
 	ui.MountLyrics(a)
 
+	// 评论缓存同理：建目录（阻塞 IO），排在开窗口之前。
+	ui.MountComments(a)
+
 	// 弹幕缓存也是同一件事：建目录是阻塞 IO，排在开窗口之前。
 	// 它不发请求——真正开始取是界面第一帧问 `App.Danmaku()` 的时候。
 	ui.MountDanmaku(a)

@@ -53,6 +53,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"strconv"
 	"strings"
 	"time"
@@ -198,7 +199,12 @@ type homePage struct {
 	overview bool
 	// ovScroll / ovWidth 是总览的滚动位置和上一帧量到的内容宽。
 	ovScroll ui.ScrollState
-	ovWidth  float32
+	// heroIdx / heroAt 是轮播横幅当前停在第几张、什么时候换上的。
+	heroIdx int
+	// newOff 是新歌速递那一排从第几首起摆（点左右箭头翻页）。
+	newOff  int
+	heroAt  time.Time
+	ovWidth float32
 	// miniTop 是两张榜（热榜、原创榜）的前几名；miniLoaded 记着取它时榜上有几首。
 	miniTop    [2][]list.Music
 	miniLoaded [2]int
@@ -263,6 +269,11 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		Draw:   h.viewPopLead,
 		Label:  "新歌速递",
 		Height: h.newGrid.Height,
+	})
+	h.lists[homeRecentTab].SetLead(&list.Lead{
+		Draw:   h.viewRecentLead,
+		Label:  "继续播放",
+		Height: func() float32 { return homeRecentLeadH },
 	})
 	return h
 }
@@ -449,6 +460,22 @@ func (h *homePage) viewPopLead(c *ui.Context) {
 		})
 }
 
+// withPopTop 画「顶图 + 下面那一块状态」。「流行」那一档的两样一起放进一个滚动
+// 容器：新歌速递是两行大封面，窗口不高时状态那一块会被挤到窗外，滚动容器让它够得着。
+// 别的档没有顶图，直接画状态。
+func (h *homePage) withPopTop(c *ui.Context, tab int, body func()) {
+	if tab != homePopTab {
+		body()
+		return
+	}
+	ui.Scroll(c).Key("home:pop:state").Grow(1).Children(func() {
+		ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
+			h.viewPopTop(c, tab)
+			body()
+		})
+	})
+}
+
 // viewPopTop 画新歌速递那一块——**不在列表里**的那一次。
 //
 // ⚠️ **什么时候才走这里**：「流行」那一档的列表**一首歌都没有**的时候（拉失败 /
@@ -503,10 +530,10 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **顶图先画**：这一档没有列表可挂（列表一根歌都没有），而新歌速递
 		// 那一块是**这一屏的内容**（上游 `index.tsx:295`），它不因为下面那一档
 		// 没拉到就消失。
-		h.viewPopTop(c, tab)
-
-		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
-			pg.Err, func() { h.retryTab(tab) })
+		h.withPopTop(c, tab, func() {
+			s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
+				pg.Err, func() { h.retryTab(tab) })
+		})
 	case pg.Loading && pg.Loaded == 0:
 		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
 		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
@@ -517,8 +544,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 「正在加载」的时候，屏幕上确实一首歌都没有。
 		//
 		// ⚠️ **顶图先画**（理由同上面那一支）。
-		h.viewPopTop(c, tab)
-		drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab])
+		h.withPopTop(c, tab, func() { drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab]) })
 	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
@@ -540,8 +566,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 			e = recentEmpty
 			e.Action = &emptyAction{Label: "去听推荐", Do: func() { h.tab = 0 }}
 		}
-		h.viewPopTop(c, tab)
-		s.viewEmpty(c, "home:empty", e)
+		h.withPopTop(c, tab, func() { s.viewEmpty(c, "home:empty", e) })
 	default:
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。
@@ -550,7 +575,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 那一块一起滚走，见 `viewPopLead`）——表头说的是下面那些歌，而新歌速递在
 		// 它们上面，表头留在列表外面就会跑到新歌速递上面去。
 		h.viewBoardCaption(c, tab)
-		if tab != homePopTab {
+		if tab != homePopTab && tab != homeRecentTab {
 			h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
 		}
 		h.lists[tab].View(c)
@@ -603,11 +628,33 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 		}
 	}
 	t := c.Theme()
-	ui.Column(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
-		Gradient(from, to, 135).Padding(space.Px16, space.Px24).Justify(ui.Center).Gap(space.Px6).Children(func() {
-		ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
-		ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-			TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+	ui.Row(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
+		Gradient(from, to, 135).Padding(space.Px16, space.Px24).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
+			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+			ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
+				TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+		})
+		items := h.lists[tab].Items()
+		if len(items) == 0 || h.acts.Add == nil {
+			return
+		}
+		btn := ui.Row(c).Key("home:board:enqueue").AlignItems(ui.Center).Gap(space.Px6).
+			Padding(space.Px8, space.Px16).Radius(20).Background(ui.RGBA(255, 255, 255, 0.2)).
+			Focusable().Role(ui.RoleButton).Label("加入播放列表").OnClick(func() {
+			its := make([]app.Item, 0, len(items))
+			for _, m := range items {
+				its = append(its, m.Item)
+			}
+			h.acts.Add(its)
+		})
+		if btn.Hovered() {
+			btn = btn.Background(ui.RGBA(255, 255, 255, 0.32))
+		}
+		btn.Children(func() {
+			ui.Icon(c, icon(iconEnqueue)).FontSize(18).TextColor(ui.RGBA(255, 255, 255, 1))
+			ui.Text(c, "加入播放列表").FontSize(scale.Font(c, scale.Size14)).TextColor(ui.RGBA(255, 255, 255, 1))
+		})
 	})
 }
 

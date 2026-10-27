@@ -550,6 +550,47 @@ var Items = []Item{
 	},
 	{
 		Category: HTTP,
+		// 🔴 **评论这一摊的应用层**（票 #572）：
+		//
+		//	oid    mv 那一路的 oid 是**数字 avid**（走 `ArchiveID` 换），
+		//	       audio 那一路是 **auid**（`type=14`）。漏了换 avid ⇒ **静默
+		//	       拿到空列表**（B 站把认不出来的 oid 判成「没有评论」）。
+		//	防重入 界面每一帧都调 `Comments()`，每一帧都发一次请求的话 B 站
+		//	       会以为我们在刷。
+		//	退避  失败之后**要能再问**（不是一次失败就再也不问）。
+		//	换歌  迟到的结果回来发现 oid 对不上就丢——不然刚换的歌上面挂着
+		//	       上一首的评论。
+		//	缓存  同一首歌第二次进是**瞬时的**（不发请求）；TTL 一小时；
+		//	       键带 type（`1-12345` 和 `14-12345` 是两个文件）。
+		//	时序  零评论的对象**也要落缓存**（不然第二次进又要问一遍）；
+		//	       同一对象上有两趟时，**较早的那一趟不许盖掉较新的那一份**
+		//	       （界面上的和盘上的都不许）。
+		//	local 本地文件不摆入口，**一个请求都不发**。
+		Spec: "评论这一摊（应用层）：mv 的 oid 是数字 avid、audio 的 oid 是 auid（type=14）；每帧调不会发第二个请求；失败之后能再问；换歌之后旧的结果作废；缓存命中是瞬时的、TTL 一小时、有刷新能绕过；零评论的对象也落缓存；同一对象上较早的那一趟不许盖掉较新的那一份（界面上的和盘上的）；本地文件不摆入口也不发请求",
+		Tests: []string{
+			"TestTheMVCommentOIDIsTheNumericAVID",
+			"TestTheAudioCommentOIDIsTheAUID",
+			"TestCommentsAreNotAskedTwice",
+			"TestCommentsAreAskedAgainAfterAFailure",
+			"TestTheCommentsOfThePreviousSongDoNotShowUp",
+			"TestTheSecondVisitIsInstant",
+			"TestTheAVIDIsRememberedAcrossRestarts",
+			"TestTheRefreshBypassesTheCache",
+			"TestALocalItemIsNotWorthAsking",
+			"TestLoadMoreUsesTheCursor",
+			"TestTheRepliesUseTheSameObject",
+			"TestNoCommentsIsNotAFailure",
+			"TestTheMVAsksAgainWhenTheAVIDCannotBeFetched",
+			"TestTheKeyCarriesTheType",
+			"TestTheTwoObjectsGetTwoFiles",
+			"TestAnExpiredEntryIsAsGoodAsMissing",
+			"TestAnObjectWithNoCommentsIsCached",
+			"TestAnOlderRequestDoesNotOverwriteTheRefresh",
+			"TestAnOlderRequestDoesNotOverwriteTheCache",
+		},
+	},
+	{
+		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
 		// （票 #316 收窄了风控，票 #346 把限流收到同一档）。
@@ -1476,6 +1517,7 @@ var Items = []Item{
 		Tests: []string{
 			"TestQuittingWhileDownloadingLeavesNothingBroken",
 			"TestQuittingWhileCheckingIsQuiet",
+			"TestQuittingJustAsTheCheckComesBackIsQuiet",
 			"TestThePrefsFileRoundTrips",
 			"TestACorruptPrefsFileIsIgnoredNotFatal",
 			"TestAPrefsFileFromANewerVersionIsLeftAlone",
@@ -4139,6 +4181,81 @@ var Items = []Item{
 			"TestTheEnqueueNoticeIsOnlyForRandom",
 			"TestAddingASongInRandomModeSaysItWillPlayThisRound",
 			"TestAddingASongOutsideRandomModeSaysNothing",
+		},
+	},
+	{
+		// 🔴 **这一条的错法也是「静默」的**：用户右键封面按了「复制歌曲信息」，
+		// 什么都没发生——而他以为复制好了（按下去没有报错、没有弹窗、没有声音）。
+		// 而「复制封面」那一档更坏：写进去的是**空字节或者一段坏字节**，用户
+		// 在别的应用里粘出来的是**一张打不开的图**。
+		//
+		// 而**没有封面时按不动那一项、也不说为什么**是同一种坏处：用户以为
+		// 程序坏了。
+		Category: Platform,
+		// 票 #556（issue #556）。
+		//
+		// ⚠️ **这一组量的是「剪贴板里到底有什么」**，不是「调了哪个函数」——
+		// 后者是实现，前者是用户看见的东西（文本要逐字，图要能解开）。
+		Spec: "当前这一首的信息能复制成可读文本（歌名 / UP 主 / 时长 / BVID / 链接 / 路径，**没有的字段整行不出现**，没有多余前缀，歌名和界面上摆的是同一个）；当前封面能复制成一张**能解开的 PNG**；**没有封面时那一项按不动且说清楚为什么**，也不往剪贴板里写图；复制失败有**看得见的反馈**；键盘（菜单键 / Shift+F10）够得着这一份菜单",
+		Tests: []string{
+			// 文本：逐字（**多一个前缀用户粘进聊天框还得手删一行**）。
+			"TestTheSongInfoTextHasEveryField",
+			// 文本：**没有的字段整行不出现**（留一行空的「UP主：」更难读）。
+			"TestTheSongInfoTextOmitsTheFieldsThatAreNotThere",
+			// 文本：**音频 id 不是 BVID**（报错了用户拿着它搜会搜到别的东西）。
+			"TestTheSongInfoTextDoesNotCallAnAudioIDSomethingItIsNot",
+			// 文本：歌名**和界面上摆的是同一个**（清洗过的那一份）。
+			"TestTheSongInfoTextUsesTheNameOnScreen",
+			// 文本：没有多余前缀。
+			"TestTheSongInfoTextHasNoExtraPrefix",
+			// 菜单：那两项**真的在菜单里**（少建一项那一项就永远点不到）。
+			"TestTheCoverMenuOffersTheTwoCopyActions",
+			// 走菜单按下去，文本**真的进了剪贴板**。
+			"TestChoosingCopySongInfoPutsTheTextOnTheClipboard",
+			// 封面：剪贴板里那张**能被解开**（别的应用要能贴）。
+			"TestCopyCoverPutsAPNGOnTheClipboard",
+			// 封面：**交出去的是原图**（不是缓存里缩到 768 的那一份），
+			// 而且**EXIF 摆正了**（不摆正的话交出去的是一张横躺着的图）。
+			"TestSourceGivesTheOriginalBytes",
+			"TestSourceImageIsNotScaled",
+			// 封面：**交出去的和缓存里存着的不一样**（只断「尺寸是原图的尺寸」
+			// 的话，缓存没真的存下缩过的那一份，就没东西可比）。
+			"TestSourceImageIsNotTheStoredOne",
+			"TestSourceImageStraightensTheEXIFOrientation",
+			// 摆正的结果**和框架自己摆的是同一个**（对着框架比，而不是对着
+			// 一份抄过来的映射比——而且是**逐像素**比：只比宽高的话，方向 2/4
+			// （翻转那一批）和方向 6/8（转置那一批）全都分不出来）。
+			"TestTheOrientationMatchesTheFrameworksOwn",
+			// 取不到的时候**报错**（而不是给一段空字节——空字节粘出来
+			// 是一张打不开的图）。
+			"TestSourceOnAnEmptyURLSaysSo",
+			"TestSourceAfterCloseSaysSo",
+			// 没有封面：**不写图**，那一项是灰的，而且说清楚为什么。
+			"TestTheCopyCoverItemIsGreyWithoutACover",
+			"TestCopyCoverWithoutACoverWritesNothing",
+			// 失败**不静默**：文本那一档和封面那一档各一条。
+			"TestAFailedCopySaysSo",
+			"TestAFailedCoverCopySaysSo",
+			// 失败**不静默**：**编码**那一档（取到了图但编不成 PNG）——
+			// 「取不到」那一档在 `png.Encode` 之前就返回了，所以它盖不住这一档。
+			"TestAFailedCoverEncodeSaysSo",
+			// **后按的那一次赢**：封面复制在后台跑，完成顺序和按下去的顺序
+			// 可以不一样——先发起的封面那一趟**不许覆盖**后来的复制内容。
+			"TestTheLastCopyActionWinsOverAnEarlierCover",
+			"TestAnEarlierCoverDoesNotOverwriteALaterCover",
+			// **判号和写在同一个主线程段里**：旧封面的段**还在队列里排队**
+			// 的时候，用户按的文本**先**落地；旧封面的段随后执行时，判号
+			// 已经不通过了——所以它**一个字都不写**（不是落地了再改回来）。
+			"TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText",
+			// **一轮里只有一段在跑**：主线程是单线程的，所以一个段跑着的
+			// 期间另一个段进不来（这一条量的是「串行」这个前提本身）。
+			"TestOnlyOneSectionRunsAtATimeOnTheMainThread",
+			// **两档真的是两档**：主线程档**绕过队列**直接执行，后台档
+			// **排队**——而那个差别**就是那个竞态的机制**（桩把两档混成
+			// 一样的话，那个交错压根不会发生，而测它的用例照样是绿的）。
+			"TestTheMainThreadSectionGoesStraightThroughWhileABackgroundOneWaits",
+			// 键盘：Tab 走到封面上，菜单键能开出这一份菜单。
+			"TestTheMenuKeyOpensTheCopyMenuOnTheCover",
 		},
 	},
 	{

@@ -20,7 +20,9 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"strconv"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
@@ -34,16 +36,17 @@ import (
 const (
 	// homeHeroCount 是横幅摆几张；homeMiniRows 是迷你榜取前几名。
 	homeHeroCount = 3
+	homeHeroEvery = 6 * time.Second
 	homeMiniRows  = 5
 
 	// homeOverviewCellGap 是横幅、磁贴、封面行的横向缝（16）。算格宽用它；
 	// 元素上的缝写 space.Px16（间距 lint 不认常量），块与块之间的竖向缝是 space.Px28。
 	homeOverviewCellGap = 16
 
-	homeTileH      = 84
+	homeTileH      = 96
 	homeBoardHeroH = 112
-	homeMiniRowH   = 56
-	homeMiniCover  = 40
+	homeMiniRowH   = 64
+	homeMiniCover  = 48
 )
 
 // homeStartsOnOverview 说应用打开时首页是不是先停在总览。生产里恒为 true；
@@ -139,55 +142,99 @@ func (h *homePage) heroSongs() []list.Music {
 	return out
 }
 
+// viewHero 是顶上那块轮播横幅：三张叠在一起，当前那张不透明、其余淡到看不见，
+// 每 homeHeroEvery 换下一张（鼠标停在横幅上不换，系统开着「减少动态效果」时直接换）。
 func (h *homePage) viewHero(c *ui.Context, w float32) {
 	t := c.Theme()
 	songs := h.heroSongs()
-	n := homeHeroCount
-	cw := cellW(w, n, homeOverviewCellGap)
-	ch := cw * 0.56
+	ch := min(w*0.26, 260)
 	if len(songs) == 0 {
 		if !h.feed.newTab.loading && h.feed.newTab.started {
 			return
 		}
-		ui.Row(c).Key("home:hero:skel").FillWidth().Gap(space.Px16).Label("正在加载新歌速递").Children(func() {
-			for i := range n {
-				ui.Box(c).Key("home:hero:skel:"+strconv.Itoa(i)).Size(cw, ch).Radius(t.Radius + 4).
-					Background(t.Text.Alpha(0.06))
-			}
-		})
+		ui.Box(c).Key("home:hero:skel").Size(w, ch).Radius(t.Radius + 4).
+			Background(t.Text.Alpha(0.06)).Label("正在加载新歌速递")
 		return
 	}
-	ui.Row(c).Key("home:hero").FillWidth().Gap(space.Px16).Children(func() {
-		for _, m := range songs {
-			h.viewHeroCard(c, m, cw, ch)
+	now := c.Now()
+	if h.heroAt.IsZero() {
+		h.heroAt = now
+	}
+	if h.heroIdx >= len(songs) {
+		h.heroIdx = 0
+	}
+	stage := ui.Box(c).Key("home:hero").Size(w, ch).Radius(t.Radius + 4).Clip()
+	if len(songs) > 1 {
+		if stage.Hovered() {
+			h.heroAt = now
+		} else if now.Sub(h.heroAt) >= homeHeroEvery {
+			h.heroIdx, h.heroAt = (h.heroIdx+1)%len(songs), now
+		}
+		c.After(max(homeHeroEvery-now.Sub(h.heroAt), time.Millisecond))
+	}
+	anim := fullBarAnim(c)
+	stage.Children(func() {
+		for i, m := range songs {
+			h.viewHeroCard(c, m, w, ch, i == h.heroIdx, anim)
 		}
 	})
-}
-
-func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32) {
-	t := c.Theme()
-	sh := list.ShowOf(m)
-	card := ui.Box(c).Key("home:hero:"+m.ID).Size(w, hgt).Radius(t.Radius + 4).Clip().
-		Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
-	card.Children(func() {
-		imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, w, hgt)
-		ui.Box(c).Key("home:hero:bar:"+m.ID).Size(w, hgt*0.55).
-			Gradient(ui.RGBA(0, 0, 0, 0), ui.RGBA(0, 0, 0, 0.78), 180).
-			Attach(ui.AnchorBottomLeft, ui.AnchorBottomLeft).
-			Padding(space.None, space.Px48, space.Px12, space.Px16).
-			AlignItems(ui.Start).Justify(ui.End).Children(func() {
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size18)).Bold().
-				TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(2).Ellipsis("…")
-			if sh.Owner != "" {
-				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size13)).
-					TextColor(ui.RGBA(255, 255, 255, 0.8)).MaxLines(1).Ellipsis("…")
+	if len(songs) > 1 {
+		ui.Row(c).Key("home:hero:dots").Gap(space.Px8).Padding(space.Px8, space.None, space.None, space.None).
+			Justify(ui.Center).FillWidth().Children(func() {
+			for i, m := range songs {
+				on := i == h.heroIdx
+				dw := float32(8)
+				bg := t.Text.Alpha(0.2)
+				if on {
+					dw, bg = 20, t.Accent
+				}
+				ui.Box(c).Key("home:hero:dot:"+m.ID).Size(dw, 8).Radius(4).Background(bg).
+					Focusable().Role(ui.RoleButton).Label("第 " + strconv.Itoa(i+1) + " 张").
+					OnClick(func() { h.heroIdx, h.heroAt = i, c.Now() })
 			}
 		})
-		ui.Box(c).Key("home:hero:play:"+m.ID).Size(36, 36).Radius(18).Background(t.Accent).Center().
-			Attach(ui.AnchorBottomRight, ui.AnchorBottomRight).Right(space.Px12).Bottom(space.Px12).
+	}
+}
+
+func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur bool, anim ui.Animation) {
+	t := c.Theme()
+	sh := list.ShowOf(m)
+	card := ui.Box(c).Key("home:hero:"+m.ID).Size(w, hgt).Radius(t.Radius+4).Clip().
+		Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+	fade := float32(1)
+	if cur {
+		fade = 0
+		card = card.Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
+	}
+	card = card.AnimatePose(ui.Pose{Fade: fade}, anim)
+	card = card.Background(ui.RGBA(28, 23, 20, 1))
+	card.Children(func() {
+		// 封面多是 16:9：按原比例贴右，不再拉满整条横幅（拉满会被放大裁掉大半，还糊）；
+		// 左边一段渐变把它融进深色底，文字落在深色底上。
+		cw := min(hgt*16/9, w*0.7)
+		ui.Box(c).Key("home:hero:img:"+m.ID).Size(cw, hgt).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
 			Children(func() {
-				ui.Icon(c, icon(iconPlayFill)).FontSize(18).TextColor(t.AccentText)
+				imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, hgt, 0, nil)
+				ui.Box(c).Key("home:hero:fade:"+m.ID).Size(cw*0.45, hgt).
+					Gradient(ui.RGBA(28, 23, 20, 1), ui.RGBA(28, 23, 20, 0), 90).
+					Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 			})
+		ui.Column(c).Key("home:hero:txt:"+m.ID).Size(max(w-cw*0.7, w*0.3), hgt).
+			Padding(space.Px24, space.Px24, space.Px24, space.Px28).Gap(space.Px8).Justify(ui.Center).AlignItems(ui.Start).
+			Attach(ui.AnchorTopLeft, ui.AnchorTopLeft).Children(func() {
+			ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size12)).Bold().TextColor(t.Accent)
+			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).Bold().
+				TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(2).Ellipsis("…")
+			if sh.Owner != "" {
+				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size14)).
+					TextColor(ui.RGBA(255, 255, 255, 0.75)).MaxLines(1).Ellipsis("…")
+			}
+			ui.Row(c).Key("home:hero:play:"+m.ID).Gap(space.Px6).Padding(space.Px8, space.Px16, space.Px8, space.Px12).
+				Radius(18).Background(t.Accent).AlignItems(ui.Center).Children(func() {
+				ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.AccentText)
+				ui.Text(c, "立即播放").FontSize(scale.Font(c, scale.Size13)).Bold().TextColor(t.AccentText)
+			})
+		})
 	})
 }
 
@@ -203,10 +250,20 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 	ui.Row(c).Key("home:tiles").FillWidth().Gap(space.Px16).Children(func() {
 		for _, tile := range homeTiles {
 			name := homeTabs[tile.tab]
-			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(t.Radius+2).
+			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(t.Radius+2).Clip().
 				Gradient(tile.from, tile.to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
+				// 磁贴右侧压一张该榜第一名的封面当「插画」，向左渐隐进磁贴底色；没有数据就只剩渐变。
+				if items := h.lists[tile.tab].Items(); len(items) > 0 && items[0].Cover != "" && h.newGrid.cache.Get(items[0].Cover).Ready() {
+					iw := cw * 0.5
+					ui.Box(c).Key("home:tile:art:"+name).Size(iw, homeTileH).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
+						Children(func() {
+							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, items[0].Cover, "", iw, homeTileH, 0, nil)
+							ui.Box(c).Key("home:tile:fade:"+name).Size(iw, homeTileH).
+								Gradient(tile.to, tile.to.Alpha(0), 90).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+						})
+				}
 				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
 				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(ui.RGBA(255, 255, 255, 0.78)).MaxLines(1)
@@ -236,64 +293,116 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 	if cols > 6 {
 		cols = 6
 	}
-	if len(songs) > cols {
-		songs = songs[:cols]
-	}
 	if len(songs) == 0 {
 		return
 	}
+	total := len(songs)
+	if h.newOff+cols > total {
+		h.newOff = max(total-cols, 0)
+	}
+	songs = songs[h.newOff:min(h.newOff+cols, total)]
 	cw := cellW(w, cols, homeOverviewCellGap)
 	ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:new:head", "新歌速递", "查看更多", func() { h.openTab(homePopTab) })
-		ui.Row(c).Key("home:new:row").FillWidth().Gap(space.Px16).Children(func() {
-			for _, m := range songs {
-				sh := list.ShowOf(m)
-				card := ui.Column(c).Key("home:new:" + m.ID).Width(cw).Gap(space.Px6).
-					Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
-				on := card.Hovered()
-				card.Children(func() {
-					imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, cw)
-					col := t.Text
-					if on || (h.acts.IsPlaying != nil && h.acts.IsPlaying(m.Item)) {
-						col = ink.AccentOn(t)
-					}
-					ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size14)).TextColor(col).MaxLines(1).Ellipsis("…")
-					if sh.Owner != "" {
-						ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-					}
-				})
+		ui.Box(c).Key("home:new:stage").FillWidth().Children(func() {
+			ui.Row(c).Key("home:new:row").FillWidth().Gap(space.Px16).Children(func() {
+				for _, m := range songs {
+					sh := list.ShowOf(m)
+					card := ui.Column(c).Key("home:new:" + m.ID).Width(cw).Gap(space.Px6).
+						Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
+					on := card.Hovered()
+					card.Children(func() {
+						imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, cw)
+						col := t.Text
+						if on || (h.acts.IsPlaying != nil && h.acts.IsPlaying(m.Item)) {
+							col = ink.AccentOn(t)
+						}
+						ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size14)).TextColor(col).MaxLines(1).Ellipsis("…")
+						if sh.Owner != "" {
+							ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
+						}
+					})
+				}
+			})
+			arrow := func(key, label, glyph string, anchor ui.Anchor, to int) {
+				b := ui.Box(c).Key(key).Size(36, 36).Radius(18).Center().Background(t.Surface).Border(1, t.Border).
+					Attach(anchor, anchor).Top(cw/2 - 18).Focusable().Role(ui.RoleButton).Label(label).
+					OnClick(func() { h.newOff = to })
+				b.Children(func() { ui.Text(c, glyph).FontSize(scale.Font(c, scale.Size20)).TextColor(t.Text) })
+			}
+			if h.newOff > 0 {
+				arrow("home:new:prev", "上一页", "‹", ui.AnchorTopLeft, max(h.newOff-cols, 0))
+			}
+			if h.newOff+cols < total {
+				arrow("home:new:next", "下一页", "›", ui.AnchorTopRight, min(h.newOff+cols, total-cols))
 			}
 		})
 	})
 }
 
 func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
-	if len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 {
+	newTop := h.newGrid.songs
+	if len(newTop) > homeMiniRows {
+		newTop = newTop[:homeMiniRows]
+	}
+	if len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 && len(newTop) == 0 {
 		return
 	}
-	cw := cellW(w, 2, homeOverviewCellGap*2)
+	cw := (w - 2*32) / 3
 	ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
-		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).Children(func() {
-			for i, tab := range [2]int{homeHotTab, homeOriginalTab} {
-				h.viewMiniBoard(c, i, tab, cw)
-			}
+		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).AlignItems(ui.Start).Children(func() {
+			h.viewMiniBoard(c, homeTabs[homeHotTab], h.miniTop[0], homeHotTab, cw)
+			h.viewMiniBoard(c, homeTabs[homeOriginalTab], h.miniTop[1], homeOriginalTab, cw)
+			h.viewMiniBoard(c, "新歌榜", newTop, homePopTab, cw)
 		})
 	})
 }
 
-func (h *homePage) viewMiniBoard(c *ui.Context, idx, tab int, w float32) {
+// playAllOf 把 songs 整排放进播放：第一首立刻播，其余排进队尾。
+func (h *homePage) playAllOf(songs []list.Music) {
+	if len(songs) == 0 {
+		return
+	}
+	h.playNow(songs[0])
+	if h.acts.Add == nil || len(songs) < 2 {
+		return
+	}
+	its := make([]app.Item, 0, len(songs)-1)
+	for _, m := range songs[1:] {
+		its = append(its, m.Item)
+	}
+	h.acts.Add(its)
+}
+
+func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music, tab int, w float32) {
 	t := c.Theme()
-	songs := h.miniTop[idx]
-	ui.Column(c).Key("home:board:" + homeTabs[tab]).Width(w).Gap(space.Px4).Children(func() {
-		h.sectionHead(c, "home:board:head:"+homeTabs[tab], homeTabs[tab], "查看全部", func() { h.openTab(tab) })
+	ui.Column(c).Key("home:board:" + name).Width(w).Gap(space.Px4).Children(func() {
+		ui.Row(c).Key("home:board:head:" + name).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
+			ui.Text(c, name).FontSize(scale.Font(c, scale.Size20)).Bold().TextColor(t.Text).Grow(1)
+			if len(songs) > 0 {
+				pa := ui.Row(c).Key("home:board:all:"+name).AlignItems(ui.Center).Gap(space.Px4).
+					Padding(space.Px4, space.Px10).Radius(14).Background(t.Text.Alpha(0.06)).
+					Focusable().Role(ui.RoleButton).Label("播放全部 " + name).OnClick(func() { h.playAllOf(songs) })
+				if pa.Hovered() {
+					pa = pa.Background(t.Text.Alpha(0.12))
+				}
+				pa.Children(func() {
+					ui.Icon(c, icon(iconPlayFill)).FontSize(12).TextColor(t.Text)
+					ui.Text(c, "播放全部").FontSize(scale.Font(c, scale.Size12)).TextColor(t.Text)
+				})
+			}
+			if flatLink(c, "全部").Clicked() {
+				h.openTab(tab)
+			}
+		})
 		if len(songs) == 0 {
 			ui.Text(c, "榜单还在路上").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			return
 		}
 		for i, m := range songs {
 			sh := list.ShowOf(m)
-			row := ui.Row(c).Key("home:board:row:"+strconv.Itoa(tab)+":"+m.ID).FillWidth().Height(homeMiniRowH).
+			row := ui.Row(c).Key("home:board:row:"+name+":"+m.ID).FillWidth().Height(homeMiniRowH).
 				AlignItems(ui.Center).Gap(space.Px12).Padding(space.None, space.Px8).Radius(t.Radius).
 				Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
 			if row.Hovered() {
@@ -316,6 +425,9 @@ func (h *homePage) viewMiniBoard(c *ui.Context, idx, tab int, w float32) {
 						ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 					}
 				})
+				if m.Duration > 0 {
+					ui.Text(c, clockText(m.Duration)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+				}
 			})
 		}
 	})

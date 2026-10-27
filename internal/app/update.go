@@ -577,6 +577,30 @@ func (u *updater) check(user bool) {
 	u.mu.Lock()
 	switch {
 	case u.closed:
+		// ⚠️ **相位也得退回去**，不能就这么留着。
+		//
+		// 这一支是「网络回来了，但应用已经退了」：上面那个 `aborted` 分支
+		// （ctx 被取消）已经把相位退回去了，而这一支**没有**——可这一支
+		// 说的是同一件事（「没有什么会来了」），而那三个字「正在检查…」是
+		// 「等一会儿就好」⇒ 界面上那个按钮会永远转下去。
+		//
+		// ⚠️ **为什么会落到这一支**：窗口在 `aborted := ctx.Err() != nil`
+		// 与下面那次 `u.mu.Lock()` 之间——
+		//
+		//	这一趟 check                    应用退出（Close → upd.close）
+		//	─────────────────────────        ────────────────────────────────
+		//	Check 回来了（ctx 还没取消）
+		//	aborted = false              ← 这一刻 ctx 还没被取消
+		//	...                            u.closed = true；checkCancel() ⇒ ctx 取消
+		//	u.mu.Lock()
+		//	switch { case u.closed: return }   ← 撞上这里 ⇒ 相位留在 Checking
+		//
+		// 而 `App.Close` 的收尾**很长**（存播放位置、结束播放记录、关播放器、
+		// 关弹幕、收下载…），`upd.close()` 还**排在最后**——所以那个窗口
+		// 有多长，取决于那段时间机器有多忙。
+		if u.state.phase == UpdateChecking {
+			u.state.phase = UpdateIdle
+		}
 		u.mu.Unlock()
 		return
 	case err != nil:
