@@ -2725,7 +2725,15 @@ var Items = []Item{
 		//     的话「前面插一条」会让后面所有条的状态整体错配。
 		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
 		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
-		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
+		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
+		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
+		//     像素宽的字滚了 1.8 秒之后尾巴还在封面里，下一条就进来了 ⇒
+		//     重叠 88 像素，两句话没法读）。
+		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
+		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
+		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
 		Tests: []string{
 			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
 			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
@@ -2735,6 +2743,9 @@ var Items = []Item{
 			"TestEveryDanmakuHasItsOwnKey",
 			"TestTheDanmakuCanBeTurnedOff",
 			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
+			"TestTwoDanmakuOnTheSameLaneNeverOverlap",
+			"TestTheSameLaneWaitsForThePreviousDanmakuToClearTheEdge",
+			"TestALongDanmakuStaysUntilItHasLeftTheCover",
 		},
 	},
 	{

@@ -83,14 +83,6 @@ const (
 	// ⚠️ **按封面的宽算**（不是按字宽）：30% × 360 = 108 DIP ⇒ 1.8 秒。
 	// 弹幕稀的时候稀疏、密的时候自动变稀，不会堆成一坨。
 	danmakuTrackSpacingRatio = 0.3
-
-	// danmakuMaxAgeMS 是「一条弹幕最多在屏幕上待多久」的**粗筛**（毫秒）。
-	//
-	// 真正的那一档按**字宽**算（一条字走到出界要 (封面宽 + 字宽) / 速度），
-	// 而这里只是一个上界，用来**别去量那些早该出界的字**（量字宽要排一次版）。
-	//
-	// 15 秒对应「字宽 540 DIP」——比封面上能摆下的最长的一行还长。
-	danmakuMaxAgeMS = 15000
 )
 
 // danmakuAnim 是弹幕那一个 pose 的动画。
@@ -105,6 +97,20 @@ const (
 // X/Y/Scale/Rotate **直接到终点** ⇒ 弹幕变成 20fps 跳着走（实测与「位置算在
 // view 里」那一档一模一样，见 `mygo/ui/pose.go` 的 `still && i < 4`）。
 var danmakuAnim = ui.Animation{Duration: 100 * time.Millisecond, Ease: ui.Linear}
+
+// danmakuLane 是一条轨道上**上一条**弹幕的那些数。
+//
+// ⚠️ **为什么记的是「上一条」而不是「轨道上还空着没有」**：下一条能不能进
+// 这条轨道，取决于**上一条的尾巴走到哪儿了**——同一条轨道上两条弹幕**不能
+// 叠字**（叠在一起就没法读了）。
+type danmakuLane struct {
+	// used 是这条轨道用过没有（空轨道什么都不挡）。
+	used bool
+	// timeMS 是上一条入场的视频时间（毫秒）。
+	timeMS int64
+	// width 是上一条的字宽（DIP）——**它要走出多远，下一条才进得来**。
+	width float32
+}
 
 // danmakuSlot 是一条正在滚的弹幕占的那条轨道。
 type danmakuSlot struct {
@@ -123,11 +129,23 @@ type danmakuSlot struct {
 // 每帧重算的——每帧重算的话，一条弹幕会在屏幕上「换轨道」，或者被挤掉之后又
 // 半路冒出来。
 type danmakuLayer struct {
-	// freeAt 是每条轨道「下一条最早能进」的视频时间（毫秒）。
+	// lanes 记着每条轨道上**上一条**弹幕的那些数（入场时间 + 字宽）。
 	//
-	// ⚠️ **它是按 key 记的判据**（报告 §3.3）：前一条滚够了 30% 的宽度，
-	// 这一条轨道才让下一条进来。
-	freeAt [danmakuTracks]int64
+	// ⚠️ **下一条能不能进这条轨道，判据是两条**：
+	//
+	//	一、时间（报告 §3.3）：前一条走出 30% 的宽度（360 × 30% ÷ 60 = 1.8 秒）。
+	//	二、几何：**前一条的尾巴必须已经过了右边沿那条入场线**——
+	//	   两条同速从右边沿进来，后一条的左边沿永远比前一条的右边沿靠右
+	//	   60 × Δt 像素 ⇒ 不叠字当且仅当 Δt × 60 ≥ 前一条的字宽。
+	//
+	// ⚠️ **第二条是评审提出来的**（critical：同轨叠字）：报告 §3.3 那条
+	// 「走出 30%」只当**时间门槛**用——它对**长字不够**：一条 196 像素宽的
+	// 字滚了 1.8 秒（走了 108 像素）之后它的尾巴还在封面里，而下一条已经
+	// 从右边沿进来了 ⇒ **重叠 88 像素**，两句话叠在一起没法读。
+	//
+	// ⚠️ **两条都过才进**（取大的那个）：时间门槛管「稀疏度」，几何门槛管
+	// 「可读性」——后者优先。
+	lanes [danmakuTracks]danmakuLane
 
 	// slots 记着正在滚的那些弹幕：弹幕的 rowid → 它占的那条轨道。
 	//
@@ -160,7 +178,7 @@ type danmakuLayer struct {
 
 // reset 把这一摊清空（换歌、或者压根没有弹幕）。
 func (d *danmakuLayer) reset() {
-	d.freeAt = [danmakuTracks]int64{}
+	d.lanes = [danmakuTracks]danmakuLane{}
 	d.slots = nil
 	d.widths = nil
 	d.live = 0
@@ -195,31 +213,48 @@ func danmakuSortByTime(vis []danmakuVisible) {
 
 // assign 给一条新出现的弹幕找一条轨道。
 //
-// # 规则（报告 §3.3）
+// # 规则
 //
-// 每条弹幕找第一条「前一条已经走出 30% 宽度」的轨道；都没有就**丢掉这一条**
-// （不排队）。
+// 每条弹幕找第一条**放得下**的轨道（见 `danmakuLayer.lanes` 那一段的两条
+// 判据：时间门槛 + 几何门槛）；八条轨道都放不下就**丢掉这一条**（不排队）。
 //
 // ⚠️ **轨道是入场那一刻定的**（B 站那样），不是每帧重算的——每帧重算的话，
 // 一条弹幕会在屏幕上换轨道，或者被挤掉之后又半路冒出来。
 func (d *danmakuLayer) assign(it app.DanmakuItem, width float32, spacingMS int64, coverW float32) danmakuSlot {
 	slot := danmakuSlot{
-		lane:     -1,
-		timeMS:   it.TimeMS,
-		maxAgeMS: danmakuMaxAgeMS,
-	}
-	if it.ID != "" {
+		lane:   -1,
+		timeMS: it.TimeMS,
 		// 一条字走到**整个出界**（右沿也出去了）要多久：(封面宽 + 字宽) / 速度。
-		slot.maxAgeMS = int64((float64(coverW) + float64(width)) * 1000 / danmakuSpeed)
+		maxAgeMS: int64((float64(coverW) + float64(width)) * 1000 / danmakuSpeed),
 	}
 	if d.live < danmakuMaxOnScreen {
 		for t := range danmakuTracks {
-			if d.freeAt[t] <= it.TimeMS {
+			lane := d.lanes[t]
+			if !lane.used {
+				// 空轨道 ⇒ 什么都不挡。
 				slot.lane = t
-				d.freeAt[t] = it.TimeMS + spacingMS
-				d.live++
 				break
 			}
+			// 门槛一（报告 §3.3）：前一条走出 30% 的宽度。
+			need := spacingMS
+			// 门槛二（几何）：前一条的**尾巴**必须已经过了右边沿那条入场线，
+			// 否则两条的字会叠在一起（评审提的 critical）。
+			if geom := int64(float64(lane.width) * 1000 / danmakuSpeed); geom > need {
+				need = geom
+			}
+			if it.TimeMS-lane.timeMS < need {
+				continue
+			}
+			slot.lane = t
+			break
+		}
+		if slot.lane >= 0 {
+			d.lanes[slot.lane] = danmakuLane{
+				used:   true,
+				timeMS: it.TimeMS,
+				width:  width,
+			}
+			d.live++
 		}
 	}
 	if d.slots == nil {
@@ -227,6 +262,29 @@ func (d *danmakuLayer) assign(it app.DanmakuItem, width float32, spacingMS int64
 	}
 	d.slots[it.ID] = slot
 	return slot
+}
+
+// danmakuAgeBoundMS 报「一条弹幕早就该出界了」的时间上界（毫秒）。
+//
+// # 它是**粗筛**，不是判据
+//
+// 真正的判据是量出来的字宽（(封面宽 + 字宽) ÷ 速度）——而量字宽要排一次版，
+// 所以先用这个上界把早该出界的那些滤掉，别白排一次版。
+//
+// # 为什么用**字节数**而不是字数
+//
+// 一个字节最宽一个字宽（汉字是**三个**字节一个字宽）⇒ 「字节数 × 字号」
+// 一定 ≥ 真字宽 ⇒ 这个上界**不会**把还在画面上的那条滤掉。
+//
+// ⚠️ **滤掉了就是「提前消失」**：本票评审提过一个 major——40 字的长弹幕在
+// 第 17 秒整条不见了（一个 15 秒的硬上限在按字宽判断出界之前先把它滤掉了，
+// 而按 60 px/s 它的右缘还在封面里）。所以这一档**只做上界，不做上限**。
+//
+// ⚠️ **汉字那三倍是白给的**：粗筛窗口比真窗口宽三倍 ⇒ 量字宽的次数多一些
+// （每条弹幕只量一次，量完记在 `d.widths` 里）。
+func danmakuAgeBoundMS(text string, fontSize, coverW float32) int64 {
+	wBound := float64(len(text)) * float64(fontSize)
+	return int64((float64(coverW) + wBound) * 1000 / danmakuSpeed)
 }
 
 // expire 收掉已经整个出界的那些（它们占的轨道要让给后来的）。

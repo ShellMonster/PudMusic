@@ -99,7 +99,7 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 		//（屏幕上会一条弹幕都没有）。
 		//
 		// ⇒ 轨道那一摊清掉重来（字宽那份留着——它跟位置无关）。
-		d.freeAt = [danmakuTracks]int64{}
+		d.lanes = [danmakuTracks]danmakuLane{}
 		d.slots = nil
 		d.live = 0
 	}
@@ -125,7 +125,14 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 			continue
 		}
 		age := posMS - it.TimeMS
-		if age < 0 || age > danmakuMaxAgeMS {
+		if age < 0 {
+			continue
+		}
+		// ⚠️ **粗筛只是「上界」**：早该出界的那些不排版（量字宽要排一次版）。
+		// 它**不是**一个硬上限——本票评审提过一个 major：一条 15 秒的硬上限
+		// 把 40 字的长弹幕在第 17 秒整条滤掉了，而那时它的右缘还在封面里
+		//（按 60 px/s 算）。见 `danmakuAgeBoundMS`。
+		if age > danmakuAgeBoundMS(it.Text, fontSize, area.W) {
 			continue
 		}
 		w := d.widthOf(c, it.ID, it.Text, fontSize)
