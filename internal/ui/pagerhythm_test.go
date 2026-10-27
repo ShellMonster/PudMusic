@@ -637,11 +637,11 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 	}{
 		{name: "搜索", loading: "正在加载…", path: searchPath + "?q=%E5%91%A8%E6%9D%B0%E4%BC%A6", rows: true},
 		{name: "收藏夹", loading: "正在加载…", path: collectionPathPrefix + "12345", rows: true},
-		{name: "稍后再看", loading: "正在加载…", path: laterPath},
-		{name: "历史记录", loading: "正在加载…", path: historyPath},
-		{name: "我的关注", loading: "正在加载关注的人…", path: followPath},
-		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath},
-		{name: "UP 主空间", loading: "正在加载动态…", path: "/user/77"},
+		{name: "稍后再看", loading: "正在加载…", path: laterPath, rows: true},
+		{name: "历史记录", loading: "正在加载…", path: historyPath, rows: true},
+		{name: "我的关注", loading: "正在加载关注的人…", path: followPath, rows: true},
+		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath, rows: true},
+		{name: "UP 主空间", loading: "正在加载动态…", path: "/user/77", rows: true},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			b := newTestShell(t, blockedBiliOpts(t, true)...)
