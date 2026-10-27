@@ -123,6 +123,27 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 				s.pickSwitch(c, "音量均衡", "音量均衡", st.NormalizeVolume, ro,
 					func(cur *app.Settings, on bool) { cur.NormalizeVolume = on })
 			})
+		// 迷你播放器那个歌词卷帘（票 #536）。
+		//
+		// ⚠️ **它归在「播放」这一组**：它管的是迷你播放器上**放歌时**的那块
+		// 歌词区，不是外观也不是下载。而迷你播放器本身也是「播放」那一件事
+		// 的一部分（它是「把播放器缩到桌面上」那个入口）。
+		//
+		// ⚠️ **默认是开的**（`app.DefaultMiniLyricsCurtain`）：用户装上就有
+		// 卷帘这个效果，而**不用**去设置里找一格把它打开。
+		//
+		// ⚠️ **不进 `switchHint` 表**：那一表只收「效果看不见」的格
+		// （`switch_hint.go` 的文件头），而这一格**看得见**——用户点一下迷你窗
+		// 的封面就知道它管不管用。
+		s.settingRow(c, "迷你播放器歌词卷帘", "",
+			func() {
+				s.pickSwitch(c, "迷你播放器歌词卷帘", "迷你播放器歌词卷帘",
+					st.MiniLyricsCurtainOn(), ro,
+					func(cur *app.Settings, on bool) {
+						v := on
+						cur.MiniLyricsCurtain = &v
+					})
+			})
 
 	})
 	s.settingGroup(c, "下载", func() {
