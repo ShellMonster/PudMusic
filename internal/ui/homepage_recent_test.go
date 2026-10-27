@@ -48,7 +48,7 @@ func TestRecentPlaysShowWhenTheyWereWatched(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFramesClock(t, tt, "最近播放", func() bool { return showsText(tt, "听过的歌甲") })
-	for _, want := range []string{"观看时间", "今天", "昨天", "5天前"} {
+	for _, want := range []string{"观看时间", "今天", "昨天", "5天前", "上次听到这里", "今天 1 首  ·  昨天 1 首  ·  更早 1 首"} {
 		if !showsText(tt, want) {
 			t.Errorf("最近播放上没有「%s」：%q", want, tt.Texts())
 		}

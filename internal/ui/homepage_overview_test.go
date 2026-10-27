@@ -60,3 +60,15 @@ func TestTheHeroBannerAdvancesByItselfAndStopsWhenHovered(t *testing.T) {
 	tt.Advance(homeHeroEvery + time.Second)
 	waitFrames(t, tt, "自动换到下一张", func() bool { return s.home.heroIdx == 1 })
 }
+
+func TestTheSidebarRecommendEntryLeadsBackToTheOverview(t *testing.T) {
+	startOnOverview(t)
+	s, tt, _ := newHomeShell(t, homeDiscoverFake(t))
+	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "排行榜") })
+	if err := tt.Click("热榜"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "进了热榜列表", func() bool { return showsText(tt, "鬼畜") })
+	s.navigate(homePath)
+	waitFrames(t, tt, "回到总览", func() bool { return showsText(tt, "排行榜") && !showsText(tt, "鬼畜") })
+}
