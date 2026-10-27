@@ -716,15 +716,32 @@ func TestTheProfileGlyphIsNotAPlayTriangle(t *testing.T) {
 	if diff(triPix, bg) < 60 {
 		t.Errorf("播放三角在盒子偏左正中那处不是实的（%v，底色 %v）——判据本身有问题", triPix, bg)
 	}
-	// ② 「进他的 UP 空间」那一处**不是**实的：那儿没有播放三角。
+	// ② 「进他的 UP 空间」那一处**不是**实的：那儿没有播放三角。用同一行左侧的底色作参照，
+	// 避免把封面渐变当成图形。
 	profPix := img.RGBAAt(int(prof.X+prof.W*0.2), int(prof.Y+prof.H*0.5))
-	if diff(profPix, bg2) > 60 {
-		t.Errorf("「进他的 UP 空间」那一枚画的还是那枚播放三角（%v，底色 %v）", profPix, bg2)
+	profBg := img.RGBAAt(int(prof.X)+1, int(prof.Y+prof.H*0.5))
+	if diff(profPix, profBg) > 60 {
+		t.Errorf("「进他的 UP 空间」那一枚画的还是那枚播放三角（%v，底色 %v）", profPix, profBg)
 	}
 	// ③ 而它**画了东西**：那一枚不是空的。
-	if n := inkIn(img, prof, bg); n == 0 {
+	if n := inkInRows(img, prof); n == 0 {
 		t.Errorf("「进他的 UP 空间」那一枚一个像素都没画——它得是一个「人」")
 	}
+}
+
+// inkInRows 数那个盒子里相对每一行底色的墨迹，避免封面渐变被当成图形。
+func inkInRows(img *image.RGBA, box ui.Rect) int {
+	n := 0
+	left := int(box.X)
+	for y := int(box.Y); y < int(box.Y+box.H); y++ {
+		bg := img.RGBAAt(left+1, y)
+		for x := left; x < int(box.X+box.W); x++ {
+			if diff(img.RGBAAt(x, y), bg) > 60 {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // inkIn 数那个盒子里有多少像素**不是**底色。
