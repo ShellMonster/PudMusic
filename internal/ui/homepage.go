@@ -458,6 +458,22 @@ func (h *homePage) viewPopLead(c *ui.Context) {
 		})
 }
 
+// withPopTop 画「顶图 + 下面那一块状态」。「流行」那一档的两样一起放进一个滚动
+// 容器：新歌速递是两行大封面，窗口不高时状态那一块会被挤到窗外，滚动容器让它够得着。
+// 别的档没有顶图，直接画状态。
+func (h *homePage) withPopTop(c *ui.Context, tab int, body func()) {
+	if tab != homePopTab {
+		body()
+		return
+	}
+	ui.Scroll(c).Key("home:pop:state").Grow(1).Children(func() {
+		ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
+			h.viewPopTop(c, tab)
+			body()
+		})
+	})
+}
+
 // viewPopTop 画新歌速递那一块——**不在列表里**的那一次。
 //
 // ⚠️ **什么时候才走这里**：「流行」那一档的列表**一首歌都没有**的时候（拉失败 /
@@ -512,10 +528,10 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// ⚠️ **顶图先画**：这一档没有列表可挂（列表一根歌都没有），而新歌速递
 		// 那一块是**这一屏的内容**（上游 `index.tsx:295`），它不因为下面那一档
 		// 没拉到就消失。
-		h.viewPopTop(c, tab)
-
-		s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
-			pg.Err, func() { h.retryTab(tab) })
+		h.withPopTop(c, tab, func() {
+			s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
+				pg.Err, func() { h.retryTab(tab) })
+		})
 	case pg.Loading && pg.Loaded == 0:
 		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
 		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
@@ -526,8 +542,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 「正在加载」的时候，屏幕上确实一首歌都没有。
 		//
 		// ⚠️ **顶图先画**（理由同上面那一支）。
-		h.viewPopTop(c, tab)
-		drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab])
+		h.withPopTop(c, tab, func() { drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab]) })
 	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
@@ -549,8 +564,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 			e = recentEmpty
 			e.Action = &emptyAction{Label: "去听推荐", Do: func() { h.tab = 0 }}
 		}
-		h.viewPopTop(c, tab)
-		s.viewEmpty(c, "home:empty", e)
+		h.withPopTop(c, tab, func() { s.viewEmpty(c, "home:empty", e) })
 	default:
 		// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 		// 下滚它不动，宽屏下滚到右边列名也还在。
