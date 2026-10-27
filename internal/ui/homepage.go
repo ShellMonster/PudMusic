@@ -53,6 +53,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/Biu_Go/internal/app"
 	"strconv"
 	"strings"
 	"time"
@@ -198,7 +199,10 @@ type homePage struct {
 	overview bool
 	// ovScroll / ovWidth 是总览的滚动位置和上一帧量到的内容宽。
 	ovScroll ui.ScrollState
-	ovWidth  float32
+	// heroIdx / heroAt 是轮播横幅当前停在第几张、什么时候换上的。
+	heroIdx int
+	heroAt  time.Time
+	ovWidth float32
 	// miniTop 是两张榜（热榜、原创榜）的前几名；miniLoaded 记着取它时榜上有几首。
 	miniTop    [2][]list.Music
 	miniLoaded [2]int
@@ -263,6 +267,11 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		Draw:   h.viewPopLead,
 		Label:  "新歌速递",
 		Height: h.newGrid.Height,
+	})
+	h.lists[homeRecentTab].SetLead(&list.Lead{
+		Draw:   h.viewRecentLead,
+		Label:  "继续播放",
+		Height: func() float32 { return homeRecentLeadH },
 	})
 	return h
 }
@@ -550,7 +559,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 那一块一起滚走，见 `viewPopLead`）——表头说的是下面那些歌，而新歌速递在
 		// 它们上面，表头留在列表外面就会跑到新歌速递上面去。
 		h.viewBoardCaption(c, tab)
-		if tab != homePopTab {
+		if tab != homePopTab && tab != homeRecentTab {
 			h.lists[tab].Header(c, "home:header:"+strconv.Itoa(tab))
 		}
 		h.lists[tab].View(c)
@@ -603,11 +612,33 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 		}
 	}
 	t := c.Theme()
-	ui.Column(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
-		Gradient(from, to, 135).Padding(space.Px16, space.Px24).Justify(ui.Center).Gap(space.Px6).Children(func() {
-		ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
-		ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-			TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+	ui.Row(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
+		Gradient(from, to, 135).Padding(space.Px16, space.Px24).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
+			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+			ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
+				TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+		})
+		items := h.lists[tab].Items()
+		if len(items) == 0 || h.acts.Add == nil {
+			return
+		}
+		btn := ui.Row(c).Key("home:board:enqueue").AlignItems(ui.Center).Gap(space.Px6).
+			Padding(space.Px8, space.Px16).Radius(20).Background(ui.RGBA(255, 255, 255, 0.2)).
+			Focusable().Role(ui.RoleButton).Label("加入播放列表").OnClick(func() {
+			its := make([]app.Item, 0, len(items))
+			for _, m := range items {
+				its = append(its, m.Item)
+			}
+			h.acts.Add(its)
+		})
+		if btn.Hovered() {
+			btn = btn.Background(ui.RGBA(255, 255, 255, 0.32))
+		}
+		btn.Children(func() {
+			ui.Icon(c, icon(iconEnqueue)).FontSize(18).TextColor(ui.RGBA(255, 255, 255, 1))
+			ui.Text(c, "加入播放列表").FontSize(scale.Font(c, scale.Size14)).TextColor(ui.RGBA(255, 255, 255, 1))
+		})
 	})
 }
 

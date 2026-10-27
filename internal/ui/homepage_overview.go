@@ -21,6 +21,7 @@ package ui
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
@@ -34,6 +35,7 @@ import (
 const (
 	// homeHeroCount 是横幅摆几张；homeMiniRows 是迷你榜取前几名。
 	homeHeroCount = 3
+	homeHeroEvery = 6 * time.Second
 	homeMiniRows  = 5
 
 	// homeOverviewCellGap 是横幅、磁贴、封面行的横向缝（16）。算格宽用它；
@@ -42,8 +44,8 @@ const (
 
 	homeTileH      = 84
 	homeBoardHeroH = 112
-	homeMiniRowH   = 56
-	homeMiniCover  = 40
+	homeMiniRowH   = 64
+	homeMiniCover  = 48
 )
 
 // homeStartsOnOverview 说应用打开时首页是不是先停在总览。生产里恒为 true；
@@ -139,36 +141,71 @@ func (h *homePage) heroSongs() []list.Music {
 	return out
 }
 
+// viewHero 是顶上那块轮播横幅：三张叠在一起，当前那张不透明、其余淡到看不见，
+// 每 homeHeroEvery 换下一张（鼠标停在横幅上不换，系统开着「减少动态效果」时直接换）。
 func (h *homePage) viewHero(c *ui.Context, w float32) {
 	t := c.Theme()
 	songs := h.heroSongs()
-	n := homeHeroCount
-	cw := cellW(w, n, homeOverviewCellGap)
-	ch := cw * 0.56
+	ch := min(w*0.34, 300)
 	if len(songs) == 0 {
 		if !h.feed.newTab.loading && h.feed.newTab.started {
 			return
 		}
-		ui.Row(c).Key("home:hero:skel").FillWidth().Gap(space.Px16).Label("正在加载新歌速递").Children(func() {
-			for i := range n {
-				ui.Box(c).Key("home:hero:skel:"+strconv.Itoa(i)).Size(cw, ch).Radius(t.Radius + 4).
-					Background(t.Text.Alpha(0.06))
-			}
-		})
+		ui.Box(c).Key("home:hero:skel").Size(w, ch).Radius(t.Radius + 4).
+			Background(t.Text.Alpha(0.06)).Label("正在加载新歌速递")
 		return
 	}
-	ui.Row(c).Key("home:hero").FillWidth().Gap(space.Px16).Children(func() {
-		for _, m := range songs {
-			h.viewHeroCard(c, m, cw, ch)
+	now := c.Now()
+	if h.heroAt.IsZero() {
+		h.heroAt = now
+	}
+	if h.heroIdx >= len(songs) {
+		h.heroIdx = 0
+	}
+	stage := ui.Box(c).Key("home:hero").Size(w, ch).Radius(t.Radius + 4).Clip()
+	if len(songs) > 1 {
+		if stage.Hovered() {
+			h.heroAt = now
+		} else if now.Sub(h.heroAt) >= homeHeroEvery {
+			h.heroIdx, h.heroAt = (h.heroIdx+1)%len(songs), now
+		}
+		c.After(max(homeHeroEvery-now.Sub(h.heroAt), time.Millisecond))
+	}
+	anim := fullBarAnim(c)
+	stage.Children(func() {
+		for i, m := range songs {
+			h.viewHeroCard(c, m, w, ch, i == h.heroIdx, anim)
 		}
 	})
+	if len(songs) > 1 {
+		ui.Row(c).Key("home:hero:dots").Gap(space.Px8).Padding(space.Px8, space.None, space.None, space.None).
+			Justify(ui.Center).FillWidth().Children(func() {
+			for i, m := range songs {
+				on := i == h.heroIdx
+				dw := float32(8)
+				bg := t.Text.Alpha(0.2)
+				if on {
+					dw, bg = 20, t.Accent
+				}
+				ui.Box(c).Key("home:hero:dot:"+m.ID).Size(dw, 8).Radius(4).Background(bg).
+					Focusable().Role(ui.RoleButton).Label("第 " + strconv.Itoa(i+1) + " 张").
+					OnClick(func() { h.heroIdx, h.heroAt = i, c.Now() })
+			}
+		})
+	}
 }
 
-func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32) {
+func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur bool, anim ui.Animation) {
 	t := c.Theme()
 	sh := list.ShowOf(m)
-	card := ui.Box(c).Key("home:hero:"+m.ID).Size(w, hgt).Radius(t.Radius + 4).Clip().
-		Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
+	card := ui.Box(c).Key("home:hero:"+m.ID).Size(w, hgt).Radius(t.Radius+4).Clip().
+		Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+	fade := float32(1)
+	if cur {
+		fade = 0
+		card = card.Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
+	}
+	card = card.AnimatePose(ui.Pose{Fade: fade}, anim)
 	card.Children(func() {
 		imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, w, hgt)
 		ui.Box(c).Key("home:hero:bar:"+m.ID).Size(w, hgt*0.55).
