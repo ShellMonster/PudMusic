@@ -465,13 +465,88 @@ func (s *Shell) bindMiniWindow() {
 // 迷你窗口的 `OnClosed` 因此只做它自己的三件事：摘掉那条唤醒、收掉它自己那几摊
 // **逐窗口**的资源（`New` 给每个外壳都建了一份，见 `releaseMini`）、以及告诉主窗口。
 func (s *Shell) attachMiniWindow(w *mygo.Window) {
-	s.win = w
+	s.attachMiniWindowTo(miniWindowOf{w: w})
+}
+
+// attachMiniWindowTo 把迷你窗口接到它的外壳上。
+//
+// ⚠️ **它接的是 `miniWindow` 那一层，而不是 `*mygo.Window`**：于是无头那一档
+// 能用一个**假窗**走**同一条生产路径**——而「关窗之前把窗高改回 84 ⇒
+// `StateKey` 落盘的是 320×84」这一条**量得到**（真窗那一档读的是原生那一
+// 边的 bounds，见 `minicurtain.go` 里 `miniWindow` 那一段）。
+//
+// ⚠️ **假窗没有原生那一侧**：那几样（把 `s.win` 指过去、登记唤醒句柄、接可见
+// 性回调）**只对真窗成立**，所以它们走 `w.Native()` 那一格——假窗给 nil，那
+// 几样就跳过（而无头 Tester 里本来也没有真窗口可登记）。
+func (s *Shell) attachMiniWindowTo(w miniWindow) {
+	native := w.Native()
+	s.win = native
+	// ⚠️ **这一层接口也给迷你窗备着**：卷帘要改的是**原生尺寸**，而无头
+	// Tester 里没有真窗口——「关窗之前把高度改回 84 ⇒ 落盘的是 320×84」
+	// 这一条要靠它才**测得到**（理由见 `minicurtain.go` 里 `miniWindow`
+	// 那一段）。
+	s.miniWin = w
 	s.bindMiniWindow()
 	// 这扇窗的可见性同主窗口一样由系统推过来，但「有没有焦点」不参与判断：
 	// 它是 Panel，点它不激活应用（票 #162），于是它几乎永远失焦——拿焦点判的
 	// 话，用户点一下播放键进度条就不再动了（见 presence.go）。
-	s.watchWindow(w)
+	if native != nil {
+		s.watchWindow(native)
+	}
 
+	// ⚠️ **逐窗口的那些生命周期钩子装在这一层上**（`miniWindow` 那一层接口），
+	// 而不是直接装在 `*mygo.Window` 上——理由见 `attachMiniWindowLifecycle`
+	// 那一段。
+	s.attachMiniWindowLifecycle(s.miniWin)
+
+	if native == nil {
+		// ⚠️ **假窗没有 `OnClosed` 那一格**：它要的是 `*mygo.Window` 那一套
+		// API，而无头那一档压根没有真窗口——所以「窗关掉之后收尾」那几样在
+		// 那一档走不到（它们量的是真窗的生命周期，见 `miniplayer_test.go`
+		// 末尾那一节「真窗口才量得到」）。
+		return
+	}
+	native.OnClosed(func() {
+		if s.win == native {
+			s.win = nil
+		}
+		if _, ok := s.miniWin.(miniWindowOf); ok {
+			s.miniWin = nil
+		}
+		// 唤醒句柄的摘除在 `closePerWindow` 里（`releaseMini` 走的就是它）。
+		s.releaseMini()
+		// ⚠️ **主窗口要叫回来**。它是「进迷你」那一步收起来的（`openMiniPlayer`），
+		// 而这一条除了点「退出」之外还有别的路会走到：macOS 上的 ⌘W、Windows 上
+		// 的 Alt+F4。用户从那些路把迷你窗口关掉之后，主窗口还收着——应用还活着、
+		// 音乐还在放，而屏幕上什么都没有了（连 Dock 上的窗口列表都是空的）。
+		//
+		// 退出流程里**不叫**：那时候正在挨个关窗口，再把主窗口 Show 出来是反着的
+		// （`Shell.quitting`，见 `Attach` 里同一句的注释）。
+		if s.main != nil && s.main.mini == s {
+			s.main.mini = nil
+			if !s.main.quitting {
+				s.main.restoreMainWindow()
+			}
+		}
+	})
+}
+
+// attachMiniWindowLifecycle 装迷你窗那些**装在 `miniWindow` 那一层上**的
+// 生命周期钩子。
+//
+// 🔴 **它为什么单独拆出来、而且接的是 `miniWindow` 而不是 `*mygo.Window`**：
+// 无头 Tester 里**没有真窗口**（`mygo.NewWindow` 在应用没 ready 时直接
+// panic，`mygo/window.go:382`），而「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘
+// 的是 320×84」这一条**在真窗那一档量不到**（`captureState` 读的是原生那一
+// 边的 bounds）。
+//
+// ⇒ 抽出这一层接口，测试用一个**假窗**走**同一条生产路径**（这个函数本身），
+// 而「**删掉那个钩子，那条用例必须红**」正是靠这个——那正是评审用负控制抓到
+// 的那类漏洞（删掉钩子之后旧的用例全绿）。
+func (s *Shell) attachMiniWindowLifecycle(w miniWindow) {
+	if w == nil {
+		return
+	}
 	// 🔴 **关窗之前先把卷帘收掉**（票 #536）。
 	//
 	// 理由是 `StateKey`：**宽高也记在里面**（`mygo/window_state.go:196` 的
@@ -489,27 +564,6 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 		// 是白滑的——而更要紧的是**落盘的尺寸**（`StateKey` 抓的是关窗那一
 		// 刻的宽高）。
 		s.miniCurtainCollapseNow()
-	})
-
-	w.OnClosed(func() {
-		if s.win == w {
-			s.win = nil
-		}
-		// 唤醒句柄的摘除在 `closePerWindow` 里（`releaseMini` 走的就是它）。
-		s.releaseMini()
-		// ⚠️ **主窗口要叫回来**。它是「进迷你」那一步收起来的（`openMiniPlayer`），
-		// 而这一条除了点「退出」之外还有别的路会走到：macOS 上的 ⌘W、Windows 上
-		// 的 Alt+F4。用户从那些路把迷你窗口关掉之后，主窗口还收着——应用还活着、
-		// 音乐还在放，而屏幕上什么都没有了（连 Dock 上的窗口列表都是空的）。
-		//
-		// 退出流程里**不叫**：那时候正在挨个关窗口，再把主窗口 Show 出来是反着的
-		// （`Shell.quitting`，见 `Attach` 里同一句的注释）。
-		if s.main != nil && s.main.mini == s {
-			s.main.mini = nil
-			if !s.main.quitting {
-				s.main.restoreMainWindow()
-			}
-		}
 	})
 }
 

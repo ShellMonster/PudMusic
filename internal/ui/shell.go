@@ -678,6 +678,25 @@ type Shell struct {
 	// 函数。
 	miniCurtainWork mygo.Rectangle
 
+	// miniWin 是**迷你播放器这一扇窗**的那层接口（生产实现是 `*mygo.Window`）。
+	//
+	// ⚠️ **它为什么存在**：卷帘要改的是**窗的原生尺寸**，而无头 Tester 里**没有
+	// 真窗口**（`mygo.NewWindow` 在应用没 ready 时直接 panic，
+	// `mygo/window.go:382`）。于是「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘
+	// 的是 320×84」这条**在无头那一档量不到**。
+	//
+	// ⇒ 抽这一层接口，测试实现是一个**假窗**（记住最后一次 `SetSize`，能手动
+	// 触发 `OnClose`）。这样「关窗钩子有没有把高度改回 84」就变成**可测的**
+	// ——而**删掉那个钩子，这条用例必须红**。
+	//
+	// ⚠️ **别把 `s.win` 的类型整个换掉**：`s.win` 在十几处被当 `*mygo.Window`
+	// 用（`platform.RestoreFromBackground(s.win)` 那一类），换类型会波及一大片
+	// 与这一票无关的代码。所以这里只抽**迷你那一扇**要的那几样。
+	//
+	// ⚠️ **零值 = 「还没有窗」**：迷你窗建出来之前（`ensureMiniWindow` 排进
+	// `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
+	miniWin miniWindow
+
 	// miniLyric 是**卷帘里那个歌词区**自己那一摊（滚动位置、上一帧量到的两个
 	// 框、正在滚向哪一句）。
 	//

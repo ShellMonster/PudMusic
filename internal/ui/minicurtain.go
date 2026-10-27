@@ -238,25 +238,8 @@ func miniCurtainHeight(work mygo.Rectangle, win mygo.Rectangle) int {
 // miniCurtainRect 是「一个矩形」——`mygo.Rectangle` 的别名。
 //
 // ⚠️ **为什么要别名**：工作区那块和窗那块都是 `mygo.Rectangle`，而
-// `miniCurtainWorkArea` 是**一个函数**（问真的那块工作区）——同名会撞。
+// `miniCurtainWorkAreaOf` 是**一个函数**（问真的那块工作区）——同名会撞。
 type miniCurtainRect = mygo.Rectangle
-
-// miniCurtainWorkArea 是那扇窗所在显示器的工作区。
-//
-// ⚠️ **返回零值 = 「不知道」**：没有真窗口（无头测试里）、或者窗已经关了。
-// 那时 `miniCurtainHeight` 返回 0（不展开）——而**这不是「卷帘坏了」**，
-// 是「这一扇窗的位置没人知道」。
-//
-// ⚠️ **`mygo.Screen` 头上有 `needsApp`**（`mygo/app.go:128`）：应用还没
-// ready 的时候调它直接 panic。真窗口在 `App.WhenReady` 之后才有，所以
-// 这一行只在应用 ready 之后才走到。
-func miniCurtainWorkArea(w *mygo.Window) mygo.Rectangle {
-	if w == nil || w.IsDestroyed() {
-		return mygo.Rectangle{}
-	}
-	win := w.Bounds()
-	return mygo.Screen.DisplayMatching(win).WorkArea
-}
 
 // miniCurtainToggle 是「点封面」那一下：切换展开 / 收起。
 //
@@ -283,7 +266,78 @@ func (s *Shell) miniCurtainToggle() bool {
 	}
 	s.miniCurtain.open = true
 	s.miniCurtain.target = h
+	// 🔴 **展开的那一下要把键盘抢到这一扇窗上**（票 #536，评审实测抓到的那个）。
+	//
+	// ⚠️ **为什么非做不可**：迷你窗是 `Panel`（`MiniWindowOptions`），
+	// 点它**不激活应用**（`mygo/internal/darwin/window.go:806` 那个
+	// `if !w.opts.Panel` 才 `activateIgnoringOtherApps`）——于是**键盘不在
+	// 这一扇窗上**，Esc 走的是**用户原来那个应用**（访达、浏览器…）。
+	//
+	// ⇒ **窗口级的 Esc 压根到不了这一扇窗**：`c.Shortcut(0, ui.KeyEscape)`
+	// 那一层要的是「这一扇窗收得到键」，而它收不到。
+	//
+	// ⚠️ **实测（2026-10-27 评审在真窗口上复现的）**：访达在前台，点封面
+	// 展开到 301 高，然后按 Esc —— **窗口仍然是 301 高，访达仍然在前台**。
+	//
+	// ⚠️ **这一步要两样，缺一样都不行**：
+	//
+	//  1. **把应用带到前台**（`mygo.App.Focus()` → `activateIgnoringOtherApps:`，
+	//     `mygo/app.go:370`）——不然系统把键盘给**原来那个应用**，而这一扇
+	//     窗压根收不到按键。
+	//  2. **让这一扇成为 key 窗口**（`w.Focus()` → `makeKeyAndOrderFront:`）——
+	//     不然应用是前台了，而**前台那个应用的 key 窗口是别的窗**（主窗口
+	//     那一扇，或者压根没有），键盘还是不在这一扇上。
+	//
+	//     ⚠️ **`w.Focus()` 单独做不够**：它是 `makeKeyAndOrderFront:` **加上**
+	//     `if !w.opts.Panel { activateIgnoringOtherApps: }`——而这一扇**是
+	//     Panel**，所以它**只做前半截**：把这一扇变成 key 窗口，但**应用仍然
+	//     不是前台**。而应用不是前台的时候，key 窗口的键盘事件压根不进来
+	//     （Cocoa 把键送给**前台应用**的 key 窗口）。
+	//
+	// ⚠️ **顺序：先激活应用，再抢 key 窗口**：反过来（先 `makeKeyAndOrderFront:`
+	// 再 `activateIgnoringOtherApps:`）的话，激活应用那一刻系统会把 key 窗口
+	// 交还给**前台那个应用自己的 key 窗口**——这一扇又变成「前台应用的一个
+	// 非 key 窗」。
+	//
+	// ⚠️ **只在展开的时候做**：收起那一下**不抢**——用户是在「自己刚点过的那
+	// 扇窗」上按的（点封面就已经抢过一次了），而**每一次收起都把用户抢到前
+	// 台**是更坏的行为（他在写别的东西的时候被拽走）。
+	s.miniCurtainActivate()
 	return true
+}
+
+// miniCurtainActivate 把键盘抢到迷你窗这一扇上：先激活应用，再让它成为 key
+// 窗口。
+//
+// ⚠️ **它要的是「键盘在这一扇窗上」**：窗口级的 Esc（`c.Shortcut(0,
+// ui.KeyEscape)`）要这一扇窗收得到键，而迷你窗是 `Panel`——点它不激活
+// 应用，键盘就留在用户原来那个应用里（见 `miniCurtainToggle` 那一条
+// 长注释）。
+//
+// ⚠️ **两步都要，顺序也不能换**：见 `miniCurtainToggle` 里那一段。
+//
+// ⚠️ **只有第一步有那个前提**：`mygo.App.Focus()` 头上有 `needsApp`
+// （`mygo/app.go:128`）——应用没 ready 的时候调它**直接 panic**，而无头
+// Tester 里压根没有应用。所以那一档先看 `mygo.App.IsReady()`。
+//
+// ⚠️ **第二步（`w.Focus()`）不需要任何前提**：它要的是「这一扇窗成为 key
+// 窗口」，而那是**这一扇窗自己的事**——它跟应用 ready 没关系。
+func (s *Shell) miniCurtainActivate() {
+	// ⚠️ **顺序：先激活应用，再抢 key 窗口**——反过来（先
+	// `makeKeyAndOrderFront:` 再 `activateIgnoringOtherApps:`）的话，激活应用
+	// 那一刻系统会把 key 窗口交还给**前台那个应用自己的 key 窗口**——这一扇
+	// 又变成「前台应用的一个非 key 窗」。
+	if mygo.App.IsReady() {
+		mygo.App.Focus()
+	}
+	// ⚠️ **激活之后再抢 key 窗口**：`mygo.App.Focus()` 只把**应用**带到前台，
+	// 而前台应用的 key 窗口**不是这一扇**——于是键盘还是不在这一扇上。
+	// `w.Focus()` 走 `makeKeyAndOrderFront:`，它把这一扇变成 key 窗口（而
+	// 因为它是 Panel，**它自己不会**顺带激活应用——所以这一步得排在激活
+	// 之后）。
+	if w := s.miniWindow(); w != nil && !w.IsDestroyed() {
+		w.Focus()
+	}
 }
 
 // miniCurtainMaxHeight 算「这一扇窗现在最多能长出多高的卷帘」。
@@ -291,7 +345,7 @@ func (s *Shell) miniCurtainToggle() bool {
 // ⚠️ **它走的是「窗现在在哪」**，不是「窗应该在哪」——用户拖到哪儿就在
 // 哪儿算，而那个位置是这一扇窗自己的（`StateKey` 记住的）。
 func (s *Shell) miniCurtainMaxHeight() int {
-	w := s.win
+	w := s.miniWindow()
 	if w == nil || w.IsDestroyed() {
 		// ⚠️ **没有真窗口也要能算**：无头 Tester 里没有窗，而「这扇窗现在在
 		// 哪儿」是**注入的**（`s.miniCurtainWork`）——那一档要量的是「卷帘能
@@ -308,7 +362,26 @@ func (s *Shell) miniCurtainMaxHeight() int {
 		}
 		return 0
 	}
-	return miniCurtainHeight(miniCurtainWorkArea(w), w.Bounds())
+	return miniCurtainHeight(s.miniCurtainWorkAreaOf(w), w.Bounds())
+}
+
+// miniCurtainWorkAreaOf 是那扇窗所在显示器的工作区。
+//
+// ⚠️ **零值 = 「不知道」**：没有真窗口（无头测试里）、或者窗已经关了。那时
+// `miniCurtainHeight` 返回 0（不展开）——而**这不是「卷帘坏了」**，是「这一
+// 扇窗的位置没人知道」。
+//
+// ⚠️ **`mygo.Screen` 头上有 `needsApp`**（`mygo/app.go:128`）：应用还没
+// ready 的时候调它直接 panic。真窗口在 `App.WhenReady` 之后才有，所以这一行
+// 只在应用 ready 之后才走到。
+//
+// ⚠️ **它走的是 `miniWindow` 那一层接口**：于是测试实现（假窗）可以把工作区
+// **摆进来**，不必真的问系统——而生产那一档问的是真的（`mygo.Screen`）。
+func (s *Shell) miniCurtainWorkAreaOf(w miniWindow) mygo.Rectangle {
+	if w == nil || w.IsDestroyed() {
+		return mygo.Rectangle{}
+	}
+	return w.WorkArea()
 }
 
 // miniCurtainCollapse 收起卷帘：窗高回到 84。
@@ -358,7 +431,7 @@ func (s *Shell) miniCurtainCollapseNow() {
 // `SurfaceResize` → 下一帧按新尺寸重排），而**这一帧的布局**用的还是旧
 // 高度——所以窗高要**每帧跟着动画走**（见 `viewMini`）。
 func (s *Shell) miniCurtainSetHeight(h int) {
-	w := s.win
+	w := s.miniWindow()
 	if w == nil || w.IsDestroyed() {
 		return
 	}
@@ -367,6 +440,83 @@ func (s *Shell) miniCurtainSetHeight(h int) {
 		width = miniWidth
 	}
 	w.SetSize(width, h)
+}
+
+// miniWindow 是「迷你播放器这一扇窗」那一层接口。
+//
+// ⚠️ **它为什么存在**：卷帘要改的是**窗的原生尺寸**，而无头 Tester 里**没有
+// 真窗口**（`mygo.NewWindow` 在应用没 ready 时直接 panic，
+// `mygo/window.go:382`）。于是「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘的
+// 是 320×84」这条**在无头那一档量不到**。
+//
+// ⇒ 抽这一层接口，生产实现是 `*mygo.Window`，而测试实现是一个**假窗**
+// （记住最后一次 `SetSize`，能手动触发 `OnClose`）。这样「关窗钩子有没有把
+// 高度改回 84」就变成**可测的**——而**删掉那个钩子，这条用例必须红**。
+//
+// ⚠️ **别把 `s.win` 的类型整个换掉**：`s.win` 在十几处被当 `*mygo.Window`
+// 用（`platform.RestoreFromBackground(s.win)` 那一类），换类型会波及一大片
+// 与这一票无关的代码。所以这里只抽**迷你那一扇**要的那几样。
+type miniWindow interface {
+	// Size 是窗现在的宽高。
+	Size() (width, height int)
+	// SetSize 改窗的尺寸（原生那一边的事）。
+	SetSize(width, height int)
+	// Bounds 是窗现在在哪、多大。
+	Bounds() mygo.Rectangle
+	// WorkArea 是这扇窗所在显示器的工作区（**零值 = 「不知道」**）。
+	//
+	// ⚠️ **它在这一层上，是为了无头那一档**：生产实现问的是
+	// `mygo.Screen.DisplayMatching(win).WorkArea`，而 `mygo.Screen` 头上有
+	// `needsApp`（`mygo/app.go:128`）——应用没 ready 的时候调它**直接
+	// panic**，而无头 Tester 里压根没有应用。所以测试实现把工作区**摆进来**，
+	// 而「卷帘不该长出工作区」这件事本身是纯逻辑（`miniCurtainHeight`）。
+	WorkArea() mygo.Rectangle
+	// Native 是底下那扇**真窗**（测试实现返回 nil）。
+	//
+	// ⚠️ **它只有一个用处**：生产那一档有几样东西**只对真窗成立**（把
+	// `s.win` 指过去、登记唤醒句柄、接可见性回调）——而「接可见性回调」要
+	// 的是 `*mygo.Window` 那一套 API。
+	Native() *mygo.Window
+	// IsDestroyed 报这扇窗还在不在。
+	IsDestroyed() bool
+	// Focus 让这扇窗成为 key 窗口（**不**激活应用——它是 Panel）。
+	Focus()
+	// OnClose 装「关窗之前」那个钩子。
+	OnClose(fn func(e *mygo.CloseEvent)) (off func())
+}
+
+// miniWindowOf 是 `*mygo.Window` 那一层接口的实现。
+type miniWindowOf struct{ w *mygo.Window }
+
+func (m miniWindowOf) Size() (int, int)          { return m.w.Size() }
+func (m miniWindowOf) SetSize(width, height int) { m.w.SetSize(width, height) }
+func (m miniWindowOf) Bounds() mygo.Rectangle    { return m.w.Bounds() }
+func (m miniWindowOf) IsDestroyed() bool         { return m.w.IsDestroyed() }
+func (m miniWindowOf) Focus()                    { m.w.Focus() }
+func (m miniWindowOf) WorkArea() mygo.Rectangle {
+	return mygo.Screen.DisplayMatching(m.w.Bounds()).WorkArea
+}
+func (m miniWindowOf) Native() *mygo.Window { return m.w }
+func (m miniWindowOf) OnClose(fn func(e *mygo.CloseEvent)) (off func()) {
+	return m.w.OnClose(fn)
+}
+
+// miniWindow 返回迷你播放器这一扇窗的那层接口。
+//
+// ⚠️ **它只返回 `s.miniWin`，不临时造一个**：那一层接口是**一个结构体**
+// （`miniWindowOf`，里面一个指针），而**每次返回一个接口值都要装箱一次**
+// ——装箱逃逸到堆上，而这一句**每一帧都要调两三次**（`miniCurtainSetHeight`
+// 一次、`miniCurtainMaxHeight` 一次）。⇒ 每帧多一到两次分配，而那一扇窗
+// **失焦照画**（面板语义，见 `presence.go`）——于是那一档的分配是**一直**在
+// 付的（帧预算那条测试数的就是它）。
+//
+// ⇒ 所以 `s.miniWin` 是**建窗时存好的那一个**（`attachMiniWindowTo` 装），
+// 这里**只是把它读出来**——零分配。
+//
+// ⚠️ **零值 = 「没有窗」**：迷你窗建出来之前（`ensureMiniWindow` 排进
+// `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
+func (s *Shell) miniWindow() miniWindow {
+	return s.miniWin
 }
 
 // miniCurtainTargetHeight 是这一帧**窗该有**多高。

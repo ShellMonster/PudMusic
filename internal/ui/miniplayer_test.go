@@ -967,10 +967,15 @@ func TestRenderMiniShots(t *testing.T) {
 //	      不能超出工作区（而**放不下 120 的时候不展开**）。
 //	   d. **Esc 到不到得了这一扇窗**：迷你窗是 `Panel`，点它**不激活应用**，
 //	      于是键盘还在原来那个应用手里——Esc 走的是**那个应用的窗口**。
-//	      ⇒ 只有迷你窗是 key 窗口的时候 Esc 才到得了（用户用别的办法把键盘
-//	      焦点切到这一扇时）。这一条**在无头那一档量不到**：无头 Tester 里
-//	      焦点链是空的，窗口级的 Esc 直接命中（见 `minicurtain_test.go` 的
-//	      `TestTheMiniCurtainClosesWithEscape`）。
+//	      ⇒ 这一版在**展开的那一下**补了两步（`miniCurtainActivate`）：
+//	      **① 把应用带到前台**（`mygo.App.Focus()`）**② 让这一扇成为 key
+//	      窗口**（`w.Focus()`）——缺一样 Esc 都到不了。
+//	      ⚠️ **无头那一档只量得到第②样**（第①样要应用 ready，而无头 Tester
+//	      里压根没有应用）：见 `minicurtain_state_test.go` 的
+//	      `TestTheMiniCurtainFocusesItsWindowWhenItOpens`。
+//	      ⇒ **真机上还要验的是第①样**：点封面之后**应用是不是真的到了前台**
+//	      （而这正是评审在真机上抓到的那一半：2026-10-27 实测「访达仍在前台、
+//	      窗仍 301 高、按 Esc 到不了」）。
 //	   e. **悬停展开可不可用**：这一版**没做悬停**（面板失焦时收不到鼠标移动，
 //	      BMG-280 §2.4），而「悬停能不能当增强」要等真窗上验过 hover 可用
 //	      之后才谈得上。

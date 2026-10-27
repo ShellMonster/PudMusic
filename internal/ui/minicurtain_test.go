@@ -481,20 +481,72 @@ func TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack(t *testing.T) {
 // ⚠️ **走的是生产那条路**：先写盘、再 `MountSettings` 读回来——和真程序
 // 启动时一样（`shelltest_test.go` 的 `withSettings` 就是这一条路）。
 func TestTheMiniLyricsCurtainSwitchSurvivesARestart(t *testing.T) {
+	// ⚠️ **种子设置是「开」**：这一条要验的是「**用户把它关掉**之后重启还在
+	// 关着」，所以起点得是「开」——不然下面那一步关不掉任何东西，这条用例
+	// 就成了空转（而「空转」正是评审用负控制抓出来的那一类问题）。
 	st := app.DefaultSettings("")
-	off := false
-	st.MiniLyricsCurtain = &off
+	on := true
+	st.MiniLyricsCurtain = &on
 
 	sh := newTestShell(t, withSettings(st))
-	if sh.a.SettingsSnapshot().MiniLyricsCurtainOn() {
-		t.Fatal("写进去的那份设置读出来是开的：关着就该是关着")
+	if !sh.a.SettingsSnapshot().MiniLyricsCurtainOn() {
+		raw, _ := os.ReadFile(sh.settingsPath)
+		t.Fatalf("起点就不对：那份设置读出来是关的 path=%s file=%s", sh.settingsPath, string(raw))
 	}
 
-	// 重新读一遍盘（模拟重启）：同一个路径再挂一次。
-	sh2 := newTestShell(t, withSettings(st))
-	if sh2.a.SettingsSnapshot().MiniLyricsCurtainOn() {
-		t.Error("重启之后那个开关又变回开的了：它没有落盘")
+	// 🔴 **走生产的改设置那条路**（`App.UpdateSettings` ⇒ store.Update ⇒
+	// 后台落盘），**不是**往界面上硬塞一个 Settings 值。
+	//
+	// ⚠️ **为什么这一句是关键**：改设置的那条路被换掉（不落盘 / 丢弃改动）
+	// 的话，下面「重新读一遍盘」读到的还是**开**的 ⇒ 这一条红。
+	// 而只断言 `SettingsSnapshot()` 的话，**改动被整条丢弃也照样绿**——
+	// 那个快照是从内存里那份读出来的，压根没经过盘。
+	if _, err := sh.a.UpdateSettings(func(cur *app.Settings) {
+		v := false
+		cur.MiniLyricsCurtain = &v
+	}); err != nil {
+		t.Fatal(err)
 	}
+	if sh.a.SettingsSnapshot().MiniLyricsCurtainOn() {
+		t.Fatal("改完之后快照里那个开关还是开的：设置压根没被改")
+	}
+
+	// ⚠️ **落盘**：store 的写盘是后台合并写的（`SettingsStore.loop`），
+	// 不等它就立刻读盘，读到的还是**旧内容**。这一句是等它写完。
+	if err := sh.a.CloseSettings(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 🔴 **重新读**那**同一条文件**（模拟重启）：不是「再写一份新的设置
+	// 进去读出来」——那是**读自己刚写进去的那一份种子**，压根不经过落盘。
+	got, err := app.LoadSettings(sh.settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MiniLyricsCurtainOn() {
+		t.Errorf("重启之后那个开关又变回开的了：它没有落盘"+
+			"（读回来的是 %v）", miniCurtainSwitchText(got.MiniLyricsCurtain))
+	}
+	// ⚠️ **顺带断一下文件里真的写着那一格**：落盘那一层有可能把这一格整个
+	// 吞掉（而读回来的是默认值「开」——那样上面那条会红，但这里说得更准）。
+	if got.MiniLyricsCurtain == nil {
+		t.Error("落盘之后那一份设置里压根没有「miniLyricsCurtain」这一格")
+	}
+}
+
+// miniCurtainSwitchText 把那个开关的指针值说成人话。
+//
+// ⚠️ **它报的是「读回来的那一格是开着还是关着」**：而那一格**可能压根没有**
+// （`nil` = 没设过 = 默认开）——而**指针的地址对读者毫无意义**（报错里出现
+// 一个 `0x4be43a2ea188` 谁也看不懂）。
+func miniCurtainSwitchText(v *bool) string {
+	if v == nil {
+		return "没设过（默认开）"
+	}
+	if *v {
+		return "开"
+	}
+	return "关"
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

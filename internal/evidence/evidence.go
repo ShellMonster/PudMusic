@@ -4175,6 +4175,11 @@ var Items = []Item{
 			// 「立刻收起」真的是一下子到位（而不是先弹回 320 再滑下去）——
 			// 而那 240ms 里窗比内容高（透明的那一块在吃点击）。
 			"TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack",
+			// 窗口状态落盘：展开着关窗 ⇒ 落盘的尺寸是 320×84（`StateKey` 记
+			// 宽高，而抓的是关窗那一刻）。
+			"TestTheMiniCurtainLeavesACollapsedHeightInTheWindowState",
+			// 展开的那一下把键盘抢到这一扇窗上（不然 Esc 到不了它）。
+			"TestTheMiniCurtainFocusesItsWindowWhenItOpens",
 		},
 	},
 	{
