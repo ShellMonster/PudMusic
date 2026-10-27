@@ -223,6 +223,10 @@ func TestTheMentionFilterFindsTheSongNameInsideTheTitle(t *testing.T) {
 		// 符挨在一起的时候要**先切外层的**，不然只认出「歌名：说明」⇒ 正文里
 		// 提到「歌名」的那一条被判成没提到 ⇒ 界面显示零命中。
 		"周杰伦-晴天：电影主题曲",
+		// ⚠️ **「歌手：歌名 (Live)」那一档**（票 #574 第三轮评审的 F7）：版本
+		// 说明要**先剥掉**再看——不剥的话那个 "Live" 让整段被当成说明 ⇒ 歌名
+		// 跑到左边（歌手）去了 ⇒ 提到「晴天」的那一条被判成没提到。
+		"周杰伦：晴天 (Live)",
 	} {
 		t.Run(title, func(t *testing.T) {
 			b := newCommentBili(t, "reply-main.json")
@@ -248,24 +252,31 @@ func TestTheMentionFilterFindsTheSongNameInsideTheTitle(t *testing.T) {
 // 不算提到这首歌」。
 //
 // 🔴 **提到歌手不等于提到这首歌**（票 #574 的第二轮评审：「周杰伦：晴天」那一
-// 档把「周杰伦」收进了别名表，于是正文只提到歌手的评论也被算成提到了歌）。
+// 档把「周杰伦」收进了别名表，于是正文只提到歌手的评论也被算成提到了歌；
+// 第三轮评审的 F7：「周杰伦：晴天 (Live)」那一档同样如此）。
 func TestTheMentionFilterDoesNotCountTheArtistAsAMention(t *testing.T) {
-	b := newCommentBili(t, "reply-main.json")
-	// ⚠️ **这一份里唯一提到人的那一条只提到了歌手**。
-	b.mainRaw = commentFixtureMentionOnlyTheArtist(t, "周杰伦")
-	it := mvItem()
-	it.Title = "周杰伦：晴天"
-	_, tt := newCommentsShell(t, b, it, 1400, 1400)
+	// ⚠️ **两种标题都要断**：带版本说明的那一档（"(Live)"）最容易把歌名认
+	// 丢。
+	for _, title := range []string{"周杰伦：晴天", "周杰伦：晴天 (Live)"} {
+		t.Run(title, func(t *testing.T) {
+			b := newCommentBili(t, "reply-main.json")
+			// ⚠️ **这一份里唯一提到人的那一条只提到了歌手**。
+			b.mainRaw = commentFixtureMentionOnlyTheArtist(t, "周杰伦")
+			it := mvItem()
+			it.Title = title
+			_, tt := newCommentsShell(t, b, it, 1400, 1400)
 
-	if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
-		t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
-	}
-	// 零命中（这一份里一条都没提到「晴天」）⇒ 说的是「没有提到这首歌」。
-	commentsWait(t, tt, "说清了没有提到这首歌", func() bool {
-		return tt.HasText("这个视频的 6 条评论里没有提到这首歌")
-	})
-	if tt.HasText("1 条提到这首歌") {
-		t.Errorf("只提到歌手的那一条被算成提到这首歌了，文字有 %q", tt.Texts())
+			if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
+				t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
+			}
+			// 零命中（这一份里一条都没提到「晴天」）⇒ 说的是「没有提到这首歌」。
+			commentsWait(t, tt, "说清了没有提到这首歌", func() bool {
+				return tt.HasText("这个视频的 6 条评论里没有提到这首歌")
+			})
+			if tt.HasText("1 条提到这首歌") {
+				t.Errorf("只提到歌手的那一条被算成提到这首歌了，文字有 %q", tt.Texts())
+			}
+		})
 	}
 }
 

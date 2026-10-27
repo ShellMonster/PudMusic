@@ -201,6 +201,66 @@ func TestTheColonTitleDoesNotTakeTheArtistSegment(t *testing.T) {
 	}
 }
 
+// TestTheColonTitleWithAVersionNoteGivesTheSongName 断「歌手：歌名 (Live)」
+// 那一档。
+//
+// 🔴 **版本说明必须先剥掉再看**（票 #574 第三轮评审的 F7：「周杰伦：晴天
+// (Live)」那一档把「周杰伦」收进了别名表——只提到歌手的评论被算成命中，
+// 而正文提到「晴天」的那一条反被算成没提到）。
+func TestTheColonTitleWithAVersionNoteGivesTheSongName(t *testing.T) {
+	for _, title := range []string{
+		"周杰伦：晴天 (Live)",
+		"周杰伦：晴天（Live）",
+		"周杰伦：晴天 [Live]",
+		"周杰伦：晴天 Live版",
+		"周杰伦：晴天(Live)",
+		"周杰伦：晴天 (Live版)",
+	} {
+		tab := New(title, "某个 UP 主")
+		if !has(t, tab, "晴天") {
+			t.Errorf("标题 %q 的表里没有「晴天」：%q", title, tab.Forms())
+		}
+		if has(t, tab, "周杰伦") {
+			t.Errorf("标题 %q 的表里有「周杰伦」——那是署名，不是歌名：%q",
+				title, tab.Forms())
+		}
+		if !tab.Mentions("晴天真好听") {
+			t.Errorf("标题 %q：正文里明明有「晴天」，却没命中", title)
+		}
+		if tab.Mentions("周杰伦真棒") {
+			t.Errorf("标题 %q：正文里只有「周杰伦」却命中了——"+
+				"提到歌手不等于提到这首歌", title)
+		}
+	}
+}
+
+// TestTheSongNameIsNotTakenFromTheArtistWhenTheNoteIsTheWholeRightSide 断
+// 「歌名：说明」那一档在**说明**那一族认得出来的时候取左边。
+//
+// ⚠️ **说明那一族收得紧**：英文那几个（live/cover/remix…）是**整个词**才算，
+// 而按子串收的话「Olive」「believe」这种歌名会被误判成说明。
+func TestTheSongNameIsNotTakenFromTheArtistWhenTheNoteIsTheWholeRightSide(t *testing.T) {
+	for _, title := range []string{
+		"晴天：电影主题曲",
+		"晴天：主题曲",
+		"晴天：现场版",
+		"晴天：歌曲介绍",
+	} {
+		tab := New(title, "某个 UP 主")
+		if !has(t, tab, "晴天") {
+			t.Errorf("标题 %q 的表里没有「晴天」：%q", title, tab.Forms())
+		}
+	}
+	// ⚠️ **英文歌名不许被「live」那个子串咬掉**（"olive" 里有 "live"）。
+	tab := New("歌手：Olive", "某个 UP 主")
+	if !has(t, tab, "Olive") {
+		t.Errorf("表里没有「Olive」：%q", tab.Forms())
+	}
+	if has(t, tab, "歌手") {
+		t.Errorf("表里有「歌手」——那是署名，不是歌名：%q", tab.Forms())
+	}
+}
+
 // TestTheCompactDashAndColonTitleGivesTheSongName 断「歌手-歌名：说明」那一
 // 档。
 //
@@ -329,5 +389,30 @@ func TestTheMatchIgnoresCaseAndSpaces(t *testing.T) {
 	tab2 := New("大 鱼", "某个歌手")
 	if !tab2.Mentions("大鱼真好听") {
 		t.Errorf("「大鱼」没命中「大 鱼」")
+	}
+}
+
+// TestTheSongNameSurvivesAMultiWordVersionNote 断「多词版本说明」那一族。
+//
+// ⚠️ **版本说明常常不止一个词**（"Live Ver."、"Live Version"）：认不出后半个
+// 词的话，歌名会被它顶掉（"晴天 Live Ver." ⇒ 歌名变成「Ver.」）⇒ 正文提到
+// 「晴天」的那一条被判成没提到。
+func TestTheSongNameSurvivesAMultiWordVersionNote(t *testing.T) {
+	for _, title := range []string{
+		"周杰伦：晴天 Live Ver.",
+		"周杰伦：晴天 Live Version",
+		"周杰伦-晴天 Live Ver.",
+	} {
+		tab := New(title, "某个 UP 主")
+		if !has(t, tab, "晴天") {
+			t.Errorf("标题 %q 的表里没有「晴天」：%q", title, tab.Forms())
+		}
+		if has(t, tab, "周杰伦") {
+			t.Errorf("标题 %q 的表里有「周杰伦」——那是署名，不是歌名：%q",
+				title, tab.Forms())
+		}
+		if !tab.Mentions("晴天真好听") {
+			t.Errorf("标题 %q：正文里明明有「晴天」，却没命中", title)
+		}
 	}
 }
