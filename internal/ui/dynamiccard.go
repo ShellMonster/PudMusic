@@ -362,10 +362,9 @@ func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
 		// 主色当字（浅色下取压深的那一档，理由见 `widgets/ink`）；没赞是空心
 		// 拇指 + 次要色。
 		col := t.TextMuted
-		thumb := iconLike
+		thumb := likeIcon(liked)
 		if liked {
 			col = ink.AccentOn(t)
-			thumb = iconLikeFilled
 		}
 		btn := flat.ButtonContent(c, func(c *ui.Context) {
 			ui.Icon(c, icon(thumb)).FontSize(18).TextColor(col)

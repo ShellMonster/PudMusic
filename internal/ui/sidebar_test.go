@@ -681,7 +681,7 @@ func TestTheSidebarShowsTheAppNameExactlyOnce(t *testing.T) {
 		if s == "Biu" {
 			t.Errorf("界面上还有一行整字「Biu」——那是被改名前的旧品牌字：%q", tt.Texts())
 		}
-		if strings.Contains(s, "BiuGo") {
+		if s == "布丁音乐" {
 			names = append(names, s)
 		}
 	}
@@ -888,7 +888,7 @@ func TestALongFavoriteNameDoesNotMakeTheRowTaller(t *testing.T) {
 func TestTheSidebarPanicIsCaught(t *testing.T) {
 	s, _, tt, _ := sideShell(t)
 
-	if !tt.HasText("BiuGo") {
+	if !tt.HasText("布丁音乐") {
 		t.Fatalf("侧栏没画出来，文字有 %q", tt.Texts())
 	}
 	s.sideBody = func(*mygoui.Context) { panic("侧栏画崩了") }

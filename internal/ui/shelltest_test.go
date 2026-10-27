@@ -444,7 +444,7 @@ func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
 		migration.mu.Unlock()
 
 		tt, s, _, _ := shellWithSettings(t, app.ThemeModeDark, true)
-		want := BuildTheme(s.app.SettingsSnapshot(), true).Background
+		want := wantBackground(t, s.app, true)
 		for f := range 3 {
 			tt.Frame()
 			// ⚠️ **推钟让入场走完**：提示是淡进来的（250ms），而 Tester 的钟
