@@ -566,7 +566,8 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // ⚠️ **行数照参考图**（B 站 UP 主页那张图）：标题 **1 行**、描述 **2 行**。
 // 上游那一版是标题 2 行、描述 1 行。
 //
-// 整块可点：追加这首并立即播，保留原队列（票 #337）。
+// 整块可点：放这一首并立即播，保留原队列（票 #337 定的方向；票 #608 照上游
+// `play()` 补上「已经在队列里就定位过去、不重复入队」那一支）。
 // 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
 	t := c.Theme()

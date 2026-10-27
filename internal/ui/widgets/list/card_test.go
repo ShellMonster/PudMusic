@@ -329,7 +329,7 @@ func TestTheCompactRowHasNoCover(t *testing.T) {
 	tt.Frame()
 	tt.Advance(hover.Fade)
 	tt.Frame()
-	if _, ok := tt.Find(hover.FromLabel(title)); ok {
+	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
 		t.Errorf("紧凑档的封面上冒出了播放三角——这一档不该有封面：%q", tt.Texts())
 	}
 }

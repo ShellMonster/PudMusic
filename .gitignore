@@ -2,9 +2,18 @@
 /.mygo/
 mygo_windows_*.syso
 
+# 本地研究材料、维护者计划与开发工具状态。
 _research/
 docs/research/
 .claude/
+/.zcode/
+
+# 本地票据草稿与审查输出，不随公开提交进入仓库。
+/ticket-*.md
+/.review-*
+
+# macOS 本地目录元数据。
+.DS_Store
 
 # `go test` 留下的编译产物（`go test -memprofile` / `-cpuprofile` 会在当前目录
 # 留下一个 `ui.test` 之类的二进制）。
@@ -17,7 +26,7 @@ docs/research/
 #
 # ⚠️ 它们的**内容**进不了仓库：一份验收输出看着像日志，其实是机器那一秒的
 # 状态，过期得比代码快得多，而它躺在仓库里会让人以为「这个包当时是绿的」。
-.review-scratch/
+/.review-scratch/
 
 # 更新签名私钥。
 #

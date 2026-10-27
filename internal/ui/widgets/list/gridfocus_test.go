@@ -238,10 +238,11 @@ func TestTheGridHandsTheFocusBackAtTheTop(t *testing.T) {
 }
 
 // TestEnterPlaysTheCellTheCursorIsOn 钉「回车放歌」——和列表那一档**同一个手势**
-// （列表的 `OnSubmit` 走的是 `playFrom`，网格的双击走的也是它）。
+// （列表的 `OnSubmit` 和网格的双击都走 `rowPlay`）。
 //
-// ⚠️ **判据是「放出去的那一批」**：从游标那一首**往后**（`playFrom` 的口径），
-// 不是只放那一首。
+// ⚠️ **判据是「放出去的那一首」**：回车放的是游标那一首**自己**（`Actions.PlayNow`，
+// 票 #608 照上游 Biu 的 `play()`），不是「从这一首往后」那一段——那一段是右键菜单
+// 「从这一首往后听」的活儿，不该顺手清掉用户排好的队列。
 func TestEnterPlaysTheCellTheCursorIsOn(t *testing.T) {
 	songs := songsOf(8, "UP 主")
 	rec := &recorded{}
@@ -262,15 +263,14 @@ func TestEnterPlaysTheCellTheCursorIsOn(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	if len(rec.played) != 1 {
-		t.Fatalf("回车放了 %d 次，want 1 次", len(rec.played))
+	if len(rec.nowed) != 1 {
+		t.Fatalf("回车放了 %d 次「立即播放」，want 1 次", len(rec.nowed))
 	}
-	got := rec.played[0]
-	if len(got) != len(songs)-1 {
-		t.Fatalf("放出去的是 %d 首，want %d 首（从游标那一首往后）", len(got), len(songs)-1)
+	if got := rec.nowed[0].Identity(); got != songs[1].Item.Identity() {
+		t.Errorf("放出去的是 %v，want 游标那一首 %v", got, songs[1].Item.Identity())
 	}
-	if got[0].Identity() != songs[1].Item.Identity() {
-		t.Errorf("放出去的第一首是 %v，want 游标那一首 %v", got[0].Identity(), songs[1].Item.Identity())
+	if len(rec.played) != 0 {
+		t.Errorf("回车顺手把队列换成了「从这一首往后」那一段（收到 %d 次）", len(rec.played))
 	}
 }
 

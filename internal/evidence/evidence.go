@@ -2706,6 +2706,50 @@ var Items = []Item{
 	},
 	{
 		Category: Play,
+		// 满屏播放器左边那张封面上的弹幕（**界面**那一层；取弹幕那一半是
+		// 上面那一条）。
+		//
+		// 钉的是五个「界面上看不出坏了」的点：
+		//
+		//   - **画在浮层里**：满屏整个是浮层，而浮层画在主树**之上**——弹幕
+		//     画在主树里会被满屏那层不透明的底盖住。🔴 **那个症状是静默的**：
+		//     文字**在树里**（`Texts()` 查得到），而画面上一个像素也没有。
+		//     ⇒ 「树上有没有那几行字」验不出这个坑，得看画面。
+		//   - **位移走 pose**：位置要是算在 view 里（`Absolute().Left(x)`），它
+		//     只在重建时更新——而满屏开着时界面 20 帧/秒重建，于是弹幕是 20fps
+		//     跳着走的。走 pose（只重绘那一族）是 60fps 平滑。
+		//   - **按当前位置起步**：弹幕的时间是**视频时间**，我们放的就是这个视频
+		//     的音轨 ⇒ 没有额外 offset。「从第 3 分钟开始听」就从第 3 分钟那一条
+		//     开始滚（**不是**按「播放了多久」滚）。
+		//   - **key 用弹幕自己的 rowid**：动态列表的 key 必须稳定且唯一——用下标
+		//     的话「前面插一条」会让后面所有条的状态整体错配。
+		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
+		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
+		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
+		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
+		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
+		//     像素宽的字滚了 1.8 秒之后尾巴还在封面里，下一条就进来了 ⇒
+		//     重叠 88 像素，两句话没法读）。
+		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
+		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
+		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		Tests: []string{
+			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
+			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
+			"TestTheDanmakuStartsFromTheCurrentPosition",
+			"TestTheDanmakuGlidesInsteadOfTeleporting",
+			"TestTheDanmakuJumpsWhenMotionIsReduced",
+			"TestEveryDanmakuHasItsOwnKey",
+			"TestTheDanmakuCanBeTurnedOff",
+			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
+			"TestTwoDanmakuOnTheSameLaneNeverOverlap",
+			"TestTheSameLaneWaitsForThePreviousDanmakuToClearTheEdge",
+			"TestALongDanmakuStaysUntilItHasLeftTheCover",
+		},
+	},
+	{
+		Category: Play,
 		// 「多 P 的投稿只能播第一集」（BMG-47 的 A12）那一张票的界面那一半：
 		// 播放条上有分集入口 → 打开是浮层列表、每一集有编号和标题 → 标出正在播的
 		// 那一集 → 点一集就切过去 → **单 P 不摆这个入口**。
@@ -3897,12 +3941,26 @@ var Items = []Item{
 	},
 	{
 		// 票 #337 覆盖 #299：单首保留队列，显式批量/区段替换队列。
+		// 票 #608 覆盖 #337 的那一处「同一首已经在队列里时照样再加一份」：
+		// 照上游 Biu 的 `play()` 改成**定位已有那一份**，不再重复入队。
 		Category: Play,
-		Spec:     "立即播放追加这一首并打断，旧队列保留；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
+		Spec:     "点一首歌保留旧队列（已在队列里就定位、不在才追加）；批量入口替换这一批并从第一首播；从这一首往后听/下一首播放/添加到队列保持区段替换/当前后插入/队尾追加的语义",
 		Tests: []string{
 			"TestEnqueueAndPlayNowAppendsAndStartsTheNewSong",
-			// 同一首已经在队列里时**照样再加一份**（与上游那一处不同）。
-			"TestEnqueueAndPlayNowAppendsTheSameSongTwice",
+			// 同一首已经在队列里时**定位过去，不再追加一份**（照上游）。
+			"TestEnqueueAndPlayNowSelectsTheSameSongInsteadOfAppending",
+			// 已经在队列里的那一首：长度不变、当前项指过去、放的是它（票 #608）。
+			"TestEnqueueAndPlayNowSelectsAnItemThatIsAlreadyInTheQueue",
+			// 不在队列里的那一首：追加到队尾并立即播（票 #608）。
+			"TestEnqueueAndPlayNowAppendsASongThatIsNotInTheQueue",
+			// 队列里同一首排了两遍时，定位到用户点的那一份（票 #608）。
+			"TestEnqueueAndPlayNowLocatesTheDuplicateNotTheFirstCopy",
+			// 点一首歌不清空周围的歌（票 #608）。
+			"TestEnqueueAndPlayNowDoesNotClearTheQueueAroundIt",
+			// E2E：投稿页 112 首「全部播放」之后双击第 59 首，队列还是 112 首，
+			// 当前项是第 59 首；点一首不在队列里的会追加（票 #608）。
+			"TestDoubleClickingAnUpSubmissionKeepsThePlaylist",
+			"TestDoubleClickingASongOutsideTheQueueAppendsIt",
 			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
 			"TestThePlayNowEntryAppendsAndStartsThatSong",
 			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
