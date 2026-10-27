@@ -137,7 +137,7 @@ func TestTheMiniCurtainLeavesACollapsedHeightInTheWindowState(t *testing.T) {
 
 	// 展开：窗真的变高了（`miniCurtainSetHeight` 走的是那一层接口）。
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
@@ -185,7 +185,7 @@ func TestTheMiniCurtainFocusesItsWindowWhenItOpens(t *testing.T) {
 	s.miniWin = fake
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
@@ -224,7 +224,7 @@ func TestTheMiniCurtainTakesTheKeyWindowWhenTheAppBecomesActive(t *testing.T) {
 	s.miniWin = fake
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
@@ -271,13 +271,13 @@ func TestTheMiniCurtainStopsTakingTheKeyWindowAfterItCollapses(t *testing.T) {
 	s.miniWin = fake
 
 	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, true)
+	settleCurtain(t, tt, s, true)
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
 
 	// 收起
-	s.miniCurtainCollapse()
+	s.miniCurtainCollapse(tt.Now())
 	if s.miniCurtainWantsKey {
 		t.Fatal("收起之后那个「我要键盘」的凭据还留着")
 	}
