@@ -1,0 +1,135 @@
+name: macOS native CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Build and validate macOS app
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Verify formatting and modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            files="$(git diff --name-only "$GITHUB_BASE_SHA"...HEAD -- '*.go')"
+          elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            if [[ "$GITHUB_EVENT_BEFORE" == 0000000000000000000000000000000000000000 ]]; then
+              files="$(git ls-files '*.go')"
+            else
+              files="$(git diff --name-only "$GITHUB_EVENT_BEFORE" HEAD -- '*.go')"
+            fi
+          else
+            files=""
+          fi
+          if [ -n "$files" ]; then
+            formatted="$(printf '%s\n' "$files" | xargs gofmt -l)"
+            if [ -n "$formatted" ]; then
+              printf 'These changed Go files are not formatted:\n%s\n' "$formatted" >&2
+              exit 1
+            fi
+          fi
+          go mod verify
+
+      - name: Run Go checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath -p 4 ./...
+          go vet -trimpath -p 4 ./...
+          go test -p 4 $(go list ./... | grep -v '/internal/ui$')
+          go test ./internal/licensing/
+
+      - name: Verify generated resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          go generate ./internal/platform/ ./internal/licensing/
+          git diff --exit-code -- resources
+
+      - name: Build unsigned macOS artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset MYGO_UPDATER_PRIVATE_KEY
+          go tool mygo build --platform darwin/arm64,darwin/amd64
+
+      - name: Validate app bundles and disk images
+        shell: bash
+        run: |
+          set -euo pipefail
+          : > macos-build-summary.txt
+
+          for target in darwin-arm64 darwin-amd64; do
+            dir="build/$target"
+            [ -d "$dir" ] || { echo "Missing $dir" >&2; exit 1; }
+
+            app="$(find "$dir" -maxdepth 1 -type d -name '*.app' -print -quit)"
+            dmg="$(find "$dir" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+            install_script="$dir/install.sh"
+            [ -n "$app" ] || { echo "Missing .app in $dir" >&2; exit 1; }
+            [ -n "$dmg" ] || { echo "Missing .dmg in $dir" >&2; exit 1; }
+            [ -f "$install_script" ] || { echo "Missing install.sh in $dir" >&2; exit 1; }
+
+            binary="$(find "$app/Contents/MacOS" -maxdepth 1 -type f -perm -111 -print -quit)"
+            [ -n "$binary" ] || { echo "Missing executable in $app" >&2; exit 1; }
+
+            archs="$(lipo -archs "$binary")"
+            case "$target" in
+              darwin-arm64) expected='arm64' ;;
+              darwin-amd64) expected='x86_64' ;;
+            esac
+            [ "$archs" = "$expected" ] || {
+              echo "$binary has architectures $archs; expected $expected" >&2
+              exit 1
+            }
+
+            hdiutil imageinfo "$dmg" >/dev/null
+            printf '%s\n' "$target" >> macos-build-summary.txt
+            printf '  app: %s\n' "$(basename "$app")" >> macos-build-summary.txt
+            printf '  dmg: %s\n' "$(basename "$dmg")" >> macos-build-summary.txt
+            printf '  install script: %s\n' "$(basename "$install_script")" >> macos-build-summary.txt
+            printf '  executable architectures: %s\n' "$archs" >> macos-build-summary.txt
+          done
+
+          cat macos-build-summary.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload macOS artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-native-${{ github.run_number }}
+          if-no-files-found: error
+          path: |
+            build/darwin-arm64/*.dmg
+            build/darwin-arm64/install.sh
+            build/darwin-amd64/*.dmg
+            build/darwin-amd64/install.sh
+            macos-build-summary.txt
