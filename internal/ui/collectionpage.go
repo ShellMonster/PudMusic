@@ -445,14 +445,21 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 决定了画哪一句，而「头图区画在哪」也是同一个判据——两处各判一次的
 		// 话，改一处忘了另一处，症状是「空的时候头图区不见了 / 画两遍」。
 		empty := collectionEmpty(p, info)
-		if empty != collectionEmptyNone {
+		// ⚠️ **失败那一档不算「空」**：失败的时候列表**不是空的**——它有
+		// 自己的失败态（那个「加载失败，点此重试」按钮），而那一格只在
+		// `p.list.View` 里画。所以头图区**留在列表里**，页面继续走列表那一支。
+		//
+		// 🔴 **不这么分的后果**（票 #624 评审的评论第 1 条）：失败落进
+		// 「没有结果」那一支，而那一支不调 `p.list.View`——于是那个重试按钮
+		// 永远画不出来，用户看到的是「暂无内容」而**没有重试的入口**。
+		if empty == collectionEmptyNone || empty == collectionEmptyFailed {
+			s.collectionLead(c, p)
+		} else {
 			// 🔴 **空的时候把列表里的那一块卸掉**：头图区在外面画了，而
 			// 列表里的那块留着的话两边都画一份。
 			s.clearCollectionLead(p)
 			s.viewCollectionHeader(c, p)
 			s.viewCollectionOps(c, p)
-		} else {
-			s.collectionLead(c, p)
 		}
 
 		// 容器拉回来了、里面一条都没有：画「没有收藏夹」那一句
@@ -477,6 +484,18 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 同一句话。
 			s.viewEmpty(c, "collection:no-results", noSearchResults)
 		default:
+			// ⚠️ **这一支是「列表自己画」**（`collectionEmptyNone` 和
+			// `collectionEmptyFailed` 两档都落这儿）。
+			//
+			// 🔴 **失败那一档也走这儿**（票 #624 评审的评论第 1 条）：列表的
+			// 失败态（一句原因 + 一个「加载失败，点此重试」）**只在
+			// `p.list.View` 里画**（`syncList` 的 `p.blocked` 那一支）——而
+			// 「没有结果」那一支不调它，于是那个重试按钮永远画不出来。
+			//
+			// ⚠️ **所以失败时绝不能画「暂无内容」/「换个词再搜一次」**：那两
+			// 句都会把重试入口盖住，而「换个词」更是错的——失败不是「这个词
+			// 不存在」，用户该**再试一次**。
+			//
 			// ⚠️ **第一页在途时，这一格由列表自己画**（画法是外面递进去的，
 			// 见 `newCollectionList` 和 `loadingCell`）：它和「没有收藏夹」那一格
 			// 是同一个出口（票 #138）。
@@ -510,9 +529,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 
 // collectionEmptyKind 是「这一页是**哪一种**空」。
 //
-// 🔴 **它是一个枚举而不是一个 bool**：这一页有两种空，而它们的**画法不同**
-// （一句是「没有收藏夹」，一句是「换个词再搜一次」）——而「头图区画在哪」
-// 问的是「是不是空」（两种都算）。
+// 🔴 **它是一个枚举而不是一个 bool**：这一页有三种空，而它们的**画法不同**
+// （一句是「没有收藏夹」、一句是「换个词再搜一次」、一句是**列表自己的失败态**）
+// ——而「头图区画在哪」问的是「是不是空」（前两种算，第三种不算）。
 //
 // ⚠️ **判据只有这一处**（`collectionEmpty`）：`viewCollection` 拿它去 switch
 // 画哪一句，而「头图区画在列表里还是列表外」也拿它判——两处各判一次的话，
@@ -526,6 +545,21 @@ const (
 	collectionEmptyNoFavorites
 	// collectionEmptyNoResults 是「搜了，词发出去了，一条都没有」。
 	collectionEmptyNoResults
+	// collectionEmptyFailed 是「这一趟拉失败了」。
+	//
+	// 🔴 **它和「没有结果」是两件事**（票 #624 评审的评论第 1 条）：
+	//
+	//	没有结果	搜的词真的不存在——用户该**换个词**
+	//	失败	网络断了 / 风控了 / 登录态过期了——用户该**再试一次**
+	//
+	// ⚠️ **判据漏了「失败」会怎样**：失败之后 `Loading` 是 false（`apply` 里
+	// 失败会清掉它），于是「Loaded == 0 && !Loading」成立——落进「没有结果」
+	// 那一支。而那一支**不调 `p.list.View`**，于是**列表的失败态（那个
+	// 「加载失败，点此重试」按钮）永远画不出来**。
+	//
+	// 用户看到的是「暂无内容」，**没有重试的入口**——而网络类的失败等一会儿
+	// 自己就好了，用户却只能去改搜索词。
+	collectionEmptyFailed
 )
 
 // collectionEmpty 报这一页是**哪一种**空。
@@ -533,12 +567,22 @@ const (
 // ⚠️ **判据是 MediaCount 为 0**，不是「列表此刻一行都没有」：后者在翻页加载的
 // 那一瞬间也为真，那样会让整页内容闪一下空状态（用户点进收藏夹、列表转了
 // 两帧、中间整个内容区变成一句「暂无内容」）。
+//
+// 🔴 **「失败」要排在「没有结果」前面**（票 #624 评审的评论第 1 条）：那两档
+// 的**共同条件**是「列表一行都没有且不在拉」，而失败之后 `Loading` 也是
+// false——不把失败单独挑出来，它就会落进「没有结果」那一支。
 func collectionEmpty(p *collectionPage, info app.CollectionInfo) collectionEmptyKind {
 	if info.Loaded && info.MediaCount == 0 {
 		return collectionEmptyNoFavorites
 	}
+	pg := p.list.Paged()
+	// 🔴 **失败先判**：它和「没有结果」共着「一行都没有且不在拉」这个条件，
+	// 而失败之后 `Loading` 也是 false。
+	if pg.Err != nil {
+		return collectionEmptyFailed
+	}
 	// 搜了、词已经发出去了、一条都没有：也是空的（画的是「换个词再搜一次」）。
-	if p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading {
+	if p.keyword != "" && pg.Loaded == 0 && !pg.Loading {
 		return collectionEmptyNoResults
 	}
 	return collectionEmptyNone
