@@ -52,19 +52,17 @@ var errExploreMissing = errors.New("这一页暂时加载不出来")
 // 传第二个的话，登录态、请求头、WBI 密钥全都不是同一份了，而症状是
 // 「登录成功了，一打开空间就 -101」。
 func (a *App) MountExplore(cli *bili.Client) {
-	mountedExplore.Store(a, cli)
+	a.mu.Lock()
+	a.exploreClient = cli
+	a.mu.Unlock()
 }
 
 // explore 返回那个客户端。没挂过是 nil（调用方返回 errExploreMissing）。
 func (a *App) explore() *bili.Client {
-	if v, ok := mountedExplore.Load(a); ok {
-		return v.(*bili.Client)
-	}
-	return nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.exploreClient
 }
-
-// mountedExplore 是「这个 App 用的是哪个 B 站客户端」。
-var mountedExplore sync.Map // *App → *bili.Client
 
 // TestOnlyAdoptLogin 装一份登录态，**只给界面层的测试用**。
 //
@@ -263,23 +261,18 @@ type UpSpace struct {
 // UpSpaceOf 是 mid 这个 UP 的头部状态。**第一次问的时候现建一个空的**：
 // 「还没加载」是正常状态，不该让调用方判 nil。
 func (a *App) UpSpaceOf(mid int64) *UpSpace {
-	key := upSpaceKey{a, mid}
-	if v, ok := mountedSpaces.Load(key); ok {
-		return v.(*UpSpace)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.spaces == nil {
+		a.spaces = make(map[int64]*UpSpace)
+	}
+	if s := a.spaces[mid]; s != nil {
+		return s
 	}
 	s := &UpSpace{app: a, mid: mid}
-	actual, _ := mountedSpaces.LoadOrStore(key, s)
-	return actual.(*UpSpace)
+	a.spaces[mid] = s
+	return s
 }
-
-// upSpaceKey 是头部状态的键。带上 App 是为了两个窗口/两次测试之间不串。
-type upSpaceKey struct {
-	app *App
-	mid int64
-}
-
-// mountedSpaces 存着每个 UP 的头部状态。
-var mountedSpaces sync.Map // upSpaceKey → *UpSpace
 
 // Mid 是这个 UP 的 id。
 func (s *UpSpace) Mid() int64 { return s.mid }
@@ -365,7 +358,13 @@ func (s *UpSpace) Load() {
 		<-done
 
 		s.mu.Lock()
+		if s.app.isClosed() {
+			s.running = false
+			s.mu.Unlock()
+			return
+		}
 		stale := !s.running
+
 		s.running = false
 		if stale {
 			// 已经有一次在路上跑着了。这一份不管。
