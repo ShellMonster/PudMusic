@@ -54,6 +54,9 @@ type biliFixture struct {
 	searched []string
 	// pagelistCalls 数分 P 列表被叫了几次——「放歌之前有没有问过」就看你叫没叫。
 	pagelistCalls int
+	// playURLCalls 数取流接口被叫了几次——「这一趟取流真的发生了没有」就靠它
+	// （票 #624：失效的条目**不该**触发这一趟，而「没触发」只有数得出来才验得到）。
+	playURLCalls int
 
 	// suggestTerms 是每个词该回的那批联想词；suggestAsked 记被问过的词（按顺序）；
 	// suggestFail 非 0 时这一路一律回这个业务 code（造「拉不到」）。
@@ -395,6 +398,9 @@ func (f *biliFixture) setViewPoints(points []any) {
 func (f *biliFixture) servePlayURL(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.searchCids = append(f.searchCids, r.URL.Query().Get("cid"))
+	// ⚠️ **数取流接口被问了几次**（票 #624）：失效的条目**不该**触发这一趟
+	// ——而「没触发」只有数得出来才验得到。
+	f.playURLCalls++
 	f.mu.Unlock()
 
 	writeBiliJSON(w, map[string]any{
@@ -410,6 +416,15 @@ func (f *biliFixture) servePlayURL(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	})
+}
+
+// playURLHits 报取流接口被问了几次。
+//
+// ⚠️ **给测试用**：它是「失效的条目没有白跑一趟取流」那一条的判据（票 #624）。
+func (f *biliFixture) playURLHits() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.playURLCalls
 }
 
 func (f *biliFixture) mediaURL() string {

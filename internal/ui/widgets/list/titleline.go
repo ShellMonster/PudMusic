@@ -2,7 +2,7 @@ package list
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	inkpkg "github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
@@ -53,6 +53,63 @@ func LiveTag(c *ui.Context) {
 		Padding(space.Px2, space.Px6).SingleLine()
 }
 
+// InvalidLabel 是那枚「已失效」小标签上的字。
+//
+// ⚠️ **导出的**：界面层那一组 E2E 测试要认得这一枚（Tester 认元素的唯一凭据
+// 就是文字和 Label），而标签的画法在这一处——两处各写一遍字的话，改一边
+// 另一边对不上。
+const InvalidLabel = "已失效"
+
+// invalidTagRadius 是「已失效」那枚小标签的圆角：和「现场」那枚同一档
+// （两个都是小胶囊，不跟主题圆角走）。
+const invalidTagRadius = 4
+
+// InvalidTag 画那枚「已失效」小标签。
+//
+// # 为什么它是**次要色**而不是主色
+//
+// 主色在本项目里是「正在放」那一行（`rowColors`）——用户随时要认的那一件。
+// 而失效是「这一行放不了了」：**它是常态**（收藏夹里躺着一个失效条目很常见），
+// 不该抢主色。抢了的话用户会以为那一行是「正在放」。
+//
+// ⚠️ **底比字浅**（不是反过来）：这一枚要和那一行的**灰字**分开——那行字是
+// 次要色，这一枚要是「底深字浅」，那两个字就糊在底里读不出来（实测：那
+// 样裁剪放大看，标签像一块脏斑而不是一枚标签）。
+//
+// 所以：底 = 次要色和背景混出来的**淡灰**，字 = **次要色**（比底深）。
+//
+// invalidTagColors 是那枚标签的**字色和底色**。
+//
+// 🔴 **它是一个函数**：画法和测试**共用这一份**——测试自己算一遍的话，
+// 算的就不是画面上那个颜色了（而「测试算的和画的不是同一个」正是那种
+// 一路绿过的错）。
+//
+// ⚠️ **字用 `ink.Ensure` 压到 4.5:1**（WCAG AA，正文那一档）：那两个字是
+// **11px** 的小字，而「次要色配淡灰底」在浅色下只有 **3.95:1**——达不到
+// 要求（`TestTheInvalidTagKeepsItsContrast` 钉着这一条）。`Ensure` 按底色
+// 的亮度往黑或往白混，达标就原样返回，所以**深色那一档它不动**（本来就够）。
+func invalidTagColors(t *ui.Theme) (text, bg ui.Color) {
+	bg = t.Background.Mix(t.TextMuted, 0.16)
+	text = inkpkg.Ensure(t.TextMuted, bg, inkpkg.TextContrast)
+	return text, bg
+}
+
+// InvalidTag 画那枚「已失效」小标签。
+//
+// ⚠️ **底比字浅**（不是反过来）：这一枚要和那一行的**灰字**分开——那行字是
+// 次要色，这一枚要是「底深字浅」，那两个字就糊在底里读不出来（实测：那
+// 样裁剪放大看，标签像一块脏斑而不是一枚标签）。
+//
+// ⚠️ **淡灰那一档不是「纯背景」**：纯背景的话标签就没有边界，看着就是一行
+// 字里多了两个字，而不是「一枚标签」。
+func InvalidTag(c *ui.Context) {
+	t := c.Theme()
+	text, bg := invalidTagColors(t)
+	ui.Text(c, InvalidLabel).FontSize(scale.Font(c, scale.Size11)).
+		TextColor(text).Background(bg).Radius(invalidTagRadius).
+		Padding(space.Px2, space.Px6).SingleLine()
+}
+
 // ownerRow 是「画副标题那一行」要的那些东西。
 //
 // # ⚠ 「画出来的那一句」和「那个人」是两样
@@ -81,6 +138,14 @@ type ownerRow struct {
 	grow bool
 	// acts 是这个列表会做的操作（`OpenOwner` 在里面）。
 	acts Actions
+	// invalid 是「这一条已经失效」（票 #624）。
+	//
+	// ⚠️ **它画在 UP 名前面**：它是这一行的**状态**，而 UP 名是**这一首是谁**
+	// ——状态在前，读起来是「这一首已经失效 · 某某」。
+	//
+	// ⚠️ **它自己也会让那一行出现**：失效的条目常常既没有 UP 名也不是
+	// 「现场」，而判据在外一层（`card.go`）——那里看的是 `m.Invalid`。
+	invalid bool
 }
 
 // OwnerTipText 是那句提示：和播放条上那一枚**一个说法**（`internal/ui/playbar.go`
@@ -94,13 +159,32 @@ type ownerRow struct {
 // 那种错在画面上只是「提示里那句话怪怪的」。
 func OwnerTipText(name string) string { return "打开 " + name + " 的空间" }
 
+// ownerLineShown 报副标题那一行**要不要画**。
+//
+// 🔴 **全仓只有这一处判**（票 #624）：列表那一档和紧凑那一档都调它。
+//
+// ⚠️ **失效的条目也算「要画」**：「已失效」是那一行**唯一**告诉用户
+// 「这一首放不了」的东西，而失效的条目常常既没有 UP 名也不是「现场」——
+// 于是原来那个「有 UP 名或者有现场标签才画」的判据会让它什么都不画，
+// 用户看到的是一行灰字（灰是灰了，但**没说是为什么**）。
+//
+// ⚠️ 而两处各判一次的话，改判据就会漏一处——漏掉的那一处症状是
+// 「紧凑那一档不标失效」：用户切到紧凑就看不出哪一首坏了。
+func ownerLineShown(sh Shown, invalid bool) bool {
+	return sh.Owner != "" || sh.Live || invalid
+}
+
 // ownerLine 画副标题那一行：现场标签（有就画）+ 副标题文字。
 //
 // 🔴 **有编号时 UP 名是一枚可点的名字型链接**（票 #360）：点了进那个 UP 的空间。
 // **没有编号时照旧画成普通字**——名字照样显示，只是点不动（B 站有些接口只给
 // 名字不给编号，见 `app.Item.ArtistMid`）。
 func ownerLine(c *ui.Context, o ownerRow) {
-	row := ui.Row(c).Gap(space.Px6).AlignItems(ui.Center)
+	// ⚠️ **缝是 8 不是 6**（票 #624）：「已失效」那枚标签和 UP 名之间，
+	// 6 像素（`space.Px6`）太挤——裁剪放大看，标签的圆角几乎贴着 UP 名那个
+	// 「U」，看着像连成一片。而「现场」那枚标签和 UP 名之间也是 6，那一枚
+	// 是主色淡底（边界清楚），这一枚是淡灰（边界弱），需要的缝更多。
+	row := ui.Row(c).Gap(space.Px8).AlignItems(ui.Center)
 	if o.maxW > 0 {
 		row = row.MaxWidth(o.maxW)
 	}
@@ -108,6 +192,12 @@ func ownerLine(c *ui.Context, o ownerRow) {
 		row = row.Grow(1)
 	}
 	row.Children(func() {
+		// 🔴 **失效的标签在最前面**（票 #624）：它是这一行的**状态**，
+		// 而 UP 名是**这一首是谁**——状态在前，读起来是「这一首已经失效 ·
+		// 某某」。
+		if o.invalid {
+			InvalidTag(c)
+		}
 		if o.shown.Live {
 			LiveTag(c)
 		}
@@ -217,8 +307,11 @@ func ownerButton(c *ui.Context, text, tip string, size, lh float32, color ui.Col
 }
 
 // liveTagText 是标签字色：强调色压在它自己的 14% 淡底上，浅色下不够 4.5:1 就压深。
+//
+// ⚠️ **用的是 `ink.TextContrast` 那个数**（不是一个写死的 4.5）：那个数是
+// 「正文」那一档的要求（WCAG AA，1.4.3），写死的话改了标准这一处不跟着改。
 func liveTagText(t *ui.Theme) ui.Color {
-	return ink.Ensure(t.Accent, t.Background.Mix(t.Accent, 0.14), 4.5)
+	return inkpkg.Ensure(t.Accent, t.Background.Mix(t.Accent, 0.14), inkpkg.TextContrast)
 }
 
 // OwnerLine 画副标题那一行（**导出**给界面层里自己画行 / 画卡片的那几处用）。

@@ -315,3 +315,25 @@ func TestAnItemWithoutAPartStillCannotBeDownloadedSynchronously(t *testing.T) {
 		t.Errorf("它还是进了下载队列（%d 项）", n)
 	}
 }
+
+// TestAnInvalidEntryIsNotDownloaded 钉住「下载那一路也滤」。
+//
+// 🔴 **这一条是审查补上的**（票 #624 的评审第 3 条）：下载那一路原先只判
+// 「有没有音频流」，而失效的条目照样能进下载队列——于是它先问一次分 P
+// （`/x/player/pagelist`，一趟网络往返），再进队列让下载器去取流（**又一趟**
+// 带签名的往返）。**两趟白跑**，而那一首的稿件已经被删了。
+func TestAnInvalidEntryIsNotDownloaded(t *testing.T) {
+	f := newCollectionFixture(t)
+	a := downloadApp(t, f)
+
+	_, err := a.downloadableItem(context.Background(), bili.Media{
+		ID: 1293494, Type: bili.MediaVideo, Bvid: "BVdead", Title: "失效的那首", Attr: 1,
+	})
+	if err == nil {
+		t.Fatal("失效的那一条被排进了下载队列")
+	}
+	var u *Unplayable
+	if !errors.As(err, &u) || u.Kind != UnplayableInvalid {
+		t.Errorf("拒它的理由是 %v，want 一个 UnplayableInvalid", err)
+	}
+}
