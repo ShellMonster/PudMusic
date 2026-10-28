@@ -34,6 +34,8 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/guard"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
@@ -146,6 +148,7 @@ type pagedRows struct {
 
 	fetch libraryFetcher
 	acts  list.Actions
+	pager *list.Pager[libraryRow, libraryQuery]
 
 	// query 取「这一页要用什么条件去拉」。**由 load 在界面线程上调**，返回值是
 	// 一份快照（见 libraryQuery）。做成一个回调而不是两个字段，是因为它读的那几样
@@ -234,13 +237,31 @@ func newPagedRows(render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui
 	p := &pagedRows{
 		render: render, menu: menu,
 		fetch: fetch, acts: acts, query: query,
+		pager: list.NewPager[libraryRow, libraryQuery](func(ctx context.Context, page, loaded int, q libraryQuery) (list.PagerPage[libraryRow], error) {
+			rows, more, err := fetch(ctx, page, loaded, q)
+			return list.PagerPage[libraryRow]{Items: rows, HasMore: more}, err
+		}, func(row libraryRow) string { return row.ID }, query),
+
 		sel: -1,
 		// 「还有没有」要等有人问过才知道，在那之前一律当作还有——不然第一帧会以为
 		// 到底了，连页脚那一行都不画。
 		hasMore: true,
 		seen:    map[string]bool{},
 	}
-	// 「↑ 到顶时把焦点交回侧栏」那一档（票 #245 的 E4）。理由同
+	p.pager.SetApply(func(pg list.PagerPage[libraryRow]) int {
+		p.rows = append(p.rows, pg.Items...)
+		p.page = p.pager.Status().Page
+		p.hasMore, p.loading, p.err, p.blocked = pg.HasMore, false, nil, false
+		p.rev++
+		return len(pg.Items)
+	})
+	p.pager.SetFailureHandler(func(_ int, _ list.PagerTrigger, err error) {
+		st := p.pager.Status()
+		p.page, p.loading, p.err, p.blocked = st.Page, false, err, true
+		if p.acts.Notify != nil {
+			p.acts.Notify("加载更多失败："+bili.Friendly(err), notice.Danger)
+		}
+	})
 	// `widgets/list` 的 `New`。
 	p.keys.SetUpAtTop(acts.FocusOut)
 	p.draw = guard.Wrap(p.view, p.onPanic)
@@ -283,19 +304,15 @@ func (p *pagedRows) Status() PagedStatus {
 //
 // ⚠️ 只能由界面线程调。
 func (p *pagedRows) Reload() {
-	p.stop() // 含 p.loading = false
-	p.gen++
 	p.rows = nil
-	p.seen = map[string]bool{}
 	p.page = 0
 	p.hasMore = true
 	p.err = nil
 	p.blocked = false
+	p.loading = false
 	p.rev++
 	p.ScrollTop()
-	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的，那时候不一定还
-	// 有下一帧。
-	p.load(trigFirstRender)
+	p.pager.Reload()
 }
 
 // ScrollTop 回到顶上。切路由和点回顶按钮都走它。
@@ -416,18 +433,10 @@ func (p *pagedRows) onPanic(rec any) {
 // 而恢复之后的第一帧 `Visible()` 报的还是满屏之前的旧行号，「末尾还在画面外」
 // 那个判断会晚一帧才成立。
 func (p *pagedRows) Sync(c *ui.Context) {
-	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，不唤醒就是
-	// 「结果到了、画面停在旧帧」（实测 0 帧刷新）。
-	p.setWake(c.Services())
-
-	// 先收后台投回来的页再画：这样这一帧画的就是**已经加上**的那几行。
-	p.adopt()
-
-	// ① 首帧。**必须在画之前发出去**：画完再发的话这一帧画出来的是「这里还没有
-	// 内容」，要等这一页回来才换掉，用户第一眼看到的是空的。
-	if p.page == 0 {
-		p.load(trigFirstRender)
-	}
+	p.pager.Sync(c.Services())
+	st := p.pager.Status()
+	p.page, p.hasMore = st.Page, st.HasMore
+	p.loading, p.err, p.blocked = st.Loading, st.Err, st.Blocked
 }
 
 // view 是真的画法，View 是它外面那道 recover。
@@ -807,8 +816,7 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 			if p.blocked {
 				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。
 				if flatButton(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					p.blocked = false
-					p.load(trigRetry)
+					p.pager.Retry()
 				}
 				return
 			}
@@ -1076,11 +1084,11 @@ func (p *pagedRows) afterFrame() {
 		// 末尾还在画面外。什么都不做，等用户滚过去。
 	case first > 0:
 		// ② 滚到底：哨兵行进了画面，而且列表不在顶上（是用户滚过去的）。
-		p.load(trigScrollEnd)
+		p.pager.Load(list.PagerScrollEnd)
 	default:
 		// ③ 拉完之后再检一次：还在顶上、末尾已经画在屏幕上 = 全部内容一屏摆得下。
 		// **这一支就是「筛选后只剩两页」的救命的那一支。**
-		p.load(trigRefill)
+		p.pager.Load(list.PagerRefill)
 	}
 }
 
