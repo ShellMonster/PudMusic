@@ -629,6 +629,9 @@ type Shell struct {
 	// queueRows 是这一帧去重之后要画的那几行（连同它们在队列里的下标）。
 	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。
 	queueRows []queueRow
+	// queueRowsRevision 是 queueRows 对应的队列快照版本。revision 不变时复用
+	// 同一份派生行，当前/停止状态仍在绘制前按当前 State 更新。
+	queueRowsRevision uint64
 
 	// queueClearOpen 是「清空播放列表」那道二次确认开着没有（抽屉头右上角那枚
 	// 垃圾桶，见 queue_drawer.go 的 viewQueueClearConfirm）。

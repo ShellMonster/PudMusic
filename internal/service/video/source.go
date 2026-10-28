@@ -17,6 +17,7 @@ type Source struct {
 	done   chan struct{}
 	mu     sync.Mutex
 	err    error
+	close  sync.Once
 }
 
 // Err 在 Frames 关闭后给出终止原因（正常读完为 nil）。
@@ -24,11 +25,7 @@ func (s *Source) Err() error { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
 
 // Close 停掉解码并等线程退出。
 func (s *Source) Close() {
-	select {
-	case <-s.quit:
-	default:
-		close(s.quit)
-	}
+	s.close.Do(func() { close(s.quit) })
 	<-s.done
 }
 

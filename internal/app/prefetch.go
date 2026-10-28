@@ -459,6 +459,9 @@ func (a *App) invalidatePrefetch() {
 	e := a.prefetch
 	a.prefetch = nil
 	a.prefetchGen++
+	// 失效意味着下一首的身份已经重新决定。失败抑制只属于旧目标，不能
+	// 压住新目标的预取；这同时覆盖队列变化和手动下一首。
+	a.prefetchOff = false
 	a.prefetchMu.Unlock()
 
 	// 🔴 **在途的那一趟掐掉**：没人要它了，而它还占着一条连接。

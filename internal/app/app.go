@@ -664,7 +664,9 @@ type App struct {
 	// ⚠️ **它有自己的锁（`commentsMu`），不在 `a.mu` 里**：写它的是网络往返回来的
 	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
 	// 同 `likeMu` / `partsMu`。
-	commentsMu sync.Mutex
+	// commentsMu sync.Mutex
+	commentsMu     sync.Mutex
+	commentsCancel context.CancelFunc
 	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
 	commentsSlot string
 	// comments 是已经拿到的那些评论（主列表）。
@@ -1334,7 +1336,6 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		}
 		return err
 	}
-
 	a.mu.Lock()
 	old := a.player
 	// 倍率和音量一样是「用户选的那个值」，换歌之后照旧——见 App.rate 那段。
@@ -1343,6 +1344,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 记的还是用户设的值（取消静音放回去的就是它）。
 	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetEQ(a.eqGains)
 	a.applyFadeInLocked(p)
+	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
