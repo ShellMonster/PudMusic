@@ -1,6 +1,6 @@
 package ui
 
-// 播放条上那一句错的「**详情层**」（票 #320）。
+// 播放条上那一句错的「**详情层**」（票 #320；票：左下角出错那三行太碎）。
 //
 // # 这一组盯的是「用户能不能读到完整那一句」
 //
@@ -9,10 +9,14 @@ package ui
 // 播放条上那一行只有 140 像素宽（1200 宽的窗口，实测）——于是它被压成一行
 // 省略号，用户常常只读到半句话。
 //
+// 🔴 **那一句话从那一行搬到了播放键上**（票：左下角出错那三行太碎）：出错时
+// 播放键那一枚变成**红色的「重试」键**，而完整那一句在**它的**悬停提示和
+// **它的**「详情」面板里。
+//
 // 这一组断三件事：
 //
-//  1. **点得开**：点那一句红字，出来一块面板，里面是完整那一句（多行排开）。
-//  2. **播放条一个像素都没动**：面板是浮层，那一行还是一行，播放条还是 76 高。
+//  1. **点得开**：点播放键那一枚，出来一块面板，里面是完整那一句（多行排开）。
+//  2. **播放条一个像素都没动**：面板是浮层，播放条还是 76 高。
 //  3. **错没了面板就收**：不然下一句错一上来，面板是开着的。
 
 import (
@@ -52,17 +56,19 @@ func errBarTester(t *testing.T, st *app.State, width, height int, dark bool) (*m
 	return tt, b.s
 }
 
-// openErrDetail 点开播放条上那一句错，返回点开之后那一帧。
+// openErrDetail 点开播放条上那个**出错键**，返回点开之后那一帧。
 //
-// ⚠️ **点的是那一句红字的最左边**：那一句的盒子是整行那么宽（`Grow(1)`），
-// 而画出来的字只有一百多像素——点盒子中间会落在字后面的空白上。
+// 🔴 **锚点从「那一句红字」换成了「播放键那一枚」**（票：左下角出错那三行太
+// 碎）：错误文案从那一列搬到了播放键上，而完整那一句在**那一枚**的悬停提示
+// 和「详情」面板里。
 func openErrDetail(t *testing.T, tt *mygoui.Tester, msg string) {
 	t.Helper()
-	r, ok := tt.Find("打不开：" + msg)
+	_ = msg
+	r, ok := tt.Find(errPlayKeyLabel)
 	if !ok {
-		t.Fatalf("画面上没有那一句错：%q", tt.Texts())
+		t.Fatalf("画面上没有那个出错键：%q", tt.Texts())
 	}
-	tt.ClickAt(r.X+4, r.Y+r.H/2)
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 }
 
@@ -72,7 +78,7 @@ func openErrDetail(t *testing.T, tt *mygoui.Tester, msg string) {
 // 上那一句的**文本节点里也是完整那一句**（只是画的时候被截了），所以「它在
 // 树上」证明不了任何事——要证明的是它**排开了、看得全**。
 func TestClickingTheErrorOpensTheWholeSentence(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	// 还没点：面板不在。
@@ -97,14 +103,14 @@ func TestClickingTheErrorOpensTheWholeSentence(t *testing.T) {
 		t.Errorf("面板里那句话只有 %.1f 高——它被压成一行了（= 又截了一次）：%q",
 			body.H, tt.Texts())
 	}
-	// 🔴 **它排在那一行上面**（不是压着它）：面板是锚在那一句上的一个气泡，
-	// 底边在那一句的上沿——压住了它自己解释的那一行，就成了「说了有话看不见」。
-	bar, ok := tt.Find("打不开：" + errLongSentence)
+	// 🔴 **它排在那个出错键上面**（不是压着它）：面板是锚在那一枚上的一个气泡，
+	// 底边在那一枚的上沿——压住了它自己解释的那一枚，就成了「说了有话看不见」。
+	bar, ok := tt.Find("这一首放不出来，出错了")
 	if !ok {
-		t.Fatalf("画面上没有那一句错：%q", tt.Texts())
+		t.Fatalf("画面上没有那个出错键：%q", tt.Texts())
 	}
 	if panel.Y+panel.H > bar.Y {
-		t.Errorf("详情面板压着自己那一行：面板底 %.1f，那一行顶 %.1f",
+		t.Errorf("详情面板压着自己那一枚：面板底 %.1f，那一枚顶 %.1f",
 			panel.Y+panel.H, bar.Y)
 	}
 }
@@ -115,25 +121,34 @@ func TestClickingTheErrorOpensTheWholeSentence(t *testing.T) {
 // 挤进了播放条的布局里，播放条就会被撑成两行，而**症状是静默的**：最后一行
 // 被 76 高裁掉，界面上看不出坏了（文本节点还在，测试也还找得到它）。
 func TestThePlayBarDoesNotMoveWhenTheDetailOpens(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
-	before, ok := tt.Find("打不开：" + errLongSentence)
+	before, ok := tt.Find("这一首放不出来，出错了")
 	if !ok {
-		t.Fatalf("画面上没有那一句错：%q", tt.Texts())
+		t.Fatalf("画面上没有那个出错键：%q", tt.Texts())
 	}
 	openErrDetail(t, tt, errLongSentence)
-	after, ok := tt.Find("打不开：" + errLongSentence)
+	after, ok := tt.Find("这一首放不出来，出错了")
 	if !ok {
-		t.Fatalf("点开之后那一句错不见了：%q", tt.Texts())
+		t.Fatalf("点开之后那个出错键不见了：%q", tt.Texts())
 	}
 	if before != after {
-		t.Errorf("打开详情之后播放条上那一句动了：%v → %v", before, after)
+		t.Errorf("打开详情之后播放条上那一枚动了：%v → %v", before, after)
 	}
-	// 🔴 **还是一行**：一行 12 号字是 14 像素高。两行（28）就说明它换行了，
-	// 而 76 高的播放条装不下第二行。
-	if after.H > 20 {
-		t.Errorf("播放条上那一句错高 %.1f——它换行了（76 高的播放条装不下两行）", after.H)
+	// 🔴 **播放条还是 76 高**：面板是浮层，它挤进播放条的布局里的话，播放条就
+	// 会被撑开，而**症状是静默的**：最后一行被 76 高裁掉，界面上看不出坏了
+	//（文本节点还在，测试也还找得到它）。
+	//
+	// ⚠️ **播放条摆在窗口底下**（见 `errBarTester` 那段注释），所以那个 y 是
+	// **从窗口顶边**量的——播放条的上沿在 `height - playbarHeight`。
+	barTop := float32(320) - playbarHeight
+	if after.Y+after.H > 320 {
+		t.Errorf("打开详情之后那一枚掉出窗口了（下边在 y=%.1f）", after.Y+after.H)
+	}
+	if after.Y < barTop {
+		t.Errorf("打开详情之后那一枚跑到播放条上面去了（顶 %.1f，播放条上沿 %.1f）",
+			after.Y, barTop)
 	}
 }
 
@@ -142,7 +157,7 @@ func TestThePlayBarDoesNotMoveWhenTheDetailOpens(t *testing.T) {
 // ⚠️ **不收的话**：用户重试成功了，播放条上那一行没了，而**面板还开着**——
 // 它上面写着「打不开」，而其实能播了。下一句错一上来，面板也是开着的。
 func TestTheDetailClosesWhenTheErrorIsGone(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -172,7 +187,7 @@ func TestTheDetailClosesWhenTheErrorIsGone(t *testing.T) {
 //
 // 这一条钉的是「焦点在别处时关得掉」这一档：点开之后焦点在锚点那一行上。
 func TestTheDetailClosesWhenTheUserPressesEscape(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -194,7 +209,7 @@ func TestTheDetailClosesWhenTheUserPressesEscape(t *testing.T) {
 // 和 `OverlayShortcut(0, KeyEscape)`），而「点外面」那一条**没有**焦点上的
 // 前提——指针点在哪就是哪。
 func TestTheDetailClosesWhenTheUserClicksOutside(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -219,14 +234,14 @@ func TestTheDetailClosesWhenTheUserClicksOutside(t *testing.T) {
 // ⚠️ **判据是「同一句话在画面上出现了两次」**：一次是播放条上那句（画出来是
 // 截断的），一次是提示框里那句（完整的）。
 func TestHoveringTheErrorStillShowsTheWholeSentence(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
-	r, ok := tt.Find("打不开：" + errLongSentence)
+	r, ok := tt.Find(errPlayKeyLabel)
 	if !ok {
-		t.Fatalf("画面上没有那一句错：%q", tt.Texts())
+		t.Fatalf("画面上没有那个出错键：%q", tt.Texts())
 	}
-	tt.Move(r.X+4, r.Y+r.H/2)
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 
 	n := 0
@@ -235,8 +250,8 @@ func TestHoveringTheErrorStillShowsTheWholeSentence(t *testing.T) {
 			n++
 		}
 	}
-	if n < 2 {
-		t.Errorf("悬停之后提示框里没有完整那一句（画面上只出现过一次）：%q", tt.Texts())
+	if n < 1 {
+		t.Errorf("悬停之后提示框里没有完整那一句：%q", tt.Texts())
 	}
 }
 
@@ -246,7 +261,7 @@ func TestHoveringTheErrorStillShowsTheWholeSentence(t *testing.T) {
 // 面板开着的时候指针移开又移回来，提示框就会盖在那块面板上——屏幕上是一块
 // 小提示压着一块面板，读起来像坏了。
 func TestTheTooltipDoesNotStackOnTopOfTheDetail(t *testing.T) {
-	st := app.State{Err: errLongSentence}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -254,20 +269,31 @@ func TestTheTooltipDoesNotStackOnTopOfTheDetail(t *testing.T) {
 	// 指针移开，再移回来（移开是为了让提示框那一档「按过它了就收起」复位）。
 	tt.Move(600, 120)
 	tt.Frame()
-	r, ok := tt.Find("打不开：" + errLongSentence)
+	r, ok := tt.Find(errPlayKeyLabel)
 	if !ok {
-		t.Fatalf("画面上没有那一句错：%q", tt.Texts())
+		t.Fatalf("画面上没有那个出错键：%q", tt.Texts())
 	}
-	tt.Move(r.X+4, r.Y+r.H/2)
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 
+	// 🔴 **提示框没挂着**：面板开着的时候，那一枚上的提示框**不挂**（理由见
+	// `viewErrorPlayKey` 里那段注释）——两块摆在同一个位置，而它们说的是同一
+	// 句话。
+	//
+	// ⚠️ **判据是「带前缀的那一句出现了 0 次」**：提示框里给的是
+	// 「打不开：」+完整那一句，而面板里给的是**分开的两块**（「打不开」和正文）。
+	// 所以面板开着的时候，画面上**不该**有「打不开：完整那一句」那一整串。
 	n := 0
 	for _, s := range tt.Texts() {
 		if s == "打不开："+errLongSentence {
 			n++
 		}
 	}
-	if n != 1 {
-		t.Errorf("面板开着的时候提示框还挂着（同一句话出现了 %d 次）：%q", n, tt.Texts())
+	if n != 0 {
+		t.Errorf("面板开着的时候提示框还挂着（带前缀的那一句出现了 %d 次）：%q", n, tt.Texts())
+	}
+	// 面板本身还在（它没被提示框顶掉）。
+	if _, ok := tt.Find("错误详情"); !ok {
+		t.Errorf("面板不见了：%q", tt.Texts())
 	}
 }

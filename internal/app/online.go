@@ -1844,6 +1844,20 @@ func (a *App) failOnline(gen int, it Item, branch string, err error, stage strin
 	if stage != "" {
 		detail = fmt.Sprintf("卡在「%s」这一步：%s", stage, msg)
 	}
+	// 🔴 **记下失败的那一首**：它是**和正在放的那一首不同的两首**（理由见
+	// `State.FailedTitle`）。取流失败时播放器压根没装上，而 `a.title` 是**流
+	// 装上之后**才写的——所以不记这一份，界面上那一列显示的会是**上一首**，
+	// 用户读到的是「这一首正在放，但它打不开」。
+	//
+	// ⚠️ **它和 `setErrTextDetail` 落在同一次锁里**（`setErr` 那一族要持锁，
+	// 见 `queue.go`）：分两次锁的话，中间那道缝里别人清一次错，
+	// `Err` 和 `FailedTitle` 就对不上了。
+	//
+	// ⚠️ **作者名是队列项里就有的**（`Item.Artist`）——不用再问一次接口。
+	a.mu.Lock()
+	a.failedTitle = it.Title
+	a.failedArtist = it.Artist
+	a.mu.Unlock()
 	a.setErrTextDetail(msg, detail, bili.Recoverable(err))
 }
 

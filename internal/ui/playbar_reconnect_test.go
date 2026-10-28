@@ -68,8 +68,10 @@ func TestTheErrorWinsOverTheReconnectingLine(t *testing.T) {
 	if tt.HasText("正在重连") {
 		t.Errorf("出错了还在说「正在重连」：%q", tt.Texts())
 	}
-	if !tt.HasText("在线流拉不下来了") {
-		t.Errorf("失败之后界面上没有那句话：%q", tt.Texts())
+	// 🔴 **出错的信号是播放键那一枚**（票：左下角出错那三行太碎）：错误文案从
+	// 那一列里搬走了，而「出错了」长在播放键上。
+	if !tt.HasText(errPlayKeyLabel) {
+		t.Errorf("失败之后播放键没有变成那个出错的键：%q", tt.Texts())
 	}
 }
 

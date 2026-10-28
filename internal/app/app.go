@@ -131,6 +131,28 @@ type State struct {
 	// 空串 = 和 `Err` 一样（绝大多数错都是这样）。
 	ErrDetail string
 
+	// FailedTitle 是**放不出来的那一首**的歌名，FailedArtist 是它的作者。
+	//
+	// 🔴 **它们和 `Title` / `Artist` 是两首**（票：左下角出错那三行）：
+	// `Title` / `Artist` 是**正在放的那一首**，而这两个是**失败的那一首**。
+	//
+	// ⚠️ **为什么必须分开**：取流失败的时候播放器压根没装上（`a.player` 仍是
+	// nil），而 `a.title` / `a.artist` 是**流装上之后**才写的——于是出错那一
+	// 栏显示的本来是**上一首**：
+	//
+	//	冷启动就失败			Title = ""（空）
+	//	上一首在放，点第二首失败	Title = "第一首"（**还在放的那首**）
+	//
+	// 第二种是用户会撞上的那个：那一列上写的是「第一首 / 它的作者」，第三行
+	// 写的是「打不开：……」——**对不上号**。用户读到的是「这一首正在放，但它
+	// 打不开」，而打不开的其实是他刚点的**另一首**。
+	//
+	// ⚠️ **没有歌的时候它就是空串**：那不是「显示正在放的那一首」，是「什么
+	// 都没说」——那一列本来就空着（`viewTrackText` 的「没有歌不摆」）。
+	FailedTitle string
+	// FailedArtist 是失败那一首的作者（UP 名）。空串 = 那一首没有作者名。
+	FailedArtist string
+
 	// Loading 是「**正在取流**」：用户刚点了一首，在途的那一次播放还没装上
 	// 播放器。
 	//
@@ -286,6 +308,14 @@ type App struct {
 	// 界面上据此决定给不给「重试」那一枚键：给一个按了也没用的重试比不给
 	// 更糟（用户按两次发现还是那样，就不再信这个应用了）。
 	errRetryable bool
+	// failedTitle / failedArtist 是**放不出来的那一首**（理由见
+	// `State.FailedTitle`）。
+	//
+	// ⚠️ **它和 `a.title` 是两首**：`a.title` 是正在放的那一首，而这一份是
+	// 失败的那一首——不分开的话，出错那一栏显示的是**上一首**，用户读到的是
+	// 「这一首正在放，但它打不开」。
+	failedTitle  string
+	failedArtist string
 	// pending 是「上一次用户想放的那一项」。
 	//
 	// 它是重试那一枚键的**凭据**：重试要放的还是这一首，而不是队列里
@@ -1139,7 +1169,10 @@ func (a *App) Snapshot() State {
 		SleepAfterTrack: a.sleepAfterTrack,
 		Err:             a.errText,
 		ErrDetail:       a.errDetail,
-		Loading:         a.loading,
+		// 🔴 **失败的那一首和正在放的那一首是两首**（理由见 `State.FailedTitle`）。
+		FailedTitle:  a.failedTitle,
+		FailedArtist: a.failedArtist,
+		Loading:      a.loading,
 		// 🔴 **「启动中」只在「还没有歌」的时候才为真**（见 State 里
 		// `Starting` 那段注释）：有歌的时候界面上摆的是歌名，用户看得见
 		// 应用已经准备好了。
@@ -1278,6 +1311,12 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		// 连流都没有（它在你的磁盘上，坏了就是坏了）。留着上一句的
 		// `errRetryable` 的话，界面上会给出一枚按了也没用的「重试」。
 		a.errRetryable = false
+		// 🔴 **「失败的那一首」也一起清**：用户现在面对的是**这个本地文件**，
+		// 而那两栏里可能还留着上一首**在线**歌的名字——不清的话，那一列显示
+		// 的是「第二首 / 它的作者」，第三句却是「打不开本地文件」，三句凑不
+		// 成一件事（理由见 `State.FailedTitle`）。
+		a.failedTitle = ""
+		a.failedArtist = ""
 		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
 		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
 		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。

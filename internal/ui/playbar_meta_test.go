@@ -251,9 +251,13 @@ func TestTheTextColumnDoesNotSquashTheTitle(t *testing.T) {
 				t.Errorf("宽度 %d：歌名（y=%.1f 高 %.1f）被 %d 高的播放条裁了",
 					width, title.Y, title.H, playbarHeight)
 			}
-			// 三行都得在播放条里：UP 名那一行和错误那一行是这一票新加的，
-			// 它们被 76 高裁掉的话用户看到的是「有话说了却看不见」。
-			for _, text := range []string{"一个名字很长的 UP 主名字", "打不开：连不上 B 站这条音频流了"} {
+			// 🔴 **出错时那一列还是两行**（歌名 + UP 名）（票：左下角出错那三行
+			// 太碎）：错误文案搬到了**播放键**上，而那一列写的是**失败的那一首**
+			// （理由见 `State.FailedTitle`）。
+			//
+			// ⚠️ **它们都得在播放条里**：被 76 高裁掉的话用户看到的是「有话说了
+			// 却看不见」。
+			for _, text := range []string{"一个名字很长的 UP 主名字"} {
 				r, ok := tt.Find(text)
 				if !ok {
 					t.Fatalf("宽度 %d：画面上找不到 %q：%q", width, text, tt.Texts())
@@ -263,15 +267,26 @@ func TestTheTextColumnDoesNotSquashTheTitle(t *testing.T) {
 						width, text, r.Y, r.H, playbarHeight)
 				}
 			}
+			// 那一列上**不该**有第三行（错误文案搬走了）。
+			for _, text := range tt.Texts() {
+				if strings.HasPrefix(text, "打不开") {
+					t.Errorf("宽度 %d：那一列上还有那句被截碎的错误文案 %q——"+
+						"它该搬到播放键上去", width, text)
+				}
+			}
 		})
 	}
 }
 
-// TestTheErrorSitsUnderTheOwnerLine 钉住三行的**顺序**：歌名 / UP 名 / 错误。
+// TestTheOwnerSitsUnderTheTitle 钉住两行的**顺序**：歌名 / UP 名。
 //
-// 顺序反了的话用户读到的是「先看到一句打不开，再看到是谁的歌」——而他最先要
-// 知道的是「出了什么事」。
-func TestTheErrorSitsUnderTheOwnerLine(t *testing.T) {
+// 顺序反了的话用户读到的是「先看到是谁的歌，再看到歌名」——而他最先要知道的
+// 是「这是哪一首」。
+//
+// 🔴 **出错时那一列还是两行**（票：左下角出错那三行太碎）：错误文案搬到了
+// **播放键**上，而那一列写的是**失败的那一首**（理由见 `State.FailedTitle`）。
+// 那一列仍然只有两行——三行的话，76 高的播放条塞不下（票 #219 的教训）。
+func TestTheOwnerSitsUnderTheTitle(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "这一首歌的名字",
 		Artist: "某个 UP 主", ArtistMid: 12345,
@@ -280,18 +295,20 @@ func TestTheErrorSitsUnderTheOwnerLine(t *testing.T) {
 
 	title, okT := tt.Find("这一首歌的名字")
 	owner, okO := tt.Find("某个 UP 主")
-	errBox, okE := tt.Find("打不开：连不上 B 站这条音频流了")
-	if !okT || !okO || !okE {
-		t.Fatalf("歌名在不在 %v，UP 名在不在 %v，错误在不在 %v，画面的字：%q",
-			okT, okO, okE, tt.Texts())
+	if !okT || !okO {
+		t.Fatalf("歌名在不在 %v，UP 名在不在 %v，画面的字：%q",
+			okT, okO, tt.Texts())
 	}
 	if owner.Y < title.Y+title.H {
 		t.Errorf("UP 名 {%.1f,%.1f} 没有排在歌名 {%.1f,%.1f %.1fx%.1f} 的下面",
 			owner.X, owner.Y, title.X, title.Y, title.W, title.H)
 	}
-	if errBox.Y < owner.Y+owner.H {
-		t.Errorf("错误 {%.1f,%.1f} 没有排在 UP 名 {%.1f,%.1f %.1fx%.1f} 的下面",
-			errBox.X, errBox.Y, owner.X, owner.Y, owner.W, owner.H)
+	// 🔴 **那一列上不该有第三行**（错误文案搬走了）：它是三行里最挤的一行，
+	// 而 76 高的播放条放不下三行（票 #219 的教训）。
+	for _, s := range tt.Texts() {
+		if strings.HasPrefix(s, "打不开") {
+			t.Errorf("那一列上还有那句被截碎的错误文案 %q——它该搬到播放键上去", s)
+		}
 	}
 }
 

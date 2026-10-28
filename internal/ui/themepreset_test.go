@@ -188,9 +188,12 @@ func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
 	}
 }
 
-// TestTheSelectedSideItemUsesTheAccentSoftBase：选中的侧栏项底是强调色淡底
-// （`accentSoft`），字在这层底上仍 ≥ 4.5:1。
-func TestTheSelectedSideItemUsesTheAccentSoftBase(t *testing.T) {
+// TestTheSelectedSideItemIsSolidAndReadable：选中的侧栏项底是**实心主色底**
+// （票：用户要「深底色 + 白字」），字取 `t.AccentText`，压在主色底上仍 ≥ 3:1。
+//
+// ⚠️ **这一档换过一次**：原来是 `accentSoft` 淡底（对侧栏底 1.08:1 ~ 1.29:1，
+// 几乎分不出来），换成实心底之后那两条断言就都过时了——删掉，换成现在这两条。
+func TestTheSelectedSideItemIsSolidAndReadable(t *testing.T) {
 	for _, name := range allPresets {
 		for _, dark := range []bool{false, true} {
 			s := app.DefaultSettings("")
@@ -200,11 +203,13 @@ func TestTheSelectedSideItemUsesTheAccentSoftBase(t *testing.T) {
 				s.ThemeMode = app.ThemeModeDark
 			}
 			th := BuildTheme(s, false)
-			if got, want := flatCurrentBg(th), accentSoft(th); got != want {
-				t.Errorf("%s dark=%v：选中底 %v，该是 accentSoft %v", name, dark, got, want)
+			if got, want := flatSolidCurrentText(th), th.AccentText; got != want {
+				t.Errorf("%s dark=%v：选中项的字 %v，该是 AccentText %v", name, dark, got, want)
 			}
-			if r := presetRatio(flatCurrentText(th, true), flatCurrentBg(th)); r < 4.5 {
-				t.Errorf("%s dark=%v：选中项的字压在淡底上只有 %.2f:1", name, dark, r)
+			// 🔴 **字压在主色底上 ≥ 3:1**：图形那一档的判据（`ink` 的规矩）。
+			// 方案自带的 `onAccent` 和 applyAccent 挑的黑 / 白都该过这条。
+			if r := presetRatio(flatSolidCurrentText(th), th.Accent); r < 3 {
+				t.Errorf("%s dark=%v：选中项的字压在主色底上只有 %.2f:1", name, dark, r)
 			}
 		}
 	}

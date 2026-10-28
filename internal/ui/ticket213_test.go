@@ -175,9 +175,11 @@ func TestTheFollowPaneAndTheSidebarAreOneFamily(t *testing.T) {
 				t.Errorf("侧栏当前项的底色是 %v，分组那一列当前项的底色是 %v——"+
 					"两列的选中态得是同一个数", sideBg, paneBgRow)
 			}
-			if !nearRGBA(paneBgRow, rgbaOf(flatCurrentBg(theme)), 3) {
-				t.Errorf("分组那一列当前项的底色是 %v，want %v（accentSoft 淡底）",
-					paneBgRow, flatCurrentBg(theme))
+			// 🔴 **这一档是实心主色底**（票：用户要「深底色 + 白字」）：淡底那一
+			// 档和侧栏底色的对比度只有 1.09:1 ~ 1.29:1——几乎分不出来。
+			if !nearRGBA(paneBgRow, rgbaOf(theme.Accent), 3) {
+				t.Errorf("分组那一列当前项的底色是 %v，want %v（实心主色底）",
+					paneBgRow, theme.Accent)
 			}
 		})
 	}
@@ -214,17 +216,17 @@ func TestTheFollowPaneSelectedRowIsReadable(t *testing.T) {
 				t.Fatalf("分组那一列上没有「特别关注(1)」那一格，文字有 %q", tt.Texts())
 			}
 
-			// 底：accentSoft 淡底。
+			// 底：实心主色（票：用户要「深底色 + 白字」）。
 			curBg := modeOf(bandPixels(img, cur))
-			if !nearRGBA(curBg, rgbaOf(flatCurrentBg(theme)), 3) {
-				t.Errorf("选中那一格的底色是 %v，want %v（accentSoft 淡底）",
-					curBg, flatCurrentBg(theme))
+			if !nearRGBA(curBg, rgbaOf(theme.Accent), 3) {
+				t.Errorf("选中那一格的底色是 %v，want %v（实心主色底）",
+					curBg, theme.Accent)
 			}
-			// 字：按那层底现算的那一档。
+			// 字：主色底上读得出来的那一档（`t.AccentText`）。
 			//
 			// ⚠️ **容差是 24**：字是抗锯齿画的，量到的那个像素是字色和底色的混合。
 			curInk := farthestFrom(img, cur, curBg)
-			wantInk := flatCurrentText(theme, true)
+			wantInk := flatSolidCurrentText(theme)
 			if !nearRGBA(curInk, rgbaOf(wantInk), 24) {
 				t.Errorf("选中那一格的字色是 %v，want %v", curInk, wantInk)
 			}

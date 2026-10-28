@@ -16,7 +16,7 @@
 // 不划算。补在真正要放的那一刻（`app.runOnline` 的 `withCid`，见 video.go）。所以搜
 // 出来的条目进队列时**确实是空的 cid**，它靠的是放歌那一刻那一次问，而不是这里。
 //
-// B 站偶尔会在结果里带上 `cid`，带上了我们就用（`parseCid`），别因为「反正一般是
+// B 站偶尔会在结果里带上 `cid`，带上了我们就用（`ParseCid`），别因为「反正一般是
 // 空的」就扔掉。
 
 package bili
@@ -241,7 +241,7 @@ func (c *Client) SearchVideos(ctx context.Context, q VideoQuery) (VideoPage, err
 		}
 		out.Hits = append(out.Hits, VideoHit{
 			Bvid:     it.Bvid,
-			Cid:      parseCid(it.Cid),
+			Cid:      ParseCid(it.Cid),
 			Title:    decodeEntities(stripHTML(it.Title)),
 			Owner:    decodeEntities(it.Author),
 			Cover:    normalizeImageURL(it.Pic),
@@ -373,10 +373,14 @@ func searchHasMore(page, got, total int) bool {
 	return p < searchMaxPage && p*searchPageSize < total
 }
 
-// parseCid 把 B 站那个数字 cid 变成字符串；0 是「没有」。用字符串是因为
+// ParseCid 把 B 站那个数字 cid 变成字符串；0 是「没有」。用字符串是因为
 // `app.Item.Cid` 是字符串，在线播放比对的是字符串（`online.go` 的 `refetch`）。
 // 0 变成空串而不是 "0"——"0" 会被当成一个真的分 P id 传下去，取回来的是别人的集。
-func parseCid(cid int64) string {
+//
+// 🔴 **这一条是全仓唯一的口径**（票：首页榜单点不动）：`app.onlineItem` 造队列项
+// 时也走它。同一件事写两遍的话，两遍里有一遍忘了改，那一遍就会把 `"0"` 当成
+// 真的分 P id 传下去——症状是「这一首放不出来」，而界面上看不出是哪一步坏的。
+func ParseCid(cid int64) string {
 	if cid <= 0 {
 		return ""
 	}

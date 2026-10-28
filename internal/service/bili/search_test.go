@@ -460,8 +460,8 @@ func TestParseCid(t *testing.T) {
 		in   int64
 		want string
 	}{{29165486316, "29165486316"}, {0, ""}, {-1, ""}} {
-		if got := parseCid(c.in); got != c.want {
-			t.Errorf("parseCid(%d) = %q，want %q", c.in, got, c.want)
+		if got := ParseCid(c.in); got != c.want {
+			t.Errorf("ParseCid(%d) = %q，want %q", c.in, got, c.want)
 		}
 	}
 }

@@ -612,30 +612,29 @@ func wcagLum(c color.RGBA) float64 {
 	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
 }
 
-// TestTheCurrentRowIsAFaintTintNotASolidBlock 钉住选中态。
+// TestTheCurrentRowIsASolidBlock 钉住选中态。
 //
-// 上一条断的是「平时没有底」，这一条断的是「选中那一格有底，但不是实心主色」。
+// 上一条断的是「平时没有底」，这一条断的是「选中那一格有底」。
+//
+// 🔴 **这一档从「淡底」改成「实心主色底」**（票：用户要「深底色 + 白字」）：
+// 淡底（`accentSoft`）和侧栏底色的对比度只有 **1.09:1 ~ 1.29:1**（实测）——
+// **几乎分不出来**，而「当前在哪」是侧栏里唯一的方向标。
 //
 // 判据是**和侧栏底色的通道差**：
 //
 //   - 0        → 选中态根本没画，用户看不出自己在哪一页
-//   - 6~64     → 一层很淡的底（对的形状）
-//   - ~214     → 实心主色（Biu `#1ed760` 压在 `#f4f4f5` 上最大的那一道），
-//     这就是原来那一版 `Background(t.Accent)`，也是调研点名的那一处
-//
-// 64 是从「看得出在哪一页」倒推的绝对数，**不是照抄任何一处实现里的数**：
-// 浅色那一档淡底是 30、深色那一档是 39，而实心那一版最小也有 149。两边都过，两边
-// 都拦得住。
+//   - < 100    → 还是太淡，看不出当前在哪一页
+//   - ≥ 100    → 一块实心主色底（对的形状）
 //
 // ⚠️ **探针还是侧栏那一列**（和上一条同一个），不是 `Tester.Find`：「本地音乐」在
 // 内容区还有一个同名页标题，`Find` 给回来的是那个 (92, 7)——第一版就栽在这儿，
 // 它对着内容区的白底去量侧栏，怎么量都不会红。侧栏那一列只认「和侧栏底色不同的
 // 那一段」，而这一页里这样的段**只有一段**：选中的那一行。
-func TestTheCurrentRowIsAFaintTintNotASolidBlock(t *testing.T) {
-	const (
-		wantMin = 6
-		wantMax = 64
-	)
+func TestTheCurrentRowIsASolidBlock(t *testing.T) {
+	// 🔴 **下限从 64 提到 100**：淡底那一档和侧栏底色只差 30~39 个通道，而实心
+	// 主色底差着 100+（实测暖纸浅色 4.34:1、深色 6.38:1）。100 是把两档分开的
+	// 那条线——它拦得住「改回淡底」，也拦得住「什么底都没画」。
+	const wantMin = 100
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -663,14 +662,9 @@ func TestTheCurrentRowIsAFaintTintNotASolidBlock(t *testing.T) {
 			y1 := r.y1 - (r.y1-r.y0)/4 - 1
 			lit := probeBand(img, sideScanX, y0, sideScanX, y1)
 			d := maxDiff(lit, bg)
-			switch {
-			case d < wantMin:
+			if d < wantMin {
 				t.Errorf("选中的那一行和侧栏底色只差 %d（< %d，%v 对 %v）——"+
-					"看不出当前在哪一页", d, wantMin, lit, bg)
-			case d > wantMax:
-				t.Errorf("选中的那一行和侧栏底色差 %d（> %d，%v 对 %v）——那是实心主色，"+
-					"Biu 那边是主色很淡的一层（上游 HeroUI 的 variant=\"flat\"）",
-					d, wantMax, lit, bg)
+					"看不出当前在哪一页（这一档是实心主色底）", d, wantMin, lit, bg)
 			}
 		})
 	}
