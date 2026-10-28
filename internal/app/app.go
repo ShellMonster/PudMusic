@@ -1770,6 +1770,7 @@ func (a *App) Close() {
 	a.recommend, a.library, a.favorites = nil, nil, nil
 	a.exploreClient = nil
 	a.search = nil
+	oldSpaces := a.spaces
 	a.spaces = nil
 	a.wakeMu.Lock()
 	a.wakes = nil
@@ -1793,6 +1794,9 @@ func (a *App) Close() {
 	a.wake = nil
 	a.mu.Unlock()
 
+	for _, s := range oldSpaces {
+		s.invalidate()
+	}
 	close(a.done)
 
 	// 「上次听到哪儿」这一格：**退出前强制落一次**。
