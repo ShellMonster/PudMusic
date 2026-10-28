@@ -137,6 +137,12 @@ type themeCache struct {
 	base *ui.Theme
 	// hotTheme 是指针压在滚动条上的那一档。
 	hotTheme *ui.Theme
+	// card 是「卡片那一档」的三个值（底色 / 圆角 / 悬停底）。
+	//
+	// ⚠️ **它和主题是同一层的东西**（理由见 `cardPalette` 顶上那一段）：三个值
+	// 只依赖**方案**和**深浅**，而那两样都在 `key` 里。于是它跟着主题一起算、
+	// 一起缓存——各处去读那一份，而不是**每张卡各去读一遍设置**（票 #632）。
+	card cardPalette
 	// valid 是「这一份是真的」（零值的那一份是空的）。
 	valid bool
 }
@@ -164,6 +170,8 @@ func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.T
 		// 热的那一档是**值拷贝**一份：改的是拷贝，缓存里那一份不动。
 		hot := *base
 		hot.Scrollbar = scrollbarHot(&hot)
+		// 卡片那三个值跟主题一起算（理由见 `themeCache.card`）。
+		c.card = cardPaletteOf(base, s.ThemePreset)
 		c.key, c.base, c.hotTheme, c.valid = key, base, &hot, true
 	}
 	return c.base

@@ -4914,4 +4914,56 @@ var Items = []Item{
 			"TestEachScreenStaysInsideItsFrameBudget",
 		},
 	},
+	{
+		// 归「严格 HTTP fixture」那一组：这一票（#632）动的是**读设置**的次数。
+		//
+		// 归这一组是因为它量的全是「这一帧读了几次设置」——而关注页那一列卡片
+		// **每一张、每一帧**都要用三个值（卡片底色 / 卡片圆角 / 卡片悬停那一档
+		// 底色），而这三个值**只依赖两样东西**（主题方案、深浅）——原来它们
+		// **各自去读一遍设置**，于是「一帧读几百次」。
+		//
+		// ⚠️ **错法是静默的**：画面上**一个像素都不会变**（那三个值算出来还是
+		// 同一个），用户只会觉得「这页停着不动也一直烧电」——而这正是这一族
+		//（「每帧重复做同一件事」那一族）的共同点。
+		//
+		// ⚠️ **判据是「每帧读了几次设置」，不是「每帧分配了几次」**：那一次读
+		// 是一次**互斥锁** + 一次几百字节的**值拷贝**，而那份拷贝**不逃逸**
+		// （实测：挂上 store 时 `SettingsSnapshot()` 一次都不分配）——所以它在
+		// **分配次数上完全看不见**。于是这里要**自己数**（`app.TakeSettingsReadCount`）。
+		//
+		// ⚠️ **实测（2026-10-28，这棵树上）**：关注页**隔离**那一档（只画关注页
+		// 那一块）每帧读设置 **48 → 1 次**；**整窗**那一档每遍 view **400 → 4 次**
+		// （4 张卡；20 张卡改前是 760 次，改后也是 4 次——**与卡数无关**了）。
+		// ⇒ **每张卡带来的那一份读设置归零**。
+		//
+		// ⚠️ **画面必须一模一样**：这一票只改「这些值**怎么算出来的**」，不改
+		// 「它们**是多少**」——所以「三个值的数值」和「换了方案 / 换了深浅之后
+		// 立刻跟着变」两条都得钉住。
+		Category: HTTP,
+		Spec:     "关注页那一张卡的三个颜色（卡片底色、卡片圆角、卡片悬停那一档底色）只算一次：它们只依赖主题方案和深浅，跟主题本身是同一层地缓存着的；于是每一帧读设置的次数不再随卡片数涨（实测隔离那一档 48 → 1 次、整窗 400 → 4 次，每张卡带来的那一份归零）；三个值的数值一个字节都不许变；换了主题方案、或者系统在浅色/深色之间切换之后立刻跟着变；卡片那一列的排布、间距、圆角数值、悬停比例全部不变",
+		Tests: []string{
+			// 「每帧读几次设置」这一头（票 #628 那一族）：卡多起来不再涨。
+			"TestTheFollowCardColorsAreNotRecomputedPerCard",
+			// 整窗口径（用户感受到的那一帧）：差值也不许随卡数涨。
+			"TestTheWholeWindowStopsReadingSettingsPerCard",
+			// 三个值的数值：一个字节都不许变（照抄老算法的那一份算术）。
+			"TestTheCardColorsAreExactlyWhatTheyWere",
+			// 换了主题方案之后立刻跟着变。
+			"TestTheCardColorsFollowThePresetChange",
+			// 系统在浅色/深色之间切换时立刻跟上。
+			"TestTheCardColorsFollowTheSystemDarkChange",
+			// 帧预算那一档的「每帧读几次设置」那一栏（上限 4 次）。
+			"TestEachScreenStaysInsideItsFrameBudget",
+			// 画面：卡片底是**卡片那一档**、悬停那一档从卡片自己的底出发
+			// （这一条早就有，这一票不许破坏它）。
+			"TestTheFollowCardSitsOnItsOwnBackground",
+			// 卡片那圈影还在（这一票碰的是底色和圆角，影不许动）。
+			"TestTheFollowCardHasAShadow",
+			// 卡片那一族（弹窗面板 / 抽屉面板）还是同一档料。
+			"TestDialogCardFollowsThePreset",
+			"TestCardsAndDialogsStillStandOffTheBackground",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			"TestTheCollapsedFavoritesPanelIsACard",
+		},
+	},
 }
