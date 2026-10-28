@@ -162,6 +162,10 @@ func upSpaceMidOf(path string) (int64, bool) {
 // 后台那一条线只做两件事：把结果投进信箱（自己带锁），叫醒界面。
 type upSpace struct {
 	mid int64
+	// mountGen identifies the App Explore client that owns this cached state.
+	// A remount must retire every local pager and row before another frame can
+	// adopt results from the new client.
+	mountGen uint64
 	// notify 说一句话（后台跑完的结果）。nil 时那一句就没了。
 	//
 	// ⚠️ **语气跟着话一起走**（票 #180）：失败是红的。
@@ -241,9 +245,10 @@ type upSpace struct {
 
 // upResult 是后台拉完之后投进信箱的东西。
 type upResult struct {
-	tab  int
-	dyns []bili.Dynamic
-	cols []bili.UpCollection
+	mountGen uint64
+	tab      int
+	dyns     []bili.Dynamic
+	cols     []bili.UpCollection
 	// cursor 是下一页的入口（动态接口给的 offset）。别的 Tab 是空的。
 	cursor string
 	// sent 是 B 站这一页发了几条（过滤**之前**）。见 upPager.adopt：
@@ -272,10 +277,14 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	if s.upSpaces == nil {
 		s.upSpaces = map[int64]*upSpace{}
 	}
+	mountGen := s.app.ExploreGeneration()
 	if sp, ok := s.upSpaces[mid]; ok {
+		if sp.mountGen != mountGen {
+			sp.resetForMount(mountGen, s.app.UpSpaceOf(mid))
+		}
 		return sp
 	}
-	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid), notify: s.addToast}
+	sp := &upSpace{mid: mid, mountGen: mountGen, header: s.app.UpSpaceOf(mid), notify: s.addToast}
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
 	// 拿到的永远是对的 UP。
 	sp.videos = list.NewPaged(s.images, s.listActions(),
@@ -382,6 +391,27 @@ func (p *upPager) stop() {
 		p.cancel = nil
 	}
 	*p = upPager{}
+}
+
+// resetForMount retires all UI-local Explore state for a new App mount.
+func (sp *upSpace) resetForMount(mountGen uint64, header *app.UpSpace) {
+	sp.mountGen = mountGen
+	sp.header = header
+	sp.videosStarted = false
+	sp.leadSet = false
+	sp.dyn.stop()
+	sp.fav.stop()
+	sp.ser.stop()
+	sp.videos.Reset()
+	sp.dynItems = nil
+	sp.cols = [upTabCount][]bili.UpCollection{}
+	sp.seen = nil
+	sp.rowKeys = [upTabCount]rowkey.Memo[upRowIdent, any]{}
+	sp.state = [upTabCount]ui.ListState{}
+	sp.drops = [upTabCount]dropTally{}
+	sp.boxMu.Lock()
+	sp.box = nil
+	sp.boxMu.Unlock()
 }
 
 // adopt 记一次成功的拉取。
@@ -536,9 +566,10 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 	p := sp.pagerOf(sp.tab)
 	if !p.started && !p.loading {
 		if ctx := p.begin(); ctx != nil {
-			go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page)
+			go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page, sp.mountGen)
 		}
 	}
+
 }
 
 // viewSpaceHeader 是头图 + 关注 + 统计。

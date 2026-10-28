@@ -202,9 +202,71 @@ func openSpace(t *testing.T, s *Shell, tt *mygoui.Tester, mid int64) *upSpace {
 	return sp
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 假接口
-// ─────────────────────────────────────────────────────────────────────────────
+// TestRemountDropsLateExplorePagerResults verifies the shared mount generation
+// contract for the local dynamic/favorite/series pager family.
+func TestRemountDropsLateExplorePagerResults(t *testing.T) {
+	oldB := newUIExplore(t)
+	newB := newUIExplore(t)
+	uiSpaceData(oldB, "旧客户端", 0, 1)
+	uiSpaceData(newB, "新客户端", 0, 1)
+
+	oldStarted := make(chan struct{})
+	oldRelease := make(chan struct{})
+	oldFinished := make(chan struct{})
+	oldB.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		close(oldStarted)
+		<-oldRelease
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamic("old", "旧客户端动态"),
+		}, "offset": "", "has_more": false})
+		close(oldFinished)
+	})
+	newB.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamic("new", "新客户端动态"),
+		}, "offset": "", "has_more": false})
+	})
+
+	s, tt, a := newSpaceShell(t, oldB, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFor(t, "旧客户端动态请求发出", func() bool {
+		select {
+		case <-oldStarted:
+			return true
+		default:
+			return false
+		}
+	})
+
+	newCLI := bili.NewClient(bili.Options{Transport: newB.Server.Client().Transport})
+	newCLI.TestOnlyPointHostsAtFixture(newB.URL)
+	a.MountExplore(newCLI)
+
+	waitFrames(t, tt, "新客户端动态加载完", func() bool {
+		return len(sp.dynItems) == 1 && sp.dynItems[0].ID == "new"
+	})
+	if got := len(sp.dynItems); got != 1 {
+		t.Fatalf("重挂载后动态行数=%d，want 1", got)
+	}
+	if got := sp.dynItems[0].ID; got != "new" {
+		t.Fatalf("重挂载后保留了错误的动态 %q", got)
+	}
+
+	close(oldRelease)
+	waitFor(t, "旧客户端动态请求结束", func() bool {
+		select {
+		case <-oldFinished:
+			return true
+		default:
+			return false
+		}
+	})
+	tt.Frame()
+	if len(sp.dynItems) != 1 || sp.dynItems[0].ID != "new" {
+		t.Fatalf("旧客户端迟到结果写回了新挂载状态：%+v", sp.dynItems)
+	}
+}
 
 // uiSpaceData 装好「头 / 关系 / 粉丝数」三个接口。
 func uiSpaceData(b *uiExplore, name string, attribute int, follower int64) {
