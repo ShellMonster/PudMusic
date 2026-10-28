@@ -153,18 +153,15 @@ func (a *App) folderItems(ctx context.Context, ref CollectionRef) ([]Item, int, 
 
 // playableItems 把一批内容翻成队列项，放不了的那种跳过。
 //
-// 和界面层 `itemsOfMedias` 是同一件事，**必须跳过而不是放进去再报错**：一个
-// 收藏夹里躺着两个合集就让「播放整个收藏夹」整条失败，是用户没法接受的。
-func playableItems(medias []bili.Media) []Item {
-	items := make([]Item, 0, len(medias))
-	for _, m := range medias {
-		if !m.Playable() {
-			continue
-		}
-		items = append(items, ItemOfMedia(m))
-	}
-	return items
-}
+// ⚠️ **它现在是 `QueueItemsOfMedias` 的一个别名**（那一处是唯一的实现）：
+// 界面层的「播放全部」和这里的「播放整个收藏夹」是**同一件事**，而它们
+// 原来是各写一份的（`internal/ui/collectionbatch.go` 的 `itemsOfMedias` 和
+// 这里）——两份各判一次的话，改判据时会漏掉一处，而漏掉的那一处症状是
+// 「还有失效的歌在被白跑取流」。
+//
+// **必须跳过而不是放进去再报错**：一个收藏夹里躺着两个合集就让「播放整个
+// 收藏夹」整条失败，是用户没法接受的。
+func playableItems(medias []bili.Media) []Item { return QueueItemsOfMedias(medias) }
 
 // DeleteFavoriteFolder 删掉自己创建的这个收藏夹（连它里面的内容）。**立刻返回**。
 //

@@ -61,6 +61,14 @@ func ItemOfMedia(m bili.Media) Item {
 		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
 		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
 		Sid: strconv.FormatInt(m.ID, 10),
+		// 🔴 **失效状态带着走**（B 站那个 `attr` 字段）：这一条已经没了，
+		// 而队列入口要**在取流之前**就把它滤掉——不然应用要为一条不存在
+		// 的稿件白跑一趟带签名的往返（实测 200~400ms），而那一趟注定失败。
+		//
+		// ⚠️ **判据只有那一个出处**（`bili.Media.Invalid`），而这里是它进
+		// 队列项的唯一通道——所以界面上画的那一行、菜单里灰掉的那一项、
+		// 队列里滤掉的那一条，读的都是同一个事实。
+		Invalid: m.Invalid(),
 	}
 	switch m.Type {
 	case bili.MediaVideo:

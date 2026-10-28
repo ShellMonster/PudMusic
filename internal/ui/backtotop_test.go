@@ -232,3 +232,39 @@ func TestTheSettingsPageHasABackToTop(t *testing.T) {
 		return tt.HasText(backTopLabel)
 	})
 }
+
+// TestTheCollectionHasABackToTop 钉住**回顶按钮**。
+//
+// ⚠️ **这一枚本来就有**（`widgets/list/backtotop.go` 是全仓唯一实现，
+// 阈值 400 像素、距右 40、距下 120，照抄上游 `src/components/scroll-container/
+// index.tsx` 的 `fixed right-10 bottom-[120px]`）——但**这一页没有测试钉住它**
+// （上游那边收藏夹是三页、我们是一页，而 `backtotop_test.go` 里没有收藏夹那一条）。
+//
+// 所以这一条是**补上那一条**，顺带钉住「点它回到顶上」。
+func TestTheCollectionHasABackToTop(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", collectionMedias(40)...)
+	waitSongs(t, tt, s, 40)
+	tt.Frame()
+
+	if tt.HasText(backTopLabel) {
+		t.Fatalf("还没滚就出现回顶按钮了")
+	}
+
+	tt.Scroll(600, 500, 0, 2000)
+	waitFrames(t, tt, "歌单页滚下去之后回顶按钮出现", func() bool {
+		return tt.HasText(backTopLabel)
+	})
+
+	// 点它：回到顶上。
+	if err := tt.Click(backTopLabel); err != nil {
+		t.Fatalf("点不到回顶按钮：%v", err)
+	}
+	waitFrames(t, tt, "回到顶上之后回顶按钮消失", func() bool {
+		return !tt.HasText(backTopLabel)
+	})
+	// ⚠️ **判据是头图区回到了画面上**：回到顶上意味着**头图区又回来了**——
+	// 而它现在跟着列表走，所以「回到顶上」= 头图区重新出现。
+	if _, ok := tt.Find("通勤路上"); !ok {
+		t.Error("回到顶上之后头图区没有回来——回顶按钮回的不是顶")
+	}
+}

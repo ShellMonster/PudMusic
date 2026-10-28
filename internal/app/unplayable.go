@@ -82,8 +82,23 @@ const (
 	// UnplayableNoDownload 是「这一类还没有下载通道」。
 	//
 	// 音乐库条目只有一个 auid（sid），而下载是**按稿件 + 分 P**取流的，
-	// 所以这一类放得了、下不了。放得了不等于下得了——两件事分开说。
+	// 所以这一类放得了、下不了。放得了不等于下不了——两件事分开说。
 	UnplayableNoDownload
+
+	// UnplayableInvalid 是「这一条**已经失效**」（稿件被 UP 主删了、或者
+	// 换成了别的链接）。
+	//
+	// 🔴 **它和上面那几种都不同**：别的几种是「这一条现在放不了，等一等也许
+	// 能放」，而这一种是「**它已经没了**」——重试一万次也是这个答案。
+	//
+	// ⚠️ **它判得出**（B 站给的那个 `attr` 字段，`bili.Media.Invalid`），
+	// 所以界面**点之前就不给播放入口**——而那一类别的种类
+	// （「压根没有音频流」）有时候判不出来（要一次网络往返才知道）。
+	//
+	// ⚠️ **为什么单列一种而不是并进「没有音频流」**：用户照着做的下一步
+	// 不一样。合集是「打开里面的单集就能放」，而失效是「**它已经没了**」
+	// ——后者能做的只有「忽略它 / 在 B 站删掉它」。
+	UnplayableInvalid
 )
 
 // Unplayable 是「这一首放不了」这件事，带上为什么和还能怎么办。
@@ -127,6 +142,8 @@ func defaultWhy(k UnplayableKind) string {
 		return "这一项不是一首歌"
 	case UnplayableNoDownload:
 		return "这一条是 B 站音乐库里的条目，还没有下载通道"
+	case UnplayableInvalid:
+		return "这一条已经失效了（UP 主删了它，或者换成了别的链接）"
 	}
 	return "这一首放不了"
 }
@@ -149,6 +166,11 @@ func defaultNext(k UnplayableKind) string {
 		return "它没有可播的音频"
 	case UnplayableNoDownload:
 		return "先在应用里放它，或者去 B 站下载"
+	case UnplayableInvalid:
+		// ⚠️ **不说「重试」**：重试一万次也是这个答案（它已经没了）。
+		// 用户能做的事只有「忽略它」——而收藏夹那一页还有「清除失效内容」
+		// 那一枚（见 `collectionpage.go` 的 ⋯ 菜单），那才是真的下一步。
+		return "忽略它，或者用收藏夹里的「清除失效内容」把它删掉"
 	}
 	return "换一首放"
 }
@@ -208,6 +230,15 @@ var errNoSource = errors.New("这一首还没有来源（既不是本地文件�
 func unplayableReasonOf(it Item) *Unplayable {
 	if it.IsLocal() {
 		return nil
+	}
+	// 🔴 **失效排在「有没有音频流」前面**：失效是「它已经没了」，而
+	// 「没有音频流」是「这一条现在放不了」。失效那一条更具体，而用户看到的
+	// 是「这一条已经没了」——说得含糊的话用户会去查网、换网、等它好。
+	//
+	// ⚠️ **本地文件不会落到这一支**（上面已经返回了）：本地文件没有
+	// 「失效」这回事（`Item.Invalid` 对本地文件恒为 false）。
+	if it.Invalid {
+		return unplayableOf(UnplayableInvalid)
 	}
 	return AsUnplayable(playableOnline(it))
 }
@@ -295,6 +326,8 @@ func menuNote(k UnplayableKind) string {
 		return "这一项不是一首歌"
 	case UnplayableNoDownload:
 		return "音乐库条目还没下载通道。去 B 站下载"
+	case UnplayableInvalid:
+		return "这一条已失效，放不了。忽略它，或者清掉它"
 	}
 	return "这一首放不了。换一首放"
 }

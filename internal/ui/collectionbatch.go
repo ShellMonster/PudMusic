@@ -564,21 +564,36 @@ func (s *Shell) allMedias(p *collectionPage) []bili.Media {
 
 // playWholeCollection 播放全部：把队列**换成**已经加载出来的那些并从第一首起播。
 func (s *Shell) playWholeCollection(p *collectionPage) {
-	items := itemsOfMedias(s.allMedias(p))
+	items, skipped := app.QueueItemsOfMediasCounting(s.allMedias(p))
 	if len(items) == 0 {
-		s.addToast("这里还没有可以播的歌", notice.Warning)
+		if skipped > 0 {
+			s.addToast("这里还没有可以播的歌（这一页的都放不了或已失效）", notice.Warning)
+		} else {
+			s.addToast("这里还没有可以播的歌", notice.Warning)
+		}
 		return
 	}
 	if err := s.app.PlayFrom(items...); err != nil {
 		s.addToast("放不了："+err.Error(), notice.Danger)
+		return
 	}
+	// ⚠️ **跳过了要说一声**（票 #624）：失效的条目被滤掉了，而用户数得出来
+	// ——列表里画着、标着「已失效」的那些，一首都不在队列里。不说的话，
+	// 用户看到的是「这一页有 30 首，而只放了 25 首」，而界面上一个字的
+	// 解释都没有。
+	s.addToast(collectionBatchToast("已切换到 "+strconv.Itoa(len(items))+" 首，开始播放", skipped),
+		notice.Success)
 }
 
 // addWholeCollectionToQueue 把已经加载出来的都追加到队列末尾。
 func (s *Shell) addWholeCollectionToQueue(p *collectionPage) {
-	items := itemsOfMedias(s.allMedias(p))
+	items, skipped := app.QueueItemsOfMediasCounting(s.allMedias(p))
 	if len(items) == 0 {
-		s.addToast("这里还没有可以加的歌", notice.Warning)
+		if skipped > 0 {
+			s.addToast("这里还没有可以加的歌（这一页的都放不了或已失效）", notice.Warning)
+		} else {
+			s.addToast("这里还没有可以加的歌", notice.Warning)
+		}
 		return
 	}
 	if err := s.app.Enqueue(items...); err != nil {
@@ -589,23 +604,33 @@ func (s *Shell) addWholeCollectionToQueue(p *collectionPage) {
 	// 这一轮就轮到它（见 app/queue_shuffle.go）。用户看不见池子里有什么。
 	if n := s.app.PlayMode().EnqueueNotice(); n != "" {
 		s.addToast(n, notice.Success)
+		return
 	}
+	// ⚠️ **跳过了要说一声**（理由同上面那一处）。
+	s.addToast(collectionBatchToast("已加入 "+strconv.Itoa(len(items))+" 首", skipped),
+		notice.Success)
+}
+
+// collectionBatchToast 把「成了那句话」和「跳过了几首」合成一句。
+//
+// ⚠️ **不跳的时候原样返回**：多加一句「（没有跳过的）」是噪音。
+func collectionBatchToast(ok string, skipped int) string {
+	if skipped <= 0 {
+		return ok
+	}
+	return ok + "（有 " + strconv.Itoa(skipped) + " 首放不了或已失效，没放进来）"
 }
 
 // itemsOfMedias 把一批 B 站内容翻成队列项（跳过放不了的那种）。
 //
-// 合集 / 电影那一类（type 21 / 24）在这里就被跳过，所以「播放全部」不会
-// 因为收藏夹里躺着两个合集就整条失败。
-func itemsOfMedias(medias []bili.Media) []app.Item {
-	items := make([]app.Item, 0, len(medias))
-	for _, m := range medias {
-		if !m.Playable() {
-			continue
-		}
-		items = append(items, onlineItemOf(m))
-	}
-	return items
-}
+// ⚠️ **它现在是 `app.QueueItemsOfMedias` 的别名**（那一处是唯一的实现）：
+// 这一页的「播放全部」和侧栏的「播放整个收藏夹」是**同一件事**，而它们原来
+// 各写了一份——两份各判一次的话，改判据时会漏掉一处，而漏掉的那一处症状
+// 是「还有失效的歌在被白跑取流」（每一首都等一次超时）。
+//
+// 合集 / 电影那一类（type 21 / 24）在那里就被跳过，所以「播放全部」不会
+// 因为收藏夹里躺着两个合集就整条失败；**失效的条目同样被跳过**（票 #624）。
+func itemsOfMedias(medias []bili.Media) []app.Item { return app.QueueItemsOfMedias(medias) }
 
 // reloadCollection 重新拉这一页：清掉勾选、清掉旧内容、从第一页重来。
 func (s *Shell) reloadCollection(p *collectionPage) {
@@ -614,6 +639,12 @@ func (s *Shell) reloadCollection(p *collectionPage) {
 	p.list = s.newCollectionList(p)
 	p.listSort = p.sort
 	p.list.Reload()
+	// 🔴 **页内头部要重装**（票 #625）：列表整个换掉了，而那块（头图区 +
+	// 操作条 + 表头）是装在**旧那个列表**上的。
+	//
+	// ⚠️ **不清的话新列表就没有那块**：头图区会跟着旧列表走，而界面上画的是
+	// 新列表——于是头图区整个不见（症状是「收藏夹页没有封面也没有标题」）。
+	p.leadSet = false
 	if p.multi {
 		s.attachSelection(p)
 	}
