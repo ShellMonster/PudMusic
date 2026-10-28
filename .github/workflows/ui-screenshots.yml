@@ -1,0 +1,165 @@
+name: PR UI screenshots
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - 'internal/ui/**'
+      - 'internal/app/**'
+      - 'internal/service/bili/**'
+      - 'resources/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/ui-screenshots.yml'
+
+concurrency:
+  group: ui-screenshots-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    name: Render changed UI screenshots
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Select screenshot suites
+        id: select
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          home=0
+          player=0
+          collection=0
+          all=0
+          changed=0
+
+          while IFS= read -r -d '' path; do
+            changed=1
+            case "$path" in
+              internal/ui/homepage*|internal/ui/navbar*|internal/ui/search*|internal/ui/dynamic*)
+                home=1
+                ;;
+              internal/ui/playbar*|internal/ui/miniplayer*|internal/ui/fullplayer*|internal/ui/lyrics*|internal/ui/queue*|internal/ui/partdrawer*|internal/ui/minicurtain*)
+                player=1
+                ;;
+              internal/ui/collection*|internal/ui/settings*|internal/ui/sidebar*|internal/ui/favorites*|internal/ui/localmusic*)
+                collection=1
+                ;;
+              internal/ui/**|internal/app/**|internal/service/bili/**|resources/**|go.mod|go.sum|.github/workflows/ui-screenshots.yml)
+                all=1
+                ;;
+              *)
+                all=1
+                ;;
+            esac
+          done < <(git diff --name-only -z "$BASE_SHA...$HEAD_SHA")
+
+          if [ "$changed" -eq 0 ]; then
+            all=1
+          fi
+          if [ "$all" -eq 1 ]; then
+            home=1
+            player=1
+            collection=1
+          fi
+
+          tests=()
+          [ "$home" -eq 1 ] && tests+=(TestRenderReviewHomeTabs)
+          [ "$player" -eq 1 ] && tests+=(TestRenderReviewFullPlayer)
+          [ "$collection" -eq 1 ] && tests+=(TestRenderReviewCollectionAndSettings)
+
+          pattern="$(IFS='|'; printf '%s' "${tests[*]}")"
+          printf 'Selected screenshot tests: %s\n' "$pattern"
+          printf 'pattern=%s\n' "$pattern" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$pattern" > "$RUNNER_TEMP/selected-tests.txt"
+
+      - name: Render selected UI screenshots
+        id: render
+        env:
+          BIU_SHOT_DIR: ${{ runner.temp }}/biu-ui-shots
+          SCREENSHOT_PATTERN: ${{ steps.select.outputs.pattern }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$BIU_SHOT_DIR"
+          go test ./internal/ui/ \
+            -run "^(${SCREENSHOT_PATTERN})$" \
+            -count=1 \
+            -timeout 10m
+
+      - name: Write screenshot manifest
+        if: always()
+        id: manifest
+        env:
+          TEST_OUTCOME: ${{ steps.render.outcome }}
+          TEST_PATTERN: ${{ steps.select.outputs.pattern }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
+          SHOT_DIR: ${{ runner.temp }}/biu-ui-shots
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$SHOT_DIR"
+          png_count="$(find "$SHOT_DIR" -type f -name '*.png' -print | wc -l | tr -d ' ')"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          shot_dir = Path(os.environ['SHOT_DIR'])
+          files = []
+          for path in sorted(shot_dir.glob('*.png')):
+              files.append({'name': path.name, 'size': path.stat().st_size})
+          manifest = {
+              'producer': 'PR UI screenshots',
+              'runId': os.environ['RUN_ID'],
+              'prNumber': int(os.environ['PR_NUMBER']),
+              'baseSha': os.environ['BASE_SHA'],
+              'headSha': os.environ['HEAD_SHA'],
+              'testPattern': os.environ['TEST_PATTERN'],
+              'testOutcome': os.environ['TEST_OUTCOME'],
+              'pngCount': len(files),
+              'files': files,
+          }
+          (shot_dir / 'manifest.json').write_text(
+              json.dumps(manifest, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY
+          printf '截图文件数：%s\n' "$png_count" >> "$GITHUB_STEP_SUMMARY"
+          printf '测试结果：%s\n' "$TEST_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          printf '测试集合：`%s`\n' "$TEST_PATTERN" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload UI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots-${{ github.run_id }}
+          path: ${{ runner.temp }}/biu-ui-shots
+          if-no-files-found: warn
+          retention-days: 14
