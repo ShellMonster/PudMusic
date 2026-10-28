@@ -444,8 +444,11 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 而列表一行都没有的时候那一行**压根不存在**——于是头图区整个不见，
 		// 页面变成一句没有上下文的「暂无内容」。而头图区是**这一页的身份**
 		//（封面、标题、创建者），它不该在空的时候消失。
-		empty := s.collectionIsEmpty(p, info)
-		if empty {
+		// 🔴 **判据只有那一处**（`collectionEmpty`）：这一帧是「哪一种空」
+		// 决定了画哪一句，而「头图区画在哪」也是同一个判据——两处各判一次的
+		// 话，改一处忘了另一处，症状是「空的时候头图区不见了 / 画两遍」。
+		empty := collectionEmpty(p, info)
+		if empty != collectionEmptyNone {
 			// 🔴 **空的时候把列表里的那一块卸掉**：头图区在外面画了，而
 			// 列表里的那块留着的话两边都画一份。
 			s.clearCollectionLead(p)
@@ -462,10 +465,10 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 后者在翻页加载的那一瞬间也为真，那样会让整页内容闪一下空状态
 		// ——用户点进收藏夹、列表转了两帧、中间整个内容区变成一句
 		// 「暂无内容」。
-		switch {
-		case info.Loaded && info.MediaCount == 0:
+		switch empty {
+		case collectionEmptyNoFavorites:
 			s.viewEmpty(c, "collection:empty", noFavorites)
-		case p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading:
+		case collectionEmptyNoResults:
 			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
 			//
 			// ⚠️ 判据是「**词已经发出去了**」而不是「列表此刻一行都没有」：
@@ -508,21 +511,40 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	s.viewCollectionConfirm(c, p)
 }
 
-// collectionIsEmpty 报这一页是不是「空的」（于是头图区要画在列表外面）。
+// collectionEmptyKind 是「这一页是**哪一种**空」。
 //
-// 🔴 **它和 `viewCollection` 里那两支空状态是同一个判据**（那一支判的是
-// 「画哪一句」，这一处判的是「头图区画在哪」）——两处各判一次的话，一处改了
-// 另一处没改，症状是「空的时候头图区不见了」。
+// 🔴 **它是一个枚举而不是一个 bool**：这一页有两种空，而它们的**画法不同**
+// （一句是「没有收藏夹」，一句是「换个词再搜一次」）——而「头图区画在哪」
+// 问的是「是不是空」（两种都算）。
+//
+// ⚠️ **判据只有这一处**（`collectionEmpty`）：`viewCollection` 拿它去 switch
+// 画哪一句，而「头图区画在列表里还是列表外」也拿它判——两处各判一次的话，
+// 改一处忘了另一处，症状是「空的时候头图区不见了 / 画两遍」。
+type collectionEmptyKind uint8
+
+const (
+	// collectionEmptyNone 是「不空」。
+	collectionEmptyNone collectionEmptyKind = iota
+	// collectionEmptyNoFavorites 是「这个容器里一条都没有」。
+	collectionEmptyNoFavorites
+	// collectionEmptyNoResults 是「搜了，词发出去了，一条都没有」。
+	collectionEmptyNoResults
+)
+
+// collectionEmpty 报这一页是**哪一种**空。
 //
 // ⚠️ **判据是 MediaCount 为 0**，不是「列表此刻一行都没有」：后者在翻页加载的
-// 那一瞬间也为真，那样会让头图区在内容加载的那两帧里跳到列表外面（于是
-// 位置跳一截）。
-func (s *Shell) collectionIsEmpty(p *collectionPage, info app.CollectionInfo) bool {
+// 那一瞬间也为真，那样会让整页内容闪一下空状态（用户点进收藏夹、列表转了
+// 两帧、中间整个内容区变成一句「暂无内容」）。
+func collectionEmpty(p *collectionPage, info app.CollectionInfo) collectionEmptyKind {
 	if info.Loaded && info.MediaCount == 0 {
-		return true
+		return collectionEmptyNoFavorites
 	}
 	// 搜了、词已经发出去了、一条都没有：也是空的（画的是「换个词再搜一次」）。
-	return p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading
+	if p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading {
+		return collectionEmptyNoResults
+	}
+	return collectionEmptyNone
 }
 
 // collectionLead 装这一页的页内头部：**头图区 + 操作条 + 表头**。
@@ -559,8 +581,9 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 	p.list.SetLead(&list.Lead{
 		// ⚠️ **无障碍名字**：「这一块」是什么——读屏软件念出来是「收藏夹的头图」。
 		Label: "收藏夹的头图",
-		// ⚠️ **估高**：见 `collectionLeadHeight`。它只被回顶按钮用（判「滚过
-		// 400 像素没有」），差几十像素的后果只是那枚按钮早一点或晚一点出现。
+		// ⚠️ **估高**：见 `collectionLeadHeight`。这一页挂着 `ScrollState`，
+		// 所以回顶按钮读的是精确像素、**用不到它**——留着是为了 `Lead` 那
+		// 一份完整（按行换算的那一路会用到它，而那一路是别的页在用）。
 		Height: func() float32 { return collectionLeadHeight },
 		Draw: func(c *ui.Context) {
 			ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
@@ -703,12 +726,19 @@ const collectionOpsButtonH = 40
 // 而标题可能占两行、简介可能没有、元信息可能还没回来（那时候是骨架，
 // 但骨架是同高的）。
 //
-// 🔴 **这个数只被回顶按钮用**（判「滚过 400 像素没有」，`list.List.ScrollOffset`
-// 那一处）：差几十像素的后果只是那枚按钮早一点或晚一点出现——而它本来就是
-// 估的（网格那一档的行高也是估的，见 `Grid.ScrollOffset`）。
-//
 // ⚠️ **别拿它当布局依据**：布局是框架量的（那一块真的有多高，框架知道），
-// 这个数只是「回顶按钮早一点晚一点」的那一点余量。
+// 这个数只是「按行换算滚动量」那一路用的余量。
+//
+// # ⚠️ **这一页实际上用不到它**（票 #624 的评审第 1 条）
+//
+// 这一页的分页列表**挂了 `ScrollState`**（`PagedList` 的默认值），于是
+// `PagedList.ScrollOffset` 走的是 `scroll.Y`（**精确像素**），而不是按行换算
+// 的那一支（`List.ScrollOffset`，那一支才会用到 `Lead.Height`）。
+//
+// 所以：**回顶按钮的时机是准的**（精确像素），这个估高一个字节都没参与。
+// 留着它是为了 `Lead` 那一份完整（`Height` 为 nil 的话 `leadHeight` 给 0，
+// 而按行换算的那一路会少算一截）——**而那一路是别的页在用**（首页、UP 空间
+// 挂了 `SetScrollState(false)`，见 `homepage.go`）。
 //
 // 算的来历：
 //

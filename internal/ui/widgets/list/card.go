@@ -225,13 +225,13 @@ func (l *List) ScrollOffset() float32 {
 //	正在放	主色当字（最该一眼认出的那一行）
 //	失效	次要色（这一行放不了了，但**不是**用户正在听的那首）
 //
-// ⚠️ **两档不冲突**：`invalid` 先判——一个失效的条目**不可能正在放**
-// （失效的压根进不了队列，见 `app.QueueItemsOfMedias`），而真放上了的那首
-// 不会中途变成失效。
+// ⚠️ **「正在放」优先**（票 #624 的评审第 4 条）：这两档**能同时成立**——
+// 「正在放」是用户随时要认的那一行，它要是被灰掉，用户就认不出自己正在听
+// 的是哪首了。
+//
+// ⚠️ 而失效那一档也**不会因此失效**：一条**真放上了**的歌不会中途变成失效
+// （失效是 B 站在收藏夹里给的事实，而队列里的歌来自取流那一刻）。
 func rowColors(t *ui.Theme, playing, invalid bool) (title, owner ui.Color) {
-	if invalid {
-		return t.TextMuted, t.TextMuted
-	}
 	if playing {
 		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（默认那个绿
 		// 压在白底上只有 1.9:1），深色下原样。算它的理由见 `widgets/ink`。
@@ -239,6 +239,9 @@ func rowColors(t *ui.Theme, playing, invalid bool) (title, owner ui.Color) {
 		// ⚠️ 别写回 `t.Accent`：深色下看不出差别，浅色下那一行就是「正在放的
 		// 那首歌读不出来」——而它恰恰是最该一眼认出的那一行。
 		return ink.AccentOn(t), t.TextMuted
+	}
+	if invalid {
+		return t.TextMuted, t.TextMuted
 	}
 	return t.Text, t.TextMuted
 }

@@ -104,14 +104,20 @@ func TestTheCollectionOpsRowScrollsAwayWithTheList(t *testing.T) {
 
 // TestTheCollectionHeaderIsNotLeftBehindAsAnOverlay 钉住「它不是浮在上面的」。
 //
-// 🔴 **这一条防的是另一种改法**：把头图区做成 `ui.Overlay`（浮在整窗之上，
-// 不占布局）——那样它在画面上「跟着滚」了（位置变了），但**列表的内容被它
-// 盖住了**，用户看到的还是一屏只剩半屏。
+// 🔴 **这一条防的是另一种改法**：把头图区做成一个**浮层**（`ui.Overlay`，浮在
+// 整窗之上、不占布局）——那样表头会跟着列表滚走（这一条断的就是那个），
+// 但**头图区本身会一直压在内容上面**，用户看到的还是一屏只剩半屏。
 //
-// 判据是**滚到底之后第一首歌还在画面上**：它被头图区盖住的话，那一行要么
-// 找不到，要么位置不对。
+// ⚠️ **两条判据**（票 #624 的评审第 6 条：原来只有一条，而注释说的是另一条）：
+//
+//	表头滚走了	它**跟着列表走**，不是浮层
+//	列表内容没被盖住	它**不压着内容**，不是浮层
+//
+// ⚠️ **第二条量的是「滚到底之后最后那一首歌还在画面上」**：浮层会盖住它
+// （或者把它推到画面外面），而它现在**跟着内容走**，所以它在。
 func TestTheCollectionHeaderIsNotLeftBehindAsAnOverlay(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345", collectionMedias(40)...)
+	medias := collectionMedias(40)
+	_, s, tt := collectionShell(t, "12345", medias...)
 	waitSongs(t, tt, s, 40)
 	tt.Frame()
 
@@ -121,13 +127,24 @@ func TestTheCollectionHeaderIsNotLeftBehindAsAnOverlay(t *testing.T) {
 		tt.Frame()
 	}
 
-	// 表头是**跟着列表走**的那一块的证明：它在列表的第 0 行里，
-	// 所以滚到底之后它应该不在画面上——而如果它是一个浮层，它会**一直���**。
+	// ① 表头是**跟着列表走**的那一块的证明：它在列表的第 0 行里，
+	// 所以滚到底之后它应该不在画面上——而如果它是一个浮层，它会**一直在**。
 	//
 	// ⚠️ **表头的名字是「收藏时间」**（收藏夹那一页的时间列是 `fav_time`，
 	// 见 `collectionTimeTitle`）。
 	if _, stillThere := tt.Find("收藏时间"); stillThere {
 		t.Error("滚到底之后表头还在画面上——它不是跟着列表走的（是个浮层？）")
+	}
+
+	// ② **内容没被盖住**：最后那一首歌还在画面上。
+	//
+	// ⚠️ **判据是「最后那一首」而不是「第一首」**：滚到底之后第一首早滚出
+	// 画面了（「不在画面上」和「被盖住了」在它身上分不开——而分不开就不能当
+	// 判据）。
+	last := "歌曲 40"
+	if _, ok := tt.Find(last); !ok {
+		t.Errorf("滚到底之后最后一首歌（%q）不在画面上——头图区盖住了内容？文字有 %q",
+			last, tt.Texts())
 	}
 }
 
@@ -218,4 +235,38 @@ func TestTheCollectionHeaderScrollsAwayInTheGridViewToo(t *testing.T) {
 		t.Errorf("网格那一档：滚了 1500 之后标题还在 y=%.0f（滚之前 y=%.0f）——"+
 			"它钉在顶上了", after.Y, before.Y)
 	}
+}
+
+// TestTheCollectionFirstFrameSaysItIsLoading 钉住**首屏的「正在加载…」**。
+//
+// 🔴 **这一条是票 #625 的评审补上的（第 3 条）**：头图区搬进列表之后，列表
+// **至少有一行**（那第 0 行就是头图区自己），而框架那一格（`Children`，列表
+// **外面**的内容）**只在列表一行都没有的时候才画**（`mygo/ui/list.go` 的
+// `layoutList` 里 `if n == 0` 那一支）。于是那一格**永远不画**——
+// 「正在加载…」那个骨架屏整个消失。
+//
+// ⚠️ **症状是首屏空白**：用户第一次打开收藏夹看到的是「头图区 + 一片空白 +
+// 不知道在不在加载」。而那一格是**专门**做这件事的（票 #138：它和
+// 「没有结果」那一格是同一个形状）。
+//
+// ⚠️ **判据是「内容还在路上」**：夹具默认秒回，而那一档只在内容还在路上
+// 的时候出现——所以这一条要**卡住内容列表那一趟**。
+func TestTheCollectionFirstFrameSaysItIsLoading(t *testing.T) {
+	b := newCollectionBili(t)
+	hold := make(chan struct{})
+	b.holdList = hold
+	t.Cleanup(func() { close(hold) })
+
+	_, s, tt := collectionShellFrom(t, b, nil, "", "12345")
+	tt.Frame()
+
+	if !tt.HasText("正在加载…") {
+		t.Errorf("首屏没有「正在加载…」：文字有 %q", tt.Texts())
+	}
+	// ⚠️ **顺带钉住「头图区还在」**：那一格和头图区是**两样**——骨架屏没了
+	// 而头图区还在，用户至少还知道自己在哪个收藏夹里。
+	if _, ok := tt.Find("通勤路上"); !ok {
+		t.Errorf("首屏的头图区不见了：文字有 %q", tt.Texts())
+	}
+	_ = s
 }

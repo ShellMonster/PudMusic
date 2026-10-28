@@ -621,17 +621,6 @@ func collectionBatchToast(ok string, skipped int) string {
 	return ok + "（有 " + strconv.Itoa(skipped) + " 首放不了或已失效，没放进来）"
 }
 
-// itemsOfMedias 把一批 B 站内容翻成队列项（跳过放不了的那种）。
-//
-// ⚠️ **它现在是 `app.QueueItemsOfMedias` 的别名**（那一处是唯一的实现）：
-// 这一页的「播放全部」和侧栏的「播放整个收藏夹」是**同一件事**，而它们原来
-// 各写了一份——两份各判一次的话，改判据时会漏掉一处，而漏掉的那一处症状
-// 是「还有失效的歌在被白跑取流」（每一首都等一次超时）。
-//
-// 合集 / 电影那一类（type 21 / 24）在那里就被跳过，所以「播放全部」不会
-// 因为收藏夹里躺着两个合集就整条失败；**失效的条目同样被跳过**（票 #624）。
-func itemsOfMedias(medias []bili.Media) []app.Item { return app.QueueItemsOfMedias(medias) }
-
 // reloadCollection 重新拉这一页：清掉勾选、清掉旧内容、从第一页重来。
 func (s *Shell) reloadCollection(p *collectionPage) {
 	clear(p.picked)

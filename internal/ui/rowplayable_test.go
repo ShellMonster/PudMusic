@@ -44,6 +44,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/service/localmusic"
 )
@@ -117,11 +118,11 @@ func TestEveryRowWeDrawHasAVerdictThatMatchesWhatHappens(t *testing.T) {
 			}
 
 			// ② 判据说能放的必须进得了队列；说放不了的必须进不去。
-			//    「播放全部」走的就是 `itemsOfMedias`，而它信判据——判据错了，
+			//    「播放全部」走的就是 `app.QueueItemsOfMedias`，而它信判据——判据错了，
 			//    「播放全部」就会因为收藏夹里躺着两个合集而整条失败。
-			items := itemsOfMedias([]bili.Media{m})
+			items := app.QueueItemsOfMedias([]bili.Media{m})
 			if r.Judged && len(items) != 1 {
-				t.Fatalf("%s：判据说能放，批量「播放全部」却把它跳过了（itemsOfMedias 出了 %d 项）", r.What, len(items))
+				t.Fatalf("%s：判据说能放，批量「播放全部」却把它跳过了（app.QueueItemsOfMedias 出了 %d 项）", r.What, len(items))
 			}
 			if !r.Judged && len(items) != 0 {
 				t.Fatalf("%s：判据说放不了，它却进了队列（%d 项）", r.What, len(items))

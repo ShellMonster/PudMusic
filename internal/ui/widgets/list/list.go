@@ -847,6 +847,19 @@ func (l *List) viewRow(r ui.ListRow) {
 // （点它一下就是选中了第 0 行）——那一块主色底露出来就是「一整条绿」，而它上面
 // 装的是卡片。刷一层页面底色把它盖掉（和 `selection.go` 的 `rowCover` 同一个
 // 道理）。
+//
+// 🔴 **「没有歌时那一格」要跟着画**（票 #625 的评审第 3 条）：
+//
+// 框架那一格是 `Children`（列表**外面**的内容），而它**只在列表一行都没有的
+// 时候才画**（`mygo/ui/list.go` 的 `layoutList` 里 `if n == 0` 那一支——
+// 「Without rows, what else was built in the list shows」）。
+//
+// 而**装了页内头部之后列表至少有一行**（那第 0 行就是它自己）——于是框架
+// 那一支永远不画，「正在加载…」那一格（骨架屏）就**整个消失**了。
+//
+// ⚠️ **症状是首屏空白**：用户第一次打开收藏夹看到的是「头图区 + 一片空白 +
+// 不知道在不在加载」——而那一格本来是**专门**做这件事的（票 #138：它和
+// 「没有结果」那一格是同一个形状）。
 func (l *List) viewLead(c *ui.Context) {
 	if l.lead == nil || l.lead.Draw == nil {
 		return
@@ -857,6 +870,15 @@ func (l *List) viewLead(c *ui.Context) {
 	guardFailed(&l.failed, "页内头部", leadFailed, func() {
 		ui.Column(c).FillWidth().Background(c.Theme().Background).Children(func() {
 			l.lead.Draw(c)
+			// ⚠️ **判据是「没有歌」**：框架那一支判的是「列表没有行」，而
+			// 装了页内头部之后行数 ≥ 1——所以这里要自己判「没有**歌**」。
+			//
+			// ⚠️ **只画外面递进来的那一格**（`emptyView`）：没递的话就是列表
+			// 自己那句 13px 的「这里还没有歌」，而它由框架那一支画（列表真的
+			// 一行都没有的时候）。
+			if len(l.songs) == 0 && l.emptyView != nil {
+				l.emptyView(c)
+			}
 		})
 	})
 }

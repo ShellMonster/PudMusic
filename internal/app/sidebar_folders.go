@@ -113,7 +113,7 @@ func (a *App) withFolderItems(f Favorite, verb, able string, done func(string, n
 // folderPageLimit 是「翻到第几页就认输」。
 //
 // 🔴 **不能只靠 `items` 那个上限收口**：一个收藏夹里如果全是合集 / 剧集（那几类
-// 放不了，`playableItems` 会跳过它们），`items` **一个都不会长**，而 B 站那边
+// 放不了，`QueueItemsOfMedias` 会跳过它们），`items` **一个都不会长**，而 B 站那边
 // `has_more` 一直是 true——于是那一趟会一直翻页，直到天荒地老。表现是「点了
 // 播放，侧栏那一行转圈转到应用退出」。
 //
@@ -140,7 +140,7 @@ func (a *App) folderItems(ctx context.Context, ref CollectionRef) ([]Item, int, 
 		if err != nil {
 			return items, 0, err
 		}
-		items = append(items, playableItems(medias)...)
+		items = append(items, QueueItemsOfMedias(medias)...)
 		if !hasMore || len(medias) == 0 {
 			return items, 0, nil
 		}
@@ -150,18 +150,6 @@ func (a *App) folderItems(ctx context.Context, ref CollectionRef) ([]Item, int, 
 	}
 	return items, 1, nil
 }
-
-// playableItems 把一批内容翻成队列项，放不了的那种跳过。
-//
-// ⚠️ **它现在是 `QueueItemsOfMedias` 的一个别名**（那一处是唯一的实现）：
-// 界面层的「播放全部」和这里的「播放整个收藏夹」是**同一件事**，而它们
-// 原来是各写一份的（`internal/ui/collectionbatch.go` 的 `itemsOfMedias` 和
-// 这里）——两份各判一次的话，改判据时会漏掉一处，而漏掉的那一处症状是
-// 「还有失效的歌在被白跑取流」。
-//
-// **必须跳过而不是放进去再报错**：一个收藏夹里躺着两个合集就让「播放整个
-// 收藏夹」整条失败，是用户没法接受的。
-func playableItems(medias []bili.Media) []Item { return QueueItemsOfMedias(medias) }
 
 // DeleteFavoriteFolder 删掉自己创建的这个收藏夹（连它里面的内容）。**立刻返回**。
 //

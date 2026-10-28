@@ -168,3 +168,112 @@ func TestAnInvalidItemDoesNotAskBiliForAStream(t *testing.T) {
 	}
 	_ = dead
 }
+
+// TestTheQueueRefusesAnInvalidItem 钉住**队列入口那一道闸**。
+//
+// 🔴 **这一条是审查补上的**（票 #624 的评审第 1 条）：行级入口（双击 / 回车 /
+// 封面播放钮 / 「从这一首往后听」）走的是 `EnqueueAndPlayNow` / `PlayFrom`，
+// 而它们原先**不判失效**——于是失效的条目照样进队列、照样白跑一趟取流。
+//
+// 判据在 **app 层**（`CanQueue`），而 app 层是**所有队列入口**的所在地——
+// 界面层那几个入口也调它，所以不存在「这一处漏了」。
+func TestTheQueueRefusesAnInvalidItem(t *testing.T) {
+	a := newOnlineApp(t, newStreamFixture(t), t.TempDir())
+
+	dead := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVdead", Title: "失效的那首", Invalid: true}
+	if err := a.EnqueueAndPlayNow(dead); err == nil {
+		t.Error("队列收下了失效的那一条——它会进队列，然后白跑一趟取流")
+	}
+	if got := a.Queue().Items(); len(got) != 0 {
+		t.Errorf("队列里有 %d 首，want 0：%+v", len(got), got)
+	}
+}
+
+// TestPlayFromRefusesInvalidItems 钉住「换队列」那一道闸。
+//
+// ⚠️ **它是另一条路**：`EnqueueAndPlayNow` 是「放这一首」，`PlayFrom` 是
+// 「换成这一批」——而后者是「从这一首往后听」走的路，它把**一整段**塞进队列，
+// 里面的失效条目一个都不滤。
+//
+// ⚠️ **判据是「整批被拒」还是「滤掉失效的那些」**：这一条钉的是**滤掉**——
+// 用户点「从这一首往后听」是为了听后面那一段，而后面那几首里混着一个失效的，
+// 不该因为它整批都放不了。
+func TestPlayFromRefusesInvalidItems(t *testing.T) {
+	a := newOnlineApp(t, newStreamFixture(t), t.TempDir())
+
+	live := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVlive", Title: "活着的那首"}
+	dead := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVdead", Title: "失效的那首", Invalid: true}
+	if err := a.PlayFrom(live, dead); err != nil {
+		t.Fatalf("放不进去：%v", err)
+	}
+	got := a.Queue().Items()
+	if len(got) != 1 {
+		t.Fatalf("队列里有 %d 首，want 1（失效的那首不该进来）：%+v", len(got), got)
+	}
+	if got[0].Bvid != "BVlive" {
+		t.Errorf("队列里那一首是 %q，want BVlive", got[0].Bvid)
+	}
+}
+
+// TestEnqueueRefusesInvalidItems 钉住「加进队列」那一道闸。
+//
+// ⚠️ **它和上面两条是三条不同的路**：「添加到队列」不改正在放的那首，
+// 而「立即播放」把这一首变成正在放的——判据一样，入口不一样。
+func TestEnqueueRefusesInvalidItems(t *testing.T) {
+	a := newOnlineApp(t, newStreamFixture(t), t.TempDir())
+
+	dead := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVdead", Title: "失效的那首", Invalid: true}
+	if err := a.Enqueue(dead); err == nil {
+		t.Error("「添加到队列」收下了失效的那一条")
+	}
+	if got := a.Queue().Items(); len(got) != 0 {
+		t.Errorf("队列里有 %d 首，want 0：%+v", len(got), got)
+	}
+}
+
+// TestEnqueueNextRefusesInvalidItems 钉住「下一首播放」那一道闸。
+func TestEnqueueNextRefusesInvalidItems(t *testing.T) {
+	a := newOnlineApp(t, newStreamFixture(t), t.TempDir())
+
+	dead := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVdead", Title: "失效的那首", Invalid: true}
+	if err := a.EnqueueNext(dead); err == nil {
+		t.Error("「下一首播放」收下了失效的那一条")
+	}
+	if got := a.Queue().Items(); len(got) != 0 {
+		t.Errorf("队列里有 %d 首，want 0：%+v", len(got), got)
+	}
+}
+
+// TestThePrefetchDoesNotAskForAnInvalidSong 钉住「预取不备失效的那一首」。
+//
+// 🔴 **这一条也是审查补上的**（票 #624 的评审第 1 条）：预取（`maybePrefetch`）
+// 在当前这首快放完的时候**主动替下一首备一遍流地址**——而它原先只判
+// 「有没有音频流」，于是失效的那一首被**多打了一趟**取流。
+//
+// ⚠️ **判据是「备好之后那一份是谁」**：`TestOnlyPrefetchReady` 那一族
+// 断的是「备好了没有」，而这里断的是「备的是**不是那一首失效的**」。
+func TestThePrefetchDoesNotAskForAnInvalidSong(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.on("/x/player/pagelist", func(w http.ResponseWriter, r *http.Request) {
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": []any{map[string]any{"cid": 777, "page": 1, "part": "第一集", "duration": 260}}})
+	})
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", time.Hour), int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+
+	// 队列里是「正在放的那首」+「下一首是失效的那首」。
+	live := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVlive", Cid: "1", Title: "活着的那首"}
+	dead := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVdead", Cid: "1", Title: "失效的那首", Invalid: true}
+	if err := a.PlayFrom(live, dead); err != nil {
+		t.Fatalf("放不进去：%v", err)
+	}
+	playing(t, a, "活着的那首")
+
+	// 🔴 **失效的那首压根进不了队列**（队列入口那道闸），所以预取看不到它。
+	// 这一条钉的是那一道闸——而「预取不备失效的」是它的**后果**。
+	if got := a.Queue().Items(); len(got) != 1 {
+		t.Fatalf("队列里有 %d 首，want 1（失效的那首不该进来）：%+v", len(got), got)
+	}
+}

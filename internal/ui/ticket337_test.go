@@ -87,7 +87,7 @@ func TestOtherBatchEntriesReplaceQueueAndStartFirst(t *testing.T) {
 		mountQueueStreaming(t, s.app)
 		waitSongs(t, tt, s, 2)
 		seedThreeSongs(t, s.app)
-		want := itemsOfMedias(s.allMedias(s.collection))
+		want := app.QueueItemsOfMedias(s.allMedias(s.collection))
 		if err := tt.Click("播放全部"); err != nil {
 			t.Fatal(err)
 		}

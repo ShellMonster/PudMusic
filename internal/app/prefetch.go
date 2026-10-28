@@ -174,6 +174,14 @@ func (a *App) maybePrefetch(pos, dur time.Duration) {
 	if err := playableOnline(next); err != nil {
 		return
 	}
+	// 🔴 **失效的也不备**（票 #624）：那一首的稿件已经被 UP 主删了，而备它
+	// 就是**白打一次带签名的取流往返**（实测 200~400ms）——而那一趟注定失败。
+	//
+	// ⚠️ **判据是 `CanQueue`**（一处）：失效这个事实在 `Item.Invalid` 上，
+	// 而它和队列入口那一道闸用的是同一个判据。
+	if !CanQueue(next) {
+		return
+	}
 	// 和正在放的那一首是同一首 → 没什么可备的（单曲循环、队列里同一首排了两遍）。
 	if sameStreamTarget(online.item, next) {
 		return

@@ -78,3 +78,29 @@ func QueueItemsOfMediasCounting(medias []bili.Media) (items []Item, skipped int)
 	}
 	return items, skipped
 }
+
+// CanQueue 报这一项**能不能进队列**。
+//
+// 🔴 **它和 `CanPlay` 是两件事**，要分清：
+//
+//	`CanPlay`	界面上「给不给播放入口」问的（菜单里那一项灰不灰）
+//	`CanQueue`	**队列入口**问的（这一项能不能进队列）
+//
+// ⚠️ **为什么分开**：`CanPlay` 对「不是歌的行」（搜索结果的用户那一档）是
+// **给**的——那一行的「播放」是**进 UP 主空间**，压根没有「能不能放」这回事。
+// 而进队列问的是另一件事：**它是不是一首能播的歌**。
+//
+// # 为什么它是这一票要治的那件事（票 #624）
+//
+// 一个**已失效**的条目（稿件被 UP 主删了）进队列之后，应用要为它白跑一趟
+// 带 WBI 签名的取流往返（实测 200~400ms），而那一趟**注定失败**——用户等的
+// 就是这一串串超时。
+//
+// 🔴 **闸在 app 层**：队列入口全在这一层（`Enqueue` / `EnqueueNext` /
+// `EnqueueAndPlayNow` / `PlayFrom`），而界面层的行级入口（双击 / 回车 /
+// 封面播放钮 / 「从这一首往后听」）最后也都要走到这里——所以闸装在这一层，
+// **就没有哪条路能绕过去**。
+//
+// ⚠️ **判据只有那一个**（`bili.Media.Invalid` → `Item.Invalid`）：这一层不再
+// 自己判失效。
+func CanQueue(it Item) bool { return !it.Invalid }

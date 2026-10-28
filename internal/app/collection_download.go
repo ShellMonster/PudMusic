@@ -155,6 +155,15 @@ func (a *App) downloadableItem(ctx context.Context, m bili.Media) (Item, error) 
 		return Item{}, errNoAudioFlow
 	}
 	it := ItemOfMedia(m)
+	// 🔴 **失效的不下**（票 #624 的评审第 3 条）：这一条在**问分 P之前**就
+	// 挡住了——不然要先问一次分 P（`/x/player/pagelist`，一趟网络往返），再进
+	// 下载队列让下载器去取流（**又一趟**带签名的往返）——**两趟白跑**，
+	// 而那一首的稿件已经被 UP 主删了，它注定下不下来。
+	//
+	// ⚠️ **判据是 `CanQueue`**（一处）：和队列入口那道闸是同一个判据。
+	if !CanQueue(it) {
+		return Item{}, unplayableOf(UnplayableInvalid)
+	}
 	if it.Bvid == "" {
 		return Item{}, ErrNoAudioDownload
 	}

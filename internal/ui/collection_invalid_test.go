@@ -145,3 +145,48 @@ func TestPlayingAllSaysHowManyWereSkipped(t *testing.T) {
 		return false
 	})
 }
+
+// TestDoubleClickingAnInvalidRowDoesNotAskForAStream 钉住「双击」那一条路。
+//
+// 🔴 **这一条是审查补上的**（票 #624 的评审第 1 条）：双击 / 回车 / 点封面上的
+// 播放三角走的是 `EnqueueAndPlayNow`，而它原先**不判失效**——于是失效的条目
+// 照样进队列、照样**白跑一趟带签名的取流往返**（实测 200~400ms），而那一趟
+// 注定失败。
+//
+// 而双击是收藏夹页**最常用**的播放手势——所以这一条是这一票的核心判据。
+//
+// ⚠️ **判据是取流接口被问了几次**：光断「队列里有几首」不够——那一首进队列
+// 之后**起播**才是那一趟取流，而「起播失败之后被自动跳过」（`autoSkipDead`）
+// 会把队列挪回去，于是「队列里几首」那个判据量不到那一趟往返。
+func TestDoubleClickingAnInvalidRowDoesNotAskForAStream(t *testing.T) {
+	b := newCollectionBili(t)
+	b.setMedias(invalidMediaOf(1, "失效的一首"))
+	_, s, tt := collectionShellFrom(t, b, nil, "", "12345")
+	waitSongs(t, tt, s, 1)
+	tt.Frame()
+
+	// ⚠️ **取流要挂上**：这一条要验的就是「取流**没有**发生」，而那台假 B 站
+	// 得**会伺服**取流——不然「没发生」是因为「压根不会」，不是因为我拦住了。
+	mountQueueStreaming(t, s.app)
+	before := b.playURLHits()
+
+	// 双击那一行。
+	r, ok := tt.Find("失效的一首")
+	if !ok {
+		t.Fatalf("画面上找不到那一行：文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	for range 10 {
+		tt.Frame()
+	}
+
+	// 🔴 **取流一次都不该有**。
+	if got := b.playURLHits(); got != before {
+		t.Errorf("取流接口被问了 %d 次，want %d（失效的那一条不该触发取流）", got, before)
+	}
+	// 🔴 **队列里也不该有它**。
+	if got := s.app.Queue().Items(); len(got) != 0 {
+		t.Errorf("队列里有 %d 首，want 0：%+v", len(got), got)
+	}
+}
