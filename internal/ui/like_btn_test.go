@@ -162,6 +162,35 @@ func TestTheLikeButtonShakesWhileHeld(t *testing.T) {
 	}
 }
 
+// TestTheButtonLongPressKeepsAskingForFrames 钉住「没环的目标整段按住都要自己要帧」。
+//
+// 赞键没有环、没有 Draw 回调：抖动的偏移和「到没到 2500ms」全靠**重建帧**算。
+// 要是照有环那一路在 500ms 后停手（环出来之后有局部重绘自驱，赞键没有），暂停时
+// 没有 tick、指针不动没有事件——长按冻在半路：抖停了、三连永远发不出去。
+//
+// ⚠️ 这一条量的是**帧经济**：推钟不强制出帧。Tester 的 `Frame()` 会无条件出
+// 一帧，`waitFrames` 也一样——别的用例里那一笔会把「冻住」盖住，只有数重建
+// 次数才量得出来。
+func TestTheButtonLongPressKeepsAskingForFrames(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	holdStar(t, e, "赞")
+
+	// 推到 700ms（抖动已经开始、进度 > 0 的那一段），数接下来 100ms 里
+	// 播放条建了几次帧。上限给 2 是给后台 tick 的：窗口里真时的唤醒撞进来
+	// 算它一帧，但抖动的帧是**每一刷新一帧**，量级对不上。
+	advanceLike(e, 700*time.Millisecond)
+	e.s.builds = buildTally{}
+	advanceLike(e, 100*time.Millisecond)
+	if got := e.s.builds.playbar; got < 2 {
+		t.Errorf("按住 700–800 毫秒之间播放条只建了 %d 次帧 —— 没环的目标漏要帧，"+
+			"暂停时长按会冻在半路（抖停了、三连发不出去）", got)
+	}
+
+	// 要帧要得到位，三连就还是到点就发（这一段依旧不强制出帧）。
+	advanceLike(e, biuLikeLongPressMS*time.Millisecond-800*time.Millisecond+200*time.Millisecond)
+	waitFrames(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+}
+
 // TestTheButtonLongPressWaitsForTheServerAnswer 钉住「没问就不许长按」——
 // 和封面那一条同一口径：猜错的方向是白花两枚币，宁可按不动。
 func TestTheButtonLongPressWaitsForTheServerAnswer(t *testing.T) {

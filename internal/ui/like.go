@@ -221,7 +221,9 @@ func likeArmed(a *app.App) bool {
 //
 // ⚠️ **它管的是「按着没有」和「什么时候发三连」，环画到哪是**画的时候**算的**
 // （`likeRingProgress`）——理由见那一段（局部重绘不重建，票 #392）。
-func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed bool) {
+//
+// ringed 说的是这个目标有没有进度环——它决定按住期间怎么要帧，见函数尾那段。
+func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed bool) {
 	now := s.clock.Now()
 
 	// 这一次按下开始了：从这一刻起计时。
@@ -264,15 +266,24 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed bool) {
 	// ⚠️ **按住的时候必须一直要帧**：指针不动时框架不会自己出帧，于是进度环
 	// 停在 0、那 2.5 秒也永远不会到（不报错、不崩溃，就是长按没反应）。
 	//
-	// ⚠️ **但只有「环还没出来」的那一段要靠重建**（`c.AnimationFrame()`）：
-	// 环那个元素此刻还不存在，于是**没有东西能去要「只重画」的那一帧**——
-	// 而局部重绘那一帧**不重建**（`mygo/ui/runtime.go` 的 `repaintFrame`），
-	// 靠它量不到「按了多久」。
+	// 两类目标要帧的路子不一样（ringed 说的是这个目标有没有环）：
 	//
-	// 环出来之后（`g.progress > 0`）就换成**画的时候**要帧
-	// （`likeRingProgress` 里的 `p.AnimationFrame()`），那一段走的是局部
-	// 重绘：整棵元素树不必每一帧重建一遍（票 #392）。
-	if armed && pressed && g.progress <= 0 {
+	//   有环（两张封面）：只有「环还没出来」的那一段靠**重建**要帧
+	//   （`c.AnimationFrame()`）——环那个元素此刻还不存在，没有东西能去要
+	//   「只重画」的那一帧，而局部重绘那一帧**不重建**（`mygo/ui/runtime.go`
+	//   的 `repaintFrame`），靠它量不到「按了多久」。环出来之后（
+	//   `g.progress > 0`）就换成**画的时候**要帧（`likeRingProgress` 里的
+	//   `p.AnimationFrame()`），那一段走局部重绘：整棵元素树不必每一帧
+	//   重建一遍（票 #392）。
+	//
+	//   没环（赞键）：**整段按住都靠重建要帧**。它没有 Draw 回调——没有人
+	//   去要那趟局部重绘，抖动的偏移和「到没到 2500ms」全都要靠重建帧算。
+	//   按环那一套在 500ms 后停手的话，暂停时没有 tick、指针不动没有事件，
+	//   长按就冻在半路：抖停了、三连永远发不出去（而且无头测试发现不了
+	//   ——Tester 的 `Frame()` 会无条件出一帧，把冻住盖住，见
+	//   TestTheButtonLongPressKeepsAskingForFrames）。代价是抖动那两秒整棵
+	//   树每帧重建一遍——有界（松手/触发即停），和任何 AnimateTo 动画同款。
+	if armed && pressed && (!ringed || g.progress <= 0) {
 		c.AnimationFrame()
 	}
 }
@@ -359,7 +370,7 @@ func tripleSaysWhatHappened(res bili.TripleResult) string {
 // 环可画，只能靠重建（见 `trackLike` 那一段）。
 func (s *Shell) viewLikeRing(g *likeGesture, c *ui.Context, pressed bool, radius float32) {
 	armed := likeArmed(s.app)
-	s.trackLike(g, c, pressed, armed)
+	s.trackLike(g, c, pressed, armed, true)
 	if g.progress <= 0 {
 		return
 	}
@@ -632,7 +643,7 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 	// 慢一帧。
 	armed := likeArmed(s.app)
 	fired := s.likeBtn.fired
-	s.trackLike(&s.likeBtn, c, b.Pressed(), armed)
+	s.trackLike(&s.likeBtn, c, b.Pressed(), armed, false)
 	if !fired && s.likeBtn.fired {
 		// 三连触发的这一下，图标弹一下（和点击那一弹同一个动效）：时间到的
 		// 「成了」就是这一停一弹，星标等 B 站的答案落地再亮。
