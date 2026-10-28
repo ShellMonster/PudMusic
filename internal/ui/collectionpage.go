@@ -171,9 +171,6 @@ func (x *mediaIndex) reset() {
 type collectionPage struct {
 	ref app.CollectionRef
 
-	// tint 是头图区背景光晕的取色（封面主色，见 viewCollectionHeader）。
-	tint coverTint
-
 	// list 是下面那个分页列表。
 	list *list.PagedList
 
@@ -591,7 +588,7 @@ const collectionOpsButtonH = 40
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
-	hue, sat := p.tint.sync(info.Cover, s.wake.invalidate)
+	hue, sat := s.tint.sync(info.Cover, s.wake.invalidate)
 	glow := collectionGlow(t, hue, sat)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。

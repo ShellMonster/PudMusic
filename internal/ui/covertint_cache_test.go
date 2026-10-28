@@ -80,13 +80,26 @@ func TestTheTintCacheIsBounded(t *testing.T) {
 	tintClientFor(t, &hits)
 
 	var tint coverTint
-	// 灌比上限更多的封面。
-	for i := range 64 {
+	// ⚠️ **要灌「上限的好几倍」**：灌 64 条、断言不超过 64，那三个数互相
+	// 抵消了，断言恒成立（实测：把淘汰逻辑改成空操作，这条照样绿）。
+	const over = 3
+	for i := range tintCacheLimit * over {
 		tint.sync(urlFor(i), func() {})
 		waitTint(t, &tint)
 	}
-	if n := tint.cacheSize(); n > tintCacheLimit {
-		t.Fatalf("缓存里有 %d 条，超过上限 %d", n, tintCacheLimit)
+	// ⚠️ **断言「正好等于上限」而不是「不超过」**：后者在「完全不淘汰」的
+	// 实现下也成立（缓存会涨到 192 条——但那是 `<=` 也拦不住的）。
+	if n := tint.cacheSize(); n != tintCacheLimit {
+		t.Fatalf("缓存里有 %d 条，want %d（上限就是 %d）", n, tintCacheLimit, tintCacheLimit)
+	}
+	// ⚠️ **还要确认「最老的那几条真的被挤掉了」**：只数条数的话，一个
+	// 「塞满了但塞的是重复的」实现也能蒙对。
+	if _, _, ok := tint.cached(urlFor(0)); ok {
+		t.Fatalf("最早那个封面（urlFor(0)）还在缓存里——淘汰逻辑没生效")
+	}
+	// 而**最近用的**那条必须在。
+	if _, _, ok := tint.cached(urlFor(tintCacheLimit*over - 1)); !ok {
+		t.Fatalf("最近用的那条不在缓存里——淘汰挑错了对象")
 	}
 }
 
@@ -235,5 +248,93 @@ func TestACoverWithoutColourIsStillRemembered(t *testing.T) {
 	if got := hits.Load(); got != 1 {
 		t.Fatalf("取不到色的封面发了 %d 次网络请求，want 1——"+
 			"每一帧都会重发，网络会被打满", got)
+	}
+}
+
+// 网络失败之后**不能每一帧都重发一次请求**。
+//
+// # 为什么这一条要紧
+//
+// 从前的 `sync` 靠 `url != t.url` 判断「要不要发一趟」，所以**同一个 URL
+// 只发一次**——失败也不重发。改成「缓存没有就发一趟」之后，失败的那些
+// （404、400、超时）**不在缓存里**，于是下一帧又一趟——
+// 「一个失效的封面地址」会让网络被每一帧打一次。
+//
+// ⚠️ 实测（30 帧）：改之前 30 次请求，改之后 30 次请求。
+//
+// # 怎么修
+//
+// 失败也要记进缓存，但**记的是「失败」而不是「没有颜色」**，并且带**退避**：
+// 退避期内不再试，过了再试一次（网络可能恢复了）。
+//
+// ⚠️ **「失败」和「没有颜色」是两件事**：黑白封面是**永久**取不到色，
+// 网络错误是**可恢复**的——所以前者永久记，后者退避后重试。
+func TestANetworkFailureDoesNotRetryEveryFrame(t *testing.T) {
+	var hits atomic.Int64
+	orig := tintClient
+	t.Cleanup(func() { tintClient = orig })
+	tintClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		hits.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(http.NoBody),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	var tint coverTint
+	const url = "https://i0.hdslb.com/bfs/archive/gone.jpg"
+	// 模拟 30 帧：每一帧要一次色，且上一趟已经回来。
+	for range 30 {
+		tint.sync(url, func() {})
+		waitTint(t, &tint)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("网络失败后 30 帧发了 %d 次请求，want 1——"+
+			"每一帧都重发，网络会被打满", got)
+	}
+}
+
+// 失败是**可恢复**的：退避过了之后要再试一次（网络可能恢复了）。
+//
+// ⚠️ 这一条是上一条的另一半：「失败就永远不试」会把「网络好了之后颜色
+// 也不出来了」这个症状带进来。
+func TestANetworkFailureIsRetriedAfterTheBackoff(t *testing.T) {
+	var hits atomic.Int64
+	orig := tintClient
+	t.Cleanup(func() { tintClient = orig })
+	tintClient = &http.Client{Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		hits.Add(1)
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Body:       io.NopCloser(http.NoBody),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	// ⚠️ **时钟要在第一趟之前就装上**：退避的到期时刻是**失败那一刻**算的
+	// 出来的，用的是当时的时钟——事后再换时钟，那一刻已经过去了。
+	fc := newFakeClock(time.Now())
+	var tint coverTint
+	tint.clock = fc.Now
+
+	const url = "https://i0.hdslb.com/bfs/archive/gone.jpg"
+	tint.sync(url, func() {})
+	waitTint(t, &tint)
+	first := hits.Load()
+
+	// 退避期内：不重发。
+	tint.sync(url, func() {})
+	waitTint(t, &tint)
+	if got := hits.Load(); got != first {
+		t.Fatalf("退避期内又发了 %d 次请求（want %d）", got, first)
+	}
+
+	// 退避过了：再试一次（哪怕还是失败）。
+	fc.Advance(tintRetryBase + time.Second)
+	tint.sync(url, func() {})
+	waitTint(t, &tint)
+	if got := hits.Load(); got != first+1 {
+		t.Fatalf("退避过了之后没有重试（%d 次，want %d）", got, first+1)
 	}
 }

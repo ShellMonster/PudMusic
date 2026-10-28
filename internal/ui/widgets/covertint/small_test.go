@@ -187,3 +187,48 @@ func fakeBili(t *testing.T, width, height int, c color.RGBA) (*string, *http.Cli
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// 这个包**自己能解 WebP**——不靠 `internal/ui` 顺带注册。
+//
+// # 为什么
+//
+// B 站图床给的封面有一档就是 `.webp`（`imgcache` 一直用 `@…webp`），
+// 而 `image.Decode` 认不认 WebP 取决于**这个二进制里有没有那个解码器**。
+//
+// 从前这个包只注册了 jpeg/png，它是被 `internal/ui` 用的——那边导入了
+// `mygo/ui`，WebP 解码器**顺带**注册上了，于是**碰巧**能解。那是依赖了
+// 别人的副作用：这个包单独用就解不了，而症状是「取不到色」——**静默的**。
+func TestThisPackageDecodesWebPOnItsOwn(t *testing.T) {
+	// 一枚 4×4 的蓝色 WebP（VP8L 无损）。
+	img, _, err := image.Decode(bytes.NewReader(blueWebP))
+	if err != nil {
+		t.Fatalf("这个包解不了 webp：%v（它是靠 `internal/ui` 顺带注册的）", err)
+	}
+	if b := img.Bounds(); b.Dx() != 4 || b.Dy() != 4 {
+		t.Fatalf("解出来的尺寸不对：%+v", b)
+	}
+	// 顺手确认**颜色也对**（不是解出来一片空白）。
+	r, g, bl, _ := img.At(2, 2).RGBA()
+	if r>>8 < 20 || g>>8 < 60 || bl>>8 < 180 {
+		t.Fatalf("解出来的颜色不对：%d,%d,%d（该是蓝的）", r>>8, g>>8, bl>>8)
+	}
+}
+
+// blueWebP 是一枚 4×4 的**蓝色** WebP（VP8L 无损）。
+//
+// 它是**内嵌的字节**，不是从网上下的——测试不许依赖网络。
+//
+// ⚠️ VP8L 的负载是「位打包」的，所以这个串**不能**随手改：改一个字节就
+// 不是合法的 WebP 了。要换尺寸或换颜色就重新编一枚。
+var blueWebP = []byte{
+	0x52, 0x49, 0x46, 0x46, // "RIFF"
+	0x1e, 0x00, 0x00, 0x00, // 文件大小（不含头 8 字节）
+	0x57, 0x45, 0x42, 0x50, // "WEBP"
+	0x56, 0x50, 0x38, 0x4c, // "VP8L"
+	0x11, 0x00, 0x00, 0x00, // 负载长度
+	0x2f, 0x03, 0xc0, 0x00,
+	0x00, 0x07, 0x50, 0xa8,
+	0x7a, 0x94, 0xbb, 0xff,
+	0x81, 0x88, 0xe8, 0x7f,
+	0x00, 0x00,
+}

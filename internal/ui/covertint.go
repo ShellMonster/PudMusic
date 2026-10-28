@@ -27,9 +27,7 @@ import (
 // 一个格子的话，「换成别的封面」会把前一个的色冲掉——于是切回来还是要
 // 重下。表才有缓存的意义。
 type coverTint struct {
-	mu       sync.Mutex
-	url      string
-	hue, sat float64
+	mu sync.Mutex
 
 	// cache 是「URL → 取到的色」那一张表。
 	//
@@ -37,6 +35,17 @@ type coverTint struct {
 	// 否则每次 `sync` 都会对一个取不到色的封面重新发一次请求，而那张封面
 	// （黑白封面、坏地址）永远是取不到色的，于是**每一帧都发一次网络请求**。
 	cache map[string]tintColor
+
+	// failures 是「每个 URL 失败了几次」——退避的倍数靠它。
+	//
+	// ⚠️ **不能靠 `at` 判**：`at` 是「最近用到」的时刻，不是「失败了几次」。
+	failures map[string]int
+
+	// clock 是「此刻」——测试换掉它就能把退避推快。
+	//
+	// ⚠️ **它是函数不是时钟接口**：取色这一层只要「现在几点」，不需要
+	// `EveryFunc`（它不排定时器，退避是靠「下一次 `sync` 来看一眼」实现的）。
+	clock func() time.Time
 
 	// inflight 是「正在取色中的那些 URL」。
 	//
@@ -57,9 +66,21 @@ type tintColor struct {
 
 	// at 是「上次用到它是什么时候」——淘汰最久没用的那一条靠它。
 	//
-	// ⚠️ **不能靠 `coverTint.url` 判**：那只是「当前这一张」，不是「上一次
-	// 用到的是哪一张」。
+	// ⚠️ **不能靠「当前这一张」判**：那只是「现在要的是哪一张」，不是
+	// 「上一次用到的是哪一张」。
 	at uint64
+
+	// failed 是「上一次取它失败了」。
+	//
+	// ⚠️ **失败和「取不到色」是两件事**：黑白封面是**永久**取不到色，
+	// 网络错误（404、超时）是**可恢复**的。所以失败要**退避后重试**，
+	// 而不是永久记死。
+	failed bool
+
+	// retryAt 是「退避到什么时候为止不再试」。
+	//
+	// 零值 = 不在退避期（要么没失败过，要么已经退避过了）。
+	retryAt time.Time
 }
 
 // tintCacheLimit 是那张表最多留多少条。
@@ -77,6 +98,18 @@ const tintCacheLimit = 64
 // 值——否则它会被当成「最久没用」被挤掉，而它明明刚刚才用过。
 var tintClock atomic.Uint64
 
+// tintRetryBase 是取色失败之后等多久再试。
+//
+// ⚠️ **不能是 0**：那样失败之后每一帧都会重发一次请求（实测 30 帧 = 30 次
+// 网络请求）——一个失效的封面地址就能把网络打满。
+//
+// ⚠️ **也不能太长**：网络抖动是暂时的，退避太久会���「网络早就好了，颜色
+// 却一直不出来」。这一档是 5 秒。
+const tintRetryBase = 5 * time.Second
+
+// tintRetryMax 是退避的封顶。
+const tintRetryMax = time.Minute
+
 // tintClient 拉封面字节用的客户端：走全应用唯一的网络层（代理设置、
 // 凭据边界都归它管），超时保留自己那一档——取色是锦上添花，等不起。
 var tintClient = func() *http.Client {
@@ -92,32 +125,39 @@ var tintClient = func() *http.Client {
 // 那层光晕立刻就在（票 #623）。
 func (t *coverTint) sync(url string, wake func()) (hue, sat float64) {
 	if url == "" {
-		t.mu.Lock()
-		t.url = ""
-		t.hue, t.sat = 0, 0
-		t.mu.Unlock()
 		return 0, 0
 	}
 
 	// 缓存里有的：直接用。
 	t.mu.Lock()
 	if c, ok := t.cache[url]; ok {
-		// ⚠️ **每次命中都要把 `at` 推到最新**：否则这一条会被当成「最久
-		// 没用」挤掉，而它明明刚刚才用过。
-		c.at = tintClock.Add(1)
-		t.cache[url] = c
-		t.url, t.hue, t.sat = url, c.hue, c.sat
-		t.mu.Unlock()
-		return c.hue, c.sat
+		// ⚠️ **失败的那一条**分两种情况：
+		//
+		//	退避期内 → 不重发（否则每一帧一次网络请求）
+		//	退避过了 → **重新起一趟**（网络错误是可恢复的，永久记死会让
+		//	             「网络早就好了，颜色却一直不出来」）
+		if c.failed {
+			if t.now().Before(c.retryAt) {
+				t.mu.Unlock()
+				return 0, 0
+			}
+			// 退避过了：把它从缓存里摘掉，落到下面「缓存没有」那一支——
+			// 那里会重新起一趟，而 `fetch` 回来之后会重新写进来。
+			delete(t.cache, url)
+		} else {
+			// ⚠️ **每次命中都要把 `at` 推到最新**：否则这一条会被当成「最久
+			// 没用」挤掉，而它明明刚刚才用过。
+			c.at = tintClock.Add(1)
+			t.cache[url] = c
+			t.mu.Unlock()
+			return c.hue, c.sat
+		}
 	}
 	// 已经在取了：别起第二个，等那一趟回来。
 	if t.inflight[url] {
-		t.url = url
 		t.mu.Unlock()
 		return 0, 0
 	}
-	t.url = url
-	t.hue, t.sat = 0, 0
 	if t.inflight == nil {
 		t.inflight = map[string]bool{}
 	}
@@ -133,24 +173,50 @@ func (t *coverTint) fetch(url string, wake func()) {
 	h, ok, err := covertint.Fetch(context.Background(), tintClient, url)
 	t.mu.Lock()
 	delete(t.inflight, url)
-	if err == nil {
+	switch {
+	case err != nil:
+		// ⚠️ **失败要记，而且要带退避**：不记的话下一帧又一趟——实测
+		// 「一个失效的封面地址」能让每一帧都发一次网络请求。
+		//
+		// ⚠️ **失败和「取不到色」不是一回事**：失败是**可恢复**的，所以
+		// 记的是「退避到什么时候为止不再试」，退避过了还会再试。
+		t.putCached(url, tintColor{failed: true, retryAt: t.now().Add(t.retryDelayLocked(url))})
+	case !ok:
 		// ⚠️ **取不到色也记**（饱和度 0）：那张封面（黑白封面、坏地址）永远
 		// 取不到色，不记的话每次 `sync` 都会重发一次请求。
+		//
+		// ⚠️ 这一档**不是失败**：黑白封面永久取不到色，重试也没用。
 		t.putCached(url, tintColor{hue: h.H, sat: h.S})
-	}
-	// ⚠️ **只有「当前要的还是这一张」才写当前那一档**（理由同从前）：
-	// 取色是在后台跑的，用户可能已经切到别的封面去了。
-	if t.url == url {
-		t.hue, t.sat = h.H, h.S
-		if !ok {
-			t.hue, t.sat = 0, 0
-		}
+	default:
+		t.putCached(url, tintColor{hue: h.H, sat: h.S})
 	}
 	t.mu.Unlock()
 	if err != nil {
 		return
 	}
 	wake()
+}
+
+// retryDelayLocked 是这个 URL 这一次失败之后要退避多久（**调用方拿着锁**）。
+//
+// ⚠️ **失败次数越多等得越久**，但封顶在 `tintRetryMax`——不然一个一直
+// 失败的地址会让它永远不再试（而网络可能早就好了）。
+func (t *coverTint) retryDelayLocked(url string) time.Duration {
+	// 退避的倍数由「这一条已经失败了几次」决定，而那个数存在 `at` 里
+	// 是不行的（`at` 是「最近用到」的时刻）。所以失败次数单独记。
+	d := tintRetryBase << t.failures[url]
+	if d > tintRetryMax || d <= 0 {
+		d = tintRetryMax
+	}
+	return d
+}
+
+// now 是此刻。测试换掉它就能把退避推快。
+func (t *coverTint) now() time.Time {
+	if t.clock != nil {
+		return t.clock()
+	}
+	return time.Now()
 }
 
 // putCached 把一个色记进那张表（**调用方已经拿着锁**）。
@@ -161,13 +227,22 @@ func (t *coverTint) putCached(url string, c tintColor) {
 	if _, ok := t.cache[url]; !ok && len(t.cache) >= tintCacheLimit {
 		t.evictOldestLocked()
 	}
+	if c.failed {
+		if t.failures == nil {
+			t.failures = map[string]int{}
+		}
+		t.failures[url]++
+	} else {
+		// ⚠️ **成功了就清掉失败计数**：那个 URL 现在是好的。
+		delete(t.failures, url)
+	}
 	c.at = tintClock.Add(1)
 	t.cache[url] = c
 }
 
 // evictOldestLocked 挤掉最久没用的那一条（**调用方已经拿着锁**）。
 //
-// ⚠️ **「最久没用」靠 `t.url` 判不出来**（那只是「当前这一张」），
+// ⚠️ **「最久没用」靠「当前这一张」判不出来**（那只是「现在要的是哪一张」），
 // 所以这张表自己记一条「上次用到是什么时候」。
 func (t *coverTint) evictOldestLocked() {
 	oldest, found := "", false
@@ -179,6 +254,9 @@ func (t *coverTint) evictOldestLocked() {
 	}
 	if found {
 		delete(t.cache, oldest)
+		// ⚠️ **失败计数也要一起清**：它跟那一条是一对——留着就是一个
+		// 永远算不出来的计数（那个 URL 已经不在表里了）。
+		delete(t.failures, oldest)
 	}
 }
 
