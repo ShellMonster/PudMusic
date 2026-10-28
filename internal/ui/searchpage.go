@@ -23,10 +23,12 @@
 package ui
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -281,14 +283,17 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	if pg.Err != nil && pg.Loaded == 0 {
 		retry := func() { t.list.Reload() }
 		retryLabel := "重试搜索"
-		if searchErr, ok := pg.Err.(*app.SearchError); ok && !searchErr.Retryable {
+		if searchErr, ok := searchErrorOf(pg.Err); ok && !searchErr.Retryable {
 			retry = nil
 			retryLabel = ""
 		}
+		errText := searchErrorText(pg.Err)
 		s.viewLoadError(c, "search:fail:"+strconv.Itoa(tab),
-			"搜索「"+keyword+"」", retryLabel, pg.Err, retry)
+			"搜索「"+keyword+"」", retryLabel, errors.New(errText), retry)
+
 		return
 	}
+
 	if pg.Loaded == 0 && !pg.Loading {
 		s.viewEmpty(c, "search:no-results:"+strconv.Itoa(tab), noSearchResults)
 		return
@@ -310,6 +315,18 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	}
 	t.list.View(c)
 	s.noteScrollbar(t.list.Hot())
+}
+
+func searchErrorOf(err error) (*app.SearchError, bool) {
+	var searchErr *app.SearchError
+	return searchErr, errors.As(err, &searchErr)
+}
+
+func searchErrorText(err error) string {
+	if searchErr, ok := searchErrorOf(err); ok {
+		return notice.SearchErrorText(searchErr.Category)
+	}
+	return err.Error()
 }
 
 // searchHeaderSpec 是这一档 Tab 的表头。

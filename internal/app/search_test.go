@@ -137,6 +137,13 @@ func TestSearchClassifiesErrorsForTheUI(t *testing.T) {
 		if searchErr.Message != "连不上 B 站，检查一下网络" || !searchErr.Retryable {
 			t.Fatalf("search error=%+v", searchErr)
 		}
+		if searchErr.Category != app.SearchErrorNetwork {
+			t.Fatalf("search error category=%v, want network", searchErr.Category)
+		}
+		if !errors.Is(err, bili.ErrNetwork) {
+			t.Fatalf("search error lost network cause: %v", err)
+		}
+
 	})
 
 	t.Run("business error is not retryable", func(t *testing.T) {
@@ -165,6 +172,13 @@ func TestSearchClassifiesErrorsForTheUI(t *testing.T) {
 		if searchErr.Retryable {
 			t.Fatalf("business error unexpectedly retryable: %+v", searchErr)
 		}
+		if searchErr.Category != app.SearchErrorAPI {
+			t.Fatalf("search error category=%v, want api", searchErr.Category)
+		}
+		if searchErr.Message != "B 站拒绝了这次请求" {
+			t.Fatalf("search error message=%q", searchErr.Message)
+		}
+
 	})
 }
 
