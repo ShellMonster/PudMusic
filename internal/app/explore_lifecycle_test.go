@@ -87,8 +87,10 @@ func TestClosedAppDiscardsLateSpaceResult(t *testing.T) {
 	b.mu.Lock()
 	b.delayMS = 100
 	b.mu.Unlock()
+	oldFinished := make(chan struct{})
 	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
 		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "迟到的 UP"})
+		close(oldFinished)
 	})
 	a := newExploreApp(t, b)
 	var wakes atomic.Int32
@@ -96,9 +98,7 @@ func TestClosedAppDiscardsLateSpaceResult(t *testing.T) {
 	sp := a.UpSpaceOf(42)
 	sp.Load()
 	a.Close()
-	for i := 0; i < 100; i++ {
-		waitExploreSleep()
-	}
+	waitExploreSignal(t, oldFinished, "关闭后的迟到请求结束")
 	if got := sp.Snapshot(); got.Loaded || got.User.Name != "" {
 		t.Fatalf("关闭后的迟到结果写回旧空间：%+v", got)
 	}
