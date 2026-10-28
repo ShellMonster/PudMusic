@@ -158,11 +158,11 @@ func applyPreset(t *ui.Theme, name app.ThemePreset) {
 
 // sidebarBackground 是侧栏这一帧的底色：方案里的 `sidebar`（规范 §2），经典不套方案、
 // 沿用主题的 Background。
+//
+// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
+// 理由见 `cardPalette` 顶上那一段（那一份里连侧栏那一档底色一起算了）。
 func (s *Shell) sidebarBackground(t *ui.Theme) ui.Color {
-	if sk, _, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
-		return ui.Hex(sk.sidebar)
-	}
-	return t.Background
+	return s.cardStyleOf(t).sidebar
 }
 
 // accentSoft 是「强调色的淡底」：底色往强调色推一点（规范 §2 的 `accentSoft`，
@@ -175,24 +175,103 @@ func accentSoft(t *ui.Theme) ui.Color {
 	return t.Background.Mix(t.Accent, a)
 }
 
-// cardBackground 是卡片、弹层的底色：方案里的 `surface1`；经典沿用控件那一层 `Surface`。
-func (s *Shell) cardBackground(t *ui.Theme) ui.Color {
-	if sk, _, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
-		return ui.Hex(sk.surface1)
+// cardPalette 是「卡片那一档」的三个值：**底色**、**圆角**、**悬停那一档底色**。
+//
+// # 为什么它们三个是一份
+//
+// 三个值都只依赖两样东西：**主题方案**和**深浅**（外加主题自己的
+// `Surface` / `Radius` / `Text`——而那三样在主题里也是跟着方案和深浅走的）。
+// 于是它们和**主题本身**是同一层的东西：主题只在「设置变了 / 系统深浅变了 /
+// 桌面偏好变了」的时候才变，那三样都在 `themeKey` 里。
+//
+// ⚠️ **它们原来各自去读一遍设置**（`cardBackground` / `cardRadius` /
+// `cardHoverBackground` 三个函数各读一次），而关注页那一列卡**每一张、每一帧**
+// 都要用这三个值——于是「一帧读几次设置」是**每张卡乘以几**的（实测整窗
+// 400 次/帧、隔离 48 次/帧，票 #628）。
+//
+// 新的做法是**跟主题同一层地算一次、存起来**，各处去读那一份——见
+// `themeCache`（`theme.go`）。
+type cardPalette struct {
+	// bg 是卡片、弹层的底色：方案里的 `surface1`；经典沿用控件那一层 `Surface`。
+	bg ui.Color
+	// radius 是卡片、弹层的圆角：方案里的 `radiusLg`；经典就是主题圆角的 1.5 倍。
+	radius float32
+	// hover 是「一张卡片被指针压着」那一档底色：从**卡片自己的底**出发，往
+	// 文字色推一档（理由见 `cardHoverBackground`）。
+	hover ui.Color
+	// sidebar 是侧栏那一帧的底色：方案里的 `sidebar`（规范 §2）；经典沿用主题的
+	// Background。
+	//
+	// ⚠️ **它和卡片那三个值是同一份**：它们都只依赖**方案**和**深浅**，而那一
+	// 档的查表（`presetSkinFor`）就是「方案 + 深浅 → 那一档的颜色」。于是**一次
+	// 查表**出三样东西，而不是三样各查一次。
+	sidebar ui.Color
+	// preset 是「这一份套着方案（不是经典）」：写死的冷灰（zinc）在暖色方案里
+	// 要换成跟着主题走的色（理由见 `cardStyle.preset`）。
+	preset bool
+}
+
+// cardPaletteOf 按主题和方案算卡片那三个值。
+//
+// ⚠️ **这是纯函数**：不读设置、不分配。于是它能被**每帧算一次**（而不是每张卡
+// 一次）——「每张卡一次」的那些读设置才是这一票要消灭的那几百次。
+//
+// # 两个分支和「原来那三个函数」逐字对应
+//
+//   - **方案**：底色是 `surface1`、圆角是 `radiusLg`、悬停往文字色推
+//     `presetHoverMix`；
+//   - **经典**：底色是控件那一层 `Surface`、圆角是主题圆角的 1.5 倍、悬停往
+//     黑/白推 `surfaceStep`（`applyBackground` 那个算法）。
+//
+// ⚠️ **悬停那一档是从「卡片自己的底」推的**，不是从页面底推的——理由见
+// `cardHoverBackground` 顶上那一段。
+func cardPaletteOf(t *ui.Theme, preset app.ThemePreset) cardPalette {
+	if sk, shape, ok := presetSkinFor(preset, t.Dark); ok {
+		bg := ui.Hex(sk.surface1)
+		return cardPalette{
+			bg:      bg,
+			radius:  shape.radiusLg,
+			hover:   bg.Mix(t.Text, presetHoverMix),
+			sidebar: ui.Hex(sk.sidebar),
+			preset:  true,
+		}
 	}
-	return t.Surface
+	bg := t.Surface
+	mix := ui.Color{A: 255} // 黑
+	step := surfaceStepLight
+	if t.Dark {
+		mix = ui.Color{R: 255, G: 255, B: 255, A: 255}
+		step = surfaceStepDark
+	}
+	return cardPalette{
+		bg:      bg,
+		radius:  t.Radius * 1.5,
+		hover:   bg.Mix(mix, step),
+		sidebar: t.Background,
+	}
+}
+
+// cardBackground 是卡片、弹层的底色：方案里的 `surface1`；经典沿用控件那一层 `Surface`。
+//
+// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
+// 理由见 `cardPalette` 顶上那一段。
+func (s *Shell) cardBackground(t *ui.Theme) ui.Color {
+	return s.cardStyleOf(t).bg
 }
 
 // cardRadius 是卡片、弹层的圆角：方案里的 `radiusLg`；经典就是主题圆角的 1.5 倍。
+//
+// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
+// 理由见 `cardPalette` 顶上那一段。
 func (s *Shell) cardRadius(t *ui.Theme) float32 {
-	if _, shape, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
-		return shape.radiusLg
-	}
-	return t.Radius * 1.5
+	return s.cardStyleOf(t).radius
 }
 
 // cardHoverBackground 是「一张卡片被指针压着」那一档底色：从**卡片自己的底**
 // 出发，往文字色推一档。
+//
+// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
+// 理由见 `cardPalette` 顶上那一段。
 //
 // # 为什么基数是卡片底，而不是页面底或控件层
 //
@@ -220,17 +299,39 @@ func (s *Shell) cardRadius(t *ui.Theme) float32 {
 //
 //   - 经典：底色往黑/白推 `surfaceStep`（`applyBackground` 那个算法）；
 //   - 方案：往文字色推 `presetHoverMix`（`applyPreset` 那个算法）。
-func (s *Shell) cardHoverBackground(t *ui.Theme, cardBg ui.Color) ui.Color {
-	if _, _, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
-		return cardBg.Mix(t.Text, presetHoverMix)
+func (s *Shell) cardHoverBackground(t *ui.Theme) ui.Color {
+	return s.cardStyleOf(t).hover
+}
+
+// cardStyleOf 取出这一帧该用的卡片那一份。
+//
+// # 走缓存的那条路（生产上唯一会走到的）
+//
+// 主题缓存（`themeCache`）**每帧开头装一次主题**（`applyFrameTheme`），而它
+// 算主题的时候顺手把卡片那三个值也算了——那三个值和主题是**同一层**的东西
+// （只依赖方案和深浅，而那两样都在 `themeKey` 里）。
+//
+// 于是「卡片那三个值」和「主题」是**同一份缓存、同一个键**：键变了（方案换了 /
+// 深浅变了 / 设置变了）下一帧就是新的，而键没变就一直复用。
+//
+// # 那条兜底的路
+//
+// 调用方传的 `t` 那一档深浅和缓存里那一档**不一样**时（比如测试里拿
+// `BuildTheme(...)` 现拼一份），缓存里那一份就不能用了——于是按同一个算法现算
+// 一次（**不读设置**：方案名从缓存的键里拿）。
+//
+// ⚠️ **缓存还没算过的时候**（第一帧之前）那条键是零值，而零值的方案名是空串
+// ——**空串 = 经典**，而用户此刻设的可能是暖纸。于是那一档**要读一次设置**
+// 拿真的方案名。这条路只在「主题还没算过」时走（生产上第一帧之前），而
+// **每张卡**走的是上面那条缓存的路——所以它不是「每张卡一次」。
+func (s *Shell) cardStyleOf(t *ui.Theme) cardPalette {
+	if !s.theme.valid {
+		return cardPaletteOf(t, s.app.SettingsSnapshot().ThemePreset)
 	}
-	mix := ui.Color{A: 255} // 黑
-	step := surfaceStepLight
-	if t.Dark {
-		mix = ui.Color{R: 255, G: 255, B: 255, A: 255}
-		step = surfaceStepDark
+	if t.Dark == s.theme.key.dark {
+		return s.theme.card
 	}
-	return cardBg.Mix(mix, step)
+	return cardPaletteOf(t, s.theme.key.preset)
 }
 
 // cardStyle 是这一帧弹窗面板用的底色和圆角。
@@ -256,10 +357,14 @@ var frameCard atomic.Pointer[cardStyle]
 
 // publishCard 在每帧开头算好弹窗面板的样子并发布。方案里的 `surface1` / `radiusLg`；
 // 经典保持原样（底色 = Background，圆角 = 2.5 个间距单位），一个像素不动。
+//
+// ⚠️ **它读的是缓存里那一份**（`Shell.cardStyleOf`），不再自己去读设置——
+// 弹窗面板的底色和圆角就是**卡片那一档**的同一组值（`surface1` / `radiusLg`），
+// 所以它们本来就在同一份缓存里（理由见 `cardPalette` 顶上那一段）。
 func (s *Shell) publishCard(t *ui.Theme) {
 	cs := cardStyle{bg: t.Background, radius: t.Space(2.5)}
-	if sk, shape, ok := presetSkinFor(s.app.SettingsSnapshot().ThemePreset, t.Dark); ok {
-		cs = cardStyle{bg: ui.Hex(sk.surface1), radius: shape.radiusLg, preset: true}
+	if pal := s.cardStyleOf(t); pal.preset {
+		cs = cardStyle{bg: pal.bg, radius: pal.radius, preset: true}
 	}
 	frameCard.Store(&cs)
 }

@@ -1152,7 +1152,7 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 	if card.Hovered() {
 		// ⚠️ **悬停那一档从卡片自己的底出发**（`cardHoverBackground`），不是跳到
 		// 控件那一层去——那样常态和悬停不在同一条色阶上。
-		card = card.Background(s.cardHoverBackground(t, cardBg))
+		card = card.Background(s.cardHoverBackground(t))
 	}
 
 	// 🔴 **每帧都问一次**（理由见 `followActionBarKey`）：指针在卡上时目标是 1，
