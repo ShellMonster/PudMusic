@@ -3613,6 +3613,46 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #630：UP 空间的头图横幅**从来没画出来过**。
+		//
+		// 🔴 **这一条的错法是「静默」里最静的那种**：横幅那一格传给图片
+		// 缓存的**宽度是 0**（通栏，量不出宽度），而画图那一层用的就是这个
+		// 宽度——于是那一格真的是 0 像素宽，图画不出来。**没有报错、没有
+		// 崩溃**，画面上只是「头像和名字都在、头图那块是空的」。
+		//
+		// 票 #621 又给它加了一层浪费：宽度 0 掉进「量不出尺寸 ⇒ 给最小档
+		// 64×64」的分支，于是多要了一张**正方形缩略图**（横幅两端直接丢掉）。
+		//
+		// ⚠️ **画面上的像素是唯一能抓住它的判据**：元素树上照样有图片元素、
+		// 请求照样发出去了、帧预算甚至更省（画不出来是「少分配」）。
+		//
+		// ⚠️ **「量不出显示尺寸 ⇒ 按原图走」是缓存层的统一规则**，不是横幅
+		// 这一处的特例——将来有人再传 0，会被同一条规则接住。
+		Category: Platform,
+		Spec:     "UP 空间的头图横幅按它真正显示的尺寸要图并画出来：横幅那一带有图（画面上的像素）、铺满内容区宽度、要的是那一档而不是 64×64、窗口拖宽跟着变清晰而拖动时不会每像素换一张图、加载中有扫光的灰、失败有失败态、没头图走主题色渐变；「量不出显示尺寸」在缓存层按原图走",
+		Tests: []string{
+			// 画面上的像素——唯一能抓住「画不出来」的判据。
+			"TestTheSpaceBannerIsActuallyDrawn",
+			// 铺满整个内容区宽度。
+			"TestTheSpaceBannerFillsTheWholeWidth",
+			// 要的是横幅该要的那一档（不是 64×64，且带中心裁剪）。
+			"TestTheSpaceBannerAsksForItsOwnSize",
+			// 拖动时不每像素换一张图 / 跟着窗口宽走。
+			"TestTheSpaceBannerDoesNotAskForANewImageOnEveryPixel",
+			"TestTheSpaceBannerFollowsTheWindowWidth",
+			// 加载态、失败态、没头图那一档。
+			"TestTheSpaceBannerShowsSomethingWhileItLoads",
+			"TestTheSpaceBannerShowsAFailureState",
+			"TestTheSpaceBannerWithoutABannerIsNotBlank",
+			// 探测和画用的是同一个 key（同一张图不下两遍）。
+			"TestTheSpaceBannerIsDownloadedOnlyOnce",
+			// 缓存层那条统一规则。
+			"TestAnUnknownDisplaySizeAsksForTheOriginal",
+			"TestOnlyOneSideUnknownIsAlsoTheOriginal",
+			"TestAKnownSizeStillAsksForThatSize",
+		},
+	},
+	{
 		// 票 #268（2026-10-25）：UP 空间的动态条目与稿件卡按 B 站 UP 主页
 		// 那张参考图重排。
 		//
