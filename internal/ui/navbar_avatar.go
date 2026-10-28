@@ -863,7 +863,15 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 
 	// 失败和「还没下好」要分得开：混成一个色，用户只会以为这个头像本来就是空的，
 	// 等网络好了也不会再看它一眼（imgcache 那边也是这么分的，见 drawCover）。
-	switch st := s.images.Get(face); {
+	//
+	// ⚠️ **走 `GetSized` 而不是 `Get`**（票 #634）：这一格是 40 见方，而 B 站给的
+	// 是**原图**（几百 KB 的正方形）——照原地址去取就是几十倍的浪费。
+	//
+	// ⚠️ **而且它以前是服务层拼好了裁剪参数才给的**（`avatarURL` 拼
+	// `@160w_160h_1c_1s.webp`）——服务层不再拼之后（裁剪参数改由图片缓存按显示
+	// 尺寸统一决定），这一格要是还 `Get`，就变成**去下原图**了。所以这里跟着
+	// 改成 `GetSized`——**按这一格的显示尺寸要图**，和别处的头像走同一条机制。
+	switch st := s.images.GetSized(face, side, side); {
 	case st.Ready():
 		ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(side, side)
 	case st.Err != nil:
