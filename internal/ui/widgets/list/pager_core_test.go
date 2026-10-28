@@ -1,0 +1,116 @@
+package list
+
+import (
+	"context"
+	"errors"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
+
+func TestPagerDropsStaleResultsAndDeduplicatesPages(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	current := map[int]PagerPage[string]{
+		1: {Items: []string{"a", "b"}, HasMore: true},
+	}
+	fetch := func(ctx context.Context, page, loaded int, _ struct{}) (PagerPage[string], error) {
+		if page == 2 {
+			<-release
+			return PagerPage[string]{Items: []string{"b", "c"}, HasMore: false}, nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return current[page], nil
+	}
+	var got []string
+	var gotMu sync.Mutex
+	p := NewPager(fetch, func(v string) string { return v }, func() struct{} { return struct{}{} })
+	p.SetApply(func(page PagerPage[string]) int {
+		gotMu.Lock()
+		got = append(got, page.Items...)
+		gotMu.Unlock()
+		return len(page.Items)
+	})
+	p.Sync(ui.Services{})
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Loaded == 2 && !p.Status().Loading
+	})
+	p.Load(PagerScrollEnd)
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Loading
+	})
+
+	mu.Lock()
+	current[1] = PagerPage[string]{Items: []string{"new"}, HasMore: false}
+	mu.Unlock()
+	gotMu.Lock()
+	got = nil
+	gotMu.Unlock()
+	p.Reload()
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Loading
+	})
+	close(release)
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Loaded == 1 && !p.Status().Loading
+	})
+
+	gotMu.Lock()
+	defer gotMu.Unlock()
+	if len(got) != 1 || got[0] != "new" {
+		t.Fatalf("stale page landed: %#v", got)
+	}
+}
+
+func TestPagerStopsAfterFailureAndRetries(t *testing.T) {
+	var mu sync.Mutex
+	failed := true
+	fetch := func(context.Context, int, int, struct{}) (PagerPage[string], error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if failed {
+			return PagerPage[string]{}, errors.New("temporary")
+		}
+		return PagerPage[string]{Items: []string{"ok"}, HasMore: false}, nil
+	}
+	p := NewPager(fetch, func(v string) string { return v }, func() struct{} { return struct{}{} })
+	p.SetApply(func(page PagerPage[string]) int { return len(page.Items) })
+	p.Sync(ui.Services{})
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Err != nil
+	})
+	if p.Status().Loading || !p.Status().Blocked {
+		t.Fatalf("failure did not unlock and block: %+v", p.Status())
+	}
+
+	mu.Lock()
+	failed = false
+	mu.Unlock()
+	p.Retry()
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Loaded == 1 && !p.Status().Loading
+	})
+	if p.Status().Err != nil || p.Status().HasMore {
+		t.Fatalf("retry did not recover: %+v", p.Status())
+	}
+}
+
+func waitPager(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatal("pager condition did not become true")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
