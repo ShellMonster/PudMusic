@@ -166,7 +166,10 @@ type danmakuLayer struct {
 	count int
 	first string
 
-	// lastPos 是上一帧的位置（毫秒）。
+	// itemsByTime 是当前弹幕批次按 TimeMS 排序的索引。绘制帧只在这个索引上
+	// 做时间窗口二分，不再扫描和排序完整列表。
+	itemsByTime  []app.DanmakuItem
+	maxTextBytes int
 	//
 	// ⚠️ **它只用来认「位置往回跳了」**：用户拖动进度条回到前面时，那八条
 	// 轨道上记着的「下一条最早能进」还是**将来**的时刻，于是新弹幕一条都放
@@ -184,10 +187,18 @@ func (d *danmakuLayer) reset() {
 	d.live = 0
 	d.count = 0
 	d.first = ""
+	d.itemsByTime = nil
+	d.maxTextBytes = 0
 	d.lastPos = 0
 }
 
-// danmakuVisible 是一条此刻该在屏幕上的弹幕。
+// danmakuSortItemsByTime 建立当前批次的稳定时间索引。
+func danmakuSortItemsByTime(items []app.DanmakuItem) {
+	slices.SortStableFunc(items, func(a, b app.DanmakuItem) int {
+		return cmp.Compare(a.TimeMS, b.TimeMS)
+	})
+}
+
 type danmakuVisible struct {
 	// item 是这一条自己（时间、正文、颜色、rowid）。
 	item app.DanmakuItem
