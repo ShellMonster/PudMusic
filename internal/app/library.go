@@ -355,12 +355,24 @@ func historyCannotPlayReason(canPlay bool) string {
 // ownerName / ownerMid 是这一首的 UP 主，播放条上那一句要显示它、点它进他的
 // 空间（见 `Item.Artist`）。**两个都要传**：只给名字的话播放条上那一句点不动，
 // 而调用方手上通常两个都有（B 站这几条接口都带 `upper`/`owner`）。
+//
+// 🔴 **cid 是 0 时要空着，不是字符串 `"0"`**（票：首页榜单点不动）：
+// `Item.Cid` 是字符串，而在线播放那一路判的是「空串 = 缺，去问一次」
+// （`withCid`）。零拼成字符串是 `"0"`，它**冒充一个真的分 P id**——
+//
+//	withCid 看到 "0" ≠ "" → 不去问分 P
+//	PlayURL 看到 "0" ≠ "" → 把 cid=0 真发出去 → B 站回 -400「请求错误」
+//
+// 而 B 站有一批接口就是不给分 P id（音乐榜的 `creation_first_cid`、新歌速递
+// 的 `cid`），那批接口给的数字是**零**。所以这里判的是「小于等于零」。
+//
+// ⚠️ **别改成「等于零」**：负数拼出来是 `"-1"`，它一样冒充真的分 P id。
 func onlineItem(bvid string, cid int64, title, cover, ownerName string, ownerMid int64) Item {
 	return Item{
 		Source:    "online",
 		Type:      "mv",
 		Bvid:      bvid,
-		Cid:       strconv.FormatInt(cid, 10),
+		Cid:       bili.ParseCid(cid),
 		Title:     title,
 		Cover:     cover,
 		Artist:    ownerName,

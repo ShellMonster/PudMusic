@@ -555,14 +555,15 @@ const (
 // 所以折叠态留一枚图标：点了弹一层浮层，列出两组收藏夹，点一个就进去。
 //
 // ⚠️ **当前就在某个收藏夹页上时，那一枚要亮起来**（票 #371）：和侧栏菜单项在
-// 折叠态里的画法一样（`flatCurrent`——强调色淡底 + 按那层底现算的字）。折叠
-// 起来之后侧栏里只剩这一枚图标，它就是「当前在哪」唯一的指示——不亮的话用户
-// 在收藏夹那一页上，却看不出来自己在哪一页。
+// 折叠态里的画法一样（**实心主色底**，见 `flatSolidCurrent`）。折叠起来之后
+// 侧栏里只剩这一枚图标，它就是「当前在哪」唯一的指示——不亮的话用户在收藏夹
+// 那一页上，却看不出来自己在哪一页。
 func (s *Shell) viewFavoritesCollapsed(c *ui.Context, st app.Settings) {
 	anchor := flatIconCellButton(c, iconEmptyFolder, favCollapsedName, sideIconSize, sideIconCell).
 		AlignSelf(ui.Center)
 	if s.onCollectionPage() {
-		anchor = flatCurrent(c, anchor)
+		anchor = flatSolidCurrent(c, anchor)
+		anchor = flatSolidCurrentFeel(c, anchor)
 	}
 	s.sideItemTip(c, anchor, favCollapsedName)
 	if anchor.Clicked() {
@@ -840,13 +841,17 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	row = sideFocusable(row)
 	switch {
 	case cur:
-		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
-		// 强调色淡底 + 按那层底现算的字，深浅两套同一个数）。
+		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatSolidCurrent`——
+		// **实心主色底** + 主色上读得出来的那一档字）。
 		//
-		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`）：那是审计 F-02 /
-		// F-06 点名的那一处——同一个屏上（关注页、动态流页）左栏是实心绿大块、
-		// 侧栏是淡底，两种画法并排，而实心那一块比主操作还响。
-		row = flatCurrent(c, row)
+		// 🔴 **这一档从淡底改成实心底**（票：用户要「深底色 + 白字」）：淡底
+		// （`accentSoft`）和侧栏底色的对比度只有 **1.09:1 ~ 1.29:1**（实测）——
+		// **几乎分不出来**，而「当前在哪」是这一列里唯一的方向标。
+		//
+		// ⚠️ **字色不是写死的白字**：`t.AccentText`（框架按主色亮度挑黑白）——
+		// 深色方案的主色是**亮色**（暖纸深色 `#E58A5A`），白字压上去只有
+		// **2.59:1**，读不出来（理由见 `flatSolidCurrent`）。
+		row = flatSolidCurrent(c, row)
 	}
 	// ⚠️ **悬停 / 按下是 `flat.Feel`**（压一层半透明的前景色），和侧栏菜单项、
 	// 关注页那一列同一档（票 #371）。
@@ -857,7 +862,15 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	//
 	// ⚠️ **压在选中那一层上面是故意的**：压一层前景色在任何底上都成立（透
 	// 明底上是变灰，淡底上是变深），而换底只在前一种底上成立。
-	row = flat.Feel(c, row)
+	//
+	// 🔴 **选中那一行要用「按那一层底算」的那一支**（`flatSolidCurrentFeel`）：
+	// 按主题算的话，浅色主题的正文色是黑的，8% 的黑压在主色底上几乎看不出
+	// 变化——那一行的悬停反馈等于没有。
+	if cur {
+		row = flatSolidCurrentFeel(c, row)
+	} else {
+		row = flat.Feel(c, row)
+	}
 
 	row.Children(func() {
 		s.viewFavoriteCover(c, f)
@@ -881,8 +894,11 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 				TextColor(rowTextColor(t, cur)).Grow(1).
 				MaxLines(1).Ellipsis("…")
 			// 「N 首」：小字、次要色。
+			//
+			// 🔴 **选中那一行的小字要按主色底重算**：`t.TextMuted` 压在实心主色
+			// 底上只有 1.02:1 ~ 1.34:1——完全读不出来。
 			ui.Text(c, favCountText(f)).FontSize(scale.Font(c, scale.Size12)).
-				TextColor(t.TextMuted).Grow(1).MaxLines(1)
+				TextColor(countTextColor(t, cur)).Grow(1).MaxLines(1)
 		})
 	})
 
@@ -941,14 +957,34 @@ func favRowKey(g app.FavoriteGroup, id int64) string {
 	return "fav-row:" + strconv.Itoa(int(g)) + ":" + strconv.FormatInt(id, 10)
 }
 
-// rowTextColor 是收藏夹那一行的字色。
+// rowTextColor 是收藏夹那一行的**名字**的字色。
 //
-// ⚠️ **和 `flatCurrent` 配的是同一档**（`flatCurrentText`）：这一行的字是**自己
-// 画的**（不是从父元素继承），所以底换了字也得跟着换——深色下当前那一行是
-// 主色字，浅色下是**从主色现算的、压到 ≥4.5:1 的那一档**（主色压在浅底上读不
-// 出来，见 flatbutton.go 那一段）。
+// ⚠️ **和 `flatSolidCurrent` 配的是同一档**（`flatSolidCurrentText`）：这一行的
+// 字是**自己画的**（不是从父元素继承），所以底换了字也得跟着换——
+//
+//	没选中	正文色
+//	选中了	`t.AccentText`（主色底上读得出来的那一档）
+//
+// ⚠️ **别用 `flatCurrentText` 了**：那是淡底那一档的字（按淡底现算），而底
+// 已经换成实心主色了——底换了字没换，浅色下就是一行主色底上的深绿字。
 func rowTextColor(t *ui.Theme, current bool) ui.Color {
-	return flatCurrentText(t, current)
+	if current {
+		return flatSolidCurrentText(t)
+	}
+	return t.Text
+}
+
+// countTextColor 是收藏夹那一行的**「N 首」**的字色。
+//
+// 🔴 **选中那一行要按主色底重算**（`flatSolidCurrentMutedText`）：
+// `t.TextMuted` 压在实心主色底上只有 1.02:1 ~ 1.34:1——完全读不出来。
+//
+// 没选中那一行照旧是次要色（它是这一页里的第二层信息）。
+func countTextColor(t *ui.Theme, current bool) ui.Color {
+	if current {
+		return flatSolidCurrentMutedText(t)
+	}
+	return t.TextMuted
 }
 
 // favoriteMenu 建这一行的系统原生右键菜单。

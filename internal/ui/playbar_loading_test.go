@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	mygoui "github.com/egoist/mygo/ui"
 )
 
 // 播放条上的取流反馈（票 #282 立的「要说话」，票 #581 改成「光圈说话」）。
@@ -70,38 +68,48 @@ func TestAFailedPlayGivesASentenceInsteadOfASpinner(t *testing.T) {
 	if tt.HasText("正在取流") {
 		t.Errorf("失败了还在转圈：%q", tt.Texts())
 	}
+	// 🔴 **那句话在播放键那一枚的「详情」面板里**（票：左下角出错那三行太碎）：
+	// 错误文案从那一列里搬走了——那一列只有 75.7 像素宽（实测），一句 26 个
+	// 字的话上屏只剩十来个。
+	//
+	// ⚠️ **判据是「打开面板之后那句话在」**：面板没打开时那句话不在画面上，
+	// 而「失败之后是一句话」这条规格指的是**用户能得到那句话**。
+	if !tt.HasText(errPlayKeyLabel) {
+		t.Errorf("失败之后播放键没有变成那个出错的键：%q", tt.Texts())
+	}
+	openErrDetail(t, tt, "")
 	if !tt.HasText("取流超时了") {
-		t.Errorf("失败之后界面上没有那句话：%q", tt.Texts())
+		t.Errorf("打开详情之后界面上没有那句话：%q", tt.Texts())
 	}
 }
 
-// TestTheFailureSentenceFitsOnOneLine 盯**失败那句话一行放得下**。
+// TestTheFailureSentenceFitsOnOneLine 盯**失败那句话在面板里排得开**。
 //
 // 🔴 **判据是「这句话本身有多宽」比「那一格有多宽」**（不是「字在不在」）：
-// 播放条上那一行只有 140 像素宽（1200 宽的窗口，实测），12 号字放得下十来个
-// 字。一句 50 个字的话上屏只剩「打不开：取流…」这样的碎片——那不是「一句能
-// 看懂的话」（票 #282 的评审）。
+// 播放条上那一列只有 75.7 像素宽（实测），12 号字放得下十来个字。一句 50 个字
+// 的话上屏只剩「打不开：取流…」这样的碎片——那不是「一句能看懂的话」
+// （票 #282 的评审）。
 //
-// ⚠️ **完整那一句在悬停提示里**（`State.ErrDetail`），所以屏幕上短、提示里
-// 全，两边合起来才是一句能看懂的话。
+// 🔴 **那句话在「详情」面板里**（票：左下角出错那三行太碎）：面板宽 320
+// （`t.Space(80)`），一句 50 个字的话**排成两三行**——而「排开了」才是看得全
+// 的证明。
+//
+// ⚠️ **完整那一句在悬停提示里**（`State.ErrDetail`），所以短的那句在画面上、
+// 完整的那句在提示和面板里，两边合起来才是一句能看懂的话。
 func TestTheFailureSentenceFitsOnOneLine(t *testing.T) {
 	const short = "取流超时了"
 	const detail = "取流超时了（20s 内这一段网络没回）。可能是网络慢，也可能是这一首的流取不到——换一首放，或者点重试再试一次。"
 	tt, _ := metaBarTester(t, app.State{Err: short, ErrDetail: detail}, 1200)
 
-	box, ok := tt.Find("打不开：" + short)
+	openErrDetail(t, tt, "")
+	body, ok := tt.Find(detail)
 	if !ok {
-		t.Fatalf("画面上没有那句话：%q", tt.Texts())
+		t.Fatalf("面板里没有完整那一句：%q", tt.Texts())
 	}
-	// 量一下这句话本身有多宽（和界面上用的是同一个字号）。
-	var measured float32
-	mygoui.NewTester(func(c *mygoui.Context) {
-		measured, _ = c.MeasureText(0, mygoui.Span{
-			Text: "打不开：" + short, Size: scale.Font(c, scale.Size12)})
-	}, 300, 60).Frame()
-
-	if measured > box.W {
-		t.Errorf("「打不开：%s」宽 %.1f，而那一格只有 %.1f——放不下，屏幕上只剩碎片",
-			short, measured, box.W)
+	// 🔴 **它排开了**：一行 12 号字是 14 像素高，两行就是 28。不止一行，才说明
+	// 这句话是**排开的、看得全的**，而不是又被截了一次。
+	if body.H <= 20 {
+		t.Errorf("面板里那句话只有 %.1f 高——它被压成一行了（= 又截了一次）：%q",
+			body.H, tt.Texts())
 	}
 }

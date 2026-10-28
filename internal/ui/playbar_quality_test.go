@@ -106,20 +106,24 @@ func TestNoQualityBadgeWhenThereIsNoTrack(t *testing.T) {
 	}
 }
 
-// TestTheErrorSitsUnderTheTitle 盯出错时歌名还是一整行。
+// TestTheErrorDoesNotSqueezeTheTitle 盯出错时歌名还是一整行。
 //
 // # 为什么这条不能只断「字在不在」
 //
 // 出错时界面变成什么样，只有**位置**能说清：「有一句话」在歌名被挤成
 // 一字一行的竖条、又被 76 高的播放条裁掉的时候**照样成立**——字确实画了，
-// 只是没人看得见。所以这里断的是两个 Rect 的关系：
+// 只是没人看得见。
 //
-//	错误那一行的上边在歌名那一行的下边之下（竖着堆，不是并排）
-//	两行都还在播放条里面（没被裁）
+// 🔴 **错误文案不再占那一列**（票：左下角出错那三行太碎）：它搬到了**播放
+// 键**上（那一枚变成红色的「重试」键）。所以这一条现在断的是：
 //
-// 曾经的写法就是把 `Column` 换成一个裸 `Row`，错误文字变成了外层那一行的
-// 第三个孩子，跑到歌名右边去了。`TestErrorShowsNextToTheTitle` 那时候是绿的。
-func TestTheErrorSitsUnderTheTitle(t *testing.T) {
+//	歌名横向要占得开——被压到 40px 以下就说明已经是竖排了
+//	歌名还在播放条里面（没被裁）
+//	那一列上**没有**那句被截碎的错误文案
+//
+// ⚠️ **歌名右边让出来的那一格不是白让的**：播放键那一枚变红了，而它和
+// 歌名在不同的列（播放键在中间那一列），所以歌名的宽度**不受它影响**。
+func TestTheErrorDoesNotSqueezeTheTitle(t *testing.T) {
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			tt := qualityBarTester(t, app.State{
@@ -130,21 +134,20 @@ func TestTheErrorSitsUnderTheTitle(t *testing.T) {
 			}, width)
 
 			title, okT := tt.Find("这一首歌的名字")
-			errBox, okE := tt.Find("打不开：连不上 B 站这条音频流了")
-			if !okT || !okE {
-				t.Fatalf("宽度 %d：歌名在不在 %v，错误在不在 %v，画面的字：%q", width, okT, okE, tt.Texts())
+			if !okT {
+				t.Fatalf("宽度 %d：歌名不在画面上，画面的字：%q", width, tt.Texts())
 			}
-
-			if errBox.Y < title.Y+title.H {
-				t.Errorf("宽度 %d：错误 {%.1f,%.1f %.1fx%.1f} 没有排在歌名 {%.1f,%.1f %.1fx%.1f} 的下面"+
-					"——它跑到歌名右边去了，歌名会被挤成竖条", width,
-					errBox.X, errBox.Y, errBox.W, errBox.H,
-					title.X, title.Y, title.W, title.H)
+			// 🔴 **那一列上不该有那句被截碎的错误文案**。
+			for _, s := range tt.Texts() {
+				if len(s) > 4 && s[:4] == "打不开" {
+					t.Errorf("宽度 %d：那一列上还有那句被截碎的错误文案 %q——"+
+						"它该搬到播放键上去（那一列只有 75.7 像素宽）", width, s)
+				}
 			}
-			// 两行都在播放条里面。播放条 76 高，歌名在行内垂直居中。
-			if title.H > playbarHeight || errBox.Y+errBox.H > playbarHeight {
-				t.Errorf("宽度 %d：内容被 76 高的播放条裁了（歌名 %.1f 高，错误下边在 y=%.1f）",
-					width, title.H, errBox.Y+errBox.H)
+			// 歌名还在播放条里面。播放条 76 高，歌名在行内垂直居中。
+			if title.H > playbarHeight || title.Y+title.H > playbarHeight {
+				t.Errorf("宽度 %d：内容被 76 高的播放条裁了（歌名 %.1f 高，下边在 y=%.1f）",
+					width, title.H, title.Y+title.H)
 			}
 			// 歌名横向要占得开——被压到 40px 以下就说明已经是竖排了。
 			if title.W < 40 {
@@ -186,19 +189,27 @@ func TestTheTitleAndBadgeShareOneLine(t *testing.T) {
 	}
 }
 
-// TestErrorShowsNextToTheTitle 盯出错时播放条上有一句话。
+// TestErrorShowsNextToTheTitle 盯出错时播放条上**说得出话**。
 //
 // 「取流失败不是空白」这条规格的界面那一半：网络断了、解码失败、地址换不到，
 // 都要有话可说，而且和歌名挨着（用户看歌名时自然会看到）。
+//
+// 🔴 **那句话搬到播放键上了**（票：左下角出错那三行太碎）：那一列只有 75.7
+// 像素宽（实测），一句 26 个字的话上屏只剩十来个。所以**「说得出话」由那一
+// 枚键担着**——它变成红色的「重试」，而完整那一句在它的悬停提示和「详情」
+// 面板里。
 func TestErrorShowsNextToTheTitle(t *testing.T) {
 	tt := qualityBarTester(t, app.State{
 		HasTrack: true,
 		Title:    "在线的一首",
 		Quality:  "192K",
 		Err:      "连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）",
+		CanRetry: true,
 	})
-	if !tt.HasText("打不开：连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）") {
-		t.Errorf("播放条上没有那句错误：%q", tt.Texts())
+	// 🔴 **播放键那一枚变成「出错了」**——那是「说得出话」的那一句（完整那一句
+	// 在它的悬停提示和「详情」面板里）。
+	if !tt.HasText(errPlayKeyLabel) {
+		t.Errorf("出错时播放键没有变成那个出错的键：%q", tt.Texts())
 	}
 	if !tt.HasText("在线的一首") {
 		t.Errorf("出错时歌名不见了：%q", tt.Texts())

@@ -433,6 +433,13 @@ func Dimmed(c *ui.Context, e ui.Element) ui.Element {
 // 悬停那层是压在它上面的）。
 func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e, ThemeBase) }
 
+// FeelOnBase 是「按给定的底算」的 `Feel`。
+//
+// ⚠️ **实心主色底那一档要用它**：按主题算的话，浅色主题的正文色是**黑的**，
+// 8% 的黑压在主色底上几乎看不出变化——那一行的悬停反馈等于没有。而按那一层底
+// 的深浅挑（深底压白、浅底压黑），两边都看得出变化（理由见 `shadeInk`）。
+func FeelOnBase(c *ui.Context, e ui.Element, base Base) ui.Element { return feel(c, e, base) }
+
 // feel 铺上「悬停 / 按下」的那一层反馈。
 //
 // ⚠️ **「铺不铺」在建元素时问，「是不是禁用」在画的时候问**——见 `shade`。

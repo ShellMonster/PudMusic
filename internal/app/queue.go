@@ -2015,10 +2015,15 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 // 不动」，那恰恰是这一档要消灭的形态。
 //
 // 「正在重连」那一档归它自己那几处管（见 `reconnect.go`）。
+//
+// 🔴 **「失败的那一首」也一起清**：错收掉了还留着它，界面上就会显示一句
+// 「放不出来的是《X》」——而错已经没了（理由见 `State.FailedTitle`）。
 func (a *App) clearErrLocked() {
 	a.errText = ""
 	a.errDetail = ""
 	a.errRetryable = false
+	a.failedTitle = ""
+	a.failedArtist = ""
 }
 
 // Retry 再放一次上一次用户想放的那一首。

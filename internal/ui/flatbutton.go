@@ -255,6 +255,86 @@ func flatSolid(c *ui.Context, e ui.Element) ui.Element {
 	return e.Background(t.Accent).TextColor(t.AccentText)
 }
 
+// flatSolidCurrent 是「**当前在哪**」的**实心主色底**那一档（票：用户要
+// 「深底色 + 白字」）。
+//
+// # 它和 `flatCurrent`（淡底）是两件事
+//
+// `flatCurrent` 是「主色淡底 + 按那层底现算的字」——它和侧栏底色的对比度只有
+// **1.09:1 ~ 1.29:1**（实测暖纸浅色 / 靛夜深色），**几乎分不出来**。而「当前
+// 在哪」是侧栏里唯一的方向标。
+//
+// 这一档是**实心主色底**，和它挨着的侧栏底色差着 **4.34:1 ~ 6.72:1**。
+//
+// # 字色：`t.AccentText`，不是写死的白字
+//
+// ⚠️ **主色是用户可设的，而深色方案的主色是亮色**（暖纸深色 `#E58A5A`）——
+// 白字压上去只有 **2.59:1**，读不出来。而 `t.AccentText` 是框架按主色亮度挑出来
+// 的黑或白（`applyAccent`，`theme.go`），**在主色底上一定读得出来**
+// （实测 5.24:1 ~ 9.23:1）。
+//
+// ⚠️ **浅色下它多半就是白字**（经典浅色的主色 `#1ED760` 亮，`AccentText` 是
+// **近黑** `#18181B`——9.23:1）。所以「深底色 + 白字」这个说法在**浅色方案**下
+// 成立，在经典和深色方案下是**深底 + 深字**。这不是妥协，是 WCAG：
+// 亮绿底上的白字只有 1.92:1。
+//
+// # 次要字（收藏夹那行的「N 首」）
+//
+// ⚠️ **`t.TextMuted` 压在主色底上只有 1.02:1 ~ 1.34:1**——完全读不出来。
+// 所以那一行的小字要按主色底重算（`flatSolidCurrentMutedText`）。
+//
+// # 和 `flatSolid`（「被选中的选项」）的差别
+//
+// `flatSolid` 是设置页那些**选项**（主题三档、下拉项高亮）——那些是**值**，
+// 而这一档是**位置**。两者碰巧都是实心主色底，所以这一档不另起一个名字，
+// 但**它多带两样**：一是次要字那一档（`flatSolidCurrentMutedText`），二是
+// 悬停 / 按下要跟着主色走（见 `flatSolidCurrentFeel`）。
+func flatSolidCurrent(c *ui.Context, e ui.Element) ui.Element {
+	t := c.Theme()
+	return e.Background(t.Accent).TextColor(flatSolidCurrentText(t))
+}
+
+// flatSolidCurrentText 是实心主色底上该用的**字色**。
+//
+// 就是 `t.AccentText`——框架按主色亮度挑出来的黑或白，在主色底上一定读得出来
+// （理由见 `flatSolidCurrent`）。
+func flatSolidCurrentText(t *ui.Theme) ui.Color {
+	return t.AccentText
+}
+
+// flatSolidCurrentMutedText 是实心主色底上该用的**次要字色**（收藏夹那行的
+// 「N 首」）。
+//
+// 🔴 **不能直接用 `t.TextMuted`**：它压在主色底上只有 1.02:1 ~ 1.34:1——完全
+// 读不出来。所以从 `t.AccentText` 出发，**朝主色混一点**压暗一档。
+//
+// ⚠️ **那个数是量出来的，不是拍的**：混 30% 只有 3.43:1（暖纸浅色）——而
+// 「N 首」是 12 号字，不算 WCAG 的「大字」，判据是 **4.5:1**。所以上限是
+// **10%**（最差 4.58:1，暮光琥珀浅色）；取 **8%** 是留一点余量（最差
+// 4.70:1），因为**主色是用户可设的**——用户挑一个更亮的主色，那一档就更吃力。
+//
+// ⚠️ **8% 够不够看出它是次要的**：够——它和名字那一档（`AccentText`）差的是
+// 「同一支色上的一档深浅」，而字号已经差了一档（14 对 12）。
+//
+// ⚠️ **深浅两套走同一个算法**：深色方案的主色是亮色，那一档混完更暗，仍然
+// 读得出来。
+func flatSolidCurrentMutedText(t *ui.Theme) ui.Color {
+	return t.AccentText.Mix(t.Accent, 0.08)
+}
+
+// flatSolidCurrentFeel 是实心主色底那一档的**悬停 / 按下**反馈。
+//
+// 🔴 **不能直接用 `flat.Feel`**：那是「按主题算」的——浅色主题的正文色是**黑
+// 的**，8% 的黑压在主色底上几乎看不出变化（那一行的悬停反馈等于没有）。按这一
+// 层底（主色）的深浅挑就对了：深底压白、浅底压黑，两边都看得出变化。
+//
+// ⚠️ **压在前景色上，不是换底**：换底会把「当前在哪」那一层的主色顶掉——
+// 指针一落上去，当前项就整个不见了。
+func flatSolidCurrentFeel(c *ui.Context, e ui.Element) ui.Element {
+	t := c.Theme()
+	return flat.FeelOnBase(c, e, flat.BaseOf(t.Accent))
+}
+
 // flatSelected 是选中态那一层**中性**的底。
 //
 // 往 `t.SurfaceHover` 的方向再走 6%：只取 `t.SurfaceHover` 的话，选中的那一格和

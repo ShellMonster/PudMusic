@@ -104,15 +104,25 @@ func (c *Client) ToplistLatestID(ctx context.Context, kind ToplistKind) (int64, 
 // toplistMusicData 是 music_list 的 data 段。
 type toplistMusicData struct {
 	List []struct {
-		MusicID          string    `json:"music_id"`
-		MusicTitle       string    `json:"music_title"`
-		Singer           string    `json:"singer"`
-		MvAid            flexInt64 `json:"mv_aid"`
-		MvBvid           string    `json:"mv_bvid"`
-		MvCover          string    `json:"mv_cover"`
-		CreationAid      flexInt64 `json:"creation_aid"`
-		CreationBvid     string    `json:"creation_bvid"`
-		CreationCover    string    `json:"creation_cover"`
+		MusicID       string    `json:"music_id"`
+		MusicTitle    string    `json:"music_title"`
+		Singer        string    `json:"singer"`
+		MvAid         flexInt64 `json:"mv_aid"`
+		MvBvid        string    `json:"mv_bvid"`
+		MvCover       string    `json:"mv_cover"`
+		CreationAid   flexInt64 `json:"creation_aid"`
+		CreationBvid  string    `json:"creation_bvid"`
+		CreationCover string    `json:"creation_cover"`
+		// 🔴 **CreationFirstCid 是「第一集的分 P id」**（票：首页榜单点不动）。
+		//
+		// ⚠️ **字段名是 `creation_first_cid`，不是 `creation_cid`**：B 站叫
+		// 「第一集」，而榜单上挂着的稿件可能不止一集——名字对不上就是解析不到，
+		// 而解析不到的表现是「接口返回正常、这一条就是放不出来」。
+		//
+		// ⚠️ **数字和字符串两种写法都认**（`flexInt64`）：B 站这几个接口的同一
+		// 批字段在不同的榜上形状不一样（真网实测：热榜给数字，新歌速递给字符串
+		// `"0"`）。
+		CreationFirstCid flexInt64 `json:"creation_first_cid"`
 		CreationTitle    string    `json:"creation_title"`
 		CreationDuration int64     `json:"creation_duration"`
 		CreationPlay     int64     `json:"creation_play"`
@@ -140,8 +150,14 @@ func toplistPage(d toplistMusicData) []RecommendItem {
 	for _, it := range d.List {
 		bvid, aid := it.CreationBvid, int64(it.CreationAid)
 		cover := it.CreationCover
+		// 🔴 **分 P id 跟着稿件走**（票：首页榜单点不动）：B 站给的是
+		// `creation_first_cid`——**第一集**的分 P id，而它是配 `creation_bvid`
+		// 的。所以退回 MV 那一支（下面）时**不能**带着它——那个 cid 是另一个
+		// 稿件的分 P id，拿它去取流会取到别人的集。
+		cid := int64(it.CreationFirstCid)
 		if bvid == "" {
 			bvid, aid = it.MvBvid, int64(it.MvAid)
+			cid = 0
 		}
 		if bvid == "" {
 			continue
@@ -154,7 +170,7 @@ func toplistPage(d toplistMusicData) []RecommendItem {
 			title = it.CreationTitle
 		}
 		out = append(out, RecommendItem{
-			Bvid: bvid, Aid: aid, TrackID: it.MusicID,
+			Bvid: bvid, Aid: aid, Cid: cid, TrackID: it.MusicID,
 			Title: decodeEntities(title), Cover: normalizeImageURL(cover),
 			Owner: decodeEntities(it.Singer),
 			View:  it.CreationPlay, Duration: seconds(it.CreationDuration),

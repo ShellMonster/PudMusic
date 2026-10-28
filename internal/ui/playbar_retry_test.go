@@ -1,22 +1,28 @@
 package ui
 
-// 播放条上那一枚「**还能怎么办**」。
+// 播放条上那一句错的「**还能怎么办**」。
 //
 // # 为什么是「一枚键」而不是「一句更长的说明」
 //
-// 播放条上那句话只有一行宽（还带省略号），而「为什么 + 还能怎么办」两半
-// 加起来有一二十个字——写在那里必然被截掉一半，而截掉的那一半恰恰是
-// **用户下一步要做的事**。所以：
+// 「为什么 + 还能怎么办」两半加起来有一二十个字——而播放条上那一列只有
+// 75.7 像素宽（实测），一句 26 个字的话上屏只剩十来个。所以：
 //
 //	能重试	「重试」——网络断了、地址过期了，再试一次就有可能好
 //	不能重试但有 B 站地址	「在 B 站打开」——B 站说这一条没有音频流，
 //	                    用户能做的就是去 B 站里听它
 //
-// # 两条规矩
+// 🔴 **这两枚搬进「详情」面板了**（票：左下角出错那三行太碎）：错误文案从
+// 那一列里搬走了，而它们原来和那句话挤在同一行（75.7 + 62 像素）。面板由
+// **播放键那一枚**（出错时它变成红色的）点开——完整那一句 + 能做的事都在
+// 里面（`playbar_err.go`）。
+//
+// # 三条规矩
 //
 //  1. **不能重试的时候不给「重试」**：给一个按了也没用的重试比不给更糟——
 //     用户按两次发现还是那样，就不再信这个应用了。
 //  2. **出错之前播放条一个像素都不动**：那一枚键只在出错的时候才建。
+//  3. **「重试」和「在 B 站打开」不同时摆**：可重试的那一档给「重试」，而
+//     不可重试的那一档给「在 B 站打开」（和原来一样）。
 
 import (
 	"net/http"
@@ -41,7 +47,14 @@ func TestThePlayBarOffersARetryWhenTheFailureIsWorthRetrying(t *testing.T) {
 		t.Fatalf("放不进去：%v", err)
 	}
 
-	waitFor(t, "播放条上出现「重试」", func() bool {
+	// 🔴 **「重试」在「详情」面板里**（票：左下角出错那三行太碎）：错误文案从
+	// 那一列里搬走了，而它原来和那句话挤在同一行。
+	waitFor(t, "播放条上出现那个出错键", func() bool {
+		tt.Frame()
+		return showsText(tt, errPlayKeyLabel)
+	})
+	openErrDetail(t, tt, "")
+	waitFor(t, "详情面板里有「重试」", func() bool {
 		tt.Frame()
 		return showsText(tt, "重试")
 	})
@@ -64,19 +77,19 @@ func TestThePlayBarDoesNotOfferARetryThatWouldDoNothing(t *testing.T) {
 		t.Fatalf("放不进去：%v", err)
 	}
 
-	waitFor(t, "播放条上出现那句话", func() bool {
+	waitFor(t, "播放条上出现那个出错键", func() bool {
 		tt.Frame()
-		return showsText(tt, "打不开：B 站没有给这一条单独的音频流（歌单、活动那一种多半是这样）。在 B 站里打开它听，或者换一首放")
+		return showsText(tt, errPlayKeyLabel)
+	})
+	// ⚠️ **「还能怎么办」在「详情」面板里**（理由见文件头那��段）。
+	openErrDetail(t, tt, "")
+	waitFor(t, "详情面板里出现「在 B 站打开」", func() bool {
+		tt.Frame()
+		return showsText(tt, "在 B 站打开")
 	})
 	if showsText(tt, "重试") {
 		t.Error("给了一枚按了也没用的「重试」")
 	}
-	// ⚠️ **「还能怎么办」要给成一枚能按的键**：这一首在 B 站上是有的，
-	// 而「去 B 站里听它」正是用户能做的事。
-	waitFor(t, "播放条上出现「在 B 站打开」", func() bool {
-		tt.Frame()
-		return showsText(tt, "在 B 站打开")
-	})
 }
 
 // TestThePlayBarDoesNotOfferARetryThatWouldHitTheRiskControlAgain 盯风控
@@ -99,9 +112,14 @@ func TestThePlayBarDoesNotOfferARetryThatWouldHitTheRiskControlAgain(t *testing.
 		t.Fatalf("放不进去：%v", err)
 	}
 
-	waitFor(t, "播放条上出现那句话", func() bool {
+	waitFor(t, "播放条上出现那个出错键", func() bool {
 		tt.Frame()
-		return showsText(tt, "打不开：被 B 站的风控拦下了，等一会儿再试")
+		return showsText(tt, errPlayKeyLabel)
+	})
+	openErrDetail(t, tt, "")
+	waitFor(t, "详情面板出来", func() bool {
+		tt.Frame()
+		return showsText(tt, "错误详情")
 	})
 	if showsText(tt, "重试") {
 		t.Error("给了一枚按下去只会再撞一次风控的「重试」")
@@ -129,9 +147,14 @@ func TestThePlayBarDoesNotOfferARetryThatWouldHitTheRateLimitAgain(t *testing.T)
 		t.Fatalf("放不进去：%v", err)
 	}
 
-	waitFor(t, "播放条上出现那句话", func() bool {
+	waitFor(t, "播放条上出现那个出错键", func() bool {
 		tt.Frame()
-		return showsText(tt, "打不开：操作太快了，等一会儿再试")
+		return showsText(tt, errPlayKeyLabel)
+	})
+	openErrDetail(t, tt, "")
+	waitFor(t, "详情面板出来", func() bool {
+		tt.Frame()
+		return showsText(tt, "错误详情")
 	})
 	if showsText(tt, "重试") {
 		t.Error("给了一枚按下去只会再撞一次限流的「重试」")
