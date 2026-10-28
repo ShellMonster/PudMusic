@@ -1824,7 +1824,7 @@ var Items = []Item{
 		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
 		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行、基线 JPEG 按 MCU 行缩放，不分配整张原图且像素不变；仅 EXIF 旋转图保留框架方向处理；缓存创建和重置均遵循环境预算",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行、基线 JPEG 按 MCU 行缩放，不分配整张原图且像素不变；EXIF 旋转图自己摆正再缩（不走 ui.DecodeBitmap，它会把整份原始字节钉在 bitmap 上）；缓存创建和重置均遵循环境预算",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
@@ -1838,7 +1838,8 @@ var Items = []Item{
 			"TestStoredJPEGDoesNotAllocateFullSizeImage",
 			"TestStreamingJPEGRejectsTruncation",
 			"TestStreamingJPEGUnsupportedVariantsFallBack",
-			"TestJPEGEXIFOnlyRotationsBypassScaling",
+			"TestJPEGEXIFOnlyRotationsAreMadeUprightAndScaled",
+				"TestDecodedCoversDoNotHoldTheirBytes",
 			"TestJPEGRowCorpusMatchesStandardDecoder",
 			"TestImageCacheBudgetFromEnvironment",
 			"TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted",

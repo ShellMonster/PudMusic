@@ -1294,7 +1294,22 @@ func (s *Shell) viewFullProgress(c *ui.Context, st app.State, dim ui.Color) {
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size12)).TextColor(dim).
 			MinWidth(48).MaxLines(1)
-		sl := knobSlider(c, &s.fullScrub, 0, 1, knobFullLook(dim, base)).
+		// 那一根线靠 `live` 自己走（见 `selfSliderLive`）：整棵树只在读数变了
+		// 时重建，而线每帧都画在当下的位置。
+		//
+		// ⚠️ **只在「在放」时给**：暂停时位置不动，每帧重画是纯浪费，
+		// 而且会一直要下一帧，窗口停不下来。
+		var live sliderLive
+		if known && st.Playing {
+			dur := float64(st.Duration)
+			live = sliderLive{
+				frac: func() float32 {
+					return float32(float64(s.app.PlayPosition()) / dur)
+				},
+				visible: s.presence.seen,
+			}
+		}
+		sl := knobSliderLive(c, &s.fullScrub, 0, 1, knobFullLook(dim, base), live).
 			Grow(1).Label("全屏播放进度").Disabled(!known)
 		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
 		// 那半个宽 10，点比 6 像素的轨道粗 3；「缺口」用这一行坐着的底色，

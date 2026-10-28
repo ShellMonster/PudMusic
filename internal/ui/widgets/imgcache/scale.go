@@ -60,10 +60,12 @@ const maxStoredSide = 768
 
 // decodeStored 解一张网络图，得到**存进缓存的那一份**。
 //
-// 和 `ui.DecodeBitmap` 的区别只有两个：
+// 和 `ui.DecodeBitmap` 的区别有三个：
 //
-//   - 长边超过 `maxStoredSide` 的按比例缩到 `maxStoredSide`；
-//   - EXIF 需要旋转/翻转的那一张**不缩**（见 hasExifOrientation）。
+//   - 长边超过 `maxStoredSide` 的按比例缩到 `maxStoredSide`（EXIF 要转的那一张
+//     也是：先摆正再缩）；
+//   - 摆正和缩放都在这里做完，交给 `ui.NewBitmap` 的只是最终的像素；
+//   - **不捕获原始字节**（见下面 EXIF 那一支的注释）。
 //
 // ⚠️ **碰像素必须在造 Bitmap 之前**（`ui.Bitmap` 只能写不能读，
 // `mygo/ui/bitmap.go`：没有 GetPixel、没有把像素取出来的那一支）：所以这一格
@@ -72,10 +74,22 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	if len(data) == 0 {
 		return nil, errors.New("imgcache: 没有字节")
 	}
-	// 需要旋转/翻转的仍由框架摆正。只有 EXIF 元数据、方向为 1 或未设置
-	// 的图可以正常缩放；真机缓存中 146 张有 EXIF，均不需要旋转。
-	if hasExifOrientation(data) {
-		return ui.DecodeBitmap(data)
+	// 需要旋转/翻转的：自己解、自己摆正、自己缩。
+	//
+	// ⚠️ **不能交给 `ui.DecodeBitmap`**（0.7.1 起）：它为了 `ReleasePixels`
+	// 能重新解码，会把**整份原始字节**留在 bitmap 上不放（`bitmap.go` 的
+	// `decode` 字段是个闭包，捕获了 `data`）。一张封面几百 KB，缓存里几百张
+	// 就是几十 MB——而这一支要的只是一张 768 长的图。0.6.4 那份 `DecodeBitmap`
+	// 用完就丢，所以这个坑是升级带来的，不是本来就有的。
+	//
+	// 摆正和缩放都在这里做完，交给 `ui.NewBitmap` 的只是最终的 `*image.RGBA`：
+	// 它不捕获任何字节，缓存挤掉它时像素就跟着走了。
+	if o := exifOrientation(data); o >= 2 {
+		img, _, err := image.Decode(bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		return ui.NewBitmap(shrinkToStored(orientImage(img, o))), nil
 	}
 	if img, handled, err := decodeJPEGStored(data); handled {
 		if err != nil {
@@ -94,26 +108,31 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	if err != nil {
 		return nil, err
 	}
+	return ui.NewBitmap(shrinkToStored(img)), nil
+}
+
+// shrinkToStored 把一张图缩到最长边 `maxStoredSide`（已经够小就原样返回）。
+//
+// ⚠️ **用 ApproxBiLinear 而不是 CatmullRom**（`internal/ui/covercrop.go` 那一处
+// 缩放用的是 CatmullRom）：实测一张 1920×1080 缩到 768×432，CatmullRom 要
+// 120~280ms（跟机器负载有关），ApproxBiLinear 只要 10~15ms——**十几倍**。
+//
+// 画质的差别是量出来的：两者逐通道的平均差 **0.45/255**（0.18%）——看不出来，
+// 而这一格每加载一张封面就缩一次（一屏十几张，全在后台 worker 上），十几倍的
+// CPU 差就是「封面半秒之后才出来」和「封面立刻出来」的差别。
+func shrinkToStored(img image.Image) image.Image {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
-		return nil, errors.New("imgcache: 这张图没有像素")
+		return img
 	}
 	if max(w, h) <= maxStoredSide {
-		return ui.NewBitmap(img), nil
+		return img
 	}
-
 	// 按比例缩：长边落到 maxStoredSide，另一边按同一个比例走。
 	dst := image.NewRGBA(storedBounds(w, h))
-	// ⚠️ **用 ApproxBiLinear 而不是 CatmullRom**（`internal/ui/covercrop.go` 那一处
-	// 缩放用的是 CatmullRom）：实测一张 1920×1080 缩到 768×432，CatmullRom 要
-	// 120~280ms（跟机器负载有关），ApproxBiLinear 只要 10~15ms——**十几倍**。
-	//
-	// 画质的差别是量出来的：两者逐通道的平均差 **0.45/255**（0.18%）——看不出来，
-	// 而这一格每加载一张封面就缩一次（一屏十几张，全在后台 worker 上），十几倍的
-	// CPU 差就是「封面半秒之后才出来」和「封面立刻出来」的差别。
 	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
-	return ui.NewBitmap(dst), nil
+	return dst
 }
 
 func storedBounds(w, h int) image.Rectangle {
