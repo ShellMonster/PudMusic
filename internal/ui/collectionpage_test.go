@@ -68,6 +68,13 @@ type favBili struct {
 	// ⚠️ **它是为了复现「第一页还在拉」**：夹具默认秒回，而那一档
 	// （骨架屏）只在内容还在路上的时候出现。
 	holdList chan struct{}
+	// failList 非 0 时，**内容列表那一趟回这个业务 code**（造「拉不到」）。
+	//
+	// ⚠️ **它是为了复现「搜了没搜到、而那一趟失败了」**：那一档的判据是
+	// 「Loaded == 0 && !Loading」，而失败之后 `Loading` 是 false——于是它会
+	// 落进「没有结果」那一支，而**列表的失败态（那个重试按钮）就画不出来了**
+	// （那一格只在 `p.list.View` 里画，而那一支不调它）。
+	failList int
 	// playURLCalls 数**取流接口被问了几次**。
 	//
 	// ⚠️ **它是为了验「失效的条目不白跑一趟取流」**（票 #624）：光断
@@ -119,6 +126,11 @@ func newCollectionBili(t *testing.T) *favBili {
 				"upper":       b.infos["upper"],
 			})
 		case "/x/v3/fav/resource/list":
+			// ⚠️ **造「拉不到」**：回一个业务错，让这一趟失败。
+			if b.failList != 0 {
+				writeCollectionJSON(t, w, b.failList, "拉不到", nil)
+				return
+			}
 			b.orders = append(b.orders, r.URL.Query().Get("order"))
 			kw := r.URL.Query().Get("keyword")
 			b.keywords = append(b.keywords, kw)
