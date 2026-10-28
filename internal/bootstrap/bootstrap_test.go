@@ -103,11 +103,31 @@ func TestAssembleContinuesAfterOptionalMountFailures(t *testing.T) {
 	}
 	t.Cleanup(a.Close)
 	if len(got) != 23 || got[len(got)-1] != "run" {
-
 		t.Fatalf("optional failures stopped assembly: %v", got)
 	}
 	if len(logs) != 4 {
 		t.Fatalf("optional failures logged %d times, want 4: %v", len(logs), logs)
+	}
+}
+
+func TestAssembleStopsBeforeRunWhenRequiredInitializationFails(t *testing.T) {
+	var run bool
+	d := minimalDependencies(func(string) {})
+	d.NewApp = func() *app.App { return nil }
+	d.Run = func(*app.App, *media.Session) error {
+		run = true
+		return nil
+	}
+
+	a, err := Assemble(d)
+	if err == nil {
+		t.Fatal("Assemble succeeded after required initialization failed")
+	}
+	if a != nil {
+		t.Fatal("Assemble returned an app after NewApp returned nil")
+	}
+	if run {
+		t.Fatal("Run entered after required initialization failed")
 	}
 }
 
