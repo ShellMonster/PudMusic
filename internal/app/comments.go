@@ -466,7 +466,15 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 
 	repliesFetch := a.commentsRepliesFetch
 	archiveFetch := a.commentsArchiveIDFetch
-	go a.loadReplies(it, slot, gen, root, repliesFetch, archiveFetch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.commentsMu.Lock()
+	if a.commentsCancel == nil {
+		a.commentsCancel = cancel
+	} else {
+		cancel()
+	}
+	a.commentsMu.Unlock()
+	go a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
 	return nil
 }
 
@@ -632,7 +640,7 @@ func (a *App) resetCommentsLocked(slot string) {
 // `ensureComments` 里那一段）。
 func (a *App) loadComments(ctx context.Context, it Item, slot string, gen, seq, mode int, next string, more bool,
 	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
-	typ, oid, ok, err := a.resolveCommentTarget(it, archiveFetch)
+	typ, oid, ok, err := a.resolveCommentTarget(ctx, it, archiveFetch)
 	if err != nil {
 		// ⚠️ **换 avid 那一趟失败了**：**不报错**（票 #572：「取不到就当『没有
 		// 评论』，不发请求，也不报错」），但**要能再问**——
@@ -903,7 +911,7 @@ func (a *App) wakeComments() {
 // 第三个返回值是「认得出来吗」，第四个是「认的时候出了错吗」——两者必须分开：
 // 「压根没有身份」（sid 认不出来）是**问一百次也一样**，而「换 avid 那一趟失败」
 // 是**等一会儿再问有可能好**。
-func (a *App) resolveCommentTarget(it Item, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool, err error) {
+func (a *App) resolveCommentTarget(ctx context.Context, it Item, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool, err error) {
 	switch it.Type {
 	case "audio":
 		// ⚠️ **音乐库音频的 oid 就是 auid**（`type=14`），不用换。
@@ -913,7 +921,7 @@ func (a *App) resolveCommentTarget(it Item, archiveFetch commentsArchiveIDFetchF
 		}
 		return bili.CommentTypeAudio, id, true, nil
 	case "mv":
-		aid, err := a.commentArchiveID(it.Bvid, archiveFetch)
+		aid, err := a.commentArchiveID(ctx, it.Bvid, archiveFetch)
 		if err != nil {
 			return 0, 0, false, err
 		}
@@ -929,7 +937,7 @@ func (a *App) resolveCommentTarget(it Item, archiveFetch commentsArchiveIDFetchF
 //
 // 换过的要记住（内存里 + 盘上），不然**每次进这一首都要多付一次往返**——
 // 而验收要求「同一首歌第二次进是瞬时的（不发请求）」。
-func (a *App) commentArchiveID(bvid string, fetch commentsArchiveIDFetchFunc) (int64, error) {
+func (a *App) commentArchiveID(ctx context.Context, bvid string, fetch commentsArchiveIDFetchFunc) (int64, error) {
 	a.commentsMu.Lock()
 	if a.commentsAvids != nil {
 		if id, ok := a.commentsAvids[bvid]; ok && id > 0 {
@@ -948,7 +956,11 @@ func (a *App) commentArchiveID(bvid string, fetch commentsArchiveIDFetchFunc) (i
 	}
 	if ch, ok := a.commentsAvidWaiters[bvid]; ok {
 		a.commentsMu.Unlock()
-		<-ch
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
 		a.commentsMu.Lock()
 		id := a.commentsAvids[bvid]
 		a.commentsMu.Unlock()
@@ -977,7 +989,7 @@ func (a *App) commentArchiveID(bvid string, fetch commentsArchiveIDFetchFunc) (i
 		}
 		fetch = cli.ArchiveID
 	}
-	id, err := fetch(context.Background(), bvid)
+	id, err := fetch(ctx, bvid)
 	if err != nil {
 		a.finishAVIDWait(bvid, ch)
 		return 0, err
@@ -1042,9 +1054,9 @@ func (a *App) fetchCommentList(ctx context.Context, typ, oid int64, mode int, ne
 }
 
 // loadReplies 拉一层楼中楼，回来写进缓存并叫醒界面。
-func (a *App) loadReplies(it Item, slot string, gen int, root int64,
+func (a *App) loadReplies(ctx context.Context, it Item, slot string, gen int, root int64,
 	repliesFetch commentsRepliesFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
-	typ, oid, ok := a.commentOIDFor(it, slot, gen, archiveFetch)
+	typ, oid, ok := a.commentOIDFor(ctx, it, slot, gen, archiveFetch)
 	if !ok {
 		a.finishReplies(slot, gen, root, nil)
 		return
@@ -1061,7 +1073,7 @@ func (a *App) loadReplies(it Item, slot string, gen int, root int64,
 			return rs, err
 		}
 	}
-	rs, err := fetch(context.Background(), typ, oid, root)
+	rs, err := fetch(ctx, typ, oid, root)
 	if err != nil {
 		a.finishReplies(slot, gen, root, nil)
 		return
@@ -1072,7 +1084,7 @@ func (a *App) loadReplies(it Item, slot string, gen int, root int64,
 // commentOIDFor 拿当前这一首的对象类型和 id。
 //
 // 已经问过主列表的话直接用它（**别再换一次 avid**）；还没问过就现算。
-func (a *App) commentOIDFor(it Item, slot string, gen int, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool) {
+func (a *App) commentOIDFor(ctx context.Context, it Item, slot string, gen int, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool) {
 	a.commentsMu.Lock()
 	if a.commentsSlot == slot && a.commentsGen == gen && a.commentsOid > 0 {
 		typ, oid = a.commentsTyp, a.commentsOid
@@ -1080,7 +1092,7 @@ func (a *App) commentOIDFor(it Item, slot string, gen int, archiveFetch comments
 		return typ, oid, true
 	}
 	a.commentsMu.Unlock()
-	typ, oid, ok, _ = a.resolveCommentTarget(it, archiveFetch)
+	typ, oid, ok, _ = a.resolveCommentTarget(ctx, it, archiveFetch)
 	return typ, oid, ok
 }
 

@@ -123,6 +123,7 @@ func (q *Queue) moveSongBeforeLocked(id, before string) bool {
 
 	q.items = newItems
 	q.cur = newCur
+	q.bumpRevisionLocked()
 	// ⚠️ **洗牌袋不用动**：它记的是判重标识，而重排改的是**顺序**——歌还是那
 	// 几首，身份没变，袋子里的那一列照样对得上（见 queue_shuffle.go）。
 	//

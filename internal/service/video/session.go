@@ -35,12 +35,13 @@ const (
 type Session struct {
 	cfg Config
 
-	mu     sync.Mutex
-	idx    *Index
-	err    error
-	cancel context.CancelFunc
-	out    chan Frame
-	done   chan struct{}
+	mu      sync.Mutex
+	frameMu sync.Mutex
+	idx     *Index
+	err     error
+	cancel  context.CancelFunc
+	out     chan Frame
+	done    chan struct{}
 
 	pend      *Frame
 	shown     Frame
@@ -97,6 +98,12 @@ func (s *Session) Duration() time.Duration {
 
 // Seek 丢掉手上的一切，从 at 重新开始。
 func (s *Session) Seek(at time.Duration) {
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
+	s.seekLocked(at)
+}
+
+func (s *Session) seekLocked(at time.Duration) {
 	s.stop()
 	s.begin(at)
 }
@@ -117,6 +124,8 @@ func (s *Session) stop() {
 // than once.
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
+		s.frameMu.Lock()
+		defer s.frameMu.Unlock()
 		s.stop()
 		s.cleanupFrames()
 		if s.tempPath != "" {
@@ -152,12 +161,15 @@ func (s *Session) cleanupFrames() {
 // Poll 按时钟 pos 取当前该显示的那一帧：有新帧返回 true。
 // 返回的 Pix 到下一次 Poll 返回 true 之前有效。
 func (s *Session) Poll(pos time.Duration) (Frame, bool) {
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
 	if time.Since(s.lastSeek) > resyncGap {
 		behind := s.haveShow && pos+resyncBack < s.shown.PTS
 		ahead := pos > s.head+resyncAhead
 		if behind || ahead {
-			s.Seek(pos)
+			s.seekLocked(pos)
 		}
+
 	}
 	s.mu.Lock()
 	out := s.out
