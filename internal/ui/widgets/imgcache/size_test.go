@@ -223,3 +223,94 @@ func coverPNGForTest(t testing.TB, w, h int) []byte {
 	}
 	return buf.Bytes()
 }
+
+// TestDraggingTheWindowDoesNotMakeNewURLs 钉住「窗口宽一点点变，URL 不该跟着变」。
+//
+// # 这条是评审挑出来的（PR #622）
+//
+// 第一版只吸**长边**，短边按比例连续算。而首页磁贴那一格的宽随窗口走、高固定
+// 96——窗口拖一像素，短边就变一像素，URL 就换一个。实测 `cw` 从 257 走到 320
+// 会产生 **48 个不同的 URL**：拖一次窗口就下一批新图、在盘上攒一批几乎一样的
+// 文件、在内存里各占一块。
+//
+// 现在的做法是短边**跟比例、但量化到 1/32**（见 `coverPixelSize`）。
+func TestDraggingTheWindowDoesNotMakeNewURLs(t *testing.T) {
+	const base = "https://i0.hdslb.com/bfs/archive/y.jpg"
+	seen := map[string]bool{}
+	for cw := 257; cw <= 320; cw++ {
+		// 首页磁贴：宽 = cw*0.5、高固定 96（`homepage_overview.go`）。
+		w, h := coverPixelSize(float32(cw)*0.5, 96, 2)
+		seen[sizedURL(base, w, h)] = true
+	}
+	if len(seen) > 5 {
+		t.Errorf("窗口宽从 257 拖到 320（64 个像素），产生了 %d 个不同的 URL——"+
+			"拖一次窗口就下一批新图、盘上攒一批几乎一样的文件（短边没量化）",
+			len(seen))
+	}
+}
+
+// TestTheAspectRatioIsKept 钉住「宽高比不能掰弯」。
+//
+// 两条边各吸各的档会把比例掰弯：400×336 分别吸到 400/400，图被拉伸两成。
+// 这条守的是「长边吸档、短边按比例跟」那个做法。
+func TestTheAspectRatioIsKept(t *testing.T) {
+	for _, tc := range []struct{ w, h float32 }{
+		{200, 168}, {672, 378}, {384, 288}, {48, 48},
+	} {
+		pw, ph := coverPixelSize(tc.w, tc.h, 2)
+		want := float64(tc.w) / float64(tc.h)
+		got := float64(pw) / float64(ph)
+		if diff := got/want - 1; diff > 0.06 || diff < -0.06 {
+			t.Errorf("%g×%g 要成 %d×%d，宽高比 %g → %g（偏了 %.0f%%）——图会被拉伸",
+				tc.w, tc.h, pw, ph, want, got, diff*100)
+		}
+	}
+}
+
+// TestTheProbeKeyMatchesTheDrawnKey 钉住「探测 Ready 用的 key 和画的时候是同一个」。
+//
+// # 为什么这条必须有
+//
+// 「先探测有没有图，有才画」是这一屏的常见写法（UP 空间缩略图、首页磁贴的
+// 插画）。如果探测用 `Get(url)`、画的时候用 `GetSized(url, w, h)`，**两张图
+// 下两遍**：探测那份是原图，画的那份才是按尺寸的——同一张封面多一次网络、
+// 多一次解码，而这一票要省的像素一份没省。
+//
+// 这是 PR #622 的评审挑出来的真回归，`upspace.go` 和 `homepage_overview.go`
+// 两处都中过。这条测试守的是「有人把探测改回 `Get`」。
+func TestTheProbeKeyMatchesTheDrawnKey(t *testing.T) {
+	var mu sync.Mutex
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.URL.Path)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(coverPNGForTest(t, 8, 8))
+	}))
+	defer srv.Close()
+
+	c := New(Options{})
+	t.Cleanup(c.Close)
+	c.SetScale(2)
+
+	url := srv.URL + "/bfs/archive/probe.jpg"
+	w, h := float32(200), float32(168)
+
+	// 探测（就是 `upspace.go` 那一句）。
+	_ = c.GetSized(url, w, h)
+	// 等的是 `GetSized` 真正拼出来的那一个 key（200×168 DIP @2x → 400 长边，
+	// 短边按比例量化），不是「测试里手写的 200×168」。
+	pw, ph := coverPixelSize(w, h, 2)
+	waitState(t, c, sizedURL(url, pw, ph), 10*time.Second, loaded)
+	// 画（`States` → `drawCover`）。同一个尺寸，**不该再发第二次**。
+	_ = c.GetSized(url, w, h)
+
+	mu.Lock()
+	n := len(asked)
+	mu.Unlock()
+	if n != 1 {
+		t.Errorf("探测 + 绘制一共发了 %d 次请求（%v）——"+
+			"同一个尺寸该只下一次；多出来的那一次说明探测和绘制用了不同的 key", n, asked)
+	}
+}

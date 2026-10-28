@@ -977,7 +977,11 @@ func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey 
 		// ⚠️ **还没下下来的那一格不放大**：放大的是**那张图**，还没下下来的图
 		// 没有可放大的东西。上游也一样（`emptyPlaceholder` 是另一个元素，那个
 		// `scale-105` 加在 `<Image>` 上）。
-		if st := s.images.Get(url); st.Ready() {
+		// ⚠️ **探测用的 key 必须和下面 `States` 画的那一个相同**（`GetSized` 会
+		// 按显示尺寸拼出 `@<w>w_<h>h_1c`）。用 `Get(url)` 探测的话，探测下一份
+		// 原图、画的时候再下一份按尺寸的——同一张图下两遍，而显示的是原图那份，
+		// 这一票要省的像素一份没省（PR #622 的评审挑出来的）。
+		if st := s.images.GetSized(url, w, h); st.Ready() {
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {
 				motion.HoverZoom(img, zoomKey, on)

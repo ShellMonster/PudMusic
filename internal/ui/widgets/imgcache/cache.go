@@ -362,6 +362,18 @@ func (c *Cache) scale() float32 {
 	return 1
 }
 
+// scaled reports whether a window has told the cache the scale yet.
+//
+// ⚠️ **它挡的是「启动时每张封面多下一次」**：`GetSized` 在没人喂过 DPR 时
+// 按 1 倍算，于是第一帧要的是 64 档；窗口那一帧的绘制回调把真实的 2 喂进来
+// 之后，同一个封面变成 96 档——**同一个 key 换了一个**，缓存里没有，只能再下
+// 一次。一屏十几张，就是启动时多下十几张图。
+//
+// 所以没人喂过的时候 `GetSized` 退回 `Get`（原图那一格）：原图比任何一档都
+// 大，画出来不会糊，而且它和「还没有 DPR 概念」时的行为一致。这一档只在
+// 第一帧之前存在（一帧之后 DPR 就有了）。
+func (c *Cache) scaled() bool { return c.dpr.Load() != 0 }
+
 // GetSized 是 `Get` 加上「**按显示尺寸要图**」。
 //
 // w、h 是这一格**显示**多大（DIP）。它按这台机器的像素密度换成该向图床要的
@@ -384,6 +396,11 @@ func (c *Cache) scale() float32 {
 // ⚠️ **它和 `Get` 用的是同一张表**：`Get(url)` 要的是原图那一格，`GetSized`
 // 要的是某一档裁剪过的那一格，两个 key 不同，互不干扰。
 func (c *Cache) GetSized(url string, w, h float32) State {
+	if !c.scaled() {
+		// 还没人喂过 DPR（第一帧之前）：按原图走，别先下一张小一号的
+		// （理由见 `scaled`）。
+		return c.Get(url)
+	}
 	pw, ph := coverPixelSize(w, h, c.scale())
 	if pw <= 0 || ph <= 0 {
 		return c.Get(url)

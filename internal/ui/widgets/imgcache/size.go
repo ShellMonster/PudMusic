@@ -45,19 +45,43 @@ func coverPixelSize(w, h, scale float32) (int, int) {
 	}
 	pw := int(w*scale + 0.5)
 	ph := int(h*scale + 0.5)
-	// 长边吸档，短边按同一个倍率走：两个都独立吸档的话，比例会走样。
-	long, short := max(pw, ph), min(pw, ph)
-	tier := snapToTier(long)
-	if tier > maxStoredSide {
-		tier = maxStoredSide
+
+	// **长边吸档，短边按比例跟**——不是两条边各吸各的。
+	//
+	// 两条边各吸各的会把宽高比掰弯：400×336 的两条边分别吸到 400 / 400，
+	// 图被拉伸两成（这个仓库吃过这一口，`TestTheProbeKeyMatchesTheDrawnKey`
+	// 里量出来的 400w_400h 就是它）。
+	//
+	// 而只吸长边、短边纯按比例算，又让短边**连续**变化（首页磁贴的宽随窗口
+	// 走、高固定）：窗口拖一像素 URL 就换一个，实测拖动 64 个像素产生 48 个
+	// 不同的 URL。
+	//
+	// 所以短边**跟比例、但量化到「1/32」**：宽高比的偏差最多 3%，肉眼看不出来
+	// （而且画的时候 `Fit(ui.Cover)` 还会再裁一次），而拖动时短边只会每隔
+	// 几十像素才变一档——`TestDraggingTheWindowDoesNotMakeNewURLs` 钉着这一条。
+	long, short := pw, ph
+	if ph > pw {
+		long, short = ph, pw
 	}
-	if long > 0 && tier != long {
-		short = int(float64(short) * float64(tier) / float64(long))
+	tier := min(snapToTier(long), maxStoredSide)
+	if long > 0 {
+		short = quantize(int(float64(short)*float64(tier)/float64(long)), 32)
 	}
-	if pw >= ph {
-		return tier, max(short, 1)
+	if ph > pw {
+		return short, tier
 	}
-	return max(short, 1), tier
+	return tier, short
+}
+
+// quantize 把 px 量化到 step 的整数倍（向上取整，至少一个 step）。
+//
+// 它是「短边跟着长边的比例走，但不要精确到像素」——理由见 `coverPixelSize`
+// 里那段注释：精确到像素的话，窗口拖一像素 URL 就换一个。
+func quantize(px, step int) int {
+	if px <= 0 {
+		return step
+	}
+	return (px + step - 1) / step * step
 }
 
 // sizeTiers 是向图床要图的档位，从小到大。
