@@ -180,9 +180,6 @@ func Assemble(d Dependencies) (*app.App, error) {
 }
 
 func validateRequiredDependencies(d Dependencies) error {
-	if d.PinUserDataDir == nil {
-		return errMissingDependency("PinUserDataDir")
-	}
 	if d.NewApp == nil {
 		return errMissingDependency("NewApp")
 	}

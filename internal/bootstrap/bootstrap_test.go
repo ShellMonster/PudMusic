@@ -86,6 +86,37 @@ func TestAssembleRunsHeadlessInDependencyOrder(t *testing.T) {
 	}
 }
 
+func TestAssembleRunsWithOptionalDataDirectoryPinningOmitted(t *testing.T) {
+	var run bool
+	d := Dependencies{
+		NewApp: func() *app.App { return app.New() },
+		Run: func(*app.App, *media.Session) error {
+			run = true
+			return nil
+		},
+	}
+
+	a, err := Assemble(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.Close)
+	if !run {
+		t.Fatal("Run was not entered with optional PinUserDataDir omitted")
+	}
+
+	for name, required := range map[string]Dependencies{
+		"NewApp": {Run: d.Run},
+		"Run":    {NewApp: d.NewApp},
+	} {
+		t.Run("missing "+name, func(t *testing.T) {
+			if _, err := Assemble(required); err == nil {
+				t.Fatalf("Assemble succeeded with missing %s", name)
+			}
+		})
+	}
+}
+
 func TestAssembleContinuesAfterOptionalMountFailures(t *testing.T) {
 	var got []string
 	mark := func(name string) { got = append(got, name) }
