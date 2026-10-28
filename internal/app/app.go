@@ -664,7 +664,9 @@ type App struct {
 	// ⚠️ **它有自己的锁（`commentsMu`），不在 `a.mu` 里**：写它的是网络往返回来的
 	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
 	// 同 `likeMu` / `partsMu`。
-	commentsMu sync.Mutex
+	// commentsMu sync.Mutex
+	commentsMu     sync.Mutex
+	commentsCancel context.CancelFunc
 	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
 	commentsSlot string
 	// comments 是已经拿到的那些评论（主列表）。

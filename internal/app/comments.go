@@ -403,12 +403,12 @@ func (a *App) LoadMoreComments() bool {
 		a.commentsSeqs = map[string]int{}
 	}
 	a.commentsSeqs[slot] = seq
-	a.commentsMu.Unlock()
-
-	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
-	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, mode, next, true, listFetch, archiveFetch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.commentsCancel = cancel
+	a.commentsMu.Unlock()
+	go a.loadComments(ctx, it, slot, gen, seq, mode, next, true, listFetch, archiveFetch)
+
 	return true
 }
 
@@ -587,13 +587,19 @@ func (a *App) ensureComments(it Item, slot string) {
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, mode, "", false, listFetch, archiveFetch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.commentsCancel = cancel
+	go a.loadComments(ctx, it, slot, gen, seq, mode, "", false, listFetch, archiveFetch)
 }
 
 // resetCommentsLocked 把评论这一摊整个清空，换成另一个槽位。
 //
 // ⚠️ **代次一定要加**：迟到的结果回来时靠它认出来（对不上就丢）。
 func (a *App) resetCommentsLocked(slot string) {
+	if a.commentsCancel != nil {
+		a.commentsCancel()
+		a.commentsCancel = nil
+	}
 	a.commentsSlot = slot
 	a.comments = nil
 	a.commentsErr = nil
@@ -624,7 +630,7 @@ func (a *App) resetCommentsLocked(slot string) {
 // 🔴 **seq 是这一趟的在途序号**：它挡的是「同一个对象上有两趟」——较早的那一趟
 // 回来时既不许盖掉界面上的新结果，也不许盖掉盘上的新缓存（理由见
 // `ensureComments` 里那一段）。
-func (a *App) loadComments(it Item, slot string, gen, seq, mode int, next string, more bool,
+func (a *App) loadComments(ctx context.Context, it Item, slot string, gen, seq, mode int, next string, more bool,
 	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
 	typ, oid, ok, err := a.resolveCommentTarget(it, archiveFetch)
 	if err != nil {
@@ -665,7 +671,8 @@ func (a *App) loadComments(it Item, slot string, gen, seq, mode int, next string
 		}
 	}
 
-	page, err := a.fetchCommentList(typ, oid, mode, next, listFetch)
+	page, err := a.fetchCommentList(ctx, typ, oid, mode, next, listFetch)
+
 	if err != nil {
 		// ⚠️ **「还没有人评论」不是失败**：B 站回的是 code 0 + 空列表，而这一页
 		// 照常有值（`AllCount` / `UpperMid` 那些）。混成失败的话，界面上会说
@@ -1021,7 +1028,7 @@ func (a *App) rememberCommentOID(slot string, gen int, typ, oid int64) {
 //
 // mode 是**排序档**：`bili.CommentSortHot` / `bili.CommentSortLatest`
 // （理由见 `bili.CommentSorts`——「评论」那一档不在里面）。
-func (a *App) fetchCommentList(typ, oid int64, mode int, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
+func (a *App) fetchCommentList(ctx context.Context, typ, oid int64, mode int, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
 	if fetch == nil {
 		cli := a.commentsClient()
 		if cli == nil {
@@ -1031,7 +1038,7 @@ func (a *App) fetchCommentList(typ, oid int64, mode int, next string, fetch comm
 			return cli.CommentList(ctx, typ, oid, mode, next, commentsPageSize)
 		}
 	}
-	return fetch(context.Background(), typ, oid, mode, next)
+	return fetch(ctx, typ, oid, mode, next)
 }
 
 // loadReplies 拉一层楼中楼，回来写进缓存并叫醒界面。
