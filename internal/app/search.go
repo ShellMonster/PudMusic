@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
@@ -61,9 +62,32 @@ type SearchPage struct {
 	Total   int
 }
 
-// SearchError is the user-facing error model for a search request.
+// SearchErrorCategory identifies the stable meaning of a search failure.
+type SearchErrorCategory = notice.SearchErrorCategory
+
+const (
+	SearchErrorUnknown           = notice.SearchErrorCategoryUnknown
+	SearchErrorMissingClient     = notice.SearchErrorCategoryMissingClient
+	SearchErrorInvalidTab        = notice.SearchErrorCategoryInvalidTab
+	SearchErrorCanceled          = notice.SearchErrorCategoryCanceled
+	SearchErrorNetwork           = notice.SearchErrorCategoryNetwork
+	SearchErrorNotLoggedIn       = notice.SearchErrorCategoryNotLoggedIn
+	SearchErrorRiskControl       = notice.SearchErrorCategoryRiskControl
+	SearchErrorTooFrequent       = notice.SearchErrorCategoryTooFrequent
+	SearchErrorCSRF              = notice.SearchErrorCategoryCSRF
+	SearchErrorBadResponse       = notice.SearchErrorCategoryBadResponse
+	SearchErrorTruncatedResponse = notice.SearchErrorCategoryTruncatedResponse
+	SearchErrorAPI               = notice.SearchErrorCategoryAPI
+)
+
+// SearchError is the application error model for a search request.
+//
+// Message and Error keep the legacy presentation contract for existing callers.
+// New callers should use Category and Retryable, then choose presentation text in
+// the UI layer.
 type SearchError struct {
 	Message   string
+	Category  SearchErrorCategory
 	Retryable bool
 	cause     error
 }
@@ -83,12 +107,12 @@ type Search struct {
 	client *bili.Client
 }
 
-var errSearchMissing = errors.New("搜索暂时用不了")
+var errSearchMissing = errors.New("search client is not mounted")
 
 // Page loads and maps one search page.
 func (s *Search) Page(ctx context.Context, q SearchQuery) (SearchPage, error) {
 	if s == nil || s.client == nil {
-		return SearchPage{}, &SearchError{Message: errSearchMissing.Error(), Retryable: true, cause: errSearchMissing}
+		return SearchPage{}, newSearchError(notice.SearchErrorCategoryMissingClient, true, errSearchMissing)
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -121,7 +145,7 @@ func (s *Search) Page(ctx context.Context, q SearchQuery) (SearchPage, error) {
 			page = SearchPage{Items: videoItems(got.Hits), HasMore: got.HasMore, Total: got.Total}
 		}
 	default:
-		return SearchPage{}, &SearchError{Message: "搜索类型暂时用不了", Retryable: false, cause: errors.New("unknown search tab")}
+		return SearchPage{}, newSearchError(notice.SearchErrorCategoryInvalidTab, false, errors.New("unknown search tab"))
 	}
 	if err != nil {
 		return SearchPage{}, searchError(err)
@@ -201,11 +225,43 @@ func searchError(err error) error {
 	if err == nil {
 		return nil
 	}
-	message := bili.Friendly(err)
-	if message == "" {
-		message = "拉不到这一场搜索，等一会儿再试"
+	category := searchErrorCategory(err)
+	return newSearchError(category, bili.Recoverable(err), err)
+}
+
+func newSearchError(category SearchErrorCategory, retryable bool, cause error) *SearchError {
+	return &SearchError{
+		Message:   notice.SearchErrorText(category),
+		Category:  category,
+		Retryable: retryable,
+		cause:     cause,
 	}
-	return &SearchError{Message: message, Retryable: bili.Recoverable(err), cause: err}
+}
+
+func searchErrorCategory(err error) SearchErrorCategory {
+	var api *bili.APIError
+	switch {
+	case errors.Is(err, context.Canceled):
+		return SearchErrorCanceled
+	case errors.Is(err, bili.ErrNetwork):
+		return SearchErrorNetwork
+	case errors.Is(err, bili.ErrNotLoggedIn):
+		return SearchErrorNotLoggedIn
+	case errors.Is(err, bili.ErrRiskControl):
+		return SearchErrorRiskControl
+	case errors.Is(err, bili.ErrTooFrequent):
+		return SearchErrorTooFrequent
+	case errors.Is(err, bili.ErrCSRF):
+		return SearchErrorCSRF
+	case errors.Is(err, bili.ErrBadResponse):
+		return SearchErrorBadResponse
+	case errors.Is(err, bili.ErrTruncatedResponse):
+		return SearchErrorTruncatedResponse
+	case errors.As(err, &api):
+		return SearchErrorAPI
+	default:
+		return SearchErrorUnknown
+	}
 }
 
 // MountSearch attaches the application search boundary to this App.
