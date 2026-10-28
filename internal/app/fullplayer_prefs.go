@@ -293,4 +293,10 @@ func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
 	if wake != nil {
 		wake()
 	}
+	a.mu.Lock()
+	player := a.player
+	a.mu.Unlock()
+	if player != nil {
+		player.SetSpectrumEnabled(next.ShowSpectrum)
+	}
 }

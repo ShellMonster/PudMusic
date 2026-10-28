@@ -1476,6 +1476,7 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	a.applyFadeInLocked(p)
 	a.mu.Unlock()
 	p.SetVolume(vol).SetRate(rate).SetNormalize(norm).SetEQ(eq)
+	p.SetSpectrumEnabled(a.FullPlayerPrefs().ShowSpectrum)
 	return src, p, nil
 }
 
