@@ -1848,25 +1848,17 @@ func (a *App) failOnline(gen int, it Item, branch string, err error, stage strin
 	// `State.FailedTitle`）。取流失败时播放器压根没装上，而 `a.title` 是**流
 	// 装上之后**才写的——所以不记这一份，界面上那一列显示的会是**上一首**，
 	// 用户读到的是「这一首正在放，但它打不开」。
-	a.setFailedSong(it)
-	a.setErrTextDetail(msg, detail, bili.Recoverable(err))
-}
-
-// setFailedSong 记下**放不出来的那一首**（歌名 + 作者）。
-//
-// ⚠️ **它和 `a.title` 是两首**：`a.title` 是**正在放的那一首**（流装上之后才
-// 写），而这一份是**失败的那一首**（理由见 `State.FailedTitle`）。
-//
-// ⚠️ **作者名是队列项里就有的**（`Item.Artist`）——不用再问一次接口。
-func (a *App) setFailedSong(it Item) {
+	//
+	// ⚠️ **它和 `setErrTextDetail` 落在同一次锁里**（`setErr` 那一族要持锁，
+	// 见 `queue.go`）：分两次锁的话，中间那道缝里别人清一次错，
+	// `Err` 和 `FailedTitle` 就对不上了。
+	//
+	// ⚠️ **作者名是队列项里就有的**（`Item.Artist`）——不用再问一次接口。
 	a.mu.Lock()
 	a.failedTitle = it.Title
 	a.failedArtist = it.Artist
-	wake := a.wake
 	a.mu.Unlock()
-	if wake != nil {
-		wake()
-	}
+	a.setErrTextDetail(msg, detail, bili.Recoverable(err))
 }
 
 // failPlay 报一次「**这一趟播放**」的失败，并把「正在取流」那一档收掉。

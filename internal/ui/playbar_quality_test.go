@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -139,7 +140,7 @@ func TestTheErrorDoesNotSqueezeTheTitle(t *testing.T) {
 			}
 			// 🔴 **那一列上不该有那句被截碎的错误文案**。
 			for _, s := range tt.Texts() {
-				if len(s) > 4 && s[:4] == "打不开" {
+				if strings.HasPrefix(s, "打不开") {
 					t.Errorf("宽度 %d：那一列上还有那句被截碎的错误文案 %q——"+
 						"它该搬到播放键上去（那一列只有 75.7 像素宽）", width, s)
 				}
@@ -206,10 +207,10 @@ func TestErrorShowsNextToTheTitle(t *testing.T) {
 		Err:      "连不上 B 站这条音频流了（网络或地址的问题，不是歌坏了）",
 		CanRetry: true,
 	})
-	// 🔴 **播放键那一枚变成「出错了」**——那是「说得出话」的那一句（完整那一句
-	// 在它的悬停提示和「详情」面板里）。
-	if !tt.HasText(errPlayKeyLabel) {
-		t.Errorf("出错时播放键没有变成那个出错的键：%q", tt.Texts())
+	// 🔴 **可重试的那一档，播放键那一枚就是「重试」**（点它直接重试，一步到位；
+	// 完整那一句在它的悬停提示里）。
+	if !tt.HasText("重试这一首") {
+		t.Errorf("出错时播放键没有变成「重试」那一枚：%q", tt.Texts())
 	}
 	if !tt.HasText("在线的一首") {
 		t.Errorf("出错时歌名不见了：%q", tt.Texts())

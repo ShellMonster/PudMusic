@@ -78,7 +78,7 @@ func openErrDetail(t *testing.T, tt *mygoui.Tester, msg string) {
 // 上那一句的**文本节点里也是完整那一句**（只是画的时候被截了），所以「它在
 // 树上」证明不了任何事——要证明的是它**排开了、看得全**。
 func TestClickingTheErrorOpensTheWholeSentence(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	// 还没点：面板不在。
@@ -121,7 +121,7 @@ func TestClickingTheErrorOpensTheWholeSentence(t *testing.T) {
 // 挤进了播放条的布局里，播放条就会被撑成两行，而**症状是静默的**：最后一行
 // 被 76 高裁掉，界面上看不出坏了（文本节点还在，测试也还找得到它）。
 func TestThePlayBarDoesNotMoveWhenTheDetailOpens(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	before, ok := tt.Find("这一首放不出来，出错了")
@@ -157,7 +157,7 @@ func TestThePlayBarDoesNotMoveWhenTheDetailOpens(t *testing.T) {
 // ⚠️ **不收的话**：用户重试成功了，播放条上那一行没了，而**面板还开着**——
 // 它上面写着「打不开」，而其实能播了。下一句错一上来，面板也是开着的。
 func TestTheDetailClosesWhenTheErrorIsGone(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -187,7 +187,7 @@ func TestTheDetailClosesWhenTheErrorIsGone(t *testing.T) {
 //
 // 这一条钉的是「焦点在别处时关得掉」这一档：点开之后焦点在锚点那一行上。
 func TestTheDetailClosesWhenTheUserPressesEscape(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -209,7 +209,7 @@ func TestTheDetailClosesWhenTheUserPressesEscape(t *testing.T) {
 // 和 `OverlayShortcut(0, KeyEscape)`），而「点外面」那一条**没有**焦点上的
 // 前提——指针点在哪就是哪。
 func TestTheDetailClosesWhenTheUserClicksOutside(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)
@@ -234,7 +234,7 @@ func TestTheDetailClosesWhenTheUserClicksOutside(t *testing.T) {
 // ⚠️ **判据是「同一句话在画面上出现了两次」**：一次是播放条上那句（画出来是
 // 截断的），一次是提示框里那句（完整的）。
 func TestHoveringTheErrorStillShowsTheWholeSentence(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	r, ok := tt.Find(errPlayKeyLabel)
@@ -261,7 +261,7 @@ func TestHoveringTheErrorStillShowsTheWholeSentence(t *testing.T) {
 // 面板开着的时候指针移开又移回来，提示框就会盖在那块面板上——屏幕上是一块
 // 小提示压着一块面板，读起来像坏了。
 func TestTheTooltipDoesNotStackOnTopOfTheDetail(t *testing.T) {
-	st := app.State{Err: errLongSentence, CanRetry: true}
+	st := app.State{Err: errLongSentence, CanRetry: false}
 	tt, _ := errBarTester(t, &st, 1200, 320, false)
 
 	openErrDetail(t, tt, errLongSentence)

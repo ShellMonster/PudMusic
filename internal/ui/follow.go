@@ -485,7 +485,7 @@ func (f *followPage) scrollTop() {
 //
 //   - **底色用方案的 `sidebar`**（`Shell.sidebarBackground`，和侧栏那一栏同一个
 //     出口）——于是侧栏 + 这一列是同一片「导航区」，内容区是另一片。
-//   - **选中那一格是 `accentSoft` 淡底 + 按那层底现算的字**（`flatCurrent`）——
+//   - **选中那一格是实心主色底**（`flatSolidCurrent`）——
 //     和侧栏菜单当前项**同一个函数**，所以两个色值逐字节相同。
 //   - **没选中的是次要色**：这一列是这一页里的第二层导航，选中那一格才是要看的
 //     那一格；次要色让「现在在哪」一眼看得出来。
@@ -640,7 +640,7 @@ func followPaneTitle(f *followPage) string {
 // 这一行是**侧栏菜单项的弟弟**：同样的淡底选中态、同样的字、同样的内边距。
 // 三样都取侧栏那一份：
 //
-//   - 选中 → `flatCurrent`（`accentSoft` 淡底 + 按那层底现算的字）；
+//   - 选中 → `flatSolidCurrent`（实心主色底）；
 //   - 没选中 → 次要色；
 //   - 悬停 / 按下 → `flat.Feel`（压一层半透明的前景色，和侧栏菜单项同一档）。
 func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {

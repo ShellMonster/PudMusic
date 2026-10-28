@@ -54,6 +54,23 @@ const (
 // 列表页那一批旧测试在 init 里关掉它，直接从列表页起手。
 var homeStartsOnOverview = true
 
+// homeTileRadius 是**磁贴**（和它右侧那张插画封面）的圆角。
+//
+// 🔴 **插画和容器必须同一个数**（票：首页有一点圆角什么的问题）：插画调
+// `imgcache.ViewPlaceholderTitled` 时把圆角传给它——原来传的是 **0**，图片
+// 自己画成直角，「看起来是圆的」全靠磁贴的 `Clip()` 兜底。而插画是
+// `Attach(AnchorTopRight)` **绝对定位**的孩子，外层容器的裁剪罩不住绝对定位
+// 的孩子——用户撞上的就是那个：封面的右上 / 右下两个角凸出在磁贴圆角外面。
+//
+// ⚠️ **容器和插画共用这一个出口**：两个数写两遍的话，改了一处另一处就悄悄
+// 对不上（插画比容器方一圈，或者反过来）。
+func homeTileRadius(t *ui.Theme) float32 { return t.Radius + 2 }
+
+// homeHeroRadius 是**新歌速递横幅**（和它右侧那张封面）的圆角。
+//
+// 理由同 `homeTileRadius`：容器和插画共用这一个出口。
+func homeHeroRadius(t *ui.Theme) float32 { return t.Radius + 4 }
+
 // homeTiles 是四个入口磁贴：指向 homeTabs 的哪一档、副标题、渐变两头。
 // 颜色是固定的深色调（白字压得住），不跟主题走：磁贴本身就是「封面」。
 var homeTiles = [4]struct {
@@ -220,7 +237,7 @@ func (h *homePage) viewHero(c *ui.Context, w float32) {
 func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur bool, anim ui.Animation) {
 	t := c.Theme()
 	sh := list.ShowOf(m)
-	card := ui.Box(c).Key("home:hero:"+m.ID).Size(w, hgt).Radius(t.Radius+4).Clip().
+	card := ui.Box(c).Key("home:hero:"+m.ID).Size(w, hgt).Radius(homeHeroRadius(t)).Clip().
 		Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 	fade := float32(1)
 	if cur {
@@ -235,7 +252,7 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur
 		cw := min(hgt*16/9, w*0.7)
 		ui.Box(c).Key("home:hero:img:"+m.ID).Size(cw, hgt).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
 			Children(func() {
-				imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, hgt, 0, nil)
+				imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, hgt, homeHeroRadius(t), nil)
 				ui.Box(c).Key("home:hero:fade:"+m.ID).Size(cw*0.45, hgt).
 					Gradient(ui.RGBA(28, 23, 20, 1), ui.RGBA(28, 23, 20, 0), 90).
 					Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
@@ -271,7 +288,7 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 	ui.Row(c).Key("home:tiles").FillWidth().Gap(space.Px16).Children(func() {
 		for _, tile := range homeTiles {
 			name := homeTabs[tile.tab]
-			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(t.Radius+2).Clip().
+			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(homeTileRadius(t)).Clip().
 				Gradient(tile.from, tile.to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
@@ -287,7 +304,7 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 					h.newGrid.cache.GetSized(items[0].Cover, iw, homeTileH).Ready() {
 					ui.Box(c).Key("home:tile:art:"+name).Size(iw, homeTileH).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
 						Children(func() {
-							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, items[0].Cover, "", iw, homeTileH, 0, nil)
+							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, items[0].Cover, "", iw, homeTileH, homeTileRadius(t), nil)
 							ui.Box(c).Key("home:tile:fade:"+name).Size(iw, homeTileH).
 								Gradient(tile.to, tile.to.Alpha(0), 90).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 						})

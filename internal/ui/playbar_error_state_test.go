@@ -19,6 +19,7 @@ package ui
 //  3. 那一行**只留一句**——错误详情进悬停提示和「详情」面板（那是既有设施）。
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -40,7 +41,7 @@ func TestTheErrorLineIsNotACrushedThirdLine(t *testing.T) {
 
 	// 那一列上**不该**有被截碎的错误文案。
 	for _, s := range tt.Texts() {
-		if len(s) > 4 && s[:4] == "打不开" {
+		if strings.HasPrefix(s, "打不开") {
 			t.Errorf("画面上还有那一句被截碎的错误文案 %q——它该从那一列里"+
 				"搬走（那一列只有 75.7 像素宽，26 个字只剩十来个）", s)
 		}
@@ -83,8 +84,8 @@ func TestThePlayKeyTurnsIntoAnErrorKey(t *testing.T) {
 		CanRetry:    true,
 	}, 1200)
 
-	if !tt.HasText(errPlayKeyLabel) {
-		t.Errorf("出错时播放键没有变成那个出错的键，文字有 %q", tt.Texts())
+	if !tt.HasText("重试这一首") {
+		t.Errorf("出错时播放键没有变成「重试」那一枚，文字有 %q", tt.Texts())
 	}
 }
 

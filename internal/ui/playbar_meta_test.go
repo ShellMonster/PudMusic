@@ -269,7 +269,7 @@ func TestTheTextColumnDoesNotSquashTheTitle(t *testing.T) {
 			}
 			// 那一列上**不该**有第三行（错误文案搬走了）。
 			for _, text := range tt.Texts() {
-				if len(text) > 4 && text[:4] == "打不开" {
+				if strings.HasPrefix(text, "打不开") {
 					t.Errorf("宽度 %d：那一列上还有那句被截碎的错误文案 %q——"+
 						"它该搬到播放键上去", width, text)
 				}
@@ -306,7 +306,7 @@ func TestTheOwnerSitsUnderTheTitle(t *testing.T) {
 	// 🔴 **那一列上不该有第三行**（错误文案搬走了）：它是三行里最挤的一行，
 	// 而 76 高的播放条放不下三行（票 #219 的教训）。
 	for _, s := range tt.Texts() {
-		if len(s) > 4 && s[:4] == "打不开" {
+		if strings.HasPrefix(s, "打不开") {
 			t.Errorf("那一列上还有那句被截碎的错误文案 %q——它该搬到播放键上去", s)
 		}
 	}

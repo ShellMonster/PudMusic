@@ -47,16 +47,12 @@ func TestThePlayBarOffersARetryWhenTheFailureIsWorthRetrying(t *testing.T) {
 		t.Fatalf("放不进去：%v", err)
 	}
 
-	// 🔴 **「重试」在「详情」面板里**（票：左下角出错那三行太碎）：错误文案从
-	// 那一列里搬走了，而它原来和那句话挤在同一行。
-	waitFor(t, "播放条上出现那个出错键", func() bool {
+	// 🔴 **可重试的那一档，播放键那一枚**就是「重试」**（点它直接重试，一步
+	// 到位——网络抖了一下，用户要的就是「再试一次」）。完整那一句在它的悬停
+	// 提示里。
+	waitFor(t, "播放条上出现「重试」那一枚", func() bool {
 		tt.Frame()
-		return showsText(tt, errPlayKeyLabel)
-	})
-	openErrDetail(t, tt, "")
-	waitFor(t, "详情面板里有「重试」", func() bool {
-		tt.Frame()
-		return showsText(tt, "重试")
+		return showsText(tt, "重试这一首")
 	})
 }
 

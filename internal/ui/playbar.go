@@ -483,14 +483,18 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	// 显示的是**上一首**：用户读到的是「这一首正在放，但它打不开」，而打不开
 	// 的其实是刚点的**另一首**。两首对不上号，是这一列最难懂的一种形态。
 	//
-	// ⚠️ **只有「有歌」的时候才换**：没有歌的时候（冷启动就失败）那一列本来
-	// 就空着，而失败那一首的名字正是用户要知道的那一句。
+	// ⚠️ **这一支要排在「没有歌」那一支前面**：冷启动就失败的时候
+	// （`HasTrack=false`、`FailedTitle` 有值），用户要知道的正是**失败那一首**
+	// 的名字——「还没有打开文件」那句占位话会把它整个盖掉（评审抓到的就是
+	// 这个顺序问题）。
+	//
+	// ⚠️ **作者编号不带**（`artistMid = 0`）：那一栏记的是失败那一首的作者，
+	// 但跳转要的编号没有跟着记（它在那一场失败里没有用——用户下一步是重试或
+	// 去 B 站，不是进作者空间）。
 	if st.Err != "" && st.FailedTitle != "" {
 		title = tclean.Clean(st.FailedTitle).Title
 		artist, artistMid = st.FailedArtist, 0
-	}
-
-	if !st.HasTrack {
+	} else if !st.HasTrack {
 		title = "还没有打开文件"
 		// 🔴 **冷启动那一句**（票 #478）：窗口开了、界面在那儿、就是没声音，
 		// 而「还没有打开文件」是**一句假话**——应用不是没有文件，它是在
@@ -566,9 +570,11 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 		// 🔴 **错一收，「详情」面板也得收**（票 #320）：**在 switch 之前**判——
 		// 错收掉之后紧接着来的可能是「正在重连」「正在取流」「停住了」那几档
 		// （票 #315 / #282 / #319），而那块面板说的是上一句错的话，它自己不会走。
-		if st.Err == "" {
-			s.errDetailOpen = false
-		}
+		//
+		// ⚠️ **复位点必须排在浮层建立之前**：那块面板现在锚在**播放键**上
+		// （`viewErrorPlayKey`，中间那一列），而这一列是 Grid 的**第一个**孩子
+		// ——本列先建，复位才赶在浮层之前。要是哪天把左列挪到中列之后，
+		// 这里就得跟着挪（`viewErrorPlayKey` 里那段注释写着同一件事）。
 		// 它们的优先级是**错 > 重连 > 停住**：
 		//
 		//	出错		一句错比一枚转圈信息量大，而转圈还在转说明还有希望
@@ -1090,28 +1096,37 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	})
 }
 
-// errPlayKeyLabel 是**出错那一档的播放键**的无障碍名字（读屏软件念的是它，
-// 而它在画面上是一个图标）。
+// errPlayKeyLabel 是**出错那一档的播放键**在**不可重试**那一档的无障碍名字
+// （读屏软件念的是它，而它在画面上是一个图标）。
 //
 // ⚠️ **它是一个出口**：好几处测试要认出「出错时的那一枚」，而它们认的是
 // `Label`——`Tester.Find` 认的是文字和 `Label`，不认 `Key`。这个名字散着写
 // 的话，改了一处另一处就安静地对不上。
+//
+// ⚠️ **可重试那一档的名字是「重试这一首」**（见 `viewErrorPlayKey`）：那一档
+// 点下去就是重试，名字说的就是它做的事。
 const errPlayKeyLabel = "这一首放不出来，出错了"
 
 // viewErrorPlayKey 是**出错那一档的播放键**。
 //
 // # 形态
 //
-//	可重试	危险色底 + 一枚「重试」图形（回转箭头）+ **可点**（点它重试这一首）
-//	不可重试	危险色底 + 一枚「感叹号」图形 + **按不动**
+//	可重试	危险色底 + **回转箭头**，点它**直接重试**这一首
+//	不可重试	危险色底 + **感叹号**，点它**打开「详情」面板**
+//	        （完整那一句 + 「在 B 站打开」在里面）
 //
-// ⚠️ **两档都是危险色底**：不可重试的那一档不给「重试」键，但**仍然要说
-// 「出错了」**——错误文案搬走之后，这一枚就是那个信号。
+// # 为什么两档点下去做的事不一样
 //
-// ⚠️ **图形两档不一样**：可重试的那一枚是**回转箭头**（那是「按下去会发生什
-// 么」的图形）；不可重试的那一枚是**感叹号**（那是「这一首放不出来」的图形），
-// 而它是禁用的（灰掉、不响应点击）。⚠️ **别把两档画成同一个图形**：那用户看到
-// 一枚「重试」却按不动，只能猜是哪一处坏了。
+// 能做的事有**两件**（重试 / 在 B 站里听它），而**两个都摆在播放条上放不下**
+// ——那一列只有 75.7 像素宽（实测），一句 26 个字的话上屏只剩十来个。所以：
+//
+//   - **可重试的那一档，重试就是全部**——网络抖了一下，用户要的就是「再试
+//     一次」，一步到位；那一枚的图形（回转箭头）说的正是这件事。
+//   - **不可重试的那一档，重试不存在**——重试一万次还是这一句。用户能做的
+//     是「看清楚为什么」和「去 B 站里听它」，两样都在面板里。那一枚的图形
+//     （感叹号）说的是「这一首放不出来」，不是「按下去能重试」。
+//
+// 🔴 **两档都是危险色底**：错误文案搬走之后，这一枚就是「出错了」唯一的信号。
 //
 // 🔴 **字色用 `readableOn`**：危险色在浅色方案下是深红（`#B4492E`），白字压
 // 上去够；而经典那套的危险红 `#f31260` 上白字 4.15:1 —— `readableOn` 按
@@ -1119,29 +1134,10 @@ const errPlayKeyLabel = "这一首放不出来，出错了"
 //
 // ⚠️ **提示里给完整那一句**：播放条上那一行的宽度只有 75.7 像素（实测），
 // 一句 26 个字的话上屏只剩十来个——完整那一句在悬停提示和「详情」面板里
-// （`errFullBody`），而这一枚的提示里也有它。
+// （`errFullBody`）。
 func (s *Shell) viewErrorPlayKey(c *ui.Context, st app.State) ui.Element {
 	t := c.Theme()
-	// 🔴 **图形两档不一样**：可重试的是**回转箭头**（那是「按下去能重试」的
-	// 图形）；不可重试的是**感叹号**（那是「这一首放不出来」的图形）。
-	// ⚠️ **别把两档画成同一个图形**：那用户看到一枚「重试」却按不动，只能猜是
-	// 哪一处坏了。
-	glyph := iconWarning
-	if st.CanRetry {
-		glyph = iconRefresh
-	}
-	b := ui.ButtonBase(c).Label(errPlayKeyLabel).
-		Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None).Radius(iconHitPlay / 2).
-		Background(t.Danger).
-		OnClick(func() { s.errDetailOpen = !s.errDetailOpen })
-	b.Children(func() {
-		ic := ui.Icon(c, icon(glyph)).FontSize(iconPlayBtn).
-			TextColor(readableOn(t.Danger, ui.RGB(255, 255, 255)))
-		ic = flat.PressScale(ic, b.Pressed(), false)
-	})
-	// 🔴 **完整那一句在悬停提示里**：这一枚是那一句话唯一的出处了（错误文案
-	// 从那一列里搬走了），而播放条上那一行的宽度只有 75.7 像素（实测）——
-	// 一句 26 个字的话上屏只剩十来个。
+
 	tip := "打不开：" + errFullBody(st)
 	// ⚠️ **面板开着的时候不挂提示框**：提示框和那块面板**摆在同一个位置**，
 	// 而它们说的是同一句话——指针移开又移回来的时候，两块叠在一起，屏幕上就
@@ -1149,9 +1145,35 @@ func (s *Shell) viewErrorPlayKey(c *ui.Context, st app.State) ui.Element {
 	if s.errDetailOpen {
 		tip = ""
 	}
+
+	var b ui.Element
+	if st.CanRetry {
+		b = ui.ButtonBase(c).Label("重试这一首").
+			Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None).Radius(iconHitPlay / 2).
+			Background(t.Danger).
+			OnClick(func() { s.retryPlay() })
+		b.Children(func() {
+			ic := ui.Icon(c, icon(iconRefresh)).FontSize(iconPlayBtn).
+				TextColor(readableOn(t.Danger, ui.RGB(255, 255, 255)))
+			ic = flat.PressScale(ic, b.Pressed(), false)
+		})
+		b = s.withTip(c, b, tip)
+		return b
+	}
+
+	// 不可重试：那一枚点开是「详情」面板（完整那一句 + 「在 B 站打开」）。
+	b = ui.ButtonBase(c).Label(errPlayKeyLabel).
+		Size(iconHitPlay, iconHitPlay).Padding(space.None, space.None).Radius(iconHitPlay / 2).
+		Background(t.Danger).
+		OnClick(func() { s.errDetailOpen = !s.errDetailOpen })
+	b.Children(func() {
+		ic := ui.Icon(c, icon(iconWarning)).FontSize(iconPlayBtn).
+			TextColor(readableOn(t.Danger, ui.RGB(255, 255, 255)))
+		ic = flat.PressScale(ic, b.Pressed(), false)
+	})
 	b = s.withTip(c, b, tip)
 	// 🔴 **这一枚是「详情层」的入口**（票 #320）：它点得开——完整那一句在那块
-	// 面板里，而**能做的事**也在里面（见 `viewErrorDetail`）。
+	// 面板里，而「在 B 站打开」也在里面（见 `viewErrorDetail`）。
 	//
 	// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局
 	// 之外**单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——

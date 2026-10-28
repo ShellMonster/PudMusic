@@ -41,7 +41,6 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -120,59 +119,6 @@ func flatIconCellButton(c *ui.Context, name, label string, font, cell float32) u
 	return flat.IconCellButton(c, icon(name), label, font, cell)
 }
 
-// flatCurrent 是「这一项正选中」的那一层：**一块中性的底 + 主色的字**。
-//
-// 原来我们侧栏那一行刷的是**实心主色**（`sidebar.go` 的 `Background(t.Accent)`），
-// 那是调研点名的那处（报告 §2 基线 B 标注 3）。上游那一格长什么样，
-// `_research/biu/screenshots/home.png` 上量得到：**中性灰底 + 主色的字**——
-// pill 是 `#27272c`，字取最亮那一处是 `#66cc8a`，两者差 **7.7:1**。
-//
-// # 🔴 **深浅两套现在是同一个东西**（票 #239，审计 F-15）
-//
-// 改之前浅色那一支是**主色当底**（主色 14% 那一层淡绿底 + 正文色），深色那一支
-// 是**主色当字**（中性灰底 + 亮绿的字）——**同一个控件，主色的角色在两套主题里
-// 换了**：浅色下整个侧栏因此「更绿」（那一格是 `#dff9e9`，整窗 6881 像素 =
-// 0.72%），深色下同一格是 `#3e3e41`。
-//
-// 现在两套都是「**中性灰底 + 主色的字**」：
-//
-//   - **底**：深浅两套都是 `flatSelected`（浅色 #dcdcdf / 深色 #3e3e41）。
-//   - **字**：深色下是主色本身（亮绿压深灰 5.55:1，够）；浅色下是**从主色现算的
-//     一个压深变体**（`ink.Ensure`，≥4.5:1；默认主色下算出来是 #107032）
-//     ——主色（`#1ed760`）压浅底只有 1.4:1，直接用等于把这一行读不出来，而浅色下
-//     主色当字必须压深是
-//     DESIGN.md §七 明写的规矩（「我们比上游好、不要改回去」）。
-//
-// ⚠️ **主色的角色统一成「字」**：两套里它都不当底了。浅色下那一格从一大块淡绿
-// 变成一小段深绿字——主色的出现率降一截，而整份主题里主色终于只有一个角色。
-//
-// # 🔴 和「正在播放」那一支**现在不是同一件事**了（票 #294，2026-10-24）
-//
-// 改之前这两支是相反的：这里是「主色当底」，列表行 / 网格卡片的「正在播放」是
-// 「主色当字」（`ink.AccentOn`）。底换掉之后，两支合了：都是「中性底 + 主色的
-// 字」，浅色下那个字都是压深的那一档。
-//
-// 底下为什么是中性灰而不是主色淡底：绿字压绿底是同一支颜色压自己——浅色下那一格
-// 从改前的 9.2:1 掉到 1.55:1，直接不达标；而上游那一格本来就是中性灰。
-// `TestTheSelectedRowKeepsItsContrast` 逐条钉着这几个数。
-//
-// ⚠️ **队列抽屉的「正在播放」那一行后来单独改成了「淡主色底」**（票 #294 / 报告
-// §1 的 S-11，2026-10-24 拍板按上游改）：那一行的底是**主色 20% 那一层淡底**
-// （浅色 #d2f7df），歌名是主色压深到 ≥4.5:1 的那一档。**它不走 `flatCurrent`**
-// ——改 `flatCurrent` 会把侧栏当前项和左栏那三处一起改掉。那一行的配方在
-// `playingrow.go` 的 `playingRowBg` / `playingRowText`。
-//
-// ⚠️ **分集抽屉的「正在放」那一行也是那一档**（票 #323，2026-10-24）：它之前
-// 一直还是实心主色底，和队列抽屉差着一个上游的数——现在两个抽屉共用同一份
-// 配方（`playingrow.go`）。
-//
-// **「没选中」就是不调它**：那一支一个字都不改，颜色继续由 `flat` 那个包里的
-// 反馈层按悬停 / 按下决定。
-func flatCurrent(c *ui.Context, e ui.Element) ui.Element {
-	t := c.Theme()
-	return e.Background(flatCurrentBg(t)).TextColor(flatCurrentText(t, true))
-}
-
 // flatCurrentBg 是 flatCurrent 那一层**底色**。
 //
 // ⚠️ **深浅两套是同一个数**（票 #239，审计 F-15）：以前浅色那一档是**半透明**的
@@ -186,34 +132,14 @@ func flatCurrentBg(t *ui.Theme) ui.Color {
 	return accentSoft(t)
 }
 
-// flatCurrentText 是 flatCurrent 配的那一档**字色**。
+// flatCurrentText 是「**当前在哪**」那一档**没选中**时的字色——正文色。
 //
-// 之所以单列一个函数：有些地方的字是**自己画**的（不是从父元素继承）——
-// 收藏夹那一行的歌名就是（`sidebar_favorites.go` 的 `rowTextColor`）。那一处必须
-// 和这一档**同一个数**，否则「底换了、字没换」——浅色下就是一行灰底上的深色字
-// 和别处的主色字，深色下则是灰底上的黑字。
-//
-// ⚠️ **队列抽屉那一行现在不是同一个数**（票 #294，2026-10-24）：它后来单独
-// 改成了**淡主色底**（`playingrow.go` 的 `playingRowBg`），底上的字按**那一层
-// 淡底**重算（`playingRowText`）——浅色下算出来是 **#127d38**，而这一档是
-// **#107032**。两个数差在「按哪个底算」：淡主色底比中性灰底亮，压深要压得更狠。
-// 所以那几处**不能**再照着「必须和这一档同一个数」写。
-//
-// ⚠️ **浅色那一支是「压深的主色」，不是正文色**：主色（亮绿）压在浅底上不到
-// 2:1，当字色等于把这一行读不出来（见上面那一大段）。而「主色压深到 ≥4.5:1」
-// 是 DESIGN.md §七 定的规矩——浅色下它算出来是一个深绿（默认主色下是
-// `#107032`），深色下就是主色本身。
-//
-// 主色是**用户可设的**，所以那个变体每次都从当前主色现算（`ink.Ensure`），
-// 这里没有一个写死的绿。
+// ⚠️ **它只剩这一个分支**：选中那一档已经统一成**实心主色底**
+// （`flatSolidCurrent`，字取 `t.AccentText`），那一支不再经过这里。现在还在用
+// 它的只有设置页只读档（`settings_page.go` 的 `pickSelected`：禁用时字取
+// 正文色）。
 func flatCurrentText(t *ui.Theme, current bool) ui.Color {
-	if !current {
-		return t.Text
-	}
-	if t.Dark {
-		return t.Accent
-	}
-	return ink.Ensure(t.Accent, flatCurrentBg(t), 4.5)
+	return t.Text
 }
 
 // flatSolid 是「**被选中的选项**」那一档：一块**实心主色**，字取 `t.AccentText`。
@@ -311,28 +237,40 @@ func flatSolidCurrentText(t *ui.Theme) ui.Color {
 // ⚠️ **那个数是量出来的，不是拍的**：混 30% 只有 3.43:1（暖纸浅色）——而
 // 「N 首」是 12 号字，不算 WCAG 的「大字」，判据是 **4.5:1**。所以上限是
 // **10%**（最差 4.58:1，暮光琥珀浅色）；取 **8%** 是留一点余量（最差
-// 4.70:1），因为**主色是用户可设的**——用户挑一个更亮的主色，那一档就更吃力。
+// 4.70:1）。
 //
-// ⚠️ **8% 够不够看出它是次要的**：够——它和名字那一档（`AccentText`）差的是
-// 「同一支色上的一档深浅」，而字号已经差了一档（14 对 12）。
+// ⚠️ **这个余量只对内置的八套方案成立**：主色是用户可设的，用户挑一个中间调
+// 的饱和色（比如亮青 `#10c8ff`）时，`AccentText` 自己都只有 2:1 上下——那是
+// `applyAccent` 那一层的事（它现在按 WCAG 亮度挑黑白，见 `theme.go`），不是
+// 这一层能兜住的。这一层兜的是「内置方案的八档全过」。
 //
-// ⚠️ **深浅两套走同一个算法**：深色方案的主色是亮色，那一档混完更暗，仍然
-// 读得出来。
+// ⚠️ **8% 够不够看出它是次要的**：弱——它和名字那一档（`AccentText`）只差
+// 同一支色上的一档深浅，真正的层级信号是**字号**（14 对 12）。要更明显的
+// 次要层级就得牺牲对比度，两者只能取一头。
 func flatSolidCurrentMutedText(t *ui.Theme) ui.Color {
 	return t.AccentText.Mix(t.Accent, 0.08)
 }
 
-// flatSolidCurrentFeel 是实心主色底那一档的**悬停 / 按下**反馈。
+// flatSolidCurrentFeel 是实心主色底那一档的**悬停 / 按下**反馈：**换主色自己的
+// hover / pressed 档**。
 //
-// 🔴 **不能直接用 `flat.Feel`**：那是「按主题算」的——浅色主题的正文色是**黑
-// 的**，8% 的黑压在主色底上几乎看不出变化（那一行的悬停反馈等于没有）。按这一
-// 层底（主色）的深浅挑就对了：深底压白、浅底压黑，两边都看得出变化。
+// 🔴 **不能压前景色**（`flat.Feel` 那一层 8% / 16% 的半透明前景）：实测压在
+// 主色底上只有 **1.15:1 ~ 1.19:1**（悬停）——指针落上去和不落几乎分不出来。
+// 也不能用 `flat.FeelOnBase`（按底色深浅挑黑白再压）——同样的量级。
 //
-// ⚠️ **压在前景色上，不是换底**：换底会把「当前在哪」那一层的主色顶掉——
-// 指针一落上去，当前项就整个不见了。
+// ⚠️ **这一档是「换底」，不是「压一层」**：和 `iconButtonPlay`（主色圆底悬停
+// 变 `AccentHover`、按下变 `AccentPressed`）同一个做法。它和 `flat.Feel` 注释
+// 里那条「换底会顶掉选中层」不冲突——这一层**本身就是**选中那一层，换成的
+// 还是主色（亮/暗一档），「当前在哪」的信号没有走。
 func flatSolidCurrentFeel(c *ui.Context, e ui.Element) ui.Element {
 	t := c.Theme()
-	return flat.FeelOnBase(c, e, flat.BaseOf(t.Accent))
+	switch {
+	case e.Pressed():
+		return e.Background(t.AccentPressed)
+	case e.Hovered():
+		return e.Background(t.AccentHover)
+	}
+	return e
 }
 
 // flatSelected 是选中态那一层**中性**的底。

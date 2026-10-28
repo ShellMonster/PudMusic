@@ -503,17 +503,29 @@ func upVideoDuration(raw json.RawMessage) string {
 }
 
 // upVideoCid 读 cid。同样是两套格式（数字 / 字符串）。
+//
+// 🔴 **最后过一遍 `ParseCid`**（票：首页榜单点不动）：0 是「没有」，拼成字符串
+// 是 `"0"`——而 `"0"` 会冒充一个真的分 P id 被发去取流（B 站回 -400，界面上
+// 写「B 站拒绝了这次请求」）。空串才让取流那一层知道「缺了，得问一次」。
 func upVideoCid(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return ""
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return ""
+		}
+		return ParseCid(n)
 	}
 	var n json.Number
 	if err := json.Unmarshal(raw, &n); err == nil {
-		return n.String()
+		v, err := n.Int64()
+		if err != nil {
+			return ""
+		}
+		return ParseCid(v)
 	}
 	return ""
 }

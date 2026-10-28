@@ -1311,6 +1311,12 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		// 连流都没有（它在你的磁盘上，坏了就是坏了）。留着上一句的
 		// `errRetryable` 的话，界面上会给出一枚按了也没用的「重试」。
 		a.errRetryable = false
+		// 🔴 **「失败的那一首」也一起清**：用户现在面对的是**这个本地文件**，
+		// 而那两栏里可能还留着上一首**在线**歌的名字——不清的话，那一列显示
+		// 的是「第二首 / 它的作者」，第三句却是「打不开本地文件」，三句凑不
+		// 成一件事（理由见 `State.FailedTitle`）。
+		a.failedTitle = ""
+		a.failedArtist = ""
 		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
 		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
 		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。

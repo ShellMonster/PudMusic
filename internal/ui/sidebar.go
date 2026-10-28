@@ -561,7 +561,6 @@ func (s *Shell) viewSideGroupTitle(c *ui.Context, group string, firstOfAll, coll
 // sideMenuItem 是侧栏菜单里的一项。
 //
 // selected 是「当前就在这一页」——它换的是**图标那一枚**（实心）和**底色**
-// （上游 HeroUI 的 `variant="flat"` + `color="primary"`，见 flatCurrent）。
 //
 // # 展开态：图标在 40×40 的格子里，名字在格子右边
 //
@@ -713,7 +712,7 @@ func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 		//
 		// ⚠️ **主色当字色要取 `ink.AccentOn`**：浅色下主色是亮绿，压在浅底上
 		// 只有 1.9:1（读不出来），所以取那个「读得出来」的变体——理由和
-		// `flatbutton.go` 的 `flatCurrent` 是同一条。
+		// `flatbutton.go` 的 `flatSolidCurrent` 是同一条。
 		if hint.Hovered() {
 			hint = hint.TextColor(ink.AccentOn(c.Theme())).Underline().
 				Cursor(ui.CursorPointer)
