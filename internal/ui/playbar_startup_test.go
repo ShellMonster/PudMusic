@@ -22,7 +22,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestTheStartupSaysItIsPreparing 盯「启动那一段，界面上有一句话」。

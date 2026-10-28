@@ -21,7 +21,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // ticket455Presets 是这一票出图要覆盖的四套方案。

@@ -12,8 +12,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // D1（设置页说明和控件之间的空档）已经不存在：设置页的每一行不再带说明文字，

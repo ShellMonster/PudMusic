@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

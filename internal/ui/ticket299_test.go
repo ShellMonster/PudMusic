@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // localSongs 造 n 首**本地**的歌：歌名是「本地 1」到「本地 n」，文件是同一个

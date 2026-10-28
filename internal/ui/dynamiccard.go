@@ -8,22 +8,22 @@ package ui
 
 import (
 	"fmt"
-	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
+	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 

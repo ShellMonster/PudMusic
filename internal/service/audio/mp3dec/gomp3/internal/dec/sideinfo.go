@@ -1,6 +1,6 @@
 package dec
 
-import "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3/internal/bits"
+import "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3/internal/bits"
 
 // scfLongTable mirrors g_scf_long (tools/oracle/minimp3.h:486-495):
 // long-block scalefactor band-width tables, one row per

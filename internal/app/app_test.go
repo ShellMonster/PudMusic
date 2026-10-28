@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这些测试用真解码器真播放器跑：阶段 1 要验收的就是「打开本地 FLAC 能出声、

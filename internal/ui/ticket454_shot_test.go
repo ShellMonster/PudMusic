@@ -17,7 +17,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestRenderTicket454Shots 把队列抽屉开着的那一屏存成 PNG（两套方案 × 深浅各一套）。

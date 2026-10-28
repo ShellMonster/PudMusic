@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/media"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/media"
 )
 
 // 系统媒体会话在业务这一侧的接线：什么时候说一声、说什么、以及收到命令之后

@@ -37,11 +37,11 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/ShellMonster/Biu_Go/internal/licensing"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/licensing"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -59,7 +59,7 @@ const (
 	// aboutRepoLabel / aboutRepoText 是「代码仓库」那一行：左边是名字，
 	// 下面是那个能点的地址。
 	aboutRepoLabel = "代码仓库"
-	aboutRepoText  = "github.com/ShellMonster/Biu_Go"
+	aboutRepoText  = "github.com/ShellMonster/PudMusic"
 	// aboutLicenseLabel / aboutLicenseText 是「第三方许可」那一行。
 	aboutLicenseLabel = "第三方许可"
 	aboutLicenseText  = "打开随包发出的许可清单"
@@ -78,7 +78,7 @@ const (
 //
 // ⚠️ **它和 `feedbackURL`（`navbar_avatar.go`）是同一个仓库的两个入口**：
 // 那一个去 issue 区，这一个去代码。改仓库地址要两处一起改。
-const repoURL = "https://github.com/ShellMonster/Biu_Go"
+const repoURL = "https://github.com/ShellMonster/PudMusic"
 
 // noticesFile 报告随包发出去的那份第三方许可清单在哪儿。
 //

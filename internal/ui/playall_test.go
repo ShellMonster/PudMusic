@@ -26,8 +26,8 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // 上游那一枚的实测值（UX 报告 C-05 的实图逐像素量出来的）。

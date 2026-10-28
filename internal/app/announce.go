@@ -43,7 +43,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // FriendlyErrText 把一个错翻成一句**给用户听**的话。

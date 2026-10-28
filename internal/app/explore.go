@@ -34,7 +34,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // errExploreMissing 是「探索这一摊还没挂上」。

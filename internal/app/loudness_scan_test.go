@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // longWav 是 0.244 幅度的 440 Hz 单声道正弦：均方功率 0.0298，K 加权在 440 Hz 上

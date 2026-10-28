@@ -18,7 +18,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestRenderMiniMuteShots 把迷你窗在静音 / 未静音两种状态各存一张 PNG。

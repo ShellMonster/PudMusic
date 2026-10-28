@@ -14,7 +14,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // TestRenderFollowGridShots 把「我的关注」那个网格存成 PNG，深浅各一套。

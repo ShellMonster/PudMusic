@@ -14,7 +14,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // loggedInApp 造一个**已经登录**、并且指着这台假 B 站的 App。

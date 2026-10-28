@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/danmaku"
 )
 
 // TestTheDanmakuCacheNeverLandsInTheWorkingDirectory 钉住「拿不到应用数据目录时缓存

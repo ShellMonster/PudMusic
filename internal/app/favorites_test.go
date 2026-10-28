@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一组盯的是「拖完真的存住了」这条验收。

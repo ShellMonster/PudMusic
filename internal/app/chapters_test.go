@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // 这一组测的是「进度条上那些章节点」的数据从哪来、什么时候来。

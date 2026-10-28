@@ -29,7 +29,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestRenderTicket194Shots 把「正在播放」那一页的旋钮那一列存成 PNG。

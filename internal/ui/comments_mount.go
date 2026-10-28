@@ -23,8 +23,8 @@ package ui
 import (
 	"path/filepath"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/comments"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/comments"
 )
 
 // MountComments 把评论缓存挂上。

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // downloadRecorder 是记「下载」这一下的桩。

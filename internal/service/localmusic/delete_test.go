@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic/localmusictest"
 )
 
 // 删文件是这个应用里**唯一**会动用户数据文件的动作，所以这一组测试盯的

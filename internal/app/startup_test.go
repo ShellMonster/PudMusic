@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一组盯「**冷启动**」那一段（票 #478）。

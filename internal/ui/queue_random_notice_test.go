@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestAddingASongInRandomModeSaysItWillPlayThisRound 盯「**随机档加歌时要说

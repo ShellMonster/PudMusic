@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 抽屉要动队列的那些动作：从队列里删掉一首、清空、点一行跳过去。

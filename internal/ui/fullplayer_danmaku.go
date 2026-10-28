@@ -26,8 +26,8 @@
 package ui
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/testproc"
+	"github.com/ShellMonster/PudMusic/internal/testproc"
 )
 
 // TestRouteFromURL 验 deep link 到路由的那一步。

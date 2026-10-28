@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/extaf"
 )
 
 // 打开文件时资源必须换手干净：同一个文件连着打开两次，第一次的解码器和

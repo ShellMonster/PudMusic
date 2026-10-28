@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // TestRenderListOwnerShots 把「列表行里的 UP 名」存成 PNG。

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // TestRenderDesign180Shots 把四种语义色和入场那一段存成 PNG。

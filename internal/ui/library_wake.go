@@ -18,8 +18,8 @@ import (
 	"log"
 	"slices"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/egoist/mygo/ui"
 )
 

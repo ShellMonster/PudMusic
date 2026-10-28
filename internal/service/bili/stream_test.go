@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // 这一组测的是「拿到取流响应之后」的那半：挑哪一条流、有效期怎么算、

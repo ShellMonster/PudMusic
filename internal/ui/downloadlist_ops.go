@@ -23,11 +23,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )

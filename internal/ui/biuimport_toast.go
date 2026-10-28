@@ -3,7 +3,7 @@ package ui
 import (
 	"fmt"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // biuImportToast 把导入结果压成一句给用户看的话。

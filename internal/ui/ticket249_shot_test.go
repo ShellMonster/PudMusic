@@ -21,8 +21,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // shotName 给这一轮存图起个名：方案 + 深浅。

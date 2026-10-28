@@ -20,9 +20,9 @@ import (
 //
 // ⚠️ **这里原来靠 `runtime.Caller(0)` 推路径**（拿本文件的路径往上找）。
 // 那在 `-trimpath` 之下拿到的是 **import 路径**
-// （`github.com/ShellMonster/Biu_Go/internal/ui/widgets/space/space_test.go`）
+// （`github.com/ShellMonster/PudMusic/internal/ui/widgets/space/space_test.go`）
 // 而不是文件系统路径——拼出来的 `DESIGN.md` 不存在，两条用例会红：
-// `open github.com/ShellMonster/Biu_Go/DESIGN.md: no such file or directory`。
+// `open github.com/ShellMonster/PudMusic/DESIGN.md: no such file or directory`。
 //
 // 而 `-trimpath` 是**编译缓存跨 worktree 命中的前提**（源码路径不再进哈希，
 // 产物才能被别的 worktree 复用），所以这里的定位必须**既不依赖编译期路径、

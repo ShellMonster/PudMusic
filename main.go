@@ -31,9 +31,9 @@ import (
 	"runtime/debug"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/platform"
-	"github.com/ShellMonster/Biu_Go/internal/ui"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/ui"
 )
 
 func main() {

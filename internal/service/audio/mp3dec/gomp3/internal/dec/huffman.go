@@ -1,6 +1,6 @@
 package dec
 
-import "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3/internal/bits"
+import "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3/internal/bits"
 
 // fourThirds and twoNinths mirror the two f-suffixed literal fractions in
 // l3Pow43's rational approximation (tools/oracle/minimp3.h:738: 4.f/3 and

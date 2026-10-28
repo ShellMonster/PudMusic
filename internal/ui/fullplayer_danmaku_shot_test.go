@@ -29,7 +29,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // shotDanmaku 是出图时摆的那十二条弹幕。

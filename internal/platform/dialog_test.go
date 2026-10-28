@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	// 空导入：这些 init 才是真正往解码器注册表里写东西的地方，白名单要对着它们核。
-	_ "github.com/ShellMonster/Biu_Go/internal/service/audio"
+	_ "github.com/ShellMonster/PudMusic/internal/service/audio"
 
 	"github.com/egoist/mygo"
 	mygoaudio "github.com/egoist/mygo/audio"

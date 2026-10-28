@@ -31,8 +31,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // CollectionRefs 是歌单这一摊事的依赖。零值不挂——界面要判空。

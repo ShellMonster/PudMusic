@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // 「从 Biu 切过来」的端到端：造一份 Biu 的数据目录，在一个**空**的本应用数据

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic"
 	"github.com/egoist/mygo/ui"
 )
 

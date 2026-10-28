@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // likeServer 是一台会答「赞没赞」和「三连」的假 B 站。

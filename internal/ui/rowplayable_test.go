@@ -44,8 +44,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic"
 )
 
 // verdictRow 是一类会被我们画成一行、并且带着一句「能不能放」的内容。

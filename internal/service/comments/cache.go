@@ -35,7 +35,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // TTL 是一份评论缓存多久算过期。

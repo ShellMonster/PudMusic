@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 )
 
 // TestTheLyricScrollIsTwoHundredMilliseconds 钉住那一下的时长与形状。

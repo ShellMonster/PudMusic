@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // 这一组是票 #220 的回归：「取流非常慢」和「一直转圈」这两件事。

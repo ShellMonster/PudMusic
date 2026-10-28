@@ -4,7 +4,7 @@ import (
 	"image"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

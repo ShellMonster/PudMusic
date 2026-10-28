@@ -34,8 +34,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/danmaku"
 )
 
 // danmakuRetryAfter 是问失败之后隔多久再问一次。

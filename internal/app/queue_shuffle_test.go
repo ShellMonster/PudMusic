@@ -3,7 +3,7 @@ package app_test
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 随机模式下的**历史栈**（票 #322 的 B4）：「上一首」回到**刚才放过的那首**，

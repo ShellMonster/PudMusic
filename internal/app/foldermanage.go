@@ -29,7 +29,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // folderChoices 是「我创建的收藏夹」拉回来之后的那一份，按问的是哪个内容分组。

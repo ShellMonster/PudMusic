@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // 这一组测的是「B 站那一份歌词是自己来的」这条线：

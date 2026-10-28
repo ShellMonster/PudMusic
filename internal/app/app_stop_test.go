@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // `App.ClearTrack` 的代次那道守卫：停掉之后，在途的在线流**不许**再把歌装回来。

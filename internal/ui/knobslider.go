@@ -48,7 +48,7 @@ package ui
 import (
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )

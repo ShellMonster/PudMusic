@@ -33,7 +33,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // TTL 是缓存的有效期：7 天。

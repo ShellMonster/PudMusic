@@ -32,7 +32,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // errLibraryMissing 是「这一页还没挂上 B 站客户端」。

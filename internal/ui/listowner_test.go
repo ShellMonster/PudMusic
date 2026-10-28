@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // 这一组钉住「点列表行里的 UP 名进他的空间」那条路（票 #360）。

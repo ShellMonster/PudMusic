@@ -46,7 +46,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/egoist/mygo"
 )
 

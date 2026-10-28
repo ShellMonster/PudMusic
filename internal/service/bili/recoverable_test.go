@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // TestRecoverableTellsWhatIsWorthRetryingAgain 盯这张表的两半。

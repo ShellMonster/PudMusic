@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/covertint"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
 	"github.com/egoist/mygo/ui"
 )
 

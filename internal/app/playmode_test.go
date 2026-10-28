@@ -12,7 +12,7 @@ package app_test
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // fixedRand 是「每次都给出同一个数」的随机源。

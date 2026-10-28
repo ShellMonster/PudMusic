@@ -38,7 +38,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic"
 )
 
 // errLocalMusicMissing 是「本地音乐还没挂上」。见 `LocalMusicMounted`。

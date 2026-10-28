@@ -3,7 +3,7 @@ package mp3
 import (
 	"errors"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3/internal/dec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3/internal/dec"
 )
 
 // Sentinel errors returned by this package's decoding functions.

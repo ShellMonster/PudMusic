@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/testproc"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/testproc"
 )
 
 // 这些测试盯的是「设置挂在 App 上」这一层：读盘、给快照、改、落盘、退出前

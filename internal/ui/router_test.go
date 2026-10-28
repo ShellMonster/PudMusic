@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

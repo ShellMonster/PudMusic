@@ -17,8 +17,8 @@ package ui
 
 import (
 	"fmt"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"image"
 	"math"
 	"os"
@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

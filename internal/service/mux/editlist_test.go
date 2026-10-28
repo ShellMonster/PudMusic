@@ -21,7 +21,7 @@ import (
 	"github.com/Eyevinn/mp4ff/bits"
 	"github.com/Eyevinn/mp4ff/mp4"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest"
+	"github.com/ShellMonster/PudMusic/internal/service/mux/muxtest"
 )
 
 // TestALateAudioStreamGetsAnEmptyEditInTheRightTimescale 钉住编辑列表。

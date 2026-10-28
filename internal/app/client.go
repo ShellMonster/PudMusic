@@ -1,6 +1,6 @@
 package app
 
-import "github.com/ShellMonster/Biu_Go/internal/service/bili"
+import "github.com/ShellMonster/PudMusic/internal/service/bili"
 
 // BiliClient 是这个 App 用的**那一个** B 站客户端，没挂登录时是 nil。
 //

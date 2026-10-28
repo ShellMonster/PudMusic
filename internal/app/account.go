@@ -32,7 +32,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // LoginPhase 是扫码登录在界面上的样子。

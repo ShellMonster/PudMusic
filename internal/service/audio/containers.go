@@ -3,8 +3,8 @@ package audio
 import (
 	"io"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/mfadec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/extaf"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/mfadec"
 
 	mygoaudio "github.com/egoist/mygo/audio"
 )

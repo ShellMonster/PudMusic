@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/testproc"
+	"github.com/ShellMonster/PudMusic/internal/testproc"
 )
 
 // 这一份是 `internal/ui` 的**磁盘护栏**：跑之前先看一眼临时目录所在的文件系统

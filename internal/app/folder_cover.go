@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // folderCoverCache 记着「封面失效的收藏夹，改用哪首歌的封面」。

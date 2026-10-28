@@ -24,7 +24,7 @@
 package ui
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // switchHint 是「效果看不见」的那几格，拨开之后要说的那一句。

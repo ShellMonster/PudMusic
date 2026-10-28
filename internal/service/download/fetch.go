@@ -37,7 +37,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/mux"
+	"github.com/ShellMonster/PudMusic/internal/service/mux"
 )
 
 // 取流和下载这一摊的哨兵错误。都拿 errors.Is 判。

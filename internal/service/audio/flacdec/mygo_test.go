@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
-	_ "github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec/mygoflac"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
+	_ "github.com/ShellMonster/PudMusic/internal/service/audio/flacdec/mygoflac"
 
 	"github.com/egoist/mygo/audio"
 )

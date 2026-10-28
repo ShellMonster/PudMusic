@@ -47,9 +47,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )

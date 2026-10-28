@@ -14,7 +14,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // TestRenderSemanticShots 把这一票动过的地方各存一张 PNG，深浅各一套。

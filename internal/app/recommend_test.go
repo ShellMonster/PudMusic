@@ -23,7 +23,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // homeBili 是一台照着给定答案回答的假 B 站，把收到的路径和查询串都录下来。

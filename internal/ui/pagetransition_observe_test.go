@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

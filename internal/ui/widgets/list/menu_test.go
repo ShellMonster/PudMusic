@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // 这一组验的是**右键菜单**：菜单是系统的原生菜单（不是自绘浮层），项照 Biu 的

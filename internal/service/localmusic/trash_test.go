@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic/localmusictest"
 )
 
 // 这一组盯的是「移进废纸篓」那一步的**三条路**（成功 / 失败 / 不可回收）

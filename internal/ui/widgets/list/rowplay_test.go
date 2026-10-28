@@ -14,7 +14,7 @@ package list
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestDoubleClickingAUserRowOpensTheSpaceNotTheSpeaker 钉住用户行的分流。

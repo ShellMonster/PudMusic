@@ -37,7 +37,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/spectrum"
+	"github.com/ShellMonster/PudMusic/internal/service/spectrum"
 	mygoaudio "github.com/egoist/mygo/audio"
 )
 

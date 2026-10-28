@@ -48,7 +48,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // Biu 的四个明文文件名。照 `biu/shared/store/index.ts:1-6` 的 `StoreNameMap`，

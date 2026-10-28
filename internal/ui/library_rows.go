@@ -33,14 +33,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
-	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/guard"
+	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 

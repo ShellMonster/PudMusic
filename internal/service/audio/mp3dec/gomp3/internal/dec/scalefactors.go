@@ -1,6 +1,6 @@
 package dec
 
-import "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3/internal/bits"
+import "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3/internal/bits"
 
 // scfPartitionsTable mirrors g_scf_partitions (tools/oracle/minimp3.h:656-660).
 var scfPartitionsTable = [3][28]uint8{

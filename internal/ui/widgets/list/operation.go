@@ -25,10 +25,10 @@
 package list
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrim"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 

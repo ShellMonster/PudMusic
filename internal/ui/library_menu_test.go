@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 稍后再看 / 历史记录这两页的行右键菜单（对照审计的 A9：各页菜单逐页补

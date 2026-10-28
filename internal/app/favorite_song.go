@@ -27,7 +27,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // errFavoriteUnavailable 是「收藏没接上」——没挂在线播放（也就没挂上那个 B 站

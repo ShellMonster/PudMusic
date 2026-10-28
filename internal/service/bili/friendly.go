@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // codeMessages 是错误码到中文说明的表。

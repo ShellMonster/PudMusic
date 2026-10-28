@@ -26,7 +26,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestRenderUpSpaceLayoutShots 把 UP 空间那一页存成 PNG。

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/extaf"
 
 	mygoaudio "github.com/egoist/mygo/audio"
 )

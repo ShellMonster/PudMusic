@@ -16,7 +16,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestClickingACollectedAlbumGoesToThatAlbum 断点一个**合集**走的是合集

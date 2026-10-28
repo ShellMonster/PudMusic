@@ -19,7 +19,7 @@
 package ui
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo/ui"
 )
 

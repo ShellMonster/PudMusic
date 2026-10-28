@@ -26,7 +26,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 换账号这一组用例里的两个账号，和它们各自的歌单名。

@@ -30,7 +30,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

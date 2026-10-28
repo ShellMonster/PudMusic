@@ -3,7 +3,7 @@ package app
 import (
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // 切歌淡入淡出（设置里的「切歌淡入淡出」，0 = 关，默认关）：

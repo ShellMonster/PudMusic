@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // TestEnqueueAndPlayNowSelectsAnItemThatIsAlreadyInTheQueue 是这一票的核心。

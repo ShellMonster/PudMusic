@@ -55,7 +55,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	tclean "github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
+	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 )
 
 // Table 是「这一首的别名表」。

@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
 

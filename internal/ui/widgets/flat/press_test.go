@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
 	"github.com/egoist/mygo/ui"
 )
 

@@ -32,8 +32,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // errStreamingMissing 是「在线播放没挂上」。见 `MountStreaming`。

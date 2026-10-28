@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一组验的是「把文件从访达 / 资源管理器拖进窗口」这一条路。所有测试都走

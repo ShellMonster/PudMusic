@@ -1,6 +1,6 @@
 package ui
 
-import "github.com/ShellMonster/Biu_Go/internal/app"
+import "github.com/ShellMonster/PudMusic/internal/app"
 
 // MountLocalMusic 挂上本地音乐库。
 //

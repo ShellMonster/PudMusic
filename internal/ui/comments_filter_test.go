@@ -20,9 +20,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/ui/songname"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/songname"
 )
 
 // mentionItem 是「一个视频，而它的歌名是『晴天』」那一档的条目。

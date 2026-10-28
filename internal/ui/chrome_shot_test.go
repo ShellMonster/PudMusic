@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一族把**界面骨架**（侧栏 / 内容区 / 播放条三处底色、顶栏、设置页、播放条右边

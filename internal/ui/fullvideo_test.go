@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
-	"github.com/ShellMonster/Biu_Go/internal/service/video"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/video"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

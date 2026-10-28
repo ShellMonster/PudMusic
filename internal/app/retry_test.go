@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // TestARateLimitedFailureIsNotOfferedARetry 盯限流（-509）那一档。

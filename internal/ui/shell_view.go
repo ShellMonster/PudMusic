@@ -15,9 +15,9 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
+	"github.com/ShellMonster/PudMusic/internal/ui/guard"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
 	"github.com/egoist/mygo/ui"
 )
 

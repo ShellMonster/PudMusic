@@ -40,8 +40,8 @@
 package ui
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
