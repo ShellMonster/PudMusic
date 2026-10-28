@@ -81,14 +81,17 @@ jobs:
           go generate ./internal/platform/ ./internal/licensing/
           git diff --exit-code -- resources
 
-      - name: Generate release notes
-        run: scripts/generate-release-notes.sh '${{ steps.release.outputs.tag }}' release-notes.md
-
       - name: Build and upload draft release assets
         run: |
           go tool mygo build \
             -platform darwin/arm64,darwin/amd64,windows/amd64,windows/arm64 \
             -upload
+
+      - name: Verify release assets
+        run: scripts/verify-release-assets.sh
+
+      - name: Generate release notes
+        run: scripts/generate-release-notes.sh '${{ steps.release.outputs.tag }}' release-notes.md
 
       - name: Update draft release notes
         env:

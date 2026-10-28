@@ -15,6 +15,14 @@ if [ -z "$tag" ]; then
 fi
 
 version="${tag#v}"
+slug="$(python3 - <<'PY'
+import json
+print(json.load(open('mygo.json'))['slug'])
+PY
+)"
+
+[ -n "$slug" ] || { printf 'mygo.json 中没有 slug\n' >&2; exit 1; }
+
 commit="$(git rev-parse "$tag^{commit}")"
 previous=""
 if previous_commit="$(git rev-parse -q --verify "$tag^{}")"; then
@@ -92,12 +100,12 @@ fi
   fi
   printf '\n## 下载\n\n'
   printf '请按系统和架构选择下方资产；Release 页面中的资产标签会标明对应平台。自动更新清单由构建流程生成并随 Release 上传。\n\n'
-  printf '| 系统 | 架构 | 安装包 | 便携归档 | 自动更新清单 |\n'
+  printf '| 系统 | 架构 | 安装包 | 更新归档 | 自动更新清单 |\n'
   printf '| --- | --- | --- | --- | --- |\n'
-  printf '| macOS | Apple Silicon（arm64） | `%s.arm64.dmg` | `app-%s-darwin-arm64.tar.gz` | `update-darwin-arm64.json` |\n' "$version" "$version"
-  printf '| macOS | Intel（amd64） | `%s.amd64.dmg` | `app-%s-darwin-amd64.tar.gz` | `update-darwin-amd64.json` |\n' "$version" "$version"
-  printf '| Windows | x64（amd64） | `Setup.%s.amd64.exe` | `app-%s-windows-amd64.tar.gz` | `update-windows-amd64.json` |\n' "$version" "$version"
-  printf '| Windows | ARM64 | `Setup.%s.arm64.exe` | `app-%s-windows-arm64.tar.gz` | `update-windows-arm64.json` |\n' "$version" "$version"
+  printf '| macOS | Apple Silicon（arm64） | `%s-%s-arm64.dmg` | `%s-%s-darwin-arm64.tar.gz` | `update-darwin-arm64.json` |\n' "$slug" "$version" "$slug" "$version"
+  printf '| macOS | Intel（amd64） | `%s-%s-amd64.dmg` | `%s-%s-darwin-amd64.tar.gz` | `update-darwin-amd64.json` |\n' "$slug" "$version" "$slug" "$version"
+  printf '| Windows | x64（amd64） | `%s-setup-%s-amd64.exe` | `%s-%s-windows-amd64.tar.gz` | `update-windows-amd64.json` |\n' "$slug" "$version" "$slug" "$version"
+  printf '| Windows | ARM64 | `%s-setup-%s-arm64.exe` | `%s-%s-windows-arm64.tar.gz` | `update-windows-arm64.json` |\n' "$slug" "$version" "$slug" "$version"
   printf '\n'
   printf '安装包未进行 Apple 公证或 Windows 代码签名。\n'
   printf '\n## 校验\n\n'
