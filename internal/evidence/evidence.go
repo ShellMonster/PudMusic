@@ -673,6 +673,69 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Paging,
+		// 🔴 **评论页 v2：只看提到歌名的评论**（票 #574）：
+		//
+		//	为什么  `mv` 那一档拿到的是**这个视频**的评论，里面大部分不是在
+		//	        聊这首歌（研究票 #537 报告 §4.1 实测）⇒ 页面上给一枚
+		//	        开关，让用户自己挑那个窄视图（**默认是关的**：这一页默
+		//	        认摆的是这一首的**全部**评论）。
+		//	别名表 「提到这首歌」没法只拿一个歌名去判（标题里全是视频的痕
+		//	        迹，用户写的也是各种写法）⇒ 一张表、一处算
+		//	        （`internal/ui/songname`），界面层不自己再拼一份。
+		//	零命中 「这个视频的 N 条评论里没有提到这首歌」这句话**只有在翻完
+		//	        之后**才说得出来（只翻了第一页就说「没有」，那是撒谎）⇒
+		//	        零命中时界面自己把这一首的评论翻完（翻到**翻到的条数盖住
+		//	        B 站给的总数**为止——不是「B 站说到底了」为止：那一档
+		//	        它自己的总数可能还有十万条，而我们就翻到了十几条）。
+		//	楼中楼 楼中楼按**它自己的正文**留：主评论提到了而楼中楼没提到
+		//	        ⇒ 楼中楼不摆；只有楼中楼提到了 ⇒ 主评论照摆（上下文）。
+		//	括号  标题里那些**成对的括号整组判**：「歌手：歌名 (Live 2019)」
+		//	        那一档，按空格切字段会切成「(Live」「2019)」两个**半
+		//	        个括号**的字段 ⇒ 「2019」被当成歌名 ⇒ 正文里提到歌名
+		//	        的那一条一条都命不中；括号外的裸年份（《1984》）是歌名
+		//	        的一部分，不许剔。
+		Spec: "评论页 v2：只看提到歌名的评论这一枚开关默认关着；按歌名 + 别名表 + 简称筛正文；别名表只有一处（internal/ui/songname），常见标题形状（【晴天】/「歌手 - 歌名」/紧凑连字符/冒号/「歌手-歌名：说明」/「歌手：歌名 (Live)」/「歌手：歌名 (Live 2019)」/「歌手：歌名 (2019)」）都认得出歌名，歌手那一段不进表，标题里成对的括号整组判（版本说明整组剔掉，括号外的裸年份当歌名）；楼中楼按各自的正文留；一条都没命中时说清「这个视频的 N 条评论里没有提到这首歌」（查完之后才说，查没完只说「已翻到的 N 条」），并给一条「看全部评论」的退路",
+		Tests: []string{
+			"TestTheMentionFilterIsOffByDefault",
+			"TestTheMentionFilterShowsOnlyTheCommentsThatMentionTheSong",
+			"TestTheMentionFilterFindsTheSongNameInsideTheTitle",
+			"TestTheMentionFilterDoesNotCountTheArtistAsAMention",
+			"TestTheMentionFilterSaysThatNobodyMentionedTheSong",
+			"TestTheMentionFilterDoesNotClaimToHaveCheckedEveryComment",
+			"TestTheMentionFilterLooksThroughTheWholeVideoBeforeItSaysNobodyDid",
+			"TestTheMentionFilterAlsoLooksAtTheReplies",
+			"TestTheMentionFilterCanBeTurnedOffFromTheEmptyState",
+			"TestTheMentionFilterSwitchSitsAtTheRightEdge",
+			"TestRenderCommentsMentionFilterShots",
+			"TestTheCleanedSongNameIsInTheTable",
+			"TestThePlainTitleIsAlsoInTheTable",
+			"TestTheBookTitleMarksAreStripped",
+			"TestTheShortNameOfAPlainTitleIsInTheTable",
+			"TestTheArtistSegmentIsNotAnAlias",
+			"TestTheArtistSegmentIsNotAnAliasWhenTheArtistIsKnown",
+			"TestTheBracketedSongNameIsInTheTable",
+			"TestTheBracketHoldsTheArtistWhenThereIsMoreThanIt",
+			"TestTheCompactDashTitleGivesTheSongName",
+			"TestTheColonTitleGivesTheSongName",
+			"TestTheColonTitleDoesNotTakeTheArtistSegment",
+			"TestTheCompactDashAndColonTitleGivesTheSongName",
+			"TestTheSongNameIsNotSwallowedByAVersionNote",
+			"TestTheColonTitleWithAVersionNoteGivesTheSongName",
+			"TestTheSongNameIsNotTakenFromTheArtistWhenTheNoteIsTheWholeRightSide",
+			"TestTheSongNameSurvivesAMultiWordVersionNote",
+			"TestTheSongNameSurvivesAVersionNoteWithAYear",
+			"TestABareYearIsPartOfTheSongName",
+			"TestTheEnglishTitleIsNotSplit",
+			"TestAPromoSegmentIsNotAnAlias",
+			"TestOneCharacterAliasesAreNotUsed",
+			"TestOneCharacterChineseSongNamesAreUsable",
+			"TestAnEmptyTitleGivesAnEmptyTable",
+			"TestTheBodyIsMatched",
+			"TestTheMatchIgnoresCaseAndSpaces",
+		},
+	},
+	{
 		Category: HTTP,
 		// 风控和限流**都不判成「可重试」**：界面上那枚「重试」是立刻再问一次
 		// （没有退避），而这两样要等的是时间——判成可重试的话用户点一次撞一次
