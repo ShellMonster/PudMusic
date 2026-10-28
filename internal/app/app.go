@@ -352,6 +352,7 @@ type App struct {
 	exploreClient *bili.Client
 	search        *Search
 	spaces        map[int64]*UpSpace
+	exploreGen    uint64
 
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
 	streaming *Streaming

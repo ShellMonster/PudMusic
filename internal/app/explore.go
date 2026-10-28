@@ -55,6 +55,7 @@ func (a *App) MountExplore(cli *bili.Client) {
 	a.mu.Lock()
 	oldSpaces := a.spaces
 	a.exploreClient = cli
+	a.exploreGen++
 	a.spaces = make(map[int64]*UpSpace)
 	a.mu.Unlock()
 
@@ -64,6 +65,17 @@ func (a *App) MountExplore(cli *bili.Client) {
 	for _, s := range oldSpaces {
 		s.invalidate()
 	}
+}
+
+// ExploreGeneration identifies the current Explore client mount.
+//
+// UI-owned cached Explore state captures this value when it is created. A new
+// mount means results from the old client or account must not be adopted into
+// that cache, even if cancellation arrives after the result was queued.
+func (a *App) ExploreGeneration() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.exploreGen
 }
 
 // explore 返回那个客户端。没挂过是 nil（调用方返回 errExploreMissing）。
