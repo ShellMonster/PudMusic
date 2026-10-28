@@ -410,7 +410,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		old := a.player
 		a.player = p
 		a.duration = p.Duration()
-		a.position = pos
+		a.setPositionLocked(pos)
 		a.quality = ref.Label
 		a.online = &onlineTrack{
 			item: tr.item, ref: ref, source: src,
@@ -1139,7 +1139,7 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 			pos = d
 		}
 	}
-	a.position = pos
+	a.setPositionLocked(pos)
 	if paused {
 		// 恢复：**停在那个位置，不出声**。
 		//
@@ -1962,7 +1962,8 @@ func (a *App) giveUpSkipping(streak int, last Item, cause error) {
 	p := a.player
 	sounding := p != nil && p.Playing()
 	if !sounding {
-		a.position, a.playing = 0, false
+		a.setPositionLocked(0)
+		a.playing = false
 		a.stopped = true
 	}
 	wake := a.wake
@@ -2052,7 +2053,7 @@ func (a *App) refreshOnlineNow(cause error) {
 		old := a.player
 		a.player = p
 		a.duration = p.Duration()
-		a.position = pos
+		a.setPositionLocked(pos)
 		a.quality = ref.Label
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
 			reopening: true, gen: gen}

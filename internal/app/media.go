@@ -212,7 +212,7 @@ func (a *App) Stop() {
 	// 了」，而用户明明听到了 3 分 20 秒。
 	at := a.position
 	a.playing, a.wantPlay, a.stopped = false, false, true
-	a.position = 0
+	a.setPositionLocked(0)
 	wake := a.wake
 	a.mu.Unlock()
 

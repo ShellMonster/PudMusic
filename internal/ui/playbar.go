@@ -1469,7 +1469,22 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
 			MinWidth(48).MaxLines(1)
 
-		sl := playbarProgressSlider(c, &s.scrub, 0, 1).Grow(1).Label("播放进度").Disabled(!known)
+		// ⚠️ **`live` 只在「在放」时给**：暂停时位置不动，每帧重画同一个位置
+		// 是纯浪费——而它会一直要下一帧，窗口就停不下来（`progress_live_test.go`
+		// 的 `TestAPausedBarDoesNotAskForFrames` 钉着这一条）。
+		// ⚠️ **`visible` 那道闸不能省**：失焦（但没最小化）时框架自己不管，
+		// 链子会在绘制路径里自己续下去（理由见 `selfSliderLive` 那段注释）。
+		var live sliderLive
+		if known && st.Playing {
+			dur := float64(st.Duration)
+			live = sliderLive{
+				frac: func() float32 {
+					return float32(float64(s.app.PlayPosition()) / dur)
+				},
+				visible: s.presence.seen,
+			}
+		}
+		sl := playbarProgressSliderLive(c, &s.scrub, 0, 1, live).Grow(1).Label("播放进度").Disabled(!known)
 		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
 		// 那半个宽 8，点比 4 像素的轨道粗 3——票 #585）。
 		sl = withChapterDots(sl, chs, st.Duration, 8, 7, c.Theme().Background)

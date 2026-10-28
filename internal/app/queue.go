@@ -1801,7 +1801,8 @@ func (a *App) onTrackFinished() {
 		p.Seek(0)
 		p.Play()
 		a.mu.Lock()
-		a.position, a.playing, a.wantPlay = 0, true, true
+		a.setPositionLocked(0)
+		a.playing, a.wantPlay = true, true
 		a.stopped = false
 		wake := a.wake
 		a.mu.Unlock()
@@ -1823,7 +1824,8 @@ func (a *App) onTrackFinished() {
 		//
 		// 而它该表示的「这一串放完了」由 `a.stopped` 记着，系统那边（锁屏上的
 		// 播放/停止）也已经报成 stopped。
-		a.position, a.playing = 0, false
+		a.setPositionLocked(0)
+		a.playing = false
 		a.stopped = true
 		wake := a.wake
 		a.mu.Unlock()

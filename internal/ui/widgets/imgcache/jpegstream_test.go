@@ -93,7 +93,7 @@ func TestStreamingJPEGRejectsTruncation(t *testing.T) {
 	}
 }
 
-func TestJPEGEXIFOnlyRotationsBypassScaling(t *testing.T) {
+func TestJPEGEXIFOnlyRotationsAreMadeUprightAndScaled(t *testing.T) {
 	data := coverJPEG(t, 800, 450, false)
 	for _, bo := range []binary.ByteOrder{binary.LittleEndian, binary.BigEndian} {
 		for o := 0; o <= 9; o++ {
@@ -119,13 +119,21 @@ func TestJPEGEXIFOnlyRotationsBypassScaling(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// ⚠️ **摆正之后照样缩**（这一条以前断言「旋转的那几张不缩」）：
+			// 那时候的理由是「像素读不回来，转了就没法再缩」——`ui.Bitmap`
+			// 确实只能写不能读，但**缩放是在造 Bitmap 之前**做的（`shrinkToStored`
+			// 拿的是 `*image.RGBA`），所以那个理由从来就不成立。
+			//
+			// 而现在它必须缩：0.7.1 的 `ui.DecodeBitmap` 会把整份原始字节钉在
+			// bitmap 上（为了 `ReleasePixels`），这一支要是还走它，几百 KB 的字节
+			// 就跟着缓存条目一辈子——见 `decodeStored` 那一支的注释。
+			//
+			// 尺寸判据按**摆正之后**算：800×450 的图缩到长边 768 是 768×432；
+			// 要转 90° 的那几张摆正之后是 450×800，长边 800 → 缩到 432×768。
 			w, h := bm.Size()
 			wantW, wantH := 768, 432
-			if rotated {
-				wantW, wantH = 800, 450
-				if o >= 5 {
-					wantW, wantH = 450, 800
-				}
+			if rotated && o >= 5 {
+				wantW, wantH = 432, 768
 			}
 			if w != wantW || h != wantH {
 				t.Fatalf("orientation=%d size=%dx%d want %dx%d", o, w, h, wantW, wantH)
@@ -155,5 +163,58 @@ func TestStreamingJPEGUnsupportedVariantsFallBack(t *testing.T) {
 		if _, err := decodeStored(body); err != nil {
 			t.Fatalf("standard fallback failed: %v", err)
 		}
+	}
+}
+
+// TestDecodedCoversDoNotHoldTheirBytes 钉住「解出来的那张图不把原始字节留在
+// bitmap 上」。
+//
+// # 为什么这条必须存在
+//
+// 0.7.1 的 `ui.DecodeBitmap` 为了 `ReleasePixels` 能重新解码，把收到的
+// `[]byte` 捕获在一个闭包里不放（`mygo/ui/bitmap.go` 的 `decode` 字段）。
+// 我们这一格解的是**网络上下来的整张原图**：B 站封面动辄几百 KB，缓存里
+// 几百张就是几十 MB 的隐形常驻——而界面上用的只是缩到 768 的那一份。
+//
+// 所以 `decodeStored` **一处都不该**再走 `ui.DecodeBitmap`。判据是**结构性的**：
+// 把字节换掉再看图（`ui.DecodeBitmap` 造出来的会在下一次要像素时按旧字节
+// 重新解出来，`ui.NewBitmap` 造的不会）。这里用更直接的证据：自己解一份，
+// 然后把原始切片**改烂**，再让 bitmap 去画（`Draw` 会取像素）——不崩、尺寸
+// 不变，就说明它没在回头看那份字节。
+//
+// ⚠️ **它不是内存测量的替代品**：真正的判据是「bitmap 上还挂着字节没有」，
+// 而那只能靠 `runtime` 或者 `unsafe` 去探（这个包不该那么做）。它拦的是
+// 「有人又把这一支改回 `ui.DecodeBitmap`」，那正是这一条的来由。
+func TestDecodedCoversDoNotHoldTheirBytes(t *testing.T) {
+	data := coverJPEG(t, 800, 450, false)
+	// 造一张带 EXIF 旋转的（那是唯一一支曾经走 `ui.DecodeBitmap` 的）。
+	bo := binary.LittleEndian
+	tiff := make([]byte, 26)
+	copy(tiff, "II")
+	bo.PutUint16(tiff[2:], 42)
+	bo.PutUint32(tiff[4:], 8)
+	bo.PutUint16(tiff[8:], 1)
+	bo.PutUint16(tiff[10:], 0x112)
+	bo.PutUint16(tiff[12:], 3)
+	bo.PutUint32(tiff[14:], 1)
+	bo.PutUint16(tiff[18:], 6) // 90°
+	seg := append([]byte{0xff, 0xe1, 0, 34, 'E', 'x', 'i', 'f', 0, 0}, tiff...)
+	body := append(append(append([]byte{}, data[:2]...), seg...), data[2:]...)
+
+	bm, err := decodeStored(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, h := bm.Size()
+	if w != 432 || h != 768 {
+		t.Fatalf("摆正之后该缩到 432×768，实际 %dx%d", w, h)
+	}
+	// 把原始字节改烂：只留一个不是 JPEG 的头。
+	for i := range body {
+		body[i] = 0
+	}
+	// 尺寸读得回来、不崩——说明 bitmap 不靠那份字节活着。
+	if w2, h2 := bm.Size(); w2 != w || h2 != h {
+		t.Fatalf("字节被改烂之后尺寸变了：%dx%d → %dx%d", w, h, w2, h2)
 	}
 }
