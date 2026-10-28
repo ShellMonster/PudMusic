@@ -679,6 +679,16 @@ func TestRedrawingAfterCloseDoesNotRearmAnyTimer(t *testing.T) {
 			},
 			armed: func(s *Shell) bool { return s.searchWatchStop != nil },
 		},
+		{
+			name: "热词轮换那个每五秒一跳的",
+			arm: func(_ *testing.T, s *Shell, tt *mygoui.Tester) {
+				// 那个表要「框空着、词池有词」才装（syncHotwords 的收条件），直接
+				// 摆一份词池进去，首帧就装上。
+				s.app.HotwordsOf().TestOnlySetWords([]string{"季候风", "我不难过"})
+				tt.Frame()
+			},
+			armed: func(s *Shell) bool { return s.hotword.stop != nil },
+		},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			s, tt := newShell(t)

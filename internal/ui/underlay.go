@@ -136,6 +136,13 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 	s.syncFeedDot()
 	s.avatarSync()
 
+	// 热词轮换的表：满屏开着的时候顶栏不画，占位词没人看得见，把表收掉——
+	// 不然它每 5 秒叫醒一次窗口画一帧满屏（`syncHotwords` 自己跟着顶栏的 view
+	// 跑，满屏时它没机会跑自己的收条件；见 navbar_hotword.go）。
+	if s.full.open {
+		s.stopHotword()
+	}
+
 	// 路由那一摊：404 那个倒计时（`syncRoute`）。它原来在 `viewRoutes` 的
 	// 最前面，而满屏开着的时候 `viewRoutes` 整个不跑——不挪的话，用户在满屏
 	// 里待着的那几秒里，那个倒计时停在半路。

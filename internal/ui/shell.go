@@ -185,6 +185,11 @@ type Shell struct {
 	notFoundAt   time.Time
 	notFoundStop func()
 
+	// hotword 是搜索框那个轮换热词占位的跨帧状态（轮到第几个、这一轮从几时
+	// 算起、那个每 5 秒一跳的定时器），见 navbar_hotword.go。和上面两个一样，
+	// 定时器回调只调 wakeHandle.invalidate，其余只由主线程读写。
+	hotword hotwordState
+
 	// pageBody 是画页面内容的那一支。单独拎出来是为了能替掉它测崩溃
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
 	pageBody func(*ui.Context, *ui.Route, Route)
