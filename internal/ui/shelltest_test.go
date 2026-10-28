@@ -233,11 +233,9 @@ func withStartupMigration(r MigrationReport) shellOpt {
 //
 // ## 为什么它归基座管，而不是每条测试自己记得收
 //
-// `migration` 是**包级的一个变量**（migrate_mount.go），而「点一下『从 Biu 导入』」
-// 那条后台线会直接往它里面写（`rememberImport`）。于是它和外壳、和 App 都无关，
+// `migration` 是**包级的一个变量**（migrate_mount.go），它和外壳、和 App 都无关，
 // 活到下一条测试：留在那儿的话，**后面每一个新建的 Shell 第一帧都弹一条 toast**
-// （viewMain → announceMigration），而 toast 的卡片底色是**主色**（Biu 的
-// `color: "primary"`）。`settings_test.go` 那些验窗口底色的测试取的采样点
+// （viewMain → announceMigration），而 toast 的卡片底色是主色。`settings_test.go` 那些验窗口底色的测试取的采样点
 // (700, 430)（900×600 窗口的右下角）**正好落在那张卡片上**，于是那几条红成
 // 「画面那个点是 {30 215 96}」——那个数就是 DefaultPrimaryColor 逐字（实测）。
 //
@@ -568,67 +566,8 @@ func writeTempSettings(t *testing.T, st app.Settings) string {
 	return path
 }
 
-// TestALeakedMigrationReportCannotReachTheNextShell 钉住「包级那个迁移报告收得掉」。
-//
-// ## 它钉的是哪一种坏
-//
-// 「点一下『从 Biu 导入』」那条后台线会**直接往包级的 `migration.r` 里写**
-// （`rememberImport`），而那个变量和外壳、和 App 都无关，活到下一条测试。留在
-// 那儿的话，**后面每一个新建的 Shell 第一帧都弹一条 toast**（`viewMain` →
-// `announceMigration`），而 toast 的卡片底色是**主色**（Biu 的 `color: "primary"`）。
-//
-// 受害的是别的文件里读像素的那几条：它们的采样点 (700, 430)（900×600 窗口的右下
-// 角）**正好落在换行了的那张卡片上**——卡片一旦换行就向上长，于是那一块变成主色。
-// 症状是「画面那个点是 {30 215 96}」，那个数就是 `DefaultPrimaryColor` 逐字。
-//
-// 实测：15 次 `go test ./...` 里飘 1 次，而它飘的是**别的文件**的测试，追起来要
-// 跨三个文件——症状离真因隔了三层。
-//
-// ## 为什么这里要手动往那个全局里塞一份「漏进来的」报告
-//
-// 真正漏它的那条路径是后台线**晚于收尾**才写（`reloadSettings` → `rememberImport`
-// → `addToast`），而测试等的是 `reloadSettings` 改出来的设置，不是报告本身。复现
-// 那一次调度很脆，直接把「漏进来了」这个状态摆出来更稳。
-//
-// ⚠️ **本条的判据是像素**，因为受害的正是读像素的那些测试：光断言「没有 toast」
-// 也能过，但那不是用户看见的东西。
-//
-// 拿掉 `resetMigrationReport` 这一句本条立刻红（读到 {30 215 96}、toasts=1）。
-func TestALeakedMigrationReportCannotReachTheNextShell(t *testing.T) {
-	for i := range 20 {
-		// 摆一份「上一条测试漏下来的」报告。
-		migration.mu.Lock()
-		migration.r = MigrationReport{
-			Imported: app.Imported{
-				Dir: "/Users/x/Biu", Settings: true,
-				// 「请重新登录」那一句逼首帧那条 toast 换行，卡片才会向上长到
-				// 采样点那一块；只有一行的话它压根够不着。
-				Notes: []string{"Biu 那边是登录状态。这一版不搬过来——请在这个应用里重新登录一次。"},
-			},
-		}
-		migration.mu.Unlock()
-
-		tt, s, _, _ := shellWithSettings(t, app.ThemeModeDark, true)
-		want := wantBackground(t, s.app, true)
-		for f := range 3 {
-			tt.Frame()
-			// ⚠️ **推钟让入场走完**：提示是淡进来的（250ms），而 Tester 的钟
-			// 站着不动——不推的话那条提示在头几帧里几乎是全透明的，采样点照样
-			// 是背景色，于是这一条会**绿得像没漏**（它要抓的恰恰是那个漏）。
-			settleToast(t, tt)
-			got := tt.Image().RGBAAt(sampleX, sampleY)
-			if got == (color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}) {
-				continue
-			}
-			t.Fatalf("第 %d 轮第 %d 帧：采样点 (%d,%d) 是 %v，want %v——"+
-				"说明包级那份迁移报告漏进来了，首帧弹了一条主色底色的 toast 盖在上面（屏幕上 %d 条）",
-				i, f, sampleX, sampleY, got, want, len(s.visibleToasts()))
-		}
-	}
-}
-
 // TestRedrawingAfterCloseDoesNotRearmAnyTimer 钉住「关掉之后再画一帧，不会再装定时器」。
-//
+
 // ## 它挡的是什么
 //
 // 三个装定时器的地方（`feed.arm` 每五分钟一跳、`armNotFound` 每一秒一跳、

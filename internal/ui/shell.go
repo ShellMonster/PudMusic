@@ -382,7 +382,8 @@ type Shell struct {
 	// 十次之后应用层那个列表就有十条，每发生一件事就多走十趟空转。
 	announceRemove func()
 
-	// migrationAnnounced 是「启动时的迁移/导入结果已经弹过一次 toast 了」。
+	// migrationAnnounced 是「启动升级失败提示已经弹过一次 toast 了」。
+
 	//
 	// 只由界面线程读写（`viewMain` 第一帧），所以不需要锁。挂在 Shell 上而不是
 	// 包级的 map 上，是因为「每个窗口各弹一次」才是对的：迷你播放器窗口是**另

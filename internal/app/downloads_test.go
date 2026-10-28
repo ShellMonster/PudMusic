@@ -484,7 +484,7 @@ func TestTheFourQueueActionsAreWired(t *testing.T) {
 // 退出时写一次，于是：
 //
 //	本次会话点的那一首     只在内存里
-//	按一次「从 Biu 导入」  旧 Manager 被不落盘地关掉 → 那一首随它没了
+//	并入另一份下载记录  旧 Manager 被不落盘地关掉 → 那一首随它没了
 //	新 Manager Restore    读的是**陈旧**的文件，里面只有上次留下的
 //	退出时落盘            用户点的歌从队列文件里被抹掉
 //

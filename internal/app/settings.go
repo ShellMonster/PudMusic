@@ -791,8 +791,7 @@ func LoadSettings(path string) (Settings, error) {
 
 // parseSettingsFile 从一段字节里认出一份设置和它是第几版。
 //
-// 它和 `LoadSettings` 的区别只有一处：**不碰磁盘**。导入（`biuimport.go` 那边）
-// 拿到的是 Biu 的一份 JSON 字节、要认的形状和设置文件完全一样（两种，见文件头），
+// 它和 `LoadSettings` 的区别只有一处：**不碰磁盘**。配置文件导入需要直接解析 JSON，
 // 让它先落盘再走 `LoadSettings` 是「为了读一份文件而写一份文件」——会覆盖用户
 // 现在的设置，而且报出来的错会指向一个临时路径。
 //
