@@ -227,6 +227,19 @@ func TestTheMentionFilterFindsTheSongNameInsideTheTitle(t *testing.T) {
 		// 说明要**先剥掉**再看——不剥的话那个 "Live" 让整段被当成说明 ⇒ 歌名
 		// 跑到左边（歌手）去了 ⇒ 提到「晴天」的那一条被判成没提到。
 		"周杰伦：晴天 (Live)",
+		// ⚠️ **版本说明里带年份的那一档**（票 #574 第六轮评审的 F7）：括号要
+		// **整组**判——按空格切字段会把「(Live 2019)」切成「(Live」「2019)」
+		// 两个**半个括号**的字段 ⇒ 「2019」被当成了歌名 ⇒ 正文里提到「晴天」
+		// 的那一条一条都命不中 ⇒ 界面显示零命中。
+		"周杰伦：晴天 (Live 2019)",
+		"周杰伦：晴天（Live 2019）",
+		"周杰伦：晴天 (2019)",
+		"周杰伦：晴天 (2019 Remaster)",
+		"【晴天 Live 2019】",
+		// ⚠️ **版本说明不带括号的那一档**（"Live" 跟歌名挤在同一段里）：
+		// 它断的是「**按字段**判，不按整段判」——按整段判的话「晴天 Live」整段
+		// 都不是说明 ⇒ 歌名变成「Live」⇒ 提到「晴天」的那一条被判成没提到。
+		"周杰伦：晴天 Live",
 	} {
 		t.Run(title, func(t *testing.T) {
 			b := newCommentBili(t, "reply-main.json")
@@ -257,7 +270,14 @@ func TestTheMentionFilterFindsTheSongNameInsideTheTitle(t *testing.T) {
 func TestTheMentionFilterDoesNotCountTheArtistAsAMention(t *testing.T) {
 	// ⚠️ **两种标题都要断**：带版本说明的那一档（"(Live)"）最容易把歌名认
 	// 丢。
-	for _, title := range []string{"周杰伦：晴天", "周杰伦：晴天 (Live)"} {
+	for _, title := range []string{
+		"周杰伦：晴天",
+		"周杰伦：晴天 (Live)",
+		// ⚠️ **带年份的版本说明那一档**（票 #574 第六轮评审的 F7）：那一档既
+		// 容易把歌名认丢，又容易把歌手认成歌名。
+		"周杰伦：晴天 (Live 2019)",
+		"周杰伦：晴天 (2019)",
+	} {
 		t.Run(title, func(t *testing.T) {
 			b := newCommentBili(t, "reply-main.json")
 			// ⚠️ **这一份里唯一提到人的那一条只提到了歌手**。

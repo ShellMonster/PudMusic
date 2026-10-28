@@ -690,7 +690,12 @@ var Items = []Item{
 		//	        它自己的总数可能还有十万条，而我们就翻到了十几条）。
 		//	楼中楼 楼中楼按**它自己的正文**留：主评论提到了而楼中楼没提到
 		//	        ⇒ 楼中楼不摆；只有楼中楼提到了 ⇒ 主评论照摆（上下文）。
-		Spec: "评论页 v2：只看提到歌名的评论这一枚开关默认关着；按歌名 + 别名表 + 简称筛正文；别名表只有一处（internal/ui/songname），常见标题形状（【晴天】/「歌手 - 歌名」/紧凑连字符/冒号/「歌手-歌名：说明」/「歌手：歌名 (Live)」）都认得出歌名，歌手那一段不进表；楼中楼按各自的正文留；一条都没命中时说清「这个视频的 N 条评论里没有提到这首歌」（查完之后才说，查没完只说「已翻到的 N 条」），并给一条「看全部评论」的退路",
+		//	括号  标题里那些**成对的括号整组判**：「歌手：歌名 (Live 2019)」
+		//	        那一档，按空格切字段会切成「(Live」「2019)」两个**半
+		//	        个括号**的字段 ⇒ 「2019」被当成歌名 ⇒ 正文里提到歌名
+		//	        的那一条一条都命不中；括号外的裸年份（《1984》）是歌名
+		//	        的一部分，不许剔。
+		Spec: "评论页 v2：只看提到歌名的评论这一枚开关默认关着；按歌名 + 别名表 + 简称筛正文；别名表只有一处（internal/ui/songname），常见标题形状（【晴天】/「歌手 - 歌名」/紧凑连字符/冒号/「歌手-歌名：说明」/「歌手：歌名 (Live)」/「歌手：歌名 (Live 2019)」/「歌手：歌名 (2019)」）都认得出歌名，歌手那一段不进表，标题里成对的括号整组判（版本说明整组剔掉，括号外的裸年份当歌名）；楼中楼按各自的正文留；一条都没命中时说清「这个视频的 N 条评论里没有提到这首歌」（查完之后才说，查没完只说「已翻到的 N 条」），并给一条「看全部评论」的退路",
 		Tests: []string{
 			"TestTheMentionFilterIsOffByDefault",
 			"TestTheMentionFilterShowsOnlyTheCommentsThatMentionTheSong",
@@ -719,6 +724,8 @@ var Items = []Item{
 			"TestTheColonTitleWithAVersionNoteGivesTheSongName",
 			"TestTheSongNameIsNotTakenFromTheArtistWhenTheNoteIsTheWholeRightSide",
 			"TestTheSongNameSurvivesAMultiWordVersionNote",
+			"TestTheSongNameSurvivesAVersionNoteWithAYear",
+			"TestABareYearIsPartOfTheSongName",
 			"TestTheEnglishTitleIsNotSplit",
 			"TestAPromoSegmentIsNotAnAlias",
 			"TestOneCharacterAliasesAreNotUsed",
@@ -1895,7 +1902,7 @@ var Items = []Item{
 			"TestStreamingJPEGRejectsTruncation",
 			"TestStreamingJPEGUnsupportedVariantsFallBack",
 			"TestJPEGEXIFOnlyRotationsAreMadeUprightAndScaled",
-				"TestDecodedCoversDoNotHoldTheirBytes",
+			"TestDecodedCoversDoNotHoldTheirBytes",
 			"TestJPEGRowCorpusMatchesStandardDecoder",
 			"TestImageCacheBudgetFromEnvironment",
 			"TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted",

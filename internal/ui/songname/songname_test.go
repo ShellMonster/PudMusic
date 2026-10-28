@@ -416,3 +416,69 @@ func TestTheSongNameSurvivesAMultiWordVersionNote(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSongNameSurvivesAVersionNoteWithAYear 断「版本说明里有年份」那一族。
+//
+// 🔴 **括号要整组判**（票 #574 第六轮评审的 F7）：「歌手：歌名 (Live 2019)」按
+// 空格切字段会切成「(Live」「2019)」两个**半个括号**的字段——它们既不是版本
+// 说明（`isQualifier` 要整个词是 live）也不是歌名 ⇒ **「2019」被收进了别名
+// 表** ⇒ 正文里提到真歌名的那一条评论一条都命不中（界面显示零命中）。
+//
+// ⇒ 年份在**前面**（"(2019)"、"(2019 Remaster)"）也一样：那个年份字段照样会
+// 被当成歌名。
+func TestTheSongNameSurvivesAVersionNoteWithAYear(t *testing.T) {
+	for _, title := range []string{
+		"周杰伦：晴天 (Live 2019)",
+		"周杰伦：晴天（Live 2019）",
+		"周杰伦：晴天 (2019)",
+		"周杰伦：晴天（2019）",
+		"周杰伦：晴天 (2019 Remaster)",
+		"周杰伦：晴天 (Remaster 2019)",
+		"周杰伦-晴天 (Live 2019)",
+		"【晴天 Live 2019】",
+	} {
+		tab := New(title, "某个 UP 主")
+		if !has(t, tab, "晴天") {
+			t.Errorf("标题 %q 的表里没有「晴天」：%q", title, tab.Forms())
+		}
+		if has(t, tab, "2019") {
+			t.Errorf("标题 %q 的表里有「2019」——那是版本说明，不是歌名：%q",
+				title, tab.Forms())
+		}
+		if has(t, tab, "周杰伦") {
+			t.Errorf("标题 %q 的表里有「周杰伦」——那是署名，不是歌名：%q",
+				title, tab.Forms())
+		}
+		// ⚠️ **判据是「正文里提到真歌名的那一条命中」**，不是「表里长什么样」。
+		if !tab.Mentions("「晴天」这一段我循环了一整天") {
+			t.Errorf("标题 %q：正文里明明有「晴天」，却没命中", title)
+		}
+		if tab.Mentions("「周杰伦」这一段我循环了一整天") {
+			t.Errorf("标题 %q：正文里只有「周杰伦」却命中了——"+
+				"提到歌手不等于提到这首歌", title)
+		}
+	}
+}
+
+// TestABareYearIsPartOfTheSongName 断「括号外的裸年份不许剔」。
+//
+// 🔴 **《1984》是真的**（票 #574 第六轮评审的 F7）：只有**括号里**的年份才是
+// 版本说明——光秃秃的「1984」留在标题里要当歌名的一部分（而把年份当成版本
+// 说明剔掉的话，这类歌一条评论都筛不出来）。
+func TestABareYearIsPartOfTheSongName(t *testing.T) {
+	// ⚠️ **两档都要断**：整段就是年份（"1984"），以及年份跟别的字挤在一段
+	// （"1984 演唱会"）——后者才咬得住「把年份当版本说明剔掉」那种错修法
+	// （那一档里清洗过的标题是「1984 演唱会」，正文里的「1984」匹配不上它）。
+	for _, title := range []string{"1984", "1984 演唱会"} {
+		tab := New(title, "某个 UP 主")
+		if tab.Empty() {
+			t.Errorf("标题 %q 给出了空表", title)
+		}
+		if !has(t, tab, "1984") {
+			t.Errorf("标题 %q 的表里没有「1984」：%q", title, tab.Forms())
+		}
+		if !tab.Mentions("1984这首我循环了一整天") {
+			t.Errorf("标题 %q：正文里明明有「1984」，却没命中", title)
+		}
+	}
+}

@@ -33,6 +33,11 @@
 //	晴天：电影主题曲         按冒号切成几段，剔掉「说明」那一族 ⇒ 歌名是
 //	                      「晴天」；「歌手：歌名」⇒ 剔不掉什么 ⇒ 歌名是
 //	                      最后那一段（歌手那一段丢掉）
+//	歌手：歌名 (Live 2019)   括号**整组**是版本说明 ⇒ 整组剔掉 ⇒ 歌名是
+//	                      「歌名」（见 `brackets.go`：按空格切字段会把
+//	                      那个括号切成「(Live」「2019)」两个半个括号的
+//	                      字段 ⇒ 歌名被它们顶掉 ⇒ 正文里提到歌名的那一条
+//	                      评论一条都命不中）
 //	Let It Go             英文标题：空格是**词的一部分**，不拆
 //
 // ⇒ `New` 按这些形状把歌名认出来，收进一张表；匹配是「小写 + 去空白 +
@@ -124,7 +129,11 @@ func New(rawTitle, artist string) Table {
 	//
 	// ⇒ 歌名从**去掉括号之后剩下的那一段**里认，而那一段的**最后一段**就是
 	// 歌名（「【晴天】」⇒「晴天」；「【周杰伦】晴天」⇒「晴天」）。
-	plain := stripSpans(rawTitle)
+	// ⚠️ **先整组剔掉版本说明那些括号**（`prepareTitle`），再把剩下的括号换成
+	// 空白（`stripSpans`）：顺序反了就看不出「哪几个字段本来在同一个括号里」
+	// ⇒「(Live 2019)」会被切成「(Live」「2019)」两个**半个括号**的字段 ⇒ 它们
+	// 被当成歌名收进表里（票 #574 第六轮评审的 F7）。
+	plain := stripSpans(prepareTitle(rawTitle))
 	for _, s := range songSegments(plain, hints) {
 		add(s)
 	}
@@ -376,6 +385,10 @@ var qualifiers = []string{
 	// 的话「Ver.」那个字段认不出来 ⇒ 歌名被它顶掉（「晴天 Live Ver.」⇒ 歌名
 	// 变成「Ver.」⇒ 正文提到「晴天」的那一条被判成没提到）。
 	"ver", "version",
+	// ⚠️ **「重制」那一族**（"Remaster"、"Remastered"）："(2019 Remaster)"
+	// 那一档里，「2019」是年份（版本说明），而「Remaster」也得认得出来⇒ 整个
+	// 括号组才是版本说明（票 #574 第六轮评审的 F7）。
+	"remaster", "remastered",
 	"主题曲", "插曲", "片尾曲", "片头曲", "原声带", "副标题", "说明",
 }
 
@@ -429,12 +442,12 @@ func splitColon(s string) []string {
 // 那一族在这里（`qualifiers`）——**不自己再抄一份宣传词表**（理由见
 // `widgets/title.IsPromoOnly` 的注释）。
 func isNoteWord(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return false
-	}
 	// ⚠️ **末尾的标点不算事**（"Ver."、"Live。"）：版本说明常常带个句点。
-	trimmed := strings.TrimRight(s, ".,，。、!！?？")
+	//
+	// ⚠️ **两头的括号也要去**（"(Live" ⇒ "Live"）：`isQualifier` 要**整个词**
+	// 才是版本说明，而版本说明常常带着括号（票 #574 第六轮评审的 F7：半个括号
+	// 的字段认不出来 ⇒ 被当成歌名）。
+	trimmed := trimNotePunctuation(s)
 	if trimmed == "" {
 		return false
 	}
@@ -553,13 +566,17 @@ func artistHints(artist, extra string) []string {
 }
 
 // isArtist 报这一段是不是艺人名。
+//
+// ⚠️ **两边的括号与标点都去掉再比**（票 #574 第六轮评审的 F7 顺带自查）：那一段
+// 可能还带着半个括号（"(周杰伦"），而艺人名那一栏是干净的 ⇒ 不去掉就认不出来
+// ⇒ 署名那一段被当成了歌名。
 func isArtist(seg string, hints []string) bool {
-	s := strings.TrimSpace(seg)
+	s := trimNotePunctuation(seg)
 	if s == "" {
 		return false
 	}
 	for _, h := range hints {
-		if strings.EqualFold(s, h) {
+		if strings.EqualFold(s, trimNotePunctuation(h)) {
 			return true
 		}
 	}
