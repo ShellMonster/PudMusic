@@ -26,6 +26,8 @@
 package ui
 
 import (
+	"sort"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
@@ -76,10 +78,19 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 	if d.count != len(items) || d.first != items[0].ID {
 		// **换了一份**（换歌了）⇒ 上一份的轨道与字宽全部作废。
 		//
-		// ⚠️ **判据是「条数 + 第一条的 rowid」**：那一份弹幕的顺序是 B 站给的
+		// ⚠️ **判据是「条数 + 第一条的 rowid」：这一份弹幕的顺序是 B 站给的
 		// 顺序（不变），所以这两样变了就是换了一份。
 		d.reset()
 		d.count, d.first = len(items), items[0].ID
+		d.itemsByTime = append(d.itemsByTime[:0], items...)
+		d.maxTextBytes = 0
+		for _, it := range d.itemsByTime {
+			if n := len(it.Text); n > d.maxTextBytes {
+				d.maxTextBytes = n
+			}
+		}
+		danmakuSortItemsByTime(d.itemsByTime)
+
 	}
 
 	fontSize := scale.Font(c, danmakuFontSize)
@@ -115,7 +126,12 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 	// ⚠️ **窗口是「从它自己的时间到当前位置」**：还没到的（age < 0）不画，
 	// 已经走完的（age 超过「(封面宽 + 字宽) / 速度」）也不画。
 	vis := s.full.danmakuBuf[:0]
-	for _, it := range items {
+	// `itemsByTime` 已经按时间稳定排序；从当前位置往前推粗略窗口的起点，
+	// 再向后扫描到第一个未来时间，避免每帧遍历完整弹幕列表。
+	startMS := posMS - int64((float64(area.W)+float64(d.maxTextBytes)*float64(fontSize))*1000/danmakuSpeed)
+	start := sort.Search(len(d.itemsByTime), func(i int) bool { return d.itemsByTime[i].TimeMS >= startMS })
+	end := sort.Search(len(d.itemsByTime), func(i int) bool { return d.itemsByTime[i].TimeMS > posMS })
+	for _, it := range d.itemsByTime[start:end] {
 		if it.ID == "" {
 			// 没有 rowid ⇒ 认不出它 ⇒ 不画。
 			//
