@@ -14,7 +14,7 @@ func TestAssembleRunsHeadlessInDependencyOrder(t *testing.T) {
 	var got []string
 	mark := func(name string) { got = append(got, name) }
 	cli := bili.NewClient(bili.Options{})
-	var streamingClient, collectionsClient, exploreClient, libraryClient, recommendClient *bili.Client
+	var streamingClient, searchClient, collectionsClient, exploreClient, libraryClient, recommendClient *bili.Client
 	d := Dependencies{
 		PinUserDataDir: func() error { mark("pin data directory"); return nil },
 		NewApp:         func() *app.App { mark("new app"); return app.New() },
@@ -27,6 +27,10 @@ func TestAssembleRunsHeadlessInDependencyOrder(t *testing.T) {
 		MountStreaming: func(_ *app.App, got *bili.Client) {
 			mark("streaming")
 			streamingClient = got
+		},
+		MountSearch: func(_ *app.App, got *bili.Client) {
+			mark("search")
+			searchClient = got
 		},
 		StartWarmUp: func(*app.App) { mark("warm up") },
 		MountCollections: func(_ *app.App, got *bili.Client) {
@@ -70,14 +74,14 @@ func TestAssembleRunsHeadlessInDependencyOrder(t *testing.T) {
 
 	want := []string{
 		"pin data directory", "new app", "migration", "settings", "full player preferences",
-		"login", "streaming", "warm up", "collections", "explore", "library", "recommend",
+		"login", "streaming", "search", "warm up", "collections", "explore", "library", "recommend",
 		"local music", "lyrics", "comments", "danmaku", "updates", "downloads", "notifications",
 		"media", "mounted", "run",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("assembly order = %v, want %v", got, want)
 	}
-	if streamingClient != cli || collectionsClient != cli || exploreClient != cli || libraryClient != cli || recommendClient != cli {
+	if streamingClient != cli || searchClient != cli || collectionsClient != cli || exploreClient != cli || libraryClient != cli || recommendClient != cli {
 		t.Fatal("client-dependent mounts did not share the login client")
 	}
 }
@@ -98,7 +102,7 @@ func TestAssembleContinuesAfterOptionalMountFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.Close)
-	if len(got) != 22 || got[len(got)-1] != "run" {
+	if len(got) != 23 || got[len(got)-1] != "run" {
 
 		t.Fatalf("optional failures stopped assembly: %v", got)
 	}
@@ -151,6 +155,7 @@ func minimalDependencies(mark func(string)) Dependencies {
 		},
 		MountLogin:     func(*app.App) *bili.Client { mark("login"); return cli },
 		MountStreaming: func(*app.App, *bili.Client) { mark("streaming") },
+		MountSearch:    func(*app.App, *bili.Client) { mark("search") },
 		StartWarmUp:    func(*app.App) { mark("warm up") },
 		MountCollections: func(*app.App, *bili.Client) {
 			mark("collections")

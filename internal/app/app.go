@@ -350,6 +350,7 @@ type App struct {
 	library       *Library
 	favorites     *Favorites
 	exploreClient *bili.Client
+	search        *Search
 	spaces        map[int64]*UpSpace
 
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
@@ -1768,6 +1769,7 @@ func (a *App) Close() {
 	a.closed = true
 	a.recommend, a.library, a.favorites = nil, nil, nil
 	a.exploreClient = nil
+	a.search = nil
 	a.spaces = nil
 	a.wakeMu.Lock()
 	a.wakes = nil

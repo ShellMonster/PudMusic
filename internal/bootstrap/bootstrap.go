@@ -27,6 +27,7 @@ type Dependencies struct {
 	MountFullPlayerPrefs func(*app.App)
 	MountLogin           func(*app.App) *bili.Client
 	MountStreaming       func(*app.App, *bili.Client)
+	MountSearch          func(*app.App, *bili.Client)
 	StartWarmUp          func(*app.App)
 	MountCollections     func(*app.App, *bili.Client)
 	MountExplore         func(*app.App, *bili.Client)
@@ -57,6 +58,7 @@ func DefaultDependencies() Dependencies {
 		MountFullPlayerPrefs: ui.MountFullPlayerPrefs,
 		MountLogin:           ui.MountLogin,
 		MountStreaming:       ui.MountStreaming,
+		MountSearch:          func(a *app.App, cli *bili.Client) { a.MountSearch(cli) },
 		StartWarmUp:          func(a *app.App) { a.StartWarmUp() },
 		MountCollections:     ui.MountCollections,
 		MountExplore:         func(a *app.App, cli *bili.Client) { a.MountExplore(cli) },
@@ -120,6 +122,9 @@ func Assemble(d Dependencies) (*app.App, error) {
 	}
 	if d.MountStreaming != nil {
 		d.MountStreaming(a, cli)
+	}
+	if d.MountSearch != nil {
+		d.MountSearch(a, cli)
 	}
 	if d.StartWarmUp != nil {
 		d.StartWarmUp(a)
