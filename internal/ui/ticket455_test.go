@@ -18,8 +18,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 )
 
 // searchFetchFail 是这一组里那一趟拉页要失败时说的话。

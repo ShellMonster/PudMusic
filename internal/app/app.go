@@ -13,13 +13,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/media"
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/comments"
-	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/media"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/comments"
+	"github.com/ShellMonster/PudMusic/internal/service/danmaku"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // afterFunc 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。

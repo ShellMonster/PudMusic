@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec"
 )
 
 // 解码速度决定「能不能边下边放」：一个追不上实时的解码器，歌开头会卡住。

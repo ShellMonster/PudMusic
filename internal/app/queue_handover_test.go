@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 删掉正在放的那首、而**下一首是在线的、并且那条流建不起来**的那一支。

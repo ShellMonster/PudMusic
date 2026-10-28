@@ -32,7 +32,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // errLikeUnavailable 是「赞不了」：没挂在线播放（也就没挂上那个 B 站 client）。

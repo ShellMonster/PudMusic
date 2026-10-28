@@ -26,7 +26,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestTogglingPauseDoesNotStallTheQueue 盯**按一次暂停再恢复之后队列照常往下走**。

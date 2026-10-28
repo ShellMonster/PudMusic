@@ -35,7 +35,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // retryRule 是这张表里的一行。

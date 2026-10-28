@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/video"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/video"
 )
 
 // 边放边看：声音仍然由音频引擎放，视频只是跟着音频的进度出画面。

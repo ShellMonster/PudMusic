@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/platform"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────

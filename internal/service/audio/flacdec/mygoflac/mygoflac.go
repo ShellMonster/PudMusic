@@ -5,8 +5,8 @@
 // Import it for its side effect:
 //
 //	import (
-//		"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
-//		_ "github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec/mygoflac"
+//		"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
+//		_ "github.com/ShellMonster/PudMusic/internal/service/audio/flacdec/mygoflac"
 //	)
 //
 // A bare ".flac" stream is registered on its magic, "fLaC". FLAC inside an
@@ -20,7 +20,7 @@ package mygoflac
 import (
 	"io"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
 
 	"github.com/egoist/mygo/audio"
 )

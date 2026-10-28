@@ -21,7 +21,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // TestTheCollectionKindAndTheArchiveKindSayDifferentThings 两类不许说同一句。

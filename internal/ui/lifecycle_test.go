@@ -5,7 +5,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo"
 )
 

@@ -10,7 +10,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // TestRenderDesign176Shots 把这三处存成 PNG，留给人眼和上游并排看。

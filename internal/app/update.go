@@ -52,7 +52,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // UpdatePhase 是更新器走到哪一步了。界面上弹窗出不出现、按钮是什么，全看它。

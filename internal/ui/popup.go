@@ -17,7 +17,7 @@
 package ui
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 

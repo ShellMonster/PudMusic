@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest"
+	"github.com/ShellMonster/PudMusic/internal/service/mux/muxtest"
 )
 
 // 这一组盯的是「下完一首歌之后它旁边有一张封面，而且那张封面和音频对得上名字」。

@@ -31,7 +31,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // TestSameItemTellsThisItemFromAnother 盯身份判据本身。

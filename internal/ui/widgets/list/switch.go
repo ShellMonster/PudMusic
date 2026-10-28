@@ -19,7 +19,7 @@
 package list
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/egoist/mygo/ui"
 )
 

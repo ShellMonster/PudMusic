@@ -40,7 +40,7 @@ package ui
 // （被裁掉，看不见）。⇒ 画在**根**上，它才是贴着**窗**的下沿。
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/egoist/mygo/ui"
 )
 

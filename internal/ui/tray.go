@@ -9,7 +9,7 @@ import (
 	"log"
 	"runtime"
 
-	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/platform"
 	"github.com/egoist/mygo"
 )
 

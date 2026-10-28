@@ -3,7 +3,7 @@ package app_test
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 队列的 **item 级重排**（票 #322 的 B5）。

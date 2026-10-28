@@ -25,10 +25,10 @@ import (
 
 	"github.com/Eyevinn/mp4ff/mp4"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
-	"github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/mux/muxtest"
 )
 
 // dashPairFor 造一份带视频的 dash 段（一条视频 + 一条音频）。

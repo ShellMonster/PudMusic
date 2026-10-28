@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // retryingSource 造一条「正在重试」的字节源（它一直下不动）。

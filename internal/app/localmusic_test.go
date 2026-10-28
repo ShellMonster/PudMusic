@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic/localmusictest"
 )
 
 // 本地音乐这一摊的测试跑在真磁盘上：真的建目录、真的写文件、真的删文件。

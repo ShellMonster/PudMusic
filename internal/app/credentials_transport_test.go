@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一组验的是**生产的那一层**（`CredentialTransport`），不是策略本身。

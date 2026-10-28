@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // settingsSlot 是一个 App 上挂着的那份设置。

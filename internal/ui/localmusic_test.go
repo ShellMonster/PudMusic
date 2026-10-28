@@ -7,9 +7,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic"
-	"github.com/ShellMonster/Biu_Go/internal/service/localmusic/localmusictest"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic"
+	"github.com/ShellMonster/PudMusic/internal/service/localmusic/localmusictest"
 	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )

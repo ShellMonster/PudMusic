@@ -38,10 +38,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -491,7 +491,7 @@ func TestThePlayBarShadowComesFromTheShadowPackage(t *testing.T) {
 	// 2. 走的是那个包。
 	imported := false
 	for _, imp := range f.Imports {
-		if imp.Path.Value == `"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"` {
+		if imp.Path.Value == `"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"` {
 			imported = true
 		}
 	}
@@ -708,7 +708,7 @@ func TestEveryShadowTierHasACallSite(t *testing.T) {
 }
 
 // shadowPkgPath 是那个包的 import 路径。
-const shadowPkgPath = `"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shadow"`
+const shadowPkgPath = `"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"`
 
 // shadowLocalName 是 `widgets/shadow` 在这个文件里的**本地名**。
 //

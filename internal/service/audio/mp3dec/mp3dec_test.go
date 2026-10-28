@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	gomp3 "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3"
+	gomp3 "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3"
 )
 
 // 素材：`internal/service/audio/testdata/gapless.mp3`（0.625 秒的 440 Hz

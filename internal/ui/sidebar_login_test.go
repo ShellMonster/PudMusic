@@ -7,7 +7,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // loginOnlyTitles 是「要登录才有内容」的那几页的名字。

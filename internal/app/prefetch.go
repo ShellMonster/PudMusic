@@ -39,7 +39,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // prefetchLead 是提前量：当前这一首还剩多久的时候开始备下一首的地址。

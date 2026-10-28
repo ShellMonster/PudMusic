@@ -13,8 +13,8 @@ package ui
 import (
 	"log"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/media"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/media"
 	"github.com/egoist/mygo"
 )
 

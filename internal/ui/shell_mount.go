@@ -13,9 +13,9 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/platform"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )

@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

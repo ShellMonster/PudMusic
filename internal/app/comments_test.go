@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/comments"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/comments"
 )
 
 // 评论这一摊：后台拉、缓存、退避、换歌就重置、以及「mv 要先换 avid」。

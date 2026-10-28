@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一族把头像下面那一层下拉存成 PNG，留给人眼看。

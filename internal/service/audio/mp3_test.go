@@ -43,8 +43,8 @@ import (
 
 	mygoaudio "github.com/egoist/mygo/audio"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec"
-	gomp3 "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec"
+	gomp3 "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3"
 )
 
 // 素材的规格。这几个数**不是从素材里读出来的**，是素材的规格——写在这里是

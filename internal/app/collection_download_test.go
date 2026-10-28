@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // downloadApp 建一个挂了歌单、取流和下载三样的 App，都指着那台假 B 站。

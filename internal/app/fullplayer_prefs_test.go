@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // 全屏播放器那份偏好：落盘、读回、以及几个「用户可以直接编辑这个文件」的情形。

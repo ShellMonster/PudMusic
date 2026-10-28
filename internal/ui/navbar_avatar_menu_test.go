@@ -22,8 +22,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

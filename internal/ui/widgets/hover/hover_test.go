@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/egoist/mygo/ui"
 )
 

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestTheDanmakuComesForASongWhoseCidHadToBeAsked 盯「搜索结果那一路」也有弹幕。

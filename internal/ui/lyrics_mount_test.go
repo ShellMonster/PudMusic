@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // TestTheLyricsCacheNeverLandsInTheWorkingDirectory 钉住「拿不到应用数据目录时缓存

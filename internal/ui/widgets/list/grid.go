@@ -22,14 +22,14 @@ package list
 import (
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/rowkey"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/leading"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scrollbar"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 

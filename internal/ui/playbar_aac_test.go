@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 验收项 1 的后半段：系统解码器解出来的歌，播放条也要认。

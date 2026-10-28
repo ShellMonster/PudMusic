@@ -18,7 +18,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // shotLibraryPage 造一个停在 path 上的历史/稍后再看页面，并把「哪一首在放」摆好。

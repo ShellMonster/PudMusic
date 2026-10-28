@@ -1,7 +1,7 @@
 # flacdec —— 从验证资产搬进来的 FLAC 解码器
 
 这是 t-0017 验证过的实现，搬进本仓库，**代码逐字未改**，只改了 import 路径
-（`biu.audio/flacdec` → `github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec`）。
+（`biu.audio/flacdec` → `github.com/ShellMonster/PudMusic/internal/service/audio/flacdec`）。
 测试、测试素材一起搬过来了，所以 `go test ./...` 在本仓库里仍然能跑那 64 项验证。
 
 原始资产在 `~/.herdr-projects/biu-mygo/library/flac-decoder-verified/`，

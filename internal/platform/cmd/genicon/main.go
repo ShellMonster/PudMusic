@@ -17,7 +17,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/ShellMonster/Biu_Go/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/platform"
 )
 
 // iconRelPath 是源图的位置，相对**仓库根**。

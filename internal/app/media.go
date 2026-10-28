@@ -20,7 +20,7 @@ package app
 import (
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/media"
+	"github.com/ShellMonster/PudMusic/internal/media"
 )
 
 // mediaPublishEvery 是「在放的时候多久校正一次锁屏上的进度」。

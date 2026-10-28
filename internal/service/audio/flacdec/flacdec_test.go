@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
 
 	"github.com/mewkiz/flac/frame"
 	m4a "github.com/tphakala/go-m4a"

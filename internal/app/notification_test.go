@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // 这一组盯的是「下载下完了 → 界面层」那一段接线（票 #559）。

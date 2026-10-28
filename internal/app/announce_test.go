@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // 这一组盯的是「状态变化被念出来」的那一半（无障碍，票 #321）。

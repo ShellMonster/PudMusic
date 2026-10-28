@@ -1,6 +1,6 @@
 package dec
 
-import "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3/internal/bits"
+import "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3/internal/bits"
 
 // l3ChangeSign mirrors upstream L3_change_sign (tools/oracle/minimp3.h:1186-1192):
 // negates every odd-indexed sample of every other 18-float subband block

@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // seenDynID 是假 B 站那儿的「此刻最新那条动态」的 id。

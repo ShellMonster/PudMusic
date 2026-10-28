@@ -43,7 +43,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // SuggestState 是搜索浮层里「联想词」那一档一帧要读的全部状态。

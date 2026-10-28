@@ -32,8 +32,8 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // favRefresh 是「正在刷」那一趟的状态，连同跑完之后要说的那句话。

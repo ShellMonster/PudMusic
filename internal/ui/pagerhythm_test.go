@@ -17,11 +17,11 @@ package ui
 
 import (
 	"context"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"go/ast"
 	"go/parser"
 	"go/token"

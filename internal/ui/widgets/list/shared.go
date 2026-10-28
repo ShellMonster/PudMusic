@@ -14,8 +14,8 @@ import (
 	"log"
 	"runtime/debug"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // warnDuplicateIDs 把重复的行标识指出来。

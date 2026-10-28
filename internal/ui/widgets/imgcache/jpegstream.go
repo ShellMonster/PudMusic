@@ -6,7 +6,7 @@ import (
 	"image"
 	"image/jpeg"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache/internal/jpegrows"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache/internal/jpegrows"
 	xdraw "golang.org/x/image/draw"
 )
 

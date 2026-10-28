@@ -42,7 +42,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // lyricSearchMemoMax 是结果缓存留多少条。

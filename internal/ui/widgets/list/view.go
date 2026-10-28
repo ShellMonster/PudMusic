@@ -9,7 +9,7 @@
 // 把「选中的那一档」和「预览的那一张」对上（见 `previewOf`）。
 package list
 
-import "github.com/ShellMonster/Biu_Go/internal/app"
+import "github.com/ShellMonster/PudMusic/internal/app"
 
 // View 是一份歌此刻该摆成什么样。
 //

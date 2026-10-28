@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/testproc"
+	"github.com/ShellMonster/PudMusic/internal/testproc"
 )
 
 // TestMain 是这一包的门：跑完把「子进程跑本测试自己」的那份副本收掉。

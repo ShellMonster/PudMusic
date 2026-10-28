@@ -1,4 +1,4 @@
-module github.com/ShellMonster/Biu_Go
+module github.com/ShellMonster/PudMusic
 
 go 1.27.3
 

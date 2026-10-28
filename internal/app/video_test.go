@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 func rangeServer(t *testing.T, body string, hits *int) *httptest.Server {

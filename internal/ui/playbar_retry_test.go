@@ -22,7 +22,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestThePlayBarOffersARetryWhenTheFailureIsWorthRetrying 取流失败（可恢复）。

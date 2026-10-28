@@ -4,7 +4,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // 本地文件的响度扫描：开着音量均衡时，在后台把整首解一遍量出响度，量完告诉

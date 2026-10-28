@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 队列的判据分两层：Queue 本身是纯数据（不碰播放器），App 上的那几个方法要走

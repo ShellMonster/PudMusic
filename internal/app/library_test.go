@@ -15,7 +15,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // fakeBili 是一台照着给定答案回答的假 B 站，顺便把收到的请求和 body 录下来。

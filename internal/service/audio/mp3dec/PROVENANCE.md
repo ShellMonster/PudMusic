@@ -32,7 +32,7 @@
 ## 搬了哪些文件，哪些没搬
 
 `gomp3/` 底下是上游的目录结构，**代码逐字未改**，只改了 import 路径
-（`github.com/tphakala/go-mp3` → `github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3`）。
+（`github.com/tphakala/go-mp3` → `github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3`）。
 
 搬进来的：
 

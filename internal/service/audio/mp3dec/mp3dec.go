@@ -38,7 +38,7 @@ import (
 
 	mygoaudio "github.com/egoist/mygo/audio"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3/pcm"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3/pcm"
 )
 
 // init 把 MP3 注册进 MyGo 的格式表。

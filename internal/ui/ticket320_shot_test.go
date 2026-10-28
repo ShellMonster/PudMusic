@@ -20,7 +20,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestRenderTicket320Shots 把这一票的两处各存一张 PNG，深浅各一套。

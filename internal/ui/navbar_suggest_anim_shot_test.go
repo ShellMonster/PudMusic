@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // 这一族把联想面板的**进场那几帧**存成 PNG，留给人眼看（票 #259）。

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // lyricsApp 建一个挂好了歌词缓存的空应用。缓存挂在 `t.TempDir()` 上，和真应用

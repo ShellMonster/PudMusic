@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // 快捷键和搜索历史的迁移入口，以及启动时把它们和设置、队列一起升的那一轮。

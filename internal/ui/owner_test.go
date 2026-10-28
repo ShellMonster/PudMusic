@@ -3,8 +3,8 @@ package ui
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // 「每一个入口造出来的队列项都要带上 UP 主」（A23 的反面）。

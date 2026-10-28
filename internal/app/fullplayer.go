@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // SpectrumBars 返回当前正在放的那一帧的频谱条高度（0~1 的比例，barCount 个）。

@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // fakeLyricSource 是一只可编排的歌词源：它数自己被调了几次、能按需要卡住、

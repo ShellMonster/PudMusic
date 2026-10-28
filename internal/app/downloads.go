@@ -29,8 +29,8 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // errDownloadsMissing 是「下载没挂上」。见 `DownloadMounted`。

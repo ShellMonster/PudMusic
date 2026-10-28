@@ -33,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestThePlayingBarKeepsAskingForRepaints 钉住「在放的时候那根线一直在走」。

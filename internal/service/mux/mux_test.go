@@ -22,7 +22,7 @@ import (
 
 	"github.com/Eyevinn/mp4ff/mp4"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/mux/muxtest"
+	"github.com/ShellMonster/PudMusic/internal/service/mux/muxtest"
 )
 
 // 造输入的那套在 `muxtest` 包里（和 `download` 包里端到端那一条共用）。

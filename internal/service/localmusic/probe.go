@@ -3,7 +3,7 @@ package localmusic
 import (
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // readHeadOrNil 是 `readHead` 的容错版：读不出来给 nil，让调用方走「没有标签」。

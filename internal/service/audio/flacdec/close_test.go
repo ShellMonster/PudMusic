@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
 )
 
 // openFiles counts the file descriptors this process holds, or skips the test when

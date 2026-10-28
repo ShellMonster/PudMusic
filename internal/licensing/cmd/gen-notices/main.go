@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ShellMonster/Biu_Go/internal/licensing"
+	"github.com/ShellMonster/PudMusic/internal/licensing"
 )
 
 // genTargets 是要核一遍的构建目标。

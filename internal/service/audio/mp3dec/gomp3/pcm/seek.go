@@ -6,7 +6,7 @@ import (
 	"io"
 	"math"
 
-	mp3 "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3"
+	mp3 "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3"
 )
 
 // ErrSeekUnsupported is returned by SeekToSample when the source does not

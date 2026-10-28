@@ -53,7 +53,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ShellMonster/Biu_Go/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"os"
 	"path/filepath"
 	"reflect"

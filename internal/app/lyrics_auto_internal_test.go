@@ -3,7 +3,7 @@ package app
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 func TestCleanLyricTitleDropsBracketsAndNoise(t *testing.T) {

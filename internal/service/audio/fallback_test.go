@@ -6,8 +6,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/extaf"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
 
 	mygoaudio "github.com/egoist/mygo/audio"
 	m4a "github.com/tphakala/go-m4a"

@@ -33,8 +33,8 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // ItemOfMedia 把一条 B 站内容翻成队列认的那一项。

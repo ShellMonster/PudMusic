@@ -18,8 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/extaf"
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/extaf"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
 	mygoaudio "github.com/egoist/mygo/audio"
 
 	// MP3 是本仓库自己解的（`internal/service/audio/mp3dec`，里面 vendor 的是
@@ -29,7 +29,7 @@ import (
 	// ⚠️ **别改回 `mygo/audio/mp3`**：MyGo 的注册表是「按注册顺序找第一条
 	// 命中的」，两个 mp3 解码器都注册的话，认出哪一个取决于 init 顺序——
 	// 而那个顺序不是能靠读代码定下来的东西。撤掉这一行是刻意的。
-	_ "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec"
+	_ "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec"
 
 	// Ogg Vorbis：`mygo/audio/vorbis` 靠 init 把 `OggS` 注册进 MyGo 的
 	// 格式表，解码器是 `github.com/jfreymuth/oggvorbis`（MIT）。

@@ -36,8 +36,8 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/egoist/mygo"
 )
 

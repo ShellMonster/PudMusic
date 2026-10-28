@@ -12,7 +12,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // TestTheLyricsSayWhereTheyCameFrom 盯那一句说明。

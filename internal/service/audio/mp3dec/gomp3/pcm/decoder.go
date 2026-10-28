@@ -9,7 +9,7 @@ import (
 	"math"
 	"time"
 
-	mp3 "github.com/ShellMonster/Biu_Go/internal/service/audio/mp3dec/gomp3"
+	mp3 "github.com/ShellMonster/PudMusic/internal/service/audio/mp3dec/gomp3"
 )
 
 var (

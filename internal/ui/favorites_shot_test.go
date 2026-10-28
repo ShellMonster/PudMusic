@@ -20,7 +20,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // TestRenderFavoritesShots 把侧栏收藏夹那几档存成 PNG。

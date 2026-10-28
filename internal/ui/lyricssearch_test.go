@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

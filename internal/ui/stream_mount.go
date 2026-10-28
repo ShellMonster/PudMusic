@@ -6,8 +6,8 @@
 package ui
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // MountStreaming 装好在线播放。**必须在开窗口之前调**。

@@ -32,7 +32,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 // fileNoticeLifetime 是那句话待多久。

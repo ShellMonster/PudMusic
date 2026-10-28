@@ -8,7 +8,7 @@ package ui
 // 按提示找过去，扫到右上角只看见一行小字，**很可能以为那只是说明文字**。
 
 import (
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"image"
 	"image/color"
 	"testing"

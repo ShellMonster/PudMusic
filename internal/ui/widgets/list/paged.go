@@ -42,11 +42,11 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/ui/guard"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/flat"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/guard"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/egoist/mygo/ui"
 )
 

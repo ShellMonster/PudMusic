@@ -61,13 +61,13 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/motion"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/scale"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -130,7 +130,7 @@ const (
 	//
 	// Biu 指的是它自己的仓库（`user/index.tsx:138`）。这里指我们自己的——
 	// 用户在 MyGo 里点「问题反馈」，要能开到能提 MyGo 的那个地方去。
-	feedbackURL = "https://github.com/ShellMonster/Biu_Go/issues"
+	feedbackURL = "https://github.com/ShellMonster/PudMusic/issues"
 
 	// avatarMenuLabel 是那一层浮层的无障碍名字，也是测试认得它的凭据。
 	//

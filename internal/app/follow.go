@@ -20,7 +20,7 @@ package app
 import (
 	"context"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // ExploreMounted 报探索那一摊（UP 空间 / 动态流 / **我的关注**）挂上没有。

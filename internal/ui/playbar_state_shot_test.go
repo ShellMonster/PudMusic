@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 func TestRenderPlayBarStateShots(t *testing.T) {

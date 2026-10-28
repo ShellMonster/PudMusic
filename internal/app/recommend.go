@@ -40,7 +40,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // errRecommendMissing 是「首页还没挂上 B 站客户端」。

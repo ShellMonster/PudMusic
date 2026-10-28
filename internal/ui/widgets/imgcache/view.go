@@ -4,10 +4,10 @@ import (
 	"hash/fnv"
 	"unicode/utf8"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/iconset"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/ink"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/title"
+	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/egoist/mygo/ui"
 )
 

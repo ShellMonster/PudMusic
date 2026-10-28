@@ -20,8 +20,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/notice"
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // collectionFixture 是一台假 B 站：收藏夹元信息 + 内容列表 + 那几个写接口。

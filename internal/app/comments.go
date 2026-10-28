@@ -31,8 +31,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/service/comments"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/comments"
 )
 
 // commentsRetryAfter 是问失败之后隔多久再问一次。

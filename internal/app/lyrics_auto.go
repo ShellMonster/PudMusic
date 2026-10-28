@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // 自动找歌词的最后一道：B 站没有字幕、缓存里也没有时，按歌名去已挂上的歌词源

@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
 // folderFixture 是一台只认「收藏夹管理」那几个接口的假 B 站。

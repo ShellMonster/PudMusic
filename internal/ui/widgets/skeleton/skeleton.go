@@ -22,8 +22,8 @@ package skeleton
 import (
 	"time"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/shimmer"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 

@@ -21,7 +21,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

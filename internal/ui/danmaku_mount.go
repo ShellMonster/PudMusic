@@ -25,8 +25,8 @@ package ui
 import (
 	"path/filepath"
 
-	"github.com/ShellMonster/Biu_Go/internal/app"
-	"github.com/ShellMonster/Biu_Go/internal/service/danmaku"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/danmaku"
 )
 
 // danmakuDirName 是弹幕缓存放在应用数据目录底下的那一个文件夹。

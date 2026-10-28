@@ -26,8 +26,8 @@ package ui
 import (
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/bili"
-	"github.com/ShellMonster/Biu_Go/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
 

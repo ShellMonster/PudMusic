@@ -8,7 +8,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/ShellMonster/Biu_Go/internal/service/audio/flacdec"
+	"github.com/ShellMonster/PudMusic/internal/service/audio/flacdec"
 
 	"github.com/mewkiz/flac/frame"
 )
