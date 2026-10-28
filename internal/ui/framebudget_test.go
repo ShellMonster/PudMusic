@@ -1196,10 +1196,19 @@ var budgetSwitchOn bool
 func TestEachScreenStaysInsideItsFrameBudget(t *testing.T) {
 	for _, sc := range budgetScreens() {
 		t.Run(sc.name, func(t *testing.T) {
+			// ⚠️ **「这一帧画了几遍」要自己数**（理由见 `budgetViewPasses`）：
+			// 「每帧读几次设置」那一栏要按**遍数**归一（口径和
+			// `cardcolors_test.go` 的 `cardColorFrameReads` 一样），而遍数
+			// 只有这一处数得出来——它是那一档自己的 view 被调了几次。
+			passes := new(int64)
 			// 只画这一块：整窗的分配里混着侧栏、顶栏和别的页面，超了以后
 			// 报不出「是哪一块多分配的」。
 			opts := []shellOpt{reduceMotion(), withView(func(s *Shell) func(*mygoui.Context) {
-				return sc.draw(s)
+				inner := sc.draw(s)
+				return func(c *mygoui.Context) {
+					*passes++
+					inner(c)
+				}
 			})}
 			if sc.width > 0 && sc.height > 0 {
 				opts = append(opts, at(sc.width, sc.height))
@@ -1227,17 +1236,31 @@ func TestEachScreenStaysInsideItsFrameBudget(t *testing.T) {
 			//
 			// ⚠️ **它得归零之后量**：那个计数器是**进程级**的（别的线程的读也
 			// 在里面），所以量之前先 `TakeSettingsReadCount` 归零。
+			//
+			// 🔴 **它量的是「画一遍」，不是「一帧」**：`tt.Frame()` 可能画**好几
+			// 遍**（MyGo 的 `Tester.settle()` 最多跑 20 遍 view），而每遍都要读
+			// 一遍设置——于是那个数会在「1 遍」和「20 遍」之间跳。
+			//
+			// ⇒ 所以这里**除以遍数**，量的是「**画一遍**这一块读了几次设置」——
+			// 口径和 `cardcolors_test.go` 的 `cardColorFrameReads` **一样**
+			// （那一条早就归一了，两处曾经不一致）。
+			//
+			// ⚠️ **眼下它恒为 1**（`reduceMotion()` 让一帧就是一遍 view），而
+			// **归一之后**它在「一帧画好几遍」的情形下也稳——那才是这一栏
+			// 本来要量的东西。
 			if sc.budget.reads > 0 {
+				*passes = 0
 				app.TakeSettingsReadCount() // 归零
 				tt.Frame()
 				reads := app.TakeSettingsReadCount()
-				t.Logf("%s：每帧读设置 %d 次（上限 %d 次）",
-					sc.name, reads, sc.budget.reads)
-				if reads > sc.budget.reads {
-					t.Errorf("%s：每帧读设置 %d 次，上限 %d 次——"+
+				perPass := budgetReadsPerPass(t, sc.name, reads, *passes)
+				t.Logf("%s：画一遍读设置 %d 次（上限 %d 次；这一帧画了 %d 遍，读了 %d 次）",
+					sc.name, perPass, sc.budget.reads, *passes, reads)
+				if perPass > sc.budget.reads {
+					t.Errorf("%s：画一遍读设置 %d 次，上限 %d 次——"+
 						"「读设置」这一头涨回去了（票 #632 修掉的就是"+
 						"「每张卡各自去读一遍设置」那种）",
-						sc.name, reads, sc.budget.reads)
+						sc.name, perPass, sc.budget.reads)
 				}
 			}
 		})
@@ -1477,6 +1500,31 @@ func (b buildTally) describe() string {
 // 它只改「值怎么过去」，不改「建了什么」——所以不影响这一组要量的任何数。
 func reduceMotion() shellOpt {
 	return withPrefs(mygoui.Preferences{ReduceMotion: true})
+}
+
+// budgetReadsPerPass 把「这一帧读了几次设置」归一成「**画一遍**读了几次」。
+//
+// # 为什么要归一
+//
+// `tt.Frame()` 可能画**好几遍**（MyGo 的 `Tester.settle()` 最多跑 20 遍
+// view——切页动画进行中时它会一直画到不再要帧），而每遍都要读一遍设置——
+// 于是那个原始的数会在「1 遍」和「20 遍」之间跳（实测 8 次 vs 160 次）。
+//
+// ⇒ 归一之后量的是「**画一遍**这一块读了几次设置」，那才是这一栏要量的
+// 东西（「每张卡各自去读一遍设置」那种回归——**一遍**里读了太多次）。
+//
+// ⚠️ **口径和 `cardcolors_test.go` 的 `cardColorFrameReads` 一样**
+// （那一条早就除以遍数了）——两处曾经不一致，这一栏是后加的，忘了归一。
+//
+// ⚠️ **除法要求遍数大于 0**：一帧一次都没画的情形（画崩了 / 路由没匹配）
+// 会让它除零——那种情形要报错，而不是静悄悄地当成 0。
+func budgetReadsPerPass(t *testing.T, name string, reads, passes int64) int64 {
+	t.Helper()
+	if passes <= 0 {
+		t.Fatalf("%s：这一帧一遍都没画（读设置 %d 次）——量到的不是「画一遍」",
+			name, reads)
+	}
+	return reads / passes
 }
 
 // budgetDanmaku 是满屏那一档摆的那**十二条弹幕**。

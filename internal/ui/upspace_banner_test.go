@@ -36,6 +36,7 @@ import (
 
 	mygoui "github.com/egoist/mygo/ui"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 )
 
@@ -199,6 +200,10 @@ func installBannerImages(t *testing.T, s *Shell, pics *bannerPicServer) {
 
 // bannerSpaceShell 造一个「打开一个 UP 主空间」的壳，那台假 B 站给的横幅
 // 地址指向假图床。
+//
+// ⚠️ **它挂了一份设置**（`app.DefaultSettings("")`）：那一组里有几条要**改
+// 侧栏**（拖宽、折叠），而那些都是**写设置**——没挂设置时写不进去
+// （`ErrSettingsNotMounted`），前提就搭不起来。
 func bannerSpaceShell(t *testing.T, pics *bannerPicServer, bannerPath string) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	b := newUIExplore(t)
@@ -227,7 +232,7 @@ func bannerSpaceShell(t *testing.T, pics *bannerPicServer, bannerPath string) (*
 	b.on("/x/relation/modify", func(w http.ResponseWriter, r *http.Request) {
 		uiExploreJSON(w, 0, nil)
 	})
-	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s, tt, _ := newSpaceShell(t, b, true, "77", withSettings(app.DefaultSettings("")))
 	installBannerImages(t, s, pics)
 	openSpace(t, s, tt, 42)
 	return s, tt
@@ -260,16 +265,7 @@ func bannerBox(t *testing.T, tt *mygoui.Tester) mygoui.Rect {
 	return r
 }
 
-// bannerRedPixels 数横幅那一带里有多少个**那个红色**的像素。
-//
-// # 为什么数像素而不是问元素
-//
-// 这一票要证明的是「图**画出来了**」，而元素树上看得见图片元素不等于画面上
-// 有它——那一格宽度是 0 的时候，图片元素照样在树上，画面上一个像素也没有。
-// 所以只能看像素（仓库里多处用同一个办法，见 `comments_test.go` 的
-// `magentaPixels`）。
-//
-// # ⚠️ **只数横幅自己那一条，不数头像那一块**
+// bannerOwnRows 是横幅**自己独占**的那几行（头像压住的那一段不算）。
 //
 // 头像压住横幅的**下沿**（`upAvatarTop` = 88），而头像是**另一张网络图**。
 // 于是「横幅那一格」这个盒子在竖直方向上和头像**重叠**——数整格的话，头像
@@ -279,24 +275,49 @@ func bannerBox(t *testing.T, tt *mygoui.Tester) mygoui.Rect {
 // 在**把宽度改回 0 之后照样是绿的**——它数到的是头像（一个圆，3048 个像素），
 // 不是横幅。横幅那一带（y 从上沿到头像上沿）一个红色像素都没有。
 //
+// ⚠️ **用「横幅高 − 头像压住的那一段」算**，而不是写死 88：那两个数在
+// `upspace.go` 的常量表里（`upBannerH` / `upAvatarTop`），改了要跟着变。
+func bannerOwnRows(box mygoui.Rect) (top, bottom float32) {
+	top = box.Y
+	bottom = box.Y + upBannerH - (upBannerH - upAvatarTop)
+	// 留 4 像素余量：头像那一圈底色环（`upAvatarRing`）压在上面。
+	bottom -= upAvatarRing + 1
+	if bottom <= top {
+		bottom = top + 1
+	}
+	return top, bottom
+}
+
+// bannerOwnArea 是横幅自己那几条的**总面积**（像素个数）。
+//
+// 它是 `bannerRedCoverage` 的分母。
+func bannerOwnArea(box mygoui.Rect) int {
+	top, bottom := bannerOwnRows(box)
+	w := box.X + box.W - box.X
+	h := bottom - top
+	if w <= 0 || h <= 0 {
+		return 0
+	}
+	return int(w) * int(h)
+}
+
+// bannerRedPixels 数横幅那一带里有多少个**那个红色**的像素。
+//
+// # 为什么数像素而不是问元素
+//
+// 这一票要证明的是「图**画出来了**」，而元素树上看得见图片元素不等于画面上
+// 有它——那一格宽度是 0 的时候，图片元素照样在树上，画面上一个像素也没有。
+// 所以只能看像素（仓库里多处用同一个办法，见 `comments_test.go` 的
+// `magentaPixels`）。
+//
 // 所以这里只数**横幅自己占的那一条**：从横幅的上沿到**头像的上沿**（减去
 // 一点余量），横向是横幅的整条宽。
 func bannerRedPixels(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) int {
 	t.Helper()
 	img := tt.Image()
-	// 头像上沿 = 头像那一块的 y。头像那一块是**圆的**，它从 `upAvatarTop`
-	// （= 横幅高 − 44 = 88）开始——所以横幅自己独占的是上面那 88 像素。
-	//
-	// ⚠️ **用「横幅高 − 头像压住的那一段」算**，而不是写死 88：那两个数在
-	// `upspace.go` 的常量表里（`upBannerH` / `upAvatarTop`），改了要跟着变。
-	own := box.Y + upBannerH - (upBannerH - upAvatarTop)
-	// 留 4 像素余量：头像那一圈底色环（`upAvatarRing`）压在上面。
-	own -= upAvatarRing + 1
-	if own <= box.Y {
-		own = box.Y + 1
-	}
+	rowTop, rowBottom := bannerOwnRows(box)
 	n := 0
-	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(own), img.Rect.Max.Y); y++ {
+	for y := max(int(rowTop), img.Rect.Min.Y); y < min(int(rowBottom), img.Rect.Max.Y); y++ {
 		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
 			p := img.RGBAAt(x, y)
 			if absInt(int(p.R)-int(bannerRed.R)) <= 24 &&
@@ -307,6 +328,37 @@ func bannerRedPixels(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) int {
 		}
 	}
 	return n
+}
+
+// bannerRedCoverage 量横幅那一带里，红色像素**占了几成**。
+//
+// # ⚠️ **为什么不能只数「有多少个红像素」**
+//
+// 「> 100 个」那一档只钉住「**有图**」，**钉不住「图铺满了那一格」**——
+// 而票 #630 的验收明写「横幅**铺满整个宽度**」。
+//
+// 实测：把横幅那一格的宽度砍一半（`spaceContentWidth(c)*0.5`），**那些
+// 「有图」的测试全部照样绿**——980×132 的槽里画 490 宽，红色像素仍有 42922
+// 个（覆盖率 33%），远大于阈值 100。
+//
+// ⇒ 所以这里断的是**覆盖率**：红色像素 / 那一带的总面积。
+//
+// # 为什么分母是「横幅自己那几条 × 整条宽」
+//
+// 竖直方向只取横幅**独占**的那几行（头像压住下沿，见 `bannerOwnRows`）；
+// 横向取**整条宽**——因为「铺满」说的是横向（通栏），而竖直方向那一格本来
+// 就是 132 高。
+//
+// ⚠️ **图片是 `Fit(ui.Cover)`**：它把图**裁**成那一格的形状。所以一条
+// 980×132 的槽里显示的是 980×132 的图——不是原图缩放，而是**中心裁剪**。
+// 假图床给的是纯色图，所以整条都是红的。
+func bannerRedCoverage(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) float64 {
+	t.Helper()
+	area := bannerOwnArea(box)
+	if area <= 0 {
+		return 0
+	}
+	return float64(bannerRedPixels(t, tt, box)) / float64(area)
 }
 
 // TestTheSpaceBannerIsActuallyDrawn 钉住这一票的**核心**：打开一个 UP 主空间，
@@ -321,6 +373,10 @@ func bannerRedPixels(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) int {
 // ⚠️ **这一条是唯一能抓住「画不出来」的判据**：横幅那一格宽度是 0 的时候，
 // 元素树上照样有图片元素、请求照样发出去了、帧预算甚至更省——只有画面上的
 // 像素会说话。
+//
+// ⚠️ **这里只断「有图」，不断「铺满」**：铺满是**覆盖率**那一档
+// （`TestTheSpaceBannerCoversTheWholeSlot`）——「> 100 个像素」这一档断不住
+// 「图只画了一半」（实测把宽度砍一半它照样绿，理由见 `bannerRedCoverage`）。
 func TestTheSpaceBannerIsActuallyDrawn(t *testing.T) {
 	pics := &bannerPicServer{}
 	_, tt := bannerSpaceShell(t, pics, "https://i0.hdslb.com/bfs/archive/banner.png")
@@ -329,6 +385,44 @@ func TestTheSpaceBannerIsActuallyDrawn(t *testing.T) {
 	waitFrames(t, tt, "横幅画出来", func() bool {
 		return bannerRedPixels(t, tt, bannerBox(t, tt)) > 100
 	})
+}
+
+// TestTheSpaceBannerCoversTheWholeSlot 钉住横幅**铺满了它那一格**。
+//
+// # ⚠️ **为什么必须单列一条**
+//
+// 「有图」那一档（`TestTheSpaceBannerIsActuallyDrawn`）断的是「> 100 个红
+// 像素」——而**画面上只有一半画出来了，它照样绿**。
+//
+// 实测（把横幅那一格的宽度砍成一半）：980×132 的槽里画 490 宽，红像素
+// 还有 42922 个（覆盖率 33%），远大于 100 ⇒ 「有图」那条**绿**。
+//
+// 而票 #630 的验收明写「横幅**铺满整个宽度**」——所以这一条断的是
+// **覆盖率**（红色像素 / 那一带的总面积 ≥ 90%）。
+//
+// # 为什么 90% 而不是 100%
+//
+// 底下那一层「淡进页面底色」的渐变（`upspace.go` 的 `LinearGradient`）压在
+// 横幅**下沿**上，而头像那一圈底色环也压在上面——所以最下面那几行**本来
+// 就不是纯红**。竖直方向已经排除了头像压住的那一段（见 `bannerOwnRows`），
+// 但浮点数、圆角、抗锯齿还会吃掉零星几个像素。90% 留足了余量，而「只画了
+// 一半」是 33%——离 90% 远得很，判据不会飘。
+func TestTheSpaceBannerCoversTheWholeSlot(t *testing.T) {
+	pics := &bannerPicServer{}
+	_, tt := bannerSpaceShell(t, pics, "https://i0.hdslb.com/bfs/archive/banner.png")
+
+	// 等横幅那一格画出来。
+	waitFrames(t, tt, "横幅画出来", func() bool {
+		return bannerRedPixels(t, tt, bannerBox(t, tt)) > 100
+	})
+
+	box := bannerBox(t, tt)
+	coverage := bannerRedCoverage(t, tt, box)
+	if coverage < 0.9 {
+		t.Errorf("横幅那一带只有 %.1f%% 是那个红色（%d / %d 像素）——"+
+			"它没铺满那一格（要 ≥ 90%%）",
+			coverage*100, bannerRedPixels(t, tt, box), bannerOwnArea(box))
+	}
 }
 
 // TestTheSpaceBannerFillsTheWholeWidth 钉住横幅**铺满整个内容区宽度**。

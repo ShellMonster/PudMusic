@@ -3633,8 +3633,16 @@ var Items = []Item{
 		Tests: []string{
 			// 画面上的像素——唯一能抓住「画不出来」的判据。
 			"TestTheSpaceBannerIsActuallyDrawn",
+			// ⚠️ **覆盖率**——「有图」那一档断不住「图只画了一半」
+			// （实测把宽度砍一半它照样绿）。
+			"TestTheSpaceBannerCoversTheWholeSlot",
 			// 铺满整个内容区宽度。
 			"TestTheSpaceBannerFillsTheWholeWidth",
+			// 🔴 **内容区的宽要和画面上侧栏的宽对得上**（对抗性审查）：
+			// 侧栏「上一次拖动的终点」是陈旧值，折叠之后它比画面上宽 236
+			// 像素 ⇒ 横幅右边空出一条空白带。
+			"TestTheContentAreaIsNotNarrowedByAStaleDragWidth",
+			"TestTheBannerFillsTheContentAreaAfterTheSidebarCollapses",
 			// 要的是横幅该要的那一档（不是 64×64，且带中心裁剪）。
 			"TestTheSpaceBannerAsksForItsOwnSize",
 			// 拖动时不每像素换一张图 / 跟着窗口宽走。
