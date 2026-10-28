@@ -181,3 +181,23 @@ func TestActiveAt(t *testing.T) {
 		t.Errorf("一句歌词都没有时是 -1，出了 %d", got)
 	}
 }
+
+func TestActiveAtScalesWithBinarySearch(t *testing.T) {
+	rows := make([]Row, 100000)
+	for i := range rows {
+		rows[i].At = time.Duration(i) * time.Second
+	}
+	for _, tc := range []struct {
+		at   time.Duration
+		want int
+	}{
+		{at: -time.Second, want: 0},
+		{at: 0, want: 0},
+		{at: 999*time.Second + 500*time.Millisecond, want: 999},
+		{at: 99999 * time.Second, want: 99999},
+	} {
+		if got := ActiveAt(rows, tc.at); got != tc.want {
+			t.Fatalf("ActiveAt(%v) = %d, want %d", tc.at, got, tc.want)
+		}
+	}
+}
