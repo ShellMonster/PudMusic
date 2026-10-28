@@ -36,15 +36,18 @@ jobs:
 
       - name: Verify formatting and modules
         shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            files="$(git diff --name-only "$GITHUB_BASE_SHA"...HEAD -- '*.go')"
+            files="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
           elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            if [[ "$GITHUB_EVENT_BEFORE" == 0000000000000000000000000000000000000000 ]]; then
+            if [[ "$BEFORE_SHA" == 0000000000000000000000000000000000000000 ]]; then
               files="$(git ls-files '*.go')"
             else
-              files="$(git diff --name-only "$GITHUB_EVENT_BEFORE" HEAD -- '*.go')"
+              files="$(git diff --name-only "$BEFORE_SHA" HEAD -- '*.go')"
             fi
           else
             files=""
