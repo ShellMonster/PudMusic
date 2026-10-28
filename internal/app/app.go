@@ -343,6 +343,15 @@ type App struct {
 	// 挂上去之前是 nil，界面要判空。
 	account *Account
 
+	// 这些是按 App 生命周期拥有的挂载模块。它们不放在包级注册表里，
+	// 这样关闭一个 App 就能一次性摘掉它的所有模块和 keyed page state。
+	settings      *settingsSlot
+	recommend     *Recommend
+	library       *Library
+	favorites     *Favorites
+	exploreClient *bili.Client
+	spaces        map[int64]*UpSpace
+
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
 	streaming *Streaming
 
@@ -976,7 +985,7 @@ type wakeEntry struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog}
+		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace)}
 	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
 	// 而它在「第一次取流有结果了」之前都算「还没准备好」——
 	// 界面上要靠它说一句话（见 App 里 `starting` 那段注释）。
@@ -996,8 +1005,13 @@ func New() *App {
 	return a
 }
 
-// logf 往**播放路径**的日志里写一句。
-//
+// isClosed 报告 App 是否已进入关闭流程。
+func (a *App) isClosed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed
+}
+
 // 🔴 **出口可以是 nil**：没装（或者被换成了 nil）时这句话就丢了——
 // 日志不是功能，丢了不许把整个应用带下去。
 func (a *App) logf(format string, args ...any) {
@@ -1752,6 +1766,15 @@ func (a *App) Close() {
 		return
 	}
 	a.closed = true
+	a.recommend, a.library, a.favorites = nil, nil, nil
+	a.exploreClient = nil
+	a.spaces = nil
+	a.wakeMu.Lock()
+	a.wakes = nil
+	a.wakeMu.Unlock()
+	a.announceMu.Lock()
+	a.announces = nil
+	a.announceMu.Unlock()
 	p := a.player
 	a.player = nil
 	a.playing = false
@@ -1764,6 +1787,8 @@ func (a *App) Close() {
 	rep := a.report
 	a.report = nil
 	at := a.position
+	settings := a.settings
+	a.wake = nil
 	a.mu.Unlock()
 
 	close(a.done)
@@ -1775,7 +1800,16 @@ func (a *App) Close() {
 	//
 	// 排在 `close(a.done)` 之后：后台时钟已经停了，不会再有别的 goroutine 来
 	// 改这一格，落下去的就是**最后那个状态**。
+	// 设置的后台合并写也要在退出时同步收尾。
 	a.SavePlayback()
+	if settings != nil && settings.store != nil {
+		_ = settings.store.Close()
+	}
+	a.mu.Lock()
+	if a.settings == settings {
+		a.settings = nil
+	}
+	a.mu.Unlock()
 
 	// 播放记录先结掉这一轮，再关那条 goroutine。
 	//
