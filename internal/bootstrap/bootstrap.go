@@ -16,8 +16,11 @@ import (
 )
 
 // Dependencies are the operations involved in assembling the application before
-// the event loop and the first native window. Mounts that return an error are
-// optional unless Assemble explicitly treats them as required.
+// the event loop and the first native window. PinUserDataDir and feature mounts
+// are optional: their failures are logged and startup keeps the framework
+// fallback or the remaining features. NewApp and Run are required bootstrap
+// dependencies; missing required dependencies stop assembly before the window
+// runs.
 type Dependencies struct {
 	PinUserDataDir func() error
 	NewApp         func() *app.App
@@ -79,23 +82,20 @@ func DefaultDependencies() Dependencies {
 }
 
 // Assemble performs all pre-window mounting and then hands control to the UI
-// runtime. Pinning the data directory is attempted before App creation; if the
-// platform cannot pin it, startup keeps the existing fallback behavior and
-// continues with the framework's default directory. Migration, settings,
-// updates and downloads retain their existing optional failure policy and are
-// logged while startup continues.
+// runtime. Required bootstrap dependencies fail before the window can run;
+// data-directory pinning and feature mounts retain their optional, logged
+// failure policy so the framework fallback and the remaining features continue.
 func Assemble(d Dependencies) (*app.App, error) {
 	if d.Logf == nil {
 		d.Logf = log.Printf
 	}
-	if d.PinUserDataDir == nil {
-		return nil, errMissingDependency("PinUserDataDir")
+	if err := validateRequiredDependencies(d); err != nil {
+		return nil, err
 	}
-	if err := d.PinUserDataDir(); err != nil {
-		d.Logf("biu: 钉不住应用数据目录，这次的设置可能存不住：%v", err)
-	}
-	if d.NewApp == nil {
-		return nil, errMissingDependency("NewApp")
+	if d.PinUserDataDir != nil {
+		if err := d.PinUserDataDir(); err != nil {
+			d.Logf("biu: 钉不住应用数据目录，这次的设置可能存不住：%v", err)
+		}
 	}
 	a := d.NewApp()
 	if a == nil {
@@ -173,12 +173,23 @@ func Assemble(d Dependencies) (*app.App, error) {
 	if d.NoteMounted != nil {
 		d.NoteMounted(a)
 	}
-	if d.Run != nil {
-		if err := d.Run(a, sess); err != nil {
-			return a, err
-		}
+	if err := d.Run(a, sess); err != nil {
+		return a, err
 	}
 	return a, nil
+}
+
+func validateRequiredDependencies(d Dependencies) error {
+	if d.PinUserDataDir == nil {
+		return errMissingDependency("PinUserDataDir")
+	}
+	if d.NewApp == nil {
+		return errMissingDependency("NewApp")
+	}
+	if d.Run == nil {
+		return errMissingDependency("Run")
+	}
+	return nil
 }
 
 // missingDependency is kept private so production callers see the original
