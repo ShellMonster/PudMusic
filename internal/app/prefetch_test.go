@@ -300,8 +300,49 @@ func TestAPrefetchThatFailsFallsBackSilently(t *testing.T) {
 	}
 }
 
-// TestAPreparedAddressThatExpiresIsThrownAway 盯「备好的地址快过期了就放弃」。
-//
+func TestAPrefetchFailureOnlySuppressesThatTarget(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(10.0)
+	var rejected atomic.Bool
+	var thirdPrefetch atomic.Int32
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		f.playCalls.Add(1)
+		q := r.URL.Query()
+		switch q.Get("bvid") {
+		case "BV2":
+			if rejected.CompareAndSwap(false, true) {
+				// A non-recoverable response must suppress retries for BV2 only.
+				http.Error(w, "too many requests", http.StatusTooManyRequests)
+				return
+			}
+		case "BV3":
+			thirdPrefetch.Add(1)
+		}
+		name := q.Get("bvid") + "-" + q.Get("cid")
+		writeStreamJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{"timelength": 10000,
+				"dash": dashFor(cdnURL(f.URL, name, 2*time.Hour), int(bili.QualityHigh192), 110836)}})
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "第一首"),
+		onlineItem("BV2", "2", "第二首"), onlineItem("BV3", "3", "第三首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一首")
+	waitFor(t, 15*time.Second, "第二首的预取失败", func() bool {
+		return rejected.Load()
+	})
+
+	// The manual next path must retire the failed target's suppression before
+	// the next target is considered.
+	a.Next()
+	playing(t, a, "第二首")
+	waitFor(t, 15*time.Second, "切到第二首后恢复预取第三首", func() bool {
+		return thirdPrefetch.Load() > 0
+	})
+}
+
 // B 站的地址带一个 deadline，而 `Usable` 留了两分钟提前量（见
 // `bili.StreamRef.Usable`）。备到一条**马上就要过期**的地址时，正确做法是
 // **放弃它**——真播那一趟重新取一条新的。
