@@ -4830,4 +4830,48 @@ var Items = []Item{
 			"TestLyricsLoadingFallsBackWhenNothingWillEverArrive",
 		},
 	},
+	{
+		// 归「严格 HTTP fixture」那一组：这一票（#633）动的是**分配**。
+		//
+		// 归这一组是因为它量的全是「这一帧建了多少个对象」——而界面层那套帧
+		// 预算（`internal/ui/framebudget_test.go`）量的也是这个。同一个刻度。
+		Category: HTTP,
+		// 票 #633（#628 的实现）：下载记录页**每一格**、**每一帧**都要算一个
+		// 「这一格是谁」的键，而那个键**只用来查一张 map**（`d.failed`，记着
+		// 「哪一格画崩了」）、算完查完就扔——原先那一句 `fmt.Sprintf` 于是每格
+		// 每帧多一次分配 ＋ 一次格式化（一屏八行 × 五列 = 四十次）。
+		//
+		// ⚠️ **错法是静默的**：画面上**一个像素都不会变**（那个键不进画面），
+		// 用户只会觉得「界面有点粘」——而这正是这一族（「每帧重建」那一族）
+		// 的共同点。
+		//
+		// ⚠️ **判据全是「每帧分配了几次」**，不是「拼了几次」——后者是内部
+		// 实现，换个实现照样对（结构体键、嵌套 map、事先记好一份，都是零分配）。
+		//
+		// ⚠️ **「哪一格崩了」那个记录必须还认得出那一行**：行会重排（用户在
+		// 上面删掉一条，下面的行往上挪），而那个记录是「行 id + 列号」——
+		// 按**行下标**记的话，用户删掉一行之后，崩过的那一格就记到**别的行**
+		// 上去了，而界面上只是「有一格写着画不出来」，错位**看不出来**。
+		//
+		// ⚠️ **一格画崩了仍然只有那一格降级**：别的格子照画，整页照常。
+		Spec: "下载记录页那一格的键不分配（每帧不再为它拼一次字符串）；「哪一格崩了」的记录认的是**行 id + 列号**（行重排之后还对得上那一行）；一格画崩了仍然只有那一格变成「画不出来」，别的格子照画；表格的内容、列宽、位置不变",
+		Tests: []string{
+			// 那个键不分配（单元级：稳态下零分配）。
+			"TestTheDownloadCellKeyDoesNotAllocate",
+			// 那个键还认得出是哪一格（两个维度都得在）。
+			"TestTheDownloadCellKeyStillTellsRowsApart",
+			// 「哪一格崩了」的记录**跟着那一行走**（行重排之后仍对得上）。
+			"TestTheBrokenCellFollowsItsRowWhenTheRowsMove",
+			// 一格画崩了只有那一格降级（这一条早就有，这一票不许破坏它）。
+			"TestOneBrokenCellDoesNotBlankOutThePage",
+			"TestTheBrokenCellSettlesByItself",
+			// 画面不变：内容、列宽、位置。
+			"TestTheDownloadTableIsUnchanged",
+			// 整页每一帧**不因为这个键**多分配（相对判据：多出「八行 × 五列」
+			// 那一截就红）。
+			"TestTheDownloadsPageDoesNotAllocatePerCell",
+			// 帧预算那一档的上限被压下来了（这一档的基线是实测值）。
+			"TestEachScreenStaysInsideItsFrameBudget",
+		},
+	},
 }
