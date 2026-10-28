@@ -182,6 +182,24 @@ func sideTargetWidth(st app.Settings) float64 {
 	return app.ClampSideMenuWidth(st.SideMenuWidth)
 }
 
+// sideDrawnWidth 是**这一帧侧栏实际占多宽**。
+//
+// ⚠️ **它和 `sideTargetWidth` 不是同一件事**：那个是**目标**（设置里那个数），
+// 而这一帧画出来的是**动画中间的值**（200ms 的过渡），拖动时更是跟着指针走
+// （`s.sideWidth`）。要算「内容区有多宽」就得用**画出来的那一档**——
+// 过渡期间按目标算，内容区会算宽 200 像素，页面上那一行就放不下。
+//
+// ⚠️ **取两者的较大值**（和 `settingsSideWidth` 同一个道理）：拖动中那一档
+// 可能比目标小，而内容区此时**还占着旧的宽**（布局还没重排），取大的一档 ⇒
+// 内容区算得偏小 ⇒ 不会算出一个比实际更宽的数。
+func (s *Shell) sideDrawnWidth(st app.Settings) float32 {
+	w := float32(sideTargetWidth(st))
+	if s.sideWidth > float64(w) {
+		w = float32(s.sideWidth)
+	}
+	return w
+}
+
 // sideCollapsedVisual 是这一帧**画出来**的那一档（折叠 / 展开）。
 //
 // 上游是 `isCollapsedVisual`（`biu/src/layout/side/index.tsx:55`）：
