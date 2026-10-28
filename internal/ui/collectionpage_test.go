@@ -63,6 +63,25 @@ type favBili struct {
 	// paths 记下每一次请求打到了哪条路径（发没发请求本身就是一条断言：
 	// 「为了一个认不出的项去问 B 站」是白跑的一趟）。
 	paths []string
+	// holdList 非 nil 时，**内容列表那一趟卡在这儿**（它不放行，直到收尾）。
+	//
+	// ⚠️ **它是为了复现「第一页还在拉」**：夹具默认秒回，而那一档
+	// （骨架屏）只在内容还在路上的时候出现。
+	holdList chan struct{}
+	// failList 非 0 时，**内容列表那一趟回这个业务 code**（造「拉不到」）。
+	//
+	// ⚠️ **它是为了复现「搜了没搜到、而那一趟失败了」**：那一档的判据是
+	// 「Loaded == 0 && !Loading」，而失败之后 `Loading` 是 false——于是它会
+	// 落进「没有结果」那一支，而**列表的失败态（那个重试按钮）就画不出来了**
+	// （那一格只在 `p.list.View` 里画，而那一支不调它）。
+	failList int
+	// playURLCalls 数**取流接口被问了几次**。
+	//
+	// ⚠️ **它是为了验「失效的条目不白跑一趟取流」**（票 #624）：光断
+	// 「队列里有几首」不够——那一首进队列之后**起播**才是那一趟取流。
+	playURLCalls int
+	// media 是 CDN 那一条要给的字节（取流那一趟要真能下出声音）。
+	media []byte
 }
 
 func newCollectionBili(t *testing.T) *favBili {
@@ -76,8 +95,20 @@ func newCollectionBili(t *testing.T) *favBili {
 	}
 	b.Server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
-		defer b.mu.Unlock()
 		b.paths = append(b.paths, r.URL.Path)
+		// ⚠️ **「卡住内容列表」那一趟要在锁外面等**：锁里等的话，
+		// 同一台夹具的**其它**请求（元信息那一趟）也被卡住——而那一趟是
+		// 「头图区第一帧是正在加载」的前置条件。
+		//
+		// ⚠️ **而且要放行**：那一条路径后面还要写 `b.orders` / `b.keywords`，
+		// 所以等完之后要重新拿锁。
+		hold := b.holdList
+		if hold != nil && r.URL.Path == "/x/v3/fav/resource/list" {
+			b.mu.Unlock()
+			<-hold
+			b.mu.Lock()
+		}
+		defer b.mu.Unlock()
 		switch r.URL.Path {
 		case "/x/v3/fav/folder/info":
 			state := 0
@@ -95,6 +126,11 @@ func newCollectionBili(t *testing.T) *favBili {
 				"upper":       b.infos["upper"],
 			})
 		case "/x/v3/fav/resource/list":
+			// ⚠️ **造「拉不到」**：回一个业务错，让这一趟失败。
+			if b.failList != 0 {
+				writeCollectionJSON(t, w, b.failList, "拉不到", nil)
+				return
+			}
 			b.orders = append(b.orders, r.URL.Query().Get("order"))
 			kw := r.URL.Query().Get("keyword")
 			b.keywords = append(b.keywords, kw)
@@ -121,6 +157,32 @@ func newCollectionBili(t *testing.T) *favBili {
 			_ = r.ParseForm()
 			b.cleaned = append(b.cleaned, r.PostForm.Get("media_id"))
 			writeCollectionJSON(t, w, 0, "0", 0)
+		case "/x/player/wbi/playurl":
+			// 🔴 **数取流被问了几次**（票 #624）：失效的条目**不该**触发
+			// 这一趟——而「没触发」只有数得出来才验得到。
+			b.playURLCalls++
+			writeCollectionJSON(t, w, 0, "0", map[string]any{
+				"timelength": 1000,
+				"dash": map[string]any{
+					"duration": 1,
+					"audio": []any{map[string]any{
+						"id": 30280, "bandwidth": 110836, "codecs": "mp4a.40.2",
+						"mimeType": "audio/mp4",
+						"baseUrl":  b.URL + "/cdn/a.flac?deadline=" + strconv.FormatInt(time.Now().Add(2*time.Hour).Unix(), 10) + "&upsig=deadbeef",
+					}},
+				},
+			})
+		case "/x/player/pagelist":
+			writeCollectionJSON(t, w, 0, "0", []any{
+				map[string]any{"cid": 777, "page": 1, "part": "第一集", "duration": 260},
+			})
+		case "/cdn/a.flac":
+			if len(b.media) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "audio/flac")
+			_, _ = w.Write(b.media)
 		case "/x/web-interface/view":
 			// bvid → avid。列表页的条目大多只有 bvid，而收藏夹那个弹窗要的是
 			// avid（`app.ResolveFavoriteID` 走的就是这一个查询）。
@@ -248,6 +310,15 @@ func (b *favBili) deletedFolders() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.deleted...)
+}
+
+// playURLHits 报取流接口被问了几次。
+//
+// ⚠️ **给测试用**（票 #624）：它是「失效的条目没有白跑一趟取流」那一条的判据。
+func (b *favBili) playURLHits() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.playURLCalls
 }
 
 // hitsOf 数打到某条路径上的请求有几回。
@@ -904,7 +975,7 @@ func TestSortingReloadsFromTheFirstPage(t *testing.T) {
 // TestEveryPlayableCollectionEntryIsAcceptedByThePlayer 钉住「可放 == 能放」。
 //
 // `bili.Media.Playable` 说能放的那些，界面就会照着画、照着进队列
-// （`itemsOfMedias` 是唯一的筛子）。所以它和「播放器认不认这一项」必须**一致**：
+// （`app.QueueItemsOfMedias` 是唯一的筛子）。所以它和「播放器认不认这一项」必须**一致**：
 //
 //	Playable() == true  → 翻出来的 Item 一定要能被播放那一层接受
 //	Playable() == false → 一定要被挡住（合集 / 电影放进去就是一条打不开的条目）
@@ -921,7 +992,7 @@ func TestEveryPlayableCollectionEntryIsAcceptedByThePlayer(t *testing.T) {
 	} {
 		m := bili.Media{ID: 1293494, Type: typ, Bvid: "BV1xx", Title: "一条"}
 
-		items := itemsOfMedias([]bili.Media{m})
+		items := app.QueueItemsOfMedias([]bili.Media{m})
 		ready := len(items) > 0 && items[0].OnlineReady()
 
 		if ready != m.Playable() {

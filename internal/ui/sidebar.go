@@ -625,7 +625,6 @@ func (s *Shell) viewSideGroupTitle(c *ui.Context, group string, firstOfAll, coll
 // sideMenuItem 是侧栏菜单里的一项。
 //
 // selected 是「当前就在这一页」——它换的是**图标那一枚**（实心）和**底色**
-// （上游 HeroUI 的 `variant="flat"` + `color="primary"`，见 flatCurrent）。
 //
 // # 展开态：图标在 40×40 的格子里，名字在格子右边
 //
@@ -647,24 +646,38 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 	}
 
 	if collapsed {
-		// `AlignSelf(Center)`：格子是 40 宽，而侧栏折叠后是 72——不居中的话
+		// `AlignSelf(ui.Center)`：格子是 40 宽，而侧栏折叠后是 72——不居中的话
 		// 它会贴在左边沿上（上游那一格也是居中的：Avatar 在 `justify-center`
 		// 的按钮里）。
 		item := flatIconCellButton(c, name, rt.Title, sideIconSize, sideIconCell).
 			AlignSelf(ui.Center)
 		s.sideItemTip(c, item, rt.Title)
 		if selected {
-			item = flatCurrent(c, item)
+			// 🔴 **实心主色底**（票：用户要「深底色 + 白字」）：淡底那一档
+			// 和侧栏底色的对比度只有 1.09:1 ~ 1.29:1——**几乎分不出来**，
+			// 而折叠态侧栏里这一枚图标是「当前在哪」**唯一**的指示。
+			item = flatSolidCurrent(c, item)
+			item = flatSolidCurrentFeel(c, item)
 		}
 		return item
 	}
 	item := flatIconLabelButton(c, name, rt.Title, sideIconSize, sideIconCell)
-	// 选中那一层照上游 HeroUI 的 `variant="flat"` + `color="primary"`
-	// （`components/menu/menu-item.tsx:83-84`）：主色很淡的一层底 +
-	// 主色的字。**不是实心主色**——原来那一版 `Background(t.Accent)`
-	// 就是调研点名的「选中整条刷实心绿」（报告 §2 基线 B 标注 3）。
+	// 选中那一层是**实心主色底**（`flatSolidCurrent`）。
+	//
+	// 🔴 **这一档从「主色淡底 + 主色的字」改成实心底**（票：用户要「深底色 +
+	// 白字」）：淡底（`accentSoft`）和侧栏底色的对比度只有 **1.09:1 ~ 1.29:1**
+	// （实测）——**几乎分不出来**，而「当前在哪」是侧栏里唯一的方向标。
+	//
+	// ⚠️ **字色是 `t.AccentText` 而不是写死的白字**：主色是用户可设的，而深色
+	// 方案的主色是**亮色**（暖纸深色 `#E58A5A`），白字压上去只有 2.59:1
+	// （理由见 `flatSolidCurrent`）。
+	//
+	// ⚠️ **上游 Biu 那边是淡底**（HeroUI 的 `variant="flat"` + `color="primary"`，
+	// `components/menu/menu-item.tsx:83-84`）——这一档是**我们自己**改的，
+	// 因为上游那一档在真机上「当前在哪」是看不清的。
 	if selected {
-		item = flatCurrent(c, item)
+		item = flatSolidCurrent(c, item)
+		item = flatSolidCurrentFeel(c, item)
 	}
 	return item
 }
@@ -763,7 +776,7 @@ func (s *Shell) viewLoggedOutHint(c *ui.Context, hidden int) {
 		//
 		// ⚠️ **主色当字色要取 `ink.AccentOn`**：浅色下主色是亮绿，压在浅底上
 		// 只有 1.9:1（读不出来），所以取那个「读得出来」的变体——理由和
-		// `flatbutton.go` 的 `flatCurrent` 是同一条。
+		// `flatbutton.go` 的 `flatSolidCurrent` 是同一条。
 		if hint.Hovered() {
 			hint = hint.TextColor(ink.AccentOn(c.Theme())).Underline().
 				Cursor(ui.CursorPointer)

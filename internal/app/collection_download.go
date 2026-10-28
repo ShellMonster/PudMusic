@@ -61,6 +61,14 @@ func ItemOfMedia(m bili.Media) Item {
 		// Sid 一直带着：Type=12（音频）靠它，Type=2 的条目也指着它
 		// （`list.BiliLink` 有 bvid 时优先用 bvid，所以不会串）。
 		Sid: strconv.FormatInt(m.ID, 10),
+		// 🔴 **失效状态带着走**（B 站那个 `attr` 字段）：这一条已经没了，
+		// 而队列入口要**在取流之前**就把它滤掉——不然应用要为一条不存在
+		// 的稿件白跑一趟带签名的往返（实测 200~400ms），而那一趟注定失败。
+		//
+		// ⚠️ **判据只有那一个出处**（`bili.Media.Invalid`），而这里是它进
+		// 队列项的唯一通道——所以界面上画的那一行、菜单里灰掉的那一项、
+		// 队列里滤掉的那一条，读的都是同一个事实。
+		Invalid: m.Invalid(),
 	}
 	switch m.Type {
 	case bili.MediaVideo:
@@ -147,6 +155,15 @@ func (a *App) downloadableItem(ctx context.Context, m bili.Media) (Item, error) 
 		return Item{}, errNoAudioFlow
 	}
 	it := ItemOfMedia(m)
+	// 🔴 **失效的不下**（票 #624 的评审第 3 条）：这一条在**问分 P之前**就
+	// 挡住了——不然要先问一次分 P（`/x/player/pagelist`，一趟网络往返），再进
+	// 下载队列让下载器去取流（**又一趟**带签名的往返）——**两趟白跑**，
+	// 而那一首的稿件已经被 UP 主删了，它注定下不下来。
+	//
+	// ⚠️ **判据是 `CanQueue`**（一处）：和队列入口那道闸是同一个判据。
+	if !CanQueue(it) {
+		return Item{}, unplayableOf(UnplayableInvalid)
+	}
 	if it.Bvid == "" {
 		return Item{}, ErrNoAudioDownload
 	}

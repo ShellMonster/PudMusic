@@ -209,6 +209,13 @@ type collectionPage struct {
 
 	// multi 是多选态开着没有。
 	multi bool
+
+	// leadSet 是「页内头部装过了没有」。
+	//
+	// ⚠️ **只装一次**（理由同 `upSpace.leadSet`）：`SetLead` 的闭包里读的是
+	// `p`，而 `p` 是每次画的时候现取的——所以闭包不用重装。而**换列表**的时候
+	// （`reloadCollection`）要把它清掉：新列表还没有那块。
+	leadSet bool
 	// picked 是勾上的行身份。
 	//
 	// ⚠️ 它**只装当前列表里有的行**：换排序 / 刷新时整个清空，而列表往后是
@@ -419,8 +426,41 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
 	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).Padding(space.None, pagePadX).Children(func() {
-		s.viewCollectionHeader(c, p)
-		s.viewCollectionOps(c, p)
+		// 🔴 **头图区、操作条、表头都在列表的滚动区里**（票 #625）：它们是
+		// **列表的第 0 行**（页内头部，`list.Lead`），跟着内容一起滚走。
+		//
+		// ⚠️ **原先它们在列表外面**——于是滚列表时它们**钉在顶上不动**，一屏
+		// 只剩半屏能看歌。上游那边整页是**一个**滚动容器（`favorites/index.tsx:436`
+		// 的 `<ScrollContainer>` 里直接摆 `<Header/>` + `<Operations/>` + 列表），
+		// 所以那边头图本来就会滚走。
+		//
+		// ⚠️ **表头也跟着走**：表头说的是下面那些歌，而顶图在它们**上面**——
+		// 表头留在列表外面就会跑到顶图**上面**去（`rowheader.go` 的文件头）。
+		//
+		// ⚠️ **但空的时候它们要画在列表外面**：页内头部占的是列表的**第 0 行**，
+		// 而列表一行都没有的时候那一行**压根不存在**——于是头图区整个不见，
+		// 页面变成一句没有上下文的「暂无内容」。而头图区是**这一页的身份**
+		//（封面、标题、创建者），它不该在空的时候消失。
+		// 🔴 **判据只有那一处**（`collectionEmpty`）：这一帧是「哪一种空」
+		// 决定了画哪一句，而「头图区画在哪」也是同一个判据——两处各判一次的
+		// 话，改一处忘了另一处，症状是「空的时候头图区不见了 / 画两遍」。
+		empty := collectionEmpty(p, info)
+		// ⚠️ **失败那一档不算「空」**：失败的时候列表**不是空的**——它有
+		// 自己的失败态（那个「加载失败，点此重试」按钮），而那一格只在
+		// `p.list.View` 里画。所以头图区**留在列表里**，页面继续走列表那一支。
+		//
+		// 🔴 **不这么分的后果**（票 #624 评审的评论第 1 条）：失败落进
+		// 「没有结果」那一支，而那一支不调 `p.list.View`——于是那个重试按钮
+		// 永远画不出来，用户看到的是「暂无内容」而**没有重试的入口**。
+		if empty == collectionEmptyNone || empty == collectionEmptyFailed {
+			s.collectionLead(c, p)
+		} else {
+			// 🔴 **空的时候把列表里的那一块卸掉**：头图区在外面画了，而
+			// 列表里的那块留着的话两边都画一份。
+			s.clearCollectionLead(p)
+			s.viewCollectionHeader(c, p)
+			s.viewCollectionOps(c, p)
+		}
 
 		// 容器拉回来了、里面一条都没有：画「没有收藏夹」那一句
 		//（`empty.go` 的 noFavorites，上游出处也在那儿）。
@@ -429,10 +469,10 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 后者在翻页加载的那一瞬间也为真，那样会让整页内容闪一下空状态
 		// ——用户点进收藏夹、列表转了两帧、中间整个内容区变成一句
 		// 「暂无内容」。
-		switch {
-		case info.Loaded && info.MediaCount == 0:
+		switch empty {
+		case collectionEmptyNoFavorites:
 			s.viewEmpty(c, "collection:empty", noFavorites)
-		case p.keyword != "" && p.list.Paged().Loaded == 0 && !p.list.Paged().Loading:
+		case collectionEmptyNoResults:
 			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
 			//
 			// ⚠️ 判据是「**词已经发出去了**」而不是「列表此刻一行都没有」：
@@ -444,6 +484,18 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 同一句话。
 			s.viewEmpty(c, "collection:no-results", noSearchResults)
 		default:
+			// ⚠️ **这一支是「列表自己画」**（`collectionEmptyNone` 和
+			// `collectionEmptyFailed` 两档都落这儿）。
+			//
+			// 🔴 **失败那一档也走这儿**（票 #624 评审的评论第 1 条）：列表的
+			// 失败态（一句原因 + 一个「加载失败，点此重试」）**只在
+			// `p.list.View` 里画**（`syncList` 的 `p.blocked` 那一支）——而
+			// 「没有结果」那一支不调它，于是那个重试按钮永远画不出来。
+			//
+			// ⚠️ **所以失败时绝不能画「暂无内容」/「换个词再搜一次」**：那两
+			// 句都会把重试入口盖住，而「换个词」更是错的——失败不是「这个词
+			// 不存在」，用户该**再试一次**。
+			//
 			// ⚠️ **第一页在途时，这一格由列表自己画**（画法是外面递进去的，
 			// 见 `newCollectionList` 和 `loadingCell`）：它和「没有收藏夹」那一格
 			// 是同一个出口（票 #138）。
@@ -459,10 +511,10 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// ⚠️ 它**换不掉**多选接线（`attachSelection` 装的那一份挂在两份控件上，
 			// 见 `widgets/list/switch.go`），所以网格那一档点勾照样能批量删。
 			p.list.SetView(s.displayView())
-			// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以
-			// 列表往下滚它不动。它自己会判多选态要不要给勾选框让位置（`HeaderSpec` 的
-			// Lead），所以这一处不用管多选。
-			p.list.Header(c, "collection:header")
+			// ⚠️ **表头在页内头部里面**（票 #625）：它跟着头图区一起滚走。
+			// 它自己会判多选态要不要给勾选框让位置（`HeaderSpec` 的 Lead），
+			// 所以这一处不用管多选。
+			//
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
 			p.list.View(c)
@@ -473,6 +525,133 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		}
 	})
 	s.viewCollectionConfirm(c, p)
+}
+
+// collectionEmptyKind 是「这一页是**哪一种**空」。
+//
+// 🔴 **它是一个枚举而不是一个 bool**：这一页有三种空，而它们的**画法不同**
+// （一句是「没有收藏夹」、一句是「换个词再搜一次」、一句是**列表自己的失败态**）
+// ——而「头图区画在哪」问的是「是不是空」（前两种算，第三种不算）。
+//
+// ⚠️ **判据只有这一处**（`collectionEmpty`）：`viewCollection` 拿它去 switch
+// 画哪一句，而「头图区画在列表里还是列表外」也拿它判——两处各判一次的话，
+// 改一处忘了另一处，症状是「空的时候头图区不见了 / 画两遍」。
+type collectionEmptyKind uint8
+
+const (
+	// collectionEmptyNone 是「不空」。
+	collectionEmptyNone collectionEmptyKind = iota
+	// collectionEmptyNoFavorites 是「这个容器里一条都没有」。
+	collectionEmptyNoFavorites
+	// collectionEmptyNoResults 是「搜了，词发出去了，一条都没有」。
+	collectionEmptyNoResults
+	// collectionEmptyFailed 是「这一趟拉失败了」。
+	//
+	// 🔴 **它和「没有结果」是两件事**（票 #624 评审的评论第 1 条）：
+	//
+	//	没有结果	搜的词真的不存在——用户该**换个词**
+	//	失败	网络断了 / 风控了 / 登录态过期了——用户该**再试一次**
+	//
+	// ⚠️ **判据漏了「失败」会怎样**：失败之后 `Loading` 是 false（`apply` 里
+	// 失败会清掉它），于是「Loaded == 0 && !Loading」成立——落进「没有结果」
+	// 那一支。而那一支**不调 `p.list.View`**，于是**列表的失败态（那个
+	// 「加载失败，点此重试」按钮）永远画不出来**。
+	//
+	// 用户看到的是「暂无内容」，**没有重试的入口**——而网络类的失败等一会儿
+	// 自己就好了，用户却只能去改搜索词。
+	collectionEmptyFailed
+)
+
+// collectionEmpty 报这一页是**哪一种**空。
+//
+// ⚠️ **判据是 MediaCount 为 0**，不是「列表此刻一行都没有」：后者在翻页加载的
+// 那一瞬间也为真，那样会让整页内容闪一下空状态（用户点进收藏夹、列表转了
+// 两帧、中间整个内容区变成一句「暂无内容」）。
+//
+// 🔴 **「失败」要排在「没有结果」前面**（票 #624 评审的评论第 1 条）：那两档
+// 的**共同条件**是「列表一行都没有且不在拉」，而失败之后 `Loading` 也是
+// false——不把失败单独挑出来，它就会落进「没有结果」那一支。
+func collectionEmpty(p *collectionPage, info app.CollectionInfo) collectionEmptyKind {
+	if info.Loaded && info.MediaCount == 0 {
+		return collectionEmptyNoFavorites
+	}
+	pg := p.list.Paged()
+	// 🔴 **失败先判**：它和「没有结果」共着「一行都没有且不在拉」这个条件，
+	// 而失败之后 `Loading` 也是 false。
+	if pg.Err != nil {
+		return collectionEmptyFailed
+	}
+	// 搜了、词已经发出去了、一条都没有：也是空的（画的是「换个词再搜一次」）。
+	if p.keyword != "" && pg.Loaded == 0 && !pg.Loading {
+		return collectionEmptyNoResults
+	}
+	return collectionEmptyNone
+}
+
+// collectionLead 装这一页的页内头部：**头图区 + 操作条 + 表头**。
+//
+// 🔴 **它是列表的第 0 行**（`list.Lead`），画在列表的滚动区里——所以它跟着
+// 内容一起滚走，滚一段就没了（票 #625）。
+//
+// # 为什么三样东西在**同一块**里
+//
+//	头图区	这一屏的上半：封面、标题、简介、创建者
+//	操作条	头图区下面那一排动作
+//	表头	「下面那些歌叫什么列」
+//
+// 表头说的是**下面那些歌**，而头图区在它们**上面**——表头留在列表外面的话，
+// 它会跑到头图区**上面**去（`rowheader.go` 的文件头写明了这一条）。
+//
+// # 和首页 / UP 空间是同一个做法
+//
+// 首页三个 Tab（`homepage.go`）和 UP 空间（`upspace_tabs.go`）都装它，
+// 而 `loading_states_test.go` 里有一条测试专门钉住「榜单头图跟着列表滚走」。
+//
+// ⚠️ **只装一次**：闭包里读的 `p` 是每次画的时候现取的（同一个理由见
+// `upspace_tabs.go` 的 `leadSet`）。
+//
+// 🔴 **空的时候要卸掉**（`clearCollectionLead`）：这一页从「有歌」变成「空」
+// 的那一趟（搜了没搜到、或者收藏夹被清空了），列表换掉了——而那一块是装在
+// **旧列表**上的。不卸的话新列表上还有一块，而外面又画了一份（症状是
+// 「头图区画了两遍」）。
+func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
+	if p.leadSet {
+		return
+	}
+	p.leadSet = true
+	p.list.SetLead(&list.Lead{
+		// ⚠️ **无障碍名字**：「这一块」是什么——读屏软件念出来是「收藏夹的头图」。
+		Label: "收藏夹的头图",
+		// ⚠️ **估高**：见 `collectionLeadHeight`。这一页挂着 `ScrollState`，
+		// 所以回顶按钮读的是精确像素、**用不到它**——留着是为了 `Lead` 那
+		// 一份完整（按行换算的那一路会用到它，而那一路是别的页在用）。
+		Height: func() float32 { return collectionLeadHeight },
+		Draw: func(c *ui.Context) {
+			ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
+				s.viewCollectionHeader(c, p)
+				s.viewCollectionOps(c, p)
+				// ⚠️ **表头在最后**：它是「下面那些歌叫什么列」，所以它在
+				// 头图区和操作条的**下面**——和它原先在列表外面的位置一样。
+				p.list.Header(c, "collection:header")
+			})
+		},
+	})
+}
+
+// clearCollectionLead 把这一页的页内头部**卸掉**。
+//
+// 🔴 **它是在「这一页变空」的时候调的**：那时候头图区画在列表**外面**
+// （见 `viewCollection` 里那一支），而列表里的那一块留着的话，两边都画一份
+// ——症状是「头图区画了两遍」。
+//
+// ⚠️ **卸的是当前那个列表上的**：列表换过之后那一块本来就不在了（它装在旧
+// 列表上），所以这里卸的是「现在这个列表上有没有」。
+func (s *Shell) clearCollectionLead(p *collectionPage) {
+	if !p.leadSet {
+		return
+	}
+	p.leadSet = false
+	p.list.SetLead(nil)
 }
 
 // syncCollection 是收藏夹 / 合集 / 系列这一页每帧的副作用：收「刚才那个容器真的
@@ -580,6 +759,38 @@ const (
 // 那一排的宽度在最小窗口上已经贴着边（见 `viewCollectionOps`），再把图标键
 // 撑到 40 就会把这一排挤出去。
 const collectionOpsButtonH = 40
+
+// collectionLeadHeight 是页内头部（头图区 + 操作条 + 表头）的**估高**。
+//
+// ⚠️ **它是估的**（和 `list.Lead.Height` 的约定一样）：这一块的高度跟着内容
+// 走——封面 200×168、右边三行字（标题 / 简介 / 类型+条数）+ 创建者那一行，
+// 而标题可能占两行、简介可能没有、元信息可能还没回来（那时候是骨架，
+// 但骨架是同高的）。
+//
+// ⚠️ **别拿它当布局依据**：布局是框架量的（那一块真的有多高，框架知道），
+// 这个数只是「按行换算滚动量」那一路用的余量。
+//
+// # ⚠️ **这一页实际上用不到它**（票 #624 的评审第 1 条）
+//
+// 这一页的分页列表**挂了 `ScrollState`**（`PagedList` 的默认值），于是
+// `PagedList.ScrollOffset` 走的是 `scroll.Y`（**精确像素**），而不是按行换算
+// 的那一支（`List.ScrollOffset`，那一支才会用到 `Lead.Height`）。
+//
+// 所以：**回顶按钮的时机是准的**（精确像素），这个估高一个字节都没参与。
+// 留着它是为了 `Lead` 那一份完整（`Height` 为 nil 的话 `leadHeight` 给 0，
+// 而按行换算的那一路会少算一截）——**而那一路是别的页在用**（首页、UP 空间
+// 挂了 `SetScrollState(false)`，见 `homepage.go`）。
+//
+// 算的来历：
+//
+//	头图区	封面 168 + 上下内边距 40（`space.Px20`）+ 三行字和两道路 16
+//	操作条	40（主按钮）+ 上下 12
+//	表头	一行（`headerLineH` 那道分隔线之外的那一行）
+//
+// ⚠️ **字号乘行高倍数**（`leading.Copy` 是倍数不是像素）：小字 14 × 1.5 = 21。
+const collectionLeadHeight = collectionCoverH + 40 +
+	3*scale.Size14*leading.Copy + 2*collectionHeadGap + collectionOwnerAvatarSize +
+	collectionOpsButtonH + 24 + 32
 
 // viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
 //

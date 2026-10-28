@@ -312,31 +312,17 @@ go tool mygo build -platform "$platforms"
 #
 # 这是整个脚本最要紧的一道检查：没有私钥时 MyGo 不报错，它只是不打更新文件，
 # 于是产物里躺着一个永远不会更新的安装包，而签收的人要等用户报障才发现。
+scripts/verify-release-assets.sh "${targets[@]}"
+
 assets=()
 for t in "${targets[@]}"; do
   target="${t/\//-}"
   dir="build/$target"
-  [ -d "$dir" ] || die "没有产物目录 ${dir}——第 4 步说它打完了，这个目录却没有。"
-
-  manifest="$dir/update-$target.json"
-  [ -f "$manifest" ] || die "$target 没有 update-$target.json——更新包没打出来。
-
-  最常见的原因是没有私钥：那时 MyGo 照打安装包、不报任何错，只是不产出更新文件。
-  确认 MYGO_UPDATER_PRIVATE_KEY 有值（它必须是 base64 的私钥本身，不是路径）。"
-
-  # 清单里的签名必须是空的这一条：清单在而签名空，等于发出去一个谁都能改的更新源。
-  sig="$(json_file_get "$manifest" signature)"
-  [ -n "$sig" ] || die "$target 的清单里 signature 是空的——它没被签名。
-  别把这种包发出去：应用会装一个校验不过的更新。"
-  manifest_version="$(json_file_get "$manifest" version)"
-  [ "$manifest_version" = "$version" ] ||
-    die "$target 的清单里版本是 ${manifest_version}，不是 ${version}。"
-
   while IFS= read -r f; do
     [ -n "$f" ] && assets+=("$f")
   done < <(find "$dir" -maxdepth 1 -type f \
-    \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*Setup*.exe' \) -print | sort)
-  assets+=("$manifest")
+    \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*-setup-*.exe' \) -print | sort)
+  assets+=("$dir/update-$target.json")
 done
 
 say "产物"

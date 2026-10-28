@@ -21,6 +21,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -523,19 +524,19 @@ func applyAccent(t *ui.Theme, a ui.Color) {
 		t.Selection, t.Focus = a.Alpha(0.25), a.Alpha(0.55)
 	}
 
-	// 主色上的字：白底太亮看不清就反过来用深色。Biu 的绿 (#1ed760)
-	// 正好是要走这一支的。
+	// 主色上的字：挑黑或白里**对比更高的那一个**（WCAG 相对亮度，pivot 0.179
+	// 是「黑白两个字对比度相等」的那个点）。Biu 的绿 (#1ed760) 正好是要走深字
+	// 那一支的。
+	//
+	// 🔴 **判据必须是 WCAG 亮度，不是 sRGB 加权和**（评审抓到的）：加权和在
+	// 中间调的饱和色上会挑错——`#10c8ff`（亮青）加权值 152 ≤ 165 走白字，而
+	// 白字压上去只有 **1.96:1**；WCAG 亮度 0.44 > 0.179 走深字。这一档是
+	// 「主色底上的字」，它的职责就是**在主色底上读得出来**（用户在设置里可以
+	// 把主色换成任何颜色，写死的阈值保证不了这件事）。
 	t.AccentText = white
-	if luminance(a) > 165 {
+	if ink.Luminance(a) > ink.PivotLuminance {
 		t.AccentText = ui.Color{R: 24, G: 24, B: 27, A: 255}
 	}
-}
-
-// luminance 是 sRGB 相对亮度，和 ui.Color 里那个未导出的 gray() 同算法。
-//
-// 这里重写一份是因为它没导出。本包不能靠反射去戳 ui 的内部状态。
-func luminance(c ui.Color) float32 {
-	return 0.2126*float32(c.R) + 0.7152*float32(c.G) + 0.0722*float32(c.B)
 }
 
 // parseHexColor 解析 #rgb / #rgba / #rrggbb / #rrggbbaa。

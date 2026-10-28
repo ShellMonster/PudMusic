@@ -367,6 +367,34 @@ const (
 // `TestEveryPlayableEntryCanActuallyBeStreamed` 盯着这件事。
 func (m Media) Playable() bool { return m.Type == MediaVideo || m.Type == MediaAudio }
 
+// Invalid 报这个条目**已经失效**（稿件被 UP 主删了、或者换成了别的链接）。
+//
+// # 判据是「attr 不是 0」
+//
+// B 站给的值：`0` 正常、`1` 其他原因删除、`9` UP 自己删除（上游
+// `service/fav-resource.ts:95` 的注释）。所以判据是「不是 0」，不是
+// 「是 1 或者是 9」——后者在 B 站加一个新取值时会静默失效。
+//
+// # 🔴 **它和 `Playable` 是两件事，不许合并**
+//
+//	`Playable`	这一条**有没有音频流**（合集 / 电影没有）
+//	`Invalid`	这一条**还在不在**（稿件没了）
+//
+// 两者都要「放不了」，但**说的不是同一句话**：合集是「打开里面的单集
+// 就能放」，失效是「这一条已经没了」——用户照着做的下一步不一样。
+// 合成一个判据的话，说明文字只能取一个，而另一个就说了假话。
+//
+// # 失效的条目**照样画在列表里**
+//
+// 这是 B 站给的事实（上游也照样画，注释见 `Media.Attr`）。直接不画的话
+// 用户会发现「收藏夹里的歌自己少了几首」而且不知道为什么——那比看见一条
+// 标着「已失效」的内容更难解释。
+//
+// 而**放它进队列更糟**：那会让应用为一条已经不存在的稿件白跑一趟取流
+// （每一首失效歌都要等一次超时），而上游是**取流之前就滤掉**的
+// （`src/common/utils/fav.ts:55` 的 `.filter(item => ... && item.attr === 0)`）。
+func (m Media) Invalid() bool { return m.Attr != 0 }
+
 // resourceListData 是内容列表接口的 `data` 段。
 type resourceListData struct {
 	HasMore bool `json:"has_more"`

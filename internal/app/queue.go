@@ -124,6 +124,23 @@ type Item struct {
 	// 把投稿的编号填进 `Bvid`/`Cid` 的话键就变了，用户已有的缓存全部作废。
 	SubtitleBvid string
 	SubtitleCid  string
+
+	// Invalid 是「这一条已经失效」（稿件被 UP 主删了、或者换成了别的链接）。
+	//
+	// ⚠️ **它是从 B 站那个 `attr` 字段来的**（`bili.Media.Attr`，见
+	// `bili.Media.Invalid`），而判据只有那一个出处。
+	//
+	// 🔴 **它和「没有音频流」是两件事**（`Type` 那一栏管的是那个）：
+	//
+	//	合集 / 电影	这一条**没有音频流**（打开里面的单集就能放）
+	//	失效	这一条**已经没了**（稿件被删了）
+	//
+	// 两者都要「放不了」，但**说的不是同一句话**——用户照着做的下一步不一样。
+	// 而失效这一类**更要紧**：它会先被塞进队列、再白跑一趟带签名的取流往返
+	// （实测 200~400ms），而那一趟**注定失败**（B 站已经不认那个稿件了）。
+	//
+	// ⚠️ **本地文件永远是 false**：本地文件不走 B 站，没有「失效」这回事。
+	Invalid bool
 }
 
 // LocalItem 把一个本地音频文件包成一项。
@@ -1313,7 +1330,17 @@ func (a *App) PlayingItem() (Item, bool) {
 //
 // 打头一项打不开就把错误记在播放条上并返回，后面的照排；一首歌打不开不该把
 // 整个队列的操作搅黄。
+//
+// 🔴 **失效的条目进不来**（票 #624）：`CanQueue` 那一道闸。它要是进来了，
+// 应用会为一条已经不存在的稿件白跑一趟带签名的取流往返，而那一趟注定失败。
 func (a *App) Enqueue(items ...Item) error {
+	items, skipped := filterQueueable(items)
+	if len(items) == 0 {
+		if skipped > 0 {
+			return unplayableOf(UnplayableInvalid)
+		}
+		return nil
+	}
 	wasEmpty := a.queue.Len() == 0
 	a.queue.Append(items...)
 	if !wasEmpty {
@@ -1324,6 +1351,29 @@ func (a *App) Enqueue(items ...Item) error {
 		return nil
 	}
 	return a.play(item)
+}
+
+// filterQueueable 把**不能进队列的**那些滤掉，报出滤了几首。
+//
+// 🔴 **它是所有队列入口的那一道闸**（票 #624）：`Enqueue` / `EnqueueNext` /
+// `EnqueueAndPlayNow` / `PlayFrom` 都过它，而界面层的行级入口（双击 / 回车 /
+// 封面播放钮 /「从这一首往后听」）最后也都要走到那些入口——所以闸装在这里，
+// **就没有哪条路能绕过去**。
+//
+// ⚠️ **滤掉而不是报错**（除非一首都没剩）：用户点「从这一首往后听」是为了听
+// 后面那一段，而后面那几首里混着一个失效的，不该因为它整批都放不了。
+//
+// ⚠️ **判据是 `CanQueue`**（一处），而那一处背后是 `bili.Media.Invalid`。
+func filterQueueable(items []Item) (out []Item, skipped int) {
+	out = make([]Item, 0, len(items))
+	for _, it := range items {
+		if !CanQueue(it) {
+			skipped++
+			continue
+		}
+		out = append(out, it)
+	}
+	return out, skipped
 }
 
 // EnqueueAndPlayNow 让**这一首**成为正在放的那首——队列里原来有的那几首**保留**。
@@ -1369,6 +1419,15 @@ func (a *App) Enqueue(items ...Item) error {
 // 抽屉里点正在放的那一行，用户想的是「把指针挪回来」；列表里点一首歌，用户想的是
 // 「放它」——重播一遍是对的。
 func (a *App) EnqueueAndPlayNow(item Item) error {
+	// 🔴 **失效的条目进不来**（票 #624）：这一条是行级入口（双击 / 回车 / 封面
+	// 播放钮）走的路，而它要是放进去了，应用会为一条已经不存在的稿件白跑一趟
+	// 带签名的取流往返（实测 200~400ms），而那一趟注定失败。
+	//
+	// ⚠️ **判据是 `CanQueue`**（一处），而这一道闸装在**所有**队列入口上——
+	// 所以没有哪条路能绕过去。
+	if !CanQueue(item) {
+		return unplayableOf(UnplayableInvalid)
+	}
 	// 已经在队列里：定位过去，不追加。
 	//
 	// ⚠️ **取第一份**（`at` 那个下标）：抽屉按判重标识去重、只画第一份
@@ -1413,6 +1472,10 @@ func (a *App) EnqueueAndPlayNow(item Item) error {
 // 队列原本是空的时候直接起播——和 `Enqueue` 同一句理由：用户点了「下一首播放」，
 // 队列里什么都没有，他总得听见声音。
 func (a *App) EnqueueNext(item Item) error {
+	// 🔴 **失效的条目进不来**（票 #624）：理由同 `EnqueueAndPlayNow` 那一处。
+	if !CanQueue(item) {
+		return unplayableOf(UnplayableInvalid)
+	}
 	wasEmpty := a.queue.Len() == 0
 	a.queue.InsertNext(item)
 	if !wasEmpty {
@@ -1439,6 +1502,19 @@ func (a *App) EnqueueNext(item Item) error {
 // 队列弄丢，也不该让播放条停在一首放不了的歌上（和 step 里同一个道理）。
 func (a *App) PlayFrom(items ...Item) error {
 	if len(items) == 0 {
+		return nil
+	}
+	// 🔴 **失效的条目滤掉**（票 #624）：这一条是「从这一首往后听」和六枚批量
+	// 入口走的路，而「从这一首往后听」把**一整段**塞进队列——那里面混着的
+	// 失效条目一个都不该进来（进来就是白跑一趟注定失败的取流）。
+	//
+	// ⚠️ **滤掉而不是整批拒绝**：用户点「从这一首往后听」是为了听后面那一段，
+	// 而后面那几首里混着一个失效的，不该因为它整批都放不了。
+	items, skipped := filterQueueable(items)
+	if len(items) == 0 {
+		if skipped > 0 {
+			return unplayableOf(UnplayableInvalid)
+		}
 		return nil
 	}
 	old := a.queue.Items()
@@ -2015,10 +2091,15 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 // 不动」，那恰恰是这一档要消灭的形态。
 //
 // 「正在重连」那一档归它自己那几处管（见 `reconnect.go`）。
+//
+// 🔴 **「失败的那一首」也一起清**：错收掉了还留着它，界面上就会显示一句
+// 「放不出来的是《X》」——而错已经没了（理由见 `State.FailedTitle`）。
 func (a *App) clearErrLocked() {
 	a.errText = ""
 	a.errDetail = ""
 	a.errRetryable = false
+	a.failedTitle = ""
+	a.failedArtist = ""
 }
 
 // Retry 再放一次上一次用户想放的那一首。

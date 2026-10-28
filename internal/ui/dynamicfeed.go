@@ -456,12 +456,15 @@ func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
 	on := box.Hovered()
 	if all {
 		// 「全部」是**当前就在看的那一个**：和侧栏菜单当前项**同一套**画法
-		// （`flatCurrent`——中性灰底 + 主色的字，深浅两套同一个数）。
+		// （**实心主色底**，见 `flatSolidCurrent`）。
 		//
-		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`，一块 248×50 的实心
-		// 绿）：那是审计 F-02 / F-06 点名的那一处——同一个屏上左栏是实心绿、
-		// 侧栏是淡底，两种画法并排，而实心那一块是那一页纯主色像素最多的地方。
-		box = flatCurrent(c, box)
+		// 🔴 **这一列和关注页那一列、侧栏是邻居**：它们挨着摆，而「当前在哪」
+		// 在三处说的是同一件事——三种画法并排的话，用户看到的是「这个应用没
+		// 做完」。
+		//
+		// ⚠️ **字色是 `t.AccentText`**（主色底上读得出来的那一档），不是写死的
+		// 白字——理由见 `flatSolidCurrent`。
+		box = flatSolidCurrent(c, box)
 	} else if on {
 		box = box.Background(t.SurfaceHover)
 	}

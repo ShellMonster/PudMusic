@@ -63,6 +63,7 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -70,6 +71,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/guard"
+	"github.com/ShellMonster/PudMusic/internal/ui/songname"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
@@ -108,6 +110,39 @@ const (
 	commentBodyGap = space.Px12
 )
 
+// commentsMentionScanMax 是「筛选开着而一条都没命中」时**最多翻多少条评论**。
+//
+// 🔴 **为什么要一个上限**：那句话「这个视频的 N 条评论里没有提到这首歌」只有
+// 在**翻完**这一首的评论之后才说得出来（只翻了第一页就说「没有」，那是撒谎）。
+// 而 B 站那个视频可能有十万条评论——全翻一遍就是几千趟请求（打的是 B 站的
+// 评论接口，那是别人的服务器）。
+//
+// ⇒ 翻到上限就停手，那一句话改成老实的说法（「已翻到的 N 条评论里还没有提到
+// 这首歌」）。
+//
+// ⚠️ **600 条 = 20 页**（一页 30 条，`internal/app` 那一档）。
+const commentsMentionScanMax = 600
+
+// commentsMentionCovered 报「这一首的评论我们已经查完了吗」。
+//
+// 🔴 **不能用「B 站说到底了」当查完了**（票 #574 的评审）：B 站说到底了只
+// 说的是「没有下一页了」，而它自己的总数（`cursor.all_count`）可能还有十万
+// 条——实测有一档是「翻了 12 条，B 站说到底了，而它给的总数是 184226」。
+// 那一档里说「这个视频的 184226 条评论里没有提到这首歌」是**撒谎**：我们只
+// 看过 12 条。
+//
+// ⇒ **查完的判据是「翻到的条数盖住了它给的总数」**：
+//
+//	给了总数   翻到的 >= 总数 ⇒ 查完了
+//	没给总数   B 站说到底了 ⇒ 查完了（它给 0 就是「还不知道有多少」，
+//	           而那时候「没有下一页」就是全部）
+func commentsMentionCovered(loaded int, allCount int64, hasMore bool) bool {
+	if allCount > 0 {
+		return int64(loaded) >= allCount
+	}
+	return !hasMore
+}
+
 // commentsPage 是评论页自己的一摊状态。
 //
 // ⚠️ **它挂在壳上而不是每帧新建**：列表的滚动位置、行身份、展开的楼中楼
@@ -136,6 +171,45 @@ type commentsPage struct {
 	// wantRefresh 是「用户按了刷新」这个意图。**view 只记它，发请求的是
 	// `syncComments`**（理由见文件头「铁律三」）。
 	wantRefresh bool
+
+	// mentionOnly 是「只看正文里提到这首歌的评论」那一枚开关（票 #574）。
+	//
+	// ⚠️ **默认是关的**：这一页默认摆的是这一首的**全部**评论——筛选是用户
+	// 自己挑出来的窄视图，不是默认口径（而 `mv` 那一档默认摆的是**这个视频
+	// 的评论**，页头那一枚角标已经说清它是谁的评论了）。
+	//
+	// ⚠️ **它是 `springSwitch` 绑着的那个 bool**：框架在**建到的时候**才写它
+	// （理由同 `sortIdx`），所以 `syncComments` 读到的是上一帧的那一次点击。
+	mentionOnly bool
+	// srcMention 是「上一次建行时那一枚开关是什么值」——变了就重建行。
+	srcMention bool
+
+	// names 是「这一首的别名表」（哪些写法算提到了这首歌）。
+	//
+	// ⚠️ **它是 `internal/ui/songname` 那一处算出来的**（那里是唯一的一处口
+	// 径）：界面层不自己再拼一份歌名或别名——两份口径迟早分叉，而分叉出来
+	// 的那种差异极难查。
+	names songname.Table
+	// srcTitle / srcArtist 是「上一次算别名表时那首歌叫什么」——变了就重算。
+	//
+	// ⚠️ **不每帧重算**：别名表是建行和筛选用的一次性产物，而每帧重算就是
+	// 每帧一次分配（理由同 `framebudget_test.go` 盯着的「每帧现算」那族）。
+	srcTitle  string
+	srcArtist string
+	// hits 是「这一轮筛出来几条提到歌名的评论」。
+	hits int
+	// loaded 是「已经拿到多少条评论了」（这一页一共拿到了多少条）。
+	loaded int
+	// covered 是「这一首的评论我们已经查完了吗」。
+	//
+	// 🔴 **它是「那句『没有提到这首歌』能不能说」的判据**（票 #574 的评审）：
+	// B 站说「到底了」（`CommentsHasMore` 为假）**不等于**我们查完了——它
+	// 自己的总数（`cursor.all_count`）说还有十万条，而我们就翻到了 12 条
+	// （接口重复给同一批的时候，应用层那一档「无进展保护」会把它当成到底）。
+	//
+	// ⇒ 查完了才说那句完整的话，没查完只说「已翻到的 N 条评论里还没有提到
+	// 这首歌」（理由见 `commentsMentionCovered`）。
+	covered bool
 
 	// rows 是摊平之后的行：主评论 + 展开的楼中楼。
 	rows []commentRow
@@ -336,7 +410,8 @@ func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 
 // viewCommentsBody 是「一条评论都还没有」时画的那一块。
 //
-// ⚠️ **四档是四句话**：正在拉 / 拉失败了 / 还没有人评论 / 压根没有评论。
+// ⚠️ **五档是五句话**：正在拉 / 拉失败了 / 还没有人评论 / 压根没有评论 /
+// 筛选开着而一条都没命中。
 // 混成一句话的话，用户读到「问不出评论」会以为歌没了，而歌好好地摆在那儿。
 func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 	switch {
@@ -346,6 +421,11 @@ func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 				// ⚠️ **这里只记意图**：发请求的是 `syncComments`（铁律三）。
 				p.wantRefresh = true
 			})
+	case p.mentionOnly && p.hits == 0 && p.loaded > 0:
+		// ⚠️ **这一档是「筛选开着，而这一首的评论里一条都没提到歌名」**：
+		// 它跟「还没有人评论」是两件事——这一首**有**评论（有几百条），
+		// 只是没有一条在聊这首歌。
+		s.viewCommentsNoMention(c, p)
 	case s.app.CommentsNoComments():
 		s.viewEmpty(c, "page:comments:none", emptyState{
 			Title: "还没有人评论",
@@ -355,6 +435,77 @@ func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 	default:
 		s.viewEmpty(c, "page:comments:loading", loadingState("正在拉评论…"))
 	}
+}
+
+// viewCommentsNoMention 是「筛选开着，而这一首的评论里没有提到这首歌」那一块。
+//
+// 🔴 **这句话必须说得准**：说「这个视频的 388 条评论里没有提到这首歌」的前提
+// 是**这一首的评论已经翻完了**——只翻了第一页就说「没有」，那是撒谎（而用户
+// 翻下去就看到一条提到歌名的评论，于是他觉得这个功能在骗人）。
+//
+// ⇒ 还在翻的时候说老实的那一句（「已翻到的 30 条评论里还没有提到这首歌」），
+// 翻完了才说那一句完整的话。
+//
+// ⚠️ **三种「没查完」各有一句**（票 #574 的评审）：
+//
+//	还在翻        「还在往下翻这一首的评论，翻到底才知道有没有」
+//	翻到上限      「这一页最多翻 600 条评论，剩下的没翻」
+//	B 站提前说到底 「B 站说这一页之后就没有了，可它给的总数是 N 条」
+//
+// ⚠️ **说「还在往下翻」而其实已经停手了，用户会一直等下去**——所以那三种
+// 得分开说。
+func (s *Shell) viewCommentsNoMention(c *ui.Context, p *commentsPage) {
+	// ⚠️ **「这个视频」还是「这一首」**：看的是这一条是什么条目——
+	// `mv` 那一档的评论是**这个视频**的，而音乐库音频那一档是**这一首**的
+	// （页头那一枚角标是同一句口径，见 `viewCommentsScopeBadge`）。
+	scope := "这一首"
+	if it, ok := s.app.CurrentItem(); ok && it.Type == "mv" {
+		scope = "这个视频"
+	}
+	// ⚠️ **那一枚键是「怎么才能不空」**：这一格空着是因为用户自己把筛选按上
+	// 了，而按一下就能看回全部评论——不用他去页头找那枚开关。
+	//
+	// ⚠️ **它只改界面上的那一枚开关**（不发请求）：评论已经拿回来了，关掉筛
+	// 选只是把它们重新摆出来（铁律三）。
+	showAll := &emptyAction{Label: "看全部评论", Do: func() {
+		p.mentionOnly = false
+	}}
+	if !p.covered {
+		// 还没查完：这一句只说**翻到的那几条**。
+		//
+		// ⚠️ **三种没查完各有一句**：说「还在往下翻」而其实已经停手了，用户
+		// 会一直等下去——而这一页等下去也不会有下文（上限就是上限）。
+		hint := "还在往下翻这一首的评论，翻到底才知道有没有"
+		switch {
+		case p.loaded >= commentsMentionScanMax:
+			hint = fmt.Sprintf("这一页最多翻 %d 条评论，剩下的没翻", commentsMentionScanMax)
+		case !s.app.CommentsHasMore():
+			// 🔴 **B 站说到底了，而它自己的总数说还有更多**（接口重复给同一
+			// 批的时候就是这样）：那句话不能按「查完了」说。
+			hint = fmt.Sprintf("B 站说这一页之后就没有了，可它给的总数是 %d 条",
+				s.app.CommentsAllCount())
+		}
+		s.viewEmpty(c, "page:comments:nomention", emptyState{
+			Title: fmt.Sprintf("已翻到的 %d 条评论里还没有提到这首歌", p.loaded),
+			Hint:  hint,
+			Info:  true,
+			Icon:  iconEmptyMusic,
+			// ⚠️ **还在翻的时候也给这一枚**：用户等不及的时候得有个退路，
+			// 而这一枚按下去那趟扫描就停了（筛选关掉 ⇒ 不再自己翻）。
+			Action: showAll,
+		})
+		return
+	}
+	// 查完了：B 站给的评论总数就是这一首的条数（它给 0 就是还不知道）。
+	n := s.app.CommentsAllCount()
+	if n <= 0 {
+		n = int64(p.loaded)
+	}
+	s.viewEmpty(c, "page:comments:nomention", emptyState{
+		Title:  fmt.Sprintf("%s的 %d 条评论里没有提到这首歌", scope, n),
+		Action: showAll,
+		Icon:   iconEmptyMusic,
+	})
 }
 
 // viewCommentsHeader 是页头：**这一首是什么 + 这些评论是谁的评论**，
@@ -401,15 +552,64 @@ func (s *Shell) viewCommentsHeader(c *ui.Context, it app.Item) {
 			})
 		})
 
-		// 第二行：作者 / UP 名 + 总条数。
+		// 第二行：作者 / UP 名 + 总条数 + 那一枚「只看提到歌名的」。
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
 			ui.Text(c, commentsAuthorLine(it)).FontSize(scale.Font(c, scale.Size13)).
 				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1)
-			if n := s.app.CommentsAllCount(); n > 0 {
+			// ⚠️ **筛选开着的时候这一行换一句话**：摆「共 N 条」而列表里只
+			// 有筛选后的那几条，用户会以为另外那些评论不见了。
+			switch {
+			case p.mentionOnly && p.hits > 0:
+				ui.Text(c, strconv.Itoa(p.hits)+" 条提到这首歌").
+					FontSize(scale.Font(c, scale.Size12)).
+					TextColor(t.TextMuted).MaxLines(1)
+			case s.app.CommentsAllCount() > 0:
+				// ⚠️ **一条都没命中时还是摆总数**：那一档空状态里已经说了
+				// 「这个视频的 N 条评论里没有提到这首歌」，而这里摆的是同一个
+				// 数（两处说的是同一件事）。
+				n := s.app.CommentsAllCount()
 				ui.Text(c, "共 "+strconv.FormatInt(n, 10)+" 条").FontSize(scale.Font(c, scale.Size12)).
 					TextColor(t.TextMuted).MaxLines(1)
 			}
+			s.viewCommentsMentionSwitch(c, p)
 		})
+	})
+}
+
+// viewCommentsMentionSwitch 是页头那一枚「只看提到歌名的」开关（票 #574）。
+//
+// 🔴 **默认是关的**（`commentsPage.mentionOnly` 的零值）：这一页默认摆的是
+// 这一首的**全部**评论——筛选是用户自己挑出来的窄视图。
+//
+// ⚠️ **开关自己一个字都没有**（它是 `springSwitch`），所以旁边的字是给它
+// 兜着的；而它自己的 `Label` 是给屏幕阅读器和无头 Tester 用的（框架那一颗
+// 开关没有可见文字）。
+//
+// ⚠️ **左边是字、右边是开关**：跟设置页和满屏偏好面板上那些开关是同一副
+// 样子（`fullSwitchRow`：「左边标题，右边开关」）——同一个控件只有一种样子。
+//
+// ⚠️ **这一枚不许加 Key**：开关的旋钮是**动画**出来的（`switch.go` 顶上那一
+// 段），而动画记在节点的键上——每帧换一个新节点，动画每帧从头开始。
+func (s *Shell) viewCommentsMentionSwitch(c *ui.Context, p *commentsPage) {
+	t := c.Theme()
+	// ⚠️ **这一首没有名字就没法筛**：那时候按下去只会把评论全筛掉，而界面
+	// 上说不清为什么（空表不筛，见 `songname.Table.Empty`）。
+	noName := p.names.Empty()
+	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "只看提到歌名的评论").FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).MaxLines(1)
+		// ⚠️ **开关是在这个回调里建的**：框架把建出来的元素挂到**当前正在
+		// 建的那一格**上（`ui.SwitchBase` 自己会挂），而这一格是上面那个
+		// Row——在外面建的话它就成了外层那一列的孩子。
+		sw := springSwitch(c, &p.mentionOnly).Label("开关：只看提到歌名的评论")
+		if noName {
+			sw = sw.Disabled(true)
+			// ⚠️ **按灰的时候要说清为什么**（`withTip`）：一个按不动的开关，
+			// 不说理由的话用户只以为这个应用有时候控件会坏。
+			// 而 `withTip` 返回的就是锚点本身（提示挂在它身上），所以返回值
+			// 可以丢——元素已经在树里了。
+			s.withTip(c, sw, "这一首没有名字，没法按歌名筛")
+		}
 	})
 }
 
@@ -998,8 +1198,40 @@ func (s *Shell) syncComments(c *ui.Context) {
 		p.expRev++
 	}
 
+	// 别名表：这一首叫什么变了就重算（它只在建行和筛选用，所以不是每帧算）。
+	//
+	// ⚠️ **不每帧重算**：别名表是一次性的产物，而每帧重算就是每帧一次分配
+	// （理由同 `framebudget_test.go` 盯着的「每帧现算」那族坏处）。
+	if it, ok := s.app.CurrentItem(); ok &&
+		(it.Title != p.srcTitle || it.Artist != p.srcArtist) {
+		p.srcTitle, p.srcArtist = it.Title, it.Artist
+		p.names = songname.New(it.Title, it.Artist)
+		p.srcLen = -1
+		// 🔴 **换成一首没有名字的歌，筛选就做不了**：空表会把这一首的评论
+		// 全筛掉（`songname.Table.Empty`），而界面上一句话都说不清为什么。
+		//
+		// ⇒ 把开关按回去（它那一枚也是按灰的，用户看得出按不动）。
+		if p.names.Empty() && p.mentionOnly {
+			p.mentionOnly = false
+		}
+	}
+
+	// 🔴 **筛选开关变了**：重建一遍行（筛完的行数变了），并回到第一条。
+	//
+	// ⚠️ **它读到的是上一帧的那一次点击**（框架在**建到的时候**才写那个
+	// bool，理由同 `sortIdx`）。
+	if p.mentionOnly != p.srcMention {
+		p.srcMention = p.mentionOnly
+		p.srcLen = -1
+		p.state.ScrollTo(0, ui.Start)
+	}
+
 	// 评论列表：问一次（`Comments()` 自己会保证在问），顺便把楼中楼也问上。
 	cm := s.app.Comments()
+	p.loaded = len(cm)
+	// 🔴 **查完了没有**：那句「这个视频的 N 条评论里没有提到这首歌」只有查完
+	// 了才说得出来（理由见 `commentsMentionCovered`）。
+	p.covered = commentsMentionCovered(len(cm), s.app.CommentsAllCount(), s.app.CommentsHasMore())
 	sig := 0
 	for _, root := range p.expandedRoots() {
 		sig += len(s.app.CommentReplies(root))
@@ -1043,8 +1275,34 @@ func (s *Shell) syncComments(c *ui.Context) {
 	//
 	// ⚠️ **哨兵是列表多出来的那一行**（`len(p.rows)+1`），它的行号就是
 	// `len(p.rows)`——和 `paged.go` 的口径一样（那边哨兵也占一行）。
-	first, last := p.state.Visible()
-	if list.DecideNextPage(st, first, last, len(p.rows)+1).Action == list.PagingLoadNext {
+	//
+	// 🔴 **筛选开着而一条都没命中时，不走这一条**：那一档翻页是「筛选自己
+	// 在翻」（`commentsMentionScanMax` 那个上限），不是「用户滚到底了」——
+	// 两边都翻的话上限就是空的（列表空着，哨兵那一行一直看得见 ⇒ 一直翻）。
+	//
+	// 🔴 **判据是 `wantScan`（筛选开着而一条都没命中），不是 `scanning`**
+	// （那一档**还没查完**）：哨兵那一路（用户自己滚到底了）在筛选开着而一
+	// 条都没命中的时候**整个关掉**——查完了也一样（查完了就不用再翻，而它
+	// 自己说的那句话是「N 条评论里没有提到这首歌」）。
+	//
+	// ⚠️ **查完了就不翻了**：查完的判据是「翻到的条数盖住了 B 站给的总数」
+	// （`commentsMentionCovered`），不是「B 站说没有下一页了」——那一档说过
+	// 头的话，这一句就不诚实。
+	wantScan := p.mentionOnly && p.hits == 0 && !p.names.Empty()
+	scanning := wantScan && !p.covered
+	if !wantScan {
+		first, last := p.state.Visible()
+		if list.DecideNextPage(st, first, last, len(p.rows)+1).Action == list.PagingLoadNext {
+			s.app.LoadMoreComments()
+		}
+	}
+	// 🔴 **筛选开着而一条都没命中：把这一首的评论翻完**。
+	//
+	// 理由：那句话「这个视频的 N 条评论里没有提到这首歌」只有在**翻完**之后
+	// 才说得出来（只翻了第一页就说「没有」，那是撒谎）。
+	//
+	// ⚠️ **发出去的是应用层那一趟**（铁律三）：这里只判「该不该翻」。
+	if scanning && len(cm) < commentsMentionScanMax && s.app.CommentsHasMore() {
 		s.app.LoadMoreComments()
 	}
 }
@@ -1058,28 +1316,72 @@ func (s *Shell) syncComments(c *ui.Context) {
 // 就 panic（`ui: two elements under one parent have the key ...`）——而翻页
 // 重叠会让同一条评论进两页（应用层那一层已经去过重了，这里再挡一道：
 // **两行共用一份状态**和**整页变成错误页**，症状都比「多一行」严重得多）。
+//
+// 🔴 **筛选开着就只留「正文里提到这首歌」的那些**（票 #574）：`mv` 那一档
+// 拿到的是**这个视频**的评论，里面大部分不是在聊这首歌（研究票 #537 报告
+// §4.1 实测）——而这一枚开关是用户自己挑出来的窄视图。
+//
+// 🔴 **楼中楼按它自己的正文判**（票 #574 的评审）：
+//
+//	主评论提到了、楼中楼没提到   楼中楼**不摆**（它跟这首歌没关系）
+//	主评论没提到、楼中楼提到了   主评论**照摆**（它是那段对话的上下文），
+//	                          摆的是那条提到了的楼中楼
+//
+// ⚠️ **没展开的主评论看不到它的楼中楼**：楼中楼是**展开的时候**才问的
+// （`replies` 那一趟请求），而问遍所有主评论的楼中楼就是几百趟请求（打的是
+// B 站的服务器）——所以没展开的那些只按主评论自己的正文判。
+//
+// ⚠️ **空表不筛**：这一首没有名字的时候（`songname.Table.Empty`）按下去只会
+// 把评论全筛掉，而界面上一句话都说不清为什么。
 func (p *commentsPage) rebuildRows(cm []bili.Comment, replies func(int64) []bili.Comment) {
 	rows := make([]commentRow, 0, len(cm))
 	seen := make(map[int64]bool, len(cm))
+	filter := p.mentionOnly && !p.names.Empty()
+	hits := 0
 	for _, c := range cm {
+		// 楼中楼：**展开了的才有**（没展开的那一条我们没问过它）。
+		var rs []bili.Comment
+		if p.expanded[c.Rpid] {
+			rs = replies(c.Rpid)
+		}
+		// ⚠️ **筛选开着的时候，楼中楼按它自己的正文留**（票 #574 的评审）。
+		kept := rs
+		rootHit := true
+		if filter {
+			rootHit = p.names.Mentions(c.Message)
+			kept = nil
+			for _, r := range rs {
+				if p.names.Mentions(r.Message) {
+					kept = append(kept, r)
+					hits++
+				}
+			}
+			// 🔴 **只有楼中楼提到了，主评论也照摆**：它是那段对话的上下文，
+			// 而整条藏起来的话，用户看不到「有人在这条下面提到了这首歌」。
+			if !rootHit && len(kept) == 0 {
+				continue
+			}
+			if rootHit {
+				hits++
+			}
+		}
 		key := commentRowKey(c.Rpid, false)
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 		rows = append(rows, newCommentRow(c, false, 0))
-		if p.expanded[c.Rpid] {
-			for _, r := range replies(c.Rpid) {
-				key := commentRowKey(r.Rpid, true)
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
-				rows = append(rows, newCommentRow(r, true, c.Rpid))
+		for _, r := range kept {
+			key := commentRowKey(r.Rpid, true)
+			if seen[key] {
+				continue
 			}
+			seen[key] = true
+			rows = append(rows, newCommentRow(r, true, c.Rpid))
 		}
 	}
 	p.rows = rows
+	p.hits = hits
 }
 
 // newCommentRow 建一行，**顺手把那一行要显示的字都算好**。

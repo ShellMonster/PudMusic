@@ -57,14 +57,18 @@ type currentSpot struct {
 	ink mygoui.Color
 }
 
-// assertCurrentIsFlat 断「当前那一格是 flatCurrent 那一档，不是实心主色」。
+// assertCurrentIsFlat 断「当前那一格是 `flatSolidCurrent` 那一档」（**实心主色底**）。
 //
 // ⚠️ **三个判据缺一不可**：
 //
-//   - 「不是实心主色」——那是改之前的样子（F-06：248×50 的实心大块）；
-//   - 「底色就是 flatCurrent 那一档」——只断前一条的话，一块**别的**浅色也过；
-//   - 「字色是那一档该有的」——底换了字没换，浅色下就是一行灰底上的正文色而
-//     别处是主色字（深色下则是灰底上的黑字）。
+//   - 「底色就是实心主色」——这一档就该是实心底（票：用户要「深底色 + 白字」）；
+//   - 「字色是主色上读得出来的那一档」——底换了字没换，浅色下就是一行主色底上的
+//     深色字（读不出来），深色下则是主色底上的白字（也读不出来）；
+//   - 「旁边那一格**不是**主色底」——不然「当前在哪」就没有信号了。
+//
+// 🔴 **这一条从「淡底」改成「实心底」**（票：用户要「深底色 + 白字」）：淡底
+// （`accentSoft`）和侧栏底色的对比度只有 **1.09:1 ~ 1.29:1**（实测）——**几乎
+// 分不出来**，而「当前在哪」是这一列里唯一的方向标。
 func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark bool) {
 	t.Helper()
 	curPx := bandPixels(img, sp.cur)
@@ -77,22 +81,15 @@ func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark boo
 
 	theme := BuildTheme(app.DefaultSettings(""), dark)
 
-	// 判据一：**不是实心主色**。
-	if nearRGBA(cur, rgbaOf(theme.Accent), 2) {
-		t.Errorf("%s：当前那一格是实心主色 %v——那是改之前的样子（F-06：248×50 的"+
-			"实心大块，比主操作还响）", sp.name, cur)
-	}
-
-	// 判据二：**底色就是 flatCurrent 那一档**。
+	// 判据一：**底色就是实心主色**。
 	//
-	// ⚠️ **深浅两套都是不透明的中性灰**（票 #239 之前浅色那档是半透明的主色 14%，
-	// 那时要合到旁边那一格身下的底板上才是屏幕上的数）。
-	want := flatCurrentBg(theme)
+	// ⚠️ **容差是 3**：这一档是不透明的一个数，屏幕上的数就是它。
+	want := theme.Accent
 	if !nearRGBA(cur, rgbaOf(want), 3) {
-		t.Errorf("%s：当前那一格的底色是 %v，want %v（flatCurrent 那一档）", sp.name, cur, want)
+		t.Errorf("%s：当前那一格的底色是 %v，want %v（实心主色底）", sp.name, cur, want)
 	}
 
-	// 判据三：**字色是那一档该有的**。
+	// 判据二：**字色是那一档该有的**。
 	//
 	// ⚠️ **容差是 24**：字是抗锯齿画的，一个像素 rarely 是纯字色——13px 的汉字
 	// 笔画只有一两个像素宽，量到的那个「最远离底色的像素」是字色和底色的混合。
@@ -100,6 +97,14 @@ func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark boo
 	// #18181b 与主色压深那一档差 90+），所以这个容差拦得住「字色换了」。
 	if !nearRGBA(ink, rgbaOf(sp.ink), 24) {
 		t.Errorf("%s：当前那一格的字色是 %v，want %v", sp.name, ink, sp.ink)
+	}
+
+	// 判据三：**旁边那一格不是主色底**。
+	//
+	// ⚠️ **这一条是「当前在哪」这个信号的前提**：两格都是主色底的话，等于没有
+	// 选中态（实测旁边那一格的底是侧栏底 / 页面底）。
+	if nearRGBA(sib, rgbaOf(want), 3) {
+		t.Errorf("%s：旁边那一格也是主色底 %v——那就没有「当前」这一说了", sp.name, sib)
 	}
 }
 
@@ -169,7 +174,7 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				}
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				assertCurrentIsFlat(t, currentSpot{cur, sib, "关注页分组",
-					flatCurrentText(theme, true)}, tt.Image(), dark)
+					flatSolidCurrentText(theme)}, tt.Image(), dark)
 			})
 
 			t.Run("动态页作者栏", func(t *testing.T) {
@@ -200,7 +205,7 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				}
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				assertCurrentIsFlat(t, currentSpot{cur, sib, "动态页作者栏",
-					flatCurrentText(theme, true)}, tt.Image(), dark)
+					flatSolidCurrentText(theme)}, tt.Image(), dark)
 			})
 
 			t.Run("侧栏收藏夹", func(t *testing.T) {
@@ -218,7 +223,7 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 				}
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				assertCurrentIsFlat(t, currentSpot{cur, sib, "侧栏收藏夹",
-					flatCurrentText(theme, true)}, tt.Image(), dark)
+					flatSolidCurrentText(theme)}, tt.Image(), dark)
 			})
 		})
 	}

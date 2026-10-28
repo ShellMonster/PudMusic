@@ -328,9 +328,12 @@ func TestTheCollapsedFavoritesIconLightsUpOnACollectionPage(t *testing.T) {
 	img := tt.Image()
 	px := samplePixel(img, int(icon.X)+3, int(icon.Y)+3)
 	theme := BuildTheme(app.DefaultSettings(""), false)
-	if !nearRGBA(px, rgbaOf(accentSoft(theme)), 3) {
-		t.Errorf("收藏夹那一枚的底色是 %v，want %v（accentSoft 淡底）",
-			px, rgbaOf(accentSoft(theme)))
+	// 🔴 **这一档是实心主色底**（票：用户要「深底色 + 白字」）：淡底那一档和
+	// 侧栏底色的对比度只有 1.09:1 ~ 1.29:1——几乎分不出来，而折叠态侧栏里
+	// 这一枚图标是「当前在哪」**唯一**的指示。
+	if !nearRGBA(px, rgbaOf(theme.Accent), 3) {
+		t.Errorf("收藏夹那一枚的底色是 %v，want %v（实心主色底）",
+			px, rgbaOf(theme.Accent))
 	}
 }
 

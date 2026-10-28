@@ -485,7 +485,7 @@ func (f *followPage) scrollTop() {
 //
 //   - **底色用方案的 `sidebar`**（`Shell.sidebarBackground`，和侧栏那一栏同一个
 //     出口）——于是侧栏 + 这一列是同一片「导航区」，内容区是另一片。
-//   - **选中那一格是 `accentSoft` 淡底 + 按那层底现算的字**（`flatCurrent`）——
+//   - **选中那一格是实心主色底**（`flatSolidCurrent`）——
 //     和侧栏菜单当前项**同一个函数**，所以两个色值逐字节相同。
 //   - **没选中的是次要色**：这一列是这一页里的第二层导航，选中那一格才是要看的
 //     那一格；次要色让「现在在哪」一眼看得出来。
@@ -640,7 +640,7 @@ func followPaneTitle(f *followPage) string {
 // 这一行是**侧栏菜单项的弟弟**：同样的淡底选中态、同样的字、同样的内边距。
 // 三样都取侧栏那一份：
 //
-//   - 选中 → `flatCurrent`（`accentSoft` 淡底 + 按那层底现算的字）；
+//   - 选中 → `flatSolidCurrent`（实心主色底）；
 //   - 没选中 → 次要色；
 //   - 悬停 / 按下 → `flat.Feel`（压一层半透明的前景色，和侧栏菜单项同一档）。
 func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
@@ -687,13 +687,16 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 	box := ui.Row(c).Grow(1).Key("follow-tab:"+tab).Padding(space.Px6, space.Px8).Radius(t.Radius).
 		AlignItems(ui.Center)
 	if tab == f.tab {
-		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（`flatCurrent`——
-		// 强调色淡底 + 按那层底现算的字，深浅两套同一个数）。
+		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（**实心主色底**，
+		// 见 `flatSolidCurrent`）。
 		//
-		// ⚠️ **原来这里是实心主色**（`Background(t.Accent)`，一块 192×32 的实心
-		// 绿）：那是审计 F-02 / F-06 点名的那一处——同一个屏上左栏是实心绿、
-		// 侧栏是淡底，两种画法并排，而实心那一块比主操作还响。
-		box = flatCurrent(c, box)
+		// 🔴 **这一列和侧栏是邻居**：它们挨着摆，而「当前在哪」在两列里说的是
+		// 同一件事——两种画法并排的话，用户看到的是「这个应用没做完」（那正是
+		// 审计 F-02 / F-06 当初删实心底的理由，而这一档反过来是用户点名要的）。
+		//
+		// ⚠️ **字色是 `t.AccentText`**（主色底上读得出来的那一档），不是写死的
+		// 白字——理由见 `flatSolidCurrent`。
+		box = flatSolidCurrent(c, box)
 	} else {
 		// 没选中的那些是**次要色**：这一列是这一页里的第二层导航，选中那一格
 		// 才是要看的那一格。侧栏的菜单项是正文色（那是第一层导航），这一列
@@ -708,9 +711,16 @@ func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
 	// `Selected` / `Selection` 从头到尾没设过）——所以这里没有第二层要盖。
 	//
 	// ⚠️ **悬停那一层是「压」不是「换」**：换成 `t.SurfaceHover` 的话，指针一落到
-	// 选中那一格上，淡底就被整块顶掉——「当前在哪」是这一列里唯一的方向标，
+	// 选中那一格上，实心底就被整块顶掉——「当前在哪」是这一列里唯一的方向标，
 	// 被一次悬停盖掉比多画一层底更坏（`widgets/flat` 的文件头写着同一件事）。
-	box = flat.Feel(c, box)
+	//
+	// 🔴 **选中那一格要「按那一层底算」的那一支**：按主题算的话，浅色主题的
+	// 正文色是黑的，8% 的黑压在主色底上几乎看不出变化（悬停反馈等于没有）。
+	if tab == f.tab {
+		box = flatSolidCurrentFeel(c, box)
+	} else {
+		box = flat.Feel(c, box)
+	}
 	// ⚠️ **点了就换查询，而且换查询必须重置行**（见 resetUsers 的注释）。
 	if box.Clicked() {
 		s.selectFollowTab(f, tab)

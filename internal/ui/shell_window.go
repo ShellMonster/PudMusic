@@ -100,7 +100,7 @@ func (s *Shell) closePerWindow() {
 	// 画到（无头 Tester 里关掉之后再 `Frame()` 就会，见 `close_while_loading_test.go`）。
 	s.closed = true
 
-	// 三个定时器。全是「窗口没了之后唤醒对它是 no-op，留着不致命，但会一直醒到
+	// 四个定时器。全是「窗口没了之后唤醒对它是 no-op，留着不致命，但会一直醒到
 	// 进程退出」那一类。
 	//
 	// ⚠️ 搜索防抖那个钟**不在** viewMain 的 syncSearchWatch 管辖范围内：
@@ -112,6 +112,7 @@ func (s *Shell) closePerWindow() {
 	s.feed.disarm()    // 红点，每五分钟一跳（navbar_feed.go）
 	s.disarmNotFound() // 404 倒计时，每一秒一跳（notfound.go）
 	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
+	s.stopHotword()    // 热词轮换，每五秒一跳（navbar_hotword.go）
 
 	// 🔴 摘掉这一条唤醒句柄（铁律三那个逐窗口的列表）。摘掉之后调它是 no-op，
 	// 而不摘不致命——但「进迷你 / 退出迷你」来回十次之后那个列表就有十条，

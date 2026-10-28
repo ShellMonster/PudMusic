@@ -113,7 +113,7 @@ func (a *App) withFolderItems(f Favorite, verb, able string, done func(string, n
 // folderPageLimit 是「翻到第几页就认输」。
 //
 // 🔴 **不能只靠 `items` 那个上限收口**：一个收藏夹里如果全是合集 / 剧集（那几类
-// 放不了，`playableItems` 会跳过它们），`items` **一个都不会长**，而 B 站那边
+// 放不了，`QueueItemsOfMedias` 会跳过它们），`items` **一个都不会长**，而 B 站那边
 // `has_more` 一直是 true——于是那一趟会一直翻页，直到天荒地老。表现是「点了
 // 播放，侧栏那一行转圈转到应用退出」。
 //
@@ -140,7 +140,7 @@ func (a *App) folderItems(ctx context.Context, ref CollectionRef) ([]Item, int, 
 		if err != nil {
 			return items, 0, err
 		}
-		items = append(items, playableItems(medias)...)
+		items = append(items, QueueItemsOfMedias(medias)...)
 		if !hasMore || len(medias) == 0 {
 			return items, 0, nil
 		}
@@ -149,21 +149,6 @@ func (a *App) folderItems(ctx context.Context, ref CollectionRef) ([]Item, int, 
 		}
 	}
 	return items, 1, nil
-}
-
-// playableItems 把一批内容翻成队列项，放不了的那种跳过。
-//
-// 和界面层 `itemsOfMedias` 是同一件事，**必须跳过而不是放进去再报错**：一个
-// 收藏夹里躺着两个合集就让「播放整个收藏夹」整条失败，是用户没法接受的。
-func playableItems(medias []bili.Media) []Item {
-	items := make([]Item, 0, len(medias))
-	for _, m := range medias {
-		if !m.Playable() {
-			continue
-		}
-		items = append(items, ItemOfMedia(m))
-	}
-	return items
 }
 
 // DeleteFavoriteFolder 删掉自己创建的这个收藏夹（连它里面的内容）。**立刻返回**。

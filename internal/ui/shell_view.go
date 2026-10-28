@@ -87,6 +87,9 @@ func (s *Shell) View(c *ui.Context) {
 	}
 
 	if s.crash != nil {
+		// 热词轮换的表也收掉：崩溃页没有顶栏，`syncHotwords` 到不了，不收的话
+		// 它每 5 秒叫醒一次画一帧没人看的崩溃页（见 navbar_hotword.go 文件头）。
+		s.stopHotword()
 		s.viewCrash(c)
 		return
 	}

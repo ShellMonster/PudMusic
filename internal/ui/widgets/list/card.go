@@ -216,7 +216,22 @@ func (l *List) ScrollOffset() float32 {
 // ⚠️ **「正在放」和「选中」同时成立时，「正在放」赢**：主色底已经没有了，两件事
 // 里只有一件还画得出来，而它才是用户随时要认的那一件（正在放的那首在别的页面上
 // 也要认得出来）。
-func rowColors(t *ui.Theme, playing bool) (title, owner ui.Color) {
+//
+// # 🔴 **失效那一档（票 #624）**
+//
+// invalid 是「这一条已经失效」（稿件被 UP 主删了、或者换成了别的链接）。
+// 它拿**次要色**——和「正在放」那一档不一样：
+//
+//	正在放	主色当字（最该一眼认出的那一行）
+//	失效	次要色（这一行放不了了，但**不是**用户正在听的那首）
+//
+// ⚠️ **「正在放」优先**（票 #624 的评审第 4 条）：这两档**能同时成立**——
+// 「正在放」是用户随时要认的那一行，它要是被灰掉，用户就认不出自己正在听
+// 的是哪首了。
+//
+// ⚠️ 而失效那一档也**不会因此失效**：一条**真放上了**的歌不会中途变成失效
+// （失效是 B 站在收藏夹里给的事实，而队列里的歌来自取流那一刻）。
+func rowColors(t *ui.Theme, playing, invalid bool) (title, owner ui.Color) {
 	if playing {
 		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（默认那个绿
 		// 压在白底上只有 1.9:1），深色下原样。算它的理由见 `widgets/ink`。
@@ -224,6 +239,9 @@ func rowColors(t *ui.Theme, playing bool) (title, owner ui.Color) {
 		// ⚠️ 别写回 `t.Accent`：深色下看不出差别，浅色下那一行就是「正在放的
 		// 那首歌读不出来」——而它恰恰是最该一眼认出的那一行。
 		return ink.AccentOn(t), t.TextMuted
+	}
+	if invalid {
+		return t.TextMuted, t.TextMuted
 	}
 	return t.Text, t.TextMuted
 }
@@ -253,7 +271,7 @@ func (l *List) viewCard(r ui.ListRow) {
 	m := l.songs[i]
 	playing := l.isPlaying(m)
 
-	titleColor, ownerColor := rowColors(t, playing)
+	titleColor, ownerColor := rowColors(t, playing, m.Item.Invalid)
 
 	// ⚠️ **hover 必须在 Children 之前问**：`Hovered` 报的是**这一帧**指针在不在
 	// 上面，而「按下去有反应」这件事本身要等 Children 建它。MyGo 自己的例子
@@ -320,7 +338,12 @@ func (l *List) viewCard(r ui.ListRow) {
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
 			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 				MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if sh.Owner != "" || sh.Live {
+			// ⚠️ **失效的条目那一行标签要画，哪怕它没有 UP 名**：
+			// 「已失效」是这一行**唯一**告诉用户「这一首放不了」的东西，
+			// 而失效的条目常常既没有 UP 名也不是「现场」——于是原来那个
+			// `sh.Owner != "" || sh.Live` 的判据会让它什么都不画，
+			// 用户看到的是一行灰字（灰是灰了，但**没说是为什么**）。
+			if ownerLineShown(sh, m.Item.Invalid) {
 				ownerLine(c, ownerRow{
 					shown: sh,
 					name:  m.Owner,
@@ -333,6 +356,10 @@ func (l *List) viewCard(r ui.ListRow) {
 					color: ownerColor,
 					maxW:  listTitleMaxW,
 					acts:  l.acts,
+					// ⚠️ **失效的标签画在 UP 名前面**（`ownerLine` 那一处）：
+					// 它是这一行的**状态**，而 UP 名是**这一首是谁**——
+					// 状态在前，读起来是「这一首已经失效 · 某某」。
+					invalid: m.Item.Invalid,
 				})
 			}
 			progressBar(c, m)
@@ -396,7 +423,7 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 	m := l.songs[i]
 	playing := l.isPlaying(m)
 
-	titleColor, ownerColor := rowColors(t, playing)
+	titleColor, ownerColor := rowColors(t, playing, m.Item.Invalid)
 
 	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(rowGap).Padding(compactPadY, compactPadX).
 		Height(compactRowHeight).
@@ -416,7 +443,7 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
 			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
 				MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if sh.Owner != "" || sh.Live {
+			if ownerLineShown(sh, m.Item.Invalid) {
 				ownerLine(c, ownerRow{
 					shown: sh,
 					name:  m.Owner,
@@ -428,6 +455,8 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 					color: ownerColor,
 					maxW:  listTitleMaxW,
 					acts:  l.acts,
+					// ⚠️ **失效的标签**：理由同上面那一处。
+					invalid: m.Item.Invalid,
 				})
 			}
 		})

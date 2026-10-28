@@ -974,12 +974,12 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	//
 	// ⚠️ **「正在放」和「选中」同时成立时，「正在放」赢**（理由同 `card.go` 的
 	// `rowColors`）：主色底已经没有了，两件事里只有一件还画得出来。
-	titleColor, metaColor := t.Text, t.TextMuted
-	if playing {
-		// 主色当**字**：浅色下要一个与底色对比度 ≥4.5:1 的变体（理由见
-		// `widgets/ink`）；深色下原样。
-		titleColor = ink.AccentOn(t)
-	}
+	//
+	// 🔴 **走 `rowColors` 那一个出口**（票 #624）：这一格原来**自己写了一遍**
+	// 颜色的判据，而失效那一档（灰掉）加进来的时候，两处各判一次的话漏掉
+	// 一处的症状是「列表那档标了失效、网格那档没标」——用户切到网格就看不出
+	// 哪一首坏了。
+	titleColor, metaColor := rowColors(t, playing, m.Item.Invalid)
 
 	box := ui.Column(c).Radius(t.Radius).
 		// 右键菜单挂在**这一格**上，和列表挂在行上是同一件事：MyGo 取的是
@@ -1076,7 +1076,7 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 				ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
 					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
 				ui.Row(c).Gap(cardGap).Children(func() {
-					if sh.Owner != "" || sh.Live {
+					if ownerLineShown(sh, m.Item.Invalid) {
 						ownerLine(c, ownerRow{
 							shown: sh,
 							name:  m.Owner,
@@ -1089,6 +1089,8 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 							color: metaColor,
 							grow:  true,
 							acts:  g.acts,
+							// ⚠️ **失效的标签**：理由同 `card.go` 那一处。
+							invalid: m.Item.Invalid,
 						})
 
 					}
