@@ -44,15 +44,93 @@ func Dominant(img image.Image) (Hue, bool) {
 	return Hue{H: h, S: sat / weight}, true
 }
 
+// TintSide 是取色那一趟要的那张小图的**长边**有多少像素。
+//
+// # 为什么是 96
+//
+// 它是量出来的（60 张真封面，等比缩放后与原图取色的色相偏差）：
+//
+//	长边 48 → max 31.52°  avg 1.68°  ← 开始飘
+//	长边 64 → max 15.96°  avg 1.04°
+//	长边 96 → max  8.27°  avg 0.90°  ← 收住了
+//	长边 200 → max 7.91°  avg 0.80°  ← 再大只是白花下载和解码
+//
+// 96 那一档够小（解码 0.26ms，而原图 276ms~1375ms），也够稳。
+const TintSide = 96
+
+// scalingFor 给出这个封面地址该拼的**缩放参数**，空串表示不用拼。
+//
+// # 两套语法，各按各的来
+//
+//	网易云（`music.126.net`）  `?param=WxH`   —— 查询参数
+//	B 站图床（`hdslb.com`）     `@WxH`          —— 路径后缀
+//
+// 别把 B 站那一套套到网易云上（它的图床不认），也别反过来。
+//
+// # ⚠️ **B 站那一套不能带 `_1c`**
+//
+// `_1c` 是**中心裁剪**：切掉画面两边，把图裁成正方形。而歌单封面本来就是
+// 横图（B 站默认 16:9），主色常常在边上——中心裁剪之后取到的可能是另一个
+// 颜色。实测 60 张真封面：
+//
+//	中心裁正方（`@96w_96h_1c`）  max |Δhue| 172.9°  avg 10.88°  ← 另一个颜色
+//	中心裁 16:9（`@96w_54h_1c`）  max |Δhue|  61.5°  avg  4.18°
+//	等比缩放  （`@96w_96h`）      max |Δhue|   8.27° avg  0.90°  ← 要这个
+//
+// B 站图床的语义已实测确认：`@96w_96h` 给的是 96×54（原图 1672×940，
+// 等比缩放），`@96w_96h_1c` 给的是 96×96（中心裁剪）。
+//
+// # 已经带过参数的地址**原样返回**
+//
+// 图床自己裁好的那一档（`…jpg@672w_378h_1c.webp`）再拼一次就成了两个
+// `@`——那是坏地址，返回 HTTP 400。
+func scalingFor(cover string) string {
+	if cover == "" {
+		return ""
+	}
+	u, err := url.Parse(cover)
+	if err != nil {
+		return ""
+	}
+	// 网易云：查询参数。⚠️ **已经带过查询串的不动它**（那可能是别的参数）。
+	if strings.Contains(u.Host, "music.126.net") {
+		if u.RawQuery != "" {
+			return ""
+		}
+		return "param=48y48"
+	}
+	// B 站图床：路径后缀。
+	//
+	// ⚠️ **只认 `/bfs/`**：B 站图床的图都在那条路径下，而别的域名（用户头像
+	// 挂在 `/bfs/face/` 下面，但也有走别的路径的）不认这一套参数——拼上去
+	// 就是坏地址。
+	if !strings.Contains(u.Host, "hdslb.com") || !strings.Contains(u.Path, "/bfs/") {
+		return ""
+	}
+	if strings.Contains(u.Path, "@") {
+		return ""
+	}
+	return fmt.Sprintf("@%dw_%dh", TintSide, TintSide)
+}
+
 // Fetch 下载封面的小图并取主色调。
 func Fetch(ctx context.Context, client *http.Client, cover string) (Hue, bool, error) {
 	u, err := url.Parse(cover)
 	if err != nil {
 		return Hue{}, false, err
 	}
-	// 网易云图片服务按 ?param=WxH 缩，取一张小的就够了。
-	if strings.Contains(u.Host, "music.126.net") && u.RawQuery == "" {
-		u.RawQuery = "param=48y48"
+	// 按图床各自的语法要一张**小图**——取一个颜色不需要原图，而原图解码要
+	// 几百毫秒到一秒多（理由见 `scalingFor`）。
+	switch s := scalingFor(cover); {
+	case s == "":
+		// 不该拼的地址：原样取。
+	case strings.HasPrefix(s, "@"):
+		// `@` 在 URL 的 Path 里不会被转义（`url.URL.String` 只转义
+		// 保留字符之外的），拼在 Path 末尾就行。
+		u.Path += s
+	default:
+		// 网易云那一套是查询参数。
+		u.RawQuery = s
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
