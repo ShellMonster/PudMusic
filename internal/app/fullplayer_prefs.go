@@ -211,10 +211,21 @@ func (p *fullPlayerPrefsStore) get() FullPlayerPrefs {
 // ⚠️ 落盘写在**锁外面**：界面每帧要读这一份（`App.FullPlayerPrefs`），
 // 拿着锁做一次文件写就是把界面的等待时间变成那一次写。
 func (p *fullPlayerPrefsStore) put(next FullPlayerPrefs) {
+	p.update(next)
+	p.persist(next)
+}
+
+func (p *fullPlayerPrefsStore) update(next FullPlayerPrefs) FullPlayerPrefs {
 	p.mu.Lock()
 	p.cur = next
 	p.normalizeLocked()
 	next = p.cur
+	p.mu.Unlock()
+	return next
+}
+
+func (p *fullPlayerPrefsStore) persist(next FullPlayerPrefs) {
+	p.mu.Lock()
 	path, prevErr := p.path, p.save
 	p.mu.Unlock()
 
@@ -264,9 +275,15 @@ func (a *App) MountFullPlayerPrefs(path string) {
 // FullPlayerPrefs 返回现在这一份偏好。没挂上磁盘时是默认（全屏播放器照样能用）。
 func (a *App) FullPlayerPrefs() FullPlayerPrefs {
 	a.mu.Lock()
-	p := a.fullPlayerPrefs
-	a.mu.Unlock()
-	return p.get()
+	defer a.mu.Unlock()
+	return a.fullPlayerPrefsValueLocked()
+}
+
+func (a *App) fullPlayerPrefsValueLocked() FullPlayerPrefs {
+	if a.fullPlayerPrefs == nil {
+		return DefaultFullPlayerPrefs()
+	}
+	return a.fullPlayerPrefs.get()
 }
 
 // SetFullPlayerPrefs 改全屏播放器的偏好并立刻落盘。
@@ -286,11 +303,16 @@ func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
 		a.fullPlayerPrefs = &fullPlayerPrefsStore{cur: DefaultFullPlayerPrefs()}
 	}
 	p := a.fullPlayerPrefs
+	next = p.update(next)
 	wake := a.wake
+	player := a.player
 	a.mu.Unlock()
 
-	p.put(next)
+	p.persist(next)
 	if wake != nil {
 		wake()
+	}
+	if player != nil {
+		player.SetSpectrumEnabled(next.ShowSpectrum)
 	}
 }

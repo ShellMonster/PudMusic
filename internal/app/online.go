@@ -408,7 +408,9 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			return
 		}
 		old := a.player
+		p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 		a.player = p
+
 		a.duration = p.Duration()
 		a.setPositionLocked(pos)
 		a.quality = ref.Label
@@ -1113,8 +1115,10 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		return
 	}
 	old := a.player
+	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p
 	a.title = it.Title
+
 	a.path = ""
 	a.cover = it.Cover
 	a.artist = it.Artist
@@ -2065,12 +2069,14 @@ func (a *App) refreshOnlineNow(cause error) {
 			return
 		}
 		old := a.player
+		p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 		a.player = p
 		a.duration = p.Duration()
 		a.setPositionLocked(pos)
 		a.quality = ref.Label
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
 			reopening: true, gen: gen}
+
 		// 源归播放器管了（见 App.pendingSrc）。
 		a.pendingSrc = nil
 		a.reportedErr = nil
