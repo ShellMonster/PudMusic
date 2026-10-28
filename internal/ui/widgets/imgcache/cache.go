@@ -35,6 +35,7 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"runtime"
@@ -201,6 +202,18 @@ type Cache struct {
 	// ⚠️ **只有界面线程动它**（`BeginFrame` 只在 view 里调），所以不用锁。
 	frameToken time.Time
 
+	// dpr 是这台机器的像素密度（Retina 2、普通屏 1），给 `GetSized` 把
+	// **显示尺寸（DIP）**换成**该向图床要的像素**。
+	//
+	// ⚠️ **为什么存在缓存上而不是调用方传**：`drawCover` 那一层只拿得到
+	// `*ui.Context`，而框架的 `Context` 没有「倍率」这个入口（只有
+	// `Painter.Scale()`，而它只在绘制阶段有）。所以由窗口在每帧的 `DrawOver`
+	// 里喂一次（`SetScale`），这里按默认 1 走——**没有窗口喂的时候等于不缩放**
+	// （无头测试就是这一档：那里的「DIP」本来就是像素）。
+	//
+	// 它是原子的：喂的那一处在绘制回调里，读的那一处可能在另一次 build 里。
+	dpr atomic.Uint32 // float32 的位模式
+
 	// failed 是失败条目的账：失败不占字节，LRU 挤不掉，所以单独有一道上限
 	// （maxFailed）。failOrder 老的在前，超限时从老的开始忘。
 	failed    map[*entry]*list.Element
@@ -325,6 +338,57 @@ func (c *Cache) notify() {
 			fn()
 		}
 	}
+}
+
+// SetScale 记下这台机器的像素密度，给 `GetSized` 换算用。
+//
+// dpr 是「几个物理像素算一个点」：Retina 2、普通屏 1。非正值被忽略（调用方
+// 量不到的时候不该把已经记下的那个抹成 0）。
+//
+// ⚠️ **从绘制回调里喂**：框架只有 `Painter.Scale()` 回答得出这个问题，而那
+// 只在绘制阶段拿得到（`internal/ui/covermodal.go` 那段注释写过同一条）。
+func (c *Cache) SetScale(dpr float32) {
+	if c == nil || dpr <= 0 {
+		return
+	}
+	c.dpr.Store(math.Float32bits(dpr))
+}
+
+// scale 报这台机器的像素密度，没喂过时是 1。
+func (c *Cache) scale() float32 {
+	if v := c.dpr.Load(); v != 0 {
+		return math.Float32frombits(v)
+	}
+	return 1
+}
+
+// GetSized 是 `Get` 加上「**按显示尺寸要图**」。
+//
+// w、h 是这一格**显示**多大（DIP）。它按这台机器的像素密度换成该向图床要的
+// 像素，吸到 `sizeTiers` 的某一档，再拼进 URL（`sizedURL`）。
+//
+// # 为什么要这样
+//
+// 缓存里存的是解码后的 RGBA：一张 768×432 是 1.33MB，而列表行那一格只显示
+// 48 DIP（Retina 上 96 像素，0.04MB）。一直拿 768 的图去填 96 的格子，是
+// 四十多倍的浪费——794 张缓存、均值 284KB 的原始字节，每一张都付过一次
+// ~37ms 的「解全图」。
+//
+// 让图床给一张刚好够大的，同时省内存、省 CPU、省带宽。同一个封面在不同尺寸
+// 下是**不同的缓存条目**（`url@96w_96h_1c.webp` 与 `url@400w_400h_1c.webp`），
+// 各画各的，谁也不挤谁。
+//
+// ⚠️ **尺寸量不出来时退化成 `Get`**：布局还没算过的调用点会传 0，那时候要
+// 原图——总比要一个 1×1 强。
+//
+// ⚠️ **它和 `Get` 用的是同一张表**：`Get(url)` 要的是原图那一格，`GetSized`
+// 要的是某一档裁剪过的那一格，两个 key 不同，互不干扰。
+func (c *Cache) GetSized(url string, w, h float32) State {
+	pw, ph := coverPixelSize(w, h, c.scale())
+	if pw <= 0 || ph <= 0 {
+		return c.Get(url)
+	}
+	return c.Get(sizedURL(url, pw, ph))
 }
 
 // Get 返回 url 这一帧该画什么。第一次见这个 url 就会起一次后台下载，
