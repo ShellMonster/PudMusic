@@ -454,6 +454,16 @@ func (p *PagedList) Paged() Paged {
 	}
 }
 
+// First 返回已经拿到的第一行，不复制其余分页内容。
+//
+// 首页总览只需要一张磁贴的首项；整页动作仍使用 Items。只能由界面线程调。
+func (p *PagedList) First() (Music, bool) {
+	if len(p.items) == 0 {
+		return Music{}, false
+	}
+	return p.items[0], true
+}
+
 // Items 返回已经拿到的全部行的一份拷贝（给「播放全部」这类整页动作用）。
 func (p *PagedList) Items() []Music { return append([]Music(nil), p.items...) }
 

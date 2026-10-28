@@ -292,23 +292,18 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 				Gradient(tile.from, tile.to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
-				// 磁贴右侧压一张该榜第一名的封面当「插画」，向左渐隐进磁贴底色；没有数据就只剩渐变。
-				// ⚠️ **探测用的 key 必须和下面 `ViewPlaceholderTitled` 画的那一个
-				// 相同**（`GetSized` 按 `iw × homeTileH` 拼出 `@<w>w_<h>h_1c`）。
-				// 用 `Get(cover)` 探测是下一份原图、画的时候再下一份按尺寸的——
-				// 同一张图下两遍（PR #622 的评审挑出来的）。
-				//
-				// 所以 `iw` 先算出来：探测要用它，画也要用它。
+				// 磁贴只需要榜单第一项；不要用 Items() 为一张插画复制整页分页列表。
 				iw := cw * 0.5
-				if items := h.lists[tile.tab].Items(); len(items) > 0 && items[0].Cover != "" &&
-					h.newGrid.cache.GetSized(items[0].Cover, iw, homeTileH).Ready() {
+				if first, ok := h.lists[tile.tab].First(); ok && first.Cover != "" &&
+					h.newGrid.cache.GetSized(first.Cover, iw, homeTileH).Ready() {
 					ui.Box(c).Key("home:tile:art:"+name).Size(iw, homeTileH).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
 						Children(func() {
-							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, items[0].Cover, "", iw, homeTileH, homeTileRadius(t), nil)
+							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, first.Cover, "", iw, homeTileH, homeTileRadius(t), nil)
 							ui.Box(c).Key("home:tile:fade:"+name).Size(iw, homeTileH).
 								Gradient(tile.to, tile.to.Alpha(0), 90).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 						})
 				}
+
 				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
 				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size12)).
 					TextColor(ui.RGBA(255, 255, 255, 0.78)).MaxLines(1)
