@@ -3,6 +3,7 @@ package list
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -104,6 +105,63 @@ func TestPagerStopsAfterFailureAndRetries(t *testing.T) {
 	}
 }
 
+func TestPagerStopsAfterEmptyPage(t *testing.T) {
+	var calls int
+	fetch := func(context.Context, int, int, struct{}) (PagerPage[string], error) {
+		calls++
+		if calls == 1 {
+			return PagerPage[string]{Items: []string{"one"}, HasMore: true}, nil
+		}
+		return PagerPage[string]{Items: nil, HasMore: true}, nil
+	}
+	var got []string
+	p := NewPager(fetch, func(v string) string { return v }, func() struct{} { return struct{}{} })
+	p.SetApply(func(page PagerPage[string]) int {
+		got = append(got, page.Items...)
+		return len(page.Items)
+	})
+	p.Sync(ui.Services{})
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Page == 1 && !p.Status().Loading
+	})
+	p.Load(PagerScrollEnd)
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return !p.Status().Loading
+	})
+	st := p.Status()
+	if st.HasMore {
+		t.Fatalf("empty page left pager open: %+v", st)
+	}
+	if calls != 2 || len(got) != 1 || got[0] != "one" {
+		t.Fatalf("calls=%d got=%v, want two calls and one item", calls, got)
+	}
+	p.Load(PagerScrollEnd)
+	if calls != 2 {
+		t.Fatalf("pager loaded after empty terminal page: %d calls", calls)
+	}
+}
+
+func TestPagerWakesRegisteredServicesWhenResultArrives(t *testing.T) {
+	var wakes int
+	p := NewPager(func(context.Context, int, int, struct{}) (PagerPage[string], error) {
+		return PagerPage[string]{Items: []string{"ok"}}, nil
+	}, func(v string) string { return v }, func() struct{} { return struct{}{} })
+	p.SetApply(func(page PagerPage[string]) int { return len(page.Items) })
+	p.wakeMu.Lock()
+	p.wakes = append(p.wakes, pagerWake{wake: func() { wakes++ }})
+	p.wakeMu.Unlock()
+	p.Sync(ui.Services{})
+	waitPager(t, func() bool {
+		p.Sync(ui.Services{})
+		return p.Status().Loaded == 1 && !p.Status().Loading
+	})
+	if wakes == 0 {
+		t.Fatal("pager result did not invalidate a registered window")
+	}
+}
+
 func waitPager(t *testing.T, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -111,6 +169,6 @@ func waitPager(t *testing.T, condition func() bool) {
 		if time.Now().After(deadline) {
 			t.Fatal("pager condition did not become true")
 		}
-		time.Sleep(time.Millisecond)
+		runtime.Gosched()
 	}
 }
