@@ -91,9 +91,17 @@ fi
     printf '\n[查看完整变更记录](%s)\n' "$compare"
   fi
   printf '\n## 下载\n\n'
-  printf '请从本页 Assets 下载 macOS 或 Windows 安装包。自动更新清单由构建流程生成并随 Release 上传。\n'
+  printf '请按系统和架构选择下方资产；Release 页面中的资产标签会标明对应平台。自动更新清单由构建流程生成并随 Release 上传。\n\n'
+  printf '| 系统 | 架构 | 安装包 | 便携归档 | 自动更新清单 |\n'
+  printf '| --- | --- | --- | --- | --- |\n'
+  printf '| macOS | Apple Silicon（arm64） | `%s.arm64.dmg` | `app-%s-darwin-arm64.tar.gz` | `update-darwin-arm64.json` |\n' "$version" "$version"
+  printf '| macOS | Intel（amd64） | `%s.amd64.dmg` | `app-%s-darwin-amd64.tar.gz` | `update-darwin-amd64.json` |\n' "$version" "$version"
+  printf '| Windows | x64（amd64） | `Setup.%s.amd64.exe` | `app-%s-windows-amd64.tar.gz` | `update-windows-amd64.json` |\n' "$version" "$version"
+  printf '| Windows | ARM64 | `Setup.%s.arm64.exe` | `app-%s-windows-arm64.tar.gz` | `update-windows-arm64.json` |\n' "$version" "$version"
+  printf '\n'
+  printf '安装包未进行 Apple 公证或 Windows 代码签名。\n'
   printf '\n## 校验\n\n'
-  printf '下载后请通过文件大小、GitHub Assets 和项目发布信息核对来源；当前安装包未进行 Apple 公证或 Windows 代码签名。\n'
+  printf '下载后请通过文件大小、GitHub Assets 和项目发布信息核对来源。\n'
 } > "$out"
 
 printf '已生成 %s\n' "$out"
