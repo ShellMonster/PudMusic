@@ -284,6 +284,10 @@ func TestTheSearchBoxPicksUpNetEaseHotWords(t *testing.T) {
 // 占位词停在「搜索」，界面不出任何声；而且**退避**挡住了重试风暴——推了
 // 五十次轮换的钟、画了几十帧，fixture 也只被叫过一次（失败记了时刻，退避期内
 // 业务层根本不发）。
+//
+// ⚠️ **1 分钟退避的边界本身钉不住**：业务层的退避用的是墙钟（`time.Since`，
+// 和热榜歌名 `RefreshHotSongs` 同一形状），假时钟推不动它——这条测试证的是
+// 「不会每帧/每档重发」，「恰好一分钟后再问」没有回归覆盖，是已知盲区。
 func TestAFailingNetEaseStaysSilentAndCheap(t *testing.T) {
 	var mu sync.Mutex
 	calls := 0
@@ -339,5 +343,22 @@ func TestTheFullPlayerStopsTheHotWordTimer(t *testing.T) {
 	tt.Frame()
 	if s.hotword.stop == nil {
 		t.Error("退出满屏回到首页，轮换的定时器没装回去")
+	}
+}
+
+// TestACrashedShellStopsTheHotWordTimer 钉崩溃页那一档：页面 panic 之后整窗走
+// viewCrash，`syncHotwords` 到不了——表要在画崩溃页的那一帧就收掉，不然它每
+// 5 秒叫醒一次画一帧没人看的错误页。
+func TestACrashedShellStopsTheHotWordTimer(t *testing.T) {
+	s, tt, _ := hotWordShell(t, withHotWordWords())
+	tt.Frame()
+	if s.hotword.stop == nil {
+		t.Fatal("起点就不对：定时器没装上")
+	}
+
+	s.crash = s.newCrashInfo("侧栏", "坏掉了")
+	tt.Frame()
+	if s.hotword.stop != nil {
+		t.Error("崩了之后轮换的定时器还醒着")
 	}
 }

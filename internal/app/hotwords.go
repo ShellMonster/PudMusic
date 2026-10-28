@@ -89,13 +89,16 @@ func (h *Hotwords) Refresh(wake func()) {
 		got, err := h.client.Fetch(ctx)
 		h.mu.Lock()
 		h.loading, h.at = false, time.Now()
-		// ⚠️ **只有「拉到了至少一条」才动 `words`**：拉到空（网易云这一趟没给，
-		// 但这一趟是成功的）或者失败，都**保留上一份**——占位词是环境装饰，
-		// 上一份哪怕放久了也还是能搜的词，把它们换成一个空池子再等下一趟，
-		// 用户看到的是占位词闪回「搜索」，那一下没有任何信息量。空词池在
-		// 退避那一格有另一个后果：TTL 按 `hotWordsRetry` 走，问得比平时勤。
-		if err == nil && len(got) > 0 {
-			h.words = shapeHotwords(got)
+		// ⚠️ **只有「筛完还剩得下」才动 `words`**：拉到空（网易云这一趟没给，
+		// 但这一趟是成功的）、失败、或者拉回来的全是摆不下的长词（`shapeHotwords`
+		// 筛完是空），都**保留上一份**——占位词是环境装饰，上一份哪怕放久了也
+		// 还是能搜的词，把它们换成一个空池子再等下一趟，用户看到的是占位词闪回
+		// 「搜索」，那一下没有任何信息量。空词池在退避那一格有另一个后果：TTL
+		// 按 `hotWordsRetry` 走，问得比平时勤。
+		if err == nil {
+			if shaped := shapeHotwords(got); len(shaped) > 0 {
+				h.words = shaped
+			}
 		}
 		h.mu.Unlock()
 		if wake != nil {

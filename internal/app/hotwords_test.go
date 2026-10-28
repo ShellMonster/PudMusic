@@ -164,6 +164,34 @@ func TestHotwordsShapeForThePlaceholder(t *testing.T) {
 	}
 }
 
+// TestHotwordsKeepTheOldPoolWhenNothingFits 钉筛完只剩空的那个边角：网易云某一趟
+// 给的全是摆不下的长词时，上一份好词池**不许**被换空——不然占位词闪回「搜索」
+// 整整一个退避期（1 分钟），而上一份明明是能用的。
+func TestHotwordsKeepTheOldPoolWhenNothingFits(t *testing.T) {
+	f := newHotFixture(t, hotsBody("短词"))
+	h := hotwordsOn(t, f)
+	done := make(chan struct{}, 8)
+	wake := func() { done <- struct{}{} }
+	h.Refresh(wake)
+	<-done
+	if len(h.Words()) != 1 {
+		t.Fatalf("第一趟就该有词：%q", h.Words())
+	}
+
+	f.mu.Lock()
+	f.body = hotsBody("一个特别特别特别长的词肯定放不下", "这一首超长超长超长超长超长超长")
+	f.mu.Unlock()
+	h.mu.Lock()
+	h.at = time.Time{} // 抹掉退避起点，等价于「等到了再问的时刻」
+	h.mu.Unlock()
+	h.Refresh(wake)
+	<-done
+
+	if got := h.Words(); len(got) != 1 || got[0] != "短词" {
+		t.Errorf("全是长词的那一趟把词池换掉了：%q，want 保留 [短词]", got)
+	}
+}
+
 // TestHotwordsWithoutAClientIsFree 钉没挂上的那一支：不 panic、不发请求、没词。
 // 界面据此把占位词停在「搜索」，而不是打一个注定失败的网络请求。
 func TestHotwordsWithoutAClientIsFree(t *testing.T) {
