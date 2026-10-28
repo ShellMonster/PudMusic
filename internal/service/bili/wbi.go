@@ -178,8 +178,8 @@ type navData struct {
 	IsLogin bool   `json:"isLogin"`
 	Mid     int64  `json:"mid"`
 	Uname   string `json:"uname"`
-	// Face 是头像地址。和其余几个接口一样在下面过一遍 `avatarURL`（补协议、
-	// 拼裁剪参数），所以结构体这一层存的是**原样**。
+	// Face 是头像地址。和其余几个接口一样在下面过一遍 `avatarURL`（补协议），
+	// 所以结构体这一层存的是**原样**。
 	Face string `json:"face"`
 }
 
@@ -191,8 +191,11 @@ type Nav struct {
 	Mid int64
 	// Uname 是昵称。
 	Uname string
-	// Face 是**我自己的**头像地址，已经补好协议、拼好裁剪参数（`avatarURL`，
-	// 和 `FollowUser.Face` 同一份做法，理由见 follow.go 的文件头）。
+	// Face 是**我自己的**头像地址，已经补好协议（`avatarURL`，和
+	// `FollowUser.Face` 同一份做法，理由见 follow.go 的文件头）。
+	//
+	// ⚠️ **裁剪参数不在这层拼**（票 #634）：它由图片缓存按显示尺寸统一决定——
+	// 顶栏那枚圆是 40 见方，而关注卡是 128，两处要的档位本来就不一样。
 	//
 	// 空串有两种来路，B 站那边分不出来：没登录（`LoggedIn` 是 false），或者
 	// 这个账号压根没设过头像。**调用方分辨不了就别硬分**——`LoggedIn` 才是
