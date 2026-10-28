@@ -18,7 +18,7 @@ import (
 // 断言的是**画面上有什么**和**磁盘上落了什么**——文件框在无头环境里调不了，
 // 替掉 `s.picker`（和本地音乐那几个「选择」按钮同一个道理）。
 
-// 配置段只提供本应用自己的配置文件导出 / 导入，不能暴露旧版 Biu 目录导入入口。
+// 配置段只提供本应用自己的配置文件导出 / 导入。
 func TestTheConfigSectionDoesNotOfferBiuDirectoryImport(t *testing.T) {
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
@@ -45,8 +45,8 @@ func TestExportingWritesAFileWithNoCredentialAndSaysSo(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, st)
 
 	dir := t.TempDir()
-	target := filepath.Join(dir, "biu-settings-2026-10-17T12-30-00.json")
-	fake := &fakePicker{savedAs: target, savedName: "biu-settings-2026-10-17T12-30-00.json"}
+	target := filepath.Join(dir, "mygo-settings-2026-10-17T12-30-00.json")
+	fake := &fakePicker{savedAs: target, savedName: "mygo-settings-2026-10-17T12-30-00.json"}
 	s.picker = fake
 
 	clickSetting(t, tt, s, "导出配置")
@@ -70,7 +70,7 @@ func TestExportingWritesAFileWithNoCredentialAndSaysSo(t *testing.T) {
 		t.Fatalf("导出的不是 JSON：%v", err)
 	}
 	if _, wrapped := top["appSettings"]; wrapped {
-		t.Fatalf("导出带了 appSettings 信封：配置导入一个键都取不到：%s", body)
+		t.Fatalf("导出不应带设置文件信封：%s", body)
 	}
 	if got := string(top["themeMode"]); got != `"dark"` {
 		t.Fatalf("导出的不是当前设置（themeMode=%s）", got)
@@ -92,7 +92,7 @@ func TestImportingAConfigChangesOnlyWhatThatFileMentions(t *testing.T) {
 	cur.SideMenuWidth = 300
 	tt, s, a, _ := shellOnSettings(t, cur)
 
-	patch := filepath.Join(t.TempDir(), "biu-settings-x.json")
+	patch := filepath.Join(t.TempDir(), "mygo-settings-x.json")
 	if err := os.WriteFile(patch, []byte(`{"themeMode":"dark","borderRadius":20}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestImportingAConfigChangesOnlyWhatThatFileMentions(t *testing.T) {
 func TestImportingAConfigActuallyReachesTheDisk(t *testing.T) {
 	tt, s, _, path := shellOnSettings(t, app.DefaultSettings(""))
 
-	patch := filepath.Join(t.TempDir(), "biu-settings-x.json")
+	patch := filepath.Join(t.TempDir(), "mygo-settings-x.json")
 	if err := os.WriteFile(patch, []byte(`{"borderRadius":21}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 		t.Fatal("一份未来的设置文件没有被判成只读：用户会以为改了能存住")
 	}
 
-	patch := filepath.Join(t.TempDir(), "biu-settings-x.json")
+	patch := filepath.Join(t.TempDir(), "mygo-settings-x.json")
 	if err := os.WriteFile(patch, []byte(`{"borderRadius":21}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -198,37 +198,8 @@ func TestImportingIntoSettingsFromANewerVersionIsRefusedLoudly(t *testing.T) {
 	clickSetting(t, tt, s, "导入配置")
 	waitFrames(t, tt, "画面上出现「导入配置失败」", func() bool { return tt.HasText("导入配置失败") })
 	// 那份文件一个字节都没动。
-	if got := readFile(t, path); got != body {
+	if got, err := os.ReadFile(path); err != nil || string(got) != body {
 		t.Fatalf("一份未来的设置文件被改写了：\n改前 %s\n改后 %s", body, got)
-	}
-}
-
-// 界面上「配置」那一段不会把设置页画崩——哪怕迁移报告里有很长的句子。
-func TestTheConfigSectionSurvivesALongMigrationNote(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
-		Upgraded:      "数据已升到 v1（动了：settings.json、shortcuts.json、search-history.json、download-queue.json）",
-		UpgradedFiles: []string{"settings.json", "shortcuts.json"},
-	}))
-	if tt.HasText("界面出错了") {
-		t.Fatalf("配置段画崩了，文字有 %q", tt.Texts())
-	}
-}
-
-// 升级失败那一句必须带着「原来的数据一个字节都没少」。
-//
-// 用户最怕的是「升级失败之后我的设置没了」。界面上只写一句「升级失败」的话，
-// 他会在还没搞清发生了什么之前先去翻自己的文件。
-func TestAFailedUpgradeSaysTheOldFilesAreStillThere(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withStartupMigration(MigrationReport{
-		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
-		UpgradeErr: os.ErrInvalid,
-		Rollback:   true,
-	}))
-	if !tt.HasText("原来的数据一个字节都没少") {
-		t.Fatalf("升级失败时没有说原文件还在，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("数据已升到") && !tt.HasText("升级到 v1 失败") {
-		t.Fatalf("升级结果没有摆在设置页上，文字有 %q", tt.Texts())
 	}
 }
 
@@ -278,7 +249,7 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 		}
 	}
 
-	patch := filepath.Join(t.TempDir(), "biu-settings-x.json")
+	patch := filepath.Join(t.TempDir(), "mygo-settings-x.json")
 	if err := os.WriteFile(patch, []byte(`{"themeMode":"dark"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +273,7 @@ func TestImportingADarkThemeActuallyTurnsTheWholeWindowDark(t *testing.T) {
 
 	// 反过来：再导一份「跟随系统」并把系统外观切成深色，画面要跟着**系统**走。
 	// 这一条排除的是「界面根本不看 themeMode、一直深色」这种蒙混过关的实现。
-	follow := filepath.Join(t.TempDir(), "biu-settings-y.json")
+	follow := filepath.Join(t.TempDir(), "mygo-settings-y.json")
 	if err := os.WriteFile(follow, []byte(`{"themeMode":"system"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -329,39 +300,6 @@ func asColor(p color.RGBA) mygoui.Color {
 // 是 color.RGBA，要拿前者去比后者的读数就得先换过去。
 func rgbaOf(c mygoui.Color) color.RGBA {
 	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
-}
-
-// 一次顺顺利利的升级**不弹** toast。
-//
-// 用户没要求知道「数据已是最新」；弹一条「已升到 v1」是在打扰他，而且真出事
-// （升级失败）时那条提示就混在一堆无害提示里，不显眼。
-func TestASuccessfulQuietUpgradeSaysNothing(t *testing.T) {
-	_, tt := newShell(t, withStartupMigration(MigrationReport{
-		Upgraded:      "数据已升到 v1（动了：settings.json）",
-		UpgradedFiles: []string{"settings.json"},
-	}))
-	tt.Frame()
-
-	if tt.HasText("已升到 v1") {
-		t.Errorf("一次顺顺利利的升级弹了一条 toast，文字有 %q", tt.Texts())
-	}
-}
-
-// 升级失败要弹，而且那句话必须带着「原文件一个字节都没少」。
-func TestAFailedUpgradeIsAnnouncedOnTheFirstFrameToo(t *testing.T) {
-	_, tt := newShell(t, withStartupMigration(MigrationReport{
-		Upgraded:   "升级到 v1 失败：这一份读不懂。原来的数据一个字节都没少。",
-		UpgradeErr: os.ErrInvalid,
-		Rollback:   true,
-	}))
-	tt.Frame()
-
-	if !tt.HasText("数据升级失败") {
-		t.Fatalf("升级失败没有在第一帧说出来，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("一个字节都没少") {
-		t.Fatalf("那句话里没有说原文件还在，文字有 %q", tt.Texts())
-	}
 }
 
 // 数据目录来自更新的版本：导入按钮**不摆**，并把为什么说清楚。

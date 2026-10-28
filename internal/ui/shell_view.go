@@ -212,9 +212,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 「刷新数据」那一趟回来的话（成了几个 / 为什么没成 / 已经在刷了）。
 	// 同样每帧取一次，取走就没了——理由见 reportFavoritesRefresh。
 	s.reportFavoritesRefresh()
-	// 启动迁移失败时在第一帧提示用户。
-
-	s.announceMigration()
 
 	// ⚠️ **这一帧只取一次快照**：底层那一层（`drawUnderlay`）和满屏播放器
 	//（`viewFullPlayer`）看的是同一份播放状态——两次取的话两者之间播放状态可能

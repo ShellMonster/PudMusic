@@ -215,45 +215,6 @@ type shellSpec struct {
 	view func(s *Shell) func(*mygoui.Context)
 	// noTester 不要 Tester：这一条只要一个外壳（收尾、字段、纯逻辑）。
 	noTester bool
-	// migration 是这个外壳启动时看到的迁移报告。零值 = 什么都没迁（默认）。
-	migration *MigrationReport
-}
-
-// withStartupMigration 造外壳时给它一份启动迁移报告（设置页「配置」那一段要读
-// 它）。名字里那个「Startup」是为了和 `settings_tab_config_test.go` 里那个
-// `withMigration(t, r)` 区分开——那是造完外壳之后再改的另一个用法。
-//
-// ⚠️ 默认是**零值**，而且基座在造外壳**之前**就把包级那份抹成零——理由见
-// `resetMigrationReport`。
-func withStartupMigration(r MigrationReport) shellOpt {
-	return func(sp *shellSpec) { sp.migration = &r }
-}
-
-// resetMigrationReport 抹掉包级的迁移报告，并在测试结束时把它恢复回去。
-//
-// ## 为什么它归基座管，而不是每条测试自己记得收
-//
-// `migration` 是**包级的一个变量**（migrate_mount.go），它和外壳、和 App 都无关，
-// 活到下一条测试：留在那儿的话，**后面每一个新建的 Shell 第一帧都弹一条 toast**
-// （viewMain → announceMigration），而 toast 的卡片底色是主色。`settings_test.go` 那些验窗口底色的测试取的采样点
-// (700, 430)（900×600 窗口的右下角）**正好落在那张卡片上**，于是那几条红成
-// 「画面那个点是 {30 215 96}」——那个数就是 DefaultPrimaryColor 逐字（实测）。
-//
-// 一个包级变量，测试收不掉——所以收回基座：**造外壳之前抹成零**，收尾时恢复。
-// 「造之前抹」是关键：即便上一条测试的后台线晚了半拍才写进来，它落的那一刻本条
-// 测试的外壳已经建好、第一帧也画完了，抹不掉它；要到**下一条**测试建外壳时才会被
-// 抹掉，那时它已经害不到人了。
-func resetMigrationReport(t *testing.T) {
-	t.Helper()
-	migration.mu.Lock()
-	before := migration.r
-	migration.r = MigrationReport{}
-	migration.mu.Unlock()
-	t.Cleanup(func() {
-		migration.mu.Lock()
-		migration.r = before
-		migration.mu.Unlock()
-	})
 }
 
 // onApp 让外壳挂在**外面那个** App 上（那些测试要拿同一个 App 验队列、相位之类
@@ -349,10 +310,6 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 		o(sp)
 	}
 
-	// 包级那个迁移报告先抹成零（理由见 resetMigrationReport 的注释）。**必须在
-	// New(a) 之前**：外壳建好之后第一帧就会读它。
-	resetMigrationReport(t)
-
 	// 那一份「窗口看不看得见」是包级的（`hover.frameVisible`），而 `withView`
 	// 可以绕过 `Shell.View` 单独画一块——那样它就不会被每帧重设，于是上一条
 	// 测试留下的「看不见」会漏进这一条。每条测试都从「看得见」开始。
@@ -363,12 +320,6 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 	flag := hover.NewVisibleFlag()
 	hover.SetVisibleFlag(flag)
 	shimmer.SetVisibleFlag(flag)
-	if sp.migration != nil {
-		migration.mu.Lock()
-		migration.r = *sp.migration
-		migration.mu.Unlock()
-	}
-
 	a := sp.app
 	if a == nil {
 		a = app.New()

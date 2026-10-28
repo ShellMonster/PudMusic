@@ -8,17 +8,13 @@ import (
 	"testing"
 )
 
-// 快捷键存储这一组：拿真实的文件、真的读真的写。
-//
-// 断言的只有两类：**默认值逐条等于 Biu 的**（键名和 accelerator 串都逐字比），
-// 和**存进去再读回来还是那份**。不断言「调了哪个函数」——那种测试在把
-// `readShortcuts` 换成 `return defaultShortcutSettings(), false` 时依然是绿的。
+// 快捷键存储测试使用真实文件，覆盖默认值、持久化和当前格式保护。
 
-// TestTheShortcutDefaultsAreBiuOnes 逐条钉住 Biu 的默认值。
+// TestTheShortcutDefaultsAreStable 逐条钉住 Biu 的默认值。
 //
 // 抄错一条的症状是「Biu 里按 ⌘⇧P，我们这边按 ⌘⇧P 没反应」，而两边的界面都
 // 画得好好的，所以这一条只能靠把值逐条写出来比。
-func TestTheShortcutDefaultsAreBiuOnes(t *testing.T) {
+func TestTheShortcutDefaultsAreStable(t *testing.T) {
 	got := defaultShortcutSettings()
 
 	if !got.EnableGlobalShortcuts {
@@ -95,35 +91,6 @@ func TestARecordedShortcutLandsOnDiskAndComesBack(t *testing.T) {
 	checkShortcut(t, "全局", got.GlobalShortcuts[0], "togglePlay", "播放/暂停", "CommandOrControl+Alt+P")
 }
 
-// TestItReadsBiuOwnShortcutFile 验 Biu 那份 electron-store 的文件读得进来。
-//
-// 这一条对应验收「从 Biu 切换过来时…快捷键都读得进来」在**读**的那一半。
-// Biu 的文件顶层就是那三个键（外加一个我们不认识的 `__internal__`），**没有**
-// schemaVersion，所以按 v0 读。
-func TestItReadsBiuOwnShortcutFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), shortcutFileName)
-	writeJSON(t, path, map[string]any{
-		"shortcuts":             []map[string]string{{"id": "togglePlay", "name": "播放/暂停", "shortcut": "CommandOrControl+J"}},
-		"globalShortcuts":       []map[string]string{{"id": "togglePlay", "name": "播放/暂停", "shortcut": "CommandOrControl+Alt+J"}},
-		"enableGlobalShortcuts": false,
-		"__internal__":          map[string]any{"migrations": map[string]any{}},
-	})
-
-	got, ro := readShortcuts(path)
-	if ro {
-		t.Error("Biu 的文件不该被判成只读")
-	}
-	if got.EnableGlobalShortcuts {
-		t.Error("Biu 那边关着的「启用全局快捷键」被读成了开着")
-	}
-	checkShortcut(t, "应用内", got.Shortcuts[0], "togglePlay", "播放/暂停", "CommandOrControl+J")
-	// 文件里只有一条，缺的那五条要**补上默认值**——不然设置页上会少五行，
-	// 而用户只会觉得「这一版怎么只有播放/暂停能改」。
-	if len(got.Shortcuts) != 6 {
-		t.Errorf("补齐之后是 %d 条，want 6", len(got.Shortcuts))
-	}
-}
-
 // TestAFileFromANewerVersionIsReadOnly 验只读保护。
 //
 // 只读时**一个字都不许写回去**：按旧语义改一遍就把用户的快捷键毁了。这一格是
@@ -188,11 +155,11 @@ func TestACorruptFileIsBackedUpAndDefaultsComeBack(t *testing.T) {
 	}
 }
 
-// TestRestoreDefaultsBringsTheSixKeysBack 验「恢复默认」。
+// TestRestoreDefaultsBringsTheDefaultKeysBack 验「恢复默认」。
 //
 // 特意先改坏三格再恢复，并且**用户自己多出来的那一条要留着**——Biu 是整份替换，
 // 那一版会把用户加的键一起抹掉。
-func TestRestoreDefaultsBringsTheSixKeysBack(t *testing.T) {
+func TestRestoreDefaultsBringsTheDefaultKeysBack(t *testing.T) {
 	k := newShortcutKeys("")
 	defer k.Close()
 
@@ -212,10 +179,10 @@ func TestRestoreDefaultsBringsTheSixKeysBack(t *testing.T) {
 	got := k.snapshot()
 	checkShortcut(t, "应用内", got.Shortcuts[0], "togglePlay", "播放/暂停", "CommandOrControl+P")
 	checkShortcut(t, "全局", got.GlobalShortcuts[0], "togglePlay", "播放/暂停", "CommandOrControl+Alt+P")
-	if len(got.Shortcuts) != 7 {
-		t.Errorf("恢复默认之后是 %d 条，want 7（默认六条 + 用户自己那条）", len(got.Shortcuts))
+	if len(got.Shortcuts) != len(defaultShortcutSettings().Shortcuts)+1 {
+		t.Errorf("恢复默认之后是 %d 条，want 默认快捷键数 + 用户自己那条", len(got.Shortcuts))
 	}
-	checkShortcut(t, "用户自己那条", got.Shortcuts[6], "mine", "我加的", "CommandOrControl+9")
+	checkShortcut(t, "用户自己那条", got.Shortcuts[len(got.Shortcuts)-1], "mine", "我加的", "CommandOrControl+9")
 }
 
 // TestConflictsAreOnlyLookedForInsideOneColumn 验冲突只在同一列里判。
@@ -248,11 +215,8 @@ func TestConflictsAreOnlyLookedForInsideOneColumn(t *testing.T) {
 	}
 }
 
-// TestKeysAreWrittenAsBiuWouldWriteThem 验写出去的键名和 Biu 一字不差。
-//
-// 这一条是「用户来回切 Biu 和 MyGo 不丢设置」在快捷键上的机器版本：Biu 的
-// 「导入配置」逐个 `defaultShortcutSettings` 的键去取，取不到就是没这一项。
-func TestKeysAreWrittenAsBiuWouldWriteThem(t *testing.T) {
+// TestKeysAreWrittenInTheCurrentFormat 验当前快捷键文件的顶层结构。
+func TestKeysAreWrittenInTheCurrentFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), shortcutFileName)
 	k := newShortcutKeys(path)
 	// ⚠️ 得先改一处才会落盘：这一份和设置那边一样，**没改过就不写**（第一次运行
@@ -277,7 +241,7 @@ func TestKeysAreWrittenAsBiuWouldWriteThem(t *testing.T) {
 			t.Errorf("少了键 %q，写出去的是 %s", key, raw)
 		}
 	}
-	// Biu 那三个键必须**在顶层**：它的导入是逐个键去取的，埋进信封里就取不到。
+	// 三个快捷键字段必须保持顶层结构。
 	for _, key := range []string{"shortcuts", "globalShortcuts", "enableGlobalShortcuts"} {
 		inner := got[key]
 		if len(inner) > 0 && inner[0] == '{' {

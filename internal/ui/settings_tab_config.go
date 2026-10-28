@@ -1,36 +1,6 @@
-// 设置页的「配置」那一段：导出 / 导入配置。
+// 设置页的「配置」段：导出 / 导入当前版本配置文件。
 //
-// # 段名为什么和 Biu 不一样
-//
-// Biu 把「导出配置 / 导入配置」长在「关于应用」那一段里（`system-settings.tsx:388-402`，
-// 版本号 + 检查更新之后紧接着就是 `<ImportExport />`）。我们把它拆成了独立的
-// 「配置」一段，理由是**这两段改的不是同一样东西**：「关于应用」那一段动的是
-// `App` 上的更新器状态（它自己那一份 `app-update.json`），而这一段动的是用户的
-// 设置文件——而「只读」保护护的恰恰是设置文件（见下面 `settingsConfig` 的注释）。
-// 合成一段的话，「设置来自更新的版本」这一个场景会把本来还能用的导出入口一起关掉。
-//
-// ⚠️ 顺带把一句过期的话改掉：这一段的文件头曾经写着「我们没摆版本号和检查更新
-// ——版本号是 9.9、检查更新是 9.14，都还没做」。**两者都做完了**（自动更新，
-// commit `8c936d4`，在 `update_entry.go` / `update_dialog.go`），而且 PLAN 里
-// 9.9 与 9.14 指的分别是「更新日志富文本 + 检查更新按钮」和「打包与更新链集成
-// 验证」，那个引用本身就是照错的。
-//
-// # 三个按钮，三件不同的事
-//
-//	导出配置  存一份裸的 JSON，凭据一件都不带
-//	导入配置  读一份 JSON 并进现在的设置（文件里没有的键原样保留）
-//
-// 三件都**不整体回滚**：导出写的是用户新选的文件、导入只并不改（`MergeSettings`
-// 。
-//
-// # 凭据不进导出
-//
-// 导出走白名单 + 抹掉代理密码，见 `internal/app/export.go` 的文件头。
-// Cookie / SESSDATA / refresh_token / 带签名的 URL **根本不在设置里**——凭据存在
-// 凭据后端（`app/credentials.go`：macOS 是用户数据目录下的
-// `credentials/session.json`，Windows 是 `credentials.dpapi`），不在设置里。
-// 代理密码**在**设置里，所以要单独抹；抹完 `proxySettings` 那一格还在，
-// 类型、主机、端口、用户名照导（代理地址不是秘密，换台机器接着用是想要的）。
+// 导入按字段合并，缺失字段保留当前设置；代理密码不会被配置文件覆盖。
 package ui
 
 import (
@@ -53,30 +23,16 @@ import (
 // 还能做的事（用户要拿一份出来排查），而导入会让 store 转只读，点了只会得到一句
 // 「这份设置来自更新的版本」，那句话由 `applySetting` 那条路统一报。
 func (s *Shell) settingsConfig(c *ui.Context) {
-	rep := LastMigration()
 	s.settingGroup(c, "配置", func() {
-		ui.Column(c).FillWidth().Gap(space.Px8).Children(func() {
-			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				if settingsButton(c, "导出配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					s.exportConfig()
-				}
-				if settingsButton(c, "导入配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					s.importConfig()
-				}
-			})
-			if note := migrationNote(rep); note != "" {
-				ui.Text(c, note).FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).Wrap()
+		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
+			if settingsButton(c, "导出配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
+				s.exportConfig()
+			}
+			if settingsButton(c, "导入配置").FontSize(scale.Font(c, scale.Size13)).Clicked() {
+				s.importConfig()
 			}
 		})
 	})
-}
-
-// migrationNote 把上次启动的升级结果压成一句人话。
-func migrationNote(r MigrationReport) string {
-	if r.Upgraded == "" {
-		return ""
-	}
-	return r.Upgraded + "。"
 }
 
 // ⚠️ **必须在另一个 goroutine 里弹框**：MyGo 把弹框请求 post 到主线程再等系统
@@ -105,8 +61,7 @@ func (s *Shell) exportConfig() {
 
 // importConfig 弹打开框，把挑回来的那份并进现在的设置。
 //
-// 并不是替换：Biu 的导入是逐键 merge（`export-import.tsx:49-53`），文件里没有的
-// 键原样保留。所以「导一份只改过主题的配置」不会把别的设置打回默认值。
+// 按字段合并：文件里没有的键原样保留，所以只改主题不会重置其它设置。
 func (s *Shell) importConfig() {
 	parent := s.win
 	picker := s.picker

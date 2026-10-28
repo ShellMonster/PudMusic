@@ -1,24 +1,5 @@
-// 快捷键：Biu 的 `shared/settings/shortcut-settings.ts` + `src/store/shortcuts.ts`。
-//
-// ## 为什么是单独一份文件，不进 app.Settings
-//
-// Biu 自己也是**单独一个 store**（zustand persist 的 `"shortcut-settings"`，
-// `biu/src/store/shortcuts.ts:20`），`app-settings.json` 里根本没有这个键
-// （`shared/settings/app-setting.d.ts` 逐字对过）。照抄就是这一份文件。
-// `PLAN.md` §3.4 的持久化表也是这么写的：`| 快捷键 | <UserData>/shortcuts.json |`。
-//
-// 加进设置的理由（`sideMenuCollectionOrder` 那种）在快捷键这里**不成立**：设置
-// 那边的键名要逐字等于 Biu 的导出，多一个键就是多一个 Biu 认不出的键；而快捷键
-// 本来就是另一份文件，合成一份的话坏了要一起恢复。
-//
-// 落盘的做法照 `internal/app/settings.go` 和 `searchhistory.go`：schema 号 +
-// 临时文件 + rename 原子写 + 后台合并写 + 收尾同步落完。
-//
-// ## 这一票只管「录下来存住」，不管「生效」
-//
-// 录完、存住、冲突能看出来，是这一份文件的事（PLAN 9.3）。按下去真的会做什么在
-// 另外两个文件里：`shortcut_dispatch.go`（应用内分发）和 `shortcut_global.go`
-// （全局注册）。这一份只负责它们读的那份设置——改一个键之后它们下一帧就跟上。
+// 快捷键存储：当前版本的 schema 文件、原子写和后台合并写。
+
 package ui
 
 import (
@@ -38,8 +19,7 @@ const (
 	// `shortcuts.json`。文件名不需要一致，**键名才需要**——下面那一段就照着它。
 	shortcutFileName = "shortcuts.json"
 
-	// shortcutSchema 是这份文件的格式版本。改它的**结构**（加键、删键、改类型）
-	// 就涨它，并往 shortcutMigrations 里加一条 v→v+1 的路。
+	// shortcutSchema 是当前快捷键文件的格式版本。
 	shortcutSchema = 1
 
 	// shortcutWriteDelay 是把连续改动合并成一次落盘的窗口。和设置那边的
@@ -53,52 +33,24 @@ var (
 	errShortcutsNoSuchCmd = errors.New("快捷键：没有这一条命令")
 )
 
-// shortcutItem 是一条快捷键。Biu 的 `ShortcutItem` 就是这三个字段
-// （`shared/types/shortcut-setting.d.ts`）。
-//
-// Biu 还往同一条上挂 `isConflict` 和 `error` 两个**算出来的**字段：录的时候顺手
-// 一起存下去。这里不存——它们每帧从 `Shortcuts` 现算（见 `conflictOf`）。存一份
-// 在文件里只会和下一次算出来的对不上，而对不上的那一份没人会去改。
+// shortcutItem 是一条快捷键。冲突状态只在内存中计算，不落盘。
 type shortcutItem struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
 	Shortcut string `json:"shortcut"`
 }
 
-// shortcutSettings 是落盘的整体，键名照 Biu 的 `ShortcutSettings`。
+// shortcutSettings 是落盘的整体。
 type shortcutSettings struct {
 	EnableGlobalShortcuts bool           `json:"enableGlobalShortcuts"`
 	Shortcuts             []shortcutItem `json:"shortcuts"`
 	GlobalShortcuts       []shortcutItem `json:"globalShortcuts"`
 }
 
-// shortcutFile 是落盘时外面套的那一层。Biu 那份 electron-store 的文件没有它，
-// 读的时候按 v0 读（见 readShortcuts），键名一样能对上。
-//
-// ⚠️ `shortcutSettings` 必须是**匿名嵌入**的，不能是一个叫 `Shortcuts` 的命名字段：
-// 匿名字段会被 encoding/json 摊平到外层，那三个键才在**顶层**——而 Biu 的导入是
-// 逐个 `defaultShortcutSettings` 的键去顶层取的（`src/pages/settings/
-// export-import.tsx:46-51`）。写成命名字段的话三个键会埋进一层对象里，Biu 那边
-// 一个都取不到，而本项目这边看着「存好了」。
+// shortcutFile 是当前版本的快捷键文件信封。匿名嵌入保证快捷键字段落在顶层。
 type shortcutFile struct {
 	SchemaVersion int `json:"schemaVersion"`
 	shortcutSettings
-}
-
-// shortcutMigrations 把 v 升到 v+1。
-//
-// v0 是**没有 schemaVersion 的那份**，而那正是用户真正拿得着的那一份：Biu 设置页
-// 「导出配置」落下来的、以及 Biu 自己 electron-store 里躺着的那份
-// （`biu/electron/store.ts`）。它必须有一条路能走过来——没有的话
-// `readShortcuts` 会把 Biu 的文件判成「读不懂 → 只读」，用户在设置页上会一个字都
-// 改不了（和设置那边 `migrations[0]` 修 Biu 那个 `"system-default"` 坏字体值是
-// 同一个道理，见 `internal/app/settings.go`）。
-var shortcutMigrations = map[int]func(*shortcutSettings){
-	0: func(s *shortcutSettings) {
-		// 现在没有要改的值。Biu 自己会往同一条上存 `isConflict` / `error` 两个
-		// 算出来的字段（`shortcut-settings.tsx:31-36`），我们不读它们，也就不会
-		// 把它们带回去——见 shortcutItem 的注释。
-	},
 }
 
 // shortcutSlot 是设置页上那一格：哪一条命令（id）、哪一列（应用内/全局）。
@@ -214,22 +166,24 @@ func newShortcutKeys(path string) *shortcutKeys {
 	return k
 }
 
-// readShortcuts 读盘。
-//
-// 认得两种形状，判据只有一条：**顶层有没有 `shortcuts` 这个键**。
-//
-//   - 我们写的：`{"schemaVersion": 1, "shortcuts": [...], "globalShortcuts":
-//     [...], "enableGlobalShortcuts": true}`
-//   - Biu 的 electron-store 文件：顶层就是那三个键，外加一个我们不认识的
-//     `__internal__`（conf 的内部状态，标准库自动忽略）。**没有 schemaVersion，
-//     按 v0 读**，走的是和「Biu 直接导出」同一条迁移链。
-//
-// 没有这个文件不是错误，返回默认值——第一次运行就是这样。
-//
-// 第二个返回值是「这份文件只读吗」：来自更新的 schema 版本、根本没有可走的迁移
-// 路径、或者压根认不出是什么文件。两种情况下**一个字都不写回去**——按旧语义改
-// 一遍就毁了，和设置那边的 ErrSettingsFromNewer 同一个道理
-// （`internal/app/settings.go`）。
+// probeShortcuts 解析当前版本的快捷键文件。
+func probeShortcuts(raw []byte) (from int, s shortcutSettings, ok bool, err error) {
+	var probe struct {
+		SchemaVersion *int            `json:"schemaVersion"`
+		Shortcuts     *[]shortcutItem `json:"shortcuts"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return 0, shortcutSettings{}, false, err
+	}
+	if probe.SchemaVersion == nil || probe.Shortcuts == nil {
+		return 0, shortcutSettings{}, false, nil
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return 0, shortcutSettings{}, false, err
+	}
+	return *probe.SchemaVersion, s, true, nil
+}
+
 func readShortcuts(path string) (shortcutSettings, bool) {
 	def := defaultShortcutSettings()
 	b, err := os.ReadFile(path)
@@ -241,13 +195,7 @@ func readShortcuts(path string) (shortcutSettings, bool) {
 		backupShortcuts(path)
 		return def, false
 	}
-	if !ok {
-		return def, true
-	}
-	if from > shortcutSchema {
-		return def, true
-	}
-	if err := runShortcutMigrations(&s, from); err != nil {
+	if !ok || from != shortcutSchema {
 		return def, true
 	}
 	return s.mergeMissing(def), false

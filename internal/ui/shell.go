@@ -382,15 +382,6 @@ type Shell struct {
 	// 十次之后应用层那个列表就有十条，每发生一件事就多走十趟空转。
 	announceRemove func()
 
-	// migrationAnnounced 是「启动升级失败提示已经弹过一次 toast 了」。
-
-	//
-	// 只由界面线程读写（`viewMain` 第一帧），所以不需要锁。挂在 Shell 上而不是
-	// 包级的 map 上，是因为「每个窗口各弹一次」才是对的：迷你播放器窗口是**另
-	// 一个窗口**，它的第一帧不该因为主窗口已经弹过就跳过（它也有自己的屏幕可
-	// 以弹）。见 `announceMigration`。
-	migrationAnnounced bool
-
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`

@@ -37,8 +37,7 @@ const (
 	// searchHistoryFileName 是搜索历史这份文件的名字。
 	searchHistoryFileName = "search-history.json"
 
-	// searchHistorySchema 是这份文件的格式版本。改它的**结构**（加键、删键、
-	// 改类型）就涨它，并往 searchHistoryMigrations 里加一条 v→v+1 的路。
+	// searchHistorySchema 是当前搜索历史文件的格式版本。
 	searchHistorySchema = 1
 
 	// searchHistoryShown 是浮层上最多摆几条。Biu 是 `items.slice(0, 10)`
@@ -64,30 +63,10 @@ type searchItem struct {
 	Time int64 `json:"time"`
 }
 
-// searchHistoryFile 是落盘的整体。
-//
-// 外面这层信封只有设置那边才有（那边要和 Biu 的 electron-store 双向兼容，
-// 才需要分得出「有没有 appSettings 键」）。这一份没有别的应用会来读它，信封就
-// 只是把版本号记下来。
+// searchHistoryFile 是当前版本的搜索历史文件。
 type searchHistoryFile struct {
 	SchemaVersion int          `json:"schemaVersion"`
 	Items         []searchItem `json:"items"`
-}
-
-// searchHistoryMigrations 把 v 升到 v+1。
-//
-// v0 是「文件里没有 `schemaVersion` 键」的那一份。**它必须有这条路**：没有的话
-// `readSearchHistory` 会把一份 v0 文件判成「没有可走的迁移路径 → 只读」，用户在
-// 搜索框里记一条东西都存不住；而 `MigrateSearchHistoryFile`（`migrate_files.go`）
-// 会直接报错，让启动那一轮升级整轮回滚。
-//
-// 它从哪来：这一份文件是照 Biu 的 `src/store/search-history.ts` 建的，那个 store
-// 也是一个 zustand persist，键名（`value` / `time`）和结构**从第一版起就没变过**。
-// 所以 v0 → v1 结构上不用搬东西——这条空的迁移是为了让那条路**存在**，
-// 不是为了改值（和 `settings.go` 的 `migrations[0]` 同一个道理，那一条修的是
-// Biu 一个已知的坏值）。
-var searchHistoryMigrations = map[int]func(*searchHistoryFile){
-	0: func(*searchHistoryFile) {},
 }
 
 // searchHistory 是搜索历史。
@@ -127,14 +106,7 @@ func newSearchHistory(path string) *searchHistory {
 	return h
 }
 
-// readSearchHistory 读盘。坏文件不是错误：备份走，返回空的一份接着用。
-//
-// 「读不出来」和「读出来是空的」必须分开说：前者要留一份 `.bak` 让用户知道自己
-// 丢了什么，后者是正常状态（还没搜过）。
-//
-// 第二个返回值是「这份文件只读吗」：来自更新的 schema 版本，或者根本认不出是第几
-// 版。两种情况下**一个字都不写回去**——按旧语义改一遍就毁了，和设置那边的
-// ErrSettingsFromNewer 同一个道理（`internal/app/settings.go`）。
+// readSearchHistory 只接受当前版本的搜索历史文件；旧版本或无法识别的文件保持原样并只读。
 func readSearchHistory(path string) (items []searchItem, readOnly bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -145,17 +117,8 @@ func readSearchHistory(path string) (items []searchItem, readOnly bool) {
 		backupSearchHistory(path)
 		return nil, false
 	}
-	if f.SchemaVersion > searchHistorySchema {
+	if f.SchemaVersion != searchHistorySchema {
 		return nil, true
-	}
-	for v := f.SchemaVersion; v < searchHistorySchema; v++ {
-		m, ok := searchHistoryMigrations[v]
-		if !ok {
-			// 没有迁移的路就别改它：带着一份读不懂的文件原样留着，好过按错误的
-			// 语义重写一遍用户的文件。
-			return nil, true
-		}
-		m(&f)
 	}
 	return f.Items, false
 }

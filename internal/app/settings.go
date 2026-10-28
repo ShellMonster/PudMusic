@@ -1,59 +1,13 @@
 // 应用设置的落盘：schema 版本 + 原子写 + 异步合并写。
 //
-// ## JSON 键名必须和 Biu 完全一致
-//
-// Biu 用 electron-store，落盘的是 `<UserData>/app-settings.json`，内容形如
-// `{"appSettings": {...}}`（见 `biu/electron/store.ts:12-21`，
-// `biu/src/store/settings.ts:46-57`）。键名全部来自
-// `biu/shared/settings/app-settings.ts` 的 `defaultAppSettings`，结构定义在
-// `biu/shared/types/app-setting.d.ts`。
-//
-// 我们原样沿用这些键名，**包括这一阶段还不用的那几个**（`ffmpegPath`、
-// `hiddenMenuKeys`、`displayMode`……）。理由不是"预留"，是为了用户来回切换
-// Biu 和 MyGo 时不丢东西：这一版读得懂、写得回，用户换个应用打开还是原样。
-// 丢字段是最难查的一类数据丢失。
-//
-// ## Biu 有**两种**文件，两种都得能读
-//
-// 「Biu 的设置文件」不是一个形状，是两个：
-//
-//   - `app-settings.json`（electron-store 自己落的盘）：外面包一层信封
-//     `{"appSettings": {...}, "__internal__": {...}}`。
-//   - `biu-settings-<时间戳>.json`（设置页上「导出配置」按钮下载下来的）：
-//     **裸的 `{...}`，外面没有信封**——`export-import.tsx:19` 写的是
-//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`，
-//     写的是 `appSettings` 的值本身。Biu 自己的「导入配置」要的也是这个形状
-//     （同文件 :46-51，逐个 `defaultAppSettings` 的键去取）。
-//
-// 用户真正会拿到手上、真正会拿来「导入」的是**第二种**——第一种躺在
-// `~/Library/Application Support/Biu/` 里，用户一般不知道它在哪。所以认不出
-// 裸的那份不是「少支持一种格式」，是**导入功能整个不工作**：整份文件被当成没有
-// 任何已知键，退回全默认值，**一声不响**，用户只会觉得「导入了但什么都没变」。
-//
-// 判据见 `splitEnvelope`。
-//
-// 本文件写出的 JSON 一定包含全部键；Biu 的文件可能省略 `proxySettings.port`
-// 这类可选键，读的时候补默认值即可——两个方向的差别只在这里。
-//
-// ## 为什么原子写不够（Codex M9）
-//
-// 临时文件 + rename 只保证「写到一半被断电」不会留下半个文件。它不管：
-//
-//   - **schema 版本**：文件是哪个版本写的、能不能读，这一层完全管不了。
-//   - **迁移失败怎么办**：升级到一半崩溃，留下的到底是新的还是旧的？
-//   - **版本回退**：用户把应用换回旧版，旧版读到新版的文件会怎样？
-//   - **多文件一致性**：这是本文件之外的事（播放队列、下载任务…），要靠
-//     「一次升级要么全成、要么全不成」来保证，见下面 ErrSettingsFromNewer。
-//
-// 所以本文件做四件事，缺一不可：schema 号、迁移链、迁移前备份、
-// 遇到更新的版本就**只读不写**。
+// 临时文件 + rename 只保证「写到一半被断电」不会留下半个文件；schema 版本和未来
+// 版本只读保护则由设置文件信封负责。
 package app
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,27 +18,13 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
-// SchemaVersion 是本包写出的设置文件格式版本。
-//
-// 改设置的**结构**（加键、删键、改类型）就要涨它，并往 migrations 里加一条
-// v→v+1 的路。只改取值范围、只加新的可选键，不用涨。
-//
-// 这不是历史包袱：自动更新会把用户从旧版直接送到新版，中间不经过用户确认，
-// 迁移链是唯一的兜底。
 const SchemaVersion = 1
 
 // SettingsFileName 是设置文件名。
-//
-// ⚠️ 和 Biu 的 `app-settings.json` 不一样。Biu 那个名字是 electron-store 的
-// `StoreNameMap.AppSettings` 直接拼出来的，没有语义。我们按 `PLAN.md` §3.4
-// 用 `settings.json`——**键名一致才需要兼容，文件名不需要**。
-//
-// 导入 Biu 的配置就是把它的文件放到设置文件该在的位置上，**内容不用改**：
-// Biu 的两种形状（electron-store 的 `app-settings.json`、以及设置页「导出
-// 配置」下载的 `biu-settings-*.json`）都能直接读，见文件头的说明和
-// `splitEnvelope`。
 const SettingsFileName = "settings.json"
 
 // 设置文件里几个约定值。
@@ -153,7 +93,7 @@ func ClampSideMenuWidth(v float64) float64 {
 	return v
 }
 
-// 主题档位。Biu 的 `ThemeMode = "system" | "light" | "dark"`。
+// 主题档位。
 type ThemeMode string
 
 const (
@@ -169,17 +109,8 @@ const (
 // 是 2026-10-26 本仓库**原创**补的四套（补上冷色和水墨/紫/蓝几个色相，对比度
 // 按 WCAG 现算过）——数值不取自任何现成的公开色板。
 //
-// ## 我们加的、Biu 没有的键
-//
-// Biu 只有 `themeMode`（浅 / 深 / 跟随系统）加一个主色一个底色，**没有「整套方案」
-// 这个概念**，所以 `themePreset` 是我们自己的键（见 `ourOwnKeys`）。Biu 读到
-// 我们的文件会把它当不认识的键，Biu 自己的设置一个键都没丢。
-//
-// ## 默认是「暖纸」，「经典」是显式的一档
-//
-// 「经典」就是原来的外观（Biu 绿加框架默认底色），不套任何方案，值是 `"classic"`。
-// 默认（包括键缺失、空串、不认识的值）一律是暖纸：应用还没发版，没有需要保住的
-// 旧外观；Biu 导出的配置里没有这个键，导入后也拿到暖纸。
+// 旧外观没有这一格，默认方案仍是暖纸。
+
 // 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
 // `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
 // 经典，免得「改了没反应」。
@@ -533,21 +464,7 @@ type Settings struct {
 	Playback PlaybackSnapshot `json:"playback"`
 
 	// DynamicSeen 是「动态红点看到哪儿了」。
-	//
-	// ⚠️ **这是我们自己的键**（Biu 那边没有）：Biu 把「看过没有」放在内存里
-	// （`user-feed/index.tsx:12` 的 useState），所以它重启之后又是「全部没看过」
-	// ——那个点每五分钟回来一次，而用户已经看过了。
-	//
-	// 键名是我们自己的，不是 Biu 的：放在设置里是因为设置存储已经把 schema 版本、
-	// 原子写、退出前 flush、只读保护这几件都做好了（理由同 Playback 那一格）。
 	DynamicSeen DynamicSeen `json:"dynamicSeen"`
-
-	// extra 是这个版本的代码不认识的键，原样带着走。
-	//
-	// 两个方向都要保：更新的 Biu 加了新键，或者未来的我们加了键而用户换回了
-	// 旧版——直接丢弃就是数据丢失。读进来时留下，写出去时原样带上，
-	// 我们认识的键以我们的值为准。
-	extra map[string]json.RawMessage
 }
 
 // knownSettingsKeys 是 Settings 里我们自己认识的键，从结构体标签反射出来。
@@ -582,54 +499,7 @@ func (s Settings) MiniLyricsCurtainOn() bool {
 	return *s.MiniLyricsCurtain
 }
 
-// UnmarshalJSON 读一个 Settings：已知的键按结构体读，剩下的存进 extra。
-func (s *Settings) UnmarshalJSON(b []byte) error {
-	// plain 去掉方法的那一份类型，防止 UnmarshalJSON 自己调自己。
-	type plain Settings
-	var v plain
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(b, &all); err != nil {
-		return err
-	}
-	extra := make(map[string]json.RawMessage, len(all))
-	for k, raw := range all {
-		if !knownSettingsKeys[k] {
-			extra[k] = raw
-		}
-	}
-
-	*s = Settings(v)
-	s.extra = extra
-	return nil
-}
-
-// MarshalJSON 写一个 Settings：自己的键 + 带回来的陌生键。
-func (s Settings) MarshalJSON() ([]byte, error) {
-	type plain Settings
-	b, err := json.Marshal(plain(s))
-	if err != nil || len(s.extra) == 0 {
-		return b, err
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
-	}
-	for k, raw := range s.extra {
-		if _, known := m[k]; !known {
-			m[k] = raw
-		}
-	}
-	return json.Marshal(m)
-}
-
-// settingsFile 是落盘的整体。信封是 Biu 的 `{"appSettings": {...}}`，
-// 外面多一个 schemaVersion。
-//
-// Biu 的 electron-store 还会写一个 `"__internal__"` 段（conf 的内部状态）。
-// 读的时候标准库会自动忽略它，我们也不写回去。
+// settingsFile 是当前版本的设置文件信封。
 type settingsFile struct {
 	SchemaVersion int      `json:"schemaVersion"`
 	AppSettings   Settings `json:"appSettings"`
@@ -727,9 +597,9 @@ func (s Settings) UpdateNotificationEnabled() bool {
 	return *s.UpdateNotification
 }
 
-// 设置文件的三种坏法。三种要分开，因为要分开处理。
+// 当前版本设置文件的坏法分为损坏、版本不匹配和存储已关闭三类。
 var (
-	// ErrSettingsCorrupt：文件在，但不是我们（或 Biu）写出来的 JSON。
+	// ErrSettingsCorrupt：文件在，但不是当前版本写出的有效 JSON。
 	// 处理：备份走，重置成默认值，让用户继续用。
 	ErrSettingsCorrupt = errors.New("app: 设置文件已损坏，已重置为默认值")
 
@@ -743,15 +613,7 @@ var (
 	ErrSettingsClosed = errors.New("app: 设置存储已关闭")
 )
 
-// LoadSettings 读一份设置。
-//
-// 没有这个文件**不是错误**，返回默认值——第一次运行就是这样。
-//
-// 读得懂三种形状（自己写的、Biu 的 electron-store 落盘文件、Biu「导出配置」
-// 下载的裸文件），见文件头和 `splitEnvelope`。
-//
-// 返回的 Settings 在出错时也总是可用的（要么是默认值，要么是从坏文件里
-// 尽力恢复出来的），调用方只需要看 error 决定要不要告诉用户。
+// LoadSettings 读取当前版本的设置文件；缺失文件使用默认值，旧版和未来版本不写回。
 func LoadSettings(path string) (Settings, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -761,56 +623,20 @@ func LoadSettings(path string) (Settings, error) {
 		return DefaultSettings(""), fmt.Errorf("app: 读设置 %s: %w", path, err)
 	}
 
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(b, &top); err != nil {
-		// 先把坏文件留下来再重置。没有它，用户丢了设置都不知道丢了什么，
-		// 也没法把里面没坏的部分捞回来。
+	var f settingsFile
+	if err := json.Unmarshal(b, &f); err != nil {
 		backupSettings(path)
 		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
 	}
-
-	s, from, err := splitEnvelope(b, top)
-	if err != nil {
-		backupSettings(path)
-		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
-	}
-
-	if from > SchemaVersion {
-		// 不备份、不动它。这是别人（更新的版本）写的，我们无权处置。
+	if f.SchemaVersion != SchemaVersion {
 		return DefaultSettings(""), fmt.Errorf("%w: 文件是 v%d，我们只到 v%d（%s）",
-			ErrSettingsFromNewer, from, SchemaVersion, path)
+			ErrSettingsFromNewer, f.SchemaVersion, SchemaVersion, path)
 	}
-
-	if err := applyMigrations(&s, from); err != nil {
-		backupSettings(path)
-		return DefaultSettings(""), fmt.Errorf("app: 升级设置 %s 失败，已保留原文件: %w", path, err)
-	}
-	s.normalize()
-	return s, nil
+	f.AppSettings.normalize()
+	return f.AppSettings, nil
 }
 
-// parseSettingsFile 从一段字节里认出一份设置和它是第几版。
-//
-// 它和 `LoadSettings` 的区别只有一处：**不碰磁盘**。配置文件导入需要直接解析 JSON，
-// 让它先落盘再走 `LoadSettings` 是「为了读一份文件而写一份文件」——会覆盖用户
-// 现在的设置，而且报出来的错会指向一个临时路径。
-//
-// 返回的 from 是文件**自己说的**版本（没有 `schemaVersion` 键就是 0，见
-// `splitEnvelope`），调用方自己决定要不要走迁移链。
-func parseSettingsFile(b []byte) (Settings, int, error) {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(b, &top); err != nil {
-		return Settings{}, 0, err
-	}
-	return splitEnvelope(b, top)
-}
-
-// marshalSettingsFile 按我们自己的 schema 把一份设置写成字节。
-//
-// 信封是 `{"schemaVersion": N, "appSettings": {...}}`（`settingsFile`），
-// 和 `SettingsStore.Flush` 写出去的是同一份形状——导出的那份配置**不带**这个
-// 信封，那是另一条路（见 `export.go`），因为 Biu 设置页「导出配置」下载的
-// 就是裸的 `appSettings`。
+// marshalSettingsFile 按当前版本的信封写出设置。
 func marshalSettingsFile(s Settings) ([]byte, error) {
 	return json.MarshalIndent(settingsFile{
 		SchemaVersion: SchemaVersion,
@@ -818,78 +644,10 @@ func marshalSettingsFile(s Settings) ([]byte, error) {
 	}, "", "  ")
 }
 
-// splitEnvelope 把一份设置文件拆成「设置」和「它是第几版」。
-//
-// 三种形状，认错任何一种的后果都是**静默丢设置**：
-//
-//  1. 我们自己写的：{"schemaVersion": 1, "appSettings": {...}}
-//  2. Biu 的 electron-store 落盘文件：{"appSettings": {...}, "__internal__": {...}}
-//     （`__internal__` 是 conf 的内部状态，标准库自动忽略，我们也不写回去）
-//  3. **Biu 设置页上「导出配置」下载的那份：裸的 `{...}`，外面没有信封。**
-//     `biu/src/pages/settings/export-import.tsx:19` 写的是
-//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`。
-//     用户真正拿得着的导入文件就是这一种。
-//
-// 判据只有一条：**顶层有没有 `appSettings` 这个键**。裸的那份里根本没有它
-// （那 20 个键是 autoStart、closeWindowOption……），两种形状不会认错。
-//
-// 裸的那份按 **v0** 读：它没有 schemaVersion 键，那就是 0，也就是「Biu 直接
-// 导出的那份」——和它带信封时走的是同一条迁移链，v0 那一步会把 Biu 自己那个
-// `"system-default"` 坏字体值修掉（`biu/src/store/settings.ts:37-39` 专门兼容
-// 它，旧版本导出的文件里就是会有）。
-func splitEnvelope(b []byte, top map[string]json.RawMessage) (Settings, int, error) {
-	if _, ok := top["appSettings"]; ok {
-		var f settingsFile
-		if err := json.Unmarshal(b, &f); err != nil {
-			return Settings{}, 0, err
-		}
-		return f.AppSettings, f.SchemaVersion, nil
-	}
-	var s Settings
-	if err := json.Unmarshal(b, &s); err != nil {
-		return Settings{}, 0, err
-	}
-	return s, 0, nil
-}
-
-// migration 把 v 升到 v+1。
-type migration func(*Settings) error
-
-// migrations 是迁移链。key 是**升级前**的版本号。
-var migrations = map[int]migration{
-	// v0：Biu 直接导出的文件（没有 schemaVersion）。
-	// 键名我们原样沿用，所以结构上不用搬东西，只要修掉 Biu 自己那个已知坏值。
-	0: func(s *Settings) error {
-		if s.FontFamily == "system-default" {
-			s.FontFamily = DefaultFontFamily
-		}
-		return nil
-	},
-}
-
-// applyMigrations 一路往上走。每一步失败就把错误交出去，绝不半途停下留个
-// 「一半新一半旧」的结果。
-func applyMigrations(s *Settings, from int) error {
-	for v := from; v < SchemaVersion; v++ {
-		m, ok := migrations[v]
-		if !ok {
-			return fmt.Errorf("没有从 schema v%d 升到 v%d 的路", v, v+1)
-		}
-		if err := m(s); err != nil {
-			return fmt.Errorf("v%d → v%d: %w", v, v+1, err)
-		}
-	}
-	return nil
-}
-
 // hexColor 是合法的颜色写法，和 MyGo 的 ui.Hex 接受的一样。
 // 这里自己写一份：本包不认识界面，不能 import mygo/ui。
 var hexColor = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
 
-// normalize 把明显不合理的值拉回合法区间。
-//
-// 这一步不是可选的洁癖：设置文件是用户能直接编辑的，也可能从 Biu、备份、
-// 手改的导入里来，一个 `borderRadius: 9999` 不该一路穿到画界面的那一行。
 func (s *Settings) normalize() {
 	s.BorderRadius = min(max(s.BorderRadius, 0), MaxBorderRadius)
 	if s.FontFamily == "" {

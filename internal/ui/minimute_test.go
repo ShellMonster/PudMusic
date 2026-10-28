@@ -564,7 +564,7 @@ func TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound(t *testing.T) {
 	// 造出那个状态：**老设置文件**（只有 `volume`，没有 `isMuted`）。
 	dir := writableTempDir(t, "settings")
 	path := filepath.Join(dir, app.SettingsFileName)
-	if err := os.WriteFile(path, []byte(`{"volume":0}`), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schemaVersion":1,"appSettings":{"volume":0}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	a := app.New()

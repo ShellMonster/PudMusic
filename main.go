@@ -61,14 +61,6 @@ func main() {
 	}
 
 	a := app.New()
-	// 数据升级排在**所有挂载之前**。顺序反了的话，备份里
-	// 存到的是「已经被挂载动过的」内容，回滚回不去；而且只读判断也会晚一步，
-	// 一份来自更新版本的文件会先被挂载按旧语义改写一遍。
-	//
-	// 失败不挡启动：用户照常用这个应用，数据存不住的事界面上另有提示。
-	if err := ui.MountMigration(); err != nil {
-		log.Printf("biu: 升级数据失败，原文件都留着了：%v", err)
-	}
 	if err := ui.MountSettings(a); err != nil {
 		log.Printf("biu: 拿不到应用数据目录，这次的设置存不住：%v", err)
 	}

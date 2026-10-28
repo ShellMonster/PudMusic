@@ -300,7 +300,7 @@ func TestAFreshInstallGetsBiuDefaultMode(t *testing.T) {
 
 	// 一份没有 playMode 这一格的旧设置文件。
 	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	writeFile(t, path, `{"appSettings":{"themeMode":"light"}}`)
+	writeFile(t, path, `{"schemaVersion":1,"appSettings":{"themeMode":"light"}}`)
 	s, err := app.LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestAFreshInstallGetsBiuDefaultMode(t *testing.T) {
 	}
 
 	// 手写坏的值也该被拉回来，而不是原样留在界面上。
-	writeFile(t, path, `{"appSettings":{"playMode":"whatever"}}`)
+	writeFile(t, path, `{"schemaVersion":1,"appSettings":{"playMode":"whatever"}}`)
 	s, err = app.LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)

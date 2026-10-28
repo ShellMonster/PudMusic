@@ -1,13 +1,5 @@
-// 快捷键的写法：把一次按键变成 Biu/Electron 的 accelerator 串，再把那个串画成
-// 人看得懂的符号。照 Biu 的 `src/common/utils/shortcut.ts` 两个函数逐条来。
-//
-// ## 为什么存的是 Electron 的 accelerator，而不是 MyGo 的 (Modifiers, Key)
-//
-// 因为要**和 Biu 双向兼容**：用户在 Biu 里录的 ⌘⇧P 换到这边得认得，反过来也是。
-// MyGo 那一对在 macOS 上是 `Super`、别处是 `Ctrl`，写出去就成了 `Ctrl+Shift+P`，
-// Biu 那边读不懂，`CommandOrControl` 才是两边都认的那个词。
-//
-// ## 三个规矩（Biu 的 handleKeyDown + PLAN C-49）
+// 快捷键的写法：把一次按键变成 accelerator 串，再把那个串画成
+// 人看得懂的符号。
 //
 //   - **所有按键都吃掉**：回调返回 true，MyGo 就不会把这个键继续交给 Tab、方向键
 //     滚动、菜单角色那一整套（`ui/input.go:679` 的 `rt.deliver` 之后直接
@@ -30,9 +22,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// accelerator 是 Biu（= Electron）写快捷键的格式：`CommandOrControl+Alt+Shift+P`。
-//
-// 存的是**一串**而不是结构体，为的是它原样就是 Biu 文件里的值，读写都不用翻译。
+// accelerator 是应用使用的快捷键格式，例如 `CommandOrControl+Alt+Shift+P`。
 type accelerator string
 
 // 修饰键在串里的那三个词。顺序照 Biu：CommandOrControl、Alt、Shift。
