@@ -201,7 +201,17 @@ type downloadsPage struct {
 	// `widgets/list` 的 failed 一样：MyGo 的事件循环没有 recover（页级那道在
 	// `Shell.page`，兜的是整页），不记的话这一格每帧崩一次，日志被刷爆、
 	// 帧率拖垮——比画不出来糟得多。
-	failed map[string]bool
+	//
+	// ⚠️ **键是 `dlCellKey`（一个结构体），不是字符串**：这个键**每一格每一帧**
+	// 都要算一次，而它算出来只用来查这一张表、查完就扔——原先那一句
+	// `fmt.Sprintf("%s#%d", …)` 于是每格每帧多一次分配 ＋ 一次格式化
+	// （一屏八行 × 五列 = 四十次；票 #633）。结构体键**零分配**。
+	//
+	// ⚠️ **它必须是「行 id + 列号」，不能改成行下标**：行会重排（用户在上面删掉
+	// 一条，下面的行往上挪），按下标记的话，用户删掉一行之后，崩过的那一格就
+	// 记到**别的行**上了——而界面上只是「有一格写着画不出来」，错位看不出来。
+	// （`TestTheBrokenCellFollowsItsRowWhenTheRowsMove` 钉的就是这一条。）
+	failed map[dlCellKey]bool
 
 	// ask 是「你确定吗」那一弹窗，非 nil 时开着。见 downloadlist_ops.go。
 	ask *confirmAsk
@@ -448,6 +458,50 @@ func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
 // dlRowKey 是「下标越界」时给的行身份。一个歌不可能撞上的类型。
 type dlRowKey struct{}
 
+// dlCellKey 是「下载记录页的那一格」的身份。
+//
+// # 它是「行 id + 列号」，而**不是**字符串
+//
+// 🔴 **这个键每一格每一帧都要算一次**，算出来只用来查 `d.failed` 那一张表
+// （记着「哪一格画崩了」）、查完就扔——所以它**必须是不分配的**。
+//
+// 原先那一句 `fmt.Sprintf("%s#%d", rowID, col)` 每格每帧多一次分配 ＋ 一次
+// 格式化：一屏八行 × 五列 = **四十次**（票 #633 量的那个数）。
+// **map 的键不必是字符串**——一个可比较的结构体键查表是零分配的。
+//
+// # 为什么两个维度都得在
+//
+// 只认行 id 的话，崩了一格会把**整行**都废掉（用户看到的是整行写「画不出来」）；
+// 只认列号的话，**每一行**的那一列都一起废掉（用户看到的是整列）。
+//
+// # ⚠️ **行 id 那一维不许换成行下标**
+//
+// 行会重排：用户在上面删掉一条，下面的行往上挪一格。而「崩过的那一格」那个
+// 记录**必须跟着那一行走**——它是「行 id + 列号」，不是「第几行」。
+//
+// 按下标记的话：崩的是**歌 甲**（第 0 行）的第 0 列，用户删掉歌 甲 之后，**歌 乙**
+// 挪到第 0 行——于是那个记录记到了**歌 乙**头上，歌 乙的文件那一格也变成
+// 「画不出来」，而真正崩过的歌 甲 已经不在屏幕上了。
+//
+// **症状是静默的**：界面上只是「有一格写着画不出来」，用户不会知道那记的是
+// 另一首歌。`TestTheBrokenCellFollowsItsRowWhenTheRowsMove` 钉的就是这一条。
+type dlCellKey struct {
+	// rowID 是那一行的身份（`download.Snapshot.ID`）。
+	//
+	// ⚠️ **它是行 id，不是行下标**：理由见上面那一段。
+	rowID string
+	// col 是列号（`colFile` / `colStatus` / …）。
+	col int
+}
+
+// cellKey 算「这一格」的身份。
+//
+// ⚠️ **它必须是零分配的**（这一格每一帧都要算一次，而算出来只用来查一张表），
+// 所以这里不拼字符串——见 `dlCellKey` 的注释。
+func (d *downloadsPage) cellKey(r download.Snapshot, col int) dlCellKey {
+	return dlCellKey{rowID: r.ID, col: col}
+}
+
 // viewCell 画一格，外包一层 panic 兜底。
 //
 // 🔴 **这一格自己兜住自己**：页级那道 Guard（`Shell.page`）兜的是**整页**——
@@ -465,18 +519,18 @@ func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 		dlBrokenCellText(c)
 		return
 	}
-	id := fmt.Sprintf("%s#%d", d.rows[row].ID, col)
-	if d.failed[id] {
+	key := d.cellKey(d.rows[row], col)
+	if d.failed[key] {
 		dlBrokenCellText(c)
 		return
 	}
 	defer func() {
 		if rec := recover(); rec != nil {
 			if d.failed == nil {
-				d.failed = map[string]bool{}
+				d.failed = map[dlCellKey]bool{}
 			}
-			d.failed[id] = true
-			log.Printf("biu: 下载记录的一格画崩了（%s）：%v\n%s", id, rec, debug.Stack())
+			d.failed[key] = true
+			log.Printf("biu: 下载记录的一格画崩了（%s）：%v\n%s", dlCellLabel(key), rec, debug.Stack())
 			// 🔴 **崩了要再要一帧**：recover 接住的是 build pass **中间**，那一格
 			// 剩下的部分没建（封面那一格是个空盒子），画出来是半张。下一帧那一格
 			// 才画得出「画不出来」——而界面是**按需绘制**的：没人要帧，那一格就
@@ -490,6 +544,16 @@ func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 		}
 	}()
 	d.drawCell(c, s, row, col)
+}
+
+// dlCellLabel 把一个格子的身份写成给人看的那一句。
+//
+// ⚠️ **它只用在日志里**（崩了的那一格报出来是哪一格），而日志**不是每帧**写
+// 的——所以这里拼字符串不心疼（`fmt.Sprintf` 一次是分配，而它一天也不写几次）。
+//
+// ⚠️ **它不许反过来当键用**：键是 `dlCellKey` 那个结构体（见它的注释）。
+func dlCellLabel(k dlCellKey) string {
+	return fmt.Sprintf("%s#%d", k.rowID, k.col)
 }
 
 // dlBrokenCellText 是「这一格画不出来」那一行字。
