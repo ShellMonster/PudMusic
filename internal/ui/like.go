@@ -166,6 +166,10 @@ type likeGesture struct {
 	// fired 是这一按已经三连过。再按住多久都不再发第二次（Biu 的
 	// `longPressTimerRef` 是一次性的）。
 	fired bool
+	// fireAt 是这一按三连触发的时刻（`s.clock` 的钟）。触发之后要帧还要走
+	// likePopTotal 这么一小段（赞键的那一弹要帧走完；顺带让环在答案回来之前
+	// 也收得掉），见 trackLike 尾上那个条件。
+	fireAt time.Time
 	// swallow 是「下一次 click 要吞掉」。三连触发时置上，长按的松手那一帧被
 	// `swallowClick` 消费掉。理由见文件头。
 	swallow bool
@@ -247,7 +251,7 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 		if !g.fired && held >= likeLongPress {
 			// 到点了。Biu 那边这一帧把进度环收掉（`setIsProgressing(false)`）
 			// 并把补发的那一次 click 标成要吞的（`ignoreNextPressRef = true`）。
-			g.fired, g.swallow = true, true
+			g.fired, g.swallow, g.fireAt = true, true, now
 			s.tripleNow()
 		}
 		// 环：500ms 之后才开始画，画到三连那一刻正好转满。
@@ -281,9 +285,14 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 	//   按环那一套在 500ms 后停手的话，暂停时没有 tick、指针不动没有事件，
 	//   长按就冻在半路：抖停了、三连永远发不出去（而且无头测试发现不了
 	//   ——Tester 的 `Frame()` 会无条件出一帧，把冻住盖住，见
-	//   TestTheButtonLongPressKeepsAskingForFrames）。代价是抖动那两秒整棵
-	//   树每帧重建一遍——有界（松手/触发即停），和任何 AnimateTo 动画同款。
-	if armed && pressed && (!ringed || g.progress <= 0) {
+	//   TestTheButtonLongPressKeepsAskingForFrames）。
+	//
+	// ⚠️ **触发之后有界地再要一小段**：赞键那一弹（AnimateTo 缩放的那一档）
+	//   要帧走完 100ms 上 + 180ms 回；顺带让封面上的环也在答案回来
+	//   之前就收掉，而不是挂在「满」上等回包叫醒。过了这一段就真的停了——
+	//   再按着不放也没有东西在动，松手有指针事件叫醒，不会丢帧。
+	if armed && pressed && (!ringed || g.progress <= 0) &&
+		(!g.fired || now.Sub(g.fireAt) < likePopUp+likePopDown) {
 		c.AnimationFrame()
 	}
 }
@@ -379,7 +388,7 @@ func (s *Shell) viewLikeRing(g *likeGesture, c *ui.Context, pressed bool, radius
 		PassThrough().
 		Role(ui.RoleProgress).Label("点赞进度")
 	ring.Draw(func(p *ui.Painter, r ui.Rect) {
-		progress := s.likeRingProgress(g, armed)
+		progress := s.likeRingProgress(g)
 		if progress <= 0 {
 			// 三连刚发出去（或者这一段本来就不画）：环收掉。
 			//
@@ -409,16 +418,23 @@ func (s *Shell) viewLikeRing(g *likeGesture, c *ui.Context, pressed bool, radius
 //
 // ⚠️ **三连也是在这里发出去的**（而不是等到下一次重建）：局部重绘那一帧**不
 // 重建**，而「按了多久」只有这一层知道——等下一次重建才发现就晚了。
-func (s *Shell) likeRingProgress(g *likeGesture, armed bool) float32 {
+//
+// ⚠️ **armed 每次现问（`likeArmed(s.app)`），不吃建帧时捕获的那一份**：环一旦
+// 出来，500–2500ms 整段走局部重绘、**不重建**，闭包里冻着的 armed 两秒不更新
+// ——期间赞状态被后台翻掉（问回来的结果落地、多端同步）的话，用冻着的那一份
+// 会照走到满、照发三连。现问的成本是三次读，零分配。
+func (s *Shell) likeRingProgress(g *likeGesture) float32 {
 	if !g.held {
 		return 0
 	}
-	held := s.clock.Now().Sub(g.start)
+	now := s.clock.Now()
+	held := now.Sub(g.start)
+	armed := likeArmed(s.app)
 	if armed && !g.fired && held >= likeLongPress {
 		// 到点了（同 `trackLike` 那一支）：Biu 那边这一帧把进度环收掉
 		// （`setIsProgressing(false)`）并把补发的那一次 click 标成要吞的
 		// （`ignoreNextPressRef = true`）。
-		g.fired, g.swallow = true, true
+		g.fired, g.swallow, g.fireAt = true, true, now
 		s.tripleNow()
 	}
 	if !armed || g.fired || held <= likeRingDelay {

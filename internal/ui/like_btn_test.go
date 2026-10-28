@@ -136,11 +136,13 @@ func TestTheLikeButtonShakesWhileHeld(t *testing.T) {
 			biuLikeRingDelayMS-100, n)
 	}
 
-	// 500 → 600 → 700 毫秒：抖起来了，隔 100 毫秒的两帧必须不一样。
+	// 500 → 600 → 645 毫秒：抖起来了，隔半个周期（45ms）的两帧必须不一样。
+	// ⚠️ 采样差要跨换向点：隔 100ms 的话相位只差 40°，图标偏移差 0.18px——
+	// 抗锯齿的余量能不能显出来全看光栅化心情；隔半周期最大差 3px，断得实。
 	advanceLike(e, 200*time.Millisecond) // 400 + 200 = 600 毫秒
 	e.tt.Frame()
 	mid := cloneImage(e.tt.Image())
-	advanceLike(e, 100*time.Millisecond)
+	advanceLike(e, 45*time.Millisecond)
 	e.tt.Frame()
 	if n := diffIn(btn, mid, e.tt.Image()); n == 0 {
 		t.Error("按住半秒之后键上的图形一动不动 —— 抖动没接上")
