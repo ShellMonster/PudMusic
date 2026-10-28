@@ -820,6 +820,44 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「严格 HTTP fixture」那一组：这一票动的是**地址**（票 #634）。
+		//
+		// 归这一组是因为它量的全是**请求**：请求发了几次、请求的是哪个地址。
+		Category: HTTP,
+		// 票 #634（#629 的实现）：所有头像走**同一个**规范化入口（补协议、
+		// **不**拼裁剪参数），裁剪参数由图片缓存**按显示尺寸**统一决定；
+		// 而按显示尺寸拼出来的那个地址**记好一份**（每帧不再重拼）。
+		//
+		// ⚠️ **两件事的错法都是「静默」的**：地址不统一 → 同一个 UP 主的同一张脸
+		// 在关注页和空间页上是**两个缓存条目、两次下载**（界面上看不出区别，用户
+		// 只看到同一张脸）；每帧重拼 → 一屏十二张封面每帧多十二次分配（画面上
+		// 更看不出区别，只是「界面有点粘」）。
+		//
+		// ⚠️ **判据全是「请求了什么 / 请求了几次 / 每帧分配了几次」**，不是
+		// 「拼了几次」——后者是内部实现，换个实现照样对。
+		Spec: "所有头像走同一个规范化入口（服务层不拼裁剪参数，图片缓存按显示尺寸统一决定那一档）；同一个 UP 主的脸在关注列表和他空间之间来回切，请求次数不增加；按显示尺寸拼出来的地址记好一份（每帧不再重拼），而那一份有上限",
+		Tests: []string{
+			// 服务层：所有头像**逐字相同**、不带裁剪参数、已经带参数的原样返回。
+			"TestEveryAvatarComesFromTheSameNormalization",
+			"TestAvatarAddressesCarryNoCropParams",
+			"TestAnAvatarThatAlreadyHasCropParamsIsLeftAlone",
+			"TestTheOwnerFaceIsTheSameOneAsEverywhereElse",
+			// 图片缓存：请求的是「按显示尺寸」那一档；头像要正方形（中心裁剪）。
+			"TestTheAvatarAsksForTheSizeItIsDrawnAt",
+			"TestTheAvatarStaysSquare",
+			// 图片缓存：同一个脸只下一次；拼出来的地址记好一份；那一份有上限。
+			"TestTheSameFaceIsOnlyAskedForOnce",
+			"TestTheSizedURLIsRemembered",
+			"TestTheRememberedURLsAreBounded",
+			// 端到端：真页面（假 B 站 + 假图床）来回切，请求次数不增加；
+			// 而头像**照旧画出来**（正方形、中心是那张脸——不是一块灰饼）；
+			// 顶栏那一枚也要的是**裁好的那一张**（不是原图）。
+			"TestTheSameFaceIsNotDownloadedAgainWhenSwitchingPages",
+			"TestTheAvatarIsStillDrawn",
+			"TestTheNavbarAvatarAsksForACroppedImage",
+		},
+	},
+	{
 		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
 		//
 		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
