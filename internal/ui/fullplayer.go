@@ -1082,7 +1082,9 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		// 长按 2.5 秒 = 一键三连。满屏上**没有**别的赞入口（照抄 Biu：它那边
 		// 满屏那张封面是 `pointer-events-none`，三连只在播放条上）——我们把这一层
 		// 接进来是因为 SPEC 需求 69 说的是「长按封面」，而满屏上只有这一张封面。
-		s.viewLikeRing(c, box.Pressed())
+		// 状态机用两张封面共用的 `s.like`（满屏开着时播放条不建，互斥），圆角
+		// 跟这层 Box 的那一个走，环才贴得住边。
+		s.viewLikeRing(&s.like, c, box.Pressed(), c.Theme().Radius)
 	})
 
 	// 🔴 **每个长按目标都要在这里问一句 `swallowClick`**（播放条那一张在

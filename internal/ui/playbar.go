@@ -1285,8 +1285,9 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		// 长按 2.5 秒 = 一键三连（SPEC 需求 69），500ms 起进度环。
 		//
 		// ⚠️ **它在 `Children` 里面**：环画的是「这一帧按了多久」，而那要靠
-		// `wrap.Pressed()` 问出来（见 like.go 的 viewLikeRing）。
-		s.viewLikeRing(c, wrap.Pressed())
+		// `wrap.Pressed()` 问出来（见 like.go 的 viewLikeRing）。状态机用两张
+		// 封面共用的 `s.like`，圆角传封面的那一个 6——环贴着外边框拐弯。
+		s.viewLikeRing(&s.like, c, wrap.Pressed(), coverRadius)
 	})
 
 	if wrap.Clicked() {

@@ -120,8 +120,8 @@ func TestTheLikeIconPopsBeforeTheBackgroundGrows(t *testing.T) {
 	// 开始走）——所以要看的是**推一点钟之后**。
 	e.tt.Advance(50 * time.Millisecond)
 	e.tt.Frame()
-	if e.s.like.iconScale <= 1 {
-		t.Errorf("赞出去 50ms 之后图标层是 %v，want > 1（它该先弹起来）", e.s.like.iconScale)
+	if e.s.likeBtn.iconScale <= 1 {
+		t.Errorf("赞出去 50ms 之后图标层是 %v，want > 1（它该先弹起来）", e.s.likeBtn.iconScale)
 	}
 
 	// 背景层：这时候**还没动**——它晚 0.1s 才开始，所以图标那一块之外一个
@@ -183,7 +183,7 @@ func TestTheLikeBackgroundGrowsToFullSize(t *testing.T) {
 		t.Errorf("赞出去 600ms 之后背景层长到半径 %d 像素，want %d（长满了）", g.radius, want)
 	}
 	// 图标层弹完要回到 1。
-	if e.s.like.iconScale > 1.01 {
-		t.Errorf("赞出去 600ms 之后图标层是 %v，want 1（弹完该回去了）", e.s.like.iconScale)
+	if e.s.likeBtn.iconScale > 1.01 {
+		t.Errorf("赞出去 600ms 之后图标层是 %v，want 1（弹完该回去了）", e.s.likeBtn.iconScale)
 	}
 }

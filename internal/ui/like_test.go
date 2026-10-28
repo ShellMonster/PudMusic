@@ -102,6 +102,35 @@ func TestTheRingGrowsWhileTheCoverIsHeld(t *testing.T) {
 	}
 }
 
+// TestTheRingHugsTheCoverBorder 钉住「环贴着封面外边框」。
+//
+// 旧的那版是外接椭圆：它只在中边那四个点摸到封面的边，四个角上**一辈子没有
+// 像素**——在方形封面的角上，椭圆整段划进封面里头去。贴边的这一版跟着封面的
+// 圆角矩形走：环走到右上角（约 750 毫秒）时，封面圆角外那一小块凹角必须亮起来。
+//
+// 凹角 = 封面外框以内、圆角以外的那一小块。悬停浮层的圆角把它让了出来，
+// 基线里它是干净的。
+func TestTheRingHugsTheCoverBorder(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	cover, before := holdCover(t, e)
+	corner := mygoui.Rect{X: cover.X + cover.W - 4, Y: cover.Y, W: 4, H: 4}
+
+	// 600 毫秒：环还在顶边右半上，没到角。
+	advanceLike(e, biuLikeRingDelayMS*time.Millisecond+100*time.Millisecond)
+	e.tt.Frame()
+	if n := diffIn(corner, before, e.tt.Image()); n != 0 {
+		t.Errorf("才按住 %d 毫秒角上就有 %d 个像素 —— 环走得太快",
+			biuLikeRingDelayMS+100, n)
+	}
+
+	// 800 毫秒：环过了右上角。
+	advanceLike(e, 200*time.Millisecond)
+	e.tt.Frame()
+	if n := diffIn(corner, before, e.tt.Image()); n == 0 {
+		t.Error("环走到右上角了，圆角外的凹角却一个像素都没有 —— 它还是椭圆，不是贴着外边框")
+	}
+}
+
 // TestLettingGoEarlyDoesNothing 钉住「短按不是三连」。
 //
 // 而那一次短按**照旧是普通点击**（封面照旧开全屏）：Biu 那边短按赞键是「赞一下」，
@@ -385,8 +414,8 @@ func ringBuilt(tt *mygoui.Tester) bool {
 // 环是画在封面**外面**的（Biu 的 `inset: -2px`），所以外面这一圈是干净的：
 // 没有环的时候数出来**正好是 0**。
 //
-// ⚠️ 一个刚开始的环只有 4~5 个像素（进度 0.1% 是 1 段，一段 2×2），所以
-// 「画出来了吗」判的是 `> 0` 而不是「够不够多」。
+// ⚠️ 一个刚开始的环只有几个像素（起步那一截有 `likeRingMinSpan` 那么长、2px 宽），
+// 所以「画出来了吗」判的是 `> 0` 而不是「够不够多」。
 func ringPainted(tt *mygoui.Tester, cover mygoui.Rect, before *image.RGBA) int {
 	now := tt.Image()
 	band := inflate(cover, likeRingWidth*2+2)
