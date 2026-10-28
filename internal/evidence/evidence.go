@@ -1839,7 +1839,7 @@ var Items = []Item{
 			"TestStreamingJPEGRejectsTruncation",
 			"TestStreamingJPEGUnsupportedVariantsFallBack",
 			"TestJPEGEXIFOnlyRotationsAreMadeUprightAndScaled",
-				"TestDecodedCoversDoNotHoldTheirBytes",
+			"TestDecodedCoversDoNotHoldTheirBytes",
 			"TestJPEGRowCorpusMatchesStandardDecoder",
 			"TestImageCacheBudgetFromEnvironment",
 			"TestAnEntryEvictedBeforeItIsDecodedIsNotAccounted",
@@ -2751,6 +2751,49 @@ var Items = []Item{
 			// 同一个 bvid 的**另一分 P** 的在途那一趟也不许把自己的 cid 写上
 			// （bvid 对得上不够——多 P 的投稿 bvid 是同一个）。
 			"TestTheInFlightRunOfAnotherPartDoesNotWriteItsCid",
+		},
+	},
+	{
+		Category: HTTP,
+		// 封面取色那一趟（票 #623）。
+		//
+		// 钉的是四件事：
+		//
+		//   - **要的是小图，不是原图**：从前为了算出一个颜色把封面原图整张
+		//     解码（实测 276ms~1375ms/张），而取色算法本身只要几百微秒——
+		//     解码占了 99.9%。用户看到的「顶部颜色渲染慢」是「顶部颜色算得慢」。
+		//   - **参数不带 `_1c`**：那是中心裁剪，会切掉画面两边，而主色常常在
+		//     边上——实测 60 张真封面最大偏 172.9°（取到另一个颜色）。
+		//   - **颜色不能变**：换了取色的图，光晕的颜色必须一样。
+		//   - **同一个封面不重下**：切走再切回那个歌单，光晕立刻就在
+		//     （不重新下载、不重新解码）；而**取不到色**的封面（黑白封面）
+		//     也要记进缓存——不记的话每一帧都重发一次请求。
+		Spec: "封面取色：要小图不要原图、参数不带中心裁剪、颜色与原图一致、同一个封面不重复下载（取不到色的也要记）",
+		Tests: []string{
+			"TestTheTintAsksForASmallCoverAndNotTheOriginal",
+			"TestTheTintAsksForASmallEnoughCover",
+			"TestTheNeteaseCoverKeepsItsOwnScaling",
+			"TestAnAlreadyScaledCoverIsLeftAlone",
+			"TestAForeignImageHostIsLeftAlone",
+			"TestTheSmallCoverKeepsTheColour",
+			"TestTheCentreCropWouldChangeTheColour",
+			"TestTheSecondJpegCompressionDoesNotChangeTheColour",
+			"TestShrinkingTooFarDriftsTheColour",
+			"TestTheSamplingStepCanSkipANarrowStripe",
+			"TestThisPackageDecodesWebPOnItsOwn",
+			"TestTheTintEndToEndKeepsTheColour",
+			"TestTheTintIsRememberedPerCover",
+			"TestTheTintCacheKeepsMoreThanOneCover",
+			"TestTheTintCacheIsBounded",
+			"TestTheTintCacheIsKeyedByTheURL",
+			"TestACoverWithoutColourIsStillRemembered",
+			"TestANetworkFailureDoesNotRetryEveryFrame",
+			"TestANetworkFailureIsRetriedAfterTheBackoff",
+			"TestTheCollectionHeaderAsksForASmallCover",
+			"TestTheCollectionHeaderGetsItsColour",
+			"TestTheCollectionHeaderKeepsItsColourAcrossVisits",
+			"TestTheColourSurvivesGoingBackAndForth",
+			"TestTheColourIsTheSameAsTheOriginalWouldGive",
 		},
 	},
 	{
