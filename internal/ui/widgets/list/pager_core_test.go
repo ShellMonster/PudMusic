@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,20 +145,20 @@ func TestPagerStopsAfterEmptyPage(t *testing.T) {
 }
 
 func TestPagerWakesRegisteredServicesWhenResultArrives(t *testing.T) {
-	var wakes int
+	var wakes atomic.Int32
 	p := NewPager(func(context.Context, int, int, struct{}) (PagerPage[string], error) {
 		return PagerPage[string]{Items: []string{"ok"}}, nil
 	}, func(v string) string { return v }, func() struct{} { return struct{}{} })
 	p.SetApply(func(page PagerPage[string]) int { return len(page.Items) })
 	p.wakeMu.Lock()
-	p.wakes = append(p.wakes, pagerWake{wake: func() { wakes++ }})
+	p.wakes = append(p.wakes, pagerWake{wake: func() { wakes.Add(1) }})
 	p.wakeMu.Unlock()
 	p.Sync(ui.Services{})
 	waitPager(t, func() bool {
 		p.Sync(ui.Services{})
 		return p.Status().Loaded == 1 && !p.Status().Loading
 	})
-	if wakes == 0 {
+	if wakes.Load() == 0 {
 		t.Fatal("pager result did not invalidate a registered window")
 	}
 }
