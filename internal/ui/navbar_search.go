@@ -331,6 +331,16 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		// （浮层没开就不问，见 `syncSuggest`）。
 		s.syncSuggest(s.clock.Now())
 
+		// 热词占位：框空着的时候轮换网易云的热搜词（`navbar_hotword.go`）。排在这
+		// 一帧的焦点定下来之后——聚焦不换词，认的就是刚写过的 `s.searchFocused`。
+		s.syncHotwords(s.clock.Now())
+		// ⚠️ **占位词在这里换**（builder 事后调，和上面 `row.Background` 同一个
+		// 办法）：字段建的时候占位词还是「搜索」，这一帧该显示哪个词要等
+		// `syncHotwords` 推完才知道。等于「搜索」就不动了。
+		if ph := s.hotwordPlaceholder(); ph != searchLabel {
+			field.Placeholder(ph)
+		}
+
 		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}

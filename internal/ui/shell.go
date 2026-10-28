@@ -185,6 +185,10 @@ type Shell struct {
 	notFoundAt   time.Time
 	notFoundStop func()
 
+	// hotword 是搜索框那个轮换热词占位的跨帧状态（轮到第几个、这一轮从几时
+	// 算起、那个每 5 秒一跳的定时器），见 navbar_hotword.go。和上面两个一样，
+	// 定时器回调只调 wakeHandle.invalidate，其余只由主线程读写。
+	hotword hotwordState
 	// pageBody 是画页面内容的那一支。单独拎出来是为了能替掉它测崩溃
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
 	pageBody func(*ui.Context, *ui.Route, Route)
@@ -1209,6 +1213,9 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 把这一格换成 `tt.Frame()`（见 `shelltest_test.go`），于是「那句话在画面
 	// 上」在测试里当场成立。
 	s.repaint = s.wake.invalidateNow
+	// 热词轮换那一摊的唤醒函数同理绑一次（方法值每帧现取就是每帧一次堆分配，
+	// 理由见 navbar_hotword.go 文件头）。
+	s.hotword.wake = s.wake.invalidate
 	// 快捷键那两条路的动作都落到它。方法值在这儿绑一次就够：runShortcut 只碰
 	// s.app 和 s.router，两个都是建好之后就一直在的。
 	s.onShortcut = s.runShortcut
