@@ -65,7 +65,7 @@
 
 ### 调用时机
 
-`main()` 的**第一句**就调 `PinUserDataDir()`，它排在 `app.New()` 与所有 `Mount*` 之前：
+`bootstrap.Assemble` 的第一阶段调用 `PinUserDataDir()`，它排在 `app.New()` 与所有 `Mount*` 之前：
 
 - 必须排在所有 `mygo.App.Path(mygo.PathUserData)` 之前；
 - 「**读不到设置**」的默认处理是**安静地按第一次运行开起来**——晚一步的症状是
