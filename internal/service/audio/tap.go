@@ -68,6 +68,8 @@ type tap struct {
 	// enabled 控制频谱分析是否运行。它只跳过 FFT 和历史写入，EQ、均衡和
 	// 音频样本仍然照常通过 tap。
 	enabled atomic.Bool
+	// generation 让关闭频谱时已经开始计算的旧 Read 在提交历史前失效。
+	generation atomic.Uint64
 	// out 是分析器的输出缓冲（FFT 的中间量在 Analyzer 自己那里）。
 	// **只有解码 goroutine 碰它**，所以不加锁。
 	out []float32
@@ -92,6 +94,7 @@ func newTap(d mygoaudio.Decoder) *tap {
 
 // SetSpectrumEnabled toggles FFT and history recording without changing audio samples.
 func (t *tap) SetSpectrumEnabled(enabled bool) {
+	t.generation.Add(1)
 	t.enabled.Store(enabled)
 	if !enabled {
 		t.mu.Lock()
@@ -123,8 +126,9 @@ func (t *tap) Read(buf []float32) (int, error) {
 		t.norm.apply(buf[:n-n%ch], ch, t.Decoder.SampleRate(), t.normOn.Load())
 		if frames := int64(n / ch); frames > 0 {
 			if t.enabled.Load() {
+				generation := t.generation.Load()
 				t.an.SetVolume(math.Float32frombits(t.vol.Load()))
-				t.push(buf[:n], frames, ch)
+				t.push(buf[:n], frames, ch, generation)
 			} else {
 				t.advance(frames)
 			}
@@ -182,12 +186,16 @@ func (t *tap) maxFrames() int64 {
 }
 
 // push 把刚读到的一段算成谱，记进历史，必要时把最老的挤出去。
-func (t *tap) push(samples []float32, frames int64, channels int) {
+func (t *tap) push(samples []float32, frames int64, channels int, generation uint64) {
 	mag := t.an.Magnitudes(samples, channels, t.out)
-	from := t.cur
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	from := t.cur
+	if !t.enabled.Load() || t.generation.Load() != generation {
+		t.cur = from + frames
+		return
+	}
 	t.cur = from + frames
 
 	// ⚠️ **结果缓冲一段一份，不回收。**

@@ -1334,7 +1334,6 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		}
 		return err
 	}
-	spectrumEnabled := a.FullPlayerPrefs().ShowSpectrum
 	a.mu.Lock()
 	old := a.player
 	// 倍率和音量一样是「用户选的那个值」，换歌之后照旧——见 App.rate 那段。
@@ -1343,7 +1342,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 记的还是用户设的值（取消静音放回去的就是它）。
 	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetEQ(a.eqGains)
 	a.applyFadeInLocked(p)
-	p.SetSpectrumEnabled(spectrumEnabled)
+	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
