@@ -293,7 +293,11 @@ func drawCover(c *ui.Context, cache *Cache, url string, w, h, radius float32, em
 		return
 	}
 
-	switch st := cache.Get(url); {
+	// 🔴 **按这一格的实际显示尺寸要图**（见 `GetSized` 的注释）：以前所有
+	// 位置都拿长边 768 的那一张，于是列表行那种 48 DIP 的格子也压着 1.3MB
+	// 的像素。`w`、`h` 就是调用方交给这一格的大小，乘上屏幕倍率正好是
+	// 「不糊的最小值」。
+	switch st := cache.GetSized(url, w, h); {
 	case st.Ready():
 		// 🔴 **有图这一档也描一圈边**（票 #244 / UX 报告 §2 的 E2）。
 		//

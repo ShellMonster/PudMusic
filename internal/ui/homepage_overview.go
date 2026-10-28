@@ -276,8 +276,15 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
 				// 磁贴右侧压一张该榜第一名的封面当「插画」，向左渐隐进磁贴底色；没有数据就只剩渐变。
-				if items := h.lists[tile.tab].Items(); len(items) > 0 && items[0].Cover != "" && h.newGrid.cache.Get(items[0].Cover).Ready() {
-					iw := cw * 0.5
+				// ⚠️ **探测用的 key 必须和下面 `ViewPlaceholderTitled` 画的那一个
+				// 相同**（`GetSized` 按 `iw × homeTileH` 拼出 `@<w>w_<h>h_1c`）。
+				// 用 `Get(cover)` 探测是下一份原图、画的时候再下一份按尺寸的——
+				// 同一张图下两遍（PR #622 的评审挑出来的）。
+				//
+				// 所以 `iw` 先算出来：探测要用它，画也要用它。
+				iw := cw * 0.5
+				if items := h.lists[tile.tab].Items(); len(items) > 0 && items[0].Cover != "" &&
+					h.newGrid.cache.GetSized(items[0].Cover, iw, homeTileH).Ready() {
 					ui.Box(c).Key("home:tile:art:"+name).Size(iw, homeTileH).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
 						Children(func() {
 							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, items[0].Cover, "", iw, homeTileH, 0, nil)

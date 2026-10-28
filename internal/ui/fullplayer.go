@@ -675,7 +675,15 @@ func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int) bool {
 // 「不自绘等效效果」那一条仍然守得住。
 func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	winW, winH := c.Size()
-	st := s.images.Get(url)
+	// ⚠️ **背景故意要「大的那一份」**，不走 `GetSized`（封面那一格走的）。
+	//
+	// 背景是**整窗铺满再糊**：窗口 1200×800 时画布 300×200，而它还要被
+	// `glass.Blur` 采样、在 Retina 上再乘一倍——需要的源比满屏封面那一格
+	// （384 DIP）还大。所以它按窗口的像素尺寸要。
+	//
+	// 代价是：同一首封面，背景和封面格各有一份（两个 key）。这在改之前是
+	// 一份（都是原图），但那时候封面格也压着 1.77MB——两害相权，拆开更省。
+	st := s.images.GetSized(url, winW, winH)
 	if !st.Ready() {
 		// 封面还没来：底下是主题的底色（外头那一层），画布先不动。
 		return
