@@ -76,6 +76,17 @@ type Gauges struct {
 	mediaTempBytes atomic.Int64
 }
 
+// processGauges is the process-wide collection the media layers write into, so a
+// diagnostic snapshot taken anywhere in the process sees the same numbers.
+var processGauges Gauges
+
+// ProcessGauges returns the process-wide gauge collection.
+//
+// Packages that own a measurable resource (the video frame pool, a media temp
+// file) update this one; TakeSnapshot reads it. Tests that need an isolated
+// counter pass their own Gauges instead of touching this one.
+func ProcessGauges() *Gauges { return &processGauges }
+
 // AddFramePoolBytes moves the decoded-video frame pool gauge by delta.
 func (g *Gauges) AddFramePoolBytes(delta int64) { g.framePoolBytes.Add(delta) }
 
@@ -105,8 +116,12 @@ type Snapshot struct {
 }
 
 // TakeSnapshot samples the process without touching a Metrics collection.
+//
+// The byte gauges come from the process-wide collection, so a frame pool that is
+// live when the snapshot is taken shows up here without the caller having to know
+// which subsystem owns it.
 func TakeSnapshot() Snapshot {
-	return Snapshot{Runtime: SampleRuntime()}
+	return Snapshot{Runtime: SampleRuntime(), Gauges: ProcessGauges().Snapshot()}
 }
 
 // WriteJSON writes the record as one JSON object.
