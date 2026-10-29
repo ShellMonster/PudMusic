@@ -292,6 +292,53 @@ func TestFullPlayerPrefsRemountClosesPreviousStoreBeforeReplacingIt(t *testing.T
 	}
 }
 
+func TestFullPlayerPrefsRemountPreservesCloseFailureAndLatestValue(t *testing.T) {
+	writeErr := errors.New("disk full")
+	written := make(chan []byte, 1)
+	flush := make(chan struct{})
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(_ string, _ []byte) error {
+		return writeErr
+	}, flush)
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("old in-memory preference = %q, want %q", got, p.SpectrumColor)
+	}
+
+	remounted := a.mountFullPlayerPrefs(filepath.Join(dir, "remounted", fullPlayerPrefsFileName), func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		return nil
+	}, nil)
+	if remounted == nil {
+		t.Fatal("remount returned nil store")
+	}
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("remount lost failed in-memory preference: %q", got)
+	}
+	if err := a.FullPlayerPrefsError(); !errors.Is(err, writeErr) {
+		t.Fatalf("FullPlayerPrefsError = %v, want %v", err, writeErr)
+	}
+	if err := a.TakeSettingsError(); !errors.Is(err, writeErr) {
+		t.Fatalf("TakeSettingsError = %v, want %v", err, writeErr)
+	}
+	if err := a.TakeSettingsError(); err != nil {
+		t.Fatalf("same remount error was reported twice: %v", err)
+	}
+
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("replacement close did not retry the preserved preference: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#111111"`)) {
+		t.Fatalf("replacement write lost the preserved preference: %s", body)
+	}
+}
+
 func TestFullPlayerPrefsUpdateRacingCloseSurvivesRemount(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})

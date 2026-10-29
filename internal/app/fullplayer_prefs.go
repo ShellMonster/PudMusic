@@ -414,15 +414,28 @@ func (a *App) mountFullPlayerPrefs(path string, writeFile func(string, []byte) e
 	a.fullPlayerPrefs = nil
 	a.fullPlayerPrefsDetached = true
 	a.mu.Unlock()
+	var closeErr error
+	var failed FullPlayerPrefs
+	var hasFailed bool
 	if old != nil {
-		_ = old.Close()
+		closeErr = old.Close()
+		if closeErr != nil {
+			failed = old.get()
+			hasFailed = true
+		}
 	}
 
 	p := &fullPlayerPrefsStore{path: path, writeFile: writeFile, flush: flush, wake: a.invalidate}
+	if closeErr != nil {
+		p.save = closeErr
+	}
 	p.load()
 	p.start()
 	a.mu.Lock()
 	pending, hasPending := a.fullPlayerPrefsPending, a.fullPlayerPrefsPendingSet
+	if !hasPending && hasFailed {
+		pending, hasPending = failed, true
+	}
 	a.fullPlayerPrefsPendingSet = false
 	a.fullPlayerPrefsDetached = false
 	a.fullPlayerPrefs = p
