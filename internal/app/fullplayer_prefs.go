@@ -49,8 +49,7 @@ const (
 
 // FullPlayerPrefs 是全屏播放器的偏好。
 //
-// 键名和 Biu 那一个 store 一样（`store/full-screen-player-settings.ts` 的
-// `partialize`），将来从 Biu 迁过来的时候认得。
+// 字段名和文件格式保持稳定，便于当前版本读写。
 type FullPlayerPrefs struct {
 	// ShowLyrics 歌词画不画。默认 **true**（Biu 的 `defaultSettings.showLyrics`）。
 	ShowLyrics bool `json:"showLyrics"`

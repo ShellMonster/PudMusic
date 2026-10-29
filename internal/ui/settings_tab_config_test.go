@@ -19,7 +19,7 @@ import (
 // 替掉 `s.picker`（和本地音乐那几个「选择」按钮同一个道理）。
 
 // 配置段只提供本应用自己的配置文件导出 / 导入。
-func TestTheConfigSectionDoesNotOfferBiuDirectoryImport(t *testing.T) {
+func TestTheConfigSectionOnlyOffersCurrentConfigImport(t *testing.T) {
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
 	for _, want := range []string{"配置", "导出配置", "导入配置"} {
@@ -83,8 +83,8 @@ func TestExportingWritesAFileWithNoCredentialAndSaysSo(t *testing.T) {
 
 // 导入一份配置之后，设置真的变了，**而且只变了文件里提到的那些**。
 //
-// 「只变了提到的那些」是 Biu 的语义（`merge`，`export-import.tsx:53`）。用户导出
-// 一份只改过主题的配置导回来，圆角、下载目录、侧栏宽度都该原样。
+// 「只变了提到的那些」表示配置文件按字段合并。用户导出一份只改过主题的配置
+// 导回来，圆角、下载目录、侧栏宽度都该原样。
 func TestImportingAConfigChangesOnlyWhatThatFileMentions(t *testing.T) {
 	cur := app.DefaultSettings("/Users/x/Downloads")
 	cur.ThemeMode = app.ThemeModeLight

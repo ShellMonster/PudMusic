@@ -172,7 +172,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		s.settingRow(c, "开机自启", "",
 			func() { s.pickAutoStart(c, st, ro) })
 
-		// 「关于应用」摆在最后，照 Biu 的 `system-settings.tsx` 那一段的顺序。
+		// 「关于应用」摆在最后。
 		//
 		// ⚠️ 它**不是** `settingRow`，也不吃 `ro`：更新那一摊的状态在 `App` 上，不在
 		// 设置文件里，而「只读」保护的是**设置文件**——更新器写的是自己那一份
@@ -180,14 +180,11 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
 		// 更新入口关掉。
 		//
-		// ⚠️ 顺序：**在**「配置」段（导出 / 导入）**之前**。Biu 那边
-		// 导入导出就是长在「关于应用」这一段里的——版本号 + 检查更新那一行之后
-		// 紧接着就是 `<ImportExport />`（`system-settings.tsx:388-402`）。两边各自
-		// 加了一段，谁在前谁在后没人对过，这里按 Biu 定下来。
+		// 配置导出和导入放在关于应用之后。
 	})
 	s.settingsUpdate(c, s.app.UpdateSnapshot(), ro)
 
-	// 「配置」段（导出 / 导入），照 Biu 的位置。
+	// 「配置」段（导出 / 导入）。
 	s.settingsConfig(c)
 }
 

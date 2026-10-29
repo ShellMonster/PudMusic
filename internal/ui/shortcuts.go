@@ -14,9 +14,7 @@ import (
 )
 
 const (
-	// shortcutFileName 是这份文件的名字。Biu 那边叫 `shortcut-settings.json`
-	// （electron-store 的 `StoreNameMap` 拼出来的），这里按 PLAN §3.4 用
-	// `shortcuts.json`。文件名不需要一致，**键名才需要**——下面那一段就照着它。
+	// shortcutFileName 是当前快捷键文件的名字。
 	shortcutFileName = "shortcuts.json"
 
 	// shortcutSchema 是当前快捷键文件的格式版本。
@@ -62,16 +60,10 @@ type shortcutSlot struct {
 	id     string
 }
 
-// defaultShortcutSettings 是 Biu 的默认值，逐字抄
-// `biu/shared/settings/shortcut-settings.ts`。
+// defaultShortcutSettings 返回应用内和全局快捷键的默认值。
 //
-// ⚠️ 全局那六条比应用内的那六条多一个 ⌥：两边同用一个键的话，在别的应用里按
-// 应用内那一个就会误触发别人——Biu 正是这么分的，照抄。
-//
-// ⚠️ **那六条之外还有两条我们自己加的**（快退 / 快进，见下面 inOnly 那一段）：
-// 它们**只在应用内**登记，没有全局那一半——音乐播放器里「跳过几秒」是键盘党
-// 的高频动作，但把 ⌘⌥ 加方向键钉到系统层去，别的应用里选字/选文件就少了一对
-// 组合键，代价大于收益。
+// 全局快捷键比应用内快捷键多一个 ⌥，避免两者使用同一个组合键时互相触发。
+// 快退和快进只登记在应用内，不占用其他应用的全局组合键。
 func defaultShortcutSettings() shortcutSettings {
 	var ids = []struct{ id, key string }{
 		{"togglePlay", "P"},
@@ -84,7 +76,7 @@ func defaultShortcutSettings() shortcutSettings {
 	in := make([]shortcutItem, 0, len(ids)+len(inAppOnlyShortcuts))
 	global := make([]shortcutItem, 0, len(ids))
 	for _, it := range ids {
-		// CommandOrControl 是 Biu 的写法：macOS 上是 ⌘，别处是 Ctrl。
+		// CommandOrControl 在 macOS 上表示 ⌘，其他平台表示 Ctrl。
 		in = append(in, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+" + it.key})
 		global = append(global, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+Alt+" + it.key})
 	}
@@ -101,19 +93,14 @@ func defaultShortcutSettings() shortcutSettings {
 	}
 }
 
-// inAppOnlyShortcuts 是**只登记在应用内**、没有全局那一半的命令：id 和默认键。
-//
-// 它们不在 Biu 的那六条里（`shortcut-settings.ts` 只有六条），是这一层按
-// 「音乐播放器的通用约定」补的——和裸空格 = 播放/暂停（`viewShortcuts` 里
-// 那一段）是同一条思路，只不过这两条要出现在设置页的表里（能改、能看见冲突），
-// 所以走默认表而不是硬编码。
+// inAppOnlyShortcuts 是只登记在应用内、没有全局那一半的命令：id 和默认键。
+// 快退和快进是播放器内的操作，不占用系统级快捷键。
 var inAppOnlyShortcuts = []struct{ id, key string }{
 	{"seekBack", "Shift+Left"},
 	{"seekForward", "Shift+Right"},
 }
 
-// defaultShortcutNames 是每条命令的名字。Biu 的那六条逐字抄 Biu 那一行；
-// inAppOnlyShortcuts 那两条是我们自己的，写法跟同一张表。
+// defaultShortcutNames 是每条命令的显示名称。
 var defaultShortcutNames = map[string]string{
 	"togglePlay":     "播放/暂停",
 	"prev":           "上一首",
@@ -151,9 +138,7 @@ type shortcutKeys struct {
 func newShortcutKeys(path string) *shortcutKeys {
 	k := &shortcutKeys{
 		path: path,
-		// 先摆上 Biu 的默认值：没挂上盘（path 为空）和第一次运行（文件不存在）
-		// 都得有一份能用的，而不是一份零值——零值里那六条命令是空的，设置页上
-		// 会一行都不画，而那正是「第一次打开设置页什么也没有」的样子。
+		// 没挂上盘或第一次运行时使用默认快捷键。
 		cur:  defaultShortcutSettings(),
 		req:  make(chan struct{}, 1),
 		quit: make(chan struct{}),
@@ -286,12 +271,8 @@ func (k *shortcutKeys) setEnableGlobal(on bool) error {
 	return nil
 }
 
-// reset 把**每一列的每一个键**恢复成默认值（Biu 的「恢复默认」按钮）。
-//
-// Biu 是整份替换（`reset()` 之后 `update({shortcuts: defaultShortcutSettings.shortcuts})`），
-// 这里逐列逐条覆盖：命令的**条数**以用户文件里有的为准（`mergeShortcutList` 把用户
-// 多出来的那几条留着），只把对得上的那些键改回默认。加一条新命令之后点「恢复默认」
-// 不会把用户自己加的键抹掉。
+// reset 把每一列的每一个键恢复成默认值。
+// 用户自己增加的命令仍然保留，只重置能与默认命令对应的快捷键。
 func (k *shortcutKeys) reset() error {
 	k.mu.Lock()
 	if k.ro {
@@ -472,8 +453,7 @@ func shortcutPath(dir string) string { return filepath.Join(dir, shortcutFileNam
 
 // conflictOf 找出与 accel 撞车的那一条（同一列之内）。
 //
-// 空串不算冲突：Biu 的 `handleChangeShortcut` 也是这么写的（「空快捷键不会冲突」），
-// 好几条都不设键是正常的，不该把这也说成错。
+// 空串不算冲突：多个命令都可以不设置快捷键。
 func conflictOf(list []shortcutItem, id, accel string) (shortcutItem, bool) {
 	if accel == "" {
 		return shortcutItem{}, false

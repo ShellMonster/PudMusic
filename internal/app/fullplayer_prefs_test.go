@@ -113,11 +113,8 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestThePrefsFileUsesBiusKeyNames 断「键名和 Biu 那个 store 一致」。
-//
-// 用户从 Biu 迁过来的时候是**按内容**认的（整份导出/导入），键名不一样就等于
-// 他在 Biu 里调好的频谱开关到这边变成「没设过」。
-func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
+// TestThePrefsFileUsesStableKeyNames 验证偏好文件使用稳定的字段名。
+func TestThePrefsFileUsesStableKeyNames(t *testing.T) {
 	dir := t.TempDir()
 	a := New()
 	t.Cleanup(a.Close)

@@ -128,9 +128,8 @@ func mustMarshal(v any) json.RawMessage {
 	return b
 }
 
-// ExportFileName 给一份导出文件起名字：`biu-settings-2026-10-17T12-30-00.json`。
+// ExportFileName 给一份导出文件起名字：`mygo-settings-2026-10-17T12-30-00.json`。
 //
-// 时间格式和 Biu 逐字一样（`toISOString().slice(0,19).replace(/[:T]/g,"-")`）：
 // 文件名里带时间，用户导出三次就是三个文件，不会互相覆盖；冒号在 Windows 上
 // 非法，所以换成横线。
 func ExportFileName(now time.Time) string {

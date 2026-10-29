@@ -1,25 +1,6 @@
-// 搜索历史：Biu 的 `src/store/search-history.ts`，一条一条照它。
+// 搜索历史：独立文件保存，按时间倒序维护最近搜索词。
 //
-// ## 为什么是单独一份文件，不进 app.Settings
-//
-// Biu 自己也是**单独一个 store**（zustand persist 的 `"search-history"`），
-// `app-settings.json` 里根本没有这个键（`shared/settings/app-setting.d.ts` 逐字
-// 对过）。照抄就是这一份文件。
-//
-// 顺带也避开了往 `internal/app` 里加键——那边 `settings_test.go` 的 `biuKeys` 和
-// `ourOwnKeys` 是两张封闭的表，加一个键就得同时改那两张，而那一块不是这张卡片的
-// 活儿。
-//
-// 落盘的做法照 `internal/app/settings.go`：schema 号 + 临时文件 + rename 原子写 +
-// 后台合并写 + 收尾同步落完。少任何一件都能想出坏法——只 merge 不 rename，写到
-// 一半断电会留下半个文件；只 rename 不带 schema 号，就分不清这份文件是哪个版本
-// 写的。
-//
-// ## 设置里的 `showSearchHistory` 只管显不显示，不管存不存
-//
-// Biu 就是这样（`layout/navbar/search/index.tsx:121-124` 只在 topContent 里判
-// `showSearchHistory`）：用户在设置里把它关掉，历史照样还在文件里，重新打开又
-// 回来了。关掉只该是「我不想看见」，不该是「替我把它们删了」。
+// 独立文件便于限制存储数量，并与应用设置的生命周期分开。
 package ui
 
 import (
@@ -40,15 +21,12 @@ const (
 	// searchHistorySchema 是当前搜索历史文件的格式版本。
 	searchHistorySchema = 1
 
-	// searchHistoryShown 是浮层上最多摆几条。Biu 是 `items.slice(0, 10)`
-	// （`layout/navbar/search/index.tsx:141`）。文件里存的比这多。
+	// searchHistoryShown 是浮层上最多显示的条数。文件里存的比这多。
 	searchHistoryShown = 10
 
 	// searchHistoryStored 是文件里最多留几条。
 	//
-	// Biu 的 store 不设上限，一年下来能攒几千条：一个只用来「回看最近搜过什么」
-	// 的列表存那么多，读的时候要全量反序列化，收益却全在最近那十条上。多出来
-	// 的从**最旧的一头**丢。
+	// 文件里最多保留 50 条，超出时从最旧的一头丢弃。
 	searchHistoryStored = 50
 
 	// searchHistoryWriteDelay 是把连续改动合并成一次落盘的窗口。和设置那边的
@@ -56,10 +34,10 @@ const (
 	searchHistoryWriteDelay = 120 * time.Millisecond
 )
 
-// searchItem 是一条历史。Biu 的 `SearchItem` 就是这两个字段。
+// searchItem 是一条搜索历史记录。
 type searchItem struct {
 	Value string `json:"value"`
-	// Time 是记下这条的时刻，Unix 毫秒。Biu 用 `Date.now()`。
+	// Time 是记录搜索词的时刻，单位是 Unix 毫秒。
 	Time int64 `json:"time"`
 }
 
@@ -128,11 +106,7 @@ func readSearchHistory(path string) (items []searchItem, readOnly bool) {
 // 挪不动也不报错——已经出过一次问题了，不能因为留个证据再报一次。
 func backupSearchHistory(path string) { _ = os.Rename(path, path+".bak") }
 
-// add 记下搜过的一个词。Biu 的 `add`：去重、把新的顶到最前。
-//
-// 空串和纯空格不记：Biu 的 `submitSearch` 先 `if (!keyword?.trim()) return`
-// （`search/index.tsx:54`），同一个门槛在这儿——不然浮层上会出现一条搜不出任何
-// 东西的历史。
+// add 记录一个搜索词：去重，并把新的记录放到最前面。
 func (h *searchHistory) add(value string) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -153,7 +127,7 @@ func (h *searchHistory) add(value string) {
 	h.signal()
 }
 
-// remove 删掉一条（浮层上那个 ×）。Biu 的 `delete` 按值删。
+// remove 删除一条搜索历史记录。
 func (h *searchHistory) remove(value string) {
 	h.mu.Lock()
 	before := len(h.items)
@@ -165,7 +139,7 @@ func (h *searchHistory) remove(value string) {
 	h.signal()
 }
 
-// clear 清空全部。Biu 的 `clearSearchHistory`（浮层右上角那个「清除全部」）。
+// clear 清空全部搜索历史。
 func (h *searchHistory) clear() {
 	h.mu.Lock()
 	if len(h.items) == 0 {
@@ -333,9 +307,7 @@ func searchHistoryPath(dir string) string { return filepath.Join(dir, searchHist
 
 // searchHistorySummary 把一条历史压成浮层上摆的那一小片字。
 //
-// 摆全值是 Biu 的做法（`Chip` 的 classNames 里 truncate，让它自己截断）。这里
-// 限长是为了不让一条超长的关键词把浮层顶变宽——限制写在浮层那一层，存下来的
-// 还是完整的一条。
+// 限长是为了不让一条超长关键词把浮层撑宽；存储内容仍然保留完整关键词。
 func searchHistorySummary(v string) string {
 	const max = 24
 	r := []rune(v)

@@ -25,7 +25,7 @@ import (
 // accelerator 是应用使用的快捷键格式，例如 `CommandOrControl+Alt+Shift+P`。
 type accelerator string
 
-// 修饰键在串里的那三个词。顺序照 Biu：CommandOrControl、Alt、Shift。
+// 修饰键在串里的顺序：CommandOrControl、Alt、Shift。
 const (
 	accelCmd    = "CommandOrControl"
 	accelCmdRaw = "Command"
@@ -84,7 +84,7 @@ func accelFromEvent(ev ui.InputEvent) (accelerator, bool) {
 	}
 
 	var parts []string
-	// `ui.Cmd` 是 Command（macOS）/ Ctrl（别处），两边合成 Biu 的那一个词。
+	// `ui.Cmd` 是 Command（macOS）或 Ctrl（其他平台），统一写成跨平台的 CommandOrControl。
 	if ev.Mods&(ui.Super|ui.Ctrl) != 0 {
 		parts = append(parts, accelCmd)
 	}
@@ -97,7 +97,7 @@ func accelFromEvent(ev ui.InputEvent) (accelerator, bool) {
 	return accelerator(strings.Join(append(parts, accelKeyName(key)), "+")), true
 }
 
-// accelKeyName 是一个键在 accelerator 里的写法，照 Biu 的那几行。
+// accelKeyName 是一个键在快捷键字符串里的写法。
 func accelKeyName(k ui.Key) string {
 	switch {
 	case k >= ui.KeyA && k <= ui.KeyZ:
@@ -146,9 +146,8 @@ func accelKeyName(k ui.Key) string {
 	return ""
 }
 
-// formatAccel 把 accelerator 画成人看得懂的符号。逐条照 Biu 的
-// `formatElectronAcceleratorForDisplay`：macOS 上 CommandOrControl 是 ⌘、Alt 是 ⌥、
-// Shift 是 ⇧，方向键是箭头，空格是 ␣；别的平台和 mac 一样用 Ctrl/Alt/Shift。
+// formatAccel 把快捷键字符串画成人看得懂的符号：macOS 上 CommandOrControl 是 ⌘、
+// Alt 是 ⌥、Shift 是 ⇧，方向键是箭头，空格是 ␣；其他平台显示 Ctrl/Alt/Shift。
 func formatAccel(a accelerator) string {
 	if a == "" {
 		return ""
@@ -190,17 +189,14 @@ func formatAccel(a accelerator) string {
 // 录制时那一格显示的字。
 const (
 	// recordingHint 是「正在录、而这一格现在还没有键」时那一格里的字。已经设过键的
-	// 那一格在录的时候照常显示它现在的键（Biu 就是这么做的，见 shortcutRecorder）。
+	// 那一格在录的时候照常显示它现在的键。
 	recordingHint = "按下新的快捷键"
 
-	// shortcutFieldWidth / shortcutFieldHeight 是那一格多大。Biu 那一列是
-	// `200px` 宽（`shortcut-settings.tsx:102`），高度按一行字加内边距取。
+	// shortcutFieldWidth / shortcutFieldHeight 是快捷键输入框的尺寸。
 	shortcutFieldWidth  = 200
 	shortcutFieldHeight = 30
 
-	// clearButtonSize 是那个 × 的边长。Biu 摆的是 16px 的圆圈图标（`RiCloseCircleFill
-	// size={16}`），这里取 18 上下：格子只有 30 高，按钮默认的内边距会让它撑到 29.3
-	// 高（几乎占满整格），钉死之后它才是「一个 ×」而不是「一整条按钮」。
+	// clearButtonSize 是清空按钮的边长。固定尺寸后按钮不会撑满输入框高度。
 	clearButtonSize = 18
 )
 
@@ -224,9 +220,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	t := c.Theme()
 	recording := s.recording == slot
 
-	// 画出来的一直是**它现在的键**（Biu 的 `<Input value={format(value)}>` 就是这样，
-	// 录的时候那一格里的字不会变成一句提示）：录完立刻看得见自己刚按了什么，是
-	// 这一格最要紧的一件事。「正在录」由主色描边和焦点环表示。
+	// 已设置快捷键时，录制过程中继续显示当前值；录制状态由边框和焦点环表示。
 	//
 	// ⚠️ 一格没设键的时候正在录也要说清「现在按下去就会录上」——空框配主色描边，
 	// 用户会以为那是一个空的按钮。
@@ -241,8 +235,8 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	case recording:
 		border = t.Accent
 	}
-	// 描红的两件事：和别的键撞了（Biu 的 isConflict），和刚才按的那个键根本不
-	// 能录成快捷键。撞了还带一句是谁撞的，只有描红的话用户不知道自己撞了谁。
+	// 描红表示两种错误：与其他快捷键冲突，或刚才按下的键不能录成快捷键。
+	// 冲突时同时显示发生冲突的命令，便于用户修正。
 	invalid := conflict != "" || s.rejected == slot
 	if invalid {
 		border = t.Danger
@@ -264,18 +258,8 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		color = dangerText(t)
 	}
 
-	// 🔴 **这一格必须是 `ui.Row`，不是 `ui.Box`。**
-	//
-	// `ui.Box` 就是**列**（`ui/context.go` 的 coreBox → coreColumn）：子元素从上往下
-	// 排，而且**每一个都拉满列的宽度**。所以「键 + ×」在 Box 里是**上下两层**：键占满
-	// 184 宽的那一层，× 同样占满 184 宽、而高度有 29，于是它整个掉到框的**外面**去
-	// ——点不到（Biu 那个 × 变成死按钮），而且从画面上看是「两层框、× 压着下一行」。
-	// 键也在上面那一层贴着上边框，没有上下居中。
-	//
-	// 实测（`TestEveryRecorderCellKeepsItsClearButtonInside` 的注释里有整张表）：
-	//
-	//	Box(Text + Button) → 键 184x15.3 @ y=0    × 184x29.3 @ y=15.3   ← 掉出框外
-	//	Row(Text.Grow + Button) → 键 145.9x15.3 @ y=7.3  × 38.1x29.3 @ y=0.3 ← 框内、居中
+	// `ui.Box` 是列布局，子元素会上下排列；这里必须用行布局，让快捷键文本和清空按钮
+	// 保持在同一行并垂直居中。
 	field := ui.Row(c).Key(shortcutFieldKey(slot)).
 		Width(shortcutFieldWidth).Height(shortcutFieldHeight).
 		Radius(t.Radius).Background(t.Surface).Border(1, border).
@@ -295,22 +279,8 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 		// `Grow(1)`：把 × 右边剩下的宽度全吃掉，于是 × 永远贴着右边，超长的键被
 		// `SingleLine` 截断而不是把 × 顶出框外（手改过的设置文件里可能有很长的值）。
 		ui.Text(c, text).FontSize(scale.Font(c, scale.Size13)).SingleLine().Grow(1).Shrink(0).TextColor(color)
-		// 清空。Biu 的 `endContent` 那个 ×（`shortcut-key-input/index.tsx:46`），
-		// 它的显示条件是「不是只读**且**有值」——**不是**「没在录」。
-		//
-		// 🔴 「没在录时才摆」会让这个 × 变成**永远点不到的死按钮**：点它的那一下，
-		// 指针事件是在帧之前落到引擎上的（`ui/input.go` 的 pointerDown），我们的
-		// `InputPointerDown` 立刻把 `s.recording` 设成这一格；紧接着 view 才跑，
-		// 于是那一帧「正在录」成立，× **根本没被建出来**，`Clicked()` 自然读不到。
-		// 用户看到的是一个点下去没反应的图标——整格扫 60 个点，一个都清不掉。
-		//
-		// 所以照 Biu：只要有值就摆着。点它 = 清空**并且**退出录制（清空是一个收尾
-		// 动作，不该顺手把这一格留在「等着录下一个键」的状态里）。
-		//
-		// 这一格没设键的时候不摆：没东西可清的时候摆一个叉只是让人多按一次空的。
-		//
-		// ⚠️ 尺寸是钉死的：不钉的话 Button 默认的内边距让它有 29.3 高，在 30 高的
-		// 格里上下各只让出 0.35 DIP，看上去就是「贴边的一个大方块」而不是一个 ×。
+		// 清空按钮只要有值就显示，且点击后同时清空并退出录制。
+		// 录制状态在指针事件处理后更新，因此按钮必须在录制状态下继续存在。
 		if !ro && item.Shortcut != "" &&
 			ui.Button(c, "×").Label("清空「"+item.Name+"」的快捷键").
 				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
@@ -395,7 +365,7 @@ func (s *Shell) takeRecordedKey(field ui.Element, slot shortcutSlot) {
 		}
 		switch ev.Key {
 		case ui.KeyBackspace, ui.KeyDelete:
-			// 清空这一格。Biu：`if (e.key === "Backspace" || e.key === "Delete")`。
+			// Backspace 和 Delete 清空当前快捷键。
 			s.rejected = shortcutSlot{}
 			s.applyShortcut(slot, "")
 			return true
@@ -408,9 +378,7 @@ func (s *Shell) takeRecordedKey(field ui.Element, slot shortcutSlot) {
 		}
 		a, ok := accelFromEvent(ev)
 		if !ok {
-			// 非法键：描红这一格，但什么都不存。Biu 是「mapKeyToElectronAccelerator
-			// 返回 null 就不改」，我们多描一次红，好让用户知道「刚才那一下没录上」
-			// 而不是「按了没反应」。
+			// 非法键：描红这一格，但不修改已保存的快捷键。
 			s.rejected = slot
 			return true
 		}

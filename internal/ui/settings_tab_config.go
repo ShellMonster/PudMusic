@@ -87,7 +87,7 @@ func (s *Shell) importConfig() {
 			return
 		}
 		if err := s.app.FlushSettings(); err != nil {
-			log.Printf("biu: 导入配置后落盘失败：%v", err)
+			log.Printf("mygo: 导入配置后落盘失败：%v", err)
 		}
 		s.addToast("已导入配置，设置已应用", notice.Success)
 		s.wake.invalidate()
