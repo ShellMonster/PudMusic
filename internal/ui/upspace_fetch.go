@@ -16,6 +16,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"log"
 	"runtime/debug"
 	"strconv"
@@ -31,7 +32,7 @@ import (
 // fetchVideos 是「投稿」Tab 的拉页器。**在后台 goroutine 里跑**
 // （`list.PagedList.load`），所以里面不许碰界面状态。
 func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page, error) {
-	pg, err := s.app.UpVideos(ctx, bili.UpVideoQuery{
+	pg, err := s.app.UpVideos(ctx, app.SpaceVideoQuery{
 		Mid: mid, Page: page, Size: bili.UpVideoDefaultSize,
 	})
 	if err != nil {
@@ -92,10 +93,10 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 	case upTabCollection:
 		// 收藏夹那个接口是**分页**的（pn/ps，默认 20；见 bili.SpaceFavFolders）。
 		pg, err := s.app.UpCollections(ctx, sp.mid, page+1)
-		r.err, r.cols, r.hasMore, r.sent = err, pg.Folders, pg.HasMore, len(pg.Folders)
+		r.err, r.cols, r.hasMore, r.sent = err, pg.Items, pg.HasMore, len(pg.Items)
 	case upTabSeries:
 		pg, err := s.app.UpSeries(ctx, sp.mid, page+1, upSeriesPageSize)
-		r.err, r.cols, r.hasMore, r.sent = err, pg.Collections, pg.HasMore, len(pg.Collections)
+		r.err, r.cols, r.hasMore, r.sent = err, pg.Items, pg.HasMore, len(pg.Items)
 	}
 
 	// 🔴 **每一趟都留一句计数**：这一页 B 站发了几条、留下几条、丢掉几条、

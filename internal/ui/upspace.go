@@ -38,7 +38,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
@@ -191,9 +190,9 @@ type upSpace struct {
 	ser upPager
 
 	// dynItems 是「动态」Tab 的行。
-	dynItems []bili.Dynamic
+	dynItems []app.Dynamic
 	// cols 是「收藏夹」和「合集」两张 Tab 的行。其余 Tab 那一格是空的。
-	cols [upTabCount][]bili.UpCollection
+	cols [upTabCount][]app.SpaceCollection
 	// seen 是**已经收进上面两份的行身份**，用来挡翻页重叠。
 	//
 	// ⚠️ 必须有：B 站翻页是会重叠的（同一页的东西挪了名次就会在两页里各出现
@@ -247,8 +246,8 @@ type upSpace struct {
 type upResult struct {
 	mountGen uint64
 	tab      int
-	dyns     []bili.Dynamic
-	cols     []bili.UpCollection
+	dyns     []app.Dynamic
+	cols     []app.SpaceCollection
 	// cursor 是下一页的入口（动态接口给的 offset）。别的 Tab 是空的。
 	cursor string
 	// sent 是 B 站这一页发了几条（过滤**之前**）。见 upPager.adopt：
@@ -259,7 +258,7 @@ type upResult struct {
 	//
 	// ⚠️ **身份是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态在
 	// 两页里各出现一次——按出现次数记，那个数会偏大（票 #344）。
-	drops []bili.DroppedDynamic
+	drops []app.DroppedDynamic
 	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
 	//
 	// ⚠️ 「整页一条都不剩」这种失败在界面上完全看不出来（只有一个空列表
@@ -404,7 +403,7 @@ func (sp *upSpace) resetForMount(mountGen uint64, header *app.UpSpace) {
 	sp.ser.stop()
 	sp.videos.Reset()
 	sp.dynItems = nil
-	sp.cols = [upTabCount][]bili.UpCollection{}
+	sp.cols = [upTabCount][]app.SpaceCollection{}
 	sp.seen = nil
 	sp.rowKeys = [upTabCount]rowkey.Memo[upRowIdent, any]{}
 	sp.state = [upTabCount]ui.ListState{}
@@ -428,7 +427,7 @@ func (sp *upSpace) resetForMount(mountGen uint64, header *app.UpSpace) {
 // ⚠️ **反过来，「0 条」也不等于到底**：B 站这一页发了 0 条、而它给的**入口
 // 前进了**，说明后面还有——那就要**继续拉下一页**（票 #344）。真正到底的是
 // 「0 条 + 入口没前进」：再问一次问回来的是同一页（见
-// `bili.DynamicPage.MoreAfter`）。
+// `app.DynamicPage.MoreAfter`）。
 //
 // 所以判据是这两个的**或**：「这一页有东西」或者「入口前进了」。
 //

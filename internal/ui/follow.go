@@ -42,6 +42,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"log"
 	"runtime/debug"
 	"strconv"
@@ -50,7 +51,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
@@ -195,7 +195,7 @@ type followPage struct {
 	//
 	// tags 是关注分组。tagStarted / tagErr 是这一摊自己的状态——它和右边那一格
 	// 是两次独立的请求，各拉各的，各失败各的。
-	tags       []bili.FollowTag
+	tags       []app.FollowTag
 	tagStarted bool
 	tagErr     error
 	tagLoading bool
@@ -204,7 +204,7 @@ type followPage struct {
 	tab string
 
 	// ── 右边那个网格 ──
-	users []bili.FollowUser
+	users []app.FollowUser
 	// seen 是**已经收进来的身份**，挡翻页重叠。B 站翻页是会重叠的（同一页的
 	// 东西挪了名次就会在两页里各出现一次），而两个一模一样的身份会让框架按
 	// key 对位时那几格共用一份状态（理由同 `upSpace.seen`）。
@@ -296,8 +296,8 @@ type followResult struct {
 	// 扔掉——用户可能已经切走了。
 	tab, keyword string
 
-	tags  []bili.FollowTag
-	users []bili.FollowUser
+	tags  []app.FollowTag
+	users []app.FollowUser
 	// total 是「一共多少人」。三个接口给总数、分组明细不给（那一档用分组自己的
 	// count，发请求之前就在界面线程上取好了，见 tabTotal）。
 	total int
@@ -948,7 +948,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 // ⚠️ 一行里塞的是 cols 张卡，而**两个一模一样的行身份**会让框架按 key 对位时
 // 那几行共用一份状态——Tester 里当场 panic，真窗口里选中一格隔壁那格也亮着。
 // 「这一行第一个人」跟着数据走，所以天然唯一（`seen` 已经把重复的人滤掉了）。
-func followRowKey(users []bili.FollowUser, i, cols int) string {
+func followRowKey(users []app.FollowUser, i, cols int) string {
 	k := i * cols
 	if k >= len(users) {
 		return "follow:empty-row"
@@ -969,7 +969,7 @@ func followKeyOf(mid int64) string { return "follow:" + strconv.FormatInt(mid, 1
 func followIdentity(mid int64) any { return followKeyOf(mid) }
 
 // followRowLabel 是第 i 行给无障碍和「打字选中」用的名字。
-func followRowLabel(users []bili.FollowUser, i, cols int) string {
+func followRowLabel(users []app.FollowUser, i, cols int) string {
 	k := i * cols
 	if k >= len(users) {
 		return "加载更多关注的人"
@@ -1011,7 +1011,7 @@ func (s *Shell) keepFollowAnchor(f *followPage, cols int) {
 }
 
 // followIndexOfMid 是这一页里那个 mid 的下标，没有是 -1。
-func followIndexOfMid(users []bili.FollowUser, mid int64) int {
+func followIndexOfMid(users []app.FollowUser, mid int64) int {
 	if mid <= 0 {
 		return -1
 	}
@@ -1092,7 +1092,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 // `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
 // 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
 // 了（`bili/follow.go`），摆一行字是最诚实的画法。
-func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring bool) {
+func (s *Shell) viewFollowCard(c *ui.Context, u app.FollowUser, selected, ring bool) {
 	t := c.Theme()
 	name := u.Name
 	if name == "" {
@@ -1217,7 +1217,7 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 // 选一个组、再走 `/x/relation/tags/addUsers`——那条写接口和选组的弹层都不在
 // 这一页现有的四个 GET 里（见 `bili/follow.go` 的文件头）。按下去什么都不会
 // 发生的按钮，比少这一枚更糟。
-func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float32) {
+func (s *Shell) viewFollowActions(c *ui.Context, u app.FollowUser, shown float32) {
 	t := c.Theme()
 	bottom := followActionBarBottom - (1-shown)*followActionBarRise
 
@@ -1252,7 +1252,7 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 // 🔴 **写接口要一个往返，所以在后台跑**（理由同 `upSpace.follow`）。后台只
 // 往带锁的信箱里投「取的是谁、成没成」，界面线程在下一帧开头收（铁律三：
 // 投递完必须叫醒界面）。
-func (s *Shell) unfollowFromFollowCard(u bili.FollowUser) {
+func (s *Shell) unfollowFromFollowCard(u app.FollowUser) {
 	f := s.followPageOf()
 	go func() {
 		err := s.app.UpSpaceOf(u.Mid).Follow(context.Background(), false)
@@ -1421,7 +1421,7 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64,
 		return
 	}
 
-	var pg bili.FollowUsersPage
+	var pg app.FollowUsersPage
 	if keyword != "" {
 		pg, r.err = s.app.SearchFollowings(ctx, self, keyword, page+1)
 	} else {

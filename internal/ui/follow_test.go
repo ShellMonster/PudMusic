@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -578,7 +577,7 @@ func scrollFollowToEnd(t *testing.T, tt *mygoui.Tester, f *followPage) {
 //
 // 这里验的是「行身份跟着这一行里的第一个人走」：换列数之后它必须换。
 func TestTheRowsAreKeyedByWhoNotByNumber(t *testing.T) {
-	f := &followPage{cols: 4, users: []bili.FollowUser{
+	f := &followPage{cols: 4, users: []app.FollowUser{
 		{Mid: 1}, {Mid: 2}, {Mid: 3}, {Mid: 4}, {Mid: 5},
 	}}
 	// 4 列：第 0 行是 1..4，第 1 行开头是 5。
@@ -628,17 +627,17 @@ func TestAPageThatComesBackForTheWrongTabNeverLands(t *testing.T) {
 	f.box = []followResult{
 		// ① 换组之前发的那一页（代次 1、停在「全部关注」）。
 		{which: followUsers, selfMid: 77, gen: 1, tab: followTabAll,
-			users: []bili.FollowUser{{Mid: 11, Name: "上一组的那个人"}}},
+			users: []app.FollowUser{{Mid: 11, Name: "上一组的那个人"}}},
 		// ② 代次对、停的组对，可是**带着一个已经不生效的搜索词**回来的那一页。
 		// （换词同样 bump 代次，所以这一条量的是关键词那一道：它是加在那儿的
 		// 第二道，而加它的理由是「代次只认『发出去了几件事』」这件事会在将来
 		// 有人复用的时候漏掉。）
 		{which: followUsers, selfMid: 77, gen: 2, tab: followTagTab(777),
 			keyword: "上一个词",
-			users:   []bili.FollowUser{{Mid: 12, Name: "上一个词搜到的"}}},
+			users:   []app.FollowUser{{Mid: 12, Name: "上一个词搜到的"}}},
 		// ③ 换账号之前发的那一页。
 		{which: followUsers, selfMid: 88, gen: 2, tab: followTagTab(777),
-			users: []bili.FollowUser{{Mid: 13, Name: "上一个账号的"}}},
+			users: []app.FollowUser{{Mid: 13, Name: "上一个账号的"}}},
 	}
 	s.adoptFollow(f)
 
@@ -663,7 +662,7 @@ func TestAPageForTheTabWeAreOnDoesLand(t *testing.T) {
 	f := &followPage{tab: followTagTab(777), gen: 2, selfMid: 77}
 	f.box = []followResult{{
 		which: followUsers, selfMid: 77, gen: 2, tab: followTagTab(777),
-		users: []bili.FollowUser{{Mid: 77, Name: "这一组的人"}},
+		users: []app.FollowUser{{Mid: 77, Name: "这一组的人"}},
 	}}
 	s.adoptFollow(f)
 

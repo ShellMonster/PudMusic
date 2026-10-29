@@ -24,9 +24,9 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"testing"
 
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -130,7 +130,7 @@ func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 // # cardW 是调用方给的
 //
 // 卡有多宽是**网格**算的（`list.CellWidth`），而卡自己不会说。
-func followCardBox(t *testing.T, tt *mygoui.Tester, u bili.FollowUser, cardW float32) mygoui.Rect {
+func followCardBox(t *testing.T, tt *mygoui.Tester, u app.FollowUser, cardW float32) mygoui.Rect {
 	t.Helper()
 	av, ok := tt.Find(u.Face)
 	if !ok {
