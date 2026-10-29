@@ -133,11 +133,15 @@ func (l *dynLikes) revert(id string) {
 // 不这么做的话，从按下到界面变化之间隔着一次网络往返（几百毫秒），而用户在这
 // 段时间里会再按一下——于是他点了三次，最后的状态和他以为的相反。
 func (s *Shell) toggleDynamicLike(d app.Dynamic) {
+	account := s.app.AccountSnapshot()
 	next := s.dynLikes.flip(d.ID, d.Liked, d.LikeCount)
 	s.wake.invalidate()
 
-	s.app.LikeDynamic(d.ID, next.liked, func(err error) {
+	s.app.LikeDynamicForAccount(account, d.ID, next.liked, func(err error) {
 		if err != nil {
+			if err == app.ErrStaleGeneration || s.app.AccountSnapshot() != account {
+				return
+			}
 			s.dynLikes.revert(d.ID)
 			s.addToast(likeFailText(next.liked, err), notice.Danger)
 		}

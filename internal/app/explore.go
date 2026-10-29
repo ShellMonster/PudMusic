@@ -631,12 +631,22 @@ func (a *App) FollowedAuthors(ctx context.Context, vmid int64, page int) (Follow
 // 是乐观的（先点亮再发），所以等它失败再告诉用户「没登录」的话，赞已经先亮
 // 过一下又灭回去了——两次跳变。
 func (a *App) LikeDynamic(dynID string, like bool, done func(error)) {
-	if a.explore() == nil {
-		sayThumbDone(done, errExploreMissing)
+	a.LikeDynamicForAccount(a.AccountSnapshot(), dynID, like, done)
+}
+
+// LikeDynamicForAccount sends a like request for the captured account and only
+// completes successfully while that account and Explore client are still current.
+func (a *App) LikeDynamicForAccount(snapshot AccountSnapshot, dynID string, like bool, done func(error)) {
+	cli, err := a.exploreAt(snapshot)
+	if err != nil {
+		sayThumbDone(done, err)
 		return
 	}
 	go func() {
-		err := a.explore().LikeDynamic(context.Background(), dynID, like)
+		err := cli.LikeDynamic(context.Background(), dynID, like)
+		if !a.accountSnapshotCurrent(snapshot) {
+			err = ErrStaleGeneration
+		}
 		if err != nil {
 			log.Printf("biu: 给动态 %s 点赞失败：%v", dynID, err)
 		}
