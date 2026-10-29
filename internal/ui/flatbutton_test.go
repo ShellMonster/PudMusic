@@ -260,7 +260,7 @@ func sideScans(img *image.RGBA) (bg color.RGBA, runs []sideRun) {
 // # 为什么断源码而不是画面
 //
 // 评审查出来过一次：设置页有**六枚**描边药丸漏了（`settings_tab_config.go` 的
-// 导出 / 导入 / 从 Biu 导入、`settings_tab_menu.go` 的「添加文件夹」和「×」、
+// 导出 / 导入、`settings_tab_menu.go` 的「添加文件夹」和「×」、
 // `settings_tab_shortcut.go` 的「恢复默认」），而代码和**全部测试都绿**——
 // `ui.Button(c, "导出配置")` 和 `flatButton(c, "导出配置")` 签名一模一样、事件照旧
 // 触发，只有画面上多了一圈线。

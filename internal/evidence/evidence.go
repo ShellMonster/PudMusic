@@ -280,7 +280,7 @@ var Items = []Item{
 			"TestSeekClearsTheEndedLatch",
 			// 落盘 + 默认档。
 			"TestThePlayModeSurvivesARestart",
-			"TestAFreshInstallGetsBiuDefaultMode",
+			"TestAFreshInstallGetsDefaultMode",
 			// 界面：按钮按一下换一格、右键四档齐、保持分集顺序的开关、没挤坏歌名。
 			"TestThePlayModeButtonSaysWhichModeItIs",
 			"TestClickingThePlayModeButtonWalksTheFourModes",

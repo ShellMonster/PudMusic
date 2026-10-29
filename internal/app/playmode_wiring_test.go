@@ -272,12 +272,10 @@ func TestThePlayModeSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestAFreshInstallGetsBiuDefaultMode 盯没有设置文件时的默认档。
+// TestAFreshInstallGetsDefaultMode 验证没有设置文件时的默认档。
 //
-// 两个方向：一是默认档是**循环播放**（Biu 的初始值，也是「放完就停住」这个
-// 症状的反面）；二是那份文件里根本没有 playMode 这一格时，normalize 要把它
-// 变成默认档——一份从旧版升上来的设置正是这个样子。
-func TestAFreshInstallGetsBiuDefaultMode(t *testing.T) {
+// 默认档是循环播放；设置文件里没有 playMode 这一格时，normalize 使用同一个默认档。
+func TestAFreshInstallGetsDefaultMode(t *testing.T) {
 	if app.DefaultPlayMode != app.PlayModeLoop {
 		t.Errorf("默认档是 %q，want loop（Biu 的初始值）", app.DefaultPlayMode)
 	}
@@ -300,7 +298,7 @@ func TestAFreshInstallGetsBiuDefaultMode(t *testing.T) {
 
 	// 一份没有 playMode 这一格的旧设置文件。
 	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	writeFile(t, path, `{"appSettings":{"themeMode":"light"}}`)
+	writeFile(t, path, `{"schemaVersion":1,"appSettings":{"themeMode":"light"}}`)
 	s, err := app.LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)
@@ -310,7 +308,7 @@ func TestAFreshInstallGetsBiuDefaultMode(t *testing.T) {
 	}
 
 	// 手写坏的值也该被拉回来，而不是原样留在界面上。
-	writeFile(t, path, `{"appSettings":{"playMode":"whatever"}}`)
+	writeFile(t, path, `{"schemaVersion":1,"appSettings":{"playMode":"whatever"}}`)
 	s, err = app.LoadSettings(path)
 	if err != nil {
 		t.Fatal(err)

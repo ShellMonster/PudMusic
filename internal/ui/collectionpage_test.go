@@ -785,9 +785,8 @@ func TestTheCollectionSearchSaysWhenThereIsNoResult(t *testing.T) {
 // 基线（`6247a3d`）在侧栏 400 是 57 宽、480 是 **0 宽**（右缘 922，**出窗口**）
 // ——**这一票在每一档都比它好**。
 //
-// 侧栏宽度是 **160~480**（`app.ClampSideMenuWidth`），而**导入 Biu 的设置之后
-// 侧栏就是 280**（`internal/app/first_import_test.go:110`），窗口又能拖到
-// **900 最小**——那一档是用户真真实实会撞上的。
+// 侧栏宽度是 **180~300**（`app.ClampSideMenuWidth`），窗口最小宽度是 **900**，
+// 这一档是用户真真实实会撞上的。
 //
 // # 判据是**画面上的盒子**
 //

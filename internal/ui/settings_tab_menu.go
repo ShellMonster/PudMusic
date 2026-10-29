@@ -247,13 +247,8 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 			ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
 			return
 		}
-		// ⚠️ **重复的目录只画一次**。设置文件是用户能直接编辑的（也能从 Biu 那边来），
-		// 两个一模一样的目录在文件里完全合法——而这一行的 key 就是路径：MyGo 在同一层里
-		// 拿到两个一样的 key 会**当场 panic**（`ui/context.go` 的 duplicateKey），那一格
-		// 带着整个设置页换成错误页，用户之前改好的设置全看不见。
-		//
-		// 这里去重而不是去改设置：写设置是 `internal/app` 那一层的事，那份文件不是这一票
-		// 的；而重复的目录本来就该只出现一遍（Biu 的 local-music 页也是这么去的）。
+		// 重复目录只画一次。设置文件可由用户直接编辑，两个相同目录在文件里合法；
+		// 但列表 key 必须唯一，否则渲染器会 panic。
 		seen := make(map[string]bool, len(st.LocalMusicDirs))
 		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
 			for i, dir := range st.LocalMusicDirs {

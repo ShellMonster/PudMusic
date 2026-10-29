@@ -321,9 +321,8 @@ func accelModFromName(name string) (ui.Modifiers, bool) {
 
 // accelKeyFromName 是 accelKeyName 的反函数。
 //
-// 大小写都收：Biu 写出来的是大写（`CommandOrControl+P`），而手改过的设置文件里
-// 小写的写法很常见，MyGo 自己的 accelerator 解析器也是小写之后比
-// （`mygo/internal/accelerator` 的 `parseKey`）。
+// 大小写都收：快捷键文件通常使用大写，手写配置也可能使用小写；
+// MyGo 自己的 accelerator 解析器也是小写之后比较。
 func accelKeyFromName(name string) (ui.Key, bool) {
 	// 单个字符：字母、数字。**先按字节判长度**——「é」在 UTF-8 里是两个字节，
 	// 当成两个字符去查会落到下面那张表里去，而那里没有它，于是老老实实返回 false。
