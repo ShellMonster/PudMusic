@@ -222,9 +222,8 @@ func emptyArt(c *ui.Context, name string) {
 func emptyCopy(c *ui.Context, e emptyState) {
 	t := c.Theme()
 	ui.Text(c, e.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(t.Text)
-	// 提示语（Hint）默认不画：标题 + 插画 + 能点的下一步已经说清了，多一句
-	// 解释只是让人多读一行。带数据的（Info）才画。
-	if e.Info && e.Hint != "" {
+	// 提示语是空状态的行动线索；只要调用方提供了，就和标题一起画出来。
+	if e.Hint != "" {
 		ui.Text(c, e.Hint).FontSize(scale.Font(c, scale.EmptyHint)).LineHeight(leading.Copy).
 			TextColor(t.TextMuted)
 	}

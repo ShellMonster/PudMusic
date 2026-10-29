@@ -15,8 +15,44 @@ package app
 //     「正在放的那首」会错位——指针停在原来的下标上，而那一格已经是别的歌了。
 //     症状是**静默**的：播放条上写着 A，抽屉里高亮的是 B，而响着的还是 A。
 
-// MoveSongBefore 把队列里判重标识等于 id 的那些项整批挪到 before 那一项**之前**。
-//
+// MoveAtBefore 把队列第 from 项挪到 before 项之前；before == len(items) 表示队尾。
+func (q *Queue) MoveAtBefore(from, before int) bool {
+	q.mu.Lock()
+	ok := q.moveAtBeforeLocked(from, before)
+	q.mu.Unlock()
+	if ok {
+		q.changed()
+		q.invalidate()
+	}
+	return ok
+}
+
+func (q *Queue) moveAtBeforeLocked(from, before int) bool {
+	if from < 0 || from >= len(q.items) || before < 0 || before > len(q.items) || from == before || from+1 == before {
+		return false
+	}
+	item := q.items[from]
+	items := append([]Item(nil), q.items[:from]...)
+	items = append(items, q.items[from+1:]...)
+	if before > from {
+		before--
+	}
+	items = append(items, Item{})
+	copy(items[before+1:], items[before:])
+	items[before] = item
+	cur := q.cur
+	if cur == from {
+		cur = before
+	} else if from < cur && cur <= before {
+		cur--
+	} else if before <= cur && cur < from {
+		cur++
+	}
+	q.items, q.cur = items, cur
+	q.bumpRevisionLocked()
+	return true
+}
+
 // - **id 是空串**：认不出是哪一首，不动（返回 false）。挪了也对不上任何一行。
 // - **before 是空串**：挪到队尾。
 // - 队列里没有 id、或者 before 那一项不在队列里：返回 false，队列不动。

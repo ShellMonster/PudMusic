@@ -59,8 +59,8 @@ var searchUserSorts = []userSortOption{
 	{"默认排序", app.SearchSortDefault},
 	{"粉丝数由高到低", app.SearchSortSecond},
 	{"粉丝数由低到高", app.SearchSortThird},
-	{"Lv等级由高到低", app.SearchSortFourth},
-	{"Lv等级由低到高", app.SearchSortFifth},
+	{"等级由高到低", app.SearchSortFourth},
+	{"等级由低到高", app.SearchSortFifth},
 }
 
 // searchUserIDPrefix 是用户行的身份前缀。mid 本身唯一且稳定，加前缀是为了让
@@ -90,7 +90,7 @@ type searchState struct {
 	//
 	// ⚠️ **一个 Tab 一格**，不是一个全局值：Biu 的两个列表各有一份排序状态
 	// （`video-list` 一个 `order`、`user-list` 一个 `sortKey`），在「用户」里
-	// 按过「Lv等级由高到低」再切回「视频」，那边的排序该还在原处。
+	// 按过「等级由高到低」再切回「视频」，那边的排序该还在原处。
 	sorts [searchTabCount]int
 
 	// lists 是每个 Tab 那一份分页列表。
