@@ -216,7 +216,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 回来了），而在慢帧上那一次读会和这一帧的 `adopt` 写撞上。
 	if !p.started && !p.loading {
 		if ctx := p.begin(); ctx != nil {
-			go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+			go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 		}
 	}
 
@@ -229,7 +229,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 			s.viewLoadError(c, upLoadErrorKey(sp, tab), "这个 UP 主的"+upTabNames[tab], "重试加载"+upTabNames[tab], p.err, func() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
-					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+					go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 				}
 			})
 		})
@@ -370,7 +370,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	if p.want() {
 		if _, last := st.Visible(); last >= rows-1 {
 			if ctx := p.begin(); ctx != nil {
-				go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+				go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 			}
 		}
 	}
@@ -523,7 +523,7 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
-					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+					go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 				}
 			}
 		case p.loading:

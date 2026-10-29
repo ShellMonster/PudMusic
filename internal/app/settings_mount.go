@@ -13,7 +13,6 @@ package app
 import (
 	"errors"
 	"path/filepath"
-	"sync"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
@@ -40,8 +39,7 @@ type settingsSlot struct {
 	shown string
 }
 
-// mountedSettings 是「哪个 App 挂的是哪份设置」。进程里通常只有一个。
-var mountedSettings sync.Map // *App → *settingsSlot
+// settingsSlot 是 App 直接拥有的设置挂载槽位。
 
 // ErrSettingsNotMounted 是忘了调 MountSettings 时的错。
 var ErrSettingsNotMounted = errors.New("app: 还没有挂上设置，先调 MountSettings")
@@ -62,7 +60,13 @@ func SettingsPath(dir string) string { return filepath.Join(dir, SettingsFileNam
 // 提示，用户看得见自己丢了设置，而不是安静地按默认值用下去。
 func (a *App) MountSettings(path string) error {
 	store, err := OpenSettingsStore(path)
-	mountedSettings.Store(a, &settingsSlot{store: store, loadErr: err})
+	a.mu.Lock()
+	old := a.settings
+	a.settings = &settingsSlot{store: store, loadErr: err}
+	a.mu.Unlock()
+	if old != nil && old.store != nil {
+		_ = old.store.Close()
+	}
 
 	// 播放模式是**队列**的形状，队列不走挂载表（它跟着 App 走，见 app.go），
 	// 所以得在这里把它从设置搬过去。不搬的话用户设过的档每次启动都被
@@ -117,7 +121,9 @@ func (a *App) RecordSettingsFailure(err error) {
 	if err == nil {
 		return
 	}
-	mountedSettings.Store(a, &settingsSlot{loadErr: err})
+	a.mu.Lock()
+	a.settings = &settingsSlot{loadErr: err}
+	a.mu.Unlock()
 }
 
 // CloseSettings 收尾：把还欠着的改动落完，停掉后台写。可以重复调。
@@ -125,11 +131,14 @@ func (a *App) RecordSettingsFailure(err error) {
 // ⚠️ 「改设置 → 杀进程 → 重启 → 设置还在」这条验收靠的就是 store 里那次
 // 同步 Flush。SIGKILL 拦不住，任何异步写盘都得配一个同步收尾。
 func (a *App) CloseSettings() error {
-	v, ok := mountedSettings.LoadAndDelete(a)
-	if !ok {
+	a.mu.Lock()
+	slot := a.settings
+	a.settings = nil
+	a.mu.Unlock()
+	if slot == nil {
 		return nil
 	}
-	store := v.(*settingsSlot).store
+	store := slot.store
 	if store == nil {
 		return nil
 	}
@@ -259,10 +268,9 @@ func (a *App) TakeSettingsError() error {
 
 // settingsSlot 是这个 App 挂着的设置，没有就返回 nil。
 func (a *App) settingsSlot() *settingsSlot {
-	if v, ok := mountedSettings.Load(a); ok {
-		return v.(*settingsSlot)
-	}
-	return nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.settings
 }
 
 // invalidate 叫界面要一帧。

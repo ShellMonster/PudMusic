@@ -66,7 +66,7 @@ func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page
 // B 站改一个字段就是在这一行炸。崩了当成一个错投进信箱，走正常那条路。
 // cursor 和 page 是**调用方（界面线程）**在开这一拉那一刻读出来的
 // 闸门状态，不是这里自己读的——闸门是界面线程的状态，后台碰它就是数据竞争。
-func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string, page int) {
+func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string, page int, mountGen uint64) {
 	var r upResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -81,7 +81,7 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 		s.wake.invalidate()
 	}()
 
-	r = upResult{tab: tab}
+	r = upResult{mountGen: mountGen, tab: tab}
 
 	switch tab {
 	case upTabDynamic:
@@ -128,6 +128,9 @@ func (s *Shell) adoptUp(sp *upSpace) {
 	}
 
 	for _, r := range box {
+		if r.mountGen != sp.mountGen {
+			continue
+		}
 		p := sp.pagerOf(r.tab)
 		// ⚠️ **`settle` 必须先调**：失败、超时、返回不对、拉取的代码崩了，
 		// 全走这一条。漏了它那一格会永远停在「正在加载」。

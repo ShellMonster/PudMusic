@@ -23,9 +23,12 @@
 package ui
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -278,11 +281,19 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	pg := t.list.Paged()
 
 	if pg.Err != nil && pg.Loaded == 0 {
+		retry := func() { t.list.Reload() }
+		retryLabel := "重试搜索"
+		if searchErr, ok := searchErrorOf(pg.Err); ok && !searchErr.Retryable {
+			retry = nil
+			retryLabel = ""
+		}
+		errText := searchErrorText(pg.Err)
 		s.viewLoadError(c, "search:fail:"+strconv.Itoa(tab),
-			"搜索「"+keyword+"」", "重试搜索", pg.Err,
-			func() { t.list.Reload() })
+			"搜索「"+keyword+"」", retryLabel, errors.New(errText), retry)
+
 		return
 	}
+
 	if pg.Loaded == 0 && !pg.Loading {
 		s.viewEmpty(c, "search:no-results:"+strconv.Itoa(tab), noSearchResults)
 		return
@@ -306,6 +317,18 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	s.noteScrollbar(t.list.Hot())
 }
 
+func searchErrorOf(err error) (*app.SearchError, bool) {
+	var searchErr *app.SearchError
+	return searchErr, errors.As(err, &searchErr)
+}
+
+func searchErrorText(err error) string {
+	if searchErr, ok := searchErrorOf(err); ok {
+		return notice.SearchErrorText(searchErr.Category)
+	}
+	return err.Error()
+}
+
 // searchHeaderSpec 是这一档 Tab 的表头。
 //
 // ⚠️ **「用户」那一档没有「时长」**：那一档的行是「序号 / 头像 / 昵称 / 个性签名」
@@ -324,7 +347,8 @@ func searchHeaderSpec(tab int, v list.View, cols list.Columns, check bool, key s
 
 // searchColumns 是这一档要多画哪两列（行和表头读的是同一份）。
 //
-//	歌曲 / 视频	播放量 + 投稿时间（`VideoHit.Play` / `VideoHit.PubDate`）
+// 歌曲 / 视频	播放量 + 投稿时间（应用 SearchItem.View / SearchItem.PubTime）
+//
 //	用户		两样都没有——用户不是视频，行里也不该凭空多出两列空的
 //
 // ⚠️ `Now` 传的是 `s.now`（读外壳那颗时钟的闭包），不是 `s.clock.Now`：

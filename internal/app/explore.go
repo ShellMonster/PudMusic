@@ -52,19 +52,38 @@ var errExploreMissing = errors.New("这一页暂时加载不出来")
 // 传第二个的话，登录态、请求头、WBI 密钥全都不是同一份了，而症状是
 // 「登录成功了，一打开空间就 -101」。
 func (a *App) MountExplore(cli *bili.Client) {
-	mountedExplore.Store(a, cli)
+	a.mu.Lock()
+	oldSpaces := a.spaces
+	a.exploreClient = cli
+	a.exploreGen++
+	a.spaces = make(map[int64]*UpSpace)
+	a.mu.Unlock()
+
+	// The keyed spaces belong to the client mount. Invalidate them after dropping
+	// the app lock so an in-flight response cannot repopulate state for the new
+	// client or account.
+	for _, s := range oldSpaces {
+		s.invalidate()
+	}
+}
+
+// ExploreGeneration identifies the current Explore client mount.
+//
+// UI-owned cached Explore state captures this value when it is created. A new
+// mount means results from the old client or account must not be adopted into
+// that cache, even if cancellation arrives after the result was queued.
+func (a *App) ExploreGeneration() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.exploreGen
 }
 
 // explore 返回那个客户端。没挂过是 nil（调用方返回 errExploreMissing）。
 func (a *App) explore() *bili.Client {
-	if v, ok := mountedExplore.Load(a); ok {
-		return v.(*bili.Client)
-	}
-	return nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.exploreClient
 }
-
-// mountedExplore 是「这个 App 用的是哪个 B 站客户端」。
-var mountedExplore sync.Map // *App → *bili.Client
 
 // TestOnlyAdoptLogin 装一份登录态，**只给界面层的测试用**。
 //
@@ -258,28 +277,24 @@ type UpSpace struct {
 	head    SpaceHeader
 	gen     uint64
 	running bool
+	closed  bool
 }
 
 // UpSpaceOf 是 mid 这个 UP 的头部状态。**第一次问的时候现建一个空的**：
 // 「还没加载」是正常状态，不该让调用方判 nil。
 func (a *App) UpSpaceOf(mid int64) *UpSpace {
-	key := upSpaceKey{a, mid}
-	if v, ok := mountedSpaces.Load(key); ok {
-		return v.(*UpSpace)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.spaces == nil {
+		a.spaces = make(map[int64]*UpSpace)
+	}
+	if s := a.spaces[mid]; s != nil {
+		return s
 	}
 	s := &UpSpace{app: a, mid: mid}
-	actual, _ := mountedSpaces.LoadOrStore(key, s)
-	return actual.(*UpSpace)
+	a.spaces[mid] = s
+	return s
 }
-
-// upSpaceKey 是头部状态的键。带上 App 是为了两个窗口/两次测试之间不串。
-type upSpaceKey struct {
-	app *App
-	mid int64
-}
-
-// mountedSpaces 存着每个 UP 的头部状态。
-var mountedSpaces sync.Map // upSpaceKey → *UpSpace
 
 // Mid 是这个 UP 的 id。
 func (s *UpSpace) Mid() int64 { return s.mid }
@@ -289,6 +304,17 @@ func (s *UpSpace) Snapshot() SpaceHeader {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.head
+}
+
+// invalidate closes this keyed state for the client mount that created it.
+// In-flight work may still return, but it can no longer publish or wake.
+func (s *UpSpace) invalidate() {
+	s.mu.Lock()
+	s.closed = true
+	s.gen++
+	s.running = false
+	s.head = SpaceHeader{}
+	s.mu.Unlock()
 }
 
 // Load 拉一次头部（昵称/头像/头图/等级 + 关注关系 + 粉丝数）。**立刻返回**。
@@ -319,13 +345,15 @@ func (s *UpSpace) Load() {
 	askStat := selfMid != 0
 
 	s.mu.Lock()
-	if s.running {
+	if s.closed || s.running {
 		// 已经在拉了。**不排队**：连点三下就是三个在途请求，回来时顺序不保证，
 		// 而三个结果说的是同一件事。
 		s.mu.Unlock()
 		return
 	}
 	s.running = true
+	s.gen++
+	gen := s.gen
 	s.head.Loading, s.head.Err = true, ""
 	s.mu.Unlock()
 	wake := s.app.wakeLocked()
@@ -365,7 +393,13 @@ func (s *UpSpace) Load() {
 		<-done
 
 		s.mu.Lock()
-		stale := !s.running
+		if s.app.isClosed() {
+			s.running = false
+			s.mu.Unlock()
+			return
+		}
+		stale := s.gen != gen || s.closed
+
 		s.running = false
 		if stale {
 			// 已经有一次在路上跑着了。这一份不管。
@@ -435,6 +469,10 @@ func (s *UpSpace) Load() {
 // 防抖那条），而这一页也没有别的入口能让用户重来一次。
 func (s *UpSpace) RetryRelation() {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	s.head.relationErr = ""
 	s.head.statErr = ""
 	s.mu.Unlock()
@@ -446,6 +484,10 @@ func (s *UpSpace) RetryRelation() {
 // fail 记一次加载失败并叫醒界面。
 func (s *UpSpace) fail(err error) {
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
 	s.head.Loading = false
 	s.head.Err = err.Error()
 	s.mu.Unlock()
@@ -473,6 +515,10 @@ func (s *UpSpace) Follow(ctx context.Context, follow bool) error {
 	}
 
 	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return errExploreMissing
+	}
 	was := s.head.Relation
 	s.head.Relation = relationAfter(was, follow)
 	// 按过之后关系是**确定**的，哪怕刚才那次查询是拿另一个账号做的。
@@ -483,13 +529,25 @@ func (s *UpSpace) Follow(ctx context.Context, follow bool) error {
 	err := cli.ModifyRelation(ctx, s.mid, act)
 	if err != nil {
 		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			return err
+		}
 		s.head.Relation = was // 回滚：按钮要变回原来那个样子
 		s.mu.Unlock()
+
 		if wake := s.app.wakeLocked(); wake != nil {
 			wake()
 		}
 		return err
 	}
+	s.mu.Lock()
+	closed := s.closed
+	s.mu.Unlock()
+	if closed {
+		return nil
+	}
+
 	// 成功路径也要叫醒：上面的 `Follow` 已经把按钮的字改了，但界面是即时模式，
 	// 不叫醒它就一直停在按下去之前那一帧（铁律三）。
 	if wake := s.app.wakeLocked(); wake != nil {
