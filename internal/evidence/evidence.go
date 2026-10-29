@@ -1925,7 +1925,7 @@ var Items = []Item{
 		// 就把上限顶破了，于是挤 → 退占位 → 重新下 → 又被挤……一直循环。
 		//
 		// 全部用 `httptest` 验（假图床 + 假 B 站接口），不连真网。
-		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行、基线 JPEG 按 MCU 行缩放，不分配整张原图且像素不变；EXIF 旋转图自己摆正再缩（不走 ui.DecodeBitmap，它会把整份原始字节钉在 bitmap 上）；缓存创建和重置均遵循环境预算",
+		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行、基线 JPEG 按 MCU 行缩放，不分配整张原图且像素不变；EXIF 旋转图自己摆正再缩（不走 ui.DecodeBitmap，它会把整份原始字节钉在 bitmap 上）；缓存创建和重置均遵循环境预算；**向图床要的那一档的宽高比与那一格一致（≤3%）、横幅在 Retina 上不糊，而「存进缓存的那一份」仍然被 768 夹住（32MiB 预算不变）；满屏背景的清晰度可调（流畅/清晰/高清三档），而**解码按目标尺寸流式进行、内存峰值与源图大小无关**",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
 			"TestTheHomeCoversDoNotGoBackToPlaceholder",
@@ -1952,6 +1952,24 @@ var Items = []Item{
 			"TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash",
 			"TestTheHistoryPageCoversDoNotKeepFlashing",
 			"TestTheLaterPageCoversDoNotKeepFlashing",
+			// 票 #624：「向图床要多大」与「存进缓存多大」是两条线（票 #664）。
+			"TestTheRequestedTierKeepsTheAspectRatio",
+			"TestTheBannerIsNotBlurryOnRetina",
+			"TestTheShortEdgeIsQuantizedToEight",
+			"TestTheRequestedTierIsNotClampedByTheStoredCap",
+			"TestTheStoredCapIsUnchanged",
+			"TestTheStoredSizeIsStillCapped",
+			"TestTheBackdropDoesNotGrowUnbounded",
+			"TestDraggingTheWindowDoesNotMakeNewURLs",
+			"TestTheRememberedURLsAreBounded",
+			"TestTheFakeImageHostCropsLikeTheRealOne",
+			// 票 #666：满屏背景的清晰度三档 + 流式解码按目标尺寸停。
+			"TestTheClarityTiersChangeBothTheCanvasAndTheBlur",
+			"TestTheBlurShrinksAsTheCanvasGrows",
+			"TestTheBlurOnScreenIsTheSameWhateverTheWindowSize",
+			"TestTheBackdropPassesItsOwnStoredSize",
+			"TestTheStoredCopyCanBeLargerThanTheDefaultCap",
+			"TestTheStoredSideReachesTheDecoderEndToEnd",
 		},
 	},
 	{

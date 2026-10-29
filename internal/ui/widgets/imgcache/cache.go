@@ -434,6 +434,85 @@ func (c *Cache) GetSized(url string, w, h float32) State {
 	return c.Get(c.rememberedSizedURL(url, pw, ph))
 }
 
+// GetSizedCapped 是 `GetSized` 加一个「**这一格最多要多大**」的上限。
+//
+// cap 是**长边的上限**（像素），0 = 不限。
+//
+// # 谁用
+//
+// **满屏播放器的背景**（`internal/ui/fullplayer.go`）——它**故意**要大的那一档，
+// 但它真正需要的源图只有 600×400（背景是画到 `winW/4 × winH/4` 的画布上、
+// 再放大 4 倍铺满整窗的，而 `ui.Cover` 那一步就已经把源图缩到画布了）。
+// ⇒ 不加限制的话它要 2400×1600，**多要了 16 倍像素**，而它是**每次开满屏
+// 都要的**（网络字节 ×10）。
+//
+// ⚠️ **上限由那一格自己传**，而不是加一个全局上限——全局上限会把横幅那一格
+// （980 DIP @2x = 1960 像素）也挡住，而那一格**真的要**那么大（不然 Retina 上
+// 糊 2.5 倍）。
+func (c *Cache) GetSizedCapped(url string, w, h float32, cap int) State {
+	if !c.scaled() {
+		return c.Get(url)
+	}
+	pw, ph := coverPixelSizeCapped(w, h, c.scale(), cap)
+	if pw <= 0 || ph <= 0 {
+		return c.Get(url)
+	}
+	return c.Get(c.rememberedSizedURL(url, pw, ph))
+}
+
+// GetSizedStoredAt 是 `GetSized` 加一个「**解出来存多大**」的上限。
+//
+// storeSide 是**存进缓存的那一份**的长边上限（像素），0 = `maxStoredSide`。
+//
+// # 它和 `GetSizedCapped` 的区别
+//
+//	GetSizedCapped   限「**向图床要多大**」（超过就不再往大了要）
+//	GetSizedStoredAt 限「**解出来存多大**」（原图更大也只解到这么大）
+//
+// # 为什么需要它
+//
+// 票 #666：满屏播放器的背景**按画布尺寸要图**（高清档画布 1200×800），而
+// `maxStoredSide = 768` 会把**解下来那一份**钉在 768 —— 于是要到一张大图、
+// 解下来还是 768 宽、再被 GPU 拉大，**清晰度白给了**。
+//
+// ⚠️ **放开它会动 32MiB 的预算**，所以**只有明确知道自己要存多大的调用方**
+// 才传这个参数（现在只有满屏背景那一处）。
+//
+// ⚠️ **它和「整张解进内存」是两件事**：流式解码（`decodeJPEGStored` /
+// `decodePNGStored`）**只解到目标尺寸就停**，内存峰值和源图多大无关
+// （实测：源图 2000×1500 和 6000×4000，解码总分配都是约 2 MB）。
+func (c *Cache) GetSizedStoredAt(url string, w, h float32, storeSide int) State {
+	if !c.scaled() {
+		return c.Get(url)
+	}
+	pw, ph := coverPixelSize(w, h, c.scale())
+	if pw <= 0 || ph <= 0 {
+		return c.Get(url)
+	}
+	return c.getStoredAt(c.rememberedSizedURL(url, pw, ph), storeSide)
+}
+
+// getStoredAt 是 `Get` 加一个「这一条要存多大」。
+func (c *Cache) getStoredAt(url string, storeSide int) State {
+	url = absoluteURL(url)
+	if url == "" {
+		return State{}
+	}
+	v, loaded := c.entries.LoadOrStore(url, &entry{url: url, maxSide: storeSide})
+	e := v.(*entry)
+
+	c.mu.Lock()
+	c.lru.touch(e)
+	e.drawn = c.frame.Load()
+	c.mu.Unlock()
+
+	if !loaded && !c.start(e) {
+		c.forget(e)
+		return State{Err: ErrClosed}
+	}
+	return e.state()
+}
+
 // rememberedSizedURL 是 `sizedURL` 加上「**记好一份**」。
 //
 // 命中那份表时**不产生分配**（那个串已经在表里了）——这是这一票省下来的那些
@@ -464,25 +543,10 @@ func (c *Cache) rememberedSizedURL(src string, w, h int) string {
 func (c *Cache) Get(url string) State {
 	// ⚠️ **协议相对的地址在这里兜一道**（理由见 `absoluteURL`）：拿它当 key
 	// 也是同一条规范化之后的串，于是同一个地址无论服务层补没补过都是同一格。
-	url = absoluteURL(url)
-	if url == "" {
-		return State{}
-	}
-	v, loaded := c.entries.LoadOrStore(url, &entry{url: url})
-	e := v.(*entry)
-
-	c.mu.Lock()
-	c.lru.touch(e)
-	// 记一笔「这一张这一帧画着」：挤缓存时正画着的那几张不许挤（票 #358，
-	// 理由见 `entry.drawn`）。
-	e.drawn = c.frame.Load()
-	c.mu.Unlock()
-
-	if !loaded && !c.start(e) {
-		c.forget(e)
-		return State{Err: ErrClosed}
-	}
-	return e.state()
+	//
+	// 记一笔「这一张这一帧画着」也在那里面（挤缓存时正画着的那几张不许挤，
+	// 票 #358，理由见 `entry.drawn`）。
+	return c.getStoredAt(url, 0)
 }
 
 // BeginFrame 告诉缓存「新的一帧开始了」。
@@ -686,6 +750,16 @@ type entry struct {
 	// 所以零和「第一帧之前」是同一件事——那时候没有「画面上」这一说，挤的
 	// 行为和从前一模一样。
 	drawn uint64
+
+	// maxSide 是**解出来存那一份**的长边上限（像素）。0 = `maxStoredSide`。
+	//
+	// ⚠️ **它跟着 entry 走**：同一个 URL 在不同档位下是**不同的 key**
+	// （`url@2048w_280h_1c.webp` vs `url@768w_128h_1c.webp`），所以每一档
+	// 各自的 entry 记各自的目标尺寸，互不干扰。
+	//
+	// 票 #666：满屏背景高清档要存 1200×800 那一份（比 768 大），而**流式解码**
+	// 让它只解到那个尺寸就停——内存峰值和源图多大无关。
+	maxSide int
 }
 
 // onScreen 报这一张**是不是画面上正画着的**（frame 是这一帧的号）。
@@ -760,6 +834,14 @@ type job struct {
 	// fromDisk 报这批字节是从盘上读的。盘上那份解不开时不能当成「这张图就是
 	// 坏的」——先删掉它，回去下一次真的（见 decodeWorker）。
 	fromDisk bool
+	// maxSide 是**解出来存那一份**的长边上限（像素）。0 = 用 `maxStoredSide`。
+	//
+	// 票 #666：满屏播放器的背景按**画布尺寸**要图，而那比 768 大（高清档
+	// 画布 1200×800）。⚠️ **但它只解到那个尺寸就停**——流式解码
+	// （`decodeJPEGStored` / `decodePNGStored`）的内存峰值只跟**目标**有关，
+	// 和源图多大无关（实测：源图 2000×1500 和 6000×4000，解码总分配都是
+	// 约 2 MB）。
+	maxSide int
 }
 
 // fetch 拿到一张图的字节：先看磁盘缓存，没有才走网络。
@@ -793,7 +875,7 @@ func (c *Cache) fetch(e *entry) {
 		}
 	}
 	select {
-	case c.decodeCh <- job{e: e, data: data, fromDisk: fromDisk}:
+	case c.decodeCh <- job{e: e, data: data, fromDisk: fromDisk, maxSide: e.maxSide}:
 	case <-e.ctx.Done():
 	}
 }
@@ -959,7 +1041,7 @@ func (c *Cache) decodeWorker() {
 	for {
 		select {
 		case j := <-c.decodeCh:
-			bm, err := decodeStored(j.data)
+			bm, err := decodeStored(j.data, j.maxSide)
 			if err != nil {
 				if j.fromDisk && !j.e.isDropped() && !c.closed.Load() {
 					// 盘上那份解不开（上一个版本留下的、或者被外部写坏了）：

@@ -253,8 +253,13 @@ func measureAllocs(t *testing.T, fn func()) uint64 {
 // # 键的粒度要和现有的档位机制对齐
 //
 // 键里的宽高**已经是吸过档的**（`coverPixelSize` 的活儿：长边吸到某一档、短边
-// 跟比例量化到 1/32）。所以拖动窗口时短边只每隔几十像素才变一档——**不会**每
+// 跟比例量化到 1/8）。所以拖动窗口时短边只每隔几十像素才变一档——**不会**每
 // 拖一个像素产生一个一次性条目。
+//
+// ⚠️ **判据从「≤5」变成「≤8」是按新口径重算的**（票 #664）：量化粒度从 1/32
+// 变成 1/8（为了横幅那一档的比例从 23.7% 降到 1.5%），这一档的条目数从 **3**
+// 涨到 **7**——那是**换来的精度**的价钱，不是退化。原始症状（每拖一个像素
+// 一条、48 条）依然被挡住。
 func TestTheRememberedURLsAreBounded(t *testing.T) {
 	c := New(Options{})
 	t.Cleanup(c.Close)
@@ -266,7 +271,7 @@ func TestTheRememberedURLsAreBounded(t *testing.T) {
 		w, h := coverPixelSize(float32(cw)*0.5, 96, 2)
 		_ = c.rememberedSizedURL(base, w, h)
 	}
-	if n := c.sizedURLs.lenOf(); n > 5 {
+	if n := c.sizedURLs.lenOf(); n > 8 {
 		t.Errorf("窗口宽从 257 拖到 320（64 个像素），备忘录里多了 %d 条——"+
 			"拖一次窗口就多一批一次性条目（短边没量化）", n)
 	}

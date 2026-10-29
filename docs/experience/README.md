@@ -26,7 +26,7 @@
 | [architecture.md](architecture.md) | 分层与依赖方向、两扇窗怎么共用一份状态、封面缓存的内存预算 | 你要加一个子系统，或者不清楚某段代码该放哪一层 |
 | [upstream-biu.md](upstream-biu.md) | 上游 Biu 的源码和截图怎么取、哪些数值以上游为准、我们和上游刻意不同的地方 | 你在实现或对齐一个上游页面（UI 票尤其） |
 | [release-and-versioning.md](release-and-versioning.md) | 版本号三处对上、发版五步、更新签名私钥、MyGo 版本基线 | 你要发版、升版本、升 MyGo |
-| [git-and-workflow.md](git-and-workflow.md) | 提交信息、文件怎么拆、注释为什么不许写「还没做」、工作板与 worktree 怎么配合 | 你要提交、拆文件、或第一次在这个仓库里干活 |
+| [git-and-workflow.md](git-and-workflow.md) | 提交信息、文件怎么拆、注释为什么不许写「还没做」、分支与 worktree 怎么配合、开工基点怎么定 | 你要提交、拆文件、开一张新票、或第一次在这个仓库里干活 |
 
 ---
 
@@ -68,13 +68,17 @@
 
 ### 从 `AGENTS.md` 搬来的
 
-> **38 条**，与收尾说明里的落位表一一对应。**§1~§11 每一章都有条目**——
-> 一章都没有落掉，才叫「一条不落」。
+> **37 条**，与收尾说明里的落位表一一对应。
+>
+> ⚠️ **§10 那一章（收尾）的条目已经删掉**：它讲的是工作区怎么被清掉、收尾不做的后果，
+> 那是工具链的内部生命周期，不是项目纪律。现在 `AGENTS.md` §收尾 只留「停掉自己起的进程」
+> 和「收尾报告写什么」两条。**§10 因此是唯一一章没有条目落在本目录的**——它现在只剩纪律
+> 本体，没有需要下沉的「为什么」。
 
 | # | 原位置 | 内容 | 新位置（文档 § 小节） | 纪律留在源文件？ |
 |---|---|---|---|---|
 | 1 | §1 | `-trimpath` 为什么（缓存跨 worktree 命中、实测 38 包 / 41 MB） | `docs/agents/testing.md` §《编译缓存与 `-trimpath`》 | — |
-| 2 | §1 | **三个硬条件**（① `test` 不带 `-trimpath` ② 不许 `GOFLAGS=-trimpath` ③ 全板一致，含「同一个提交里改完 `AGENTS.md` + `DESIGN.md` + 全部 open 票面 + 板子的 check 命令」） | **纪律留在 `AGENTS.md` §1**；理由在 `docs/agents/testing.md` §《编译缓存与 `-trimpath`》里的《三个硬条件，踩了更糟》 | ✅ |
+| 2 | §1 | **三个硬条件**（① `test` 不带 `-trimpath` ② 不许 `GOFLAGS=-trimpath` ③ 全员一致，含「同一个提交里改完 `AGENTS.md` + `DESIGN.md` + 全部 open 票面 + 外部跑验收的 check 命令」） | **纪律留在 `AGENTS.md` §1**；理由在 `docs/agents/testing.md` §《编译缓存与 `-trimpath`》里的《三个硬条件，踩了更糟》 | ✅ |
 | 3 | §1 | `-p 4` 为什么限并发（机器主人自己也要用） | `docs/agents/testing.md` §《`-p 4` 是限并发用的》 | ✅ |
 | 4 | §1 | 默认不跑 `internal/ui` 的理由（一轮 62~298 秒、绿只证明画面没坏） | `docs/agents/testing.md` §《默认不跑 `internal/ui`》 | ✅ |
 | 5 | §1 | 为什么不带 `-race`（十几到二十分钟，评审会超时） | `docs/agents/testing.md` §《不带 `-race`》 | ✅ |
@@ -86,8 +90,8 @@
 | 11 | §2 | `waitFor` / `waitFrames` / 推钟 + `FramePending` / load < 8 / 磁盘 5 GB / `diskguard` / 不许清缓存 / 加压 3 次 / F12 / 每帧分配 / `gofmt` | `docs/agents/testing.md` §《跑测试的几条口径》 | ✅ |
 | 12 | §2 | 已知会飘的名单（3 条 + 1 条待复核 + 2 条已划掉）、怎么自己核这份名单 | `docs/agents/testing.md` §《已知会飘的那几条》 | ✅ |
 | 13 | §3 | 改了对一件事的裁决必须同步改 GitHub issue 的验收标准（`gh issue edit`）；为什么（对话里判的事只有你知道，评审不知道；栽过两次） | **纪律留在 `AGENTS.md` §3**；操作细则 `docs/agents/issue-tracker.md` §《Conventions》《Ticket template》 | ✅ |
-| 14 | §3 | 自动关票不归你管：板子按 `merge.closes` 在开 PR 之前往正文加一行 `Closes #<票号>`；没 PR 就合并后自己 `gh issue close` | **纪律留在 `AGENTS.md` §3**；背景 `docs/experience/git-and-workflow.md` §《工作板与 worktree》 | ✅ |
-| 15 | §3 | 不要手写 `Closes #N`（连反引号里也不行；GitHub 不认代码块里的关闭关键字；2026-10-24 漏过一张 #244）；**关不掉的最常见原因是时序**（`merge.closes` 必须在 PR 开出来之前配好）；票号写错也关不掉（板子只关 `merge.closes` 里列的那几张） | **纪律留在 `AGENTS.md` §3**；背景 `docs/experience/git-and-workflow.md` §《提交信息》 | ✅ |
+| 14 | §3 | 自动关票不归你管：任务流程按 `merge.closes` 在开 PR 之前往正文加一行 `Closes #<票号>`；没 PR 就合并后自己 `gh issue close` | **纪律留在 `AGENTS.md` §3**；背景 `docs/experience/git-and-workflow.md` §《分支与 worktree》 | ✅ |
+| 15 | §3 | 不要手写 `Closes #N`（连反引号里也不行；GitHub 不认代码块里的关闭关键字；2026-10-24 漏过一张 #244）；**关不掉的最常见原因是时序**（`merge.closes` 必须在 PR 开出来之前配好）；票号写错也关不掉（只关 `merge.closes` 里列的那几张） | **纪律留在 `AGENTS.md` §3**；背景 `docs/experience/git-and-workflow.md` §《提交信息》 | ✅ |
 | 16 | §4 界面层 1 | `SetTheme` 每帧在 view 最开头调 | **纪律留在 `AGENTS.md` §4**；背景 `docs/experience/interface-pitfalls.md` §《主题色》 | ✅ |
 | 17 | §4 界面层 2 | view 里 panic 会杀进程 ⇒ `ui.Guard` | **纪律留在 `AGENTS.md` §4**；背景 `docs/experience/interface-pitfalls.md` §《panic》 | ✅ |
 | 18 | §4 界面层 3 | 投递完状态要挨着每扇窗叫醒；`Update(nil)` SIGSEGV；看不见的窗丢帧是设计 | **纪律留在 `AGENTS.md` §4**；背景 `docs/experience/interface-pitfalls.md` §《唤醒》 | ✅ |
@@ -107,10 +111,9 @@
 | 32 | §8 | 提交信息：中文一句话 + 票号；不写 `Closes #N` | **纪律留在 `AGENTS.md` §8**；背景 `docs/experience/git-and-workflow.md` §《提交信息》 | ✅ |
 | 33 | §9 | `GLOSSARY.md` / `docs/adr/` 不存在、`docs/research/` 不进版本库 | **纪律留在 `AGENTS.md` §9**；背景 `docs/experience/git-and-workflow.md` §《仓库里哪些东西不是文档》 | ✅ |
 | 34 | §9 | 回归证据是代码，不是文档 | **纪律留在 `AGENTS.md` §9**；背景 `docs/experience/architecture.md` §《回归证据是代码，不是文档》 | ✅ |
-| 35 | §10 | gopls 收尾：为什么、怎么做（按 cwd 认领）、清理的顺序 | **纪律留在 `AGENTS.md` §10**；细则 `docs/agents/cleanup.md` §《为什么》《怎么做》《清理的顺序》 | ✅ |
-| 36 | §11 | 文件怎么组织：什么时候该拆 / 怎么拆 / 什么时候别拆 | **纪律留在 `AGENTS.md` §11**；背景 `docs/experience/git-and-workflow.md` §《文件怎么组织》 | ✅ |
-| 37 | §1 里 `-trimpath` 的理由 | 为什么全板必须一致（半开半开 ⇒ 缓存翻倍到 518 MB） | `docs/experience/git-and-workflow.md` §《为什么 `-trimpath` 是全板一致的》 | — |
-| 38 | 开头 | 「只写从代码里看不出来、踩过才知道的东西」 | `docs/agents/README.md` §《规矩 vs 知识 vs 数值》 | — |
+| 35 | §11 | 文件怎么组织：什么时候该拆 / 怎么拆 / 什么时候别拆 | **纪律留在 `AGENTS.md` §11**；背景 `docs/experience/git-and-workflow.md` §《文件怎么组织》 | ✅ |
+| 36 | §1 里 `-trimpath` 的理由 | 为什么全员必须一致（半开半开 ⇒ 缓存翻倍到 518 MB） | `docs/experience/git-and-workflow.md` §《为什么 `-trimpath` 是全员一致的》 | — |
+| 37 | 开头 | 「只写从代码里看不出来、踩过才知道的东西」 | `docs/agents/README.md` §《规矩 vs 知识 vs 数值》 | — |
 
 ### 从 `README.md` 搬来的
 

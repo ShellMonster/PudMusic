@@ -107,7 +107,7 @@ func shotSpaceWithBanner(t *testing.T, dir, name string, dark bool) {
 	// 横幅那一张给一条**横向的渐变带**：一眼看得出是横幅，而且**左右两端颜色
 	// 不同**——中心裁剪把两端切掉的话，画面上就看出来了。
 	pics := &bannerPicServer{}
-	pics.bannerImg = bannerShotPNG(1200, 400,
+	pics.bannerImg = bannerShotPNG(4000, 400,
 		color.RGBA{92, 62, 44, 255}, color.RGBA{214, 132, 78, 255})
 	_, tt := bannerShotShell(t, dark, "https://i0.hdslb.com/bfs/archive/banner.png", pics)
 	// ⚠️ **等的是「横幅那一带有图」**，不是「有那个红色」——出图这一组给的
