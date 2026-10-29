@@ -99,6 +99,9 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	p := DefaultFullPlayerPrefs()
 	p.ShowSpectrum, p.SpectrumColor = true, "#1ed760"
 	a.SetFullPlayerPrefs(p)
+	if err := a.FlushFullPlayerPrefs(); err != nil {
+		t.Fatal(err)
+	}
 
 	// 重开一个 App 读同一份文件。
 	b := New()
@@ -113,8 +116,30 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestThePrefsFileUsesBiusKeyNames 断「键名和 Biu 那个 store 一致」。
-//
+func TestFullPlayerPrefsCoalescesToLatestValue(t *testing.T) {
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.MountFullPlayerPrefs(FullPlayerPrefsPath(dir))
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	if got := a.FullPlayerPrefs().SpectrumColor; got != "#222222" {
+		t.Fatalf("memory preference = %q, want latest value", got)
+	}
+	if err := a.FlushFullPlayerPrefs(); err != nil {
+		t.Fatal(err)
+	}
+	b := New()
+	t.Cleanup(b.Close)
+	b.MountFullPlayerPrefs(FullPlayerPrefsPath(dir))
+	if got := b.FullPlayerPrefs().SpectrumColor; got != "#222222" {
+		t.Fatalf("disk preference = %q, want latest value", got)
+	}
+}
+
 // 用户从 Biu 迁过来的时候是**按内容**认的（整份导出/导入），键名不一样就等于
 // 他在 Biu 里调好的频谱开关到这边变成「没设过」。
 func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
@@ -126,6 +151,9 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 	p.ShowSpectrum = true
 	p.LyricsColor, p.SpectrumColor, p.BackgroundColor = "#ffffff", "#ff0000", "#101014"
 	a.SetFullPlayerPrefs(p)
+	if err := a.FlushFullPlayerPrefs(); err != nil {
+		t.Fatal(err)
+	}
 
 	b, err := os.ReadFile(filepath.Join(dir, fullPlayerPrefsFileName))
 	if err != nil {

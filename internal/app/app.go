@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1827,6 +1828,9 @@ func (a *App) Close() {
 	// goroutine 还在往界面上投递状态——界面已经拆了。
 	if upd != nil {
 		upd.close()
+	}
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		log.Printf("biu: 退出时保存全屏播放器偏好失败：%v", err)
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const (
@@ -117,9 +118,15 @@ func FullPlayerPrefsPath(dir string) string {
 type fullPlayerPrefsStore struct {
 	path string
 
-	mu   sync.Mutex
-	cur  FullPlayerPrefs
-	save error
+	wmu     sync.Mutex
+	mu      sync.Mutex
+	cur     FullPlayerPrefs
+	save    error
+	dirty   bool
+	closed  bool
+	req     chan struct{}
+	quit    chan struct{}
+	stopped chan struct{}
 }
 
 // load 读盘，读不到就用默认。**在挂上的时候调一次**。
@@ -214,13 +221,43 @@ func (p *fullPlayerPrefsStore) put(next FullPlayerPrefs) {
 	p.mu.Lock()
 	p.cur = next
 	p.normalizeLocked()
-	next = p.cur
-	path, prevErr := p.path, p.save
+	p.dirty = p.path != ""
+	closed := p.closed
 	p.mu.Unlock()
-
-	if path == "" {
-		return
+	if !closed && p.dirty {
+		select {
+		case p.req <- struct{}{}:
+		default:
+		}
 	}
+}
+
+func (p *fullPlayerPrefsStore) Flush() error {
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
+	p.mu.Lock()
+	if !p.dirty || p.path == "" {
+		p.mu.Unlock()
+		return nil
+	}
+	next, path := p.cur, p.path
+	p.dirty = false
+	p.mu.Unlock()
+	err := p.write(path, next)
+	if err != nil {
+		p.mu.Lock()
+		p.dirty = true
+		p.save = err
+		p.mu.Unlock()
+		return err
+	}
+	p.mu.Lock()
+	p.save = nil
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *fullPlayerPrefsStore) write(path string, next FullPlayerPrefs) error {
 	b, err := json.MarshalIndent(struct {
 		SchemaVersion int             `json:"schemaVersion"`
 		FullPlayer    FullPlayerPrefs `json:"fullPlayer"`
@@ -228,16 +265,57 @@ func (p *fullPlayerPrefsStore) put(next FullPlayerPrefs) {
 	if err == nil {
 		err = writeFileAtomic(path, b)
 	}
-	if err != nil && prevErr == nil {
-		p.mu.Lock()
-		p.save = err
-		p.mu.Unlock()
+	if err != nil {
 		log.Printf("biu: 全屏播放器偏好 %s 存不住：%v", path, err)
+	}
+	return err
+}
+
+func (p *fullPlayerPrefsStore) Close() error {
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil
+	}
+	p.closed = true
+	p.mu.Unlock()
+	if p.quit != nil {
+		close(p.quit)
+		<-p.stopped
+	}
+	return p.Flush()
+}
+
+func (p *fullPlayerPrefsStore) loop() {
+	defer close(p.stopped)
+	t := time.NewTimer(time.Hour)
+	if !t.Stop() {
+		<-t.C
+	}
+	for {
+		select {
+		case <-p.quit:
+			if !t.Stop() {
+				select {
+				case <-t.C:
+				default:
+				}
+			}
+			return
+		case <-p.req:
+			if !t.Stop() {
+				select {
+				case <-t.C:
+				default:
+				}
+			}
+			t.Reset(writeDebounce)
+		case <-t.C:
+			_ = p.Flush()
+		}
 	}
 }
 
-// normalizeLocked 把明显不合理的值拉回合法区间（调用方拿着锁）。
-//
 // 只管颜色：用户可以直接编辑这个文件，`"spectrumColor": "红"` 不该一路穿到
 // 画界面的那一行（那里 `parseHexColor` 认不出来会退回黑色，一条纯黑的频谱
 // 摆在深色背景上等于没有；背景色和歌词色同理）。
@@ -256,6 +334,12 @@ func (p *fullPlayerPrefsStore) normalizeLocked() {
 func (a *App) MountFullPlayerPrefs(path string) {
 	p := &fullPlayerPrefsStore{path: path}
 	p.load()
+	if path != "" {
+		p.req = make(chan struct{}, 1)
+		p.quit = make(chan struct{})
+		p.stopped = make(chan struct{})
+		go p.loop()
+	}
 	a.mu.Lock()
 	a.fullPlayerPrefs = p
 	a.mu.Unlock()
@@ -269,8 +353,27 @@ func (a *App) FullPlayerPrefs() FullPlayerPrefs {
 	return p.get()
 }
 
-// SetFullPlayerPrefs 改全屏播放器的偏好并立刻落盘。
-//
+func (a *App) FlushFullPlayerPrefs() error {
+	a.mu.Lock()
+	p := a.fullPlayerPrefs
+	a.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.Flush()
+}
+
+func (a *App) CloseFullPlayerPrefs() error {
+	a.mu.Lock()
+	p := a.fullPlayerPrefs
+	a.fullPlayerPrefs = nil
+	a.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.Close()
+}
+
 // 为什么是「立刻」而不是像设置那样合并写：这一份只有八样，改它的动作是
 // 「点一下开关 / 挑一个颜色」，一天点不了几次；而合并写要一个后台 goroutine
 // 和一个停掉它的钩子，为这么小的东西不值当。
