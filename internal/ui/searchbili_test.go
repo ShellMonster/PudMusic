@@ -104,9 +104,18 @@ type biliFixture struct {
 	// tripleBody 是三连那一趟的回包（可以改成「B 站只做成了一部分」）。
 	relLiked, relFaved bool
 	tripleBody         string
-	// likePosts 记每一次赞的 up（1 赞 / 2 取消赞），triplePosts 数三连。
+	// likePosts 记每一次赞的 like（1 赞 / 2 取消赞），triplePosts 数三连。
+	//
+	// ⚠️ **字段名是 `like`，不是 `up`**：这台假 B 站照着 web 端
+	// `/x/web-interface/archive/like` 的真形状造（`bilibili-API-collect` 的
+	// `docs/video/action.md`「点赞视频（web端）」）。`up` 是动态点赞那个接口
+	// （`/x/dynamic/feed/dyn/thumb`）的字段，混用会让人以为两边一样——而这一票的
+	// 根因正是发错了字段名（B 站回 -400，用户看到「B 站拒绝了这次请求」）。
 	likePosts, triplePosts int
-	lastUp                 string
+	lastLike               string
+	// lastLikeForm 是最近一次赞的**整份**表单：端到端用例要断「up 一定不在」，
+	// 只留 like 那一格的话，多出来的字段就看不见了。
+	lastLikeForm url.Values
 }
 
 // fixture 那一摊收藏用的固定值。

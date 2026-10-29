@@ -116,15 +116,25 @@ func TestArchiveRelationOfNothingAsksNobody(t *testing.T) {
 
 // TestLikeArchiveSendsTheWriteWithCSRF 是「点一下星标」那一次写。
 //
-// 断三样：**POST**、**CSRF**（查询串 + `bili-jct` 头）、`up` 的 1/2。
+// 断四样：**POST**、**CSRF**（查询串 + `bili-jct` 头）、**`like`** 的 1/2，以及
+// **`up` 一定不在**。
 //
-// ⚠️ `up` 用 1/2 而不是「切换」：界面重画之后手上那份状态可能是**旧的**，切换
-// 会点成反的（用户连点两下等于没点）。和 `LikeDynamic` 是同一条。
+// 🔴 **字段名是 `like`，不是 `up`**：web 端 `/x/web-interface/archive/like` 的参数表
+// （`bilibili-API-collect` 的 `docs/video/action.md`「点赞视频（web端）」）只有
+// `like`；`up` 是动态点赞那个接口（`/x/dynamic/feed/dyn/thumb`）的字段。发成 `up`
+// 时 B 站回 -400「参数错误」，用户在界面上看到的是「B 站拒绝了这次请求」——这一票的
+// 根因就是它。
+//
+// ⚠️ **两个字段不许同时发**：B 站对「既有 like 又有 up」的行为没有文档，多带一个
+// 没被定义的字段只会让下一个排障的人多一条岔路。
+//
+// ⚠️ `like` 用 1/2 而不是「切换」（0）：界面重画之后手上那份状态可能是**旧的**，
+// 切换会点成反的（用户连点两下等于没点）。
 func TestLikeArchiveSendsTheWriteWithCSRF(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		like bool
-		up   string
+		want string
 	}{
 		{"赞", true, "1"},
 		{"取消赞", false, "2"},
@@ -145,8 +155,13 @@ func TestLikeArchiveSendsTheWriteWithCSRF(t *testing.T) {
 			if got.Form.Get("bvid") != "BV1xx" {
 				t.Errorf("bvid 传的是 %q", got.Form.Get("bvid"))
 			}
-			if got.Form.Get("up") != c.up {
-				t.Errorf("up 传的是 %q，want %q", got.Form.Get("up"), c.up)
+			if v := got.Form.Get("like"); v != c.want {
+				t.Errorf("like 传的是 %q（表单 %v），want %q（web 端接口收的是 like，不是 up）",
+					v, got.Form, c.want)
+			}
+			if _, sent := got.Form["up"]; sent {
+				t.Errorf("表单里还有 up=%q —— 两个字段同时发出去时 B 站行为未定义，"+
+					"这个接口只收 like", got.Form.Get("up"))
 			}
 			if got.Query.Get("csrf") != "the-jct-value" {
 				t.Errorf("查询串里没有 csrf")
@@ -231,6 +246,18 @@ func TestLikeTripleAsksForTheAidNotTheBvid(t *testing.T) {
 	}
 	if triple.Query.Get("csrf") != "the-jct-value" {
 		t.Error("三连的查询串里没有 csrf")
+	}
+	// 三连这一趟只发 `aid`，不许跟着 archive/like 的字段名变化长出 `like`：
+	// 参数表里只有 `aid`（`bilibili-API-collect` 的 `docs/video/action.md`
+	// 「一键三连」）。这一条是「把 archive/like 的字段名从 up 改成 like 时误伤
+	// 三连」的回归。
+	//
+	// ⚠️ 这里**只断 like 不在**，不断 up：网页版那枚三连按钮本身就带
+	// `up=1&up_coin=1`（见 `LikeTriple` 那段注释），将来真要支持「只赞不投」时
+	// 加上 up 是合法的——钉死它反而会挡住一条正当的改动。
+	if _, sent := triple.Form["like"]; sent {
+		t.Errorf("三连的表单里有 like=%q —— 它只收 aid，like 是 archive/like 的字段",
+			triple.Form.Get("like"))
 	}
 }
 

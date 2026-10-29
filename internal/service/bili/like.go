@@ -41,6 +41,9 @@ const (
 	// 真要写的时候让 B 站回 -101，那才是真话。
 	pathArchiveRelation = "/x/web-interface/archive/relation"
 	// pathArchiveLike 是赞 / 取消赞。**POST，要 CSRF**。
+	//
+	// 🔴 表单字段是 **`like`**（1 赞 / 2 取消赞），不是 `up`——那是**动态**点赞
+	// 那个接口的字段。见 `LikeArchive` 那段。
 	pathArchiveLike = "/x/web-interface/archive/like"
 	// pathArchiveTriple 是一键三连。**POST，要 CSRF**。
 	//
@@ -100,9 +103,20 @@ func (c *Client) ArchiveRelation(ctx context.Context, bvid string) (ArchiveRelat
 
 // LikeArchive 给一首投稿点赞（like=true）或取消点赞。**写操作**。
 //
-// up 的取值照 B 站：1 点赞、2 取消点赞。**0 是切换，我们不用它**——切换在界面
+// 🔴 **表单字段叫 `like`，不叫 `up`**：web 端 `/x/web-interface/archive/like`
+// 的参数表（`bilibili-API-collect` 的 `docs/video/action.md`「点赞视频（web端）」）
+// 只有 `like`；`up` 是**动态**点赞那几个接口（`/x/dynamic/feed/dyn/thumb`、APP 端
+// `/x/v2/view/like`）的字段。发成 `up` 时 B 站回 -400，用户看到的是 `friendly.go`
+// 那句「B 站拒绝了这次请求」——而真相是我们发错了字段名。
+//
+// # 和 LikeDynamic 的区别：**字段名不同**
+//
+// 两个都是「赞 / 取消赞」，取值也都是 1/2，但**收的字段名不一样**：这边的 web 端
+// 稿件接口收 `like`，动态那个接口（`LikeDynamic`，JSON 体）收 `up`。所以两处
+// 的常量、变量名各按各的口径叫，不要互相抄——这一票的根因就是从动态那边抄过来的。
+//
+// like 的取值照 B 站：1 点赞、2 取消点赞。**0 是切换，我们不用它**——切换在界面
 // 重画之后会点成反的（那一帧画出来的是旧状态），用户连点两下等于没点。
-// 和 `LikeDynamic` 是同一条理由。
 //
 // ⚠️ **不重试**：见文件头。一次超时的点赞重试一次，用户手上就可能是两个赞。
 func (c *Client) LikeArchive(ctx context.Context, bvid string, like bool) error {
@@ -110,13 +124,14 @@ func (c *Client) LikeArchive(ctx context.Context, bvid string, like bool) error 
 	if bvid == "" {
 		return ErrNoVideo
 	}
-	up := 1
+	// ⚠️ 变量名不叫 `like`：函数参数已经占了那个名字（`like bool`）。
+	likeVal := 1
 	if !like {
-		up = 2
+		likeVal = 2
 	}
 	form := url.Values{
 		"bvid": {bvid},
-		"up":   {strconv.Itoa(up)},
+		"like": {strconv.Itoa(likeVal)},
 	}
 	if _, err := c.Do(ctx, Call{
 		Method: "POST", URL: c.hostAPI + pathArchiveLike, Form: form, CSRF: true,
