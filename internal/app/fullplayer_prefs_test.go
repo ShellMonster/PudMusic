@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -99,6 +100,9 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	p := DefaultFullPlayerPrefs()
 	p.ShowSpectrum, p.SpectrumColor = true, "#1ed760"
 	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("save before restart: %v", err)
+	}
 
 	// 重开一个 App 读同一份文件。
 	b := New()
@@ -113,8 +117,197 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestThePrefsFileUsesBiusKeyNames 断「键名和 Biu 那个 store 一致」。
-//
+func TestFullPlayerPrefsUpdateReturnsBeforePersistence(t *testing.T) {
+	writes := make(chan struct{})
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(string, []byte) error {
+		close(writes)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("memory preference = %q, want %q", got, p.SpectrumColor)
+	}
+	select {
+	case <-writes:
+		t.Fatal("SetFullPlayerPrefs waited for persistence")
+	default:
+	}
+	select {
+	case flush <- struct{}{}:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background writer did not accept a flush signal")
+	}
+}
+
+func TestFullPlayerPrefsCoalescesConsecutiveUpdates(t *testing.T) {
+	var calls atomic.Int32
+	written := make(chan []byte, 2)
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		calls.Add(1)
+		written <- append([]byte(nil), b...)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	flush <- struct{}{}
+
+	body := waitFullPlayerPrefsWrite(t, written)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("writer called %d times, want 1", got)
+	}
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("coalesced write did not contain latest value: %s", body)
+	}
+}
+
+func TestFullPlayerPrefsCloseWritesLatestVersionAfterOlderWrite(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	written := make(chan []byte, 2)
+	var calls atomic.Int32
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		written <- append([]byte(nil), b...)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	flush <- struct{}{}
+	waitFullPlayerPrefsSignal(t, firstStarted, "first preference write")
+
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	closed := make(chan error, 1)
+	go func() { closed <- a.CloseFullPlayerPrefs() }()
+
+	close(releaseFirst)
+	first := waitFullPlayerPrefsWrite(t, written)
+	second := waitFullPlayerPrefsWrite(t, written)
+	if bytes.Contains(first, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("first write unexpectedly used the latest value: %s", first)
+	}
+	if !bytes.Contains(second, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("close did not persist the latest version: %s", second)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("close did not wait for the latest preference write")
+	}
+}
+
+func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *testing.T) {
+	writeErr := errors.New("disk full")
+	written := make(chan []byte, 2)
+	var calls atomic.Int32
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		if calls.Add(1) == 1 {
+			return writeErr
+		}
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	flush <- struct{}{}
+	_ = waitFullPlayerPrefsWrite(t, written)
+	waitForFullPlayerPrefsError(t, a, writeErr)
+
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("close did not retry the pending latest write: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("retry wrote an old value: %s", body)
+	}
+}
+
+func TestFullPlayerPrefsCloseFlushesAWriteWhoseBackgroundRequestWasCanceled(t *testing.T) {
+	written := make(chan []byte, 1)
+	a, _, _ := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#333333"
+	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("close returned error: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#333333"`)) {
+		t.Fatalf("close lost the pending preference: %s", body)
+	}
+}
+
+func newTestFullPlayerPrefsApp(t *testing.T, writer func(string, []byte) error) (*App, *fullPlayerPrefsStore, chan struct{}) {
+	t.Helper()
+	dir := t.TempDir()
+	flush := make(chan struct{})
+	p := &fullPlayerPrefsStore{path: FullPlayerPrefsPath(dir), writeFile: writer, flush: flush}
+	p.load()
+	p.start()
+	a := New()
+	a.mu.Lock()
+	a.fullPlayerPrefs = p
+	a.mu.Unlock()
+	t.Cleanup(func() { a.Close() })
+	return a, p, flush
+}
+
+func waitFullPlayerPrefsSignal(t *testing.T, signal <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+func waitFullPlayerPrefsWrite(t *testing.T, written <-chan []byte) []byte {
+	t.Helper()
+	select {
+	case body := <-written:
+		return body
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for preference write")
+		return nil
+	}
+}
+
+func waitForFullPlayerPrefsError(t *testing.T, a *App, want error) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if errors.Is(a.FullPlayerPrefsError(), want) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("reported write error = %v, want %v", a.FullPlayerPrefsError(), want)
+}
+
 // 用户从 Biu 迁过来的时候是**按内容**认的（整份导出/导入），键名不一样就等于
 // 他在 Biu 里调好的频谱开关到这边变成「没设过」。
 func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
@@ -126,6 +319,9 @@ func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 	p.ShowSpectrum = true
 	p.LyricsColor, p.SpectrumColor, p.BackgroundColor = "#ffffff", "#ff0000", "#101014"
 	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("save before reading file: %v", err)
+	}
 
 	b, err := os.ReadFile(filepath.Join(dir, fullPlayerPrefsFileName))
 	if err != nil {
