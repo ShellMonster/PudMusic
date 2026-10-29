@@ -614,6 +614,11 @@ type App struct {
 	// must finish closing the previous writer before publishing its replacement.
 	fullPlayerPrefsMu sync.Mutex
 	fullPlayerPrefs   *fullPlayerPrefsStore
+	// fullPlayerPrefsPending keeps an update made after the current store was
+	// detached in memory until the next mount can attach it to a persisted store.
+	fullPlayerPrefsPending    FullPlayerPrefs
+	fullPlayerPrefsPendingSet bool
+	fullPlayerPrefsDetached   bool
 	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
 	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
 	specBars []float32

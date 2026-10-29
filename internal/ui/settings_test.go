@@ -440,8 +440,27 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 	}
 }
 
-// TestShellSaysSoWhenSettingsCannotBeStored 验「设置存不住」时用户看得见。
-//
+func TestShellSaysSoWhenFullPlayerPrefsCannotBeStored(t *testing.T) {
+	dir := t.TempDir()
+	a := app.New()
+	a.MountFullPlayerPrefs(app.FullPlayerPrefsPath(dir))
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	sh := newTestShell(t, onApp(a))
+	p := a.FullPlayerPrefs()
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+
+	waitFrames(t, sh.tt, "全屏播放器偏好落盘失败提示", func() bool {
+		return sh.tt.HasText("全屏播放器偏好") && sh.tt.HasText("存不住")
+	})
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("落盘失败后内存偏好被丢掉：%q", got)
+	}
+}
+
 // 这一条盯的是一个具体的坑：拿不到应用数据目录时没有 store 可挂，界面上什么
 // 都不会出现，只有日志里有一行——而日志只有排障的人看得到。用户看到的现象是
 // 「改了主题，下次打开又变回来了」，中间什么提示都没有。

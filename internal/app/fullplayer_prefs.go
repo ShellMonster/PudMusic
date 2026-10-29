@@ -26,6 +26,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -133,6 +134,7 @@ type fullPlayerPrefsStore struct {
 	flush   <-chan struct{}
 
 	writeFile func(string, []byte) error
+	wake      func()
 }
 
 // load 读盘，读不到就用默认。**在挂上的时候调一次**。
@@ -275,15 +277,23 @@ func (p *fullPlayerPrefsStore) Flush() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if err != nil {
-		p.save = err
+		wrapped := fmt.Errorf("app: 全屏播放器偏好存不住：%w", err)
+		p.save = wrapped
 		p.dirty = true
-		return err
+		if p.wake != nil {
+			p.wake()
+		}
+		return wrapped
 	}
 	if p.gen == version {
 		p.dirty = false
 	}
 	p.save = nil
+	if p.wake != nil {
+		p.wake()
+	}
 	return nil
+
 }
 
 func (p *fullPlayerPrefsStore) write(path string, next FullPlayerPrefs) error {
@@ -402,22 +412,31 @@ func (a *App) mountFullPlayerPrefs(path string, writeFile func(string, []byte) e
 	}
 	old := a.fullPlayerPrefs
 	a.fullPlayerPrefs = nil
+	a.fullPlayerPrefsDetached = true
 	a.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
 	}
 
-	p := &fullPlayerPrefsStore{path: path, writeFile: writeFile, flush: flush}
+	p := &fullPlayerPrefsStore{path: path, writeFile: writeFile, flush: flush, wake: a.invalidate}
 	p.load()
 	p.start()
 	a.mu.Lock()
+	pending, hasPending := a.fullPlayerPrefsPending, a.fullPlayerPrefsPendingSet
+	a.fullPlayerPrefsPendingSet = false
+	a.fullPlayerPrefsDetached = false
 	a.fullPlayerPrefs = p
 	a.mu.Unlock()
+	if hasPending {
+		p.put(pending)
+	}
 	return p
 }
 
 // FullPlayerPrefsError 返回最近一次全屏播放器偏好落盘失败。
 func (a *App) FullPlayerPrefsError() error {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
 	a.mu.Lock()
 	p := a.fullPlayerPrefs
 	a.mu.Unlock()
@@ -434,6 +453,7 @@ func (a *App) CloseFullPlayerPrefs() error {
 	a.mu.Lock()
 	p := a.fullPlayerPrefs
 	a.fullPlayerPrefs = nil
+	a.fullPlayerPrefsDetached = true
 	a.mu.Unlock()
 	if p == nil {
 		return nil
@@ -450,6 +470,9 @@ func (a *App) FullPlayerPrefs() FullPlayerPrefs {
 
 func (a *App) fullPlayerPrefsValueLocked() FullPlayerPrefs {
 	if a.fullPlayerPrefs == nil {
+		if a.fullPlayerPrefsPendingSet {
+			return a.fullPlayerPrefsPending
+		}
 		return DefaultFullPlayerPrefs()
 	}
 	return a.fullPlayerPrefs.get()
@@ -457,8 +480,21 @@ func (a *App) fullPlayerPrefsValueLocked() FullPlayerPrefs {
 
 // SetFullPlayerPrefs 更新内存中的全屏播放器偏好，并通知后台合并写入。
 func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
+
 	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return
+	}
 	if a.fullPlayerPrefs == nil {
+		if a.fullPlayerPrefsDetached {
+			a.fullPlayerPrefsPending = next
+			a.fullPlayerPrefsPendingSet = true
+			a.mu.Unlock()
+			return
+		}
 		a.fullPlayerPrefs = &fullPlayerPrefsStore{cur: DefaultFullPlayerPrefs()}
 	}
 	p := a.fullPlayerPrefs

@@ -247,16 +247,32 @@ func (a *App) FlushSettings() error {
 // ⚠️ 只能在界面主线程调：shown 是给界面那一侧记的账，没有上锁。
 func (a *App) TakeSettingsError() error {
 	slot := a.settingsSlot()
-	if slot == nil {
-		return nil
-	}
-	err := slot.loadErr
-	if err == nil && slot.store != nil {
-		err = slot.store.LastError()
+	var err error
+	if slot != nil {
+		err = slot.loadErr
+		if err == nil && slot.store != nil {
+			err = slot.store.LastError()
+		}
 	}
 	if err == nil {
-		slot.shown = ""
+		err = a.FullPlayerPrefsError()
+	}
+	if err == nil {
+		if slot != nil {
+			slot.shown = ""
+		}
 		return nil
+	}
+	if slot == nil {
+		// A full-player preference failure can happen before the ordinary settings
+		// store is mounted. Keep the same one-shot accounting used by the settings
+		// error path so every frame does not enqueue the same Toast.
+		a.mu.Lock()
+		if a.settings == nil {
+			a.settings = &settingsSlot{}
+		}
+		slot = a.settings
+		a.mu.Unlock()
 	}
 	msg := err.Error()
 	if msg == slot.shown {
