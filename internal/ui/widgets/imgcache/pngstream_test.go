@@ -42,7 +42,7 @@ func assertPNGScale(t *testing.T, data []byte) {
 	b := wantSrc.Bounds()
 	want := image.NewRGBA(storedBounds(b.Dx(), b.Dy()))
 	xdraw.ApproxBiLinear.Scale(want, want.Bounds(), wantSrc, b, xdraw.Src, nil)
-	got, handled, err := decodePNGStored(data)
+	got, handled, err := decodePNGStored(data, 0)
 	if err != nil || !handled {
 		t.Fatalf("handled=%v err=%v", handled, err)
 	}
@@ -156,10 +156,10 @@ func TestStreamingPNGRejectsCorruption(t *testing.T) {
 		rawStreamPNG(800, 10, make([]byte, (800*4+1)*9), 100),
 		rawStreamPNG(800, 10, make([]byte, (800*4+1)*11), 100),
 	} {
-		if _, handled, err := decodePNGStored(data); !handled || err == nil {
+		if _, handled, err := decodePNGStored(data, 0); !handled || err == nil {
 			t.Fatalf("corrupt PNG accepted: handled=%v err=%v", handled, err)
 		}
-		if _, err := decodeStored(data); err == nil {
+		if _, err := decodeStored(data, 0); err == nil {
 			t.Fatal("cache must not publish corrupt image")
 		}
 	}
@@ -177,14 +177,14 @@ func TestStreamingPNGFallsBackForOtherImages(t *testing.T) {
 		if err := png.Encode(&b, img); err != nil {
 			t.Fatal(err)
 		}
-		if _, handled, _ := decodePNGStored(b.Bytes()); handled {
+		if _, handled, _ := decodePNGStored(b.Bytes(), 0); handled {
 			t.Fatal("unexpected streaming path")
 		}
-		if _, err := decodeStored(b.Bytes()); err != nil {
+		if _, err := decodeStored(b.Bytes(), 0); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := decodeStored(jpegBytes(t, 800, 450)); err != nil {
+	if _, err := decodeStored(jpegBytes(t, 800, 450), 0); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -193,7 +193,7 @@ func TestStoredPNGDoesNotAllocateFullSizeImage(t *testing.T) {
 	data := streamPNG(t, 1920, 1080, false)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	bm, err := decodeStored(data)
+	bm, err := decodeStored(data, 0)
 	runtime.ReadMemStats(&after)
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +214,7 @@ func BenchmarkStoredPNG(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if _, err := decodeStored(data); err != nil {
+		if _, err := decodeStored(data, 0); err != nil {
 			b.Fatal(err)
 		}
 	}
