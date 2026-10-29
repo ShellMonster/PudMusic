@@ -532,9 +532,10 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 	// `Loaded` 仍是 false（那是「从没成功过」），而这一行每帧都跑——于是
 	// 头图一失败就变成一个每帧发一次的请求（实测 300 毫秒发了 138 次），
 	// 界面停在「打不开」上还在刷网络。唯一的出口是用户点「再试一次」。
+	account := s.pageAccount()
 	if !h.Loaded && !h.Loading && h.Err == "" {
 		sp.header.Load()
-	} else if h.NeedRelation(s.app.SelfMid()) || h.NeedStat(s.app.SelfMid()) {
+	} else if h.NeedRelation(account.SelfMid) || h.NeedStat(account.SelfMid) {
 		// 🔴 关注关系和关注数这两样**都要在缺的时候补查**。
 		//
 		// 关注关系那条的理由见下面；关注数那条是同一个病根：它是**按账号**
@@ -557,7 +558,7 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 			sp.videosStarted = true
 			sp.videos.Reload()
 		}
-		sp.videos.SetView(s.displayView())
+		sp.videos.SetView(s.pageDisplayView())
 		sp.videos.Sync(c)
 	}
 
@@ -711,14 +712,15 @@ func (s *Shell) spaceBadge(c *ui.Context, official string) {
 // ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
 // 的 `stats` 表就三行）。这一版照它，不自己加。
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
-	isSelf := s.app.SelfMid() == sp.mid
+	account := s.pageAccount()
+	isSelf := account.SelfMid == sp.mid
 
 	ui.Row(c).Key("space-actions").Gap(upStatGap).AlignItems(ui.Center).Children(func() {
 		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
 		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
 		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
 		if !isSelf {
-			switch h.Follow(s.app.SelfMid(), s.app.LoggedIn()) {
+			switch h.Follow(account.SelfMid, account.SelfMid != 0) {
 			case app.FollowDone:
 				// ⚠️ **关注是写接口**（要 CSRF、要网络、一个往返）。在界面线程
 				// 上直接调就是每按一次冻一下窗口，所以开后台；
@@ -749,7 +751,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 		// 要 Cookie，没登录时 B 站要么回 -101、要么给 0，而界面上会是一个
 		// 干干净净的「粉丝数 0」——用户会以为他真的一个粉丝都没有。等级也是
 		// 一块（上游把它算在 `stats` 里），跟着一起藏。
-		if s.app.LoggedIn() {
+		if account.SelfMid != 0 {
+
 			// 🔴 **没查到就画「没查到」，不画 0**。粉丝数 0 是一个**假数**
 			// （真实值可能是十几万），而它看起来完全正常——这是这一块最难受
 			// 的失败方式。等级来自 acc/info、登录就能读到，所以照画。
@@ -939,7 +942,8 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 			ui.Box(c).Size(side, side).Radius(side / 2).Background(placeholder)
 			return
 		}
-		imgcache.States(c, s.images, face, side, side, side/2, imgcache.AvatarShape())
+		imgcache.States(c, s.pageImages(), face, side, side, side/2, imgcache.AvatarShape())
+
 	})
 }
 
@@ -966,7 +970,8 @@ func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
 			ui.Box(c).Height(h).FillWidth().Background(t.Surface)
 			return
 		}
-		imgcache.States(c, s.images, url, 0, h, 0, imgcache.Shape{})
+		imgcache.States(c, s.pageImages(), url, 0, h, 0, imgcache.Shape{})
+
 	})
 }
 
@@ -1011,14 +1016,16 @@ func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey 
 		// 按显示尺寸拼出 `@<w>w_<h>h_1c`）。用 `Get(url)` 探测的话，探测下一份
 		// 原图、画的时候再下一份按尺寸的——同一张图下两遍，而显示的是原图那份，
 		// 这一票要省的像素一份没省（PR #622 的评审挑出来的）。
-		if st := s.images.GetSized(url, w, h); st.Ready() {
+		if st := s.pageImages().GetSized(url, w, h); st.Ready() {
+
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {
 				motion.HoverZoom(img, zoomKey, on)
 			}
 			return
 		}
-		imgcache.States(c, s.images, url, w, h, t.Radius, imgcache.Shape{})
+		imgcache.States(c, s.pageImages(), url, w, h, t.Radius, imgcache.Shape{})
+
 	})
 }
 

@@ -130,7 +130,7 @@ func (s *Shell) syncSearch(c *ui.Context) {
 
 	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
 	// 每帧都要调）。
-	st.lists[cur].list.SetView(s.displayView())
+	st.lists[cur].list.SetView(s.pageDisplayView())
 	st.lists[cur].list.SetHighlight(keyword)
 
 	// 收后台投回来的结果、起该起的那一拉。
@@ -300,7 +300,7 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	}
 	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
 	// 每帧都要调）。三个 Tab 各调各的：三份列表各记着自己停在哪，切 Tab 不重置。
-	t.list.SetView(s.displayView())
+	t.list.SetView(s.pageDisplayView())
 	// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 	// 下滚它不动，宽屏下滚到右边列名也还在。
 	//

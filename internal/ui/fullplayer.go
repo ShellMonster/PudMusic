@@ -224,7 +224,7 @@ var (
 // `(L+0.05)/0.05 = 1.05/(L+0.05)`）。0.5 的话，一块中灰（L≈0.3）会给白字，
 // 对比度只有 3:1，而黑字有 7:1。Biu 用的 color2k `readableColor` 也是 0.179。
 func (s *Shell) fullForeground(c *ui.Context) (on, dim ui.Color) {
-	p := s.app.FullPlayerPrefs()
+	p := s.pagePrefs()
 	if p.ShowBlurredBackground {
 		return fullOnColor, fullDimColor
 	}
@@ -242,7 +242,7 @@ func (s *Shell) fullForeground(c *ui.Context) (on, dim ui.Color) {
 
 // fullBackground 是关掉虚化背景时铺在底下那一层的颜色。
 func (s *Shell) fullBackground(c *ui.Context) ui.Color {
-	if hex := s.app.FullPlayerPrefs().BackgroundColor; hex != "" {
+	if hex := s.pagePrefs().BackgroundColor; hex != "" {
 		if col, ok := parseHexColor(hex); ok {
 			return col
 		}
@@ -272,7 +272,7 @@ func (s *Shell) fullBackground(c *ui.Context) ui.Color {
 // 坐在同一块底上，但它们的淡底还是按主题正文色算的（那是另一张票的事，票面写
 // 着「满屏播放器那一行」）。
 func (s *Shell) fullRowBase(c *ui.Context) ui.Color {
-	if !s.app.FullPlayerPrefs().ShowBlurredBackground {
+	if !s.pagePrefs().ShowBlurredBackground {
 		return s.fullBackground(c)
 	}
 	// 糊过的封面（最亮 = 纯白）压一层 55% 的黑。
@@ -577,7 +577,7 @@ func (s *Shell) closeFullPlayer() {
 // 必须有一首歌在放：播放条上那一张封面没有的时候就没有东西可点，而这儿也还有
 // 别处会走这条路（快捷键将来就有），所以这里再判一次。
 func (s *Shell) openFullPlayer() {
-	if !s.app.Snapshot().HasTrack {
+	if !s.pageInput().Playback.HasTrack {
 		s.addToast("还没有在放什么，先进一首歌", notice.Warning)
 		return
 	}
@@ -610,7 +610,7 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 	// 关掉虚化背景：铺一层用户挑的颜色（空串 = 主题背景色），没有封面、没有
 	// 压暗——照 Biu 的 `{!showBlurredBackground && <div style={{backgroundColor}}/>}`
 	// （`index.tsx:227-229`）。
-	if !s.app.FullPlayerPrefs().ShowBlurredBackground {
+	if !s.pagePrefs().ShowBlurredBackground {
 		ui.Box(c).Key("full-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Background(s.fullBackground(c))
@@ -683,7 +683,7 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	//
 	// 代价是：同一首封面，背景和封面格各有一份（两个 key）。这在改之前是
 	// 一份（都是原图），但那时候封面格也压着 1.77MB——两害相权，拆开更省。
-	st := s.images.GetSized(url, winW, winH)
+	st := s.pageImages().GetSized(url, winW, winH)
 	if !st.Ready() {
 		// 封面还没来：底下是主题的底色（外头那一层），画布先不动。
 		return
@@ -960,7 +960,7 @@ func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 		s.viewFullTheater(c, hidden)
 		return
 	}
-	prefs := s.app.FullPlayerPrefs()
+	prefs := s.pagePrefs()
 	if !prefs.ShowLyrics {
 		s.viewFullCover(c, st, hidden, fullWindowRect(c), false)
 		return
@@ -1012,7 +1012,7 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	// 「显示封面」关掉就一个字都不建（Biu 的 `{!isLocal && showCover && <Image …>}`
 	// ——`index.tsx:328`）。本地那一半的判据（`!isLocal`）不在这一层：本地文件
 	// 没有封面时画的是占位图，关掉它照样是「中间不摆东西」，和上游同一个结果。
-	if !s.app.FullPlayerPrefs().ShowCover {
+	if !s.pagePrefs().ShowCover {
 		// ⚠️ **顺手把那一块清掉**：弹幕是画在封面**上面**的，而封面关掉了
 		// 就没有那一块可画——不清的话弹幕会画在**上一次**封面待的那一块
 		// （那地方现在什么都没有）。
@@ -1066,7 +1066,7 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		id := coverIdentity(s, st)
 		// 切歌时新旧封面交叉淡入淡出：封面按封面地址起键，旧的退场时留一份淡出的
 		// 影子，新的同时淡入。
-		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面").
+		cover := imgcache.View(c, s.pageImages(), st.CoverURL, w, h).Label("当前封面").
 			Key(s.fullCoverKeyFor(st.CoverURL))
 		if phase == app.VideoOff || phase == app.VideoFailed {
 			cover = cover.Transition(s.fullCoverMatchFor(id))
@@ -1135,7 +1135,7 @@ func (s *Shell) fullCoverMatchFor(id string) ui.ElementTransition {
 // **不能留空**：空串会让「没建」和「建了但身份是空的」长得一样，而转场认的是
 // 值的相等——一个空串能和任何一首的空串对上，转场就变成了「从随便哪张封面飞过来」。
 func coverIdentity(s *Shell, st app.State) string {
-	if cur, ok := s.app.CurrentItem(); ok {
+	if cur, ok := s.pageInput().Current, s.pageInput().HasCurrent; ok {
 		if id := cur.Identity(); id != "" {
 			return id
 		}
@@ -1459,7 +1459,7 @@ func fullBarAnim(c *ui.Context) ui.Animation {
 // 只在**确知只有一条**的时候收起来——那时候确实没有「选」的意思。
 func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 	parts := s.app.Parts()
-	cur, _ := s.app.CurrentItem()
+	cur := s.pageInput().Current
 	s.full.partsRows = partRowsFor(parts, cur)
 
 	if hidden {

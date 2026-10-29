@@ -42,7 +42,7 @@ const danmakuLayerKey = "full-danmaku"
 
 // viewFullDanmaku 画满屏播放器左边那张封面上的弹幕。
 func (s *Shell) viewFullDanmaku(c *ui.Context, st app.State) {
-	if !s.app.FullPlayerPrefs().ShowDanmaku {
+	if !s.pagePrefs().ShowDanmaku {
 		// 设置里关掉了 ⇒ **一个字都不建**（连那个盒子都不建）。
 		//
 		// ⚠️ **顺手把这一摊清掉**：关掉再打开的时候轨道那一摊不该留着上一次

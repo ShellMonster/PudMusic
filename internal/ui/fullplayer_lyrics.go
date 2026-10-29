@@ -110,7 +110,7 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 	// ⚠️ **分栏只看「显示封面」那一个开关**（上游 `centered={!showCover}`）：
 	// 封面开着的时候歌词是**左对齐**的一列（那些句子的左沿咬在内容盒的左沿上），
 	// 封面关掉的时候歌词占满整窗，于是居中。
-	centered := !s.app.FullPlayerPrefs().ShowCover
+	centered := !s.pagePrefs().ShowCover
 
 	// ⚠️ **说明句用满屏自己的第二档色**（`fullForeground` 的那个 dim），不用主题的
 	// 次要色：这一屏压在糊过的封面上，主题的次要色在浅色封面上会糊进去。
@@ -248,7 +248,7 @@ func (s *Shell) viewFullLyricsLoading(c *ui.Context) {
 // （它以前是个死控件，见票 #236）；没挑就用满屏自己的前景色。
 func (s *Shell) fullLyricColor(c *ui.Context) ui.Color {
 	on, _ := s.fullForeground(c)
-	if hex := s.app.FullPlayerPrefs().LyricsColor; hex != "" {
+	if hex := s.pagePrefs().LyricsColor; hex != "" {
 		if col, ok := parseHexColor(hex); ok {
 			return col
 		}

@@ -42,6 +42,10 @@ type Shell struct {
 	app *app.App
 	win *mygo.Window
 
+	// framePage is the shared page input/action snapshot for this frame. Page
+	// modules keep their own state; this only carries genuinely shared values.
+	framePage pageSeam
+
 	// draw 是外面包了一层 recover 的 viewMain。
 	draw func(*ui.Context)
 
