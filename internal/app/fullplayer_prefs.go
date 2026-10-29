@@ -388,12 +388,32 @@ func (p *fullPlayerPrefsStore) normalizeLocked() {
 // fullPlayerPrefs 是 App 上挂的那一份。没挂上是 nil，`App.FullPlayerPrefs`
 // 判空之后给默认值。
 func (a *App) MountFullPlayerPrefs(path string) {
-	p := &fullPlayerPrefsStore{path: path}
+	a.mountFullPlayerPrefs(path, nil, nil)
+}
+
+func (a *App) mountFullPlayerPrefs(path string, writeFile func(string, []byte) error, flush <-chan struct{}) *fullPlayerPrefsStore {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
+
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil
+	}
+	old := a.fullPlayerPrefs
+	a.fullPlayerPrefs = nil
+	a.mu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+
+	p := &fullPlayerPrefsStore{path: path, writeFile: writeFile, flush: flush}
 	p.load()
 	p.start()
 	a.mu.Lock()
 	a.fullPlayerPrefs = p
 	a.mu.Unlock()
+	return p
 }
 
 // FullPlayerPrefsError 返回最近一次全屏播放器偏好落盘失败。
@@ -409,6 +429,8 @@ func (a *App) FullPlayerPrefsError() error {
 
 // CloseFullPlayerPrefs 停止后台写入，并等待最后一个已接受版本完成。
 func (a *App) CloseFullPlayerPrefs() error {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
 	a.mu.Lock()
 	p := a.fullPlayerPrefs
 	a.fullPlayerPrefs = nil
