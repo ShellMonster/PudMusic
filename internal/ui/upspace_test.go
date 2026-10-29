@@ -202,9 +202,71 @@ func openSpace(t *testing.T, s *Shell, tt *mygoui.Tester, mid int64) *upSpace {
 	return sp
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 假接口
-// ─────────────────────────────────────────────────────────────────────────────
+// TestRemountDropsLateExplorePagerResults verifies the shared mount generation
+// contract for the local dynamic/favorite/series pager family.
+func TestRemountDropsLateExplorePagerResults(t *testing.T) {
+	oldB := newUIExplore(t)
+	newB := newUIExplore(t)
+	uiSpaceData(oldB, "旧客户端", 0, 1)
+	uiSpaceData(newB, "新客户端", 0, 1)
+
+	oldStarted := make(chan struct{})
+	oldRelease := make(chan struct{})
+	oldFinished := make(chan struct{})
+	oldB.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		close(oldStarted)
+		<-oldRelease
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamic("old", "旧客户端动态"),
+		}, "offset": "", "has_more": false})
+		close(oldFinished)
+	})
+	newB.on("/x/polymer/web-dynamic/v1/feed/space", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{
+			uiDynamic("new", "新客户端动态"),
+		}, "offset": "", "has_more": false})
+	})
+
+	s, tt, a := newSpaceShell(t, oldB, false, "")
+	openSpace(t, s, tt, 42)
+	sp := s.upSpaces[42]
+	waitFor(t, "旧客户端动态请求发出", func() bool {
+		select {
+		case <-oldStarted:
+			return true
+		default:
+			return false
+		}
+	})
+
+	newCLI := bili.NewClient(bili.Options{Transport: newB.Server.Client().Transport})
+	newCLI.TestOnlyPointHostsAtFixture(newB.URL)
+	a.MountExplore(newCLI)
+
+	waitFrames(t, tt, "新客户端动态加载完", func() bool {
+		return len(sp.dynItems) == 1 && sp.dynItems[0].ID == "new"
+	})
+	if got := len(sp.dynItems); got != 1 {
+		t.Fatalf("重挂载后动态行数=%d，want 1", got)
+	}
+	if got := sp.dynItems[0].ID; got != "new" {
+		t.Fatalf("重挂载后保留了错误的动态 %q", got)
+	}
+
+	close(oldRelease)
+	waitFor(t, "旧客户端动态请求结束", func() bool {
+		select {
+		case <-oldFinished:
+			return true
+		default:
+			return false
+		}
+	})
+	tt.Frame()
+	if len(sp.dynItems) != 1 || sp.dynItems[0].ID != "new" {
+		t.Fatalf("旧客户端迟到结果写回了新挂载状态：%+v", sp.dynItems)
+	}
+}
 
 // uiSpaceData 装好「头 / 关系 / 粉丝数」三个接口。
 func uiSpaceData(b *uiExplore, name string, attribute int, follower int64) {
@@ -792,9 +854,9 @@ func TestAFailedTabSaysItFailedAndOffersARetry(t *testing.T) {
 		})
 		tt.Frame()
 
-		if showsText(tt, upTabEmpty(tab, bili.DropCounts{}).Title) {
+		if showsText(tt, upTabEmpty(tab, app.DropCounts{}).Title) {
 			t.Errorf("%s 拉失败了，界面上却是空状态 %q——用户会以为他真的没有",
-				upTabNames[tab], upTabEmpty(tab, bili.DropCounts{}).Title)
+				upTabNames[tab], upTabEmpty(tab, app.DropCounts{}).Title)
 		}
 		if !showsText(tt, "这一块没拉出来") {
 			t.Errorf("%s 拉失败了却没说失败，文字有 %q", upTabNames[tab], tt.Texts())
@@ -888,8 +950,8 @@ func TestADynamicKeepsItsIdentityWhenOneIsInsertedAbove(t *testing.T) {
 	}
 
 	// 在**最前面**插一条（模拟刷新：B 站就是按时间倒着给的，新动态排在最前）。
-	sp.dynItems = append([]bili.Dynamic{{
-		ID: "newest", Kind: bili.DynamicText, Text: "刚发的一条",
+	sp.dynItems = append([]app.Dynamic{{
+		ID: "newest", Kind: app.DynamicText, Text: "刚发的一条",
 	}}, sp.dynItems...)
 	tt.Frame()
 
@@ -1460,7 +1522,7 @@ func TestAnEmptyPageWhoseOffsetStaysIsTheEnd(t *testing.T) {
 // # 为什么上面那一条不够
 //
 // `TestAnEmptyPageWhoseOffsetStaysIsTheEnd` 给的是「入口**空串**」——而那一条
-// 在**服务层**就收口了（`bili.DynamicPage.MoreAfter`：入口是空的就没有下一页），
+// 在**服务层**就收口了（`app.DynamicPage.MoreAfter`：入口是空的就没有下一页），
 // **UI 那一半根本没被问到**。这一条给的是「入口**没前进**」：入口还在（"O1"），
 // 而 B 站又回了同一个 "O1"——再问一次问回来的还是同一页，所以到第二页就该收手。
 //
@@ -1599,9 +1661,9 @@ func TestTheListDoesNotPullEveryPageWithoutScrolling(t *testing.T) {
 // ——选中一个另一个也亮，而界面上看不出任何异样。
 func TestRowKeysAreUniqueIncludingTheSentinel(t *testing.T) {
 	sp := &upSpace{}
-	sp.dynItems = []bili.Dynamic{{ID: "d1"}, {ID: "d2"}}
-	sp.cols[upTabCollection] = []bili.UpCollection{{ID: 1, Type: 1}, {ID: 2, Type: 1}}
-	sp.cols[upTabSeries] = []bili.UpCollection{{ID: 1, Type: 3}, {ID: 2, Type: 3}}
+	sp.dynItems = []app.Dynamic{{ID: "d1"}, {ID: "d2"}}
+	sp.cols[upTabCollection] = []app.SpaceCollection{{ID: 1, Type: 1}, {ID: 2, Type: 1}}
+	sp.cols[upTabSeries] = []app.SpaceCollection{{ID: 1, Type: 3}, {ID: 2, Type: 3}}
 
 	// 每一张 Tab 里：内容 + 哨兵，两两不同。
 	for _, tab := range []int{upTabDynamic, upTabCollection, upTabSeries} {
@@ -1632,8 +1694,8 @@ func TestRowKeysAreUniqueIncludingTheSentinel(t *testing.T) {
 // 状态，而界面上看不出任何异样。
 func TestACollectionKeyCarriesItsType(t *testing.T) {
 	sp := &upSpace{}
-	sp.cols[upTabCollection] = []bili.UpCollection{{ID: 1, Type: 1}}
-	sp.cols[upTabSeries] = []bili.UpCollection{{ID: 1, Type: 3}}
+	sp.cols[upTabCollection] = []app.SpaceCollection{{ID: 1, Type: 1}}
+	sp.cols[upTabSeries] = []app.SpaceCollection{{ID: 1, Type: 3}}
 
 	fav := upRowKey(sp, upTabCollection, 0)
 	ser := upRowKey(sp, upTabSeries, 0)
@@ -1649,8 +1711,8 @@ func TestACollectionKeyCarriesItsType(t *testing.T) {
 // 每一行都给无障碍留了名字；收藏夹那一行点了会跳。
 func TestEveryRowHasALabelAndACollectionRowGoesToItsPage(t *testing.T) {
 	sp := &upSpace{}
-	sp.cols[upTabCollection] = []bili.UpCollection{{ID: 100, Type: 1, Title: "我的收藏夹", Count: 8}}
-	sp.dynItems = []bili.Dynamic{{ID: "d1", Kind: bili.DynamicText, Text: "正文"}}
+	sp.cols[upTabCollection] = []app.SpaceCollection{{ID: 100, Type: 1, Title: "我的收藏夹", Count: 8}}
+	sp.dynItems = []app.Dynamic{{ID: "d1", Kind: app.DynamicText, Text: "正文"}}
 
 	if got := upRowLabel(sp, upTabCollection, 0); got != "我的收藏夹" {
 		t.Errorf("收藏夹那一行的名字是 %q", got)

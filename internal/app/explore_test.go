@@ -134,7 +134,7 @@ func TestExploreIsMissingIsAnIdentifiableError(t *testing.T) {
 	t.Cleanup(a.Close)
 	ctx := context.Background()
 
-	if _, err := a.UpVideos(ctx, bili.UpVideoQuery{Mid: 1}); err != errExploreMissing {
+	if _, err := a.UpVideos(ctx, SpaceVideoQuery{Mid: 1}); err != errExploreMissing {
 		t.Errorf("投稿：%v，want errExploreMissing", err)
 	}
 	if _, err := a.UpCollections(ctx, 1, 1); err != errExploreMissing {
@@ -308,7 +308,7 @@ func TestFollowChangesTheButtonBeforeTheRoundTrip(t *testing.T) {
 
 	// 请求还在路上（服务器那边有 200ms 延迟），关系已经变了。
 	deadline := 50
-	for sp.Snapshot().Relation != bili.RelationFollowed && deadline > 0 {
+	for sp.Snapshot().Relation != RelationFollowed && deadline > 0 {
 		waitExploreSleep()
 		deadline--
 	}
@@ -320,8 +320,48 @@ func TestFollowChangesTheButtonBeforeTheRoundTrip(t *testing.T) {
 	}
 }
 
-// TestFollowRollsTheButtonBackWhenItFails 钉住「失败要回滚」。
-//
+func TestFollowCompletionAfterAccountChangeIsRejected(t *testing.T) {
+	b := newExploreBili(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 1})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"relation": map[string]any{"attribute": 0}})
+	})
+	b.on("/x/relation/modify", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		writeExploreJSON(w, 0, nil)
+	})
+	a := newExploreApp(t, b)
+	loginExplore(a, "77")
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+
+	snapshot := a.AccountSnapshot()
+	done := make(chan error, 1)
+	go func() { done <- sp.FollowForAccount(context.Background(), snapshot, true) }()
+	<-started
+	a.TestOnlyAdoptLogin("88")
+	close(release)
+	if err := <-done; err != ErrStaleGeneration {
+		t.Fatalf("stale follow returned %v, want ErrStaleGeneration", err)
+	}
+	if got := sp.Snapshot(); got.RelationKnown() || got.Relation.Followed() {
+		t.Fatalf("stale follow left account-bound optimistic state: %+v", got)
+	}
+}
+
 // 不回滚的话按钮会一直写着「已关注」，而 B 站那边他压根没关注——用户
 // 第二次按「已关注」取消的是一次**从来没发生过**的关注。
 func TestFollowRollsTheButtonBackWhenItFails(t *testing.T) {
@@ -383,7 +423,7 @@ func TestFollowKeepsMutualFollowedMutual(t *testing.T) {
 	if err := sp.Follow(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
-	if got := sp.Snapshot().Relation; got != bili.RelationNone {
+	if got := sp.Snapshot().Relation; got != RelationNone {
 		t.Errorf("取关之后是 %v，want 未关注", got)
 	}
 }
@@ -694,12 +734,13 @@ func TestLoggedOutHeaderDoesNotRefetchForever(t *testing.T) {
 func TestEachTabHitsItsOwnEndpoint(t *testing.T) {
 	b := newExploreBili(t)
 	a := newExploreApp(t, b)
+	loginExplore(a, "42")
 	ctx := context.Background()
 
 	if _, err := a.UpDynamics(ctx, 42, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.UpVideos(ctx, bili.UpVideoQuery{Mid: 42, Page: 1}); err != nil {
+	if _, err := a.UpVideos(ctx, SpaceVideoQuery{Mid: 42, Page: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.UpCollections(ctx, 42, 1); err != nil {

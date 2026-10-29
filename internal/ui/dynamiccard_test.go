@@ -389,8 +389,42 @@ func openDynMenu(t *testing.T, tt *mygoui.Tester) {
 	tt.Frame()
 }
 
-// TestLikingADynamicReallyReachesBili 「赞」不是一句「还没接」。
-//
+func TestLateFailedLikeDoesNotRevertTheCurrentAccount(t *testing.T) {
+	b := newUIExplore(t)
+	started := make(chan struct{})
+	responded := make(chan struct{})
+	release := make(chan struct{})
+	b.on("/x/dynamic/feed/dyn/thumb", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		uiExploreJSON(w, -101, nil)
+		close(responded)
+	})
+	item := uiDynamicArchive("v1", "BV1play")
+	setLike(item, 12, false)
+	s, tt, a := dynamicCardShell(t, b, item)
+
+	if err := tt.Click("赞 12"); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	a.TestOnlyAdoptLogin("88")
+	close(release)
+	<-responded
+	waitFor(t, "late like completion", func() bool {
+		tt.Frame()
+		liked, count := s.dynLikes.get("v1", false, 12)
+		return liked && count == 13
+	})
+	if tt.HasText("赞不了") {
+		t.Fatalf("stale like failure showed a failure toast for the current account: %q", tt.Texts())
+	}
+}
+
 // 钉三样：**按钮摆出来了**、**按下去发的是这一条的 id**、**界面上立刻变了**。
 // 最后一条是乐观更新：用户按完到界面变化之间隔着一次网络往返，不立刻变的话他
 // 会再按一下，于是他点了三次而他以为点了一次。

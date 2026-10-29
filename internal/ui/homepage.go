@@ -374,7 +374,7 @@ func (h *homePage) SetSongs(songs homeSongs) {
 // ⚠️ **别为了「看着完整」给它补一个大标题**：那是一个上游没有的新元素，而且
 // 这一页顶上已经有三个 Tab 了。真的想要一个页名，走**侧栏那一项**。
 func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
-	// 记一笔「首页建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	// Shared playback, display and cache inputs are sampled once at Shell.View.
 	s.builds.home++
 	s.applyFrameTheme(c)
 	s.home.view(c, s)
@@ -405,7 +405,7 @@ func (s *Shell) syncHome(c *ui.Context) {
 	// 🔴 设置里的「数据显示样式」在**画之前**装给这一屏的三个列表：忘了这一句的
 	// 症状是「设置改了、首页没变」——而首页是用户打开应用看到的第一页，最先发现
 	// 「这个设置没用」的就是这儿。
-	view := s.displayView()
+	view := s.pageDisplayView()
 	for _, l := range h.lists {
 		l.SetView(view)
 	}

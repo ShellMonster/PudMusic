@@ -25,12 +25,12 @@ package ui
 import (
 	"context"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"log"
 	"runtime/debug"
 	"strconv"
 	"sync"
 
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -75,9 +75,9 @@ const allAuthorsMid = 0
 // 后台那一条线只往 box 那个带锁的信箱里投。
 type dynamicFeed struct {
 	// items 是右边已经拿到的动态。
-	items []bili.Dynamic
+	items []app.Dynamic
 	// authors 是左边已经拿到的关注的人。
-	authors []bili.FollowAuthor
+	authors []app.FollowAuthor
 
 	// state 是右边那一栏的列表状态，authState 是左边的。**不能共用**：
 	// MyGo 会在「同一个 ListState 被两个 List 显示」时 panic。
@@ -113,8 +113,9 @@ type dynamicFeed struct {
 	drops dropTally
 	// started 是右边已经拉过至少一页了。
 	started bool
-	// selfMid 是**这份缓存是为哪个账号拉的**。作者栏和「关注的动态」都是
-	// 按账号的，账号一变这一页整个作废（见 resetIfAccountChanged）。
+	// account is the complete snapshot this cache belongs to.
+	account app.AccountSnapshot
+	// selfMid is the account mid used for this cache.
 	selfMid int64
 
 	// 跨 goroutine 的只有这一小摊信箱。
@@ -127,9 +128,11 @@ type feedResult struct {
 	which int
 	// selfMid 是发这一次时的账号。换账号之后回来的那一页**作废**——
 	// `stop` 能停请求，但停不掉已经在回来的那一页。
+	// account is the immutable account snapshot captured when this request starts.
+	account app.AccountSnapshot
 	selfMid int64 // feedAuthors / feedItems
-	dyns    []bili.Dynamic
-	authors []bili.FollowAuthor
+	dyns    []app.Dynamic
+	authors []app.FollowAuthor
 	cursor  string
 	// sent 是 B 站这一页发了几条（过滤之前）。见 upPager.adopt。
 	sent    int
@@ -138,7 +141,7 @@ type feedResult struct {
 	//
 	// ⚠️ **身份是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态在
 	// 两页里各出现一次——按出现次数记，那个数会偏大（票 #344）。
-	drops []bili.DroppedDynamic
+	drops []app.DroppedDynamic
 	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
 	dropWhy []string
 	err     error
@@ -173,11 +176,12 @@ func (s *Shell) dynamicFeedOf() *dynamicFeed {
 //
 // 顺带把那两条在途请求作废掉（闸门 `stop` 会 cancel + 清掉状态）。
 func (s *Shell) resetIfAccountChanged(f *dynamicFeed) {
-	cur := s.app.SelfMid()
-	if f.selfMid == cur {
+	cur := s.app.AccountSnapshot()
+	if f.account == cur {
 		return
 	}
-	f.selfMid = cur
+	f.account = cur
+	f.selfMid = cur.SelfMid
 	f.auth.stop()
 	f.feed.stop()
 	f.auth = upPager{}
@@ -644,8 +648,8 @@ func feedEmpty(f *dynamicFeed) emptyState {
 // 和 UP 空间那边那一份（`upRowLabel`）是同一个东西，但**不共用**：那边的
 // 签名吃的是 `*upSpace`，而这一页的状态挂在壳上不是挂在某个 UP 上。
 // 两边各写三行，比为了复用去改另一个文件的签名便宜。
-func feedRowLabel(d bili.Dynamic) string {
-	if d.Kind == bili.DynamicVideo && d.Video != nil && d.Video.Title != "" {
+func feedRowLabel(d app.Dynamic) string {
+	if d.Kind == app.DynamicVideo && d.Video != nil && d.Video.Title != "" {
 		return d.Video.Title
 	}
 	if d.Text != "" {
@@ -690,6 +694,7 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 // cursor 和 page 是**调用方（界面线程）**在开这一拉那一刻读出来的闸门状态，
 // 不是这里自己读的——闸门是界面线程的状态，后台碰它就是数据竞争。
 func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor string, page int) {
+	account := s.app.AccountSnapshot()
 	var r feedResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -703,14 +708,14 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		s.wake.invalidate()
 	}()
 
-	r = feedResult{which: which, selfMid: s.app.SelfMid()}
+	r = feedResult{which: which, account: account, selfMid: account.SelfMid}
 
 	switch which {
 	case feedAuthors:
-		pg, err := s.app.FollowedAuthors(ctx, s.app.SelfMid(), page+1)
+		pg, err := s.app.FollowedAuthorsForAccount(ctx, account, page+1)
 		r.err, r.authors, r.hasMore, r.sent = err, pg.Authors, pg.HasMore, len(pg.Authors)
 	default:
-		pg, err := s.app.DynamicFeed(ctx, cursor)
+		pg, err := s.app.DynamicFeedForAccount(ctx, account, cursor)
 		r.err, r.dyns, r.hasMore, r.drops = err, pg.Items, pg.HasMore, pg.Drops
 		r.cursor, r.sent = pg.Offset, pg.Raw
 		r.dropWhy = pg.DropWhy
@@ -754,6 +759,10 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 	}
 
 	for _, r := range box {
+		if r.account != s.app.AccountSnapshot() {
+			f.feedPager(r.which).settle()
+			continue
+		}
 		if r.selfMid != f.selfMid {
 			// 换账号之前发出去的那一页。它说的是**上一个账号**的关注的人。
 			f.feedPager(r.which).settle()

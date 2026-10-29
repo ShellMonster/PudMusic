@@ -37,11 +37,10 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
 
 **出处**：`README.md`《代码怎么分层》（+ `internal/app` 的包注释）
 
-**建状态、建窗口、把两者接上。**
+**启动装配、窗口和运行时接线。**
 
-`main()` 的第一句是 `platform.PinUserDataDir()`（见
-[data-and-credentials.md](data-and-credentials.md)），然后 `app.New()`，然后建窗口，
-然后 `mygo.App.Run()`。
+`bootstrap.Assemble` 的第一阶段是 `platform.PinUserDataDir()`（见
+[data-and-credentials.md](data-and-credentials.md)），然后创建 `app.App`，完成挂载，最后创建窗口并运行。
 
 **什么时候用得上**：你在 `main.go` 里加逻辑——先问一句「这是状态、窗口，还是接线」。
 

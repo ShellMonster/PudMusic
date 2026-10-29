@@ -42,6 +42,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"log"
 	"runtime/debug"
 	"strconv"
@@ -50,7 +51,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
@@ -195,7 +195,7 @@ type followPage struct {
 	//
 	// tags 是关注分组。tagStarted / tagErr 是这一摊自己的状态——它和右边那一格
 	// 是两次独立的请求，各拉各的，各失败各的。
-	tags       []bili.FollowTag
+	tags       []app.FollowTag
 	tagStarted bool
 	tagErr     error
 	tagLoading bool
@@ -204,7 +204,7 @@ type followPage struct {
 	tab string
 
 	// ── 右边那个网格 ──
-	users []bili.FollowUser
+	users []app.FollowUser
 	// seen 是**已经收进来的身份**，挡翻页重叠。B 站翻页是会重叠的（同一页的
 	// 东西挪了名次就会在两页里各出现一次），而两个一模一样的身份会让框架按
 	// key 对位时那几格共用一份状态（理由同 `upSpace.seen`）。
@@ -262,8 +262,9 @@ type followPage struct {
 	// 刷爆日志、拖垮帧率，比「这一格画不出来」糟得多。
 	failed map[int64]bool
 
-	// selfMid 是这份缓存**为哪个账号**拉的。换账号整页作废（见
-	// resetFollowIfAccountChanged）。
+	// account is the complete snapshot this cache belongs to.
+	account app.AccountSnapshot
+	// selfMid is the account mid used for this cache.
 	selfMid int64
 
 	// gen 是代次。换分组 / 换搜索词时 +1：在途那一页回来时代次对不上就扔掉。
@@ -288,7 +289,9 @@ const (
 // followResult 是后台拉完之后投进信箱的东西。
 type followResult struct {
 	which followWhich
-	// selfMid 是发这一次时的账号。换账号之前发出去的那一页作废。
+	// account is the immutable account snapshot captured when this request starts.
+	account app.AccountSnapshot
+	// selfMid is发 this request时的账号。换账号之前发出去的那一页作废。
 	selfMid int64
 	// gen 只在拉右边那一格时有意义（换分组 / 换词会让代次 +1）。
 	gen int
@@ -296,8 +299,8 @@ type followResult struct {
 	// 扔掉——用户可能已经切走了。
 	tab, keyword string
 
-	tags  []bili.FollowTag
-	users []bili.FollowUser
+	tags  []app.FollowTag
+	users []app.FollowUser
 	// total 是「一共多少人」。三个接口给总数、分组明细不给（那一档用分组自己的
 	// count，发请求之前就在界面线程上取好了，见 tabTotal）。
 	total int
@@ -321,11 +324,12 @@ func (s *Shell) followPageOf() *followPage {
 // 后留着上一份的话，用户在新账号下看的是旧账号的关注——而界面上没有任何东西
 // 提示这一点（和 `dynamicfeed.go` 同一个理由）。
 func (s *Shell) resetFollowIfAccountChanged(f *followPage) {
-	cur := s.app.SelfMid()
-	if f.selfMid == cur {
+	cur := s.app.AccountSnapshot()
+	if f.account == cur {
 		return
 	}
-	f.selfMid = cur
+	f.account = cur
+	f.selfMid = cur.SelfMid
 	f.tagLoading = false
 	f.tags, f.tagStarted, f.tagErr = nil, false, nil
 	f.resetUsers()
@@ -948,7 +952,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 // ⚠️ 一行里塞的是 cols 张卡，而**两个一模一样的行身份**会让框架按 key 对位时
 // 那几行共用一份状态——Tester 里当场 panic，真窗口里选中一格隔壁那格也亮着。
 // 「这一行第一个人」跟着数据走，所以天然唯一（`seen` 已经把重复的人滤掉了）。
-func followRowKey(users []bili.FollowUser, i, cols int) string {
+func followRowKey(users []app.FollowUser, i, cols int) string {
 	k := i * cols
 	if k >= len(users) {
 		return "follow:empty-row"
@@ -969,7 +973,7 @@ func followKeyOf(mid int64) string { return "follow:" + strconv.FormatInt(mid, 1
 func followIdentity(mid int64) any { return followKeyOf(mid) }
 
 // followRowLabel 是第 i 行给无障碍和「打字选中」用的名字。
-func followRowLabel(users []bili.FollowUser, i, cols int) string {
+func followRowLabel(users []app.FollowUser, i, cols int) string {
 	k := i * cols
 	if k >= len(users) {
 		return "加载更多关注的人"
@@ -1011,7 +1015,7 @@ func (s *Shell) keepFollowAnchor(f *followPage, cols int) {
 }
 
 // followIndexOfMid 是这一页里那个 mid 的下标，没有是 -1。
-func followIndexOfMid(users []bili.FollowUser, mid int64) int {
+func followIndexOfMid(users []app.FollowUser, mid int64) int {
 	if mid <= 0 {
 		return -1
 	}
@@ -1092,7 +1096,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 // `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
 // 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
 // 了（`bili/follow.go`），摆一行字是最诚实的画法。
-func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring bool) {
+func (s *Shell) viewFollowCard(c *ui.Context, u app.FollowUser, selected, ring bool) {
 	t := c.Theme()
 	name := u.Name
 	if name == "" {
@@ -1217,7 +1221,7 @@ func (s *Shell) viewFollowCard(c *ui.Context, u bili.FollowUser, selected, ring 
 // 选一个组、再走 `/x/relation/tags/addUsers`——那条写接口和选组的弹层都不在
 // 这一页现有的四个 GET 里（见 `bili/follow.go` 的文件头）。按下去什么都不会
 // 发生的按钮，比少这一枚更糟。
-func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float32) {
+func (s *Shell) viewFollowActions(c *ui.Context, u app.FollowUser, shown float32) {
 	t := c.Theme()
 	bottom := followActionBarBottom - (1-shown)*followActionBarRise
 
@@ -1252,14 +1256,16 @@ func (s *Shell) viewFollowActions(c *ui.Context, u bili.FollowUser, shown float3
 // 🔴 **写接口要一个往返，所以在后台跑**（理由同 `upSpace.follow`）。后台只
 // 往带锁的信箱里投「取的是谁、成没成」，界面线程在下一帧开头收（铁律三：
 // 投递完必须叫醒界面）。
-func (s *Shell) unfollowFromFollowCard(u bili.FollowUser) {
+func (s *Shell) unfollowFromFollowCard(u app.FollowUser) {
 	f := s.followPageOf()
+	account := s.app.AccountSnapshot()
 	go func() {
-		err := s.app.UpSpaceOf(u.Mid).Follow(context.Background(), false)
+		err := s.app.UpSpaceOf(u.Mid).FollowForAccount(context.Background(), account, false)
 		f.boxMu.Lock()
 		f.box = append(f.box, followResult{
 			which:       followUnfollow,
-			selfMid:     s.app.SelfMid(),
+			account:     account,
+			selfMid:     account.SelfMid,
 			unfollowMid: u.Mid,
 			err:         err,
 		})
@@ -1359,6 +1365,7 @@ func followEmpty(f *followPage) emptyState {
 // 页级的）一个都接不到它——Go 里没人在跑那个 goroutine，而这一段正是「解析接口
 // 返回」的地方。B 站改一个字段就是在这一行炸。
 func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
+	account := s.app.AccountSnapshot()
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1372,8 +1379,8 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 		s.wake.invalidate()
 	}()
 
-	r = followResult{which: followTags, selfMid: s.app.SelfMid()}
-	r.tags, r.err = s.app.FollowTags(ctx)
+	r = followResult{which: followTags, account: account, selfMid: account.SelfMid}
+	r.tags, r.err = s.app.FollowTagsForAccount(ctx, account)
 }
 
 // fetchFollowUsers 拉右边那一格的一页。
@@ -1394,6 +1401,7 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 // 而「累计加载了多少」是界面状态，后台读它就是竞争。所以它在**界面线程上**取一
 // 份带过来（和 `library_rows.go` 的 `load` 传 `loaded` 是同一个做法）。
 func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64, tab, keyword string, page, loaded, count int) {
+	account := s.app.AccountSnapshot()
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1406,14 +1414,13 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64,
 		s.wake.invalidate()
 	}()
 
-	r = followResult{which: followUsers, selfMid: s.app.SelfMid(), gen: int(gen), tab: tab, keyword: keyword}
-	self := s.app.SelfMid()
+	r = followResult{which: followUsers, account: account, selfMid: account.SelfMid, gen: int(gen), tab: tab, keyword: keyword}
 
 	if tagID, ok := tagIDOf(tab); ok {
 		// ⚠️ 分组明细那个接口**不报总数**，所以总数那一项用的是分组自己的 count
 		//（理由见 `bili/follow.go` 文件头）。它在 `f.tags` 里，而那是界面状态——
 		// 所以**也在界面线程上取一份**带进来（`count` 那一个参数）。
-		users, err := s.app.FollowTagUsers(ctx, tagID, page+1)
+		users, err := s.app.FollowTagUsersForAccount(ctx, account, tagID, page+1)
 		r.err = err
 		if err == nil {
 			r.users, r.total = users, count
@@ -1421,12 +1428,14 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64,
 		return
 	}
 
-	var pg bili.FollowUsersPage
+	var pg app.FollowUsersPage
+	var err error
 	if keyword != "" {
-		pg, r.err = s.app.SearchFollowings(ctx, self, keyword, page+1)
+		pg, err = s.app.SearchFollowingsForAccount(ctx, account, keyword, page+1)
 	} else {
-		pg, r.err = s.app.FollowList(ctx, self, page+1)
+		pg, err = s.app.FollowListForAccount(ctx, account, page+1)
 	}
+	r.err = err
 	if r.err != nil {
 		return
 	}
@@ -1467,7 +1476,7 @@ func (s *Shell) adoptFollow(f *followPage) {
 	for _, r := range box {
 		// ⚠️ **`settle` / 清 loading 必须无条件执行**：请求失败、超时、返回不对、
 		// 拉取的代码自己崩了，全走这一条。漏了它那一格会永远停在「正在加载」。
-		if r.selfMid != f.selfMid {
+		if r.account != s.app.AccountSnapshot() || r.selfMid != f.selfMid {
 			// 换账号之前发出去的那一页（`stop` 停不掉已经在回来的那一页）。
 			// 取关那一趟直接丢掉：它改的是**上一个账号**的关注。
 			switch r.which {
