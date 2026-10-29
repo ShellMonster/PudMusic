@@ -506,6 +506,197 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 	return &CollectionPage{Medias: out, HasMore: d.HasMore}, nil
 }
 
+// ── 合集 / 系列的内容列表 ──────────────────────────────────────────────────
+//
+// 🔴 **它们和收藏夹不是同一个接口**（票 #683）：`/x/v3/fav/resource/list` 收的是
+// `media_id`，只对收藏夹（type=11）有效；往它上面发一个合集 / 系列的 id，B 站
+// 回的是一个空列表或者一句 -400，**界面上是一页空白、一个错都没有**。
+//
+// 两个接口的形状（照 `bilibili-API-collect` 的 `docs/video/collection.md`）：
+//
+//	合集  /x/polymer/web-space/seasons_archives_list
+//	      mid（必要）、season_id（必要）、page_num、page_size、sort_reverse
+//	系列  /x/series/archives
+//	      mid（必要）、series_id（必要）、pn、ps、sort（desc / asc）
+//
+// ⚠️ **两边的分页参数叫法不一样**（`page_num`/`page_size` vs `pn`/`ps`）——
+// 这是 B 站自己不一致，不是我们的笔误。写错的话接口会**默默用默认值**（第 1 页、
+// 一页 20），于是「翻到第 2 页」永远是第 1 页那些歌，而界面上看不出异样。
+//
+// ⚠️ **两个返回的条目形状是一样的**：都有一个 `archives` 数组，每一项带
+// `aid` / `bvid` / `title` / `pic` / `duration` / `pubdate` / `stat.view`。
+// 合集另外给一层 `meta`（标题 / 封面 / 总数），系列的元信息在另一个接口
+// （`/x/series/series`）——这一层只用得到条目，所以不碰 meta。
+
+const (
+	// pathSeasonArchives 是合集内容的接口。
+	pathSeasonArchives = "/x/polymer/web-space/seasons_archives_list"
+	// pathSeriesArchives 是系列内容的接口。
+	pathSeriesArchives = "/x/series/archives"
+)
+
+// archiveItem 是 `archives` 数组里的一项（合集和系列共用这一份形状）。
+//
+// ⚠️ **`aid` 的零值不能当「没有」**：合集 / 系列的每一条都是一个真稿件，
+// `aid` 是它唯一的数值身份（删除、收藏都要 avid）。0 只可能是接口没给。
+type archiveItem struct {
+	Aid      int64  `json:"aid"`
+	Bvid     string `json:"bvid"`
+	Title    string `json:"title"`
+	Pic      string `json:"pic"`
+	Ctime    int64  `json:"ctime"`
+	Duration int    `json:"duration"`
+	PubDate  int64  `json:"pubdate"`
+	Stat     struct {
+		View int64 `json:"view"`
+	} `json:"stat"`
+}
+
+// seasonArchivesData 是合集内容接口的 `data` 段。
+//
+// `page` 里的三个数只有 `total` 有用（「后面还有没有」要拿它算，见下面的
+// `page.HasMore`）：B 站不给 `has_more`，所以判据只能是「已经翻到第几页」×
+// 「一页几条」和总数比。
+type seasonArchivesData struct {
+	Archives []archiveItem `json:"archives"`
+	Page     struct {
+		PageNum  int `json:"page_num"`
+		PageSize int `json:"page_size"`
+		Total    int `json:"total"`
+	} `json:"page"`
+}
+
+// seriesArchivesData 是系列内容接口的 `data` 段。
+//
+// ⚠️ **`page` 的键名也不同**（`num` / `size` / `total`）。照合集那份写的话
+// 三个数全是 0，于是 `HasMore` 恒为 false——「下一页」在系列上永远不出现。
+type seriesArchivesData struct {
+	Archives []archiveItem `json:"archives"`
+	Page     struct {
+		Num   int `json:"num"`
+		Size  int `json:"size"`
+		Total int `json:"total"`
+	} `json:"page"`
+}
+
+// SeasonArchives 取一个合集（type=21）里的一页内容，page 从 1 起。
+//
+// mid 是**合集创建者的 mid**——文档写「必要」，后面又注一句「也可以是任意的
+// 非负整数」。⚠️ **我们传真的那一个**（`CollectionInfo.OwnerMid`）：
+// 「任意值也行」是文档的旁注、没有真网验证过，而传对的不会错。
+//
+// seasonID 是**合集 id**（`season_id`），不是 avid、也不是收藏夹的 mlid。
+//
+// ps 传 0 用默认的 20（和收藏夹那个接口同一个上限，见 pageSizeLimit）。
+func (c *Client) SeasonArchives(ctx context.Context, mid, seasonID int64, page, ps int) (*CollectionPage, error) {
+	if seasonID <= 0 {
+		return nil, fmt.Errorf("bili: 合集 id 不对（%d）", seasonID)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if ps <= 0 || ps > pageSizeLimit {
+		ps = pageSizeLimit
+	}
+
+	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathSeasonArchives, Query: url.Values{
+		"mid":       {strconv.FormatInt(max(mid, 0), 10)},
+		"season_id": {strconv.FormatInt(seasonID, 10)},
+		"page_num":  {strconv.Itoa(page)},
+		"page_size": {strconv.Itoa(ps)},
+	}})
+	if err != nil {
+		return nil, err
+	}
+
+	var d seasonArchivesData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("bili: 合集内容的返回读不懂：%w", err)
+	}
+	out := mediasOfArchives(d.Archives)
+	return &CollectionPage{
+		Medias:  out,
+		HasMore: hasMorePages(page, ps, len(out), d.Page.Total),
+	}, nil
+}
+
+// SeriesArchives 取一个系列（type=31）里的一页内容，page 从 1 起。
+//
+// 参数语义和 `SeasonArchives` 一样（mid 是系列创建者的 mid，seriesID 是
+// 系列 id），只有接口路径和分页参数名不同（理由见上面那一节）。
+func (c *Client) SeriesArchives(ctx context.Context, mid, seriesID int64, page, ps int) (*CollectionPage, error) {
+	if seriesID <= 0 {
+		return nil, fmt.Errorf("bili: 系列 id 不对（%d）", seriesID)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if ps <= 0 || ps > pageSizeLimit {
+		ps = pageSizeLimit
+	}
+
+	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathSeriesArchives, Query: url.Values{
+		"mid":       {strconv.FormatInt(max(mid, 0), 10)},
+		"series_id": {strconv.FormatInt(seriesID, 10)},
+		"pn":        {strconv.Itoa(page)},
+		"ps":        {strconv.Itoa(ps)},
+	}})
+	if err != nil {
+		return nil, err
+	}
+
+	var d seriesArchivesData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("bili: 系列内容的返回读不懂：%w", err)
+	}
+	out := mediasOfArchives(d.Archives)
+	return &CollectionPage{
+		Medias:  out,
+		HasMore: hasMorePages(page, ps, len(out), d.Page.Total),
+	}, nil
+}
+
+// mediasOfArchives 把 `archives` 数组翻成 `Media`。
+//
+// 🔴 **Type 一律填 `MediaVideo`（2）**：这两个接口回的只有视频稿件，没有音频
+// 那一类。填成 0 的话 `Playable()` 判 false，整页「播放全部」一首都不加——
+// 而界面上看不出为什么（列表照旧画得出来）。
+//
+// ⚠️ **`attr` 这几个接口不给**，所以 `Media.Attr` 是 0（= 正常）。合集里的
+// 稿件被删了的时候条目是不是还在，得看真接口——这一层不编一个值。
+func mediasOfArchives(in []archiveItem) []Media {
+	out := make([]Media, 0, len(in))
+	for _, m := range in {
+		out = append(out, Media{
+			ID: m.Aid, Type: MediaVideo, Bvid: m.Bvid,
+			Title: decodeEntities(m.Title), Cover: normalizeImageURL(m.Pic),
+			// ⚠️ duration 是**秒**（同收藏夹那一路，见 CollectionMedias 里那段）。
+			Duration: time.Duration(m.Duration) * time.Second,
+			View:     m.Stat.View,
+			PubTime:  unixSeconds(m.PubDate),
+			// 合集 / 系列没有「收藏时间」这一栏（那一列画的是 pubtime，见
+			// `collectionTimeOf`），所以 FavTime 留零值（= 这一次没给）。
+		})
+	}
+	return out
+}
+
+// hasMorePages 报「这一页之后还有没有」。
+//
+// 🔴 **这两个接口不给 `has_more`**（收藏夹那个给），所以只能拿总数算：
+// 「已经翻到的条数」是 `(page-1)*ps + 这一页拿到的`。⚠️ **后一半要用真拿到
+// 几条而不是 ps**：最后一页不满、或者接口自己截断时，拿 ps 算会多算，于是
+// 「下一页」一直摆着、点下去是空页。
+//
+// total 是 0（接口没给）时一律说「没有了」：宁可少一个「下一页」，也不要在
+// 已经到底的时候让用户按一下拿回一页空白——那看起来像应用坏了。
+func hasMorePages(page, ps, got, total int) bool {
+	if total <= 0 || ps <= 0 {
+		return false
+	}
+	return (page-1)*ps+got < total
+}
+
 // FavoriteCollection 收藏这个容器（星标点亮）。
 func (c *Client) FavoriteCollection(ctx context.Context, id int64) error {
 	return c.setCollectionFav(ctx, pathFolderFav, id)

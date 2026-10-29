@@ -162,15 +162,23 @@ func itemOfPlaybackEntry(e PlaybackEntry) (Item, bool) {
 		return it, true
 
 	case strings.HasPrefix(e.ID, playbackIDMV):
-		bvid := strings.TrimPrefix(e.ID, playbackIDMV)
+		bvid, cidFromID := splitMVIdentity(strings.TrimPrefix(e.ID, playbackIDMV))
 		if bvid == "" {
 			return Item{}, false
+		}
+		// ⚠️ **cid 以 `Cid` 那一栏为准**：标识里那一段是票 #683 之后才有的，
+		// 旧文件里的标识是 `mv:<bvid>`、cid 只在 `e.Cid` 里。两处都在时它们是
+		// 同一个数（`trackKey` 就是从同一个 `Cid` 拼的），所以取哪个都不会错
+		// ——但只读一处更不容易漂。
+		cid := cidFromID
+		if e.Cid != "" {
+			cid = e.Cid
 		}
 		return Item{
 			Source:    SourceOnline,
 			Type:      "mv",
 			Bvid:      bvid,
-			Cid:       e.Cid,
+			Cid:       cid,
 			Title:     e.Title,
 			Cover:     e.Cover,
 			Artist:    e.Artist,

@@ -475,9 +475,10 @@ func (a *App) invalidatePrefetch() {
 
 // sameStreamTarget 报两项是不是**同一段流的同一个目标**。
 //
-// ⚠️ **它比的不是 `Item.Identity()`**：那个标识只认 bvid（投稿那一路），
-// 而多 P 视频的每一集是同一个 bvid——用它比的话，「备的是第 3 集、真播的是
-// 第 5 集」会被认成同一首。
+// ⚠️ **它比的不是 `Item.Identity()`**：那个标识在**两边都知道 cid 时**认得出
+// 分集，而在有一边不知道时（列表行没有 cid、队列项补出来了）它判的是「两首」
+// ——那个口径对**队列身份**是对的（见 `trackKey`），对「用户说的是不是这一段」
+// 却不是（票 #683）。
 //
 // 比的是取流要用的那几样：
 //
@@ -487,6 +488,15 @@ func (a *App) invalidatePrefetch() {
 //
 // ⚠️ **认不出是哪一首的（bvid 和 sid 都是空串）一律当不同**：那种项压根放不了，
 // 而当成同一首的话，一份来路不明的地址会被当成「这一首的」。
+//
+// # 谁在用它（票 #683 之后有三个调用方）
+//
+//	预取（`maybePrefetch` / `takePrefetch`）	备好的那一份是不是这一首
+//	`IsPlaying`	列表上那一行是不是正在放的这一首（行没有 cid、队列项有）
+//	`Queue.indexOfStreamTarget`	「点它」找的是不是队列里那一项（同上）
+//
+// ⚠️ **后两个都是「有一边不知道 cid」的场景**，前一个两边都知道（备的时候已经
+// 补过 cid）。三种都要的是「不知道的那一边不比」——所以判据只留这一份。
 func sameStreamTarget(x, y Item) bool {
 	if x.Type == "audio" || y.Type == "audio" {
 		return x.Sid != "" && x.Sid == y.Sid

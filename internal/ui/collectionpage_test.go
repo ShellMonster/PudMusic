@@ -137,6 +137,28 @@ func newCollectionBili(t *testing.T) *favBili {
 			writeCollectionJSON(t, w, 0, "0", map[string]any{
 				"medias": b.filterByKeyword(kw), "has_more": false,
 			})
+		case "/x/polymer/web-space/seasons_archives_list", "/x/series/archives":
+			// 🔴 **合集 / 系列走的是另外两个接口**（票 #683，缺陷 C）：收藏夹那个
+			// 接口对它们的 id 只回空列表或者 -400，界面上是一页空白。
+			//
+			// ⚠️ **两条路径共用这一支，形状却不完全一样**：分页那一层合集的键是
+			// `page_num` / `page_size` / `total`，系列的是 `num` / `size` / `total`。
+			// 这就是真接口的样子（`docs/video/collection.md`），照它造。
+			if b.failList != 0 {
+				writeCollectionJSON(t, w, b.failList, "拉不到", nil)
+				return
+			}
+			b.orders = append(b.orders, r.URL.Query().Get("order"))
+			b.keywords = append(b.keywords, r.URL.Query().Get("keyword"))
+			page := map[string]any{"total": len(b.medias)}
+			if r.URL.Path == "/x/series/archives" {
+				page["num"], page["size"] = 1, 20
+			} else {
+				page["page_num"], page["page_size"] = 1, 20
+			}
+			writeCollectionJSON(t, w, 0, "0", map[string]any{
+				"archives": b.archiveJSON(), "page": page,
+			})
 		case "/x/v3/fav/folder/fav", "/x/v3/fav/folder/unfav":
 			_ = r.ParseForm()
 			b.faved = r.URL.Path == "/x/v3/fav/folder/fav"
@@ -235,6 +257,24 @@ func (b *favBili) filterByKeyword(kw string) []map[string]any {
 		if strings.Contains(title, kw) {
 			out = append(out, m)
 		}
+	}
+	return out
+}
+
+// archiveJSON 把 medias 翻成合集 / 系列那两条接口的 `archives` 形状。
+//
+// 形状照 `docs/video/collection.md`：`aid` / `bvid` / `title` / `pic` /
+// `duration`（秒）/ `pubdate` / `stat.view`。**没有 `attr`、没有 `upper`**
+// ——那两个接口不给（见 `bili.mediasOfArchives` 那段注释）。
+func (b *favBili) archiveJSON() []map[string]any {
+	out := make([]map[string]any, 0, len(b.medias))
+	for _, m := range b.medias {
+		id, _ := m["id"].(int)
+		out = append(out, map[string]any{
+			"aid": id, "bvid": m["bvid"], "title": m["title"],
+			"pic": m["cover"], "duration": m["duration"], "pubdate": 1670000000,
+			"stat": map[string]any{"view": 100},
+		})
 	}
 	return out
 }

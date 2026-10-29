@@ -1048,6 +1048,11 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// ⚠️ **代次要一起给**：这一趟回来的时候可能已经过时了（用户早就按了另一
 	// 首）——过时的那一趟问出来的 cid 属于它自己那一趟，不属于「现在这一首」。
 	a.notePendingCid(gen, it.Bvid, it.Cid)
+	// 🔴 **同一个 cid 也要写回队列项**（票 #683）：收藏夹 / 搜索那些接口有的
+	// 不给 cid，而分集抽屉认「正在放的是哪一集」比的是**队列项**的 cid
+	// （`partRowsFor` 的 active）。只记在 `pending` 上的话，抽屉里一行都标不出
+	// 来——用户要点一次别的集才恢复正常。
+	a.writeBackCid(gen, it)
 	run.timing.Part = time.Since(t0)
 	// 🔴 **代次变了就别再往下走**：问分 P / 元信息是**一次网络往返**，这一趟
 	// 等它的时候用户完全可能已经切了歌、或者超时闹钟已经响了。那就没人要这
@@ -1337,6 +1342,55 @@ func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) 
 	}
 	it.Cid = cid
 	return it, nil
+}
+
+// writeBackCid 把起播时补出来的分 P id 写回队列的当前项（票 #683）。
+//
+// # 为什么要有这一句
+//
+// 有几个来源**不给 cid**（收藏夹内容、搜索结果）：那一项进队列时 `Cid` 是空的，
+// 分 P id 是 `withCid` 在取流那一趟补出来的，而补出来的那一份原来只喂给了两处
+// 局部读者——`runOnline` 的局部变量和 `pending`（弹幕用）。
+//
+// ⇒ **队列项自己一直是空的**。而分集抽屉认「正在放的是哪一集」比的是队列项的
+// cid（`partRowsFor` 的 `active: p.Cid == cur.Cid`）——于是一首多 P 从收藏夹放
+// 起来之后，抽屉里**一行都不亮**，用户不知道自己在听哪一集；要点一次别的集
+// 才恢复正常（那一次走的是 `PlayPart`，它本来就写队列项）。
+//
+// # 判据链（和 `notePendingCid` 同一个道理，但要更严）
+//
+//  1. **代次不能过时**：这一趟是取流那一趟，回来的时候用户可能早就换歌了。
+//  2. **队列当前项还得是这一首**。🔴 **bvid 对得上不够**（多 P 的每一集都是
+//     同一个 bvid）——所以这里只认「cid 还是空的」那一种：cid 已有值的就是
+//     **确定的某一集**，而我们要写的这一条是「还不知道是哪一集」的那一项。
+//     用户换到另一集之后当前项的 cid 就有值了，这一句自然什么都不做。
+//  3. **写回用 `replaceCurrentIf`**：从读当前项到写回去之间没有持锁，中间的
+//     竞态由它拿「整项相等」再比一次挡住（见 `Queue.replaceCurrentIf`）。
+//
+// ⚠️ **只补空的，不覆盖已有的**：已有 cid 的项写回去会白改一次队列 revision
+// ——那一下会让抽屉、列表、落盘全部重算一遍，而内容一个字节都没变。
+func (a *App) writeBackCid(gen int, it Item) {
+	if it.Cid == "" || !it.isOnline() || it.Type != "mv" || it.Bvid == "" {
+		return
+	}
+	if a.genStale(gen) {
+		// 这一趟已经作废（用户换歌了 / 超时了 / 退出了）：它问出来的 cid 是
+		// **它自己那一趟**的，不该落到现在队列里那一项上。
+		return
+	}
+	cur, ok := a.queue.Current()
+	if !ok {
+		return
+	}
+	// 不是同一首，或者已经是确定的某一集了 → 不写。
+	if cur.Bvid != it.Bvid || cur.Cid != "" {
+		return
+	}
+	// ⚠️ **先留一份原样再改**：`replaceCurrentIf` 拿它当「是不是同一项」的判据，
+	// 改完再传的话永远对不上（队列里那一份还是旧的），于是**一次都写不进去**。
+	expected := cur
+	cur.Cid = it.Cid
+	a.queue.replaceCurrentIf(expected, cur)
 }
 
 // buildOnline 建一套「流引用 + 字节源 + 播放器」，**不往 App 上装**。

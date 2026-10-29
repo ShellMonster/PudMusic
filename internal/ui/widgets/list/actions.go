@@ -53,6 +53,17 @@ type Actions struct {
 	// 里打开 B 站。
 	Open func(item app.Item)
 
+	// OpenCollection 进**合集内部**（`/collection/{id}?type=21`，就是歌单页）。
+	//
+	// 🔴 **只有合集那一行才摆这一项**（判据是 `app.Item.CollectionID` > 0，
+	// 见 `addCollectionEntry`）：收藏夹里 type=21 的行没有音频流，播放入口是灰的，
+	// 而菜单末尾那句说明写着「打开里面的单集就能放」——**这一项才是那句话的
+	// 落点**（票 #683，缺陷 B）。没有它的话，用户照着那句话做不了任何事。
+	//
+	// ⚠️ **为 nil 时那一项按下去说一句「现在还不能用」**（`doAction` 里那一支）：
+	// 按了没反应比说一句更坏。
+	OpenCollection func(item app.Item)
+
 	// Copy 把一段文字放进系统剪贴板（「复制歌曲信息」用）。为 nil 时那一项说一句
 	// 现在还不能用。
 	Copy func(text string)

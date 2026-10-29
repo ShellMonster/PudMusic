@@ -596,16 +596,92 @@ func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMiss
 // `bili.CollectionMedias` 顶上那一段）。
 //
 // 返回的第二项是「后面还有没有」。
+//
+// # 🔴 三类容器走**三个不同的接口**（票 #683）
+//
+//	收藏夹 11  `/x/v3/fav/resource/list`（`media_id`）
+//	合集 21    `/x/polymer/web-space/seasons_archives_list`（`mid` + `season_id`）
+//	系列 31    `/x/series/archives`（`mid` + `series_id`）
+//
+// 原来这一层**永远**打收藏夹那个接口，而它对合集 / 系列的 id 只会回一个空
+// 列表（或者一句 -400）——界面上是**一页空白，一个错都没有**。用户看到的是
+// 「点进合集，里面什么都没有」。
+//
+// ⚠️ **合集 / 系列要 `mid`**，而 `CollectionRef` 只有 ID 和 Type——mid 从
+// 元信息缓存里拿（`CollectionInfo.OwnerMid`，见 `fetchCollection`）。**没拉到
+// 元信息时 mid 是 0**：文档说这个参数「也可以是任意的非负整数」，所以 0 是
+// 能发的（真网验证不了，但发 0 比不发强——不发的话 B 站回 -400）。
+//
+// ⚠️ **keyword 只对收藏夹有意义**：那两个接口没有 `keyword` 参数。合集 / 系列
+// 里按歌名找是把这一页筛掉吗？不——**本地筛不能筛没拉下来的页**（理由见
+// `bili.CollectionMedias` 顶上那段）。所以这一档如实说「这一类还没有按歌名
+// 找」，界面按错误显示，而不是静默丢掉词（那看起来像「搜了没反应」）。
 func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bili.CollectionSort, keyword string, page int) ([]bili.Media, bool, error) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return nil, false, errCollectionsMissing
 	}
+	switch ref.Type {
+	case bili.CollectionAlbum:
+		if keyword != "" {
+			return nil, false, errCollectionSearchUnsupported
+		}
+		pg, err := c.refs.Client.SeasonArchives(ctx, a.collectionOwnerMid(ref), ref.ID, page, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		return pg.Medias, pg.HasMore, nil
+	case bili.CollectionSeries:
+		if keyword != "" {
+			return nil, false, errCollectionSearchUnsupported
+		}
+		pg, err := c.refs.Client.SeriesArchives(ctx, a.collectionOwnerMid(ref), ref.ID, page, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		return pg.Medias, pg.HasMore, nil
+	}
+	// 收藏夹（以及认不出的类型，见 `ParseCollectionType` 的兜底）。
 	pg, err := c.refs.Client.CollectionMedias(ctx, ref.ID, sort, keyword, page, 0)
 	if err != nil {
 		return nil, false, err
 	}
 	return pg.Medias, pg.HasMore, nil
+}
+
+// errCollectionSearchUnsupported 是「这一类容器还不能按歌名找」。
+//
+// ⚠️ **它是给用户看的一句话**，所以不说「接口」、不说「还没实现」（票 #242，
+// UX 报告 §3-F 的 F2）：用户不知道应用里哪一块还没接上。说清「在这个合集里
+// 暂时只能靠翻和滚」，那是他照着能做的下一步。
+var errCollectionSearchUnsupported = errors.New("biu: 合集和系列里还不能按歌名找，翻一翻吧")
+
+// collectionOwnerMid 是这一页要用的「创建者 mid」，**没有就当场问一次**。
+//
+// 合集 / 系列那两个内容接口要 `mid`，而 `CollectionRef` 只有 ID 和 Type——
+// mid 在元信息里（`CollectionInfo.OwnerMid`）。元信息是另一趟后台请求，**它
+// 不一定先到**：页面第一帧就会去拉内容（见 `newCollectionPage` 的注释），而
+// 那一趟和元信息那一趟是**并发**的。
+//
+// 🔴 **等不到就用 0 发出去是不够的**：文档说 mid「也可以是任意的非负整数」，
+// 但那是旁注、没有真网验证过。所以这一层在缓存里没有 mid 时**当场问一次**
+// 元信息（反正在后台 goroutine 里，而且这一问的结果别的读者也用得上）。
+//
+// ⚠️ **问不到也照发 0**：不发的话 B 站回 -400，界面上是「这个合集打不开」，
+// 而发 0 至少还有「B 站接受任意 mid」那一半的机会。两害相权，发。
+func (a *App) collectionOwnerMid(ref CollectionRef) int64 {
+	if mid := a.Collection(ref).OwnerMid; mid > 0 {
+		return mid
+	}
+	info, err := a.fetchCollection(ref)
+	if err != nil {
+		log.Printf("biu: 问容器 %s 的创建者失败（合集接口先按 mid=0 发一次）：%v", ref.Key(), err)
+		return 0
+	}
+	if c := a.collectionsSnapshot(); c != nil {
+		c.cache.put(info)
+	}
+	return info.OwnerMid
 }
 
 // sayCollectionsMissing 说一句「还没挂上」。挂不上这一页画得出来，
