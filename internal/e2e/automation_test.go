@@ -1,3 +1,5 @@
+//go:build e2e
+
 package e2e
 
 import (
@@ -38,12 +40,11 @@ func TestMyGoAutomationDrivesNativeUIAndCapturesIt(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	socketDir, err := os.MkdirTemp("/tmp", "mg-")
+	socketDir, socket, err := makeAutomationSocket()
 	if err != nil {
-		t.Fatalf("创建短路径 socket 目录：%v", err)
+		t.Fatalf("创建自动化 socket：%v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
-	socket := filepath.Join(socketDir, "a.sock")
 	var buildOut, buildErr bytes.Buffer
 	fixture := filepath.Join(socketDir, "fixture")
 	build := exec.Command("go", "build", "-tags", "e2e", "-o", fixture, ".")
@@ -63,7 +64,7 @@ func TestMyGoAutomationDrivesNativeUIAndCapturesIt(t *testing.T) {
 	}
 	defer func() {
 		cancel()
-		_ = cmd.Wait()
+		waitForFixtureExit(t, cmd)
 	}()
 
 	conn := waitForAutomationSocket(t, socket, cmd, &stdout, &stderr)
@@ -121,6 +122,15 @@ func TestMyGoAutomationDrivesNativeUIAndCapturesIt(t *testing.T) {
 	}, nil)
 }
 
+func makeAutomationSocket() (string, string, error) {
+	base := automationSocketBase()
+	dir, err := os.MkdirTemp(base, "mg-")
+	if err != nil {
+		return "", "", err
+	}
+	return dir, filepath.Join(dir, "a.sock"), nil
+}
+
 func fixtureDir() string {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
@@ -133,7 +143,7 @@ func waitForAutomationSocket(t *testing.T, path string, cmd *exec.Cmd, stdout, s
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		conn, err := net.Dial("unix", path)
+		conn, err := dialAutomation(path)
 		if err == nil {
 			return conn
 		}
@@ -147,8 +157,26 @@ func waitForAutomationSocket(t *testing.T, path string, cmd *exec.Cmd, stdout, s
 	}
 }
 
+func waitForFixtureExit(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case <-waited:
+		return
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		select {
+		case <-waited:
+		case <-time.After(2 * time.Second):
+			t.Log("MyGo fixture 未在强制终止后退出")
+		}
+	}
+}
+
 func callAutomation(t *testing.T, client *automationClient, id int, method string, params any, out any) {
 	t.Helper()
+	_ = client.conn.SetDeadline(time.Now().Add(15 * time.Second))
 	request := map[string]any{"id": id, "method": method}
 	if params != nil {
 		request["params"] = params
