@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 const (
@@ -117,9 +118,21 @@ func FullPlayerPrefsPath(dir string) string {
 type fullPlayerPrefsStore struct {
 	path string
 
-	mu   sync.Mutex
-	cur  FullPlayerPrefs
-	save error
+	wmu sync.Mutex
+	mu  sync.Mutex
+	cur FullPlayerPrefs
+
+	save   error
+	dirty  bool
+	closed bool
+	gen    uint64
+
+	req     chan struct{}
+	quit    chan struct{}
+	stopped chan struct{}
+	flush   <-chan struct{}
+
+	writeFile func(string, []byte) error
 }
 
 // load 读盘，读不到就用默认。**在挂上的时候调一次**。
@@ -206,45 +219,155 @@ func (p *fullPlayerPrefsStore) get() FullPlayerPrefs {
 	return p.cur
 }
 
-// put 记下新的一份并落盘。
-//
-// ⚠️ 落盘写在**锁外面**：界面每帧要读这一份（`App.FullPlayerPrefs`），
-// 拿着锁做一次文件写就是把界面的等待时间变成那一次写。
-func (p *fullPlayerPrefsStore) put(next FullPlayerPrefs) {
-	p.update(next)
-	p.persist(next)
-}
-
-func (p *fullPlayerPrefsStore) update(next FullPlayerPrefs) FullPlayerPrefs {
+// put 记下新的一份，先更新内存，再通知后台合并写。
+func (p *fullPlayerPrefsStore) put(next FullPlayerPrefs) FullPlayerPrefs {
 	p.mu.Lock()
 	p.cur = next
 	p.normalizeLocked()
 	next = p.cur
+	if p.path != "" {
+		p.dirty = true
+	}
+	p.gen++
+	closed := p.closed
 	p.mu.Unlock()
+
+	if !closed && p.path != "" {
+		p.signal()
+	}
 	return next
 }
 
-func (p *fullPlayerPrefsStore) persist(next FullPlayerPrefs) {
-	p.mu.Lock()
-	path, prevErr := p.path, p.save
-	p.mu.Unlock()
-
-	if path == "" {
+func (p *fullPlayerPrefsStore) signal() {
+	if p.req == nil {
 		return
 	}
+	select {
+	case p.req <- struct{}{}:
+	default:
+	}
+}
+
+func (p *fullPlayerPrefsStore) start() {
+	if p.path == "" || p.req != nil {
+		return
+	}
+	p.req = make(chan struct{}, 1)
+	p.quit = make(chan struct{})
+	p.stopped = make(chan struct{})
+	go p.loop()
+}
+
+func (p *fullPlayerPrefsStore) Flush() error {
+	p.wmu.Lock()
+	defer p.wmu.Unlock()
+
+	p.mu.Lock()
+	if !p.dirty || p.path == "" {
+		err := p.save
+		p.mu.Unlock()
+		return err
+	}
+	version, next, path := p.gen, p.cur, p.path
+	p.mu.Unlock()
+
+	err := p.write(path, next)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err != nil {
+		p.save = err
+		p.dirty = true
+		return err
+	}
+	if p.gen == version {
+		p.dirty = false
+	}
+	p.save = nil
+	return nil
+}
+
+func (p *fullPlayerPrefsStore) write(path string, next FullPlayerPrefs) error {
 	b, err := json.MarshalIndent(struct {
 		SchemaVersion int             `json:"schemaVersion"`
 		FullPlayer    FullPlayerPrefs `json:"fullPlayer"`
 	}{fullPlayerPrefsSchema, next}, "", "  ")
 	if err == nil {
-		err = writeFileAtomic(path, b)
+		if p.writeFile != nil {
+			err = p.writeFile(path, b)
+		} else {
+			err = writeFileAtomic(path, b)
+		}
 	}
-	if err != nil && prevErr == nil {
-		p.mu.Lock()
-		p.save = err
-		p.mu.Unlock()
+	if err != nil {
 		log.Printf("biu: 全屏播放器偏好 %s 存不住：%v", path, err)
 	}
+	return err
+}
+
+func (p *fullPlayerPrefsStore) Close() error {
+	p.mu.Lock()
+	if p.closed {
+		err := p.save
+		p.mu.Unlock()
+		return err
+	}
+	p.closed = true
+	p.mu.Unlock()
+
+	if p.quit != nil {
+		close(p.quit)
+		<-p.stopped
+	}
+	return p.Flush()
+}
+
+func (p *fullPlayerPrefsStore) loop() {
+	defer close(p.stopped)
+	var timer *time.Timer
+	for {
+		var tick <-chan time.Time
+		if timer != nil {
+			tick = timer.C
+		}
+		select {
+		case <-p.quit:
+			if timer != nil {
+				timer.Stop()
+			}
+			return
+		case <-p.req:
+			if p.flush != nil {
+				select {
+				case <-p.flush:
+				case <-p.quit:
+					return
+				}
+				_ = p.Flush()
+				continue
+			}
+			if timer == nil {
+				timer = time.NewTimer(writeDebounce)
+			} else {
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				timer.Reset(writeDebounce)
+			}
+		case <-tick:
+			timer = nil
+			_ = p.Flush()
+		}
+	}
+}
+
+// fullPlayerPrefsError 返回最近一次异步落盘失败。
+func (p *fullPlayerPrefsStore) fullPlayerPrefsError() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.save
 }
 
 // normalizeLocked 把明显不合理的值拉回合法区间（调用方拿着锁）。
@@ -267,9 +390,33 @@ func (p *fullPlayerPrefsStore) normalizeLocked() {
 func (a *App) MountFullPlayerPrefs(path string) {
 	p := &fullPlayerPrefsStore{path: path}
 	p.load()
+	p.start()
 	a.mu.Lock()
 	a.fullPlayerPrefs = p
 	a.mu.Unlock()
+}
+
+// FullPlayerPrefsError 返回最近一次全屏播放器偏好落盘失败。
+func (a *App) FullPlayerPrefsError() error {
+	a.mu.Lock()
+	p := a.fullPlayerPrefs
+	a.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.fullPlayerPrefsError()
+}
+
+// CloseFullPlayerPrefs 停止后台写入，并等待最后一个已接受版本完成。
+func (a *App) CloseFullPlayerPrefs() error {
+	a.mu.Lock()
+	p := a.fullPlayerPrefs
+	a.fullPlayerPrefs = nil
+	a.mu.Unlock()
+	if p == nil {
+		return nil
+	}
+	return p.Close()
 }
 
 // FullPlayerPrefs 返回现在这一份偏好。没挂上磁盘时是默认（全屏播放器照样能用）。
@@ -286,29 +433,18 @@ func (a *App) fullPlayerPrefsValueLocked() FullPlayerPrefs {
 	return a.fullPlayerPrefs.get()
 }
 
-// SetFullPlayerPrefs 改全屏播放器的偏好并立刻落盘。
-//
-// 为什么是「立刻」而不是像设置那样合并写：这一份只有八样，改它的动作是
-// 「点一下开关 / 挑一个颜色」，一天点不了几次；而合并写要一个后台 goroutine
-// 和一个停掉它的钩子，为这么小的东西不值当。
+// SetFullPlayerPrefs 更新内存中的全屏播放器偏好，并通知后台合并写入。
 func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
 	a.mu.Lock()
 	if a.fullPlayerPrefs == nil {
-		// 没挂上盘（拿不到应用数据目录）：建一份只在内存里的，让这一轮能用，
-		// 而且**挂回 App 上**——不挂回去的话下一次改就又建一个，用户在这次会话
-		// 里改的开关会自己跳回去。
-		//
-		// 初值要显式给默认：`next` 通常是调用方从 `FullPlayerPrefs()` 起手改出来
-		// 的，但这一层不该赌那件事。
 		a.fullPlayerPrefs = &fullPlayerPrefsStore{cur: DefaultFullPlayerPrefs()}
 	}
 	p := a.fullPlayerPrefs
-	next = p.update(next)
 	wake := a.wake
 	player := a.player
 	a.mu.Unlock()
 
-	p.persist(next)
+	next = p.put(next)
 	if wake != nil {
 		wake()
 	}

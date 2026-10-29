@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1792,7 +1793,10 @@ func (a *App) Close() {
 	a.report = nil
 	at := a.position
 	settings := a.settings
+	fullPlayerPrefs := a.fullPlayerPrefs
+	a.fullPlayerPrefs = nil
 	a.wake = nil
+
 	a.mu.Unlock()
 
 	for _, s := range oldSpaces {
@@ -1811,6 +1815,11 @@ func (a *App) Close() {
 	a.SavePlayback()
 	if settings != nil && settings.store != nil {
 		_ = settings.store.Close()
+	}
+	if fullPlayerPrefs != nil {
+		if err := fullPlayerPrefs.Close(); err != nil {
+			log.Printf("biu: 退出时保存全屏播放器偏好失败：%v", err)
+		}
 	}
 	a.mu.Lock()
 	if a.settings == settings {
