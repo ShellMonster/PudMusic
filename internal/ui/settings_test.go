@@ -449,13 +449,17 @@ func TestShellSaysSoWhenFullPlayerPrefsCannotBeStored(t *testing.T) {
 	}
 
 	sh := newTestShell(t, onApp(a))
+	a.SetWake(sh.s.wake.invalidate)
 	p := a.FullPlayerPrefs()
 	p.SpectrumColor = "#222222"
 	a.SetFullPlayerPrefs(p)
-
-	waitFrames(t, sh.tt, "全屏播放器偏好落盘失败提示", func() bool {
-		return sh.tt.HasText("全屏播放器偏好") && sh.tt.HasText("存不住")
+	waitFor(t, "全屏播放器偏好异步落盘失败", func() bool {
+		return a.FullPlayerPrefsError() != nil
 	})
+	sh.tt.Frame()
+	if !sh.tt.HasText("全屏播放器偏好") || !sh.tt.HasText("存不住") {
+		t.Fatalf("界面上没有提示全屏播放器偏好存不住，文字有 %q", sh.tt.Texts())
+	}
 	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
 		t.Fatalf("落盘失败后内存偏好被丢掉：%q", got)
 	}
