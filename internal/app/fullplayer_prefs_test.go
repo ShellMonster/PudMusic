@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -294,12 +295,13 @@ func TestFullPlayerPrefsRemountClosesPreviousStoreBeforeReplacingIt(t *testing.T
 func TestFullPlayerPrefsUpdateRacingCloseSurvivesRemount(t *testing.T) {
 	release := make(chan struct{})
 	started := make(chan struct{})
+	var startedOnce sync.Once
 	oldWritten := make(chan []byte, 1)
 	dir := t.TempDir()
 	a := New()
 	t.Cleanup(a.Close)
 	a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(_ string, b []byte) error {
-		close(started)
+		startedOnce.Do(func() { close(started) })
 		<-release
 		oldWritten <- append([]byte(nil), b...)
 		return nil
@@ -314,6 +316,11 @@ func TestFullPlayerPrefsUpdateRacingCloseSurvivesRemount(t *testing.T) {
 
 	closed := make(chan error, 1)
 	go func() { closed <- a.CloseFullPlayerPrefs() }()
+	waitFor(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.fullPlayerPrefsDetached
+	}, "full-player preference close to detach the store")
 	latest := first
 	latest.SpectrumColor = "#222222"
 	updated := make(chan struct{})

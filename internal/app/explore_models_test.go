@@ -23,6 +23,7 @@ func TestExploreQueriesExposeApplicationModels(t *testing.T) {
 		writeExploreJSON(w, 0, map[string]any{"total": 1, "list": []map[string]any{{"mid": 7, "uname": "关注的人", "face": "//img/face"}}})
 	})
 	a := newExploreApp(t, b)
+	loginExplore(a, "77")
 	ctx := context.Background()
 
 	video, err := a.UpVideos(ctx, SpaceVideoQuery{Mid: 42, Page: 1})

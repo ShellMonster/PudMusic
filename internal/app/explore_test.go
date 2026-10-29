@@ -734,6 +734,7 @@ func TestLoggedOutHeaderDoesNotRefetchForever(t *testing.T) {
 func TestEachTabHitsItsOwnEndpoint(t *testing.T) {
 	b := newExploreBili(t)
 	a := newExploreApp(t, b)
+	loginExplore(a, "42")
 	ctx := context.Background()
 
 	if _, err := a.UpDynamics(ctx, 42, ""); err != nil {
