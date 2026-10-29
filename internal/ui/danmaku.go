@@ -29,6 +29,24 @@
 //
 // 那两件事在 `fullplayer_danmaku.go`（画的地方和那层浮层），这一份只管
 // 「哪几条该在屏幕上、各占哪条轨道」。
+//
+// # 位移有自己的时钟（票 #669）
+//
+// 整窗的唤醒被降到约 1Hz（`internal/app/tick_wake.go` 的 `readoutMoved`），
+// 而弹幕要按显示器刷新率走 ⇒ 位置不能再只取「建树那一刻的 `State.Position`」。
+//
+// 这一份因此记一个**锚点**：建树那一刻把 `State.Position` 钉在
+// `baseMS` / `baseAt` 上，绘制帧用 `Painter.Now()` 从锚点按 `rate` 往外推
+// （`posAt`）。两次重建之间位置因此是**连续**的，整窗重建多快都无所谓。
+//
+// 锚点只在三种情况下重钉（`follow`）：
+//
+//	换歌        调用方 `reset` 之后重新钉
+//	跳转        这一帧的读数和推出来的位置差过 `danmakuSeekSlop`
+//	暂停/恢复   播放状态变了（冻结在**画到的那一格**，不回到读数上）
+//
+// 几十毫秒的采样误差**不重钉**：重钉就是跳一下，而那个误差是有界的
+// （播放器 50ms 一拍）。
 package ui
 
 import (
@@ -85,18 +103,42 @@ const (
 	danmakuTrackSpacingRatio = 0.3
 )
 
-// danmakuAnim 是弹幕那一个 pose 的动画。
+const (
+	// danmakuSeekSlop 是「这一下是跳转，不是采样误差」的门槛。
+	//
+	// # 为什么需要它
+	//
+	// 绘制帧按 `Painter.Now()` 自己往前推位置，而整窗重建时拿到的
+	// `State.Position` 是播放器 50ms 一拍采回来的。两者差几十毫秒是**正常**的，
+	// 拿那个差去重钉锚点就是让弹幕在每次整窗重建时抖一下。
+	//
+	// ⇒ 超过这个门槛的差才算「用户拖了进度条 / 跳转」：那时必须重钉，而且
+	// 往回跳还要把轨道整份复位（见 `follow`）。
+	//
+	// ⚠️ **不能太小**：正常播放时两次相邻的整窗重建差 1~2 秒（整窗约 1Hz），
+	// 门槛太小的话每一次重建都被当成跳转 ⇒ 轨道整份复位 ⇒ 弹幕每次重建都换
+	// 轨道（抖）。
+	danmakuSeekSlop = 2 * time.Second
+)
+
+// danmakuPosAt 报「锚点之后过了 d」时弹幕该在的位置（毫秒）。
 //
-// ⚠️ **时长 100ms、线性**（报告 §3.1 实测）：
+// rate 是那一份弹幕的时间轴每秒走多少（正常是 1；倍速播放时跟着变）。
+func danmakuPosAt(baseMS int64, rate float64, d time.Duration) int64 {
+	return baseMS + int64(float64(d.Milliseconds())*rate)
+}
+
+// danmakuRate 把 `State.Rate` 归到「一个合理的倍速」上。
 //
-//   - **时长 50~200ms 都一样平滑**（每帧 1 像素）；**500ms 反而慢一半**——
-//     目标是每 50 毫秒往前挪一点，时长太长时插出来的值一直追不上目标。
-//   - **线性**：匀速横穿本来就该是匀速的，缓动会让它一顿一顿。
-//
-// ⚠️ **「减少动态效果」开着的时候不用另写一套**：框架在那个偏好下让 pose 的
-// X/Y/Scale/Rotate **直接到终点** ⇒ 弹幕变成 20fps 跳着走（实测与「位置算在
-// view 里」那一档一模一样，见 `mygo/ui/pose.go` 的 `still && i < 4`）。
-var danmakuAnim = ui.Animation{Duration: 100 * time.Millisecond, Ease: ui.Linear}
+// ⚠️ **零值和负数不是「停在原地」**：手摆的状态（测试、还没装播放器的那几帧）
+// 里 `Rate` 是 0，直接乘出来位置就永远不动——弹幕停在右边沿上不动，而那看
+// 上去像「它坏了」。所以 0 和负数都按 1 处理。
+func danmakuRate(rate float64) float64 {
+	if rate <= 0 {
+		return 1
+	}
+	return rate
+}
 
 // danmakuLane 是一条轨道上**上一条**弹幕的那些数。
 //
@@ -170,13 +212,53 @@ type danmakuLayer struct {
 	// 做时间窗口二分，不再扫描和排序完整列表。
 	itemsByTime  []app.DanmakuItem
 	maxTextBytes int
+
+	// baseMS 是锚点那一刻的视频位置（毫秒），baseAt 是那一刻的**钟**
+	// （建树时 `Context.Now()` 的读数）。绘制帧用
+	// `danmakuPosAt(baseMS, rate, p.Now().Sub(baseAt))` 往外推。
 	//
-	// ⚠️ **它只用来认「位置往回跳了」**：用户拖动进度条回到前面时，那八条
-	// 轨道上记着的「下一条最早能进」还是**将来**的时刻，于是新弹幕一条都放
-	// 不进去（屏幕上会一条弹幕都没有）。
+	// ⚠️ **它们是两个不同的钟**：baseMS 是播放器的位置（50ms 采一次），
+	// baseAt 是界面的墙钟。两者只在锚点这一刻对齐，之后各走各的——这正是
+	// 「弹幕自己按 60fps 往前走」的意思。
+	baseMS int64
+	baseAt time.Time
+	// rate 是这一份弹幕的时间轴每秒走多少（倍速播放时跟着变）。
+	rate float64
+	// playing 是锚点之后弹幕动不动。
 	//
-	// ⇒ 位置往回跳的时候把轨道那一摊清掉重来。
-	lastPos int64
+	// ⚠️ **暂停时它不许动，即使墙钟还在走**：暂停的那一刻把锚点重钉到
+	// 「画到的那一格」上（不是播放器的读数），于是恢复之后从原地接着走。
+	playing bool
+
+	// lastBaseMS 是上一次**建树**时读到（或推出来）的位置，只用来认跳转。
+	//
+	// ⚠️ **判据是「读数 vs 自己推出来的位置」**，不是「和上一次读数比」：
+	// 正常播放时上一次读数可能是 1 秒前（整窗约 1Hz），拿它比会把每一次
+	// 重建都当成跳转。
+	lastBaseMS int64
+
+	// ready 是「这一帧有一份弹幕可画」。盒子、绘制回调都看它。
+	ready bool
+	// animate 是「播放中，而且用户没要求减少动态效果」：只有它为真时才逐帧
+	// 重绘。为假时位置只在整窗重建那一帧更新（`posAt` 返回锚点本身）。
+	animate bool
+	// fontSize / trackH 是这一份弹幕用的字号与轨道高（建树时按系统字号和
+	// 封面高度算好，绘制帧直接用）。
+	fontSize float32
+	trackH   float32
+	// buf 是这一帧可见的弹幕（复用的缓冲，免得每帧分配）。
+	buf []danmakuVisible
+
+	// paints / requests 是**给测试数**的两个计数（照 `builds.go` 那条规矩：
+	// 「谁画的谁才数得出来」，所以它住在生产代码里）。
+	//
+	//	paints    这一层画了几帧
+	//	requests  这一层要了几次下一帧
+	//
+	// ⚠️ **不能拿 `Tester.FramePending()` 判「弹幕要不要帧」**：满屏开着的时候
+	// 进度条那根线（`viewFullProgress` 的 `live`）在播放中也一直要帧，两者从
+	// 「有没有帧」上看不出区别。
+	paints, requests int
 }
 
 // reset 把这一摊清空（换歌、或者压根没有弹幕）。
@@ -189,7 +271,90 @@ func (d *danmakuLayer) reset() {
 	d.first = ""
 	d.itemsByTime = nil
 	d.maxTextBytes = 0
-	d.lastPos = 0
+	d.baseMS, d.lastBaseMS = 0, 0
+	d.baseAt = time.Time{}
+	d.rate = 0
+	d.playing = false
+	d.ready = false
+	d.animate = false
+	d.fontSize, d.trackH = 0, 0
+	// ⚠️ **buf 只截断、不置 nil**：它是复用的缓冲（换歌之后照样复用它），
+	// 置 nil 就是每次换歌多分一次。
+	d.buf = d.buf[:0]
+}
+
+// posAt 报「钟走到 now」时弹幕该在的位置（毫秒）。
+//
+// ⚠️ **暂停（或不做连续动画）时它给的就是锚点那一格**：那时位置只在整窗
+// 重建那一帧更新（见 `follow`）。
+func (d *danmakuLayer) posAt(now time.Time) int64 {
+	if !d.playing || !d.animate || d.baseAt.IsZero() {
+		return d.baseMS
+	}
+	return danmakuPosAt(d.baseMS, d.rate, now.Sub(d.baseAt))
+}
+
+// follow 让锚点跟着这一帧的读数走（建树时调）。
+//
+// pos 是这一帧读到的 `State.Position`，now 是这一帧的钟，playing 是
+// 「这一帧在不在放」，rate 是倍速，animate 是「要不要走连续动画」。
+//
+// # 什么时候重钉
+//
+//	还没锚过 / 播放状态变了 / 动画开关变了   钉到读数上
+//	不做连续动画（暂停、减少动态效果）      读数变了就钉
+//	在做连续动画、读数比推出来的差过阈值    钉（跳转；阈值见 danmakuSeekSlop）
+//	其余                                    不动
+//
+// ⚠️ **最后那条「其余」是关键**：在放时读数和推出来的位置差几十毫秒是采样
+// 误差，重钉就是让弹幕在每次整窗重建时抖一下。
+func (d *danmakuLayer) follow(pos int64, now time.Time, playing, animate bool, rate float64) {
+	if d.baseAt.IsZero() {
+		d.pin(pos, now, playing, animate, rate)
+		return
+	}
+	if d.playing != playing || d.animate != animate || d.rate != danmakuRate(rate) {
+		// 播放状态变了（暂停 / 恢复 / 减动效开关翻面）、或者用户改了倍速。
+		//
+		// ⚠️ **暂停冻在「画到的那一格」上**，不是播放器的读数：读数比画出来
+		// 的晚几十毫秒（50ms 一拍），拿它冻会让弹幕在按下暂停时往回跳一两个
+		// 像素。恢复则用读数——音频那边的事实，差的那一点正好补上。
+		if playing {
+			d.pin(pos, now, playing, animate, rate)
+		} else {
+			d.freeze(d.posAt(now), now, pos)
+		}
+		return
+	}
+	if !playing || !animate {
+		// 同一个状态里读数变了 ⇒ 用户拖了进度条（暂停时播放器自己不动；
+		// 减动效时位置只在整窗重建这一帧更新）。
+		if pos != d.lastBaseMS {
+			d.pin(pos, now, playing, animate, rate)
+		}
+		return
+	}
+	if drift := pos - d.posAt(now); drift > danmakuSeekSlop.Milliseconds() || -drift > danmakuSeekSlop.Milliseconds() {
+		d.pin(pos, now, playing, animate, rate)
+		return
+	}
+	d.lastBaseMS = pos
+}
+
+// pin 把锚点钉在 pos / now 上。
+func (d *danmakuLayer) pin(pos int64, now time.Time, playing, animate bool, rate float64) {
+	d.baseMS, d.baseAt = pos, now
+	d.lastBaseMS = pos
+	d.playing, d.animate = playing, animate
+	d.rate = danmakuRate(rate)
+}
+
+// freeze 把锚点冻在 painted 那一格上（暂停），而 lastBaseMS 记着播放器的读数
+// ——用它认「暂停期间用户拖了进度条」。
+func (d *danmakuLayer) freeze(painted int64, now time.Time, sampled int64) {
+	d.baseMS, d.baseAt = painted, now
+	d.lastBaseMS = sampled
+	d.playing, d.animate = false, false
 }
 
 // danmakuSortItemsByTime 建立当前批次的稳定时间索引。
@@ -311,16 +476,85 @@ func (d *danmakuLayer) expire(posMS int64) {
 }
 
 // widthOf 报一条弹幕的字宽（DIP）。**量一次就够**。
-func (d *danmakuLayer) widthOf(c *ui.Context, id, text string, fontSize float32) float32 {
+//
+// ⚠️ **权衡器是 `Painter` 而不是 `Context`**：量字宽现在发生在**绘制帧**里
+// （那一帧只有 `p`），而 `Painter.MeasureText` 和 `Context.MeasureText` 落到
+// 同一个排版缓存上（`richParams`）——同一个字号量出来的数一样。
+func (d *danmakuLayer) widthOf(p *ui.Painter, id, text string, fontSize float32) float32 {
 	if w, ok := d.widths[id]; ok {
 		return w
 	}
-	w, _ := c.MeasureText(0, ui.Span{Text: text, Size: fontSize})
+	w, _ := p.MeasureText(0, ui.Span{Text: text, Size: fontSize})
 	if d.widths == nil {
 		d.widths = map[string]float32{}
 	}
 	d.widths[id] = w
 	return w
+}
+
+// sync 是**建树那一帧**要做的三件事：认这份弹幕的身份、把字号与轨道高定下来、
+// 把时钟锚点对上这一帧的位置。
+//
+// ⚠️ **它只调一次（建树那一遍）**：绘制帧拿到的 `Painter` 里没有 `Context`，
+// 而这三件事都需要 `Context`（设置、系统字号、`Now`）。
+func (d *danmakuLayer) sync(c *ui.Context, st app.State, items []app.DanmakuItem, area ui.Rect) {
+	if len(items) == 0 {
+		// 没有弹幕（或者还在问）⇒ 这一帧没有可画的。
+		d.reset()
+		return
+	}
+	if d.count != len(items) || d.first != items[0].ID {
+		// **换了一份**（换歌了）⇒ 上一份的轨道、字宽、锚点全部作废。
+		//
+		// ⚠️ **判据是「条数 + 第一条的 rowid」：这一份弹幕的顺序是 B 站给的
+		// 顺序（不变），所以这两样变了就是换了一份。
+		d.reset()
+		d.count, d.first = len(items), items[0].ID
+		d.itemsByTime = append(d.itemsByTime[:0], items...)
+		d.maxTextBytes = 0
+		for _, it := range d.itemsByTime {
+			if n := len(it.Text); n > d.maxTextBytes {
+				d.maxTextBytes = n
+			}
+		}
+		danmakuSortItemsByTime(d.itemsByTime)
+	}
+
+	fontSize := scale.Font(c, danmakuFontSize)
+	trackH := danmakuTrackHeight
+	if h := fontSize + danmakuTrackGap; h > trackH {
+		// 系统字号调大了 ⇒ 轨道跟着长（否则两行字压在一起）。
+		trackH = h
+	}
+	if maxH := area.H / float32(danmakuTracks); trackH > maxH {
+		// 而轨道总数是死的（8 条）⇒ 太高的话只能压回去。
+		trackH = maxH
+	}
+	d.fontSize, d.trackH = fontSize, trackH
+	d.ready = true
+
+	posMS := st.Position.Milliseconds()
+	if d.baseAt.IsZero() {
+		// 第一帧（或者刚 reset）⇒ 锚点直接落在这儿。
+		d.pin(posMS, c.Now(), st.Playing, st.Playing && !c.Preferences().ReduceMotion, st.Rate)
+		return
+	}
+	// ⚠️ **回退要把轨道整份复位**：轨道上记着的是「上一条入场时刻」，回退
+	// 之后那些时刻还在**将来**，于是新位置上的弹幕一条都放不进去（屏幕上
+	// 会一条弹幕都没有）。
+	//
+	// 判据是「这一帧的读数比**画到的**位置还早」——那是用户把进度条拖回去了，
+	// 不是采样误差（差值是整段整段的）。
+	//
+	// ⚠️ **比的是 `posAt` 不是 `baseMS`**：在放时锚点是**上一次建树**那一刻
+	// （可能一秒前），拿它比的话「从 60 秒拖回 30 秒」会被漏掉（30 > anchor-2s），
+	// 而轨道上记着的是 60 秒附近的入场时刻。
+	if posMS < d.posAt(c.Now())-danmakuSeekSlop.Milliseconds() {
+		d.lanes = [danmakuTracks]danmakuLane{}
+		d.slots = nil
+		d.live = 0
+	}
+	d.follow(posMS, c.Now(), st.Playing, st.Playing && !c.Preferences().ReduceMotion, st.Rate)
 }
 
 // danmakuColorOf 把 B 站的十进制 RGB 变成画界面用的颜色。
