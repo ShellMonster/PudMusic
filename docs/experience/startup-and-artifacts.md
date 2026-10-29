@@ -157,3 +157,55 @@ Big Sur 改的是 **Apple 自家那一批**图标，而那道圆角是**画进 .
 | Windows `.ico` | 16 / 24 / 32 / 48 / 64 / 128 / 256 | 7 |
 
 **什么时候用得上**：你在换图标、改图标生成逻辑、或者在排查「Dock 和托盘不一样」。
+
+---
+
+## 包体归因：分层体积与链接依赖
+
+**出处**：`internal/perf` 的 `layers.go` / `golist.go` / `size_report.go`，
+入口是 `internal/perf/cmd/artifact-report`（票 #674）
+
+「包 18 MB」不是一个能拿来做决定的数：**主可执行文件**是依赖改动会动的那一块，
+**Resources** 是换一张图会动的那一块，**安装包/压缩包**是用户真正下载的那一块。
+混在一起就分不清「这次变重是谁变重」。
+
+所以报告固定分四层：
+
+| 层 | 判定 | 意义 |
+|---|---|---|
+| 主可执行文件 | `Contents/MacOS/` 下那一支；Windows 的 `*.exe`（非 `-setup-`）；Linux 无扩展名的顶层可执行文件 | 链接依赖的结果 |
+| Resources | `Contents/Resources/` 下的全部内容；非 bundle 目标里 `resources/` 复制过去的那棵树 | 随包资源的来源 |
+| 其他 | `Info.plist`、`PkgInfo`、`_CodeSignature/`、`install.sh`、`update-*.json` | 安装后要占盘、但不属于上面两类 |
+| 安装包/压缩包 | `.dmg`、`*-setup-*.exe`、`.tar.gz`、`.delta`、`.deb` | 下载体积，**不计入安装后总计** |
+
+规则在 `ClassifyArtifactFile` 里，**用测试钉住**（`internal/perf/layers_test.go`）：
+少判一条不会让构建失败，只会让报告里的百分比对不上 100。
+
+### 链接依赖为什么按模块、不按字节
+
+`go list -deps` 能回答「**哪些模块真的编进去了**」，回答不了「每个模块占多少字节」
+——那需要 linker map 或符号级尺寸分析。报告只报前者，**不编造后者的数字**。
+
+依赖按 `build/<goos>-<goarch>` 每个目标各跑一次再合并：`//go:build windows` 的文件让
+四个目标的依赖图不完全一样，只跑本机那一个会漏。这和许可清单是同一个口径。
+
+### 怎么跑
+
+```sh
+scripts/build.sh              # 打包后自动跑
+go run ./internal/perf/cmd/artifact-report            # 量 build/
+go run ./internal/perf/cmd/artifact-report -no-deps   # 只量体积
+```
+
+`build/` 不存在或没产物时它输出「**未构建**」并成功返回——那是一个正常状态。
+**量的是产物，不是模块缓存**：模块缓存多大跟实际编进去多少没有关系。
+
+### 大资源与格式候选
+
+- 资源来源按顶层条目聚合；`>= 1 MiB` 的标成「大资源」，需要复核是否该改成运行时
+  按需下载或独立资源包。`TestNoOptionalLargeResourceIsStaticallyShipped` 直接盯着
+  `resources/` —— 往那里丢一个大文件会让测试红。
+- 「格式与能力来源」那张表按**实际链接结果**过滤：裁掉一个格式会删掉哪些模块，
+  表上直接写着。MP3 解码器是 vendor 进仓库的，不在 `go list -deps` 里，报告会说明。
+
+**什么时候用得上**：你在加/删依赖、换随包资源、或者在判断「这次包变大是不是我改的」。

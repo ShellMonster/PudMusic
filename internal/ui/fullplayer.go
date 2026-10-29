@@ -386,9 +386,6 @@ type fullPlayer struct {
 	// ⚠️ **它挂在满屏这一摊上**：弹幕只在满屏播放器里出现，而这一摊的
 	// 生命周期就是满屏播放器开着的那段时间。
 	danmaku danmakuLayer
-
-	// danmakuBuf 是弹幕那一层每帧要画的那几条（复用的缓冲，免得每帧分配）。
-	danmakuBuf []danmakuVisible
 }
 
 // partRow 是分集列表里的一行。
@@ -429,6 +426,10 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 	// ⇒ 不清的话弹幕会画在**上一帧**封面待的那一块，而那一块现在什么都没有。
 	s.full.coverRect = ui.Rect{}
 	if !st.HasTrack {
+		// ⚠️ **没有歌的时候弹幕那一摊也要收掉**：这一支直接 return，
+		// `viewFullDanmaku` 压根跑不到——留着锚点和轨道的话，换歌回来那一帧
+		// 会把上一首的荡回来。
+		s.full.danmaku.reset()
 		// 🔴 **不能在这里关掉自己**。
 		//
 		// `HasTrack` 为 false 有两种情形，而第一种非常常见：

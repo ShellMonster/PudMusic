@@ -2926,16 +2926,19 @@ var Items = []Item{
 		//     画在主树里会被满屏那层不透明的底盖住。🔴 **那个症状是静默的**：
 		//     文字**在树里**（`Texts()` 查得到），而画面上一个像素也没有。
 		//     ⇒ 「树上有没有那几行字」验不出这个坑，得看画面。
-		//   - **位移走 pose**：位置要是算在 view 里（`Absolute().Left(x)`），它
-		//     只在重建时更新——而满屏开着时界面 20 帧/秒重建，于是弹幕是 20fps
-		//     跳着走的。走 pose（只重绘那一族）是 60fps 平滑。
+		//   - **位移走「只重绘」的帧**（票 #669）：位置要是算在 view 里
+		//     （`Absolute().Left(x)`），它只在整窗重建时更新——而播放中的整窗
+		//     唤醒约 1Hz（`tick_wake.go` 的 `readoutMoved`），于是弹幕「动一下停
+		//     一下」。现在位置在 `Draw` 里按 `Painter.Now()` 现算，播放中每帧
+		//     `Painter.AnimationFrame()`（只重绘、不重建）。
 		//   - **按当前位置起步**：弹幕的时间是**视频时间**，我们放的就是这个视频
 		//     的音轨 ⇒ 没有额外 offset。「从第 3 分钟开始听」就从第 3 分钟那一条
 		//     开始滚（**不是**按「播放了多久」滚）。
-		//   - **key 用弹幕自己的 rowid**：动态列表的 key 必须稳定且唯一——用下标
-		//     的话「前面插一条」会让后面所有条的状态整体错配。
-		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
-		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
+		//   - **轨道按弹幕自己的 rowid 记**：状态必须稳定且唯一——用下标的话
+		//     「前面插一条」会让后面所有条的轨道整体错配。
+		//   - **它是装饰**：`RoleNone`（读屏软件不念），「减少动态效果」开着时不
+		//     逐帧重画，设置里能整个关掉（默认开着），暂停 / 关闭 / 退出满屏 / 换歌
+		//     都停止请求帧并复位。
 		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
 		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
 		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
@@ -2944,14 +2947,24 @@ var Items = []Item{
 		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
 		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
 		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
-		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走只重绘帧（播放中连续推进、不靠整窗重建）、轨道状态按弹幕自己的 rowid 记、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）、暂停/关闭/退出满屏/换歌都停帧并复位",
 		Tests: []string{
 			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
 			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
 			"TestTheDanmakuStartsFromTheCurrentPosition",
-			"TestTheDanmakuGlidesInsteadOfTeleporting",
-			"TestTheDanmakuJumpsWhenMotionIsReduced",
-			"TestEveryDanmakuHasItsOwnKey",
+			"TestTheDanmakuKeepsMovingWithoutRebuildingTheView",
+			"TestTheDanmakuMovesOneStepPerFrame",
+			"TestACloserSampleDoesNotJerkTheDanmaku",
+			"TestTheDanmakuFollowsThePositionWhenMotionIsReduced",
+			"TestReduceMotionDoesNotAskForContinuousFrames",
+			"TestAPausedDanmakuStopsAndKeepsItsPlace",
+			"TestTheDanmakuGoesOnFromWhereItPaused",
+			"TestChangingTheSongResetsTheDanmaku",
+			"TestSeekingBackwardsClearsTheStaleLanes",
+			"TestLosingTheTrackClearsTheDanmaku",
+			"TestTurningTheDanmakuOffStopsTheFrames",
+			"TestClosingTheFullPlayerStopsTheDanmakuFrames",
+			"TestTheDanmakuKeepsItsLaneWhenTheViewRebuilds",
 			"TestTheDanmakuCanBeTurnedOff",
 			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
 			"TestTwoDanmakuOnTheSameLaneNeverOverlap",

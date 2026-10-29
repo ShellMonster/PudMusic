@@ -163,11 +163,23 @@ func TestRenderDanmakuShots(t *testing.T) {
 
 			// ⚠️ **十二条都得在**（一条都没被丢掉）：出图是材料，而材料本身
 			// 少了几条的话，那张图量的就不是「同屏十二条」那一档了。
+			//
+			// ⚠️ **判据是模型层的槽位，不是 `tt.Texts()`**：弹幕现在是一层
+			// 自绘的墨迹（票 #669），正文不在查找索引里。槽位是「这一条拿到了
+			// 轨道」的事实，而 `lane < 0` 就是「被丢掉了」。
 			for _, r := range shotDanmaku() {
-				if !env.tt.HasText(r.Text) {
-					t.Errorf("弹幕 %q 没在画面上（文字有 %q）——它被丢掉了？",
-						r.Text, env.tt.Texts())
+				slot, ok := env.s.full.danmaku.slots[r.ID]
+				if !ok {
+					t.Errorf("弹幕 %q 这一帧根本没进可见列表——它被丢掉了？", r.Text)
+					continue
 				}
+				if slot.lane < 0 {
+					t.Errorf("弹幕 %q 没有拿到轨道（lane=%d）——它被丢掉了", r.Text, slot.lane)
+				}
+			}
+			if got := env.s.full.danmaku.live; got != len(shotDanmaku()) {
+				t.Errorf("在屏的弹幕是 %d 条，want %d（同屏上限那一档）",
+					got, len(shotDanmaku()))
 			}
 
 			save(t, dir, "306-满屏-弹幕-"+tc.name+".png", env.tt)
