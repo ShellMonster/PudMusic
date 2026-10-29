@@ -7,35 +7,14 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
-// SpaceQuery identifies one UP space.
-type SpaceQuery struct {
-	Mid int64
-}
-
-// FollowQuery identifies a page of the current account's follows.
-type FollowQuery struct {
-	SelfMid int64
-	Page    int
-	Keyword string
-	TagID   *int
-}
-
-// DynamicQuery identifies one page of a dynamic feed or UP-space dynamic tab.
-type DynamicQuery struct {
-	Mid    int64
-	Offset string
-}
-
-// FollowAction is an application-level follow/unfollow command.
-type FollowAction struct {
-	Mid    int64
-	Follow bool
-}
-
-// DynamicLikeAction is an application-level dynamic like command.
-type DynamicLikeAction struct {
-	ID   string
-	Like bool
+// AccountSnapshot is the immutable identity captured when account-bound work starts.
+//
+// SelfMid and Generation must travel together: the mid labels the result while
+// the generation proves that the account has not changed since the request began.
+type AccountSnapshot struct {
+	SelfMid          int64
+	Generation       uint64
+	ClientGeneration uint64
 }
 
 // SpaceUser is the presentation-safe UP-space identity.

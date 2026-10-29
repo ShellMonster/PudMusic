@@ -102,7 +102,40 @@ func uiFollowTag(b *uiExplore, tagID int, users []any) {
 // 这一页
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheFollowPageShowsTheFollowedPeople 是这一页的主干：左边分组、右边网格。
+func TestLateFollowResultKeepsItsAccountSnapshot(t *testing.T) {
+	b := newUIExplore(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		uiExploreJSON(w, 0, map[string]any{"total": 1, "list": []any{map[string]any{"mid": 11, "uname": "旧账号关注"}}})
+	})
+	s, _, a := newSpaceShell(t, b, true, "77")
+	f := s.followPageOf()
+	f.selfMid = 77
+	f.account = a.AccountSnapshot()
+	ctx := f.pager.begin()
+	if ctx == nil {
+		t.Fatal("follow fetch did not start")
+	}
+	go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, 0, 1)
+	<-started
+	a.TestOnlyAdoptLogin("88")
+	close(release)
+	waitFor(t, "late follow request", func() bool {
+		s.adoptFollow(f)
+		return !f.pager.loading
+	})
+	if len(f.users) != 0 {
+		t.Fatalf("late follow result landed after account change: %+v", f.users)
+	}
+}
+
 func TestTheFollowPageShowsTheFollowedPeople(t *testing.T) {
 	b := newUIExplore(t)
 	uiFollowTags(b, map[int]any{-10: "特别关注", 0: "默认分组", 777: "常听的"})

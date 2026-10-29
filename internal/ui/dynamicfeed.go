@@ -113,8 +113,9 @@ type dynamicFeed struct {
 	drops dropTally
 	// started 是右边已经拉过至少一页了。
 	started bool
-	// selfMid 是**这份缓存是为哪个账号拉的**。作者栏和「关注的动态」都是
-	// 按账号的，账号一变这一页整个作废（见 resetIfAccountChanged）。
+	// account is the complete snapshot this cache belongs to.
+	account app.AccountSnapshot
+	// selfMid is the account mid used for this cache.
 	selfMid int64
 
 	// 跨 goroutine 的只有这一小摊信箱。
@@ -127,6 +128,8 @@ type feedResult struct {
 	which int
 	// selfMid 是发这一次时的账号。换账号之后回来的那一页**作废**——
 	// `stop` 能停请求，但停不掉已经在回来的那一页。
+	// account is the immutable account snapshot captured when this request starts.
+	account app.AccountSnapshot
 	selfMid int64 // feedAuthors / feedItems
 	dyns    []app.Dynamic
 	authors []app.FollowAuthor
@@ -173,11 +176,12 @@ func (s *Shell) dynamicFeedOf() *dynamicFeed {
 //
 // 顺带把那两条在途请求作废掉（闸门 `stop` 会 cancel + 清掉状态）。
 func (s *Shell) resetIfAccountChanged(f *dynamicFeed) {
-	cur := s.app.SelfMid()
-	if f.selfMid == cur {
+	cur := s.app.AccountSnapshot()
+	if f.account == cur {
 		return
 	}
-	f.selfMid = cur
+	f.account = cur
+	f.selfMid = cur.SelfMid
 	f.auth.stop()
 	f.feed.stop()
 	f.auth = upPager{}
@@ -690,6 +694,7 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 // cursor 和 page 是**调用方（界面线程）**在开这一拉那一刻读出来的闸门状态，
 // 不是这里自己读的——闸门是界面线程的状态，后台碰它就是数据竞争。
 func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor string, page int) {
+	account := s.app.AccountSnapshot()
 	var r feedResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -703,14 +708,14 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 		s.wake.invalidate()
 	}()
 
-	r = feedResult{which: which, selfMid: s.app.SelfMid()}
+	r = feedResult{which: which, account: account, selfMid: account.SelfMid}
 
 	switch which {
 	case feedAuthors:
-		pg, err := s.app.FollowedAuthors(ctx, s.app.SelfMid(), page+1)
+		pg, err := s.app.FollowedAuthorsForAccount(ctx, account, page+1)
 		r.err, r.authors, r.hasMore, r.sent = err, pg.Authors, pg.HasMore, len(pg.Authors)
 	default:
-		pg, err := s.app.DynamicFeed(ctx, cursor)
+		pg, err := s.app.DynamicFeedForAccount(ctx, account, cursor)
 		r.err, r.dyns, r.hasMore, r.drops = err, pg.Items, pg.HasMore, pg.Drops
 		r.cursor, r.sent = pg.Offset, pg.Raw
 		r.dropWhy = pg.DropWhy
@@ -754,6 +759,10 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 	}
 
 	for _, r := range box {
+		if r.account != s.app.AccountSnapshot() {
+			f.feedPager(r.which).settle()
+			continue
+		}
 		if r.selfMid != f.selfMid {
 			// 换账号之前发出去的那一页。它说的是**上一个账号**的关注的人。
 			f.feedPager(r.which).settle()
