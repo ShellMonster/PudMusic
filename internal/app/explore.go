@@ -123,152 +123,13 @@ func (a *App) SelfMid() int64 {
 // UP 空间的头部
 // ─────────────────────────────────────────────────────────────────────────────
 
-// SpaceHeader 是 UP 空间头部此刻的样子。界面一帧只读这一份拷贝。
-type SpaceHeader struct {
-	// Loaded 是「已经拿到过一次了」。false 时界面上画的是加载中/失败那两支，
-	// 别拿 User.Name == "" 当「没加载」——他可能真的就叫空。
-	Loaded  bool
-	Loading bool
-	// User 是昵称、头像、头图、等级。
-	User User
-	// Relation 是我和他的关系（有没有关注、是不是拉黑了）。
-	Relation bili.Relation
-	// Stat 是关注数和粉丝数。
-	Stat bili.RelationStat
-	// Err 是上一次加载的错。成功时是空串。
-	Err string
+// SpaceHeader is the UP-space header snapshot consumed by the UI.
+type SpaceHeader = SpaceHeaderSnapshot
 
-	// statKnown / statErr 是「关注数/粉丝数」那一组。
-	//
-	// ⚠️ 为什么不能像 `Stat` 那样「拿不到就当 0」：**粉丝数 0 会被画成一个
-	// 干干净净的「粉丝数 0」**，而那是个**假数**——真实值可能是十几万。用户会
-	// 相信它。所以查不到就说「没查到」并且给一个重试。
-	//
-	// ⚠️ 这里**没有**「按哪个账号记」那一格（relation 有）。粉丝数是这个 UP 主
-	// 的公开数据，两个账号看到的一样；加上去只会把未登录那一档（mid=0）判成
-	// 「永远没查到」，于是每帧重拉一次。
-	statKnown bool
-	statErr   string
+// User is the UP-space identity exposed to the UI.
+type User = SpaceUser
 
-	// relationFor 是**查这个关系时用的账号**（自己的 mid，0 是没登录）。
-	//
-	// ⚠️ 头部是按 mid 缓存的，而「关注关系」是**按账号**的：账号 A 登进来
-	// 缓存了「已关注」，换成账号 B 打开同一个 UP 的空间，那份「已关注」是
-	// **A 的**，画出来就是错的按钮。记下当时是谁，比记一个布尔值有用。
-	relationFor int64
-	// relationKnown 是那次查询**成功了没有**。
-	relationKnown bool
-	// relationErr 是查失败的原因。非空时 relationKnown 是 false，而
-	// Relation 的值没有意义（是零值，界面上不能拿它画按钮）。
-	relationErr string
-}
-
-// FollowState 是「关注按钮此刻该画成什么样」。
-type FollowState int
-
-const (
-	// FollowHidden 不画按钮：没登录、看的是自己、或者正在查。
-	FollowHidden FollowState = iota
-	// FollowAskable 没关注 → 画「关注」。
-	FollowAskable
-	// FollowDone 已关注 → 画「已关注」。
-	FollowDone
-	// FollowFailed 没查到，且**用户可以点重试**。
-	FollowFailed
-)
-
-// Follow 是关注按钮此刻的样子。
-//
-// ⚠️ **不是查过就信**：那次查询可能是另一个账号做的，也可能失败了。
-// 这两种情况下画「关注」比不画更糟——用户按下去是一次**取关**，而
-// 他其实没关注过这个 UP。
-func (h SpaceHeader) Follow(selfMid int64, loggedIn bool) FollowState {
-	if !loggedIn || h.Loading && !h.Loaded {
-		return FollowHidden
-	}
-	if !h.relationKnown {
-		if h.relationErr != "" {
-			return FollowFailed
-		}
-		// 正在查，或者还没轮到查（没登录时）。都不画。
-		return FollowHidden
-	}
-	if h.relationFor != selfMid {
-		// 这是**别的账号**查出来的，不能拿来给这个账号画按钮。
-		// 不画而不是画「关注」——见上面那条。
-		return FollowHidden
-	}
-	if h.Relation.Followed() {
-		return FollowDone
-	}
-	return FollowAskable
-}
-
-// StatOK 报告「关注数/粉丝数是真的查到了」。
-//
-// ⚠️ **只看 statKnown，不要看「是哪个账号查的」**（那是 `Relation` 才需要的）。
-// 关注数/粉丝数是**这个 UP 主的公开数据**，两个账号看到的是一样，所以
-// 「按账号记」在这里没有意义；而它有代价：未登录时 `statFor` 是 0，于是
-// `StatOK` 永远为假、`NeedStat` 永远为真 —— 一个**每帧重拉头部**的自激
-// 循环（实测：未登录、接口全部成功，8 次空闲帧就发了 10 次请求）。
-func (h SpaceHeader) StatOK() bool { return h.statKnown }
-
-// StatFailed 报告「关注数/粉丝数没查到，而且可以点重试」。
-func (h SpaceHeader) StatFailed() bool { return h.statErr != "" }
-
-// NeedStat 报「关注数/粉丝数该不该现在去查」。selfMid 是当前登录账号（0 = 没登录）。
-//
-// ⚠️ **第一句必须是「登录了吗」**：这一块界面只在登录后才画，没登录时 `Load`
-// **压根不去查**它（见 Load 里的 `askStat`）。少了这道判断，未登录时
-// `statKnown` 永远是 false → `NeedStat` 永远是 true → 每帧调一次 `Load`，
-// 而每次结果回来又唤醒界面（铁律三）—— 那是一个**自己叫醒自己**的循环。
-//
-// 剩下的和 NeedRelation 一致：头已经加载过、没在拉、**没失败过**（失败了等人
-// 点重试，不然一个稳定失败的接口就是每帧一个请求）。
-func (h SpaceHeader) NeedStat(selfMid int64) bool {
-	if selfMid == 0 || !h.Loaded || h.Loading || h.statErr != "" {
-		return false
-	}
-	return !h.StatOK()
-}
-
-// AnyPartFailed 报告「关注关系或关注数那两样里有没查到的」，界面据此给一个
-// 重试入口。
-func (h SpaceHeader) AnyPartFailed() bool { return h.relationErr != "" || h.statErr != "" }
-
-// RelationKnown 报告「关注关系是真的查到了」。
-func (h SpaceHeader) RelationKnown() bool { return h.relationKnown }
-
-// RelationFailed 报告「关注关系没查到，而且可以点重试」。
-func (h SpaceHeader) RelationFailed() bool { return h.relationErr != "" }
-
-// RelationErr 是查关注关系失败的原因。
-func (h SpaceHeader) RelationErr() string { return h.relationErr }
-
-// NeedRelation 报「关注关系该不该现在去查」。
-//
-// selfMid 是当前登录账号（**0 就是没登录** —— `SelfMid` 没登录时给 0）。
-//
-// 四个条件同时成立才查：
-//   - 登录了（那个接口要 Cookie，没登录一定 -101）；
-//   - 头部已经加载过（关系是搭在头上的，头没好没意义）；
-//   - **没有正在拉**（防重入）；
-//   - 没有成功查过，或者**查过但不是这个账号查的**。
-//
-// 最后那个「查失败之后不自动重试」也是同一支：`relationErr` 非空时返回
-// false，等人点「重试」。不然一个稳定失败的接口就是每帧一个请求。
-func (h SpaceHeader) NeedRelation(selfMid int64) bool {
-	if selfMid == 0 || !h.Loaded || h.Loading || h.relationErr != "" {
-		return false
-	}
-	return !(h.relationKnown && h.relationFor == selfMid)
-}
-
-// User 是 UP 主本人。B 站那份叫 `bili.User`，这里换个名是为了界面上读起来
-// 是 `header.User.Name` 而不是 `header.User.User.Name`。
-type User = bili.User
-
-// UpSpace 是一个 UP 主空间的**头部状态**。按 mid 存着，切走再切回来是热的。
+// UpSpace is a single UP-space header state keyed by mid.
 type UpSpace struct {
 	app *App
 	mid int64
@@ -362,19 +223,33 @@ func (s *UpSpace) Load() {
 	go func() {
 		ctx := context.Background()
 		var (
-			user        *bili.User
-			stat        *bili.RelationStat
+			user        *SpaceUser
+			stat        *RelationStats
 			statErr     error
-			relation    bili.Relation
+			relation    SpaceRelation
 			relationOK  bool
 			relationErr error
 		)
 		done := make(chan struct{}, 3)
-		go func() { user, _ = cli.SpaceAcc(ctx, mid); done <- struct{}{} }()
+		go func() {
+			defer func() { done <- struct{}{} }()
+			v, err := cli.SpaceAcc(ctx, mid)
+			if err == nil {
+				mapped := mapSpaceUser(v)
+				user = &mapped
+			}
+		}()
+
 		if askStat {
 			go func() {
 				defer func() { done <- struct{}{} }()
-				stat, statErr = cli.RelationStatOf(ctx, mid)
+				v, err := cli.RelationStatOf(ctx, mid)
+				statErr = err
+				if err == nil {
+					mapped := mapStats(v)
+					stat = &mapped
+				}
+
 			}()
 		} else {
 			done <- struct{}{}
@@ -382,8 +257,11 @@ func (s *UpSpace) Load() {
 		if askRelation {
 			go func() {
 				defer func() { done <- struct{}{} }()
-				relation, relationErr = cli.SpaceRelation(ctx, mid)
-				relationOK = relationErr == nil
+				v, err := cli.SpaceRelation(ctx, mid)
+				relationErr = err
+				relation = mapRelation(v)
+				relationOK = err == nil
+
 			}()
 		} else {
 			done <- struct{}{}
@@ -566,15 +444,14 @@ func selfMidOf(a *App) int64 { return a.SelfMid() }
 // 写成 6 的话按钮照样显示「已关注」（`Relation.Followed` 两个值都算），
 // 而下次刷新时 B 站给回 6 也对得上——两种写法在界面上分不出差别，
 // 写 2 是不把不知道的事编出来。
-func relationAfter(was bili.Relation, follow bool) bili.Relation {
+func relationAfter(was SpaceRelation, follow bool) SpaceRelation {
 	if follow {
-		if was == bili.RelationMutual {
-			// 已经互关了，关注之后还是互关（而且我们确知）。
+		if was == RelationMutual {
 			return was
 		}
-		return bili.RelationFollowed
+		return RelationFollowed
 	}
-	return bili.RelationNone
+	return RelationNone
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -585,61 +462,92 @@ func relationAfter(was bili.Relation, follow bool) bili.Relation {
 // 里调（`paged.go` 的 load/fetchOne），结果投递和叫醒界面那一套 PagedList
 // 自己管。所以这里只做三件事：拿到客户端、转发、把「没挂上」变成能判的错。
 
-// UpVideos 拉「投稿」Tab 的一页。
-func (a *App) UpVideos(ctx context.Context, q bili.UpVideoQuery) (bili.UpVideoPage, error) {
+func (a *App) UpVideos(ctx context.Context, q SpaceVideoQuery) (SpaceVideoPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return bili.UpVideoPage{}, errExploreMissing
+		return SpaceVideoPage{}, errExploreMissing
 	}
-	return cli.SpaceVideos(ctx, q)
+	pg, err := cli.SpaceVideos(ctx, bili.UpVideoQuery{Mid: q.Mid, Page: q.Page, Size: q.Size, Keyword: q.Keyword, Order: q.Order})
+	if err != nil {
+		return SpaceVideoPage{}, err
+	}
+	out := SpaceVideoPage{Total: pg.Total, HasMore: pg.HasMore, Videos: make([]SpaceVideo, 0, len(pg.Videos))}
+	for _, v := range pg.Videos {
+		out.Videos = append(out.Videos, mapSpaceVideo(v))
+	}
+	return out, nil
 }
 
-// UpCollections 拉「收藏夹」Tab 的一页。
-//
-// ⚠️ **分页**：B 站那个接口带 pn/ps（默认 20、上限 50），返回里带 count 和
-// has_more。不翻页的话超过 20 个收藏夹的 UP 主，第 21 个永远看不到。
-func (a *App) UpCollections(ctx context.Context, mid int64, page int) (bili.FavFolderPage, error) {
+func (a *App) UpCollections(ctx context.Context, mid int64, page int) (SpaceCollectionPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return bili.FavFolderPage{}, errExploreMissing
+		return SpaceCollectionPage{}, errExploreMissing
 	}
-	return cli.SpaceFavFolders(ctx, mid, page, 0)
+	pg, err := cli.SpaceFavFolders(ctx, mid, page, 0)
+	if err != nil {
+		return SpaceCollectionPage{}, err
+	}
+	out := SpaceCollectionPage{Count: pg.Count, HasMore: pg.HasMore, Items: make([]SpaceCollection, 0, len(pg.Folders))}
+	for _, v := range pg.Folders {
+		out.Items = append(out.Items, mapCollection(v))
+	}
+	return out, nil
 }
 
-// UpSeries 拉「合集」Tab 的一页。
-func (a *App) UpSeries(ctx context.Context, mid int64, page, size int) (bili.SpaceSeriesPage, error) {
+func (a *App) UpSeries(ctx context.Context, mid int64, page, size int) (SpaceCollectionPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return bili.SpaceSeriesPage{}, errExploreMissing
+		return SpaceCollectionPage{}, errExploreMissing
 	}
-	return cli.SpaceSeries(ctx, mid, page, size)
+	pg, err := cli.SpaceSeries(ctx, mid, page, size)
+	if err != nil {
+		return SpaceCollectionPage{}, err
+	}
+	out := SpaceCollectionPage{HasMore: pg.HasMore, Items: make([]SpaceCollection, 0, len(pg.Collections))}
+	for _, v := range pg.Collections {
+		out.Items = append(out.Items, mapCollection(v))
+	}
+	return out, nil
 }
 
-// UpDynamics 拉 UP 空间「动态」Tab 的一页。offset 空串是第一页。
-func (a *App) UpDynamics(ctx context.Context, mid int64, offset string) (bili.DynamicPage, error) {
+func (a *App) UpDynamics(ctx context.Context, mid int64, offset string) (DynamicPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return bili.DynamicPage{}, errExploreMissing
+		return DynamicPage{}, errExploreMissing
 	}
-	return cli.SpaceDynamics(ctx, mid, offset)
+	pg, err := cli.SpaceDynamics(ctx, mid, offset)
+	if err != nil {
+		return DynamicPage{}, err
+	}
+	return mapDynamicPage(pg), nil
 }
 
-// DynamicFeed 拉动态流（关注的人在发什么）的一页。
-func (a *App) DynamicFeed(ctx context.Context, offset string) (bili.DynamicPage, error) {
+func (a *App) DynamicFeed(ctx context.Context, offset string) (DynamicPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return bili.DynamicPage{}, errExploreMissing
+		return DynamicPage{}, errExploreMissing
 	}
-	return cli.DynamicFeed(ctx, offset)
+	pg, err := cli.DynamicFeed(ctx, offset)
+	if err != nil {
+		return DynamicPage{}, err
+	}
+	return mapDynamicPage(pg), nil
 }
 
-// FollowedAuthors 拉动态流左侧作者栏的一页。
-func (a *App) FollowedAuthors(ctx context.Context, vmid int64, page int) (bili.FollowPage, error) {
+func (a *App) FollowedAuthors(ctx context.Context, vmid int64, page int) (FollowAuthorsPage, error) {
 	cli := a.explore()
 	if cli == nil {
-		return bili.FollowPage{}, errExploreMissing
+		return FollowAuthorsPage{}, errExploreMissing
 	}
-	return cli.Followings(ctx, vmid, page)
+	pg, err := cli.Followings(ctx, vmid, page)
+	if err != nil {
+		return FollowAuthorsPage{}, err
+	}
+	out := FollowAuthorsPage{Total: pg.Total, HasMore: pg.HasMore, Authors: make([]FollowAuthor, 0, len(pg.Authors))}
+	for _, v := range pg.Authors {
+		out.Authors = append(out.Authors, FollowAuthor{Mid: v.Mid, Name: v.Name, Face: v.Face})
+	}
+	return out, nil
 }
 
 // LikeDynamic 给一条动态点赞 / 取消点赞。**立刻返回**，结果走 done。

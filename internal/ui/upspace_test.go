@@ -854,9 +854,9 @@ func TestAFailedTabSaysItFailedAndOffersARetry(t *testing.T) {
 		})
 		tt.Frame()
 
-		if showsText(tt, upTabEmpty(tab, bili.DropCounts{}).Title) {
+		if showsText(tt, upTabEmpty(tab, app.DropCounts{}).Title) {
 			t.Errorf("%s 拉失败了，界面上却是空状态 %q——用户会以为他真的没有",
-				upTabNames[tab], upTabEmpty(tab, bili.DropCounts{}).Title)
+				upTabNames[tab], upTabEmpty(tab, app.DropCounts{}).Title)
 		}
 		if !showsText(tt, "这一块没拉出来") {
 			t.Errorf("%s 拉失败了却没说失败，文字有 %q", upTabNames[tab], tt.Texts())
@@ -950,8 +950,8 @@ func TestADynamicKeepsItsIdentityWhenOneIsInsertedAbove(t *testing.T) {
 	}
 
 	// 在**最前面**插一条（模拟刷新：B 站就是按时间倒着给的，新动态排在最前）。
-	sp.dynItems = append([]bili.Dynamic{{
-		ID: "newest", Kind: bili.DynamicText, Text: "刚发的一条",
+	sp.dynItems = append([]app.Dynamic{{
+		ID: "newest", Kind: app.DynamicText, Text: "刚发的一条",
 	}}, sp.dynItems...)
 	tt.Frame()
 
@@ -1522,7 +1522,7 @@ func TestAnEmptyPageWhoseOffsetStaysIsTheEnd(t *testing.T) {
 // # 为什么上面那一条不够
 //
 // `TestAnEmptyPageWhoseOffsetStaysIsTheEnd` 给的是「入口**空串**」——而那一条
-// 在**服务层**就收口了（`bili.DynamicPage.MoreAfter`：入口是空的就没有下一页），
+// 在**服务层**就收口了（`app.DynamicPage.MoreAfter`：入口是空的就没有下一页），
 // **UI 那一半根本没被问到**。这一条给的是「入口**没前进**」：入口还在（"O1"），
 // 而 B 站又回了同一个 "O1"——再问一次问回来的还是同一页，所以到第二页就该收手。
 //
@@ -1661,9 +1661,9 @@ func TestTheListDoesNotPullEveryPageWithoutScrolling(t *testing.T) {
 // ——选中一个另一个也亮，而界面上看不出任何异样。
 func TestRowKeysAreUniqueIncludingTheSentinel(t *testing.T) {
 	sp := &upSpace{}
-	sp.dynItems = []bili.Dynamic{{ID: "d1"}, {ID: "d2"}}
-	sp.cols[upTabCollection] = []bili.UpCollection{{ID: 1, Type: 1}, {ID: 2, Type: 1}}
-	sp.cols[upTabSeries] = []bili.UpCollection{{ID: 1, Type: 3}, {ID: 2, Type: 3}}
+	sp.dynItems = []app.Dynamic{{ID: "d1"}, {ID: "d2"}}
+	sp.cols[upTabCollection] = []app.SpaceCollection{{ID: 1, Type: 1}, {ID: 2, Type: 1}}
+	sp.cols[upTabSeries] = []app.SpaceCollection{{ID: 1, Type: 3}, {ID: 2, Type: 3}}
 
 	// 每一张 Tab 里：内容 + 哨兵，两两不同。
 	for _, tab := range []int{upTabDynamic, upTabCollection, upTabSeries} {
@@ -1694,8 +1694,8 @@ func TestRowKeysAreUniqueIncludingTheSentinel(t *testing.T) {
 // 状态，而界面上看不出任何异样。
 func TestACollectionKeyCarriesItsType(t *testing.T) {
 	sp := &upSpace{}
-	sp.cols[upTabCollection] = []bili.UpCollection{{ID: 1, Type: 1}}
-	sp.cols[upTabSeries] = []bili.UpCollection{{ID: 1, Type: 3}}
+	sp.cols[upTabCollection] = []app.SpaceCollection{{ID: 1, Type: 1}}
+	sp.cols[upTabSeries] = []app.SpaceCollection{{ID: 1, Type: 3}}
 
 	fav := upRowKey(sp, upTabCollection, 0)
 	ser := upRowKey(sp, upTabSeries, 0)
@@ -1711,8 +1711,8 @@ func TestACollectionKeyCarriesItsType(t *testing.T) {
 // 每一行都给无障碍留了名字；收藏夹那一行点了会跳。
 func TestEveryRowHasALabelAndACollectionRowGoesToItsPage(t *testing.T) {
 	sp := &upSpace{}
-	sp.cols[upTabCollection] = []bili.UpCollection{{ID: 100, Type: 1, Title: "我的收藏夹", Count: 8}}
-	sp.dynItems = []bili.Dynamic{{ID: "d1", Kind: bili.DynamicText, Text: "正文"}}
+	sp.cols[upTabCollection] = []app.SpaceCollection{{ID: 100, Type: 1, Title: "我的收藏夹", Count: 8}}
+	sp.dynItems = []app.Dynamic{{ID: "d1", Kind: app.DynamicText, Text: "正文"}}
 
 	if got := upRowLabel(sp, upTabCollection, 0); got != "我的收藏夹" {
 		t.Errorf("收藏夹那一行的名字是 %q", got)

@@ -21,9 +21,9 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"strconv"
 
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
@@ -340,7 +340,7 @@ const dynamicShapesNote = "B 站的动态有好几种形态，这一版只画得
 //
 // ⚠️ **按类别说**（票 #344）：每一类理由各说一句，「读不懂」不能被说成
 // 「形态不认识」。
-func (s *Shell) viewDroppedNote(c *ui.Context, counts bili.DropCounts) {
+func (s *Shell) viewDroppedNote(c *ui.Context, counts app.DropCounts) {
 	t := c.Theme()
 	ui.Text(c, dropSentence(counts)).
 		FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)

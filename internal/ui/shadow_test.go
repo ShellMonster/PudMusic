@@ -39,7 +39,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
@@ -298,7 +297,7 @@ func TestTheFollowCardHasAShadow(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
-				s.viewFollowCard(c, bili.FollowUser{
+				s.viewFollowCard(c, app.FollowUser{
 					Mid: 11, Name: "一个 UP 主", Sign: "签名",
 					Face: "https://f/author-11.jpg",
 				}, false, false)

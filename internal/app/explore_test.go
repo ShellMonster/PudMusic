@@ -134,7 +134,7 @@ func TestExploreIsMissingIsAnIdentifiableError(t *testing.T) {
 	t.Cleanup(a.Close)
 	ctx := context.Background()
 
-	if _, err := a.UpVideos(ctx, bili.UpVideoQuery{Mid: 1}); err != errExploreMissing {
+	if _, err := a.UpVideos(ctx, SpaceVideoQuery{Mid: 1}); err != errExploreMissing {
 		t.Errorf("投稿：%v，want errExploreMissing", err)
 	}
 	if _, err := a.UpCollections(ctx, 1, 1); err != errExploreMissing {
@@ -308,7 +308,7 @@ func TestFollowChangesTheButtonBeforeTheRoundTrip(t *testing.T) {
 
 	// 请求还在路上（服务器那边有 200ms 延迟），关系已经变了。
 	deadline := 50
-	for sp.Snapshot().Relation != bili.RelationFollowed && deadline > 0 {
+	for sp.Snapshot().Relation != RelationFollowed && deadline > 0 {
 		waitExploreSleep()
 		deadline--
 	}
@@ -383,7 +383,7 @@ func TestFollowKeepsMutualFollowedMutual(t *testing.T) {
 	if err := sp.Follow(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
-	if got := sp.Snapshot().Relation; got != bili.RelationNone {
+	if got := sp.Snapshot().Relation; got != RelationNone {
 		t.Errorf("取关之后是 %v，want 未关注", got)
 	}
 }
@@ -699,7 +699,7 @@ func TestEachTabHitsItsOwnEndpoint(t *testing.T) {
 	if _, err := a.UpDynamics(ctx, 42, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.UpVideos(ctx, bili.UpVideoQuery{Mid: 42, Page: 1}); err != nil {
+	if _, err := a.UpVideos(ctx, SpaceVideoQuery{Mid: 42, Page: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.UpCollections(ctx, 42, 1); err != nil {
