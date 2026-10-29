@@ -75,13 +75,24 @@ func TestTheRequestedPixelSizeFollowsTheDisplaySize(t *testing.T) {
 	}
 }
 
-// TestTheRequestedPixelSizeIsCapped 钉住上限：不管显示多大，都不要超过
-// `maxStoredSide`——那是磁盘和内存两边共同的上限，一张 4K 的封面图床也不该给。
-func TestTheRequestedPixelSizeIsCapped(t *testing.T) {
-	w, h := coverPixelSize(2000, 1200, 2)
-	if max(w, h) > maxStoredSide {
-		t.Errorf("要 %dx%d 像素，超过 maxStoredSide（%d）——"+
-			"超出的部分既不显示也白占内存", w, h, maxStoredSide)
+// TestTheStoredSizeIsStillCapped 钉住**内存那一头**的上限：不管显示多大，
+// **存进缓存的那一份**都不超过 `maxStoredSide`。
+//
+// ⚠️ **这条原来是「要图的那一档」也不超过 `maxStoredSide`**（票 #624 的写法），
+// 而那是**把两件事写成了一件**：
+//
+//	「向图床要多大」  ← 清晰度的事（票 #664）
+//	「存进缓存多大」  ← 内存的事（这条）
+//
+// 它们本来就不一样（图床给你 1000×1000、内存里存 768×768 是正常的）。
+// 拆开之后：**要图那一档不再被这个上限夹住**（横幅在 Retina 上才不糊），
+// 而**存的那一份仍然被它夹住**（32MiB 的预算不变）。
+func TestTheStoredSizeIsStillCapped(t *testing.T) {
+	// 存进去的那一份：解码一张 4000×3000 的图，存下来的长边仍然是 768。
+	b := storedBounds(4000, 3000)
+	if max(b.Dx(), b.Dy()) > maxStoredSide {
+		t.Errorf("4000×3000 的图存下来的尺寸是 %v，长边超过 maxStoredSide（%d）——"+
+			"内存那一头被放松了，32MiB 的预算就破了", b, maxStoredSide)
 	}
 }
 
@@ -233,7 +244,18 @@ func coverPNGForTest(t testing.TB, w, h int) []byte {
 // 会产生 **48 个不同的 URL**：拖一次窗口就下一批新图、在盘上攒一批几乎一样的
 // 文件、在内存里各占一块。
 //
-// 现在的做法是短边**跟比例、但量化到 1/32**（见 `coverPixelSize`）。
+// 现在的做法是短边**跟比例、但量化到 1/8**（见 `coverPixelSize`）。
+//
+// ⚠️ **判据从「≤5」变成「≤8」是按新口径重算的，不是放宽**（票 #664）：
+//
+//	量化粒度 1/32 → 这一档产生 **3** 个 key，比例偏差 **23.7%**（横幅被拉宽）
+//	量化粒度 1/8  → 这一档产生 **7** 个 key，比例偏差 **0%**
+//
+// ⇒ 粒度细了三倍，key 数从 3 涨到 7 是**该有的**（每一档的相对精度细了，
+// 窗口宽度每变一档就换一张更准的图）。**上限 8** 是新口径下的上界。
+//
+// ⇒ 而「拖一次窗口下一批新图」那个原始症状（48 个 URL）**依然被挡住**：
+// 7 ≪ 48，差着七倍。
 func TestDraggingTheWindowDoesNotMakeNewURLs(t *testing.T) {
 	const base = "https://i0.hdslb.com/bfs/archive/y.jpg"
 	seen := map[string]bool{}
@@ -242,7 +264,7 @@ func TestDraggingTheWindowDoesNotMakeNewURLs(t *testing.T) {
 		w, h := coverPixelSize(float32(cw)*0.5, 96, 2)
 		seen[sizedURL(base, w, h)] = true
 	}
-	if len(seen) > 5 {
+	if len(seen) > 8 {
 		t.Errorf("窗口宽从 257 拖到 320（64 个像素），产生了 %d 个不同的 URL——"+
 			"拖一次窗口就下一批新图、盘上攒一批几乎一样的文件（短边没量化）",
 			len(seen))
