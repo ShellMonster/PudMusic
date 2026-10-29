@@ -1025,7 +1025,7 @@ func budgetScreens() []budgetScreen {
 				// ⚠️ **分组和人是直接摆进去的**：这一页的数据是后台拉回来的
 				// （理由同上面那一段）。
 				f.tagStarted = true
-				f.tags = []bili.FollowTag{
+				f.tags = []app.FollowTag{
 					{ID: -10, Name: "特别关注", Count: 1},
 					{ID: 0, Name: "默认分组", Count: budgetFollowCards},
 				}
@@ -1810,10 +1810,10 @@ const budgetFollowCards = 20
 //
 // ⚠️ **签名和认证都摆着**：真实的那一格有它们（签名折两行、认证一行），
 // 而空的那一档量到的是「少画两行字」——不是用户看见的那一屏。
-func budgetFollowUsers(n int) []bili.FollowUser {
-	users := make([]bili.FollowUser, n)
+func budgetFollowUsers(n int) []app.FollowUser {
+	users := make([]app.FollowUser, n)
 	for i := range users {
-		users[i] = bili.FollowUser{
+		users[i] = app.FollowUser{
 			Mid:      int64(11 + i),
 			Name:     fmt.Sprintf("第 %d 个 UP", i+1),
 			Sign:     fmt.Sprintf("第 %d 个 UP 的签名", i+1),

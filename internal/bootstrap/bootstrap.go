@@ -25,7 +25,6 @@ type Dependencies struct {
 	PinUserDataDir func() error
 	NewApp         func() *app.App
 
-	MountMigration       func() error
 	MountSettings        func(*app.App) error
 	MountFullPlayerPrefs func(*app.App)
 	MountLogin           func(*app.App) *bili.Client
@@ -56,7 +55,6 @@ func DefaultDependencies() Dependencies {
 	return Dependencies{
 		PinUserDataDir:       platform.PinUserDataDir,
 		NewApp:               app.New,
-		MountMigration:       ui.MountMigration,
 		MountSettings:        ui.MountSettings,
 		MountFullPlayerPrefs: ui.MountFullPlayerPrefs,
 		MountLogin:           ui.MountLogin,
@@ -102,11 +100,6 @@ func Assemble(d Dependencies) (*app.App, error) {
 		return nil, errMissingDependency("NewApp returned nil")
 	}
 
-	if d.MountMigration != nil {
-		if err := d.MountMigration(); err != nil {
-			d.Logf("biu: 升级数据失败，原文件都留着了：%v", err)
-		}
-	}
 	if d.MountSettings != nil {
 		if err := d.MountSettings(a); err != nil {
 			d.Logf("biu: 拿不到应用数据目录，这次的设置存不住：%v", err)

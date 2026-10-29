@@ -18,7 +18,6 @@ func TestAssembleRunsHeadlessInDependencyOrder(t *testing.T) {
 	d := Dependencies{
 		PinUserDataDir: func() error { mark("pin data directory"); return nil },
 		NewApp:         func() *app.App { mark("new app"); return app.New() },
-		MountMigration: func() error { mark("migration"); return nil },
 		MountSettings:  func(*app.App) error { mark("settings"); return nil },
 		MountFullPlayerPrefs: func(_ *app.App) {
 			mark("full player preferences")
@@ -73,7 +72,7 @@ func TestAssembleRunsHeadlessInDependencyOrder(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	want := []string{
-		"pin data directory", "new app", "migration", "settings", "full player preferences",
+		"pin data directory", "new app", "settings", "full player preferences",
 		"login", "streaming", "search", "warm up", "collections", "explore", "library", "recommend",
 		"local music", "lyrics", "comments", "danmaku", "updates", "downloads", "notifications",
 		"media", "mounted", "run",
@@ -122,7 +121,6 @@ func TestAssembleContinuesAfterOptionalMountFailures(t *testing.T) {
 	mark := func(name string) { got = append(got, name) }
 	var logs []string
 	d := minimalDependencies(mark)
-	d.MountMigration = func() error { mark("migration"); return errors.New("migration failed") }
 	d.MountSettings = func(*app.App) error { mark("settings"); return errors.New("settings failed") }
 	d.MountUpdates = func(*app.App) error { mark("updates"); return errors.New("updates failed") }
 	d.MountDownloads = func(*app.App) error { mark("downloads"); return errors.New("downloads failed") }
@@ -133,11 +131,11 @@ func TestAssembleContinuesAfterOptionalMountFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(a.Close)
-	if len(got) != 23 || got[len(got)-1] != "run" {
+	if len(got) != 22 || got[len(got)-1] != "run" {
 		t.Fatalf("optional failures stopped assembly: %v", got)
 	}
-	if len(logs) != 4 {
-		t.Fatalf("optional failures logged %d times, want 4: %v", len(logs), logs)
+	if len(logs) != 3 {
+		t.Fatalf("optional failures logged %d times, want 3: %v", len(logs), logs)
 	}
 }
 
@@ -199,7 +197,6 @@ func minimalDependencies(mark func(string)) Dependencies {
 
 		PinUserDataDir: func() error { mark("pin"); return nil },
 		NewApp:         func() *app.App { mark("new app"); return app.New() },
-		MountMigration: func() error { mark("migration"); return nil },
 		MountSettings:  func(*app.App) error { mark("settings"); return nil },
 		MountFullPlayerPrefs: func(_ *app.App) {
 			mark("full player preferences")
