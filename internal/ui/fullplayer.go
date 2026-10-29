@@ -1129,6 +1129,9 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	// 问，于是标记一路活到播放条，把用户接下来的第一次点击吃掉——关掉满屏点封面要点
 	// 第二下才开全屏。它自己永远好不了：三连成功之后 `Liked` 变真、`likeArmed` 变
 	// false，清标记的那一支再也进不去（`trackLike` 那段有完整的一段）。
+	//
+	// ⚠️ **中途松手也算**（票 #681）：按住 700ms（环已经出来、三连还没触发）就松开
+	// 时，`engaged` 为真——这一层也得把那一刻的 click 消费掉，否则标记会活到播放条。
 	if box.Clicked() {
 		s.like.swallowClick()
 	}

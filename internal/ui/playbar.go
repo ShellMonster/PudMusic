@@ -1314,8 +1314,12 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 	})
 
 	if wrap.Clicked() {
-		// 🔴 **长按三连之后松手补发的那一次 click 必须吞掉**，否则凭空弹出全屏
+		// 🔴 **长按之后松手补发的那一次 click 必须吞掉**，否则凭空弹出全屏
 		// 播放器（原因见 like.go 文件头：Biu 那边漏了它是一次多余的赞）。
+		//
+		// ⚠️ **「长按」从进度环出来那一刻算起，不是从三连发出去算起**（票 #681）：
+		// `swallowClick` 同时看 `swallow`（三连触发过）和 `engaged`（环出来过），
+		// 所以按住 600ms 松手不会开全屏，而不到 500ms 的短按照旧开。
 		if s.like.swallowClick() {
 			return
 		}

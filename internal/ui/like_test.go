@@ -11,6 +11,7 @@ package ui
 import (
 	"image"
 	"image/color"
+	"strconv"
 	"testing"
 	"time"
 
@@ -131,10 +132,12 @@ func TestTheRingHugsTheCoverBorder(t *testing.T) {
 	}
 }
 
-// TestLettingGoEarlyDoesNothing 钉住「短按不是三连」。
+// TestLettingGoEarlyDoesNothing 钉住「没到 2.5 秒就不是三连」。
 //
-// 而那一次短按**照旧是普通点击**（封面照旧开全屏）：Biu 那边短按赞键是「赞一下」，
-// 我们这边短按封面是「开全屏」，两边都不该被长按那一套吞掉。
+// ⚠️ **它不是「那一下还是普通点击」**：600 毫秒已经过了进度环的门槛（500 毫秒），
+// 那一按**算长按**，补发的那一次 click 要被吞掉——封面不会开全屏
+// （钉住它的是 `TestACoverHoldPastTheRingSwallowsItsClick`）。真正的短按（不到
+// 500 毫秒）才照旧开全屏（`TestAQuickReleaseOnTheCoverStillOpensTheFullScreen`）。
 func TestLettingGoEarlyDoesNothing(t *testing.T) {
 	e := newLikeEnv(t, false, false, false)
 	cover, before := holdCover(t, e)
@@ -147,8 +150,8 @@ func TestLettingGoEarlyDoesNothing(t *testing.T) {
 		t.Fatal("按住 600 毫秒环建出来了却没画上去")
 	}
 
-	// 松手。⚠️ **这一松是一次普通点击**，封面照旧开全屏（Biu 那边短按赞键是赞一下，
-	// 我们这边短按封面是开全屏）——所以下面**不能**拿画面比了：满屏一开整窗都变了。
+	// 松手。⚠️ 环已经出来过，所以这一松是**长按的松手**（不是点击）——
+	// 补发的那一次 click 会被吞掉，下面照旧可以拿画面比。
 	pt := coverPoint2(t, e.tt)
 	e.tt.Release(pt[0], pt[1])
 	e.tt.Frame()
@@ -159,6 +162,65 @@ func TestLettingGoEarlyDoesNothing(t *testing.T) {
 	}
 	if ringBuilt(e.tt) {
 		t.Error("手已经松开了环还在")
+	}
+}
+
+// TestACoverHoldPastTheRingSwallowsItsClick 钉住「环一出来，松手就不再是点击」。
+//
+// 🔴 用户报的「长按封面取消了还进播放器」：按住 600 / 700 毫秒（环已经画出来，
+// 但还没到 2.5 秒的三连）再松手，框架会补发一次 click——漏吞就是**凭空弹出
+// 全屏播放器**。用户手上只是按了一会儿又松开，预期是留在当前。
+//
+// ⚠️ **门槛是进度环那一个（500ms），不是三连那一个（2500ms）**：环一出来就说明
+// 用户进入长按语义了（见 like.go 的 `likeGesture.engaged`）。
+func TestACoverHoldPastTheRingSwallowsItsClick(t *testing.T) {
+	for _, ms := range []int{biuLikeRingDelayMS + 100, biuLikeRingDelayMS + 200} {
+		t.Run(strconv.Itoa(ms), func(t *testing.T) {
+			e := newLikeEnv(t, false, false, false)
+			holdCover(t, e)
+			pt := coverPoint2(t, e.tt)
+
+			advanceLike(e, time.Duration(ms)*time.Millisecond)
+			e.tt.Release(pt[0], pt[1])
+			e.tt.Frame()
+
+			if e.s.full.open || e.tt.HasText("关闭全屏") {
+				t.Errorf("封面按住 %d 毫秒松手，全屏播放器自己开出来了 —— "+
+					"环一出来就算长按，补发的那一次 click 没吞掉", ms)
+			}
+			if got := e.f.triplePostCount(); got != 0 {
+				t.Errorf("按住 %d 毫秒就三连了（%d 次），Biu 是 %d 毫秒",
+					ms, got, biuLikeLongPressMS)
+			}
+			// ⚠️ **吞的是一次**：松手那一帧之后标记必须已经用掉，否则用户接下来
+			// 点的第一下封面会被吃掉（「要点第二下才开」）。
+			if e.s.like.engaged {
+				t.Error("松手之后「这一按算长按」还留着 —— 它会吃掉下一次点击")
+			}
+			e.tt.ClickAt(pt[0], pt[1])
+			if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+				t.Error("中途松手之后第一次点封面没开全屏 —— 吞标记用掉之后还在吞")
+			}
+		})
+	}
+}
+
+// TestAQuickReleaseOnTheCoverStillOpensTheFullScreen 是上一条的反面：**短按没被误伤**。
+//
+// 499 毫秒还没到进度环的门槛，按 Biu 的语义就是一次普通点击——封面照旧开全屏。
+// 没有这一条的话，把「松手一律吞掉」写进去也能让上一条全绿，而封面就再也点不开了。
+func TestAQuickReleaseOnTheCoverStillOpensTheFullScreen(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	holdCover(t, e)
+	pt := coverPoint2(t, e.tt)
+
+	advanceLike(e, time.Duration(biuLikeRingDelayMS-1)*time.Millisecond)
+	e.tt.Release(pt[0], pt[1])
+	e.tt.Frame()
+
+	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+		t.Errorf("封面按住 %d 毫秒松手，全屏没开 —— 短按被长按那一套误伤了",
+			biuLikeRingDelayMS-1)
 	}
 }
 
@@ -281,6 +343,56 @@ func TestTheFullScreenCoverTakesTheLongPressToo(t *testing.T) {
 	advanceLike(e, biuLikeLongPressMS*time.Millisecond+200*time.Millisecond)
 
 	waitFrames(t, e.tt, "满屏上的长按三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+}
+
+// TestTheFullScreenCoverHoldPastTheRingStaysPut 钉住满屏那张的「中途松手」。
+//
+// 🔴 同一个病在满屏上的形状**不是开全屏**（它本来就开着）：漏吞的话补发的那次
+// click 落在满屏封面这一层，而这一层**没有自己的本命动作**——真正的问题是它会
+// 把 `swallow` 标记留在**两张封面共用的那一份状态机**里，一路活到播放条，把用户
+// 接下来第一次点封面吃掉（要点第二下才开全屏）。这一条量的是「松手之后满屏还在、
+// 没三连、标记没留下」。
+func TestTheFullScreenCoverHoldPastTheRingStaysPut(t *testing.T) {
+	e := newLikeEnv(t, false, false, true)
+
+	r := coverAt(t, e.tt)
+	e.tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	if !e.tt.HasText("关闭全屏") {
+		t.Fatalf("满屏没开，文字有 %q", e.tt.Texts())
+	}
+	e.tt.Frame()
+
+	big := fullCoverRect(t, e.tt)
+	pt := [2]float32{big.X + big.W/2, big.Y + big.H/2}
+	e.tt.Press(pt[0], pt[1])
+	advanceLike(e, time.Duration(biuLikeRingDelayMS+200)*time.Millisecond)
+	e.tt.Release(pt[0], pt[1])
+	e.tt.Frame()
+
+	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+		t.Error("满屏封面上按住 700 毫秒松手，满屏却关掉了")
+	}
+	if got := e.f.triplePostCount(); got != 0 {
+		t.Errorf("按住 %d 毫秒就三连了（%d 次），Biu 是 %d 毫秒",
+			biuLikeRingDelayMS+200, got, biuLikeLongPressMS)
+	}
+	if e.s.like.swallow {
+		t.Error("满屏那张松手之后还留着吞 click 的标记 —— 它会吃掉播放条上下一次点击")
+	}
+	// ⚠️ **`engaged` 也一样要消费掉**：它和 `swallow` 是两条独立判据，漏问它等于
+	// 这一层什么都没做（`viewCover` 那边会替它吞，而那不是这一层的责任）。
+	if e.s.like.engaged {
+		t.Error("满屏那张松手之后「这一按算长按」还留着 —— 满屏这一层没消费它")
+	}
+
+	// 收手之后关掉满屏，点播放条封面：必须**一次**就开。
+	closeFull(t, e)
+	again := coverAt(t, e.tt)
+	e.tt.ClickAt(again.X+again.W/2, again.Y+again.H/2)
+	if !e.tt.HasText("关闭全屏") {
+		t.Error("满屏封面中途松手之后，第一次点播放条封面没开全屏（要点第二下）—— " +
+			"那一按的吞标记没人消费，一路活到了这里")
+	}
 }
 
 // ---- 满屏三连之后的那一次点击 ----

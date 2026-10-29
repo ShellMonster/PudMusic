@@ -22,9 +22,15 @@
 // （`IconButton` 在封面右边），我们先是照 SPEC 接了封面，现在赞键也接上——
 // 两边的形状就一样了。而病根是同一个：**长按的松手和普通点击的松手在框架看来
 // 没有区别**，所以补发的那一次 click 必须由**每一个长按目标自己**吞掉
-// （`likeGesture.swallowClick`，三连触发时置上、松手那一帧消费）。谁漏了它，
+// （`likeGesture.swallowClick`，长按成立时置上、松手那一帧消费）。谁漏了它，
 // 一次长按就多出一次自己的本命动作：赞键上是「又赞/取消赞一次」，封面上是
 // 「凭空弹出全屏播放器」——后者更难看：进度环刚转满，界面就换成满屏那一屏。
+//
+// 🔴 **不只是三连触发之后要吞**：进度环（赞键是抖）一出来，这一按就已经算长按了
+// ——`likeGesture.engaged` 从那一刻起为真，松手补发的那一次 click 也要吞。
+// 只认「三连发出去」（`swallow`）的话，按住 600ms 松手仍然是一次点击：封面
+// **开全屏**、赞键**多赞一次**（真的发到 B 站账号上）。用户按了一半又松开是在
+// 取消，不是在点。（票 #681）
 //
 // # 两个数是死的（照抄 Biu）
 //
@@ -173,6 +179,18 @@ type likeGesture struct {
 	// swallow 是「下一次 click 要吞掉」。三连触发时置上，长按的松手那一帧被
 	// `swallowClick` 消费掉。理由见文件头。
 	swallow bool
+	// engaged 是「这一按已经算长按了」——进度环（赞键是抖）出来的那一刻置上
+	// （`held > likeRingDelay`），**不是**等三连发出去。
+	//
+	// 🔴 **它和 `swallow` 是两件事**，不能复用：`swallow` 的语义是「下一次 click
+	// 吞掉」，而 `engaged` 是「这一按的性质已经变了」——环一出来，松手就不再是
+	// 一次点击（否则按住 600ms 松手会开全屏 / 多赞一次，票 #681）。
+	//
+	// ⚠️ **松手那一帧之后要保留**：补发的那一次 click 是在松手**那一帧之后**才
+	// 被问的（`Clicked()` 问的是上一帧的松手），所以 `trackLike` 把 `held` 清掉
+	// 的时候不能顺手清它。清它的有两处：`swallowClick` 把它和那一次 click 一起
+	// 消费掉、`trackLike` 开头在下一次按下时兜底清掉。
+	engaged bool
 	// progress 是环走到哪（0~1），0 = 不画。每一帧重算（不用动画），
 	// 所以它只是这一帧的答案，**不是**跨帧记着的进度。
 	progress float32
@@ -241,13 +259,24 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 	// 所以每个长按目标**都要**在松手那一帧消费它自己那一次（见 `viewFullCover`），
 	// 而这里再兜一层：漏掉一个消费者的后果最多是「标记到下一次按下就被清掉」，
 	// 而不是用户看到的多点一下。
+	//
+	// ⚠️ **`engaged` 也在这里清**：它是「这一按算长按了」的判据，属于**这一次按下**
+	// ——下一次按下是一条新的手势，从零开始。松手那一帧不清它（那一帧之后才有人
+	// 来问 `swallowClick`），见字段那一段。
 	if pressed && !g.held {
-		g.held, g.start, g.fired, g.swallow = true, now, false, false
+		g.held, g.start, g.fired, g.swallow, g.engaged = true, now, false, false, false
 	}
 
 	g.progress = 0
 	if g.held && armed {
 		held := now.Sub(g.start)
+		// 环（赞键是抖）出来的那一刻，这一按就已经是长按了——见 `engaged` 那一段。
+		//
+		// ⚠️ **它不看 pressed**：松手那一帧 pressed 已经是 false，而 `held` 还留着
+		// （要到下面那一句才清）——补发的那一次 click 正是在这一帧之后被问的。
+		if held > likeRingDelay {
+			g.engaged = true
+		}
 		if !g.fired && held >= likeLongPress {
 			// 到点了。Biu 那边这一帧把进度环收掉（`setIsProgressing(false)`）
 			// 并把补发的那一次 click 标成要吞的（`ignoreNextPressRef = true`）。
@@ -299,19 +328,29 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 
 // swallowClick 消费掉长按之后补发的那一次 click。返回 true = 这一次要吞掉。
 //
+// 🔴 **两个判据都要看**（票 #681）：
+//
+//	swallow  三连发出去了，这一松是它的尾巴
+//	engaged  环/抖已经出来过，这一按**本来就**是长按——用户按了一半又松开
+//	         是在取消，不是在点
+//
+// 只认 `swallow` 的话，按住 600ms 松手会被当成普通点击：封面开全屏、赞键
+// 多赞一次（真的写到 B 站账号上）。见文件头。
+//
 // ⚠️ **谁来问**：长按目标自己在处理 `Clicked()` 的那一帧问。问的人只能是那个
 // 元素——补发的那一次 click 落在长按目标上，别人问了也问不到（而别人问了就
 // 会把标记吃掉，然后真正要吞的那一次没吞）。
 //
-// 它是**一次性的**：消费掉就清掉（和 Biu 的 `ignoreNextPressRef` 一样）。漏了
-// 消费也不要紧——下一次按下会把标记清掉（见 `trackLike`），所以一个漏掉的标记
-// 最多吃掉一次正常点击的资格，而不会一直卡着。
+// ⚠️ **`engaged` 要在这里清掉**：它属于**这一次按下**，一次松手只该吞一次 click
+// ——不清的话用户接下来那一帧的普通点击也会被吞（而 `engaged` 不是靠
+// `trackLike` 开头清的：那要等下一次按下，中间那一次点击就没了）。
+// `swallow` 是一次性的（和 Biu 的 `ignoreNextPressRef` 一样）；漏了消费也不要紧
+// ——下一次按下会把两个都清掉（见 `trackLike`），所以一个漏掉的标记最多吃掉
+// 一次正常点击的资格，而不会一直卡着。
 func (g *likeGesture) swallowClick() bool {
-	if !g.swallow {
-		return false
-	}
-	g.swallow = false
-	return true
+	eat := g.swallow || g.engaged
+	g.swallow, g.engaged = false, false
+	return eat
 }
 
 // tripleNow 发那一次一键三连。**立刻返回**，结果在后台那一趟。
