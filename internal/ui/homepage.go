@@ -658,6 +658,18 @@ func boardCaptionText(number int, at time.Time) string {
 	return strings.Join(parts, " · ")
 }
 
+// boardCaptionColor 是榜单横幅上**副题**那一行的颜色。
+//
+// 🔴 **纯白，不是白 82%**（2026-10-29 的视觉走查）：横幅的底是固定的深色渐变
+// （`homeTiles`，不跟主题走），副题原来用白 82%，压在热榜那个橙红亮端
+// `(196,82,44)` 上合成出来是 `(244,224,217)`——实测 **3.60:1**，低于 DESIGN.md
+// 对正文的 4.5:1。而那一句「第 3 期（周榜）· 日期」是用户判断「这张榜是哪一期」
+// 的唯一依据，不该是整条横幅上最糊的一行。
+//
+// ⚠️ **它提成常量是为了让测试看得见**（`homepage_board_contrast_test.go` 引的就是
+// 它）：写死在调用处的话，「把透明度调回去」这件事在测试里查不出来。
+var boardCaptionColor = ui.RGBA(255, 255, 255, 1)
+
 // viewBoardCaption 在热榜 / 原创榜的列表上面画期数和更新时间。别的档不画；
 // 还没拉到那一期的信息时也不画（不摆一行空话）。
 func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
@@ -686,7 +698,7 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 		ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
 			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
 			ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-				TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+				TextColor(boardCaptionColor).MaxLines(1)
 		})
 		items := h.lists[tab].Items()
 		if len(items) == 0 || h.acts.Add == nil {

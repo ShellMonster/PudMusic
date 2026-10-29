@@ -665,8 +665,20 @@ type App struct {
 	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
 	// 同 `likeMu` / `partsMu`。
 	// commentsMu sync.Mutex
-	commentsMu     sync.Mutex
+	commentsMu sync.Mutex
+	// commentsCancel 取消的是**主列表**那一趟（换歌 / 换槽位时用）。
 	commentsCancel context.CancelFunc
+	// commentsReplyCancels 是**楼中楼**各自的取消函数，按 root 分格。
+	//
+	// 🔴 **它必须和 `commentsCancel` 分开**（2026-10-29 的回归）：楼中楼和主列表
+	// 是两个并行的请求，共用一格的话「后发的那一趟把先发的掐掉」——而楼中楼最常见
+	// 的用法恰恰是**主列表已经回来之后**再去点开回复。挤在一格里时，那一趟会拿到
+	// 一个刚被自己取消掉的 ctx（`CommentReplies` 里那个 else 分支），
+	// **一个包都发不出去**，用户看到的是「点开回复没有任何反应」。
+	//
+	// 按 root 分格还带来第二件事：同一个槽位上连着点开两条回复时，两条各自
+	// 都要拿到自己的结果，不能互相掐。
+	commentsReplyCancels map[int64]context.CancelFunc
 	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
 	commentsSlot string
 	// comments 是已经拿到的那些评论（主列表）。
