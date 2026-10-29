@@ -365,6 +365,11 @@ func (s *Shell) openMiniPlayer() {
 	if w := s.win; w != nil && !w.IsDestroyed() {
 		platform.HideToBackground(w)
 	}
+	// 🔴 主窗口只是被藏起来，`closePerWindow` 不会跑（回来还要用它），所以
+	// 「藏起来就看不见的东西」得在这儿自己收——热词轮换的表不收的话，它每
+	// 5 秒叫醒一次一扇看不见的窗（`wakeHandle` 会把帧丢掉，代价只是一次空醒，
+	// 但表该收）。回到主窗口重画首帧时照常装回（见 navbar_hotword.go）。
+	s.stopHotword()
 }
 
 // newMiniShell 建出迷你那个外壳，并和主窗口接上（`s.mini` 指过去、反向指回来）。

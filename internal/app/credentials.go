@@ -12,8 +12,7 @@
 //     能落盘的 Session（含 cookie + SESSDATA + bili_jct + refresh_token），
 //     启动时读回来重建 jar——见 Session.Jar。
 //   - **凭据放哪**。明文放配置文件，拷一份给别人就等于把账号交出去。
-//     Biu 就是明文（electron-store 加了个 encryptionKey，实测只是混淆，
-//     `biu/electron/store.ts:23-27`），**那不构成必须照抄的体验合同**。
+//     凭据应由平台安全存储保存，普通配置文件不承载登录态。
 //   - **谁能拿到凭据**。歌词源、封面 CDN、B 站写 API、updater 不是同一
 //     凭据边界，见 InjectPolicy。
 //   - **日志里能出现什么**。Cookie、签名 URL、代理密码一律不许，见 Redactor。
@@ -380,6 +379,16 @@ func (m *Manager) Generation() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.gen
+}
+
+// Snapshot returns the current session and its generation from one lock-held read.
+//
+// Callers that start account-bound work must use both values from this same
+// snapshot; reading Current and Generation separately can pair two accounts.
+func (m *Manager) Snapshot() (Session, uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cur, m.gen
 }
 
 // Jar 给网络层用。返回的 jar 是当前登录态的快照；之后登录态变了要重新取。

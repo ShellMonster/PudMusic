@@ -133,7 +133,7 @@ func PickConfigFile(parent *mygo.Window) (string, error) {
 	paths, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
 		Parent:  parent,
 		Title:   "选择配置文件",
-		Message: "选一份从 Biu 或别的机器导出的配置 JSON",
+		Message: "选一份本应用或别的机器导出的配置 JSON",
 		Filters: jsonFilters,
 	})
 	if err != nil || len(paths) == 0 {

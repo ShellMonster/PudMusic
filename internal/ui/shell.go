@@ -42,6 +42,10 @@ type Shell struct {
 	app *app.App
 	win *mygo.Window
 
+	// framePage is the shared page input/action snapshot for this frame. Page
+	// modules keep their own state; this only carries genuinely shared values.
+	framePage pageSeam
+
 	// draw 是外面包了一层 recover 的 viewMain。
 	draw func(*ui.Context)
 
@@ -185,6 +189,10 @@ type Shell struct {
 	notFoundAt   time.Time
 	notFoundStop func()
 
+	// hotword 是搜索框那个轮换热词占位的跨帧状态（轮到第几个、这一轮从几时
+	// 算起、那个每 5 秒一跳的定时器），见 navbar_hotword.go。和上面两个一样，
+	// 定时器回调只调 wakeHandle.invalidate，其余只由主线程读写。
+	hotword hotwordState
 	// pageBody 是画页面内容的那一支。单独拎出来是为了能替掉它测崩溃
 	// （铁律四的验收点：页面里 panic，进程不能崩）。
 	pageBody func(*ui.Context, *ui.Route, Route)
@@ -382,14 +390,6 @@ type Shell struct {
 	// 十次之后应用层那个列表就有十条，每发生一件事就多走十趟空转。
 	announceRemove func()
 
-	// migrationAnnounced 是「启动时的迁移/导入结果已经弹过一次 toast 了」。
-	//
-	// 只由界面线程读写（`viewMain` 第一帧），所以不需要锁。挂在 Shell 上而不是
-	// 包级的 map 上，是因为「每个窗口各弹一次」才是对的：迷你播放器窗口是**另
-	// 一个窗口**，它的第一帧不该因为主窗口已经弹过就跳过（它也有自己的屏幕可
-	// 以弹）。见 `announceMigration`。
-	migrationAnnounced bool
-
 	// fullScreen 是主窗口此刻是不是全屏。
 	//
 	// ⚠️ **它由窗口的回调推过来，不在 view 里问**：`win.IsFullScreen()`
@@ -510,6 +510,31 @@ type Shell struct {
 	sideDragFromX     float32
 	sideDragFromWidth float64
 
+	// sideDrawnW 是**这一帧侧栏真正画出来的宽**（`viewSide` 里那个
+	// `AnimateTo`/`Jump` 的返回值——也就是**这一帧参与布局的那一档**）。
+	//
+	// 🔴 **它不是「目标宽」**（`sideTargetWidth`）：侧栏有 200ms 的过渡，
+	// 过渡期间画出来的是**中间值**；而内容区就架在它右边（`underlay.go`
+	// 那个 Row），所以「内容区有多宽」= 窗口宽 − **它这一帧画出来的那一档**。
+	//
+	// ⚠️ **为什么不能靠猜**（这是对抗性审查挖出来的一个真 bug）：
+	//
+	//   - 「上一次拖动的终点」是**陈旧的**——`commitSideWidth` 只写设置，
+	//     **不清 `s.sideWidth`**。于是「拖到 300 → 折叠」这一路，
+	//     `s.sideWidth` 停在 300、目标是 64，而**画面上画的是 64**。
+	//     拿陈旧值去算内容区 ⇒ 内容区算窄了 236 像素 ⇒ 横幅右边空出
+	//     236 像素的一条空白带（**不报错、不崩溃**，画面上只是「没铺满」）。
+	//   - 「拖动中那一档可能比目标小」也不是「内容区还占着旧的宽」——
+	//     **实测内容区每一帧都跟着重排**（`underlay.go` 那个 Row 是
+	//     flex 布局，侧栏一改宽，兄弟那一列立刻重排）。实测拖动时
+	//     横幅那一格的宽**逐帧**跟着画面上的侧栏宽走，一像素不差。
+	//
+	// ⇒ 所以这一格是**记下来的事实**，不是推出来的估计。
+	//
+	// ⚠️ **它是 0 = 这一帧侧栏压根没画**（比如侧栏那一支被替掉了，见
+	// `sideBody`）——那时候退回「目标宽」（见 `sideDrawnWidth`）。
+	sideDrawnW float32
+
 	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
 	// 两组一份是因为两组各排各的（见 sidebar_favorites.go）。
 	sideLists [favGroups]ui.ListState
@@ -600,6 +625,9 @@ type Shell struct {
 	// queueRows 是这一帧去重之后要画的那几行（连同它们在队列里的下标）。
 	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。
 	queueRows []queueRow
+	// queueRowsRevision 是 queueRows 对应的队列快照版本。revision 不变时复用
+	// 同一份派生行，当前/停止状态仍在绘制前按当前 State 更新。
+	queueRowsRevision uint64
 
 	// queueClearOpen 是「清空播放列表」那道二次确认开着没有（抽屉头右上角那枚
 	// 垃圾桶，见 queue_drawer.go 的 viewQueueClearConfirm）。
@@ -1209,6 +1237,9 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 把这一格换成 `tt.Frame()`（见 `shelltest_test.go`），于是「那句话在画面
 	// 上」在测试里当场成立。
 	s.repaint = s.wake.invalidateNow
+	// 热词轮换那一摊的唤醒函数同理绑一次（方法值每帧现取就是每帧一次堆分配，
+	// 理由见 navbar_hotword.go 文件头）。
+	s.hotword.wake = s.wake.invalidate
 	// 快捷键那两条路的动作都落到它。方法值在这儿绑一次就够：runShortcut 只碰
 	// s.app 和 s.router，两个都是建好之后就一直在的。
 	s.onShortcut = s.runShortcut

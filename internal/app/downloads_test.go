@@ -484,7 +484,7 @@ func TestTheFourQueueActionsAreWired(t *testing.T) {
 // 退出时写一次，于是：
 //
 //	本次会话点的那一首     只在内存里
-//	按一次「从 Biu 导入」  旧 Manager 被不落盘地关掉 → 那一首随它没了
+//	并入另一份下载记录  旧 Manager 被不落盘地关掉 → 那一首随它没了
 //	新 Manager Restore    读的是**陈旧**的文件，里面只有上次留下的
 //	退出时落盘            用户点的歌从队列文件里被抹掉
 //
@@ -568,9 +568,9 @@ func TestRemountingDownloadsDoesNotLoseWhatWasJustImported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 导入：Biu 那一条被并进文件（`MergeIntoQueue`），文件里此刻有两条。
+	// 合并另一份队列：当前会话的任务和外来任务都应保留，文件里此刻有两条。
 	if err := download.MergeIntoQueue(queue, []*download.Task{{
-		ID: "frombiu|9", Title: "Biu 里下完的那首", Dest: "/x/biu.m4a",
+		ID: "external|9", Title: "外来队列中的歌曲", Dest: "/x/external.m4a",
 		Status: download.StatusDone, AddedAt: 2,
 	}}); err != nil {
 		t.Fatal(err)
@@ -583,7 +583,7 @@ func TestRemountingDownloadsDoesNotLoseWhatWasJustImported(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, want := range []string{"mine|1", "frombiu|9"} {
+	for _, want := range []string{"mine|1", "external|9"} {
 		if _, ok := a.DownloadSnapshot(want); !ok {
 			t.Errorf("换挂之后 %q 不在队列里（导入进来的或本次会话的，丢了一个）", want)
 		}
@@ -592,7 +592,7 @@ func TestRemountingDownloadsDoesNotLoseWhatWasJustImported(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := readQueueFile(t, queue)
-	for _, want := range []string{"mine|1", "frombiu|9"} {
+	for _, want := range []string{"mine|1", "external|9"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("落盘之后 %q 被抹掉了：\n%s", want, got)
 		}

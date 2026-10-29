@@ -45,7 +45,7 @@ func TestRenderDesign180Shots(t *testing.T) {
 					{notice.Warning, "这个收藏夹暂时打不开"},
 				},
 				{
-					{notice.Plain, "从 Biu 导入了一批数据"},
+					{notice.Plain, "已导出配置文件"},
 					{notice.Success, "已加进下载队列"},
 					{notice.Danger, "下载失败：网络不通"},
 				},

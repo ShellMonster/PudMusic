@@ -976,8 +976,63 @@ func TestTheAVIDIsFetchedOnlyOnce(t *testing.T) {
 	}
 }
 
-// commentsWaitTimeout 是这一组等后台那一趟的上限。
 const commentsWaitTimeout = 5 * time.Second
+
+// TestSwitchingSongsCancelsThePreviousCommentRequest 钉住「切歌会取消旧评论请求」。
+//
+// 旧请求即使最终返回也会被代次丢掉；但它还应该收到取消信号，避免慢的旧页
+// 长时间占着请求槽位，快速切歌时把峰值越堆越高。
+func TestSwitchingSongsCancelsThePreviousCommentRequest(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	calls := &commentCalls{}
+	oldStarted := make(chan struct{})
+	oldCanceled := make(chan struct{})
+	var startedOnce sync.Once
+	var canceledOnce sync.Once
+	a.commentsListFetch = func(ctx context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		calls.addList(typ, oid, next)
+		if oid == 111 {
+			startedOnce.Do(func() { close(oldStarted) })
+			<-ctx.Done()
+			canceledOnce.Do(func() { close(oldCanceled) })
+			return bili.CommentPage{}, ctx.Err()
+		}
+		return commentPage([]bili.Comment{{Rpid: 2, Message: "这一首的"}}, "", true), nil
+	}
+	a.Queue().Reset(
+		Item{Source: "online", Type: "audio", Sid: "111"},
+		Item{Source: "online", Type: "audio", Sid: "222"},
+	)
+
+	a.Comments()
+	waitCommentsFor(t, commentsWaitTimeout, "旧评论请求发出", func() bool {
+		select {
+		case <-oldStarted:
+			return true
+		default:
+			return false
+		}
+	})
+
+	a.Queue().selectAt(1)
+	if got := a.Comments(); got != nil {
+		t.Fatalf("切歌后旧评论还在界面上：%v", got)
+	}
+	waitComments(t, a, 1, "新歌评论")
+	if got := a.Comments()[0].Message; got != "这一首的" {
+		t.Fatalf("切歌后界面显示 %q，want 新歌评论", got)
+	}
+	select {
+	case <-oldCanceled:
+	case <-time.After(commentsWaitTimeout):
+		t.Fatal("切歌后旧评论请求没有收到取消信号")
+	}
+	if got := calls.listCount(); got != 2 {
+		t.Fatalf("评论请求发了 %d 趟，want 旧歌 1 趟 + 新歌 1 趟", got)
+	}
+}
 
 // waitCommentsFor 是这一组内部那份「等条件」。
 func waitCommentsFor(t *testing.T, timeout time.Duration, what string, cond func() bool) {

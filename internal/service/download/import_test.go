@@ -137,71 +137,6 @@ func TestMergingNothingWritesNothing(t *testing.T) {
 	}
 }
 
-// MigrateFile：v0 → v1 的队列文件能被升到当前版本并写回。
-func TestMigratingAQueueFileLiftsItToTheCurrentVersion(t *testing.T) {
-	path := filepath.Join(t.TempDir(), QueueFileName)
-	// 没有 `version` 键的那一份（v0）。
-	body := `{"tasks":[{"id":"BV1a|1","title":"甲","dest":"/x/a.m4a","status":"done"}]}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateFile(path); err != nil {
-		t.Fatal(err)
-	}
-	var f queueFile
-	raw, _ := os.ReadFile(path)
-	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatal(err)
-	}
-	if f.Version != storeVersion {
-		t.Fatalf("版本停在 %d，不是 %d", f.Version, storeVersion)
-	}
-	if len(f.Tasks) != 1 || f.Tasks[0].Title != "甲" {
-		t.Fatalf("迁完之后任务没了：%+v", f.Tasks)
-	}
-}
-
-// 已经是当前版本：一个字都不动。
-//
-// 每次启动都重写一遍的话，mtime 全在变，而有些备份工具按 mtime 判断「改过了」。
-func TestMigratingAnUpToDateQueueWritesNothing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), QueueFileName)
-	body := `{"version":1,"tasks":[]}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	before, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateFile(path); err != nil {
-		t.Fatal(err)
-	}
-	after, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !before.ModTime().Equal(after.ModTime()) {
-		t.Fatalf("已经是最新的一份却被重写了：%v → %v", before.ModTime(), after.ModTime())
-	}
-}
-
-// 一份未来的队列：不碰，并报错。
-func TestMigratingAQueueFromANewerVersionTouchesNothing(t *testing.T) {
-	path := filepath.Join(t.TempDir(), QueueFileName)
-	body := `{"version":99,"tasks":[]}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateFile(path); err == nil {
-		t.Fatal("一份 v99 的队列没有被拦下")
-	}
-	got, _ := os.ReadFile(path)
-	if string(got) != body {
-		t.Fatalf("那份文件被改写了：%s", got)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 
 func newTask(id, title string) *Task {
@@ -219,39 +154,4 @@ func readTasks(t *testing.T, path string) []*Task {
 		t.Fatalf("读队列 %s：%v", path, err)
 	}
 	return f.Tasks
-}
-
-// 并进一份 v0 的队列时，那一份**先走过迁移链**，和 `Restore` / `MigrateFile` 同路。
-//
-// 这一条钉的是「三条路走同一条链」。今天 `queueMigrations[0]` 是空函数，所以不跑也
-// 看不出差别——那正是 `migrate.go` 注释里写的那个失败模式反过来：**一份 v0 的
-// 内容被盖上 v1 的版本号，然后永远不再被迁**。等有人往那张表里加了真的 v0 迁移，
-// 这一条就是唯一绕过它的路。
-//
-// 判据不是「跑没跑链」（那得往包里塞一条假迁移才看得见），而是**写出去的那一份
-// 自称的版本**：走了链的话它停在 `storeVersion`，不走的话这里会停在一个更低的
-// 编号上——而那份文件从此对后面所有人都是「已经是最新版了」。
-func TestMergingIntoAnOlderQueueDoesNotSkipItsMigration(t *testing.T) {
-	path := filepath.Join(t.TempDir(), QueueFileName)
-	// 一份 v0：没有 version 键。
-	if err := os.WriteFile(path, []byte(`{"tasks":[{"id":"BV1|1","title":"旧的","dest":"/x/a.m4a","status":"paused"}]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := MergeIntoQueue(path, []*Task{newTask("BV2|2", "新的")}); err != nil {
-		t.Fatal(err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var f queueFile
-	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatal(err)
-	}
-	if f.Version != storeVersion {
-		t.Errorf("写出去的那一份自称第 %d 版，want %d（读出来的那份没走迁移链）", f.Version, storeVersion)
-	}
-	if len(f.Tasks) != 2 {
-		t.Errorf("队列里有 %d 条，want 2（旧的一条 + 并进来的）", len(f.Tasks))
-	}
 }

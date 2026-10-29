@@ -65,6 +65,11 @@ type tap struct {
 	normOn atomic.Bool
 	norm   normState
 	eq     eqState
+	// enabled 控制频谱分析是否运行。它只跳过 FFT 和历史写入，EQ、均衡和
+	// 音频样本仍然照常通过 tap。
+	enabled atomic.Bool
+	// generation 让关闭频谱时已经开始计算的旧 Read 在提交历史前失效。
+	generation atomic.Uint64
 	// out 是分析器的输出缓冲（FFT 的中间量在 Analyzer 自己那里）。
 	// **只有解码 goroutine 碰它**，所以不加锁。
 	out []float32
@@ -83,8 +88,23 @@ type tap struct {
 func newTap(d mygoaudio.Decoder) *tap {
 	t := &tap{Decoder: d, an: spectrum.New(1), out: make([]float32, spectrum.Bins)}
 	t.vol.Store(math.Float32bits(1))
+	t.enabled.Store(true)
 	return t
 }
+
+// SetSpectrumEnabled toggles FFT and history recording without changing audio samples.
+func (t *tap) SetSpectrumEnabled(enabled bool) {
+	t.generation.Add(1)
+	t.enabled.Store(enabled)
+	if !enabled {
+		t.mu.Lock()
+		t.blocks, t.frames = nil, 0
+		t.mu.Unlock()
+	}
+}
+
+// SpectrumEnabled reports whether FFT and history recording are active.
+func (t *tap) SpectrumEnabled() bool { return t.enabled.Load() }
 
 // SetVolume 设音量增益，让频谱跟着音量缩放。
 //
@@ -105,15 +125,26 @@ func (t *tap) Read(buf []float32) (int, error) {
 		t.eq.apply(buf[:n-n%ch], ch, t.Decoder.SampleRate())
 		t.norm.apply(buf[:n-n%ch], ch, t.Decoder.SampleRate(), t.normOn.Load())
 		if frames := int64(n / ch); frames > 0 {
-			t.an.SetVolume(math.Float32frombits(t.vol.Load()))
-			t.push(buf[:n], frames, ch)
+			if t.enabled.Load() {
+				generation := t.generation.Load()
+				t.an.SetVolume(math.Float32frombits(t.vol.Load()))
+				t.push(buf[:n], frames, ch, generation)
+			} else {
+				t.advance(frames)
+			}
 		}
+
 	}
 	return n, err
 }
 
-// Close 转发给内层解码器，没有就什么都不做。
-//
+// advance keeps the source-frame clock moving while analysis is disabled.
+func (t *tap) advance(frames int64) {
+	t.mu.Lock()
+	t.cur += frames
+	t.mu.Unlock()
+}
+
 // ⚠️ **不能省**：挂点的 `Decoder` 是一个**接口**字段，方法不会被提升（和
 // `errorDecoder` 上那段是同一个坑，`handles_test.go` 记着它）。
 // 少这一句的后果不是「关得慢一点」——关解码器是顺着链一路往里传的，挂点这里
@@ -155,12 +186,16 @@ func (t *tap) maxFrames() int64 {
 }
 
 // push 把刚读到的一段算成谱，记进历史，必要时把最老的挤出去。
-func (t *tap) push(samples []float32, frames int64, channels int) {
+func (t *tap) push(samples []float32, frames int64, channels int, generation uint64) {
 	mag := t.an.Magnitudes(samples, channels, t.out)
-	from := t.cur
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	from := t.cur
+	if !t.enabled.Load() || t.generation.Load() != generation {
+		t.cur = from + frames
+		return
+	}
 	t.cur = from + frames
 
 	// ⚠️ **结果缓冲一段一份，不回收。**

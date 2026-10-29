@@ -36,6 +36,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/perf"
 	"io"
 	"net/http"
 	"os"
@@ -173,6 +174,13 @@ type StreamSourceOptions struct {
 	// 之后这一轮就结束了，下一次断流从第 1 次重新数。
 	OnRetry func(attempt int, wait time.Duration)
 
+	// Gauges 是可选的字节账本：#672 的诊断快照用它看「这条流现在在临时文件里
+	// 占了多少字节」。nil 表示不记账。
+	//
+	// ⚠️ **它记的是「已写进文件」的字节**，不是「收到了多少」：写失败的那一段
+	// 不算——那一段根本没落在盘上，算进去会让快照比真实的磁盘占用大。
+	Gauges *perf.Gauges
+
 	// OnReconnected 重试之后**字节又开始来了**时调一次。
 	//
 	// 第一次就下成功的话不调——那时候压根没有重连过。
@@ -241,14 +249,16 @@ type StreamSource struct {
 	// 比「反正 AudioToolbox 只用一条线程」这种假设稳。
 	opMu sync.Mutex
 
-	mu     sync.Mutex
-	cond   *sync.Cond
-	file   *os.File
-	path   string // 缓存文件路径，Close 时删
-	filled int64  // 已经下到缓存里的字节数（下载前沿）
-	size   int64  // 总长；-1 是还不知道
-	cur    int64  // 读游标
-	err    error  // 终态错误；io.EOF 是「正常读完」
+	mu   sync.Mutex
+	cond *sync.Cond
+	file *os.File
+	path string // 缓存文件路径，Close 时删
+	// gauge 是 #672 的临时文件字节账本；nil = 不记账。
+	gauge  *perf.Gauges
+	filled int64 // 已经下到缓存里的字节数（下载前沿）
+	size   int64 // 总长；-1 是还不知道
+	cur    int64 // 读游标
+	err    error // 终态错误；io.EOF 是「正常读完」
 	closed bool
 
 	// tailStart 是「单独取回来的尾部那一段」的起点。-1 = 没在取尾部。
@@ -384,6 +394,7 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		stall:        orDefaultDuration(o.StallTimeout, defaultStallTimeout),
 		ctx:          ctx,
 		cancel:       cancel,
+		gauge:        o.Gauges,
 	}
 	// Options.Size 的 0 和 -1 都表示「还不知道」。不归一的话 size 会停在 0，
 	// 于是 Seek(0, SeekEnd) 立刻答 0——extaf 拿到的 AudioFileID 长度是 0，
@@ -658,6 +669,8 @@ func (s *StreamSource) Close() error {
 	if path != "" {
 		_ = os.Remove(path)
 	}
+	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
+	s.zeroTempGauge()
 	return errors.Join(errs...)
 }
 
@@ -723,4 +736,33 @@ func streamExt(urls []string) string {
 		return path[i:]
 	}
 	return ".bin"
+}
+
+// zeroTempGauge 把这条流的临时文件字节从账本里扣掉。
+//
+// ⚠️ **只在 Close 调**：restart 走的是 `resetTempGauge`（归零但不关账本），
+// 因为重启之后同一个文件还会继续写。
+func (s *StreamSource) zeroTempGauge() {
+	if s.gauge == nil {
+		return
+	}
+	s.mu.Lock()
+	n := s.filled
+	s.mu.Unlock()
+	if n > 0 {
+		s.gauge.AddMediaTempBytes(-n)
+	}
+}
+
+// resetTempGauge 在缓存被截断之后把账本归零（文件还在，只是内容清空了）。
+func (s *StreamSource) resetTempGauge() {
+	if s.gauge == nil {
+		return
+	}
+	s.mu.Lock()
+	n := s.filled
+	s.mu.Unlock()
+	if n > 0 {
+		s.gauge.AddMediaTempBytes(-n)
+	}
 }

@@ -7,18 +7,8 @@
 // 空队列，而盘上还躺着一堆 `.part`。所以走「临时文件 → fsync → rename」，
 // 跟设置那一份是同一套（`app/settings.go` 的 `writeSettingsAtomic`）。
 //
-// # 退出时把「正在下」改成「暂停」
-//
-// 跟 B 站上游一样（`electron/ipc/download/download-queue.ts:254`）：
-// `downloading` / `waiting` 存成 `downloadPaused`。存成 running 没有意义
-// ——重启之后**根本没有**那个在飞的 HTTP 请求，界面上会永远转圈。
-//
-// # 恢复时**不自动开下**
-//
-// B 站也是不自动续（`restoreQueue` 只把任务放回 map 里，用户得按「继续」）。
-// 这一条在这里尤其重要：应用启动时网络可能还没起来、用户刚坐下、机器可能
-// 根本没有网。一开窗就发几十个请求，表现为「一启动就卡」和一堆红字。
-// 自动续是界面层的决定，不是这一层的行为。
+// 退出时把正在下载的任务改成暂停：重启后没有原来的 HTTP 请求，不能保留运行状态。
+// 恢复时不自动开始下载，由界面层决定何时继续，避免启动时网络尚未就绪就发起请求。
 
 package download
 
@@ -38,9 +28,8 @@ const QueueFileName = "download-queue.json"
 // 下标就对不上新的分块划分了。认版本是为了**拒绝**一份读不懂的记录，
 // 而不是硬读出一个「下到一半」的假象。
 //
-// 导出的理由和 `QueueFileName` 一样：这份文件的形状**就是**这一版的对外约定
-// （用户自己会打开它看，别的层要写它、备份它、迁移它），「它第几版」是外面
-// 的代码要问的第一个问题。
+// 导出的理由和 QueueFileName 一样：这份文件的形状是当前版本的存储约定，
+// 读取前必须先确认版本。
 const QueueVersion = 1
 
 // storeVersion 是这一版读的那一版。写代码时用 `QueueVersion`，这里留个别名是
@@ -116,16 +105,8 @@ func (m *Manager) Restore(path string) error {
 	if err := json.Unmarshal(b, &f); err != nil {
 		return fmt.Errorf("download: 队列文件读不懂（%s）：%w", filepath.Base(path), err)
 	}
-	if f.Version > storeVersion {
-		// 更高的版本我们读不懂，**整份不碰**。往一份我们没有能力重写的文件上
-		// 动手，比什么都不做糟得多。
-		return fmt.Errorf("download: 队列文件是第 %d 版的，这一版认第 %d 版", f.Version, storeVersion)
-	}
-	// 更低（或没有 version 键）的走迁移链，见 `migrate.go` 的 queueMigrations。
-	// ⚠️ 这一条不能省：一份 v0 文件曾在这里被当成「读不懂」，整个队列丢，
-	// 而用户重启看到的是空队列、盘上却躺着一堆 `.part`。
-	if err := runQueueMigrations(&f, f.Version); err != nil {
-		return fmt.Errorf("%w", err)
+	if f.Version != storeVersion {
+		return fmt.Errorf("download: 队列文件是第 %d 版的，这一版只认第 %d 版", f.Version, storeVersion)
 	}
 
 	m.mu.Lock()

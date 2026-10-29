@@ -14,6 +14,7 @@ import (
 	"errors"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
@@ -26,18 +27,17 @@ import (
 // 这个错**，否则界面无从知道「这次改的设置存不住」。下面每一个方法都把
 // store == nil 当成「没有设置可用」，不碰它。
 type settingsSlot struct {
+	mu    sync.Mutex
 	store *SettingsStore
 
 	// loadErr 是挂载时读盘的错：文件坏了，或者来自更新的版本。
-	//
-	// 它不拦着程序起来——设置照样用（默认值，或从坏文件里尽力恢复出来的），
-	// 这里只是记下来，让界面能告诉用户出了什么事（见 TakeSettingsError）。
 	loadErr error
 
-	// shown 是已经报给用户看过的那一个错。
-	//
-	// 界面每帧都要问一次，不记账的话屏幕上会一直是一样的话在闪。
-	shown string
+	// externalErr 是不属于 SettingsStore 的持久化错误（例如全屏播放器偏好）。
+	externalErr error
+
+	// shown 记录已经交给界面的错误文本，避免同一个错误在每帧重复出现。
+	shown map[string]struct{}
 }
 
 // mountedSettings 是「哪个 App 挂的是哪份设置」。进程里通常只有一个。
@@ -107,7 +107,19 @@ func (a *App) MountSettings(path string) error {
 	return err
 }
 
-// RecordSettingsFailure 记下一个「设置存不住」的错：没有 store，界面用默认值
+// RecordExternalSettingsError makes a non-SettingsStore persistence failure visible through the settings error channel.
+func (a *App) RecordExternalSettingsError(err error) {
+	slot := a.settingsSlot()
+	if slot == nil {
+		slot = &settingsSlot{}
+		actual, _ := mountedSettings.LoadOrStore(a, slot)
+		slot = actual.(*settingsSlot)
+	}
+	slot.mu.Lock()
+	slot.externalErr = err
+	slot.mu.Unlock()
+}
+
 // 跑着，但**这件事用户必须看得见**（见 TakeSettingsError）。
 //
 // 用在拿不到设置文件路径那种场合。那不是「还没挂设置」（第一次运行），是
@@ -141,11 +153,66 @@ func (a *App) CloseSettings() error {
 // 每帧都要调，所以**没挂过 store 也不能返回零值**：一份零值的设置会让主题
 // 变成黑底黑字。给 Biu 的默认值，和「第一次运行」表现一致。
 func (a *App) SettingsSnapshot() Settings {
+	settingsReads.Add(1)
 	if slot := a.settingsSlot(); slot != nil && slot.store != nil {
 		return slot.store.Snapshot()
 	}
 	return DefaultSettings("")
 }
+
+// settingsReads 是「一共读了几次设置」的计数器。
+//
+// # 它数的是什么
+//
+// **每一次 `SettingsSnapshot()` 算一次**——不管有没有挂上 store（没挂上的那一
+// 次返回的是默认值，而那也是一次读）。
+//
+// # 为什么要有它
+//
+// 「读设置」不是免费的：`Snapshot()` 要拿一把互斥锁，还要把一份 `Settings`
+// **值拷贝**出去（它里面有好几个切片和指针），而 `Settings` 不小。
+//
+// 于是「某一帧读了几次设置」是**这一帧有多贵**的一个直接刻度：一次读 = 一次
+// 锁 + 一次几百字节的拷贝 + 一次堆分配。界面层那套帧预算量的是**分配次数**
+// （那是这些读的**间接**后果），而这个计数器量的是**直接**的那一头。
+//
+// ⚠️ **它不是给生产看的**：它一直在数，而 `Add(1)` 是原子操作——每帧几十次
+// 的话，那点开销可以忽略（原子加在现代 CPU 上是几条指令），但它**确实是**
+// 每次读设置都要付的一点点。真要严格，就把它挪到界面层那一层去数。
+//
+// ⚠️ **它是进程级的**（不是每个 App 一份）：跟 `runtime.MemStats.Mallocs` 一样，
+// **别的线程**的读也算在里面。测「一帧读了几次」的时候，窗口要短。
+var settingsReads atomic.Int64
+
+// SettingsReadCount 报「一共读了几次设置」。
+//
+// ⚠️ **它是进程级的**：别的 App、别的线程的读也在这里面。要量「某一个 App
+// 读了几次」，先看 `TakeSettingsReadCount` 那一条（它能取走并归零）。
+func SettingsReadCount() int64 { return settingsReads.Load() }
+
+// TakeSettingsReadCount 取走「到现在为止读了几次设置」，并把计数器归零。
+//
+// # 形状为什么是「取走并归零」而不是「读一个数」
+//
+// 下一张票（票 #632）要断言的是「**这一帧**读了几次设置」——而「这一帧」是
+// 一个**区间**，不是「从进程启动到现在」。所以这个口子必须能：
+//
+//  1. **归零**（量之前把之前的读清掉）——`TakeSettingsReadCount` 归零；
+//  2. **取走**（量完之后读增量）——同一句把增量拿回来并再归零。
+//
+// 于是量一帧的写法是：
+//
+//	before := app.TakeSettingsReadCount() // 归零，拿回一个可以忽略的数
+//	tt.Frame()                             // 画一帧
+//	reads := app.TakeSettingsReadCount()   // 这一帧读了几次
+//
+// ⚠️ **它会清掉别人的读**：进程里另一个 App 也在读设置的话，那一笔会算进
+// 这一次。测试里通常只有一个 App，所以不影响。
+//
+// ⚠️ **归零不是线程安全的快照**：并发读的话可能丢一两笔。而它要量的是
+// 「界面线程那一帧读了几次」，而界面线程是**唯一**会在一帧里读设置的那条
+// （后台线程读设置是为了别的目的，见 `SettingsSnapshot` 的调用点），所以够用。
+func TakeSettingsReadCount() int64 { return settingsReads.Swap(0) }
 
 // UpdateSettings 改设置。改完立刻返回，落盘在后台合并写（见 settings.go）。
 //
@@ -241,20 +308,36 @@ func (a *App) TakeSettingsError() error {
 	if slot == nil {
 		return nil
 	}
-	err := slot.loadErr
-	if err == nil && slot.store != nil {
-		err = slot.store.LastError()
+
+	candidates := make([]error, 0, 3)
+	if slot.loadErr != nil {
+		candidates = append(candidates, slot.loadErr)
 	}
-	if err == nil {
-		slot.shown = ""
-		return nil
+	slot.mu.Lock()
+	if slot.externalErr != nil {
+		candidates = append(candidates, slot.externalErr)
 	}
-	msg := err.Error()
-	if msg == slot.shown {
-		return nil
+	slot.mu.Unlock()
+	if slot.store != nil {
+		if err := slot.store.LastError(); err != nil {
+			candidates = append(candidates, err)
+		}
 	}
-	slot.shown = msg
-	return err
+	for _, err := range candidates {
+		msg := err.Error()
+		if _, ok := slot.shown[msg]; ok {
+			continue
+		}
+		if slot.shown == nil {
+			slot.shown = make(map[string]struct{})
+		}
+		slot.shown[msg] = struct{}{}
+		return err
+	}
+	if len(candidates) == 0 {
+		slot.shown = nil
+	}
+	return nil
 }
 
 // settingsSlot 是这个 App 挂着的设置，没有就返回 nil。

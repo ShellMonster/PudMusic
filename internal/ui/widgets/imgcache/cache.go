@@ -155,6 +155,16 @@ type Options struct {
 	// MaxFailed 是失败记录的条数上限，零值 256。到上限之后最老的一条会被
 	// 忘掉（下次再取会从头开始）。
 	MaxFailed int
+	// ReleaseAfterFrames 是「连续多少帧没被要过就把封面像素放掉」的阈值，
+	// 零值用 DefaultReleaseAfterFrames，负值表示**不释放**（关掉这一档）。
+	//
+	// 判据是帧号，不是墙钟（理由见 `release.go`）。`visibleFrames` 之内的
+	// 那几张永远不释放，这个阈值比它小也没用。
+	ReleaseAfterFrames int
+	// MaxReleased 是「已经放掉像素、还留着记录」的条目**条数**上限，零值用
+	// `defaultMaxReleased`。这些条目没有字节数，LRU 的字节上限挤不掉它们，
+	// 所以单独有一道（理由见 `release.go`）。
+	MaxReleased int
 	// Clock 是退避定时用的钟，零值用真实时间。测试传假钟推进时间。
 	Clock Clock
 }
@@ -193,6 +203,13 @@ type Cache struct {
 	mu  sync.Mutex
 	lru *lru
 
+	// sizedURLs 是「(地址, 宽, 高) → 拼好的地址」那份备忘录（票 #634）。
+	//
+	// ⚠️ **它为什么在这份缓存上而不是包级**：键里有地址，而地址跟着这一份缓存
+	// 走（换一份缓存就该有一份自己的表）——而包级那张表会被多个缓存共用，于是
+	// 一份缓存的 `Close` 清不掉别人的条目。
+	sizedURLs sizedURLCache
+
 	// frame 是**画到第几帧**了，0 = 还没开始数（`BeginFrame` 一次都没调过）。
 	//
 	// ⚠️ **后台线程要读它**（挤缓存的那一处在解码 worker 上），所以它是原子的。
@@ -219,6 +236,24 @@ type Cache struct {
 	failed    map[*entry]*list.Element
 	failOrder *list.List
 	maxFailed int
+
+	// released 是**像素已经放掉**的那些条目的账（票 #673，见 `release.go`）。
+	//
+	// 它们没有字节数，LRU 的字节上限挤不掉，所以和失败条目一样单独有一道
+	// 上限（maxReleased）；relOrder 老的在前，超限时从老的开始忘。
+	released     map[*entry]*list.Element
+	relOrder     *list.List
+	maxReleased  int
+	releaseAfter int
+
+	// redecodes 数「像素放掉之后重新解码」了多少次（票 #673）。
+	//
+	// ⚠️ **只给测试看**：生产上没有任何一处读它（不打印、不上报）。它是一个
+	// 原子计数，不会让每次加载多一次分配。
+	redecodes atomic.Int64
+
+	// releases 数「放掉像素」了多少次（票 #673）。同样只给测试看。
+	releases atomic.Int64
 
 	wakeMu sync.Mutex
 	wakes  []func()
@@ -277,23 +312,35 @@ func New(opts Options) *Cache {
 	if opts.MaxFailed <= 0 {
 		opts.MaxFailed = defaultMaxFailed
 	}
+	if opts.MaxReleased <= 0 {
+		opts.MaxReleased = defaultMaxReleased
+	}
+	if opts.ReleaseAfterFrames == 0 {
+		opts.ReleaseAfterFrames = DefaultReleaseAfterFrames
+	} else if opts.ReleaseAfterFrames < 0 {
+		opts.ReleaseAfterFrames = 0
+	}
 	if opts.Clock == nil {
 		opts.Clock = systemClock{}
 	}
 
 	c := &Cache{
-		client:     opts.Client,
-		ua:         opts.UserAgent,
-		lru:        newLRU(opts.MaxBytes),
-		decodeCh:   make(chan job, opts.Decoders*4),
-		inflight:   make(chan struct{}, opts.MaxInflight),
-		clock:      opts.Clock,
-		retryBase:  opts.RetryBase,
-		retryMax:   opts.RetryMax,
-		maxRetries: opts.MaxRetries,
-		maxFailed:  opts.MaxFailed,
-		failed:     make(map[*entry]*list.Element),
-		failOrder:  list.New(),
+		client:       opts.Client,
+		ua:           opts.UserAgent,
+		lru:          newLRU(opts.MaxBytes),
+		decodeCh:     make(chan job, opts.Decoders*4),
+		inflight:     make(chan struct{}, opts.MaxInflight),
+		clock:        opts.Clock,
+		retryBase:    opts.RetryBase,
+		retryMax:     opts.RetryMax,
+		maxRetries:   opts.MaxRetries,
+		maxFailed:    opts.MaxFailed,
+		failed:       make(map[*entry]*list.Element),
+		failOrder:    list.New(),
+		maxReleased:  opts.MaxReleased,
+		releaseAfter: opts.ReleaseAfterFrames,
+		released:     make(map[*entry]*list.Element),
+		relOrder:     list.New(),
 	}
 	c.ctx, c.stop = context.WithCancel(context.Background())
 	c.refs.Store(1) // 建缓存的人算一份使用者
@@ -390,11 +437,29 @@ func (c *Cache) scaled() bool { return c.dpr.Load() != 0 }
 // 下是**不同的缓存条目**（`url@96w_96h_1c.webp` 与 `url@400w_400h_1c.webp`），
 // 各画各的，谁也不挤谁。
 //
-// ⚠️ **尺寸量不出来时退化成 `Get`**：布局还没算过的调用点会传 0，那时候要
-// 原图——总比要一个 1×1 强。
+// ⚠️ **尺寸量不出来时退化成 `Get`（要原图）**：调用点传 0 的时候要原图——
+// 总比要一个 1×1 强。
+//
+// ⚠️ **「量不出来」时原图是唯一安全的选择**（票 #630）：**通栏**那一格量不出
+// 宽度，量不出来**不是因为它小**，而是因为它要的就是整行那么宽——按最小档
+// （64×64）要图会把一张通栏横幅变成正方形缩略图，两端直接丢掉。所以**没有档位**
+// 这一档，只有「按原图走」。
+//
+// ⚠️ **「唯一安全的选择」只对「通栏」那一种成立**（细则见 `coverPixelSize`
+// 的注释）：对**小格子**，原图意味着下几百 KB——不糊，但内存和流量白花几十倍。
+// ⇒ **今天仓库里没有别的传 0 的调用点**（横幅那一格已经改成传真正显示的宽），
+// **眼下没有用户可见的损害**；但新接进来的调用点**要自己权衡**。
 //
 // ⚠️ **它和 `Get` 用的是同一张表**：`Get(url)` 要的是原图那一格，`GetSized`
 // 要的是某一档裁剪过的那一格，两个 key 不同，互不干扰。
+//
+// ⚠️ **拼出来的那个地址记好一份**（票 #634）：`sizedURL` 每帧每一格都要拼一次
+// `@<宽>w_<高>h_1c.webp`，而一屏十二张封面 = 每帧十二次分配，60 帧每秒就是
+// **每秒 720 次纯垃圾**。而它的结果只取决于三样东西（地址、宽、高），所以
+// `(地址, 宽, 高)` → 拼好的地址那份表（`sizedURLCache`）记一份就够了。
+//
+// 那个表的键**已经是吸过档的**（`coverPixelSize` 的活儿），所以拖动窗口时短边
+// 只每隔几十像素才变一档——**不会**每拖一个像素产生一个一次性条目。
 func (c *Cache) GetSized(url string, w, h float32) State {
 	if !c.scaled() {
 		// 还没人喂过 DPR（第一帧之前）：按原图走，别先下一张小一号的
@@ -403,9 +468,118 @@ func (c *Cache) GetSized(url string, w, h float32) State {
 	}
 	pw, ph := coverPixelSize(w, h, c.scale())
 	if pw <= 0 || ph <= 0 {
+		// 量不出显示尺寸 ⇒ 按原图走（规则见 `coverPixelSize`）。
 		return c.Get(url)
 	}
-	return c.Get(sizedURL(url, pw, ph))
+	return c.Get(c.rememberedSizedURL(url, pw, ph))
+}
+
+// GetSizedCapped 是 `GetSized` 加一个「**这一格最多要多大**」的上限。
+//
+// cap 是**长边的上限**（像素），0 = 不限。
+//
+// # 谁用
+//
+// **满屏播放器的背景**（`internal/ui/fullplayer.go`）——它**故意**要大的那一档，
+// 但它真正需要的源图只有 600×400（背景是画到 `winW/4 × winH/4` 的画布上、
+// 再放大 4 倍铺满整窗的，而 `ui.Cover` 那一步就已经把源图缩到画布了）。
+// ⇒ 不加限制的话它要 2400×1600，**多要了 16 倍像素**，而它是**每次开满屏
+// 都要的**（网络字节 ×10）。
+//
+// ⚠️ **上限由那一格自己传**，而不是加一个全局上限——全局上限会把横幅那一格
+// （980 DIP @2x = 1960 像素）也挡住，而那一格**真的要**那么大（不然 Retina 上
+// 糊 2.5 倍）。
+func (c *Cache) GetSizedCapped(url string, w, h float32, cap int) State {
+	if !c.scaled() {
+		return c.Get(url)
+	}
+	pw, ph := coverPixelSizeCapped(w, h, c.scale(), cap)
+	if pw <= 0 || ph <= 0 {
+		return c.Get(url)
+	}
+	return c.Get(c.rememberedSizedURL(url, pw, ph))
+}
+
+// GetSizedStoredAt 是 `GetSized` 加一个「**解出来存多大**」的上限。
+//
+// storeSide 是**存进缓存的那一份**的长边上限（像素），0 = `maxStoredSide`。
+//
+// # 它和 `GetSizedCapped` 的区别
+//
+//	GetSizedCapped   限「**向图床要多大**」（超过就不再往大了要）
+//	GetSizedStoredAt 限「**解出来存多大**」（原图更大也只解到这么大）
+//
+// # 为什么需要它
+//
+// 票 #666：满屏播放器的背景**按画布尺寸要图**（高清档画布 1200×800），而
+// `maxStoredSide = 768` 会把**解下来那一份**钉在 768 —— 于是要到一张大图、
+// 解下来还是 768 宽、再被 GPU 拉大，**清晰度白给了**。
+//
+// ⚠️ **放开它会动 32MiB 的预算**，所以**只有明确知道自己要存多大的调用方**
+// 才传这个参数（现在只有满屏背景那一处）。
+//
+// ⚠️ **它和「整张解进内存」是两件事**：流式解码（`decodeJPEGStored` /
+// `decodePNGStored`）**只解到目标尺寸就停**，内存峰值和源图多大无关
+// （实测：源图 2000×1500 和 6000×4000，解码总分配都是约 2 MB）。
+func (c *Cache) GetSizedStoredAt(url string, w, h float32, storeSide int) State {
+	if !c.scaled() {
+		return c.Get(url)
+	}
+	pw, ph := coverPixelSize(w, h, c.scale())
+	if pw <= 0 || ph <= 0 {
+		return c.Get(url)
+	}
+	return c.getStoredAt(c.rememberedSizedURL(url, pw, ph), storeSide)
+}
+
+// getStoredAt 是 `Get` 加一个「这一条要存多大」。
+func (c *Cache) getStoredAt(url string, storeSide int) State {
+	url = absoluteURL(url)
+	if url == "" {
+		return State{}
+	}
+	v, loaded := c.entries.LoadOrStore(url, &entry{url: url, maxSide: storeSide})
+	e := v.(*entry)
+
+	c.mu.Lock()
+	c.lru.touch(e)
+	frame := c.frame.Load()
+	e.drawn = frame
+	// ⚠️ `born` 只在**第一次**记（零值才算）：它给「`BeginFrame` 之前建的
+	// 条目」当「最后一次被要」的底（见 `release.go` 的 `idleFrames`）。
+	if e.born == 0 {
+		e.born = frame
+	}
+	c.mu.Unlock()
+
+	if !loaded && !c.start(e) {
+		c.forget(e)
+		return State{Err: ErrClosed}
+	}
+	// 像素放掉过的条目（票 #673）：起一次重新加载，这一帧先报占位。
+	// `state()` 在它之后读，于是「已经解完」的那一档不会被这里盖掉。
+	if loaded {
+		c.reloadReleased(e)
+	}
+	return e.state()
+}
+
+// rememberedSizedURL 是 `sizedURL` 加上「**记好一份**」。
+//
+// 命中那份表时**不产生分配**（那个串已经在表里了）——这是这一票省下来的那些
+// 分配的来源。
+//
+// ⚠️ **它和包级那个 `sizedURL` 是两回事**：包级那个是**纯函数**（拼一次算一
+// 次），这个是**查表**（命中就复用）。这里用另一个名字，免得读代码的人以为
+// 「查表的那个」就是「拼的那个」。
+func (c *Cache) rememberedSizedURL(src string, w, h int) string {
+	k := sizedKey{src: src, w: w, h: h}
+	if v, ok := c.sizedURLs.lookup(k); ok {
+		return v
+	}
+	v := sizedURL(src, w, h)
+	c.sizedURLs.store(k, v)
+	return v
 }
 
 // Get 返回 url 这一帧该画什么。第一次见这个 url 就会起一次后台下载，
@@ -420,25 +594,10 @@ func (c *Cache) GetSized(url string, w, h float32) State {
 func (c *Cache) Get(url string) State {
 	// ⚠️ **协议相对的地址在这里兜一道**（理由见 `absoluteURL`）：拿它当 key
 	// 也是同一条规范化之后的串，于是同一个地址无论服务层补没补过都是同一格。
-	url = absoluteURL(url)
-	if url == "" {
-		return State{}
-	}
-	v, loaded := c.entries.LoadOrStore(url, &entry{url: url})
-	e := v.(*entry)
-
-	c.mu.Lock()
-	c.lru.touch(e)
-	// 记一笔「这一张这一帧画着」：挤缓存时正画着的那几张不许挤（票 #358，
-	// 理由见 `entry.drawn`）。
-	e.drawn = c.frame.Load()
-	c.mu.Unlock()
-
-	if !loaded && !c.start(e) {
-		c.forget(e)
-		return State{Err: ErrClosed}
-	}
-	return e.state()
+	//
+	// 记一笔「这一张这一帧画着」也在那里面（挤缓存时正画着的那几张不许挤，
+	// 票 #358，理由见 `entry.drawn`）。
+	return c.getStoredAt(url, 0)
 }
 
 // BeginFrame 告诉缓存「新的一帧开始了」。
@@ -461,6 +620,10 @@ func (c *Cache) Get(url string) State {
 // 帧号停在 0，**挤的行为和从前一模一样**（库自己的老测试、还没接上这一句的
 // 调用方都是这样）。所以这一句是「加了更好」而不是「必须加」。
 //
+// ⚠️ **它同时驱动「像素延迟释放」**（票 #673，见 `release.go`）：帧号不走的
+// 话，长期没人要的封面也就不会放像素——那是**故意的**：没有帧号就没有
+// 「画面上正画着谁」这个概念，那时候按帧判「谁没人要」没有意义。
+//
 // # ⚠️ **缓存是 nil 时这一句什么都不做**
 //
 // 真窗口上缓存从来不是 nil（`Shell` 一定建一个），但**测试会把它摘掉**：
@@ -480,7 +643,20 @@ func (c *Cache) BeginFrame(now time.Time) {
 		return
 	}
 	c.frameToken = now
-	c.frame.Add(1)
+	frame := c.frame.Add(1)
+	c.releaseIdle(frame)
+}
+
+// ReleaseStats 报这个缓存**放掉过多少次像素**、**因此重新解码过多少次**
+// （票 #673）。
+//
+// ⚠️ **只给测试和诊断看**：生产代码里没有任何一处读它——它不打印、不上报、
+// 不参与任何决策。两个数都是原子计数，不会让每次加载多一次分配。
+func (c *Cache) ReleaseStats() (releases, redecodes int64) {
+	if c == nil {
+		return 0, 0
+	}
+	return c.releases.Load(), c.redecodes.Load()
 }
 
 // SetMaxBytes 改这份缓存的字节上限。
@@ -516,6 +692,7 @@ func (c *Cache) start(e *entry) bool {
 		e.cancel()
 	}
 	e.ctx, e.cancel = ctx, cancel
+	e.fetching = true
 	e.mu.Unlock()
 
 	c.lifeWG.Add(1)
@@ -537,6 +714,9 @@ func (c *Cache) Cancel(url string) {
 		e := v.(*entry)
 		c.forget(e)
 		c.dropFailure(e)
+		// 票 #673：已经放掉像素的那本账里也要摘掉，不然它会一直挂在
+		// `released` 上（那本账只按条数淘汰，靠它自己清不掉）。
+		c.forgetReleased(e)
 		e.discard()
 	}
 }
@@ -642,6 +822,31 @@ type entry struct {
 	// 所以零和「第一帧之前」是同一件事——那时候没有「画面上」这一说，挤的
 	// 行为和从前一模一样。
 	drawn uint64
+
+	// maxSide 是**解出来存那一份**的长边上限（像素）。0 = `maxStoredSide`。
+	//
+	// ⚠️ **它跟着 entry 走**：同一个 URL 在不同档位下是**不同的 key**
+	// （`url@2048w_280h_1c.webp` vs `url@768w_128h_1c.webp`），所以每一档
+	// 各自的 entry 记各自的目标尺寸，互不干扰。
+	//
+	// 票 #666：满屏背景高清档要存 1200×800 那一份（比 768 大），而**流式解码**
+	// 让它只解到那个尺寸就停——内存峰值和源图多大无关。
+	maxSide int
+
+	// fetching 报「这一条正在走后台加载链路」（下载 → 解码）。
+	//
+	// 票 #673：像素放掉之后重新要它，这一格要**先变成加载中**再起一次加载；
+	// 并发的两次 `Get`（主窗口 + 迷你窗口）只许起一次，所以这个标记在 entry
+	// 的锁里判并置。它和 `done` 是两件事：`done` 是「有终态了」，这个是
+	// 「后台正跑着」。
+	fetching bool
+
+	// released 报「像素已经放掉、记录还留着」（票 #673，见 `release.go`）。
+	released bool
+
+	// born 是这一条**第一次被要**的帧号。`drawn` 为 0（`BeginFrame` 之前建的）
+	// 时 `idleFrames` 拿它当底（见 `release.go`）。
+	born uint64
 }
 
 // onScreen 报这一张**是不是画面上正画着的**（frame 是这一帧的号）。
@@ -692,7 +897,15 @@ func (e *entry) state() State {
 		return State{Bitmap: e.bm}
 	case e.done:
 		// 暂时失败排着重试时也走这一支：界面上还是失败态，不闪回 Loading。
+		//
+		// ⚠️ **它排在 `fetching` 前面**（票 #673）：失败之后的自动重试也会把
+		// `fetching` 置上，而那一档**不能**闪回占位——否则重试期间界面上的
+		// 失败态会变成「加载中」，和「第一次加载」分不开了。
 		return State{Err: e.err}
+	case e.fetching:
+		// 正在后台跑（第一次加载，或者像素放掉之后的重新解码，票 #673）：
+		// 界面上先画占位，不画失败态。
+		return State{Loading: true}
 	default:
 		return State{Loading: true}
 	}
@@ -716,6 +929,14 @@ type job struct {
 	// fromDisk 报这批字节是从盘上读的。盘上那份解不开时不能当成「这张图就是
 	// 坏的」——先删掉它，回去下一次真的（见 decodeWorker）。
 	fromDisk bool
+	// maxSide 是**解出来存那一份**的长边上限（像素）。0 = 用 `maxStoredSide`。
+	//
+	// 票 #666：满屏播放器的背景按**画布尺寸**要图，而那比 768 大（高清档
+	// 画布 1200×800）。⚠️ **但它只解到那个尺寸就停**——流式解码
+	// （`decodeJPEGStored` / `decodePNGStored`）的内存峰值只跟**目标**有关，
+	// 和源图多大无关（实测：源图 2000×1500 和 6000×4000，解码总分配都是
+	// 约 2 MB）。
+	maxSide int
 }
 
 // fetch 拿到一张图的字节：先看磁盘缓存，没有才走网络。
@@ -749,7 +970,7 @@ func (c *Cache) fetch(e *entry) {
 		}
 	}
 	select {
-	case c.decodeCh <- job{e: e, data: data, fromDisk: fromDisk}:
+	case c.decodeCh <- job{e: e, data: data, fromDisk: fromDisk, maxSide: e.maxSide}:
 	case <-e.ctx.Done():
 	}
 }
@@ -915,7 +1136,7 @@ func (c *Cache) decodeWorker() {
 	for {
 		select {
 		case j := <-c.decodeCh:
-			bm, err := decodeStored(j.data)
+			bm, err := decodeStored(j.data, j.maxSide)
 			if err != nil {
 				if j.fromDisk && !j.e.isDropped() && !c.closed.Load() {
 					// 盘上那份解不开（上一个版本留下的、或者被外部写坏了）：
@@ -964,12 +1185,20 @@ func (c *Cache) finish(e *entry, bm *ui.Bitmap, err error) {
 		e.mu.Unlock()
 		return
 	}
+	// 这一次尝试到此结束（票 #673）：下面若排了重试，重试那条路会重新置上。
+	wasReleased := e.released
+	e.fetching = false
 
 	if bm != nil {
 		e.bm, e.err, e.done = bm, nil, true
+		e.released = false
 		e.failures = 0
 		e.mu.Unlock()
 
+		if wasReleased {
+			// 这一张是**放开之后重新解回来的**：计一次数（只给测试看）。
+			c.redecodes.Add(1)
+		}
 		c.dropFailure(e)
 		c.account(e, bm)
 		c.notify()
@@ -977,6 +1206,11 @@ func (c *Cache) finish(e *entry, bm *ui.Bitmap, err error) {
 	}
 
 	e.err, e.done = err, true
+	// ⚠️ **`released` 留着不清**（票 #673）：这一条是「放掉像素之后重新解，
+	// 但解失败了」。`state()` 里 `done` 排在 `fetching` 前面，所以界面上报的
+	// 仍然是失败态、`Get` 也不会每次都重新起一次加载（`reloadReleased` 的判据
+	// 里有 `done`）——而**自动重试成功**那一次仍然算「放掉之后的重新解码」
+	// （`wasReleased` 在重试那条路上也会是 true）。
 	e.failures++
 	failures := e.failures
 	e.mu.Unlock()

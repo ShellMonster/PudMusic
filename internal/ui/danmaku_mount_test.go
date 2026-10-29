@@ -64,21 +64,33 @@ func TestTheDanmakuCacheGoesUnderTheUserDataDir(t *testing.T) {
 // 一次窗口白等一次。这一条钉住的是 `main.go` 里那一行还在——它不在编译能管到的
 // 地方（`ui.Run` 之前那一段是手写的），而少了它弹幕每次都要重新拉一遍。
 func TestMountDanmakuIsWiredBeforeTheWindow(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "main.go"))
+	mainSrc, err := os.ReadFile(filepath.Join("..", "..", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(src)
-	at := strings.Index(text, "ui.MountDanmaku(a)")
-	if at < 0 {
-		t.Fatalf("main.go 里没有 ui.MountDanmaku(a) 这一行")
+	bootstrapSrc, err := os.ReadFile(filepath.Join("..", "bootstrap", "bootstrap.go"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	run := strings.Index(text, "ui.Run(a, sess)")
-	if run < 0 {
-		t.Fatal("main.go 里没有 ui.Run(a, sess) 那一行")
+	mainText := string(mainSrc)
+	bootstrapText := string(bootstrapSrc)
+	mount := strings.Index(bootstrapText, "MountDanmaku:         ui.MountDanmaku")
+	if mount < 0 {
+		t.Fatalf("bootstrap.go 里没有 ui.MountDanmaku 的默认装配")
 	}
-	if at > run {
-		t.Errorf("ui.MountDanmaku(a) 排在 ui.Run 之后（第 %d 字节 vs 第 %d 字节）——"+
-			"建目录是阻塞 IO，得在开窗口之前", at, run)
+	assemble := strings.Index(mainText, "bootstrap.Assemble(bootstrap.DefaultDependencies())")
+	if assemble < 0 {
+		t.Fatalf("main.go 里没有通过 bootstrap.Assemble 启动")
+	}
+	if strings.Index(bootstrapText, "d.MountDanmaku(a)") < 0 {
+		t.Fatalf("bootstrap.go 里没有在 Run 前执行弹幕挂载")
+	}
+	mountCall := strings.Index(bootstrapText, "d.MountDanmaku(a)")
+	runCall := strings.Index(bootstrapText, "d.Run(a, sess)")
+	if runCall < 0 {
+		t.Fatalf("bootstrap.go 里没有执行 Run")
+	}
+	if mountCall > runCall {
+		t.Errorf("弹幕挂载排在 Run 之后（第 %d 字节 vs 第 %d 字节）", mountCall, runCall)
 	}
 }

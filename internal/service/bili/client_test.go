@@ -692,11 +692,15 @@ func TestNavNotLoggedInIsNotAnError(t *testing.T) {
 
 // TestNavCarriesMyOwnFace 验 nav 顺带把我自己的头像带回来（issue #95）。
 //
-// ⚠️ **钉的是「已经拼好了」而不是「原样透传」**：B 站给的是协议相对的原图，
-// 补协议和拼裁剪参数是这一层的活（和 `FollowUser.Face` 同一份做法，见
-// follow.go 的文件头）。写成「拿到什么给什么」的话，界面那层就得抄一遍这段，
-// 而漏掉裁剪参数的后果是**顶栏那个 28 见方的一格去下几百 KB 的正方形原图**——
-// 不报错、不变慢、只是每次都下。
+// ⚠️ **钉的是「协议补好了」而不是「原样透传」**：B 站给的是协议相对的原图，
+// 补协议是这一层的活（和 `FollowUser.Face` 同一份做法，见 follow.go 的文件头）。
+// 写成「拿到什么给什么」的话，界面那层就得抄一遍这段，而漏掉的后果是**顶栏
+// 那一格去下几百 KB 的正方形原图**——不报错、不变慢、只是每次都下。
+//
+// ⚠️ **裁剪参数不在这层拼了**（票 #634）：它由图片缓存按显示尺寸统一决定
+// （顶栏那枚圆是 40 见方，关注卡是 128，两处要的档位本来就不一样），而这一层
+// 自己拼的话，别处（空间页 / 动态流 / 收藏夹）那一份就**拿不到**「按显示尺寸」
+// 的那一档——同一个 UP 主的同一张脸于是成了两个缓存条目、两次下载。
 func TestNavCarriesMyOwnFace(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
@@ -708,9 +712,9 @@ func TestNavCarriesMyOwnFace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "https://i0.hdslb.com/bfs/face/mine.jpg@" + avatarSize + ".webp"
+	want := "https://i0.hdslb.com/bfs/face/mine.jpg"
 	if nav.Face != want {
-		t.Errorf("头像地址是 %q，want %q（协议没补或裁剪参数没拼）", nav.Face, want)
+		t.Errorf("头像地址是 %q，want %q（协议没补）", nav.Face, want)
 	}
 }
 

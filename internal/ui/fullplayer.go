@@ -174,6 +174,20 @@ const fullBackdropScale = 4
 // `plugins/glass` 那一份。
 const fullBackdropBlur = 32
 
+// clarityBlurSigma 是某一档在**画布上**的模糊半径（画布像素）。
+//
+// ⚠️ **和 `fullBackdropSigma` 的区别**：那个是「画布固定 1/4」时代的那一个，
+// 这一份按用户选的档位取模糊半径（`BackdropClarity.BlurDIP`），再按画布与窗口
+// 的比例换算成画布像素——所以**屏幕上糊的程度**在档位内是恒定的（和窗口多大、
+// 屏幕多密无关），只有换档才变。
+func clarityBlurSigma(clarity app.BackdropClarity, canvasW, winW float32) float32 {
+	blur := float32(clarity.BlurDIP())
+	if winW <= 0 {
+		return blur
+	}
+	return blur * canvasW / winW
+}
+
 // fullBackdropSigma 是画布上的模糊半径（画布像素）。
 //
 // 画布是窗口的 1/4，所以画布上的 σ=8 放到屏幕上正好是 32 DIP——**和画布多大
@@ -224,7 +238,7 @@ var (
 // `(L+0.05)/0.05 = 1.05/(L+0.05)`）。0.5 的话，一块中灰（L≈0.3）会给白字，
 // 对比度只有 3:1，而黑字有 7:1。Biu 用的 color2k `readableColor` 也是 0.179。
 func (s *Shell) fullForeground(c *ui.Context) (on, dim ui.Color) {
-	p := s.app.FullPlayerPrefs()
+	p := s.pagePrefs()
 	if p.ShowBlurredBackground {
 		return fullOnColor, fullDimColor
 	}
@@ -242,7 +256,7 @@ func (s *Shell) fullForeground(c *ui.Context) (on, dim ui.Color) {
 
 // fullBackground 是关掉虚化背景时铺在底下那一层的颜色。
 func (s *Shell) fullBackground(c *ui.Context) ui.Color {
-	if hex := s.app.FullPlayerPrefs().BackgroundColor; hex != "" {
+	if hex := s.pagePrefs().BackgroundColor; hex != "" {
 		if col, ok := parseHexColor(hex); ok {
 			return col
 		}
@@ -272,7 +286,7 @@ func (s *Shell) fullBackground(c *ui.Context) ui.Color {
 // 坐在同一块底上，但它们的淡底还是按主题正文色算的（那是另一张票的事，票面写
 // 着「满屏播放器那一行」）。
 func (s *Shell) fullRowBase(c *ui.Context) ui.Color {
-	if !s.app.FullPlayerPrefs().ShowBlurredBackground {
+	if !s.pagePrefs().ShowBlurredBackground {
 		return s.fullBackground(c)
 	}
 	// 糊过的封面（最亮 = 纯白）压一层 55% 的黑。
@@ -372,9 +386,6 @@ type fullPlayer struct {
 	// ⚠️ **它挂在满屏这一摊上**：弹幕只在满屏播放器里出现，而这一摊的
 	// 生命周期就是满屏播放器开着的那段时间。
 	danmaku danmakuLayer
-
-	// danmakuBuf 是弹幕那一层每帧要画的那几条（复用的缓冲，免得每帧分配）。
-	danmakuBuf []danmakuVisible
 }
 
 // partRow 是分集列表里的一行。
@@ -415,6 +426,10 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 	// ⇒ 不清的话弹幕会画在**上一帧**封面待的那一块，而那一块现在什么都没有。
 	s.full.coverRect = ui.Rect{}
 	if !st.HasTrack {
+		// ⚠️ **没有歌的时候弹幕那一摊也要收掉**：这一支直接 return，
+		// `viewFullDanmaku` 压根跑不到——留着锚点和轨道的话，换歌回来那一帧
+		// 会把上一首的荡回来。
+		s.full.danmaku.reset()
 		// 🔴 **不能在这里关掉自己**。
 		//
 		// `HasTrack` 为 false 有两种情形，而第一种非常常见：
@@ -577,7 +592,7 @@ func (s *Shell) closeFullPlayer() {
 // 必须有一首歌在放：播放条上那一张封面没有的时候就没有东西可点，而这儿也还有
 // 别处会走这条路（快捷键将来就有），所以这里再判一次。
 func (s *Shell) openFullPlayer() {
-	if !s.app.Snapshot().HasTrack {
+	if !s.pageInput().Playback.HasTrack {
 		s.addToast("还没有在放什么，先进一首歌", notice.Warning)
 		return
 	}
@@ -610,7 +625,7 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 	// 关掉虚化背景：铺一层用户挑的颜色（空串 = 主题背景色），没有封面、没有
 	// 压暗——照 Biu 的 `{!showBlurredBackground && <div style={{backgroundColor}}/>}`
 	// （`index.tsx:227-229`）。
-	if !s.app.FullPlayerPrefs().ShowBlurredBackground {
+	if !s.pagePrefs().ShowBlurredBackground {
 		ui.Box(c).Key("full-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Background(s.fullBackground(c))
@@ -675,21 +690,41 @@ func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int) bool {
 // 「不自绘等效效果」那一条仍然守得住。
 func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	winW, winH := c.Size()
-	// ⚠️ **背景故意要「大的那一份」**，不走 `GetSized`（封面那一格走的）。
+	// 票 #666：画布比例和模糊半径都跟着**用户选的那一档**走。
+	clarity := s.app.SettingsSnapshot().BackdropClarity
+	div := float32(clarity.CanvasDivisor())
+	cw := max(int(winW/div), 1)
+	ch := max(int(winH/div), 1)
+	// ⚠️ **背景故意要「大的那一份」**，不走封面那一格那条路。
 	//
-	// 背景是**整窗铺满再糊**：窗口 1200×800 时画布 300×200，而它还要被
-	// `glass.Blur` 采样、在 Retina 上再乘一倍——需要的源比满屏封面那一格
-	// （384 DIP）还大。所以它按窗口的像素尺寸要。
+	// 背景是**画到一块小画布上再放大铺满整窗**：窗口 1200×800 时画布是
+	// 300×200（`fullBackdropScale = 4`），放大 4 倍铺满整窗，还要被
+	// `glass.Blur` 采样。
+	//
+	// ⚠️ **它真正需要的源图是「画布尺寸 × 屏幕倍率」= 600×400**，不是整窗的
+	// 2400×1600（票 #664 实测）：源图在 `cp.Image(st.Bitmap, box, ui.Cover)`
+	// 那一步就已经被缩到画布上了——要更大的图只是白下载、白解码。
+	//
+	// ⚠️ **以前按整窗要，是因为「要图的那一档」被「存的那一份」的上限夹在
+	// 768**（票 #664）——而 768 对 600 来说**是够的**，所以那个上限恰好把
+	// 「多要 16 倍」这件事盖住了。现在夹子拆开了，就按画布尺寸要。
 	//
 	// 代价是：同一首封面，背景和封面格各有一份（两个 key）。这在改之前是
 	// 一份（都是原图），但那时候封面格也压着 1.77MB——两害相权，拆开更省。
-	st := s.images.GetSized(url, winW, winH)
+	// ⚠️ **要图那一档按画布尺寸**，而且**存下来的那一份也要那么大**（票 #666）。
+	//
+	// 从前 `maxStoredSide = 768` 把「存的那一份」钉死，于是就算要到一张大图，
+	// **解下来还是缩到 768** ⇒ 画布 1200×800 的档位拿到的是一张 768 宽的图，
+	// 再被 GPU 拉大——**清晰度白给了**。
+	//
+	// 现在把「这一格要存多大」传给解码器：流式解码（`decodeJPEGStored` /
+	// `decodePNGStored`）**只解到那个尺寸就停**，内存峰值和源图多大无关
+	// （实测：源图 2000×1500 和 6000×4000，解码总分配都是约 2 MB）。
+	st := s.pageImages().GetSizedStoredAt(url, float32(cw), float32(ch), max(cw, ch))
 	if !st.Ready() {
 		// 封面还没来：底下是主题的底色（外头那一层），画布先不动。
 		return
 	}
-	cw := max(int(winW/fullBackdropScale), 1)
-	ch := max(int(winH/fullBackdropScale), 1)
 	// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
 	if s.full.backdropChanged(url, st.Bitmap, cw, ch) {
 		if s.full.bg == nil || s.full.bgW != cw || s.full.bgH != ch {
@@ -714,7 +749,7 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 			box := ui.Rect{W: float32(cw), H: float32(ch)}
 			s.full.bg.Draw(p, func(cp *ui.Painter) {
 				cp.Image(st.Bitmap, box, ui.Cover)
-				fullBackdropMaterial(fullBackdropSigma(float32(cw), winW)).
+				fullBackdropMaterial(clarityBlurSigma(clarity, float32(cw), winW)).
 					PaintMaterial(cp, box, [4]float32{})
 			})
 		})
@@ -960,7 +995,7 @@ func (s *Shell) viewFullStage(c *ui.Context, st app.State, hidden bool) {
 		s.viewFullTheater(c, hidden)
 		return
 	}
-	prefs := s.app.FullPlayerPrefs()
+	prefs := s.pagePrefs()
 	if !prefs.ShowLyrics {
 		s.viewFullCover(c, st, hidden, fullWindowRect(c), false)
 		return
@@ -1012,7 +1047,7 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 	// 「显示封面」关掉就一个字都不建（Biu 的 `{!isLocal && showCover && <Image …>}`
 	// ——`index.tsx:328`）。本地那一半的判据（`!isLocal`）不在这一层：本地文件
 	// 没有封面时画的是占位图，关掉它照样是「中间不摆东西」，和上游同一个结果。
-	if !s.app.FullPlayerPrefs().ShowCover {
+	if !s.pagePrefs().ShowCover {
 		// ⚠️ **顺手把那一块清掉**：弹幕是画在封面**上面**的，而封面关掉了
 		// 就没有那一块可画——不清的话弹幕会画在**上一次**封面待的那一块
 		// （那地方现在什么都没有）。
@@ -1066,7 +1101,7 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, hidden bool, area ui.
 		id := coverIdentity(s, st)
 		// 切歌时新旧封面交叉淡入淡出：封面按封面地址起键，旧的退场时留一份淡出的
 		// 影子，新的同时淡入。
-		cover := imgcache.View(c, s.images, st.CoverURL, w, h).Label("当前封面").
+		cover := imgcache.View(c, s.pageImages(), st.CoverURL, w, h).Label("当前封面").
 			Key(s.fullCoverKeyFor(st.CoverURL))
 		if phase == app.VideoOff || phase == app.VideoFailed {
 			cover = cover.Transition(s.fullCoverMatchFor(id))
@@ -1135,7 +1170,7 @@ func (s *Shell) fullCoverMatchFor(id string) ui.ElementTransition {
 // **不能留空**：空串会让「没建」和「建了但身份是空的」长得一样，而转场认的是
 // 值的相等——一个空串能和任何一首的空串对上，转场就变成了「从随便哪张封面飞过来」。
 func coverIdentity(s *Shell, st app.State) string {
-	if cur, ok := s.app.CurrentItem(); ok {
+	if cur, ok := s.pageInput().Current, s.pageInput().HasCurrent; ok {
 		if id := cur.Identity(); id != "" {
 			return id
 		}
@@ -1459,7 +1494,7 @@ func fullBarAnim(c *ui.Context) ui.Animation {
 // 只在**确知只有一条**的时候收起来——那时候确实没有「选」的意思。
 func (s *Shell) viewFullParts(c *ui.Context, hidden bool) {
 	parts := s.app.Parts()
-	cur, _ := s.app.CurrentItem()
+	cur := s.pageInput().Current
 	s.full.partsRows = partRowsFor(parts, cur)
 
 	if hidden {

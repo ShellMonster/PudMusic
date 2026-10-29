@@ -167,10 +167,9 @@ func TestEveryRecordedKeyComesBackAsItself(t *testing.T) {
 
 // TestTheShortcutsHandEditedIntoTheFileStillWork 验手改过的设置文件里的写法。
 //
-// 那一串是给 Biu 看的，用户从 Biu 那边导一份过来是常事，而导出/手写出来的写法
-// 比我们自己录的更多：小写的键、带 `Command`（不是 CommandOrControl）的修饰键、
-// 键本身就是加号的 `CommandOrControl++`。解析不了它们的话，用户搬一次配置就
-// 搬坏一半快捷键。
+// 那一串是手写配置文件里常见的写法，而导出/手写出来的写法比我们自己录的更多：
+// 小写的键、带 `Command`（不是 CommandOrControl）的修饰键、键本身就是加号的
+// `CommandOrControl++`。解析不了它们的话，配置文件中的快捷键会失效。
 func TestTheShortcutsHandEditedIntoTheFileStillWork(t *testing.T) {
 	cases := []struct {
 		acc      accelerator
@@ -466,7 +465,7 @@ func TestWalkingAwayMidRecordingDoesNotSilenceTheShortcutsForever(t *testing.T) 
 // 会各自认领同一个组合键——正好落进「窗口在前台时它响两次」那件事。
 //
 // 通过界面录不出这种状态（`accelFromEvent` 总是写 CommandOrControl），只有手改过
-// 设置文件才会，而那正是「从 Biu 那边导一份配置过来」会发生的事。
+// 设置文件才会，因此要保证两种等价写法不会重复注册。
 func TestTwoSpellingsOfTheSameKeyAreNotBothRegistered(t *testing.T) {
 	s, _, hot, _ := shellWithHotkeys(t)
 	if err := s.keys.set(shortcutSlot{id: "togglePlay"}, "CommandOrControl+P"); err != nil {

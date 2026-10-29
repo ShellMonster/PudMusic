@@ -256,6 +256,37 @@ func SameTrack(x, y Item) bool {
 // 这里忘了那里，而本地项认错了的表现是「在访达里显示一个在线的歌」。
 func (it Item) IsLocal() bool { return it.Source == "local" || it.Type == "local" }
 
+// QueueSnapshot 是队列在同一个 revision 下的一份不可变视图。
+//
+// items 只由 Queue 在 revision 变化时替换；调用方只能通过 Len 和 At 读取，不能
+// 把内部 slice 带出去。UI 因此可以在一帧里复用同一份视图，而不用每次复制整列。
+type QueueSnapshot struct {
+	revision uint64
+	items    []Item
+	current  int
+	mode     PlayMode
+}
+
+// Revision 是这份视图的版本。版本不变时，队列形状、当前项和播放模式都不变。
+func (s QueueSnapshot) Revision() uint64 { return s.revision }
+
+// Len 返回这份视图里的队列长度。
+func (s QueueSnapshot) Len() int { return len(s.items) }
+
+// At 返回第 i 项；越界返回零值和 false。
+func (s QueueSnapshot) At(i int) (Item, bool) {
+	if i < 0 || i >= len(s.items) {
+		return Item{}, false
+	}
+	return s.items[i], true
+}
+
+// CurrentIndex 返回这份视图里的当前项下标；-1 表示还没开始。
+func (s QueueSnapshot) CurrentIndex() int { return s.current }
+
+// PlayMode 返回这份视图里的播放模式。
+func (s QueueSnapshot) PlayMode() PlayMode { return s.mode }
+
 // Queue 是播放队列。零值不可用，请用 NewQueue。
 //
 // 末尾的行为照抄 Biu 的 play-list.ts：next 和 prev 都是取模绕回，队列里只有
@@ -274,6 +305,11 @@ type Queue struct {
 	mu    sync.Mutex
 	items []Item
 	cur   int // 当前项的下标；-1 是还没开始
+
+	// revision 在队列形状、当前项或播放模式变化时递增。UI 用它把不可变快照
+	// 和去重后的行缓存到下一次真正变化，稳态帧不再复制整列。
+	revision uint64
+	snapshot QueueSnapshot
 
 	// onChange 是「队列变了」的钩子。
 	//
@@ -349,10 +385,10 @@ func NewQueue() *Queue {
 // 同一个源必然挑出同一串歌，所以「随机这一档下一首是 c」这种断言才能一次
 // 一次地钉死，而不是偶尔红一次。
 func NewQueueWithRand(r RandSource) *Queue {
-	return &Queue{cur: -1, mode: DefaultPlayMode, keepPages: true, rnd: r}
+	return &Queue{cur: -1, mode: DefaultPlayMode, keepPages: true, rnd: r, revision: 1}
 }
 
-// changed 告诉外面「队列变了」。**必须在 `q.mu` 外面调**（理由见 onChange）。
+// changed 告诉外面「队列变了」。**必须在 `q.mu` 外面调**（理由见 onChange）.
 //
 // 它只是通知，不改队列——所以「通知」和「改动」之间没有半途改完的状态。
 func (q *Queue) changed() {
@@ -372,6 +408,8 @@ func (q *Queue) invalidate() {
 	}
 }
 
+func (q *Queue) bumpRevisionLocked() { q.revision++ }
+
 // Append 往队列尾部追加，不动当前项。
 //
 // ⚠️ **随机档要把新加的那些装进洗牌袋**（见 queue_shuffle.go 的
@@ -384,6 +422,7 @@ func (q *Queue) Append(items ...Item) {
 	q.mu.Lock()
 	q.items = append(q.items, items...)
 	q.bagAddItemsLocked(items)
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()
 	// 队尾多了一首：下一首可能变了（顺序播放走到队尾那一档时，下一首就是它）。
@@ -415,6 +454,7 @@ func (q *Queue) InsertNext(item Item) {
 	if len(q.items) == 0 {
 		q.items = []Item{item}
 		q.cur = 0
+		q.bumpRevisionLocked()
 		q.mu.Unlock()
 		q.changed()
 		return
@@ -426,6 +466,7 @@ func (q *Queue) InsertNext(item Item) {
 	q.items = slices.Insert(q.items, at, item)
 	// ⚠️ **随机档要把它挪到袋头**（见上面那段）：那一档的「下一首」是袋子说了算。
 	q.bagPromoteLocked(item.Identity())
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()
 	// 插在正在放的那首后面 → **下一首就是它**了：之前备好的那份作废。
@@ -437,6 +478,22 @@ func (q *Queue) Len() int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return len(q.items)
+}
+
+// Snapshot 返回队列的不可变视图。相同 revision 会复用同一份内部快照，调用方只能
+// 通过 At 读取，不能修改队列或把内部 slice 带出去。
+func (q *Queue) Snapshot() QueueSnapshot {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.snapshot.revision != q.revision {
+		q.snapshot = QueueSnapshot{
+			revision: q.revision,
+			items:    append([]Item(nil), q.items...),
+			current:  q.cur,
+			mode:     q.mode,
+		}
+	}
+	return q.snapshot
 }
 
 // Items 返回队列的快照，按播放顺序。改它不影响队列。
@@ -498,6 +555,9 @@ func (q *Queue) CurrentIndex() int {
 func (q *Queue) Move(delta int) (Item, bool) {
 	q.mu.Lock()
 	it, ok := q.moveIndexLocked(delta)
+	if ok {
+		q.bumpRevisionLocked()
+	}
 	q.mu.Unlock()
 	if ok {
 		q.changed()
@@ -552,6 +612,9 @@ func (q *Queue) moveIndexLocked(delta int) (Item, bool) {
 func (q *Queue) MoveNext() (Item, bool) {
 	q.mu.Lock()
 	it, ok := q.moveNextLocked()
+	if ok {
+		q.bumpRevisionLocked()
+	}
 	q.mu.Unlock()
 	if ok {
 		// 当前项变了：落盘那一格得跟着变（changed 必须在锁外面调，见它的注释）。
@@ -602,6 +665,9 @@ func (q *Queue) moveNextLocked() (Item, bool) {
 func (q *Queue) MovePrev() (Item, bool) {
 	q.mu.Lock()
 	it, ok := q.movePrevLocked()
+	if ok {
+		q.bumpRevisionLocked()
+	}
 	q.mu.Unlock()
 	if ok {
 		// 当前项变了：落盘那一格得跟着变（changed 必须在锁外面调，见它的注释）。
@@ -664,6 +730,9 @@ type stepUndo struct {
 func (q *Queue) UndoStep() bool {
 	q.mu.Lock()
 	ok := q.undoStepLocked()
+	if ok {
+		q.bumpRevisionLocked()
+	}
 	q.mu.Unlock()
 	if ok {
 		// 当前项退回去了：落盘那一格得跟着变（changed 必须在锁外面调）。
@@ -740,6 +809,7 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 	q.bag = nil
 	q.history = q.history[:0]
 	q.undo = stepUndo{}
+	q.bumpRevisionLocked()
 	if len(items) == 0 {
 		q.mu.Unlock()
 		q.changed()
@@ -783,13 +853,15 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	case q.cur > i:
 		q.cur--
 	case q.cur == i:
-		// 删掉的正是当前项，它原来的下标现在指着后面那一首；删的是末尾就绕回
+		// 删除的正是当前项，它原来的下标现在指着后面那一首；删的是末尾就绕回
 		// 第一首（和 Move 两端绕回一个道理，见文件头的说明）。
 		if q.cur >= len(q.items) {
 			q.cur = 0
 		}
 	}
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
+
 	q.changed()
 	// 删掉一首 → 下一首可能变了。
 	q.invalidate()
@@ -863,6 +935,7 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 		return false
 	}
 	q.items[i] = item
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()
 	// 就地换掉一项 → 下一首可能变了。
@@ -888,6 +961,7 @@ func (q *Queue) selectAt(i int) (Item, bool) {
 	if i < 0 {
 		q.cur = -1
 		q.undo = stepUndo{}
+		q.bumpRevisionLocked()
 		q.mu.Unlock()
 		q.changed()
 		q.invalidate()
@@ -901,6 +975,7 @@ func (q *Queue) selectAt(i int) (Item, bool) {
 	pushed := q.setCurLocked(i, true)
 	q.undo = stepUndo{ok: true, prevCur: prevCur, popHist: pushed}
 	it := q.items[i]
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()
 	// 跳到别的一首 → 下一首变了。
@@ -932,23 +1007,11 @@ func (q *Queue) selectAt(i int) (Item, bool) {
 //	随机  抽。抽之前先问一句「保持分集顺序」要不要听（见 nextPageLocked）。
 //	单曲  不挪，还是这一首，从头再放。
 //
-// 另有两条是 Biu 有、我们**故意不抄**的：
-//
-//   - 单曲那一档在 Biu 是靠 `audio.loop = true` 交给浏览器的（onended 直接
-//     return）。我们不在播放器上开循环：那样「下一首是谁」的决定权就跑到
-//     音频引擎里去了，而这一层的验收是「四档各能说清下一首是哪首」。
-//     单曲在这里是 Advance 给出的一个结论（重放当前这一首），播放器只负责
-//     「从 0 开始放」。
-//   - Biu 的随机是每次 `shuffle(整个列表)` 再找当前那首在洗过之后的位置、
-//     取它后面那一首。它依赖「上一次洗出来的顺序」，所以同一首歌连着两次
-//     放完可能落到同一首上。**我们用洗牌袋**（见 queue_shuffle.go）：一列
-//     打乱过的歌，一首一首地发，发完一列再打乱一列——不重复、不遗漏。
+// 我们使用洗牌袋：歌曲逐首发出，发完后重新洗牌，避免重复和遗漏。
 
 // PlayMode 是播放模式。
 //
-// Biu 那边的 `PlayMode` 是 1..4 的数字；我们落盘用这四个词，因为设置文件是
-// 用户能直接编辑的（见 settings.go 的文件头）。**档位顺序、文案和默认档照
-// 它**——Biu 的 `play-list.ts:978` 那份持久化里的键名我们原样沿用。
+// 设置文件使用字符串保存四种模式，档位顺序、文案和默认档由当前应用定义。
 type PlayMode string
 
 const (
@@ -1083,6 +1146,7 @@ type Advance struct {
 func (q *Queue) Advance() Advance {
 	q.mu.Lock()
 	d, _ := q.advanceLocked(true)
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	// 当前项变了（或者至少「结论」变了），落盘那一格得跟着变。
 	q.changed()
@@ -1266,6 +1330,7 @@ func (q *Queue) SetPlayMode(m PlayMode) {
 	q.bagClearLocked()
 	q.historyClearLocked()
 	q.undo = stepUndo{}
+	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	// ⚠️ **换档之后「下一首是谁」整个变了**（随机那一档是从洗牌袋里抽的），
 	// 之前备好的那份地址必须作废。
@@ -1286,6 +1351,7 @@ func (q *Queue) SetKeepPagesOrderInRandom(v bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.keepPages = v
+	q.bumpRevisionLocked()
 }
 
 // ---- App 这一侧的接线 ----

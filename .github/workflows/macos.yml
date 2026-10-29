@@ -42,12 +42,12 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            files="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
+            files="$(git diff --name-only --diff-filter=ACMRTUXB "$BASE_SHA"...HEAD -- '*.go')"
           elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
             if [[ "$BEFORE_SHA" == 0000000000000000000000000000000000000000 ]]; then
               files="$(git ls-files '*.go')"
             else
-              files="$(git diff --name-only "$BEFORE_SHA" HEAD -- '*.go')"
+              files="$(git diff --name-only --diff-filter=ACMRTUXB "$BEFORE_SHA" HEAD -- '*.go')"
             fi
           else
             files=""
@@ -123,6 +123,22 @@ jobs:
           done
 
           cat macos-build-summary.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attribute package size
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 主可执行文件 / Resources / 其他 与安装包分开，再列链接依赖和资源来源。
+          # 量的是 build/ 里的产物，不是模块缓存。
+          go run ./internal/perf/cmd/artifact-report | tee artifact-size.txt
+          {
+            echo
+            echo '### 包体归因'
+            echo
+            echo '```'
+            cat artifact-size.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload macOS artifacts
         if: always()

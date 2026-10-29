@@ -198,6 +198,14 @@ func (c *Client) Danmaku(ctx context.Context, cid string) ([]Danmaku, error) {
 //
 // ⚠️ **它不会自动解**：`net/http` 只自动解 gzip，不解 deflate——所以
 // 响应体到这一层还是压着的。
+// maxDanmakuInflatedBytes 是一份弹幕解压之后的字节上限。
+//
+// 压缩这一侧已经有响应体上限（见 client.go 的 32 MiB），但 deflate 的压缩比
+// 可以到几十上百倍：一份几百 KB 的响应完全能解出几百 MB，而解压时**原始压缩
+// 字节和展开结果会同时在内存里**。B 站实测最长的弹幕列表是几 MB 量级，所以
+// 32 MiB 是「正常永远撞不到、异常一定挡住」的那一档。
+const maxDanmakuInflatedBytes = 32 << 20
+
 func inflateDanmaku(raw []byte) ([]byte, error) {
 	// ⚠️ **0 字节不是错**：B 站对「这个 cid 没有弹幕」有可能回一个**空的**
 	// body（实测过），而那是**正常**的一种——零条弹幕，不是错误。
@@ -212,9 +220,14 @@ func inflateDanmaku(raw []byte) ([]byte, error) {
 	r := flate.NewReader(bytes.NewReader(raw))
 	defer r.Close()
 
-	out, err := io.ReadAll(r)
+	// 多读一个字节就能分出「刚好到上限」和「超过上限」：限制本身不接受
+	// 第 limit+1 个字节。
+	out, err := io.ReadAll(io.LimitReader(r, maxDanmakuInflatedBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("bili: 弹幕的压缩层解不开（不是原始 deflate？）：%w", err)
+	}
+	if len(out) > maxDanmakuInflatedBytes {
+		return nil, fmt.Errorf("bili: 弹幕解压之后超过 %d 字节，不当成正常响应", maxDanmakuInflatedBytes)
 	}
 	return out, nil
 }

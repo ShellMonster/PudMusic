@@ -245,13 +245,14 @@ func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
 // 第一次入队那个，播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
 //
 // ⚠️ **那两串身份是记好的那一份**（`ids`）：现拼的话每帧每行一到两次分配（票 #339）。
-func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
-	rows := make([]queueRow, 0, len(items))
-	seen := make(map[string]bool, len(items))
-	for i, it := range items {
-		// ⚠️ **按「第几项」记**：这一格的原料是这一项自己（Item + 队列里的位置），
-		// 所以队列一改（加歌、删歌、重排）它自己就看得出「数据换了」——调用方
-		// 一处都不用记得重建（理由见 `rowkey.Memo` 的文件头）。
+func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
+	rows := make([]queueRow, 0, snapshot.Len())
+	seen := make(map[string]bool, snapshot.Len())
+	for i := 0; i < snapshot.Len(); i++ {
+		it, ok := snapshot.At(i)
+		if !ok {
+			continue
+		}
 		ident := ids.At(i, queueRowRaw{item: it, at: i}, packQueueRowIdentity)
 		if ident.id != "" {
 			if seen[ident.id] {
@@ -262,6 +263,13 @@ func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdenti
 		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
 	}
 	return rows
+}
+
+// queueRowsFor 保留纯函数测试和旧调用方的整列接缝；绘制路径使用 revision 快照。
+func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
+	q := app.NewQueue()
+	q.Reset(items...)
+	return queueRowsForSnapshot(q.Snapshot(), ids)
 }
 
 // viewQueueDrawer 是播放列表抽屉。没开就一个字都不建。
@@ -286,9 +294,12 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	// 建（`viewFullPlayer` 末尾那一句），而 `viewMain` 必须让开。两处都建
 	// 的话这里会是 2——而画面上看着没差。
 	s.builds.drawer++
+	qSnapshot := s.app.Queue().Snapshot()
+	if s.queueRowsRevision != qSnapshot.Revision() {
+		s.queueRows = queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
+		s.queueRowsRevision = qSnapshot.Revision()
+	}
 	t := c.Theme()
-	s.queueRows = queueRowsFor(s.app.Queue().Items(), &s.queueRowIDs)
-
 	ui.Overlay(c, func() {
 		// ⚠️ 底边留出底下那一条的高度（**上游** Biu 的
 		// `data-[placement=right]:mb-22` 是 88，**我们**的是 `playbarHeight`

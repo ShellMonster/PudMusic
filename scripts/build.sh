@@ -86,11 +86,18 @@ for d in build/*/; do
   # ⚠️ 用 `du -sh` 不用 `du -h`：给目录传 `du -h` 在这台 macOS 上会输出**多行**
   # （目录加它下面的每一项），`$( )` 全收进来之后 printf 只给第一行补空格，
   # 后面的几行就顶到行首去了——产物列表看起来像坏掉了。
-  find "$d" -maxdepth 1 \( -name '*.dmg' -o -name '*Setup*.exe' -o -name '*.app' \) -print 2>/dev/null |
+  find "$d" -maxdepth 1 \( -name '*.dmg' -o -name '*-setup-*.exe' -o -name '*.app' \) -print 2>/dev/null |
     while IFS= read -r f; do
       printf '    %-40s %6s\n' "$(basename "$f")" "$(du -sh "$f" | cut -f1)"
     done
 done
+
+say "包体归因"
+# 主可执行文件 / Resources / 其他（安装后解包体积）与安装包/压缩包（下载体积）
+# 分开报，再列链接依赖与资源来源。产物目录还没建出来时它只说「未构建」，不报错。
+#
+# ⚠️ 这里量的是**产物**，不是模块缓存：模块缓存的大小跟实际编进去多少没有关系。
+go run ./internal/perf/cmd/artifact-report
 
 say "装之前请读 README 的「已知边界」一节"
 cat <<'EOF'

@@ -52,9 +52,8 @@ const commentsReplyPageSize = 20
 
 // CommentsCacheDirName 是评论缓存目录的名字，挂在用户数据目录下。
 //
-// ⚠️ **它不是 `lyrics-cache` 那一种「从 Biu 导入」的目录**（见
-// `biuimport.go` 的 `LyricsCacheDirName`）：评论没有 Biu 上游那份数据可导，
-// 这一份从头到尾都是我们自己写的，所以放在应用数据目录底下一个平级的文件夹。
+// ⚠️ 评论缓存没有外部兼容格式，这一份从头到尾都是我们自己写的，
+// 所以放在应用数据目录底下一个平级的文件夹。
 const CommentsCacheDirName = "comments"
 
 // errCommentsUnavailable 是「评论这一摊没挂上」（没挂上 B 站客户端）。
@@ -403,12 +402,12 @@ func (a *App) LoadMoreComments() bool {
 		a.commentsSeqs = map[string]int{}
 	}
 	a.commentsSeqs[slot] = seq
-	a.commentsMu.Unlock()
-
-	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
-	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, mode, next, true, listFetch, archiveFetch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.commentsCancel = cancel
+	a.commentsMu.Unlock()
+	go a.loadComments(ctx, it, slot, gen, seq, mode, next, true, listFetch, archiveFetch)
+
 	return true
 }
 
@@ -466,7 +465,15 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 
 	repliesFetch := a.commentsRepliesFetch
 	archiveFetch := a.commentsArchiveIDFetch
-	go a.loadReplies(it, slot, gen, root, repliesFetch, archiveFetch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.commentsMu.Lock()
+	if a.commentsCancel == nil {
+		a.commentsCancel = cancel
+	} else {
+		cancel()
+	}
+	a.commentsMu.Unlock()
+	go a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
 	return nil
 }
 
@@ -587,13 +594,19 @@ func (a *App) ensureComments(it Item, slot string) {
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
 	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
-	go a.loadComments(it, slot, gen, seq, mode, "", false, listFetch, archiveFetch)
+	ctx, cancel := context.WithCancel(context.Background())
+	a.commentsCancel = cancel
+	go a.loadComments(ctx, it, slot, gen, seq, mode, "", false, listFetch, archiveFetch)
 }
 
 // resetCommentsLocked 把评论这一摊整个清空，换成另一个槽位。
 //
 // ⚠️ **代次一定要加**：迟到的结果回来时靠它认出来（对不上就丢）。
 func (a *App) resetCommentsLocked(slot string) {
+	if a.commentsCancel != nil {
+		a.commentsCancel()
+		a.commentsCancel = nil
+	}
 	a.commentsSlot = slot
 	a.comments = nil
 	a.commentsErr = nil
@@ -624,9 +637,9 @@ func (a *App) resetCommentsLocked(slot string) {
 // 🔴 **seq 是这一趟的在途序号**：它挡的是「同一个对象上有两趟」——较早的那一趟
 // 回来时既不许盖掉界面上的新结果，也不许盖掉盘上的新缓存（理由见
 // `ensureComments` 里那一段）。
-func (a *App) loadComments(it Item, slot string, gen, seq, mode int, next string, more bool,
+func (a *App) loadComments(ctx context.Context, it Item, slot string, gen, seq, mode int, next string, more bool,
 	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
-	typ, oid, ok, err := a.resolveCommentTarget(it, archiveFetch)
+	typ, oid, ok, err := a.resolveCommentTarget(ctx, it, archiveFetch)
 	if err != nil {
 		// ⚠️ **换 avid 那一趟失败了**：**不报错**（票 #572：「取不到就当『没有
 		// 评论』，不发请求，也不报错」），但**要能再问**——
@@ -665,7 +678,8 @@ func (a *App) loadComments(it Item, slot string, gen, seq, mode int, next string
 		}
 	}
 
-	page, err := a.fetchCommentList(typ, oid, mode, next, listFetch)
+	page, err := a.fetchCommentList(ctx, typ, oid, mode, next, listFetch)
+
 	if err != nil {
 		// ⚠️ **「还没有人评论」不是失败**：B 站回的是 code 0 + 空列表，而这一页
 		// 照常有值（`AllCount` / `UpperMid` 那些）。混成失败的话，界面上会说
@@ -896,7 +910,7 @@ func (a *App) wakeComments() {
 // 第三个返回值是「认得出来吗」，第四个是「认的时候出了错吗」——两者必须分开：
 // 「压根没有身份」（sid 认不出来）是**问一百次也一样**，而「换 avid 那一趟失败」
 // 是**等一会儿再问有可能好**。
-func (a *App) resolveCommentTarget(it Item, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool, err error) {
+func (a *App) resolveCommentTarget(ctx context.Context, it Item, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool, err error) {
 	switch it.Type {
 	case "audio":
 		// ⚠️ **音乐库音频的 oid 就是 auid**（`type=14`），不用换。
@@ -906,7 +920,7 @@ func (a *App) resolveCommentTarget(it Item, archiveFetch commentsArchiveIDFetchF
 		}
 		return bili.CommentTypeAudio, id, true, nil
 	case "mv":
-		aid, err := a.commentArchiveID(it.Bvid, archiveFetch)
+		aid, err := a.commentArchiveID(ctx, it.Bvid, archiveFetch)
 		if err != nil {
 			return 0, 0, false, err
 		}
@@ -922,7 +936,7 @@ func (a *App) resolveCommentTarget(it Item, archiveFetch commentsArchiveIDFetchF
 //
 // 换过的要记住（内存里 + 盘上），不然**每次进这一首都要多付一次往返**——
 // 而验收要求「同一首歌第二次进是瞬时的（不发请求）」。
-func (a *App) commentArchiveID(bvid string, fetch commentsArchiveIDFetchFunc) (int64, error) {
+func (a *App) commentArchiveID(ctx context.Context, bvid string, fetch commentsArchiveIDFetchFunc) (int64, error) {
 	a.commentsMu.Lock()
 	if a.commentsAvids != nil {
 		if id, ok := a.commentsAvids[bvid]; ok && id > 0 {
@@ -941,7 +955,11 @@ func (a *App) commentArchiveID(bvid string, fetch commentsArchiveIDFetchFunc) (i
 	}
 	if ch, ok := a.commentsAvidWaiters[bvid]; ok {
 		a.commentsMu.Unlock()
-		<-ch
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
 		a.commentsMu.Lock()
 		id := a.commentsAvids[bvid]
 		a.commentsMu.Unlock()
@@ -970,7 +988,7 @@ func (a *App) commentArchiveID(bvid string, fetch commentsArchiveIDFetchFunc) (i
 		}
 		fetch = cli.ArchiveID
 	}
-	id, err := fetch(context.Background(), bvid)
+	id, err := fetch(ctx, bvid)
 	if err != nil {
 		a.finishAVIDWait(bvid, ch)
 		return 0, err
@@ -1021,7 +1039,7 @@ func (a *App) rememberCommentOID(slot string, gen int, typ, oid int64) {
 //
 // mode 是**排序档**：`bili.CommentSortHot` / `bili.CommentSortLatest`
 // （理由见 `bili.CommentSorts`——「评论」那一档不在里面）。
-func (a *App) fetchCommentList(typ, oid int64, mode int, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
+func (a *App) fetchCommentList(ctx context.Context, typ, oid int64, mode int, next string, fetch commentsListFetchFunc) (bili.CommentPage, error) {
 	if fetch == nil {
 		cli := a.commentsClient()
 		if cli == nil {
@@ -1031,13 +1049,13 @@ func (a *App) fetchCommentList(typ, oid int64, mode int, next string, fetch comm
 			return cli.CommentList(ctx, typ, oid, mode, next, commentsPageSize)
 		}
 	}
-	return fetch(context.Background(), typ, oid, mode, next)
+	return fetch(ctx, typ, oid, mode, next)
 }
 
 // loadReplies 拉一层楼中楼，回来写进缓存并叫醒界面。
-func (a *App) loadReplies(it Item, slot string, gen int, root int64,
+func (a *App) loadReplies(ctx context.Context, it Item, slot string, gen int, root int64,
 	repliesFetch commentsRepliesFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
-	typ, oid, ok := a.commentOIDFor(it, slot, gen, archiveFetch)
+	typ, oid, ok := a.commentOIDFor(ctx, it, slot, gen, archiveFetch)
 	if !ok {
 		a.finishReplies(slot, gen, root, nil)
 		return
@@ -1054,7 +1072,7 @@ func (a *App) loadReplies(it Item, slot string, gen int, root int64,
 			return rs, err
 		}
 	}
-	rs, err := fetch(context.Background(), typ, oid, root)
+	rs, err := fetch(ctx, typ, oid, root)
 	if err != nil {
 		a.finishReplies(slot, gen, root, nil)
 		return
@@ -1065,7 +1083,7 @@ func (a *App) loadReplies(it Item, slot string, gen int, root int64,
 // commentOIDFor 拿当前这一首的对象类型和 id。
 //
 // 已经问过主列表的话直接用它（**别再换一次 avid**）；还没问过就现算。
-func (a *App) commentOIDFor(it Item, slot string, gen int, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool) {
+func (a *App) commentOIDFor(ctx context.Context, it Item, slot string, gen int, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool) {
 	a.commentsMu.Lock()
 	if a.commentsSlot == slot && a.commentsGen == gen && a.commentsOid > 0 {
 		typ, oid = a.commentsTyp, a.commentsOid
@@ -1073,7 +1091,7 @@ func (a *App) commentOIDFor(it Item, slot string, gen int, archiveFetch comments
 		return typ, oid, true
 	}
 	a.commentsMu.Unlock()
-	typ, oid, ok, _ = a.resolveCommentTarget(it, archiveFetch)
+	typ, oid, ok, _ = a.resolveCommentTarget(ctx, it, archiveFetch)
 	return typ, oid, ok
 }
 

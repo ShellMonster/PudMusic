@@ -38,7 +38,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
@@ -121,6 +120,12 @@ const (
 	upBadgeS = 20
 )
 
+// spaceBannerLabel 是横幅那一格的无障碍名字。
+//
+// ⚠️ **它是为了「量得到那一格」**：无头 Tester 只认 label / text，不认图片——
+// 没有它就量不到横幅那一格的盒子（`spaceThumb` 的注释记着同一件事）。
+const spaceBannerLabel = "UP 主空间的头图横幅"
+
 // upPathOf 是 mid 这个 UP 的空间地址。
 func upPathOf(mid int64) string { return upPathPrefix + strconv.FormatInt(mid, 10) }
 
@@ -162,6 +167,10 @@ func upSpaceMidOf(path string) (int64, bool) {
 // 后台那一条线只做两件事：把结果投进信箱（自己带锁），叫醒界面。
 type upSpace struct {
 	mid int64
+	// mountGen identifies the App Explore client that owns this cached state.
+	// A remount must retire every local pager and row before another frame can
+	// adopt results from the new client.
+	mountGen uint64
 	// notify 说一句话（后台跑完的结果）。nil 时那一句就没了。
 	//
 	// ⚠️ **语气跟着话一起走**（票 #180）：失败是红的。
@@ -187,9 +196,9 @@ type upSpace struct {
 	ser upPager
 
 	// dynItems 是「动态」Tab 的行。
-	dynItems []bili.Dynamic
+	dynItems []app.Dynamic
 	// cols 是「收藏夹」和「合集」两张 Tab 的行。其余 Tab 那一格是空的。
-	cols [upTabCount][]bili.UpCollection
+	cols [upTabCount][]app.SpaceCollection
 	// seen 是**已经收进上面两份的行身份**，用来挡翻页重叠。
 	//
 	// ⚠️ 必须有：B 站翻页是会重叠的（同一页的东西挪了名次就会在两页里各出现
@@ -241,9 +250,10 @@ type upSpace struct {
 
 // upResult 是后台拉完之后投进信箱的东西。
 type upResult struct {
-	tab  int
-	dyns []bili.Dynamic
-	cols []bili.UpCollection
+	mountGen uint64
+	tab      int
+	dyns     []app.Dynamic
+	cols     []app.SpaceCollection
 	// cursor 是下一页的入口（动态接口给的 offset）。别的 Tab 是空的。
 	cursor string
 	// sent 是 B 站这一页发了几条（过滤**之前**）。见 upPager.adopt：
@@ -254,7 +264,7 @@ type upResult struct {
 	//
 	// ⚠️ **身份是给上层去重用的**：B 站翻页会重叠，同一条画不出来的动态在
 	// 两页里各出现一次——按出现次数记，那个数会偏大（票 #344）。
-	drops []bili.DroppedDynamic
+	drops []app.DroppedDynamic
 	// dropWhy 是丢掉的理由（人话，一种一句）。**只进日志**，不进界面。
 	//
 	// ⚠️ 「整页一条都不剩」这种失败在界面上完全看不出来（只有一个空列表
@@ -272,10 +282,14 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	if s.upSpaces == nil {
 		s.upSpaces = map[int64]*upSpace{}
 	}
+	mountGen := s.app.ExploreGeneration()
 	if sp, ok := s.upSpaces[mid]; ok {
+		if sp.mountGen != mountGen {
+			sp.resetForMount(mountGen, s.app.UpSpaceOf(mid))
+		}
 		return sp
 	}
-	sp := &upSpace{mid: mid, header: s.app.UpSpaceOf(mid), notify: s.addToast}
+	sp := &upSpace{mid: mid, mountGen: mountGen, header: s.app.UpSpaceOf(mid), notify: s.addToast}
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
 	// 拿到的永远是对的 UP。
 	sp.videos = list.NewPaged(s.images, s.listActions(),
@@ -384,6 +398,27 @@ func (p *upPager) stop() {
 	*p = upPager{}
 }
 
+// resetForMount retires all UI-local Explore state for a new App mount.
+func (sp *upSpace) resetForMount(mountGen uint64, header *app.UpSpace) {
+	sp.mountGen = mountGen
+	sp.header = header
+	sp.videosStarted = false
+	sp.leadSet = false
+	sp.dyn.stop()
+	sp.fav.stop()
+	sp.ser.stop()
+	sp.videos.Reset()
+	sp.dynItems = nil
+	sp.cols = [upTabCount][]app.SpaceCollection{}
+	sp.seen = nil
+	sp.rowKeys = [upTabCount]rowkey.Memo[upRowIdent, any]{}
+	sp.state = [upTabCount]ui.ListState{}
+	sp.drops = [upTabCount]dropTally{}
+	sp.boxMu.Lock()
+	sp.box = nil
+	sp.boxMu.Unlock()
+}
+
 // adopt 记一次成功的拉取。
 //
 // sent 是**这一页 B 站发了几条**（过滤**之前**的条数），hasMore 是它说的
@@ -398,7 +433,7 @@ func (p *upPager) stop() {
 // ⚠️ **反过来，「0 条」也不等于到底**：B 站这一页发了 0 条、而它给的**入口
 // 前进了**，说明后面还有——那就要**继续拉下一页**（票 #344）。真正到底的是
 // 「0 条 + 入口没前进」：再问一次问回来的是同一页（见
-// `bili.DynamicPage.MoreAfter`）。
+// `app.DynamicPage.MoreAfter`）。
 //
 // 所以判据是这两个的**或**：「这一页有东西」或者「入口前进了」。
 //
@@ -503,9 +538,10 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 	// `Loaded` 仍是 false（那是「从没成功过」），而这一行每帧都跑——于是
 	// 头图一失败就变成一个每帧发一次的请求（实测 300 毫秒发了 138 次），
 	// 界面停在「打不开」上还在刷网络。唯一的出口是用户点「再试一次」。
+	account := s.pageAccount()
 	if !h.Loaded && !h.Loading && h.Err == "" {
 		sp.header.Load()
-	} else if h.NeedRelation(s.app.SelfMid()) || h.NeedStat(s.app.SelfMid()) {
+	} else if h.NeedRelation(account.SelfMid) || h.NeedStat(account.SelfMid) {
 		// 🔴 关注关系和关注数这两样**都要在缺的时候补查**。
 		//
 		// 关注关系那条的理由见下面；关注数那条是同一个病根：它是**按账号**
@@ -528,7 +564,7 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 			sp.videosStarted = true
 			sp.videos.Reload()
 		}
-		sp.videos.SetView(s.displayView())
+		sp.videos.SetView(s.pageDisplayView())
 		sp.videos.Sync(c)
 	}
 
@@ -536,9 +572,10 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 	p := sp.pagerOf(sp.tab)
 	if !p.started && !p.loading {
 		if ctx := p.begin(); ctx != nil {
-			go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page)
+			go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page, sp.mountGen)
 		}
 	}
+
 }
 
 // viewSpaceHeader 是头图 + 关注 + 统计。
@@ -595,7 +632,13 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		// 不画 B 站的占位图（那看着像加载失败）。
 		ui.Box(c).Absolute().Left(0).Right(0).Top(0).Height(upBannerH).Clip().Children(func() {
 			if h.User.Banner != "" {
-				s.spaceFill(c, h.User.Banner, upBannerH)
+				// ⚠️ **宽度是横幅真正显示的宽**（票 #630）：它是通栏，宽就是
+				// 内容区的宽（窗口宽 − 侧栏宽）。
+				//
+				// ⚠️ **以前这里传的是 0**，而那个宽度**就是画的时候用的宽度**
+				// ——于是横幅从来没画出来过（票 #65 起的老 bug），票 #621 又给它
+				// 加了一层「要一张 64×64 正方缩略图」的浪费。
+				s.spaceFill(c, h.User.Banner, s.spaceContentWidth(c), upBannerH)
 			} else {
 				ui.Box(c).Height(upBannerH).FillWidth().LinearGradient(ui.LinearGradient{Angle: 135, Stops: []ui.GradientStop{
 					{Color: t.Background.Mix(t.Accent, 0.7), At: 0},
@@ -681,14 +724,15 @@ func (s *Shell) spaceBadge(c *ui.Context, official string) {
 // ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
 // 的 `stats` 表就三行）。这一版照它，不自己加。
 func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
-	isSelf := s.app.SelfMid() == sp.mid
+	account := s.pageAccount()
+	isSelf := account.SelfMid == sp.mid
 
 	ui.Row(c).Key("space-actions").Gap(upStatGap).AlignItems(ui.Center).Children(func() {
 		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
 		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
 		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
 		if !isSelf {
-			switch h.Follow(s.app.SelfMid(), s.app.LoggedIn()) {
+			switch h.Follow(account.SelfMid, account.SelfMid != 0) {
 			case app.FollowDone:
 				// ⚠️ **关注是写接口**（要 CSRF、要网络、一个往返）。在界面线程
 				// 上直接调就是每按一次冻一下窗口，所以开后台；
@@ -719,7 +763,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 		// 要 Cookie，没登录时 B 站要么回 -101、要么给 0，而界面上会是一个
 		// 干干净净的「粉丝数 0」——用户会以为他真的一个粉丝都没有。等级也是
 		// 一块（上游把它算在 `stats` 里），跟着一起藏。
-		if s.app.LoggedIn() {
+		if account.SelfMid != 0 {
+
 			// 🔴 **没查到就画「没查到」，不画 0**。粉丝数 0 是一个**假数**
 			// （真实值可能是十几万），而它看起来完全正常——这是这一块最难受
 			// 的失败方式。等级来自 acc/info、登录就能读到，所以照画。
@@ -909,8 +954,53 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 			ui.Box(c).Size(side, side).Radius(side / 2).Background(placeholder)
 			return
 		}
-		imgcache.States(c, s.images, face, side, side, side/2, imgcache.AvatarShape())
+		imgcache.States(c, s.pageImages(), face, side, side, side/2, imgcache.AvatarShape())
+
 	})
+}
+
+// spaceContentWidth 是**内容区有多宽**（窗口宽 − 侧栏宽）。
+//
+// ⚠️ **它不是窗口宽**：侧栏占掉一块（默认 220，折叠 64，最宽 300），所以
+// 1200 的窗口上内容区是 980。横幅是**内容区里的通栏**，所以它要显示的宽就是
+// 这个数。
+//
+// # 为什么自己算，而不是量布局
+//
+// `Bounds()` 报的是**上一帧**的盒子（`mygo/ui/element.go:1437`）——第一帧它
+// 是空的，于是横幅第一帧要图会拿到 0（退回原图那一档），第二帧才正常。
+// 而「窗口宽 − 侧栏宽」是**算出来的**，第一帧就对。
+//
+// ⚠️ **侧栏那一档取「画出来的」**（`sideDrawnWidth`）：侧栏有 200ms 的过渡，
+// 拖动时更是跟着指针走——按设置里那个目标算，过渡期间内容区会算宽 200 像素。
+//
+// 🔴 **而「画出来的那一档」是记下来的事实，不是推出来的**（票 #630 的对抗性
+// 审查）：`sideDrawnWidth` 拿的是 `viewSide` 里那个 `AnimateTo`/`Jump` 的
+// **返回值**——也就是**这一帧参与布局的那一档**。
+//
+// ⚠️ **为什么不能推**（两个方向都推错过）：
+//
+//   - 拿**目标宽**推：过渡期间画面上是中间值 ⇒ 内容区算宽 200 像素。
+//   - 拿**上一次拖动的终点**推：那是**陈旧值**（松手只写设置、不清它）。
+//     「拖到 300 → 折叠」这一路它给 300，而画面上是 64 ⇒ 内容区算成 900
+//     （实际 1136）⇒ **横幅右边空出 236 像素的一条空白带**。
+//
+// ⇒ 所以这一处**永远和画面上的侧栏宽对得上**（实测拖动时它逐帧跟着走，
+// 一像素不差）。
+//
+// # 实测（1200 窗口、默认设置）
+//
+//	侧栏 220 → 横幅 980　　侧栏 64（折叠）→ 1136　　侧栏 300 → 900
+//	窗口 1600 → 1380　　　窗口 900 → 680
+func (s *Shell) spaceContentWidth(c *ui.Context) float32 {
+	winW, _ := c.Size()
+	st := s.app.SettingsSnapshot()
+	w := winW - s.sideDrawnWidth(st)
+	if w <= 0 {
+		// 量不出来（窗口比侧栏还窄）⇒ 交给「量不出尺寸 ⇒ 按原图走」那一档。
+		return 0
+	}
+	return w
 }
 
 // spaceFill 画一张铺满宽度、指定高度的网络图（头图）。
@@ -929,14 +1019,27 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 // 现在加载中是一块带扫光的灰，失败是描边框 + 图片图标；空地址仍然是调用方
 // 那一块（这一处是页面底色，见 `viewSpaceHeader`：没有头图的 UP 主占多数，
 // 那时画的是主题色渐变，压根走不到这里）。
-func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
+//
+// # ⚠️ **w 必须是横幅**真正显示的宽**（票 #630）
+//
+// 这一格是**通栏**：它的宽就是内容区的宽（窗口宽 − 侧栏宽），不是固定的数。
+//
+// ⚠️ **以前这里传的是 0**，而 `imgcache.States` 那个宽度**就是画的时候用的
+// 宽度**——于是那一格的宽度真的是 0 像素，**横幅从来没画出来过**（票 #65 起
+// 就有的老 bug）。票 #621 又给它加了一层浪费：宽度 0 掉进「量不出尺寸 ⇒ 给
+// 最小档 64×64」的分支，于是多要了一张 64×64 的正方缩略图——横幅的两端直接
+// 丢掉（实测请求的是 `top_photo.jpg@64w_64h_1c.webp`，画面上横幅那一带一个
+// 像素都没有）。
+//
+// 所以这里传**这一格真正要显示的宽**。
+func (s *Shell) spaceFill(c *ui.Context, url string, w, h float32) {
 	t := c.Theme()
-	ui.Box(c).Height(h).FillWidth().Clip().Children(func() {
+	ui.Box(c).Height(h).FillWidth().Clip().Label(spaceBannerLabel).Children(func() {
 		if url == "" {
 			ui.Box(c).Height(h).FillWidth().Background(t.Surface)
 			return
 		}
-		imgcache.States(c, s.images, url, 0, h, 0, imgcache.Shape{})
+			imgcache.States(c, s.pageImages(), url, w, h, 0, imgcache.Shape{})
 	})
 }
 
@@ -981,14 +1084,16 @@ func (s *Shell) spaceThumbZoom(c *ui.Context, url string, w, h float32, zoomKey 
 		// 按显示尺寸拼出 `@<w>w_<h>h_1c`）。用 `Get(url)` 探测的话，探测下一份
 		// 原图、画的时候再下一份按尺寸的——同一张图下两遍，而显示的是原图那份，
 		// 这一票要省的像素一份没省（PR #622 的评审挑出来的）。
-		if st := s.images.GetSized(url, w, h); st.Ready() {
+		if st := s.pageImages().GetSized(url, w, h); st.Ready() {
+
 			img := ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h)
 			if zoomKey != "" {
 				motion.HoverZoom(img, zoomKey, on)
 			}
 			return
 		}
-		imgcache.States(c, s.images, url, w, h, t.Radius, imgcache.Shape{})
+		imgcache.States(c, s.pageImages(), url, w, h, t.Radius, imgcache.Shape{})
+
 	})
 }
 

@@ -181,7 +181,32 @@ func TestBrokenSettingsFileStillStarts(t *testing.T) {
 	}
 }
 
-// TestSettingsFromANewerVersionStayReadOnly 验「设置来自更新的版本」时一个字
+func TestBrokenSettingsLoadErrorDoesNotHideExternalPersistenceError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	write(t, path, "这不是 JSON")
+
+	a := app.New()
+	t.Cleanup(func() {
+		a.Close()
+		_ = a.CloseSettings()
+	})
+	if err := a.MountSettings(path); !errors.Is(err, app.ErrSettingsCorrupt) {
+		t.Fatalf("拿到的是 %v，want ErrSettingsCorrupt", err)
+	}
+	externalErr := errors.New("全屏播放器偏好存不住")
+	a.RecordExternalSettingsError(externalErr)
+
+	if err := a.TakeSettingsError(); !errors.Is(err, app.ErrSettingsCorrupt) {
+		t.Fatalf("第一次设置错误 = %v，want ErrSettingsCorrupt", err)
+	}
+	if err := a.TakeSettingsError(); !errors.Is(err, externalErr) {
+		t.Fatalf("第二次设置错误 = %v，want external error", err)
+	}
+	if err := a.TakeSettingsError(); err != nil {
+		t.Fatalf("同一批错误被重复报告：%v", err)
+	}
+}
+
 // 都不许写回去。
 //
 // 一个字都不能写：用户的设置会被一个旧版本按旧语义改写，等升级回来已经面目
@@ -386,5 +411,44 @@ func TestRecordSettingsFailureIgnoresNil(t *testing.T) {
 	a.RecordSettingsFailure(nil)
 	if err := a.TakeSettingsError(); err != nil {
 		t.Errorf("记了一个空错：%v", err)
+	}
+}
+
+// TestSettingsReadCountCountsEverySnapshot 钉住「读设置的计数器」这个口子。
+//
+// # 为什么要有它
+//
+// 「某一帧读了几次设置」是**这一帧有多贵**的一个直接刻度：一次读 = 一次锁 +
+// 一次几百字节的拷贝（`Settings` 实测 608 字节）+ 一次堆分配。界面层那套帧
+// 预算量的是**分配次数**（那是这些读的**间接**后果），而这个计数器量的是
+// **直接**的那一头——票 #632 要用它断言「关注页那三个颜色只算一次」。
+//
+// # 为什么形状是「取走并归零」
+//
+// 「这一帧」是一个**区间**，不是「从进程启动到现在」。所以这个口子要能归零
+// （量之前清掉之前的读）、也要能取走（量完之后读增量）——同一句干这两样。
+func TestSettingsReadCountCountsEverySnapshot(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	// ⚠️ **先归零**：这个计数器是**进程级**的，前面别的测试读过的都算在里面。
+	app.TakeSettingsReadCount()
+
+	a.SettingsSnapshot()
+	a.SettingsSnapshot()
+	a.SettingsSnapshot()
+	if got := app.TakeSettingsReadCount(); got != 3 {
+		t.Errorf("读了三次设置，计数器报 %d 次", got)
+	}
+
+	// ⚠️ **取走的那一句要归零**：否则下一段区间会把上一段的算进去。
+	if got := app.TakeSettingsReadCount(); got != 0 {
+		t.Errorf("取走之后计数器还是 %d——它没归零，下一段区间就量不准了", got)
+	}
+
+	// 没挂 store 时那一次也是**一次读**（它返回的是默认值）。
+	a.SettingsSnapshot()
+	if got := app.TakeSettingsReadCount(); got != 1 {
+		t.Errorf("没挂 store 时的一次读没算进去（报 %d 次）", got)
 	}
 }

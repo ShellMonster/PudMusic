@@ -81,6 +81,16 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 		// 后退 / 前进 / 搜索框，而侧栏从 y=64 才开始——于是每一页的第一眼是
 		// 「一条横贯整窗的顶栏」，不是 macOS 应用那种「左边一条全高栏 + 内容区
 		// 右上角一条导航」。
+		//
+		// ⚠️ **「这一帧侧栏画出来的那一档」要在这里归零**（票 #630 的对抗性
+		// 审查）：它由 `viewSide` 记下，而侧栏排在下面那个 Row 的**第一个**
+		// 孩子——所以归零必须排在**建侧栏之前**，否则那一格还是上一帧的值。
+		//
+		// 归零是**必须的**：MyGo 一帧要跑 3 遍 view，而 `viewSide` 在其中
+		// 某一遍里可能被替掉（`sideBody`）或压根没被调到（满屏播放器开着
+		// 时底层那一层压根不画）——不归零的话，内容区会拿**上一帧**的侧栏
+		// 宽去算，而那一帧的侧栏和这一帧的不是同一件事。
+		s.sideDrawnW = 0
 		ui.Row(c).Grow(1).Children(func() {
 			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
 			// 表现是整个窗口空一大块，连报错的地方都没有。
@@ -135,6 +145,13 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 	s.syncSuggestPending(s.clock.Now())
 	s.syncFeedDot()
 	s.avatarSync()
+
+	// 热词轮换的表：满屏开着的时候顶栏不画，占位词没人看得见，把表收掉——
+	// 不然它每 5 秒叫醒一次窗口画一帧满屏（`syncHotwords` 自己跟着顶栏的 view
+	// 跑，满屏时它没机会跑自己的收条件；见 navbar_hotword.go）。
+	if s.full.open {
+		s.stopHotword()
+	}
 
 	// 路由那一摊：404 那个倒计时（`syncRoute`）。它原来在 `viewRoutes` 的
 	// 最前面，而满屏开着的时候 `viewRoutes` 整个不跑——不挪的话，用户在满屏

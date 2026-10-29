@@ -1,59 +1,13 @@
 // 应用设置的落盘：schema 版本 + 原子写 + 异步合并写。
 //
-// ## JSON 键名必须和 Biu 完全一致
-//
-// Biu 用 electron-store，落盘的是 `<UserData>/app-settings.json`，内容形如
-// `{"appSettings": {...}}`（见 `biu/electron/store.ts:12-21`，
-// `biu/src/store/settings.ts:46-57`）。键名全部来自
-// `biu/shared/settings/app-settings.ts` 的 `defaultAppSettings`，结构定义在
-// `biu/shared/types/app-setting.d.ts`。
-//
-// 我们原样沿用这些键名，**包括这一阶段还不用的那几个**（`ffmpegPath`、
-// `hiddenMenuKeys`、`displayMode`……）。理由不是"预留"，是为了用户来回切换
-// Biu 和 MyGo 时不丢东西：这一版读得懂、写得回，用户换个应用打开还是原样。
-// 丢字段是最难查的一类数据丢失。
-//
-// ## Biu 有**两种**文件，两种都得能读
-//
-// 「Biu 的设置文件」不是一个形状，是两个：
-//
-//   - `app-settings.json`（electron-store 自己落的盘）：外面包一层信封
-//     `{"appSettings": {...}, "__internal__": {...}}`。
-//   - `biu-settings-<时间戳>.json`（设置页上「导出配置」按钮下载下来的）：
-//     **裸的 `{...}`，外面没有信封**——`export-import.tsx:19` 写的是
-//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`，
-//     写的是 `appSettings` 的值本身。Biu 自己的「导入配置」要的也是这个形状
-//     （同文件 :46-51，逐个 `defaultAppSettings` 的键去取）。
-//
-// 用户真正会拿到手上、真正会拿来「导入」的是**第二种**——第一种躺在
-// `~/Library/Application Support/Biu/` 里，用户一般不知道它在哪。所以认不出
-// 裸的那份不是「少支持一种格式」，是**导入功能整个不工作**：整份文件被当成没有
-// 任何已知键，退回全默认值，**一声不响**，用户只会觉得「导入了但什么都没变」。
-//
-// 判据见 `splitEnvelope`。
-//
-// 本文件写出的 JSON 一定包含全部键；Biu 的文件可能省略 `proxySettings.port`
-// 这类可选键，读的时候补默认值即可——两个方向的差别只在这里。
-//
-// ## 为什么原子写不够（Codex M9）
-//
-// 临时文件 + rename 只保证「写到一半被断电」不会留下半个文件。它不管：
-//
-//   - **schema 版本**：文件是哪个版本写的、能不能读，这一层完全管不了。
-//   - **迁移失败怎么办**：升级到一半崩溃，留下的到底是新的还是旧的？
-//   - **版本回退**：用户把应用换回旧版，旧版读到新版的文件会怎样？
-//   - **多文件一致性**：这是本文件之外的事（播放队列、下载任务…），要靠
-//     「一次升级要么全成、要么全不成」来保证，见下面 ErrSettingsFromNewer。
-//
-// 所以本文件做四件事，缺一不可：schema 号、迁移链、迁移前备份、
-// 遇到更新的版本就**只读不写**。
+// 临时文件 + rename 只保证「写到一半被断电」不会留下半个文件；schema 版本和未来
+// 版本只读保护则由设置文件信封负责。
 package app
 
 import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -64,48 +18,26 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
-// SchemaVersion 是本包写出的设置文件格式版本。
-//
-// 改设置的**结构**（加键、删键、改类型）就要涨它，并往 migrations 里加一条
-// v→v+1 的路。只改取值范围、只加新的可选键，不用涨。
-//
-// 这不是历史包袱：自动更新会把用户从旧版直接送到新版，中间不经过用户确认，
-// 迁移链是唯一的兜底。
 const SchemaVersion = 1
 
 // SettingsFileName 是设置文件名。
-//
-// ⚠️ 和 Biu 的 `app-settings.json` 不一样。Biu 那个名字是 electron-store 的
-// `StoreNameMap.AppSettings` 直接拼出来的，没有语义。我们按 `PLAN.md` §3.4
-// 用 `settings.json`——**键名一致才需要兼容，文件名不需要**。
-//
-// 导入 Biu 的配置就是把它的文件放到设置文件该在的位置上，**内容不用改**：
-// Biu 的两种形状（electron-store 的 `app-settings.json`、以及设置页「导出
-// 配置」下载的 `biu-settings-*.json`）都能直接读，见文件头的说明和
-// `splitEnvelope`。
 const SettingsFileName = "settings.json"
 
 // 设置文件里几个约定值。
 const (
-	// DefaultFontFamily 是 Biu 的默认字体。Biu 自己还留过一个
-	// `"system-default"` 的错误值（src/store/settings.ts:37-39 专门兼容它），
-	// 迁移里一并改掉。
+	// DefaultFontFamily 是应用的默认字体。
 	DefaultFontFamily = "system-ui"
-	// DefaultPrimaryColor 是 Biu 的绿色主色（Spotify 绿）。
+	// DefaultPrimaryColor 是应用的默认主色。
 	DefaultPrimaryColor = "#1ed760"
-	// DefaultBorderRadius 是 Biu 的默认圆角。
+	// DefaultBorderRadius 是应用的默认圆角。
 	DefaultBorderRadius = 8.0
-	// MaxBorderRadius 是圆角的上限，也是 Biu 设置页滑块的右端点。
+	// MaxBorderRadius 是圆角的上限。
 	MaxBorderRadius = 24.0
 	// DefaultVolume 是「用户没设过音量」时给的默认音量（1 = 100%）。
-	//
-	// ⚠️ **它是 1 而不是 Biu 的 0.5**：Biu 那边 0.5 是 `play-list` store 的初值，
-	// 而我们**老版本每一次启动都是 100%**（音量压根没落盘）——老用户升级上来
-	// 看到的还是他一直习惯的那一档，不该在升级的那一次突然变成一半。
-	//
-	// 上游那 0.5 的出处见报告 §4.4（`biu/src/store/play-list.ts:369`）。
 	DefaultVolume = 1.0
 	// MaxTrackFadeSeconds 是切歌淡入淡出能设的最长时间。
 	MaxTrackFadeSeconds = 15
@@ -122,16 +54,16 @@ const (
 	DefaultMiniLyricsCurtain = true
 )
 
-// 侧栏宽度的三个数，抄 Biu `src/layout/side/index.tsx:15-17`：
+// 侧栏宽度的三个数：
 //
-//	COLLAPSED_WIDTH = 72    折叠后多宽
-//	MIN_WIDTH       = 160   展开时的下限，拖到它下面就折叠
-//	MAX_WIDTH       = 480   展开时的上限
+//	COLLAPSED_WIDTH = 64    折叠后多宽
+//	MIN_WIDTH       = 180   展开时的下限，拖到它下面就折叠
+//	MAX_WIDTH       = 300   展开时的上限
 //
 // 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
 const (
-	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。上游 Biu 是 72 / 160~480 / 200。
+	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。
 	CollapsedSideMenuWidth = 64.0
 	MinSideMenuWidth       = 180.0
 	MaxSideMenuWidth       = 300.0
@@ -141,8 +73,7 @@ const (
 // ClampSideMenuWidth 把一个宽度拉进 [MinSideMenuWidth, MaxSideMenuWidth]。
 //
 // 拖动过程中**不要**用它：拖到 100 时画出来的就该是 100（折叠中的样子），
-// 只有落盘的值和重读设置时才钳。Biu 也是这个分工（`computeWidth` 里的
-// widthForView / widthToPersist 分开）。
+// 只有落盘的值和重读设置时才钳。拖动过程中保持原始值，便于显示折叠状态。
 func ClampSideMenuWidth(v float64) float64 {
 	if v < MinSideMenuWidth {
 		return MinSideMenuWidth
@@ -153,7 +84,7 @@ func ClampSideMenuWidth(v float64) float64 {
 	return v
 }
 
-// 主题档位。Biu 的 `ThemeMode = "system" | "light" | "dark"`。
+// 主题档位。
 type ThemeMode string
 
 const (
@@ -169,17 +100,8 @@ const (
 // 是 2026-10-26 本仓库**原创**补的四套（补上冷色和水墨/紫/蓝几个色相，对比度
 // 按 WCAG 现算过）——数值不取自任何现成的公开色板。
 //
-// ## 我们加的、Biu 没有的键
-//
-// Biu 只有 `themeMode`（浅 / 深 / 跟随系统）加一个主色一个底色，**没有「整套方案」
-// 这个概念**，所以 `themePreset` 是我们自己的键（见 `ourOwnKeys`）。Biu 读到
-// 我们的文件会把它当不认识的键，Biu 自己的设置一个键都没丢。
-//
-// ## 默认是「暖纸」，「经典」是显式的一档
-//
-// 「经典」就是原来的外观（Biu 绿加框架默认底色），不套任何方案，值是 `"classic"`。
-// 默认（包括键缺失、空串、不认识的值）一律是暖纸：应用还没发版，没有需要保住的
-// 旧外观；Biu 导出的配置里没有这个键，导入后也拿到暖纸。
+// 旧外观没有这一格，默认方案仍是暖纸。
+
 // 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
 // `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
 // 经典，免得「改了没反应」。
@@ -201,22 +123,13 @@ const (
 // 它是**生产默认**：应用还没发版，没有需要保住的旧外观，所以默认一律是暖纸
 // （缺键、空串、不认识的值都落到这里，见 `pickEnum`）。
 //
-// ⚠️ **这是一个变量而不是常量，是为了留一扇门**：老界面那一批「和 Biu 逐像素
-// 对照」的用例曾经在这里被按成经典，好让它们继续绿。票 #406 把那一层去掉
-// （`internal/ui` 的 `TestMain` 不再改它），界面那一包的测试现在量的是**暖纸**
-// ——那才是用户看见的那一版。
-//
 // 「经典」这个**用户选项**照旧保留（设置页方案卡里有它，摆在最后一行末尾），它自己那套配色有
 // 专门的用例盯着（`internal/ui/themepreset_test.go` 及那几处按方案各跑一遍的
 // 截图用例）。而「生产默认是暖纸」由本包里的测试盯着（`themepreset_test.go`）。
 var DefaultThemePreset = ThemePresetWarmPaper
 
-// 音质档位。Biu 的 `AudioQuality`。
-//
-// 🔴 **没有「自动」这一档**（票 #581）：默认是有损的高品质档（音乐库 320K /
-// 投稿 192K），无损/杜比是显式选项——拿不到时由取流那层自动退到最高有损，
-// 不报错。以前这里有过 `auto`（有无损先给无损），已删：老设置文件里存着的
-// `"auto"` 由 `normalize` 的 `pickEnum` 兜底归一成 `AudioQualityHigh`，不写迁移。
+// 音质档位。默认是有损的高品质档（音乐库 320K / 投稿 192K），无损/杜比是显式选项——
+// 拿不到时由取流那层自动退到最高有损，不报错。
 type AudioQuality string
 
 const (
@@ -227,7 +140,7 @@ const (
 	AudioQualityLow      AudioQuality = "low"
 )
 
-// 列表显示方式。Biu 的 `displayMode`。
+// 列表显示方式。
 type DisplayMode string
 
 const (
@@ -236,7 +149,54 @@ const (
 	DisplayModeCompact DisplayMode = "compact"
 )
 
-// 页面切换动画。Biu 的 `PageTransition`。
+// BackdropClarity 是**满屏播放器背景的清晰度**（票 #666）。
+//
+// 背景那一层本来是「封面放大四倍、明显模糊」（照 Biu 的 `glassmorphism.ts`），
+// 所以它**清晰度天生就低**。这一格让用户自己挑：
+//
+//	流畅  画布 = 窗口的 1/4，σ=32 DIP（**默认**，也是从前的样子）
+//	清晰  画布 = 窗口的 1/2，σ=16 DIP
+//	高清  画布 = 窗口的 1/1，σ=8 DIP
+//
+// ⚠️ **画布越大，要的源图越大、GPU 模糊也越贵**——三档是按「像素量级」分的
+// （27 万 / 103 万 / 397 万像素，见票面）。
+type BackdropClarity string
+
+const (
+	BackdropClaritySmooth BackdropClarity = "smooth"
+	BackdropClarityClear  BackdropClarity = "clear"
+	BackdropClarityHD     BackdropClarity = "hd"
+)
+
+// 画布是窗口的几分之一（对应上面那三档）。
+//
+// ⚠️ **它是「分母」**：4 表示画布 = 窗口 / 4。值越小画布越大、越清晰。
+func (c BackdropClarity) CanvasDivisor() float64 {
+	switch c {
+	case BackdropClarityClear:
+		return 2
+	case BackdropClarityHD:
+		return 1
+	}
+	return 4
+}
+
+// BlurDIP 是这一档在**屏幕上**的模糊半径（DIP）。
+//
+// ⚠️ **画布越大、σ 越小**：模糊的观感要跟着画布走——画布是 1/4 时 σ=32 正好
+// 「把细节全糊掉」，画布放大四倍之后同样的 32 DIP 会糊得太狠（糊成一片纯色），
+// 于是按同样的比例降到 8。
+func (c BackdropClarity) BlurDIP() float64 {
+	switch c {
+	case BackdropClarityClear:
+		return 16
+	case BackdropClarityHD:
+		return 8
+	}
+	return 32
+}
+
+// 页面切换动画。
 type PageTransition string
 
 const (
@@ -247,7 +207,7 @@ const (
 	PageTransitionSlideUp PageTransition = "slideUp"
 )
 
-// 关闭窗口时怎么办。Biu 的 `closeWindowOption`。
+// 关闭窗口时怎么办。
 type CloseWindowOption string
 
 const (
@@ -255,24 +215,7 @@ const (
 	CloseWindowExit CloseWindowOption = "exit"
 )
 
-// 代理协议。Biu 的 `ProxyType` 是 `"none" | "http" | "socks4" | "socks5"`，
-// **没有 HTTPS**（`biu/src/pages/settings/proxy-settings.tsx:10-15` 的
-// `PROXY_TYPE_OPTIONS`）。
-//
-// 🔴 这里比 Biu 多一个 `https`。加它破的不是「键名与 Biu 一致」那条（那条讲的是
-// `app-settings.json` 里的**键**，一个都没动），而是多了一个 **值**：
-//
-//   - Biu 读到 `{"proxySettings":{"type":"https"}}` 时，TypeScript 的那个联合类型
-//     在运行时拦不住它，值原样留在 store 里——**Biu 那边一个字节都不丢**。
-//   - 我们这边它是合法值，`normalize()` 认它，网络层也认它（`proxy.go` 的
-//     `ProxyForSettings`）。https 走的是 HTTP 那一套拨号（Go 的 `http.Transport`
-//     对 `http://` 和 `https://` 的代理是同一条路），所以多一档不需要新的实现，
-//     只是把用户要的那一档摆出来。
-//
-// 这一格的**消费端**在本包里：`MountSettings` / `UpdateSettings` 把它存进
-// 网络层每请求现读的那一格（`proxy.go` 的 `storeProxy` / `ProxySnapshot`），
-// 每一条出网请求都按它走——四种协议里的 SOCKS4 由 `Socks4Tunnel` 在拨号里
-// 隧道（`http.Transport` 不认这个 scheme）。
+// 代理协议。支持 HTTP、HTTPS、SOCKS4 和 SOCKS5。
 type ProxyType string
 
 const (
@@ -285,8 +228,7 @@ const (
 
 // ProxySettings 是代理配置。
 //
-// Port 用指针：Biu 的类型是 `port?: number`，默认值是 `undefined`，
-// 用 int 表达不了「没设」和「设成 0」的区别。
+// Port 用指针表达「未设置」和「设成 0」的区别。
 type ProxySettings struct {
 	Type     ProxyType `json:"type"`
 	Host     string    `json:"host"`
@@ -295,8 +237,7 @@ type ProxySettings struct {
 	Password string    `json:"password"`
 }
 
-// SideMenuCollectionFolded 是侧栏两组收藏的折叠状态。键名照 Biu 的
-// `sideMenuCollectionFolded`（`biu/shared/settings/app-settings.ts:25`）。
+// SideMenuCollectionFolded 是侧栏两组收藏的折叠状态。
 type SideMenuCollectionFolded struct {
 	Created   bool `json:"created"`
 	Collected bool `json:"collected"`
@@ -304,29 +245,10 @@ type SideMenuCollectionFolded struct {
 
 // SideMenuCollectionOrder 是侧栏两组收藏的**顺序**：每组一条 ID 序列。
 //
-// ## 我们加的、Biu 没有的键（两个地方，原因一样）
+// 条目每次从接口拉取，顺序是用户拖出来的，因此只保存顺序。
+// 设置存储统一提供 schema 版本、原子写、退出前 flush 和只读保护。
 //
-// `SideMenuCollectionOrder` 和 `Settings.PlayMode` /
-// `Settings.ShouldKeepPagesOrderInRandomPlayMode` 在 Biu 那边**都不在
-// app-settings.json 里**：前者是 zustand persist 的 `"favorites-order"`
-// （`{createdOrder, collectedOrder}`，`biu/src/store/favorite.ts:157-163`），
-// 后两者是 `play-list` store 里的字段（`biu/src/store/play-list.ts:74,86`，
-// 靠它自己的 partialize 落盘）。
-//
-// 键名照抄、位置换了，理由和 Biu 把它们分开存一样：它们是**队列/侧栏的状态**，
-// 不是应用的配置。但我们仍然放进设置，因为设置存储已经把 schema 版本、
-// 原子写、退出前 flush、只读保护这几件都做好了（见 settings.go），
-// 另开一份文件就等于把这些重造一遍——重造出来的那份还少了只读保护：
-// 设置来自更新的版本时，这一格照样会被旧版本按旧语义改写。
-//
-// 「顺序」这一格还多一条理由：验收要求「顺序落盘」，而设置是唯一一个已经
-// 做对了写入那一半的地方。
-//
-// 分工照 Biu：**条目不存，顺序才存**。条目每次从接口拉，存一份本地副本
-// 只会和接口对不上；顺序是用户拖出来的，接口不返回，只能存。
-//
-// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用涨），
-// 读不到就是空序列，等于「还没排过序」。
+// 加键不用涨 SchemaVersion（只加新的可选键不用涨）；读不到就是空序列，等于「还没排过序」。
 type SideMenuCollectionOrder struct {
 	Created   []int64 `json:"created"`
 	Collected []int64 `json:"collected"`
@@ -361,7 +283,7 @@ type DynamicSeenEntry struct {
 	// 真实的返回长这样："954659517801431040"）。传一个时间戳进去，那个接口要么
 	// 回错、要么当成「比它新的都算」——而界面上只是「那个点不对」。
 	//
-	// 空串 = 一次都没看过 → 问 B 站的时候传 0（上游 Biu 一直传的就是 0）。
+	// 空串 = 一次都没看过 → 请求动态更新时传 0。
 	Baseline string `json:"baseline"`
 }
 
@@ -386,14 +308,11 @@ type DynamicSeen struct {
 	// 分配数（实测：映射那一版让播放条那一档从 14 次涨到 16 次，上限正好是 16）。
 	// 一张表只有一两条，扫一遍就行。
 	//
-	// 0 = 一次都没看过 → 问 B 站的时候传 0，那一档是「从头算」，于是用户
-	// 第一次打开就能看见那个点（上游 Biu 传的就是 0）。
+	// 0 = 一次都没看过 → 请求动态更新时传 0。
 	Baselines []DynamicSeenEntry `json:"baselines"`
 }
 
-// Settings 是一份完整的应用设置，键名与 Biu 一一对应。
-//
-// 字段顺序按 Biu `defaultAppSettings` 的书写顺序排，方便两边对着看。
+// Settings 是一份完整的应用设置。
 type Settings struct {
 	AutoStart                bool                     `json:"autoStart"`
 	CloseWindowOption        CloseWindowOption        `json:"closeWindowOption"`
@@ -418,25 +337,11 @@ type Settings struct {
 	ReportPlayHistory        bool                     `json:"reportPlayHistory"`
 	LocalMusicDirs           []string                 `json:"localMusicDirs"`
 
-	// PlayMode 是播放模式（顺序 / 循环 / 随机 / 单曲）。键名照 Biu 的
-	// `play-list.ts:74` 那个 zustand 字段，见本类型上面「我们加的键」那一段。
+	// PlayMode 是播放模式（顺序 / 循环 / 随机 / 单曲）。
 	PlayMode PlayMode `json:"playMode"`
-	// ShouldKeepPagesOrderInRandomPlayMode 是「随机时保持分集顺序」。键名照 Biu
-	// 的 `play-list.ts:86`，同一段理由。
-	//
-	// ⚠️ **默认值是 true（照 Biu 的 `play-list.ts:373`），而它的零值是 false，
-	// 所以「这份设置里没有这一格」和「用户把它关了」在读回来之后分不开。**
-	// 于是：新装的是开的（走 DefaultSettings），从一份旧设置升上来的是关的。
-	//
-	// 这不是这一格独有的：`ShowSearchHistory` 和 `ReportPlayHistory` 的默认值
-	// 也是 true，缺了它们同样是关的（见 DefaultSettings）。Go 的 bool 表达不了
-	// 「没设过」，要修就得给这几格一起换成 `*bool` 或者涨一次 SchemaVersion 再
-	// 迁移——那是另一票的事，不该混在「加四档播放模式」里顺手做掉。
-	//
-	// 今天没人在意：这个开关只在**队列里已经有分集**的时候才改变任何事，而
-	// 队列里现在**没有**分集——分集抽屉（BMG-47 的 A12）是换集时**就地改队列里
-	// 那一项的 Cid**，不插新的项（见 `App.PlayPart` 与 `Item.PageIndex` 那段
-	// 注释）。要让这个开关真的有话可说，得让每一集各占一项，那是另一件事。
+	// BackdropClarity 是满屏播放器背景的清晰度（票 #666）。空串 = 流畅。
+	BackdropClarity BackdropClarity `json:"backdropClarity"`
+	// ShouldKeepPagesOrderInRandomPlayMode 是「随机时保持分集顺序」。
 	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
 
 	// Volume 是用户设的音量（0..1），1 是解码出来的原样。
@@ -446,11 +351,9 @@ type Settings struct {
 	// 用 float64 的话两者读出来都是 0，而「启动时突然没声」和「用户自己拉到 0」
 	// 是两回事：前者是 bug，后者是用户要的。
 	//
-	// （和 `ProxySettings.Port` 同一个理由——那份也是 Biu 那边用 `?:` 表达的
-	// 「没设过」。）
+	// 用指针表达「未设置」和「设成 0」的区别。
 	//
-	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`volume`），位置换了——
-	// 和 `PlayMode` / `ShouldKeepPagesOrderInRandomPlayMode` 同一段理由。
+	// 键名保持稳定，位置与播放相关设置放在一起。
 	Volume *float64 `json:"volume"`
 
 	// PlaybackRate 是用户设的播放倍率。0 表示没设过（倍率的合法范围从 0.5 起，
@@ -473,9 +376,7 @@ type Settings struct {
 	// 于是「默认开着」这件事对老用户**不成立**（而票面要的是「装上就有
 	// 卷帘」）。这一格是**新增**的键，所以 nil = 没设过 = 默认开。
 	//
-	// ⚠️ **这不是「为老数据写兼容」**（AGENTS.md §5 那条规矩针对的是老外观、
-	// 老目录、老设置值）：这里没有迁移、没有双份格式、没有兜底分支，只是
-	// 「默认」这一档落在哪儿的问题。
+	// 这一格使用指针，区分「未设置」和「用户关闭」。缺少字段时由 normalize 填入默认值。
 	MiniLyricsCurtain *bool `json:"miniLyricsCurtain"`
 
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
@@ -492,7 +393,7 @@ type Settings struct {
 	// 用裸 bool 的话，要么老用户升级上来就被静默关掉（那也是错的方向），要么
 	// 拿不到「用户关了」这一档。
 	//
-	// 键名是我们自己的（Biu 那边没有这一格）。
+	// 键名是应用自己的设置字段。
 	UpdateNotification *bool `json:"updateNotification"`
 
 	// CoverHue / CoverSat 是界面从当前封面取出来的色相（0~360）和饱和度（0~1），只在
@@ -516,38 +417,17 @@ type Settings struct {
 	// 启动，音量变成 0（Clementine 的老毛病）。静音是它自己的一格，而音量那一
 	// 格记的是「用户设的是多少」。
 	//
-	// 键名照 Biu 的 `play-list` 那个 zustand 字段（`isMuted`）。
+	// Muted 是静音标志，和音量分开存。
 	Muted bool `json:"isMuted"`
 
 	// Playback 是「上次听到哪儿」那一格：队列、当前项、播放位置。
 	//
-	// ⚠️ **它和音量、播放模式在同一个文件里，是有意的**：同一次原子写里落盘，
+	// 它和音量、播放模式在同一个文件里，是有意的：同一次原子写里落盘，
 	// 它们之间就没有「谁先谁后」的竞态（见 playback_state.go 文件头那张表）。
-	//
-	// 键名是我们自己的（Biu 那边没有这一个键，它把队列放在 `play-list` store
-	// 里）。Biu 读到它会当不认识的键——最坏的结果是**它自己的队列不受影响**
-	//（那是另一个文件里的事）。
-	//
-	// 加键不用涨 SchemaVersion（见 SchemaVersion 的注释：只加新的可选键不用
-	// 涨）：读不到就是空的，等于「没有上次听到哪儿」。
 	Playback PlaybackSnapshot `json:"playback"`
 
 	// DynamicSeen 是「动态红点看到哪儿了」。
-	//
-	// ⚠️ **这是我们自己的键**（Biu 那边没有）：Biu 把「看过没有」放在内存里
-	// （`user-feed/index.tsx:12` 的 useState），所以它重启之后又是「全部没看过」
-	// ——那个点每五分钟回来一次，而用户已经看过了。
-	//
-	// 键名是我们自己的，不是 Biu 的：放在设置里是因为设置存储已经把 schema 版本、
-	// 原子写、退出前 flush、只读保护这几件都做好了（理由同 Playback 那一格）。
 	DynamicSeen DynamicSeen `json:"dynamicSeen"`
-
-	// extra 是这个版本的代码不认识的键，原样带着走。
-	//
-	// 两个方向都要保：更新的 Biu 加了新键，或者未来的我们加了键而用户换回了
-	// 旧版——直接丢弃就是数据丢失。读进来时留下，写出去时原样带上，
-	// 我们认识的键以我们的值为准。
-	extra map[string]json.RawMessage
 }
 
 // knownSettingsKeys 是 Settings 里我们自己认识的键，从结构体标签反射出来。
@@ -582,65 +462,16 @@ func (s Settings) MiniLyricsCurtainOn() bool {
 	return *s.MiniLyricsCurtain
 }
 
-// UnmarshalJSON 读一个 Settings：已知的键按结构体读，剩下的存进 extra。
-func (s *Settings) UnmarshalJSON(b []byte) error {
-	// plain 去掉方法的那一份类型，防止 UnmarshalJSON 自己调自己。
-	type plain Settings
-	var v plain
-	if err := json.Unmarshal(b, &v); err != nil {
-		return err
-	}
-	var all map[string]json.RawMessage
-	if err := json.Unmarshal(b, &all); err != nil {
-		return err
-	}
-	extra := make(map[string]json.RawMessage, len(all))
-	for k, raw := range all {
-		if !knownSettingsKeys[k] {
-			extra[k] = raw
-		}
-	}
-
-	*s = Settings(v)
-	s.extra = extra
-	return nil
-}
-
-// MarshalJSON 写一个 Settings：自己的键 + 带回来的陌生键。
-func (s Settings) MarshalJSON() ([]byte, error) {
-	type plain Settings
-	b, err := json.Marshal(plain(s))
-	if err != nil || len(s.extra) == 0 {
-		return b, err
-	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, err
-	}
-	for k, raw := range s.extra {
-		if _, known := m[k]; !known {
-			m[k] = raw
-		}
-	}
-	return json.Marshal(m)
-}
-
-// settingsFile 是落盘的整体。信封是 Biu 的 `{"appSettings": {...}}`，
-// 外面多一个 schemaVersion。
-//
-// Biu 的 electron-store 还会写一个 `"__internal__"` 段（conf 的内部状态）。
-// 读的时候标准库会自动忽略它，我们也不写回去。
+// settingsFile 是当前版本的设置文件信封。
 type settingsFile struct {
 	SchemaVersion int      `json:"schemaVersion"`
 	AppSettings   Settings `json:"appSettings"`
 }
 
-// DefaultSettings 返回 Biu 的默认设置。downloadPath 传默认下载目录，
-// 对应 Biu 的 `electron/store.ts:18`（那里注入 `app.getPath("downloads")`）。
+// DefaultSettings 返回应用的默认设置。downloadPath 传默认下载目录。
 //
-// ⚠️ **我们这边传的是空串**：默认落点由 `platform.DefaultDownloadsDir` 算出来
-// （「音乐」目录下的应用子目录），不是系统下载目录——见
-// `platform/downloadsdir.go` 顶上那一节。
+// 默认落点由 `platform.DefaultDownloadsDir` 算出来（「音乐」目录下的应用子目录），
+// 不是系统下载目录——见 `platform/downloadsdir.go` 顶上那一节。
 func DefaultSettings(downloadPath string) Settings {
 	// 音量那一格是**指针**，所以每一次调用都要新的一份——共用同一个指针的话，
 	// 有人改了 `*s.Volume` 就把全局的默认值改了。
@@ -678,8 +509,7 @@ func DefaultSettings(downloadPath string) Settings {
 		ReportPlayHistory: true,
 		LocalMusicDirs:    []string{},
 
-		// 「每个账号看到哪儿了」那张表：空表 = 每个账号都没看过（于是问 B 站
-		// 的时候传 0，用户第一次打开就能看见那个点）。
+		// 空序列表示每个账号都还没有已读基准；请求动态更新时传 0。
 		//
 		// ⚠️ **空序列不分配**（它指向 `runtime.zerobase`），而空映射要分配——
 		// 理由见 DynamicSeen.Baselines 那一格。
@@ -705,9 +535,7 @@ func DefaultSettings(downloadPath string) Settings {
 		// 回事。统一成空序列。
 		Playback: PlaybackSnapshot{Items: []PlaybackEntry{}},
 
-		// 播放模式的两个默认值都照 Biu 的初始状态（`play-list.ts:370,373`）：
-		// 默认循环播放（不是顺序播放——「放完就停住」正是这一票要治的症状，
-		// 见 PlayMode 的注释），随机时保持分集顺序默认开着。
+		// 播放模式的两个默认值：默认循环播放，随机时保持分集顺序。
 		PlayMode:                             DefaultPlayMode,
 		ShouldKeepPagesOrderInRandomPlayMode: true,
 	}
@@ -727,31 +555,21 @@ func (s Settings) UpdateNotificationEnabled() bool {
 	return *s.UpdateNotification
 }
 
-// 设置文件的三种坏法。三种要分开，因为要分开处理。
+// 当前版本设置文件的坏法分为损坏、版本不匹配和存储已关闭三类。
 var (
-	// ErrSettingsCorrupt：文件在，但不是我们（或 Biu）写出来的 JSON。
+	// ErrSettingsCorrupt：文件在，但不是当前版本写出的有效 JSON。
 	// 处理：备份走，重置成默认值，让用户继续用。
 	ErrSettingsCorrupt = errors.New("app: 设置文件已损坏，已重置为默认值")
 
 	// ErrSettingsFromNewer：文件来自一个 schema 更高的版本。
-	// 处理：**一个字都不许写回去**（store 转成只读），否则用户的设置会被一个
-	// 旧版本按旧语义改写，等升级回来已经面目全非。这是 M9 说的
-	// 「旧版本回退兼容」。
+	// 处理：一个字都不许写回去（store 转成只读），避免旧版本改写新版本数据。
 	ErrSettingsFromNewer = errors.New("app: 设置文件来自更新的版本，本次只读不写")
 
 	// ErrSettingsClosed：进程已经在收尾，不接受改动了。
 	ErrSettingsClosed = errors.New("app: 设置存储已关闭")
 )
 
-// LoadSettings 读一份设置。
-//
-// 没有这个文件**不是错误**，返回默认值——第一次运行就是这样。
-//
-// 读得懂三种形状（自己写的、Biu 的 electron-store 落盘文件、Biu「导出配置」
-// 下载的裸文件），见文件头和 `splitEnvelope`。
-//
-// 返回的 Settings 在出错时也总是可用的（要么是默认值，要么是从坏文件里
-// 尽力恢复出来的），调用方只需要看 error 决定要不要告诉用户。
+// LoadSettings 读取当前版本的设置文件；缺失文件使用默认值，旧版和未来版本不写回。
 func LoadSettings(path string) (Settings, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -761,57 +579,20 @@ func LoadSettings(path string) (Settings, error) {
 		return DefaultSettings(""), fmt.Errorf("app: 读设置 %s: %w", path, err)
 	}
 
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(b, &top); err != nil {
-		// 先把坏文件留下来再重置。没有它，用户丢了设置都不知道丢了什么，
-		// 也没法把里面没坏的部分捞回来。
+	var f settingsFile
+	if err := json.Unmarshal(b, &f); err != nil {
 		backupSettings(path)
 		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
 	}
-
-	s, from, err := splitEnvelope(b, top)
-	if err != nil {
-		backupSettings(path)
-		return DefaultSettings(""), fmt.Errorf("%w: %s (%v)", ErrSettingsCorrupt, path, err)
-	}
-
-	if from > SchemaVersion {
-		// 不备份、不动它。这是别人（更新的版本）写的，我们无权处置。
+	if f.SchemaVersion != SchemaVersion {
 		return DefaultSettings(""), fmt.Errorf("%w: 文件是 v%d，我们只到 v%d（%s）",
-			ErrSettingsFromNewer, from, SchemaVersion, path)
+			ErrSettingsFromNewer, f.SchemaVersion, SchemaVersion, path)
 	}
-
-	if err := applyMigrations(&s, from); err != nil {
-		backupSettings(path)
-		return DefaultSettings(""), fmt.Errorf("app: 升级设置 %s 失败，已保留原文件: %w", path, err)
-	}
-	s.normalize()
-	return s, nil
+	f.AppSettings.normalize()
+	return f.AppSettings, nil
 }
 
-// parseSettingsFile 从一段字节里认出一份设置和它是第几版。
-//
-// 它和 `LoadSettings` 的区别只有一处：**不碰磁盘**。导入（`biuimport.go` 那边）
-// 拿到的是 Biu 的一份 JSON 字节、要认的形状和设置文件完全一样（两种，见文件头），
-// 让它先落盘再走 `LoadSettings` 是「为了读一份文件而写一份文件」——会覆盖用户
-// 现在的设置，而且报出来的错会指向一个临时路径。
-//
-// 返回的 from 是文件**自己说的**版本（没有 `schemaVersion` 键就是 0，见
-// `splitEnvelope`），调用方自己决定要不要走迁移链。
-func parseSettingsFile(b []byte) (Settings, int, error) {
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(b, &top); err != nil {
-		return Settings{}, 0, err
-	}
-	return splitEnvelope(b, top)
-}
-
-// marshalSettingsFile 按我们自己的 schema 把一份设置写成字节。
-//
-// 信封是 `{"schemaVersion": N, "appSettings": {...}}`（`settingsFile`），
-// 和 `SettingsStore.Flush` 写出去的是同一份形状——导出的那份配置**不带**这个
-// 信封，那是另一条路（见 `export.go`），因为 Biu 设置页「导出配置」下载的
-// 就是裸的 `appSettings`。
+// marshalSettingsFile 按当前版本的信封写出设置。
 func marshalSettingsFile(s Settings) ([]byte, error) {
 	return json.MarshalIndent(settingsFile{
 		SchemaVersion: SchemaVersion,
@@ -819,90 +600,17 @@ func marshalSettingsFile(s Settings) ([]byte, error) {
 	}, "", "  ")
 }
 
-// splitEnvelope 把一份设置文件拆成「设置」和「它是第几版」。
-//
-// 三种形状，认错任何一种的后果都是**静默丢设置**：
-//
-//  1. 我们自己写的：{"schemaVersion": 1, "appSettings": {...}}
-//  2. Biu 的 electron-store 落盘文件：{"appSettings": {...}, "__internal__": {...}}
-//     （`__internal__` 是 conf 的内部状态，标准库自动忽略，我们也不写回去）
-//  3. **Biu 设置页上「导出配置」下载的那份：裸的 `{...}`，外面没有信封。**
-//     `biu/src/pages/settings/export-import.tsx:19` 写的是
-//     `JSON.stringify(settingStore?.appSettings ?? defaultAppSettings, null, 2)`。
-//     用户真正拿得着的导入文件就是这一种。
-//
-// 判据只有一条：**顶层有没有 `appSettings` 这个键**。裸的那份里根本没有它
-// （那 20 个键是 autoStart、closeWindowOption……），两种形状不会认错。
-//
-// 裸的那份按 **v0** 读：它没有 schemaVersion 键，那就是 0，也就是「Biu 直接
-// 导出的那份」——和它带信封时走的是同一条迁移链，v0 那一步会把 Biu 自己那个
-// `"system-default"` 坏字体值修掉（`biu/src/store/settings.ts:37-39` 专门兼容
-// 它，旧版本导出的文件里就是会有）。
-func splitEnvelope(b []byte, top map[string]json.RawMessage) (Settings, int, error) {
-	if _, ok := top["appSettings"]; ok {
-		var f settingsFile
-		if err := json.Unmarshal(b, &f); err != nil {
-			return Settings{}, 0, err
-		}
-		return f.AppSettings, f.SchemaVersion, nil
-	}
-	var s Settings
-	if err := json.Unmarshal(b, &s); err != nil {
-		return Settings{}, 0, err
-	}
-	return s, 0, nil
-}
-
-// migration 把 v 升到 v+1。
-type migration func(*Settings) error
-
-// migrations 是迁移链。key 是**升级前**的版本号。
-var migrations = map[int]migration{
-	// v0：Biu 直接导出的文件（没有 schemaVersion）。
-	// 键名我们原样沿用，所以结构上不用搬东西，只要修掉 Biu 自己那个已知坏值。
-	0: func(s *Settings) error {
-		if s.FontFamily == "system-default" {
-			s.FontFamily = DefaultFontFamily
-		}
-		return nil
-	},
-}
-
-// applyMigrations 一路往上走。每一步失败就把错误交出去，绝不半途停下留个
-// 「一半新一半旧」的结果。
-func applyMigrations(s *Settings, from int) error {
-	for v := from; v < SchemaVersion; v++ {
-		m, ok := migrations[v]
-		if !ok {
-			return fmt.Errorf("没有从 schema v%d 升到 v%d 的路", v, v+1)
-		}
-		if err := m(s); err != nil {
-			return fmt.Errorf("v%d → v%d: %w", v, v+1, err)
-		}
-	}
-	return nil
-}
-
 // hexColor 是合法的颜色写法，和 MyGo 的 ui.Hex 接受的一样。
 // 这里自己写一份：本包不认识界面，不能 import mygo/ui。
 var hexColor = regexp.MustCompile(`^#([0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$`)
 
-// normalize 把明显不合理的值拉回合法区间。
-//
-// 这一步不是可选的洁癖：设置文件是用户能直接编辑的，也可能从 Biu、备份、
-// 手改的导入里来，一个 `borderRadius: 9999` 不该一路穿到画界面的那一行。
 func (s *Settings) normalize() {
 	s.BorderRadius = min(max(s.BorderRadius, 0), MaxBorderRadius)
 	if s.FontFamily == "" {
 		s.FontFamily = DefaultFontFamily
 	}
 	// 「没设过」和「被钳到区间里」是两件事，兜底值必须分开：
-	//
-	//   - 文件里没有这一格，或者写的是 0 → 给**默认的 200**，不是下限 160。
-	//     Biu 那边是 `sideMenuWidth ?? 200`（`biu/src/layout/side/index.tsx:49`），
-	//     兜底也是 200；而且下一次写盘就会把这个 200 永久写回去。少了这一条，
-	//     Biu 的旧导出、手写的设置文件第一次打开就变成 160，Biu 那边是 200。
-	//   - 写了但是越界（比如手改成 99999）→ 钳进 [160, 480]。
+	// 文件里没有这一格，或者写的是 0 → 给默认的 220；写了但是越界则钳进 [180, 300]。
 	if s.SideMenuWidth <= 0 {
 		s.SideMenuWidth = DefaultSideMenuWidth
 	} else {
@@ -915,9 +623,7 @@ func (s *Settings) normalize() {
 		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach,
 		ThemePresetCeladon, ThemePresetInkPaper, ThemePresetSandalwood,
 		ThemePresetIndigoNight, ThemePresetClassic)
-	// 🔴 **兜底是 `AudioQualityHigh` 不是无损**：认不出来的值（包括老设置文件
-	// 里存着的 `"auto"`，票 #581 删掉的那一档）归一成默认的有损档——裸的
-	// 「无损」拿不到就退档、杜比同理，但拿不到的前提是先得有声音。
+	// 认不出的值归一成默认的有损档；无损和杜比拿不到时由取流层退档。
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityHigh,
 		AudioQualityLossless, AudioQualityDolby, AudioQualityHigh,
 		AudioQualityMedium, AudioQualityLow)
@@ -928,8 +634,7 @@ func (s *Settings) normalize() {
 		PageTransitionScale, PageTransitionSlideUp)
 	s.CloseWindowOption = pickEnum(s.CloseWindowOption, CloseWindowHide,
 		CloseWindowHide, CloseWindowExit)
-	// 设置文件里没有 playMode 这一格时它是空串，normalize 会把它变成默认档，
-	// 于是「老版本升上来」和「新装」走的是同一条路。
+	// 设置文件里没有 playMode 这一格时它是空串，normalize 会把它变成默认档。
 	s.PlayMode = pickEnum(s.PlayMode, DefaultPlayMode, PlayModes...)
 	s.ProxySettings.Type = pickEnum(s.ProxySettings.Type, ProxyNone,
 		ProxyNone, ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5)
@@ -959,13 +664,7 @@ func (s *Settings) normalize() {
 	}
 	// 音量：钳进 [0, 1]。
 	//
-	// ⚠️ **「这一格不存在」和「这一格是 0」必须分开**：前者是老版本写的文件
-	// （那时候音量压根不落盘，每一次启动都是 100%），该给**默认值**；后者是用户
-	// 自己把滑块拉到最下（= 静音），该给 0。用 float64 的话两者读出来都是 0，
-	// 而「启动时突然没声」是最难查的一类回归——所以这一格是指针（见
-	// `Settings.Volume` 的注释）。
-	//
-	// 而 0 本身是合法的：用户把滑块拉到最下就是 0（= 静音，见 `App.SetVolume`）。
+	// 音量缺少时使用默认值，显式设置为 0 时保留静音值。
 	if s.Volume == nil {
 		v := DefaultVolume
 		s.Volume = &v
@@ -973,21 +672,12 @@ func (s *Settings) normalize() {
 		v := min(max(*s.Volume, 0), 1)
 		s.Volume = &v
 	}
-	// 「有更新了弹系统通知」：nil = 「这一格不存在」（老版本写的文件）→ **默认
-	// 开**。理由见 `Settings.UpdateNotification` 那一格。
+	// 有更新通知缺少时默认开启。
 	if s.UpdateNotification == nil {
 		v := true
 		s.UpdateNotification = &v
 	}
-	// 迷你播放器的歌词卷帘：nil = 这份设置里**没有这一格** = 默认**开**
-	// （票 #536）。
-	//
-	// ⚠️ **默认是开，所以 nil 要给 true 而不是 false**：这一格是新增的键，
-	// 而一份老设置文件读出来它就是 nil——给它 false 的话，「装上就有卷帘」
-	// 这件事对每一个老用户都不成立（而那正是票面要的）。
-	//
-	// ⚠️ **「用户关了」和「没设过」分得开**：前者是 `*ptr == false`，这里原样
-	// 留着；后者是 nil，这里给它默认。
+	// 迷你播放器歌词卷帘缺少时默认开启，用户明确关闭的值保持不变。
 	if s.MiniLyricsCurtain == nil {
 		v := DefaultMiniLyricsCurtain
 		s.MiniLyricsCurtain = &v

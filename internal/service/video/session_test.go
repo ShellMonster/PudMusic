@@ -3,8 +3,11 @@ package video
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/perf"
 )
 
 func fixture(t *testing.T) []byte {
@@ -20,6 +23,150 @@ func fetcher(b []byte) func(context.Context, int64, int64) ([]byte, error) {
 	return func(_ context.Context, from, to int64) ([]byte, error) {
 		to = min(to, int64(len(b)))
 		return b[from:to], nil
+	}
+}
+
+func TestSessionClosesWithNoTemporaryFilesLeft(t *testing.T) {
+	data := fixture(t)
+	dir := t.TempDir()
+	idx, err := ParseIndex(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var paths []string
+	open := func(path string, pool BufferPool) (*Source, error) {
+		mu.Lock()
+		paths = append(paths, path)
+		mu.Unlock()
+		s := newSource(pool)
+		go func() {
+			close(s.frames)
+			close(s.done)
+		}()
+		return s, nil
+	}
+	s := Start(Config{Fetch: fetcher(data), Open: open, TempDir: dir}, 0)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(paths)
+		mu.Unlock()
+		if n == len(idx.Segments) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.Close()
+
+	mu.Lock()
+	got := append([]string(nil), paths...)
+	mu.Unlock()
+	if len(got) != len(idx.Segments) {
+		t.Fatalf("opened %d segments, want %d", len(got), len(idx.Segments))
+	}
+	if len(got) == 0 {
+		t.Fatal("no segment paths recorded")
+	}
+	for _, path := range got {
+		if path != got[0] {
+			t.Fatalf("segment temporary path changed: %q then %q", got[0], path)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary directory has %d entries after close", len(entries))
+	}
+}
+
+func TestSessionCloseRecyclesPendingAndQueuedFrames(t *testing.T) {
+	var g perf.Gauges
+	pool := newFramePool(64<<10, &g)
+	// 先按四块小缓冲的尺寸借出来，再原样交回，让池子记着它们的账。
+	pix := make([][]byte, 4)
+	for i := range pix {
+		b, err := pool.Acquire(1<<10, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pix[i] = b
+	}
+	s := &Session{
+		pool:   pool,
+		cancel: func() {},
+		done:   make(chan struct{}),
+		out:    make(chan Frame, 3),
+	}
+	close(s.done)
+	s.pend = &Frame{Pix: pix[0]}
+	s.prevPix = pix[1]
+	s.out <- Frame{Pix: pix[2]}
+	s.out <- Frame{Pix: pix[3]}
+
+	s.Close()
+	if st := pool.stats(); st.Lent != 0 || st.Allocated != 0 {
+		t.Fatalf("close 之后池里还有账: %+v", st)
+	}
+	if got := g.Snapshot().FramePoolBytes; got != 0 {
+		t.Fatalf("close 之后 gauge = %d, want 0", got)
+	}
+	if s.pend != nil || s.prevPix != nil {
+		t.Fatal("session retained a pending or displayed frame after close")
+	}
+}
+
+func TestSourceCloseIsConcurrentAndIdempotent(t *testing.T) {
+	s := newSource(nil)
+	go func() {
+		close(s.frames)
+		close(s.done)
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Close()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestSourceCloseReturnsQueuedFramesToThePool(t *testing.T) {
+	var g perf.Gauges
+	pool := newFramePool(64<<10, &g)
+	s := newSource(pool)
+	for i := 0; i < frameQueueDepth; i++ {
+		b, err := pool.Acquire(1<<10, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.frames <- Frame{Pix: b}
+	}
+	if st := pool.stats(); st.Lent != frameQueueDepth<<10 {
+		t.Fatalf("排队时 stats = %+v", st)
+	}
+	go func() {
+		close(s.frames)
+		close(s.done)
+	}()
+	s.Close()
+	st := pool.stats()
+	if st.Lent != 0 {
+		t.Fatalf("Close 之后队列里的帧没还回去: %+v", st)
+	}
+	// gauge 只报「借出去还没还」的字节，Close 之后必须归零。空闲缓冲还在池里
+	// （关闭后会被 close() 一起丢掉，见下一个断言）。
+	if got := g.Snapshot().FramePoolBytes; got != 0 {
+		t.Fatalf("Close 之后 gauge = %d, want 0", got)
+	}
+	pool.close()
+	if st := pool.stats(); st.Allocated != 0 {
+		t.Fatalf("close 之后池里还持有分配: %+v", st)
 	}
 }
 

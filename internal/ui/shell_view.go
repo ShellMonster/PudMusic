@@ -87,8 +87,18 @@ func (s *Shell) View(c *ui.Context) {
 	}
 
 	if s.crash != nil {
+		// 热词轮换的表也收掉：崩溃页没有顶栏，`syncHotwords` 到不了，不收的话
+		// 它每 5 秒叫醒一次画一帧没人看的崩溃页（见 navbar_hotword.go 文件头）。
+		s.stopHotword()
 		s.viewCrash(c)
 		return
+	}
+	// Take one shared page seam snapshot before drawing any page. All page
+	// modules read this frame input instead of independently sampling App state.
+	// A mini shell can be exercised with its App temporarily detached by the
+	// panic-recovery test; leave that failure inside the guarded draw callback.
+	if s.app != nil {
+		s.framePage = s.pageSeam()
 	}
 	s.draw(c)
 
@@ -212,16 +222,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 「刷新数据」那一趟回来的话（成了几个 / 为什么没成 / 已经在刷了）。
 	// 同样每帧取一次，取走就没了——理由见 reportFavoritesRefresh。
 	s.reportFavoritesRefresh()
-	// 启动时自动导入的结果，第一帧弹一条 toast 说一声。
-	//
-	// 为什么非弹不可：任务要求「凭据可以不迁，**要提示重新登录**」。那句提示只在
-	// 设置页「配置」那一段里，而用户不会主动去那儿——他在启动时什么也没点，
-	// 然后发现要重新登录，而界面上从头到尾没提过发生过一次导入。
-	//
-	// 排在 `syncSearchWatch` 之后：这一句会 `addToast`，而上面那一句收的是
-	// 「搜索页那个钟」的状态。两句互不相干，先后无所谓，但**都必须在
-	// `s.app.Snapshot()` 之前**——那一行拿的是这一帧要画的播放状态。
-	s.announceMigration()
 
 	// ⚠️ **这一帧只取一次快照**：底层那一层（`drawUnderlay`）和满屏播放器
 	//（`viewFullPlayer`）看的是同一份播放状态——两次取的话两者之间播放状态可能

@@ -2,14 +2,14 @@
 // 逐段抄，顺序也照抄（外观 / 播放 / 下载 / 搜索 / 系统）。
 //
 // ⚠️ 这一段曾经写着「这一份里没有导入导出配置（PLAN 9.12）」——那句话在说它
-// 做的**那一天**就是错的。`settingsConfig`（导出 / 导入 / 从 Biu 导入）在
+// 做的**那一天**就是错的。`settingsConfig`（导出 / 导入）在
 // **`settings_tab_config.go`**，由本文件末尾的 `settingsGeneral` 调它摆出来；
 // 版本号与检查更新也早就在 `update_entry.go` 里了（自动更新，commit `8c936d4`）。
 // PLAN 9.12 是「持久化迁移」，跟导入导出配置无关，那个编号也是照错的。
 //
 // 现在的分工照着读：**外观 / 播放 / 下载 / 搜索 / 系统**在这一份；「关于应用」
 // （版本号 + 检查更新 + 更新日志）在 `update_entry.go`；「配置」（导出 / 导入 /
-// 从 Biu 导入）在 `settings_tab_config.go`，摆在这一页的最末尾。
+// 导入）在 `settings_tab_config.go`，摆在这一页的最末尾。
 //
 // 顺带记一句为什么它们要拆开：Biu 那边是长在同一段里的，我们拆开是因为改的不是
 // 同一样东西——更新器的状态在 `App` 上，用户设置的状态在设置文件里，而只读保护
@@ -102,6 +102,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 			func() { s.pickFont(c, st, ro) })
 		s.settingRow(c, "圆角", "",
 			func() { s.pickRadius(c, st, ro) })
+		s.settingRow(c, "背景清晰度", "",
+			func() { s.pickBackdropClarity(c, st, ro) })
 
 	})
 	s.settingGroup(c, "播放", func() {
@@ -172,7 +174,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		s.settingRow(c, "开机自启", "",
 			func() { s.pickAutoStart(c, st, ro) })
 
-		// 「关于应用」摆在最后，照 Biu 的 `system-settings.tsx` 那一段的顺序。
+		// 「关于应用」摆在最后。
 		//
 		// ⚠️ 它**不是** `settingRow`，也不吃 `ro`：更新那一摊的状态在 `App` 上，不在
 		// 设置文件里，而「只读」保护的是**设置文件**——更新器写的是自己那一份
@@ -180,14 +182,11 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
 		// 更新入口关掉。
 		//
-		// ⚠️ 顺序：**在**「配置」段（导出 / 导入 / 从 Biu 导入）**之前**。Biu 那边
-		// 导入导出就是长在「关于应用」这一段里的——版本号 + 检查更新那一行之后
-		// 紧接着就是 `<ImportExport />`（`system-settings.tsx:388-402`）。两边各自
-		// 加了一段，谁在前谁在后没人对过，这里按 Biu 定下来。
+		// 配置导出和导入放在关于应用之后。
 	})
 	s.settingsUpdate(c, s.app.UpdateSnapshot(), ro)
 
-	// 「配置」段（导出 / 导入 / 从 Biu 导入），照 Biu 的位置。
+	// 「配置」段（导出 / 导入）。
 	s.settingsConfig(c)
 }
 
@@ -281,6 +280,26 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 		// 应用层把这一笔同步给正在放的那首（`UpdateSettings` → `SetAudioQuality`）。
 		// 切到无损/杜比的那一下说一句降档规矩——只在切换时说，理由见那边的注释。
 		qualitySwitchToast(s, app.PrefToBili(quality))
+	}
+}
+
+// pickBackdropClarity 是「背景清晰度」那一格（票 #666）。
+//
+// 满屏播放器的背景本来是「封面放大四倍、明显模糊」——清晰度天生就低。这一格
+// 让用户自己挑，三档按**像素量级**分（27 万 / 103 万 / 397 万像素）。
+//
+// ⚠️ **标签要说清代价**：只写「高清」的话用户不知道它要下多大的图。所以
+// 「高清」后面带了那半句。
+func (s *Shell) pickBackdropClarity(c *ui.Context, st app.Settings, ro bool) {
+	items := []enumItem[app.BackdropClarity]{
+		{value: app.BackdropClaritySmooth, label: "流畅"},
+		{value: app.BackdropClarityClear, label: "清晰"},
+		{value: app.BackdropClarityHD, label: "高清（流量更大）"},
+	}
+	clarity := st.BackdropClarity
+	enumSelect(c, &clarity, items, "选择背景清晰度", s.settingsControlFitW(c, selectWidth), 0, ro)
+	if clarity != st.BackdropClarity {
+		s.applySetting("背景清晰度", func(cur *app.Settings) { cur.BackdropClarity = clarity })
 	}
 }
 

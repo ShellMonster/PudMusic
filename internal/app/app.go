@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -343,6 +344,17 @@ type App struct {
 	// 挂上去之前是 nil，界面要判空。
 	account *Account
 
+	// 这些是按 App 生命周期拥有的挂载模块。它们不放在包级注册表里，
+	// 这样关闭一个 App 就能一次性摘掉它的所有模块和 keyed page state。
+	settings      *settingsSlot
+	recommend     *Recommend
+	library       *Library
+	favorites     *Favorites
+	exploreClient *bili.Client
+	search        *Search
+	spaces        map[int64]*UpSpace
+	exploreGen    uint64
+
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
 	streaming *Streaming
 
@@ -598,9 +610,15 @@ type App struct {
 	// 唯一凭据——串了的话，事后排查会拿着另一首歌的日志找原因。
 	playLog func(format string, args ...any)
 
-	// fullPlayerPrefs 是全屏播放器自己那一份偏好（见 fullplayer_prefs.go）。
-	// 挂上之前是 nil，`FullPlayerPrefs` 判空之后给默认值。
-	fullPlayerPrefs *fullPlayerPrefsStore
+	// fullPlayerPrefsMu serializes mounting and closing the fullplayer store. A mount
+	// must finish closing the previous writer before publishing its replacement.
+	fullPlayerPrefsMu sync.Mutex
+	fullPlayerPrefs   *fullPlayerPrefsStore
+	// fullPlayerPrefsPending keeps an update made after the current store was
+	// detached in memory until the next mount can attach it to a persisted store.
+	fullPlayerPrefsPending    FullPlayerPrefs
+	fullPlayerPrefsPendingSet bool
+	fullPlayerPrefsDetached   bool
 	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
 	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
 	specBars []float32
@@ -664,7 +682,9 @@ type App struct {
 	// ⚠️ **它有自己的锁（`commentsMu`），不在 `a.mu` 里**：写它的是网络往返回来的
 	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
 	// 同 `likeMu` / `partsMu`。
-	commentsMu sync.Mutex
+	// commentsMu sync.Mutex
+	commentsMu     sync.Mutex
+	commentsCancel context.CancelFunc
 	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
 	commentsSlot string
 	// comments 是已经拿到的那些评论（主列表）。
@@ -974,7 +994,7 @@ type wakeEntry struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog}
+		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace)}
 	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
 	// 而它在「第一次取流有结果了」之前都算「还没准备好」——
 	// 界面上要靠它说一句话（见 App 里 `starting` 那段注释）。
@@ -994,8 +1014,13 @@ func New() *App {
 	return a
 }
 
-// logf 往**播放路径**的日志里写一句。
-//
+// isClosed 报告 App 是否已进入关闭流程。
+func (a *App) isClosed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed
+}
+
 // 🔴 **出口可以是 nil**：没装（或者被换成了 nil）时这句话就丢了——
 // 日志不是功能，丢了不许把整个应用带下去。
 func (a *App) logf(format string, args ...any) {
@@ -1334,7 +1359,6 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		}
 		return err
 	}
-
 	a.mu.Lock()
 	old := a.player
 	// 倍率和音量一样是「用户选的那个值」，换歌之后照旧——见 App.rate 那段。
@@ -1343,6 +1367,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 记的还是用户设的值（取消静音放回去的就是它）。
 	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetEQ(a.eqGains)
 	a.applyFadeInLocked(p)
+	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
@@ -1744,12 +1769,25 @@ func (a *App) ClearTrack() {
 
 // Close 停掉播放、关掉解码器和文件句柄，并停掉后台时钟。可以重复调用。
 func (a *App) Close() {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
 		return
 	}
 	a.closed = true
+	a.recommend, a.library, a.favorites = nil, nil, nil
+	a.exploreClient = nil
+	a.search = nil
+	oldSpaces := a.spaces
+	a.spaces = nil
+	a.wakeMu.Lock()
+	a.wakes = nil
+	a.wakeMu.Unlock()
+	a.announceMu.Lock()
+	a.announces = nil
+	a.announceMu.Unlock()
 	p := a.player
 	a.player = nil
 	a.playing = false
@@ -1762,8 +1800,16 @@ func (a *App) Close() {
 	rep := a.report
 	a.report = nil
 	at := a.position
+	settings := a.settings
+	fullPlayerPrefs := a.fullPlayerPrefs
+	a.fullPlayerPrefs = nil
+	a.wake = nil
+
 	a.mu.Unlock()
 
+	for _, s := range oldSpaces {
+		s.invalidate()
+	}
 	close(a.done)
 
 	// 「上次听到哪儿」这一格：**退出前强制落一次**。
@@ -1773,7 +1819,21 @@ func (a *App) Close() {
 	//
 	// 排在 `close(a.done)` 之后：后台时钟已经停了，不会再有别的 goroutine 来
 	// 改这一格，落下去的就是**最后那个状态**。
+	// 设置的后台合并写也要在退出时同步收尾。
 	a.SavePlayback()
+	if settings != nil && settings.store != nil {
+		_ = settings.store.Close()
+	}
+	if fullPlayerPrefs != nil {
+		if err := fullPlayerPrefs.Close(); err != nil {
+			log.Printf("biu: 退出时保存全屏播放器偏好失败：%v", err)
+		}
+	}
+	a.mu.Lock()
+	if a.settings == settings {
+		a.settings = nil
+	}
+	a.mu.Unlock()
 
 	// 播放记录先结掉这一轮，再关那条 goroutine。
 	//
