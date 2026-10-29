@@ -13,7 +13,10 @@ import (
 // Keep JPEG's original Huffman/IDCT precision and the existing ApproxBiLinear
 // samples. Only the decoder's storage changes: two MCU rows replace the full
 // YCbCr/Gray source. The callback consumes completed rows before their reuse.
-func decodeJPEGStored(data []byte) (*image.RGBA, bool, error) {
+func decodeJPEGStored(data []byte, maxSide int) (*image.RGBA, bool, error) {
+	if maxSide <= 0 {
+		maxSide = maxStoredSide
+	}
 	if len(data) < 2 || data[0] != 0xff || data[1] != 0xd8 {
 		return nil, false, nil
 	}
@@ -24,14 +27,14 @@ func decodeJPEGStored(data []byte) (*image.RGBA, bool, error) {
 	if cfg.Width <= 0 || cfg.Height <= 0 {
 		return nil, true, errors.New("imgcache: JPEG has no pixels")
 	}
-	if max(cfg.Width, cfg.Height) <= maxStoredSide {
+	if max(cfg.Width, cfg.Height) <= maxSide {
 		return nil, false, nil
 	}
 	var dst *image.RGBA
 	next := 0
 	err = jpegrows.Decode(bytes.NewReader(data), func(src image.RGBA64Image, ready int) {
 		if dst == nil {
-			dst = image.NewRGBA(storedBounds(cfg.Width, cfg.Height))
+			dst = image.NewRGBA(boundsWithMaxSide(cfg.Width, cfg.Height, maxSide))
 		}
 		end := next
 		yscale := float64(cfg.Height) / float64(dst.Rect.Dy())

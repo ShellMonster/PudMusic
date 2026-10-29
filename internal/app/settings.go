@@ -149,6 +149,53 @@ const (
 	DisplayModeCompact DisplayMode = "compact"
 )
 
+// BackdropClarity 是**满屏播放器背景的清晰度**（票 #666）。
+//
+// 背景那一层本来是「封面放大四倍、明显模糊」（照 Biu 的 `glassmorphism.ts`），
+// 所以它**清晰度天生就低**。这一格让用户自己挑：
+//
+//	流畅  画布 = 窗口的 1/4，σ=32 DIP（**默认**，也是从前的样子）
+//	清晰  画布 = 窗口的 1/2，σ=16 DIP
+//	高清  画布 = 窗口的 1/1，σ=8 DIP
+//
+// ⚠️ **画布越大，要的源图越大、GPU 模糊也越贵**——三档是按「像素量级」分的
+// （27 万 / 103 万 / 397 万像素，见票面）。
+type BackdropClarity string
+
+const (
+	BackdropClaritySmooth BackdropClarity = "smooth"
+	BackdropClarityClear  BackdropClarity = "clear"
+	BackdropClarityHD     BackdropClarity = "hd"
+)
+
+// 画布是窗口的几分之一（对应上面那三档）。
+//
+// ⚠️ **它是「分母」**：4 表示画布 = 窗口 / 4。值越小画布越大、越清晰。
+func (c BackdropClarity) CanvasDivisor() float64 {
+	switch c {
+	case BackdropClarityClear:
+		return 2
+	case BackdropClarityHD:
+		return 1
+	}
+	return 4
+}
+
+// BlurDIP 是这一档在**屏幕上**的模糊半径（DIP）。
+//
+// ⚠️ **画布越大、σ 越小**：模糊的观感要跟着画布走——画布是 1/4 时 σ=32 正好
+// 「把细节全糊掉」，画布放大四倍之后同样的 32 DIP 会糊得太狠（糊成一片纯色），
+// 于是按同样的比例降到 8。
+func (c BackdropClarity) BlurDIP() float64 {
+	switch c {
+	case BackdropClarityClear:
+		return 16
+	case BackdropClarityHD:
+		return 8
+	}
+	return 32
+}
+
 // 页面切换动画。
 type PageTransition string
 
@@ -292,6 +339,8 @@ type Settings struct {
 
 	// PlayMode 是播放模式（顺序 / 循环 / 随机 / 单曲）。
 	PlayMode PlayMode `json:"playMode"`
+	// BackdropClarity 是满屏播放器背景的清晰度（票 #666）。空串 = 流畅。
+	BackdropClarity BackdropClarity `json:"backdropClarity"`
 	// ShouldKeepPagesOrderInRandomPlayMode 是「随机时保持分集顺序」。
 	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
 

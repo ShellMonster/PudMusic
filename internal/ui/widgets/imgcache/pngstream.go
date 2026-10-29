@@ -24,12 +24,15 @@ import (
 // Other PNG variants and other formats still use their standard decoders. This
 // is deliberately not a replacement PNG codec. Chunk CRCs, filters, the zlib
 // checksum and even un-sampled trailing rows must validate before publishing.
-func decodePNGStored(data []byte) (*image.RGBA, bool, error) {
+func decodePNGStored(data []byte, maxSide int) (*image.RGBA, bool, error) {
+	if maxSide <= 0 {
+		maxSide = maxStoredSide
+	}
 	if len(data) < 33 || string(data[:8]) != "\x89PNG\r\n\x1a\n" || string(data[12:16]) != "IHDR" {
 		return nil, false, nil
 	}
 	w, h := int64(binary.BigEndian.Uint32(data[16:20])), int64(binary.BigEndian.Uint32(data[20:24]))
-	if data[24] != 8 || (data[25] != 2 && data[25] != 6) || data[28] != 0 || max(w, h) <= maxStoredSide {
+	if data[24] != 8 || (data[25] != 2 && data[25] != 6) || data[28] != 0 || max(w, h) <= int64(maxSide) {
 		return nil, false, nil
 	}
 	// Bound scratch rows; leave unusually wide/tall images to the existing
@@ -107,7 +110,7 @@ func decodePNGStored(data []byte) (*image.RGBA, bool, error) {
 	src := &pngRows{r: zr, rect: image.Rect(0, 0, int(w), int(h)), bpp: bpp, y: -1}
 	src.rows[0] = make([]byte, int(w)*bpp+1)
 	src.rows[1] = make([]byte, int(w)*bpp+1)
-	dst := image.NewRGBA(storedBounds(int(w), int(h)))
+	dst := image.NewRGBA(boundsWithMaxSide(int(w), int(h), maxSide))
 	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), src, src.Bounds(), xdraw.Src, nil)
 	for src.y < int(h)-1 && src.err == nil {
 		src.next()

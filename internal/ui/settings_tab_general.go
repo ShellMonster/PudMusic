@@ -102,6 +102,8 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 			func() { s.pickFont(c, st, ro) })
 		s.settingRow(c, "圆角", "",
 			func() { s.pickRadius(c, st, ro) })
+		s.settingRow(c, "背景清晰度", "",
+			func() { s.pickBackdropClarity(c, st, ro) })
 
 	})
 	s.settingGroup(c, "播放", func() {
@@ -278,6 +280,26 @@ func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 		// 应用层把这一笔同步给正在放的那首（`UpdateSettings` → `SetAudioQuality`）。
 		// 切到无损/杜比的那一下说一句降档规矩——只在切换时说，理由见那边的注释。
 		qualitySwitchToast(s, app.PrefToBili(quality))
+	}
+}
+
+// pickBackdropClarity 是「背景清晰度」那一格（票 #666）。
+//
+// 满屏播放器的背景本来是「封面放大四倍、明显模糊」——清晰度天生就低。这一格
+// 让用户自己挑，三档按**像素量级**分（27 万 / 103 万 / 397 万像素）。
+//
+// ⚠️ **标签要说清代价**：只写「高清」的话用户不知道它要下多大的图。所以
+// 「高清」后面带了那半句。
+func (s *Shell) pickBackdropClarity(c *ui.Context, st app.Settings, ro bool) {
+	items := []enumItem[app.BackdropClarity]{
+		{value: app.BackdropClaritySmooth, label: "流畅"},
+		{value: app.BackdropClarityClear, label: "清晰"},
+		{value: app.BackdropClarityHD, label: "高清（流量更大）"},
+	}
+	clarity := st.BackdropClarity
+	enumSelect(c, &clarity, items, "选择背景清晰度", s.settingsControlFitW(c, selectWidth), 0, ro)
+	if clarity != st.BackdropClarity {
+		s.applySetting("背景清晰度", func(cur *app.Settings) { cur.BackdropClarity = clarity })
 	}
 }
 
