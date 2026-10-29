@@ -733,12 +733,13 @@ func (l *List) View(c *ui.Context) {
 	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).
 		FillWidth().
-		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
-		// 理由见 `selection.go` 的 KeyboardMode）。
+		// ⚠️ **听一听输入**：两件事——知道「上一次是键盘还是指针」（焦点环靠它，
+		// 理由见 `selection.go` 的 KeyboardMode），以及 ⌘C 复制选中那一行的歌名
+		// （票 #685，理由见 `copy_title.go` 的文件头）。
 		//
-		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
-		// 焦点都还在。
-		HandleInput(l.keys.Input).
+		// ⚠️ **只有真的复制了才吃掉事件**：其它一律返回 false，方向键挪游标、
+		// 点击选行、Tab 换焦点都还在。
+		HandleInput(l.input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。
 		//

@@ -825,7 +825,27 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				shadow.TailwindLG(imgcache.Loading(c, collectionCoverW, collectionCoverH, imgcache.Shape{}))
 			}
 
-			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Children(func() {
+			// 🔴 **文字那一列是可选中复制的**（票 #685）：用户想复制的是「这个
+			// 收藏夹叫什么、简介写了什么」——拖一下、Cmd+C 就该粘得出来。
+			//
+			// ⚠️ **作用域给在**这一列**上，不给每一行各来一次**：一个容器上的
+			// `Selectable` 让里面所有 Text / RichText 共用一个选择
+			// （`mygo/ui/api_gen.go` 的 `Selectable`：「On a container, its Text
+			// and RichText descendants share one selection. Copy joins their
+			// selected text with newlines, in the order they were built.」）。
+			// 逐行各加一次的话，从标题拖到简介时第一行会掉出作用域——用户得
+			// 复制三次，而他要的是「一整段」。
+			//
+			// ⚠️ **创建者那一行不用 `Unselectable`**：那个名字是
+			// `list.OwnerName`（一枚 `ButtonBase` 做的名字型链接），而框架对
+			// 控件里的字本来就不给选（同一份文档：「Text inside controls, such
+			// as buttons and text inputs, keeps the control's interaction」；
+			// 判据在 `mygo/ui/textselection.go` 的 `prepareSelectable`：祖先带
+			// `flagClickable` 就停）。多加一道 `Unselectable` 反而会把这一行
+			// **整个**踢出选择作用域，将来它旁边真要加一段说明字也选不了了。
+			//
+			// ⚠️ **封面不在这**一列里：它在外面那个 `Row` 里，是图片、没有字。
+			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Selectable().Children(func() {
 				// ⚠️ **这个标题是 30（`scale.CollectionTitle`），不是页标题那个数**：
 				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
 				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, scale.CollectionTitle)).Bold().

@@ -616,6 +616,18 @@ func (g *Grid) Hot() bool { return g.hot }
 // `mygo/ui/list.go` 的 `listInput`：它只在「这张列表有游标」时才导航。）
 func (g *Grid) gridInput(ev ui.InputEvent) bool {
 	g.keys.Input(ev)
+	// ⌘C 复制选中那一格的歌名（票 #685）。
+	//
+	// ⚠️ **列表那一档是同一件事**（`copy_title.go` 的 `copyCommand` /
+	// `notifyCopied`）：收藏夹页按设置在两档之间切（`SwitchView`），而「选一首、
+	// ⌘C」在网格里也该成——不然同一个页面两种摆法两种行为。
+	if copyCommand(ev) && g.acts.Copy != nil {
+		if m, ok := g.Selected(); ok {
+			g.acts.Copy(ShowOf(m).Title)
+			notifyCopied(g.acts)
+			return true
+		}
+	}
 	if ev.Kind != ui.InputKeyDown {
 		return false
 	}

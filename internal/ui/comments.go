@@ -680,8 +680,21 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px6).Children(func() {
 			// 第一行：昵称 + 等级 + 徽章 + 时间。
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
+				// 🔴 **昵称可以拖选复制**（票 #685）：用户经常要把「谁说的」复制
+				// 出去（去搜这个人、去举报、发给别人）。原先这一页一个字都选不
+				// 中——拖选之后按 Cmd+C，剪贴板是空的。
+				//
+				// ⚠️ **只加在昵称这一格上，不给整个 `Row` 加 `Selectable`**：这一
+				// 行里还有带底色的等级 / 「UP 主」/「官方认证」三枚徽章和右边那句
+				// 时间，容器级选择会把它们一起拖进复制的字里（变成
+				// 「昵称\nUP 主\n3天前」那样）。用户要的是那个名字。
+				//
+				// ⚠️ **正文那一格没跟着做**：它是自己排版、自己画的
+				// （`shapeCommentBody` + `commentBody.paint`），改它会和
+				// `work/684-highlight` 在同一个函数上硬冲突——那一半单独一票
+				// （理由见 `selectable_copy_test.go` 顶上那一段）。
 				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text).
-					MaxLines(1).Ellipsis("…")
+					MaxLines(1).Ellipsis("…").Selectable()
 				// ⚠️ **徽章是「一段带底色的字」，不是一个盒子套一段字**：
 				// 后者要多一个闭包（= 一次分配），而这一行每一帧都要重建一次
 				// ——一屏十来行就是十来次（理由同 `framebudget_test.go` 盯着的
@@ -739,8 +752,9 @@ func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentR
 			commentReplyAvatar, commentReplyAvatar, commentReplyAvatar/2)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
+				// 楼中楼的昵称同样可以拖选复制（理由同 `viewCommentRow` 那一处）。
 				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text).
-					MaxLines(1).Ellipsis("…")
+					MaxLines(1).Ellipsis("…").Selectable()
 				if cm.IsUpper {
 					s.viewCommentBadge(c, "UP 主", t.Accent, t.AccentText)
 				}
