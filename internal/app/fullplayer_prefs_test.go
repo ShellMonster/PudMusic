@@ -367,6 +367,23 @@ func waitFullPlayerPrefsWrite(t *testing.T, written <-chan []byte) []byte {
 	}
 }
 
+func waitFullPlayerPrefsWritePath(t *testing.T, written <-chan string) string {
+	t.Helper()
+	select {
+	case path := <-written:
+		return path
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for preference write path")
+		return ""
+	}
+}
+
+func currentFullPlayerPrefsStore(a *App) *fullPlayerPrefsStore {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fullPlayerPrefs
+}
+
 func waitForFullPlayerPrefsError(t *testing.T, errCh <-chan error, want error) {
 	t.Helper()
 	select {
