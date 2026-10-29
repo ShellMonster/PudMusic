@@ -40,8 +40,6 @@
 package ui
 
 import (
-	"sort"
-
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo/ui"
 )
@@ -110,12 +108,19 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 
 // paintDanmaku 画这一帧该在屏幕上的那几条弹幕。
 //
-// ⚠️ **它每一帧都从 `d` 现算**（包括窗口二分和轨道分配）：只重绘的那些帧用的
+// ⚠️ **它每一帧都从 `d` 现算**（包括窗口推进和轨道分配）：只重绘的那些帧用的
 // 是**建树那一遍记下的回调**，闭包里存着的任何「那一帧的可见列表」到这里都
 // 是过期的。
 //
-// 每帧的工作量是「窗口里那几条」（同屏上限 12）——不是整份弹幕列表：时间索引
-// 和窗口二分是 #647 交付的（`d.itemsByTime` + `sort.Search`）。
+// # 每帧的工作量（票 #670）
+//
+//   - 窗口：`advance` 只把**新进入窗口**的条目过一遍（游标只前进），稳态帧里
+//     游标不动——一次 `sort.Search` 都不做；
+//   - 活动集合：最多同屏 12 条（`danmakuMaxOnScreen`），`expire` 原地压缩；
+//   - 绘制：就那 12 条，逐条算位置、画字。
+//
+// 时间索引和窗口二分仍然是 #647 交付的那一份（`d.itemsByTime` + `sort.Search`，
+// 见 `danmakuLayer.rewind`）——这一票没有重新实现它，只是不再每帧都二分。
 func (s *Shell) paintDanmaku(p *ui.Painter, r ui.Rect) {
 	d := &s.full.danmaku
 	if !d.ready || len(d.itemsByTime) == 0 {
@@ -127,59 +132,9 @@ func (s *Shell) paintDanmaku(p *ui.Painter, r ui.Rect) {
 	// 「前一条走出 30% 的宽度」换算成时间（毫秒）。
 	spacingMS := int64(float64(r.W) * danmakuTrackSpacingRatio * 1000 / danmakuSpeed)
 
-	// 收掉已经整个出界的那些（它们占的轨道要让给后来的）。
-	d.expire(posMS)
-
-	// 此刻该在屏幕上的那几条。
-	//
-	// ⚠️ **窗口是「从它自己的时间到当前位置」**：还没到的（age < 0）不画，
-	// 已经走完的（age 超过「(封面宽 + 字宽) / 速度」）也不画。
-	vis := d.buf[:0]
-	// `itemsByTime` 已经按时间稳定排序；从当前位置往前推粗略窗口的起点，
-	// 再向后扫描到第一个未来时间，避免每帧遍历完整弹幕列表。
-	startMS := posMS - int64((float64(r.W)+float64(d.maxTextBytes)*float64(d.fontSize))*1000/danmakuSpeed)
-	start := sort.Search(len(d.itemsByTime), func(i int) bool { return d.itemsByTime[i].TimeMS >= startMS })
-	end := sort.Search(len(d.itemsByTime), func(i int) bool { return d.itemsByTime[i].TimeMS > posMS })
-	for _, it := range d.itemsByTime[start:end] {
-		if it.ID == "" {
-			// 没有 rowid ⇒ 认不出它 ⇒ 不画。
-			//
-			// ⚠️ **不是「兜底给它一个 key」**：槽位是按 rowid 记的，没有身份
-			// 就没法稳定（生产上 rowid 一定有，见 `internal/service/bili` 的
-			// `Danmaku.ID`）。
-			continue
-		}
-		age := posMS - it.TimeMS
-		if age < 0 {
-			continue
-		}
-		// ⚠️ **粗筛只是「上界」**：早该出界的那些不排版（量字宽要排一次版）。
-		// 它**不是**一个硬上限——本票评审提过一个 major：一条 15 秒的硬上限
-		// 把 40 字的长弹幕在第 17 秒整条滤掉了，而那时它的右缘还在封面里
-		// （按 60 px/s 算）。见 `danmakuAgeBoundMS`。
-		if age > danmakuAgeBoundMS(it.Text, d.fontSize, r.W) {
-			continue
-		}
-		w := d.widthOf(p, it.ID, it.Text, d.fontSize)
-		if age > int64((float64(r.W)+float64(w))*1000/danmakuSpeed) {
-			continue
-		}
-		vis = append(vis, danmakuVisible{item: it, ageMS: age, width: w})
-	}
-	// ⚠️ **按时间排**：轨道是按「谁先入场」定的（B 站那样），所以顺序不能乱。
-	// （索引已经排好了，这里稳一下「同一时刻的两条」——它们的先后决定轨道。）
-	danmakuSortByTime(vis)
-	d.buf = vis
-
-	// 给新出现的那些找轨道（老的那几条的位置不动）。
-	for i := range vis {
-		v := &vis[i]
-		slot, known := d.slots[v.item.ID]
-		if !known {
-			slot = d.assign(v.item, v.width, spacingMS, r.W)
-		}
-		v.lane = slot.lane
-	}
+	// 把时间窗口推到当前位置：新进入的条目在这里分轨道、量字宽（只做一次），
+	// 出界的那些在这里收掉。
+	d.advance(p, posMS, r.W, spacingMS)
 
 	// 画。⚠️ **裁到封面那一块**：走出左边沿的弹幕直接出界（报告 §3.3：不淡出）。
 	// 不裁的话它们会飘到满屏的别处去。
@@ -191,15 +146,11 @@ func (s *Shell) paintDanmaku(p *ui.Painter, r ui.Rect) {
 	// 只有一张画布那么大，位置是算出来的，折行会把字叠到别的轨道上去。
 	customFont := p.Theme().Font != ""
 	p.Clip(r, 0, func() {
-		for i := range vis {
-			v := &vis[i]
-			if v.lane < 0 {
-				// 没有轨道可放 ⇒ **丢掉这一条**（报告 §3.3：不排队）。
-				continue
-			}
+		for i := range d.active {
+			v := &d.active[i]
 			// 入场那一点是封面的右沿；走了多远由它自己的年龄算。
-			x := r.X + r.W - float32(v.ageMS)*danmakuSpeed/1000
-			y := r.Y + float32(v.lane)*d.trackH
+			x := r.X + r.W - float32(posMS-v.slot.timeMS)*danmakuSpeed/1000
+			y := r.Y + float32(v.slot.lane)*d.trackH
 			color := danmakuColorOf(v.item.Color)
 			if customFont {
 				// ⚠️ **用户换了字体才走这一支**：那一档下 `p.Text` 用的是
