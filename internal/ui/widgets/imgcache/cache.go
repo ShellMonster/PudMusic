@@ -434,6 +434,32 @@ func (c *Cache) GetSized(url string, w, h float32) State {
 	return c.Get(c.rememberedSizedURL(url, pw, ph))
 }
 
+// GetSizedCapped 是 `GetSized` 加一个「**这一格最多要多大**」的上限。
+//
+// cap 是**长边的上限**（像素），0 = 不限。
+//
+// # 谁用
+//
+// **满屏播放器的背景**（`internal/ui/fullplayer.go`）——它**故意**要大的那一档，
+// 但它真正需要的源图只有 600×400（背景是画到 `winW/4 × winH/4` 的画布上、
+// 再放大 4 倍铺满整窗的，而 `ui.Cover` 那一步就已经把源图缩到画布了）。
+// ⇒ 不加限制的话它要 2400×1600，**多要了 16 倍像素**，而它是**每次开满屏
+// 都要的**（网络字节 ×10）。
+//
+// ⚠️ **上限由那一格自己传**，而不是加一个全局上限——全局上限会把横幅那一格
+// （980 DIP @2x = 1960 像素）也挡住，而那一格**真的要**那么大（不然 Retina 上
+// 糊 2.5 倍）。
+func (c *Cache) GetSizedCapped(url string, w, h float32, cap int) State {
+	if !c.scaled() {
+		return c.Get(url)
+	}
+	pw, ph := coverPixelSizeCapped(w, h, c.scale(), cap)
+	if pw <= 0 || ph <= 0 {
+		return c.Get(url)
+	}
+	return c.Get(c.rememberedSizedURL(url, pw, ph))
+}
+
 // rememberedSizedURL 是 `sizedURL` 加上「**记好一份**」。
 //
 // 命中那份表时**不产生分配**（那个串已经在表里了）——这是这一票省下来的那些

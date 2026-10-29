@@ -140,13 +140,59 @@ func (t *bannerPicTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 	img := t.pics.bannerImg
 	t.pics.mu.Unlock()
 	if isBanner && img != nil {
+		// ⚠️ **按请求里的档位真的裁**（B 站图床就是这么做）。
+		//
+		// 不裁的话，**图床那一档的比例压根没在画面上出现过**——那么
+		// 「横幅有没有被拉宽」在视觉审查里就**核不出来**（改前改后是同一张图）。
+		//
+		// 票 #624 改的就是比例，所以这一条是「让夹具说实话」。
+		cropped := cropBannerToRequest(img, r.URL.String())
 		return &http.Response{
 			StatusCode: http.StatusOK,
-			Body:       nopCloser{bytes.NewBuffer(img)},
+			Body:       nopCloser{bytes.NewBuffer(cropped)},
 			Header:     http.Header{"Content-Type": []string{"image/png"}},
 		}, nil
 	}
 	return bannerResponse(r.URL.Path), nil
+}
+
+// cropBannerToRequest 按请求地址里的档位参数中心裁那张图。
+//
+// ⚠️ **地址里没有档位就原样返回**（那一次是真的要原图）。
+//
+// ⚠️ **它不 panic**——传输层不该依赖 `*testing.T`（那是 `cropLikeRealHost`
+// 那条测试才用的）。
+func cropBannerToRequest(data []byte, u string) []byte {
+	w, h := cropDimsFromURL(u)
+	if w <= 0 || h <= 0 {
+		return data
+	}
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		return data
+	}
+	b := img.Bounds()
+	sw, sh := b.Dx(), b.Dy()
+	target := float64(w) / float64(h)
+	cw, ch := sw, sh
+	if float64(sw)/float64(sh) > target {
+		cw = int(float64(sh) * target)
+	} else {
+		ch = int(float64(sw) / target)
+	}
+	x0 := b.Min.X + (sw-cw)/2
+	y0 := b.Min.Y + (sh-ch)/2
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		for x := range w {
+			dst.Set(x, y, img.At(x0+x*cw/w, y0+y*ch/h))
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, dst); err != nil {
+		return data
+	}
+	return buf.Bytes()
 }
 
 // bannerResponse 造一张纯色图的回应：**横幅红色、别的蓝色**。
