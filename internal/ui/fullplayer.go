@@ -174,6 +174,20 @@ const fullBackdropScale = 4
 // `plugins/glass` 那一份。
 const fullBackdropBlur = 32
 
+// clarityBlurSigma 是某一档在**画布上**的模糊半径（画布像素）。
+//
+// ⚠️ **和 `fullBackdropSigma` 的区别**：那个是「画布固定 1/4」时代的那一个，
+// 这一份按用户选的档位取模糊半径（`BackdropClarity.BlurDIP`），再按画布与窗口
+// 的比例换算成画布像素——所以**屏幕上糊的程度**在档位内是恒定的（和窗口多大、
+// 屏幕多密无关），只有换档才变。
+func clarityBlurSigma(clarity app.BackdropClarity, canvasW, winW float32) float32 {
+	blur := float32(clarity.BlurDIP())
+	if winW <= 0 {
+		return blur
+	}
+	return blur * canvasW / winW
+}
+
 // fullBackdropSigma 是画布上的模糊半径（画布像素）。
 //
 // 画布是窗口的 1/4，所以画布上的 σ=8 放到屏幕上正好是 32 DIP——**和画布多大
@@ -675,8 +689,11 @@ func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int) bool {
 // 「不自绘等效效果」那一条仍然守得住。
 func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	winW, winH := c.Size()
-	cw := max(int(winW/fullBackdropScale), 1)
-	ch := max(int(winH/fullBackdropScale), 1)
+	// 票 #666：画布比例和模糊半径都跟着**用户选的那一档**走。
+	clarity := s.app.SettingsSnapshot().BackdropClarity
+	div := float32(clarity.CanvasDivisor())
+	cw := max(int(winW/div), 1)
+	ch := max(int(winH/div), 1)
 	// ⚠️ **背景故意要「大的那一份」**，不走封面那一格那条路。
 	//
 	// 背景是**画到一块小画布上再放大铺满整窗**：窗口 1200×800 时画布是
@@ -693,7 +710,16 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 	//
 	// 代价是：同一首封面，背景和封面格各有一份（两个 key）。这在改之前是
 	// 一份（都是原图），但那时候封面格也压着 1.77MB——两害相权，拆开更省。
-	st := s.images.GetSized(url, float32(cw), float32(ch))
+	// ⚠️ **要图那一档按画布尺寸**，而且**存下来的那一份也要那么大**（票 #666）。
+	//
+	// 从前 `maxStoredSide = 768` 把「存的那一份」钉死，于是就算要到一张大图，
+	// **解下来还是缩到 768** ⇒ 画布 1200×800 的档位拿到的是一张 768 宽的图，
+	// 再被 GPU 拉大——**清晰度白给了**。
+	//
+	// 现在把「这一格要存多大」传给解码器：流式解码（`decodeJPEGStored` /
+	// `decodePNGStored`）**只解到那个尺寸就停**，内存峰值和源图多大无关
+	// （实测：源图 2000×1500 和 6000×4000，解码总分配都是约 2 MB）。
+	st := s.images.GetSizedStoredAt(url, float32(cw), float32(ch), max(cw, ch))
 	if !st.Ready() {
 		// 封面还没来：底下是主题的底色（外头那一层），画布先不动。
 		return
@@ -722,7 +748,7 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 			box := ui.Rect{W: float32(cw), H: float32(ch)}
 			s.full.bg.Draw(p, func(cp *ui.Painter) {
 				cp.Image(st.Bitmap, box, ui.Cover)
-				fullBackdropMaterial(fullBackdropSigma(float32(cw), winW)).
+				fullBackdropMaterial(clarityBlurSigma(clarity, float32(cw), winW)).
 					PaintMaterial(cp, box, [4]float32{})
 			})
 		})

@@ -51,7 +51,7 @@ func TestStreamingJPEGMatchesExistingPixels(t *testing.T) {
 				}
 				want := image.NewRGBA(storedBounds(size.X, size.Y))
 				xdraw.ApproxBiLinear.Scale(want, want.Rect, src, src.Bounds(), xdraw.Src, nil)
-				got, handled, err := decodeJPEGStored(data)
+				got, handled, err := decodeJPEGStored(data, 0)
 				if err != nil || !handled {
 					t.Fatalf("handled=%v err=%v", handled, err)
 				}
@@ -69,7 +69,7 @@ func TestStoredJPEGDoesNotAllocateFullSizeImage(t *testing.T) {
 		runtime.GC()
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		bm, err := decodeStored(data)
+		bm, err := decodeStored(data, 0)
 		runtime.ReadMemStats(&after)
 		if err != nil {
 			t.Fatal(err)
@@ -86,7 +86,7 @@ func TestStoredJPEGDoesNotAllocateFullSizeImage(t *testing.T) {
 func TestStreamingJPEGRejectsTruncation(t *testing.T) {
 	data := coverJPEG(t, 800, 49, false)
 	for _, n := range []int{len(data) / 2, len(data) - 100, len(data) - 2, len(data) - 1} {
-		_, handled, err := decodeJPEGStored(data[:n])
+		_, handled, err := decodeJPEGStored(data[:n], 0)
 		if !handled || err == nil {
 			t.Fatalf("truncated at %d: handled=%v err=%v", n, handled, err)
 		}
@@ -115,7 +115,7 @@ func TestJPEGEXIFOnlyRotationsAreMadeUprightAndScaled(t *testing.T) {
 			if hasExifOrientation(body) != rotated {
 				t.Fatalf("orientation=%d", o)
 			}
-			bm, err := decodeStored(body)
+			bm, err := decodeStored(body, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -157,10 +157,10 @@ func TestStreamingJPEGUnsupportedVariantsFallBack(t *testing.T) {
 	extended[sof+1] = 0xc1
 	late := append(append(append([]byte{}, data[:len(data)-2]...), []byte{0xff, 0xee, 0, 14, 'A', 'd', 'o', 'b', 'e', 0, 100, 0, 0, 0, 0, 1}...), data[len(data)-2:]...)
 	for _, body := range [][]byte{extended, late} {
-		if _, handled, err := decodeJPEGStored(body); handled || err != nil {
+		if _, handled, err := decodeJPEGStored(body, 0); handled || err != nil {
 			t.Fatalf("fallback handled=%v err=%v", handled, err)
 		}
-		if _, err := decodeStored(body); err != nil {
+		if _, err := decodeStored(body, 0); err != nil {
 			t.Fatalf("standard fallback failed: %v", err)
 		}
 	}
@@ -201,7 +201,7 @@ func TestDecodedCoversDoNotHoldTheirBytes(t *testing.T) {
 	seg := append([]byte{0xff, 0xe1, 0, 34, 'E', 'x', 'i', 'f', 0, 0}, tiff...)
 	body := append(append(append([]byte{}, data[:2]...), seg...), data[2:]...)
 
-	bm, err := decodeStored(body)
+	bm, err := decodeStored(body, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

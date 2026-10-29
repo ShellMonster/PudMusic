@@ -70,7 +70,10 @@ const maxStoredSide = 768
 // ⚠️ **碰像素必须在造 Bitmap 之前**（`ui.Bitmap` 只能写不能读，
 // `mygo/ui/bitmap.go`：没有 GetPixel、没有把像素取出来的那一支）：所以这一格
 // 自己解码、自己缩，缩完的 `*image.RGBA` 才交给 `ui.NewBitmap`。
-func decodeStored(data []byte) (*ui.Bitmap, error) {
+func decodeStored(data []byte, maxSide int) (*ui.Bitmap, error) {
+	if maxSide <= 0 {
+		maxSide = maxStoredSide
+	}
 	if len(data) == 0 {
 		return nil, errors.New("imgcache: 没有字节")
 	}
@@ -89,16 +92,16 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 		if err != nil {
 			return nil, err
 		}
-		return ui.NewBitmap(shrinkToStored(orientImage(img, o))), nil
+		return ui.NewBitmap(shrinkTo(orientImage(img, o), maxSide)), nil
 	}
-	if img, handled, err := decodeJPEGStored(data); handled {
+	if img, handled, err := decodeJPEGStored(data, maxSide); handled {
 		if err != nil {
 			return nil, err
 		}
 		return ui.NewBitmap(img), nil
 	}
 	// 普通大 PNG 逐行解：只留缩放要用的两行，不建整张原图。
-	if img, handled, err := decodePNGStored(data); handled {
+	if img, handled, err := decodePNGStored(data, maxSide); handled {
 		if err != nil {
 			return nil, err
 		}
@@ -108,10 +111,13 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ui.NewBitmap(shrinkToStored(img)), nil
+	return ui.NewBitmap(shrinkTo(img, maxSide)), nil
 }
 
-// shrinkToStored 把一张图缩到最长边 `maxStoredSide`（已经够小就原样返回）。
+// shrinkTo 把一张图缩到最长边 `side`（已经够小就原样返回）。
+//
+// ⚠️ **`side` 是「这一份要存多大」**，不是「源图多大」（票 #666）：默认是
+// `maxStoredSide`（768），而满屏背景那一格传**画布尺寸**（它要更大的那一份）。
 //
 // ⚠️ **用 ApproxBiLinear 而不是 CatmullRom**（`internal/ui/covercrop.go` 那一处
 // 缩放用的是 CatmullRom）：实测一张 1920×1080 缩到 768×432，CatmullRom 要
@@ -120,23 +126,31 @@ func decodeStored(data []byte) (*ui.Bitmap, error) {
 // 画质的差别是量出来的：两者逐通道的平均差 **0.45/255**（0.18%）——看不出来，
 // 而这一格每加载一张封面就缩一次（一屏十几张，全在后台 worker 上），十几倍的
 // CPU 差就是「封面半秒之后才出来」和「封面立刻出来」的差别。
-func shrinkToStored(img image.Image) image.Image {
+func shrinkTo(img image.Image, side int) image.Image {
 	b := img.Bounds()
 	w, h := b.Dx(), b.Dy()
 	if w <= 0 || h <= 0 {
 		return img
 	}
-	if max(w, h) <= maxStoredSide {
+	if side <= 0 {
+		side = maxStoredSide
+	}
+	if max(w, h) <= side {
 		return img
 	}
-	// 按比例缩：长边落到 maxStoredSide，另一边按同一个比例走。
-	dst := image.NewRGBA(storedBounds(w, h))
+	// 按比例缩：长边落到 side，另一边按同一个比例走。
+	dst := image.NewRGBA(boundsWithMaxSide(w, h, side))
 	xdraw.ApproxBiLinear.Scale(dst, dst.Bounds(), img, b, xdraw.Src, nil)
 	return dst
 }
 
 func storedBounds(w, h int) image.Rectangle {
-	k := min(1, float64(maxStoredSide)/float64(max(w, h)))
+	return boundsWithMaxSide(w, h, maxStoredSide)
+}
+
+// boundsWithMaxSide 是「长边不超过 side」的那块尺寸。
+func boundsWithMaxSide(w, h, side int) image.Rectangle {
+	k := min(1, float64(side)/float64(max(w, h)))
 	return image.Rect(0, 0, max(1, int(float64(w)*k+0.5)), max(1, int(float64(h)*k+0.5)))
 }
 
