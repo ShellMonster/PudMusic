@@ -35,20 +35,23 @@ const (
 type Session struct {
 	cfg Config
 
-	mu     sync.Mutex
-	idx    *Index
-	err    error
-	cancel context.CancelFunc
-	out    chan Frame
-	done   chan struct{}
+	mu      sync.Mutex
+	frameMu sync.Mutex
+	idx     *Index
+	err     error
+	cancel  context.CancelFunc
+	out     chan Frame
+	done    chan struct{}
 
-	pend     *Frame
-	shown    Frame
-	haveShow bool
-	head     time.Duration
-	lastSeek time.Time
-	prevPix  []byte
-	free     chan []byte
+	pend      *Frame
+	shown     Frame
+	haveShow  bool
+	head      time.Duration
+	lastSeek  time.Time
+	prevPix   []byte
+	free      chan []byte
+	tempPath  string
+	closeOnce sync.Once
 }
 
 // Start 从 at 开始取流解码。
@@ -95,6 +98,12 @@ func (s *Session) Duration() time.Duration {
 
 // Seek 丢掉手上的一切，从 at 重新开始。
 func (s *Session) Seek(at time.Duration) {
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
+	s.seekLocked(at)
+}
+
+func (s *Session) seekLocked(at time.Duration) {
 	s.stop()
 	s.begin(at)
 }
@@ -103,22 +112,64 @@ func (s *Session) stop() {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
 	s.mu.Unlock()
+	if cancel == nil || done == nil {
+		return
+	}
 	cancel()
 	<-done
 }
 
-// Close 停掉一切并清掉临时文件。
-func (s *Session) Close() { s.stop() }
+// Close stops the decoder, recycles all frames that have not been consumed, and
+// removes the reusable segment file. It is safe to call concurrently and more
+// than once.
+func (s *Session) Close() {
+	s.closeOnce.Do(func() {
+		s.frameMu.Lock()
+		defer s.frameMu.Unlock()
+		s.stop()
+		s.cleanupFrames()
+		if s.tempPath != "" {
+			_ = os.Remove(s.tempPath)
+			s.tempPath = ""
+		}
+	})
+}
+
+func (s *Session) cleanupFrames() {
+	if s.pend != nil {
+		s.recycle(s.pend.Pix)
+		s.pend = nil
+	}
+	if s.prevPix != nil {
+		s.recycle(s.prevPix)
+		s.prevPix = nil
+	}
+	s.shown, s.haveShow = Frame{}, false
+	for {
+		select {
+		case f, ok := <-s.out:
+			if !ok {
+				return
+			}
+			s.recycle(f.Pix)
+		default:
+			return
+		}
+	}
+}
 
 // Poll 按时钟 pos 取当前该显示的那一帧：有新帧返回 true。
 // 返回的 Pix 到下一次 Poll 返回 true 之前有效。
 func (s *Session) Poll(pos time.Duration) (Frame, bool) {
+	s.frameMu.Lock()
+	defer s.frameMu.Unlock()
 	if time.Since(s.lastSeek) > resyncGap {
 		behind := s.haveShow && pos+resyncBack < s.shown.PTS
 		ahead := pos > s.head+resyncAhead
 		if behind || ahead {
-			s.Seek(pos)
+			s.seekLocked(pos)
 		}
+
 	}
 	s.mu.Lock()
 	out := s.out
@@ -247,11 +298,22 @@ func (s *Session) run(ctx context.Context, out chan<- Frame, at time.Duration) e
 }
 
 func (s *Session) playSegment(ctx context.Context, out chan<- Frame, init, data []byte, segStart, start time.Duration) error {
-	f, err := os.CreateTemp(s.cfg.TempDir, "biu-video-*.mp4")
+	if s.tempPath == "" {
+		f, err := os.CreateTemp(s.cfg.TempDir, "biu-video-*.mp4")
+		if err != nil {
+			return err
+		}
+		s.tempPath = f.Name()
+		if err := f.Close(); err != nil {
+			_ = os.Remove(s.tempPath)
+			s.tempPath = ""
+			return err
+		}
+	}
+	f, err := os.OpenFile(s.tempPath, os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
 	_, err = f.Write(init)
 	if err == nil {
 		_, err = f.Write(data)
@@ -262,7 +324,7 @@ func (s *Session) playSegment(ctx context.Context, out chan<- Frame, init, data 
 	if err != nil {
 		return err
 	}
-	src, err := s.cfg.Open(f.Name(), s.free)
+	src, err := s.cfg.Open(s.tempPath, s.free)
 	if err != nil {
 		return err
 	}

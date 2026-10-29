@@ -305,8 +305,12 @@ func TestTheSpecialTagIsPassedThroughAsANumber(t *testing.T) {
 
 // TestAvatarAddressesAreReadyToFetch 盯头像地址在服务层就收拾好了。
 //
-// 两件事：补协议（B 站给的是 `//i0.hdslb.com/…`，缺协议会被当成普通路径去读盘）
-// 和拼裁剪参数（原图几百 KB，而这一页一屏摆得下六张 128 的卡）。
+// 一件事：**补协议**（B 站给的是 `//i0.hdslb.com/…`，缺协议会被当成普通路径去
+// 读盘）。
+//
+// ⚠️ **裁剪参数不在这层拼了**（票 #634）：它由图片缓存按显示尺寸统一决定，
+// 而这一层自己拼的话，别处（空间页 / 动态流 / 收藏夹）那一份就**拿不到**「按
+// 显示尺寸」的那一档——同一个 UP 主的同一张脸于是成了两个缓存条目、两次下载。
 func TestAvatarAddressesAreReadyToFetch(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(relationTagsPath, func(w http.ResponseWriter, r *http.Request) {
@@ -328,7 +332,7 @@ func TestAvatarAddressesAreReadyToFetch(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := pg.Users[0].Face; !strings.HasPrefix(got, "https://i0.hdslb.com/") ||
-		!strings.HasSuffix(got, "@160w_160h_1c_1s.webp") {
+		strings.Contains(got, "@") {
 		t.Errorf("「全部关注」的头像地址是 %q", got)
 	}
 

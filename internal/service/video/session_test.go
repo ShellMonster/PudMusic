@@ -3,6 +3,7 @@ package video
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 )
@@ -21,6 +22,103 @@ func fetcher(b []byte) func(context.Context, int64, int64) ([]byte, error) {
 		to = min(to, int64(len(b)))
 		return b[from:to], nil
 	}
+}
+
+func TestSessionClosesWithNoTemporaryFilesLeft(t *testing.T) {
+	data := fixture(t)
+	dir := t.TempDir()
+	idx, err := ParseIndex(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var paths []string
+	open := func(path string, pool chan []byte) (*Source, error) {
+		mu.Lock()
+		paths = append(paths, path)
+		mu.Unlock()
+		s := newSource(pool)
+		go func() {
+			close(s.frames)
+			close(s.done)
+		}()
+		return s, nil
+	}
+	s := Start(Config{Fetch: fetcher(data), Open: open, TempDir: dir}, 0)
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(paths)
+		mu.Unlock()
+		if n == len(idx.Segments) {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	s.Close()
+
+	mu.Lock()
+	got := append([]string(nil), paths...)
+	mu.Unlock()
+	if len(got) != len(idx.Segments) {
+		t.Fatalf("opened %d segments, want %d", len(got), len(idx.Segments))
+	}
+	if len(got) == 0 {
+		t.Fatal("no segment paths recorded")
+	}
+	for _, path := range got {
+		if path != got[0] {
+			t.Fatalf("segment temporary path changed: %q then %q", got[0], path)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("temporary directory has %d entries after close", len(entries))
+	}
+}
+
+func TestSessionCloseRecyclesPendingAndQueuedFrames(t *testing.T) {
+	free := make(chan []byte, 8)
+	s := &Session{
+		cancel: func() {},
+		done:   make(chan struct{}),
+		out:    make(chan Frame, 3),
+		free:   free,
+	}
+	close(s.done)
+	s.pend = &Frame{Pix: []byte{1}}
+	s.prevPix = []byte{2}
+	s.out <- Frame{Pix: []byte{3}}
+	s.out <- Frame{Pix: []byte{4}}
+
+	s.Close()
+	if got := len(free); got != 4 {
+		t.Fatalf("recycled %d pixel buffers, want 4", got)
+	}
+	if s.pend != nil || s.prevPix != nil {
+		t.Fatal("session retained a pending or displayed frame after close")
+	}
+}
+
+func TestSourceCloseIsConcurrentAndIdempotent(t *testing.T) {
+	s := newSource(nil)
+	go func() {
+		close(s.frames)
+		close(s.done)
+	}()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 32; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Close()
+		}()
+	}
+	wg.Wait()
 }
 
 func TestParseIndexFindsEverySegment(t *testing.T) {

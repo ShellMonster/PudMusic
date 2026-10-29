@@ -283,8 +283,35 @@ func TestTheSpectrumBarsAreZeroWithoutATrack(t *testing.T) {
 	}
 }
 
-// TestTheSpectrumBarsReuseOneBuffer 断「每帧不新分配」。
-//
+func TestTheSpectrumPreferenceControlsTheCurrentPlayer(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	p := DefaultFullPlayerPrefs()
+	p.ShowSpectrum = false
+	a.SetFullPlayerPrefs(p)
+	if err := a.Open(filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { return a.Snapshot().Position > 0 }, "播放位置前进")
+	for i, v := range a.SpectrumBars(48, 40) {
+		if v != 0 {
+			t.Fatalf("频谱关闭时第 %d 根是 %v", i, v)
+		}
+	}
+
+	p.ShowSpectrum = true
+	a.SetFullPlayerPrefs(p)
+	waitFor(t, func() bool {
+		for _, v := range a.SpectrumBars(48, 40) {
+			if v > 0 {
+				return true
+			}
+		}
+		return false
+	}, "频谱历史恢复")
+}
+
 // 频谱是**每帧**画的，每帧 `make` 一次是白烧（48 根 × 4 字节 × 60 帧/秒）。
 // 所以返回的是同一块切片：第二次拿到的和第一次是同一块内存。
 func TestTheSpectrumBarsReuseOneBuffer(t *testing.T) {

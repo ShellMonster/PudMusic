@@ -127,8 +127,18 @@ func New(d mygoaudio.Decoder) *Player {
 	return &Player{dec: ed, tap: tp, vs: vs, play: mygoaudio.NewPlayer(maybeMuted(vs)), vol: 1, gain: 1}
 }
 
-// CloserReadSeeker 是「既是字节来源、又必须被一起关掉」的那一类东西。
-//
+// SetSpectrumEnabled toggles FFT/history work while leaving the audio chain unchanged.
+func (p *Player) SetSpectrumEnabled(enabled bool) {
+	if p != nil && p.tap != nil {
+		p.tap.SetSpectrumEnabled(enabled)
+	}
+}
+
+// SpectrumEnabled reports whether this player is recording spectrum history.
+func (p *Player) SpectrumEnabled() bool {
+	return p != nil && p.tap != nil && p.tap.SpectrumEnabled()
+}
+
 // 在线流的 `StreamSource` 就是它。把它合成一个参数是因为这两件事**必须成对**
 // 出现：只接不关的话下载 goroutine、缓存文件和临时目录里的残留全都跟着换歌
 // 累积起来；只关不接的话下一首歌读的是上一首的字节源。

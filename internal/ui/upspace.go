@@ -121,6 +121,12 @@ const (
 	upBadgeS = 20
 )
 
+// spaceBannerLabel 是横幅那一格的无障碍名字。
+//
+// ⚠️ **它是为了「量得到那一格」**：无头 Tester 只认 label / text，不认图片——
+// 没有它就量不到横幅那一格的盒子（`spaceThumb` 的注释记着同一件事）。
+const spaceBannerLabel = "UP 主空间的头图横幅"
+
 // upPathOf 是 mid 这个 UP 的空间地址。
 func upPathOf(mid int64) string { return upPathPrefix + strconv.FormatInt(mid, 10) }
 
@@ -595,7 +601,13 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		// 不画 B 站的占位图（那看着像加载失败）。
 		ui.Box(c).Absolute().Left(0).Right(0).Top(0).Height(upBannerH).Clip().Children(func() {
 			if h.User.Banner != "" {
-				s.spaceFill(c, h.User.Banner, upBannerH)
+				// ⚠️ **宽度是横幅真正显示的宽**（票 #630）：它是通栏，宽就是
+				// 内容区的宽（窗口宽 − 侧栏宽）。
+				//
+				// ⚠️ **以前这里传的是 0**，而那个宽度**就是画的时候用的宽度**
+				// ——于是横幅从来没画出来过（票 #65 起的老 bug），票 #621 又给它
+				// 加了一层「要一张 64×64 正方缩略图」的浪费。
+				s.spaceFill(c, h.User.Banner, s.spaceContentWidth(c), upBannerH)
 			} else {
 				ui.Box(c).Height(upBannerH).FillWidth().LinearGradient(ui.LinearGradient{Angle: 135, Stops: []ui.GradientStop{
 					{Color: t.Background.Mix(t.Accent, 0.7), At: 0},
@@ -913,6 +925,50 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 	})
 }
 
+// spaceContentWidth 是**内容区有多宽**（窗口宽 − 侧栏宽）。
+//
+// ⚠️ **它不是窗口宽**：侧栏占掉一块（默认 220，折叠 64，最宽 300），所以
+// 1200 的窗口上内容区是 980。横幅是**内容区里的通栏**，所以它要显示的宽就是
+// 这个数。
+//
+// # 为什么自己算，而不是量布局
+//
+// `Bounds()` 报的是**上一帧**的盒子（`mygo/ui/element.go:1437`）——第一帧它
+// 是空的，于是横幅第一帧要图会拿到 0（退回原图那一档），第二帧才正常。
+// 而「窗口宽 − 侧栏宽」是**算出来的**，第一帧就对。
+//
+// ⚠️ **侧栏那一档取「画出来的」**（`sideDrawnWidth`）：侧栏有 200ms 的过渡，
+// 拖动时更是跟着指针走——按设置里那个目标算，过渡期间内容区会算宽 200 像素。
+//
+// 🔴 **而「画出来的那一档」是记下来的事实，不是推出来的**（票 #630 的对抗性
+// 审查）：`sideDrawnWidth` 拿的是 `viewSide` 里那个 `AnimateTo`/`Jump` 的
+// **返回值**——也就是**这一帧参与布局的那一档**。
+//
+// ⚠️ **为什么不能推**（两个方向都推错过）：
+//
+//   - 拿**目标宽**推：过渡期间画面上是中间值 ⇒ 内容区算宽 200 像素。
+//   - 拿**上一次拖动的终点**推：那是**陈旧值**（松手只写设置、不清它）。
+//     「拖到 300 → 折叠」这一路它给 300，而画面上是 64 ⇒ 内容区算成 900
+//     （实际 1136）⇒ **横幅右边空出 236 像素的一条空白带**。
+//
+// ⇒ 所以这一处**永远和画面上的侧栏宽对得上**（实测拖动时它逐帧跟着走，
+// 一像素不差）。
+//
+// # 实测（1200 窗口、默认设置）
+//
+//	侧栏 220 → 横幅 980　　侧栏 64（折叠）→ 1136　　侧栏 300 → 900
+//	窗口 1600 → 1380　　　窗口 900 → 680
+func (s *Shell) spaceContentWidth(c *ui.Context) float32 {
+	winW, _ := c.Size()
+	st := s.app.SettingsSnapshot()
+	w := winW - s.sideDrawnWidth(st)
+	if w <= 0 {
+		// 量不出来（窗口比侧栏还窄）⇒ 交给「量不出尺寸 ⇒ 按原图走」那一档。
+		return 0
+	}
+	return w
+}
+
 // spaceFill 画一张铺满宽度、指定高度的网络图（头图）。
 //
 // ⚠️ **铺满是 `FillWidth()`（percent 100），不是 `Width(0)`**：`Width(v)` 的
@@ -929,14 +985,27 @@ func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShad
 // 现在加载中是一块带扫光的灰，失败是描边框 + 图片图标；空地址仍然是调用方
 // 那一块（这一处是页面底色，见 `viewSpaceHeader`：没有头图的 UP 主占多数，
 // 那时画的是主题色渐变，压根走不到这里）。
-func (s *Shell) spaceFill(c *ui.Context, url string, h float32) {
+//
+// # ⚠️ **w 必须是横幅**真正显示的宽**（票 #630）
+//
+// 这一格是**通栏**：它的宽就是内容区的宽（窗口宽 − 侧栏宽），不是固定的数。
+//
+// ⚠️ **以前这里传的是 0**，而 `imgcache.States` 那个宽度**就是画的时候用的
+// 宽度**——于是那一格的宽度真的是 0 像素，**横幅从来没画出来过**（票 #65 起
+// 就有的老 bug）。票 #621 又给它加了一层浪费：宽度 0 掉进「量不出尺寸 ⇒ 给
+// 最小档 64×64」的分支，于是多要了一张 64×64 的正方缩略图——横幅的两端直接
+// 丢掉（实测请求的是 `top_photo.jpg@64w_64h_1c.webp`，画面上横幅那一带一个
+// 像素都没有）。
+//
+// 所以这里传**这一格真正要显示的宽**。
+func (s *Shell) spaceFill(c *ui.Context, url string, w, h float32) {
 	t := c.Theme()
-	ui.Box(c).Height(h).FillWidth().Clip().Children(func() {
+	ui.Box(c).Height(h).FillWidth().Clip().Label(spaceBannerLabel).Children(func() {
 		if url == "" {
 			ui.Box(c).Height(h).FillWidth().Background(t.Surface)
 			return
 		}
-		imgcache.States(c, s.images, url, 0, h, 0, imgcache.Shape{})
+		imgcache.States(c, s.images, url, w, h, 0, imgcache.Shape{})
 	})
 }
 

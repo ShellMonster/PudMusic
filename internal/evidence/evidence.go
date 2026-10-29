@@ -883,6 +883,44 @@ var Items = []Item{
 		},
 	},
 	{
+		// 归「严格 HTTP fixture」那一组：这一票动的是**地址**（票 #634）。
+		//
+		// 归这一组是因为它量的全是**请求**：请求发了几次、请求的是哪个地址。
+		Category: HTTP,
+		// 票 #634（#629 的实现）：所有头像走**同一个**规范化入口（补协议、
+		// **不**拼裁剪参数），裁剪参数由图片缓存**按显示尺寸**统一决定；
+		// 而按显示尺寸拼出来的那个地址**记好一份**（每帧不再重拼）。
+		//
+		// ⚠️ **两件事的错法都是「静默」的**：地址不统一 → 同一个 UP 主的同一张脸
+		// 在关注页和空间页上是**两个缓存条目、两次下载**（界面上看不出区别，用户
+		// 只看到同一张脸）；每帧重拼 → 一屏十二张封面每帧多十二次分配（画面上
+		// 更看不出区别，只是「界面有点粘」）。
+		//
+		// ⚠️ **判据全是「请求了什么 / 请求了几次 / 每帧分配了几次」**，不是
+		// 「拼了几次」——后者是内部实现，换个实现照样对。
+		Spec: "所有头像走同一个规范化入口（服务层不拼裁剪参数，图片缓存按显示尺寸统一决定那一档）；同一个 UP 主的脸在关注列表和他空间之间来回切，请求次数不增加；按显示尺寸拼出来的地址记好一份（每帧不再重拼），而那一份有上限",
+		Tests: []string{
+			// 服务层：所有头像**逐字相同**、不带裁剪参数、已经带参数的原样返回。
+			"TestEveryAvatarComesFromTheSameNormalization",
+			"TestAvatarAddressesCarryNoCropParams",
+			"TestAnAvatarThatAlreadyHasCropParamsIsLeftAlone",
+			"TestTheOwnerFaceIsTheSameOneAsEverywhereElse",
+			// 图片缓存：请求的是「按显示尺寸」那一档；头像要正方形（中心裁剪）。
+			"TestTheAvatarAsksForTheSizeItIsDrawnAt",
+			"TestTheAvatarStaysSquare",
+			// 图片缓存：同一个脸只下一次；拼出来的地址记好一份；那一份有上限。
+			"TestTheSameFaceIsOnlyAskedForOnce",
+			"TestTheSizedURLIsRemembered",
+			"TestTheRememberedURLsAreBounded",
+			// 端到端：真页面（假 B 站 + 假图床）来回切，请求次数不增加；
+			// 而头像**照旧画出来**（正方形、中心是那张脸——不是一块灰饼）；
+			// 顶栏那一枚也要的是**裁好的那一张**（不是原图）。
+			"TestTheSameFaceIsNotDownloadedAgainWhenSwitchingPages",
+			"TestTheAvatarIsStillDrawn",
+			"TestTheNavbarAvatarAsksForACroppedImage",
+		},
+	},
+	{
 		// 归「播放」那一组：还是顶栏，但说的是头像**下面那一层**（票 #363）。
 		//
 		// 归这一组是因为它是**界面上的一处交互**（和满屏偏好面板那一条同一类），
@@ -3638,6 +3676,54 @@ var Items = []Item{
 		},
 	},
 	{
+		// 票 #630：UP 空间的头图横幅**从来没画出来过**。
+		//
+		// 🔴 **这一条的错法是「静默」里最静的那种**：横幅那一格传给图片
+		// 缓存的**宽度是 0**（通栏，量不出宽度），而画图那一层用的就是这个
+		// 宽度——于是那一格真的是 0 像素宽，图画不出来。**没有报错、没有
+		// 崩溃**，画面上只是「头像和名字都在、头图那块是空的」。
+		//
+		// 票 #621 又给它加了一层浪费：宽度 0 掉进「量不出尺寸 ⇒ 给最小档
+		// 64×64」的分支，于是多要了一张**正方形缩略图**（横幅两端直接丢掉）。
+		//
+		// ⚠️ **画面上的像素是唯一能抓住它的判据**：元素树上照样有图片元素、
+		// 请求照样发出去了、帧预算甚至更省（画不出来是「少分配」）。
+		//
+		// ⚠️ **「量不出显示尺寸 ⇒ 按原图走」是缓存层的统一规则**，不是横幅
+		// 这一处的特例——将来有人再传 0，会被同一条规则接住。
+		Category: Platform,
+		Spec:     "UP 空间的头图横幅按它真正显示的尺寸要图并画出来：横幅那一带有图（画面上的像素）、铺满内容区宽度、要的是那一档而不是 64×64、窗口拖宽跟着变清晰而拖动时不会每像素换一张图、加载中有扫光的灰、失败有失败态、没头图走主题色渐变；「量不出显示尺寸」在缓存层按原图走",
+		Tests: []string{
+			// 画面上的像素——唯一能抓住「画不出来」的判据。
+			"TestTheSpaceBannerIsActuallyDrawn",
+			// ⚠️ **覆盖率**——「有图」那一档断不住「图只画了一半」
+			// （实测把宽度砍一半它照样绿）。
+			"TestTheSpaceBannerCoversTheWholeSlot",
+			// 铺满整个内容区宽度。
+			"TestTheSpaceBannerFillsTheWholeWidth",
+			// 🔴 **内容区的宽要和画面上侧栏的宽对得上**（对抗性审查）：
+			// 侧栏「上一次拖动的终点」是陈旧值，折叠之后它比画面上宽 236
+			// 像素 ⇒ 横幅右边空出一条空白带。
+			"TestTheContentAreaIsNotNarrowedByAStaleDragWidth",
+			"TestTheBannerFillsTheContentAreaAfterTheSidebarCollapses",
+			// 要的是横幅该要的那一档（不是 64×64，且带中心裁剪）。
+			"TestTheSpaceBannerAsksForItsOwnSize",
+			// 拖动时不每像素换一张图 / 跟着窗口宽走。
+			"TestTheSpaceBannerDoesNotAskForANewImageOnEveryPixel",
+			"TestTheSpaceBannerFollowsTheWindowWidth",
+			// 加载态、失败态、没头图那一档。
+			"TestTheSpaceBannerShowsSomethingWhileItLoads",
+			"TestTheSpaceBannerShowsAFailureState",
+			"TestTheSpaceBannerWithoutABannerIsNotBlank",
+			// 探测和画用的是同一个 key（同一张图不下两遍）。
+			"TestTheSpaceBannerIsDownloadedOnlyOnce",
+			// 缓存层那条统一规则。
+			"TestAnUnknownDisplaySizeAsksForTheOriginal",
+			"TestOnlyOneSideUnknownIsAlsoTheOriginal",
+			"TestAKnownSizeStillAsksForThatSize",
+		},
+	},
+	{
 		// 票 #268（2026-10-25）：UP 空间的动态条目与稿件卡按 B 站 UP 主页
 		// 那张参考图重排。
 		//
@@ -4853,6 +4939,102 @@ var Items = []Item{
 			"TestProtocolRelativeAddressesAreNotPermanentFailures",
 			"TestLyricsReportLoadingUntilTheyHaveSomething",
 			"TestLyricsLoadingFallsBackWhenNothingWillEverArrive",
+		},
+	},
+	{
+		// 归「严格 HTTP fixture」那一组：这一票（#633）动的是**分配**。
+		//
+		// 归这一组是因为它量的全是「这一帧建了多少个对象」——而界面层那套帧
+		// 预算（`internal/ui/framebudget_test.go`）量的也是这个。同一个刻度。
+		Category: HTTP,
+		// 票 #633（#628 的实现）：下载记录页**每一格**、**每一帧**都要算一个
+		// 「这一格是谁」的键，而那个键**只用来查一张 map**（`d.failed`，记着
+		// 「哪一格画崩了」）、算完查完就扔——原先那一句 `fmt.Sprintf` 于是每格
+		// 每帧多一次分配 ＋ 一次格式化（一屏八行 × 五列 = 四十次）。
+		//
+		// ⚠️ **错法是静默的**：画面上**一个像素都不会变**（那个键不进画面），
+		// 用户只会觉得「界面有点粘」——而这正是这一族（「每帧重建」那一族）
+		// 的共同点。
+		//
+		// ⚠️ **判据全是「每帧分配了几次」**，不是「拼了几次」——后者是内部
+		// 实现，换个实现照样对（结构体键、嵌套 map、事先记好一份，都是零分配）。
+		//
+		// ⚠️ **「哪一格崩了」那个记录必须还认得出那一行**：行会重排（用户在
+		// 上面删掉一条，下面的行往上挪），而那个记录是「行 id + 列号」——
+		// 按**行下标**记的话，用户删掉一行之后，崩过的那一格就记到**别的行**
+		// 上去了，而界面上只是「有一格写着画不出来」，错位**看不出来**。
+		//
+		// ⚠️ **一格画崩了仍然只有那一格降级**：别的格子照画，整页照常。
+		Spec: "下载记录页那一格的键不分配（每帧不再为它拼一次字符串）；「哪一格崩了」的记录认的是**行 id + 列号**（行重排之后还对得上那一行）；一格画崩了仍然只有那一格变成「画不出来」，别的格子照画；表格的内容、列宽、位置不变",
+		Tests: []string{
+			// 那个键不分配（单元级：稳态下零分配）。
+			"TestTheDownloadCellKeyDoesNotAllocate",
+			// 那个键还认得出是哪一格（两个维度都得在）。
+			"TestTheDownloadCellKeyStillTellsRowsApart",
+			// 「哪一格崩了」的记录**跟着那一行走**（行重排之后仍对得上）。
+			"TestTheBrokenCellFollowsItsRowWhenTheRowsMove",
+			// 一格画崩了只有那一格降级（这一条早就有，这一票不许破坏它）。
+			"TestOneBrokenCellDoesNotBlankOutThePage",
+			"TestTheBrokenCellSettlesByItself",
+			// 画面不变：内容、列宽、位置。
+			"TestTheDownloadTableIsUnchanged",
+			// 整页每一帧**不因为这个键**多分配（相对判据：多出「八行 × 五列」
+			// 那一截就红）。
+			"TestTheDownloadsPageDoesNotAllocatePerCell",
+			// 帧预算那一档的上限被压下来了（这一档的基线是实测值）。
+			"TestEachScreenStaysInsideItsFrameBudget",
+		},
+	},
+	{
+		// 归「严格 HTTP fixture」那一组：这一票（#632）动的是**读设置**的次数。
+		//
+		// 归这一组是因为它量的全是「这一帧读了几次设置」——而关注页那一列卡片
+		// **每一张、每一帧**都要用三个值（卡片底色 / 卡片圆角 / 卡片悬停那一档
+		// 底色），而这三个值**只依赖两样东西**（主题方案、深浅）——原来它们
+		// **各自去读一遍设置**，于是「一帧读几百次」。
+		//
+		// ⚠️ **错法是静默的**：画面上**一个像素都不会变**（那三个值算出来还是
+		// 同一个），用户只会觉得「这页停着不动也一直烧电」——而这正是这一族
+		//（「每帧重复做同一件事」那一族）的共同点。
+		//
+		// ⚠️ **判据是「每帧读了几次设置」，不是「每帧分配了几次」**：那一次读
+		// 是一次**互斥锁** + 一次几百字节的**值拷贝**，而那份拷贝**不逃逸**
+		// （实测：挂上 store 时 `SettingsSnapshot()` 一次都不分配）——所以它在
+		// **分配次数上完全看不见**。于是这里要**自己数**（`app.TakeSettingsReadCount`）。
+		//
+		// ⚠️ **实测（2026-10-28，这棵树上）**：关注页**隔离**那一档（只画关注页
+		// 那一块）每帧读设置 **48 → 1 次**；**整窗**那一档每遍 view **400 → 4 次**
+		// （4 张卡；20 张卡改前是 760 次，改后也是 4 次——**与卡数无关**了）。
+		// ⇒ **每张卡带来的那一份读设置归零**。
+		//
+		// ⚠️ **画面必须一模一样**：这一票只改「这些值**怎么算出来的**」，不改
+		// 「它们**是多少**」——所以「三个值的数值」和「换了方案 / 换了深浅之后
+		// 立刻跟着变」两条都得钉住。
+		Category: HTTP,
+		Spec:     "关注页那一张卡的三个颜色（卡片底色、卡片圆角、卡片悬停那一档底色）只算一次：它们只依赖主题方案和深浅，跟主题本身是同一层地缓存着的；于是每一帧读设置的次数不再随卡片数涨（实测隔离那一档 48 → 1 次、整窗 400 → 4 次，每张卡带来的那一份归零）；三个值的数值一个字节都不许变；换了主题方案、或者系统在浅色/深色之间切换之后立刻跟着变；卡片那一列的排布、间距、圆角数值、悬停比例全部不变",
+		Tests: []string{
+			// 「每帧读几次设置」这一头（票 #628 那一族）：卡多起来不再涨。
+			"TestTheFollowCardColorsAreNotRecomputedPerCard",
+			// 整窗口径（用户感受到的那一帧）：差值也不许随卡数涨。
+			"TestTheWholeWindowStopsReadingSettingsPerCard",
+			// 三个值的数值：一个字节都不许变（照抄老算法的那一份算术）。
+			"TestTheCardColorsAreExactlyWhatTheyWere",
+			// 换了主题方案之后立刻跟着变。
+			"TestTheCardColorsFollowThePresetChange",
+			// 系统在浅色/深色之间切换时立刻跟上。
+			"TestTheCardColorsFollowTheSystemDarkChange",
+			// 帧预算那一档的「每帧读几次设置」那一栏（上限 4 次）。
+			"TestEachScreenStaysInsideItsFrameBudget",
+			// 画面：卡片底是**卡片那一档**、悬停那一档从卡片自己的底出发
+			// （这一条早就有，这一票不许破坏它）。
+			"TestTheFollowCardSitsOnItsOwnBackground",
+			// 卡片那圈影还在（这一票碰的是底色和圆角，影不许动）。
+			"TestTheFollowCardHasAShadow",
+			// 卡片那一族（弹窗面板 / 抽屉面板）还是同一档料。
+			"TestDialogCardFollowsThePreset",
+			"TestCardsAndDialogsStillStandOffTheBackground",
+			"TestTheAvatarMenuPanelLooksLikeACard",
+			"TestTheCollapsedFavoritesPanelIsACard",
 		},
 	},
 }

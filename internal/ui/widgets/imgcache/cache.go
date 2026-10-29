@@ -193,6 +193,13 @@ type Cache struct {
 	mu  sync.Mutex
 	lru *lru
 
+	// sizedURLs 是「(地址, 宽, 高) → 拼好的地址」那份备忘录（票 #634）。
+	//
+	// ⚠️ **它为什么在这份缓存上而不是包级**：键里有地址，而地址跟着这一份缓存
+	// 走（换一份缓存就该有一份自己的表）——而包级那张表会被多个缓存共用，于是
+	// 一份缓存的 `Close` 清不掉别人的条目。
+	sizedURLs sizedURLCache
+
 	// frame 是**画到第几帧**了，0 = 还没开始数（`BeginFrame` 一次都没调过）。
 	//
 	// ⚠️ **后台线程要读它**（挤缓存的那一处在解码 worker 上），所以它是原子的。
@@ -390,11 +397,29 @@ func (c *Cache) scaled() bool { return c.dpr.Load() != 0 }
 // 下是**不同的缓存条目**（`url@96w_96h_1c.webp` 与 `url@400w_400h_1c.webp`），
 // 各画各的，谁也不挤谁。
 //
-// ⚠️ **尺寸量不出来时退化成 `Get`**：布局还没算过的调用点会传 0，那时候要
-// 原图——总比要一个 1×1 强。
+// ⚠️ **尺寸量不出来时退化成 `Get`（要原图）**：调用点传 0 的时候要原图——
+// 总比要一个 1×1 强。
+//
+// ⚠️ **「量不出来」时原图是唯一安全的选择**（票 #630）：**通栏**那一格量不出
+// 宽度，量不出来**不是因为它小**，而是因为它要的就是整行那么宽——按最小档
+// （64×64）要图会把一张通栏横幅变成正方形缩略图，两端直接丢掉。所以**没有档位**
+// 这一档，只有「按原图走」。
+//
+// ⚠️ **「唯一安全的选择」只对「通栏」那一种成立**（细则见 `coverPixelSize`
+// 的注释）：对**小格子**，原图意味着下几百 KB——不糊，但内存和流量白花几十倍。
+// ⇒ **今天仓库里没有别的传 0 的调用点**（横幅那一格已经改成传真正显示的宽），
+// **眼下没有用户可见的损害**；但新接进来的调用点**要自己权衡**。
 //
 // ⚠️ **它和 `Get` 用的是同一张表**：`Get(url)` 要的是原图那一格，`GetSized`
 // 要的是某一档裁剪过的那一格，两个 key 不同，互不干扰。
+//
+// ⚠️ **拼出来的那个地址记好一份**（票 #634）：`sizedURL` 每帧每一格都要拼一次
+// `@<宽>w_<高>h_1c.webp`，而一屏十二张封面 = 每帧十二次分配，60 帧每秒就是
+// **每秒 720 次纯垃圾**。而它的结果只取决于三样东西（地址、宽、高），所以
+// `(地址, 宽, 高)` → 拼好的地址那份表（`sizedURLCache`）记一份就够了。
+//
+// 那个表的键**已经是吸过档的**（`coverPixelSize` 的活儿），所以拖动窗口时短边
+// 只每隔几十像素才变一档——**不会**每拖一个像素产生一个一次性条目。
 func (c *Cache) GetSized(url string, w, h float32) State {
 	if !c.scaled() {
 		// 还没人喂过 DPR（第一帧之前）：按原图走，别先下一张小一号的
@@ -403,9 +428,28 @@ func (c *Cache) GetSized(url string, w, h float32) State {
 	}
 	pw, ph := coverPixelSize(w, h, c.scale())
 	if pw <= 0 || ph <= 0 {
+		// 量不出显示尺寸 ⇒ 按原图走（规则见 `coverPixelSize`）。
 		return c.Get(url)
 	}
-	return c.Get(sizedURL(url, pw, ph))
+	return c.Get(c.rememberedSizedURL(url, pw, ph))
+}
+
+// rememberedSizedURL 是 `sizedURL` 加上「**记好一份**」。
+//
+// 命中那份表时**不产生分配**（那个串已经在表里了）——这是这一票省下来的那些
+// 分配的来源。
+//
+// ⚠️ **它和包级那个 `sizedURL` 是两回事**：包级那个是**纯函数**（拼一次算一
+// 次），这个是**查表**（命中就复用）。这里用另一个名字，免得读代码的人以为
+// 「查表的那个」就是「拼的那个」。
+func (c *Cache) rememberedSizedURL(src string, w, h int) string {
+	k := sizedKey{src: src, w: w, h: h}
+	if v, ok := c.sizedURLs.lookup(k); ok {
+		return v
+	}
+	v := sizedURL(src, w, h)
+	c.sizedURLs.store(k, v)
+	return v
 }
 
 // Get 返回 url 这一帧该画什么。第一次见这个 url 就会起一次后台下载，

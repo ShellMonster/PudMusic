@@ -37,6 +37,7 @@ import (
 	"cmp"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 )
@@ -176,10 +177,9 @@ func ActiveAt(rows []Row, at time.Duration) int {
 	if len(rows) == 0 {
 		return -1
 	}
-	for i := len(rows) - 1; i >= 0; i-- {
-		if at >= rows[i].At {
-			return i
-		}
+	i := sort.Search(len(rows), func(i int) bool { return rows[i].At > at }) - 1
+	if i < 0 {
+		return 0
 	}
-	return 0
+	return i
 }
