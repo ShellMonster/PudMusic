@@ -262,8 +262,9 @@ type followPage struct {
 	// 刷爆日志、拖垮帧率，比「这一格画不出来」糟得多。
 	failed map[int64]bool
 
-	// selfMid 是这份缓存**为哪个账号**拉的。换账号整页作废（见
-	// resetFollowIfAccountChanged）。
+	// account is the complete snapshot this cache belongs to.
+	account app.AccountSnapshot
+	// selfMid is the account mid used for this cache.
 	selfMid int64
 
 	// gen 是代次。换分组 / 换搜索词时 +1：在途那一页回来时代次对不上就扔掉。
@@ -288,7 +289,9 @@ const (
 // followResult 是后台拉完之后投进信箱的东西。
 type followResult struct {
 	which followWhich
-	// selfMid 是发这一次时的账号。换账号之前发出去的那一页作废。
+	// account is the immutable account snapshot captured when this request starts.
+	account app.AccountSnapshot
+	// selfMid is发 this request时的账号。换账号之前发出去的那一页作废。
 	selfMid int64
 	// gen 只在拉右边那一格时有意义（换分组 / 换词会让代次 +1）。
 	gen int
@@ -321,11 +324,12 @@ func (s *Shell) followPageOf() *followPage {
 // 后留着上一份的话，用户在新账号下看的是旧账号的关注——而界面上没有任何东西
 // 提示这一点（和 `dynamicfeed.go` 同一个理由）。
 func (s *Shell) resetFollowIfAccountChanged(f *followPage) {
-	cur := s.app.SelfMid()
-	if f.selfMid == cur {
+	cur := s.app.AccountSnapshot()
+	if f.account == cur {
 		return
 	}
-	f.selfMid = cur
+	f.account = cur
+	f.selfMid = cur.SelfMid
 	f.tagLoading = false
 	f.tags, f.tagStarted, f.tagErr = nil, false, nil
 	f.resetUsers()
@@ -1254,12 +1258,14 @@ func (s *Shell) viewFollowActions(c *ui.Context, u app.FollowUser, shown float32
 // 投递完必须叫醒界面）。
 func (s *Shell) unfollowFromFollowCard(u app.FollowUser) {
 	f := s.followPageOf()
+	account := s.app.AccountSnapshot()
 	go func() {
-		err := s.app.UpSpaceOf(u.Mid).Follow(context.Background(), false)
+		err := s.app.UpSpaceOf(u.Mid).FollowForAccount(context.Background(), account, false)
 		f.boxMu.Lock()
 		f.box = append(f.box, followResult{
 			which:       followUnfollow,
-			selfMid:     s.app.SelfMid(),
+			account:     account,
+			selfMid:     account.SelfMid,
 			unfollowMid: u.Mid,
 			err:         err,
 		})
@@ -1359,6 +1365,7 @@ func followEmpty(f *followPage) emptyState {
 // 页级的）一个都接不到它——Go 里没人在跑那个 goroutine，而这一段正是「解析接口
 // 返回」的地方。B 站改一个字段就是在这一行炸。
 func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
+	account := s.app.AccountSnapshot()
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1372,8 +1379,8 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 		s.wake.invalidate()
 	}()
 
-	r = followResult{which: followTags, selfMid: s.app.SelfMid()}
-	r.tags, r.err = s.app.FollowTags(ctx)
+	r = followResult{which: followTags, account: account, selfMid: account.SelfMid}
+	r.tags, r.err = s.app.FollowTagsForAccount(ctx, account)
 }
 
 // fetchFollowUsers 拉右边那一格的一页。
@@ -1394,6 +1401,7 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 // 而「累计加载了多少」是界面状态，后台读它就是竞争。所以它在**界面线程上**取一
 // 份带过来（和 `library_rows.go` 的 `load` 传 `loaded` 是同一个做法）。
 func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64, tab, keyword string, page, loaded, count int) {
+	account := s.app.AccountSnapshot()
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -1406,14 +1414,13 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64,
 		s.wake.invalidate()
 	}()
 
-	r = followResult{which: followUsers, selfMid: s.app.SelfMid(), gen: int(gen), tab: tab, keyword: keyword}
-	self := s.app.SelfMid()
+	r = followResult{which: followUsers, account: account, selfMid: account.SelfMid, gen: int(gen), tab: tab, keyword: keyword}
 
 	if tagID, ok := tagIDOf(tab); ok {
 		// ⚠️ 分组明细那个接口**不报总数**，所以总数那一项用的是分组自己的 count
 		//（理由见 `bili/follow.go` 文件头）。它在 `f.tags` 里，而那是界面状态——
 		// 所以**也在界面线程上取一份**带进来（`count` 那一个参数）。
-		users, err := s.app.FollowTagUsers(ctx, tagID, page+1)
+		users, err := s.app.FollowTagUsersForAccount(ctx, account, tagID, page+1)
 		r.err = err
 		if err == nil {
 			r.users, r.total = users, count
@@ -1422,11 +1429,13 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64,
 	}
 
 	var pg app.FollowUsersPage
+	var err error
 	if keyword != "" {
-		pg, r.err = s.app.SearchFollowings(ctx, self, keyword, page+1)
+		pg, err = s.app.SearchFollowingsForAccount(ctx, account, keyword, page+1)
 	} else {
-		pg, r.err = s.app.FollowList(ctx, self, page+1)
+		pg, err = s.app.FollowListForAccount(ctx, account, page+1)
 	}
+	r.err = err
 	if r.err != nil {
 		return
 	}
@@ -1467,7 +1476,7 @@ func (s *Shell) adoptFollow(f *followPage) {
 	for _, r := range box {
 		// ⚠️ **`settle` / 清 loading 必须无条件执行**：请求失败、超时、返回不对、
 		// 拉取的代码自己崩了，全走这一条。漏了它那一格会永远停在「正在加载」。
-		if r.selfMid != f.selfMid {
+		if r.account != s.app.AccountSnapshot() || r.selfMid != f.selfMid {
 			// 换账号之前发出去的那一页（`stop` 停不掉已经在回来的那一页）。
 			// 取关那一趟直接丢掉：它改的是**上一个账号**的关注。
 			switch r.which {

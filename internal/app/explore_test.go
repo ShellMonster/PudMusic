@@ -320,8 +320,48 @@ func TestFollowChangesTheButtonBeforeTheRoundTrip(t *testing.T) {
 	}
 }
 
-// TestFollowRollsTheButtonBackWhenItFails 钉住「失败要回滚」。
-//
+func TestFollowCompletionAfterAccountChangeIsRejected(t *testing.T) {
+	b := newExploreBili(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	b.on("/x/space/wbi/acc/info", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"mid": 42, "name": "n"})
+	})
+	b.on("/x/relation/stat", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"follower": 1})
+	})
+	b.on("/x/space/wbi/acc/relation", func(w http.ResponseWriter, r *http.Request) {
+		writeExploreJSON(w, 0, map[string]any{"relation": map[string]any{"attribute": 0}})
+	})
+	b.on("/x/relation/modify", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		writeExploreJSON(w, 0, nil)
+	})
+	a := newExploreApp(t, b)
+	loginExplore(a, "77")
+	sp := a.UpSpaceOf(42)
+	sp.Load()
+	waitExplore(t, sp)
+
+	snapshot := a.AccountSnapshot()
+	done := make(chan error, 1)
+	go func() { done <- sp.FollowForAccount(context.Background(), snapshot, true) }()
+	<-started
+	a.TestOnlyAdoptLogin("88")
+	close(release)
+	if err := <-done; err != ErrStaleGeneration {
+		t.Fatalf("stale follow returned %v, want ErrStaleGeneration", err)
+	}
+	if got := sp.Snapshot(); got.RelationKnown() || got.Relation.Followed() {
+		t.Fatalf("stale follow left account-bound optimistic state: %+v", got)
+	}
+}
+
 // 不回滚的话按钮会一直写着「已关注」，而 B 站那边他压根没关注——用户
 // 第二次按「已关注」取消的是一次**从来没发生过**的关注。
 func TestFollowRollsTheButtonBackWhenItFails(t *testing.T) {

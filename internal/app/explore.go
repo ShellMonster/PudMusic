@@ -103,12 +103,26 @@ func (a *App) TestOnlyAdoptLogin(mid string) {
 	})
 }
 
-// SelfMid 是当前登录账号的 mid，0 是没登录。
-//
-// 动态流左侧的作者栏列的是「**我**关注的人」，所以要的是自己的 mid，
-// 不是页面上那个 UP 的（那个在路由参数里）。
-func (a *App) SelfMid() int64 {
-	id := a.Session().DedeUserID
+// AccountSnapshot captures the current account identity and generation once.
+func (a *App) AccountSnapshot() AccountSnapshot {
+	if a.account == nil {
+		return AccountSnapshot{}
+	}
+	session, generation := a.account.mgr.Snapshot()
+	return AccountSnapshot{
+		SelfMid:          parseSelfMid(session.DedeUserID),
+		Generation:       generation,
+		ClientGeneration: a.ExploreGeneration(),
+	}
+}
+
+// accountSnapshotCurrent reports whether a request still belongs to the current account.
+func (a *App) accountSnapshotCurrent(snapshot AccountSnapshot) bool {
+	return a.AccountSnapshot() == snapshot
+}
+
+// parseSelfMid converts a DedeUserID into the public self mid.
+func parseSelfMid(id string) int64 {
 	if id == "" {
 		return 0
 	}
@@ -117,6 +131,14 @@ func (a *App) SelfMid() int64 {
 		return 0
 	}
 	return n
+}
+
+// SelfMid 是当前登录账号的 mid，0 是没登录。
+//
+// 动态流左侧的作者栏列的是「**我**关注的人」，所以要的是自己的 mid，
+// 不是页面上那个 UP 的（那个在路由参数里）。
+func (a *App) SelfMid() int64 {
+	return a.AccountSnapshot().SelfMid
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -134,11 +156,12 @@ type UpSpace struct {
 	app *App
 	mid int64
 
-	mu      sync.Mutex
-	head    SpaceHeader
-	gen     uint64
-	running bool
-	closed  bool
+	mu        sync.Mutex
+	head      SpaceHeader
+	gen       uint64
+	followGen uint64
+	running   bool
+	closed    bool
 }
 
 // UpSpaceOf 是 mid 这个 UP 的头部状态。**第一次问的时候现建一个空的**：
@@ -383,9 +406,14 @@ func (s *UpSpace) fail(err error) {
 // 粉丝数**不在这里改**：粉丝数是 B 站那边算的，改它等于自己编一个数。
 // 取关之后它会少 1，那是下一次进这个空间才看得见的。
 func (s *UpSpace) Follow(ctx context.Context, follow bool) error {
-	cli := s.app.explore()
-	if cli == nil {
-		return errExploreMissing
+	return s.FollowForAccount(ctx, s.app.AccountSnapshot(), follow)
+}
+
+// FollowForAccount applies the optimistic follow change for one immutable account snapshot.
+func (s *UpSpace) FollowForAccount(ctx context.Context, snapshot AccountSnapshot, follow bool) error {
+	cli, err := s.app.exploreAt(snapshot)
+	if err != nil {
+		return err
 	}
 	act := bili.ActionFollow
 	if !follow {
@@ -400,30 +428,40 @@ func (s *UpSpace) Follow(ctx context.Context, follow bool) error {
 	was := s.head.Relation
 	s.head.Relation = relationAfter(was, follow)
 	// 按过之后关系是**确定**的，哪怕刚才那次查询是拿另一个账号做的。
-	s.head.relationFor, s.head.relationKnown = selfMidOf(s.app), true
+	s.head.relationFor, s.head.relationKnown = snapshot.SelfMid, true
 	s.head.relationErr = ""
+	s.followGen++
+	followGen := s.followGen
 	s.mu.Unlock()
 
-	err := cli.ModifyRelation(ctx, s.mid, act)
-	if err != nil {
-		s.mu.Lock()
-		if s.closed {
-			s.mu.Unlock()
-			return err
-		}
+	err = cli.ModifyRelation(ctx, s.mid, act)
+	s.mu.Lock()
+	staleAccount := !s.app.accountSnapshotCurrent(snapshot)
+	staleOperation := s.followGen != followGen || s.closed
+	if staleAccount {
+		// 这个空间按 mid 缓存，但关系按账号缓存。旧账号的乐观状态不能留给新账号。
+		s.head.Relation = RelationNone
+		s.head.relationFor, s.head.relationKnown = 0, false
+		s.head.relationErr = ""
+	}
+	if err != nil && !staleAccount && !staleOperation {
 		s.head.Relation = was // 回滚：按钮要变回原来那个样子
-		s.mu.Unlock()
+	}
+	s.mu.Unlock()
 
+	if staleAccount || staleOperation {
+		if staleAccount {
+			if wake := s.app.wakeLocked(); wake != nil {
+				wake()
+			}
+		}
+		return ErrStaleGeneration
+	}
+	if err != nil {
 		if wake := s.app.wakeLocked(); wake != nil {
 			wake()
 		}
 		return err
-	}
-	s.mu.Lock()
-	closed := s.closed
-	s.mu.Unlock()
-	if closed {
-		return nil
 	}
 
 	// 成功路径也要叫醒：上面的 `Follow` 已经把按钮的字改了，但界面是即时模式，
@@ -522,32 +560,69 @@ func (a *App) UpDynamics(ctx context.Context, mid int64, offset string) (Dynamic
 	return mapDynamicPage(pg), nil
 }
 
-func (a *App) DynamicFeed(ctx context.Context, offset string) (DynamicPage, error) {
-	cli := a.explore()
+func (a *App) exploreAt(snapshot AccountSnapshot) (*bili.Client, error) {
+	a.mu.Lock()
+	cli, clientGeneration := a.exploreClient, a.exploreGen
+	a.mu.Unlock()
 	if cli == nil {
-		return DynamicPage{}, errExploreMissing
+		return nil, errExploreMissing
+	}
+	if !a.accountSnapshotCurrent(snapshot) || clientGeneration != snapshot.ClientGeneration {
+		return nil, ErrStaleGeneration
+	}
+	return cli, nil
+}
+
+func (a *App) dynamicFeedForAccount(ctx context.Context, snapshot AccountSnapshot, offset string) (DynamicPage, error) {
+	cli, err := a.exploreAt(snapshot)
+	if err != nil {
+		return DynamicPage{}, err
 	}
 	pg, err := cli.DynamicFeed(ctx, offset)
 	if err != nil {
 		return DynamicPage{}, err
 	}
+	if !a.accountSnapshotCurrent(snapshot) {
+		return DynamicPage{}, ErrStaleGeneration
+	}
 	return mapDynamicPage(pg), nil
 }
 
-func (a *App) FollowedAuthors(ctx context.Context, vmid int64, page int) (FollowAuthorsPage, error) {
-	cli := a.explore()
-	if cli == nil {
-		return FollowAuthorsPage{}, errExploreMissing
-	}
-	pg, err := cli.Followings(ctx, vmid, page)
+func (a *App) followedAuthorsForAccount(ctx context.Context, snapshot AccountSnapshot, page int) (FollowAuthorsPage, error) {
+	cli, err := a.exploreAt(snapshot)
 	if err != nil {
 		return FollowAuthorsPage{}, err
+	}
+	pg, err := cli.Followings(ctx, snapshot.SelfMid, page)
+	if err != nil {
+		return FollowAuthorsPage{}, err
+	}
+	if !a.accountSnapshotCurrent(snapshot) {
+		return FollowAuthorsPage{}, ErrStaleGeneration
 	}
 	out := FollowAuthorsPage{Total: pg.Total, HasMore: pg.HasMore, Authors: make([]FollowAuthor, 0, len(pg.Authors))}
 	for _, v := range pg.Authors {
 		out.Authors = append(out.Authors, FollowAuthor{Mid: v.Mid, Name: v.Name, Face: v.Face})
 	}
 	return out, nil
+}
+
+func (a *App) DynamicFeed(ctx context.Context, offset string) (DynamicPage, error) {
+	return a.dynamicFeedForAccount(ctx, a.AccountSnapshot(), offset)
+}
+
+func (a *App) DynamicFeedForAccount(ctx context.Context, snapshot AccountSnapshot, offset string) (DynamicPage, error) {
+	return a.dynamicFeedForAccount(ctx, snapshot, offset)
+}
+
+func (a *App) FollowedAuthorsForAccount(ctx context.Context, snapshot AccountSnapshot, page int) (FollowAuthorsPage, error) {
+	return a.followedAuthorsForAccount(ctx, snapshot, page)
+}
+
+func (a *App) FollowedAuthors(ctx context.Context, vmid int64, page int) (FollowAuthorsPage, error) {
+	snapshot := a.AccountSnapshot()
+	snapshot.SelfMid = vmid
+	return a.followedAuthorsForAccount(ctx, snapshot, page)
 }
 
 // LikeDynamic 给一条动态点赞 / 取消点赞。**立刻返回**，结果走 done。
