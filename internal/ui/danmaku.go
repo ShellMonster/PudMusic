@@ -47,11 +47,36 @@
 //
 // 几十毫秒的采样误差**不重钉**：重钉就是跳一下，而那个误差是有界的
 // （播放器 50ms 一拍）。
+//
+// # 增量：只有新进入窗口的条目才分配轨道（票 #670）
+//
+// #647 交付了按 `TimeMS` 排序的索引（`itemsByTime`）和窗口二分；改之前绘制帧
+// 仍然每帧把窗口里那一段**重新过一遍**：每一条都查一次字宽缓存、可见列表
+// 每帧重排一次、已经在 `slots` 里的条目每帧再查一次 map。密集弹幕（上千条）
+// 下这些工作随「窗口里有多少条」线性增长，而窗口起点是按**最长那条弹幕**
+// 估出来的上界——一条长弹幕就能把窗口拉出好几分钟。
+//
+// ⇒ 这一份现在记一个**只前进的游标** `cursor`：
+//
+//	第一次跨过当前位置的条目   进一次窗口：先看有没有轨道放得下，放得下才
+//	                          量字宽、分配轨道、加入 `active`；放不下就丢掉
+//	                          （不排队，也不为它量字宽）
+//	已经在 active 里的条目     每帧只按自己的年龄算位置，不再查索引、不再
+//	                          量字宽、不再写 map
+//	整个出界的条目             从 active / slots / widths 里一起收掉
+//
+// 换歌（`count` / `first` 变了）、大幅回退、字号变化、封面宽度变化时，
+// 游标和活动集合整体复位（见 `resetTracks`）——那些状态下旧的字宽、轨道
+// 门槛和活动条目都不再成立。
+//
+// 时间索引和窗口二分仍然是 #647 交付的那一份：`rewind` 用 `sort.Search` 把
+// 游标放到窗口起点（早已出界的条目直接跳过），改的只是**不再每帧都做一遍**。
 package ui
 
 import (
 	"cmp"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -165,6 +190,17 @@ type danmakuSlot struct {
 	maxAgeMS int64
 }
 
+// danmakuActive 是活动集合里的一条：已经进了窗口、占着轨道的那条弹幕。
+//
+// ⚠️ **它是「已入场」的唯一事实**（票 #670）：绘制帧只遍历这一份，不再回
+// 时间索引里找「谁该出现」——那是 `cursor` 在一帧里做一次的事。
+type danmakuActive struct {
+	// item 是这条弹幕自己（正文、颜色、rowid 都在里面）。
+	item app.DanmakuItem
+	// slot 是它占的那条轨道（`lane` 一定 >= 0：被丢掉的不进活动集合）。
+	slot danmakuSlot
+}
+
 // danmakuLayer 记着弹幕这一摊跨帧的状态。
 //
 // ⚠️ **为什么要有跨帧的状态**：轨道是**入场那一刻**定的（B 站那样），不是
@@ -193,6 +229,9 @@ type danmakuLayer struct {
 	//
 	// ⚠️ **键是弹幕自己的 rowid**（稳定且唯一），不是下标——下标会随着
 	// 「前面插了一条」整体错配（铁律四第 4 条）。
+	//
+	// ⚠️ **被丢掉的不进这张表**（票 #670）：没有槽位就没有活动状态，下一帧
+	// 也不该再为它做任何事。
 	slots map[string]danmakuSlot
 
 	// widths 记着每条弹幕的字宽（量一次就够）。
@@ -208,10 +247,35 @@ type danmakuLayer struct {
 	count int
 	first string
 
-	// itemsByTime 是当前弹幕批次按 TimeMS 排序的索引。绘制帧只在这个索引上
-	// 做时间窗口二分，不再扫描和排序完整列表。
+	// itemsByTime 是当前弹幕批次按 TimeMS 排序的索引（#647 交付的那一份）。
+	// 绘制帧只在这个索引上做时间窗口二分，不再扫描和排序完整列表。
 	itemsByTime  []app.DanmakuItem
 	maxTextBytes int
+
+	// cursor 是时间索引上「还没被游标吞掉」的第一个位置（票 #670）。
+	//
+	// ⚠️ **它只前进**（大幅回退除外）：每帧从它往后扫到「时间 > 当前位置」
+	// 为止，跨过去的条目**只处理一次**——分轨道、量字宽、加入 `active`。
+	// 之后每帧只遍历活动集合，不再碰索引，也不再查字宽。
+	cursor int
+
+	// active 是已经入场、还在屏幕上的那些条目（按入场时间排序）。
+	//
+	// ⚠️ **它是复用的缓冲**：收掉出界的那几条走原地压缩，不重新分配。
+	active []danmakuActive
+
+	// lastPosMS 是上一次推进窗口时的位置，只用来认「这一帧往回走了」。
+	//
+	// ⚠️ **往回走要把游标倒回去**（小范围抖动 / 采样误差）：不倒的话，
+	// 刚被吞掉的那几条会被当成「已经处理过」，而它们的年龄变小之后本该
+	// 重新出现在画面上。
+	lastPosMS int64
+	// posValid 是「lastPosMS 已经是这一份弹幕上的一个位置」（复位 / 换歌 /
+	// 跳转之后为假，第一帧要走一次二分）。
+	posValid bool
+
+	// coverW 是这一份活动状态按哪个封面宽算的（变了要整份复位）。
+	coverW float32
 
 	// baseMS 是锚点那一刻的视频位置（毫秒），baseAt 是那一刻的**钟**
 	// （建树时 `Context.Now()` 的读数）。绘制帧用
@@ -246,8 +310,6 @@ type danmakuLayer struct {
 	// 封面高度算好，绘制帧直接用）。
 	fontSize float32
 	trackH   float32
-	// buf 是这一帧可见的弹幕（复用的缓冲，免得每帧分配）。
-	buf []danmakuVisible
 
 	// paints / requests 是**给测试数**的两个计数（照 `builds.go` 那条规矩：
 	// 「谁画的谁才数得出来」，所以它住在生产代码里）。
@@ -259,14 +321,23 @@ type danmakuLayer struct {
 	// 进度条那根线（`viewFullProgress` 的 `live`）在播放中也一直要帧，两者从
 	// 「有没有帧」上看不出区别。
 	paints, requests int
+
+	// entered / assigned / measures 是增量窗口的**可测计数**（票 #670），
+	// 全是普通整数，不参与绘制、不做任何额外分配：
+	//
+	//	entered   过粗筛之后「进了窗口」的条目数（含没有轨道被丢掉的；
+	//	          回退重扫时同一条会被再数一次——那正是回退的成本）
+	//	assigned  其中真的拿到轨道的条目数（= 活动集合一共收过多少条）
+	//	measures  真的量过字宽的次数（每条拿到轨道的只量一次）
+	//
+	// ⚠️ **它们钉住的是「分配次数只和新进入的条数相关」**：密集弹幕下
+	// `assigned` 不该随总条数线性增长，稳态帧里 `measures` 一次都不该涨。
+	entered, assigned, measures int
 }
 
 // reset 把这一摊清空（换歌、或者压根没有弹幕）。
 func (d *danmakuLayer) reset() {
-	d.lanes = [danmakuTracks]danmakuLane{}
-	d.slots = nil
-	d.widths = nil
-	d.live = 0
+	d.resetTracks()
 	d.count = 0
 	d.first = ""
 	d.itemsByTime = nil
@@ -278,9 +349,26 @@ func (d *danmakuLayer) reset() {
 	d.ready = false
 	d.animate = false
 	d.fontSize, d.trackH = 0, 0
-	// ⚠️ **buf 只截断、不置 nil**：它是复用的缓冲（换歌之后照样复用它），
-	// 置 nil 就是每次换歌多分一次。
-	d.buf = d.buf[:0]
+	d.entered, d.assigned, d.measures = 0, 0, 0
+}
+
+// resetTracks 把轨道、字宽、游标和活动集合整份复位，**保留**这一份弹幕的
+// 身份（`count` / `first`）、时间索引和时钟锚点。
+//
+// 它用在四种「旧状态不再成立」的时候（票 #670）：换歌（走 `reset`）、大幅
+// 回退、字号变化、封面宽度变化。之后游标从时间索引的窗口起点重新开始，
+// 新位置上的条目按空轨道重新分配。
+func (d *danmakuLayer) resetTracks() {
+	d.lanes = [danmakuTracks]danmakuLane{}
+	d.slots = nil
+	d.widths = nil
+	d.live = 0
+	d.cursor = 0
+	// ⚠️ **active 只截断、不置 nil**：它是复用的缓冲（复位之后照样复用它）。
+	d.active = d.active[:0]
+	d.lastPosMS = 0
+	d.posValid = false
+	d.coverW = 0
 }
 
 // posAt 报「钟走到 now」时弹幕该在的位置（毫秒）。
@@ -364,80 +452,80 @@ func danmakuSortItemsByTime(items []app.DanmakuItem) {
 	})
 }
 
-type danmakuVisible struct {
-	// item 是这一条自己（时间、正文、颜色、rowid）。
-	item app.DanmakuItem
-	// ageMS 是它滚了多久（毫秒）：`当前位置 - 它自己的时间`。
-	ageMS int64
-	// width 是它的字宽（DIP）。
-	width float32
-	// lane 是它占的轨道号（-1 = 被丢掉了）。
-	lane int
-}
-
-// danmakuSortByTime 按视频时间排（稳定的）。
-//
-// ⚠️ **轨道是按「谁先入场」定的**（B 站那样），所以顺序不能乱。
-//
-// ⚠️ **排序要稳定**：同一时刻的两条（B 站的数据里有）得保持 B 站给的
-// 先后，否则它们的轨道每帧可能换（⇒ 抖）。
-func danmakuSortByTime(vis []danmakuVisible) {
-	slices.SortStableFunc(vis, func(a, b danmakuVisible) int {
-		return cmp.Compare(a.item.TimeMS, b.item.TimeMS)
-	})
-}
-
-// assign 给一条新出现的弹幕找一条轨道。
+// pickLane 给一条**新进入窗口**的弹幕找第一条放得下的轨道（-1 = 放不下）。
 //
 // # 规则
 //
 // 每条弹幕找第一条**放得下**的轨道（见 `danmakuLayer.lanes` 那一段的两条
-// 判据：时间门槛 + 几何门槛）；八条轨道都放不下就**丢掉这一条**（不排队）。
+// 判据：时间门槛 + 几何门槛）；八条轨道都放不下、或者同屏已经到上限，就
+// **丢掉这一条**（不排队）。
+//
+// ⚠️ **它不量字宽**（票 #670）：放不下的条目连一次 `MeasureText` 都不该付
+// ——密集弹幕里被丢掉的是绝大多数，而那正是「首次打开」最贵的那一下。
 //
 // ⚠️ **轨道是入场那一刻定的**（B 站那样），不是每帧重算的——每帧重算的话，
 // 一条弹幕会在屏幕上换轨道，或者被挤掉之后又半路冒出来。
-func (d *danmakuLayer) assign(it app.DanmakuItem, width float32, spacingMS int64, coverW float32) danmakuSlot {
+func (d *danmakuLayer) pickLane(timeMS, spacingMS int64) int {
+	if d.live >= danmakuMaxOnScreen {
+		return -1
+	}
+	for t := range danmakuTracks {
+		lane := d.lanes[t]
+		if !lane.used {
+			// 空轨道 ⇒ 什么都不挡。
+			return t
+		}
+		// 门槛一（报告 §3.3）：前一条走出 30% 的宽度。
+		need := spacingMS
+		// 门槛二（几何）：前一条的**尾巴**必须已经过了右边沿那条入场线，
+		// 否则两条的字会叠在一起（评审提的 critical）。
+		if geom := int64(float64(lane.width) * 1000 / danmakuSpeed); geom > need {
+			need = geom
+		}
+		if timeMS-lane.timeMS < need {
+			continue
+		}
+		return t
+	}
+	return -1
+}
+
+// commit 把一条拿到轨道的弹幕记进轨道状态和槽位，返回它的槽位。
+//
+// ⚠️ **`lane >= 0` 才调它**：被丢掉的不进槽位（票 #670）——没有槽位就没有
+// 活动状态，下一帧也不该再为它做任何事。
+func (d *danmakuLayer) commit(lane int, it app.DanmakuItem, width float32, coverW float32) danmakuSlot {
 	slot := danmakuSlot{
-		lane:   -1,
+		lane:   lane,
 		timeMS: it.TimeMS,
 		// 一条字走到**整个出界**（右沿也出去了）要多久：(封面宽 + 字宽) / 速度。
 		maxAgeMS: int64((float64(coverW) + float64(width)) * 1000 / danmakuSpeed),
 	}
-	if d.live < danmakuMaxOnScreen {
-		for t := range danmakuTracks {
-			lane := d.lanes[t]
-			if !lane.used {
-				// 空轨道 ⇒ 什么都不挡。
-				slot.lane = t
-				break
-			}
-			// 门槛一（报告 §3.3）：前一条走出 30% 的宽度。
-			need := spacingMS
-			// 门槛二（几何）：前一条的**尾巴**必须已经过了右边沿那条入场线，
-			// 否则两条的字会叠在一起（评审提的 critical）。
-			if geom := int64(float64(lane.width) * 1000 / danmakuSpeed); geom > need {
-				need = geom
-			}
-			if it.TimeMS-lane.timeMS < need {
-				continue
-			}
-			slot.lane = t
-			break
-		}
-		if slot.lane >= 0 {
-			d.lanes[slot.lane] = danmakuLane{
-				used:   true,
-				timeMS: it.TimeMS,
-				width:  width,
-			}
-			d.live++
-		}
+	d.lanes[lane] = danmakuLane{
+		used:   true,
+		timeMS: it.TimeMS,
+		width:  width,
 	}
 	if d.slots == nil {
 		d.slots = map[string]danmakuSlot{}
 	}
 	d.slots[it.ID] = slot
+	// ⚠️ **`live` 是活动集合条数的镜像**：`expire` 收掉出界的那些时重设，
+	// 这里每收一条加一——两个地方各加各减容易漏，所以就这两个口子。
+	d.live++
 	return slot
+}
+
+// assign 给一条弹幕找轨道并记账（挑轨道 + 写入槽位两步的合并入口）。
+//
+// ⚠️ **绘制路径不走它**（`advance` 先挑轨道、量完字宽才 `commit`，为的是
+// 「放不下的不量字宽」）；它留给只验轨道规则的测试用。
+func (d *danmakuLayer) assign(it app.DanmakuItem, width float32, spacingMS int64, coverW float32) danmakuSlot {
+	lane := d.pickLane(it.TimeMS, spacingMS)
+	if lane < 0 {
+		return danmakuSlot{lane: -1, timeMS: it.TimeMS}
+	}
+	return d.commit(lane, it, width, coverW)
 }
 
 // danmakuAgeBoundMS 报「一条弹幕早就该出界了」的时间上界（毫秒）。
@@ -457,22 +545,53 @@ func (d *danmakuLayer) assign(it app.DanmakuItem, width float32, spacingMS int64
 // 而按 60 px/s 它的右缘还在封面里）。所以这一档**只做上界，不做上限**。
 //
 // ⚠️ **汉字那三倍是白给的**：粗筛窗口比真窗口宽三倍 ⇒ 量字宽的次数多一些
-// （每条弹幕只量一次，量完记在 `d.widths` 里）。
+// （每条弹幕拿到轨道时量一次，量完记在 `d.widths` 里）。
 func danmakuAgeBoundMS(text string, fontSize, coverW float32) int64 {
 	wBound := float64(len(text)) * float64(fontSize)
 	return int64((float64(coverW) + wBound) * 1000 / danmakuSpeed)
 }
 
+// windowStart 是「从当前位置往前推多远的条目还可能挂在屏幕上」的时间点。
+//
+// 它用的是**最长那条**弹幕的字节数上界（`maxTextBytes`）——所以窗口一定
+// 盖住所有还在画面上的条目（`danmakuAgeBoundMS` 只粗筛、不砍）。
+func (d *danmakuLayer) windowStart(posMS int64, coverW float32) int64 {
+	bound := float64(coverW) + float64(d.maxTextBytes)*float64(d.fontSize)
+	return posMS - int64(bound*1000/danmakuSpeed)
+}
+
+// rewind 把游标挪到 `posMS` 那一格的窗口起点（二分，不扫描）。
+//
+// ⚠️ **只在「第一次」和「跳转 / 回退」时调**（票 #670）：普通播放帧从游标
+// 往后走，一次 `sort.Search` 都不做——窗口二分仍然是 #647 那份索引上的，
+// 只是不再每帧都二分一遍。
+func (d *danmakuLayer) rewind(posMS int64, coverW float32) {
+	startMS := d.windowStart(posMS, coverW)
+	d.cursor = sort.Search(len(d.itemsByTime), func(i int) bool {
+		return d.itemsByTime[i].TimeMS >= startMS
+	})
+}
+
 // expire 收掉已经整个出界的那些（它们占的轨道要让给后来的）。
+//
+// ⚠️ **活动集合是原地压缩的**（票 #670）：不新建切片、不重新排序。同屏
+// 上限 12 条 ⇒ 这一步每帧最多过 12 个元素。
+//
+// ⚠️ **字宽跟着槽位一起收**：`widths` 与 `slots` 是同一份活动集合的两个
+// 视图，只留**在屏**那几条的字宽——不然一首长歌放下来它会一直涨。回退时
+// 重新扫到同一条会再量一次，那是回退自己的成本，正常播放不付。
 func (d *danmakuLayer) expire(posMS int64) {
-	for id, slot := range d.slots {
-		if posMS-slot.timeMS > slot.maxAgeMS {
-			delete(d.slots, id)
-			if slot.lane >= 0 {
-				d.live--
-			}
+	kept := d.active[:0]
+	for _, a := range d.active {
+		if posMS-a.slot.timeMS > a.slot.maxAgeMS {
+			delete(d.slots, a.item.ID)
+			delete(d.widths, a.item.ID)
+			continue
 		}
+		kept = append(kept, a)
 	}
+	d.active = kept
+	d.live = len(kept)
 }
 
 // widthOf 报一条弹幕的字宽（DIP）。**量一次就够**。
@@ -480,6 +599,8 @@ func (d *danmakuLayer) expire(posMS int64) {
 // ⚠️ **权衡器是 `Painter` 而不是 `Context`**：量字宽现在发生在**绘制帧**里
 // （那一帧只有 `p`），而 `Painter.MeasureText` 和 `Context.MeasureText` 落到
 // 同一个排版缓存上（`richParams`）——同一个字号量出来的数一样。
+//
+// ⚠️ **只有拿到轨道的条目才调它**（票 #670）：`measures` 数的是真的排了几次版。
 func (d *danmakuLayer) widthOf(p *ui.Painter, id, text string, fontSize float32) float32 {
 	if w, ok := d.widths[id]; ok {
 		return w
@@ -489,7 +610,76 @@ func (d *danmakuLayer) widthOf(p *ui.Painter, id, text string, fontSize float32)
 		d.widths = map[string]float32{}
 	}
 	d.widths[id] = w
+	d.measures++
 	return w
+}
+
+// advance 把时间窗口推到 `posMS`，并把**新进入窗口**的条目录入活动集合。
+//
+// # 每帧做什么
+//
+//	要跳就二分一次游标（第一次 / 跳转 / 回退）
+//	收掉出界的（原地压缩活动集合）
+//	从游标往后，把「时间已经不晚于 posMS」的条目**过一遍就不再回头**：
+//	    没有 rowid / 早就出界        跳过（不量字宽）
+//	    已经在活动集合里            跳过（回退时才会碰到）
+//	    有轨道放得下                量一次字宽、分配、加入活动集合
+//	    没有轨道                   丢掉（不量字宽、不进活动集合）
+//
+// ⚠️ **工作量和「新进入几条」成正比**，不跟「这份弹幕一共几条」成正比：
+// 稳态帧里游标不动，只有 `expire` 过一遍那顶多 12 条活动条目。
+func (d *danmakuLayer) advance(p *ui.Painter, posMS int64, coverW float32, spacingMS int64) {
+	// ⚠️ **往回走就把游标倒回去**（票 #670）：往回走一点（暂停恢复时锚点重钉、
+	// 倍速切换的采样误差）时，刚刚收掉的那几条可能又该在屏幕上了——不倒游标
+	// 它们永远不会再入场。这不是普通播放帧的成本：在放时 `posAt` 单调，只有
+	// 「跳转 / 暂停 / 恢复 / 换倍速」那几下会往回走。
+	if !d.posValid || posMS < d.lastPosMS ||
+		posMS-d.lastPosMS > danmakuSeekSlop.Milliseconds() {
+		d.rewind(posMS, coverW)
+	}
+	d.expire(posMS)
+	for d.cursor < len(d.itemsByTime) {
+		it := d.itemsByTime[d.cursor]
+		if it.TimeMS > posMS {
+			break
+		}
+		d.cursor++
+		if it.ID == "" {
+			// 没有 rowid ⇒ 认不出它 ⇒ 不画。
+			//
+			// ⚠️ **不是「兜底给它一个 key」**：槽位是按 rowid 记的，没有身份
+			// 就没法稳定（生产上 rowid 一定有，见 `internal/service/bili` 的
+			// `Danmaku.ID`）。
+			continue
+		}
+		if _, ok := d.slots[it.ID]; ok {
+			// 回退时重新扫到的条目——它已经在活动集合里，状态直接复用。
+			continue
+		}
+		if posMS-it.TimeMS > danmakuAgeBoundMS(it.Text, d.fontSize, coverW) {
+			// 粗筛上界：早就出界的那些不排版（量字宽要排一次版）。
+			continue
+		}
+		d.entered++
+		lane := d.pickLane(it.TimeMS, spacingMS)
+		if lane < 0 {
+			// 没有轨道可放 ⇒ **丢掉这一条**（报告 §3.3：不排队）。
+			continue
+		}
+		width := d.widthOf(p, it.ID, it.Text, d.fontSize)
+		if posMS-it.TimeMS > int64((float64(coverW)+float64(width))*1000/danmakuSpeed) {
+			// 精确判据（照旧是「(封面宽 + 字宽) ÷ 速度」）：回退重扫时才会
+			// 走到这里——那条早就整个出界了，不该再挂回轨道上。刚量的那一格
+			// 也一起收掉，让 `widths` 与 `slots` 保持一一对应。
+			delete(d.widths, it.ID)
+			continue
+		}
+		slot := d.commit(lane, it, width, coverW)
+		d.active = append(d.active, danmakuActive{item: it, slot: slot})
+		d.assigned++
+	}
+	d.lastPosMS = posMS
+	d.posValid = true
 }
 
 // sync 是**建树那一帧**要做的三件事：认这份弹幕的身份、把字号与轨道高定下来、
@@ -530,7 +720,18 @@ func (d *danmakuLayer) sync(c *ui.Context, st app.State, items []app.DanmakuItem
 		// 而轨道总数是死的（8 条）⇒ 太高的话只能压回去。
 		trackH = maxH
 	}
+	// ⚠️ **字号变了要把轨道整份复位**（票 #670）：字宽是按字号量的，旧的
+	// 那一份宽度、轨道门槛和「整个出界」的时长全部不再成立。
+	if d.ready && d.fontSize != fontSize {
+		d.resetTracks()
+	}
+	// ⚠️ **封面宽度变了也要复位**：轨道门槛（30% 封面宽）和出界时长
+	// （封面宽 + 字宽）都按它算，而窗口粗筛的上界也用它。
+	if d.coverW != 0 && d.coverW != area.W {
+		d.resetTracks()
+	}
 	d.fontSize, d.trackH = fontSize, trackH
+	d.coverW = area.W
 	d.ready = true
 
 	posMS := st.Position.Milliseconds()
@@ -550,9 +751,10 @@ func (d *danmakuLayer) sync(c *ui.Context, st app.State, items []app.DanmakuItem
 	// （可能一秒前），拿它比的话「从 60 秒拖回 30 秒」会被漏掉（30 > anchor-2s），
 	// 而轨道上记着的是 60 秒附近的入场时刻。
 	if posMS < d.posAt(c.Now())-danmakuSeekSlop.Milliseconds() {
-		d.lanes = [danmakuTracks]danmakuLane{}
-		d.slots = nil
-		d.live = 0
+		d.resetTracks()
+		// ⚠️ **复位会把 `coverW` 清成 0（「还没按哪个宽度算过」）**：这一帧
+		// 已经知道宽度了，补回去——否则下一帧的 `sync` 会以为封面宽度刚变。
+		d.coverW = area.W
 	}
 	d.follow(posMS, c.Now(), st.Playing, st.Playing && !c.Preferences().ReduceMotion, st.Rate)
 }
