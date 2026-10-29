@@ -68,8 +68,12 @@
 
 ### 从 `AGENTS.md` 搬来的
 
-> **38 条**，与收尾说明里的落位表一一对应。**§1~§11 每一章都有条目**——
-> 一章都没有落掉，才叫「一条不落」。
+> **37 条**，与收尾说明里的落位表一一对应。
+>
+> ⚠️ **§10 那一章（收尾）的条目已经删掉**：它讲的是工作区怎么被清掉、收尾不做的后果，
+> 那是工具链的内部生命周期，不是项目纪律。现在 `AGENTS.md` §收尾 只留「停掉自己起的进程」
+> 和「收尾报告写什么」两条。**§10 因此是唯一一章没有条目落在本目录的**——它现在只剩纪律
+> 本体，没有需要下沉的「为什么」。
 
 | # | 原位置 | 内容 | 新位置（文档 § 小节） | 纪律留在源文件？ |
 |---|---|---|---|---|
@@ -107,10 +111,9 @@
 | 32 | §8 | 提交信息：中文一句话 + 票号；不写 `Closes #N` | **纪律留在 `AGENTS.md` §8**；背景 `docs/experience/git-and-workflow.md` §《提交信息》 | ✅ |
 | 33 | §9 | `GLOSSARY.md` / `docs/adr/` 不存在、`docs/research/` 不进版本库 | **纪律留在 `AGENTS.md` §9**；背景 `docs/experience/git-and-workflow.md` §《仓库里哪些东西不是文档》 | ✅ |
 | 34 | §9 | 回归证据是代码，不是文档 | **纪律留在 `AGENTS.md` §9**；背景 `docs/experience/architecture.md` §《回归证据是代码，不是文档》 | ✅ |
-| 35 | §10 | gopls 收尾：为什么、怎么做（按 cwd 认领）、清理的顺序 | **纪律留在 `AGENTS.md` §10**；细则 `docs/agents/cleanup.md` §《为什么》《怎么做》《清理的顺序》 | ✅ |
-| 36 | §11 | 文件怎么组织：什么时候该拆 / 怎么拆 / 什么时候别拆 | **纪律留在 `AGENTS.md` §11**；背景 `docs/experience/git-and-workflow.md` §《文件怎么组织》 | ✅ |
-| 37 | §1 里 `-trimpath` 的理由 | 为什么全员必须一致（半开半开 ⇒ 缓存翻倍到 518 MB） | `docs/experience/git-and-workflow.md` §《为什么 `-trimpath` 是全员一致的》 | — |
-| 38 | 开头 | 「只写从代码里看不出来、踩过才知道的东西」 | `docs/agents/README.md` §《规矩 vs 知识 vs 数值》 | — |
+| 35 | §11 | 文件怎么组织：什么时候该拆 / 怎么拆 / 什么时候别拆 | **纪律留在 `AGENTS.md` §11**；背景 `docs/experience/git-and-workflow.md` §《文件怎么组织》 | ✅ |
+| 36 | §1 里 `-trimpath` 的理由 | 为什么全员必须一致（半开半开 ⇒ 缓存翻倍到 518 MB） | `docs/experience/git-and-workflow.md` §《为什么 `-trimpath` 是全员一致的》 | — |
+| 37 | 开头 | 「只写从代码里看不出来、踩过才知道的东西」 | `docs/agents/README.md` §《规矩 vs 知识 vs 数值》 | — |
 
 ### 从 `README.md` 搬来的
 

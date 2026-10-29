@@ -141,8 +141,6 @@ internal/ui/shell.go  →  shell_window.go   窗口生命周期
   任务流程会跑验收命令并开 PR。
 - **一个 agent 的临时文件**放在它自己的 `$TMPDIR` 下的专属目录里，**不要**散在 `/tmp`
   或家目录里——收尾时那个目录连同还活着的进程一起清掉。
-- **收尾**：把自己工作区里那个 gopls 停掉，否则工作区清不掉。完整做法见
-  `docs/agents/cleanup.md`。
 
 ### 开工基点
 
