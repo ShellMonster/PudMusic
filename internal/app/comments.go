@@ -52,9 +52,8 @@ const commentsReplyPageSize = 20
 
 // CommentsCacheDirName 是评论缓存目录的名字，挂在用户数据目录下。
 //
-// ⚠️ **它不是 `lyrics-cache` 那一种「从 Biu 导入」的目录**（见
-// `biuimport.go` 的 `LyricsCacheDirName`）：评论没有 Biu 上游那份数据可导，
-// 这一份从头到尾都是我们自己写的，所以放在应用数据目录底下一个平级的文件夹。
+// ⚠️ 评论缓存没有外部兼容格式，这一份从头到尾都是我们自己写的，
+// 所以放在应用数据目录底下一个平级的文件夹。
 const CommentsCacheDirName = "comments"
 
 // errCommentsUnavailable 是「评论这一摊没挂上」（没挂上 B 站客户端）。

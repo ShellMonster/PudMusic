@@ -366,7 +366,7 @@ func TestAFreshInstallHasTwoEmptyGroups(t *testing.T) {
 
 // TestTheSidebarWidthIsClampedOnTheWayIn 验侧栏宽度从设置文件进来就被钳住。
 //
-// 设置文件是用户能直接编辑的，也可能从 Biu 的旧导出、手改的备份里来。
+// 设置文件是用户能直接编辑的，也可能来自手改的备份。
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行——那样侧栏会把
 // 整个窗口吃掉，内容区一点不剩。
 func TestTheSidebarWidthIsClampedOnTheWayIn(t *testing.T) {

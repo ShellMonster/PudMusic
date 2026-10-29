@@ -42,12 +42,12 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            files="$(git diff --name-only "$BASE_SHA"...HEAD -- '*.go')"
+            files="$(git diff --name-only --diff-filter=ACMRTUXB "$BASE_SHA"...HEAD -- '*.go')"
           elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
             if [[ "$BEFORE_SHA" == 0000000000000000000000000000000000000000 ]]; then
               files="$(git ls-files '*.go')"
             else
-              files="$(git diff --name-only "$BEFORE_SHA" HEAD -- '*.go')"
+              files="$(git diff --name-only --diff-filter=ACMRTUXB "$BEFORE_SHA" HEAD -- '*.go')"
             fi
           else
             files=""

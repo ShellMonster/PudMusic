@@ -871,8 +871,7 @@ func TestTheLocalMusicDirectoriesAreEditable(t *testing.T) {
 //
 // ⚠️ 这一条是被一个真崩溃逼出来的：那一行的 key 就是路径，而 MyGo 在同一层里拿到
 // 两个一样的 key 会**当场 panic**——那一格带着整个设置页换成错误页，用户之前改好的
-// 设置一个都看不见。设置文件是用户能直接编辑的（也能从 Biu 那边来），两个一样的
-// 目录在文件里完全合法，所以这一格必须自己去重。
+// 设置文件是用户能直接编辑的，两个一样的目录在文件里完全合法，所以这一格必须自己去重。
 func TestTheLocalMusicDirectoriesDoNotCrashOnADuplicate(t *testing.T) {
 	st := app.DefaultSettings("")
 	st.LocalMusicDirs = []string{"/music/rock", "/music/rock", "/music/jazz"}
