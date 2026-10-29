@@ -215,12 +215,10 @@ func TestFullPlayerPrefsCloseWritesLatestVersionAfterOlderWrite(t *testing.T) {
 func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *testing.T) {
 	writeErr := errors.New("disk full")
 	written := make(chan []byte, 2)
-	errReported := make(chan error, 1)
 	var calls atomic.Int32
 	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
 		written <- append([]byte(nil), b...)
 		if calls.Add(1) == 1 {
-			errReported <- writeErr
 			return writeErr
 		}
 		return nil
@@ -231,7 +229,15 @@ func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *te
 	a.SetFullPlayerPrefs(p)
 	flush <- struct{}{}
 	_ = waitFullPlayerPrefsWrite(t, written)
-	waitForFullPlayerPrefsError(t, errReported, writeErr)
+	waitFor(t, func() bool {
+		return errors.Is(a.FullPlayerPrefsError(), writeErr)
+	}, "全屏偏好落盘错误")
+	if err := a.TakeSettingsError(); !errors.Is(err, writeErr) {
+		t.Fatalf("TakeSettingsError = %v, want %v", err, writeErr)
+	}
+	if err := a.TakeSettingsError(); err != nil {
+		t.Fatalf("same full-player write error was reported twice: %v", err)
+	}
 
 	p.SpectrumColor = "#222222"
 	a.SetFullPlayerPrefs(p)
@@ -282,6 +288,66 @@ func TestFullPlayerPrefsRemountClosesPreviousStoreBeforeReplacingIt(t *testing.T
 	waitFullPlayerPrefsSignal(t, remounted, "same-path remount")
 	if got := currentFullPlayerPrefsStore(a); got == old {
 		t.Fatal("same-path remount kept the old store")
+	}
+}
+
+func TestFullPlayerPrefsUpdateRacingCloseSurvivesRemount(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	oldWritten := make(chan []byte, 1)
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(_ string, b []byte) error {
+		close(started)
+		<-release
+		oldWritten <- append([]byte(nil), b...)
+		return nil
+	}, nil)
+
+	first := DefaultFullPlayerPrefs()
+	first.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(first)
+	old := currentFullPlayerPrefsStore(a)
+	old.signal()
+	waitFullPlayerPrefsSignal(t, started, "old preference write")
+
+	closed := make(chan error, 1)
+	go func() { closed <- a.CloseFullPlayerPrefs() }()
+	latest := first
+	latest.SpectrumColor = "#222222"
+	updated := make(chan struct{})
+	go func() {
+		a.SetFullPlayerPrefs(latest)
+		close(updated)
+	}()
+	select {
+	case <-updated:
+		t.Fatal("SetFullPlayerPrefs completed before the old writer was released")
+	default:
+	}
+
+	close(release)
+	waitFullPlayerPrefsWrite(t, oldWritten)
+	if err := <-closed; err != nil {
+		t.Fatalf("close returned error: %v", err)
+	}
+	waitFullPlayerPrefsSignal(t, updated, "racing preference update")
+	if got := a.FullPlayerPrefs().SpectrumColor; got != latest.SpectrumColor {
+		t.Fatalf("racing update was not visible in memory: %q", got)
+	}
+
+	written := make(chan []byte, 1)
+	a.mountFullPlayerPrefs(filepath.Join(dir, "remounted", fullPlayerPrefsFileName), func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		return nil
+	}, nil)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("close after remount returned error: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("remount did not persist racing update: %s", body)
 	}
 }
 
