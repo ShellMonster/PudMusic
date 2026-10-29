@@ -3870,6 +3870,12 @@ var Items = []Item{
 		},
 	},
 	{
+		Category: Platform,
+		Spec:     "MyGo v0.7.3 自动化测试构建能驱动 Native UI、读取无障碍树、按稳定 key 操作并抓取窗口图像",
+		Tests:    []string{"TestMyGoAutomationDrivesNativeUIAndCapturesIt"},
+		RealOnly: true,
+	},
+	{
 		// 归「双平台」那一组：这一票动的是**右下角那条提示**（它的颜色、尺寸
 		// 和入场）。
 		//
