@@ -85,7 +85,7 @@ func (a *App) withFolderItems(f Favorite, verb, able string, done func(string, n
 		sayFolder(done, verb+"不了这个收藏夹：收藏夹暂时打不开", notice.Danger)
 		return
 	}
-	ref := folderRef(f)
+	ref := CollectionRefOf(f)
 	go func() {
 		items, left, err := a.folderItems(context.Background(), ref)
 		if err != nil {
@@ -284,12 +284,18 @@ func (a *App) forgetFavorite(g FavoriteGroup, id int64) {
 	}
 }
 
-// folderRef 把侧栏那一行翻成容器引用。
+// CollectionRefOf 把侧栏那一行翻成容器引用。
 //
 // ⚠️ **类型认不出时按收藏夹处理**（和 URL 上的 `type` 一样，见
 // `bili.CollectionType.Valid`）：侧栏那一行的 Type 是别的页面填的，而
 // 「按收藏夹处理」最多是打不开，「整条失败」会让用户以为自己点的不是收藏夹。
-func folderRef(f Favorite) CollectionRef {
+//
+// 🔴 **它导出是因为界面层也要这一份换算**：侧栏那枚封面走
+// `FolderFallbackCover(CollectionRefOf(f))`，而**页面头图区手上是
+// `CollectionRef`**。界面层自己拼 `CollectionRef{ID: f.ID, Type: ...}` 的话
+// 会漏掉上面那条「认不出按收藏夹处理」的兜底——于是同一个容器在两边算出两个
+// 不同的 key，缓存、在途标记、`done` 表各有一份（两趟请求，而且封面可能不一样）。
+func CollectionRefOf(f Favorite) CollectionRef {
 	t := bili.CollectionType(f.Type)
 	if !t.Valid() {
 		t = bili.CollectionFavorite
