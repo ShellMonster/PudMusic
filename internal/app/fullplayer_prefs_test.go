@@ -215,10 +215,12 @@ func TestFullPlayerPrefsCloseWritesLatestVersionAfterOlderWrite(t *testing.T) {
 func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *testing.T) {
 	writeErr := errors.New("disk full")
 	written := make(chan []byte, 2)
+	errReported := make(chan error, 1)
 	var calls atomic.Int32
 	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
 		written <- append([]byte(nil), b...)
 		if calls.Add(1) == 1 {
+			errReported <- writeErr
 			return writeErr
 		}
 		return nil
@@ -229,7 +231,7 @@ func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *te
 	a.SetFullPlayerPrefs(p)
 	flush <- struct{}{}
 	_ = waitFullPlayerPrefsWrite(t, written)
-	waitForFullPlayerPrefsError(t, a, writeErr)
+	waitForFullPlayerPrefsError(t, errReported, writeErr)
 
 	p.SpectrumColor = "#222222"
 	a.SetFullPlayerPrefs(p)
@@ -242,6 +244,80 @@ func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *te
 	}
 }
 
+func TestFullPlayerPrefsRemountClosesPreviousStoreBeforeReplacingIt(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	writes := make(chan string, 2)
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	old := a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(path string, _ []byte) error {
+		close(started)
+		<-release
+		writes <- path
+		return nil
+	}, nil)
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	old.signal()
+	waitFullPlayerPrefsSignal(t, started, "old preference write")
+
+	remounted := make(chan struct{})
+	go func() {
+		a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(path string, _ []byte) error {
+			writes <- path
+			return nil
+		}, nil)
+		close(remounted)
+	}()
+	select {
+	case <-remounted:
+		t.Fatal("same-path remount replaced the store before closing the old writer")
+	default:
+	}
+	close(release)
+	waitFullPlayerPrefsWritePath(t, writes)
+	waitFullPlayerPrefsSignal(t, remounted, "same-path remount")
+	if got := currentFullPlayerPrefsStore(a); got == old {
+		t.Fatal("same-path remount kept the old store")
+	}
+}
+
+func TestFullPlayerPrefsRemountWaitsForPreviousWriterBeforeAppClose(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	dir := t.TempDir()
+	a := New()
+	old := a.mountFullPlayerPrefs(filepath.Join(dir, "old.json"), func(string, []byte) error {
+		close(started)
+		<-release
+		return nil
+	}, nil)
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	old.signal()
+	waitFullPlayerPrefsSignal(t, started, "old preference write")
+
+	remounted := make(chan struct{})
+	go func() {
+		a.mountFullPlayerPrefs(filepath.Join(dir, "new.json"), nil, nil)
+		close(remounted)
+	}()
+	select {
+	case <-remounted:
+		t.Fatal("different-path remount replaced the store before old writer completion")
+	default:
+	}
+	close(release)
+	waitFullPlayerPrefsSignal(t, remounted, "different-path remount")
+	a.Close()
+	if got := currentFullPlayerPrefsStore(a); got != nil {
+		t.Fatal("App.Close left a fullplayer preference store mounted")
+	}
+}
 func TestFullPlayerPrefsCloseFlushesAWriteWhoseBackgroundRequestWasCanceled(t *testing.T) {
 	written := make(chan []byte, 1)
 	a, _, _ := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
@@ -265,13 +341,8 @@ func newTestFullPlayerPrefsApp(t *testing.T, writer func(string, []byte) error) 
 	t.Helper()
 	dir := t.TempDir()
 	flush := make(chan struct{})
-	p := &fullPlayerPrefsStore{path: FullPlayerPrefsPath(dir), writeFile: writer, flush: flush}
-	p.load()
-	p.start()
 	a := New()
-	a.mu.Lock()
-	a.fullPlayerPrefs = p
-	a.mu.Unlock()
+	p := a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), writer, flush)
 	t.Cleanup(func() { a.Close() })
 	return a, p, flush
 }
@@ -296,16 +367,16 @@ func waitFullPlayerPrefsWrite(t *testing.T, written <-chan []byte) []byte {
 	}
 }
 
-func waitForFullPlayerPrefsError(t *testing.T, a *App, want error) {
+func waitForFullPlayerPrefsError(t *testing.T, errCh <-chan error, want error) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if errors.Is(a.FullPlayerPrefsError(), want) {
-			return
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, want) {
+			t.Fatalf("writer error = %v, want %v", err, want)
 		}
-		time.Sleep(time.Millisecond)
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for preference write error %v", want)
 	}
-	t.Fatalf("reported write error = %v, want %v", a.FullPlayerPrefsError(), want)
 }
 
 // 用户从 Biu 迁过来的时候是**按内容**认的（整份导出/导入），键名不一样就等于

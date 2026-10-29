@@ -610,9 +610,10 @@ type App struct {
 	// 唯一凭据——串了的话，事后排查会拿着另一首歌的日志找原因。
 	playLog func(format string, args ...any)
 
-	// fullPlayerPrefs 是全屏播放器自己那一份偏好（见 fullplayer_prefs.go）。
-	// 挂上之前是 nil，`FullPlayerPrefs` 判空之后给默认值。
-	fullPlayerPrefs *fullPlayerPrefsStore
+	// fullPlayerPrefsMu serializes mounting and closing the fullplayer store. A mount
+	// must finish closing the previous writer before publishing its replacement.
+	fullPlayerPrefsMu sync.Mutex
+	fullPlayerPrefs   *fullPlayerPrefsStore
 	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
 	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
 	specBars []float32
@@ -1763,6 +1764,8 @@ func (a *App) ClearTrack() {
 
 // Close 停掉播放、关掉解码器和文件句柄，并停掉后台时钟。可以重复调用。
 func (a *App) Close() {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
