@@ -44,6 +44,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/perf"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -342,6 +343,12 @@ func New(opts Options) *Cache {
 		released:     make(map[*entry]*list.Element),
 		relOrder:     list.New(),
 	}
+	// 缓存占多少字节要进诊断快照（票 #668）。依赖方向是 imgcache → perf：
+	// perf 不认识界面，只收一个数字。
+	//
+	// ⚠️ **报给进程级的那个账本**：一条缓存一份，每份都往同一个 gauge 上加，
+	// 总量才是整个进程的封面占用。
+	c.lru.onBytes = perf.ProcessGauges().AddImageCacheBytes
 	c.ctx, c.stop = context.WithCancel(context.Background())
 	c.refs.Store(1) // 建缓存的人算一份使用者
 	if opts.Dir != "" {
@@ -781,6 +788,11 @@ func (c *Cache) Close() {
 	if c.disk != nil {
 		c.disk.close()
 	}
+	// 这份缓存已经没人用了：把字节账归零，诊断快照里就不该再有它的占用。
+	// （条目本身等 GC 收，那和账本不是一回事。）
+	c.mu.Lock()
+	c.lru.reset()
+	c.mu.Unlock()
 }
 
 // forget 把 e 从 LRU 表里拿掉并记账归零。
@@ -902,11 +914,13 @@ func (e *entry) state() State {
 		// `fetching` 置上，而那一档**不能**闪回占位——否则重试期间界面上的
 		// 失败态会变成「加载中」，和「第一次加载」分不开了。
 		return State{Err: e.err}
-	case e.fetching:
-		// 正在后台跑（第一次加载，或者像素放掉之后的重新解码，票 #673）：
-		// 界面上先画占位，不画失败态。
-		return State{Loading: true}
 	default:
+		// 其余全部是「还没到终态」：第一次加载、像素放掉之后的重新解码
+		// （票 #673），以及还没起过任何加载的刚建出来的条目。
+		//
+		// ⚠️ **`fetching` 不必单独列一支**：它落在这一支里，画的同样是占位。
+		// 而「失败后的自动重试」虽然也置着 `fetching`，却由上面 `e.done`
+		// 那一支先接住——那一档不许闪回「加载中」（理由见那一段注释）。
 		return State{Loading: true}
 	}
 }

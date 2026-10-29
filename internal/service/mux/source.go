@@ -28,6 +28,8 @@ import (
 
 	"github.com/Eyevinn/mp4ff/bits"
 	"github.com/Eyevinn/mp4ff/mp4"
+
+	"github.com/ShellMonster/PudMusic/internal/perf"
 )
 
 // maxBoxBytes 是一个顶层 box 读进内存的上限。
@@ -44,6 +46,14 @@ const maxBoxBytes = 64 << 20
 // 「正常撞不到、坏了就挡住」的那一档：不挡的话，一份坏文件能让后台交织
 // goroutine 直接申请几百 MB 甚至更多。
 const maxSampleBytes = 64 << 20
+
+// gauge 是这一层写进诊断快照的字节表。
+//
+// ⚠️ **它是变量，不是直接调 `perf.ProcessGauges()`**：高水位一旦被推上去就
+// 只增不减，同一个包里先跑的用例会把值抬到后面那些用例的期望之上——测试
+// 于是「不管这里记没记都能过」。用变量之后，测试可以指向一份自己的账本，
+// 断言这一次真的记了。
+var gauge = perf.ProcessGauges()
 
 // sampleRef 是一个采样在源流里的位置和时间戳。
 //
@@ -414,6 +424,9 @@ const boxHeaderLen = 8
 // 里 box 就在第 0 字节——mp4ff 用它算嵌套 box 的绝对位置，而我们只要
 // 相对关系。
 func readBox(r io.Reader, hdr boxHeader) (mp4.Box, error) {
+	// 最大的那个 box 进诊断快照（票 #668）：它是这一层唯一一次「按文件里
+	// 声明的长度分配内存」，异常大的 moov/moof 在快照里就这一个数能看出来。
+	gauge.NoteMP4BoxBytes(int64(hdr.size))
 	if hdr.size > maxBoxBytes {
 		return nil, fmt.Errorf("mux: %s box 有 %d 字节，比能解的 %d 还大", hdr.name, hdr.size, maxBoxBytes)
 	}

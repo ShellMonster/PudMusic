@@ -443,16 +443,28 @@ func TestReleasedCoverShowsThePlaceholderUntilItDecodes(t *testing.T) {
 		}
 	}
 	// 并发再要几次：不许再起第三条请求（同一时刻只有一条在飞）。
+	//
+	// ⚠️ **不用「睡一会儿再看请求数」当判据**：那既可能漏（goroutine 还没跑到
+	// 服务端）也可能白等。这里等两件确定的事——这几次 `Get` 全部返回
+	// （「要不要起下载」是同步决定的），以及 `lifeWG` 排空（它数着所有下载
+	// goroutine，包括万一多起的那一条；多起的那一条会卡在同一个 gate 上，
+	// 放开之后才退出）。两者都过去了，请求数才是最终值。
+	var gets sync.WaitGroup
 	for range 5 {
-		go c.Get(url)
+		gets.Add(1)
+		go func() {
+			defer gets.Done()
+			c.Get(url)
+		}()
 	}
-	time.Sleep(50 * time.Millisecond)
-	if got := calls.Load(); got != 2 {
-		t.Errorf("同一张被要了 %d 次（want 2：第一次 + 一次重新解码）", got)
-	}
+	gets.Wait()
 
 	close(gate)
 	waitState(t, c, url, 5*time.Second, loaded)
+	c.lifeWG.Wait()
+	if got := calls.Load(); got != 2 {
+		t.Errorf("同一张被要了 %d 次（want 2：第一次 + 一次重新解码）", got)
+	}
 	if got := c.redecodes.Load(); got != 1 {
 		t.Errorf("重新解码计数是 %d，want 1", got)
 	}

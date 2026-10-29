@@ -336,51 +336,62 @@ func TestTheDanmakuFollowsThePositionWhenMotionIsReduced(t *testing.T) {
 //
 // # 它钉的是哪一个坏
 //
-// pose 的状态是**按元素的 key 记着**的 ⇒ 同一个 key 换一批弹幕会继承上一批的位移，
-// 元素直接跑到屏幕外、**一个字都画不出来**（报告 §3.1 实测）。
+// 每条弹幕的 key 必须是**它自己的 rowid**（`app.DanmakuItem.ID`），不是它在
+// 列表里的下标：列表一换（换歌、或者 B 站补发/刷新一份新的），下标会整体
+// 错配——上一条的状态被下一条继承，位置、轨道全跟着错。
 //
-// ⇒ key 用**弹幕自己的 rowid**（`app.DanmakuItem.ID`）。
+// ⚠️ **判据已经从「画面上量位移」改成「模型层的槽位」**：票 #669 之后弹幕是
+// 一层自绘的墨迹，位置由绘制帧现算，元素上不再有逐条的 Text/pose 可量。稳定
+// key 现在的事实就是 `danmakuLayer.slots`——它按 rowid 记着每一条占的那条
+// 轨道（见 `slots` 字段的注释：键是 rowid，不是下标）。
 //
 // # 怎么验「key 是 rowid 而不是下标」
 //
-// 先摆一条**滚了 3 秒**的弹幕（位移 -180），再把整份换成一条**滚了 1 秒**的
-// （位移 -60）。
+// 摆两条弹幕（一红一绿），让它们各占一条轨道；记下各自的槽位。之后只推时间、
+// 重建几帧（位置往前走，但这一份弹幕没换）：
 //
-//   - key 是 rowid ⇒ 新来的那条是**新元素**，直接落在它自己的目标上（-60），
-//     两者的左边沿差 120 像素。
-//   - key 是下标   ⇒ 新来的那条**继承了**上一条的位移（-180），还在老位置——
-//     左边沿一点不差。
-//
-// ⚠️ **两条的字一样**：量的是**像素的左边沿**，而字形左边那一撇和字框左沿差
-// 几像素（实测 10）——字不一样的话那几像素的差就混进判据里了。
-//
-// ⚠️ **量的是「换完那一帧」**：位移走 pose 的话，新元素在它自己的第一帧就落在
-// 目标上（`mygo/ui/pose.go` 的 `samplePose`：没有上一帧的位姿就「shows there at
-// once」）；而继承下来的位姿会**从老位置起步**滑过去——那正是「不瞬移」。
+//   - 每条弹幕的槽位（轨道、入场时间、存活时长）**逐字段不变**——说明它跨帧
+//     仍是同一条，没有因为列表重排或新条目插到前面而换槽位；
+//   - 两条的槽位**互不相同**（各占一条轨道）——说明键不是「列表里第几个」。
 func TestEveryDanmakuHasItsOwnKey(t *testing.T) {
-	env := danmakuShell(t, []app.DanmakuItem{
-		danmakuItem("old", 39000, "同一条字"),
+	env := danmakuPlayingEnv(t, []app.DanmakuItem{
+		danmakuItemColor("d1", 40000, "同一条字", danmakuRed),
+		danmakuItemColor("d2", 40100, "另一条字", danmakuGreen),
 	}, systemIsDark(true))
+	env.st.Position = 42 * time.Second
 	env.tt.Frame()
-	old, _ := redSpan(env.tt, danmakuArea(), 0)
-	if old < 0 {
-		t.Fatalf("画面上没有弹幕，文字有 %q", env.tt.Texts())
+
+	d := &env.s.full.danmaku
+	first, ok := d.slots["d1"]
+	if !ok {
+		t.Fatalf("第一条弹幕没有进槽位：%v", d.slots)
+	}
+	second, ok := d.slots["d2"]
+	if !ok {
+		t.Fatalf("第二条弹幕没有进槽位：%v", d.slots)
+	}
+	if first == second {
+		t.Fatalf("两条弹幕拿到了一模一样的槽位 %+v——键不是各自的 rowid", first)
+	}
+	if first.timeMS != 40000 || second.timeMS != 40100 {
+		t.Fatalf("槽位记的入场时间不是各自的：d1=%+v d2=%+v", first, second)
 	}
 
-	// 换成一份新的：一条滚了 1 秒的（时间 = 当前位置 - 1 秒）。
-	env.s.app.SetDanmakuForTest([]app.DanmakuItem{
-		danmakuItem("new", 41000, "同一条字"),
-	})
-	env.tt.Frame()
-	fresh, _ := redSpan(env.tt, danmakuArea(), 0)
-	if fresh < 0 {
-		t.Fatalf("换了一份之后画面上没有弹幕，文字有 %q", env.tt.Texts())
+	// 只推时间、重建几帧：这一份弹幕没换，每条弹幕的槽位必须原样保留。
+	for i := range 3 {
+		env.st.Position += 500 * time.Millisecond
+		env.tt.Frame()
+		if got := d.slots["d1"]; got != first {
+			t.Fatalf("第 %d 帧之后 d1 的槽位从 %+v 变成了 %+v——同一条弹幕跨帧换了槽位", i+1, first, got)
+		}
+		if got := d.slots["d2"]; got != second {
+			t.Fatalf("第 %d 帧之后 d2 的槽位从 %+v 变成了 %+v——同一条弹幕跨帧换了槽位", i+1, second, got)
+		}
 	}
-	// 差 120 像素（滚了 3 秒 vs 滚了 1 秒 ⇒ 2 秒 × 60 像素/秒）。
-	if got := fresh - old; got < 117 || got > 123 {
-		t.Errorf("换了一份之后新弹幕的左边沿在 x=%d，原来那条在 x=%d（差 %d，"+
-			"want 120 上下）——差 0 说明它继承了上一条的位移，"+
-			"说明 key 不是弹幕自己的 rowid", fresh, old, got)
+	// 画面上那两条都还在（否则上面那个「槽位没变」可能只是什么都没画）。
+	if !redSeen(env.tt, danmakuArea()) || !greenSeen(env.tt, danmakuArea()) {
+		t.Errorf("推进之后画面上少了一条弹幕（红=%v 绿=%v）",
+			redSeen(env.tt, danmakuArea()), greenSeen(env.tt, danmakuArea()))
 	}
 }
 
