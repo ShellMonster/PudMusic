@@ -49,6 +49,10 @@ func MountSettings(a *app.App) error {
 		if err := a.FlushSettings(); err != nil {
 			log.Printf("biu: 退出时保存设置失败：%v", err)
 		}
+		if err := a.FlushFullPlayerPrefs(); err != nil {
+			log.Printf("biu: 退出时保存全屏播放器偏好失败：%v", err)
+		}
+
 	})
 
 	dir, err := mygo.App.Path(mygo.PathUserData)
