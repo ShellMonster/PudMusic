@@ -253,3 +253,5 @@ GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m \
 ```
 
 **什么时候用得上**：你要跑验收时。
+
+<!-- 临时探针：只改文档，用来验证截图评论 workflow 不会被触发 -->
