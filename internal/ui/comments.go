@@ -226,6 +226,21 @@ type commentsPage struct {
 	bodies map[int64]*commentBody
 	// listW 是列表容器上一帧的宽（正文排版按它算宽度）。
 	listW float32
+	// mark 是这一帧的高亮配色（筛选关着时是零值）。
+	//
+	// ⚠️ **一帧算一次**（`viewComments` 开头），不是每条评论算一次：`ink.Ensure`
+	// 是一趟二十步的二分，而这一页一屏十来条评论——每条各算一遍是白花的。
+	mark commentMark
+	// markTheme / markOn 记着「上面那一份配色是按哪一份主题、哪个开关算的」。
+	//
+	// ⚠️ **主题不变就不重算**：`ink.Ensure` 那一趟是二十步二分（每步三次
+	// WCAG 亮度换算，每次三个 `math.Pow`）——每帧算一遍虽然不分配，但那是
+	// 白烧的 CPU（理由同 `themeCache`：主题只在设置变了的时候才变）。
+	//
+	// ⚠️ **比的是指针**：`themeCache.of` 在键没变时返回**同一份**主题
+	// （`internal/ui/theme.go` 那一段），所以一次 `==` 就够。
+	markTheme *ui.Theme
+	markOn    bool
 
 	// slot 是「上一次是给哪一首建的」——换歌就清缓存（rpid 会撞）。
 	slot string
@@ -319,6 +334,16 @@ type commentBody struct {
 	// ⚠️ **颜色在里面现取**（`pr.Theme()`）：主题是用户能改的，而这一份
 	// 缓存跨帧活着——写死颜色的话，用户换了深浅两套之后正文还是旧的颜色。
 	paint func(*ui.Painter, ui.Rect)
+	// mark 是排这一份时用的高亮配色（零值 = 没高亮）。
+	//
+	// 🔴 **它是缓存键的一部分**：高亮那几段的字色和底色是**烘进 span 里**的
+	// （`ui.Span.Color` / `Background`），而其余的字色是画的时候从主题现取的
+	// ——所以主题一变（深浅、主色），这一份就得重排。不重排的话，那几段会一直
+	// 是上一次主题的颜色。
+	//
+	// ⚠️ **`commentMark` 可比较**（两个颜色 + 一个 float32），所以判「配色变
+	// 了没有」就是一次 `==`，不分配任何东西。
+	mark commentMark
 }
 
 // viewComments 是评论页。
@@ -328,6 +353,24 @@ func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 
 	p := &s.comments
 	it, has := s.app.CurrentItem()
+
+	// 🔴 **高亮那一份配色一帧算一次**（票 #684）：筛选开着才算，关着时是零值
+	// （`commentBodyOf` 见它是零值就不跑匹配、不带底色）。
+	//
+	// ⚠️ **它必须在 `applyFrameTheme` 之后算**：`ink.Ensure` 按当前主题的主色
+	// 和底色现算。
+	//
+	// ⚠️ **主题没变、开关没变就复用**：那一趟是二十步二分，而主题只在设置变了
+	// 的时候才变（`themeCache` 那一层）。
+	on := p.mentionOnly && !p.names.Empty()
+	if on != p.markOn || c.Theme() != p.markTheme {
+		p.markOn, p.markTheme = on, c.Theme()
+		if on {
+			p.mark = commentMarkOf(c.Theme())
+		} else {
+			p.mark = commentMark{}
+		}
+	}
 
 	// 🔴 **本地文件不摆入口**（`CommentsWorthAsking`）：它在 B 站上没有对应
 	// 的对象，而问一个认不出来的 oid 的症状是「静默拿到空列表」——于是界面上
@@ -874,6 +917,10 @@ func (s *Shell) viewCommentsSentinel(c *ui.Context, p *commentsPage) {
 //
 // ⚠️ **`.Label(...)` 把正文交给框架**：屏幕阅读器读得到它，无头 Tester 也
 // 找得到它——不然这一页的正文对它们是不存在的。
+//
+// 🔴 **高亮只在筛选开着的时候做**（票 #684）：关着的时候这一条走的是**原来
+// 那条路**——不跑那次匹配、不带任何底色（正文是**连续几行的字**，常驻的色块
+// 会让用户以为自己是拿鼠标选中了几段）。
 func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Comment, lines int, w float32) {
 	body := s.commentBodyOf(c, p, cm, lines, w)
 	if body == nil {
@@ -886,11 +933,33 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 //
 // ⚠️ **排版不便宜**（`text.Shared().Shape`），而这一页每一帧都要画十几条
 // 评论——每帧重排一遍就是十几倍的浪费。所以按 (rpid, 宽度, 行数) 记一份。
+//
+// 🔴 **命中区间也在这一次排版里算掉**（票 #684）：`songname.Table.Matches`
+// 每条评论跑一次就够（排版本来就缓存着），而这里是**唯一**需要它的地方
+// ——所以它是**排的时候**跑一趟，不是每帧跑。筛选关着的时候**根本不跑**
+// （高亮是筛选的一部分，见 `viewCommentBodyEl`）。
 func (s *Shell) commentBodyOf(c *ui.Context, p *commentsPage, cm bili.Comment, lines int, w float32) *commentBody {
-	if b, ok := p.bodies[cm.Rpid]; ok && b.w == w && b.lines == lines {
+	// 🔴 **高亮的配色和区间跟着排版一起缓存**（见 `commentBody.mark`）：
+	// 主题变了（深浅 / 主色）那一份要重排，因为高亮那几段的字色和底色是**烘进
+	// span 里**的。
+	//
+	// ⚠️ **配色是 `viewComments` 开头算好的那一份**（一帧一次）：这里只是取
+	// 过来用——每一条评论各算一遍 `ink.Ensure` 是白花的。
+	//
+	// ⚠️ **筛选关着时 mark 是零值**：这时候 `Matches` 也不跑。
+	mark := p.mark
+	// 🔴 **缓存先查、匹配后跑**：`Matches` 每条评论分配十几次（它要拼一份归一化
+	// 串 + 一张映射表），而这一页每一帧都要问一遍每一条评论——先查缓存的话，
+	// 稳态下（正文排好了）它**一次都不跑**。缓存键里的 `mark` 已经能答「这一份
+	// 是不是同一个配色下排的」，所以命中就说明区间也是同一批。
+	if b, ok := p.bodies[cm.Rpid]; ok && b.w == w && b.lines == lines && b.mark == mark {
 		return b
 	}
-	b := shapeCommentBody(c, cm, w, lines)
+	var hl []songname.Range
+	if mark.Bg.A != 0 && !p.names.Empty() {
+		hl = p.names.Matches(cm.Message)
+	}
+	b := shapeCommentBody(c, cm, w, lines, hl, mark)
 	// 🔴 **画这一格的那一支记在这一份里**（而不是每帧现建一个闭包）：
 	// 这一格每一帧都要画，而闭包每帧新建一次就是一次分配——一屏十来行就是
 	// 来十次（理由同 `framebudget_test.go` 盯着的「每帧现算」那族坏处）。
@@ -952,13 +1021,19 @@ func (s *Shell) commentBodyWidth(kind int) float32 {
 // `ObjectHeight`）：框架的文本引擎给那枚 U+FFFC 留一个 18×18 的位置，而
 // **它自己一个字都不画**（`mygo/ui/paint.go` 跳过 object 字形）——所以那一格
 // 是空的，得我们自己把那张表情图画上去。
-func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *commentBody {
+//
+// hl 是正文里命中歌名的那些字符区间（按**原文**的 rune，见 `songname.Range`），
+// mark 是它们的画法。两样都为零值时，排出来的就是原来那一份。
+//
+// 🔴 **截断之后要重新裁一遍区间**：截断点之后的那一截正文根本不在画面上
+// （换成了省略号），留着它只会去切一段不存在的文字。
+func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int, hl []songname.Range, mark commentMark) *commentBody {
 	font := ui.Font{Family: c.Theme().Font, Size: scale.Font(c, scale.Size14)}
 	m := font.Metrics()
 	lineH := m.Ascent + m.Descent + m.LineGap
 	maxH := float32(lines) * lineH
 
-	spans, emotes, plain := commentSpans(cm.Message, cm.Emotes)
+	spans, emotes, plain := commentSpansMarked(cm.Message, cm.Emotes, hl, mark)
 	layout := ui.ShapeRichText(spans, font, w)
 	_, h := layout.Size()
 	if h > maxH+0.5 {
@@ -976,6 +1051,10 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 			// ⚠️ **量的是「安全切点」那一段**：切点落在占位符里面的话，量出来
 			// 的那一份和最后摆出来的那一份不是同一句话（一个是半个占位符的
 			// 字面量，一个是整枚表情）——二分就会照着一个不存在的东西收敛。
+			//
+			// ⚠️ **量的时候不带高亮**：底色和字色**不改字宽**（`Span.Background`
+			// 画在字形后面），所以带不带它排出来的行数一模一样——而带上它的话
+			// 每一趟二分都要重切所有 span，白花。
 			sp, _, _ := commentSpans(string(runes[:safeCommentCut(ranges, mid)]), cm.Emotes)
 			sp = append(sp, ui.Span{Text: "…"})
 			l := ui.ShapeRichText(sp, font, w)
@@ -986,7 +1065,10 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 				hi = mid - 1
 			}
 		}
-		spans, emotes, plain = commentSpans(string(runes[:safeCommentCut(ranges, lo)]), cm.Emotes)
+		cut := safeCommentCut(ranges, lo)
+		// 🔴 **区间按新的 rune 数裁**（截断点之后的高亮丢掉）。
+		hl = clipMarks(hl, cut)
+		spans, emotes, plain = commentSpansMarked(string(runes[:cut]), cm.Emotes, hl, mark)
 		spans = append(spans, ui.Span{Text: "…"})
 		plain = plain + "…"
 		layout = ui.ShapeRichText(spans, font, w)
@@ -1001,6 +1083,7 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 		h:       h,
 		lines:   lines,
 		lineH:   lineH,
+		mark:    mark,
 	}
 }
 
@@ -1014,41 +1097,65 @@ func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int) *com
 // 🔴 **认占位符的口径只有这一处**：截断那一档（`safeCommentCut`）要认的是
 // **同一批**占位符——认错了的话，截断会把一段普通文字里的方括号也当成表情
 // 切掉。
+//
+// ⚠️ **高亮是这一支的另一档**（`commentSpansMarked`）：`hl` 为空、`mark` 是
+// 零值的时候，两处的 span 逐段相同——所以「认占位符」仍然只有这一处。
 func commentSpans(msg string, emotes map[string]bili.CommentEmote) ([]ui.Span, []string, string) {
+	return commentSpansMarked(msg, emotes, nil, commentMark{})
+}
+
+// commentSpansMarked 是 `commentSpans` 加「按区间把命中的那几段染上底色」
+// （票 #684）。
+//
+// 🔴 **表情占位符那一格不染色**：`hl` 用的是**原文**的 rune 坐标（
+// `songname.Range`），所以一枚表情占位符 `[妙啊]` 可能整个落在命中区间里——
+// 而这里的切法是**先按占位符切成 token**，文字段各自按自己的起点套色 ⇒ 那一格
+// 自然让出去（画出来是一张图，不是一块有底色的字）。
+//
+// ⚠️ **文字段的起点按原文的 rune 数累加**（`base`）：`plain` 里表情换成
+// 「［表情］」四个字，长度和原文的 `[妙啊]` 对不上——所以坐标只跟**原文**走。
+func commentSpansMarked(msg string, emotes map[string]bili.CommentEmote, hl []songname.Range, mark commentMark) ([]ui.Span, []string, string) {
 	var spans []ui.Span
 	var urls []string
 	var plain strings.Builder
+	// base 是 rest 之前已经过去了多少个**原文的** rune。
+	base := 0
+	text := func(s string) {
+		if s == "" {
+			return
+		}
+		spans = appendMarkedText(spans, s, base, hl, mark)
+		plain.WriteString(s)
+		base += utf8.RuneCountInString(s)
+	}
 	rest := msg
 	for len(rest) > 0 {
 		i := strings.IndexByte(rest, '[')
 		if i < 0 {
-			spans = append(spans, ui.Span{Text: rest})
-			plain.WriteString(rest)
+			text(rest)
 			break
 		}
 		if i > 0 {
-			spans = append(spans, ui.Span{Text: rest[:i]})
-			plain.WriteString(rest[:i])
+			text(rest[:i])
 		}
 		j := strings.IndexByte(rest[i:], ']')
 		if j < 0 {
 			// 没有收尾的 ']'：后面整段都是普通文字。
-			spans = append(spans, ui.Span{Text: rest[i:]})
-			plain.WriteString(rest[i:])
+			text(rest[i:])
 			break
 		}
 		token := rest[i : i+j+1]
 		e, ok := emotes[token]
 		if !ok {
 			// 不是表情：这一段就是普通文字。
-			spans = append(spans, ui.Span{Text: token})
-			plain.WriteString(token)
+			text(token)
 			rest = rest[i+j+1:]
 			continue
 		}
 		spans = append(spans, ui.Span{Text: "\uFFFC", ObjectWidth: commentEmote, ObjectHeight: commentEmote})
 		urls = append(urls, commentImageURL(e.URL))
 		plain.WriteString("［表情］")
+		base += utf8.RuneCountInString(token)
 		rest = rest[i+j+1:]
 	}
 	return spans, urls, plain.String()

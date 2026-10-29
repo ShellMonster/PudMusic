@@ -226,3 +226,41 @@ func TestRenderCommentsMentionFilterShots(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderCommentsHighlightShots 出「筛选开着、正文里命中的歌名高亮」那一张，
+// 深浅各一套（票 #684）。
+//
+// 🔴 **这一张是那一票的画面材料**：要审的是**底色有多重、字还读不读得出、
+// 圆角是不是贴着字形**。这三件都只在画面上看得出来——`Span.Background` 是一个
+// 颜色，而「它压在这一页的底色上有多重」是颜色的合成结果。
+func TestRenderCommentsHighlightShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newCommentBili(t, "reply-main.json")
+			b.mainRaw = commentFixtureLongBodyMentioning(t, "晴天")
+			_, tt := newCommentsShell(t, b, mentionItem(), 1400, 1000, systemIsDark(dark))
+
+			if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
+				t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
+			}
+			commentsWait(t, tt, "筛完了", func() bool {
+				return tt.HasText("1 条提到这首歌")
+			})
+			// ⚠️ **裁第一条评论那一整块**（头像 / 昵称 / 正文 / 计数）：高亮那一段
+			// 和周围的字放在一起才看得出「底色有多重」。
+			if r, ok := tt.Find("大圆镜科普"); ok {
+				saveRect(t, dir, fmt.Sprintf("24-评论页-歌名高亮-%s.png", name), tt,
+					int(r.X)-52, int(r.Y)-26, 1140, 260)
+			}
+			save(t, dir, fmt.Sprintf("25-评论页-歌名高亮整页-%s.png", name), tt)
+		})
+	}
+}

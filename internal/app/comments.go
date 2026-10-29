@@ -465,17 +465,47 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 
 	repliesFetch := a.commentsRepliesFetch
 	archiveFetch := a.commentsArchiveIDFetch
+	// 🔴 **楼中楼的每一趟有自己的 cancel，按 root 记**。
+	//
+	// 原来那一版把这一趟的 cancel 存进 `commentsCancel`（那是**主列表**的格子），
+	// 然后**取消了这一趟自己的 ctx** ——于是楼中楼**一趟都没发出去过**
+	// （`bili: 网络没通: … context canceled`），展开永远是空的。
+	//
+	// ⚠️ **不跟主列表共用一格**：主列表那一趟一结束就没人再碰 `commentsCancel`，
+	// 而两趟楼中楼（展开两条评论）本来是并行的、互不相干。
 	ctx, cancel := context.WithCancel(context.Background())
+	// ⚠️ **记的是一个带身份的指针，不是裸的 cancel**（函数值只能和 nil 比）：
+	// 收尾时靠身份认出「这一格还是我那一趟」，否则同一个 root 又起了一趟时，
+	// 先收尾的那一趟会把新的那一格删掉——新的那一趟于是**再也取消不了**。
+	req := &commentReplyRequest{cancel: cancel}
 	a.commentsMu.Lock()
-	if a.commentsCancel == nil {
-		a.commentsCancel = cancel
-	} else {
-		cancel()
+	if a.commentsRepliesCancel == nil {
+		a.commentsRepliesCancel = map[int64]*commentReplyRequest{}
 	}
+	// 同一个 root 又问了一次：先取消上一趟（它的结果按代次丢掉，见
+	// `finishReplies`）。
+	if prev := a.commentsRepliesCancel[root]; prev != nil {
+		prev.cancel()
+	}
+	a.commentsRepliesCancel[root] = req
 	a.commentsMu.Unlock()
-	go a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
+	go func() {
+		defer func() {
+			a.commentsMu.Lock()
+			if a.commentsRepliesCancel[root] == req {
+				delete(a.commentsRepliesCancel, root)
+			}
+			a.commentsMu.Unlock()
+			cancel()
+		}()
+		a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
+	}()
 	return nil
 }
+
+// commentReplyRequest 是一层楼中楼那一趟的身份：它的 cancel 加一个指针身份
+// （用来认出「缓存里那一格还是不是我那一趟」，理由见 `CommentReplies`）。
+type commentReplyRequest struct{ cancel context.CancelFunc }
 
 // RefreshComments 绕过缓存重拉一遍当前这一首的评论。**立刻返回**。
 //
@@ -620,6 +650,12 @@ func (a *App) resetCommentsLocked(slot string) {
 	a.commentsRefresh = false
 	a.commentsOid = 0
 	a.commentsTyp = 0
+	// 🔴 **换歌就把在途的楼中楼全取消掉**：它们问的是上一首的对象，结果会被
+	// 代次丢掉，留着它们只是白占着连接。
+	for _, req := range a.commentsRepliesCancel {
+		req.cancel()
+	}
+	a.commentsRepliesCancel = nil
 	a.commentsReplies = map[int64][]bili.Comment{}
 	a.commentsRepliesTried = map[int64]time.Time{}
 	a.commentsRepliesWanted = map[int64]bool{}

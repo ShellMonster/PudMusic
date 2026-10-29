@@ -19,10 +19,10 @@ package ui
 // 不全量。
 // 全量的意思是「每一个界面都有一条预算」，那要等这些界面的画法稳定下来再说。
 //
-// （现在是十一档：票 #339 往后加了「稍后再看网格」，票 #284 往后加了「设置开关」
+// （现在是十三档：票 #339 往后加了「稍后再看网格」，票 #284 往后加了「设置开关」
 // 和「迷你播放器」那两档，票 #280 往后加了「迷你播放器歌词卷帘」，票 #573
-// 往后加了「评论页」，票 #631 往后加了「关注页」和「下载记录页」——见下面那
-// 一条。）
+// 往后加了「评论页」，票 #631 往后加了「关注页」和「下载记录页」，票 #684
+// 往后加了「评论页·筛选开着」——见下面那一条。）
 //
 // # 「隔离的那一块」和「整窗」是两处，量的不是同一件事
 //
@@ -128,6 +128,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/ui/songname"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -892,6 +893,62 @@ func budgetScreens() []budgetScreen {
 			draw: func(s *Shell) func(*mygoui.Context) {
 				return func(c *mygoui.Context) {
 					// 这一页自己装主题（铁律二：页面的头一件正事）。
+					s.viewComments(c, nil)
+				}
+			},
+		},
+		{
+			// 评论页 · 筛选开着（票 #684）：正文里命中的歌名要染上底色。
+			//
+			// **为什么单独给它一档**：这一档和上面那一档量的**不是同一件事**。
+			// 筛选关着时正文那一份是「纯文字 + 表情占位符」，而开着的时候每一条
+			// 评论的正文被**切成更多段 span**（命中的那一段单独一段，带底色和主色
+			// 字）。框架的 `spanPaint` 每帧要为 `Background` 那一档多走一遍
+			// （`textBackgrounds` + 每次 `newSpanPaint` 的一次 `spanCache` 分配）
+			// ——**这是真画了更多东西**的正常成本，不是浪费；而它必须有上限，不然
+			// 「哪天有人把切 span 写成每帧重算」，这一页会悄悄贵一截。
+			//
+			// **基线（实测，2026-10-29，这棵树上）**：每帧 **73 次分配 / 4168 字节**，
+			// 八行评论、每行正文都命中。同一份夹具把筛选关掉是 **57 次 / 1928 字节**
+			// （就是上面那一档的数）——**多出来的 16 次**是那一层底色自己。
+			//
+			// **为什么上限是 88 次 / 5500 字节**：次数是**基线 + 15**——一屏八行，
+			// 「每行多算一次」那种回归是 +8（73 + 8 = 81 < 88：**照不红**），所以
+			// 这一档拦的是**更粗**的那一类：**每行多算两次以上**（73 + 16 = 89 > 88：
+			// 红 ✓），以及「每帧重排正文」（那一档是几百次）。字节留三成
+			// （4168 × 1.3 ≈ 5400）：这一档的大头是**每条评论多切出来的那几段**，
+			// 而「每帧重切一遍」一次就是几 KB。
+			//
+			// ⚠️ **它不替代上面那一档**：关着的时候那一档更紧（64 / 2500），而
+			// 默认状态就是关着的——把两档合成一个宽上限的话，关着那一档的回归就
+			// 没人拦了。
+			name: "评论页·筛选开着",
+			budget: frameBudget{
+				allocs: 88,
+				bytes:  5500,
+				floor:  35,
+			},
+			setup: func(t *testing.T, s *Shell, _ *mygoui.Tester) {
+				s.app.Queue().Reset(app.Item{
+					Source: "online", Type: "mv", Bvid: "BV1xx411c7mD",
+					Title: "晴天", Artist: "某个 UP 主",
+				})
+				// ⚠️ **别名表和开关都直接摆上**（不点那枚开关）：这一档量的是
+				// 「筛选开着的那一屏画起来多贵」，而点开关要跑一趟 `rebuildRows`
+				// ——那是**一次**的开销，不是每帧的。
+				s.comments.names = songname.New("晴天", "某个 UP 主")
+				s.comments.mentionOnly = true
+				s.comments.rows = budgetCommentRows(budgetCommentRowCount)
+				s.comments.listW = budgetCommentListW
+				// ⚠️ **每一行的正文都要命中**：只命中一行的话，量到的是「一行多
+				// 那几段」——而真实的那一屏（筛选开着）里**每一条都命中**（那是
+				// 筛选的定义）。
+				for i := range s.comments.rows {
+					s.comments.rows[i].cm.Message = "晴天" + s.comments.rows[i].cm.Message
+				}
+			},
+			draw: func(s *Shell) func(*mygoui.Context) {
+				return func(c *mygoui.Context) {
 					s.viewComments(c, nil)
 				}
 			},

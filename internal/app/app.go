@@ -667,6 +667,14 @@ type App struct {
 	// commentsMu sync.Mutex
 	commentsMu     sync.Mutex
 	commentsCancel context.CancelFunc
+	// commentsRepliesCancel 是每一层楼中楼那一趟的 cancel，**按 root 分开**。
+	//
+	// ⚠️ **不能和 `commentsCancel` 共用一个格子**：那一格是主列表的，而楼中楼
+	// 每一层是独立的一趟（展开两条评论就是两趟并行）。共用一格的话，后发的那
+	// 一趟会把先发的那一趟取消掉——症状是「只有最后点开的那条有楼中楼」
+	// （票 #684 顺手修的：原来那一版更糟，它取消了**自己**，楼中楼一趟都发不
+	// 出去）。
+	commentsRepliesCancel map[int64]*commentReplyRequest
 	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
 	commentsSlot string
 	// comments 是已经拿到的那些评论（主列表）。
