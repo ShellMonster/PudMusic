@@ -230,11 +230,9 @@ func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *te
 	a.SetFullPlayerPrefs(p)
 	flush <- struct{}{}
 	_ = waitFullPlayerPrefsWrite(t, written)
-	waitFor(t, func() bool {
-		return errors.Is(a.FullPlayerPrefsError(), writeErr)
-	}, "全屏偏好落盘错误")
-	if err := a.TakeSettingsError(); !errors.Is(err, writeErr) {
-		t.Fatalf("TakeSettingsError = %v, want %v", err, writeErr)
+	waitForFullPlayerPrefsSettingsError(t, a, writeErr)
+	if err := a.FullPlayerPrefsError(); !errors.Is(err, writeErr) {
+		t.Fatalf("FullPlayerPrefsError = %v, want %v", err, writeErr)
 	}
 	if err := a.TakeSettingsError(); err != nil {
 		t.Fatalf("same full-player write error was reported twice: %v", err)
@@ -323,9 +321,7 @@ func TestFullPlayerPrefsRemountPreservesCloseFailureAndLatestValue(t *testing.T)
 	if err := a.FullPlayerPrefsError(); !errors.Is(err, writeErr) {
 		t.Fatalf("FullPlayerPrefsError = %v, want %v", err, writeErr)
 	}
-	if err := a.TakeSettingsError(); !errors.Is(err, writeErr) {
-		t.Fatalf("TakeSettingsError = %v, want %v", err, writeErr)
-	}
+	waitForFullPlayerPrefsSettingsError(t, a, writeErr)
 	if err := a.TakeSettingsError(); err != nil {
 		t.Fatalf("same remount error was reported twice: %v", err)
 	}
@@ -504,16 +500,11 @@ func currentFullPlayerPrefsStore(a *App) *fullPlayerPrefsStore {
 	return a.fullPlayerPrefs
 }
 
-func waitForFullPlayerPrefsError(t *testing.T, errCh <-chan error, want error) {
+func waitForFullPlayerPrefsSettingsError(t *testing.T, a *App, want error) {
 	t.Helper()
-	select {
-	case err := <-errCh:
-		if !errors.Is(err, want) {
-			t.Fatalf("writer error = %v, want %v", err, want)
-		}
-	case <-time.After(2 * time.Second):
-		t.Fatalf("timed out waiting for preference write error %v", want)
-	}
+	waitFor(t, func() bool {
+		return errors.Is(a.TakeSettingsError(), want)
+	}, "全屏偏好设置错误通知")
 }
 
 // 用户从 Biu 迁过来的时候是**按内容**认的（整份导出/导入），键名不一样就等于

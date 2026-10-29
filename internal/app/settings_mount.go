@@ -27,18 +27,17 @@ import (
 // 这个错**，否则界面无从知道「这次改的设置存不住」。下面每一个方法都把
 // store == nil 当成「没有设置可用」，不碰它。
 type settingsSlot struct {
+	mu    sync.Mutex
 	store *SettingsStore
 
 	// loadErr 是挂载时读盘的错：文件坏了，或者来自更新的版本。
-	//
-	// 它不拦着程序起来——设置照样用（默认值，或从坏文件里尽力恢复出来的），
-	// 这里只是记下来，让界面能告诉用户出了什么事（见 TakeSettingsError）。
 	loadErr error
 
-	// shown 是已经报给用户看过的那一个错。
-	//
-	// 界面每帧都要问一次，不记账的话屏幕上会一直是一样的话在闪。
-	shown string
+	// externalErr 是不属于 SettingsStore 的持久化错误（例如全屏播放器偏好）。
+	externalErr error
+
+	// shown 记录已经交给界面的错误文本，避免同一个错误在每帧重复出现。
+	shown map[string]struct{}
 }
 
 // mountedSettings 是「哪个 App 挂的是哪份设置」。进程里通常只有一个。
@@ -108,7 +107,19 @@ func (a *App) MountSettings(path string) error {
 	return err
 }
 
-// RecordSettingsFailure 记下一个「设置存不住」的错：没有 store，界面用默认值
+// RecordExternalSettingsError makes a non-SettingsStore persistence failure visible through the settings error channel.
+func (a *App) RecordExternalSettingsError(err error) {
+	slot := a.settingsSlot()
+	if slot == nil {
+		slot = &settingsSlot{}
+		actual, _ := mountedSettings.LoadOrStore(a, slot)
+		slot = actual.(*settingsSlot)
+	}
+	slot.mu.Lock()
+	slot.externalErr = err
+	slot.mu.Unlock()
+}
+
 // 跑着，但**这件事用户必须看得见**（见 TakeSettingsError）。
 //
 // 用在拿不到设置文件路径那种场合。那不是「还没挂设置」（第一次运行），是
@@ -297,20 +308,36 @@ func (a *App) TakeSettingsError() error {
 	if slot == nil {
 		return nil
 	}
-	err := slot.loadErr
-	if err == nil && slot.store != nil {
-		err = slot.store.LastError()
+
+	candidates := make([]error, 0, 3)
+	if slot.loadErr != nil {
+		candidates = append(candidates, slot.loadErr)
 	}
-	if err == nil {
-		slot.shown = ""
-		return nil
+	slot.mu.Lock()
+	if slot.externalErr != nil {
+		candidates = append(candidates, slot.externalErr)
 	}
-	msg := err.Error()
-	if msg == slot.shown {
-		return nil
+	slot.mu.Unlock()
+	if slot.store != nil {
+		if err := slot.store.LastError(); err != nil {
+			candidates = append(candidates, err)
+		}
 	}
-	slot.shown = msg
-	return err
+	for _, err := range candidates {
+		msg := err.Error()
+		if _, ok := slot.shown[msg]; ok {
+			continue
+		}
+		if slot.shown == nil {
+			slot.shown = make(map[string]struct{})
+		}
+		slot.shown[msg] = struct{}{}
+		return err
+	}
+	if len(candidates) == 0 {
+		slot.shown = nil
+	}
+	return nil
 }
 
 // settingsSlot 是这个 App 挂着的设置，没有就返回 nil。

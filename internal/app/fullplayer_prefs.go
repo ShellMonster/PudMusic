@@ -132,8 +132,9 @@ type fullPlayerPrefsStore struct {
 	stopped chan struct{}
 	flush   <-chan struct{}
 
-	writeFile func(string, []byte) error
-	wake      func()
+	writeFile           func(string, []byte) error
+	wake                func()
+	recordSettingsError func(error)
 }
 
 // load 读盘，读不到就用默认。**在挂上的时候调一次**。
@@ -279,6 +280,9 @@ func (p *fullPlayerPrefsStore) Flush() error {
 		wrapped := fmt.Errorf("app: 全屏播放器偏好存不住：%w", err)
 		p.save = wrapped
 		p.dirty = true
+		if p.recordSettingsError != nil {
+			p.recordSettingsError(wrapped)
+		}
 		if p.wake != nil {
 			p.wake()
 		}
@@ -288,6 +292,9 @@ func (p *fullPlayerPrefsStore) Flush() error {
 		p.dirty = false
 	}
 	p.save = nil
+	if p.recordSettingsError != nil {
+		p.recordSettingsError(nil)
+	}
 	if p.wake != nil {
 		p.wake()
 	}
@@ -424,7 +431,7 @@ func (a *App) mountFullPlayerPrefs(path string, writeFile func(string, []byte) e
 		}
 	}
 
-	p := &fullPlayerPrefsStore{path: path, writeFile: writeFile, flush: flush, wake: a.invalidate}
+	p := &fullPlayerPrefsStore{path: path, writeFile: writeFile, flush: flush, wake: a.invalidate, recordSettingsError: a.RecordExternalSettingsError}
 	if closeErr != nil {
 		p.save = closeErr
 	}
