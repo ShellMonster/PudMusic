@@ -15,8 +15,12 @@ import (
 // ⚠️ **判据要量一批宽度，不能只量 980 那一档**——264 能被 8 整除是**巧合**。
 func TestTheRequestedTierKeepsTheAspectRatio(t *testing.T) {
 	const base = "https://i0.hdslb.com/bfs/archive/y.jpg"
-	// 一批宽度（包含 980 那一档，也包含「短边不能被 8 整除」的那些）。
-	for _, cw := range []int{900, 940, 960, 980, 1000, 1020, 1060, 1100} {
+	// ⚠️ **要量一大段，不只是几个点**：只量 900~1100 会漏掉「长边撞到档位
+	// 边界」那一段——实测那一段（1537 DIP 往上的超宽窗口）偏差会到 3.09%，
+	// 而 980 那一档只有 1.5%。
+	//
+	// 这一段从 600 扫到 1900（DIP）——覆盖「最小窗口」到「比 Retina 屏还宽」。
+	for _, cw := range rangeAll(600, 1900) {
 		const slotH = 132 // DIP
 		pw, ph := coverPixelSize(float32(cw), slotH, 2)
 		if pw <= 0 || ph <= 0 {
@@ -33,6 +37,7 @@ func TestTheRequestedTierKeepsTheAspectRatio(t *testing.T) {
 			t.Errorf("宽 %d：要的那一档 %dx%d 的宽高比 %.3f，而那一格是 %.3f——偏 %.1f%%（要 ≤3%%）",
 				cw, pw, ph, gotRatio, slotRatio, dev)
 		}
+		_ = base
 		// 顺带确认那一档确实是要的尺寸（不是被最小档顶替了）。
 		// ⚠️ **允许比「正好」大**（档位是向上取的），但不许比它小——小了就是糊。
 		if pw < cw*2 {
@@ -131,4 +136,13 @@ func TestTheBackdropDoesNotGrowUnbounded(t *testing.T) {
 			"网络字节白花了", cw, ch)
 	}
 	fmt.Printf("画布 %d×%d @2x ⇒ 要 %dx%d\n", canvasW, canvasH, cw, ch)
+}
+
+// rangeAll 给出 [from, to] 之间的每一个整数。
+func rangeAll(from, to int) []int {
+	out := make([]int, 0, to-from+1)
+	for i := from; i <= to; i++ {
+		out = append(out, i)
+	}
+	return out
 }
