@@ -299,14 +299,23 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 			// 第三段有多宽：量画出来的那几枚键的跨度。
 			//
 			// ⚠️ **「评论」也在里面**（票 #573 之后第三段是四枚）：漏掉它的话
-			// 量出来的第三段比真的窄 32，而歌名那一列的宽是拿第三段的宽算的
-			// ——差出来的那 32 全算到歌名头上。
+			// 量出来的第三段比真的窄——而歌名那一列的宽是拿第三段的宽算的，
+			// 差出来的那一截全算到歌名头上。
+			//
+			// ⚠️ **它那一枚的名字可能带数字**（票 #682 起评论数进了名字）：这个
+			// 测试背后是一个**空的 App**（没有 bvid，于是 `CommentCount()` 是 0、
+			// 名字就是「评论」），但别把这里写死成只认那两个字——用
+			// `findCommentsKey` 找，带不带数字都认得出来。
 			segLo, segHi := float32(1e9), float32(-1e9)
-			for _, k := range []string{"分集", "收藏", "赞", "评论"} {
+			for _, k := range []string{"分集", "收藏", "赞"} {
 				r, ok := tt.Find(k)
 				if !ok {
 					continue
 				}
+				segLo = min32(segLo, r.X)
+				segHi = max32(segHi, r.X+r.W)
+			}
+			if r, ok := findCommentsKey(tt); ok {
 				segLo = min32(segLo, r.X)
 				segHi = max32(segHi, r.X+r.W)
 			}
@@ -317,10 +326,10 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 			got := title.W
 			// ⚠️ **左列的宽是「轨道宽」和「保底宽」里大的那个**：轨道是 1/5
 			// （上游的 `minmax(0,1fr)`），而**内容最少要 `playbarLeftMinW`**
-			// （票 #573 之后是四枚键 → 272）——窗口不够宽的时候是保底宽说话，
-			// 那一列**撑出轨道**（上游那边也是这么溢的）。
+			// （票 #682 之后是 307：三枚 32 + 评论那一枚 67）——窗口不够宽的
+			// 时候是保底宽说话，那一列**撑出轨道**（上游那边也是这么溢的）。
 			//
-			// ⚠️ **1280 那一档就是撑出轨道的那一档**（轨道 249.6 < 保底 272）。
+			// ⚠️ **1280 那一档就是撑出轨道的那一档**（轨道 249.6 < 保底 307）。
 			track := float32(width-playbarPadX*2) / 5
 			leftW := max32(track, playbarLeftMinW)
 			want := leftW - coverSize - 2*coverGap - (segHi - segLo)

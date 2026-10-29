@@ -53,8 +53,12 @@ const (
 	// pathFavDeal 是写接口：往 add_media_ids 那些格子里放、从 del_media_ids 那些
 	// 格子里拿。**它是 POST，要 CSRF**。
 	pathFavDeal = "/x/v3/fav/resource/deal"
-	// pathView 是稿件详情：bvid → aid。上游取分 P 列表用的是 `/x/player/pagelist`
-	// （`video.go`），那一个不返回 aid，所以这里另问一次详情。
+	// pathView 是稿件详情：bvid → aid（**外加 `stat.reply`，评论数**）。上游取分 P
+	// 列表用的是 `/x/player/pagelist`（`video.go`），那一个不返回 aid，所以这里另
+	// 问一次详情。
+	//
+	// ⚠️ **不要换成 `/x/web-interface/archive/stat`**（票 #682 的调研）：上游文档
+	// 那条接口已经标了「该接口已失效（HTTP 404）」。
 	pathView = "/x/web-interface/view"
 )
 
@@ -139,10 +143,32 @@ func (c *Client) FavFolders(ctx context.Context, upMid int64) ([]FavFolder, erro
 	return out, nil
 }
 
-// ArchiveID 查一个稿件的 avid（收藏接口要的是它，见文件头）。
-func (c *Client) ArchiveID(ctx context.Context, bvid string) (int64, error) {
+// ArchiveStats 是一份稿件详情（`/x/web-interface/view`）里我们要的那两栏。
+//
+// # 为什么一次拿两样
+//
+// 播放条上那枚「评论」键要显示**评论数**（票 #682），而它要的那个数就在
+// `stat.reply` 里——和收藏 / 点赞要的 `aid` 是**同一个回包**。分成两个方法的话，
+// 同一首歌唱起来界面上要付两个往返；合成一个只多读一栏 JSON。
+//
+// 🔴 **Reply（`stat.reply`）的零值语义：0 = 「没有这个数」**，不是「零条评论」。
+// B 站没给 `stat`（或者 `reply` 就是 0）时我们**不知道**那一首有没有人评论。
+// 对界面来说两者是同一件事（**不画数字**，见 `internal/ui/comments_entry.go`），
+// 所以类型上没有把两者分开——但调用方**不许**把 0 读成「没人评论」。
+type ArchiveStats struct {
+	// Aid 是 avid（收藏 / 点赞 / 评论接口要的都是它）。
+	Aid int64
+	// Reply 是评论数。**0 = 没有这个数**（见上面那段）。
+	Reply int64
+}
+
+// ArchiveStats 查一个稿件的 avid 和评论数。**一次往返**（见 `ArchiveStats`）。
+//
+// bvid 空时当场返回 `ErrNoVideo`（不发请求）；B 站说没有这个稿件（aid 是 0）
+// 时也是 `ErrNoVideo`。`stat` 那一栏缺失**不算错**——Reply 留 0。
+func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, error) {
 	if bvid == "" {
-		return 0, ErrNoVideo
+		return ArchiveStats{}, ErrNoVideo
 	}
 	raw, err := c.Do(ctx, Call{
 		Method: "GET",
@@ -150,18 +176,39 @@ func (c *Client) ArchiveID(ctx context.Context, bvid string) (int64, error) {
 		Query:  url.Values{"bvid": {bvid}},
 	})
 	if err != nil {
-		return 0, err
+		return ArchiveStats{}, err
 	}
 	var d struct {
-		Aid int64 `json:"aid"`
+		Aid  int64 `json:"aid"`
+		Stat struct {
+			Reply int64 `json:"reply"`
+		} `json:"stat"`
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
-		return 0, fmt.Errorf("bili: 稿件详情读不懂: %w", err)
+		return ArchiveStats{}, fmt.Errorf("bili: 稿件详情读不懂: %w", err)
 	}
 	if d.Aid <= 0 {
-		return 0, ErrNoVideo
+		return ArchiveStats{}, ErrNoVideo
 	}
-	return d.Aid, nil
+	// ⚠️ **负数是上游的垃圾，按「没有这个数」算**：把 -1 当评论数画出来是
+	// 「-1 条评论」，比不画糟得多。
+	reply := d.Stat.Reply
+	if reply < 0 {
+		reply = 0
+	}
+	return ArchiveStats{Aid: d.Aid, Reply: reply}, nil
+}
+
+// ArchiveID 查一个稿件的 avid（收藏接口要的是它，见文件头）。
+//
+// 它是 `ArchiveStats` 的薄封装：**同一个接口、同一次往返**，只是调用方不要
+// 评论数（收藏 / 点赞 / 播放上报那几摊都不需要它）。
+func (c *Client) ArchiveID(ctx context.Context, bvid string) (int64, error) {
+	st, err := c.ArchiveStats(ctx, bvid)
+	if err != nil {
+		return 0, err
+	}
+	return st.Aid, nil
 }
 
 // FavFolderIDs 问「那一格里现在有哪些内容」，回一组 id（投稿的 avid / 音频的 auid）。

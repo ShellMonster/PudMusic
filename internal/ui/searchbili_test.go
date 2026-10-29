@@ -107,6 +107,12 @@ type biliFixture struct {
 	// likePosts 记每一次赞的 up（1 赞 / 2 取消赞），triplePosts 数三连。
 	likePosts, triplePosts int
 	lastUp                 string
+
+	// viewReply 是 `/x/web-interface/view` 回的 `stat.reply`（评论数，票 #682）。
+	//
+	// ⚠️ **零值 = 「B 站没给这个数」**：播放条上那一枚键拿不到数就**不画数字**
+	// （不是画「0」——那会让用户以为没人评论）。
+	viewReply int64
 }
 
 // fixture 那一摊收藏用的固定值。
@@ -147,9 +153,16 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 				}}})
 
 	case r.URL.Path == "/x/web-interface/view":
-		// bvid → avid（收藏接口要的是 avid）。
+		// bvid → avid（收藏接口要的是 avid），外加 `stat.reply`——播放条上那一枚
+		// 「评论」键的评论数（票 #682）。
+		f.mu.Lock()
+		reply := f.viewReply
+		f.mu.Unlock()
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"aid": fixtureAid, "bvid": r.URL.Query().Get("bvid")}})
+			"data": map[string]any{
+				"aid": fixtureAid, "bvid": r.URL.Query().Get("bvid"),
+				"stat": map[string]any{"reply": reply},
+			}})
 
 	case r.URL.Path == "/x/v3/fav/folder/created/list-all":
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
@@ -368,6 +381,16 @@ func (f *biliFixture) serveVideoPages(w http.ResponseWriter, r *http.Request) {
 func (f *biliFixture) setVideoPages(pages []any) {
 	f.mu.Lock()
 	f.videoPages = pages
+	f.mu.Unlock()
+}
+
+// setViewReply 改 `/x/web-interface/view` 回的评论数（`stat.reply`，票 #682）。
+//
+// ⚠️ **带着锁改**：handler 在锁里读这一格，测试在锁外写的话，一趟还在路上的
+// 响应就可能和这一写撞上（`go test -race` 报出来的那种）。
+func (f *biliFixture) setViewReply(reply int64) {
+	f.mu.Lock()
+	f.viewReply = reply
 	f.mu.Unlock()
 }
 

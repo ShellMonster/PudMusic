@@ -316,6 +316,63 @@ func TestArchiveIDAsksByBvid(t *testing.T) {
 	}
 }
 
+// TestArchiveStatsReadsTheReplyCount 钉住「一趟往返同时拿到 aid 和评论数」。
+//
+// 🔴 **为什么要把 `stat.reply` 一起读回来**：播放条上那枚「评论」键要显示评论数
+// （票 #682），而这一趟（bvid → aid）本来就要发——顺带读一栏不花第二个往返。
+//
+// ⚠️ **`stat` 缺失 / `reply` 是 0 都是「没有这个数」，不是「零评论」**：B 站没给
+// 那一栏时我们没资格说「这一首没人评论」。类型上两者都是 0（界面那一层的判据
+// 也是「0 就不画数字」），所以这里只钉「不报错、回 0」。
+func TestArchiveStatsReadsTheReplyCount(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"aid": 4242, "bvid": "BV1xx",
+			"stat": map[string]any{"view": 100, "danmaku": 3, "reply": 1286, "like": 9},
+		}))
+	})
+	st, err := f.client(t, Options{}).ArchiveStats(context.Background(), "BV1xx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Aid != 4242 {
+		t.Errorf("Aid 是 %d，want 4242", st.Aid)
+	}
+	if st.Reply != 1286 {
+		t.Errorf("Reply 是 %d，want 1286——`stat.reply` 就是评论数", st.Reply)
+	}
+
+	// ⚠️ **`stat` 整段缺失**：回包里没有那一栏时不许报错，Reply 是 0。
+	f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"aid": 7}))
+	})
+	st, err = f.client(t, Options{}).ArchiveStats(context.Background(), "BV1noStat")
+	if err != nil {
+		t.Fatalf("stat 缺失时报错了：%v", err)
+	}
+	if st.Aid != 7 || st.Reply != 0 {
+		t.Errorf("stat 缺失时拿到 %+v，want Aid=7 Reply=0", st)
+	}
+
+	// ⚠️ **bvid 空时当场返回，不发请求**（和 `ArchiveID` 的既有行为一字不差）。
+	before := len(f.requests())
+	if _, err := f.client(t, Options{}).ArchiveStats(context.Background(), ""); !errors.Is(err, ErrNoVideo) {
+		t.Errorf("空 bvid 回的是 %v，want ErrNoVideo", err)
+	}
+	if after := len(f.requests()); after != before {
+		t.Errorf("空 bvid 时发了 %d 趟请求——它该当场返回", after-before)
+	}
+
+	// aid 是 0 时是「没有这个稿件」，不是「aid 是 0」。
+	f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"aid": 0, "stat": map[string]any{"reply": 5}}))
+	})
+	if _, err := f.client(t, Options{}).ArchiveStats(context.Background(), "没了"); !errors.Is(err, ErrNoVideo) {
+		t.Errorf("aid 是 0 时回的是 %v，want ErrNoVideo", err)
+	}
+}
+
 // TestFriendlyTalksAboutFavoriteFailures 收藏的那两个哨兵要能被说成一句用户听得懂
 // 的话。**不是所有收藏失败都值得重试**：「已经收藏过了」再按一次还是那句话，而
 // 「收藏夹接口没登录」重试多少次都一样，用户该做的是重新登录。
