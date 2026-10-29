@@ -579,6 +579,9 @@ func copySamples(ctx context.Context, w io.Writer, tracks []*track) error {
 			if s.size > maxSampleBytes {
 				return fmt.Errorf("mux: 采样 %d 有 %d 字节，超过 %d 的上限", p.run.first+k, s.size, maxSampleBytes)
 			}
+			// 单个采样的最大值进诊断快照（票 #668）：它决定中转缓冲要扩到多大，
+			// 是「一块异常大的关键帧」在快照里唯一看得见的痕迹。
+			gauge.NoteMP4SampleBytes(int64(s.size))
 			// 一个关键帧能有几百 KB，超过中转缓冲区就临时扩一块。
 			// 不扩的话这里是切片越界 panic，而交织跑在后台 goroutine 上。
 			if int(s.size) > len(buf) {

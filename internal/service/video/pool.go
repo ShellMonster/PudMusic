@@ -278,8 +278,8 @@ func (p *framePool) dropFreeLocked() bool {
 	return true
 }
 
-// dropLocked 把一块缓冲从「持有」里去掉。preLent 表示这块是不是借出去的：
-// 借出去的（Release 在关闭后的路径）还要减 lent —— 调用方负责先减，这里只管账。
+// dropLocked 把一块缓冲从「持有」里去掉，只动 owned 那本账（`allocated`）。
+// `lent` 由调用方先减：这里不看这块是不是借出去的。
 func (p *framePool) dropLocked(base uintptr, size int64) {
 	delete(p.sizes, base)
 	delete(p.out, base)

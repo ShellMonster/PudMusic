@@ -417,7 +417,7 @@ func (s *StreamSource) sameContainer(urls []string) bool {
 // 解码器的读游标往前挪就等于把这首歌倒回开头——那正是「换流后从原位置
 // 继续」要避免的事。清缓存是为了把字节补齐，不是为了把进度倒回去。
 func (s *StreamSource) restart() error {
-	s.resetTempGauge()
+	s.clearTempGauge()
 	if err := s.file.Truncate(0); err != nil {
 		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
 	}

@@ -39,11 +39,13 @@
 // `baseMS` / `baseAt` 上，绘制帧用 `Painter.Now()` 从锚点按 `rate` 往外推
 // （`posAt`）。两次重建之间位置因此是**连续**的，整窗重建多快都无所谓。
 //
-// 锚点只在三种情况下重钉（`follow`）：
+// 锚点只在四种情况下重钉（`follow`）：
 //
 //	换歌        调用方 `reset` 之后重新钉
 //	跳转        这一帧的读数和推出来的位置差过 `danmakuSeekSlop`
 //	暂停/恢复   播放状态变了（冻结在**画到的那一格**，不回到读数上）
+//	倍速        时间轴的斜率变了（`follow` 里 `d.rate != danmakuRate(rate)`
+//	            那一支），旧锚点按旧倍速推出来的位置从改速那一刻起不再成立
 //
 // 几十毫秒的采样误差**不重钉**：重钉就是跳一下，而那个误差是有界的
 // （播放器 50ms 一拍）。
@@ -65,7 +67,8 @@
 //	                          量字宽、不再写 map
 //	整个出界的条目             从 active / slots / widths 里一起收掉
 //
-// 换歌（`count` / `first` 变了）、大幅回退、字号变化、封面宽度变化时，
+// 换歌（`count` / `first` / `last` 那一组身份变了）、大幅回退、字号变化、
+// 封面宽度变化时，
 // 游标和活动集合整体复位（见 `resetTracks`）——那些状态下旧的字宽、轨道
 // 门槛和活动条目都不再成立。
 //
@@ -243,9 +246,21 @@ type danmakuLayer struct {
 	// live 是现在占着轨道的有几条（同屏上限 12 就是它）。
 	live int
 
-	// count/first 是这一份弹幕的「身份」——变了就是换歌了（要重置）。
-	count int
-	first string
+	// count/first/last/firstTimeMS/lastTimeMS 是这一份弹幕的「身份」——变了
+	// 就是换了一份（换歌、或者 B 站补发/刷新了一份新的）。
+	//
+	// ⚠️ **不能只比「条数 + 首条 rowid」**（问题 #670）：补发或刷新时，两批
+	// 弹幕完全可能条数相同、首条也相同，只有后面几条换掉——那时旧判据把新的
+	// 一份当成同一份，游标停在旧位置、`slots` 留着上一批的条目、锚点也是
+	// 旧的，屏幕上要么一条都不出，要么旧的那几条在原地一直滚。
+	//
+	// 现在的指纹是**整份的边界**：条数 + 首末 rowid + 首末 TimeMS。首末加上
+	// 时间轴两头之后，长度相同、首条相同而末条（或它该出现的时间）不同的两份
+	// 一定分得开。
+	count       int
+	first, last string
+	firstTimeMS int64
+	lastTimeMS  int64
 
 	// itemsByTime 是当前弹幕批次按 TimeMS 排序的索引（#647 交付的那一份）。
 	// 绘制帧只在这个索引上做时间窗口二分，不再扫描和排序完整列表。
@@ -339,7 +354,8 @@ type danmakuLayer struct {
 func (d *danmakuLayer) reset() {
 	d.resetTracks()
 	d.count = 0
-	d.first = ""
+	d.first, d.last = "", ""
+	d.firstTimeMS, d.lastTimeMS = 0, 0
 	d.itemsByTime = nil
 	d.maxTextBytes = 0
 	d.baseMS, d.lastBaseMS = 0, 0
@@ -353,7 +369,7 @@ func (d *danmakuLayer) reset() {
 }
 
 // resetTracks 把轨道、字宽、游标和活动集合整份复位，**保留**这一份弹幕的
-// 身份（`count` / `first`）、时间索引和时钟锚点。
+// 身份（`count` / `first` / `last` / 首末 `TimeMS`）、时间索引和时钟锚点。
 //
 // 它用在四种「旧状态不再成立」的时候（票 #670）：换歌（走 `reset`）、大幅
 // 回退、字号变化、封面宽度变化。之后游标从时间索引的窗口起点重新开始，
@@ -682,6 +698,23 @@ func (d *danmakuLayer) advance(p *ui.Painter, posMS int64, coverW float32, spaci
 	d.posValid = true
 }
 
+// sameBatch 报 items 是不是**当前这一份**弹幕（身份没变）。
+//
+// 身份是整份的边界：条数、首末条目的 rowid、首末条目的 TimeMS。加末尾两样
+// 的理由见 `danmakuLayer` 里 `count` 那一组字段的注释——只比「条数 + 首条」
+// 时，B 站补发/刷新出来的一份会被当成同一份。
+//
+// ⚠️ **顺序按 B 站给的那一份**（`sync` 存的是原样的 `items`），所以首末就是
+// 响应里的第一条与最后一条。
+func (d *danmakuLayer) sameBatch(items []app.DanmakuItem) bool {
+	if d.count != len(items) {
+		return false
+	}
+	first, last := items[0], items[len(items)-1]
+	return d.first == first.ID && d.last == last.ID &&
+		d.firstTimeMS == first.TimeMS && d.lastTimeMS == last.TimeMS
+}
+
 // sync 是**建树那一帧**要做的三件事：认这份弹幕的身份、把字号与轨道高定下来、
 // 把时钟锚点对上这一帧的位置。
 //
@@ -693,13 +726,18 @@ func (d *danmakuLayer) sync(c *ui.Context, st app.State, items []app.DanmakuItem
 		d.reset()
 		return
 	}
-	if d.count != len(items) || d.first != items[0].ID {
-		// **换了一份**（换歌了）⇒ 上一份的轨道、字宽、锚点全部作废。
+	if !d.sameBatch(items) {
+		// **换了一份**（换歌了，或者 B 站补发/刷新了一份新的）⇒ 上一份的
+		// 轨道、字宽、锚点全部作废。
 		//
-		// ⚠️ **判据是「条数 + 第一条的 rowid」：这一份弹幕的顺序是 B 站给的
-		// 顺序（不变），所以这两样变了就是换了一份。
+		// ⚠️ **判据是整份的边界，不是只有「条数 + 首条」**（问题 #670）：
+		// 两批弹幕可以条数相同、首条也相同而末条不同——那是补发最常见的样子。
+		// 只比前两样的话新的那一份会被当成同一份，游标/槽位/锚点全都留在旧的
+		// 位置上。
 		d.reset()
-		d.count, d.first = len(items), items[0].ID
+		d.count = len(items)
+		d.first, d.last = items[0].ID, items[len(items)-1].ID
+		d.firstTimeMS, d.lastTimeMS = items[0].TimeMS, items[len(items)-1].TimeMS
 		d.itemsByTime = append(d.itemsByTime[:0], items...)
 		d.maxTextBytes = 0
 		for _, it := range d.itemsByTime {

@@ -36,13 +36,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/ShellMonster/PudMusic/internal/perf"
 	"io"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/perf"
 )
 
 // StreamSource 的哨兵错误。
@@ -670,7 +671,7 @@ func (s *StreamSource) Close() error {
 		_ = os.Remove(path)
 	}
 	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
-	s.zeroTempGauge()
+	s.clearTempGauge()
 	return errors.Join(errs...)
 }
 
@@ -738,24 +739,15 @@ func streamExt(urls []string) string {
 	return ".bin"
 }
 
-// zeroTempGauge 把这条流的临时文件字节从账本里扣掉。
+// clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。
 //
-// ⚠️ **只在 Close 调**：restart 走的是 `resetTempGauge`（归零但不关账本），
-// 因为重启之后同一个文件还会继续写。
-func (s *StreamSource) zeroTempGauge() {
-	if s.gauge == nil {
-		return
-	}
-	s.mu.Lock()
-	n := s.filled
-	s.mu.Unlock()
-	if n > 0 {
-		s.gauge.AddMediaTempBytes(-n)
-	}
-}
-
-// resetTempGauge 在缓存被截断之后把账本归零（文件还在，只是内容清空了）。
-func (s *StreamSource) resetTempGauge() {
+// 它只扣账，不动 `filled`，也不关账本——两处调用方的语义因此各说各的：
+//
+//	Close    文件删了，账本里不该再留着它的字节（`filled` 跟着进程一起没）
+//	restart  文件还在、只是内容被截断，同一个文件接下来会继续写
+//
+// 两处要扣的是**同一个数**（s.filled），所以只有这一个实现。
+func (s *StreamSource) clearTempGauge() {
 	if s.gauge == nil {
 		return
 	}
