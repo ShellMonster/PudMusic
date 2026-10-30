@@ -242,6 +242,10 @@ type StreamSourceOptions struct {
 //
 // 零值不可用，请用 `NewStreamSource`。
 type StreamSource struct {
+	// closeMu 串行化 Close 的完整生命周期：第二次 Close 只能在第一次已经
+	// 关掉文件并完成清理之后重试删除。
+	closeMu sync.Mutex
+
 	// opMu 串行化「游标 + 读」这一对。
 	//
 	// ⚠️ AudioToolbox 的读回调是**从它自己的线程**调进来的，
@@ -642,10 +646,14 @@ func (s *StreamSource) Seek(off int64, whence int) (int64, error) {
 // 上、下载 goroutine 阻塞在 HTTP 上、缓存文件躺在临时目录里，三样都被它
 // 一次收拾掉。
 func (s *StreamSource) Close() error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+
 	s.mu.Lock()
 	if s.closed {
+		path := s.path
 		s.mu.Unlock()
-		return nil
+		return removeTempFile(path)
 	}
 	s.closed = true
 	// 先把等着的都叫醒，再关门——反过来会有人被唤醒之后又睡回去。
@@ -665,10 +673,10 @@ func (s *StreamSource) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	// 缓存文件删不掉不是错误，只是会留一个临时文件在磁盘上——
-	// 报给用户毫无意义。
-	if path != "" {
-		_ = os.Remove(path)
+	// 缓存文件删不掉是资源清理错误：播放器没有可恢复的动作，但必须把它返回给
+	// 调用方，避免 Windows 上的句柄泄漏只表现成测试里的残留文件。
+	if err := removeTempFile(path); err != nil {
+		errs = append(errs, fmt.Errorf("audio: 删除在线流缓存：%w", err))
 	}
 	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
 	s.clearTempGauge()
@@ -737,6 +745,41 @@ func streamExt(urls []string) string {
 		return path[i:]
 	}
 	return ".bin"
+}
+
+// closeRemoveRetries 是 Windows 文件句柄释放和目录删除之间的短暂竞态保护。
+const closeRemoveRetries = 200
+
+// closeRemoveWait 是每次重试删除缓存文件前的等待时间。
+const closeRemoveWait = 10 * time.Millisecond
+
+// removeTempFile 在文件句柄释放后删除缓存文件；Windows 上短暂被占用时有限重试。
+func removeTempFile(path string) error {
+	if path == "" {
+		return nil
+	}
+	var lastErr error
+	for attempt := 0; attempt < closeRemoveRetries; attempt++ {
+		err := os.Remove(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			lastErr = err
+		} else {
+			_, statErr := os.Stat(path)
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			if statErr != nil {
+				lastErr = statErr
+			}
+		}
+		if attempt+1 < closeRemoveRetries {
+			time.Sleep(closeRemoveWait)
+		}
+	}
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("audio: 在线流缓存仍存在：%s", path)
 }
 
 // clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。

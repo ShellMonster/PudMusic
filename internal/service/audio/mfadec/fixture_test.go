@@ -35,12 +35,8 @@ import (
 
 // 参考 WAV 的实测值（2026-10-18，macOS + ffmpeg）。
 //
-// ⚠️ 这三个数不是「正确答案」，是**换一次解码器就会不一样**的数：
-// ffmpeg 解同一个 .m4a 给出 177152 帧，而 macOS 的 AudioToolbox（`extaf`，
-// 逐样本验证过的那一份）给 176400 帧——差 752 帧（17 毫秒），是两边对
-// 编码器 priming 该剪多少的判断不一样。所以 Windows 上 MF 解出来的帧数
-// **大概率也不会正好等于 177152**；判据是「落在 176400~178176 之间」
-// （下界是 AudioToolbox 的，上界是裸 ADTS 不剪时的长度）。
+// Windows runner 的 MFT 原始输出按完整 access unit 计为 178176 帧；产品层
+// 对 MP4 再按编辑列表裁成 176400 帧，对裸 ADTS 保留 178176 帧。
 const (
 	refRate   = 44100
 	refChans  = 2

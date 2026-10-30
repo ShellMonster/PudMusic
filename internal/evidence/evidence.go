@@ -1439,12 +1439,13 @@ var Items = []Item{
 		// 容器说的呈现长度、丢掉编码器延迟。所以它要**单独**验一遍——spike 那
 		// 几条验的是解码器本身，碰不到这三件事。
 		//
-		// ⚠️ 它在 macOS 和 Windows 上**各跑一遍**，走的是两个不同的解码器
-		// （AudioToolbox / Media Foundation），比的是同一份参考。而两条线是
-		// **不一样**的：Windows（Media Foundation）用票面定的 0.02，macOS
-		// 用实测出来的 0.1（AudioToolbox 在同一份素材上是 0.070597）。理由写
-		// 在 `internal/service/audio/aac_reference_test.go` 顶上。
-		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS），帧数落在 176400~178176 之间，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
+		// ⚠️ 它在两个平台上各跑一遍，走的是两个不同的解码器
+		// （AudioToolbox / Media Foundation），比的是同一份参考。跨解码器
+		// 的最大差上限统一按 0.1，声道交换倍率按 2；macOS 已实测
+		// AudioToolbox 最大差 0.070597，Windows 真机日志中的 Media Foundation
+		// 最大差为 0.066711。两种容器的长度按各自的呈现口径单独断言。
+
+		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS）；MP4 呈现长度为 176400 帧、裸 ADTS 完整长度为 178176 帧，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
 		Tests: []string{
 			"TestTheProductPathDecodesAACSampleForSample",
 			"TestTheProductPathDecodesADTSSampleForSample",
