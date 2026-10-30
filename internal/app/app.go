@@ -416,7 +416,7 @@ type App struct {
 	//
 	// ⚠️ **它的命和 `pendingSrc` 不一样**：`pendingSrc` 在播放器装上之后
 	// 就交出去了（源归播放器管），而 `loadSrc` 要到**这一趟结束**才清——
-	// 中途被顶掉的那一条也得由看门狗自己关掉（见 `abortPendingSource`）。
+	// 中途被顶掉的那一条也得由看门狗自己关掉（见 `abortPendingSourceFor`）。
 	loadSrc *audio.StreamSource
 	// loadSrcGen 是 loadSrc 属于哪一趟（见上）。
 	loadSrcGen int
@@ -1386,6 +1386,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 建的（取流要几百毫秒的网络往返）。不加的话，用户点了本地文件之后，那条
 	// 在途的在线流照样会装上来——把本地文件顶掉，界面上响的是用户没点的那首。
 	// 那一头认的就是这个代次（`online.go` 的 `runOnline`）。
+	prevGen := a.onlineGen
 	a.onlineGen++
 	// 「正在取流」这一档到此为止：本地文件是**同步**开的，开完就在放，没有
 	// 「还在准备」这一段。
@@ -1472,8 +1473,13 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 在途的那条在线流也掐掉（代次加了，那一头会自己走人——但它自己走人要等
 	// 网络那一头先回话，而这里可以立刻停）。
 	//
+	// ⚠️ **传的是**`prevGen`（加之前那一趟）：上面已经把 `onlineGen` 加过了，
+	// 而这里要掐的正是**被顶掉的那一趟**的源。传当前值的话一个源都关不掉
+	// （现在那一栏属于新代次），而传 0 又会把新代次的源连坐关掉——见
+	// `abortPendingSourceFor` 的注释。
+	//
 	// ⚠️ **锁外面调**：它要拿 `a.mu`，而那把锁上面已经拿着。
-	a.abortPendingSource()
+	a.abortPendingSourceFor(prevGen)
 
 	// 先把新歌换上，再关旧的：换歌期间 tick 拿到的一直是有效的播放器。
 	if old != nil {
@@ -1737,6 +1743,7 @@ func (a *App) ClearTrack() {
 	// / failOnline / noteQuality 都对）。不加的话，用户把正在放的那首删掉之后
 	// 那条流才建好——它照样会装上来，队列是空的、播放器却在放一首不在队列里的歌，
 	// 正是这里要避免的那件事。
+	prevGen := a.onlineGen
 	a.onlineGen++
 	a.online = nil
 	// 「正在取流」这一档也收掉：清掉当前曲目 = 用户不要这一首了，那条在途的
@@ -1760,8 +1767,9 @@ func (a *App) ClearTrack() {
 	wake := a.wake
 	a.mu.Unlock()
 
-	// 在途的那条在线流也掐掉（理由同 `Open` 里那一句：锁外面调）。
-	a.abortPendingSource()
+	// 在途的那条在线流也掐掉（理由同 `Open` 里那一句：锁外面调、传**被顶掉
+	// 的那一趟**的代次）。
+	a.abortPendingSourceFor(prevGen)
 
 	// 「这一首到此为止」也是终止：播放记录那一轮到此结束（见 playreport.go
 	// 的「一、什么时候发」）。它和 `Stop` 是同一件事的两个入口。
@@ -1865,7 +1873,9 @@ func (a *App) Close() {
 	// 🔴 **在途的那条字节源也要关**：播放器还没建起来的时候它已经在下载了，
 	// 而上面那句关的是**播放器**——关不到它。没有这一句的话，一次卡死的取流
 	// 会在应用退出之后还在下载（临时文件也一起留在盘上）。
-	a.abortPendingSource()
+	//
+	// ⚠️ **这一处是「全关」，不看代次**：进程都要没了，还有谁在等的源都该停。
+	a.abortAllPendingSources()
 	// 在途的那一趟**预取**也要掐：它还占着一条连接，而用户已经退出了。
 	a.invalidatePrefetch()
 	a.mu.Lock()
