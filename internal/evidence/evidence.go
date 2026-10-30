@@ -99,7 +99,11 @@ var Items = []Item{
 			"TestIsPlayingSaysNoWhilePaused",
 			"TestIsPlayingFollowsTheSoundNotTheQueuePointer",
 			"TestIsPlayingRecognisesTheSongThatIsReallyPlaying",
-			"TestTheSameSongInTwoRowsIsOneHighlight",
+			// ⚠️ **原来那一条叫 `TestTheSameSongInTwoRowsIsOneHighlight`**：票
+			// #683 之后「同一首」带上 cid 了（同一个投稿的两集是两首），所以它拆成
+			// 两条——「同一集的两条记录都亮」和「同一投稿的两集只有一行亮」。
+			"TestTheSameRecordingInTwoRowsIsOneHighlight",
+			"TestTwoEpisodesOfOneVideoAreNotTheSameSong",
 			"TestTheRowThatIsReallyPlayingIsMarked",
 			"TestTheHistoryPageDoesNotMarkASongThatIsNotPlaying",
 			"TestTheLaterPageDoesNotMarkASongThatIsNotPlaying",
@@ -2133,6 +2137,10 @@ var Items = []Item{
 			// 各页从空状态落到真数据的那一步。
 			"TestTheThreeTabsAllSwitch",
 			"TestCollectionShowsTheHeaderAndTheOpsBar",
+			// 合集 / 系列那一页（票 #683 的缺陷 C）：它们走的是另外两个接口，
+			// 而「走错接口」在界面上就是一页空白——所以这一条要列在这个
+			// 「真数据」的台账里。
+			"TestTheSeasonPageListsItsArchives",
 			// 首页那一页的**取数**那一半（表上那一行走的就是这条链）：
 			// 三档各打各的接口，换了档拿到的是另一批。
 			"TestTheHomePagePullsTheTabYouAreLookingAt",

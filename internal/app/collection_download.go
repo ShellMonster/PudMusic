@@ -81,6 +81,18 @@ func ItemOfMedia(m bili.Media) Item {
 		// 于是界面上那句说明就成了「这一条不是投稿」——而用户看到的是
 		// 收藏夹里的一个合集，他该知道的是「打开里面的单集就能放」。
 		it.Type = "collection"
+		// 🔴 **合集要带着它的 season_id 才进得去**（票 #683，缺陷 B）：收藏夹里
+		// type=21 的 `id` 就是**合集 id**（`docs/fav/list.md`：「视频合集：
+		// 视频合集id」），而合集页按 `/collection/{id}?type=21` 认它——那一页
+		// 要的正是这个数，**不是 avid**（`m.ID` 对 type=2 才是 avid，两个不能混）。
+		//
+		// ⚠️ **电影（24）不填**：文档没说清 24 的 `id` 是什么（收藏夹里它和
+		// 合集同一档，而 24 到底是「合集那种容器」还是「稿件本身」没有旁证）。
+		// 查不清就不猜——菜单里那一项于是摆不出来，用户看到的还是那一句说明，
+		// 而不是一个点了会跳到错页面的入口。
+		if m.Type == bili.MediaCollection {
+			it.CollectionID = m.ID
+		}
 	}
 	return it
 }

@@ -143,21 +143,25 @@ func TestThePlayingMarkFollowsTheSongWhenTheQueueMoves(t *testing.T) {
 	}
 }
 
-// TestTheSameSongInTwoRowsIsOneHighlight 钉住判据是**同一首**而不是同一份。
+// TestTheSameRecordingInTwoRowsIsOneHighlight 钉住判据是**同一首**而不是同一份。
 //
-// 历史记录那一页同一首歌看过两次是**两行**（`Music.ID` 不同，那是铁律四要的），
-// 而它们在 B 站那边是同一首。认「同一首」时两行都亮——那是对的：用户点的、
-// 听的都是同一首歌，而另一份只是它自己那份记录。
+// 历史记录那一页同一首听过两次是**两行**（`Music.ID` 不同，那是铁律四要的），
+// 而它们在 B 站那边是同一首**同一集**。认「同一首」时两行都亮——那是对的：用户
+// 点的、听的都是同一首，而另一份只是它自己那份记录。
 //
 // 认「同一份」（比整个 `Item`）的话两行都不亮，于是用户在一份**正在放**的
 // 记录上看到的是「哪首都没在放」。
-func TestTheSameSongInTwoRowsIsOneHighlight(t *testing.T) {
+//
+// 🔴 **票 #683 之后「同一首」带上 cid 了**：同一个投稿的**两集**不再是同一首
+// （那是两个独立的行、两个独立的队列项）。所以这一条改成造**同一个 cid** 的两行
+// ——「同一集听过两次」，那才是这条判据真正要覆盖的形状；两集各亮一行由下面
+// 那一条 `TestTwoEpisodesOfOneVideoAreNotTheSameSong` 钉。
+func TestTheSameRecordingInTwoRowsIsOneHighlight(t *testing.T) {
 	rec := &recorded{}
-	a := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "同一首"}
-	b := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "2", Title: "同一首的另一集"}
+	a := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "同一集"}
 	songs := []Music{
 		{ID: "history:BV1@1", Title: "看过的第一次", Item: a},
-		{ID: "history:BV1@2", Title: "看过的第二次", Item: b},
+		{ID: "history:BV1@2", Title: "看过的第二次", Item: a},
 	}
 	_, tt := newList(t, playingActions(rec, a.Identity()), songs)
 
@@ -165,7 +169,33 @@ func TestTheSameSongInTwoRowsIsOneHighlight(t *testing.T) {
 		t.Errorf("正在放的那份没有被标出来：%q", tt.Texts())
 	}
 	if !markedOn(t, tt, "看过的第二次") {
-		t.Errorf("同一首歌的另一份没有被标出来（那是同一首，cid 不一样而已）：%q", tt.Texts())
+		t.Errorf("同一集的两条记录只亮了一行（那是同一首，只是 Music.ID 不同）：%q", tt.Texts())
+	}
+}
+
+// TestTwoEpisodesOfOneVideoAreNotTheSameSong 钉住票 #683 的行为变化。
+//
+// 历史记录里同一个投稿的第一集和第二集是**两行**，而只有正在放的那一行该亮。
+// 判重不认 cid 的那些年，这里两行都亮——用户看到「两集都在放」，而真正出声的
+// 只有一集；同一个洞还让「点第二集」变成了「什么都不做」。
+func TestTwoEpisodesOfOneVideoAreNotTheSameSong(t *testing.T) {
+	rec := &recorded{}
+	first := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "第一集"}
+	second := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "2", Title: "第二集"}
+	songs := []Music{
+		{ID: "history:BV1@1", Title: "看过的第一集", Item: first},
+		{ID: "history:BV1@2", Title: "看过的第二集", Item: second},
+	}
+	_, tt := newList(t, playingActions(rec, first.Identity()), songs)
+
+	if !markedOn(t, tt, "看过的第一集") {
+		t.Errorf("正在放的那一集没有被标出来：%q", tt.Texts())
+	}
+	if markedOn(t, tt, "看过的第二集") {
+		t.Errorf("同一投稿的另一集也被标成「正在播放」了（只有一集在放）：%q", tt.Texts())
+	}
+	if n := countMarks(tt); n != 1 {
+		t.Errorf("画面上有 %d 处「正在播放」，want 1 处：%q", n, tt.Texts())
 	}
 }
 

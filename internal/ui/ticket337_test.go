@@ -50,8 +50,20 @@ func assertQueueAndPlaying(t *testing.T, a *app.App, want []app.Item, current in
 		t.Fatalf("队列有 %d 首，want %d：%+v", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i].Identity() != want[i].Identity() {
-			t.Errorf("队列第 %d 项是 %q，want %q", i, got[i].Identity(), want[i].Identity())
+		// ⚠️ **比之前先把 cid 抹掉**（票 #683 的缺陷 D）：起播那一趟会把补出来
+		// 的分 P id 写回队列项（收藏夹 / 搜索给的条目本来没有 cid），于是队列里
+		// 那一项的身份从 `mv:<bvid>` 变成 `mv:<bvid>|<cid>`——而 `want` 是调用方
+		// 按接口数据造的，cid 还空着。两者说的是**同一首**，只是队列那一份多了
+		// 「是哪一集」。
+		//
+		// 抹掉之后仍按 `Identity` 比（而不是只比 bvid）：本地项看路径、音乐库看
+		// sid、种类前缀也还在——「放错一首别的歌」这一档照样红。补出来的 cid 由
+		// `internal/app/multipart_identity_test.go` 和
+		// `internal/ui/collection_multipart_test.go` 单独钉。
+		g, w := got[i], want[i]
+		g.Cid, w.Cid = "", ""
+		if g.Identity() != w.Identity() {
+			t.Errorf("队列第 %d 项是 %q，want %q", i, g.Identity(), w.Identity())
 		}
 	}
 	if got := a.Queue().CurrentIndex(); got != current {

@@ -670,3 +670,30 @@ func TestAppendingPagesKeepsTheChosenSong(t *testing.T) {
 		t.Errorf("翻完页选中的是 %q，want p1-4（追加不该动到上面那些行的身份）", m.ID)
 	}
 }
+
+// TestTheLoadFailToastDoesNotShowOurInternalPrefix 钉住「那句红字里不出现
+// `biu:`」（票 #683 的复审）。
+//
+// 错的原始串带着我们自己的包名前缀（`bili: …` / `app: …` 各自包成 `biu: …`），
+// 而那一位是**给用户看的**：用户不知道「biu」是什么，读到的是一句看起来像
+// 内部日志的话。这一族提示（`loadFailToast`）在**所有**分页列表上都用，所以
+// 前缀在这里一次剥干净。
+func TestTheLoadFailToastDoesNotShowOurInternalPrefix(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"第一页", errors.New("biu: 收藏夹暂时打不开"), "加载失败：收藏夹暂时打不开"},
+		{"后一页", errors.New("biu: 连不上 B 站"), "加载更多失败：连不上 B 站"},
+		{"没有前缀的照旧", errors.New("网络炸了"), "加载更多失败：网络炸了"},
+	} {
+		page := 2
+		if c.name == "第一页" {
+			page = 1
+		}
+		if got := loadFailToast(page, c.err); got != c.want {
+			t.Errorf("%s：loadFailToast = %q，want %q", c.name, got, c.want)
+		}
+	}
+}

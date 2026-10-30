@@ -29,7 +29,10 @@ func TestIdentityFollowsBuisKeys(t *testing.T) {
 		want string
 	}{
 		{"本地", app.LocalItem("/music/a.flac"), "local:/music/a.flac"},
+		// ⚠️ **没有 cid 的 MV 只有 `mv:<bvid>`**（票 #683）：搜索结果只给 bvid，
+		// 那时还不知道是哪一集，按投稿判。有 cid 的才带上 `|<cid>`（见下一行）。
 		{"MV", app.Item{Source: "online", Type: "mv", Bvid: "BV1xx411c7mD"}, "mv:BV1xx411c7mD"},
+		{"带 cid 的 MV", app.Item{Source: "online", Type: "mv", Bvid: "BV1xx411c7mD", Cid: "777"}, "mv:BV1xx411c7mD|777"},
 		{"音乐", app.Item{Source: "online", Type: "audio", Sid: "1293494"}, "audio:1293494"},
 		// 只填了 Type 的本地项：LocalItem 两个都填，手写的常常只填 Type，
 		// 少判一个它就掉到下面两支里去拿一个空标识了。
@@ -48,11 +51,24 @@ func TestIdentityFollowsBuisKeys(t *testing.T) {
 
 // TestIdentityTellsSameSongApartFromDifferentOnes 是 Identity 的真正判据：
 // 同一首的两个写法和两首不同的歌，两边都要分清。
+//
+// 🔴 **同一个投稿的两分集是两首**（票 #683）：用户报的「一个视频下多个子集，
+// 点里面的歌单播放不了」根子就在这一句上——判重不认 cid 的话，抽屉只画一行、
+// 点第二集放的是第一集、`PlayAt` 连播放器都不换。完整的判据（含「一个有一个
+// 没有为什么判不同」）在 `multipart_identity_test.go`。
 func TestIdentityTellsSameSongApartFromDifferentOnes(t *testing.T) {
-	same1 := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "第一集"}
-	same2 := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "2", Title: "第二集"}
-	if same1.Identity() != same2.Identity() {
-		t.Errorf("同一个投稿的两分集身份不同：%q / %q", same1.Identity(), same2.Identity())
+	one := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "第一集"}
+	two := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "2", Title: "第二集"}
+	if one.Identity() == two.Identity() {
+		t.Errorf("同一个投稿的两分集身份相同：%q（两集被当成同一首）", one.Identity())
+	}
+	// 同一集的两次拷贝（同一个 bvid + 同一个 cid）仍然是同一首——标题不参与身份。
+	sameCopy := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "另一个标题"}
+	if one.Identity() != sameCopy.Identity() {
+		t.Errorf("同一集的两次拷贝身份不同：%q / %q", one.Identity(), sameCopy.Identity())
+	}
+	if !app.SameTrack(one, sameCopy) {
+		t.Error("同一集的两次拷贝没有被判成同一首")
 	}
 
 	// 同一个文件路径摆两次是同一首；两个路径不是。

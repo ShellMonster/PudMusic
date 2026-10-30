@@ -23,8 +23,10 @@
 //
 //	/x/v3/fav/folder/info          容器自己的字段（头图区）
 //	/x/v3/fav/resource/list        容器里的内容（分页）
-//	/x/v3/fav/folder/fav           收藏这个容器
-//	/x/v3/fav/folder/unfav         取消收藏这个容器
+//	/x/v3/fav/folder/fav           收藏这个容器（收藏夹）
+//	/x/v3/fav/folder/unfav         取消收藏这个容器（收藏夹）
+//	/x/v3/fav/season/fav           收藏这个容器（合集）
+//	/x/v3/fav/season/unfav         取消收藏这个容器（合集）
 //	/x/v3/fav/resource/batch-del   从容器里删掉几个条目（批量）
 //	/x/v3/fav/resource/clean       清掉容器里所有失效的条目
 package bili
@@ -45,6 +47,8 @@ const (
 	pathResourceList     = "/x/v3/fav/resource/list"
 	pathFolderFav        = "/x/v3/fav/folder/fav"
 	pathFolderUnfav      = "/x/v3/fav/folder/unfav"
+	pathSeasonFav        = "/x/v3/fav/season/fav"
+	pathSeasonUnfav      = "/x/v3/fav/season/unfav"
 	pathResourceBatchDel = "/x/v3/fav/resource/batch-del"
 	pathResourceClean    = "/x/v3/fav/resource/clean"
 )
@@ -192,6 +196,12 @@ type CollectionOwner struct {
 }
 
 // CollectionInfo 是容器自己的那些字段——顶部头图区画的就是它。
+//
+// ⚠️ **它是三类容器共用的那一份形状，不是「收藏夹的那一份」**（票 #683 的复审）：
+// 收藏夹走 `CollectionInfo` 方法（`folder/info`），合集走 `SeasonInfo`
+// （`seasons_archives_list` 的 `meta`），系列走 `SeriesInfo`（`/x/series/series`）。
+// 三处的字段有一半是「接口没给」的零值（见 `seasonMeta.info`），界面据此不画
+// 那几样，而不是说它们是空。
 type CollectionInfo struct {
 	ID    int64
 	Title string
@@ -428,6 +438,12 @@ type CollectionPage struct {
 	Medias []Media
 	// HasMore 后面还有没有。
 	HasMore bool
+	// Meta 是合集内容接口顺手给的容器元信息（标题 / 封面 / mid / 总数）。
+	//
+	// ⚠️ **只有合集有**（系列的内容接口不给自己那一层，它的元信息在
+	// `/x/series/series`，见 `SeriesInfo`）；收藏夹是 nil。调用方拿到它就该
+	// 记进元信息缓存——后面翻页要的 mid 就在这里，不然每一页都得再问一次。
+	Meta *CollectionInfo
 }
 
 // CollectionMedias 取容器里的一页内容，page 从 1 起。
@@ -506,25 +522,360 @@ func (c *Client) CollectionMedias(ctx context.Context, id int64, sort Collection
 	return &CollectionPage{Medias: out, HasMore: d.HasMore}, nil
 }
 
+// ── 合集 / 系列的内容列表 ──────────────────────────────────────────────────
+//
+// 🔴 **它们和收藏夹不是同一个接口**（票 #683）：`/x/v3/fav/resource/list` 收的是
+// `media_id`，只对收藏夹（type=11）有效；往它上面发一个合集 / 系列的 id，B 站
+// 回的是一个空列表或者一句 -400，**界面上是一页空白、一个错都没有**。
+//
+// 两个接口的形状（照 `bilibili-API-collect` 的 `docs/video/collection.md`）：
+//
+//	合集  /x/polymer/web-space/seasons_archives_list
+//	      mid（必要）、season_id（必要）、page_num、page_size、sort_reverse
+//	系列  /x/series/archives
+//	      mid（必要）、series_id（必要）、pn、ps、sort（desc / asc）
+//
+// ⚠️ **两边的分页参数叫法不一样**（`page_num`/`page_size` vs `pn`/`ps`）——
+// 这是 B 站自己不一致，不是我们的笔误。写错的话接口会**默默用默认值**（第 1 页、
+// 一页 20），于是「翻到第 2 页」永远是第 1 页那些歌，而界面上看不出异样。
+//
+// ⚠️ **两个返回的条目形状是一样的**：都有一个 `archives` 数组，每一项带
+// `aid` / `bvid` / `title` / `pic` / `duration` / `pubdate` / `stat.view`。
+// 合集另外给一层 `meta`（标题 / 封面 / 创建者 / 总数，见 `seasonMeta`），系列的
+// 元信息在另一个接口（`/x/series/series`，见 `SeriesInfo`）。
+
+const (
+	// pathSeasonArchives 是合集内容的接口（也顺手给容器那一层 `meta`）。
+	pathSeasonArchives = "/x/polymer/web-space/seasons_archives_list"
+	// pathSeriesArchives 是系列内容的接口。
+	pathSeriesArchives = "/x/series/archives"
+	// pathSeriesInfo 是系列自己的元信息（内容接口不给）。
+	pathSeriesInfo = "/x/series/series"
+)
+
+// archiveItem 是 `archives` 数组里的一项（合集和系列共用这一份形状）。
+//
+// ⚠️ **`aid` 的零值不能当「没有」**：合集 / 系列的每一条都是一个真稿件，
+// `aid` 是它唯一的数值身份（删除、收藏都要 avid）。0 只可能是接口没给。
+type archiveItem struct {
+	Aid      int64  `json:"aid"`
+	Bvid     string `json:"bvid"`
+	Title    string `json:"title"`
+	Pic      string `json:"pic"`
+	Ctime    int64  `json:"ctime"`
+	Duration int    `json:"duration"`
+	PubDate  int64  `json:"pubdate"`
+	Stat     struct {
+		View int64 `json:"view"`
+	} `json:"stat"`
+}
+
+// seasonArchivesData 是合集内容接口的 `data` 段。
+//
+// `page` 里的三个数只有 `total` 有用（「后面还有没有」要拿它算，见下面的
+// `page.HasMore`）：B 站不给 `has_more`，所以判据只能是「已经翻到第几页」×
+// 「一页几条」和总数比。
+//
+// 🔴 **`meta` 是头图区要的那一份**（票 #683 的复审）：合集没有收藏夹那个
+// `folder/info` 可打，标题 / 封面 / 创建者 / 总数都在这一个 `meta` 里。
+// 字段名照 `bilibili-API-collect` 的 `docs/video/collection.md`（`name` /
+// `cover` / `mid` / `total` / `description`）。
+type seasonArchivesData struct {
+	Archives []archiveItem `json:"archives"`
+	Meta     seasonMeta    `json:"meta"`
+	Page     struct {
+		PageNum  int `json:"page_num"`
+		PageSize int `json:"page_size"`
+		Total    int `json:"total"`
+	} `json:"page"`
+}
+
+// seasonMeta 是合集内容接口的 `meta` 段。
+type seasonMeta struct {
+	SeasonID    int64  `json:"season_id"`
+	Mid         int64  `json:"mid"`
+	Name        string `json:"name"`
+	Cover       string `json:"cover"`
+	Description string `json:"description"`
+	Total       int    `json:"total"`
+}
+
+// seriesArchivesData 是系列内容接口的 `data` 段。
+//
+// ⚠️ **`page` 的键名也不同**（`num` / `size` / `total`）。照合集那份写的话
+// 三个数全是 0，于是 `HasMore` 恒为 false——「下一页」在系列上永远不出现。
+type seriesArchivesData struct {
+	Archives []archiveItem `json:"archives"`
+	Page     struct {
+		Num   int `json:"num"`
+		Size  int `json:"size"`
+		Total int `json:"total"`
+	} `json:"page"`
+}
+
+// SeasonArchives 取一个合集（type=21）里的一页内容，page 从 1 起。
+//
+// mid 是**合集创建者的 mid**——文档写「必要」，后面又注一句「也可以是任意的
+// 非负整数」。⚠️ **我们传真的那一个**（`CollectionInfo.OwnerMid`）：
+// 「任意值也行」是文档的旁注、没有真网验证过，而传对的不会错。
+//
+// seasonID 是**合集 id**（`season_id`），不是 avid、也不是收藏夹的 mlid。
+//
+// ps 传 0 用默认的 20（和收藏夹那个接口同一个上限，见 pageSizeLimit）。
+func (c *Client) SeasonArchives(ctx context.Context, mid, seasonID int64, page, ps int) (*CollectionPage, error) {
+	if seasonID <= 0 {
+		return nil, fmt.Errorf("bili: 合集 id 不对（%d）", seasonID)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if ps <= 0 || ps > pageSizeLimit {
+		ps = pageSizeLimit
+	}
+
+	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathSeasonArchives, Query: url.Values{
+		"mid":       {strconv.FormatInt(max(mid, 0), 10)},
+		"season_id": {strconv.FormatInt(seasonID, 10)},
+		"page_num":  {strconv.Itoa(page)},
+		"page_size": {strconv.Itoa(ps)},
+	}})
+	if err != nil {
+		return nil, err
+	}
+
+	var d seasonArchivesData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("bili: 合集内容的返回读不懂：%w", err)
+	}
+	out := mediasOfArchives(d.Archives)
+	p := &CollectionPage{
+		Medias:  out,
+		HasMore: hasMorePages(page, ps, len(out), d.Page.Total),
+	}
+	if d.Meta.SeasonID != 0 || d.Meta.Name != "" {
+		p.Meta = d.Meta.info(CollectionAlbum)
+	}
+	return p, nil
+}
+
+// info 把合集那个 `meta` 段翻成 `CollectionInfo`。
+//
+// ⚠️ **`Faved` / `Private` / `Default` 是「不知道」**：合集这个接口不给收藏状态，
+// 也没有公开 / 私密那一位。零值在这几个字段上表示「没给」，界面据此不画那条
+// 星标的实心态——而不是说「它没有被收藏」（真实状态只有另一个接口知道）。
+func (m seasonMeta) info(typ CollectionType) *CollectionInfo {
+	return &CollectionInfo{
+		ID:         m.SeasonID,
+		Title:      decodeEntities(m.Name),
+		Intro:      m.Description,
+		Cover:      normalizeImageURL(m.Cover),
+		Type:       typ,
+		MediaCount: m.Total,
+		Owner:      CollectionOwner{Mid: m.Mid},
+	}
+}
+
+// SeasonInfo 取一个合集（type=21）自己的字段——头图区那一份。
+//
+// # 为什么不是 `folder/info`
+//
+// 那个接口只认收藏夹的 mlid：往它上面发一个合集 id，B 站回一句 -400，于是
+// 头图区**永远停在占位**、每开一次页面还弹一句红字（票 #683 的复审）。
+//
+// # 为什么走内容接口
+//
+// 合集没有「只要元信息」的公开接口；`seasons_archives_list` 的 `meta` 里就带着
+// 标题 / 封面 / 创建者 / 总数（见 `seasonArchivesData`）。这里只要一条
+// （`page_size=1`），代价是那一页的一条稿件数据——比再打一个注定失败的请求小。
+//
+// ⚠️ **mid 可以传 0**：文档说这个参数「也可以是任意的非负整数」，而我们要的
+// 是**回包里那个 `meta.mid`**。调用方拿到之后记进缓存，后面翻页就有真的 mid 了。
+func (c *Client) SeasonInfo(ctx context.Context, mid, seasonID int64) (*CollectionInfo, error) {
+	pg, err := c.SeasonArchives(ctx, mid, seasonID, 1, 1)
+	if err != nil {
+		return nil, err
+	}
+	if pg.Meta == nil {
+		return nil, fmt.Errorf("bili: 合集 %d 的信息里没有 meta（接口形状变了？）", seasonID)
+	}
+	return pg.Meta, nil
+}
+
+// SeriesInfo 取一个系列（type=31）自己的字段——头图区那一份。
+//
+// 系列和合集不同：它的内容接口（`/x/series/archives`）**不给**容器那一层，
+// 元信息在 `/x/series/series`（照 Biu 的 `service/series-info.ts`）：
+// `data.meta` 里是 `series_id` / `mid` / `name` / `cover` / `description` /
+// `creator` / `total`。
+//
+// ⚠️ **`creator` 是 UP 主的昵称**（合集那边没有这一个字段），所以系列页的
+// 创建者那一行画得出来；合集的头图区只有 mid，昵称那一格空着。
+func (c *Client) SeriesInfo(ctx context.Context, seriesID int64) (*CollectionInfo, error) {
+	if seriesID <= 0 {
+		return nil, fmt.Errorf("bili: 系列 id 不对（%d）", seriesID)
+	}
+	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathSeriesInfo, Query: url.Values{
+		"series_id": {strconv.FormatInt(seriesID, 10)},
+	}})
+	if err != nil {
+		return nil, err
+	}
+	var d struct {
+		Meta struct {
+			SeriesID    int64  `json:"series_id"`
+			Mid         int64  `json:"mid"`
+			Name        string `json:"name"`
+			Cover       string `json:"cover"`
+			Description string `json:"description"`
+			Creator     string `json:"creator"`
+			Total       int    `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("bili: 系列信息的返回读不懂：%w", err)
+	}
+	return &CollectionInfo{
+		ID:         d.Meta.SeriesID,
+		Title:      decodeEntities(d.Meta.Name),
+		Intro:      d.Meta.Description,
+		Cover:      normalizeImageURL(d.Meta.Cover),
+		Type:       CollectionSeries,
+		MediaCount: d.Meta.Total,
+		Owner:      CollectionOwner{Mid: d.Meta.Mid, Name: decodeEntities(d.Meta.Creator)},
+	}, nil
+}
+
+// SeriesArchives 取一个系列（type=31）里的一页内容，page 从 1 起。
+//
+// 参数语义和 `SeasonArchives` 一样（mid 是系列创建者的 mid，seriesID 是
+// 系列 id），只有接口路径和分页参数名不同（理由见上面那一节）。
+func (c *Client) SeriesArchives(ctx context.Context, mid, seriesID int64, page, ps int) (*CollectionPage, error) {
+	if seriesID <= 0 {
+		return nil, fmt.Errorf("bili: 系列 id 不对（%d）", seriesID)
+	}
+	if page < 1 {
+		page = 1
+	}
+	if ps <= 0 || ps > pageSizeLimit {
+		ps = pageSizeLimit
+	}
+
+	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + pathSeriesArchives, Query: url.Values{
+		"mid":       {strconv.FormatInt(max(mid, 0), 10)},
+		"series_id": {strconv.FormatInt(seriesID, 10)},
+		"pn":        {strconv.Itoa(page)},
+		"ps":        {strconv.Itoa(ps)},
+	}})
+	if err != nil {
+		return nil, err
+	}
+
+	var d seriesArchivesData
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return nil, fmt.Errorf("bili: 系列内容的返回读不懂：%w", err)
+	}
+	out := mediasOfArchives(d.Archives)
+	return &CollectionPage{
+		Medias:  out,
+		HasMore: hasMorePages(page, ps, len(out), d.Page.Total),
+	}, nil
+}
+
+// mediasOfArchives 把 `archives` 数组翻成 `Media`。
+//
+// 🔴 **Type 一律填 `MediaVideo`（2）**：这两个接口回的只有视频稿件，没有音频
+// 那一类。填成 0 的话 `Playable()` 判 false，整页「播放全部」一首都不加——
+// 而界面上看不出为什么（列表照旧画得出来）。
+//
+// ⚠️ **`attr` 这几个接口不给**，所以 `Media.Attr` 是 0（= 正常）。合集里的
+// 稿件被删了的时候条目是不是还在，得看真接口——这一层不编一个值。
+func mediasOfArchives(in []archiveItem) []Media {
+	out := make([]Media, 0, len(in))
+	for _, m := range in {
+		out = append(out, Media{
+			ID: m.Aid, Type: MediaVideo, Bvid: m.Bvid,
+			Title: decodeEntities(m.Title), Cover: normalizeImageURL(m.Pic),
+			// ⚠️ duration 是**秒**（同收藏夹那一路，见 CollectionMedias 里那段）。
+			Duration: time.Duration(m.Duration) * time.Second,
+			View:     m.Stat.View,
+			PubTime:  unixSeconds(m.PubDate),
+			// 合集 / 系列没有「收藏时间」这一栏（那一列画的是 pubtime，见
+			// `collectionTimeOf`），所以 FavTime 留零值（= 这一次没给）。
+		})
+	}
+	return out
+}
+
+// hasMorePages 报「这一页之后还有没有」。
+//
+// 🔴 **这两个接口不给 `has_more`**（收藏夹那个给），所以只能拿总数算：
+// 「已经翻到的条数」是 `(page-1)*ps + 这一页拿到的`。⚠️ **后一半要用真拿到
+// 几条而不是 ps**：最后一页不满、或者接口自己截断时，拿 ps 算会多算，于是
+// 「下一页」一直摆着、点下去是空页。
+//
+// total 是 0（接口没给）时一律说「没有了」：宁可少一个「下一页」，也不要在
+// 已经到底的时候让用户按一下拿回一页空白——那看起来像应用坏了。
+func hasMorePages(page, ps, got, total int) bool {
+	if total <= 0 || ps <= 0 {
+		return false
+	}
+	return (page-1)*ps+got < total
+}
+
 // FavoriteCollection 收藏这个容器（星标点亮）。
-func (c *Client) FavoriteCollection(ctx context.Context, id int64) error {
-	return c.setCollectionFav(ctx, pathFolderFav, id)
+//
+// 🔴 **按容器类型分派**（票 #683 的复审）：收藏夹走 `folder/fav` + `media_id`，
+// 合集走 `season/fav` + `season_id`（上游 Biu 的 `service/fav-season-fav.ts`）。
+// 不分的话合集那个 id 会冒充收藏夹 mlid 发出去，B 站回错，而界面上是一句
+// 「收藏不了」——用户看不出那一下压根不该发。
+//
+// ⚠️ **系列（31）返回错**：B 站没有「收藏一个系列」这个动作（上游也没有）。
+// 与其把 series_id 当 media_id 发出去换回一句看不懂的话，不如当场说清。
+func (c *Client) FavoriteCollection(ctx context.Context, id int64, typ CollectionType) error {
+	return c.setCollectionFav(ctx, true, id, typ)
 }
 
-// UnfavoriteCollection 取消收藏这个容器。
-func (c *Client) UnfavoriteCollection(ctx context.Context, id int64) error {
-	return c.setCollectionFav(ctx, pathFolderUnfav, id)
+// UnfavoriteCollection 取消收藏这个容器（分派规则同 `FavoriteCollection`）。
+func (c *Client) UnfavoriteCollection(ctx context.Context, id int64, typ CollectionType) error {
+	return c.setCollectionFav(ctx, false, id, typ)
 }
 
-func (c *Client) setCollectionFav(ctx context.Context, path string, id int64) error {
+// setCollectionFav 是收藏 / 取消收藏背后那一支。
+//
+//	fav=true   收藏
+//	fav=false  取消收藏
+func (c *Client) setCollectionFav(ctx context.Context, fav bool, id int64, typ CollectionType) error {
 	if id <= 0 {
 		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)
 	}
-	_, err := c.Do(ctx, c.writeCall(c.hostAPI+path, url.Values{
-		"media_id": {strconv.FormatInt(id, 10)},
-		"platform": {platformWeb},
-	}))
-	if err != nil {
+	var (
+		path string
+		form url.Values
+	)
+	switch typ {
+	case CollectionAlbum:
+		path = pathSeasonFav
+		if !fav {
+			path = pathSeasonUnfav
+		}
+		form = url.Values{
+			"season_id": {strconv.FormatInt(id, 10)},
+			"platform":  {platformWeb},
+		}
+	case CollectionSeries:
+		// ⚠️ 系列没有这个动作（见 `FavoriteCollection`）。
+		return fmt.Errorf("bili: 系列不支持收藏（%d）", id)
+	default:
+		path = pathFolderFav
+		if !fav {
+			path = pathFolderUnfav
+		}
+		form = url.Values{
+			"media_id": {strconv.FormatInt(id, 10)},
+			"platform": {platformWeb},
+		}
+	}
+	if _, err := c.Do(ctx, c.writeCall(c.hostAPI+path, form)); err != nil {
 		return fmt.Errorf("bili: %s %d: %w", path, id, err)
 	}
 	return nil
@@ -536,14 +887,18 @@ func (c *Client) setCollectionFav(ctx context.Context, path string, id int64) er
 // `id:type,id:type`）。只给 id 的话 B 站删不掉任何东西**而且不报错**，
 // 表现是「点了删除，刷新之后一条不少」——界面上看起来就像删除根本没生效。
 //
-// 合集 / 系列（21 / 31）不支持这个接口：只有收藏夹能删内容。传进来的
-// 非收藏夹 id 会原样发出去，B 站回什么就是什么。
+// 🔴 **非收藏夹直接拒绝、一个请求都不发**（票 #683 的复审）：合集 / 系列
+// （21 / 31）没有「从这里删内容」这个动作，原来把它们的 id 当 `media_id` 原样
+// 发出去——B 站回一句它认不出的错，界面上是「删不掉」，而这一趟注定失败。
 //
 // 空的 medias 是 no-op：空串 `resources` 发过去 B 站会回 -400，而界面
 // 上「没勾任何东西就点删除」根本不该发请求。
-func (c *Client) RemoveCollectionMedias(ctx context.Context, id int64, medias []Media) error {
+func (c *Client) RemoveCollectionMedias(ctx context.Context, id int64, typ CollectionType, medias []Media) error {
 	if id <= 0 {
 		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)
+	}
+	if typ != CollectionFavorite {
+		return fmt.Errorf("bili: %s里不能删内容（%d）", typ.Label(), id)
 	}
 	if len(medias) == 0 {
 		return nil
@@ -584,19 +939,20 @@ func (c *Client) RemoveCollectionMedias(ctx context.Context, id int64, medias []
 // 服务端这一个动作只带一个 `media_id`，B 站自己认得哪几条失效了（照 Biu 上游
 // 的 `postFavResourceClean`，`service/fav-resource-clean.ts`）。它认得的比我们多。
 //
-// ⚠️ **只对收藏夹有效**：和 `RemoveCollectionMedias` 同一个道理，合集 / 系列是
-// 建在稿件上的，B 站没有这个动作。
+// 🔴 **只对收藏夹有效，非收藏夹直接拒绝、一个请求都不发**（票 #683 的复审）：
+// 和 `RemoveCollectionMedias` 同一个道理，合集 / 系列是建在稿件上的，B 站没有
+// 这个动作。原来这一条把 season_id / series_id 当 `media_id` 发出去——那一趟
+// 注定失败。
 //
-// **界面那边只判所有权、不判容器类型**（见 `app.CanDeleteCollection` 的注释，
-// 以及 `DeleteFolder` 上「界面上不做类型判断」那段）：自己建的合集 / 系列上，
-// 这一项照样摆得出来，而 B 站会回一句它不认识。合集 / 系列在 URL 上是
-// `/collection/{id}?type=21`，而**今天界面上没有一行点得进去会拼出那个查询串**
-// ——侧栏「我收藏的」那一组只收收藏夹（见 `app.collectedFavorites` 的注释：
-// 合集的内容列表是另一套接口，本项目没接，摆进去是死的路）。要手敲 URL 才碰
-// 得到，所以这一条现在只是**注释里的话必须是真的**，不是一个活着的缺陷。
-func (c *Client) CleanInvalidResources(ctx context.Context, id int64) error {
+// **界面那边还会自己挡一道**（见 `ui.collectionMoreItemsFor`）：合集 / 系列页的
+// ⋯ 菜单里这几项不摆出来，所以正常路径上根本走不到这一层；这里的判据是给
+// 「以后有人接了一条新入口」兜底的。
+func (c *Client) CleanInvalidResources(ctx context.Context, id int64, typ CollectionType) error {
 	if id <= 0 {
 		return fmt.Errorf("bili: 收藏夹 id 不对（%d）", id)
+	}
+	if typ != CollectionFavorite {
+		return fmt.Errorf("bili: %s里没有「清除失效内容」这个动作（%d）", typ.Label(), id)
 	}
 	// ⚠️ **不带 platform**：上游这一个也没带（B 站不认它），多给不报错但那
 	// 一次请求的报文就和上游的不一样了，而两个一漂就得分不清是谁的问题。

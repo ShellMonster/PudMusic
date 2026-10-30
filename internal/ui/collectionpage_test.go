@@ -51,6 +51,13 @@ type favBili struct {
 	keywords []string
 	// faved 是此刻收藏了没有（folder/info 就照它回）。
 	faved bool
+	// seasonFaved 是**合集**此刻收藏了没有（`fav/season/fav` 那一套记在它上面）。
+	//
+	// ⚠️ **和 `faved` 分开**：它们是两个不同的接口、两份不同的状态，合成一格的话
+	// 「合集星标打错了接口」在夹具上会被当成成功（票 #683 的复审）。
+	seasonFaved bool
+	// seasonForms 记下每一次合集星标请求带的表单（`season_id` 对不对）。
+	seasonForms []map[string][]string
 	// removed 记下每一次 batch-del 的 resources。
 	removed []string
 	// deleted 记下每一次 folder/del 的 media_ids（「删除收藏夹」和侧栏
@@ -63,6 +70,9 @@ type favBili struct {
 	// paths 记下每一次请求打到了哪条路径（发没发请求本身就是一条断言：
 	// 「为了一个认不出的项去问 B 站」是白跑的一趟）。
 	paths []string
+	// contents 记下每一次**内容列表**请求（合集那边要排除头图区 `page_size=1`
+	// 的那一趟元信息，见 `hitsOfContent`）。
+	contents []contentHit
 	// holdList 非 nil 时，**内容列表那一趟卡在这儿**（它不放行，直到收尾）。
 	//
 	// ⚠️ **它是为了复现「第一页还在拉」**：夹具默认秒回，而那一档
@@ -137,6 +147,60 @@ func newCollectionBili(t *testing.T) *favBili {
 			writeCollectionJSON(t, w, 0, "0", map[string]any{
 				"medias": b.filterByKeyword(kw), "has_more": false,
 			})
+		case "/x/polymer/web-space/seasons_archives_list", "/x/series/archives":
+			// 🔴 **合集 / 系列走的是另外两个接口**（票 #683，缺陷 C）：收藏夹那个
+			// 接口对它们的 id 只回空列表或者 -400，界面上是一页空白。
+			//
+			// ⚠️ **两条路径共用这一支，形状却不完全一样**：分页那一层合集的键是
+			// `page_num` / `page_size` / `total`，系列的是 `num` / `size` / `total`。
+			// 这就是真接口的样子（`docs/video/collection.md`），照它造。
+			//
+			// ⚠️ **`failList` 只让「内容那一趟」失败**（`page_size` 不是 1 的那一次）：
+			// 头图区现在也从这条接口拿元信息（`page_size=1`，票 #683 的复审），
+			// 全都失败的话「内容失败、头图区正常」这个场景就造不出来了。
+			if b.failList != 0 && r.URL.Query().Get("page_size") != "1" {
+				writeCollectionJSON(t, w, b.failList, "拉不到", nil)
+				return
+			}
+			// ⚠️ **只记内容那一趟**（`page_size` 不是 1 的）：头图区那一趟（合集）
+			// 和内容走同一个接口，混进来之后「翻了几次页」就数不清了。
+			if r.URL.Query().Get("page_size") != "1" {
+				b.contents = append(b.contents, contentHit{path: r.URL.Path, page: r.URL.Query().Get("page_size")})
+			}
+			b.orders = append(b.orders, r.URL.Query().Get("order"))
+			b.keywords = append(b.keywords, r.URL.Query().Get("keyword"))
+			page := map[string]any{"total": len(b.medias)}
+			data := map[string]any{"archives": b.archiveJSON(), "page": page}
+			if r.URL.Path == "/x/series/archives" {
+				page["num"], page["size"] = 1, 20
+			} else {
+				page["page_num"], page["page_size"] = 1, 20
+				// 🔴 **合集内容接口顺手给的 `meta`**（票 #683 的复审）：头图区的
+				// 标题 / 封面 / 创建者 / 条数都在它上面——合集没有收藏夹那个
+				// `folder/info` 可打。真接口就是这样的（`data.meta`）。
+				data["meta"] = map[string]any{
+					"season_id": 1227671, "mid": 1, "name": "一个合集",
+					"cover": "", "description": "合集简介", "total": len(b.medias),
+				}
+			}
+			writeCollectionJSON(t, w, 0, "0", data)
+		case "/x/series/series":
+			// 系列的元信息在**另一个接口**（票 #683 的复审）：内容接口不给容器
+			// 那一层。照 Biu 的 `service/series-info.ts` 造。
+			writeCollectionJSON(t, w, 0, "0", map[string]any{
+				"meta": map[string]any{
+					"series_id": 534501, "mid": 1, "name": "一个系列", "creator": "UP 小明",
+					"cover": "", "description": "系列简介", "total": len(b.medias),
+				},
+				"recent_aids": []int{},
+			})
+		case "/x/v3/fav/season/fav", "/x/v3/fav/season/unfav":
+			// 🔴 **合集星标走的是另一套接口**（票 #683 的复审，上游
+			// `service/fav-season-fav.ts`）：`season_id` 而不是 `media_id`。
+			_ = r.ParseForm()
+			b.seasonForms = append(b.seasonForms, map[string][]string(r.PostForm))
+			b.seasonFaved = r.URL.Path == "/x/v3/fav/season/fav"
+			writeCollectionJSON(t, w, 0, "0", "SUCCESS")
 		case "/x/v3/fav/folder/fav", "/x/v3/fav/folder/unfav":
 			_ = r.ParseForm()
 			b.faved = r.URL.Path == "/x/v3/fav/folder/fav"
@@ -235,6 +299,24 @@ func (b *favBili) filterByKeyword(kw string) []map[string]any {
 		if strings.Contains(title, kw) {
 			out = append(out, m)
 		}
+	}
+	return out
+}
+
+// archiveJSON 把 medias 翻成合集 / 系列那两条接口的 `archives` 形状。
+//
+// 形状照 `docs/video/collection.md`：`aid` / `bvid` / `title` / `pic` /
+// `duration`（秒）/ `pubdate` / `stat.view`。**没有 `attr`、没有 `upper`**
+// ——那两个接口不给（见 `bili.mediasOfArchives` 那段注释）。
+func (b *favBili) archiveJSON() []map[string]any {
+	out := make([]map[string]any, 0, len(b.medias))
+	for _, m := range b.medias {
+		id, _ := m["id"].(int)
+		out = append(out, map[string]any{
+			"aid": id, "bvid": m["bvid"], "title": m["title"],
+			"pic": m["cover"], "duration": m["duration"], "pubdate": 1670000000,
+			"stat": map[string]any{"view": 100},
+		})
 	}
 	return out
 }
@@ -1316,4 +1398,27 @@ func TestTheCollectionSearchDoesNotStealTheFocusWhenComingBack(t *testing.T) {
 		t.Errorf("回来之后焦点落在那个输入框里（光标 %v）——用户在别处敲的字会落进"+
 			"这个框里", caret)
 	}
+}
+
+// hitsOfContent 数打到某条路径上的**内容列表**请求（合集那边排除头图区
+// `page_size=1` 的那一趟元信息）。
+//
+// ⚠️ **合集 / 系列的头图区也从内容接口拿元信息**（票 #683 的复审）：光数路径
+// 把两件事混在一起了，而「内容打了几次」正是「分派对不对 + 有没有多翻」的判据。
+func (b *favBili) hitsOfContent(path string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := 0
+	for _, q := range b.contents {
+		if q.path == path {
+			n++
+		}
+	}
+	return n
+}
+
+// contentHit 记一次内容列表请求（路径 + 查询串）。
+type contentHit struct {
+	path string
+	page string
 }
