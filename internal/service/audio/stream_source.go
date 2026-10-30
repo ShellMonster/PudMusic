@@ -242,6 +242,10 @@ type StreamSourceOptions struct {
 //
 // 零值不可用，请用 `NewStreamSource`。
 type StreamSource struct {
+	// closeMu 串行化 Close 的完整生命周期：第二次 Close 只能在第一次已经
+	// 关掉文件并完成清理之后重试删除。
+	closeMu sync.Mutex
+
 	// opMu 串行化「游标 + 读」这一对。
 	//
 	// ⚠️ AudioToolbox 的读回调是**从它自己的线程**调进来的，
@@ -642,9 +646,14 @@ func (s *StreamSource) Seek(off int64, whence int) (int64, error) {
 // 上、下载 goroutine 阻塞在 HTTP 上、缓存文件躺在临时目录里，三样都被它
 // 一次收拾掉。
 func (s *StreamSource) Close() error {
+	s.closeMu.Lock()
+	defer s.closeMu.Unlock()
+
 	s.mu.Lock()
 	if s.closed {
+		path := s.path
 		s.mu.Unlock()
+		removeTempFile(path)
 		return nil
 	}
 	s.closed = true
