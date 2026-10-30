@@ -608,15 +608,20 @@ func (c *Client) CleanInvalidResources(ctx context.Context, id int64) error {
 	return nil
 }
 
-// writeCall 造一个写接口的调用：CSRF 同时进查询串、请求头和表单体。
+// writeCall 造一个写接口的调用，**并额外把 csrf 显式塞进表单体**。
 //
-// ⚠️ 三处都放是有原因的，别当成冗余：
-//   - 查询串和 `bili-jct` 头是 `Client.Do` 里 `Call.CSRF` 已经在做的；
-//   - **表单体这一处是 B 站 web 端真正校验的地方**——上游的
-//     `request-interceptors.ts` 就是把 csrf 塞进 POST 的 body 里的。
+// ⚠️ **表单体这一处是 `writeCall` 自己做的，不是 `Call.CSRF` 的自动行为**：
+// `Call{CSRF: true}` 只把 csrf 放进查询串和 `bili-jct` 头（`Client.send` 与
+// `setHeaders`），`Form` 那张表原样发出去。所以这里才要 `form.Set("csrf", v)`。
 //
-// 少任何一处，B 站的答案都是 -111（`ErrCSRF`）。而 -111 在真机上有一半
-// 的概率被报成「风控」（见 ErrCSRF 的注释），于是排障方向从一开始就错了。
+// 这么写是照 Biu 上游的 `request-interceptors.ts`——它把 csrf 塞进 POST 的
+// body 里。而**同一份代码里另有一族写接口没放体里那份**（直接写
+// `Call{Form: ..., CSRF: true}` 的 `LikeArchive` / `LikeTriple` / `dealFavMedia` /
+// `PlayReportOpen`），它们在真机上也通。⇒ 体里这一份是「照上游抄」，不是
+// 「少它就 -111」：两种写法并存，别把这句话套到别处。
+//
+// ⚠️ **-111（`ErrCSRF`）在真机上有一半的概率被报成「风控」**（见 ErrCSRF 的
+// 注释），所以这一族真撞上 -111 时先怀疑 csrf 有没有到，别一开始就往风控查。
 func (c *Client) writeCall(u string, form url.Values) Call {
 	if c.csrf != nil {
 		if v := c.csrf(); v != "" {
