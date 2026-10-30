@@ -205,6 +205,111 @@ func TestACoverHoldPastTheRingSwallowsItsClick(t *testing.T) {
 	}
 }
 
+// TestACoverHoldReleasedOffTheCoverKeepsTheNextKeyPress 钉住「松手落在封面外，
+// 那一次长按就到松手为止」。
+//
+// 🔴 评审在票 #681 上跑出来的形态（`engaged` 的寿命问题）：
+//
+//	按住封面 700ms（环出来了）→ 指针移出封面 → 松手
+//
+// 补发的那一次 click **不落在封面上**（指针在封面外松手，框架根本不记这一下
+// click），于是没有人问 `swallowClick`，`engaged` 就悬着。而键盘激活
+// （Tab 之后按回车、或读屏软件的 press 动作）**没有指针按下那一帧**——
+// `trackLike` 开头那个「下一次按下就清」的清零点永远进不去，于是第一条回车被
+// 吞掉（全屏不开、赞不发），第二条才生效。
+//
+// ⚠️ **判据是「回车那一下就成了」**，不是「`engaged` 是不是 false」：后者是
+// 实现细节，而用户看到的是「按了没反应」。也正因为这样，`settle()` 中间跑过
+// 几帧都不影响这一条——它问的是最后那一次激活有没有被吃掉。
+func TestACoverHoldReleasedOffTheCoverKeepsTheNextKeyPress(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	holdCover(t, e)
+
+	advanceLike(e, time.Duration(biuLikeRingDelayMS+200)*time.Millisecond)
+
+	// 指针移出封面，在封面外松手：这一下不是点封面，不该有任何 click 落到它上面。
+	e.tt.Move(5, 5)
+	e.tt.Release(5, 5)
+	e.tt.Frame()
+
+	if e.s.full.open || e.tt.HasText("关闭全屏") {
+		t.Fatal("松手落在封面外，全屏却开了")
+	}
+
+	// 键盘那一下：封面在指针按下时已经拿到了焦点，回车就是「按它」。
+	e.tt.Key(0, mygoui.KeyEnter)
+	e.tt.Frame()
+
+	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+		t.Errorf("封面外松手之后按回车，全屏没开 —— 那一次长按的「松手已过」没到期，"+
+			"把键盘的第一次激活吞掉了（文字有 %q）", e.tt.Texts())
+	}
+}
+
+// TestALikeButtonHoldReleasedOffItKeepsTheNextKeyPress 是同一条病的赞键形态。
+//
+// 🔴 赞键上的后果和封面不同：封面上被吞的是「开全屏」，赞键上被吞的是**那一次
+// 点赞**——用户按了回车，画面上什么都不变，也没有任何报错。
+//
+// 路径完全一样：按住 600 毫秒（抖/环已经出来）→ 指针移出 → 松手 → 回车。
+func TestALikeButtonHoldReleasedOffItKeepsTheNextKeyPress(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	holdStar(t, e, "赞")
+
+	advanceLike(e, time.Duration(biuLikeRingDelayMS+100)*time.Millisecond)
+
+	// 移出赞键再松手：补发的那一次 click 不落在它上面。
+	e.tt.Move(5, 5)
+	e.tt.Release(5, 5)
+	e.tt.Frame()
+
+	if got := e.f.likePostsCount(); got != 0 {
+		t.Fatalf("移出赞键松手之后发出去 %d 次赞（用户是在取消，不是点赞）", got)
+	}
+
+	// 回车就是「按这一键」。
+	e.tt.Key(0, mygoui.KeyEnter)
+	e.tt.Frame()
+
+	if got := e.f.likePostsCount(); got != 1 {
+		t.Errorf("赞键外松手之后按回车，赞出去了 %d 次（want 1）—— "+
+			"那一次长按的标记没到期，把键盘的第一次激活吞掉了", got)
+	}
+}
+
+// TestACoverTripleReleasedOffTheCoverKeepsTheNextKeyPress 是同一条病的第三连形态：
+// **三连已经触发了，然后指针移出封面再松手**。
+//
+// 🔴 `swallow`（三连的尾巴）和 `engaged`（环出来过）是两个标记，先前它们都在
+// 「下一次指针按下」时才兜底清。三连之后移出封面松手这一路里没人问
+// `swallowClick`（补发的 click 不落在封面），键盘激活又没有指针按下那一帧——
+// 于是回车被吞一次，第二次才开全屏。`released` 那一条把**两个**标记一起到期
+// 之后，这里必须先红后绿。
+func TestACoverTripleReleasedOffTheCoverKeepsTheNextKeyPress(t *testing.T) {
+	e := newLikeEnv(t, false, false, true)
+	holdCover(t, e)
+
+	advanceLike(e, time.Duration(biuLikeLongPressMS+100)*time.Millisecond)
+	waitFrames(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
+
+	// 移出封面再松手：这一下不是点封面。
+	e.tt.Move(5, 5)
+	e.tt.Release(5, 5)
+	e.tt.Frame()
+
+	if e.s.full.open || e.tt.HasText("关闭全屏") {
+		t.Fatal("三连之后移出封面松手，全屏却开了")
+	}
+
+	e.tt.Key(0, mygoui.KeyEnter)
+	e.tt.Frame()
+
+	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+		t.Errorf("三连之后封面外松手，再按回车全屏没开 —— `swallow` 那个尾巴没到期，"+
+			"把键盘的第一次激活吞掉了（文字有 %q）", e.tt.Texts())
+	}
+}
+
 // TestAQuickReleaseOnTheCoverStillOpensTheFullScreen 是上一条的反面：**短按没被误伤**。
 //
 // 499 毫秒还没到进度环的门槛，按 Biu 的语义就是一次普通点击——封面照旧开全屏。

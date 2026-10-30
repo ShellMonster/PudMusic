@@ -123,8 +123,8 @@ func TestALikeButtonHoldPastTheShakeSwallowsItsClick(t *testing.T) {
 	// 赞键就再也点不动了（而画面上看不出任何异样）。
 	e.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
 	waitFrames(t, e.tt, "下一次点击赞出去了", func() bool { return e.f.likePostsCount() > 0 })
-	if got := e.f.lastLikeUp(); got != "1" {
-		t.Errorf("中途松手之后第一次点击发出去的 up 是 %q，want 1（1 是赞）", got)
+	if got := e.f.lastLikeValue(); got != "1" {
+		t.Errorf("中途松手之后第一次点击发出去的 like 是 %q，want 1（1 是赞）", got)
 	}
 }
 
@@ -144,8 +144,8 @@ func TestAQuickReleaseOnTheLikeButtonStillLikes(t *testing.T) {
 	if got := e.f.likePostsCount(); got != 1 {
 		t.Errorf("短按发出去 %d 次赞，want 1", got)
 	}
-	if got := e.f.lastLikeUp(); got != "1" {
-		t.Errorf("发出去的 up 是 %q，want 1（1 是赞）", got)
+	if got := e.f.lastLikeValue(); got != "1" {
+		t.Errorf("发出去的 like 是 %q，want 1（1 是赞）", got)
 	}
 }
 
