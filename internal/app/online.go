@@ -270,6 +270,15 @@ type onlineTrack struct {
 	gen int
 }
 
+// streamCacheMax 是「播放前预判」那个缓存最多留几条。
+//
+// 🔴 **它不是「几条地址」的上限，是「内存里几个小结构」的上限**（2026-10-30）：
+// 原来那张表只留一条，反复切歌时每切回去一次都要重新问 B 站要一次地址
+// （A → B → A → B → A 实测取流 5 次）——而那些地址的有效期还有几小时。
+//
+// 取 8：够用户来回切几首，又不会攒出一堆（每条过期了就清掉）。
+const streamCacheMax = 8
+
 // streamKey 是取流缓存的键。
 //
 // 用 Biu 的判重标识（`source/type/bvid/cid/sid`）而不是队列下标：换了歌
@@ -284,6 +293,7 @@ func (a *App) MountStreaming(s Streaming) {
 	a.mu.Lock()
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
+	a.streamCacheOrder = map[string]time.Time{}
 	a.mu.Unlock()
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
@@ -320,6 +330,7 @@ func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	}
 	a.streaming.Quality = q
 	a.streamCache = map[string]*bili.StreamRef{}
+	a.streamCacheOrder = map[string]time.Time{}
 	tr := a.online
 	pos, want, gen := a.position, a.wantPlay, a.onlineGen
 	wake := a.wake
@@ -1683,11 +1694,78 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 	}
 
 	a.mu.Lock()
-	// 缓存只留手上这一条。留着几十条过期地址没有用——过期是常态，
-	// 而每一条都在诊断里等着被脱敏。
-	a.streamCache = map[string]*bili.StreamRef{key: ref}
+	a.putStreamRefLocked(key, ref)
 	a.mu.Unlock()
 	return ref, nil
+}
+
+// putStreamRefLocked 把一条流放进「播放前预判」那个缓存。**调用方拿着 `a.mu`。**
+//
+// # 🔴 缓存留的是**好几条**，不是一条（2026-10-30）
+//
+// 原来每一取到一条新的就把整张表**重建成那一条**（`map[...]{key: ref}`）。
+// 于是来回切歌时，每切回去一次都要重新问 B 站要一次地址——
+//
+//	A → B → A → B → A   ⇒   取流接口被调 5 次（实测）
+//
+// 而那条地址十几秒前才拿到过、有效期还有几小时（`expiryOf`：音乐库那一路
+// 一般三小时）。用户快速来回切歌，每切一下都白等一趟带签名的网络往返。
+//
+// ⇒ 改成留多条，切回去时命中自己那一条（`resolve` 里 `a.streamCache[key]`）。
+//
+// # 原来那条注释的两个顾虑，现在这样处理
+//
+//	「留着几十条过期地址没有用」——过期地址**现在就清掉**（`pruneStreamCacheLocked`），
+//	  留下的每一条都是还能用的（`Usable`），所以「堆积」不存在。
+//	「每一条都在诊断里等着被脱敏」——脱敏是 HTTP 请求日志那一层的事
+//	  （`credentials_transport.go`），和这个 map 无关：缓存里的地址**没有被
+//	  任何地方写进日志**。
+//
+// ⚠️ **容量上限**：留 `streamCacheMax` 条。超了就把**最旧**的那些丢掉
+// （`streamCacheOrder` 记着放进来的先后）。
+func (a *App) putStreamRefLocked(key string, ref *bili.StreamRef) {
+	// ⚠️ **两个 map 都要判**：往 nil map 写会 panic（`assignment to entry in nil
+	// map`），而 `New()` 只初始化了 `streamCache` 那一个。
+	if a.streamCache == nil {
+		a.streamCache = map[string]*bili.StreamRef{}
+	}
+	if a.streamCacheOrder == nil {
+		a.streamCacheOrder = map[string]time.Time{}
+	}
+	// 同一个 key 重来一次（换流 / 换音质）：位置更新到最新，别占着最旧那一格。
+	delete(a.streamCacheOrder, key)
+	a.streamCacheOrder[key] = time.Now()
+	a.streamCache[key] = ref
+	a.pruneStreamCacheLocked()
+}
+
+// pruneStreamCacheLocked 清掉不能用的那些（过期的、容量超了的）。
+// **调用方拿着 `a.mu`。**
+//
+// ⚠️ **过期的先清**：它们是「留着也没用」的那些——留着只会让「有几条地址」
+// 这个数看起来吓人，而实际上能用的只有没过期的那几条。
+func (a *App) pruneStreamCacheLocked() {
+	now := time.Now()
+	for k, ref := range a.streamCache {
+		if ref == nil || !ref.Usable(now) {
+			delete(a.streamCache, k)
+			delete(a.streamCacheOrder, k)
+		}
+	}
+	// 容量上限：超了就把最旧的丢掉。
+	for len(a.streamCache) > streamCacheMax {
+		oldest, at := "", time.Time{}
+		for k, t := range a.streamCacheOrder {
+			if at.IsZero() || t.Before(at) {
+				oldest, at = k, t
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(a.streamCache, oldest)
+		delete(a.streamCacheOrder, oldest)
+	}
 }
 
 // putStreamCache 把一条流放进「播放前预判」那个缓存。
@@ -1698,7 +1776,7 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 // 预取；两个入口在用之前都比对过「备的就是这一首」。
 func (a *App) putStreamCache(it Item, ref *bili.StreamRef) {
 	a.mu.Lock()
-	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	a.putStreamRefLocked(streamKey(it), ref)
 	a.mu.Unlock()
 }
 
@@ -1725,8 +1803,9 @@ func (a *App) refetch(ctx context.Context, s *Streaming, it Item) *audio.StreamR
 	}
 
 	a.mu.Lock()
-	// 和 resolve 一样只留一条：换流之后手上这条就是唯一有用的那条。
-	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	// 换流之后手上这一条就是最新鲜的那条（**别的条目不动**：切回去时还能用
+	// 各自那一条，见 `putStreamRefLocked` 的注释）。
+	a.putStreamRefLocked(streamKey(it), ref)
 	a.mu.Unlock()
 
 	// ⚠️ 这里**不填 Size**：取流接口的返回里没有长度，而 `StreamReply.Size`
