@@ -22,9 +22,20 @@
 // （`IconButton` 在封面右边），我们先是照 SPEC 接了封面，现在赞键也接上——
 // 两边的形状就一样了。而病根是同一个：**长按的松手和普通点击的松手在框架看来
 // 没有区别**，所以补发的那一次 click 必须由**每一个长按目标自己**吞掉
-// （`likeGesture.swallowClick`，三连触发时置上、松手那一帧消费）。谁漏了它，
+// （`likeGesture.swallowClick`，长按成立时置上、松手那一帧消费）。谁漏了它，
 // 一次长按就多出一次自己的本命动作：赞键上是「又赞/取消赞一次」，封面上是
 // 「凭空弹出全屏播放器」——后者更难看：进度环刚转满，界面就换成满屏那一屏。
+//
+// 🔴 **不只是三连触发之后要吞**：进度环（赞键是抖）一出来，这一按就已经算长按了
+// ——`likeGesture.engaged` 从那一刻起为真，松手补发的那一次 click 也要吞。
+// 只认「三连发出去」（`swallow`）的话，按住 600ms 松手仍然是一次点击：封面
+// **开全屏**、赞键**多赞一次**（真的发到 B 站账号上）。用户按了一半又松开是在
+// 取消，不是在点。（票 #681）
+//
+// ⚠️ **这两个标记的寿命是「松手之后那一次评估」**（票 #681 审查）：松手落在
+// 长按目标**外面**时补发的 click 不落在它上面，没人来问 `swallowClick`；而键盘
+// 激活（回车 / 读屏的 press）没有指针按下那一帧——标记要是一直留到下一次指针
+// 按下，用户的第一次键盘激活就被吞了。见 `likeGesture.released`。
 //
 // # 两个数是死的（照抄 Biu）
 //
@@ -173,6 +184,41 @@ type likeGesture struct {
 	// swallow 是「下一次 click 要吞掉」。三连触发时置上，长按的松手那一帧被
 	// `swallowClick` 消费掉。理由见文件头。
 	swallow bool
+	// engaged 是「这一按已经算长按了」——进度环（赞键是抖）出来的那一刻置上
+	// （`held > likeRingDelay`），**不是**等三连发出去。
+	//
+	// 🔴 **它和 `swallow` 是两件事**，不能复用：`swallow` 的语义是「下一次 click
+	// 吞掉」，而 `engaged` 是「这一按的性质已经变了」——环一出来，松手就不再是
+	// 一次点击（否则按住 600ms 松手会开全屏 / 多赞一次，票 #681）。
+	//
+	// ⚠️ **松手那一帧之后要留一次评估**：补发的那一次 click 是在松手**那一帧
+	// 的同一遍 build 里**被问的（`trackLike` 排在 `Clicked()` 之前），所以
+	// `trackLike` 把 `held` 清掉的时候不能顺手清它。寿命的终点是 `released`
+	// 那一段说的「第二次评估」：`swallowClick` 消费掉，或者没人来问的话就自然
+	// 到期。
+	engaged bool
+	// released 是「这一按已经不再按着了，但 `swallow` / `engaged` 还没过期」。
+	//
+	// 🔴 **这是 `engaged`（以及同一类漏问的 `swallow`）的另一个清零点**（票 #681
+	// 审查）。原来它只在 `swallowClick` 消费、或**下一次指针按下**时被清；而
+	// 「按住 700ms，指针移出封面再松手」这一路里，补发的 click 不落在长按目标
+	// 上，没人来问 `swallowClick`；键盘激活（Tab 之后回车、读屏软件的 press）
+	// 又**没有指针按下那一帧**——于是标记一直悬着，把用户第一次键盘激活吞掉
+	// （封面不开全屏、赞键不点赞），第二次才生效。三连触发之后移出封面再松手是
+	// 同一个病（`swallow` 留在那里，回车照样被吞）。
+	//
+	// 所以寿命钉在一次评估上：
+	//
+	//	松手/指针移出的那一帧    `held` 清掉，`released` 置上（两个标记还留着
+	//	                        ——同一遍 build 后面的 `Clicked()` 要用它）
+	//	紧接着的下一次评估      `pressed` 仍是 false 而 `held` 已经 false ⇒ 那一遍
+	//	                        要么已经问过 `Clicked()`（吞掉了），要么松手落在
+	//	                        目标外面（没人问）——两种情况下这一按都到此为止
+	//
+	// 这比「等下一次指针按下」准：用户的下一次输入可能是键盘，而键盘不经过
+	// 指针按下。指针那一路没有任何变化——`trackLike` 开头「下一次按下就清」
+	// 仍先于 `Clicked()` 跑（同一遍 build 里的顺序见 `viewCover`）。
+	released bool
 	// progress 是环走到哪（0~1），0 = 不画。每一帧重算（不用动画），
 	// 所以它只是这一帧的答案，**不是**跨帧记着的进度。
 	progress float32
@@ -240,14 +286,28 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 	//
 	// 所以每个长按目标**都要**在松手那一帧消费它自己那一次（见 `viewFullCover`），
 	// 而这里再兜一层：漏掉一个消费者的后果最多是「标记到下一次按下就被清掉」，
-	// 而不是用户看到的多点一下。
+	// 而不是用户看到的多点一下。松手落在目标外面那种更早——`released` 那一段
+	// 在松手之后的下一帧就把它清掉，不用等到下一次按下。
+	//
+	// ⚠️ **`engaged` / `released` 也在这里清**：它们是「这一按算长按了」的判据，
+	// 属于**这一次按下**——下一次按下是一条新的手势，从零开始。松手那一帧不清
+	// 它们（同一遍 build 后面的 `Clicked()` 要问它），见字段那一段与下面
+	// 「松手之后的那一次评估」。
 	if pressed && !g.held {
-		g.held, g.start, g.fired, g.swallow = true, now, false, false
+		g.held, g.start, g.fired, g.swallow, g.engaged, g.released =
+			true, now, false, false, false, false
 	}
 
 	g.progress = 0
 	if g.held && armed {
 		held := now.Sub(g.start)
+		// 环（赞键是抖）出来的那一刻，这一按就已经是长按了——见 `engaged` 那一段。
+		//
+		// ⚠️ **它不看 pressed**：松手那一帧 pressed 已经是 false，而 `held` 还留着
+		// （要到下面那一句才清）——补发的那一次 click 正是在这一帧之后被问的。
+		if held > likeRingDelay {
+			g.engaged = true
+		}
 		if !g.fired && held >= likeLongPress {
 			// 到点了。Biu 那边这一帧把进度环收掉（`setIsProgressing(false)`）
 			// 并把补发的那一次 click 标成要吞的（`ignoreNextPressRef = true`）。
@@ -264,6 +324,34 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 	}
 
 	if !pressed {
+		// 🔴 **`engaged` 的寿命到此为止**（票 #681 审查）：松手落在长按目标
+		// **外面**时，补发的那一次 click 不落在它上面，没人来问 `swallowClick`；
+		// 而键盘激活（回车 / 读屏的 press）没有指针按下那一帧，`trackLike` 开头
+		// 那个清零点进不去。留着的话，用户第一次回车被吞（封面不开全屏、赞键不
+		// 点赞），第二次才生效。
+		//
+		// 所以钉在**一次评估**上：
+		//
+		//	松手那一帧       `held` 清掉、`released` 置上——`engaged` 还留着，
+		//	                 因为同一遍 build 后面的 `Clicked()` 正要问它；
+		//	之后的第一次评估  `pressed` 仍是 false 而 `held` 已经 false ⇒ 上一遍
+		//	                 要么已经问过 `Clicked()`（吞掉了），要么松手落在目标
+		//	                 外面（没人问）。两种情况下这一按都到此为止。
+		//
+		// ⚠️ **不能在这个分支里顺手清 `engaged`**：松手那一帧也会走到这里，
+		// 而那一帧的 `Clicked()` 就在下面几行等着问它。
+		if g.held {
+			g.released = true
+		} else if g.released {
+			// 这一按到此为止：两个标记都过期。`swallow` 也在这里清——三连
+			// 触发之后移出封面再松手是同一个病（补发的 click 不落在目标上，
+			// 没人问 `swallowClick`），留着的标记会把用户下一次键盘激活吃掉。
+			//
+			// ⚠️ **不会误伤「松手那一帧的 click」**：那一次问发生在置上
+			// `released` 的**同一遍 build** 里（`trackLike` 在 `Clicked()`
+			// 之前），而这里要等到下一次评估（下一帧）才走到。
+			g.swallow, g.engaged, g.released = false, false, false
+		}
 		g.held = false
 	}
 
@@ -299,19 +387,30 @@ func (s *Shell) trackLike(g *likeGesture, c *ui.Context, pressed, armed, ringed 
 
 // swallowClick 消费掉长按之后补发的那一次 click。返回 true = 这一次要吞掉。
 //
+// 🔴 **两个判据都要看**（票 #681）：
+//
+//	swallow  三连发出去了，这一松是它的尾巴
+//	engaged  环/抖已经出来过，这一按**本来就**是长按——用户按了一半又松开
+//	         是在取消，不是在点
+//
+// 只认 `swallow` 的话，按住 600ms 松手会被当成普通点击：封面开全屏、赞键
+// 多赞一次（真的写到 B 站账号上）。见文件头。
+//
 // ⚠️ **谁来问**：长按目标自己在处理 `Clicked()` 的那一帧问。问的人只能是那个
 // 元素——补发的那一次 click 落在长按目标上，别人问了也问不到（而别人问了就
 // 会把标记吃掉，然后真正要吞的那一次没吞）。
 //
-// 它是**一次性的**：消费掉就清掉（和 Biu 的 `ignoreNextPressRef` 一样）。漏了
-// 消费也不要紧——下一次按下会把标记清掉（见 `trackLike`），所以一个漏掉的标记
-// 最多吃掉一次正常点击的资格，而不会一直卡着。
+// ⚠️ **两个标记都要在这里清掉**：它们属于**这一次按下**，一次松手只该吞一次
+// click——不清的话用户接下来那一帧的普通点击也会被吞。
+//
+// ⚠️ **没人来问也不会一直卡着**（票 #681 审查）：`trackLike` 的 `released`
+// 那一段把寿命钉在松手之后的**一次评估**上——松手落在目标外面（补发的 click
+// 不落在它上面）时，下一帧就把两个标记都清掉。在此之前「漏了消费」要等下一次
+// **指针按下**才恢复，而键盘激活没有那一帧，于是第一次回车被吞。
 func (g *likeGesture) swallowClick() bool {
-	if !g.swallow {
-		return false
-	}
-	g.swallow = false
-	return true
+	eat := g.swallow || g.engaged
+	g.swallow, g.engaged = false, false
+	return eat
 }
 
 // tripleNow 发那一次一键三连。**立刻返回**，结果在后台那一趟。

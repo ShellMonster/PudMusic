@@ -117,6 +117,70 @@ func TestALongPressOnTheLikeButtonNeverTogglesTheLike(t *testing.T) {
 	}
 }
 
+// TestALikeButtonHoldPastTheShakeSwallowsItsClick 钉住「抖一开始，松手就不再是点击」。
+//
+// 🔴 用户报的同类问题（封面那边是开全屏，这边是**多赞一次**）：按住赞键 600 毫秒
+// （抖已经开始了，但还没到 2.5 秒的三连）再松手，框架会补发一次 click——漏吞就是
+// 用户在「取消」的时候被记了一赞。那一赞是**真的发到 B 站账号上的**。
+//
+// ⚠️ **门槛是 500ms 那一档（`likeRingDelay`），不是三连那一个**：抖/环一出来就
+// 说明这一按已经算长按了（见 like.go 的 `likeGesture.engaged`）。
+//
+// ⚠️ **两样都要断**：画面上立刻变「已赞」（`SetLike` 是乐观的，同一帧就改）是
+// 用户看得见的那一半；`likePostsCount` 是发出去的那一半。只看前者的话，把
+// `SetLike` 挪到别处就能让这一条假绿。
+func TestALikeButtonHoldPastTheShakeSwallowsItsClick(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	btn, _ := holdStar(t, e, "赞")
+
+	advanceLike(e, time.Duration(biuLikeRingDelayMS+100)*time.Millisecond)
+	e.tt.Release(btn.X+btn.W/2, btn.Y+btn.H/2)
+	e.tt.Frame()
+	e.tt.Frame()
+
+	if e.tt.HasText("已赞") {
+		t.Error("赞键按住 600 毫秒松手，星标亮了 —— 松手补发的 click 没吞掉")
+	}
+	if got := e.f.likePostsCount(); got != 0 {
+		t.Errorf("赞键按住 600 毫秒松手，发出去了 %d 次赞 —— 用户在取消，却被记了一赞", got)
+	}
+	if got := e.f.triplePostCount(); got != 0 {
+		t.Errorf("按住 600 毫秒就三连了（%d 次），Biu 是 %d 毫秒", got, biuLikeLongPressMS)
+	}
+	if e.s.likeBtn.engaged {
+		t.Error("松手之后「这一按算长按」还留着 —— 它会把用户下一次正常点击也吞掉")
+	}
+
+	// ⚠️ **吞的是一次**：用户接下来那一次普通点击必须照旧点赞。`engaged` 不清的话
+	// 赞键就再也点不动了（而画面上看不出任何异样）。
+	e.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
+	waitFrames(t, e.tt, "下一次点击赞出去了", func() bool { return e.f.likePostsCount() > 0 })
+	if got := e.f.lastLikeValue(); got != "1" {
+		t.Errorf("中途松手之后第一次点击发出去的 like 是 %q，want 1（1 是赞）", got)
+	}
+}
+
+// TestAQuickReleaseOnTheLikeButtonStillLikes 是上一条的反面：**短按没被误伤**。
+//
+// 400 毫秒还没到抖/环那一档，按 Biu 的语义就是一次普通点击——赞照旧发出去。
+// 没有这一条的话，「松手一律吞掉」也能让上一条全绿，而赞键就再也点不动了。
+func TestAQuickReleaseOnTheLikeButtonStillLikes(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+	btn, _ := holdStar(t, e, "赞")
+
+	advanceLike(e, time.Duration(biuLikeRingDelayMS-100)*time.Millisecond)
+	e.tt.Release(btn.X+btn.W/2, btn.Y+btn.H/2)
+
+	waitFrames(t, e.tt, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
+	// ⚠️ **正好一次**：0 是「短按被吞了」，2 是「补发的那一次也没吞」——两头都不对。
+	if got := e.f.likePostsCount(); got != 1 {
+		t.Errorf("短按发出去 %d 次赞，want 1", got)
+	}
+	if got := e.f.lastLikeValue(); got != "1" {
+		t.Errorf("发出去的 like 是 %q，want 1（1 是赞）", got)
+	}
+}
+
 // TestTheButtonLongPressIsOffOnceTheSongIsLiked 钉住「已点赞时赞键的长按整个禁用」。
 //
 // 和封面那一条（TestTheLongPressIsOffOnceTheSongIsLiked）同一口径：不进状态机、
