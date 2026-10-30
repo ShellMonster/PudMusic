@@ -377,8 +377,8 @@ func TestAFailedLocalFileDoesNotPointAtAnotherSong(t *testing.T) {
 		t.Fatalf("放不进去：%v", err)
 	}
 	waitForErr(t, a)
-	if got := a.Snapshot().BiliURL; got == "" {
-		t.Fatal("取流失败的那一首连 B 站地址都没有——「在 B 站里听它」正是用户能做的事")
+	if got := a.Snapshot().BiliURL; got != "https://www.bilibili.com/video/BV1Stale" {
+		t.Errorf("取流失败的那一首 B 站地址 = %q，want 失败条目自己的地址", got)
 	}
 
 	// 再打开一个打不开的本地文件。

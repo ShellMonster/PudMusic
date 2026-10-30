@@ -825,7 +825,10 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	if a.online != nil {
 		a.online.gen = a.onlineGen
 	}
+	timeoutGen := a.onlineGen
+	failedItem := a.pending
 	stage = a.loadingStage
+
 	// ⚠️ **失败那一刻已经下到多少字节**：判据是「这一段没有进展」，而
 	// 「没进展」**不等于**「一个字节都没到」——下到一半卡住时字节明明已经
 	// 到了，而那句话里写「一个字节都没到」是**错的**（票 #220 的评审）。
@@ -853,12 +856,17 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	// 播放条上冒一句「取流超时了」，用户会以为是自己点的歌放不出来——他这一
 	// 次连歌都还没点。
 	if restore {
-		a.restoreGen = 0
+		a.mu.Lock()
+		if a.onlineGen == timeoutGen && a.restoreGen == gen {
+			a.restoreGen = 0
+		}
+		a.mu.Unlock()
 		if wake != nil {
 			wake()
 		}
 		return
 	}
+
 	// 🔴 **上屏的那一句必须短**（票 #282 的评审）：播放条上那一行只有 140 像素宽
 	// （1200 宽的窗口，实测），12 号字放得下十来个字，而前面还顶着「打不开：」
 	// 四个字。一句 50 个字的话在屏幕上只剩「打不开：取流…」这样的碎片——
@@ -894,7 +902,8 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 			}
 		}
 	}
-	a.setErrTextDetail(short, detail, true)
+	a.setErrTextDetailFor(timeoutGen, failedItem, short, detail, true)
+
 	if wake != nil {
 		wake()
 	}
@@ -1779,6 +1788,7 @@ func (a *App) checkPlayback() {
 	a.mu.Lock()
 	p := a.player
 	tr := a.online
+	gen := a.onlineGen
 	a.mu.Unlock()
 	if p == nil {
 		return
@@ -1801,15 +1811,25 @@ func (a *App) checkPlayback() {
 	// 同一条错误只报一次。解码器的 Err 记的是**第一条**错误、不自己清零，
 	// 不比对的话每 50 ms 都会重新冒一次。
 	a.mu.Lock()
+	if a.player != p || a.online != tr || a.onlineGen != gen {
+		a.mu.Unlock()
+		return
+	}
 	if a.reportedErr == err {
 		a.mu.Unlock()
 		return
 	}
 	a.reportedErr = err
 	a.playing = false
-	gen := a.onlineGen
+	gen = a.onlineGen
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 播放器错误的后续处理在锁外进行；用户可能在这段时间切歌。
+	// 旧播放器的错误不能再污染新一代的播放状态。
+	if !a.playbackStillCurrent(p, tr, gen) {
+		return
+	}
 
 	// 歌停了（解码失败、网络断、换流换不动）。系统那边的播放状态也得跟着
 	// 变成「不在放」，否则控制中心上还是「播放中」——用户按暂停，
@@ -1824,10 +1844,13 @@ func (a *App) checkPlayback() {
 		// 切歌/退出带出来的，不是错。状态已经被 publishMedia 报成「不在放」了。
 		a.logf("biu: 播放停了（切歌/退出带出来的，不算错）：%v", err)
 	case onlineErrReopen:
-		// 换到了另一条流：字节偏移接不上，但**播放位置**还在原处。
+		// 换到了另一条流：字节偏移接不上，但**播放位置**还在。
 		// 从那儿重开就是「换流后从原来的位置继续」。
+		if !a.playbackStillCurrent(p, tr, gen) {
+			return
+		}
 		a.logf("biu: 播放中途换了流，准备从原位置重开：%v", err)
-		a.refreshOnlineNow(err)
+		a.refreshOnlineNowFor(err, p, tr, gen)
 	default:
 		// 🔴 **「能不能重试」跟着这句话一起落**：字节源拉不动多半是网络或
 		// 地址的问题（可重试），而「这一条压根没有音频流」重试也没用。
@@ -1836,12 +1859,46 @@ func (a *App) checkPlayback() {
 		// 以前一个字都不写，于是「点了不播」「播到一半停了」这两类事后完全
 		// 查不了——用户能描述的只有「它不响」。
 		var title string
+		var item Item
 		if tr != nil {
 			title = tr.item.Title
+			item = tr.item
 		}
 		a.logf("biu: 播放失败：%q（代次 %d）：%v", title, gen, err)
-		a.setErrText(bili.Friendly(err), bili.Recoverable(err))
+		a.setPlaybackErrFor(p, tr, gen, item, bili.Friendly(err), bili.Recoverable(err))
 	}
+}
+
+func (a *App) playbackStillCurrent(p *audio.Player, tr *onlineTrack, gen int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.closed && a.player == p && a.online == tr && a.onlineGen == gen
+}
+
+func (a *App) setPlaybackErrFor(p *audio.Player, tr *onlineTrack, gen int, it Item, msg string, retryable bool) bool {
+	a.mu.Lock()
+	if a.closed || a.player != p || a.online != tr || a.onlineGen != gen {
+		a.mu.Unlock()
+		return false
+	}
+	a.errText = msg
+	a.errDetail = msg
+	a.errRetryable = retryable
+	if tr != nil {
+		a.failedTitle = it.Title
+		a.failedArtist = it.Artist
+		a.failedBiliURL = BiliLink(it)
+	}
+	a.clearReconnectLocked()
+	wake := a.wake
+	a.mu.Unlock()
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
+	if wake != nil {
+		wake()
+	}
+	return true
 }
 
 // failOnline 报一次在线播放的失败。
@@ -1917,16 +1974,28 @@ func (a *App) failOnline(gen int, it Item, branch string, err error, stage strin
 	// 装上之后**才写的——所以不记这一份，界面上那一列显示的会是**上一首**，
 	// 用户读到的是「这一首正在放，但它打不开」。
 	//
-	// ⚠️ **它和 `setErrTextDetail` 落在同一次锁里**（`setErr` 那一族要持锁，
-	// 见 `queue.go`）：分两次锁的话，中间那道缝里别人清一次错，
-	// `Err` 和 `FailedTitle` 就对不上了。
-	//
-	// ⚠️ **作者名是队列项里就有的**（`Item.Artist`）——不用再问一次接口。
+	// ⚠️ **错误和失败条目的身份必须在同一个代次临界区提交**：否则用户在
+	// 这里切到下一首时，迟到的失败回调会把旧标题或旧链接挂到新状态上。
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return
+	}
 	a.failedTitle = it.Title
 	a.failedArtist = it.Artist
+	a.failedBiliURL = BiliLink(it)
+	a.errText = msg
+	a.errDetail = detail
+	a.errRetryable = bili.Recoverable(err)
+	a.clearReconnectLocked()
+	wake := a.wake
 	a.mu.Unlock()
-	a.setErrTextDetail(msg, detail, bili.Recoverable(err))
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
+	if wake != nil {
+		wake()
+	}
 }
 
 // failPlay 报一次「**这一趟播放**」的失败，并把「正在取流」那一档收掉。
@@ -2084,23 +2153,30 @@ func (a *App) giveUpSkipping(streak int, last Item, cause error) {
 // 在重连，它是放弃了。
 func (a *App) refreshOnlineNow(cause error) {
 	a.mu.Lock()
-	tr := a.online
-	if tr == nil {
+	p, tr, gen := a.player, a.online, a.onlineGen
+	a.mu.Unlock()
+	a.refreshOnlineNowFor(cause, p, tr, gen)
+}
+
+func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack, gen int) {
+	a.mu.Lock()
+	if tr == nil || a.online != tr || a.onlineGen != gen || a.closed {
 		a.mu.Unlock()
 		return
 	}
 	if tr.reopening {
-		// 已经重开过一次了：这一首救不回来了。老实报错。
 		it := tr.item
 		a.mu.Unlock()
 		a.logf("biu: 换流重开被作废了（这一首已经重开过一次）：%q：%v", it.Title, cause)
-		a.setErrTextDetail("这条流接不上了",
-			"这条流换了两次，接不上刚才播放的位置了。换一首放，或者点「重试」再取一次流。",
-			true)
+		a.setErrTextDetailFor(gen, it, "这条流接不上了",
+			"这条流换了两次，接不上刚才播放的位置了。换一首放，或者点「重试」再取一次流。", false)
+		return
+	}
+	if p == nil || a.player != p {
+		a.mu.Unlock()
 		return
 	}
 	tr.reopening = true
-	gen := a.onlineGen
 	pos, want := a.position, a.wantPlay
 	a.mu.Unlock()
 
@@ -2111,31 +2187,28 @@ func (a *App) refreshOnlineNow(cause error) {
 
 	s := a.streamingSnapshot()
 	if s == nil {
-		a.setErr(bili.Friendly(errStreamingMissing))
+		a.setPlaybackErrFor(p, tr, gen, tr.item, bili.Friendly(errStreamingMissing), false)
 		return
 	}
 
 	go func() {
-		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
+		src, nextPlayer, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
 		if err != nil {
 			a.failOnline(gen, tr.item, "换流重开", err, "")
 			return
 		}
 
 		a.mu.Lock()
-		if a.onlineGen != gen || a.closed || a.online == nil {
-			cur := a.onlineGen
+		if a.player != p || a.online != tr || a.onlineGen != gen || a.closed {
 			a.mu.Unlock()
-			p.Close()
-			a.logf("biu: 换流重开被作废了（代次变了）：%q（来的代次 %d，现在的代次 %d）",
-				tr.item.Title, gen, cur)
+			nextPlayer.Close()
 			a.endReconnect(gen)
 			return
 		}
 		old := a.player
-		p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
-		a.player = p
-		a.duration = p.Duration()
+		nextPlayer.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+		a.player = nextPlayer
+		a.duration = nextPlayer.Duration()
 		a.setPositionLocked(pos)
 		a.quality = ref.Label
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
@@ -2159,11 +2232,11 @@ func (a *App) refreshOnlineNow(cause error) {
 		}
 		// 跳回原来的位置。这一步是这一整条路径的全部意义：
 		// 没有它，用户会在歌播到一半的时候突然从头听到。
-		if pos > 0 && pos < p.Duration() {
-			p.Seek(pos)
+		if pos > 0 && pos < nextPlayer.Duration() {
+			nextPlayer.Seek(pos)
 		}
 		if want {
-			p.Play()
+			nextPlayer.Play()
 		}
 		a.publishMedia()
 		if wake != nil {
