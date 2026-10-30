@@ -43,6 +43,21 @@ func (a *App) FolderFallbackCover(ref CollectionRef) string {
 	if ref.ID <= 0 {
 		return ""
 	}
+	// 🔴 **只有收藏夹有这一档兜底**：它的「接口封面」是**容器第一首**的封面
+	// （B 站那边就是这么算的），第一首失效之后那个地址还在、图已经 404 了。
+	//
+	// 合集 / 系列不是这么算的：它们的封面在容器自己的 `meta.cover` 里
+	// （`LoadCollectionPage` 那一趟顺手记进 `CollectionInfo`），**不由第一首
+	// 决定**——所以它们既不需要这一档，也走不通：那两类的第一页要 `mid`，
+	// 而兜底这条路只有 `CollectionRef`（没有 mid），发出去必然 404。
+	//
+	// ⚠️ **这一条是 #696 合进来之后才成立的**：在那之前 `LoadCollectionPage`
+	// 对所有类型都打收藏夹那个接口，合集碰巧也能「拉到点什么」。现在它按类型
+	// 分派了，这条兜底就必须跟着收窄——不收窄的话，合集页的头图区每隔一帧
+	// 发一次注定 404 的请求，而那个封面永远出不来。
+	if ref.Type != bili.CollectionFavorite {
+		return ""
+	}
 	fc := &a.folderCovers
 	key := ref.Key()
 	fc.mu.Lock()

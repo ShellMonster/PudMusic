@@ -105,11 +105,16 @@ func TestFolderFallbackCoverStaysEmptyWhenNothingIsPlayable(t *testing.T) {
 	}
 }
 
-// TestFolderFallbackCoverKeepsEachContainerApart 同一个 id 的两个容器
-// **各拉各的**——缓存键是 `"<id>:<type>"`，不是 id。
+// TestFolderFallbackCoverKeepsEachContainerApart 不同容器**各拉各的**——
+// 缓存键是 `"<id>:<type>"`，不是 id。
 //
 // 🔴 **这一条钉的就是那个串档**：只按 id 记的话，第二个容器会被第一个容器的
 // `busy` / `done` 挡住，一次请求都不发（而它拿到的还是第一个容器的封面）。
+//
+// ⚠️ **用两个不同 id 来钉**（不是同 id 的收藏夹 + 合集）：这一档兜底只对
+// **收藏夹**成立（见 `FolderFallbackCover` 里那一段——合集/系列的封面来自
+// 容器自己的 `meta.cover`，走不了这条路）。同 id 那一档由下面那条
+// `TestFolderFallbackCoverLeavesAlbumsAndSeriesAlone` 单独钉住。
 func TestFolderFallbackCoverKeepsEachContainerApart(t *testing.T) {
 	f := newCollectionFixture(t)
 	f.medias = fallbackMedias()
@@ -117,30 +122,59 @@ func TestFolderFallbackCoverKeepsEachContainerApart(t *testing.T) {
 	t.Cleanup(a.Close)
 	withFixture(t, a, f, 0)
 
-	favorite := CollectionRef{ID: 42, Type: bili.CollectionFavorite}
-	album := CollectionRef{ID: 42, Type: bili.CollectionAlbum}
+	first := CollectionRef{ID: 42, Type: bili.CollectionFavorite}
+	second := CollectionRef{ID: 77, Type: bili.CollectionFavorite}
 
 	// 两个容器各问一次（都在后台拉）。
-	a.FolderFallbackCover(favorite)
-	a.FolderFallbackCover(album)
+	a.FolderFallbackCover(first)
+	a.FolderFallbackCover(second)
 
 	waitUntil(t, "两个容器都拉完", 2*time.Second, func() bool {
 		a.folderCovers.mu.Lock()
 		defer a.folderCovers.mu.Unlock()
-		_, favDone := a.folderCovers.done[favorite.Key()]
-		_, albumDone := a.folderCovers.done[album.Key()]
-		return favDone && albumDone &&
-			!a.folderCovers.busy[favorite.Key()] && !a.folderCovers.busy[album.Key()]
+		_, firstDone := a.folderCovers.done[first.Key()]
+		_, secondDone := a.folderCovers.done[second.Key()]
+		return firstDone && secondDone &&
+			!a.folderCovers.busy[first.Key()] && !a.folderCovers.busy[second.Key()]
 	})
 
 	if n := f.listHits(); n != 2 {
-		t.Fatalf("同一个 id 的两个容器一共拉了 %d 次第一页，want 2——"+
+		t.Fatalf("两个容器一共拉了 %d 次第一页，want 2——"+
 			"缓存键只按 id 记会让两个容器串成一份", n)
 	}
-	for _, ref := range []CollectionRef{favorite, album} {
+	for _, ref := range []CollectionRef{first, second} {
 		if got := a.FolderFallbackCover(ref); got == "" {
 			t.Errorf("%v 那一份兜底是空的——它的第一页里有可用的封面", ref)
 		}
+	}
+}
+
+// TestFolderFallbackCoverLeavesAlbumsAndSeriesAlone 合集 / 系列**不走这一档
+// 兜底，也不发任何请求**。
+//
+// 🔴 **这一条是 #699 与 #696 合到一起之后的回归钉子**：合集那一类的第一页要
+// `mid`，而兜底这条路只有 `CollectionRef`（没有 mid）；分派之后它必然 404，
+// 而 404 不写 `done` ⇒ 每一帧重发一次、封面永远出不来。
+//
+// 它们的封面本来就在容器自己的 `meta.cover` 里（`LoadCollectionPage` 那一趟
+// 顺手记进 `CollectionInfo`），**不由第一首决定**，所以这一档对它们是多余的。
+func TestFolderFallbackCoverLeavesAlbumsAndSeriesAlone(t *testing.T) {
+	f := newCollectionFixture(t)
+	f.medias = fallbackMedias()
+	a := New()
+	t.Cleanup(a.Close)
+	withFixture(t, a, f, 0)
+
+	for _, ref := range []CollectionRef{
+		{ID: 42, Type: bili.CollectionAlbum},
+		{ID: 42, Type: bili.CollectionSeries},
+	} {
+		if got := a.FolderFallbackCover(ref); got != "" {
+			t.Errorf("%v 回了 %q，want 空串（那一类不走第一首兜底）", ref, got)
+		}
+	}
+	if n := f.listHits(); n != 0 {
+		t.Fatalf("合集/系列发了 %d 次请求，want 0", n)
 	}
 }
 
