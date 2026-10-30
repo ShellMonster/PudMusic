@@ -6,11 +6,11 @@
 // 列表 / 网格上有），而抽屉里用户同样会想把歌名复制出去（发给别人、去搜这一首）。
 // 抽屉今天是唯一能看「这一串还要放什么」的地方，那里一个字都复制不出来。
 //
-// # 做法：菜单第一项
+// # 做法：末尾另起一段
 //
 // 抽屉的菜单五项是照 Biu `music-playlist-drawer/menu.tsx` 的 `getMenus` 抄的，
-// 而 Biu 没有「复制」那一项。这一项摆在末尾（「从列表删除」之后另起一段），
-// 三项破坏性 / 外部动作之后紧跟一个只读动作——它不打断前面那五项的顺序
+// 而 Biu 没有「复制」那一项。这一项摆在**最后**（「从列表删除」之后隔一道
+// 分隔线），破坏性动作之后紧跟一个只读动作——它不打断前面那五项的顺序
 // （那五项有现成的断言盯着，见 `queue_drawer_test.go`）。
 package ui
 
@@ -105,12 +105,16 @@ func TestQueueCmdCDoesNotStealTheClipboard(t *testing.T) {
 	}
 }
 
-// 抽屉的菜单项数：原来是 5 项，这一票加了「复制歌名」——所以是 6 项。
+// 抽屉的菜单项数：原来是 5 项，这一票另起一段加了「复制歌名」——所以是 7 项
+// （五项 + 一条分隔线 + 复制歌名）。
 //
-// ⚠️ **单独一条**：`queue_drawer_test.go` 里那两条照 Biu 抄的项序断言
-// （`TestQueueRowMenuOffersFiveItemsForAnOnlineSong` 等）**不该**被这一票改动
-// 语义——它们盯的是「上游那五项一项不多一项不少」，而新加的第六项在它们
-// 的期望之外。所以那两条改成「前五项照旧」+ 这一条钉第六项。
+// 🔴 **这一条钉的是「没有多出别的东西」**（对抗性审查的第 3 条）：原来它只断
+// 「7 项 + 最后一项是复制歌名」，于是**把分隔线换成一条重复的真项，四条测试
+// 全绿**。现在逐位钉住第 6 项是分隔线（`"-"`，`Tester.Menu` 对
+// `MenuItemSeparator` 报的就是这个字）——那一段「另起一段」才真的是另一段。
+//
+// ⚠️ **前五项由 `queue_drawer_test.go` 那两条逐项比**（它们现在比的也是精确
+// 的 7 项整张表）。
 func TestQueueRowMenuHasTheCopyTitleAfterTheUpstreamFive(t *testing.T) {
 	h := newHarness(t)
 	h.app.Queue().Append(app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "第一首"})
@@ -123,6 +127,11 @@ func TestQueueRowMenuHasTheCopyTitleAfterTheUpstreamFive(t *testing.T) {
 	got := h.tt.Menu()
 	if len(got) != 7 {
 		t.Fatalf("菜单有 %d 项 %q，want 7 项（上游五项 + 分隔线 + 「复制歌名」）", len(got), got)
+	}
+	// 🔴 **第 6 项必须是分隔线**：换成任何一条真项（哪怕是把「从列表删除」再
+	// 写一遍）都是「菜单里多出一样东西」，而用户会看到两段之间没有分界。
+	if got[5] != "-" {
+		t.Errorf("菜单第 6 项是 %q，want 分隔线 \"-\"（全部：%q）", got[5], got)
 	}
 	if got[len(got)-1] != queueCopyLabel {
 		t.Errorf("菜单最后一项是 %q，want %q（全部：%q）", got[len(got)-1], queueCopyLabel, got)

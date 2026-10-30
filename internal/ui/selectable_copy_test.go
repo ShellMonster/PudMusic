@@ -231,16 +231,21 @@ func TestCmdCCopiesTheSelectedRowTitleInTheCollectionPage(t *testing.T) {
 	}
 }
 
-// TestCopyingASelectionStillBeatsTheSelectedRow 是「别抢」那一条：
-// **拖选了头图区的字之后，⌘C 复制的是那段字**，不是列表里选中的那一行。
+// TestCopyingASelectionStillBeatsTheSelectedRow 钉住「拖选之后 ⌘C 复制的是那段
+// 字，不是列表里选中的那一行」。
 //
-// 🔴 **这条是方案的关键判据**：列表行的 ⌘C 挂在列表的 `HandleInput` 上
-// （`widgets/list/copy_title.go`），而框架只在**焦点那个元素**上派发按键 /
-// 编辑命令。拖选文字之后焦点落在那一段字上（`pressTextSelection` 做的），
-// 所以列表那一条**根本收不到**——这一条钉住的就是这个顺序。
+// ⚠️ **这条测的不是「优先级」，而是「框架只把按键派给焦点元素」**：
+// `keyDownPhysical` 和 `editEvent` 都走 `focusHandler()`——拖选之后焦点落在
+// 那一段字上（`pressTextSelection` 干的），列表那一层的 `HandleInput` 根本
+// 收不到这条命令。实现里**没有**任何「谁优先」的判断；页面级 `OnShortcut` 抢、
+// 列表自己挂 `OnShortcut` 直接写，这条测试**都照样绿**（对抗性审查实测过）。
+//
+// 🔴 **真正守住「列表那一行还能被 ⌘C 复制」的是
+// `TestCmdCCopiesTheSelectedRowTitleInTheCollectionPage`**：它点一行、按 ⌘C，
+// 断剪贴板里是那一行的歌名。少了那一半，「列表的 ⌘C 从未接上」也会让这一条绿。
 //
 // ⚠️ **先选中一行**（让「列表有一条可复制的行」这个前提成立）：不选的话
-// 这条测试会因为「列表本来就没东西可复制」而绿，验不到抢不抢。
+// 这条测试会因为「列表本来就没东西可复制」而绿，验不到那一半。
 func TestCopyingASelectionStillBeatsTheSelectedRow(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
 	waitSongs(t, tt, s, 2)
@@ -266,20 +271,18 @@ func TestCopyingASelectionStillBeatsTheSelectedRow(t *testing.T) {
 	}
 }
 
-// TestClickingTheHeaderAroundItsTextStillChoosesTheFirstSong 钉住「文字可选中
-// 之后，头图区**其余那一片**还是列表的第 0 行」。
+// TestDoubleClickingInsideTheHeaderColumnStillPlaysTheFirstSong 钉住「文字可选中
+// 之后，页头那一列里**双击仍然播第一首**」。
 //
-// 🔴 **这条解决的是一个真实副作用**：头图区那几行字变成可选之后，**点在字上**
-// 的那一下被文本选择接走了（框架的 `pressTextSelection` 先于行的 `clickAt`），
-// 于是 `List.Selected` 不再被推到第一首歌。而头图区**其余的地方**（封面旁边、
-// 字与字之间的留白、左右内边距）该照旧——那里的点击仍然落到第 0 行上，而
-// `List.View` 会把第 0 行修正成第一首歌（见 `list.go` 的 `l.sel = leadRows`）。
+// 🔴 **这是对抗性审查抓到的真实回归**：文字那一列加了 `Selectable` 之后，框架的
+// `pressTextSelection` 把这**整列**上的按下先接走（`mygo/ui/input.go` 的
+// `pointerDown` 先问它，而 `textSelectionAt` 对列内的空白会**就近吸到最近那一段
+// 字**上）——于是行的 `OnSubmit` 永远不触发，双击播放**整列都死了**（1200 宽的
+// 窗口下实测死区是 x≈472..1180、y≈66..245 的矩形，含标题右侧空白、行距、简介
+// 下方、类型行）。基线那一整片是「双击播第一首」。
 //
-// ⚠️ **为什么「点在字上不选第一首」是可接受的**：头图区是**布局**，不是一条
-// 歌——用户点在标题上想的是「看看这个页头」或者「复制这个名字」，不是「我要
-// 选中这一页的第一首」。而选中在票 #197 之后**画面上什么都没有**（不刷底色），
-// 所以用户也看不到这一下丢了。
-func TestClickingTheHeaderAroundItsTextStillChoosesTheFirstSong(t *testing.T) {
+// ⚠️ **判据是队列真的长了一首、而且那一首是第一首**（不是「某个回调被调了」）。
+func TestDoubleClickingInsideTheHeaderColumnStillPlaysTheFirstSong(t *testing.T) {
 	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
 	waitSongs(t, tt, s, 2)
 	waitFrames(t, tt, "头图区画出来", func() bool {
@@ -287,16 +290,92 @@ func TestClickingTheHeaderAroundItsTextStillChoosesTheFirstSong(t *testing.T) {
 		return ok
 	})
 
-	r, ok := tt.Find("通勤路上")
+	title, ok := tt.Find("通勤路上")
 	if !ok {
 		t.Fatalf("画面上找不到标题，文字有 %q", tt.Texts())
 	}
-	// 标题左边那一块留白（内边距里、不在任何字上）。
-	tt.ClickAt(r.X-14, r.Y+r.H/2)
+	// 列内的空白：标题右边 200 像素（同一行上、不在任何字上）。
+	x, y := title.X+title.W+200, title.Y+title.H/2
+
+	before := len(s.app.Queue().Items())
+	tt.ClickAt(x, y)
+	tt.ClickAt(x, y)
+	for range 8 {
+		tt.Frame()
+	}
+	got := s.app.Queue().Items()
+	if len(got) != before+1 {
+		t.Fatalf("页头列内双击之后队列有 %d 首，want %d（双击该播第一首）：%v",
+			len(got), before+1, titlesOf(got))
+	}
+	if got[len(got)-1].Title != "歌 一" {
+		t.Errorf("双击页头列内放的是 %q，want 第一首 %q（全部：%v）",
+			got[len(got)-1].Title, "歌 一", titlesOf(got))
+	}
+}
+
+// TestClickingInsideTheHeaderColumnSelectsTheFirstSong 钉住「列内单击**仍然
+// 选中第 0 行**」。
+//
+// ⚠️ **这条原来是点在标题左边 14 像素**（可选中那一列**外面**），于是去掉
+// `.Selectable()` 它照样绿——恒真。现在点在列内（标题右边 200，同一行上、
+// 不在任何字上），而基线那一整片都是「点一下选中第 0 行」。
+//
+// ⚠️ **判据是 `Selected`**：选中在票 #197 之后画面上什么都没有，但它决定
+// 「⌘C 复制哪一行」（`TestCmdCCopiesTheSelectedRowTitleInTheCollectionPage`），
+// 也决定方向键从哪儿开始走。
+//
+// ⚠️ **先选第二首**：不先弄脏的话，第 0 行本来就可能是选中的（第一帧的默认），
+// 那这一条就验不到「点这一下把它挪回去了」。
+func TestClickingInsideTheHeaderColumnSelectsTheFirstSong(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+	waitFrames(t, tt, "头图区画出来", func() bool {
+		_, ok := tt.Find("通勤路上")
+		return ok
+	})
+
+	second, ok := tt.Find("歌 二")
+	if !ok {
+		t.Fatalf("画面上找不到第二首，文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(second.X+second.W/2, second.Y+second.H/2)
+	tt.Frame()
+	if got, ok := s.collection.list.Selected(); !ok || got.Title != "歌 二" {
+		t.Fatalf("先摆好的前提没成立：选中的是 (%q, %v)", got.Title, ok)
+	}
+
+	title, ok := tt.Find("通勤路上")
+	if !ok {
+		t.Fatalf("画面上找不到标题，文字有 %q", tt.Texts())
+	}
+	// 列内、不在任何字上：标题右边 200 像素。
+	tt.ClickAt(title.X+title.W+200, title.Y+title.H/2)
 	tt.Frame()
 
 	if got, ok := s.collection.list.Selected(); !ok || got.Title != "歌 一" {
-		t.Errorf("点页头文字旁边的留白之后选中的是 (%q, %v)，want 歌 一（列表第 0 行）",
+		t.Errorf("点页头列内之后选中的是 (%q, %v)，want 歌 一（列表第 0 行）",
 			got.Title, ok)
+	}
+}
+
+// TestDraggingInsideTheHeaderColumnStillCopiesIt 钉住「加了双击那一路之后，
+// 列内的拖选复制**没有被弄坏**」。
+//
+// 🔴 **两条手势要同时活着**：只修双击（比如把整列改成不可选）会让拖选复制
+// 回到「一个字都复制不出来」；只留 Selectable 则双击播不了。这一条和上面那条
+// 一起把那一列钉死。
+func TestDraggingInsideTheHeaderColumnStillCopiesIt(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+	waitFrames(t, tt, "头图区画出来", func() bool {
+		_, ok := tt.Find("通勤路上")
+		return ok
+	})
+
+	dragOver(t, tt, "通勤路上", "早上听")
+	want := "通勤路上\n早上听"
+	if got := copySelection(tt); got != want {
+		t.Errorf("列内从标题拖到简介之后剪贴板里是 %q，want %q", got, want)
 	}
 }

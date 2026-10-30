@@ -87,8 +87,12 @@ func TestCmdCCopiesTheCleanedTitle(t *testing.T) {
 		{ID: "a", Title: "【4K修复】晴天", Item: app.Item{Source: "online", Type: "mv", Bvid: "BV1", Title: "【4K修复】晴天"}},
 	})
 	// 画面上显示的是清洗过的那个名字（这一条先把它量出来，不写死清洗规则）。
-	shown, ok := ShowOf(Music{Title: "【4K修复】晴天"}).Title, true
-	if !ok || shown == "" {
+	//
+	// ⚠️ **不要写成 `shown, ok := ..., true`**：那个 `ok` 是常量真，下面的
+	// `!ok ||` 永远只可能因为空串成立——一句话说了两遍，而读的人会以为
+	// `ShowOf` 有一个「拿不到」的分支。
+	shown := ShowOf(Music{Title: "【4K修复】晴天"}).Title
+	if shown == "" {
 		t.Fatalf("清洗之后没有名字")
 	}
 	if _, ok := tt.Find(shown); !ok {

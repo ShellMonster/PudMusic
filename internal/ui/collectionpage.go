@@ -626,6 +626,36 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 		// 所以回顶按钮读的是精确像素、**用不到它**——留着是为了 `Lead` 那
 		// 一份完整（按行换算的那一路会用到它，而那一路是别的页在用）。
 		Height: func() float32 { return collectionLeadHeight },
+		// 🔴 **列内双击 = 播第一首**（票 #685）：文字那一列可选中之后，框架的
+		// `pressTextSelection` 把这一块上的按下先接走（列内空白会被就近吸到最近
+		// 那一段字上），行的 `OnSubmit` 收不到——基线那一整片（标题右侧空白、
+		// 行距、简介下方、类型行）都是「双击播第一首」，这里把它接回来。
+		//
+		// ⚠️ **语义和双击一行完全相同**（`list.rowPlay` → `Actions.PlayNow` →
+		// `App.EnqueueAndPlayNow`，票 #608：**加这一首并播，不换队列**）。走
+		// `EnqueueAndPlayNow` 而不是 `PlayFrom`：换了队列的话，「点页头播第一首」
+		// 会顺手把用户排好的队列扔掉——而双击一行不会。
+		//
+		// ⚠️ **一条歌都没有时什么都不做**：页头画着、歌还没拉回来（或者这一份
+		// 本来就空），「第一首」不存在。
+		OnDoubleClick: func() {
+			first, ok := p.list.First()
+			if !ok {
+				return
+			}
+			if err := s.app.EnqueueAndPlayNow(first.Item); err != nil {
+				s.addToast("放不了这一首："+err.Error(), notice.Danger)
+			}
+		},
+		// 🔴 **列内按下 = 选中第一首**（票 #685）：基线里页内头部**就是列表的
+		// 第 0 行**，点它一下选中的是第一首歌（`List.View` 把「游标停在页内头部」
+		// 修正成第一首，见那里那一支）。文字可选中之后那一下被接走了，`Selected`
+		// 停在**上一次选中的歌**上——用户点一下页头再按 ⌘C，复制的是别的行
+		//（对抗性审查实测）。
+		//
+		// ⚠️ **两档都放**（`PagedList.SelectFirst` → `SwitchView` 两份）：点的是
+		// 哪一档看到的页头，选中的就该是那一档里看得见的第一首。
+		OnClick: func() { p.list.SelectFirst() },
 		Draw: func(c *ui.Context) {
 			ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
 				s.viewCollectionHeader(c, p)

@@ -173,6 +173,16 @@ func (s *SwitchView) TakeFocus() {
 	s.list.TakeFocus()
 }
 
+// SelectFirst 把选中项放到第一首（见 `List.SelectFirst`），**两档都放**。
+//
+// ⚠️ **两份都动**：页内头部在两档里都有（`SetLead` 两份都装），而「点一下页头
+// = 选中第 0 行」在两档里是同一件事——只动正在画的那一份的话，切档之后选中项
+// 会跳回上一档留下的位置。
+func (s *SwitchView) SelectFirst() {
+	s.list.SelectFirst()
+	s.grid.SelectFirst()
+}
+
 // Hot 报指针是不是压在底下这一对控件的滚动条上（见 `List.Hot`）。
 //
 // 两档各有一份滚动容器（同一份歌、两种摆法），所以问的是**这一帧画的那一档**。
@@ -245,4 +255,15 @@ func (s *SwitchView) ScrollOffset() float32 {
 		return s.grid.ScrollOffset()
 	}
 	return s.list.ScrollOffset()
+}
+
+// ScrollToEnd 把这一屏滚到最底下，并让框架按**当前这一帧**量到的行高重新吸附。
+//
+// ⚠️ **它只对列表那一档有实现**：网格那一档的行高是量的、尾格没有「换画法」
+// 这回事（翻页那一层也只往列表这一档装 end/footer 画法，见 `PagedList.syncList`）。
+func (s *SwitchView) ScrollToEnd() {
+	if s.view == ViewCard {
+		return
+	}
+	s.list.ScrollToEnd()
 }

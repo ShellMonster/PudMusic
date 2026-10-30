@@ -838,7 +838,14 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	// 🔴 **把在途的下载掐掉**：光在界面上说「超时」不够——那条字节源还在
 	// 后台下载（而播放器还没建起来，`App.Close` 也管不到它）。不掐掉的话，
 	// 这一次「已经判它失败」的取流会一直下到天亮。
-	a.abortPendingSource()
+	//
+	// ⚠️ **只掐 `gen` 那一趟的**：这个闹钟是**一帧一帧重新挂的**（`rearmLoading`），
+	// 而它挂上之后用户完全可能又点了一首——那时 `pendingSrc` 已经是新歌的了，
+	// 无条件关就会把新歌正在建的源连坐关掉（2026-10-30 从 CI 日志里查出来的
+	// 「字节源已关闭」，见 `abortPendingSourceFor` 的注释）。
+	// 上面那句 `a.onlineGen++` 加的是「活下来的那一首」的代次，和这里要掐的
+	// 那一趟无关，所以传的是**闹钟自己认的那一代**。
+	a.abortPendingSourceFor(gen)
 
 	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回，段=%s）",
 		title, gen, onlinePlayTimeout, stage)
@@ -902,8 +909,12 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 // ⚠️ **同时把进度的基准归零**：这一段从「一个字节都还没到」开始，而「没下到」
 // 和「下到了一点」在 `Filled()` 上分别是 0 和 n——基准必须是 0，不然「一个
 // 字节都不来」会被判成「还在走」。
-func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
+func (a *App) setLoadSource(src *audio.StreamSource, gen int) bool {
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return false
+	}
 	old := a.loadSrc
 	if old != nil && old != src {
 		a.loadSrc = nil
@@ -917,6 +928,7 @@ func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
 	if old != nil {
 		old.Close()
 	}
+	return true
 }
 
 // dropLoadSource 把「这一趟自己的那一条」摘掉（它已经归播放器管了，或者
@@ -1425,9 +1437,13 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	if err != nil {
 		return nil, nil, err
 	}
-	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而播放器还没
-	// 建起来——「超时」和「退出」都要能把它掐掉（见 App.pendingSrc）。
-	a.setPendingSource(src, gen)
+	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而代次可能在
+	// 建源期间变化。发布前先在同一把锁下确认它仍属于当前播放；旧代次不能碰当前
+	// 播放的源（否则会把新歌的源关掉，见 setPendingSource）。
+	if !a.setPendingSource(src, gen) {
+		src.Close()
+		return nil, nil, errStaleGen
+	}
 	// 🔴 **「这一趟自己的那一条」**（票 #220）：看门狗问「这一段还有没有
 	// 进展」时要看的是**它**，不是上面那个共享的 `pendingSrc`——
 	// 换音质 / 换流重开那两条路会把 `pendingSrc` 顶掉（理由见 App 里
@@ -1435,8 +1451,10 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	//
 	// ⚠️ **只有「开新歌」那一趟才记**：那两条路建的源不是用户此刻在等的
 	// 那一条，记上去只会让看门狗盯着别人的流。
-	if run != nil {
-		a.setLoadSource(src, gen)
+	if run != nil && !a.setLoadSource(src, gen) {
+		a.clearPendingSource(src)
+		src.Close()
+		return nil, nil, errStaleGen
 	}
 	// 🔴 **建源的这一小段时间里代次也可能变了**（用户切歌、或者超时闹钟响了）。
 	// 那就没人要这条流了——立刻关掉，别让它下到天亮。
@@ -1505,8 +1523,12 @@ func (a *App) genStale(gen int) bool {
 //
 // 🔴 **上一条还在的话，先把它关掉**：它属于**上一趟**（代次已经变了的那一趟），
 // 没人要它了——不关掉的话它会一直下到天亮（票 #282）。
-func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
+func (a *App) setPendingSource(src *audio.StreamSource, gen int) bool {
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return false
+	}
 	old := a.pendingSrc
 	if old != nil && a.pendingSrcGen != gen {
 		a.pendingSrc = nil
@@ -1519,6 +1541,7 @@ func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
 	if old != nil {
 		old.Close()
 	}
+	return true
 }
 
 // clearPendingSource 把在途的那一条从 App 上摘掉（它已经归播放器管了，或者
@@ -1538,7 +1561,7 @@ func (a *App) clearPendingSource(src *audio.StreamSource) {
 	a.mu.Unlock()
 }
 
-// abortPendingSource 关掉在途的那条字节源（如果还有的话）。
+// abortPendingSourceFor 关掉**属于代次 gen 的那一趟**在途的字节源。
 //
 // **锁外面关**：字节源的 `Close` 要等它的下载 goroutine 退出来，而那个
 // goroutine 可能正拿着 `a.mu`（换流那条路上它会回调 `noteQuality`）。锁里面
@@ -1549,7 +1572,51 @@ func (a *App) clearPendingSource(src *audio.StreamSource) {
 // 换成**它们自己的**源，于是只关 `pendingSrc` 关不到这一趟真正在下的那一条
 // （票 #220 的评审复现过：那一条会一直下到天亮，而它的临时文件也一起
 // 留在盘上）。
-func (a *App) abortPendingSource() {
+//
+// # 🔴 为什么要带代次（2026-10-30）
+//
+// 原来这一句是 `abortPendingSource()`：**无条件**关当前的 `pendingSrc` /
+// `loadSrc`，不看它们属于哪一趟。连点几首时，前几首的清理（超时闹钟、切歌、
+// 停止、退出）就会把**新歌正在建的**那条源一起关掉——新歌那一趟于是报
+//
+//	播放失败："第 5 首"（开播放器，段=下音频，代次 5）：audio: 字节源已关闭
+//
+// 而代次 5 就是当时的 `onlineGen`：它根本不是过时的那一趟，是被别人连坐关的。
+// CI 上 `TestOnlyTheLastTrackWinsWhenSwitchingFast` 偶发 30 秒超时就是它
+// （第 5 首永远放不起来，`title` 就一直停在「第 4 首」）。
+//
+// 判据是**两栏各自的代次**（`pendingSrcGen` / `loadSrcGen`）：
+//
+//	代次对得上 → 这一趟自己的，关掉（它正是当初加这个函数要治的那件事：
+//	             超时那一趟会一直下到天亮）
+//	代次对不上 → 别人的，**一个字都不碰**，也不从栏上摘（那是**现在那一趟**
+//	             的源，摘掉之后连超时都管不到它了）
+func (a *App) abortPendingSourceFor(gen int) {
+	a.mu.Lock()
+	var srcs []*audio.StreamSource
+	if a.pendingSrc != nil && a.pendingSrcGen == gen {
+		srcs = append(srcs, a.pendingSrc)
+		a.pendingSrc = nil
+	}
+	if a.loadSrc != nil && a.loadSrcGen == gen {
+		srcs = append(srcs, a.loadSrc)
+		a.loadSrc = nil
+	}
+	a.mu.Unlock()
+	// ⚠️ **同一个源可能被列两次**（正常路径上 `pendingSrc` 和 `loadSrc`
+	// 是同一条）——`StreamSource.Close` 可以重复调（它自己判 `closed`），
+	// 所以重复关是安全的。
+	for _, s := range srcs {
+		s.Close()
+	}
+}
+
+// abortAllPendingSources 关掉**所有**在途的字节源，不看代次。
+//
+// ⚠️ **只给 `App.Close` 用**：进程都要没了，还有谁在等的源都该停。别在
+// 切歌 / 超时那几条路上用它——那正是把「新歌正在建的源」连坐关掉的那个写法
+// （见 `abortPendingSourceFor` 的注释）。
+func (a *App) abortAllPendingSources() {
 	a.mu.Lock()
 	var srcs []*audio.StreamSource
 	if a.pendingSrc != nil {
@@ -1561,9 +1628,6 @@ func (a *App) abortPendingSource() {
 		a.loadSrc = nil
 	}
 	a.mu.Unlock()
-	// ⚠️ **同一个源可能被列两次**（正常路径上 `pendingSrc` 和 `loadSrc`
-	// 是同一条）——`StreamSource.Close` 可以重复调（它自己判 `closed`），
-	// 所以重复关是安全的。
 	for _, s := range srcs {
 		s.Close()
 	}

@@ -540,3 +540,81 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 			"（写的顺序：%v）", writes)
 	}
 }
+
+// ---- 这一票新加的两个复制入口也要占号（票 #685 的对抗性审查）----
+
+// TestTheSelectedRowCopyWithdrawsAnEarlierCoverClaim 断**列表的 ⌘C 会把在途的
+// 封面那一趟作废**。
+//
+// 🔴 **审查抓到的洞**：`copyClipboard` 的号是为了「先按封面（慢，后台编 PNG）、
+// 再按别的复制（快）」不会反过来被旧封面盖掉。而票 #685 新加的两条入口
+// （列表 / 网格的 ⌘C、抽屉的「复制歌名」）直接调 `s.wake.writeClipboard`，
+// **不取号**——于是它们在途的封面那一趟跑完时问 `isLatest(gen)` 仍然是 true，
+// 它会照写，剪贴板最后是**旧封面**。
+//
+// ⚠️ **`claim()` 就是「封面那一趟已经取了号、还在后台编」的那一刻**：它是
+// 生产上 `copyCover` 起后台之前做的那一件事，这里直接拿来当替身——不用真的
+// 起一趟后台，判据只问「这个号还是不是最新的」。
+//
+// ⚠️ **判据是 `copyClip.isLatest(gen) == false`**：用户最后按的是复制歌名，
+// 封面那一趟必须发现自己过时了（然后**一个字都不写**）。
+func TestTheSelectedRowCopyWithdrawsAnEarlierCoverClaim(t *testing.T) {
+	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	waitSongs(t, tt, s, 2)
+	waitFrames(t, tt, "第二首画出来", func() bool {
+		_, ok := tt.Find("歌 二")
+		return ok
+	})
+
+	r, ok := tt.Find("歌 二")
+	if !ok {
+		t.Fatalf("画面上找不到第二首，文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+
+	// 「封面那一趟已经取了号」——它还在后台编 PNG。
+	inFlight := s.claim()
+	if !copyClip.isLatest(inFlight) {
+		t.Fatalf("测试自己没摆好：刚取的号 %d 已经不是最新的了", inFlight)
+	}
+
+	tt.SetClipboard("")
+	tt.Key(mygoui.Cmd, mygoui.KeyC)
+	tt.Frame()
+	if got := tt.Clipboard(); got != "歌 二" {
+		t.Fatalf("先摆好的前提没成立：⌘C 之后剪贴板里是 %q，want 歌 二", got)
+	}
+
+	// 🔴 **在途的封面那一趟必须看到自己过时了**。
+	if copyClip.isLatest(inFlight) {
+		t.Errorf("列表 ⌘C 之后，在途的封面那一趟（号 %d）仍然是最新的——它会照写，"+
+			"剪贴板最后变成旧封面", inFlight)
+	}
+}
+
+// TestTheQueueTitleCopyWithdrawsAnEarlierCoverClaim 断**抽屉的「复制歌名」也会
+// 把在途的封面那一趟作废**（同一个洞，另一条入口）。
+func TestTheQueueTitleCopyWithdrawsAnEarlierCoverClaim(t *testing.T) {
+	h := newHarness(t)
+	h.app.Queue().Append(onlineSong("BV1", "要复制的那一首"))
+	h.tt.Frame()
+	openDrawer(t, h)
+
+	// 「封面那一趟已经取了号」——它还在后台编 PNG。
+	inFlight := h.s.claim()
+	if !copyClip.isLatest(inFlight) {
+		t.Fatalf("测试自己没摆好：刚取的号 %d 已经不是最新的了", inFlight)
+	}
+
+	chooseQueueItem(t, h, "要复制的那一首", queueCopyLabel)
+	if got := h.tt.Clipboard(); got != "要复制的那一首" {
+		t.Fatalf("先摆好的前提没成立：剪贴板里是 %q", got)
+	}
+
+	// 🔴 **在途的封面那一趟必须看到自己过时了**。
+	if copyClip.isLatest(inFlight) {
+		t.Errorf("抽屉「复制歌名」之后，在途的封面那一趟（号 %d）仍然是最新的——"+
+			"它会照写，剪贴板最后变成旧封面", inFlight)
+	}
+}

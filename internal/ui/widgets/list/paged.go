@@ -227,6 +227,15 @@ type PagedList struct {
 	// 那一行就不画（**别的页就是这样**：它们到底了就是到底了，界面上不多说一句）。
 	endView func(c *ui.Context)
 
+	// lastEndShown 是上一帧末尾那一行是不是「没有更多了」那一档。
+	//
+	// 🔴 **它挡的是「换画法之后不重新吸附」**（2026-10-29 的视觉走查）：框架
+	// 每一帧都是从**上一帧**的布局出发的，而末尾那一行是这一帧才换成「没有
+	// 更多了」的——不主动滚一下的话，它按上一帧那档的估计高度摆，用户看到的是
+	// 末尾那一行只露出半截（800 / 900 高的窗口上实测墨迹 11 行只剩 5 行），
+	// 再滚一次才变对。
+	lastEndShown bool
+
 	// failureNotice 报「拉页失败时要不要说一句」（见 SetFailureNotice）。默认要。
 	failureNotice bool
 
@@ -458,6 +467,11 @@ func (p *PagedList) SetSongs(songs []Music) {
 	p.hasMore = false
 	p.err = nil
 	p.blocked = false
+	// ⚠️ **换了一批歌，上一批的「已经到底」不算数**：不复位的话，上一批看到底
+	// 之后换歌，新一批的结果在 `syncList` 跑到 `hasMore` 那一支之前就落地时，
+	// `lastEndShown` 还是 true，该重新吸附的时候不吸附（同一操作随帧序给出两种
+	// 结果）。
+	p.lastEndShown = false
 	p.rev++
 }
 
@@ -522,6 +536,7 @@ func (p *PagedList) Reset() {
 	p.hasMore = true
 	p.err = nil
 	p.blocked = false
+	p.lastEndShown = false
 	p.rev++
 	p.ScrollTop()
 }
@@ -550,6 +565,11 @@ func (p *PagedList) ScrollTop() {
 // ——它自己这一道必须有，包一层是这里最便宜的保险。
 // TakeFocus 把键盘焦点交给底下那一对控件此刻画的那一档（票 #245 的 E4）。
 func (p *PagedList) TakeFocus() { p.surf.TakeFocus() }
+
+// SelectFirst 把选中项放到第一首（见 `List.SelectFirst`）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SelectFirst() { p.surf.SelectFirst() }
 
 // Hot 报指针是不是压在底下那一对控件的滚动条上（见 `List.Hot`）。
 func (p *PagedList) Hot() bool { return p.surf.Hot() }
@@ -650,11 +670,38 @@ func (p *PagedList) syncList() {
 		case p.hasMore || p.blocked:
 			p.surf.SetFooter(p.footerView)
 			p.surf.SetFooterLabel(footerLabel)
+			p.lastEndShown = false
 		case p.endView != nil:
 			p.surf.SetFooter(p.endView)
 			p.surf.SetFooterLabel(EndLabel)
+			// 🔴 **刚换成「没有更多了」、而且用户本来就停在底部时，重新吸附一次**
+			// （2026-10-29 的视觉走查）：框架每一帧从**上一帧**的布局出发，而这一
+			// 行是这一帧才换的画法、高度和上一档（转圈）不一样。不重新吸附的话它
+			// 按上一帧那档的估计高度摆，末尾一行只露出半截——用户滚到底看到的就是
+			// 被切的那一屏，得再滚一次才正常。
+			//
+			// ⚠️ **判据是「上一帧末尾已经在画面里」（`AtEnd()`），不是「刚换过去」**
+			// （对抗性审查抓到的）：只看「刚换过去」的话，**用户没在底部也会被拽
+			// 到底**——滚到一半往回翻、上一页的回包落地那一帧，列表会从当前位置
+			// 直接跳到底（实测 offset 0 → 1200.9）；窗口高、一页装得下时自动补屏
+			// 也会有同样的问题（打开页面看到的是列表末尾，不是开头）。
+			//
+			// ⚠️ **只在刚换过去的那一帧叫**（`lastEndShown` 记着上一帧是哪一档）：
+			// 每帧都叫的话，用户往回滚一点就会被一直拽回底上，那一页就滚不动了。
+			//
+			// ⚠️ **换查询 / 换歌之后要复位**（`Reset` / `SetSongs` 两处都清）：
+			// 不复位的话，上一次「到底」之后重新加载，新结果在 `syncList` 跑到
+			// `hasMore` 那一支之前就落地时，`lastEndShown` 还是 true，该吸附的
+			// 时候不吸附——同一操作随帧序给出两种结果。
+			if !p.lastEndShown {
+				if p.surf.List().AtEnd() {
+					p.surf.ScrollToEnd()
+				}
+				p.lastEndShown = true
+			}
 		default:
 			p.surf.SetFooter(nil)
+			p.lastEndShown = false
 		}
 	}
 
