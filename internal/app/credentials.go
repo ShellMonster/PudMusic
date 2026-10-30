@@ -381,6 +381,16 @@ func (m *Manager) Generation() uint64 {
 	return m.gen
 }
 
+// Snapshot returns the current session and its generation from one lock-held read.
+//
+// Callers that start account-bound work must use both values from this same
+// snapshot; reading Current and Generation separately can pair two accounts.
+func (m *Manager) Snapshot() (Session, uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cur, m.gen
+}
+
 // Jar 给网络层用。返回的 jar 是当前登录态的快照；之后登录态变了要重新取。
 func (m *Manager) Jar() http.CookieJar {
 	return m.Current().Jar()

@@ -25,8 +25,6 @@ package ui
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"log"
 	"runtime/debug"
 	"slices"
@@ -34,6 +32,8 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/guard"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
@@ -89,9 +89,6 @@ type libraryQuery struct {
 // loadedBefore 是**拉这一页之前已经加载了几行**，用来算「还有没有」。
 type libraryFetcher func(ctx context.Context, page, loadedBefore int, q libraryQuery) (rows []libraryRow, hasMore bool, err error)
 
-// maxWakes 是记着的唤醒句柄上限：一个窗口一条，多出来的挤掉最久没画的那个。
-const maxWakes = 4
-
 // gridGap 是网格那一档格子之间的间距。
 //
 // ⚠️ **取 `list.GridGap` 而不是另写一个数**：Biu 那个网格组件在同一个窗口宽度下
@@ -146,32 +143,12 @@ type pagedRows struct {
 
 	fetch libraryFetcher
 	acts  list.Actions
-
-	// query 取「这一页要用什么条件去拉」。**由 load 在界面线程上调**，返回值是
-	// 一份快照（见 libraryQuery）。做成一个回调而不是两个字段，是因为它读的那几样
-	// 东西分散在 `libraryPage` 上（词在那儿、日期在 dateFilter 上）。
-	query func() libraryQuery
+	pager *list.Pager[libraryRow, libraryQuery]
 
 	// ── 下面这一摊只由界面线程读写（铁律一）────────────────────────────────
 
 	// rows 是已经拿到的全部行，**追加在尾部**。
 	rows []libraryRow
-	// seen 是 rows 里已有的 ID。翻页重叠是常事（B 站翻页本来可能重复），不去重
-	// 就是两个一样的身份共用一份状态——选中一个另一个也亮。
-	seen map[string]bool
-
-	page    int
-	hasMore bool
-	loading bool
-	err     error
-	// blocked 记着「上一页拉失败了，自动补屏先停在这儿」。没有它就是自己打自己
-	// 的循环：失败 → 解锁 → 下一帧看见容器还是没填满 → 又拉。
-	blocked bool
-	// gen 是代次。换查询时 +1：在途请求的结果回来时代次对不上就扔掉。
-	gen    uint64
-	cancel context.CancelFunc
-	// why 是这一页是被哪一条保障叫起来的，只是为了出错时说得清是哪一条。
-	why trigger
 
 	scroll   ui.ScrollState
 	rev      int
@@ -213,14 +190,8 @@ type pagedRows struct {
 	// 于是「鼠标点过一行之后再按方向键」那一路上，键盘走到哪一行都没有指示。
 	keys list.KeyboardMode
 
-	// ── 跨 goroutine 的只有下面这两小摊 ──────────────────────────────────
-
-	// wakes 是**每个画过这个列表的窗口**一条，deliver 全部叫醒。
-	wakeMu sync.Mutex
-	wakes  []wakeEntry
-	frame  uint64
-
-	// mu 只护着信箱：后台往里投，界面线程在 view 开头取。
+	// ── 跨 goroutine 的操作信箱 ───────────────────────────────────────────────
+	// 翻页结果由共享 pager 自己收取；这里仅保留删除与清除操作的结果。
 	mu  sync.Mutex
 	box []mailboxItem
 }
@@ -233,14 +204,25 @@ func newPagedRows(render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui
 	fetch libraryFetcher, acts list.Actions, query func() libraryQuery) *pagedRows {
 	p := &pagedRows{
 		render: render, menu: menu,
-		fetch: fetch, acts: acts, query: query,
+		fetch: fetch, acts: acts,
+		pager: list.NewPager[libraryRow, libraryQuery](func(ctx context.Context, page, loaded int, q libraryQuery) (list.PagerPage[libraryRow], error) {
+			rows, more, err := fetch(ctx, page, loaded, q)
+			return list.PagerPage[libraryRow]{Items: rows, HasMore: more}, err
+		}, func(row libraryRow) string { return row.ID }, query),
+
 		sel: -1,
-		// 「还有没有」要等有人问过才知道，在那之前一律当作还有——不然第一帧会以为
-		// 到底了，连页脚那一行都不画。
-		hasMore: true,
-		seen:    map[string]bool{},
+		// 「还有没有」由共享 pager 维护；构造时仍保持未加载状态。
 	}
-	// 「↑ 到顶时把焦点交回侧栏」那一档（票 #245 的 E4）。理由同
+	p.pager.SetApply(func(pg list.PagerPage[libraryRow]) int {
+		p.rows = append(p.rows, pg.Items...)
+		p.rev++
+		return len(pg.Items)
+	})
+	p.pager.SetFailureHandler(func(_ int, _ list.PagerTrigger, err error) {
+		if p.acts.Notify != nil {
+			p.acts.Notify("加载更多失败："+bili.Friendly(err), notice.Danger)
+		}
+	})
 	// `widgets/list` 的 `New`。
 	p.keys.SetUpAtTop(acts.FocusOut)
 	p.draw = guard.Wrap(p.view, p.onPanic)
@@ -269,9 +251,10 @@ type PagedStatus struct {
 
 // Status 返回此刻的状态。
 func (p *pagedRows) Status() PagedStatus {
+	st := p.pager.Status()
 	return PagedStatus{
-		Page: p.page, Loaded: len(p.rows), HasMore: p.hasMore,
-		Loading: p.loading, Err: p.err,
+		Page: st.Page, Loaded: len(p.rows), HasMore: st.HasMore,
+		Loading: st.Loading, Err: st.Err,
 	}
 }
 
@@ -283,19 +266,10 @@ func (p *pagedRows) Status() PagedStatus {
 //
 // ⚠️ 只能由界面线程调。
 func (p *pagedRows) Reload() {
-	p.stop() // 含 p.loading = false
-	p.gen++
 	p.rows = nil
-	p.seen = map[string]bool{}
-	p.page = 0
-	p.hasMore = true
-	p.err = nil
-	p.blocked = false
 	p.rev++
 	p.ScrollTop()
-	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的，那时候不一定还
-	// 有下一帧。
-	p.load(trigFirstRender)
+	p.pager.Reload()
 }
 
 // ScrollTop 回到顶上。切路由和点回顶按钮都走它。
@@ -354,7 +328,7 @@ func (p *pagedRows) Drop(id string) {
 		return
 	}
 	p.rows = slices.Delete(p.rows, i, i+1)
-	delete(p.seen, id)
+	p.pager.Forget(id)
 	if p.sel > i {
 		p.sel--
 	} else if p.sel == i {
@@ -397,7 +371,7 @@ func (p *pagedRows) TakeFocus() {
 // 来是半张。**这里不换错误页**：坏的是这一个控件，页面上别的东西照常用。
 func (p *pagedRows) onPanic(rec any) {
 	log.Printf("biu: 分页行列表画崩了：%v\n%s", rec, debug.Stack())
-	p.invalidate()
+	p.pager.Invalidate()
 }
 
 // Sync 是这一份翻页列表每帧的**副作用**：登记唤醒句柄、收后台投回来的结果、
@@ -416,18 +390,8 @@ func (p *pagedRows) onPanic(rec any) {
 // 而恢复之后的第一帧 `Visible()` 报的还是满屏之前的旧行号，「末尾还在画面外」
 // 那个判断会晚一帧才成立。
 func (p *pagedRows) Sync(c *ui.Context) {
-	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，不唤醒就是
-	// 「结果到了、画面停在旧帧」（实测 0 帧刷新）。
-	p.setWake(c.Services())
-
-	// 先收后台投回来的页再画：这样这一帧画的就是**已经加上**的那几行。
 	p.adopt()
-
-	// ① 首帧。**必须在画之前发出去**：画完再发的话这一帧画出来的是「这里还没有
-	// 内容」，要等这一页回来才换掉，用户第一眼看到的是空的。
-	if p.page == 0 {
-		p.load(trigFirstRender)
-	}
+	p.pager.Sync(c.Services())
 }
 
 // view 是真的画法，View 是它外面那道 recover。
@@ -509,10 +473,11 @@ type footerIdentity struct{}
 // 挪到它身上——**列表一打开就停在最底下**，用户看见的是第 30 首而不是第 1 首（实测
 // 40 行时首帧就落在 31..40）。那一帧不摆哨兵就没有锚点要记，列表自然从顶上开始。
 func (p *pagedRows) showFooter() bool {
-	if len(p.rows) == 0 && p.loading {
+	loading := p.pager.Status().Loading
+	if len(p.rows) == 0 && loading {
 		return false
 	}
-	return p.hasMore || p.blocked
+	return p.pager.Status().HasMore || p.pager.Status().Blocked
 }
 
 // emptyStateFor 是这一帧列表里那一格空状态，nil 是「什么都不说」。
@@ -525,7 +490,7 @@ func (p *pagedRows) showFooter() bool {
 // 刚发出去还没回来（`loading`）都是，而它们说的话和画的东西不一样。
 func (p *pagedRows) emptyStateFor(t *ui.Theme) *emptyState {
 	switch {
-	case len(p.rows) == 0 && p.loading:
+	case len(p.rows) == 0 && p.pager.Status().Loading:
 		// 一行都还没有：第一页在途。这时候「正在加载…」就是列表全部的内容，
 		// 哨兵先收起来——同一句摆两遍（空状态一句 + 页脚一句）是噪音。
 		//
@@ -537,7 +502,7 @@ func (p *pagedRows) emptyStateFor(t *ui.Theme) *emptyState {
 		// 字是淡的（票 #138）。
 		loading := skeletonState("正在加载…")
 		return &loading
-	case len(p.rows) == 0 && p.blocked:
+	case len(p.rows) == 0 && p.pager.Status().Blocked:
 		// 一行都没有还失败了：页面上就留那一个重试按钮，一句话都不多说。
 		return nil
 	case len(p.rows) == 0:
@@ -804,15 +769,14 @@ func (p *pagedRows) viewFooter(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8).
 		Children(func() {
-			if p.blocked {
+			if p.pager.Status().Blocked {
 				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。
 				if flatButton(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					p.blocked = false
-					p.load(trigRetry)
+					p.pager.Retry()
 				}
 				return
 			}
-			if p.loading {
+			if p.pager.Status().Loading {
 				ui.Spinner(c).Label("加载更多")
 				ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 			}
@@ -1010,9 +974,8 @@ func (p *pagedRows) Remove(i int, del func(context.Context, string) error) {
 		return
 	}
 	id := row.ID
-	// 代次在**界面线程上**取一份（p.gen 只由界面线程写，铁律一）：后台 goroutine
-	// 再去读它就是数据竞争，`-race` 会当场报出来。
-	gen := p.gen
+	// 代次在**界面线程上**取一份（pager 负责分页代次；操作结果仍需防止落到新查询）。
+	gen := p.pager.Generation()
 	go func() {
 		p.deliver(removeResult{gen: gen, id: id, err: del(context.Background(), id)})
 	}()
@@ -1029,59 +992,25 @@ func (p *pagedRows) ClearViewed(del func(context.Context) error) {
 	if del == nil {
 		return
 	}
-	gen := p.gen
+	gen := p.pager.Generation()
 	go func() {
 		p.deliver(clearViewedResult{gen: gen, err: del(context.Background())})
 	}()
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 三重保障
-// ─────────────────────────────────────────────────────────────────────────────
-
-// trigger 是「这次翻页是被哪一条叫起来的」。三条保障走同一段代码，记下来只是
-// 为了出错时说得清是哪一条。
-type trigger uint8
-
-const (
-	trigFirstRender trigger = iota
-	trigScrollEnd
-	trigRefill
-	trigRetry
-)
-
-func (t trigger) String() string {
-	switch t {
-	case trigFirstRender:
-		return "首次渲染检查叫的"
-	case trigScrollEnd:
-		return "滚到底叫的"
-	case trigRetry:
-		return "用户点了重试"
-	default:
-		return "容器没填满叫的"
-	}
-}
-
 // afterFrame 是三重保障的②③（①在 view 开头）。每一帧跑一次——三条保障不是
 // 三个不同的钩子，是同一个判断（末尾那一行进没进画面）在不同时刻的三个取值。
 func (p *pagedRows) afterFrame() {
-	// 防重入闸门：正在拉、上一页失败了、或者已经到底，都不再拉。
-	if p.loading || p.blocked || !p.hasMore {
+	first, last := p.state.Visible()
+	decision := list.DecideNextPage(p.pager.PagingState(), first, last, p.rowCount())
+	if decision.Action != list.PagingLoadNext {
 		return
 	}
-	first, last := p.state.Visible()
-	switch n := p.rowCount(); {
-	case last < n-1:
-		// 末尾还在画面外。什么都不做，等用户滚过去。
-	case first > 0:
-		// ② 滚到底：哨兵行进了画面，而且列表不在顶上（是用户滚过去的）。
-		p.load(trigScrollEnd)
-	default:
-		// ③ 拉完之后再检一次：还在顶上、末尾已经画在屏幕上 = 全部内容一屏摆得下。
-		// **这一支就是「筛选后只剩两页」的救命的那一支。**
-		p.load(trigRefill)
+	if decision.Scrolled {
+		p.pager.Load(list.PagerScrollEnd)
+		return
 	}
+	p.pager.Load(list.PagerRefill)
 }
 
 // rowCount 是这一帧**画出来的行数**（不是歌数）：网格那一档一行几首，所以行数
@@ -1110,68 +1039,5 @@ func (p *pagedRows) listRows() int {
 	return len(p.rows)
 }
 
-// load 拉下一页。三重保障和用户点重试最后都走这里。
-//
-// 🔴 防重入就是第二行那把锁：三条保障会在同一帧里先后命中，没有它就是一次
-// 滚动三个请求。
-func (p *pagedRows) load(why trigger) {
-	if p.loading || p.blocked || p.fetch == nil {
-		return
-	}
-	if p.page > 0 && !p.hasMore {
-		return
-	}
-	next := p.page + 1
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel, p.loading, p.err, p.why = cancel, true, nil, why
-	// 🔴 **代次、已加载行数、筛选条件都在这里（界面线程上）取一份再交给后台**。
-	// 它们全都只由界面线程写（Reload / setPreset / applyKeyword），后台 goroutine
-	// 再去读就是数据竞争——而这种错在界面上几乎看不出来：多半是某一次筛选的结果配
-	// 上了另一次的词，而那在 `-race` 之外永远验不出来。
-	gen, loaded, q := p.gen, len(p.rows), p.snapshot()
-
-	go func() {
-		defer cancel()
-		rows, more, err := p.fetchOne(ctx, next, loaded, q)
-		p.deliver(libraryResult{gen: gen, page: next, rows: rows, hasMore: more, err: err})
-	}()
-}
-
-// errFetcherPanic 是拉页器自己崩了之后变成的那个错。
-var errFetcherPanic = errors.New("拉页的代码崩了")
-
-// fetchOne 调 fetch，**崩了也变成一个错**。
-//
-// 🔴 不包这一层就是进程当场没了：fetch 跑在后台 goroutine 里，界面那一层的
-// recover 一个都接不到它。而 fetch 正是「解析接口返回」的那一段，B 站一变就
-// 在这里炸。
-func (p *pagedRows) fetchOne(ctx context.Context, page, loaded int, q libraryQuery) (rows []libraryRow, more bool, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("biu: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
-			rows, more, err = nil, false, fmt.Errorf("%w：%v", errFetcherPanic, rec)
-		}
-	}()
-	return p.fetch(ctx, page, loaded, q)
-}
-
-// snapshot 取一份筛选条件的快照。**只能由界面线程调**（load 里）。
-//
-// 没装 query 回调时给零值（不筛、不带词）——那不是「忘了装」的常态，而是
-// `NewPaged` 那一路（页面还没把筛选接上）本来就没有筛选。
-func (p *pagedRows) snapshot() libraryQuery {
-	if p.query == nil {
-		return libraryQuery{}
-	}
-	return p.query()
-}
-
-// stop 停掉在途的那一页。它只是**不让结果落地**：真正的作废靠 gen。停请求是
-// 为了别让服务端白做一遍。
-func (p *pagedRows) stop() {
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-	p.loading = false
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// 共享 Pager 负责拉页、取消、代次、防重入与异常处理。

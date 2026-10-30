@@ -1,4 +1,4 @@
-// 搜索页那三个 Tab 的状态、拉页，以及 B 站结果到列表行的映射。画法在 searchpage.go；
+// 搜索页那三个 Tab 的状态与应用页模型到列表行的转换。画法在 searchpage.go；
 // 这一层全是纯逻辑（拉页、映射、翻页重置），能单独测，view 函数要靠 Tester 才验得动。
 //
 // # 为什么是三个 Tab（上游只有「视频 / 用户」）
@@ -13,14 +13,11 @@ package ui
 
 import (
 	"context"
-	"errors"
-	"log"
 	"strconv"
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
 )
@@ -40,40 +37,30 @@ const (
 // searchTabNames 是三个 Tab 上的字。
 var searchTabNames = [searchTabCount]string{"歌曲", "视频", "用户"}
 
-// videoSortOption 是视频 / 歌曲那一档的排序。字面照抄上游的 `sortOptions`
-// （`pages/search/video-list/search-header.tsx:21-27`），顺序也照抄——
-// 用户在 Biu 里记熟的是这个次序。
 type videoSortOption struct {
 	Label string
-	Order bili.VideoOrder
+	Sort  app.SearchSort
 }
 
-// searchVideoSorts 是歌曲 / 视频 Tab 的排序。第一档是默认（Biu 的
-// `useState("totalrank")`）。
 var searchVideoSorts = []videoSortOption{
-	{"综合排序", bili.VideoOrderTotalRank},
-	{"最多播放", bili.VideoOrderClick},
-	{"最新发布", bili.VideoOrderPubdate},
-	{"最多弹幕", bili.VideoOrderDanmaku},
-	{"最多收藏", bili.VideoOrderStow},
+	{"综合排序", app.SearchSortDefault},
+	{"最多播放", app.SearchSortSecond},
+	{"最新发布", app.SearchSortThird},
+	{"最多弹幕", app.SearchSortFourth},
+	{"最多收藏", app.SearchSortFifth},
 }
 
-// userSortOption 是用户那一档的排序。字面照抄上游
-// （`pages/search/user-list/search-header.tsx:12-18`，值在 `utils.ts` 的
-// `getSortParams`）。
 type userSortOption struct {
 	Label string
-	Sort  bili.UserSort
+	Sort  app.SearchSort
 }
 
-// searchUserSorts 是用户 Tab 的排序。第一档是默认（Biu 的
-// `useState("default")`）。
 var searchUserSorts = []userSortOption{
-	{"默认排序", bili.UserSortDefault},
-	{"粉丝数由高到低", bili.UserSortFansDesc},
-	{"粉丝数由低到高", bili.UserSortFansAsc},
-	{"Lv等级由高到低", bili.UserSortLevelDesc},
-	{"Lv等级由低到高", bili.UserSortLevelAsc},
+	{"默认排序", app.SearchSortDefault},
+	{"粉丝数由高到低", app.SearchSortSecond},
+	{"粉丝数由低到高", app.SearchSortThird},
+	{"等级由高到低", app.SearchSortFourth},
+	{"等级由低到高", app.SearchSortFifth},
 }
 
 // searchUserIDPrefix 是用户行的身份前缀。mid 本身唯一且稳定，加前缀是为了让
@@ -91,16 +78,6 @@ const searchUserIDPrefix = "u:"
 // 不会流到判重标识（`queue.go` 的 `streamKey`）里去。
 const searchUserItemType = app.ItemTypeUser
 
-// errSearchNotMounted 是「还没挂上 B 站客户端」。
-//
-// 只在没走过 `MountLogin` 时出现（生产上 `main.go` 一定先挂），测试里不挂就是
-// 这一条。
-//
-// ⚠️ **这句是给用户看的，不许说「客户端」「接口」**（票 #242，UX 报告 §3-F 的
-// F2）：用户不知道应用内部有没有挂上什么客户端，他只知道「搜不出来」。说成
-// 「网络不通」也不对——那会让用户去查自己的网，而实际上是他这个应用少了一块。
-var errSearchNotMounted = errors.New("搜索暂时用不了")
-
 // searchState 是搜索页记得的全部东西，一个窗口一份。
 //
 // ⚠️ 挂在 Shell 上而不是建成局部变量：即时模式每一帧都重画一遍，局部变量下一帧
@@ -113,25 +90,14 @@ type searchState struct {
 	//
 	// ⚠️ **一个 Tab 一格**，不是一个全局值：Biu 的两个列表各有一份排序状态
 	// （`video-list` 一个 `order`、`user-list` 一个 `sortKey`），在「用户」里
-	// 按过「Lv等级由高到低」再切回「视频」，那边的排序该还在原处。
+	// 按过「等级由高到低」再切回「视频」，那边的排序该还在原处。
 	sorts [searchTabCount]int
 
 	// lists 是每个 Tab 那一份分页列表。
 	lists [searchTabCount]searchTab
 
-	// fetch 拉一页。**是一个字段而不是写死的方法**：分页列表在 NewPaged 那一刻就把
-	// 拉页器拿走了，做成字段之后换的是它背后那一个，闭包每次调都重新读，替换对
-	// 已经建好的列表也管用（测试要换成不碰网络的假拉页器）。
-	//
-	// ⚠️ 它跑在后台 goroutine 里，读的每一样共享状态都得自己护住（见 searchTab.mu）。
+	// fetch 拉一页。测试可以替换这一层，但生产实现只调用应用搜索边界。
 	fetch func(tab int, ctx context.Context, page int) (list.Page, error)
-
-	// client 是拉页要用的那一个 B 站客户端，默认是 App 上那一个（`App.BiliClient`）。
-	//
-	// 做成字段是为了**能在不挂登录的情况下测真的那条拉页路**（`App.BiliClient` 只有
-	// 走过 `MountLogin` 之后才有值，而挂登录要碰凭据后端）。同一个理由跟 `fetch`
-	// 一样：这一层的依赖是显式的，测试换掉的是它背后那一个。
-	client func() *bili.Client
 }
 
 // searchTab 是一个 Tab 的分页列表，外加「现在画着的这批结果是谁的」。
@@ -190,7 +156,7 @@ type searchQuerySpec struct {
 
 // init 把三个 Tab 建起来。Shell.New 调它。
 func (st *searchState) init(s *Shell) {
-	st.fetch, st.client = s.fetchSearchTab, s.app.BiliClient
+	st.fetch = s.fetchSearchTab
 	for i := range st.lists {
 		st.lists[i].list = list.NewPaged(s.images, s.searchActions(i), s.searchFetcher(i))
 		// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
@@ -211,156 +177,32 @@ func (s *Shell) searchFetcher(tab int) list.Fetcher {
 	}
 }
 
-// fetchSearchTab 是真的那一份拉页器（`searchState.fetch` 的默认值）。
+// fetchSearchTab 是搜索页唯一的应用层入口。UI 不知道 B 站请求、响应或错误编码。
 func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Page, error) {
 	t := &s.search.lists[tab]
 	t.mu.Lock()
 	q, gen := t.query, t.gen
 	t.mu.Unlock()
 
-	st := &s.search
-	cli := st.client()
-	if cli == nil {
-		return list.Page{}, errSearchNotMounted
-	}
-
-	var (
-		songs   []list.Music
-		hasMore bool
-		total   int
-		err     error
-	)
-	if tab == searchTabUser {
-		ask := searchUserQueryOf(q)
-		ask.Page = page
-		var pg bili.UserPage
-		pg, err = cli.SearchUsers(ctx, ask)
-		songs, hasMore, total = searchUserMusics(pg.Hits), pg.HasMore, pg.Total
-	} else {
-		ask := searchVideoQueryOf(tab, q)
-		ask.Page = page
-		var pg bili.VideoPage
-		pg, err = cli.SearchVideos(ctx, ask)
-		songs, hasMore, total = searchVideoMusics(pg.Hits), pg.HasMore, pg.Total
-	}
+	pg, err := s.app.SearchOf().Page(ctx, app.SearchQuery{
+		Tab:     app.SearchTab(tab),
+		Keyword: q.keyword,
+		Sort:    app.SearchSort(q.sort),
+		Page:    page,
+	})
 	if err != nil {
-		// ⚠️ **说人话**：界面上原样摆的就是这一句（失败那一格画的是 `err.Error()`，
-		// 那条 Toast 也是），而 B 站客户端的错是「bili: 网络没通: GET /x/y: dial
-		// tcp …」这种给开发者看的东西。`bili.Friendly` 把它翻成「连不上 B 站，
-		// 检查一下网络」——首页那一档也是这么办的（`homepage_feed.go` 的
-		// `homeFailureOf`）。
-		//
-		// 🔴 **原始的那一句要进日志**：翻过去的那一句有时候是「出了点问题（详情看
-		// 日志）」——那句话指的日志里得有这件事，而分页列表那边记的是**翻过之后**
-		// 的那一句（`widgets/list/paged.go` 的 `apply`）。所以原始的那一份在这里
-		// 记一份。
-		log.Printf("biu: 搜索拉页失败（%s，第 %d 页）：%v", searchTabNames[tab], page, err)
-		return list.Page{}, searchFailureOf(err)
+		return list.Page{}, err
 	}
-
-	// 留一份给「全部播放」。去重在按下按钮那一刻做（见 searchPlayAll）。
-	//
-	// 🔴 **代次对不上就整个丢掉**：换查询之后旧的那一页还会回来（cancel 只停请求，
-	// 已经回来的那一趟照样给结果），它已经不该出现在任何地方了——分页列表会靠自己的
-	// 代次把它作废，而这一份是绕过分页列表收进来的。
+	songs := searchItemsOf(pg.Items)
 	t.mu.Lock()
 	if gen == t.gen {
-		// B 站翻页会重叠，同一个 bvid 落进两页里是常事，原样收着、按下去那一刻再去重。
 		t.loaded = append(t.loaded, songs...)
-		t.total = total
+		t.total = pg.Total
 	}
 	t.mu.Unlock()
-
-	return list.Page{Songs: songs, HasMore: hasMore}, nil
+	return list.Page{Songs: songs, HasMore: pg.HasMore}, nil
 }
 
-// searchFailureOf 把 B 站客户端那一句错翻成一句**用户看得懂**的话。
-//
-// ⚠️ **这一句会原样出现在界面上**：搜索页的失败那一格画的是 `err.Error()`，而
-// 那条 Toast 也是。`bili.Friendly` 负责翻（-101 → 「登录已经过期了，重新扫码
-// 登录一下」、`ErrNetwork` → 「连不上 B 站，检查一下网络」），而它也**绝不把
-// 地址原样打出去**（取流地址带签名，出现在界面上等于把那条流公开了）。
-//
-// ⚠️ **空的那一句有兜底**：`bili.Friendly` 对「用户自己取消了」返回空串（那一趟
-// 不该在界面上留话），而这儿是**一次真的失败**——空着的话界面上就只剩一个图标
-// 和一个重试按钮，一句原因都没有。
-func searchFailureOf(err error) error {
-	if err == nil {
-		return nil
-	}
-	msg := bili.Friendly(err)
-	if msg == "" {
-		msg = "拉不到这一场搜索，等一会儿再试"
-	}
-	return errors.New(msg)
-}
-
-// searchVideoQueryOf 把「歌曲 / 视频」那一档的查询变成一次 B 站请求。
-//
-// 🔴 「歌曲」与「视频」的差别**只有 MusicOnly 这一个字段**（见文件头）。它单独拎成
-// 一个纯函数，是因为这一条正是「三个 Tab 各搜各的」的全部要害，而它在真请求里
-// （网络、WBI 签名）没法一眼验出来。
-func searchVideoQueryOf(tab int, q searchQuerySpec) bili.VideoQuery {
-	return bili.VideoQuery{
-		Keyword: q.keyword,
-		// 🔴 「歌曲」Tab 限定音乐分区，「视频」Tab 全都要。写反了两个 Tab 会
-		// 搜出完全一样的东西，而界面上看不出任何异样。
-		MusicOnly: tab == searchTabSong,
-		Order:     searchVideoSorts[sortOf(tab, q.sort)].Order,
-	}
-}
-
-// searchUserQueryOf 把用户那一档的查询变成一次 B 站请求。
-func searchUserQueryOf(q searchQuerySpec) bili.UserQuery {
-	return bili.UserQuery{
-		Keyword: q.keyword,
-		Sort:    searchUserSorts[sortOf(searchTabUser, q.sort)].Sort,
-	}
-}
-
-// sortOf 把排序下标夹进这一 Tab 的范围。正常情况下它总在范围内（`ui.Tabs` 只给
-// 那几个标签写值），夹一道是因为这里读的是**后台 goroutine**：越界会是一个看不懂
-// 的崩溃，而不是一句「这一档排序不存在」。
-func sortOf(tab, i int) int {
-	n := searchTabSortCount(tab)
-	if i < 0 || i >= n {
-		return 0
-	}
-	return i
-}
-
-// searchTabSortCount 是 tab 那一档有多少个排序。
-func searchTabSortCount(tab int) int {
-	if tab == searchTabUser {
-		return len(searchUserSorts)
-	}
-	return len(searchVideoSorts)
-}
-
-// searchSpecKey 是「现在这些结果对应的是哪一条查询」那个键。
-//
-// ⚠️ **里面没有 Tab**：放进去的话切 Tab 就成了「查询变了」，每次切都重新拉一遍并且
-// 回到顶上，「切 Tab 不重置滚动位置」就废了（searchTab.current）。
-func searchSpecKey(q searchQuerySpec) string {
-	return q.keyword + "\x00" + strconv.Itoa(q.sort)
-}
-
-// current 是「拿当前这一 Tab 的状态，顺手判断要不要重头再来」。
-//
-// 🔴 **任一筛选条件变化 → 自动重置到第 1 页**（验收第 2 条）：判据是「画着的这些
-// 结果已经不是你此刻要的那一批了」——关键词变了或者排序变了。做法是调
-// `PagedList.Reload`，它停掉在途请求、清空已加载的行、回顶、从第 1 页重来（见
-// `widgets/list/paged.go`）。上游是 `useEffect` 依赖 `[keyword, musicOnly, order]`。
-//
-// ⚠️ **换查询那一帧，这一层会顺手多拉一页**（已知）：`Reload` 先把行清空，而分页
-// 列表的「容器没填满自动续拉」是拿**上一帧**量到的可见行判断的（`paged.go` 的
-// `afterFrame` 读 `ListState.Visible`，MyGo 的注释写着「报的是上一帧画出来的行」）。
-// 用户刚滚到底部时那一份是「40~48 行」，于是它以为「末尾已经画在屏幕上了」又拉一
-// 页。有没有拉到取决于那一帧的布局时序，**时好时坏**——所以别拿「一共加载了几行」
-// 当这一条的判据。根因在 `widgets/list/paged.go`，本票对那个包只读不改；真要修是
-// 在 `afterFrame` 里加一道「刚刚换过查询」的闸门，和它已有的 `blocked` 同一类。
-//
-// 只有界面线程能调。
 func (t *searchTab) current(q searchQuerySpec) {
 	key := searchSpecKey(q)
 	if t.kw == key {
@@ -368,111 +210,37 @@ func (t *searchTab) current(q searchQuerySpec) {
 	}
 	t.kw = key
 	t.mu.Lock()
-	t.gen++ // 作废旧查询在途的那几趟，见上面 gen 的注释
+	t.gen++
 	t.query, t.loaded = q, nil
 	t.total = 0
-	// 换查询 = 换一场搜索，而「这一场已经念过了」是**按场**记的（见
-	// `announced` 的注释）。不清零的话，新一场搜完了也不会念。
 	t.announced = false
 	t.mu.Unlock()
 	t.list.Reload()
 }
 
-// searchTotal 是这一场搜索命中的总数。零 = 还不知道。
 func (t *searchTab) searchTotal() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.total
 }
 
-// snapshot 是已经拿到的全部行，一份拷贝。「全部播放」按的正是它。
 func (t *searchTab) snapshot() []list.Music {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return append([]list.Music(nil), t.loaded...)
 }
 
-// searchVideoMusic 把一条视频结果变成一行。
-//
-// 🔴 **身份是 bvid**，不是序号：一个 bvid 在 B 站上只对应一个稿件，而翻页会
-// 把同一个 bvid 送到两页里（见 paged.go 的去重）。拿序号当身份的话，前一页多
-// 出来的行会让后面所有行的选中状态整体错配（铁律四）。
-func searchVideoMusic(hit bili.VideoHit) list.Music {
-	return list.Music{
-		ID:       hit.Bvid,
-		Title:    hit.Title,
-		Cover:    hit.Cover,
-		Owner:    hit.Owner,
-		Duration: hit.Duration,
-		// 播放量：列表那一列和网格卡片封面底部那一条渐变上画的都是它
-		//（`Music.View`）。
-		View: hit.Play,
-		// 投稿时间：搜索页那一列画的是接口的 `pubdate`（见 `Music.PubTime`）。
-		PubTime: hit.PubDate,
-		// ⚠️ Cid 大多数情况是空的（B 站的搜索结果不给分 P id，见
-		// `service/bili/search.go` 文件头）。空着的时候在线播放会按「缺稿件 id
-		// 或分 P id」拒掉并说清为什么，那条限制不许为了「搜出来的歌能放」而放松。
-		Item: app.Item{
-			Source: "online",
-			Type:   "mv",
-			Bvid:   hit.Bvid,
-			Cid:    hit.Cid,
-			Title:  hit.Title,
-			Cover:  hit.Cover,
-			// UP 名 + 编号：播放条上那一句要显示它、点它进他的空间
-			//（`app.Item.Artist`）。`VideoHit` 两样都带，往下传就是了。
-			Artist:    hit.Owner,
-			ArtistMid: hit.Mid,
-		},
-	}
+func searchSpecKey(q searchQuerySpec) string {
+	return q.keyword + "\x00" + strconv.Itoa(q.sort)
 }
 
-func searchVideoMusics(hits []bili.VideoHit) []list.Music {
-	if len(hits) == 0 {
-		return nil
-	}
-	out := make([]list.Music, len(hits))
-	for i, h := range hits {
-		out[i] = searchVideoMusic(h)
-	}
-	return out
-}
-
-// searchUserMusic 把一条用户结果变成一行。
-//
-// 上游的用户是一张 240 高的大卡片（`user-list/index.tsx:127` 的
-// `rowHeight={240}`，竖着摆头像、等级、粉丝数、关注按钮）。这里摆的是列表的
-// 一行：序号 + 头像 + 昵称 + 个性签名。头像那一格还是 48 见方
-// （`widgets/list/card.go`），所以看起来比上游那张卡片小得多——省掉的是关注
-// 按钮（要一个还没接的 B 站写接口）和竖着摆版，用户按 UP 名的意图是一样的。
-func searchUserMusic(hit bili.UserHit) list.Music {
-	return list.Music{
-		ID:    searchUserIDPrefix + strconv.FormatInt(hit.Mid, 10),
-		Title: hit.Name,
-		Cover: hit.Avatar,
-		// 个性签名摆在 UP 名那一列（Biu 的音乐卡片那里放的就是 UP 名）。
-		Owner: hit.Sign,
-		// ⚠️ **没有 View，而且本来也不会有**：用户不是视频，没有播放量（播放量在
-		// `VideoHit.Play` 上，见上面那个 `searchVideoMusic`）。所以网格卡片封面
-		// 底部那一条渐变上**左半边不画**（理由见 `list.Music.View`）。
-		Item: app.Item{
-			Source: "online",
-			Type:   searchUserItemType,
-			// 装的是 mid，理由见 searchUserItemType 的注释。
-			Bvid:  strconv.FormatInt(hit.Mid, 10),
-			Title: hit.Name,
-			Cover: hit.Avatar,
-		},
-	}
-}
-
-func searchUserMusics(hits []bili.UserHit) []list.Music {
-	if len(hits) == 0 {
-		return nil
-	}
-	out := make([]list.Music, len(hits))
-	for i, h := range hits {
-		out[i] = searchUserMusic(h)
+func searchItemsOf(items []app.SearchItem) []list.Music {
+	out := make([]list.Music, 0, len(items))
+	for _, item := range items {
+		out = append(out, list.Music{
+			ID: item.ID, Title: item.Title, Cover: item.Cover, Owner: item.Owner,
+			Duration: item.Duration, View: item.View, PubTime: item.PubTime, Item: item.Item,
+		})
 	}
 	return out
 }
@@ -492,16 +260,8 @@ func searchUserSpaceURL(mid string) string {
 
 // searchActions 是这一 Tab 的列表会做的操作。
 //
-// 歌曲 / 视频就是 `s.listActions()`（右键、双击、加队列、收藏、在 B 站打开、
-// 下载）；用户那一 Tab 换一份——用户不是歌，「播放」是进他的空间，「加进队列」
-// 照实说一句为什么不行。
-//
-// ⚠️ **歌曲 / 视频这一份的「下载」是接上了的，而结果多半是「下不了」**：
-// B 站的搜索接口只给 bvid、不给 cid（`bili.SearchVideo`），而下载按分 P 存
-// 文件。所以那一项按下去会得到一句「还没取到分 P id」——**这是如实的，不是
-// 没接**。别为了「让它看起来能用」把 cid 偷偷补上：搜索结果里的条目是**搜出来的
-// 片段**，用户按「下载音频」时想下的是他搜到的那一支，而补出来的是那支稿件的
-// 第一集（多 P 的第三集也是第一集）。
+// ⚠️ 搜索结果的动作数据已经在应用层准备好，UI 只把它转换为通用列表行。
+
 func (s *Shell) searchActions(tab int) list.Actions {
 	if tab == searchTabUser {
 		return s.searchUserActions()

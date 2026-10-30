@@ -1,11 +1,13 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -99,6 +101,9 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	p := DefaultFullPlayerPrefs()
 	p.ShowSpectrum, p.SpectrumColor = true, "#1ed760"
 	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("save before restart: %v", err)
+	}
 
 	// 重开一个 App 读同一份文件。
 	b := New()
@@ -113,8 +118,398 @@ func TestTheSpectrumSwitchSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestThePrefsFileUsesStableKeyNames 验证偏好文件使用稳定的字段名。
-func TestThePrefsFileUsesStableKeyNames(t *testing.T) {
+func TestFullPlayerPrefsUpdateReturnsBeforePersistence(t *testing.T) {
+	writes := make(chan struct{})
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(string, []byte) error {
+		close(writes)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("memory preference = %q, want %q", got, p.SpectrumColor)
+	}
+	select {
+	case <-writes:
+		t.Fatal("SetFullPlayerPrefs waited for persistence")
+	default:
+	}
+	select {
+	case flush <- struct{}{}:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background writer did not accept a flush signal")
+	}
+}
+
+func TestFullPlayerPrefsCoalescesConsecutiveUpdates(t *testing.T) {
+	var calls atomic.Int32
+	written := make(chan []byte, 2)
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		calls.Add(1)
+		written <- append([]byte(nil), b...)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	flush <- struct{}{}
+
+	body := waitFullPlayerPrefsWrite(t, written)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("writer called %d times, want 1", got)
+	}
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("coalesced write did not contain latest value: %s", body)
+	}
+}
+
+func TestFullPlayerPrefsCloseWritesLatestVersionAfterOlderWrite(t *testing.T) {
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	written := make(chan []byte, 2)
+	var calls atomic.Int32
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		if calls.Add(1) == 1 {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		written <- append([]byte(nil), b...)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	flush <- struct{}{}
+	waitFullPlayerPrefsSignal(t, firstStarted, "first preference write")
+
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	closed := make(chan error, 1)
+	go func() { closed <- a.CloseFullPlayerPrefs() }()
+
+	close(releaseFirst)
+	first := waitFullPlayerPrefsWrite(t, written)
+	second := waitFullPlayerPrefsWrite(t, written)
+	if bytes.Contains(first, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("first write unexpectedly used the latest value: %s", first)
+	}
+	if !bytes.Contains(second, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("close did not persist the latest version: %s", second)
+	}
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("close returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("close did not wait for the latest preference write")
+	}
+}
+
+func TestFullPlayerPrefsWriteFailureIsReportedAndPendingWriteSurvivesClose(t *testing.T) {
+	writeErr := errors.New("disk full")
+	written := make(chan []byte, 2)
+	var calls atomic.Int32
+	a, _, flush := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		if calls.Add(1) == 1 {
+			return writeErr
+		}
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	flush <- struct{}{}
+	_ = waitFullPlayerPrefsWrite(t, written)
+	waitForFullPlayerPrefsSettingsError(t, a, writeErr)
+	if err := a.FullPlayerPrefsError(); !errors.Is(err, writeErr) {
+		t.Fatalf("FullPlayerPrefsError = %v, want %v", err, writeErr)
+	}
+	if err := a.TakeSettingsError(); err != nil {
+		t.Fatalf("same full-player write error was reported twice: %v", err)
+	}
+
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("close did not retry the pending latest write: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("retry wrote an old value: %s", body)
+	}
+}
+
+func TestFullPlayerPrefsRemountClosesPreviousStoreBeforeReplacingIt(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	writes := make(chan string, 2)
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	old := a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(path string, _ []byte) error {
+		close(started)
+		<-release
+		writes <- path
+		return nil
+	}, nil)
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	old.signal()
+	waitFullPlayerPrefsSignal(t, started, "old preference write")
+
+	remounted := make(chan struct{})
+	go func() {
+		a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(path string, _ []byte) error {
+			writes <- path
+			return nil
+		}, nil)
+		close(remounted)
+	}()
+	select {
+	case <-remounted:
+		t.Fatal("same-path remount replaced the store before closing the old writer")
+	default:
+	}
+	close(release)
+	waitFullPlayerPrefsWritePath(t, writes)
+	waitFullPlayerPrefsSignal(t, remounted, "same-path remount")
+	if got := currentFullPlayerPrefsStore(a); got == old {
+		t.Fatal("same-path remount kept the old store")
+	}
+}
+
+func TestFullPlayerPrefsRemountPreservesCloseFailureAndLatestValue(t *testing.T) {
+	writeErr := errors.New("disk full")
+	written := make(chan []byte, 1)
+	flush := make(chan struct{})
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(_ string, _ []byte) error {
+		return writeErr
+	}, flush)
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(p)
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("old in-memory preference = %q, want %q", got, p.SpectrumColor)
+	}
+
+	remounted := a.mountFullPlayerPrefs(filepath.Join(dir, "remounted", fullPlayerPrefsFileName), func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		return nil
+	}, nil)
+	if remounted == nil {
+		t.Fatal("remount returned nil store")
+	}
+	if got := a.FullPlayerPrefs().SpectrumColor; got != p.SpectrumColor {
+		t.Fatalf("remount lost failed in-memory preference: %q", got)
+	}
+	if err := a.FullPlayerPrefsError(); !errors.Is(err, writeErr) {
+		t.Fatalf("FullPlayerPrefsError = %v, want %v", err, writeErr)
+	}
+	waitForFullPlayerPrefsSettingsError(t, a, writeErr)
+	if err := a.TakeSettingsError(); err != nil {
+		t.Fatalf("same remount error was reported twice: %v", err)
+	}
+
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("replacement close did not retry the preserved preference: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#111111"`)) {
+		t.Fatalf("replacement write lost the preserved preference: %s", body)
+	}
+}
+
+func TestFullPlayerPrefsUpdateRacingCloseSurvivesRemount(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	oldWritten := make(chan []byte, 1)
+	dir := t.TempDir()
+	a := New()
+	t.Cleanup(a.Close)
+	a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), func(_ string, b []byte) error {
+		startedOnce.Do(func() { close(started) })
+		<-release
+		oldWritten <- append([]byte(nil), b...)
+		return nil
+	}, nil)
+
+	first := DefaultFullPlayerPrefs()
+	first.SpectrumColor = "#111111"
+	a.SetFullPlayerPrefs(first)
+	old := currentFullPlayerPrefsStore(a)
+	old.signal()
+	waitFullPlayerPrefsSignal(t, started, "old preference write")
+
+	closed := make(chan error, 1)
+	go func() { closed <- a.CloseFullPlayerPrefs() }()
+	waitFor(t, func() bool {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		return a.fullPlayerPrefsDetached
+	}, "full-player preference close to detach the store")
+	latest := first
+	latest.SpectrumColor = "#222222"
+	updated := make(chan struct{})
+	go func() {
+		a.SetFullPlayerPrefs(latest)
+		close(updated)
+	}()
+	select {
+	case <-updated:
+		t.Fatal("SetFullPlayerPrefs completed before the old writer was released")
+	default:
+	}
+
+	close(release)
+	waitFullPlayerPrefsWrite(t, oldWritten)
+	if err := <-closed; err != nil {
+		t.Fatalf("close returned error: %v", err)
+	}
+	waitFullPlayerPrefsSignal(t, updated, "racing preference update")
+	if got := a.FullPlayerPrefs().SpectrumColor; got != latest.SpectrumColor {
+		t.Fatalf("racing update was not visible in memory: %q", got)
+	}
+
+	written := make(chan []byte, 1)
+	a.mountFullPlayerPrefs(filepath.Join(dir, "remounted", fullPlayerPrefsFileName), func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		return nil
+	}, nil)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("close after remount returned error: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#222222"`)) {
+		t.Fatalf("remount did not persist racing update: %s", body)
+	}
+}
+
+func TestFullPlayerPrefsRemountWaitsForPreviousWriterBeforeAppClose(t *testing.T) {
+	release := make(chan struct{})
+	started := make(chan struct{})
+	dir := t.TempDir()
+	a := New()
+	old := a.mountFullPlayerPrefs(filepath.Join(dir, "old.json"), func(string, []byte) error {
+		close(started)
+		<-release
+		return nil
+	}, nil)
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#222222"
+	a.SetFullPlayerPrefs(p)
+	old.signal()
+	waitFullPlayerPrefsSignal(t, started, "old preference write")
+
+	remounted := make(chan struct{})
+	go func() {
+		a.mountFullPlayerPrefs(filepath.Join(dir, "new.json"), nil, nil)
+		close(remounted)
+	}()
+	select {
+	case <-remounted:
+		t.Fatal("different-path remount replaced the store before old writer completion")
+	default:
+	}
+	close(release)
+	waitFullPlayerPrefsSignal(t, remounted, "different-path remount")
+	a.Close()
+	if got := currentFullPlayerPrefsStore(a); got != nil {
+		t.Fatal("App.Close left a fullplayer preference store mounted")
+	}
+}
+func TestFullPlayerPrefsCloseFlushesAWriteWhoseBackgroundRequestWasCanceled(t *testing.T) {
+	written := make(chan []byte, 1)
+	a, _, _ := newTestFullPlayerPrefsApp(t, func(_ string, b []byte) error {
+		written <- append([]byte(nil), b...)
+		return nil
+	})
+
+	p := DefaultFullPlayerPrefs()
+	p.SpectrumColor = "#333333"
+	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("close returned error: %v", err)
+	}
+	body := waitFullPlayerPrefsWrite(t, written)
+	if !bytes.Contains(body, []byte(`"spectrumColor": "#333333"`)) {
+		t.Fatalf("close lost the pending preference: %s", body)
+	}
+}
+
+func newTestFullPlayerPrefsApp(t *testing.T, writer func(string, []byte) error) (*App, *fullPlayerPrefsStore, chan struct{}) {
+	t.Helper()
+	dir := t.TempDir()
+	flush := make(chan struct{})
+	a := New()
+	p := a.mountFullPlayerPrefs(FullPlayerPrefsPath(dir), writer, flush)
+	t.Cleanup(func() { a.Close() })
+	return a, p, flush
+}
+
+func waitFullPlayerPrefsSignal(t *testing.T, signal <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", what)
+	}
+}
+
+func waitFullPlayerPrefsWrite(t *testing.T, written <-chan []byte) []byte {
+	t.Helper()
+	select {
+	case body := <-written:
+		return body
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for preference write")
+		return nil
+	}
+}
+
+func waitFullPlayerPrefsWritePath(t *testing.T, written <-chan string) string {
+	t.Helper()
+	select {
+	case path := <-written:
+		return path
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for preference write path")
+		return ""
+	}
+}
+
+func currentFullPlayerPrefsStore(a *App) *fullPlayerPrefsStore {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.fullPlayerPrefs
+}
+
+func waitForFullPlayerPrefsSettingsError(t *testing.T, a *App, want error) {
+	t.Helper()
+	waitFor(t, func() bool {
+		return errors.Is(a.TakeSettingsError(), want)
+	}, "全屏偏好设置错误通知")
+}
+
+// 用户从 Biu 迁过来的时候是**按内容**认的（整份导出/导入），键名不一样就等于
+// 他在 Biu 里调好的频谱开关到这边变成「没设过」。
+func TestThePrefsFileUsesBiusKeyNames(t *testing.T) {
 	dir := t.TempDir()
 	a := New()
 	t.Cleanup(a.Close)
@@ -123,6 +518,9 @@ func TestThePrefsFileUsesStableKeyNames(t *testing.T) {
 	p.ShowSpectrum = true
 	p.LyricsColor, p.SpectrumColor, p.BackgroundColor = "#ffffff", "#ff0000", "#101014"
 	a.SetFullPlayerPrefs(p)
+	if err := a.CloseFullPlayerPrefs(); err != nil {
+		t.Fatalf("save before reading file: %v", err)
+	}
 
 	b, err := os.ReadFile(filepath.Join(dir, fullPlayerPrefsFileName))
 	if err != nil {
@@ -290,7 +688,11 @@ func TestTheSpectrumPreferenceControlsTheCurrentPlayer(t *testing.T) {
 	if err := a.Open(filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return a.Snapshot().Position > 0 }, "播放位置前进")
+	// ⚠️ **这里等的是「真的开出一个音频设备再走起来」**：`waitFor` 那 2 秒是给
+	// 「后台一定会做完」的小事留的（见它的注释），而这一条要过一遍系统音频
+	// 输出——CI 那台 macOS runner 上偶尔要更久（2026-10-30 飘红过一次）。
+	// 给它宽一点，坏掉的时候仍然会失败（等 10 秒还没动就是真没在放）。
+	waitForWithin(t, 10*time.Second, func() bool { return a.Snapshot().Position > 0 }, "播放位置前进")
 	for i, v := range a.SpectrumBars(48, 40) {
 		if v != 0 {
 			t.Fatalf("频谱关闭时第 %d 根是 %v", i, v)
@@ -299,7 +701,7 @@ func TestTheSpectrumPreferenceControlsTheCurrentPlayer(t *testing.T) {
 
 	p.ShowSpectrum = true
 	a.SetFullPlayerPrefs(p)
-	waitFor(t, func() bool {
+	waitForWithin(t, 10*time.Second, func() bool {
 		for _, v := range a.SpectrumBars(48, 40) {
 			if v > 0 {
 				return true

@@ -406,12 +406,11 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 		// 折叠态摆**一个字**（不是图）：侧栏折叠后是 72 像素、内容区只剩 63，
 		// 24px 的「布丁音乐」四个字放不下，但**一个字**放得下 —— 折叠后那一片
 		// 不至于空着。
+		name := appName
 		if collapsed {
-			ui.Text(c, appNameShort).FontSize(scale.Font(c, scale.BrandName)).Bold().
-				TextColor(ink.AccentOn(t))
-			return
+			name = appNameShort
 		}
-		ui.Text(c, appName).NoWrap().FontSize(scale.Font(c, scale.BrandName)).Bold().
+		ui.Text(c, name).NoWrap().FontSize(scale.Font(c, scale.BrandName)).Bold().
 			TextColor(ink.AccentOn(t))
 	})
 }

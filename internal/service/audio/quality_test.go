@@ -244,12 +244,18 @@ func TestContentDecidesTheContainerNotTheFileName(t *testing.T) {
 	wavBytes := buildWAV(w.samples, w.channels, w.rate)
 	liar := writeTemp(t, "其实是wav.flac", wavBytes)
 
-	if _, err := Open(liar); err != nil {
+	filePlayer, err := Open(liar)
+	if err != nil {
 		t.Errorf("一份 WAV 改名成 .flac 就放不出来了（%v）——认容器认的是头几个字节，不是后缀", err)
+	} else {
+		filePlayer.Close()
 	}
 	// 同一段字节挂到 CDN 上，在线流也该认得出来。
-	if _, err := OpenStream(newOnlineSource(t, newByteCDN(t, wavBytes))); err != nil {
+	streamPlayer, err := OpenStream(newOnlineSource(t, newByteCDN(t, wavBytes)))
+	if err != nil {
 		t.Errorf("同一份字节作为在线流放不出来：%v", err)
+	} else {
+		streamPlayer.Close()
 	}
 }
 

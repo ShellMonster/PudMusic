@@ -81,10 +81,10 @@ const LegacyUserDataDirName = "Biu MyGo"
 // PinUserDataDir 把应用数据目录钉在 `LegacyUserDataDirName` 上（见本文件顶上）。
 //
 // 必须在**任何一次 `mygo.App.Path(mygo.PathUserData)` 之前**调，而且要在
-// `mygo.App.Run()` 之前——单实例锁与退出回调同理。调用点是 `main()` 的第一句，
-// 它排在 `app.New()` 与所有 `Mount*` 之前：数据升级（`ui.MountMigration`）和读
-// 设置（`ui.MountSettings`）都要读盘，排在它们后面就已经晚了一步，而**晚一步
-// 的症状正是「按第一次运行处理」**——读不到设置就安静地用默认值开起来，用户只
+// `mygo.App.Run()` 之前——单实例锁与退出回调同理。调用点是
+// `bootstrap.Assemble` 的第一阶段，它排在 `app.New()` 与所有 `Mount*` 之前：数据升级
+// （`ui.MountMigration`）和读设置（`ui.MountSettings`）都要读盘，排在它们后面就已经晚了一步，
+// 而**晚一步的症状正是「按第一次运行处理」**——读不到设置就安静地用默认值开起来，用户只
 // 发现「设置一直存不住」，换台机器再丢一次。
 //
 // 拿不到用户配置目录时返回错误，让调用方记一条日志继续走：那时候框架自己会

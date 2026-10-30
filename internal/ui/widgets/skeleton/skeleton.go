@@ -44,12 +44,15 @@ func Block(c *ui.Context, key string, w, h, radius float32) ui.Element {
 
 // Row 画一行歌曲占位：方形缩略图 + 两行字条 + 右侧时长条。总高 rowH。
 func Row(c *ui.Context, key string, rowH float32) {
-	pad := float32(6)
+	pad := (rowH - 48) / 2
+	if pad < 0 {
+		pad = 0
+	}
 	thumb := rowH - 2*pad
 	ui.Row(c).Key(key).FillWidth().Height(rowH).Padding(pad).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		Block(c, key+":t", thumb, thumb, 6)
 		ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
-			Block(c, key+":a", 0, 12, 4)
+			Block(c, key+":a", 180, 12, 4)
 			Block(c, key+":b", 120, 10, 4)
 		})
 		Block(c, key+":d", 40, 10, 4)
@@ -58,10 +61,11 @@ func Row(c *ui.Context, key string, rowH float32) {
 
 // Card 画一张封面卡片占位：方形封面（边长 side）+ 两条字条。
 func Card(c *ui.Context, key string, side float32) {
+	t := c.Theme()
 	ui.Column(c).Key(key).Width(side).Gap(space.Px8).Children(func() {
-		Block(c, key+":c", side, side, 8)
-		Block(c, key+":a", side*0.8, 12, 4)
-		Block(c, key+":b", side*0.5, 10, 4)
+		Block(c, key+":c", side, side, t.Radius)
+		Block(c, key+":a", side*0.8, 12, t.Radius)
+		Block(c, key+":b", side*0.5, 10, t.Radius)
 	})
 }
 
@@ -75,8 +79,8 @@ func Post(c *ui.Context, key string) {
 				Block(c, key+":t", 72, 10, 4)
 			})
 		})
-		Block(c, key+":l1", 0, 12, 4)
-		Block(c, key+":l2", 0, 12, 4)
+		Block(c, key+":l1", 300, 12, 4)
+		Block(c, key+":l2", 260, 12, 4)
 		Block(c, key+":l3", 220, 12, 4)
 	})
 }
