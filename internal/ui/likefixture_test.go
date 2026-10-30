@@ -118,7 +118,14 @@ func (f *biliFixture) triplePostCount() int {
 }
 
 // lastLikeUp 是最近一次赞带的 up。
-func (f *biliFixture) lastLikeUp() string {
+//
+// ⚠️ **这个名字是过渡期的**：写接口那个字段已经改成 `like`（票 #680），
+// 那一票把这里改名叫 `lastLikeValue`；本票（#681）的新用例按新名字调。
+// 两个名字在合并之前各自单独编译得了，并到一起之后只剩 `lastLikeValue`。
+func (f *biliFixture) lastLikeUp() string { return f.lastLikeValue() }
+
+// lastLikeValue 是最近一次赞带的那个字段的值。
+func (f *biliFixture) lastLikeValue() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastUp
