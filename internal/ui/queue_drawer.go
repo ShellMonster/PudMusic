@@ -1,7 +1,8 @@
 // 播放列表抽屉：Biu 的 `components/music-playlist-drawer`。行高 64
 // （`index.tsx:12` 的 `RowHeight`，也是 `scrollToPlayItem` 那个
-// `targetIndex * 64` 的出处）、保留队列中的每一项、行菜单五项（`menu.tsx` 的
-// `getMenus`，理由见 `queueMenuItems`）。
+// `targetIndex * 64` 的出处）、保留队列中的每一项、行菜单是上游那五项加末尾
+// 一项「复制歌名」（`menu.tsx` 的 `getMenus` + 票 #685，理由见
+// `queueMenuItems`）。
 //
 // 它浮在主布局**外面**：`ui.Overlay` + `Absolute`（MyGo 文档
 // `docs/ui/overlays.md` 里有一个抽屉的例子），不在 `viewMain` 那个 `Row` 里
@@ -1049,13 +1050,21 @@ var queueEmpty = emptyState{
 	Hint:  "点歌右边的「加入队列」，或者用播放条上的「加歌」把本地的文件放进来",
 }
 
-// ---- 那一行的菜单（五项） ----
+// ---- 那一行的菜单（上游五项 + 「复制歌名」） ----
 
 // queueMenuItem 是行菜单里的一项。
+//
+// sep 的是**分隔那一行**——它不是一项，框架那一层由 `Menu.Separator` 画；放进
+// 项表是为了让项序读起来和菜单上看到的顺序一致（和 `widgets/list/menu.go` 的
+// `menuItem.sep` 同一个写法）。
 type queueMenuItem struct {
 	key   string
 	label string
+	sep   bool
 }
+
+// queueMenuSeparator 是分隔那一行。
+var queueMenuSeparator = queueMenuItem{sep: true}
 
 // queueMenuItems 是这一行的菜单：Biu `music-playlist-drawer/menu.tsx` 的
 // `getMenus` 那一套，一项不多一项不少：
@@ -1070,6 +1079,17 @@ type queueMenuItem struct {
 //
 // 第四项的字按这一项的来处换（本地项写「在访达中显示」），判断和内容列表那一套
 // 菜单共用一份（`list.OpenLabel`）。
+//
+// # 末尾那一段「复制歌名」（票 #685）
+//
+// 上游那五项之后**另起一段**加一项只读动作：用户要把歌名复制出去（发给别人、
+// 去搜这一首），而抽屉是唯一能看「这一串还要放什么」的地方——那里原先一个字
+// 都复制不出来（内容列表那一套「复制歌曲信息」只有列表 / 网格上有）。
+//
+// ⚠️ **排在最后、还隔一条分隔线**：前面五项有现成的断言盯着（
+// `queue_drawer_test.go` 那两条逐项比项序，它们盯的是「上游那五项照抄」），
+// 插在中间会把那两条变成「改文案就得改测试」的麻烦。而它在语义上也确实是
+// 另一类：前五项都动东西（收藏 / 下载 / 打开 / 删），这一项一个字节都不动。
 func queueMenuItems(item app.Item) []queueMenuItem {
 	return []queueMenuItem{
 		{key: "favorite", label: "收藏"},
@@ -1077,8 +1097,17 @@ func queueMenuItems(item app.Item) []queueMenuItem {
 		{key: "download-video", label: "下载视频"},
 		{key: "bililink", label: list.OpenLabel(item)},
 		{key: "del", label: "从列表删除"},
+		queueMenuSeparator,
+		{key: "copy-title", label: queueCopyLabel},
 	}
 }
+
+// queueCopyLabel 是抽屉行菜单里「复制歌名」那一项的字。
+//
+// ⚠️ **和内容列表的「复制歌曲信息」不同名**：那个复制的是「歌名 - UP 名」加
+// 地址（`list.SongInfoText`），这个只复制歌名——同一句字用在两处的话，用户
+// 粘出来才发现多了一半东西。
+const queueCopyLabel = "复制歌名"
 
 // queueMenu 建这一行的菜单。
 //
@@ -1092,6 +1121,10 @@ func queueMenuItems(item app.Item) []queueMenuItem {
 // 哪怕「上一首 / 下一首」在这中间挪了 cur，拿到的仍然是用户按的那一行。
 func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 	for _, item := range queueMenuItems(row.item) {
+		if item.sep {
+			m.Separator()
+			continue
+		}
 		if m.Item(item.label).Chosen() {
 			s.queueAction(row, item)
 			return
@@ -1101,7 +1134,7 @@ func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 
 // queueAction 是菜单里那一项被选中之后做的事。
 //
-// **五项全都真的在做那件事**，这一层只有「点了 → 调服务 → 把结果说给用户」：
+// **每一项都真的在做那件事**，这一层只有「点了 → 调服务 → 把结果说给用户」：
 //
 //	收藏        App.FavoriteSong —— 接口调用、把 bvid 换成 avid、挑哪一格、判重复，
 //	            全在 `internal/service/bili/favorite.go` 里（这里一句 B 站的知识都没有）
@@ -1109,6 +1142,7 @@ func (s *Shell) queueMenu(m *ui.Menu, row queueRow) {
 //	下载视频    App.DownloadVideo —— 取视频流 + 交织成一个 mp4 都在下载服务里
 //	打开来处    list.Actions.Open
 //	从列表删除  App.RemoveSongFromList
+//	复制歌名    剪贴板接缝（票 #685，见下面那一支）
 //
 // 收藏要问 B 站四到五次，所以走**回调**（见 App.FavoriteSong）；下载是「加进队列、
 // 立刻返回」。
@@ -1126,7 +1160,33 @@ func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 		list.AppActions(s.app, s.addToast).Open(row.item)
 	case "del":
 		s.removeQueueRow(row)
+	case "copy-title":
+		s.copyQueueTitle(row)
 	}
+}
+
+// copyQueueTitle 把这一行的歌名放进剪贴板（票 #685）。
+//
+// ⚠️ **复制的是界面上显示的那个名字**（`tclean.Clean` 清洗过的，和
+// `viewQueueRow` 里画的是同一句）：界面上写着「晴天」而复制出来是「【4K修复】晴天」，
+// 用户会以为复制错了行。这一条和 `widgets/list` 的 `TestCmdCCopiesTheCleanedTitle`
+// 是同一个口径。
+//
+// ⚠️ **走 `s.copyText`，不是裸的 `s.wake.writeClipboard`**（票 #685 的对抗性
+// 审查）：后者**不取号**，于是在途的封面那一趟（后台编 PNG，慢）跑完时问
+// `isLatest(gen)` 仍然是 true，它会照写——用户最后按的「复制歌名」被一张旧
+// 封面盖掉。`copyText` 走 `commitNow`，取号 + 写在同一段里（理由见
+// `clipboard.go` 的 `copyClipboard`）。
+//
+// ⚠️ **无头 Tester 里 `mygo.Clipboard.Write*` 会 panic**（`needsApp`）——
+// `copyText` 内部走的是 `Shell.writeClipboardText` 那个接缝，测试把它换成
+// 记下内容的桩。
+func (s *Shell) copyQueueTitle(row queueRow) {
+	if err := s.copyText(tclean.Clean(row.item.Title).Title); err != nil {
+		s.addToast("复制不了歌名："+err.Error(), notice.Danger)
+		return
+	}
+	s.addToast("已复制歌名", notice.Success)
 }
 
 // removeQueueRow 是「从列表删除」。

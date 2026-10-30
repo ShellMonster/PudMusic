@@ -433,6 +433,40 @@ func formatSongDuration(d time.Duration) string {
 	return fmt.Sprintf("%d:%02d", m, sec)
 }
 
+// copyText 把一段文字放进剪贴板，**并算一次「复制」**（取号作废在途的封面那一趟）。
+//
+// 🔴 **票 #685 新加的那几条复制入口必须走这里，不能直接调
+// `s.wake.writeClipboard`**：`copyClipboard` 的号是为了「先按封面（慢，后台编
+// PNG）、再按别的复制（快）」不会反过来被旧封面盖掉（见那个类型的注释）。
+// 跳过 `commitNow` 的那条路**不取号**——于是它写完以后，在途的封面那一趟问
+// `isLatest(gen)` 仍然拿到 true，它会照写，剪贴板最后是**旧封面**。对抗性审查
+// 实测过这个洞（列表 ⌘C 和抽屉「复制歌名」两条都在）。
+//
+// ⚠️ **取号和写在同一段里**（`commitNow`）：理由同 `copySongInfo`——「比过了」
+// 不等于「写进去的时候仍然是这一档」。
+//
+// ⚠️ **说话由调用方管**（它把错误带回去）：每个入口成功那句话说得不一样
+// （列表 / 抽屉说「已复制歌名」，菜单说「已复制歌曲信息」），而失败那句话也
+// 该点名是哪一项——这一层只说「没写成，原因是这个」。
+//
+// ⚠️ **两个出口按有没有接缝分流**：`Shell.writeClipboardText` 是测试的桩
+// （`copySongInfo` 那一档也用它）；没装的时候走 `s.wake.writeClipboard`——那
+// 是界面层拿到的**窗口**剪贴板接缝，生产上（`Shell.Attach` 之后）和 Tester 里
+// 都有。**不能在这里退回 `systemWriteClipboardText`**：它要真的 App 事件循环，
+// 无头 Tester 里那一句会挂住（不是 panic，是等一个永远不来的主线程回调）。
+func (s *Shell) copyText(text string) error {
+	write := s.writeClipboardText
+	err := s.commitNow(func() error {
+		if write != nil {
+			return write(text)
+		}
+		s.wake.writeClipboard(text)
+		return nil
+	})
+	s.wake.invalidate()
+	return err
+}
+
 // copySongInfo 把这一首的信息放进剪贴板。
 //
 // ⚠️ **失败了要说得出来**（票面要求「不静默失败」）：剪贴板写失败就弹一句
@@ -455,6 +489,9 @@ func (s *Shell) copySongInfo(st app.State) {
 	// ⚠️ **这一档照样要作废前面那一趟封面**（「先按封面（慢）、再按文本」最后
 	// 留着的必须是那段文字）——而那正是**取号**干的事：取号就是作废前面所有
 	// 的号。
+	//
+	// ⚠️ **不走 `copyText`**：这一档把「说」也放进同一段里（剪贴板里是什么，
+	// 屏幕上就该同时说什么），而 `copyText` 把说话留给调用方、在外面说。
 	s.commitNow(func() error {
 		if err := write(text); err != nil {
 			s.addToast("复制不了歌曲信息："+err.Error(), notice.Danger)

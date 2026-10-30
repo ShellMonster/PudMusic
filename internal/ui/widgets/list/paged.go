@@ -567,6 +567,11 @@ func (p *PagedList) ScrollTop() {
 // TakeFocus 把键盘焦点交给底下那一对控件此刻画的那一档（票 #245 的 E4）。
 func (p *PagedList) TakeFocus() { p.surf.TakeFocus() }
 
+// SelectFirst 把选中项放到第一首（见 `List.SelectFirst`）。
+//
+// ⚠️ 只能由界面线程调。
+func (p *PagedList) SelectFirst() { p.surf.SelectFirst() }
+
 // Hot 报指针是不是压在底下那一对控件的滚动条上（见 `List.Hot`）。
 func (p *PagedList) Hot() bool { return p.surf.Hot() }
 

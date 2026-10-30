@@ -173,6 +173,16 @@ func (s *SwitchView) TakeFocus() {
 	s.list.TakeFocus()
 }
 
+// SelectFirst 把选中项放到第一首（见 `List.SelectFirst`），**两档都放**。
+//
+// ⚠️ **两份都动**：页内头部在两档里都有（`SetLead` 两份都装），而「点一下页头
+// = 选中第 0 行」在两档里是同一件事——只动正在画的那一份的话，切档之后选中项
+// 会跳回上一档留下的位置。
+func (s *SwitchView) SelectFirst() {
+	s.list.SelectFirst()
+	s.grid.SelectFirst()
+}
+
 // Hot 报指针是不是压在底下这一对控件的滚动条上（见 `List.Hot`）。
 //
 // 两档各有一份滚动容器（同一份歌、两种摆法），所以问的是**这一帧画的那一档**。

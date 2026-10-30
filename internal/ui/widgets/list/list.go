@@ -609,6 +609,25 @@ func (l *List) ScrollTo(row int, align ui.Align) { l.state.ScrollTo(row, align) 
 // ⚠️ 只能由界面线程调，同 ScrollTo。
 func (l *List) ScrollTop() { l.state.ScrollTo(0, ui.Start) }
 
+// SelectFirst 把游标放到**第一首歌**上（页内头部不算，见 lead.go）。
+//
+// 🔴 **它是「点一下页内头部」该做的事**（票 #685）：页内头部占着列表的第 0 行，
+// 基线里点它一下就是「选中第 0 行」——而 `List.View` 会在下一帧把
+// 「游标停在页内头部上」修正成第一首歌（见那里那一支）。文字可选中之后那一
+// 下被文字选择接走了，这个出口就是把它补回来的那一句。
+//
+// ⚠️ **一首歌都没有时什么都不做**（页内头部还在，但它不是歌）。
+//
+// ⚠️ **走的是框架那个游标**（`l.sel`），不是另开一个字段：`Selected` /
+// 方向键 / 焦点环 / ⌘C 读的**都是它**，另开一份的话「点页头之后 ⌘C」复制的是
+// 另一首歌。
+func (l *List) SelectFirst() {
+	if len(l.songs) == 0 {
+		return
+	}
+	l.sel = leadRows(l.lead)
+}
+
 // ScrollToEnd 把列表滚到最底下。
 //
 // ⚠️ **它不只是「滚到底」**：框架那一侧的 `ScrollToEnd` 还会把这一档的
@@ -756,12 +775,13 @@ func (l *List) View(c *ui.Context) {
 	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).
 		FillWidth().
-		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
-		// 理由见 `selection.go` 的 KeyboardMode）。
+		// ⚠️ **听一听输入**：两件事——知道「上一次是键盘还是指针」（焦点环靠它，
+		// 理由见 `selection.go` 的 KeyboardMode），以及 ⌘C 复制选中那一行的歌名
+		// （票 #685，理由见 `copy_title.go` 的文件头）。
 		//
-		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
-		// 焦点都还在。
-		HandleInput(l.keys.Input).
+		// ⚠️ **只有真的复制了才吃掉事件**：其它一律返回 false，方向键挪游标、
+		// 点击选行、Tab 换焦点都还在。
+		HandleInput(l.input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。
 		//
@@ -891,7 +911,16 @@ func (l *List) viewLead(c *ui.Context) {
 		return
 	}
 	guardFailed(&l.failed, "页内头部", leadFailed, func() {
-		ui.Column(c).FillWidth().Background(c.Theme().Background).Children(func() {
+		// ⚠️ **`HandleInput` 挂在外层这一格上，不在可选中那一列上**：那一列
+		// 在 `lead.Draw` 里面（这一层够不着它的元素），而 `HandleInput` 挂在
+		// **外层的祖先**上照样收得到这一块里所有的按下——`pointerDown` 取的是
+		// 命中链上**最里层那个带 `input` 的元素**（`mygo/ui/handler.go` 的
+		// `handler`），而可选中那几段字本身没有 `input`。
+		//
+		// ⚠️ **它不抢文字选择**：`inputFn` 会让 `prepareSelectable` 在**祖先**
+		// 那一层停下（`mygo/ui/textselection.go`），而可选中那一列在这层**里
+		// 面**——从字往上走先撞到那一列，作用域照样是它。
+		ui.Column(c).FillWidth().Background(c.Theme().Background).HandleInput(l.leadInput).Children(func() {
 			l.lead.Draw(c)
 			// ⚠️ **判据是「没有歌」**：框架那一支判的是「列表没有行」，而
 			// 装了页内头部之后行数 ≥ 1——所以这里要自己判「没有**歌**」。
@@ -905,6 +934,13 @@ func (l *List) viewLead(c *ui.Context) {
 		})
 	})
 }
+
+// leadInput 是页内头部那一格的输入回调（`Lead.OnClick` / `OnDoubleClick` 的
+// 接线，票 #685）。
+//
+// ⚠️ **判定和理由全在 `leadInput`（lead.go）那一处，两个视图共用同一份**：
+// 列表和网格各写一遍的话，两档里的页内头部会各有一种语义。
+func (l *List) leadInput(ev ui.InputEvent) bool { return leadInput(l.lead, ev) }
 
 // viewFooter 画末尾那一行，崩了也只废掉这一行（同一套兜法，同一张表）。
 func (l *List) viewFooter(c *ui.Context) {

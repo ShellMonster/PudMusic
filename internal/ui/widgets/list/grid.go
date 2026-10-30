@@ -270,6 +270,20 @@ func (g *Grid) TakeFocus() {
 	g.state.Handle.Focus()
 }
 
+// SelectFirst 把游标放到**第一首**上。
+//
+// 🔴 **它是「点一下页内头部」在网格档该做的事**（票 #685）：页内头部占着网格的
+// 第 0 行，基线里点它一下就是「选中第 0 行」→ 等价于选中第一首歌。文字可选中
+// 之后那一下被 `pressTextSelection` 接走了（理由见 `Lead.OnClick`）。
+//
+// ⚠️ **一首歌都没有时什么都不做**。
+func (g *Grid) SelectFirst() {
+	if len(g.songs) == 0 {
+		return
+	}
+	g.sel = 0
+}
+
 // SetSongs 换掉网格里的歌。
 //
 // 🔴 和 `List.SetSongs` 一样，选中项跟着**那一首**走：原来选中的那首还在新的一
@@ -616,6 +630,18 @@ func (g *Grid) Hot() bool { return g.hot }
 // `mygo/ui/list.go` 的 `listInput`：它只在「这张列表有游标」时才导航。）
 func (g *Grid) gridInput(ev ui.InputEvent) bool {
 	g.keys.Input(ev)
+	// ⌘C 复制选中那一格的歌名（票 #685）。
+	//
+	// ⚠️ **列表那一档是同一件事**（`copy_title.go` 的 `copyCommand` /
+	// `notifyCopied`）：收藏夹页按设置在两档之间切（`SwitchView`），而「选一首、
+	// ⌘C」在网格里也该成——不然同一个页面两种摆法两种行为。
+	if copyCommand(ev) && g.acts.Copy != nil {
+		if m, ok := g.Selected(); ok {
+			g.acts.Copy(ShowOf(m).Title)
+			notifyCopied(g.acts)
+			return true
+		}
+	}
 	if ev.Kind != ui.InputKeyDown {
 		return false
 	}
@@ -880,11 +906,20 @@ func (g *Grid) viewLead(c *ui.Context) {
 		return
 	}
 	guardFailed(&g.failedRow, "页内头部", leadFailed, func() {
-		ui.Column(c).FillWidth().Background(c.Theme().Background).Children(func() {
+		// ⚠️ **双击那一手和列表那一档是同一份接线**（票 #685）：网格里同样有
+		// 可选中复制的页内头部（`SetLead` 两份都装），所以「列内双击」在那里
+		// 也会被文字选择接走——理由和 `List.viewLead` 那一处一字不差。
+		ui.Column(c).FillWidth().Background(c.Theme().Background).HandleInput(g.leadInput).Children(func() {
 			g.lead.Draw(c)
 		})
 	})
 }
+
+// leadInput 是页内头部那一格的输入回调（`Lead.OnDoubleClick` 的接线，票 #685）。
+//
+// ⚠️ **和 `List.leadInput` 走同一个判定**（`lead.go` 的 `leadInput`）：两档里
+// 页内头部的双击只能是同一件事。
+func (g *Grid) leadInput(ev ui.InputEvent) bool { return leadInput(g.lead, ev) }
 
 // viewFooterRow 画哨兵**独占一行**时的那一行：哨兵在第一格，其余格子空着。
 //

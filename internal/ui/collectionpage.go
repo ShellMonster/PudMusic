@@ -626,6 +626,36 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 		// 所以回顶按钮读的是精确像素、**用不到它**——留着是为了 `Lead` 那
 		// 一份完整（按行换算的那一路会用到它，而那一路是别的页在用）。
 		Height: func() float32 { return collectionLeadHeight },
+		// 🔴 **列内双击 = 播第一首**（票 #685）：文字那一列可选中之后，框架的
+		// `pressTextSelection` 把这一块上的按下先接走（列内空白会被就近吸到最近
+		// 那一段字上），行的 `OnSubmit` 收不到——基线那一整片（标题右侧空白、
+		// 行距、简介下方、类型行）都是「双击播第一首」，这里把它接回来。
+		//
+		// ⚠️ **语义和双击一行完全相同**（`list.rowPlay` → `Actions.PlayNow` →
+		// `App.EnqueueAndPlayNow`，票 #608：**加这一首并播，不换队列**）。走
+		// `EnqueueAndPlayNow` 而不是 `PlayFrom`：换了队列的话，「点页头播第一首」
+		// 会顺手把用户排好的队列扔掉——而双击一行不会。
+		//
+		// ⚠️ **一条歌都没有时什么都不做**：页头画着、歌还没拉回来（或者这一份
+		// 本来就空），「第一首」不存在。
+		OnDoubleClick: func() {
+			first, ok := p.list.First()
+			if !ok {
+				return
+			}
+			if err := s.app.EnqueueAndPlayNow(first.Item); err != nil {
+				s.addToast("放不了这一首："+err.Error(), notice.Danger)
+			}
+		},
+		// 🔴 **列内按下 = 选中第一首**（票 #685）：基线里页内头部**就是列表的
+		// 第 0 行**，点它一下选中的是第一首歌（`List.View` 把「游标停在页内头部」
+		// 修正成第一首，见那里那一支）。文字可选中之后那一下被接走了，`Selected`
+		// 停在**上一次选中的歌**上——用户点一下页头再按 ⌘C，复制的是别的行
+		//（对抗性审查实测）。
+		//
+		// ⚠️ **两档都放**（`PagedList.SelectFirst` → `SwitchView` 两份）：点的是
+		// 哪一档看到的页头，选中的就该是那一档里看得见的第一首。
+		OnClick: func() { p.list.SelectFirst() },
 		Draw: func(c *ui.Context) {
 			ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
 				s.viewCollectionHeader(c, p)
@@ -891,7 +921,27 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 				shadow.TailwindLG(imgcache.Loading(c, collectionCoverW, collectionCoverH, imgcache.Shape{}))
 			}
 
-			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Children(func() {
+			// 🔴 **文字那一列是可选中复制的**（票 #685）：用户想复制的是「这个
+			// 收藏夹叫什么、简介写了什么」——拖一下、Cmd+C 就该粘得出来。
+			//
+			// ⚠️ **作用域给在**这一列**上，不给每一行各来一次**：一个容器上的
+			// `Selectable` 让里面所有 Text / RichText 共用一个选择
+			// （`mygo/ui/api_gen.go` 的 `Selectable`：「On a container, its Text
+			// and RichText descendants share one selection. Copy joins their
+			// selected text with newlines, in the order they were built.」）。
+			// 逐行各加一次的话，从标题拖到简介时第一行会掉出作用域——用户得
+			// 复制三次，而他要的是「一整段」。
+			//
+			// ⚠️ **创建者那一行不用 `Unselectable`**：那个名字是
+			// `list.OwnerName`（一枚 `ButtonBase` 做的名字型链接），而框架对
+			// 控件里的字本来就不给选（同一份文档：「Text inside controls, such
+			// as buttons and text inputs, keeps the control's interaction」；
+			// 判据在 `mygo/ui/textselection.go` 的 `prepareSelectable`：祖先带
+			// `flagClickable` 就停）。多加一道 `Unselectable` 反而会把这一行
+			// **整个**踢出选择作用域，将来它旁边真要加一段说明字也选不了了。
+			//
+			// ⚠️ **封面不在这**一列里：它在外面那个 `Row` 里，是图片、没有字。
+			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Selectable().Children(func() {
 				// ⚠️ **这个标题是 30（`scale.CollectionTitle`），不是页标题那个数**：
 				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
 				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, scale.CollectionTitle)).Bold().

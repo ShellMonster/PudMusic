@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/platform"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
@@ -113,7 +114,19 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 func (s *Shell) listActions() list.Actions {
 	acts := list.AppActions(s.app, s.addToast)
 	acts.FavSelect = s.openFolderSelect
-	acts.Copy = s.wake.writeClipboard
+	// 🔴 **复制走 `s.copyText`，不是 `s.wake.writeClipboard`**（票 #685 的对抗性
+	// 审查）：后者**不取号**，于是在途的封面那一趟（后台编 PNG，慢）跑完时问
+	// `isLatest(gen)` 仍然是 true，它会照写——用户最后按的「复制歌名」被一张旧
+	// 封面盖掉。`copyText` 走 `commitNow`，取号 + 写在同一段里（理由见
+	// `clipboard.go` 的 `copyClipboard`）。
+	//
+	// ⚠️ **说话在列表那一层**（`widgets/list` 的 `notifyCopied` 与
+	// `menu.go` 的「已复制歌曲信息」），因为它知道用户按的是 ⌘C 还是菜单项。
+	acts.Copy = func(text string) {
+		if err := s.copyText(text); err != nil {
+			s.addToast("复制不了："+err.Error(), notice.Danger)
+		}
+	}
 	// 焦点交接（票 #245 的 E4）：每一帧各个列表把自己登记上去，于是「侧栏按 ↓
 	// 把焦点交给内容区」有一个统一的目标——理由见 `widgets/list` 的 `focus.go`。
 	acts.Focus = s.registerContentFocus

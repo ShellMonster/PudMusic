@@ -27,7 +27,7 @@ func mentionsString(e ast.Expr, want string) bool {
 }
 
 // 播放列表抽屉的验收：行高 64、保留队列中的每一项、「定位当前播放」平滑滚过去、
-// 行菜单那五项。
+// 行菜单（上游那五项 + 末尾的「复制歌名」）。
 //
 // 窗口是 760×460（winW / winH），抽屉是 320 宽、到播放条上沿为止，所以：
 // y < 372 是抽屉那一层（点它关抽屉），y >= 372 是播放条（照常用）。
@@ -691,8 +691,13 @@ func TestLocateCurrentSaysSoWhenThereIsNothingToLocate(t *testing.T) {
 	})
 }
 
-// TestQueueRowMenuOffersFiveItemsForAnOnlineSong 五项是 Biu
+// TestQueueRowMenuOffersFiveItemsForAnOnlineSong 前五项是 Biu
 // `music-playlist-drawer/menu.tsx` 的 `getMenus` 那一套，一项不多一项不少。
+//
+// ⚠️ **票 #685 之后菜单不止五项**了：末尾另起一段加了「复制歌名」（理由见
+// `queue_copy_test.go` 的文件头）。这一条钉的仍然是**上游那五项照抄、顺序不动**
+// ——所以比的是**前五项**，不是整张菜单；「多出来的那一项是什么」由
+// `TestQueueRowMenuHasTheCopyTitleAfterTheUpstreamFive` 钉着。
 func TestQueueRowMenuOffersFiveItemsForAnOnlineSong(t *testing.T) {
 	h := newHarness(t)
 	h.app.Queue().Append(onlineSong("BV1", "第一首"))
@@ -702,8 +707,12 @@ func TestQueueRowMenuOffersFiveItemsForAnOnlineSong(t *testing.T) {
 	if err := h.tt.RightClick("第一首"); err != nil {
 		t.Fatalf("右键不了这一行：%v", err)
 	}
-	want := []string{"收藏", "下载音频", "下载视频", "在 B 站打开", "从列表删除"}
+	want := []string{"收藏", "下载音频", "下载视频", "在 B 站打开", "从列表删除",
+		"-", queueCopyLabel}
 	got := h.tt.Menu()
+	// 🔴 **精确的 7 项**（对抗性审查：这里原来是 `len(got) < len(want)`——那是
+	// 「至少五项」，而菜单里多塞一项、或者分隔线被换成一条重复的真项，四条
+	// 测试全绿）。现在整张菜单逐项比：「五项照抄 + 一道分隔线 + 复制歌名」。
 	if len(got) != len(want) {
 		t.Fatalf("菜单有 %d 项 %q，want %d 项 %q", len(got), got, len(want), want)
 	}
@@ -714,12 +723,15 @@ func TestQueueRowMenuOffersFiveItemsForAnOnlineSong(t *testing.T) {
 	}
 }
 
-// TestQueueRowMenuOffersTheSameFiveItemsForALocalSong 本地项**也是五项**。
+// TestQueueRowMenuOffersTheSameFiveItemsForALocalSong 本地项的**前五项**也照旧。
 //
 // 这一条盯的是「今天唯一把项放进队列的入口是 enqueuePicked（本地文件）」：照 Biu 的
 // hidden 规则（收藏 / 下载 / 在 B 站打开对本地项都藏起来）的话，普通用户看到的行
 // 菜单**永远只有「从列表删除」一项**，五项一条都见不到。第四项按来处换成「在访达中
 // 显示」（判断和内容列表那一套菜单共用一份，见 list.OpenLabel）。
+//
+// ⚠️ **同上面那一条：票 #685 之后菜单末尾多一项**（「复制歌名」），所以这里比的
+// 也是前五项。
 func TestQueueRowMenuOffersTheSameFiveItemsForALocalSong(t *testing.T) {
 	h := newHarness(t)
 	// 歌名起得特别一点：Tester 是按**精确的字**找元素的，歌名太普通会先撞上
@@ -731,8 +743,11 @@ func TestQueueRowMenuOffersTheSameFiveItemsForALocalSong(t *testing.T) {
 	if err := h.tt.RightClick("本地那一首"); err != nil {
 		t.Fatalf("右键不了这一行：%v", err)
 	}
-	want := []string{"收藏", "下载音频", "下载视频", "在访达中显示", "从列表删除"}
+	want := []string{"收藏", "下载音频", "下载视频", "在访达中显示", "从列表删除",
+		"-", queueCopyLabel}
 	got := h.tt.Menu()
+	// 🔴 **精确的 7 项**（理由同上一条：`< len(want)` 那一种是「至少五项」，
+	// 多出来的东西一条都抓不到）。
 	if len(got) != len(want) {
 		t.Fatalf("本地项的菜单有 %d 项 %q，want %d 项 %q", len(got), got, len(want), want)
 	}
@@ -845,7 +860,10 @@ func TestDeletingAQueuedCopyRemovesEveryCopyOut(t *testing.T) {
 	}
 	// 右键甲 那一行要用坐标：甲 正在放，同一个字在播放条上也有。
 	h.tt.RightClickAt(500, 85)
-	if got := h.tt.Menu(); len(got) != 5 {
+	// ⚠️ **判据是「菜单开出来了」而不是「几项」**：票 #685 之后末尾多了一项
+	// （「复制歌名」），项数不再是 5——所以这里认「里面有没有『从列表删除』」，
+	// 那才是这一条接下来要按的那一项。
+	if got := h.tt.Menu(); !slicesContains(got, "从列表删除") {
 		t.Fatalf("右键甲 那一行没有菜单，文字：%q", h.tt.Texts())
 	}
 	if err := h.tt.ChooseMenuItem("从列表删除"); err != nil {
