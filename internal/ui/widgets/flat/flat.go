@@ -437,11 +437,16 @@ func Feel(c *ui.Context, e ui.Element) ui.Element { return feel(c, e, ThemeBase)
 //
 // ⚠️ **「铺不铺」在建元素时问，「是不是禁用」在画的时候问**——见 `shade`。
 //
-// ⚠️ 它是在建元素时算的：`Element` 上没有 `styleFn`，而框架自己的 `styleButton`
-// 是把同一段逻辑挂进 `styleFn`（paint 时跑）才拿到「按下的那一帧立刻变深」。
-// 这里靠的是指针位置**不进事件循环就不变**（`mygo/ui/input.go:265` 的
-// `setHover`），于是画面上的效果一样。本包早就在用这个写法
-// （`internal/ui/navbar_suggest.go` 的 `viewSuggestTerm`）。
+// ⚠️ 它是在建元素时算的：`Element` 上没有 `styleFn`（那是框架内部的未导出
+// 字段），所以这一层只能自己问 `Pressed()` / `Hovered()`。
+//
+// ⚠️ **这一段曾经断言「框架靠 `styleFn` 才拿到『按下的那一帧立刻变深』，我们
+// 这里做不到」——那条断言现在不成立了**：框架 v0.7.3 的 `Element.Pressed()`
+// （`mygo/ui/input.go:1227`）在 `pressPending` 时就返回 true（那一段的框架
+// 注释写着「Show that choice in this frame」），而 `feel` 就是在**建元素的
+// 那一刻**问它——所以按下的那一帧确实立刻变深，和框架的按钮一样。
+//
+// 本包早就在用这个写法（`internal/ui/navbar_suggest.go` 的 `viewSuggestTerm`）。
 func feel(c *ui.Context, e ui.Element, base Base) ui.Element {
 	t := c.Theme()
 	switch {
