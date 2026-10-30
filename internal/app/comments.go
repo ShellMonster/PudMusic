@@ -660,6 +660,13 @@ func (a *App) resetCommentsLocked(slot string) {
 	a.commentsRefresh = false
 	a.commentsOid = 0
 	a.commentsTyp = 0
+	// 🔴 **换歌就把在途的楼中楼全取消掉**：它们问的是上一首的对象，结果会被
+	// 代次丢掉，留着它们只是白占着连接。
+	for root, cancel := range a.commentsReplyCancels {
+		cancel()
+		delete(a.commentsReplyCancels, root)
+	}
+	a.commentsReplyCancels = nil
 	a.commentsReplies = map[int64][]bili.Comment{}
 	a.commentsRepliesTried = map[int64]time.Time{}
 	a.commentsRepliesWanted = map[int64]bool{}

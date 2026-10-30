@@ -56,6 +56,7 @@
 package songname
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -148,20 +149,127 @@ func New(rawTitle, artist string) Table {
 //
 // ⚠️ **判的是正文**（`bili.Comment.Message`），不是昵称也不是表情表：这一
 // 票问的是「这条评论在不在聊这首歌」。
+//
+// ⚠️ **它是 `Matches` 的薄封装**：口径只有一处（「哪些写法算提到」那张表 +
+// 「怎么算提到」那套归一化）——两份判据迟早分叉，而分叉出来的症状是「筛选
+// 筛出来了，正文里却没有一处高亮」。
 func (t Table) Mentions(body string) bool {
+	return len(t.Matches(body)) > 0
+}
+
+// Range 是正文里一段命中的字符区间（**按 rune**，左闭右开）。
+//
+// ⚠️ **按 rune 不按字节**：正文里中日英混排还有 emoji（四个字节一个字），
+// 按字节下标切的话 `[]rune(body)[r.Start:r.End]` 会切出半个字——评论页拿它
+// 切 span 时那一整段就会错位。
+type Range struct{ Start, End int }
+
+// Matches 是正文里**每一处**命中的字符区间（按出现位置排好、重叠的合并）。
+//
+// # 为什么要单独一支（`Mentions` 不够用）
+//
+// `Mentions` 只答「有没有」——筛选用它够了。而评论页要把命中的那一段**染上
+// 底色**（票 #684），那就得知道「在正文的第几个字上」。两份判据各写一套的
+// 话迟早分叉（筛出来了却没有一处高亮），所以 `Mentions` 就是这一支的薄封装。
+//
+// # 🔴 归一化串上的下标**不能**直接切原串
+//
+// `normalize` 做了两件事：去掉所有空白、转小写。于是「Let It Go」归一化之后
+// 是 "letitgo"（7 个字），正文里写的 "let it go" 有 9 个字——拿归一化串上的
+// 下标去切原串，切出来的是**短一截**的一段（还可能是完全不相干的位置）。
+//
+// ⇒ 构造归一化串的时候**一边记一份映射**（归一化的第 j 个字来自原串的第几个
+// rune），命中之后按它翻回原串。
+//
+// ⚠️ **翻回来的区间会包含别名中间原本夹着的空格**（"let it go" 那 9 个字）：
+// 这是**对的**——高亮该覆盖整段，而不是把空格漏成几道缝。
+//
+// # 性能
+//
+// 评论页每一条评论跑一次（排一次版、缓存下来，见 `comments.go` 的
+// `commentBodyOf`——**不是每帧**）。所以这里的目标是「一趟构造 + 每个别名一趟
+// 子串搜索」：`strings.Index` 走的是字节搜索（快），而下标换算靠二分查那张
+// 映射表——不嵌套重扫整条正文。
+func (t Table) Matches(body string) []Range {
 	if body == "" || len(t.keys) == 0 {
-		return false
+		return nil
 	}
-	b := normalize(body)
-	if b == "" {
-		return false
+	// 归一化串 + 两份下标：`starts[j]` 是归一化串里第 j 个字的**字节**偏移，
+	// `orig[j]` 是它来自原串的第几个 rune。
+	//
+	// ⚠️ **`orig` 记的是「产出了这个归一化字的那个原串 rune」**，所以两个
+	// 归一化字之间的原串空白不在映射里——而映射回来时那一段区间**自然**把
+	// 它们包含进去（`orig[s]` 到 `orig[e-1]+1`）。
+	var b strings.Builder
+	b.Grow(len(body))
+	norms := utf8.RuneCountInString(body)
+	orig := make([]int, 0, norms)
+	starts := make([]int, 0, norms)
+	runeIdx := 0
+	for _, r := range body {
+		if unicode.IsSpace(r) {
+			runeIdx++
+			continue
+		}
+		starts = append(starts, b.Len())
+		orig = append(orig, runeIdx)
+		b.WriteRune(unicode.ToLower(r))
+		runeIdx++
 	}
+	if len(orig) == 0 {
+		return nil
+	}
+	norm := b.String()
+
+	var out []Range
 	for _, k := range t.keys {
-		if strings.Contains(b, k) {
-			return true
+		if k == "" {
+			continue
+		}
+		from := 0
+		for from <= len(norm)-len(k) {
+			j := strings.Index(norm[from:], k)
+			if j < 0 {
+				break
+			}
+			j += from
+			// 归一化侧的 rune 区间 [s, e)：`starts` 是每个字的起始字节偏移，
+			// 二分就能把字节偏移翻成字下标。
+			end := j + len(k)
+			s := sort.SearchInts(starts, j)
+			e := sort.SearchInts(starts, end)
+			// 🔴 **命中必须落在字边界上**：归一化串是按 rune 拼的，而子串匹配
+			// 走的是字节——理论上不会错位（两边的码点来自同一批 rune），但真撞
+			// 上中间那一格时**宁可不标**，也不拿一个错位的区间去切字符串。
+			if s >= len(orig) || starts[s] != j ||
+				(e < len(starts) && starts[e] != end) || e <= s {
+				break
+			}
+			out = append(out, Range{Start: orig[s], End: orig[e-1] + 1})
+			// ⚠️ **同一段里同一个别名只找一次**：别名是歌名（两三个字起），
+			// 自己套自己的（"aaa" 那种）不是歌名会有的形状；从头 `j+1` 再找
+			// 一遍会让这一步在病态输入上退化成平方。
+			from = j + len(k)
 		}
 	}
-	return false
+	if len(out) == 0 {
+		return nil
+	}
+	// 🔴 **重叠/相邻的合并**：别名表里有长短两档命中同一段的时候（「晴天」与
+	// 「晴天真好听」），不合并就是同一段两层底色——画面上看不出来，但 span
+	// 会白白多切几段。
+	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
+	merged := out[:0]
+	for _, r := range out {
+		if len(merged) > 0 && r.Start <= merged[len(merged)-1].End {
+			if r.End > merged[len(merged)-1].End {
+				merged[len(merged)-1].End = r.End
+			}
+			continue
+		}
+		merged = append(merged, r)
+	}
+	return merged
 }
 
 // Empty 报这张表是不是空的（这一首没有名字）。
