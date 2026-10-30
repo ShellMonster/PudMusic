@@ -766,15 +766,31 @@ type App struct {
 	commentsRepliesWanted map[int64]bool
 	// commentsAvids 记着 bvid → avid 的换算（省掉同一首歌的第二次往返）。
 	commentsAvids map[string]int64
-	// commentsAvidWaiters 是「正在换 avid 的那一趟」（bvid → 那个 chan）。
+	// commentsReplyCounts 记着 bvid → 评论数（`stat.reply`）。
 	//
-	// 🔴 **同一时刻只发一趟**：主列表那一趟和楼中楼那一趟可能同时问同一个
-	// bvid 的 avid——两趟都发出去就是两次网络往返。
-	commentsAvidWaiters map[string]chan struct{}
+	// 🔴 **它和 `commentsAvids` 是同一趟来的**（票 #682）：稿件详情一次回两样。
+	// ⚠️ **只在内存里**：盘上那个索引只存 aid（格式不动——改了会让已有用户的
+	// 缓存全部作废），所以重启之后第一次问稿件详情之前播放条上没有数字。
+	commentsReplyCounts map[string]int64
+	// commentsStatsKnown 记着「这个 bvid 的稿件详情**真的**问过」（两栏都拿到了）。
+	//
+	// ⚠️ **不能拿 `commentsAvids` 当这个判据**：盘上那个索引会往里塞 aid，而它
+	// **没有**评论数——拿它当「问过了」的话播放条永远等不到数字。
+	commentsStatsKnown map[string]bool
+	// commentsStatsWaiters 是「正在问这个 bvid 的稿件详情」（bvid → 那个 chan）。
+	//
+	// 🔴 **同一时刻只发一趟**：播放条要评论数、评论页要 avid，而它们是同一个
+	// 回包——两趟都发出去就是明明一次能拿到的东西问了 B 站两次。
+	commentsStatsWaiters map[string]chan struct{}
+	// commentsStatsTried 按 bvid 记着播放条那一趟**失败**的时刻（退避用）。
+	//
+	// ⚠️ **只有评论数这一路看它**：评论页那一趟的退避在 `ensureComments` /
+	// `commentsTriedAt` 那边，共用的话一次评论数问失败会让评论页也停在原地。
+	commentsStatsTried map[string]time.Time
 	// commentsCache 是评论缓存。挂上之前是 nil（那时的表现是「每次都要重问」，
 	// 没有别的坏处）。
 	commentsCache *comments.Cache
-	// commentsListFetch / commentsRepliesFetch / commentsArchiveIDFetch 是问
+	// commentsListFetch / commentsRepliesFetch / commentsArchiveFetch 是问
 	// 评论那几趟的替身。生产上永远是 nil（走取流零件上的那个 B 站客户端）。
 	//
 	// ⚠️ **只由界面那一侧读写**（跟 `partsFetch` 同一条规矩）：`ensureComments`
@@ -782,8 +798,8 @@ type App struct {
 	commentsListFetch commentsListFetchFunc
 	// commentsRepliesFetch 是问楼中楼那一趟。
 	commentsRepliesFetch commentsRepliesFetchFunc
-	// commentsArchiveIDFetch 是 bvid → avid 那一趟。
-	commentsArchiveIDFetch commentsArchiveIDFetchFunc
+	// commentsArchiveFetch 是 bvid → 稿件详情那一趟（aid + 评论数）。
+	commentsArchiveFetch commentsArchiveFetchFunc
 	// commentsSeq 是**在途序号**。每发起一趟问评论就加一（不管问的是哪一页）。
 	//
 	// 🔴 **它挡的是「同一个对象上有两趟」**：用户按了「刷新」，而首次加载那一趟

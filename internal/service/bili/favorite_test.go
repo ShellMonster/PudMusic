@@ -316,6 +316,124 @@ func TestArchiveIDAsksByBvid(t *testing.T) {
 	}
 }
 
+// TestArchiveStatsReadsTheReplyCount 钉住「一趟往返同时拿到 aid 和评论数」。
+//
+// 🔴 **为什么要把 `stat.reply` 一起读回来**：播放条上那枚「评论」键要显示评论数
+// （票 #682），而这一趟（bvid → aid）本来就要发——顺带读一栏不花第二个往返。
+//
+// ⚠️ **`stat` 缺失 / `reply` 是 0 都是「没有这个数」，不是「零评论」**：B 站没给
+// 那一栏时我们没资格说「这一首没人评论」。类型上两者都是 0（界面那一层的判据
+// 也是「0 就不画数字」），所以这里只钉「不报错、回 0」。
+func TestArchiveStatsReadsTheReplyCount(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"aid": 4242, "bvid": "BV1xx",
+			"stat": map[string]any{"view": 100, "danmaku": 3, "reply": 1286, "like": 9},
+		}))
+	})
+	st, err := f.client(t, Options{}).ArchiveStats(context.Background(), "BV1xx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Aid != 4242 {
+		t.Errorf("Aid 是 %d，want 4242", st.Aid)
+	}
+	if st.Reply != 1286 {
+		t.Errorf("Reply 是 %d，want 1286——`stat.reply` 就是评论数", st.Reply)
+	}
+
+	// ⚠️ **`stat` 整段缺失**：回包里没有那一栏时不许报错，Reply 是 0。
+	f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"aid": 7}))
+	})
+	st, err = f.client(t, Options{}).ArchiveStats(context.Background(), "BV1noStat")
+	if err != nil {
+		t.Fatalf("stat 缺失时报错了：%v", err)
+	}
+	if st.Aid != 7 || st.Reply != 0 {
+		t.Errorf("stat 缺失时拿到 %+v，want Aid=7 Reply=0", st)
+	}
+
+	// ⚠️ **bvid 空时当场返回，不发请求**（和 `ArchiveID` 的既有行为一字不差）。
+	before := len(f.requests())
+	if _, err := f.client(t, Options{}).ArchiveStats(context.Background(), ""); !errors.Is(err, ErrNoVideo) {
+		t.Errorf("空 bvid 回的是 %v，want ErrNoVideo", err)
+	}
+	if after := len(f.requests()); after != before {
+		t.Errorf("空 bvid 时发了 %d 趟请求——它该当场返回", after-before)
+	}
+
+	// aid 是 0 时是「没有这个稿件」，不是「aid 是 0」。
+	f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"aid": 0, "stat": map[string]any{"reply": 5}}))
+	})
+	if _, err := f.client(t, Options{}).ArchiveStats(context.Background(), "没了"); !errors.Is(err, ErrNoVideo) {
+		t.Errorf("aid 是 0 时回的是 %v，want ErrNoVideo", err)
+	}
+}
+
+// TestArchiveStatsSurvivesAStatShapeDrift 钉住**不用的那一栏坏了不许打死整条链路**。
+//
+// 🔴 `ArchiveID` 是收藏（`ridAndType`）和一键三连的必经之路，而它走的是
+// `ArchiveStats`——`json.Unmarshal` 遇到类型对不上会让**整个反序列化**失败，于是
+// 一个我们根本不用的字段（`stat.reply`）形状漂移，会把收藏和一键三连一起打死。
+// 改之前 `ArchiveID` 只解 `aid`，对这些漂移免疫。
+//
+// 仓库的明文约定（`flexjson.go` 文件头）：「凡是 B 站有可能写成字符串的数字都用
+// `flexInt`」——读不出来就当零值，绝不把整条带走。
+func TestArchiveStatsSurvivesAStatShapeDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stat any
+	}{
+		// B 站真把计数写成字符串（`flexjson.go` 文件头记的那次 `pub_ts` 就是）。
+		{"reply 是字符串", map[string]any{"view": 100, "reply": "1234"}},
+		// 形状整个变了：数组不是对象。
+		{"stat 是数组", []any{}},
+		// 形状整个变了：给了个字符串。
+		{"stat 是字符串", "没有这一栏"},
+		// 空值（这一档本来就是好的，留着盯「别的档的修法没把它弄坏」）。
+		{"stat 是 null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeBili(t)
+			f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+				data := map[string]any{"aid": 4242, "bvid": "BV1xx"}
+				if tc.stat != nil {
+					data["stat"] = tc.stat
+				} else {
+					data["stat"] = nil
+				}
+				writeJSON(w, jsonData(t, 0, "0", data))
+			})
+			c := f.client(t, Options{})
+
+			// 🔴 最要紧的一条：收藏 / 三连走的那条路必须照旧。
+			aid, err := c.ArchiveID(context.Background(), "BV1xx")
+			if err != nil {
+				t.Fatalf("ArchiveID 报错了：%v——一个不用的字段把收藏/三连打死了", err)
+			}
+			if aid != 4242 {
+				t.Errorf("ArchiveID 回的是 %d，want 4242", aid)
+			}
+
+			// `ArchiveStats` 自己也不许报错：aid 要对。
+			st, err := c.ArchiveStats(context.Background(), "BV1xx")
+			if err != nil {
+				t.Fatalf("ArchiveStats 报错了：%v", err)
+			}
+			if st.Aid != 4242 {
+				t.Errorf("ArchiveStats 的 Aid 是 %d，want 4242", st.Aid)
+			}
+			// `stat.reply` 是数字字符串时按 `flexInt` 的语义读出来（读不出来当 0）。
+			if tc.name == "reply 是字符串" && st.Reply != 1234 {
+				t.Errorf("reply 是 \"1234\" 时读成 %d，want 1234（flexInt 的语义）", st.Reply)
+			}
+		})
+	}
+}
+
 // TestFriendlyTalksAboutFavoriteFailures 收藏的那两个哨兵要能被说成一句用户听得懂
 // 的话。**不是所有收藏失败都值得重试**：「已经收藏过了」再按一次还是那句话，而
 // 「收藏夹接口没登录」重试多少次都一样，用户该做的是重新登录。

@@ -94,6 +94,16 @@ type biliFixture struct {
 	// 拿「这一页有几行」冒充，用户就知道了个假数。
 	searchTotal int
 
+	// viewReply 是 `/x/web-interface/view` 回的 `stat.reply`（评论数，票 #682）。
+	//
+	// ⚠️ **零值 = 「B 站没给这个数」**：播放条上那一枚键拿不到数就**不画数字**
+	// （不是画「0」——那会让用户以为没人评论）。
+	//
+	// ⚠️ **这一格特意摆在这里**（不跟在点赞那几格后面）：票 #680 在那一带把
+	// `lastUp` 改成了 `lastLike` / `lastLikeForm`，两边都往同一处加字段会让
+	// 合并必冲突。这一段是**只加不改**——合并时照这一格原样重放即可。
+	viewReply int64
+
 	// favoritedIn 是「这一首已经在哪些收藏夹里」；favoriteCalls 记下每一次写。
 	favoritedIn   []int64
 	favoriteCalls []url.Values
@@ -156,9 +166,16 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 				}}})
 
 	case r.URL.Path == "/x/web-interface/view":
-		// bvid → avid（收藏接口要的是 avid）。
+		// bvid → avid（收藏接口要的是 avid），外加 `stat.reply`——播放条上那一枚
+		// 「评论」键的评论数（票 #682）。
+		f.mu.Lock()
+		reply := f.viewReply
+		f.mu.Unlock()
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
-			"data": map[string]any{"aid": fixtureAid, "bvid": r.URL.Query().Get("bvid")}})
+			"data": map[string]any{
+				"aid": fixtureAid, "bvid": r.URL.Query().Get("bvid"),
+				"stat": map[string]any{"reply": reply},
+			}})
 
 	case r.URL.Path == "/x/v3/fav/folder/created/list-all":
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
@@ -377,6 +394,16 @@ func (f *biliFixture) serveVideoPages(w http.ResponseWriter, r *http.Request) {
 func (f *biliFixture) setVideoPages(pages []any) {
 	f.mu.Lock()
 	f.videoPages = pages
+	f.mu.Unlock()
+}
+
+// setViewReply 改 `/x/web-interface/view` 回的评论数（`stat.reply`，票 #682）。
+//
+// ⚠️ **带着锁改**：handler 在锁里读这一格，测试在锁外写的话，一趟还在路上的
+// 响应就可能和这一写撞上（`go test -race` 报出来的那种）。
+func (f *biliFixture) setViewReply(reply int64) {
+	f.mu.Lock()
+	f.viewReply = reply
 	f.mu.Unlock()
 }
 

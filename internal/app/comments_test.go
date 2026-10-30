@@ -18,7 +18,7 @@ import (
 
 // 评论这一摊：后台拉、缓存、退避、换歌就重置、以及「mv 要先换 avid」。
 //
-// 这一组**全走替身**（`commentsListFetch` / `commentsArchiveIDFetch` / …），
+// 这一组**全走替身**（`commentsListFetch` / `commentsArchiveFetch` / …），
 // 一个真请求都不发——不碰真 B 站（AGENTS.md §6）。
 
 // commentCalls 记着问评论那一趟被叫了几回、参数是什么。
@@ -139,9 +139,9 @@ func TestCommentsAreNotAskedTwice(t *testing.T) {
 
 	calls := &commentCalls{}
 	release := make(chan struct{})
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 12345, nil
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -189,9 +189,9 @@ func TestTheMVCommentOIDIsTheNumericAVID(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 987654321, nil
+		return bili.ArchiveStats{Aid: 987654321}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -223,9 +223,9 @@ func TestTheAudioCommentOIDIsTheAUID(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 111, nil
+		return bili.ArchiveStats{Aid: 111}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -255,9 +255,9 @@ func TestALocalItemIsNotWorthAsking(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 1, nil
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -290,8 +290,8 @@ func TestTheCommentsOfThePreviousSongDoNotShowUp(t *testing.T) {
 
 	release := make(chan struct{})
 	var n atomic.Int32
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		if oid == 111 {
@@ -346,9 +346,9 @@ func TestCommentsAreAskedAgainAfterAFailure(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 1, nil
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -410,8 +410,8 @@ func TestTheClosedSectionIsSaidInPlainWords(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		// 这一档就是 B 站回 12002 时仓库给出的那个错（`bili` 那一层已经把它
@@ -449,9 +449,9 @@ func TestTheSecondVisitIsInstant(t *testing.T) {
 	a.MountComments(comments.NewCache(dir))
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 12345, nil
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -494,9 +494,9 @@ func TestTheRefreshBypassesTheCache(t *testing.T) {
 	a.MountComments(comments.NewCache(dir))
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 12345, nil
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	var n atomic.Int32
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
@@ -542,9 +542,9 @@ func TestTheAVIDIsRememberedAcrossRestarts(t *testing.T) {
 	a.MountComments(comments.NewCache(dir))
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 12345, nil
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -572,9 +572,9 @@ func TestTheAVIDIsRememberedAcrossRestarts(t *testing.T) {
 	b := New()
 	t.Cleanup(b.Close)
 	b.MountComments(comments.NewCache(dir))
-	b.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	b.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 999, nil
+		return bili.ArchiveStats{Aid: 999}, nil
 	}
 	b.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -602,8 +602,8 @@ func TestARepeatedCommentIsNotAddedTwice(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -655,8 +655,8 @@ func TestAPageThatBringsNothingNewIsTheEnd(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -710,8 +710,8 @@ func TestLoadMoreUsesTheCursor(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -770,8 +770,8 @@ func TestLoadMoreCarriesTheOffsetThroughTheCache(t *testing.T) {
 	a.MountComments(comments.NewCache(dir))
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -810,9 +810,9 @@ func TestTheRepliesUseTheSameObject(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 12345, nil
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -853,8 +853,8 @@ func TestNoCommentsIsNotAFailure(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		// B 站回的是「这个对象在，只是没人评论」：code 0 + 空列表 + is_end。
@@ -890,9 +890,9 @@ func TestTheMVAsksAgainWhenTheAVIDCannotBeFetched(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
-		return 0, errors.New("断网了")
+		return bili.ArchiveStats{}, errors.New("断网了")
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -946,10 +946,10 @@ func TestTheAVIDIsFetchedOnlyOnce(t *testing.T) {
 
 	calls := &commentCalls{}
 	release := make(chan struct{})
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		calls.addArchive(bvid)
 		<-release
-		return 12345, nil
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -1062,8 +1062,8 @@ func TestEnsureCommentsAsksOnceAndSaysItIsLoaded(t *testing.T) {
 
 	calls := &commentCalls{}
 	release := make(chan struct{})
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 12345, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -1115,8 +1115,8 @@ func TestCommentsLoadedIsTrueEvenWhenNobodyCommented(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		return bili.CommentPage{IsEnd: true, AllCount: 0}, bili.ErrCommentNoComments
@@ -1182,8 +1182,8 @@ func TestTheReplyRequestGetsALiveContext(t *testing.T) {
 
 	// 主列表那一趟要先跑完：正是它把 `commentsCancel` 占住了，
 	// 复现的时序必须是「主列表已经拿到 → 再点楼中楼」。
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 12345, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		return commentPage([]bili.Comment{{Rpid: 1, Count: 2}}, "", true), nil
@@ -1220,8 +1220,8 @@ func TestTheReplyRequestSurvivesUntilItsOwnResult(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 12345, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		return commentPage([]bili.Comment{
