@@ -902,8 +902,12 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 // ⚠️ **同时把进度的基准归零**：这一段从「一个字节都还没到」开始，而「没下到」
 // 和「下到了一点」在 `Filled()` 上分别是 0 和 n——基准必须是 0，不然「一个
 // 字节都不来」会被判成「还在走」。
-func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
+func (a *App) setLoadSource(src *audio.StreamSource, gen int) bool {
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return false
+	}
 	old := a.loadSrc
 	if old != nil && old != src {
 		a.loadSrc = nil
@@ -917,6 +921,7 @@ func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
 	if old != nil {
 		old.Close()
 	}
+	return true
 }
 
 // dropLoadSource 把「这一趟自己的那一条」摘掉（它已经归播放器管了，或者
@@ -1425,9 +1430,13 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	if err != nil {
 		return nil, nil, err
 	}
-	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而播放器还没
-	// 建起来——「超时」和「退出」都要能把它掐掉（见 App.pendingSrc）。
-	a.setPendingSource(src, gen)
+	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而代次可能在
+	// 建源期间变化。发布前先在同一把锁下确认它仍属于当前播放；旧代次不能碰当前
+	// 播放的源（否则会把新歌的源关掉，见 setPendingSource）。
+	if !a.setPendingSource(src, gen) {
+		src.Close()
+		return nil, nil, errStaleGen
+	}
 	// 🔴 **「这一趟自己的那一条」**（票 #220）：看门狗问「这一段还有没有
 	// 进展」时要看的是**它**，不是上面那个共享的 `pendingSrc`——
 	// 换音质 / 换流重开那两条路会把 `pendingSrc` 顶掉（理由见 App 里
@@ -1435,8 +1444,10 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	//
 	// ⚠️ **只有「开新歌」那一趟才记**：那两条路建的源不是用户此刻在等的
 	// 那一条，记上去只会让看门狗盯着别人的流。
-	if run != nil {
-		a.setLoadSource(src, gen)
+	if run != nil && !a.setLoadSource(src, gen) {
+		a.clearPendingSource(src)
+		src.Close()
+		return nil, nil, errStaleGen
 	}
 	// 🔴 **建源的这一小段时间里代次也可能变了**（用户切歌、或者超时闹钟响了）。
 	// 那就没人要这条流了——立刻关掉，别让它下到天亮。
@@ -1505,8 +1516,12 @@ func (a *App) genStale(gen int) bool {
 //
 // 🔴 **上一条还在的话，先把它关掉**：它属于**上一趟**（代次已经变了的那一趟），
 // 没人要它了——不关掉的话它会一直下到天亮（票 #282）。
-func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
+func (a *App) setPendingSource(src *audio.StreamSource, gen int) bool {
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return false
+	}
 	old := a.pendingSrc
 	if old != nil && a.pendingSrcGen != gen {
 		a.pendingSrc = nil
@@ -1519,6 +1534,7 @@ func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
 	if old != nil {
 		old.Close()
 	}
+	return true
 }
 
 // clearPendingSource 把在途的那一条从 App 上摘掉（它已经归播放器管了，或者
