@@ -315,8 +315,9 @@ type App struct {
 	// ⚠️ **它和 `a.title` 是两首**：`a.title` 是正在放的那一首，而这一份是
 	// 失败的那一首——不分开的话，出错那一栏显示的是**上一首**，用户读到的是
 	// 「这一首正在放，但它打不开」。
-	failedTitle  string
-	failedArtist string
+	failedTitle   string
+	failedArtist  string
+	failedBiliURL string
 	// pending 是「上一次用户想放的那一项」。
 	//
 	// 它是重试那一枚键的**凭据**：重试要放的还是这一首，而不是队列里
@@ -1269,21 +1270,22 @@ func (a *App) sourceLocked() string {
 	return SourceOnline
 }
 
-// biliURLLocked 是当前这一首在 B 站上的地址。**必须在持锁时调**。
+// biliURLLocked 是播放条当前动作对应的 B 站地址。**必须在持锁时调**。
 //
-// 正在放的那一首（`a.online`）优先；还没有放上（取流失败了）就用**用户
-// 刚才想放的那一首**（`a.pending`）。
-//
-// 本地文件在 B 站上没有对应的东西，而没有稿件身份的在线条目（没挂投稿的
-// 那种）也没有——那两种都给空串。
+// 有播放器时，标题和链接必须来自同一个实际播放器条目：在线播放器用
+// `a.online`，本地播放器没有 B 站地址。在线取流尚未装上时，旧播放器仍是播放条目，
+// 不能把 `pending` 的链接提前挂上去；只有没有播放器的失败状态才回退到 `pending`。
 func (a *App) biliURLLocked() string {
-	if a.online != nil {
-		return BiliLink(a.online.item)
+	if a.errText != "" && a.failedBiliURL != "" {
+		return a.failedBiliURL
 	}
-	// 🔴 **取流失败的时候 `a.online` 从没装上**（那条流压根没建起来），
-	// 而用户想听的那一首在 `pending` 里。「在 B 站里听它」正是失败之后
-	// 用户能做的事，地址得从那儿来——不然那枚键压根不会出现。
-	return BiliLink(a.pending)
+	if a.player == nil {
+		return BiliLink(a.pending)
+	}
+	if a.online == nil {
+		return ""
+	}
+	return BiliLink(a.online.item)
 }
 
 // setCover 记下当前这首的封面地址。
@@ -1366,6 +1368,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		// 成一件事（理由见 `State.FailedTitle`）。
 		a.failedTitle = ""
 		a.failedArtist = ""
+		a.failedBiliURL = ""
 		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
 		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
 		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。
