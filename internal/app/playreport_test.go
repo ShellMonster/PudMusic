@@ -293,6 +293,38 @@ func untilBeats(t *testing.T, b *reportBili, action string, n int) []url.Values 
 	}
 }
 
+// beatUntil 一边「放」一边等到心跳够 n 条，最多等 timeout。
+//
+// # 为什么不能只写「循环 6 次、每次 sleep 25ms」
+//
+// 心跳是 `sync` 里按「离上次够久没有」（`r.every`，测试里 20ms）现判的，
+// 而 `sync` **只在 `play` 那一刻跑一趟**——没有别的东西会去推它。所以「发了几
+// 条心跳」= 「有几次 play 恰好落在 20ms 之外」，而这个数在负载高的机器上会
+// **变少**（`time.Sleep(25ms)` 实际睡成 21ms、或者某一次 play 被延后，就凑不满）。
+//
+// 2026-10-30 的 CI 上就是这么红的：`TestAFailedReportDoesNotReachTheUser`
+// 只收到 3 次心跳，报「失败一次就不记了」——而它其实每次都发了，只是那一轮
+// 没轮到。那不是被测代码坏了，是**判据留的余量不够**。
+//
+// ⇒ 判据改成「在 timeout 之内能凑够 n 条」：真坏了（一失败就停）等多久都只有
+// 一条，而调度慢只是让这一轮多跑几趟。play 的进度跟着已发心跳数往前走，
+// 保证每一趟都带着新的位置（不然心跳会被 `sync` 当重复丢掉）。
+//
+// ⚠️ **它有副作用**：每一趟都 `play` 一下（位置往前走一秒）。调用方要的是
+// 「心跳数」而不是「位置推到哪」，所以这没问题；但要断言位置的用例别用它。
+func beatUntil(t *testing.T, a *App, b *reportBili, it Item, n int, timeout time.Duration) int {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		got := len(b.allBeats())
+		if got >= n || time.Now().After(deadline) {
+			return got
+		}
+		play(a, it, time.Duration(got)*time.Second, 900*time.Second)
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
 func playTypesOf(beats []url.Values) []string {
 	out := make([]string, 0, len(beats))
 	for _, f := range beats {
@@ -721,7 +753,18 @@ func TestLoggingOutStopsTheReporting(t *testing.T) {
 		t.Fatalf("退登失败：%v", err)
 	}
 
-	// 退登之后这一首还在放着（我们不因为退登就停歌），但不该再记了。
+	// 🔴 **先把退登那一刻还在路上的发完，再开始数**
+	// （2026-10-30 的 CI 飘红）：`Logout` 只保证「之后不再开新的」，管不到
+	// **已经在 `PlayReportBeat` 里**的那一条——它可能在 `stopAccount` 之前就
+	// 过了 `live` 那一关，正在网络上。
+	//
+	// 那一条的**危害是零**：jar 已经被 `logout()` 清空，它到 B 站是匿名请求，
+	// 记不到任何人名下。而原来那条断言是「退登之后 `allBeats` 一条都不许涨」,
+	// 于是撞上这个窗口就红（实测 60 轮里 5 次），红的是「请求恰好发出去了一半」，
+	// 不是「退登没停」。
+	//
+	// ⇒ 等队列空了再取基线：这一条要盯的本来就是**退登之后还继续不继续发**。
+	reporterOf(t, a).drain(2 * time.Second)
 	opensAfter := b.opensCount()
 	beatsAfter := len(b.allBeats())
 	for i := 0; i < 12; i++ {
@@ -794,18 +837,26 @@ func TestAFailedReportDoesNotReachTheUser(t *testing.T) {
 
 	it := reportItem("BV1resilient", "333")
 	play(a, it, 0, 900*time.Second)
-	for i := 0; i < 6; i++ {
-		play(a, it, time.Duration(i)*time.Second, 900*time.Second)
-		time.Sleep(25 * time.Millisecond)
-	}
-	time.Sleep(150 * time.Millisecond)
+
+	// 🔴 **等到「真的又发了 5 次」为止，不要数固定几轮循环**
+	// （2026-10-30 的 CI 飘红）：心跳是 `sync` 里按「离上次够久没有」
+	// （`r.every` = 20ms）现判的，而 `sync` 只在 `play` 那一刻跑一趟。
+	// 原来写的是「6 轮 × sleep 25ms」，留给调度的余量只有 5ms——CI 上
+	// sleep 实际睡成 21ms、或者某一次 sync 被延后，就只凑出 3 次，
+	// 而那不是「失败一次就不记了」，是这一轮压根没轮到发。
+	//
+	// 判据还是同一条（**失败之后必须继续发**），只是把「等多久」交给一个
+	// 上限而不是固定循环次数：只要在 2 秒内凑够 5 次就是对的——真坏了
+	// （一失败就停）等多久都只有 1 次。
+	const wantBeats = 5
+	got := beatUntil(t, a, b, it, wantBeats, 2*time.Second)
 
 	if err := a.Snapshot().Err; err != "" {
 		t.Errorf("播放条上冒出了一句：%s", err)
 	}
 	// B 站拒了，但它**一直在拒**——我们这边必须一次都没停过。
-	if n := len(b.allBeats()); n < 5 {
-		t.Errorf("B 站拒了之后我们只发了 %d 次心跳——失败一次就不记了", n)
+	if got < wantBeats {
+		t.Errorf("B 站拒了之后我们只发了 %d 次心跳（等了 2 秒）——失败一次就不记了", got)
 	}
 	// 位置还在往前走：上报这条路上没有任何东西能卡住播放。
 	if st := a.Snapshot(); st.Err != "" {

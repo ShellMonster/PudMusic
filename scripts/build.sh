@@ -92,6 +92,13 @@ for d in build/*/; do
     done
 done
 
+say "包体归因"
+# 主可执行文件 / Resources / 其他（安装后解包体积）与安装包/压缩包（下载体积）
+# 分开报，再列链接依赖与资源来源。产物目录还没建出来时它只说「未构建」，不报错。
+#
+# ⚠️ 这里量的是**产物**，不是模块缓存：模块缓存的大小跟实际编进去多少没有关系。
+go run ./internal/perf/cmd/artifact-report
+
 say "装之前请读 README 的「已知边界」一节"
 cat <<'EOF'
   - macOS 的 dmg **没有公证**：首次打开 Gatekeeper 会拦，右键点图标选「打开」，

@@ -6,6 +6,8 @@ on:
       - opened
       - synchronize
       - reopened
+    # 这份列表与 ui-screenshots-comment.yml 的**完全一致**：两个 workflow 必须同进同退，
+    # 否则评论那个会去等一个永远不会出现的截图 run，干等十几分钟后失败。
     paths:
       - 'internal/ui/**'
       - 'internal/app/**'
@@ -14,6 +16,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/ui-screenshots.yml'
+      - '.github/workflows/ui-screenshots-comment.yml'
 
 concurrency:
   group: ui-screenshots-${{ github.event.pull_request.number }}

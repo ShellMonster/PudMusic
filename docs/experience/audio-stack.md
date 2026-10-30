@@ -182,13 +182,12 @@ WMA 解码器）。
 
 这条是「**决定还没做，但当前边界清楚**」，不是「没排期」。将来要不要做还没拍板。
 
-### ⚠️ Windows 上有损那一档还没在真机上验过
+### ✅ Windows 上有损那一档已在真机验过
 
-B 站的有损音质（`dash.audio`，最高 192K）那一档**接上了** Windows 自带的 Media Foundation
+B 站的有损音质（`dash.audio`，最高 192K）已经接上 Windows 自带的 Media Foundation
 （本仓库的 `internal/service/audio/mfadec`，`IMFTransform` + `CLSID_CMSAACDecMFT`，issue
-#253）——**但这条还没在真 Windows 上跑过一行**：验收它的那条 CI
-（`windows-aac-spike.yml`）的 runner 一直没接上（账号付款的问题），所以「能不能放、放在哪、
-多长」**都还没有真机上的数**。
+#253）。Windows runner 已跑通 AAC-LC 的 MP4 和裸 ADTS 解码、COM apartment 压力测试与产品层
+测试；当前 spike 记录的跨解码器最大差约为 `0.066711`，声道交换后差异约为 `3.61×`。
 
 ### ⚠️ 杜比音轨不能手动选
 

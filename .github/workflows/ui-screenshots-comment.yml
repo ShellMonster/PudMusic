@@ -6,6 +6,19 @@ on:
       - opened
       - synchronize
       - reopened
+    # 与 ui-screenshots.yml 用**同一套** paths 过滤：那个 workflow 只在动了这些路径时
+    # 才跑，本 workflow 也必须同样只在这些情况下跑。否则本 workflow 会去等一个
+    # 永远不会出现的截图 run（只改文档的 PR 就撞这个），干等十几分钟后以
+    # 「No UI screenshot run found」失败——那是本 workflow 的缺陷，不是 PR 的问题。
+    paths:
+      - 'internal/ui/**'
+      - 'internal/app/**'
+      - 'internal/service/bili/**'
+      - 'resources/**'
+      - 'go.mod'
+      - 'go.sum'
+      - '.github/workflows/ui-screenshots.yml'
+      - '.github/workflows/ui-screenshots-comment.yml'
   workflow_dispatch:
     inputs:
       pr_number:
@@ -73,7 +86,13 @@ jobs:
             }
 
             if (!run) {
-              core.setFailed(`No UI screenshot run found for PR #${prNumber} head ${pr.head.sha}.`);
+              // 本 workflow 的职责是**贴一条评论**，不是当门禁：截图跑没跑、过没过，
+              // 由 ui-screenshots.yml 自己报。所以「没找到截图 run」不该把这里判红——
+              // 那样只会在 PR 上多一个误导性的红叉（真有问题的那次运行已经报过红了）。
+              core.info(
+                `No UI screenshot run found for PR #${prNumber} head ${pr.head.sha}; ` +
+                'skipping the comment without failing this job.',
+              );
               return;
             }
 
