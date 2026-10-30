@@ -26,7 +26,7 @@ func mentionsString(e ast.Expr, want string) bool {
 	return ok && lit.Kind == token.STRING && lit.Value == strconv.Quote(want)
 }
 
-// 播放列表抽屉的验收：行高 64、按判重标识去重、「定位当前播放」平滑滚过去、
+// 播放列表抽屉的验收：行高 64、保留队列中的每一项、「定位当前播放」平滑滚过去、
 // 行菜单那五项。
 //
 // 窗口是 760×460（winW / winH），抽屉是 320 宽、到播放条上沿为止，所以：
@@ -505,12 +505,11 @@ func TestQueueRowClickPlaysThatSong(t *testing.T) {
 	}
 }
 
-// TestQueueDrawerMarksTheSongBeingPlayed 钉「正在放的那一行」是按**判重标识**认
-// 的，不是按队列下标。
+// TestQueueDrawerMarksTheSongBeingPlayed 钉「正在放的那一行」是按**队列位置**认的，
+// 同一首歌重复出现时，只有当前项对应的那一行高亮。
 //
-// 摆的是 [甲, 甲]：正在放的是**第二份**甲（队列的当前项在下标 1），抽屉里去重之后只
-// 画一行甲。按标识认 → 那行是绿的；按下标认 → 第 0 行和当前项不是同一行，画出来不是
-// 绿的。这和 Biu 的 `isSame(playItem, item)` 是一回事。
+// 摆的是 [甲, 甲]：正在放的是**第二份**甲（队列的当前项在下标 1），抽屉里画两行甲。
+// 按队列位置认 → 只有第二行是绿的。
 //
 // ⚠️ 必须**真的在放**：「正在放」的判据是「队列的当前项 **且** 确实有歌在放」
 // （见 Shell.playingIdentity）——接歌失败停下来之后当前项还落在一首放不出来的歌上，
@@ -529,8 +528,8 @@ func TestQueueDrawerMarksTheSongBeingPlayed(t *testing.T) {
 	h.tt.Frame()
 	openDrawer(t, h)
 
-	if got := countRows(h); got != 2 {
-		t.Fatalf("抽屉里画着 %d 行，want 2（甲 甲 乙 去重成 甲 乙）", got)
+	if got := countRows(h); got != 3 {
+		t.Fatalf("抽屉里画着 %d 行，want 3（甲、甲、乙逐项展示）", got)
 	}
 	playing, ok1 := h.tt.Find("甲")
 	other, ok2 := h.tt.Find("乙")
@@ -827,13 +826,13 @@ func chooseQueueItem(t *testing.T, h *harness, title, label string) {
 	h.tt.Frame()
 }
 
-// TestDeletingADedupedRowTakesEveryCopyOut 队列是 **[甲, 甲, 乙]**，抽屉里去重
-// 之后画两行（甲、乙）。
+// TestDeletingAQueuedCopyRemovesEveryCopyOut 队列是 **[甲, 甲, 乙]**，抽屉里逐项展示
+// 三行。删除其中一行时，沿用现有播放列表语义移除同身份的所有副本。
 //
 // 评审踩到的那一条：右键第一行甲、按「从列表删除」，只删一份的话那一行画完还在
 // （顶上的计数也不变），而播放条上还是甲——用户按了等于没按。Biu 的 `play-list.ts`
 // 里 `del` 用的就是 `isSame` 删全部同身份项。
-func TestDeletingADedupedRowTakesEveryCopyOut(t *testing.T) {
+func TestDeletingAQueuedCopyRemovesEveryCopyOut(t *testing.T) {
 	h := newHarness(t)
 	dir := t.TempDir()
 	a := localSong(t, dir, "甲.flac")
@@ -841,8 +840,8 @@ func TestDeletingADedupedRowTakesEveryCopyOut(t *testing.T) {
 	h.app.Enqueue(a, localSong(t, dir, "乙.flac")) // 队列 甲,甲,乙
 	openDrawer(t, h)
 
-	if got := countRows(h); got != 2 {
-		t.Fatalf("抽屉里画着 %d 行，want 2（去重之后）", got)
+	if got := countRows(h); got != 3 {
+		t.Fatalf("抽屉里画着 %d 行，want 3（队列项逐行展示）", got)
 	}
 	// 右键甲 那一行要用坐标：甲 正在放，同一个字在播放条上也有。
 	h.tt.RightClickAt(500, 85)
@@ -854,14 +853,14 @@ func TestDeletingADedupedRowTakesEveryCopyOut(t *testing.T) {
 	}
 	h.tt.Frame()
 
-	if got := titlesOf(h.app.Queue().Items()); len(got) != 1 || got[0] != "乙" {
-		t.Fatalf("删完之后队列是 %q，want 只剩 乙", got)
+	if got := titlesOf(h.app.Queue().Items()); len(got) != 2 || got[0] != "甲" || got[1] != "乙" {
+		t.Fatalf("删完之后队列是 %q，want 剩下一份甲和乙", got)
 	}
-	if h.tt.HasText("甲") {
-		t.Errorf("删掉了两首 甲，画面上还在，文字：%q", h.tt.Texts())
+	if !h.tt.HasText("甲") {
+		t.Errorf("只删掉一份甲后，画面上应该还保留另一份甲，文字：%q", h.tt.Texts())
 	}
-	if got := countRows(h); got != 1 {
-		t.Errorf("抽屉里画着 %d 行，want 1", got)
+	if got := countRows(h); got != 2 {
+		t.Errorf("抽屉里画着 %d 行，want 2", got)
 	}
 	// 删掉的里面有正在放的那首 → 接着放乙。
 	waitFor(t, "接着放乙", func() bool {
@@ -949,10 +948,9 @@ func TestQueueDrawerClearEmptiesItAndStops(t *testing.T) {
 	}
 }
 
-// TestQueueDrawerListsEverySongOnce 钉「按判重标识去重」，也顺带是一道保险：
-// 抽屉的行身份是判重标识（铁律四），而 MyGo 在 Tester 里**撞了 key 当场 panic**
-// （`t.rt.strict = true`），所以去掉 queueRowsFor 里那一次去重，这里就红。
-func TestQueueDrawerListsEverySongOnce(t *testing.T) {
+// TestQueueDrawerListsEveryQueuedItem 钉「按队列项逐行展示」，也顺带是一道保险：
+// 同一首歌可以重复入队，重复项必须有独立 key，不能在 Tester 严格模式下撞 key。
+func TestQueueDrawerListsEveryQueuedItem(t *testing.T) {
 	h := newHarness(t)
 	dup := onlineSong("BV1", "第一首")
 	// 五首里只有两个不同的判重标识，第一首还排了三遍。
@@ -960,12 +958,12 @@ func TestQueueDrawerListsEverySongOnce(t *testing.T) {
 	h.tt.Frame()
 	openDrawer(t, h)
 
-	if got := countRows(h); got != 2 {
-		t.Errorf("抽屉里画着 %d 行，want 2（五首里只有两个不同的判重标识）", got)
+	if got := countRows(h); got != 5 {
+		t.Errorf("抽屉里画着 %d 行，want 5（队列里的每一项都展示）", got)
 	}
-	// 顶上那个计数也是去重之后的（Biu 的 `pureList?.length`）。
-	if !h.tt.HasText("(2)") {
-		t.Errorf("顶上写的不是去重之后的数量 (2)，文字有 %q", h.tt.Texts())
+	// 顶上那个计数对应可见队列行数。
+	if !h.tt.HasText("(5)") {
+		t.Errorf("顶上写的不是队列数量 (5)，文字有 %q", h.tt.Texts())
 	}
 }
 

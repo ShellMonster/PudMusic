@@ -35,7 +35,6 @@ package list
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"runtime/debug"
@@ -195,6 +194,7 @@ type PagedList struct {
 	// 名字用 surf（surface，「面」）而不是 view：这一层已经有 `view` 那个方法了。
 	surf  *SwitchView
 	fetch Fetcher
+	pager *Pager[Music, struct{}]
 
 	// ── 下面这一摊只由界面线程读写（铁律一）────────────────────────────────
 
@@ -227,6 +227,15 @@ type PagedList struct {
 	// endView 是「**没有更多了**」那一行的画法（见 SetEndView）。nil 是没装——
 	// 那一行就不画（**别的页就是这样**：它们到底了就是到底了，界面上不多说一句）。
 	endView func(c *ui.Context)
+
+	// lastEndShown 是上一帧末尾那一行是不是「没有更多了」那一档。
+	//
+	// 🔴 **它挡的是「换画法之后不重新吸附」**（2026-10-29 的视觉走查）：框架
+	// 每一帧都是从**上一帧**的布局出发的，而末尾那一行是这一帧才换成「没有
+	// 更多了」的——不主动滚一下的话，它按上一帧那档的估计高度摆，用户看到的是
+	// 末尾那一行只露出半截（800 / 900 高的窗口上实测墨迹 11 行只剩 5 行），
+	// 再滚一次才变对。
+	lastEndShown bool
 
 	// failureNotice 报「拉页失败时要不要说一句」（见 SetFailureNotice）。默认要。
 	failureNotice bool
@@ -298,17 +307,34 @@ type pageResult struct {
 // 构造器里建），那时候还没有唤醒句柄也没有画面。第一页由第一帧的 view 拉。
 func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 	p := &PagedList{
-		surf:  NewSwitchView(cache, acts),
-		fetch: fetch,
-		// 「还有没有」要等有人问过才知道。在那之前一律当作还有——不然第一帧
-		// 会以为到底了，连页脚那一行都不画。
-		hasMore: true,
-		seen:    map[string]bool{},
-		// 失败要说一句（见 SetFailureNotice）：别的页就靠它告诉用户出了什么事。
-		failureNotice: true,
-		// 挂一个 ScrollState（见 SetScrollState）：回顶按钮靠它判「滚过多少」。
-		scrollState: true,
+		surf: NewSwitchView(cache, acts), fetch: fetch,
+		hasMore: true, seen: map[string]bool{}, failureNotice: true, scrollState: true,
 	}
+	p.pager = NewPager[Music, struct{}](func(ctx context.Context, page, _ int, _ struct{}) (PagerPage[Music], error) {
+		pg, err := fetch(ctx, page)
+		return PagerPage[Music]{Items: pg.Songs, HasMore: pg.HasMore}, err
+	}, func(m Music) string { return m.ID }, func() struct{} { return struct{}{} })
+	p.pager.SetApply(func(pg PagerPage[Music]) int {
+		for _, m := range pg.Items {
+			p.items = append(p.items, m)
+		}
+		p.page = p.pager.Status().Page
+		p.hasMore = pg.HasMore
+		p.loading = false
+		p.err = nil
+		p.blocked = false
+		p.rev++
+		return len(pg.Items)
+	})
+	p.pager.SetFailureHandler(func(page int, why PagerTrigger, err error) {
+		p.page = p.pager.Status().Page
+		p.loading = false
+		p.err = err
+		p.blocked = true
+		if p.failureNotice {
+			notify(p.surf.List().acts, loadFailToast(page, err), notice.Danger)
+		}
+	})
 	p.draw = guard.Wrap(p.view, p.onPanic)
 	return p
 }
@@ -437,10 +463,16 @@ func (p *PagedList) SetSongs(songs []Music) {
 	for _, m := range p.items {
 		p.seen[m.ID] = true
 	}
+	p.pager.Seed(songs)
 	p.page = 1
 	p.hasMore = false
 	p.err = nil
 	p.blocked = false
+	// ⚠️ **换了一批歌，上一批的「已经到底」不算数**：不复位的话，上一批看到底
+	// 之后换歌，新一批的结果在 `syncList` 跑到 `hasMore` 那一支之前就落地时，
+	// `lastEndShown` 还是 true，该重新吸附的时候不吸附（同一操作随帧序给出两种
+	// 结果）。
+	p.lastEndShown = false
 	p.rev++
 }
 
@@ -483,9 +515,7 @@ func (p *PagedList) Items() []Music { return append([]Music(nil), p.items...) }
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) Reload() {
 	p.Reset()
-	// 当场拉第一页，不等下一帧：Reload 有可能是在 view 之外调的（比如后台
-	// 事件），那时候不一定还有下一帧。
-	p.load(trigFirstRender)
+	p.pager.Reload()
 }
 
 // Reset 清空已加载的行，让这一份从第一页重来——**但不当场拉**。
@@ -499,14 +529,15 @@ func (p *PagedList) Reload() {
 //
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) Reset() {
-	p.stop() // 含 p.loading = false
-	p.gen++
+	p.pager.Reset()
+
 	p.items = nil
 	p.seen = map[string]bool{}
 	p.page = 0
 	p.hasMore = true
 	p.err = nil
 	p.blocked = false
+	p.lastEndShown = false
 	p.rev++
 	p.ScrollTop()
 }
@@ -570,22 +601,15 @@ func (p *PagedList) onPanic(rec any) {
 // 而恢复之后的第一帧 `Visible()` 报的还是满屏之前的旧行号，「末尾还在画面外」
 // 那个判断会晚一帧才成立。
 func (p *PagedList) Sync(c *ui.Context) {
-	// 🔴 铁律三：把这一帧的窗口登记进去。后台投递完结果要靠它叫醒界面，
-	// 不唤醒就是「结果到了、画面停在旧帧」（实测 0 帧刷新）。
 	p.setWake(c.Services())
+	p.pager.Sync(c.Services())
+	p.syncPagerState()
+}
 
-	// 先收后台投回来的页，再画：这样这一帧画的就是**已经加上**的那几行，
-	// 不用等下一帧。
-	p.adopt()
-
-	// ① 首次渲染检查。**必须在画之前发出去**，不是画完再发：
-	//   - 画完再发的话，这一帧画出来的是「这里还没有歌」，要等这一页回来才
-	//     换掉——用户第一眼看到的是空列表（这条有测试钉住，见 paged_test.go 的
-	//     TestTheVeryFirstFrameAlreadySaysLoading）。
-	//   - 而且那一段没有任何东西会叫醒界面：唤醒只有「结果到了」那一次。
-	if DecideFirstPage(p.pagingState()).Action == PagingLoadFirst {
-		p.load(trigFirstRender)
-	}
+func (p *PagedList) syncPagerState() {
+	st := p.pager.Status()
+	p.page, p.hasMore = st.Page, st.HasMore
+	p.loading, p.err, p.blocked = st.Loading, st.Err, st.Blocked
 }
 
 // view 是真的画法，View 是它外面那道 recover。
@@ -642,11 +666,38 @@ func (p *PagedList) syncList() {
 		case p.hasMore || p.blocked:
 			p.surf.SetFooter(p.footerView)
 			p.surf.SetFooterLabel(footerLabel)
+			p.lastEndShown = false
 		case p.endView != nil:
 			p.surf.SetFooter(p.endView)
 			p.surf.SetFooterLabel(EndLabel)
+			// 🔴 **刚换成「没有更多了」、而且用户本来就停在底部时，重新吸附一次**
+			// （2026-10-29 的视觉走查）：框架每一帧从**上一帧**的布局出发，而这一
+			// 行是这一帧才换的画法、高度和上一档（转圈）不一样。不重新吸附的话它
+			// 按上一帧那档的估计高度摆，末尾一行只露出半截——用户滚到底看到的就是
+			// 被切的那一屏，得再滚一次才正常。
+			//
+			// ⚠️ **判据是「上一帧末尾已经在画面里」（`AtEnd()`），不是「刚换过去」**
+			// （对抗性审查抓到的）：只看「刚换过去」的话，**用户没在底部也会被拽
+			// 到底**——滚到一半往回翻、上一页的回包落地那一帧，列表会从当前位置
+			// 直接跳到底（实测 offset 0 → 1200.9）；窗口高、一页装得下时自动补屏
+			// 也会有同样的问题（打开页面看到的是列表末尾，不是开头）。
+			//
+			// ⚠️ **只在刚换过去的那一帧叫**（`lastEndShown` 记着上一帧是哪一档）：
+			// 每帧都叫的话，用户往回滚一点就会被一直拽回底上，那一页就滚不动了。
+			//
+			// ⚠️ **换查询 / 换歌之后要复位**（`Reset` / `SetSongs` 两处都清）：
+			// 不复位的话，上一次「到底」之后重新加载，新结果在 `syncList` 跑到
+			// `hasMore` 那一支之前就落地时，`lastEndShown` 还是 true，该吸附的
+			// 时候不吸附——同一操作随帧序给出两种结果。
+			if !p.lastEndShown {
+				if p.surf.List().AtEnd() {
+					p.surf.ScrollToEnd()
+				}
+				p.lastEndShown = true
+			}
 		default:
 			p.surf.SetFooter(nil)
+			p.lastEndShown = false
 		}
 	}
 
@@ -767,12 +818,7 @@ func (t trigger) String() string {
 // 算拿到过（`apply` 里照样 `p.page = r.page`）——那一档是「没有更多了」，
 // 不是「还没问过」。
 func (p *PagedList) pagingState() PagingState {
-	return PagingState{
-		Fetched: p.page > 0,
-		Loading: p.loading,
-		Blocked: p.blocked,
-		HasMore: p.hasMore,
-	}
+	return p.pager.PagingState()
 }
 
 // afterFrame 是三重保障的②③（①在 view 开头，见那里）。每一帧跑一次——三条保障
@@ -800,13 +846,14 @@ func (p *PagedList) afterFrame() {
 	if d.Scrolled {
 		// ② 滚到底：哨兵行进了画面，而且列表不在顶上（是用户滚过去的，
 		// 不是它自己没填满）。
-		p.load(trigScrollEnd)
+		p.pager.Load(PagerScrollEnd)
 		return
 	}
 	// ③ 加载结束后再检一次：还在顶上、末尾已经画在屏幕上 = 全部内容一屏
 	// 摆得下。**这一支就是「筛选后只剩两页」的救命的那一支**：用户没滚过，
 	// 少的就是它。
-	p.load(trigRefill)
+	p.pager.Load(PagerRefill)
+
 }
 
 // load 拉下一页。三重保障和用户点重试最后都走这里。
@@ -835,7 +882,7 @@ func (p *PagedList) load(why trigger) {
 }
 
 // errFetcherPanic 是拉页器自己崩了之后变成的那个错。
-var errFetcherPanic = errors.New("拉页的代码崩了")
+var errFetcherPanic = ErrPagerPanic
 
 // loadFailToast 是拉页失败时弹的那一句。
 //
@@ -960,8 +1007,7 @@ func (p *PagedList) footerView(c *ui.Context) {
 				// 这是**行里的一句重试**，不是错误页上那颗主按钮：它跟着列表
 				// 最后一行出现，用扁平配方（无常驻底、无描边），悬停才有一层淡底。
 				if flat.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					p.blocked = false
-					p.load(trigRetry)
+					p.pager.Retry()
 				}
 				return
 			}

@@ -294,8 +294,12 @@ func (a *App) DownloaderMounted() bool {
 // 时钟）。直接 `a.wake()` 在那时候是空指针——崩在一个跟被测逻辑毫无关系的
 // goroutine 里，而症状是「拉收藏夹拉崩了」。
 func (a *App) wakeUI() {
-	if w := a.wakeLocked(); w != nil {
-		w()
+	a.mu.Lock()
+	closed := a.closed
+	wake := a.wake
+	a.mu.Unlock()
+	if !closed && wake != nil {
+		wake()
 	}
 }
 

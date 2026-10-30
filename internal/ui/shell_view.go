@@ -93,6 +93,13 @@ func (s *Shell) View(c *ui.Context) {
 		s.viewCrash(c)
 		return
 	}
+	// Take one shared page seam snapshot before drawing any page. All page
+	// modules read this frame input instead of independently sampling App state.
+	// A mini shell can be exercised with its App temporarily detached by the
+	// panic-recovery test; leave that failure inside the guarded draw callback.
+	if s.app != nil {
+		s.framePage = s.pageSeam()
+	}
 	s.draw(c)
 
 	// 提示：**这一遍 build 走完之后**才画（票 #420）。

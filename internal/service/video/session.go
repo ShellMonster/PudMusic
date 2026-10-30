@@ -6,16 +6,23 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/perf"
 )
 
 // Config 是一路视频要的外部依赖。
 type Config struct {
 	// Fetch 取流上 [from, to) 这段字节。地址失效、换 CDN 都由它自己处理。
 	Fetch func(ctx context.Context, from, to int64) ([]byte, error)
-	// Open 解码一个本地 fMP4 文件；空则用平台默认。
-	Open func(path string, pool chan []byte) (*Source, error)
+	// Open 解码一个本地 fMP4 文件；空则用平台默认。像素缓冲一律从这个 pool 借还。
+	Open func(path string, pool BufferPool) (*Source, error)
 	// TempDir 放分片临时文件；空则用系统临时目录。
 	TempDir string
+	// FramePoolBytes 是帧池的总字节预算；0 用 defaultFramePoolBytes。
+	// 给测试留一个口子，生产路径不传。
+	FramePoolBytes int64
+	// Gauges 是帧池记账写入的 gauge 集合；空则写进程级的那一份（#668 快照读它）。
+	Gauges *perf.Gauges
 }
 
 const (
@@ -33,7 +40,8 @@ const (
 // Session 是一路正在播放的视频：按需取分片、解码、按给定时钟交帧。
 // Poll/Seek/Close 只在一个 goroutine（界面线程）里调。
 type Session struct {
-	cfg Config
+	cfg  Config
+	pool *framePool
 
 	mu      sync.Mutex
 	frameMu sync.Mutex
@@ -49,7 +57,6 @@ type Session struct {
 	head      time.Duration
 	lastSeek  time.Time
 	prevPix   []byte
-	free      chan []byte
 	tempPath  string
 	closeOnce sync.Once
 }
@@ -59,7 +66,7 @@ func Start(cfg Config, at time.Duration) *Session {
 	if cfg.Open == nil {
 		cfg.Open = Open
 	}
-	s := &Session{cfg: cfg, free: make(chan []byte, 8)}
+	s := &Session{cfg: cfg, pool: newFramePool(cfg.FramePoolBytes, cfg.Gauges)}
 	s.begin(at)
 	return s
 }
@@ -86,6 +93,13 @@ func (s *Session) begin(at time.Duration) {
 // Err 是取流或解码失败的原因（没失败为 nil）。
 func (s *Session) Err() error { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
 
+// FramePoolStats 是帧池此刻的账目：预算、持有、借出、峰值与分配次数。
+//
+// 它是给诊断和测试用的读数，不是播放路径的一部分：Peak 与 PeakLent 能证明这一路
+// 相对改造前的槽位上限到底压到了多少字节，Lent 归零能证明关闭、Seek 和取消之后
+// 没有帧漏在别人手里。
+func (s *Session) FramePoolStats() FramePoolStats { return s.pool.stats() }
+
 // Duration 是整条视频流的时长，目录没读到之前为 0。
 func (s *Session) Duration() time.Duration {
 	s.mu.Lock()
@@ -105,6 +119,11 @@ func (s *Session) Seek(at time.Duration) {
 
 func (s *Session) seekLocked(at time.Duration) {
 	s.stop()
+	s.reclaimFrames()
+	if s.pool.isClosed() {
+		// Close 之后又 Seek：不再开新的一路（池已经收摊，开了也只会立刻失败）。
+		return
+	}
 	s.begin(at)
 }
 
@@ -119,15 +138,17 @@ func (s *Session) stop() {
 	<-done
 }
 
-// Close stops the decoder, recycles all frames that have not been consumed, and
-// removes the reusable segment file. It is safe to call concurrently and more
-// than once.
+// Close stops the decoder, recycles all frames that have not been consumed, drops
+// the pool's pooled buffers, and removes the reusable segment file. It is safe to
+// call concurrently and more than once.
 func (s *Session) Close() {
 	s.closeOnce.Do(func() {
 		s.frameMu.Lock()
 		defer s.frameMu.Unlock()
 		s.stop()
-		s.cleanupFrames()
+		s.reclaimFrames()
+		// 池里还留着的空闲缓冲也一并丢掉：Close 之后这块内存不该再算在进程头上。
+		s.pool.close()
 		if s.tempPath != "" {
 			_ = os.Remove(s.tempPath)
 			s.tempPath = ""
@@ -135,7 +156,9 @@ func (s *Session) Close() {
 	})
 }
 
-func (s *Session) cleanupFrames() {
+// reclaimFrames 把手上和队列里所有尚未消费的帧交回帧池。stop 之后 out 已关闭，
+// 这里的非阻塞排空会把队列中剩下的帧全部回收；没有 stop 时也不会卡住。
+func (s *Session) reclaimFrames() {
 	if s.pend != nil {
 		s.recycle(s.pend.Pix)
 		s.pend = nil
@@ -145,9 +168,12 @@ func (s *Session) cleanupFrames() {
 		s.prevPix = nil
 	}
 	s.shown, s.haveShow = Frame{}, false
-	for {
+	s.mu.Lock()
+	out := s.out
+	s.mu.Unlock()
+	for out != nil {
 		select {
-		case f, ok := <-s.out:
+		case f, ok := <-out:
 			if !ok {
 				return
 			}
@@ -214,10 +240,7 @@ end:
 }
 
 func (s *Session) recycle(b []byte) {
-	select {
-	case s.free <- b:
-	default:
-	}
+	s.pool.Release(b)
 }
 
 func (s *Session) index(ctx context.Context) (*Index, error) {
@@ -324,7 +347,7 @@ func (s *Session) playSegment(ctx context.Context, out chan<- Frame, init, data 
 	if err != nil {
 		return err
 	}
-	src, err := s.cfg.Open(s.tempPath, s.free)
+	src, err := s.cfg.Open(s.tempPath, s.pool)
 	if err != nil {
 		return err
 	}
@@ -349,6 +372,9 @@ func (s *Session) playSegment(ctx context.Context, out chan<- Frame, init, data 
 			select {
 			case out <- fr:
 			case <-ctx.Done():
+				// 这一帧已经从池里借了缓冲；取消时它不会被任何人消费，
+				// 必须在这里还回去，gauge 才能归零。
+				src.Recycle(fr.Pix)
 				return nil
 			}
 		case <-ctx.Done():
