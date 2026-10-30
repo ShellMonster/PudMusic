@@ -748,7 +748,7 @@ func streamExt(urls []string) string {
 }
 
 // closeRemoveRetries 是 Windows 文件句柄释放和目录删除之间的短暂竞态保护。
-const closeRemoveRetries = 10
+const closeRemoveRetries = 200
 
 // closeRemoveWait 是每次重试删除缓存文件前的等待时间。
 const closeRemoveWait = 10 * time.Millisecond
@@ -760,16 +760,26 @@ func removeTempFile(path string) error {
 	}
 	var lastErr error
 	for attempt := 0; attempt < closeRemoveRetries; attempt++ {
-		if err := os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) {
-			return nil
-		} else {
+		err := os.Remove(path)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			lastErr = err
+		} else {
+			_, statErr := os.Stat(path)
+			if errors.Is(statErr, os.ErrNotExist) {
+				return nil
+			}
+			if statErr != nil {
+				lastErr = statErr
+			}
 		}
 		if attempt+1 < closeRemoveRetries {
 			time.Sleep(closeRemoveWait)
 		}
 	}
-	return lastErr
+	if lastErr != nil {
+		return lastErr
+	}
+	return fmt.Errorf("audio: 在线流缓存仍存在：%s", path)
 }
 
 // clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。
