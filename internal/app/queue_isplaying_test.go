@@ -322,3 +322,54 @@ func TestTheUPOwnerIsClearedWithTheTrack(t *testing.T) {
 			st.Artist, st.ArtistMid)
 	}
 }
+
+// TestIsPlayingDoesNotMarkAVideoRowForTheAudioWithTheSameNumber 钉住「先判种类」
+// 那一半的整链（票 #683 的复审）。
+//
+// `ItemOfMedia` 对**所有**类型都填 `Sid = Media.ID`，而 avid 和 auid 是同一个
+// 数值空间：队列里正在放 auid=12345 的音乐库那一首，收藏夹里恰好有一行
+// avid=12345 的视频。不判种类的话那一行会被标成「正在放」——用户点它，
+// `EnqueueAndPlayNow` 也会定位到**音乐库那一首**上。
+func TestIsPlayingDoesNotMarkAVideoRowForTheAudioWithTheSameNumber(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	playing := Item{Source: "online", Type: "audio", Sid: "12345", Title: "音乐库那一首"}
+	playingNow(a, playing)
+
+	// 收藏夹里那一行：`ItemOfMedia` 的形状（Sid 也填了同一个数）。
+	row := Item{Source: "online", Type: "mv", Bvid: "BV1xx411c7mD", Sid: "12345", Title: "收藏夹里的视频"}
+	if a.IsPlaying(row) {
+		t.Error("正在放的是音乐库的那一首（auid=12345），而 avid 恰好也是 12345 的视频行" +
+			"被标成了正在播放——这一行点下去会跳到音乐库那一首上")
+	}
+	// 同一首还是要认得出。
+	if !a.IsPlaying(Item{Source: "online", Type: "audio", Sid: "12345"}) {
+		t.Error("正在放的音乐库那首歌自己没被认出来")
+	}
+}
+
+// TestEnqueueAndPlayNowDoesNotJumpToTheAudioWithTheSameNumber 是上面那一条的
+// 「点它」那一半：视频行不该把当前项定位到音乐库那一首上、也不该少一份。
+func TestEnqueueAndPlayNowDoesNotJumpToTheAudioWithTheSameNumber(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	playing := Item{Source: "online", Type: "audio", Sid: "12345", Title: "音乐库那一首"}
+	a.Queue().Reset(playing)
+	if _, ok := a.Queue().Move(0); !ok {
+		t.Fatal("队列没有当前项")
+	}
+
+	row := Item{Source: "online", Type: "mv", Bvid: "BV1xx411c7mD", Sid: "12345", Title: "收藏夹里的视频"}
+	// 起播会失败（没挂取流），但**队列形状**是这一条要断的。
+	_ = a.EnqueueAndPlayNow(row)
+
+	items := a.Queue().Items()
+	if len(items) != 2 {
+		t.Fatalf("队列里有 %d 项，want 2（视频是另外一首，要追加）：%+v", len(items), items)
+	}
+	if items[1].Type != "mv" || items[1].Bvid != "BV1xx411c7mD" {
+		t.Errorf("追加进去的是 %+v，want 那一行视频", items[1])
+	}
+}

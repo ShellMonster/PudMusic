@@ -79,7 +79,10 @@ func TestTheSeasonPageListsItsArchives(t *testing.T) {
 			if c.typ == bili.CollectionSeries {
 				wantPath = "/x/series/archives"
 			}
-			if got := b.hitsOf(wantPath); got != 1 {
+			// ⚠️ **数的是「内容那一趟」**（票 #683 的复审）：头图区的元信息也从
+			// 同一个接口拿（合集是 `page_size=1` 的那一次），拿总量数会把那一趟
+			// 也算进来。系列的元信息走另一条路径，不受影响。
+			if got := b.hitsOfContent(wantPath); got != 1 {
 				t.Errorf("%s 打了 %q %d 次，want 1 次", c.name, wantPath, got)
 			}
 			if got := b.hitsOf("/x/v3/fav/resource/list"); got != 0 {

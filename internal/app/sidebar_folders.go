@@ -255,7 +255,9 @@ func (a *App) UnfavoriteFolder(f Favorite, done func(string, notice.Tone)) {
 		return
 	}
 	go func() {
-		if err := c.refs.Client.UnfavoriteCollection(context.Background(), f.ID); err != nil {
+		// ⚠️ 侧栏「我收藏的」那一组只收收藏夹（见 `collectedFavorites` 的注释），
+		// 所以类型写死收藏夹——那一行本来就是从 `fav/folder/collected/list` 来的。
+		if err := c.refs.Client.UnfavoriteCollection(context.Background(), f.ID, bili.CollectionFavorite); err != nil {
 			log.Printf("biu: 取消收藏收藏夹 %d 失败：%v", f.ID, err)
 			sayFolder(done, "取消不了收藏："+bili.Friendly(err), notice.Danger)
 			a.wakeUI()

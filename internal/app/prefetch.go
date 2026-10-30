@@ -486,6 +486,11 @@ func (a *App) invalidatePrefetch() {
 //	       而问出来的那一个已经被填进备好的那一份里了）
 //	audio  sid 一样
 //
+// 🔴 **先判种类**：`ItemOfMedia` 对**所有**类型都填 `Sid = Media.ID`
+// （`collection_download.go`），而 avid 和 auid 是同一个数值空间——不判种类的话
+// 队列里正在放的 auid=12345 和收藏夹里 avid=12345 的那一行会被认成同一首：
+// 列表上那一行在跳、点它播的是「音乐库那一首」。种类不同一律不同，不比后面那几样。
+//
 // ⚠️ **认不出是哪一首的（bvid 和 sid 都是空串）一律当不同**：那种项压根放不了，
 // 而当成同一首的话，一份来路不明的地址会被当成「这一首的」。
 //
@@ -498,7 +503,12 @@ func (a *App) invalidatePrefetch() {
 // ⚠️ **后两个都是「有一边不知道 cid」的场景**，前一个两边都知道（备的时候已经
 // 补过 cid）。三种都要的是「不知道的那一边不比」——所以判据只留这一份。
 func sameStreamTarget(x, y Item) bool {
-	if x.Type == "audio" || y.Type == "audio" {
+	xAudio, yAudio := x.Type == "audio", y.Type == "audio"
+	// 🔴 **种类不同一律不同**（理由见上面那段）：audio 只跟 audio 比，mv 只跟 mv 比。
+	if xAudio != yAudio {
+		return false
+	}
+	if xAudio {
 		return x.Sid != "" && x.Sid == y.Sid
 	}
 	if x.Bvid == "" || x.Bvid != y.Bvid {

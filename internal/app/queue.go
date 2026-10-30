@@ -233,7 +233,7 @@ func (it Item) Identity() string {
 // **同一个 bvid 的两个分 P 被当成了同一首**，三个地方各错一次：
 //
 //	抽屉去重	两集只画一行（用户看不到第二集）
-//	indexByIdentity	点第二集，找到的是第一集（放出来的是第一集）
+//	定位「点它」	按 bvid 找的是第一集（放出来的是第一集）
 //	SameTrack	`PlayAt` 判「同一首」→ 只挪指针、不重新取流（按了没反应）
 //
 // ⚠️ **没有 cid 时退回按 bvid**：搜索结果只给 bvid，那时还不知道是哪一集。
@@ -257,6 +257,12 @@ func (it Item) trackKey() (kind, id string) {
 	case it.IsLocal():
 		return playbackIDLocal, it.Path
 	case it.Type == "mv":
+		// ⚠️ **bvid 是空串时整项都认不出来**（票 #683 的复审）：原来这一支会
+		// 拼出 `mv:|<cid>`——两个都认不出 bvid 的坏项各带一个 cid 就判成了两首，
+		// 而它们连是哪一首都不知道。空串才是「没法判重」那一档（见 `Identity`）。
+		if it.Bvid == "" {
+			return "", ""
+		}
 		if it.Cid == "" {
 			// 还不知道是哪一集：按投稿判（理由见上面那一节）。
 			return playbackIDMV, it.Bvid
@@ -285,6 +291,31 @@ func splitMVIdentity(s string) (bvid, cid string) {
 		return s[:i], s[i+1:]
 	}
 	return s, ""
+}
+
+// splitIdentity 是 `Identity()` 的**退化那一半的逆**：把 `mv:<bvid>|<cid>` /
+// `audio:<sid>` / `local:<路径>` 拆成「种类」和「主 id」（mv 取 bvid、audio 取
+// sid、本地取路径）。
+//
+// 🔴 **恢复上次听到哪儿时用它做第二趟匹配**（票 #683 的复审，见
+// `RestorePlayback`）：旧文件里 `Current` 是 `mv:<bvid>`（没有 `|<cid>`），而恢复
+// 出来的那一项身份已经是 `mv:<bvid>|<cid>`——严格相等找不到，当前项会退回第一首。
+// 退化到「种类 + bvid」就认得出它是同一集的旧写法。
+//
+// ⚠️ **它和 `trackKey` 是同一份口径的两半**（前缀 + 主 id）：两处各拼一份的话，
+// 改了前缀忘了一处，恢复出来的当前项会静默退回第一首（而界面上看不出任何异样）。
+func splitIdentity(id string) (kind, key string) {
+	for _, k := range []string{playbackIDLocal, playbackIDMV, playbackIDAudio} {
+		if strings.HasPrefix(id, k) {
+			v := strings.TrimPrefix(id, k)
+			if k == playbackIDMV {
+				// mv 的主 id 是 bvid：把 `|<cid>` 那一段去掉。
+				v, _ = splitMVIdentity(v)
+			}
+			return k, v
+		}
+	}
+	return "", ""
 }
 
 // SameTrack 报两项是不是同一首。
@@ -928,33 +959,17 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	return it, true
 }
 
-// indexByIdentity 是队列里**第一项**判重标识等于 id 的下标，找不到是 -1。
-//
-// 「第一项」是有意的：抽屉按判重标识去重、只画第一份（`queueRowsFor`），
-// 定位到第一份才和用户看见的那一行对得上。
-//
-// id 是空串时一律找不到（认不出是哪一首的项不参与判重，理由见 `Item.Identity`）。
-func (q *Queue) indexByIdentity(id string) (int, bool) {
-	if id == "" {
-		return -1, false
-	}
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for i := range q.items {
-		if q.items[i].Identity() == id {
-			return i, true
-		}
-	}
-	return -1, false
-}
-
 // indexOfStreamTarget 是队列里**第一项**「和 it 是同一段流」的下标，找不到是 -1。
 //
-// 🔴 **它和 `indexByIdentity` 是两件事**（票 #683）：
+// 🔴 **它和队列身份（`Item.Identity`）是两件事**（票 #683）：
 //
-//	`indexByIdentity`	队列身份（去重 / 删除 / 落盘）——「有一个不知道是哪一集」
-//	                    和「确定的第 777 集」是两首（理由见 `trackKey`）
-//	`indexOfStreamTarget`	「用户说放的是不是这一段」——不知道的那一边不比 cid
+//	队列身份	去重 / 删除 / 落盘——「有一个不知道是哪一集」和「确定的第 777 集」
+//	            是两首（理由见 `trackKey`）
+//	这一条	「用户说放的是不是这一段」——不知道的那一边不比 cid
+//
+// ⚠️ **队列身份那一侧没有「按标识找下标」的方法**（这里原来有一个
+// `indexByIdentity`，票 #683 之后没有调用方，删了）：定位「点它」走的是这一条，
+// 而它的第一趟就是身份相等（见下面那两趟扫描）。
 //
 // 场景：队列里那一项起播之后补出了 cid（缺陷 D），而用户回到列表点同一首——
 // 列表那一行是接口给的、没有 cid。按 `Identity` 找是「没有」→ 追加一份，队列里
@@ -967,9 +982,24 @@ func (q *Queue) indexByIdentity(id string) (int, bool) {
 // 本地项两条都比不出来（`sameStreamTarget` 只认 bvid / sid），所以本地那一档
 // 退回 `SameTrack`（路径就是身份）。这一条只在这个出口用，别在预取那一层也
 // 套上——那边压根不备本地文件（见 `maybePrefetch`）。
+//
+// 🔴 **两趟扫：先精确、后退回宽松**（票 #683 的复审）。宽松判据在「一边有 cid、
+// 一边没有」时判同一，而队列里完全可能先有一项**不知道是哪一集**的同一个 bvid
+// （收藏夹 / 搜索结果来的），后面才是用户点的那一集——一趟扫到底的话返回的永远
+// 是第一项，用户点的「第 2 集」被未知的那一项顶掉，取流请求带的是第一集的 cid。
+// 精确那一趟是 `Identity` 相等（= `SameTrack`），退回那一趟才是 `sameStreamTarget`。
 func (q *Queue) indexOfStreamTarget(it Item) (int, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	// 第一趟：身份一模一样的那一项（确定的第 777 集优先于「不知道是哪一集」）。
+	if id := it.Identity(); id != "" {
+		for i := range q.items {
+			if q.items[i].Identity() == id {
+				return i, true
+			}
+		}
+	}
+	// 第二趟：放宽到「同一段流」——不知道 cid 的那一边不比。
 	for i := range q.items {
 		if streamTargetOrSameTrack(q.items[i], it) {
 			return i, true
@@ -1025,8 +1055,14 @@ func (q *Queue) RemoveIdentity(id string) (removed []Item, wasCurrent, ok bool) 
 
 // replaceAt 把第 i 项就地换成 item。队列位置和当前项都**不动**。
 //
-// 只有换分集用得到（`App.PlayPart`）：同一个 bvid 的另一集在判重上是同一首，
-// 插一项新的会让抽屉和队列里同时出现同一首。
+// 只有换分集用得到（`App.PlayPart`）：换集是**同一项换了 cid**，插一项新的会让
+// 队列里多出一份同一集（身份从 `mv:<bvid>|<旧 cid>` 变成 `mv:<bvid>|<新 cid>`，
+// 抽屉会画成两行，而「从列表删除」只删得掉其中一份）。
+//
+// ⚠️ **洗牌袋和历史栈里那一格要跟着换身份**（票 #683 的复审）：它们记的是判重
+// 标识，而换集之后那一项的身份变了——不改的话袋子把这一格当成「已经被删掉」的
+// 跳过，这一轮**永远抽不到它**；历史栈里那一格同样退不回来。见
+// `replaceIdentityLocked`。
 //
 // 不导出：它和 `selectAt` 一样只许「App.PlayPart」这一条路调，多导出一个就多一处
 // 能把队列和播放器对不上的地方。i 越界是 false 且什么都不动。
@@ -1036,7 +1072,9 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 		q.mu.Unlock()
 		return false
 	}
+	oldID := q.items[i].Identity()
 	q.items[i] = item
+	q.replaceIdentityLocked(oldID, item.Identity())
 	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()
@@ -1045,11 +1083,11 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 	return true
 }
 
-// replaceCurrentIf 把**当前项**就地换成 item，前提是它此刻仍然**正好是 expected**。
-// 返回换没换。
+// fillCidIf 把**当前项连同它同身份的所有副本**的分 P id 一起补上，前提是当前项
+// 此刻仍然**正好是 expected**。返回改没改。
 //
 // 这是「起播时补出来的分 P id 写回队列」（票 #683，见 `App.writeBackCid`）那一条
-// 路用的。它和 `replaceAt` 的差别只有一个，但那一个是必须的：
+// 路用的。
 //
 // 🔴 **调用方在后台 goroutine 里跑**（取流那一趟），从「看一眼当前项」到「写回去」
 // 之间隔着一次网络往返——那几秒里用户完全可能点走了（换了一集、换了另一首）。
@@ -1060,17 +1098,44 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 // （同一投稿的每一集都是同一个 bvid），只比 cid 也不够（缺 cid 的那几项 cid 都是
 // 空串，认不出是哪一首）。整项相等是「用户按的还是当初那一项」最强的判据。
 //
+// 🔴 **同身份的副本一起补**（票 #683 的复审）：同一集在队列里排了两份时，两份的
+// 身份都是 `mv:<bvid>`、抽屉只画一行。只补当前那一份的话，它的身份变成
+// `mv:<bvid>|<cid>`，另一份还是 `mv:<bvid>`——抽屉立刻变成两行，而「从列表删除」
+// 只删得掉其中一份。两份补同一个 cid 之后身份仍然一样，抽屉还是一行。
+//
+// ⚠️ **只补 cid 还是空的那几项**：已经确定的某一集不该被改掉（它的身份里带着
+// 另一个 cid，也就不会命中这里）。
+//
 // ⚠️ **`invalidate()` 在这里是对的**：cid 变了就是**换了一集**，而「下一首是谁」
 // 可能跟着变（队列里同一 bvid 的两集现在判重上也不同了，见 `trackKey`）。预取
 // 那一头只是把备好的地址丢掉、下一拍重算（见 `invalidatePrefetch`），**不碰正在
 // 放的那一条流**——正在放的流挂在播放器上，不是预取层的东西。
-func (q *Queue) replaceCurrentIf(expected, item Item) bool {
+func (q *Queue) fillCidIf(expected Item, cid string) bool {
 	q.mu.Lock()
-	if q.cur < 0 || q.cur >= len(q.items) || q.items[q.cur] != expected {
+	if cid == "" || q.cur < 0 || q.cur >= len(q.items) || q.items[q.cur] != expected {
 		q.mu.Unlock()
 		return false
 	}
-	q.items[q.cur] = item
+	id := expected.Identity()
+	if id == "" {
+		q.mu.Unlock()
+		return false
+	}
+	changed := 0
+	for i := range q.items {
+		if q.items[i].Cid != "" || q.items[i].Identity() != id {
+			continue
+		}
+		q.items[i].Cid = cid
+		changed++
+	}
+	if changed == 0 {
+		q.mu.Unlock()
+		return false
+	}
+	// 身份从 `mv:<bvid>` 变成 `mv:<bvid>|<cid>`：洗牌袋 / 历史栈里那一格也得跟着
+	// 换（理由见 `replaceIdentityLocked`）。
+	q.replaceIdentityLocked(id, q.items[q.cur].Identity())
 	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()

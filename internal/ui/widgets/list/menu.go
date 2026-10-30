@@ -129,8 +129,9 @@ func menuItems(m Music) []menuItem {
 // 拼出来的地址对不上任何一页，而那种错在界面上是「点了跳到一个空页面」。
 //
 // ⚠️ **排在「在 B 站打开」前面**：它和那一项是一组（都往别处去），而合集那一行的
-// 「在 B 站打开」按 `BiliLink` 拼的是 `video/<bvid>`——合集没有 bvid，于是那一项
-// 按下去什么都不发生。所以这一项是这一行**唯一**走得通的「去别处」。
+// 「在 B 站打开」按 `BiliLink` 拼不出地址（合集没有 bvid，而那个 `Sid` 是合集 id 而
+// 不是音频 id，见 `app.BiliLink` 的注释）——于是那一项按下去什么都不发生。所以这一
+// 项是这一行**唯一**走得通的「去别处」。
 func addCollectionEntry(items []menuItem, it app.Item) []menuItem {
 	if it.CollectionID <= 0 {
 		return items

@@ -56,7 +56,7 @@ func TestPlayAtSwitchesBetweenTwoEpisodesOfOneVideo(t *testing.T) {
 
 // TestEnqueueAndPlayNowPlaysTheEpisodeAskedFor 钉住「点第二集放第二集」。
 //
-// 原来 `indexByIdentity` 按 bvid 找到队列里的第一集，于是用户点第二集放的是
+// 原来按 bvid 找到队列里的第一集，于是用户点第二集放的是
 // 第一集——而播放条上的名字也是第一集，用户唯一能察觉的是「我点的不是这首」。
 func TestEnqueueAndPlayNowPlaysTheEpisodeAskedFor(t *testing.T) {
 	f := newStreamFixture(t)

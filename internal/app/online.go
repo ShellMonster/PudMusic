@@ -1364,8 +1364,9 @@ func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) 
 //     同一个 bvid）——所以这里只认「cid 还是空的」那一种：cid 已有值的就是
 //     **确定的某一集**，而我们要写的这一条是「还不知道是哪一集」的那一项。
 //     用户换到另一集之后当前项的 cid 就有值了，这一句自然什么都不做。
-//  3. **写回用 `replaceCurrentIf`**：从读当前项到写回去之间没有持锁，中间的
-//     竞态由它拿「整项相等」再比一次挡住（见 `Queue.replaceCurrentIf`）。
+//  3. **写回用 `fillCidIf`**：从读当前项到写回去之间没有持锁，中间的竞态由它
+//     拿「整项相等」再比一次挡住（见 `Queue.fillCidIf`）；它也顺手把**同一集排了
+//     两份**的那些副本一起补上（不然抽屉那一行会被拆成两行）。
 //
 // ⚠️ **只补空的，不覆盖已有的**：已有 cid 的项写回去会白改一次队列 revision
 // ——那一下会让抽屉、列表、落盘全部重算一遍，而内容一个字节都没变。
@@ -1386,11 +1387,7 @@ func (a *App) writeBackCid(gen int, it Item) {
 	if cur.Bvid != it.Bvid || cur.Cid != "" {
 		return
 	}
-	// ⚠️ **先留一份原样再改**：`replaceCurrentIf` 拿它当「是不是同一项」的判据，
-	// 改完再传的话永远对不上（队列里那一份还是旧的），于是**一次都写不进去**。
-	expected := cur
-	cur.Cid = it.Cid
-	a.queue.replaceCurrentIf(expected, cur)
+	a.queue.fillCidIf(cur, it.Cid)
 }
 
 // buildOnline 建一套「流引用 + 字节源 + 播放器」，**不往 App 上装**。

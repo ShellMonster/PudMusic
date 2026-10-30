@@ -973,7 +973,7 @@ func TestQueueDrawerListsEverySongOnce(t *testing.T) {
 // **同一个 bvid 的两集在抽屉里是两行**。
 //
 // 判重标识带上 cid 之前，这里只画一行——于是用户看到队列里只有一首，而它其实
-// 是两集；点「第 2 集」也找不到那一行（`indexByIdentity` 按 bvid 找的是第一集）。
+// 是两集；点「第 2 集」也找不到那一行（按 bvid 找的是第一集）。
 //
 // ⚠️ **这两项要真的带不同 cid**：`onlineSong` 那个 helper 每一条都填 `Cid: "1"`，
 // 用它造出来的两项判重上仍然是同一首（同一集的两次拷贝），这一条就会红得莫名其

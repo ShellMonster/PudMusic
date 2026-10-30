@@ -9,8 +9,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
@@ -22,6 +25,8 @@ import (
 type seasonFixture struct {
 	mu   sync.Mutex
 	hits map[string]int
+	// forms 记下写接口每一次收到的表单（写操作分派那几条用例要看参数）。
+	forms map[string]url.Values
 }
 
 func (f *seasonFixture) count(path string) int {
@@ -229,28 +234,35 @@ func favOnlyClient(t *testing.T, sf *seasonFixture) *bili.Client {
 	return cli
 }
 
-// TestSeasonPagesAskForTheMidWhenTheHeaderIsNotLoaded 钉住「元信息还没到也要带 mid」。
+// TestSeasonPagesCarryTheMidEvenBeforeTheHeaderLands 钉住「元信息还没到时内容那一趟
+// 带的也是真的 mid」。
 //
 // 页面第一帧就会去拉内容，而元信息是**另一趟**后台请求——两趟是并发的。元信息
 // 没到时 `Collection(ref).OwnerMid` 是 0，直接发出去的话合集接口拿到的是 mid=0
-// （文档说也行，但那是旁注、没验证过）。这一条钉的是「没到就当场问一次」。
-func TestSeasonPagesAskForTheMidWhenTheHeaderIsNotLoaded(t *testing.T) {
+// （文档说也行，但那是旁注、没验证过）。
+//
+// 🔴 **今天的退路是「问一次合集自己的 meta」**（票 #683 的复审）：`SeasonInfo`
+// 就是内容接口的 `page_size=1`，它的 `meta.mid` 就是我们要的那一个。原来那条
+// 退路打的是 `folder/info`——对合集必失败，于是这一问每次都白打。
+func TestSeasonPagesCarryTheMidEvenBeforeTheHeaderLands(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
-	var gotMid string
+	var contentMids []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/x/v3/fav/folder/info":
-			// 元信息只在这一条路上给（内容那一趟要多问一次）。
-			writeCollectionJSON(t, w, 0, "0", map[string]any{
-				"id": 1227671, "title": "一个合集", "attr": 0, "media_count": 1,
-				"upper": map[string]any{"mid": 900, "name": "UP"},
-			})
+			// 🔴 合集不该走到这里。回一份「成功」会把错遮住，回错才是真的。
+			writeCollectionJSON(t, w, -400, "这个接口对合集没有意义", nil)
 		case "/x/polymer/web-space/seasons_archives_list":
-			gotMid = r.URL.Query().Get("mid")
+			if r.URL.Query().Get("page_size") != "1" {
+				contentMids = append(contentMids, r.URL.Query().Get("mid"))
+			}
 			writeCollectionJSON(t, w, 0, "0", map[string]any{
 				"archives": []map[string]any{},
-				"page":     map[string]any{"page_num": 1, "page_size": 20, "total": 0},
+				"meta": map[string]any{
+					"season_id": 1227671, "mid": 900, "name": "一个合集", "total": 0,
+				},
+				"page": map[string]any{"page_num": 1, "page_size": 20, "total": 0},
 			})
 		default:
 			http.NotFound(w, r)
@@ -266,7 +278,250 @@ func TestSeasonPagesAskForTheMidWhenTheHeaderIsNotLoaded(t *testing.T) {
 		CollectionRef{ID: 1227671, Type: bili.CollectionAlbum}, bili.SortByFavTime, "", 1); err != nil {
 		t.Fatal(err)
 	}
-	if gotMid != "900" {
-		t.Errorf("合集请求带的 mid 是 %q，want 900（元信息没到时要当场问一次）", gotMid)
+	if len(contentMids) == 0 {
+		t.Fatal("内容那一趟一次都没发出去")
 	}
+	if got := contentMids[0]; got != "900" {
+		t.Errorf("内容那一趟带的 mid 是 %q，want 900（元信息没到时要先从合集自己的 meta 问出来）", got)
+	}
+}
+
+// ── 头图区那一趟也按类型分派 ────────────────────────────────────────────────
+
+// TestTheSeasonHeaderComesFromTheMatchingEndpoint 是复审第 4 条的主线。
+//
+// 头图区那一趟原来无条件打 `/x/v3/fav/folder/info`（只认收藏夹 mlid），于是
+// 每开一次合集 / 系列页：请求注定失败、`LoadCollection` 弹一句「打不开这个收藏夹」、
+// 头图区永远停在占位。这一条钉的是「打的是这一类自己的接口」＋「一次
+// `folder/info` 都不打」。
+func TestTheSeasonHeaderComesFromTheMatchingEndpoint(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		ref      CollectionRef
+		wantPath string
+	}{
+		{"合集", CollectionRef{ID: 1227671, Type: bili.CollectionAlbum}, "/x/polymer/web-space/seasons_archives_list"},
+		{"系列", CollectionRef{ID: 534501, Type: bili.CollectionSeries}, "/x/series/series"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			a := New()
+			t.Cleanup(a.Close)
+			sf := &seasonFixture{hits: map[string]int{}}
+			srv := newSeasonHeaderServer(t, sf)
+			cli := bili.NewClient(bili.Options{})
+			cli.TestOnlyPointHostsAtFixture(srv.URL)
+			a.MountCollections(CollectionRefs{Client: cli, Settle: 0})
+
+			a.LoadCollection(c.ref)
+			waitUntil(t, "头图区元信息进缓存", 2*time.Second, func() bool {
+				return a.Collection(c.ref).Loaded
+			})
+
+			info := a.Collection(c.ref)
+			if info.Title != "一个"+c.name {
+				t.Errorf("头图区的标题是 %q，want %q", info.Title, "一个"+c.name)
+			}
+			if info.Cover == "" {
+				t.Error("头图区的封面是空的")
+			}
+			if info.MediaCount != 7 {
+				t.Errorf("头图区的条数是 %d，want 7", info.MediaCount)
+			}
+			if info.OwnerMid != 900 {
+				t.Errorf("头图区的 UP mid 是 %d，want 900", info.OwnerMid)
+			}
+			// 🔴 一次收藏夹那个接口都不能打（它对合集 / 系列的 id 只会回错）。
+			if got := sf.count("/x/v3/fav/folder/info"); got != 0 {
+				t.Errorf("%s 的头图区打了 %d 次 folder/info——那个接口对它只会回错，界面于是永远停占位",
+					c.name, got)
+			}
+			if got := sf.count(c.wantPath); got == 0 {
+				t.Errorf("%s 的头图区没打 %q（打过的是 %v）", c.name, c.wantPath, sf.hitsCopy())
+			}
+			// 也不该弹「打不开这个收藏夹」那句红字。
+			if n, ok := a.TakeCollectionNotice(c.ref); ok {
+				t.Errorf("%s 的头图区弹了一句 %q——它明明拉到了", c.name, n.Text)
+			}
+		})
+	}
+}
+
+// newSeasonHeaderServer 是一台会答「头图区那两条路径」的假 B 站。
+//
+// ⚠️ **`folder/info` 故意回 -400**：真的 B 站对合集 / 系列的 id 就是回错，
+// 而这里要是回一份正常的元信息的话，「打错接口」那一半会被假数据遮住。
+func newSeasonHeaderServer(t *testing.T, sf *seasonFixture) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sf.mu.Lock()
+		sf.hits[r.URL.Path]++
+		sf.mu.Unlock()
+		switch r.URL.Path {
+		case "/x/polymer/web-space/seasons_archives_list":
+			writeCollectionJSON(t, w, 0, "0", map[string]any{
+				"archives": []map[string]any{},
+				"meta": map[string]any{
+					"season_id": 1227671, "mid": 900, "name": "一个合集",
+					"cover":       "https://i0.hdslb.com/bfs/new_dyn/season.jpg",
+					"description": "合集简介", "total": 7,
+				},
+				"page": map[string]any{"page_num": 1, "page_size": 20, "total": 7},
+			})
+		case "/x/series/series":
+			writeCollectionJSON(t, w, 0, "0", map[string]any{
+				"meta": map[string]any{
+					"series_id": 534501, "mid": 900, "name": "一个系列", "creator": "UP 小明",
+					"cover":       "https://i0.hdslb.com/bfs/new_dyn/series.jpg",
+					"description": "系列简介", "total": 7,
+				},
+				"recent_aids": []int{},
+			})
+		default:
+			writeCollectionJSON(t, w, -400, "这个接口对合集没有意义", nil)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestTheSeasonPageRecordsTheMidFromTheContentPass 钉住复审第 4 条的「退路」那一半：
+// 内容那一趟的 `meta.mid` 要记进缓存，于是后面的翻页不再靠「再问一次元信息」。
+//
+// 原来 `collectionOwnerMid` 在缓存里没有 mid 时当场问一次元信息，而那一趟打的是
+// `folder/info`（对合集必失败）——**每翻一页重打一次**。合集内容接口的 `meta`
+// 里就带着 mid，第一次拉内容时顺手记下来，后面的页就不用再问。
+func TestTheSeasonPageRecordsTheMidFromTheContentPass(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+	sf := &seasonFixture{hits: map[string]int{}}
+	srv := newSeasonHeaderServer(t, sf)
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(srv.URL)
+	a.MountCollections(CollectionRefs{Client: cli, Settle: 0})
+
+	ref := CollectionRef{ID: 1227671, Type: bili.CollectionAlbum}
+	// ⚠️ **缓存里没有元信息**（内容那一趟先跑）。
+	if _, _, err := a.LoadCollectionPage(context.Background(), ref, bili.SortByFavTime, "", 1); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.Collection(ref).OwnerMid; got != 900 {
+		t.Errorf("内容那一趟回来之后缓存里的 mid 是 %d，want 900（meta.mid 要记下来）", got)
+	}
+
+	// 第二页：不应该再打一次元信息那几个接口。
+	before := sf.hitsCopy()
+	if _, _, err := a.LoadCollectionPage(context.Background(), ref, bili.SortByFavTime, "", 2); err != nil {
+		t.Fatal(err)
+	}
+	after := sf.hitsCopy()
+	if got := after["/x/v3/fav/folder/info"] - before["/x/v3/fav/folder/info"]; got != 0 {
+		t.Errorf("翻第二页时打了 %d 次 folder/info，want 0", got)
+	}
+	// 封面 / 标题也是 meta 给的，不靠别的接口。
+	if info := a.Collection(ref); info.Title != "一个合集" || info.Cover == "" {
+		t.Errorf("内容那一趟记下来的元信息不完整：%+v", info)
+	}
+}
+
+// ── 写操作也按类型分派（复审第 5 条） ───────────────────────────────────────
+
+// TestFavoritingASeasonFromTheAppHitsTheSeasonEndpoint 是复审第 5 条的整条链：
+// 合集页点星标打的是 `fav/season/fav` 并带 `season_id`，`folder/fav` 一次都不打。
+func TestFavoritingASeasonFromTheAppHitsTheSeasonEndpoint(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+	sf := &seasonFixture{hits: map[string]int{}}
+	srv := newSeasonWriteServer(t, sf)
+	cli := bili.NewClient(bili.Options{CSRF: func() string { return "jct" }})
+	cli.TestOnlyPointHostsAtFixture(srv.URL)
+	a.MountCollections(CollectionRefs{Client: cli, Settle: 0})
+
+	ref := CollectionRef{ID: 1227671, Type: bili.CollectionAlbum}
+	a.SetFavorite(ref, true)
+	waitUntil(t, "收藏那一趟打完", 2*time.Second, func() bool {
+		return sf.count("/x/v3/fav/season/fav") == 1
+	})
+	if got := sf.count("/x/v3/fav/folder/fav"); got != 0 {
+		t.Errorf("合集页的星标打了 %d 次收藏夹那个接口——那一路会把 season_id 当 media_id 发出去", got)
+	}
+	if got := sf.lastForm("/x/v3/fav/season/fav").Get("season_id"); got != "1227671" {
+		t.Errorf("season_id = %q，want 1227671", got)
+	}
+}
+
+// TestRemovingMediasFromASeasonIsRefusedWithoutARequest 是复审第 5 条的另一半：
+// 合集页的批量删除**直接拒绝、一个请求都不发**。
+func TestRemovingMediasFromASeasonIsRefusedWithoutARequest(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+	sf := &seasonFixture{hits: map[string]int{}}
+	srv := newSeasonWriteServer(t, sf)
+	cli := bili.NewClient(bili.Options{CSRF: func() string { return "jct" }})
+	cli.TestOnlyPointHostsAtFixture(srv.URL)
+	a.MountCollections(CollectionRefs{Client: cli, Settle: 0})
+
+	err := a.RemoveMedias(t.Context(),
+		CollectionRef{ID: 1227671, Type: bili.CollectionAlbum},
+		[]bili.Media{{ID: 11, Type: bili.MediaVideo}})
+	if err == nil {
+		t.Error("合集里删内容报成功了")
+	}
+	if got := sf.count("/x/v3/fav/resource/batch-del"); got != 0 {
+		t.Errorf("发了 %d 次批量删除，want 0", got)
+	}
+}
+
+// TestClearingInvalidOnASeasonIsRefusedWithoutARequest 同理。
+func TestClearingInvalidOnASeasonIsRefusedWithoutARequest(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+	sf := &seasonFixture{hits: map[string]int{}}
+	srv := newSeasonWriteServer(t, sf)
+	cli := bili.NewClient(bili.Options{CSRF: func() string { return "jct" }})
+	cli.TestOnlyPointHostsAtFixture(srv.URL)
+	a.MountCollections(CollectionRefs{Client: cli, Settle: 0})
+
+	ref := CollectionRef{ID: 1227671, Type: bili.CollectionAlbum}
+	a.ClearInvalidMedias(ref)
+	// 等一句说法（拒绝也要说一声，不然按下去没反应）。
+	n, ok := waitNotice(t, a, ref)
+	if !ok {
+		t.Fatal("拒绝时一句话都没说")
+	}
+	if !strings.Contains(n.Text, "清除失效内容") {
+		t.Errorf("说的那句是 %q，want 一句说清没有这个动作的话", n.Text)
+	}
+	if got := sf.count("/x/v3/fav/resource/clean"); got != 0 {
+		t.Errorf("发了 %d 次清除失效，want 0", got)
+	}
+}
+
+// newSeasonWriteServer 是一台会答写接口的假 B 站，并记下每一次的表单。
+type seasonWriteFixture struct {
+	*seasonFixture
+	forms map[string]url.Values
+}
+
+func newSeasonWriteServer(t *testing.T, sf *seasonFixture) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sf.mu.Lock()
+		sf.hits[r.URL.Path]++
+		if sf.forms == nil {
+			sf.forms = map[string]url.Values{}
+		}
+		_ = r.ParseForm()
+		sf.forms[r.URL.Path] = r.PostForm
+		sf.mu.Unlock()
+		writeCollectionJSON(t, w, 0, "0", nil)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// lastForm 报某条路径最后一次收到的表单。
+func (f *seasonFixture) lastForm(path string) url.Values {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.forms[path]
 }

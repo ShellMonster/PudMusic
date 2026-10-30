@@ -73,8 +73,29 @@ type searchButtonState struct {
 //
 // 返回的是**展开时那个输入框**；收起时返回零值元素（它的 `Submitted` /
 // `Focused` 一律是 false）。调用方靠这个读回车。
+//
+// # 🔴 禁用那一档（票 #683 的复审）
+//
+// 有些页面上的容器**没有按名字找的接口**（合集 / 系列的内容接口不收 `keyword`）。
+// 那里摆一个能按的搜索框，一敲词就会把整页换成「加载失败，点此重试」——用户看到
+// 的是「这一页坏了」。
+//
+// 所以 `disabledTip` 非空时**只画那枚放大镜、按不动**，提示写它一句为什么
+// （「这一类还没有按歌名找」）。它**永远不展开**：`st.open` 都不看，展开的那条
+// 分支压根走不到——否则「按不动但能展开」的输入框会照样把词发出去。
+//
+// ⚠️ **提示走 `Description` 而不是 `Tooltip`**：禁用的键 `Hovered()` 恒为 false
+// （`mygo/ui/input.go` 的 `Hovered`），悬停提示永远出不来——能出那一句的地方只有
+// 无障碍描述。用户点它时看到的是「没有反应」，读屏软件念得出为什么。
 func expandableSearch(c *ui.Context, tip tipFunc, st *searchButtonState, text *string,
-	label string, minW, maxW float32, justShown bool) ui.Element {
+	label string, minW, maxW float32, justShown bool, disabledTip string) ui.Element {
+	if disabledTip != "" {
+		// ⚠️ **`st` 一个字都不改**：禁用的键不展开、也不记焦点（`focusNext` 留着
+		// 的话，一旦放开就有一个看不见的框抢焦点）。
+		return flatIconButton(c, iconSearch, label, iconMd).
+			Size(iconHitMd, iconMd).Padding(space.None, space.Px7).
+			Disabled(true).Description(disabledTip)
+	}
 	// ⚠️ **刚进这一页的那一帧不建输入框**（`justShown`）：框架切页时会把焦点
 	// 还给「离开这一页时有焦点的那个元素」，而那正是这个输入框——不建它就没有
 	// 焦点可还，下一帧它照常展开（词还摆在那儿），焦点却不落在它身上。

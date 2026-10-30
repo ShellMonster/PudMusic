@@ -144,3 +144,36 @@ func TestSeasonArchivesRejectsAnEmptySeasonID(t *testing.T) {
 		t.Errorf("发了 %d 个请求，want 0", n)
 	}
 }
+
+// TestHasMorePagesCountsWhatReallyCameBack 钉住「已经翻到几条」的后半截用的是
+// **真拿到的那几条**，不是 `ps`。
+//
+// 最后一页不满的时候两者不一样：`page=1, ps=20, got=5, total=6` 还有下一页；
+// 拿 ps 算的话 `20 < 6` 是 false，「下一页」就永远不出现——而用户明明还没看到
+// 第 6 条。
+func TestHasMorePagesCountsWhatReallyCameBack(t *testing.T) {
+	cases := []struct {
+		name                 string
+		page, ps, got, total int
+		want                 bool
+	}{
+		// 最后一页不满、而后面还有：拿 ps 算会漏掉这几条。
+		{"第一页只回了 5 条、总共 6 条", 1, 20, 5, 6, true},
+		// 这一页刚好把总数填满：没有下一页了。
+		{"第一页 5 条正好是全部", 1, 20, 5, 5, false},
+		// 中间那些页：拿 got == ps 算和拿 ps 算一样。
+		{"中间页满", 2, 20, 20, 100, true},
+		// 最后一页不满、也没有了。
+		{"最后一页 7 条、总数 47", 3, 20, 7, 47, false},
+		// 接口没给总数：一律说「没有了」。
+		{"总数是 0", 1, 20, 20, 0, false},
+		// 接口自己截断了（要 20 只给 3）：拿 ps 算会一直有下一页。
+		{"接口自己截断", 1, 20, 3, 10, true},
+	}
+	for _, c := range cases {
+		if got := hasMorePages(c.page, c.ps, c.got, c.total); got != c.want {
+			t.Errorf("%s：hasMorePages(%d, %d, %d, %d) = %v，want %v",
+				c.name, c.page, c.ps, c.got, c.total, got, c.want)
+		}
+	}
+}

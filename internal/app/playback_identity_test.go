@@ -70,3 +70,32 @@ func TestSplitMVIdentityTakesTheLastSeparator(t *testing.T) {
 		t.Errorf("没有分隔符时 = %q / %q，want \"BV1\" / \"\"", bvid, cid)
 	}
 }
+
+// TestTheCollectionIDIsCarriedThroughTheEntry 钉住「落盘那一格也带着合集 id」。
+//
+// 收藏夹里 type=21 那一行带着 `CollectionID`（菜单里「打开这个合集」靠它拼
+// `/collection/{id}?type=21`）。它是那一行**唯一的「去别处」身份**（合集没有
+// bvid），落在队列项上却不在 `PlaybackEntry` 里的话，任何一次经过落盘的读取
+// 都会把它丢掉——而丢掉的症状是菜单里那一项摆不出来，界面上看不出少了什么。
+//
+// ⚠️ **合集那一行今天恢复不出来**（`Identity()` 是空串，`itemOfPlaybackEntry`
+// 的守卫会跳过整条）：这一条钉的是**这一格不许在搬运中丢掉**，不是「合集能恢复」。
+func TestTheCollectionIDIsCarriedThroughTheEntry(t *testing.T) {
+	it := Item{Source: "online", Type: "collection", CollectionID: 1227671, Title: "一个合集"}
+	e := playbackEntryOf(it)
+	if e.CollectionID != 1227671 {
+		t.Errorf("落盘的 CollectionID 是 %d，want 1227671", e.CollectionID)
+	}
+
+	// 恢复那一半：条目上带着它，恢复出来的项也要带着（那一格是值的搬运，
+	// 不是按类型现算的）。
+	back, ok := itemOfPlaybackEntry(PlaybackEntry{
+		ID: "mv:BV1", Title: "带着合集 id 的一行", CollectionID: 1227671,
+	})
+	if !ok {
+		t.Fatal("条目被认成「认不出来」了")
+	}
+	if back.CollectionID != 1227671 {
+		t.Errorf("恢复出来的 CollectionID 是 %d，want 1227671", back.CollectionID)
+	}
+}

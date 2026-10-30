@@ -69,8 +69,15 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 			s.askConfirm(p, confirmDownload, chosen, true)
 		}
 
-		if ui.Button(c, "批量删除").Clicked() {
-			s.askConfirm(p, confirmDelete, chosen, true)
+		// 🔴 **批量删除只对收藏夹摆**（票 #683 的复审）：`batch-del` 是收藏夹那套
+		// 接口，合集 / 系列里没有「从这里删内容」这个动作。摆出来按下去只会得到
+		// 一句 B 站的错，而 `app.RemoveMedias` 现在也会直接拒绝。
+		//
+		// ⚠️ **批量下载留着**：它按 bvid 走下载服务，和容器类型无关。
+		if p.ref.Type == bili.CollectionFavorite {
+			if ui.Button(c, "批量删除").Clicked() {
+				s.askConfirm(p, confirmDelete, chosen, true)
+			}
 		}
 
 		ui.Spacer(c)

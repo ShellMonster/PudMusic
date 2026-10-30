@@ -108,6 +108,13 @@ type PlaybackEntry struct {
 	Cid       string `json:"cid,omitempty"`
 	PageIndex int    `json:"pageIndex,omitempty"`
 	TotalPage int    `json:"totalPage,omitempty"`
+	// CollectionID 是「这一条是哪一个合集」（收藏夹里 type=21 那一行）。
+	//
+	// ⚠️ **它也得存**（票 #683 的复审）：那一行没有 bvid，`CollectionID` 是它
+	// **唯一的「去别处」身份**（菜单里「打开这个合集」靠它拼
+	// `/collection/{id}?type=21`）。不存的话，任何一次经过这一格的搬运都会把它
+	// 丢掉，而症状是那一项在菜单里**摆不出来**——界面上看不出少了什么。
+	CollectionID int64 `json:"collectionId,omitempty"`
 }
 
 // playbackEntryOf 把一项变成落盘用的那一格。
@@ -117,14 +124,15 @@ type PlaybackEntry struct {
 // 影响。
 func playbackEntryOf(it Item) PlaybackEntry {
 	return PlaybackEntry{
-		ID:        it.Identity(),
-		Title:     it.Title,
-		Cover:     it.Cover,
-		Artist:    it.Artist,
-		ArtistMid: it.ArtistMid,
-		Cid:       it.Cid,
-		PageIndex: it.PageIndex,
-		TotalPage: it.TotalPage,
+		ID:           it.Identity(),
+		Title:        it.Title,
+		Cover:        it.Cover,
+		Artist:       it.Artist,
+		ArtistMid:    it.ArtistMid,
+		Cid:          it.Cid,
+		PageIndex:    it.PageIndex,
+		TotalPage:    it.TotalPage,
+		CollectionID: it.CollectionID,
 	}
 }
 
@@ -175,16 +183,17 @@ func itemOfPlaybackEntry(e PlaybackEntry) (Item, bool) {
 			cid = e.Cid
 		}
 		return Item{
-			Source:    SourceOnline,
-			Type:      "mv",
-			Bvid:      bvid,
-			Cid:       cid,
-			Title:     e.Title,
-			Cover:     e.Cover,
-			Artist:    e.Artist,
-			ArtistMid: e.ArtistMid,
-			PageIndex: e.PageIndex,
-			TotalPage: e.TotalPage,
+			Source:       SourceOnline,
+			Type:         "mv",
+			Bvid:         bvid,
+			Cid:          cid,
+			Title:        e.Title,
+			Cover:        e.Cover,
+			Artist:       e.Artist,
+			ArtistMid:    e.ArtistMid,
+			PageIndex:    e.PageIndex,
+			TotalPage:    e.TotalPage,
+			CollectionID: e.CollectionID,
 		}, true
 
 	case strings.HasPrefix(e.ID, playbackIDAudio):
@@ -397,6 +406,16 @@ func (a *App) RestorePlayback() error {
 	//
 	// ⚠️ **当前项按标识找，不按下标**：恢复出来的顺序和当初保存的顺序可能
 	// 不一样（中间有几条被守卫跳过了），按下标找会指着另一首。
+	//
+	// 🔴 **两趟：先严格、后退化到「种类 + 主 id」**（票 #683 的复审）。旧文件里
+	// `Current` 写的是 `mv:<bvid>`（票 #683 之前没有 `|<cid>`），而恢复出来的
+	// 那一项身份已经是 `mv:<bvid>|<cid>`（cid 从 `e.Cid` 来）——严格相等找不到，
+	// idx 落到 0：**当前项变成第一首，播放位置也套到它身上**。升级后第一次启动
+	// 的用户会听到队列第一首从「上次的 60 秒」开始。
+	//
+	// 退化那一趟只比「种类 + 主 id」（mv 取 bvid、audio 取 sid、本地取路径）：
+	// 不同分集的主 id 相同，所以**只有在严格匹配失败时**才用——队列里同一视频
+	// 的两集都存着的话，严格那一趟会先认对。
 	a.queue.Reset(items...)
 	idx := -1
 	if snap.Current != "" {
@@ -404,6 +423,17 @@ func (a *App) RestorePlayback() error {
 			if it.Identity() == snap.Current {
 				idx = i
 				break
+			}
+		}
+		if idx < 0 {
+			// 退化那一趟：两边都拆到「种类 + 主 id」再比（理由见上）。
+			if kind, id := splitIdentity(snap.Current); id != "" {
+				for i, it := range items {
+					if k, v := splitIdentity(it.Identity()); k == kind && v == id {
+						idx = i
+						break
+					}
+				}
 			}
 		}
 	}

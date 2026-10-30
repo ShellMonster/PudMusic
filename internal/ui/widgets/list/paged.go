@@ -40,6 +40,7 @@ import (
 	"log"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
@@ -844,11 +845,21 @@ var errFetcherPanic = errors.New("拉页的代码崩了")
 //
 // ⚠️ 后面的页仍然说「加载更多」：那几页确实是接着往下加载时失败的，而那一档
 // 已经有结果在屏幕上了，说「加载失败」会让人以为整页都没了。
+//
+// 🔴 **原始错串里的 `biu:` 要剥掉**（票 #683 的复审）：那是我们自己的包名前缀
+// （服务层各自包一层 `bili:` / `app:`，再被 `biu:` 收口），而这一句是**给用户
+// 看的**——用户不知道「biu」是什么，读到的是一句看起来像内部日志的话。这一族
+// 提示在所有分页列表上都用，所以前缀在这里一次剥干净。
 func loadFailToast(page int, err error) string {
-	if page <= 1 {
-		return "加载失败：" + err.Error()
+	msg := strings.TrimSpace(strings.TrimPrefix(err.Error(), "biu: "))
+	if msg == "" {
+		// 空串（理论上不会有）也要给一句人话，别让「加载失败：」后面空着。
+		msg = "出了点问题"
 	}
-	return "加载更多失败：" + err.Error()
+	if page <= 1 {
+		return "加载失败：" + msg
+	}
+	return "加载更多失败：" + msg
 }
 
 // fetchOne 调 fetch，**崩了也变成一个错**。
