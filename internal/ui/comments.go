@@ -1314,6 +1314,14 @@ func (s *Shell) syncComments(c *ui.Context) {
 		p.srcTitle, p.srcArtist = it.Title, it.Artist
 		p.names = songname.New(it.Title, it.Artist)
 		p.srcLen = -1
+		// 🔴 **正文排版缓存也要清**（票 #684）：它的键里**没有别名表**
+		// （`commentBodyOf` 按 rpid / 宽 / 行数 / 配色记）——留着的话，筛选用
+		// 的是新歌名，正文里高亮的却还是旧歌名的那几段。
+		//
+		// ⚠️ **只在别名表真的换了时清**（就是这一支）：每帧清的话排版缓存整个
+		// 作废，`framebudget_test.go` 那一档会红。而换歌本来就伴随
+		// `p.srcLen = -1`（下一帧重建行），重排一次排版是同一件事的一部分。
+		p.bodies = nil
 		// 🔴 **换成一首没有名字的歌，筛选就做不了**：空表会把这一首的评论
 		// 全筛掉（`songname.Table.Empty`），而界面上一句话都说不清为什么。
 		//

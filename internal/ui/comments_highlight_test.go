@@ -543,6 +543,85 @@ func TestTheHighlightFollowsTheTheme(t *testing.T) {
 	ts.tt.Frame()
 }
 
+// TestTheCachedBodyFollowsANewAliasTable 断「别名表换了之后，正文排版缓存
+// 不能还留着旧表算出来的那一份」。
+//
+// 🔴 **缓存键里没有别名表**（`commentBodyOf` 的键是 rpid / 宽 / 行数 / 配色）：
+// 换歌（或者同一首的标题、艺人变了）时 `syncComments` 换了 `p.names`，而排版
+// 缓存还留着——筛选用的是新歌名，正文里标的却是旧歌名的位置。
+//
+// ⚠️ **判据是「新排了一份」**：缓存命中时 `commentBodyOf` 返回的是**同一个
+// 指针**（`TestTheMatchingRunsOncePerCommentNotPerFrame` 钉住的那条路），所以
+// 换了别名表之后必须是**另一个**指针——那一份是拿新表的 `Matches` 排的
+// （`commentBodyOf` 里唯一跑匹配的地方）。
+//
+// ⚠️ **紧接着再 sync 一次（什么都没变）必须还是同一份**：每帧都清的话排版
+// 缓存整个作废，帧预算那一档（`framebudget_test.go`）会红——所以这一条也把
+// 「只在别名表真的换了时清」钉住。
+func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
+	const (
+		oldName = "晴天"
+		newName = "告白气球"
+		body    = "晴天和告白气球都好听"
+	)
+	// 当前这一首叫**新**歌名：`syncComments` 那一支靠标题变了认出「别名表要
+	// 重算」。
+	it := mvItem()
+	it.Title = newName
+
+	var first, second, again *commentBody
+	var gotTitle string
+	done := false
+	ts := newTestShell(t, at(1200, 900),
+		stubbed(func(_ *testing.T, s *Shell) { s.app.Queue().Reset(it) }),
+		withView(func(s *Shell) func(*mygoui.Context) {
+			return func(c *mygoui.Context) {
+				if done {
+					return
+				}
+				done = true
+				s.wake.set(c)
+				s.applyFrameTheme(c)
+				p := &s.comments
+				// 摆成「上一帧还是《晴天》」：槽位一致（不走换歌那一支）、
+				// 别名表是旧的、开关开着、配色算好。
+				p.slot = s.app.CommentsSlot()
+				p.srcTitle, p.srcArtist = oldName, it.Artist
+				p.srcMention = true
+				p.names = songname.New(oldName, it.Artist)
+				p.mentionOnly = true
+				p.mark = commentMarkOf(c.Theme())
+
+				cm := bili.Comment{Rpid: 7, Message: body}
+				first = s.commentBodyOf(c, p, cm, commentBodyLines, 900)
+
+				// 这一帧当前这一首叫「告白气球」⇒ 走别名表重算那一支。
+				s.syncComments(c)
+				gotTitle = p.srcTitle
+				second = s.commentBodyOf(c, p, cm, commentBodyLines, 900)
+
+				// 什么都没变的下一帧：排版缓存**必须还在**。
+				s.syncComments(c)
+				again = s.commentBodyOf(c, p, cm, commentBodyLines, 900)
+			}
+		}))
+	ts.tt.Frame()
+
+	if gotTitle != newName {
+		t.Fatalf("`syncComments` 没走别名表重算那一支（srcTitle 是 %q）——这条用例的前提不成立", gotTitle)
+	}
+	if first == nil || second == nil || again == nil {
+		t.Fatalf("正文没排出来：first=%v second=%v again=%v", first, second, again)
+	}
+	if second == first {
+		t.Errorf("别名表换成《%s》了，正文却还是缓存里那一份——高亮区间还是按旧歌名《%s》算的",
+			newName, oldName)
+	}
+	if again != second {
+		t.Errorf("这一帧别名表没变，正文却重排了——排版缓存被每帧清掉了（帧预算会红）")
+	}
+}
+
 // TestTheMatchingRunsOncePerCommentNotPerFrame 断「正文排好之后，每一帧不再
 // 跑一遍匹配」。
 //
