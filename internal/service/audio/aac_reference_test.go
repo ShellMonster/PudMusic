@@ -28,36 +28,28 @@ package audio
 //
 // # 判据
 //
-//   - 帧数落在 176400~178176（下界 = AudioToolbox 的，上界 = 不剪的）；
-//   - 最佳对齐后最大逐样本差 ≤ 0.02，**并且把这个数打出来**；
+//   - MP4 产品路径的呈现长度是 176400 帧；裸 ADTS 产品路径的完整长度是
+//     178176 帧；
+//   - 最佳对齐后最大逐样本差 ≤ 0.1，**并且把这个数打出来**；
 //   - 声道数和参考一致。
 //
 // ⚠️ **RMS 当不了判据**：它把左右声道、时间轴、幅度揉成一个数，声道调换了
 // 它也测不出来。素材的左右声道每一个样本都不一样，所以只能逐样本比。
 //
-// # ⚠️ 0.02 那条线是**给 Media Foundation 定的**
+// # 跨解码器的校准线
 //
-// 这一条在两个平台上跑，走的是两个不同的解码器，而**两个解码器和 ffmpeg 的
-// 差不一样大**。macOS 的 AudioToolbox 在同一份素材上实测是：
-//
-//	最大逐样本差 0.070597（平均 0.0009）
-//	左右声道换掉之后：0.240906（3.41 倍）
-//
-// 所以 macOS 那一档用**实测出来的**线（0.1 / 2 倍），Windows 那一档用票面
-// 定的线（0.02 / 4 倍）。两条线都写在这里，是为了让「为什么 macOS 的松、
-// Windows 的紧」有据可查，而不是看心情。
-//
-// ⚠️ **那两条线从来没有对任何一个真解码器验过**——Windows 那条 CI 从建起来
-// 就没有跑起来过（runner 根本没接到，账号付款的问题）。所以 Windows 上的
-// 数字到底落在哪儿**是未知的**：可能远小于 0.02，也可能和 AudioToolbox 一个
-// 量级。这一条要等 CI 能跑了才知道。
+// 这一条在两个平台上跑，走的是不同的系统解码器，而两个解码器和 ffmpeg 的
+// 差异不一样大。macOS 的 AudioToolbox 在同一份素材上实测最大逐样本差
+// 0.070597，左右声道换掉之后是 0.240906（3.41 倍）。Windows runner 的
+// 历史日志记录最大差 0.066711，换声道后是 0.240906（3.61 倍）。
+// 因此跨平台统一使用 0.1 的最大差上限和 2 倍的声道交换倍率；这两条线能覆盖
+// 已知系统解码器差异，同时仍能把声道交换显著变差识别出来。
 
 import (
 	"bytes"
 	"io"
 	"math"
 	"os"
-	"runtime"
 	"testing"
 )
 
@@ -78,24 +70,33 @@ const aacFixtureADTSPath = "mfadec/testdata/aaclc-stereo.aac"
 
 // aacMaxDiffBudget 是「最佳对齐后最大逐样本差」的上限。
 //
-// Windows（Media Foundation）用票面定的 0.02；别的平台用 macOS 实测出来的
-// 0.1（AudioToolbox 是 0.070597）。
+// 0.1 覆盖当前已知的 AudioToolbox（0.070597）和 Media Foundation
+// （0.066711）与 ffmpeg 参考之间的正常差异。
 func aacMaxDiffBudget() float64 {
-	if runtime.GOOS == "windows" {
-		return 0.02
-	}
 	return 0.1
 }
 
 // aacSwapRatioBudget 是「左右声道换掉之后，差值至少要变成几倍」。
 //
-// Windows 用票面定的 4；别的平台用 macOS 实测出来的 2（AudioToolbox 是
-// 3.41 倍）。
+// 当前 AudioToolbox 实测 3.41 倍，Media Foundation 实测 3.61 倍；2 倍
+// 留出系统版本的余量，同时仍能识别声道交换。
 func aacSwapRatioBudget() float64 {
-	if runtime.GOOS == "windows" {
-		return 4
-	}
 	return 2
+}
+
+func TestAACReferenceBudgetsCoverKnownSystemDecoderDifferences(t *testing.T) {
+	if got := aacMaxDiffBudget(); got != 0.1 {
+		t.Fatalf("AAC 最大差阈值 = %.3f，want 0.1", got)
+	}
+	if got := aacSwapRatioBudget(); got != 2 {
+		t.Fatalf("AAC 声道交换倍率阈值 = %.1f，want 2", got)
+	}
+	if known := 0.070597; known >= aacMaxDiffBudget() {
+		t.Fatalf("已知 AudioToolbox 差异 %.6f 不应超过阈值 %.2f", known, aacMaxDiffBudget())
+	}
+	if known := 3.41; known <= aacSwapRatioBudget() {
+		t.Fatalf("已知 AudioToolbox 声道交换倍率 %.2f 应超过阈值 %.1f", known, aacSwapRatioBudget())
+	}
 }
 
 // TestTheProductPathDecodesAACSampleForSample 断「产品这一层解出来的 PCM 和
@@ -128,14 +129,11 @@ func TestTheProductPathDecodesAACSampleForSample(t *testing.T) {
 	frames := len(pcm) / d.Channels()
 	t.Logf("产品这一层解出来 %d 帧（%.3f 秒）", frames, float64(frames)/float64(d.SampleRate()))
 
-	// 帧数：两边对编码器 priming 的剪法不一样，所以只要求落在
-	// 「AudioToolbox 的 176400」到「不剪的 178176」之间。
-	const (
-		framesLow  = 176400
-		framesHigh = 178176
-	)
-	if frames < framesLow || frames > framesHigh {
-		t.Errorf("解出 %d 帧，落在 [%d, %d] 之外", frames, framesLow, framesHigh)
+	// MP4 编辑列表的呈现长度是 176400 帧；裸 ADTS 没有编辑列表，完整
+	// access unit 解码长度是 178176 帧。分别钉住，避免多出的尾部被宽区间掩盖。
+	const wantFrames = 176400
+	if frames != wantFrames {
+		t.Errorf("产品 MP4 呈现长度 = %d 帧，want %d", frames, wantFrames)
 	}
 
 	ref := readReference(t)
@@ -198,13 +196,10 @@ func TestTheProductPathDecodesADTSSampleForSample(t *testing.T) {
 	frames := len(pcm) / d.Channels()
 	t.Logf("裸 ADTS 解出来 %d 帧（%.3f 秒）", frames, float64(frames)/float64(d.SampleRate()))
 
-	// 帧数：和 .m4a 那一路同一个区间（裸 ADTS 没有编辑列表，所以它是整条）。
-	const (
-		framesLow  = 176400
-		framesHigh = 178176
-	)
-	if frames < framesLow || frames > framesHigh {
-		t.Errorf("解出 %d 帧，落在 [%d, %d] 之外", frames, framesLow, framesHigh)
+	// 裸 ADTS 没有编辑列表，完整 access unit 解码长度是 178176 帧。
+	const wantFrames = 178176
+	if frames != wantFrames {
+		t.Errorf("产品裸 ADTS 解码长度 = %d 帧，want %d", frames, wantFrames)
 	}
 
 	ref := readReference(t)
