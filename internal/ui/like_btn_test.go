@@ -57,6 +57,38 @@ func TestHoldingTheLikeButtonTriplesTheSong(t *testing.T) {
 	waitFrames(t, e.tt, "赞键的长按三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
 }
 
+// TestTheLikeKeyPostsLikeAndNeverUp 是这一票的端到端回归：点一下赞键，假 B 站
+// 收到的表单里必须是 **`like`**、而且**不能有 `up`**。
+//
+// 🔴 走的是整条路（界面 → App → 服务层 → 假 B 站），不是「某个函数被调用了」：
+// 只测服务层的话，界面传错参数、服务层抄错字段这类事它一条都拦不住；而这一票
+// 原来的实现发的是 `up`（从动态点赞那个接口抄过来的），web 端接口回 -400，
+// 用户看到「B 站拒绝了这次请求」。
+//
+// fixture 那边的 `serveArchiveLike` 也照真接口改成了读 `like`——照着自己发错的
+// 形状造 fixture 正是这一票能全绿混过去的原因（仓库纪律：fixture 必须照真接口造）。
+func TestTheLikeKeyPostsLikeAndNeverUp(t *testing.T) {
+	e := newLikeEnv(t, false, false, false)
+
+	if err := e.tt.Click("赞"); err != nil {
+		t.Fatalf("点不了赞键：%v（文字：%q）", err, e.tt.Texts())
+	}
+	// 和 TestClickingTheStarLikesTheSong 一样要 waitFrames（点击在建树时才被消费），
+	// 而那一趟是真的发出去——机器忙时要好几秒，所以给足 30 秒再判失败。
+	waitFramesFor(t, e.tt, 30*time.Second, "赞发出去了", func() bool {
+		return e.f.likePostsCount() > 0
+	})
+
+	form := e.f.lastLikePostedForm()
+	if got := form.Get("like"); got != "1" {
+		t.Errorf("表单里的 like 是 %q（整份 %v），want 1 —— web 端接口收的是 like", got, form)
+	}
+	if _, sent := form["up"]; sent {
+		t.Errorf("表单里还有 up=%q（整份 %v）—— 这个接口只收 like，up 是动态点赞那一个的字段",
+			form.Get("up"), form)
+	}
+}
+
 // TestALongPressOnTheLikeButtonNeverTogglesTheLike 钉住「长按之后松手补发的那一次
 // click 必须吞掉」。
 //
@@ -77,11 +109,11 @@ func TestALongPressOnTheLikeButtonNeverTogglesTheLike(t *testing.T) {
 
 	// 用户接下来的第一次点击照旧是他自己的：吞标记不能一直吞下去。
 	// ⚠️ 三连已经把这一首**赞上了**（B 站回包 like=true），所以这一次点击
-	// 是「取消赞」（up=2）——断的是「点击照常工作」，不是「还赞一次」。
+	// 是「取消赞」（like=2）——断的是「点击照常工作」，不是「还赞一次」。
 	e.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
 	waitFrames(t, e.tt, "赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
-	if got := e.f.lastLikeUp(); got != "2" {
-		t.Errorf("长按之后第一次点击发出去的 up 是 %q，want 2（三连赞上了，这一次是取消赞）", got)
+	if got := e.f.lastLikeValue(); got != "2" {
+		t.Errorf("长按之后第一次点击发出去的 like 是 %q，want 2（三连赞上了，这一次是取消赞）", got)
 	}
 }
 
@@ -110,8 +142,8 @@ func TestTheButtonLongPressIsOffOnceTheSongIsLiked(t *testing.T) {
 
 	e.tt.Release(btn.X+btn.W/2, btn.Y+btn.H/2)
 	waitFrames(t, e.tt, "取消赞发出去了", func() bool { return e.f.likePostsCount() > 0 })
-	if got := e.f.lastLikeUp(); got != "2" {
-		t.Errorf("发出去的 up 是 %q，want 2（2 是取消赞）", got)
+	if got := e.f.lastLikeValue(); got != "2" {
+		t.Errorf("发出去的 like 是 %q，want 2（2 是取消赞）", got)
 	}
 }
 

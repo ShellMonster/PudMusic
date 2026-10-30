@@ -314,7 +314,20 @@ type Call struct {
 	URL string
 	// Query 是查询参数。会按 WBI 规则处理，nil 也可以。
 	Query url.Values
-	// Form 是表单体。只有 POST 用；非 nil 时 CSRF 也写进表单。
+	// Form 是表单体。只有 POST 用。
+	//
+	// ⚠️ **`CSRF: true` 不会往这张表里写 csrf**：它只把 csrf 放进**查询串**
+	// （`send` 里那句 `q.Set("csrf", csrf)`）和 `bili-jct` 头（`setHeaders`），
+	// 表单体里那一份要调用方自己 `form.Set("csrf", ...)`。
+	//
+	// ⇒ **两种写法并存，别把它们当成一条普适规则**：
+	//
+	//	走 `writeCall` 的（收藏夹那一族）  表单体里有 csrf
+	//	直接写 `Call{Form: ..., CSRF: true}` 的（`LikeArchive` / `LikeTriple` /
+	//	`dealFavMedia` / `PlayReportOpen` / `PlayReportBeat`）  只有查询串 + 头
+	//
+	// 后一族是既有形状，这一票不去动它（改它会波及所有写接口）。要动先数清楚
+	// 影响面，并且拿真机验过再改——`Form` 这一栏保持描述现状，不写成规范。
 	Form url.Values
 	// JSON 是 JSON 请求体，会被编码成 `{"k":v}` 发出去（Content-Type 是
 	// `application/json`）。

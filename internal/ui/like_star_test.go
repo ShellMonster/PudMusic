@@ -52,8 +52,16 @@ func TestClickingTheStarLikesTheSong(t *testing.T) {
 	waitFramesFor(t, e.tt, 30*time.Second, "赞发出去了", func() bool {
 		return e.f.likePostsCount() > 0
 	})
-	if got := e.f.lastLikeUp(); got != "1" {
-		t.Errorf("发出去的 up 是 %q，want 1（1 是赞，2 是取消赞）", got)
+	if got := e.f.lastLikeValue(); got != "1" {
+		t.Errorf("发出去的 like 是 %q，want 1（1 是赞，2 是取消赞）", got)
+	}
+	// 端到端：这一趟走过「界面 → App → 服务层 → 假 B 站」整条路，fixture 收下的
+	// **整份表单**里必须有 like、且不能有 up（那是动态点赞那个接口的字段）。
+	// 只断 fixture 里那一格的话，服务层把 like 和 up 一起发出去也发现不了。
+	form := e.f.lastLikePostedForm()
+	if _, sent := form["up"]; sent {
+		t.Errorf("表单里还有 up=%q —— web 端点赞接口只收 like，两个一起发时 B 站行为未定义",
+			form.Get("up"))
 	}
 	// 乐观：点完那一帧就亮了，不用等网络。
 	e.tt.Frame()

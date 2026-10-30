@@ -41,6 +41,9 @@ const (
 	// 真要写的时候让 B 站回 -101，那才是真话。
 	pathArchiveRelation = "/x/web-interface/archive/relation"
 	// pathArchiveLike 是赞 / 取消赞。**POST，要 CSRF**。
+	//
+	// 🔴 表单字段是 **`like`**（1 赞 / 2 取消赞），不是 `up`——那是**动态**点赞
+	// 那个接口的字段。见 `LikeArchive` 那段。
 	pathArchiveLike = "/x/web-interface/archive/like"
 	// pathArchiveTriple 是一键三连。**POST，要 CSRF**。
 	//
@@ -100,9 +103,39 @@ func (c *Client) ArchiveRelation(ctx context.Context, bvid string) (ArchiveRelat
 
 // LikeArchive 给一首投稿点赞（like=true）或取消点赞。**写操作**。
 //
-// up 的取值照 B 站：1 点赞、2 取消点赞。**0 是切换，我们不用它**——切换在界面
+// 🔴 **表单字段叫 `like`，不叫 `up`**：web 端 `/x/web-interface/archive/like`
+// 的参数表（`bilibili-API-collect` 的 `docs/video/action.md`「点赞视频（web端）」）
+// 只有 `like`；`up` 是**动态**点赞那个接口（`/x/dynamic/feed/dyn/thumb`）的字段。
+// 发成 `up` 时 B 站回 -400，用户看到的是 `friendly.go` 那句「B 站拒绝了这次请求」
+// ——而真相是我们发错了字段名。
+//
+// ⚠️ **APP 端 `/x/v2/view/like` 也收 `like`**（`docs/video/action.md` 的 APP 端
+// 参数表），只是取值是 **0/1**（0 点赞、1 取消赞）而不是这里的 1/2——这一条别
+// 当成反例抄：字段名是同一个，容易把「取值也不同」这件事看漏。
+//
+// # 和 LikeDynamic 的区别：**字段名不同**
+//
+// 两个都是「赞 / 取消赞」，取值也都是 1/2，但**收的字段名不一样**：这边的 web 端
+// 稿件接口收 `like`，动态那个接口（`LikeDynamic`，JSON 体）收 `up`。所以两处
+// 的常量、变量名各按各的口径叫，不要互相抄——这一票的根因就是从动态那边抄过来的。
+//
+// like 的取值照 B 站：1 点赞、2 取消点赞。**0 是切换，我们不用它**——切换在界面
 // 重画之后会点成反的（那一帧画出来的是旧状态），用户连点两下等于没点。
-// 和 `LikeDynamic` 是同一条理由。
+//
+// ⚠️ **残余风险：这里没带 `Buvid: true`**（票 #680 审查留档，只记不改）。官方
+// 文档对这个接口写着「需验证 Cookie 中 `buvid3` 字段存在且正常，否则将导致触发
+// 风控」；而这一趟只靠 `CSRF: true`。正常路径上登录响应会下发 buvid3、它进了
+// jar，`http.Client` 自己带上去——所以日常是通的。
+//
+// 🔴 **兜不住的是「恢复出来的旧 session 里没有 buvid3」**（`SeedCookies` 只有
+// 登录时存下的那几条）。那时 B 站回的是**风控的 -352 / -412**（`friendly.go`
+// 那两句「被 B 站的风控拦下了」），**不是 -400**——所以下次看到点赞撞风控，
+// 先查 jar 里有没有 `buvid3`，别去怀疑字段名（字段名错了是 -400）。
+//
+// 不在这里补 `Buvid: true` 的理由：那会往点赞这一族加一条**新的**取 buvid 的
+// 往返（`/x/frontend/finger/spi`，`buvidCookie` 有缓存、每个客户端只取一次），
+// 还会让这一族请求多带一个 `Cookie` 头——而它只在「buvid3 缺失」时才显形。
+// 改动面比这一条残余风险大，真遇到时改成 `Buvid: true` 是一行的事。
 //
 // ⚠️ **不重试**：见文件头。一次超时的点赞重试一次，用户手上就可能是两个赞。
 func (c *Client) LikeArchive(ctx context.Context, bvid string, like bool) error {
@@ -110,13 +143,14 @@ func (c *Client) LikeArchive(ctx context.Context, bvid string, like bool) error 
 	if bvid == "" {
 		return ErrNoVideo
 	}
-	up := 1
+	// ⚠️ 变量名不叫 `like`：函数参数已经占了那个名字（`like bool`）。
+	likeVal := 1
 	if !like {
-		up = 2
+		likeVal = 2
 	}
 	form := url.Values{
 		"bvid": {bvid},
-		"up":   {strconv.Itoa(up)},
+		"like": {strconv.Itoa(likeVal)},
 	}
 	if _, err := c.Do(ctx, Call{
 		Method: "POST", URL: c.hostAPI + pathArchiveLike, Form: form, CSRF: true,
