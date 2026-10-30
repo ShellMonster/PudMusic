@@ -166,6 +166,16 @@ type ArchiveStats struct {
 //
 // bvid 空时当场返回 `ErrNoVideo`（不发请求）；B 站说没有这个稿件（aid 是 0）
 // 时也是 `ErrNoVideo`。`stat` 那一栏缺失**不算错**——Reply 留 0。
+//
+// 🔴 **`stat` 那一栏的形状漂移不许把整条打死**（票 #682 的对抗性审查）：
+// `encoding/json` 遇到类型对不上会让**整个反序列化**失败，而这一条是收藏
+// （`ridAndType`）和一键三连的必经之路——一个我们**不用**的字段（`stat.reply`）
+// 换个形状就能把收藏和三连一起打死。改之前 `ArchiveID` 只解 `aid`，对这些漂移
+// 免疫。
+//
+// ⇒ 分两次解：先解出 `aid`（那一条**必须**成功，它是我们要的东西），再把 `stat`
+// 单独解一遍——**第二次失败只当 Reply=0**，而且 `reply` 用 `flexInt`（B 站可能
+// 写成字符串，见 `flexjson.go` 的文件头）。
 func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, error) {
 	if bvid == "" {
 		return ArchiveStats{}, ErrNoVideo
@@ -179,10 +189,11 @@ func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, e
 		return ArchiveStats{}, err
 	}
 	var d struct {
-		Aid  int64 `json:"aid"`
-		Stat struct {
-			Reply int64 `json:"reply"`
-		} `json:"stat"`
+		Aid int64 `json:"aid"`
+		// ⚠️ **`json.RawMessage`**：`stat` 的形状不由这一层定（它可能是个对象、
+		// 数组、字符串、null）——解成 RawMessage 什么形状都不会让这次 Unmarshal
+		// 失败，第二遍再单独解。
+		Stat json.RawMessage `json:"stat"`
 	}
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return ArchiveStats{}, fmt.Errorf("bili: 稿件详情读不懂: %w", err)
@@ -190,9 +201,19 @@ func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, e
 	if d.Aid <= 0 {
 		return ArchiveStats{}, ErrNoVideo
 	}
+	// ⚠️ **第二遍失败只当「没有这个数」**：`stat` 不是我们要的东西，而它坏了
+	// 不等于这一条读不懂。
+	reply := int64(0)
+	if len(d.Stat) > 0 {
+		var st struct {
+			Reply flexInt `json:"reply"`
+		}
+		if err := json.Unmarshal(d.Stat, &st); err == nil {
+			reply = st.Reply.Int64()
+		}
+	}
 	// ⚠️ **负数是上游的垃圾，按「没有这个数」算**：把 -1 当评论数画出来是
 	// 「-1 条评论」，比不画糟得多。
-	reply := d.Stat.Reply
 	if reply < 0 {
 		reply = 0
 	}

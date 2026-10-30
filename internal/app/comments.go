@@ -1038,6 +1038,12 @@ func (a *App) ensureCommentStats(bvid string) {
 // 省掉那一趟才把两栏合成一个回包的。
 //
 // allowDisk=true：**盘上那份只有 aid 的索引算答案**（评论页要的就是 aid）。
+//
+// 🔴 **盘要在「进等待」之前读**（allowDisk 时）：读盘是本地 IO，而在途的那一趟
+// 是网络。播放条那一半（`ensureCommentStats`）不认盘，所以用户一进来它就发了
+// 一趟——断网时它要等到超时才失败，而评论页要是排在它后面，就会跟着报「评论
+// 暂时打不开」，尽管开页要的 aid 在盘上就有（票 #682 对抗性审查的 MAJOR 1）。
+// ⇒ **为一个本地就有答案的东西去等网络**是这里要消灭的，不是「等得久一点」。
 func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchiveFetchFunc, allowDisk bool) (bili.ArchiveStats, error) {
 	a.commentsMu.Lock()
 	if a.commentsStatsKnown[bvid] {
@@ -1049,6 +1055,25 @@ func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchi
 	if id := a.commentsAvids[bvid]; allowDisk && id > 0 {
 		a.commentsMu.Unlock()
 		return bili.ArchiveStats{Aid: id}, nil
+	}
+	a.commentsMu.Unlock()
+
+	// 盘上那份索引：只有 aid，而评论页要的就是它（见 `commentArchiveID`）。
+	// ⚠️ **锁外面读**：读盘是阻塞 IO，而 `commentsMu` 是界面每一帧都要的。
+	if allowDisk {
+		if id := a.diskAVID(bvid); id > 0 {
+			a.rememberAVID(bvid, id)
+			return bili.ArchiveStats{Aid: id}, nil
+		}
+	}
+
+	a.commentsMu.Lock()
+	// ⚠️ **再判一次**：读盘那一段没拿锁，中间那一趟可能已经问完并把两栏都记
+	// 下了——那时这里该直接吃它的结果，而不是再发一趟。
+	if a.commentsStatsKnown[bvid] {
+		st := bili.ArchiveStats{Aid: a.commentsAvids[bvid], Reply: a.commentsReplyCounts[bvid]}
+		a.commentsMu.Unlock()
+		return st, nil
 	}
 	if a.commentsStatsWaiters == nil {
 		a.commentsStatsWaiters = map[string]chan struct{}{}
@@ -1064,10 +1089,17 @@ func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchi
 		}
 		a.commentsMu.Lock()
 		known := a.commentsStatsKnown[bvid]
-		st := bili.ArchiveStats{Aid: a.commentsAvids[bvid], Reply: a.commentsReplyCounts[bvid]}
+		id := a.commentsAvids[bvid]
+		reply := a.commentsReplyCounts[bvid]
 		a.commentsMu.Unlock()
 		if known {
-			return st, nil
+			return bili.ArchiveStats{Aid: id, Reply: reply}, nil
+		}
+		// 🔴 **那一趟可能是「盘命中」**（`runArchiveTrip` 的 allowDisk 分支只写
+		// `commentsAvids`，不写 `commentsStatsKnown`——盘上那份没有评论数）。那时
+		// 评论页要的 aid 已经到手了，**不能再跟着报失败**。
+		if allowDisk && id > 0 {
+			return bili.ArchiveStats{Aid: id}, nil
 		}
 		// 那一趟没拿到（失败 / B 站说没有这个稿件）：当成这一趟失败。
 		return bili.ArchiveStats{}, errCommentsUnavailable
@@ -1078,18 +1110,35 @@ func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchi
 	return a.runArchiveTrip(ctx, bvid, fetch, ch, allowDisk)
 }
 
+// diskAVID 从盘上那份索引里读 aid。没有、坏了、没挂缓存都是 0。
+//
+// ⚠️ **一个锁都不拿地调它**（`commentsCacheSnapshot` 自己取一次，读完就放）：
+// 读盘是阻塞 IO，别把 `commentsMu` 带进去。
+func (a *App) diskAVID(bvid string) int64 {
+	c := a.commentsCacheSnapshot()
+	if c == nil {
+		return 0
+	}
+	if id, ok := c.LoadAVID(bvid); ok && id > 0 {
+		return id
+	}
+	return 0
+}
+
 // runArchiveTrip 真的发那一趟（**调用方已经占下了 `ch` 那个坑**）。
 //
 // allowDisk 见 `archiveStats`：评论页那一半认盘上那份只有 aid 的索引。
+//
+// 🔴 **盘命中也要让等的人拿到 aid**：命中分支只写 `commentsAvids`（盘上那份没有
+// 评论数，所以不写 `commentsStatsKnown`）。挂在后面等的评论页醒来时靠的是
+// `commentsAvids` 里那一格 + allowDisk 补判——见 `archiveStats` 的等待分支。
 func (a *App) runArchiveTrip(ctx context.Context, bvid string, fetch commentsArchiveFetchFunc, ch chan struct{}, allowDisk bool) (bili.ArchiveStats, error) {
 	// 盘上那份索引：只有 aid（见 `commentArchiveID` 的注释）。
 	if allowDisk {
-		if c := a.commentsCacheSnapshot(); c != nil {
-			if id, ok := c.LoadAVID(bvid); ok && id > 0 {
-				a.rememberAVID(bvid, id)
-				a.finishAVIDWait(bvid, ch)
-				return bili.ArchiveStats{Aid: id}, nil
-			}
+		if id := a.diskAVID(bvid); id > 0 {
+			a.rememberAVID(bvid, id)
+			a.finishAVIDWait(bvid, ch)
+			return bili.ArchiveStats{Aid: id}, nil
 		}
 	}
 

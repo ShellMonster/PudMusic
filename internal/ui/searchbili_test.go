@@ -94,6 +94,16 @@ type biliFixture struct {
 	// 拿「这一页有几行」冒充，用户就知道了个假数。
 	searchTotal int
 
+	// viewReply 是 `/x/web-interface/view` 回的 `stat.reply`（评论数，票 #682）。
+	//
+	// ⚠️ **零值 = 「B 站没给这个数」**：播放条上那一枚键拿不到数就**不画数字**
+	// （不是画「0」——那会让用户以为没人评论）。
+	//
+	// ⚠️ **这一格特意摆在这里**（不跟在点赞那几格后面）：票 #680 在那一带把
+	// `lastUp` 改成了 `lastLike` / `lastLikeForm`，两边都往同一处加字段会让
+	// 合并必冲突。这一段是**只加不改**——合并时照这一格原样重放即可。
+	viewReply int64
+
 	// favoritedIn 是「这一首已经在哪些收藏夹里」；favoriteCalls 记下每一次写。
 	favoritedIn   []int64
 	favoriteCalls []url.Values
@@ -107,12 +117,6 @@ type biliFixture struct {
 	// likePosts 记每一次赞的 up（1 赞 / 2 取消赞），triplePosts 数三连。
 	likePosts, triplePosts int
 	lastUp                 string
-
-	// viewReply 是 `/x/web-interface/view` 回的 `stat.reply`（评论数，票 #682）。
-	//
-	// ⚠️ **零值 = 「B 站没给这个数」**：播放条上那一枚键拿不到数就**不画数字**
-	// （不是画「0」——那会让用户以为没人评论）。
-	viewReply int64
 }
 
 // fixture 那一摊收藏用的固定值。

@@ -373,6 +373,67 @@ func TestArchiveStatsReadsTheReplyCount(t *testing.T) {
 	}
 }
 
+// TestArchiveStatsSurvivesAStatShapeDrift 钉住**不用的那一栏坏了不许打死整条链路**。
+//
+// 🔴 `ArchiveID` 是收藏（`ridAndType`）和一键三连的必经之路，而它走的是
+// `ArchiveStats`——`json.Unmarshal` 遇到类型对不上会让**整个反序列化**失败，于是
+// 一个我们根本不用的字段（`stat.reply`）形状漂移，会把收藏和一键三连一起打死。
+// 改之前 `ArchiveID` 只解 `aid`，对这些漂移免疫。
+//
+// 仓库的明文约定（`flexjson.go` 文件头）：「凡是 B 站有可能写成字符串的数字都用
+// `flexInt`」——读不出来就当零值，绝不把整条带走。
+func TestArchiveStatsSurvivesAStatShapeDrift(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		stat any
+	}{
+		// B 站真把计数写成字符串（`flexjson.go` 文件头记的那次 `pub_ts` 就是）。
+		{"reply 是字符串", map[string]any{"view": 100, "reply": "1234"}},
+		// 形状整个变了：数组不是对象。
+		{"stat 是数组", []any{}},
+		// 形状整个变了：给了个字符串。
+		{"stat 是字符串", "没有这一栏"},
+		// 空值（这一档本来就是好的，留着盯「别的档的修法没把它弄坏」）。
+		{"stat 是 null", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeBili(t)
+			f.on(pathView, func(w http.ResponseWriter, r *http.Request) {
+				data := map[string]any{"aid": 4242, "bvid": "BV1xx"}
+				if tc.stat != nil {
+					data["stat"] = tc.stat
+				} else {
+					data["stat"] = nil
+				}
+				writeJSON(w, jsonData(t, 0, "0", data))
+			})
+			c := f.client(t, Options{})
+
+			// 🔴 最要紧的一条：收藏 / 三连走的那条路必须照旧。
+			aid, err := c.ArchiveID(context.Background(), "BV1xx")
+			if err != nil {
+				t.Fatalf("ArchiveID 报错了：%v——一个不用的字段把收藏/三连打死了", err)
+			}
+			if aid != 4242 {
+				t.Errorf("ArchiveID 回的是 %d，want 4242", aid)
+			}
+
+			// `ArchiveStats` 自己也不许报错：aid 要对。
+			st, err := c.ArchiveStats(context.Background(), "BV1xx")
+			if err != nil {
+				t.Fatalf("ArchiveStats 报错了：%v", err)
+			}
+			if st.Aid != 4242 {
+				t.Errorf("ArchiveStats 的 Aid 是 %d，want 4242", st.Aid)
+			}
+			// `stat.reply` 是数字字符串时按 `flexInt` 的语义读出来（读不出来当 0）。
+			if tc.name == "reply 是字符串" && st.Reply != 1234 {
+				t.Errorf("reply 是 \"1234\" 时读成 %d，want 1234（flexInt 的语义）", st.Reply)
+			}
+		})
+	}
+}
+
 // TestFriendlyTalksAboutFavoriteFailures 收藏的那两个哨兵要能被说成一句用户听得懂
 // 的话。**不是所有收藏失败都值得重试**：「已经收藏过了」再按一次还是那句话，而
 // 「收藏夹接口没登录」重试多少次都一样，用户该做的是重新登录。

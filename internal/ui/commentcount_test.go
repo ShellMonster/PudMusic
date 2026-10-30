@@ -16,6 +16,7 @@ package ui
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 
@@ -247,6 +248,85 @@ func commentCountWidths(t *testing.T, it app.Item, width int, reply int64) map[s
 		t.Fatalf("宽度 %d / %d 条：画面上找不到进度条，文字有 %q", width, reply, tt.Texts())
 	}
 	return out
+}
+
+// TestTheWidthCommentsMatchTheCode 钉住**那一大段宽度注释与代码/实测一致**。
+//
+// 🔴 这一段注释是「为什么左列保底是这么多」的唯一说明，而下一个人调宽度时就是
+// 照着它算的——**写错一个数就是把人带偏一次**（票 #682 的审查抓到两处：
+// 最小宽度写的 305，实际 307；「四档都是 76」里 1600 其实是 82.6）。
+//
+// 判据分三层：
+//
+//  1. 常量之间的账（`playbarActionsW` = 三枚 32 + 评论键 67 = 163）；
+//  2. 注释里那个「最小宽度：**N**」要与 `playbarLeftMinW` 算出来的数一致；
+//  3. 「歌名的宽」那段要与**实测**一致：1600 那一档不是 76，注释里必须写出量到
+//     的那个数（`fmt.Sprintf("%.1f")` 的同一个格式）。
+func TestTheWidthCommentsMatchTheCode(t *testing.T) {
+	// 1. 常量的账。
+	if playbarCommentsW != iconHitMd+commentCountGap+commentCountMaxW {
+		t.Errorf("playbarCommentsW = %d，want %d（32 + 缝 + 数字格）",
+			playbarCommentsW, iconHitMd+commentCountGap+commentCountMaxW)
+	}
+	if playbarCommentsW != 67 {
+		t.Errorf("playbarCommentsW = %d，want 67（票 #682 量出来的那一档）", playbarCommentsW)
+	}
+	if playbarActionsW != 163 {
+		t.Errorf("playbarActionsW = %d，want 163（三枚 96 + 评论键 67）", playbarActionsW)
+	}
+	if playbarLeftMinW != 307 {
+		t.Errorf("playbarLeftMinW = %d，want 307（52 + 8 + 76 + 8 + 163）", playbarLeftMinW)
+	}
+	if commentCountGap != 2 {
+		t.Errorf("commentCountGap = %d，want 2", commentCountGap)
+	}
+
+	// 2/3. 注释要与代码和实测对得上。
+	b, err := os.ReadFile("playbar.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+
+	// 注释里那句「最小宽度：**N**」。
+	claimed := -1
+	for _, line := range strings.Split(src, "\n") {
+		if !strings.Contains(line, "playbarLeftMinW 是左边那一列的最小宽度") {
+			continue
+		}
+		if _, err := fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(
+			strings.TrimSpace(line), "// playbarLeftMinW 是左边那一列的最小宽度：**")),
+			"%d", &claimed); err != nil {
+			t.Fatalf("读不出那一行注释里的宽度：%q（%v）", line, err)
+		}
+	}
+	if claimed < 0 {
+		t.Fatal("playbar.go 里找不到「playbarLeftMinW 是左边那一列的最小宽度」那一行注释")
+	}
+	if claimed != playbarLeftMinW {
+		t.Errorf("注释说最小宽度是 %d，代码算出来是 %d——照着注释算的人会被带偏",
+			claimed, playbarLeftMinW)
+	}
+
+	// 歌名的宽：量四档，把「不是 76 的那一档」的真实数写进注释里。
+	const longTitle = "一首歌的名字很长很长很长很长"
+	it := app.Item{
+		Source: "online", Type: "mv", Bvid: "BVcommentWidthDoc", Cid: "1",
+		Title: longTitle, Artist: "某个 UP 主", ArtistMid: 1,
+	}
+	for _, width := range []int{900, 1000, 1200, 1600} {
+		got := commentCountWidths(t, it, width, 1234567)[longTitle]
+		if got == trackTextMinW {
+			continue
+		}
+		// 那一档不是保底宽（轨道说话）：注释里得写出这个数，而不是笼统地说
+		// 「四档都是 76」。
+		want := fmt.Sprintf("%.1f", got)
+		if !strings.Contains(src, want) {
+			t.Errorf("宽度 %d 上歌名实测 %.1f，而 playbar.go 的宽度注释里没有这个数"+
+				"——注释说的和量出来的不一致", width, got)
+		}
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
