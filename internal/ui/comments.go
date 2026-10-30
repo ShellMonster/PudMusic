@@ -352,7 +352,7 @@ func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 	s.applyFrameTheme(c)
 
 	p := &s.comments
-	it, has := s.app.CurrentItem()
+	it, has := s.pageInput().Current, s.pageInput().HasCurrent
 
 	// 🔴 **高亮那一份配色一帧算一次**（票 #684）：筛选开着才算，关着时是零值
 	// （`commentBodyOf` 见它是零值就不跑匹配、不带底色）。
@@ -502,7 +502,8 @@ func (s *Shell) viewCommentsNoMention(c *ui.Context, p *commentsPage) {
 	// `mv` 那一档的评论是**这个视频**的，而音乐库音频那一档是**这一首**的
 	// （页头那一枚角标是同一句口径，见 `viewCommentsScopeBadge`）。
 	scope := "这一首"
-	if it, ok := s.app.CurrentItem(); ok && it.Type == "mv" {
+	input := s.pageInput()
+	if input.HasCurrent && input.Current.Type == "mv" {
 		scope = "这个视频"
 	}
 	// ⚠️ **那一枚键是「怎么才能不空」**：这一格空着是因为用户自己把筛选按上
@@ -716,7 +717,7 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 		AlignSelf(ui.Stretch).AlignItems(ui.Start).Gap(commentBodyGap).
 		Padding(space.Px4, space.None).Children(func() {
 		// 头像：B 站的评论头像是圆的。
-		imgcache.ViewRadius(c, s.images, commentImageURL(cm.Avatar),
+		imgcache.ViewRadius(c, s.pageImages(), commentImageURL(cm.Avatar),
 			commentAvatar, commentAvatar, commentAvatar/2)
 
 		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px6).Children(func() {
@@ -777,7 +778,7 @@ func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentR
 	ui.Row(c).Key(row.elemKey).
 		AlignSelf(ui.Stretch).AlignItems(ui.Start).Gap(space.Px8).
 		MarginX(space.Px12).Children(func() {
-		imgcache.ViewRadius(c, s.images, commentImageURL(cm.Avatar),
+		imgcache.ViewRadius(c, s.pageImages(), commentImageURL(cm.Avatar),
 			commentReplyAvatar, commentReplyAvatar, commentReplyAvatar/2)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
@@ -966,7 +967,7 @@ func (s *Shell) commentBodyOf(c *ui.Context, p *commentsPage, cm bili.Comment, l
 	//
 	// ⚠️ **颜色在里面现取**（`pr.Theme()`）：这一份缓存跨帧活着，而主题是
 	// 用户能改的——写死颜色的话，用户换了深浅两套之后正文还是旧的颜色。
-	cache := s.images
+	cache := s.pageImages()
 	b.paint = func(pr *ui.Painter, r ui.Rect) {
 		pr.TextLayout(b.layout, r.X, r.Y, pr.Theme().Text)
 		for i, o := range b.objects {
@@ -1309,25 +1310,28 @@ func (s *Shell) syncComments(c *ui.Context) {
 	//
 	// ⚠️ **不每帧重算**：别名表是一次性的产物，而每帧重算就是每帧一次分配
 	// （理由同 `framebudget_test.go` 盯着的「每帧现算」那族坏处）。
-	if it, ok := s.app.CurrentItem(); ok &&
-		(it.Title != p.srcTitle || it.Artist != p.srcArtist) {
-		p.srcTitle, p.srcArtist = it.Title, it.Artist
-		p.names = songname.New(it.Title, it.Artist)
-		p.srcLen = -1
-		// 🔴 **正文排版缓存也要清**（票 #684）：它的键里**没有别名表**
-		// （`commentBodyOf` 按 rpid / 宽 / 行数 / 配色记）——留着的话，筛选用
-		// 的是新歌名，正文里高亮的却还是旧歌名的那几段。
-		//
-		// ⚠️ **只在别名表真的换了时清**（就是这一支）：每帧清的话排版缓存整个
-		// 作废，`framebudget_test.go` 那一档会红。而换歌本来就伴随
-		// `p.srcLen = -1`（下一帧重建行），重排一次排版是同一件事的一部分。
-		p.bodies = nil
-		// 🔴 **换成一首没有名字的歌，筛选就做不了**：空表会把这一首的评论
-		// 全筛掉（`songname.Table.Empty`），而界面上一句话都说不清为什么。
-		//
-		// ⇒ 把开关按回去（它那一枚也是按灰的，用户看得出按不动）。
-		if p.names.Empty() && p.mentionOnly {
-			p.mentionOnly = false
+	input := s.pageInput()
+	if input.HasCurrent {
+		it := input.Current
+		if it.Title != p.srcTitle || it.Artist != p.srcArtist {
+			p.srcTitle, p.srcArtist = it.Title, it.Artist
+			p.names = songname.New(it.Title, it.Artist)
+			p.srcLen = -1
+			// 🔴 **正文排版缓存也要清**（票 #684）：它的键里**没有别名表**
+			// （`commentBodyOf` 按 rpid / 宽 / 行数 / 配色记）——留着的话，筛选用
+			// 的是新歌名，正文里高亮的却还是旧歌名的那几段。
+			//
+			// ⚠️ **只在别名表真的换了时清**（就是这一支）：每帧清的话排版缓存整个
+			// 作废，`framebudget_test.go` 那一档会红。而换歌本来就伴随
+			// `p.srcLen = -1`（下一帧重建行），重排一次排版是同一件事的一部分。
+			p.bodies = nil
+			// 🔴 **换成一首没有名字的歌，筛选就做不了**：空表会把这一首的评论
+			// 全筛掉（`songname.Table.Empty`），而界面上一句话都说不清为什么。
+			//
+			// ⇒ 把开关按回去（它那一枚也是按灰的，用户看得出按不动）。
+			if p.names.Empty() && p.mentionOnly {
+				p.mentionOnly = false
+			}
 		}
 	}
 

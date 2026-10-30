@@ -80,6 +80,11 @@ type commentBili struct {
 	hold chan struct{}
 	// calls 记着主列表那几趟的查询串。
 	calls []url.Values
+	// replyCalls 数着楼中楼那几趟（`/x/v2/reply/reply`）。
+	//
+	// ⚠️ **它单独一个计数而不是并进 `calls`**：那个查询串是主列表的
+	// （pagination_str / mode），楼中楼问的是 root，形状不一样。
+	replyCalls int
 }
 
 // newCommentBili 装一台假 B 站。
@@ -158,10 +163,20 @@ func newCommentBili(t *testing.T, mainFile string) *commentBili {
 
 	// 楼中楼。
 	b.on("/x/v2/reply/reply", func(w http.ResponseWriter, _ *http.Request) {
+		b.mu.Lock()
+		b.replyCalls++
+		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(b.files["reply-reply.json"])
 	})
 	return b
+}
+
+// replyCallCount 数楼中楼被问了几回。
+func (b *commentBili) replyCallCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.replyCalls
 }
 
 // mainCallCount 数主列表被问了几回。

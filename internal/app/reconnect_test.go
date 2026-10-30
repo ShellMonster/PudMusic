@@ -268,8 +268,60 @@ func TestTheOldSongsReconnectStateDoesNotStealTheNewOnesLine(t *testing.T) {
 	}
 }
 
-// TestTheSecondReopenSaysItGaveUp 盯「第二次重开被挡掉」那一支。
-//
+func TestAStaleSourceCannotReplaceTheCurrentPendingSource(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	current := retryingSourceWith(t, 30*time.Second)
+	stale := retryingSourceWith(t, 30*time.Second)
+	a.mu.Lock()
+	a.onlineGen++
+	currentGen := a.onlineGen
+	a.pendingSrc = current
+	a.pendingSrcGen = currentGen
+	staleGen := currentGen - 1
+	a.mu.Unlock()
+
+	if a.setPendingSource(stale, staleGen) {
+		t.Fatal("过期代次居然替换了当前 pending source")
+	}
+
+	a.mu.Lock()
+	got, gotGen := a.pendingSrc, a.pendingSrcGen
+	gotCurrentGen := a.onlineGen
+	a.mu.Unlock()
+	if got != current || gotGen != gotCurrentGen {
+		t.Fatalf("过期代次改了当前源：got=%p gen=%d，want=%p gen=%d", got, gotGen, current, gotCurrentGen)
+	}
+}
+
+func TestAStaleSourceCannotReplaceTheCurrentLoadSource(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	current := retryingSourceWith(t, 30*time.Second)
+	stale := retryingSourceWith(t, 30*time.Second)
+	a.mu.Lock()
+	a.onlineGen++
+	currentGen := a.onlineGen
+	a.loadSrc = current
+	a.loadSrcGen = currentGen
+	staleGen := currentGen - 1
+	a.mu.Unlock()
+
+	if a.setLoadSource(stale, staleGen) {
+		t.Fatal("过期代次居然替换了当前 load source")
+	}
+
+	a.mu.Lock()
+	got, gotGen := a.loadSrc, a.loadSrcGen
+	gotCurrentGen := a.onlineGen
+	a.mu.Unlock()
+	if got != current || gotGen != gotCurrentGen {
+		t.Fatalf("过期代次改了当前源：got=%p gen=%d，want=%p gen=%d", got, gotGen, current, gotCurrentGen)
+	}
+}
+
 // 一首歌只重开一次（`onlineTrack.reopening`）。第二次还不行就该**如实报错**。
 //
 // 🔴 **以前这里是直接 return**（票 #315 的评审复现过）：界面上「正在重连」

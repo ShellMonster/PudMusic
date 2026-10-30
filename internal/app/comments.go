@@ -465,47 +465,41 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 
 	repliesFetch := a.commentsRepliesFetch
 	archiveFetch := a.commentsArchiveIDFetch
-	// 🔴 **楼中楼的每一趟有自己的 cancel，按 root 记**。
+	// 🔴 **楼中楼有自己的 cancel 槽**（`commentsReplyCancels`，按 root 分格）：
+	// 挤进 `commentsCancel` 那一格的话，主列表那一趟（通常已经跑完、而它留下的
+	// cancel 不会被清空）会让这一趟刚造出来的 ctx 当场被取消——**一个包都不出去**，
+	// 用户看到的是「点开回复没有任何反应」。按 root 分格还保证同一个槽位上连着点开
+	// 两条回复时，两条各自都能拿到自己的结果。
 	//
-	// 原来那一版把这一趟的 cancel 存进 `commentsCancel`（那是**主列表**的格子），
-	// 然后**取消了这一趟自己的 ctx** ——于是楼中楼**一趟都没发出去过**
-	// （`bili: 网络没通: … context canceled`），展开永远是空的。
-	//
-	// ⚠️ **不跟主列表共用一格**：主列表那一趟一结束就没人再碰 `commentsCancel`，
-	// 而两趟楼中楼（展开两条评论）本来是并行的、互不相干。
+	// ⚠️ **同一个 root 重问时换掉旧的**：那个 root 上一次的取消函数已经没用了
+	// （它那一趟要么回来了、要么早就不该再写界面）；留着只会让这一格的 map
+	// 无限长下去。
 	ctx, cancel := context.WithCancel(context.Background())
-	// ⚠️ **记的是一个带身份的指针，不是裸的 cancel**（函数值只能和 nil 比）：
-	// 收尾时靠身份认出「这一格还是我那一趟」，否则同一个 root 又起了一趟时，
-	// 先收尾的那一趟会把新的那一格删掉——新的那一趟于是**再也取消不了**。
-	req := &commentReplyRequest{cancel: cancel}
 	a.commentsMu.Lock()
-	if a.commentsRepliesCancel == nil {
-		a.commentsRepliesCancel = map[int64]*commentReplyRequest{}
+	// ⚠️ **两次加锁之间可能已经换歌了**：上面那次 `Unlock` 之后、这一次
+	// `Lock` 之前，界面线程可能换了槽位并跑完 `resetCommentsLocked`——那一趟
+	// 会把这个新造出来的 ctx 的取消函数**漏掉**（它清的是当时 map 里已有的
+	// 那些），于是这一趟不受控地跑完（结果被代次丢掉，但网络和内存照付）。
+	//
+	// 判据用**代次**：`gen` 是在上面那次加锁里取的；这里对不上就说明槽位已经
+	// 换过，这一趟根本不该发出去——直接取消并走人（`commentsRepliesWanted`
+	// 那份记在旧代次上，换槽时已经被清了，不会卡住重试）。
+	if a.commentsGen != gen || a.commentsSlot != slot {
+		a.commentsMu.Unlock()
+		cancel()
+		return nil
 	}
-	// 同一个 root 又问了一次：先取消上一趟（它的结果按代次丢掉，见
-	// `finishReplies`）。
-	if prev := a.commentsRepliesCancel[root]; prev != nil {
-		prev.cancel()
+	if a.commentsReplyCancels == nil {
+		a.commentsReplyCancels = map[int64]context.CancelFunc{}
 	}
-	a.commentsRepliesCancel[root] = req
+	if prev := a.commentsReplyCancels[root]; prev != nil {
+		prev()
+	}
+	a.commentsReplyCancels[root] = cancel
 	a.commentsMu.Unlock()
-	go func() {
-		defer func() {
-			a.commentsMu.Lock()
-			if a.commentsRepliesCancel[root] == req {
-				delete(a.commentsRepliesCancel, root)
-			}
-			a.commentsMu.Unlock()
-			cancel()
-		}()
-		a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
-	}()
+	go a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
 	return nil
 }
-
-// commentReplyRequest 是一层楼中楼那一趟的身份：它的 cancel 加一个指针身份
-// （用来认出「缓存里那一格还是不是我那一趟」，理由见 `CommentReplies`）。
-type commentReplyRequest struct{ cancel context.CancelFunc }
 
 // RefreshComments 绕过缓存重拉一遍当前这一首的评论。**立刻返回**。
 //
@@ -637,6 +631,13 @@ func (a *App) resetCommentsLocked(slot string) {
 		a.commentsCancel()
 		a.commentsCancel = nil
 	}
+	// 🔴 **在途的楼中楼也要掐掉**：换歌之后那些 root 属于上一首，回来的结果
+	// 代次对不上、写不进界面——但请求本身还占着网络和内存。按 root 分格存着，
+	// 这里逐个取消并清空那一格（槽位换了，旧 root 永远不会再被问）。
+	for root, cancel := range a.commentsReplyCancels {
+		cancel()
+		delete(a.commentsReplyCancels, root)
+	}
 	a.commentsSlot = slot
 	a.comments = nil
 	a.commentsErr = nil
@@ -652,10 +653,11 @@ func (a *App) resetCommentsLocked(slot string) {
 	a.commentsTyp = 0
 	// 🔴 **换歌就把在途的楼中楼全取消掉**：它们问的是上一首的对象，结果会被
 	// 代次丢掉，留着它们只是白占着连接。
-	for _, req := range a.commentsRepliesCancel {
-		req.cancel()
+	for root, cancel := range a.commentsReplyCancels {
+		cancel()
+		delete(a.commentsReplyCancels, root)
 	}
-	a.commentsRepliesCancel = nil
+	a.commentsReplyCancels = nil
 	a.commentsReplies = map[int64][]bili.Comment{}
 	a.commentsRepliesTried = map[int64]time.Time{}
 	a.commentsRepliesWanted = map[int64]bool{}
@@ -1132,6 +1134,15 @@ func (a *App) commentOIDFor(ctx context.Context, it Item, slot string, gen int, 
 }
 
 // finishReplies 记下一次楼中楼的结果并叫醒界面。
+//
+// ⚠️ **这一趟结束了，它那个取消函数就没用了**（`commentsReplyCancels[root]`）：
+// 不删的话，同一首歌里每展开一层楼就留一个 CancelFunc（连同它那个 ctx 和闭包）
+// 到换歌为止。删的时机放在**结果落地**这一处——`loadReplies` 的每条路径
+// （成功、失败、认不出对象）最后都走到这里。
+//
+// ⚠️ **删之前对一下代次**：换歌之后槽位和代次都变了，那一格早被
+// `resetCommentsLocked` 清掉；这时同 root 的新一趟可能已经写进新的一格，
+// 盲目 `delete` 会把**新的**那个取消函数删掉（那一趟就再也不受控制了）。
 func (a *App) finishReplies(slot string, gen int, root int64, rs []bili.Comment) {
 	a.commentsMu.Lock()
 	if a.commentsSlot == slot && a.commentsGen == gen {
@@ -1144,6 +1155,7 @@ func (a *App) finishReplies(slot string, gen int, root int64, rs []bili.Comment)
 		if a.commentsRepliesWanted != nil {
 			a.commentsRepliesWanted[root] = false
 		}
+		delete(a.commentsReplyCancels, root)
 	}
 	a.commentsMu.Unlock()
 

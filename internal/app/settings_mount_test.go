@@ -181,7 +181,32 @@ func TestBrokenSettingsFileStillStarts(t *testing.T) {
 	}
 }
 
-// TestSettingsFromANewerVersionStayReadOnly 验「设置来自更新的版本」时一个字
+func TestBrokenSettingsLoadErrorDoesNotHideExternalPersistenceError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), app.SettingsFileName)
+	write(t, path, "这不是 JSON")
+
+	a := app.New()
+	t.Cleanup(func() {
+		a.Close()
+		_ = a.CloseSettings()
+	})
+	if err := a.MountSettings(path); !errors.Is(err, app.ErrSettingsCorrupt) {
+		t.Fatalf("拿到的是 %v，want ErrSettingsCorrupt", err)
+	}
+	externalErr := errors.New("全屏播放器偏好存不住")
+	a.RecordExternalSettingsError(externalErr)
+
+	if err := a.TakeSettingsError(); !errors.Is(err, app.ErrSettingsCorrupt) {
+		t.Fatalf("第一次设置错误 = %v，want ErrSettingsCorrupt", err)
+	}
+	if err := a.TakeSettingsError(); !errors.Is(err, externalErr) {
+		t.Fatalf("第二次设置错误 = %v，want external error", err)
+	}
+	if err := a.TakeSettingsError(); err != nil {
+		t.Fatalf("同一批错误被重复报告：%v", err)
+	}
+}
+
 // 都不许写回去。
 //
 // 一个字都不能写：用户的设置会被一个旧版本按旧语义改写，等升级回来已经面目

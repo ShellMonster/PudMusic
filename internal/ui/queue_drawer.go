@@ -1,8 +1,7 @@
 // 播放列表抽屉：Biu 的 `components/music-playlist-drawer`。行高 64
 // （`index.tsx:12` 的 `RowHeight`，也是 `scrollToPlayItem` 那个
-// `targetIndex * 64` 的出处）、按判重标识去重（同一处的 `uniqBy`，键在
-// `app.Item.Identity` 上）、行菜单五项（`menu.tsx` 的 `getMenus`，理由见
-// `queueMenuItems`）。
+// `targetIndex * 64` 的出处）、保留队列中的每一项、行菜单五项（`menu.tsx` 的
+// `getMenus`，理由见 `queueMenuItems`）。
 //
 // 它浮在主布局**外面**：`ui.Overlay` + `Absolute`（MyGo 文档
 // `docs/ui/overlays.md` 里有一个抽屉的例子），不在 `viewMain` 那个 `Row` 里
@@ -147,23 +146,15 @@ const (
 
 // queueRow 是抽屉里画出来的一行。
 //
-// `at` 是它在**队列**里的下标：去重之后行号和下标不再是一回事（同一个键的第一条
-// 留在队列第 3 位、在抽屉里是第 1 行），点一行 / 放一首 / 删一行用的都是 `at`。
+// at 是它在**队列**里的下标：抽屉逐项展示队列，所以行号和队列下标一致；点一行、
+// 放一首、删一行都使用这个位置。
 type queueRow struct {
 	item app.Item
 	at   int
 	// key 是这一行的身份（铁律四）。见 queueRowKey。
 	key string
-	// id 是这一首的**判重标识**（Item.Identity）。
-	//
-	// ⚠️ **它和 key 不是一回事**：key 是「这一行」（铁律四），id 是「这一首」
-	// （队列里可能有同一首的多份，抽屉只画一行）。
-	//
-	// 它在 queueRowsFor 里就**算好了**（那一处本来就要算，见去重那段）——存下来
-	// 是为了别处不用再算一遍（现算一遍是要分配的：Identity 拼的是一个新字符串）。
-	//
-	// ⚠️ **而且它是记好的那一份**（票 #339）：`queueRowsFor` 拿
-	// `s.queueRowIDs` 那个 memo 换来的，所以每帧每行不再现拼一次。
+	// id 是这一首的**判重标识**（Item.Identity），仅用于判断当前播放项；同一首歌的
+	// 多份队列项各自保留自己的行。
 	id string
 	// state 是这一行处在哪一档（见 queueRowState）。**每帧重算**：这些行是
 	// `viewQueueDrawer` 每帧现造的（`queueRowsFor`），所以写在上面的状态不会
@@ -178,22 +169,11 @@ type queueRow struct {
 
 // queueRowKey 是这一行的 key。
 //
-// 🔴 铁律四：**行的身份是这一首歌的判重标识，不是行号**。默认的「父 ID +
-// 兄弟序号」在前面插一行 / 删掉一行之后会让后面所有行的状态整体错配——
-// 抽屉上最直接的表现是「正在播的那首」高亮到了旁边那一行。
-//
-// 认不出是哪一首的项（Identity 返回空串，见它的注释）退回用队列下标当身份：
-// **不能给它们同一个空串**，那会让 MyGo 在 Tester 里当场 panic（重复的 key），
-// 真窗口里则是两行串在一处、删一行连着删掉两首。
-//
-// ⚠️ 退回的那一支前缀用 `!` 而不是别的：`Identity` 造出来的键一律是
-// `<local|mv|audio>:<值>`，冒号是它的一部分。所以「`queue-row:` + 标识」和
-// 「`queue-row!` + 下标」这两串**永远不会相等**——写成 `queue-row:#3` 的话，
-// 一首标识正好是 `#3` 的歌就会和队里第三行那个认不出的项撞上（虽然今天造不出
-// 那种标识，但这里是唯一一处拿两样用户数据拼一个键的地方，别留这个口子）。
-func queueRowKey(id string, at int) string {
+// 同一首歌的重复项用它在该歌曲副本中的序号区分；不同歌曲的插入不会改变已有行的
+// key，因此悬停、焦点和菜单状态可以跟着原来的队列项保留。
+func queueRowKey(id string, occurrence int, at int) string {
 	if id != "" {
-		return "queue-row:" + id
+		return "queue-row:" + id + "!" + strconv.Itoa(occurrence)
 	}
 	return "queue-row!" + strconv.Itoa(at)
 }
@@ -205,26 +185,15 @@ func queueRowKey(id string, at int) string {
 // 认得出身份的那些行每帧每行两次，二十首的队列就是四十来次（认不出的那一支
 // 只有行身份那一次：判重标识是空串，不拼）。
 type queueRowIdentity struct {
-	// id 是这一首的判重标识（`Item.Identity()`）。
-	id string
-	// key 是这一行的身份（铁律四）。见 queueRowKey。
+	id  string
 	key string
 }
 
-// queueRowRaw 是「那两串身份」的**原料**。
-//
-// ⚠️ **取得它不能分配**：所以它记的是 Item 本身（现成的字段）加上这一项在队列里
-// 的位置，而**不是**那两串身份——那两串恰恰是要省掉的那一步（`rowkey.Memo` 的
-// 文件头：「现拼的那一步本身就要分配，而它恰恰是要省掉的那一步」）。
-//
-// ⚠️ **Item 整个当原料**：它认得出身份靠的就是那几个字段（`Source` / `Type` /
-// `Path` / `Bvid` / `Sid`），而比较一个 Item 不分配（字段全是现成的字符串，
-// 同一个字符串的指针一样，比较是 O(1)）。
+// queueRowRaw 是「那两串身份」的原料。
 type queueRowRaw struct {
-	item app.Item
-	// at 是这一项在队列里的位置。认不出是哪一首时行身份退回按下标（见
-	// queueRowKey），所以位置也是原料的一部分。
-	at int
+	item       app.Item
+	occurrence int
+	at         int
 }
 
 // packQueueRowIdentity 是「原料 → 那两串身份」的那一步。
@@ -236,30 +205,37 @@ type queueRowRaw struct {
 // 而快的那条路上零分配。
 func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
 	id := r.item.Identity()
-	return queueRowIdentity{id: id, key: queueRowKey(id, r.at)}
+	return queueRowIdentity{id: id, key: queueRowKey(id, r.occurrence, r.at)}
 }
 
-// queueRowsFor 是抽屉这一帧要画的那几行：队列按判重标识去重之后的样子。
+// queueRowsFor 是抽屉这一帧要画的那几行：队列里的每一项都保留一行。
 //
-// **保留第一次出现的**（`uniqBy` 的语义）：那一行在队列里的位置（`at`）也还是
-// 第一次入队那个，播放条和「下一首」走的是队列，抽屉跟着走同一个才不至于各说各话。
+// 队列允许同一首歌重复入队，抽屉必须把每一份都展示出来，才能让可见计数、
+// 行位置和下一首播放的实际顺序一致。行身份由判重标识和队列下标组成，
+// 所以重复项仍有稳定且唯一的 key。
 //
-// ⚠️ **那两串身份是记好的那一份**（`ids`）：现拼的话每帧每行一到两次分配（票 #339）。
+// ⚠️ **那两串身份是记好的那一份**（票 #339）：现拼的话每帧每行一到两次分配。
 func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
 	rows := make([]queueRow, 0, snapshot.Len())
-	seen := make(map[string]bool, snapshot.Len())
 	for i := 0; i < snapshot.Len(); i++ {
 		it, ok := snapshot.At(i)
 		if !ok {
 			continue
 		}
-		ident := ids.At(i, queueRowRaw{item: it, at: i}, packQueueRowIdentity)
-		if ident.id != "" {
-			if seen[ident.id] {
-				continue
+		occurrence := 0
+		if app.SameTrack(it, it) {
+			for j := 0; j < i; j++ {
+				prev, ok := snapshot.At(j)
+				if ok && app.SameTrack(it, prev) {
+					occurrence++
+				}
 			}
-			seen[ident.id] = true
 		}
+		raw := queueRowRaw{item: it, occurrence: occurrence}
+		if !app.SameTrack(it, it) {
+			raw.at = i
+		}
+		ident := ids.At(i, raw, packQueueRowIdentity)
 		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
 	}
 	return rows
@@ -372,7 +348,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			panel.Role(ui.RoleDialog).Label("播放列表").
 				Children(func() {
 					s.viewQueueHeader(c, t)
-					s.viewQueueBody(c, t)
+					s.viewQueueBody(c, t, qSnapshot)
 				})
 
 			// ---- 进出场 ----
@@ -511,6 +487,12 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 			}
 			ui.Text(c, "("+strconv.Itoa(len(rows))+")").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
 		})
+		// 抽屉必须始终有一个可见出口，空队列也不能只靠 Esc 或点外面关闭。
+		ui.Spacer(c)
+		if s.withTip(c, iconKey(c, iconClose, "关闭播放列表", iconSm, false).
+			Size(iconHit, iconHit).Padding(space.None, space.Px9), "关闭播放列表").Clicked() {
+			s.drawerOpen = false
+		}
 		if len(rows) == 0 {
 			return
 		}
@@ -593,11 +575,7 @@ func (s *Shell) viewQueueClearConfirm(c *ui.Context) {
 
 // queueClearBody 是那道确认的正文：说清毁掉的是什么、有几首。
 //
-// ⚠️ **数的是抽屉里画着的那几行**（去重之后）：那是用户看得见的数——顶上写着
-// 「(3)」，正文写着「3 首」才说得通。
-//
-// ⚠️ **「正在放的那首也会停」只在真的有歌在放的时候才说**：没在放的时候提它，
-// 用户会以为这一下还顺手做了别的什么。
+// 数的是队列里实际会被清掉的项数，和抽屉标题显示的行数一致。
 func queueClearBody(n int, playing bool) string {
 	what := "队列里的 " + strconv.Itoa(n) + " 首会清掉"
 	if playing {
@@ -608,8 +586,8 @@ func queueClearBody(n int, playing bool) string {
 
 // viewQueueBody 是抽屉下面那一块：有歌就是那一列，没有歌是一句空状态（分岔照
 // Biu 的 `{list.length ? <VirtualList/> : <Empty/>}`）。
-func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
-	if len(s.queueRows) == 0 {
+func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme, snapshot app.QueueSnapshot) {
+	if snapshot.Len() == 0 {
 		// ⚠️ 那两行走 `emptyCopy`（empty.go），和七个页面的空状态同一份字号、
 		// 同一份主次色。原先这里自己抄了一份 15 / 12——而抄一份就会漂开。
 		ui.Column(c).Key("queue-empty").Grow(1).Center().Padding(space.Px20, space.Px16).Children(func() {
@@ -617,21 +595,20 @@ func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme) {
 		})
 		return
 	}
-	s.viewQueueList(c, t)
+	s.viewQueueList(c, t, snapshot)
 }
 
-// viewQueueList 是抽屉里那一列队列。行身份是判重标识（铁律四），行高定死 64——
+// viewQueueList 是播放列表抽屉里那一列队列。每个队列项都是一行，行高定死 64——
 // 「定位当前播放」滚到的 `targetIndex * 64` 靠的就是这个定值。
-func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
+func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnapshot) {
 	rows := s.queueRows
 	// ⚠️ **这一帧只取一次快照**（`viewMain` 那条规矩：两次取的话两者之间状态
 	// 可能变了，而画出来的是两份不同的状态）。「当前这一首」和「停住了」都从
 	// 这一份里读。
 	st := s.app.Snapshot()
-	playing := s.playingIdentity(st)
-	// 「正在放的那一行」在**建列表之前**找出来，不要在每一行的回调里找：那是一帧
-	// 里 len(rows) 次全表扫，队列长一点就是几万次判重标识的比较，而每帧都来一遍。
-	cur := currentRow(rows, playing)
+	playing := st.HasTrack
+	current := s.app.Queue().CurrentIndex()
+	cur := currentRow(rows, current, playing)
 	// ⚠️ **状态写在那一行自己身上**（`queueRow.state`），不另开一个变量：这个
 	// 闭包每帧建一次，而它捕获的每一个变量都占闭包结构体的一个位置——多一个
 	// 变量就是多一个指针，尺寸类跳一级，**每帧多 16 个字节**（票 #319 的验收：
@@ -658,11 +635,7 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 		}
 	}
 
-	// 🔴 铁律四：Key 每一帧都重装，装的是这一首自己的判重标识。
-	// ⚠️ 别改成行号：那正是实测踩过的坑（前面删掉一行，后面所有行的状态整体
-	// 错配，抽屉上表现为「正在播的那首」高亮到了旁边那一行）。
-	// ⚠️ **身份是预先装箱好的那一份**（`s.queueRowKeys`）：理由见
-	// `shell.go` 里那个字段的注释（票 #313）。
+	// 行 key 包含判重标识和队列位置，重复项因此各自稳定且唯一。
 	s.queueList.Key = func(i int) any {
 		return s.queueRowKeys.At(i, rows[i].key, rowkey.Identity)
 	}
@@ -715,21 +688,12 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme) {
 
 // currentRow 是「正在放的那一首」在抽屉里的行号，没有是 -1。
 //
-// 按**判重标识**认，不按下标认（同一首排了两遍时，正在放的可能不是抽屉留下的
-// 那一条）。这也是 Biu 的 `isSame(playItem, item)`。
-func currentRow(rows []queueRow, playing string) int {
-	if playing == "" {
+// 当前播放项由队列下标定位；同一首歌重复出现时，只有当前项对应的那一行高亮。
+func currentRow(rows []queueRow, current int, playing bool) int {
+	if !playing || current < 0 || current >= len(rows) {
 		return -1
 	}
-	for i, r := range rows {
-		// ⚠️ **用行上记好的那一份**（`r.id`）：现算的话每帧每一行一次字符串拼接
-		// （`Item.Identity()` 拼的是「local:」+ 路径），而这一份在 `queueRowsFor`
-		// 里已经算好、而且是记好的（票 #339）。
-		if id := r.id; id != "" && id == playing {
-			return i
-		}
-	}
-	return -1
+	return current
 }
 
 // playingIdentity 是「正在放的那一首」的判重标识。没有歌在放、或者认不出是哪一首
@@ -1058,30 +1022,16 @@ func (s *Shell) locateCurrent() {
 		s.addToast("当前没有正在播放的歌曲", notice.Warning)
 		return
 	}
-	cur, ok := s.app.Queue().Current()
-	if !ok {
+	idx := s.app.Queue().CurrentIndex()
+	if idx < 0 {
 		s.addToast("当前没有正在播放的歌曲", notice.Warning)
 		return
 	}
-	id := cur.Identity()
-	if id == "" {
-		s.addToast("当前这一首认不出来，没法定位", notice.Warning)
-		return
-	}
-	idx := -1
-	for i, r := range s.queueRows {
-		if r.item.Identity() == id {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	if idx < 0 || idx >= len(s.queueRows) {
 		s.addToast("播放列表里没有当前播放的歌曲", notice.Warning)
 		return
 	}
-	// 末尾那几行：目标偏移会超出内容，框架会把 glide 的目标钳在 MaxY 上
-	// （`mygo/ui/scroll.go` 的 glide），和 Biu 那个 `Math.min(targetTop, maxTop)`
-	// 同一件事，这里不自己算一遍。
+	// 行顺序与队列顺序一致，当前副本可能是重复项中的第二份或更后面的一份。
 	s.queueScroll.ScrollTo(0, float32(idx)*queueRowHeight, ui.Smooth)
 }
 
@@ -1188,13 +1138,7 @@ func (s *Shell) queueAction(row queueRow, item queueMenuItem) {
 // 认不出是哪一项的（`Identity` 是空串）走按位置删那一份——它没有身份可循，而这一行
 // 在队列里的位置是准的。
 func (s *Shell) removeQueueRow(row queueRow) {
-	if row.item.Identity() == "" {
-		s.sayQueueErr(s.app.RemoveAt(row.at))
-		return
-	}
-	if _, err := s.app.RemoveSongFromList(row.item); err != nil {
-		s.addToast(err.Error(), notice.Danger)
-	}
+	s.sayQueueErr(s.app.RemoveAt(row.at))
 }
 
 // startDownload 是「下载音频」：加进下载队列（`app.Download`，下载那一票的实现）。

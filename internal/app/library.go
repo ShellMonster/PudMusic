@@ -29,7 +29,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
@@ -387,12 +386,11 @@ func onlineItem(bvid string, cid int64, title, cover, ownerName string, ownerMid
 // app.go 里，那一行不在这一票的改动范围（见 favorites.go 上面的那段说明）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// mountedLibrary 是每个 App 挂着的这一摊。
-var mountedLibrary sync.Map // *App → *Library
-
 // MountLibrary 把这两页要的那几个接口挂到 App 上。**在开窗口之前调**。
 func (a *App) MountLibrary(cli *bili.Client) {
-	mountedLibrary.Store(a, &Library{Client: cli})
+	a.mu.Lock()
+	a.library = &Library{Client: cli}
+	a.mu.Unlock()
 }
 
 // Mounted 报这一摊挂上没有。界面靠它说清「还没接上」，而不是发一个注定失败
@@ -403,10 +401,10 @@ func (l *Library) Mounted() bool { return l != nil && l.Client != nil }
 // 空的：查询会回 errLibraryMissing，界面据此说清「没接上」，而不是画一个
 // 永远空的列表（空列表和「没接上」在用户眼里是两件事）。
 func (a *App) LibraryOf() *Library {
-	if v, ok := mountedLibrary.Load(a); ok {
-		return v.(*Library)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.library == nil {
+		a.library = &Library{}
 	}
-	f := &Library{}
-	actual, _ := mountedLibrary.LoadOrStore(a, f)
-	return actual.(*Library)
+	return a.library
 }

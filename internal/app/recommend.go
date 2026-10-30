@@ -422,21 +422,20 @@ func (r *Recommend) NewMusic(ctx context.Context) ([]RecommendItem, int, error) 
 // 挂到 App 上
 // ─────────────────────────────────────────────────────────────────────────────
 
-// mountedRecommend 是每个 App 挂着的这一摊。
-var mountedRecommend sync.Map // *App → *Recommend
-
 // MountRecommend 把首页要的那几个接口挂到 App 上。**在开窗口之前调**。
 func (a *App) MountRecommend(cli *bili.Client) {
-	mountedRecommend.Store(a, &Recommend{Client: cli})
+	a.mu.Lock()
+	a.recommend = &Recommend{Client: cli}
+	a.mu.Unlock()
 }
 
 // RecommendOf 是这个 App 的首页这一摊。还没挂过就现建一个空的：取数会回
 // errRecommendMissing，界面据此说清「没接上」。
 func (a *App) RecommendOf() *Recommend {
-	if v, ok := mountedRecommend.Load(a); ok {
-		return v.(*Recommend)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.recommend == nil {
+		a.recommend = &Recommend{}
 	}
-	r := &Recommend{}
-	mountedRecommend.Store(a, r)
-	return r
+	return a.recommend
 }

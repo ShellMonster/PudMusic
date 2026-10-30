@@ -2117,6 +2117,10 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	a.errText = msg
 	a.errDetail = detail
 	a.errRetryable = retryable
+	// 通用错误替换不再代表某个失败播放项；失败项身份只由 failOnline 与错误一起提交。
+	a.failedTitle = ""
+	a.failedArtist = ""
+	a.failedBiliURL = ""
 	// 🔴 **有错就不再说「正在重连」**（票 #315）：那一行和错误那一行占**同一个
 	// 位置**（播放条上只有一行宽），而错的那句信息量更大——重连失败之后用户
 	// 要看的是「为什么不行、还能怎么办」，不是「还在重连」。
@@ -2145,8 +2149,30 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	}
 }
 
-// clearErrLocked 清掉播放条上那一句错误。**必须在持锁时调**。
-//
+func (a *App) setErrTextDetailFor(gen int, it Item, msg, detail string, retryable bool) bool {
+	a.mu.Lock()
+	if a.closed || a.onlineGen != gen {
+		a.mu.Unlock()
+		return false
+	}
+	a.errText = msg
+	a.errDetail = detail
+	a.errRetryable = retryable
+	a.failedTitle = it.Title
+	a.failedArtist = it.Artist
+	a.failedBiliURL = BiliLink(it)
+	a.clearReconnectLocked()
+	wake := a.wake
+	a.mu.Unlock()
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
+	if wake != nil {
+		wake()
+	}
+	return true
+}
+
 // 🔴 **三个值一起清**：只清 `errText` 而留着 `errRetryable`，界面上就变成
 // 「没有错误了，但重试那一枚键还亮着」——而那枚键按下去会重放上一首，
 // 用户会以为是自己按错了。
@@ -2166,6 +2192,7 @@ func (a *App) clearErrLocked() {
 	a.errRetryable = false
 	a.failedTitle = ""
 	a.failedArtist = ""
+	a.failedBiliURL = ""
 }
 
 // Retry 再放一次上一次用户想放的那一首。

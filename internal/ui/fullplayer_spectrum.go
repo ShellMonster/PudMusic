@@ -90,7 +90,7 @@ func fullBarCount(width float32) int {
 // 「默认关着」是 Biu 的 `defaultSettings.showSpectrum: false`，用户得在偏好面板里
 // 自己开（`viewFullSettings`）。关着的时候这里连那个区域都不占——不是在画一片黑。
 func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
-	if !s.app.FullPlayerPrefs().ShowSpectrum {
+	if !s.pagePrefs().ShowSpectrum {
 		return
 	}
 	winW, _ := c.Size()
@@ -98,7 +98,7 @@ func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
 	h := float32(fullSpectrumHeight)
 	barCount := fullBarCount(w)
 	bars := s.app.SpectrumBars(barCount, h)
-	color := spectrumColorOf(s.app.FullPlayerPrefs().SpectrumColor)
+	color := spectrumColorOf(s.pagePrefs().SpectrumColor)
 
 	// 频谱离底边多远跟着控制条走（Biu 的 `index.tsx:370`）：
 	// 界面露着的时候压在控制条上方 12，藏起来的时候退到离底 24。

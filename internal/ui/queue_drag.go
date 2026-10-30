@@ -45,14 +45,14 @@ import (
 // ⚠️ **只放判重标识**：下标和队列的下标对不上（见上面那段），判重标识才是两边
 // 都认的那个键。
 type queueDragValue struct {
-	id string
+	at int
 }
 
 // newQueueDragValue 造一个拖动值。
 //
 // ⚠️ **不能有捕获**：它被当成 rowkey.Memo 的 pack 传（每帧每一行都问一次），
 // 有捕获的话那个闭包每次都是新的一份——那就是每帧每行一次分配。
-func newQueueDragValue(id string) *queueDragValue { return &queueDragValue{id: id} }
+func newQueueDragValue(at int) *queueDragValue { return &queueDragValue{at: at} }
 
 // queueDragFor 是第 i 行那个拖动值。
 //
@@ -60,7 +60,7 @@ func newQueueDragValue(id string) *queueDragValue { return &queueDragValue{id: i
 // 不能每帧新建一个。rowkey.Memo 记着它——身份没变就是同一份（见 rowkey 的
 // 说明：快的那条路上零分配）。
 func (s *Shell) queueDragFor(i int, row queueRow) *queueDragValue {
-	return s.queueDrags.At(i, row.id, newQueueDragValue)
+	return s.queueDrags.At(i, row.at, newQueueDragValue)
 }
 
 // queueDrop 是「松手」那一下：把被拖的那首挪到落点。
@@ -68,35 +68,23 @@ func (s *Shell) queueDragFor(i int, row queueRow) *queueDragValue {
 // 落点是哪一行、那一行的哪一半，是**各行自己记的**（见 viewQueueRow 里那几句
 // PointerPosition）：每一行都知道指针是不是在它身上、在它的哪一半。
 func (s *Shell) queueDrop(v *queueDragValue) {
-	if v == nil || v.id == "" {
-		// 认不出是哪一首：不动（挪了也对不上任何一行）。
+	if v == nil {
 		return
 	}
 	at := s.queueDropAt
 	if at < 0 || at >= len(s.queueRows) {
 		return
 	}
-	before := ""
-	if s.queueDropUpper {
-		// ⚠️ **用行上记好的那一份**（`row.id`）：它是同一首歌的判重标识，而现算
-		// 的话要拼一次字符串（理由同 `currentRow` 里那一处，票 #339）。
-		before = s.queueRows[at].id
-	} else if at+1 < len(s.queueRows) {
-		before = s.queueRows[at+1].id
+	before := s.queueRows[at].at
+	if !s.queueDropUpper {
+		before = at + 1
 	}
-	// before 是空串 = 挪到队尾（落在最后一行的下半）。
-	if before == v.id {
-		// 挪到自己前面：不动（那本来就是它待着的地方）。
+	if before == v.at || before == v.at+1 {
 		return
 	}
-	if !s.app.Queue().MoveSongBefore(v.id, before) {
+	if !s.app.Queue().MoveAtBefore(v.at, before) {
 		return
 	}
-	// 队列变了，抽屉要重画。
-	//
-	// ⚠️ **必须叫醒**：这一帧的行已经建好了（画的是旧顺序），队列是在这一帧的
-	// 中途改的——不叫醒的话画面会停在旧顺序，直到下一次别的什么东西碰巧刷新
-	//（而即时模式下那种刷新可能一直不来）。
 	s.wake.invalidate()
 }
 

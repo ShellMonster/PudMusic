@@ -1162,112 +1162,107 @@ func TestEnsureCommentsDoesNotAskForALocalFile(t *testing.T) {
 	}
 }
 
-// TestTheReplyRequestIsNotCancelledByItself 钉住「楼中楼那一趟发得出去」。
+// TestTheReplyRequestGetsALiveContext 钉住「楼中楼那一趟拿到的 ctx 是活的」。
 //
-// 🔴 **这是票 #684 顺手抓到的线上缺陷**：`CommentReplies` 建了这一趟的 ctx，
-// 却把它存进**主列表**那个格子、然后**取消了这一趟自己**。症状是展开楼中楼
-// 永远是空的——而界面上看不出来（那一格只是**没有内容**），日志里也只留一句
-// `bili: 网络没通: … context canceled`。
+// 🔴 **这是一个真回归的护栏**（2026-10-29 的视觉走查发现）：`CommentReplies`
+// 原来是 `go a.loadReplies(...)`，那一趟没有自己的 ctx；后来有人给它补了一个
+// `context.WithCancel`，但补的写法是「`commentsCancel` 已经有人占着就把**新造的
+// 那个**取消掉」——而主列表那一趟结束时**不会**把 `commentsCancel` 清空。
 //
-// ⚠️ **判据是「放到结束都不会被取消」**：只断「发了一趟」的话，那个实现也发
-// 了一趟（发出去之后立刻就被取消了），差别只在结果回不回得来。
-func TestTheReplyRequestIsNotCancelledByItself(t *testing.T) {
+// 于是用户点开楼中楼时走的是 `else` 分支：刚造出来的 ctx 当场被 cancel，
+// `loadReplies` 拿着一个已取消的上下文去发请求，**一个包都不会出去**。
+// 症状是「点开回复没有任何反应，也没有报错」。
+//
+// ⚠️ **原来的替身签名是 `func(_ context.Context, …)`**，直接把 ctx 丢掉——
+// 所以 `TestTheRepliesUseTheSameObject` 一直是绿的，盖住了这个 bug。
+// 这一条**必须**读 ctx 的状态，不然它也是一条哑的护栏。
+func TestTheReplyRequestGetsALiveContext(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.commentsArchiveIDFetch = func(context.Context, string) (int64, error) { return 12345, nil }
-	a.commentsListFetch = func(context.Context, int64, int64, int, string) (bili.CommentPage, error) {
+	// 主列表那一趟要先跑完：正是它把 `commentsCancel` 占住了，
+	// 复现的时序必须是「主列表已经拿到 → 再点楼中楼」。
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 12345, nil
+	}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		return commentPage([]bili.Comment{{Rpid: 1, Count: 2}}, "", true), nil
 	}
-	var canceled error
-	done := make(chan struct{}, 1)
+
+	ctxErr := make(chan error, 1)
 	a.commentsRepliesFetch = func(ctx context.Context, typ, oid, root int64) ([]bili.Comment, error) {
-		// 给取消留出时间：那个 bug 是**发起的那一刻**就取消的，所以这里只要
-		// 走几圈就能看见。
-		for i := 0; i < 20; i++ {
-			time.Sleep(5 * time.Millisecond)
-			if err := ctx.Err(); err != nil {
-				canceled = err
-				break
-			}
-		}
-		done <- struct{}{}
-		return []bili.Comment{{Rpid: 9, Root: root}}, nil
+		// 发请求之前先看 ctx：已取消的话这一趟根本不会出网。
+		ctxErr <- ctx.Err()
+		return nil, ctx.Err()
 	}
 	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
 	a.queue.selectAt(0)
+
 	waitComments(t, a, 1, "主列表")
-
-	// ⚠️ **主列表已经问过了**（`commentsCancel` 那一格有值）：那个 bug 只在
-	// 这一档才现形——格子空着的时候它才走「存下来」那一支。
-	if a.commentsCancel == nil {
-		t.Fatal("主列表那一趟的 cancel 没记下来——这条用例的前提不成立")
-	}
-
 	a.CommentReplies(1)
+
 	select {
-	case <-done:
-	case <-time.After(3 * time.Second):
-		t.Fatal("楼中楼那一趟没回来")
+	case err := <-ctxErr:
+		if err != nil {
+			t.Fatalf("楼中楼那一趟拿到的 ctx 已经结束（%v）——这一趟不会发出去，用户点开回复没有任何反应", err)
+		}
+	case <-time.After(commentsWaitTimeout):
+		t.Fatal("楼中楼那一趟压根没被调用")
 	}
-	if canceled != nil {
-		t.Fatalf("楼中楼那一趟的 ctx 被取消了（%v）——它自己的结果永远回不来", canceled)
-	}
-	waitCommentsFor(t, commentsWaitTimeout, "楼中楼落进缓存", func() bool {
-		return len(a.CommentReplies(1)) == 1
-	})
 }
 
-// TestTwoFloorsOfRepliesDoNotCancelEachOther 钉住「两层楼中楼互不取消」。
+// TestTheReplyRequestSurvivesUntilItsOwnResult 钉住「楼中楼那一趟不会被
+// **另一条**楼中楼提前掐掉」。
 //
-// ⚠️ **展开两条评论就是两趟并行的请求**：共用一个 cancel 的话，后展开的那
-// 一条会把先展开的那一条取消掉——症状是「只有最后点开的那条有楼中楼」。
-func TestTwoFloorsOfRepliesDoNotCancelEachOther(t *testing.T) {
+// 同一个槽位上连着点开两条回复时，第一条那一趟不该被第二条取消：两条问的是
+// 不同的 root，各自都要拿到自己的结果。取消只该发生在**换歌**（槽位变了）那一下。
+func TestTheReplyRequestSurvivesUntilItsOwnResult(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	a.commentsArchiveIDFetch = func(context.Context, string) (int64, error) { return 12345, nil }
-	a.commentsListFetch = func(context.Context, int64, int64, int, string) (bili.CommentPage, error) {
-		return commentPage([]bili.Comment{{Rpid: 1}, {Rpid: 2}}, "", true), nil
+	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
+		return 12345, nil
 	}
-	var mu sync.Mutex
-	canceled := map[int64]error{}
+	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
+		return commentPage([]bili.Comment{
+			{Rpid: 1, Count: 2}, {Rpid: 2, Count: 3},
+		}, "", true), nil
+	}
+
 	release := make(chan struct{})
+	results := make(chan int64, 4)
 	a.commentsRepliesFetch = func(ctx context.Context, typ, oid, root int64) ([]bili.Comment, error) {
-		<-release
-		mu.Lock()
-		canceled[root] = ctx.Err()
-		mu.Unlock()
-		return []bili.Comment{{Rpid: root * 10, Root: root}}, nil
+		// 两条都先挂着，等测试放行——这样第二条来得及把第一条掐掉。
+		select {
+		case <-release:
+		case <-ctx.Done():
+			results <- -root
+			return nil, ctx.Err()
+		}
+		results <- root
+		return []bili.Comment{{Rpid: root * 10, Root: root, Message: "楼中楼"}}, nil
 	}
 	a.Queue().Append(Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1"})
 	a.queue.selectAt(0)
-	waitComments(t, a, 2, "主列表")
 
+	waitComments(t, a, 2, "主列表")
 	a.CommentReplies(1)
 	a.CommentReplies(2)
-	// ⚠️ **两趟都进了 fetch 才放行**：只等一趟的话，「第二趟把第一趟取消了」
-	// 那种实现里的第二趟也可能还没发出去。
-	deadline := time.Now()
-	for {
-		a.commentsMu.Lock()
-		n := len(a.commentsRepliesCancel)
-		a.commentsMu.Unlock()
-		if n == 2 || time.Since(deadline) > 3*time.Second {
-			break
-		}
-		time.Sleep(time.Millisecond)
-	}
 	close(release)
 
-	waitCommentsFor(t, commentsWaitTimeout, "两层的楼中楼都落进缓存", func() bool {
-		return len(a.CommentReplies(1)) == 1 && len(a.CommentReplies(2)) == 1
-	})
-	mu.Lock()
-	defer mu.Unlock()
-	for _, root := range []int64{1, 2} {
-		if err := canceled[root]; err != nil {
-			t.Errorf("第 %d 层的楼中楼被取消了（%v）——两趟不该互相取消", root, err)
+	// 两条都要正常回来（负数是「被取消了」）。
+	var got []int64
+	for range 2 {
+		select {
+		case root := <-results:
+			got = append(got, root)
+		case <-time.After(commentsWaitTimeout):
+			t.Fatalf("只回来了 %d 条楼中楼，want 2", len(got))
+		}
+	}
+	for _, root := range got {
+		if root < 0 {
+			t.Errorf("root %d 那一趟被取消了——两条楼中楼问的是不同的人，不该互相掐", -root)
 		}
 	}
 }

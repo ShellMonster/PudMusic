@@ -246,3 +246,14 @@ func (s *SwitchView) ScrollOffset() float32 {
 	}
 	return s.list.ScrollOffset()
 }
+
+// ScrollToEnd 把这一屏滚到最底下，并让框架按**当前这一帧**量到的行高重新吸附。
+//
+// ⚠️ **它只对列表那一档有实现**：网格那一档的行高是量的、尾格没有「换画法」
+// 这回事（翻页那一层也只往列表这一档装 end/footer 画法，见 `PagedList.syncList`）。
+func (s *SwitchView) ScrollToEnd() {
+	if s.view == ViewCard {
+		return
+	}
+	s.list.ScrollToEnd()
+}
