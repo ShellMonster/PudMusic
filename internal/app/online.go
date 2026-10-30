@@ -34,6 +34,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/streamaudio"
 )
 
 // errStreamingMissing 是「在线播放没挂上」。见 `MountStreaming`。
@@ -240,6 +241,19 @@ type Streaming struct {
 	Quality bili.AudioQuality
 	// TempDir 是下载缓存落在哪。空 = 系统临时目录。
 	TempDir string
+	// CacheDir 是**音频字节的落盘缓存**落在哪。空 = 不落盘。
+	//
+	// 🔴 **它和 `TempDir` 是两件事**：
+	//
+	//	TempDir	**临时**文件：切歌就删（那是「切歌不遗留」那道门）
+	//	CacheDir	**缓存**：下过的字节留在盘上，切回来直接读盘，不走网络
+	//
+	// 用户要的是后者（2026-10-30）：「前面比如取到了的，那应该是在本地电脑
+	// 缓存上啊，为啥还要再去跑网络请求；应该是没有才跑网络请求啊」。
+	//
+	// ⚠️ **它该落在用户数据目录底下**（跟评论 / 弹幕 / 歌词缓存一样），
+	// 不是系统临时目录——临时目录会被系统清掉，那缓存就白留了。
+	CacheDir string
 }
 
 // onlineTrack 是「当前正在放的那条在线流」。
@@ -268,6 +282,14 @@ type onlineTrack struct {
 	// 有了这一栏：那一条源的状态只在 `gen` 还是当前代次的时候才算数
 	// （见 `reconnect.go` 的 `reconnectingLocked`）。
 	gen int
+	// cacheTrack / cacheTier 是「盘上那一份字节」的身份（走网络那一路是空串）。
+	//
+	// 🔴 **它管的是「这一份不许被淘汰」**：容量淘汰按「最久没动过的先删」排，
+	// 而正在播的那一份不能被删——删了歌就断了（见 `streamaudio.Cache.Protect`）。
+	//
+	// ⚠️ **换歌时要把上一份的保护解除**（见 `App.releaseByteCacheProtect`）。
+	cacheTrack string
+	cacheTier  string
 }
 
 // streamCacheMax 是「播放前预判」那个缓存最多留几条。
@@ -294,7 +316,21 @@ func (a *App) MountStreaming(s Streaming) {
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
 	a.streamCacheOrder = map[string]time.Time{}
+	// 🔴 **字节缓存**（2026-10-30）：下了的字节留在盘上，切回来直接读盘。
+	//
+	// ⚠️ **空目录 = 不落盘**：拿不到用户数据目录时，缓存整个关掉——
+	// 那只是「每次都重新下」，不该挡着应用开起来（和评论 / 弹幕缓存同一套
+	// 规矩，见 `internal/ui/lyrics_mount.go`）。
+	a.byteCache = streamaudio.NewCache(s.CacheDir)
 	a.mu.Unlock()
+	// 🔴 **清一遍孤儿**（2026-10-30）：上一次进程被杀 / 崩掉，会在盘上留下
+	// 「只有字节、没有记录」的那些文件——它们在容量账本之外，所以缓存目录
+	// 会**无上限地长**，而 2 GB 上限形同虚设。
+	//
+	// ⚠️ **锁外面调**：它要读盘（扫目录）。
+	if n := a.byteCacheSnapshot().CleanOrphans(); n > 0 {
+		a.logf("biu: 清掉了 %d 个没用的音频缓存残留", n)
+	}
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
 	// 播放记录上报**跟着在线播放起**：只有在线流才有得报（本地文件在 B 站
@@ -374,6 +410,20 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 	}
 
 	go func() {
+		// 🔴 **先看盘上有没有这一档的字节**（2026-10-30）：换音质是用户
+		// 明确要的「换到那一档去」——而那一档**下过**的话，字节就在盘上，
+		// 不该再下一遍。
+		//
+		// ⚠️ **它在 `resolve` 之前**：地址那一层是「**会过期**的缓存」，
+		// 字节那一层才是「**不会过期**的缓存」。
+		if byteCacheKeyReady(tr.item) {
+			if rec, ok := a.cachedAudio(tr.item, q); ok {
+				a.logf("biu: 换音质：这一档在盘上有缓存，直接播盘上的：%q（%s）",
+					tr.item.Title, rec.Tier)
+				a.restreamFromByteCache(tr, rec, q, pos, want, gen)
+				return
+			}
+		}
 		ref, err := a.resolve(context.Background(), s, tr.item, q)
 		if err != nil {
 			a.failQualitySwitch(gen, q, err)
@@ -389,6 +439,16 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			// 不会自己清掉的红字」——那是失败的那一半，这一条是成功的那一半，
 			// 当时漏了。
 			a.clearStaleQualityErr(gen, tr)
+			// 🔴 **顺手把「这个偏好 → 这一档」记下来**（2026-10-30 的第二轮
+			// 审查）：用户点了「无损」而这一首没有无损，B 站给的是 192K——
+			// 于是「无损」和「高音质」在**这一首**上解析到同一档。
+			//
+			// ⚠️ **不记的话用户会白下一整首**：那张映射表是**字节下完那一刻**
+			// 写的，而这一档命中了缓存（字节**根本没重下**），于是「无损」
+			// 这一条永远不会出现——用户切回「高音质」时缓存不命中，整首重下。
+			//
+			// 那正是用户那句话要免掉的事（「已经取到的就别再取」）。
+			a.rememberByteCacheTier(tr.item, q, ref)
 			return
 		}
 		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref, nil)
@@ -452,6 +512,97 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			wake()
 		}
 	}()
+}
+
+// restreamFromByteCache 换音质时**用盘上那一份字节**换过去。
+//
+// 🔴 **它和 `restreamOnline` 的网络那一路做同一件事**：换播放器、跳回原来的
+// 播放位置、照旧出声——只是字节不用再下一遍。
+//
+// ⚠️ **打不开就退回网络那一路**：盘上那份可能坏了，而那不该让「换音质」
+// 这件事失败（用户点了没反应是最糟的一种）。
+func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
+	q bili.AudioQuality, pos time.Duration, want bool, gen int,
+) {
+	p, err := a.buildFromCachedBytes(a.byteCachePathFor(rec.Track, rec.Tier), nil)
+	if err != nil {
+		a.logf("biu: 换音质：盘上那份字节打不开（重新取流）：%q：%v", tr.item.Title, err)
+		a.dropBrokenByteCache(tr.item, q, rec.Tier)
+		a.restreamOnline(tr, q, pos, want, gen)
+		return
+	}
+	ref := &bili.StreamRef{
+		Bvid:  tr.item.Bvid,
+		Cid:   tr.item.Cid,
+		Sid:   tr.item.Sid,
+		Label: rec.Label,
+	}
+	// 🔴 **档位要填对**：填 0 的话「选回当前这一档」就不再是无操作。
+	applyTierToRef(ref, rec.Tier)
+
+	// 🔴 **同一档就别打断**（2026-10-30 的第二轮审查）：这一档和现在在放的
+	// 那一档**是同一档**时，换过去听不出区别——而网络那一路明确不打断
+	// （见 `restreamOnline` 里那个 `SameTier` 短路）。
+	//
+	// ⚠️ **不打断的话位置也不该跳**：用户听着的歌从 482ms 跳到 1210ms
+	// （从头重放）——那是「为一个听不出区别的改动把歌从中间截断」。
+	if sameTierAsCache(rec, tr.ref) {
+		a.clearStaleQualityErr(gen, tr)
+		return
+	}
+
+	a.mu.Lock()
+	if a.onlineGen != gen || a.closed || a.online != tr {
+		cur := a.onlineGen
+		a.mu.Unlock()
+		p.Close()
+		a.logf("biu: 换音质的结果被作废了（已经不是这一条流了）：%q（来的代次 %d，现在的代次 %d）",
+			tr.item.Title, gen, cur)
+		return
+	}
+	if a.streaming == nil || a.streaming.Quality != q {
+		a.mu.Unlock()
+		p.Close()
+		a.logf("biu: 换音质的结果被作废了（用户又换了一档）：%q", tr.item.Title)
+		return
+	}
+	old := a.player
+	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+	a.player = p
+	a.duration = p.Duration()
+	a.setPositionLocked(pos)
+	a.quality = ref.Label
+	prevOnline := a.online
+	a.online = &onlineTrack{
+		item: tr.item, ref: ref, source: nil,
+		quality:    rec.Label,
+		gen:        gen,
+		cacheTrack: rec.Track,
+		cacheTier:  rec.Tier,
+	}
+	a.pendingSrc = nil
+	a.reportedErr = nil
+	a.clearErrLocked()
+	wake := a.wake
+	a.mu.Unlock()
+
+	// 🔴 **上一份的保护解除**（锁外面）：它不再被播了。
+	a.releaseByteCacheProtect(prevOnline)
+	// 🔴 **这一份保护起来**：它正在被播。
+	a.protectByteCache(rec.Track, rec.Tier)
+
+	if old != nil {
+		old.Close()
+	}
+	if pos > 0 && pos < p.Duration() {
+		p.Seek(pos)
+	}
+	if want {
+		p.Play()
+	}
+	if wake != nil {
+		wake()
+	}
 }
 
 // clearStaleQualityErr 清掉一句已经不成立的换档提示。
@@ -1020,6 +1171,37 @@ func (a *App) rearmLoadingLocked(gen int, title, stage string) {
 // at / paused 只有「恢复上次听到哪儿」那一趟会带（见 playback_state.go）：
 // at 是要停到的位置，paused 是「开了之后别出声」。
 func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
+	a.runOnlineMaybe(it, gen, at, paused, true)
+}
+
+// runOnlineWithoutCache 是 `runOnline`，但**跳过缓存判定**。
+//
+// 🔴 **它只有一个调用方**：盘上那份字节打不开的时候（见
+// `playFromByteCache`）。
+//
+// ⚠️ **为什么必须单独有一条路**：`runOnline` 的缓存判定会再次命中**同一份**
+// 坏缓存——于是「打不开 → 走网络 → 缓存判定又命中 → 打不开」是一个
+// **无限循环**，而用户看到的是「点了歌完全没反应，CDN 一次都没被拉」。
+func (a *App) runOnlineWithoutCache(it Item, gen int, at time.Duration, paused bool) {
+	a.runOnlineMaybe(it, gen, at, paused, false)
+}
+
+// runOnlineMaybe 是 `runOnline` 的正文。useCache 说的是「要不要先看盘上
+// 有没有这一首的字节」。
+//
+// 🔴 **缓存判定在最前面**（在 `withSource` 之前）：用户要的是
+// 「没有才跑网络请求」——而 `withSource` 本身就是一次网络往返
+// （缺 cid 的问分 P、音乐库的问元信息）。命中缓存时那一次也不该发。
+//
+// ⚠️ **但缓存键要算得出来**：键是「曲目身份 + 偏好」，而 `withSource`
+// 补的正是**曲目身份的一部分**（cid / sid）。
+//
+//	投稿那一路	cid 已经在 `it` 里（队列项带着它）→ 键算得出来
+//	音乐库那一路	sid 已经在 `it` 里 → 键算得出来
+//
+// 缺 cid 的**投稿**条目（搜索结果）算不出来——那一路**先问分 P**，
+// 再回来查缓存（见下面那一处）。
+func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, useCache bool) {
 	// 🔴 **冷启动那一段的第一取流时刻**（票 #478）：用户「双击 → 出声」
 	// 这条链上，「取流开始」是一个节点——而它在**恢复上次那一首**时
 	// 是在**开窗口之前**就发出去的（`RestorePlayback` 排在 `openWindow`
@@ -1030,6 +1212,29 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	if s == nil {
 		a.failPlay(gen, it, "取流零件没挂", errStreamingMissing)
 		return
+	}
+
+	// 🔴 **⓪ 先看盘上有没有这一首的字节**（2026-10-30）：
+	//
+	// 有的话**连 playurl 都不问**——用户要的是「没有才跑网络请求」
+	// （原话：「前面比如取到了的，那应该是在本地电脑缓存上啊，
+	// 为啥还要再去跑网络请求」）。
+	//
+	// ⚠️ **它在 `withSource` 之前**：那本身也是一次网络往返（缺 cid 的问
+	// 分 P、音乐库的问元信息），而命中缓存时那一次也不该发。
+	//
+	// ⚠️ **但缺 cid 的条目算不出键**（键里有 cid）：那一路先问分 P，
+	// 问完再回来查（见下面 `withSource` 之后那一处）。
+	if useCache && byteCacheKeyReady(it) {
+		if rec, ok := a.cachedAudio(it, s.Quality); ok {
+			a.logf("biu: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, rec.Tier)
+			// ⚠️ **位置和「别出声」要原样传下去**：这是「恢复上次听到哪儿」
+			// 那一趟（`playback_state.go`）——丢了它们，恢复出来的那一首
+			// 会**从头开始而且自己出声**（那是明确的产品规则，见
+			// `playOnlineFrom` 的注释）。
+			a.playFromByteCache(it, gen, rec, at, paused, nil)
+			return
+		}
 	}
 
 	// 🔴 缺 cid 的条目（搜索结果全都是）先问一次该放哪一集，再去取流。
@@ -1102,6 +1307,21 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 不一样（取流失败是网络/地址，开不了播放器是这一条的格式/这台机器解不了）。
 	// 合成一句「取流失败」的话，用户分不出该换网还是该换歌。
 	//
+	// 🔴 **⓪ 缺 cid 的条目：问完分 P 再查一次缓存**（2026-10-30）。
+	//
+	// 键里有 cid，而这一路**一开始没有 cid**——所以上面那一处查不了。
+	// 现在 cid 问出来了，键算得出来了。
+	//
+	// ⚠️ **只有「一开始就没有 cid」的那些才走到这里**：上面那一处已经查过
+	// 一次了，那一次没命中才走到这儿来。
+	if useCache && byteCacheKeyReady(it) {
+		if rec, ok := a.cachedAudio(it, s.Quality); ok {
+			a.logf("biu: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, rec.Tier)
+			a.playFromByteCache(it, gen, rec, at, paused, run)
+			return
+		}
+	}
+	//
 	// 🔴 **① 问 playurl 拿地址**（票 #220 的第一段）：这一段是一次带 WBI
 	// 签名的接口往返，而它是**两条取流路径（投稿 / 音乐库）唯一的共同段**。
 	tURL := time.Now()
@@ -1134,6 +1354,33 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		return
 	}
 
+	// 🔴 **装上播放器**（和「盘上缓存」那一路共用这一段，见 `installOnlinePlayer`）。
+	//
+	// ⚠️ **缓存身份要一起给它**（2026-10-30 的第二轮审查）：走网络这一路
+	// 下载的字节**也**落在缓存里，而它在下完之前是「只有字节、没有记录」
+	// 的那一种——容量淘汰会把它当**孤儿**删掉（而下载还在往那个已被删的
+	// 文件写，字节全丢，于是这一首永远下不完）。
+	cacheTrack, cacheTier := "", ""
+	if byteCacheKeyReady(it) {
+		cacheTrack = byteCacheTrack(it)
+		cacheTier = byteCacheTier(it, ref)
+	}
+	a.installOnlinePlayer(it, gen, ref, src, p, at, paused, s, cacheTrack, cacheTier)
+}
+
+// installOnlinePlayer 把建好的播放器装到 App 上，并让它开始出声。
+//
+// 🔴 **两条路共用这一个函数**：走网络的那一条（`runOnline`）和走盘上缓存的
+// 那一条（`playFromByteCache`）。**两份实现迟早会漂移**，而漂移的那一半
+// 正好是「装上播放器」这一段——用户听到的第一个音、和界面上那一行字，
+// 都从这里出。
+//
+// src 是那一条字节源。**盘上缓存那一路传 nil**（它没有字节源：字节已经在
+// 盘上了，再包一层源是没有意义的）。
+func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
+	src *audio.StreamSource, p *audio.Player, at time.Duration, paused bool, s *Streaming,
+	cacheTrack, cacheTier string,
+) {
 	a.mu.Lock()
 	if a.onlineGen != gen || a.closed {
 		// 代次已经变了（切歌了），或者应用正在退出。手上这些一样都不留。
@@ -1193,12 +1440,30 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	}
 	a.stopped = false
 	a.quality = ref.Label
-	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, gen: gen}
-	// 源归播放器管了（`audio.Player` 的 closers 会关它），App 这一栏清空。
+	// 🔴 **上一份的保护要解除**（见 `releaseByteCacheProtect`）：它不再被播了，
+	// 而留着那个保护会让它永远不被淘汰——用户听过的歌会一直占着盘。
+	prevTrack := a.online
+	a.online = &onlineTrack{
+		item: it, ref: ref, source: src, quality: ref.Label, gen: gen,
+		cacheTrack: cacheTrack, cacheTier: cacheTier,
+	}
+	// 🔴 **「这一趟自己的那一条」在盘上缓存那一路是 nil**：那条路没有字节源
+	// （字节已经在盘上了，见 `playFromByteCache`），而 `loadSrc` 是给看门狗
+	// 盯进度用的——没有源就没有进度可盯。
+	//
+	// 🔴 **上一首的源要关掉**（2026-10-30）：走网络那一路，源归**新**播放器
+	// 管（`audio.Player` 的 closers 会关它），而这一栏清空是对的。
+	//
+	// ⚠️ **但盘上缓存那一路没有源**：新播放器手上是空的，而这一栏里装的是
+	// **上一首**的源——直接清掉的话，那一条源就**没人关了**：它继续下到天亮，
+	// 而它写进缓存的那一份会在**应用退出之后**才落盘（于是测试的收尾报
+	// 「directory not empty」，真实用户那边则是缓存目录里多一份半截的字节）。
+	prevSrc := a.pendingSrc
 	a.pendingSrc = nil
 	// 🔴 **「这一趟自己的那一条」也清掉**（票 #220）：这一趟到这儿就完了，
 	// 而它的源已经归播放器管了——留着它的话，**下一次**超时会把正在放着的
 	// 那一条的源关掉。
+	prevLoadSrc := a.loadSrc
 	a.loadSrc = nil
 	a.reportedErr = nil
 	a.clearErrLocked()
@@ -1222,6 +1487,27 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	}
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 🔴 **上一份的保护解除**（锁外面）：它不再被播了。
+	// ⚠️ **锁外面调**：它要拿 `a.mu`（取缓存对象），而那把锁上面还拿着。
+	a.releaseByteCacheProtect(prevTrack)
+
+	// 🔴 **上一首的源关掉**（锁外面）：盘上缓存那一路的新播放器手上没有源，
+	// 所以上一首那条**没人关**——它会继续下到天亮，而它写进缓存的那一份会在
+	// 应用退出之后才落盘。
+	//
+	// ⚠️ **锁外面调**：源的 `Close` 要等它的下载 goroutine 退出来，
+	// 而那个 goroutine 可能正拿着 `a.mu`（换流那条路上它会回调
+	// `noteQuality`）。锁里面等就是死等。
+	//
+	// ⚠️ **同一个源可能被列两次**（`pendingSrc` 和 `loadSrc` 常常是同一条）：
+	// `Close` 可以重复调（它自己判 `closed`），所以重复关是安全的。
+	if prevSrc != nil && prevSrc != src {
+		prevSrc.Close()
+	}
+	if prevLoadSrc != nil && prevLoadSrc != src && prevLoadSrc != prevSrc {
+		prevLoadSrc.Close()
+	}
 
 	// 换了一首 → 落盘那一格该跟着变（见 playback_state.go）。
 	a.markPlaybackDirty()
@@ -1475,10 +1761,48 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	// 一个实实在在的数据竞争（`-race` 一跑就红）。
 	var firstAt atomic.Int64
 	srcStart := time.Now()
+	// 🔴 **字节落在缓存里还是临时文件里**（2026-10-30）：
+	//
+	//	有缓存目录 → 落在缓存里，**切歌不删**，下回直接读盘
+	//	没有　　　→ 落在临时文件里，切歌就删（那是「切歌不遗留」那道门）
+	//
+	// ⚠️ **缓存路径按「这一首 + 这一档」算**（`byteCacheKey`）：同一首歌的
+	// 不同音质档是**两段不同的字节**，共用一个文件的话，第二档会把第一档
+	// 的字节覆盖掉。
+	// 🔴 **字节落在缓存里还是临时文件里**（2026-10-30）：
+	//
+	//	有缓存目录 → 落在缓存里，**切歌不删**，下回直接读盘
+	//	没有　　　→ 落在临时文件里，切歌就删（那是「切歌不遗留」那道门）
+	//
+	// ⚠️ **缓存路径按「这一首 + 实际那一档」算**（`byteCacheTier`）：
+	// 同一首歌的不同音质档是**两段不同的字节**，共用一个文件的话，
+	// 第二档会把第一档的字节覆盖掉。
+	//
+	// ⚠️ **按「实际那一档」而不是「用户要的那一档」**：用户点了无损而这一首
+	// 没有无损，B 站给的是 192K——那一份字节就该在 192K 那个位置，
+	// 于是「高音质」这个偏好切回来的时候**正好能用**（用户那句话要的正是
+	// 「已经取到的就别再取」）。
+	cacheTrack, cacheTier := "", ""
+	if byteCacheKeyReady(it) {
+		cacheTrack = byteCacheTrack(it)
+		cacheTier = byteCacheTier(it, ref)
+	}
+	cachePath := a.byteCachePathFor(cacheTrack, cacheTier)
+	// 🔴 **先记下「这一份正在下」**（2026-10-30 的第二轮审查）：字节在下载的
+	// 那一段里是「只有 `.bin`、没有 `.json`」的——而那一档在容量账本之外，
+	// 容量一超限它就会被当**孤儿**删掉（而下载还在往那个已被删的文件写，
+	// 字节全丢，于是这一首永远下不完）。
+	//
+	// ⚠️ **那一份记的是 `Complete: false`**：所以它**不算**能播的缓存
+	// （见 `streamaudio.Cache.Complete`）——「正在下」和「下完了」是两件事。
+	if cachePath != "" {
+		_ = a.byteCacheSnapshot().StartBytes(cacheTrack, cacheTier)
+	}
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,
 		TempDir:   s.TempDir,
+		CachePath: cachePath,
 		Client:    s.Media,
 		// 续传的偏移在源那边，它要接就从同一个字节接着下。
 		// 这里重新取的是**整条**流——偏移只是告诉调用方「你从哪里断的」，
@@ -1503,6 +1827,19 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// **不许在里面拿 `a.mu`**——那把锁是界面每帧都要的。
 		OnFirstBytes: func(int64) {
 			firstAt.CompareAndSwap(0, time.Now().UnixNano())
+		},
+		// 🔴 **「整首下完了」**（2026-10-30）：字节源是**唯一**知道
+		// 「下完了」的地方（`io.EOF` 只有它记），而上层要靠它标
+		// 「这一份缓存齐了」。
+		//
+		// ⚠️ **它在下载 goroutine 里调**：所以它只做一件事：写元数据
+		// （那一层自己管锁）。**不许在这里拿 `a.mu`**——那把锁是界面
+		// 每帧都要的。
+		OnComplete: func(size int64) {
+			if cachePath == "" {
+				return
+			}
+			a.markByteCacheComplete(it, s.Quality, ref, size)
 		},
 	})
 	if err != nil {

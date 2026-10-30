@@ -74,6 +74,13 @@ func (s *StreamSource) pump() {
 		if err == nil {
 			// 正常读完。
 			s.markTotal(s.Filled())
+			// 🔴 **「整首下完了」报一声**（2026-10-30）：上层要靠它标
+			// 「这一份缓存齐了」——而这一层是**唯一**知道那件事的地方
+			// （`io.EOF` 只有它记）。
+			//
+			// ⚠️ **在 `fail(io.EOF)` 之前报**：那样上层看到的时候，
+			// 这一份已经是「真的下完了」。
+			s.reportComplete()
 			s.fail(io.EOF)
 			return
 		}
@@ -545,6 +552,15 @@ func (s *StreamSource) stopped() bool {
 }
 
 // markTotal 在读完之后把总长定下来。
+//
+// 🔴 **它不认「长度是猜的」那一种**（2026-10-30）：服务器不给
+// `Content-Length` 时，下载可能**中途结束**（chunked + 提前断开），
+// 而这时候「下到了多少」不是总长——它是**截断的长度**。
+//
+// ⚠️ **把截断的长度当总长**，上层就会以为「这一份是完整的」——
+// 而用户切回来听到的是放了一半的歌（见 `reportComplete` 的注释）。
+//
+// 所以这里**不设 `sizeKnown`**：只有服务器明说过的长度才算「知道」。
 func (s *StreamSource) markTotal(n int64) {
 	s.mu.Lock()
 	if s.size < 0 {
@@ -596,6 +612,9 @@ func (s *StreamSource) commitTotal(total int64) {
 	// 不该被一个续传响应改回去。
 	if s.size < 0 || total > s.size {
 		s.size = total
+		// 🔴 **这个长度是服务器说的**（`Content-Length` / `Content-Range` 的
+		// `/total`）：所以「知道有多长」这一栏立起来了（见 `sizeKnown`）。
+		s.sizeKnown = true
 	}
 	s.cond.Broadcast()
 	s.mu.Unlock()

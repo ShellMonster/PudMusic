@@ -21,6 +21,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/danmaku"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/streamaudio"
 )
 
 // afterFunc 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。
@@ -377,6 +378,19 @@ type App struct {
 	streamCache map[string]*bili.StreamRef
 	// streamCacheOrder 记着每个 key 是什么时候进缓存的（为了淘汰最旧的）。
 	streamCacheOrder map[string]time.Time
+	// byteCache 是**音频字节的落盘缓存**（见 `service/streamaudio`）。
+	//
+	// 🔴 **它和 `streamCache` 是两件事**：
+	//
+	//	streamCache	地址（B 站给的播放地址，会过期）
+	//	byteCache	字节（音频本身，不过期）
+	//
+	// 用户要的是后者：「前面取到了的，那应该是在本地电脑缓存上啊，
+	// 为啥还要再去跑网络请求」（2026-10-30）。
+	//
+	// ⚠️ **nil = 不落盘**：没给缓存目录时（拿不到用户数据目录），
+	// 在线播放照旧走临时文件那一路。
+	byteCache *streamaudio.Cache
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
 	onlineGen int
@@ -1412,6 +1426,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	a.applyFadeInLocked(p)
 	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p
+	// 🔴 **上一份的保护解除**：本地文件顶上来了，那一份不再被播。
+	// ⚠️ **锁外面调**：它要拿 `a.mu`（取缓存对象），而那把锁上面还拿着。
+	prevOnline := a.online
 	a.online = nil
 	// 🔴 **代次要加**：本地文件和在线流是**两条并行的路**，而在线那一路是后台
 	// 建的（取流要几百毫秒的网络往返）。不加的话，用户点了本地文件之后，那条
@@ -1511,6 +1528,9 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	//
 	// ⚠️ **锁外面调**：它要拿 `a.mu`，而那把锁上面已经拿着。
 	a.abortPendingSourceFor(prevGen)
+
+	// 🔴 **上一份的保护解除**（锁外面）：本地文件顶上来了。
+	a.releaseByteCacheProtect(prevOnline)
 
 	// 先把新歌换上，再关旧的：换歌期间 tick 拿到的一直是有效的播放器。
 	if old != nil {
@@ -1776,6 +1796,8 @@ func (a *App) ClearTrack() {
 	// 正是这里要避免的那件事。
 	prevGen := a.onlineGen
 	a.onlineGen++
+	// 🔴 **上一份的保护解除**（锁外面）：这一首被清掉了，不再被播。
+	prevOnline := a.online
 	a.online = nil
 	// 「正在取流」这一档也收掉：清掉当前曲目 = 用户不要这一首了，那条在途的
 	// 取流也作废了（代次已经加了，那一头会自己走人）。
@@ -1801,6 +1823,9 @@ func (a *App) ClearTrack() {
 	// 在途的那条在线流也掐掉（理由同 `Open` 里那一句：锁外面调、传**被顶掉
 	// 的那一趟**的代次）。
 	a.abortPendingSourceFor(prevGen)
+
+	// 🔴 **上一份的保护解除**（锁外面）：这一首被清掉了。
+	a.releaseByteCacheProtect(prevOnline)
 
 	// 「这一首到此为止」也是终止：播放记录那一轮到此结束（见 playreport.go
 	// 的「一、什么时候发」）。它和 `Stop` 是同一件事的两个入口。
@@ -1910,8 +1935,11 @@ func (a *App) Close() {
 	// 在途的那一趟**预取**也要掐：它还占着一条连接，而用户已经退出了。
 	a.invalidatePrefetch()
 	a.mu.Lock()
+	prevOnline := a.online
 	a.online = nil
 	a.mu.Unlock()
+	// 🔴 **上一份的保护解除**（锁外面）：应用都要退了。
+	a.releaseByteCacheProtect(prevOnline)
 	// 告诉系统「没有歌了」。不做这一步的话，退出去之后锁屏上还会留着
 	// 一首已经不存在的歌，而控制中心的播放键按下去还能收到命令。
 	a.publishMedia()
