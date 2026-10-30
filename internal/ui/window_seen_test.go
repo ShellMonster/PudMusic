@@ -194,6 +194,22 @@ func TestAWokenWindowCatchesUp(t *testing.T) {
 // 主窗口失焦不等于迷你播放器看不见：两扇窗各有各的 `presence`、各有各的唤醒
 // 句柄，而 `App.wakeAll` 仍然挨个叫醒（铁律三不变）。这一条量的是「叫醒之后的
 // 那一扇窗自己做的决定」——主窗把唤醒丢掉，迷你窗照常接住。
+//
+// # ⚠️ **判据为什么改了**
+//
+// 这一条原来断的是「后台叫完之后主窗 `FramePending()` 为假、迷你窗为真」。
+// **那个判据在票 #468 之后就不成立了**，而这一条因此在 main 上一直红
+// （2026-10-31 复核：干净 worktree 在 HEAD 的干净提交上同样红，不是回归）。
+//
+// 原因：窗口**刚变得看不见**的时候，`noteWindow` 会**补一帧**
+// （`presence.go`，票 #468）——那一帧是「把常驻动画停下来」的那一帧（满屏的
+// 封面在转的时候，要帧走的是框架那一层，不经过本应用那道闸）。
+//
+// ⇒ 于是「失焦之后主窗 `FramePending()` 为真」这件事，**说的不是后台叫醒了它**，
+// 而是「失焦那一下补的那一帧还没被画掉」。两个原因共用一个判据，分不开。
+//
+// **修法不是改生产代码**（那一帧是票 #468 特意要的），而是**先把那一帧画掉**，
+// 再断「这一次后台叫醒」——下面那段就是。
 func TestTheMiniWindowKeepsUpWhileTheMainWindowIsUnseen(t *testing.T) {
 	a := app.New()
 	// `newTestShell` 的收尾会关掉 a；迷你那一条要先收（后注册先跑）。
@@ -210,23 +226,53 @@ func TestTheMiniWindowKeepsUpWhileTheMainWindowIsUnseen(t *testing.T) {
 	mainFrames, miniFrames := 0, 0
 	mainTT := mygoui.NewTester(func(c *mygoui.Context) { mainFrames++; main.View(c) }, 1200, 800)
 	miniTT := mygoui.NewTester(func(c *mygoui.Context) { miniFrames++; mini.View(c) }, miniWidth, miniHeight)
+	// 先各画一帧：唤醒句柄的 `Services` 是**画的时候**登记的（`wake.set`），
+	// 还没画过的那一帧 `invalidate` 会被丢掉（`held` 是假）。
+	mainTT.Frame()
+	miniTT.Frame()
 
 	// 主窗失焦（用户在看别的应用），迷你窗还浮在桌面上。
 	main.noteWindow(func(p *windowPresence) { p.focused = false })
 
-	// 一次普通的后台状态变化：`App` 挨个叫醒两扇窗。
+	// ⚠️ **把失焦那一下补的那一帧画掉**（票 #468 补的那一帧，见上面那段话）：
+	// 不画掉的话，「主窗还欠着一帧」和「后台叫醒了主窗」就分不开了。
+	//
+	// ⚠️ **要推钟**：Tester 的钟站着不动，而 `Advance` 才画那些「落在窗口内」
+	// 的帧（`mygo/ui/headless.go` 的 `Advance` → `due()` 那一支）。
+	mainTT.Frame()
+	mainTT.Advance(50 * time.Millisecond)
+	if mainTT.FramePending() {
+		t.Fatal("起点就不对：主窗失焦那一下补的那一帧画完之后，它还在要帧——" +
+			"下面「后台叫醒它」就分不出是这一次叫醒的了")
+	}
+
+	// 一次普通的后台状态变化：`App` 挨个叫醒两扇窗（`wakeAll`，铁律三）。
+	//
+	// ⚠️ **走的是真路径**：不直接调 `wake.invalidateIf`——那样会绕开
+	// 「这一扇窗有没有在 `App` 里登记」这一层，于是「迷你窗压根没登记唤醒
+	// 句柄」这种坏法就绕过去了（实测：把 `bindMiniWindow` 改成空操作，
+	// 只有 `mini_window_wake_e2e_test.go` 那条会红，这条不会）。
 	a.SetVolume(0.42)
 
+	// 🔴 **判据**：主窗**丢掉**这次唤醒（它看不见），迷你窗**接住**（它看得见）。
+	//
+	// ⚠️ **这里能断 `FramePending()` 了**——因为上面已经把「失焦那一下补的
+	// 那一帧」画掉了（票 #468），主窗此刻不欠帧。于是「主窗 pending 为假」
+	// 就只可能是「这一次叫醒被丢掉了」。
 	if mainTT.FramePending() {
-		t.Error("主窗口失焦了，后台一叫它还是请求了一帧")
+		t.Error("主窗口失焦了，后台一叫它还是请求了一帧——" +
+			"看不见的窗口那些帧全是白烧的电（票 #156）")
 	}
 	if !miniTT.FramePending() {
 		t.Error("主窗口失焦、迷你窗口看得见，后台却没能把迷你窗口叫醒——" +
 			"它会停在旧内容（铁律三：逐窗口叫醒）")
 	}
 
-	// 两扇窗真画一帧：主窗照画（看不见不等于不能画，只是没人叫它），
-	// 迷你窗照常。
+	// 而迷你窗那一扇**真的把状态更新到画面上了**：后台把音量改成了 0.42，
+	// 迷你窗画出来的那一帧上，静音那一枚还是「静音」（0.42 不是静音）。
+	//
+	// ⚠️ **这一条断的是「画面跟上了」**：光断「唤醒被接住」不够——接住了却
+	// 没画出来，用户看到的还是旧内容。
 	beforeMain, beforeMini := mainFrames, miniFrames
 	mainTT.Frame()
 	miniTT.Frame()
