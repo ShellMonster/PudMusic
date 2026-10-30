@@ -117,8 +117,8 @@ func TestThePartsEntryOpensAndSwitchesTheEpisode(t *testing.T) {
 		return ok && it.Cid == "779"
 	})
 
-	// 队列里**还是那一项**（不是插了一首新的）：多 P 的两集在 `Item.Identity()`
-	// 里是同一首，插一项新的会让抽屉和队列里同时出现同一首。
+	// 队列里**还是那一项**（不是插了一首新的）：换集是同一项换了 cid（`Item.Identity()`
+	// 里 mv 带上 cid），插一项新的会让队列里多出一份同一集、抽屉画成两行。
 	if n := len(s.app.Queue().Items()); n != 1 {
 		t.Errorf("队列里有 %d 项，换集之后应该还是 1 项", n)
 	}

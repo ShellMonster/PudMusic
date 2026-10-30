@@ -324,8 +324,8 @@ func TestFavoriteAndUnfavoritePostToTheirOwnEndpoints(t *testing.T) {
 		call func(*Client) error
 		want string
 	}{
-		{"收藏", func(c *Client) error { return c.FavoriteCollection(context.Background(), 42) }, pathFolderFav},
-		{"取消收藏", func(c *Client) error { return c.UnfavoriteCollection(context.Background(), 42) }, pathFolderUnfav},
+		{"收藏", func(c *Client) error { return c.FavoriteCollection(context.Background(), 42, CollectionFavorite) }, pathFolderFav},
+		{"取消收藏", func(c *Client) error { return c.UnfavoriteCollection(context.Background(), 42, CollectionFavorite) }, pathFolderUnfav},
 	} {
 		f := newFakeBili(t)
 		f.on(c.want, func(w http.ResponseWriter, r *http.Request) {
@@ -355,7 +355,7 @@ func TestCSRFGoesIntoTheFormBodyToo(t *testing.T) {
 		writeJSON(w, jsonData(t, 0, "0", nil))
 	})
 	c := f.client(t, Options{CSRF: func() string { return "jct-fixture" }})
-	if err := c.FavoriteCollection(context.Background(), 42); err != nil {
+	if err := c.FavoriteCollection(context.Background(), 42, CollectionFavorite); err != nil {
 		t.Fatal(err)
 	}
 	got := f.requests()[0]
@@ -398,7 +398,7 @@ func TestRemoveSendsIDAndTypePairs(t *testing.T) {
 	medias := []Media{
 		{ID: 11, Type: MediaVideo}, {ID: 22, Type: MediaAudio},
 	}
-	if err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, medias); err != nil {
+	if err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, CollectionFavorite, medias); err != nil {
 		t.Fatal(err)
 	}
 	got := f.requests()[0]
@@ -420,7 +420,7 @@ func TestRemoveChunksABigFolder(t *testing.T) {
 	for i := range medias {
 		medias[i] = Media{ID: int64(1000 + i), Type: MediaVideo}
 	}
-	if err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, medias); err != nil {
+	if err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, CollectionFavorite, medias); err != nil {
 		t.Fatal(err)
 	}
 	reqs := f.requests()
@@ -448,7 +448,7 @@ func wantBatchSize(i int) int {
 // 根本不该发请求。
 func TestRemoveNothingSendsNothing(t *testing.T) {
 	f := newFakeBili(t)
-	if err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, nil); err != nil {
+	if err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, CollectionFavorite, nil); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(f.requests()); n != 0 {
@@ -472,7 +472,7 @@ func TestRemoveStopsAtTheFirstFailure(t *testing.T) {
 	for i := range medias {
 		medias[i] = Media{ID: int64(i), Type: MediaVideo}
 	}
-	err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, medias)
+	err := f.client(t, Options{}).RemoveCollectionMedias(context.Background(), 42, CollectionFavorite, medias)
 	if err == nil {
 		t.Fatal("第二批失败了还报成功")
 	}
@@ -508,7 +508,7 @@ func TestCleanSendsOnlyTheFolderID(t *testing.T) {
 	})
 
 	c := f.client(t, Options{CSRF: func() string { return "jct-fixture" }})
-	if err := c.CleanInvalidResources(context.Background(), 12345); err != nil {
+	if err := c.CleanInvalidResources(context.Background(), 12345, CollectionFavorite); err != nil {
 		t.Fatal(err)
 	}
 	reqs := f.requests()
@@ -530,7 +530,7 @@ func TestCleanSendsOnlyTheFolderID(t *testing.T) {
 // TestCleanRefusesNobody 收藏夹 id 不对就报错，不发请求。
 func TestCleanRefusesNobody(t *testing.T) {
 	f := newFakeBili(t)
-	if err := f.client(t, Options{}).CleanInvalidResources(context.Background(), 0); err == nil {
+	if err := f.client(t, Options{}).CleanInvalidResources(context.Background(), 0, CollectionFavorite); err == nil {
 		t.Fatal("media_id=0 也发出去了，应该报错")
 	}
 	if n := len(f.requests()); n != 0 {
@@ -548,7 +548,7 @@ func TestCleanSaysWhichFolderItWas(t *testing.T) {
 		writeJSON(w, jsonData(t, -400, "请求错误", nil))
 	})
 
-	err := f.client(t, Options{}).CleanInvalidResources(context.Background(), 12345)
+	err := f.client(t, Options{}).CleanInvalidResources(context.Background(), 12345, CollectionFavorite)
 	if err == nil {
 		t.Fatal("B 站回错了还报成功")
 	}
@@ -694,6 +694,93 @@ func TestTheOwnerFaceGetsItsProtocol(t *testing.T) {
 		}
 		if got.Owner.Face != c.want {
 			t.Errorf("face %q → %q，want %q", c.raw, got.Owner.Face, c.want)
+		}
+	}
+}
+
+// ── 写操作按容器类型分派（票 #683 的复审） ────────────────────────────────────
+
+// TestFavoritingASeasonUsesTheSeasonEndpoint 钉住「合集的星标打的是
+// `fav/season/fav`，参数是 `season_id`」。
+//
+// 原来星标不分类型，一律打 `fav/folder/fav` 并带 `media_id`——对合集来说那个
+// 参数是**合集 id 冒充收藏夹 mlid**，B 站回错，而界面上一句「收藏不了」。
+// 上游 Biu 对合集用的是 `/x/v3/fav/season/fav`（`service/fav-season-fav.ts`）。
+func TestFavoritingASeasonUsesTheSeasonEndpoint(t *testing.T) {
+	f := newFakeBili(t)
+	f.on("/x/v3/fav/season/fav", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", "SUCCESS"))
+	})
+	c := f.client(t, Options{CSRF: func() string { return "jct" }})
+	if err := c.FavoriteCollection(context.Background(), 1227671, CollectionAlbum); err != nil {
+		t.Fatal(err)
+	}
+	reqs := f.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("发了 %d 个请求，want 1", len(reqs))
+	}
+	if reqs[0].Path != "/x/v3/fav/season/fav" {
+		t.Errorf("打的是 %q，want /x/v3/fav/season/fav（合集不走收藏夹那一套）", reqs[0].Path)
+	}
+	if got := reqs[0].Form.Get("season_id"); got != "1227671" {
+		t.Errorf("season_id = %q，want 1227671", got)
+	}
+	if got := reqs[0].Form.Get("media_id"); got != "" {
+		t.Errorf("发了 media_id = %q——合集那边没有这个参数", got)
+	}
+	if got := reqs[0].Form.Get("platform"); got != platformWeb {
+		t.Errorf("platform = %q，want %q", got, platformWeb)
+	}
+}
+
+// TestUnfavoritingASeasonUsesTheSeasonEndpoint 取消收藏同理。
+func TestUnfavoritingASeasonUsesTheSeasonEndpoint(t *testing.T) {
+	f := newFakeBili(t)
+	f.on("/x/v3/fav/season/unfav", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", "SUCCESS"))
+	})
+	c := f.client(t, Options{CSRF: func() string { return "jct" }})
+	if err := c.UnfavoriteCollection(context.Background(), 1227671, CollectionAlbum); err != nil {
+		t.Fatal(err)
+	}
+	reqs := f.requests()
+	if len(reqs) != 1 || reqs[0].Path != "/x/v3/fav/season/unfav" {
+		t.Fatalf("请求是 %+v，want 一条 /x/v3/fav/season/unfav", reqs)
+	}
+	if got := reqs[0].Form.Get("season_id"); got != "1227671" {
+		t.Errorf("season_id = %q，want 1227671", got)
+	}
+}
+
+// TestRemovingMediasFromASeriesIsRefused 钉住「非收藏夹的批量删除直接拒绝、不发请求」。
+//
+// 原来这一条把 series_id 当 `media_id` 原样发出去——B 站回一句它认不出的错，
+// 而界面上是「删不掉」。**不该发的请求一个都不该发**。
+func TestRemovingMediasFromASeriesIsRefused(t *testing.T) {
+	for _, ref := range []CollectionType{CollectionAlbum, CollectionSeries} {
+		f := newFakeBili(t)
+		c := f.client(t, Options{CSRF: func() string { return "jct" }})
+		err := c.RemoveCollectionMedias(context.Background(), 534501, ref,
+			[]Media{{ID: 11, Type: MediaVideo}})
+		if err == nil {
+			t.Errorf("%v：非收藏夹的批量删除报成功了", ref)
+		}
+		if n := len(f.requests()); n != 0 {
+			t.Errorf("%v：发出去 %d 个请求，want 0", ref, n)
+		}
+	}
+}
+
+// TestCleaningInvalidFromASeasonIsRefused 清除失效内容同理。
+func TestCleaningInvalidFromASeasonIsRefused(t *testing.T) {
+	for _, ref := range []CollectionType{CollectionAlbum, CollectionSeries} {
+		f := newFakeBili(t)
+		c := f.client(t, Options{CSRF: func() string { return "jct" }})
+		if err := c.CleanInvalidResources(context.Background(), 1227671, ref); err == nil {
+			t.Errorf("%v：非收藏夹的「清除失效内容」报成功了", ref)
+		}
+		if n := len(f.requests()); n != 0 {
+			t.Errorf("%v：发出去 %d 个请求，want 0", ref, n)
 		}
 	}
 }

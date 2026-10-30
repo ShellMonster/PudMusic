@@ -329,3 +329,39 @@ func (q *Queue) indexOfIdentityLocked(id string) int {
 	}
 	return -1
 }
+
+// replaceIdentityLocked 把袋子和历史栈里的 old 换成 new。
+//
+// 换集是**就地**改队列项的 cid（`Queue.replaceAt`），而两项身份都记在
+// **判重标识**上（见文件头）。不换的话那一格指向一个已经不存在的身份：
+// `indexOfIdentityLocked` 返回 -1，`bagNextLocked` 把它当「已经被删掉」跳过——
+// 这一轮那一首**永远抽不到**；历史栈里那一格同样退不回来。
+//
+// ⚠️ **空串什么都不换**：认不出身份的项本来就不在袋子里 / 历史栈里（那两个
+// 入口都挡了空串），拿它去替换只会把别的空格也改了。
+//
+// ⚠️ **只换出现过的那些格**：袋子里同一首只有一格（`bagResetLocked` 按身份去重），
+// 历史栈里可能有几格（同一首放过几次就压几次）——所以两边都是整列扫一遍。
+func (q *Queue) replaceIdentityLocked(old, new string) {
+	if old == "" || new == "" || old == new {
+		return
+	}
+	for i, v := range q.bag {
+		if v == old {
+			q.bag[i] = new
+		}
+	}
+	for i, v := range q.history {
+		if v == old {
+			q.history[i] = new
+		}
+	}
+	// 退回去的那一笔记的也是身份：换集之后「上一首」要退回这一项的新身份，
+	// 否则回滚会退到一个对不上队列的标识上。
+	if q.undo.drawn == old {
+		q.undo.drawn = new
+	}
+	if q.undo.histIt == old {
+		q.undo.histIt = new
+	}
+}

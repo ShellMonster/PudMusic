@@ -105,7 +105,45 @@ func menuItems(m Music) []menuItem {
 		{key: "favorite", label: "收藏"},
 		{key: "download-audio", label: "下载音频"},
 	}
+	items = addCollectionEntry(items, m.Item)
 	return markUnplayable(items, m.Item)
+}
+
+// addCollectionEntry 给**合集那一行**加一项「打开这个合集」（票 #683，缺陷 B）。
+//
+// # 为什么需要它
+//
+// 收藏夹里可以有 type=21（合集）的行，它**没有音频流**——播放入口是灰的，而
+// 菜单末尾那句说明写着「打开里面的单集就能放」。可原来的菜单里**没有任何一个
+// 能真的打开它的入口**：用户照着那句话做不了任何事（双击也是播放，一样无效）。
+//
+// # 为什么不改双击
+//
+// 双击是「播放」的语义（`rowPlay`），不该为一类播不了的行改。而菜单里已经摆着
+// 那句说明——在它旁边补一项真能按的动作最自然。
+//
+// # 判据是 `Item.CollectionID`
+//
+// 合集 id 在 `app.Item.CollectionID` 上（`ItemOfMedia` 从 `Media.ID` 填的，
+// 那个字段对 type=21 就是合集 id）。**没有它就不摆这一项**——凭 bvid 或 sid
+// 拼出来的地址对不上任何一页，而那种错在界面上是「点了跳到一个空页面」。
+//
+// ⚠️ **排在「在 B 站打开」前面**：它和那一项是一组（都往别处去），而合集那一行的
+// 「在 B 站打开」按 `BiliLink` 拼不出地址（合集没有 bvid，而那个 `Sid` 是合集 id 而
+// 不是音频 id，见 `app.BiliLink` 的注释）——于是那一项按下去什么都不发生。所以这一
+// 项是这一行**唯一**走得通的「去别处」。
+func addCollectionEntry(items []menuItem, it app.Item) []menuItem {
+	if it.CollectionID <= 0 {
+		return items
+	}
+	out := make([]menuItem, 0, len(items)+1)
+	for _, item := range items {
+		if item.key == "open" {
+			out = append(out, menuItem{key: "open-collection", label: "打开这个合集"})
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // markUnplayable 把放不了 / 下不了的那些项按不动，并补上说明。
@@ -222,6 +260,16 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 		if acts.Open != nil {
 			acts.Open(song.Item)
 		}
+	case "open-collection":
+		// 🔴 **合集那一行唯一的「进内部」入口**（票 #683，缺陷 B）。走的是
+		// `Actions.OpenCollection`，界面上那一侧接成「导航到合集页」。
+		//
+		// ⚠️ **没接时说清楚**（和别的那几项同一个规矩）：按了没反应最难解释。
+		if acts.OpenCollection == nil {
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
+			return
+		}
+		acts.OpenCollection(song.Item)
 	case "copy-info":
 		if acts.Copy == nil {
 			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)

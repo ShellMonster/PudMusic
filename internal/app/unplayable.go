@@ -373,11 +373,17 @@ func UndownloadableReason(it Item) string {
 //
 // 🔴 **只有这一处拼**：播放列表抽屉的行菜单、内容列表那一套菜单、播放条上
 // 「在 B 站打开」那一枚键都要它，而拼错一处就是「打开了一个打不开的页面」。
+//
+// 🔴 **`Sid` 只对音频那一档算数**（票 #683 的复审）：`ItemOfMedia` 对**所有**类型
+// 都填 `Sid = Media.ID`，而合集（type=21）那一行的 `ID` 是**合集 id**（season_id）
+// ——照 `Sid` 拼出来是 `audio/au<season_id>`，一个**不存在**的页面，而用户会以为
+// 稿子被删了。合集那一行真正的入口是菜单里的「打开这个合集」（`Item.CollectionID`）。
+// 按 `Type` 判而不是按 `Sid` 空不空判，理由同上：那个字段对几类都有值。
 func BiliLink(it Item) string {
 	switch {
 	case it.Bvid != "":
 		return "https://www.bilibili.com/video/" + it.Bvid
-	case it.Sid != "":
+	case it.Type == "audio" && it.Sid != "":
 		return "https://www.bilibili.com/audio/au" + it.Sid
 	}
 	return ""

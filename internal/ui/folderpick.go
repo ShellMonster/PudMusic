@@ -10,10 +10,13 @@ import (
 	"image"
 	"io"
 	"os"
+	"strconv"
 	"sync"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/egoist/mygo"
 )
@@ -138,6 +141,14 @@ func (s *Shell) listActions() list.Actions {
 	// 有一处安静地走错。
 	acts.OpenOwner = func(mid int64, _ string) {
 		s.openOwnerSpace(mid)
+	}
+	// 合集那一行的「打开这个合集」（票 #683，缺陷 B）。
+	//
+	// ⚠️ **和侧栏那条路走同一个拼法**（`collectionPath` + `collectionTypeQuery`）：
+	// 两处各拼一遍的话，改了一处另一处就安静地跳到错页面上。
+	acts.OpenCollection = func(it app.Item) {
+		s.navigate(collectionPath(it.CollectionID) +
+			"?" + collectionTypeQuery + "=" + strconv.Itoa(int(bili.CollectionAlbum)))
 	}
 	return acts
 }

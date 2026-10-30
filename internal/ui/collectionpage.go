@@ -822,6 +822,56 @@ const collectionLeadHeight = collectionCoverH + 40 +
 	3*scale.Size14*leading.Copy + 2*collectionHeadGap + collectionOwnerAvatarSize +
 	collectionOpsButtonH + 24 + 32
 
+// collectionHeaderCover 是头图区这一帧要画的那个封面地址（**三层兜底之后**的）。
+//
+// # 和侧栏那一枚是同一套口径
+//
+// 侧栏那一行（`viewFavoriteCover`）做的是同一件事，而**头图区此前没做**：
+//
+//	① 接口给的封面（容器第一首）
+//	② 它为空、或者**这个尺寸下**已经拉失败 → 夹里第一首还有效、还有封面的那张
+//	   （`app.FolderFallbackCover`，后台只拉一页、每个容器一次）
+//	③ 都没有 → 空串（那一格画「没有封面」的占位）
+//
+// 症状：第一首失效时，B 站给的那个封面地址还在、图已经 404 了。侧栏那枚方形封面
+// 早就换成了夹里下一首的封面，而**头图区还是那张坏图**——同一页上两处对同一件事
+// 给出两个答案。
+//
+// # ⚠️ 判断「拉失败」用的尺寸必须和真正画的时候**一模一样**
+//
+// `GetSized` 的缓存键是 `(地址, 宽, 高)`：小图那一份失败**不等于**大图那一份
+// 失败（它们是两个缓存条目）。侧栏判的是 `imgcache.ParamsSquare` 那一档
+// （32 见方），这里判的是 `collectionCoverW × collectionCoverH`——**各自带
+// 各自的参数**，谁也不借谁的。
+//
+// 同样地，`app.FolderFallbackCover` 的缓存里存的是**原始地址**：裁剪参数由
+// **画它的那一格**自己拼（侧栏拼 `ParamsSquare`，这里拼大图那一套）。把裁剪过
+// 的地址存进那个缓存，另一处就会拿到一个尺寸不对的键。
+//
+// # ⚠️ 只有「封面为空 / 拉失败」才去问兜底
+//
+// 封面正常时这一帧一次都不该走到那一层：它要拿一把锁、查两张表，而这条路径
+// **每帧**都跑（`framebudget_test.go` 量的是每帧分配）。更实际的理由是语义：
+// 「每帧都问一次兜底」等于把「后台拉过没有」变成渲染循环的一部分，而它真正
+// 要回答的只是「原来那张还能不能用」。
+//
+// ⚠️ **`!Loaded` 那一档返回空串，但那一档由调用方画骨架屏**：空地址在
+// `imgcache` 里是「本来就没有」那一档（图片图标占位），和「元信息还没回来」
+// 的含义相反——所以这个函数**不参与**那一档的判断，调用方要先用 `info.Loaded`
+// 分流。
+func (s *Shell) collectionHeaderCover(ref app.CollectionRef, info app.CollectionInfo) string {
+	if !info.Loaded {
+		return ""
+	}
+	// 还在下载（`Loading`）时 `Err` 是 nil，这里照旧用接口给的那张——那一格
+	// 画的是骨架屏，等它下来就是了。
+	if info.Cover != "" &&
+		s.images.GetSized(info.Cover, collectionCoverW, collectionCoverH).Err == nil {
+		return info.Cover
+	}
+	return s.app.FolderFallbackCover(ref)
+}
+
 // viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
 //
 // 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`：右边那一
@@ -829,7 +879,15 @@ const collectionLeadHeight = collectionCoverH + 40 +
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
-	hue, sat := s.tint.sync(info.Cover, s.wake.invalidate)
+	// 光晕跟着**这一帧真正画的那张封面**走（见 `collectionHeaderCover`）：
+	// 兜底换上之后颜色也要换，否则会出现「封面是第二首的、光晕还是第一首
+	// （失效那张）的颜色」——而失效那张往往根本没有颜色可给。
+	//
+	// ⚠️ `sync` 的缓存键就是**它收到的那个地址**（`covertint_cache_test.go` 的
+	// `TestTheTintCacheIsKeyedByTheURL` 钉着），所以换地址天然换色、切回来也
+	// 命得中原来那一条。
+	cover := s.collectionHeaderCover(p.ref, info)
+	hue, sat := s.tint.sync(cover, s.wake.invalidate)
 	glow := collectionGlow(t, hue, sat)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
@@ -849,8 +907,16 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			// 才换成图。那两档的含义是相反的。
 			//
 			// 所以 `!Loaded` 时直接画「正在加载」那一档（一块带扫光的灰）。
+			//
+			// ⚠️ **`cover` 是三层兜底之后的那一张**（见 `collectionHeaderCover`）：
+			// 接口给的那张拉不下来时它是夹里下一首的，而不是那张坏图。
+			//
+			// ⚠️ **兜底地址也走 `imgcache.View` 的原始地址**（不带 `@…` 参数）：
+			// 那一格按 `collectionCoverW × collectionCoverH` **自己**向图床要
+			// 对应的一档（`GetSized`），和判断「拉失败」时用的是同一个尺寸。
+			// 手动拼一副参数的话两边就成了两个缓存条目——判完了还是画不出来。
 			if info.Loaded {
-				shadow.TailwindLG(imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH))
+				shadow.TailwindLG(imgcache.View(c, s.images, cover, collectionCoverW, collectionCoverH))
 			} else {
 				shadow.TailwindLG(imgcache.Loading(c, collectionCoverW, collectionCoverH, imgcache.Shape{}))
 			}
@@ -1113,7 +1179,10 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 		// 一个字都填不满）。`Justify(End)` 让这一组贴着页边距。
 		ui.Row(c).Grow(1).Gap(space.Px8).Center().Justify(ui.End).Children(func() {
 			s.viewCollectionSearch(c, p)
-			s.viewCollectionSort(c, p)
+			// ⚠️ **合集 / 系列不摆排序下拉**（理由见 `collectionSortSupported`）。
+			if collectionSortSupported(p.ref.Type) {
+				s.viewCollectionSort(c, p)
+			}
 		})
 	})
 }
@@ -1127,11 +1196,24 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 //
 // ⚠️ Biu 那一侧对「视频系列」和「自己创建的收藏夹」不画这个按钮
 // （`operation/index.tsx:47-49`）。这一页拿不到「是不是自己创建的」
-// （`fav_state` 说的是这个容器有没有被别人收藏），所以两种都画——
-// 让服务端拒绝比在界面上猜一个条件准。
+// （`fav_state` 说的是这个容器有没有被别人收藏），所以**收藏夹**那一档两种都画
+// ——让服务端拒绝比在界面上猜一个条件准。
+//
+// 🔴 **系列不画**（票 #683 的复审）：B 站没有「收藏一个系列」这个动作（上游
+// `operation/index.tsx` 也是这么分的），摆出来按下去只会得到一句看不懂的错。
+// 合集照画——`fav/season/fav` 是有的。
 func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
+	if p.ref.Type == bili.CollectionSeries {
+		return
+	}
 	info := s.app.Collection(p.ref)
+	// ⚠️ **那句话带上这一类的名字**（票 #683 的复审）：合集页上写「收藏这个收藏夹」
+	// 说的是另一件事——用户点的是合集，页面上也写着「视频合集」。收藏夹那一档
+	// 一个字都不改（「收藏这个收藏夹」，不管公开还是私密——原来就是这样）。
 	tip := "收藏这个收藏夹"
+	if p.ref.Type != bili.CollectionFavorite {
+		tip = "收藏这个" + p.ref.Type.Label()
+	}
 	if info.Faved {
 		tip = "取消收藏"
 	}
@@ -1181,6 +1263,12 @@ var collectionMoreBaseItems = []collectionMenuItem{
 // 收藏夹」。照上游 `menu.tsx` 的 `show: isCreatedBySelf && !isDefaultFav(attr)`：
 // 别人建的收藏夹摆不出删除（B 站不给这个接口），B 站发下来的那个默认收藏夹
 // 也摆不出（它同样删不掉）。
+//
+// 🔴 **这两项只属于收藏夹**（票 #683 的复审）：`clear-invalid` 打的是
+// `/x/v3/fav/resource/clean`、`delete-folder` 打的是 `/x/v3/fav/folder/del`
+// ——都是收藏夹那一套。合集 / 系列上摆出来（`CanDeleteCollection` 对 UP 主是
+// 自己的合集也判真）按下去只会得到一句 B 站的「请求错误」，而用户以为是自己
+// 的账号出了问题。
 var collectionMoreOwnerItems = []collectionMenuItem{
 	{key: "clear-invalid", label: "清除失效内容"},
 	{key: "delete-folder", label: "删除收藏夹"},
@@ -1209,7 +1297,9 @@ func (s *Shell) collectionMoreItemsFor(p *collectionPage) []collectionMenuItem {
 	if !info.Loaded {
 		return items
 	}
-	if s.app.CanDeleteCollection(p.ref) {
+	// ⚠️ **这两项只属于收藏夹**（理由见 `collectionMoreOwnerItems`）：合集 / 系列
+	// 上 B 站没有这两个动作，摆出来就是一条注定失败的路。
+	if p.ref.Type == bili.CollectionFavorite && s.app.CanDeleteCollection(p.ref) {
 		items = append(items, collectionMoreOwnerItems...)
 	}
 	return append(items, collectionMoreForgetItem)
@@ -1240,7 +1330,8 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 	}
 }
 
-// viewCollectionSort 是排序下拉。
+// viewCollectionSort 是排序下拉。**只有收藏夹页摆它**（见
+// `collectionSortSupported`：合集 / 系列的接口不认这几档）。
 //
 // ⚠️ 用 `SelectBase` 而不是 `ui.Select`：后者收的是 `[]string`，而排序在
 // B 站那边是一个枚举。拿字去当排序，中间就多一处「显示的字」和「发给接口的
@@ -1329,6 +1420,40 @@ const collectionSortMinW = 83.2
 // 歌名的控件（占位文字不是标签），无头 Tester 也只认 label / text。
 const collectionSearchLabel = "搜索歌名"
 
+// collectionSearchUnsupportedTip 是合集 / 系列页那枚**按不动**的放大镜为什么按不动。
+//
+// ⚠️ **它是给用户看的一句话**：不说「接口」「还没实现」，只说这一类的现状和
+// 下一步（「翻一翻吧」）——和 `app.errCollectionSearchUnsupported` 说同一件事，
+// 只是那一句是在「词已经发出去了」之后才说得出的话。
+const collectionSearchUnsupportedTip = "这一类还没有按歌名找，翻一翻吧"
+
+// collectionSearchSupported 报这一类容器的内容接口支不支持「按歌名找」。
+//
+// 🔴 **判据只有这一处**（票 #683 的复审）：它同时决定「画不画搜索框」和
+// 「`LoadCollectionPage` 会不会拒绝那个词」（`app.errCollectionSearchUnsupported`）。
+// 两处各判一次的话，改了接口支持哪一类，另一处的控件就还摆在那儿——而那个控件
+// 按下去会把整页换成「加载失败」。
+//
+// ⚠️ **收藏夹支持、合集和系列不支持**：只有 `/x/v3/fav/resource/list` 收
+// `keyword`（见 `bili.CollectionMedias` 顶上那一段）。
+func collectionSearchSupported(typ bili.CollectionType) bool {
+	return typ == bili.CollectionFavorite
+}
+
+// collectionSortSupported 报这一类容器有没有「按哪一档排」这个选择。
+//
+// 🔴 **合集 / 系列没有**（票 #683 的复审）：它们的接口只收一个 `sort_reverse`
+// （倒序），没有收藏夹那三个 `order`。照收藏夹那三档画出来的话，三档发出去的
+// 请求**一模一样**——用户选了「最多播放」，回来的还是同一批、同一个顺序，而
+// 界面上一点也看不出来（死控件）。
+//
+// ⚠️ **不画，而不是只留两档**：`sort_reverse` 这一层还没接（`bili.SeasonArchives`
+// / `SeriesArchives` 都不收排序参数），留两档的话其中一档仍然是假的。等真接上
+// 之后再把这一条放开、同时把 `sort_reverse` 一路传下去。
+func collectionSortSupported(typ bili.CollectionType) bool {
+	return typ == bili.CollectionFavorite
+}
+
 // viewCollectionSearch 是「按歌名找」，**一枚会展开的按钮**。
 //
 // 上游那一排的右边是 `SearchWithSort`（`components/search-with-sort/index.tsx`），
@@ -1343,9 +1468,26 @@ const collectionSearchLabel = "搜索歌名"
 // ⚠️ **回车立刻搜，防抖 500ms**：抄上游（`components/search-button/index.tsx`
 // 的 `useDebounceFn(..., { wait: 500 })`），也和这一页的邻居一致（`librarypage.go`
 // 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
+//
+// 🔴 **合集 / 系列不摆搜索框**（票 #683 的复审）：那两个内容接口没有 `keyword`，
+// `LoadCollectionPage` 对非空词会返回「还不能按歌名找」，而列表控件会把整页换成
+// 「加载失败，点此重试」并弹一句带 `biu:` 前缀的错。判据和「发不发请求」用的是
+// 同一个（`collectionSearchSupported`）。
 func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
+	// 🔴 **合集 / 系列：按灰，提示说清为什么**（票 #683 的复审）。绝不接进
+	// fetcher——`draft` / `pendingSince` 也一起清掉，那个 500ms 的钟别醒着
+	// （`collectionSearching` 看的就是 `pendingSince`）。
+	if !collectionSearchSupported(p.ref.Type) {
+		p.draft = p.keyword
+		p.pendingSince = time.Time{}
+		p.submitted = false
+		expandableSearch(c, s.tip, &p.search, &p.draft, collectionSearchLabel,
+			collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown(),
+			collectionSearchUnsupportedTip)
+		return
+	}
 	box := expandableSearch(c, s.tip, &p.search, &p.draft, collectionSearchLabel,
-		collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown())
+		collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown(), "")
 	p.submitted = box.Submitted()
 
 	// 判据和排序那一处一个写法：这一帧条件变了就换查询。

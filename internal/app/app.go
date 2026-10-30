@@ -315,8 +315,9 @@ type App struct {
 	// ⚠️ **它和 `a.title` 是两首**：`a.title` 是正在放的那一首，而这一份是
 	// 失败的那一首——不分开的话，出错那一栏显示的是**上一首**，用户读到的是
 	// 「这一首正在放，但它打不开」。
-	failedTitle  string
-	failedArtist string
+	failedTitle   string
+	failedArtist  string
+	failedBiliURL string
 	// pending 是「上一次用户想放的那一项」。
 	//
 	// 它是重试那一枚键的**凭据**：重试要放的还是这一首，而不是队列里
@@ -363,7 +364,19 @@ type App struct {
 	// 歌单内容页这一摊，见 collection.go。挂上去之前是 nil（界面判空）。
 	collections *collections
 
+	// streamCache 是「播放前预判」那个缓存：key 是条目的身份（`streamKey`），
+	// value 是已经取到、还能播的流地址。
+	//
+	// 🔴 **它留的是好几条**（2026-10-30）：原来每取到一条新的就把整张表重建成
+	// 那一条，于是来回切歌时每切回去一次都要重新问 B 站要一次地址
+	// （A → B → A → B → A 实测取流 5 次）。切回去时命中自己那一条才对。
+	//
+	// ⚠️ **过期的那几条会被清掉**（`pruneStreamCacheLocked`），所以「留着
+	// 过期地址」不是问题；`streamCacheOrder` 记着放进来的先后，好按「最旧」
+	// 淘汰（`streamCacheMax` 条封顶）。
 	streamCache map[string]*bili.StreamRef
+	// streamCacheOrder 记着每个 key 是什么时候进缓存的（为了淘汰最旧的）。
+	streamCacheOrder map[string]time.Time
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
 	onlineGen int
@@ -753,15 +766,31 @@ type App struct {
 	commentsRepliesWanted map[int64]bool
 	// commentsAvids 记着 bvid → avid 的换算（省掉同一首歌的第二次往返）。
 	commentsAvids map[string]int64
-	// commentsAvidWaiters 是「正在换 avid 的那一趟」（bvid → 那个 chan）。
+	// commentsReplyCounts 记着 bvid → 评论数（`stat.reply`）。
 	//
-	// 🔴 **同一时刻只发一趟**：主列表那一趟和楼中楼那一趟可能同时问同一个
-	// bvid 的 avid——两趟都发出去就是两次网络往返。
-	commentsAvidWaiters map[string]chan struct{}
+	// 🔴 **它和 `commentsAvids` 是同一趟来的**（票 #682）：稿件详情一次回两样。
+	// ⚠️ **只在内存里**：盘上那个索引只存 aid（格式不动——改了会让已有用户的
+	// 缓存全部作废），所以重启之后第一次问稿件详情之前播放条上没有数字。
+	commentsReplyCounts map[string]int64
+	// commentsStatsKnown 记着「这个 bvid 的稿件详情**真的**问过」（两栏都拿到了）。
+	//
+	// ⚠️ **不能拿 `commentsAvids` 当这个判据**：盘上那个索引会往里塞 aid，而它
+	// **没有**评论数——拿它当「问过了」的话播放条永远等不到数字。
+	commentsStatsKnown map[string]bool
+	// commentsStatsWaiters 是「正在问这个 bvid 的稿件详情」（bvid → 那个 chan）。
+	//
+	// 🔴 **同一时刻只发一趟**：播放条要评论数、评论页要 avid，而它们是同一个
+	// 回包——两趟都发出去就是明明一次能拿到的东西问了 B 站两次。
+	commentsStatsWaiters map[string]chan struct{}
+	// commentsStatsTried 按 bvid 记着播放条那一趟**失败**的时刻（退避用）。
+	//
+	// ⚠️ **只有评论数这一路看它**：评论页那一趟的退避在 `ensureComments` /
+	// `commentsTriedAt` 那边，共用的话一次评论数问失败会让评论页也停在原地。
+	commentsStatsTried map[string]time.Time
 	// commentsCache 是评论缓存。挂上之前是 nil（那时的表现是「每次都要重问」，
 	// 没有别的坏处）。
 	commentsCache *comments.Cache
-	// commentsListFetch / commentsRepliesFetch / commentsArchiveIDFetch 是问
+	// commentsListFetch / commentsRepliesFetch / commentsArchiveFetch 是问
 	// 评论那几趟的替身。生产上永远是 nil（走取流零件上的那个 B 站客户端）。
 	//
 	// ⚠️ **只由界面那一侧读写**（跟 `partsFetch` 同一条规矩）：`ensureComments`
@@ -769,8 +798,8 @@ type App struct {
 	commentsListFetch commentsListFetchFunc
 	// commentsRepliesFetch 是问楼中楼那一趟。
 	commentsRepliesFetch commentsRepliesFetchFunc
-	// commentsArchiveIDFetch 是 bvid → avid 那一趟。
-	commentsArchiveIDFetch commentsArchiveIDFetchFunc
+	// commentsArchiveFetch 是 bvid → 稿件详情那一趟（aid + 评论数）。
+	commentsArchiveFetch commentsArchiveFetchFunc
 	// commentsSeq 是**在途序号**。每发起一趟问评论就加一（不管问的是哪一页）。
 	//
 	// 🔴 **它挡的是「同一个对象上有两趟」**：用户按了「刷新」，而首次加载那一趟
@@ -1257,21 +1286,22 @@ func (a *App) sourceLocked() string {
 	return SourceOnline
 }
 
-// biliURLLocked 是当前这一首在 B 站上的地址。**必须在持锁时调**。
+// biliURLLocked 是播放条当前动作对应的 B 站地址。**必须在持锁时调**。
 //
-// 正在放的那一首（`a.online`）优先；还没有放上（取流失败了）就用**用户
-// 刚才想放的那一首**（`a.pending`）。
-//
-// 本地文件在 B 站上没有对应的东西，而没有稿件身份的在线条目（没挂投稿的
-// 那种）也没有——那两种都给空串。
+// 有播放器时，标题和链接必须来自同一个实际播放器条目：在线播放器用
+// `a.online`，本地播放器没有 B 站地址。在线取流尚未装上时，旧播放器仍是播放条目，
+// 不能把 `pending` 的链接提前挂上去；只有没有播放器的失败状态才回退到 `pending`。
 func (a *App) biliURLLocked() string {
-	if a.online != nil {
-		return BiliLink(a.online.item)
+	if a.errText != "" && a.failedBiliURL != "" {
+		return a.failedBiliURL
 	}
-	// 🔴 **取流失败的时候 `a.online` 从没装上**（那条流压根没建起来），
-	// 而用户想听的那一首在 `pending` 里。「在 B 站里听它」正是失败之后
-	// 用户能做的事，地址得从那儿来——不然那枚键压根不会出现。
-	return BiliLink(a.pending)
+	if a.player == nil {
+		return BiliLink(a.pending)
+	}
+	if a.online == nil {
+		return ""
+	}
+	return BiliLink(a.online.item)
 }
 
 // setCover 记下当前这首的封面地址。
@@ -1354,6 +1384,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		// 成一件事（理由见 `State.FailedTitle`）。
 		a.failedTitle = ""
 		a.failedArtist = ""
+		a.failedBiliURL = ""
 		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
 		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
 		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。

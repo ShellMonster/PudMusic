@@ -101,13 +101,11 @@ type Item struct {
 	// 是拿每一集的 cid 和当前项的 cid 比出来的），而换集是 `App.PlayPart`
 	// **就地改队列里那一项的 Cid**，不插新的项——所以队列里从头到尾只有一项。
 	//
-	// ⚠️ **正因为队列里不分集，`Identity` 把分集算进去是错的**：同一 bvid 的两集
-	// 在它眼里是同一首，这是对的（它们本来就是队列里的同一项）。这一格原来写着
-	// 「等分集那一票落地时把 Identity 和抽屉的去重一起改」，而那一票选了另一条路。
-	//
-	// 那两个数唯一真的读者是「随机时保持分集顺序」那一个开关（见 `Queue.Advance`
-	// 的随机分支和 `nextPage`），而它要的是**队列里有分集**——那件事还没做（要做
-	// 就得让每一集各占一项，于是上面那条 `Identity` 和抽屉的去重才真的要改）。
+	// ⚠️ **票 #683 之后 `Identity` 把 cid 算进去了**（同一 bvid 的两集各算一首），
+	// 所以「队列里同一 bvid 排着好几项」**可以**出现（历史记录、用户手动加）——
+	// 但这两栏仍然恒为 0：没有任何一条来源给它们赋值，`nextPageLocked` 因此
+	// 永远在第一道判据（`PageIndex <= 0`）就返回 false。**改了这个事实就要回来看
+	// 这里**：随机档会开始按「分集顺序」跳，而那是一个独立的开关（`keepPages`）。
 	PageIndex int
 	TotalPage int
 
@@ -124,6 +122,17 @@ type Item struct {
 	// 把投稿的编号填进 `Bvid`/`Cid` 的话键就变了，用户已有的缓存全部作废。
 	SubtitleBvid string
 	SubtitleCid  string
+
+	// CollectionID 是「这一条是哪一个合集」——收藏夹里 type=21 那一行的
+	// **合集 id**（`bili.Media.ID` 对 type=21 就是它，见 `ItemOfMedia`）。
+	//
+	// 🔴 **它不是 `Sid`、也不是 `Bvid`**：合集不是稿件，`Id` 那一格是合集自己的
+	// season_id。界面上「打开这个合集」那一条靠它拼 `/collection/{id}?type=21`
+	// ——按 `Sid` / `Bvid` 拼出来的是一个对不上的页面（`Sid` 对 type=21 填的是
+	// 同一个数，但那是「碰巧」而不是语义）。
+	//
+	// 0 是「这一条不是合集」（或者查不清 id 是什么，比如电影 type=24）。
+	CollectionID int64
 
 	// Invalid 是「这一条已经失效」（稿件被 UP 主删了、或者换成了别的链接）。
 	//
@@ -184,7 +193,8 @@ const (
 // （`biu/src/components/music-playlist-drawer/index.tsx` 的 uniqBy）：
 //
 //	本地 → local:<完整路径>     （Biu 的 local:<id>，本地项的 id 就是路径）
-//	MV   → mv:<bvid>
+//	MV   → mv:<bvid>            还不知道是哪一集（搜索结果只有 bvid）
+//	MV   → mv:<bvid>|<cid>      确定的某一集（多 P 的每一集各算一首，票 #683）
 //	音乐 → audio:<sid>
 //
 // **认不出是哪一首时返回空串**，调用方必须自己拿这个空串当「没法判重」处理，
@@ -194,6 +204,10 @@ const (
 //
 // 键里带来源前缀不是多余的：Bvid / Sid / 路径三样都是用户数据，不加前缀的话
 // 一个叫 `1293494` 的 sid 和一个叫 `1293494` 的本地文件名会认成同一首。
+//
+// ⚠️ **这个键会落盘**（`playback.items` 的 `id`）：拼法一变，旧记录里的
+// `mv:<bvid>` 就对不上新写的 `mv:<bvid>|<cid>` 了——恢复时当前项会退回第一首。
+// 那一格是「上次听到哪儿」，不是用户数据（队列照旧恢复）。
 func (it Item) Identity() string {
 	kind, id := it.trackKey()
 	if id == "" {
@@ -203,7 +217,7 @@ func (it Item) Identity() string {
 }
 
 // trackKey 是「这一项是哪一种、身份是什么」那两样：种类就是 `Identity()` 的
-// 那个前缀，身份是路径 / bvid / sid 里的一个。
+// 那个前缀，身份是路径 / bvid(+cid) / sid 里的一个。
 //
 // 🔴 **它是判重口径的唯一出处**：`Identity()`（拼成字符串）和 `SameTrack`
 // （比字段）都从这儿拿——两处各写一份的话，改了「Identity」忘了「SameTrack」，
@@ -212,6 +226,29 @@ func (it Item) Identity() string {
 //
 // ⚠️ **认不出是哪一项时两样都是空串**：空串不是「谁都跟它一样」——调用方必须
 // 把它当「没法判重」处理（见 `Identity` 那段）。
+//
+// # 🔴 mv 的身份带上 cid：多 P 的每一集各算一首（票 #683）
+//
+// 用户报的是「一个视频下多个子集，点有些按钮时点里面的歌单播放不了」。根子是
+// **同一个 bvid 的两个分 P 被当成了同一首**，三个地方各错一次：
+//
+//	抽屉去重	两集只画一行（用户看不到第二集）
+//	定位「点它」	按 bvid 找的是第一集（放出来的是第一集）
+//	SameTrack	`PlayAt` 判「同一首」→ 只挪指针、不重新取流（按了没反应）
+//
+// ⚠️ **没有 cid 时退回按 bvid**：搜索结果只给 bvid，那时还不知道是哪一集。
+// 两首都「不知道是哪一集」的同一个投稿**就是**同一首（同一首歌在抽屉里出现
+// 两行是另一个 bug），所以那一档必须继续认成同一首。
+//
+// 🔴 **「一个有一个没有」判不同**：有 cid 的那一项是**确定的某一集**，没 cid
+// 的是**未知**。判同一的话，定位会落到未知的那一项上，于是用户点的「第二集」
+// 被一个还不知道是哪一集的项顶掉——放出来的是第一集（而界面上看不出异样）。
+// 反过来（确定的项被未知的顶掉）和「两首都未知」是同一类错，只是那一类不会
+// 发生在这条判据上。
+//
+// ⚠️ **分隔符用 `|`**：bvid 是 `BV` + 字母数字（不会有 `|`），cid 是十进制数字
+// ——两段都不会撞上分隔符。而拼法只要有一处写得不一样（比如这边用 `|`、落盘
+// 那边用 `-`），恢复出来的当前项就对不上任何一行。
 func (it Item) trackKey() (kind, id string) {
 	// ⚠️ Source 和 Type 都判（见 IsLocal）：`LocalItem` 两个都填，而手写的
 	// Item 常常只填 Type。少判一个的话，本地项会掉到下面那两支里去拿一个空
@@ -220,9 +257,63 @@ func (it Item) trackKey() (kind, id string) {
 	case it.IsLocal():
 		return playbackIDLocal, it.Path
 	case it.Type == "mv":
-		return playbackIDMV, it.Bvid
+		// ⚠️ **bvid 是空串时整项都认不出来**（票 #683 的复审）：原来这一支会
+		// 拼出 `mv:|<cid>`——两个都认不出 bvid 的坏项各带一个 cid 就判成了两首，
+		// 而它们连是哪一首都不知道。空串才是「没法判重」那一档（见 `Identity`）。
+		if it.Bvid == "" {
+			return "", ""
+		}
+		if it.Cid == "" {
+			// 还不知道是哪一集：按投稿判（理由见上面那一节）。
+			return playbackIDMV, it.Bvid
+		}
+		return playbackIDMV, it.Bvid + "|" + it.Cid
 	case it.Type == "audio":
 		return playbackIDAudio, it.Sid
+	}
+	return "", ""
+}
+
+// splitMVIdentity 是 `trackKey` 那一边拼法的**逆**：把 `mv:` 后面那一段拆成
+// bvid 和 cid（没有 cid 时第二个是空串）。
+//
+// 🔴 **它和 `trackKey` 必须一起改**（票 #683）：`Identity` 落进设置文件，而恢复
+// 走的就是这一条拆法。只在 `trackKey` 里加 `|<cid>` 而不在这儿拆的话，恢复出来
+// 的 bvid 变成了 `BV1|777`——取流时拿它当 bvid 发出去，B 站回 -400，而界面上
+// 是「恢复出来的那一首打不开」。
+//
+// ⚠️ **只用最后一个 `|` 切**：bvid 里没有 `|`（`BV` + 字母数字），cid 是十进制
+// 数字——但真按「第一个 `|`」切的话，将来 bvid 的字符集放宽了就会静默拆错。
+// 从右往左找那一个分隔符，坏处只是「bvid 里出现 `|` 时拆错」，而那种 bvid 本来
+// 就不存在。
+func splitMVIdentity(s string) (bvid, cid string) {
+	if i := strings.LastIndexByte(s, '|'); i >= 0 {
+		return s[:i], s[i+1:]
+	}
+	return s, ""
+}
+
+// splitIdentity 是 `Identity()` 的**退化那一半的逆**：把 `mv:<bvid>|<cid>` /
+// `audio:<sid>` / `local:<路径>` 拆成「种类」和「主 id」（mv 取 bvid、audio 取
+// sid、本地取路径）。
+//
+// 🔴 **恢复上次听到哪儿时用它做第二趟匹配**（票 #683 的复审，见
+// `RestorePlayback`）：旧文件里 `Current` 是 `mv:<bvid>`（没有 `|<cid>`），而恢复
+// 出来的那一项身份已经是 `mv:<bvid>|<cid>`——严格相等找不到，当前项会退回第一首。
+// 退化到「种类 + bvid」就认得出它是同一集的旧写法。
+//
+// ⚠️ **它和 `trackKey` 是同一份口径的两半**（前缀 + 主 id）：两处各拼一份的话，
+// 改了前缀忘了一处，恢复出来的当前项会静默退回第一首（而界面上看不出任何异样）。
+func splitIdentity(id string) (kind, key string) {
+	for _, k := range []string{playbackIDLocal, playbackIDMV, playbackIDAudio} {
+		if strings.HasPrefix(id, k) {
+			v := strings.TrimPrefix(id, k)
+			if k == playbackIDMV {
+				// mv 的主 id 是 bvid：把 `|<cid>` 那一段去掉。
+				v, _ = splitMVIdentity(v)
+			}
+			return k, v
+		}
 	}
 	return "", ""
 }
@@ -868,24 +959,65 @@ func (q *Queue) RemoveAt(i int) (Item, bool) {
 	return it, true
 }
 
-// indexByIdentity 是队列里**第一项**判重标识等于 id 的下标，找不到是 -1。
+// indexOfStreamTarget 是队列里**第一项**「和 it 是同一段流」的下标，找不到是 -1。
 //
-// 「第一项」是有意的：抽屉按判重标识去重、只画第一份（`queueRowsFor`），
-// 定位到第一份才和用户看见的那一行对得上。
+// 🔴 **它和队列身份（`Item.Identity`）是两件事**（票 #683）：
 //
-// id 是空串时一律找不到（认不出是哪一首的项不参与判重，理由见 `Item.Identity`）。
-func (q *Queue) indexByIdentity(id string) (int, bool) {
-	if id == "" {
-		return -1, false
-	}
+//	队列身份	去重 / 删除 / 落盘——「有一个不知道是哪一集」和「确定的第 777 集」
+//	            是两首（理由见 `trackKey`）
+//	这一条	「用户说放的是不是这一段」——不知道的那一边不比 cid
+//
+// ⚠️ **队列身份那一侧没有「按标识找下标」的方法**（这里原来有一个
+// `indexByIdentity`，票 #683 之后没有调用方，删了）：定位「点它」走的是这一条，
+// 而它的第一趟就是身份相等（见下面那两趟扫描）。
+//
+// 场景：队列里那一项起播之后补出了 cid（缺陷 D），而用户回到列表点同一首——
+// 列表那一行是接口给的、没有 cid。按 `Identity` 找是「没有」→ 追加一份，队列里
+// 同一集变成两行。而按这一条找是「有」，于是定位过去、放队列里那份完整数据。
+//
+// ⚠️ **判据只有一处**（`sameStreamTarget`）：预取那一层比「备好的那一份是不是
+// 这一首」用的就是它——两边各写一份的话，「点它」和「备它」会各认各的。
+//
+// ⚠️ **判据是「两个都认得出才比」的那一份**（`streamTargetOrSameTrack`）：
+// 本地项两条都比不出来（`sameStreamTarget` 只认 bvid / sid），所以本地那一档
+// 退回 `SameTrack`（路径就是身份）。这一条只在这个出口用，别在预取那一层也
+// 套上——那边压根不备本地文件（见 `maybePrefetch`）。
+//
+// 🔴 **两趟扫：先精确、后退回宽松**（票 #683 的复审）。宽松判据在「一边有 cid、
+// 一边没有」时判同一，而队列里完全可能先有一项**不知道是哪一集**的同一个 bvid
+// （收藏夹 / 搜索结果来的），后面才是用户点的那一集——一趟扫到底的话返回的永远
+// 是第一项，用户点的「第 2 集」被未知的那一项顶掉，取流请求带的是第一集的 cid。
+// 精确那一趟是 `Identity` 相等（= `SameTrack`），退回那一趟才是 `sameStreamTarget`。
+func (q *Queue) indexOfStreamTarget(it Item) (int, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	// 第一趟：身份一模一样的那一项（确定的第 777 集优先于「不知道是哪一集」）。
+	if id := it.Identity(); id != "" {
+		for i := range q.items {
+			if q.items[i].Identity() == id {
+				return i, true
+			}
+		}
+	}
+	// 第二趟：放宽到「同一段流」——不知道 cid 的那一边不比。
 	for i := range q.items {
-		if q.items[i].Identity() == id {
+		if streamTargetOrSameTrack(q.items[i], it) {
 			return i, true
 		}
 	}
 	return -1, false
+}
+
+// streamTargetOrSameTrack 报两项是不是「用户说的同一首」：先按流目标（`sameStreamTarget`），
+// 本地那一档退回 `SameTrack`。
+//
+// ⚠️ **顺序不能反**：`SameTrack` 先把「一个有一个没有 cid」判成两首，而这一层
+// 恰恰要把它认成同一首（理由见 `indexOfStreamTarget`）。
+func streamTargetOrSameTrack(x, y Item) bool {
+	if sameStreamTarget(x, y) {
+		return true
+	}
+	return SameTrack(x, y)
 }
 
 // RemoveIdentity 把队列里**所有**判重标识等于 id 的项删掉，返回删掉的是哪几项、
@@ -923,8 +1055,14 @@ func (q *Queue) RemoveIdentity(id string) (removed []Item, wasCurrent, ok bool) 
 
 // replaceAt 把第 i 项就地换成 item。队列位置和当前项都**不动**。
 //
-// 只有换分集用得到（`App.PlayPart`）：同一个 bvid 的另一集在判重上是同一首，
-// 插一项新的会让抽屉和队列里同时出现同一首。
+// 只有换分集用得到（`App.PlayPart`）：换集是**同一项换了 cid**，插一项新的会让
+// 队列里多出一份同一集（身份从 `mv:<bvid>|<旧 cid>` 变成 `mv:<bvid>|<新 cid>`，
+// 抽屉会画成两行，而「从列表删除」只删得掉其中一份）。
+//
+// ⚠️ **洗牌袋和历史栈里那一格要跟着换身份**（票 #683 的复审）：它们记的是判重
+// 标识，而换集之后那一项的身份变了——不改的话袋子把这一格当成「已经被删掉」的
+// 跳过，这一轮**永远抽不到它**；历史栈里那一格同样退不回来。见
+// `replaceIdentityLocked`。
 //
 // 不导出：它和 `selectAt` 一样只许「App.PlayPart」这一条路调，多导出一个就多一处
 // 能把队列和播放器对不上的地方。i 越界是 false 且什么都不动。
@@ -934,11 +1072,73 @@ func (q *Queue) replaceAt(i int, item Item) bool {
 		q.mu.Unlock()
 		return false
 	}
+	oldID := q.items[i].Identity()
 	q.items[i] = item
+	q.replaceIdentityLocked(oldID, item.Identity())
 	q.bumpRevisionLocked()
 	q.mu.Unlock()
 	q.changed()
 	// 就地换掉一项 → 下一首可能变了。
+	q.invalidate()
+	return true
+}
+
+// fillCidIf 把**当前项连同它同身份的所有副本**的分 P id 一起补上，前提是当前项
+// 此刻仍然**正好是 expected**。返回改没改。
+//
+// 这是「起播时补出来的分 P id 写回队列」（票 #683，见 `App.writeBackCid`）那一条
+// 路用的。
+//
+// 🔴 **调用方在后台 goroutine 里跑**（取流那一趟），从「看一眼当前项」到「写回去」
+// 之间隔着一次网络往返——那几秒里用户完全可能点走了（换了一集、换了另一首）。
+// 按**下标**写回去会改到别人的那一项上，而症状是「队列里某一首的 cid 是另一集的
+// ——点它放出来的是另一集」。
+//
+// ⚠️ **比的是整项**（`Item` 的字段全是值类型，`==` 就是逐字段比）：只比 bvid 不够
+// （同一投稿的每一集都是同一个 bvid），只比 cid 也不够（缺 cid 的那几项 cid 都是
+// 空串，认不出是哪一首）。整项相等是「用户按的还是当初那一项」最强的判据。
+//
+// 🔴 **同身份的副本一起补**（票 #683 的复审）：同一集在队列里排了两份时，两份的
+// 身份都是 `mv:<bvid>`、抽屉只画一行。只补当前那一份的话，它的身份变成
+// `mv:<bvid>|<cid>`，另一份还是 `mv:<bvid>`——抽屉立刻变成两行，而「从列表删除」
+// 只删得掉其中一份。两份补同一个 cid 之后身份仍然一样，抽屉还是一行。
+//
+// ⚠️ **只补 cid 还是空的那几项**：已经确定的某一集不该被改掉（它的身份里带着
+// 另一个 cid，也就不会命中这里）。
+//
+// ⚠️ **`invalidate()` 在这里是对的**：cid 变了就是**换了一集**，而「下一首是谁」
+// 可能跟着变（队列里同一 bvid 的两集现在判重上也不同了，见 `trackKey`）。预取
+// 那一头只是把备好的地址丢掉、下一拍重算（见 `invalidatePrefetch`），**不碰正在
+// 放的那一条流**——正在放的流挂在播放器上，不是预取层的东西。
+func (q *Queue) fillCidIf(expected Item, cid string) bool {
+	q.mu.Lock()
+	if cid == "" || q.cur < 0 || q.cur >= len(q.items) || q.items[q.cur] != expected {
+		q.mu.Unlock()
+		return false
+	}
+	id := expected.Identity()
+	if id == "" {
+		q.mu.Unlock()
+		return false
+	}
+	changed := 0
+	for i := range q.items {
+		if q.items[i].Cid != "" || q.items[i].Identity() != id {
+			continue
+		}
+		q.items[i].Cid = cid
+		changed++
+	}
+	if changed == 0 {
+		q.mu.Unlock()
+		return false
+	}
+	// 身份从 `mv:<bvid>` 变成 `mv:<bvid>|<cid>`：洗牌袋 / 历史栈里那一格也得跟着
+	// 换（理由见 `replaceIdentityLocked`）。
+	q.replaceIdentityLocked(id, q.items[q.cur].Identity())
+	q.bumpRevisionLocked()
+	q.mu.Unlock()
+	q.changed()
 	q.invalidate()
 	return true
 }
@@ -1504,7 +1704,12 @@ func (a *App) EnqueueAndPlayNow(item Item) error {
 	// 口径）：列表那一行可能是从接口的简版数据造的（缺 `Cid` / `Cover` 之类），
 	// 而队列里那一份是当初入队时的完整数据。放简版的话，在线取流会因为缺分 P id
 	// 打不开——症状是「这一首明明在队列里，点它却报错」。
-	if at, ok := a.queue.indexByIdentity(item.Identity()); ok {
+	//
+	// 🔴 **找的是「同一段流」而不是 `Identity` 字符串相等**（票 #683）：列表那一行
+	// 是接口给的，**没有 cid**；而队列里那一项起播之后 cid 被补上了（缺陷 D）——
+	// 按 `Identity` 比是「未知 vs 确定 = 两首」，于是点同一首会**在队列里多出一份**。
+	// 判据见 `Queue.indexOfStreamTarget`。
+	if at, ok := a.queue.indexOfStreamTarget(item); ok {
 		queued, _ := a.queue.itemAt(at)
 		a.queue.selectAt(at)
 		if err := a.play(queued); err != nil {
@@ -1708,6 +1913,13 @@ func sameSong(x, y Item) bool { return SameTrack(x, y) }
 // ⚠️ **认不出是哪一首的（标识是空串）一律当「不在放」**：那是「还没接来源的
 // 占位项」，把它当正在放的话界面上会出现一个说不清自己在指哪里的高亮。
 //
+// ⚠️ **在线那一半比的是 `sameStreamTarget` 而不是 `Identity` 的字符串**
+// （票 #683）：列表行是**接口给的**，收藏夹 / 搜索结果那几处**没有 cid**；而
+// 正在放的那一项起播之后 cid 被补上了（缺陷 D）。两边按 `Identity` 严格比就是
+// 「一个未知 + 一个确定 = 两首」——于是在听的那首歌在列表上**不高亮**。
+// `sameStreamTarget` 的规矩是「两边的 cid 都知道时必须相等」，正好是这个
+// 意思（它本来就是预取那一层比「同一个目标」用的判据）。
+//
 // ⚠️ **一次锁就够**：判据要的三样（`a.playing` / `a.path` / `a.online`）都在
 // `a.mu` 底下，而**队列这一层压根不碰**——碰它就得定「先 App 的锁还是先队列的
 // 锁」，而那个顺序在别处是反的（`App.Play` 先拿队列的锁再拿 App 的锁）。
@@ -1724,7 +1936,7 @@ func (a *App) IsPlaying(it Item) bool {
 	}
 	// 在线那一项：它就是 `a.online` 里那一条。
 	if a.online != nil {
-		return SameTrack(it, a.online.item)
+		return sameStreamTarget(it, a.online.item)
 	}
 	return false
 }
@@ -2117,6 +2329,10 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	a.errText = msg
 	a.errDetail = detail
 	a.errRetryable = retryable
+	// 通用错误替换不再代表某个失败播放项；失败项身份只由 failOnline 与错误一起提交。
+	a.failedTitle = ""
+	a.failedArtist = ""
+	a.failedBiliURL = ""
 	// 🔴 **有错就不再说「正在重连」**（票 #315）：那一行和错误那一行占**同一个
 	// 位置**（播放条上只有一行宽），而错的那句信息量更大——重连失败之后用户
 	// 要看的是「为什么不行、还能怎么办」，不是「还在重连」。
@@ -2145,8 +2361,30 @@ func (a *App) setErrTextDetail(msg, detail string, retryable bool) {
 	}
 }
 
-// clearErrLocked 清掉播放条上那一句错误。**必须在持锁时调**。
-//
+func (a *App) setErrTextDetailFor(gen int, it Item, msg, detail string, retryable bool) bool {
+	a.mu.Lock()
+	if a.closed || a.onlineGen != gen {
+		a.mu.Unlock()
+		return false
+	}
+	a.errText = msg
+	a.errDetail = detail
+	a.errRetryable = retryable
+	a.failedTitle = it.Title
+	a.failedArtist = it.Artist
+	a.failedBiliURL = BiliLink(it)
+	a.clearReconnectLocked()
+	wake := a.wake
+	a.mu.Unlock()
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
+	if wake != nil {
+		wake()
+	}
+	return true
+}
+
 // 🔴 **三个值一起清**：只清 `errText` 而留着 `errRetryable`，界面上就变成
 // 「没有错误了，但重试那一枚键还亮着」——而那枚键按下去会重放上一首，
 // 用户会以为是自己按错了。
@@ -2166,6 +2404,7 @@ func (a *App) clearErrLocked() {
 	a.errRetryable = false
 	a.failedTitle = ""
 	a.failedArtist = ""
+	a.failedBiliURL = ""
 }
 
 // Retry 再放一次上一次用户想放的那一首。

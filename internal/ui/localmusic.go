@@ -614,7 +614,7 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 		// 输入框（`local-music/index.tsx:236`）。我们这一排放不下 240，展开的
 		// 上限沿用原来那个输入框的 180。
 		expandableSearch(c, p.tip, &p.searchBox, &p.search, searchLocalLabel, 64, 180,
-			p.justShown())
+			p.justShown(), "")
 		ui.Select(c, &p.dirLabel, dirLabels(st.Roots)).Width(180)
 		// 移除此目录 / 重新扫描：上游是两枚 `IconButton`（`local-music/index.tsx:238,244`，
 		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有

@@ -210,7 +210,11 @@ func TestReorderingTheQueueThrowsThePreparedAddressAway(t *testing.T) {
 	})
 
 	// 把第二首挪到第一首前面：队列的顺序变了。
-	if !a.Queue().MoveSongBefore("mv:BV2", "mv:BV1") {
+	//
+	// ⚠️ **标识要带着 cid**（票 #683）：mv 的判重现在带上分 P，`mv:BV2` 对不上
+	// 任何一项（这两首都带 cid），于是挪不动——而这条用例要量的是「重排作废」，
+	// 不是判重。
+	if !a.Queue().MoveSongBefore("mv:BV2|2", "mv:BV1|1") {
 		t.Fatal("挪不动那首歌")
 	}
 	// 作废了 → 下一拍重新备一份。

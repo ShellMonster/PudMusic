@@ -74,8 +74,13 @@ type (
 	commentsListFetchFunc func(context.Context, int64, int64, int, string) (bili.CommentPage, error)
 	// commentsRepliesFetchFunc 是问一层楼中楼那一趟。
 	commentsRepliesFetchFunc func(context.Context, int64, int64, int64) ([]bili.Comment, error)
-	// commentsArchiveIDFetchFunc 是 bvid → avid 那一趟。
-	commentsArchiveIDFetchFunc func(context.Context, string) (int64, error)
+	// commentsArchiveFetchFunc 是 bvid → 稿件详情那一趟（**一次往返拿两样**：
+	// 收藏 / 评论要的 aid，和播放条上要显示的评论数 `stat.reply`）。
+	//
+	// 🔴 **它不再只是「换 avid」**（票 #682）：播放条上那枚「评论」键要显示数字，
+	// 而它在用户打开评论页之前就要有值——那个数就在同一个回包里，分成两趟就是
+	// 同一首歌唱起来付两个往返。
+	commentsArchiveFetchFunc func(context.Context, string) (bili.ArchiveStats, error)
 )
 
 // commentResult 是一次拉回来的结果。
@@ -402,7 +407,7 @@ func (a *App) LoadMoreComments() bool {
 		a.commentsSeqs = map[string]int{}
 	}
 	a.commentsSeqs[slot] = seq
-	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
+	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveFetch
 	ctx, cancel := context.WithCancel(context.Background())
 	a.commentsCancel = cancel
 	a.commentsMu.Unlock()
@@ -464,8 +469,7 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 	a.commentsMu.Unlock()
 
 	repliesFetch := a.commentsRepliesFetch
-	archiveFetch := a.commentsArchiveIDFetch
-	// 🔴 **楼中楼有自己的 cancel 槽**（`commentsReplyCancels`，按 root 分格）：
+	// ⚠️ **楼中楼有自己的 cancel 槽**（`commentsReplyCancels`，按 root 分格）：
 	// 挤进 `commentsCancel` 那一格的话，主列表那一趟（通常已经跑完、而它留下的
 	// cancel 不会被清空）会让这一趟刚造出来的 ctx 当场被取消——**一个包都不出去**，
 	// 用户看到的是「点开回复没有任何反应」。按 root 分格还保证同一个槽位上连着点开
@@ -474,6 +478,11 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 	// ⚠️ **同一个 root 重问时换掉旧的**：那个 root 上一次的取消函数已经没用了
 	// （它那一趟要么回来了、要么早就不该再写界面）；留着只会让这一格的 map
 	// 无限长下去。
+	//
+	// ⚠️ **下面这一行是 #682 改的那一半**：取的是 `commentsArchiveFetch`
+	// （一次往返同时拿 aid 和评论数），不是 main 那个只换 avid 的
+	// `commentsArchiveIDFetch`——两者是同一个替身槽位的新旧名字，合并时只能留一个。
+	archiveFetch := a.commentsArchiveFetch
 	ctx, cancel := context.WithCancel(context.Background())
 	a.commentsMu.Lock()
 	// ⚠️ **两次加锁之间可能已经换歌了**：上面那次 `Unlock` 之后、这一次
@@ -617,7 +626,7 @@ func (a *App) ensureComments(it Item, slot string) {
 
 	// ⚠️ **替身函数在这里就取出来**（界面那一侧），goroutine 不碰那些字段——
 	// 和 `partsFetch` 同一条规矩（理由见 app.go 里那一段的注释）。
-	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveIDFetch
+	listFetch, archiveFetch := a.commentsListFetch, a.commentsArchiveFetch
 	ctx, cancel := context.WithCancel(context.Background())
 	a.commentsCancel = cancel
 	go a.loadComments(ctx, it, slot, gen, seq, mode, "", false, listFetch, archiveFetch)
@@ -651,6 +660,13 @@ func (a *App) resetCommentsLocked(slot string) {
 	a.commentsRefresh = false
 	a.commentsOid = 0
 	a.commentsTyp = 0
+	// 🔴 **换歌就把在途的楼中楼全取消掉**：它们问的是上一首的对象，结果会被
+	// 代次丢掉，留着它们只是白占着连接。
+	for root, cancel := range a.commentsReplyCancels {
+		cancel()
+		delete(a.commentsReplyCancels, root)
+	}
+	a.commentsReplyCancels = nil
 	a.commentsReplies = map[int64][]bili.Comment{}
 	a.commentsRepliesTried = map[int64]time.Time{}
 	a.commentsRepliesWanted = map[int64]bool{}
@@ -669,7 +685,7 @@ func (a *App) resetCommentsLocked(slot string) {
 // 回来时既不许盖掉界面上的新结果，也不许盖掉盘上的新缓存（理由见
 // `ensureComments` 里那一段）。
 func (a *App) loadComments(ctx context.Context, it Item, slot string, gen, seq, mode int, next string, more bool,
-	listFetch commentsListFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
+	listFetch commentsListFetchFunc, archiveFetch commentsArchiveFetchFunc) {
 	typ, oid, ok, err := a.resolveCommentTarget(ctx, it, archiveFetch)
 	if err != nil {
 		// ⚠️ **换 avid 那一趟失败了**：**不报错**（票 #572：「取不到就当『没有
@@ -941,7 +957,7 @@ func (a *App) wakeComments() {
 // 第三个返回值是「认得出来吗」，第四个是「认的时候出了错吗」——两者必须分开：
 // 「压根没有身份」（sid 认不出来）是**问一百次也一样**，而「换 avid 那一趟失败」
 // 是**等一会儿再问有可能好**。
-func (a *App) resolveCommentTarget(ctx context.Context, it Item, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool, err error) {
+func (a *App) resolveCommentTarget(ctx context.Context, it Item, archiveFetch commentsArchiveFetchFunc) (typ, oid int64, ok bool, err error) {
 	switch it.Type {
 	case "audio":
 		// ⚠️ **音乐库音频的 oid 就是 auid**（`type=14`），不用换。
@@ -967,84 +983,283 @@ func (a *App) resolveCommentTarget(ctx context.Context, it Item, archiveFetch co
 //
 // 换过的要记住（内存里 + 盘上），不然**每次进这一首都要多付一次往返**——
 // 而验收要求「同一首歌第二次进是瞬时的（不发请求）」。
-func (a *App) commentArchiveID(ctx context.Context, bvid string, fetch commentsArchiveIDFetchFunc) (int64, error) {
+//
+// 🔴 **它和「播放条上的评论数」是同一趟**（票 #682）：稿件详情一次回两样
+// （`aid` 和 `stat.reply`），所以换 avid 那一趟**顺手**把评论数也记下来
+// （`rememberStats`）——播放条那一枚键就不用自己再发一趟。
+//
+// ⚠️ **盘上那份索引只有 aid**：命中它的时候评论数还是「没有」，播放条那一半
+// （`ensureCommentStats`）会自己再问一趟。这是有意的——不动盘上格式（改了会让
+// 已有用户的缓存全部作废），代价只是「重启之后第一次进评论页之前没有数字」。
+func (a *App) commentArchiveID(ctx context.Context, bvid string, fetch commentsArchiveFetchFunc) (int64, error) {
+	st, err := a.archiveStats(ctx, bvid, fetch, true)
+	if err != nil {
+		return 0, err
+	}
+	if st.Aid <= 0 {
+		return 0, errCommentsUnavailable
+	}
+	return st.Aid, nil
+}
+
+// CommentCount 是播放条上那枚「评论」键要显示的数字。**0 = 还没有**。
+//
+// # 它和 `CommentsAllCount()` 的分工
+//
+//	CommentsAllCount()   评论页那一趟带回来的总数（打开过评论页之后才有）
+//	CommentCount()       稿件详情的 `stat.reply`（**播放条自己那一趟**）
+//
+// 播放条上那一枚要在**用户打开评论页之前**就显示数字，所以它不能等评论页。
+//
+// 🔴 **0 = 「拿不到」= 不显示**（不是「零条评论」）：画一个「0」会让用户以为
+// 这一首没人评论。拿不到的时候那一枚键**照旧能点**（它打开评论页），只是没有
+// 数字——失败之后隔 `commentsRetryAfter` 再问一次（`commentsStatsTried`）。
+//
+// ⚠️ **这一调用是每帧一次的**（和 `Parts()` / `LikeState()` 同一个形状）：
+// 有缓存就返回缓存，没有就把那一趟发出去（同一时刻只有一趟）。
+func (a *App) CommentCount() int64 {
+	it, ok := a.CurrentItem()
+	if !ok || !it.isOnline() || it.Bvid == "" {
+		// 本地文件没有 B 站上的对象；音乐库条目的评论数要另问评论接口
+		// （`type=14`），这一趟只认 bvid。
+		return 0
+	}
+	a.ensureCommentStats(it.Bvid)
+
 	a.commentsMu.Lock()
-	if a.commentsAvids != nil {
-		if id, ok := a.commentsAvids[bvid]; ok && id > 0 {
-			a.commentsMu.Unlock()
-			return id, nil
+	defer a.commentsMu.Unlock()
+	if !a.commentsStatsKnown[it.Bvid] {
+		return 0
+	}
+	return a.commentsReplyCounts[it.Bvid]
+}
+
+// ensureCommentStats 保证正在问 / 已经问过 bvid 的稿件详情（只为评论数）。
+//
+// 和 `ensureParts` 同一个形状：有缓存就不发，在途就不重发，失败隔
+// `commentsRetryAfter` 再问。
+//
+// 🔴 **盘上那个 aid 索引不挡它**（见 `commentArchiveID` 的注释）：那一份没有
+// 评论数，命中它也只能拿到一半——所以「有没有问过」的判据是
+// `commentsStatsKnown`，不是 `commentsAvids`。
+func (a *App) ensureCommentStats(bvid string) {
+	a.commentsMu.Lock()
+	if a.commentsStatsKnown[bvid] {
+		a.commentsMu.Unlock()
+		return
+	}
+	if _, inFlight := a.commentsStatsWaiters[bvid]; inFlight {
+		a.commentsMu.Unlock()
+		return
+	}
+	// 退避：界面每一帧都调 `CommentCount()`，不等一下的话失败一次就是每秒一发。
+	if tried := a.commentsStatsTried[bvid]; !tried.IsZero() && time.Since(tried) < commentsRetryAfter {
+		a.commentsMu.Unlock()
+		return
+	}
+	// 🔴 **在途标记在这里就占下**（不是等 goroutine 起来才占）：界面每一帧都
+	// 调一次，而「检查」和「占坑」分开的话，两次调用之间那个窗口里会多起
+	// 若干个白等的 goroutine。
+	if a.commentsStatsWaiters == nil {
+		a.commentsStatsWaiters = map[string]chan struct{}{}
+	}
+	ch := make(chan struct{})
+	a.commentsStatsWaiters[bvid] = ch
+	a.commentsMu.Unlock()
+
+	// ⚠️ **替身在这里取**（界面那一侧）：goroutine 不碰 `App` 上那个字段
+	// （和 `partsFetch` 同一条规矩）。
+	fetch := a.commentsArchiveFetch
+	go a.runArchiveTrip(context.Background(), bvid, fetch, ch, false)
+}
+
+// archiveStats 是「bvid → 稿件详情」那一趟的**同步出口**（评论页那一半用）。
+//
+// 🔴 **它和播放条那一半走同一张在途表**（`commentsStatsWaiters`）：同一首歌的
+// 两半同时问的话，那是「一次能拿到的东西问了 B 站两次」——而这一票正是为了
+// 省掉那一趟才把两栏合成一个回包的。
+//
+// allowDisk=true：**盘上那份只有 aid 的索引算答案**（评论页要的就是 aid）。
+//
+// 🔴 **盘要在「进等待」之前读**（allowDisk 时）：读盘是本地 IO，而在途的那一趟
+// 是网络。播放条那一半（`ensureCommentStats`）不认盘，所以用户一进来它就发了
+// 一趟——断网时它要等到超时才失败，而评论页要是排在它后面，就会跟着报「评论
+// 暂时打不开」，尽管开页要的 aid 在盘上就有（票 #682 对抗性审查的 MAJOR 1）。
+// ⇒ **为一个本地就有答案的东西去等网络**是这里要消灭的，不是「等得久一点」。
+func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchiveFetchFunc, allowDisk bool) (bili.ArchiveStats, error) {
+	a.commentsMu.Lock()
+	if a.commentsStatsKnown[bvid] {
+		st := bili.ArchiveStats{Aid: a.commentsAvids[bvid], Reply: a.commentsReplyCounts[bvid]}
+		a.commentsMu.Unlock()
+		return st, nil
+	}
+	// 内存里那份 aid（盘上索引灌进来的，或者另一趟刚写下的）。
+	if id := a.commentsAvids[bvid]; allowDisk && id > 0 {
+		a.commentsMu.Unlock()
+		return bili.ArchiveStats{Aid: id}, nil
+	}
+	a.commentsMu.Unlock()
+
+	// 盘上那份索引：只有 aid，而评论页要的就是它（见 `commentArchiveID`）。
+	// ⚠️ **锁外面读**：读盘是阻塞 IO，而 `commentsMu` 是界面每一帧都要的。
+	if allowDisk {
+		if id := a.diskAVID(bvid); id > 0 {
+			a.rememberAVID(bvid, id)
+			return bili.ArchiveStats{Aid: id}, nil
 		}
 	}
-	// 🔴 **同一时刻只发一趟**：主列表那一趟和楼中楼那一趟可能同时问「这个 bvid
-	// 的 avid 是多少」——两趟都发出去就是两次网络往返，而 B 站会当成两次
-	// 独立的稿件详情请求。
-	//
-	// 后来的那一趟**等前面那一趟的结果**（而不是自己再发一趟）：等的结果就是
-	// 同一个 avid。
-	if a.commentsAvidWaiters == nil {
-		a.commentsAvidWaiters = map[string]chan struct{}{}
+
+	a.commentsMu.Lock()
+	// ⚠️ **再判一次**：读盘那一段没拿锁，中间那一趟可能已经问完并把两栏都记
+	// 下了——那时这里该直接吃它的结果，而不是再发一趟。
+	if a.commentsStatsKnown[bvid] {
+		st := bili.ArchiveStats{Aid: a.commentsAvids[bvid], Reply: a.commentsReplyCounts[bvid]}
+		a.commentsMu.Unlock()
+		return st, nil
 	}
-	if ch, ok := a.commentsAvidWaiters[bvid]; ok {
+	if a.commentsStatsWaiters == nil {
+		a.commentsStatsWaiters = map[string]chan struct{}{}
+	}
+	// 🔴 **同一时刻只发一趟**：后来的那一趟**等前面那一趟的结果**，而不是自己
+	// 再发一趟——等的结果就是同一份回包。
+	if ch, ok := a.commentsStatsWaiters[bvid]; ok {
 		a.commentsMu.Unlock()
 		select {
 		case <-ch:
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return bili.ArchiveStats{}, ctx.Err()
 		}
 		a.commentsMu.Lock()
+		known := a.commentsStatsKnown[bvid]
 		id := a.commentsAvids[bvid]
+		reply := a.commentsReplyCounts[bvid]
 		a.commentsMu.Unlock()
-		if id > 0 {
-			return id, nil
+		if known {
+			return bili.ArchiveStats{Aid: id, Reply: reply}, nil
 		}
-		return 0, errCommentsUnavailable
+		// 🔴 **那一趟可能是「盘命中」**（`runArchiveTrip` 的 allowDisk 分支只写
+		// `commentsAvids`，不写 `commentsStatsKnown`——盘上那份没有评论数）。那时
+		// 评论页要的 aid 已经到手了，**不能再跟着报失败**。
+		if allowDisk && id > 0 {
+			return bili.ArchiveStats{Aid: id}, nil
+		}
+		// 那一趟没拿到（失败 / B 站说没有这个稿件）：当成这一趟失败。
+		return bili.ArchiveStats{}, errCommentsUnavailable
 	}
 	ch := make(chan struct{})
-	a.commentsAvidWaiters[bvid] = ch
+	a.commentsStatsWaiters[bvid] = ch
 	a.commentsMu.Unlock()
+	return a.runArchiveTrip(ctx, bvid, fetch, ch, allowDisk)
+}
 
-	if c := a.commentsCacheSnapshot(); c != nil {
-		if id, ok := c.LoadAVID(bvid); ok && id > 0 {
+// diskAVID 从盘上那份索引里读 aid。没有、坏了、没挂缓存都是 0。
+//
+// ⚠️ **一个锁都不拿地调它**（`commentsCacheSnapshot` 自己取一次，读完就放）：
+// 读盘是阻塞 IO，别把 `commentsMu` 带进去。
+func (a *App) diskAVID(bvid string) int64 {
+	c := a.commentsCacheSnapshot()
+	if c == nil {
+		return 0
+	}
+	if id, ok := c.LoadAVID(bvid); ok && id > 0 {
+		return id
+	}
+	return 0
+}
+
+// runArchiveTrip 真的发那一趟（**调用方已经占下了 `ch` 那个坑**）。
+//
+// allowDisk 见 `archiveStats`：评论页那一半认盘上那份只有 aid 的索引。
+//
+// 🔴 **盘命中也要让等的人拿到 aid**：命中分支只写 `commentsAvids`（盘上那份没有
+// 评论数，所以不写 `commentsStatsKnown`）。挂在后面等的评论页醒来时靠的是
+// `commentsAvids` 里那一格 + allowDisk 补判——见 `archiveStats` 的等待分支。
+func (a *App) runArchiveTrip(ctx context.Context, bvid string, fetch commentsArchiveFetchFunc, ch chan struct{}, allowDisk bool) (bili.ArchiveStats, error) {
+	// 盘上那份索引：只有 aid（见 `commentArchiveID` 的注释）。
+	if allowDisk {
+		if id := a.diskAVID(bvid); id > 0 {
 			a.rememberAVID(bvid, id)
 			a.finishAVIDWait(bvid, ch)
-			return id, nil
+			return bili.ArchiveStats{Aid: id}, nil
 		}
 	}
 
 	if fetch == nil {
 		cli := a.commentsClient()
 		if cli == nil {
+			a.noteStatsTried(bvid)
 			a.finishAVIDWait(bvid, ch)
-			return 0, errCommentsUnavailable
+			return bili.ArchiveStats{}, errCommentsUnavailable
 		}
-		fetch = cli.ArchiveID
+		fetch = cli.ArchiveStats
 	}
-	id, err := fetch(ctx, bvid)
+	st, err := fetch(ctx, bvid)
 	if err != nil {
+		// ⚠️ **失败也要记退避**：播放条那一半每一帧都来问，不记的话一次断网
+		// 就是每秒一趟。评论页那一半另有一份退避（`commentsTriedAt`），两处
+		// 各记各的——共用的话一次评论数问失败会让评论页也停在原地。
+		a.noteStatsTried(bvid)
 		a.finishAVIDWait(bvid, ch)
-		return 0, err
+		return bili.ArchiveStats{}, err
 	}
-	if id > 0 {
-		a.rememberAVID(bvid, id)
+	if st.Aid > 0 {
+		a.rememberStats(bvid, st)
 		if c := a.commentsCacheSnapshot(); c != nil {
-			_ = c.SaveAVID(bvid, id)
+			_ = c.SaveAVID(bvid, st.Aid)
 		}
+	} else {
+		// B 站说这个稿件 aid 是 0：那不是一份能用的答案，隔一会儿再问。
+		a.noteStatsTried(bvid)
 	}
 	a.finishAVIDWait(bvid, ch)
-	return id, nil
+	a.wakeComments()
+	return st, nil
+}
+
+// rememberStats 记下一趟稿件详情的结果（**两栏都记**）。
+//
+// ⚠️ **aid 只记正数**：0 是「B 站说没有这个稿件」，记下来会让下一次误以为
+// 问过了。
+func (a *App) rememberStats(bvid string, st bili.ArchiveStats) {
+	a.commentsMu.Lock()
+	if st.Aid > 0 {
+		if a.commentsAvids == nil {
+			a.commentsAvids = map[string]int64{}
+		}
+		a.commentsAvids[bvid] = st.Aid
+	}
+	if a.commentsReplyCounts == nil {
+		a.commentsReplyCounts = map[string]int64{}
+	}
+	a.commentsReplyCounts[bvid] = st.Reply
+	if a.commentsStatsKnown == nil {
+		a.commentsStatsKnown = map[string]bool{}
+	}
+	a.commentsStatsKnown[bvid] = true
+	a.commentsMu.Unlock()
+}
+
+// noteStatsTried 记下「这个 bvid 的稿件详情刚问失败过」（播放条那一半的退避）。
+func (a *App) noteStatsTried(bvid string) {
+	a.commentsMu.Lock()
+	if a.commentsStatsTried == nil {
+		a.commentsStatsTried = map[string]time.Time{}
+	}
+	a.commentsStatsTried[bvid] = time.Now()
+	a.commentsMu.Unlock()
 }
 
 // finishAVIDWait 把等着这一趟的那些 goroutine 放出来。
 func (a *App) finishAVIDWait(bvid string, ch chan struct{}) {
 	a.commentsMu.Lock()
-	if cur, ok := a.commentsAvidWaiters[bvid]; ok && cur == ch {
-		delete(a.commentsAvidWaiters, bvid)
+	if cur, ok := a.commentsStatsWaiters[bvid]; ok && cur == ch {
+		delete(a.commentsStatsWaiters, bvid)
 	}
 	a.commentsMu.Unlock()
 	close(ch)
 }
 
-// rememberAVID 记住 bvid → avid。
+// rememberAVID 记住 bvid → avid（**只有 aid**，评论数还是「没有」）。
 func (a *App) rememberAVID(bvid string, avid int64) {
 	a.commentsMu.Lock()
 	if a.commentsAvids == nil {
@@ -1085,7 +1300,7 @@ func (a *App) fetchCommentList(ctx context.Context, typ, oid int64, mode int, ne
 
 // loadReplies 拉一层楼中楼，回来写进缓存并叫醒界面。
 func (a *App) loadReplies(ctx context.Context, it Item, slot string, gen int, root int64,
-	repliesFetch commentsRepliesFetchFunc, archiveFetch commentsArchiveIDFetchFunc) {
+	repliesFetch commentsRepliesFetchFunc, archiveFetch commentsArchiveFetchFunc) {
 	typ, oid, ok := a.commentOIDFor(ctx, it, slot, gen, archiveFetch)
 	if !ok {
 		a.finishReplies(slot, gen, root, nil)
@@ -1114,7 +1329,7 @@ func (a *App) loadReplies(ctx context.Context, it Item, slot string, gen int, ro
 // commentOIDFor 拿当前这一首的对象类型和 id。
 //
 // 已经问过主列表的话直接用它（**别再换一次 avid**）；还没问过就现算。
-func (a *App) commentOIDFor(ctx context.Context, it Item, slot string, gen int, archiveFetch commentsArchiveIDFetchFunc) (typ, oid int64, ok bool) {
+func (a *App) commentOIDFor(ctx context.Context, it Item, slot string, gen int, archiveFetch commentsArchiveFetchFunc) (typ, oid int64, ok bool) {
 	a.commentsMu.Lock()
 	if a.commentsSlot == slot && a.commentsGen == gen && a.commentsOid > 0 {
 		typ, oid = a.commentsTyp, a.commentsOid
