@@ -667,9 +667,7 @@ func (s *StreamSource) Close() error {
 	}
 	// 缓存文件删不掉不是错误，只是会留一个临时文件在磁盘上——
 	// 报给用户毫无意义。
-	if path != "" {
-		_ = os.Remove(path)
-	}
+	removeTempFile(path)
 	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
 	s.clearTempGauge()
 	return errors.Join(errs...)
@@ -737,6 +735,27 @@ func streamExt(urls []string) string {
 		return path[i:]
 	}
 	return ".bin"
+}
+
+// closeRemoveRetries 是 Windows 文件句柄释放和目录删除之间的短暂竞态保护。
+const closeRemoveRetries = 10
+
+// closeRemoveWait 是每次重试删除缓存文件前的等待时间。
+const closeRemoveWait = 10 * time.Millisecond
+
+// removeTempFile 在文件句柄释放后删除缓存文件；Windows 上短暂被占用时有限重试。
+func removeTempFile(path string) {
+	if path == "" {
+		return
+	}
+	for attempt := 0; attempt < closeRemoveRetries; attempt++ {
+		if err := os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) {
+			return
+		}
+		if attempt+1 < closeRemoveRetries {
+			time.Sleep(closeRemoveWait)
+		}
+	}
 }
 
 // clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。
