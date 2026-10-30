@@ -641,10 +641,25 @@ func waitUntilScan(t *testing.T, a *App, timeout time.Duration) {
 // 两秒不成就是真出问题，不该继续等。
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
+	waitForWithin(t, 2*time.Second, cond, msg)
+}
+
+// waitForWithin 是 `waitFor` 带自定义上限的那一版。
+//
+// ⚠️ **什么时候该用它**：等的这件事**不止是「后台算完」**，还要过一遍外部
+// 系统——开一个音频设备、等真实的采样时钟走起来、等一次网络往返。那种事在
+// 慢机器上的上界和「后台算完」不是一回事，用 2 秒会红成「机器慢」，而不是
+// 红成「坏了」（2026-10-30 的 `TestTheSpectrumPreferenceControlsTheCurrentPlayer`
+// 就是这么飘的）。
+//
+// ⚠️ **上限放宽不等于放水**：坏掉的时候照样会到点失败，只是把「多等一会儿」
+// 和「真的坏了」分开。
+func waitForWithin(t *testing.T, limit time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(limit)
 	for !cond() {
 		if time.Now().After(deadline) {
-			t.Fatalf("%s", msg)
+			t.Fatalf("%s（等了 %v）", msg, limit)
 		}
 		time.Sleep(time.Millisecond)
 	}
