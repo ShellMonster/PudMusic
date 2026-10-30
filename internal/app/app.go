@@ -364,7 +364,19 @@ type App struct {
 	// 歌单内容页这一摊，见 collection.go。挂上去之前是 nil（界面判空）。
 	collections *collections
 
+	// streamCache 是「播放前预判」那个缓存：key 是条目的身份（`streamKey`），
+	// value 是已经取到、还能播的流地址。
+	//
+	// 🔴 **它留的是好几条**（2026-10-30）：原来每取到一条新的就把整张表重建成
+	// 那一条，于是来回切歌时每切回去一次都要重新问 B 站要一次地址
+	// （A → B → A → B → A 实测取流 5 次）。切回去时命中自己那一条才对。
+	//
+	// ⚠️ **过期的那几条会被清掉**（`pruneStreamCacheLocked`），所以「留着
+	// 过期地址」不是问题；`streamCacheOrder` 记着放进来的先后，好按「最旧」
+	// 淘汰（`streamCacheMax` 条封顶）。
 	streamCache map[string]*bili.StreamRef
+	// streamCacheOrder 记着每个 key 是什么时候进缓存的（为了淘汰最旧的）。
+	streamCacheOrder map[string]time.Time
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
 	onlineGen int
