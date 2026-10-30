@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -103,7 +102,7 @@ func cardColorIsolatedShell(t *testing.T, n int) (*Shell, *mygoui.Tester, *app.A
 	s, tt, a := b.s, b.tt, b.a
 	f := s.followPageOf()
 	f.tagStarted = true
-	f.tags = []bili.FollowTag{{ID: 0, Name: "默认分组", Count: n}}
+	f.tags = []app.FollowTag{{ID: 0, Name: "默认分组", Count: n}}
 	f.total = n
 	f.pager.started = true
 	f.users = budgetFollowUsers(n)

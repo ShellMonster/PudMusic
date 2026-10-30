@@ -270,6 +270,15 @@ type onlineTrack struct {
 	gen int
 }
 
+// streamCacheMax 是「播放前预判」那个缓存最多留几条。
+//
+// 🔴 **它不是「几条地址」的上限，是「内存里几个小结构」的上限**（2026-10-30）：
+// 原来那张表只留一条，反复切歌时每切回去一次都要重新问 B 站要一次地址
+// （A → B → A → B → A 实测取流 5 次）——而那些地址的有效期还有几小时。
+//
+// 取 8：够用户来回切几首，又不会攒出一堆（每条过期了就清掉）。
+const streamCacheMax = 8
+
 // streamKey 是取流缓存的键。
 //
 // 用 Biu 的判重标识（`source/type/bvid/cid/sid`）而不是队列下标：换了歌
@@ -284,6 +293,7 @@ func (a *App) MountStreaming(s Streaming) {
 	a.mu.Lock()
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
+	a.streamCacheOrder = map[string]time.Time{}
 	a.mu.Unlock()
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
@@ -320,6 +330,7 @@ func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	}
 	a.streaming.Quality = q
 	a.streamCache = map[string]*bili.StreamRef{}
+	a.streamCacheOrder = map[string]time.Time{}
 	tr := a.online
 	pos, want, gen := a.position, a.wantPlay, a.onlineGen
 	wake := a.wake
@@ -825,7 +836,10 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	if a.online != nil {
 		a.online.gen = a.onlineGen
 	}
+	timeoutGen := a.onlineGen
+	failedItem := a.pending
 	stage = a.loadingStage
+
 	// ⚠️ **失败那一刻已经下到多少字节**：判据是「这一段没有进展」，而
 	// 「没进展」**不等于**「一个字节都没到」——下到一半卡住时字节明明已经
 	// 到了，而那句话里写「一个字节都没到」是**错的**（票 #220 的评审）。
@@ -838,7 +852,14 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	// 🔴 **把在途的下载掐掉**：光在界面上说「超时」不够——那条字节源还在
 	// 后台下载（而播放器还没建起来，`App.Close` 也管不到它）。不掐掉的话，
 	// 这一次「已经判它失败」的取流会一直下到天亮。
-	a.abortPendingSource()
+	//
+	// ⚠️ **只掐 `gen` 那一趟的**：这个闹钟是**一帧一帧重新挂的**（`rearmLoading`），
+	// 而它挂上之后用户完全可能又点了一首——那时 `pendingSrc` 已经是新歌的了，
+	// 无条件关就会把新歌正在建的源连坐关掉（2026-10-30 从 CI 日志里查出来的
+	// 「字节源已关闭」，见 `abortPendingSourceFor` 的注释）。
+	// 上面那句 `a.onlineGen++` 加的是「活下来的那一首」的代次，和这里要掐的
+	// 那一趟无关，所以传的是**闹钟自己认的那一代**。
+	a.abortPendingSourceFor(gen)
 
 	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回，段=%s）",
 		title, gen, onlinePlayTimeout, stage)
@@ -846,12 +867,17 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	// 播放条上冒一句「取流超时了」，用户会以为是自己点的歌放不出来——他这一
 	// 次连歌都还没点。
 	if restore {
-		a.restoreGen = 0
+		a.mu.Lock()
+		if a.onlineGen == timeoutGen && a.restoreGen == gen {
+			a.restoreGen = 0
+		}
+		a.mu.Unlock()
 		if wake != nil {
 			wake()
 		}
 		return
 	}
+
 	// 🔴 **上屏的那一句必须短**（票 #282 的评审）：播放条上那一行只有 140 像素宽
 	// （1200 宽的窗口，实测），12 号字放得下十来个字，而前面还顶着「打不开：」
 	// 四个字。一句 50 个字的话在屏幕上只剩「打不开：取流…」这样的碎片——
@@ -887,7 +913,8 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 			}
 		}
 	}
-	a.setErrTextDetail(short, detail, true)
+	a.setErrTextDetailFor(timeoutGen, failedItem, short, detail, true)
+
 	if wake != nil {
 		wake()
 	}
@@ -902,8 +929,12 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 // ⚠️ **同时把进度的基准归零**：这一段从「一个字节都还没到」开始，而「没下到」
 // 和「下到了一点」在 `Filled()` 上分别是 0 和 n——基准必须是 0，不然「一个
 // 字节都不来」会被判成「还在走」。
-func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
+func (a *App) setLoadSource(src *audio.StreamSource, gen int) bool {
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return false
+	}
 	old := a.loadSrc
 	if old != nil && old != src {
 		a.loadSrc = nil
@@ -917,6 +948,7 @@ func (a *App) setLoadSource(src *audio.StreamSource, gen int) {
 	if old != nil {
 		old.Close()
 	}
+	return true
 }
 
 // dropLoadSource 把「这一趟自己的那一条」摘掉（它已经归播放器管了，或者
@@ -1425,9 +1457,13 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	if err != nil {
 		return nil, nil, err
 	}
-	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而播放器还没
-	// 建起来——「超时」和「退出」都要能把它掐掉（见 App.pendingSrc）。
-	a.setPendingSource(src, gen)
+	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而代次可能在
+	// 建源期间变化。发布前先在同一把锁下确认它仍属于当前播放；旧代次不能碰当前
+	// 播放的源（否则会把新歌的源关掉，见 setPendingSource）。
+	if !a.setPendingSource(src, gen) {
+		src.Close()
+		return nil, nil, errStaleGen
+	}
 	// 🔴 **「这一趟自己的那一条」**（票 #220）：看门狗问「这一段还有没有
 	// 进展」时要看的是**它**，不是上面那个共享的 `pendingSrc`——
 	// 换音质 / 换流重开那两条路会把 `pendingSrc` 顶掉（理由见 App 里
@@ -1435,8 +1471,10 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	//
 	// ⚠️ **只有「开新歌」那一趟才记**：那两条路建的源不是用户此刻在等的
 	// 那一条，记上去只会让看门狗盯着别人的流。
-	if run != nil {
-		a.setLoadSource(src, gen)
+	if run != nil && !a.setLoadSource(src, gen) {
+		a.clearPendingSource(src)
+		src.Close()
+		return nil, nil, errStaleGen
 	}
 	// 🔴 **建源的这一小段时间里代次也可能变了**（用户切歌、或者超时闹钟响了）。
 	// 那就没人要这条流了——立刻关掉，别让它下到天亮。
@@ -1505,8 +1543,12 @@ func (a *App) genStale(gen int) bool {
 //
 // 🔴 **上一条还在的话，先把它关掉**：它属于**上一趟**（代次已经变了的那一趟），
 // 没人要它了——不关掉的话它会一直下到天亮（票 #282）。
-func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
+func (a *App) setPendingSource(src *audio.StreamSource, gen int) bool {
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return false
+	}
 	old := a.pendingSrc
 	if old != nil && a.pendingSrcGen != gen {
 		a.pendingSrc = nil
@@ -1519,6 +1561,7 @@ func (a *App) setPendingSource(src *audio.StreamSource, gen int) {
 	if old != nil {
 		old.Close()
 	}
+	return true
 }
 
 // clearPendingSource 把在途的那一条从 App 上摘掉（它已经归播放器管了，或者
@@ -1538,7 +1581,7 @@ func (a *App) clearPendingSource(src *audio.StreamSource) {
 	a.mu.Unlock()
 }
 
-// abortPendingSource 关掉在途的那条字节源（如果还有的话）。
+// abortPendingSourceFor 关掉**属于代次 gen 的那一趟**在途的字节源。
 //
 // **锁外面关**：字节源的 `Close` 要等它的下载 goroutine 退出来，而那个
 // goroutine 可能正拿着 `a.mu`（换流那条路上它会回调 `noteQuality`）。锁里面
@@ -1549,7 +1592,51 @@ func (a *App) clearPendingSource(src *audio.StreamSource) {
 // 换成**它们自己的**源，于是只关 `pendingSrc` 关不到这一趟真正在下的那一条
 // （票 #220 的评审复现过：那一条会一直下到天亮，而它的临时文件也一起
 // 留在盘上）。
-func (a *App) abortPendingSource() {
+//
+// # 🔴 为什么要带代次（2026-10-30）
+//
+// 原来这一句是 `abortPendingSource()`：**无条件**关当前的 `pendingSrc` /
+// `loadSrc`，不看它们属于哪一趟。连点几首时，前几首的清理（超时闹钟、切歌、
+// 停止、退出）就会把**新歌正在建的**那条源一起关掉——新歌那一趟于是报
+//
+//	播放失败："第 5 首"（开播放器，段=下音频，代次 5）：audio: 字节源已关闭
+//
+// 而代次 5 就是当时的 `onlineGen`：它根本不是过时的那一趟，是被别人连坐关的。
+// CI 上 `TestOnlyTheLastTrackWinsWhenSwitchingFast` 偶发 30 秒超时就是它
+// （第 5 首永远放不起来，`title` 就一直停在「第 4 首」）。
+//
+// 判据是**两栏各自的代次**（`pendingSrcGen` / `loadSrcGen`）：
+//
+//	代次对得上 → 这一趟自己的，关掉（它正是当初加这个函数要治的那件事：
+//	             超时那一趟会一直下到天亮）
+//	代次对不上 → 别人的，**一个字都不碰**，也不从栏上摘（那是**现在那一趟**
+//	             的源，摘掉之后连超时都管不到它了）
+func (a *App) abortPendingSourceFor(gen int) {
+	a.mu.Lock()
+	var srcs []*audio.StreamSource
+	if a.pendingSrc != nil && a.pendingSrcGen == gen {
+		srcs = append(srcs, a.pendingSrc)
+		a.pendingSrc = nil
+	}
+	if a.loadSrc != nil && a.loadSrcGen == gen {
+		srcs = append(srcs, a.loadSrc)
+		a.loadSrc = nil
+	}
+	a.mu.Unlock()
+	// ⚠️ **同一个源可能被列两次**（正常路径上 `pendingSrc` 和 `loadSrc`
+	// 是同一条）——`StreamSource.Close` 可以重复调（它自己判 `closed`），
+	// 所以重复关是安全的。
+	for _, s := range srcs {
+		s.Close()
+	}
+}
+
+// abortAllPendingSources 关掉**所有**在途的字节源，不看代次。
+//
+// ⚠️ **只给 `App.Close` 用**：进程都要没了，还有谁在等的源都该停。别在
+// 切歌 / 超时那几条路上用它——那正是把「新歌正在建的源」连坐关掉的那个写法
+// （见 `abortPendingSourceFor` 的注释）。
+func (a *App) abortAllPendingSources() {
 	a.mu.Lock()
 	var srcs []*audio.StreamSource
 	if a.pendingSrc != nil {
@@ -1561,9 +1648,6 @@ func (a *App) abortPendingSource() {
 		a.loadSrc = nil
 	}
 	a.mu.Unlock()
-	// ⚠️ **同一个源可能被列两次**（正常路径上 `pendingSrc` 和 `loadSrc`
-	// 是同一条）——`StreamSource.Close` 可以重复调（它自己判 `closed`），
-	// 所以重复关是安全的。
 	for _, s := range srcs {
 		s.Close()
 	}
@@ -1619,11 +1703,78 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 	}
 
 	a.mu.Lock()
-	// 缓存只留手上这一条。留着几十条过期地址没有用——过期是常态，
-	// 而每一条都在诊断里等着被脱敏。
-	a.streamCache = map[string]*bili.StreamRef{key: ref}
+	a.putStreamRefLocked(key, ref)
 	a.mu.Unlock()
 	return ref, nil
+}
+
+// putStreamRefLocked 把一条流放进「播放前预判」那个缓存。**调用方拿着 `a.mu`。**
+//
+// # 🔴 缓存留的是**好几条**，不是一条（2026-10-30）
+//
+// 原来每一取到一条新的就把整张表**重建成那一条**（`map[...]{key: ref}`）。
+// 于是来回切歌时，每切回去一次都要重新问 B 站要一次地址——
+//
+//	A → B → A → B → A   ⇒   取流接口被调 5 次（实测）
+//
+// 而那条地址十几秒前才拿到过、有效期还有几小时（`expiryOf`：音乐库那一路
+// 一般三小时）。用户快速来回切歌，每切一下都白等一趟带签名的网络往返。
+//
+// ⇒ 改成留多条，切回去时命中自己那一条（`resolve` 里 `a.streamCache[key]`）。
+//
+// # 原来那条注释的两个顾虑，现在这样处理
+//
+//	「留着几十条过期地址没有用」——过期地址**现在就清掉**（`pruneStreamCacheLocked`），
+//	  留下的每一条都是还能用的（`Usable`），所以「堆积」不存在。
+//	「每一条都在诊断里等着被脱敏」——脱敏是 HTTP 请求日志那一层的事
+//	  （`credentials_transport.go`），和这个 map 无关：缓存里的地址**没有被
+//	  任何地方写进日志**。
+//
+// ⚠️ **容量上限**：留 `streamCacheMax` 条。超了就把**最旧**的那些丢掉
+// （`streamCacheOrder` 记着放进来的先后）。
+func (a *App) putStreamRefLocked(key string, ref *bili.StreamRef) {
+	// ⚠️ **两个 map 都要判**：往 nil map 写会 panic（`assignment to entry in nil
+	// map`），而 `New()` 只初始化了 `streamCache` 那一个。
+	if a.streamCache == nil {
+		a.streamCache = map[string]*bili.StreamRef{}
+	}
+	if a.streamCacheOrder == nil {
+		a.streamCacheOrder = map[string]time.Time{}
+	}
+	// 同一个 key 重来一次（换流 / 换音质）：位置更新到最新，别占着最旧那一格。
+	delete(a.streamCacheOrder, key)
+	a.streamCacheOrder[key] = time.Now()
+	a.streamCache[key] = ref
+	a.pruneStreamCacheLocked()
+}
+
+// pruneStreamCacheLocked 清掉不能用的那些（过期的、容量超了的）。
+// **调用方拿着 `a.mu`。**
+//
+// ⚠️ **过期的先清**：它们是「留着也没用」的那些——留着只会让「有几条地址」
+// 这个数看起来吓人，而实际上能用的只有没过期的那几条。
+func (a *App) pruneStreamCacheLocked() {
+	now := time.Now()
+	for k, ref := range a.streamCache {
+		if ref == nil || !ref.Usable(now) {
+			delete(a.streamCache, k)
+			delete(a.streamCacheOrder, k)
+		}
+	}
+	// 容量上限：超了就把最旧的丢掉。
+	for len(a.streamCache) > streamCacheMax {
+		oldest, at := "", time.Time{}
+		for k, t := range a.streamCacheOrder {
+			if at.IsZero() || t.Before(at) {
+				oldest, at = k, t
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(a.streamCache, oldest)
+		delete(a.streamCacheOrder, oldest)
+	}
 }
 
 // putStreamCache 把一条流放进「播放前预判」那个缓存。
@@ -1634,7 +1785,7 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 // 预取；两个入口在用之前都比对过「备的就是这一首」。
 func (a *App) putStreamCache(it Item, ref *bili.StreamRef) {
 	a.mu.Lock()
-	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	a.putStreamRefLocked(streamKey(it), ref)
 	a.mu.Unlock()
 }
 
@@ -1661,8 +1812,9 @@ func (a *App) refetch(ctx context.Context, s *Streaming, it Item) *audio.StreamR
 	}
 
 	a.mu.Lock()
-	// 和 resolve 一样只留一条：换流之后手上这条就是唯一有用的那条。
-	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	// 换流之后手上这一条就是最新鲜的那条（**别的条目不动**：切回去时还能用
+	// 各自那一条，见 `putStreamRefLocked` 的注释）。
+	a.putStreamRefLocked(streamKey(it), ref)
 	a.mu.Unlock()
 
 	// ⚠️ 这里**不填 Size**：取流接口的返回里没有长度，而 `StreamReply.Size`
@@ -1715,6 +1867,7 @@ func (a *App) checkPlayback() {
 	a.mu.Lock()
 	p := a.player
 	tr := a.online
+	gen := a.onlineGen
 	a.mu.Unlock()
 	if p == nil {
 		return
@@ -1737,15 +1890,25 @@ func (a *App) checkPlayback() {
 	// 同一条错误只报一次。解码器的 Err 记的是**第一条**错误、不自己清零，
 	// 不比对的话每 50 ms 都会重新冒一次。
 	a.mu.Lock()
+	if a.player != p || a.online != tr || a.onlineGen != gen {
+		a.mu.Unlock()
+		return
+	}
 	if a.reportedErr == err {
 		a.mu.Unlock()
 		return
 	}
 	a.reportedErr = err
 	a.playing = false
-	gen := a.onlineGen
+	gen = a.onlineGen
 	wake := a.wake
 	a.mu.Unlock()
+
+	// 播放器错误的后续处理在锁外进行；用户可能在这段时间切歌。
+	// 旧播放器的错误不能再污染新一代的播放状态。
+	if !a.playbackStillCurrent(p, tr, gen) {
+		return
+	}
 
 	// 歌停了（解码失败、网络断、换流换不动）。系统那边的播放状态也得跟着
 	// 变成「不在放」，否则控制中心上还是「播放中」——用户按暂停，
@@ -1760,10 +1923,13 @@ func (a *App) checkPlayback() {
 		// 切歌/退出带出来的，不是错。状态已经被 publishMedia 报成「不在放」了。
 		a.logf("biu: 播放停了（切歌/退出带出来的，不算错）：%v", err)
 	case onlineErrReopen:
-		// 换到了另一条流：字节偏移接不上，但**播放位置**还在原处。
+		// 换到了另一条流：字节偏移接不上，但**播放位置**还在。
 		// 从那儿重开就是「换流后从原来的位置继续」。
+		if !a.playbackStillCurrent(p, tr, gen) {
+			return
+		}
 		a.logf("biu: 播放中途换了流，准备从原位置重开：%v", err)
-		a.refreshOnlineNow(err)
+		a.refreshOnlineNowFor(err, p, tr, gen)
 	default:
 		// 🔴 **「能不能重试」跟着这句话一起落**：字节源拉不动多半是网络或
 		// 地址的问题（可重试），而「这一条压根没有音频流」重试也没用。
@@ -1772,12 +1938,46 @@ func (a *App) checkPlayback() {
 		// 以前一个字都不写，于是「点了不播」「播到一半停了」这两类事后完全
 		// 查不了——用户能描述的只有「它不响」。
 		var title string
+		var item Item
 		if tr != nil {
 			title = tr.item.Title
+			item = tr.item
 		}
 		a.logf("biu: 播放失败：%q（代次 %d）：%v", title, gen, err)
-		a.setErrText(bili.Friendly(err), bili.Recoverable(err))
+		a.setPlaybackErrFor(p, tr, gen, item, bili.Friendly(err), bili.Recoverable(err))
 	}
+}
+
+func (a *App) playbackStillCurrent(p *audio.Player, tr *onlineTrack, gen int) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return !a.closed && a.player == p && a.online == tr && a.onlineGen == gen
+}
+
+func (a *App) setPlaybackErrFor(p *audio.Player, tr *onlineTrack, gen int, it Item, msg string, retryable bool) bool {
+	a.mu.Lock()
+	if a.closed || a.player != p || a.online != tr || a.onlineGen != gen {
+		a.mu.Unlock()
+		return false
+	}
+	a.errText = msg
+	a.errDetail = msg
+	a.errRetryable = retryable
+	if tr != nil {
+		a.failedTitle = it.Title
+		a.failedArtist = it.Artist
+		a.failedBiliURL = BiliLink(it)
+	}
+	a.clearReconnectLocked()
+	wake := a.wake
+	a.mu.Unlock()
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
+	if wake != nil {
+		wake()
+	}
+	return true
 }
 
 // failOnline 报一次在线播放的失败。
@@ -1853,16 +2053,28 @@ func (a *App) failOnline(gen int, it Item, branch string, err error, stage strin
 	// 装上之后**才写的——所以不记这一份，界面上那一列显示的会是**上一首**，
 	// 用户读到的是「这一首正在放，但它打不开」。
 	//
-	// ⚠️ **它和 `setErrTextDetail` 落在同一次锁里**（`setErr` 那一族要持锁，
-	// 见 `queue.go`）：分两次锁的话，中间那道缝里别人清一次错，
-	// `Err` 和 `FailedTitle` 就对不上了。
-	//
-	// ⚠️ **作者名是队列项里就有的**（`Item.Artist`）——不用再问一次接口。
+	// ⚠️ **错误和失败条目的身份必须在同一个代次临界区提交**：否则用户在
+	// 这里切到下一首时，迟到的失败回调会把旧标题或旧链接挂到新状态上。
 	a.mu.Lock()
+	if a.onlineGen != gen || a.closed {
+		a.mu.Unlock()
+		return
+	}
 	a.failedTitle = it.Title
 	a.failedArtist = it.Artist
+	a.failedBiliURL = BiliLink(it)
+	a.errText = msg
+	a.errDetail = detail
+	a.errRetryable = bili.Recoverable(err)
+	a.clearReconnectLocked()
+	wake := a.wake
 	a.mu.Unlock()
-	a.setErrTextDetail(msg, detail, bili.Recoverable(err))
+	if msg != "" {
+		a.announce("播放失败：" + msg)
+	}
+	if wake != nil {
+		wake()
+	}
 }
 
 // failPlay 报一次「**这一趟播放**」的失败，并把「正在取流」那一档收掉。
@@ -2020,23 +2232,30 @@ func (a *App) giveUpSkipping(streak int, last Item, cause error) {
 // 在重连，它是放弃了。
 func (a *App) refreshOnlineNow(cause error) {
 	a.mu.Lock()
-	tr := a.online
-	if tr == nil {
+	p, tr, gen := a.player, a.online, a.onlineGen
+	a.mu.Unlock()
+	a.refreshOnlineNowFor(cause, p, tr, gen)
+}
+
+func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack, gen int) {
+	a.mu.Lock()
+	if tr == nil || a.online != tr || a.onlineGen != gen || a.closed {
 		a.mu.Unlock()
 		return
 	}
 	if tr.reopening {
-		// 已经重开过一次了：这一首救不回来了。老实报错。
 		it := tr.item
 		a.mu.Unlock()
 		a.logf("biu: 换流重开被作废了（这一首已经重开过一次）：%q：%v", it.Title, cause)
-		a.setErrTextDetail("这条流接不上了",
-			"这条流换了两次，接不上刚才播放的位置了。换一首放，或者点「重试」再取一次流。",
-			true)
+		a.setErrTextDetailFor(gen, it, "这条流接不上了",
+			"这条流换了两次，接不上刚才播放的位置了。换一首放，或者点「重试」再取一次流。", false)
+		return
+	}
+	if p == nil || a.player != p {
+		a.mu.Unlock()
 		return
 	}
 	tr.reopening = true
-	gen := a.onlineGen
 	pos, want := a.position, a.wantPlay
 	a.mu.Unlock()
 
@@ -2047,31 +2266,28 @@ func (a *App) refreshOnlineNow(cause error) {
 
 	s := a.streamingSnapshot()
 	if s == nil {
-		a.setErr(bili.Friendly(errStreamingMissing))
+		a.setPlaybackErrFor(p, tr, gen, tr.item, bili.Friendly(errStreamingMissing), false)
 		return
 	}
 
 	go func() {
-		src, p, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
+		src, nextPlayer, ref, err := a.buildOnline(context.Background(), s, tr.item, gen)
 		if err != nil {
 			a.failOnline(gen, tr.item, "换流重开", err, "")
 			return
 		}
 
 		a.mu.Lock()
-		if a.onlineGen != gen || a.closed || a.online == nil {
-			cur := a.onlineGen
+		if a.player != p || a.online != tr || a.onlineGen != gen || a.closed {
 			a.mu.Unlock()
-			p.Close()
-			a.logf("biu: 换流重开被作废了（代次变了）：%q（来的代次 %d，现在的代次 %d）",
-				tr.item.Title, gen, cur)
+			nextPlayer.Close()
 			a.endReconnect(gen)
 			return
 		}
 		old := a.player
-		p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
-		a.player = p
-		a.duration = p.Duration()
+		nextPlayer.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+		a.player = nextPlayer
+		a.duration = nextPlayer.Duration()
 		a.setPositionLocked(pos)
 		a.quality = ref.Label
 		a.online = &onlineTrack{item: tr.item, ref: ref, source: src, quality: ref.Label,
@@ -2095,11 +2311,11 @@ func (a *App) refreshOnlineNow(cause error) {
 		}
 		// 跳回原来的位置。这一步是这一整条路径的全部意义：
 		// 没有它，用户会在歌播到一半的时候突然从头听到。
-		if pos > 0 && pos < p.Duration() {
-			p.Seek(pos)
+		if pos > 0 && pos < nextPlayer.Duration() {
+			nextPlayer.Seek(pos)
 		}
 		if want {
-			p.Play()
+			nextPlayer.Play()
 		}
 		a.publishMedia()
 		if wake != nil {

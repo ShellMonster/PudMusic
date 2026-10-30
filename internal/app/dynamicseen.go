@@ -89,15 +89,15 @@ func (a *App) NewDynamicCount(ctx context.Context) (int, error) {
 // 所以这里现拉一次第一页：它返回的 `data.update_baseline` 就是此刻最新那条的
 // id（见 bili.DynamicPage.Baseline），拿它当基准，B 站下一轮就会说「没有新的」。
 func (a *App) CatchUpDynamicSeen(ctx context.Context) (string, error) {
-	if !a.LoggedIn() {
+	account := a.AccountSnapshot()
+	if account.SelfMid <= 0 {
 		return "", ErrNotLoggedIn
 	}
-	cli := a.explore()
-	if cli == nil {
-		return "", errExploreMissing
-	}
-	pg, err := cli.DynamicFeed(ctx, "")
+	pg, err := a.dynamicFeedForAccount(ctx, account, "")
 	if err != nil {
+		if !a.accountSnapshotCurrent(account) {
+			return "", ErrStaleGeneration
+		}
 		return "", err
 	}
 	if pg.Baseline == "" {
@@ -109,7 +109,11 @@ func (a *App) CatchUpDynamicSeen(ctx context.Context) (string, error) {
 		log.Printf("biu: 动态流这一页是空的，没有可记的更新基线")
 		return "", nil
 	}
-	a.MarkDynamicSeen(pg.Baseline)
+	if err := a.MarkDynamicSeenForAccount(account, pg.Baseline); err != nil {
+		if err == ErrStaleGeneration {
+			return "", err
+		}
+	}
 	return pg.Baseline, nil
 }
 
@@ -121,16 +125,33 @@ func (a *App) CatchUpDynamicSeen(ctx context.Context) (string, error) {
 // 新的那个是不是更大。倒退一步（用户把机器的时间调回去了、或者两趟请求回来
 // 的顺序反了）会让「已经看过的」又变成「没看过」，那个点会诈尸。
 func (a *App) MarkDynamicSeen(dynID string) {
-	mid := a.SelfMid()
+	if err := a.MarkDynamicSeenForAccount(a.AccountSnapshot(), dynID); err != nil && err != ErrStaleGeneration {
+		// 存不住不是致命的：这一趟顶多让那个点下次又冒出来，而用户已经看过了。
+		log.Printf("biu: 记不住「动态看到哪儿了」：%v", err)
+	}
+}
+
+// MarkDynamicSeenForAccount commits a seen baseline only while the captured
+// account and Explore client are still current.
+func (a *App) MarkDynamicSeenForAccount(snapshot AccountSnapshot, dynID string) error {
+	if !a.accountSnapshotCurrent(snapshot) {
+		return ErrStaleGeneration
+	}
+	mid := snapshot.SelfMid
 	if mid <= 0 {
 		// 没登录就没有「我关注的人的动态」，也就没有「看过」。
-		return
+		return nil
 	}
 	dynID = strings.TrimSpace(dynID)
 	if dynID == "" {
-		return
+		return nil
 	}
+	stale := false
 	_, err := a.UpdateSettings(func(s *Settings) {
+		if !a.accountSnapshotCurrent(snapshot) {
+			stale = true
+			return
+		}
 		// ⚠️ **整份换掉，不就地改元素**。
 		//
 		// 设置存储的 `Snapshot()` 给的是**浅拷贝**：切片头共用同一个底层数组，
@@ -138,11 +159,8 @@ func (a *App) MarkDynamicSeen(dynID string) {
 		// `DynamicBaseline`）的时候，这边在锁里**就地**改同一个数组，就是一次
 		// 数据竞争（`-race` 直接报）。
 		//
-		// 换掉整个切片就没有这个问题：改的是**新数组**，而外面那些读者读的是
-		// **旧数组**——旧数组从这一刻起再没人改它。
-		//
-		// ⚠️ **这也是这个包里别的键的写法**：`SideMenuCollectionOrder.setList`
-		// 和 `normalize` 都是**换头**，没有一处就地改元素。
+		// 换掉整个切片就没有这个问题：改的是**新数组**，而外面那些读者读的是**旧数组**——
+		// 旧数组从这一刻起再没人改它。
 		next := make([]DynamicSeenEntry, len(s.DynamicSeen.Baselines))
 		copy(next, s.DynamicSeen.Baselines)
 		// ⚠️ **只动这一个账号那一行**：别的账号的基准得留着（切回去的时候那个点
@@ -163,10 +181,14 @@ func (a *App) MarkDynamicSeen(dynID string) {
 		s.DynamicSeen.Baselines = append(next,
 			DynamicSeenEntry{Mid: mid, Baseline: dynID})
 	})
+	if stale {
+		return ErrStaleGeneration
+	}
 	if err != nil {
 		// 存不住不是致命的：这一趟顶多让那个点下次又冒出来，而用户已经看过了。
 		log.Printf("biu: 记不住「动态看到哪儿了」：%v", err)
 	}
+	return err
 }
 
 // newerDynID 报 a 是不是比 b 新。

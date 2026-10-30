@@ -2,11 +2,11 @@ package ui
 
 import (
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"log"
 	"runtime/debug"
 	"strconv"
 
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -216,7 +216,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 回来了），而在慢帧上那一次读会和这一帧的 `adopt` 写撞上。
 	if !p.started && !p.loading {
 		if ctx := p.begin(); ctx != nil {
-			go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+			go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 		}
 	}
 
@@ -229,7 +229,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 			s.viewLoadError(c, upLoadErrorKey(sp, tab), "这个 UP 主的"+upTabNames[tab], "重试加载"+upTabNames[tab], p.err, func() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
-					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+					go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 				}
 			})
 		})
@@ -370,7 +370,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	if p.want() {
 		if _, last := st.Visible(); last >= rows-1 {
 			if ctx := p.begin(); ctx != nil {
-				go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+				go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 			}
 		}
 	}
@@ -450,7 +450,7 @@ func upRowLabel(sp *upSpace, tab, i int) string {
 	case upTabDynamic:
 		if i < len(sp.dynItems) {
 			d := sp.dynItems[i]
-			if d.Kind == bili.DynamicVideo && d.Video != nil && d.Video.Title != "" {
+			if d.Kind == app.DynamicVideo && d.Video != nil && d.Video.Title != "" {
 				return d.Video.Title
 			}
 			if d.Text != "" {
@@ -490,7 +490,7 @@ func upEmptyKey(sp *upSpace, tab int) string {
 //
 // ⚠️ **按类别说**（票 #344）：「形态不认识」和「我们读不懂」是**两回事**，
 // 合成一句就是把「B 站改了返回的形状」说成「他发了我们画不出来的形态」。
-func upTabEmpty(tab int, counts bili.DropCounts) emptyState {
+func upTabEmpty(tab int, counts app.DropCounts) emptyState {
 	if counts.Total() > 0 {
 		return emptyState{
 			Title: "这里没有能显示的" + upTabNames[tab],
@@ -523,7 +523,7 @@ func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 			if ui.Button(c, "重试加载"+upTabNames[tab]).FontSize(scale.Font(c, scale.Size13)).Clicked() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
-					go s.fetchUp(ctx, sp, tab, p.cursor, p.page)
+					go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
 				}
 			}
 		case p.loading:

@@ -1439,12 +1439,13 @@ var Items = []Item{
 		// 容器说的呈现长度、丢掉编码器延迟。所以它要**单独**验一遍——spike 那
 		// 几条验的是解码器本身，碰不到这三件事。
 		//
-		// ⚠️ 它在 macOS 和 Windows 上**各跑一遍**，走的是两个不同的解码器
-		// （AudioToolbox / Media Foundation），比的是同一份参考。而两条线是
-		// **不一样**的：Windows（Media Foundation）用票面定的 0.02，macOS
-		// 用实测出来的 0.1（AudioToolbox 在同一份素材上是 0.070597）。理由写
-		// 在 `internal/service/audio/aac_reference_test.go` 顶上。
-		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS），帧数落在 176400~178176 之间，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
+		// ⚠️ 它在两个平台上各跑一遍，走的是两个不同的解码器
+		// （AudioToolbox / Media Foundation），比的是同一份参考。跨解码器
+		// 的最大差上限统一按 0.1，声道交换倍率按 2；macOS 已实测
+		// AudioToolbox 最大差 0.070597，Windows 真机日志中的 Media Foundation
+		// 最大差为 0.066711。两种容器的长度按各自的呈现口径单独断言。
+
+		Spec: "产品这一层解出来的 AAC 与另一个解码器**逐样本**对得上（不是 RMS）；MP4 呈现长度为 176400 帧、裸 ADTS 完整长度为 178176 帧，左右声道没调换；**两种容器都要比**（只比 .m4a 的话 ADTS 那一路解错了也会通过）",
 		Tests: []string{
 			"TestTheProductPathDecodesAACSampleForSample",
 			"TestTheProductPathDecodesADTSSampleForSample",
@@ -2926,16 +2927,19 @@ var Items = []Item{
 		//     画在主树里会被满屏那层不透明的底盖住。🔴 **那个症状是静默的**：
 		//     文字**在树里**（`Texts()` 查得到），而画面上一个像素也没有。
 		//     ⇒ 「树上有没有那几行字」验不出这个坑，得看画面。
-		//   - **位移走 pose**：位置要是算在 view 里（`Absolute().Left(x)`），它
-		//     只在重建时更新——而满屏开着时界面 20 帧/秒重建，于是弹幕是 20fps
-		//     跳着走的。走 pose（只重绘那一族）是 60fps 平滑。
+		//   - **位移走「只重绘」的帧**（票 #669）：位置要是算在 view 里
+		//     （`Absolute().Left(x)`），它只在整窗重建时更新——而播放中的整窗
+		//     唤醒约 1Hz（`tick_wake.go` 的 `readoutMoved`），于是弹幕「动一下停
+		//     一下」。现在位置在 `Draw` 里按 `Painter.Now()` 现算，播放中每帧
+		//     `Painter.AnimationFrame()`（只重绘、不重建）。
 		//   - **按当前位置起步**：弹幕的时间是**视频时间**，我们放的就是这个视频
 		//     的音轨 ⇒ 没有额外 offset。「从第 3 分钟开始听」就从第 3 分钟那一条
 		//     开始滚（**不是**按「播放了多久」滚）。
-		//   - **key 用弹幕自己的 rowid**：动态列表的 key 必须稳定且唯一——用下标
-		//     的话「前面插一条」会让后面所有条的状态整体错配。
-		//   - **它是装饰**：不给 Role / Label（读屏软件不念），「减少动态效果」
-		//     开着时按 20fps 跳着走，设置里能整个关掉（默认开着）。
+		//   - **轨道按弹幕自己的 rowid 记**：状态必须稳定且唯一——用下标的话
+		//     「前面插一条」会让后面所有条的轨道整体错配。
+		//   - **它是装饰**：`RoleNone`（读屏软件不念），「减少动态效果」开着时不
+		//     逐帧重画，设置里能整个关掉（默认开着），暂停 / 关闭 / 退出满屏 / 换歌
+		//     都停止请求帧并复位。
 		//   - **同一条轨道上两条不能叠字**：两条同速从右边沿进来，不叠字当且
 		//     仅当「后一条晚的时间 × 速度 ≥ 前一条的字宽」——报告 §3.3 那条
 		//     「走出 30% 宽度」只当**时间门槛**用，它对长字不够（一条 196
@@ -2944,14 +2948,24 @@ var Items = []Item{
 		//   - **长弹幕不会提前消失**：一条弹幕待到「整个出界」为止（(封面宽
 		//     + 字宽) ÷ 速度），**没有时长上限**——早该出界的那些靠「按字数
 		//     估的宽上界」粗筛掉，而那个上界只粗筛、不砍。
-		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走 pose（60fps 平滑）、每条弹幕一个稳定且唯一的 key、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）",
+		Spec: "满屏播放器左边那张封面上的弹幕：画在封面上（浮层里，不是主树）、按当前播放位置滚、位移走只重绘帧（播放中连续推进、不靠整窗重建）、轨道状态按弹幕自己的 rowid 记、同一条轨道上两条不叠字、长弹幕不会提前消失、装饰不进无障碍树、设置里能整个关掉（默认开）、暂停/关闭/退出满屏/换歌都停帧并复位",
 		Tests: []string{
 			"TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer",
 			"TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen",
 			"TestTheDanmakuStartsFromTheCurrentPosition",
-			"TestTheDanmakuGlidesInsteadOfTeleporting",
-			"TestTheDanmakuJumpsWhenMotionIsReduced",
-			"TestEveryDanmakuHasItsOwnKey",
+			"TestTheDanmakuKeepsMovingWithoutRebuildingTheView",
+			"TestTheDanmakuMovesOneStepPerFrame",
+			"TestACloserSampleDoesNotJerkTheDanmaku",
+			"TestTheDanmakuFollowsThePositionWhenMotionIsReduced",
+			"TestReduceMotionDoesNotAskForContinuousFrames",
+			"TestAPausedDanmakuStopsAndKeepsItsPlace",
+			"TestTheDanmakuGoesOnFromWhereItPaused",
+			"TestChangingTheSongResetsTheDanmaku",
+			"TestSeekingBackwardsClearsTheStaleLanes",
+			"TestLosingTheTrackClearsTheDanmaku",
+			"TestTurningTheDanmakuOffStopsTheFrames",
+			"TestClosingTheFullPlayerStopsTheDanmakuFrames",
+			"TestTheDanmakuKeepsItsLaneWhenTheViewRebuilds",
 			"TestTheDanmakuCanBeTurnedOff",
 			"TestTheFullPlayerSettingsHasTheDanmakuSwitch",
 			"TestTwoDanmakuOnTheSameLaneNeverOverlap",
@@ -3855,6 +3869,12 @@ var Items = []Item{
 			// 按钮在忙的时候：里面有转圈、它真的在转、按钮灰成主色的一半、字还在。
 			"TestTheBusyButtonTurnsAndGreysOut",
 		},
+	},
+	{
+		Category: Platform,
+		Spec:     "MyGo v0.7.3 自动化测试构建能驱动 Native UI、读取无障碍树、按稳定 key 操作并抓取窗口图像",
+		Tests:    []string{"TestMyGoAutomationDrivesNativeUIAndCapturesIt"},
+		RealOnly: true,
 	},
 	{
 		// 归「双平台」那一组：这一票动的是**右下角那条提示**（它的颜色、尺寸

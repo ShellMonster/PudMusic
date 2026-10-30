@@ -16,7 +16,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
@@ -70,7 +69,7 @@ const maxDynamicPics = 9
 // 时要撤回去）。不加锁 `-race` 会红，而红的那次症状是「赞的按钮偶尔自己弹回去」
 // ——因为撤回去那一条正好盖掉了用户紧接着按的第二下。
 //
-// 没动过的那些不在这儿：读的是 B 站拉回来的那份（`bili.Dynamic.Liked`）。
+// 没动过的那些不在这儿：读的是 B 站拉回来的那份（`app.Dynamic.Liked`）。
 type dynLikes struct {
 	mu sync.Mutex
 	m  map[string]dynLike
@@ -133,12 +132,16 @@ func (l *dynLikes) revert(id string) {
 // **乐观**：先翻过来（界面立刻变），再发请求；B 站说不行就撤回去并说一句为什么。
 // 不这么做的话，从按下到界面变化之间隔着一次网络往返（几百毫秒），而用户在这
 // 段时间里会再按一下——于是他点了三次，最后的状态和他以为的相反。
-func (s *Shell) toggleDynamicLike(d bili.Dynamic) {
+func (s *Shell) toggleDynamicLike(d app.Dynamic) {
+	account := s.app.AccountSnapshot()
 	next := s.dynLikes.flip(d.ID, d.Liked, d.LikeCount)
 	s.wake.invalidate()
 
-	s.app.LikeDynamic(d.ID, next.liked, func(err error) {
+	s.app.LikeDynamicForAccount(account, d.ID, next.liked, func(err error) {
 		if err != nil {
+			if err == app.ErrStaleGeneration || s.app.AccountSnapshot() != account {
+				return
+			}
 			s.dynLikes.revert(d.ID)
 			s.addToast(likeFailText(next.liked, err), notice.Danger)
 		}
@@ -160,7 +163,7 @@ func likeFailText(like bool, err error) string {
 // 摆的是一格一格的封面卡（`user-profile/grid-card/index.tsx:26` 的
 // `group-hover:scale-105` + `transition-transform duration-300`）。放大的是
 // **框里那张图**，框不动——框要是自己长大，它就会压到旁边的标题上。
-func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected, ring bool) {
+func (s *Shell) viewCollectionRow(c *ui.Context, col app.SpaceCollection, selected, ring bool) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px12).AlignItems(ui.Center).
 		Margin(space.None, space.None, space.Px8, space.None).
@@ -195,11 +198,11 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col bili.UpCollection, selected
 // viewDynamicCard 画一条动态卡片。
 //
 // 三种类型画在同一张卡上：**头像 + 昵称 + 时间 → 正文 → 内容**。
-// 内容那一块按类型分三种（见 `bili.DynamicKind`）。
+// 内容那一块按类型分三种（见 `app.DynamicKind`）。
 //
 // 🔴 **作者名可点进他的空间**（上游 `dynamic-feed/item.tsx:88-90` 跳
 // `/user/{mid}`）。这是「能点进对应 UP 空间」那条验收在卡片上的落点。
-func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bool) {
+func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring bool) {
 	t := c.Theme()
 	// ⚠️ **通栏**：左右 0、只有一条下边框、透明底、直角。
 	//
@@ -281,7 +284,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 					// 「时间 · 动作」那一行（上游 `User` 的 `description`）。
 					if d.Time != "" {
 						when := d.Time
-						if d.Kind == bili.DynamicVideo && d.Video != nil {
+						if d.Kind == app.DynamicVideo && d.Video != nil {
 							when += " · 发布了音乐"
 						}
 						ui.Text(c, when).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
@@ -305,7 +308,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 
 		// ③ 内容：三种类型。
 		switch {
-		case d.Kind == bili.DynamicVideo && d.Video != nil:
+		case d.Kind == app.DynamicVideo && d.Video != nil:
 			s.viewDynamicVideo(c, d.Video, d.Author)
 		case len(d.Pics) > 0:
 			s.viewDynamicPics(c, d.Pics)
@@ -323,8 +326,8 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d bili.Dynamic, selected, ring bo
 // 参考图（B 站 UP 主页）上那一句简介是**画在稿件卡里**的，正文那一行是空的
 // （上游的 `textContent` 是 `desc?.text || opus?.summary?.text`，投稿动态的
 // `desc.text` 通常是空的）。
-func dynBodyRepeatsCard(d bili.Dynamic) bool {
-	if d.Kind != bili.DynamicVideo || d.Video == nil || d.Text == "" {
+func dynBodyRepeatsCard(d app.Dynamic) bool {
+	if d.Kind != app.DynamicVideo || d.Video == nil || d.Text == "" {
 		return false
 	}
 	// ⚠️ **两边都要去空白才能比**：`bili` 那一层给 `Video.Desc` 的是**原样**
@@ -345,7 +348,7 @@ func dynBodyRepeatsCard(d bili.Dynamic) bool {
 // ⚠️ **「下一首播放」「下载音频」收进「⋯」菜单**（上游的 `MoreMenu` 就是这么
 // 放的：`dynamic-feed/item.tsx:145-150` 的 `onAddToNext` / `onDownloadAudio`）。
 // 它们原来在卡片最下面那一排（正文下面），而参考图上那一排没有它们。
-func (s *Shell) viewDynamicActions(c *ui.Context, d bili.Dynamic) {
+func (s *Shell) viewDynamicActions(c *ui.Context, d app.Dynamic) {
 	t := c.Theme()
 	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 		liked, count := s.dynLikes.get(d.ID, d.Liked, d.LikeCount)
@@ -401,7 +404,7 @@ const dynMoreLabel = "这条动态的更多操作"
 // ⚠️ **这不是这一票引入的**：改之前这一行里的「赞」「下一首播放」「下载音频」
 // 同样按回车没反应（基线实测：赞数不变、队列没变）。收进菜单只是把「看得见
 // 但按不动」变成「看不见也按不动」——**功能上没有进一步变差**。
-func (s *Shell) viewDynamicMore(c *ui.Context, d bili.Dynamic) {
+func (s *Shell) viewDynamicMore(c *ui.Context, d app.Dynamic) {
 	btn := flatIconButton(c, iconMore, dynMoreLabel, 16)
 	if btn.Clicked() {
 		if s.dynMenuOpen && s.dynMenuFor == d.ID {
@@ -436,10 +439,10 @@ const dynMenuW = 168
 // ⚠️ **纯文字和图文那两条只有一项**：B 站音乐库里的音频条目还没有取流通道，
 // 「下一首播放」「下载音频」摆出来按不动（理由同 `viewDynamicActions` 原来
 // 那一段注释）。
-func (s *Shell) viewDynamicMenuItems(c *ui.Context, d bili.Dynamic) {
+func (s *Shell) viewDynamicMenuItems(c *ui.Context, d app.Dynamic) {
 	t := c.Theme()
 	items := []dynMenuItem{}
-	if d.Kind == bili.DynamicVideo && d.Video != nil {
+	if d.Kind == app.DynamicVideo && d.Video != nil {
 		items = append(items,
 			dynMenuItem{label: "下一首播放", icon: iconEnqueue, run: func() {
 				s.playNextFromDynamic(d.Video, d.Author)
@@ -505,7 +508,7 @@ func (s *Shell) openBiliVideo(bvid string) {
 // ⚠️ **不许换成 `Enqueue`**：那个接在**队尾**，而这一项的字面意思是「下一首就
 // 放它」。用户按这一下是因为他听见歌不好，想把某支片子插到眼前这一首后面，
 // 而它在队尾的话他得等到整张列表放完——症状是「按了，什么也没发生，直到一小时后」。
-func (s *Shell) playNextFromDynamic(v *bili.DynamicArchive, author bili.DynamicAuthor) {
+func (s *Shell) playNextFromDynamic(v *app.DynamicVideoItem, author app.DynamicAuthor) {
 	if err := s.app.EnqueueNext(dynVideoItem(v, author)); err != nil {
 		s.addToast("放不了这一首："+err.Error(), notice.Danger)
 		return
@@ -569,7 +572,7 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // 整块可点：放这一首并立即播，保留原队列（票 #337 定的方向；票 #608 照上游
 // `play()` 补上「已经在队列里就定位过去、不重复入队」那一支）。
 // 起播失败由 list.Actions.PlayNow 的 Toast 说明。
-func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author bili.DynamicAuthor) {
+func (s *Shell) viewDynamicVideo(c *ui.Context, v *app.DynamicVideoItem, author app.DynamicAuthor) {
 	t := c.Theme()
 	box := ui.Row(c).Grow(1).AlignItems(ui.Center).Padding(space.Px8).
 		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
@@ -637,7 +640,7 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *bili.DynamicArchive, author b
 //
 // ⚠️ **时长不在这一行**：它现在是封面右下角那个角标（上游那样），两处都画
 // 是同一句话说两遍。
-func dynVideoMeta(v *bili.DynamicArchive) string {
+func dynVideoMeta(v *app.DynamicVideoItem) string {
 	if v.Play == "" {
 		return ""
 	}
@@ -646,11 +649,11 @@ func dynVideoMeta(v *bili.DynamicArchive) string {
 
 // dynVideoItem 把一份动态里的投稿变成队列里的一项。
 //
-// ⚠️ **author 要单独传进来**：`bili.DynamicArchive` 里只有稿件，而发这条动态
-// 的人挂在 `bili.Dynamic.Author` 上（`DynamicAuthor` 名和编号都有）。少传
+// ⚠️ **author 要单独传进来**：`app.DynamicVideoItem` 里只有稿件，而发这条动态
+// 的人挂在 `app.Dynamic.Author` 上（`DynamicAuthor` 名和编号都有）。少传
 // 的话从动态流放的歌在播放条上**没有 UP 名**——那一行整个不画，而界面上看
 // 不出任何异样（见 `app.Item.Artist`）。
-func dynVideoItem(v *bili.DynamicArchive, author bili.DynamicAuthor) app.Item {
+func dynVideoItem(v *app.DynamicVideoItem, author app.DynamicAuthor) app.Item {
 	return app.Item{
 		Source: "online", Type: "mv", Bvid: v.Bvid, Title: v.Title, Cover: v.Cover,
 		Artist:    author.Name,
@@ -666,7 +669,7 @@ func dynVideoItem(v *bili.DynamicArchive, author bili.DynamicAuthor) app.Item {
 // ownerMid 是这一页所属的那个 UP（`fetchVideos` 手上就有）：B 站的投稿接口
 // 逐条给了名字（`UpVideo.Author`），可没给编号，而播放条上那一句 UP 名要靠
 // 编号拼 `/user/{id}`。
-func spaceVideoItem(v bili.UpVideo, ownerMid int64) app.Item {
+func spaceVideoItem(v app.SpaceVideo, ownerMid int64) app.Item {
 	return app.Item{
 		Source: "online", Type: "mv", Bvid: v.Bvid, Cid: v.Cid,
 		Title: v.Title, Cover: v.Cover,

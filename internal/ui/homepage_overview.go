@@ -71,8 +71,32 @@ func homeTileRadius(t *ui.Theme) float32 { return t.Radius + 2 }
 // 理由同 `homeTileRadius`：容器和插画共用这一个出口。
 func homeHeroRadius(t *ui.Theme) float32 { return t.Radius + 4 }
 
-// homeTiles 是四个入口磁贴：指向 homeTabs 的哪一档、副标题、渐变两头。
-// 颜色是固定的深色调（白字压得住），不跟主题走：磁贴本身就是「封面」。
+func homeTilePalette(t *ui.Theme, tile struct {
+	tab      int
+	subtitle string
+	from, to ui.Color
+}) (from, to, text ui.Color) {
+	index := 0
+	for i, candidate := range homeTiles {
+		if candidate.tab == tile.tab {
+			index = i
+			break
+		}
+	}
+	step := float32(0.22) + float32(0.04)*float32(index)
+	if t.Dark {
+		from = t.Background.Mix(t.Accent, step+0.08)
+	} else {
+		from = t.Text.Mix(t.Accent, step)
+	}
+	to = from.Mix(t.Text, 0.12)
+	contrastBg := from
+	if ink.Ratio(t.Text, to) < ink.Ratio(t.Text, from) {
+		contrastBg = to
+	}
+	return from, to, ink.Ensure(t.Text, contrastBg, ink.TextContrast)
+}
+
 var homeTiles = [4]struct {
 	tab      int
 	subtitle string
@@ -260,17 +284,18 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur
 		ui.Column(c).Key("home:hero:txt:"+m.ID).Size(max(w-cw*0.7, w*0.3), hgt).
 			Padding(space.Px24, space.Px24, space.Px24, space.Px28).Gap(space.Px8).Justify(ui.Center).AlignItems(ui.Start).
 			Attach(ui.AnchorTopLeft, ui.AnchorTopLeft).Children(func() {
-			ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size12)).Bold().TextColor(t.Accent)
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).Bold().
-				TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(2).Ellipsis("…")
+			ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size12)).
+				TextColor(ink.Ensure(t.Accent, ui.RGBA(28, 23, 20, 1), ink.TextContrast))
+			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).
+				TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(2).Ellipsis("…")
 			if sh.Owner != "" {
 				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size14)).
-					TextColor(ui.RGBA(255, 255, 255, 0.75)).MaxLines(1).Ellipsis("…")
+					TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(1).Ellipsis("…")
 			}
 			ui.Row(c).Key("home:hero:play:"+m.ID).Gap(space.Px6).Padding(space.Px8, space.Px16, space.Px8, space.Px12).
 				Radius(18).Background(t.Accent).AlignItems(ui.Center).Children(func() {
 				ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.AccentText)
-				ui.Text(c, "立即播放").FontSize(scale.Font(c, scale.Size13)).Bold().TextColor(t.AccentText)
+				ui.Text(c, "立即播放").FontSize(scale.Font(c, scale.Size13)).TextColor(t.AccentText)
 			})
 		})
 	})
@@ -288,8 +313,9 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 	ui.Row(c).Key("home:tiles").FillWidth().Gap(space.Px16).Children(func() {
 		for _, tile := range homeTiles {
 			name := homeTabs[tile.tab]
+			from, to, tileText := homeTilePalette(t, tile)
 			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(homeTileRadius(t)).Clip().
-				Gradient(tile.from, tile.to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
+				Gradient(from, to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
 			b.Children(func() {
 				// 磁贴只需要榜单第一项；不要用 Items() 为一张插画复制整页分页列表。
@@ -300,13 +326,13 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 						Children(func() {
 							imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, first.Cover, "", iw, homeTileH, homeTileRadius(t), nil)
 							ui.Box(c).Key("home:tile:fade:"+name).Size(iw, homeTileH).
-								Gradient(tile.to, tile.to.Alpha(0), 90).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+								Gradient(to, to.Alpha(0), 90).Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 						})
 				}
 
-				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
-				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size12)).
-					TextColor(ui.RGBA(255, 255, 255, 0.78)).MaxLines(1)
+				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).TextColor(tileText).MaxLines(1)
+				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size13)).
+					TextColor(tileText).MaxLines(1)
 			})
 		}
 	})
@@ -316,7 +342,7 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 func (h *homePage) sectionHead(c *ui.Context, key, title, more string, go_ func()) {
 	t := c.Theme()
 	ui.Row(c).Key(key).FillWidth().AlignItems(ui.Center).Justify(ui.SpaceBetween).Children(func() {
-		ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Bold().TextColor(t.Text)
+		ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).TextColor(t.Text)
 		if more != "" && flatLink(c, more).Clicked() {
 			go_()
 		}
@@ -491,7 +517,7 @@ func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music,
 	t := c.Theme()
 	ui.Column(c).Key("home:board:" + name).Width(w).Gap(space.Px4).Children(func() {
 		ui.Row(c).Key("home:board:head:" + name).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
-			ui.Text(c, name).FontSize(scale.Font(c, scale.Size20)).Bold().TextColor(t.Text).Grow(1)
+			ui.Text(c, name).FontSize(scale.Font(c, scale.Size20)).TextColor(t.Text).Grow(1)
 			if len(songs) > 0 {
 				pa := ui.Row(c).Key("home:board:all:"+name).AlignItems(ui.Center).Gap(space.Px4).
 					Padding(space.Px4, space.Px10).Radius(14).Background(t.Text.Alpha(0.06)).
@@ -528,7 +554,7 @@ func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music,
 				rank := ui.Text(c, strconv.Itoa(i+1)).Width(24).TextAlign(ui.Center).
 					FontSize(scale.Font(c, scale.Size16)).TextColor(rc)
 				if bold {
-					rank.Bold()
+					rank = rank.FontWeight(weightMedium)
 				}
 				imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, homeMiniCover, homeMiniCover)
 				ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {

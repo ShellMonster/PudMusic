@@ -517,8 +517,9 @@ func (l *List) viewIndex(c *ui.Context, i int, playing bool, color ui.Color, tit
 		return
 	}
 	if l.cols.Rank && i < 3 {
-		ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).Bold().
-			FontSize(scale.Font(c, font+rankTopFontBoost)).TextColor(ink.AccentOn(t)).MaxLines(1)
+		ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).
+			FontSize(scale.Font(c, font+rankTopFontBoost)).FontWeight(500).
+			TextColor(ink.AccentOn(t)).MaxLines(1)
 		return
 	}
 	ui.Text(c, indexText(i)).Width(width).TextAlign(ui.Center).

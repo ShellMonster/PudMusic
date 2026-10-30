@@ -70,6 +70,12 @@ jobs:
           go test -p 4 $(go list ./... | grep -v '/internal/ui$')
           go test ./internal/licensing/
 
+      - name: Run MyGo native UI E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIU_RUN_MYGO_E2E=1 go test -tags e2e ./internal/e2e -run TestMyGoAutomationDrivesNativeUIAndCapturesIt -count=1 -timeout 90s
+
       - name: Verify generated resources
         shell: bash
         run: |
@@ -123,6 +129,22 @@ jobs:
           done
 
           cat macos-build-summary.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Attribute package size
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 主可执行文件 / Resources / 其他 与安装包分开，再列链接依赖和资源来源。
+          # 量的是 build/ 里的产物，不是模块缓存。
+          go run ./internal/perf/cmd/artifact-report | tee artifact-size.txt
+          {
+            echo
+            echo '### 包体归因'
+            echo
+            echo '```'
+            cat artifact-size.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload macOS artifacts
         if: always()

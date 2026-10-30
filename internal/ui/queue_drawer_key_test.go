@@ -10,9 +10,9 @@ import (
 
 // 抽屉那一列的**行身份**（铁律四），在数据这一层钉住。
 //
-// 界面上看得见的后果由 `queue_drawer_test.go` 那边验（同一首排两遍只画一行、
-// 正在放的那行有高亮）；这里断的是更靠底的东西：**行的 key 是这一首自己的判重
-// 标识，不是它在队列里的位置**。
+// 界面上看得见的后果由 `queue_drawer_test.go` 那边验（同一首排两遍也画两行、
+// 正在放的那行有高亮）；这里断的是更靠底的东西：**行的 key 是这一首自己的
+// 判重标识 + 队列位置，不是单独的判重标识**。
 //
 // 为什么非得是身份：MyGo 默认拿「父 ID + 兄弟序号」当行的身份，前面插一行会让
 // 后面所有行的状态整体错配。抽屉上错配出来的东西不少——高亮到了旁边那首、
@@ -37,14 +37,15 @@ func TestQueueRowKeysFollowTheSongNotItsPlace(t *testing.T) {
 	after := queueRowsFor([]app.Item{mv("BV1", "第一首"), b, c}, ids)
 
 	if len(before) != 2 || len(after) != 3 {
-		t.Fatalf("去重之后 %d 行 / 插了一首之后 %d 行，want 2 / 3", len(before), len(after))
+		t.Fatalf("队列项 %d 行 / 插入一项之后 %d 行，want 2 / 3", len(before), len(after))
 	}
 	for i := range before {
-		if before[i].key != after[i+1].key {
-			t.Errorf("第 %d 行（%q）的身份从 %q 变成了 %q——它用的是行号",
-				i+1, before[i].item.Title, before[i].key, after[i+1].key)
+		if before[i].item.Identity() != after[i+1].item.Identity() {
+			t.Errorf("第 %d 行（%q）的歌曲身份从 %q 变成了 %q", i+1, before[i].item.Title, before[i].item.Identity(), after[i+1].item.Identity())
 		}
-		// 行号确实动了（所以上面那一断言不是白给的）：at 从 i 变成了 i+1。
+		if before[i].key != after[i+1].key {
+			t.Errorf("第 %d 行（%q）的 key 在插入无关歌曲后变化：%q → %q", i+1, before[i].item.Title, before[i].key, after[i+1].key)
+		}
 		if before[i].at+1 != after[i+1].at {
 			t.Errorf("%q 在队列里的位置是 %d → %d", before[i].item.Title, before[i].at, after[i+1].at)
 		}
@@ -54,23 +55,24 @@ func TestQueueRowKeysFollowTheSongNotItsPlace(t *testing.T) {
 	}
 }
 
-// TestQueueRowsKeepTheFirstOfADuplicate 同一首排了两遍，抽屉留的是**第一次**
-// 出现的那一条，at 指的是它在队列里的位置。
-//
-// at 必须是队里那个位置：点一行、删一行用的都是它，拿行号去调队列就是删错那一首。
-func TestQueueRowsKeepTheFirstOfADuplicate(t *testing.T) {
+// TestQueueRowsKeepEveryDuplicate 同一首排了两遍，抽屉保留**两条**，且每条的 at
+// 指回队列里的真实位置。
+func TestQueueRowsKeepEveryDuplicate(t *testing.T) {
 	dup := mv("BV1", "第一首")
 	rows := queueRowsFor([]app.Item{mv("BV2", "第二首"), dup, dup},
 		&rowkey.Memo[queueRowRaw, queueRowIdentity]{})
 
-	if len(rows) != 2 {
-		t.Fatalf("去重之后 %d 行，want 2", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("重复项被隐藏后只剩 %d 行，want 3", len(rows))
 	}
-	if rows[1].at != 1 {
-		t.Errorf("留下那一行的 at 是 %d，want 1（它在队列里第一次出现的位置）", rows[1].at)
+	if rows[1].at != 1 || rows[2].at != 2 {
+		t.Errorf("重复项的位置是 %d / %d，want 1 / 2", rows[1].at, rows[2].at)
 	}
-	if rows[1].item != dup {
-		t.Errorf("留下的是 %+v，want %+v", rows[1].item, dup)
+	if rows[1].key == rows[2].key {
+		t.Errorf("重复项的行 key 撞了：%q", rows[1].key)
+	}
+	if rows[1].item != dup || rows[2].item != dup {
+		t.Errorf("重复项没有保留：%+v / %+v", rows[1].item, rows[2].item)
 	}
 }
 
@@ -84,13 +86,13 @@ func TestQueueRowsGiveUnidentifiableItemsDistinctKeys(t *testing.T) {
 		&rowkey.Memo[queueRowRaw, queueRowIdentity]{})
 
 	if len(rows) != 2 {
-		t.Fatalf("认不出的项被并成了 %d 行，want 2", len(rows))
+		t.Fatalf("认不出的项没有保持逐项展示，得到 %d 行，want 2", len(rows))
 	}
 	if rows[0].key == rows[1].key {
 		t.Errorf("两个认不出的项撞了身份：%q", rows[0].key)
 	}
 	// 但它们照样能被认出来是自己那一行：两个不同的键。
-	if rows[0].key != queueRowKey("", 0) || rows[1].key != queueRowKey("", 1) {
+	if rows[0].key != queueRowKey("", 0, 0) || rows[1].key != queueRowKey("", 0, 1) {
 		t.Errorf("身份是 %q / %q，want 按队列下标退回去", rows[0].key, rows[1].key)
 	}
 }
@@ -104,10 +106,9 @@ func TestQueueRowsGiveUnidentifiableItemsDistinctKeys(t *testing.T) {
 // 判据是**分配次数**（不是时间）：分配次数不受机器快慢影响（见
 // `internal/ui/framebudget_test.go` 的文件头）。
 //
-// ⚠️ **判据是「比行数还少」，不是「等于几」**：那一遍固定要建的是「一份行 +
-// 一张去重的表」（三两次），而每行那两次是**按行数涨的**。所以「比行数少」
-// 就是「没有每行分配」，而具体是三还是四不写死（map 那几笔是标准库内部的，
-// 换个 Go 版本会变）。
+// ⚠️ **判据是「比行数还少」，不是「等于几」**：那一遍固定要建的是「一份行」；
+// 每行的两次身份计算是**按行数涨的**。所以「比行数少」就是「没有每行分配」，
+// 而具体是几次不写死（标准库内部实现会变）。
 func TestQueueRowsDoNotRebuildTheirIdentityEveryFrame(t *testing.T) {
 	items := make([]app.Item, 20)
 	for i := range items {
@@ -138,19 +139,19 @@ func TestQueueRowKeyCarriesTheIdentity(t *testing.T) {
 		at   int
 		want string
 	}{
-		{"认得出来的", "mv:BV1", 3, "queue-row:mv:BV1"},
+		{"认得出来的", "mv:BV1", 3, "queue-row:mv:BV1!0"},
 		{"认不出来的", "", 3, "queue-row!3"},
 	}
 	for _, c := range cases {
-		if got := queueRowKey(c.id, c.at); got != c.want {
-			t.Errorf("%s：queueRowKey(%q, %d) = %q，want %q", c.name, c.id, c.at, got, c.want)
+		if got := queueRowKey(c.id, 0, c.at); got != c.want {
+			t.Errorf("%s：queueRowKey(%q, 0, %d) = %q，want %q", c.name, c.id, c.at, got, c.want)
 		}
 	}
 	// 认不出的那一支和认得出的那一支**永远不会撞**：`Identity` 造出来的键一律
 	// 是 `<local|mv|audio>:<值>`，冒号是它的一部分，所以前缀后面的那个字节就把
 	// 两串分开了。写成 `queue-row:#1` 的话，一首标识正好是 `#1` 的歌就会撞上
 	// 队里第一行那个认不出的项。
-	if queueRowKey("", 1) == queueRowKey("#1", 0) {
+	if queueRowKey("", 0, 1) == queueRowKey("#1", 0, 0) {
 		t.Error("认不出的项和标识正好是「#1」的那一首撞了身份")
 	}
 }

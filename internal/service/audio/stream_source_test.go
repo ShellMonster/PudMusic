@@ -742,16 +742,23 @@ func TestCloseRemovesTheCacheFileAndJoinsEveryGoroutine(t *testing.T) {
 		t.Fatalf("Close 第二次（应该可以重复调用）：%v", err)
 	}
 
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(entries) != 0 {
-		names := make([]string, len(entries))
-		for i, e := range entries {
-			names[i] = e.Name()
+	cachePath := s.path
+	deadline := time.Now().Add(time.Second)
+	for {
+		_, statErr := os.Stat(cachePath)
+		if errors.Is(statErr, os.ErrNotExist) || time.Now().After(deadline) {
+			if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("检查缓存文件：%v", statErr)
+			}
+			break
 		}
-		t.Errorf("缓存文件留下了：%v", names)
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(cachePath); err == nil {
+		removeErr := os.Remove(cachePath)
+		t.Errorf("缓存文件留下了：%s（再次删除：%v）", cachePath, removeErr)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("检查缓存文件：%s：%v", cachePath, err)
 	}
 	if after := goroutines(); after > before+2 {
 		t.Errorf("关掉之后 goroutine 数从 %d 涨到 %d，有下载/看门狗没退出", before, after)

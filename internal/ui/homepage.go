@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -374,7 +375,7 @@ func (h *homePage) SetSongs(songs homeSongs) {
 // ⚠️ **别为了「看着完整」给它补一个大标题**：那是一个上游没有的新元素，而且
 // 这一页顶上已经有三个 Tab 了。真的想要一个页名，走**侧栏那一项**。
 func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
-	// 记一笔「首页建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	// Shared playback, display and cache inputs are sampled once at Shell.View.
 	s.builds.home++
 	s.applyFrameTheme(c)
 	s.home.view(c, s)
@@ -405,7 +406,7 @@ func (s *Shell) syncHome(c *ui.Context) {
 	// 🔴 设置里的「数据显示样式」在**画之前**装给这一屏的三个列表：忘了这一句的
 	// 症状是「设置改了、首页没变」——而首页是用户打开应用看到的第一页，最先发现
 	// 「这个设置没用」的就是这儿。
-	view := s.displayView()
+	view := s.pageDisplayView()
 	for _, l := range h.lists {
 		l.SetView(view)
 	}
@@ -674,19 +675,21 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 	}
 	// 榜单头图：和总览上那张磁贴同一套渐变，大字榜名 + 期数更新日期，
 	// 让二级页一眼认得出是从哪张磁贴进来的。
+	t := c.Theme()
 	var from, to ui.Color
 	for _, tile := range homeTiles {
 		if tile.tab == tab {
-			from, to = tile.from, tile.to
+			from, to, _ = homeTilePalette(t, tile)
 		}
 	}
-	t := c.Theme()
 	ui.Row(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
 		Gradient(from, to, 135).Padding(space.Px16, space.Px24).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
-			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+			titleColor := ink.Ensure(ui.RGBA(255, 255, 255, 1), from, ink.TextContrast)
+			captionColor := ink.Ensure(ui.RGBA(255, 255, 255, 1), from, ink.TextContrast)
+			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).TextColor(titleColor).MaxLines(1)
 			ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-				TextColor(ui.RGBA(255, 255, 255, 0.82)).MaxLines(1)
+				TextColor(captionColor).MaxLines(1)
 		})
 		items := h.lists[tab].Items()
 		if len(items) == 0 || h.acts.Add == nil {
