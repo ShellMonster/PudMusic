@@ -31,6 +31,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -144,4 +145,98 @@ func TestWithoutACachePathTheTempFileIsStillRemoved(t *testing.T) {
 	if _, err := os.Stat(cachePath); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("临时文件还在：%s（检查：%v）", cachePath, err)
 	}
+}
+
+// TestTheCompleteCallbackFiresOnlyWhenTheLengthIsKnown 盯「下完了」那一声。
+//
+// 🔴 **这一条是第一轮那个「截断被当完整」的防线**（2026-10-30 的第二轮
+// 审查指出来的：它原来零覆盖）。
+//
+// 服务器不给 `Content-Length` 时，连接结束**可能**是「被掐了」而不是
+// 「下完了」——而那两种从客户端这一侧**长得一模一样**（都是「读完了」）。
+//
+// ⚠️ **报错了的后果**：上层会把这一份标成「完整的缓存」，而用户切回来
+// 听到的是**放了一半的歌**（或者一段噪声）。
+//
+// ⚠️ **不报的后果**：这一份不会被缓存（下次重新下一遍）——那只是
+// 「没省下流量」，而不会让用户听到坏东西。
+func TestTheCompleteCallbackFiresOnlyWhenTheLengthIsKnown(t *testing.T) {
+	data := payload(32 << 10)
+
+	// ① 服务器给了 `Content-Length` → 报「下完了」，而且长度对得上。
+	t.Run("有 Content-Length 就报", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+			w.Write(data)
+		}))
+		t.Cleanup(srv.Close)
+
+		// 🔴 **原子量**：那个回调跑在**下载 goroutine** 里，而这一边在读
+		// （普通变量在这里是一个实实在在的数据竞争，`-race` 一跑就红）。
+		var got atomic.Int64
+		got.Store(-1)
+		var calls atomic.Int32
+		s, err := NewStreamSource(StreamSourceOptions{
+			URLs:   []string{srv.URL},
+			Client: srv.Client(),
+			OnComplete: func(n int64) {
+				got.Store(n)
+				calls.Add(1)
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.Close() })
+
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) && calls.Load() == 0 {
+			time.Sleep(5 * time.Millisecond)
+		}
+		if calls.Load() == 0 {
+			t.Fatal("等了 10 秒，「下完了」还没报出来")
+		}
+		if got.Load() != int64(len(data)) {
+			t.Errorf("报的长度 = %d，want %d", got.Load(), len(data))
+		}
+		// 🔴 **只报一次**。
+		time.Sleep(200 * time.Millisecond)
+		if calls.Load() != 1 {
+			t.Errorf("报 %d 次，want 1", calls.Load())
+		}
+	})
+
+	// ② 服务器不给 `Content-Length`（chunked）→ **不报**。
+	t.Run("不知道有多长就不报", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 不设 Content-Length → Go 用 chunked。
+			w.Write(data)
+		}))
+		t.Cleanup(srv.Close)
+
+		var calls atomic.Int32
+		s, err := NewStreamSource(StreamSourceOptions{
+			URLs:       []string{srv.URL},
+			Client:     srv.Client(),
+			OnComplete: func(int64) { calls.Add(1) },
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { s.Close() })
+
+		// 等这一趟真的结束（源报了 io.EOF 之后）。
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) {
+			if s.Err() != nil {
+				break
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		// 🔴 **不许报**：长度是猜的，而猜的那个数可能是**截断的长度**。
+		if calls.Load() > 0 {
+			t.Errorf("长度不知道却报了「下完了」（%d 次）——"+
+				"上层会把这一份标成完整的缓存，用户切回来听到的是放了一半的歌", calls.Load())
+		}
+	})
 }

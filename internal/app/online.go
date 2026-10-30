@@ -29,7 +29,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -440,6 +439,16 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			// 不会自己清掉的红字」——那是失败的那一半，这一条是成功的那一半，
 			// 当时漏了。
 			a.clearStaleQualityErr(gen, tr)
+			// 🔴 **顺手把「这个偏好 → 这一档」记下来**（2026-10-30 的第二轮
+			// 审查）：用户点了「无损」而这一首没有无损，B 站给的是 192K——
+			// 于是「无损」和「高音质」在**这一首**上解析到同一档。
+			//
+			// ⚠️ **不记的话用户会白下一整首**：那张映射表是**字节下完那一刻**
+			// 写的，而这一档命中了缓存（字节**根本没重下**），于是「无损」
+			// 这一条永远不会出现——用户切回「高音质」时缓存不命中，整首重下。
+			//
+			// 那正是用户那句话要免掉的事（「已经取到的就别再取」）。
+			a.rememberByteCacheTier(tr.item, q, ref)
 			return
 		}
 		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref, nil)
@@ -529,16 +538,17 @@ func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
 		Label: rec.Label,
 	}
 	// 🔴 **档位要填对**：填 0 的话「选回当前这一档」就不再是无操作。
-	if rec.Tier != "" {
-		if len(rec.Tier) > 1 && rec.Tier[0] == 'm' {
-			if n, err := strconv.Atoi(rec.Tier[1:]); err == nil {
-				ref.MusicTier = bili.MusicTier(n)
-			}
-		} else if len(rec.Tier) > 1 && rec.Tier[0] == 'q' {
-			if n, err := strconv.Atoi(rec.Tier[1:]); err == nil {
-				ref.Quality = bili.Quality(n)
-			}
-		}
+	applyTierToRef(ref, rec.Tier)
+
+	// 🔴 **同一档就别打断**（2026-10-30 的第二轮审查）：这一档和现在在放的
+	// 那一档**是同一档**时，换过去听不出区别——而网络那一路明确不打断
+	// （见 `restreamOnline` 里那个 `SameTier` 短路）。
+	//
+	// ⚠️ **不打断的话位置也不该跳**：用户听着的歌从 482ms 跳到 1210ms
+	// （从头重放）——那是「为一个听不出区别的改动把歌从中间截断」。
+	if sameTierAsCache(rec, tr.ref) {
+		a.clearStaleQualityErr(gen, tr)
+		return
 	}
 
 	a.mu.Lock()
@@ -1340,7 +1350,17 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 	}
 
 	// 🔴 **装上播放器**（和「盘上缓存」那一路共用这一段，见 `installOnlinePlayer`）。
-	a.installOnlinePlayer(it, gen, ref, src, p, at, paused, s, "", "")
+	//
+	// ⚠️ **缓存身份要一起给它**（2026-10-30 的第二轮审查）：走网络这一路
+	// 下载的字节**也**落在缓存里，而它在下完之前是「只有字节、没有记录」
+	// 的那一种——容量淘汰会把它当**孤儿**删掉（而下载还在往那个已被删的
+	// 文件写，字节全丢，于是这一首永远下不完）。
+	cacheTrack, cacheTier := "", ""
+	if byteCacheKeyReady(it) {
+		cacheTrack = byteCacheTrack(it)
+		cacheTier = byteCacheTier(it, ref)
+	}
+	a.installOnlinePlayer(it, gen, ref, src, p, at, paused, s, cacheTrack, cacheTier)
 }
 
 // installOnlinePlayer 把建好的播放器装到 App 上，并让它开始出声。
@@ -1714,9 +1734,19 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	cacheTrack, cacheTier := "", ""
 	if byteCacheKeyReady(it) {
 		cacheTrack = byteCacheTrack(it)
-		cacheTier = byteCacheTier(ref)
+		cacheTier = byteCacheTier(it, ref)
 	}
 	cachePath := a.byteCachePathFor(cacheTrack, cacheTier)
+	// 🔴 **先记下「这一份正在下」**（2026-10-30 的第二轮审查）：字节在下载的
+	// 那一段里是「只有 `.bin`、没有 `.json`」的——而那一档在容量账本之外，
+	// 容量一超限它就会被当**孤儿**删掉（而下载还在往那个已被删的文件写，
+	// 字节全丢，于是这一首永远下不完）。
+	//
+	// ⚠️ **那一份记的是 `Complete: false`**：所以它**不算**能播的缓存
+	// （见 `streamaudio.Cache.Complete`）——「正在下」和「下完了」是两件事。
+	if cachePath != "" {
+		_ = a.byteCacheSnapshot().StartBytes(cacheTrack, cacheTier)
+	}
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,

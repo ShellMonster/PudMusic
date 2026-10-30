@@ -12,6 +12,7 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -63,8 +64,14 @@ func TestABrokenCacheDoesNotLoopForever(t *testing.T) {
 	waitFor(t, 10*time.Second, "A 首开始出声", func() bool {
 		return a.Snapshot().Title == "A 首"
 	})
+	// 🔴 **等的是「缓存记上了『下完了』」**：`.bin` 是**建源那一刻**就
+	// `O_TRUNC` 出来的空文件——拿它当「下完了」的证据的话，慢网下测试会在
+	// 只下了几 KB 的时候就把文件「弄坏」，测的其实是「下到一半的缓存」。
+	//
+	// ⚠️ **「下完了」的唯一外部证据是那份记录里的 `complete: true`**
+	// （见 `streamaudio.Bytes.Complete`）。
 	waitFor(t, 10*time.Second, "A 首下完", func() bool {
-		return len(cacheFiles(t, cacheDir, ".bin")) > 0
+		return cacheHasComplete(t, cacheDir, "online|mv|BV1|A|")
 	})
 
 	// 🔴 **把盘上那份弄坏**：内容变成垃圾，而**大小不变**。
@@ -199,6 +206,22 @@ func TestTheRestoreKeepsItsPositionAndStaysSilent(t *testing.T) {
 	}
 }
 
+// cacheHasComplete 报缓存目录里有没有「这一首、下完了」的记录。
+func cacheHasComplete(t *testing.T, dir, track string) bool {
+	t.Helper()
+	for _, p := range cacheFiles(t, dir, ".json") {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(raw), `"track":"`+track+`"`) &&
+			strings.Contains(string(raw), `"complete":true`) {
+			return true
+		}
+	}
+	return false
+}
+
 // cacheFiles 列出缓存目录里带某个后缀的文件。
 func cacheFiles(t *testing.T, dir, suffix string) []string {
 	t.Helper()
@@ -213,4 +236,64 @@ func cacheFiles(t *testing.T, dir, suffix string) []string {
 		}
 	}
 	return out
+}
+
+// TestAnotherPreferenceThatLandsOnTheSameTierReusesTheBytes 盯「两个偏好
+// 落在同一档时共用一份字节」。
+//
+// 🔴 **这是用户那句话最核心的一个场景**（2026-10-30 的第二轮审查）：
+// 用户点了「无损」，而这一首没有无损——B 站给 192K。于是：
+//
+//	「无损」→ q30280
+//	「高音质」→ q30280	（同一档！）
+//
+// 而「偏好 → 档」那张表是**字节下完那一刻**写的。如果切档那一趟命中了
+// 缓存（字节**根本没重下**），那张表就**永远不会补上**「无损」这一条。
+//
+// 于是用户切回「高音质」时**缓存不命中**——整首重下一遍。那正是用户要
+// 免掉的事（「已经取到的就别再取」）。
+func TestAnotherPreferenceThatLandsOnTheSameTierReusesTheBytes(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
+
+	a, cacheDir := newCacheApp(t, f)
+
+	// 先按默认偏好（高音质）下完。
+	if err := a.PlayFrom(onlineItem("BV1", "A", "A 首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "A 首开始出声", func() bool {
+		return a.Snapshot().Title == "A 首"
+	})
+	waitFor(t, 10*time.Second, "A 首下完", func() bool {
+		return cacheHasComplete(t, cacheDir, "online|mv|BV1|A|")
+	})
+
+	// 🔴 **切到「无损」**：这一首没有无损，B 站给的还是 192K（同一档）。
+	//
+	// ⚠️ **切档那一趟**会走网络（去问 B 站要那一档的地址，好知道它是不是
+	// 同一档）——所以「CDN 被拉了」不是判据。判据在**最后**：
+	// 切回来的时候不用重下。
+	a.SetAudioQuality(bili.AudioLossless)
+	time.Sleep(500 * time.Millisecond)
+
+	// 切走，再切回（用默认偏好）。
+	if err := a.PlayFrom(onlineItem("BV1", "B", "B 首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "B 首开始出声", func() bool {
+		return a.Snapshot().Title == "B 首"
+	})
+	hitsBeforeA := f.mediaHitsFor("/cdn/a.flac")
+	if err := a.PlayFrom(onlineItem("BV1", "A", "A 首")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "A 首回来", func() bool {
+		return a.Snapshot().Title == "A 首"
+	})
+	if got := f.mediaHitsFor("/cdn/a.flac"); got > hitsBeforeA {
+		t.Errorf("切回 A 那一趟，CDN 又被拉了 %d 次——"+
+			"「偏好 → 档」那张表缺了「无损」这一条，于是同一段字节被重下一遍", got-hitsBeforeA)
+	}
 }

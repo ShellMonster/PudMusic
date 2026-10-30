@@ -15,9 +15,11 @@ package streamaudio
 // 而「为什么」要读好几层代码才知道。
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -343,4 +345,37 @@ func TestTheRecordIsFoundByItsFileName(t *testing.T) {
 	if _, err := os.Stat(c.BytesPath(track, tier)); !os.IsNotExist(err) {
 		t.Error("真正的那个字节文件没被删——淘汰靠记录里那一栏算路径就找错了文件")
 	}
+}
+
+// TestProtectAndEvictDoNotRace 盯「保护那一栏和淘汰不打架」。
+//
+// 🔴 **这是 runtime fatal，不是脏读**：`Protect` 是**应用层**的 goroutine
+// 在写（切歌 / 换音质），而 `Evict` 是**下载 goroutine** 在跑
+// （`SaveBytes` → `Evict`）。裸 map 并发读写 = Go runtime 直接
+// `fatal error: concurrent map read and map write`——整个应用崩掉。
+//
+// ⚠️ **要 `-race` 才验得到**：没有 race detector 的话，坏掉的只是
+// 「保护有时候不生效」——而那要等容量超限才显形。
+func TestProtectAndEvictDoNotRace(t *testing.T) {
+	c := NewCache(t.TempDir()).WithCapacity(1)
+	track := "online|mv|BV1|1|"
+
+	var wg sync.WaitGroup
+	// 一边在切歌（写保护栏），一边在下歌（触发淘汰）。
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			c.Protect(track, "q30280")
+			c.Unprotect(track, "q30280")
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 200; i++ {
+			writeBytesFile(t, c, track, fmt.Sprintf("q%d", 30200+i), 100)
+			_ = c.SaveBytes(track, fmt.Sprintf("q%d", 30200+i), 100, "x", Meta{})
+		}
+	}()
+	wg.Wait()
 }

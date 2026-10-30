@@ -75,6 +75,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -173,6 +174,17 @@ type Cache struct {
 	// 才保得住它。用户数据目录里堆满了缓存的时候，正在听的歌会被删掉，
 	// 歌就断了（那是最不能接受的一种后果）。
 	protect map[string]bool
+	// mu 护着这个结构体。
+	//
+	// 🔴 **它必须有**（2026-10-30 的第二轮审查）：`Protect` / `Unprotect`
+	// 是**应用层**的 goroutine 在写（切歌 / 换音质），而 `Evict` 是
+	// **下载 goroutine** 在读（`SaveBytes` → `Evict`）。裸 map 并发读写
+	// 不是「读到脏值」，是 Go runtime 直接 `fatal error: concurrent map
+	// read and map write` ——整个应用崩掉。
+	//
+	// ⚠️ **锁的粒度是「一个 Cache 实例一把」**：这一层不碰别的锁，
+	// 所以不会有锁顺序问题（`a.mu` 那把锁在应用层，两者不交叉）。
+	mu sync.Mutex
 }
 
 // NewCache 建一个落在 dir 的缓存。**建目录**：不在的话第一次写会失败，
@@ -345,6 +357,32 @@ func (c *Cache) SaveBytes(track, tier string, size int64, label string, meta Met
 	return nil
 }
 
+// StartBytes 记下「这一份正在下」。
+//
+// 🔴 **它为什么必须存在**：字节在下载的那一段里是「只有 `.bin`、没有
+// `.json`」的——而那一档在容量账本之外，容量一超限它就会被当**孤儿**删掉
+// （而下载还在往那个已被删的文件写，字节全丢，于是这一首永远下不完）。
+//
+// ⚠️ **它写的那一份 `Complete` 是 false**：所以它**不算**一份能播的缓存
+// （见 `Complete` 的判据）——「正在下」和「下完了」是两件事。
+//
+// ⚠️ **`Size` 是 -1**：还不知道有多长（而「猜一个长度」正是第一轮审查
+// 挖出来的那个「截断被当完整」的坑）。
+func (c *Cache) StartBytes(track, tier string) error {
+	if c.dir == "" {
+		return nil
+	}
+	now := c.now()
+	return c.writeBytes(Bytes{
+		Track:     track,
+		Tier:      tier,
+		Size:      -1,
+		Complete:  false,
+		FetchedAt: now,
+		TouchedAt: now,
+	})
+}
+
 // SavePref 记下「这个曲目、这个偏好解析到了那一档」。
 //
 // ⚠️ **它在「字节下完之后」才调**：映射表指向的档必须真的有字节。
@@ -375,7 +413,9 @@ func (c *Cache) Protect(track, tier string) {
 	if c.dir == "" {
 		return
 	}
+	c.mu.Lock()
 	c.protect[protectKey(track, tier)] = true
+	c.mu.Unlock()
 }
 
 // Unprotect 解除「这一份正在用」。
@@ -383,7 +423,16 @@ func (c *Cache) Unprotect(track, tier string) {
 	if c.dir == "" {
 		return
 	}
+	c.mu.Lock()
 	delete(c.protect, protectKey(track, tier))
+	c.mu.Unlock()
+}
+
+// isProtected 报这一份是不是「正在用」。
+//
+// ⚠️ **必须在持 `c.mu` 时调**（`Evict` 那一处）。
+func (c *Cache) isProtected(track, tier string) bool {
+	return c.protect[protectKey(track, tier)]
 }
 
 // protectKey 是「曲目 + 档」的保护键。
@@ -466,6 +515,16 @@ func (c *Cache) Evict() {
 	if c.dir == "" || c.capacity <= 0 {
 		return
 	}
+	// 🔴 **锁住整轮淘汰**（2026-10-30 的第二轮审查）：`Protect` /
+	// `Unprotect` 是应用层的 goroutine 在写，而这一轮是**下载 goroutine**
+	// 在跑（`SaveBytes` → `Evict`）。裸 map 并发读写是 Go runtime 的
+	// `fatal error`，不是温和的脏读。
+	//
+	// ⚠️ **这一层不碰别的锁**（应用层那把 `a.mu` 与它不交叉），
+	// 所以这里不会锁顺序问题。
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	entries, err := c.readAll()
 	if err != nil {
 		return
@@ -484,7 +543,7 @@ func (c *Cache) Evict() {
 		if total <= c.capacity {
 			return
 		}
-		if c.protect[protectKey(e.Track, e.Tier)] {
+		if c.isProtected(e.Track, e.Tier) {
 			continue
 		}
 		size := int64(0)

@@ -87,13 +87,20 @@ func byteCachePref(q bili.AudioQuality) string { return strconv.Itoa(int(q)) }
 //
 // ⚠️ **投稿那一路和音乐库那一路是两套编号**（见 `bili.SameTier`）：
 // 投稿的档在 `Quality`（30280 这种），音乐库的档在 `MusicTier`（0..3）。
-// 用哪一套要看 `it.Type`——而 `ref` 自己会告诉你它是哪一路
-// （音乐库那一路 `MusicTier` 非零）。
-func byteCacheTier(ref *bili.StreamRef) string {
+//
+// ⚠️ **用哪一套要看 `it.Type`，不能看 `ref.MusicTier != 0`**：
+// `MusicTier128` 就是 **0**（见 `bili.MusicTier`），而 `QualityUnknown`
+// 也是 **0**——于是音乐库的 128K 档会被标成 `"q0"`，和投稿的
+// `QualityUnknown` **共用同一个档标识**。
+//
+// ⚠️ **那两者的曲目键不同**（`source|type|bvid|cid|sid`），所以眼下撞不上。
+// 但那是**碰巧**——判据要立在「这一条是音乐库还是投稿」上，而不是
+// 「档位数值是不是零」。
+func byteCacheTier(it Item, ref *bili.StreamRef) string {
 	if ref == nil {
 		return ""
 	}
-	if ref.MusicTier != 0 {
+	if it.Type == "audio" {
 		return "m" + strconv.Itoa(int(ref.MusicTier))
 	}
 	return "q" + strconv.Itoa(int(ref.Quality))
@@ -113,12 +120,31 @@ func (a *App) byteCacheSnapshot() *streamaudio.Cache {
 // ⚠️ **它要连元数据一起拿**：命中缓存时不问 B 站，那么作者名、封面、
 // 字幕那一对的 bvid/cid 都得**从上一次存下来的**拿（见 `streamaudio.Meta`），
 // 否则那些格子会空着。
+//
+// 🔴 **命中之后要把映射补上**（2026-10-30 的第二轮审查）：
+// 「偏好 → 档」那张表是**字节下完那一刻**写的（`markByteCacheComplete`），
+// 而命中缓存时字节**根本没重下**——于是那张表可能缺这一条。
+//
+// 缺了会怎样：用户从「高音质」切到「无损」（而这一首只有 192K，两档解析到
+// 同一档），再切回「高音质」时**缓存不命中**——整首重下一遍。
+// 那正是用户那句话要免掉的事（「已经取到的就别再取」）。
+//
+// ⚠️ **补的时候不能覆盖已有的**：那张表记的是「这个偏好解析到了哪一档」，
+// 而**同一个偏好在不同的歌上解析到不同的档**——所以只补**这一首**这一条。
 func (a *App) cachedAudio(it Item, q bili.AudioQuality) (streamaudio.Bytes, bool) {
 	c := a.byteCacheSnapshot()
 	if c == nil {
 		return streamaudio.Bytes{}, false
 	}
-	return c.Lookup(byteCacheTrack(it), byteCachePref(q))
+	track := byteCacheTrack(it)
+	rec, ok := c.Lookup(track, byteCachePref(q))
+	if !ok {
+		return streamaudio.Bytes{}, false
+	}
+	// 🔴 **补上「这个偏好 → 这一档」**：查缓存这件事本身就证明了
+	// 「这个偏好在**这一首**上解析到了这一档」。
+	_ = c.SavePref(track, byteCachePref(q), rec.Tier)
+	return rec, true
 }
 
 // buildFromCachedBytes 用盘上那份字节建播放链路。
@@ -195,7 +221,7 @@ func (a *App) markByteCacheComplete(it Item, q bili.AudioQuality, ref *bili.Stre
 		return
 	}
 	track := byteCacheTrack(it)
-	tier := byteCacheTier(ref)
+	tier := byteCacheTier(it, ref)
 	if tier == "" {
 		return
 	}
@@ -274,6 +300,18 @@ func (a *App) releaseByteCacheProtect(tr *onlineTrack) {
 // （用户看到的是「点了歌完全没反应」）。所以这里走的是
 // `runOnlineWithoutCache`——**跳过缓存判定**的那一条路。
 func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time.Duration, paused bool, run *loadRun) {
+	// 🔴 **把界面上要用的那些字段补回来**（2026-10-30 的第二轮审查）：
+	// 命中缓存时**不问 B 站**，所以作者名、封面、字幕那一对的 bvid/cid
+	// 都得**从上一次存下来的**拿（`streamaudio.Meta`）。
+	//
+	// ⚠️ **音乐库那一路尤其要紧**：那一路要问一次 `song/info` 才能补上
+	// 作者名，而它**也在缓存命中时被跳过了**——于是播放条上的作者名空着，
+	// 而 `fetchBiliSubtitle` 没有 `SubtitleBvid` / `SubtitleCid` 就问不出
+	// 字幕地址——**歌词没了**。
+	//
+	// ⚠️ **只在空着的时候补**：调用方给的新值（比如用户刚改的封面）
+	// 不该被上一次存下来的那份盖掉。
+	it = it.withMeta(rec.Meta)
 	s := a.streamingSnapshot()
 	p, err := a.buildFromCachedBytes(a.byteCachePathFor(rec.Track, rec.Tier), run)
 	if err != nil {
@@ -295,25 +333,109 @@ func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time
 		Label:   rec.Label,
 		Quality: bili.QualityUnknown,
 	}
-	// ⚠️ **档位要填对**：填 0 的话「选回当前这一档」就不再是无操作——
+	// 🔴 **档位要填对**：填 0 的话「选回当前这一档」就不再是无操作——
 	// 用户点一下音质 chip 就会打断正在播的歌并重新下一遍（见
 	// `bili.SameTier`）。
-	if rec.Tier != "" {
-		if len(rec.Tier) > 1 && rec.Tier[0] == 'm' {
-			if n, err := strconv.Atoi(rec.Tier[1:]); err == nil {
-				ref.MusicTier = bili.MusicTier(n)
-			}
-		} else if len(rec.Tier) > 1 && rec.Tier[0] == 'q' {
-			if n, err := strconv.Atoi(rec.Tier[1:]); err == nil {
-				ref.Quality = bili.Quality(n)
-			}
-		}
-	}
+	applyTierToRef(ref, rec.Tier)
 	// 🔴 **这一份正在用，不许淘汰**（见 `streamaudio.Cache.Protect`）。
 	a.protectByteCache(rec.Track, rec.Tier)
 	// ⚠️ **`a.online.source` 是 nil**：这一路没有字节源（字节已经在盘上了）。
 	// 读它的地方都判 nil（见 `reconnect.go` 和 `online.go` 的那几处）。
 	a.installOnlinePlayer(it, gen, ref, nil, p, at, paused, s, rec.Track, rec.Tier)
+}
+
+// rememberByteCacheTier 记下「这一首、这个偏好 → 这一档」。
+//
+// 🔴 **它为什么必须存在**（2026-10-30 的第二轮审查）：用户点了「无损」而
+// 这一首没有无损，B 站给的是 192K——于是「无损」和「高音质」在**这一首**上
+// 解析到**同一档**。
+//
+// 而「偏好 → 档」那张表是**字节下完那一刻**写的——命中缓存的时候字节
+// **根本没重下**，于是那张表永远缺这一条。用户切回另一个偏好时缓存不命中，
+// **整首重下一遍**。那正是用户那句话要免掉的事。
+//
+// ⚠️ **它只在「这一档的字节确实在盘上」时才记**：映射表指向的档必须真的有
+// 字节，否则下一次查缓存会指向一份不存在的东西。
+func (a *App) rememberByteCacheTier(it Item, q bili.AudioQuality, ref *bili.StreamRef) {
+	c := a.byteCacheSnapshot()
+	if c == nil {
+		return
+	}
+	track := byteCacheTrack(it)
+	tier := byteCacheTier(it, ref)
+	if tier == "" {
+		return
+	}
+	// 🔴 **这一档的字节必须在**：不然那张表会指向一份不存在的东西。
+	if _, ok := c.Complete(track, tier); !ok {
+		return
+	}
+	_ = c.SavePref(track, byteCachePref(q), tier)
+}
+
+// applyTierToRef 把档标识填回 `StreamRef` 的档位栏。
+//
+// 🔴 **它必须有**：填 0 的话「选回当前这一档」就不再是无操作——用户点一下
+// 音质 chip 就会打断正在播的歌并重新下一遍（判据是 `bili.SameTier`，
+// 它比的就是那两个栏）。
+func applyTierToRef(ref *bili.StreamRef, tier string) {
+	if ref == nil || tier == "" || len(tier) < 2 {
+		return
+	}
+	n, err := strconv.Atoi(tier[1:])
+	if err != nil {
+		return
+	}
+	switch tier[0] {
+	case 'm':
+		ref.MusicTier = bili.MusicTier(n)
+	case 'q':
+		ref.Quality = bili.Quality(n)
+	}
+}
+
+// sameTierAsCache 报「缓存里这一档」和「现在在放的那一档」是不是同一档。
+//
+// ⚠️ **它比的是档本身，不是徽章文字**：徽章是给人看的（会被改写），
+// 而档位才是「听得出区别吗」的判据（见 `bili.SameTier`）。
+func sameTierAsCache(rec streamaudio.Bytes, ref *bili.StreamRef) bool {
+	if ref == nil {
+		return false
+	}
+	cached := &bili.StreamRef{}
+	applyTierToRef(cached, rec.Tier)
+	// 🔴 **两栏都要看**：音乐库那一路只有 `MusicTier`，投稿那一路只有
+	// `Quality`（见 `bili.SameTier` 的注释）。
+	if cached.MusicTier != 0 || ref.MusicTier != 0 {
+		return cached.MusicTier == ref.MusicTier
+	}
+	return cached.Quality == ref.Quality
+}
+
+// withMeta 把缓存里存着的那些界面字段**补进**这一项（只在空着的时候）。
+//
+// ⚠️ **只在空着的时候补**：调用方给的新值（用户刚改的封面、刚从 B 站
+// 问来的作者名）不该被上一次存下来的那份盖掉——那是**倒退**。
+func (it Item) withMeta(m streamaudio.Meta) Item {
+	if it.Title == "" {
+		it.Title = m.Title
+	}
+	if it.Cover == "" {
+		it.Cover = m.Cover
+	}
+	if it.Artist == "" {
+		it.Artist = m.Artist
+	}
+	if it.ArtistMid == 0 {
+		it.ArtistMid = m.ArtistMid
+	}
+	if it.SubtitleBvid == "" {
+		it.SubtitleBvid = m.SubtitleBvid
+	}
+	if it.SubtitleCid == "" {
+		it.SubtitleCid = m.SubtitleCid
+	}
+	return it
 }
 
 // currentQuality 报当前那一份音质偏好。

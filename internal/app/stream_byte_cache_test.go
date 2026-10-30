@@ -153,8 +153,13 @@ func TestTheCacheIsUsedOnlyForTheSameTrack(t *testing.T) {
 		return a.Snapshot().Title == "A 首"
 	})
 	// 等它真的下完（字节数到了整首）。
+	// 🔴 **等的是「缓存记上了『下完了』」**：`mediaHits > 0` 只是「第一个字节
+	// 到了」——而界面上的「开始出声」也是那一刻。慢网下测试会在只下了几 KB
+	// 的时候就往下走，于是这一条验的是「下到一半的缓存」。
+	//
+	// ⚠️ **「下完了」的唯一外部证据是那份记录里的 `complete: true`**。
 	waitFor(t, 10*time.Second, "A 首下完", func() bool {
-		return f.mediaHits.Load() > 0
+		return cacheHasComplete(t, cacheDir, "online|mv|BV1|A|")
 	})
 	// 切到 B（不同的一首）再切回 A。
 	if err := a.PlayFrom(onlineItem("BV1", "B", "B 首")); err != nil {
