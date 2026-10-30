@@ -29,6 +29,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -98,6 +99,22 @@ func (b *streamCacheBili) hitsFor(path string) int {
 	return b.cdnByPath[path]
 }
 
+// cacheJSONs 列出缓存目录里那些记录文件。
+func cacheJSONs(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("读缓存目录：%v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".json" {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out
+}
+
 func writeStreamCacheJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
@@ -128,26 +145,66 @@ func TestSwitchingBackDoesNotHitTheNetwork(t *testing.T) {
 		CacheDir: cacheDir,
 	})
 
-	// A → B → A：A 第二次播的时候，CDN 不该再被拉。
-	for i, cid := range []string{"A", "B", "A"} {
-		if err := a.PlayFrom(app.Item{
-			Source: "online", Type: "mv", Bvid: "BV1", Cid: cid,
-			Title: "第 " + cid + " 首",
-		}); err != nil {
-			t.Fatalf("第 %d 次切到 %s：%v", i+1, cid, err)
-		}
-		waitFor(t, "「第 "+cid+" 首」开始出声", func() bool {
-			return a.Snapshot().Title == "第 "+cid+" 首"
-		})
+	// 先播 A，让它下完（盘上有了那份字节）。
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A",
+		Title: "第 A 首",
+	}); err != nil {
+		t.Fatal(err)
 	}
-
-	// 🔴 **A 那一条 CDN 路径只该被拉一次**。
+	waitFor(t, "「第 A 首」开始出声", func() bool {
+		return a.Snapshot().Title == "第 A 首"
+	})
+	// 🔴 **等它真的下完**：界面上「开始出声」的那一刻**字节可能还没下完**
+	// （边下边播），而缓存是**下完**那一刻才记的。
 	//
-	// ⚠️ **判据是「同一条路径」，不是「总数」**：总数是 2（A 一次、B 一次），
-	// 而「每一首各一次」是对的——A 被拉两次才是错的。
-	if got := b.hitsFor("/cdn/A.flac"); got > 1 {
-		t.Errorf("A 的 CDN 路径被拉了 %d 次，want ≤1——"+
-			"下过的字节没有留在盘上，用户每切回去一次就白下一整首", got)
+	// ⚠️ **等的是「缓存目录里有了那一份的记录」**：那是「下完了」的**唯一**
+	// 外部可见的证据（CDN 被拉过 ≠ 下完了）。
+	waitFor(t, "A 首下完（缓存记上了）", func() bool {
+		for _, p := range cacheJSONs(t, cacheDir) {
+			raw, _ := os.ReadFile(p)
+			if strings.Contains(string(raw), `"track":"online|mv|BV1|A|"`) &&
+				strings.Contains(string(raw), `"complete":true`) {
+				return true
+			}
+		}
+		return false
+	})
+
+	// 切到 B（**另一首**）——让界面上那一首真的换掉。
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "B",
+		Title: "第 B 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "「第 B 首」开始出声", func() bool {
+		return a.Snapshot().Title == "第 B 首"
+	})
+
+	// 🔴 **切回 A 那一趟，CDN 一个字节都不该再要**。
+	//
+	// ⚠️ **判据是「切回去之前 vs 之后」的差**，不是总数：第一次播 A 的时候
+	// CDN 本来就会被拉——而且可能不止一次（字节源会**并行**发一条 Range
+	// 请求去取文件末尾那一段，好让解码器立刻拿到 `moov`）。
+	//
+	// ⚠️ **差值必须是 0**：切回去那一趟**一个字节都不该再要**。
+	//
+	// ⚠️ **等的是「A 真的在放」**：切回去之前界面上是 B，所以「标题是 A」
+	// 这一条**只会在新那一趟装上之后才成立**——而那正是要量的那一趟。
+	hitsBefore := b.hitsFor("/cdn/A.flac")
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A",
+		Title: "第 A 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "「第 A 首」回来", func() bool {
+		return a.Snapshot().Title == "第 A 首"
+	})
+	if got := b.hitsFor("/cdn/A.flac"); got != hitsBefore {
+		t.Errorf("切回 A 那一趟，CDN 又被拉了 %d 次——"+
+			"下过的字节没有留在盘上，用户每切回去一次就白下一整首", got-hitsBefore)
 	}
 
 	// 🔴 **缓存文件真的留在盘上**。

@@ -122,6 +122,16 @@ type streamFixture struct {
 
 	// failMediaAfter > 0 时，发到这个字节就掐断连接（模拟地址中途失效）。
 	failMediaAfter int
+	// alwaysTruncateAt > 0 时，**每一次**请求都只发这么多字节就掐断
+	// （模拟「这一首就是下不完」：限流、CDN 边缘节点只发一半）。
+	//
+	// ⚠️ **它是「这一次发多少」，不是「发到第几个字节」**：断流之后源会用
+	// Range 从断的地方接着下，而那个起点已经不小了——按绝对偏移算的话，
+	// 重试那一次就下完了，而「这一首下不完」就造不出来。
+	//
+	// ⚠️ **它和 `failMediaAfter` 不是一回事**：那一条只掐第一次
+	// （`mediaOnce`），而这一条**每一次**都掐。
+	alwaysTruncateAt int
 	// mediaGate 关掉之后才真的掐断。理由见 audio 包里同名 helper。
 	mediaGate chan struct{}
 	mediaOnce sync.Once
@@ -335,6 +345,13 @@ func (f *streamFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
 
 	// Content-Length 写的是**这一次实际会发多少**，不是整段长度。写成总长的话，
 	// 声明和实际对不上，客户端读到的是 unexpected EOF。
+	//
+	// 🔴 **`alwaysTruncateAt` 不改 Content-Length**（2026-10-30）：它模拟的是
+	// 「连接中途断了」——服务器**说了**这一份有多长，然后只发了前面一段就断了。
+	// 而那正是真实世界里的形态（B 站的 CDN 说了总长，然后连接被掐了）。
+	//
+	// ⚠️ **改了 Content-Length 的话那个源就「名正言顺」地认为这一份只有那么长**
+	// ——那不是「截断」，那是「服务器说它就这么大」。两回事。
 	w.Header().Set("Content-Length", fmt.Sprint(len(data)-start))
 	if start > 0 {
 		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(data)-1, len(data)))
@@ -345,6 +362,23 @@ func (f *streamFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
 		w.Write(data[start:f.failMediaAfter])
 		w.(http.Flusher).Flush()
 		f.mediaOnce.Do(func() { <-f.mediaGate })
+		panic(http.ErrAbortHandler)
+	}
+	// 🔴 **每一次都只发这么多**：模拟「这一首就是下不完」
+	// （限流、CDN 边缘节点只发一半）。
+	//
+	// ⚠️ **按「这一次发多少」算，不按绝对偏移**：断流之后源会用 Range
+	// 从断的地方接着下，而那个起点已经不小了——按绝对偏移算的话，
+	// 重试那一次就下完了，而「这一首下不完」就造不出来。
+	if f.alwaysTruncateAt > 0 {
+		end := start + f.alwaysTruncateAt
+		if end > len(data) {
+			end = len(data)
+		}
+		w.Write(data[start:end])
+		w.(http.Flusher).Flush()
+		// 🔴 **连接被掐断**（不是「正常读完」）：Content-Length 说好了
+		// 还有更多，而 body 到这儿就断了——客户端读到的是 unexpected EOF。
 		panic(http.ErrAbortHandler)
 	}
 	w.Write(data[start:])

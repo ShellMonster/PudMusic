@@ -299,9 +299,22 @@ type StreamSource struct {
 	gauge  *perf.Gauges
 	filled int64 // 已经下到缓存里的字节数（下载前沿）
 	size   int64 // 总长；-1 是还不知道
-	cur    int64 // 读游标
-	err    error // 终态错误；io.EOF 是「正常读完」
-	closed bool
+	// sizeKnown 说的是「**这个长度是服务器说的**」。
+	//
+	// 🔴 **它和 `size >= 0` 不是一回事**（2026-10-30）：服务器不给
+	// `Content-Length` 时，下载可能**中途结束**（chunked + 提前断开），
+	// 而这时候 `size` 会被设成「下到了多少」——那是**截断的长度**，
+	// 不是总长。
+	//
+	// ⚠️ **把截断的长度当总长**，上层就会以为「这一份是完整的」——
+	// 而用户切回来听到的是放了一半的歌（见 `reportComplete` 的注释）。
+	//
+	// ⚠️ **只有服务器明说过的长度才是「知道」**：`Options.Size` 给的、
+	// `Content-Length` 报的、`Content-Range` 的 `/total` 算的。
+	sizeKnown bool
+	cur       int64 // 读游标
+	err       error // 终态错误；io.EOF 是「正常读完」
+	closed    bool
 
 	// tailStart 是「单独取回来的尾部那一段」的起点。-1 = 没在取尾部。
 	//
@@ -444,6 +457,8 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		// 🔴 **持久缓存不删**（见 `persistent` 那字段）：临时文件照旧删。
 		persistent: o.CachePath != "",
 		size:       o.Size,
+		// 🔴 **调用方给了长度，那长度就是「服务器说的」**（见 `sizeKnown`）。
+		sizeKnown: o.Size > 0,
 		// ⚠️ **-1 而不是零值**：零值是「第 0 个字节起就是尾部」，
 		// 那会让 `availAt` 把整个顺序下载区都当成「已经单独取回来了」。
 		tailStart:    -1,
@@ -791,8 +806,27 @@ func (s *StreamSource) reportComplete() {
 		s.mu.Unlock()
 		return
 	}
+	// 🔴 **「长度是猜的」就不报**（2026-10-30）：服务器不给
+	// `Content-Length` 时，连接结束**可能**是「被掐了」而不是「下完了」——
+	// 而那两种从客户端这一侧长得一模一样（都是「读完了」）。
+	//
+	// ⚠️ **报错了的后果**：上层会把这一份标成「完整的缓存」，而用户切回来
+	// 听到的是**放了一半的歌**（或者一段噪声）。
+	//
+	// ⚠️ **不报的后果**：这一份不会被缓存（下次重新下一遍）——那只是
+	// 「没省下流量」，而不会让用户听到坏东西。
+	//
+	// 判据是 `sizeKnown`（见那一栏的注释）：只有**服务器明说过的**长度
+	// 才算数。
+	if !s.sizeKnown {
+		s.mu.Unlock()
+		return
+	}
 	s.completeSeen = true
-	size := s.size
+	// 🔴 **报的是「盘上实际有多少字节」**（`filled`），不是 `size`：
+	// 上层拿它跟盘上那个文件的大小比对（`CompleteEntry` 的第三个判据），
+	// 报错了会判成「没下完」。
+	size := s.filled
 	onComplete := s.onComplete
 	s.mu.Unlock()
 	if onComplete != nil {

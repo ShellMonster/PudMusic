@@ -26,6 +26,7 @@ package app_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,7 +45,6 @@ func TestSwitchingBackAndForthDoesNotDownloadTwice(t *testing.T) {
 
 	cacheDir := t.TempDir()
 	a := app.New()
-	t.Cleanup(a.Close)
 	cli := bili.NewClient(bili.Options{})
 	cli.TestOnlyPointHostsAtFixture(f.URL)
 	a.MountStreaming(app.Streaming{
@@ -53,6 +53,11 @@ func TestSwitchingBackAndForthDoesNotDownloadTwice(t *testing.T) {
 		TempDir:  t.TempDir(),
 		CacheDir: cacheDir,
 	})
+	// 🔴 **先关应用，再让 `t.TempDir()` 收尾**：清理是**倒序**跑的，
+	// 而 `t.TempDir()` 的清理是在它被调用的那一刻登记的——比这里登记的
+	// `a.Close` **早**。于是缓存目录会在字节源还开着那个文件的时候被删，
+	// 收尾报「directory not empty」（Windows 上那更是删不掉）。
+	t.Cleanup(a.Close)
 
 	// A → B → A：A 第二次播的时候不该再从 CDN 拉一遍。
 	for i, who := range []string{"A", "B", "A"} {
@@ -68,7 +73,7 @@ func TestSwitchingBackAndForthDoesNotDownloadTwice(t *testing.T) {
 	//
 	// ⚠️ **判据是「同一条路径被打了多少次」，不是「总数」**：总数是 2
 	// （A 一次、B 一次）——**每一首各一次才是对的**，而 A 被拉两次才是错的。
-	if got := f.mediaHitsFor("/cdn/a.flac"); got > 1 {
+	if got := f.mediaHitsFor("/cdn/A.flac"); got > 1 {
 		t.Errorf("A 的 CDN 路径被打了 %d 次，want ≤1——"+
 			"下过的字节没有留在盘上，用户每切回去一次就白下一整首", got)
 	}
@@ -126,7 +131,6 @@ func TestTheCacheIsUsedOnlyForTheSameTrack(t *testing.T) {
 
 	cacheDir := t.TempDir()
 	a := app.New()
-	t.Cleanup(a.Close)
 	cli := bili.NewClient(bili.Options{})
 	cli.TestOnlyPointHostsAtFixture(f.URL)
 	a.MountStreaming(app.Streaming{
@@ -135,6 +139,11 @@ func TestTheCacheIsUsedOnlyForTheSameTrack(t *testing.T) {
 		TempDir:  t.TempDir(),
 		CacheDir: cacheDir,
 	})
+	// 🔴 **先关应用，再让 `t.TempDir()` 收尾**：清理是**倒序**跑的，
+	// 而 `t.TempDir()` 的清理是在它被调用的那一刻登记的——比这里登记的
+	// `a.Close` **早**。于是缓存目录会在字节源还开着那个文件的时候被删，
+	// 收尾报「directory not empty」（Windows 上那更是删不掉）。
+	t.Cleanup(a.Close)
 
 	// 先放 A，让它下完。
 	if err := a.PlayFrom(onlineItem("BV1", "A", "A 首")); err != nil {
@@ -196,13 +205,16 @@ func TestTheCacheIsUsedOnlyForTheSameTrack(t *testing.T) {
 func TestAPartialDownloadIsNotMistakenForACompleteOne(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
-	// 🔴 **CDN 掐在 4096 字节**：这一首永远下不完。
-	f.failMediaAfter = 4096
+	// 🔴 **CDN 永远只发 4096 字节**：这一首下不完。
+	//
+	// ⚠️ **要「永远」那一条**：断流之后源会重试，而重试那一次就下完了
+	// （`failMediaAfter` 只掐第一次）——那样这一首最终还是完整的，
+	// 而这一条用例就测不到「下了一半」。
+	f.alwaysTruncateAt = 4096
 	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), int(bili.QualityHigh192), 110836))
 
 	cacheDir := t.TempDir()
 	a := app.New()
-	t.Cleanup(a.Close)
 	cli := bili.NewClient(bili.Options{})
 	cli.TestOnlyPointHostsAtFixture(f.URL)
 	a.MountStreaming(app.Streaming{
@@ -211,6 +223,11 @@ func TestAPartialDownloadIsNotMistakenForACompleteOne(t *testing.T) {
 		TempDir:  t.TempDir(),
 		CacheDir: cacheDir,
 	})
+	// 🔴 **先关应用，再让 `t.TempDir()` 收尾**：清理是**倒序**跑的，
+	// 而 `t.TempDir()` 的清理是在它被调用的那一刻登记的——比这里登记的
+	// `a.Close` **早**。于是缓存目录会在字节源还开着那个文件的时候被删，
+	// 收尾报「directory not empty」（Windows 上那更是删不掉）。
+	t.Cleanup(a.Close)
 
 	// 放它，然后等它开始下（但下不完）。
 	if err := a.PlayFrom(onlineItem("BV1", "A", "A 首")); err != nil {
@@ -231,20 +248,33 @@ func TestAPartialDownloadIsNotMistakenForACompleteOne(t *testing.T) {
 		return a.Snapshot().Title == "B 首"
 	})
 
-	// 🔴 **切回去的时候要重新走网络**：盘上那一份是半截的。
+	// 🔴 **盘上那一份不能被当成「可以直接播的缓存」**。
 	//
-	// ⚠️ **判据是「CDN 又被拉了一次」**：用半截的字节放出来 = 放噪声，
-	// 而那比多下一次烂缓存糟得多。
-	hitsBefore := f.mediaHitsFor("/cdn/a.flac")
-	if err := a.PlayFrom(onlineItem("BV1", "A", "A 首")); err != nil {
-		t.Fatal(err)
+	// ⚠️ **判据是「缓存目录里没有那一份的记录」**：这一首永远下不完，
+	// 而「下不完」的那一份**不能**被标成完整——用户切回来的时候，
+	// 用半截的字节放出来 = 放噪声。
+	//
+	// ⚠️ **不是「CDN 又被拉了一次」**：这一首压根放不出来（CDN 永远只发
+	// 4096 字节），所以「切回去」那一趟根本走不到 CDN。要盯的是**缓存
+	// 有没有把这一份记成完整**。
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Fatalf("读缓存目录：%v", err)
 	}
-	waitFor(t, 10*time.Second, "A 首回来", func() bool {
-		return a.Snapshot().Title == "A 首"
-	})
-	waitFor(t, 10*time.Second, "A 首重新走网络", func() bool {
-		return f.mediaHitsFor("/cdn/a.flac") > hitsBefore
-	})
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".json" {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(cacheDir, e.Name()))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(raw), `"complete":true`) &&
+			strings.Contains(string(raw), `"track":"online|mv|BV1|A|"`) {
+			t.Errorf("没下完的那一份被记成完整了：%s——"+
+				"用户切回来听到的是放了一半的歌", raw)
+		}
+	}
 }
 
 // TestWithoutACacheDirNothingIsKept 盯「没给缓存目录时行为不变」。

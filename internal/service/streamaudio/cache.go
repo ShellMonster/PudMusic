@@ -11,23 +11,55 @@
 // 照 `service/lyrics` / `service/danmaku` 那一层的规矩：这一层只管读写盘，
 // 取不取字节是调用方的事（`internal/app/online.go`）。
 //
-// # 一首一档一个文件
+// # 两类记录：字节和「偏好 → 档」
 //
-// 键是 `source|type|bvid|cid|sid` **加上音质档**：同一首歌在 128K 和无损下
-// 是**两段不同的字节**，共用一个文件的话，第二档会把第一档的字节覆盖掉，
-// 而第一档的文件名还指向它——于是切回第一档时听到的是第二档的声音。
+// 盘上有两种记录，靠**文件名前缀**区分：
 //
-// # 完整性靠**旁挂的元数据**，不靠文件大小
+//	"b-" + <曲目> + "-" + <档> + ".bin"	字节
+//	"b-" + <曲目> + "-" + <档> + ".json"	那一份字节的记录
+//	"p-" + <曲目> + "-" + <偏好> + ".json"	「这个偏好解析到了哪一档」
 //
-// ⚠️ **光看文件大小判不出「下完了」**：字节源的文件布局是
-// 「顺序下载的前沿 + 并行取回来的末尾那一段 + 中间可能的洞」
-// （见 `service/audio/stream_source.go` 的 `availAt`）。一个下到一半的文件
-// 大小和整首**可能一样**（末尾那一段先到了），而它的中间是**洞**——
-// 洞里的字节是零，解出来是噪声。
+// ## 🔴 为什么字节按**实际那一档**存，而不是按「用户要的那一档」
 //
-// 所以每份缓存旁边有一份 `.meta`，记着「这一份应该是多少字节」
-// （那是 CDN 报回来的 Content-Length）。**下完了**的判据是
-// 「文件大小 == 那个数」**而且**「那一趟真的报完了」。
+// 用户点了「无损」，而这一首没有无损——B 站会给 192K（降档，票 #581）。
+// 于是**同一个偏好**在不同的歌上解析到不同的档，而**不同的偏好**在某些歌上
+// 解析到同一个档。
+//
+// ⚠️ **如果字节按偏好存**，那么「无损 → 高音质 → 无损」这一圈下来，
+// 用户会把**同一段字节**在盘上存两份（键不同）、下两遍（网络白花）。
+// 而用户那句话要的正是「已经取到的就别再取」：
+//
+//	「前面比如取到了的，那应该是在本地电脑缓存上啊，
+//	  为啥还要再去跑网络请求；应该是没有才跑网络请求啊」
+//
+// 所以：**字节按实际那一档存**（一份字节只存一份），
+// 而「偏好 → 档」的映射单独记（一张小表）。
+//
+// 于是「无损」和「高音质」在**同一首歌**上解析到同一档时，
+// 它们**指向同一份字节**——用户来回换档不会白下一遍。
+//
+// # 🔴 文件名里带身份，而不只是哈希
+//
+// 曲目身份里有 `|` `/` `:` 这些在 Windows 上**不是合法文件名**的字符，
+// 所以文件名不能用它本身。而只用哈希的话，**身份就找不回来了**——
+// 那时候「这一份是哪一首」只能靠记录文件里那一栏，而那一栏是**可以坏的**
+// （用户手改、写盘写到一半被杀）。
+//
+// 拿坏掉的一栏去算路径的后果是：淘汰**删掉了另一个文件**，而真正那个
+// `.bin` 永远删不掉——缓存目录于是无上限地长。
+//
+// 所以身份**转义成十六进制**放进文件名：十六进制里只有 `[0-9a-f]`，
+// **没有分隔符会撞上**，而分隔符只有一个（`-`），所以**能可靠地反查回来**。
+//
+// # 「下完了」怎么判
+//
+// ⚠️ **不靠文件大小**：字节源的文件布局是「顺序下载的前沿 + 并行取回来的
+// 末尾那一段 + 中间可能的洞」（见 `service/audio/stream_source.go` 的
+// `availAt`）。一个下到一半的文件大小可能和整首**一样**（末尾那一段先到了），
+// 而它的中间是**洞**——洞里的字节是零，解出来是噪声。
+//
+// 所以完整性靠**旁挂的记录**（`Bytes.Complete`），
+// 而记录是**下完了那一刻**才写的。
 //
 // # 过期和容量
 //
@@ -36,7 +68,6 @@
 package streamaudio
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
@@ -61,46 +92,71 @@ const TTL = 7 * 24 * time.Hour
 // 所以上限要**小到用户不会觉得被占了空间**，也要**大到日常听歌用不着重下**。
 const DefaultCapacity = int64(2) << 30
 
-// Entry 是一份缓存的元数据。
+// 记录种类的前缀。
+const (
+	bytesPrefix = "b-"
+	prefPrefix  = "p-"
+)
+
+// Meta 是这一份缓存附带的**界面要用的东西**。
 //
-// ⚠️ **它和字节分开放**（`.meta` 一个文件，字节一个文件）：字节是**大块**的，
-// 而元数据是**小块**且**要频繁改**的（下载时要更新进度、下载完要写总长）。
-// 放在一起的话，每写一次进度都要重写整个字节文件——那是几 MB 的写。
-type Entry struct {
-	// Key 是这一份的键（`source|type|bvid|cid|sid|quality`）。
-	Key string `json:"key"`
-	// Size 是这一份**应该**有多少字节。-1 = 还不知道（没下完、或者
-	// CDN 没给 Content-Length）。
-	//
-	// ⚠️ **-1 的那一份不算完整**（见 `Complete`）：不知道有多长就判不出
-	// 「下完了」。
+// ⚠️ **它存在这里是因为「缓存命中那一路不发任何请求」**：那些字段（作者名、
+// 封面、字幕那一对的 bvid/cid）正常是**问 B 站**问来的，而命中缓存时
+// 不问——所以上一次问到的要存下来。
+//
+// ⚠️ **空串就是「没有」**：界面照旧显示空着，而不是猜一个。
+type Meta struct {
+	Title        string `json:"title,omitempty"`
+	Cover        string `json:"cover,omitempty"`
+	Artist       string `json:"artist,omitempty"`
+	ArtistMid    int64  `json:"artistMid,omitempty"`
+	SubtitleBvid string `json:"subtitleBvid,omitempty"`
+	SubtitleCid  string `json:"subtitleCid,omitempty"`
+}
+
+// Bytes 是「一份下完的字节」的记录。
+type Bytes struct {
+	// Track 是这一份属于哪一首（曲目身份，不含音质）。
+	Track string `json:"track"`
+	// Tier 是**实际那一档**（`"q30280"` / `"m2"` 这样的标识）。
+	Tier string `json:"tier"`
+	// Size 是盘上那份字节的字节数。-1 = 还不知道。
 	Size int64 `json:"size"`
 	// Complete 说的是「这一份的字节已经齐了」。
 	//
-	// ⚠️ **它不是从文件大小推出来的**（见文件头「完整性靠旁挂的元数据」）：
+	// ⚠️ **它不是从文件大小推出来的**（见文件头「完整性靠旁挂的记录」）：
 	// 字节源的文件中间可能有洞，而洞里的字节是零。
 	Complete bool `json:"complete"`
+	// Label 是这一份实际的音质档文字（"192K" / "Hi-Res 无损" ……）。
+	//
+	// ⚠️ **它记的是「B 站真的给了哪一档」，不是「用户要哪一档」**：
+	// 用户点了无损而这一首没有无损，B 站会给 192K（降档），
+	// 而缓存里躺的是**192K 的字节**。播放条上的徽章要照实写 192K——
+	// 写「无损」是骗人。
+	Label string `json:"label,omitempty"`
+	// Meta 是界面要用的那些字段（见 `Meta`）。
+	Meta Meta `json:"meta,omitempty"`
 	// FetchedAt 是**这一份下完的时刻**。过期判据靠它。
 	FetchedAt time.Time `json:"fetchedAt"`
 	// TouchedAt 是**最后一次用到它**的时刻。容量淘汰按它排（LRU）。
 	TouchedAt time.Time `json:"touchedAt"`
-	// Label 是**这一份实际的音质档**（"192K" / "Hi-Res 无损" ……）。
-	//
-	// ⚠️ **它记的是「B 站真的给了哪一档」，不是「用户要哪一档」**：
-	// 用户点了无损而这一首没有无损，B 站会给 192K（降档，票 #581），
-	// 而缓存里躺的是**192K 的字节**。播放条上的徽章要照实写 192K——
-	// 写「无损」是骗人。
-	//
-	// 空串 = 不知道（那就退到用缓存键里的那档偏好名）。
-	Label string `json:"label,omitempty"`
 }
 
 // Expired 报这一份是不是过期了。
-func (e Entry) Expired(now time.Time) bool {
-	if e.FetchedAt.IsZero() {
+func (b Bytes) Expired(now time.Time) bool {
+	if b.FetchedAt.IsZero() {
 		return true
 	}
-	return now.Sub(e.FetchedAt) > TTL
+	return now.Sub(b.FetchedAt) > TTL
+}
+
+// Pref 是「这个偏好解析到了哪一档」。
+type Pref struct {
+	Track string `json:"track"`
+	Pref  string `json:"pref"`
+	Tier  string `json:"tier"`
+	// TouchedAt 是最后一次用到它（容量淘汰按它排）。
+	TouchedAt time.Time `json:"touchedAt"`
 }
 
 // Cache 是字节缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。
@@ -110,19 +166,31 @@ type Cache struct {
 	capacity int64
 	// now 是时钟。nil 用 time.Now（给假时钟是为了让过期和淘汰能被测）。
 	now func() time.Time
+	// protect 是**正在用、不许淘汰**的那些份（按曲目 + 档）。
+	//
+	// 🔴 **它必须有**：淘汰会按「最久没动过的先删」排，而「正在放的那一份」
+	// 恰恰是**刚被 Touch 过**的——但那只是在**容量只超了一点点**的时候
+	// 才保得住它。用户数据目录里堆满了缓存的时候，正在听的歌会被删掉，
+	// 歌就断了（那是最不能接受的一种后果）。
+	protect map[string]bool
 }
 
 // NewCache 建一个落在 dir 的缓存。**建目录**：不在的话第一次写会失败，
 // 而失败的表现是「每次播这一首都重新下一遍」。
 //
-// ⚠️ **空目录进、空目录出**：空目录的缓存只读不写（见 `Cache.Path`）。
+// ⚠️ **空目录进、空目录出**：空目录的缓存只读不写。
 // 拿不到用户数据目录时，缓存就整个关掉——那只是「每次都重新下」，
 // 而不该挡着应用开起来。
 func NewCache(dir string) *Cache {
 	if dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	return &Cache{dir: dir, capacity: DefaultCapacity, now: time.Now}
+	return &Cache{
+		dir:      dir,
+		capacity: DefaultCapacity,
+		now:      time.Now,
+		protect:  map[string]bool{},
+	}
 }
 
 // Dir 是缓存目录，空表示这个缓存不落盘。
@@ -144,98 +212,132 @@ func (c *Cache) WithClock(now func() time.Time) *Cache {
 	return c
 }
 
-// Path 是 key 这一份字节在磁盘上的位置。空目录时是空串。
+// encode 把身份转义成**文件名的一部分**。
 //
-// ⚠️ **文件名是 key 的哈希**：键里带 `|` `/` `:`，在 Windows 上根本不是合法
-// 文件名（和 `service/lyrics` 的缓存同一套理由）。
-func (c *Cache) Path(key string) string {
-	if c.dir == "" || key == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(key))
-	return filepath.Join(c.dir, hex.EncodeToString(sum[:16])+".bin")
-}
-
-// metaPath 是 key 这一份的元数据在磁盘上的位置。
-func (c *Cache) metaPath(key string) string {
-	if c.dir == "" || key == "" {
-		return ""
-	}
-	sum := sha256.Sum256([]byte(key))
-	return filepath.Join(c.dir, hex.EncodeToString(sum[:16])+".meta")
-}
-
-// Load 读 key 这一份的元数据。没有这一条、文件坏了、目录都没建，都只是「没有」。
+// ⚠️ **它必须是可逆的**：身份里有 `|` `/` `:` 这些非法文件名字符，
+// 而文件名又要能**反查回身份**（见文件头「文件名里带身份」那一段）。
 //
-// ⚠️ **读不出来一律当成没有，绝不报错**：缓存坏掉的表现应该是「重新下这一首」，
-// 而不是应用开不起来。用户删掉缓存目录、清磁盘、换机器都会走到这里。
-func (c *Cache) Load(key string) (Entry, bool) {
-	path := c.metaPath(key)
-	if path == "" {
-		return Entry{}, false
-	}
-	b, err := os.ReadFile(path)
+// 转义用十六进制：只有 `[0-9a-f]`，**没有分隔符会撞上**。
+func encode(s string) string { return hex.EncodeToString([]byte(s)) }
+
+// decode 把文件名那一段**反查回**身份。
+//
+// ⚠️ **反查不出来就返回空串**：那一份是坏的（文件名被用户改过、
+// 或者格式对不上），调用方据此当它不存在。
+func decode(encoded string) string {
+	raw, err := hex.DecodeString(encoded)
 	if err != nil {
-		return Entry{}, false
+		return ""
 	}
-	var e Entry
-	if err := json.Unmarshal(b, &e); err != nil {
-		return Entry{}, false
-	}
-	return e, true
+	return string(raw)
 }
 
-// CompleteEntry 读 key 这一份的元数据，**并且**确认它是一份可以直接播的
-// 完整字节（见 `Complete` 的三个判据）。
+// BytesPath 是「曲目 + 档」这一份字节在磁盘上的位置。空目录时是空串。
+func (c *Cache) BytesPath(track, tier string) string {
+	if c.dir == "" || track == "" || tier == "" {
+		return ""
+	}
+	return filepath.Join(c.dir, bytesPrefix+encode(track)+"-"+encode(tier)+".bin")
+}
+
+// bytesMetaPath 是「曲目 + 档」那一份的记录在磁盘上的位置。
+func (c *Cache) bytesMetaPath(track, tier string) string {
+	if c.dir == "" || track == "" || tier == "" {
+		return ""
+	}
+	return filepath.Join(c.dir, bytesPrefix+encode(track)+"-"+encode(tier)+".json")
+}
+
+// prefPath 是「曲目 + 偏好」那张映射表在磁盘上的位置。
+func (c *Cache) prefPath(track, pref string) string {
+	if c.dir == "" || track == "" || pref == "" {
+		return ""
+	}
+	return filepath.Join(c.dir, prefPrefix+encode(track)+"-"+encode(pref)+".json")
+}
+
+// Lookup 查「这个曲目、这个偏好」有没有一份**可以直接播**的字节。
 //
-// ⚠️ **它返回的是元数据和路径两样**：路径给播放那一层用，元数据给
-// 「这一份是几 MB / 什么音质」用——**播放条上的音质徽章要照实写**
-// （用户点了无损而 B 站给了 192K，那徽章就该写 192K）。
-func (c *Cache) CompleteEntry(key string) (Entry, string, bool) {
+// ⚠️ **它只查盘，不发请求**：这是「连地址都不要」的前提。
+//
+// 三个判据缺一不可：
+//
+//  1. 「偏好 → 档」那张表里有这一条；
+//  2. 那一份的记录说它下完了；
+//  3. **没过期**，而且**盘上的字节文件还在、大小对得上**。
+//
+// ⚠️ **第 3 条不能省**：只信记录的话，用户清空缓存目录之后，
+// 应用会拿着一份「下完了」的记录去播一个**不存在的文件**。
+//
+// 返回 ok = false 表示「没有可用的缓存」，调用方照旧走网络那一路。
+func (c *Cache) Lookup(track, pref string) (Bytes, bool) {
 	if c.dir == "" {
-		return Entry{}, "", false
+		return Bytes{}, false
 	}
-	e, ok := c.Load(key)
-	if !ok || !e.Complete {
-		return Entry{}, "", false
+	p, ok := c.readPref(track, pref)
+	if !ok {
+		return Bytes{}, false
 	}
-	if e.Expired(c.now()) {
-		return Entry{}, "", false
+	b, ok := c.Complete(track, p.Tier)
+	if !ok {
+		return Bytes{}, false
 	}
-	path := c.Path(key)
+	return b, true
+}
+
+// Complete 查「曲目 + 档」这一份是不是一份可以直接播的完整字节。
+func (c *Cache) Complete(track, tier string) (Bytes, bool) {
+	if c.dir == "" {
+		return Bytes{}, false
+	}
+	b, ok := c.readBytes(track, tier)
+	if !ok || !b.Complete {
+		return Bytes{}, false
+	}
+	if b.Expired(c.now()) {
+		return Bytes{}, false
+	}
+	path := c.BytesPath(track, tier)
 	if path == "" {
-		return Entry{}, "", false
+		return Bytes{}, false
 	}
 	st, err := os.Stat(path)
 	if err != nil {
-		return Entry{}, "", false
+		return Bytes{}, false
 	}
-	if e.Size >= 0 && st.Size() != e.Size {
-		return Entry{}, "", false
+	// 大小对不上就是没下完（或者字节被截断了）。
+	if b.Size >= 0 && st.Size() != b.Size {
+		return Bytes{}, false
 	}
 	// 记一次「用过」：容量淘汰按这个排（LRU）。
-	e.TouchedAt = c.now()
-	_ = c.Save(key, e)
-	return e, path, true
+	b.TouchedAt = c.now()
+	_ = c.writeBytes(b)
+	return b, true
 }
 
-// Save 把 key 这一份的元数据原子写下去。空目录时什么都不做。
-func (c *Cache) Save(key string, e Entry) error {
-	path := c.metaPath(key)
-	if path == "" {
+// SaveBytes 记下一份**下完了**的字节。
+//
+// ⚠️ **它只在「真的下完了」时调**：中途断了的话盘上是「一半 + 洞」
+// （见 `service/audio` 的 `availAt`），而那不是一份能播的缓存。
+//
+// ⚠️ **size 传 -1 表示「不知道有多长」**：那样的记录**不算完整**
+// （见 `Complete` 的判据）——不知道有多长就判不出「下完了」。
+func (c *Cache) SaveBytes(track, tier string, size int64, label string, meta Meta) error {
+	if c.dir == "" {
 		return nil
 	}
-	if e.Key == "" {
-		e.Key = key
+	now := c.now()
+	b := Bytes{
+		Track:     track,
+		Tier:      tier,
+		Size:      size,
+		Complete:  size >= 0,
+		Label:     label,
+		Meta:      meta,
+		FetchedAt: now,
+		TouchedAt: now,
 	}
-	if e.TouchedAt.IsZero() {
-		e.TouchedAt = c.now()
-	}
-	b, err := json.Marshal(e)
-	if err != nil {
-		return err
-	}
-	if err := writeAtomic(path, b); err != nil {
+	if err := c.writeBytes(b); err != nil {
 		return err
 	}
 	// 写完就顺手做一次容量淘汰——否则「一直下」会让缓存目录无上限地长。
@@ -243,74 +345,121 @@ func (c *Cache) Save(key string, e Entry) error {
 	return nil
 }
 
-// Complete 报 key 这一份是不是「一份可以直接播的完整字节」。
+// SavePref 记下「这个曲目、这个偏好解析到了那一档」。
 //
-// ⚠️ **三个判据缺一不可**：
-//
-//  1. 元数据说它下完了（`Complete`）；
-//  2. **没过期**（过期了就去重新下）；
-//  3. **盘上的字节文件还在，而且大小对得上**——元数据说下完了而字节文件
-//     被删了（用户清了缓存目录、清磁盘），那就得重新下。
-//
-// ⚠️ **第 3 条不能省**：只信元数据的话，用户清空缓存目录之后，应用会
-// 拿着一份「下完了」的元数据去播一个**不存在的文件**——而那一份的字节
-// 已经在磁盘上了。
-func (c *Cache) Complete(key string) (string, bool) {
+// ⚠️ **它在「字节下完之后」才调**：映射表指向的档必须真的有字节。
+func (c *Cache) SavePref(track, pref, tier string) error {
 	if c.dir == "" {
-		return "", false
+		return nil
 	}
-	e, ok := c.Load(key)
-	if !ok || !e.Complete {
-		return "", false
-	}
-	if e.Expired(c.now()) {
-		return "", false
-	}
-	path := c.Path(key)
-	if path == "" {
-		return "", false
-	}
-	st, err := os.Stat(path)
+	p := Pref{Track: track, Pref: pref, Tier: tier, TouchedAt: c.now()}
+	b, err := json.Marshal(p)
 	if err != nil {
-		return "", false
+		return err
 	}
-	// 大小对不上就是没下完（或者字节被截断了）。
-	if e.Size >= 0 && st.Size() != e.Size {
-		return "", false
-	}
-	// 记一次「用过」：容量淘汰按这个排（LRU）。
-	e.TouchedAt = c.now()
-	_ = c.Save(key, e)
-	return path, true
+	return writeAtomic(c.prefPath(track, pref), b)
 }
 
-// Touch 记一次「用过 key 这一份」（只改元数据里的 `TouchedAt`）。
-//
-// ⚠️ **它不写字节文件**：那份字节一个字节都不用动。
-func (c *Cache) Touch(key string) {
-	e, ok := c.Load(key)
+// Touch 记一次「用过曲目 + 档这一份」（只改记录里的 `TouchedAt`）。
+func (c *Cache) Touch(track, tier string) {
+	b, ok := c.readBytes(track, tier)
 	if !ok {
 		return
 	}
-	e.TouchedAt = c.now()
-	_ = c.Save(key, e)
+	b.TouchedAt = c.now()
+	_ = c.writeBytes(b)
 }
 
-// Remove 删掉 key 这一份（字节和元数据都删）。
+// Protect 标住「这一份正在用，不许淘汰」。
+func (c *Cache) Protect(track, tier string) {
+	if c.dir == "" {
+		return
+	}
+	c.protect[protectKey(track, tier)] = true
+}
+
+// Unprotect 解除「这一份正在用」。
+func (c *Cache) Unprotect(track, tier string) {
+	if c.dir == "" {
+		return
+	}
+	delete(c.protect, protectKey(track, tier))
+}
+
+// protectKey 是「曲目 + 档」的保护键。
+func protectKey(track, tier string) string { return track + "\x00" + tier }
+
+// Remove 删掉「曲目 + 档」这一份（字节和记录都删）。
 //
 // ⚠️ **删不掉不算错误**：缓存清理是「尽力而为」——
 // 用户手工删过文件、磁盘满了、权限变了，都会走到这里，
 // 而那都不该挡住播放。
-func (c *Cache) Remove(key string) {
-	_ = os.Remove(c.Path(key))
-	_ = os.Remove(c.metaPath(key))
+func (c *Cache) Remove(track, tier string) {
+	_ = os.Remove(c.BytesPath(track, tier))
+	_ = os.Remove(c.bytesMetaPath(track, tier))
 }
 
-// Evict 按容量上限删掉最久没动过的那些份。**不会**删掉正在用的那一份
-// （调用方自己管那一份）。
+// RemovePref 删掉「曲目 + 偏好」那张映射表的一条。
+func (c *Cache) RemovePref(track, pref string) {
+	_ = os.Remove(c.prefPath(track, pref))
+}
+
+// CleanOrphans 清掉目录里**没有配对**的那些文件。
 //
-// ⚠️ **它只删「元数据说下完了」的**：没下完的那些是**在途**的，
-// 删掉它们等于让正在下的那一趟白下（而那一趟还在往那个文件里写）。
+// 🔴 **它必须做**：一次「没下完就切歌」会在盘上留下一个 `.bin` 而**没有**
+// 它的 `.json`（记录是「下完了」才写的）。而那份 `.bin` 在容量账本之外
+// （账本只数有记录的那些）——于是缓存目录**无上限地长**，2 GB 上限形同虚设。
+//
+// ⚠️ **反向的也要清**：有 `.json` 而没有 `.bin` 的那一份是**指向一个
+// 不存在的字节文件**的（用户手工删过、或者上一次写盘写到一半被杀）。
+//
+// ⚠️ **它返回清掉了多少个文件**：调用方（以及测试）要看得见它干了什么。
+func (c *Cache) CleanOrphans() int {
+	if c.dir == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return 0
+	}
+	// 先把目录里的名字收成两张表（去掉后缀）。
+	binSet := map[string]bool{}
+	jsonSet := map[string]bool{}
+	for _, de := range entries {
+		name := de.Name()
+		switch {
+		case strings.HasPrefix(name, bytesPrefix) && strings.HasSuffix(name, ".bin"):
+			binSet[strings.TrimSuffix(name, ".bin")] = true
+		case strings.HasPrefix(name, bytesPrefix) && strings.HasSuffix(name, ".json"):
+			jsonSet[strings.TrimSuffix(name, ".json")] = true
+		}
+	}
+	removed := 0
+	// 没有配对记录的 `.bin`：上一次进程被杀留下的半截。
+	for base := range binSet {
+		if jsonSet[base] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(c.dir, base+".bin")); err == nil {
+			removed++
+		}
+	}
+	// 没有配对字节的 `.json`：指向一个不存在的字节文件。
+	for base := range jsonSet {
+		if binSet[base] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(c.dir, base+".json")); err == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
+// Evict 按容量上限删掉最久没动过的那些份。
+//
+// ⚠️ **正在用的那一份不许删**（见 `protect` 那一栏的注释）：正在播的歌被删掉
+// 的话，歌就断了——那是最不能接受的一种后果。
 //
 // ⚠️ **它按 `TouchedAt` 排（LRU）**：最近用过的先留着。
 func (c *Cache) Evict() {
@@ -321,15 +470,9 @@ func (c *Cache) Evict() {
 	if err != nil {
 		return
 	}
-	var total int64
-	for _, e := range entries {
-		if !e.Complete {
-			continue
-		}
-		if st, err := os.Stat(c.Path(e.Key)); err == nil {
-			total += st.Size()
-		}
-	}
+	// 容量统计要算上**所有** `.bin`——包括那些没有记录的孤儿
+	// （它们占着地方，却不在「有记录的那些」的账本里）。
+	total := c.totalBytes(entries)
 	if total <= c.capacity {
 		return
 	}
@@ -341,23 +484,145 @@ func (c *Cache) Evict() {
 		if total <= c.capacity {
 			return
 		}
-		if !e.Complete {
+		if c.protect[protectKey(e.Track, e.Tier)] {
 			continue
 		}
 		size := int64(0)
-		if st, err := os.Stat(c.Path(e.Key)); err == nil {
+		if st, err := os.Stat(c.BytesPath(e.Track, e.Tier)); err == nil {
 			size = st.Size()
 		}
-		c.Remove(e.Key)
+		c.Remove(e.Track, e.Tier)
+		// 指向它的那几张映射表也作废（那一档没了，映射就没意义）。
+		c.removePrefsForTier(e.Track, e.Tier)
 		total -= size
+	}
+	// 🔴 **孤儿也得清**：它们不在账本的条目里，但它们占着地方。
+	if total > c.capacity {
+		c.cleanOrphanBytes(c.capacity - total)
 	}
 }
 
-// readAll 读目录里所有的元数据。
+// totalBytes 报盘上现在占了多少字节（**包括没有记录的孤儿**）。
+func (c *Cache) totalBytes(entries []Bytes) int64 {
+	var total int64
+	seen := map[string]bool{}
+	for _, e := range entries {
+		path := c.BytesPath(e.Track, e.Tier)
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		if st, err := os.Stat(path); err == nil {
+			total += st.Size()
+		}
+	}
+	// 没有配对记录的 `.bin`。
+	dirEntries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return total
+	}
+	for _, de := range dirEntries {
+		if !strings.HasPrefix(de.Name(), bytesPrefix) || !strings.HasSuffix(de.Name(), ".bin") {
+			continue
+		}
+		path := filepath.Join(c.dir, de.Name())
+		if seen[path] {
+			continue
+		}
+		if info, err := de.Info(); err == nil {
+			total += info.Size()
+		}
+	}
+	return total
+}
+
+// cleanOrphanBytes 删掉**没有配对记录**的 `.bin`，直到不超 `room`。
 //
-// ⚠️ **读不出来的跳过，不报错**：那一份的元数据坏了（写了一半、被外力改了），
-// 而它的字节文件还占着地方——清它是对的（它已经不可用了）。
-func (c *Cache) readAll() ([]Entry, error) {
+// ⚠️ **只删最老的那些**：孤儿也按 mtime 排，和有记录的那些一个口径。
+//
+// 🔴 **绝不许删「有配对记录」的那些**：它们是正常的缓存（有记录的那些由
+// `Evict` 的主循环负责，那一轮会连记录一起删）。在这里把它们删掉的话，
+// 就留下了一堆「有记录、没有字节」的残骸——而那要等 `CleanOrphans`
+// 那一轮才清得掉。
+func (c *Cache) cleanOrphanBytes(room int64) {
+	dirEntries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return
+	}
+	// 先收下「有配对记录的」那些名字。
+	paired := map[string]bool{}
+	for _, de := range dirEntries {
+		name := de.Name()
+		if strings.HasPrefix(name, bytesPrefix) && strings.HasSuffix(name, ".json") {
+			paired[strings.TrimSuffix(name, ".json")] = true
+		}
+	}
+	type orphan struct {
+		path string
+		size int64
+		mod  time.Time
+	}
+	var orphans []orphan
+	for _, de := range dirEntries {
+		name := de.Name()
+		if !strings.HasPrefix(name, bytesPrefix) || !strings.HasSuffix(name, ".bin") {
+			continue
+		}
+		if paired[strings.TrimSuffix(name, ".bin")] {
+			continue
+		}
+		info, err := de.Info()
+		if err != nil {
+			continue
+		}
+		orphans = append(orphans, orphan{
+			path: filepath.Join(c.dir, name),
+			size: info.Size(),
+			mod:  info.ModTime(),
+		})
+	}
+	sort.Slice(orphans, func(i, j int) bool { return orphans[i].mod.Before(orphans[j].mod) })
+	for _, o := range orphans {
+		if room >= 0 {
+			return
+		}
+		if err := os.Remove(o.path); err == nil {
+			room += o.size
+		}
+	}
+}
+
+// removePrefsForTier 删掉所有指向 tier 的映射表。
+func (c *Cache) removePrefsForTier(track, tier string) {
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return
+	}
+	for _, de := range entries {
+		if !strings.HasPrefix(de.Name(), prefPrefix) || !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(c.dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		var p Pref
+		if json.Unmarshal(b, &p) != nil {
+			continue
+		}
+		if p.Track == track && p.Tier == tier {
+			_ = os.Remove(filepath.Join(c.dir, de.Name()))
+		}
+	}
+}
+
+// readAll 读目录里所有的**字节记录**。
+//
+// 🔴 **它靠文件名认身份，不靠记录里那一栏**：文件名里带着身份的转义
+// （见文件头「文件名里带身份」），所以**用户手改过记录里那一栏**也不会
+// 让淘汰删错文件——而拿坏掉的一栏去算路径的话，淘汰会**删掉另一个文件**，
+// 真正那个 `.bin` 永远删不掉。
+func (c *Cache) readAll() ([]Bytes, error) {
 	if c.dir == "" {
 		return nil, nil
 	}
@@ -365,26 +630,103 @@ func (c *Cache) readAll() ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []Entry
+	var out []Bytes
 	for _, de := range dirEntries {
 		name := de.Name()
-		if !strings.HasSuffix(name, ".meta") {
+		if !strings.HasPrefix(name, bytesPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		track, tier, ok := parseBytesName(name)
+		if !ok {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(c.dir, name))
 		if err != nil {
 			continue
 		}
-		var e Entry
-		if err := json.Unmarshal(b, &e); err != nil {
+		var rec Bytes
+		if json.Unmarshal(b, &rec) != nil {
 			continue
 		}
-		if e.Key == "" {
-			continue
-		}
-		out = append(out, e)
+		// 🔴 **身份以文件名为准**：记录里那一栏只是**记录**（可能被人改过）。
+		rec.Track = track
+		rec.Tier = tier
+		out = append(out, rec)
 	}
 	return out, nil
+}
+
+// parseBytesName 从「字节记录」的文件名里**反查回**身份。
+//
+// ⚠️ **反查不出来就返回 false**：那一份是坏的（文件名被改过），
+// 而它既不该被淘汰，也不该被当成一份缓存。
+func parseBytesName(name string) (track, tier string, ok bool) {
+	if !strings.HasPrefix(name, bytesPrefix) || !strings.HasSuffix(name, ".json") {
+		return "", "", false
+	}
+	base := strings.TrimSuffix(strings.TrimPrefix(name, bytesPrefix), ".json")
+	// 名字是 <曲目编码>-<档编码>。编码是十六进制（**没有 `-`**），
+	// 所以按**唯一一个** `-` 切就够。
+	idx := strings.Index(base, "-")
+	if idx <= 0 || idx == len(base)-1 {
+		return "", "", false
+	}
+	track = decode(base[:idx])
+	tier = decode(base[idx+1:])
+	if track == "" || tier == "" {
+		return "", "", false
+	}
+	return track, tier, true
+}
+
+// readBytes 读「曲目 + 档」那一份的记录。
+func (c *Cache) readBytes(track, tier string) (Bytes, bool) {
+	path := c.bytesMetaPath(track, tier)
+	if path == "" {
+		return Bytes{}, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Bytes{}, false
+	}
+	var rec Bytes
+	if err := json.Unmarshal(b, &rec); err != nil {
+		return Bytes{}, false
+	}
+	return rec, true
+}
+
+// writeBytes 把一份字节记录原子写下去。
+func (c *Cache) writeBytes(b Bytes) error {
+	path := c.bytesMetaPath(b.Track, b.Tier)
+	if path == "" {
+		return nil
+	}
+	raw, err := json.Marshal(b)
+	if err != nil {
+		return err
+	}
+	return writeAtomic(path, raw)
+}
+
+// readPref 读「曲目 + 偏好」那张映射表的一条。
+func (c *Cache) readPref(track, pref string) (Pref, bool) {
+	path := c.prefPath(track, pref)
+	if path == "" {
+		return Pref{}, false
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Pref{}, false
+	}
+	var p Pref
+	if err := json.Unmarshal(b, &p); err != nil {
+		return Pref{}, false
+	}
+	if p.Tier == "" {
+		return Pref{}, false
+	}
+	return p, true
 }
 
 // writeAtomic 临时文件 → fsync → rename。任何一步失败都把临时文件删掉。
