@@ -751,7 +751,14 @@ func TestCloseRemovesTheCacheFileAndJoinsEveryGoroutine(t *testing.T) {
 		for i, e := range entries {
 			names[i] = e.Name()
 		}
-		t.Errorf("缓存文件留下了：%v", names)
+		var details []string
+		for _, name := range names {
+			path := filepath.Join(dir, name)
+			_, statErr := os.Stat(path)
+			removeErr := os.Remove(path)
+			details = append(details, fmt.Sprintf("%s stat=%v remove=%v", name, statErr, removeErr))
+		}
+		t.Errorf("缓存文件留下了：%v（Close 后再次检查：%s）", names, strings.Join(details, "; "))
 	}
 	if after := goroutines(); after > before+2 {
 		t.Errorf("关掉之后 goroutine 数从 %d 涨到 %d，有下载/看门狗没退出", before, after)
