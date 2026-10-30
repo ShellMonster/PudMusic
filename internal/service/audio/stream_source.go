@@ -653,8 +653,7 @@ func (s *StreamSource) Close() error {
 	if s.closed {
 		path := s.path
 		s.mu.Unlock()
-		removeTempFile(path)
-		return nil
+		return removeTempFile(path)
 	}
 	s.closed = true
 	// 先把等着的都叫醒，再关门——反过来会有人被唤醒之后又睡回去。
@@ -674,9 +673,11 @@ func (s *StreamSource) Close() error {
 			errs = append(errs, err)
 		}
 	}
-	// 缓存文件删不掉不是错误，只是会留一个临时文件在磁盘上——
-	// 报给用户毫无意义。
-	removeTempFile(path)
+	// 缓存文件删不掉是资源清理错误：播放器没有可恢复的动作，但必须把它返回给
+	// 调用方，避免 Windows 上的句柄泄漏只表现成测试里的残留文件。
+	if err := removeTempFile(path); err != nil {
+		errs = append(errs, fmt.Errorf("audio: 删除在线流缓存：%w", err))
+	}
 	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
 	s.clearTempGauge()
 	return errors.Join(errs...)
@@ -753,18 +754,22 @@ const closeRemoveRetries = 10
 const closeRemoveWait = 10 * time.Millisecond
 
 // removeTempFile 在文件句柄释放后删除缓存文件；Windows 上短暂被占用时有限重试。
-func removeTempFile(path string) {
+func removeTempFile(path string) error {
 	if path == "" {
-		return
+		return nil
 	}
+	var lastErr error
 	for attempt := 0; attempt < closeRemoveRetries; attempt++ {
 		if err := os.Remove(path); err == nil || errors.Is(err, os.ErrNotExist) {
-			return
+			return nil
+		} else {
+			lastErr = err
 		}
 		if attempt+1 < closeRemoveRetries {
 			time.Sleep(closeRemoveWait)
 		}
 	}
+	return lastErr
 }
 
 // clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。
