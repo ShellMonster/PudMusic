@@ -742,31 +742,23 @@ func TestCloseRemovesTheCacheFileAndJoinsEveryGoroutine(t *testing.T) {
 		t.Fatalf("Close 第二次（应该可以重复调用）：%v", err)
 	}
 
+	cachePath := s.path
 	deadline := time.Now().Add(time.Second)
-	var entries []os.DirEntry
 	for {
-		entries, err = os.ReadDir(dir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(entries) == 0 || time.Now().After(deadline) {
+		_, statErr := os.Stat(cachePath)
+		if errors.Is(statErr, os.ErrNotExist) || time.Now().After(deadline) {
+			if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+				t.Fatalf("检查缓存文件：%v", statErr)
+			}
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if len(entries) != 0 {
-		names := make([]string, len(entries))
-		for i, e := range entries {
-			names[i] = e.Name()
-		}
-		var details []string
-		for _, name := range names {
-			path := filepath.Join(dir, name)
-			_, statErr := os.Stat(path)
-			removeErr := os.Remove(path)
-			details = append(details, fmt.Sprintf("%s stat=%v remove=%v", name, statErr, removeErr))
-		}
-		t.Errorf("缓存文件留下了：%v（等待清理后再次检查：%s）", names, strings.Join(details, "; "))
+	if _, err := os.Stat(cachePath); err == nil {
+		removeErr := os.Remove(cachePath)
+		t.Errorf("缓存文件留下了：%s（再次删除：%v）", cachePath, removeErr)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("检查缓存文件：%s：%v", cachePath, err)
 	}
 	if after := goroutines(); after > before+2 {
 		t.Errorf("关掉之后 goroutine 数从 %d 涨到 %d，有下载/看门狗没退出", before, after)
