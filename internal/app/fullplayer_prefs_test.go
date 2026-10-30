@@ -783,9 +783,10 @@ func TestPlayPartIgnoresTheEpisodeAlreadyPlaying(t *testing.T) {
 
 // TestPlayPartReplacesTheQueueItemInPlace 断「换集不插新的一项」。
 //
-// 多 P 的两集在 `Item.Identity()` 里是同一首（都按 bvid 判重）。插一项新的
-// 的话抽屉和队列里会同时出现同一首，而「上一首 / 下一首」走的还是队列——
-// 用户换完集按「上一首」，期望回到刚才那一集去。
+// 换集是**同一项换了 cid**（`Item.Identity()` 里 mv 带上 cid，见 `trackKey`）。
+// 插一项新的的话队列里会多出一份同一集（两集的身份不同了，抽屉会画成两行），
+// 而「上一首 / 下一首」走的还是队列——用户换完集按「上一首」，期望回到刚才
+// 那一集去。
 func TestPlayPartReplacesTheQueueItemInPlace(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)

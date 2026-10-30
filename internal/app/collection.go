@@ -351,6 +351,11 @@ func (c *collections) settle() time.Duration {
 //
 // 页面切到某个容器时调它一次。拉回来写进缓存并叫醒界面，所以头图区是
 // 「先占位、后填上」而不是「空白到突然有」。
+//
+// 🔴 **按 `ref.Type` 分派**（票 #683 的复审）：`/x/v3/fav/folder/info` 只认收藏夹
+// 的 mlid，往它上面发一个合集 / 系列的 id，B 站回一句 -400——于是头图区永远停在
+// 占位，还每开一次页面弹一句「打不开这个收藏夹」。三类容器各有各的元信息接口
+// （见 `fetchCollection`）。
 func (a *App) LoadCollection(ref CollectionRef) {
 	c := a.collectionsSnapshot()
 	if c == nil {
@@ -359,8 +364,8 @@ func (a *App) LoadCollection(ref CollectionRef) {
 	go func() {
 		info, err := a.fetchCollection(ref)
 		if err != nil {
-			log.Printf("biu: 拉收藏夹 %s 的信息失败：%v", ref.Key(), err)
-			c.notice.add(ref, "打不开这个收藏夹："+bili.Friendly(err), NoticePlain, notice.Danger)
+			log.Printf("biu: 拉 %s 的信息失败：%v", ref.Key(), err)
+			c.notice.add(ref, collectionLoadFailText(ref.Type, err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
 		}
@@ -369,13 +374,41 @@ func (a *App) LoadCollection(ref CollectionRef) {
 	}()
 }
 
+// collectionLoadFailText 是头图区拉不到时说的那句话。
+//
+// ⚠️ **说的是「哪一类容器」**：合集 / 系列打不开时照旧说「收藏夹」会让人以为
+// 自己点进了另一个页面。句子里**不带 `bili:` 前缀、不露内部说法**（票 #242）。
+func collectionLoadFailText(typ bili.CollectionType, err error) string {
+	return "打不开这个" + typ.Label() + "：" + bili.Friendly(err)
+}
+
 // fetchCollection 拉一次元信息并翻成界面那一层用的形状。
+//
+// 🔴 **三类容器走三条接口**（票 #683 的复审）：
+//
+//	收藏夹 11  `/x/v3/fav/folder/info`（`media_id`）
+//	合集 21    `seasons_archives_list` 的 `meta`（见 `bili.SeasonInfo`）
+//	系列 31    `/x/series/series`（见 `bili.SeriesInfo`）
 func (a *App) fetchCollection(ref CollectionRef) (CollectionInfo, error) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return CollectionInfo{}, errCollectionsMissing
 	}
-	raw, err := c.refs.Client.CollectionInfo(context.Background(), ref.ID, ref.Type)
+	ctx := context.Background()
+	var (
+		raw *bili.CollectionInfo
+		err error
+	)
+	switch ref.Type {
+	case bili.CollectionAlbum:
+		// ⚠️ **mid 用缓存里那个**（可能是 0）：合集元信息接口要它，而它反过来
+		// 也会把真的 mid 给回来——先发 0 拿到真的，下一次就有真的了。
+		raw, err = c.refs.Client.SeasonInfo(ctx, a.collectionMidHint(ref), ref.ID)
+	case bili.CollectionSeries:
+		raw, err = c.refs.Client.SeriesInfo(ctx, ref.ID)
+	default:
+		raw, err = c.refs.Client.CollectionInfo(ctx, ref.ID, ref.Type)
+	}
 	if err != nil {
 		return CollectionInfo{}, err
 	}
@@ -393,6 +426,14 @@ func (a *App) fetchCollection(ref CollectionRef) (CollectionInfo, error) {
 		Faved:      raw.Faved,
 		Loaded:     true,
 	}, nil
+}
+
+// collectionMidHint 是「缓存里已经知道的创建者 mid」（不知道时是 0）。
+//
+// ⚠️ **它只看缓存、不问网络**：`fetchCollection` 自己就在拉元信息，再在这儿问
+// 一次就是自己叫自己（`collectionOwnerMid` 的「当场问一次」会绕回来）。
+func (a *App) collectionMidHint(ref CollectionRef) int64 {
+	return a.Collection(ref).OwnerMid
 }
 
 // SetFavorite 收藏 / 取消收藏这个容器。**立刻返回**，网络往返在后台。
@@ -414,9 +455,9 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 		ctx := context.Background()
 		var err error
 		if fav {
-			err = c.refs.Client.FavoriteCollection(ctx, ref.ID)
+			err = c.refs.Client.FavoriteCollection(ctx, ref.ID, ref.Type)
 		} else {
-			err = c.refs.Client.UnfavoriteCollection(ctx, ref.ID)
+			err = c.refs.Client.UnfavoriteCollection(ctx, ref.ID, ref.Type)
 		}
 		if err != nil {
 			log.Printf("biu: 收藏夹 %s 收藏状态改成 %v 失败：%v", ref.Key(), fav, err)
@@ -460,15 +501,23 @@ func favoriteFailText(fav bool, err error) string {
 //
 // 一条都没给是 no-op：空请求 B 站回 -400，而「没勾任何东西就点删除」根本
 // 不该发请求（`bili.RemoveCollectionMedias` 里也挡了一道）。
+//
+// 🔴 **非收藏夹直接拒绝**（票 #683 的复审）：合集 / 系列没有「从这里删内容」这个
+// 动作，原来把 season_id / series_id 当 `media_id` 发出去，那一趟注定失败。
+// 界面那边也把批量删除那一条收起来了（见 `ui.viewCollectionBatchBar`），这里
+// 是第二道闸。
 func (a *App) RemoveMedias(ctx context.Context, ref CollectionRef, medias []bili.Media) error {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return errCollectionsMissing
 	}
+	if ref.Type != bili.CollectionFavorite {
+		return errors.New("这个" + ref.Type.Label() + "里不能删内容")
+	}
 	if len(medias) == 0 {
 		return nil
 	}
-	if err := c.refs.Client.RemoveCollectionMedias(ctx, ref.ID, medias); err != nil {
+	if err := c.refs.Client.RemoveCollectionMedias(ctx, ref.ID, ref.Type, medias); err != nil {
 		return err
 	}
 	// 删完了要刷新两样：条目数（头图区写着「N 条视频」）和列表本身。
@@ -488,14 +537,23 @@ func (a *App) RemoveMedias(ctx context.Context, ref CollectionRef, medias []bili
 //
 // 完了之后重新拉一次元信息：头图区写着「N 条视频」，而那正是变了的那一个数
 // （理由同 `RemoveMedias`）。**列表由界面收到通知之后自己重来**，这一层不碰。
+//
+// 🔴 **只对收藏夹**（票 #683 的复审）：B 站没有「清一个合集里的失效内容」这个
+// 动作。界面那边 ⋯ 菜单里这一项对合集 / 系列不摆，这里是第二道闸——直接拒绝，
+// 一个请求都不发。
 func (a *App) ClearInvalidMedias(ref CollectionRef) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		a.sayCollectionsMissing()
 		return
 	}
+	if ref.Type != bili.CollectionFavorite {
+		c.notice.add(ref, "这个"+ref.Type.Label()+"里没有「清除失效内容」", NoticePlain, notice.Danger)
+		a.wakeUI()
+		return
+	}
 	go func() {
-		if err := c.refs.Client.CleanInvalidResources(context.Background(), ref.ID); err != nil {
+		if err := c.refs.Client.CleanInvalidResources(context.Background(), ref.ID, ref.Type); err != nil {
 			log.Printf("biu: 清收藏夹 %s 的失效内容失败：%v", ref.Key(), err)
 			c.notice.add(ref, "清不掉失效内容："+bili.Friendly(err), NoticePlain, notice.Danger)
 			a.wakeUI()
@@ -600,16 +658,123 @@ func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMiss
 // `bili.CollectionMedias` 顶上那一段）。
 //
 // 返回的第二项是「后面还有没有」。
+//
+// # 🔴 三类容器走**三个不同的接口**（票 #683）
+//
+//	收藏夹 11  `/x/v3/fav/resource/list`（`media_id`）
+//	合集 21    `/x/polymer/web-space/seasons_archives_list`（`mid` + `season_id`）
+//	系列 31    `/x/series/archives`（`mid` + `series_id`）
+//
+// 原来这一层**永远**打收藏夹那个接口，而它对合集 / 系列的 id 只会回一个空
+// 列表（或者一句 -400）——界面上是**一页空白，一个错都没有**。用户看到的是
+// 「点进合集，里面什么都没有」。
+//
+// ⚠️ **合集 / 系列要 `mid`**，而 `CollectionRef` 只有 ID 和 Type——mid 从
+// 元信息缓存里拿（`CollectionInfo.OwnerMid`，见 `fetchCollection`）。**没拉到
+// 元信息时 mid 是 0**：文档说这个参数「也可以是任意的非负整数」，所以 0 是
+// 能发的（真网验证不了，但发 0 比不发强——不发的话 B 站回 -400）。
+//
+// ⚠️ **keyword 只对收藏夹有意义**：那两个接口没有 `keyword` 参数。合集 / 系列
+// 里按歌名找是把这一页筛掉吗？不——**本地筛不能筛没拉下来的页**（理由见
+// `bili.CollectionMedias` 顶上那段）。所以这一档如实说「这一类还没有按歌名
+// 找」，界面按错误显示，而不是静默丢掉词（那看起来像「搜了没反应」）。
 func (a *App) LoadCollectionPage(ctx context.Context, ref CollectionRef, sort bili.CollectionSort, keyword string, page int) ([]bili.Media, bool, error) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return nil, false, errCollectionsMissing
 	}
+	switch ref.Type {
+	case bili.CollectionAlbum:
+		if keyword != "" {
+			return nil, false, errCollectionSearchUnsupported
+		}
+		pg, err := c.refs.Client.SeasonArchives(ctx, a.collectionOwnerMid(ref), ref.ID, page, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		// 🔴 **这一趟顺手把 meta 记下来**（票 #683 的复审）：标题 / 封面 / 条数 /
+		// 创建者 mid 都在它上面。记下来之后后面翻页的 `collectionOwnerMid` 直接
+		// 读缓存——不记的话每一页都要再问一次元信息。
+		a.rememberSeasonMeta(ref, pg.Meta)
+		return pg.Medias, pg.HasMore, nil
+	case bili.CollectionSeries:
+		if keyword != "" {
+			return nil, false, errCollectionSearchUnsupported
+		}
+		pg, err := c.refs.Client.SeriesArchives(ctx, a.collectionOwnerMid(ref), ref.ID, page, 0)
+		if err != nil {
+			return nil, false, err
+		}
+		return pg.Medias, pg.HasMore, nil
+	}
+	// 收藏夹（以及认不出的类型，见 `ParseCollectionType` 的兜底）。
 	pg, err := c.refs.Client.CollectionMedias(ctx, ref.ID, sort, keyword, page, 0)
 	if err != nil {
 		return nil, false, err
 	}
 	return pg.Medias, pg.HasMore, nil
+}
+
+// rememberSeasonMeta 把合集内容接口顺手给的那一层 `meta` 记进缓存。
+//
+// ⚠️ **已经拉到头图区那一份时不覆盖**：那一份是从同一个接口的 meta 翻来的
+// （`fetchCollection`），但 `Faved` / `Private` / `Default` 在这儿都是不知道；
+// 覆盖一次只会把「知不知道」这件事抹掉。这里只在缓存还没有内容时落一份。
+func (a *App) rememberSeasonMeta(ref CollectionRef, meta *bili.CollectionInfo) {
+	if meta == nil {
+		return
+	}
+	c := a.collectionsSnapshot()
+	if c == nil {
+		return
+	}
+	if c.cache.get(ref).Loaded {
+		return
+	}
+	c.cache.put(CollectionInfo{
+		Ref:        ref,
+		Title:      meta.Title,
+		Intro:      meta.Intro,
+		Cover:      meta.Cover,
+		MediaCount: meta.MediaCount,
+		OwnerMid:   meta.Owner.Mid,
+		Loaded:     true,
+	})
+}
+
+// errCollectionSearchUnsupported 是「这一类容器还不能按歌名找」。
+//
+// ⚠️ **它是给用户看的一句话**，所以不说「接口」、不说「还没实现」（票 #242，
+// UX 报告 §3-F 的 F2）：用户不知道应用里哪一块还没接上。说清「在这个合集里
+// 暂时只能靠翻和滚」，那是他照着能做的下一步。
+var errCollectionSearchUnsupported = errors.New("biu: 合集和系列里还不能按歌名找，翻一翻吧")
+
+// collectionOwnerMid 是这一页要用的「创建者 mid」，**没有就当场问一次**。
+//
+// 合集 / 系列那两个内容接口要 `mid`，而 `CollectionRef` 只有 ID 和 Type——
+// mid 在元信息里（`CollectionInfo.OwnerMid`）。元信息是另一趟后台请求，**它
+// 不一定先到**：页面第一帧就会去拉内容（见 `newCollectionPage` 的注释），而
+// 那一趟和元信息那一趟是**并发**的。
+//
+// 🔴 **等不到就用 0 发出去是不够的**：文档说 mid「也可以是任意的非负整数」，
+// 但那是旁注、没有真网验证过。所以这一层在缓存里没有 mid 时**当场问一次**
+// 元信息（反正在后台 goroutine 里，而且这一问的结果别的读者也用得上）。
+//
+// ⚠️ **问不到也照发 0**：不发的话 B 站回 -400，界面上是「这个合集打不开」，
+// 而发 0 至少还有「B 站接受任意 mid」那一半的机会。两害相权，发。
+func (a *App) collectionOwnerMid(ref CollectionRef) int64 {
+	if mid := a.Collection(ref).OwnerMid; mid > 0 {
+		return mid
+	}
+	info, err := a.fetchCollection(ref)
+	if err != nil {
+		log.Printf("biu: 问容器 %s 的创建者失败（合集接口先按 mid=0 发一次）：%v", ref.Key(), err)
+		return 0
+	}
+	if c := a.collectionsSnapshot(); c != nil {
+		c.cache.put(info)
+	}
+	return info.OwnerMid
 }
 
 // sayCollectionsMissing 说一句「还没挂上」。挂不上这一页画得出来，

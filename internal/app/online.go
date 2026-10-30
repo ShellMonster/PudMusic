@@ -270,6 +270,15 @@ type onlineTrack struct {
 	gen int
 }
 
+// streamCacheMax 是「播放前预判」那个缓存最多留几条。
+//
+// 🔴 **它不是「几条地址」的上限，是「内存里几个小结构」的上限**（2026-10-30）：
+// 原来那张表只留一条，反复切歌时每切回去一次都要重新问 B 站要一次地址
+// （A → B → A → B → A 实测取流 5 次）——而那些地址的有效期还有几小时。
+//
+// 取 8：够用户来回切几首，又不会攒出一堆（每条过期了就清掉）。
+const streamCacheMax = 8
+
 // streamKey 是取流缓存的键。
 //
 // 用 Biu 的判重标识（`source/type/bvid/cid/sid`）而不是队列下标：换了歌
@@ -284,6 +293,7 @@ func (a *App) MountStreaming(s Streaming) {
 	a.mu.Lock()
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
+	a.streamCacheOrder = map[string]time.Time{}
 	a.mu.Unlock()
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
@@ -320,6 +330,7 @@ func (a *App) SetAudioQuality(q bili.AudioQuality) {
 	}
 	a.streaming.Quality = q
 	a.streamCache = map[string]*bili.StreamRef{}
+	a.streamCacheOrder = map[string]time.Time{}
 	tr := a.online
 	pos, want, gen := a.position, a.wantPlay, a.onlineGen
 	wake := a.wake
@@ -1069,6 +1080,11 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// ⚠️ **代次要一起给**：这一趟回来的时候可能已经过时了（用户早就按了另一
 	// 首）——过时的那一趟问出来的 cid 属于它自己那一趟，不属于「现在这一首」。
 	a.notePendingCid(gen, it.Bvid, it.Cid)
+	// 🔴 **同一个 cid 也要写回队列项**（票 #683）：收藏夹 / 搜索那些接口有的
+	// 不给 cid，而分集抽屉认「正在放的是哪一集」比的是**队列项**的 cid
+	// （`partRowsFor` 的 active）。只记在 `pending` 上的话，抽屉里一行都标不出
+	// 来——用户要点一次别的集才恢复正常。
+	a.writeBackCid(gen, it)
 	run.timing.Part = time.Since(t0)
 	// 🔴 **代次变了就别再往下走**：问分 P / 元信息是**一次网络往返**，这一趟
 	// 等它的时候用户完全可能已经切了歌、或者超时闹钟已经响了。那就没人要这
@@ -1358,6 +1374,52 @@ func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) 
 	}
 	it.Cid = cid
 	return it, nil
+}
+
+// writeBackCid 把起播时补出来的分 P id 写回队列的当前项（票 #683）。
+//
+// # 为什么要有这一句
+//
+// 有几个来源**不给 cid**（收藏夹内容、搜索结果）：那一项进队列时 `Cid` 是空的，
+// 分 P id 是 `withCid` 在取流那一趟补出来的，而补出来的那一份原来只喂给了两处
+// 局部读者——`runOnline` 的局部变量和 `pending`（弹幕用）。
+//
+// ⇒ **队列项自己一直是空的**。而分集抽屉认「正在放的是哪一集」比的是队列项的
+// cid（`partRowsFor` 的 `active: p.Cid == cur.Cid`）——于是一首多 P 从收藏夹放
+// 起来之后，抽屉里**一行都不亮**，用户不知道自己在听哪一集；要点一次别的集
+// 才恢复正常（那一次走的是 `PlayPart`，它本来就写队列项）。
+//
+// # 判据链（和 `notePendingCid` 同一个道理，但要更严）
+//
+//  1. **代次不能过时**：这一趟是取流那一趟，回来的时候用户可能早就换歌了。
+//  2. **队列当前项还得是这一首**。🔴 **bvid 对得上不够**（多 P 的每一集都是
+//     同一个 bvid）——所以这里只认「cid 还是空的」那一种：cid 已有值的就是
+//     **确定的某一集**，而我们要写的这一条是「还不知道是哪一集」的那一项。
+//     用户换到另一集之后当前项的 cid 就有值了，这一句自然什么都不做。
+//  3. **写回用 `fillCidIf`**：从读当前项到写回去之间没有持锁，中间的竞态由它
+//     拿「整项相等」再比一次挡住（见 `Queue.fillCidIf`）；它也顺手把**同一集排了
+//     两份**的那些副本一起补上（不然抽屉那一行会被拆成两行）。
+//
+// ⚠️ **只补空的，不覆盖已有的**：已有 cid 的项写回去会白改一次队列 revision
+// ——那一下会让抽屉、列表、落盘全部重算一遍，而内容一个字节都没变。
+func (a *App) writeBackCid(gen int, it Item) {
+	if it.Cid == "" || !it.isOnline() || it.Type != "mv" || it.Bvid == "" {
+		return
+	}
+	if a.genStale(gen) {
+		// 这一趟已经作废（用户换歌了 / 超时了 / 退出了）：它问出来的 cid 是
+		// **它自己那一趟**的，不该落到现在队列里那一项上。
+		return
+	}
+	cur, ok := a.queue.Current()
+	if !ok {
+		return
+	}
+	// 不是同一首，或者已经是确定的某一集了 → 不写。
+	if cur.Bvid != it.Bvid || cur.Cid != "" {
+		return
+	}
+	a.queue.fillCidIf(cur, it.Cid)
 }
 
 // buildOnline 建一套「流引用 + 字节源 + 播放器」，**不往 App 上装**。
@@ -1692,11 +1754,78 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 	}
 
 	a.mu.Lock()
-	// 缓存只留手上这一条。留着几十条过期地址没有用——过期是常态，
-	// 而每一条都在诊断里等着被脱敏。
-	a.streamCache = map[string]*bili.StreamRef{key: ref}
+	a.putStreamRefLocked(key, ref)
 	a.mu.Unlock()
 	return ref, nil
+}
+
+// putStreamRefLocked 把一条流放进「播放前预判」那个缓存。**调用方拿着 `a.mu`。**
+//
+// # 🔴 缓存留的是**好几条**，不是一条（2026-10-30）
+//
+// 原来每一取到一条新的就把整张表**重建成那一条**（`map[...]{key: ref}`）。
+// 于是来回切歌时，每切回去一次都要重新问 B 站要一次地址——
+//
+//	A → B → A → B → A   ⇒   取流接口被调 5 次（实测）
+//
+// 而那条地址十几秒前才拿到过、有效期还有几小时（`expiryOf`：音乐库那一路
+// 一般三小时）。用户快速来回切歌，每切一下都白等一趟带签名的网络往返。
+//
+// ⇒ 改成留多条，切回去时命中自己那一条（`resolve` 里 `a.streamCache[key]`）。
+//
+// # 原来那条注释的两个顾虑，现在这样处理
+//
+//	「留着几十条过期地址没有用」——过期地址**现在就清掉**（`pruneStreamCacheLocked`），
+//	  留下的每一条都是还能用的（`Usable`），所以「堆积」不存在。
+//	「每一条都在诊断里等着被脱敏」——脱敏是 HTTP 请求日志那一层的事
+//	  （`credentials_transport.go`），和这个 map 无关：缓存里的地址**没有被
+//	  任何地方写进日志**。
+//
+// ⚠️ **容量上限**：留 `streamCacheMax` 条。超了就把**最旧**的那些丢掉
+// （`streamCacheOrder` 记着放进来的先后）。
+func (a *App) putStreamRefLocked(key string, ref *bili.StreamRef) {
+	// ⚠️ **两个 map 都要判**：往 nil map 写会 panic（`assignment to entry in nil
+	// map`），而 `New()` 只初始化了 `streamCache` 那一个。
+	if a.streamCache == nil {
+		a.streamCache = map[string]*bili.StreamRef{}
+	}
+	if a.streamCacheOrder == nil {
+		a.streamCacheOrder = map[string]time.Time{}
+	}
+	// 同一个 key 重来一次（换流 / 换音质）：位置更新到最新，别占着最旧那一格。
+	delete(a.streamCacheOrder, key)
+	a.streamCacheOrder[key] = time.Now()
+	a.streamCache[key] = ref
+	a.pruneStreamCacheLocked()
+}
+
+// pruneStreamCacheLocked 清掉不能用的那些（过期的、容量超了的）。
+// **调用方拿着 `a.mu`。**
+//
+// ⚠️ **过期的先清**：它们是「留着也没用」的那些——留着只会让「有几条地址」
+// 这个数看起来吓人，而实际上能用的只有没过期的那几条。
+func (a *App) pruneStreamCacheLocked() {
+	now := time.Now()
+	for k, ref := range a.streamCache {
+		if ref == nil || !ref.Usable(now) {
+			delete(a.streamCache, k)
+			delete(a.streamCacheOrder, k)
+		}
+	}
+	// 容量上限：超了就把最旧的丢掉。
+	for len(a.streamCache) > streamCacheMax {
+		oldest, at := "", time.Time{}
+		for k, t := range a.streamCacheOrder {
+			if at.IsZero() || t.Before(at) {
+				oldest, at = k, t
+			}
+		}
+		if oldest == "" {
+			return
+		}
+		delete(a.streamCache, oldest)
+		delete(a.streamCacheOrder, oldest)
+	}
 }
 
 // putStreamCache 把一条流放进「播放前预判」那个缓存。
@@ -1707,7 +1836,7 @@ func (a *App) resolve(ctx context.Context, s *Streaming, it Item, pref bili.Audi
 // 预取；两个入口在用之前都比对过「备的就是这一首」。
 func (a *App) putStreamCache(it Item, ref *bili.StreamRef) {
 	a.mu.Lock()
-	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	a.putStreamRefLocked(streamKey(it), ref)
 	a.mu.Unlock()
 }
 
@@ -1734,8 +1863,9 @@ func (a *App) refetch(ctx context.Context, s *Streaming, it Item) *audio.StreamR
 	}
 
 	a.mu.Lock()
-	// 和 resolve 一样只留一条：换流之后手上这条就是唯一有用的那条。
-	a.streamCache = map[string]*bili.StreamRef{streamKey(it): ref}
+	// 换流之后手上这一条就是最新鲜的那条（**别的条目不动**：切回去时还能用
+	// 各自那一条，见 `putStreamRefLocked` 的注释）。
+	a.putStreamRefLocked(streamKey(it), ref)
 	a.mu.Unlock()
 
 	// ⚠️ 这里**不填 Size**：取流接口的返回里没有长度，而 `StreamReply.Size`

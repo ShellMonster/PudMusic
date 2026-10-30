@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
@@ -155,6 +156,12 @@ func TestEnqueueAndPlayNowDoesNotClearTheQueueAroundIt(t *testing.T) {
 // 判据取的是**播放状态里的标题**（`App.play` 在那一条路上写的是它拿到的那个
 // item 的 Title）：队列里那一份写的是「队列里的标题」，调用方递进来的写的是
 // 「列表上的标题」——播的是哪一份，读出来就是哪一个。
+//
+// ⚠️ **判重带上 cid 之后（票 #683）「简版」的造法要跟着变**：原来那个简版是
+// 「同一个 bvid、cid 空着」，而判重现在把「有 cid」和「没 cid」判成**两首**
+// （见 `trackKey` 那一段：有 cid 的是确定的某一集，没 cid 的是未知）。所以这一条
+// 要造的是「同一个 bvid + **同一个 cid**、但标题和封面不全」那一份——那才是
+// 「同一集的简版」，也正是这条路要挡的那个形状。
 func TestEnqueueAndPlayNowPlaysTheQueuedCopyNotTheCallersCopy(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)
@@ -166,15 +173,16 @@ func TestEnqueueAndPlayNowPlaysTheQueuedCopyNotTheCallersCopy(t *testing.T) {
 	}
 	playing(t, a, "队列里的标题")
 
-	// 调用方递进来的是同一首（同一个 bvid）的**简版**：标题不一样、cid 空着。
-	thin := onlineItem("BV1xx", "", "列表上的标题")
+	// 调用方递进来的是同一集的**简版**：同一个 bvid + 同一个 cid，标题不一样、
+	// 封面也空着。
+	thin := app.Item{Source: "online", Type: "mv", Bvid: "BV1xx", Cid: "123", Title: "列表上的标题"}
 	if err := a.EnqueueAndPlayNow(thin); err != nil {
 		t.Fatalf("EnqueueAndPlayNow()：%v", err)
 	}
 	playing(t, a, "队列里的标题")
 
 	if n := len(a.Queue().Items()); n != 1 {
-		t.Errorf("队列里有 %d 首，want 1（同一首不该再加一份）", n)
+		t.Errorf("队列里有 %d 首，want 1（同一集不该再加一份）", n)
 	}
 	if got := a.Snapshot().Title; got == "列表上的标题" {
 		t.Errorf("播的是调用方递进来的简版（%q），应该是队列里那一份", got)

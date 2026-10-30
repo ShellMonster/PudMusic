@@ -33,8 +33,8 @@ func TestAnObjectWithNoCommentsIsCached(t *testing.T) {
 	a.MountComments(comments.NewCache(dir))
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -100,8 +100,8 @@ func TestAnOlderRequestDoesNotOverwriteTheRefresh(t *testing.T) {
 	calls := &commentCalls{}
 	release := make(chan struct{})
 	first := true
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 12345, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -164,8 +164,8 @@ func TestAnOlderRequestDoesNotOverwriteTheCache(t *testing.T) {
 	//
 	// ⚠️ **必须用同一个 oid**：缓存文件是按 `<type>-<oid>` 命名的，而这一条盯的
 	// 就是「盘上那一份被改回去」。oid 不一样的话那是两个文件，改不到一起。
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
@@ -243,8 +243,8 @@ func TestTheNewTripStillWritesTheCacheAfterComingBack(t *testing.T) {
 	a.MountComments(comments.NewCache(dir))
 
 	calls := &commentCalls{}
-	a.commentsArchiveIDFetch = func(_ context.Context, bvid string) (int64, error) {
-		return 1, nil
+	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
+		return bili.ArchiveStats{Aid: 1}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)

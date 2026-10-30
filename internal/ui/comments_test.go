@@ -639,7 +639,7 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 				}
 				bodies = append(bodies, shaped{
 					msg:  cm.Message,
-					body: shapeCommentBody(c, cm, 900, commentBodyLines),
+					body: shapeCommentBody(c, cm, 900, commentBodyLines, nil, commentMark{}),
 				})
 			}
 		}

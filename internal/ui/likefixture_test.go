@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/draw"
 	"net/http"
+	"net/url"
 	"testing"
 	"time"
 
@@ -86,7 +87,17 @@ func (f *biliFixture) serveArchiveLike(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	f.mu.Lock()
 	f.likePosts++
-	f.lastUp = r.PostForm.Get("up")
+	// 🔴 收的是 **`like`**，不是 `up`：这是 web 端 `/x/web-interface/archive/like`
+	// 的真形状（`bilibili-API-collect` 的 `docs/video/action.md`「点赞视频（web端）」
+	// 参数表只有 like）。照真接口造 fixture 是这个仓库的纪律——照着我们自己发错的
+	// 那一份造，测试会全绿而真机被 B 站回 -400（这一票就是这么来的）。
+	f.lastLike = r.PostForm.Get("like")
+	// 拷一份：`url.ParseForm` 的表单值没有别处会改，但留一份快照比赌这一点稳
+	// （后面要是有人往 handler 里加东西，断言的仍是这一次请求的形状）。
+	f.lastLikeForm = url.Values{}
+	for k, v := range r.PostForm {
+		f.lastLikeForm[k] = append([]string(nil), v...)
+	}
 	f.mu.Unlock()
 	_, _ = w.Write([]byte(`{"code":0,"message":"0","ttl":1}`))
 }
@@ -117,18 +128,18 @@ func (f *biliFixture) triplePostCount() int {
 	return f.triplePosts
 }
 
-// lastLikeUp 是最近一次赞带的 up。
-//
-// ⚠️ **这个名字是过渡期的**：写接口那个字段已经改成 `like`（票 #680），
-// 那一票把这里改名叫 `lastLikeValue`；本票（#681）的新用例按新名字调。
-// 两个名字在合并之前各自单独编译得了，并到一起之后只剩 `lastLikeValue`。
-func (f *biliFixture) lastLikeUp() string { return f.lastLikeValue() }
-
-// lastLikeValue 是最近一次赞带的那个字段的值。
+// lastLikeValue 是最近一次赞带的 like（「1 赞 / 2 取消赞」）。
 func (f *biliFixture) lastLikeValue() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.lastUp
+	return f.lastLike
+}
+
+// lastLikePostedForm 是最近一次赞的整份表单（端到端断「up 不在」用）。
+func (f *biliFixture) lastLikePostedForm() url.Values {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastLikeForm
 }
 
 // writeBiliLikeJSON 把一段 data 包成 B 站那个信封。nil 时给一个失败（没登录）。

@@ -932,7 +932,10 @@ func (s *Shell) viewFavoriteCover(c *ui.Context, f app.Favorite) {
 	// 就沿用夹里下一首有效的封面（后台只拉第一页、每夹一次）；③ 一首都没有就画默认封面。
 	cover := f.Cover
 	if cover == "" || s.images.Get(imgcache.CoverURL(cover, imgcache.ParamsSquare)).Err != nil {
-		cover = s.app.FolderFallbackCover(f)
+		// ⚠️ **换算走 `app.CollectionRefOf`，别在这里自己拼**：它带着「类型认不出
+		// 时按收藏夹处理」那条兜底，而页面头图区用的是同一个换算。两边各拼一份的
+		// 话，同一个容器在两边会算出两个不同的 key（两趟请求、两份缓存）。
+		cover = s.app.FolderFallbackCover(app.CollectionRefOf(f))
 	}
 	if cover == "" {
 		defaultCover(c, favCoverSize)
