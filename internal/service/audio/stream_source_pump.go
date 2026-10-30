@@ -163,6 +163,7 @@ func (s *StreamSource) append(b []byte) error {
 	if s.size >= 0 && s.filled > s.size {
 		s.size = s.filled
 	}
+	gauge := s.gauge
 	// 🔴 **字节回来了就说一声**（票 #315）：这是「重连成功」的唯一判据——
 	// 请求没报错不算，连上了却一个字节都不下也不算（那种连接在用户听来
 	// 和没恢复一样）。
@@ -181,6 +182,9 @@ func (s *StreamSource) append(b []byte) error {
 	s.firstBytesSeen = true
 	s.cond.Broadcast()
 	s.mu.Unlock()
+	if gauge != nil {
+		gauge.AddMediaTempBytes(int64(len(b)))
+	}
 	if recovered && s.onReconn != nil {
 		s.onReconn()
 	}
@@ -413,6 +417,7 @@ func (s *StreamSource) sameContainer(urls []string) bool {
 // 解码器的读游标往前挪就等于把这首歌倒回开头——那正是「换流后从原位置
 // 继续」要避免的事。清缓存是为了把字节补齐，不是为了把进度倒回去。
 func (s *StreamSource) restart() error {
+	s.clearTempGauge()
 	if err := s.file.Truncate(0); err != nil {
 		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
 	}

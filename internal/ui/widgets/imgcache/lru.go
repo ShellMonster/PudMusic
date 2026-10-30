@@ -15,15 +15,39 @@ import "container/list"
 // 装不下 → LRU 只能把**正在显示着的**挤掉 → 界面上封面反复闪（issue #208）。
 //
 // 它只管记账：谁最近用过、谁该被挤掉。挤掉之后做什么是 Cache 的事。
+//
+// ⚠️ **每一次 `used` 的变化都要走 `addUsed`**：它把同一个增量转给缓存外部的
+// 诊断字节表（`perf.Gauges` 的 image cache 那一档）。散在四处各改一次的话，
+// 漏掉一处就是快照上的数和真实占用对不上。
 type lru struct {
 	max   int64
 	used  int64
 	order *list.List // 元素是 *entry，最近用的在前面
 	byURL map[string]*list.Element
+
+	// onBytes 收 `used` 的每一次增量（正负都收），nil = 不往外报。
+	// 它在 Cache.mu 下被调用（lru 的每个方法都由调用方持那把锁）。
+	onBytes func(delta int64)
 }
 
 func newLRU(maxBytes int64) *lru {
 	return &lru{max: maxBytes, order: list.New(), byURL: make(map[string]*list.Element)}
+}
+
+// addUsed 改账，并把同一个增量转给外部的字节表。
+func (l *lru) addUsed(delta int64) {
+	l.used += delta
+	if l.onBytes != nil {
+		l.onBytes(delta)
+	}
+}
+
+// reset 把整本账归零（缓存关掉时用）：表里的条目一起放掉，外部的字节表
+// 收到一笔等于当前占用的负数。之后这份缓存不再占诊断快照里的任何字节。
+func (l *lru) reset() {
+	l.order.Init()
+	clear(l.byURL)
+	l.addUsed(-l.used)
 }
 
 // touch 记一次使用，把 e 提到最前面。
@@ -41,7 +65,7 @@ func (l *lru) touch(e *entry) {
 		// 把旧条目归零拿掉，换新的。
 		l.order.Remove(el)
 		old := el.Value.(*entry)
-		l.used -= old.bytes
+		l.addUsed(-old.bytes)
 		old.bytes = 0
 		delete(l.byURL, e.url)
 	}
@@ -72,7 +96,7 @@ func (l *lru) resize(e *entry, bytes int64, frame uint64) (evicted []*entry) {
 		// 一起被回收（条目已经不在 `entries` 里了），不记账。
 		return nil
 	}
-	l.used += bytes - e.bytes
+	l.addUsed(bytes - e.bytes)
 	e.bytes = bytes
 
 	// ⚠️ **刚解出来的这一张要排到最前面**：LRU 挤掉的是最久没用的那一张，
@@ -118,7 +142,7 @@ func (l *lru) resize(e *entry, bytes int64, frame uint64) (evicted []*entry) {
 		}
 		l.order.Remove(cur)
 		delete(l.byURL, victim.url)
-		l.used -= victim.bytes
+		l.addUsed(-victim.bytes)
 		victim.bytes = 0
 		evicted = append(evicted, victim)
 		cur = l.order.Back()
@@ -132,6 +156,6 @@ func (l *lru) drop(e *entry) {
 		l.order.Remove(el)
 		delete(l.byURL, e.url)
 	}
-	l.used -= e.bytes
+	l.addUsed(-e.bytes)
 	e.bytes = 0
 }

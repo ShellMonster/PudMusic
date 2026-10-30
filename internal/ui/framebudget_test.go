@@ -559,10 +559,26 @@ func budgetScreens() []budgetScreen {
 			// 是**弹幕那十二条**（每条一条字，字号 18 ⇒ 每条十几个字节的排版
 			// 缓冲）**加上封面落影那一层的阴影画布**。上限按最坏那档留两成半
 			// ⇒ 2100。
+			// ⚠️ **票 #669 把这一档从 43 次降到 32 次**：弹幕不再一条一个
+			// `ui.Text` 元素（那 12 次就是它们），而是封面那一层的一个**自绘**
+			// 元素——条数不再影响建树的分配（只影响绘制回调里画几个字）。
+			// ⇒ 基线 **32 次 / 1444 字节**（实测三遍：32 / 32 / 32 次，
+			// 1445 / 1444 / 1444 字节）。上限跟着收到 **40 / 1900**
+			// （基线 + 8 的余量，字节按最坏那档留三成）。
+			// ⚠️ **「弹幕那一层画两遍」现在拦不住了**（它不再逐条分配）——
+			// 那件事由 `fullplayer_danmaku_live_test.go` 的计数钉着
+			// （`paints` / `requests`），不在这一档的预算里。
+			//
+			// ⚠️ **票 #670（增量时间窗口）之后这一档没有回退**：合到主线之前实测
+			// 32~33 次 / 1441~1532 字节（五遍：32/1444、32/1447、32/1444、
+			// 33/1524、32/1441），和 #669 的基线同一个数——增量游标只是把
+			// 「窗口里再扫一遍」换成「活动集合过一遍」，每帧的**分配**本来就不在
+			// 那儿。合进 `integration/perf-667` 之后（含图片尺寸那几票）实测
+			// 33 / 1457~1460 字节（三遍）。上限沿用 40 / 1900。
 			name: "满屏播放器",
 			budget: frameBudget{
-				allocs: 51,
-				bytes:  2100,
+				allocs: 40,
+				bytes:  1900,
 				floor:  22,
 			},
 			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
@@ -1011,7 +1027,7 @@ func budgetScreens() []budgetScreen {
 				// ⚠️ **分组和人是直接摆进去的**：这一页的数据是后台拉回来的
 				// （理由同上面那一段）。
 				f.tagStarted = true
-				f.tags = []bili.FollowTag{
+				f.tags = []app.FollowTag{
 					{ID: -10, Name: "特别关注", Count: 1},
 					{ID: 0, Name: "默认分组", Count: budgetFollowCards},
 				}
@@ -1796,10 +1812,10 @@ const budgetFollowCards = 20
 //
 // ⚠️ **签名和认证都摆着**：真实的那一格有它们（签名折两行、认证一行），
 // 而空的那一档量到的是「少画两行字」——不是用户看见的那一屏。
-func budgetFollowUsers(n int) []bili.FollowUser {
-	users := make([]bili.FollowUser, n)
+func budgetFollowUsers(n int) []app.FollowUser {
+	users := make([]app.FollowUser, n)
 	for i := range users {
-		users[i] = bili.FollowUser{
+		users[i] = app.FollowUser{
 			Mid:      int64(11 + i),
 			Name:     fmt.Sprintf("第 %d 个 UP", i+1),
 			Sign:     fmt.Sprintf("第 %d 个 UP 的签名", i+1),

@@ -54,6 +54,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/ShellMonster/PudMusic/internal/perf"
 )
 
 // pathDanmaku 是弹幕接口。
@@ -188,6 +190,24 @@ func (c *Client) Danmaku(ctx context.Context, cid string) ([]Danmaku, error) {
 	return parseDanmaku(xmlBytes)
 }
 
+// maxDanmakuCompressedBytes 是一份弹幕响应体压缩之后的上限：8 MiB。
+//
+// B 站实测弹幕响应远小于此（几 MB 量级是几万条弹幕），所以这一档是「正常
+// 永远撞不到、异常一定挡住」。
+//
+// ⚠️ **不复用 client 的 32 MiB**：那是所有接口共用的响应体上限，而弹幕这一路
+// 还要再做一次膨胀（见 maxDanmakuInflatedBytes）——两个上限一起兜，内存峰值
+// 才是「压缩 + 解压」两份之和；拿共用的那个档当这里的判据等于这一路没有
+// 自己的边界。
+const maxDanmakuCompressedBytes = 8 << 20
+
+// maxDanmakuInflatedBytes 是一份弹幕解压之后的字节上限。
+//
+// deflate 的压缩比可以到几十上百倍：一份几百 KB 的响应完全能解出几百 MB，
+// 而解压时**原始压缩字节和展开结果会同时在内存里**。B 站实测最长的弹幕列表
+// 是几 MB 量级，所以 32 MiB 是「正常永远撞不到、异常一定挡住」的那一档。
+const maxDanmakuInflatedBytes = 32 << 20
+
 // inflateDanmaku 把 B 站给的那一档 deflate 解开。
 //
 // 🔴 **用 `compress/flate`（原始 deflate），不是 `compress/zlib`**。
@@ -208,14 +228,27 @@ func inflateDanmaku(raw []byte) ([]byte, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
+	// 压缩侧先挡一道（票 #672）：解压要把整份压缩字节留在内存里，输入本身
+	// 不设上限的话「解压之后有限」只保住了后半段。
+	if len(raw) > maxDanmakuCompressedBytes {
+		return nil, fmt.Errorf("bili: 弹幕的压缩体有 %d 字节，超过 %d 的上限", len(raw), maxDanmakuCompressedBytes)
+	}
+	perf.ProcessGauges().NoteDanmakuCompressedBytes(int64(len(raw)))
 
 	r := flate.NewReader(bytes.NewReader(raw))
 	defer r.Close()
 
-	out, err := io.ReadAll(r)
+	// 多读一个字节就能分出「刚好到上限」和「超过上限」：限制本身不接受
+	// 第 limit+1 个字节。
+	out, err := io.ReadAll(io.LimitReader(r, maxDanmakuInflatedBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("bili: 弹幕的压缩层解不开（不是原始 deflate？）：%w", err)
 	}
+	if len(out) > maxDanmakuInflatedBytes {
+		return nil, fmt.Errorf("bili: 弹幕解压之后超过 %d 字节，不当成正常响应", maxDanmakuInflatedBytes)
+	}
+	// 只有真的解出来了才记展开后的字节：失败的那一份不算「进程处理过这么大」。
+	perf.ProcessGauges().NoteDanmakuInflatedBytes(int64(len(out)))
 	return out, nil
 }
 

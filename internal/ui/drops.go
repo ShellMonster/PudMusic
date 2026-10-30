@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
 // dropTally 是「丢掉的那几条」的账本。
@@ -27,17 +27,17 @@ import (
 // ⚠️ **它按身份记，不按次数记**（理由见文件头）：`seen` 是已经数过的那几条
 // 的身份，同一条在两页里各出现一次也只算一次。
 type dropTally struct {
-	// seen 是已经数过的那几条的身份（`bili.DroppedDynamic.Key`）。
+	// seen 是已经数过的那几条的身份（`app.DroppedDynamic.Key`）。
 	seen map[string]bool
 	// counts 是按类别的计数。
-	counts bili.DropCounts
+	counts app.DropCounts
 }
 
 // add 记下这一页丢掉的那几条。
 //
 // ⚠️ **同一条只算一次**：B 站翻页会重叠，而那一条的**身份**（`Key`）在两页
 // 里是一样的（票 #344）。
-func (t *dropTally) add(drops []bili.DroppedDynamic) {
+func (t *dropTally) add(drops []app.DroppedDynamic) {
 	if len(drops) == 0 {
 		return
 	}
@@ -57,8 +57,8 @@ func (t *dropTally) add(drops []bili.DroppedDynamic) {
 func (t *dropTally) total() int { return t.counts.Total() }
 
 // dropCountsOf 是**这一页**丢掉的那几条按类别的计数（给日志用的）。
-func dropCountsOf(drops []bili.DroppedDynamic) bili.DropCounts {
-	var c bili.DropCounts
+func dropCountsOf(drops []app.DroppedDynamic) app.DropCounts {
+	var c app.DropCounts
 	for _, d := range drops {
 		c.Add(d.Reason)
 	}
@@ -66,7 +66,7 @@ func dropCountsOf(drops []bili.DroppedDynamic) bili.DropCounts {
 }
 
 // dropCountText 是按类别的计数（给日志看的一行字）。
-func dropCountText(c bili.DropCounts) string {
+func dropCountText(c app.DropCounts) string {
 	return fmt.Sprintf("形态不认识 %d、读不懂 %d、没有身份 %d、什么也没有 %d、"+
 		"投稿没有稿件号 %d、还不认识的类别 %d",
 		c.ShapeUnknown, c.Unreadable, c.NoIdentity, c.Empty, c.NoArchive, c.Other)
@@ -84,7 +84,7 @@ func dropCountText(c bili.DropCounts) string {
 //
 // 返回的顺序是固定的（形态 → 读不懂 → 没有身份 → 什么也没有 → 投稿没有稿件号
 // → 还不认识的类别），所以同一份计数每次说出来都是同一句。
-func dropPhrases(c bili.DropCounts) []string {
+func dropPhrases(c app.DropCounts) []string {
 	var out []string
 	if c.ShapeUnknown > 0 {
 		out = append(out, fmt.Sprintf("有 %d 条落在别的形态上了：%s", c.ShapeUnknown, dynamicShapesNote))
@@ -108,6 +108,6 @@ func dropPhrases(c bili.DropCounts) []string {
 }
 
 // dropSentence 是那些话拼成的一句（空状态和那一行小字共用同一份）。
-func dropSentence(c bili.DropCounts) string {
+func dropSentence(c app.DropCounts) string {
 	return strings.Join(dropPhrases(c), "；")
 }

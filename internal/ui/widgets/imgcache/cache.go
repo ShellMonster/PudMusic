@@ -44,6 +44,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/perf"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -155,6 +156,16 @@ type Options struct {
 	// MaxFailed 是失败记录的条数上限，零值 256。到上限之后最老的一条会被
 	// 忘掉（下次再取会从头开始）。
 	MaxFailed int
+	// ReleaseAfterFrames 是「连续多少帧没被要过就把封面像素放掉」的阈值，
+	// 零值用 DefaultReleaseAfterFrames，负值表示**不释放**（关掉这一档）。
+	//
+	// 判据是帧号，不是墙钟（理由见 `release.go`）。`visibleFrames` 之内的
+	// 那几张永远不释放，这个阈值比它小也没用。
+	ReleaseAfterFrames int
+	// MaxReleased 是「已经放掉像素、还留着记录」的条目**条数**上限，零值用
+	// `defaultMaxReleased`。这些条目没有字节数，LRU 的字节上限挤不掉它们，
+	// 所以单独有一道（理由见 `release.go`）。
+	MaxReleased int
 	// Clock 是退避定时用的钟，零值用真实时间。测试传假钟推进时间。
 	Clock Clock
 }
@@ -227,6 +238,24 @@ type Cache struct {
 	failOrder *list.List
 	maxFailed int
 
+	// released 是**像素已经放掉**的那些条目的账（票 #673，见 `release.go`）。
+	//
+	// 它们没有字节数，LRU 的字节上限挤不掉，所以和失败条目一样单独有一道
+	// 上限（maxReleased）；relOrder 老的在前，超限时从老的开始忘。
+	released     map[*entry]*list.Element
+	relOrder     *list.List
+	maxReleased  int
+	releaseAfter int
+
+	// redecodes 数「像素放掉之后重新解码」了多少次（票 #673）。
+	//
+	// ⚠️ **只给测试看**：生产上没有任何一处读它（不打印、不上报）。它是一个
+	// 原子计数，不会让每次加载多一次分配。
+	redecodes atomic.Int64
+
+	// releases 数「放掉像素」了多少次（票 #673）。同样只给测试看。
+	releases atomic.Int64
+
 	wakeMu sync.Mutex
 	wakes  []func()
 
@@ -284,24 +313,42 @@ func New(opts Options) *Cache {
 	if opts.MaxFailed <= 0 {
 		opts.MaxFailed = defaultMaxFailed
 	}
+	if opts.MaxReleased <= 0 {
+		opts.MaxReleased = defaultMaxReleased
+	}
+	if opts.ReleaseAfterFrames == 0 {
+		opts.ReleaseAfterFrames = DefaultReleaseAfterFrames
+	} else if opts.ReleaseAfterFrames < 0 {
+		opts.ReleaseAfterFrames = 0
+	}
 	if opts.Clock == nil {
 		opts.Clock = systemClock{}
 	}
 
 	c := &Cache{
-		client:     opts.Client,
-		ua:         opts.UserAgent,
-		lru:        newLRU(opts.MaxBytes),
-		decodeCh:   make(chan job, opts.Decoders*4),
-		inflight:   make(chan struct{}, opts.MaxInflight),
-		clock:      opts.Clock,
-		retryBase:  opts.RetryBase,
-		retryMax:   opts.RetryMax,
-		maxRetries: opts.MaxRetries,
-		maxFailed:  opts.MaxFailed,
-		failed:     make(map[*entry]*list.Element),
-		failOrder:  list.New(),
+		client:       opts.Client,
+		ua:           opts.UserAgent,
+		lru:          newLRU(opts.MaxBytes),
+		decodeCh:     make(chan job, opts.Decoders*4),
+		inflight:     make(chan struct{}, opts.MaxInflight),
+		clock:        opts.Clock,
+		retryBase:    opts.RetryBase,
+		retryMax:     opts.RetryMax,
+		maxRetries:   opts.MaxRetries,
+		maxFailed:    opts.MaxFailed,
+		failed:       make(map[*entry]*list.Element),
+		failOrder:    list.New(),
+		maxReleased:  opts.MaxReleased,
+		releaseAfter: opts.ReleaseAfterFrames,
+		released:     make(map[*entry]*list.Element),
+		relOrder:     list.New(),
 	}
+	// 缓存占多少字节要进诊断快照（票 #668）。依赖方向是 imgcache → perf：
+	// perf 不认识界面，只收一个数字。
+	//
+	// ⚠️ **报给进程级的那个账本**：一条缓存一份，每份都往同一个 gauge 上加，
+	// 总量才是整个进程的封面占用。
+	c.lru.onBytes = perf.ProcessGauges().AddImageCacheBytes
 	c.ctx, c.stop = context.WithCancel(context.Background())
 	c.refs.Store(1) // 建缓存的人算一份使用者
 	if opts.Dir != "" {
@@ -503,12 +550,23 @@ func (c *Cache) getStoredAt(url string, storeSide int) State {
 
 	c.mu.Lock()
 	c.lru.touch(e)
-	e.drawn = c.frame.Load()
+	frame := c.frame.Load()
+	e.drawn = frame
+	// ⚠️ `born` 只在**第一次**记（零值才算）：它给「`BeginFrame` 之前建的
+	// 条目」当「最后一次被要」的底（见 `release.go` 的 `idleFrames`）。
+	if e.born == 0 {
+		e.born = frame
+	}
 	c.mu.Unlock()
 
 	if !loaded && !c.start(e) {
 		c.forget(e)
 		return State{Err: ErrClosed}
+	}
+	// 像素放掉过的条目（票 #673）：起一次重新加载，这一帧先报占位。
+	// `state()` 在它之后读，于是「已经解完」的那一档不会被这里盖掉。
+	if loaded {
+		c.reloadReleased(e)
 	}
 	return e.state()
 }
@@ -569,6 +627,10 @@ func (c *Cache) Get(url string) State {
 // 帧号停在 0，**挤的行为和从前一模一样**（库自己的老测试、还没接上这一句的
 // 调用方都是这样）。所以这一句是「加了更好」而不是「必须加」。
 //
+// ⚠️ **它同时驱动「像素延迟释放」**（票 #673，见 `release.go`）：帧号不走的
+// 话，长期没人要的封面也就不会放像素——那是**故意的**：没有帧号就没有
+// 「画面上正画着谁」这个概念，那时候按帧判「谁没人要」没有意义。
+//
 // # ⚠️ **缓存是 nil 时这一句什么都不做**
 //
 // 真窗口上缓存从来不是 nil（`Shell` 一定建一个），但**测试会把它摘掉**：
@@ -588,7 +650,20 @@ func (c *Cache) BeginFrame(now time.Time) {
 		return
 	}
 	c.frameToken = now
-	c.frame.Add(1)
+	frame := c.frame.Add(1)
+	c.releaseIdle(frame)
+}
+
+// ReleaseStats 报这个缓存**放掉过多少次像素**、**因此重新解码过多少次**
+// （票 #673）。
+//
+// ⚠️ **只给测试和诊断看**：生产代码里没有任何一处读它——它不打印、不上报、
+// 不参与任何决策。两个数都是原子计数，不会让每次加载多一次分配。
+func (c *Cache) ReleaseStats() (releases, redecodes int64) {
+	if c == nil {
+		return 0, 0
+	}
+	return c.releases.Load(), c.redecodes.Load()
 }
 
 // SetMaxBytes 改这份缓存的字节上限。
@@ -624,6 +699,7 @@ func (c *Cache) start(e *entry) bool {
 		e.cancel()
 	}
 	e.ctx, e.cancel = ctx, cancel
+	e.fetching = true
 	e.mu.Unlock()
 
 	c.lifeWG.Add(1)
@@ -645,6 +721,9 @@ func (c *Cache) Cancel(url string) {
 		e := v.(*entry)
 		c.forget(e)
 		c.dropFailure(e)
+		// 票 #673：已经放掉像素的那本账里也要摘掉，不然它会一直挂在
+		// `released` 上（那本账只按条数淘汰，靠它自己清不掉）。
+		c.forgetReleased(e)
 		e.discard()
 	}
 }
@@ -709,6 +788,11 @@ func (c *Cache) Close() {
 	if c.disk != nil {
 		c.disk.close()
 	}
+	// 这份缓存已经没人用了：把字节账归零，诊断快照里就不该再有它的占用。
+	// （条目本身等 GC 收，那和账本不是一回事。）
+	c.mu.Lock()
+	c.lru.reset()
+	c.mu.Unlock()
 }
 
 // forget 把 e 从 LRU 表里拿掉并记账归零。
@@ -760,6 +844,21 @@ type entry struct {
 	// 票 #666：满屏背景高清档要存 1200×800 那一份（比 768 大），而**流式解码**
 	// 让它只解到那个尺寸就停——内存峰值和源图多大无关。
 	maxSide int
+
+	// fetching 报「这一条正在走后台加载链路」（下载 → 解码）。
+	//
+	// 票 #673：像素放掉之后重新要它，这一格要**先变成加载中**再起一次加载；
+	// 并发的两次 `Get`（主窗口 + 迷你窗口）只许起一次，所以这个标记在 entry
+	// 的锁里判并置。它和 `done` 是两件事：`done` 是「有终态了」，这个是
+	// 「后台正跑着」。
+	fetching bool
+
+	// released 报「像素已经放掉、记录还留着」（票 #673，见 `release.go`）。
+	released bool
+
+	// born 是这一条**第一次被要**的帧号。`drawn` 为 0（`BeginFrame` 之前建的）
+	// 时 `idleFrames` 拿它当底（见 `release.go`）。
+	born uint64
 }
 
 // onScreen 报这一张**是不是画面上正画着的**（frame 是这一帧的号）。
@@ -810,8 +909,18 @@ func (e *entry) state() State {
 		return State{Bitmap: e.bm}
 	case e.done:
 		// 暂时失败排着重试时也走这一支：界面上还是失败态，不闪回 Loading。
+		//
+		// ⚠️ **它排在 `fetching` 前面**（票 #673）：失败之后的自动重试也会把
+		// `fetching` 置上，而那一档**不能**闪回占位——否则重试期间界面上的
+		// 失败态会变成「加载中」，和「第一次加载」分不开了。
 		return State{Err: e.err}
 	default:
+		// 其余全部是「还没到终态」：第一次加载、像素放掉之后的重新解码
+		// （票 #673），以及还没起过任何加载的刚建出来的条目。
+		//
+		// ⚠️ **`fetching` 不必单独列一支**：它落在这一支里，画的同样是占位。
+		// 而「失败后的自动重试」虽然也置着 `fetching`，却由上面 `e.done`
+		// 那一支先接住——那一档不许闪回「加载中」（理由见那一段注释）。
 		return State{Loading: true}
 	}
 }
@@ -1090,12 +1199,20 @@ func (c *Cache) finish(e *entry, bm *ui.Bitmap, err error) {
 		e.mu.Unlock()
 		return
 	}
+	// 这一次尝试到此结束（票 #673）：下面若排了重试，重试那条路会重新置上。
+	wasReleased := e.released
+	e.fetching = false
 
 	if bm != nil {
 		e.bm, e.err, e.done = bm, nil, true
+		e.released = false
 		e.failures = 0
 		e.mu.Unlock()
 
+		if wasReleased {
+			// 这一张是**放开之后重新解回来的**：计一次数（只给测试看）。
+			c.redecodes.Add(1)
+		}
 		c.dropFailure(e)
 		c.account(e, bm)
 		c.notify()
@@ -1103,6 +1220,11 @@ func (c *Cache) finish(e *entry, bm *ui.Bitmap, err error) {
 	}
 
 	e.err, e.done = err, true
+	// ⚠️ **`released` 留着不清**（票 #673）：这一条是「放掉像素之后重新解，
+	// 但解失败了」。`state()` 里 `done` 排在 `fetching` 前面，所以界面上报的
+	// 仍然是失败态、`Get` 也不会每次都重新起一次加载（`reloadReleased` 的判据
+	// 里有 `done`）——而**自动重试成功**那一次仍然算「放掉之后的重新解码」
+	// （`wasReleased` 在重试那条路上也会是 true）。
 	e.failures++
 	failures := e.failures
 	e.mu.Unlock()

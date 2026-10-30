@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"log"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -314,8 +315,9 @@ type App struct {
 	// ⚠️ **它和 `a.title` 是两首**：`a.title` 是正在放的那一首，而这一份是
 	// 失败的那一首——不分开的话，出错那一栏显示的是**上一首**，用户读到的是
 	// 「这一首正在放，但它打不开」。
-	failedTitle  string
-	failedArtist string
+	failedTitle   string
+	failedArtist  string
+	failedBiliURL string
 	// pending 是「上一次用户想放的那一项」。
 	//
 	// 它是重试那一枚键的**凭据**：重试要放的还是这一首，而不是队列里
@@ -342,6 +344,17 @@ type App struct {
 	// account 是扫码登录那摊事（状态、轮询、落盘），见 account.go。
 	// 挂上去之前是 nil，界面要判空。
 	account *Account
+
+	// 这些是按 App 生命周期拥有的挂载模块。它们不放在包级注册表里，
+	// 这样关闭一个 App 就能一次性摘掉它的所有模块和 keyed page state。
+	settings      *settingsSlot
+	recommend     *Recommend
+	library       *Library
+	favorites     *Favorites
+	exploreClient *bili.Client
+	search        *Search
+	spaces        map[int64]*UpSpace
+	exploreGen    uint64
 
 	// 在线播放这一摊，见 online.go。挂上去之前 streaming 是 nil。
 	streaming *Streaming
@@ -404,7 +417,7 @@ type App struct {
 	//
 	// ⚠️ **它的命和 `pendingSrc` 不一样**：`pendingSrc` 在播放器装上之后
 	// 就交出去了（源归播放器管），而 `loadSrc` 要到**这一趟结束**才清——
-	// 中途被顶掉的那一条也得由看门狗自己关掉（见 `abortPendingSource`）。
+	// 中途被顶掉的那一条也得由看门狗自己关掉（见 `abortPendingSourceFor`）。
 	loadSrc *audio.StreamSource
 	// loadSrcGen 是 loadSrc 属于哪一趟（见上）。
 	loadSrcGen int
@@ -598,9 +611,15 @@ type App struct {
 	// 唯一凭据——串了的话，事后排查会拿着另一首歌的日志找原因。
 	playLog func(format string, args ...any)
 
-	// fullPlayerPrefs 是全屏播放器自己那一份偏好（见 fullplayer_prefs.go）。
-	// 挂上之前是 nil，`FullPlayerPrefs` 判空之后给默认值。
-	fullPlayerPrefs *fullPlayerPrefsStore
+	// fullPlayerPrefsMu serializes mounting and closing the fullplayer store. A mount
+	// must finish closing the previous writer before publishing its replacement.
+	fullPlayerPrefsMu sync.Mutex
+	fullPlayerPrefs   *fullPlayerPrefsStore
+	// fullPlayerPrefsPending keeps an update made after the current store was
+	// detached in memory until the next mount can attach it to a persisted store.
+	fullPlayerPrefsPending    FullPlayerPrefs
+	fullPlayerPrefsPendingSet bool
+	fullPlayerPrefsDetached   bool
 	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
 	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
 	specBars []float32
@@ -665,8 +684,20 @@ type App struct {
 	// 那个 goroutine，而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。理由
 	// 同 `likeMu` / `partsMu`。
 	// commentsMu sync.Mutex
-	commentsMu     sync.Mutex
+	commentsMu sync.Mutex
+	// commentsCancel 取消的是**主列表**那一趟（换歌 / 换槽位时用）。
 	commentsCancel context.CancelFunc
+	// commentsReplyCancels 是**楼中楼**各自的取消函数，按 root 分格。
+	//
+	// 🔴 **它必须和 `commentsCancel` 分开**（2026-10-29 的回归）：楼中楼和主列表
+	// 是两个并行的请求，共用一格的话「后发的那一趟把先发的掐掉」——而楼中楼最常见
+	// 的用法恰恰是**主列表已经回来之后**再去点开回复。挤在一格里时，那一趟会拿到
+	// 一个刚被自己取消掉的 ctx（`CommentReplies` 里那个 else 分支），
+	// **一个包都发不出去**，用户看到的是「点开回复没有任何反应」。
+	//
+	// 按 root 分格还带来第二件事：同一个槽位上连着点开两条回复时，两条各自
+	// 都要拿到自己的结果，不能互相掐。
+	commentsReplyCancels map[int64]context.CancelFunc
 	// commentsSlot 是这份缓存属于谁（`mv|<bvid>` / `audio|<sid>`）。换歌就重来。
 	commentsSlot string
 	// comments 是已经拿到的那些评论（主列表）。
@@ -992,7 +1023,7 @@ type wakeEntry struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog}
+		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace)}
 	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
 	// 而它在「第一次取流有结果了」之前都算「还没准备好」——
 	// 界面上要靠它说一句话（见 App 里 `starting` 那段注释）。
@@ -1012,8 +1043,13 @@ func New() *App {
 	return a
 }
 
-// logf 往**播放路径**的日志里写一句。
-//
+// isClosed 报告 App 是否已进入关闭流程。
+func (a *App) isClosed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.closed
+}
+
 // 🔴 **出口可以是 nil**：没装（或者被换成了 nil）时这句话就丢了——
 // 日志不是功能，丢了不许把整个应用带下去。
 func (a *App) logf(format string, args ...any) {
@@ -1238,21 +1274,22 @@ func (a *App) sourceLocked() string {
 	return SourceOnline
 }
 
-// biliURLLocked 是当前这一首在 B 站上的地址。**必须在持锁时调**。
+// biliURLLocked 是播放条当前动作对应的 B 站地址。**必须在持锁时调**。
 //
-// 正在放的那一首（`a.online`）优先；还没有放上（取流失败了）就用**用户
-// 刚才想放的那一首**（`a.pending`）。
-//
-// 本地文件在 B 站上没有对应的东西，而没有稿件身份的在线条目（没挂投稿的
-// 那种）也没有——那两种都给空串。
+// 有播放器时，标题和链接必须来自同一个实际播放器条目：在线播放器用
+// `a.online`，本地播放器没有 B 站地址。在线取流尚未装上时，旧播放器仍是播放条目，
+// 不能把 `pending` 的链接提前挂上去；只有没有播放器的失败状态才回退到 `pending`。
 func (a *App) biliURLLocked() string {
-	if a.online != nil {
-		return BiliLink(a.online.item)
+	if a.errText != "" && a.failedBiliURL != "" {
+		return a.failedBiliURL
 	}
-	// 🔴 **取流失败的时候 `a.online` 从没装上**（那条流压根没建起来），
-	// 而用户想听的那一首在 `pending` 里。「在 B 站里听它」正是失败之后
-	// 用户能做的事，地址得从那儿来——不然那枚键压根不会出现。
-	return BiliLink(a.pending)
+	if a.player == nil {
+		return BiliLink(a.pending)
+	}
+	if a.online == nil {
+		return ""
+	}
+	return BiliLink(a.online.item)
 }
 
 // setCover 记下当前这首的封面地址。
@@ -1335,6 +1372,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		// 成一件事（理由见 `State.FailedTitle`）。
 		a.failedTitle = ""
 		a.failedArtist = ""
+		a.failedBiliURL = ""
 		// ⚠️ **`pending` 也清掉**：用户现在面对的是**这个本地文件**，而
 		// `pending` 里可能还留着上一首在线的歌——留着的话，播放条上那枚
 		// 「在 B 站打开」会指向**另一首歌**（和这句错一点关系都没有）。
@@ -1367,6 +1405,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 建的（取流要几百毫秒的网络往返）。不加的话，用户点了本地文件之后，那条
 	// 在途的在线流照样会装上来——把本地文件顶掉，界面上响的是用户没点的那首。
 	// 那一头认的就是这个代次（`online.go` 的 `runOnline`）。
+	prevGen := a.onlineGen
 	a.onlineGen++
 	// 「正在取流」这一档到此为止：本地文件是**同步**开的，开完就在放，没有
 	// 「还在准备」这一段。
@@ -1453,8 +1492,13 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 在途的那条在线流也掐掉（代次加了，那一头会自己走人——但它自己走人要等
 	// 网络那一头先回话，而这里可以立刻停）。
 	//
+	// ⚠️ **传的是**`prevGen`（加之前那一趟）：上面已经把 `onlineGen` 加过了，
+	// 而这里要掐的正是**被顶掉的那一趟**的源。传当前值的话一个源都关不掉
+	// （现在那一栏属于新代次），而传 0 又会把新代次的源连坐关掉——见
+	// `abortPendingSourceFor` 的注释。
+	//
 	// ⚠️ **锁外面调**：它要拿 `a.mu`，而那把锁上面已经拿着。
-	a.abortPendingSource()
+	a.abortPendingSourceFor(prevGen)
 
 	// 先把新歌换上，再关旧的：换歌期间 tick 拿到的一直是有效的播放器。
 	if old != nil {
@@ -1718,6 +1762,7 @@ func (a *App) ClearTrack() {
 	// / failOnline / noteQuality 都对）。不加的话，用户把正在放的那首删掉之后
 	// 那条流才建好——它照样会装上来，队列是空的、播放器却在放一首不在队列里的歌，
 	// 正是这里要避免的那件事。
+	prevGen := a.onlineGen
 	a.onlineGen++
 	a.online = nil
 	// 「正在取流」这一档也收掉：清掉当前曲目 = 用户不要这一首了，那条在途的
@@ -1741,8 +1786,9 @@ func (a *App) ClearTrack() {
 	wake := a.wake
 	a.mu.Unlock()
 
-	// 在途的那条在线流也掐掉（理由同 `Open` 里那一句：锁外面调）。
-	a.abortPendingSource()
+	// 在途的那条在线流也掐掉（理由同 `Open` 里那一句：锁外面调、传**被顶掉
+	// 的那一趟**的代次）。
+	a.abortPendingSourceFor(prevGen)
 
 	// 「这一首到此为止」也是终止：播放记录那一轮到此结束（见 playreport.go
 	// 的「一、什么时候发」）。它和 `Stop` 是同一件事的两个入口。
@@ -1762,12 +1808,25 @@ func (a *App) ClearTrack() {
 
 // Close 停掉播放、关掉解码器和文件句柄，并停掉后台时钟。可以重复调用。
 func (a *App) Close() {
+	a.fullPlayerPrefsMu.Lock()
+	defer a.fullPlayerPrefsMu.Unlock()
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
 		return
 	}
 	a.closed = true
+	a.recommend, a.library, a.favorites = nil, nil, nil
+	a.exploreClient = nil
+	a.search = nil
+	oldSpaces := a.spaces
+	a.spaces = nil
+	a.wakeMu.Lock()
+	a.wakes = nil
+	a.wakeMu.Unlock()
+	a.announceMu.Lock()
+	a.announces = nil
+	a.announceMu.Unlock()
 	p := a.player
 	a.player = nil
 	a.playing = false
@@ -1780,8 +1839,16 @@ func (a *App) Close() {
 	rep := a.report
 	a.report = nil
 	at := a.position
+	settings := a.settings
+	fullPlayerPrefs := a.fullPlayerPrefs
+	a.fullPlayerPrefs = nil
+	a.wake = nil
+
 	a.mu.Unlock()
 
+	for _, s := range oldSpaces {
+		s.invalidate()
+	}
 	close(a.done)
 
 	// 「上次听到哪儿」这一格：**退出前强制落一次**。
@@ -1791,7 +1858,21 @@ func (a *App) Close() {
 	//
 	// 排在 `close(a.done)` 之后：后台时钟已经停了，不会再有别的 goroutine 来
 	// 改这一格，落下去的就是**最后那个状态**。
+	// 设置的后台合并写也要在退出时同步收尾。
 	a.SavePlayback()
+	if settings != nil && settings.store != nil {
+		_ = settings.store.Close()
+	}
+	if fullPlayerPrefs != nil {
+		if err := fullPlayerPrefs.Close(); err != nil {
+			log.Printf("biu: 退出时保存全屏播放器偏好失败：%v", err)
+		}
+	}
+	a.mu.Lock()
+	if a.settings == settings {
+		a.settings = nil
+	}
+	a.mu.Unlock()
 
 	// 播放记录先结掉这一轮，再关那条 goroutine。
 	//
@@ -1811,7 +1892,9 @@ func (a *App) Close() {
 	// 🔴 **在途的那条字节源也要关**：播放器还没建起来的时候它已经在下载了，
 	// 而上面那句关的是**播放器**——关不到它。没有这一句的话，一次卡死的取流
 	// 会在应用退出之后还在下载（临时文件也一起留在盘上）。
-	a.abortPendingSource()
+	//
+	// ⚠️ **这一处是「全关」，不看代次**：进程都要没了，还有谁在等的源都该停。
+	a.abortAllPendingSources()
 	// 在途的那一趟**预取**也要掐：它还占着一条连接，而用户已经退出了。
 	a.invalidatePrefetch()
 	a.mu.Lock()

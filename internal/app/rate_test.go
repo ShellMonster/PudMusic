@@ -45,6 +45,24 @@ import (
 //
 // 所以这里的写法是：**同一轮里量两个窗口，只信它们的比值**。机器慢会让两个
 // 窗口一起慢，比值不变；而「倍率没套上」是比值从 2 掉到 1——那个掉得下。
+//
+// # 🔴 跳过那些「不能拿来判」的数（2026-10-30 压测查出来的）
+//
+// 光写成比值还不够。机器被抢得狠的时候，量出来的数会**离谱到看着像另一种错**：
+//
+//	「2 倍速走 4.81，原速走 1.03，比值 4.69」   ← 窗口只量到 375ms（见 `secPerSong`）
+//	「0.5 倍速走 1.06，原速走 1.11，比值 0.96」 ← 抖动 3.94 倍，两个数都不可信
+//
+// 第二种最伤：**0.96 看着正是这条用例要抓的那个错**（0.5 倍速没套上），而它其实
+// 只是「机器把两段量的时间都搞乱了」。拿这种数去断言，红的既不是代码也不是测试
+// 逻辑，是这台机器当时的负载——而 CI 天天在那种负载下跑。
+//
+// ⇒ `distrust` 早就会算出这件事，原来只把话挂在错误信息后面（判据照红）；现在
+// 它的话**也用来决定要不要跳过**：抖动超过 `jitteryJitter`、或者原速基准低过
+// `healthyUnity`，这一轮就不判。
+//
+// ⚠️ **这不是放水**：「倍率没套上」那一档的抖动是**小的**（两段都稳稳地走成同一个
+// 错值），触发不了跳过；能被它挡掉的只有「这一轮压根没量准」。
 
 // rateName 是测试里的档位名，和界面上那个一样。
 func rateName(r float64) string { return strconv.FormatFloat(r, 'g', -1, 64) + "x" }
@@ -101,8 +119,29 @@ const winSpan = 2 * time.Second
 func secPerSong(t *testing.T, a *app.App, from, to time.Duration) (best, jitter float64) {
 	t.Helper()
 	span := to - from
-	x, y := window(t, a, from, to), window(t, a, to, to+span)
-	return max(x, y), jitterOf(x, y)
+	x, coveredX := window(t, a, from, to)
+	y, coveredY := window(t, a, to, to+span)
+	// 🔴 **只拿「量全了」的那几段算**（2026-10-30 压测复现）：
+	// 位置是每 50ms 一次 tick 写回的，机器被抢的时候一次 tick 可能一口气跨过
+	// 好几格——`at1-at0` 被压缩，算出来的值就**虚高**。
+	//
+	// 实测（八个 `yes` 压满 CPU）：期望 1000ms 的两段分别只量到 375ms / 596ms，
+	// 算出 5.32 / 3.35（真值 2.0 附近）；而这里是**两段取 max**，正好把虚高的
+	// 那一段捡走 → 「2 倍速走 4.81，比值 4.69」。
+	//
+	// 两段都量全了跟原来完全一样；只有一段量全就用那一段；都没量全就退回原来
+	// 的「取 max」并把抖动报成无穷（`distrust` 会说出「机器在抖」，而那种时候
+	// 这一轮本来就不该拿来判）。
+	switch {
+	case coveredX && coveredY:
+		return max(x, y), jitterOf(x, y)
+	case coveredX:
+		return x, jitterOf(x, y)
+	case coveredY:
+		return y, jitterOf(x, y)
+	default:
+		return max(x, y), math.Inf(1)
+	}
 }
 
 // jitterOf 是两遍测量之间差多少倍：大的除以小的。
@@ -123,13 +162,29 @@ func jitterOf(x, y float64) float64 {
 	return hi / lo
 }
 
-// window 量一段窗口的 secPerSong。
-func window(t *testing.T, a *app.App, from, to time.Duration) float64 {
+// window 量一段窗口的 secPerSong，并报「这一测算量全了没有」。
+//
+// # 🔴 covered 是什么意思
+//
+// `reach` 等到「位置过线」就返回，而位置是每 50ms 一次 tick 写回的：机器被抢
+// 的时候一次 tick 可能一口气跨过好几格，`at1-at0` 就被**压缩**了，算出来的值
+// 虚高。实测被抢时 1000ms 的窗口只量到 375ms / 596ms（见 `secPerSong`）。
+//
+// 所以这里把「真实跨度 / 期望跨度」也报出去，由调用方决定这一段能不能用。
+func window(t *testing.T, a *app.App, from, to time.Duration) (perSong float64, covered bool) {
 	t.Helper()
+	want := to - from
 	at0 := reach(t, a, from)
 	at1 := reach(t, a, to)
-	return float64(to-from) / float64(at1.Sub(at0))
+	span := at1.Sub(at0)
+	return float64(want) / float64(span), float64(span) >= windowSpanFloor*float64(want)
 }
+
+// windowSpanFloor 是「这一测算量全了」的下限：真实跨度至少要有期望的这么多。
+//
+// 0.8 是量出来的：健康的机器上跨度在 0.95~1.03 之间，被抢时会掉到 0.38 / 0.60。
+// 取 0.8 两边分得开——正常那一段永远算「量全了」，被压缩的那一段一定不算。
+const windowSpanFloor = 0.8
 
 // near 断 got 和 want 是不是在彼此的 ±tol 倍之内（tol > 1）。
 func near(got, want, tol float64) bool {
@@ -162,6 +217,11 @@ const jitteryJitter = 1.3
 // 它**不改变**断言的结果——只挂在错误信息后面，让人知道红的是不是代码的锅。
 func distrust(unity, jitter float64) string {
 	switch {
+	case math.IsInf(jitter, 1):
+		// 两段窗口**一段都没量全**（见 `secPerSong`）：机器被抢得连一整段
+		// 都走不完，这一轮什么也说明不了。
+		return "⚠️ 这一次多半不是代码的问题：两段窗口一段都没量全（机器被抢得太狠），" +
+			"上面的数是机器的数。机器闲下来重跑一次就能确认。"
 	case jitter > jitteryJitter:
 		return fmt.Sprintf("⚠️ 这一次多半不是代码的问题：同一段量两遍差 %.2f 倍，"+
 			"机器当时在抖，上面的数是机器的数。机器闲下来重跑一次就能确认。", jitter)
@@ -252,6 +312,7 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 	a.SetRate(2)
 	two, jTwo := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
 	one, jOne := unityBaseline(t, a, 9*time.Second)
+	requireMeasurable(t, one, max(jTwo, jOne))
 	if !near(two, 2*one, rateTol) {
 		t.Errorf("2 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 2"+
 			"（进度条和耳朵对不上）%s", two, one, two/one,
@@ -266,6 +327,7 @@ func TestTheClockFollowsTheRate(t *testing.T) {
 	// 分母取两段原速里**大的**那个：机器慢的时候多给一次机会，别因为其中一段
 	// 慢就把比值压到容差外。
 	base := max(one, one2)
+	requireMeasurable(t, base, max(jHalf, jOne2, jTwo, jOne))
 	if !near(half, 0.5*base, rateTol) {
 		t.Errorf("0.5 倍速走 %.3f，原速走 %.3f——比值 %.2f，want 0.5%s",
 			half, base, half/base, distrust(base, max(jHalf, jOne2)))
@@ -302,12 +364,14 @@ func TestRateIsRememberedBeforeAnyTrackIsOpen(t *testing.T) {
 	// 「新歌一上来就是 2 倍速」——必须量**开歌后的第一段**，中间不能有别的操作。
 	two, jTwo := secPerSong(t, a, 3*time.Second, 3*time.Second+winSpan)
 	one, jOne := unityBaseline(t, a, 9*time.Second)
+	requireMeasurable(t, one, max(jTwo, jOne))
 	if !near(two, 2*one, rateTol) {
 		t.Errorf("先按的 2 倍速没套到新歌上：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2%s",
 			one, two, two/one, distrust(one, max(jTwo, jOne)))
 	}
 	// 拨回 2 倍速之后仍然是 2 倍速——量基准那一拨没有把倍率留在 1。
 	again, jAgain := secPerSong(t, a, 15*time.Second, 15*time.Second+winSpan)
+	requireMeasurable(t, one, max(jAgain, jOne))
 	if !near(again, 2*one, rateTol) {
 		t.Errorf("量完基准再拨回 2 倍速，只走到 %.3f（原速 %.3f）——倍率被量基准那次留下了%s",
 			again, one, distrust(one, max(jAgain, jOne)))
@@ -374,10 +438,12 @@ func TestRateSurvivesTrackChanges(t *testing.T) {
 	// 相对速度和切歌后走的相对速度一样吗」，那才是这一条要问的。
 	rBefore, rAfter := before/unity1, after/unity2
 
+	requireMeasurable(t, unity1, max(j1, jB))
 	if !near(rBefore, 2, rateTol) {
 		t.Errorf("切歌之前就不对：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2%s",
 			unity1, before, rBefore, distrust(unity1, max(j1, jB)))
 	}
+	requireMeasurable(t, unity2, max(j2, jA))
 	if !near(rAfter, rBefore, rateTol) {
 		t.Errorf("切歌之后从 %.2f 掉到 %.2f（各自的原速基准分别是 %.3f 和 %.3f）"+
 			"——新播放器没套上倍率%s", rBefore, rAfter, unity1, unity2,
@@ -443,9 +509,34 @@ func TestOnlineTrackKeepsTheRate(t *testing.T) {
 			one, two, 2*one, rateTol, rateTol*2*one)
 	}
 
+	requireMeasurable(t, one, max(jTwo, jOne))
 	if !near(two, 2*one, rateTol) {
 		t.Errorf("在线歌没套上 2 倍速：原速走 %.3f，2 倍速走 %.3f——比值 %.2f，want 2%s",
 			one, two, two/one, distrust(one, max(jTwo, jOne)))
+	}
+}
+
+// requireMeasurable 在「这一轮根本没量准」时跳过整条用例。
+//
+// # 🔴 为什么要有它（2026-10-30 压测查出来的）
+//
+// 这一族用例早就有两道防线：`secPerSong` 两段取大（治「某一段被抢」）、
+// `rateMeasuredTooFast`（治「量出来的比任何档位能给的都快」）。但漏了一档：
+//
+//	0.5 倍速走 1.06，原速走 1.11——比值 0.96，**抖动 3.94 倍**
+//
+// 0.96 看着正是这条用例要抓的那个错（0.5 倍速没套上），而它其实只是「机器把
+// 两段量的时间都搞乱了」。拿它断言，红的是机器的负载。
+//
+// ⇒ 抖动超过 `jitteryJitter`、或者原速基准低过 `healthyUnity`，这一轮就跳过
+// （`distrust` 本来就算得出这两件事，原来只把话挂在错误信息后面）。
+//
+// ⚠️ **不是放水**：「倍率没套上」那一档的抖动是**小的**（两段都稳稳地走成同一个
+// 错值），触发不了这里。
+func requireMeasurable(t *testing.T, unity, jitter float64) {
+	t.Helper()
+	if why := distrust(unity, jitter); why != "" {
+		t.Skip(why)
 	}
 }
 

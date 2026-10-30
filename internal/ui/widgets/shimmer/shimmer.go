@@ -96,7 +96,12 @@ func Block(c *ui.Context, key string, w, h, radius float32) ui.Element {
 		b = b.FillWidth()
 	}
 	t := c.Theme()
-	base, glow := t.Text.Alpha(BaseAlpha), t.Background.Alpha(GlowAlpha)
+	baseAlpha, glowAlpha := BaseAlpha, GlowAlpha
+	if t.Dark {
+		baseAlpha = 0.12
+		glowAlpha = 0.72
+	}
+	base, glow := t.Text.Alpha(baseAlpha), t.Background.Alpha(glowAlpha)
 	visible := frameVisible
 	return b.Draw(func(p *ui.Painter, r ui.Rect) {
 		Paint(p, r, radius, base, glow, visible)

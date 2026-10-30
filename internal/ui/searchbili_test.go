@@ -559,9 +559,6 @@ func (stickyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return http.DefaultTransport.RoundTrip(r.Clone(context.WithoutCancel(r.Context())))
 }
 
-// searchOnRealClient 把外壳的搜索接上真的客户端（走真的 fetchSearchTab 那条路）。
-func searchOnRealClient(s *Shell, c *bili.Client) { s.search.client = func() *bili.Client { return c } }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 搜出来的歌放得起来（评审的 critical）
 // ─────────────────────────────────────────────────────────────────────────────

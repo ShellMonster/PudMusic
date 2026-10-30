@@ -42,6 +42,10 @@ type Shell struct {
 	app *app.App
 	win *mygo.Window
 
+	// framePage is the shared page input/action snapshot for this frame. Page
+	// modules keep their own state; this only carries genuinely shared values.
+	framePage pageSeam
+
 	// draw 是外面包了一层 recover 的 viewMain。
 	draw func(*ui.Context)
 
@@ -590,7 +594,7 @@ type Shell struct {
 	//
 	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
 	// 每帧都要传一次拖动值（见 queue_drag.go 的说明）。
-	queueDrags rowkey.Memo[string, *queueDragValue]
+	queueDrags rowkey.Memo[int, *queueDragValue]
 
 	// queueDropAt 是**落点那一行**在抽屉里的行号（-1 = 没有落点）。
 	//

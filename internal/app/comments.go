@@ -469,14 +469,42 @@ func (a *App) CommentReplies(root int64) []bili.Comment {
 	a.commentsMu.Unlock()
 
 	repliesFetch := a.commentsRepliesFetch
+	// ⚠️ **楼中楼有自己的 cancel 槽**（`commentsReplyCancels`，按 root 分格）：
+	// 挤进 `commentsCancel` 那一格的话，主列表那一趟（通常已经跑完、而它留下的
+	// cancel 不会被清空）会让这一趟刚造出来的 ctx 当场被取消——**一个包都不出去**，
+	// 用户看到的是「点开回复没有任何反应」。按 root 分格还保证同一个槽位上连着点开
+	// 两条回复时，两条各自都能拿到自己的结果。
+	//
+	// ⚠️ **同一个 root 重问时换掉旧的**：那个 root 上一次的取消函数已经没用了
+	// （它那一趟要么回来了、要么早就不该再写界面）；留着只会让这一格的 map
+	// 无限长下去。
+	//
+	// ⚠️ **下面这一行是 #682 改的那一半**：取的是 `commentsArchiveFetch`
+	// （一次往返同时拿 aid 和评论数），不是 main 那个只换 avid 的
+	// `commentsArchiveIDFetch`——两者是同一个替身槽位的新旧名字，合并时只能留一个。
 	archiveFetch := a.commentsArchiveFetch
 	ctx, cancel := context.WithCancel(context.Background())
 	a.commentsMu.Lock()
-	if a.commentsCancel == nil {
-		a.commentsCancel = cancel
-	} else {
+	// ⚠️ **两次加锁之间可能已经换歌了**：上面那次 `Unlock` 之后、这一次
+	// `Lock` 之前，界面线程可能换了槽位并跑完 `resetCommentsLocked`——那一趟
+	// 会把这个新造出来的 ctx 的取消函数**漏掉**（它清的是当时 map 里已有的
+	// 那些），于是这一趟不受控地跑完（结果被代次丢掉，但网络和内存照付）。
+	//
+	// 判据用**代次**：`gen` 是在上面那次加锁里取的；这里对不上就说明槽位已经
+	// 换过，这一趟根本不该发出去——直接取消并走人（`commentsRepliesWanted`
+	// 那份记在旧代次上，换槽时已经被清了，不会卡住重试）。
+	if a.commentsGen != gen || a.commentsSlot != slot {
+		a.commentsMu.Unlock()
 		cancel()
+		return nil
 	}
+	if a.commentsReplyCancels == nil {
+		a.commentsReplyCancels = map[int64]context.CancelFunc{}
+	}
+	if prev := a.commentsReplyCancels[root]; prev != nil {
+		prev()
+	}
+	a.commentsReplyCancels[root] = cancel
 	a.commentsMu.Unlock()
 	go a.loadReplies(ctx, it, slot, gen, root, repliesFetch, archiveFetch)
 	return nil
@@ -611,6 +639,13 @@ func (a *App) resetCommentsLocked(slot string) {
 	if a.commentsCancel != nil {
 		a.commentsCancel()
 		a.commentsCancel = nil
+	}
+	// 🔴 **在途的楼中楼也要掐掉**：换歌之后那些 root 属于上一首，回来的结果
+	// 代次对不上、写不进界面——但请求本身还占着网络和内存。按 root 分格存着，
+	// 这里逐个取消并清空那一格（槽位换了，旧 root 永远不会再被问）。
+	for root, cancel := range a.commentsReplyCancels {
+		cancel()
+		delete(a.commentsReplyCancels, root)
 	}
 	a.commentsSlot = slot
 	a.comments = nil
@@ -1300,6 +1335,15 @@ func (a *App) commentOIDFor(ctx context.Context, it Item, slot string, gen int, 
 }
 
 // finishReplies 记下一次楼中楼的结果并叫醒界面。
+//
+// ⚠️ **这一趟结束了，它那个取消函数就没用了**（`commentsReplyCancels[root]`）：
+// 不删的话，同一首歌里每展开一层楼就留一个 CancelFunc（连同它那个 ctx 和闭包）
+// 到换歌为止。删的时机放在**结果落地**这一处——`loadReplies` 的每条路径
+// （成功、失败、认不出对象）最后都走到这里。
+//
+// ⚠️ **删之前对一下代次**：换歌之后槽位和代次都变了，那一格早被
+// `resetCommentsLocked` 清掉；这时同 root 的新一趟可能已经写进新的一格，
+// 盲目 `delete` 会把**新的**那个取消函数删掉（那一趟就再也不受控制了）。
 func (a *App) finishReplies(slot string, gen int, root int64, rs []bili.Comment) {
 	a.commentsMu.Lock()
 	if a.commentsSlot == slot && a.commentsGen == gen {
@@ -1312,6 +1356,7 @@ func (a *App) finishReplies(slot string, gen int, root int64, rs []bili.Comment)
 		if a.commentsRepliesWanted != nil {
 			a.commentsRepliesWanted[root] = false
 		}
+		delete(a.commentsReplyCancels, root)
 	}
 	a.commentsMu.Unlock()
 
