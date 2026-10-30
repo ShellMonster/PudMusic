@@ -115,13 +115,18 @@ func newCollectionFixture(t *testing.T) *collectionFixture {
 }
 
 // fixtureMediaJSON 把 medias 翻成 B 站那个形状。
+//
+// ⚠️ **`attr` 要照 `Media.Attr` 给**：它是「这条还在不在」的唯一来源
+// （`bili.Media.Invalid`），而兜底封面那条链路（`FolderFallbackCover`）
+// 就是靠它跳过失效条目的。写死 0 的话，夹具里造的「失效的那首」在接口那一侧
+// 是有效的——那条判据于是测不到。
 func fixtureMediaJSON(in []bili.Media) []map[string]any {
 	out := make([]map[string]any, 0, len(in))
 	for _, m := range in {
 		out = append(out, map[string]any{
 			"id": m.ID, "type": m.Type, "title": m.Title, "bvid": m.Bvid,
 			"cover": m.Cover, "duration": int(m.Duration / time.Second),
-			"attr": 0, "upper": map[string]any{"name": m.Owner},
+			"attr": m.Attr, "upper": map[string]any{"name": m.Owner},
 		})
 	}
 	return out

@@ -792,6 +792,56 @@ const collectionLeadHeight = collectionCoverH + 40 +
 	3*scale.Size14*leading.Copy + 2*collectionHeadGap + collectionOwnerAvatarSize +
 	collectionOpsButtonH + 24 + 32
 
+// collectionHeaderCover 是头图区这一帧要画的那个封面地址（**三层兜底之后**的）。
+//
+// # 和侧栏那一枚是同一套口径
+//
+// 侧栏那一行（`viewFavoriteCover`）做的是同一件事，而**头图区此前没做**：
+//
+//	① 接口给的封面（容器第一首）
+//	② 它为空、或者**这个尺寸下**已经拉失败 → 夹里第一首还有效、还有封面的那张
+//	   （`app.FolderFallbackCover`，后台只拉一页、每个容器一次）
+//	③ 都没有 → 空串（那一格画「没有封面」的占位）
+//
+// 症状：第一首失效时，B 站给的那个封面地址还在、图已经 404 了。侧栏那枚方形封面
+// 早就换成了夹里下一首的封面，而**头图区还是那张坏图**——同一页上两处对同一件事
+// 给出两个答案。
+//
+// # ⚠️ 判断「拉失败」用的尺寸必须和真正画的时候**一模一样**
+//
+// `GetSized` 的缓存键是 `(地址, 宽, 高)`：小图那一份失败**不等于**大图那一份
+// 失败（它们是两个缓存条目）。侧栏判的是 `imgcache.ParamsSquare` 那一档
+// （32 见方），这里判的是 `collectionCoverW × collectionCoverH`——**各自带
+// 各自的参数**，谁也不借谁的。
+//
+// 同样地，`app.FolderFallbackCover` 的缓存里存的是**原始地址**：裁剪参数由
+// **画它的那一格**自己拼（侧栏拼 `ParamsSquare`，这里拼大图那一套）。把裁剪过
+// 的地址存进那个缓存，另一处就会拿到一个尺寸不对的键。
+//
+// # ⚠️ 只有「封面为空 / 拉失败」才去问兜底
+//
+// 封面正常时这一帧一次都不该走到那一层：它要拿一把锁、查两张表，而这条路径
+// **每帧**都跑（`framebudget_test.go` 量的是每帧分配）。更实际的理由是语义：
+// 「每帧都问一次兜底」等于把「后台拉过没有」变成渲染循环的一部分，而它真正
+// 要回答的只是「原来那张还能不能用」。
+//
+// ⚠️ **`!Loaded` 那一档返回空串，但那一档由调用方画骨架屏**：空地址在
+// `imgcache` 里是「本来就没有」那一档（图片图标占位），和「元信息还没回来」
+// 的含义相反——所以这个函数**不参与**那一档的判断，调用方要先用 `info.Loaded`
+// 分流。
+func (s *Shell) collectionHeaderCover(ref app.CollectionRef, info app.CollectionInfo) string {
+	if !info.Loaded {
+		return ""
+	}
+	// 还在下载（`Loading`）时 `Err` 是 nil，这里照旧用接口给的那张——那一格
+	// 画的是骨架屏，等它下来就是了。
+	if info.Cover != "" &&
+		s.images.GetSized(info.Cover, collectionCoverW, collectionCoverH).Err == nil {
+		return info.Cover
+	}
+	return s.app.FolderFallbackCover(ref)
+}
+
 // viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
 //
 // 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`：右边那一
@@ -799,7 +849,15 @@ const collectionLeadHeight = collectionCoverH + 40 +
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	info := s.app.Collection(p.ref)
-	hue, sat := s.tint.sync(info.Cover, s.wake.invalidate)
+	// 光晕跟着**这一帧真正画的那张封面**走（见 `collectionHeaderCover`）：
+	// 兜底换上之后颜色也要换，否则会出现「封面是第二首的、光晕还是第一首
+	// （失效那张）的颜色」——而失效那张往往根本没有颜色可给。
+	//
+	// ⚠️ `sync` 的缓存键就是**它收到的那个地址**（`covertint_cache_test.go` 的
+	// `TestTheTintCacheIsKeyedByTheURL` 钉着），所以换地址天然换色、切回来也
+	// 命得中原来那一条。
+	cover := s.collectionHeaderCover(p.ref, info)
+	hue, sat := s.tint.sync(cover, s.wake.invalidate)
 	glow := collectionGlow(t, hue, sat)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
@@ -819,8 +877,16 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			// 才换成图。那两档的含义是相反的。
 			//
 			// 所以 `!Loaded` 时直接画「正在加载」那一档（一块带扫光的灰）。
+			//
+			// ⚠️ **`cover` 是三层兜底之后的那一张**（见 `collectionHeaderCover`）：
+			// 接口给的那张拉不下来时它是夹里下一首的，而不是那张坏图。
+			//
+			// ⚠️ **兜底地址也走 `imgcache.View` 的原始地址**（不带 `@…` 参数）：
+			// 那一格按 `collectionCoverW × collectionCoverH` **自己**向图床要
+			// 对应的一档（`GetSized`），和判断「拉失败」时用的是同一个尺寸。
+			// 手动拼一副参数的话两边就成了两个缓存条目——判完了还是画不出来。
 			if info.Loaded {
-				shadow.TailwindLG(imgcache.View(c, s.images, info.Cover, collectionCoverW, collectionCoverH))
+				shadow.TailwindLG(imgcache.View(c, s.images, cover, collectionCoverW, collectionCoverH))
 			} else {
 				shadow.TailwindLG(imgcache.Loading(c, collectionCoverW, collectionCoverH, imgcache.Shape{}))
 			}
