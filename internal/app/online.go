@@ -1425,11 +1425,20 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// 🔴 **「这一趟自己的那一条」在盘上缓存那一路是 nil**：那条路没有字节源
 	// （字节已经在盘上了，见 `playFromByteCache`），而 `loadSrc` 是给看门狗
 	// 盯进度用的——没有源就没有进度可盯。
-	// 源归播放器管了（`audio.Player` 的 closers 会关它），App 这一栏清空。
+	//
+	// 🔴 **上一首的源要关掉**（2026-10-30）：走网络那一路，源归**新**播放器
+	// 管（`audio.Player` 的 closers 会关它），而这一栏清空是对的。
+	//
+	// ⚠️ **但盘上缓存那一路没有源**：新播放器手上是空的，而这一栏里装的是
+	// **上一首**的源——直接清掉的话，那一条源就**没人关了**：它继续下到天亮，
+	// 而它写进缓存的那一份会在**应用退出之后**才落盘（于是测试的收尾报
+	// 「directory not empty」，真实用户那边则是缓存目录里多一份半截的字节）。
+	prevSrc := a.pendingSrc
 	a.pendingSrc = nil
 	// 🔴 **「这一趟自己的那一条」也清掉**（票 #220）：这一趟到这儿就完了，
 	// 而它的源已经归播放器管了——留着它的话，**下一次**超时会把正在放着的
 	// 那一条的源关掉。
+	prevLoadSrc := a.loadSrc
 	a.loadSrc = nil
 	a.reportedErr = nil
 	a.clearErrLocked()
@@ -1457,6 +1466,23 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// 🔴 **上一份的保护解除**（锁外面）：它不再被播了。
 	// ⚠️ **锁外面调**：它要拿 `a.mu`（取缓存对象），而那把锁上面还拿着。
 	a.releaseByteCacheProtect(prevTrack)
+
+	// 🔴 **上一首的源关掉**（锁外面）：盘上缓存那一路的新播放器手上没有源，
+	// 所以上一首那条**没人关**——它会继续下到天亮，而它写进缓存的那一份会在
+	// 应用退出之后才落盘。
+	//
+	// ⚠️ **锁外面调**：源的 `Close` 要等它的下载 goroutine 退出来，
+	// 而那个 goroutine 可能正拿着 `a.mu`（换流那条路上它会回调
+	// `noteQuality`）。锁里面等就是死等。
+	//
+	// ⚠️ **同一个源可能被列两次**（`pendingSrc` 和 `loadSrc` 常常是同一条）：
+	// `Close` 可以重复调（它自己判 `closed`），所以重复关是安全的。
+	if prevSrc != nil && prevSrc != src {
+		prevSrc.Close()
+	}
+	if prevLoadSrc != nil && prevLoadSrc != src && prevLoadSrc != prevSrc {
+		prevLoadSrc.Close()
+	}
 
 	// 换了一首 → 落盘那一格该跟着变（见 playback_state.go）。
 	a.markPlaybackDirty()

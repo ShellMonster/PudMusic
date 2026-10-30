@@ -130,6 +130,10 @@ func TestSwitchingBackDoesNotHitTheNetwork(t *testing.T) {
 
 	cacheDir := t.TempDir()
 	a := app.New()
+	// 🔴 **先关应用，再让 `t.TempDir()` 收尾**：清理是**倒序**跑的，
+	// 而 `t.TempDir()` 的清理是在它被调用的那一刻登记的——比这里登记的
+	// `a.Close` **早**。于是缓存目录会在字节源还开着那个文件的时候被删，
+	// 收尾报「directory not empty」（Windows 上那更是删不掉）。
 	t.Cleanup(a.Close)
 
 	transport := &app.CredentialTransport{
