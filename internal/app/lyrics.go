@@ -331,15 +331,40 @@ func (a *App) loadLyrics(key string, gen int) {
 			return
 		}
 		a.lyricEntry = entry
-		if !ok {
+		// 🔴 **判据是「有没有歌词文本」，不是「ok」**（2026-10-30 的第二轮
+		// 对抗性审查挖出来的 P1）。
+		//
+		// ⚠️ **为什么**：缓存层在**过期**的时候返回的是「记录在、歌词没了」
+		// （ok = true，而 `Lyrics` 是空串）——因为用户调过的偏移和字号还在
+		// 那份记录里，而那两样是**用户数据**，不该跟着歌词文本一起过期。
+		//
+		// 而**本地文件那一支的「自动找歌词」是挂在 `!ok` 上的**：本地文件没有
+		// B 站字幕那一路，歌词全靠自动搜。所以判据要是「ok」，本地文件的那份
+		// 歌词过期之后就**永远搜不回来了**——用户看到的现象是「这一首的歌词
+		// 永久消失，除非他自己开搜索弹窗」。
+		hasLyrics := strings.TrimSpace(entry.Lyrics) != ""
+		if !hasLyrics {
 			if title, local := localLyricTitle(key); local {
 				defer a.autoSearchLyrics(key, title)
 			}
 		}
-		if ok {
+		if hasLyrics {
 			a.lyricRows = rows
-			// 只有真的调过才盖回去。缓存里没这两个字段时（老记录、别的源写的）
-			// 保持上面刚重置的默认值——这就是「先重置、再恢复」的后半段。
+		}
+		// 🔴 **偏移和字号是**用户自己的值**，跟「歌词文本新不新」无关**（2026-10-30
+		// 的对抗性审查挖出来的 P0）。
+		//
+		// ⚠️ **过期的那一份也要恢复这两个值**：歌词缓存 7 天不用就会过期，
+		// 而用户调过的偏移和字号**不该跟着过期**——那是他自己的设置，
+		// 而「歌词文本要重新拉一份」是另一件事。
+		//
+		// ⚠️ **判据是「盘上有没有这一份记录」，不是「歌词文本在不新鲜」**：
+		// 缓存层在过期时返回的是「记录在、歌词没了」（见 `lyrics.Cache.Load`），
+		// 而用户值就在那份记录里。
+		//
+		// ⚠️ **零值表示「没调过」**：缓存里没这两个字段时（老记录、别的源写的）
+		// 保持上面刚重置的默认值——这就是「先重置、再恢复」的后半段。
+		if ok {
 			a.lyricOffsetMS = clampLyricsOffset(entry.OffsetMS)
 			a.lyricFontSize = ClampLyricsFontSize(entry.FontSize)
 		}

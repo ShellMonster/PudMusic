@@ -59,11 +59,18 @@ func TestTheTwoObjectsGetTwoFiles(t *testing.T) {
 }
 
 // TestAnExpiredEntryIsAsGoodAsMissing 钉住「TTL 一小时」。
+//
+// ⚠️ **判据是文件的修改时刻**（见 `diskcache` 的文件头），而这一条要把它
+// 推到 2 小时前——`Save` 写下去的时刻就是「刚刚」。
 func TestAnExpiredEntryIsAsGoodAsMissing(t *testing.T) {
 	dir := t.TempDir()
 	c := NewCache(dir)
-	old := time.Now().Add(-2 * TTL).Unix()
-	if err := c.Save(1, 12345, Entry{FetchedAt: old, Comments: []bili.Comment{{Rpid: 1}}}); err != nil {
+	if err := c.Save(1, 12345, Entry{Comments: []bili.Comment{{Rpid: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	// 把那份文件的修改时刻推到 2 小时前。
+	old := time.Now().Add(-2 * TTL)
+	if err := os.Chtimes(c.Path(Key(1, 12345)), old, old); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.Load(1, 12345); ok {
@@ -75,6 +82,47 @@ func TestAnExpiredEntryIsAsGoodAsMissing(t *testing.T) {
 	}
 	if _, ok := c.Load(1, 999); !ok {
 		t.Error("刚写的那一份读不回来")
+	}
+}
+
+// TestTheExpiryRollsWithEveryUse 钉住「过期是滚动的」。
+//
+// 🔴 **这是这一层存在的全部理由**（2026-10-30 用户提出来的）：
+//
+//	「过期7天应该会滚动刷新吧，比如第一天用户听的，应该第8天删；
+//	  第三天用户又听了，这时候应该是第11天清的」
+//
+// ⇒ 判据是「**最后一次用到**」，不是「取回来的时刻」。
+//
+// ⚠️ **用假时钟**：真等一小时没法测。
+func TestTheExpiryRollsWithEveryUse(t *testing.T) {
+	now := time.Now()
+	clock := now
+	c := NewCache(t.TempDir()).WithClock(func() time.Time { return clock })
+	if err := c.Save(1, 12345, Entry{
+		FetchedAt: now.Unix(),
+		Comments:  []bili.Comment{{Rpid: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 第 30 分钟：用户又看了一遍（离边界还有半小时）。
+	clock = now.Add(30 * time.Minute)
+	if _, ok := c.Load(1, 12345); !ok {
+		t.Fatal("第 30 分钟读不到")
+	}
+	// 🔴 **第 80 分钟**：按「写下来」算早该删了（离写下来 80 分钟 > 1 小时），
+	// 但用户 30 分钟时看过 ⇒ 还该在（离最后一次用到只有 50 分钟）。
+	//
+	// ⚠️ **这一条断言是「滚动」的全部要害**：判据若是不滚的（按写下来的
+	// 时刻算），它在这里会红。
+	clock = now.Add(80 * time.Minute)
+	if _, ok := c.Load(1, 12345); !ok {
+		t.Error("第 30 分钟看过，第 80 分钟就过期了——过期没有跟着使用滚动")
+	}
+	// 🔴 **第 4 小时**：离最后一次用到（80 分钟那次）已经 3.3 小时 ⇒ 该删了。
+	clock = now.Add(4 * time.Hour)
+	if _, ok := c.Load(1, 12345); ok {
+		t.Error("离最后一次用到满 1 小时了还不过期——用户不看了它就该被清掉")
 	}
 }
 

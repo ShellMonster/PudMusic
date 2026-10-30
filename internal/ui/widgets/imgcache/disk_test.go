@@ -27,7 +27,7 @@ func diskPath(dir, name string) string { return filepath.Join(dir, name) }
 // **最久未用**的那一份，不是最早写进去的那一份。
 func TestDiskCacheEvictsTheLeastRecentlyUsed(t *testing.T) {
 	dir := t.TempDir()
-	d := newDiskCache(dir, 25)
+	d := newDiskCache(dir, 25, 0)
 	t.Cleanup(d.close)
 	<-d.ready
 
@@ -94,7 +94,7 @@ func TestStartupSweepTrimsWhatTheLastRunLeft(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := newDiskCache(dir, 25)
+	d := newDiskCache(dir, 25, 0)
 	t.Cleanup(d.close)
 	<-d.ready
 
@@ -141,7 +141,7 @@ func TestDeletionNeverLeavesTheCacheDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	d := newDiskCache(dir, 10)
+	d := newDiskCache(dir, 10, 0)
 	t.Cleanup(d.close)
 	<-d.ready
 
@@ -460,5 +460,187 @@ func TestDiskWritesDoNotBlockTheCaller(t *testing.T) {
 	c.Close()
 	if got, err := os.ReadFile(diskPath(dir, diskNameFor(url))); err != nil || !bytes.Equal(got, body) {
 		t.Errorf("收尾之后盘上没有完整的那一份：%d 字节，err %v", len(got), err)
+	}
+}
+
+// TestTheCoverExpiryRollsWithEveryUse 验「封面的过期是滚动的」。
+//
+// 🔴 **这是这一层存在的全部理由**（2026-10-30 用户提出来的）：
+//
+//	「过期7天应该会滚动刷新吧，比如第一天用户听的，应该第8天删；
+//	  第三天用户又听了，这时候应该是第11天清的」
+//
+// ⇒ 判据是「**最后一次用过**」，不是「下载那一刻」。
+//
+// ⚠️ **用假时钟**：真等 7 天没法测。
+func TestTheCoverExpiryRollsWithEveryUse(t *testing.T) {
+	day0 := time.Now()
+	clock := day0
+	dir := t.TempDir()
+	d := newDiskCache(dir, 1<<20, 7*24*time.Hour)
+	d.now = func() time.Time { return clock }
+	t.Cleanup(d.close)
+	<-d.ready
+
+	name := diskNameFor("https://example.invalid/cover.jpg")
+	d.writeSync(name, diskTestBody)
+
+	// 第 3 天：用户又看到了这张封面。
+	clock = day0.Add(3 * 24 * time.Hour)
+	if _, ok := d.open(name); !ok {
+		t.Fatal("第 3 天读不到")
+	}
+	// 🔴 **第 9 天**：按「下载那一刻」算早该删了（离下载 9 天 > 7 天），
+	// 但用户第 3 天看过 ⇒ 还该在。
+	//
+	// ⚠️ **这一条断言是「滚动」的全部要害**：判据若是不滚的（按下载那一刻
+	// 算），它在这里会红。
+	clock = day0.Add(9 * 24 * time.Hour)
+	if _, ok := d.open(name); !ok {
+		t.Error("第 3 天看过，第 9 天就过期了——过期没有跟着使用滚动")
+	}
+	// 第 17 天（离最后一次用过 8 天）⇒ 该删了。
+	clock = day0.Add(17 * 24 * time.Hour)
+	if _, ok := d.open(name); ok {
+		t.Error("离最后一次用过满 7 天了还不过期——用户不看了它就该被清掉")
+	}
+}
+
+// TestAnExpiredCoverIsDeletedNotJustIgnored 验「过期的那一份会被删掉」。
+//
+// ⚠️ **光是不命中不够**：留着它只会占地方，而它已经不会再被命中了。
+func TestAnExpiredCoverIsDeletedNotJustIgnored(t *testing.T) {
+	dir := t.TempDir()
+	d := newDiskCache(dir, 1<<20, 7*24*time.Hour)
+	t.Cleanup(d.close)
+	<-d.ready
+
+	name := diskNameFor("https://example.invalid/old.jpg")
+	d.writeSync(name, diskTestBody)
+	// ⚠️ **假时钟先摆好**：「这一版开始管缓存的时刻」是**懒初始化**的——
+	// 它在第一次被问的时候定下来，而那一次的「现在」就是这里的假时钟。
+	start := time.Now()
+	d.now = func() time.Time { return start }
+	// ⚠️ **「这一版写的」判据是「修改时刻在 policyStart 之后」**——而这一条
+	// 要验的是「过期了会被删掉」，所以那份文件的修改时刻得**在 policyStart
+	// 之后、但在 TTL 之前**。
+	policy := d.policyStart()
+	// ⚠️ **修改时刻正好落在 policyStart 上**：那是「这一版写的」的最早可能
+	// （比它早 ⇒ 是升级前写的，不按 TTL 过期）。
+	old := policy
+	if err := os.Chtimes(diskPath(dir, name), old, old); err != nil {
+		t.Fatal(err)
+	}
+	d.now = func() time.Time { return policy.Add(30 * 24 * time.Hour) }
+
+	if _, ok := d.open(name); ok {
+		t.Fatal("过期的那一份还命中了")
+	}
+	if _, err := os.Stat(diskPath(dir, name)); !os.IsNotExist(err) {
+		t.Errorf("过期的那一份还在盘上（stat 返回 %v）——它占着地方却再也不会被命中", err)
+	}
+}
+
+// TestReadingACoverDoesNotWriteToDisk 验「读一张封面不会变成写盘」。
+//
+// 🔴 **这一层明确拒绝过那个做法**（文件头：「每读一张图就改一次时间戳，
+// 等于把读变成了写」）——而「用 mtime 当最后用过」正是**只改元数据**，
+// 不写内容、不 fsync、不建临时文件。
+//
+// ⚠️ **判据是「目录里没有多出文件」**：写路径会建临时文件再 rename。
+func TestReadingACoverDoesNotWriteToDisk(t *testing.T) {
+	dir := t.TempDir()
+	d := newDiskCache(dir, 1<<20, 7*24*time.Hour)
+	t.Cleanup(d.close)
+	<-d.ready
+
+	name := diskNameFor("https://example.invalid/cover.jpg")
+	d.writeSync(name, diskTestBody)
+	// 读之前先数一遍目录里有什么。
+	before, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for range 20 {
+		if _, ok := d.open(name); !ok {
+			t.Fatal("刚写进去的读不出来")
+		}
+	}
+
+	after, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		names := make([]string, 0, len(after))
+		for _, e := range after {
+			names = append(names, e.Name())
+		}
+		t.Errorf("读了 20 次之后目录里多了文件（%d → %d 个）：%v",
+			len(before), len(after), names)
+	}
+}
+
+// TestACoverWithoutATimestampIsStillFresh 验「老缓存不会因为缺时间戳就作废。
+//
+// ⚠️ **老缓存文件没有「最后用过」这一栏**——而这一层以前根本没有过期这一说，
+// 所以用户升级之后盘上全是「用 mtime 判」的封面。
+//
+// 而 mtime 就是「当初写下去的时刻」——所以**不需要任何迁移**。
+func TestACoverWithoutATimestampIsStillFresh(t *testing.T) {
+	day0 := time.Now()
+	dir := t.TempDir()
+	d := newDiskCache(dir, 1<<20, 7*24*time.Hour)
+	t.Cleanup(d.close)
+	<-d.ready
+
+	name := diskNameFor("https://example.invalid/legacy.jpg")
+	// **只写图**（模拟老缓存：没有旁挂记录）。
+	if err := os.WriteFile(diskPath(dir, name), diskTestBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 三天前写的。
+	old := day0.Add(-3 * 24 * time.Hour)
+	if err := os.Chtimes(diskPath(dir, name), old, old); err != nil {
+		t.Fatal(err)
+	}
+	d.now = func() time.Time { return day0 }
+
+	if _, ok := d.open(name); !ok {
+		t.Error("三天前写的老缓存被判过期了——老缓存不该一升级就作废")
+	}
+}
+
+// TestTheOldCoverFilesSurviveTheUpgrade 验「升级前的封面缓存不会在升级后
+// 全部消失」。
+//
+// 🔴 **这一层以前根本没有过期这一说**（2026-10-30 的第二轮对抗性审查）：
+// 所以用户盘上的老封面是「几个月前写的」，而它们的修改时刻就是几个月前。
+// 照 mtime 判的话，用户升级一次就会**几百张封面全部消失、全部重下**
+// （一屏几十张，每张都要走图床）。
+//
+// ⇒ 老文件给一段宽限期。
+func TestTheOldCoverFilesSurviveTheUpgrade(t *testing.T) {
+	day0 := time.Now()
+	dir := t.TempDir()
+	d := newDiskCache(dir, 1<<20, 7*24*time.Hour)
+	t.Cleanup(d.close)
+	<-d.ready
+
+	name := diskNameFor("https://example.invalid/old.jpg")
+	if err := os.WriteFile(diskPath(dir, name), diskTestBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 30 天前写的（老版本留下来的）。
+	old := day0.Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(diskPath(dir, name), old, old); err != nil {
+		t.Fatal(err)
+	}
+	d.now = func() time.Time { return day0 }
+
+	if _, ok := d.open(name); !ok {
+		t.Error("30 天前写的老封面被判过期了——" +
+			"用户升级一次就会几百张封面全部消失、全部重下")
 	}
 }

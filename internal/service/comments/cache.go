@@ -31,11 +31,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 // TTL 是一份评论缓存多久算过期。
@@ -62,6 +62,12 @@ type Entry struct {
 	// （AGENTS.md §5），而这一栏本来就该从落盘的第一天起就在。
 	Sort int `json:"sort"`
 	// FetchedAt 是这份缓存是什么时候拉回来的（Unix 秒）。
+	//
+	// ⚠️ **它不是过期判据**（见 `service/diskcache` 的文件头）：那个时刻不
+	// 因为用户又看了而变。而用户天天在看的那一首的评论，不该在一小时后消失。
+	//
+	// ⚠️ **过期的判据是文件的修改时刻**（mtime）——每一次读到它都会把它推到
+	// 当下。而这一栏记的是「我们什么时候拿到的」，那是**另一个事实**。
 	FetchedAt int64 `json:"fetchedAt"`
 	// NextOffset 是下一页的游标（**偏移量**，B 站给什么就是什么，不透明）。
 	//
@@ -87,6 +93,8 @@ type Entry struct {
 // Cache 是评论缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。
 type Cache struct {
 	dir string
+	// now 是时钟。nil 用 time.Now（给假时钟是为了让过期能被测）。
+	now func() time.Time
 }
 
 // NewCache 建一个落在 dir 的缓存。**建目录**：不在的话第一次写会失败，
@@ -95,7 +103,15 @@ func NewCache(dir string) *Cache {
 	if dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	return &Cache{dir: dir}
+	return &Cache{dir: dir, now: time.Now}
+}
+
+// WithClock 换时钟。给假时钟是为了让过期能被测（等一小时没法测）。
+func (c *Cache) WithClock(now func() time.Time) *Cache {
+	if now != nil {
+		c.now = now
+	}
+	return c
 }
 
 // Dir 是缓存目录，空表示这个缓存不落盘。
@@ -144,10 +160,20 @@ func (c *Cache) Load(typ, oid int64) (Entry, bool) {
 	if e.Type != typ || e.Oid != oid {
 		return Entry{}, false
 	}
-	// 过期了就是没有（TTL 一小时）。
-	if e.FetchedAt <= 0 || time.Since(time.Unix(e.FetchedAt, 0)) > TTL {
+	// 🔴 **过期是滚动的**（2026-10-30）：判据是「**最后一次用到**」。
+	//
+	// ⚠️ **判据是文件的修改时刻**（见 `service/diskcache` 的文件头）——
+	// 每次读到它都会把它推到当下。而用户天天在看的那一首的评论，不该在
+	// 一小时后消失。
+	if !diskcache.Fresh(path, c.now(), TTL) {
 		return Entry{}, false
 	}
+	// 🔴 **记一次「用过」**：把文件的修改时刻推到当下——**只改元数据，
+	// 不碰内容**。
+	//
+	// ⚠️ **不写回整份记录**：那会（1）把读路径变成写路径，
+	// （2）把并发写进去的新内容盖成旧内容（丢更新）。
+	diskcache.Touch(path, c.now())
 	return e, true
 }
 
@@ -160,13 +186,30 @@ func (c *Cache) Save(typ, oid int64, e Entry) error {
 	}
 	e.Type, e.Oid = typ, oid
 	if e.FetchedAt == 0 {
-		e.FetchedAt = time.Now().Unix()
+		e.FetchedAt = c.now().Unix()
 	}
+	return c.write(path, e)
+}
+
+// write 把一份记录原子写下去。
+//
+// 🔴 **写完把文件的修改时刻设成「取回来的时刻」**：过期的判据是 mtime
+// （见 `diskcache` 的文件头），而磁盘上的 mtime 是**真实时间**——
+// 于是用假时钟的测试会看到「刚写的文件已经过期了」。
+//
+// ⚠️ **这一步在生产上也是对的**：文件的修改时刻就该是「这一份是什么时候
+// 拿到的」，而不是「写它的那一瞬间」（两者相差一次 fsync 的工夫，
+// 而那正是「用户多久没用了」这件事的起点）。
+func (c *Cache) write(path string, e Entry) error {
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, b)
+	if err := diskcache.WriteAtomic(path, b); err != nil {
+		return err
+	}
+	diskcache.Touch(path, c.now())
+	return nil
 }
 
 // ── bvid → avid 的索引 ─────────────────────────────────────────────────────
@@ -233,59 +276,5 @@ func (c *Cache) SaveAVID(bvid string, avid int64) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, b)
-}
-
-// writeAtomic 临时文件 → fsync → rename。任何一步失败都把临时文件删掉。
-//
-// ⚠️ 临时文件建在**目标同一个目录**里：rename 只在同一文件系统内是原子的，
-// 临时文件放到系统临时目录去的话，跨文件系统时 rename 会失败——而那正是
-// 「用户把数据目录放在另一个盘上」的情形。
-func writeAtomic(path string, b []byte) (err error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".comments-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		if err != nil {
-			tmp.Close()
-			os.Remove(name)
-		}
-	}()
-
-	if _, err = tmp.Write(b); err != nil {
-		return err
-	}
-	// 数据落盘了但目录项没有的话，断电之后可能还是旧文件名。
-	if err = tmp.Sync(); err != nil {
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	// CreateTemp 建出来的是 0600。评论里没有隐私，给成普通用户文件同样的
-	// 权限，不然用户从访达里看一眼缓存目录会以为坏了。
-	if err = os.Chmod(name, 0o644); err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	return syncDir(dir)
-}
-
-// syncDir 把目录项本身刷到盘上。Windows 上打不开目录句柄，直接跳过——
-// 那边 rename 本身就已经是原子的。
-func syncDir(dir string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	return diskcache.WriteAtomic(path, b)
 }

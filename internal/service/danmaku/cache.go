@@ -21,26 +21,30 @@
 //
 // ## 写盘是原子的
 //
-// 临时文件 → fsync → rename，和歌词缓存是同一套（见 `service/lyrics/cache.go`
-// 的 `writeAtomic`）。就地写的话断电或进程被杀会留下半份 JSON，而半份 JSON
-// 解析失败 = 这一集从此「没有弹幕」——用户看不出是缓存坏了，只觉得那集没弹幕。
+// 临时文件 → fsync → rename，和歌词缓存是同一套（见 `service/diskcache` 的
+// `WriteAtomic`——五个缓存包共用那一份）。就地写的话断电或进程被杀会留下半份
+// JSON，而半份 JSON 解析失败 = 这一集从此「没有弹幕」——用户看不出是缓存坏了，
+// 只觉得那集没弹幕。
 package danmaku
 
 import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 // TTL 是缓存的有效期：7 天。
 //
 // 7 天是「弹幕这东西基本不变，但也不至于永远不更新」之间的那个数：B 站的一集
 // 弹幕在一周之内不会变出新的来，而一周之后重新拉一次也就一次往返。
-const TTL = 7 * 24 * time.Hour
+//
+// 🔴 **过期是滚动的**（2026-10-30）：判据是「最后一次用到」，不是「取回来的
+// 时刻」——用户天天在听的那一集，弹幕不该在第七天消失（见 `service/diskcache`）。
+const TTL = diskcache.TTL
 
 // Entry 是缓存里一个 cid 的一份弹幕。
 type Entry struct {
@@ -51,28 +55,21 @@ type Entry struct {
 	// 它的定义（那是服务层的事）。这份文件是**自己的缓存**，不是要和谁交换的
 	// 格式。
 	Items []bili.Danmaku `json:"items"`
-	// FetchedAt 是**取回来的时刻**。过期就靠它算（见 `Expired`）。
+	// FetchedAt 是**取回来的时刻**。
 	//
-	// ⚠️ **它不是「这一份是什么时候生成的」**：B 站给的历史弹幕就是这个时间，
-	// 而我们要的是「我们什么时候拿到的」——只有后者能判缓存是不是还新鲜。
+	// ⚠️ **它不是过期判据**（见 `diskcache` 的文件头）：那个时刻不因为用户
+	// 又听了而变。而用户天天在听的那一集，弹幕不该在第七天消失。
+	//
+	// ⚠️ **过期的判据是文件的修改时刻**（mtime）——每一次读到它都会把它推到
+	// 当下。而这一栏记的是「我们什么时候拿到的」，那是**另一个事实**。
 	FetchedAt time.Time `json:"fetchedAt"`
-}
-
-// Expired 报这一份是不是过期了。
-//
-// ⚠️ **零值（没取过时刻）算过期**：那份文件要么是手写的，要么是更早的版本
-// 写的，而「不知道什么时候取的」就该当成不新鲜——宁可多拉一次，也不要拿一份
-// 来路不明的东西当新的。
-func (e Entry) Expired(now time.Time) bool {
-	if e.FetchedAt.IsZero() {
-		return true
-	}
-	return now.Sub(e.FetchedAt) > TTL
 }
 
 // Cache 是弹幕缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。
 type Cache struct {
 	dir string
+	// now 是时钟。nil 用 time.Now（给假时钟是为了让过期能被测）。
+	now func() time.Time
 }
 
 // NewCache 建一个落在 dir 的缓存。**建目录**：不在的话第一次写会失败，
@@ -81,7 +78,15 @@ func NewCache(dir string) *Cache {
 	if dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	return &Cache{dir: dir}
+	return &Cache{dir: dir, now: time.Now}
+}
+
+// WithClock 换时钟。给假时钟是为了让过期能被测（等 7 天没法测）。
+func (c *Cache) WithClock(now func() time.Time) *Cache {
+	if now != nil {
+		c.now = now
+	}
+	return c
 }
 
 // Dir 是缓存目录，空表示这个缓存不落盘。
@@ -138,6 +143,13 @@ func validID(s string) bool {
 // ⚠️ **读不出来一律当成没有，绝不报错**：弹幕缓存坏掉的表现应该是「这一集
 // 暂时没有弹幕」，而不是应用开不起来。用户删掉缓存目录、清磁盘、换机器都会
 // 走到这里。
+//
+// 🔴 **命中之后要记一次「用过」**（2026-10-30）：过期是**滚动**的——用户今天
+// 看了这一集，它今天就重新开始算 7 天。而「用过」这件事只有这一层知道
+// （调用方可能读完之后就没再管它了）。
+//
+// ⚠️ **写回去失败不算错**：那只是这一次没记上「用过」，而下一次读还会再记。
+// 缓存不该因为写不进去就拒绝服务。
 func (c *Cache) Load(bvid, cid string) (Entry, bool) {
 	path := c.Path(bvid, cid)
 	if path == "" {
@@ -151,11 +163,23 @@ func (c *Cache) Load(bvid, cid string) (Entry, bool) {
 	if err := json.Unmarshal(b, &e); err != nil {
 		return Entry{}, false
 	}
-	if e.Expired(time.Now()) {
+	now := c.now()
+	// 🔴 **过期判据是文件的修改时刻**（见 `diskcache` 的文件头）：那才是
+	// 「最后一次用到它」的时刻。
+	//
+	// ⚠️ **不用记录里那一栏**（`FetchedAt`）：那个时刻不因为用户又听了而变，
+	// 而用户天天在听的那一集，弹幕不该在第七天消失。
+	if !diskcache.Fresh(path, now, TTL) {
 		// 过期了就当没有（不删文件：删它是一次额外的写，而下一次 `Save` 会
 		// 把它盖掉）。
 		return Entry{}, false
 	}
+	// 🔴 **记一次「用过」**：把文件的修改时刻推到当下——**只改元数据，
+	// 不碰内容**。
+	//
+	// ⚠️ **不写回整份记录**：那会（1）把读路径变成写路径，
+	// （2）把并发写进去的新内容盖成旧内容（丢更新）。
+	diskcache.Touch(path, now)
 	return e, true
 }
 
@@ -167,67 +191,30 @@ func (c *Cache) Save(bvid, cid string, e Entry) error {
 		return nil
 	}
 	if e.FetchedAt.IsZero() {
-		// 没写时刻的那一份**不许落盘**：过期判据靠的就是它，而零值会被当成
-		// 「一拉出来就过期」。要存就得把时刻写上。
-		e.FetchedAt = time.Now()
+		// 没写时刻的那一份**不许落盘**：它记的是「我们什么时候拿到的」，
+		// 而零值会说不出这件事。要存就得把时刻写上。
+		e.FetchedAt = c.now()
 	}
+	return c.write(path, e)
+}
+
+// write 把一份记录原子写下去。
+//
+// 🔴 **写完把文件的修改时刻设成「取回来的时刻」**：过期的判据是 mtime
+// （见 `diskcache` 的文件头），而磁盘上的 mtime 是**真实时间**——
+// 于是用假时钟的测试会看到「刚写的文件已经过期了」。
+//
+// ⚠️ **这一步在生产上也是对的**：文件的修改时刻就该是「这一份是什么时候
+// 拿到的」，而不是「写它的那一瞬间」（两者相差一次 fsync 的工夫，
+// 而那正是「用户多久没用了」这件事的起点）。
+func (c *Cache) write(path string, e Entry) error {
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, b)
-}
-
-// writeAtomic 临时文件 → fsync → rename。任何一步失败都把临时文件删掉。
-//
-// ⚠️ 临时文件建在**目标同一个目录**里：rename 只在同一文件系统内是原子的，
-// 临时文件放到系统临时目录去的话，跨文件系统时 rename 会失败——而那正是
-// 「用户把数据目录放在另一个盘上」的情形。
-func writeAtomic(path string, b []byte) (err error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".danmaku-*.tmp")
-	if err != nil {
+	if err := diskcache.WriteAtomic(path, b); err != nil {
 		return err
 	}
-	name := tmp.Name()
-	defer func() {
-		if err != nil {
-			tmp.Close()
-			os.Remove(name)
-		}
-	}()
-
-	if _, err = tmp.Write(b); err != nil {
-		return err
-	}
-	// 数据落盘了但目录项没有的话，断电之后可能还是旧文件名。
-	if err = tmp.Sync(); err != nil {
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	// CreateTemp 建出来的是 0600。弹幕里没有隐私，给成普通用户文件同样的
-	// 权限，不然用户从访达里看一眼弹幕缓存目录会以为坏了。
-	if err = os.Chmod(name, 0o644); err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	return syncDir(dir)
-}
-
-// syncDir 把目录项本身刷到盘上。Windows 上打不开目录句柄，直接跳过——
-// 那边 rename 本身就已经是原子的。
-func syncDir(dir string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	diskcache.Touch(path, c.now())
+	return nil
 }

@@ -17,6 +17,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 // QueueFileName 是队列文件名。
@@ -56,7 +58,7 @@ func (m *Manager) Save(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("download: 建队列目录：%w", err)
 	}
-	return writeAtomic(path, b)
+	return diskcache.WriteAtomic(path, b)
 }
 
 // Persistable 拷一份能落盘的任务列表，把在飞的改成暂停。
@@ -185,50 +187,4 @@ func chunksInRange(length int64, chunks []int) bool {
 		}
 	}
 	return true
-}
-
-// writeAtomic 原子写：临时文件 → fsync → rename。
-func writeAtomic(path string, b []byte) (err error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".download-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		if err != nil {
-			tmp.Close()
-			os.Remove(name)
-		}
-	}()
-
-	if _, err = tmp.Write(b); err != nil {
-		return err
-	}
-	// fsync 的是数据。数据落盘了但目录项没有的话，断电之后可能还是旧文件。
-	if err = tmp.Sync(); err != nil {
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	// CreateTemp 建出来的是 0600。这份文件不是秘密（里面没有凭据），
-	// 但它和设置放同一个目录，给成普通用户配置同样的权限。
-	if err = os.Chmod(name, 0o644); err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	return syncDir(dir)
-}
-
-// syncDir 把目录项本身刷到盘上。
-func syncDir(dir string) error {
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
 }

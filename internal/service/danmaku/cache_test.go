@@ -154,16 +154,69 @@ func TestACacheWithoutADirJustDoesNothing(t *testing.T) {
 //
 // 过期了之后 `Load` 给的是「没有」——于是应用会重新拉一次（那是「过期后会重新
 // 拉」那一条验收的一半）。
+//
+// ⚠️ **判据是文件的修改时刻**（见 `diskcache` 的文件头），而这一条要把它
+// 推到 8 天前——`Save` 写下去的时刻就是「刚刚」。
 func TestSevenDaysLaterItIsGone(t *testing.T) {
 	c := NewCache(t.TempDir())
 	if err := c.Save("BV1", "1", Entry{
 		Items:     []bili.Danmaku{{Text: "x"}},
-		FetchedAt: time.Now().Add(-8 * 24 * time.Hour),
+		FetchedAt: time.Now(),
 	}); err != nil {
+		t.Fatal(err)
+	}
+	// 把那份文件的修改时刻推到 8 天前。
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(c.Path("BV1", "1"), old, old); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.Load("BV1", "1"); ok {
 		t.Error("8 天前的那一份还在——它该过期了")
+	}
+}
+
+// TestTheExpiryRollsWithEveryUse 钉住「过期是滚动的」。
+//
+// 🔴 **这是这一层存在的全部理由**（2026-10-30 用户提出来的）：
+//
+//	「过期7天应该会滚动刷新吧，比如第一天用户听的，应该第8天删；
+//	  第三天用户又听了，这时候应该是第11天清的」
+//
+// ⇒ 判据是「**最后一次用到**」，不是「取回来的时刻」。
+//
+// ⚠️ **用假时钟**：真等 7 天没法测。
+//
+// ⚠️ **每一步都离边界有余量**：TTL 的边界是「大于 7 天」还是「大于等于」，
+// 那是个可以商量的口径——而这里要钉的是「**滚动**」这一件事本身，
+// 不该被边界口径连累。所以每一步都离边界至少一天。
+//
+// ⚠️ **时间线是按顺序走的**：每一次 `Load` 都算一次「用过」，而**过期判据在
+// 触碰之前算**——所以「查得到」和「刷新了窗口」是同一次读的两件事。
+func TestTheExpiryRollsWithEveryUse(t *testing.T) {
+	day0 := time.Now()
+	clock := day0
+	c := NewCache(t.TempDir()).WithClock(func() time.Time { return clock })
+	if err := c.Save("BV1", "1", Entry{
+		Items:     []bili.Danmaku{{Text: "x"}},
+		FetchedAt: day0,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 第 3 天：用户又听了一遍（离边界还有 4 天）。
+	clock = day0.Add(3 * 24 * time.Hour)
+	if _, ok := c.Load("BV1", "1"); !ok {
+		t.Fatal("第 3 天读不到")
+	}
+	// 🔴 **第 9 天**：按「取回来」算早该删了（离取回来 9 天 > 7 天），
+	// 但用户第 3 天听过 ⇒ 还该在。
+	clock = day0.Add(9 * 24 * time.Hour)
+	if _, ok := c.Load("BV1", "1"); !ok {
+		t.Error("第 3 天听过，第 9 天就过期了——过期没有跟着使用滚动")
+	}
+	// 第 17 天（离最后一次用到 8 天）⇒ 该删了。
+	clock = day0.Add(17 * 24 * time.Hour)
+	if _, ok := c.Load("BV1", "1"); ok {
+		t.Error("离最后一次用到满 7 天了还不过期——用户不听了它就该被清掉")
 	}
 }
 
@@ -172,8 +225,13 @@ func TestFreshAtSixDays(t *testing.T) {
 	c := NewCache(t.TempDir())
 	if err := c.Save("BV1", "1", Entry{
 		Items:     []bili.Danmaku{{Text: "x"}},
-		FetchedAt: time.Now().Add(-6 * 24 * time.Hour),
+		FetchedAt: time.Now(),
 	}); err != nil {
+		t.Fatal(err)
+	}
+	// 把那份文件的修改时刻推到 6 天前。
+	old := time.Now().Add(-6 * 24 * time.Hour)
+	if err := os.Chtimes(c.Path("BV1", "1"), old, old); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := c.Load("BV1", "1"); !ok {
@@ -181,14 +239,14 @@ func TestFreshAtSixDays(t *testing.T) {
 	}
 }
 
-// TestAnEntryWithoutAMomentCountsAsExpired 盯「不知道什么时候取的」那一种。
+// TestAMissingFileIsAsGoodAsMissing 盯「文件不在 = 没有缓存」。
 //
-// 零值时刻 = 「这一份的来路不明」，而拿一份来路不明的东西当新的，比多拉一次
-// 危险得多。
-func TestAnEntryWithoutAMomentCountsAsExpired(t *testing.T) {
-	e := Entry{Items: []bili.Danmaku{{Text: "x"}}}
-	if !e.Expired(time.Now()) {
-		t.Error("没有时刻的那一份被当成新鲜的了")
+// 🔴 **判据是文件的修改时刻**——所以「文件不见了」和「过期了」是一回事：
+// 两者都当没有。（用户手工删过缓存目录、清磁盘都会走到这里。）
+func TestAMissingFileIsAsGoodAsMissing(t *testing.T) {
+	c := NewCache(t.TempDir())
+	if _, ok := c.Load("BV1", "1"); ok {
+		t.Error("根本没有文件却读出了东西")
 	}
 }
 

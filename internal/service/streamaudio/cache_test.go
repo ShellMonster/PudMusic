@@ -144,6 +144,49 @@ func TestTheExpiryIsSevenDays(t *testing.T) {
 	}
 }
 
+// TestTheExpiryRollsWithEveryUse 盯「过期是滚动的」。
+//
+// 🔴 **这是这一层存在的全部理由**（2026-10-30 用户提出来的）：
+//
+//	「过期7天应该会滚动刷新吧，比如第一天用户听的，应该第8天删；
+//	  第三天用户又听了，这时候应该是第11天清的」
+//
+// ⇒ 判据是「**最后一次用到**」，不是「下完的那一刻」。
+//
+// ⚠️ **用假时钟**：真等 7 天没法测。
+//
+// ⚠️ **每一步都离边界有余量**：TTL 的边界是「大于 7 天」还是「大于等于」，
+// 那是个可以商量的口径——而这里要钉的是「**滚动**」这一件事本身。
+func TestTheExpiryRollsWithEveryUse(t *testing.T) {
+	now := time.Now()
+	clock := now
+	c := NewCache(t.TempDir()).WithClock(func() time.Time { return clock })
+	track, pref, tier := "online|mv|BV1|1|", "0", "q30280"
+	writeBytesFile(t, c, track, tier, 100)
+	if err := c.SavePref(track, pref, tier); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveBytes(track, tier, 100, "192K", Meta{}); err != nil {
+		t.Fatal(err)
+	}
+	// 第 3 天：用户又听了这一首。
+	clock = now.Add(3 * 24 * time.Hour)
+	if _, ok := c.Lookup(track, pref); !ok {
+		t.Fatal("第 3 天查不到")
+	}
+	// 🔴 **第 9 天**：按「下完」算早该删了（离下完 9 天 > 7 天），
+	// 但用户第 3 天听过 ⇒ 还该在。
+	clock = now.Add(9 * 24 * time.Hour)
+	if _, ok := c.Lookup(track, pref); !ok {
+		t.Error("第 3 天听过，第 9 天就过期了——过期没有跟着使用滚动")
+	}
+	// 第 17 天（离最后一次用到 8 天）⇒ 该删了。
+	clock = now.Add(17 * 24 * time.Hour)
+	if _, ok := c.Lookup(track, pref); ok {
+		t.Error("离最后一次用到满 7 天了还不过期——用户不听了它就该被清掉")
+	}
+}
+
 // TestEvictKeepsTheOneInUse 盯「正在用的那一份不许被淘汰」。
 //
 // 🔴 **这是最不能接受的一种后果**：用户正在听的歌被删掉 → 歌就断了。
@@ -172,7 +215,8 @@ func TestEvictDropsTheOldestFirst(t *testing.T) {
 	clock := base
 	c := NewCache(t.TempDir()).WithCapacity(1000).WithClock(func() time.Time { return clock })
 	track := "online|mv|BV1|1|"
-	// 三份，每份 400 字节。依次写，TouchedAt 一份比一份新。
+	// 三份，每份 400 字节。依次写，字节文件的修改时刻一份比一份新
+	//（容量淘汰按**它**排，见 `Evict`）。
 	for i, tier := range []string{"q30216", "q30232", "q30280"} {
 		clock = base.Add(time.Duration(i) * time.Hour)
 		writeBytesFile(t, c, track, tier, 400)

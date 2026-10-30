@@ -345,11 +345,18 @@ func TestTheSecondTimeIsInstant(t *testing.T) {
 func TestAnExpiredCacheIsFetchedAgain(t *testing.T) {
 	dir := t.TempDir()
 	c := danmaku.NewCache(dir)
-	// 8 天前的那一份：过期了。
 	if err := c.Save("BV1", danmakuCid, danmaku.Entry{
 		Items:     []bili.Danmaku{{Text: "旧的那一份", ID: "old"}},
-		FetchedAt: time.Now().Add(-8 * 24 * time.Hour),
+		FetchedAt: time.Now(),
 	}); err != nil {
+		t.Fatal(err)
+	}
+	// 🔴 **把那份文件的修改时刻推到 8 天前**：过期的判据是**文件自己的修改
+	// 时刻**（见 `service/diskcache` 的文件头），而那才是「最后一次用过它」
+	// 的时刻——记录里那一栏 `FetchedAt` 记的是「我们什么时候拿到的」，
+	// 那是**另一个事实**。
+	old := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(c.Path("BV1", danmakuCid), old, old); err != nil {
 		t.Fatal(err)
 	}
 
