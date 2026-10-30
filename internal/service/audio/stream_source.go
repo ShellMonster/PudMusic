@@ -201,6 +201,18 @@ type StreamSourceOptions struct {
 	// ⚠️ **只调一次**（第一次有字节的时候）。参数是那一刻已经下到的字节数。
 	OnFirstBytes func(n int64)
 
+	// OnComplete 在**整首下完**的时候调一次。参数是这一份的总字节数。
+	//
+	// ⚠️ **只调一次，而且只在真的下完时调**：中途断了、换流换不动了、
+	// 源被关了，都**不调**——那几种情况下盘上的字节是「一半 + 洞」
+	// （见 `availAt`），而「一半 + 洞」不是一份能播的缓存。
+	//
+	// 🔴 **上层用它来标「这一份缓存齐了」**：判据必须是「下完了」，
+	// 而这一层是唯一知道那件事的地方（`io.EOF` 只有它记）。
+	//
+	// ⚠️ **它在下载 goroutine 里调**：里面不许拿 App 那把界面锁。
+	OnComplete func(size int64)
+
 	// Backoff 是**每一次重试之前要等的时长**序列。
 	//
 	// 零值用默认：1 秒、2 秒、4 秒（见 `defaultBackoff`）。
@@ -233,6 +245,25 @@ type StreamSourceOptions struct {
 	MaxRefresh int
 	// TempDir 是缓存文件落在哪。空 = 系统临时目录。
 	TempDir string
+
+	// CachePath 是**持久缓存**的文件路径。空 = 走临时文件那一路。
+	//
+	// 🔴 **给了它，源就不删那个文件**（`Close` 只关句柄）：它是缓存，
+	// 下一次播同一首的时候直接接着用，而不是从零再下一遍
+	// （见 `StreamSource` 那段「持久缓存」的说明）。
+	//
+	// ⚠️ **调用方要自己保证那个路径的父目录存在**——这一层不建目录
+	// （它是 IO 那一层的活，而这一层只管字节）。
+	//
+	// ⚠️ **调用方也要自己保证「那个文件是这一首的」**：这一层不知道
+	// 缓存键是什么，它只管往那个路径上写字节。**写之前要清空**
+	// （否则上一次留下的字节会混进来）——所以这一层**总是以截断打开**
+	// （见 `NewStreamSource`）。
+	//
+	// ⚠️ **别拿它当「续传」用**：这一层每次建源都从零开始下，
+	// 盘上已有的字节**不会**被认成「已经下过了」。真正要「接着下」的那一层
+	// 是 `internal/app` 的缓存（它知道某一首下到哪儿了）。
+	CachePath string
 }
 
 // StreamSource 是一个「能播、能拖、能换流、能取消」的在线字节源。
@@ -257,7 +288,13 @@ type StreamSource struct {
 	mu   sync.Mutex
 	cond *sync.Cond
 	file *os.File
-	path string // 缓存文件路径，Close 时删
+	path string // 缓存文件路径
+	// persistent 说的是「这个文件 Close 之后**不删**」。
+	//
+	// 🔴 **它只对持久缓存为真**：临时文件那一路**照旧删**
+	// （见 `TestCloseRemovesTheCacheFileAndJoinsEveryGoroutine`——
+	// 那是「切歌不遗留」那道门，改成不删会让临时目录越攒越多）。
+	persistent bool
 	// gauge 是 #672 的临时文件字节账本；nil = 不记账。
 	gauge  *perf.Gauges
 	filled int64 // 已经下到缓存里的字节数（下载前沿）
@@ -318,6 +355,11 @@ type StreamSource struct {
 	// onFirstBytes 是「头几个字节到了」那个回调（见 `StreamSourceOptions`）。
 	// 它给上层一个把「等字节」和「等解码器」分开量的计时点。
 	onFirstBytes func(n int64)
+	// onComplete 是「整首下完了」那个回调（见 `StreamSourceOptions`）。
+	// 上层用它来标「这一份缓存齐了」。
+	onComplete func(size int64)
+	// completeSeen 是「已经报过下完了」——那个回调只该调一次。
+	completeSeen bool
 	// firstBytesSeen 是「已经报过第一次了」——那个回调只该调一次。
 	firstBytesSeen bool
 	// retryPending 是「上一次是重试来的，字节还没回来」。
@@ -371,16 +413,37 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		return nil, errors.New("audio: 在线字节源至少要有一个地址")
 	}
 
-	f, err := os.CreateTemp(o.TempDir, "biu-stream-*"+streamExt(o.URLs))
-	if err != nil {
-		return nil, fmt.Errorf("audio: 建不了在线流的缓存文件：%w", err)
+	// 🔴 **给了 `CachePath` 就用它，否则用临时文件**。
+	//
+	// ⚠️ **持久缓存那一路用 `O_TRUNC` 打开**：这个源每次都从零开始下，
+	// 而盘上可能留着上一次那一份的字节——不清零的话，下载的前沿和盘上的
+	// 旧字节会混在一起，解出来的是噪声。
+	//
+	// （「接着下」不是这一层的事：那是 `internal/app` 的缓存干的，
+	// 它知道某一首下到哪儿了，见 `StreamSourceOptions.CachePath` 的说明。）
+	var f *os.File
+	var path string
+	if o.CachePath != "" {
+		file, err := os.OpenFile(o.CachePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		if err != nil {
+			return nil, fmt.Errorf("audio: 建不了在线流的缓存文件：%w", err)
+		}
+		f, path = file, o.CachePath
+	} else {
+		file, err := os.CreateTemp(o.TempDir, "biu-stream-*"+streamExt(o.URLs))
+		if err != nil {
+			return nil, fmt.Errorf("audio: 建不了在线流的缓存文件：%w", err)
+		}
+		f, path = file, file.Name()
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &StreamSource{
 		file: f,
-		path: f.Name(),
-		size: o.Size,
+		path: path,
+		// 🔴 **持久缓存不删**（见 `persistent` 那字段）：临时文件照旧删。
+		persistent: o.CachePath != "",
+		size:       o.Size,
 		// ⚠️ **-1 而不是零值**：零值是「第 0 个字节起就是尾部」，
 		// 那会让 `availAt` 把整个顺序下载区都当成「已经单独取回来了」。
 		tailStart:    -1,
@@ -394,6 +457,7 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		onRetry:      o.OnRetry,
 		onReconn:     o.OnReconnected,
 		onFirstBytes: o.OnFirstBytes,
+		onComplete:   o.OnComplete,
 		backoff:      append([]time.Duration(nil), o.Backoff...),
 		now:          o.Now,
 		stall:        orDefaultDuration(o.StallTimeout, defaultStallTimeout),
@@ -645,6 +709,10 @@ func (s *StreamSource) Seek(off int64, whence int) (int64, error) {
 // 这一个函数是「快速切歌不留东西」的全部保证：解码 goroutine 阻塞在 Read
 // 上、下载 goroutine 阻塞在 HTTP 上、缓存文件躺在临时目录里，三样都被它
 // 一次收拾掉。
+//
+// 🔴 **持久缓存那一路不删文件**（`persistent` 为真）：那是缓存，
+// 下一次播同一首还要用它（见 `StreamSourceOptions.CachePath`）。
+// 临时文件那一路**照旧删**——那是「切歌不遗留」那道门。
 func (s *StreamSource) Close() error {
 	s.closeMu.Lock()
 	defer s.closeMu.Unlock()
@@ -652,7 +720,11 @@ func (s *StreamSource) Close() error {
 	s.mu.Lock()
 	if s.closed {
 		path := s.path
+		persistent := s.persistent
 		s.mu.Unlock()
+		if persistent {
+			return nil
+		}
 		return removeTempFile(path)
 	}
 	s.closed = true
@@ -660,6 +732,7 @@ func (s *StreamSource) Close() error {
 	s.cond.Broadcast()
 	f := s.file
 	path := s.path
+	persistent := s.persistent
 	s.mu.Unlock()
 
 	s.cancel()
@@ -672,6 +745,11 @@ func (s *StreamSource) Close() error {
 		if err := f.Close(); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	// 🔴 **持久缓存不删**：它是缓存，不是垃圾。
+	if persistent {
+		s.clearTempGauge()
+		return errors.Join(errs...)
 	}
 	// 缓存文件删不掉是资源清理错误：播放器没有可恢复的动作，但必须把它返回给
 	// 调用方，避免 Windows 上的句柄泄漏只表现成测试里的残留文件。
@@ -697,6 +775,29 @@ func (s *StreamSource) fail(err error) {
 	}
 	s.cond.Broadcast()
 	s.mu.Unlock()
+}
+
+// reportComplete 报「整首下完了」。**只报一次**。
+//
+// ⚠️ **它在下载 goroutine 里调**（`pump` 的正常读完那一支），
+// 所以里面不许拿 App 那把界面锁。
+//
+// ⚠️ **只在真的下完时调**：中途断了、换流换不动了、源被关了，
+// 那几种情况都**不调**——那几种情况下盘上的字节是「一半 + 洞」
+// （见 `availAt`），而那不是一份能播的缓存。
+func (s *StreamSource) reportComplete() {
+	s.mu.Lock()
+	if s.completeSeen {
+		s.mu.Unlock()
+		return
+	}
+	s.completeSeen = true
+	size := s.size
+	onComplete := s.onComplete
+	s.mu.Unlock()
+	if onComplete != nil {
+		onComplete(size)
+	}
 }
 
 // terminalErr 在没有别的错可报时给一个交代。

@@ -74,6 +74,13 @@ func (s *StreamSource) pump() {
 		if err == nil {
 			// 正常读完。
 			s.markTotal(s.Filled())
+			// 🔴 **「整首下完了」报一声**（2026-10-30）：上层要靠它标
+			// 「这一份缓存齐了」——而这一层是**唯一**知道那件事的地方
+			// （`io.EOF` 只有它记）。
+			//
+			// ⚠️ **在 `fail(io.EOF)` 之前报**：那样上层看到的时候，
+			// 这一份已经是「真的下完了」。
+			s.reportComplete()
 			s.fail(io.EOF)
 			return
 		}

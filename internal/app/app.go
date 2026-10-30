@@ -21,6 +21,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/danmaku"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/service/streamaudio"
 )
 
 // afterFunc 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。
@@ -377,6 +378,19 @@ type App struct {
 	streamCache map[string]*bili.StreamRef
 	// streamCacheOrder 记着每个 key 是什么时候进缓存的（为了淘汰最旧的）。
 	streamCacheOrder map[string]time.Time
+	// byteCache 是**音频字节的落盘缓存**（见 `service/streamaudio`）。
+	//
+	// 🔴 **它和 `streamCache` 是两件事**：
+	//
+	//	streamCache	地址（B 站给的播放地址，会过期）
+	//	byteCache	字节（音频本身，不过期）
+	//
+	// 用户要的是后者：「前面取到了的，那应该是在本地电脑缓存上啊，
+	// 为啥还要再去跑网络请求」（2026-10-30）。
+	//
+	// ⚠️ **nil = 不落盘**：没给缓存目录时（拿不到用户数据目录），
+	// 在线播放照旧走临时文件那一路。
+	byteCache *streamaudio.Cache
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
 	onlineGen int

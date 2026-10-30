@@ -58,6 +58,12 @@ type streamFixture struct {
 	mu sync.Mutex
 	// playURLs 是取流接口**依次**该回的 dash。最后一条会一直用。
 	playURLs []map[string]any
+	// playURLsByCid 是**按 cid**指定的 dash。查表优先于「依次」那一份。
+	//
+	// ⚠️ **它是给「同一首要能数清楚」的那些用例用的**：判「切回去那一趟
+	// 有没有白下」要看的是**同一首**的 CDN 路径被打了多少次，而「依次」
+	// 那一份给的是同一个地址，分不出是哪一首。
+	playURLsByCid map[string]map[string]any
 	// overrides 是按路径整段替换掉默认处理。
 	overrides map[string]http.HandlerFunc
 	// playCalls 数取流接口被打了多少次。
@@ -89,6 +95,14 @@ type streamFixture struct {
 	media []byte
 	// mediaHits 数 CDN 被打了多少次。
 	mediaHits atomic.Int32
+	// mediaHitsByPath 数**每一条 CDN 路径**分别被打了多少次。
+	//
+	// ⚠️ **它和 `mediaHits` 不是一回事**：那个数的是总数，而「A → B → A」
+	// 这种序列里总数是 2（两首各一次）——**每一首各一次才是对的**。
+	// 判「切回去那一趟有没有白下」要看的是**同一首**被打了几次。
+	mediaHitsByPath map[string]int
+	// mediaByPath 是**每条 CDN 路径各自的字节**。没登记的路径走 `media`。
+	mediaByPath map[string][]byte
 	// forbidden 的 CDN 路径一律回 403（模拟「这条地址过期了」）。
 	forbidden map[string]bool
 
@@ -117,6 +131,23 @@ func (f *streamFixture) onPlayURL(dash map[string]any) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.playURLs = append(f.playURLs, dash)
+}
+
+// onPlayURLForCid 给某一个 cid 指定它自己的取流返回。
+func (f *streamFixture) onPlayURLForCid(cid string, dash map[string]any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.playURLsByCid == nil {
+		f.playURLsByCid = map[string]map[string]any{}
+	}
+	f.playURLsByCid[cid] = dash
+}
+
+// mediaHitsFor 报某一条 CDN 路径被打了多少次。
+func (f *streamFixture) mediaHitsFor(path string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.mediaHitsByPath[path]
 }
 
 func (f *streamFixture) on(path string, h http.HandlerFunc) {
@@ -246,6 +277,15 @@ func (f *streamFixture) servePlayURL(w http.ResponseWriter, q url.Values) {
 	if n >= 0 {
 		dash = f.playURLs[n]
 	}
+	// 🔴 **按 cid 分流**（2026-10-30）：`playURLsByCid` 里有的按 cid 走，
+	// 没有的走「依次」那一份（老规矩）。
+	//
+	// ⚠️ **为什么要按 cid 分**：判「A 切回来那一趟有没有白下」要看的是
+	// **同一首**的 CDN 路径被打了多少次——而「依次」那一份给的是同一个地址，
+	// 分不出是哪一首。
+	if byCid, ok := f.playURLsByCid[q.Get("cid")]; ok {
+		dash = byCid
+	}
 	sub, subV2 := f.subtitleURL, f.subtitleURLV2
 	f.mu.Unlock()
 
@@ -266,12 +306,24 @@ func (f *streamFixture) servePlayURL(w http.ResponseWriter, q url.Values) {
 
 func (f *streamFixture) serveMedia(w http.ResponseWriter, r *http.Request) {
 	f.mediaHits.Add(1)
+	f.mu.Lock()
+	if f.mediaHitsByPath == nil {
+		f.mediaHitsByPath = map[string]int{}
+	}
+	f.mediaHitsByPath[r.URL.Path]++
+	f.mu.Unlock()
 	if f.forbidden[r.URL.Path] {
 		http.Error(w, "地址失效了", http.StatusForbidden)
 		return
 	}
 
 	data := f.media
+	// 🔴 **每条 CDN 路径可以有自己的字节**（2026-10-30）：判「切回去那一趟
+	// 有没有串歌」要看的是**这一首自己的**字节，而「一份字节走天下」
+	// 分不出是哪一首。
+	if byPath, ok := f.mediaByPath[r.URL.Path]; ok {
+		data = byPath
+	}
 	start := 0
 	if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
 		start, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"))

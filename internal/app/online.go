@@ -34,6 +34,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/service/streamaudio"
 )
 
 // errStreamingMissing 是「在线播放没挂上」。见 `MountStreaming`。
@@ -240,6 +241,19 @@ type Streaming struct {
 	Quality bili.AudioQuality
 	// TempDir 是下载缓存落在哪。空 = 系统临时目录。
 	TempDir string
+	// CacheDir 是**音频字节的落盘缓存**落在哪。空 = 不落盘。
+	//
+	// 🔴 **它和 `TempDir` 是两件事**：
+	//
+	//	TempDir	**临时**文件：切歌就删（那是「切歌不遗留」那道门）
+	//	CacheDir	**缓存**：下过的字节留在盘上，切回来直接读盘，不走网络
+	//
+	// 用户要的是后者（2026-10-30）：「前面比如取到了的，那应该是在本地电脑
+	// 缓存上啊，为啥还要再去跑网络请求；应该是没有才跑网络请求啊」。
+	//
+	// ⚠️ **它该落在用户数据目录底下**（跟评论 / 弹幕 / 歌词缓存一样），
+	// 不是系统临时目录——临时目录会被系统清掉，那缓存就白留了。
+	CacheDir string
 }
 
 // onlineTrack 是「当前正在放的那条在线流」。
@@ -294,6 +308,12 @@ func (a *App) MountStreaming(s Streaming) {
 	a.streaming = &s
 	a.streamCache = map[string]*bili.StreamRef{}
 	a.streamCacheOrder = map[string]time.Time{}
+	// 🔴 **字节缓存**（2026-10-30）：下了的字节留在盘上，切回来直接读盘。
+	//
+	// ⚠️ **空目录 = 不落盘**：拿不到用户数据目录时，缓存整个关掉——
+	// 那只是「每次都重新下」，不该挡着应用开起来（和评论 / 弹幕缓存同一套
+	// 规矩，见 `internal/ui/lyrics_mount.go`）。
+	a.byteCache = streamaudio.NewCache(s.CacheDir)
 	a.mu.Unlock()
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
@@ -1097,6 +1117,21 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	// 不一样（取流失败是网络/地址，开不了播放器是这一条的格式/这台机器解不了）。
 	// 合成一句「取流失败」的话，用户分不出该换网还是该换歌。
 	//
+	// 🔴 **⓪ 先看盘上有没有这一首的字节**（2026-10-30）：
+	//
+	// 有的话**连 playurl 都不问**——用户要的是「没有才跑网络请求」
+	// （原话：「前面比如取到了的，那应该是在本地电脑缓存上啊，
+	// 为啥还要再去跑网络请求」）。
+	//
+	// ⚠️ **它在 `resolve` 之前**：地址那一层是「**会过期**的缓存」
+	// （PR #691），字节那一层才是「**不会过期**的缓存」。用户要省掉的是
+	// 后面那一趟网络往返，而省掉它就得**在问地址之前**判。
+	if _, cached, ok := a.cachedAudio(it, s.Quality); ok {
+		a.logf("biu: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, cached)
+		a.playFromByteCache(it, gen, cached, run)
+		return
+	}
+	//
 	// 🔴 **① 问 playurl 拿地址**（票 #220 的第一段）：这一段是一次带 WBI
 	// 签名的接口往返，而它是**两条取流路径（投稿 / 音乐库）唯一的共同段**。
 	tURL := time.Now()
@@ -1129,6 +1164,22 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 		return
 	}
 
+	// 🔴 **装上播放器**（和「盘上缓存」那一路共用这一段，见 `installOnlinePlayer`）。
+	a.installOnlinePlayer(it, gen, ref, src, p, at, paused, s)
+}
+
+// installOnlinePlayer 把建好的播放器装到 App 上，并让它开始出声。
+//
+// 🔴 **两条路共用这一个函数**：走网络的那一条（`runOnline`）和走盘上缓存的
+// 那一条（`playFromByteCache`）。**两份实现迟早会漂移**，而漂移的那一半
+// 正好是「装上播放器」这一段——用户听到的第一个音、和界面上那一行字，
+// 都从这里出。
+//
+// src 是那一条字节源。**盘上缓存那一路传 nil**（它没有字节源：字节已经在
+// 盘上了，再包一层源是没有意义的）。
+func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
+	src *audio.StreamSource, p *audio.Player, at time.Duration, paused bool, s *Streaming,
+) {
 	a.mu.Lock()
 	if a.onlineGen != gen || a.closed {
 		// 代次已经变了（切歌了），或者应用正在退出。手上这些一样都不留。
@@ -1189,6 +1240,9 @@ func (a *App) runOnline(it Item, gen int, at time.Duration, paused bool) {
 	a.stopped = false
 	a.quality = ref.Label
 	a.online = &onlineTrack{item: it, ref: ref, source: src, quality: ref.Label, gen: gen}
+	// 🔴 **「这一趟自己的那一条」在盘上缓存那一路是 nil**：那条路没有字节源
+	// （字节已经在盘上了，见 `playFromByteCache`），而 `loadSrc` 是给看门狗
+	// 盯进度用的——没有源就没有进度可盯。
 	// 源归播放器管了（`audio.Player` 的 closers 会关它），App 这一栏清空。
 	a.pendingSrc = nil
 	// 🔴 **「这一趟自己的那一条」也清掉**（票 #220）：这一趟到这儿就完了，
@@ -1424,10 +1478,20 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	// 一个实实在在的数据竞争（`-race` 一跑就红）。
 	var firstAt atomic.Int64
 	srcStart := time.Now()
+	// 🔴 **字节落在缓存里还是临时文件里**（2026-10-30）：
+	//
+	//	有缓存目录 → 落在缓存里，**切歌不删**，下回直接读盘
+	//	没有　　　→ 落在临时文件里，切歌就删（那是「切歌不遗留」那道门）
+	//
+	// ⚠️ **缓存路径按「这一首 + 这一档」算**（`byteCacheKey`）：同一首歌的
+	// 不同音质档是**两段不同的字节**，共用一个文件的话，第二档会把第一档
+	// 的字节覆盖掉。
+	cachePath := a.byteCachePathFor(it, s.Quality)
 	src, err := audio.NewStreamSource(audio.StreamSourceOptions{
 		URLs:      ref.URLs,
 		ExpiresAt: ref.ExpiresAt,
 		TempDir:   s.TempDir,
+		CachePath: cachePath,
 		Client:    s.Media,
 		// 续传的偏移在源那边，它要接就从同一个字节接着下。
 		// 这里重新取的是**整条**流——偏移只是告诉调用方「你从哪里断的」，
@@ -1452,6 +1516,19 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// **不许在里面拿 `a.mu`**——那把锁是界面每帧都要的。
 		OnFirstBytes: func(int64) {
 			firstAt.CompareAndSwap(0, time.Now().UnixNano())
+		},
+		// 🔴 **「整首下完了」**（2026-10-30）：字节源是**唯一**知道
+		// 「下完了」的地方（`io.EOF` 只有它记），而上层要靠它标
+		// 「这一份缓存齐了」。
+		//
+		// ⚠️ **它在下载 goroutine 里调**：所以它只做一件事：写元数据
+		// （那一层自己管锁）。**不许在这里拿 `a.mu`**——那把锁是界面
+		// 每帧都要的。
+		OnComplete: func(size int64) {
+			if cachePath == "" {
+				return
+			}
+			a.markByteCacheComplete(it, s.Quality, size, ref.Label)
 		},
 	})
 	if err != nil {
