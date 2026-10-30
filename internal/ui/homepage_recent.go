@@ -75,7 +75,7 @@ func (h *homePage) viewRecentCard(c *ui.Context, m list.Music) {
 		imgcache.ViewTitled(c, h.newGrid.cache, m.Cover, sh.Title, homeRecentCover, homeRecentCover)
 		ui.Column(c).Grow(1).Gap(space.Px4).Children(func() {
 			ui.Text(c, "上次听到这里").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Accent)
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size18)).Bold().TextColor(t.Text).MaxLines(1).Ellipsis("…")
+			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text).MaxLines(1).Ellipsis("…")
 			if sh.Owner != "" {
 				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 			}

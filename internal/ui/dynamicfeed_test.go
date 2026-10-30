@@ -15,7 +15,43 @@ import (
 // 动态流那一页
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheAuthorListPagesAndEachRowGoesToThatSpace 是「动态流左侧作者栏能
+func TestLateDynamicAuthorResultKeepsItsAccountSnapshot(t *testing.T) {
+	b := newUIExplore(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		closeOnce := func() {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+		}
+		closeOnce()
+		<-release
+		uiExploreJSON(w, 0, map[string]any{"total": 1, "list": []any{map[string]any{"mid": 11, "uname": "旧账号作者"}}})
+	})
+	s, _, a := newSpaceShell(t, b, true, "77")
+	f := s.dynamicFeedOf()
+	f.selfMid = 77
+	f.account = a.AccountSnapshot()
+	ctx := f.auth.begin()
+	if ctx == nil {
+		t.Fatal("author fetch did not start")
+	}
+	go s.fetchFeed(ctx, f, feedAuthors, "", 0)
+	<-started
+	a.TestOnlyAdoptLogin("88")
+	close(release)
+	waitFor(t, "late author request", func() bool {
+		s.adoptFeed(f)
+		return !f.auth.loading
+	})
+	if len(f.authors) != 0 {
+		t.Fatalf("late author result landed after account change: %+v", f.authors)
+	}
+}
+
 // 翻页、能点进对应 UP 空间」那条验收的钉子。
 func TestTheAuthorListPagesAndEachRowGoesToThatSpace(t *testing.T) {
 	b := newUIExplore(t)

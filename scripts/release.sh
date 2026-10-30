@@ -330,6 +330,11 @@ for f in "${assets[@]}"; do
   printf '  %-56s %6s\n' "$f" "$(du -h "$f" | cut -f1)"
 done
 
+say "包体归因"
+# 主可执行文件 / Resources / 其他（安装后解包体积）和安装包/压缩包（下载体积）
+# 分开报，再列链接依赖与资源来源。量的是 build/ 里的产物，不是模块缓存。
+go run ./internal/perf/cmd/artifact-report
+
 # ========================================================== 5 草稿 Release
 say "第 5 步 / 共 5 步：推标签并挂草稿 Release"
 

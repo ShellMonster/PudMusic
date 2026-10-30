@@ -117,11 +117,12 @@ func nsDict(kv map[uintptr]uintptr) uintptr {
 	return r
 }
 
-// Open 从本地 fMP4 文件解码。
+// Open 从本地 fMP4 文件解码。像素缓冲都从 pool 借、用完由调用方 Recycle 交回，
+// 解码器自己不再分配不记账的缓冲。
 //
 // ⚠️ AVAssetReader 会把时间轴重新对到这个文件的第一个分片上：帧的 PTS 是
 // 相对本文件的，调用方要自己按 sidx 把它搬回流上的绝对时间。
-func Open(path string, pool chan []byte) (*Source, error) {
+func Open(path string, pool BufferPool) (*Source, error) {
 	avfOnce.Do(loadAVF)
 	if avfErr != nil {
 		return nil, avfErr
@@ -135,8 +136,6 @@ func Open(path string, pool chan []byte) (*Source, error) {
 	}
 	return s, nil
 }
-
-func (s *Source) fail(err error) { s.mu.Lock(); s.err = err; s.mu.Unlock() }
 
 func (s *Source) run(path string, ready chan<- error) {
 	runtime.LockOSThread()
@@ -195,11 +194,18 @@ func (s *Source) run(path string, ready chan<- error) {
 		cfRelease(sb)
 		poolPop(p)
 		if !ok {
+			if err := s.Err(); err != nil {
+				// 借不到缓冲之类的硬错误：不继续按帧失败重试，直接收摊，
+				// 让 Session.Err 把原因交给播放器。
+				return
+			}
 			continue
 		}
 		select {
 		case s.frames <- f:
 		case <-s.quit:
+			// 退出时这一帧已经借了缓冲，必须还回池里，否则 gauge 永远降不下来。
+			s.Recycle(f.Pix)
 			return
 		}
 	}
@@ -216,15 +222,15 @@ func (s *Source) copyFrame(sb uintptr, pts time.Duration) (Frame, bool) {
 	if base == 0 {
 		return Frame{}, false
 	}
-	var buf []byte
-	select {
-	case buf = <-s.free:
-	default:
+	n := int64(w) * int64(h) * 4
+	// 借缓冲走帧池的字节预算：预算紧的时候这里等显示端交回上一帧（背压），
+	// 取消时拿 ErrFramePoolStopped 退出；一帧大到预算放不下两帧时拿
+	// ErrFramePoolBudget，由 Source.fail 交给 Session.Err。
+	buf, err := s.acquire(n)
+	if err != nil {
+		s.fail(err)
+		return Frame{}, false
 	}
-	if cap(buf) < w*h*4 {
-		buf = make([]byte, w*h*4)
-	}
-	buf = buf[:w*h*4]
 	src := unsafe.Slice((*byte)(ptr(base)), stride*h)
 	for y := 0; y < h; y++ {
 		row, dst := src[y*stride:y*stride+w*4], buf[y*w*4:(y+1)*w*4]

@@ -1434,21 +1434,31 @@ func TestTheMeasureBudgetIsBounded(t *testing.T) {
 // 地方（`ui.Run` 之前那一段是手写的），而少了它歌词区会一直说「暂无歌词」，
 // 界面上看不出任何异样。
 func TestMountLyricsIsWiredBeforeTheWindow(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "main.go"))
+	mainSrc, err := os.ReadFile(filepath.Join("..", "..", "main.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(src)
-	at := strings.Index(text, "ui.MountLyrics(a)")
-	if at < 0 {
-		t.Fatalf("main.go 里没有 ui.MountLyrics(a) 这一行")
+	bootstrapSrc, err := os.ReadFile(filepath.Join("..", "bootstrap", "bootstrap.go"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	run := strings.Index(text, "ui.Run(a, sess)")
-	if run < 0 {
-		t.Fatal("main.go 里没有 ui.Run(a, sess) 那一行")
+	mainText := string(mainSrc)
+	bootstrapText := string(bootstrapSrc)
+	if strings.Index(bootstrapText, "MountLyrics:          ui.MountLyrics") < 0 {
+		t.Fatalf("bootstrap.go 里没有 ui.MountLyrics 的默认装配")
 	}
-	if at > run {
-		t.Errorf("ui.MountLyrics(a) 排在 ui.Run 之后（第 %d 字节 vs 第 %d 字节）——"+
-			"建目录是阻塞 IO，得在开窗口之前", at, run)
+	if strings.Index(mainText, "bootstrap.Assemble(bootstrap.DefaultDependencies())") < 0 {
+		t.Fatalf("main.go 里没有通过 bootstrap.Assemble 启动")
+	}
+	if strings.Index(bootstrapText, "d.MountLyrics(a)") < 0 {
+		t.Fatalf("bootstrap.go 里没有在 Run 前执行歌词挂载")
+	}
+	mountCall := strings.Index(bootstrapText, "d.MountLyrics(a)")
+	runCall := strings.Index(bootstrapText, "d.Run(a, sess)")
+	if runCall < 0 {
+		t.Fatalf("bootstrap.go 里没有执行 Run")
+	}
+	if mountCall > runCall {
+		t.Errorf("歌词挂载排在 Run 之后（第 %d 字节 vs 第 %d 字节）", mountCall, runCall)
 	}
 }

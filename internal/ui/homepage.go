@@ -59,6 +59,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -374,7 +375,7 @@ func (h *homePage) SetSongs(songs homeSongs) {
 // ⚠️ **别为了「看着完整」给它补一个大标题**：那是一个上游没有的新元素，而且
 // 这一页顶上已经有三个 Tab 了。真的想要一个页名，走**侧栏那一项**。
 func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
-	// 记一笔「首页建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
+	// Shared playback, display and cache inputs are sampled once at Shell.View.
 	s.builds.home++
 	s.applyFrameTheme(c)
 	s.home.view(c, s)
@@ -405,7 +406,7 @@ func (s *Shell) syncHome(c *ui.Context) {
 	// 🔴 设置里的「数据显示样式」在**画之前**装给这一屏的三个列表：忘了这一句的
 	// 症状是「设置改了、首页没变」——而首页是用户打开应用看到的第一页，最先发现
 	// 「这个设置没用」的就是这儿。
-	view := s.displayView()
+	view := s.pageDisplayView()
 	for _, l := range h.lists {
 		l.SetView(view)
 	}
@@ -658,18 +659,6 @@ func boardCaptionText(number int, at time.Time) string {
 	return strings.Join(parts, " · ")
 }
 
-// boardCaptionColor 是榜单横幅上**副题**那一行的颜色。
-//
-// 🔴 **纯白，不是白 82%**（2026-10-29 的视觉走查）：横幅的底是固定的深色渐变
-// （`homeTiles`，不跟主题走），副题原来用白 82%，压在热榜那个橙红亮端
-// `(196,82,44)` 上合成出来是 `(244,224,217)`——实测 **3.60:1**，低于 DESIGN.md
-// 对正文的 4.5:1。而那一句「第 3 期（周榜）· 日期」是用户判断「这张榜是哪一期」
-// 的唯一依据，不该是整条横幅上最糊的一行。
-//
-// ⚠️ **它提成常量是为了让测试看得见**（`homepage_board_contrast_test.go` 引的就是
-// 它）：写死在调用处的话，「把透明度调回去」这件事在测试里查不出来。
-var boardCaptionColor = ui.RGBA(255, 255, 255, 1)
-
 // viewBoardCaption 在热榜 / 原创榜的列表上面画期数和更新时间。别的档不画；
 // 还没拉到那一期的信息时也不画（不摆一行空话）。
 func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
@@ -686,19 +675,21 @@ func (h *homePage) viewBoardCaption(c *ui.Context, tab int) {
 	}
 	// 榜单头图：和总览上那张磁贴同一套渐变，大字榜名 + 期数更新日期，
 	// 让二级页一眼认得出是从哪张磁贴进来的。
+	t := c.Theme()
 	var from, to ui.Color
 	for _, tile := range homeTiles {
 		if tile.tab == tab {
-			from, to = tile.from, tile.to
+			from, to, _ = homeTilePalette(t, tile)
 		}
 	}
-	t := c.Theme()
 	ui.Row(c).Key("home:board:hero").FillWidth().Height(homeBoardHeroH).Radius(t.Radius+4).
 		Gradient(from, to, 135).Padding(space.Px16, space.Px24).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
-			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(ui.RGBA(255, 255, 255, 1)).MaxLines(1)
+			titleColor := ink.Ensure(ui.RGBA(255, 255, 255, 1), from, ink.TextContrast)
+			captionColor := ink.Ensure(ui.RGBA(255, 255, 255, 1), from, ink.TextContrast)
+			ui.Text(c, homeTabs[tab]).FontSize(scale.Font(c, scale.Size28)).TextColor(titleColor).MaxLines(1)
 			ui.Text(c, text).Key("home:board:caption").FontSize(scale.Font(c, scale.Size13)).
-				TextColor(boardCaptionColor).MaxLines(1)
+				TextColor(captionColor).MaxLines(1)
 		})
 		items := h.lists[tab].Items()
 		if len(items) == 0 || h.acts.Add == nil {

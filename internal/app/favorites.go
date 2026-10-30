@@ -471,18 +471,15 @@ func orderOf(items []Favorite) []int64 {
 // 方法能写在任意文件里、字段不能。等 app.go 那边的改动并进来，把下面这一格
 // 搬回结构体就行，调用方一行都不用改。
 
-// favoritesSlot 是一个 App 挂着的侧栏收藏夹。
-var mountedFavorites sync.Map // *App → *Favorites
-
 // FavoritesOf 是这个 App 的侧栏收藏夹。还没挂过就现建一个空的：空列表是
 // 「还没接接口」那个正常状态，不该让调用方判 nil。
 func (a *App) FavoritesOf() *Favorites {
-	if v, ok := mountedFavorites.Load(a); ok {
-		return v.(*Favorites)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.favorites == nil {
+		a.favorites = &Favorites{}
 	}
-	f := &Favorites{}
-	actual, _ := mountedFavorites.LoadOrStore(a, f)
-	return actual.(*Favorites)
+	return a.favorites
 }
 
 // SetFavorites 把某一组换成 items，顺序按设置里存的那份排。

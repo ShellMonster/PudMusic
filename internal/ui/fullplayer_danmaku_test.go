@@ -4,13 +4,15 @@
 // 所以「弹幕压在封面上」「弹幕是滑过去的而不是瞬移的」这些都是**画面上的事**，
 // 不是「调了哪个函数」。
 //
-// # 判据为什么大多是**像素**
+// # 判据为什么**全是像素和模型状态**
 //
-// 位移是 `AnimatePose` 走的，而 pose 的中间帧是**只重绘**的——那一帧**不重建
-// 视图**，于是 Tester 的查找索引（`tt.Find` / `tt.Texts` 那一套）停在上一帧的
-// 位置上（`mygo/ui/runtime.go` 的 `rt.labels` 只在 commit 时重算）。
+// 弹幕是一层**自绘的墨迹**（票 #669）：位置和字都在 `Draw` 回调里按
+// `Painter.Now()` 算，因为只重绘的那些帧**不重建视图**。于是
 //
-// ⇒ 量「弹幕现在在哪儿」只能量**画面上的像素**。
+//   - 「弹幕现在在哪儿」只能量**画面上的像素**（`redSpan` / `greenSpan`）；
+//   - 「它该在哪条轨道上」量模型层（`danmakuLayer.slots` / `lanes`）；
+//   - **`tt.Texts()` 里没有弹幕的正文**——那不是一个缺陷，弹幕本来就是装饰
+//     （`RoleNone`），读屏软件也不念它。
 package ui
 
 import (
@@ -176,8 +178,7 @@ func TestTheDanmakuIsDrawnOnTheCoverOfTheFullPlayer(t *testing.T) {
 // 满屏播放器整个是浮层，而浮层画在主树**之上**——弹幕画在主树里的话，满屏那层
 // 不透明的底会把它整个盖住。
 //
-// ⚠️ **那个症状是静默的**：文字**在树里**（`tt.Texts()` 查得到），而画面上一个
-// 像素也没有。所以只验「树上有没有那几行字」是验不出这个坑的——得看画面。
+// ⚠️ **那个症状是静默的**：画面上一个像素也没有，而没有任何报错。
 //
 // ⇒ 这里**故意**把弹幕画在主树里（不走 `ui.Overlay`），然后断言画面上**没有**
 // 那些红像素。
@@ -188,6 +189,10 @@ func TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen(t *testing.T) {
 			s.applyFrameTheme(c)
 			s.viewFullPlayer(c, env.st)
 			// ⚠️ **故意画在主树里**：满屏那一层是浮层，压在上面。
+			//
+			// 设置里关着弹幕 ⇒ `viewFullPlayer` 那一遍把状态 reset 了；这里
+			// 按生产同一条路重建一份，只是**不套 `ui.Overlay`**。
+			s.full.danmaku.sync(c, env.st, s.app.Danmaku().Items, s.full.coverRect)
 			s.drawFullDanmaku(c, env.st, s.full.coverRect)
 		}
 	}))
@@ -203,9 +208,9 @@ func TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen(t *testing.T) {
 	})
 	env.tt.Frame()
 
-	// 树上**有**那行字（所以「它没画」不是「它压根没建」）。
-	if !env.tt.HasText("第一条弹幕") {
-		t.Fatalf("弹幕压根没建，文字有 %q", env.tt.Texts())
+	// 这一层真的建了（所以「它没画」不是「它压根没建」）。
+	if !env.s.full.danmaku.ready {
+		t.Fatal("弹幕层压根没建起来——这一条要验的是「画了但被盖住」")
 	}
 	// 而画面上**没有**它——被满屏那层不透明的底盖住了。
 	left, _ := redSpan(env.tt, danmakuArea(), 0)
@@ -227,94 +232,103 @@ func TestTheDanmakuUnderTheFullPlayerWouldNotBeSeen(t *testing.T) {
 // 数）。
 func TestTheDanmakuStartsFromTheCurrentPosition(t *testing.T) {
 	env := danmakuShell(t, []app.DanmakuItem{
-		danmakuItem("near", 180000, "第三分钟那一条"),
+		// ⚠️ **比位置早半秒**：年龄 0 的那条正好压在右边沿上（裁剪之后看不见），
+		// 而这一条要验的是「它在画面上」。
+		danmakuItem("near", 179500, "第三分钟那一条"),
 		danmakuItem("far", 5000, "开头那一条"),
 	}, systemIsDark(true))
 	// 位置在第 3 分钟。
 	env.st.Position = 3 * time.Minute
 	env.tt.Frame()
 
-	if !env.tt.HasText("第三分钟那一条") {
-		t.Errorf("第 3 分钟那一条没有画出来，文字有 %q", env.tt.Texts())
+	if !redSeen(env.tt, danmakuArea()) {
+		t.Errorf("第 3 分钟那一条没有画出来（封面那一块里一个红像素都没有）")
 	}
-	if env.tt.HasText("开头那一条") {
-		t.Error("开头那一条还在画面上——它是按「播放了多久」而不是按当前位置滚的")
+	// 「开头那一条」要是画了，它会和这一条**同一条轨道**（同一时刻只有它在滚动
+	// 窗口里），而画面上那一条墨迹的左沿会跑到封面外面去 —— 所以判据是画面上
+	// 只有一条墨迹、而且在封面里。
+	for lane := range danmakuTracks {
+		if lane == 0 {
+			continue
+		}
+		if l, _ := redSpan(env.tt, danmakuArea(), lane); l >= 0 {
+			t.Errorf("第 %d 条轨道上也有墨迹——「开头那一条」还在画面上"+
+				"（它是按「播放了多久」而不是按当前位置滚的）", lane)
+		}
 	}
 }
 
-// TestTheDanmakuGlidesInsteadOfTeleporting 钉住「位移走 `AnimatePose`」。
+// TestACloserSampleDoesNotJerkTheDanmaku 钉住「几十毫秒的采样误差不会让弹幕
+// 抖一下」（票 #669）。
 //
-// # 它量的是「跳一下之后它怎么过去」
+// # 它量的是「读数变了，但位置不动」
 //
-// 位置要是**算在 view 里**（`Absolute().Left(x)`），它就只会在重建的时候更新
-// ——而满屏开着的时候界面 20 帧/秒重建，于是弹幕是 20fps 跳着走的。
+// 弹幕的位置由绘制帧按 `Painter.Now()` 推，而整窗重建时拿到的
+// `State.Position` 是播放器 50ms 一拍采回来的。两者差几十毫秒是**正常**的
+// ——拿那个差去重钉锚点，弹幕就会在每次整窗重建时抖一下。
 //
-// ⇒ 位移走 `AnimatePose`（「只重绘」那一族）：view 只给**目标**，元素自己在只重绘
-// 的帧里走到那儿。
-//
-// # 判据：跳一下之后**它没有瞬移**
-//
-// 位置跳 500 毫秒 ⇒ 目标挪 30 像素。位移走 pose 的话，重建那一帧元素**还在老的
-// 位置**（曲线刚起步），推过 100 毫秒才到新的位置；位移算在 view 里的话，
-// 重建那一帧它就已经在新的位置上了。
-//
-// ⚠️ **量的是像素**：只重绘的那一帧**不重建视图**，Tester 的查找索引停在上一帧
-// （见文件头那一段）。
-func TestTheDanmakuGlidesInsteadOfTeleporting(t *testing.T) {
-	env := danmakuShell(t, []app.DanmakuItem{
+// ⇒ 判据：把读数往前挪 500 毫秒（远小于 `danmakuSeekSlop` 的 2 秒）、钟不动，
+// 弹幕**一动不动**。
+func TestACloserSampleDoesNotJerkTheDanmaku(t *testing.T) {
+	env := danmakuPlayingEnv(t, []app.DanmakuItem{
 		danmakuItem("d1", 41500, "第一条弹幕"),
 	}, systemIsDark(true))
 	env.tt.Frame()
 	before, _ := redSpan(env.tt, danmakuArea(), 0)
 	if before < 0 {
-		t.Fatalf("画面上没有弹幕，文字有 %q", env.tt.Texts())
+		t.Fatalf("画面上没有弹幕")
 	}
 
-	// 位置往前跳 500 毫秒（像用户拖了进度条）。
+	// 钟不动，只有采样值往前走 500 毫秒。
 	env.st.Position += 500 * time.Millisecond
 	env.tt.Frame()
 	after, _ := redSpan(env.tt, danmakuArea(), 0)
 	if after != before {
-		t.Errorf("位置跳了 500 毫秒之后弹幕**瞬移**了（左边沿 %d → %d）——"+
-			"位移是算在 view 里的，于是它 20fps 跳着走；"+
-			"它应该走 `AnimatePose`，滑过去", before, after)
+		t.Errorf("读数差了 500 毫秒（采样误差）就把弹幕挪了 %d 像素（x=%d → x=%d）"+
+			"——它会因此每帧抖一下；这么小的差该被当成采样误差", after-before, before, after)
 	}
 
-	// 推过那一段动画（100 毫秒）之后，它到新位置了。
-	env.tt.Advance(150 * time.Millisecond)
+	// 而钟往前推，它就该跟着走（位置由它自己的时钟推）。
+	env.tt.Advance(500 * time.Millisecond)
 	settled, _ := redSpan(env.tt, danmakuArea(), 0)
-	if settled >= before {
-		t.Errorf("推过 150 毫秒之后弹幕还在 x=%d（原来 x=%d）——它没有滑到新位置上去",
-			settled, before)
+	if got := before - settled; got < 26 || got > 34 {
+		t.Errorf("推了 500 毫秒之后弹幕走了 %d 像素（want 30）——它没有跟着自己的时钟走", got)
 	}
 }
 
-// TestTheDanmakuJumpsWhenMotionIsReduced 钉住「减少动态效果开着的时候按 20fps
-// 跳着走」。
+// TestTheDanmakuFollowsThePositionWhenMotionIsReduced 钉住「减少动态效果开着
+// 的时候弹幕还是跟着位置走，只是不逐帧重画」。
 //
-// # 为什么不用另写一套
+// 弹幕的运动**本身就是动效**：那个偏好开着的时候不该按显示器刷新率一直重画
+// （`TestReduceMotionDoesNotAskForContinuousFrames` 钉着那一半）。但位置仍然
+// 得跟着播放走——否则用户看到的是一秒跳一格的「卡住的弹幕」。
 //
-// 框架在那个偏好下让 pose 的 X/Y/Scale/Rotate **直接到终点**
-// （`mygo/ui/pose.go` 的 `still && i < 4`）⇒ 弹幕变成 20fps 跳着走（实测与「位置
-// 算在 view 里」那一档一模一样）。
-//
-// ⇒ 判据就是上一条的反过来：位置跳一下之后，它**立刻**就在新的位置上了。
-func TestTheDanmakuJumpsWhenMotionIsReduced(t *testing.T) {
-	env := danmakuShell(t, []app.DanmakuItem{
+// ⇒ 判据：推钟（没有绘制帧）它不动；位置变了（整窗重建）它到新位置。
+func TestTheDanmakuFollowsThePositionWhenMotionIsReduced(t *testing.T) {
+	env := danmakuPlayingEnv(t, []app.DanmakuItem{
 		danmakuItem("d1", 41500, "第一条弹幕"),
 	}, systemIsDark(true), reduceMotion())
 	env.tt.Frame()
 	before, _ := redSpan(env.tt, danmakuArea(), 0)
 	if before < 0 {
-		t.Fatalf("画面上没有弹幕，文字有 %q", env.tt.Texts())
+		t.Fatalf("画面上没有弹幕")
 	}
 
+	// 推钟但不改位置 ⇒ 不动（那个偏好下位置只跟着整窗重建走）。
+	env.tt.Advance(500 * time.Millisecond)
+	env.tt.Frame()
+	if still, _ := redSpan(env.tt, danmakuArea(), 0); still != before {
+		t.Errorf("「减少动态效果」开着时推钟就把弹幕挪了（x=%d → x=%d）——"+
+			"那个偏好下它不该逐帧重画", before, still)
+	}
+
+	// 位置变了 ⇒ 到新位置（60 像素/秒 × 0.5 秒 = 30 像素）。
 	env.st.Position += 500 * time.Millisecond
 	env.tt.Frame()
 	after, _ := redSpan(env.tt, danmakuArea(), 0)
-	if after >= before {
-		t.Errorf("「减少动态效果」开着的时候弹幕没有直接跳到新位置"+
-			"（左边沿 %d → %d）——它应该一步到位", before, after)
+	if got := before - after; got < 26 || got > 34 {
+		t.Errorf("位置往前 500 毫秒之后弹幕走了 %d 像素（want 30）——"+
+			"偏好的只是刷新频率，位置还是得跟着位置走", got)
 	}
 }
 
@@ -322,51 +336,62 @@ func TestTheDanmakuJumpsWhenMotionIsReduced(t *testing.T) {
 //
 // # 它钉的是哪一个坏
 //
-// pose 的状态是**按元素的 key 记着**的 ⇒ 同一个 key 换一批弹幕会继承上一批的位移，
-// 元素直接跑到屏幕外、**一个字都画不出来**（报告 §3.1 实测）。
+// 每条弹幕的 key 必须是**它自己的 rowid**（`app.DanmakuItem.ID`），不是它在
+// 列表里的下标：列表一换（换歌、或者 B 站补发/刷新一份新的），下标会整体
+// 错配——上一条的状态被下一条继承，位置、轨道全跟着错。
 //
-// ⇒ key 用**弹幕自己的 rowid**（`app.DanmakuItem.ID`）。
+// ⚠️ **判据已经从「画面上量位移」改成「模型层的槽位」**：票 #669 之后弹幕是
+// 一层自绘的墨迹，位置由绘制帧现算，元素上不再有逐条的 Text/pose 可量。稳定
+// key 现在的事实就是 `danmakuLayer.slots`——它按 rowid 记着每一条占的那条
+// 轨道（见 `slots` 字段的注释：键是 rowid，不是下标）。
 //
 // # 怎么验「key 是 rowid 而不是下标」
 //
-// 先摆一条**滚了 3 秒**的弹幕（位移 -180），再把整份换成一条**滚了 1 秒**的
-// （位移 -60）。
+// 摆两条弹幕（一红一绿），让它们各占一条轨道；记下各自的槽位。之后只推时间、
+// 重建几帧（位置往前走，但这一份弹幕没换）：
 //
-//   - key 是 rowid ⇒ 新来的那条是**新元素**，直接落在它自己的目标上（-60），
-//     两者的左边沿差 120 像素。
-//   - key 是下标   ⇒ 新来的那条**继承了**上一条的位移（-180），还在老位置——
-//     左边沿一点不差。
-//
-// ⚠️ **两条的字一样**：量的是**像素的左边沿**，而字形左边那一撇和字框左沿差
-// 几像素（实测 10）——字不一样的话那几像素的差就混进判据里了。
-//
-// ⚠️ **量的是「换完那一帧」**：位移走 pose 的话，新元素在它自己的第一帧就落在
-// 目标上（`mygo/ui/pose.go` 的 `samplePose`：没有上一帧的位姿就「shows there at
-// once」）；而继承下来的位姿会**从老位置起步**滑过去——那正是「不瞬移」。
+//   - 每条弹幕的槽位（轨道、入场时间、存活时长）**逐字段不变**——说明它跨帧
+//     仍是同一条，没有因为列表重排或新条目插到前面而换槽位；
+//   - 两条的槽位**互不相同**（各占一条轨道）——说明键不是「列表里第几个」。
 func TestEveryDanmakuHasItsOwnKey(t *testing.T) {
-	env := danmakuShell(t, []app.DanmakuItem{
-		danmakuItem("old", 39000, "同一条字"),
+	env := danmakuPlayingEnv(t, []app.DanmakuItem{
+		danmakuItemColor("d1", 40000, "同一条字", danmakuRed),
+		danmakuItemColor("d2", 40100, "另一条字", danmakuGreen),
 	}, systemIsDark(true))
+	env.st.Position = 42 * time.Second
 	env.tt.Frame()
-	old, _ := redSpan(env.tt, danmakuArea(), 0)
-	if old < 0 {
-		t.Fatalf("画面上没有弹幕，文字有 %q", env.tt.Texts())
+
+	d := &env.s.full.danmaku
+	first, ok := d.slots["d1"]
+	if !ok {
+		t.Fatalf("第一条弹幕没有进槽位：%v", d.slots)
+	}
+	second, ok := d.slots["d2"]
+	if !ok {
+		t.Fatalf("第二条弹幕没有进槽位：%v", d.slots)
+	}
+	if first == second {
+		t.Fatalf("两条弹幕拿到了一模一样的槽位 %+v——键不是各自的 rowid", first)
+	}
+	if first.timeMS != 40000 || second.timeMS != 40100 {
+		t.Fatalf("槽位记的入场时间不是各自的：d1=%+v d2=%+v", first, second)
 	}
 
-	// 换成一份新的：一条滚了 1 秒的（时间 = 当前位置 - 1 秒）。
-	env.s.app.SetDanmakuForTest([]app.DanmakuItem{
-		danmakuItem("new", 41000, "同一条字"),
-	})
-	env.tt.Frame()
-	fresh, _ := redSpan(env.tt, danmakuArea(), 0)
-	if fresh < 0 {
-		t.Fatalf("换了一份之后画面上没有弹幕，文字有 %q", env.tt.Texts())
+	// 只推时间、重建几帧：这一份弹幕没换，每条弹幕的槽位必须原样保留。
+	for i := range 3 {
+		env.st.Position += 500 * time.Millisecond
+		env.tt.Frame()
+		if got := d.slots["d1"]; got != first {
+			t.Fatalf("第 %d 帧之后 d1 的槽位从 %+v 变成了 %+v——同一条弹幕跨帧换了槽位", i+1, first, got)
+		}
+		if got := d.slots["d2"]; got != second {
+			t.Fatalf("第 %d 帧之后 d2 的槽位从 %+v 变成了 %+v——同一条弹幕跨帧换了槽位", i+1, second, got)
+		}
 	}
-	// 差 120 像素（滚了 3 秒 vs 滚了 1 秒 ⇒ 2 秒 × 60 像素/秒）。
-	if got := fresh - old; got < 117 || got > 123 {
-		t.Errorf("换了一份之后新弹幕的左边沿在 x=%d，原来那条在 x=%d（差 %d，"+
-			"want 120 上下）——差 0 说明它继承了上一条的位移，"+
-			"说明 key 不是弹幕自己的 rowid", fresh, old, got)
+	// 画面上那两条都还在（否则上面那个「槽位没变」可能只是什么都没画）。
+	if !redSeen(env.tt, danmakuArea()) || !greenSeen(env.tt, danmakuArea()) {
+		t.Errorf("推进之后画面上少了一条弹幕（红=%v 绿=%v）",
+			redSeen(env.tt, danmakuArea()), greenSeen(env.tt, danmakuArea()))
 	}
 }
 
@@ -392,8 +417,9 @@ func TestTheDanmakuCanBeTurnedOff(t *testing.T) {
 	if left, _ := redSpan(env.tt, danmakuArea(), 0); left >= 0 {
 		t.Errorf("关掉之后弹幕还在画面上（最左的红像素在 x=%d）", left)
 	}
-	if env.tt.HasText("第一条弹幕") {
-		t.Errorf("关掉之后那行字还在树上，文字有 %q", env.tt.Texts())
+	if env.s.full.danmaku.ready {
+		t.Error("关掉之后弹幕那一层的状态还留着（ready 还是真）——" +
+			"设置关掉时要整个复位")
 	}
 }
 

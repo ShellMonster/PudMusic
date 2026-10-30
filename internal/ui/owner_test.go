@@ -45,14 +45,14 @@ func TestEveryEntryCarriesTheUPOwner(t *testing.T) {
 		},
 		{
 			from: "动态卡片",
-			item: dynVideoItem(&bili.DynamicArchive{
+			item: dynVideoItem(&app.DynamicVideoItem{
 				Bvid: "BV1dyn", Title: "动态里的投稿",
-			}, bili.DynamicAuthor{Name: "动态的 UP", Mid: 222}),
+			}, app.DynamicAuthor{Name: "动态的 UP", Mid: 222}),
 			want: "动态的 UP", mid: 222,
 		},
 		{
 			from: "UP 空间投稿",
-			item: spaceVideoItem(bili.UpVideo{
+			item: spaceVideoItem(app.SpaceVideo{
 				Bvid: "BV1space", Cid: "9", Title: "空间里的投稿", Author: "空间的 UP",
 			}, 333),
 			want: "空间的 UP", mid: 333,

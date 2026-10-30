@@ -9,7 +9,9 @@
 package app
 
 import (
+	"context"
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"testing"
 )
@@ -36,8 +38,50 @@ const (
 	seenIDNew = "954659517801431041"
 )
 
-// TestTheDynamicBaselineSurvivesARestart 验「看到哪儿了」**落盘**。
-//
+func TestCatchUpDynamicSeenRejectsCompletionAfterAccountChange(t *testing.T) {
+	b := newExploreBili(t)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-started:
+		default:
+			close(started)
+		}
+		<-release
+		writeExploreJSON(w, 0, map[string]any{
+			"items": []any{}, "offset": "", "has_more": false,
+			"update_baseline": seenIDNew,
+		})
+	})
+	a := newExploreApp(t, b)
+	if err := a.MountSettings(filepath.Join(t.TempDir(), SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	loginExplore(a, "77")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.CatchUpDynamicSeen(context.Background())
+		done <- err
+	}()
+	<-started
+	loginExplore(a, "88")
+	close(release)
+
+	if err := <-done; err != ErrStaleGeneration {
+		t.Fatalf("stale catch-up returned %v, want ErrStaleGeneration", err)
+	}
+	loginExplore(a, "77")
+	if got := a.DynamicBaseline(); got != "" {
+		t.Fatalf("stale catch-up wrote account A baseline %q after switching accounts", got)
+	}
+	loginExplore(a, "88")
+	if got := a.DynamicBaseline(); got != "" {
+		t.Fatalf("stale catch-up wrote account B baseline %q", got)
+	}
+}
+
 // ⚠️ **不落盘的话每次启动的判定都是乱的**：重启之后基准回到空串，于是问 B 站
 // 的时候问的是「从头算」，那个点就一直亮着——而用户明明看过了。
 func TestTheDynamicBaselineSurvivesARestart(t *testing.T) {

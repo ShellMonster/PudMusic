@@ -42,6 +42,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/perf"
 )
 
 // StreamSource 的哨兵错误。
@@ -173,6 +175,13 @@ type StreamSourceOptions struct {
 	// 之后这一轮就结束了，下一次断流从第 1 次重新数。
 	OnRetry func(attempt int, wait time.Duration)
 
+	// Gauges 是可选的字节账本：#672 的诊断快照用它看「这条流现在在临时文件里
+	// 占了多少字节」。nil 表示不记账。
+	//
+	// ⚠️ **它记的是「已写进文件」的字节**，不是「收到了多少」：写失败的那一段
+	// 不算——那一段根本没落在盘上，算进去会让快照比真实的磁盘占用大。
+	Gauges *perf.Gauges
+
 	// OnReconnected 重试之后**字节又开始来了**时调一次。
 	//
 	// 第一次就下成功的话不调——那时候压根没有重连过。
@@ -241,14 +250,16 @@ type StreamSource struct {
 	// 比「反正 AudioToolbox 只用一条线程」这种假设稳。
 	opMu sync.Mutex
 
-	mu     sync.Mutex
-	cond   *sync.Cond
-	file   *os.File
-	path   string // 缓存文件路径，Close 时删
-	filled int64  // 已经下到缓存里的字节数（下载前沿）
-	size   int64  // 总长；-1 是还不知道
-	cur    int64  // 读游标
-	err    error  // 终态错误；io.EOF 是「正常读完」
+	mu   sync.Mutex
+	cond *sync.Cond
+	file *os.File
+	path string // 缓存文件路径，Close 时删
+	// gauge 是 #672 的临时文件字节账本；nil = 不记账。
+	gauge  *perf.Gauges
+	filled int64 // 已经下到缓存里的字节数（下载前沿）
+	size   int64 // 总长；-1 是还不知道
+	cur    int64 // 读游标
+	err    error // 终态错误；io.EOF 是「正常读完」
 	closed bool
 
 	// tailStart 是「单独取回来的尾部那一段」的起点。-1 = 没在取尾部。
@@ -384,6 +395,7 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		stall:        orDefaultDuration(o.StallTimeout, defaultStallTimeout),
 		ctx:          ctx,
 		cancel:       cancel,
+		gauge:        o.Gauges,
 	}
 	// Options.Size 的 0 和 -1 都表示「还不知道」。不归一的话 size 会停在 0，
 	// 于是 Seek(0, SeekEnd) 立刻答 0——extaf 拿到的 AudioFileID 长度是 0，
@@ -658,6 +670,8 @@ func (s *StreamSource) Close() error {
 	if path != "" {
 		_ = os.Remove(path)
 	}
+	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
+	s.clearTempGauge()
 	return errors.Join(errs...)
 }
 
@@ -723,4 +737,24 @@ func streamExt(urls []string) string {
 		return path[i:]
 	}
 	return ".bin"
+}
+
+// clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。
+//
+// 它只扣账，不动 `filled`，也不关账本——两处调用方的语义因此各说各的：
+//
+//	Close    文件删了，账本里不该再留着它的字节（`filled` 跟着进程一起没）
+//	restart  文件还在、只是内容被截断，同一个文件接下来会继续写
+//
+// 两处要扣的是**同一个数**（s.filled），所以只有这一个实现。
+func (s *StreamSource) clearTempGauge() {
+	if s.gauge == nil {
+		return
+	}
+	s.mu.Lock()
+	n := s.filled
+	s.mu.Unlock()
+	if n > 0 {
+		s.gauge.AddMediaTempBytes(-n)
+	}
 }
