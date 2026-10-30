@@ -130,7 +130,7 @@ func TestSpecEmptyStates(t *testing.T) {
 			if !tt.HasText(c.e.Title) {
 				t.Fatalf("%s 的 %q 没画出来，文字有 %q", c.what, c.e.Title, tt.Texts())
 			}
-			if !tt.HasText(c.e.Title) {
+			if !tt.HasText(c.e.Hint) {
 				t.Fatalf("%s 的「怎么才能不空」%q 没画出来，文字有 %q", c.what, c.e.Hint, tt.Texts())
 			}
 			at, ok := tt.Find(c.e.Title)

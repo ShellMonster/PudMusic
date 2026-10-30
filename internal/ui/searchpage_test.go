@@ -465,8 +465,8 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
-	if err := tt.Click("Lv等级由高到低"); err != nil {
-		t.Fatalf("点不到「Lv等级由高到低」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("等级由高到低"); err != nil {
+		t.Fatalf("点不到「等级由高到低」：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "用户那一档换了排序", func() bool {
 		c := st.callsOf(searchTabUser)
