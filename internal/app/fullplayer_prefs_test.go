@@ -688,7 +688,11 @@ func TestTheSpectrumPreferenceControlsTheCurrentPlayer(t *testing.T) {
 	if err := a.Open(filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac")); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, func() bool { return a.Snapshot().Position > 0 }, "播放位置前进")
+	// ⚠️ **这里等的是「真的开出一个音频设备再走起来」**：`waitFor` 那 2 秒是给
+	// 「后台一定会做完」的小事留的（见它的注释），而这一条要过一遍系统音频
+	// 输出——CI 那台 macOS runner 上偶尔要更久（2026-10-30 飘红过一次）。
+	// 给它宽一点，坏掉的时候仍然会失败（等 10 秒还没动就是真没在放）。
+	waitForWithin(t, 10*time.Second, func() bool { return a.Snapshot().Position > 0 }, "播放位置前进")
 	for i, v := range a.SpectrumBars(48, 40) {
 		if v != 0 {
 			t.Fatalf("频谱关闭时第 %d 根是 %v", i, v)
@@ -697,7 +701,7 @@ func TestTheSpectrumPreferenceControlsTheCurrentPlayer(t *testing.T) {
 
 	p.ShowSpectrum = true
 	a.SetFullPlayerPrefs(p)
-	waitFor(t, func() bool {
+	waitForWithin(t, 10*time.Second, func() bool {
 		for _, v := range a.SpectrumBars(48, 40) {
 			if v > 0 {
 				return true
