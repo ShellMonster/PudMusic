@@ -436,8 +436,33 @@ func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
 func (s *Shell) navigate(target string) {
 	s.clearToasts()
 	s.crash = nil
-	if target == homePath && s.router.Path() == homePath && s.home != nil {
-		s.home.backToOverview()
+	if target == homePath && s.router.Path() == homePath {
+		s.backToHomeOverview()
 	}
 	s.router.Push(target)
+}
+
+// backToHomeOverview 回首页的「发现」总览。
+//
+// # 这是「回总览」那件事**唯一的出口**
+//
+// 两处走它：
+//
+//   - **顶栏那一枚返回键**（`navbar.go` 的 `viewHomeBack`）：在首页上按它回总览。
+//   - **`navigate` 切到 `/` 而已经在 `/` 上**（上面那一句）：侧栏的「推荐音乐」
+//     那一项被按了（它已经在首页上），按它回总览而不是「换到同一页」。
+//
+// ⚠️ **两处走同一个出口**：各写一份的话，改了一处忘了另一处，于是「回总览」
+// 在两条路上有两种行为——而用户分不出那条路是哪一个。
+//
+// # 它是**页内切换**，不动路由
+//
+// 回总览不是换页：路由一个字都不动（首页只有 `/` 一条路由，而「回总览」不是
+// 换页）。所以它**不清 Toast、不复位 crash**——那两样是 `navigate` 的事，
+// 而 `navigate` 在这一条路上不走。
+func (s *Shell) backToHomeOverview() {
+	if s.home == nil {
+		return
+	}
+	s.home.backToOverview()
 }

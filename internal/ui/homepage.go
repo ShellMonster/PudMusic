@@ -749,10 +749,22 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 		// 和次级排序那几排不是同一个样子（票 #138）。
 		//
 		// 首页这一排上游是 `size="lg"`（44），其余三处是 md（40）。
+		// 🔴 **这里原来还有一枚「返回发现」**（票 #706，2026-10-31）：榜单名称
+		// 左边那个画着左箭头的图标键，按它回总览。
+		//
+		// **它被拿掉了**：回总览那件事交给**顶栏那一枚**（`navbar.go` 的
+		// `viewHomeBack`）——顶栏那一枚在首页上本来就摆着，而它原先是**失效的**
+		//（首页只有 `/` 一条路由，榜单那一档是页内切换，压根没 push 过路由，
+		// 路由历史里没有上一条可退）。
+		//
+		// **为什么不能两枚都留**：两枚键做同一件事，而它们的**可按性不一样**
+		//（顶栏那一枚在总览上是灰的）——用户按了没反应的那一枚，用户会以为是
+		// 坏了。同一件事一个入口。
+		//
+		// ⚠️ **这一行还留着**（它现在只包着 Tab 那一排）：`c.Key("home:tabs")`
+		// 必须在 Tab 的**构造之前**写（`ui/element.go` 的 Key 注释：自带输入的
+		// 控件都不能构造后 Key），而那一行是它现在所在的那一层。
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-			if iconKey(c, iconSideCollapse, "返回发现", 20, false).Size(36, 36).Padding(space.None, space.Px8).Clicked() {
-				h.backToOverview()
-			}
 			c.Key("home:tabs")
 			mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
 		})
