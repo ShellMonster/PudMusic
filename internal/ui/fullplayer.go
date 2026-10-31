@@ -337,6 +337,57 @@ type fullPlayer struct {
 	mouseX, mouseY float32
 	mouseOK        bool
 
+	// uiHiddenByUser 是「**用户亲手**把界面藏起来了没有」。
+	//
+	// # 为什么它得是一个**单独的状态**，不能只靠那个三秒的钟
+	//
+	// 原来只有一条规则：「指针最后动过之后过了三秒就藏」（Biu 的
+	// `scheduleHideUi(3000)`）。而那条规则是**单向**的：藏起来之后指针一动
+	// 界面就全回来（Biu 的 `onMouseMove` → `setIsUiVisible(true)`）。
+	//
+	// 用户要的是**切换**：满屏里点一下空白处藏起来，**再点一下**才回来。
+	// 那是**另一件事**——「谁藏的」得各自记着，否则「手动藏的」和「钟藏的」
+	// 分不开。
+	//
+	// # 手动藏的那一档**不受指针影响**
+	//
+	// 三秒那一档仍然是「指针一动就回来」（`TestMovingThePointerBringsTheInterfaceBack`
+	// 钉着，那是 Biu 的行为）。但手动藏的那一档**一直藏着**，直到用户再点一次
+	// 空白。
+	//
+	// 理由：用户刚藏好的时候，鼠标多半**还在动**（手正要往别处去）。如果
+	// 「指针一动就回来」，那么用户什么也没点、界面自己就冒出来了——那是
+	// **界面自己动了**，不是用户要的。
+	//
+	// 代价是：手动藏起来之后用户得再点一下才知道界面在哪儿——那一下就是出口。
+	//
+	// ⚠️ **不是「藏了就永远藏着」**：再点一次空白它就回来（`toggleFullUI`）。
+	uiHiddenByUser bool
+
+	// blankPressWithSettings 是「**这一轮按下的那一下**是按在满屏的空白上，
+	// 而那时偏好面板开着」没有。
+	//
+	// # 为什么它得单独记着
+	//
+	// 框架那个浮层自己管「按外面关掉」（`PopoverBase` 的 `PressedOutside`）——
+	// 而满屏的空白**就是外面**，所以面板会被那一按关掉。于是
+	// `s.full.settings` 在**按下那一帧**就成了 false：等探针问「面板开着没有」
+	// （那是**松手**那一帧）的时候，已经问不出刚才那一下了。
+	//
+	// ⇒ 所以要在**按下的那一帧**就把这件事记下来——那一帧 `settings` 还是
+	// true（面板是在建树这一趟里才被关掉的）。
+	//
+	// ⚠️ **它记的是「按在空白上」，不是「按在面板外面」**：按在面板里、按在
+	// 齿轮上都不算（那两处落在探针**上面**，探针压根没被按到）。
+	//
+	// ⚠️ **只在按下那一帧记**：这一帧之后探针**一直是按着的**（手指没松开），
+	// 而框架的浮层在**建树这一趟里**就把面板关掉了——于是第二帧起
+	// `settingsOpen` 已经是 false 了。所以「按下的那一帧」得单独认出来，
+	// 不能每帧重记（否则第二次记下去的是 false，把第一次的 true 冲掉）。
+	blankPressWithSettings bool
+	// blankPressed 记着「探针现在正按着」——用来认「**刚才**按下的那一帧」。
+	blankPressed bool
+
 	// settings 是偏好面板开着没有（开着的时候不藏界面）。
 	settings bool
 	// partsOpen 是分集面板开着没有。
@@ -452,25 +503,78 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 		return
 	}
 
+	// ⚠️ **这一帧**进来时偏好面板开着没有。
+	//
+	// 框架那个浮层是在**建树这一趟里**把面板关掉的（`PopoverBase` 的
+	// `PressedOutside` 问「指针按在了不是这个元素的地方」——按在探针上就是
+	// 「按在外面」），所以等探针那一行问的时候它**已经是 false 了**。那就
+	// 问不出「面板开着的时候不该藏界面」——而那正是要守住的那一条。
+	//
+	// ⇒ 先把进来时的值记下来（理由同 `viewFullTopBar` 里 `wasOpen` 那一段）。
+	settingsOpen := s.full.settings
+
 	ui.Overlay(c, func() {
 		// 背景先摆：它是整窗的一层，后面那些控件都压在它上面。
 		s.viewFullBackdrop(c, st.CoverURL)
 
-		// 铺满整窗的那一层：它报指针的位置（认出「动了没有」），顺便吃掉底下
-		// 那一层的点击。
+		// 铺满整窗的那一层：它报指针的位置（认出「动了没有」），吃掉底下
+		// 那一层的点击，**并且接住「点空白处切换界面显隐」那一下**。
 		//
 		// ⚠️ 它必须在**背景之上、控件之下**：控件要能拿到点击，而命中测试是从上
 		// 往下走的，先撞上的是控件。
+		//
+		// 🔴 **用 `probe.Clicked()`，不要用 `panel.PressedOutside()`**
+		// （理由见 `queue_drawer.go` 的同一处警告）：`PressedOutside` 问的是
+		// 「指针按在了不是这个元素的地方」，问的**不是这一层的框**——于是
+		// 分集面板上按一下、弹幕浮层上按一下、播放列表抽屉上按一下，都会被
+		// 算成「外面」，界面就自己藏起来了。`probe` 铺满整窗，问它「按在我
+		// 身上没有」才是「按在空白处」——抽屉就是这么做的（`back.Clicked()`）。
 		probe := ui.Box(c).Key("full-probe").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Modal()
 
 		s.syncFullPointer(probe)
 
+		// ⚠️ **按下的那一帧**就把「面板开着没有」记下来。
+		//
+		// 框架那个浮层是在**建树这一趟里**把面板关掉的（`PopoverBase` 的
+		// `PressedOutside` 问「指针按在了不是这个元素的地方」——按在探针上就是
+		// 「按在外面」），于是 `s.full.settings` 在按下那一帧之后就成了 false。
+		// 等松手那一帧问「刚才那一下是不是在面板开着的时候按的」，已经问不
+		// 出来了——而那正是要守住的那一条（面板开着时不该藏界面）。
+		//
+		// ⇒ 按下（`Pressed()`）的时候记，**松手（`Clicked()`）的时候用**。
+		//
+		// ⚠️ **只在「刚按下」的那一帧记**：探针按着的时候框架每帧都建一遍树，
+		// 而面板在**第一帧**就被关掉了——所以第二帧起 `settingsOpen` 已经是
+		// false 了。要是每帧重记，第一次记下的 true 就被冲成 false。
+		//
+		// ⚠️ **按在面板里不算**：面板浮在探针**上面**，那一按压根没落到探针
+		// 身上——所以「按在空白上」这一条是探针自己问出来的，不用另外判。
+		if probe.Pressed() {
+			if !s.full.blankPressed {
+				s.full.blankPressWithSettings = settingsOpen
+			}
+			s.full.blankPressed = true
+		} else {
+			s.full.blankPressed = false
+		}
+
 		hidden := s.fullHidden()
 		if hidden {
 			// 界藏起来了，光标也不留
 			// （Biu 的 `cursor: isUiVisible ? "auto" : "none"`，index.tsx:209）。
+			//
+			// ⚠️ **这一支和封面那一支是配对的**：框架认光标是从指针底下最里层
+			// 那个元素开始往上找的，而遇到的**第一个「接点击的」元素就停**
+			// （认成默认箭头，`runtime.go` 的 `updateCursor`）。探针现在接点击
+			// （`Clicked()` 那一支），于是它就是那个「接点击的」元素——光标会
+			// 停在它上面，`CursorNone` 轮不到。所以这一支**必须**自己说
+			// `CursorNone`。
+			//
+			// 而封面那一层为了长按三连调了 `Pressed()`，它也是接点击的那一枚
+			// ——指针落在**封面**上时探针那一支根本轮不到，所以封面那一层也得
+			// 自己说（`viewFullCover` 里已经这么写了）。
 			probe = probe.Cursor(ui.CursorNone)
 		}
 
@@ -483,6 +587,15 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 			s.viewFullControls(c, st, hidden)
 			s.viewFullParts(c, hidden)
 		})
+
+		// 点空白 → 切换界面显隐。
+		//
+		// ⚠️ **这一下问的是探针，不是顶栏/底栏**：探针铺满整窗，而控件在它
+		// **上面**（命中测试从上往下走），所以按在控件上的那一下根本落不到
+		// 探针身上——按「关闭全屏」不会顺手把界面也藏了。
+		if probe.Clicked() {
+			s.toggleFullUI(s.full.blankPressWithSettings)
+		}
 
 		if probe.OverlayShortcut(0, ui.KeyEscape) {
 			if s.fullScreen && s.videoMadeFull {
@@ -549,7 +662,10 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 
 		s.syncFullPointer(probe)
 
-		hidden := s.fullHidden()
+		// ⚠️ **空状态不藏界面**：`fullHiddenWith(false)` 把「手动藏的那一档」
+		// 也排除了——这一屏上除了那个关闭键没有别的东西，藏它等于把用户关在
+		// 一屏里出不来（理由见 `fullHiddenWith` 的注释）。
+		hidden := s.fullHiddenWith(false)
 		if hidden {
 			probe = probe.Cursor(ui.CursorNone)
 		}
@@ -1417,14 +1533,80 @@ func (s *Shell) disarmFullHide() {
 // fullHidden 问「界面现在该藏起来没有」。
 //
 // 开着偏好面板的时候不藏（Biu 的 `if (isSettingsOpen) return`）。
+//
+// # 两档，谁藏的
+//
+//	手动藏的   `uiHiddenByUser` —— 用户点过空白了。**指针动不叫它回来**，
+//	         一直藏着，直到用户再点一次空白（理由见那个字段的注释）。
+//	钟藏的   指针最后动过之后过了 `fullHideDelay` —— 指针一动就回来
+//	         （Biu 的 `onMouseMove` → `setIsUiVisible(true)`）。
+//
+// ⚠️ **手动藏的那一档排在前面**：它比钟**硬**——三秒到了也不动它，指针动了
+// 也不动它。用户点了「藏」，那这一屏就是他的。
 func (s *Shell) fullHidden() bool {
+	return s.fullHiddenWith(true)
+}
+
+// fullHiddenWith 问「界面现在该藏起来没有」，manual 是「手动藏的那一档算不算」。
+//
+// ⚠️ **空状态那一支传 false**：满屏开着而此刻没有歌的时候，屏幕上只剩一句
+// 「暂无播放内容」和顶栏那一个关闭键——**没有可藏的东西**（没有底栏、没有
+// 频谱、没有中间那一块），而把那个关闭键藏了等于把用户关在一屏里出不来：那一
+// 屏连「按 Esc 退回去」那句提示都没画（`viewFullEmpty` 只画了标题）。
+//
+// ⇒ 手动藏的那一档**不往空状态漏**——否则用户手动藏了一次界面，之后换歌的
+// 那几百毫秒（正好走空状态）里连关闭键都没了，而那一屏又不告诉他怎么出去。
+func (s *Shell) fullHiddenWith(manual bool) bool {
 	if s.full.settings {
 		return false
+	}
+	if manual && s.full.uiHiddenByUser {
+		return true
 	}
 	if s.full.lastMove.IsZero() {
 		return false
 	}
 	return s.clock.Now().Sub(s.full.lastMove) >= fullHideDelay
+}
+
+// toggleFullUI 翻转「界面藏没藏」——满屏里点一下空白处调它。
+//
+// # 它翻的是**手动那一档**
+//
+// 手动藏 → 手动露；手动露 → 手动藏。手动露了之后，三秒那条规则照旧接着算
+// （指针一动重排钟，停三秒它又自己藏回去）——那是另一档。
+//
+// # ⚠️ `settingsOpen` 是「**按下的那一帧**偏好面板开着没有」
+//
+// 不能直接读 `s.full.settings`：框架那个浮层是在**建树这一趟里**把面板关掉的
+// （`PopoverBase` 的 `PressedOutside` 问「指针按在了不是这个元素的地方」——
+// 按在探针上就是「按在外面」），所以等探针问的时候它**已经是 false 了**。
+// 那就问不出「面板开着的时候不该藏」了——而那正是要守住的那一条
+// （Biu 的 `scheduleHideUi` 第一行就 `if (isSettingsOpen) return`）。
+//
+// ⇒ 所以「按下那一帧」的值得由调用方记下来传进来（见 `viewFullPlayer` 里
+// `blankPressWithSettings` 那一段）。
+func (s *Shell) toggleFullUI(settingsOpen bool) {
+	// 这一轮按下的那一下用完了：清掉，免得下一次按的时候读到上一次的。
+	s.full.blankPressWithSettings = false
+	if settingsOpen {
+		// 偏好面板开着的时候不动：面板开着时藏界面，用户一个字都还没改就成了
+		// 「界面不见了」——那是最坏的那种体验（Biu 那边也是这么处理的）。
+		//
+		// ⚠️ **面板本身关不关是另一件事**：框架那个浮层自己管「点外面关掉」，
+		// 那是既有行为（实测：按空白处面板会关掉），我们不动它（见
+		// `fullplayer_settings.go` 的注释）。
+		return
+	}
+	s.full.uiHiddenByUser = !s.full.uiHiddenByUser
+	if !s.full.uiHiddenByUser {
+		// 手动露出来：三秒那条规则从**此刻**重新算起。
+		//
+		// ⚠️ **不重排的话界面刚露出来就又藏回去了**：手动藏着的这段时间里
+		// `lastMove` 早就过了三秒（那个钟是「指针最后动过」算的），`fullHidden`
+		// 立刻算出「已经三秒没动」——用户刚点出来的那一下就被钟收走了。
+		s.armFullHide()
+	}
 }
 
 // fullShown 是「看得见」的比例：0 全藏、1 全显。
