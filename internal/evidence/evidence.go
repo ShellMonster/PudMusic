@@ -2022,7 +2022,12 @@ var Items = []Item{
 		//
 		// 「失败之后不许每帧重发」这一条是防那个自激循环：实测 300 毫秒能发
 		// 138 次，界面停在「打不开」上还在刷网络。
-		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈；空列表说的是「没有内容」；新歌速递那一块挂掉不牵连下面那一档",
+		//
+		// ⚠️ **最后那五条盯的是「发现」总览那三块**（横幅 / 新歌速递 / 排行榜）：
+		// 它们各自有一句早退，而那句早退把「拉失败」和「没在拉」当成同一件事
+		// ——于是失败那一刻三块**整块消失**（连标题都没有），用户看到的是首页
+		// 内容区一片空白（票 #706）。
+		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈；空列表说的是「没有内容」；新歌速递那一块挂掉不牵连下面那一档；「发现」总览那三块在拉失败时**不许整块消失**（那是「一片空白」）",
 		Tests: []string{
 			"TestAFailedRecommendSaysSoAndOffersARetry",
 			"TestAnEmptyRecommendListIsNotAFailure",
@@ -2030,6 +2035,11 @@ var Items = []Item{
 			"TestTheHomePageSaysItIsLoadingUntilTheFirstPageIsBack",
 			"TestNewMusicIsOnlyPulledOnThePopTab",
 			"TestLoggingInReloadsTheRecommendations",
+			"TestTheOverviewNeverGoesBlankWhenTheFetchFails",
+			"TestTheOverviewSaysItFailedAndOffersARetry",
+			"TestTheOverviewRetryStartsTheRequestAgain",
+			"TestAnEmptyOverviewIsNotAFailure",
+			"TestTheOverviewShowsSkeletonsWhileItIsStillLoading",
 		},
 	},
 	{
