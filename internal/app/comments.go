@@ -1002,6 +1002,24 @@ func (a *App) commentArchiveID(ctx context.Context, bvid string, fetch commentsA
 	return st.Aid, nil
 }
 
+// ArchiveCounts 是**当前这一首**的三个读数（票 #701）。
+//
+// 🔴 **每一栏 0 = 「没有这个数」**，不是「零」——理由见 `ArchiveCounts()`。
+//
+// ⚠️ **这三个数是「整个稿件」的数，不是「这一 P」的**：多 P 的视频里放的是第 3
+// 集，显示的仍是整稿的数字（`stat` 挂在稿件上，不挂在分 P 上）。
+type ArchiveCounts struct {
+	// Reply 是评论数（`stat.reply`）。
+	Reply int64
+	// Favorite 是收藏数（`stat.favorite`）。
+	//
+	// ⚠️ **它是「这个视频被收藏了多少次」，不是「有多少人收藏了」**——它和
+	// 播放条那枚「收藏」键的实心 / 空心（**我**收藏了没有）是**两件不同的事**。
+	Favorite int64
+	// Like 是获赞数（`stat.like`）。
+	Like int64
+}
+
 // CommentCount 是播放条上那枚「评论」键要显示的数字。**0 = 还没有**。
 //
 // # 它和 `CommentsAllCount()` 的分工
@@ -1017,21 +1035,56 @@ func (a *App) commentArchiveID(ctx context.Context, bvid string, fetch commentsA
 //
 // ⚠️ **这一调用是每帧一次的**（和 `Parts()` / `LikeState()` 同一个形状）：
 // 有缓存就返回缓存，没有就把那一趟发出去（同一时刻只有一趟）。
+//
+// ⚠️ **它是 `ArchiveCounts()` 的薄封装**（票 #701）：那三个数在同一个回包里，
+// 而界面每一帧要的是**一起**拿（一次调用、一次锁）——分三个方法就是每帧三次
+// 取锁、三次查表。
 func (a *App) CommentCount() int64 {
+	return a.ArchiveCounts().Reply
+}
+
+// ArchiveCounts 是**当前这一首**的三个读数（评论 / 收藏 / 赞）。
+//
+// # 它是那三个数的**唯一出口**（票 #701）
+//
+// 播放条左边第三段那三枚键（赞 / 收藏 / 评论）各要一个数，而它们要的三个数
+// 在**同一个回包**里（`/x/web-interface/view` 的 `stat`）——所以：
+//
+//	CommentsAllCount()   评论页那一趟带回来的总数（打开过评论页之后才有）
+//	ArchiveCounts()      稿件详情那一趟的三个数（**播放条自己那一趟**）
+//
+// 🔴 **每一栏 0 = 「拿不到」= 不显示**，不是「零条评论 / 零次收藏 / 零个赞」：
+// 画一个「0」会让用户以为这一首真的没人看。拿不到的时候那几枚键**照旧能点**。
+//
+// ⚠️ **这一调用是每帧一次的**（和 `Parts()` / `LikeState()` 同一个形状）：
+// 有缓存就返回缓存，没有就把那一趟发出去（**同一时刻只有一趟**——
+// `ensureCommentStats` 里那个在途标记管的就是这件事）。
+//
+// 🔴 **本地文件和音乐库音频一个数都没有**：本地文件在 B 站上没有对应的对象；
+// 音乐库条目的评论数要另问评论接口（`type=14`），而 `stat` 挂在稿件详情上——
+// 那一档**照旧摆键、只是没有数字**（「不显示」不是「零条评论」）。
+//
+// ⚠️ **零新增网络往返**：那一趟（稿件详情）本来就要发（票 #682 的评论数就在
+// 里头），这三个数是**顺带**从同一个回包里读的。
+func (a *App) ArchiveCounts() ArchiveCounts {
 	it, ok := a.CurrentItem()
 	if !ok || !it.isOnline() || it.Bvid == "" {
-		// 本地文件没有 B 站上的对象；音乐库条目的评论数要另问评论接口
+		// 本地文件没有 B 站上的对象；音乐库条目的数要另问别的接口
 		// （`type=14`），这一趟只认 bvid。
-		return 0
+		return ArchiveCounts{}
 	}
 	a.ensureCommentStats(it.Bvid)
 
 	a.commentsMu.Lock()
 	defer a.commentsMu.Unlock()
 	if !a.commentsStatsKnown[it.Bvid] {
-		return 0
+		return ArchiveCounts{}
 	}
-	return a.commentsReplyCounts[it.Bvid]
+	return ArchiveCounts{
+		Reply:    a.commentsReplyCounts[it.Bvid],
+		Favorite: a.commentsFavoriteCounts[it.Bvid],
+		Like:     a.commentsLikeCounts[it.Bvid],
+	}
 }
 
 // ensureCommentStats 保证正在问 / 已经问过 bvid 的稿件详情（只为评论数）。
@@ -1089,7 +1142,7 @@ func (a *App) ensureCommentStats(bvid string) {
 func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchiveFetchFunc, allowDisk bool) (bili.ArchiveStats, error) {
 	a.commentsMu.Lock()
 	if a.commentsStatsKnown[bvid] {
-		st := bili.ArchiveStats{Aid: a.commentsAvids[bvid], Reply: a.commentsReplyCounts[bvid]}
+		st := a.cachedStatsLocked(bvid)
 		a.commentsMu.Unlock()
 		return st, nil
 	}
@@ -1113,7 +1166,7 @@ func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchi
 	// ⚠️ **再判一次**：读盘那一段没拿锁，中间那一趟可能已经问完并把两栏都记
 	// 下了——那时这里该直接吃它的结果，而不是再发一趟。
 	if a.commentsStatsKnown[bvid] {
-		st := bili.ArchiveStats{Aid: a.commentsAvids[bvid], Reply: a.commentsReplyCounts[bvid]}
+		st := a.cachedStatsLocked(bvid)
 		a.commentsMu.Unlock()
 		return st, nil
 	}
@@ -1131,11 +1184,11 @@ func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchi
 		}
 		a.commentsMu.Lock()
 		known := a.commentsStatsKnown[bvid]
-		id := a.commentsAvids[bvid]
-		reply := a.commentsReplyCounts[bvid]
+		st := a.cachedStatsLocked(bvid)
+		id := st.Aid
 		a.commentsMu.Unlock()
 		if known {
-			return bili.ArchiveStats{Aid: id, Reply: reply}, nil
+			return st, nil
 		}
 		// 🔴 **那一趟可能是「盘命中」**（`runArchiveTrip` 的 allowDisk 分支只写
 		// `commentsAvids`，不写 `commentsStatsKnown`——盘上那份没有评论数）。那时
@@ -1150,6 +1203,21 @@ func (a *App) archiveStats(ctx context.Context, bvid string, fetch commentsArchi
 	a.commentsStatsWaiters[bvid] = ch
 	a.commentsMu.Unlock()
 	return a.runArchiveTrip(ctx, bvid, fetch, ch, allowDisk)
+}
+
+// cachedStatsLocked 把记在内存里的那几栏拼回一份 `ArchiveStats`。
+//
+// ⚠️ **调用方必须已经拿着 `commentsMu`**（这是它名字里那个 `Locked` 的意思）。
+//
+// 🔴 **三个数都要拼上**（票 #701）：它们在同一个回包里，而播放条上三枚键各要
+// 一个——只拼 `Reply` 的话，另外两枚键就永远是「没有这个数」。
+func (a *App) cachedStatsLocked(bvid string) bili.ArchiveStats {
+	return bili.ArchiveStats{
+		Aid:      a.commentsAvids[bvid],
+		Reply:    a.commentsReplyCounts[bvid],
+		Favorite: a.commentsFavoriteCounts[bvid],
+		Like:     a.commentsLikeCounts[bvid],
+	}
 }
 
 // diskAVID 从盘上那份索引里读 aid。没有、坏了、没挂缓存都是 0。
@@ -1216,10 +1284,13 @@ func (a *App) runArchiveTrip(ctx context.Context, bvid string, fetch commentsArc
 	return st, nil
 }
 
-// rememberStats 记下一趟稿件详情的结果（**两栏都记**）。
+// rememberStats 记下一趟稿件详情的结果（**那几栏都记**）。
 //
 // ⚠️ **aid 只记正数**：0 是「B 站说没有这个稿件」，记下来会让下一次误以为
 // 问过了。
+//
+// ⚠️ **三个数都记（票 #701）**：它们在同一个回包里（`stat`），而播放条上那
+// 三枚键各要一个——不记的话，另外两枚键就永远是「没有这个数」。
 func (a *App) rememberStats(bvid string, st bili.ArchiveStats) {
 	a.commentsMu.Lock()
 	if st.Aid > 0 {
@@ -1232,6 +1303,14 @@ func (a *App) rememberStats(bvid string, st bili.ArchiveStats) {
 		a.commentsReplyCounts = map[string]int64{}
 	}
 	a.commentsReplyCounts[bvid] = st.Reply
+	if a.commentsFavoriteCounts == nil {
+		a.commentsFavoriteCounts = map[string]int64{}
+	}
+	a.commentsFavoriteCounts[bvid] = st.Favorite
+	if a.commentsLikeCounts == nil {
+		a.commentsLikeCounts = map[string]int64{}
+	}
+	a.commentsLikeCounts[bvid] = st.Like
 	if a.commentsStatsKnown == nil {
 		a.commentsStatsKnown = map[string]bool{}
 	}

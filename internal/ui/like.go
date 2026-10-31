@@ -697,8 +697,18 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 	// `playbar_keys.go`）。所以这里给这一枚钉一个 key。
 	c.Key(likeButtonKey)
 
-	btn := s.withTip(c, s.likeButton(c, name, label, color, rel.Liked),
-		likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked()))
+	// 🔴 **获赞数（票 #701）**：整个稿件的获赞数（`stat.like`），和这一枚键的
+	// 实心 / 空心（**我**赞了没有）是**两件不同的事**。
+	count := s.app.ArchiveCounts().Like
+
+	// 🔴 **无障碍名字里要带上那个数**（票 #701）：数字画在图标旁边，而图标对
+	// 辅助技术不可见（`mygo/ui/svg.go`）——名字里没有它的话，读屏用户听到的就
+	// 只有「赞」两个字，那个数对他们不存在。
+	//
+	// ⚠️ **「已赞」那一档也一样要带**：实心 / 空心是画面上的事，而读屏软件看不见。
+	btn := s.withTip(c, s.likeButton(c, name, countKeyLabel(label, count), color, rel.Liked, count),
+		countKeyTip("赞", count,
+			likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked())))
 	if btn.Clicked() {
 		// 🔴 **长按三连之后松手补发的那一次 click 必须吞掉**，否则一次长按变成
 		// 「三连 + 一次多余的取消赞」（同 `viewCover`；见文件头）。而吞标记是
@@ -725,13 +735,40 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 // likeButton 是赞键那一枚按钮：底下那一圈背景，上面是拇指图形。
 // 它同时是长按三连的目标：这一帧的按住喂进 `s.likeBtn`，抖动也是这一帧算的。
 //
-// ⚠️ **两层都是绝对定位、居中挂在按钮上**：绝对定位的元素绘制时排在普通子元素
-// **之后**（`mygo/ui/paint.go` 的两趟循环），而同一趟里是按**建元素的先后**画的
+// # 🔴 「图形 + 数字」的结构（票 #701）
+//
+// 这一枚现在带一个读数（获赞数），所以它的**内容**是「图形 + 数字」两半：
+//
+//	[ 32 × 32 的图形块 ] │ 缝 2 │ [ 数字 ]
+//
+// ⚠️ **图形那一块是 32 × 32，而按钮比它宽**：按钮的宽是「图形块 + 缝 + 数字」，
+// 而那一圈背景和那个拇指图形**只在左边那 32 里面**。
+//
+// ⚠️ **所以两层不再挂在按钮正中，而是挂在「图形块」上**：绝对定位是相对**父元素
+// 的 padding box**，而图形块是那一行里的第一个子元素——于是
+// `Attach(AnchorCenter, AnchorCenter)` 挂到图形块上，那一圈背景就正好在图形块
+// 正中（和改之前一样：它罩住的是那个拇指，不是数字）。
+//
+// ⚠️ **为什么不能把它们挂在按钮正中**：那会让这一圈背景跑到「图形 + 数字」那一整
+// 条的正中——而那一圈是**拇指的底圈**（满大时半径 16 = 32 的一半），跑到整条
+// 正中的话它就罩住了数字那一半，画面上是「一圈底色浮在数字底下」。
+//
+// ⚠️ **长按三连的手势不许坏**：手势的目标是**按钮**（`b.Pressed()`），而绝对
+// 定位的元素**照旧登记命中**（`mygo/ui/runtime.go`）——所以那一圈背景和那个
+// 拇指图形仍然点在按钮上（命中链取最内层的可点元素，而它们不是可点的）。
+// 「抖在图形块上」这件事也照旧：抖的是**内层**，命中框和 tooltip 的锚点不晃。
+//
+// ⚠️ **没有数字时这一枚和改之前一模一样**：图形 18 + 两侧各 7 的内边距（32），
+// 而那一圈底色挂在**按钮**上（`Attach` 相对按钮的 padding box，居中就是按钮
+// 正中）——那正是改之前的样子。
+//
+// ⚠️ **两层都是绝对定位**：绝对定位的元素绘制时排在普通子元素**之后**
+// （`mygo/ui/paint.go` 的两趟循环），而同一趟里是按**建元素的先后**画的
 // ——所以背景层先建、图标层后建，图标才落在背景上面。
 //
-// ⚠️ **位置用 `Attach(AnchorCenter, AnchorCenter)`**：绝对定位是相对按钮的
+// ⚠️ **位置用 `Attach(AnchorCenter, AnchorCenter)`**：绝对定位是相对父元素的
 // **padding box**（`mygo/ui/element.go` 的 `Absolute` 文档：「Top(0) puts the
-// element just below the border, whatever the padding」），居中挂上去正好在按钮
+// element just below the border, whatever the padding」），居中挂上去正好在父元素
 // 正中间，和内边距无关。
 //
 // ⚠️ **抖要抖在内层（背景 + 图标），不能抖在按钮上**：框架的 Transform 连
@@ -742,9 +779,16 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 // ⚠️ **按下时是「放大」到 1.04**（不是别的图标键那种缩到 0.96）：赞是往外给的
 // 一个动作，按下去的时候让它**涨一点**，比缩下去更像「按到了」（手册 ⓪ ①：
 // 「如果是放大，一般 1.04 就够了」）。
-func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, liked bool) ui.Element {
+func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, liked bool, count int64) ui.Element {
+	// ⚠️ **按钮的宽不是钉死的**：它跟着「图形 + 缝 + 数字」走——**没有数字时
+	// 它就是 32**（图形 18 + 两侧各 7），和改之前**一个字节都不差**。
+	//
+	// ⚠️ **不能 `Size(iconHitMd, iconHitMd)`**：那样数字那一格就被挤出去了（而
+	// 框架**不会**把它藏起来——它是溢出去画在按钮外面，而按钮的命中框还是 32，
+	// 于是那一格数字既看得见又点不着）。
 	b := flat.Button(c, "").Label(label).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).TextColor(color)
+		Height(iconHitMd).Padding(space.None, countKeyPadX(count)).TextColor(color)
+	hasCount := playbarCountText(count) != ""
 
 	// 长按三连：这一帧的按住喂进赞键**自己那一份**状态机。
 	//
@@ -766,10 +810,36 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 	}
 	dx := likeShakeDX(&s.likeBtn, s.clock.Now(), armed)
 
-	b.Children(func() {
+	// 🔴 **图形那一半**（和「背景层 + 图标层」那两层是同一块地方）。
+	//
+	// ⚠️ **锚盒子是 18 × 18**（`iconMd`，不是 `iconHitMd`）：带数字时图形
+	// **紧贴**那一枚键的左沿（宽度账见 `playbar_counts.go` 的文件头），而绝对
+	// 定位是相对**父元素的 padding box**——所以那一圈底色得挂在**一个正好
+	// 18 宽的盒子**上，那一圈才以拇指为中心。
+	//
+	// 🔴 **底色的形状分两档**（`bgW` / `bgH`）：
+	//
+	//	没有数字   32 × 32 的圆   ——和改之前**一模一样**
+	//	有数字     18 × 32 的胶囊 ——横向只占拇指那么宽
+	//
+	// **为什么带数字时要缩成胶囊**：32 宽的圆会往**右边**伸 7（拇指半径 9，圆
+	// 半径 16），而那一截正好压在**数字**上（数字从图形右边 2 开始）。
+	//
+	// ⇒ 宽度账（900 宽下左列右沿离滑块只剩 **5.20**）**不许**多出那 7 像素。而
+	// **竖向不变**是有意的：那一圈竖着罩住整个拇指（它比拇指高），而横向只
+	// 要罩住拇指就行——多出来的那一圈横向留白在有数字时**没有地方放**（右边
+	// 就是数字）。
+	//
+	// ⚠️ **竖着还是 32**：`like_anim_test.go` 量的是「离中心最远的那个像素」
+	// （半径 16），而胶囊竖向的半高仍是 16——那个断言**照样成立**。
+	bgW, bgH := float32(iconHitMd), float32(iconHitMd)
+	if hasCount {
+		bgW = iconMd
+	}
+	drawIcon := func(c *ui.Context) {
 		// 背景层（先建 → 画在下面）
 		bg := ui.Box(c).Attach(ui.AnchorCenter, ui.AnchorCenter).
-			Size(iconHitMd, iconHitMd).Radius(iconHitMd/2).
+			Size(bgW, bgH).Radius(bgW/2).
 			Background(c.Theme().Accent.Alpha(likeBgAlpha)).Translate(dx, 0)
 		// ⚠️ **缩放和不透明度合成一个 pose**（原来是两条通道）：
 		//
@@ -807,6 +877,42 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		// 再平移」复合，dx 是外层坐标上的 1.5px，不会被缩放放大缩小。
 		v := flat.PressScaleValue(ic, b.Pressed(), true) * s.likeIconScale(c, ic)
 		ic = ic.Scale(v, v).Translate(dx, 0)
+	}
+
+	b.Children(func() {
+		if !hasCount {
+			// ⚠️ **没有数字时**：这一枚和改之前**一模一样**——图形 18 + 两侧各 7
+			// 的内边距（32），而那一圈底色挂在**按钮**上（绝对定位相对按钮的
+			// padding box，居中就是按钮正中）。
+			//
+			// 🔴 **图形要占住那 18**：它是绝对定位的，而绝对定位的元素**不占布局
+			// 的宽**（`mygo/ui/element.go` 的 `Absolute`）——所以这里给它一个
+			// **18 见方的锚盒子**，那一圈底色和它挂在**这个盒子**上（而不是按钮
+			// 上），而**盒子本身在流里**，于是按钮的宽还是 18 + 7 + 7 = 32。
+			ui.Box(c).Size(iconMd, iconMd).Children(func() {
+				drawIcon(c)
+			})
+			return
+		}
+		// 🔴 **有数字时**：图形**紧贴**那一枚键的左沿（宽度账见
+		// `playbar_counts.go` 的文件头）——图形**不在** 32 的盒子里，那会多出
+		// 14 的留白，三枚键就是 42，而 900 宽下左列右沿就撞上进度条滑块了。
+		//
+		// ⚠️ **那一圈底色还要以图形为中心**：绝对定位是相对**父元素的 padding
+		// box**，所以那一圈得挂在**一个正好 18 宽的盒子**上——那个盒子就是图形
+		// 自己的锚（`iconMd` 见方）。
+		ui.Row(c).Gap(playbarCountGap).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(iconMd, iconMd).Children(func() {
+				drawIcon(c)
+			})
+			// 🔴 **数字那一格**（票 #701）：获赞数。
+			//
+			// ⚠️ **走共享的那一份**（`countText`）：宽度上限 / 省略号 / 字号 / 颜色
+			// **只有一处**——赞键自己画图形那一块（那两层是绝对定位的，有自己的锚
+			// 结构），但数字那一格不许另写一份（审查抓到过：另外两枚有上限，它
+			// 没有——于是换字体时它会突破上限，而另外两枚不会）。
+			countValueText(c, count)
+		})
 	})
 	return b
 }
