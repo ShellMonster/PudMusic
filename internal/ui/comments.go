@@ -49,24 +49,34 @@
 // 两份判据迟早分叉，而分叉出来的那种差异极难查（一个列表会补屏，另一个
 // 不会，而且两边看着都「对」）——见 `syncComments`。
 //
-// # 正文是「自己画」的（表情要成图）
+// # 正文是框架的 `ui.RichText`（表情要成图，正文能拖选复制）
 //
-// 🔴 **框架的文本控件画不出 inline object 那一格**：`mygo/ui/paint.go` 的
-// `textForeground` 跳过 `g.Object` 的字形——它只给那一格**留位置**（
-// `Span.ObjectWidth` / `ObjectHeight`），不画东西。而表情就是靠那一格摆进去的
-// （正文里的 `[妙啊]` 换成一枚 U+FFFC，那一格贴上那张表情图）。
+// 🔴 **这一段的理由改过了**（票 #702）。原来这里写着：
 //
-// ⇒ 正文**自己排版、自己画**（`ui.ShapeRichText` + `Painter.TextLayout` +
-// `Painter.Image`）。而文字**照样交给辅助技术和无头 Tester**：那一格用
-// `.Label(...)` 把正文交给框架，于是屏幕阅读器读得到它，`Tester.Find` 也
-// 找得到它——不然这一页的正文对它们是不存在的。
+//	框架的文本控件画不出 inline object 那一格：mygo/ui/paint.go 的
+//	textForeground 跳过 g.Object 的字形——它只给那一格**留位置**，不画东西。
+//
+// **那条断言写于 2026-10-28（`f0735f1f`），那时依赖是 mygo v0.6.4。** 而
+// `DrawObjects` 是 **v0.7.1 才引入的**（v0.6.4 里 0 个文件提到它，v0.7.1 起
+// 6 个文件有）——项目之后在 #611 升到 v0.7.1、在 `d25206a2` 升到 v0.7.3，
+// **两次都没把代码和注释一起跟上**。⇒ 那条理由**已经不成立**了。
+//
+// ⇒ 正文改用框架的 `ui.RichText(...).DrawObjects(...)`：框架给 inline object
+// **留位置并把那一格交给你画**（`mygo/docs/ui/text.md`：「`DrawObjects` draws
+// them, after the glyphs, in the text's clip: it gets each one's rune in the
+// paragraph and its box」），而**排版、截断、高亮、选中**全都交给框架。
+//
+// 而文字**照样交给辅助技术和无头 Tester**：那一格用 `.Label(...)` 把正文交给
+// 框架，于是屏幕阅读器读得到它，`Tester.Find` 也找得到它——不然这一页的正文
+// 对它们是不存在的。
+//
+// （这一格的完整说法在 `comments_body.go` 的文件头。）
 package ui
 
 import (
 	"fmt"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
@@ -78,6 +88,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -301,49 +312,48 @@ func commentRowKey(rpid int64, reply bool) int64 {
 	return rpid << 1
 }
 
-// commentBody 是一条评论正文的排版结果。
+// commentBody 是一条评论正文的**span 那一份**（排版之前）。
+//
+// 🔴 **它现在只记 span，不记排版结果**：排版是**框架**的事（`ui.RichText` 有
+// 自己的布局缓存，`mygo/ui/layoutcache.go` 的 `sameLayout`），而旧的做法是
+// 自己缓存 `*ui.TextLayout`（理由见 `comments_body.go` 的文件头）。
 type commentBody struct {
-	// layout 是排好版的那一份（`ui.ShapeRichText` 的结果）。
-	layout *ui.TextLayout
-	// objects 是正文里那些表情占位符的位置（相对排版原点）。
-	objects []ui.TextObject
-	// emotes 是表情图的地址，与 objects 一一对应。
-	emotes []string
-	// plain 是**给辅助技术和无头 Tester 的那份正文**（表情占位符换成
-	// 「［表情］」）。
+	// spans 是正文切出来的那几段（表情占位符是 inline object）。
+	spans []ui.Span
+	// urls 是那些表情图的地址，与 spans 里的占位符一一对应（按出现的顺序）。
+	urls []string
+	// plain 是「给读屏的那一份」（表情占位符写成「［表情］」）。
 	//
-	// ⚠️ **它不是画出来的那一份**：画出来的是 `layout`，而这一份是**文字**。
-	// 两者必须是同一句话——不然屏幕阅读器读到的和眼睛看到的不一样。
+	// 🔴 **它和 spans 来自同一次切分**（理由见 `comments_body.go` 的
+	// `commentSpansOf`《两份必须同源》）——所以读屏读到的那句话**必然**就是
+	// 眼睛看到的那句话（表情那格是图，其余是字）。
+	//
+	// ⚠️ **它是算的时候算出来的，不是每帧现算**：算它要再切一遍正文，而这一页
+	// 每一帧都要画十来条评论的正文——现算就是每帧多十来趟切分。
 	plain string
-	// w 是排版时的宽度，h 是排出来的高度。
-	w, h float32
-	// lines 是最多几行（主评论和楼中楼不一样）。
-	lines int
-	// lineH 是**一行**有多高（字体的 ascent + descent + line gap）。
-	//
-	// ⚠️ **它记下来是因为「折起来」那一档要拿它算上限**：正文最多几行是
-	// `lines`，于是这一格最多有多高就是 `lines × lineH`——而那个数**只
-	// 排版的时候算得出来**（`font.Metrics()` 那一趟）。
-	lineH float32
-	// paint 是画这一格的那一支。
-	//
-	// ⚠️ **它记下来是因为闭包每帧新建一次就是一次分配**：而这一格每一帧都要
-	// 画（正文是「自己排版自己画」的），所以一屏十来行就是十来次。记下来之后
-	// 它**只在正文重排一次的时候新建一次**。
-	//
-	// ⚠️ **颜色在里面现取**（`pr.Theme()`）：主题是用户能改的，而这一份
-	// 缓存跨帧活着——写死颜色的话，用户换了深浅两套之后正文还是旧的颜色。
-	paint func(*ui.Painter, ui.Rect)
-	// mark 是排这一份时用的高亮配色（零值 = 没高亮）。
+	// mark 是切这一份时用的高亮配色（零值 = 没高亮）。
 	//
 	// 🔴 **它是缓存键的一部分**：高亮那几段的字色和底色是**烘进 span 里**的
 	// （`ui.Span.Color` / `Background`），而其余的字色是画的时候从主题现取的
-	// ——所以主题一变（深浅、主色），这一份就得重排。不重排的话，那几段会一直
+	// ——所以主题一变（深浅、主色），这一份就得重切。不重切的话，那几段会一直
 	// 是上一次主题的颜色。
 	//
 	// ⚠️ **`commentMark` 可比较**（两个颜色 + 一个 float32），所以判「配色变
 	// 了没有」就是一次 `==`，不分配任何东西。
 	mark commentMark
+
+	// draw 是「把那一格表情图画上去」的那一支（`DrawObjects` 的回调）。
+	//
+	// 🔴 **它是记在这里的，不是每帧现建**：闭包每帧新建一次就是一次分配，而
+	// 这一格每一帧都要画（一屏十来行就是十来次）——理由同旧 `commentBody.paint`
+	// 的注释（那一档记的就是同一件事）。
+	//
+	// ⚠️ **它在第一次画这一格的时候才建**（`nil` ⇒ 建一次并记下来）。
+	draw func(p *ui.Painter, at int, r ui.Rect)
+	// copyFn 是「复制出去的那一份」（`CopyData` 的回调）。
+	//
+	// ⚠️ **它和 `draw` 是同一个道理**：每帧现建就是每帧一次分配。
+	copyFn func(parts []ui.SelectedText) transfer.Data
 }
 
 // viewComments 是评论页。
@@ -732,10 +742,9 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 				// 时间，容器级选择会把它们一起拖进复制的字里（变成
 				// 「昵称\nUP 主\n3天前」那样）。用户要的是那个名字。
 				//
-				// ⚠️ **正文那一格没跟着做**：它是自己排版、自己画的
-				// （`shapeCommentBody` + `commentBody.paint`），改它会和
-				// `work/684-highlight` 在同一个函数上硬冲突——那一半单独一票
-				// （理由见 `selectable_copy_test.go` 顶上那一段）。
+				// ⚠️ **正文那一格后来也做上了**（票 #702）：它现在是框架的
+				// `ui.RichText` + `Selectable`（理由见 `comments_body.go` 的
+				// 文件头）——所以正文也能拖选复制了。
 				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text).
 					MaxLines(1).Ellipsis("…").Selectable()
 				// ⚠️ **徽章是「一段带底色的字」，不是一个盒子套一段字**：
@@ -766,7 +775,7 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 			})
 
 			// 正文（表情占位符换成了图）。
-			s.viewCommentBodyEl(c, p, cm, commentBodyLines, s.commentBodyWidth(0))
+			s.viewCommentBodyEl(c, p, cm, commentBodyLines)
 
 			// 第三行：点赞数 + 回复数。
 			ui.Row(c).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
@@ -810,7 +819,7 @@ func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentR
 						TextColor(t.TextMuted).MaxLines(1)
 				}
 			})
-			s.viewCommentBodyEl(c, p, cm, commentReplyBodyLines, s.commentBodyWidth(1))
+			s.viewCommentBodyEl(c, p, cm, commentReplyBodyLines)
 		})
 	})
 }
@@ -920,325 +929,6 @@ func (s *Shell) viewCommentsSentinel(c *ui.Context, p *commentsPage) {
 		ui.Text(c, "没有更多了").FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).Padding(space.Px8)
 	}
-}
-
-// viewCommentBodyEl 画一条评论的正文。
-//
-// 🔴 **表情占位符换成了图**（验收项）：正文里的 `[妙啊]` 画出来是**那张图**，
-// 不是那五个字。
-//
-// ⚠️ **正文是「自己排版、自己画」的**（理由见文件头）：框架的文本控件给
-// inline object 留了位置却**不画它**，而表情就靠那一格。
-//
-// ⚠️ **`.Label(...)` 把正文交给框架**：屏幕阅读器读得到它，无头 Tester 也
-// 找得到它——不然这一页的正文对它们是不存在的。
-//
-// 🔴 **高亮只在筛选开着的时候做**（票 #684）：关着的时候这一条走的是**原来
-// 那条路**——不跑那次匹配、不带任何底色（正文是**连续几行的字**，常驻的色块
-// 会让用户以为自己是拿鼠标选中了几段）。
-func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Comment, lines int, w float32) {
-	body := s.commentBodyOf(c, p, cm, lines, w)
-	if body == nil {
-		return
-	}
-	ui.Box(c).FillWidth().Height(body.h).Label(body.plain).DrawOver(body.paint)
-}
-
-// commentBodyOf 拿一条评论正文的排版结果（**排一次，缓存着**）。
-//
-// ⚠️ **排版不便宜**（`text.Shared().Shape`），而这一页每一帧都要画十几条
-// 评论——每帧重排一遍就是十几倍的浪费。所以按 (rpid, 宽度, 行数) 记一份。
-//
-// 🔴 **命中区间也在这一次排版里算掉**（票 #684）：`songname.Table.Matches`
-// 每条评论跑一次就够（排版本来就缓存着），而这里是**唯一**需要它的地方
-// ——所以它是**排的时候**跑一趟，不是每帧跑。筛选关着的时候**根本不跑**
-// （高亮是筛选的一部分，见 `viewCommentBodyEl`）。
-func (s *Shell) commentBodyOf(c *ui.Context, p *commentsPage, cm bili.Comment, lines int, w float32) *commentBody {
-	// 🔴 **高亮的配色和区间跟着排版一起缓存**（见 `commentBody.mark`）：
-	// 主题变了（深浅 / 主色）那一份要重排，因为高亮那几段的字色和底色是**烘进
-	// span 里**的。
-	//
-	// ⚠️ **配色是 `viewComments` 开头算好的那一份**（一帧一次）：这里只是取
-	// 过来用——每一条评论各算一遍 `ink.Ensure` 是白花的。
-	//
-	// ⚠️ **筛选关着时 mark 是零值**：这时候 `Matches` 也不跑。
-	mark := p.mark
-	// 🔴 **缓存先查、匹配后跑**：`Matches` 每条评论分配十几次（它要拼一份归一化
-	// 串 + 一张映射表），而这一页每一帧都要问一遍每一条评论——先查缓存的话，
-	// 稳态下（正文排好了）它**一次都不跑**。缓存键里的 `mark` 已经能答「这一份
-	// 是不是同一个配色下排的」，所以命中就说明区间也是同一批。
-	if b, ok := p.bodies[cm.Rpid]; ok && b.w == w && b.lines == lines && b.mark == mark {
-		return b
-	}
-	var hl []songname.Range
-	if mark.Bg.A != 0 && !p.names.Empty() {
-		hl = p.names.Matches(cm.Message)
-	}
-	b := shapeCommentBody(c, cm, w, lines, hl, mark)
-	// 🔴 **画这一格的那一支记在这一份里**（而不是每帧现建一个闭包）：
-	// 这一格每一帧都要画，而闭包每帧新建一次就是一次分配——一屏十来行就是
-	// 来十次（理由同 `framebudget_test.go` 盯着的「每帧现算」那族坏处）。
-	//
-	// ⚠️ **颜色在里面现取**（`pr.Theme()`）：这一份缓存跨帧活着，而主题是
-	// 用户能改的——写死颜色的话，用户换了深浅两套之后正文还是旧的颜色。
-	cache := s.pageImages()
-	b.paint = func(pr *ui.Painter, r ui.Rect) {
-		pr.TextLayout(b.layout, r.X, r.Y, pr.Theme().Text)
-		for i, o := range b.objects {
-			if i >= len(b.emotes) {
-				break
-			}
-			st := cache.Get(b.emotes[i])
-			if st.Bitmap == nil {
-				// 图还没下来：那一格先空着（框架的 inline object 本来就不画
-				// 任何东西），图好了缓存会叫醒这一扇窗。
-				continue
-			}
-			pr.Image(st.Bitmap, ui.Rect{X: r.X + o.Rect.X, Y: r.Y + o.Rect.Y,
-				W: o.Rect.W, H: o.Rect.H}, ui.Contain)
-		}
-	}
-	if p.bodies == nil {
-		p.bodies = map[int64]*commentBody{}
-	}
-	p.bodies[cm.Rpid] = b
-	return b
-}
-
-// commentBodyWidth 是正文那一列有多宽。
-//
-// ⚠️ **按容器宽算，不按内容量算**：正文的宽度决定它在哪几个字那里折行，
-// 而折行位置决定这一行多高——**宽度错了，整张列表的高度就错了**。
-//
-// ⚠️ **量的是上一帧的宽**（`list.Bounds()` 报的是上一帧的盒子）：这一帧
-// 还没排版，拿不到这一帧的宽。差一帧的代价是刚进这一页时正文按一个猜的
-// 宽度排一次，下一帧就对了。
-//
-// kind 是 0（主评论）还是 1（楼中楼）：楼中楼往左缩进，还用小一号的头像，
-// 于是它那一列更窄。
-func (s *Shell) commentBodyWidth(kind int) float32 {
-	w := s.comments.listW
-	if w <= 0 {
-		// 还没量过容器：先按一个常见的宽度排，下一帧重排。
-		w = 640
-	}
-	if kind == 0 {
-		// 减去头像和它后面那道缝。
-		return w - commentAvatar - commentBodyGap
-	}
-	// 楼中楼：缩进 + 小头像 + 它自己的缝。
-	return w - space.Px12*2 - commentReplyAvatar - space.Px8
-}
-
-// shapeCommentBody 把一条评论的正文排成版。
-//
-// ⚠️ **表情占位符换成一枚 inline object**（`Span.ObjectWidth` /
-// `ObjectHeight`）：框架的文本引擎给那枚 U+FFFC 留一个 18×18 的位置，而
-// **它自己一个字都不画**（`mygo/ui/paint.go` 跳过 object 字形）——所以那一格
-// 是空的，得我们自己把那张表情图画上去。
-//
-// hl 是正文里命中歌名的那些字符区间（按**原文**的 rune，见 `songname.Range`），
-// mark 是它们的画法。两样都为零值时，排出来的就是原来那一份。
-//
-// 🔴 **截断之后要重新裁一遍区间**：截断点之后的那一截正文根本不在画面上
-// （换成了省略号），留着它只会去切一段不存在的文字。
-func shapeCommentBody(c *ui.Context, cm bili.Comment, w float32, lines int, hl []songname.Range, mark commentMark) *commentBody {
-	font := ui.Font{Family: c.Theme().Font, Size: scale.Font(c, scale.Size14)}
-	m := font.Metrics()
-	lineH := m.Ascent + m.Descent + m.LineGap
-	maxH := float32(lines) * lineH
-
-	spans, emotes, plain := commentSpansMarked(cm.Message, cm.Emotes, hl, mark)
-	layout := ui.ShapeRichText(spans, font, w)
-	_, h := layout.Size()
-	if h > maxH+0.5 {
-		// 🔴 **太长了就截断**（验收项：「一条评论被折叠时（正文很长）不破版」）。
-		//
-		// 截断的办法是**二分**：按字符数试排，看排出来有几行。二分是
-		// O(log n) 次排版，而这一次排版的结果是**记着的**（见 `commentBodyOf`），
-		// 所以代价只付一次。
-		runes := []rune(cm.Message)
-		// 🔴 **截断点不许落在表情占位符里面**（理由见 `safeCommentCut`）。
-		ranges := commentEmoteRanges(cm.Message, cm.Emotes)
-		lo, hi := 0, len(runes)
-		for lo < hi {
-			mid := (lo + hi + 1) / 2
-			// ⚠️ **量的是「安全切点」那一段**：切点落在占位符里面的话，量出来
-			// 的那一份和最后摆出来的那一份不是同一句话（一个是半个占位符的
-			// 字面量，一个是整枚表情）——二分就会照着一个不存在的东西收敛。
-			//
-			// ⚠️ **量的时候不带高亮**：底色和字色**不改字宽**（`Span.Background`
-			// 画在字形后面），所以带不带它排出来的行数一模一样——而带上它的话
-			// 每一趟二分都要重切所有 span，白花。
-			sp, _, _ := commentSpans(string(runes[:safeCommentCut(ranges, mid)]), cm.Emotes)
-			sp = append(sp, ui.Span{Text: "…"})
-			l := ui.ShapeRichText(sp, font, w)
-			_, hh := l.Size()
-			if hh <= maxH {
-				lo = mid
-			} else {
-				hi = mid - 1
-			}
-		}
-		cut := safeCommentCut(ranges, lo)
-		// 🔴 **区间按新的 rune 数裁**（截断点之后的高亮丢掉）。
-		hl = clipMarks(hl, cut)
-		spans, emotes, plain = commentSpansMarked(string(runes[:cut]), cm.Emotes, hl, mark)
-		spans = append(spans, ui.Span{Text: "…"})
-		plain = plain + "…"
-		layout = ui.ShapeRichText(spans, font, w)
-	}
-	_, h = layout.Size()
-	return &commentBody{
-		layout:  layout,
-		objects: layout.Objects(),
-		emotes:  emotes,
-		plain:   plain,
-		w:       w,
-		h:       h,
-		lines:   lines,
-		lineH:   lineH,
-		mark:    mark,
-	}
-}
-
-// commentSpans 把正文拆成一段一段：**文字是文字，表情占位符换成一枚
-// inline object**。
-//
-// 返回的第二样是那些表情图的地址，**与 inline object 一一对应**（按出现的
-// 顺序）——画的时候靠这个对应关系把图贴到位置上。第三样是**给辅助技术和
-// 无头 Tester 的那份文字**（表情占位符换成「［表情］」）。
-//
-// 🔴 **认占位符的口径只有这一处**：截断那一档（`safeCommentCut`）要认的是
-// **同一批**占位符——认错了的话，截断会把一段普通文字里的方括号也当成表情
-// 切掉。
-//
-// ⚠️ **高亮是这一支的另一档**（`commentSpansMarked`）：`hl` 为空、`mark` 是
-// 零值的时候，两处的 span 逐段相同——所以「认占位符」仍然只有这一处。
-func commentSpans(msg string, emotes map[string]bili.CommentEmote) ([]ui.Span, []string, string) {
-	return commentSpansMarked(msg, emotes, nil, commentMark{})
-}
-
-// commentSpansMarked 是 `commentSpans` 加「按区间把命中的那几段染上底色」
-// （票 #684）。
-//
-// 🔴 **表情占位符那一格不染色**：`hl` 用的是**原文**的 rune 坐标（
-// `songname.Range`），所以一枚表情占位符 `[妙啊]` 可能整个落在命中区间里——
-// 而这里的切法是**先按占位符切成 token**，文字段各自按自己的起点套色 ⇒ 那一格
-// 自然让出去（画出来是一张图，不是一块有底色的字）。
-//
-// ⚠️ **文字段的起点按原文的 rune 数累加**（`base`）：`plain` 里表情换成
-// 「［表情］」四个字，长度和原文的 `[妙啊]` 对不上——所以坐标只跟**原文**走。
-func commentSpansMarked(msg string, emotes map[string]bili.CommentEmote, hl []songname.Range, mark commentMark) ([]ui.Span, []string, string) {
-	var spans []ui.Span
-	var urls []string
-	var plain strings.Builder
-	// base 是 rest 之前已经过去了多少个**原文的** rune。
-	base := 0
-	text := func(s string) {
-		if s == "" {
-			return
-		}
-		spans = appendMarkedText(spans, s, base, hl, mark)
-		plain.WriteString(s)
-		base += utf8.RuneCountInString(s)
-	}
-	rest := msg
-	for len(rest) > 0 {
-		i := strings.IndexByte(rest, '[')
-		if i < 0 {
-			text(rest)
-			break
-		}
-		if i > 0 {
-			text(rest[:i])
-		}
-		j := strings.IndexByte(rest[i:], ']')
-		if j < 0 {
-			// 没有收尾的 ']'：后面整段都是普通文字。
-			text(rest[i:])
-			break
-		}
-		token := rest[i : i+j+1]
-		e, ok := emotes[token]
-		if !ok {
-			// 不是表情：这一段就是普通文字。
-			text(token)
-			rest = rest[i+j+1:]
-			continue
-		}
-		spans = append(spans, ui.Span{Text: "\uFFFC", ObjectWidth: commentEmote, ObjectHeight: commentEmote})
-		urls = append(urls, commentImageURL(e.URL))
-		plain.WriteString("［表情］")
-		base += utf8.RuneCountInString(token)
-		rest = rest[i+j+1:]
-	}
-	return spans, urls, plain.String()
-}
-
-// commentEmoteRange 是正文里一枚表情占位符占的字符区间（**按 rune 数**，
-// 左闭右开）。
-type commentEmoteRange struct {
-	start int
-	end   int
-}
-
-// commentEmoteRanges 找出正文里那些**表情占位符**占的字符区间。
-//
-// 🔴 **口径必须和 `commentSpans` 一模一样**（那里怎么认占位符，这里就怎么
-// 认）：那一处是「`[` 到下一个 `]` 之间的那一段，**在表情表里**」才算占位符。
-//
-// ⚠️ **区间按 rune 数算**：截断是按 rune 切的（`[]rune`），而按字节算的
-// 区间跟切点对不上——中文一个字三个字节。
-func commentEmoteRanges(msg string, emotes map[string]bili.CommentEmote) []commentEmoteRange {
-	var out []commentEmoteRange
-	rest := msg
-	// base 是 rest 之前已经过去了多少个 rune。
-	base := 0
-	for len(rest) > 0 {
-		i := strings.IndexByte(rest, '[')
-		if i < 0 {
-			break
-		}
-		j := strings.IndexByte(rest[i:], ']')
-		if j < 0 {
-			break
-		}
-		token := rest[i : i+j+1]
-		head := utf8.RuneCountInString(rest[:i])
-		tok := utf8.RuneCountInString(token)
-		if _, ok := emotes[token]; ok {
-			out = append(out, commentEmoteRange{
-				start: base + head,
-				end:   base + head + tok,
-			})
-		}
-		// ⚠️ **不管是不是表情，都从这枚 token 后面接着找**：那一段已经被
-		// `commentSpans` 吃掉了（不是表情就是普通文字），找法得一样。
-		rest = rest[i+j+1:]
-		base += head + tok
-	}
-	return out
-}
-
-// safeCommentCut 把截断点**挪到占位符外面**。
-//
-// 🔴 **切点不许落在占位符里面**：落在里面的话，正文里会剩下半个 `[妙啊`——
-// 表情不再成图，而正文里出现字面量（那是「表情成图」那条验收直接破掉的
-// 形状，评审在票 #573 上抓到过）。
-//
-// ⇒ 落在里面就**退回占位符的开头**（整枚占位符不出现），而不是留在半个
-// 占位符上。退回只会让正文更短 ⇒ 高度更小 ⇒ 「最多几行」那一档还成立。
-//
-// ⚠️ **切在占位符的前后都合法**：切在开头 = 整枚不出现，切在结尾 = 整枚
-// 出现（表情成图）。
-func safeCommentCut(ranges []commentEmoteRange, n int) int {
-	for _, r := range ranges {
-		if n > r.start && n < r.end {
-			return r.start
-		}
-	}
-	return n
 }
 
 // commentImageURL 把 B 站给的地址补成能直接拉的。

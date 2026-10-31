@@ -101,33 +101,21 @@ func opaqueBackground(c ui.Color) ui.Color {
 	return c.Over(ui.Color{R: 255, G: 255, B: 255, A: 255})
 }
 
-// clipMarks 把命中区间裁进「截断之后还剩 n 个字」那一段里。
+// 🔴 **为什么没有「把命中区间裁进折起来的那一段」那一档**（旧的 `clipMarks`
+// 干的）：
 //
-// 🔴 **截断点之后的高亮必须丢掉**：那一截正文根本不在画面上（换成了省略号），
-// 留着它只会让 `commentSpans` 去切一段不存在的文字。
+// 旧的实现里，**截断是这一页自己做的**（自己二分、自己量高度），所以**截断
+// 点之后的那一截正文**要**从 span 里切掉**——留着它只会去切一段不存在的文字。
 //
-// ⚠️ **原地裁**（返回的是传进来那个切片的前半段）：调用方拿的是
-// `songname.Table.Matches` 刚返回的那一份（每条评论新算的），没有第二个人
-// 持有它。
-func clipMarks(hl []songname.Range, n int) []songname.Range {
-	if len(hl) == 0 {
-		return nil
-	}
-	out := hl[:0]
-	for _, r := range hl {
-		if r.Start >= n {
-			break
-		}
-		if r.End > n {
-			r.End = n
-		}
-		out = append(out, r)
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
+// 而现在**截断是框架做的**（`ui.RichText` 的 `MaxLines` + `Ellipsis`）：框架
+// 自己知道切到哪儿，**画出来的**只有切点之前的那几行，而**高亮是按原文的
+// rune 坐标**烘进 span 里的——切点之后的那几段**画不出来**（它们不在那一行
+// 上），于是**不用裁**。
+//
+// ⚠️ **而「给读屏的那一份」是整段原文**（`.Label(...)` 给的）：它**没有**被
+// 截断（框架的省略号是**画出来**的，不在文字里）——所以读屏软件读到的是**整
+// 句**，而眼睛看到的是**折起来的那几行**。这两者**不一致**是这一票的**已知
+// 取舍**（见 `comments_body.go` 的文件头）。
 
 // appendMarkedText 把一段文字按命中区间切成几段 span：命中的那几段套上底色与
 // 主色字，其余照旧。

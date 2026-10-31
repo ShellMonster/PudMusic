@@ -57,6 +57,40 @@ func dragOver(t *testing.T, tt *ui.Tester, from, to string) {
 	tt.Frame()
 }
 
+// dragOverFirstLine 用指针把 from 那一块的**整段**从左沿拖到右沿。
+//
+// 🔴 **为什么要有这一支**（而不用 `dragOver`）：`dragOver` 落点是
+// **盒子正中**（`a.Y + a.H/2`），而一段**折成两行**的正文，它的盒子里**两行
+// 各占一半**——于是起点落在**第二行**上，而终点落在第二行的末尾。
+// ⇒ 选出来的是**第二行**，而不是整段（实测：86 个字的正文选出来只有 20 个）。
+//
+// ⚠️ **落点是「盒子的上沿往下几像素」**：上半格一定是第一行——所以取
+// `a.Y + a.H/4`，它落在第一行的行内，而**不依赖**字体度量。
+//
+// ⚠️ **终点落在盒子的**下面**一行**：一段折行的文字，它的**盒子右沿**是**最长
+// 那一行**的右沿（而那一行可能是**第二行**）——所以「拖到右沿」选到的是
+// **第二行的末尾**，不是整段。
+//
+// ⇒ 终点取「盒子的下沿再往下 2 像素、起点那一列」：框架的命中测试把**下面
+// 那一行**算进去（`textHit` 的 `ly >= ed.originY+ed.layout.Height` ⇒ 末尾），
+// 于是选出来的是**整段**（实测：86 个字，一个不差）。
+func dragOverFirstLine(t *testing.T, tt *ui.Tester, from string) {
+	t.Helper()
+	a, ok := tt.Find(from)
+	if !ok {
+		t.Fatalf("画面上找不到 %q，文字有 %q", from, tt.Texts())
+	}
+	if a.W <= 0 || a.H <= 0 {
+		t.Fatalf("%q 没量出大小（%v）——按不中", from, a)
+	}
+	x0, y0 := a.X+1, a.Y+a.H/4
+	x1, y1 := a.X+1, a.Y+a.H+2
+	tt.Press(x0, y0)
+	tt.Move(x1, y1)
+	tt.Release(x1, y1)
+	tt.Frame()
+}
+
 // copySelection 清空剪贴板、走一次应用的「复制」命令，返回剪贴板里的字。
 func copySelection(tt *ui.Tester) string {
 	tt.SetClipboard("")
