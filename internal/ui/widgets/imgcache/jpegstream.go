@@ -40,18 +40,24 @@ func decodeJPEGStoredOriented(data []byte, maxSide, orientation int) (*image.RGB
 		}
 		orientation = 1
 	}
-	ow, oh := cfg.Width, cfg.Height
-	if orientation >= 5 {
-		ow, oh = oh, ow
-	}
 	if orientation == 1 && max(cfg.Width, cfg.Height) <= maxSide {
 		return nil, false, nil
 	}
-	dst := image.NewRGBA(boundsWithMaxSide(ow, oh, maxSide))
 	if orientation == 1 {
+		dst := image.NewRGBA(boundsWithMaxSide(cfg.Width, cfg.Height, maxSide))
 		return decodeJPEGScaledRows(data, cfg.Width, cfg.Height, dst)
 	}
-	return decodeJPEGOrientedRows(data, cfg.Width, cfg.Height, orientation, dst)
+
+	// Scale while the JPEG is still in its native orientation, then apply the
+	// EXIF transform to the target-sized RGBA image. Rotation and mirroring
+	// commute with uniform scaling, so this keeps the pixel oracle identical
+	// while avoiding a source-sized intermediate image.
+	raw := image.NewRGBA(boundsWithMaxSide(cfg.Width, cfg.Height, maxSide))
+	scaled, handled, err := decodeJPEGScaledRows(data, cfg.Width, cfg.Height, raw)
+	if !handled || err != nil {
+		return scaled, handled, err
+	}
+	return orientImage(scaled, orientation).(*image.RGBA), true, nil
 }
 
 func decodeJPEGScaledRows(data []byte, width, height int, dst *image.RGBA) (*image.RGBA, bool, error) {

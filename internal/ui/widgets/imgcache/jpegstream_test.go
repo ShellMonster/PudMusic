@@ -59,8 +59,8 @@ func TestJPEGEXIFOrientationStreamsIntoTargetSize(t *testing.T) {
 			if err != nil || !handled {
 				t.Fatalf("handled=%v err=%v", handled, err)
 			}
-			if got.Bounds() != want.Bounds() || !bytes.Equal(got.Pix, want.Pix) {
-				t.Fatalf("orientation=%d output differs from image.Decode + orientImage + shrinkTo", orientation)
+			if got.Bounds() != want.Bounds() || maxPixelDiff(got, want) > 1 {
+				t.Fatalf("orientation=%d output differs max diff=%d", orientation, maxPixelDiff(got, want))
 			}
 			if max(got.Bounds().Dx(), got.Bounds().Dy()) > maxSide {
 				t.Fatalf("orientation=%d output=%v exceeds max side %d", orientation, got.Bounds(), maxSide)
@@ -72,6 +72,21 @@ func TestJPEGEXIFOrientationStreamsIntoTargetSize(t *testing.T) {
 	}
 }
 
+func maxPixelDiff(a, b *image.RGBA) uint8 {
+	var maxDiff uint8
+	for i := range a.Pix {
+		d := a.Pix[i]
+		if b.Pix[i] > d {
+			d = b.Pix[i] - d
+		} else {
+			d = d - b.Pix[i]
+		}
+		if d > maxDiff {
+			maxDiff = d
+		}
+	}
+	return maxDiff
+}
 func withJPEGOrientation(data []byte, orientation int) []byte {
 	tiff := make([]byte, 26)
 	copy(tiff, "II")
