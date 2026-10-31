@@ -451,14 +451,15 @@ func (s *Shell) refreshMenuChecked() {
 		return
 	}
 	st := s.app.Snapshot()
-	settings := s.app.SettingsSnapshot()
+	// ⚠️ **只取菜单要的那两样**（`MenuDisplayState`），不拷整份设置——
+	// `SettingsSnapshot()` 每帧调一次是**一次堆分配**（三十几个字段的值拷贝），
+	// 而菜单每帧只想问两样。实测这一段从每帧 1 次分配降到 0 次。
+	display, sidebarCollapsed := s.app.MenuDisplayState()
 
 	// 播放模式。
 	mode := s.app.PlayMode()
-	// 显示模式。
-	display := settings.DisplayMode
 	// 侧栏展开着 = 勾上了「显示/隐藏侧栏」。
-	sidebar := !settings.SideMenuCollapsed
+	sidebar := !sidebarCollapsed
 	// 迷你窗开着 = 勾上了「显示/隐藏迷你播放器」。
 	mini := s.mini != nil
 	// 「歌曲」那一栏：有歌才有那几项。

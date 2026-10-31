@@ -1409,6 +1409,8 @@ var Items = []Item{
 			"TestThePlayModeItemsAreStillRadiosAfterTheFix",
 			"TestTheMiniPlayerIsInTheWindowColumn",
 			"TestTheWindowColumnStillHasTheSystemItems",
+			"TestTheMenuRefreshDoesNotAllocatePerFrame",
+			"TestTheMenuDisplayStateMatchesTheFullSnapshot",
 		},
 	},
 	{

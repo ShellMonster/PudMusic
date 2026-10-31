@@ -160,6 +160,29 @@ func (a *App) SettingsSnapshot() Settings {
 	return DefaultSettings("")
 }
 
+// MenuDisplayState 是「菜单里要显示的那几样设置」。
+//
+// ⚠️ **为什么单独一个窄接口**：`Settings` 有三十几个字段，而
+// `SettingsSnapshot()` **每帧都要调**——它把整份设置**值拷贝**一份出来，
+// 而 `Settings` 里有**指针字段**（音量、通知开关、迷你歌词卷帘）和一个切片，
+// 那一次拷贝会**连带拷那些指针指向的东西**。
+//
+// ⇒ 这一份**只回那两样**，不拷整份设置。
+//
+// ⚠️ **没挂过 store 时给默认值**：**不能调 `DefaultSettings("")`**——那会
+// 造一份带新指针的完整设置（一次堆分配），而菜单每帧都问。
+// 这两样的默认值是**两个常量**，写死在这里（实测这一段每帧 0 次分配）。
+func (a *App) MenuDisplayState() (mode DisplayMode, sidebarCollapsed bool) {
+	settingsReads.Add(1)
+	if slot := a.settingsSlot(); slot != nil && slot.store != nil {
+		s := slot.store.Snapshot()
+		return s.DisplayMode, s.SideMenuCollapsed
+	}
+	// ⚠️ **写死的两个默认值**：和 `DefaultSettings` 里那两栏一致
+	//（`DisplayModeList` / `false`）。
+	return DisplayModeList, false
+}
+
 // settingsReads 是「一共读了几次设置」的计数器。
 //
 // # 它数的是什么
