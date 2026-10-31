@@ -268,6 +268,79 @@ func TestTheMiniPlayerMenuItemCarriesItsShortcut(t *testing.T) {
 	}
 }
 
+// TestTheMiniPlayerIsInTheWindowColumn 断**迷你播放器在「窗口」栏**。
+//
+// ⚠️ **为什么这一条要钉**：这是**三家播放器一致**的做法（2026-11-01 实测本机
+// 装着的三个，枚举真实的 AppKit 菜单树）：
+//
+//   - Apple Music：`窗口 ▸ 迷你播放程序 ⌥⌘M` / `窗口 ▸ 切换到迷你播放程序 ⌥⌘M`
+//   - QQ音乐：`窗口 ▸ 切换到迷你窗口 ⇧⌘S`
+//   - 网易云音乐：`窗口 ▸ 切换至迷你模式 ⌘M`
+//
+// ⇒ 而「显示」那一栏放的是**界面的样子**（视图档位、侧栏）。
+//
+// ⚠️ **钉的是「它在窗口栏、且不在显示栏」**——挪走的那一边也要钉，否则
+// 有人把它加回去（那不违反惯例，只是和三家不一致）。
+func TestTheMiniPlayerIsInTheWindowColumn(t *testing.T) {
+	b := newTestShell(t)
+	m := appMenu(b.s)
+
+	cols := m.Items()
+	windowCol := cols[len(cols)-1]
+	if windowCol.Role != mygo.RoleWindowMenu {
+		t.Fatalf("最后一栏不是「窗口」栏，是 %q", windowCol.Role)
+	}
+	found := false
+	for _, it := range windowCol.Submenu {
+		if it.ID == menuCommandIDPrefix+"toggleMiniMode" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("「窗口」栏里没有「显示/隐藏迷你播放器」那一项：%v", columnShape(windowCol))
+	}
+
+	// ⚠️ **而它不在「显示」栏**：那一栏是放「界面的样子」的地方。
+	viewCol := cols[5]
+	if viewCol.Role != mygo.RoleViewMenu {
+		t.Fatalf("第 6 栏不是「显示」栏，是 %q", viewCol.Role)
+	}
+	for _, it := range viewCol.Submenu {
+		if it.ID == menuCommandIDPrefix+"toggleMiniMode" {
+			t.Error("「显示/隐藏迷你播放器」在「显示」栏里：它在「窗口」栏（Apple Music / QQ音乐 / 网易云三家一致）")
+		}
+	}
+}
+
+// TestTheWindowColumnStillHasTheSystemItems 断**「窗口」栏的系统那几项没丢**。
+//
+// ⚠️ **为什么这一条要紧**：框架的「窗口」栏是 `RoleWindowMenu`，它自带
+// 「最小化 / 缩放 / 前置全部」（`mygo/menu.go:934` 的 `roleSubmenu(RoleWindowMenu)`）。
+// 而**给了自己的 `Submenu` 就只留着角色的名字**（`prepareItem` 只在 `Submenu`
+// 为空时才用角色自带的那一份）——所以那三项得**自己写回来**，漏一项就没了。
+func TestTheWindowColumnStillHasTheSystemItems(t *testing.T) {
+	b := newTestShell(t)
+	m := appMenu(b.s)
+	cols := m.Items()
+	windowCol := cols[len(cols)-1]
+
+	roles := menuRoles(m)
+	for _, r := range []mygo.MenuRole{mygo.RoleMinimize, mygo.RoleZoom, mygo.RoleFront} {
+		if !roles[r] {
+			t.Errorf("菜单里没有 %q 了：⌘M（最小化）这些就没了", r)
+		}
+	}
+	inWindow := false
+	for _, it := range windowCol.Submenu {
+		if it.Role == mygo.RoleMinimize {
+			inWindow = true
+		}
+	}
+	if !inWindow {
+		t.Errorf("「窗口」栏里没有「最小化」：%v", columnShape(windowCol))
+	}
+}
+
 // TestTheMiniPlayerMenuItemRunsTheCommand 断**迷你播放器那一项走命令入口**。
 func TestTheMiniPlayerMenuItemRunsTheCommand(t *testing.T) {
 	b := newTestShell(t)

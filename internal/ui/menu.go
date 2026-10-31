@@ -130,8 +130,57 @@ func appMenu(s *Shell) *mygo.Menu {
 		{ID: menuPlayColumnID, Label: "播放", Submenu: playColumn(s)},
 		{ID: menuSongColumnID, Label: "歌曲", Submenu: songColumn(s)},
 		{ID: menuViewColumnID, Role: mygo.RoleViewMenu, Submenu: viewColumn(s)},
-		{ID: menuWindowColumnID, Role: mygo.RoleWindowMenu},
+		{ID: menuWindowColumnID, Role: mygo.RoleWindowMenu, Submenu: windowColumn(s)},
 	})
+}
+
+// windowColumn 是「窗口」那一栏。
+//
+// ⚠️ **迷你播放器那一项在这一栏，不在「显示」栏**——这是**三家播放器一致**的
+// 做法（实测本机装着的三个，2026-11-01）：
+//
+//   - Apple Music：`窗口 ▸ 迷你播放程序 ⌥⌘M` / `窗口 ▸ 切换到迷你播放程序 ⌥⌘M`
+//   - QQ音乐：`窗口 ▸ 切换到迷你窗口 ⇧⌘S`
+//   - 网易云音乐：`窗口 ▸ 切换至迷你模式 ⌘M`
+//
+// ⇒ 而「显示」那一栏放的是**界面的样子**（视图档位、侧栏）。
+//
+// ⚠️ **框架的「窗口」栏是 `RoleWindowMenu`**，它自带「最小化 / 缩放 /
+// 前置全部」（`mygo/menu.go:934` 的 `roleSubmenu(RoleWindowMenu)`）。
+// 给了自己的 `Submenu` 就**只留着角色的名字**，所以那三项得**自己写回来**。
+func windowColumn(s *Shell) []*mygo.MenuItem {
+	return []*mygo.MenuItem{
+		// ⚠️ **迷你播放器那一项是「命令项 + 勾选型」**：它既是一个命令（走
+		// `runShortcut`，于是有加速键、而且加速键跟着设置走），又是一个勾选态
+		//（迷你窗开着的时候打着钩）。
+		//
+		// ⚠️ **为什么不用 `menuCommandItem` 那一档**：那一档造出来的是**普通项**，
+		// 而这一项要**勾选态**——`MenuItemCheckbox` 在框架里被点的时候会**自己
+		// 先翻勾选**（`mygo/menu.go:563` 的 `menuItemClicked`：`case MenuItemCheckbox:
+		// it.SetChecked(!it.IsChecked())`），而我们要的勾选态是「迷你窗开着没有」
+		// 这个**真状态**，不是「用户点过」。
+		// ⇒ 所以自己写这一项：勾选态由 `refreshMenuChecked` 按真状态刷。
+		//
+		// ⚠️ **加速键照样要挂**（否则设置页里明明有一个键，而菜单上一片空白）。
+		//
+		// ⚠️ **它的加速键是 ⌘⇧M**（不是 ⌘M）：⌘M 是 macOS 的「最小化」
+		//（框架「窗口」栏里那一项带的键，`mygo/menu.go:743`），而**菜单的加速键
+		// 先于窗口拿到那个键**——抢它的结果是**我们这个永远不响**。
+		// 详见 `internal/ui/shortcuts.go` 的 `shiftedShortcuts`。
+		{ID: menuCommandIDPrefix + "toggleMiniMode", Label: "显示/隐藏迷你播放器",
+			Type: mygo.MenuItemCheckbox,
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				s.onShortcut("toggleMiniMode")
+			},
+			Accelerator: s.menuAccelFor("toggleMiniMode"),
+		},
+		mygo.Separator(),
+		// 框架「窗口」栏自带的那三项。
+		{Role: mygo.RoleMinimize},
+		{Role: mygo.RoleZoom},
+		mygo.Separator(),
+		{Role: mygo.RoleFront},
+	}
 }
 
 // appColumn 是第一栏（应用菜单）。
@@ -327,31 +376,6 @@ func viewColumn(s *Shell) []*mygo.MenuItem {
 		Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.toggleSidebar()
 		},
-	})
-	// ⚠️ **迷你播放器那一项是「命令项 + 勾选型」**：它既是一个命令（走
-	// `runShortcut`，于是有加速键、而且加速键跟着设置走），又是一个勾选态
-	//（迷你窗开着的时候打着钩）。
-	//
-	// ⚠️ **为什么不用 `menuCommandItem` 那一档**：那一档造出来的是**普通项**，
-	// 而这一项要**勾选态**——`MenuItemCheckbox` 在框架里被点的时候会**自己
-	// 先翻勾选**（`mygo/menu.go:563` 的 `menuItemClicked`：`case MenuItemCheckbox:
-	// it.SetChecked(!it.IsChecked())`），而我们要的勾选态是「迷你窗开着没有」
-	// 这个**真状态**，不是「用户点过」。
-	// ⇒ 所以自己写这一项：勾选态由 `refreshMenuChecked` 按真状态刷。
-	//
-	// ⚠️ **加速键照样要挂**（否则设置页里明明有一个键，而菜单上一片空白）。
-	//
-	// ⚠️ **它的加速键是 ⌘⇧M**（不是 ⌘M）：⌘M 是 macOS 的「最小化」
-	//（框架「窗口」栏里那一项带的键，`mygo/menu.go:743`），而**菜单的加速键
-	// 先于窗口拿到那个键**——抢它的结果是**我们这个永远不响**。
-	// 详见 `internal/ui/shortcuts.go` 的 `shiftedShortcuts`。
-	items = append(items, &mygo.MenuItem{
-		ID: menuCommandIDPrefix + "toggleMiniMode", Label: "显示/隐藏迷你播放器",
-		Type: mygo.MenuItemCheckbox,
-		Click: func(*mygo.MenuItem, *mygo.Window) {
-			s.onShortcut("toggleMiniMode")
-		},
-		Accelerator: s.menuAccelFor("toggleMiniMode"),
 	})
 	items = append(items, mygo.Separator())
 	// ⚠️ **「开发者工具」只在开发构建里**：框架有 `mygo.IsDev()`

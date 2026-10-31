@@ -315,9 +315,11 @@ func TestTheDisplayColumnHasTheModesAndToggles(t *testing.T) {
 	m := appMenu(b.s)
 	col := m.Items()[5]
 	got := columnShape(col)
+	// ⚠️ **迷你播放器不在这一栏**——它在「窗口」栏（Apple Music / QQ音乐 /
+	// 网易云三家一致，见 `windowColumn` 的注释）。
 	want := []string{
 		"列表", "网格", "紧凑", "---",
-		"显示/隐藏侧栏", "显示/隐藏迷你播放器", "---",
+		"显示/隐藏侧栏", "---",
 		string(mygo.RoleToggleDevTools), string(mygo.RoleToggleFullScreen),
 	}
 	if len(got) != len(want) {

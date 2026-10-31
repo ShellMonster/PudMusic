@@ -1407,6 +1407,8 @@ var Items = []Item{
 			"TestTheCommandNamesAndTheSettingsPageAgree",
 			"TestTheDeveloperToolsOnlyShowInDevelopmentBuilds",
 			"TestThePlayModeItemsAreStillRadiosAfterTheFix",
+			"TestTheMiniPlayerIsInTheWindowColumn",
+			"TestTheWindowColumnStillHasTheSystemItems",
 		},
 	},
 	{
