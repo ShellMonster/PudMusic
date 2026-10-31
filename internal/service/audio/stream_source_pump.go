@@ -154,6 +154,9 @@ func (s *StreamSource) pour(resp *http.Response, from int64, buf []byte) error {
 
 // append 把一段字节写进缓存，并叫醒等着这些字节的人。
 func (s *StreamSource) append(b []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	off := s.filled
 	s.mu.Unlock()
@@ -164,6 +167,7 @@ func (s *StreamSource) append(b []byte) error {
 		// 界面上表现成「播到一半莫名停住」，跟磁盘满毫无关系。
 		return fmt.Errorf("audio: 在线流的缓存写不下去（磁盘满了？）：%w", err)
 	}
+	gaugeDelta := s.recordWrite(off, int64(len(b)))
 
 	s.mu.Lock()
 	s.filled = off + int64(len(b))
@@ -189,8 +193,8 @@ func (s *StreamSource) append(b []byte) error {
 	s.firstBytesSeen = true
 	s.cond.Broadcast()
 	s.mu.Unlock()
-	if gauge != nil {
-		gauge.AddMediaTempBytes(int64(len(b)))
+	if gauge != nil && gaugeDelta > 0 {
+		gauge.AddMediaTempBytes(gaugeDelta)
 	}
 	if recovered && s.onReconn != nil {
 		s.onReconn()
@@ -424,12 +428,25 @@ func (s *StreamSource) sameContainer(urls []string) bool {
 // 解码器的读游标往前挪就等于把这首歌倒回开头——那正是「换流后从原位置
 // 继续」要避免的事。清缓存是为了把字节补齐，不是为了把进度倒回去。
 func (s *StreamSource) restart() error {
-	s.clearTempGauge()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.Lock()
+	n := int64(0)
+	for _, r := range s.written {
+		n += r.end - r.start
+	}
+	s.written = nil
+	gauge := s.gauge
+	s.mu.Unlock()
+	if gauge != nil && n > 0 {
+		gauge.AddMediaTempBytes(-n)
+	}
 	if err := s.file.Truncate(0); err != nil {
 		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
 	}
 	// 🔴 **尾部那一段的记账也要清**：截断把已经取回来的末尾那一段
-	// **一起抹掉**了（见 `restartTail`）。
+	// **一起抹掉了**（见 `restartTail`）。
 	s.restartTail()
 	s.mu.Lock()
 	s.filled = 0

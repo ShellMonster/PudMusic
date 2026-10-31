@@ -266,6 +266,12 @@ type StreamSourceOptions struct {
 	CachePath string
 }
 
+// byteRange is a half-open interval of bytes already written to the cache.
+type byteRange struct {
+	start int64
+	end   int64
+}
+
 // StreamSource 是一个「能播、能拖、能换流、能取消」的在线字节源。
 //
 // 它实现了 `io.ReadSeeker`，所以本地文件那条解码链（MyGo 的格式表 →
@@ -285,6 +291,12 @@ type StreamSource struct {
 	// 比「反正 AudioToolbox 只用一条线程」这种假设稳。
 	opMu sync.Mutex
 
+	// writeMu 串行化缓存文件的写入、截断和对应的区间记账。
+	//
+	// 尾部 Range 和顺序下载会同时 WriteAt；restart 还会截断文件。把文件
+	// 操作和区间并集的更新放在同一条锁序列里，避免截断后又把旧写入登记回来。
+	writeMu sync.Mutex
+
 	mu   sync.Mutex
 	cond *sync.Cond
 	file *os.File
@@ -298,7 +310,9 @@ type StreamSource struct {
 	// gauge 是 #672 的临时文件字节账本；nil = 不记账。
 	gauge  *perf.Gauges
 	filled int64 // 已经下到缓存里的字节数（下载前沿）
-	size   int64 // 总长；-1 是还不知道
+	// bytesWritten is the non-overlapping union of successful file writes.
+	written []byteRange
+	size    int64 // 总长；-1 是还不知道
 	// sizeKnown 说的是「**这个长度是服务器说的**」。
 	//
 	// 🔴 **它和 `size >= 0` 不是一回事**（2026-10-30）：服务器不给
@@ -917,22 +931,71 @@ func removeTempFile(path string) error {
 	return fmt.Errorf("audio: 在线流缓存仍存在：%s", path)
 }
 
-// clearTempGauge 把这条流已经记进账本的临时文件字节扣掉（`filled` 那一格）。
+// clearTempGauge 把这条流已经记进账本的临时文件字节扣掉。
 //
-// 它只扣账，不动 `filled`，也不关账本——两处调用方的语义因此各说各的：
-//
-//	Close    文件删了，账本里不该再留着它的字节（`filled` 跟着进程一起没）
-//	restart  文件还在、只是内容被截断，同一个文件接下来会继续写
-//
-// 两处要扣的是**同一个数**（s.filled），所以只有这一个实现。
+// 文件写入和账本清空必须原子化：restart 的截断、Close 后的清理都不能与
+// tail/pump 的成功写入交错，否则快照会短暂或永久地少算/多算。
 func (s *StreamSource) clearTempGauge() {
-	if s.gauge == nil {
-		return
-	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
-	n := s.filled
-	s.mu.Unlock()
-	if n > 0 {
-		s.gauge.AddMediaTempBytes(-n)
+	n := int64(0)
+	for _, r := range s.written {
+		n += r.end - r.start
 	}
+	s.written = nil
+	gauge := s.gauge
+	s.mu.Unlock()
+	if gauge != nil && n > 0 {
+		gauge.AddMediaTempBytes(-n)
+	}
+}
+
+// recordWrite adds a successful write to the interval union and returns the
+// number of bytes newly covered by that write. The caller holds writeMu.
+func (s *StreamSource) recordWrite(start, n int64) int64 {
+	if n <= 0 {
+		return 0
+	}
+	end := start + n
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	before := int64(0)
+	for _, r := range s.written {
+		before += r.end - r.start
+	}
+	merged := make([]byteRange, 0, len(s.written)+1)
+	cur := byteRange{start: start, end: end}
+	inserted := false
+	for _, r := range s.written {
+		if r.end < cur.start {
+			merged = append(merged, r)
+			continue
+		}
+		if cur.end < r.start {
+			if !inserted {
+				merged = append(merged, cur)
+				inserted = true
+			}
+			merged = append(merged, r)
+			continue
+		}
+		if r.start < cur.start {
+			cur.start = r.start
+		}
+		if r.end > cur.end {
+			cur.end = r.end
+		}
+	}
+	if !inserted {
+		merged = append(merged, cur)
+	}
+	s.written = merged
+	after := int64(0)
+	for _, r := range merged {
+		after += r.end - r.start
+	}
+	return after - before
 }
