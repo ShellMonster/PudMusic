@@ -162,4 +162,10 @@ func (s *Shell) applyShortcutChange(what string, fn func() error) {
 		return
 	}
 	s.syncGlobalShortcuts()
+	// ⚠️ **菜单上那些命令项的加速键要跟着变**（票 #716）。
+	//
+	// 「恢复默认」这一条走的就是这里——用户一键把八个键全恢复，而菜单上还留着
+	// 旧键的话，**旧键会被菜单吃掉**（菜单的加速键先于窗口拿到那个键，见
+	// `refreshMenuAccel` 的注释）。
+	s.refreshMenuAccel()
 }

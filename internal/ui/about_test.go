@@ -181,7 +181,7 @@ func TestTheAboutMenuItemBringsTheMainWindowBack(t *testing.T) {
 	mini := main.newMiniShell()
 	t.Cleanup(mini.releaseMini)
 
-	m := appMenu(main.openAbout, main.openSettingsFromMenu)
+	m := appMenu(main)
 	it := m.ItemByID(menuAboutID)
 	if it == nil {
 		t.Fatal("菜单里没有「关于」那一项")

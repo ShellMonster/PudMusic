@@ -1306,13 +1306,14 @@ var Items = []Item{
 		//
 		// 真机那一份是：用辅助功能读菜单栏（项、顺序、每一项的快捷键），
 		// 再真点一次「设置…」和「关于布丁音乐」。
-		Spec: "macOS 应用菜单：「关于布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）",
+		Spec: "macOS 应用菜单：七栏（应用 / 文件 / 编辑 / 播放 / 歌曲 / 显示 / 窗口），「关于布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）；「播放」「歌曲」两栏的命令走快捷键那一套，加速键跟着设置走",
 		Tests: []string{
 			"TestTheAppMenuColumnFollowsTheMacOrder",
 			"TestTheAboutItemIsOurOwn",
 			"TestTheSettingsItemHasTheMacShortcut",
 			"TestTheOtherColumnsAreStillThere",
-			"TestTheMenuHasFiveColumns",
+			"TestTheMenuHasSevenColumns",
+			"TestEveryColumnHasATitle",
 			"TestTheAppIsWrittenInChinese",
 			"TestTheSettingsMenuItemGoesToTheMainWindowEvenWithTheMiniInFront",
 			"TestTheAboutMenuItemBringsTheMainWindowBack",
@@ -1321,8 +1322,61 @@ var Items = []Item{
 			"TestTheAboutPanelRepoLinkOpensTheRepository",
 			"TestTheAboutPanelLicenseEntryOpensTheShippedNotices",
 			"TestTheAboutPanelClosesOnOK",
+			"TestThePlayColumnHasThePlayerControls",
+			"TestThePlayModeItemsAreRadios",
+			"TestThePlayModeCheckFollowsTheCurrentMode",
+			"TestTheDisplayColumnHasTheModesAndToggles",
+			"TestTheSongColumnItemsAreDisabledWithoutATrack",
+			"TestTheSongColumnGoesToTheRightPlace",
+			"TestTheFileColumnGoesToThosePages",
+			"TestTheCommandItemsCarryTheShortcuts",
+			"TestTheCommandItemsRunTheCommand",
+			"TestChangingAShortcutChangesTheMenuAccelerator",
+			"TestResettingTheShortcutsChangesTheMenuAccelerator",
+			"TestClearingAShortcutRemovesTheAcceleratorButKeepsTheItem",
+			"TestTheMenuAndTheShortcutFileAgreeOnTheSameKey",
 		},
 		RealOnly: true,
+	},
+	{
+		Category: Platform,
+		// ⚠️ **状态栏图标（macOS 菜单栏那个小音符）也是系统画的**：它的菜单
+		// 同样不在窗口的画面里，截图也截不到。
+		//
+		// ⚠️ **上游 Biu 在 macOS 上不建这个图标**
+		//（`_research/biu/electron/main.ts:161` 是 `if (process.platform !== "darwin")`），
+		// 而我们三个平台都建——所以这一条不是「照上游」，是「我们自己的决定」。
+		Spec: "状态栏图标的菜单是播放器形状：最上面说「现在在放什么」，然后是播放控制、窗口的那些去处、设置、退出；上游 Biu 那几项一项不少",
+		Tests: []string{
+			"TestTheTrayMenuHasThePlayerShape",
+			"TestTheNowPlayingLineSaysWhatIsPlaying",
+			"TestTheNowPlayingLineIsNotClickable",
+			"TestTheTrayCommandsRunTheCommand",
+			"TestTheTrayMenuKeepsEveryItemBiuHas",
+		},
+		RealOnly: true,
+	},
+	{
+		Category: Platform,
+		// ⚠️ **命令表是菜单与快捷键的地基**：菜单的加速键**会先于窗口**拿到
+		// 那个键（框架自己的 E2E：
+		// `mygo/internal/e2e/menu_shortcuts_windows_test.go:14`），所以同一个
+		// 动作不能有两份实现——而这一张表就是那份「只有一份」的保证。
+		Spec: "命令表：菜单、状态栏菜单、快捷键三处走同一份命令表；设置页存的那一串能翻译成菜单要的那一份（修饰键按框架的规范化顺序重排）",
+		Tests: []string{
+			"TestEveryShortcutCommandIsRegistered",
+			"TestTheCommandNamesMatchTheSettingsPage",
+			"TestTheMenuCommandsAreTheOnesThatBelongInAMenu",
+			"TestTheCommandOrderIsTheOrderTheUserActsIn",
+			"TestAnUnknownCommandFallsBackToItsID",
+			"TestTheMenuCanReadEverythingItNeedsToShow",
+			"TestTheStoredFormBecomesTheFrameworkForm",
+			"TestTheTranslationIsTheFrameworkForm",
+			"TestAnUntranslatableOneIsNotSilentlyDropped",
+			"TestAnEmptyShortcutTranslatesToNothing",
+			"TestTheKnownKeyTableMatchesTheFrameworkVocabulary",
+			"TestTheTranslationKeepsTheKeyOrder",
+		},
 	},
 	{
 		Category: Platform,
