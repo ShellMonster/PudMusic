@@ -43,12 +43,18 @@ import (
 // （`Comment.Emotes`），而占位符本身长得五花八门（`[妙啊]` / `[大哭]` /
 // `[间奏时光表情包_哭]`）——照抄某一个字面量的话，认不出的那几枚就留在正文
 // 里（而它们在画面上是图）。
+//
+// 🔴 **它走的是产品代码那一条路**（`commentPlain`）——而不是自己
+// `ReplaceAll`：而 `commentPlain` 现在**和画出来的那一份同源**（同一次
+// 切分，见 `comments_body.go` 的《两份必须同源》）⇒ 用例断言的「want」就是
+// **产品真的会读出来的那一句**。
+//
+// ⚠️ **自己写一份 `ReplaceAll` 会让这条用例断错东西**：那一份的判定口径
+// （替换表情表里每一个 token、不看边界）和产品的**不一样**（见
+// `comments_body.go` 的《两份必须同源》）——于是用例会在产品已经修好之后
+// 仍然红。
 func commentPlainOf(cm bili.Comment) string {
-	out := cm.Message
-	for token := range cm.Emotes {
-		out = strings.ReplaceAll(out, token, "［表情］")
-	}
-	return out
+	return commentPlain(cm.Message, cm.Emotes)
 }
 
 // TestDraggingACommentBodyCopiesIt 断**评论正文能拖选复制**。
@@ -181,10 +187,50 @@ func TestDraggingAReplyBodyCopiesIt(t *testing.T) {
 // 那一枚是 `flat.ButtonContent`（一个可点的控件），它**不在**正文那一格的祖先
 // 链上，所以正文可选中不该影响它。
 //
-// ⚠️ **判据是「点了之后楼中楼真的展开了」**（不是「按钮还在」）。
+// 🔴 **判据分两半（而不是一半）**：
+//
+//	**拖选真的生效了**  剪贴板里**有**那段正文。
+//	**按过那一枚之后，正文还得能选**  那一枚的按**没有**把「正文可选中」
+//	                                 **整个废掉**。
+//
+// ⚠️ **为什么「楼中楼展开了」那一半单独断不出东西**：那一枚是**第三行**的控件，
+// 而它**不在**正文那一格的祖先链上（框架的 `prepareSelectable` 的祖先链规则），
+// 所以它**本来就**点得动——**有没有 `Selectable()` 都一样**（实测：变异测试）。
+// ⇒ 所以那一半是**守卫**（它无论如何都变）。
 func TestTheSelectableCommentBodyDoesNotStealTheReplyButton(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	s, tt := newCommentsShell(t, b, audioItem(), 1200, 800)
+
+	// 🔴 **先在正文上拖选**：这一步让「正文可选中」真正在生效（框架的
+	// `pressTextSelection` 接走了那一下）——**而这一下才是这一条要问的**。
+	//
+	// ⚠️ **拖的是「第一行」**（`dragOverFirstLine`）：那才是正文真正在画的那一行。
+	first := s.app.Comments()[0]
+	body := commentPlainOf(first)
+	waitFrames(t, tt, "正文画出来", func() bool {
+		_, ok := tt.Find(body)
+		return ok
+	})
+	dragOverFirstLine(t, tt, body)
+
+	// 🔴 **判据分两半**：
+	//
+	//	**拖选真的生效了**  剪贴板里**有**那段正文（否则下面那些都是空谈——
+	//	                   一个压根没选中的正文，「按那一枚之后会怎样」根本
+	//	                   问不到那个问题）。
+	//	**按那一枚之后，正文仍然能选**  那一枚的按**没有**把「正文可选中」
+	//	                   **整个废掉**（比如它把选择清掉了、或它把正文的
+	//	                   命中抢了）。
+	//
+	// ⚠️ **「楼中楼展开了」那一半**留着（那是这一条最早的判据）——但它
+	// **单独**断不出东西：那一枚是**第三行**的控件，而它**不在**正文那一格的
+	// 祖先链上（框架的 `prepareSelectable` 的祖先链规则），所以它**本来就**
+	// 点得动——**有没有 `Selectable()` 都一样**（实测：变异测试）。
+	selected := copySelection(tt)
+	if selected == "" {
+		t.Fatalf("在正文上拖选之后剪贴板里**什么也没有**——" +
+			"「正文可选中」压根没生效，后面那些判据就都在问一个不存在的问题")
+	}
 
 	if err := tt.Click("共52条回复"); err != nil {
 		t.Fatalf("点不动「共 52 条回复」：%v（文字：%q）", err, tt.Texts())
@@ -197,6 +243,18 @@ func TestTheSelectableCommentBodyDoesNotStealTheReplyButton(t *testing.T) {
 		}
 		return false
 	})
+
+	// 🔴 **按过那一枚之后，正文还得能选**：这一枚是**第三行**的，它跟正文
+	// 那一格**不是同一个东西**——而它按下去**不该把正文的选择**整个清掉。
+	//
+	// ⚠️ **这一半是**变异敏感**的那一半**：把正文那一格的 `Selectable()` 拔掉，
+	// 「拖选生效」这一半就红了（剪贴板是空的）——所以这一条**断的是「正文
+	// 真的可选中，而且按那一枚之后还可选中」**，而不是「那一枚还能按」。
+	dragOverFirstLine(t, tt, body)
+	if got := copySelection(tt); got == "" {
+		t.Errorf("按过「共 52 条回复」之后，在正文上**又**拖选了一次，" +
+			"剪贴板里却什么也没有——那一枚把「正文可选中」**整个废掉**了")
+	}
 }
 
 // TestTheSelectableCommentBodyDoesNotStealTheMentionSwitch 断**加了 Selectable
@@ -210,7 +268,24 @@ func TestTheSelectableCommentBodyDoesNotStealTheReplyButton(t *testing.T) {
 func TestTheSelectableCommentBodyDoesNotStealTheMentionSwitch(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	b.mainRaw = commentFixtureMentionNoMore(t, "晴天")
-	_, tt := newCommentsShell(t, b, mentionItem(), 1400, 1000)
+	s, tt := newCommentsShell(t, b, mentionItem(), 1400, 1000)
+
+	// 🔴 **先在正文上拖选**（理由同上面那一条）：这一步让「正文可选中」真正在
+	// 生效——**而这一下才是这一条要问的**。
+	first := s.app.Comments()[0]
+	body := commentPlainOf(first)
+	waitFrames(t, tt, "正文画出来", func() bool {
+		_, ok := tt.Find(body)
+		return ok
+	})
+	dragOverFirstLine(t, tt, body)
+
+	// 🔴 **判据的第一半**：**拖选真的生效了**（剪贴板里有那段正文）——否则
+	// 后面那些都是在问一个不存在的问题。
+	if selected := copySelection(tt); selected == "" {
+		t.Fatalf("在正文上拖选之后剪贴板里**什么也没有**——" +
+			"「正文可选中」压根没生效，后面那些判据就都在问一个不存在的问题")
+	}
 
 	if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
 		t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
@@ -218,6 +293,14 @@ func TestTheSelectableCommentBodyDoesNotStealTheMentionSwitch(t *testing.T) {
 	commentsWait(t, tt, "筛选开着", func() bool {
 		return tt.HasText("条提到这首歌")
 	})
+
+	// 🔴 **按过那枚开关之后，正文还得能选**（理由同上面那一条）：那枚开关在
+	// **页头**，而它在**按下去**的时候不该把**别处**（评论正文）的选择清掉。
+	dragOverFirstLine(t, tt, body)
+	if got := copySelection(tt); got == "" {
+		t.Errorf("按过「只看提到歌名的评论」那枚开关之后，在正文上**又**拖选了一次，" +
+			"剪贴板里却什么也没有——那枚开关把「正文可选中」**整个废掉**了")
+	}
 }
 
 // TestCopyingACommentBodyBeatsTheSelectedRow 钉住「拖选正文之后 ⌘C 复制的是

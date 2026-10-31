@@ -647,7 +647,7 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 					Message: strings.Repeat("填", n) + emote + strings.Repeat("后", 300),
 					Emotes:  emotes,
 				}
-				spans, urls := commentSpansOf(cm.Message, cm.Emotes, nil, commentMark{})
+				spans, urls, _ := commentSpansOf(cm.Message, cm.Emotes, nil, commentMark{})
 				bodies = append(bodies, shaped{msg: cm.Message, spans: spans, urls: urls})
 			}
 		}

@@ -328,7 +328,7 @@ func TestTheEmoteTokenIsNeverPainted(t *testing.T) {
 	const msg = "晴天[妙啊]真好听"
 	hl := []songname.Range{{Start: 0, End: 9}}
 	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
-	spans, urls := commentSpansOf(msg, emotes, hl, mark)
+	spans, urls, _ := commentSpansOf(msg, emotes, hl, mark)
 	if len(urls) != 1 {
 		t.Fatalf("表情图有 %d 张，want 1", len(urls))
 	}
@@ -355,7 +355,7 @@ func TestTheHighlightSurvivesAnEmoteInTheMiddle(t *testing.T) {
 	const msg = "晴天[妙啊]真好听"
 	hl := []songname.Range{{Start: 0, End: 9}}
 	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
-	spans, _ := commentSpansOf(msg, emotes, hl, mark)
+	spans, _, _ := commentSpansOf(msg, emotes, hl, mark)
 	var painted []string
 	for _, sp := range spans {
 		if sp.Background.A != 0 {
@@ -389,7 +389,7 @@ func TestTheSpanTextsStillSpellTheWholeBody(t *testing.T) {
 	}
 	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
 	for _, tc := range cases {
-		spans, urls := commentSpansOf(tc.msg, emotes, tc.hl, mark)
+		spans, urls, _ := commentSpansOf(tc.msg, emotes, tc.hl, mark)
 		var got strings.Builder
 		for _, sp := range spans {
 			got.WriteString(sp.Text)

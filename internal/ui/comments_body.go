@@ -69,15 +69,45 @@
 // ⇒ 「切坏表情」那个形状（正文里剩下半个 `[妙啊`）**在新的做法里压根
 // 不存在**：画出来的那一份里，占位符要么整枚在（一张图），要么整枚不在。
 //
-// 🔴 **但有一处要盯**：框架的省略号是**加在最后一行末尾**的，而它的样式取
-// 自**最后一个 span**（`internal/text/layout.go` 的 `ellipsize`：`tSpans` 的
-// 末段 `End += len(mark)`）——如果那最后一个 span 是**表情占位符那一格**，
-// 省略号就会继承那格的**样式**（而那一格是 inline object：它画出来是**空白
-// 的方块**，不是「…」）。
+// # 🔴 省略号被「表情那一格」吞掉（票 #702 的审查）
 //
-// ⇒ **本文件的做法**：末尾**永远留一段空的普通 span**（`commentTailSpan`），
-// 于是省略号继承的是**那一段空 span 的样式**（普通文字的样式）——它画出来
-// 就是「…」。
+// 框架的省略号是**加在最后一行末尾**的，而它的样式取自**最后一个到达切点的
+// 那一段 span**（`internal/text/layout.go` 的 `ellipsize`：`tSpans[n-1].End
+// += len(mark)`）——所以**切点正好落在表情占位符那一格末尾**时，省略号的
+// rune 被**并进那一段**。
+//
+// ⚠️ **那一段带 `ObjectWidth`** ⇒ 它是 **inline object**：框架给 `ObjectWidth
+// > 0` 的 span 的**每一个 rune**挂 run delegate（`internal/text/layout.go` 的
+// `line()`：`g.Object, g.Advance, g.ID = true, sp.ObjectWidth, 0`）⇒ 那个
+// rune 的**推进宽是 18**（表情那格的宽），而**不是**省略号自己的 11.12。
+//
+// ⇒ **实测（框架内部 trace，`internal/text/layout.go` 的 `ellipsize`）**：
+//
+//	切点在文字段末尾   省略号那一格 adv = **11.12**（正常）
+//	切点在表情段末尾   省略号那一格 adv = **18.00**（被表情那格吞了）
+//
+// ⇒ 而**后果随平台而异**（这一段是**平台无关**的：`ellipsize` 在
+// `internal/text/layout.go` 里，Core Text 和 DirectWrite 都走它）：
+//
+//	**macOS（Core Text）**  框架的 `line()` 按 **rune 下标**找那一格属于哪一段
+//	                     （`spanAt(spans, g.Cluster)`）——省略号的 rune 下标是
+//	                     **切点之后**，落在**下一段**（普通文字段）⇒ 不是
+//	                     object ⇒ **省略号照常画出来**（实测：像素逐列相同，
+//	                     末尾三个点都在）。
+//	**Windows（DirectWrite）** `setObjects` 按 **code unit** 给那一段里**每个
+//	                     rune**挂 inline object（`dwrite_objects_windows.go`）——
+//	                     而省略号的 code unit **就在并进去的那一段里** ⇒ 那一格
+//	                     **真的**是 inline object ⇒ **一个字都不画** ⇒ 用户
+//	                     看到的是**一片空白**（不是「…」）。
+//
+// ⇒ **本文件的做法**：每枚表情占位符**后面接一段零宽的普通 span**
+// （`commentObjectGuard`，见 `commentSpansOf`）——于是切点**落不到**表情那
+// 一格的末尾（切点落在它**前面**或落在**守卫那一段**的末尾，而守卫那一段是
+// **普通**的）⇒ 省略号**永远**继承普通文字的样式，**永远**是「…」。
+//
+// ⚠️ **守卫是零宽的**（U+200B ZERO WIDTH SPACE）：它**不占地方**（实测：加它
+// 前后每一行的墨迹签名逐宽度相同，见 `comments_body_test.go` 的
+// `TestTheEllipsisGuardDoesNotChangeTheLayout`）——所以它**不改变排版**。
 package ui
 
 import (
@@ -105,22 +135,43 @@ const (
 	commentObjectH = float32(commentEmote)
 )
 
-// 🔴 **为什么末尾不用补一段空 span**（曾经想过，没用）：
+// 🔴 **为什么末尾不补一段空 span**（曾经想过，没用）：
 //
 // 框架的省略号继承**最后一个到达切点的那段 span** 的**排版**样式
 // （`internal/text/layout.go` 的 `ellipsize`：`tSpans[n-1].End += len(mark)`），
 // 而那一段**可能是表情占位符那一格**（它带 `ObjectWidth`）——于是省略号会被
-// Core Text 按 inline object 排版（**一块空白**，不是「…」）。
+// 按 inline object 排版（**一块空白**，不是「…」）。
 //
-// ⚠️ **但那个形状压根不成立**（实测，`ui.Tester` 探针扫宽度）：
+// ⚠️ **而「末尾补一段空 span」压根没用**（实测）：**空**的那一段与前一段的
+// `End` **相同**（它没有自己的 rune）⇒ 它**压根不是**「最后一个到达切点的
+// span」⇒ 切点落在表情那一格末尾时，省略号**照样**并进表情那一格
+// （实测：那一格的推进宽是 **18**，而省略号自己只有 **11.12**）。
 //
-//	正文末尾**不是**表情  截断点落在文字上 ⇒ 省略号继承文字的样式 ⇒ 画出来
-//	                     就是「…」（194 档宽度**全是**「…」）
-//	正文末尾**是**表情  那一档**压根不截断**（整段放得下）⇒ 没有省略号要画
-//	                     ⇒ 那一格是**整枚**的表情图（324 像素 = 18×18 全在）
+// 🔴 **而这个思路本身是对的**——只是要补在**每一枚表情后面**（而不是正文
+// 末尾），而且要**零宽**（否则占地方）。⇒ `commentObjectGuard`。
+
+// commentObjectGuard 是**每枚表情占位符后面**跟的那一段零宽的普通 span。
 //
-// ⇒ **空 span 补在末尾没用**（它和前一段的 `End` 相同，所以它压根不是
-// 「最后一个到达切点的 span」——实测加不加，行为一模一样）。
+// 🔴 **它挡的是「切点正好落在表情那一格的末尾」**（理由见文件头《省略号被
+// 「表情那一格」吞掉》）：框架的 `ellipsize` 把省略号的 rune 并进**最后一个
+// 到达切点的那一段**——而加了守卫之后，那一段**永远是守卫**（普通 span）⇒
+// 省略号**永远**继承普通文字的样式。
+//
+// ⚠️ **为什么是 U+200B（ZERO WIDTH SPACE）而不是别的**：
+//
+//	**零宽**  它不占任何地方 ⇒ 排版不变（实测：加它前后每一行的墨迹签名
+//	         逐宽度相同，见 `comments_body_test.go` 的
+//	         `TestTheEllipsisGuardDoesNotChangeTheLayout`）。
+//	**普通**  它**不带** `ObjectWidth` ⇒ 框架不会把它当 inline object。
+//	**不成字**  它是**控制字符**（`unicode.Cf`）⇒ 复制出去对用户毫无意义
+//	         （而 `commentPlain` 那一份**根本不带它**——它只活在画出来的那
+//	         一份里）。
+//
+// ⚠️ **它为什么不能是 U+200C / U+200D（ZWNJ / ZWJ）**：那些是**连接符**，
+// 而连接符会**把两边的字连成一个 grapheme** ⇒ 切点会落在**跨过守卫**的地方
+// ⇒ 守卫那一段反而**不是**「最后到达切点的那一段」了（实测：ZWJ 那一档
+// 省略号仍然被吞成 18 宽）。
+const commentObjectGuard = "\u200B"
 
 // commentPlain 是「给辅助技术和无头 Tester 的那一份正文」。
 //
@@ -133,15 +184,12 @@ const (
 // ⚠️ **占位符不认死一个**：B 站给的那张表是**每条评论自己一份**
 // （`Comment.Emotes`），而占位符本身长得五花八门（`[妙啊]` / `[大哭]` /
 // `[间奏时光表情包_哭]`）。
+//
+// 🔴 **它必须和 `commentSpansOf` **共用同一次切分**（理由见
+// `commentSpansOf` 的注释《两份必须同源》）。
 func commentPlain(msg string, emotes map[string]bili.CommentEmote) string {
-	if len(emotes) == 0 {
-		return msg
-	}
-	out := msg
-	for token := range emotes {
-		out = strings.ReplaceAll(out, token, commentPlainSpan)
-	}
-	return out
+	_, _, plain := commentSpansOf(msg, emotes, nil, commentMark{})
+	return plain
 }
 
 // commentPlainSpan 是正文里**一枚表情占位符**在「给读屏的那一份」里的写法。
@@ -164,6 +212,28 @@ const commentPlainSpan = "［表情］"
 //
 // ⚠️ **它只换 U+FFFC，不动别的**：所以选中的那段普通文字**一个字都不改**
 // （高亮是装饰，复制出来的那句话必须和画出来的一样）。
+//
+// 🔴 **坐标是哪一份的（这一条必须写清楚）**：框架给的是**画出来的那一份**的坐标。
+//
+// ⇒ 技术上的出处：`mygo/ui/textselection.go:419`：
+//
+//	parts = append(parts, SelectedText{ID: p.id, Text: p.editor.source, Start: from, End: to})
+//
+// 而 `editor.source` 是**画出来的那一份**（`mygo/ui/textselection.go:85`：`ed.source = e.text`，
+// 而 `e.text` 是**那一格的文字**）——**不是** `Label` 那一份（那一份是「给读屏的」，
+// 而它是**另一份字符串**（表情占位符写成「［表情］」。
+//
+// ⚠️ **为什么这个差别很要紧**：两份的**长度不一样**（表情那一格是 **1 个 rune**，
+// 而给读屏那一份是 **4 个字符**）⇒ 若果坐标是**给读屏那一份**的，整个选区就**全错位**了。
+//
+// ⇒ 而这一条依赖的**前提**（框架给的是画出来那一份）在**代码里**没有任何地方写下来
+// ——所以 `comments_body_test.go` 里有一条用例把它钉住（见那里的
+// `TestSelectingAfterTheEmoteStillCopiesTheRightSentence`）。
+//
+// 🔴 **它还去掉守卫**（`commentObjectGuard`）：守卫是**画出来的那一份**里的
+// 零宽字符（U+200B）——它**只**是为了让省略号不落在表情那一格（理由见文件
+// 头），而它复制出去对用户毫无意义（一个看不见的控制字符）⇒ 复制出来的那句
+// 话必须和 `commentPlain` **一模一样**。
 func commentPlainOfSelection(text string, start, end int) string {
 	// ⚠️ **按 rune 切**（不是按字节）：框架给的是**rune 下标**
 	// （`SelectedText.Start` / `End`），而中文一个字三个字节——按字节切会切坏。
@@ -177,7 +247,8 @@ func commentPlainOfSelection(text string, start, end int) string {
 	if start >= end {
 		return ""
 	}
-	return strings.ReplaceAll(string(runes[start:end]), "\uFFFC", commentPlainSpan)
+	out := strings.ReplaceAll(string(runes[start:end]), "\uFFFC", commentPlainSpan)
+	return strings.ReplaceAll(out, commentObjectGuard, "")
 }
 
 // commentSpansOf 把正文切成一段一段的 span：**文字是文字，表情占位符换成一枚
@@ -187,14 +258,48 @@ func commentPlainOfSelection(text string, start, end int) string {
 // 顺序）——`DrawObjects` 回调里的 `at`（那枚 U+FFFC 在段落里的 rune 位置）
 // 就是找它们的钥匙。
 //
+// 🔴 **返回的第三样是「给读屏的那一份」**（表情占位符写成「［表情］」）——
+// **它和前两样必须来自同一次切分**（理由见下面《两份必须同源》）。
+//
 // 🔴 **认占位符的口径只有这一处**（理由同旧 `commentSpans`）：「`[` 到下一个
 // `]` 之间的那一段，**在表情表里**」才算占位符。
 //
 // ⚠️ **高亮是这一支的另一档**（`commentSpansMarked`）：`hl` 为空、`mark` 是
 // 零值的时候，两处的 span 逐段相同——所以「认占位符」仍然只有这一处。
-func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songname.Range, mark commentMark) ([]ui.Span, []string) {
+//
+// # 🔴 两份必须同源（票 #702 的审查）
+//
+// 旧的做法（基线）里 `commentSpansMarked` **一个函数**同时产出 `spans` 和
+// `plain` ⇒ 那两份**必然一致**。
+//
+// 而 #702 把它们拆成两个独立函数之后，**判定的口径就分叉了**：
+//
+//	`commentSpansOf`  从左往右扫，找 `[` 到**下一个** `]` 之间的那一段，
+//	                  **整段在表情表里**才算占位符。
+//	`commentPlain`    `strings.ReplaceAll` 替换**表情表里每一个 token**，
+//	                  **不看边界**。
+//
+// ⇒ 两者在两种形状上分叉：
+//
+//	**嵌套方括号**  正文 "前面有字[a[b]]后面有字"，表情表 {"[b]"}
+//	                `commentSpansOf` 认出的是 `[b]`（从 `[` 到下一个 `]`）
+//	                ⇒ 画出来的是 U+FFFC；而 `commentPlain` 的 ReplaceAll
+//	                把 `[b]` 也换成「［表情］」⇒ **读屏的那一份与画出来的那
+//	                一份不一样**。
+//	**相邻 token**  正文 "前面有字[a][a]后面有字"，表情表 {"[a]", "[a][a]"}
+//	                ⇒ ReplaceAll 按 **map 的迭代顺序**替换 ⇒ **同一帧里
+//	                读到的内容可能每次都不同**（`commentPlain` 在
+//	                `viewCommentBodyEl` 里**每帧**调一次）。
+//
+// ⇒ **本文件的做法**：**一次切分，两份结果**——`commentSpansOf` 在切分的
+// 同一趟里顺手把「给读屏的那一份」也拼出来（`plain`），而 `commentPlain`
+// **只是它的第三个返回值**（不再自己 `ReplaceAll`）。
+func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songname.Range, mark commentMark) ([]ui.Span, []string, string) {
 	var spans []ui.Span
 	var urls []string
+	// plain 是「给读屏的那一份」——**在同一次切分里拼出来**（理由见上面的
+	// 《两份必须同源》）。
+	var plain strings.Builder
 	// base 是 rest 之前已经过去了多少个**原文的** rune。
 	base := 0
 	text := func(s string) {
@@ -202,6 +307,7 @@ func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songna
 			return
 		}
 		spans = appendMarkedText(spans, s, base, hl, mark)
+		plain.WriteString(s)
 		base += utf8.RuneCountInString(s)
 	}
 	rest := msg
@@ -237,11 +343,17 @@ func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songna
 			ObjectWidth:  commentObjectW,
 			ObjectHeight: commentObjectH,
 		})
+		// 🔴 **守卫**：表情后面接一段零宽的普通 span（理由见文件头《省略号被
+		// 「表情那一格」吞掉》）。
+		spans = append(spans, ui.Span{Text: commentObjectGuard})
 		urls = append(urls, commentImageURL(e.URL))
+		// ⚠️ **给读屏的那一份**：表情占位符写成「［表情］」——**不含守卫**
+		// （那是个零宽的控制字符，复制出去对用户毫无意义）。
+		plain.WriteString(commentPlainSpan)
 		base += utf8.RuneCountInString(token)
 		rest = rest[i+j+1:]
 	}
-	return spans, urls
+	return spans, urls, plain.String()
 }
 
 // viewCommentBodyEl 画一条评论的正文。
@@ -334,7 +446,14 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 				// ⚠️ **`.Label(...)` 给的是「给读屏的那一份」**（表情占位符写成
 				// 「［表情］」）：屏幕阅读器读得到它，无头 Tester 也找得到它——
 				// 而画出来的那一份里表情是图（`DrawObjects` 那一支）。
-				Label(commentPlain(cm.Message, cm.Emotes)).
+				//
+				// 🔴 **它用的是缓存的那一份**（`body.plain`），不是现算的
+				// `commentPlain(...)`：现算的话**每一帧**都要把正文再切一遍
+				// （而这一页一屏十来条评论，每帧十来趟切分就是白烧 CPU）。
+				//
+				// ⚠️ **而它和画出来的那一份必然一致**（理由见 `commentSpansOf`
+				// 的《两份必须同源》）：两者来自**同一次切分**。
+				Label(body.plain).
 				DrawObjects(draw)
 		})
 }
@@ -389,11 +508,11 @@ func (s *Shell) commentBodyOf(p *commentsPage, cm bili.Comment) *commentBody {
 	if mark.Bg.A != 0 && !p.names.Empty() {
 		hl = p.names.Matches(cm.Message)
 	}
-	spans, urls := commentSpansOf(cm.Message, cm.Emotes, hl, mark)
+	spans, urls, plain := commentSpansOf(cm.Message, cm.Emotes, hl, mark)
 	if p.bodies == nil {
 		p.bodies = map[int64]*commentBody{}
 	}
-	body := &commentBody{spans: spans, urls: urls, mark: mark}
+	body := &commentBody{spans: spans, urls: urls, plain: plain, mark: mark}
 	p.bodies[cm.Rpid] = body
 	return body
 }
