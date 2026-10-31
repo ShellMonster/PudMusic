@@ -221,6 +221,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 那些地方也各自调了一次，那是立刻就要看到）。而它内部**比一遍再改**，
 	// 所以没变的时候是零开销。
 	s.refreshMenuChecked()
+	// 状态栏菜单上「正在播放」那一行是**会变的**（换歌、没歌了）——而托盘那
+	// 份菜单只建一次，所以得运行期刷（见 refreshTrayMenu）。
+	s.refreshTrayMenu()
 	s.reportSettingsError()
 	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
 	// 会跟着停（见 syncSearchWatch）。

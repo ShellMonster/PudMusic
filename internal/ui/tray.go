@@ -29,14 +29,18 @@ import (
 // 「能不能起来」。因为一个图标建不出来就把整个应用卡在起不来的状态，是本末倒置。
 func (s *Shell) installTray() {
 	icon, template := platform.TrayIcon()
-	tray, err := platform.NewTray(icon, template, s.trayMenu())
+	menu := s.trayMenu()
+	tray, err := platform.NewTray(icon, template, menu)
 	if err != nil {
 		log.Printf("biu: 托盘图标建不出来，隐藏之后只能再启动一个应用唤回来：%v", err)
 		return
 	}
 	s.tray = tray
+	// ⚠️ **留着菜单**：它只建一次，而里面「正在播放」那一行要**运行期刷**
+	//（见 refreshTrayMenu）——不留着就刷不了。
+	s.trayMenuRef = menu
 	// 左键点图标 = 显示/隐藏，和 Biu 一样（`tray.ts` 的 `tray.on("click")`）。
-	// macOS 上点图标直接弹菜单，菜单里有「显示/隐藏界面」，不另挂。
+	// macOS 上点图标直接弹菜单，菜单里有「显示/隐藏主窗口」，不另挂。
 	if platform.TraySupported() && runtime.GOOS != "darwin" {
 		tray.OnClick(func() { s.toggleWindow() })
 	}
@@ -49,6 +53,10 @@ func (s *Shell) installTray() {
 //
 // ⚠️ **「正在播放」那一行是禁用项**：它只是给人看的，而 macOS 上一个禁用项
 // 是灰的——正好是「这一行不可点」的样子。
+//
+// ⚠️ **这一份菜单只建一次**（`installTray`），所以「正在播放」那一行**不能靠
+// 建菜单时求值**——那样它永远是**启动那一刻**的那首，用户换歌之后菜单顶部还挂
+// 着旧歌名。⇒ 那一行由 `refreshTrayMenu` 在运行期刷（见那里）。
 func (s *Shell) trayMenu() *mygo.Menu {
 	items := []*mygo.MenuItem{
 		// 「正在播放：歌名 - 艺人」。
@@ -69,10 +77,10 @@ func (s *Shell) trayMenu() *mygo.Menu {
 			s.onShortcut("next")
 		}},
 		mygo.Separator(),
-		{ID: trayToggleWindowID, Label: "显示/隐藏界面", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{ID: trayToggleWindowID, Label: "显示/隐藏主窗口", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.toggleWindow()
 		}},
-		{ID: trayOpenWindowID, Label: "打开主窗口", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{ID: trayOpenWindowID, Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.openWindow()
 		}},
 		{ID: trayMiniID, Label: "迷你播放器", Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -90,6 +98,54 @@ func (s *Shell) trayMenu() *mygo.Menu {
 		}},
 	}
 	return mygo.NewMenu(items)
+}
+
+// refreshTrayMenu 刷状态栏菜单上那些会变的东西。
+//
+// ⚠️ **为什么需要它**：托盘那一份菜单**只建一次**（`installTray`），而
+// 「正在播放」那一行是**会变的**（换歌、暂停、没歌了）。
+// ⇒ 如果只在建菜单时求值，那一行会永远是**启动那一刻**的那首——
+// 而它恰恰是用户点开菜单**第一眼**看到的那一行。
+//
+// ⚠️ **不重建菜单**：重建会让状态栏图标闪一下（框架的 `Tray.SetMenu` 是
+// 换掉整份菜单，`mygo/modules.go:752`）。所以只改那一行的文案
+// （`MenuItem.SetLabel`）和那几项的可用态。
+//
+// ⚠️ **「比一遍再改」**：这一段每帧调一次，而 `SetLabel` / `SetEnabled`
+// 每次都要往主线程投一个任务（同 `refreshMenuChecked` 的理由）。
+func (s *Shell) refreshTrayMenu() {
+	if s.trayMenuRef == nil {
+		return
+	}
+	st := s.app.Snapshot()
+	label := s.trayNowPlayingLabel()
+	hasTrack := st.HasTrack
+
+	cur := s.trayState
+	if cur.label == label && cur.hasTrack == hasTrack {
+		return
+	}
+	s.trayState = trayState{label: label, hasTrack: hasTrack}
+
+	if it := s.trayMenuRef.ItemByID(trayNowPlayingID); it != nil {
+		it.SetLabel(label)
+	}
+	// ⚠️ **没歌的时候那三项该是禁用的**：给一个按了没反应的键比不给更糟。
+	// 而应用菜单那边是这么做的（`refreshMenuChecked`）——**两处要一致**，
+	// 否则用户从状态栏点「播放/暂停」而什么都没发生，会以为是菜单坏了。
+	for _, id := range []string{"togglePlay", "prev", "next"} {
+		if it := s.trayMenuRef.ItemByID(trayCommandIDPrefix + id); it != nil {
+			it.SetEnabled(hasTrack)
+		}
+	}
+}
+
+// trayState 是状态栏菜单上那些会变的东西在**上一次刷新时**的样子。
+//
+// ⚠️ **它是用来「比一遍再改」的**（见 `refreshTrayMenu`）。
+type trayState struct {
+	label    string
+	hasTrack bool
 }
 
 // trayNowPlayingLabel 是状态栏菜单最上面那一行：「正在播放：歌名 - 艺人」。

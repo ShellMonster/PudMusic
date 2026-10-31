@@ -26,7 +26,11 @@ func TestTheShortcutDefaultsAreStable(t *testing.T) {
 		{"next", "下一首", "CommandOrControl+Right", "CommandOrControl+Alt+Right"},
 		{"volumeUp", "音量加", "CommandOrControl+Up", "CommandOrControl+Alt+Up"},
 		{"volumeDown", "音量减", "CommandOrControl+Down", "CommandOrControl+Alt+Down"},
-		{"toggleMiniMode", "切换mini/完整模式", "CommandOrControl+M", "CommandOrControl+Alt+M"},
+		// ⚠️ **迷你播放器让开了 ⌘M**：那是 macOS 的「最小化」（框架「窗口」栏
+		// 里那一项带的加速键，`mygo/menu.go:743`），而**菜单的加速键先于窗口
+		// 拿到那个键**——抢它的结果是迷你播放器永远不响。详见
+		// `internal/ui/shortcuts.go` 的 `shiftedShortcuts`。
+		{"toggleMiniMode", "显示/隐藏迷你播放器", "CommandOrControl+Shift+M", "CommandOrControl+Alt+Shift+M"},
 	}
 	// 我们自己补的两条（快退 / 快进）只在应用内那一列，排在 Biu 那六条后面；
 	// 全局那一列仍然只有 Biu 的六条。

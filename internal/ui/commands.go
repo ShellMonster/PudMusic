@@ -35,9 +35,11 @@
 // 菜单在应用里被点开的时候应用就是在前台。
 package ui
 
+import "github.com/egoist/mygo"
+
 // commandSpec 是「一条命令」的登记。
 //
-// ⚠️ **动作不在这里**：这里只放「这条命令叫什么、能不能进菜单」。
+// ⚠️ **动作不在这里**：这里只放「这条命令叫什么」。
 // 动作在 `runShortcut`（`shortcut_dispatch.go`）——那一层知道怎么跟应用层说话，
 // 而这一层要能被 `menu.go` 和 `tray.go` 用，而那两个文件**不该**知道应用层的
 // 那些方法。
@@ -46,17 +48,6 @@ type commandSpec struct {
 	id string
 	// name 是它在界面上显示的名字。
 	name string
-	// inMenu 报这条命令能不能出现在应用菜单里。
-	//
-	// ⚠️ **为什么有些命令不进菜单**：
-	//
-	//   - `seekBack` / `seekForward`：快退快进是播放器内的操作，而它们默认的键
-	//     是 ⇧⌘← / ⇧⌘→（`shortcuts.go` 的 `inAppOnlyShortcuts`）。**方向键在
-	//     菜单上显示成 ⌘← 是误导**——那个键在菜单里指的是「上一首」。
-	//   - `volumeUp` / `volumeDown`：默认键是 ⌘↑ / ⌘↓，而 ⌘↑ 在别的应用里
-	//     常常是别的意思（Emacs 的上一行）。放进菜单会让菜单栏上多出两个
-	//     抢手的方向键。
-	inMenu bool
 }
 
 // commandSpecs 是命令表本体。
@@ -67,15 +58,25 @@ type commandSpec struct {
 // ⚠️ **改这一张表就要改 `shortcuts.go` 的 `defaultShortcutNames`**：那一张是
 // 设置页上显示的名字，而这一张是菜单上显示的。**两处要一样**——同一个命令在
 // 设置页叫「播放/暂停」而在菜单里叫「播放」，用户会以为是两件事。
+//
+// ⚠️ **这里不再有「这条命令进不进菜单」那一栏**：它原来是个手写标志，
+// 而那个标志**和菜单实况脱节过**——「快退 5 秒」「快进 5 秒」「音量加」
+// 「音量减」四条明明在菜单里，标志却写着不进，于是
+// `refreshMenuAccel`（`menu.go`）**不刷它们**：用户在设置页改了键，菜单上
+// 那个旧键还在——而菜单的加速键**先于窗口**拿到那个键（见 `menu.go` 的
+// 文件头），于是旧键被菜单吃掉，按了做的是菜单项的动作，而设置页里那个键
+// 已经不归这条命令了。
+//
+// ⇒ 现在**「在不在菜单里」由菜单树自己说了算**（见 `menuCommandIDs`）。
 var commandSpecs = []commandSpec{
-	{id: "togglePlay", name: "播放/暂停", inMenu: true},
-	{id: "prev", name: "上一首", inMenu: true},
-	{id: "next", name: "下一首", inMenu: true},
-	{id: "toggleMiniMode", name: "切换mini/完整模式", inMenu: true},
-	{id: "seekBack", name: "快退 5 秒", inMenu: false},
-	{id: "seekForward", name: "快进 5 秒", inMenu: false},
-	{id: "volumeUp", name: "音量加", inMenu: false},
-	{id: "volumeDown", name: "音量减", inMenu: false},
+	{id: "togglePlay", name: "播放/暂停"},
+	{id: "prev", name: "上一首"},
+	{id: "next", name: "下一首"},
+	{id: "toggleMiniMode", name: "显示/隐藏迷你播放器"},
+	{id: "seekBack", name: "快退 5 秒"},
+	{id: "seekForward", name: "快进 5 秒"},
+	{id: "volumeUp", name: "音量加"},
+	{id: "volumeDown", name: "音量减"},
 }
 
 // commandByID 按 id 查一条命令。查不到返回零值（`ok` 为 false）。
@@ -103,16 +104,25 @@ func commandName(id string) string {
 	return id
 }
 
-// menuCommands 是「能进菜单的那些」，按 `commandSpecs` 的顺序。
+// menuCommandIDs 是「菜单里那些命令项」的 id，按 `commandSpecs` 的顺序。
 //
-// ⚠️ **每次调用都重新算**：这张表不大（现在 8 条），而它是在建菜单的时候用的
-// （建菜单是启动时的一次性动作），不是每帧。重新算比缓存起来更容易保证
-// 「改了 `commandSpecs` 就一定生效」。
-func menuCommands() []commandSpec {
-	out := make([]commandSpec, 0, len(commandSpecs))
+// ⚠️ **判据是「菜单树里有没有这一项」**，不是一张手写的清单。
+//
+// ⚠️ **为什么不能手写**：手写的那一份**和实况脱节过**（见 `commandSpecs`
+// 顶上那段）。而脱节的后果很具体：菜单的加速键**先于窗口**拿到那个键，
+// 所以菜单上留着一个旧键 ⇒ **那个旧键会被菜单吃掉**，而设置页里它已经不归
+// 那条命令了 ⇒ 用户按了「键失灵」。
+//
+// ⇒ 所以这里**从菜单树里数**（`Menu.ItemByID` 是**递归**找的，
+// `mygo/menu.go:226` 的 `itemByID`）。
+func menuCommandIDs(m *mygo.Menu) []string {
+	if m == nil {
+		return nil
+	}
+	out := make([]string, 0, len(commandSpecs))
 	for _, c := range commandSpecs {
-		if c.inMenu {
-			out = append(out, c)
+		if m.ItemByID(menuCommandIDPrefix+c.id) != nil {
+			out = append(out, c.id)
 		}
 	}
 	return out

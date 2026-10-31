@@ -1366,7 +1366,7 @@ var Items = []Item{
 		Tests: []string{
 			"TestEveryShortcutCommandIsRegistered",
 			"TestTheCommandNamesMatchTheSettingsPage",
-			"TestTheMenuCommandsAreTheOnesThatBelongInAMenu",
+			"TestTheMenuCommandsAreDerivedFromTheMenuItself",
 			"TestTheCommandOrderIsTheOrderTheUserActsIn",
 			"TestAnUnknownCommandFallsBackToItsID",
 			"TestTheMenuCanReadEverythingItNeedsToShow",
@@ -1376,6 +1376,37 @@ var Items = []Item{
 			"TestAnEmptyShortcutTranslatesToNothing",
 			"TestTheKnownKeyTableMatchesTheFrameworkVocabulary",
 			"TestTheTranslationKeepsTheKeyOrder",
+		},
+	},
+	{
+		Category: Platform,
+		// ⚠️ **这一族是「对抗性审查之后修掉的那些毛病」的回归**。
+		//
+		// 四个坑，每一个都是「功能坏了 / 说谎了」那一类：
+		//
+		//  1. **⌘M 撞车**：框架「窗口 › 最小化 ⌘M」和迷你播放器抢同一个键，
+		//     而**菜单的加速键先于窗口拿到那个键** ⇒ 迷你播放器在 macOS 上
+		//     根本触发不了。
+		//  2. **状态栏「正在播放」是启动快照**：托盘菜单只建一次，那一行若在
+		//     建的时候求值，就永远是启动那一刻的那首。
+		//  3. **「赞」「显示评论」的禁用判据用错**：菜单用「有没有歌」，而界面
+		//     上用 `Likeable()` / `CommentsWorthAsking()` —— 两套判据。
+		//  4. **命令表的「进不进菜单」标志和菜单实况脱节** ⇒ 四条命令的
+		//     加速键不跟着设置走 ⇒ 旧键被菜单吃掉 ⇒ 键「失灵」。
+		Spec: "菜单这一批修掉的毛病：⌘M 归系统所有（迷你播放器用 ⌘⇧M）、状态栏「正在播放」跟着歌走、「赞」「显示评论」和界面用同一套判据、菜单里每一条命令项的加速键都跟着设置走",
+		Tests: []string{
+			"TestTheMiniPlayerShortcutYieldsCommandMToTheSystem",
+			"TestTheMenuDoesNotClaimCommandMForSomethingElse",
+			"TestTheNowPlayingLineFollowsTheCurrentSong",
+			"TestTheTrayPlaybackItemsAreDisabledWithoutATrack",
+			"TestTheLikeItemUsesTheSameJudgeAsTheInterface",
+			"TestTheCommentsItemUsesTheSameJudgeAsTheInterface",
+			"TestEveryCommandItemInTheMenuGetsItsShortcutRefreshed",
+			"TestTheMiniPlayerMenuItemCarriesItsShortcut",
+			"TestTheMiniPlayerMenuItemRunsTheCommand",
+			"TestTheCommandNamesAndTheSettingsPageAgree",
+			"TestTheDeveloperToolsOnlyShowInDevelopmentBuilds",
+			"TestThePlayModeItemsAreStillRadiosAfterTheFix",
 		},
 	},
 	{

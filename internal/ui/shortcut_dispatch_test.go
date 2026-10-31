@@ -399,30 +399,33 @@ func TestTheShortcutsComeBackTheMomentARecordingFinishes(t *testing.T) {
 		t.Fatalf("没录进去，存的是 %q", got)
 	}
 
-	// ① 录完立刻按 ⌘M（切换 mini/完整模式）。
-	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	// ① 录完立刻按 ⌘⇧M（显示/隐藏迷你播放器）。
+	//
+	// ⚠️ **⌘⇧M 而不是 ⌘M**：⌘M 是 macOS 的「最小化」，让开了（理由见
+	// `internal/ui/shortcuts.go` 的 `shiftedShortcuts`）。
+	tt.Key(mygoui.Cmd|mygoui.Shift, mygoui.KeyM)
 	tt.Frame()
 	if len(*got) != 1 || (*got)[0] != "toggleMiniMode" {
-		t.Fatalf("录完立刻按 ⌘M 触发的是 %v，want [toggleMiniMode]——快捷键还是哑的", *got)
+		t.Fatalf("录完立刻按 ⌘⇧M 触发的是 %v，want [toggleMiniMode]——快捷键还是哑的", *got)
 	}
 
 	// ② 走回首页再按。走这一段是因为「那一页不画了」正是最容易卡住录制状态的地方。
 	s.navigate("/")
 	tt.Frame()
-	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	tt.Key(mygoui.Cmd|mygoui.Shift, mygoui.KeyM)
 	tt.Frame()
 	if len(*got) != 2 {
-		t.Errorf("走回首页之后按 ⌘M 触发的是 %v，want 第二次也响", *got)
+		t.Errorf("走回首页之后按 ⌘⇧M 触发的是 %v，want 第二次也响", *got)
 	}
 
 	// ③ 重新打开设置页、停在快捷键那一页再按。
 	s.navigate("/settings")
 	tt.Frame()
 	openSettingsTab(t, tt, "快捷键设置")
-	tt.Key(mygoui.Cmd, mygoui.KeyM)
+	tt.Key(mygoui.Cmd|mygoui.Shift, mygoui.KeyM)
 	tt.Frame()
 	if len(*got) != 3 {
-		t.Errorf("重新打开快捷键设置之后按 ⌘M 触发的是 %v，want 第三次也响", *got)
+		t.Errorf("重新打开快捷键设置之后按 ⌘⇧M 触发的是 %v，want 第三次也响", *got)
 	}
 }
 
@@ -766,7 +769,7 @@ func TestOneGlobalShortcutThatCannotRegisterDoesNotTakeTheRestDown(t *testing.T)
 func TestEveryGlobalShortcutThatFailsStillLetsTheOthersRun(t *testing.T) {
 	for _, fail := range []string{
 		"CommandOrControl+Alt+P", "CommandOrControl+Alt+Left", "CommandOrControl+Alt+Right",
-		"CommandOrControl+Alt+Up", "CommandOrControl+Alt+Down", "CommandOrControl+Alt+M",
+		"CommandOrControl+Alt+Up", "CommandOrControl+Alt+Down", "CommandOrControl+Alt+Shift+M",
 	} {
 		t.Run(fail, func(t *testing.T) {
 			s, _, hot, _ := shellWithHotkeys(t)

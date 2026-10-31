@@ -8,6 +8,7 @@
 package ui
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -51,22 +52,39 @@ func TestTheCommandNamesMatchTheSettingsPage(t *testing.T) {
 	}
 }
 
-// TestTheMenuCommandsAreTheOnesThatBelongInAMenu 断**进菜单的是哪些**。
+// TestTheMenuCommandsAreDerivedFromTheMenuItself 断**「在不在菜单里」由菜单树
+// 自己说了算**。
 //
-// ⚠️ **判据是「为什么」不是「有哪些」**：快退快进默认是 ⇧⌘← / ⇧⌘→，而
-// 方向键在菜单上显示成 ⌘← 是误导（那个键在菜单里指的是「上一首」）。
-// 音量默认是 ⌘↑ / ⌘↓，而 ⌘↑ 在别的应用里常有别的意思。
+// ⚠️ **为什么这条要紧**：这里原来有一个**手写的**「进不进菜单」标志，而那个
+// 标志**和菜单实况脱节过**——「快退 5 秒」「快进 5 秒」「音量加」「音量减」
+// 四条明明在菜单里，标志却写着不进，于是 `refreshMenuAccel` **不刷它们**。
 //
-// 这两条是**这一版的判断**，不是宪法——将来要让它们进菜单，改这一张表就行。
-func TestTheMenuCommandsAreTheOnesThatBelongInAMenu(t *testing.T) {
-	want := []string{"togglePlay", "prev", "next", "toggleMiniMode"}
-	got := menuCommands()
-	if len(got) != len(want) {
-		t.Fatalf("进菜单的命令有 %d 条（%v），want %d 条（%v）", len(got), idsOf(got), len(want), want)
+// ⇒ 而脱节的后果很具体：菜单的加速键**先于窗口**拿到那个键（框架自己的
+// E2E：`mygo/internal/e2e/menu_shortcuts_windows_test.go:14`），所以菜单上
+// 留着一个旧键 ⇒ **那个旧键会被菜单吃掉**，而设置页里它已经不归那条命令了
+// ⇒ 用户按了「键失灵」。
+//
+// 这一条钉的是「**菜单里有的命令项，都会被刷新到**」。
+func TestTheMenuCommandsAreDerivedFromTheMenuItself(t *testing.T) {
+	b := newTestShell(t)
+	s := b.s
+	s.menu = appMenu(s)
+
+	got := menuCommandIDs(s.menu)
+	if len(got) == 0 {
+		t.Fatal("菜单里一个命令项都没有")
 	}
-	for i := range want {
-		if got[i].id != want[i] {
-			t.Errorf("进菜单的第 %d 条是 %q，want %q（整份：%v）", i+1, got[i].id, want[i], idsOf(got))
+	// ⚠️ **每一条都要在菜单树里能找到**：被算成「在菜单里」却找不到，那
+	// 「刷新」刷的是一个不存在的东西。
+	for _, id := range got {
+		if s.menu.ItemByID(menuCommandIDPrefix+id) == nil {
+			t.Errorf("命令 %q 被算成「在菜单里」，但菜单树里找不到它", id)
+		}
+	}
+	// ⚠️ **那几条命令都要在菜单里**——它们是「手写标志脱节」时漏掉的那几条。
+	for _, id := range []string{"togglePlay", "prev", "next", "seekBack", "seekForward", "volumeUp", "volumeDown"} {
+		if !slices.Contains(got, id) {
+			t.Errorf("命令 %q 不在菜单里，但菜单上应该有它（它的加速键要跟着设置走）", id)
 		}
 	}
 }

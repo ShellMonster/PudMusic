@@ -243,8 +243,16 @@ func playColumn(s *Shell) []*mygo.MenuItem {
 
 // playModeItem 是「播放模式」那一组（顺序 / 循环 / 随机 / 单曲）。
 //
-// ⚠️ **做成四个平铺的单选项**，不收进子菜单：macOS 的惯例是平铺（iTunes 的
-// 「控制」栏、音乐.app 的「播放」栏都是），而收进子菜单要点两层才够得着。
+// ⚠️ **做成四个平铺的单选项**，不收进子菜单。
+//
+// ⚠️ **这一条和 Apple Music 相反**（它的「Controls」栏里「Shuffle ▸」和
+// 「Repeat ▸」是**两个带子菜单的项**，「Repeat」那一档是 Off / All / One）——
+// 但我们这边平铺是**有理由的**：我们的「播放」栏已经有十来项，再收一层子菜单
+// 要点两下才够得着；而四行平铺在 macOS 的菜单里也不难看。
+//
+// ⚠️ **别照抄 Apple Music 就以为对了**：我们那四档是**互斥**的（顺序 / 循环 /
+// 随机 / 单曲，任意时刻只有一个），而 Music 的 Shuffle 和 Repeat 是**两个
+// 正交的开关**——照抄它的形状反而会让「随机 + 单曲」这种组合没法表达。
 //
 // ⚠️ **勾选态是运行期刷的**（`refreshMenuChecked`）——播放模式随时会变
 // （用户按播放条上那枚键、或者从这里切档）。
@@ -272,7 +280,12 @@ func songColumn(s *Shell) []*mygo.MenuItem {
 		{ID: menuLikeID, Label: "赞", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.likeCurrent()
 		}},
-		{ID: menuFavoriteID, Label: "收藏当前歌曲", Click: func(*mygo.MenuItem, *mygo.Window) {
+		// ⚠️ **「添加到收藏夹…」而不是「收藏当前歌曲」**：这一项开的是**一个
+		// 弹窗**（问「放到哪些收藏夹」），而用户读「收藏当前歌曲」会以为按一下
+		// 就收藏好了——按完发现弹出一个要选文件夹的窗，那就是「这个应用不听话」。
+		//
+		// 省略号是 macOS 的写法：**这一项开了一个窗**（对话框）。
+		{ID: menuFavoriteID, Label: "添加到收藏夹…", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.favoriteCurrent()
 		}},
 		{ID: menuDownloadID, Label: "下载当前歌曲", Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -315,14 +328,41 @@ func viewColumn(s *Shell) []*mygo.MenuItem {
 			s.toggleSidebar()
 		},
 	})
+	// ⚠️ **迷你播放器那一项是「命令项 + 勾选型」**：它既是一个命令（走
+	// `runShortcut`，于是有加速键、而且加速键跟着设置走），又是一个勾选态
+	//（迷你窗开着的时候打着钩）。
+	//
+	// ⚠️ **为什么不用 `menuCommandItem` 那一档**：那一档造出来的是**普通项**，
+	// 而这一项要**勾选态**——`MenuItemCheckbox` 在框架里被点的时候会**自己
+	// 先翻勾选**（`mygo/menu.go:563` 的 `menuItemClicked`：`case MenuItemCheckbox:
+	// it.SetChecked(!it.IsChecked())`），而我们要的勾选态是「迷你窗开着没有」
+	// 这个**真状态**，不是「用户点过」。
+	// ⇒ 所以自己写这一项：勾选态由 `refreshMenuChecked` 按真状态刷。
+	//
+	// ⚠️ **加速键照样要挂**（否则设置页里明明有一个键，而菜单上一片空白）。
+	//
+	// ⚠️ **它的加速键是 ⌘⇧M**（不是 ⌘M）：⌘M 是 macOS 的「最小化」
+	//（框架「窗口」栏里那一项带的键，`mygo/menu.go:743`），而**菜单的加速键
+	// 先于窗口拿到那个键**——抢它的结果是**我们这个永远不响**。
+	// 详见 `internal/ui/shortcuts.go` 的 `shiftedShortcuts`。
 	items = append(items, &mygo.MenuItem{
-		ID: menuMiniID, Label: "显示/隐藏迷你播放器", Type: mygo.MenuItemCheckbox,
+		ID: menuCommandIDPrefix + "toggleMiniMode", Label: "显示/隐藏迷你播放器",
+		Type: mygo.MenuItemCheckbox,
 		Click: func(*mygo.MenuItem, *mygo.Window) {
-			s.toggleMiniPlayer()
+			s.onShortcut("toggleMiniMode")
 		},
+		Accelerator: s.menuAccelFor("toggleMiniMode"),
 	})
 	items = append(items, mygo.Separator())
-	items = append(items, &mygo.MenuItem{Role: mygo.RoleToggleDevTools})
+	// ⚠️ **「开发者工具」只在开发构建里**：框架有 `mygo.IsDev()`
+	//（`mygo/dev.go:12`）——发布构建由 `mygo build` 注入 `production=1`
+	//（`scripts/release.sh` 走的就是 `mygo build`）。
+	//
+	// 正式版的菜单栏上摆着「开发者工具」（还占着 ⌥⌘I）不是 macOS 惯例——
+	// Chrome / Edge / Safari 的发布版菜单里都没有它。
+	if mygo.IsDev() {
+		items = append(items, &mygo.MenuItem{Role: mygo.RoleToggleDevTools})
+	}
 	items = append(items, &mygo.MenuItem{Role: mygo.RoleToggleFullScreen})
 	return items
 }
@@ -399,18 +439,24 @@ func (s *Shell) refreshMenuChecked() {
 	mini := s.mini != nil
 	// 「歌曲」那一栏：有歌才有那几项。
 	hasTrack := st.HasTrack
+	// ⚠️ **「赞」和「显示评论」各有各的判据**（理由见下面改的那几行）：
+	// 「赞」要这一首在 B 站上**有投稿**，「显示评论」要它**有评论可问**。
+	likeable := s.app.Likeable()
+	commentsWorthAsking := s.app.CommentsWorthAsking()
 	// 「打开 UP 主空间」要 UP 主的 mid。
 	hasArtist := hasTrack && st.ArtistMid > 0
 
 	cur := s.menuState
 	if cur.playMode == mode && cur.displayMode == display && cur.sidebar == sidebar &&
-		cur.mini == mini && cur.hasTrack == hasTrack && cur.hasArtist == hasArtist {
+		cur.mini == mini && cur.hasTrack == hasTrack && cur.hasArtist == hasArtist &&
+		cur.likeable == likeable && cur.commentsWorthAsking == commentsWorthAsking {
 		// ⚠️ **一样就什么都不做**：每帧都往主线程投一次任务，是白花的钱。
 		return
 	}
 	s.menuState = menuState{
 		playMode: mode, displayMode: display, sidebar: sidebar,
 		mini: mini, hasTrack: hasTrack, hasArtist: hasArtist,
+		likeable: likeable, commentsWorthAsking: commentsWorthAsking,
 	}
 
 	// 播放模式那一组。
@@ -431,12 +477,31 @@ func (s *Shell) refreshMenuChecked() {
 	if it := s.menu.ItemByID(menuSidebarID); it != nil {
 		it.SetChecked(sidebar)
 	}
-	if it := s.menu.ItemByID(menuMiniID); it != nil {
+	if it := s.menu.ItemByID(menuCommandIDPrefix + "toggleMiniMode"); it != nil {
 		it.SetChecked(mini)
 	}
 
-	// 「歌曲」那一栏：没歌的时候那几项该是禁用的。
-	for _, id := range []string{menuLikeID, menuFavoriteID, menuDownloadID, menuCommentsID} {
+	// ⚠️ **「歌曲」那一栏的判据不是一个「有没有歌」**：每一项要什么，各有各的。
+	//
+	//   - 「赞」要 `Likeable()`——本地文件和音乐库条目**压根没有投稿**，
+	//     而 `App.SetLike` 会回一句「这一首在 B 站上没法赞」（红色 Toast）。
+	//   - 「显示评论」要 `CommentsWorthAsking()`——本地文件在 B 站上压根没有
+	//     对应的对象，问一个认不出来的 oid 的症状是「静默拿到空列表」。
+	//   - 「收藏」「下载」只要有歌就行。
+	//
+	// ⚠️ **界面上同一个功能用的是同一套判据**（`like.go` 的 `viewLikeStar`
+	// 第一句就 `if !s.app.Likeable() { return }`——本地文件**根本不摆那个键**；
+	// `comments_entry.go` 的 `viewCommentsButton` 用 `CommentsWorthAsking()`）。
+	// ⇒ 菜单和界面必须用同一套，否则「界面上没有这一枚、菜单里却有一个按了
+	// 报错」——而按一个点了报错的键比没有那个键更糟（用户按两次发现还是那样，
+	// 就不��信这个应用了）。
+	if it := s.menu.ItemByID(menuLikeID); it != nil {
+		it.SetEnabled(likeable)
+	}
+	if it := s.menu.ItemByID(menuCommentsID); it != nil {
+		it.SetEnabled(commentsWorthAsking)
+	}
+	for _, id := range []string{menuFavoriteID, menuDownloadID} {
 		if it := s.menu.ItemByID(id); it != nil {
 			it.SetEnabled(hasTrack)
 		}
@@ -465,12 +530,15 @@ func (s *Shell) refreshMenuAccel() {
 	if s.menu == nil {
 		return
 	}
-	for _, c := range menuCommands() {
-		it := s.menu.ItemByID(menuCommandIDPrefix + c.id)
+	// ⚠️ **按菜单树里实际有的那些命令项刷**，不按一张手写的清单——
+	// 理由见 `menuCommandIDs` 的注释（手写的那份和实况脱节过，而脱节的后果是
+	// 「旧键被菜单吃掉」）。
+	for _, id := range menuCommandIDs(s.menu) {
+		it := s.menu.ItemByID(menuCommandIDPrefix + id)
 		if it == nil {
 			continue
 		}
-		it.SetAccelerator(s.menuAccelFor(c.id))
+		it.SetAccelerator(s.menuAccelFor(id))
 	}
 }
 
@@ -486,6 +554,10 @@ type menuState struct {
 	mini        bool
 	hasTrack    bool
 	hasArtist   bool
+	// likeable 是「当前这一首能不能赞」（`App.Likeable`）。
+	likeable bool
+	// commentsWorthAsking 是「当前这一首有没有评论可问」（`App.CommentsWorthAsking`）。
+	commentsWorthAsking bool
 }
 
 // openPage 是「从菜单跳到某一页」。

@@ -1123,6 +1123,17 @@ type Shell struct {
 	// 不比一遍就是每帧一次无谓的跨线程往返。
 	menuState menuState
 
+	// trayMenuRef 是状态栏图标那一份菜单。**只建一次**（`installTray`），
+	// 留着是为了**运行期刷**它里面「正在播放」那一行——见 refreshTrayMenu。
+	//
+	// ⚠️ 可以是 nil：托盘建失败了（或者这个平台没有托盘）。
+	trayMenuRef *mygo.Menu
+
+	// trayState 是状态栏菜单上那些会变的东西在**上一次刷新时**的样子。
+	//
+	// ⚠️ **它是用来「比一遍再改」的**（见 refreshTrayMenu）。
+	trayState trayState
+
 	// media 是系统媒体会话，由 main 那边 MountMedia 递过来（见 media_mount.go）。
 	//
 	// ⚠️ 可以是 nil：那一次 `media.New` 没装上（`Available()` 是 false）。

@@ -31,7 +31,7 @@ func TestTheTrayMenuHasThePlayerShape(t *testing.T) {
 	want := []string{
 		"没有在放", "---",
 		"播放/暂停", "上一曲", "下一曲", "---",
-		"显示/隐藏界面", "打开主窗口", "迷你播放器", "---",
+		"显示/隐藏主窗口", "显示主窗口", "迷你播放器", "---",
 		"设置", "退出程序",
 	}
 	if len(got) != len(want) {
@@ -123,6 +123,12 @@ func TestTheTrayCommandsRunTheCommand(t *testing.T) {
 // 用户把窗口收进托盘之后，托盘那几项就是唯一的入口。
 //
 // ⚠️ **「设置」那一项在 Biu 那边叫「设置」**（不带省略号），我们也是。
+//
+// ⚠️ **「显示/隐藏界面」这一项的文案和上游不同**：上游写「显示/隐藏界面」
+// （`tray.ts`），我们写「显示/隐藏主窗口」——「界面」是 Windows 上的说法，
+// macOS 上说「窗口」。而**上游 Biu 在 macOS 上压根不建这个图标**
+// （`_research/biu/electron/main.ts:161` 是 `if (process.platform !== "darwin")`），
+// 所以这一栏在 macOS 上**没有上游可对齐**，得按 macOS 的词汇来。
 func TestTheTrayMenuKeepsEveryItemBiuHas(t *testing.T) {
 	b := newTestShell(t)
 	m := b.s.trayMenu()
@@ -130,7 +136,7 @@ func TestTheTrayMenuKeepsEveryItemBiuHas(t *testing.T) {
 	for _, it := range m.Items() {
 		labels[it.Label] = true
 	}
-	for _, want := range []string{"播放/暂停", "上一曲", "下一曲", "显示/隐藏界面", "设置", "退出程序"} {
+	for _, want := range []string{"播放/暂停", "上一曲", "下一曲", "显示/隐藏主窗口", "设置", "退出程序"} {
 		if !labels[want] {
 			t.Errorf("状态栏菜单里没有 %q 这一项：上游 Biu 有（`tray.ts`）", want)
 		}

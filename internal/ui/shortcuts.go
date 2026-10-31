@@ -71,14 +71,31 @@ func defaultShortcutSettings() shortcutSettings {
 		{"next", "Right"},
 		{"volumeUp", "Up"},
 		{"volumeDown", "Down"},
-		{"toggleMiniMode", "M"},
 	}
-	in := make([]shortcutItem, 0, len(ids)+len(inAppOnlyShortcuts))
-	global := make([]shortcutItem, 0, len(ids))
+	in := make([]shortcutItem, 0, len(ids)+len(inAppOnlyShortcuts)+len(shiftedShortcuts))
+	global := make([]shortcutItem, 0, len(ids)+len(shiftedShortcuts))
 	for _, it := range ids {
 		// CommandOrControl 在 macOS 上表示 ⌘，其他平台表示 Ctrl。
 		in = append(in, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+" + it.key})
 		global = append(global, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+Alt+" + it.key})
+	}
+	// ⚠️ **这几条要多按一个 ⇧**：它们默认的键在 macOS 上**归系统所有**。
+	//
+	// 「切换mini/完整模式」原来是 ⌘M——而 **⌘M 是 macOS 的「最小化」**
+	//（框架的「窗口」栏里「最小化」那一项带的加速键就是 `CmdOrCtrl+M`，
+	// `mygo/menu.go:743`）。而**菜单的加速键先于窗口拿到那个键**
+	//（见 `internal/ui/menu.go` 的文件头），所以 ⌘M 会被菜单吃掉——
+	// **迷你播放器在 macOS 上根本触发不了**（按 ⌘M 得到的是窗口被最小化，
+	// 而设置页里明明写着「切换mini/完整模式 ⌘M」）。
+	//
+	// ⇒ 所以让开：**⌘⇧M**。Apple Music 自己也是这么做的（它的
+	// `Switch to MiniPlayer###M#shift`）。
+	//
+	// ⚠️ **别把「快退 5 秒 / 快进 5 秒」的 ⇧ 去掉**：它们是 ⇧⌘← / ⇧⌘→，
+	// 而 ⌘← / ⌘→ 是「上一首 / 下一首」——方向键那一对留给内容区走位。
+	for _, it := range shiftedShortcuts {
+		in = append(in, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+Shift+" + it.key})
+		global = append(global, shortcutItem{ID: it.id, Name: defaultShortcutNames[it.id], Shortcut: "CommandOrControl+Alt+Shift+" + it.key})
 	}
 	// 只在应用内的那几条。**用 ⇧ 加方向键，不用裸方向键**：裸方向键是内容区
 	// 键盘走位的那一对（列表 / 表格的上下左右，见 focus.go 的文件头），认领了
@@ -93,21 +110,43 @@ func defaultShortcutSettings() shortcutSettings {
 	}
 }
 
+// shiftedShortcuts 是「默认键要多按一个 ⇧」的命令：id 和键。
+//
+// ⚠️ **为什么这一类存在**：它们的默认键在 macOS 上**归系统所有**——
+// 而**菜单的加速键先于窗口拿到那个键**（见 `internal/ui/menu.go` 的文件头），
+// 所以抢系统的键的结果不是「两个功能都响」，而是**我们的那个永远不响**。
+//
+// ⚠️ **现在只有「切换mini/完整模式」**：⌘M 是 macOS 的「最小化」
+// （框架「窗口」栏里那一项带的加速键，`mygo/menu.go:743`）。Apple Music 的
+// 迷你播放器用 ⇧⌘M（`Switch to MiniPlayer###M#shift`），照它。
+var shiftedShortcuts = []struct{ id, key string }{
+	{"toggleMiniMode", "M"},
+}
+
 // inAppOnlyShortcuts 是只登记在应用内、没有全局那一半的命令：id 和默认键。
-// 快退和快进是播放器内的操作，不占用系统级快捷键。
+// 快退和快进是播放器内的操作，不占用其他系统的全局组合键。
 var inAppOnlyShortcuts = []struct{ id, key string }{
 	{"seekBack", "Shift+Left"},
 	{"seekForward", "Shift+Right"},
 }
 
 // defaultShortcutNames 是每条命令的显示名称。
+//
+// ⚠️ **「切换mini/完整模式」改成「显示/隐藏迷你播放器」**：界面里一律叫「迷你」
+// （迷你播放器那扇窗、顶栏那枚键、歌词那一栏），而「mini」这个英文小写词
+// 只出现在这一处——那是上游 Biu 的直译（`_research/biu/shared/settings/shortcut-settings.ts`
+// 的 `name: "切换mini/完整模式"`），而**上游是 Electron 应用**，它的菜单机制
+// 与 AppKit 不同、没有「窗口 › 最小化 ⌘M」那一档，所以它那儿不撞车。
+//
+// ⇒ 我们这边统一成「迷你」，而且**菜单项和设置页用同一个名字**
+// （同一个功能两个名字，用户会以为是两件事）。
 var defaultShortcutNames = map[string]string{
 	"togglePlay":     "播放/暂停",
 	"prev":           "上一首",
 	"next":           "下一首",
 	"volumeUp":       "音量加",
 	"volumeDown":     "音量减",
-	"toggleMiniMode": "切换mini/完整模式",
+	"toggleMiniMode": "显示/隐藏迷你播放器",
 	"seekBack":       "快退 5 秒",
 	"seekForward":    "快进 5 秒",
 }
