@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -140,6 +141,57 @@ func TestAFreshInstallHasNoQueueFileAndThatIsFine(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close("") })
 	if got := m.Snapshots(); len(got) != 0 {
 		t.Fatalf("队列里有 %d 项", len(got))
+	}
+}
+
+// 缺少 version 键的队列是 v0，重开时应沿迁移链恢复，而不是被当成空队列。
+func TestAV0QueueWithoutAVersionIsRestoredOnRestart(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, QueueFileName)
+	body := `{"tasks":[{"id":"old|1","title":"旧版本留下的歌","dest":"/x/old.m4a","status":"paused"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, err := New(Options{
+		Client:  http.DefaultClient,
+		Resolve: func(context.Context, Identity) (*Source, error) { return nil, ErrNoSource },
+	}, path)
+	if err != nil {
+		t.Fatalf("v0 队列应该可以恢复：%v", err)
+	}
+	t.Cleanup(func() { _ = m.Close("") })
+	got, ok := m.Get("old|1")
+	if !ok {
+		t.Fatalf("v0 队列里的任务没有恢复：%+v", m.Snapshots())
+	}
+	if got.Title != "旧版本留下的歌" || got.Status != StatusPaused {
+		t.Fatalf("恢复出来的任务不对：%+v", got)
+	}
+}
+
+// 未来版本要明确成为只读错误，调用方可据此避免覆盖原文件。
+func TestAQueueFromANewerVersionIsRefusedAsReadOnly(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, QueueFileName)
+	body := `{"version":99,"tasks":[]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := New(Options{
+		Client:  http.DefaultClient,
+		Resolve: func(context.Context, Identity) (*Source, error) { return nil, ErrNoSource },
+	}, path)
+	if !errors.Is(err, ErrQueueFromNewer) {
+		t.Fatalf("未来版本错误不可识别：%v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != body {
+		t.Fatalf("Restore 改写了未来版本文件：%s", got)
 	}
 }
 

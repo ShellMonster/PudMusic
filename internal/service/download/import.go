@@ -45,9 +45,12 @@ func MergeIntoQueue(path string, extra []*Task) error {
 		if err := json.Unmarshal(b, &f); err != nil {
 			return fmt.Errorf("download: 队列文件读不懂（%s），没有动它：%w", filepath.Base(path), err)
 		}
-		if f.Version != storeVersion {
-			return fmt.Errorf("download: 队列文件是第 %d 版的，我们只到第 %d 版，没有动它",
-				f.Version, storeVersion)
+		if f.Version > storeVersion {
+			return fmt.Errorf("%w：文件是第 %d 版的，我们只到第 %d 版，没有动它",
+				ErrQueueFromNewer, f.Version, storeVersion)
+		}
+		if err := runQueueMigrations(&f, f.Version); err != nil {
+			return fmt.Errorf("%w：%s 没有动它", err, filepath.Base(path))
 		}
 		tasks = f.Tasks
 	} else if !errors.Is(err, os.ErrNotExist) {
