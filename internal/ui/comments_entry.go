@@ -48,20 +48,21 @@ const commentsButtonKey = "playbar:comments"
 // # 🔴 宽度账（票 #682 / #701）
 //
 // 改之前这一枚是**纯图标键**：盒子 32（`iconHitMd`），图形 18（`iconMd`）。
-// 票 #682 给它加过数字（那一版是 32 + 2 + 33 = **67**，数字格的上限是 33）。
+// 票 #682 给它加过数字（那一版是 32 + 2 + **33** = **67**，数字格的上限是
+// **33**）。
 //
 // ⚠️ **票 #701 把那个折法换掉了**（`list.CountText` 那一族：「1k+ / 10k+ /
-// 99k+ / 1亿+」），而那一族的宽由**数字格的上限**（24.5）说了算——比旧的 33 还窄 8.5。
-// 而**这一枚键的形状也变了**：带数字时图形**紧贴**左沿（左右内边距 0），
-// 所以它的宽是 18 + 2 + 数字，**不是** 7 + 18 + 2 + 数字 + 7。
+// 99k+ / 1亿+」），而那一族的宽由**数字格的上限**（**24.5**）说了算——比旧的
+// 33 还窄 8.5。而**这一枚键的形状也变了**：带数字时图形**紧贴**左沿（左右
+// 内边距 0），所以它的宽是 18 + 2 + 数字，**不是** 7 + 18 + 2 + 数字 + 7。
 //
 //	commentCountGap  2  图形和数字之间的缝（比 `space.Px4` 窄：它们是一格里的两半）
 //
-// ⚠️ **数字格的上限现在是 `playbarCountMaxW`（24.5）**，不是这里的 33——
+// ⚠️ **数字格的上限现在是 `playbarCountMaxW`（24.5）**，不是旧的 33——
 // **三个键共用一个上限**（理由见 `playbar_counts.go` 那个常量的注释：它挡的是
 // 「数字本身被拉出那一格」——而**左列的宽本来就是常数**，所以碰撞不可能发生）。
 // 旧的 33 是票 #682 的账，那时的折法最宽的一档是「99.9万」（32.95），而新折法
-// 最宽的是「99k+」（24.49）。
+// 最宽的是「99k+」（**24.49**）。
 //
 // ⚠️ **字号是 `Size10`**：这是播放条上最小的一档，而数字是**附属信息**
 // （图标才是那一枚键的身份）。再大一号（Size11）上面那个上限就不够了。
@@ -69,7 +70,7 @@ const (
 	commentCountGap = playbarCountGap
 )
 
-// playbarCommentsW 是评论键**摆满**那一档的宽：18 + 2 + 26 = **46**。
+// playbarCommentsW 是评论键**摆满**那一档的宽：18 + 2 + **24.5** = **44.5**。
 //
 // ⚠️ **它和 `iconHitMd` 不是同一个数**，所以 `playbarActionsW` 不能再用
 // 「四枚 × 32」算——那一条是票 #573 的账（四枚纯图标键），票 #682 之后评论
@@ -135,9 +136,14 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 		// ⚠️ **结构是共享的那一份**（`countKeyRow`）：「图形 │ 缝 2 │ 数字」，
 		// 而图形紧贴那一枚键的左沿（宽度账见 `playbar_counts.go` 的文件头）。
 		//
-		// ⚠️ **数字那一格的上限是 33**：宽度账见上面那几个常量——它是一道
-		// **保险**（折法改了也不撞滑块），而当前那个折法（`list.CountText`）最宽
-		// 的一档是「99k+」（24.49），**刚好装满** 24.5。
+		// ⚠️ **数字那一格的上限是 `playbarCountMaxW`（24.5）**：宽度账见上面
+		// 那几个常量——它是一道**保险**（折法改了也不撞滑块），而当前那个折法
+		// （`list.CountText`）最宽的一档是「99k+」（**24.49**），**刚好装满**
+		// 24.5。
+		//
+		// ⚠️ **当前折法一档都不截**：上限 24.5 是**保险**，不是「有一档会被
+		// 切掉」——「100…」那一档在当前折法里**压根不存在**（最宽的「99k+」
+		// 24.49 ≤ 24.5）。
 		countKeyRow(c, iconComments, count, btn.Hovered(), btn.Pressed(),
 			func(c *ui.Context) { countIcon(c, iconComments, btn.Hovered(), btn.Pressed()) })
 	})
@@ -156,16 +162,23 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 // ⚠️ **本地文件不摆**（同 `viewCommentsButton`）。
 //
 // 🔴 **满屏这一枚不带数字**（票 #682 的有意取舍）：播放条那一枚能带，是因为
-// 左列是**三段定宽**的（`playbarLeftMinW` 钉着，数字只吃自己那 33，歌名照旧
+// 左列是**三段定宽**的（`playbarLeftMinW` 钉着，数字只吃自己那 24.5，歌名照旧
 // 76）。满屏底下那一行是**居中的 flex**（`viewFullControls` 的
 // `Justify(ui.Center)`）：这一行里任何一枚变宽，**播放键就离开窗口的竖直中轴**
 // ——而「三键落在中轴上」正是满屏底栏那条设计（`fullplayer_layout_test.go` 的
 // `TestTheFullPlayerBottomBarPaddingAndMaxWidth` 量着它；那里用的是本地文件，
-// 所以评论键不在，量到的中轴是准的）。给评论键加 33 会让播放键偏 16.5，而
+// 所以评论键不在，量到的中轴是准的）。给评论键加 24.5 会让播放键偏 12.25，而
 // 满屏那一行没有播放条左列那样的余量可以重排。
 //
-// ⚠️ **同一份数据、同一个画法**：真要加的时候把那 33 从别处让出来（比如把
-// 这一行改成「左右两组 + 中间一组」的 Grid），不能像播放条那样直接撑宽。
+// ⚠️ **但提示句可以带上那个数**（票 #701 之后的对齐）：数字**不进布局**——
+// 它只在那一句提示里，而提示是**浮在画面上的气泡**（不进那一行的 flex）——
+// ⇒ 所以「不带数字」这条取舍**管不到提示句**，而「提示句里说清是整个稿件的
+// 多少」是播放条那一枚已经有的（`countKeyTip`）。⇒ 两枚键的提示句现在
+// **说同样的话**。
+//
+// ⚠️ **同一份数据、同一个画法**：真要加数字的时候把那 24.5 从别处让出来
+// （比如把这一行改成「左右两组 + 中间一组」的 Grid），不能像播放条那样直接
+// 撑宽。
 func (s *Shell) viewFullCommentsButton(c *ui.Context, st app.State, base flat.Base) {
 	if !st.HasTrack || !s.app.CommentsWorthAsking() {
 		return
@@ -173,7 +186,7 @@ func (s *Shell) viewFullCommentsButton(c *ui.Context, st app.State, base flat.Ba
 	c.Key("full:comments")
 	if s.withTip(c, iconKeyOnBase(c, iconComments, "评论", iconMd, false, base).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-		"看这一首的评论").Clicked() {
+		countKeyTip("评论", s.app.CommentCount(), "看这一首的评论")).Clicked() {
 		// ⚠️ **先把满屏收掉**：这一页是主窗口里的一页，而满屏是**压在主窗口
 		// 上面**的一层——不收掉的话 navigate 之后画面上还是满屏（那几枚键在
 		// 满屏底下点不着）。

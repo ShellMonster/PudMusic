@@ -8,10 +8,14 @@
 //
 // # 🔴 宽度账是本票最要紧的一条
 //
-// 900 宽（应用的最小窗口宽）下，左边那一列的右端离进度条滑块左沿只剩 **6.70**
+// 900 宽（应用的最小窗口宽）下，左边那一列的右端离进度条滑块左沿只剩 **5.20**
 // 像素——而**撞上去的后果是「点不动，而画面上看不出坏了」**（票 #216 那个坑：
 // 中间那一列是 `PassThrough` 的，可它的子节点照旧登记命中，于是左列撑出来的
 // 那一截被进度行的命中框盖住）。
+//
+// ⚠️ **5.20 是「视觉间距」，不是碰撞缓冲**（理由见 `playbar_counts.go` 的文件
+// 头《两个口径》）：`MaxWidth` 在**布局层**硬夹住，所以左列的宽是**常数**
+// 309.5——**碰撞不可能发生**。那 5.20 是**留给人眼**的。
 //
 // ⇒ `TestTheThreeCountsDoNotTouchTheProgressBar` 是这一组的主断言。
 //
@@ -29,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
@@ -454,6 +459,34 @@ func TestTheThreeCountsAreInTheHoverTips(t *testing.T) {
 	}
 }
 
+// TestTheFullPlayerCommentsTipSaysTheSameThing 钉住**满屏那一枚的提示句和播放条
+// 那一枚说同样的话**。
+//
+// 🔴 **为什么这一条**：满屏那一枚**不带数字**（票 #682 的有意取舍——满屏底栏是
+// 居中的 flex，加数字会让播放键离开竖直中轴），而**提示句可以带上那个数**：
+// 数字**不进布局**（它只在那一句提示里，而提示是浮在画面上的气泡）——所以
+// 「不带数字」那条取舍**管不到提示句**。
+//
+// ⇒ 而「提示句里说清是整个稿件的多少」是播放条那一枚已经有的（票 #701 的语义
+// 要求）——**两枚键说同样的话**，否则用户在满屏里点不到那个精确值。
+//
+// ⚠️ **判据是提示句的内容**（不是「键上有没有数字」）：满屏那一枚**照旧不画
+// 数字**，而提示句里说清它。
+func TestTheFullPlayerCommentsTipSaysTheSameThing(t *testing.T) {
+	tt, _ := countsFullTester(t, mvItem(), 2468)
+	key, ok := tt.Find("评论")
+	if !ok {
+		t.Fatalf("满屏播放器里找不到「评论」键，文字有 %q", tt.Texts())
+	}
+	tt.Move(key.X+key.W/2, key.Y+key.H/2)
+	tt.Frame()
+	// 🔴 **完整数字**：那一档在画面上是「2k+」，而提示里给的是「2468」。
+	if !tt.HasText("整个稿件 2468") {
+		t.Errorf("满屏那一枚「评论」键的提示句里没有「整个稿件 2468」那半句"+
+			"（文字有 %q）——它要和播放条那一枚说同样的话", tt.Texts())
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔴 宽度账
 // ─────────────────────────────────────────────────────────────────────────────
@@ -784,6 +817,47 @@ func countsShellWith(t *testing.T, b *commentBili, it app.Item, w int) *testShel
 	ts := commentCountShell(t, b, it, w)
 	ts.tt.Frame()
 	return ts
+}
+
+// countsFullTester 画**满屏播放器**，而假 B 站的 `view` 回给定的评论数。
+//
+// 🔴 **为什么单独一份**：满屏那一枚「评论」键的提示句里要带那个数——而那个数
+// 来自 `App.CommentCount()`（稿件详情那一趟），所以这一族要**等那一趟真的回来**
+// （理由同 `countsPlaybarTester`）。
+//
+// ⚠️ **状态是手给的、队列是真的**：理由同 `commentsFullTester`（判据有两半）。
+func countsFullTester(t *testing.T, it app.Item, reply int64) (*mygoui.Tester, *Shell) {
+	t.Helper()
+	b := newCommentBili(t, "reply-main.json")
+	b.on("/x/web-interface/view", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"aid": 170001, "bvid": r.URL.Query().Get("bvid"),
+			"stat": map[string]any{"reply": reply},
+		})
+	})
+	st := barState()
+	st.Title = it.Title
+	st.Artist = it.Artist
+	cli := bili.NewClient(bili.Options{Transport: b.Server.Client().Transport})
+	cli.TestOnlyPointHostsAtFixture(b.URL)
+	ts := newTestShell(t, at(1200, 800), mounted(func(t *testing.T, a *app.App) {
+		a.MountLogin(app.NewMemoryStore("test"), cli)
+		a.MountStreaming(app.Streaming{
+			Client: cli, Media: b.Server.Client(), TempDir: t.TempDir()})
+	}), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.applyFrameTheme(c)
+			s.full.open = true
+			s.viewFullPlayer(c, st)
+		}
+	}))
+	ts.s.app.Queue().Reset(it)
+	waitFrames(t, ts.tt, "评论数问回来了", func() bool {
+		return ts.s.app.CommentCount() == reply
+	})
+	ts.tt.Frame()
+	return ts.tt, ts.s
 }
 
 // countsWidths 量一档播放条上那几样各多宽。
