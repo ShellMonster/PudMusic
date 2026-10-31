@@ -49,11 +49,25 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 const (
 	// diskFileExt 是缓存文件的扩展名。
 	diskFileExt = ".img"
+	// diskPolicyMark 是「这一版开始管缓存的时刻」那个标记的文件名。
+	//
+	// 🔴 **它为什么需要**（2026-10-30 的第二轮对抗性审查）：这一层以前
+	// **根本没有过期这一说**，所以用户盘上的老封面是「几个月前写的」。
+	// 照 mtime 判的话，用户升级一次就会**几百张封面全部消失、全部重下**
+	// （一屏几十张，每张都要走图床）。
+	//
+	// ⚠️ **它记的是「这一版第一次管缓存的时刻」**，而**升级前写的文件**的
+	// 修改时刻比它早——那就是「老文件」的判据。
+	//
+	// ⚠️ **它跨重启保留**：否则每次启动都会续一次命，而那些文件**永远过期不了**。
+	diskPolicyMark = ".ttl-policy-start"
 	// diskTempMark 是写盘过程中临时文件的标记，跟着最终文件名走
 	// （`<最终名>.tmp-<随机数>`），清扫时按它认出「写到一半」。
 	diskTempMark = ".tmp-"
@@ -84,6 +98,23 @@ type diskWrite struct {
 type diskCache struct {
 	dir string
 	max int64
+	// ttl 是**一份封面多久算过期**。<= 0 = 永不过期。
+	//
+	// 🔴 **过期是滚动的**（2026-10-30）：判据是「最后一次用过」，
+	// 不是「下载那一刻」——用户天天在看的那首歌，它的封面不该在第七天消失。
+	//
+	// ⚠️ **判据是文件自己的修改时刻**（见下面 `open` 的注释），而**不是**
+	// 旁挂记录——那要求每次读都写一份记录（读路径变成写路径，还会攒垃圾）。
+	ttl time.Duration
+	// now 是时钟。nil 用 time.Now（给假时钟是为了让过期能被测）。
+	now func() time.Time
+	// start 是「这一版开始管缓存的时刻」（见 `policyStart`）。
+	//
+	// ⚠️ **它是「老文件」的判据**：修改时刻比它早的那一份，是**升级前写的**——
+	// 而这一层以前根本没有过期这一说，所以那些文件不该在升级后被一次清空。
+	start time.Time
+	// startMu 护着 `start`（它是**懒初始化**的：第一次用到缓存的时候才定下来）。
+	startMu sync.Mutex
 
 	// writeFile 是「把字节原子地写到 path」的那一格。默认是同目录临时文件 +
 	// rename；测试换成一个会停住的实现，用来证明写盘慢不挡主线程。
@@ -111,10 +142,14 @@ type diskCache struct {
 // ⚠️ 清扫在后台：目录里可能躺着几千个文件，启动时在主线程上遍历它们等于把
 // 第一帧往后推。清扫删掉某个文件时如果正好有人在读它，读的那一方拿到的要么是
 // 已经打开的完整内容、要么是一次 miss（回去下载）——两种都对。
-func newDiskCache(dir string, max int64) *diskCache {
+func newDiskCache(dir string, max int64, ttl time.Duration) *diskCache {
 	d := &diskCache{
-		dir:     dir,
-		max:     max,
+		dir: dir,
+		max: max,
+		ttl: ttl,
+		now: time.Now,
+		// ⚠️ **宽限期比 TTL 长**：老封面多留一个 TTL 的时间（也就是用户还有
+		// 整整一个 TTL 的时间不用管它们），而它们在那之后照常过期。
 		writeCh: make(chan diskWrite, diskWriteQueue),
 		ready:   make(chan struct{}),
 		order:   list.New(),
@@ -192,6 +227,19 @@ func (d *diskCache) open(name string) ([]byte, bool) {
 	if !ok {
 		return nil, false
 	}
+	// 🔴 **过期的那一份不算命中**（2026-10-30）：过期是**滚动的**——判据是
+	// 「最后一次用过」，不是「下载那一刻」。
+	//
+	// ⚠️ **判据是文件自己的修改时刻**（mtime）：每次用到它都把它推到当下。
+	// 而**不另记一份「用过」**：那要求每次读都写一次盘（读路径变成写路径，
+	// 实测 100 张从 5.8 毫秒涨到 858 毫秒），还会攒出一堆「有记录、没有图」
+	// 的残骸。
+	//
+	// ⚠️ **过期了就删掉**：留着它只会占地方，而它已经不会再被命中了。
+	if d.expired(name) {
+		_ = d.remove(name)
+		return nil, false
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, false
@@ -207,7 +255,80 @@ func (d *diskCache) open(name string) ([]byte, bool) {
 		return nil, false
 	}
 	d.touch(name, int64(len(data)))
+	// 🔴 **记一次「用过」**：把文件的修改时刻推到当下——**只改元数据，
+	// 不碰内容**。
+	diskcache.Touch(path, d.now())
 	return data, true
+}
+
+// policyStart 返回「这一版开始管缓存的时刻」。
+//
+// 🔴 **它是「老文件」的判据**（2026-10-30 的第二轮对抗性审查）：这一层以前
+// **根本没有过期这一说**，所以用户盘上的老封面是「几个月前写的」——照 mtime
+// 判的话，用户升级一次就会**几百张封面全部消失、全部重下**（一屏几十张，
+// 每张都要走图床）。
+//
+// ⇒ 所以「老文件」= **修改时刻早于这一刻**的那一份。而**这一版自己写的**
+// 那些修改时刻都在它之后（或正好等于），所以它们照常按 TTL 过期。
+//
+// ⚠️ **它跨重启保留**（记在 `diskPolicyMark` 那个文件里）：否则每次启动都会
+// 把「这一版的时刻」推到当下，于是那些文件**永远过期不了**。
+//
+// ⚠️ **它是懒初始化的**（第一次用到缓存的时候才定下来）：那样的话，测试用
+// 假时钟时它拿到的就是那个假时钟的「现在」。
+func (d *diskCache) policyStart() time.Time {
+	d.startMu.Lock()
+	defer d.startMu.Unlock()
+	if !d.start.IsZero() {
+		return d.start
+	}
+	path := filepath.Join(d.dir, diskPolicyMark)
+	if b, err := os.ReadFile(path); err == nil {
+		if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(b))); err == nil {
+			// ⚠️ **也截到秒**：理由同上（盘上的修改时刻精度不一定是纳秒）。
+			d.start = t.Truncate(time.Second)
+			return d.start
+		}
+	}
+	// 第一次用这一版：把「从现在起」记下来。
+	//
+	// 🔴 **截到秒**（2026-10-30 的第三轮自查）：盘上那个修改时刻的精度**不
+	// 一定到纳秒**（HFS+ 是秒，APFS 是纳秒，而网络盘和 Linux 上各有各的）。
+	// 而比较是「修改时刻**早于** policyStart 就算老文件」——所以 policyStart
+	// 带纳秒的话，同一秒里续命的那些封面会被判成「早于」，于是**永远不过期**
+	// （而它们本该从那一刻起照常按 TTL 过期）。
+	//
+	// ⇒ 两边都截到秒：policyStart 记秒，盘上的比较也按秒。
+	d.start = d.now().Truncate(time.Second)
+	_ = os.WriteFile(path, []byte(d.start.Format(time.RFC3339Nano)), 0o644)
+	return d.start
+}
+
+// expired 报这一张图是不是过期了。
+//
+// 🔴 **判据是文件自己的修改时刻**（mtime）：那才是「最后一次用过它」的
+// 时刻——每一次用到它都会把它推到当下（见 `open`）。
+//
+// ⚠️ **升级前写的那些不算过期**（见 `policyStart`）：它们不该在用户升级的
+// 那一刻被一次清空。而清扫那一轮会把它们的修改时刻推到当下（见 `sweep`），
+// 于是它们从那一刻开始**照常按 TTL 过期**。
+func (d *diskCache) expired(name string) bool {
+	path, ok := d.filePath(name)
+	if !ok {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if d.ttl <= 0 {
+		return false
+	}
+	// ⚠️ **升级前写的**：不算过期。
+	if info.ModTime().Before(d.policyStart()) {
+		return false
+	}
+	return d.now().Sub(info.ModTime()) >= d.ttl
 }
 
 // remove 删掉一份缓存并把它从账本上拿掉。解码发现盘上那份坏了的时候走这里。
@@ -315,8 +436,18 @@ func (d *diskCache) removeFiles(names []string) {
 func (d *diskCache) store(w diskWrite) {
 	path, ok := d.filePath(w.name)
 	if ok {
+		// 🔴 **先定下「这一版开始管缓存的时刻」，再写盘**（2026-10-30）：
+		// 顺序反了的话，**这一版自己写的每一份**的修改时刻都早于那一刻——
+		// 于是它们**全都成了「老文件」**，一份都不过期。
+		//
+		// ⚠️ **判据是「修改时刻在 policyStart 之后」**（见 `expired`），
+		// 而写盘那一刻的修改时刻就在 policyStart 之后。
+		d.policyStart()
 		if err := d.writeFile(path, w.data); err == nil {
 			d.note(w.name, int64(len(w.data)))
+			// 🔴 **把修改时刻设成「下载完的那一刻」**：过期的判据是 mtime
+			// （见上面 `open` 的注释），而它该从这一份**到位**的时候算起。
+			diskcache.Touch(path, d.now())
 		}
 	}
 	if w.done != nil {
@@ -384,7 +515,30 @@ func (d *diskCache) sweep() {
 			if err != nil || !info.Mode().IsRegular() {
 				continue
 			}
-			files = append(files, found{name: name, size: info.Size(), mod: info.ModTime()})
+			// 🔴 **升级前写的那些：给它们续一次命**（2026-10-30 的第二轮
+			// 对抗性审查）。
+			//
+			// ⚠️ **为什么**：这一层以前**根本没有过期这一说**，所以用户盘上的
+			// 老封面是「几个月前写的」——照 mtime 判的话，用户升级一次就会
+			// **几百张封面全部消失、全部重下**（一屏几十张，每张都要走图床）。
+			//
+			// ⚠️ **续的是「从现在起算一个 TTL」**：它们从这一刻开始**照常过期**，
+			// 而宽限期不是免死金牌。
+			//
+			// ⚠️ **排序用的仍是原来的修改时刻**：那是「上一次真的用到它」的
+			// 时刻，而**淘汰要按那个排**（最久没用的先挤）。续命改的是
+			// 「过期判据」，不是「淘汰顺序」。
+			mod := info.ModTime()
+			if mod.Before(d.policyStart()) {
+				diskcache.Touch(filepath.Join(d.dir, name), d.now())
+			} else if d.expired(name) {
+				// 🔴 **过期的那一份在这一轮就清掉**（2026-10-30）：不然它要等到
+				// 「容量超了才挤」才消失——而容量可能一直不超，那它就一直占着
+				// 地方。
+				_ = d.remove(name)
+				continue
+			}
+			files = append(files, found{name: name, size: info.Size(), mod: mod})
 		}
 		// 别的东西不碰：目录是专用的，但「专用」不等于「我们有权删用户的文件」。
 	}

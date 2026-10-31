@@ -67,6 +67,16 @@ const DefaultMaxBytes int64 = 32 << 20
 // 设上限不是为了省这 256MB，是为了给「一直滚下去」一个确定的终点。
 const DefaultDiskMaxBytes int64 = 256 << 20
 
+// DefaultDiskTTL 是磁盘缓存的默认有效期：7 天（和 `service/diskcache` 那一档）。
+//
+// 🔴 **过期是滚动的**（2026-10-30）：用户今天还在看的那首歌，它的封面今天
+// 就重新开始算 7 天——而用户第 3 天又听了它的话，第 11 天才清。
+//
+// ⚠️ **为什么封面也要过期**：它按容量淘汰（256 MB）已经有一个终点了，但
+// 容量淘汰是「挤最久没用的」——而**同一个地址的封面**（B 站的图床地址带
+// 一串签名）在下一次启动时可能是另一个地址，于是旧的那些一辈子占着地方。
+const DefaultDiskTTL = 7 * 24 * time.Hour
+
 // visibleFrames 是**画面上正画着的**那几张图能活多久（以帧计）。
 //
 // 挤缓存（LRU）的时候正画着的那几张是**不许挤**的（票 #358）：挤掉之后它
@@ -138,6 +148,12 @@ type Options struct {
 	// DiskMaxBytes 是磁盘缓存的字节上限，零值是 DefaultDiskMaxBytes。
 	// 只在 Dir 非空时有意义。
 	DiskMaxBytes int64
+	// DiskTTL 是**一份封面多久算过期**（零值是 DefaultDiskTTL，负值是「永不过期」）。
+	// 只在 Dir 非空时有意义。
+	//
+	// 🔴 **过期是滚动的**（2026-10-30）：判据是「最后一次用过」，不是「下载
+	// 那一刻」——用户天天在看的那首歌，它的封面不该在第七天消失。
+	DiskTTL time.Duration
 	// MaxInflight 是同时在途的下载数，零值是 6。
 	MaxInflight int
 	// Decoders 是解码 worker 数，零值是 min(核数, 4)。
@@ -354,7 +370,11 @@ func New(opts Options) *Cache {
 	if opts.Dir != "" {
 		if err := os.MkdirAll(opts.Dir, 0o755); err == nil {
 			// 目录建好了才算「要落盘」。建不了就当没配，封面照常从网上下来。
-			c.disk = newDiskCache(opts.Dir, opts.DiskMaxBytes)
+			ttl := opts.DiskTTL
+			if ttl == 0 {
+				ttl = DefaultDiskTTL
+			}
+			c.disk = newDiskCache(opts.Dir, opts.DiskMaxBytes, ttl)
 		}
 	}
 	for range opts.Decoders {

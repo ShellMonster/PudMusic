@@ -63,7 +63,8 @@
 //
 // # 过期和容量
 //
-// 过期：7 天（和 `service/danmaku` 的 TTL 一样）。
+// 过期：7 天（和 `service/danmaku` 的 TTL 一样），而且是**滚动的**——
+// 判据是「最后一次用过」，不是「下完的那一刻」（见 `service/diskcache`）。
 // 容量：默认 2 GB，超了按**最久没动过的先删**（LRU）。
 package streamaudio
 
@@ -72,11 +73,12 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 // TTL 是缓存的有效期：7 天。
@@ -84,7 +86,10 @@ import (
 // ⚠️ **它管的是「要不要再去问一次 B 站」，不是「这份字节还能不能播」**：
 // 一份完整的字节在 7 天之后照样能播（B 站的音频不会因为过期而变），
 // 只是过期之后会**重新下**（而下回来的那份是一样的）。
-const TTL = 7 * 24 * time.Hour
+//
+// 🔴 **过期是滚动的**（2026-10-30）：判据是「最后一次用过」，不是「下完的
+// 那一刻」——用户天天在听的那一首，不该在第七天消失（见 `service/diskcache`）。
+const TTL = diskcache.TTL
 
 // DefaultCapacity 是缓存目录的总容量上限：2 GB。
 //
@@ -137,18 +142,17 @@ type Bytes struct {
 	Label string `json:"label,omitempty"`
 	// Meta 是界面要用的那些字段（见 `Meta`）。
 	Meta Meta `json:"meta,omitempty"`
-	// FetchedAt 是**这一份下完的时刻**。过期判据靠它。
+	// FetchedAt 是**这一份下完的时刻**。
+	//
+	// ⚠️ **它不是过期判据**（见 `diskcache` 的文件头）：那个时刻不因为用户
+	// 又听了而变。而用户天天在听的那一首，不该在第七天消失。
 	FetchedAt time.Time `json:"fetchedAt"`
-	// TouchedAt 是**最后一次用到它**的时刻。容量淘汰按它排（LRU）。
-	TouchedAt time.Time `json:"touchedAt"`
-}
-
-// Expired 报这一份是不是过期了。
-func (b Bytes) Expired(now time.Time) bool {
-	if b.FetchedAt.IsZero() {
-		return true
-	}
-	return now.Sub(b.FetchedAt) > TTL
+	// ⚠️ **这里没有「最后用过」那一栏**：它**曾经**在这儿，而刷新它就得
+	// **把整份记录写回去**——那会把读路径变成写路径（一��� fsync + rename
+	// + 目录 fsync），还会把并发写进去的新内容盖成旧的（丢更新）。
+	//
+	// ⇒ 「最后用过」记在**字节文件本身的修改时刻**上（见 `diskcache` 的
+	// 文件头）——过期判据和容量淘汰都看它（见 `Complete` 和 `Evict`）。
 }
 
 // Pref 是「这个偏好解析到了哪一档」。
@@ -156,8 +160,6 @@ type Pref struct {
 	Track string `json:"track"`
 	Pref  string `json:"pref"`
 	Tier  string `json:"tier"`
-	// TouchedAt 是最后一次用到它（容量淘汰按它排）。
-	TouchedAt time.Time `json:"touchedAt"`
 }
 
 // Cache 是字节缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。
@@ -306,11 +308,16 @@ func (c *Cache) Complete(track, tier string) (Bytes, bool) {
 	if !ok || !b.Complete {
 		return Bytes{}, false
 	}
-	if b.Expired(c.now()) {
-		return Bytes{}, false
-	}
 	path := c.BytesPath(track, tier)
 	if path == "" {
+		return Bytes{}, false
+	}
+	// 🔴 **过期判据是字节文件的修改时刻**（见 `diskcache` 的文件头）：那才是
+	// 「最后一次用到它」的时刻——每一次用到它都会把它推到当下。
+	//
+	// ⚠️ **不用记录里那一栏**：刷新它就得把整份记录写回去（读路径变成写
+	// 路径，而且会丢并发更新）。
+	if !diskcache.Fresh(path, c.now(), TTL) {
 		return Bytes{}, false
 	}
 	st, err := os.Stat(path)
@@ -321,9 +328,17 @@ func (c *Cache) Complete(track, tier string) (Bytes, bool) {
 	if b.Size >= 0 && st.Size() != b.Size {
 		return Bytes{}, false
 	}
-	// 记一次「用过」：容量淘汰按这个排（LRU）。
-	b.TouchedAt = c.now()
-	_ = c.writeBytes(b)
+	// 🔴 **记一次「用过」**：把**字节文件**的修改时刻推到当下——只改元数据，
+	// 不碰内容。
+	//
+	// ⚠️ **不写回整份记录**（2026-10-30 的第二轮对抗性审查）：那会
+	// （1）把读路径变成写路径（一次 fsync + rename + 目录 fsync），
+	// （2）把并发 `SaveBytes` 写进去的新内容盖成旧的（丢更新）——
+	// 而用户看到的现象是「刚下完的那一份，标题和音质徽章又变回旧的」，
+	// 大小那栏被盖成旧的之后下一次还会「缓存不命中，整首重下一遍」。
+	//
+	// ⚠️ **容量淘汰（LRU）也用字节文件的修改时刻**（见 `Evict`）。
+	diskcache.Touch(path, c.now())
 	return b, true
 }
 
@@ -347,11 +362,17 @@ func (c *Cache) SaveBytes(track, tier string, size int64, label string, meta Met
 		Label:     label,
 		Meta:      meta,
 		FetchedAt: now,
-		TouchedAt: now,
 	}
 	if err := c.writeBytes(b); err != nil {
 		return err
 	}
+	// 🔴 **把字节文件的修改时刻推到「下完的那一刻」**（2026-10-30）：过期的
+	// 判据是**字节文件的 mtime**（见 `diskcache` 的文件头）。
+	//
+	// ⚠️ **为什么还要这一步**：字节是字节源自己写进那个文件的，而它的 mtime
+	// 是**写入过程中**的时刻——下载要几十秒，于是那一秒和「下完」差着
+	// 几十秒。差得不多，但它不该由「下载中途的某一刻」决定。
+	diskcache.Touch(c.BytesPath(track, tier), now)
 	// 写完就顺手做一次容量淘汰——否则「一直下」会让缓存目录无上限地长。
 	c.Evict()
 	return nil
@@ -379,7 +400,6 @@ func (c *Cache) StartBytes(track, tier string) error {
 		Size:      -1,
 		Complete:  false,
 		FetchedAt: now,
-		TouchedAt: now,
 	})
 }
 
@@ -390,22 +410,27 @@ func (c *Cache) SavePref(track, pref, tier string) error {
 	if c.dir == "" {
 		return nil
 	}
-	p := Pref{Track: track, Pref: pref, Tier: tier, TouchedAt: c.now()}
+	p := Pref{Track: track, Pref: pref, Tier: tier}
 	b, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
-	return writeAtomic(c.prefPath(track, pref), b)
+	return diskcache.WriteAtomic(c.prefPath(track, pref), b)
 }
 
-// Touch 记一次「用过曲目 + 档这一份」（只改记录里的 `TouchedAt`）。
+// Touch 记一次「用过曲目 + 档这一份」。
+//
+// 🔴 **它只改字节文件的修改时刻**（不碰记录）：那才是「最后一次用到它」的
+// 时刻——过期判据和容量淘汰都看它（见 `Complete` 和 `Evict`）。
+//
+// ⚠️ **不写回整份记录**：那会把读路径变成写路径，还会把并发写进去的新内容
+// 盖成旧的（丢更新）。
 func (c *Cache) Touch(track, tier string) {
-	b, ok := c.readBytes(track, tier)
-	if !ok {
+	path := c.BytesPath(track, tier)
+	if path == "" {
 		return
 	}
-	b.TouchedAt = c.now()
-	_ = c.writeBytes(b)
+	diskcache.Touch(path, c.now())
 }
 
 // Protect 标住「这一份正在用，不许淘汰」。
@@ -510,7 +535,7 @@ func (c *Cache) CleanOrphans() int {
 // ⚠️ **正在用的那一份不许删**（见 `protect` 那一栏的注释）：正在播的歌被删掉
 // 的话，歌就断了——那是最不能接受的一种后果。
 //
-// ⚠️ **它按 `TouchedAt` 排（LRU）**：最近用过的先留着。
+// ⚠️ **它按字节文件的修改时刻排（LRU）**：最近用过的先留着。
 func (c *Cache) Evict() {
 	if c.dir == "" || c.capacity <= 0 {
 		return
@@ -535,10 +560,44 @@ func (c *Cache) Evict() {
 	if total <= c.capacity {
 		return
 	}
+	// 🔴 **按字节文件的修改时刻排（LRU）**：那才是「最后一次用到它」的时刻
+	// ——每一次用到它都会把那个文件推到当下（见 `Complete`）。
+	//
+	// ⚠️ **为什么不看记录里那一栏（原来的 `TouchedAt`）**（2026-10-30 的第二
+	// 轮对抗性审查）：刷新它就得把整份记录写回去，而那会（1）把读路径变成
+	// 写路径，（2）把并发写进去的新内容盖成旧的。而两套口径还会**分叉**——
+	// 字节文件是新的、记录是旧的，于是**正在用的那一份反而先被淘汰**
+	// （用户看到的是「刚听过的歌被删了，切回去整首重下」）。
+	//
+	// ⇒ 所以那一栏已经**删掉**了（见 `Bytes`）。
+	// 🔴 **时刻和条目必须一起排**（2026-10-30 的第三轮自查挖出来的 P1）。
+	//
+	// ⚠️ **不能写成「排 `entries`，比较器读 `used[i]`」**：那样比较器按**位置**
+	// 读 `used`，而 `used` 不跟着 `entries` 一起动——于是排出来的是乱的
+	// （实测：三份排成了 B A C，而正确答案是 B C A）。
+	//
+	// ⇒ 而排错了的后果是**淘汰删错文件**：用户看到的是「刚听过的歌被删了，
+	// 切回去整首重下」。
+	type aged struct {
+		entry Bytes
+		used  time.Time
+	}
+	agedList := make([]aged, len(entries))
+	for i, e := range entries {
+		used := time.Time{}
+		if st, err := os.Stat(c.BytesPath(e.Track, e.Tier)); err == nil {
+			used = st.ModTime()
+		}
+		agedList[i] = aged{entry: e, used: used}
+	}
 	// 老的在前。
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].TouchedAt.Before(entries[j].TouchedAt)
+	sort.Slice(agedList, func(i, j int) bool {
+		return agedList[i].used.Before(agedList[j].used)
 	})
+	entries = entries[:0]
+	for _, a := range agedList {
+		entries = append(entries, a.entry)
+	}
 	for _, e := range entries {
 		if total <= c.capacity {
 			return
@@ -765,7 +824,7 @@ func (c *Cache) writeBytes(b Bytes) error {
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, raw)
+	return diskcache.WriteAtomic(path, raw)
 }
 
 // readPref 读「曲目 + 偏好」那张映射表的一条。
@@ -786,56 +845,4 @@ func (c *Cache) readPref(track, pref string) (Pref, bool) {
 		return Pref{}, false
 	}
 	return p, true
-}
-
-// writeAtomic 临时文件 → fsync → rename。任何一步失败都把临时文件删掉。
-//
-// ⚠️ 临时文件建在**目标同一个目录**里：rename 只在同一文件系统内是原子的，
-// 临时文件放到系统临时目录去的话，跨文件系统时 rename 会失败——而那正是
-// 「用户把数据目录放在另一个盘上」的情形。
-func writeAtomic(path string, b []byte) (err error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".streamaudio-*.tmp")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		if err != nil {
-			tmp.Close()
-			os.Remove(name)
-		}
-	}()
-
-	if _, err = tmp.Write(b); err != nil {
-		return err
-	}
-	// 数据落盘了但目录项没有的话，断电之后可能还是旧文件名。
-	if err = tmp.Sync(); err != nil {
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	if err = os.Chmod(name, 0o644); err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	return syncDir(dir)
-}
-
-// syncDir 把目录项本身刷到盘上。Windows 上打不开目录句柄，直接跳过——
-// 那边 rename 本身就已经是原子的。
-func syncDir(dir string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
 }

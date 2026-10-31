@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 // ErrQueueFromNewer 是「这份队列来自更新的版本，一个字都不许写回去」。
@@ -72,5 +74,5 @@ func MergeIntoQueue(path string, extra []*Task) error {
 	if err != nil {
 		return fmt.Errorf("download: 序列队列：%w", err)
 	}
-	return writeAtomic(path, b)
+	return diskcache.WriteAtomic(path, b)
 }

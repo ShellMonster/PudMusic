@@ -18,8 +18,20 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
+	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
+
+// TTL 是一份歌词缓存多久算过期：7 天（和弹幕缓存同一档）。
+//
+// 🔴 **它以前根本不存在**（2026-10-30）：歌词缓存只增不减，于是用户数据目录里
+// 的歌词文件只涨不落。而现在有了它，判据是**滚动**的——用户还在听的那一份
+// 不算过期。
+//
+// ⚠️ **过期的只是「歌词文本」**：用户自己调过的偏移和字号是**用户数据**，
+// 过期时也得留着（见 `Load` 的注释）。
+const TTL = diskcache.TTL
 
 // Entry 是缓存里一首歌的一条。
 //
@@ -45,6 +57,8 @@ type Entry struct {
 // Cache 是歌词缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。
 type Cache struct {
 	dir string
+	// now 是时钟。nil 用 time.Now（给假时钟是为了让过期能被测）。
+	now func() time.Time
 }
 
 // NewCache 建一个落在 dir 的缓存。**建目录**：不在的话第一次写会失败，
@@ -53,7 +67,15 @@ func NewCache(dir string) *Cache {
 	if dir != "" {
 		_ = os.MkdirAll(dir, 0o755)
 	}
-	return &Cache{dir: dir}
+	return &Cache{dir: dir, now: time.Now}
+}
+
+// WithClock 换时钟。给假时钟是为了让过期能被测（等 7 天没法测）。
+func (c *Cache) WithClock(now func() time.Time) *Cache {
+	if now != nil {
+		c.now = now
+	}
+	return c
 }
 
 // Dir 是缓存目录，空表示这个缓存不落盘。
@@ -77,6 +99,14 @@ func (c *Cache) Path(key string) string {
 // ⚠️ **读不出来一律当成没有，绝不报错**：歌词缓存坏掉的表现应该是「这首歌
 // 暂时没有歌词」，而不是应用开不起来。用户删掉缓存目录、清磁盘、换机器都
 // 会走到这里。
+//
+// 🔴 **ok 的意思是「盘上有这一份记录」，不是「这一份有歌词」**（2026-10-30）：
+// 一份**过期**的记录，它的歌词文本已经被清掉了（见下面那段），但**用户调过
+// 的偏移和字号还在**——而那两样是**用户数据**，调用方要拿得到它们。
+//
+// ⇒ 所以过期的时候返回的是「**记录在、歌词没了**」：ok = true，而
+// `Lyrics` / `TLyrics` 是空串。调用方判断「有没有歌词」要看 `Lyrics`，
+// 不是看 ok。
 func (c *Cache) Load(key string) (Entry, bool) {
 	path := c.Path(key)
 	if path == "" {
@@ -90,6 +120,36 @@ func (c *Cache) Load(key string) (Entry, bool) {
 	if err := json.Unmarshal(b, &e); err != nil {
 		return Entry{}, false
 	}
+	now := c.now()
+	// 🔴 **过期是滚动的**（2026-10-30）：判据是「**最后一次用到**」。
+	//
+	// ⚠️ **判据是文件的修改时刻**（见 `diskcache` 的文件头）——每次读到它
+	// 都会把它推到当下。而用户天天在听的那一首，不该在第七天消失。
+	if !diskcache.Fresh(path, now, TTL) {
+		// 🔴 **过期时把「歌词文本」清掉，但把用户自己的值留着**（2026-10-30
+		// 的对抗性审查挖出来的 P0）。
+		//
+		// ⚠️ **为什么不能整份丢掉**：那份缓存里除了歌词文本，还有**用户调过的
+		// 偏移和字号**。而「歌词文本过期了要重新拉一份」是**另一件事**——
+		// 顺手把用户的数据清零，用户看到的现象是「某天回来发现我调过的歌词
+		// 偏移不见了，字号也变小了」，而且**永久丢失**（缓存里唯一一份）。
+		//
+		// ⚠️ **老缓存文件不需要迁移**：它们没有时间戳这一栏，而它们的 mtime
+		// 就是当初写下去的时刻——判据按 mtime 走，老文件的行为和当初一致。
+		//
+		// 🔴 **返回的是「记录在、歌词没了」**（ok = true）：调用方要拿得到
+		// **用户调过的偏移和字号**——那两样是用户数据，不该跟着歌词文本一起
+		// 过期（见上面那段）。
+		e.Lyrics = ""
+		e.TLyrics = ""
+		return e, true
+	}
+	// 🔴 **记一次「用过」**：把文件的修改时刻推到当下——**只改元数据，
+	// 不碰内容**。
+	//
+	// ⚠️ **不写回整份记录**：那会（1）把读路径变成写路径，
+	// （2）把并发写进去的新内容盖成旧内容（丢更新）。
+	diskcache.Touch(path, now)
 	return e, true
 }
 
@@ -100,63 +160,26 @@ func (c *Cache) Save(key string, e Entry) error {
 	if path == "" {
 		return nil
 	}
+	return c.write(path, e)
+}
+
+// write 把一份记录原子写下去。
+//
+// 🔴 **写完把文件的修改时刻设成「取回来的时刻」**：过期的判据是 mtime
+// （见 `diskcache` 的文件头），而磁盘上的 mtime 是**真实时间**——
+// 于是用假时钟的测试会看到「刚写的文件已经过期了」。
+//
+// ⚠️ **这一步在生产上也是对的**：文件的修改时刻就该是「这一份是什么时候
+// 拿到的」，而不是「写它的那一瞬间」（两者相差一次 fsync 的工夫，
+// 而那正是「用户多久没用了」这件事的起点）。
+func (c *Cache) write(path string, e Entry) error {
 	b, err := json.Marshal(e)
 	if err != nil {
 		return err
 	}
-	return writeAtomic(path, b)
-}
-
-// writeAtomic 临时文件 → fsync → rename。任何一步失败都把临时文件删掉。
-//
-// ⚠️ 临时文件建在**目标同一个目录**里：rename 只在同一文件系统内是原子的，
-// 临时文件放到系统临时目录去的话，跨文件系统时 rename 会失败——而那正是
-// 「用户把数据目录放在另一个盘上」的情形。
-func writeAtomic(path string, b []byte) (err error) {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".lyrics-*.tmp")
-	if err != nil {
+	if err := diskcache.WriteAtomic(path, b); err != nil {
 		return err
 	}
-	name := tmp.Name()
-	defer func() {
-		if err != nil {
-			tmp.Close()
-			os.Remove(name)
-		}
-	}()
-
-	if _, err = tmp.Write(b); err != nil {
-		return err
-	}
-	// 数据落盘了但目录项没有的话，断电之后可能还是旧文件名。
-	if err = tmp.Sync(); err != nil {
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	// CreateTemp 建出来的是 0600。歌词里没有隐私，给成普通用户文件同样的权限，
-	// 不然用户从访达里看一眼歌词缓存目录会以为坏了。
-	if err = os.Chmod(name, 0o644); err != nil {
-		return err
-	}
-	if err = os.Rename(name, path); err != nil {
-		return err
-	}
-	return syncDir(dir)
-}
-
-// syncDir 把目录项本身刷到盘上。Windows 上打不开目录句柄，直接跳过——
-// 那边 rename 本身就已经是原子的。
-func syncDir(dir string) error {
-	if runtime.GOOS == "windows" {
-		return nil
-	}
-	d, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	diskcache.Touch(path, c.now())
+	return nil
 }
