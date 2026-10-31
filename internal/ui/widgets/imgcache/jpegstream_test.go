@@ -40,6 +40,53 @@ func coverJPEG(t testing.TB, w, h int, gray bool) []byte {
 	return b.Bytes()
 }
 
+func TestJPEGEXIFOrientationStreamsIntoTargetSize(t *testing.T) {
+	const maxSide = 96
+	data := coverJPEG(t, 2048, 1536, false)
+	decoded, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, orientation := range []int{2, 3, 4, 5, 6, 7, 8} {
+		t.Run(fmt.Sprintf("orientation=%d", orientation), func(t *testing.T) {
+			oriented := orientImage(decoded, orientation)
+			want := shrinkTo(oriented, maxSide).(*image.RGBA)
+			var before, after runtime.MemStats
+			runtime.GC()
+			runtime.ReadMemStats(&before)
+			got, handled, err := decodeJPEGStoredOriented(withJPEGOrientation(data, orientation), maxSide, orientation)
+			runtime.ReadMemStats(&after)
+			if err != nil || !handled {
+				t.Fatalf("handled=%v err=%v", handled, err)
+			}
+			if got.Bounds() != want.Bounds() || !bytes.Equal(got.Pix, want.Pix) {
+				t.Fatalf("orientation=%d output differs from image.Decode + orientImage + shrinkTo", orientation)
+			}
+			if max(got.Bounds().Dx(), got.Bounds().Dy()) > maxSide {
+				t.Fatalf("orientation=%d output=%v exceeds max side %d", orientation, got.Bounds(), maxSide)
+			}
+			if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 6<<20 {
+				t.Fatalf("orientation=%d allocated %d bytes; full-size JPEG intermediate returned", orientation, allocated)
+			}
+		})
+	}
+}
+
+func withJPEGOrientation(data []byte, orientation int) []byte {
+	tiff := make([]byte, 26)
+	copy(tiff, "II")
+	bo := binary.LittleEndian
+	bo.PutUint16(tiff[2:], 42)
+	bo.PutUint32(tiff[4:], 8)
+	bo.PutUint16(tiff[8:], 1)
+	bo.PutUint16(tiff[10:], 0x112)
+	bo.PutUint16(tiff[12:], 3)
+	bo.PutUint32(tiff[14:], 1)
+	bo.PutUint16(tiff[18:], uint16(orientation))
+	seg := append([]byte{0xff, 0xe1, 0, 34, 'E', 'x', 'i', 'f', 0, 0}, tiff...)
+	return append(append(append([]byte{}, data[:2]...), seg...), data[2:]...)
+}
+
 func TestStreamingJPEGMatchesExistingPixels(t *testing.T) {
 	for _, size := range []image.Point{{1920, 1080}, {2560, 1440}, {1081, 1921}, {769, 777}, {1024, 1}, {1, 1024}, {800, 17}} {
 		for _, gray := range []bool{false, true} {

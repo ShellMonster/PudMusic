@@ -62,8 +62,7 @@ const maxStoredSide = 768
 //
 // 和 `ui.DecodeBitmap` 的区别有三个：
 //
-//   - 长边超过 `maxStoredSide` 的按比例缩到 `maxStoredSide`（EXIF 要转的那一张
-//     也是：先摆正再缩）；
+//   - 长边超过 `maxStoredSide` 的按比例缩到 `maxStoredSide`（EXIF 方向会在流式缩放时直接映射）
 //   - 摆正和缩放都在这里做完，交给 `ui.NewBitmap` 的只是最终的像素；
 //   - **不捕获原始字节**（见下面 EXIF 那一支的注释）。
 //
@@ -87,13 +86,22 @@ func decodeStored(data []byte, maxSide int) (*ui.Bitmap, error) {
 	//
 	// 摆正和缩放都在这里做完，交给 `ui.NewBitmap` 的只是最终的 `*image.RGBA`：
 	// 它不捕获任何字节，缓存挤掉它时像素就跟着走了。
+	// EXIF-oriented baseline JPEGs use the row decoder above. Unsupported JPEG
+	// variants retain the standard decode fallback for format compatibility.
 	if o := exifOrientation(data); o >= 2 {
+		if img, handled, err := decodeJPEGStoredOriented(data, maxSide, o); handled {
+			if err != nil {
+				return nil, err
+			}
+			return ui.NewBitmap(img), nil
+		}
 		img, _, err := image.Decode(bytes.NewReader(data))
 		if err != nil {
 			return nil, err
 		}
 		return ui.NewBitmap(shrinkTo(orientImage(img, o), maxSide)), nil
 	}
+
 	if img, handled, err := decodeJPEGStored(data, maxSide); handled {
 		if err != nil {
 			return nil, err
