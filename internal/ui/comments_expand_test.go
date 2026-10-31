@@ -95,13 +95,14 @@ func TestTheUnlimitedLinesDoNotTruncateTheBody(t *testing.T) {
 			if strings.HasSuffix(plain, "…") {
 				t.Errorf("不限行数那一档末尾还是省略号：%q", plain)
 			}
+			body := &commentBody{spans: spans}
 			// 🔴 **「不限」那一档恒不折**（`commentBodyFolded` 见 `lines <= 0`
 			// 就返回 false）——它是**展开之后**的那一份。
-			if commentBodyFolded(c, spans, 900, commentBodyUnlimited) {
+			if commentBodyFolded(c, body, 900, commentBodyUnlimited) {
 				t.Error("不限行数那一档被判成「折过了」——它是展开之后的那一份")
 			}
 			// 折叠那一档要真的折起来（否则这一条测的是「本来就没折」）。
-			if !commentBodyFolded(c, spans, 900, commentBodyLines) {
+			if !commentBodyFolded(c, body, 900, commentBodyLines) {
 				t.Error("折叠那一档没被判成「折过了」——正文太长而它没折")
 			}
 		}
@@ -127,14 +128,16 @@ func TestTheBodyRemembersWhetherItWasFolded(t *testing.T) {
 			s.wake.set(c)
 			s.applyFrameTheme(c)
 			spans, _, _ := commentSpansOf(msg, nil, nil, commentMark{})
-			if !commentBodyFolded(c, spans, 900, commentBodyLines) {
+			body := &commentBody{spans: spans}
+			if !commentBodyFolded(c, body, 900, commentBodyLines) {
 				t.Error("长正文折起来之后没有被判成「折过了」")
 			}
-			if commentBodyFolded(c, spans, 900, commentBodyUnlimited) {
+			if commentBodyFolded(c, body, 900, commentBodyUnlimited) {
 				t.Error("展开那一档被判成「折过了」——界面层会摆一枚『展开』出来")
 			}
 			shortSpans, _, _ := commentSpansOf(short, nil, nil, commentMark{})
-			if commentBodyFolded(c, shortSpans, 900, commentBodyLines) {
+			shortBody := &commentBody{spans: shortSpans}
+			if commentBodyFolded(c, shortBody, 900, commentBodyLines) {
 				t.Error("短正文被判成「折过了」——界面层会给它摆一枚『展开』出来")
 			}
 		}

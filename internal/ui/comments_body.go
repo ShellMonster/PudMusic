@@ -526,7 +526,7 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 	// ⚠️ **量的是「画出来的那一格自己的盒子」**（`Bounds().W`）：正文在哪几个
 	// 字那里折行由**那个宽**决定，而它必须是**框架量出来的那一个**（我们自己
 	// 再算一份是另一份口径，而两份口径迟早分叉——理由见 `commentBodyWidthOf`）。
-	folded := commentBodyFolded(c, spans, commentBodyWidthOf(bodyBox), wantLines)
+	folded := commentBodyFolded(c, body, commentBodyWidthOf(bodyBox), wantLines)
 	// ⚠️ **而「这一条压根不长」的情形**：折叠的那一份 `folded=false`（它没被
 	// 截断过），于是**没有那一枚**——给一条「好」摆一枚「展开」，用户按下去
 	// 什么都不会发生，而那比不给更糟。
@@ -624,6 +624,9 @@ func (s *Shell) commentBodyOf(p *commentsPage, cm bili.Comment, lines int) *comm
 	if p.bodies == nil {
 		p.bodies = map[int64]*commentBody{}
 	}
+	// 🔴 **量高度的那一份要重建**：它是 `spans` 加一个字号（理由见
+	// `commentBody.measSpans`）⇒ 而 `spans` 刚切过 ⇒ 上一份的量是**上一批
+	// span** 的量。
 	body := &commentBody{spans: spans, urls: urls, plain: plain, mark: mark, lines: lines}
 	p.bodies[cm.Rpid] = body
 	return body

@@ -17,26 +17,26 @@
 //
 // # 🔴 新架构的关键差别（三条，都影响这一份）
 //
-//	① **框架的 `MaxLines` + `Ellipsis` 接手截断**
-//	   而框架判的是 **`p.MaxLines > 0`**（`internal/text/layout.go` 的 `layout`：
-//	   `if p.MaxLines > 0 { maxLines = p.MaxLines - len(l.Lines) }`）
-//	   ⇒ **`MaxLines(0)` 就是「不设上限」，整个正文一行都不截**。
-//	   ⇒ 旧的 `commentBodyUnlimited = -1`（那个负数是为了绕开旧实现里
-//	   「`maxH = 0` 会让截断那一支恒真」的坑）**不再需要**——新架构里 0 就是
-//	   「不限」（`commentBodyUnlimited = 0`）。
+//		① **框架的 `MaxLines` + `Ellipsis` 接手截断**
+//		   而框架判的是 **`p.MaxLines > 0`**（`internal/text/layout.go` 的 `layout`：
+//		   `if p.MaxLines > 0 { maxLines = p.MaxLines - len(l.Lines) }`）
+//		   ⇒ **`MaxLines(0)` 就是「不设上限」，整个正文一行都不截**。
+//		   ⇒ 旧的 `commentBodyUnlimited = -1`（那个负数是为了绕开旧实现里
+//		   「`maxH = 0` 会让截断那一支恒真」的坑）**不再需要**——新架构里 0 就是
+//		   「不限」（`commentBodyUnlimited = 0`）。
 //
-//	② **框架自己有布局缓存**
-//	   （`mygo/ui/layoutcache.go` 的 `sameLayout`：按 span 的样式比对，样式没变
-//	   就不重排）⇒ **不再需要 `p.bodies` 那份自缓存来存 `*ui.TextLayout`**。
-//   ⇒ 而展开/收起是**换一档 `MaxLines`**，两档的参数不同 ⇒ 框架的缓存**各
-//	   命中自己那一份**，不需要手工清缓存。
+//		② **框架自己有布局缓存**
+//		   （`mygo/ui/layoutcache.go` 的 `sameLayout`：按 span 的样式比对，样式没变
+//		   就不重排）⇒ **不再需要 `p.bodies` 那份自缓存来存 `*ui.TextLayout`**。
+//	  ⇒ 而展开/收起是**换一档 `MaxLines`**，两档的参数不同 ⇒ 框架的缓存**各
+//		   命中自己那一份**，不需要手工清缓存。
 //
-//	③ **三套坐标系**（`comments_body.go` 的文件头那一节）：原文 / 给读屏那份 /
-//	   span 里那份，长度都不一样，而「命中歌名」的高亮区间用的是**原文的 rune
-//	   坐标**。
-//   ⇒ **展开/收起不碰任何 span** ⇒ 高亮区间**天然还对得上**：高亮是**烘进
-//	   span 里**的（`ui.Span.Color` / `Background`），而换的只是 `MaxLines`
-//	   ⇒ 同一批 span 在两档里画出来，高亮落在同样的那几个字上。
+//		③ **三套坐标系**（`comments_body.go` 的文件头那一节）：原文 / 给读屏那份 /
+//		   span 里那份，长度都不一样，而「命中歌名」的高亮区间用的是**原文的 rune
+//		   坐标**。
+//	  ⇒ **展开/收起不碰任何 span** ⇒ 高亮区间**天然还对得上**：高亮是**烘进
+//		   span 里**的（`ui.Span.Color` / `Background`），而换的只是 `MaxLines`
+//		   ⇒ 同一批 span 在两档里画出来，高亮落在同样的那几个字上。
 //
 // # 「折没折」怎么判
 //
@@ -87,10 +87,20 @@ import (
 // 上限是 0 ⇒ 量出来的高度**永远大于** 0 ⇒ 而那一档压根不该判「折了」——
 // 它是**展开之后**的那一份。⇒ 调用方**先看展开态**（那一档直接返回 false）。
 //
-// ⚠️ **宽度是「正文那一列」的宽**：而那一列的宽由框架量（框架按宽度折行，
-// 宽度不对就折错位置）⇒ 而这一份拿到的**就是那一列的宽**（见
-// `commentBodyWidthOf`）。
-func commentBodyFolded(c *ui.Context, spans []ui.Span, width float32, lines int) bool {
+// # 🔴 **量一次就够，量出来的记在缓存的那一份里**
+//
+// ⚠️ **每帧每条量一遍是白烧的**：量一次是**一趟排版**（`c.MeasureText`），
+// 而这一页每一帧都要画十来条评论的正文 ⇒ 每帧每条量一遍就是**每帧十来趟
+// 排版**——而 `framebudget_test.go` 那一档（评论页 2300 字节 / 88 次）**会红**。
+//
+// ⇒ 所以量出来的那一位**记在 `commentBody` 里**（`folded` + `foldedW`），
+// 而**缓存键里含宽**（宽度变了 ⇒ 折没折可能变了 ⇒ 要重量）。
+//
+// ⚠️ **而那一趟排版**（`c.MeasureText`）**自己也有缓存**（框架的
+// `text.System.Layout` 按参数缓存）——所以「重量」那一趟**不重排**，它只是
+// **查一遍缓存**。⇒ 而它**分配的那一份**（`meas` 那个切片）是**每帧新建**的
+// ——⇒ 那才是这一档真正的开销，而**记下来之后连它也不用每帧建**。
+func commentBodyFolded(c *ui.Context, body *commentBody, width float32, lines int) bool {
 	// 🔴 **「不限」那一档不判**：它是**展开之后**的那一份，而展开之后一行都
 	// 没截 ⇒ 「折过了」恒假。
 	if lines <= 0 {
@@ -101,28 +111,42 @@ func commentBodyFolded(c *ui.Context, spans []ui.Span, width float32, lines int)
 		// ⇒ 症状是「刚进来那一帧没有『展开』那一枚」，而下一帧就有了。
 		return false
 	}
+	// 🔴 **缓存命中**：同一个宽上量过一次了 ⇒ 直接答。
+	//
+	// ⚠️ **宽是「上一帧」的**（`Bounds()` 报的是上一帧的盒子）⇒ 而它**变了**
+	// 就是另一份（折没折可能变了）⇒ 所以宽是键的一部分。
+	if body.foldedW == width {
+		return body.folded
+	}
 	// 🔴 **量的字号要和画的一样**：画出来的那一格是
 	// `FontSize(scale.Font(c, scale.Size14))`，而 `MeasureText` 量的字号是
 	// **span 自己带的那个**（`spanStyle` 里 `sp.Size` 覆盖基础字号）——⇒
 	// 这里给每一段补上那个字号。
-	meas := make([]ui.Span, len(spans))
+	//
+	// ⚠️ **而那个切片是每帧一次分配**（这一页一屏十来条评论）⇒ 所以它**记在
+	// 缓存的那一份里**（`measSpans`），而不是每帧现建（理由见上面的
+	// 《量一次就够》）。
 	size := scale.Font(c, scale.Size14)
-	for i, sp := range spans {
-		meas[i] = sp
-		if meas[i].Size == 0 {
-			meas[i].Size = size
+	if body.measSpans == nil || len(body.measSpans) != len(body.spans) {
+		body.measSpans = make([]ui.Span, len(body.spans))
+	}
+	for i, sp := range body.spans {
+		body.measSpans[i] = sp
+		if body.measSpans[i].Size == 0 {
+			body.measSpans[i].Size = size
 		}
 	}
-	_, h := c.MeasureText(width, meas...)
-	if h <= 0 {
-		return false
+	_, h := c.MeasureText(width, body.measSpans...)
+	folded := false
+	if h > 0 {
+		m := ui.Font{Family: c.Theme().Font, Size: size}.Metrics()
+		lineH := m.Ascent + m.Descent + m.LineGap
+		if lineH > 0 {
+			folded = h > float32(lines)*lineH+0.5
+		}
 	}
-	m := ui.Font{Family: c.Theme().Font, Size: size}.Metrics()
-	lineH := m.Ascent + m.Descent + m.LineGap
-	if lineH <= 0 {
-		return false
-	}
-	return h > float32(lines)*lineH+0.5
+	body.folded, body.foldedW = folded, width
+	return folded
 }
 
 // commentBodyWidthOf 是正文那一列有多宽（**框架量出来的那一个**）。
