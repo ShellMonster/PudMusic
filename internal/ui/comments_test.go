@@ -29,6 +29,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -62,6 +63,12 @@ type commentBili struct {
 	// ⚠️ **它是给「长正文」那一条用的**：真 fixture 里那一条正文只有一百来
 	// 个字，在宽窗口上根本折不到 6 行——于是「折起来」那条压根触发不了。
 	mainRaw []byte
+	// replyRaw 是「楼中楼那一趟回这一份」（nil = 回 `files["reply-reply.json"]`）。
+	//
+	// ⚠️ **它是给「楼中楼也能展开」那一条用的**：楼中楼正文是从**另一份夹具**
+	// （`reply-reply.json`，`/x/v2/reply/reply` 那一趟）来的，而真夹具里那一条
+	// 正文只有二十来个字——在宽窗口上折成一行，压根碰不到「最多 4 行」那道线。
+	replyRaw []byte
 	// page2Raw 是「第二页回这一份」（nil = 回 `files[page2]`）。
 	//
 	// ⚠️ **它是给「翻页重叠」那一条用的**：B 站的分页是按热度切的，不是按
@@ -166,9 +173,41 @@ func newCommentBili(t *testing.T, mainFile string) *commentBili {
 	b.on("/x/v2/reply/reply", func(w http.ResponseWriter, _ *http.Request) {
 		b.mu.Lock()
 		b.replyCalls++
+		raw := b.files["reply-reply.json"]
+		if b.replyRaw != nil {
+			raw = b.replyRaw
+		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(b.files["reply-reply.json"])
+		_, _ = w.Write(raw)
+	})
+
+	// 取流（票 #706 的 E2E 要**真的有歌在放**：播放条上那一枚「评论」键的判据是
+	// `st.HasTrack`，而那是「播放器在不在」）。
+	//
+	// ⚠️ **媒体那一段是真的 FLAC**：解码器要真字节才能放起来（而这一族要验的
+	// 是「那一枚键摆出来了、点了能开抽屉」，不是「声音对不对」）。
+	b.on("/x/player/wbi/playurl", func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{
+			"timelength": 1000,
+			"dash": map[string]any{
+				"duration": 1,
+				"audio": []any{map[string]any{
+					"id": 30280, "bandwidth": 110836, "codecs": "mp4a.40.2",
+					"mimeType": "audio/mp4", "baseUrl": b.URL + "/cdn/a.flac",
+				}},
+			},
+		})
+	})
+	b.on("/cdn/a.flac", func(w http.ResponseWriter, r *http.Request) {
+		raw, err := os.ReadFile(filepath.Join("..", "service", "audio", "flacdec",
+			"testdata", "stereo16.flac"))
+		if err != nil {
+			http.Error(w, "没有素材", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+		_, _ = w.Write(raw)
 	})
 	return b
 }
@@ -239,6 +278,61 @@ func commentFixtureWithLongBody(t *testing.T, name string) []byte {
 		t.Fatalf("fixture %s 编不出来：%v", name, err)
 	}
 	return raw
+}
+
+// commentFixtureWithShortBody 是「所有评论的正文都很短」的那一份 fixture。
+//
+// ⚠️ **它换的是**每一条**的正文，不只是第一条**——因为「正文不该有展开」
+// 那一档量的是**画面上有没有「展开」两个字」，而画面上摆着**所有**那几条
+// 评论：只把第一条换短、别的照旧（它们会折）⇒ 画面上照样有「展开」，
+// 那条测试就量成了别的东西。
+//
+// ⚠️ **「短」的标准是「一行装得下」**：正文那一列（抽屉 400 − 头像 32 − 缝 12
+// ≈ 356）在 14 号字下一行三十几个字——一句话十几个字够短了。
+//
+// 🔴 **它改的是**整个 `commentBili` 的**每一份** fixture**：评论页那一趟请求
+// 回来的可能是主列表（`reply-main.json`）、也可能是「最新」那一档
+// （`reply-main-latest.json`）——而**长正文在那一份里**（`reply-main.json`
+// 的第一条只有 86 个字，够短；`reply-main-latest.json` 里有几百字的那几条）。
+// 只改一份的话，画面上照样摆着别的那些长正文 ⇒ 照样有「展开」。
+func commentFixtureWithShortBody(t *testing.T, b *commentBili) {
+	t.Helper()
+	for name, raw := range b.files {
+		doc := map[string]any{}
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			t.Fatalf("fixture %s 读不懂：%v", name, err)
+		}
+		data, _ := doc["data"].(map[string]any)
+		replies, _ := data["replies"].([]any)
+		if len(replies) == 0 {
+			continue
+		}
+		for _, r := range replies {
+			item, _ := r.(map[string]any)
+			content, _ := item["content"].(map[string]any)
+			content["message"] = "短评一句。"
+			// 🔴 **表情也要拿掉**：正文里有表情占位符的话，它占的是**一个 inline
+			// object** 的宽度——而 `shapeCommentBody` 的截断判据量的是**高度**，
+			// 一行高就是一行高（表情那一枚还更高）。留着它的话「短」这件事就
+			// 掺进了别的变量。
+			delete(content, "emote")
+			// 🔴 **楼中楼也要改**：楼中楼正文有自己的行数上限（4 行），而它
+			// 同样会在够长时摆「展开」——主评论全短了、楼中楼没改，画面上照样有。
+			if nested, ok := item["replies"].([]any); ok {
+				for _, n := range nested {
+					ni, _ := n.(map[string]any)
+					nc, _ := ni["content"].(map[string]any)
+					nc["message"] = "短评一句。"
+					delete(nc, "emote")
+				}
+			}
+		}
+		out, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatalf("fixture %s 编不出来：%v", name, err)
+		}
+		b.files[name] = out
+	}
 }
 
 // commentFixtureWithRepeatedComment 是「第二页把第一页的第一条原样再来一次」
@@ -351,10 +445,14 @@ func (f *fakeImageTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 // 外壳
 // ─────────────────────────────────────────────────────────────────────────────
 
-// newCommentsShell 造一个停在评论页上的外壳。
+// newCommentsShell 造一个**开着评论抽屉**的外壳。
 //
 // ⚠️ **当前这一首是用队列摆的**（`Queue().Reset`）：`CommentsWorthAsking` 判的是
 // 「当前这一首」，而队列是那一首的唯一入口（`app.CurrentItem`）。
+//
+// ⚠️ **抽屉是开着的**（票 #706）：评论不再是独立路由页了，它是**右侧抽屉**——
+// 所以这一族测试「画的是评论」的方式是「把抽屉打开」，而不是「navigate 到
+// `/comments`」。
 func newCommentsShell(t *testing.T, b *commentBili, it app.Item, w, h int, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	cli := bili.NewClient(bili.Options{Transport: b.Server.Client().Transport})
@@ -368,7 +466,7 @@ func newCommentsShell(t *testing.T, b *commentBili, it app.Item, w, h int, opts 
 	s := ts.s
 	installFakeImages(t, s)
 	s.app.Queue().Reset(it)
-	s.navigate(commentsPath)
+	s.commentsOpen = true
 	ts.tt.Frame()
 	commentsWait(t, ts.tt, "评论拉回来了", func() bool {
 		return len(s.app.Comments()) > 0
@@ -385,6 +483,10 @@ func newCommentsShell(t *testing.T, b *commentBili, it app.Item, w, h int, opts 
 	commentsWait(t, ts.tt, "评论画出来了", func() bool {
 		return ts.tt.HasText(first.Uname)
 	})
+	// ⚠️ **还要推钟让抽屉滑到位**：Tester 的钟站着不动，而抽屉**从右边滑进来**
+	// ——不推它，面板还在窗口外面，而画面上那一块是空的（而症状是「找不到」，
+	// 不是「动画没走完」）。
+	settleCommentsDrawer(t, s, ts.tt)
 	return s, ts.tt
 }
 
@@ -496,13 +598,23 @@ func TestTheCommentsHeaderSaysWhoseCommentsTheseAre(t *testing.T) {
 	}
 }
 
-// TestTheCommentsPageIsNotInTheSidebarMenu 断它**不进侧栏菜单**。
+// TestTheCommentsAreNotInTheSidebarMenu 断评论**不进侧栏菜单**。
 //
-// ⚠️ **它是「当前这一首」的附属页，不是一个栏目**：摆进侧栏的话，用户会以为
+// ⚠️ **它是「当前这一首」的附属信息，不是一个栏目**：摆进侧栏的话，用户会以为
 // 那是一个能一直待着的页面，而它讲的东西每换一首就全变了。
-func TestTheCommentsPageIsNotInTheSidebarMenu(t *testing.T) {
-	if rt := lookup(commentsPath); rt.InMenu {
-		t.Errorf("评论页进侧栏菜单了——它是「当前这一首」的附属页，不是一个栏目")
+//
+// ⚠️ **票 #706 之后它连一条路由都没有了**（它是右侧抽屉）——所以这一条断的是
+// 「路由表里没有它」：而那正是「不进侧栏菜单」的更强一档（一个不在路由表里的
+// 东西**不可能**在侧栏菜单里——侧栏菜单是照路由表生成的）。
+func TestTheCommentsAreNotInTheSidebarMenu(t *testing.T) {
+	for _, r := range routes {
+		if r.InMenu && strings.Contains(r.Match, "comment") {
+			t.Errorf("路由 %q（%s）进侧栏菜单了——评论是「当前这一首」的附属信息，"+
+				"不是一个栏目", r.Match, r.Title)
+		}
+	}
+	if got := lookup("/comments").Match; got != "*" {
+		t.Errorf("lookup(\"/comments\") 认出的是 %q——评论是抽屉，不是一条路由", got)
 	}
 }
 
@@ -690,7 +802,8 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 	}
 }
 
-// TestALongCommentIsFoldedWithoutBreakingTheRow 断**长正文被折起来**。
+// TestALongCommentIsFoldedWithoutBreakingTheRow 断**长正文被折起来**，
+// **而且展开之后能折回去**（票 #706）。
 //
 // 🔴 **「折起来」是看画面**：第一条评论的正文很长（真 fixture 里那一段
 // 「若将地球的四十六亿年浓缩为一天……」），它折行之后超出 6 行——折起来的话
@@ -706,6 +819,10 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 // ⚠️ **判据是「不超过 6 行的高度」**：行高是字体的 ascent + descent +
 // line gap（`ui.Font.Metrics()`），而那一格的高度**最多**是 6 行——
 // **多了就是破版**。
+//
+// 🔴 **两种状态都要断**（票 #706 改了这条的形状）：折叠态**整段原文不在画面
+// 上**，而**展开态整段原文在画面上**——只断折叠态的话，一个「展开之后仍然把
+// 正文截着」的实现照样绿；而那正是这一票要治的那一处。
 func TestALongCommentIsFoldedWithoutBreakingTheRow(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	b.mainRaw = commentFixtureWithLongBody(t, "reply-main.json")
@@ -719,13 +836,24 @@ func TestALongCommentIsFoldedWithoutBreakingTheRow(t *testing.T) {
 	//	          **画出来**的，**不在文字里** ⇒ `Label` 给的**还是整段原文**。
 	//
 	// ⇒ 判据改成「**画出来的那一格只有 6 行那么高**」：折起来了的话，它的高
-	// 度就是 6 行（而整段原文要十几行）。
+	//	度就是 6 行（而整段原文要十几行）。
 	//
 	// ⚠️ **量的是画面上那一格的盒子**（`Tester.Find` 给的）：正文那一格**没有
 	// 固定高度**（框架按排版给），而它装的是**折起来之后**的那几行。
+	//
+	// 🔴 **而「折起来了」的判据是**高度**，不是「整段原文在不在画面上」**
+	// （新架构下后者**恒真**，理由见下面那一段）。
+	//
+	// ⚠️ **为什么不能用「整段原文在不在画面上」**：截断是**框架**做的
+	// （`MaxLines` + `Ellipsis`）⇒ 省略号是**画出来**的，**不在文字里**⇒
+	// `Label` 给的**还是整段原文**（这是票 #702 的**已知取舍**，见
+	// `comments_body.go` 的文件头《给读屏的那一份是整段原文》）。
+	// ⇒ 「整段原文在画面上」**恒真**，而它量不到「折没折」。
+	//
+	// ⇒ 判据是**那一格的高度**：折起来了的话，它的高度**就是 6 行**（而整段
+	// 原文要十几行）。
 	const rpid = int64(321942994928)
-	body := s.comments.bodies[rpid]
-	if body == nil {
+	if s.comments.bodies[rpid] == nil {
 		t.Fatalf("第一条评论没有排版缓存（rpid %d）", rpid)
 	}
 	var msg string
@@ -748,12 +876,36 @@ func TestALongCommentIsFoldedWithoutBreakingTheRow(t *testing.T) {
 	if r.H >= lineH*10 {
 		t.Errorf("长正文那一格有 %.1f 高（10 行以上）——它压根没折", r.H)
 	}
+
+	// ---- 展开态（票 #706）----
+	//
+	// 🔴 **展开之后那一格的高度要超过 6 行**：它一行都没截，正文全在——而
+	// 「展开之后仍然被截着」的那个实现，高度不会变。
+	//
+	// ⚠️ **量的还是画面上那一格的盒子**：而在新架构里「折没折」是**量出来的**
+	// （`commentBodyFolded`）⇒ 展开那一档的 `MaxLines` 是 0（框架的「不限」）⇒
+	// 那一格装的是**完整正文** ⇒ 它的高度**就是**正文全在时的高度。
+	if err := tt.Click("展开"); err != nil {
+		t.Fatalf("点不动「展开」：%v（文字：%q）", err, tt.Texts())
+	}
+	commentsWait(t, tt, "正文展开了", func() bool {
+		r2, ok2 := tt.Find(msg)
+		return ok2 && r2.H > maxH+1
+	})
+	r, ok = tt.Find(msg)
+	if !ok {
+		t.Fatalf("展开之后画面上找不到那一段正文，文字有 %q", tt.Texts())
+	}
+	if r.H <= maxH+1 {
+		t.Errorf("展开之后那一格只有 %.1f 高（%d 行是 %.1f）——正文仍然被截着",
+			r.H, commentBodyLines, maxH)
+	}
 }
 
 // commentLineHeight 量出一行正文有多高（字体的 ascent + descent + line gap）。
 //
 // ⚠️ **要真框架给得出**：字体度量是系统那一层的（Core Text / DirectWrite），
-// 而 `ui.Font.Metrics()` 就是那一层���出口。
+// 而 `ui.Font.Metrics()` 就是那一层的出口。
 func commentLineHeight(t *testing.T) float32 {
 	t.Helper()
 	var lineH float32

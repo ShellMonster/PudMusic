@@ -1039,7 +1039,7 @@ func (s *Shell) spaceFill(c *ui.Context, url string, w, h float32) {
 			ui.Box(c).Height(h).FillWidth().Background(t.Surface)
 			return
 		}
-			imgcache.States(c, s.pageImages(), url, w, h, 0, imgcache.Shape{})
+		imgcache.States(c, s.pageImages(), url, w, h, 0, imgcache.Shape{})
 	})
 }
 

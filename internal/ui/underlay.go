@@ -167,6 +167,15 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 
 	// 当前这一页自己那一份。
 	s.syncCurrentPage(c)
+
+	// 评论抽屉自己那一份（票 #706）。
+	//
+	// ⚠️ **它不在 `pageSyncs` 那张表里**：抽屉**不是一条路由**（它没有地址，
+	// 也不进路由表）——所以它不能按路由分派。
+	//
+	// ⚠️ **它每帧都跑**（理由同上面那一段）：抽屉关着的那 200ms（退场）里面板
+	// 还在树上，而后台的结果一直落在信箱里没人取。
+	s.syncComments(c)
 }
 
 // syncCurrentPage 跑当前这一页自己的副作用。
@@ -205,5 +214,22 @@ var pageSyncs = map[string]func(*Shell, *ui.Context){
 	historyPath:      (*Shell).syncHistory,
 	localMusicPath:   (*Shell).syncLocalMusic,
 	followPath:       (*Shell).syncFollow,
-	commentsPath:     (*Shell).syncComments,
+}
+
+// syncComments 是评论的每帧副作用（排序切换 / 刷新 / 翻页 / 筛选用）。
+//
+// 🔴 **它不再按路由分派**（票 #706）：评论从**独立路由页**改成了**右侧抽屉**
+// ——而抽屉不是一条路由（它没有地址，也不进路由表），所以它在 `pageSyncs` 那张
+// 表里**没有位置**。
+//
+// ⚠️ **它跟着抽屉走**：只有抽屉开着的时候才跑——理由同别处的「每帧副作用」
+// 那一族（用户没在看评论的时候，不该替他去问 B 站）。
+//
+// ⚠️ **它每帧都跑，不管抽屉画没画**（理由同 `syncUnderlay` 顶上那一段）：抽屉
+// 关着的那 200ms（退场）里面板还在树上，而后台的结果一直落在信箱里没人取。
+func (s *Shell) syncComments(c *ui.Context) {
+	if s.commentsPhase == drawerGone && !s.commentsOpen {
+		return
+	}
+	s.syncCommentsData(c)
 }

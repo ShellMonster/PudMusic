@@ -386,7 +386,7 @@ func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songna
 	return spans, urls, plain.String()
 }
 
-// viewCommentBodyEl 画一条评论的正文。
+// viewCommentBodyEl 画一条评论的正文，加上那一枚「展开 / 收起」。
 //
 // 🔴 **正文是框架的 `ui.RichText`**（理由见文件头）：它负责排版、按行数截断
 // 加省略号、把「命中歌名」的那几段染上底色，而**可选中**是它自带的能力
@@ -401,8 +401,35 @@ func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songna
 // 🔴 **高亮只在筛选开着的时候做**（票 #684）：关着的时候这一条走的是**原来
 // 那条路**——不跑那次匹配、不带任何底色（正文是**连续几行的字**，常驻的色块
 // 会让用户以为自己是拿鼠标选中了几段）。
+//
+// # 「展开 / 收起」那一枚（票 #706）
+//
+// 🔴 **正文折起来的时候**下面摆一枚「展开」；点它之后正文完整展开，那一枚
+// 变成「收起」；再点一下回到折叠态（**原位切换**，B 站那种）。
+//
+// ⚠️ **判据是「量出来的高度超过上限没有」**（`commentBodyFolded`）：而**不是**
+// 「框架截了没有」——框架**不告诉**元素「我截断了」⇒ 这一层自己量一次
+// （理由见 `comments_expand.go` 的文件头）。
+//
+// ⚠️ **展开用的是「另一个 `MaxLines` 值」**：折叠态是 6（主评论）/ 4（楼中
+// 楼），而展开态是 `commentBodyUnlimited`（**0** = 框架的「不设上限」）——
+// 而**框架的布局缓存按参数比对**（`sameLayout`）⇒ 两档**各命中自己那一份**，
+// **不需要手工清缓存**。
+//
+// ⚠️ **正文那一格和那一枚是**兄弟**（都在外面那一列里），不是「正文套一个
+// 盒子、盒子里放按钮」**：外面那一列本来就是竖着摆的（昵称 / 正文 / 点赞），
+// 而多套一层 `Column` 就是**每帧每一行多一个元素**（一屏十来行就是十来次
+// 分配）——理由同 `framebudget_test.go` 盯着的「每帧现算」那族坏处。
 func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Comment, lines int) {
-	body := s.commentBodyOf(p, cm)
+	// 🔴 **展开态**：那一档是「不限行数」（`MaxLines(0)`），而它是**展开之后**
+	// 的那一份 ⇒ 它**恒不折**（`commentBodyFolded` 见 `lines <= 0` 就返回
+	// false）。
+	expanded := p.bodiesExpanded[cm.Rpid]
+	wantLines := lines
+	if expanded {
+		wantLines = commentBodyUnlimited
+	}
+	body := s.commentBodyOf(p, cm, wantLines)
 	if body == nil || len(body.spans) == 0 {
 		return
 	}
@@ -462,7 +489,7 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 	//
 	// ⚠️ **包着的那一格必须是 `kindBox`**：框架找作用域时判的是
 	// `p.kind == kindBox && p.flags&flagSelectable != 0`（`prepareSelectable`）。
-	ui.Box(c).FillWidth().Selectable().
+	bodyBox := ui.Box(c).FillWidth().Selectable().
 		// 🔴 **复制出去的是「给读屏的那一份」**（理由见
 		// `commentPlainOfSelection`）：框架默认复制的是**画出来的那一份**，
 		// 而那一枚 U+FFFC 复制出去是个**看不见的字符**。
@@ -471,7 +498,10 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 			ui.RichText(c, spans...).
 				FontSize(scale.Font(c, scale.Size14)).
 				TextColor(c.Theme().Text).
-				MaxLines(lines).
+				// 🔴 **展开那一档是 `MaxLines(0)`**：框架判的是 `p.MaxLines > 0`
+				// ⇒ **0 就是「不设上限」，一行都不截**（理由见
+				// `comments_expand.go` 的文件头）。
+				MaxLines(wantLines).
 				Ellipsis("…").
 				// ⚠️ **`.Label(...)` 给的是「给读屏的那一份」**（表情占位符写成
 				// 「［表情］」）：屏幕阅读器读得到它，无头 Tester 也找得到它——
@@ -486,6 +516,50 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 				Label(body.plain).
 				DrawObjects(draw)
 		})
+
+	// ---- 那一枚「展开 / 收起」----
+	//
+	// 🔴 **判据是「量出来的高度超过上限没有」**（`commentBodyFolded`）：
+	// 而**不是**「框架截了没有」——框架不告诉元素「我截断了」⇒ 这一层自己
+	// 量一次（理由见 `comments_expand.go` 的文件头）。
+	//
+	// ⚠️ **量的是「画出来的那一格自己的盒子」**（`Bounds().W`）：正文在哪几个
+	// 字那里折行由**那个宽**决定，而它必须是**框架量出来的那一个**（我们自己
+	// 再算一份是另一份口径，而两份口径迟早分叉——理由见 `commentBodyWidthOf`）。
+	folded := commentBodyFolded(c, spans, commentBodyWidthOf(bodyBox), wantLines)
+	// ⚠️ **而「这一条压根不长」的情形**：折叠的那一份 `folded=false`（它没被
+	// 截断过），于是**没有那一枚**——给一条「好」摆一枚「展开」，用户按下去
+	// 什么都不会发生，而那比不给更糟。
+	//
+	// ⚠️ **而展开态恒摆「收起」**：展开之后它一行都没截 ⇒ `folded` 是 false，
+	// 而那一枚**要摆**——所以判据是「折了 **或** 展开着」。
+	if !folded && !expanded {
+		return
+	}
+	// 那一枚是**名字型链接**那一档（`flatLink`）：一句话字，悬停时底下长出
+	// 一道下划线，**没有按钮壳**——正文下面摆一枚描边药丸会把它抬成一块
+	// 独立的东西，而它只是正文的一个出口。
+	//
+	// ⚠️ **字号是 12**：它是正文的一部分（不是一节标题），而正文是 14。
+	label := "展开"
+	if expanded {
+		label = "收起"
+	}
+	// ⚠️ **点它只改界面状态**（和 `p.expanded` 那一支一样）：**不发请求**
+	//（铁律三）——评论正文早就拿回来了，展开只是把它多排几行。
+	//
+	// 🔴 **改的是「下一帧」的那一份**：这一帧的正文是**这一帧开头读到的
+	// `expanded`** 排出来的，所以点完之后**下一帧**才换成展开的那一份。
+	// 而下一帧里 `MaxLines` 换了 ⇒ **框架的缓存键换了** ⇒ 那一格自然重排
+	// ——**不需要手工清缓存**。
+	if flatLink(c, label).FontSize(scale.Font(c, scale.Size12)).
+		TextColor(c.Theme().TextMuted).AlignSelf(ui.Start).Clicked() {
+		if p.bodiesExpanded == nil {
+			p.bodiesExpanded = map[int64]bool{}
+		}
+		p.bodiesExpanded[cm.Rpid] = !expanded
+		p.bodiesExpRev++
+	}
 }
 
 // commentObjectIndex 算第 `at` 个 rune 是**第几枚**表情占位符（-1 = 不是）。
@@ -516,22 +590,30 @@ func commentObjectIndex(at int, spans []ui.Span) int {
 	return -1
 }
 
-// commentBodySpans 拿一条评论正文的那些 span（**排版之前**的那一份）。
+// commentBodyOf 拿一条评论正文的那些 span（**排版之前**的那一份）。
 //
 // 🔴 **命中区间也在这一次算掉**（票 #684）：`songname.Table.Matches` 每条评论
 // 跑一次就够，而这里是**唯一**需要它的地方——所以它是**算的时候**跑一趟，
 // 不是每帧跑。筛选关着的时候**根本不跑**（高亮是筛选的一部分）。
 //
-// ⚠️ **它按 (rpid, 配色) 记一份**（`p.bodies`）：同一帧里一条评论只算一次
+// ⚠️ **它按 (rpid, 行数, 配色) 记一份**（`p.bodies`）：同一帧里一条评论只算一次
 // span，而**跨帧**靠的是框架自己的布局缓存（`sameLayout`）——框架按 span 的
 // **样式**（`text.EncodeSpans`）比对，样式没变就不重排。
-func (s *Shell) commentBodyOf(p *commentsPage, cm bili.Comment) *commentBody {
+//
+// 🔴 **「行数」是缓存键的一部分**（票 #706）：折叠态是 6 / 4，而展开态是
+// `commentBodyUnlimited`（0）——而**两个值天然不撞**（一个是不同的 `MaxLines`
+// 参数，一个是不同的缓存键）⇒ **不需要另起一套缓存**。
+//
+// ⚠️ **而「折没折」不记在这里**：那是**量出来**的（`commentBodyFolded`），
+// 而它量的是**画出来的那一格自己的盒子**（宽度每帧可能变）——记在这里就会
+// 拿着一个过期的宽度去判「折没折」。
+func (s *Shell) commentBodyOf(p *commentsPage, cm bili.Comment, lines int) *commentBody {
 	// 🔴 **高亮的配色一帧算一次**（`viewComments` 开头）：这里只是取过来用。
 	mark := p.mark
 	// 🔴 **缓存先查、匹配后跑**：`Matches` 每条评论分配十几次（它要拼一份归一化
 	// 串 + 一张映射表），而这一页每一帧都要问一遍每一条评论——先查缓存的话，
 	// 稳态下（正文排好了）它**一次都不跑**。
-	if b, ok := p.bodies[cm.Rpid]; ok && b.mark == mark {
+	if b, ok := p.bodies[cm.Rpid]; ok && b.mark == mark && b.lines == lines {
 		return b
 	}
 	var hl []songname.Range
@@ -542,7 +624,7 @@ func (s *Shell) commentBodyOf(p *commentsPage, cm bili.Comment) *commentBody {
 	if p.bodies == nil {
 		p.bodies = map[int64]*commentBody{}
 	}
-	body := &commentBody{spans: spans, urls: urls, plain: plain, mark: mark}
+	body := &commentBody{spans: spans, urls: urls, plain: plain, mark: mark, lines: lines}
 	p.bodies[cm.Rpid] = body
 	return body
 }
