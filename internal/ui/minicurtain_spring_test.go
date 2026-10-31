@@ -7,7 +7,7 @@ package ui
 // 票 #307 把卷帘从**定时长曲线**（240ms + `motion.Unified`）换成了**自己
 // 积分的弹簧**（见 `minicurtain_spring.go`），而这一组盯的是四件事：
 //
-//  1. **展开是弹簧**：放下去约 150~180ms 到全开，**回弹两三下、幅度递减**；
+//  1. **展开是弹簧**：按 Issue 指定的 `w = 10.5` 展开，**回弹两三下、幅度递减**；
 //  2. **收起不弹**（过阻尼 ζ = 1.1），一路收回 84；
 //  3. **窗高全程 ≤ 84 + 236**，而**每一帧窗高 == 内容高**（过冲那一帧也不许
 //     超过目标——透明的那一块照样吃点击，文件头第 1 条）；
@@ -49,7 +49,8 @@ func miniCurtainFrames(t *testing.T, tt *mygoui.Tester, s *Shell, n int) []miniC
 	t.Helper()
 	out := make([]miniCurtainFrame, 0, n)
 	for range n {
-		tt.Advance(20 * time.Millisecond)
+		tt.Advance(time.Second / 60)
+		tt.Frame()
 		out = append(out, miniCurtainFrame{
 			height: s.miniCurtain.height,
 			window: s.miniCurtain.setHeight,
@@ -96,10 +97,12 @@ func miniCurtainBounces(heights []float32) []float32 {
 
 // miniCurtainPeakFrame 报高度序列里**第一个峰**在第几帧（0 是第一帧）。
 //
-// ⚠️ **它报的是「第一次冲上去到顶」那个峰**：弹簧过冲之后还会再冲一次
-// （幅度小得多），而票面要量的是「放下去到全开要多久」。
+// 序列只有一个元素时没有可比较的峰；最后一个元素也不能拿 `i+1` 比较。
 func miniCurtainPeakFrame(heights []float32) int {
-	for i := 1; i < len(heights); i++ {
+	if len(heights) < 3 {
+		return -1
+	}
+	for i := 1; i < len(heights)-1; i++ {
 		if heights[i] >= heights[i-1] && heights[i] > heights[i+1] {
 			return i
 		}
@@ -107,12 +110,25 @@ func miniCurtainPeakFrame(heights []float32) int {
 	return -1
 }
 
+func TestMiniCurtainPeakFrameDoesNotReadPastTheSequence(t *testing.T) {
+	for _, heights := range [][]float32{{}, {1}, {1, 2}, {1, 2, 1}} {
+		got := miniCurtainPeakFrame(heights)
+		if len(heights) == 3 {
+			if got != 1 {
+				t.Errorf("heights=%v: peak=%d, want 1", heights, got)
+			}
+			continue
+		}
+		if got != -1 {
+			t.Errorf("heights=%v: peak=%d, want -1", heights, got)
+		}
+	}
+}
+
 // TestTheMiniCurtainUnrollsWithASpring 盯「展开是弹簧」（票 #307）。
 //
-// ⚠️ **它量的是「放下去到全开要几帧」**：60fps 下 8~12 帧 = 133~200 毫秒，
-// 而票面要的是「约 150~180ms」——60fps 下那是第 9~11 帧。⇒ 判据放宽到
-// **8~12 帧**，而**弹簧参数那一档**（`miniCurtainOpenW` / `Z`）按 167 毫秒
-// 反算（见 `minicurtain_spring.go` 的注释）。
+// ⚠️ **它量的是「放下去到全开要几帧」**：时间步固定为 `time.Second/60`，峰值帧
+// 直接对应真实 60Hz 的时间量纲；Issue 指定 `w = 10.5` 的首峰应在第 13~14 帧。
 //
 // ⚠️ **回弹要数出「过冲几次、每次多高」**：这一条把每一帧的高度记下来，
 // 数出「冲上去又缩回来」了几次、每次缩回多少像素——**幅度要递减**（票面：
@@ -177,15 +193,14 @@ func TestTheMiniCurtainUnrollsWithASpring(t *testing.T) {
 			"（票面：「回弹两三下、幅度递减」）", bounces[0], bounces)
 	}
 
-	// 🔴 **放下去到全开**：第一个峰在第 8~12 帧（60fps 下 133~200ms）。
+	// 🔴 **放下去到全开**：Issue 指定 `w = 10.5`，第一个峰在第 13~14 帧。
 	peak := miniCurtainPeakFrame(heights)
 	if peak < 0 {
 		t.Fatalf("高度序列里没有峰：%v", heights)
 	}
-	if peak < 8 || peak > 12 {
-		t.Errorf("第一个峰在第 %d 帧（60fps 下 %.0fms），want 第 8~12 帧"+
-			"（133~200ms，票面要的是「约 150~180ms 到全开」）：%v",
-			peak, float64(peak)*1000/60, heights)
+	if peak < 13 || peak > 14 {
+		t.Errorf("第一个峰在第 %d 帧（60fps 下 %.0fms），want 第 13~14 帧（约 217~233ms，Issue 指定 w = 10.5）：%v",
+			peak, float64(peak+1)*float64(time.Second/60)/float64(time.Millisecond), heights)
 	}
 	// 峰上头要够高（≥ 90% 的目标高）——不然那不叫「放下去」。
 	if heights[peak] < miniCurtainH*0.9 {

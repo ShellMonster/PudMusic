@@ -676,9 +676,8 @@ func clickCurtainCover(t *testing.T, tt *mygoui.Tester) {
 
 // settleCurtain 推到卷帘**到位**为止（开着 / 收着都行）。
 //
-// ⚠️ **推钟而不是数帧**：这一段是**按时间**走的（240ms 的定时长曲线），
-// 而 Tester 的钟站着不动——数帧那种等法会**静默失效**（不报错、不超时、
-// 直接放行；AGENTS.md §2）。
+// ⚠️ **推钟而不是数帧**：这一段是**按时间**走的（弹簧自己积分），而 Tester
+// 的钟站着不动——每次 `Advance` 后都画一帧，直到 `spring.moving` 停止。
 //
 // ⚠️ **判据是状态而不是时间**：`open` 是**用户意图**那个状态，动画到位
 // 的时候它已经是对的了；而**高度**到位是另一件事（动画走完）。
@@ -697,9 +696,8 @@ func clickCurtainCover(t *testing.T, tt *mygoui.Tester) {
 // （`minicurtain_spring.go` 的停止条件那一条）。
 func settleCurtain(t *testing.T, tt *mygoui.Tester, s *Shell, open bool) {
 	t.Helper()
-	const step = 16 * time.Millisecond
 	for range 120 {
-		tt.Advance(step)
+		tt.Advance(time.Second / 60)
 		tt.Frame()
 		if openCurtainState(tt) != open {
 			// 状态还没对（歌词还没出现 / 还没消失）：接着等。
@@ -711,7 +709,7 @@ func settleCurtain(t *testing.T, tt *mygoui.Tester, s *Shell, open bool) {
 		}
 	}
 	t.Fatalf("推了 %v 的钟，卷帘还没有变成「%v」（高度 %v，弹簧还在动：%v）",
-		120*step, open, s.miniCurtain.height, s.miniCurtain.spring.moving)
+		120*(time.Second/60), open, s.miniCurtain.height, s.miniCurtain.spring.moving)
 }
 
 // openCurtainState 报画面上卷帘是开着还是收着。
