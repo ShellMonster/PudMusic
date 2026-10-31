@@ -1,8 +1,21 @@
 // 托盘图标（macOS 是菜单栏图标）和它的菜单。
 //
-// # 菜单项照 Biu 的 `electron/windows/tray.ts` 一条一条对：播放/暂停、上一曲、
-// 下一曲、显示/隐藏界面、分隔线、设置、退出程序。少一项就是「菜单项不齐」——
-// 用户把窗口收进托盘之后，托盘那几项就是唯一的入口。
+// # 菜单项对着 Biu 的 `electron/windows/tray.ts` 一条一条对
+//
+// Biu 那份是：播放/暂停、上一曲、下一曲、显示/隐藏界面、分隔线、设置、
+// 退出程序。**少一项就是「菜单项不齐」**——用户把窗口收进托盘之后，托盘
+// 那几项就是唯一的入口。
+//
+// ⚠️ **两处和上游不一样，都是有意的**：
+//
+//  1. **多了最上面那一行「正在播放：歌名 - 艺人」**——上游没有。它是这一栏
+//     存在的理由（用户点开菜单第一眼要看的就是「现在在放什么」）。
+//  2. **「显示/隐藏界面」写成「显示/隐藏主窗口」**——上游那个词是 Windows
+//     上的说法（「界面」），而 macOS 上说「窗口」。
+//
+// ⚠️ **上游 Biu 在 macOS 上压根不建这个图标**
+// （`_research/biu/electron/main.ts:161` 是 `if (process.platform !== "darwin")`）——
+// 所以这一栏在 macOS 上**没有上游可对齐**，得按 macOS 的形状来。
 //
 // # ⚠️ 每一项都走 `runShortcut`（`s.onShortcut`）
 //
@@ -25,6 +38,7 @@ import (
 	"log"
 	"runtime"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/platform"
 	"github.com/egoist/mygo"
 )
@@ -69,7 +83,7 @@ func (s *Shell) trayMenu() *mygo.Menu {
 		//
 		// ⚠️ **没有歌的时候说清楚**：留一条空的那一行，用户看到的是「这个应用
 		// 什么都没在放」——而那到底是「没歌」还是「菜单坏了」分不清。
-		{ID: trayNowPlayingID, Label: s.trayNowPlayingLabel(), Disabled: true},
+		{ID: trayNowPlayingID, Label: s.trayNowPlayingLabel(s.app.Snapshot()), Disabled: true},
 		mygo.Separator(),
 		// ⚠️ **走 `s.onShortcut`**（不是直接调 `s.app.Toggle()`）——理由见
 		// 文件头。
@@ -83,11 +97,17 @@ func (s *Shell) trayMenu() *mygo.Menu {
 			s.onShortcut("next")
 		}},
 		mygo.Separator(),
+		// ⚠️ **只有「显示/隐藏主窗口」这一项**，不要再加一个「显示主窗口」。
+		//
+		// ⚠️ **为什么两个会重复**：`openWindow`（`lifecycle.go:173`）在迷你
+		// 开着的时候是「把迷你那一扇叫到前面」，而 `toggleWindow` 在迷你开着
+		// 的时候是「把主窗口藏起来」——**两项都是「让用户看见点什么」，而用户
+		// 看见的那个东西不一样**（一个是迷你，一个是主窗口）。
+		//
+		// ⇒ 所以**一项就够**：菜单项写「显示/隐藏主窗口」，点了它就在
+		// 「把主窗口叫回来」和「把主窗口藏起来」之间来回。
 		{ID: trayToggleWindowID, Label: "显示/隐藏主窗口", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.toggleWindow()
-		}},
-		{ID: trayOpenWindowID, Label: "显示主窗口", Click: func(*mygo.MenuItem, *mygo.Window) {
-			s.openWindow()
 		}},
 		{ID: trayMiniID, Label: "迷你播放器", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.toggleMiniPlayer()
@@ -119,12 +139,11 @@ func (s *Shell) trayMenu() *mygo.Menu {
 //
 // ⚠️ **「比一遍再改」**：这一段每帧调一次，而 `SetLabel` / `SetEnabled`
 // 每次都要往主线程投一个任务（同 `refreshMenuChecked` 的理由）。
-func (s *Shell) refreshTrayMenu() {
+func (s *Shell) refreshTrayMenu(st app.State) {
 	if s.trayMenuRef == nil {
 		return
 	}
-	st := s.app.Snapshot()
-	label := s.trayNowPlayingLabel()
+	label := s.trayNowPlayingLabel(st)
 	hasTrack := st.HasTrack
 
 	cur := s.trayState
@@ -160,8 +179,7 @@ type trayState struct {
 //
 // ⚠️ **艺人没有就只说歌名**：本地文件没有艺人信息（`app.State.Artist` 的
 // 注释），而「歌名 - 」那一串尾巴上的破折号是给用户看的噪音。
-func (s *Shell) trayNowPlayingLabel() string {
-	st := s.app.Snapshot()
+func (s *Shell) trayNowPlayingLabel(st app.State) string {
 	if !st.HasTrack {
 		return "没有在放"
 	}
@@ -183,8 +201,6 @@ const (
 	trayCommandIDPrefix = "tray.cmd."
 	// trayToggleWindowID 是「显示/隐藏界面」那一项。
 	trayToggleWindowID = "tray.toggleWindow"
-	// trayOpenWindowID 是「打开主窗口」那一项。
-	trayOpenWindowID = "tray.openWindow"
 	// trayMiniID 是「迷你播放器」那一项。
 	trayMiniID = "tray.mini"
 	// traySettingsID 是「设置」那一项。

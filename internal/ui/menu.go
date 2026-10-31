@@ -313,7 +313,24 @@ func playModeItem(s *Shell) []*mygo.MenuItem {
 			ID:    menuPlayModeIDPrefix + string(mode),
 			Label: mode.Label(),
 			Type:  mygo.MenuItemRadio,
-			Click: func(*mygo.MenuItem, *mygo.Window) { s.app.SetPlayMode(mode) },
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				s.app.SetPlayMode(mode)
+				// ⚠️ **立刻把勾选态刷一遍**（不等下一帧）。
+				//
+				// 框架在调我们这个 `Click` **之前**已经改过勾选态了
+				//（`mygo/menu.go:569` 的 `menuItemClicked`：对 radio 项先
+				// `SetChecked(true)`，而那一支会先把**同组所有项**置为 false）。
+				// ⇒ 框架那一下之后，菜单上是「全灭 → 点亮这一项」。
+				//
+				// 而**我们要的勾选态是「当前是哪一档」这个真状态**，不是「用户
+				// 点过哪一档」——那两样在「点已经勾上的那一项」时不一样。
+				//
+				// ⚠️ **为什么这里刷了就够**：框架那一次和这一次**都是投到主线程**
+				// 的（`MenuItem.update` → `postMain`，`mygo/menu.go:315`），
+				// 而框架的**先投**、我们的**后投** ⇒ 主线程上**我们的后执行 =
+				// 后赢**。所以顺序是确定的，不靠运气。
+				s.refreshMenuChecked(s.app.Snapshot())
+			},
 		})
 	}
 	return items
@@ -367,6 +384,10 @@ func viewColumn(s *Shell) []*mygo.MenuItem {
 			Type:  mygo.MenuItemRadio,
 			Click: func(*mygo.MenuItem, *mygo.Window) {
 				s.applySetting("显示样式", func(cur *app.Settings) { cur.DisplayMode = mode })
+				// ⚠️ **立刻把勾选态刷一遍**（理由同 `playModeItem` 那一段：
+				// 框架在调我们这个 `Click` 之前已经改过勾选态了，而我们后投的
+				// 这一次在后执行 = 后赢）。
+				s.refreshMenuChecked(s.app.Snapshot())
 			},
 		})
 	}
@@ -446,11 +467,13 @@ func (s *Shell) menuAccelFor(id string) string {
 //
 // ⚠️ **什么时候调**：`viewMain` 每帧调一次（那是「状态随时会变」的那几样
 // 的兜底），加上几个明确的点（改设置、切档、开迷你窗——那些地方立刻就要看到）。
-func (s *Shell) refreshMenuChecked() {
+//
+// ⚠️ **快照是外面传进来的**（`viewMain` 取的那一份）：`Snapshot()` **会分配**
+// （章节切片 + B 站链接字符串），而这一帧已经取过一次了——再取一份就是白花。
+func (s *Shell) refreshMenuChecked(st app.State) {
 	if s.menu == nil {
 		return
 	}
-	st := s.app.Snapshot()
 	// ⚠️ **只取菜单要的那两样**（`MenuDisplayState`），不拷整份设置——
 	// `SettingsSnapshot()` 每帧调一次是**一次堆分配**（三十几个字段的值拷贝），
 	// 而菜单每帧只想问两样。实测这一段从每帧 1 次分配降到 0 次。

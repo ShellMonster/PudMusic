@@ -211,7 +211,7 @@ func (s *Shell) toggleMiniPlayer() {
 	// ⚠️ **迷你窗开没开，菜单上那个勾选态要跟着变**（菜单是系统画的，不会
 	// 自己变，见 refreshMenuChecked）。**每一条出路都要刷**——开着的时候关掉
 	// 也要刷，不然菜单上的钩一直挂着。
-	defer s.refreshMenuChecked()
+	defer s.refreshMenuChecked(s.app.Snapshot())
 
 	// ⚠️ **迷你窗口那一侧要绕回主窗口。** 那一侧的 `s.mini` 是 nil（迷你窗口不会
 	// 开着第二个自己），照常走下去就是 `openMiniPlayer()` 建在**迷你外壳**上——

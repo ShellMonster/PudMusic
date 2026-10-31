@@ -503,7 +503,7 @@ func (s *Shell) toggleSidebar() {
 	}); err != nil {
 		s.addToast("折叠状态存不住："+err.Error(), notice.Danger)
 	}
-	s.refreshMenuChecked()
+	s.refreshMenuChecked(s.app.Snapshot())
 	s.wake.invalidate()
 }
 

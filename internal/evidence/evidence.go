@@ -1411,6 +1411,7 @@ var Items = []Item{
 			"TestTheWindowColumnStillHasTheSystemItems",
 			"TestTheMenuRefreshDoesNotAllocatePerFrame",
 			"TestTheMenuDisplayStateMatchesTheFullSnapshot",
+			"TestTheRadioGroupsAreAdjacent",
 		},
 	},
 	{

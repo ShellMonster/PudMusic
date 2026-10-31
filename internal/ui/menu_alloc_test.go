@@ -29,10 +29,10 @@ func TestTheMenuRefreshDoesNotAllocatePerFrame(t *testing.T) {
 	s := b.s
 	s.menu = appMenu(s)
 	// 先刷一次，让内部那份「上一次的样子」和现在一致（后面量的是稳态）。
-	s.refreshMenuChecked()
+	s.refreshMenuChecked(s.app.Snapshot())
 
 	allocs := testing.AllocsPerRun(200, func() {
-		s.refreshMenuChecked()
+		s.refreshMenuChecked(s.app.Snapshot())
 	})
 	if allocs > 0 {
 		t.Errorf("菜单每帧刷一次，稳态每帧分配 %.1f 次，want 0 次", allocs)

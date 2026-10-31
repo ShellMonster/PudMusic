@@ -31,7 +31,7 @@ func TestTheTrayMenuHasThePlayerShape(t *testing.T) {
 	want := []string{
 		"没有在放", "---",
 		"播放/暂停", "上一曲", "下一曲", "---",
-		"显示/隐藏主窗口", "显示主窗口", "迷你播放器", "---",
+		"显示/隐藏主窗口", "迷你播放器", "---",
 		"设置", "退出程序",
 	}
 	if len(got) != len(want) {
@@ -53,7 +53,7 @@ func TestTheNowPlayingLineSaysWhatIsPlaying(t *testing.T) {
 	s := b.s
 
 	// 没有歌。
-	if got := s.trayNowPlayingLabel(); got != "没有在放" {
+	if got := s.trayNowPlayingLabel(s.app.Snapshot()); got != "没有在放" {
 		t.Errorf("没有歌的时候那一行是 %q，want %q", got, "没有在放")
 	}
 }
@@ -123,6 +123,10 @@ func TestTheTrayCommandsRunTheCommand(t *testing.T) {
 // 用户把窗口收进托盘之后，托盘那几项就是唯一的入口。
 //
 // ⚠️ **「设置」那一项在 Biu 那边叫「设置」**（不带省略号），我们也是。
+//
+// ⚠️ **「显示主窗口」那一项被删了**：它和「显示/隐藏主窗口」**在迷你开着
+// 的时候指向同一件事**（`openWindow` 在迷你开着时是「把迷你叫到前面」），
+// 两个都摆着，用户会以为它们不一样。
 //
 // ⚠️ **「显示/隐藏界面」这一项的文案和上游不同**：上游写「显示/隐藏界面」
 // （`tray.ts`），我们写「显示/隐藏主窗口」——「界面」是 Windows 上的说法，

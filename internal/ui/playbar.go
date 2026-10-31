@@ -1489,7 +1489,7 @@ func (s *Shell) viewPlayModeOn(c *ui.Context, st app.State, base flat.Base) {
 		s.app.CyclePlayMode()
 		// ⚠️ **播放模式变了，菜单上那个勾选态要跟着变**（菜单是系统画的，不会
 		// 自己变，见 refreshMenuChecked）。
-		s.refreshMenuChecked()
+		s.refreshMenuChecked(s.app.Snapshot())
 	}
 
 	// 右键出来的是「全部四档 + 那个开关」。四档摆在一列里，不是让人一格一格按

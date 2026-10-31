@@ -292,14 +292,14 @@ func TestThePlayModeCheckFollowsTheCurrentMode(t *testing.T) {
 	s := b.s
 	s.menu = appMenu(s)
 
-	s.refreshMenuChecked()
+	s.refreshMenuChecked(s.app.Snapshot())
 	// 默认档是「循环」（`DefaultPlayMode`）。
 	if !menuItemChecked(s.menu, menuPlayModeIDPrefix+string(app.PlayModeLoop)) {
 		t.Error("刚建好的时候，「循环」那一项没有打钩")
 	}
 
 	s.app.SetPlayMode(app.PlayModeRandom)
-	s.refreshMenuChecked()
+	s.refreshMenuChecked(s.app.Snapshot())
 
 	if menuItemChecked(s.menu, menuPlayModeIDPrefix+string(app.PlayModeLoop)) {
 		t.Error("切到「随机」之后，「循环」那一项还打着钩")
@@ -340,7 +340,7 @@ func TestTheSongColumnItemsAreDisabledWithoutATrack(t *testing.T) {
 	b := newTestShell(t)
 	s := b.s
 	s.menu = appMenu(s)
-	s.refreshMenuChecked()
+	s.refreshMenuChecked(s.app.Snapshot())
 
 	for _, id := range []string{menuLikeID, menuFavoriteID, menuDownloadID, menuCommentsID, menuArtistSpaceID} {
 		it := s.menu.ItemByID(id)

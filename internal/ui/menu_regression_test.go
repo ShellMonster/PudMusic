@@ -96,7 +96,7 @@ func TestTheNowPlayingLineFollowsTheCurrentSong(t *testing.T) {
 	s := b.s
 	// 装一份托盘菜单（就像 `installTray` 那样）。
 	s.trayMenuRef = s.trayMenu()
-	s.refreshTrayMenu()
+	s.refreshTrayMenu(s.app.Snapshot())
 
 	it := s.trayMenuRef.ItemByID(trayNowPlayingID)
 	if it == nil {
@@ -117,7 +117,7 @@ func TestTheNowPlayingLineFollowsTheCurrentSong(t *testing.T) {
 	// 东西变了，那一行就跟着变。而「变了没有」由 `trayState` 的「比一遍再改」
 	// 决定。
 	s.trayState = trayState{} // 假装从来没刷过
-	s.refreshTrayMenu()
+	s.refreshTrayMenu(s.app.Snapshot())
 	if got := s.trayMenuRef.ItemByID(trayNowPlayingID).Label; got != "没有在放" {
 		t.Errorf("刷新之后那一行是 %q，want %q", got, "没有在放")
 	}
@@ -133,7 +133,7 @@ func TestTheTrayPlaybackItemsAreDisabledWithoutATrack(t *testing.T) {
 	b := newTestShell(t)
 	s := b.s
 	s.trayMenuRef = s.trayMenu()
-	s.refreshTrayMenu()
+	s.refreshTrayMenu(s.app.Snapshot())
 
 	for _, id := range []string{"togglePlay", "prev", "next"} {
 		it := s.trayMenuRef.ItemByID(trayCommandIDPrefix + id)
@@ -161,23 +161,39 @@ func TestTheTrayPlaybackItemsAreDisabledWithoutATrack(t *testing.T) {
 // 这一条断的是**菜单用的判据和界面是同一个函数**，而不是「某个状态下灰不灰」
 // ——后者要真的放一首歌进去（要网络）。
 func TestTheLikeItemUsesTheSameJudgeAsTheInterface(t *testing.T) {
-	// 界面上那一枚的判据。
 	b := newTestShell(t)
-	if !b.a.Likeable() {
-		t.Skip("这一轮没有歌（likeable 是假的）：这一条要的是「判据是同一个函数」")
-	}
-
-	// 菜单那一项的判据要是同一个函数的同一个答案。
 	s := b.s
 	s.menu = appMenu(s)
-	s.refreshMenuChecked()
+
+	// ⚠️ **这一条要断的是「本地文件」那一档**——那才是这个 bug 的实际场景：
+	// 本地文件**有歌**（`HasTrack` 为真），但它**在 B 站上压根没有投稿**
+	// ⇒ `Likeable()` 为假。
+	//
+	// ⚠️ **原来那一版是同义反复**：它第一句就 `if !b.a.Likeable() { t.Skip }`，
+	// 于是「没有歌」时跳过、「有歌」时又必须是 likeable 的 mv——两种情况下
+	// 断言 `it.IsEnabled() != s.app.Likeable()` 都是恒等式。**这个判据什么
+	// 都没验。**
+	if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatalf("摆一个本地文件：%v", err)
+	}
+	if !s.app.Snapshot().HasTrack {
+		t.Fatal("本地文件摆进去之后没有歌：这一条要断的就是「有歌但不能赞」那一档")
+	}
+	if s.app.Likeable() {
+		t.Fatal("本地文件竟然能赞：这一条的前提不成立")
+	}
+
+	s.refreshMenuChecked(s.app.Snapshot())
 	it := s.menu.ItemByID(menuLikeID)
 	if it == nil {
 		t.Fatal("菜单里没有「赞」那一项")
 	}
-	if !it.IsEnabled() != !s.app.Likeable() {
-		t.Errorf("「赞」那一项的可用态（%v）和 `App.Likeable()`（%v）对不上",
-			it.IsEnabled(), s.app.Likeable())
+	// ⚠️ **本地文件时「赞」必须是禁用的**：界面上那枚压根不摆
+	//（`internal/ui/like.go` 的 `viewLikeStar` 第一句就是
+	// `if !s.app.Likeable() { return }`），而菜单上摆一个能点的，点了会弹一个
+	// 红色 Toast 说「这一首在 B 站上没法赞」。
+	if it.IsEnabled() {
+		t.Error("本地文件时「赞」那一项还是能点的：点了会弹一个红色错误")
 	}
 }
 
@@ -192,14 +208,25 @@ func TestTheCommentsItemUsesTheSameJudgeAsTheInterface(t *testing.T) {
 	b := newTestShell(t)
 	s := b.s
 	s.menu = appMenu(s)
-	s.refreshMenuChecked()
+
+	// ⚠️ **本地文件那一档**（理由同上一条）：本地文件在 B 站上压根没有对应的
+	// 对象，而问一个认不出来的 oid 的症状是「静默拿到空列表」——
+	// 所以菜单上那一项必须是禁用的，而界面上那一枚**压根不摆**
+	//（`internal/ui/comments_entry.go` 的 `viewCommentsButton`）。
+	if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
+		t.Fatalf("摆一个本地文件：%v", err)
+	}
+	s.refreshMenuChecked(s.app.Snapshot())
+
 	it := s.menu.ItemByID(menuCommentsID)
 	if it == nil {
 		t.Fatal("菜单里没有「显示评论」那一项")
 	}
-	if it.IsEnabled() != s.app.CommentsWorthAsking() {
-		t.Errorf("「显示评论」那一项的可用态（%v）和 `App.CommentsWorthAsking()`（%v）对不上",
-			it.IsEnabled(), s.app.CommentsWorthAsking())
+	if s.app.CommentsWorthAsking() {
+		t.Fatal("本地文件竟然有评论可问：这一条的前提不成立")
+	}
+	if it.IsEnabled() {
+		t.Error("本地文件时「显示评论」那一项还是能点的：点了什么也不会发生")
 	}
 }
 
@@ -265,6 +292,69 @@ func TestTheMiniPlayerMenuItemCarriesItsShortcut(t *testing.T) {
 	}
 	if it.Type != mygo.MenuItemCheckbox {
 		t.Errorf("「显示/隐藏迷你播放器」那一项的类型是 %v，want 勾选型", it.Type)
+	}
+}
+
+// TestTheRadioGroupsAreAdjacent 断**那几个单选组是相邻的**。
+//
+// ⚠️ **为什么这一条要紧**：框架的单选分组靠 `radioGroup()`
+// （`mygo/menu.go:343`）——它向两边扩，判据是**相邻的那一项也是 radio**。
+// 而**分隔线的 Type 是 `MenuItemSeparator`**——所以**一条分隔线就把一组
+// 拆成两组**。
+//
+// ⇒ 而拆开的后果很具体：`SetChecked`（`mygo/menu.go:288`）对 radio 项会调
+// `uncheckRadioSiblings()`，**只取消同一组里的兄弟**——拆组之后**四个档位
+// 能同时打着钩**。
+//
+// ⇒ 「播放模式」那四项（顺序 / 循环 / 随机 / 单曲）必须**连续**，
+// 「显示模式」那三项（列表 / 网格 / 紧凑）也是。
+//
+// ⚠️ **这一条断的是「它们在同一个父菜单里、且中间没有别的项」**——框架没导出
+// `radioGroup`，但「中间没有别的项」正是成组的**必要条件**。
+func TestTheRadioGroupsAreAdjacent(t *testing.T) {
+	b := newTestShell(t)
+	m := appMenu(b.s)
+
+	groups := []struct {
+		name string
+		ids  []string
+	}{
+		{"播放模式", []string{
+			menuPlayModeIDPrefix + string(app.PlayModeSequence),
+			menuPlayModeIDPrefix + string(app.PlayModeLoop),
+			menuPlayModeIDPrefix + string(app.PlayModeRandom),
+			menuPlayModeIDPrefix + string(app.PlayModeSingle),
+		}},
+		{"显示模式", []string{
+			menuDisplayModeIDPrefix + string(app.DisplayModeList),
+			menuDisplayModeIDPrefix + string(app.DisplayModeCard),
+			menuDisplayModeIDPrefix + string(app.DisplayModeCompact),
+		}},
+	}
+	for _, g := range groups {
+		for _, col := range m.Items() {
+			idx := -1
+			for i, it := range col.Submenu {
+				if it.ID == g.ids[0] {
+					idx = i
+					break
+				}
+			}
+			if idx < 0 {
+				continue
+			}
+			// ⚠️ **从第一项往后数，数出这一组那一段**。
+			end := idx
+			for end+1 < len(col.Submenu) && col.Submenu[end+1].Type == mygo.MenuItemRadio {
+				end++
+			}
+			if got := end - idx + 1; got != len(g.ids) {
+				t.Errorf("「%s」那一组只有 %d 项连续（want %d）："+
+					"中间夹了别的项 ⇒ 框架的 radioGroup 拆组 ⇒ 四个档位能同时打钩",
+					g.name, got, len(g.ids))
+			}
+			break
+		}
 	}
 }
 
