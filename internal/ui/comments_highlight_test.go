@@ -372,6 +372,17 @@ func TestTheHighlightSurvivesAnEmoteInTheMiddle(t *testing.T) {
 // 🔴 **切 span 只是画法**：`ShapeRichText` 拿的是一串 span，而它的文字必须
 // 逐字等于原文——少一个字，画面上那句话就少一个字（而屏幕上那句话和读屏
 // 读到的那一份（`plain`）就对不上了）。
+//
+// ⚠️ **守卫不算「那句话」的一部分**（票 #702 的 B1 修复）：每一枚表情占位符
+// 后面都接一段**零宽**的普通 span（`commentObjectGuard`，U+200B），那是给
+// 省略号挑继承样式用的（它落在「表情那一格」末尾时，省略号会被那一格的
+// 推进宽吞掉，Windows 上一个字都画不出来）。⇒ 那段守卫**零宽**，画面上
+// 看不见 ⇒ 比的时候**要去掉它**。
+//
+// 🔴 **为什么在这里去掉、而不是改「want」把守卫算进去**：这一条要断的是
+// **「用户读到的那句话」**（一个字符都不多、不少），而守卫是**排版的工具**
+// 不是内容——把它写进 `want` 等于承认「那句话里有一个零宽控制字符」，而
+// 那一行字复制出去、读屏读出来都不带它。
 func TestTheSpanTextsStillSpellTheWholeBody(t *testing.T) {
 	emotes := map[string]bili.CommentEmote{
 		"[妙啊]": {URL: "https://i0.hdslb.com/bfs/emote/x.png"},
@@ -398,8 +409,11 @@ func TestTheSpanTextsStillSpellTheWholeBody(t *testing.T) {
 		if strings.Contains(tc.msg, "[妙啊]") {
 			want = strings.ReplaceAll(tc.msg, "[妙啊]", "\uFFFC")
 		}
-		if got.String() != want {
-			t.Errorf("正文 %q：切完拼起来是 %q，want %q", tc.msg, got.String(), want)
+		// ⚠️ **去掉守卫**：它是排版的工具（零宽），不是那句话的一部分（理由见
+		// 这个函数上面的注释）。
+		gotText := strings.ReplaceAll(got.String(), commentObjectGuard, "")
+		if gotText != want {
+			t.Errorf("正文 %q：切完拼起来是 %q，want %q", tc.msg, gotText, want)
 		}
 		if n := strings.Count(want, "\uFFFC"); n != len(urls) {
 			t.Errorf("正文 %q：%d 枚占位符配了 %d 张图", tc.msg, n, len(urls))
