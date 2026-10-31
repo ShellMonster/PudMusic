@@ -28,21 +28,25 @@
 // （防重入、取消、旧结果作废、容器没填满自动续拉）**在那一层里**，界面层不
 // 另写一份。
 //
-// ## 「正在加载」那一格什么时候才出现（票 #368）
+// ## 「正在加载」那一格什么时候才出现（票 #368、票 #706）
 //
-// **只有屏幕上真的没内容可画的时候**。切到一档而它还在拉的时候，画面上留着
-// **上一档**的内容——所以那一格轮到的次数，比以前少得多（见
-// homepage_transition.go 的 `syncSwap`）。
+// **切到一档而它还在拉的时候，那一档画的是**骨架屏**（八行歌曲占位）**——
+// 不是转圈、也不是上一档的内容（票 #706：切 Tab 走**横向滑动**，新的那一档
+// **滑进来**，而它的内容还没到）。
 //
-// ## 切 Tab 有过渡（票 #368、票 #238）
+// ⚠️ **形状是已知的**（一屏歌曲行），而骨架屏就是给「形状已知」那一档用的
+// （见 `widgets/skeleton` 的文件头）。**上游是转圈**（`music-recommend/
+// index.tsx:319`）——我们**故意不抄**。
 //
-// 内容是单独一个元素（`viewBody`），切 Tab 时它整个换掉，框架按
-// `ElementTransition` 的 `Enter` 走一遍——新的那一块从下面 8 DIP 处升上来。
+// ## 切 Tab 有过渡（票 #368、票 #706）
 //
-// ⚠️ **旧的先淡出、新的后淡进**（票 #238）：退场那一段是**旧的那一块自己的
-// 不透明度**（框架的 `Exit` 那一半会复制一份上一帧的样子，那一份要重排旧
-// 列表的文字、而且和新的那一块同时在画面上）。形式和那几个数写在
-// homepage_transition.go 顶上。
+// 内容是单独一个元素（`viewPager`），切 Tab 时**横向滑动**：旧的那一档往左
+// 滑出去、新的那一档从右边滑进来，**两档并存但空间上不重叠**。
+//
+// ⚠️ **指示器和内容同起同落**（两边走同一套参数：同一曲线、同一时长）。
+//
+// ⚠️ **形式和那几个数写在 homepage_pager.go 顶上**，而 DESIGN.md §五《首页
+// 切 Tab：横向滑动》那一节记着**为什么推翻票 #238 的裁决**。
 //
 // 🔴 铁律二：这一页的 view **不许**把 `SetTheme` 放到别的地方调，见
 // `viewHome` 开头那一行和 theme.go。
@@ -172,18 +176,26 @@ type homePage struct {
 
 	// shown 是「此刻画面上画的是哪一档的内容」（票 #368）。
 	//
-	// ⚠️ **它和 tab 不是同一件事**：切到一档而它还在拉的时候，画面上留着**上一
-	// 档**的内容（那就是「流行切进去不闪」那一条，见 homepage_transition.go 的
-	// `syncSwap`）。它只在那一档有着落了之后才跟上 `tab`——而**跟着它的那个动
-	// 作要分两段**（旧的先淡出、新的后淡进，见 `syncSwap`）。
+	// ⚠️ **它和 tab 不是同一件事**：切到一档而它还在拉的时候，画面上**就是那一
+	// 档**（画着骨架屏，见 `viewPager`）——而 `shown` 是在**横滑走完**的那一刻
+	// 才换成那一档的（滑的那一段里**两档都在画面上**，见 `syncPager`）。
 	shown int
 
-	// swap 是切 Tab 那一段的状态：现在处在哪一段、退到哪一档、这一刻有多透明。
+	// swap 是切 Tab 那一段的状态：现在处在哪一段、滑到哪一档、这一刻在哪儿。
 	//
 	// ⚠️ **它和 `shown` 是一对**：`shown` 是「画面上画的是哪一档」，`swap` 是
-	// 「正在往哪一档换、换到哪一段了」。退场那一段里 `shown` 还是旧的那一档
-	// （它在淡出），进了进场那一段才换成新的那一档。详见 homepage_transition.go。
-	swap homeSwap
+	// 「正在往哪一档滑、滑到哪一段了」。滑的那一段里**两档都在画面上**（旧的
+	// 往左走、新的从右边进来），滑完了才换成新的那一档。详见 homepage_pager.go。
+	swap homePager
+
+	// pagerBox 是内容块那个容器的盒子（**上一帧**量到的）。
+	//
+	// ⚠️ **它用来算两档横向错开多远**：两档并排，各占一段，而一段就是容器
+	// 这么宽（见 homepage_pager.go 的 `viewPager`）。
+	//
+	// ⚠️ **第一帧量不到时是零值**（0）——而那时**还没在滑**（`want` 那时候还没
+	// 算出来，见 `syncHome`），所以 0 只影响「还没量到」的那一帧的布局。
+	pagerBox ui.Rect
 
 	// want 是「要换过去的那一档」，wantReady 是「它到了没有」。
 	//
@@ -241,7 +253,7 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// 按钮），再说一遍是噪音，而那一句还带着 B 站的原始码。
 		l.SetFailureNotice(false)
 		// ⚠️ **三档落在不同的位置上**（票 #368 的内容块按档分了 key，见
-		// homepage_transition.go 的 `homeBodyKeys`）：框架把滚动状态记在**元素的
+		// homepage_pager.go 的 `homeBodyKeys`）：框架把滚动状态记在**元素的
 		// 位置**上，而同一个位置轮流画的几份列表会**抢同一份**——切回「音乐」
 		// 会落到第 6 首而不是它原来的第 19 首（实测）。
 		//
@@ -394,8 +406,8 @@ func (s *Shell) viewHome(c *ui.Context, _ *ui.Route) {
 // 上一档，不出现「正在加载 XXX 推荐」那一格）。
 //
 // ⚠️ **切 Tab 那一段过渡本身不在这里**（票 #238）：它要看的是**这一帧的时刻**
-// （框架的钟），所以它跟着画面走，在 view 那一半里（见 homepage_transition.go
-// 的 `syncSwap`）。
+// （框架的钟），所以它跟着画面走，在 view 那一半里（见 homepage_pager.go 的
+// `syncPager`）。
 func (s *Shell) syncHome(c *ui.Context) {
 	h := s.home
 	// 先收后台投回来的结果，再发该发的那一摊（画之前发：画完再发的话那一帧画
@@ -452,7 +464,7 @@ func (s *Shell) syncHome(c *ui.Context) {
 // ⚠️ **内容是单独一个元素**（`viewBody`，票 #368）：切 Tab 时它整个换掉，
 // 框架靠这个认出「旧的退了、新的进了」，于是有过渡；而它换的是**画面上那一
 // 档**（`h.shown`），不一定是选中那一档（`h.tab`）——选中那一档还在拉的时候，
-// 画面上留着上一档的内容（见 `syncSwap`）。
+// 画面上就是那一档（画着骨架屏，见 `syncPager`）。
 //
 // 下面那一块给了 Grow(1) 的是列表，`list.List` 自己就占了 Grow(1)（见
 // widgets/list 的 List.View），所以它拿走了剩下的高度。
@@ -479,11 +491,14 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 		AlignItems(ui.Stretch).Children(func() {
 		h.viewTabs(c, s)
 
-		// ⚠️ **内容是单独一个元素**（`viewBody`，票 #368）：切 Tab 时它整个换掉，
-		// 框架靠这个认出「旧的退了、新的进了」，于是有过渡；而它换的是**画面上
-		// 那一档**（`h.shown`），不一定是选中那一档（`h.tab`）——选中那一档还在
-		// 拉的时候，画面上留着上一档的内容（见 `syncShown`）。
-		h.viewBody(c, s)
+		// ⚠️ **内容是单独一个元素**（`viewPager`，票 #706）：切 Tab 时它整个
+		// 换掉，而换的时候**两档都在画面上**——旧的那一档横向滑出去、新的那
+		// 一档横向滑进来（见 homepage_pager.go）。
+		//
+		// ⚠️ **它换的是「画面上画的那一档」**（`h.shown`），不一定是选中那一档
+		// （`h.tab`）——选中那一档还在拉的时候，画面上留着上一档的内容（见
+		// `syncPager`）。
+		h.viewPager(c, s)
 	})
 }
 
@@ -533,7 +548,7 @@ func (h *homePage) withPopTop(c *ui.Context, tab int, body func()) {
 // 它挂在列表里时一样（都在 Tab 那一排下面）。
 //
 // ⚠️ **tab 是「画面上画的是哪一档」**，不一定等于选中那一档（票 #368，见
-// `syncSwap`）——它和这一段里别的地方一样按 tab 取。
+// `syncPager`）——它和这一段里别的地方一样按 tab 取。
 //
 // ⚠️ **另外两档一律不画**：上游的新歌速递只在「流行」那一档（`index.tsx:295`）。
 func (h *homePage) viewPopTop(c *ui.Context, tab int) {
@@ -560,7 +575,7 @@ func (h *homePage) viewPopTop(c *ui.Context, tab int) {
 // 取消都在那一层里，而这一层只管「此刻画面上该是什么样子」。
 //
 // ⚠️ **tab 是「画面上画的是哪一档」，不一定等于选中那一档**（票 #368）：选中那
-// 一档还在拉的时候，画面上画的是上一档（见 `syncSwap`）——所以这一段里
+// 一档还在拉的时候，画面上画的是**那一档的骨架屏**（见 `syncPager`）——所以这一段里
 // 列表、表头、滚动条、回顶按钮**全都按 tab 取**，不能按 `h.tab` 取。
 func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 	pg := h.lists[tab].Paged()
@@ -585,16 +600,26 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 				pg.Err, func() { h.retryTab(tab) })
 		})
 	case pg.Loading && pg.Loaded == 0:
-		// ⚠️ 走**共用**的那一格（`drawLoading`）：上游首页那一屏也是
-		// `h-[40vh]` 那一格里的转圈（`src/pages/music-recommend/index.tsx:319`），
-		// 而这一票把其余几页也统一成那一格（票 #178，见 `loading.go`）。
+		// ⚠️ **这一档画的是骨架屏**（票 #706），不是转圈。
 		//
-		// ⚠️ **这一格只在真的没内容可画时才出现**（票 #368）：切到一档而它还在
-		// 拉的时候，画面上留着**上一档**的内容（见 `syncSwap`），所以这里轮到
-		// 「正在加载」的时候，屏幕上确实一首歌都没有。
+		// ⚠️ **为什么从转圈改成骨架屏**：切 Tab 走**横向滑动**（票 #706），
+		// 新的那一档**滑进来**的时候它的内容**还没到**——而**形状是已知的**
+		//（一屏歌曲行：缩略图 + 歌名 + 时长）。骨架屏就是给「形状已知」那一档
+		// 用的（`widgets/skeleton` 的文件头：「转圈是整页首屏那一档；骨架屏是
+		// 内容的形状已知时用」）。
+		//
+		// ⚠️ **而这一条同时把「不闪」那一条兑现了**：此前（票 #238 那一套）
+		// 「切到一档而它还在拉」的时候，画面上留着**上一档**的内容——那是靠
+		// 「不换」兑现的。而这一票**换了**：新的那一档滑进来、画骨架屏，于是
+		// 用户看得见**自己到了哪一档**，而版面不跳。
+		//
+		// ⚠️ **上游是转圈**（`src/pages/music-recommend/index.tsx:319` 的
+		// `h-[40vh]` 那一格）——我们**故意不抄**（票 #706，用户拍板）。
 		//
 		// ⚠️ **顶图先画**（理由同上面那一支）。
-		h.withPopTop(c, tab, func() { drawLoading(c, "home:loading", "正在加载"+homeTabNouns[tab]) })
+		h.withPopTop(c, tab, func() {
+			drawSkeletonRows(c, "home:skeleton:"+homeTabs[tab], "正在加载"+homeTabNouns[tab])
+		})
 	case pg.Loaded == 0:
 		// ⚠️ 走 `viewEmpty`（`routes` 表里 `/` 那一条，出处和其余 13 条写在
 		// 一起），不是让 `list.List` 说它自己那句「这里还没有歌」：那句只说
@@ -766,7 +791,9 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 		// 控件都不能构造后 Key），而那一行是它现在所在的那一层。
 		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 			c.Key("home:tabs")
-			mainTabs(c, &h.tab, tabLG, homeTabs[:]...)
+			// ⚠️ **这一排走「和底下同步」那一档**（票 #706）：滑块和内容那一块
+			// **同起同落**——而内容那一块是横向滑动的（见 homepage_pager.go）。
+			mainTabsSynced(c, &h.tab, tabLG, true, homeTabs[:]...)
 		})
 
 		// 「全部播放」：这一档的歌（**当前这一档 Tab 的**，不是三个 Tab 加起来）。
@@ -819,7 +846,7 @@ func (h *homePage) viewTabs(c *ui.Context, s *Shell) {
 // 记的）——互不干扰。
 //
 // ⚠️ **三档落在不同的元素位置上**（票 #368 的内容块按档分了 key，见
-// `homepage_transition.go` 的 `homeBodyKeys`）：框架把滚动状态记在**元素的位置**
+// `homepage_pager.go` 的 `homeBodyKeys`）：框架把滚动状态记在**元素的位置**
 // 上，而同一个位置轮流画的几份列表会**抢同一份**。这一条是上面那条的前提——
 // 两档抢同一份的话，不挂 ScrollState 也一样会被拽走。
 //

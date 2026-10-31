@@ -76,21 +76,42 @@ var (
 	tabLG = tabSize{track: 44, block: 36, font: 16}
 )
 
-// tabSlide 是滑块那一下的动画：**一条接近临界阻尼的弹簧**（ζ=0.9923），
-// 不是定时长曲线。
+// tabSlide 是滑块那一下的动画。
 //
-// 出处、阻尼为什么从 26 上调到 32、以及那几个数实算是多少，都写在
-// `internal/ui/widgets/motion` 的 `TabSlide` 那里——值只写一处。
+// ⚠️ **首页那一排改成曲线了**（票 #706）：切 Tab 的内容那一块走**横向滑动**，
+// 而用户要的是「顶部与底部动画同步进行」——**同起同落**。
 //
-// ⚠️ **上游那一档是 250ms `ease-out`**（`@heroui/theme@2.4.25` 的
-// `components/tabs.ts`），我们**故意不抄**：曲线中途换目标会从当前值重新起速
-// （顿一下），弹簧保留速度——连点三个 Tab 时滑块是接着走的。
+// 而弹簧**做不到同起同落**：这一条弹簧走 453ms 才收手（实测，见下面那张表），
+// 而内容那一侧走 200ms ⇒ 两边**不同步**（指示器还在走，内容已经停住了）。
+//
+// ⇒ **两边用同一个数**：`homePagerDuration` + `motion.Unified`。
+//
+// ⚠️ **「打断时接着走」那条好处没有丢**：框架的**曲线**分支被打断时也是**从
+// 当前值接着走**（`mygo/ui/motion.go` 的 `channel.retarget`：曲线那支把 `from`
+// 设成**当前值**），只是它「重新起速」而不是「保留速度」——而那一档的取舍
+// 见 DESIGN.md §五《主 Tab 滑块为什么是弹簧》那一节。
+//
+// ⚠️ **别的三处主 Tab（设置页 / 搜索页 / UP 空间）不走这一条**：它们没有
+// 「底下也在动」的那一档内容，而「切了 Tab 但底下不动」是**另一种**语义
+// （见下面 `mainTabs` 的注释）。
 var tabSlide = motion.TabSlide
+
+// tabSlideSynced 是**首页那一排**滑块的动画：和内容那一块同起同落。
+//
+// ⚠️ **它是包级变量，不能每帧现造**：`motion.Unified` 是闭包，每帧调一次就是
+// 每帧一个分配（每帧分配是本仓库唯一的性能判据）。
+var tabSlideSynced = homePagerAnim
 
 // mainTabs 画一排主 Tab。selected 是当前选中的下标，size 决定 40 / 44 那一档。
 //
 // 点击、左右方向键、Home/End、焦点跟着选中走，仍然是框架 `TabsBase` 那一套；
 // 我们只换画法。
+//
+// ⚠️ **synced 是「这一排下面的内容也在动」那一档**：滑块走**和内容同一个**
+// 曲线和时长，于是两者**同起同落**（票 #706，首页那一排就是它）。
+// 别的三处（设置页 / 搜索页 / UP 空间）传 false——它们底下没有「跟着一起动」
+// 的那一屏，而**切了 Tab 但底下不动**是另一种语义（见上面 `tabSlide` 的
+// 注释）。
 //
 // ⚠️ **选中那一格不再加粗**：字重一变，格子的宽度就变，滑块既要滑位置又要改
 // 宽度，还会带着后面的 Tab 整体挪一下。上游的 `tabContent` 只换字色
@@ -100,6 +121,15 @@ var tabSlide = motion.TabSlide
 // `data-[hover-unselected=true]:opacity-disabled`，选中那一格没有这一层。铺上
 // 去的话，指针停在刚点过的那一格上，白色滑块就被压成灰的了。
 func mainTabs(c *ui.Context, selected *int, size tabSize, labels ...string) ui.Element {
+	return mainTabsSynced(c, selected, size, false, labels...)
+}
+
+// mainTabsSynced 是 mainTabs 加一个「和底下同步」那一档。
+//
+// ⚠️ **单独一个函数而不是加一个参数**：加参数会改掉**四处**调用点，而其中
+// 三处传的是 false——那三处每次都要写一个 `false`，而那个 `false` 的含义
+// （「底下没有跟着动的东西」）不是从调用点看得出来的。
+func mainTabsSynced(c *ui.Context, selected *int, size tabSize, synced bool, labels ...string) ui.Element {
 	t := c.Theme()
 	tabs := ui.TabsBase(c, selected, len(labels))
 
@@ -141,6 +171,13 @@ func mainTabs(c *ui.Context, selected *int, size tabSize, labels ...string) ui.E
 	sel := *selected
 	block := blocks[sel].LayoutBounds()
 	track := tabs.List.LayoutBounds()
+	// ⚠️ **动画参数**：首页那一排要和底下的内容**同起同落**（票 #706），
+	// 所以走 `tabSlideSynced`（和内容同一个曲线 + 同一个时长）；别的三处走
+	// 弹簧（`tabSlide`）——理由见上面那两个变量的注释。
+	slide := tabSlide
+	if synced {
+		slide = tabSlideSynced
+	}
 	if block.W <= 0 || block.H <= 0 {
 		// 这一帧还量不到（第一次画这一页）。🔴 **要主动要下一帧**：这时候
 		// 没有任何动画在跑，界面画完这一帧就安静了，滑块要等到下一次鼠标
@@ -159,10 +196,10 @@ func mainTabs(c *ui.Context, selected *int, size tabSize, labels ...string) ui.E
 		c.AnimationFrame()
 		return tabs.List
 	}
-	x := tabs.List.AnimateTo("tab-slide-x", block.X-track.X, tabSlide)
-	y := tabs.List.AnimateTo("tab-slide-y", block.Y-track.Y, tabSlide)
-	w := tabs.List.AnimateTo("tab-slide-w", block.W, tabSlide)
-	h := tabs.List.AnimateTo("tab-slide-h", block.H, tabSlide)
+	x := tabs.List.AnimateTo("tab-slide-x", block.X-track.X, slide)
+	y := tabs.List.AnimateTo("tab-slide-y", block.Y-track.Y, slide)
+	w := tabs.List.AnimateTo("tab-slide-w", block.W, slide)
+	h := tabs.List.AnimateTo("tab-slide-h", block.H, slide)
 
 	fill := sliderColor(t)
 	radius := t.Radius

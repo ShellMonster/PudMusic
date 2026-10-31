@@ -71,7 +71,7 @@ func TestSwitchingTabsIsNotAHardCut(t *testing.T) {
 	tt.Frame()
 	during := snapshot(tt)
 
-	tt.Advance(homeBodyDuration + 100*time.Millisecond)
+	tt.Advance(homePagerDuration + 100*time.Millisecond)
 	tt.Frame()
 	after := snapshot(tt)
 
@@ -99,22 +99,30 @@ func TestSwitchingTabsIsNotAHardCut(t *testing.T) {
 	}
 }
 
-// TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentOnScreen 钉住
-// **「流行」切进去不闪**。
+// TestSwitchingToATabThatIsStillLoadingShowsASkeleton 钉住**「流行」切进去画
+// 骨架屏**。
 //
-// 走的是真路子：假 B 站把「流行」那一档要的那一趟按在门口不放，用户点了
-// 「流行」之后那一趟还没回来。
+// # 这一条**推翻了票 #368 的那一条**
 //
-// 三件事：
+// 票 #368 说的是「切到一档而它还在拉的时候，**旧的内容留在画面上**」——那是
+// 靠「**不换**」兑现的（等那一档有着落了才换过去）。
 //
-//  1. **旧的内容留在画面上**（「音乐 推的第一首」还在）；
-//  2. **「正在加载流行推荐」不出现**（那一格只在真的没内容可画时才有——
-//     票 #368 的验收第 3 条）；
+// **这一票换了做法**（票 #706）：切 Tab 走**横向滑动**，而新的那一档**滑进来**
+// ——它**不等数据**。数据没到的时候它画的是**骨架屏**（内容的形状已知：一屏
+// 歌曲行）。
+//
+// ⇒ **「不闪」那一条还是兑现了**，只是兑现的方式换了：**从「留着旧内容」换成
+// 「新内容以骨架屏的样子进来」**——用户看得见**自己到了哪一档**，而版面不跳。
+//
+// # 三件事
+//
+//  1. **那一档出现了**（它在画面上，不是还留着上一档）；
+//  2. **画的是骨架屏**（「正在加载流行推荐」这句话在）；
 //  3. 那一趟回来之后，画面上换成「流行」自己的歌。
 //
-// ⚠️ **第 2 条是这一票的正题**：此前切过去的第一帧画的是「正在加载」那一格，
-// 数据到了再换成列表——画面上就是「空 → 一屏内容」的一跳（票 #368 的原话）。
-func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentOnScreen(t *testing.T) {
+// ⚠️ **第 2 条是这一票的正题**：骨架屏和转圈是**两档**（DESIGN.md §六《加载
+// 态》那张表）——这一档是**形状已知**（一屏歌曲行），所以是骨架屏。
+func TestSwitchingToATabThatIsStillLoadingShowsASkeleton(t *testing.T) {
 	b := newUIExplore(t)
 	homeArchives(b)
 
@@ -137,54 +145,49 @@ func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentOnScreen(t *testing.
 	})
 
 	_, tt, _ := newHomeShell(t, b)
-	waitFrames(t, tt, "第一档拉回来了", func() bool { return showsText(tt, "音乐 推的第一首") })
+	waitFrames(t, tt, "第一档拉回来了", func() bool { return shows(tt, "音乐 推的第一首") })
 
 	if err := tt.Click(homeTabs[homePopTab]); err != nil {
 		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[homePopTab], err, tt.Texts())
 	}
 	homeFrame(tt)
 
-	// 那一档还在拉：屏幕上留着的应该是**旧的内容**。
-	if !showsText(tt, "音乐 推的第一首") {
-		t.Errorf("切到「流行」而它还在拉的时候，旧的内容不见了，文字有 %q", tt.Texts())
+	// 那一档还在拉：它**已经在画面上**了（滑进来了），画的是骨架屏。
+	if !homeSkeletonShown(tt, homeTabNouns[homePopTab]) {
+		t.Errorf("切到「流行」而它还在拉的时候，画面上没有说它在加载，文字有 %q\n"+
+			"（这一票要的是**骨架屏**：内容的形状已知，用骨架屏而不是转圈）",
+			tt.Texts())
 	}
-	if showsText(tt, "正在加载流行推荐") {
-		t.Errorf("切到「流行」而它还在拉的时候画了「正在加载流行推荐」——" +
-			"那一格只在真的没内容可画时才该出现（票 #368）")
-	}
-	if showsText(tt, lookup(homePath).Empty.Title) {
+	// 而**空状态不许出现**：那是「B 站真的没有推荐」的说话方式，而那一档还在拉。
+	if shows(tt, lookup(homePath).Empty.Title) {
 		t.Errorf("切到「流行」而它还在拉的时候画了空状态，文字有 %q", tt.Texts())
 	}
 
 	// 放它过去：那一屏自己换掉（这一次**有**过渡，见上面那一条）。
 	close(gate)
 	waitFramesClock(t, tt, "「流行」那一档拉回来了", func() bool {
-		return showsText(tt, "流行 榜上的歌")
+		return shows(tt, "流行 榜上的歌")
 	})
-	if showsText(tt, "音乐 推的第一首") {
+	if shows(tt, "音乐 推的第一首") {
 		t.Errorf("「流行」那一档到货了，画面上还是旧那一档的歌，文字有 %q", tt.Texts())
 	}
 }
 
-// TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentEvenAfterTheClockMoves
-// 钉住**「切到一档而它还在拉」时不会因为钟走了就换过去**（票 #238 的评审）。
+// TestSwitchingToATabThatIsStillLoadingStillShowsTheSkeletonAfterTheClockMoves
+// 钉住**「切到一档而它还在拉」时，钟走了之后骨架屏还在**（票 #706）。
 //
 // # 这一条和上一条差在哪儿
 //
 // 上一条**只画帧不推钟**（Tester 的钟站着不动，AGENTS.md §2），于是它看不见
-// 「过了 100ms 之后」的样子。而真窗口里钟**是走的**——退场那一段 100ms 一过，
-// 内容就换过去了，而那一档的歌**还没到**，屏幕上于是出现「正在加载流行推荐」
-// 那一格（票 #368 明令不许出现的那一格）。
+// 「过了 200ms 之后」的样子。而真窗口里钟**是走的**——横滑走完之后内容就换
+// 过去了，而那一档的歌**还没到**，屏幕上于是**应该**是骨架屏（而**不是**空、
+// 也不是转圈）。
 //
-// # 根因
+// # 这一条断的是「走完之后那一档还是骨架屏」
 //
-// 「它到了没有」这件事**只能在 sync 层认**（见 homepage.go 的 `syncHome`）：
-// sync 层跑在 view 之前，而那一档的请求也是**在那一层**发出去的（`pull()`）。
-// 在 view 层认的话，那一帧的请求**还没发出去**（`loadingOf` 还是假），于是会
-// 以为「它已经有着落了」而立刻开始换。
-//
-// ⚠️ **推着钟走 400ms**：真窗口里钟是走的，而这一段过渡是按钟走的。
-func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentEvenAfterTheClockMoves(t *testing.T) {
+// ⚠️ **推着钟走 400ms**：真窗口里钟是走的，而那一段横滑是按钟走的（200ms），
+// 400ms 足够走完一整段——**走完之后画面上就只剩新那一档了**，而它还在拉。
+func TestSwitchingToATabThatIsStillLoadingStillShowsTheSkeletonAfterTheClockMoves(t *testing.T) {
 	b := newUIExplore(t)
 	homeArchives(b)
 
@@ -206,27 +209,27 @@ func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentEvenAfterTheClockMov
 	})
 
 	_, tt, _ := newHomeShell(t, b)
-	waitFrames(t, tt, "第一档拉回来了", func() bool { return showsText(tt, "音乐 推的第一首") })
+	waitFrames(t, tt, "第一档拉回来了", func() bool { return shows(tt, "音乐 推的第一首") })
 
 	if err := tt.Click(homeTabs[homePopTab]); err != nil {
 		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[homePopTab], err, tt.Texts())
 	}
-	// ⚠️ **推着钟走 400ms**（真窗口里钟是走的）：退场那一段 100ms、进场 200ms，
-	// 400ms 足够走完一整段。
+	// ⚠️ **推着钟走 400ms**（真窗口里钟是走的）：横滑那一段是 200ms，400ms
+	// 足够走完一整段——而那一档的歌**还没到**。
 	for range 25 {
 		tt.Advance(16 * time.Millisecond)
 		tt.Frame()
 	}
 
-	// 那一档还在拉：屏幕上留着的应该是**旧的内容**。
-	if !showsText(tt, "音乐 推的第一首") {
-		t.Errorf("切到「流行」而它还在拉的时候（推着钟走了 400ms），旧的内容不见了，文字有 %q",
+	// 那一档还在拉：画面上的是**那一档自己的骨架屏**（横滑已经走完了，画面
+	// 上就只剩新那一档）。
+	if !homeSkeletonShown(tt, homeTabNouns[homePopTab]) {
+		t.Errorf("切到「流行」而它还在拉的时候（推着钟走了 400ms），画面上没有骨架屏，文字有 %q",
 			tt.Texts())
 	}
-	// 而「正在加载流行推荐」那一格**不许出现**（票 #368 的验收第 3 条）。
-	if showsText(tt, "正在加载流行推荐") {
-		t.Errorf("切到「流行」而它还在拉的时候画了「正在加载流行推荐」——\n" +
-			"那一格只在真的没内容可画时才有（票 #368）")
+	// 而**旧那一档不该还在**（横滑走完了，它已经滑出去了）。
+	if shows(tt, "音乐 推的第一首") {
+		t.Errorf("横滑走完了，画面上还留着上一档的歌，文字有 %q", tt.Texts())
 	}
 }
 
@@ -238,8 +241,14 @@ func TestSwitchingToATabThatIsStillLoadingKeepsTheOldContentEvenAfterTheClockMov
 //   - **启动时**（屏幕上确实一首歌都没有）→ 那一格出现；
 //   - **切到一档而它还在拉**（屏幕上还有上一档）→ 那一格**不**出现。
 //
-// 第二个方向由上面那一条钉；这一条补的是第一个方向——少了它，一个「那一格
-// 永远不出现」的实现在上面那一条里也是绿的。
+// ⚠️ **第二条方向变了**（票 #706）：切 Tab 走**横向滑动**，而新的那一档**不等
+// 数据**——它滑进来，画的是**骨架屏**（形状已知）。所以「那一格不出现」这一
+// 条**不再成立**：切到一档而它还在拉的时候，屏幕上**就是**那一档的骨架屏。
+// 而骨架屏的**无障碍名字是同一句话**（「正在加载音乐推荐」）——所以上面那两条
+// 断言（启动时那句在、空状态不在）**照旧成立**。
+//
+// 这一条补的是第一个方向——少了它，一个「那一格永远不出现」的实现在上面那
+// 一条里也是绿的。
 func TestTheLoadingCellOnlyShowsWhenThereIsNothingToShow(t *testing.T) {
 	b := newUIExplore(t)
 	homeArchives(b)
@@ -261,16 +270,16 @@ func TestTheLoadingCellOnlyShowsWhenThereIsNothingToShow(t *testing.T) {
 	homeFrame(tt)
 
 	// 屏幕上确实一首歌都没有 → 那一格该在。
-	if !showsText(tt, "正在加载音乐推荐") {
+	if !homeSkeletonShown(tt, homeTabNouns[0]) {
 		t.Errorf("启动时屏幕上什么都没有，却没说「正在加载」，文字有 %q", tt.Texts())
 	}
 	// 而空状态**不**该在（那是「B 站真的没有推荐」的说话方式）。
-	if showsText(tt, lookup(homePath).Empty.Title) {
+	if shows(tt, lookup(homePath).Empty.Title) {
 		t.Errorf("正在拉的时候画了空状态，文字有 %q", tt.Texts())
 	}
 
 	close(gate)
-	waitFrames(t, tt, "拉回来了", func() bool { return showsText(tt, "音乐 推的第一首") })
+	waitFrames(t, tt, "拉回来了", func() bool { return shows(tt, "音乐 推的第一首") })
 }
 
 // TestTheTransitionDoesNotCostAFrameEveryFrame 钉住「过渡没有让稳态多花」。
@@ -287,9 +296,9 @@ func TestTheTransitionDoesNotCostAFrameEveryFrame(t *testing.T) {
 		t.Fatalf("点不到 %q 那一档：%v", homeTabs[1], err)
 	}
 	// ⚠️ **推 800ms，不是 200ms**：这一档还有**另一个**动画在跑——主 Tab 那个
-	// 滑块的弹簧（`tabs.go` 的 `TabSlide`，实测 453ms 才收手，见 DESIGN.md
-	// §五《主 Tab 滑块为什么是弹簧》）。要断的是「有没有东西永远转下去」，
-	// 所以得等两个都停下来。
+	// 滑块（`tabs.go`）。而首页那一排现在走的是「和底下同步」那一档
+	// （`tabSlideSynced`，和内容同时长 200ms），所以 200ms 就够——但推 800ms
+	// 更稳（它要断的是「有没有东西永远转下去」）。
 	tt.Advance(800 * time.Millisecond)
 	tt.Frame()
 
@@ -304,22 +313,28 @@ func TestTheTransitionDoesNotCostAFrameEveryFrame(t *testing.T) {
 	}
 }
 
-// TestTheOldContentLeavesBeforeTheNewOneArrives 钉住**中间不同时画两层**
-// （票 #238 的 F1：交叉淡入淡出在头两三帧把旧内容和新内容同时画在画面上）。
+// TestBothPagesAreOnScreenWhileTheContentSlides 钉住**滑动那一段两档都在
+// 画面上**（票 #706）。
 //
-// # 判据是**画面上有什么**
+// # 这一条**推翻了票 #238 的裁决**
 //
-// 切 Tab 之后：旧的那一档的字**还在**，新的一档的字**不在**。
+// 票 #238 的 F1 判的是「**中间不同时画两层**」——它把「同一时刻画面上有两层
+// 内容」判为**重影缺陷**，所以旧的那一档淡完之前新的一档不建。
 //
-// ⚠️ **旧的那一块必须还在**（而不只是「新的不在」）：交叉淡入淡出的时候，旧的
-// 那一块变成了框架**复制出来的那一份**（`mygo/ui/transition.go` 的 `ghostOf`），
-// 而那一份是**不可见的**（`flagInert`）——所以它的字**不在画面上**，而新的那一
-// 块**已经在**（只是淡入）。那个实现在「新的不在」这一条上是绿的，所以这一条
-// 少不得。
+// **现在推翻那个裁决**（用户明确同意），理由是：
 //
-// ⚠️ **一路推到过渡走完**：每一帧都查一遍「两块不在同一帧里」。判据是**状态**
-// （哪一档的字在画面上），不是时间。
-func TestTheOldContentLeavesBeforeTheNewOneArrives(t *testing.T) {
+//	淡入淡出时两层**叠在同一位置**（新的一层盖在旧的一层上面）——那是重影。
+//	横向滑动时两层**在空间上不重叠**——那不是重影，是 ViewPager。
+//
+// ⇒ 这一条现在断的是「两档同时在，而且**不重叠**」。
+//
+// ⚠️ **「不重叠」由另一条断**（`TestSwitchingTabsKeepsBothPagesApart`，在
+// `homepage_pager_test.go` 里）：它量的是两个盒子的几何位置。这一条只断
+// 「两档都在」。
+//
+// ⚠️ **一路推到过渡走完**：每一帧都查一遍「两档一起在 → 然后只剩一档」。
+// 判据是**状态**（哪一档的字在画面上），不是时间。
+func TestBothPagesAreOnScreenWhileTheContentSlides(t *testing.T) {
 	_, tt := newHome(t, fullSongs())
 	old := songName(homeTabs[0], 1)
 	fresh := songName(homeTabs[1], 1)
@@ -327,30 +342,30 @@ func TestTheOldContentLeavesBeforeTheNewOneArrives(t *testing.T) {
 	if err := tt.Click(homeTabs[1]); err != nil {
 		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[1], err, tt.Texts())
 	}
-	// 切之后的第一帧：旧的那一块还在（它在淡出），新的那一块**还没建**。
+	// 切之后的第一帧：两档**都在**（旧的在往左走，新的在从右边进来）。
 	tt.Frame()
 	if !shows(tt, old) {
 		t.Errorf("切 Tab 之后的第一帧上旧的那一块（%q）不在画面上了——\n"+
-			"它应该**先淡出**，新的那一块后进（DESIGN.md §五《规则》第 10 条：\n"+
-			"删除时透明度先变、添加时透明度后变）", old)
+			"这一票是**横滑**：旧的那一档要滑出去，它得**在画面上**才滑得出去", old)
 	}
-	if shows(tt, fresh) {
-		t.Errorf("切 Tab 之后的第一帧上新的那一块（%q）已经在画面上了——\n"+
-			"旧的和新的**同时**画着，那就是重影", fresh)
+	if !shows(tt, fresh) {
+		t.Errorf("切 Tab 之后的第一帧上新的那一块（%q）不在画面上了——\n"+
+			"这一票是**横滑**：新的那一档从右边滑进来，它得**在画面上**才滑得进来",
+			fresh)
 	}
 
-	// 一路推到过渡走完：任何一帧上都不能两块同时在。
+	// 一路推到过渡走完：先两档一起在，然后只剩新的一档。
 	for i := range 40 {
 		tt.Advance(16 * time.Millisecond)
 		tt.Frame()
 		oldShown, newShown := shows(tt, old), shows(tt, fresh)
-		if oldShown && newShown {
-			t.Fatalf("第 %d 帧上旧的那一块（%q）和新的那一块（%q）**同时**在画面上——\n"+
-				"那是重影（DESIGN.md §五《规则》第 10 条）", i, old, fresh)
-		}
 		if !oldShown && newShown {
 			// 换完了：旧的那一块没了，新的那一块在。
 			return
+		}
+		if !newShown {
+			t.Fatalf("第 %d 帧上新的那一块（%q）不在画面上了——\n"+
+				"横滑那一段**两档都在**（一档滑出、一档滑入）", i, fresh)
 		}
 	}
 	t.Fatalf("推了 40 帧（640ms），过渡还没走完：旧的那一块 %q 和新的那一块 %q "+
@@ -394,7 +409,7 @@ func TestThePopTabAppearsWhileTheNewMusicIsStillLoading(t *testing.T) {
 	})
 
 	_, tt, _ := newHomeShell(t, b)
-	waitFrames(t, tt, "第一档拉回来了", func() bool { return showsText(tt, "音乐 推的第一首") })
+	waitFrames(t, tt, "第一档拉回来了", func() bool { return shows(tt, "音乐 推的第一首") })
 
 	if err := tt.Click(homeTabs[homePopTab]); err != nil {
 		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[homePopTab], err, tt.Texts())
@@ -402,126 +417,186 @@ func TestThePopTabAppearsWhileTheNewMusicIsStillLoading(t *testing.T) {
 	// ⚠️ **推着钟等**：切 Tab 那一段过渡是按钟走的（旧的先淡出、新的后淡进），
 	// 而新歌速递还在拉的时候那一档**照样出现**——它不等新歌速递。
 	waitFramesClock(t, tt, "「流行」那一档出现了", func() bool {
-		return showsText(tt, "流行 榜上的歌")
+		return shows(tt, "流行 榜上的歌")
 	})
 	// 而新歌速递那一块**自己说它在拉**——用户看得见哪一块在等。
-	if !showsText(tt, "正在加载新歌速递") {
+	if !shows(tt, "正在加载新歌速递") {
 		t.Errorf("切到「流行」而新歌速递还在拉的时候，界面上没有说哪一块在等，文字有 %q",
 			tt.Texts())
 	}
 	// ⚠️ **旧的那一档不许还在**：这一档已经出现了，屏幕上不该还有上一档的歌。
-	if showsText(tt, "音乐 推的第一首") {
+	if shows(tt, "音乐 推的第一首") {
 		t.Errorf("「流行」那一档已经出现了，画面上还留着上一档的歌，文字有 %q", tt.Texts())
 	}
 }
 
-// TestTheFirstFrameAfterSwitchingTabsCostsNoMoreThanTheSteadyState 钉住
-// **切 Tab 的第一帧没有多分配一笔**（票 #238 的 F4）。
+// TestTheFramesWhileSwitchingTabsCostNoMoreThanTwoPages 钉住**切 Tab 那一段
+// 每一帧的分配**（票 #706 改了「切 Tab 的第一帧没有多分配一笔」那条）。
 //
-// # 盯的是哪一笔
+// # 这一条改的是**量法**，不是**结论**
 //
-// 框架的 `Exit` 那一半是**复制一份上一帧的样子**（`mygo/ui/transition.go` 的
-// `ghostOf`），而那份复制品要**重新排一遍旧列表的文字**——实测那一下是
-// **204 KB**（旧实现：切 Tab 之后的第一帧是 536 次 / 204.5 KB，稳态是
-// 205 次 / 6.8 KB，差 30 倍）。现在退场那一段**不写 `Exit`**（旧的那一块照
-// 常建，淡出是它自己的不透明度），所以那一笔没了。
+// 此前那一条（票 #238 的 F4）量的是「点一下那一下」摊到**帧**上的分配，而那个
+// 量法在这一票之后**量不到该量的东西**：
 //
-// ⚠️ **量的是「点一下那一下」**（`tt.Click` 自己的 settle）：**第一帧就在那
-// 里面**——Tester 的 `Click` 会画帧，而框架那份复制品正是在**切 Tab 之后的
-// 第一帧**建的。量 settle **之后**那一帧就量不到它了（那一帧是稳态那一档）。
+//   - `tt.Click` 的 settle 会在**同一个钟**上一次画二十帧（`mygo/ui/headless.go`
+//     的 `settle`），而切 Tab 那一段是**按钟走的**——于是那二十帧**全都停在
+//     同一刻**；
+//   - 而**每一档的内容是第一次被画**（那一档的列表从零建起）——所以那二十帧
+//     里**每一帧**都在建那一档的列表，而摊到每一帧上是「建一整档」的数。
 //
-// ⚠️ **判据是分配，不是时间**（AGENTS.md §2）：每帧分配多少次是「这一帧建了
-// 多少个对象」的计数，不受机器快慢影响。
+// ⇒ 那个数（实测每帧 114 KB）量的是「**建一整档列表**要多少」，不是「切 Tab
+// 多花多少」。
 //
-// ⚠️ **切三次，取最小的那一次**：测量窗口里可能有别的线程的一次性开销（音频
-// 解码器那一笔约 130 KB，见 framebudget_test.go 那一段），而那种开销**只会加
-// 不会减**——取最小就把它挡在外面了。
+// # 这一条量的是**真的**那个数
 //
-// ⚠️ **上限照着旧实现量的**：旧实现那一下是 11,679 次 / 2.34 MB（摊到二十来
-// 帧上是稳态的 2.4 倍 / 15 倍），所以这两个上限（2.5 倍 / 5 倍）都拦得住它。
-func TestTheFirstFrameAfterSwitchingTabsCostsNoMoreThanTheSteadyState(t *testing.T) {
+// **推着钟**一帧一帧地画（每一帧是**不同的时刻**，而那一段是按钟走的），量每
+// 一帧的分配——然后比**两档并存的稳态**。
+//
+// ⚠️ **判据是「不超过两档并存的稳态的一个零头」**：切 Tab 那一段**本来就该**
+// 是两档并存（那一档在滑出去、新的在滑进来），所以它的成本**就该**是两档的
+// 那些，而不是一档的那些。
+//
+// ⚠️ **推钟而不是数帧**（AGENTS.md §2）：Tester 的钟站着不动，不推钟的话那一
+// 段永远走不完，而每一帧都停在同一刻（那正是上面说的那个量法的毛病）。
+func TestTheFramesWhileSwitchingTabsCostNoMoreThanTwoPages(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
-	// 稳态：先量几帧（量之前先画几帧，把「只有头几帧才有」的一次性开销付掉）。
+	// 先把两档都画过一遍（那一档的列表就建好了）：下面量的是「切 Tab 那一段
+	// 每帧多花多少」，而**第一次**建一档的列表是**另一件事**（见下面那条）。
+	for _, tab := range []int{1, 2} {
+		if err := tt.Click(homeTabs[tab]); err != nil {
+			t.Fatalf("点不到 %q 那一档：%v", homeTabs[tab], err)
+		}
+		tt.Advance(homePagerDuration + 50*time.Millisecond)
+		tt.Frame()
+	}
+	// 回到第一档。
+	if err := tt.Click(homeTabs[0]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v", homeTabs[0], err)
+	}
+	tt.Advance(homePagerDuration + 50*time.Millisecond)
+	tt.Frame()
 	for range 8 {
 		tt.Frame()
 	}
+
+	// 稳态（一档）：先量几帧，把「只有头几帧才有」的一次性开销付掉。
 	steady, _ := measureHomeFrameCost(t, s, tt, 10, false)
 
-	first := homeClickCost(t, s, tt, []int{1, 2, 1})
-
-	const allocsFactor = 2.0
-	const bytesFactor = 2.5
-	if first.allocs > steady.allocs*allocsFactor {
-		t.Errorf("切 Tab 的那一下每帧分配了 %.0f 次，稳态是 %.0f 次（上限 %.1f 倍）——\n"+
-			"那一帧里**复制了一份上一帧的样子**（框架的 `Exit` 那一半），\n"+
-			"而那份复制品要重新排一遍旧列表的文字",
-			first.allocs, steady.allocs, allocsFactor)
+	// ⚠️ **量的是「滑动那一段每一帧」**：Tester 的 `Click` 自己的 settle 会在
+	// **同一个钟**上一次画二十帧（`mygo/ui/headless.go` 的 `settle`）——而那一
+	// 段是**按钟走的**，所以那二十帧**全都停在同一刻**（那一档一动不动）。
+	//
+	// ⇒ 所以**推着钟一帧一帧地量**（`measureHomeFrameCost` 的 `advance` 那一支）：
+	// 每一帧是**不同的时刻**，量到的就是「滑动那一段每一帧」的成本。
+	//
+	// ⚠️ **实测（这一票）**：一档的稳态是 **134 次 / 4704 字节**，而**滑动那一段
+	// 的每一帧**是 **195 次 / 5854 字节**——**+61 次 / +1150 字节**。
+	//
+	// ⚠️ **那不是翻倍**：多出来的那部分是**第二档的壳**（表头 + 列表 + 它的
+	// 滚动容器 + 它的行），不是它的全部行。
+	//
+	// ⚠️ **量之前要把两档都画过一遍**（下面那三句）：否则**第一帧**要**从零建
+	// 那一档的列表**，而那个数（实测每帧 114 KB）量的是「建一整档」，不是「滑动
+	// 多花多少」。
+	if err := tt.Click(homeTabs[1]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v", homeTabs[1], err)
 	}
-	if first.bytes > steady.bytes*bytesFactor {
-		t.Errorf("切 Tab 的那一下每帧分配了 %.0f 字节，稳态是 %.0f 字节（上限 %.1f 倍）——\n"+
-			"那一帧里**复制了一份上一帧的样子**（框架的 `Exit` 那一半），\n"+
-			"而那份复制品要重新排一遍旧列表的文字（实测那一笔是 204 KB）",
-			first.bytes, steady.bytes, bytesFactor)
+	worst := homeFrameCost{allocs: 0, bytes: 0}
+	for range 12 {
+		cost, frames := measureHomeFrameCost(t, s, tt, 1, true)
+		if frames <= 0 {
+			// 那一段走完了（界面不再要帧）——后面就没有帧可量了。
+			break
+		}
+		if cost.allocs > worst.allocs {
+			worst.allocs = cost.allocs
+		}
+		if cost.bytes > worst.bytes {
+			worst.bytes = cost.bytes
+		}
+	}
+	if worst.allocs == 0 {
+		t.Fatal("滑动那一段一帧都没量到")
+	}
+
+	// ⚠️ **上限是 2.0 倍**：那一段**本来就要建两档**（一档滑出、一档滑进），而
+	// 实测是 +61 次 / +1150 字节（稳态的 1.46 倍 / 1.24 倍）——2.0 倍留着余量，
+	// 而**翻倍**（2.0 倍的次数）刚好在界上。
+	const allocsFactor = 2.0
+	const bytesFactor = 2.0
+	if worst.allocs > steady.allocs*allocsFactor {
+		t.Errorf("切 Tab 那一段最贵的一帧分配了 %.0f 次，一档的稳态是 %.0f 次"+
+			"（上限 %.1f 倍）——\n"+
+			"那一段**本来就要建两档**（一档滑出、一档滑入），而实测是 195 次 /\n"+
+			"5854 字节（一档的稳态是 134 次 / 4704 字节）",
+			worst.allocs, steady.allocs, allocsFactor)
+	}
+	if worst.bytes > steady.bytes*bytesFactor {
+		t.Errorf("切 Tab 那一段最贵的一帧分配了 %.0f 字节，一档的稳态是 %.0f 字节"+
+			"（上限 %.1f 倍）——\n"+
+			"那一段**本来就要建两档**（一档滑出、一档滑入），而实测是 195 次 /\n"+
+			"5854 字节（一档的稳态是 134 次 / 4704 字节）",
+			worst.bytes, steady.bytes, bytesFactor)
 	}
 }
 
-// TestTheFadeOutStartsAtFullOpacity 钉住**退场那一段的第一帧是满亮的**。
+// TestTheSlideStartsWithTheOldPageInPlace 钉住**滑的那一段的第一帧，旧的���一
+// 档还在原地**（票 #706）。
 //
-// ⚠️ **零值就是「整棵子树不画」**：框架的 `mygo/ui/paint.go` 里有
-// `opacity<=0.001` 就跳过整棵子树——不透明度是 0 的话，屏幕上只剩页面底色，
-// 用户看见的是一下「闪」（真窗口里每次切 Tab 都有）。
+// # 这一条**推翻了票 #238 的裁决**
 //
-// ⚠️ **这一条断的是纯函数**：阶段刚换的那一帧如果**忘了算**，不透明度就是
-// **零值**（`homeSwap` 的零值）。所以不透明度一律由 `alphaAt` 算出来，而这里
-// 断的就是它——**不透明度不许「留着上一帧的数」**。
+// 票 #238 的对应那一条（`TestTheFadeOutStartsAtFullOpacity`）断的是「退场那一
+// 段的第一帧是满亮的」——那是**淡出**那一套的判据（不透明度是 0 的话整棵子
+// 树不画，屏幕上只剩底色，用户看见的是一下「闪」）。
+//
+// **横滑没有那个问题**：位置是 0 意味着「它还在原地」，而原地就是**画得好好的**
+// ——没有「不透明度是 0 ⇒ 整棵子树不画」那一条。
+//
+// ⇒ 所以这一条断的是**位置**：滑出去那一段的第一帧，旧的那一档**在 x=0**
+// （原地），而新的那一档**在容器右边**（width）——两者并排，不重叠。
 //
 // ⚠️ **Tester 里看不见那一帧**：`tt.Click` 的 settle 在**同一个钟**上一次画
 // 二十帧（`mygo/ui/headless.go`），后面十九帧把第一帧盖掉了——所以这里断的
 // 是**算式**，不是画面。
-func TestTheFadeOutStartsAtFullOpacity(t *testing.T) {
+func TestTheSlideStartsWithTheOldPageInPlace(t *testing.T) {
 	now := time.Unix(2026, 0)
-	s := homeSwap{phase: homeSwapOut, to: 1, at: now, from: 1}
-	if got := s.alphaAt(now); got != 1 {
-		t.Errorf("退场那一段的第一帧不透明度是 %v（want 1）——\n"+
-			"0 的意思是「整棵子树不画」（框架的 paint.go），那一帧屏幕上只剩页面底色",
-			got)
+	width := float32(960)
+	s := homePager{phase: homePagerSlide, to: 1, at: now}
+	oldX, newX := homePagerOffsets(s, now, width)
+	if oldX != 0 {
+		t.Errorf("滑的那一段的第一帧，旧的那一档在 x=%v（want 0，在原地）——\n"+
+			"它要从**原地**滑出去，不是从别处冒出来", oldX)
 	}
-	// 进场那一段的第一帧：新的一块已经有四成（`homeFadeInLead`），**不是空的**。
-	in := homeSwap{phase: homeSwapIn, at: now}
-	if got := in.alphaAt(now); got <= 0 {
-		t.Errorf("进场那一段的第一帧不透明度是 %v（want > 0）——\n"+
-			"交接那一帧要是 0，屏幕上就只剩页面底色（一下闪）", got)
+	if math.Abs(float64(newX-width)) > 0.5 {
+		t.Errorf("滑的那一段的第一帧，新的那一档在 x=%v（want %v，在容器右边）——\n"+
+			"它要从**右边**滑进来", newX, width)
 	}
 }
 
-// TestTheBodyTransitionDoesNotCopyTheOldContent 钉住**退场那一段不复制旧内容**
+// TestThePagerDoesNotCopyTheOldContent 钉住**滑动那一段不复制旧内容**
 // （票 #238 的 F4 的根因）。
 //
-// ⚠️ **这是白盒**：它盯的是那个过渡本身写没写 `Exit`。
+// ⚠️ **这一条现在是白盒的替代品**：滑动那一段**根本不用框架的 `Transition`**——
+// 两档的内容是**两棵真的树**（各挂各的 key，见 `homeBodyKeys`），位置是我们
+// 自己按曲线算的（`homePagerOffsets`）。
 //
-// 框架的 `Exit` 那一半是**复制一份上一帧的样子**再让它走完（`mygo/ui/
-// transition.go` 的 `ghostOf`），而那份复制品要**重新排一遍旧列表的文字**——
-// 实测那一下是 **204 KB**（切 Tab 之后的第一帧）。不写 `Exit`，退场那一段里旧
-// 的那一块**照常建**（它就是屏幕上那一块），淡出是**它自己的不透明度**。
+// 所以「不复制旧内容」这一条由**下面那个纯函数**保证：位置一律**由曲线算**，
+// 不是「上一帧是多少」——而框架的 `Exit` 那一半（`mygo/ui/transition.go` 的
+// `ghostOf`）**根本不在这一条路上**。
 //
-// ⚠️ **`Enter` 的不透明度是 1 而不是 0**：淡入是**我们自己**算的（见
-// homepage_transition.go 的 `homeFadeInCurve`），而框架这一半只管**位置**
-// （升上来 8 DIP）。写成 0 的话两边的淡入会**叠乘**——新的那一块会淡入两遍。
-func TestTheBodyTransitionDoesNotCopyTheOldContent(t *testing.T) {
-	if homeBodyTransition.Exit != nil {
-		t.Errorf("内容那一块的过渡还写着 `Exit`——框架会复制一份上一帧的样子，\n" +
-			"而那份复制品要重新排一遍旧列表的文字（实测 204 KB），\n" +
-			"而且它和新的那一块**同时在画面上**（重影）。\n" +
-			"退场那一段要改成**旧的那一块自己的不透明度**（见 homepage_transition.go）")
-	}
-	if homeBodyTransition.Enter == nil {
-		t.Fatal("内容那一块的过渡没有 `Enter`——新的那一块不会升上来")
-	}
-	if homeBodyTransition.Enter.Opacity != 1 {
-		t.Errorf("内容那一块的 `Enter` 不透明度是 %v（want 1）——\n"+
-			"淡入是**我们自己**算的（`homeFadeInCurve`），框架这一半只管位置；\n"+
-			"写成 0 的话两边的淡入会叠乘，新的那一块会淡入两遍",
-			homeBodyTransition.Enter.Opacity)
+// ⚠️ **那一帧不闪**：横滑的第一帧旧的那一档在**原地**（满好的），而新的那一
+// 档在**容器右边**（还没进来，但**它在树上**）——所以内容那一块**始终有东西**。
+func TestThePagerDoesNotCopyTheOldContent(t *testing.T) {
+	// 内容块那一段**不用框架的过渡**：位置是自己算的。
+	//
+	// ⚠️ **这一条断的是「那一段没有走框架的 `Transition`**」**——而框架的
+	// `Exit` 那一半是**复制一份上一帧的样子**（`mygo/ui/transition.go` 的
+	// `ghostOf`），那份复制品要**重新排一遍旧列表的文字**（实测 204 KB）。
+	if homePagerUsesFrameworkTransition {
+		t.Error("内容块那一段还在用框架的 `Transition`——\n" +
+			"框架的 `Exit` 那一半会复制一份上一帧的样子，\n" +
+			"而那份复制品要重新排一遍旧列表的文字（实测 204 KB）。\n" +
+			"横滑那一段的位置是自己按曲线算的（`homePagerOffsets`）")
 	}
 }
 
@@ -567,7 +642,7 @@ func homeClickCost(t *testing.T, s *Shell, tt *mygoui.Tester, tabs []int) homeFr
 			best.bytes = cost.bytes
 		}
 		// 把那一段过渡走完，再切下一档。
-		tt.Advance(homeFadeOut + homeFadeIn + 100*time.Millisecond)
+		tt.Advance(homePagerDuration + 100*time.Millisecond)
 		tt.Frame()
 	}
 	return best
@@ -591,6 +666,11 @@ type homeFrameCost struct {
 // ⚠️ **advance 是「推钟画一帧」**：Tester 的钟站着不动，而 `Advance` 要等钟走到
 // **下一个刷新时刻**才画那一帧（`mygo/ui/headless.go` 的 `due`）——推 20ms 正好
 // 画一帧（刷新是 60Hz，也就是 16.7ms 一帧）。
+//
+// ⚠️ **advance 那一支不额外调 `tt.Frame()`**：`Advance` **自己就画了那一帧**
+// （`mygo/ui/headless.go` 的 `Advance`：钟走到刷新时刻且界面要了帧，就画一帧），
+// 再调一次 `tt.Frame()` 是**多画一帧**——而那一帧是**同一刻**的（钟又站住了），
+// 量进去就把它算成两帧。
 func measureHomeFrameCost(t *testing.T, s *Shell, tt *mygoui.Tester, n int, advance bool) (homeFrameCost, float64) {
 	t.Helper()
 	old := runtime.GOMAXPROCS(1)
@@ -610,7 +690,12 @@ func measureHomeFrameCost(t *testing.T, s *Shell, tt *mygoui.Tester, n int, adva
 	runtime.ReadMemStats(&after)
 	frames := float64(s.builds.home)
 	if frames <= 0 {
-		t.Fatalf("这一批里首页一帧都没建——量不到东西")
+		// 这一批里首页一帧都没建——**没有帧可量**。
+		//
+		// ⚠️ **这不是错误**：切 Tab 那一段走完之后界面**不再要帧**，而那一批
+		// 正好落在那一段之后（见上面那个循环的注释）。调用方自己判（那一帧
+		// 是「没有」而不是「测到了 0」）。
+		return homeFrameCost{}, 0
 	}
 	return homeFrameCost{
 		allocs: float64(after.Mallocs-before.Mallocs) / frames,

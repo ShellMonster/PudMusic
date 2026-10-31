@@ -116,10 +116,11 @@ var homeTiles = [4]struct {
 
 // openTab 从总览进第 tab 档的列表页。
 //
-// ⚠️ tab / shown / want 三个一起落到 tab：不然 `syncSwap` 会把它当成一次切 Tab，
-// 先淡出一段「上一档」的列表再换。
+// ⚠️ tab / shown / want 三个一起落到 tab：不然 `syncPager` 会把它当成一次切 Tab，
+// 先滑出一段「上一档」的列表再换。
 func (h *homePage) openTab(tab int) {
 	h.tab, h.shown, h.want, h.wantReady = tab, tab, tab, true
+	h.swap = homePager{}
 	h.overview = false
 }
 

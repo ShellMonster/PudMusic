@@ -24,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -119,6 +120,14 @@ func TestClickingASongOnTheHomeBoardPlaysIt(t *testing.T) {
 	if err := tt.Click(homeTabs[homeHotTab]); err != nil {
 		t.Fatalf("点不到「%s」：%v，文字有 %q", homeTabs[homeHotTab], err, tt.Texts())
 	}
+	// ⚠️ **要等那一段横滑走完**（票 #706）：切 Tab 走**横向滑动**，而新的那
+	// 一档**在滑的那一刻就已经在树上了**（只是还在容器外面、被裁掉了）——所以
+	// 「文字出现了」这一刻它**还点不着**（框架的命中测试要算祖先的裁切区，见
+	// `mygo/ui/runtime.go` 的 `contains`）。
+	//
+	// ⇒ 推钟把那一段走完（`homePagerDuration`），再点榜上那一首。
+	tt.Advance(homePagerDuration + 50*time.Millisecond)
+	tt.Frame()
 	waitFramesClock(t, tt, "热榜那一档", func() bool { return showsText(tt, "热榜第一名") })
 
 	// 双击榜上那一首（榜单那一列是双击才播）。
