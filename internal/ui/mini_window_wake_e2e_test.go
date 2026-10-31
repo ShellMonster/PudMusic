@@ -151,10 +151,13 @@ func drain(t *testing.T, tt *mygoui.Tester, what string) {
 //
 // # 为什么步长是 20ms
 //
-// Tester 的刷新率按 60Hz 算（`mygo/ui/headless.go` 的 `due()`：���值是 0 时
-// 兜底成 60），一帧是 16.67ms——而 `Advance` 只画**落在窗口内**的那些帧
-// （`due()` 按 `frameAt + 1/hz` 排期）。推 16ms 会落在下一帧**之前**，于是
-// 这一轮什么也没画（实测过）。
+// Tester 的刷新率按 60Hz 算（`mygo/ui/headless.go` 的 `due()`：那个 `hz`
+// 字段是 0 时兜底成 60——`coreNewTester` 压根没设它），一帧是 16.67ms——而
+// `Advance` 只画**落在窗口内**的那些帧（`due()` 按 `frameAt + 1/hz` 排期）。
+// 推 16ms 会落在下一帧**之前**，于是这一轮什么也没画（实测过）。
+//
+// ⚠️ **步长本身不是判据**（实测：1ms / 5ms / 16ms / 20ms / 100ms 都是同一
+// 个结果，只是慢的那些多转几圈）——它只是「够跨过一帧」的粒度。
 //
 // ⚠️ **它是「推够一帧」而不是「固定帧数」**：条件一成立就停，所以机器慢一点
 // 也不会飘（AGENTS.md §2：不要用固定毫秒当判据）。那个 deadline 用的是
@@ -261,8 +264,21 @@ func TestTheMiniWindowShowsTheNewStateWhileTheMainWindowIsUnseen(t *testing.T) {
 // 「叫醒被丢掉了，可画面恰好是对的」（比如上一帧之后状态没变）。分开量，
 // 才知道坏在哪一层。
 //
-// ⚠️ **判据是 `invalidateIf` 的返回值**：那是 `wakeHandle` 那一层的原话
-// （「有没有真的请求一帧」），主窗丢、迷你窗接住。
+// # ⚠️ **判据为什么不用 `wake.invalidateIf` 的返回值**
+//
+// 那一层断的是 `held && seen()`——而**上面那两条 `presence.seen()` 的断言
+// 已经把同样的信息断过了**（`invalidateIf` 的返回值就等于 `seen()`，只多了
+// `held` 那一项，而那由夹具保证）。于是断它等于**同义反复**：实测把
+// `invalidateIf` 的返回值改成「`seen()` 而不是『有没有真的请求一帧』」，
+// 这一条照样绿。
+//
+// 而它**自己**确实有一个别的测试没断的东西：**迷你窗在 `App` 里登记了没有**
+// （铁律三：逐窗口登记，`App.wakeAll` 挨个叫醒）。迷你窗的唤醒句柄是
+// `bindMiniWindow` 登记的（`miniplayer.go`），而那一扇是 `NewMini` 建出来的
+// ——登记错了的话，`App` 压根不会叫它。
+//
+// ⇒ 所以这一条断的是**「`App` 叫到了迷你窗」**这一层：它自己调一次后台的
+// 状态变更，然后看迷你窗有没有真的要帧。
 func TestTheMiniWindowKeepsUpWhenOnlyTheMainWindowIsBlurred(t *testing.T) {
 	f := newMiniWakeFixture(t)
 
@@ -287,14 +303,84 @@ func TestTheMiniWindowKeepsUpWhenOnlyTheMainWindowIsBlurred(t *testing.T) {
 			"它不该报「看不见」")
 	}
 
-	// 唤醒：主窗丢掉、迷你窗接住。
-	if f.main.wake.invalidateIf(true) {
-		t.Error("主窗口失焦了，后台一叫它它还是接住了唤醒——" +
+	// 把两扇窗欠着的帧都排掉（票 #468 补的那一帧，见 `drain` 的注释）——
+	// 不排掉的话，「要帧」这件事说不清是后台叫醒的还是那一帧的。
+	drain(t, f.mainTT, "主窗")
+	drain(t, f.miniTT, "迷你窗")
+
+	// 🔴 **走真路径**：让后台改一次状态，`App.wakeAll` 挨个叫醒两扇窗
+	// （铁律三）——迷你窗**在 `App` 里登记了**的话，它就会接到这一叫。
+	f.app.SetVolume(0)
+
+	// 主窗丢掉这次唤醒。
+	if f.mainTT.FramePending() {
+		t.Error("主窗口失焦了，后台一叫它还是请求了一帧——" +
 			"看不见的窗口那些帧全是白烧的电（票 #156）")
 	}
-	if !f.mini.wake.invalidateIf(true) {
+	// 迷你窗接住这次唤醒。
+	//
+	// ⚠️ **这一条断的是「`App` 叫到了迷你窗」**：迷你窗的唤醒句柄是
+	// `bindMiniWindow` 登记的——它没登记的话，`App` 压根不会叫它（实测：把
+	// `bindMiniWindow` 改成空操作，这条会红）。
+	if !f.miniTT.FramePending() {
 		t.Error("主窗口失焦、迷你窗口看得见，后台却没能把迷你窗口叫醒——" +
 			"它会停在旧内容（铁律三：逐窗口叫醒）")
+	}
+}
+
+// TestAWindowThatJustWentUnseenGetsOneMoreFrame 钉住票 #468 的那一帧：
+// **窗口刚变得看不见的时候，它会再要一帧**。
+//
+// # 为什么要有这一条
+//
+// 那一帧是 #468 特意要的（`presence.go` 的 `noteWindow`）：
+//
+//   - 满屏的封面在转的时候，要帧走的是**框架那一层**（pose 的通道）——它不经过
+//     本应用那道「看不见就不画」的闸。
+//   - 而 pose 的通道只有**重建一次**才会被重新瞄一个目标（只重绘的那些帧里它
+//     一直往前走）——所以「看不见」之后得有一帧**重建**，view 才会把那个 pose
+//     收掉，框架才不再要帧。
+//
+// 不补这一帧的后果：窗口失焦之后仍然每秒画 60 帧（票 #156 治的正是那个风扇
+// 和电池的问题）。
+//
+// # ⚠️ **它和「省电」那一条是**相反**的两件事，而它们共用一个判据**
+//
+// 「窗口看不见了」之后有两条路：
+//
+//	① 补一帧（#468）——**一次性的**，那一帧把常驻动画收掉。
+//	② 之后不再要帧（#156）——省电。
+//
+// 而「这扇窗现在 pending 为真」这件事，① 和「后台叫醒了它」**分不开**——
+// 这正是 `window_seen_test.go` 里那一条旧测试的病（它写于 #182，早于 #468）。
+//
+// ⇒ **这一条把 ① 单独钉住**，于是别处的判据才能把「①」和「后台叫醒」分开。
+//
+// ⚠️ **实测**：把 `noteWindow` 里那一行改回 #468 之前的样子（
+// `if !resumed`），**整包没有一条测试会红**——也就是说 #468 的这个行为
+// 在本 PR 之前没有任何测试守着。这一条把它补上。
+func TestAWindowThatJustWentUnseenGetsOneMoreFrame(t *testing.T) {
+	f := newMiniWakeFixture(t)
+
+	// 先把已有的帧排掉：起点是「这扇窗不欠帧」。
+	drain(t, f.mainTT, "主窗")
+
+	// 变得看不见（失焦）。
+	f.main.noteWindow(func(p *windowPresence) { p.focused = false })
+
+	// 🔴 **它要了一帧**：那是 #468 补的——把常驻动画收掉的那一帧。
+	if !f.mainTT.FramePending() {
+		t.Error("窗口刚变得看不见，它却没有要那一帧——" +
+			"而那一帧是把常驻动画停下来的一帧（票 #468）：" +
+			"少了它，窗口失焦之后仍然每秒画 60 帧（票 #156 治的正是那个风扇问题）")
+	}
+
+	// 而那**只是一帧**：画完之后它就停了（票 #156）。
+	f.mainTT.Frame()
+	f.mainTT.Advance(50 * time.Millisecond)
+	if f.mainTT.FramePending() {
+		t.Error("窗口看不见了，它还在要帧——" +
+			"看不见的窗口那些帧全是白烧的电（票 #156）")
 	}
 }
 
