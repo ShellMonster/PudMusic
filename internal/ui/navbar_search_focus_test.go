@@ -13,7 +13,7 @@ import (
 // ## 为什么这两条要钉在一起
 //
 // 顶栏这一枚的框里装的是 `ui.TextInputBase`——**没有描边**；而框架对 `kindInput`
-// 一律不画焦点环（`mygo@v0.6.3/ui/paint.go:334` 的 `e.kind != kindInput`）。
+// 一律不画焦点环（`mygo@v0.7.3/ui/paint.go:384` 的 `e.kind != kindInput`）。
 // 于是聚焦时唯一的变化是底色 20% → 30%，浅色底上几乎读不出来。
 //
 // 而同一个应用里另两枚搜索框（收藏夹 / 本地音乐那枚可展开的搜索、歌词搜索框）
@@ -29,7 +29,7 @@ import (
 //
 // ⚠️ **「另一个搜索框」量的是框架的 `ui.TextInput`**：收藏夹 / 本地音乐那枚
 // 可展开的搜索（`searchbutton.go`）和歌词搜索框（`lyricssearch.go`）都是它，
-// 而框架给它画焦点环的口径是 `inputBorder`（`mygo@v0.6.3/ui/form.go:274-283`）：
+// 而框架给它画焦点环的口径是 `inputBorder`（`mygo@v0.7.3/ui/form.go:274-282`）：
 // **有焦点 → `t.Accent`**。
 //
 // ⚠️ **深浅两套都量**：描边那一档跟着主题走，而浅色下主色和底色的差比深色下小。

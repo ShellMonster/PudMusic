@@ -69,12 +69,19 @@
 //
 // 上游那两个都是竖着的滑块（`offset-control.tsx` / `font-size-control.tsx` 里
 // 的 `orientation="vertical"`），而 **MyGo 的 `ui.Slider` 只会横着**——
-// `.Vertical()` 对它是一个空操作（`mygo/ui/base.go:148` 的注释："Slider, drawn
-// across, stays so"）。所以轨道和滑块自己画，`docs/ui/slider.md` 给的就是
-// 这么画的例子。
+// `.Vertical()` 对**它**是一个空操作（`mygo/ui/base.go:148` 的注释："Slider,
+// drawn across, stays so"）。所以轨道和滑块自己画，`docs/ui/slider.md` 给的
+// 就是这么画的例子。
 //
-// 拖动的手感、键盘（左右箭头、Home/End）、步长、无障碍，全是 `SliderBase` 自己
-// 的：这一层只画那两块颜色。
+// ⚠️ **`SliderBase` 是能竖的**（框架那句注释说的是 `ui.Slider`，不是
+// `ui.SliderBase`）——本文件下面 `lyricSlider` 用的正是
+// `ui.SliderBase(...).Vertical()`（`mygo/ui/base.go:148` 的 `Vertical` 里那句
+// `if e.widget == "SliderBase"` 就是它的开关）。
+//
+// ⇒ **那为什么还是自己画**：框架的 `ui.Slider`（带主题外观的那颗）**旋钮恒画**，
+// 而上游那两个是「只在悬停 / 按下时画旋钮」——那是外观口径，框架给不了。
+// 而**拖动的手感、键盘（左右箭头、Home/End）、步长、无障碍**全是 `SliderBase`
+// 自己的（`Vertical` 也会告诉辅助技术「这是竖的」），这一层只画那两块颜色。
 package ui
 
 import (
