@@ -189,18 +189,36 @@ func TestTheThemeIsNotRebuiltWhenTheViewRunsTwiceInAFrame(t *testing.T) {
 // 满屏开着的时候，那个键是**每一帧**都要算的——而它原先是一句
 // `fmt.Sprintf("%s|%p|%dx%d", …)`，每帧一次分配 ＋ 一次格式化。
 //
-// 判据是零分配：四个判据（地址、位图、宽、高）分开比，不建任何东西。
+// 判据是零分配：五个判据（地址、位图、宽、高、实际模糊半径）分开比，不建任何东西。
 func TestTheFullPlayerBackdropKeyIsNotRebuiltEveryFrame(t *testing.T) {
 	var f fullPlayer
 	url := "http://example.test/cover.png"
 	var bm *mygoui.Bitmap
 
 	allocs := testing.AllocsPerRun(200, func() {
-		_ = f.backdropChanged(url, bm, 300, 200)
+		_ = f.backdropChanged(url, bm, 300, 200, 8)
 	})
 	if allocs > 0 {
 		t.Errorf("满屏画布的键每帧拼一次字符串：每帧 %.1f 次分配——\n"+
-			"四个判据分开比是零分配的（拼出来的那一版每帧要付一次格式化）", allocs)
+			"五个判据分开比是零分配的（拼出来的那一版每帧要付一次格式化）", allocs)
+	}
+}
+
+// TestTheBackdropCacheIdentityIncludesItsBlurSigma 钉住「实际模糊半径是背景身份的一部分」。
+//
+// 同一张封面和同一块画布换了清晰度之后，旧画布里的像素仍然是旧 sigma 画出来的；
+// 不把 sigma 纳入身份，用户切换清晰度时就会继续看到旧的模糊结果。
+func TestTheBackdropCacheIdentityIncludesItsBlurSigma(t *testing.T) {
+	var f fullPlayer
+	url := "http://example.test/cover.png"
+	bm := &mygoui.Bitmap{}
+
+	f.bgURL, f.bgBitmap, f.bgW, f.bgH, f.bgSigma = url, bm, 300, 200, 8
+	if f.backdropChanged(url, bm, 300, 200, 8) {
+		t.Fatal("相同的封面、尺寸和 sigma 却说要重画")
+	}
+	if !f.backdropChanged(url, bm, 300, 200, 4) {
+		t.Fatal("实际 blur sigma 变了却说不用重画：清晰度切换会继续复用旧画布")
 	}
 }
 
@@ -219,29 +237,29 @@ func TestTheBackdropIsRedrawnExactlyWhenItShouldBe(t *testing.T) {
 	other := &mygoui.Bitmap{}
 
 	// 还没画过：一切都是「变了」。
-	if !f.backdropChanged(url, bm, 300, 200) {
+	if !f.backdropChanged(url, bm, 300, 200, 8) {
 		t.Fatal("还没画过那张画布，却说不用画")
 	}
 
-	f.bgURL, f.bgBitmap, f.bgW, f.bgH = url, bm, 300, 200
-	if f.backdropChanged(url, bm, 300, 200) {
+	f.bgURL, f.bgBitmap, f.bgW, f.bgH, f.bgSigma = url, bm, 300, 200, 8
+	if f.backdropChanged(url, bm, 300, 200, 8) {
 		t.Error("什么都没变，却说要重画——那会让毛玻璃每帧重渲一遍" +
 			"（软件渲染上那是 80~100 毫秒一帧）")
 	}
 
 	// 换了封面。
-	if !f.backdropChanged("http://example.test/other.png", bm, 300, 200) {
+	if !f.backdropChanged("http://example.test/other.png", bm, 300, 200, 8) {
 		t.Error("换了封面，却说不用重画")
 	}
 	// 换了位图（同一个地址，图换了）。
-	if !f.backdropChanged(url, other, 300, 200) {
+	if !f.backdropChanged(url, other, 300, 200, 8) {
 		t.Error("换了位图，却说不用重画")
 	}
 	// 换了尺寸（窗口改了大小）。
-	if !f.backdropChanged(url, bm, 301, 200) {
+	if !f.backdropChanged(url, bm, 301, 200, 8) {
 		t.Error("改了画布的尺寸，却说不用重画")
 	}
-	if !f.backdropChanged(url, bm, 300, 201) {
+	if !f.backdropChanged(url, bm, 300, 201, 8) {
 		t.Error("改了画布的高度，却说不用重画")
 	}
 }
