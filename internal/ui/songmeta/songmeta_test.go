@@ -10,7 +10,10 @@
 // 冒号/竖线/引号）各自认出什么、认不出的时候是什么语义。
 package songmeta
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestTheKnownShapesAreRecognized 断「B 站上那几种常见形状都认得出歌名」。
 //
@@ -45,6 +48,101 @@ func TestTheKnownShapesAreRecognized(t *testing.T) {
 				t.Errorf("Identify(%q).Name = %q，want %q", c.in, id.Name, c.want)
 			}
 		})
+	}
+}
+
+// TestTheSurnameShapedTitlesAreRecognized 断「**姓氏开头的歌名**那一族认得出」。
+//
+// 🔴 **这一族是票 #706 那个回归的正题**：上一轮为了接住「词典漏掉的歌手名」加
+// 了「形状判据」（`nameshape.go`），而它在「两边都像艺人名」的时候**直接返回
+// 空串**——于是「白月光」（白是常见姓）那一族**整条认不出来**：
+//
+//	张碧晨 - 白月光   ⇒ 认不出（原该是「白月光」）
+//	周传雄 - 黄昏     ⇒ 认不出（原该是「黄昏」）
+//
+// ⇒ 而认不出的代价**不只是显示得更脏**：别名表是空的 ⇒ **评论一条都筛不出
+// 来**（比基线更差）。
+//
+// ⚠️ **这一族断的是「不能一条都认不出」**——认得出哪一个是次要的（见下面那一
+// 族）。
+func TestTheSurnameShapedTitlesAreRecognized(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"张碧晨 - 白月光", "白月光"},
+		{"周传雄 - 黄昏", "黄昏"},
+		{"李圣欣 - 江水文", "江水文"},
+		{"白月光 - 张碧晨", "白月光"},
+		{"【4K修复】张碧晨 - 白月光 官方MV", "白月光"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			id := Identify(c.in)
+			if !id.OK {
+				t.Fatalf("Identify(%q) 认不出歌名——这一族认不出 ⇒ 别名表是空的 ⇒ "+
+					"评论一条都筛不出来（比基线更差）", c.in)
+			}
+			if id.Name == strings.TrimSpace(c.in) {
+				t.Errorf("Identify(%q).Name = %q（整条原标题）——那不是「认出歌名」",
+					c.in, id.Name)
+			}
+			if id.Name != c.want {
+				t.Errorf("Identify(%q).Name = %q，want %q", c.in, id.Name, c.want)
+			}
+		})
+	}
+}
+
+// TestTheDictionaryHitStillWinsOverTheShape 断「**词典认出的那一段仍然是署名**」。
+//
+// 🔴 **这一族是上一轮修好的那一半**：上一轮把「艺人名被当歌名」修了（"起风了 -
+// 吴青峰"不再显示成「吴青峰」）——⇒ **不能为了修这一族把它退回去**。
+func TestTheDictionaryHitStillWinsOverTheShape(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"起风了 - 吴青峰", "起风了"},
+		{"起风了 - 隔壁老樊", "起风了"},
+		{"海阔天空 - Beyond", "海阔天空"},
+		{"孤勇者 - 陈奕迅 - 官方完整版", "孤勇者"},
+	}
+	for _, c := range cases {
+		t.Run(c.in, func(t *testing.T) {
+			id := Identify(c.in)
+			if !id.OK {
+				t.Fatalf("Identify(%q) 认不出歌名", c.in)
+			}
+			if id.Name != c.want {
+				t.Errorf("Identify(%q).Name = %q，want %q", c.in, id.Name, c.want)
+			}
+		})
+	}
+}
+
+// TestTheAliasesKeepTheOriginalTitleWhenTheSongNameIsUnknown 断「认不出的时候原
+// 标题**仍然进别名表**」。
+//
+// 🔴 **这是票 #706 那个回归的另一半**：认不出的时候 `Aliases` **不放原标题** ⇒ 表
+// 是空的 ⇒ **正文里原样提到标题的那些评论一条都命不中**。
+//
+// ⚠️ **而「认不出」这个事实要由别处说**（`songname.Table.Empty` 判的是「除原标
+// 题外还有没有认出来的歌名」）——**「表里有没有东西」和「有没有认出歌名」是两
+// 件事**。
+func TestTheAliasesKeepTheOriginalTitleWhenTheSongNameIsUnknown(t *testing.T) {
+	for _, in := range []string{"【官方MV】", "[4K]", "（官方）", "【】"} {
+		found := false
+		for _, a := range Aliases(in) {
+			if a == strings.TrimSpace(in) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("Aliases(%q) = %q，里面没有原标题——用户原样抄标题的那一条"+
+				"评论就命不中了", in, Aliases(in))
+		}
 	}
 }
 

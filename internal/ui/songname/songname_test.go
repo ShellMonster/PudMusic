@@ -52,30 +52,100 @@ func TestThePlainTitleIsAlsoInTheTable(t *testing.T) {
 	}
 }
 
-// TestTheTableIsEmptyWhenTheSongNameIsUnknown 钉住「**认不出歌名 ⇒ 空表**」。
+// TestTheTableIsEmptyWhenTheSongNameIsUnknown 钉住「**认不出歌名 ⇒ 筛不了**」。
 //
-// 🔴 **这一条是票 #706 的一致性修复**：注释明写「认不出歌名的时候给**空表**
-// （`Empty` 是 true）——而**不是**给一张装着原标题的表」，而代码**无条件**把原
-// 标题加进表 ⇒ `Empty` **恒为 false**。
+// 🔴 **这一条是票 #706 的一致性修复**：界面那一支「认不出歌名 → 筛选开关按灰」
+// 必须还成立——标题是「【官方MV】」这种纯宣传词的曲，筛选开关**亮着**但**筛不
+// 出任何评论**（用户看到「一条都没有」，真相是「不知道这首歌叫什么」）。
 //
-// ⇒ 而那一支的**实际后果**是：「认不出歌名 → 筛选开关按灰」这条设计**是死
-// 的**——标题是「【官方MV】」这种纯宣传词的曲，筛选开关**亮着**但**筛不出任何
-// 评论**（用户看到「一条都没有」，真相是「不知道这首歌叫什么」）。
-//
-// ⚠️ **而空表不筛**（`Table.Empty` 的注释）：空表 ⇒ 界面把那一枚开关按灰 ⇒ 用户
-// 看得见它按不动。
+// ⚠️ **而 `Empty` 的语义是「有没有一个不是原标题的别名」**——不是「表里有没有
+// 东西」：原标题**进表**（用户原样抄标题的那一条评论要命得中），而**筛不了**
+// 这个事实由 `Empty` 说（见下面那一族）。
 func TestTheTableIsEmptyWhenTheSongNameIsUnknown(t *testing.T) {
 	for _, in := range []string{"【官方MV】", "[4K]", "（官方）", "【】"} {
 		tab := New(in, "")
 		if !tab.Empty() {
 			t.Errorf("New(%q) 的表不是空的：%q——"+
-				"认不出歌名就该给**空表**（注释这么写着，而界面那一枚开关"+
-				"也是照「空表」按灰的）", in, tab.Forms())
+				"认不出歌名 ⇒ 筛不了（界面那一枚开关是照这个按灰的）", in, tab.Forms())
 		}
 	}
 }
 
-// TestTheBookTitleMarksAreStripped 断「《晴天》也算提到」。
+// TestTheOriginalTitleIsKeptButTheTableStillSaysItCannotFilter 断「**表里有原标
+// 题、但 `Empty` 是 true**」。
+//
+// 🔴 **这是票 #706 那个回归的第二半**：上一轮「认不出 ⇒ 空表」把
+// `songmeta.Aliases` 改成「认不出就不放原标题」⇒ **正文里原样提到标题的那些评
+// 论一条都命不中**（比基线更差）。
+//
+// ⇒ 而这两件事**可以同时成立**：原标题进表（用户抄了标题的那一条命中），而
+// `Empty` 仍然是 true（**筛不了** ⇒ 开关按灰 ⇒ 界面把话说清楚）。
+func TestTheOriginalTitleIsKeptButTheTableStillSaysItCannotFilter(t *testing.T) {
+	tab := New("【官方MV】", "")
+	if !has(t, tab, "【官方MV】") {
+		t.Errorf("表里没有原标题：%q——用户原样抄标题的那一条评论一条都命不中",
+			tab.Forms())
+	}
+	if !tab.Empty() {
+		t.Errorf("New(\"【官方MV】\").Empty() = false，want true" +
+			"（认不出歌名 ⇒ 筛不了 ⇒ 开关按灰）")
+	}
+	// ⚠️ **而正文里原样提到标题的那一条要命得中**：用户把整个标题抄进评论里
+	// 是常事——而上一版（认不出 ⇒ 空表）把它判成没提到。
+	if !tab.Mentions("这个【官方MV】真不错") {
+		t.Errorf("正文里原样提到标题却没命中：%q", tab.Forms())
+	}
+	// ⚠️ **认不出的时候不该拿原标题去筛别的东西**：那是「筛不了」⇒ 界面那一
+	// 支是照 `Empty` 走的（开关按灰）。
+	if tab.Mentions("随便什么") {
+		t.Errorf("表命中了正文")
+	}
+}
+
+// TestTheAmbiguousTitleKeepsBothHalves 断「**本质歧义**那一档两个都进表」。
+//
+// 🔴 **这一族是票 #706 第二轮回归修复的那一半**：「白月光 - 黄昏」那种**两边都像**
+// 艺人名、而**词典认不出**谁是谁的写法——显示层只能显示一个，而**匹配层两个都
+// 收**。
+//
+// ⇒ 而用户在评论里写「白月光」**或**「黄昏」都该命中——只收一个的话另一半评论一条
+// 都命不中。
+//
+// ⚠️ **判据是「命不命中」**，不是「表里长什么样」。
+func TestTheAmbiguousTitleKeepsBothHalves(t *testing.T) {
+	tab := New("白月光 - 黄昏", "")
+	if tab.Empty() {
+		t.Fatalf("「白月光 - 黄昏」给出了空表——那一档认不出歌名 ⇒ 筛不了")
+	}
+	for _, body := range []string{"白月光真好听", "黄昏这首歌不错", "白月光 - 黄昏"} {
+		if !tab.Mentions(body) {
+			t.Errorf("正文 %q 明明提到了这一首，却没命中：%q", body, tab.Forms())
+		}
+	}
+}
+
+// TestTheKnownArtistSegmentIsNotAnAlias 断「**词典认得出**的那一段不进表」。
+//
+// 🔴 **这一族和上面那一族是一对**：词典认得出「张碧晨」是歌手 ⇒ 那一段是**签
+// 名**，不进表——**提到歌手不等于提到这首歌**（票 #574 的评审）。
+//
+// ⇒ 而形状判据（"张碧晨"确实长得像人名）**不能**把这一条推回「两个都收」——
+// 词典那一层是准的，形状那一层只是补漏。
+func TestTheKnownArtistSegmentIsNotAnAlias(t *testing.T) {
+	tab := New("白月光 - 张碧晨", "")
+	if has(t, tab, "张碧晨") {
+		t.Errorf("表里有「张碧晨」——词典认得出它是歌手，那是签名，不是歌名：%q",
+			tab.Forms())
+	}
+	if !tab.Mentions("白月光真好听") {
+		t.Errorf("正文里明明有「白月光」，却没命中：%q", tab.Forms())
+	}
+	if tab.Mentions("张碧晨唱得真好") {
+		t.Errorf("正文里只有「张碧晨」却命中了——提到歌手不等于提到这首歌")
+	}
+}
+
+// TestTheBookTitleMarksAreStripped 断「《晴天」也算提到」。
 func TestTheBookTitleMarksAreStripped(t *testing.T) {
 	tab := New("《晴天》", "某个歌手")
 	if !has(t, tab, "晴天") {

@@ -89,6 +89,12 @@ type Table struct {
 	// ⚠️ **两份是分开的**：匹配用的是 keys（`Mentions` 每条评论都要跑一次，
 	// 而正文是长的），而 `Forms` 给人看的是 forms。
 	keys []string
+	// named 记「**除了原标题之外**还有没有认出来的写法」。
+	//
+	// ⚠️ **它是 `Empty` 的判据**（理由见 `Empty` 的注释）：「表里有没有东西」
+	// 和「有没有认出歌名」是**两件事**——原标题**总是**进表（用户原样抄标题
+	// 的那一条要命得中），而「筛不了」这个事实由 `named` 说。
+	named bool
 }
 
 // New 造这一首的别名表。
@@ -97,16 +103,17 @@ type Table struct {
 // 是它的艺人（音乐库音频是歌手，mv 是 UP 主）——它只用来认「标题里哪一段是
 // 歌手那一段」。
 //
-// 🔴 **认不出歌名的时候给**空表**（`Empty` 是 true）——而**不是**给一张装着
-// 原标题的表：那一张表会把这一首的评论**全筛掉**（正文里没有人写整个视频
-// 标题），而界面上一句话都说不清为什么（见 `Empty` 的注释）。
+// ⚠️ **原标题总是进表**（理由见 `Aliases` 的注释）：用户会把整个标题抄进评论
+// 里，那一条要命得中。
+//
+// 🔴 **而「认不出歌名 ⇒ 筛不了」这个事实由 `Empty` 说**——不是靠「表是空的」
+// （理由见 `Empty` 的注释）。
 //
 // ⚠️ **这一条和公共层是同一份语义**（`songmeta` 的文件头写着「匹配层：认不出
-// 就给**空表**」）：`songmeta.Aliases` 在认不出的时候**不放原标题**——所以
-// 这一档拿到的**真的是空表**，而不是「一张装着原标题的表」。
+// 就给**只有原标题的表**」）：`songmeta.Aliases` 在认不出的时候**只给原标题**。
 func New(rawTitle, artist string) Table {
 	var t Table
-	add := func(s string) {
+	add := func(s string, isName bool) {
 		s = strings.TrimSpace(s)
 		if s == "" {
 			return
@@ -122,11 +129,19 @@ func New(rawTitle, artist string) Table {
 		}
 		for _, old := range t.keys {
 			if old == k {
+				// ⚠️ **已经收过了**：而这一次的它是**认出来的名字**（原标题先收
+				// 的那一次不算）⇒ `named` 要置上。
+				if isName {
+					t.named = true
+				}
 				return
 			}
 		}
 		t.forms = append(t.forms, s)
 		t.keys = append(t.keys, k)
+		if isName {
+			t.named = true
+		}
 	}
 
 	// ⚠️ **歌名与别名都从公共层拿**（`songmeta`）——**这一包不自己再认一遍**。
@@ -134,8 +149,26 @@ func New(rawTitle, artist string) Table {
 	// ⚠️ **艺人名要传进去**（`artist` + 方括号里挪出来的那一段）：那是认「哪
 	// 一段是署名」的凭据（`songmeta` 的 `hints`）。
 	hints := artistHints(rawTitle, artist)
+	// ⚠️ **认出来的那些先收**（`named` 就是它们撑起来的）：歌名，以及**本质歧义**
+	// 那一档的另一段（`songmeta` 的 `Aliases` 注释）。
+	//
+	// ⚠️ **而 `Aliases` 给的那一批里也有歌名**（同一份判据算出来的）——所以下面
+	// 收的时候要**认出哪些是「认出来的名字」**，否则 `named` 永远是 false（而
+	// `Empty` 永远是 true ⇒ 那一枚开关永远是灰的）。
+	//
+	// ⇒ 判据是「**这一条是不是认出来的歌名**」：`Aliases` 返回的顺序是「书名号
+	// 那些 → 歌名 → 本质歧义那一条 → 原标题」，而**原标题**是最后一个。
+	id := songmeta.Identify(rawTitle, hints...)
+	// ⚠️ **认出来的名字集合**（歌名 + 歧义那一档的另一段）。
+	named := map[string]bool{}
+	if id.OK {
+		named[normalize(id.Name)] = true
+		for _, alt := range id.Alts {
+			named[normalize(alt)] = true
+		}
+	}
 	for _, s := range songmeta.Aliases(rawTitle, hints...) {
-		add(s)
+		add(s, named[normalize(s)])
 	}
 	return t
 }
@@ -267,11 +300,24 @@ func (t Table) Matches(body string) []Range {
 	return merged
 }
 
-// Empty 报这张表是不是空的（这一首没有名字）。
+// Empty 报这张表**筛不筛得了**（这一首有没有名字）。
 //
-// ⚠️ **空表不能拿来筛**：那样会把这一首的评论全筛掉，而界面上一句话都
-// 说不清为什么（用户看到的是「一条都没有」，而真相是「不知道这首歌叫什么」）。
-func (t Table) Empty() bool { return len(t.keys) == 0 }
+// # 🔴 **判据是「除原标题外还有没有认出来的歌名」**，不是「表里有没有东西」
+//
+// ⚠️ **原标题总是进表**（用户会把整个标题抄进评论里，那一条要命得中）——所以
+// 「表里有没有东西」判不出「认没认出歌名」。
+//
+// ⚠️ **而这两件事本来就是两件事**：
+//
+//	表里有原标题、认不出歌名 ⇒ 表里**有**东西（那一条评论命得中），而**筛不
+//	了**（按歌名筛没有意义——用户看到的是「这一首叫什么」都不知道）；
+//	表里有认出来的歌名       ⇒ 筛得了。
+//
+// ⇒ 所以 `Empty` 判的是**后者**：有没有认出来的歌名。
+//
+// ⚠️ **消费者**（`internal/ui/comments.go`）：「认不出歌名 → 那一枚『只看提到歌名
+// 的评论』开关按灰」，而「换成一首没有名字的歌，筛选就做不了」那一支也照它走。
+func (t Table) Empty() bool { return !t.named }
 
 // Forms 是别名表里的那些写法（原始写法，给人看的）。
 func (t Table) Forms() []string { return t.forms }

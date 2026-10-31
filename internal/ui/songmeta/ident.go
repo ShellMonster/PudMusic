@@ -25,8 +25,8 @@ import (
 //
 //	显示层：认不出就退回**原标题**（`widgets/title` 那一档——宁可显示脏标题，
 //	        也不显示空白）
-//	匹配层：认不出就给**空表**（`songname` 那一档——空表不筛，否则会把这一首
-//	        的评论全筛掉，而界面上一句话都说不清为什么）
+//	匹配层：认不出就给**只有原标题的表**（`songname` 那一档——而「筛不了」这个
+//	        事实由 `Table.Empty` 说，理由见 `Aliases` 的注释）
 //
 // ⚠️ **这两个语义是有区别的**，代码里说清楚了（见上面两行）。
 
@@ -55,6 +55,14 @@ type Ident struct {
 	// ⚠️ **版本标记不是噪声，是曲目身份**：现场版和录音室版是**两个不同的
 	// 录音**——所以它要留着（而不是被当成宣传词丢掉）。
 	Live bool
+	// Alts 是「**本质歧义**」那一档的**另一段**（匹配层要两个都收）。
+	//
+	// ⚠️ **它是匹配层专用的**：「X - Y」两边都像艺人名、而词典认不出谁是谁的
+	// 时候（"白月光 - 张碧晨"），显示层只显示一个（`Name`），而匹配层两个都
+	// 收——不然用户在评论里写哪一段都命不中（见 `Aliases`）。
+	//
+	// ⚠️ **它跟 `Name` 不重叠**，而**显示层不看它**（显示层只认一个歌名）。
+	Alts []string
 }
 
 // Identify 从一条 B 站原标题里认出歌名。
@@ -84,7 +92,7 @@ func Identify(raw string, hints ...string) Ident {
 	bracketExtras := bracketExtraOf(groups)
 
 	allHints := append(append([]string{}, hints...), bracketExtras...)
-	name := candidatesOf(plain, allHints)
+	name, alt := candidatesOf(plain, allHints)
 
 	// ⚠️ **整条标题就是那些括号**（"【晴天】"）：括号**外面**一个字都没有 ⇒
 	// 那一段**就是**歌名（而"【周杰伦】"那一段是歌手 ⇒ 认不出，退出）。
@@ -109,7 +117,16 @@ func Identify(raw string, hints ...string) Ident {
 		OK:    true,
 		Extra: joinExtra(bracketExtras, name),
 		Live:  live,
+		Alts:  altList(alt),
 	}
+}
+
+// altList 把「那一段备选」包成一小片（空串 ⇒ 空片）。
+func altList(alt string) []string {
+	if strings.TrimSpace(alt) == "" {
+		return nil
+	}
+	return []string{alt}
 }
 
 // bracketOnlySong 是「整条标题就只有那些括号」那一档的歌名。
@@ -142,23 +159,25 @@ func bracketOnlySong(groups []bracketGroup) string {
 // ⚠️ **署名那一段不进表**（理由见 `candidatesOf`）：提到歌手不等于提到这
 // 首歌。
 //
-// # 🔴 **认不出歌名的时候给的是「空表」**（票 #706 的一致性修复）
+// # 🔴 **认不出歌名的时候，原标题**仍然**进表**（票 #706 的回归修复）
 //
-// ⚠️ **原标题**只在**认得出歌名**的时候才进表（"【4K修复】晴天"⇒ 那一条要命
-// 中，因为用户会把整个标题抄进评论里）。
+// ⚠️ **上一版是「认不出 ⇒ 空表」**，而那一版的代价被算成了「界面那一枚开关
+// 亮着但筛不出东西」——**实际代价大得多**：表是空的 ⇒ **正文里原样提到标题的
+// 那些评论一条都命不中**（用户抄了整个标题进评论，那一条本该命中）。
 //
-// 而**认不出**的时候（"【官方MV】"、"[4K]"那种纯宣传词的标题）**原标题不进
-// 表**——因为：
+// ⇒ 而「认不出 ⇒ 筛不了」这个事实**并不需要靠空表说**：`songname.Table.Empty`
+// 判的是「**除原标题外还有没有认出来的歌名**」——所以：
 //
-//	① 匹配层（`songname`）的语义是「**认不出就给空表**」（`songname.New` 的注
-//	   释、`Table.Empty` 的注释）：空表不筛，而界面上一句话都说不清为什么；
-//	② 原标题进表 ⇒ `Empty` **恒为 false** ⇒ 「认不出歌名 → 筛选开关按灰」那条
-//	   设计**是死的**——而那一支的实际后果是：标题是「【官方MV】」这种纯宣传词
-//	   的曲，筛选开关**亮着**但**筛不出任何评论**（用户看到「一条都没有」，真相
-//	   是「不知道这首歌叫什么」）。
+//	表里**有**原标题（用户抄了标题的那一条命得中）；
+//	`Empty` **仍然是 true**（筛不了 ⇒ 界面那一枚开关按灰 ⇒ 界面把话说清楚）。
 //
-// ⚠️ **而这份语义是这一层文件头写着的**（"匹配层：认不出就给**空表**"）——
-// 注释和代码分叉，正是这一票要消灭的那类病。
+// ⇒ **「表里有没有东西」和「有没有认出歌名」是两件事**，这一层管前者，
+// `songname` 那一层管后者。
+//
+// # ⚠️ **本质歧义那一档：两个都进表**
+//
+// "白月光 - 张碧晨" 那种两边都像艺人名的写法（`Ident.Alts`）⇒ 显示层只显示
+// 一个，而**匹配层两个都收**——不然用户在评论里写哪一段都命不中。
 func Aliases(raw string, hints ...string) []string {
 	var out []string
 	for _, s := range namedSpans(raw) {
@@ -168,11 +187,13 @@ func Aliases(raw string, hints ...string) []string {
 		out = append(out, s)
 	}
 	id := Identify(raw, hints...)
-	if !id.OK {
-		// ⚠️ **认不出 ⇒ 空表**（理由见上面那段）。
-		return dedupe(out)
+	if id.OK {
+		out = append(out, id.Name)
+		// ⚠️ **本质歧义那一档**：另一段也进表（理由见函数注释）。
+		out = append(out, id.Alts...)
 	}
-	out = append(out, id.Name)
+	// ⚠️ **原标题**进表——**认得出认不出都进**（理由见上面那段）：用户会把整个
+	// 标题抄进评论里，那一条要命得中。
 	if strings.TrimSpace(raw) != "" {
 		out = append(out, strings.TrimSpace(raw))
 	}
@@ -192,7 +213,13 @@ func Aliases(raw string, hints ...string) []string {
 // ⚠️ **哪一边是歌名**：两边都没线索时是**本质歧义**（"于文文 - 体面" 和 "体
 // 面 - 于文文" 长得一样）⇒ 按上面那个约定走；而**认得出歌手**的时候不是歧
 // 义——那一段是署名（词典在 `artists.go`）⇒ 另一段才是歌名。
-func candidatesOf(plain string, hints []string) string {
+//
+// # 返回两个值：歌名，和「**本质歧义**那一档的备选」
+//
+// ⚠️ **第二个值是匹配层用的**（见 `Ident.Alts`）：「两边都像艺人名、而词典认不
+// 出谁是谁」的时候（"白月光 - 张碧晨"），显示层只显示一个，而**匹配层两个都
+// 收**——不然用户在评论里写哪一段都命不中。
+func candidatesOf(plain string, hints []string) (name string, alt string) {
 	segs := splitSegments(plain)
 
 	// 🔴 **每一段先各自算出候选**（段内是空白那一档的语义：剔掉说明 / 宣传词
@@ -206,10 +233,10 @@ func candidatesOf(plain string, hints []string) string {
 		cands = append(cands, segment{text: c, sep: sg.sep})
 	}
 	if len(cands) == 0 {
-		return ""
+		return "", ""
 	}
 	if len(cands) == 1 {
-		return cands[0].text
+		return cands[0].text, ""
 	}
 	// ⚠️ **竖线那一档取**前**那一段，破折号那一档取**后**那一段**。
 	//
@@ -225,7 +252,7 @@ func candidatesOf(plain string, hints []string) string {
 		return pipeSongName(cands)
 	}
 	// ⚠️ **只剩冒号那一档**：说明那一族剔掉之后**剩下最后一段**是歌名。
-	return cands[len(cands)-1].text
+	return cands[len(cands)-1].text, ""
 }
 
 // dashSongName 是**破折号**那一档（「艺人 - 歌名」）该取哪一段。
@@ -249,28 +276,39 @@ func candidatesOf(plain string, hints []string) string {
 //	后一段**不像**艺人名 ⇒ 按约定取**后**那一段（"体面 - 于文文"）；
 //	后一段像、前一段不像     ⇒ 约定**不可信** ⇒ 取**前**那一段（"起风了 - 吴青峰"
 //	                        ⇒「起风了」）；
-//	**两边都像**             ⇒ 分不出 ⇒ **认不出**（返回空串）⇒ 显示层退回
-//	                        **原标题**（宁可脏，不说谎）。
+//	**两边都像**             ⇒ **本质歧义**（见下面）。
 //
-// ⚠️ **「两边都像」时返回空串是有意的**：那不是「显示空白」——公共层的语义是
-// `OK == false`，而**显示层**（`widgets/title`）在 `OK == false` 时退回**原标
-// 题**（`title.go` 的 `clean`）。
-func dashSongName(cands []segment) string {
+// # 🔴 **「两边都像」不是「认不出」**（票 #706 的回归）
+//
+// 上一版在这里**直接返回空串**——而那一次的代价被算成了「显示得更脏」。
+// 🔴 **实际代价大得多**：认不出 ⇒ `Aliases` 不放原标题 ⇒ **别名表是空的** ⇒
+// **评论一条都筛不出来**（比基线更差）。
+//
+// ⇒ 所以这里**不认不出**：按通行约定（「艺人 - 歌名」）取**后**那一段，而**另一段
+// 一起当备选**给匹配层（`Ident.Alts`）——「白月光 - 张碧晨」显示「白月光」，
+// 而匹配层「白月光」和「张碧晨 - 白月光」两个都收。
+//
+// ⚠️ **为什么显示层取后一段**：B 站文件名和下载工具都按「艺人 - 歌名」写，而
+// 「白月光 - 张碧晨」按那个约定读是「艺人叫白月光、歌叫张碧晨」——那显然不
+// 对。⇒ **宁可取错也不说谎**（说谎=把歌手名当歌名），而**匹配层两个都收**兜住
+// 另一边的写法。
+func dashSongName(cands []segment) (string, string) {
 	last := cands[len(cands)-1]
 	// ⚠️ **只有「最后一段本身就是被破折号分出来的」才问那一句**：中间那一段
 	// 和它之间可能是**冒号**（"A - B : C"那一档），而那一档的约定是「取最后一段」。
 	if !isDashSep(last.sep) || len(cands) < 2 {
-		return last.text
+		return last.text, ""
 	}
 	prev := cands[len(cands)-2]
 	if !looksLikeArtistName(last.text, prev.text) {
-		return last.text
+		return last.text, ""
 	}
 	if looksLikeArtistName(prev.text, last.text) {
-		// ⚠️ **两边都像 ⇒ 认不出**（理由见函数注释）。
-		return ""
+		// ⚠️ **两边都像 ⇒ 本质歧义**：按约定取后一段，而前一段当备选
+		// （理由见函数注释）。
+		return last.text, prev.text
 	}
-	return prev.text
+	return prev.text, ""
 }
 
 // isDashSep 报这个分隔符是不是破折号那一族。
@@ -288,7 +326,7 @@ func isDashSep(s string) bool {
 // # ⚠️ **这一档和破折号那一档一样要多问一句**
 //
 // 竖线的通行约定是「**歌名在前**」（"起风了 | 吴青峰 | 官方MV"）——但那也是
-// **在两边都认不出署名的时候**用的约定。
+// **在两边都认不出署名的时候**的约定。
 //
 // 🔴 **而「吴青峰 | 起风了」那种写法在 B 站上也有**：按约定取前一段 ⇒ 界面上
 // 把歌手的名字当歌名显示（**界面说谎**）。
@@ -297,27 +335,28 @@ func isDashSep(s string) bool {
 //
 //	前一段**不像**艺人名 ⇒ 按约定取**前**那一段；
 //	前一段像、后一段不像     ⇒ 约定**不可信** ⇒ 取**后**那一段；
-//	**两边都像**             ⇒ 认不出（退回原标题）。
+//	**两边都像**             ⇒ **本质歧义**（理由同 `dashSongName`）。
 //
 // ⚠️ **「起风了 | 吴青峰 | 官方MV」那一档不受影响**：「官方MV」是宣传词，剔掉
 // 之后只剩两段，而前一段「起风了」**不像**艺人名 ⇒ 取前一段（和约定一致）。
-func pipeSongName(cands []segment) string {
+func pipeSongName(cands []segment) (string, string) {
 	// ⚠️ **竖线在第一段和第二段之间**：而 `sep` 记的是「**前面**那个分隔符」
 	// （见 `segment` 的注释）——所以竖线是**第二段**的 `sep`。
 	if len(cands) < 2 || !isPipeSep(cands[1].sep) {
 		// ⚠️ **不是竖线那一档**（`hasSepBetween` 说有竖线在**后面**那几段之间）：
 		// 按约定取前一段。
-		return cands[0].text
+		return cands[0].text, ""
 	}
 	first, next := cands[0], cands[1]
 	if !looksLikeArtistName(first.text, next.text) {
-		return first.text
+		return first.text, ""
 	}
 	if looksLikeArtistName(next.text, first.text) {
-		// ⚠️ **两边都像 ⇒ 认不出**（理由见 `dashSongName`）。
-		return ""
+		// ⚠️ **两边都像 ⇒ 本质歧义**：按约定取前一段，而后一段当备选
+		// （理由见 `dashSongName`）。
+		return first.text, next.text
 	}
-	return next.text
+	return next.text, ""
 }
 
 // hasSepBetween 报那些候选中间有没有 seps 里某一个分隔符。
