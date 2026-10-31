@@ -52,6 +52,29 @@ func TestThePlainTitleIsAlsoInTheTable(t *testing.T) {
 	}
 }
 
+// TestTheTableIsEmptyWhenTheSongNameIsUnknown 钉住「**认不出歌名 ⇒ 空表**」。
+//
+// 🔴 **这一条是票 #706 的一致性修复**：注释明写「认不出歌名的时候给**空表**
+// （`Empty` 是 true）——而**不是**给一张装着原标题的表」，而代码**无条件**把原
+// 标题加进表 ⇒ `Empty` **恒为 false**。
+//
+// ⇒ 而那一支的**实际后果**是：「认不出歌名 → 筛选开关按灰」这条设计**是死
+// 的**——标题是「【官方MV】」这种纯宣传词的曲，筛选开关**亮着**但**筛不出任何
+// 评论**（用户看到「一条都没有」，真相是「不知道这首歌叫什么」）。
+//
+// ⚠️ **而空表不筛**（`Table.Empty` 的注释）：空表 ⇒ 界面把那一枚开关按灰 ⇒ 用户
+// 看得见它按不动。
+func TestTheTableIsEmptyWhenTheSongNameIsUnknown(t *testing.T) {
+	for _, in := range []string{"【官方MV】", "[4K]", "（官方）", "【】"} {
+		tab := New(in, "")
+		if !tab.Empty() {
+			t.Errorf("New(%q) 的表不是空的：%q——"+
+				"认不出歌名就该给**空表**（注释这么写着，而界面那一枚开关"+
+				"也是照「空表」按灰的）", in, tab.Forms())
+		}
+	}
+}
+
 // TestTheBookTitleMarksAreStripped 断「《晴天》也算提到」。
 func TestTheBookTitleMarksAreStripped(t *testing.T) {
 	tab := New("《晴天》", "某个歌手")

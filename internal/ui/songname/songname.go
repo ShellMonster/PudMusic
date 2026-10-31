@@ -100,6 +100,10 @@ type Table struct {
 // 🔴 **认不出歌名的时候给**空表**（`Empty` 是 true）——而**不是**给一张装着
 // 原标题的表：那一张表会把这一首的评论**全筛掉**（正文里没有人写整个视频
 // 标题），而界面上一句话都说不清为什么（见 `Empty` 的注释）。
+//
+// ⚠️ **这一条和公共层是同一份语义**（`songmeta` 的文件头写着「匹配层：认不出
+// 就给**空表**」）：`songmeta.Aliases` 在认不出的时候**不放原标题**——所以
+// 这一档拿到的**真的是空表**，而不是「一张装着原标题的表」。
 func New(rawTitle, artist string) Table {
 	var t Table
 	add := func(s string) {

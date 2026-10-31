@@ -98,9 +98,28 @@ var tabSlide = motion.TabSlide
 
 // tabSlideSynced 是**首页那一排**滑块的动画：和内容那一块同起同落。
 //
-// ⚠️ **它是包级变量，不能每帧现造**：`motion.Unified` 是闭包，每帧调一次就是
-// 每帧一个分配（每帧分配是本仓库唯一的性能判据）。
-var tabSlideSynced = homePagerAnim
+// ⚠️ **它是包级变量，不能每帧现造**：`motion.Unified` 是一个闭包，每帧调一次
+// 就是每帧一个分配（每帧分配是本仓库唯一的性能判据，`framebudget_test.go`）。
+//
+// # 🔴 **它**不是** `homePagerAnim` 那个变量本身**（票 #706 的一致性修复）
+//
+// 以前这里是 `var tabSlideSynced = homePagerAnim`——**同一个结构体**——于是
+// `tabSlideSynced.Duration != homePagerDuration` 和
+// `tabSlideSynced.Ease(...) == homePagerAnim.Ease(...)` 这两条断言
+// **在定义上恒成立**（它们比较的是**同一个值**）⇒ 那条测试**永远绿**，无论实现
+// 怎么改。
+//
+// ⇒ 而它号称是「指示器和内容同起同落」的**白盒证据**——真正有价值的判据是
+// e2e 那一条（`homepage_pager_e2e_test.go` 的
+// `TestTheIndicatorAndTheContentMoveTogether`，它**从画面上量指示器的位置**）。
+//
+// ⇒ 所以这里**各自造一份**（同样的参数，两次构造）——于是那两条断言**真的在比
+// 两样东西**：一份要是哪天改成别的曲线 / 别的时长，那两条断言**会红**。
+//
+// ⚠️ **参数仍然只有一处**：`homePagerDuration` 和 `motion.Unified`——两份构造
+// 用的是**同一个时长常量**和**同一条曲线**，所以「参数一样」这件事仍然由**那两
+// 个出口**保证（而不是由「它们是同一个变量」保证——后者是**巧合**，不是**保证**）。
+var tabSlideSynced = ui.Animation{Duration: homePagerDuration, Ease: motion.Unified}
 
 // mainTabs 画一排主 Tab。selected 是当前选中的下标，size 决定 40 / 44 那一档。
 //

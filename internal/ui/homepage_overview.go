@@ -17,6 +17,10 @@
 // 压根没 push 过路由）。现在它在首页上做的是「回总览」，在别的页面上仍然是退
 // 路由历史。理由见 `navbar.go` 的 `viewHomeBack`。
 //
+// ⚠️ **顶栏那一枚是「退不回去时才回总览」**（票 #706 的 bug）：路由历史退得回去
+// 的时候（用户在别的页面 → 回首页），那一枚**退路由历史**——而它退不回去的时
+// 候才回总览。理由见 `navbar.go` 的 `viewNavBack`。
+//
 // ⚠️ **迷你榜的歌是缓存的**（`miniTop`）：`PagedList.Items()` 每次是一份拷贝，
 // 每帧取一次就是每帧一次分配（这一屏有逐帧分配预算，见 framebudget_test.go），
 // 所以只在榜上歌数变了的时候重取。
@@ -125,7 +129,36 @@ func (h *homePage) openTab(tab int) {
 }
 
 // backToOverview 回到总览。
-func (h *homePage) backToOverview() { h.overview = true }
+//
+// # ⚠️ **它必须把 `swap` 一并复位**（票 #706 的第二个 bug）
+//
+// 回总览是**页内切换**：路由一个字都不动，而画面上从「榜单那一档」换成「发
+// 现总览」。
+//
+// 而 `swap` 是**切 Tab 那一段的状态**（`homePager`）——它**不属于**总览那一
+// 档。于是回总览的时候它得**跟着复位**，否则：
+//
+//	横滑到一半 ⇒ 按后退回总览 ⇒ swap 还停在 slide
+//
+// 🔴 **而 `syncPager` 那一支不会自己把它清掉**：slide 分支只在
+// `h.want == h.shown` 时才取消（那是「用户点回原来那一档」那一路）——回总览
+// 时 `want` ≠ `shown`，所以**不取消**。
+//
+// ⇒ 后果是**那一段永远挂着**：
+//
+//   - `syncPager` 每次进 slide 分支都走 `c.AnimationFrame()` ⇒ **界面一直要帧**
+//     （空转耗电）；
+//   - 那一段还**每帧画两档**（oldTab / newTab 都 ≥0），比稳态多一倍分配；
+//   - 好在 `view()` 里 `h.overview` 为真时走 `viewOverview` 分支（早退），所以
+//     **画面上没坏**；但 `swap.phase` 卡住后**没有任何东西会再推进它** ⇒ 一次误
+//     触之后那一档的 `shown` **永远停在旧档**，直到用户再点一次 Tab。
+//
+// ⚠️ **和 `openTab` 对称**：`openTab` 已经这么做了（`h.swap = homePager{}`）——
+// 两个入口都改「画的是哪一档」，所以两个都要复位那一段。
+func (h *homePage) backToOverview() {
+	h.overview = true
+	h.swap = homePager{}
+}
 
 // refreshMini 在两张榜上的歌数变了时重取前 homeMiniRows 名。每帧在 sync 层调。
 func (h *homePage) refreshMini() {

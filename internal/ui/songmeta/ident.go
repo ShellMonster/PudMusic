@@ -142,8 +142,23 @@ func bracketOnlySong(groups []bracketGroup) string {
 // ⚠️ **署名那一段不进表**（理由见 `candidatesOf`）：提到歌手不等于提到这
 // 首歌。
 //
-// ⚠️ **原标题也在里面**：用户会把整个标题抄进评论里（「看下【4K修复】晴天」）
-// ——那一行也要命中。
+// # 🔴 **认不出歌名的时候给的是「空表」**（票 #706 的一致性修复）
+//
+// ⚠️ **原标题**只在**认得出歌名**的时候才进表（"【4K修复】晴天"⇒ 那一条要命
+// 中，因为用户会把整个标题抄进评论里）。
+//
+// 而**认不出**的时候（"【官方MV】"、"[4K]"那种纯宣传词的标题）**原标题不进
+// 表**——因为：
+//
+//	① 匹配层（`songname`）的语义是「**认不出就给空表**」（`songname.New` 的注
+//	   释、`Table.Empty` 的注释）：空表不筛，而界面上一句话都说不清为什么；
+//	② 原标题进表 ⇒ `Empty` **恒为 false** ⇒ 「认不出歌名 → 筛选开关按灰」那条
+//	   设计**是死的**——而那一支的实际后果是：标题是「【官方MV】」这种纯宣传词
+//	   的曲，筛选开关**亮着**但**筛不出任何评论**（用户看到「一条都没有」，真相
+//	   是「不知道这首歌叫什么」）。
+//
+// ⚠️ **而这份语义是这一层文件头写着的**（"匹配层：认不出就给**空表**"）——
+// 注释和代码分叉，正是这一票要消灭的那类病。
 func Aliases(raw string, hints ...string) []string {
 	var out []string
 	for _, s := range namedSpans(raw) {
@@ -152,9 +167,12 @@ func Aliases(raw string, hints ...string) []string {
 		}
 		out = append(out, s)
 	}
-	if id := Identify(raw, hints...); id.OK {
-		out = append(out, id.Name)
+	id := Identify(raw, hints...)
+	if !id.OK {
+		// ⚠️ **认不出 ⇒ 空表**（理由见上面那段）。
+		return dedupe(out)
 	}
+	out = append(out, id.Name)
 	if strings.TrimSpace(raw) != "" {
 		out = append(out, strings.TrimSpace(raw))
 	}
@@ -201,13 +219,105 @@ func candidatesOf(plain string, hints []string) string {
 	//
 	// ⚠️ **两者都有的时候破折号优先**（它是那个「艺人 - 歌名」的通行约定）。
 	if hasSepBetween(cands, dashSeps) {
-		return cands[len(cands)-1].text
+		return dashSongName(cands)
 	}
 	if hasSepBetween(cands, pipeSeps) {
-		return cands[0].text
+		return pipeSongName(cands)
 	}
 	// ⚠️ **只剩冒号那一档**：说明那一族剔掉之后**剩下最后一段**是歌名。
 	return cands[len(cands)-1].text
+}
+
+// dashSongName 是**破折号**那一档（「艺人 - 歌名」）该取哪一段。
+//
+// # ⚠️ **这一档不能只靠「后一段是歌名」那个约定**
+//
+// 那个约定是**在两边都认不出署名的时候**用的（理由见 `candidatesOf` 的注释）——
+// 而「认不出」有两种：
+//
+//	① 那一段**真的是**歌名（"体面 - 于文文"那种写法）；
+//	② 那一段**是签名**，只是词典没收它（"起风了 - 吴青峰"）。
+//
+// 🔴 **② 认错了，界面上就把歌手的名字当歌名显示**——而用户看到的是「这一首叫
+// 『吴青峰』」。那是**界面说谎**。
+//
+// ⇒ 所以这一档多问一句：**后一段像不像艺人名**（`nameshape.go` 那一份**形状**
+// 判据——词典收不全，而形状收得全）。
+//
+// # 三种结果
+//
+//	后一段**不像**艺人名 ⇒ 按约定取**后**那一段（"体面 - 于文文"）；
+//	后一段像、前一段不像     ⇒ 约定**不可信** ⇒ 取**前**那一段（"起风了 - 吴青峰"
+//	                        ⇒「起风了」）；
+//	**两边都像**             ⇒ 分不出 ⇒ **认不出**（返回空串）⇒ 显示层退回
+//	                        **原标题**（宁可脏，不说谎）。
+//
+// ⚠️ **「两边都像」时返回空串是有意的**：那不是「显示空白」——公共层的语义是
+// `OK == false`，而**显示层**（`widgets/title`）在 `OK == false` 时退回**原标
+// 题**（`title.go` 的 `clean`）。
+func dashSongName(cands []segment) string {
+	last := cands[len(cands)-1]
+	// ⚠️ **只有「最后一段本身就是被破折号分出来的」才问那一句**：中间那一段
+	// 和它之间可能是**冒号**（"A - B : C"那一档），而那一档的约定是「取最后一段」。
+	if !isDashSep(last.sep) || len(cands) < 2 {
+		return last.text
+	}
+	prev := cands[len(cands)-2]
+	if !looksLikeArtistName(last.text, prev.text) {
+		return last.text
+	}
+	if looksLikeArtistName(prev.text, last.text) {
+		// ⚠️ **两边都像 ⇒ 认不出**（理由见函数注释）。
+		return ""
+	}
+	return prev.text
+}
+
+// isDashSep 报这个分隔符是不是破折号那一族。
+func isDashSep(s string) bool {
+	for _, sp := range dashSeps {
+		if s == sp {
+			return true
+		}
+	}
+	return false
+}
+
+// pipeSongName 是**竖线**那一档（「歌名 | 艺人 | 说明」）该取哪一段。
+//
+// # ⚠️ **这一档和破折号那一档一样要多问一句**
+//
+// 竖线的通行约定是「**歌名在前**」（"起风了 | 吴青峰 | 官方MV"）——但那也是
+// **在两边都认不出署名的时候**用的约定。
+//
+// 🔴 **而「吴青峰 | 起风了」那种写法在 B 站上也有**：按约定取前一段 ⇒ 界面上
+// 把歌手的名字当歌名显示（**界面说谎**）。
+//
+// ⇒ 所以这一档同样问一句「**前一段像不像艺人名**」，而回答和破折号那一档相反：
+//
+//	前一段**不像**艺人名 ⇒ 按约定取**前**那一段；
+//	前一段像、后一段不像     ⇒ 约定**不可信** ⇒ 取**后**那一段；
+//	**两边都像**             ⇒ 认不出（退回原标题）。
+//
+// ⚠️ **「起风了 | 吴青峰 | 官方MV」那一档不受影响**：「官方MV」是宣传词，剔掉
+// 之后只剩两段，而前一段「起风了」**不像**艺人名 ⇒ 取前一段（和约定一致）。
+func pipeSongName(cands []segment) string {
+	// ⚠️ **竖线在第一段和第二段之间**：而 `sep` 记的是「**前面**那个分隔符」
+	// （见 `segment` 的注释）——所以竖线是**第二段**的 `sep`。
+	if len(cands) < 2 || !isPipeSep(cands[1].sep) {
+		// ⚠️ **不是竖线那一档**（`hasSepBetween` 说有竖线在**后面**那几段之间）：
+		// 按约定取前一段。
+		return cands[0].text
+	}
+	first, next := cands[0], cands[1]
+	if !looksLikeArtistName(first.text, next.text) {
+		return first.text
+	}
+	if looksLikeArtistName(next.text, first.text) {
+		// ⚠️ **两边都像 ⇒ 认不出**（理由见 `dashSongName`）。
+		return ""
+	}
+	return next.text
 }
 
 // hasSepBetween 报那些候选中间有没有 seps 里某一个分隔符。

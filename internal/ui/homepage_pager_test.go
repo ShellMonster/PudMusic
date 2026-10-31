@@ -138,6 +138,19 @@ func TestSwitchingTabsKeepsBothPagesApart(t *testing.T) {
 // ⚠️ **指示器那一侧此前是弹簧**（`motion.TabSlide`）：它走 453ms 才收手
 // （实测），而内容走 200ms ⇒ **不同起同落**。所以这一条**会把那个弹簧顶红**
 // ——那正是这一票要改的。
+//
+// # 🔴 **这一条以前是**恒真断言**（票 #706 的一致性修复）
+//
+// 以前 `tabSlideSynced` **就是 `homePagerAnim` 那个变量**（同一个结构体）⇒
+// 下面那两条断言**在定义上恒成立**（比较的是**同一个值**）⇒ 无论实现怎么改，
+// 这一条**永远绿**。
+//
+// ⇒ 所以现在两边**各自造一份**（同样的参数，两次构造）——于是那两条断言**真的
+// 在比两样东西**：指示器那一份要是哪天改成别的曲线 / 别的时长，**会红**。
+//
+// ⚠️ **而「从画面上量指示器的位置」那一条**（e2e，`homepage_pager_e2e_test.go`
+// 的 `TestTheIndicatorAndTheContentMoveTogether`）才是**真正有效**的那一条——
+// 它量的是画面上那块滑块**真的走到哪儿了**。
 func TestTheIndicatorAndTheContentStartAndEndTogether(t *testing.T) {
 	// 指示器那一条：首页这一排走「和底下同步」那一档。
 	if tabSlideSynced.Duration != homePagerDuration {
@@ -160,6 +173,29 @@ func TestTheIndicatorAndTheContentStartAndEndTogether(t *testing.T) {
 	// 内容那一侧的进度函数在走完之后是 1（走完了）。
 	if got := homePagerProgress(homePagerDuration); got != 1 {
 		t.Errorf("走完 %v 之后进度是 %.4f（want 1）", homePagerDuration, got)
+	}
+	// 🔴 **指示器那一侧走的是**曲线**那一支，不是弹簧那一支**。
+	//
+	// ⚠️ **这一条断的是「它不是 `tabSlide`（弹簧）」**：弹簧走 453ms 才收手
+	// （实测），而内容走 200ms ⇒ **不同起同落**——而「不同起同落」在画面上是
+	// 看**得见**的（指示器还在走、内容已经停住了）。
+	//
+	// ⚠️ **判据是 `Duration > 0`**：框架的曲线那一支是 `Duration > 0`，而
+	// `Duration == 0` 落进**弹簧**那一支（`mygo/ui/motion.go` 的 `retarget`）——
+	// 而「零值 = 500ms 弹簧」不是「没动画」。
+	if tabSlideSynced.Duration <= 0 {
+		t.Errorf("指示器那一侧的 Duration 是 %v——那落进框架的**弹簧**那一支"+
+			"（`Duration == 0` ⇒ 500ms 弹簧），而内容那一侧走的是 200ms 的曲线"+
+			"⇒ 两者不同起同落", tabSlideSynced.Duration)
+	}
+	// ⚠️ **而它不是 `tabSlide`（首页之外那三处走的弹簧）**：首页这一排要跟内容
+	// 同起同落，别的三处（设置页 / 搜索页 / UP 空间）底下没有跟着一起动的那一屏
+	// ——那是**另一种语义**（见 `tabs.go` 的 `tabSlide` 的注释）。
+	if tabSlideSynced.Duration == tabSlide.Duration &&
+		tabSlideSynced.Ease != nil && tabSlide.Ease != nil {
+		t.Errorf("指示器那一侧和 `tabSlide`（弹簧）用的是同一套参数"+
+			"（时长 %v）——首页这一排要的是**和内容同起同落**（曲线），"+
+			"不是弹簧", tabSlideSynced.Duration)
 	}
 }
 
