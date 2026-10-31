@@ -295,6 +295,23 @@ func TestTheHighlightInkStaysReadableOnItsOwnWash(t *testing.T) {
 // 切 span 那一层的单元判据
 // ─────────────────────────────────────────────────────────────────────────────
 
+// sameSpans 报两串 span 是不是同一份（逐段比文本与画法）。
+//
+// ⚠️ **它比的是「画法」**：高亮那几段的字色和底色是**烘进 span 里**的
+// （`ui.Span.Color` / `Background`），而配色一变那些字段就变了——所以只比
+// 文本的话，「配色变了却没重切」那个实现照样绿。
+func sameSpans(a, b []mygoui.Span) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestTheEmoteTokenIsNeverPainted 断「命中区间盖住表情占位符时，那一格不染色」。
 //
 // 🔴 **那一格画的是一张图，不是字**：给它套一层底色的话，画面上就是表情图
@@ -311,7 +328,7 @@ func TestTheEmoteTokenIsNeverPainted(t *testing.T) {
 	const msg = "晴天[妙啊]真好听"
 	hl := []songname.Range{{Start: 0, End: 9}}
 	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
-	spans, urls, plain := commentSpansMarked(msg, emotes, hl, mark)
+	spans, urls := commentSpansOf(msg, emotes, hl, mark)
 	if len(urls) != 1 {
 		t.Fatalf("表情图有 %d 张，want 1", len(urls))
 	}
@@ -322,7 +339,7 @@ func TestTheEmoteTokenIsNeverPainted(t *testing.T) {
 		}
 	}
 	// ⚠️ **给读屏那一份一个字都不许变**（高亮是装饰）。
-	if plain != "晴天［表情］真好听" {
+	if plain := commentPlain(msg, emotes); plain != "晴天［表情］真好听" {
 		t.Errorf("读屏那一份是 %q，want「晴天［表情］真好听」", plain)
 	}
 }
@@ -338,7 +355,7 @@ func TestTheHighlightSurvivesAnEmoteInTheMiddle(t *testing.T) {
 	const msg = "晴天[妙啊]真好听"
 	hl := []songname.Range{{Start: 0, End: 9}}
 	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
-	spans, _, _ := commentSpansMarked(msg, emotes, hl, mark)
+	spans, _ := commentSpansOf(msg, emotes, hl, mark)
 	var painted []string
 	for _, sp := range spans {
 		if sp.Background.A != 0 {
@@ -372,7 +389,7 @@ func TestTheSpanTextsStillSpellTheWholeBody(t *testing.T) {
 	}
 	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
 	for _, tc := range cases {
-		spans, urls, _ := commentSpansMarked(tc.msg, emotes, tc.hl, mark)
+		spans, urls := commentSpansOf(tc.msg, emotes, tc.hl, mark)
 		var got strings.Builder
 		for _, sp := range spans {
 			got.WriteString(sp.Text)
@@ -390,32 +407,19 @@ func TestTheSpanTextsStillSpellTheWholeBody(t *testing.T) {
 	}
 }
 
-// TestTheRangesAreClippedToTheFoldedText 断「截断之后，截断点之后的高亮丢掉」。
+// 🔴 **「截断之后，截断点之后的高亮丢掉」这一档不再需要**（票 #702）：
 //
-// 🔴 **那一截正文不在画面上**（换成了省略号）：留着它的区间只会让切 span
-// 去切一段不存在的文字——而「跨过截断点的那一段」要按新的字数裁短。
-func TestTheRangesAreClippedToTheFoldedText(t *testing.T) {
-	hl := []songname.Range{{Start: 0, End: 2}, {Start: 5, End: 9}, {Start: 20, End: 24}}
-	got := clipMarks(hl, 7)
-	want := []songname.Range{{Start: 0, End: 2}, {Start: 5, End: 7}}
-	if len(got) != len(want) {
-		t.Fatalf("裁完是 %v，want %v", got, want)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("裁完是 %v，want %v", got, want)
-		}
-	}
-	if got := clipMarks(hl, 3); len(got) != 1 || got[0] != want[0] {
-		t.Errorf("截到第 3 个字时是 %v，want 只剩 %v", got, want[0])
-	}
-	if got := clipMarks(hl, 0); got != nil {
-		t.Errorf("截到零个字时是 %v，want nil", got)
-	}
-	if got := clipMarks(nil, 10); got != nil {
-		t.Errorf("没有区间时是 %v，want nil", got)
-	}
-}
+// 旧的实现里**截断是这一页自己做的**（自己二分、自己量高度），所以**截断
+// 点之后的那一截正文**要**从 span 里切掉**——留着它只会去切一段不存在的文字。
+//
+// 而现在**截断是框架做的**（`ui.RichText` 的 `MaxLines` + `Ellipsis`）：框架
+// 自己知道切到哪儿，**画出来的**只有切点之前的那几行——而**高亮是按原文的
+// rune 坐标**烘进 span 里的，于是切点之后的那几段**画不出来**（它们不在那一
+// 行上）⇒ **不用裁**。
+//
+// ⚠️ **「那一段染着底色」这件事仍然由画面上的像素盯着**
+// （`TestALongBodyWithAMentionIsStillHighlighted` 那一族）——而这一族现在量的
+// ���「折起来之后**还在画面上**的那几行里，命中的那一段还染着底色」。
 
 // TestALongBodyWithAMentionIsFoldedAndStillHighlighted 断「长正文折起来之后，
 // 截断点之前的那一段还染着色」。
@@ -437,25 +441,37 @@ func TestALongBodyWithAMentionIsFoldedAndStillHighlighted(t *testing.T) {
 	if err := tt.Click("开关：只看提到歌名的评论"); err != nil {
 		t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
 	}
-	var body *commentBody
+	var msg string
 	commentsWait(t, tt, "长正文折起来并高亮", func() bool {
 		for _, row := range s.comments.rows {
 			if b, ok := s.comments.bodies[row.cm.Rpid]; ok && b.mark.Bg.A != 0 {
-				body = b
+				msg = row.cm.Message
 				return true
 			}
 		}
 		return false
 	})
-	if !strings.HasSuffix(body.plain, "…") {
-		t.Fatalf("这条正文没被折起来（末尾不是省略号）：%q", body.plain)
+	// ⚠️ **判据是「那一格只有 6 行那么高」**：折起来是**框架**做的事
+	//（`MaxLines` + `Ellipsis`），而省略号是**画出来**的、**不在文字里**——
+	// 所以「那一段以『…』收尾」那个旧判据**不再成立**（`Label` 给的是整段
+	// 原文）。
+	//
+	// ⚠️ **量的是画面上那一格的盒子**（`Tester.Find` 给的）：正文那一格**没有
+	// 固定高度**（框架按排版给），而它装的是**折起来之后**的那几行。
+	if !strings.HasPrefix(msg, "晴天") {
+		t.Fatalf("折起来的正文不是从歌名开头：%q", msg)
 	}
-	if !strings.HasPrefix(body.plain, "晴天") {
-		t.Fatalf("折起来的正文不是从歌名开头：%q", body.plain)
-	}
-	r, ok := tt.Find(body.plain)
+	r, ok := tt.Find(msg)
 	if !ok {
 		t.Fatalf("画面上找不到折起来的那句正文，文字有 %q", tt.Texts())
+	}
+	lineH := commentLineHeight(t)
+	if r.H > float32(commentBodyLines)*lineH+1 {
+		t.Errorf("这条正文那一格有 %.1f 高，而 %d 行只有 %.1f——它没有被折起来",
+			r.H, commentBodyLines, float32(commentBodyLines)*lineH)
+	}
+	if r.H >= lineH*10 {
+		t.Errorf("这条正文那一格有 %.1f 高（10 行以上）——它压根没折", r.H)
 	}
 	rect := image.Rect(int(r.X), int(r.Y), int(r.X+r.W), int(r.Y+r.H))
 	if n := washPixelsIn(tt, false, rect); n == 0 {
@@ -497,9 +513,9 @@ func commentFixtureLongBodyMentioning(t *testing.T, mention string) []byte {
 // 那一份正文会重排」。
 //
 // 🔴 **高亮那几段的字色和底色是烘进 span 里的**（`ui.Span.Color` /
-// `Background`），而正文那一份是**缓存**着的（`commentBodyOf`）——键里不带配色
-// 的话，用户换了深浅两套之后那几段还是上一次主题的颜色（其余的字是画的时候
-// 从主题现取的，于是页面上就出现了「一半新色、一半旧色」）。
+// `Background`），而正文那一份是**缓存**着的（`commentBodySpans`）——键里不带
+// 配色的话，用户换了深浅两套之后那几段还是上一次主题的颜色（其余的字是画的
+// 时候从主题现取的，于是页面上就出现了「一半新色、一半旧色」）。
 //
 // ⚠️ **判据是重排了没有**（`mark` 变了 ⇒ 缓存不命中 ⇒ 重新排一份），不是
 // 「那两段颜色对不对」——后者要求把主题换掉再画一帧，而换主题在无头 Tester
@@ -515,14 +531,14 @@ func TestTheHighlightFollowsTheTheme(t *testing.T) {
 			s.wake.set(c)
 			s.applyFrameTheme(c)
 			p.mark = commentMarkOf(c.Theme())
-			first := s.commentBodyOf(c, p, cm, commentBodyLines, 900)
-			// 同一份配色再要一次：**必须是同一个指针**（缓存命中了）。
-			again := s.commentBodyOf(c, p, cm, commentBodyLines, 900)
-			if first != again {
-				t.Errorf("配色没变，正文却重排了（缓存没命中）")
+			first := s.commentBodyOf(p, cm).spans
+			// 同一份配色再要一次：**必须是同一份**（缓存命中了）。
+			again := s.commentBodyOf(p, cm).spans
+			if !sameSpans(first, again) {
+				t.Errorf("配色没变，正文却重切了（缓存没命中）")
 			}
-			if first.mark != p.mark {
-				t.Errorf("缓存下来的配色是 %+v，want %+v", first.mark, p.mark)
+			if got := p.bodies[cm.Rpid]; got == nil || got.mark != p.mark {
+				t.Errorf("缓存下来的配色是 %+v，want %+v", got, p.mark)
 			}
 			// 换一份配色（模拟用户换了深浅）：**必须重排**。
 			//
@@ -531,12 +547,14 @@ func TestTheHighlightFollowsTheTheme(t *testing.T) {
 			// 这一份主题**一个字节都不变**——那样这条用例量到的会是「没变所以
 			// 没重排」，而它想钉的是「变了必须重排」。
 			p.mark = commentMarkOf(BuildTheme(app.DefaultSettings(""), true))
-			second := s.commentBodyOf(c, p, cm, commentBodyLines, 900)
-			if second == first {
+			second := s.commentBodyOf(p, cm).spans
+			if sameSpans(first, second) {
 				t.Errorf("配色变了，正文却用的还是缓存那一份——高亮那几段会是旧主题的颜色")
 			}
-			if second.mark == first.mark {
-				t.Errorf("重排之后缓存里的配色没变：%+v", second.mark)
+			// ⚠️ **缓存里记的必须是**新**的那份配色**：不然下一帧拿到的还是旧
+			// 配色（而高亮的字色和底色是**烘进 span 里**的）。
+			if got := p.bodies[cm.Rpid]; got.mark != p.mark {
+				t.Errorf("重切之后缓存里的配色是 %+v，want %+v", got.mark, p.mark)
 			}
 		}
 	}))
@@ -546,14 +564,14 @@ func TestTheHighlightFollowsTheTheme(t *testing.T) {
 // TestTheCachedBodyFollowsANewAliasTable 断「别名表换了之后，正文排版缓存
 // 不能还留着旧表算出来的那一份」。
 //
-// 🔴 **缓存键里没有别名表**（`commentBodyOf` 的键是 rpid / 宽 / 行数 / 配色）：
-// 换歌（或者同一首的标题、艺人变了）时 `syncComments` 换了 `p.names`，而排版
+// 🔴 **缓存键里没有别名表**（`commentBodySpans` 的键是 rpid / 配色）：换歌
+// （或者同一首的标题、艺人变了）时 `syncComments` 换了 `p.names`，而那一份
 // 缓存还留着——筛选用的是新歌名，正文里标的却是旧歌名的位置。
 //
-// ⚠️ **判据是「新排了一份」**：缓存命中时 `commentBodyOf` 返回的是**同一个
-// 指针**（`TestTheMatchingRunsOncePerCommentNotPerFrame` 钉住的那条路），所以
-// 换了别名表之后必须是**另一个**指针——那一份是拿新表的 `Matches` 排的
-// （`commentBodyOf` 里唯一跑匹配的地方）。
+// ⚠️ **判据是「新切了一份」**：缓存命中时 `commentBodySpans` 返回的是**同一
+// 份**（`TestTheMatchingRunsOncePerCommentNotPerFrame` 钉住的那条路），所以
+// 换了别名表之后必须是**另一份**——那一份是拿新表的 `Matches` 切的
+// （`commentBodySpans` 里唯一跑匹配的地方）。
 //
 // ⚠️ **紧接着再 sync 一次（什么都没变）必须还是同一份**：每帧都清的话排版
 // 缓存整个作废，帧预算那一档（`framebudget_test.go`）会红——所以这一条也把
@@ -593,16 +611,19 @@ func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
 				p.mark = commentMarkOf(c.Theme())
 
 				cm := bili.Comment{Rpid: 7, Message: body}
-				first = s.commentBodyOf(c, p, cm, commentBodyLines, 900)
+				s.commentBodyOf(p, cm)
+				first = p.bodies[cm.Rpid]
 
 				// 这一帧当前这一首叫「告白气球」⇒ 走别名表重算那一支。
 				s.syncComments(c)
 				gotTitle = p.srcTitle
-				second = s.commentBodyOf(c, p, cm, commentBodyLines, 900)
+				s.commentBodyOf(p, cm)
+				second = p.bodies[cm.Rpid]
 
 				// 什么都没变的下一帧：排版缓存**必须还在**。
 				s.syncComments(c)
-				again = s.commentBodyOf(c, p, cm, commentBodyLines, 900)
+				s.commentBodyOf(p, cm)
+				again = p.bodies[cm.Rpid]
 			}
 		}))
 	ts.tt.Frame()
@@ -618,7 +639,7 @@ func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
 			newName, oldName)
 	}
 	if again != second {
-		t.Errorf("这一帧别名表没变，正文却重排了——排版缓存被每帧清掉了（帧预算会红）")
+		t.Errorf("这一帧别名表没变，正文却重切了——排版缓存被每帧清掉了（帧预算会红）")
 	}
 }
 
@@ -630,8 +651,8 @@ func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
 // 八行就是**每帧一百多次白花的分配**——`framebudget_test.go` 那一档（88 次）
 // 会红。
 //
-// ⚠️ **判据是「同一个指针」**：`commentBodyOf` 命中缓存时返回的是**同一份**
-// ——而匹配只在那一次重排里跑。
+// ⚠️ **判据是「同一份」**：`commentBodySpans` 命中缓存时返回的是**同一份**
+// ——而匹配只在那一次重切里跑。
 func TestTheMatchingRunsOncePerCommentNotPerFrame(t *testing.T) {
 	var first *commentBody
 	ts := newTestShell(t, at(1200, 900), withView(func(s *Shell) func(*mygoui.Context) {
@@ -642,11 +663,14 @@ func TestTheMatchingRunsOncePerCommentNotPerFrame(t *testing.T) {
 			s.comments.mentionOnly = true
 			s.comments.mark = commentMarkOf(c.Theme())
 			cm := bili.Comment{Rpid: 7, Message: "晴天真好听"}
-			b1 := s.commentBodyOf(c, &s.comments, cm, commentBodyLines, 900)
-			b2 := s.commentBodyOf(c, &s.comments, cm, commentBodyLines, 900)
-			b3 := s.commentBodyOf(c, &s.comments, cm, commentBodyLines, 900)
+			s.commentBodyOf(&s.comments, cm)
+			b1 := s.comments.bodies[cm.Rpid]
+			s.commentBodyOf(&s.comments, cm)
+			b2 := s.comments.bodies[cm.Rpid]
+			s.commentBodyOf(&s.comments, cm)
+			b3 := s.comments.bodies[cm.Rpid]
 			if b1 != b2 || b2 != b3 {
-				t.Errorf("同一份正文（配色、宽度、行数都没变）却重排了")
+				t.Errorf("同一份正文（配色没变）却重切了")
 			}
 			first = b1
 		}

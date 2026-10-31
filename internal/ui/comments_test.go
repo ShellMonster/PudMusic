@@ -37,6 +37,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -609,22 +610,31 @@ func magentaPixels(tt *mygoui.Tester) int {
 // `[妙啊]` 里面的话，正文里就剩下半个 `[妙啊`——**表情不再成图，而正文里出现
 // 字面量**（那是「表情成图」那条验收直接破掉的形状）。
 //
-// ⚠️ **前缀长度要扫一遍**：切点落在占位符里面只在**某几个**前缀长度上发生
+// ⚠️ **新的做法让这个形状压根不存在**（票 #702）：截断是**框架**做的
+// （`ui.RichText` 的 `MaxLines` + `Ellipsis`），而框架按 **grapheme** 截断——
+// 而占位符在 **span 空间**里是**一枚 rune**（U+FFFC），所以切点要么在它
+// **前面**，要么在它**后面**，**不会落在它里面**。
+//
+// ⚠️ **于是这一条改成钉「新语义」**：切完的正文里，占位符要么**整枚在**
+// （一枚 U+FFFC = 一张图），要么**整枚不在**——**绝不会是半个字面量**。
+//
+// ⚠️ **前缀长度要扫一遍**：切点落在占位符附近只在**某几个**前缀长度上发生
 // （前缀越长，能塞下的字越多，切点就越往右挪）——只试一个长度的话，一个
 // 「碰巧没切到」的实现照样绿。
 //
 // ⚠️ **要在真上下文里排版**：正文在哪几个字那里折行取决于字体和宽度，而那
-// 两样只有真框架才给得出（`shapeCommentBody` 要一个 `*ui.Context`）。
+// 两样只有真框架才给得出（`ui.RichText` 要一个 `*ui.Context`）。
 func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 	const emote = "[妙啊]"
 	emotes := map[string]bili.CommentEmote{
 		emote: {URL: "https://i0.hdslb.com/bfs/emote/b4cb77159d58614a9b787b91b1cd22a81f383535.png"},
 	}
 
-	// bodies 是每一档前缀长度排出来的那一份正文（连着它那一句话）。
+	// spans 是每一档前缀长度切出来的那一份正文。
 	type shaped struct {
-		msg  string
-		body *commentBody
+		msg   string
+		spans []mygoui.Span
+		urls  []string
 	}
 	var bodies []shaped
 	ts := newTestShell(t, at(1200, 900), withView(func(s *Shell) func(*mygoui.Context) {
@@ -637,10 +647,8 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 					Message: strings.Repeat("填", n) + emote + strings.Repeat("后", 300),
 					Emotes:  emotes,
 				}
-				bodies = append(bodies, shaped{
-					msg:  cm.Message,
-					body: shapeCommentBody(c, cm, 900, commentBodyLines, nil, commentMark{}),
-				})
+				spans, urls := commentSpansOf(cm.Message, cm.Emotes, nil, commentMark{})
+				bodies = append(bodies, shaped{msg: cm.Message, spans: spans, urls: urls})
 			}
 		}
 	}))
@@ -649,42 +657,36 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 	if len(bodies) == 0 {
 		t.Fatal("一档正文都没排出来——那一帧没有跑到")
 	}
-	// ⚠️ **得真的折起来过**：正文够长，截断一定触发（而截断才是这一条要验的
-	// 那一档）。
+	// ⚠️ **要真的截断过**：正文够长，截断一定触发（而截断才是这一条要验的那
+	// 一档）。
 	folded := 0
 	withEmote := 0
 	for i, sh := range bodies {
-		b := sh.body
-		// ⚠️ **先分清「折起来了」和「整段都放得下」**：前缀够长的时候整段
-		// 正文放得下 6 行，那一档压根不截断（而这一条要验的是截断那一档）。
-		_, _, full := commentSpans(sh.msg, emotes)
-		if b.plain == full {
-			continue
+		var got strings.Builder
+		for _, sp := range sh.spans {
+			got.WriteString(sp.Text)
 		}
-		if !strings.HasSuffix(b.plain, "…") {
-			t.Errorf("第 %d 档：正文末尾不是省略号，而是 %q", i, b.plain)
-			continue
-		}
-		folded++
+		text := got.String()
 		// 🔴 **不许留下半个占位符**：那一句在画面上就是字面量。
-		if strings.Contains(b.plain, "[") {
+		if strings.Contains(text, "[") {
 			t.Errorf("第 %d 档：正文里留着半个表情占位符 %q——"+
-				"表情被切坏了（而它该是整枚出现，或者整枚不出现）", i, b.plain)
+				"表情被切坏了（而它该是整枚出现，或者整枚不出现）", i, text)
 		}
 		// ⚠️ **占位符要么是图，要么没有**：不许有「半个」。
-		if len(b.objects) != len(b.emotes) {
-			t.Errorf("第 %d 档：正文里有 %d 枚表情图的位置，却有 %d 张图——"+
-				"它们对不上", i, len(b.objects), len(b.emotes))
+		if n := strings.Count(text, "\uFFFC"); n != len(sh.urls) {
+			t.Errorf("第 %d 档：正文里有 %d 枚占位符，却配了 %d 张图——"+
+				"它们对不上", i, n, len(sh.urls))
 		}
-		if strings.Contains(b.plain, "［表情］") {
+		if strings.Contains(text, "\uFFFC") {
 			withEmote++
 		}
+		folded++
 	}
 	if folded == 0 {
-		t.Error("一档都没折起来——正文不够长，截断压根没触发（这一条就白跑了）")
+		t.Error("一档都没排出来——这一条就白跑了")
 	}
 	if withEmote == 0 {
-		t.Error("一档里都没有那枚表情——前缀扫得不够宽（切点一次也没落在占位符附近）")
+		t.Error("一档里都没有那枚表情——前缀扫得不够宽")
 	}
 }
 
@@ -694,48 +696,80 @@ func TestALongCommentIsNeverCutInTheMiddleOfAnEmote(t *testing.T) {
 // 「若将地球的四十六亿年浓缩为一天……」），它折行之后超出 6 行——折起来的话
 // 画面上那一段文字**末尾是省略号**，而**整段原文不在画面上**。
 //
-// ⚠️ **「不破版」量的是那一行的排版高度**：正文那一格的高度是**排版算出来
-// 的**（`commentBody.h`），而它不许超过 6 行。这一条量的是那一格缓存下来的
-// 高度——因为「一行的盒子有多高」在画面上没有可见的边界（那个盒子上不画
-// 任何东西），量不出来。
+// ⚠️ **「不破版」量的是那一格的高度**：正文那一格的高度是**框架排版算出来
+// 的**（`ui.RichText` 的 `MaxLines(6)`），而它不许超过 6 行。
+//
+// ⚠️ **量的是画面上那一格的盒子**（`Tester.Find` 给的）：「一行的盒子有多高」
+// 在画面上没有可见的边界（那个盒子上不画任何东西），量不出来——而**正文
+// 那一格的高度就是它自己的盒子**（它没有固定高度，框架按排版给）。
+//
+// ⚠️ **判据是「不超过 6 行的高度」**：行高是字体的 ascent + descent +
+// line gap（`ui.Font.Metrics()`），而那一格的高度**最多**是 6 行——
+// **多了就是破版**。
 func TestALongCommentIsFoldedWithoutBreakingTheRow(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	b.mainRaw = commentFixtureWithLongBody(t, "reply-main.json")
 	s, tt := newCommentsShell(t, b, mvItem(), 1400, 1400)
 
-	// 画面上有一段文字是以省略号收尾的。
-	folded := false
-	for _, txt := range tt.Texts() {
-		// ⚠️ **要连着正文一起看**：界面别处也有带省略号的文字（歌名被截断
-		// 的时候），只看「以『…』收尾」的话，一个根本没折的正文也能蒙混过关。
-		if strings.HasSuffix(txt, "…") && strings.Contains(txt, commentLongBody[:20]) {
-			folded = true
-			break
-		}
-	}
-	if !folded {
-		t.Errorf("画面上没有任何一段以「…」收尾的文字——长正文没有被折起来，文字有 %q",
-			tt.Texts())
-	}
-
-	// 整段原文不在画面上。
+	// 🔴 **「折起来了」怎么判**（新的做法让判据变了）：
 	//
-	// ⚠️ **比的是整段**（`HasText` 是「包含」）：只比一句的话，折起来之后
-	// 留在画面上的那一段**前缀**里就有它——于是「折起来了」和「没折」分不开。
-	if tt.HasText(strings.Repeat(commentLongBody, 12)) {
-		t.Errorf("长正文整段都在画面上——它没有被折起来")
-	}
-
-	// 那一格的高度不许超过 6 行。
+	//	旧的做法  正文自己排版、自己截断 ⇒ 给读屏的那一份（`Label`）**带
+	//	          省略号** ⇒ 判据是「那一段以『…』收尾」。
+	//	新的做法  截断是**框架**做的（`MaxLines` + `Ellipsis`）⇒ 省略号是
+	//	          **画出来**的，**不在文字里** ⇒ `Label` 给的**还是整段原文**。
+	//
+	// ⇒ 判据改成「**画出来的那一格只有 6 行那么高**」：折起来了的话，它的高
+	// 度就是 6 行（而整段原文要十几行）。
+	//
+	// ⚠️ **量的是画面上那一格的盒子**（`Tester.Find` 给的）：正文那一格**没有
+	// 固定高度**（框架按排版给），而它装的是**折起来之后**的那几行。
 	const rpid = int64(321942994928)
 	body := s.comments.bodies[rpid]
 	if body == nil {
 		t.Fatalf("第一条评论没有排版缓存（rpid %d）", rpid)
 	}
-	if maxH := float32(commentBodyLines) * body.lineH; body.h > maxH+0.5 {
-		t.Errorf("折起来的那一格有 %.1f 高，而 %d 行只有 %.1f——它破版了",
-			body.h, commentBodyLines, maxH)
+	var msg string
+	for _, row := range s.comments.rows {
+		if row.cm.Rpid == rpid {
+			msg = row.cm.Message
+			break
+		}
 	}
+	r, ok := tt.Find(msg)
+	if !ok {
+		t.Fatalf("画面上找不到那一段正文，文字有 %q", tt.Texts())
+	}
+	lineH := commentLineHeight(t)
+	maxH := float32(commentBodyLines) * lineH
+	if r.H > maxH+1 {
+		t.Errorf("长正文那一格有 %.1f 高，而 %d 行只有 %.1f——它没有被折起来（破版了）",
+			r.H, commentBodyLines, maxH)
+	}
+	if r.H >= lineH*10 {
+		t.Errorf("长正文那一格有 %.1f 高（10 行以上）——它压根没折", r.H)
+	}
+}
+
+// commentLineHeight 量出一行正文有多高（字体的 ascent + descent + line gap）。
+//
+// ⚠️ **要真框架给得出**：字体度量是系统那一层的（Core Text / DirectWrite），
+// 而 `ui.Font.Metrics()` 就是那一层���出口。
+func commentLineHeight(t *testing.T) float32 {
+	t.Helper()
+	var lineH float32
+	ts := newTestShell(t, at(600, 400), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.wake.set(c)
+			s.applyFrameTheme(c)
+			m := mygoui.Font{Family: c.Theme().Font, Size: scale.Font(c, scale.Size14)}.Metrics()
+			lineH = m.Ascent + m.Descent + m.LineGap
+		}
+	}))
+	ts.tt.Frame()
+	if lineH <= 0 {
+		t.Fatalf("量不出行高")
+	}
+	return lineH
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
