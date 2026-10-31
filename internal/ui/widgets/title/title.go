@@ -3,55 +3,53 @@
 // 来源是 B 站，标题里全是视频的痕迹：`【4K修复】`、`官方MV`、`[Hi-Res]`、
 // `【周杰伦】`……产品是纯音乐 App（设计规范 v0.1 §0），这些不该占着歌名。
 //
-// # 规则（保守：只动方括号里的、和圆括号里的宣传词，不碰歌名本身）
+// # ⚠️ **它是公共层的薄封装**
 //
-//  1. `【…】` / `[…]` 里的内容：
-//     - 含「宣传词」（官方 / MV / 4K / 超清 / 修复 / 完整版 / 无损 / 字幕 / 歌词版 /
-//     Hi-Res / 首发 / 重制 / 双语 / 中字 / 高清 / 原创 …）→ **丢掉**；
-//     - 含「现场」字样（现场 / Live / 演唱会 / 音乐会 / 巡演 …）→ 丢掉，但记下 `Live`；
-//     - 其余（多半是歌手名、专辑名）→ **挪到副标题**（`Extra`）。
-//  2. `(…)` / `（…）` 里**只有宣传词**的整段丢掉（`(官方MV)`、`（4K修复）`）；
-//     里面有别的字的不动（`(Live)` 是现场标记：记 `Live` 并丢掉括号）。
-//  3. 标题本身带「现场 / Live / 演唱会」字样也记 `Live`，但**歌名里的字不删**。
-//  4. 清洗后是空的就**原样返回**——宁可显示脏标题，也不显示空白。
+// 「从标题里认出歌名」那一份逻辑住在 `internal/ui/songmeta`——**显示**（这一
+// 包）和**匹配**（`internal/ui/songname`）**共用**它。两份口径迟早分叉，而
+// 分叉出来的那种差异极难查（一个界面上写着「晴天」、另一个界面上筛不出提到
+// 「晴天」的评论，而两边看着都「对」）。
+//
+// 这一包只做**显示层特有的那两件事**：
+//
+//	① **认不出就退回原标题**（`songmeta` 给的是 `OK == false`，而这里要的是
+//	   一个**永远非空**的显示串）
+//	② **缓存**（列表每帧每行都要问一次，正则不该每帧跑）
+//
+// # ⚠️ **宣传词表只有一份**
+//
+// `IsPromoOnly` / `ContainsPromo` 现在是 `songmeta` 那一处的薄封装——**表仍然
+// 只有一份**（理由见 `songmeta.IsPromoOnly` 的注释）。
+//
+// # 规则（那些判据都在 `songmeta` 里）
+//
+//	① 《》「」『』引号里  ⇒ **就是歌名**
+//	② 【】[] 里           ⇒ 可能是歌名（「【晴天】」），也可能是歌手
+//	                        （「【周杰伦】晴天」）——靠前后有没有别的段来定
+//	③ ` - ` / `-` 破折号   ⇒ 左边署名、右边歌名（通行约定）
+//	④ `:` `：` 冒号        ⇒ 剔掉「说明」那一族，剩下最后一段是歌名
+//	⑤ `|` 竖线            ⇒ 歌名在**前**那一段（「起风了 | 吴青峰 | 官方MV」）
+//	⑥ 括号**外面**的宣传词  ⇒ 也要清（「官方MV 1080P 高音质」挂在括号外面）
 //
 // 它只管**显示**：不改 `app.State.Title`，下载文件名、搜索、去重仍用原标题。
 package title
 
 import (
-	"regexp"
-	"strings"
 	"sync"
+
+	"github.com/ShellMonster/PudMusic/internal/ui/songmeta"
 )
 
 // Cleaned 是清洗结果。
 type Cleaned struct {
 	// Title 是要显示的歌名。
 	Title string
-	// Extra 是从方括号里挪出来的非宣传内容（歌手 / 专辑名之类），多段用 " · " 连；
+	// Extra 是从方括号里挪出来的非宣传内容（歌手 / 专辑名），多段用 " · " 连；
 	// 没有就是空串。适合拼进副标题。
 	Extra string
 	// Live 是「这是现场版」。
 	Live bool
 }
-
-var (
-	// 方括号：【…】 和 […]。
-	reSquare = regexp.MustCompile(`【([^】]*)】|\[([^\]]*)\]`)
-	// 圆括号：(…) 和 （…）。
-	reParen = regexp.MustCompile(`\(([^)]*)\)|（([^）]*)）`)
-	// 清洗后头尾要去掉的分隔符。
-	reTrim = regexp.MustCompile(`^[\s|丨/\-_—–·・:：]+|[\s|丨/\-_—–·・:：]+$`)
-	// 多个空白合成一个。
-	reSpaces = regexp.MustCompile(`\s{2,}`)
-
-	promoWords = []string{
-		"官方", "mv", "4k", "8k", "1080", "60fps", "超清", "高清", "蓝光", "修复", "完整版", "无损",
-		"字幕", "歌词版", "歌词", "hi-res", "hires", "首发", "重制", "双语", "中字", "原创", "高音质",
-		"音质", "动态歌词", "pv", "ost", "纯享", "官方首发", "全网首发", "最新", "收藏", "必听",
-	}
-	liveWords = []string{"现场", "live", "演唱会", "音乐会", "巡演", "巡回", "演出版", "舞台"}
-)
 
 // cache 记住清洗结果：列表每帧每行都要问一次，正则不该每帧跑。键是原标题，
 // 满了（一万条）就整个清掉重来——够用，也不会无限长。
@@ -81,77 +79,16 @@ func Clean(raw string) Cleaned {
 }
 
 // clean 是真正的清洗（不带缓存）。
+//
+// 🔴 **认不出歌名就退回原标题**（用户口径）：宁可显示脏标题，也不显示空白。
+// 而「退回原标题」时**方括号里那些内容照样给出去**（`Extra`）——它们是歌
+// 手的名字，对用户有用，**内容不许丢**。
 func clean(raw string) Cleaned {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return Cleaned{Title: raw}
+	id := songmeta.Identify(raw)
+	if !id.OK {
+		return Cleaned{Title: raw, Extra: id.Extra, Live: id.Live}
 	}
-	var out Cleaned
-	var extras []string
-
-	s = reSquare.ReplaceAllStringFunc(s, func(m string) string {
-		inner := strings.TrimSpace(reSquare.FindStringSubmatch(m)[1] + reSquare.FindStringSubmatch(m)[2])
-		switch {
-		case hasAny(inner, liveWords):
-			out.Live = true
-		case hasAny(inner, promoWords):
-		case inner != "":
-			extras = append(extras, inner)
-		}
-		return " "
-	})
-	s = reParen.ReplaceAllStringFunc(s, func(m string) string {
-		sub := reParen.FindStringSubmatch(m)
-		inner := strings.TrimSpace(sub[1] + sub[2])
-		switch {
-		case hasAny(inner, liveWords):
-			out.Live = true
-			return " "
-		case onlyPromo(inner):
-			return " "
-		}
-		return m
-	})
-	if hasAny(s, liveWords) {
-		out.Live = true
-	}
-
-	s = reSpaces.ReplaceAllString(s, " ")
-	s = strings.TrimSpace(reTrim.ReplaceAllString(strings.TrimSpace(s), ""))
-	if s == "" {
-		return Cleaned{Title: raw, Live: out.Live}
-	}
-	out.Title = s
-	out.Extra = strings.Join(extras, " · ")
-	return out
-}
-
-// hasAny 是「s（不分大小写）里含 words 里任何一个」。
-func hasAny(s string, words []string) bool {
-	l := strings.ToLower(s)
-	for _, w := range words {
-		if strings.Contains(l, w) {
-			return true
-		}
-	}
-	return false
-}
-
-// onlyPromo 是「这一段括号里全是宣传词」：把每个宣传词抠掉后只剩标点和空白。
-func onlyPromo(inner string) bool {
-	l := strings.ToLower(inner)
-	if strings.TrimSpace(l) == "" {
-		return false
-	}
-	for _, w := range promoWords {
-		l = strings.ReplaceAll(l, w, "")
-	}
-	for _, r := range l {
-		if !strings.ContainsRune(" ,，、/|丨+&·-_.。0123456789", r) {
-			return false
-		}
-	}
-	return true
+	return Cleaned{Title: id.Name, Extra: id.Extra, Live: id.Live}
 }
 
 // IsPromoOnly 报这一段是不是**全是宣传词**（「官方MV」「4K修复」「高音质」…
@@ -161,8 +98,10 @@ func onlyPromo(inner string) bool {
 // 它——自己再抄一份那张表就是两份口径，而分叉出来的那种差异极难查（一个说
 // 「官方MV」是宣传词，另一个说不算）。
 //
+// ⚠️ **实现在 `songmeta`**（表搬到了公共层，见 `songmeta.IsPromoOnly`）。
+//
 // 🔴 **空串不算**：那是「没有这一段」，不是「这一段全是宣传词」。
-func IsPromoOnly(s string) bool { return onlyPromo(s) }
+func IsPromoOnly(s string) bool { return songmeta.IsPromoOnly(s) }
 
 // ContainsPromo 报这一段里**有没有**宣传词（「官方MV」「4K修复」「高音质」…
 // ）。
@@ -172,13 +111,12 @@ func IsPromoOnly(s string) bool { return onlyPromo(s) }
 //	IsPromoOnly   这一段**全是**宣传词（"（官方MV）"那一整个括号丢掉）
 //	ContainsPromo 这一段**里有**宣传词（"官方发布"是说明，不是歌名）
 //
-// ⚠️ **宣传词那张表仍然只有这一处**（理由同 `IsPromoOnly`）：别处要判「这一段
-// 里有没有宣传词」就走它。
+// ⚠️ **宣传词那张表仍然只有这一处**（理由同 `IsPromoOnly`）。
 //
 // 🔴 **空串不算**：那是「没有这一段」。
-func ContainsPromo(s string) bool {
-	if strings.TrimSpace(s) == "" {
-		return false
-	}
-	return hasAny(s, promoWords)
-}
+func ContainsPromo(s string) bool { return songmeta.ContainsPromo(s) }
+
+// HasLive 报这一段里有没有「现场」那一族。
+//
+// ⚠️ **实现在 `songmeta`**（`Live` 那个标记只有一份口径）。
+func HasLive(s string) bool { return songmeta.HasLive(s) }

@@ -1,15 +1,15 @@
-// 标题里那些**成对括号**的处理（票 #574）。
+// 标题里那些**成对括号**的处理。
 //
 // # 为什么括号要**整组**判
 //
-// 别名表是从标题里认歌名的，而认的方式是「切字段，逐个字段判」（`plainSegments`）。
+// 认歌名的方式是「切字段，逐个字段判」（`fields.go`）。
 // ⚠️ **按空格切字段会把一个括号组切成两半**：
 //
 //	「周杰伦：晴天 (Live 2019)」  切成  「周杰伦：晴天」/「(Live」/「2019)」
 //
-// 那两个**半个括号**的字段既不是版本说明（`(Live` 认不出来——`isQualifier` 要
-// 整个词是 live）、也不是歌名 ⇒ **它们被收进了别名表** ⇒ 正文里提到真歌名
-// 「晴天」的那一条评论一条都命不中 ⇒ 界面显示「零命中」。
+// 那两个**半个括号**的字段既不是版本说明（`(Live` 认不出来——`IsVersion` 要
+// 整个词是 live）、也不是歌名 ⇒ **它们被当成了歌名** ⇒ 正文里提到真歌名
+// 「晴天」的那一条评论一条都命不中。
 //
 // ⇒ 所以括号**整组当一个单位**：组里含版本说明（live / remix / …）或含 4 位
 // 年份 ⇒ 整组是版本说明，剔掉。
@@ -17,15 +17,14 @@
 // # 两种括号不是一回事
 //
 //	圆括号 `(…)` `（…）`  装的是**版本说明**（"(Live 2019)"）⇒ 整组剔掉
-//	方括号 `【…】` `[…]`  装的多半是**歌手**（"【周杰伦】"）⇒ 只剔组里的
-//	                      版本说明字段，别的留着（"【晴天 Live 2019】" ⇒
-//	                      歌名是「晴天」）
+//	方括号 `【…】` `[…]`  装的多半是**歌手**（"【周杰伦】"），但**也可能是歌名**
+//	                        （"【晴天】"）⇒ 靠 `fields.go` 那一档定
 //
 // # 括号外的裸年份**不许剔**
 //
 // 歌名《1984》是真的 ⇒ 光秃秃的「2019」留在标题里要当歌名的一部分——只有
 // **括号里**的年份才是版本说明。
-package songname
+package songmeta
 
 import (
 	"strings"
@@ -194,6 +193,22 @@ func scanGroups(s string) []bracketGroup {
 	return out
 }
 
+// stripSpans 把标题里那些成对的括号**去掉**（**内容留着**）。
+//
+// ⚠️ **内容留着是故意的**：方括号里那一段（「【周杰伦】」）有可能是**歌名**
+// （「【晴天】」）——真正把它剔掉的是后面那一步（「那一段的最后一段就是歌
+// 名」与「版本说明那一族不算歌名」）。
+//
+// ⚠️ **圆括号也去**：「晴天（Live版）」去掉括号之后是「晴天 Live版」，而
+// 「Live版」是版本说明 ⇒ 剩下的就是歌名。
+func stripSpans(s string) string {
+	for _, pair := range spanPairs {
+		s = strings.ReplaceAll(s, pair.open, " ")
+		s = strings.ReplaceAll(s, pair.close, " ")
+	}
+	return strings.TrimSpace(s)
+}
+
 // isVersionField 报这一段是不是**版本说明**（⇒ 它不是歌名）。
 //
 // ⚠️ **年份只在这一档里算**：「括号外的裸年份」是歌名的一部分（《1984》），
@@ -203,7 +218,7 @@ func isVersionField(s string) bool {
 	return isVersionWord(s) || isYearField(s)
 }
 
-// isVersionWord 报这一段是不是**版本说明那一族**（说明 / 宣传词 / 副标题）。
+// isVersionWord 报这一段是不是**版本说明**（说明 / 宣传词 / 副标题）。
 func isVersionWord(s string) bool { return isNoteWord(s) }
 
 // isYearField 报这一段是不是「4 位年份」。
@@ -226,7 +241,7 @@ func isYearField(s string) bool {
 // trimNotePunctuation 去掉一段两头的括号与末尾的标点。
 //
 // ⚠️ **左头的括号也要去**（"(Live" ⇒ "Live"）：版本说明常常带着括号，而
-// `isQualifier` 要**整个词**才算（"live" 而不是 "(live"）。
+// `IsVersion` 要**整个词**才算（"live" 而不是 "(live"）。
 func trimNotePunctuation(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimLeft(s, "()（）[]【】《》「」『』")
