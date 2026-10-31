@@ -168,6 +168,14 @@ func TestSwitchingToATabThatIsStillLoadingShowsASkeleton(t *testing.T) {
 	waitFramesClock(t, tt, "「流行」那一档拉回来了", func() bool {
 		return shows(tt, "流行 榜上的歌")
 	})
+	// ⚠️ **要推完那一段横滑再看「旧的那一档还在不在」**（票 #706）：切 Tab 是
+	// **一次横滑**，而**滑的那一段里两档都在画面上**（一档滑出、一档滑进）——
+	// 所以「新的一档出现了」**不等于**「旧的一档没了」。
+	//
+	// ⇒ 断言「旧的那一档没了」要等**滑完**（那一段走完，旧的才整个滑出容器）。
+	waitFramesClock(t, tt, "横滑走完了", func() bool {
+		return !shows(tt, "音乐 推的第一首")
+	})
 	if shows(tt, "音乐 推的第一首") {
 		t.Errorf("「流行」那一档到货了，画面上还是旧那一档的歌，文字有 %q", tt.Texts())
 	}
@@ -334,6 +342,23 @@ func TestTheTransitionDoesNotCostAFrameEveryFrame(t *testing.T) {
 //
 // ⚠️ **一路推到过渡走完**：每一帧都查一遍「两档一起在 → 然后只剩一档」。
 // 判据是**状态**（哪一档的字在画面上），不是时间。
+//
+// # 「在画面上」有两种，判据要分开
+//
+//   - **旧的那一档**（滑出去的那一档）：**滑的那一段里它一直有可见宽度**
+//     （它从容器右边一路缩到左边）——所以判据是**可见宽度大于 0**；
+//   - **新的那一一档**（滑进来的那一一档）：**第一帧上它正好在容器的右边沿**
+//     （可见宽度是 **0**——它还没进来）——那是 ViewPager 的样子（Android 的
+//     ViewPager 就是这样：新宿页先在屏外等着）。所以**第一帧**判据是
+//     **它在树上**（内容建出来了、位置算对了），而**往后每一帧**判据是
+//     **可见宽度大于 0**。
+//
+// ⚠️ **「它在树上」用 `HasText` 量，不用 `shows`**：`shows` 要求盒子有正宽
+// （`tt.Find` 报的是**裁切之后**的盒子，见 `mygo/ui/runtime.go` 的
+// `commitElement`），而第一帧上新的那一档**恰好在容器的右边沿**——可见宽度
+// 正好是 0。仓库里别处也是这么分的（见 `homepage_pager_test.go` 的
+// `homeSkeletonShown`：那一档在滑进来的过程中是**被裁掉的**，所以那里量的是
+// **名字在不在**）。
 func TestBothPagesAreOnScreenWhileTheContentSlides(t *testing.T) {
 	_, tt := newHome(t, fullSongs())
 	old := songName(homeTabs[0], 1)
@@ -348,13 +373,22 @@ func TestBothPagesAreOnScreenWhileTheContentSlides(t *testing.T) {
 		t.Errorf("切 Tab 之后的第一帧上旧的那一块（%q）不在画面上了——\n"+
 			"这一票是**横滑**：旧的那一档要滑出去，它得**在画面上**才滑得出去", old)
 	}
-	if !shows(tt, fresh) {
-		t.Errorf("切 Tab 之后的第一帧上新的那一块（%q）不在画面上了——\n"+
-			"这一票是**横滑**：新的那一档从右边滑进来，它得**在画面上**才滑得进来",
+	// ⚠️ **新的那一档在第一帧上「在树上」而不是「有可见宽度」**：它正好在容器
+	// 的右边沿（可见宽度 0）——**它得被建出来**（否则用户点不动它），而位置由
+	// 别的那几条断（`homepage_pager_test.go` 的
+	// `TestSwitchingTabsKeepsBothPagesApart` 量的是两个盒子的几何位置）。
+	if !tt.HasText(fresh) {
+		t.Errorf("切 Tab 之后的第一帧上新的那一块（%q）不在树上了——\n"+
+			"这一票是**横滑**：新的那一档从右边滑进来，它得**在树上**才滑得进来",
 			fresh)
 	}
 
 	// 一路推到过渡走完：先两档一起在，然后只剩新的一档。
+	//
+	// ⚠️ **这一段断的是「两档**都**有可见宽度」**（比原来那条强）：滑的那一段
+	// 里旧的那一档正在缩窄、新的那一档正在变宽——**两档各占一段，中间不空**
+	// （那正是「横向滑动真的发生了」的判据；曾经那个 `Left(width)` 的几何算错
+	// 会让新的那一档**整个在容器外面**，于是这一段就红了）。
 	for i := range 40 {
 		tt.Advance(16 * time.Millisecond)
 		tt.Frame()
@@ -366,6 +400,12 @@ func TestBothPagesAreOnScreenWhileTheContentSlides(t *testing.T) {
 		if !newShown {
 			t.Fatalf("第 %d 帧上新的那一块（%q）不在画面上了——\n"+
 				"横滑那一段**两档都在**（一档滑出、一档滑入）", i, fresh)
+		}
+		if !oldShown {
+			t.Fatalf("第 %d 帧上旧的那一块（%q）已经不在画面上了——\n"+
+				"横滑那一段**两档都在**：旧的那一档是**滑出去**的，不是**一下子没了**\n"+
+				"（一下子没了就是票 #238 说的那种「先走旧的、再进新的」，而这一票要的是"+
+				"**同起同落**）", i, old)
 		}
 	}
 	t.Fatalf("推了 40 帧（640ms），过渡还没走完：旧的那一块 %q 和新的那一块 %q "+
@@ -425,6 +465,14 @@ func TestThePopTabAppearsWhileTheNewMusicIsStillLoading(t *testing.T) {
 			tt.Texts())
 	}
 	// ⚠️ **旧的那一档不许还在**：这一档已经出现了，屏幕上不该还有上一档的歌。
+	//
+	// ⚠️ **要推完那一段横滑再看**（票 #706）：切 Tab 是**一次横滑**，而**滑的
+	// 那一段里两档都在画面上**（一档滑出、一档滑进）——所以「新的一档出现了」
+	// **不等于**「旧的一档没了」。断言「旧的那一档没了」要等**滑完**（那一段
+	// 走完，旧的才整个滑出容器）。
+	waitFramesClock(t, tt, "横滑走完了", func() bool {
+		return !shows(tt, "音乐 推的第一首")
+	})
 	if shows(tt, "音乐 推的第一首") {
 		t.Errorf("「流行」那一档已经出现了，画面上还留着上一档的歌，文字有 %q", tt.Texts())
 	}
@@ -489,8 +537,9 @@ func TestTheFramesWhileSwitchingTabsCostNoMoreThanTwoPages(t *testing.T) {
 	// ⇒ 所以**推着钟一帧一帧地量**（`measureHomeFrameCost` 的 `advance` 那一支）：
 	// 每一帧是**不同的时刻**，量到的就是「滑动那一段每一帧」的成本。
 	//
-	// ⚠️ **实测（这一票）**：一档的稳态是 **134 次 / 4704 字节**，而**滑动那一段
-	// 的每一帧**是 **195 次 / 5854 字节**——**+61 次 / +1150 字节**。
+	// ⚠️ **实测（这一票，2026-10-31 重新量过）**：一档的稳态是 **134 次 /
+	// 4704 字节**，而**滑动那一段的每一帧**是 **166 次 / 5232 字节**——**+32 次 /
+	// +528 字节**（稳态的 **1.24 倍 / 1.11 倍**）。
 	//
 	// ⚠️ **那不是翻倍**：多出来的那部分是**第二档的壳**（表头 + 列表 + 它的
 	// 滚动容器 + 它的行），不是它的全部行。
@@ -519,23 +568,27 @@ func TestTheFramesWhileSwitchingTabsCostNoMoreThanTwoPages(t *testing.T) {
 		t.Fatal("滑动那一段一帧都没量到")
 	}
 
-	// ⚠️ **上限是 2.0 倍**：那一段**本来就要建两档**（一档滑出、一档滑进），而
-	// 实测是 +61 次 / +1150 字节（稳态的 1.46 倍 / 1.24 倍）——2.0 倍留着余量，
-	// 而**翻倍**（2.0 倍的次数）刚好在界上。
-	const allocsFactor = 2.0
-	const bytesFactor = 2.0
+	// ⚠️ **上限是 1.5 倍**：那一段**本来就要建两档**（一档滑出、一档滑进），而
+	// 实测是 +32 次 / +528 字节（稳态的 **1.24 倍 / 1.11 倍**）——1.5 倍留着
+	// 余量，而**翻倍**（2.0 倍）那个上限**抓不住任何回归**（实测离它还有一半远）。
+	//
+	// ⚠️ **上限从 2.0 收到 1.5**（2026-10-31）：2.0 倍是**照着旧的那个错数**
+	// （195 次 / 5854 字节，稳态的 1.46 倍）定的——而那个数是错的。重新量过之后
+	// 实测只有 **1.24 倍 / 1.11 倍**，2.0 倍那个上限**什么回归都抓不住**。
+	const allocsFactor = 1.5
+	const bytesFactor = 1.5
 	if worst.allocs > steady.allocs*allocsFactor {
 		t.Errorf("切 Tab 那一段最贵的一帧分配了 %.0f 次，一档的稳态是 %.0f 次"+
 			"（上限 %.1f 倍）——\n"+
-			"那一段**本来就要建两档**（一档滑出、一档滑入），而实测是 195 次 /\n"+
-			"5854 字节（一档的稳态是 134 次 / 4704 字节）",
+			"那一段**本来就要建两档**（一档滑出、一档滑入），而实测是 166 次 /\n"+
+			"5232 字节（一档的稳态是 134 次 / 4704 字节）",
 			worst.allocs, steady.allocs, allocsFactor)
 	}
 	if worst.bytes > steady.bytes*bytesFactor {
 		t.Errorf("切 Tab 那一段最贵的一帧分配了 %.0f 字节，一档的稳态是 %.0f 字节"+
 			"（上限 %.1f 倍）——\n"+
-			"那一段**本来就要建两档**（一档滑出、一档滑入），而实测是 195 次 /\n"+
-			"5854 字节（一档的稳态是 134 次 / 4704 字节）",
+			"那一段**本来就要建两档**（一档滑出、一档滑入），而实测是 166 次 /\n"+
+			"5232 字节（一档的稳态是 134 次 / 4704 字节）",
 			worst.bytes, steady.bytes, bytesFactor)
 	}
 }
@@ -586,17 +639,47 @@ func TestTheSlideStartsWithTheOldPageInPlace(t *testing.T) {
 //
 // ⚠️ **那一帧不闪**：横滑的第一帧旧的那一档在**原地**（满好的），而新的那一
 // 档在**容器右边**（还没进来，但**它在树上**）——所以内容那一块**始终有东西**。
+//
+// # 🔴 **这一条以前是一条**恒真断言**（票 #706 的一致性修复）
+//
+// 以前这里是 `var homePagerUsesFrameworkTransition = false`（一个**编译期常量
+// false**）加上 `if homePagerUsesFrameworkTransition { t.Error(...) }` ⇒ **这一条
+// 永远绿**，无论实现怎么改。
+//
+// ⇒ 而它号称是票 #238 的 F4（切 Tab 第一帧多分配 204 KB）的**白盒替代品**——
+// 真正的实现（`homePagerOffsets` 确实纯按曲线算）如果哪天被人改成「读上一帧的
+// 位置」，那条测试**照样绿**。
+//
+// ⇒ 所以现在断的是**实现本身**：位置**只由「过了多久」决定**，与「那一段什么时
+// 候开始的」和「上一帧画在哪儿」**都无关**。
 func TestThePagerDoesNotCopyTheOldContent(t *testing.T) {
-	// 内容块那一段**不用框架的过渡**：位置是自己算的。
+	now := time.Unix(2026, 0)
+	width := float32(960)
+
+	// ⚠️ **同一个「过了多久」，两个不同的起点 ⇒ 位置必须一样**。
 	//
-	// ⚠️ **这一条断的是「那一段没有走框架的 `Transition`**」**——而框架的
-	// `Exit` 那一半是**复制一份上一帧的样子**（`mygo/ui/transition.go` 的
-	// `ghostOf`），那份复制品要**重新排一遍旧列表的文字**（实测 204 KB）。
-	if homePagerUsesFrameworkTransition {
-		t.Error("内容块那一段还在用框架的 `Transition`——\n" +
-			"框架的 `Exit` 那一半会复制一份上一帧的样子，\n" +
-			"而那份复制品要重新排一遍旧列表的文字（实测 204 KB）。\n" +
-			"横滑那一段的位置是自己按曲线算的（`homePagerOffsets`）")
+	// ⚠️ **为什么这一条断得住**：位置要是「读上一帧的值」，那它的值会**依赖
+	// 于上一帧画在哪儿**——而「上一帧画在哪儿」只可能来自**上一次调用**（那个
+	// 就是「复制上一帧的样子」）。而 `homePagerOffsets` 是**纯函数**：它只拿
+	// 「时刻」和「这一段的起点」，算不出「上一帧在哪儿」——所以两个不同的起点
+	// 必然给出同一个结果。
+	//
+	// ⚠️ **而这一条**真的**会红**：如果有人把 `homePagerOffsets` 改成读某个
+	// 「上一帧位置」的字段，那两次调用的结果就不再只由「过了多久」决定了。
+	for _, ms := range []int{0, 25, 50, 100, 150, 199} {
+		elapsed := time.Duration(ms) * time.Millisecond
+		s1 := homePager{phase: homePagerSlide, to: 1, at: now}
+		s2 := homePager{phase: homePagerSlide, to: 1, at: now.Add(-37 * time.Second)}
+		old1, new1 := homePagerOffsets(s1, now.Add(elapsed), width)
+		old2, new2 := homePagerOffsets(s2, now.Add(elapsed), width)
+		if old1 != old2 || new1 != new2 {
+			t.Errorf("%dms 时两档的位置取决于「这一段什么时候开始的」"+
+				"（起点 A：旧 %.1f / 新 %.1f；起点 B：旧 %.1f / 新 %.1f）——"+
+				"位置必须**只由曲线算**（由「过了多久」决定），"+
+				"不是「上一帧是多少」（那正是框架 `Exit` 那一半干的事，"+
+				"它要复制一份上一帧的样子重新排版，实测 204 KB）",
+				ms, old1, new1, old2, new2)
+		}
 	}
 }
 

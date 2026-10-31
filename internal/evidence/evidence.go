@@ -650,7 +650,7 @@ var Items = []Item{
 		Spec: "独立评论页：页头分别说清「这首歌的评论」和「这个视频的评论」、本地文件不摆入口；排序只摆两档；翻页重叠不破版（行身份唯一）；长正文折起来不切坏表情占位符；拉页的三重保障复用 widgets/list/paged.go 里那一份判据",
 		Tests: []string{
 			"TestTheCommentsHeaderSaysWhoseCommentsTheseAre",
-			"TestTheCommentsPageIsNotInTheSidebarMenu",
+			"TestTheCommentsAreNotInTheSidebarMenu",
 			"TestTheUpperBadgeOnlyShowsForTheUpperAuthor",
 			"TestTheEmoteIsDrawnAsAnImage",
 			"TestALongCommentIsNeverCutInTheMiddleOfAnEmote",
@@ -1093,8 +1093,10 @@ var Items = []Item{
 	// ── 分页与路由 ─────────────────────────────────────────────────────────
 	{
 		Category: Paging,
-		Spec:     "15 条路由一条不少，参数路由认得出",
-		Tests:    []string{"TestFifteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
+		// ⚠️ **「14 条」是票 #706 之后的数**（评论从独立路由页改成了抽屉——
+		// 而一个「不是页」的东西不进 `routes` 那张表）。
+		Spec:  "14 条路由一条不少，参数路由认得出",
+		Tests: []string{"TestFourteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
 	},
 	{
 		Category: Paging,

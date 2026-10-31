@@ -220,6 +220,143 @@ func TestTheTabSwitchFinishesOnTheNewTab(t *testing.T) {
 	}
 }
 
+// TestCancellingTheSwitchSlidesTheContentBack 钉住**取消（反悔）时内容跟着指示器
+// 一起滑回去**（DESIGN.md §五《规则》第 12 条：「动画必须可打断、**可反悔**——
+// 中途改变主意时，界面随用户调度」）。
+//
+// # 这一条顶的是「内容瞬时归位、指示器慢慢滑回去」
+//
+// 此前（票 #706 的实现）用户点回原来那一档时，内容**瞬间**跳回原地（旧的那一
+// 档从 `{X=236 W=404.7}` 一下子变成 `{X=236 W=948}`），而指示器从 0.60 慢慢
+// 滑回 0.00——**两段不同起同落**，也违反《逐处》那张表里「指示器和内容同起同落」
+// 的承诺。
+//
+// ⇒ 取消那一支也走一段动画：内容**从当前进度滑回原地**，而指示器那一条由框架
+// 带着**从当前值接着走**（`mygo/ui/motion.go` 的 `channel.retarget`）——两边**逐
+// 帧同步**。
+//
+// # 判据
+//
+//  1. **不是瞬间归位**：点回之后那一帧上旧的那一档**没有**立刻回到满宽（它还得
+//     滑回去）；
+//  2. **是滑回去的**：往后每一帧，旧的那一档的**可见宽度递增**（它一路变宽）；
+//  3. **滑回去的过程中两档都还在画面上**（不是「旧的没了、新的瞬时顶上」）；
+//  4. **走完之后回到原来那一档**（画面上只有它）。
+func TestCancellingTheSwitchSlidesTheContentBack(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+	old := songName(homeTabs[0], 1)
+
+	if err := tt.Click(homeTabs[1]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v", homeTabs[1], err)
+	}
+	tt.Advance(25 * time.Millisecond)
+	tt.Frame()
+	mid, ok := tt.Find(old)
+	if !ok || mid.W <= 0 {
+		t.Fatalf("切到一半时旧的那一档（%q）不在画面上（盒子 %v）", old, mid)
+	}
+	midW := mid.W
+
+	// 反悔：点回原来那一档。
+	if err := tt.Click(homeTabs[0]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v", homeTabs[0], err)
+	}
+	tt.Frame()
+	after, ok := tt.Find(old)
+	if !ok {
+		t.Fatalf("反悔之后旧的那一档（%q）不在树上了", old)
+	}
+
+	//  1. **不是瞬间归位**：它没有立刻回到满宽（那才是「瞬时归位」）。
+	//
+	// ⚠️ **判据是「宽度还比满宽小」**：反悔那一帧上它还在半路上（宽度是滑回去
+	// 的起点），而**瞬时归位**的实现会让它**当场就是满宽**。
+	if after.W >= midW*1.5 {
+		t.Errorf("反悔之后旧的那一档立刻回到了满宽（%.1f，滑到一半时是 %.1f）——\n"+
+			"它是**瞬时归位**的，而这一条要的是**跟着指示器一起滑回去**\n"+
+			"（DESIGN.md §五《规则》第 12 条「可反悔」、以及《逐处》那张表里"+
+			"「指示器和内容同起同落」）", after.W, midW)
+	}
+
+	//  2. **是滑回去的**：往后每一帧，可见宽度**递增**（它一路变宽回原地）。
+	//
+	// ⚠️ **量的是可见宽度**：旧的那一档往右走回原地，而它的左沿被容器夹住——
+	// 所以**宽度**就是「它回来了多少」。
+	prev := after.W
+	for i := range 12 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		r, ok := tt.Find(old)
+		if !ok {
+			t.Fatalf("第 %d 帧上旧的那一档（%q）不在树上了——\n"+
+				"滑回去那一段**两档都在**", i, old)
+		}
+		if r.W <= 0 {
+			t.Fatalf("第 %d 帧上旧的那一档（%q）的可见宽度是 %.1f——\n"+
+				"它是**滑回原地**的，不该消失", i, old, r.W)
+		}
+		if r.W < prev-0.5 {
+			t.Errorf("第 %d 帧上旧的那一档的可见宽度是 %.1f，上一帧是 %.1f——\n"+
+				"它没有**往回走**（那一段是滑回去，不是原地不动）", i, r.W, prev)
+		}
+		prev = r.W
+	}
+
+	//  4. **走完之后回到原来那一档**（画面上只有它）。
+	tt.Advance(homePagerDuration + 100*time.Millisecond)
+	tt.Frame()
+	if !shows(tt, old) {
+		t.Errorf("滑回去之后画面上没有原来那一档的歌，文字有 %q", tt.Texts())
+	}
+}
+
+// TestCancellingTheSwitchKeepsTheIndicatorAndTheContentTogether 钉住**取消时指示器
+// 和内容同起同落**。
+//
+// # 判据是**同一时刻的进度相等**
+//
+// 指示器的位置从**画面上量**（那个白色滑块的中线），内容的进度从
+// `homePagerView.progress` 取。
+//
+// ⚠️ **这一条是「同起同落」的续集**（`TestTheIndicatorAndTheContentMoveTogether`
+// 量的是**正着走**的时候）：反悔那一段上，指示器是框架带着**从当前值接着走**
+// 的（`mygo/ui/motion.go` 的 `channel.retarget`），而内容那一段是**我们自己按
+// 曲线算**的——两边**必须**落在同一个数上，否则又是「指示器慢慢滑、内容啪地一下
+// 跳」。
+func TestCancellingTheSwitchKeepsTheIndicatorAndTheContentTogether(t *testing.T) {
+	_, tt := newHome(t, fullSongs())
+
+	from := textCenterX(t, tt, homeTabs[0])
+	to := textCenterX(t, tt, homeTabs[1])
+
+	if err := tt.Click(homeTabs[1]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v", homeTabs[1], err)
+	}
+	tt.Advance(25 * time.Millisecond)
+	tt.Frame()
+
+	// 反悔。
+	if err := tt.Click(homeTabs[0]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v", homeTabs[0], err)
+	}
+	for i := range 8 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		bar := tabBarAt(t, tt, homeTabs[:], false)
+		got := bar.pill.X + bar.pill.W/2
+		frac := 0.0
+		if to != from {
+			frac = float64(got-from) / float64(to-from)
+		}
+		if math.Abs(frac-float64(homePagerView.progress)) > 0.12 {
+			t.Errorf("第 %d 帧：指示器走到了 %.0f%%，内容走到了 %.0f%%——\n"+
+				"反悔那一段**两边也要同起同落**（指示器那一条是框架从当前值接着走的，"+
+				"内容那一条是自己按曲线算的，两边要落在同一个数上）",
+				i, frac*100, float64(homePagerView.progress)*100)
+		}
+	}
+}
+
 // TestThePagerOffsetsKeepTheTwoPagesSideBySide 钉住**两档紧挨着**（纯函数）。
 //
 // ⚠️ **纯函数**：不碰界面状态、不看钟——所以它在**任何机器上**都是同一个数。

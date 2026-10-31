@@ -20,23 +20,31 @@
 // 旧的淡出那一段里**只建一档**（那是票 #238 的省法），而滑动这一段
 // **两档都在树上**——旧的那一档滑出去、新的那一档滑进来。
 //
-// ⇒ **代价是分配**（见 `framebudget_test.go` 那一档）：多一档是 **+12 次 /
-// +187 字节**（实测）。这不是翻倍——多出来的那部分是**第二档的壳**（表头 +
+// ⇒ **代价是分配**（见 `framebudget_test.go` 那一档）：多一档是 **+32 次 /
+// +528 字节**（实测：一档的稳态是 134 次 / 4704 字节，滑动那一段每一帧是
+// 166 次 / 5232 字节）。这不是翻倍——多出来的那部分是**第二档的壳**（表头 +
 // 列表 + 它的滚动容器），不是它的全部行。
 //
 // # ⚠️ **动的是布局位置，不是 transform**
 //
-// 每一档的横向偏移是**布局位置**（`Left(x)`，框架的 `layoutAbsolute` 写的是
-// `c.x`），不是一层 transform。理由是 DESIGN.md §五《不做》那条：
+// 每一档的横向偏移是**布局位置**（`Left(x)`），不是一层 transform。理由是
+// DESIGN.md §五《不做》那条：
 //
 //	**动画不要用 transform 动大子树**——软件渲染回退时会整棵子树逐像素重绘
 //	（第三方实测差两个数量级）。要动就动**布局位置**。
 //
 // 内容那一块是**一整屏**（几十行歌），正是一棵「大子树」——所以它走布局位置。
 //
+// ⚠️ **`Left(x)` 是「相对布局位置的偏移」，不是绝对坐标**（票 #706 的 P0 修复
+// 踩的就是这个坑）：框架对**流里**的元素是「从布局摆好的地方**再**往右挪」
+// （`mygo/ui/layout.go` 的 `flexLayout`：`dx, dy := c.relative(cw, ch)`——它把
+// `dx` **加**在流内位置上）。所以在一条**行**里，第二个子元素的流内位置**已经
+// 是第一段的宽度**——再叠一个 `Left(width)`，它的最终 x 就是 **2 × width**。
+//
 // ⚠️ **代价是每帧重建**（布局位置被 view 读了 ⇒ 每一帧重新排版）。实测
-// （探针量过，量法照 `framebudget_test.go` 那一档）：**每帧分配 48 次**，和
-// 稳态**完全一样**——因为稳态本来每帧也要重建一档。
+// （探针量过，量法照 `framebudget_test.go` 那一档）：滑动那一段每一帧是
+// **166 次 / 5232 字节**，而一档的稳态是 **134 次 / 4704 字节**——**+32 次 /
+// +528 字节**（不是翻倍：多出来的是**第二档的壳**，不是它的全部行）。
 //
 // ⚠️ **「走 transform 更便宜」这条路在这个仓库里不成立**：仓库自己的判据是
 // （`widgets/hover/hover.go` 的注释、`internal/ui/switch.go`）：**那个动画值
@@ -166,41 +174,77 @@ const (
 
 // homePager 是切 Tab 那一段的状态。
 //
-// ⚠️ **它是这一段唯一的记忆**：画面上画的是哪一档（`homePage.shown`）、正
-// 在往哪一档滑（`to`）、这一段从什么时候开始（`at`）。
+// ⚠️ **它是这一段唯一的记忆**：画面上画的是哪一档（`homePage.shown`）、条带
+// **右段**那一档是哪一档（`to`）、这一段从什么时候开始（`at`）、这一段从
+// 哪个进度起算（`p0`）、以及这一段是往前走还是往回走（`back`）。
 type homePager struct {
 	// phase 是现在处在哪一段。
 	phase homePagerPhase
-	// to 是要滑过去的那一档。
+	// to 是**条带右段**（第二段）那一档——**正滑进来的那一档**。
+	//
+	// ⚠️ **条带左段那一档不是它**：左段那一档是 `homePage.shown`（滑之前就在
+	// 画面上的那一档），而它在整个这一段里**不变**（滑完了才换成新的那一档）。
+	//
+	// ⚠️ **「滑回去」（反悔）那一段里 `to` 也不变**：那时往回走的是**左段**
+	// 那一档（它滑回原地），而 `to` 那一档**往右退出去**。
 	to int
 	// at 是这一段开始的时刻（框架的钟，见 `syncPager`）。
 	at time.Time
+	// back 说这一段是**滑回去**（用户反悔了，见 `syncPager` 那一支）：
+	// 进度从 p0 往回走到 **0**（左段那一档回到原地）。
+	back bool
+	// p0 是**这一段**开始时的进度（0 = 左段那一档在原地，1 = 右段那一档在原
+	// 地）。
+	//
+	// ⚠️ **它是「这一段」的起点，不是「这一次切换」的起点**：改主意（换一档
+	// 去，或者反悔）会**另起一段**，而那一段**从当前进度接着走**（不跳）。
+	p0 float32
 }
 
 // homePagerOffsets 是切 Tab 那一段**此刻**两档各自的横向位置。
 //
-// 返回的顺序是「旧的那一档、新的那一档」。
+// 返回的顺序是「左段（滑走的那一档）、右段（滑进来的那一档）」。
 //
 // ⚠️ **它一律由曲线算出来**，不是「上一帧是多少」：阶段刚换的那一帧如果**忘
 // 了算**，位置就是**零值**（0），而 0 的意思是「两档都还在原地」——于是那一帧
 // 两档**叠在同一位置**（那正是票 #238 说的重影，只不过是瞬时的）。
 //
-// ⚠️ **两档是紧挨着的**：新的那一档的左边沿**正好**在旧的那一档的右边沿右边
+// ⚠️ **两档是紧挨着的**：右段那一档的左边沿**正好**在左段那一档的右边沿右边
 // 一个容器宽的地方——即 `newX == oldX + width`。既不重叠，也不留缝（ViewPager
 // 的样子）。
+//
+// ⚠️ **q 是「条带挪出去多远」**（0 = 左段那一档在原地，1 = 右段那一档在原地）：
+// 左段那一档在 `-width·q`、右段那一档在 `width·(1-q)`——两者的差恒等于容器宽。
 func homePagerOffsets(s homePager, now time.Time, width float32) (oldX, newX float32) {
 	if s.phase != homePagerSlide {
 		return 0, 0
 	}
-	t := homePagerProgress(now.Sub(s.at))
-	if t >= 1 {
-		// 走完了：旧的那一档整个在容器外面，新的那一档在原地。
-		return -width, 0
+	q := homePagerSegmentProgress(s, now.Sub(s.at))
+	return -width * q, width * (1 - q)
+}
+
+// homePagerSegmentProgress 是切 Tab 那一段**此刻**的进度 q（0 = 左段那一档在
+// 原地，1 = 右段那一档在原地）。
+//
+// ⚠️ **它是纯函数**：不碰界面状态，不看钟——调用方把时刻传进来。
+//
+// ⚠️ **它算的是「这一段」**（`s.p0` → 目标），不是「这一次切换」：改主意会**另
+// 起一段**，而那一段**从当前进度接着走**（不跳）。
+func homePagerSegmentProgress(s homePager, elapsed time.Duration) float32 {
+	// u 是这一段的归一化进度（0 = 刚开始，1 = 走完），走的是那条统一曲线。
+	u := homePagerProgress(elapsed)
+	if s.back {
+		// ⚠️ **往回走**（用户反悔了）：进度从 `p0` 退回到 **0**（左段那一档回到
+		// 原地）。
+		//
+		// ⚠️ **它和指示器同起同落**：指示器那一条在目标变了的时候**从当前值接着
+		// 走**（框架的曲线分支：见 `mygo/ui/motion.go` 的 `channel.retarget`），
+		// 而它的当前值和这里的 `p0` 是同一个数——于是两边的归一化进度**逐帧
+		// 相等**（见 `homepage_pager_test.go` 的那条）。
+		return s.p0 * (1 - u)
 	}
-	// 旧的那一档往左走（0 → -width），新的那一档从右边进来（width → 0）。
-	// 两档**紧挨着**：新的那一档的左边沿恒在旧的那一档的右边沿右边一个容器宽
-	// 的地方（`newX == oldX + width`）。
-	return -width * t, width * (1 - t)
+	// 往前走：从 `p0` 走到 **1**（右段那一档到原地）。
+	return s.p0 + (1-s.p0)*u
 }
 
 // homePagerProgress 是切 Tab 那一段此刻的进度（0 = 刚开始，1 = 走完）。
@@ -236,22 +280,25 @@ func homePagerProgress(elapsed time.Duration) float32 {
 //
 // ⚠️ **系统开着「减少动态效果」时整段跳过**（`c.Preferences().ReduceMotion`）：
 // 那时候新内容**直接到位**，不滑。
-func (h *homePage) syncPager(c *ui.Context, width float32) (oldX, newX float32, oldTab, newTab int) {
+func (h *homePage) syncPager(c *ui.Context, width float32) (g homePagerGeom) {
 	now := c.Now()
+	reduce := c.Preferences().ReduceMotion
+	// ⚠️ **「那一档没画」是 -1**（不是零值）——零值是「第 0 档」。
+	g.oldTab, g.newTab = -1, -1
 
 	switch h.swap.phase {
 	case homePagerIdle:
 		if h.want != h.shown {
-			if c.Preferences().ReduceMotion {
+			if reduce {
 				// 减少动态效果：直接换，不滑。
 				h.shown = h.want
-				return 0, 0, -1, -1
+				return g
 			}
 			if width <= 0 {
 				// ⚠️ **容器宽还没量到**（第一帧）：滑不了——两档要错开多远，
 				// 靠的就是这个宽。这一帧先不动，下一帧量到了再滑。
 				c.AnimationFrame()
-				return 0, 0, -1, -1
+				return g
 			}
 			// ⚠️ **不等数据到货**：点了就滑。
 			//
@@ -265,40 +312,91 @@ func (h *homePage) syncPager(c *ui.Context, width float32) (oldX, newX float32, 
 		}
 	case homePagerSlide:
 		if h.want == h.shown {
-			// 用户又点回**原来那一档**：取消这一段。旧的那一档还在屏幕上（它
-			// 只是滑到一半），不该「滑出去又滑回来」。
-			h.swap = homePager{}
-			break
-		}
-		if h.want != h.swap.to {
+			// 用户又点回**原来那一档**：**反悔了**。
+			//
+			// ⚠️ **不瞬时归位**：那一段**接着往回走**（DESIGN.md §五《规则》第 12
+			// 条：「动画必须可打断、**可反悔**——中途改变主意时，界面随用户调度」）。
+			//
+			// 而**指示器那一条本来就在往回走**（框架的曲线分支被打断时**从当前值接着
+			// 走**，见 `mygo/ui/motion.go` 的 `channel.retarget`）——所以内容这一段
+			// **必须跟着走**：否则两段**不同起同落**（指示器慢慢滑回去、内容啪地一下
+			// 跳回原地）。
+			//
+			// ⚠️ **从当前进度接着往回走**（不跳回起点）：新起一段，那一段的起点
+			// `p0` 就是此刻的进度。
+			if reduce {
+				// 减少动态效果：直接归位（指示器那一条框架自己也会直接给到目标）。
+				h.swap = homePager{}
+				break
+			}
+			q := homePagerSegmentProgress(h.swap, now.Sub(h.swap.at))
+			if q <= 0 {
+				// 已经在原地了（没什么可滑回去的）：收工。
+				h.swap = homePager{}
+				break
+			}
+			h.swap.back = true
+			h.swap.p0 = q
+			h.swap.at = now
+		} else if h.want != h.swap.to {
 			// 改主意了：还是滑，只是**滑到另一档**去（`to` 换了）。
 			//
 			// ⚠️ **旧的那一档从当前进度接着走**（位置一律由曲线算，而曲线的
 			// 起点没有变）——那是「动画可打断」（DESIGN.md §五《规则》第 3 条）。
-			h.swap.to = h.want
-		}
-		if now.Sub(h.swap.at) >= homePagerDuration {
-			// 走完了：换到新的那一档。
 			//
-			// ⚠️ **这一帧只画新的那一档**：旧的那一档在走完的那一刻整个在容器
-			// 外面（进度是 1，位置是 -width），而**两档的 key 相同的话框架会
-			// 报错**（两个同 key 的元素共用一份状态，见 `mygo/ui/context.go` 的
-			// `rekey`）——`shown` 和 `to` 在这一刻是同一档，所以只画一档。
-			h.shown = h.swap.to
-			h.swap = homePager{}
-		} else {
-			// 🔴 **这一段要一帧一帧地重画**：框架不知道我们在动（内容块的位移
-			// **不是**框架的 `AnimateTo`——那是我们自己按曲线算的），不主动要
-			// 下一帧的话画面就**停在这一帧**。
-			c.AnimationFrame()
+			// ⚠️ **刚才是「往回走」而现在又改主意去另一档**：方向要翻回来（`back`
+			// 去掉），而**起点还是此刻的进度**（不跳）。
+			if h.swap.back {
+				q := homePagerSegmentProgress(h.swap, now.Sub(h.swap.at))
+				h.swap.back = false
+				h.swap.p0 = q
+				h.swap.at = now
+			}
+			h.swap.to = h.want
 		}
 	}
 
 	if h.swap.phase == homePagerIdle {
-		return 0, 0, -1, -1
+		return g
 	}
+
+	elapsed := now.Sub(h.swap.at)
+	if elapsed >= homePagerDuration {
+		if h.swap.back {
+			// 滑回原地的这一段走完了：回到「只有画着的那一档」。
+			h.swap = homePager{}
+			return g
+		}
+		// 走完了：换到新的那一档。
+		//
+		// ⚠️ **这一帧只画新的那一档**：旧的那一档在走完的那一刻整个在容器
+		// 外面（进度是 1，位置是 -width），而**两档的 key 相同的话框架会
+		// 报错**（两个同 key 的元素共用一份状态，见 `mygo/ui/context.go` 的
+		// `rekey`）——`shown` 和 `to` 在这一刻是同一档，所以只画一档。
+		h.shown = h.swap.to
+		h.swap = homePager{}
+		return g
+	}
+	// 🔴 **这一段要一帧一帧地重画**：框架不知道我们在动（内容块的位移
+	// **不是**框架的 `AnimateTo`——那是我们自己按曲线算的），不主动要
+	// 下一帧的话画面就**停在这一帧**。
+	c.AnimationFrame()
+
+	q := homePagerSegmentProgress(h.swap, elapsed)
 	ox, nx := homePagerOffsets(h.swap, now, width)
-	return ox, nx, h.shown, h.swap.to
+	return homePagerGeom{
+		oldX: ox,
+		newX: nx,
+		// ⚠️ **左段那一档是 `shown`**（滑之前就在画面上的那一档），**右段那一档是
+		// `to`**（正滑进来的那一档）——而「滑回去」那一段里位置反过来：左段那一
+		// 档**滑回原地**，右段那一档**往右退出去**。
+		oldTab: h.shown,
+		newTab: h.swap.to,
+		width:  width,
+		// ⚠️ **progress 是「条带挪出去多远」**（0 = 左段那一档在原地，1 = 右段
+		// 那一档在原地）——指示器那一条的进度和它**同一个数**（同起同落）。
+		progress: q,
+	}
 }
 
 // viewPager 画「内容那一块」——**横向滑动**的那一版。
@@ -336,7 +434,10 @@ func (h *homePage) viewPager(c *ui.Context, s *Shell) {
 	// 算出来，见 `syncHome`），所以 0 只影响「还没量到」的那一帧。
 	width := h.pagerBox.W
 
-	oldX, newX, oldTab, newTab := h.syncPager(c, width)
+	g := h.syncPager(c, width)
+	// ⚠️ **只取 `oldX`**：条带**整体**挪 `oldX`，而两档在带子里**并排**——
+	// 所以右段那一档的位置是 `width + oldX`（= `newX`），而它**不用单独摆**。
+	oldX, oldTab, newTab := g.oldX, g.oldTab, g.newTab
 
 	// 容器：裁切（带子滑出容器时看不见）。
 	//
@@ -380,15 +481,15 @@ func (h *homePage) viewPager(c *ui.Context, s *Shell) {
 			// ⚠️ **画着的那一档不一定是选中那一档**（票 #368）：选中那一档还在
 			// 拉的时候，画面上留着上一档的内容。
 			strip.Children(func() {
-				h.viewPagerPage(c, s, h.shown, 0, width)
+				h.viewPagerPage(c, s, h.shown, width)
 			})
 			return
 		}
 		// 在滑：两档都在，整条带子往左挪。
 		//
-		// ⚠️ **带子的位置是 `oldX`**：旧的那一档在带子的第一段（从 0 开始），
-		// 新的那一档在第二段（从 width 开始）——所以带子往左挪 `oldX` 之后，
-		// 旧的那一档在 `oldX`、新的那一档在 `width + oldX`。
+		// ⚠️ **带子的位置是 `oldX`**：左段那一档在带子的第一段（从 0 开始），
+		// 右段那一档在第二段（**流内位置已经是 width**）——所以带子往左挪
+		// `oldX` 之后，左段那一档在 `oldX`、右段那一档在 `width + oldX`。
 		//
 		// ⚠️ **`newX == oldX + width`**（两档紧挨着），而 `oldX` 是负的——所以
 		// 带子往左挪，旧的往左走、新的从右边进来。
@@ -408,9 +509,24 @@ func (h *homePage) viewPager(c *ui.Context, s *Shell) {
 		if oldX != 0 {
 			strip = strip.Left(oldX)
 		}
+		// ⚠️ **右段那一档的流内偏移是 0**——**不是 `width`**。
+		//
+		// ⚠️ **这一条踩过坑**（票 #706 的 P0 修复）：框架的 `Left(x)` 是**相对
+		// 布局位置的偏移**，不是绝对坐标（`mygo/ui/layout.go` 的 `flexLayout`：
+		// `dx, dy := c.relative(cw, ch)`——它把 `dx` **加**在流内摆好的位置上）。
+		// 而带子是个**行**：左段那一档占满第一段（`width`），**右段那一档的流内
+		// 位置已经是 `width`**——再叠一个 `Left(width)`，它的最终 x 就是
+		// **2 × width**。
+		//
+		// ⇒ 那一档**整个在容器外面**，而容器裁着它 ⇒ **可见宽度恒为 0**——画面
+		// 上看到的是「旧的一档缩成一条 → 一整片空白 → 新的一档啪地出现」，而**横
+		// 向滑动根本没有发生**。
+		//
+		// ⇒ 所以这里**不再给右段那一档加 `Left`**：它在流内的第二段（x = width），
+		// 正是「紧挨着左段那一档」该在的位置。
 		strip.Children(func() {
-			h.viewPagerPage(c, s, oldTab, 0, width)
-			h.viewPagerPage(c, s, newTab, width, width)
+			h.viewPagerPage(c, s, oldTab, width)
+			h.viewPagerPage(c, s, newTab, width)
 		})
 	})
 	// ⚠️ **量的是容器的盒子**（上一帧的）：两档横向错开的距离就是它。
@@ -419,25 +535,26 @@ func (h *homePage) viewPager(c *ui.Context, s *Shell) {
 	// ⚠️ **记下这一帧的几何**（给测试看）：画面上量不到「两档各在哪儿」——
 	// `tt.Find` 报的是**裁切之后**的盒子（框架把标签的盒子和祖先的裁切区求
 	// 交，见 `mygo/ui/runtime.go`），所以滑出去的那一档报出来是**被裁过的**。
-	homePagerView = homePagerGeom{
-		oldX: oldX, newX: newX, oldTab: oldTab, newTab: newTab,
-		width:    width,
-		progress: homePagerProgress(c.Now().Sub(h.swap.at)),
-	}
+	homePagerView = g
 }
 
 // viewPagerPage 画内容块里的**一档**。
 //
-// x 是这一档在**带子里**的横向位置（DIP，0 = 带子的第一段）。
+// ⚠️ **它在带子里的位置是**流内位置**：左段那一档是第一段（x=0），右段那一档
+// 是第二段（x=width）——**流**摆出来的，不是 `Left()` 摆的。
+//
+// ⚠️ **别再给它加 `Left(width)`**（票 #706 的 P0 修复）：框架的 `Left(x)` 是
+// **相对布局位置的偏移**（`mygo/ui/layout.go` 的 `flexLayout`：
+// `dx, dy := c.relative(cw, ch)`——它把 `dx` **加**在流内摆好的位置上），不是
+// 绝对坐标。而这一档的流内位置**已经是 `width`**——再叠一个 `Left(width)`，它
+// 的最终 x 就是 2 × width ⇒ **整个在容器外面** ⇒ 可见宽度恒为 0 ⇒ 横向滑动
+// 根本没发生。
 //
 // width 是**一档的宽**（= 容器宽）：每一档都占这么宽，所以两档紧挨着的时候
 // 它们的边界正好在带子的 width 处。
 //
-// ⚠️ **位置是布局位置**（`Left(x)`）：框架的 `Left` 对流里的元素是「从布局
-// 摆的地方往右挪」（`mygo/ui/layout.go` 的 `flexLayout` 那一段：
-// `dx, dy := c.relative(cw, ch)`），不是一层 transform——DESIGN.md §五《不做》
-// 那条。
-func (h *homePage) viewPagerPage(c *ui.Context, s *Shell, tab int, x, width float32) {
+// ⚠️ **位置是布局位置**（不是 transform）——DESIGN.md §五《不做》那条。
+func (h *homePage) viewPagerPage(c *ui.Context, s *Shell, tab int, width float32) {
 	// ⚠️ **「流行」那一档的状态要在画之前递过去**：它那三态是它**画的时候**
 	// 读的，而它在布局那一遍才画（列表的行是布局时建的）——递晚了那一帧画出
 	// 来的是旧状态。
@@ -450,7 +567,7 @@ func (h *homePage) viewPagerPage(c *ui.Context, s *Shell, tab int, x, width floa
 	// 就没有**视口**——里面那一档的列表滚不动。
 	//
 	// ⚠️ **宽度是**一档的宽**（`Width(width)`）**：两档紧挨着的时候它们的边界
-	// 正好在带子的 width 处，而 `Left(x)` 把第二段挪到那儿去。
+	// 正好在带子的 width 处。
 	// ⚠️ **那一列不许缩**（`Shrink(0)`）：框架的行**默认会缩**（`shrink = 1`，
 	// 见 `mygo/ui/context.go`），而两档并排在一条两档宽的带子里——**缩了它们
 	// 就不是一档那么宽了**，于是每一帧都要按新宽度重排一遍旧列表的文字。
@@ -467,9 +584,6 @@ func (h *homePage) viewPagerPage(c *ui.Context, s *Shell, tab int, x, width floa
 	// 用去量。
 	col := ui.Column(c).Key(homeBodyKeys[tab]).Width(width).MinWidth(0).FillHeight().
 		Shrink(0).Gap(space.Px12)
-	if x != 0 {
-		col = col.Left(x)
-	}
 	col.Children(func() {
 		h.viewTabBody(c, s, tab)
 	})
