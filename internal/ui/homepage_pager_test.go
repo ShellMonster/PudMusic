@@ -369,7 +369,7 @@ func TestThePagerOffsetsKeepTheTwoPagesSideBySide(t *testing.T) {
 	width := float32(960)
 	for _, ms := range []int{0, 25, 50, 100, 150, 199} {
 		s := homePager{phase: homePagerSlide, to: 1, at: now}
-		oldX, newX := homePagerOffsets(s, now.Add(time.Duration(ms)*time.Millisecond), width)
+		oldX, newX := homePagerOffsets(s, time.Duration(ms)*time.Millisecond, width)
 		if d := newX - (oldX + width); math.Abs(float64(d)) > 0.5 {
 			t.Errorf("%dms 时两档不紧挨着（旧的那一档 x=%.1f，新的那一档 x=%.1f，"+
 				"want 新的在 %.1f）——它们要**并排**（各占一段，不重叠也不留缝）",
@@ -378,7 +378,7 @@ func TestThePagerOffsetsKeepTheTwoPagesSideBySide(t *testing.T) {
 	}
 	// 走完之后：旧的那一档整个在容器外面，新的那一档在原地。
 	s := homePager{phase: homePagerSlide, to: 1, at: now}
-	oldX, newX := homePagerOffsets(s, now.Add(homePagerDuration+time.Millisecond), width)
+	oldX, newX := homePagerOffsets(s, homePagerDuration+time.Millisecond, width)
 	if math.Abs(float64(oldX+width)) > 0.5 {
 		t.Errorf("走完之后旧的那一档在 x=%.1f（want %.1f，整个在容器外面）", oldX, -width)
 	}

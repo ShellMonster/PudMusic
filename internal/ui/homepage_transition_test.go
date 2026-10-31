@@ -615,7 +615,7 @@ func TestTheSlideStartsWithTheOldPageInPlace(t *testing.T) {
 	now := time.Unix(2026, 0)
 	width := float32(960)
 	s := homePager{phase: homePagerSlide, to: 1, at: now}
-	oldX, newX := homePagerOffsets(s, now, width)
+	oldX, newX := homePagerOffsets(s, 0, width)
 	if oldX != 0 {
 		t.Errorf("滑的那一段的第一帧，旧的那一档在 x=%v（want 0，在原地）——\n"+
 			"它要从**原地**滑出去，不是从别处冒出来", oldX)
@@ -661,17 +661,25 @@ func TestThePagerDoesNotCopyTheOldContent(t *testing.T) {
 	// ⚠️ **为什么这一条断得住**：位置要是「读上一帧的值」，那它的值会**依赖
 	// 于上一帧画在哪儿**——而「上一帧画在哪儿」只可能来自**上一次调用**（那个
 	// 就是「复制上一帧的样子」）。而 `homePagerOffsets` 是**纯函数**：它只拿
-	// 「时刻」和「这一段的起点」，算不出「上一帧在哪儿」——所以两个不同的起点
-	// 必然给出同一个结果。
+	// 「**过了多久**」和「这一段的描述」，**算不出「上一帧在哪儿」**——所以两个
+	// 起点（哪怕差了 37 秒）必然给出同一个结果。
+	//
+	// ⚠️ **「它只拿『过了多久』」是结构性的**：`homePagerOffsets` 的签名就是
+	// `(s homePager, elapsed time.Duration, width float32)`——它**拿不到绝对时
+	// 刻**，所以「这一段从什么时候开始」这件事**根本进不了它的计算**。
 	//
 	// ⚠️ **而这一条**真的**会红**：如果有人把 `homePagerOffsets` 改成读某个
 	// 「上一帧位置」的字段，那两次调用的结果就不再只由「过了多久」决定了。
+	//
+	// ⚠️ **两次调用问的时刻要一起挪**（起点挪 37 秒 ⇒ 问的时刻也挪 37 秒）：
+	// 「过了多久」必须一样——而那正是这一条要断的那个量。
+	shift := -37 * time.Second
 	for _, ms := range []int{0, 25, 50, 100, 150, 199} {
 		elapsed := time.Duration(ms) * time.Millisecond
 		s1 := homePager{phase: homePagerSlide, to: 1, at: now}
-		s2 := homePager{phase: homePagerSlide, to: 1, at: now.Add(-37 * time.Second)}
-		old1, new1 := homePagerOffsets(s1, now.Add(elapsed), width)
-		old2, new2 := homePagerOffsets(s2, now.Add(elapsed), width)
+		s2 := homePager{phase: homePagerSlide, to: 1, at: now.Add(shift)}
+		old1, new1 := homePagerOffsets(s1, elapsed, width)
+		old2, new2 := homePagerOffsets(s2, elapsed, width)
 		if old1 != old2 || new1 != new2 {
 			t.Errorf("%dms 时两档的位置取决于「这一段什么时候开始的」"+
 				"（起点 A：旧 %.1f / 新 %.1f；起点 B：旧 %.1f / 新 %.1f）——"+

@@ -205,6 +205,11 @@ type homePager struct {
 //
 // 返回的顺序是「左段（滑走的那一档）、右段（滑进来的那一档）」。
 //
+// ⚠️ **它拿的是「过了多久」，不是「此刻几点」**：位置因此**只由「这一段过了多久」
+// 决定**，而**与「这一段什么时候开始的」无关**——那是「位置只由曲线算、不由上一
+// 帧是多少算」的**结构性**保证（框架的 `Exit` 那一半要复制一份上一帧的样子，见
+// `mygo/ui/transition.go` 的 `ghostOf`，实测 204 KB）。
+//
 // ⚠️ **它一律由曲线算出来**，不是「上一帧是多少」：阶段刚换的那一帧如果**忘
 // 了算**，位置就是**零值**（0），而 0 的意思是「两档都还在原地」——于是那一帧
 // 两档**叠在同一位置**（那正是票 #238 说的重影，只不过是瞬时的）。
@@ -215,11 +220,11 @@ type homePager struct {
 //
 // ⚠️ **q 是「条带挪出去多远」**（0 = 左段那一档在原地，1 = 右段那一档在原地）：
 // 左段那一档在 `-width·q`、右段那一档在 `width·(1-q)`——两者的差恒等于容器宽。
-func homePagerOffsets(s homePager, now time.Time, width float32) (oldX, newX float32) {
+func homePagerOffsets(s homePager, elapsed time.Duration, width float32) (oldX, newX float32) {
 	if s.phase != homePagerSlide {
 		return 0, 0
 	}
-	q := homePagerSegmentProgress(s, now.Sub(s.at))
+	q := homePagerSegmentProgress(s, elapsed)
 	return -width * q, width * (1 - q)
 }
 
@@ -383,7 +388,7 @@ func (h *homePage) syncPager(c *ui.Context, width float32) (g homePagerGeom) {
 	c.AnimationFrame()
 
 	q := homePagerSegmentProgress(h.swap, elapsed)
-	ox, nx := homePagerOffsets(h.swap, now, width)
+	ox, nx := homePagerOffsets(h.swap, elapsed, width)
 	return homePagerGeom{
 		oldX: ox,
 		newX: nx,
@@ -601,13 +606,3 @@ func (h *homePage) tabPending(tab int) bool {
 	pg := h.lists[tab].Paged()
 	return pg.Loading && pg.Loaded == 0
 }
-
-// homePagerUsesFrameworkTransition 报内容块那一段**有没有走框架的 `Transition`**。
-//
-// ⚠️ **它是 false**：横滑那一段的位置是**我们自己按曲线算**的（`homePagerOffsets`），
-// 两档的内容是**两棵真的树**（各挂各的 key）——所以框架的 `Transition`（连同它的
-// `Exit` 那一半「复制一份上一帧的样子」）**根本不在这一条路上**。
-//
-// ⚠️ **这一条不是装饰**：它把「那一段没有偷偷用框架的 `Exit`」这件事**写成代码**
-// ——而那正是票 #238 的 F4（切 Tab 之后的第一帧多分配 204 KB）的根因。
-var homePagerUsesFrameworkTransition = false
