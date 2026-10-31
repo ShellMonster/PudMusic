@@ -328,3 +328,55 @@ func TestCopyingACommentBodyBeatsTheSelectedRow(t *testing.T) {
 		t.Errorf("拖选正文之后复制出来的是 %q，want %q", got, body)
 	}
 }
+
+// TestPressingTheReplyButtonClearsTheSelection 钉住**按过「共 N 条回复」之后，
+// 正文里的选区没了**。
+//
+// 🔴 **这一条钉的是框架自己的行为**（不是 #702 引入的）：框架的
+// `pressTextSelection`（`mygo/ui/input.go` 的 `pointerDown` 先问它）在**按下**的
+// 那一刻就把选区**接管**了——而那一枚按钮的按**也会**让框架走那一趟
+// （`textSelectionAt` 的「就近」兜底会按**距离**找最近的段落）⇒ 选区被清掉。
+//
+// ⚠️ **为什么现在要把它钉住**：票 #702 的审查用例（
+// `TestTheSelectableCommentBodyDoesNotStealTheReplyButton`）**间接依赖**它——
+// 那一条要断言「按过那一枚之后，正文**还得能选**」，而这中间隔着「按之前选区
+// 还在」这一步。⇒ 它得是**明确的**（这条用例）而不是**碰巧**的。
+//
+// ⚠️ **而它不是缺陷**：按了按钮之后选区没了，是**正常的**（用户点了别处）——
+// 框架的规矩。而**正文仍然可选**（再拖一次就有），那才是 #702 要保证的事。
+func TestPressingTheReplyButtonClearsTheSelection(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	s, tt := newCommentsShell(t, b, audioItem(), 1200, 800)
+
+	first := s.app.Comments()[0]
+	body := commentPlainOf(first)
+	waitFrames(t, tt, "正文画出来", func() bool {
+		_, ok := tt.Find(body)
+		return ok
+	})
+
+	// 🔴 **先选中一段**：不选中就没有「选区」可言。
+	dragOverFirstLine(t, tt, body)
+	if got := copySelection(tt); got == "" {
+		t.Fatalf("在正文上拖选之后剪贴板里什么也没有——「正文可选中」压根没生效")
+	}
+
+	// 🔴 **按那一枚**：框架会把选区接管掉 ⇒ 选区没了。
+	if err := tt.Click("共52条回复"); err != nil {
+		t.Fatalf("点不动「共 52 条回复」：%v（文字：%q）", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := copySelection(tt); got != "" {
+		t.Errorf("按过「共 52 条回复」之后剪贴板里**还有** %q",
+			got)
+		t.Errorf("而框架的 `pressTextSelection` 是**接管**选区的" +
+			"（按下的那一下就把选区拿走了）⇒ 这里应该是空的")
+	}
+
+	// 🔴 **而正文仍然可选**（再拖一次就有）——那才是 #702 要保证的事。
+	dragOverFirstLine(t, tt, body)
+	if got := copySelection(tt); got == "" {
+		t.Errorf("按过「共 52 条回复」之后，在正文上**又**拖选了一次，" +
+			"剪贴板里却什么也没有——「正文可选中」被那一枚**废掉**了")
+	}
+}

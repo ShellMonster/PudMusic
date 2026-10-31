@@ -105,6 +105,25 @@
 // 一格的末尾（切点落在它**前面**或落在**守卫那一段**的末尾，而守卫那一段是
 // **普通**的）⇒ 省略号**永远**继承普通文字的样式，**永远**是「…」。
 //
+// 🔴 **别让下一个人以为 macOS 上有肉眼可见的症状**（审查员在这上面踩了坑：
+// 最初的复现用宽度 116，而那一档**压根没截断**——「末尾没有省略号」是**正常
+// 现象**，不是 bug）：
+//
+//	**macOS（Core Text）**  省略号**照常画出来**（实测：像素**逐字节相同**，
+//	                     加不加守卫的差别是 **0**）。而那一格的**推进宽**
+//	                     仍然是 18（比省略号自己的 11.12 宽 **6.88**）——
+//	                     而那 6.88 是**点的右边的空白**⇒ **画面上��不出来**
+//	                     （末尾后面本来就没有字）。
+//	**Windows（DirectWrite）** `setObjects` 按 **code unit** 给那一段里**每个
+//	                     rune**挂 inline object ⇒ 省略号那一格**真的**是
+//	                     inline object ⇒ **一个字都不画** ⇒ 用户看到的是
+//	                     **一片空白**（不是「…」）。
+//
+// ⇒ **所以这个修复是为 Windows 那一档准备的**（而我们没有 Windows 机器）——
+// 而它**在 macOS 上也有价值**：它让「省略号继承普通 span 的样式」从「macOS
+// 恰好画得对」变成**结构性的保证**（框架升级、字体变化、平台差异都不再影响
+// 它），而且它**消掉了那 6.88 像素的空白**（排版上更准）。
+//
 // ⚠️ **守卫是零宽的**（U+200B ZERO WIDTH SPACE）：它**不占地方**（实测：加它
 // 前后每一行的墨迹签名逐宽度相同，见 `comments_body_test.go` 的
 // `TestTheEllipsisGuardDoesNotChangeTheLayout`）——所以它**不改变排版**。
@@ -345,6 +364,17 @@ func commentSpansOf(msg string, emotes map[string]bili.CommentEmote, hl []songna
 		})
 		// 🔴 **守卫**：表情后面接一段零宽的普通 span（理由见文件头《省略号被
 		// 「表情那一格」吞掉》）。
+		//
+		// 🔴 **它**直接 append 进 spans**，**不经过 `text()`**——这是**故意的**：
+		// `text()` 会**累加 `base`**（**原文**的 rune 坐标），而守卫**不在原文里**
+		// ⇒ 走了 `text()` 的话，后面的**高亮区间**（`songname.Range`，也是原文
+		// 坐标）就会**整体偏一格**（症状是「高亮落在错的字上」，很难查）。
+		//
+		// ⇒ **两套坐标各走各的**：框架那一侧的 span 坐标（守卫在那里多占一格）
+		// 与高亮用的原文坐标（守卫**不占**）互不干扰。
+		// （钉住这一条的是 `comments_body_test.go` 的
+		// `TestTheHighlightStillLandsOnTheRightWordsAfterAnEmote`——它把守卫改成
+		// 走 `text()` 就会红。）
 		spans = append(spans, ui.Span{Text: commentObjectGuard})
 		urls = append(urls, commentImageURL(e.URL))
 		// ⚠️ **给读屏的那一份**：表情占位符写成「［表情］」——**不含守卫**

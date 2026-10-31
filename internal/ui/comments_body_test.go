@@ -36,6 +36,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/songname"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -555,5 +556,83 @@ func TestTheEllipsisIsVisibleAfterAnEmote(t *testing.T) {
 			t.Errorf("宽度 %d：末尾**没有**省略号的三个点（只数到 %d 列贴基线的墨迹）"+
 				"——画面上那一句被折起来了，却**看不见**「…」", w, dots)
 		}
+	}
+}
+
+// TestTheHighlightStillLandsOnTheRightWordsAfterAnEmote 钉住**表情后面跟着文字
+// 时，命中区间仍然落在正确的字上**。
+//
+// 🔴 **这一条钉的是「守卫不会把高亮坐标带偏」**（票 #702 的审查提的）：守卫是
+// **多出来的一个 rune**（在 span 序列里），而高亮用的是**原文**的 rune 坐标
+// （`songname.Range`）——所以「守卫会不会把后面的坐标顶偏一格」是个真问题。
+//
+// ⇒ **答案是不偏**，而原因值得写下来（否则将来有人把守卫改成走 `text()`，
+// 高亮就会**静默错位一格**——症状是「高亮落在错的字上」，很难查）：
+//
+//	`appendMarkedText` 只在**原文文本段**上切，它看的两个数是 `base`（**原文**
+//	rune 坐标）和 `hl`（**原文** rune 坐标）——**框架的 span 坐标它根本不碰**。
+//	而守卫是**直接 `append` 进 `spans`** 的（`comments_body.go` 的
+//	`commentSpansOf`），**不经过 `text()`** ⇒ **`base` 不累加它**
+//	（这是对的——守卫不在原文里）。
+//
+// ⇒ **原文坐标链完整**：守卫在 span 序列里多占一格，但那是**框架那一侧**的
+// 坐标，与高亮用的原文坐标是两套，互不干扰。
+//
+// ⚠️ **判据是「染了底色的那几段是哪些字」**——不是「有没有染色」：错位一格
+// 的话，染色的**是别的字**（而数量可能一样）。
+func TestTheHighlightStillLandsOnTheRightWordsAfterAnEmote(t *testing.T) {
+	emotes := commentEmotesOf("[妙啊]")
+	mark := commentMark{Bg: mygoui.Hex("#1ed760").Alpha(0.18), Ink: mygoui.Hex("#107032"), Radius: 2}
+	for _, tc := range []struct {
+		name    string
+		msg     string
+		hl      []songname.Range
+		painted []string
+	}{
+		{
+			// 原文：晴(0)天(1)[(2)妙(3)啊(4)](5)真(6)好(7)听(8)
+			// 命中「真好听」= 原文 rune 6..9 ⇒ 它在表情**之后**。
+			name:    "表情之后的那一段",
+			msg:     "晴天[妙啊]真好听",
+			hl:      []songname.Range{{Start: 6, End: 9}},
+			painted: []string{"真好听"},
+		},
+		{
+			// 命中**整段**（把表情包进去）⇒ 表情那格让出去，两侧都染。
+			name:    "整段命中（表情让出去）",
+			msg:     "晴天[妙啊]真好听",
+			hl:      []songname.Range{{Start: 0, End: 9}},
+			painted: []string{"晴天", "真好听"},
+		},
+		{
+			// 表情在**开头**：命中「晴天」= 原文 rune 3..5。
+			name:    "表情在开头的那一段",
+			msg:     "[妙啊]晴天很好",
+			hl:      []songname.Range{{Start: 3, End: 5}},
+			painted: []string{"晴"},
+		},
+		{
+			// 🔴 **两枚表情**（守卫有**两个**）⇒ 坐标要还是对的。
+			// 原文：前(0)面(1)[(2)妙(3)啊(4)](5)中(6)间(7)[(8)妙(9)啊(10)](11)后(12)面(13)
+			// 命中「后面」= 原文 rune 12..14。
+			name:    "两枚表情之后的那一段",
+			msg:     "前面[妙啊]中间[妙啊]后面",
+			hl:      []songname.Range{{Start: 12, End: 14}},
+			painted: []string{"后面"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spans, _, _ := commentSpansOf(tc.msg, emotes, tc.hl, mark)
+			var painted []string
+			for _, sp := range spans {
+				if sp.Background.A != 0 {
+					painted = append(painted, sp.Text)
+				}
+			}
+			if fmt.Sprint(painted) != fmt.Sprint(tc.painted) {
+				t.Errorf("染了底色的那几段是 %q，want %q——"+
+					"**命中区间偏了**（守卫不该把原文坐标带偏）", painted, tc.painted)
+			}
+		})
 	}
 }
