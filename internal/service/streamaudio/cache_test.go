@@ -423,3 +423,130 @@ func TestProtectAndEvictDoNotRace(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+// TestTheHitDoesNotWriteTheRecordBack 盯「命中缓存不写回整份记录」。
+//
+// 🔴 **这一条钉的是「读路径不是写路径」**（2026-10-30 的第二轮对抗性审查
+// 挖出来的 P1）。
+//
+// 「写回整份记录」有两个坏处：
+//
+//  1. **读路径变成写路径**：一次 fsync + rename + 目录 fsync。而「命中缓存」
+//     是**每次切歌回来**都会走的那条路——用户来回切歌就在反复刷盘。
+//  2. **丢更新**：`Complete` 读到的是**旧**记录，而那期间网络那一趟可能
+//     已经把新的写进去了（新的 Meta / 徽章 / 大小）。写回旧的那一份 ⇒
+//     新内容被盖掉，而大小被盖成旧的下一次还会「缓存不命中，整首重下一遍」。
+//
+// ⇒ 「最后用过」记在**字节文件的修改时刻**上（`os.Chtimes` 只改元数据），
+// 记录本身**一个字节都不动**。
+func TestTheHitDoesNotWriteTheRecordBack(t *testing.T) {
+	c := NewCache(t.TempDir())
+	track, tier := "online|mv|BV1|1|", "q30280"
+	writeBytesFile(t, c, track, tier, 100)
+	if err := c.SaveBytes(track, tier, 100, "192K", Meta{Title: "歌名"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 记下那份记录的修改时刻。
+	metaPath := c.bytesMetaPath(track, tier)
+	before, err := os.Stat(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 睡一小会儿，让「改写」和「没改写」的修改时刻能分辨开。
+	time.Sleep(20 * time.Millisecond)
+
+	if _, ok := c.Complete(track, tier); !ok {
+		t.Fatal("刚存的那一份查不到")
+	}
+
+	after, err := os.Stat(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("命中缓存的时候把那份记录写回去了（修改时刻 %v → %v）——"+
+			"读路径变成了写路径，而且会把并发写进去的新内容盖成旧的",
+			before.ModTime(), after.ModTime())
+	}
+}
+
+// TestTheHitDoesNotOverwriteANewerRecord 盯「命中缓存不会盖掉并发写进去的新记录」。
+//
+// 🔴 **这是上一条的后半段**（2026-10-30 的第二轮对抗性审查挖出来的 P1）：
+// `Complete` 先读到一份**旧**记录，等它写回去的时候网络那一趟已经写了新的。
+//
+// ⇒ 症状是「刚下完的那一份，标题和音质徽章又变回旧的」。
+func TestTheHitDoesNotOverwriteANewerRecord(t *testing.T) {
+	c := NewCache(t.TempDir())
+	track, tier := "online|mv|BV1|1|", "q30280"
+	writeBytesFile(t, c, track, tier, 100)
+	if err := c.SaveBytes(track, tier, 100, "192K", Meta{Title: "旧"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 网络那一趟写进了新的（用户等的那一趟回来了）。
+	if err := c.SaveBytes(track, tier, 100, "Hi-Res", Meta{Title: "新"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 一次命中（这一趟读到的是「旧」那一份——真实情况下读盘和写入是并着的）。
+	if _, ok := c.Complete(track, tier); !ok {
+		t.Fatal("刚存的那一份查不到")
+	}
+
+	rec, ok := c.readBytes(track, tier)
+	if !ok {
+		t.Fatal("记录不见了")
+	}
+	if rec.Meta.Title != "新" {
+		t.Errorf("标题变成了 %q，want 新——"+
+			"命中缓存的那一趟把并发写进去的新内容盖成了旧的", rec.Meta.Title)
+	}
+	if rec.Label != "Hi-Res" {
+		t.Errorf("徽章变成了 %q，want Hi-Res——"+
+			"命中缓存的那一趟把并发写进去的新内容盖成了旧的", rec.Label)
+	}
+}
+
+// TestTheEvictionOrderFollowsTheFileTimes 盯「淘汰的顺序就是「最久没用的先删」」。
+//
+// 🔴 **这一条钉的是「排序没有排错」**（2026-10-30 的第三轮自查挖出来的 P1）。
+//
+// 淘汰按**字节文件的修改时刻**排。而那一版是「排 `entries`，比较器读
+// `used[i]`」——`used` 不跟着 `entries` 一起动，于是排出来的是乱的
+// （实测三份排成了 B A C，而正确答案是 B C A）。
+//
+// ⇒ 而排错了的后果是**淘汰删错文件**：用户看到的是「刚听过的歌被删了，
+// 切回去整首重下」。
+//
+// ⚠️ **三份才验得出来**：两份的话，乱的顺序和对的顺序撞不出来。
+func TestTheEvictionOrderFollowsTheFileTimes(t *testing.T) {
+	base := time.Now()
+	clock := base
+	// 🔴 **上限刚好逼出一次淘汰**：三份 400 字节 = 1200，上限 1000 ⇒
+	// **恰好删一份**（删最老的那一份）。
+	c := NewCache(t.TempDir()).WithCapacity(1000).WithClock(func() time.Time { return clock })
+	track := "online|mv|BV1|1|"
+	// 依次写：修改时刻一份比一份新（最老的是 q30216，最新的是 q30280）。
+	for i, tier := range []string{"q30216", "q30232", "q30280"} {
+		clock = base.Add(time.Duration(i) * time.Hour)
+		writeBytesFile(t, c, track, tier, 400)
+		if err := c.SaveBytes(track, tier, 400, "x", Meta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c.Evict()
+
+	// 🔴 **最老的那一份必须没了**。
+	if _, err := os.Stat(c.BytesPath(track, "q30216")); !os.IsNotExist(err) {
+		t.Error("最老的那一份没被淘汰——淘汰顺序排错了")
+	}
+	// 🔴 **最新的那两份必须还在**。
+	for _, tier := range []string{"q30232", "q30280"} {
+		if _, err := os.Stat(c.BytesPath(track, tier)); err != nil {
+			t.Errorf("较新的 %s 被误删了：%v——淘汰顺序排错了", tier, err)
+		}
+	}
+}

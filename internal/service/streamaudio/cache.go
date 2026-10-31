@@ -570,17 +570,34 @@ func (c *Cache) Evict() {
 	// （用户看到的是「刚听过的歌被删了，切回去整首重下」）。
 	//
 	// ⇒ 所以那一栏已经**删掉**了（见 `Bytes`）。
-	used := make([]time.Time, len(entries))
+	// 🔴 **时刻和条目必须一起排**（2026-10-30 的第三轮自查挖出来的 P1）。
+	//
+	// ⚠️ **不能写成「排 `entries`，比较器读 `used[i]`」**：那样比较器按**位置**
+	// 读 `used`，而 `used` 不跟着 `entries` 一起动——于是排出来的是乱的
+	// （实测：三份排成了 B A C，而正确答案是 B C A）。
+	//
+	// ⇒ 而排错了的后果是**淘汰删错文件**：用户看到的是「刚听过的歌被删了，
+	// 切回去整首重下」。
+	type aged struct {
+		entry Bytes
+		used  time.Time
+	}
+	agedList := make([]aged, len(entries))
 	for i, e := range entries {
-		used[i] = time.Time{}
+		used := time.Time{}
 		if st, err := os.Stat(c.BytesPath(e.Track, e.Tier)); err == nil {
-			used[i] = st.ModTime()
+			used = st.ModTime()
 		}
+		agedList[i] = aged{entry: e, used: used}
 	}
 	// 老的在前。
-	sort.Slice(entries, func(i, j int) bool {
-		return used[i].Before(used[j])
+	sort.Slice(agedList, func(i, j int) bool {
+		return agedList[i].used.Before(agedList[j].used)
 	})
+	entries = entries[:0]
+	for _, a := range agedList {
+		entries = append(entries, a.entry)
+	}
 	for _, e := range entries {
 		if total <= c.capacity {
 			return

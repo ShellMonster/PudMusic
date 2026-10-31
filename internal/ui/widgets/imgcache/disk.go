@@ -285,12 +285,21 @@ func (d *diskCache) policyStart() time.Time {
 	path := filepath.Join(d.dir, diskPolicyMark)
 	if b, err := os.ReadFile(path); err == nil {
 		if t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(b))); err == nil {
-			d.start = t
-			return t
+			// ⚠️ **也截到秒**：理由同上（盘上的修改时刻精度不一定是纳秒）。
+			d.start = t.Truncate(time.Second)
+			return d.start
 		}
 	}
 	// 第一次用这一版：把「从现在起」记下来。
-	d.start = d.now()
+	//
+	// 🔴 **截到秒**（2026-10-30 的第三轮自查）：盘上那个修改时刻的精度**不
+	// 一定到纳秒**（HFS+ 是秒，APFS 是纳秒，而网络盘和 Linux 上各有各的）。
+	// 而比较是「修改时刻**早于** policyStart 就算老文件」——所以 policyStart
+	// 带纳秒的话，同一秒里续命的那些封面会被判成「早于」，于是**永远不过期**
+	// （而它们本该从那一刻起照常按 TTL 过期）。
+	//
+	// ⇒ 两边都截到秒：policyStart 记秒，盘上的比较也按秒。
+	d.start = d.now().Truncate(time.Second)
 	_ = os.WriteFile(path, []byte(d.start.Format(time.RFC3339Nano)), 0o644)
 	return d.start
 }

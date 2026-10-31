@@ -644,3 +644,53 @@ func TestTheOldCoverFilesSurviveTheUpgrade(t *testing.T) {
 			"用户升级一次就会几百张封面全部消失、全部重下")
 	}
 }
+
+// TestTheOldFilesGetTheirOwnClock 盯「老封面续命之后照常过期」。
+//
+// 🔴 **这一条钉的是「时间精度」**（2026-10-30 的第三轮自查挖出来的 P1）。
+//
+// 「续命」是把老封面的修改时刻推到当下，而「老文件」的判据是「修改时刻
+// **早于** policyStart」。于是**精度**就成了这件事的成败点：
+//
+//	policyStart 记的是带纳秒的时刻，而盘上的修改时刻**不一定存得住纳秒**
+//	（HFS+ 是秒）。⇒ 同一秒里续命的那些封面，盘上记的是「那一秒的开头」，
+//	而 policyStart 记的是「那一秒的中间」——**早于**成立 ⇒ 那些封面
+//	**永远不过期**。
+//
+// ⇒ 所以 policyStart **截到秒**：两边精度对齐，比较才有意义。
+func TestTheOldFilesGetTheirOwnClock(t *testing.T) {
+	day0 := time.Now()
+	dir := t.TempDir()
+	d := newDiskCache(dir, 1<<20, 7*24*time.Hour)
+	t.Cleanup(d.close)
+	<-d.ready
+
+	name := diskNameFor("https://example.invalid/old.jpg")
+	if err := os.WriteFile(diskPath(dir, name), diskTestBody, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := day0.Add(-30 * 24 * time.Hour)
+	if err := os.Chtimes(diskPath(dir, name), old, old); err != nil {
+		t.Fatal(err)
+	}
+	d.now = func() time.Time { return day0 }
+
+	// 第一轮清扫：老封面被续命（修改时刻推到当下）。
+	d.sweep()
+	info, err := os.Stat(diskPath(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// ⚠️ **续命之后它不再算「老文件」**：修改时刻不早于 policyStart。
+	start := d.policyStart()
+	if info.ModTime().Before(start) {
+		t.Errorf("续命之后修改时刻（%v）仍然早于 policyStart（%v）——"+
+			"这一份会被当成「老文件」，永远不过期", info.ModTime(), start)
+	}
+
+	// 🔴 **往后推一个 TTL 之后它该过期**：宽限期不是免死金牌。
+	d.now = func() time.Time { return start.Add(8 * 24 * time.Hour) }
+	if !d.expired(name) {
+		t.Error("续命 8 天后仍然不过期——用户不看了它就该被清掉")
+	}
+}
