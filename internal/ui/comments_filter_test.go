@@ -464,3 +464,64 @@ func TestTheMentionFilterCanBeTurnedOffFromTheEmptyState(t *testing.T) {
 		t.Errorf("关掉之后页头还摆着筛选后的条数，文字有 %q", tt.Texts())
 	}
 }
+
+// TestTheMentionFilterIsGreyedOutWhenTheSongNameIsUnknown 断「**认不出歌名**的
+// 时候那一枚开关按灰」。
+//
+// 🔴 **这一族是票 #706 第二轮回归修复的界面那一半**：别名表改成「原标题也进表」
+// 之后，「表里有东西」判不出「认没认出歌名」——所以 `Table.Empty` 的语义换成了
+// 「**除原标题外还有没有认出来的歌名**」。
+//
+// ⇒ 而**界面那一支要照旧**：认不出歌名 ⇒ 那一枚开关**按灰**（用户看得见它按不
+// 动），而**不是**亮着却筛不出东西。
+//
+// ⚠️ **判据是「点下去有没有反应」**：按灰的那一枚按下去**筛选不开**（框架不给
+// 禁用元素派点击）——而**亮着**的那一枚按下去会切到筛选态（页头换成筛选后的条
+// 数）。
+//
+// ⇒ 而「亮着」那一档**实测一下**当对照：不然这个判据只是「点了没反应」，而一个
+// **根本没点中**的用例也会是绿的。
+func TestTheMentionFilterIsGreyedOutWhenTheSongNameIsUnknown(t *testing.T) {
+	// ⚠️ **对照档**：认得出歌名 ⇒ 开关是亮的 ⇒ 按下去筛选**开**。
+	b := newCommentBili(t, "reply-main.json")
+	b.mainRaw = commentFixtureWithNoMore(t, "reply-main.json")
+	sOn, ttOn := newCommentsShell(t, b, mentionItem(), 1400, 1400)
+	sw, ok := ttOn.Find("开关：只看提到歌名的评论")
+	if !ok {
+		t.Fatalf("画面上找不到那枚开关，文字有 %q", ttOn.Texts())
+	}
+	ttOn.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
+	commentsWait(t, ttOn, "筛选开了", func() bool {
+		return sOn.comments.mentionOnly
+	})
+	if !sOn.comments.mentionOnly {
+		t.Fatalf("认得出歌名的那一档上，按钮按下去筛选居然没开——" +
+			"那这一族就断不到点上（对照档坏了）")
+	}
+
+	// ⚠️ **认不出歌名的那一档**：标题是「【官方MV】」——**纯宣传词** ⇒ 认不出
+	// 歌名（而原标题**进表**——那是匹配层要的，别名表不是空的）。
+	b2 := newCommentBili(t, "reply-main.json")
+	b2.mainRaw = commentFixtureWithNoMore(t, "reply-main.json")
+	it := mentionItem()
+	it.Title = "【官方MV】"
+	sOff, ttOff := newCommentsShell(t, b2, it, 1400, 1400)
+	sw2, ok := ttOff.Find("开关：只看提到歌名的评论")
+	if !ok {
+		t.Fatalf("画面上找不到那枚开关，文字有 %q", ttOff.Texts())
+	}
+	ttOff.ClickAt(sw2.X+sw2.W/2, sw2.Y+sw2.H/2)
+	// ⚠️ **等几帧**：点下去之后框架要跑一遍（而「按灰」那一枚不该有反应）。
+	commentsWait(t, ttOff, "画面稳住了", func() bool {
+		return len(ttOff.Texts()) > 0
+	})
+	if sOff.comments.mentionOnly {
+		t.Errorf("认不出歌名的那一首上，筛选居然开起来了——" +
+			"开关本该是按灰的（`Table.Empty` 判的是「除原标题外还有没有认出来的" +
+			"歌名」），而 `Empty` 是 false 就说明那一档判错了")
+	}
+	// ⚠️ **而「筛不了」这件事要看得见**：那一枚是按灰的（用户点不动）。
+	if ttOff.HasText("条提到这首歌") {
+		t.Errorf("认不出歌名的那一首上页头摆着筛选后的条数，文字有 %q", ttOff.Texts())
+	}
+}

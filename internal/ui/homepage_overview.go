@@ -9,7 +9,17 @@
 //
 // 数据都是首页原来就拉的那几摊（新歌速递、热榜、原创榜），没有新接口：总览只是
 // 换了一种摆法。「为你推荐」「鬼畜」「流行」「最近播放」仍是 `homeTabs` 里的那几
-// 档列表，总览通过 `openTab` 切过去；列表页左上角有一枚「返回发现」回到这里。
+// 档列表，总览通过 `openTab` 切过去。
+//
+// ⚠️ **回总览是顶栏那一枚返回键**（票 #706，2026-10-31）：榜单名称左边原来还有
+// 一枚「返回发现」，那一票把它拿掉了——回总览这件事只剩顶栏一个入口，而顶栏
+// 那一枚在首页上**原来退不掉**（首页只有 `/` 一条路由，榜单那一档是页内切换，
+// 压根没 push 过路由）。现在它在首页上做的是「回总览」，在别的页面上仍然是退
+// 路由历史。理由见 `navbar.go` 的 `viewHomeBack`。
+//
+// ⚠️ **顶栏那一枚是「退不回去时才回总览」**（票 #706 的 bug）：路由历史退得回去
+// 的时候（用户在别的页面 → 回首页），那一枚**退路由历史**——而它退不回去的时
+// 候才回总览。理由见 `navbar.go` 的 `viewNavBack`。
 //
 // ⚠️ **迷你榜的歌是缓存的**（`miniTop`）：`PagedList.Items()` 每次是一份拷贝，
 // 每帧取一次就是每帧一次分配（这一屏有逐帧分配预算，见 framebudget_test.go），
@@ -110,15 +120,45 @@ var homeTiles = [4]struct {
 
 // openTab 从总览进第 tab 档的列表页。
 //
-// ⚠️ tab / shown / want 三个一起落到 tab：不然 `syncSwap` 会把它当成一次切 Tab，
-// 先淡出一段「上一档」的列表再换。
+// ⚠️ tab / shown / want 三个一起落到 tab：不然 `syncPager` 会把它当成一次切 Tab，
+// 先滑出一段「上一档」的列表再换。
 func (h *homePage) openTab(tab int) {
-	h.tab, h.shown, h.want, h.wantReady = tab, tab, tab, true
+	h.tab, h.shown, h.want = tab, tab, tab
+	h.swap = homePager{}
 	h.overview = false
 }
 
 // backToOverview 回到总览。
-func (h *homePage) backToOverview() { h.overview = true }
+//
+// # ⚠️ **它必须把 `swap` 一并复位**（票 #706 的第二个 bug）
+//
+// 回总览是**页内切换**：路由一个字都不动，而画面上从「榜单那一档」换成「发
+// 现总览」。
+//
+// 而 `swap` 是**切 Tab 那一段的状态**（`homePager`）——它**不属于**总览那一
+// 档。于是回总览的时候它得**跟着复位**，否则：
+//
+//	横滑到一半 ⇒ 按后退回总览 ⇒ swap 还停在 slide
+//
+// 🔴 **而 `syncPager` 那一支不会自己把它清掉**：slide 分支只在
+// `h.want == h.shown` 时才取消（那是「用户点回原来那一档」那一路）——回总览
+// 时 `want` ≠ `shown`，所以**不取消**。
+//
+// ⇒ 后果是**那一段永远挂着**：
+//
+//   - `syncPager` 每次进 slide 分支都走 `c.AnimationFrame()` ⇒ **界面一直要帧**
+//     （空转耗电）；
+//   - 那一段还**每帧画两档**（oldTab / newTab 都 ≥0），比稳态多一倍分配；
+//   - 好在 `view()` 里 `h.overview` 为真时走 `viewOverview` 分支（早退），所以
+//     **画面上没坏**；但 `swap.phase` 卡住后**没有任何东西会再推进它** ⇒ 一次误
+//     触之后那一档的 `shown` **永远停在旧档**，直到用户再点一次 Tab。
+//
+// ⚠️ **和 `openTab` 对称**：`openTab` 已经这么做了（`h.swap = homePager{}`）——
+// 两个入口都改「画的是哪一档」，所以两个都要复位那一段。
+func (h *homePage) backToOverview() {
+	h.overview = true
+	h.swap = homePager{}
+}
 
 // refreshMini 在两张榜上的歌数变了时重取前 homeMiniRows 名。每帧在 sync 层调。
 func (h *homePage) refreshMini() {
@@ -184,6 +224,178 @@ func (h *homePage) heroSongs() []list.Music {
 	return out
 }
 
+// overviewState 是总览上那一块此刻处在哪一档。
+//
+// 🔴 **三档是三件不同的事，不许合成两档**（和 `viewTabBody` 那四种状态同一个
+// 口径，见 `homepage.go` 那段「没拉到和没有内容是两件事」）：
+//
+//	overviewLoading  还在拉     → 摆骨架（形状已知）
+//	overviewFailed   拉失败了   → 说清为什么 + 给一个重试
+//	overviewEmpty    拉到了但是空的 → 说一句「还没有」，**不给重试**
+//
+// ⚠️ **「拉失败」和「还在拉」混起来就是这一票的那个空白**（2026-10-31）：
+// 三块各自有一句早退，而那句早退只认「还在不在拉」——于是失败那一刻（
+// `loading` 变 false、`err` 有了）它判成「不在拉」，早退 ⇒ 整块消失，
+// 用户看到的是首页内容区一片空白（连标题都没有）。
+type overviewState int
+
+const (
+	// overviewLoading 是「还在拉」。
+	overviewLoading overviewState = iota
+	// overviewFailed 是「拉失败了」。
+	overviewFailed
+	// overviewEmpty 是「拉到了，但是空的」。
+	overviewEmpty
+)
+
+// heroState 是横幅那一块此刻的状态。
+//
+// ⚠️ **它和「有没有歌」是两件事**：横幅只要**有封面的**那几首（`heroSongs`），
+// 而新歌速递那一摊可能有歌、只是那些歌没有封面地址——那一档仍然是「横幅没有
+// 内容」，而**不是**「这一摊拉失败了」。
+//
+// ⚠️ **「还没拉过」是「还在拉」那一档**（`!started`）：请求都还没发出去，
+// 说「还没有内容」是在说一个还没问过的结论。
+func (h *homePage) heroState() overviewState {
+	st := &h.feed.newTab
+	if st.err != nil {
+		return overviewFailed
+	}
+	if st.loading || !st.started {
+		return overviewLoading
+	}
+	return overviewEmpty
+}
+
+// boardState 是榜那一档此刻的状态（`homeHotTab` / `homeOriginalTab`）。
+//
+// ⚠️ **它问的是那一档自己的翻页列表**（`list.PagedList.Paged()`）：翻页、防重入、
+// 失败都在那一层里，而「失败」在那儿是 `Err` 有值、`Loading` 是 false。
+//
+// ⚠️ **「一页都还没拿到」（`Page == 0`）是「还在拉」**：那一档的第一趟还在
+// 路上（或者还没发出去）。把它读成「拉到了但是空的」，用户看到的是一句
+// 「还没有内容」——而那是**一个还没问过的结论**。
+//
+// ⚠️ **「拉到空的」那一档和「失败」是两件事**：榜是「一期一次给完」的一整张
+// （见 `app/recommend.go` 的 `toplist`），B 站给了一张空榜就是「这一期没有歌」，
+// 不是拉不到——说成「拉不到」会让用户去按一个按多少次都是空的重试。
+func (h *homePage) boardState(tab int) overviewState {
+	pg := h.lists[tab].Paged()
+	if pg.Err != nil {
+		return overviewFailed
+	}
+	if pg.Loading || pg.Page == 0 {
+		return overviewLoading
+	}
+	return overviewEmpty
+}
+
+// newMusicState 是新歌速递那一摊此刻的状态。
+//
+// ⚠️ **它和「有没有歌」是两件事**：这一摊拉回来了空的 ≠ 失败。
+//
+// ⚠️ **「还没拉过」（`!started`）是「还在拉」那一档**：同 `heroState` 那一条
+// ——请求都还没发出去，说「还没有内容」是在说一个还没问过的结论。
+//
+// ⚠️ **「拉回来了、但一首都没有」是「拉到了但是空的」那一档**：那是 B 站
+// 给的结论，不是失败。
+func (h *homePage) newMusicState() overviewState {
+	st := &h.feed.newTab
+	if st.err != nil {
+		return overviewFailed
+	}
+	if st.loading || !st.started {
+		return overviewLoading
+	}
+	return overviewEmpty
+}
+
+// overviewFailText 是总览上「这一块没拉出来」那一句。
+//
+// ⚠️ **和整页那一档说的是同一件事**（`empty.go` 的 `viewLoadError`）：那边是
+// 「这一块没拉出来」，这儿是同一句——用户在首页看到的那一句话不该和他在别的
+// 页面看到的不一样。
+const overviewFailText = "这一块没拉出来"
+
+// overviewEmptyText 是总览上「拉到了，但是空的」那一句。
+//
+// ⚠️ **不许和失败那句混**：空的那一档按多少次重试都是空的（说成「没拉出来」
+// 会让用户去按一个按多少次都没用的按钮）；而失败的那一档**必须**有重试
+// （B 站的风控、断网、登录态过期全都会走到那一支）。
+//
+// ⚠️ **和 `homepage_newmusic.go` 那一档说的是同一件事**：那边是「暂无数据」
+// （上游 `new-music-top.tsx:211-214` 的原话），这儿是同一档的另一种说法——
+// 它在总览上不是一整块卡片，而是几列小榜，所以那句更短。
+const overviewEmptyText = "还没有内容"
+
+// viewOverviewFail 是总览上「这一块没拉出来」那一档：一句话 + 一个重试。
+//
+// ⚠️ **它不是 `viewEmpty` 的一个空状态**：失败必须有重试按钮，而空状态那一支
+// 没有按钮——理由在 `empty.go` 那段「为什么它不能是 viewEmpty 的一个空状态」。
+//
+// ⚠️ **它也不是 `viewLoadError`**：那一支是**整页**那一格（居中、一枚插画、
+// 上下留白），而这里是**总览上的其中一块**——它有邻居（别的块还在），把它
+// 撑成一整页的失败格会把旁边那些块挤走。
+//
+// ⚠️ **三样和 `viewLoadError` 同一个口径**：一句「这一块没拉出来」、一行
+// 「没拉出来的是：X」（说清是**哪一块**——总览上可能有三四块同时失败）、
+// 一句原始原因，最后一个重试。
+//
+// where 和 retryLabel 是**两件不同的事**：where 说「是哪一块」（给用户复现用），
+// retryLabel 说「按的是哪一趟」（按钮上的字）。两处都带是因为三块可以同时
+// 失败，而两个同名按钮摆在一起用户分不清按的是哪个（理由同 `viewLoadError`）。
+func (h *homePage) viewOverviewFail(c *ui.Context, key, where, retryLabel string, err error, retry func()) {
+	t := c.Theme()
+	// ⚠️ **要 `AlignItems(ui.Start)`**：框架的列默认把内容**居中**（横向也是），
+	// 而这一块是「一段话 + 一枚按钮」——居中之后按钮飘到那一块的右边，而话在
+	// 左边，两者对不上（出图看出来的）。
+	ui.Column(c).Key(key).FillWidth().Gap(space.Px4).AlignItems(ui.Start).Children(func() {
+		ui.Text(c, overviewFailText).FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text)
+		if where != "" {
+			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+		}
+		if err != nil {
+			ui.Text(c, err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
+				MaxLines(2).Ellipsis("…")
+		}
+		if retry != nil && retryLabel != "" {
+			if flatButton(c, retryLabel).FontSize(scale.Font(c, scale.Size13)).Clicked() {
+				retry()
+			}
+		}
+	})
+}
+
+// viewOverviewEmpty 是总览上「拉到了，但是空的」那一档：一句话，**没有重试**。
+//
+// ⚠️ **它和失败那一档必须说不同的话**：空的那一档按多少次重试都是空的，
+// 而失败的那一档不给人重试就出不来（理由同 `viewTabBody` 那四种状态）。
+func (h *homePage) viewOverviewEmpty(c *ui.Context, key, text string) {
+	t := c.Theme()
+	ui.Text(c, text).Key(key).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+}
+
+// viewHeroFailed 是横幅那一块在「拉失败」那一档的样子。
+//
+// ⚠️ **高度照骨架那一档**（`ch`）：失败和「还在拉」是同一块地方的两档，
+// 高度不一样的话下面那些行会跟着跳一下——而这一块上面就是磁贴那一排。
+//
+// ⚠️ **这里不放重试按钮**：横幅和歌那一排是**同一摊数据**（`heroSongs` 读的是
+// `h.newGrid.songs`），而重试在下面那个「新歌速递」分区里（那一处的按钮上写着
+// 「重试加载新歌速递」，说清按的是哪一趟）。两处各摆一枚一模一样的按钮，
+// 用户会以为那是两件事——而它们确实是同一件事。
+func (h *homePage) viewHeroFailed(c *ui.Context, w, ch float32) {
+	t := c.Theme()
+	ui.Column(c).Key("home:hero:fail").Size(w, ch).Radius(t.Radius + 4).
+		Center().Gap(space.Px4).Children(func() {
+		ui.Text(c, overviewFailText).FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text)
+		if err := h.feed.newTab.err; err != nil {
+			ui.Text(c, err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
+				MaxLines(2).Ellipsis("…")
+		}
+	})
+}
+
 // viewHero 是顶上那块轮播横幅：三张叠在一起，当前那张不透明、其余淡到看不见，
 // 每 homeHeroEvery 换下一张（鼠标停在横幅上不换，系统开着「减少动态效果」时直接换）。
 func (h *homePage) viewHero(c *ui.Context, w float32) {
@@ -191,7 +403,24 @@ func (h *homePage) viewHero(c *ui.Context, w float32) {
 	songs := h.heroSongs()
 	ch := min(w*0.26, 260)
 	if len(songs) == 0 {
-		if !h.feed.newTab.loading && h.feed.newTab.started {
+		// 🔴 **失败那一档不许整块消失**（2026-10-31）：原先是「不在拉了就
+		// return」——而失败时正是「不在拉了」，于是这一块连标题带内容一起不见，
+		// 首页内容区一片空白（用户报的那一张）。
+		//
+		// 三档分开：**在拉**摆骨架；**拉失败**说清为什么 + 给一个重试；
+		// **真的没有**说一句话（那是结论，不用占版面，也**不给重试**——
+		// 按多少次都是空的）。
+		switch h.heroState() {
+		case overviewFailed:
+			h.viewHeroFailed(c, w, ch)
+			return
+		case overviewEmpty:
+			// ⚠️ **拉回来了、只是没有能上横幅的封面**：那不是失败，说一句就够。
+			// 而**不给重试**：这一摊拉到了，重试也是同一批。
+			ui.Column(c).Key("home:hero:empty").Size(w, ch).Radius(t.Radius + 4).
+				Center().Children(func() {
+				ui.Text(c, "还没有能上横幅的新歌").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+			})
 			return
 		}
 		// ⚠️ **骨架要扫光、要有形状**（2026-10-27）：原先是一块 `Text` 6% 的
@@ -375,10 +604,26 @@ func (h *homePage) viewNewRow(c *ui.Context, w, ww float32) {
 	// 才整块冒出来，下面的磁贴/榜单跟着往下跳一大截（用户看到的是「点进首页，
 	// 版面自己动了一下」）。
 	//
-	// 三档分开：**在拉**摆卡片骨架；**拉失败**说失败（那一块自己有重试，
-	// 见 `newMusicGrid.view`）；**真的没有**什么都不摆（那是结论，不用占版面）。
+	// 三档分开：**在拉**摆卡片骨架；**拉失败**说清为什么 + 给一个重试；
+	// **真的没有**说一句「还没有」（那是结论，不用占版面，也**不给重试**）。
+	//
+	// 🔴 **失败那一档不许整块消失**（2026-10-31）：原先那句早退是
+	// `!loading && (started || err != nil)` ——而失败时正是「不在拉、也没歌」，
+	// 于是它早退 ⇒ 连「新歌速递」那个标题一起不见，首页内容区一片空白。
 	if len(songs) == 0 {
-		if !h.feed.newTab.loading && (h.feed.newTab.started || h.feed.newTab.err != nil) {
+		switch h.newMusicState() {
+		case overviewFailed:
+			ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
+				h.sectionHead(c, "home:new:head", "新歌速递", "", nil)
+				h.viewOverviewFail(c, "home:new:fail", "新歌速递", "重试加载新歌速递",
+					h.feed.newTab.err, func() { h.retryNew() })
+			})
+			return
+		case overviewEmpty:
+			ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
+				h.sectionHead(c, "home:new:head", "新歌速递", "", nil)
+				h.viewOverviewEmpty(c, "home:new:empty", overviewEmptyText)
+			})
 			return
 		}
 		ui.Column(c).Key("home:new").FillWidth().Gap(space.Px12).Children(func() {
@@ -445,12 +690,22 @@ func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
 	// return——「排行榜」那个标题连同三列一起不见，数据到了整块冒出来，
 	// 下面的内容跟着往下跳。
 	//
-	// ⚠️ **只在「真的还在拉」时摆**：拉失败之后三列各自有一句「榜单还在路上」
-	// （见 `viewMiniBoard`），那时再摆骨架是在说「马上就好」，而它不会好。
-	if len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 && len(newTop) == 0 {
-		if !h.boardLoading() {
-			return
-		}
+	// 🔴 **这一块不许整块消失**（2026-10-31）：原先这里是
+	// `if !h.boardLoading() { return }` ——而 `boardLoading()` 只在「还在拉」
+	// 时为真（它只看 `pg.Loading`），于是**拉失败**那一刻它判成「不在拉」
+	// ⇒ 整块（含「排行榜」那个标题）不见了 ⇒ 首页内容区一片空白
+	// （用户报的那一张）。
+	//
+	// 三档分开：**在拉**摆骨架；**拉失败**说清为什么 + 给一个重试；
+	// **真的没有**说一句「还没有」（**不给重试**——按多少次都是空的）。
+	//
+	// ⚠️ **三列各自判各自的**：热榜和原创榜是两次请求，而「新歌榜」是第三次
+	// （新歌速递那一摊）——三列的状态**可以不一样**（一列失败、另两列有歌）。
+	// 所以那一列失败时只有它自己那一列说失败，别的两列照常摆歌。
+	allEmpty := len(h.miniTop[0]) == 0 && len(h.miniTop[1]) == 0 && len(newTop) == 0
+	if allEmpty && h.boardsLoading() {
+		// 三列都还在拉：摆**三列**的骨架（照着它们将来的样子：榜头 + 四行
+		// 「封面 + 字条」），数据到了只换内容、版面不跳。
 		ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
 			h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
 			ui.Row(c).Key("home:boards:skel").FillWidth().Gap(space.Px32).
@@ -476,25 +731,55 @@ func (h *homePage) viewMiniBoards(c *ui.Context, w float32) {
 	ui.Column(c).Key("home:boards").FillWidth().Gap(space.Px12).Children(func() {
 		h.sectionHead(c, "home:boards:head", "排行榜", "", nil)
 		ui.Row(c).Key("home:boards:row").FillWidth().Gap(space.Px32).AlignItems(ui.Start).Children(func() {
-			h.viewMiniBoard(c, homeTabs[homeHotTab], h.miniTop[0], homeHotTab, cw)
-			h.viewMiniBoard(c, homeTabs[homeOriginalTab], h.miniTop[1], homeOriginalTab, cw)
-			h.viewMiniBoard(c, "新歌榜", newTop, homePopTab, cw)
+			h.viewMiniBoard(c, homeTabs[homeHotTab], h.miniTop[0], homeHotTab, cw,
+				h.boardState(homeHotTab))
+			h.viewMiniBoard(c, homeTabs[homeOriginalTab], h.miniTop[1], homeOriginalTab, cw,
+				h.boardState(homeOriginalTab))
+			h.viewMiniBoard(c, "新歌榜", newTop, homePopTab, cw,
+				h.newMusicState())
 		})
 	})
 }
 
-// boardLoading 报「那三列里至少还有一列在路上」。
+// boardsLoading 报「那三列全都还在拉」。
 //
-// ⚠️ **看的是翻页列表自己的状态**（不是「有没有歌」）：空数组在三档里都出现
+// ⚠️ **三列都空**才轮到它（外层那一支）：一列有歌的时候另外两列各自判各自
+// 的（见 `viewMiniBoard`）——那一列有歌，这一块就该摆出那个「有歌」的形状。
+//
+// ⚠️ **看的是每一列自己的取数状态**（不是「有没有歌」）：空数组在三档里都出现
 // （还在拉 / 拉失败 / 真的没有），只有第一种才该摆骨架。
-func (h *homePage) boardLoading() bool {
+func (h *homePage) boardsLoading() bool {
 	for _, tab := range [2]int{homeHotTab, homeOriginalTab} {
-		if pg := h.lists[tab].Paged(); pg.Loading && pg.Loaded == 0 {
-			return true
+		if h.boardState(tab) != overviewLoading {
+			return false
 		}
 	}
-	st := &h.feed.newTab
-	return st.loading && len(h.newGrid.songs) == 0
+	return h.newMusicState() == overviewLoading
+}
+
+// boardErrOf 是那一列失败的原因（已经翻成人话了）。
+//
+// ⚠️ **两张榜的错是翻过的**（`homepage_feed.go` 的 `tabFetcher` 里那一行
+// `homeFailureOf(err)`），而「新歌榜」那一列的错是新歌速递那一摊的
+// （`h.feed.newTab.err`，也是翻过的）。两边都已经是能直接画给人看的话。
+func (h *homePage) boardErrOf(tab int) error {
+	if tab == homePopTab {
+		return h.feed.newTab.err
+	}
+	return h.lists[tab].Paged().Err
+}
+
+// retryBoard 让那一列再拉一次。
+//
+// ⚠️ **两张榜走 `retryTab`**（翻页列表的 `Reload`：清空、回顶、从第一页重来），
+// 而**新歌榜那一列走 `retryNew`**（新歌速递那一摊自己的那一个）——
+// 三列是三次不同的请求，重试要重发的是**那一列**自己的那一次。
+func (h *homePage) retryBoard(tab int) {
+	if tab == homePopTab {
+		h.retryNew()
+		return
+	}
+	h.retryTab(tab)
 }
 
 // playAllOf 把 songs 整排放进播放：第一首立刻播，其余排进队尾。
@@ -513,7 +798,19 @@ func (h *homePage) playAllOf(songs []list.Music) {
 	h.acts.Add(its)
 }
 
-func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music, tab int, w float32) {
+// viewMiniBoard 画总览上那一列小榜。
+//
+// ⚠️ **三档是三件不同的事**（2026-10-31，和 `viewTabBody` 那四种状态同一个
+// 口径）：**在拉**说「还在路上」；**拉失败**说清为什么 + 给一个重试；
+// **真的没有**说「还没有内容」（**不给重试**——按多少次都是空的）。
+//
+// ⚠️ **三列各自判各自的**（state 是传进来的）：热榜、原创榜、新歌榜是三次
+// 请求，它们可以一个失败、另两个有歌——那一列失败时只有它自己那一列说失败，
+// 别的两列照常摆歌。
+//
+// ⚠️ **重试的名字要说清是哪一趟**：三列同时失败时三个「重试」摆在一起，
+// 用户分不清按的是哪个（理由同 `viewLoadError` 的那一条）。
+func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music, tab int, w float32, state overviewState) {
 	t := c.Theme()
 	ui.Column(c).Key("home:board:" + name).Width(w).Gap(space.Px4).Children(func() {
 		ui.Row(c).Key("home:board:head:" + name).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
@@ -535,7 +832,21 @@ func (h *homePage) viewMiniBoard(c *ui.Context, name string, songs []list.Music,
 			}
 		})
 		if len(songs) == 0 {
-			ui.Text(c, "榜单还在路上").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+			switch state {
+			case overviewFailed:
+				// 🔴 **失败那一档要有重试**（2026-10-31）：B 站的风控、断网、
+				// 登录态过期全都会走到这一支，而不给重试用户就没法重来。
+				h.viewOverviewFail(c, "home:board:fail:"+name, name, "重试加载"+name,
+					h.boardErrOf(tab), func() { h.retryBoard(tab) })
+			case overviewEmpty:
+				// ⚠️ **和失败那句不同**：这一档是「B 站给了一张空榜」——按多少次
+				// 重试都是空的，所以**不给重试**（理由同 `viewTabBody`）。
+				h.viewOverviewEmpty(c, "home:board:empty:"+name, overviewEmptyText)
+			default:
+				// 还在拉：说「还在路上」。外层那一支三列都在拉时摆的是骨架，
+				// 走到这里的是「别的列有歌、这一列还在拉」那种混合情形。
+				ui.Text(c, "榜单还在路上").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+			}
 			return
 		}
 		for i, m := range songs {

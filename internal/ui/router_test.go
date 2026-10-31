@@ -43,22 +43,25 @@ func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 	waitFrames(t, tt, "画面上出现 "+want, func() bool { return tt.HasText(want) })
 }
 
-// TestFifteenRoutes 盯住「表里那 15 条」这个数：少一条是漏了，多一条是编的。
+// TestFourteenRoutes 盯住「表里那 14 条」这个数：少一条是漏了，多一条是编的。
 //
-// **扫码登录和评论页不在这 13 条里**——它们是本项目自己加的两条（对应 Biu
-// 挂在导航栏头像下拉里的那个登录入口，和票 #573 的「当前这一首」的附属页），
-// 所以单独断言，不混进 want。
+// **扫码登录不在这 13 条里**——它是本项目自己加的一条（对应 Biu 挂在导航栏
+// 头像下拉里的那个登录入口），所以单独断言，不混进 want。
+//
+// ⚠️ **第 15 条 `/comments` 没有了**（票 #706）：评论从**独立路由页**改成了
+// **右侧抽屉**——而抽屉**不是一条路由**（它没有地址，也不进路由表），所以它
+// 不在这张表里。
 //
 // 兜底的 404 也不是一条能 Match 的模式，而是 viewRoutes 的 default 分支，
 // 所以它不在 routes 里。
-func TestFifteenRoutes(t *testing.T) {
-	if got := len(routes) + 1; got != 16 {
-		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 16（我们的 15 条 + 兜底 1 条）", got, len(routes))
+func TestFourteenRoutes(t *testing.T) {
+	if got := len(routes) + 1; got != 15 {
+		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 15（我们的 14 条 + 兜底 1 条）", got, len(routes))
 	}
 	want := []string{
 		"/", "/follow", "/later", "/history", "/local-music", "/download-list",
 		"/settings", "/search", "/dynamic-feed", "/user/{id}", "/collection/{id}",
-		"/empty", "/mini-player", "/login", "/comments",
+		"/empty", "/mini-player", "/login",
 	}
 	for _, w := range want {
 		if got := lookup(w).Match; got != w {
@@ -67,6 +70,13 @@ func TestFifteenRoutes(t *testing.T) {
 	}
 	if got := lookup("/没这条").Match; got != "*" {
 		t.Errorf("不认识的路径落到了 %q，want *（404）", got)
+	}
+	// ⚠️ **评论不再是一条路由**（票 #706）：它是右侧抽屉。而这一条**要断**——
+	// 一个「删了路由表那一行、但别处还留着 `/comments`」的实现，用户在地址栏
+	// 里敲 `/comments` 会落到 404（而那个 404 说的是「这条路径不存在」——用户
+	// 明明是从应用里点进来的）。
+	if got := lookup("/comments").Match; got != "*" {
+		t.Errorf("lookup(\"/comments\") 认出的是 %q——评论是抽屉，不是一条路由", got)
 	}
 }
 

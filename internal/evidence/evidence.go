@@ -650,7 +650,7 @@ var Items = []Item{
 		Spec: "独立评论页：页头分别说清「这首歌的评论」和「这个视频的评论」、本地文件不摆入口；排序只摆两档；翻页重叠不破版（行身份唯一）；长正文折起来不切坏表情占位符；拉页的三重保障复用 widgets/list/paged.go 里那一份判据",
 		Tests: []string{
 			"TestTheCommentsHeaderSaysWhoseCommentsTheseAre",
-			"TestTheCommentsPageIsNotInTheSidebarMenu",
+			"TestTheCommentsAreNotInTheSidebarMenu",
 			"TestTheUpperBadgeOnlyShowsForTheUpperAuthor",
 			"TestTheEmoteIsDrawnAsAnImage",
 			"TestALongCommentIsNeverCutInTheMiddleOfAnEmote",
@@ -1093,8 +1093,10 @@ var Items = []Item{
 	// ── 分页与路由 ─────────────────────────────────────────────────────────
 	{
 		Category: Paging,
-		Spec:     "15 条路由一条不少，参数路由认得出",
-		Tests:    []string{"TestFifteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
+		// ⚠️ **「14 条」是票 #706 之后的数**（评论从独立路由页改成了抽屉——
+		// 而一个「不是页」的东西不进 `routes` 那张表）。
+		Spec:  "14 条路由一条不少，参数路由认得出",
+		Tests: []string{"TestFourteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
 	},
 	{
 		Category: Paging,
@@ -2022,7 +2024,12 @@ var Items = []Item{
 		//
 		// 「失败之后不许每帧重发」这一条是防那个自激循环：实测 300 毫秒能发
 		// 138 次，界面停在「打不开」上还在刷网络。
-		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈；空列表说的是「没有内容」；新歌速递那一块挂掉不牵连下面那一档",
+		//
+		// ⚠️ **最后那五条盯的是「发现」总览那三块**（横幅 / 新歌速递 / 排行榜）：
+		// 它们各自有一句早退，而那句早退把「拉失败」和「没在拉」当成同一件事
+		// ——于是失败那一刻三块**整块消失**（连标题都没有），用户看到的是首页
+		// 内容区一片空白（票 #706）。
+		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈；空列表说的是「没有内容」；新歌速递那一块挂掉不牵连下面那一档；「发现」总览那三块在拉失败时**不许整块消失**（那是「一片空白」）",
 		Tests: []string{
 			"TestAFailedRecommendSaysSoAndOffersARetry",
 			"TestAnEmptyRecommendListIsNotAFailure",
@@ -2030,6 +2037,11 @@ var Items = []Item{
 			"TestTheHomePageSaysItIsLoadingUntilTheFirstPageIsBack",
 			"TestNewMusicIsOnlyPulledOnThePopTab",
 			"TestLoggingInReloadsTheRecommendations",
+			"TestTheOverviewNeverGoesBlankWhenTheFetchFails",
+			"TestTheOverviewSaysItFailedAndOffersARetry",
+			"TestTheOverviewRetryStartsTheRequestAgain",
+			"TestAnEmptyOverviewIsNotAFailure",
+			"TestTheOverviewShowsSkeletonsWhileItIsStillLoading",
 		},
 	},
 	{

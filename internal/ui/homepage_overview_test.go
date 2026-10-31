@@ -29,9 +29,14 @@ func TestTheOverviewShowsTilesAndLeadsIntoTheListPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFrames(t, tt, "进了热榜列表", func() bool { return showsText(tt, "鬼畜") })
-	if err := tt.Click("返回发现"); err != nil {
-		t.Fatal(err)
+	// ⚠️ **回总览走的是顶栏那一枚**（票 #706）：榜单名称左边那枚「返回发现」已经
+	// 被拿掉了——回总览这件事只剩顶栏一个入口（理由见 `navbar.go` 的
+	// `viewHomeBack`）。
+	back, ok := tt.Find(navBackLabel)
+	if !ok {
+		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
 	}
+	tt.ClickAt(back.X+back.W/2, back.Y+back.H/2)
 	waitFrames(t, tt, "回到总览", func() bool { return showsText(tt, "排行榜") && !showsText(tt, "鬼畜") })
 }
 

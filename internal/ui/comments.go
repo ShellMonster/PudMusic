@@ -1,4 +1,11 @@
-// 评论页：Biu 没有这一页（上游 `biu/src/pages/` 里没有），所以口径我们自己定。
+// 评论的**内容**：页头 + 那一列评论 + 楼中楼 + 翻页。
+//
+// ⚠️ **它现在住在抽屉里**（票 #706）：原来是 `/comments` 那一条独立路由页，而
+// 现在它是**右侧抽屉**（`comments_drawer.go`）——独立页把整个窗口顶掉，而评论是
+// 「当前这一首的附属信息」，它是**叠在底下那一页上面**的东西。
+//
+// ⇒ 这一份文件是**内容**（页头那句话、正文怎么排、楼中楼怎么展开、翻页的
+// 哨兵）；**抽屉那一层**（浮层、蒙版、进出场、宽度）在 `comments_drawer.go`。
 //
 // # 这一页最要紧的是「这些评论到底是谁的评论」
 //
@@ -92,12 +99,16 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// commentsPath 是评论页那条路由。
+// commentsEmpty 是「这一首没有评论」那一句话。
 //
-// ⚠️ **它不进侧栏菜单**（`InMenu: false`）：它是「当前这一首」的附属页，不是
-// 一个栏目——摆进侧栏的话，用户会以为那是一个能一直待着的页面，而它讲的
-// 东西每换一首就全变了。
-const commentsPath = "/comments"
+// ⚠️ **它是一份，不是两处各写一遍**：抽屉那一层和（改之前的）那一页说的是
+// 同一件事——而两处各写一份的话，改文案就会漏掉一处（而用户看到的两个界面
+// 说的是两句话）。
+var commentsEmpty = emptyState{
+	Title: "这一首没有评论",
+	Hint:  "在播放条上放一首 B 站的歌，再点右上角的「评论」",
+	Icon:  iconEmptyMusic,
+}
 
 // commentsSortLabels 是排序那两档的字。
 //
@@ -117,6 +128,26 @@ const (
 	commentBodyLines = 6
 	// commentReplyBodyLines 是楼中楼正文最多几行。
 	commentReplyBodyLines = 4
+	// commentBodyUnlimited 是「**不限行数**」那一种表达方式（票 #706）。
+	//
+	// 🔴 **在新架构里它就是 0，而 0 有确切的含义**：框架的 `MaxLines` 是
+	// 「最多几行」，而**框架判的是 `p.MaxLines > 0`**（`internal/text/layout.go`
+	// 的 `layout`：`if p.MaxLines > 0 { maxLines = ... }`）⇒ **0 就是「不设
+	// 上限」**，整个正文一行都不截。
+	//
+	// ⚠️ **这和旧的做法不一样，而差别是硬的**：旧的实现是**自己排版、自己
+	// 截断**（`shapeCommentBody`），上限是 `lines × lineH`，而截断那一支判的
+	// 是「高度 > 上限」——⇒ 上限写成 0 的话那一支**恒真**，正文会被截成 0 个字
+	// 加一个省略号（那正是这一票要治的那个坑）。所以旧的那一套必须用**一个
+	// 单独的负数**（-1）表示「不限」。
+	//
+	// ⇒ 而新架构**压根不需要那个负数**：截断是框架做的，而框架把 0 认成
+	// 「不截」。⇒ 「不限」就是 `MaxLines(0)`。
+	//
+	// ⚠️ **它不是 6 或 4**：折叠态那两个数（主评论 6 / 楼中楼 4）是**上限**，
+	// 而这一档是**另一个档**——它和折叠态在**同一个缓存键**上（`p.bodies` 是
+	// 单值 map，键里含 `lines`），所以两个值天然不撞。
+	commentBodyUnlimited = 0
 	// commentBodyGap 是正文那一列和头像之间的距离（跟第一行同一档）。
 	commentBodyGap = space.Px12
 )
@@ -178,6 +209,31 @@ type commentsPage struct {
 	expanded map[int64]bool
 	// expRev 是展开集合的版本号：改一次加一（用来认出「行要重建了」）。
 	expRev int
+
+	// bodiesExpanded 是「哪几条的**正文**展开了」（票 #706）。
+	//
+	// 🔴 **它和 `expanded`（楼中楼）是两件事**：那一处是「展开了楼中楼那一层」，
+	// 这一处是「把正文那一段拉直了」。两个集合都是「按 rpid 记着」——而 rpid
+	// 在两边各自唯一（主评论和楼中楼各有自己的 rpid）。
+	//
+	// ⚠️ **换歌就清掉**（理由同 `p.slot` 那一句）：rpid 会撞，而「展开」是
+	// **关于某一条评论**的界面状态，跟着另一首歌的同号 rpid 走是错的。
+	bodiesExpanded map[int64]bool
+	// bodiesExpRev 是正文展开集合的版本号：改一次加一。
+	//
+	// ⚠️ **它是给「缓存要清」那一步用的**：正文展开之后那一格要**重新排一次**
+	// （`lines` 换了 ⇒ 缓存键变了 ⇒ 自然重排），而**收起**之后要再排回原来
+	// 那一档——两份都排在**同一个 map 的同一个键**上（`p.bodies` 是单值 map），
+	// 所以切回来时那一格必须**重排**，不能拿上一帧那份接着用。
+	//
+	// 🔴 **在新架构里「重排」是免费的**：框架自己缓存布局
+	// （`mygo/ui/layoutcache.go` 的 `sameLayout`），而「不限行数」那一档和
+	// 折叠那一档**是两个不同的参数**（`MaxLines(0)` vs `MaxLines(6)`）——
+	// ⇒ 框架的缓存按参数比对，**两份各自都命中自己那一份**。
+	//
+	// 🔴 **它不是「行要重建了」**：正文展开**不改行数**（行的身份和高度由框架
+	// 自己量），所以它不碰 `expRev`（那一支是「行集合变了」）。
+	bodiesExpRev int
 
 	// wantRefresh 是「用户按了刷新」这个意图。**view 只记它，发请求的是
 	// `syncComments`**（理由见文件头「铁律三」）。
@@ -331,6 +387,49 @@ type commentBody struct {
 	// ⚠️ **它是算的时候算出来的，不是每帧现算**：算它要再切一遍正文，而这一页
 	// 每一帧都要画十来条评论的正文——现算就是每帧多十来趟切分。
 	plain string
+	// w 是排版时的宽度（那一列有多宽）。
+	//
+	// 🔴 **它是缓存键的一部分**（票 #706）：宽度变了，正文在哪几个字那里折行
+	// 就变了 ⇒ 折起来的那几行变了 ⇒ 「折没折」也变了。
+	w float32
+	// lines 是最多几行（主评论和楼中楼不一样）。
+	//
+	// 🔴 **它也是缓存键的一部分**：折叠态是 6（主评论）/ 4（楼中楼），而
+	// 展开态是「不限」（`commentBodyUnlimited`）——两个值天然不撞缓存，
+	// 所以**不需要另起一套缓存**。
+	lines int
+	// folded 是「这一份**被折起来过**吗」（票 #706）。
+	//
+	// 🔴 **它记在排版结果里，而不是界面层自己判断**：正文是不是太长，只有
+	// **量过**才知道（框架的 `MaxLines` 截了没有，框架**不告诉**元素）——
+	// 而界面上要决定「摆不摆『展开』那一枚」，判据就是这一位。
+	//
+	// ⚠️ **它是**量出来**的，而且量一次就够**（`commentBodyFolded`）：量一次
+	// 是**一趟排版**（`c.MeasureText`），而这一页每一帧都要画十来条评论的正文
+	// ⇒ 每帧每条量一遍就是**每帧十来趟排版**（而那一档的帧预算会红）。
+	// ⇒ 所以量出来的那一位**记在这里**，而**缓存键里含宽**（宽度变了，正文在
+	// 哪几个字那里折行就变了 ⇒ 折没折也变了）。
+	//
+	// ⚠️ **展开的那一份是 false**：它一行都没截，正文全在——界面层于是把
+	// 那一枚换成「收起」。
+	folded bool
+	// foldedW 是「上面那一位是**在哪个宽**上量出来的」。
+	//
+	// 🔴 **它是缓存键的一部分**：而**宽是上一帧的**（`Bounds()` 报的是上一帧
+	// 的盒子）⇒ 抽屉刚打开的那一帧宽是 0，下一帧才是真的宽。
+	//
+	// ⚠️ **它和 `mark` 一样是「键的一部分」**：`commentBodyOf` 判「缓存命中」
+	// 时要比它——而**宽不一样就是另一份**（折没折可能变了）。
+	foldedW float32
+	// measSpans 是「量高度的那一份 span」（**带着字号**）。
+	//
+	// 🔴 **它是记在这里的，不是每帧现建**：量一次是**一趟排版**
+	// （`c.MeasureText`），而这一页每一帧都要画十来条评论的正文 ⇒ 每帧现建
+	// 那个切片就是**每帧十来次分配**（而 `framebudget_test.go` 那一档会红）。
+	//
+	// ⚠️ **它和 `spans` 一一对应**（只多一个字号）⇒ 所以切 span 之后**要重
+	// 建**（见 `commentBodyOf`）。
+	measSpans []ui.Span
 	// mark 是切这一份时用的高亮配色（零值 = 没高亮）。
 	//
 	// 🔴 **它是缓存键的一部分**：高亮那几段的字色和底色是**烘进 span 里**的
@@ -356,11 +455,30 @@ type commentBody struct {
 	copyFn func(parts []ui.SelectedText) transfer.Data
 }
 
-// viewComments 是评论页。
+// viewComments 是评论的**内容**那一支（页头 + 列表 + 空状态）。
+//
+// ⚠️ **它不是一条路由的 view 了**（票 #706）：评论住在**右侧抽屉**里，而这一支
+// 是**抽屉和底下那一页共用**的内容（见 `viewCommentsContent`）。
+//
+// ⚠️ **它仍然调 `applyFrameTheme`**：这一支可能被当成一个独立的 view 画（测试
+// 里就是那么画的，见 `framebudget_test.go`），而那一档**不**走 `Shell.View`——
+// 框架每帧开头会把主题重置成跟随系统那一份（铁律二）。
 func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 	// 🔴 铁律二：页面 view 的头一件正事就是装主题。
 	s.applyFrameTheme(c)
+	s.viewCommentsContent(c, c.Theme())
+}
 
+// viewCommentsContent 是评论的**内容**：页头 + 那一列评论 + 空状态。
+//
+// 🔴 **它和抽屉共用同一份**（票 #706）：评论从独立页搬进抽屉之后，**功能一个
+// 字不许少**（排序两档、刷新、只看提到歌名的开关、楼中楼、高亮、翻页、分页
+// 哨兵）——所以这里**复用**原来那一页的画法，而不是抄一份。抄一份的话两边迟早
+// 分叉，而分叉出来的那种差异极难查。
+//
+// ⚠️ **它不调 `applyFrameTheme`**：它在 `viewMain` 的同一个 build pass 里建，
+// 而 `viewMain` 第一行就装好了主题（铁律二）。
+func (s *Shell) viewCommentsContent(c *ui.Context, t *ui.Theme) {
 	p := &s.comments
 	it, has := s.pageInput().Current, s.pageInput().HasCurrent
 
@@ -383,18 +501,14 @@ func (s *Shell) viewComments(c *ui.Context, _ *ui.Route) {
 	}
 
 	// 🔴 **本地文件不摆入口**（`CommentsWorthAsking`）：它在 B 站上没有对应
-	// 的对象，而问一个认不出来的 oid 的症状是「静默拿到空列表」——于是界面上
-	// 会摆一个永远空着的评论页。
+	// 的对象，而问一个认不出来的 oid 的症状是「静默拿到空列表」——于是界面上会摆
+	// 一个永远空着的评论页。
 	if !has || !s.app.CommentsWorthAsking() {
-		s.viewEmpty(c, "page:"+commentsPath, emptyState{
-			Title: "这一首没有评论",
-			Hint:  "在播放条上放一首 B 站的歌，再点右上角的「评论」",
-			Icon:  iconEmptyMusic,
-		})
+		s.viewEmpty(c, "comments:empty", commentsEmpty)
 		return
 	}
 
-	ui.Column(c).Key("page:"+commentsPath).Grow(1).FillWidth().
+	ui.Column(c).Key("comments:content").Grow(1).FillWidth().
 		Padding(space.None, pagePadX).Children(func() {
 		// 页头**永远摆**：它就是「这些评论是谁的评论」那一块（文件头）。
 		// 列表空着的时候它也得在——不然用户看到的是一片白，而不是「这一首
@@ -947,7 +1061,10 @@ func inkAccentText(c *ui.Context) ui.Color {
 	return ink.AccentOn(c.Theme())
 }
 
-// syncComments 是评论页每帧的**副作用**。
+// syncCommentsData 是评论的每帧副作用（**真正干活的那一支**）。
+//
+// ⚠️ **外面套了一层 `syncComments`**（`underlay.go`）：那一层判「抽屉开着没有」
+// ——而这一层是**不管抽屉**的（它只管评论那一摊的状态）。
 //
 // 🔴 **三件要发网络请求的事全在这里**（铁律三）：排序切换 / 刷新 / 翻页，
 // 外加展开楼中楼之后去问那一层。view 一件都不做（文件头）。
@@ -967,7 +1084,7 @@ func inkAccentText(c *ui.Context) ui.Color {
 // 的行（`mygo/ui/list.go` 的 `Visible` 注释），而这个判据每帧问一次，
 // 于是①和③是它自己成立的（内容短于容器时哨兵一直看得见；新一页到了以后
 // 下一帧再问一次）。
-func (s *Shell) syncComments(c *ui.Context) {
+func (s *Shell) syncCommentsData(c *ui.Context) {
 	p := &s.comments
 
 	// 换歌了：清掉上一首的缓存（rpid 会撞，正文排版也不能留着）。
@@ -979,6 +1096,11 @@ func (s *Shell) syncComments(c *ui.Context) {
 		p.srcLen = -1
 		p.expanded = nil
 		p.expRev++
+		// 🔴 **正文展开状态也要清**（票 #706）：rpid 是 B 站那边的编号，而
+		// **换一首歌之后同一个 rpid 可能指向另一条评论**——留着「展开」的话，
+		// 新歌那一条会莫名其妙是展开的（而用户什么都没按）。
+		p.bodiesExpanded = nil
+		p.bodiesExpRev++
 	}
 
 	// 🔴 **刷新**：view 只记了意图，真正发出去的是这里。

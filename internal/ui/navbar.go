@@ -227,10 +227,179 @@ func (s *Shell) viewNav(c *ui.Context) {
 // 挂着 `r.Go(1)` 和它的「去过那些页」列表，而上游没有前进键是**上游自己的
 // 浏览器历史模型**决定的，不是我们该抄的那一半。剩下的差别写在这一票的收尾
 // 说明里，等人拍板。
+//
+// ## 🔴 **首页上那一枚做的是另一件事**（票 #706，2026-10-31）
+//
+// 首页只有 `/` 一条路由，而榜单那一档是**页内切换**（`openTab`，压根没 push
+// 过路由）——所以框架那一支在首页上**退不掉**（路由历史里没有上一条）。
+// 而榜单名称左边那枚「返回发现」这一票被拿掉了，于是「回总览」这件事
+// **只剩顶栏这一枚**——它得自己画，见 `viewHomeBack`。
+//
+// # 🔴 **但它是「**换**」，不是「**加**」**（票 #706 的 bug）
+//
+// 改之前这一档在首页上**整个换掉**了框架那一支 ⇒ **路由历史那条路没了**：
+//
+//  1. 点侧栏「本地音乐」  → path=/local-music
+//  2. 点侧栏「推荐音乐」  → path=/        （历史里还留着 /local-music）
+//  3. 按顶栏「后退」      → path 仍是 "/"   ← 退不回去
+//
+// ⇒ 而用户在别的页面 → 回首页 → 想「后退」回刚才那个页面，**按顶栏那枚没反
+// 应**——而那枚键画出来是**亮着的**（`canGo := !s.home.overview`），用户会以为
+// 它坏了。
+//
+// ⇒ 所以这一档是「**两件事并存**」，判据是「**路由历史退不退回得去**」：
+//
+//	退得回去 ⇒ 框架那一支（**退路由历史**，还带着右键的「去过那些页」列表）；
+//	退不回去 ⇒ 自绘那一支（**回发现总览**）。
+//
+// ⚠️ **判据是 `s.router.CanGoBack()`**（框架那个公开的凭据）——它读的是路由
+// 历史**当前**那一条的位置。
 func (s *Shell) viewNavBack(c *ui.Context, back func()) {
+	// ⚠️ **判据是「当前这一页是不是首页」**：`s.router.Path()` 读的是路由历史
+	// 当前那一条（`mygo/ui/router.go` 的 `Path`），也就是**此刻画着的那一页**
+	// ——顶栏是在 `viewRoutes` **之前**画的（`underlay.go` 的 `drawUnderlay`），
+	// 而路由历史当前那一条正是马上要画的那一条。
+	//
+	// ⚠️ **首页上还要再问一句「路由历史退不退回得去」**（理由见上面那段）：退得
+	// 回去就**退历史**（框架那一支），退不回去才**回总览**（自绘那一支）。
+	if s.router.Path() == homePath && !s.router.CanGoBack() {
+		s.viewHomeBack(c, back)
+		return
+	}
 	if s.withTip(c, navArrowStyle(ui.BackButton(c, s.router).Label(navBackLabel)),
 		navBackLabel).Clicked() {
 		back()
+	}
+}
+
+// navHomeBackTip / navHomeBackTipDone 是**首页上**那一枚返回键的两句提示。
+//
+// ⚠️ **它和别的页面上的那句（「后退」）不是同一句**：首页上那一枚（**退不回去
+// 路由历史的时候**）不是退路由历史，而是回「发现」总览——说清它做什么，用户
+// 才知道按它会去哪。
+//
+// ⚠️ **第二句是「已经在最上面了」那一档**：总览自己那一档上那一枚是**禁用**的
+// （灰的、点不动），而禁用元素的悬停提示压根不出（框架的 `Hovered()` 对禁用
+// 元素恒为 false，`mygo/ui/input.go:1193`）——所以那句话是给**读屏软件**听的
+// （`withTip` 顺手写了 `Description`）。
+const (
+	navHomeBackTip     = "返回发现总览"
+	navHomeBackTipDone = "已经在发现总览"
+)
+
+// viewHomeBack 是**首页上**顶栏那一枚返回键。
+//
+// # 它什么时候才画
+//
+// ⚠️ **只在「路由历史退不回去」的时候**（`viewNavBack` 那个判据）：退得回去的
+// 时候那一枚走框架的 `ui.BackButton`（退路由历史，还带着右键的「去过那些页」
+// 列表）。
+//
+// ⇒ 所以这一支是「**退不回去时的替补**」，不是「首页上那一枚的全部」。
+//
+// # 它做什么
+//
+//	首页·榜单那一档  ⇒ 回「发现」总览（**页内切换，不动路由**）
+//	首页·总览那一档  ⇒ **已经在最上面了** ⇒ 禁用（灰的、点不动）
+//
+// ⚠️ **回总览是页内切换**：路由一个字都不动（首页只有 `/` 一条路由，而
+// 「回总览」不是换页）。这和 `router.go` 的 `navigate` 里那一处是**同一件事**
+// （切到 `/` 而已经在 `/` 上 ⇒ 回总览），两边走的是同一个出口
+// （`backToHomeOverview`）。
+//
+// # 为什么自己画，不接着用框架那一支
+//
+// 框架的 `ui.BackButton` 按下去就是 `r.Go(-1)`（**路由历史**），而这一档要的
+// 是「回总览」——**不是同一种动作**，没法靠外面包一层改掉（框架那一支把
+// `r.Go(-1)` 挂在自己身上）。
+//
+// 而它**丢掉的那一样**（右键的「去过那些页」列表）**在这一档上本来也没用**：
+// 那一列列的是路由历史，而这一档的前提正是「**路由历史退不回去**」。
+//
+// # 画法照框架那一支逐字抄
+//
+// 盒子 **32×40、无描边**、内边距 `Padding(Space(1.5), Space(2))`、底色
+// `t.Surface`（悬停 `t.SurfaceHover`、按下 `t.SurfacePressed`）、箭头是 `Draw`
+// 画的一段 path（16×16 的盒子、线宽 1.6、颜色 `t.Text` / 禁用时 `t.TextMuted`）。
+//
+// ⚠️ **为什么照抄**：顶栏那几个测试量的是**顶栏上那一枚**（首页上现在就是它）——
+// `TestTheNavArrowsAreBiuSizedAndUnbordered` 断「盒 32×40、无描边」，
+// `TestTheHistoryKeysStillHaveAGlyphAndAHitArea` 断「有图形、图形比框小」。
+// 抄歪一个像素，那两条就红。
+//
+// ⚠️ **底色是 `t.Surface`（不是「透明」）**：上游那一枚的实图量出来是
+// `#f7f7f7`（DESIGN.md §顶栏），而框架那一支给的也是 `t.Surface`——所以这里
+// 照抄框架那一支，而不是照抄「扁平按钮」那一族（那一族是透明的，`flat` 包）。
+//
+// ⚠️ **不许用 `ui.Button`**：那一族（侧栏 / 顶栏 / 播放条 / 设置 / 队列抽屉）
+// 「不许再出现 `ui.Button`」——见 `flatbutton_test.go` 的
+// `TestTheFlatAreasNeverReachForTheStockButton`。所以这里用 `ui.ButtonBase`
+// 自己装那一份主题样子（框架的 `styleButton` 就是这么做的：
+// `mygo/ui/widgets.go:152`）。
+func (s *Shell) viewHomeBack(c *ui.Context, back func()) {
+	t := c.Theme()
+	// 总览那一档**已经在最上面了**，没有上一档可退 ⇒ 禁用。
+	//
+	// ⚠️ **禁用是「灰的、点不动」**（框架对禁用元素整个乘 0.5 不透明度，
+	// `mygo/ui/paint.go`；`node.Clicked()` 头一句就认它，`mygo/ui/input.go:1122`）。
+	// 这和框架那一支「没有历史可退」时的样子**一样**——而首页上它今天就是那个
+	// 样子（`r.CanGoBack()` 在 `/` 上是 false）。所以这一档**画面上一个像素都
+	// 没变**，变的只是「榜单那一档上它亮了」。
+	canGo := s.home != nil && !s.home.overview
+	tip := navHomeBackTip
+	if !canGo {
+		tip = navHomeBackTipDone
+	}
+	// ⚠️ **盒子、内边距、底色都照框架那一支**（`historyButton` + `styleButton`）：
+	// 框架那一支是 `ui.Button` 加上 `Padding(Space(1.5), Space(2))`、
+	// `Gap(Space(1.5))`、`Radius(t.Radius)`、`Background(t.Surface)`、
+	// `TextColor(t.Text)`，悬停 / 按下换 `t.SurfaceHover` / `t.SurfacePressed`
+	// ——这里逐字照抄（**不是**用 `flat` 那一族：那一族是透明底，而这一枚**有
+	// 常驻底色**，见上面那段）。
+	//
+	// ⚠️ **常驻底色是 `t.Surface`**：上游那一枚的实图量出来底色是 `#f7f7f7`
+	//（DESIGN.md §顶栏），而框架那一支给的也是 `t.Surface`——所以首页上这一枚
+	// 和别的页面上的那一枚**底色一样**，用户不会看出它换了做法。
+	btn := ui.ButtonBase(c).Label(navBackLabel).
+		Padding(t.Space(1.5), t.Space(2)).
+		Size(navArrowW, navArrowH).Border(0, ui.Color{}).
+		Disabled(!canGo)
+	// ⚠️ **悬停 / 按下那两档底色在建元素的时候问**（`flat` 包也是这么写的，
+	// 见 `flat.go` 的 `feel` 顶上那段）：框架那一支把它挂在 `styleFn`（paint
+	// 时才跑），而 `Element` 上挂不了那个（那是不公开的），所以只能问一次。
+	pressed, hovered := btn.Pressed(), btn.Hovered()
+	fill := t.Surface
+	switch {
+	case pressed:
+		fill = t.SurfacePressed
+	case hovered:
+		fill = t.SurfaceHover
+	}
+	btn.Background(fill).Radius(t.Radius).Gap(t.Space(1.5))
+	btn.Children(func() {
+		color := t.Text
+		if !canGo {
+			color = t.TextMuted
+		}
+		// 箭头：16×16 的盒子里一段 path（框架那一支是 `coreBox` + `Draw`，
+		// `mygo/ui/router.go` 的 `historyButton`）。
+		arrow := ui.Box(c).Size(t.Space(4), t.Space(4)).Shrink(0).Role(ui.RoleNone)
+		arrow.Draw(func(p *ui.Painter, rc ui.Rect) {
+			cx, cy, s := rc.X+rc.W/2, rc.Y+rc.H/2, rc.W*0.22
+			// 后退的箭头指着**左**（框架那一支的 `dir` 是 -1）。
+			dir := float32(-1)
+			if c.Direction() == ui.RightToLeft {
+				dir = -dir
+			}
+			dx := s * dir
+			var path ui.Path
+			path.MoveTo(cx-dx/2, cy-s*1.6).LineTo(cx+dx, cy).LineTo(cx-dx/2, cy+s*1.6)
+			p.StrokePath(&path, 1.6, color)
+		})
+	})
+	if s.withTip(c, btn, tip).Clicked() {
+		back()
+		s.backToHomeOverview()
 	}
 }
 

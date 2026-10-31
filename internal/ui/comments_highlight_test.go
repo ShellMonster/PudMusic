@@ -531,9 +531,9 @@ func TestTheHighlightFollowsTheTheme(t *testing.T) {
 			s.wake.set(c)
 			s.applyFrameTheme(c)
 			p.mark = commentMarkOf(c.Theme())
-			first := s.commentBodyOf(p, cm).spans
+			first := s.commentBodyOf(p, cm, commentBodyLines).spans
 			// 同一份配色再要一次：**必须是同一份**（缓存命中了）。
-			again := s.commentBodyOf(p, cm).spans
+			again := s.commentBodyOf(p, cm, commentBodyLines).spans
 			if !sameSpans(first, again) {
 				t.Errorf("配色没变，正文却重切了（缓存没命中）")
 			}
@@ -547,7 +547,7 @@ func TestTheHighlightFollowsTheTheme(t *testing.T) {
 			// 这一份主题**一个字节都不变**——那样这条用例量到的会是「没变所以
 			// 没重排」，而它想钉的是「变了必须重排」。
 			p.mark = commentMarkOf(BuildTheme(app.DefaultSettings(""), true))
-			second := s.commentBodyOf(p, cm).spans
+			second := s.commentBodyOf(p, cm, commentBodyLines).spans
 			if sameSpans(first, second) {
 				t.Errorf("配色变了，正文却用的还是缓存那一份——高亮那几段会是旧主题的颜色")
 			}
@@ -601,8 +601,14 @@ func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
 				s.wake.set(c)
 				s.applyFrameTheme(c)
 				p := &s.comments
-				// 摆成「上一帧还是《晴天》」：槽位一致（不走换歌那一支）、
-				// 别名表是旧的、开关开着、配色算好。
+				// ⚠️ **抽屉要开着**（票 #706）：评论从独立路由页改成了右侧抽屉，
+				// 而 `syncComments` 现在**跟着抽屉走**——抽屉没开的时候它直接
+				// return（理由见 `underlay.go` 的 `syncComments`：用户没在看评论
+				// 的时候，不该替他去问 B 站）。
+				//
+				// ⇒ 这一条用例量的是「别名表变了之后排版缓存跟着变」，那件事
+				// 发生在 `syncComments` **跑起来之后**——而它现在要求抽屉开着。
+				s.commentsOpen = true
 				p.slot = s.app.CommentsSlot()
 				p.srcTitle, p.srcArtist = oldName, it.Artist
 				p.srcMention = true
@@ -611,18 +617,18 @@ func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
 				p.mark = commentMarkOf(c.Theme())
 
 				cm := bili.Comment{Rpid: 7, Message: body}
-				s.commentBodyOf(p, cm)
+				s.commentBodyOf(p, cm, commentBodyLines)
 				first = p.bodies[cm.Rpid]
 
 				// 这一帧当前这一首叫「告白气球」⇒ 走别名表重算那一支。
 				s.syncComments(c)
 				gotTitle = p.srcTitle
-				s.commentBodyOf(p, cm)
+				s.commentBodyOf(p, cm, commentBodyLines)
 				second = p.bodies[cm.Rpid]
 
 				// 什么都没变的下一帧：排版缓存**必须还在**。
 				s.syncComments(c)
-				s.commentBodyOf(p, cm)
+				s.commentBodyOf(p, cm, commentBodyLines)
 				again = p.bodies[cm.Rpid]
 			}
 		}))
@@ -663,11 +669,11 @@ func TestTheMatchingRunsOncePerCommentNotPerFrame(t *testing.T) {
 			s.comments.mentionOnly = true
 			s.comments.mark = commentMarkOf(c.Theme())
 			cm := bili.Comment{Rpid: 7, Message: "晴天真好听"}
-			s.commentBodyOf(&s.comments, cm)
+			s.commentBodyOf(&s.comments, cm, commentBodyLines)
 			b1 := s.comments.bodies[cm.Rpid]
-			s.commentBodyOf(&s.comments, cm)
+			s.commentBodyOf(&s.comments, cm, commentBodyLines)
 			b2 := s.comments.bodies[cm.Rpid]
-			s.commentBodyOf(&s.comments, cm)
+			s.commentBodyOf(&s.comments, cm, commentBodyLines)
 			b3 := s.comments.bodies[cm.Rpid]
 			if b1 != b2 || b2 != b3 {
 				t.Errorf("同一份正文（配色没变）却重切了")

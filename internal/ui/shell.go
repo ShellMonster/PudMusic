@@ -562,6 +562,19 @@ type Shell struct {
 	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
 	drawerPhase drawerPhase
 
+	// commentsOpen 是评论抽屉开没开（票 #706）。
+	//
+	// ⚠️ **它和 `drawerOpen`（队列抽屉）是两件事，各有一份**：两个抽屉可以同时
+	// 开——而它们的阶段是**各自的**（`commentsPhase`）。
+	//
+	// ⚠️ **它不进设置**：抽屉是「我现在要看评论」这一下的事，关掉窗口就该是关着
+	// 的（理由同 `drawerOpen`）。
+	commentsOpen bool
+
+	// commentsPhase 是评论抽屉现在处在进场的哪一段。**和 commentsOpen 不是
+	// 一回事**（理由同 `drawerPhase`）。
+	commentsPhase drawerPhase
+
 	// queueList 是抽屉里那一列的列表状态：滚动位置、行身份、行高。
 	queueList ui.ListState
 	// queueRowKeys 记着抽屉里每一行的身份（**预先装箱好的那一份**）。
