@@ -708,6 +708,4 @@ const (
 	menuMuteID = "play.mute"
 	// menuSidebarID 是「显示/隐藏侧栏」那一项。
 	menuSidebarID = "view.sidebar"
-	// menuMiniID 是「显示/隐藏迷你播放器」那一项。
-	menuMiniID = "view.mini"
 )
