@@ -110,13 +110,14 @@ func (a *App) MountDownloads(d Downloads) error {
 		return errDownloadsMissing
 	}
 
-	// ① 旧的那份并进文件。没有旧的（第一次挂）时这一步什么都不做。
 	old := a.downloadsSnapshot()
-	if old != nil && d.QueueFile != "" {
-		if err := download.MergeIntoQueue(d.QueueFile, old.Persistable()); err != nil {
-			// 失败只记日志：这一刻旧的那份还在内存里继续用，而新 Manager 会从
-			// 文件 Restore（少的那几条用户按一次「继续」就补上了）。
-			log.Printf("app: 换挂下载前并队列失败，本次会话新加的歌可能没接上：%v", err)
+	if old != nil {
+		if d.QueueFile == "" {
+			return errors.New("下载已挂载，缺少队列文件时不能换挂")
+		}
+		if err := download.MergeIntoQueuePreferExtra(d.QueueFile, old.Persistable()); err != nil {
+			log.Printf("app: 换挂下载前并队列失败，保留旧下载：%v", err)
+			return err
 		}
 	}
 

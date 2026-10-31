@@ -2,6 +2,7 @@ package download
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -123,6 +124,43 @@ func TestAQueueFromANewerVersionIsNeverRewritten(t *testing.T) {
 	got, _ := os.ReadFile(path)
 	if string(got) != body {
 		t.Fatalf("那份文件被改写了：%s", got)
+	}
+}
+
+// 未来版本必须是可识别的只读错误，且合并失败时原文件一个字节也不能改。
+func TestMergingIntoANewerQueueReturnsAReadOnlyErrorAndLeavesItUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), QueueFileName)
+	body := `{"version":99,"tasks":[]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MergeIntoQueue(path, []*Task{newTask("BV1a|1", "甲")}); !errors.Is(err, ErrQueueFromNewer) {
+		t.Fatalf("未来版本错误不可识别：%v", err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != body {
+		t.Fatalf("未来版本队列被改写：%s", got)
+	}
+}
+
+// v0 队列并入新任务时也必须沿同一条迁移链，再以当前版本写回。
+func TestMergingIntoAV0QueueMigratesItBeforeAppending(t *testing.T) {
+	path := filepath.Join(t.TempDir(), QueueFileName)
+	if err := os.WriteFile(path, []byte(`{"tasks":[{"id":"old|1","title":"旧的","dest":"/x/old.m4a","status":"paused"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := MergeIntoQueue(path, []*Task{newTask("new|2", "新的")}); err != nil {
+		t.Fatal(err)
+	}
+	f := readQueueFile(t, path)
+	if f.Version != storeVersion {
+		t.Fatalf("迁移后版本是 %d，want %d", f.Version, storeVersion)
+	}
+	if len(f.Tasks) != 2 || f.Tasks[0].ID != "old|1" || f.Tasks[1].ID != "new|2" {
+		t.Fatalf("迁移或追加后任务不对：%+v", f.Tasks)
 	}
 }
 

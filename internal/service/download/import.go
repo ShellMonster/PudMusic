@@ -26,12 +26,18 @@ var ErrQueueFromNewer = errors.New("download: 队列来自更新的版本，本�
 // MergeIntoQueue 把 extra 并进 path 这份队列文件，按 ID 去重。
 //
 // 现有队列排在前面，extra 里没见过的追加在后（extra 内部保持给进来的顺序）。
-// 同一首两边都有时**以现有队列为准**：那是用户在这个应用里刚点的状态，
-// 拿一份几个月前的外来记录覆盖它是倒退。
-//
-// path 上的文件不存在不是错误，返回 nil。文件在但读不懂、或者版本对不上，就**不碰它**、返回错，
-// 避免静默清空一份正在下载的队列。
+// 同一首两边都有时以现有队列为准。
 func MergeIntoQueue(path string, extra []*Task) error {
+	return mergeIntoQueue(path, extra, false)
+}
+
+// MergeIntoQueuePreferExtra 合并队列时让 extra 中的快照覆盖同 ID 的磁盘记录。
+// 这是换挂当前 Manager 时使用的语义：当前内存状态比上次落盘的快照更新。
+func MergeIntoQueuePreferExtra(path string, extra []*Task) error {
+	return mergeIntoQueue(path, extra, true)
+}
+
+func mergeIntoQueue(path string, extra []*Task, extraWins bool) error {
 	if len(extra) == 0 {
 		return nil
 	}
@@ -41,33 +47,63 @@ func MergeIntoQueue(path string, extra []*Task) error {
 
 	tasks := []*Task{}
 	if b, err := os.ReadFile(path); err == nil {
-		var f queueFile
-		if err := json.Unmarshal(b, &f); err != nil {
+		f, err := decodeQueueFile(b)
+		if err != nil {
 			return fmt.Errorf("download: 队列文件读不懂（%s），没有动它：%w", filepath.Base(path), err)
 		}
-		if f.Version != storeVersion {
-			return fmt.Errorf("download: 队列文件是第 %d 版的，我们只到第 %d 版，没有动它",
-				f.Version, storeVersion)
+		if f.Version > storeVersion {
+			return fmt.Errorf("%w：文件是第 %d 版的，我们只到第 %d 版，没有动它",
+				ErrQueueFromNewer, f.Version, storeVersion)
+		}
+		if err := runQueueMigrations(&f, f.Version); err != nil {
+			return fmt.Errorf("%w：%s 没有动它", err, filepath.Base(path))
 		}
 		tasks = f.Tasks
+
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("download: 读队列：%w", err)
 	}
 
-	have := make(map[string]bool, len(tasks))
-	for _, t := range tasks {
-		if t != nil && keepOnRestore(t) {
-			have[t.ID] = true
+	if extraWins {
+		byID := make(map[string]*Task, len(tasks)+len(extra))
+		order := make([]string, 0, len(tasks)+len(extra))
+		for _, t := range tasks {
+			if t == nil || !keepOnRestore(t) || byID[t.ID] != nil {
+				continue
+			}
+			byID[t.ID] = t
+			order = append(order, t.ID)
+		}
+		for _, t := range extra {
+			if !keepOnRestore(t) {
+				continue
+			}
+			if byID[t.ID] == nil {
+				order = append(order, t.ID)
+			}
+			byID[t.ID] = t
+		}
+		tasks = tasks[:0]
+		for _, id := range order {
+			tasks = append(tasks, byID[id])
 		}
 	}
-	for _, t := range extra {
-		// 和 `Restore` 同一个门槛：认不出是哪一首、或者不知道往哪儿写的，
-		// 捞回来也是界面上按不动的死行。
-		if !keepOnRestore(t) || have[t.ID] {
-			continue
+	if extraWins {
+		// Already merged with extra snapshots above.
+	} else {
+		have := make(map[string]bool, len(tasks))
+		for _, t := range tasks {
+			if t != nil && keepOnRestore(t) {
+				have[t.ID] = true
+			}
 		}
-		tasks = append(tasks, t)
-		have[t.ID] = true
+		for _, t := range extra {
+			if !keepOnRestore(t) || have[t.ID] {
+				continue
+			}
+			tasks = append(tasks, t)
+			have[t.ID] = true
+		}
 	}
 
 	b, err := json.MarshalIndent(queueFile{Version: storeVersion, Tasks: tasks}, "", "  ")

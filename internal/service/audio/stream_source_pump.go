@@ -154,15 +154,20 @@ func (s *StreamSource) pour(resp *http.Response, from int64, buf []byte) error {
 
 // append 把一段字节写进缓存，并叫醒等着这些字节的人。
 func (s *StreamSource) append(b []byte) error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	off := s.filled
 	s.mu.Unlock()
 
 	if _, err := s.file.WriteAt(b, off); err != nil {
-		// 磁盘满了是这里最常见的错，而且**必须当成播放失败报出去**：
-		// 装在内存里假装成功的话，歌会播到缓存写不下的地方就停住，
-		// 界面上表现成「播到一半莫名停住」，跟磁盘满毫无关系。
 		return fmt.Errorf("audio: 在线流的缓存写不下去（磁盘满了？）：%w", err)
+	}
+	gaugeDelta := s.recordWrite(off, int64(len(b)))
+	gauge := s.gauge
+	if gauge != nil && gaugeDelta > 0 {
+		gauge.AddMediaTempBytes(gaugeDelta)
 	}
 
 	s.mu.Lock()
@@ -170,7 +175,6 @@ func (s *StreamSource) append(b []byte) error {
 	if s.size >= 0 && s.filled > s.size {
 		s.size = s.filled
 	}
-	gauge := s.gauge
 	// 🔴 **字节回来了就说一声**（票 #315）：这是「重连成功」的唯一判据——
 	// 请求没报错不算，连上了却一个字节都不下也不算（那种连接在用户听来
 	// 和没恢复一样）。
@@ -189,9 +193,6 @@ func (s *StreamSource) append(b []byte) error {
 	s.firstBytesSeen = true
 	s.cond.Broadcast()
 	s.mu.Unlock()
-	if gauge != nil {
-		gauge.AddMediaTempBytes(int64(len(b)))
-	}
 	if recovered && s.onReconn != nil {
 		s.onReconn()
 	}
@@ -424,17 +425,29 @@ func (s *StreamSource) sameContainer(urls []string) bool {
 // 解码器的读游标往前挪就等于把这首歌倒回开头——那正是「换流后从原位置
 // 继续」要避免的事。清缓存是为了把字节补齐，不是为了把进度倒回去。
 func (s *StreamSource) restart() error {
-	s.clearTempGauge()
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.Lock()
+	n := int64(0)
+	for _, r := range s.written {
+		n += r.end - r.start
+	}
+	gauge := s.gauge
+	s.mu.Unlock()
 	if err := s.file.Truncate(0); err != nil {
 		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
 	}
-	// 🔴 **尾部那一段的记账也要清**：截断把已经取回来的末尾那一段
-	// **一起抹掉**了（见 `restartTail`）。
-	s.restartTail()
 	s.mu.Lock()
+	s.written = nil
+	s.tailStart = -1
+	s.tailGot = 0
 	s.filled = 0
 	s.cond.Broadcast()
 	s.mu.Unlock()
+	if gauge != nil && n > 0 {
+		gauge.AddMediaTempBytes(-n)
+	}
 	return nil
 }
 

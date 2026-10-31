@@ -355,13 +355,14 @@ type fullPlayer struct {
 	bg *ui.Canvas
 	// bgW/bgH 是这张画布的尺寸（窗口改了尺寸要重建）。
 	bgW, bgH int
-	// bgURL/bgBitmap 是这张画布画的是哪一张封面（地址 + 位图）。变了才重画。
+	// bgURL/bgBitmap/bgSigma 是这张画布画的是哪一张封面以及实际使用的模糊半径。
+	// 变了才重画。
 	//
-	// ⚠️ **两个字段分开比，不拼成一个字符串**：原先是一个 `fmt.Sprintf` 出来的
-	// 键（地址 + 位图指针 + 宽高），于是**每一帧**都要拼一次字符串（一次分配
-	// ＋一次格式化），而这一帧本来可以一个字节都不分配。
+	// ⚠️ **sigma 也属于缓存身份**：清晰度设置可以在同一块画布尺寸上改变实际
+	// blur 半径；不纳入身份会把上一档的模糊结果继续显示给用户。
 	bgURL    string
 	bgBitmap *ui.Bitmap
+	bgSigma  float32
 	// bgDirty 是「画布要重画」那一下（画它要一个 Painter，只有画的时候有）。
 	bgDirty bool
 	// bgDraws 是这张画布被重画了几次。**给测试看的**：毛玻璃每帧重渲一遍就是
@@ -657,13 +658,13 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 //
 // 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
 //
-// ## ⚠️ **四个判据分开比，不拼成一个字符串**
-//
+// ## ⚠️ **五个判据分开比，不拼成一个字符串**
+
 // 原先是一个 `fmt.Sprintf("%s|%p|%dx%d", …)` 拼出来的键，于是**每一帧**都要
 // 拼一次字符串（一次分配 ＋ 一次格式化）——而满屏开着的时候这一帧是**每一帧**
 // 都要走的，那一笔于是每帧都付一遍。分开比是零分配的。
-func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int) bool {
-	return f.bgURL != url || f.bgBitmap != bm || f.bgW != w || f.bgH != h
+func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int, sigma float32) bool {
+	return f.bgURL != url || f.bgBitmap != bm || f.bgW != w || f.bgH != h || f.bgSigma != sigma
 }
 
 // viewFullBackdropCanvas 是背景那一层：封面糊过一次画进一张画布，之后每一帧
@@ -725,13 +726,14 @@ func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
 		// 封面还没来：底下是主题的底色（外头那一层），画布先不动。
 		return
 	}
-	// 换了封面、换了位图、或者窗口改了尺寸（画布的大小跟着变），才重画。
-	if s.full.backdropChanged(url, st.Bitmap, cw, ch) {
+	// 换了封面、换了位图、窗口改了尺寸，或者实际 blur sigma 变了，才重画。
+	if s.full.backdropChanged(url, st.Bitmap, cw, ch, clarityBlurSigma(clarity, float32(cw), winW)) {
 		if s.full.bg == nil || s.full.bgW != cw || s.full.bgH != ch {
 			s.full.bg = ui.NewCanvas(cw, ch)
 			s.full.bgW, s.full.bgH = cw, ch
 		}
 		s.full.bgURL, s.full.bgBitmap = url, st.Bitmap
+		s.full.bgSigma = clarityBlurSigma(clarity, float32(cw), winW)
 		s.full.bgDirty = true
 	}
 	if s.full.bg == nil {

@@ -39,7 +39,45 @@ func TestTheClarityTiersChangeBothTheCanvasAndTheBlur(t *testing.T) {
 	}
 }
 
-// **画布越大、模糊越小**——两者必须反向，否则「更清晰」是假的。
+func TestChangingBackdropClarityThroughSettingsIsStored(t *testing.T) {
+	tt, s, a, path := shellOnSettings(t, app.DefaultSettings(""))
+
+	settingRect(t, tt, s, "背景清晰度")
+	openSelect(t, tt, "选择背景清晰度")
+	if !tt.HasText("高清（流量更大）") {
+		t.Fatalf("背景清晰度下拉没有高清选项，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("高清（流量更大）"); err != nil {
+		t.Fatalf("点不到高清选项：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+
+	if got := a.SettingsSnapshot().BackdropClarity; got != app.BackdropClarityHD {
+		t.Fatalf("选择高清后设置是 %q，want %q", got, app.BackdropClarityHD)
+	}
+	if err := a.FlushSettings(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := app.LoadSettings(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.BackdropClarity != app.BackdropClarityHD {
+		t.Fatalf("选择高清后落盘的是 %q，want %q", saved.BackdropClarity, app.BackdropClarityHD)
+	}
+
+	// 再切回流畅，确认这个设置可以来回切换，而不是只写入一次。
+	settingRect(t, tt, s, "背景清晰度")
+	openSelect(t, tt, "选择背景清晰度")
+	if err := tt.Click("流畅"); err != nil {
+		t.Fatalf("点不到流畅选项：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := a.SettingsSnapshot().BackdropClarity; got != app.BackdropClaritySmooth {
+		t.Errorf("切回流畅后设置是 %q，want %q", got, app.BackdropClaritySmooth)
+	}
+}
+
 func TestTheBlurShrinksAsTheCanvasGrows(t *testing.T) {
 	prevDiv, prevBlur := 0.0, 0.0
 	for _, c := range []app.BackdropClarity{

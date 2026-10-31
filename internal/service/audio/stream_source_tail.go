@@ -161,7 +161,10 @@ func (h headReader) ReadAt(p []byte, off int64) (int, error) {
 	if off+int64(len(p)) > filled {
 		return 0, headNotReady{need: off + int64(len(p))}
 	}
-	return h.s.file.ReadAt(p, off)
+	h.s.writeMu.Lock()
+	got, err := h.s.file.ReadAt(p, off)
+	h.s.writeMu.Unlock()
+	return got, err
 }
 
 // fetchTail 发一条 Range 请求把 [start, 文件末尾) 取回来，写进缓存文件。
@@ -198,9 +201,11 @@ func (s *StreamSource) fetchTail(start int64) {
 		return
 	}
 
+	s.writeMu.Lock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.writeMu.Unlock()
 		return
 	}
 	// 记下尾部这一段从哪儿开始（`tailGot` 还是 0，所以**还没有任何字节
@@ -209,26 +214,44 @@ func (s *StreamSource) fetchTail(start int64) {
 		s.tailStart = start
 	}
 	s.mu.Unlock()
+	s.writeMu.Unlock()
 
 	buf := make([]byte, copyBufSize)
 	off := start
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
-			if _, werr := s.file.WriteAt(buf[:n], off); werr != nil {
+			s.writeMu.Lock()
+			s.mu.Lock()
+			valid := !s.closed && s.tailStart == start
+			s.mu.Unlock()
+			if !valid {
+				s.writeMu.Unlock()
 				return
 			}
+			if _, werr := s.file.WriteAt(buf[:n], off); werr != nil {
+				s.writeMu.Unlock()
+				return
+			}
+			gaugeDelta := s.recordWrite(off, int64(n))
+			if gauge := s.gauge; gauge != nil && gaugeDelta > 0 {
+				gauge.AddMediaTempBytes(gaugeDelta)
+			}
 			off += int64(n)
+
 			// 🔴 **先落盘、再记账**：顺序是反的话，读者会拿到一段
 			// 「说是有了、其实还是零」的字节——那是解不出来的噪声。
 			s.mu.Lock()
 			s.tailGot = off - start
 			s.cond.Broadcast()
 			s.mu.Unlock()
+			s.writeMu.Unlock()
 		}
+
 		if rerr != nil {
 			return
 		}
+
 	}
 }
 
