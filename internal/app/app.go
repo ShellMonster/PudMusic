@@ -772,6 +772,16 @@ type App struct {
 	// ⚠️ **只在内存里**：盘上那个索引只存 aid（格式不动——改了会让已有用户的
 	// 缓存全部作废），所以重启之后第一次问稿件详情之前播放条上没有数字。
 	commentsReplyCounts map[string]int64
+	// commentsFavoriteCounts 记着 bvid → 收藏数（`stat.favorite`）。
+	// commentsLikeCounts 记着 bvid → 获赞数（`stat.like`）。
+	//
+	// 🔴 **它们和 `commentsReplyCounts` 是同一趟来的**（票 #701）：那三个数在
+	// `stat` 这**一个对象**里，而播放条上那三枚键各要一个——分三次问就是
+	// 「一次能拿到的东西问了 B 站三次」。
+	//
+	// ⚠️ **只在内存里**（同 `commentsReplyCounts`）：盘上那个索引只存 aid。
+	commentsFavoriteCounts map[string]int64
+	commentsLikeCounts     map[string]int64
 	// commentsStatsKnown 记着「这个 bvid 的稿件详情**真的**问过」（两栏都拿到了）。
 	//
 	// ⚠️ **不能拿 `commentsAvids` 当这个判据**：盘上那个索引会往里塞 aid，而它

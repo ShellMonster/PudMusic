@@ -143,29 +143,42 @@ func (c *Client) FavFolders(ctx context.Context, upMid int64) ([]FavFolder, erro
 	return out, nil
 }
 
-// ArchiveStats 是一份稿件详情（`/x/web-interface/view`）里我们要的那两栏。
+// ArchiveStats 是一份稿件详情（`/x/web-interface/view`）里我们要的那几栏。
 //
-// # 为什么一次拿两样
+// # 为什么一次拿几样
 //
-// 播放条上那枚「评论」键要显示**评论数**（票 #682），而它要的那个数就在
-// `stat.reply` 里——和收藏 / 点赞要的 `aid` 是**同一个回包**。分成两个方法的话，
-// 同一首歌唱起来界面上要付两个往返；合成一个只多读一栏 JSON。
+// 播放条上那三枚键（赞 / 收藏 / 评论）各要一个数（票 #682 / #701），而它们要
+// 的三个数就在 `stat` 这**一个对象**里——和收藏 / 点赞要的 `aid` 也是**同一个
+// 回包**。分成几个方法的话，同一首歌唱起来界面上要付几个往返；合成一个只多读
+// 一栏 JSON。
 //
-// 🔴 **Reply（`stat.reply`）的零值语义：0 = 「没有这个数」**，不是「零条评论」。
-// B 站没给 `stat`（或者 `reply` 就是 0）时我们**不知道**那一首有没有人评论。
-// 对界面来说两者是同一件事（**不画数字**，见 `internal/ui/comments_entry.go`），
-// 所以类型上没有把两者分开——但调用方**不许**把 0 读成「没人评论」。
+// 🔴 **那三个数的零值语义：0 = 「没有这个数」**，不是「零条评论 / 零次收藏 /
+// 零个赞」。B 站没给 `stat`（或者那一栏就是 0）时我们**不知道**那一首有没有人
+// 评论 / 收藏 / 赞。对界面来说两者是同一件事（**不画数字**，见
+// `internal/ui/comments_entry.go`），所以类型上没有把两者分开——但调用方
+// **不许**把 0 读成「没人评论」。
+//
+// ⚠️ **这三个数是「整个稿件」的数，不是「这一 P」的**：多 P 的视频里放的是第 3
+// 集，显示的仍是整稿的数字（`stat` 挂在稿件上，不挂在分 P 上）。
 type ArchiveStats struct {
 	// Aid 是 avid（收藏 / 点赞 / 评论接口要的都是它）。
 	Aid int64
-	// Reply 是评论数。**0 = 没有这个数**（见上面那段）。
+	// Reply 是评论数（`stat.reply`）。**0 = 没有这个数**（见上面那段）。
 	Reply int64
+	// Favorite 是收藏数（`stat.favorite`）。**0 = 没有这个数**（见上面那段）。
+	//
+	// ⚠️ **它是「这个视频被收藏了多少次」，不是「有多少人收藏了」**——挂在
+	// 播放条那枚「收藏」键上时，它和那枚键的实心 / 空心（**我**收藏了没有）
+	// 是**两件不同的事**（票 #701 的语义要求）。
+	Favorite int64
+	// Like 是获赞数（`stat.like`）。**0 = 没有这个数**（见上面那段）。
+	Like int64
 }
 
-// ArchiveStats 查一个稿件的 avid 和评论数。**一次往返**（见 `ArchiveStats`）。
+// ArchiveStats 查一个稿件的 avid 和那三个数。**一次往返**（见 `ArchiveStats`）。
 //
 // bvid 空时当场返回 `ErrNoVideo`（不发请求）；B 站说没有这个稿件（aid 是 0）
-// 时也是 `ErrNoVideo`。`stat` 那一栏缺失**不算错**——Reply 留 0。
+// 时也是 `ErrNoVideo`。`stat` 那一栏缺失**不算错**——那三个数都留 0。
 //
 // 🔴 **`stat` 那一栏的形状漂移不许把整条打死**（票 #682 的对抗性审查）：
 // `encoding/json` 遇到类型对不上会让**整个反序列化**失败，而这一条是收藏
@@ -173,9 +186,13 @@ type ArchiveStats struct {
 // 换个形状就能把收藏和三连一起打死。改之前 `ArchiveID` 只解 `aid`，对这些漂移
 // 免疫。
 //
+// ⚠️ **票 #701 又加了两栏（`stat.favorite` / `stat.like`）**，而那条规矩**原样
+// 适用**：这两栏是播放条上那两枚键的读数，而收藏和三连**不用**它们——所以它们
+// 同样只能待在**第二遍**里，漂移时只丢数字。
+//
 // ⇒ 分两次解：先解出 `aid`（那一条**必须**成功，它是我们要的东西），再把 `stat`
-// 单独解一遍——**第二次失败只当 Reply=0**，而且 `reply` 用 `flexInt`（B 站可能
-// 写成字符串，见 `flexjson.go` 的文件头）。
+// 单独解一遍——**第二次失败只当那三个数都是 0**，而且三个数都用 `flexInt`
+// （B 站可能写成字符串，见 `flexjson.go` 的文件头）。
 func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, error) {
 	if bvid == "" {
 		return ArchiveStats{}, ErrNoVideo
@@ -203,13 +220,17 @@ func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, e
 	}
 	// ⚠️ **第二遍失败只当「没有这个数」**：`stat` 不是我们要的东西，而它坏了
 	// 不等于这一条读不懂。
-	reply := int64(0)
+	var reply, favorite, like int64
 	if len(d.Stat) > 0 {
 		var st struct {
-			Reply flexInt `json:"reply"`
+			Reply    flexInt `json:"reply"`
+			Favorite flexInt `json:"favorite"`
+			Like     flexInt `json:"like"`
 		}
 		if err := json.Unmarshal(d.Stat, &st); err == nil {
 			reply = st.Reply.Int64()
+			favorite = st.Favorite.Int64()
+			like = st.Like.Int64()
 		}
 	}
 	// ⚠️ **负数是上游的垃圾，按「没有这个数」算**：把 -1 当评论数画出来是
@@ -217,7 +238,13 @@ func (c *Client) ArchiveStats(ctx context.Context, bvid string) (ArchiveStats, e
 	if reply < 0 {
 		reply = 0
 	}
-	return ArchiveStats{Aid: d.Aid, Reply: reply}, nil
+	if favorite < 0 {
+		favorite = 0
+	}
+	if like < 0 {
+		like = 0
+	}
+	return ArchiveStats{Aid: d.Aid, Reply: reply, Favorite: favorite, Like: like}, nil
 }
 
 // ArchiveID 查一个稿件的 avid（收藏接口要的是它，见文件头）。

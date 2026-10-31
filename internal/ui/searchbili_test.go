@@ -104,6 +104,16 @@ type biliFixture struct {
 	// 合并必冲突。这一段是**只加不改**——合并时照这一格原样重放即可。
 	viewReply int64
 
+	// viewFavorite / viewLike 是 `/x/web-interface/view` 回的 `stat.favorite`
+	// （收藏数）和 `stat.like`（获赞数）——票 #701。
+	//
+	// ⚠️ **零值 = 「B 站没给这个数」**：播放条上那两枚键拿不到数就**不画数字**
+	//（不是画「0」——那会让用户以为没人收藏 / 没人赞）。
+	//
+	// ⚠️ **这一段是**只加不改**（理由同 `viewReply` 那一格）。
+	viewFavorite int64
+	viewLike     int64
+
 	// favoritedIn 是「这一首已经在哪些收藏夹里」；favoriteCalls 记下每一次写。
 	favoritedIn   []int64
 	favoriteCalls []url.Values
@@ -167,14 +177,20 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 
 	case r.URL.Path == "/x/web-interface/view":
 		// bvid → avid（收藏接口要的是 avid），外加 `stat.reply`——播放条上那一枚
-		// 「评论」键的评论数（票 #682）。
+		// 「评论」键的评论数（票 #682），和 `stat.favorite` / `stat.like`——收藏数
+		// 和获赞数（票 #701）。
+		//
+		// ⚠️ **三个数在同一个 `stat` 对象里**：这就是「零新增网络往返」那一条
+		// （播放条上那三枚键要的就是这一个回包）。
 		f.mu.Lock()
-		reply := f.viewReply
+		reply, favorite, like := f.viewReply, f.viewFavorite, f.viewLike
 		f.mu.Unlock()
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
 			"data": map[string]any{
 				"aid": fixtureAid, "bvid": r.URL.Query().Get("bvid"),
-				"stat": map[string]any{"reply": reply},
+				"stat": map[string]any{
+					"reply": reply, "favorite": favorite, "like": like,
+				},
 			}})
 
 	case r.URL.Path == "/x/v3/fav/folder/created/list-all":

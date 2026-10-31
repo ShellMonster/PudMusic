@@ -31,8 +31,6 @@ package ui
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -47,39 +45,37 @@ const commentsButtonKey = "playbar:comments"
 
 // 播放条上评论键那个数字的几档。
 //
-// # 🔴 宽度账（票 #682）
+// # 🔴 宽度账（票 #682 / #701）
 //
 // 改之前这一枚是**纯图标键**：盒子 32（`iconHitMd`），图形 18（`iconMd`）。
-// 加了数字之后它的宽 = 7（左内边距）+ 18（图形）+ 2（缝）+ 数字 + 7（右内边距）
-// = **67**（数字吃到上限 33 时）。**没有数字时仍然是 32**（数字那一格不画，
-// 缝也不占，于是那一档的画法和改之前一模一样）。
+// 票 #682 给它加过数字（那一版是 32 + 2 + 33 = **67**，数字格的上限是 33）。
 //
-//	commentCountGap    2  图形和数字之间的缝（比 `space.Px4` 窄：它们是一格里的两半）
-//	commentCountMaxW   33 数字那一格最宽多少（见下）
+// ⚠️ **票 #701 把那个折法换掉了**（`list.CountText` 那一族：「1k+ / 10k+ /
+// 99k+ / 1亿+」），而那一族的宽由**数字格的上限**（24.5）说了算——比旧的 33 还窄 8.5。
+// 而**这一枚键的形状也变了**：带数字时图形**紧贴**左沿（左右内边距 0），
+// 所以它的宽是 18 + 2 + 数字，**不是** 7 + 18 + 2 + 数字 + 7。
 //
-// 🔴 **33 是量出来的上限，不是随手取的**：左边那一列在 900 宽下**撑出轨道**
-// （`playbarLeftMinW` 比 1/5 的轨道宽），而它右端离滑块只有 **42.7**（实测）。
-// 评论键每宽 1 像素，那一截就长 1 像素——所以数字最多只能再吃 33：左列
-// 272 → **307**，右端 323，离滑块 330.7 还有 **7.7**。
+//	commentCountGap  2  图形和数字之间的缝（比 `space.Px4` 窄：它们是一格里的两半）
 //
-// ⚠️ **33 装得下「99.9万」（32.95）**，装不下「100.0万」（37.5）：`PlayCountText`
-// 对一亿以下按万折、保留一位小数，所以 ≥ 100 万条的稿子会**截成省略号**。
-// 那是有意的取舍——为了一百万条以上的评论把进度条挤掉不值；数字本身在那几档
-// 已经只是「很多」的意思，而完整的数在评论页页头（「共 N 条」）。
+// ⚠️ **数字格的上限现在是 `playbarCountMaxW`（24.5）**，不是这里的 33——
+// **三个键共用一个上限**（理由见 `playbar_counts.go` 那个常量的注释：它挡的是
+// 「数字本身被拉出那一格」——而**左列的宽本来就是常数**，所以碰撞不可能发生）。
+// 旧的 33 是票 #682 的账，那时的折法最宽的一档是「99.9万」（32.95），而新折法
+// 最宽的是「99k+」（24.49）。
 //
 // ⚠️ **字号是 `Size10`**：这是播放条上最小的一档，而数字是**附属信息**
-// （图标才是那一枚键的身份）。再大一号（Size11）上面那个 33 就不够了。
+// （图标才是那一枚键的身份）。再大一号（Size11）上面那个上限就不够了。
 const (
-	commentCountGap  = space.Px2
-	commentCountMaxW = 33
+	commentCountGap = playbarCountGap
 )
 
-// playbarCommentsW 是评论键**摆满**那一档的宽：32 + 2 + 33 = **67**。
+// playbarCommentsW 是评论键**摆满**那一档的宽：18 + 2 + 26 = **46**。
 //
 // ⚠️ **它和 `iconHitMd` 不是同一个数**，所以 `playbarActionsW` 不能再用
-// 「四枚 × 32」算——那一条是票 #573 的账（四枚纯图标键），这一票之后评论
-// 那一枚比别的宽 35（缝 2 + 数字 33）。
-const playbarCommentsW = iconHitMd + commentCountGap + commentCountMaxW
+// 「四枚 × 32」算——那一条是票 #573 的账（四枚纯图标键），票 #682 之后评论
+// 那一枚比别的宽 35，票 #701 之后是三枚带数字的键（见 `playbar.go` 的
+// `playbarActionsW`）。
+const playbarCommentsW = iconMd + commentCountGap + playbarCountMaxW
 
 // commentsKeyLabel / commentsKeyTip 是评论键的无障碍名字和悬停提示。
 //
@@ -89,18 +85,16 @@ const playbarCommentsW = iconHitMd + commentCountGap + commentCountMaxW
 // ⚠️ **没有数字时**名字就是「评论」两个字（一字不多）：本地文件不摆这一枚，
 // 而拿不到数（离线 / 还没回来）的时候画面上也没有数字——那时候多说一句
 // 「评论 0」是在撒谎。
+//
+// ⚠️ **折法是 `list.CountText`**（不是 `list.PlayCountText`）：这一族（票 #701）
+// 走「1k+ / 10k+ / 99k+ / 1亿+」那一套，因为它的**宽度上界必须钉死**（理由见
+// `widgets/list/count.go` 的文件头）。
 func commentsKeyLabel(count int64) string {
-	if t := list.PlayCountText(count); t != "" {
-		return "评论 " + t
-	}
-	return "评论"
+	return countKeyLabel("评论", count)
 }
 
 func commentsKeyTip(count int64) string {
-	if t := list.PlayCountText(count); t != "" {
-		return "看这一首的评论（" + t + "条）"
-	}
-	return "看这一首的评论"
+	return countKeyTip("评论", count, "看这一首的评论")
 }
 
 // viewCommentsButton 是播放条上那一枚「评论」键（票 #573，票 #682 起带数字）。
@@ -127,32 +121,25 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 		return
 	}
 	count := s.app.CommentCount()
-	countText := list.PlayCountText(count)
 	c.Key(commentsButtonKey)
 
 	// ⚠️ **壳走 `flat.Button`，内容自己拼**：`iconKey` 那一档只会画一个图标，
 	// 而这一枚要有「图形 + 数字」两半。壳、悬停淡底、圆角都和 `iconKey` 同一份
 	// （`flat.button`），只是内边距和缝按「一格里的两半」摆。
+	//
+	// 🔴 **左右内边距跟着数走**（`countKeyPadX`）：带数字时是 0（不然会宽出
+	// 14），没有数字时是 7（那时的形状和改之前一模一样）。
 	btn := flat.Button(c, "").Label(commentsKeyLabel(count)).
-		Height(iconHitMd).Padding(space.None, space.Px7).Gap(commentCountGap)
+		Height(iconHitMd).Padding(space.None, countKeyPadX(count)).Gap(commentCountGap)
 	btn.Children(func() {
-		// ⚠️ **图形那一半仍然「悬停变主色」**（和相邻几枚一样）：`iconKey` 的
-		// 悬停反馈是图形自己换色（上游 `hover:text-primary`），而 `Button` 只会
-		// 铺一层淡底。数字跟着图标一起换色没有意义（它是读数，不是控件）。
-		ic := ui.Icon(c, icon(iconComments)).FontSize(iconMd)
-		if col, ok := flat.IconAccentOnHover(c, false, btn.Hovered()); ok {
-			ic = ic.TextColor(col)
-		}
-		ic = flat.PressScale(ic, btn.Pressed(), false)
-
-		if countText != "" {
-			// ⚠️ **`MaxWidth` + `MaxLines(1)` + 省略号**：宽度账见上面那几个
-			// 常量——超过 33 的那几档（≥ 100 万条）截成「100…」，绝不把左列
-			// 撑得更宽（那样 900 宽下进度条就被压了）。
-			ui.Text(c, countText).FontSize(scale.Font(c, scale.Size10)).
-				TextColor(c.Theme().TextMuted).
-				MaxWidth(commentCountMaxW).MaxLines(1).Ellipsis("…")
-		}
+		// ⚠️ **结构是共享的那一份**（`countKeyRow`）：「图形 │ 缝 2 │ 数字」，
+		// 而图形紧贴那一枚键的左沿（宽度账见 `playbar_counts.go` 的文件头）。
+		//
+		// ⚠️ **数字那一格的上限是 33**：宽度账见上面那几个常量——它是一道
+		// **保险**（折法改了也不撞滑块），而当前那个折法（`list.CountText`）最宽
+		// 的一档是「99k+」（24.49），**刚好装满** 24.5。
+		countKeyRow(c, iconComments, count, btn.Hovered(), btn.Pressed(),
+			func(c *ui.Context) { countIcon(c, iconComments, btn.Hovered(), btn.Pressed()) })
 	})
 
 	if s.withTip(c, btn, commentsKeyTip(count)).Clicked() {

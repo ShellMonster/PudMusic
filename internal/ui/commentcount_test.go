@@ -32,8 +32,10 @@ import (
 
 // TestTheCommentKeyShowsTheCount 钉住**播放条那一枚键上画出了评论数**。
 //
-// 🔴 判据是「画面上有 `PlayCountText(1286)` 那一串字」（「1286」）：它就是
-// 播放量那一列同一个折法（「1.2万」那种），所以这里不自己拼数字。
+// 🔴 判据是「画面上有 `list.CountText(1286)` 那一串字」（「1k+」）：票 #701
+// 之后这一族走的是**自己的折法**（「1k+ / 10k+ / 100k+」），而**不是**播放量
+// 那一列的（「1.2万」）——后者更宽，而这一族的**宽度上界必须钉死**（理由见
+// `widgets/list/count.go` 的文件头）。
 //
 // ⚠️ **「评论」这两个字也要在**（无障碍名字 + 画面上那枚键的身份）：只断数字
 // 的话，一个把图标换成纯数字的实现照样绿。
@@ -43,9 +45,9 @@ func TestTheCommentKeyShowsTheCount(t *testing.T) {
 	if !tt.HasText("评论") {
 		t.Errorf("播放条上找不到「评论」键，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find(list.PlayCountText(1286)); !ok {
+	if _, ok := tt.Find(list.CountText(1286)); !ok {
 		t.Fatalf("「评论」键上没有评论数 %q（文字有 %q）——那一枚键只画了图标",
-			list.PlayCountText(1286), tt.Texts())
+			list.CountText(1286), tt.Texts())
 	}
 }
 
@@ -55,23 +57,26 @@ func TestTheCommentKeyShowsTheCount(t *testing.T) {
 // 不可见）。评论数画在图标旁边、可是名字里没有的话，读屏用户听到的仍然是
 // 「评论」两个字——数字对他们不存在。
 //
-// ⚠️ **判据是名字里带量级词**（「万」那一档）：1286 这个名字里带的是「1286」
-// 还是「1.2万」都可以（`PlayCountText` 的折法），但**必须带上那个数**。
+// ⚠️ **判据是名字里带那个数**（票 #701 之后是「12k+」那一档）。
 func TestTheCommentKeySaysTheNumberToScreenReaders(t *testing.T) {
 	tt, _ := commentCountPlaybarTester(t, mvItem(), 1200, 12345)
 
-	want := "评论 " + list.PlayCountText(12345)
+	want := "评论 " + list.CountText(12345)
 	key, ok := tt.Find(want)
 	if !ok {
 		t.Fatalf("无障碍名字不是 %q（文字有 %q）——读屏用户听不到评论数",
 			want, tt.Texts())
 	}
 	// 悬停提示里也要有那个数：数字只画在画面上，指针停在别处时用户读不到它。
+	//
+	// 🔴 **提示里给的是**完整数字**，不是画面上那个折过的字**（票 #701 的要求）：
+	// 画面上是「12k+」，而提示里是「整个稿件 12345」——那一格**没有宽度限制**，
+	// 而**完整的数才是那个数**（「12k+」是「至少 1.2 万」，不是「12345」）。
 	tt.Move(key.X+key.W/2, key.Y+key.H/2)
 	tt.Frame()
-	if !tt.HasText("条）") {
-		t.Errorf("悬停提示里没有「N 条」那半句（文字有 %q）——数字只画在画面上不够",
-			tt.Texts())
+	if !tt.HasText("整个稿件 12345") {
+		t.Errorf("悬停提示里没有「整个稿件 12345」那半句（文字有 %q）——"+
+			"数字只画在画面上不够", tt.Texts())
 	}
 }
 
@@ -122,12 +127,15 @@ func TestTheCommentCountNeverShowsZero(t *testing.T) {
 // 0 那个数在字面上就是「没有」，不是一个「0」。
 //
 // 🔴 上面那条 UI 用例只能证明「某一帧上没有 0」；而「0 会不会被画出来」在实现上
-// 是 `list.PlayCountText(0)` 与 `commentsKeyLabel` 两处决定的事——所以这里直接
+// 是 `list.CountText(0)` 与 `commentsKeyLabel` 两处决定的事——所以这里直接
 // 钉那两处。**两层一起**才挡得住「等到数落下来之后画个 0」那一档（那一档在
 // UI 用例上有 50% 的运气）。
+//
+// ⚠️ **折法是 `list.CountText`**（票 #701 之后），不是 `list.PlayCountText`——
+// 那一族走「1k+ / 10k+ / 100k+」那套（宽度上界必须钉死）。
 func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
-	if got := list.PlayCountText(0); got != "" {
-		t.Errorf("PlayCountText(0) = %q，want 空串——0 是「没有这个数」，不是「零条」", got)
+	if got := list.CountText(0); got != "" {
+		t.Errorf("CountText(0) = %q，want 空串——0 是「没有这个数」，不是「零条」", got)
 	}
 	if got := commentsKeyLabel(0); got != "评论" {
 		t.Errorf("commentsKeyLabel(0) = %q，want 「评论」——名字里不该多一个 0", got)
@@ -136,11 +144,17 @@ func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
 		t.Errorf("commentsKeyTip(0) = %q，want 不带数字的那一句", got)
 	}
 	// 非 0 那一档要真的带上数字（不然上面两条可以靠「永远不带」蒙混过关）。
-	if got := commentsKeyLabel(1286); got != "评论 1286" {
-		t.Errorf("commentsKeyLabel(1286) = %q，want 「评论 1286」", got)
+	if got := commentsKeyLabel(1286); got != "评论 "+list.CountText(1286) {
+		t.Errorf("commentsKeyLabel(1286) = %q，want 「评论 %s」", got, list.CountText(1286))
 	}
+	// 🔴 **提示里给的是**完整数字**（票 #701 的要求）：画面上那格窄，放不下
+	// 「1286」以外的完整数字——而提示那一格没有宽度限制，所以给完整数字。
 	if got := commentsKeyTip(1286); !strings.Contains(got, "1286") {
 		t.Errorf("commentsKeyTip(1286) = %q，里面没有那个数", got)
+	}
+	if got := commentsKeyTip(12345); !strings.Contains(got, "12345") {
+		t.Errorf("commentsKeyTip(12345) = %q，里面没有**完整**那个数"+
+			"（提示里该给完整的，不是画面上那个折过的字）", got)
 	}
 }
 
@@ -264,21 +278,28 @@ func commentCountWidths(t *testing.T, it app.Item, width int, reply int64) map[s
 //     的那个数（`fmt.Sprintf("%.1f")` 的同一个格式）。
 func TestTheWidthCommentsMatchTheCode(t *testing.T) {
 	// 1. 常量的账。
-	if playbarCommentsW != iconHitMd+commentCountGap+commentCountMaxW {
-		t.Errorf("playbarCommentsW = %d，want %d（32 + 缝 + 数字格）",
-			playbarCommentsW, iconHitMd+commentCountGap+commentCountMaxW)
+	//
+	// ⚠️ **票 #701 换了这一族的账**：三枚键（收藏 / 赞 / 评论）**各带一个数字**，
+	// 而带数字的那一枚是「图形 18 │ 缝 2 │ 数字（上限 24.5）」= 44.5——图形**紧贴**
+	// 左沿（左右内边距 0），分集那一枚照旧是 32。
+	if playbarCommentsW != iconMd+commentCountGap+playbarCountMaxW {
+		t.Errorf("playbarCommentsW = %v，want %v（18 + 缝 + 数字格）",
+			playbarCommentsW, iconMd+commentCountGap+playbarCountMaxW)
 	}
-	if playbarCommentsW != 67 {
-		t.Errorf("playbarCommentsW = %d，want 67（票 #682 量出来的那一档）", playbarCommentsW)
+	if playbarCommentsW != 44.5 {
+		t.Errorf("playbarCommentsW = %v，want 44.5（票 #701 量出来的那一档）", playbarCommentsW)
 	}
-	if playbarActionsW != 163 {
-		t.Errorf("playbarActionsW = %d，want 163（三枚 96 + 评论键 67）", playbarActionsW)
+	if playbarActionsW != 165.5 {
+		t.Errorf("playbarActionsW = %v，want 165.5（分集 32 + 三枚带数字的键 3 × 44.5）", playbarActionsW)
 	}
-	if playbarLeftMinW != 307 {
-		t.Errorf("playbarLeftMinW = %d，want 307（52 + 8 + 76 + 8 + 163）", playbarLeftMinW)
+	if playbarLeftMinW != 309.5 {
+		t.Errorf("playbarLeftMinW = %v，want 309.5（52 + 8 + 76 + 8 + 165.5）", playbarLeftMinW)
 	}
 	if commentCountGap != 2 {
 		t.Errorf("commentCountGap = %d，want 2", commentCountGap)
+	}
+	if playbarCountMaxW != 24.5 {
+		t.Errorf("playbarCountMaxW = %v，want 24.5（刚好装下最宽那一档「99k+」24.49）", playbarCountMaxW)
 	}
 
 	// 2/3. 注释要与代码和实测对得上。
@@ -289,14 +310,17 @@ func TestTheWidthCommentsMatchTheCode(t *testing.T) {
 	src := string(b)
 
 	// 注释里那句「最小宽度：**N**」。
-	claimed := -1
+	//
+	// ⚠️ **用 `%g` 而不是 `%d`**：票 #701 之后那个数是 **309.5**（上限 24.5
+	// 带来的半像素），而 `%d` 读一个带小数的数会**报错**（整数读不进小数）。
+	claimed := -1.0
 	for _, line := range strings.Split(src, "\n") {
 		if !strings.Contains(line, "playbarLeftMinW 是左边那一列的最小宽度") {
 			continue
 		}
 		if _, err := fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(
 			strings.TrimSpace(line), "// playbarLeftMinW 是左边那一列的最小宽度：**")),
-			"%d", &claimed); err != nil {
+			"%g", &claimed); err != nil {
 			t.Fatalf("读不出那一行注释里的宽度：%q（%v）", line, err)
 		}
 	}
@@ -304,11 +328,17 @@ func TestTheWidthCommentsMatchTheCode(t *testing.T) {
 		t.Fatal("playbar.go 里找不到「playbarLeftMinW 是左边那一列的最小宽度」那一行注释")
 	}
 	if claimed != playbarLeftMinW {
-		t.Errorf("注释说最小宽度是 %d，代码算出来是 %d——照着注释算的人会被带偏",
+		t.Errorf("注释说最小宽度是 %v，代码算出来是 %v——照着注释算的人会被带偏",
 			claimed, playbarLeftMinW)
 	}
 
 	// 歌名的宽：量四档，把「不是 76 的那一档」的真实数写进注释里。
+	//
+	// ⚠️ **票 #701 之后那个数是 101.9**：票 #682 时它是 82.6（1600 那一档），
+	// 而这一票把评论键**缩回 44.5**（图形紧贴左沿），于是让给歌名的又还回去了。
+	// 900 / 1000 / 1200 三档**都是** 101.9（那一列在这三档上由**保底宽**说话，
+	// 而保底宽钉着 309.5——比 76 多出来的那一截归**歌名那一列**）；1600 那一档
+	// 由轨道说话，是 **106.0**。
 	const longTitle = "一首歌的名字很长很长很长很长"
 	it := app.Item{
 		Source: "online", Type: "mv", Bvid: "BVcommentWidthDoc", Cid: "1",
@@ -362,10 +392,10 @@ func TestThePlayBarShowsTheCommentCountThenDropsItForALocalFile(t *testing.T) {
 	}
 	waitFrames(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
 
-	// ⚠️ **`Find` 是全等匹配**（画面上那一段字正好是「2468」），所以它认的是
-	// **画出来的**那个数字，不是无障碍名字里顺带带的（`HasText` 认子串，
-	// 「评论 2468」也能满足它——那样一个只改名字、不画数字的实现照样绿）。
-	want := list.PlayCountText(2468)
+	// ⚠️ **`Find` 是全等匹配**（画面上那一段字正好是折出来的那一串），所以它认的
+	// 是**画出来的**那个数字，不是无障碍名字里顺带带的（`HasText` 认子串，
+	// 「评论 1k+」也能满足它——那样一个只改名字、不画数字的实现照样绿）。
+	want := list.CountText(2468)
 	waitFrames(t, tt, "播放条上出现评论数", func() bool {
 		_, ok := tt.Find(want)
 		return ok
