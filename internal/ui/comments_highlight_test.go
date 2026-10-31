@@ -601,8 +601,14 @@ func TestTheCachedBodyFollowsANewAliasTable(t *testing.T) {
 				s.wake.set(c)
 				s.applyFrameTheme(c)
 				p := &s.comments
-				// 摆成「上一帧还是《晴天》」：槽位一致（不走换歌那一支）、
-				// 别名表是旧的、开关开着、配色算好。
+				// ⚠️ **抽屉要开着**（票 #706）：评论从独立路由页改成了右侧抽屉，
+				// 而 `syncComments` 现在**跟着抽屉走**——抽屉没开的时候它直接
+				// return（理由见 `underlay.go` 的 `syncComments`：用户没在看评论
+				// 的时候，不该替他去问 B 站）。
+				//
+				// ⇒ 这一条用例量的是「别名表变了之后排版缓存跟着变」，那件事
+				// 发生在 `syncComments` **跑起来之后**——而它现在要求抽屉开着。
+				s.commentsOpen = true
 				p.slot = s.app.CommentsSlot()
 				p.srcTitle, p.srcArtist = oldName, it.Artist
 				p.srcMention = true
