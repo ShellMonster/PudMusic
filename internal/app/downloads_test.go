@@ -348,6 +348,38 @@ func TestTheQueueIsSavedOnQuitAndRestoredOnStart(t *testing.T) {
 	}
 }
 
+// 缺少 version 键的旧队列也要经过公开的 MountDownloads seam 恢复，并能再走一遍重启路径。
+func TestMountDownloadsRestoresAV0QueueAcrossARestart(t *testing.T) {
+	f := newStreamFixture(t)
+	dir, queueFile := t.TempDir(), filepath.Join(t.TempDir(), download.QueueFileName)
+	oldDest := filepath.Join(dir, "旧版本的歌.m4a")
+	if err := os.WriteFile(queueFile, []byte(fmt.Sprintf(`{"tasks":[{"id":"old|1","title":"旧版本的歌","dest":%q,"status":"paused"}]}`, oldDest)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a1 := newDownloadApp(t, f, dir, queueFile)
+	first, ok := a1.DownloadSnapshot("old|1")
+	if !ok {
+		t.Fatalf("MountDownloads 没有恢复 v0 队列：%+v", a1.DownloadSnapshots())
+	}
+	if first.Title != "旧版本的歌" || first.Dest != oldDest {
+		t.Fatalf("v0 任务恢复错误：%+v", first)
+	}
+	if err := a1.SaveDownloads(); err != nil {
+		t.Fatalf("保存迁移后的队列：%v", err)
+	}
+	a1.Close()
+
+	a2 := newDownloadApp(t, f, dir, queueFile)
+	second, ok := a2.DownloadSnapshot("old|1")
+	if !ok {
+		t.Fatalf("重启后 v0 任务消失：%+v", a2.DownloadSnapshots())
+	}
+	if second.Title != first.Title || second.Dest != first.Dest {
+		t.Fatalf("重启后恢复的任务变了：第一次 %+v，第二次 %+v", first, second)
+	}
+}
+
 // 取流失败要变成记录页上那一行的一句人话，不是「下到一半停住」。
 func TestAFailedResolveBecomesAReadableError(t *testing.T) {
 	f := newStreamFixture(t)
