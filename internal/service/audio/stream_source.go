@@ -609,7 +609,9 @@ func (s *StreamSource) Read(p []byte) (int, error) {
 			off, s.cur = s.cur, s.cur+n
 			s.mu.Unlock()
 
+			s.writeMu.Lock()
 			got, err := s.file.ReadAt(p[:n], off)
+			s.writeMu.Unlock()
 			if got > 0 {
 				// 🔴 **游标要按真的读到多少挪**：读少了而游标还停在
 				// `off+n` 的话，下一次读会**跳过**中间那一段——而那一段

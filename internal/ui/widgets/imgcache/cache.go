@@ -40,6 +40,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -559,13 +560,20 @@ func (c *Cache) GetSizedStoredAt(url string, w, h float32, storeSide int) State 
 	return c.getStoredAt(c.rememberedSizedURL(url, pw, ph), storeSide)
 }
 
-// getStoredAt 是 `Get` 加一个「这一条要存多大」。
+func cacheKey(url string, storeSide int) string {
+	if storeSide <= maxStoredSide {
+		return url
+	}
+	return url + "#stored=" + strconv.Itoa(storeSide)
+}
+
 func (c *Cache) getStoredAt(url string, storeSide int) State {
 	url = absoluteURL(url)
 	if url == "" {
 		return State{}
 	}
-	v, loaded := c.entries.LoadOrStore(url, &entry{url: url, maxSide: storeSide})
+	key := cacheKey(url, storeSide)
+	v, loaded := c.entries.LoadOrStore(key, &entry{url: key, sourceURL: url, maxSide: storeSide})
 	e := v.(*entry)
 
 	c.mu.Lock()
@@ -734,18 +742,19 @@ func (c *Cache) start(e *entry) bool {
 //
 // 真的取消：请求带的就是这个 context，服务端收得到。
 func (c *Cache) Cancel(url string) {
-	// key 要和 `Get` 里那一个同一条规范化之后的串（见 `absoluteURL`），
-	// 否则取消的是一个永远不会被查的键。
 	url = absoluteURL(url)
-	if v, ok := c.entries.LoadAndDelete(url); ok {
+	c.entries.Range(func(k, v any) bool {
 		e := v.(*entry)
+		if e.sourceURL != url {
+			return true
+		}
+		c.entries.CompareAndDelete(k, e)
 		c.forget(e)
 		c.dropFailure(e)
-		// 票 #673：已经放掉像素的那本账里也要摘掉，不然它会一直挂在
-		// `released` 上（那本账只按条数淘汰，靠它自己清不掉）。
 		c.forgetReleased(e)
 		e.discard()
-	}
+		return true
+	})
 }
 
 // Retain 多一份使用者。借别人那份缓存时调它——**借的那一份活得至少和借它的
@@ -831,7 +840,8 @@ func (c *Cache) UsedBytes() int64 {
 
 // entry 是一次图片加载的槽位：在主线程建，由后台 goroutine 填。
 type entry struct {
-	url string
+	url       string
+	sourceURL string
 
 	mu       sync.Mutex
 	bm       *ui.Bitmap
@@ -978,7 +988,7 @@ type job struct {
 // ⚠️ **读盘不占在途名额**：名额是给网络下载的，盘上命中根本不用打图床。要是
 // 先抢名额再读盘，重启之后一屏几十张封面会跟正在下载的那几条一起排队。
 func (c *Cache) fetch(e *entry) {
-	name := c.diskName(e.url)
+	name := c.diskName(e.sourceURL)
 	fromDisk := false
 	var data []byte
 	// ⚠️ 盘上那份坏过就不要再读了（`skipDisk`）：删不掉的时候「读→失败→再读」
@@ -995,7 +1005,7 @@ func (c *Cache) fetch(e *entry) {
 		defer func() { <-c.inflight }()
 
 		var err error
-		data, err = c.download(e.ctx, e.url)
+		data, err = c.download(e.ctx, e.sourceURL)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				c.finish(e, nil, err)
@@ -1182,7 +1192,7 @@ func (c *Cache) decodeWorker() {
 					// 100% 占着 CPU，那张图永远停在「加载中」（既不出图也不报
 					// 失败），而网络一次都没被试过。所以这一张从此刻起不再从盘
 					// 上读（`skipDisk`），下一次直接走网络。
-					if rmErr := c.disk.remove(c.diskName(j.e.url)); rmErr != nil {
+					if rmErr := c.disk.remove(c.diskName(j.e.sourceURL)); rmErr != nil {
 						log.Printf("biu: 删不掉磁盘缓存里那份坏封面（%s）：%v", j.e.url, rmErr)
 					}
 					j.e.skipDiskFromNowOn()
@@ -1198,7 +1208,7 @@ func (c *Cache) decodeWorker() {
 				// 写盘排在 finish 之前：状态变成「有图」时这一笔已经在队列里，
 				// Close 会把它落完（测试靠这个判「重启之后不用再下」）。
 				if !j.fromDisk && c.disk != nil && !c.closed.Load() {
-					c.disk.write(c.diskName(j.e.url), j.data)
+					c.disk.write(c.diskName(j.e.sourceURL), j.data)
 				}
 			}
 			c.finish(j.e, bm, err)

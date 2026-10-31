@@ -161,7 +161,10 @@ func (h headReader) ReadAt(p []byte, off int64) (int, error) {
 	if off+int64(len(p)) > filled {
 		return 0, headNotReady{need: off + int64(len(p))}
 	}
-	return h.s.file.ReadAt(p, off)
+	h.s.writeMu.Lock()
+	got, err := h.s.file.ReadAt(p, off)
+	h.s.writeMu.Unlock()
+	return got, err
 }
 
 // fetchTail 发一条 Range 请求把 [start, 文件末尾) 取回来，写进缓存文件。

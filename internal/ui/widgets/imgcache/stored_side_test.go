@@ -84,10 +84,10 @@ func TestTheStoredSideReachesTheDecoderEndToEnd(t *testing.T) {
 	// 要一个 800×600 DIP 的格子，但让它**存 1600 长边**（高清档那种）。
 	url := srv.URL + "/backdrop.jpg"
 	c.GetSizedStoredAt(url, 800, 600, 1600)
-	waitState(t, c, sizedURL(url, 800, 600), 5*time.Second, loaded)
+	waitState(t, c, cacheKey(sizedURL(url, 800, 600), 1600), 5*time.Second, loaded)
 
 	// 把那一份拿回来量长边。
-	v, ok := c.entries.Load(sizedURL(url, 800, 600))
+	v, ok := c.entries.Load(cacheKey(sizedURL(url, 800, 600), 1600))
 	if !ok {
 		t.Fatal("缓存里没有那一条")
 	}

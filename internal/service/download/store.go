@@ -82,6 +82,12 @@ func (m *Manager) persistable() []*Task {
 			continue
 		}
 		cp := *t
+		cp.Chunks = append([]int(nil), t.Chunks...)
+		if t.Companion != nil {
+			companion := *t.Companion
+			companion.Chunks = append([]int(nil), t.Companion.Chunks...)
+			cp.Companion = &companion
+		}
 		if cp.Status.inflight() {
 			cp.Status = StatusPaused
 		}
@@ -103,8 +109,8 @@ func (m *Manager) Restore(path string) error {
 		}
 		return fmt.Errorf("download: 读队列：%w", err)
 	}
-	var f queueFile
-	if err := json.Unmarshal(b, &f); err != nil {
+	f, err := decodeQueueFile(b)
+	if err != nil {
 		return fmt.Errorf("download: 队列文件读不懂（%s）：%w", filepath.Base(path), err)
 	}
 	if f.Version > storeVersion {

@@ -162,19 +162,19 @@ func (s *StreamSource) append(b []byte) error {
 	s.mu.Unlock()
 
 	if _, err := s.file.WriteAt(b, off); err != nil {
-		// 磁盘满了是这里最常见的错，而且**必须当成播放失败报出去**：
-		// 装在内存里假装成功的话，歌会播到缓存写不下的地方就停住，
-		// 界面上表现成「播到一半莫名停住」，跟磁盘满毫无关系。
 		return fmt.Errorf("audio: 在线流的缓存写不下去（磁盘满了？）：%w", err)
 	}
 	gaugeDelta := s.recordWrite(off, int64(len(b)))
+	gauge := s.gauge
+	if gauge != nil && gaugeDelta > 0 {
+		gauge.AddMediaTempBytes(gaugeDelta)
+	}
 
 	s.mu.Lock()
 	s.filled = off + int64(len(b))
 	if s.size >= 0 && s.filled > s.size {
 		s.size = s.filled
 	}
-	gauge := s.gauge
 	// 🔴 **字节回来了就说一声**（票 #315）：这是「重连成功」的唯一判据——
 	// 请求没报错不算，连上了却一个字节都不下也不算（那种连接在用户听来
 	// 和没恢复一样）。
@@ -193,9 +193,6 @@ func (s *StreamSource) append(b []byte) error {
 	s.firstBytesSeen = true
 	s.cond.Broadcast()
 	s.mu.Unlock()
-	if gauge != nil && gaugeDelta > 0 {
-		gauge.AddMediaTempBytes(gaugeDelta)
-	}
 	if recovered && s.onReconn != nil {
 		s.onReconn()
 	}
@@ -436,22 +433,21 @@ func (s *StreamSource) restart() error {
 	for _, r := range s.written {
 		n += r.end - r.start
 	}
-	s.written = nil
 	gauge := s.gauge
+	s.mu.Unlock()
+	if err := s.file.Truncate(0); err != nil {
+		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
+	}
+	s.mu.Lock()
+	s.written = nil
+	s.tailStart = -1
+	s.tailGot = 0
+	s.filled = 0
+	s.cond.Broadcast()
 	s.mu.Unlock()
 	if gauge != nil && n > 0 {
 		gauge.AddMediaTempBytes(-n)
 	}
-	if err := s.file.Truncate(0); err != nil {
-		return fmt.Errorf("audio: 清空在线流的缓存：%w", err)
-	}
-	// 🔴 **尾部那一段的记账也要清**：截断把已经取回来的末尾那一段
-	// **一起抹掉了**（见 `restartTail`）。
-	s.restartTail()
-	s.mu.Lock()
-	s.filled = 0
-	s.cond.Broadcast()
-	s.mu.Unlock()
 	return nil
 }
 
