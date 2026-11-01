@@ -484,12 +484,27 @@ func (s *Shell) viewSideCollapse(c *ui.Context, st app.Settings, collapsed bool)
 	// 可能和设置不一致（`sideCollapsedVisual`），而点这一枚要翻的永远是设置
 	// （上游的 `onToggleCollapsed` 也是这么写的）。
 	if flatButton(c, label).Label(tip).Height(sideCollapseHeight).Clicked() {
-		if _, err := s.app.UpdateSettings(func(cur *app.Settings) {
-			cur.SideMenuCollapsed = !st.SideMenuCollapsed
-		}); err != nil {
-			s.addToast("折叠状态存不住："+err.Error(), notice.Danger)
-		}
+		s.toggleSidebar()
 	}
+}
+
+// toggleSidebar 翻侧栏的折叠状态。
+//
+// ⚠️ **翻的是设置里那个开关，不是这一帧画出来的那一档**：拖动的时候视觉档
+// 可能和设置不一致（`sideCollapsedVisual`），而翻的永远是设置（上游的
+// `onToggleCollapsed` 也是这么写的）。
+//
+// ⚠️ **菜单里那一项也走这里**（`menu.go` 的「显示/隐藏侧栏」）——所以两处
+// 翻的是同一份状态，而菜单上那个勾选态跟着设置走（`refreshMenuChecked`）。
+func (s *Shell) toggleSidebar() {
+	st := s.app.SettingsSnapshot()
+	if _, err := s.app.UpdateSettings(func(cur *app.Settings) {
+		cur.SideMenuCollapsed = !st.SideMenuCollapsed
+	}); err != nil {
+		s.addToast("折叠状态存不住："+err.Error(), notice.Danger)
+	}
+	s.refreshMenuChecked(s.app.Snapshot())
+	s.wake.invalidate()
 }
 
 // viewSideMenu 是默认菜单那一组（Biu 的 SD-04）。

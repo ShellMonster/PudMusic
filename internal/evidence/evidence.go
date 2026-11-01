@@ -1306,13 +1306,14 @@ var Items = []Item{
 		//
 		// 真机那一份是：用辅助功能读菜单栏（项、顺序、每一项的快捷键），
 		// 再真点一次「设置…」和「关于布丁音乐」。
-		Spec: "macOS 应用菜单：「关于布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）",
+		Spec: "macOS 应用菜单：七栏（应用 / 文件 / 编辑 / 播放 / 歌曲 / 显示 / 窗口），「关于布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）；「播放」「歌曲」两栏的命令走快捷键那一套，加速键跟着设置走",
 		Tests: []string{
 			"TestTheAppMenuColumnFollowsTheMacOrder",
 			"TestTheAboutItemIsOurOwn",
 			"TestTheSettingsItemHasTheMacShortcut",
 			"TestTheOtherColumnsAreStillThere",
-			"TestTheMenuHasFiveColumns",
+			"TestTheMenuHasSevenColumns",
+			"TestEveryColumnHasATitle",
 			"TestTheAppIsWrittenInChinese",
 			"TestTheSettingsMenuItemGoesToTheMainWindowEvenWithTheMiniInFront",
 			"TestTheAboutMenuItemBringsTheMainWindowBack",
@@ -1321,8 +1322,98 @@ var Items = []Item{
 			"TestTheAboutPanelRepoLinkOpensTheRepository",
 			"TestTheAboutPanelLicenseEntryOpensTheShippedNotices",
 			"TestTheAboutPanelClosesOnOK",
+			"TestThePlayColumnHasThePlayerControls",
+			"TestThePlayModeItemsAreRadios",
+			"TestThePlayModeCheckFollowsTheCurrentMode",
+			"TestTheDisplayColumnHasTheModesAndToggles",
+			"TestTheSongColumnItemsAreDisabledWithoutATrack",
+			"TestTheSongColumnGoesToTheRightPlace",
+			"TestTheFileColumnGoesToThosePages",
+			"TestTheCommandItemsCarryTheShortcuts",
+			"TestTheCommandItemsRunTheCommand",
+			"TestChangingAShortcutChangesTheMenuAccelerator",
+			"TestResettingTheShortcutsChangesTheMenuAccelerator",
+			"TestClearingAShortcutRemovesTheAcceleratorButKeepsTheItem",
+			"TestTheMenuAndTheShortcutFileAgreeOnTheSameKey",
 		},
 		RealOnly: true,
+	},
+	{
+		Category: Platform,
+		// ⚠️ **状态栏图标（macOS 菜单栏那个小音符）也是系统画的**：它的菜单
+		// 同样不在窗口的画面里，截图也截不到。
+		//
+		// ⚠️ **上游 Biu 在 macOS 上不建这个图标**
+		//（`_research/biu/electron/main.ts:161` 是 `if (process.platform !== "darwin")`），
+		// 而我们三个平台都建——所以这一条不是「照上游」，是「我们自己的决定」。
+		Spec: "状态栏图标的菜单是播放器形状：最上面说「现在在放什么」，然后是播放控制、窗口的那些去处、设置、退出；上游 Biu 那几项一项不少",
+		Tests: []string{
+			"TestTheTrayMenuHasThePlayerShape",
+			"TestTheNowPlayingLineSaysWhatIsPlaying",
+			"TestTheNowPlayingLineIsNotClickable",
+			"TestTheTrayCommandsRunTheCommand",
+			"TestTheTrayMenuKeepsEveryItemBiuHas",
+		},
+		RealOnly: true,
+	},
+	{
+		Category: Platform,
+		// ⚠️ **命令表是菜单与快捷键的地基**：菜单的加速键**会先于窗口**拿到
+		// 那个键（框架自己的 E2E：
+		// `mygo/internal/e2e/menu_shortcuts_windows_test.go:14`），所以同一个
+		// 动作不能有两份实现——而这一张表就是那份「只有一份」的保证。
+		Spec: "命令表：菜单、状态栏菜单、快捷键三处走同一份命令表；设置页存的那一串能翻译成菜单要的那一份（修饰键按框架的规范化顺序重排）",
+		Tests: []string{
+			"TestEveryShortcutCommandIsRegistered",
+			"TestTheCommandNamesMatchTheSettingsPage",
+			"TestTheMenuCommandsAreDerivedFromTheMenuItself",
+			"TestTheCommandOrderIsTheOrderTheUserActsIn",
+			"TestAnUnknownCommandFallsBackToItsID",
+			"TestTheMenuCanReadEverythingItNeedsToShow",
+			"TestTheStoredFormBecomesTheFrameworkForm",
+			"TestTheTranslationIsTheFrameworkForm",
+			"TestAnUntranslatableOneIsNotSilentlyDropped",
+			"TestAnEmptyShortcutTranslatesToNothing",
+			"TestTheKnownKeyTableMatchesTheFrameworkVocabulary",
+			"TestTheTranslationKeepsTheKeyOrder",
+		},
+	},
+	{
+		Category: Platform,
+		// ⚠️ **这一族是「对抗性审查之后修掉的那些毛病」的回归**。
+		//
+		// 四个坑，每一个都是「功能坏了 / 说谎了」那一类：
+		//
+		//  1. **⌘M 撞车**：框架「窗口 › 最小化 ⌘M」和迷你播放器抢同一个键，
+		//     而**菜单的加速键先于窗口拿到那个键** ⇒ 迷你播放器在 macOS 上
+		//     根本触发不了。
+		//  2. **状态栏「正在播放」是启动快照**：托盘菜单只建一次，那一行若在
+		//     建的时候求值，就永远是启动那一刻的那首。
+		//  3. **「赞」「显示评论」的禁用判据用错**：菜单用「有没有歌」，而界面
+		//     上用 `Likeable()` / `CommentsWorthAsking()` —— 两套判据。
+		//  4. **命令表的「进不进菜单」标志和菜单实况脱节** ⇒ 四条命令的
+		//     加速键不跟着设置走 ⇒ 旧键被菜单吃掉 ⇒ 键「失灵」。
+		Spec: "菜单这一批修掉的毛病：⌘M 归系统所有（迷你播放器用 ⌘⇧M）、状态栏「正在播放」跟着歌走、「赞」「显示评论」和界面用同一套判据、菜单里每一条命令项的加速键都跟着设置走",
+		Tests: []string{
+			"TestTheMiniPlayerShortcutYieldsCommandMToTheSystem",
+			"TestTheMenuDoesNotClaimCommandMForSomethingElse",
+			"TestTheNowPlayingLineFollowsTheCurrentSong",
+			"TestTheTrayPlaybackItemsAreDisabledWithoutATrack",
+			"TestTheLikeItemUsesTheSameJudgeAsTheInterface",
+			"TestTheCommentsItemUsesTheSameJudgeAsTheInterface",
+			"TestEveryCommandItemInTheMenuGetsItsShortcutRefreshed",
+			"TestTheMiniPlayerMenuItemCarriesItsShortcut",
+			"TestTheMiniPlayerMenuItemRunsTheCommand",
+			"TestTheCommandNamesAndTheSettingsPageAgree",
+			"TestTheDeveloperToolsOnlyShowInDevelopmentBuilds",
+			"TestThePlayModeItemsAreStillRadiosAfterTheFix",
+			"TestTheMiniPlayerIsInTheWindowColumn",
+			"TestTheWindowColumnStillHasTheSystemItems",
+			"TestTheMenuRefreshDoesNotAllocatePerFrame",
+			"TestTheMenuDisplayStateMatchesTheFullSnapshot",
+			"TestTheRadioGroupsAreAdjacent",
+			"TestTheAppColumnIsNamedAfterTheApp",
+		},
 	},
 	{
 		Category: Platform,

@@ -1018,6 +1018,10 @@ func (s *Shell) applySettingOK(what string, fn func(*app.Settings)) bool {
 		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 		return false
 	}
+	// ⚠️ **设置变了，菜单上的勾选态要跟着变**：显示模式、侧栏折叠那两样是
+	// 菜单里的勾选项，而菜单是系统画的、**不在窗口的画面里**——设置改了它
+	// 不会自己变（见 refreshMenuChecked）。
+	s.refreshMenuChecked(s.app.Snapshot())
 	return true
 }
 

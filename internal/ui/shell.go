@@ -1100,12 +1100,39 @@ type Shell struct {
 	// 却不退出。缓存绕开这个顺序，见 installLifecycle 里的注释。
 	closeOption app.CloseWindowOption
 
-	// tray 是通知区域的图标（**只在 Windows / Linux 上有**，macOS 不建托盘，
-	// 见 platform.TraySupported）。nil 表示这个平台没有托盘，或者建失败了。
+	// tray 是通知区域的图标。**三个平台都有**（macOS 上是菜单栏图标，
+	// 见 platform.TraySupported）。nil 表示建失败了。
 	//
 	// 句柄留着是为了不让它被回收：托盘图标的生命周期挂在它上面，GC 收走之后
 	// 通知区域里那一个格子就没了，而界面这边看不出任何异样（见 tray.go）。
 	tray *mygo.Tray
+
+	// menu 是应用菜单（**只有 macOS 上有**，见 installMenu）。nil 表示这个平台
+	// 不装菜单，或者还没装。
+	//
+	// ⚠️ **留着它是为了运行期刷新**：菜单里的勾选态和可用态（播放模式、显示
+	// 模式、侧栏折叠、迷你窗开着没有、当前有没有歌）要跟着状态变，而菜单是
+	// 系统画的、不在窗口的画面里——那些状态变了之后得我们伸手去改
+	//（`MenuItem.SetChecked` / `SetEnabled`），见 refreshMenuChecked。
+	menu *mygo.Menu
+
+	// menuState 是「菜单上那些勾选态」在**上一次刷新时**的样子。
+	//
+	// ⚠️ **它是用来「比一遍再改」的**（见 refreshMenuChecked）：框架的
+	// `SetChecked` 每次都要往主线程投一个任务，而刷新是每帧调一次的——
+	// 不比一遍就是每帧一次无谓的跨线程往返。
+	menuState menuState
+
+	// trayMenuRef 是状态栏图标那一份菜单。**只建一次**（`installTray`），
+	// 留着是为了**运行期刷**它里面「正在播放」那一行——见 refreshTrayMenu。
+	//
+	// ⚠️ 可以是 nil：托盘建失败了（或者这个平台没有托盘）。
+	trayMenuRef *mygo.Menu
+
+	// trayState 是状态栏菜单上那些会变的东西在**上一次刷新时**的样子。
+	//
+	// ⚠️ **它是用来「比一遍再改」的**（见 refreshTrayMenu）。
+	trayState trayState
 
 	// media 是系统媒体会话，由 main 那边 MountMedia 递过来（见 media_mount.go）。
 	//
