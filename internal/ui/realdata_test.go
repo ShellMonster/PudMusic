@@ -33,6 +33,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -159,6 +160,41 @@ var realDataLedger = []realDataPage{
 		// 这一页的内容不是 B 站给的，是它自己那一页设置项。判据是「有一整排真实
 		// 的设置项在画面上」——不是一句空状态。
 		Want: []string{"数据显示样式", "开机自启"},
+	},
+	{
+		Route: statsPath, Title: "听歌统计",
+		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
+			// 这一页的数据是**本机**攒出来的（不是 B 站给的），所以判据是
+			// 「自己塞进去的那份统计在画面上」。
+			b := newTestShell(t, mounted(func(_ *testing.T, a *app.App) {
+				if err := a.MountListeningStats(app.StatsPath(t.TempDir())); err != nil {
+					t.Fatal(err)
+				}
+				today := time.Now().Format("2006-01-02")
+				a.SeedListeningStatsForTest(app.ListeningStats{
+					Days: map[string]*app.StatsDayStat{
+						// ⚠️ **按天存的那一份要带 `Tracks` 明细**：Top 那两张表
+						// 是**从按天存的那一份里加起来**的（见 `statsPeriodRows`）。
+						today: {Ms: 5_400_000, Plays: 12, Completed: 8,
+							Tracks: map[string]*app.StatsTrackStat{
+								"mv:BV1|c1": {Ms: 5_400_000, Plays: 12, Title: "真数据一首", Artist: "真数据UP", ArtistMid: 42},
+							}},
+					},
+					Tracks: map[string]*app.StatsTrackStat{
+						"mv:BV1|c1": {Ms: 5_400_000, Plays: 12, Title: "真数据一首", Artist: "真数据UP", ArtistMid: 42},
+					},
+					Artists: map[int64]*app.StatsArtistStat{
+						42: {Name: "真数据UP", Ms: 5_400_000, Plays: 12},
+					},
+				})
+			}))
+			b.s.navigate(statsPath)
+			realDataFrames(b.tt, 3)
+			return b.s, b.tt
+		},
+		// 这一页的内容是**自己攒的统计**，判据是「那几个数在画面上」——
+		// 不是一句空状态。
+		Want: []string{"真数据一首", "真数据UP", "1 小时 30 分钟"},
 	},
 	{
 		Route: searchPath, Title: "搜索",

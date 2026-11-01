@@ -27,6 +27,7 @@ type Dependencies struct {
 
 	MountSettings        func(*app.App) error
 	MountFullPlayerPrefs func(*app.App)
+	MountListeningStats  func(*app.App)
 	MountLogin           func(*app.App) *bili.Client
 	MountStreaming       func(*app.App, *bili.Client)
 	MountSearch          func(*app.App, *bili.Client)
@@ -57,6 +58,7 @@ func DefaultDependencies() Dependencies {
 		NewApp:               app.New,
 		MountSettings:        ui.MountSettings,
 		MountFullPlayerPrefs: ui.MountFullPlayerPrefs,
+		MountListeningStats:  ui.MountListeningStats,
 		MountLogin:           ui.MountLogin,
 		MountStreaming:       ui.MountStreaming,
 		MountSearch:          func(a *app.App, cli *bili.Client) { a.MountSearch(cli) },
@@ -107,6 +109,9 @@ func Assemble(d Dependencies) (*app.App, error) {
 	}
 	if d.MountFullPlayerPrefs != nil {
 		d.MountFullPlayerPrefs(a)
+	}
+	if d.MountListeningStats != nil {
+		d.MountListeningStats(a)
 	}
 
 	var cli *bili.Client

@@ -993,6 +993,13 @@ type Shell struct {
 	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。
 	settings settingsPageState
 
+	// stats 是听歌统计页自己那一摊：看哪一档、那份快照、Top 那两张表的状态。
+	// 见 stats_page.go。
+	//
+	// ⚠️ 建在 Shell 上而不是每帧新建：那两张表是 `ui.ListState`，它记着滚动
+	// 位置和选中行，新建等于每帧回到顶上。
+	statsPage statsPageState
+
 	// update 是更新弹窗自己那一摊，见 update_dialog.go。
 	//
 	// ⚠️ 它挂在 Shell 上而不是 `App` 上，所以**每个窗口各有一份**。今天这个
@@ -1316,6 +1323,11 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	// 听歌统计那一页的状态。
+	//
+	// ⚠️ **两个选中行要显式给 -1**（理由见 `newStatsPageState`）：零值 0 会被
+	// 当成「选中了第一行」，而那一行铺的主色底会让它自己画的字看不见。
+	s.statsPage = *newStatsPageState()
 	// 键盘交接（票 #245 的 E4）：这一页自己画列表（`ui.Table`），所以「登记这一页
 	// 的方向键目标」和「焦点交回侧栏」得自己装进去——理由见 `localPage` 那两个
 	// 字段的注释。

@@ -230,6 +230,58 @@ var spacingMethods = map[string]bool{
 	"MarginStart": true, "MarginEnd": true,
 }
 
+// spacingMethodNotLayout 是「**名字撞了，但它不是布局间距**」的那几处。
+//
+// # 为什么要有这一份
+//
+// 框架的 `chart` 包里，`chart.Band.Padding(inner, outer)` 要的是**比例**
+// （一根柱子那一格的内边距和外边距，占那一格步长的几分之几）——而
+// `spacingMethods` 那张名单是**按方法名**认的，于是它把 `chart` 的那一处
+// 当成了布局间距。
+//
+// ⚠️ **它不是「放行一��裸数字」**：那一处的两个数**仍然是常量**
+// （`statsBandInner` / `statsBandOuter`），而护栏对「实参是常量」那一支
+// 仍然会报（见上面那段《它拦两种写法》）。
+//
+// ⇒ 所以这一份是**按「包 + 方法」**认的：只放行 `chart` 那个包的
+// `Band.Padding`，其余一处都不放行。
+//
+// ⚠️ **别把它扩大**：这里是「一个包的一个方法」，不是「凡是带 Padding 的
+// 都算」。放行范围一大，那道护栏就名存实亡了。
+var spacingMethodNotLayout = map[string]map[string]bool{
+	// `chart.Band.Padding(inner, outer)` 是**比例**（见上）。
+	"chart": {"Padding": true},
+}
+
+// isChartBandPadding 报「这一处是不是 `chart.Band.Padding(...)`」。
+//
+// ⚠️ **它认的是「接住这个方法的表达式是什么类型」**，不是「包名是 chart」：
+// 那一处的写法是 `chart.NewBand(labels...).Padding(...)`——**接住 `Padding`
+// 的是 `chart.NewBand(...)` 的返回值**（一个 `chart.Band`），而 `chart`
+// 那个标识符是**包的限定符**、不是接收者。
+//
+// ⇒ 所以判据是「**接收者的类型来自 `chart` 包**」：扫这个文件里的
+// `chart.X` 那些调用，看有没有哪一个的返回值接着调了 `Padding`。
+func isChartBandPadding(file *ast.File, call *ast.CallExpr, sel *ast.SelectorExpr) bool {
+	// 接收者得是一个调用（`chart.NewBand(...)` 那种）。
+	recv, ok := call.Fun.(*ast.SelectorExpr).X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	// 那个调用得是 `chart.X`（限定符是 `chart`）。
+	pkg, ok := recv.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	qual, ok := pkg.X.(*ast.Ident)
+	if !ok || qual.Name != "chart" {
+		return false
+	}
+	// 收窄到 `Padding` 这一支（`spacingMethodNotLayout` 说它是放行的）。
+	methods, ok := spacingMethodNotLayout[qual.Name]
+	return ok && methods[sel.Sel.Name]
+}
+
 // TestNoSpacingLiteralIsLeft 把「间距字面量」这件事钉住：界面层里不许再
 // 出现 `.Gap(8)` / `.Padding(0, 16)` 这种写法。
 //
@@ -283,6 +335,12 @@ func TestNoSpacingLiteralIsLeft(t *testing.T) {
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok || !spacingMethods[sel.Sel.Name] {
+				return true
+			}
+			// ⚠️ **「不是布局间距」的那几处放行**：见
+			// `spacingMethodNotLayout` 顶上那一段（`chart.Band.Padding` 要的是
+			// 比例，不是像素）。
+			if isChartBandPadding(file, call, sel) {
 				return true
 			}
 			for _, arg := range call.Args {

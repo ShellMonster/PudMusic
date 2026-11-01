@@ -12,12 +12,13 @@ import (
 // Layout 里登记 12 条（`/`、`later`、`history`、`follow`、`collection/:id`、
 // `user/:id`、`settings`、`download-list`、`dynamic-feed`、`local-music`、
 // `search`、`empty`），加上独立窗口的 `mini-player` 共 13 条；我们另加了第 14 条
-// `/login`（上游把登录挂在头像下拉里，我们给它一条路由）。兜底的 `*`（404）
+// `/login`（上游把登录挂在头像下拉里，我们给它一条路由）和第 15 条 `/stats`
+// （听歌统计，从顶栏右上角那枚图标进，不进侧栏）。兜底的 `*`（404）
 // **不在 `routes` 表里**——它是 `notFound` 那一个单独的值，因为 404 不是一条能
 // Match 的模式（见 `viewRoutes`）。
 //
-// 换句话说：`len(routes) == 14`，加上 `notFound` 一共 15 条（`TestFourteenRoutes`
-// 钉的就是这个 15）。
+// 换句话说：`len(routes) == 15`，加上 `notFound` 一共 16 条（`TestFourteenRoutes`
+// 钉的就是这个 16）。
 //
 // ⚠️ **第 15 条 `/comments` 没有了**（票 #706）：评论从**独立路由页**改成了
 // **右侧抽屉**（`comments_drawer.go`）——独立页把整个窗口顶掉，而评论是「当前
@@ -72,7 +73,8 @@ type Route struct {
 	Icon, ActiveIcon string
 }
 
-// routes 是那 14 条。**InMenu 的七条**，顺序就是侧栏菜单从上到下的顺序：前六条
+// routes 是那 15 条。**InMenu 的七条**（听歌统计不进侧栏），顺序就是侧栏菜单
+// 从上到下的顺序：前六条
 // 照 Biu 的 SD-04（推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
 // 下载记录），第七条「设置」是我们自己多摆的（Biu 那边设置只从头像下拉进）。
 //
@@ -205,6 +207,16 @@ var routes = []Route{
 	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
 	// 加进菜单的话用户每次想登录都要先在侧栏里找一圈。
 	{Match: "/login", Title: "扫码登录"},
+	// 听歌统计。**不加 InMenu**：它从顶栏右上角那枚图标进（见 navbar.go），
+	// 不进侧栏。
+	//
+	// ⚠️ **它不登录也能用**：统计是「本机一份」的东西，而侧栏那三个要
+	// 登录的入口是「跟着账号走」的。
+	//
+	// ⚠️ **它有内容**（stats_page.go），所以**不填 Empty**：填了就是一句
+	// 没人会看到的话。空状态是这一页**自己里面**画的（见 stats_view.go 的
+	// `viewStatsEmpty`）。
+	{Match: statsPath, Title: "听歌统计"},
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
@@ -370,13 +382,19 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 		// 「打开文件夹」和「删除文件」。
 		return s.viewLocalMusic
 	case followPath:
-		// 我的关注（follow.go）：左边分组 Tab + 右边虚拟网格 + 页内搜索。
+		// 我的关注：左边分组 Tab + 右边虚拟网格 + 页内搜索。
 		//
 		// ⚠️ **空状态在它自己里面画，而且分五种**：「没登录」「没关注任何人」
 		// 「搜了没搜到」「这一组还没有人」「这一块拉失败了」（见 follow.go 文件头）。
 		// 所以上面 `routes` 表里那一条的 `Empty` 仍然有用——它就是「没关注任何人」
 		// 那一支，别当成「已经有内容了就该清掉」。
 		return s.viewFollow
+	case statsPath:
+		// 听歌统计：四档（日 / 周 / 月 / 全部）+ 四枚磁贴 + 柱状图 + Top 歌 +
+		// Top 艺人（见 stats_view.go）。
+		//
+		// ⚠️ **空状态在它自己里面画**（「还没有听歌记录」），理由同 follow.go。
+		return s.viewStats
 	}
 	return nil
 }
@@ -417,8 +435,8 @@ func (s *Shell) pageContent(c *ui.Context, r *ui.Route, rt Route) {
 // ⚠️ 这里**一条 Toast 都不弹**了（原型那版会弹「这一页还没做」和
 // 「没有…这一页」）：
 //
-//   - 「还没做」：`routes` 那 14 条里**已经有 13 条有自己的画法**（`builtPage`），
-//     加上兜底的 404 那一页，一共 14 页有内容；剩下那一条走的是这一页自己的空状态
+//   - 「还没做」：`routes` 那 15 条里**已经有 14 条有自己的画法**（`builtPage`），
+//     加上兜底的 404 那一页，一共 15 页有内容；剩下那一条走的是这一页自己的空状态
 //     ——`/empty`（它就是空状态落地页，按设计该空）。对着其中任何一页说「这一页
 //     还没做」都是在说一件假事，用户只会以为这一页坏了。
 //
@@ -438,6 +456,19 @@ func (s *Shell) navigate(target string) {
 	s.crash = nil
 	if target == homePath && s.router.Path() == homePath {
 		s.backToHomeOverview()
+	}
+	// 🔴 **进听歌统计那一页时重新拿一次快照**：用户可能在别处听了一首歌，
+	// 而统计是「本机一份」的——不进这一页就看不到那个变化。
+	//
+	// ⚠️ **为什么在 `navigate` 而不在那一页的每帧副作用里**：这一页的副作用
+	// 是**按当前路由分派**的（见 underlay.go 的 `syncCurrentPage`）——用户
+	// 切到别的页时它压根不会被调，所以它自己看不到「用户走了、又回来了」。
+	//
+	// ⚠️ **而 `navigate` 每一处换页都走**：侧栏、顶栏、返回键、还有程序里
+	// 那些 `s.navigate(...)`——所以这一条覆盖了所有的进入方式。
+	if target == statsPath {
+		s.statsPage.refresh(s.app)
+		s.statsPage.loaded = true
 	}
 	s.router.Push(target)
 }
