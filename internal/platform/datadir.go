@@ -89,7 +89,31 @@ const LegacyUserDataDirName = "Biu MyGo"
 //
 // 拿不到用户配置目录时返回错误，让调用方记一条日志继续走：那时候框架自己会
 // 用默认值（应用名拼出来的那个新目录），是个能用的退路，值得带着它开起来。
+//
+// ⚠️ **已经有人钉过就别再钉**：调用方可以先用 `mygo.App.SetPath` 钉一个别的
+// 目录，而这一句会**无条件覆盖**它。
+//
+// 那是谁在钉？**E2E 那一轮**（`automation_e2e.go`）——它把数据目录挪到临时目录，
+// 好让 E2E 起的那一份**不和用户正在跑的那个应用抢单实例锁**
+// （那把锁在数据目录里，见 `internal/platform/single_instance.go` 的
+// `lockPath()`）。
+//
+// ⇒ 而「抢不到锁」的 symptoms 极怪：automation 的 socket **文件在**（插件的
+// `init` 建了它），但**没人听**——连上去是「connection refused」，而应用那边
+// **一个字都没说**（它把命令行递过去就正常退出了，退出码 0）。
 func PinUserDataDir() error {
+	// ⚠️ **先问一次「是不是已经钉过了」**：`mygo.App.Path` 在有覆盖值时直接
+	// 返回它（`mygo/paths.go:53-59`），而没有覆盖值时它会返回框架默认的
+	// 那个（应用名拼出来的）——**那不是「钉过了」**。
+	//
+	// ⇒ 所以判据是「框架默认那个」和「已经钉过的那个」不同。而框架默认那个
+	// 是 `os.UserConfigDir()` 拼上应用名（`mygo/paths.go:90`）——**不是**
+	// `LegacyUserDataDirName`（那是这个项目**故意**用的另一个名字，见本文件
+	// 顶上）。⇒ 两者的差别正好就是「有没有被钉过」。
+	if dir, err := mygo.App.Path(mygo.PathUserData); err == nil && filepath.Base(dir) != mygo.App.Name() {
+		// 已经被钉过了（目录名的最后一段不是应用名）：尊重它，别覆盖。
+		return nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return fmt.Errorf("拿不到用户配置目录：%w", err)

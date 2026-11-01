@@ -118,7 +118,22 @@ func (s *Shell) installMenu() {
 // （`openAbout` 里让开迷你 + 叫回主窗口）。
 func appMenu(s *Shell) *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
-		{ID: menuAppColumnID, Role: mygo.RoleAppMenu, Submenu: appColumn(s)},
+		// ⚠️ **第一栏的名字自己写，不靠 `RoleAppMenu` 的默认标签**。
+		//
+		// 框架的 `roleDefaults(RoleAppMenu)` 给的是 `App.Name()`（`mygo/menu.go:806`），
+		// 而 `App.Name()`（`mygo/app.go:316`）在拿不到 bundle 信息时**回落到可执行
+		// 文件的名字**——于是：
+		//
+		//   - 从 `mygo build` 打出来的包：名字是 `mygo.json` 里的「布丁音乐」 ✓
+		//   - **源码直接 `go build` 出来的**：名字是「biugo」/「biugo-e2e」 ✗
+		//
+		// ⇒ 而**界面上那一律叫「布丁音乐」**（`appName`），窗口标题也是它。
+		// 菜单栏第一栏写着「biugo」而窗口标题写着「布丁音乐」——**同一个应用两个
+		// 名字**，而 macOS 上左上角第一个菜单**永远**是应用名，用户会以为装错了
+		// 什么东西。
+		//
+		// ⇒ 所以自己写死 `appName`（和界面、窗口标题同一份）。
+		{ID: menuAppColumnID, Role: mygo.RoleAppMenu, Label: appName, Submenu: appColumn(s)},
 		{ID: menuFileColumnID, Role: mygo.RoleFileMenu, Submenu: fileColumn(s)},
 		{ID: menuEditColumnID, Role: mygo.RoleEditMenu},
 		// ⚠️ **「播放」「歌曲」那两栏必须自己写 `Label`**：框架没有这两个角色，

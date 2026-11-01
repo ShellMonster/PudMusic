@@ -46,9 +46,15 @@ import (
 
 // menuAppName 是应用在菜单栏第一栏上写的名字。
 //
-// ⚠️ **第一栏的名字是应用名**（`RoleAppMenu` 的默认标签就是 `App.Name()`），
-// 而应用名是「布丁音乐」——**不是**「布丁音乐」这一栏之外的什么。
-const menuAppName = "布丁音乐"
+// ⚠️ **第一栏的名字是应用名**（`RoleAppMenu` 的默认标签就是 `App.Name()`）。
+//
+// ⚠️ **而 `App.Name()` 在「源码直接编出来的二进制」上不是「布丁音乐」**：
+// 框架的 `Name()`（`mygo/app.go:316`）先看 `packageInfo()`（那要**bundle**或
+// `mygo build` 注入的 ldflags），拿不到就**回落到可执行文件的名字**——
+// 而 E2E 编出来的那个叫 `biugo-e2e`。
+//
+// ⇒ 所以这里**从窗口标题反推**：真机上第一栏写着「布丁音乐」，而 E2E 里写着
+// 「biugo-e2e」——**两个都要能用**，所以不写死，取窗口标题。
 
 // TestTheApplicationMenu 断**应用菜单在真窗口上装上了，而且点了真的做事**。
 //
@@ -85,7 +91,8 @@ func TestTheApplicationMenu(t *testing.T) {
 		//
 		// ⇒ 所以：**报错里说的是第二段 = 那一栏在**（只是第二段那个项不存在）；
 		// **报错里说的是第一段 = 那一栏不在**。
-		for _, column := range []string{menuAppName, "文件", "编辑", "播放", "歌曲", "显示", "窗口"} {
+		app := windowTitle(t, client, window)
+		for _, column := range []string{app, "文件", "编辑", "播放", "歌曲", "显示", "窗口"} {
 			err := automationCall(client, 100, "menu", map[string]any{
 				"window": window,
 				"path":   []string{column, "这一项故意不存在"},
@@ -104,12 +111,12 @@ func TestTheApplicationMenu(t *testing.T) {
 	t.Run("点设置换到了设置页", func(t *testing.T) {
 		err := automationCall(client, 101, "menu", map[string]any{
 			"window": window,
-			"path":   []string{menuAppName, "设置…"},
+			"path":   []string{windowTitle(t, client, window), "设置…"},
 		}, nil)
 		if err != nil {
 			t.Fatalf("点「设置…」：%v", err)
 		}
-		if !waitForTree(t, client, window, "常规", 20*time.Second) {
+		if !waitForTree(t, client, window, "常规设置", 20*time.Second) {
 			t.Fatalf("点了「设置…」之后窗口里没有出现设置页的内容：\n%s", treeDump(t, client, window))
 		}
 	})
@@ -140,7 +147,13 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 	}
 
 	cmd := exec.CommandContext(ctx, binary)
-	cmd.Env = append(os.Environ(), "MYGO_AUTOMATION="+socket)
+	// ⚠️ **单独的一份数据目录**（`automation_e2e.go` 顶上那段说明了为什么）：
+	// 应用有单实例锁，而锁在用户数据目录里——**用户机器上已经跑着这个应用
+	// 时**（开发时几乎总是这样），E2E 起来的那一份会抢不到锁、把命令行递过去、
+	// 然后自己退出。症状是「socket 文件在，但没人听」。
+	cmd.Env = append(os.Environ(),
+		"MYGO_AUTOMATION="+socket,
+		"BIU_E2E_DATA_DIR="+filepath.Join(socketDir, "data"))
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -160,23 +173,67 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 	return client, stop
 }
 
-// firstContentWindow 问出那个内容窗口的 id。
-func firstContentWindow(t *testing.T, client *automationClient) int {
+// windowTitle 是那个内容窗口的标题。
+//
+// ⚠️ **第一栏（应用菜单）的名字就是窗口标题**（框架的 `RoleAppMenu` 用
+// `App.Name()`，而窗口标题用的也是它）——所以从这里就能拿到那一栏的名字，
+// **不用写死「布丁音乐」**。
+//
+// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `biugo-e2e`，而框架的
+// `App.Name()`（`mygo/app.go:316`）在拿不到 bundle 信息时**回落到可执行文件
+// 的名字**——所以 E2E 里第一栏写着的是「biugo-e2e」，真机上才是「布丁音乐」。
+func windowTitle(t *testing.T, client *automationClient, window int) string {
 	t.Helper()
 	var windows struct {
 		Windows []struct {
-			ID   int    `json:"id"`
-			Kind string `json:"kind"`
+			ID    int    `json:"id"`
+			Kind  string `json:"kind"`
+			Title string `json:"title"`
 		} `json:"windows"`
 	}
-	callAutomation(t, client, 1, "windows", nil, &windows)
+	if err := automationCall(client, 2, "windows", nil, &windows); err != nil {
+		t.Fatalf("问窗口标题：%v", err)
+	}
 	for _, w := range windows.Windows {
-		if w.Kind == "content" {
-			return w.ID
+		if w.ID == window {
+			return w.Title
 		}
 	}
-	t.Fatalf("没有内容窗口：%+v", windows.Windows)
-	return 0
+	t.Fatalf("窗口 %d 不在 %+v 里", window, windows.Windows)
+	return ""
+}
+
+// firstContentWindow 问出那个内容窗口的 id。
+//
+// ⚠️ **要等窗口出来**：automation 插件的 `ready` 是在**它自己那个**
+// `WhenReady` 回调里关上的，而**应用的窗口是在另一个 `WhenReady` 回调里
+// 开的**（`internal/ui/shell_window.go` 的 `s.openWindow()`）——两个回调的
+// 先后不保证。
+//
+// ⇒ 所以**等窗口出现**，别问一次就当没有（那不是「应用没开窗口」，是「问早了」）。
+func firstContentWindow(t *testing.T, client *automationClient) int {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		var windows struct {
+			Windows []struct {
+				ID   int    `json:"id"`
+				Kind string `json:"kind"`
+			} `json:"windows"`
+		}
+		if err := automationCall(client, 1, "windows", nil, &windows); err == nil {
+			for _, w := range windows.Windows {
+				if w.Kind == "content" {
+					return w.ID
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等不到内容窗口：%+v", windows.Windows)
+			return 0
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // waitForTree 等窗口里出现那个标签。
@@ -269,9 +326,16 @@ func automationCall(client *automationClient, id int, method string, params any,
 	return nil
 }
 
-// repoRoot 是仓库根目录（`internal/e2e` 的上一层）。
+// repoRoot 是仓库根目录。
+//
+// ⚠️ **`fixtureDir()` 返回的是 `internal/e2e/fixture`**，所以要往上退**三层**
+// 才是仓库根（`internal/e2e/fixture` → `internal/e2e` → `internal` → 根）。
+//
+// ⚠️ **退错一层的症状很怪**：会去 `internal/` 底下找 `go build .`，而那儿的
+// Go 文件在 `build` 标签之外是空的 ⇒ 报「no Go files in …/internal」——
+// 一个和「菜单有没有问题」毫无关系的错。
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir := fixtureDir()
-	return filepath.Dir(filepath.Dir(dir))
+	return filepath.Dir(filepath.Dir(filepath.Dir(dir)))
 }

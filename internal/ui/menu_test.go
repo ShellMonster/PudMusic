@@ -48,6 +48,30 @@ func TestTheMenuHasSevenColumns(t *testing.T) {
 	}
 }
 
+// TestTheAppColumnIsNamedAfterTheApp 断**第一栏写的是应用名**。
+//
+// ⚠️ **为什么这一条要紧**：框架的 `roleDefaults(RoleAppMenu)` 给的是
+// `App.Name()`（`mygo/menu.go:806`），而 `App.Name()`（`mygo/app.go:316`）在
+// 拿不到 bundle 信息时**回落到可执行文件的名字**——
+//
+//   - `mygo build` 打出来的包：「布丁音乐」 ✓
+//   - **源码直接 `go build` 出来的**：「biugo」/「biugo-e2e」 ✗
+//
+// ⇒ 而**界面上和窗口标题一律是「布丁音乐」**（`appName`）。菜单栏第一栏写着
+// 另一个名字 ⇒ **同一个应用两个名字**，而 macOS 上左上角第一个菜单**永远**是
+// 应用名——用户会以为装错了什么东西。
+func TestTheAppColumnIsNamedAfterTheApp(t *testing.T) {
+	b := newTestShell(t)
+	m := appMenu(b.s)
+	col := m.Items()[0]
+	if col.Role != mygo.RoleAppMenu {
+		t.Fatalf("第一栏不是应用菜单，是 %q", col.Role)
+	}
+	if col.Label != appName {
+		t.Errorf("第一栏写的是 %q，want %q（和应用名、窗口标题同一份）", col.Label, appName)
+	}
+}
+
 // TestEveryColumnHasATitle 断**每一栏都有名字**。
 //
 // ⚠️ **为什么这一条要紧**：菜单栏上那一栏的名字就是**那一栏的 `Label`**

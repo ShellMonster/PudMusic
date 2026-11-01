@@ -1412,6 +1412,7 @@ var Items = []Item{
 			"TestTheMenuRefreshDoesNotAllocatePerFrame",
 			"TestTheMenuDisplayStateMatchesTheFullSnapshot",
 			"TestTheRadioGroupsAreAdjacent",
+			"TestTheAppColumnIsNamedAfterTheApp",
 		},
 	},
 	{
