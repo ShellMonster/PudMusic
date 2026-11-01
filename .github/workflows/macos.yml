@@ -74,12 +74,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # 两个 E2E 一起跑（**一条命令**）：
+          # 四个 E2E 一起跑（**一条命令**）：
           #   - TestMyGoAutomationDrivesNativeUIAndCapturesIt：框架那一族
           #   - TestTheApplicationMenu：菜单栏那一族（票 #712），它在**真窗口**上
           #     按标题找栏、点「设置…」换页
           #   - TestTheStatsPage：听歌统计那一族，它在**真窗口**上按顶栏那枚
           #     图标进统计页
+          #   - TestTheListProgressBarIsAProgressIndicatorWithAName：列表行下面那条
+          #     进度条（票 #703 的 C 项），它断的是**无障碍树**里那一项的
+          #     角色 / 值 / 名字——**只有真窗口 + automation 才读得到**
           #
           # 为什么合成一条命令：它们各自都要**把整个应用编一遍**，而 CI 机器上
           # 那一步不便宜——拆成两条命令就是编两遍，第二遍编的时候机器正忙着，
@@ -91,7 +94,7 @@ jobs:
           # 没有别的实例，这一族本来能过；但**本地**跑的时候用户机器上几乎总是
           # 跑着这个应用，而那一轮会抢不到锁、然后自己退出。
           BIU_RUN_MYGO_E2E=1 go test -tags e2e ./internal/e2e \
-            -run 'TestMyGoAutomationDrivesNativeUIAndCapturesIt|TestTheApplicationMenu|TestTheStatsPage' \
+            -run 'TestMyGoAutomationDrivesNativeUIAndCapturesIt|TestTheApplicationMenu|TestTheStatsPage|TestTheListProgressBarIsAProgressIndicatorWithAName' \
             -count=1 -timeout 300s
 
       - name: Verify generated resources
