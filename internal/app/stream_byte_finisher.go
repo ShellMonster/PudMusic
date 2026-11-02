@@ -29,7 +29,6 @@
 package app
 
 import (
-	"io"
 	"sync/atomic"
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
@@ -63,6 +62,11 @@ type sourceFinisher struct {
 	// 另一个入口被点上时（键可能还算不出来），靠它也能把在补的源找回来。
 	identity string
 	src      *audio.StreamSource
+	// track / tier 是这一份在缓存里的位置。**收养时要 Protect**（不许被
+	// 容量淘汰半路删掉——删了就是白下一整首，还落一份说谎的记录），
+	// 走人的时候要解除；两个动作配对，靠的就是这两栏。
+	track string
+	tier  string
 }
 
 // byteCacheIdentity 报这一首「不管从哪个入口进来都是这一个」的身份。
@@ -103,10 +107,23 @@ func (a *App) adoptPreviousTrack(prev *onlineTrack) {
 	if a.finishers == nil {
 		a.finishers = map[string]*sourceFinisher{}
 	}
-	f := &sourceFinisher{identity: byteCacheIdentity(prev.item), src: prev.source}
+	f := &sourceFinisher{
+		identity: byteCacheIdentity(prev.item),
+		src:      prev.source,
+		track:    prev.cacheTrack,
+		tier:     prev.cacheTier,
+	}
 	a.finishers[prev.cacheTrack] = f
 	a.mu.Unlock()
 
+	// 🔴 **补完的那一份不许被淘汰半路删掉**（审查①的 P2-2）：缓存逼近上限
+	// 时，LRU 按「最久没动过」排，别的一首下完就会把这份还没动过几下的
+	// 删掉——pump 还在往一个已 unlink 的 inode 上写，下完落的是一份
+	// 「complete:true 指向不存在的 bin」的说谎记录。收养时刻刚被
+	// `releaseByteCacheProtect` 解除过保护，这里要重新标上。
+	//
+	// ⚠️ **锁外面调**：它要拿 `a.mu`（取缓存对象）。
+	a.protectByteCache(f.track, f.tier)
 	prev.adopt()
 	go f.drain(a)
 }
@@ -114,24 +131,26 @@ func (a *App) adoptPreviousTrack(prev *onlineTrack) {
 // drain 等这条源走到终态，然后收尸。
 //
 // 「等」的方式是**读它**：泵自己在往下走，读只是跟着它的进度走；下完那一刻
-// 源会先报 `OnComplete`（缓存记上「完整」——那一份闭包认的还是这一首的
-// 键和档），然后 `Read` 返回 `io.EOF`。中途拉不动了是 `ErrStreamDead`，
-// 被人关了是 `ErrSourceClosed`——三种终态都一样：关源，走人。
+// 源会先报 `OnComplete`（缓存记上「完整」并写日志——那一份闭包认的还是这一
+// 首的键和档，「记没记上」只有它知道，这里不说这句话），然后 `Read` 返回
+// `io.EOF`。中途拉不动了是 `ErrStreamDead`，被人关了是 `ErrSourceClosed`
+// ——三种终态都一样：关源，走人。
 func (f *sourceFinisher) drain(a *App) {
 	defer a.removeFinisher(f)
 	buf := make([]byte, 64<<10)
 	for {
 		if _, err := f.src.Read(buf); err != nil {
-			if err == io.EOF {
-				a.logf("biu: 上一首在后台下完了，缓存记上了")
-			}
 			break
 		}
 	}
 	f.src.Close()
 }
 
-// removeFinisher 把走完了的 finisher 从表里摘掉。
+// removeFinisher 把走完了的 finisher 从表里摘掉，并解除它的淘汰保护。
+//
+// 🔴 **Protect / Unprotect 必须配对**：收养那一刻标上的保护，在**每一条**
+// 退出路径（下完了、拉死了、被收回、退出全关）都要解掉——不然用户听过的
+// 每一首被切走的歌都会永远占着盘，2 GB 上限形同虚设。
 func (a *App) removeFinisher(f *sourceFinisher) {
 	a.mu.Lock()
 	for k, v := range a.finishers {
@@ -140,13 +159,26 @@ func (a *App) removeFinisher(f *sourceFinisher) {
 		}
 	}
 	a.mu.Unlock()
+	if f.track != "" && f.tier != "" {
+		a.unprotectByteCache(f.track, f.tier)
+	}
 }
 
 // cancelFinishersFor 把「和 it 是同一首」的在补源收回来（关掉）。
 //
 // 🔴 **它必须在为 it 建新的字节源之前调**：新源以 `O_TRUNC` 打开同一个
-// 缓存文件，两条源同时写一个文件写出来的就是垃圾。匹配按**键或身份**：
-// 键罩得住「身份齐了的同一首」，身份罩得住「cid 还没补出来」的那一路。
+// 缓存文件，两条源同时写一个文件写出来的就是垃圾。
+//
+// 匹配分两档，**互斥**（审查①的 P2-1）：
+//
+//	键算得出来	只按键匹配。此时再用身份去匹配会把**不相干的在补源错杀**
+//			——同一个投稿的另一分 P（不同缓存文件，毫无冲突）会被
+//			白杀掉，保住半截下载的收益就丢了。
+//			⚠️ **同首另一档仍会被键匹配杀掉**（finisher 表按 track 建键，
+//			复审的 P3-a 指正）：行为是安全的「宁杀勿漏」——真正的
+//			同文件冲突必须挡，多杀的那几条只是丢了半截下载。
+//	键算不出来	退到身份匹配兜底（cid 还没问出来的那一路只有它罩得住，
+//			宁粗勿漏——漏了就是两条源同写一个文件）。
 //
 // ⚠️ **锁外面关**：源的 `Close` 要等它的下载 goroutine 退出来。
 func (a *App) cancelFinishersFor(it Item) {
@@ -161,7 +193,13 @@ func (a *App) cancelFinishersFor(it Item) {
 	a.mu.Lock()
 	var kill []*sourceFinisher
 	for k, f := range a.finishers {
-		if (key != "" && k == key) || (ident != "" && f.identity == ident) {
+		matched := false
+		if key != "" {
+			matched = k == key
+		} else {
+			matched = ident != "" && f.identity == ident
+		}
+		if matched {
 			delete(a.finishers, k)
 			kill = append(kill, f)
 		}

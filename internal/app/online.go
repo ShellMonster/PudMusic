@@ -517,6 +517,13 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		wake := a.wake
 		a.mu.Unlock()
 
+		// 🔴 **上一份的保护解除**（2026-11-02 复审的 P2-a）：tr 是「从缓存
+		// 命中播着的那一条」时它带着保护，而新装的 track `cacheTrack` 是空——
+		// 不在这里解的话，旧那份会**本会话内永远不可淘汰**（下一次切歌时
+		// prevTrack 已经是空键的新 track，release 成空操作）。
+		// `restreamFromByteCache` 一直是这么做的，三条换轨路要一致。
+		a.releaseByteCacheProtect(tr)
+
 		if old != nil {
 			old.Close()
 		}
@@ -1875,13 +1882,19 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// 「这一份缓存齐了」。
 		//
 		// ⚠️ **它在下载 goroutine 里调**：所以它只做一件事：写元数据
-		// （那一层自己管锁）。**不许在这里拿 `a.mu`**——那把锁是界面
-		// 每帧都要的。
+		// （那一层自己管锁）和写一行日志。**不许在这里拿 `a.mu`**——
+		// 那把锁是界面每帧都要的。
+		//
+		// ⚠️ **日志说「记上了」要以返回值为准**（审查①的 P3-1）：服务器
+		// 不给 `Content-Length` 时字节流会走完，但缓存**什么都没记**——
+		// 拿「下完了」当「记上了」，事后查日志会被骗。
 		OnComplete: func(size int64) {
 			if cachePath == "" {
 				return
 			}
-			a.markByteCacheComplete(it, s.Quality, ref, size)
+			if a.markByteCacheComplete(it, s.Quality, ref, size) {
+				a.logf("biu: 这一首的字节下完了，缓存记上了：%q（%s）", it.Title, ref.Label)
+			}
 		},
 	})
 	if err != nil {
@@ -2741,6 +2754,11 @@ func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack,
 		a.reopenInFlight = false
 		wake := a.wake
 		a.mu.Unlock()
+
+		// 🔴 **上一份的保护解除**（复审的 P2-a，理由同 `restreamOnline`）：
+		// tr 从缓存命中播着时带着保护，新装的 track 没有缓存键——不解的话
+		// 旧那份本会话内永远不可淘汰。
+		a.releaseByteCacheProtect(tr)
 
 		if old != nil {
 			old.Close()

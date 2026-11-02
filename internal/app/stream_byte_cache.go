@@ -70,25 +70,45 @@ import (
 //	audio  只认 `sid`（音乐库的身份就是它；bvid/cid 即便在场也不是身份）
 //
 // 分 P 仍然分开（cid 不同 = 音频不同）；两种类型不会撞（`type` 栏还在）。
+//
+// 🔴 **audio 的键保持五栏**（`source|audio|||sid`，bvid/cid 两栏留空）：
+// 旧版 `streamKey` 的 audio 键**就是这个形状**（音乐库条目的 bvid/cid 本来
+// 就是空的）——新旧同形，音乐库那一半曲库的旧缓存**不需要迁移**。（这一版
+// 曾经写成四栏，旧键全部认不出来：审查①的 P1-1。）
 func byteCacheTrack(it Item) string {
 	if it.Type == "audio" {
-		return it.Source + "|audio||" + it.Sid
+		return it.Source + "|audio|||" + it.Sid
 	}
 	return it.Source + "|mv|" + it.Bvid + "|" + it.Cid + "|"
 }
 
-// legacyByteCacheTrack 把 2026-11-02 之前的旧键认出来，给迁移用。
+// legacyByteCacheTrack 把需要迁移的旧键认出来，给迁移用。
 //
-// 旧键照抄 `streamKey`，五栏全拼——于是 mv 那一路可能带着非空的 sid。
-// 新键永远不会（见 `byteCacheTrack`）。返回 ok = false 表示「这不是要迁移的键」。
+// 旧键照抄 `streamKey`，五栏全拼。要迁移的只有两种：
 //
+//	mv 带着非空的 sid	主修的那一刀（新键 mv 侧永远 sid 空）
+//	audio 带着 bvid/cid 噪声	新键的 audio 侧两栏永远空
+//
+// 其余（两种类型的同形键）返回 ok = false——「这不是要迁移的键」。
 // 它只认形状，不碰盘：真正的搬迁在 `streamaudio.Cache.Migrate` 那一层。
 func legacyByteCacheTrack(track string) (string, bool) {
 	f := strings.Split(track, "|")
-	if len(f) != 5 || f[1] != "mv" || f[4] == "" {
+	if len(f) != 5 {
 		return "", false
 	}
-	return f[0] + "|" + f[1] + "|" + f[2] + "|" + f[3] + "|", true
+	switch f[1] {
+	case "mv":
+		if f[4] == "" {
+			return "", false
+		}
+		return f[0] + "|mv|" + f[2] + "|" + f[3] + "|", true
+	case "audio":
+		if f[2] == "" && f[3] == "" {
+			return "", false
+		}
+		return f[0] + "|audio|||" + f[4], true
+	}
+	return "", false
 }
 
 // byteCacheKeyReady 报「这一首的缓存键现在算得出来吗」。
@@ -224,6 +244,11 @@ func (a *App) byteCachePathFor(track, tier string) string {
 
 // markByteCacheComplete 在这一首**下完**之后，把缓存标成完整的。
 //
+// 返回值说「这一份**真的记上了没有**」（审查①的 P3-1）：记不上的情况
+// （没挂缓存、size 未知、档认不出来）都算没记上——调用方要拿它说话，
+// 不能拿「下完了」当「记上了」（服务器不给 `Content-Length` 时，
+// 字节流走完了但缓存什么都没记，那句「缓存记上了」就是说谎）。
+//
 // ⚠️ **它只在「真的下完了」时调**：字节源报了 `io.EOF` 才是下完
 // （中途断了不算——那种情况下盘上是「一半 + 洞」，见 `availAt`）。
 //
@@ -234,10 +259,10 @@ func (a *App) byteCachePathFor(track, tier string) string {
 //
 // ⚠️ **它不写字节，只写元数据**：字节是字节源自己写进那个文件的
 // （`StreamSourceOptions.CachePath`），这一层只记「它齐了」。
-func (a *App) markByteCacheComplete(it Item, q bili.AudioQuality, ref *bili.StreamRef, size int64) {
+func (a *App) markByteCacheComplete(it Item, q bili.AudioQuality, ref *bili.StreamRef, size int64) bool {
 	c := a.byteCacheSnapshot()
 	if c == nil {
-		return
+		return false
 	}
 	// 🔴 **size <= 0 表示「不知道有多长」**：那一份**不算完整**
 	// （见 `streamaudio.Bytes.Complete`）。
@@ -249,24 +274,28 @@ func (a *App) markByteCacheComplete(it Item, q bili.AudioQuality, ref *bili.Stre
 	// ⚠️ **不记这一份**：下次重新下一遍，那只是「没省下流量」，
 	// 而不会让用户听到坏东西。
 	if size <= 0 {
-		return
+		return false
 	}
 	track := byteCacheTrack(it)
 	tier := byteCacheTier(it, ref)
 	if tier == "" {
-		return
+		return false
 	}
 	// 🔴 **「偏好 → 档」那张表**：下一次按同一个偏好来的时候，
 	// 直接指向这一份字节（不重新问 B 站要档）。
 	_ = c.SavePref(track, byteCachePref(q), tier)
-	_ = c.SaveBytes(track, tier, size, ref.Label, streamaudio.Meta{
+	if err := c.SaveBytes(track, tier, size, ref.Label, streamaudio.Meta{
 		Title:        it.Title,
 		Cover:        it.Cover,
 		Artist:       it.Artist,
 		ArtistMid:    it.ArtistMid,
 		SubtitleBvid: it.SubtitleBvid,
 		SubtitleCid:  it.SubtitleCid,
-	})
+	}); err != nil {
+		a.logf("biu: 字节下完了但缓存记录写不上（下次要重下这一首）：%q：%v", it.Title, err)
+		return false
+	}
+	return true
 }
 
 // dropBrokenByteCache 把「打不开的那一份」从缓存里删掉。

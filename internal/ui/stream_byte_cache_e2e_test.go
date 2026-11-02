@@ -336,7 +336,13 @@ func TestSwitchingAwayStillFinishesThePreviousDownload(t *testing.T) {
 		w.Header().Set("Content-Length", fmt.Sprint(len(media)))
 		w.Write(media[:mid])
 		w.(http.Flusher).Flush()
-		<-gate
+		// ⚠️ **等放行要同时听请求的取消**（审查②的 P1-4）：前置断言早失败的
+		// 话 `srv.Close` 会等这条卡住的连接，等不到就是整个二进制超时 panic。
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
 		w.Write(media[mid:])
 	}
 
