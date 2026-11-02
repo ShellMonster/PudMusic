@@ -810,8 +810,8 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 	// ⚠️ **而那一圈不会盖住角标**：角标挂在图形盒子的**右上角**（盒子坐标
 	// x≈9..18、y≈0..9 那一小角），而那一圈的右上半径离它还有一段——满大时
 	// 圆的边缘在那一角之下（实测那一小角在圆的 14° 那一带，圆的边缘离它
-	// 还有约 4 像素）。真压上是「角标往右下挪多了」的事，那时挪的是
-	// `playbarBadgeNudge`，不是这一圈。
+	// 还有约 4 像素）。真压上是「角标往右下挪多了」的事——那时挪的是
+	// `countBadge` 里那个 `Attach` 的锚/偏移，不是这一圈。
 	bgW, bgH := float32(iconHitMd), float32(iconHitMd)
 	drawIcon := func(c *ui.Context) {
 		// 背景层（先建 → 画在下面）
