@@ -152,30 +152,9 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			t.Run("关注页分组", func(t *testing.T) {
-				b := newUIExplore(t)
-				uiFollowTags(b, map[int]any{-10: "特别关注"})
-				uiFollowList(b, 3, []any{uiFollowUser(11, "第一个 UP")})
-				uiFollowSearch(b, "", nil)
-				s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(dark))
-				s.navigate(followPath)
-				tt.Frame()
-				f := s.followPageOf()
-				waitFrames(t, tt, "分组到了", func() bool { return f.tagStarted })
-				tt.Frame()
-
-				cur, ok := tt.Find("全部关注(3)")
-				if !ok {
-					t.Fatalf("左栏没有「全部关注(3)」那一格，文字有 %q", tt.Texts())
-				}
-				sib, ok := tt.Find("特别关注(1)")
-				if !ok {
-					t.Fatalf("左栏没有「特别关注(1)」那一格，文字有 %q", tt.Texts())
-				}
-				theme := BuildTheme(app.DefaultSettings(""), dark)
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "关注页分组",
-					flatSolidCurrentText(theme)}, tt.Image(), dark)
-			})
+			// ⚠️ **关注页原来有第三处（左边那列分组）——#367 改版把它收成页头
+			// 下拉了**：下拉里「当前值」是淡底（`enumSelect` 的口径），不是导航列
+			// 上那种「当前在哪」的实心主色信标，所以它不再归这一条管。
 
 			t.Run("动态页作者栏", func(t *testing.T) {
 				b := newUIExplore(t)

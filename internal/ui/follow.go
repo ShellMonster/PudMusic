@@ -52,7 +52,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
@@ -69,8 +68,16 @@ import (
 // 而且错得很安静——这一页退回占位页，没人看得出来（理由同 `laterPath`）。
 const followPath = "/follow"
 
-// followPaneW 是左边那一列的宽度。上游是 `w-50`（200）。
-const followPaneW = 200
+// followGroupSelectH / followGroupSelectMinW 是右上角那个分组下拉的尺寸。
+//
+// ⚠️ **它得认得出「是一个下拉」**：收起那一格只写当前那一组的名字 + 一枚箭头，
+// 比搜索框矮一截（`settingsSelectH` 是 32，页头里和它对齐）；而宽度按当前那一格
+// 的名字走（分组名是用户自己起的，可长可短），设一个下限不让它缩成一格箭
+// 头。
+const (
+	followGroupSelectH    = settingsSelectH
+	followGroupSelectMinW = 120
+)
 
 // followCardSide 是一张卡上头像的边长。上游是 `h-32 w-32`（128）。
 const followCardSide = 128
@@ -122,14 +129,14 @@ var followActionBarKey = struct{ followActionBar bool }{}
 // （`follow-list/index.tsx:296`）。
 const followSearchLabel = "搜索关注"
 
-// followTabAll 是左边第一格「全部关注」的身份。
+// followTabAll 是下拉里第一项「全部关注」的身份。
 //
 // ⚠️ **用 `all` 这个串而不是空串**：空串在「分组列表还没拉到」那一档也是空串，
 // 而那一档要画的是「还没拉到」，不是「全部关注」。两个都空的话那一帧画出来
-// 第一格没有名字，而用户会以为整个分组列表是空的。
+// 那一项没有名字，而用户会以为整个分组列表是空的。
 const followTabAll = "all"
 
-// followTagTab 是分组那一格的身份。分组 id 可正可负（B 站固定有 -10 特别关注
+// followTagTab 是分组那一项的身份。分组 id 可正可负（B 站固定有 -10 特别关注
 // 和 0 默认分组），所以身份是带前缀的串而不是那个数本身。
 func followTagTab(tagID int) string { return "tag:" + strconv.Itoa(tagID) }
 
@@ -191,7 +198,7 @@ var followEmptyTag = emptyState{
 // ⚠️ **只由界面线程读写**，所以里面没有一个锁；后台那一条线只往 box 那个带锁
 // 的信箱里投，投完叫醒界面（铁律三）。
 type followPage struct {
-	// ── 左边那一列 ──
+	// ── 分组那一摊 ──
 	//
 	// tags 是关注分组。tagStarted / tagErr 是这一摊自己的状态——它和右边那一格
 	// 是两次独立的请求，各拉各的，各失败各的。
@@ -215,13 +222,9 @@ type followPage struct {
 
 	pager upPager
 
-	// state 是网格的行状态，paneState 是左边那一列的。建一次存着，每帧用
-	//（铁律四：换列数是布局变了，每帧新建等于每帧跳回顶上）。
-	//
-	// ⚠️ **两个 ListState 不能共用**：MyGo 会在「同一个 ListState 被两个 List
-	// 显示」时 panic，而共用还会把两边的滚动位置搅在一起。
-	state     ui.ListState
-	paneState ui.ListState
+	// state 是网格的行状态。建一次存着，每帧用（铁律四：换列数是布局变了，
+	// 每帧新建等于每帧跳回顶上）。
+	state ui.ListState
 	// rowKeys 记着网格每一行的身份（**预先装箱好的那一份**）。
 	//
 	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
@@ -371,13 +374,11 @@ func (f *followPage) resetUsers() {
 // ⚠️ **外面已经包了一层 recover**（`router.go` 的 `Shell.page`）。
 // ⚠️ **问 `r` 不要问 `c.Router()`**（理由同 `upspace.go`）。
 //
-// ⚠️ **这一页没有页标题，而名字是有的**（票 #127）：它写在**左边那一列顶上**
-// ——`followPaneTitle` 给出「全部关注」/ 那一组的名字 / 「我的关注」
-// （理由见那个函数）。上游那一页的 `<h1>` 给的也是同一句话
-// （`src/pages/follow-list/index.tsx:206`：`全部关注` / 分组名 / `我的关注`），
-// 只是上游把它摆在右上角、我们摆在左边那一列的头顶上——那一列本来就是分组
-// 列表，「现在是哪一组」和「哪一列」是同一件事。
-// 顶栏那一处页名票 #127 去掉之后，这一页的名字就只剩这一处，**不重复**。
+// ⚠️ **这一页的页名是页头那个 24 号的「我的关注」**（`viewFollowHeader`），而
+// 「现在看的是哪一组」是页头右上角那枚下拉自己的事（`followPaneTitle` 给
+// 「全部关注」/ 那一组的名字 / 「我的关注」——分组还没拉到时的兜底）。上游
+// 那一页把同一句话塌成一个 `<h1>`（`src/pages/follow-list/index.tsx:206`）——
+// 我们这里是**两个字**：页名不换，下拉跟着组换。
 func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头。
 	s.applyFrameTheme(c)
@@ -404,14 +405,12 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 		return
 	}
 
-	ui.Row(c).Key("page:" + followPath).Grow(1).FillHeight().Children(func() {
-		s.viewFollowPane(c, f)
-		ui.Column(c).Key("follow-body").Grow(1).FillHeight().Padding(space.Px16).
-			Gap(space.Px8).Children(func() {
+	ui.Column(c).Key("page:"+followPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
+		Children(func() {
+			s.viewFollowHeader(c, f)
 			s.viewFollowSearch(c, f)
 			s.viewFollowGrid(c, f)
 		})
-	})
 
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
 	// `BackToTop`）。
@@ -480,140 +479,159 @@ func (f *followPage) scrollTop() {
 	f.state.ScrollTo(0, ui.Start)
 }
 
-// viewFollowPane 是左边那一列：标题 + 「全部关注(N)」+ 每个分组一格。
+// viewFollowHeader 是页头那一行：左边标题 + 关注总数，右边分组下拉。
 //
-// # 这一列是**侧栏的邻居**：画法照侧栏那一套（票 #367）
+// 上游 `follow-list/index.tsx:206` 的 `<h1>` 在这一页是「全部关注 / 分组名 /
+// 我的关注」，而**我们页头一直写「我的关注」**——「现在在哪一组」是右上角那个
+// 下拉自己的事（它的触发器写着当前那一格的名字），不是页头的事。上游那一支
+// 在「停在某一组」和「停在全部」之间换名字，而我们这一页的名字本来就不换。
 //
-// 这一列紧挨着侧栏摆着，用户一眼就要看出它们是同一件东西的两级。所以这一列
-// 的每一处都取侧栏那一份，不另写一份：
-//
-//   - **底色用方案的 `sidebar`**（`Shell.sidebarBackground`，和侧栏那一栏同一个
-//     出口）——于是侧栏 + 这一列是同一片「导航区」，内容区是另一片。
-//   - **选中那一格是实心主色底**（`flatSolidCurrent`）——
-//     和侧栏菜单当前项**同一个函数**，所以两个色值逐字节相同。
-//   - **没选中的是次要色**：这一列是这一页里的第二层导航，选中那一格才是要看的
-//     那一格；次要色让「现在在哪」一眼看得出来。
-//   - **行高、字号、内边距**照侧栏收藏夹那一行（`viewFavoriteRow`）：14 的字、
-//     上下 6 的内边距、行与行之间 2 的缝。
-//     ⚠️ **侧栏的「菜单项」是 13**（框架的默认字号，macOS 上 13）——那是**带图标**
-//     的那一族；这一列是**纯文字**的行，和侧栏的收藏夹行同族，所以是 14
-//     （DESIGN.md §二的正文档；「用户动态」那一页的作者栏也是 14）。
-//     ⚠️ **左右不一样**：侧栏收藏夹那一行的**左**内边距是 20（票 #371：那一列
-//     的字在 36，因为分组标题左边有一枚箭头图标），而这一列的字在 16——这一列
-//     自己就贴着内容区的左边沿，用不着给谁让位。
-//   - **圆角走主题的 `Radius`**，底色、字色一个都不写死——方案换了整套跟着换。
-//
-// ⚠️ **左边的行和右边的格是两个 `ListState`，不能共用**（MyGo 会在同一个
-// ListState 被两个 List 显示时 panic）。
-func (s *Shell) viewFollowPane(c *ui.Context, f *followPage) {
+// 布局照 `later.go` 的 `viewLaterHeader`：标题在左、右边一枚控件，`Spacer`
+// 吃掉中间的空白。
+func (s *Shell) viewFollowHeader(c *ui.Context, f *followPage) {
 	t := c.Theme()
-	// 右缘一条分界线，照上游 `follow-list/index.tsx:204` 的 `border-r`
-	// （`border-divider/40`）。
-	ui.Column(c).Key("follow-pane").Width(followPaneW).FillHeight().
-		Padding(space.Px8, space.Px8).Gap(space.Px8).
-		// 🔴 **底色是方案的 `sidebar`，不是页面底色**：这一列和侧栏是邻居，
-		// 两栏同色才是一家人（理由见这一段的抬头）。
-		Background(s.sidebarBackground(t)).
-		BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(paneDividerA)).Children(func() {
-		// ⚠️ **失败也要说失败**：`tagErr` 有值的时候下面那一支已经把分组列表
-		// 换成了错误提示，而标题还在——用户点「重试」时看得出自己重试的是
-		// 哪一摊。
-		//
-		// ⚠️ **这一句是「这一栏叫什么」，不是页标题**：所以它走**侧栏分组标题
-		// 那一档**（12 / 500 / 次要色），而不是 14 的正文档——改之前它是 14 的
-		// 正文色，而它下面那些选项是 13 的字，两样挨在一起、字号也差一个字，
-		// 用户会把「这一栏叫什么」和「这一栏里的选项」当成同一层。
-		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, scale.Size12)).
-			FontWeight(weightMedium).TextColor(t.TextMuted).
-			PaddingX(space.Px8).MaxLines(1).Ellipsis("…")
-		// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页失败时左边
-		// 是一片「还没有分组」，而 `tagStarted` 仍是 false、`tagErr` 非 nil，
-		// 切走再切回来也不会重拉——用户会以为他真的一个分组都没建过。
-		if !f.tagStarted && f.tagErr != nil {
-			s.viewFollowPaneFailed(c, f)
-			return
-		}
-		// 🔴 **「没拉到」和「一个分组都没有」是两件事**，界面上是两句话：
-		// 前者要按重试，后者不用（那是真的没有分组，B 站那会儿返回空数组）。
-		if !f.tagStarted {
-			ui.Text(c, followPaneLoading).FontSize(scale.Font(c, scale.Size12)).
-				TextColor(t.TextMuted).PaddingX(space.Px8)
-			return
+	ui.Row(c).Key("follow:page-title").FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "我的关注").FontSize(scale.Font(c, scale.PageTitle))
+		// 总数是淡一档的数字徽章，跟在标题后面（上游 `index.tsx:224` 的
+		// `allCount ? \`（${allCount}）\` : ""`）。
+		if f.total > 0 {
+			ui.Text(c, strconv.Itoa(f.total)).FontSize(scale.Font(c, scale.Size14)).
+				TextColor(t.TextMuted).Padding(space.Px2, space.Px6)
 		}
 
-		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂 key
-		// 会 panic（理由同 `dynamicfeed.go`）。
-		//
-		// ⚠️ **没有分组的时候这一格不 Grow**：Grow 是「吃掉剩下的空间」，它一长，
-		// 后面那句「还没有分组」就被顶到这一列的最底下，离它该解释的那一格十万
-		// 八千里（而那一格只有一行，压根不需要滚动）。
-		groups := ui.Column(c).Key("follow-pane-list").FillWidth()
-		if len(f.tags) > 0 {
-			groups = groups.Grow(1).FillHeight()
-		}
-		groups.Children(func() {
-			// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
-			// ⚠️ **分组栏先登记、网格后登记**，于是网格赢——它是这一页的主内容。
-			s.registerContentFocus(list.HandleFocus(&f.paneState.Handle))
-			// ⚠️ **行与行之间 2 的缝**：侧栏的菜单列和收藏夹列都是这一档
-			// （`sidebar.go` / `sidebar_favorites.go` 的 `Gap(space.Px2)`）。
-			pane := ui.List(c, &f.paneState, len(f.tags)+1).
-				Grow(1).FillHeight().Gap(space.Px2).
-				Rows(func(r ui.ListRow) { s.viewFollowPaneRow(r.Context, f, r.Index) })
-			s.trackScrollbar(pane)
-		})
-		// 🔴 **「一个分组都没有」要有一句话**：什么都不摆的话用户以为这一列
-		// 没拉出来（而它确实拉出来了，只是 B 站那会儿返回空数组）。
-		// 抄侧栏收藏夹那一句的写法（`viewFavoritesEmptyLine`）：12 的次要色。
-		if len(f.tags) == 0 {
-			ui.Text(c, followPaneNoTags).FontSize(scale.Font(c, scale.Size12)).
-				TextColor(t.TextMuted).PaddingX(space.Px8)
-		}
+		ui.Spacer(c)
+
+		s.viewFollowGroupSelect(c, f, t)
 	})
 }
 
-// followPaneLoading 是「分组还在拉」那一句话。
+// viewFollowGroupSelect 是右上角那个「全部关注 ▾」下拉。
 //
-// ⚠️ **它是「还在拉」，不是「没有」**：这一档和「还没有分组」是两句话，
-// 混起来用户会以为自己一个分组都没建过（而他只是还没等到）。
-const followPaneLoading = "正在加载分组…"
+// # 为什么是它替掉左边那一栏
+//
+// 原来左边 200 宽 × 全高的一栏只干「选组」一件事（票 #367），而分组是用户自己
+// 建的，想看有哪些分组是一个主动动作——所以它降为页头里的一枚下拉，内容区
+// 一行顶到窗口右缘。网易云那张参考图里「分组」也收在页头，不是一栏。
+//
+// # 收起那一格写的是**当前那一格**的名字
+//
+// 停在「全部关注」写「全部关注」，停在某一组写那一组的名字（上游
+// `index.tsx:206` 的 `<h1>` 同一个口径），而**不是**这一页的名字——这一页的
+// 名字是左边那个 24 号的「我的关注」。两件事在页头上是两个字。
+//
+// # 弹层里的三态和原来左栏是同一套
+//
+// 「分组还在拉」/「分组没拉出来（可重试）」/「还没有分组」——那三句话在左栏
+// 时是三行字，收成下拉之后是弹层里的三条。一句都不能少：B 站返回空数组和
+// 「我们没拉到」在界面上是两件事。
+//
+// # 分组项的画法照 `enumSelect`（settings_enum.go）
+//
+// 高亮那一档是 `flatSolid`（实心主色底），当前值那一档是淡底——同一个出口，
+// 和设置页的下拉一个样。唯一不同的是「全部关注(N)」和第一个分组之间加一道
+// 分界（票 #367 那条线的同一个理由：一个是全集，一个是用户自己建的组）。
+func (s *Shell) viewFollowGroupSelect(c *ui.Context, f *followPage, t *ui.Theme) {
+	// 收起那一格写的字：当前那一格的名字，和上游 index.tsx:206 的 `<h1>`
+	// 同一个口径（`followPaneTitle` 复用）。
+	//
+	// ⚠️ **下拉的值绑 `f.tab` 本体**：`SelectBase` 选中那一项时是把值写进绑定的
+	// 字段，绑到一个暂存格的话暂存格要在这一帧开头回填成 `f.tab`——而 `choose()`
+	// 在输入处理里写暂存格、回填在视图构建里跑，顺序反过来就把用户那一选抹掉了。
+	// 绑本体则 `Changed()` 只在真的换了的时候才响，换组要做的几件事（放掉搜索词、
+	// 换代、清行）都由 `applyFollowTab` 收着。
+	sel := ui.SelectBase(c, &f.tab)
+	trigger := sel.Trigger.Height(followGroupSelectH).MinWidth(followGroupSelectMinW).
+		Radius(t.Radius).Background(t.Surface).Border(1, t.Border).
+		Padding(space.None, space.Px10).AlignItems(ui.Center).Gap(space.Px6)
+	trigger.Label("选择关注分组")
+	trigger.Children(func() {
+		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, scale.Size14)).
+			SingleLine().Grow(1)
+		ui.Icon(c, chevronIcon()).TextColor(t.TextMuted)
+	})
 
-// followPaneNoTags 是「一个分组都没有」那一句话。
-//
-// ⚠️ **和侧栏那一句（「还没有收藏夹」）是同一个写法**：12 的次要色，一句话，
-// 不摆插画——这一列只有 200 宽，插画摆不下，而这句话要说的事情很小。
-const followPaneNoTags = "还没有分组"
+	sel.Popup(func(panel ui.Element) {
+		popupPanel(t, panel.Grow(1).MaxWidth(280).Padding(space.Px4)).Children(func() {
+			// ⚠️ **三态先判**：分组还在拉 / 拉失败了 / 还没有分组——和原来左栏
+			// 那三句话是同一套，收成下拉之后一样都不能少。
+			switch {
+			case !f.tagStarted && f.tagErr != nil:
+				ui.Text(c, "分组没拉出来").FontSize(scale.Font(c, scale.Size12)).
+					TextColor(t.Text).PaddingX(space.Px8)
+				ui.Text(c, f.tagErr.Error()).FontSize(scale.Font(c, scale.Size12)).
+					TextColor(t.TextMuted).PaddingX(space.Px8).MaxLines(2).Ellipsis("…")
+				if flatButton(c, "重试拉分组").FontSize(scale.Font(c, scale.Size12)).
+					Padding(space.Px4, space.Px8).Justify(ui.Start).Clicked() {
+					f.tagErr, f.tagLoading = nil, true
+					go s.fetchFollowTags(context.Background(), f)
+				}
+				return
+			case !f.tagStarted:
+				ui.Text(c, "正在加载分组…").FontSize(scale.Font(c, scale.Size12)).
+					TextColor(t.TextMuted).PaddingX(space.Px8)
+				return
+			}
+			// 「全部关注(N)」是第一项；它和分组之间有一道分界（票 #367 那条线
+			// 的同一个理由：一个是全集，一个是用户自己建的组）。
+			s.viewFollowGroupItem(c, f, sel, followTabAll,
+				fmt.Sprintf("全部关注%s", countSuffix(f.total)), t)
+			if len(f.tags) > 0 {
+				ui.Divider(c).Background(t.Border).MarginY(space.Px4)
+			}
+			for _, tg := range f.tags {
+				name := tg.Name + countSuffix(tg.Count)
+				if name == "" {
+					name = "这一组"
+				}
+				s.viewFollowGroupItem(c, f, sel, followTagTab(tg.ID), name, t)
+			}
+			if len(f.tags) == 0 {
+				// 🔴 **「一个分组都没有」要有一句话**：什么都不摆的话弹层里只有
+				// 一项「全部关注」，用户以为整个下拉没拉出来（而它确实拉出来了，
+				// 只是 B 站那会儿返回空数组）。
+				ui.Text(c, "还没有分组").FontSize(scale.Font(c, scale.Size12)).
+					TextColor(t.TextMuted).PaddingX(space.Px8).PaddingY(space.Px4)
+			}
+		})
+	})
 
-// viewFollowPaneFailed 是「分组没拉出来」那一档：一句结论 + 原始错误 + 重试。
-//
-// # 三样东西各是各的
-//
-//   - **结论**（"分组没拉出来"）：12 的正文色——这一档说的是「出了什么事」。
-//   - **原始错误**：12 的次要色，最多两行——给用户复现时用（和
-//     `viewLoadError` 那一档同一个做法）。
-//   - **重试**：一枚扁平按钮，**左对齐**——这一列里所有东西都是左对齐的，
-//     而框架的按钮默认把内容居中，居中的那一枚和上面那两句话不在一条竖线上。
-func (s *Shell) viewFollowPaneFailed(c *ui.Context, f *followPage) {
-	t := c.Theme()
-	ui.Text(c, "分组没拉出来").FontSize(scale.Font(c, scale.Size12)).
-		TextColor(t.Text).PaddingX(space.Px8)
-	ui.Text(c, f.tagErr.Error()).FontSize(scale.Font(c, scale.Size12)).
-		TextColor(t.TextMuted).PaddingX(space.Px8).MaxLines(2).Ellipsis("…")
-	if flatButton(c, "重试拉分组").FontSize(scale.Font(c, scale.Size12)).
-		// ⚠️ **左右内边距是 8**：这一列里所有的字都起在同一条竖线上（这一列的
-		// 内边距 8 + 行自己的内边距 8 = 16）。扁平按钮自带的 14 会把字推到
-		// 22，那一列就歪了。
-		Padding(space.Px4, space.Px8).Justify(ui.Start).Clicked() {
-		f.tagErr, f.tagLoading = nil, true
-		go s.fetchFollowTags(context.Background(), f)
+	// ⚠️ **`Changed()` 必须放在 `sel.Popup` 之后**（`input.go` 的注释：「先配好
+	// 控件再问响应」）：`Changed()` 内部会 `applyInputs()`——那一趟里跑的是弹层里
+	// 那些 `Item` 的 `choose()`，而 Item 的输入回调是 `Popup` 这一段里注册上去的。
+	// 放在 `Popup` 之前查的话，`applyInputs` 跑的时候这一帧的 Item 还没建出来，
+	// `choose()` 落到下一帧（`f.tab` 那时已被写进新值），`Changed()` 自己报 false
+	// ——`applyFollowTab` 永远不进，分组看着切了、底下那格还是上一组的人。
+	if trigger.Changed() {
+		s.applyFollowTab(f)
 	}
 }
 
-// followPaneTitle 是左边顶上那一行的名字。
+// viewFollowGroupItem 是弹层里的一项。
+//
+// 高亮（指针 / 键盘游标在这一项）走 `flatSolid`（实心主色底），当前值那一档
+// 是淡底——和 `enumSelect` 里那两项同一个出口（settings_enum.go:64-76）。
+func (s *Shell) viewFollowGroupItem(c *ui.Context, f *followPage, sel ui.SelectParts[string],
+	tab, label string, t *ui.Theme) {
+	opt := sel.Item(tab).Padding(space.Px6, space.Px10).Radius(t.Radius)
+	switch {
+	case opt.Highlighted():
+		opt = flatSolid(c, opt)
+	case tab == f.tab:
+		opt = opt.Background(t.Surface)
+	}
+	opt.Children(func() {
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).SingleLine().Grow(1)
+	})
+}
+
+// followPaneTitle 是下拉收起那一格写的名字：当前停在哪一格。
 //
 // ⚠️ **每一档都说得出是哪一档**：分组没拉到 / 拉失败了 / 停在「全部关注」/
 // 停在某一组。Biu 上游那一支（`index.tsx:206`）在这几种情况下都塌成同一个
 // 「我的关注」，而左上角突然换名字是最难自己发现的那一类毛病。
+//
+// ⚠️ **它和页头那个 24 号的「我的关注」是两回事**：页头是这一页的名字（不换），
+// 这一格是「现在看的是哪一批」（跟着分组换）。两件事在页头上是两个字。
 func followPaneTitle(f *followPage) string {
 	if !f.tagStarted {
 		return "我的关注"
@@ -634,109 +652,6 @@ func followPaneTitle(f *followPage) string {
 	return "这一组"
 }
 
-// viewFollowPaneRow 画左边的一行。
-//
-// 行身份是**这个分组是谁**（`followTabAll` / `followTagTab(id)`），不是序号
-// （铁律四）。B 站的分组 id 可正可负，撞不上 `all` 那个串。
-//
-// # 一行长什么样（票 #367）
-//
-// 这一行是**侧栏菜单项的弟弟**：同样的淡底选中态、同样的字、同样的内边距。
-// 三样都取侧栏那一份：
-//
-//   - 选中 → `flatSolidCurrent`（实心主色底）；
-//   - 没选中 → 次要色；
-//   - 悬停 / 按下 → `flat.Feel`（压一层半透明的前景色，和侧栏菜单项同一档）。
-func (s *Shell) viewFollowPaneRow(c *ui.Context, f *followPage, i int) {
-	t := c.Theme()
-
-	tab, label := followTabAll, fmt.Sprintf("全部关注%s", countSuffix(f.total))
-	if i > 0 && i-1 < len(f.tags) {
-		tg := f.tags[i-1]
-		// 分组 id 可正可负，身份带前缀（见 followTagTab）。
-		tab, label = followTagTab(tg.ID), tg.Name+countSuffix(tg.Count)
-		if label == "" {
-			label = "这一组"
-		}
-	}
-
-	// 🔴 **「全部关注(N)」和后面的分组之间要有一道分界**（票 #367）。
-	//
-	// 它们不是一伙的：前一个是「我关注的人」这个全集，后一个是「B 站上
-	// 我自己建的分组」。摆成同一个样子的时候用户分不清「这一格是全部」还是
-	// 「这一格也是一个分组」。
-	//
-	// ⚠️ **分界画在第一个分组那一行的上面**，不画在「全部关注」那一行的下面：
-	// 画在下面的话，「全部关注」被选中时那道线就落在它的淡底上（淡底那一格
-	// 的底色会盖住它），而「全部关注」恰恰是**最常被选中**的那一格。
-	if i == 1 {
-		// ⚠️ **这一道线用 `t.Border` 的原色，不打折**：这一列左右两片是**同色**
-		// 的（都是方案的 `sidebar`），而这一列右缘那道线是隔着两种颜色的
-		// （导航区 / 内容区）。同色之间要分界，只能靠线本身——打折的话
-		// 暖纸那几套（线的底色是文字色叠 12%）几乎看不见，而经典那几套
-		// （`#dbdbdb`）看得见，同一个控件在两套主题里差这么远不行。
-		ui.Divider(c).Background(t.Border).MarginY(space.Px4)
-	}
-
-	// ⚠️ **内边距是侧栏收藏夹那一行的那一份**（上下 6、左右 8）：这一列和
-	// 侧栏是邻居，行高和缩进得是一套。
-	//
-	// ⚠️ **左右那 8 和侧栏收藏夹那一行不一样了**（票 #371）：那一行的左内边距
-	// 现在是 20（它的字在 36，分组标题左边有一枚箭头图标），而这一列的字在
-	// 16——这一列自己就贴着内容区的左边沿。
-	//
-	// ⚠️ **这一行自己不铺底色**：没选中的那些行是**透**的——底是这一列的底。
-	// （框架那一层行悬停底在这一列里**不存在**：它只在「列表有游标」时才铺，
-	// 而这一列的列表没有游标，见下面 `flat.Feel` 那一段。）
-	box := ui.Row(c).Grow(1).Key("follow-tab:"+tab).Padding(space.Px6, space.Px8).Radius(t.Radius).
-		AlignItems(ui.Center)
-	if tab == f.tab {
-		// 当前正在看的那一格：和侧栏菜单当前项**同一套**画法（**实心主色底**，
-		// 见 `flatSolidCurrent`）。
-		//
-		// 🔴 **这一列和侧栏是邻居**：它们挨着摆，而「当前在哪」在两列里说的是
-		// 同一件事——两种画法并排的话，用户看到的是「这个应用没做完」（那正是
-		// 审计 F-02 / F-06 当初删实心底的理由，而这一档反过来是用户点名要的）。
-		//
-		// ⚠️ **字色是 `t.AccentText`**（主色底上读得出来的那一档），不是写死的
-		// 白字——理由见 `flatSolidCurrent`。
-		box = flatSolidCurrent(c, box)
-	} else {
-		// 没选中的那些是**次要色**：这一列是这一页里的第二层导航，选中那一格
-		// 才是要看的那一格。侧栏的菜单项是正文色（那是第一层导航），这一列
-		// 不是——两列的字色差一档，层次才分得出来。
-		box = box.TextColor(t.TextMuted)
-	}
-	// 悬停 / 按下的反馈：和侧栏菜单项同一档（`flat.Feel`——压一层半透明的前景色）。
-	//
-	// ⚠️ **这一层是这一列唯一的悬停反馈**：框架给「指针压着的那一行」铺的那层
-	// `t.SurfaceHover`（`mygo/ui/list.go` 的 styleFn）**只在「列表有游标」时
-	// 才铺**（`s.cursor() != nil`），而这一列的列表没有游标（`f.paneState` 的
-	// `Selected` / `Selection` 从头到尾没设过）——所以这里没有第二层要盖。
-	//
-	// ⚠️ **悬停那一层是「压」不是「换」**：换成 `t.SurfaceHover` 的话，指针一落到
-	// 选中那一格上，实心底就被整块顶掉——「当前在哪」是这一列里唯一的方向标，
-	// 被一次悬停盖掉比多画一层底更坏（`widgets/flat` 的文件头写着同一件事）。
-	//
-	// 🔴 **选中那一格要「按那一层底算」的那一支**：按主题算的话，浅色主题的
-	// 正文色是黑的，8% 的黑压在主色底上几乎看不出变化（悬停反馈等于没有）。
-	if tab == f.tab {
-		box = flatSolidCurrentFeel(c, box)
-	} else {
-		box = flat.Feel(c, box)
-	}
-	// ⚠️ **点了就换查询，而且换查询必须重置行**（见 resetUsers 的注释）。
-	if box.Clicked() {
-		s.selectFollowTab(f, tab)
-	}
-	box.Children(func() {
-		// ⚠️ **单行 + 省略号**：分组名是用户自己起的（「常听的那些不太熟但是每首
-		// 都想循环到会唱完整首的 UP 主」），不截断的话这一行会长高一截、把下面
-		// 那些分组整体顶下去。侧栏收藏夹那一行是同一个做法。
-		ui.Text(c, label).Grow(1).FontSize(scale.Font(c, scale.Size14)).MaxLines(1).Ellipsis("…")
-	})
-}
-
 // countSuffix 是 Tab 名字后面那个括号。**0 就不画**（上游 `index.tsx:224` 是
 // `allCount ? … : ""`）——一个空的「()」在界面上像加载坏了。
 func countSuffix(n int) string {
@@ -746,19 +661,17 @@ func countSuffix(n int) string {
 	return fmt.Sprintf("(%d)", n)
 }
 
-// selectFollowTab 切到某一格。
+// applyFollowTab 是换组要做的那几件事，在 `f.tab` 已经写进新值之后调。
 //
-// ⚠️ **切到已经停着的那一格什么都不做**：清一次行的话，用户点回刚才看的那一格
-// 就要重新拉一遍、滚动位置也回顶——而他没换任何条件。
-func (s *Shell) selectFollowTab(f *followPage, tab string) {
-	if f.tab == tab {
-		return
-	}
-	f.tab = tab
+// 入口只有一条：下拉选中（`SelectBase` 自己把新值写进 `f.tab`，然后
+// `Changed()` 响）。⚠️ **所以这里不能再判一次「新值等不等于旧值」**——到这里
+// 时 `f.tab` 已经是新值，再比就永远相等，切换整个不生效。而「停在已经停着的
+// 那一项不响」这件事 `SelectBase` 的 `Changed()` 自己管（值没变它不报告）。
+func (s *Shell) applyFollowTab(f *followPage) {
 	// ⚠️ **换分组顺手把搜索词放掉**：搜索框只在「全部关注」那一格画
 	//（上游 `index.tsx:280`），而那个词是按「全部关注」那条接口搜出来的。
 	// 留着它的话切回「全部关注」时用户会看到上次搜的那一批，而他记得自己没搜过。
-	if tab != followTabAll {
+	if f.tab != followTabAll {
 		f.applied, f.draft = "", ""
 	}
 	f.gen++
