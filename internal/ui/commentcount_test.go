@@ -162,7 +162,8 @@ func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
 // 宽度账
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheCountDoesNotSqueezeTheTitleOrTheSlider 是这一票的宽度回归。
+// TestTheCountDoesNotSqueezeTheTitleOrTheSlider 是这一票的宽度回归（本票角标
+// 之后改断**不变**）。
 //
 // # 改之前 / 改之后的账（实测，深色主题，同一首歌）
 //
@@ -172,24 +173,20 @@ func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
 //	1200     32 → 67                       76 → 76                 0    413.2
 //	1600     32 → 67                      117.6 → 82.6            35    523.2
 //
-//	（「有数字」取的是数字吃到上限 33 的那一档，即 ≥ 100 万条——那是**最宽**
-//	 的一档；「1286」那一档是 57.9，歌名一格都不让。）
+//	（那是票 #682 横排那一版：数字占一格（缝 2 + 数字 33），评论键从 32 长到
+//	 67，让位的是文字列 / 左列自己。）
 //
-// 🔴 **让位只在 1600 那一档发生，且让的正好是评论键长出来的那 35**（缝 2 +
-// 数字 33）：窄窗口（900~1280）上左边那一列由**保底宽**说话（`playbarLeftMinW`
-// 272 → 307），所以加宽落在**左列自己**身上（撑出轨道的那一截从 98.4 变成
-// 133.4），歌名那一段仍然是它的保底 76（`trackTextMinW`）。1600 上轨道够宽、
-// 文字列吃的是余量，于是那 35 从它这儿出。
+// 🔴 **本票（角标）之后那 35 没有了**：数字收成挂在图形盒子右上角的角标，
+// `Attach` **不占布局**——所以评论键**带不带数字都是 32**，歌名**一个像素都
+// 不让**，进度行也**一个像素都不让**。
 //
-// 🔴 **不许让破保底**：让完 1600 上还剩 82.6 > 76。
-//
-// 🔴 **进度行一个像素都不许让**：它在中间那一列里，压根不在左列里，所以左列
-// 撑出去的那 35 **不该**碰到它——900 宽下评论键右沿 323，滑块左沿 330.7，
-// 中间剩下 7.7（`TestTheCommentsKeyDoesNotTouchTheProgressBar` 那条盯的是
-// 「不碰」，这一条盯的是「一寸不让」）。
+// 🔴 **进度行一个像素都不许让**：它在中间那一列里，压根不在左列里——所以左列
+// 不许被撑出去。900 宽下评论键右沿 297，滑块左沿 330.7，中间剩下 **33.7**
+// （`TestTheCommentsKeyDoesNotTouchTheProgressBar` 那条盯的是「不碰」，这一条
+// 盯的是「一寸不让」）。
 //
 // ⚠️ **比的是「有数字 / 没数字」两档**：同一个窗口、同一首歌、同一个 bvid，
-// 只有 `stat.reply` 不同——于是差别只有评论键那 35，没有别的变量。
+// 只有 `stat.reply` 不同——而本票之后**两档一个像素都不该差**。
 func TestTheCountDoesNotSqueezeTheTitleOrTheSlider(t *testing.T) {
 	const longTitle = "一首歌的名字很长很长很长很长"
 	const longArtist = "一个非常非常非常非常非常非常长的 UP 主名字"
@@ -202,20 +199,21 @@ func TestTheCountDoesNotSqueezeTheTitleOrTheSlider(t *testing.T) {
 				Title: longTitle, Artist: longArtist, ArtistMid: 1,
 			}
 			without := commentCountWidths(t, it, width, 0)
-			with := commentCountWidths(t, it, width, 1234567) // 数字吃到上限 33 那一档
+			with := commentCountWidths(t, it, width, 1234567) // 数字吃到上限那一档
 
-			keyGrew := with["评论键"] - without["评论键"]
-			if keyGrew <= slack {
-				t.Fatalf("宽度 %d：带数字的评论键 %.1f，不带数字的 %.1f——那一档量错了（这一条比不了）",
-					width, with["评论键"], without["评论键"])
+			// 🔴 **角标不占布局**：评论键带不带数字都是 32，一个像素都不许长。
+			if grew := with["评论键"] - without["评论键"]; grew > slack {
+				t.Errorf("宽度 %d：带数字的评论键 %.1f，不带数字的 %.1f——"+
+					"角标该不占布局（那一格是 Attach 上去的），它却把键撑宽了 %.1f",
+					width, with["评论键"], without["评论键"], grew)
 			}
 			for _, what := range []string{longTitle, longArtist} {
-				// 🔴 让的**只能是评论键长出来的那一截**。
-				if gave := without[what] - with[what]; gave > keyGrew+slack {
-					t.Errorf("宽度 %d：「%s」让了 %.1f，而评论键只长了 %.1f——"+
-						"数字花掉了别的东西的宽度", width, what, gave, keyGrew)
+				// 🔴 歌名 **一个像素都不让**（角标不占布局，没有东西要它让）。
+				if gave := without[what] - with[what]; gave > slack {
+					t.Errorf("宽度 %d：「%s」让了 %.1f——角标不占布局，歌名一个像素都不该让",
+						width, what, gave)
 				}
-				// 🔴 让完不许破那一列的保底。
+				// 🔴 不许破那一列的保底。
 				if with[what] < trackTextMinW-slack {
 					t.Errorf("宽度 %d：带数字之后「%s」只剩 %.1f 宽（保底 %d）——"+
 						"文字列让破了", width, what, with[what], trackTextMinW)
@@ -272,34 +270,24 @@ func commentCountWidths(t *testing.T, it app.Item, width int, reply int64) map[s
 //
 // 判据分三层：
 //
-//  1. 常量之间的账（`playbarActionsW` = 三枚 32 + 评论键 67 = 163）；
+//  1. 常量之间的账（`playbarActionsW` = 四枚 32 + 三道键间缝 3 × 3 = 137）；
 //  2. 注释里那个「最小宽度：**N**」要与 `playbarLeftMinW` 算出来的数一致；
 //  3. 「歌名的宽」那段要与**实测**一致：1600 那一档不是 76，注释里必须写出量到
 //     的那个数（`fmt.Sprintf("%.1f")` 的同一个格式）。
 func TestTheWidthCommentsMatchTheCode(t *testing.T) {
 	// 1. 常量的账。
 	//
-	// ⚠️ **票 #701 换了这一族的账**：三枚键（收藏 / 赞 / 评论）**各带一个数字**，
-	// 而带数字的那一枚是「图形 18 │ 缝 2 │ 数字（上限 24.5）」= 44.5——图形**紧贴**
-	// 左沿（左右内边距 0），分集那一枚照旧是 32。
-	if playbarCommentsW != iconMd+commentCountGap+playbarCountMaxW {
-		t.Errorf("playbarCommentsW = %v，want %v（18 + 缝 + 数字格）",
-			playbarCommentsW, iconMd+commentCountGap+playbarCountMaxW)
+	// ⚠️ **本票（角标）换了这一族的账**：三枚键（收藏 / 赞 / 评论）的数字**不占
+	// 布局**——它挂在图形盒子的右上角当角标，所以每一枚键回到 32、和没有数字
+	// 时一样，分集那一枚也是 32。
+	if playbarActionsW != 137 {
+		t.Errorf("playbarActionsW = %v，want 137（四枚 32 + 三道键间缝 3 × 3）", playbarActionsW)
 	}
-	if playbarCommentsW != 44.5 {
-		t.Errorf("playbarCommentsW = %v，want 44.5（票 #701 量出来的那一档）", playbarCommentsW)
+	if playbarLeftMinW != 281 {
+		t.Errorf("playbarLeftMinW = %v，want 281（52 + 8 + 76 + 8 + 137）", playbarLeftMinW)
 	}
-	if playbarActionsW != 165.5 {
-		t.Errorf("playbarActionsW = %v，want 165.5（分集 32 + 三枚带数字的键 3 × 44.5）", playbarActionsW)
-	}
-	if playbarLeftMinW != 309.5 {
-		t.Errorf("playbarLeftMinW = %v，want 309.5（52 + 8 + 76 + 8 + 165.5）", playbarLeftMinW)
-	}
-	if commentCountGap != 2 {
-		t.Errorf("commentCountGap = %d，want 2", commentCountGap)
-	}
-	if playbarCountMaxW != 24.5 {
-		t.Errorf("playbarCountMaxW = %v，want 24.5（刚好装下最宽那一档「99k+」24.49）", playbarCountMaxW)
+	if playbarBadgeMaxW != 22.5 {
+		t.Errorf("playbarBadgeMaxW = %v，want 22.5（刚好装下最宽那一档「99k+」≈22.0，9 号字）", playbarBadgeMaxW)
 	}
 
 	// 2/3. 注释要与代码和实测对得上。
@@ -311,8 +299,8 @@ func TestTheWidthCommentsMatchTheCode(t *testing.T) {
 
 	// 注释里那句「最小宽度：**N**」。
 	//
-	// ⚠️ **用 `%g` 而不是 `%d`**：票 #701 之后那个数是 **309.5**（上限 24.5
-	// 带来的半像素），而 `%d` 读一个带小数的数会**报错**（整数读不进小数）。
+	// ⚠️ **用 `%g` 而不是 `%d`**：这个数历史上带过半像素（票 #701 是 309.5），
+	// `%d` 读一个带小数的数会**报错**（整数读不进小数）。
 	claimed := -1.0
 	for _, line := range strings.Split(src, "\n") {
 		if !strings.Contains(line, "playbarLeftMinW 是左边那一列的最小宽度") {
@@ -334,11 +322,9 @@ func TestTheWidthCommentsMatchTheCode(t *testing.T) {
 
 	// 歌名的宽：量四档，把「不是 76 的那一档」的真实数写进注释里。
 	//
-	// ⚠️ **票 #701 之后那个数是 101.9**：票 #682 时它是 82.6（1600 那一档），
-	// 而这一票把评论键**缩回 44.5**（图形紧贴左沿），于是让给歌名的又还回去了。
-	// 900 / 1000 / 1200 三档**都是** 101.9（那一列在这三档上由**保底宽**说话，
-	// 而保底宽钉着 309.5——比 76 多出来的那一截归**歌名那一列**）；1600 那一档
-	// 由轨道说话，是 **106.0**。
+	// ⚠️ **本票（角标）之后那个数是 76**：角标不占布局，左列保底 281——
+	// 900 / 1000 / 1200 三档**都是** 76（那一列在这三档上由**保底宽**说话）；
+	// 1600 那一档由轨道说话，是 **82.6**（轨道 1 份 313.6 > 保底 281）。
 	const longTitle = "一首歌的名字很长很长很长很长"
 	it := app.Item{
 		Source: "online", Type: "mv", Bvid: "BVcommentWidthDoc", Cid: "1",
