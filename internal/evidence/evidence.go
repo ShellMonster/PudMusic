@@ -4759,7 +4759,7 @@ var Items = []Item{
 		// 记在 `internal/ui/miniplayer_test.go` 末尾那一节「真窗口才量得到」
 		// 里（人工清单，不在台账里装）。
 		Category: Platform,
-		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 收起键三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
+		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 「···」菜单三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
 		Tests: []string{
 			// 展开 / 收起的三条路（封面 / 「···」菜单 / Esc）。
 			"TestTheMiniCurtainOpensWhenTheCoverIsClicked",

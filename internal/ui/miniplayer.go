@@ -439,10 +439,19 @@ func (s *Shell) restoreMainWindow() {
 // （`openMiniPlayer` 排的那条 `WhenReady` 就是为这个，见 `ensureWindow` 的注释：
 // `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:382`）。
 func (s *Shell) ensureMiniWindow() {
+	// 🔴 **排队时就把目标外壳抓住**（评审抓到的那个）：`WhenReady` 是**下一拍**
+	// 才跑的，而同一拍里「关 → 再开」会把 `s.mini` 换成**另一个**外壳——闭包里
+	// 那时再读 `s.mini`，读到的就是新外壳，于是给**新外壳**挂一扇窗，而
+	// `dropMini` 关的却是**旧**那一扇。结果：两扇真窗都活着、新外壳的 `miniWin`
+	// 被第二个 `attach` 又挂了一遍，**第一扇变成收不回来的孤儿**。
+	//
+	// ⇒ 抓住**这一次想挂给谁**，闭包里比对——`s.mini` 换了人（或者那一扇
+	// 已经有窗了）就整个放弃，别把第二扇窗挂上去。
+	mini := s.mini
 	mygo.App.WhenReady(func() {
-		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下）。
-		mini := s.mini
-		if mini == nil {
+		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下），或者换成
+		// 另一个外壳了（同一拍里「关 → 再开」）。
+		if mini == nil || s.mini != mini || mini.miniWin != nil {
 			return
 		}
 		opts := MiniWindowOptions(mini.View)
@@ -540,6 +549,12 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 		// 列表），而迷你窗会开开关关——不摘的话，每开一次就多留一个回调，
 		// 而那个回调还**拿着这一扇窗**（窗关了它照样跑）。
 		s.miniDisplaysOff = mygo.Screen.OnDisplaysChanged(func() { s.miniOnDisplaysChanged() })
+		// ⚠️ **attach 那一刻就记下「应用此刻是前台吗」**：`miniCurtainActivate`
+		// 里 `need` 算的是「点封面那一刻应用**不是**前台」，而这个标志只在两个
+		// 应用级回调里维护——attach 时它总是 false，于是**应用本来就是前台**的
+		// 时候也被错算成「需要激活」，那个 1200ms 的重试窗口于是白开一次
+		// （每帧多要一帧、每 120ms 再激活一次已经激活的应用）。
+		s.miniCurtainAppActive = mygo.App.IsReady() && mygo.App.IsActive()
 	}
 
 	// 🔴 **窗被挪动了 ⇒ 重新判它落在哪块屏上**（票 #555）。
@@ -566,7 +581,12 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	//
 	// ⚠️ **它装在迷你这个外壳上**，不是主窗口那个：卷帘只在迷你窗里，而
 	// `Shell.miniCurtainWantsKey` 也是迷你这一份的状态。
-	mygo.App.OnDidBecomeActive(func() { s.miniCurtainEnsureKey() })
+	//
+	// ⚠️ **退订句柄要留着**：这两个订阅是**全局**的（`mygo.App` 上的回调列表），
+	// 而迷你窗会开开关关——不摘的话，每开一次就多留两个回调，而它们各自还
+	// **拿着这一个外壳**（窗关了它照样跑，每来一次应用激活就对着一个死外壳
+	// 调 `Focus`）。
+	s.miniAppActiveOff = mygo.App.OnDidBecomeActive(func() { s.miniCurtainEnsureKey() })
 
 	// 🔴 **应用退出前台时，收手**（票 #307 修 F1）。
 	//
@@ -579,7 +599,7 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	// 那一档会把 `miniCurtainAppActive` 置真，重试于是自动停；用户又切走时，
 	// 这一档把它置回假——而**重试的窗口本身**（`miniCurtainFocusUntil`）
 	// 只有 1200ms，早就过了。
-	mygo.App.OnDidResignActive(func() { s.miniCurtainAppActive = false })
+	s.miniAppResignOff = mygo.App.OnDidResignActive(func() { s.miniCurtainAppActive = false })
 
 	// ⚠️ **逐窗口的那些生命周期钩子装在这一层上**（`miniWindow` 那一层接口），
 	// 而不是直接装在 `*mygo.Window` 上——理由见 `attachMiniWindowLifecycle`
@@ -604,6 +624,17 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 		if s.miniDisplaysOff != nil {
 			s.miniDisplaysOff()
 			s.miniDisplaysOff = nil
+		}
+		// ⚠️ **退订那两个应用级回调**（同一个理由）：它们是 `mygo.App` 上的全局
+		// 列表，闭包各自**拿着这一个外壳**——不摘的话，窗关了它照样跑，每开一次
+		// 迷你就多挂两条死回调。
+		if s.miniAppActiveOff != nil {
+			s.miniAppActiveOff()
+			s.miniAppActiveOff = nil
+		}
+		if s.miniAppResignOff != nil {
+			s.miniAppResignOff()
+			s.miniAppResignOff = nil
 		}
 		// 唤醒句柄的摘除在 `closePerWindow` 里（`releaseMini` 走的就是它）。
 		s.releaseMini()
@@ -785,7 +816,9 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// `DisableResize`**（`MiniWindowOptions` 的那一段），于是用户可以把窗
 	// 往高里拖。根只 `FillWidth()` 的话，窗高大于「84 + 缝 + 板高」时，
 	// 根底下会空出一块——而这一扇窗是**透明**的，**透明的那一块照样吃点击**。
-	// `Fill()` 让根铺满整扇窗，那多出来的一块是**面板自己的底**。
+	// `Fill()` 让根铺满整扇窗，那多出来的一块是**窗口自己的透明区**（透出
+	// 毛玻璃糊过的桌面）——两张板的底在 `mini-card` 和歌词板两个子元素上，
+	// 根自己**不画底**。
 	//
 	// ⚠️ **底色走 `coverWash` + `miniPanelAlpha`**（见上面那一段）：两张板都
 	// 染当前封面的色偏，而**半透明**让毛玻璃透出来。
@@ -799,7 +832,14 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 一块照样吃点击**）：提示占的是**上面那 84 高**（歌词板那一段不画），
 	// 而窗高要是还停在「84 + 缝 + 板高」，窗底下就多出一块**看不见、却拦
 	// 点击**的透明区——底下那个应用的按钮就点不到那几百像素。
-	if hasNotice && s.miniCurtain.height > 0 {
+	//
+	// 🔴 **判据是 `open` 而不是 `height > 0`**：展开的那一拍 `open` 已经是
+	// true，而 `height` 要到**下一帧**才 > 0（`miniCurtainSyncHeight` 在本
+	// 帧的 `viewMini` 开头已经跑过）。此刻恰好来一条提示的话，`height > 0`
+	// 为假 ⇒ 不收 ⇒ 而歌词板那一段被 `!hasNotice` 跳过 ⇒ 下一帧窗高却按
+	// 「84 + 缝 + h」往上长——**那一帧窗比可见内容高**。⇒ `open` 也要算：
+	// 「开着」这件事从 `toggle` 那一帧起就是真的。
+	if hasNotice && s.miniCurtain.open {
 		s.miniCurtainCollapseNow()
 	}
 	ui.Column(c).Key("mini-root").Fill().Children(func() {
@@ -912,8 +952,12 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 		Padding(miniPad, miniPad, miniPad, miniPad).
 		// ⚠️ **它是一个按钮**（读屏软件念得出「展开歌词」）：`Role(RoleButton)`
 		// + `Focusable()` 让它能被 Tab 到、能让读屏念出它是干什么的。
+		//
+		// ⚠️ **Label 跟着开/收走**：旧版有独立的「收起」键，封面列恒为「展开
+		// 歌词」问题不大；这一版它是**唯一的指针收起路**——卷帘展开时它还叫
+		// 「展开歌词」，读屏用户听到的和按下去的结果正好相反。
 		Role(ui.RoleButton).Focusable().
-		Label("展开歌词").Description(st.Title).
+		Label(miniCurtainCoverLabel(s.miniCurtain.open)).Description(st.Title).
 		Children(func() {
 			if st.CoverURL == "" {
 				return

@@ -1038,6 +1038,17 @@ func (s *Shell) viewMiniCurtain(c *ui.Context, st app.State, t *ui.Theme, cardBG
 		t)
 }
 
+// miniCurtainCoverLabel 是封面那一列（触发器）读屏念的名字。
+//
+// ⚠️ **它跟着 open 走**：这一版封面列是**唯一的指针收起路**——卷帘展开的
+// 时候它还叫「展开歌词」的话，读屏用户听到的和按下去的结果正好相反。
+func miniCurtainCoverLabel(open bool) string {
+	if open {
+		return "收起歌词"
+	}
+	return "展开歌词"
+}
+
 // viewMiniCurtainArrow 画缝里那个指向封面列的小三角。
 //
 // ⚠️ **它是「这一段是歌词板的」的视觉证据**：独立的两块板之间没有别的
@@ -1045,15 +1056,28 @@ func (s *Shell) viewMiniCurtain(c *ui.Context, st app.State, t *ui.Theme, cardBG
 //
 // ⚠️ **它在缝的正中间**（`miniCurtainGap` 高 10），横着对准封面列的中线
 // （`miniCoverCol` 84 ⇒ 中线在 42），色是歌词板那个底（`cardBG`）。
+//
+// ⚠️ **它是实心三角而不是那枚 `arrow-drop-up` 图标**：图标集里那一枚是
+// 两笔拼成的**空心折线** ⌃（line 版），在 12px 里只剩两条一像素出头的
+// 细线——目标图要的是 popover 那种**实心**的指向尾巴。这里没有现成的实心
+// 三角图标，于是自己画（`Painter.FillPath`）。
 func (s *Shell) viewMiniCurtainArrow(c *ui.Context, cardBG ui.Color) {
 	ui.Box(c).Key(miniCurtainArrowKey).
 		Height(miniCurtainGap).FillWidth().
-		Children(func() {
-			ui.Icon(c, icon(iconDropUp)).
-				Key(miniCurtainArrowKey + ":tri").
-				Absolute().Top(-1).Left(miniCoverCol/2 - 6).
-				Width(12).Height(12).
-				TextColor(cardBG)
+		Draw(func(p *ui.Painter, r ui.Rect) {
+			// 一个 12×6 的实心三角：尖朝上、底坐在歌词板的顶边上——跨在缝
+			// 和板边之间（缝 10 高，三角 6 高、居中 ⇒ 上沿 = (10−6)/2 = 2、
+			// 下沿 = 8）。
+			//
+			// ⚠️ **尖指向封面列的中线**：`miniCoverCol` 84 ⇒ 中线在 42；三角
+			// 宽 12 ⇒ 左沿在 42 − 6 = 36。
+			top := r.Y + (miniCurtainGap-6)/2
+			left := r.X + miniCoverCol/2 - 6
+			// ⚠️ **`Path` 的方法是指针接收者**（`MoveTo` / `LineTo` / `Close`），
+			// 字面量取不了址——要先命名再调，链式返回值才是它自己。
+			path := &ui.Path{}
+			path.MoveTo(left, top+6).LineTo(left+6, top).LineTo(left+12, top+6).Close()
+			p.FillPath(path, cardBG)
 		})
 }
 

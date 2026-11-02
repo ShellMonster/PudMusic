@@ -148,8 +148,9 @@ func TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain(t *testing.T) {
 		t.Fatalf("卷帘没有展开，文字有 %q", tt.Texts())
 	}
 
-	// 再点一次。
-	cover, ok := tt.Find("展开歌词")
+	// 再点一次。⚠️ **展开之后它的名字是「收起歌词」**（Label 跟着 open 走，
+	// 见 `miniCurtainCoverLabel`）。
+	cover, ok := tt.Find("收起歌词")
 	if !ok {
 		t.Fatalf("画面上找不到封面那一列，文字有 %q", tt.Texts())
 	}
@@ -162,6 +163,76 @@ func TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain(t *testing.T) {
 	}
 	if s.miniCurtain.open {
 		t.Error("卷帘还处于展开状态（`open` 还是 true）")
+	}
+}
+
+// TestTheMiniCurtainFindLyricsFromTheMenu 盯「『···』菜单里的「找歌词」会
+// 先回主窗、再开那个搜索弹窗」。
+//
+// ⚠️ **它是票面两格菜单之一**，而删掉它也照样全绿——这条是补的（评审抓到
+// 「找歌词」那一格整个没有测试）。它做的事是新加的：**先 `toggleMini` 回
+// 主窗**（那个弹窗画在主窗口那一层，迷你窗里点它会弹到一扇收着的窗上）、
+// 再 `s.main.openLyricSearch()`。
+//
+// ⚠️ **断的是「主窗那个外壳的弹窗开了」**，不是「迷你这一份的」——搜索状态
+// 是**逐窗口一份**（`Shell.lyricSearch`），而开弹窗的是 `s.main`。
+func TestTheMiniCurtainFindLyricsFromTheMenu(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+
+	// 🔴 **给主窗装一个「开弹窗」的见证**：`openLyricSearch` 走的是主窗外壳
+	// 的 `lyricSearch.open`——迷你这一份从来没挂过那个弹窗，所以断的是
+	// **主窗那一份**开了。
+	//
+	// ⚠️ **`s.main` 要手接**：`miniCurtainShell` 用 `NewMini` 建外壳，而它**不**
+	// 给 `s.main` 赋值——生产里那一半是 `newMiniShell` 干的（`mini.main = s`）。
+	main := s.main
+	if main == nil {
+		// miniCurtainShell 没把 main 挂上——拿建它的那个外壳当主窗。
+		main = newTestShell(t, onApp(a)).s
+		s.main = main
+	}
+	toggled := 0
+	s.toggleMini = func() { toggled++ }
+	// 🔴 **挂一个源**：`openLyricSearch` 一个源都没挂时**什么都不开**
+	//（它先弹「还没有接上歌词源」那句 toast），而我们要断的是「弹窗开了」。
+	a.MountLyricSources(lrclibSource(cand("1", "第一句")))
+
+	clickCurtainCover(t, tt)
+	settleCurtain(t, tt, s, true)
+
+	// 菜单里有「找歌词」那一格。
+	btn, ok := tt.Find("歌词菜单")
+	if !ok {
+		t.Fatalf("画面上找不到「···」那枚菜单钮，文字有 %q", tt.Texts())
+	}
+	tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
+	tt.Frame()
+	items := tt.Menu()
+	found := false
+	for _, it := range items {
+		if it == "找歌词" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("菜单里没有「找歌词」那一格，菜单是 %q", items)
+	}
+
+	// 选它：先回主窗，再开弹窗。
+	if err := tt.ChooseMenuItem("找歌词"); err != nil {
+		t.Fatalf("选不了「找歌词」：%v（菜单是 %q）", err, items)
+	}
+	if toggled != 1 {
+		t.Errorf("选了「找歌词」之后 `toggleMini` 被调了 %d 次，want 1：它没有先回主窗", toggled)
+	}
+	if !main.lyricSearch.open {
+		t.Error("选了「找歌词」之后主窗那个搜索弹窗没有开")
 	}
 }
 
@@ -253,8 +324,8 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 	clickCurtainCover(t, tt)
 	settleCurtain(t, tt, s, true)
 
-	// 收着的时候，迷你卡片那一块是 84 高。
-	card, ok := tt.Find("展开歌词")
+	// 展开之后封面那一列的名字是「收起歌词」（Label 跟着 open 走）。
+	card, ok := tt.Find("收起歌词")
 	if !ok {
 		t.Fatalf("画面上找不到封面那一列，文字有 %q", tt.Texts())
 	}
@@ -502,10 +573,10 @@ func TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack(t *testing.T) {
 	if got := s.miniCurtain.height; got != 0 {
 		t.Errorf("立刻收起之后卷帘高 %.1f，want 0：它还在滑下去（窗会先弹回 320）", got)
 	}
-		if got := s.miniCurtain.setHeight; got != miniHeight {
-			t.Errorf("立刻收起之后窗高是 %d，want %d：窗不该先弹回 %d 再滑下来",
-				got, miniHeight, miniHeight+miniCurtainGap+miniCurtainH)
-		}
+	if got := s.miniCurtain.setHeight; got != miniHeight {
+		t.Errorf("立刻收起之后窗高是 %d，want %d：窗不该先弹回 %d 再滑下来",
+			got, miniHeight, miniHeight+miniCurtainGap+miniCurtainH)
+	}
 	if miniCurtainHasLyrics(tt) {
 		t.Errorf("立刻收起之后画面上还有歌词：卷帘没有收起来，文字有 %q", tt.Texts())
 	}
@@ -706,6 +777,10 @@ func TestRenderMiniCurtainShots(t *testing.T) {
 }
 
 // clickCurtainCover 点一下封面那一列（展开 / 收起的触发器）。
+//
+// ⚠️ **它只在卷帘收着的时候用**：那一列的名字跟着 `open` 走（`miniCurtainCoverLabel`），
+// 收着时叫「展开歌词」、开着时叫「收起歌词」——开着的时候要用它去**收起**
+// 的话，得找「收起歌词」。
 func clickCurtainCover(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	cover, ok := tt.Find("展开歌词")
