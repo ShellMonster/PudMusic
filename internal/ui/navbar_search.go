@@ -292,14 +292,30 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			if !s.searchSuggest {
 				return false
 			}
+			// 🔴 **带修饰键的方向键还给输入框**：`editor.wants()` 对
+			// `KeyUp/KeyDown` 在 `mods != 0` 时返回 `true`——单行框本来认
+			// `Shift+↓`（扩选到末尾）和 `Cmd+↓`（光标到末尾，macOS）。
+			// `OnTextKey` 回调返回 `true` 后编辑器再也看不到这个键，
+			// 扩选/光标移动就被吞成了面板导航（探针实测 `Cmd+↓` 会武装
+			// `sel=0`）。`KeyEnter` 的修饰键也会被吞（`Cmd+Enter` 触发选中项搜索），
+			// 同一条修。
+			if k.Mods != 0 {
+				return false
+			}
 			n := len(s.nav.items)
 			switch k.Key {
 			case ui.KeyDown:
 				if n == 0 {
 					return false
 				}
-				// 没选中时 ↓ 从顶上第一条开始。
-				s.nav.sel = (s.nav.sel + 1 + n) % n
+				// 没选中时 ↓ 从顶上第一条开始（`sel=-1` 或零值 `sel=0` 都当
+				// 「还没选中」——后者是 `suggestNav{}` 的初值，点开面板
+				// 不经过 `Changed` 清零，第一次 ↓ 会从 1 开始跳过第一条）。
+				if !s.nav.armed {
+					s.nav.sel = 0
+				} else {
+					s.nav.sel = (s.nav.sel + 1 + n) % n
+				}
 				s.nav.armed, s.nav.reveal = true, true
 				s.nav.picked = s.nav.items[s.nav.sel]
 				return true
@@ -307,8 +323,13 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 				if n == 0 {
 					return false
 				}
-				// 没选中时 ↑ 从底下最后一条开始（和 combobox 同一个惯例）。
-				s.nav.sel = (s.nav.sel - 1 + n) % n
+				// 没选中时 ↑ 从底下最后一条开始（和 combobox 同一个惯例，
+				// `sel=-1` 或零值 `sel=0` 都当「还没选中」）。
+				if !s.nav.armed {
+					s.nav.sel = n - 1
+				} else {
+					s.nav.sel = (s.nav.sel - 1 + n) % n
+				}
 				s.nav.armed, s.nav.reveal = true, true
 				s.nav.picked = s.nav.items[s.nav.sel]
 				return true
@@ -488,6 +509,14 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 		//
 		// 所以这一位是「**这一场**播过了没有」，**只在浮层关掉的时候**才复位
 		// （见上面那一支）。
+		//
+		// 🔴 **`nav.items`/`armed`/`sel`/`reveal` 也要清**：`s.searchSuggest` 还是
+		// true（设计：内容回来面板自己回来），但此时 `OnTextKey` 读到的是
+		// **上一帧那一摊旧词**——清空全部后 ↓ 还能武装、回车搜出去一条
+		// 用户没选的词（探针实测：清空全部后 ↓ → `sel=0 armed=true` →
+		// 回车搜「林俊杰」）。删唯一一条历史 chip 的 ×、热榜异步变空等同理。
+		s.nav.items = s.nav.items[:0]
+		s.nav.sel, s.nav.armed, s.nav.reveal = -1, false, false
 		return
 	}
 	t := c.Theme()
@@ -898,12 +927,6 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem, idx int) {
 	})
 }
 
-// navPicked 报「这个词是不是键盘导航正选中的那一条」。
-//
-// ⚠️ **按下标比对，不是按下标当词**：`nav.sel` 是 `nav.items`（每帧重建、历史
-// 在前联想在后的扁平表）的下标。词会有重复（历史和联想可能都是「周杰伦」）——
-// 比「这一条词是不是 items[sel]」而不是「这是第几条」，这样画到第几条就是第几条
-// 亮，同名的两条都亮也亮得对（它们本来就是同一个词）。
 // navPicked 报「这一条是不是键盘导航正选中的那一条」。
 //
 // ⚠️ **按下标比对，不是按词**：历史里可能有「周杰伦」、联想词里也可能有
