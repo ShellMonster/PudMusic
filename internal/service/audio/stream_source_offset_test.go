@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -311,5 +312,113 @@ func TestAResumeOnDifferentBytesStartsFresh(t *testing.T) {
 			t.Fatalf("盘上第 %d 字节 = %d，want %d——续传把两段内容拼起来了"+
 				"（前半段是上一次留下的旧内容）", i, got[i], fresh[i])
 		}
+	}
+}
+
+// TestAStaleDoneMarkerDoesNotBlockTheNextGeneration 盯「**过期的 `done:` 标记
+// 挡不住新一代**」（2026-11-02 审查①的 P0-2）。
+//
+// # 场景
+//
+// 第一代下完了 → 它写「`done:<长度>`」的终态账本 → 缓存层那一次删除**失败**
+// （只读挂载 / 杀毒软件 / 权限）→ 账本留在盘上。第二代来了：它要重下（缓存里
+// 没有完整记录），而它的每一次写账本都被那个 `done:` 挡掉 → 账本永久停在
+// `done:` → 这一首的续传**永久失效**（每次都从零重下）。
+//
+// # 判据
+//
+// 盘上有一个 `done:` 标记、**而完整记录不在** → 新一代必须能写账本。
+func TestAStaleDoneMarkerDoesNotBlockTheNextGeneration(t *testing.T) {
+	data := payload(32 << 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serveBytes(w, r, data, len(data))
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "song.bin")
+	offsetPath := filepath.Join(dir, "song.bin.off")
+	// 上一代留下的终态标记（而完整记录不在——模拟删除失败）。
+	if err := os.WriteFile(offsetPath, []byte("done:32768"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs: []string{srv.URL}, Client: srv.Client(),
+		CachePath: cachePath, OffsetPath: offsetPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 读一点，让前沿推进，然后关掉——收尾那一次写账本必须**写得进去**。
+	chunk := make([]byte, 4096)
+	if _, err := s.Read(chunk); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 🔴 **判据是「新一代能写进去」**：账本要么被这一代退役了（它下完了——
+	// 这一趟确实把整首下完了），要么是**这一代写的那个前沿**。
+	// **不能还是那个过期的 `done:`**——它挡着每一代，续传永久失效。
+	raw, err := os.ReadFile(offsetPath)
+	if err != nil {
+		// 这一代下完了 → 账本退役，正确。
+		return
+	}
+	text := strings.TrimSpace(string(raw))
+	if strings.HasPrefix(text, "done:") {
+		t.Errorf("账本还停在过期的 done: 标记（%q）——它挡着每一代，"+
+			"这一首的续传永久失效", text)
+	}
+}
+
+// TestALedgerThatEqualsTheWholeFileIsNotAResumePoint 盯「**账本写着整首长度
+// 时不能拿它续传**」（2026-11-02 审查①的 P1-1）。
+//
+// 服务器不给 `Content-Length` 时，这一趟的字节其实下完了，但长度是**猜的**
+// ——而账本写下的是「下到了多少」，那正好是**整首长度**。下一趟拿它发
+// `Range: bytes=<整首长度>-` → 服务器回 **416** → 源报错 → **这一首此后每次
+// 都放不出来**（账本不变，永远 416）。
+//
+// # 判据
+//
+// 服务器不给 `Content-Length` 时，下完之后**账本必须退役**（不存在）。
+func TestALedgerThatEqualsTheWholeFileIsNotAResumePoint(t *testing.T) {
+	data := payload(16 << 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 🔴 **不给 Content-Length**：服务器说「长度我不知道」。
+		w.Write(data)
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	offsetPath := filepath.Join(dir, "song.bin.off")
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs: []string{srv.URL}, Client: srv.Client(),
+		CachePath: filepath.Join(dir, "song.bin"), OffsetPath: offsetPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := make([]byte, 4096)
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, err := s.Read(chunk)
+		if err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("没读完")
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(offsetPath); !os.IsNotExist(err) {
+		raw, _ := os.ReadFile(offsetPath)
+		t.Errorf("账本还在（%q）——它写的是「整首长度」，下一趟拿它续传会收到 416，"+
+			"这一首此后每次都放不出来", strings.TrimSpace(string(raw)))
 	}
 }

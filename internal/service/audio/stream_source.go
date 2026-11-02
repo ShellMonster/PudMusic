@@ -873,12 +873,45 @@ func (s *StreamSource) writeOffset(n int64) {
 	// 而「谁更大」由下一次写补上。账本被撕了/写坏了的后果只是「从零重来」
 	// （见 `resumeOffsetFor`）。
 	cur, done := readOffsetLedger(s.offsetPath)
+	if done {
+		// 🔴 **盘上有 `done:` 标记，但这一份的完整记录不在了** → 这一代
+		// **要重下**，账本必须能覆盖（2026-11-02 审查①的 P0-2）。
+		//
+		// 那个 `done:` 可能是**上一代**留下的：它写完标记，而缓存层那一次
+		// 删除失败了（只读挂载 / 杀毒软件 / 权限）。而 `done:` 的语义是
+		// 「这一份已经完整」——**新一代确实要重下**（缓存里没有完整记录），
+		// 它写不下去的话，这一首的续传**永久失效**（每次都从零重下）。
+		//
+		// ⚠️ **判据是「完整记录还在不在」**（`streamaudio.Cache.Complete`）：
+		// 它在的话，这一份真的完整了，账本该退役；它不在的话，这个 `done:`
+		// 是过期的，挡着新一代就是错的。
+		if !s.resumeLedgerHasCompleteRecord() {
+			done = false
+		}
+	}
 	if done || cur >= n {
 		return
 	}
 	buf := strconv.AppendInt(make([]byte, 0, 20), n, 10)
 	writeOffsetFile(s.offsetPath, buf)
 	s.offsetWritten = n
+}
+
+// resumeLedgerHasCompleteRecord 报「这份字节的**完整记录**还在不在」。
+//
+// 账本和字节文件是**同一个 base 名**（`<base>.bin` / `<base>.bin.off`），
+// 而完整记录是 `<base>.json`——所以它的位置就是「把 `.bin.off` 换成 `.json`」。
+//
+// ⚠️ **这一层不解析记录内容**：只判「有没有那份记录」。内容对不对是缓存层
+// 的事（`Complete`），而这里要的只是「上一代说『下完了』，而那份记录还在
+// 不在」——不在的话，那个 `done:` 就是过期的。
+func (s *StreamSource) resumeLedgerHasCompleteRecord() bool {
+	if s.offsetPath == "" {
+		return false
+	}
+	meta := strings.TrimSuffix(s.offsetPath, ".off") + ".json"
+	_, err := os.Stat(meta)
+	return err == nil
 }
 
 // writeOffsetFile 原子地写账本（临时文件 + rename）。
@@ -950,6 +983,22 @@ func (s *StreamSource) settleOffsetLedger() {
 	if done {
 		// 下完了：账本没有存在的理由了（完整记录已落下）。删它是幂等的
 		// 兜底——缓存层在落完整记录时也删过一次。
+		_ = os.Remove(s.offsetPath)
+		return
+	}
+	// 🔴 **「长度是猜的」就不留账本**（2026-11-02 审查①的 P1-1）：服务器
+	// 不给 `Content-Length` 时，这一趟的字节**可能**下完了，也可能被掐了
+	// （客户端分不出这两者）——而账本写下的是「下到了多少」，那正好是**猜测
+	// 的总长**。
+	//
+	// 下一趟拿它发 `Range: bytes=<总长>-` → 服务器回 **416** → 源报错 →
+	// **这一首此后每次都放不出来**（账本不变，永远 416）。
+	//
+	// ⚠️ **代价**：这一份不会被记成完整缓存，下次要重下一遍（只是白费流量）。
+	s.mu.Lock()
+	sizeKnown := s.sizeKnown
+	s.mu.Unlock()
+	if !sizeKnown {
 		_ = os.Remove(s.offsetPath)
 		return
 	}
