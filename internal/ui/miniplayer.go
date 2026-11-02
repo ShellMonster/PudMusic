@@ -39,7 +39,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/platform"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
@@ -212,6 +211,15 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		// 🔴 `Transparent` 必须配着自己画的背景，理由见文件头那一条。
 		// 单开这一个开关而忘了画底，窗口在桌面上是隐形的。
 		Transparent: true,
+		// 🔴 **毛玻璃**（`popover` 那一档）：窗后面的东西（桌面壁纸、别的
+		// 应用的窗）糊完垫在页面底下——两张板（卡片 / 歌词板）的底是
+		// **半透明**的（`miniPanelAlpha`），磨砂透出来。
+		//
+		// ⚠️ **整窗一个材质**：卡片区也一起透——那是设计要的样子（目标图
+		// 那张卡片本身就是半透的）；macOS 26+ 走 `NSGlassEffectView` 的
+		// `popover` 档，更早的系统走 `NSVisualEffectView`（`mygo/internal/
+		// darwin/window.go` 的 `vibrancyMaterials`）。
+		Vibrancy: mygo.VibrancyPopover,
 		// Biu：`alwaysOnTop: true, skipTaskbar: true`。
 		// 「置顶」是它作为悬浮控件的本体；「不进任务栏 / 程序坞」是为了不跟
 		// 主窗口抢同一个格子。面板语义已经隐含这两条（`mygo/window.go` 的
@@ -431,10 +439,19 @@ func (s *Shell) restoreMainWindow() {
 // （`openMiniPlayer` 排的那条 `WhenReady` 就是为这个，见 `ensureWindow` 的注释：
 // `mygo.NewWindow` 在还没 ready 时是直接 panic 的，`mygo/window.go:382`）。
 func (s *Shell) ensureMiniWindow() {
+	// 🔴 **排队时就把目标外壳抓住**（评审抓到的那个）：`WhenReady` 是**下一拍**
+	// 才跑的，而同一拍里「关 → 再开」会把 `s.mini` 换成**另一个**外壳——闭包里
+	// 那时再读 `s.mini`，读到的就是新外壳，于是给**新外壳**挂一扇窗，而
+	// `dropMini` 关的却是**旧**那一扇。结果：两扇真窗都活着、新外壳的 `miniWin`
+	// 被第二个 `attach` 又挂了一遍，**第一扇变成收不回来的孤儿**。
+	//
+	// ⇒ 抓住**这一次想挂给谁**，闭包里比对——`s.mini` 换了人（或者那一扇
+	// 已经有窗了）就整个放弃，别把第二扇窗挂上去。
+	mini := s.mini
 	mygo.App.WhenReady(func() {
-		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下）。
-		mini := s.mini
-		if mini == nil {
+		// 排队的这段时间里它可能已经被人关掉了（快捷键连按两下），或者换成
+		// 另一个外壳了（同一拍里「关 → 再开」）。
+		if mini == nil || s.mini != mini || mini.miniWin != nil {
 			return
 		}
 		opts := MiniWindowOptions(mini.View)
@@ -532,6 +549,12 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 		// 列表），而迷你窗会开开关关——不摘的话，每开一次就多留一个回调，
 		// 而那个回调还**拿着这一扇窗**（窗关了它照样跑）。
 		s.miniDisplaysOff = mygo.Screen.OnDisplaysChanged(func() { s.miniOnDisplaysChanged() })
+		// ⚠️ **attach 那一刻就记下「应用此刻是前台吗」**：`miniCurtainActivate`
+		// 里 `need` 算的是「点封面那一刻应用**不是**前台」，而这个标志只在两个
+		// 应用级回调里维护——attach 时它总是 false，于是**应用本来就是前台**的
+		// 时候也被错算成「需要激活」，那个 1200ms 的重试窗口于是白开一次
+		// （每帧多要一帧、每 120ms 再激活一次已经激活的应用）。
+		s.miniCurtainAppActive = mygo.App.IsReady() && mygo.App.IsActive()
 	}
 
 	// 🔴 **窗被挪动了 ⇒ 重新判它落在哪块屏上**（票 #555）。
@@ -542,6 +565,10 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	//
 	// ⚠️ **它不跟用户对着干**：只有一块屏都看不见这扇窗的时候才把它拉回来
 	// （理由见 `miniOnWindowMoved`）。
+	//
+	// ⚠️ **它的返回值不存**：`OnMove` 是**逐窗口**的（挂在 `w.listeners`
+	// 那一列上），窗 `destroy` 时整列跟着死——不像下面两个 `mygo.App`
+	// 全局回调要手动摘，这一条窗没了它自己就没了。
 	w.OnMove(func() { s.miniOnWindowMoved() })
 
 	// 🔴 **应用真的成了前台的时候，再抢一次 key 窗口**（票 #536，评审实测
@@ -558,7 +585,12 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	//
 	// ⚠️ **它装在迷你这个外壳上**，不是主窗口那个：卷帘只在迷你窗里，而
 	// `Shell.miniCurtainWantsKey` 也是迷你这一份的状态。
-	mygo.App.OnDidBecomeActive(func() { s.miniCurtainEnsureKey() })
+	//
+	// ⚠️ **退订句柄要留着**：这两个订阅是**全局**的（`mygo.App` 上的回调列表），
+	// 而迷你窗会开开关关——不摘的话，每开一次就多留两个回调，而它们各自还
+	// **拿着这一个外壳**（窗关了它照样跑，每来一次应用激活就对着一个死外壳
+	// 调 `Focus`）。
+	s.miniAppActiveOff = mygo.App.OnDidBecomeActive(func() { s.miniCurtainEnsureKey() })
 
 	// 🔴 **应用退出前台时，收手**（票 #307 修 F1）。
 	//
@@ -571,7 +603,7 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	// 那一档会把 `miniCurtainAppActive` 置真，重试于是自动停；用户又切走时，
 	// 这一档把它置回假——而**重试的窗口本身**（`miniCurtainFocusUntil`）
 	// 只有 1200ms，早就过了。
-	mygo.App.OnDidResignActive(func() { s.miniCurtainAppActive = false })
+	s.miniAppResignOff = mygo.App.OnDidResignActive(func() { s.miniCurtainAppActive = false })
 
 	// ⚠️ **逐窗口的那些生命周期钩子装在这一层上**（`miniWindow` 那一层接口），
 	// 而不是直接装在 `*mygo.Window` 上——理由见 `attachMiniWindowLifecycle`
@@ -597,12 +629,29 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 			s.miniDisplaysOff()
 			s.miniDisplaysOff = nil
 		}
+		// ⚠️ **退订那两个应用级回调**（同一个理由）：它们是 `mygo.App` 上的全局
+		// 列表，闭包各自**拿着这一个外壳**——不摘的话，窗关了它照样跑，每开一次
+		// 迷你就多挂两条死回调。
+		if s.miniAppActiveOff != nil {
+			s.miniAppActiveOff()
+			s.miniAppActiveOff = nil
+		}
+		if s.miniAppResignOff != nil {
+			s.miniAppResignOff()
+			s.miniAppResignOff = nil
+		}
 		// 唤醒句柄的摘除在 `closePerWindow` 里（`releaseMini` 走的就是它）。
 		s.releaseMini()
 		// ⚠️ **主窗口要叫回来**。它是「进迷你」那一步收起来的（`openMiniPlayer`），
 		// 而这一条除了点「退出」之外还有别的路会走到：macOS 上的 ⌘W、Windows 上
 		// 的 Alt+F4。用户从那些路把迷你窗口关掉之后，主窗口还收着——应用还活着、
 		// 音乐还在放，而屏幕上什么都没有了（连 Dock 上的窗口列表都是空的）。
+		//
+		// ⚠️ **走 `dropMini` 那条路这一支到不了**：它先摘 `mini.main = nil` 再
+		// `Close`——`OnClosed` 跑到这一行时 `s.main` 已经是 nil，守卫恒假。
+		// 那条路上叫回主窗的是 `closeMiniPlayer` 自己（`dropMini` 返回 true
+		// 它就调 `restoreMainWindow`），**这一支只给 ⌘W / Alt+F4 那两条不经过
+		// `dropMini` 的路兜底**——`main` 那时候还挂着。
 		//
 		// 退出流程里**不叫**：那时候正在挨个关窗口，再把主窗口 Show 出来是反着的
 		// （`Shell.quitting`，见 `Attach` 里同一句的注释）。
@@ -748,92 +797,68 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 眼前什么也没有」，症状和「双击没反应」一样。
 	noticeText, noticeTone, hasNotice := s.miniNotice()
 
-	// 底色：有那句话的时候是**语义色**（红的那一档和主窗口那条 toast 一样），
-	// 没有的时候是 `t.Surface`。
+	// 底是**半透明**的（`miniPanelAlpha`）：这扇窗开了毛玻璃
+	//（`MiniWindowOptions.Vibrancy`），全不透的底会把糊完的桌面整个盖掉——
+	// 半透明才透得出那层磨砂。两张板（卡片 / 歌词板）都走这一档。
 	//
-	// ⚠️ **语义色要盖住整张卡片**：迷你那一张卡片是浮在桌面上的，而深色主题
-	// 下 `t.Surface` 和桌面糊在一起——那一行字压着灰底读不清。
-	cardBG := s.coverWash(t, t.Surface)
+	// ⚠️ **有那句话的时候换语义色**（红的那一档和主窗口那条 toast 一样）：
+	// 提示也要透出毛玻璃，所以语义色同样压到 `miniPanelAlpha`。
+	cardBG := s.coverWash(t, t.Surface).Alpha(miniPanelAlpha)
 	noticeFG := t.Text
 	if hasNotice {
 		cardBG, noticeFG = toastColors(noticeTone, t)
+		cardBG = cardBG.Alpha(miniPanelAlpha)
 	}
 
+	// 🔴 **根是「上下三段」**：卡片段（84）→ 间隙段（小三角）→ 歌词板段。
 	//
-	// 🔴 **根是「上下两段」，不是一张 `Fill()` 的卡片**（票 #536）：以前整张卡片
-	// `Fill()`，于是窗口一变高，卡片就跟着拉高——卷帘要的是「**上面那张 84 高
-	// 的卡片不动，下面多出一块卷帘**」。所以根是一个 Column，上面那一段钉死
-	// 84（`Height(miniHeight)`），下面那一段是卷帘。
-	// 🔴 **整扇窗是一块面板**：底、圆角、影全挂在**根**这一段上（票 #536）。
+	// ⚠️ **它和旧版「一整块面板」是两件事**（票 #536 的「两张板接缝处漏桌面」
+	// 是被这版取代的）：那一版把底、圆角、影全挂在**根**上，接缝处两张板
+	// 各自的圆角会留出**两个相对的圆弧**——中间那一小块是空的，而透明的那
+	// 一块照样吃点击。
 	//
-	// ⚠️ **为什么不能「卡片一块 + 卷帘一块」**：两张各有自己圆角的板拼在
-	// 一起，接缝处会出现**两个相对的圆弧**——卡片的下沿两个角**凹**进去、
-	// 卷帘的上沿两个角**凸**出来，中间那一小块是**空的**。而这一扇窗是
-	// `Transparent: true`，**透明的那一块照样吃点击**（那一小块会拦住底下
-	// 应用的点击）。
-	//   - 视觉审查量过（2026-10-27）：接缝那一行（y=83）左沿是 231/225/215，
-	//     而表面是 241/235/224——**深了 10 个色阶**，那是桌面透出来的地方。
-	//   - 改成「一整块」之后量回来：接缝那几行（y=80..86）左沿和右沿**逐
-	//     像素都是 241/235/224**——**一条缝都没有**。
+	// ⇒ 这一版**两块板各自独立**（卡片一张、歌词板一张，中间一条
+	// `miniCurtainGap` 的缝），圆角各画各的——**接缝就是窗的透明区**，而那条
+	// 缝是**设计的一部分**（小三角住在缝里）。代价是那一条缝照样吃点击
+	// （约 10px），这是换「独立歌词板」这个外观接受的。
 	//
-	// ⚠️ **影挂在根上、且只在展开时挂**：影挂在**卷帘**上会正好压在接缝上，
-	// 留下**一道灰痕**（浅色下接缝那一行比表面深 10 个色阶）。挂在根上的
-	// 时候它围着**整块**面板，落在面板**外面**（而不接缝上）。
-	// 而**收起的时候不挂影**——迷你卡片原来就**没有影**（票 #239 的审计记着
-	// 迷你窗那一块是 DESIGN §四 的「有理由的例外」），这一票不该顺手给它
-	// 加一道。
-	//
-	// ⚠️ **根的圆角跟着卷帘走**：展开时是「上面两个角圆、下面两个角方」
-	// （卷帘从卡片底下拉出来，下面是方的），收着时四个角都圆（原来那一版）。
-	//
-	// ⚠️ **根是 `Fill()` 而不是 `FillWidth()`**：迷你窗**故意没给
+	// ⚠️ **根还是 `Fill()` 而不是 `FillWidth()`**：迷你窗**故意没给
 	// `DisableResize`**（`MiniWindowOptions` 的那一段），于是用户可以把窗
-	// 往高里拖。根只 `FillWidth()` 的话，窗高大于「84 + 卷帘高」时，
-	// 根底下会空出一块——而这一扇窗是**透明**的，**透明的那一块照样吃点击**
-	//（底下那个应用的按钮就点不到那几十像素）。`Fill()` 让根铺满整扇窗，
-	// 那多出来的一块是**面板自己的底**（不透明，不吃点击的那种空）。
+	// 往高里拖。根只 `FillWidth()` 的话，窗高大于「84 + 缝 + 板高」时，
+	// 根底下会空出一块——而这一扇窗是**透明**的，**透明的那一块照样吃点击**。
+	// `Fill()` 让根铺满整扇窗，那多出来的一块是**窗口自己的透明区**（透出
+	// 毛玻璃糊过的桌面）——两张板的底在 `mini-card` 和歌词板两个子元素上，
+	// 根自己**不画底**。
 	//
-	// ⚠️ **底色走 `coverWash`**（上游那一档：封面取色把主色主色轻轻染进底）：
-	// 迷你播放器的底和播放条那一块是**同一族**（都随当前封面的色偏一下），
-	// 而这一扇窗**整个就是一张卡片**——染的是整块面板，卷帘那一段不再单独
-	// 画底（根已经铺满整扇窗了）。
+	// ⚠️ **底色走 `coverWash` + `miniPanelAlpha`**（见上面那一段）：两张板都
+	// 染当前封面的色偏，而**半透明**让毛玻璃透出来。
 	//
 	// ⚠️ **「有提示」那一档不展开卷帘**：那一句话占掉的是**整个迷你窗**
-	//（84 高那一张卡片），而卷帘是**挂在它下面**的另一块——两者同时画的话，
-	// 用户看到的是「迷你窗上半张是那句话、下半张是歌词」，而那 84 高里
+	//（84 高那一张卡片），而歌词板是**挂在它下面**的另一块——两者同时画
+	// 的话，用户看到的是「迷你窗上半张是那句话、下半张是歌词」，而那 84 高里
 	// 有一句「这个格式我们放不了」——**两件事挤在一扇窗里，谁也读不清**。
-	// ⇒ 有提示的时候**卷帘收着**（窗还是 84 高），提示走了它再能展开。
-	expanded := !hasNotice && s.miniCurtain.height > 0
+	// ⇒ 有提示的时候**歌词板收着**（窗还是 84 高），提示走了它再能展开。
+	//
+	// ⚠️ **「再能展开」是「用户再点一次封面」，不是「自动回来」**：下面那一句
+	// `CollapseNow` 把 `open`/`target`/弹簧**全钉回 0**——提示过去之后没人再
+	// 把 `open` 置真，卷帘就停着，直到用户自己再点。旧判据（`height > 0`）那时
+	// 是「画面在收着」而不是「意图收掉」，提示走的那一刻 `open` 还活着、能
+	// 自己再长出来；现在改成按**意图**判——提示撞上来 =「这次展开作废」。
 	// ⚠️ **有提示的时候窗高必须回到 84**（这一扇窗是透明的，而**透明的那
-	// 一块照样吃点击**）：提示占的是**上面那 84 高**（卷帘那一段不画），
-	// 而窗高要是还停在「84 + 卷帘高」，窗底下就多出一块**看不见、却拦
-	// 点击**的透明区——底下那个应用的按钮就点不到那 236 像素。
-	if hasNotice && s.miniCurtain.height > 0 {
+	// 一块照样吃点击**）：提示占的是**上面那 84 高**（歌词板那一段不画），
+	// 而窗高要是还停在「84 + 缝 + 板高」，窗底下就多出一块**看不见、却拦
+	// 点击**的透明区——底下那个应用的按钮就点不到那几百像素。
+	//
+	// 🔴 **判据是 `open` 而不是 `height > 0`**：展开的那一拍 `open` 已经是
+	// true，而 `height` 要到**下一帧**才 > 0（`miniCurtainSyncHeight` 在本
+	// 帧的 `viewMini` 开头已经跑过）。此刻恰好来一条提示的话，`height > 0`
+	// 为假 ⇒ 不收 ⇒ 而歌词板那一段被 `!hasNotice` 跳过 ⇒ 下一帧窗高却按
+	// 「84 + 缝 + h」往上长——**那一帧窗比可见内容高**。⇒ `open` 也要算：
+	// 「开着」这件事从 `toggle` 那一帧起就是真的。
+	if hasNotice && s.miniCurtain.open {
 		s.miniCurtainCollapseNow()
 	}
-	panel := ui.Column(c).Key("mini-root").Fill()
-	if expanded {
-		// ⚠️ **下两个角是 7，不是方的**（票 #307）：展开的时候窗的下沿就是
-		// **下轴（地轴）那一根**——而那根杆是胶囊形（半径 = 14 的一半 = 7）。
-		// ⇒ 面板的下圆角也取 7，**两个圆弧正好对上**，于是窗的下沿看起来
-		// 就是那根杆的下沿（而不是「一块方板底上贴一根圆杆」）。
-		panel = panel.Radius(t.Radius, t.Radius, miniCurtainAxisH/2, miniCurtainAxisH/2)
-	} else {
-		panel = panel.Radius(t.Radius)
-	}
-	panel = panel.Background(cardBG)
-	if expanded {
-		panel = shadow.Popover(panel, t)
-	}
-	// ⚠️ **裁到面板自己的圆角里**（票 #307）：那两道轴是**绝对定位**的孩子，
-	// 而上轴贴着窗的顶边——面板顶边两个角是圆的（`t.Radius`，可调到 24），
-	// 不裁的话**轴的两头会戳到面板外面**（那儿是透明的桌面）。
-	//
-	// ⚠️ **裁的是孩子，不是这一段自己**：框架的 `Clip` 只裁**子元素**画出来
-	// 的东西，而根自己的底和影是**裁之前**画的（`mygo/ui/paint.go` 的
-	// `p.background` / `p.shadow` 在 `pushClip` 之前）——所以那圈影还在。
-	panel = panel.Clip()
-	panel.Children(func() {
+	ui.Column(c).Key("mini-root").Fill().Children(func() {
 		// ⚠️ **高度那一段推在这里**（而不是 `viewMini` 的开头）：它要建的那个
 		// 「动画值的宿主」元素得是**根的子节点**（框架按「键 + 父」认元素），
 		// 而根是上面那一句建的。
@@ -841,39 +866,32 @@ func (s *Shell) viewMini(c *ui.Context) {
 		// ⚠️ **它在 `applyFrameTheme` 之后**：收起的那一段会画出来（窗高是动画
 		// 值），而那一段画的是**当前这一帧**的主题——主题先装好，它才对。
 		s.miniCurtainSyncHeight(c)
-		ui.Row(c).Key("mini").FillWidth().Height(miniHeight).
-			DragWindow().Children(func() {
-			// ⚠️ **有提示的时候这一段让位给那句话**（上游那一档，见
-			// `filenotice.go`）：迷你那一张卡片整个变成那句话。
-			if hasNotice {
-				s.viewMiniNotice(c, noticeText, noticeFG)
-				return
-			}
-			// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
-			s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
-			s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
-		})
-		// 卷帘。⚠️ **高度为 0 的时候一个字都不画**（`viewMiniCurtain` 那一支）——
-		// 窗高已经回到 84，而这一段要是还画着，窗就比内容矮。
+		// 🔴 **卡片段**：84 高那一张板，圆角四边都是 `t.Radius`。
+		//
+		// ⚠️ **它不再是根**：根是上面那个透明 Column（不画底），卡片是它
+		// 的第一个孩子——**自己画底、自己圆角**。收起的时候整扇窗就是它。
+		ui.Box(c).Key("mini-card").FillWidth().Height(miniHeight).
+			Radius(t.Radius).Background(cardBG).Clip().
+			Children(func() {
+				ui.Row(c).Key("mini").Fill().DragWindow().Children(func() {
+					// ⚠️ **有提示的时候这一段让位给那句话**（上游那一档，见
+					// `filenotice.go`）：迷你那一张卡片整个变成那句话。
+					if hasNotice {
+						s.viewMiniNotice(c, noticeText, noticeFG)
+						return
+					}
+					// 里面照样逐块包一层 Guard（铁律四）：崩掉封面那一块不该把控制键一起带走。
+					s.guardAt("迷你播放器封面", func(c *ui.Context) { s.viewMiniCover(c, st) })(c)
+					s.guardAt("迷你播放器控制键", func(c *ui.Context) { s.viewMiniControls(c, st, t) })(c)
+				})
+			})
+		// 歌词板（含间隙 + 小三角）。⚠️ **高度为 0 的时候一个字都不画**
+		//（`viewMiniCurtain` 那一支）——窗高已经回到 84，而这一段要是还画着，
+		// 窗就比内容矮。
 		//
 		// ⚠️ **有提示的时候也不画**（理由见上面那一段：那句话占掉整扇窗）。
 		if !hasNotice {
-			s.viewMiniCurtain(c, st, t, s.miniCurtain.height)
-		}
-		// ⚠️ **两道轴画在最后**（绝对定位的孩子最后画）：上轴是**迷你窗顶边**
-		// 那一道（一直都在），下轴是**卷帘下沿**那一道（跟着下沿走，回弹时
-		// 跟着抖）——理由见 `minicurtain_axis.go` 的文件头。
-		s.viewMiniCurtainAxisTop(c, t, cardBG)
-		if expanded {
-			s.viewMiniCurtainAxisBottom(c, t, cardBG)
-			// 🔴 **「收起」那一枚坐在下轴那根杆上**（票 #307 §②）：而歌词
-			// 现在**贴着下沿**（当前句的下沿就压在下轴的上沿上）——那一枚键
-			// 原来在杆之上 4 像素，**正好压在当前句那一行上**（长句子会从键
-			// 底下穿过去）。⇒ 挪到杆上，而杆是**根**的绝对定位孩子。
-			//
-			// ⚠️ **它必须排在轴**之后**画**（绝对定位的孩子最后画）：不然轴
-			// 会盖住它（轴是那根杆，而键要坐在杆上面）。
-			s.viewMiniCurtainCollapse(c, t)
+			s.viewMiniCurtain(c, st, t, cardBG, s.miniCurtain.height)
 		}
 	})
 }
@@ -950,8 +968,12 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State) {
 		Padding(miniPad, miniPad, miniPad, miniPad).
 		// ⚠️ **它是一个按钮**（读屏软件念得出「展开歌词」）：`Role(RoleButton)`
 		// + `Focusable()` 让它能被 Tab 到、能让读屏念出它是干什么的。
+		//
+		// ⚠️ **Label 跟着开/收走**：旧版有独立的「收起」键，封面列恒为「展开
+		// 歌词」问题不大；这一版它是**唯一的指针收起路**——卷帘展开时它还叫
+		// 「展开歌词」，读屏用户听到的和按下去的结果正好相反。
 		Role(ui.RoleButton).Focusable().
-		Label("展开歌词").Description(st.Title).
+		Label(miniCurtainCoverLabel(s.miniCurtain.open)).Description(st.Title).
 		Children(func() {
 			if st.CoverURL == "" {
 				return

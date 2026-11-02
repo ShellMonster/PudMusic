@@ -4759,12 +4759,12 @@ var Items = []Item{
 		// 记在 `internal/ui/miniplayer_test.go` 末尾那一节「真窗口才量得到」
 		// 里（人工清单，不在台账里装）。
 		Category: Platform,
-		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 收起键三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
+		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 「···」菜单三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
 		Tests: []string{
-			// 展开 / 收起的三条路。
+			// 展开 / 收起的三条路（封面 / 「···」菜单 / Esc）。
 			"TestTheMiniCurtainOpensWhenTheCoverIsClicked",
 			"TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain",
-			"TestTheMiniCurtainClosesWithTheCollapseButton",
+			"TestTheMiniCurtainClosesFromTheMenu",
 			"TestTheMiniCurtainClosesWithEscape",
 			// 窗口高度 = 84 + 卷帘高（那一扇窗是透明的，多出来的那一块照样吃
 			// 点击）。
@@ -4800,8 +4800,9 @@ var Items = []Item{
 			"TestTheMiniCurtainUnrollsWithASpring",
 			// - 收起不弹（过阻尼），一路收回 84。
 			"TestTheMiniCurtainRollsUpWithoutBouncing",
-			// - 两道轴：上轴在顶边，下轴贴着下沿（改窗高它也贴着）。
-			"TestTheMiniCurtainHasTwoAxes",
+			// - 两张板独立：卡片和歌词板之间有一条缝，缝里有一个指向封面的
+			//   小三角。
+			"TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard",
 			// - 激活失败了就再试（F1 那个判据）。
 			"TestTheMiniCurtainRetriesTheActivation",
 			// - 展开到一半就收起：**不许先长高**（换目标 = 速度归零）。
@@ -4809,9 +4810,9 @@ var Items = []Item{
 			// - 重试窗口开着的时候**还要得出帧**（迷你窗是失焦照画的，
 			//   帧是「谁要」才出的——弹簧停稳之后帧源就断了）。
 			"TestTheMiniCurtainKeepsAFrameWhileTheActivationRetryIsOpen",
-			// - 歌词**贴着下沿排**（票 #307 §②）：当前句的下沿压在下轴的
-			//   上沿上，而当前句**不在中间**。
-			"TestTheMiniCurtainLyricsHugTheBottom",
+			// - 歌词**当前句居中**（票面 2026-10 的目标图）：当前句放大 +
+			//   主色，上下各留得出历史句和未来句。
+			"TestTheMiniCurtainLyricsCentresTheCurrentLine",
 			// - **普通点击**（指针那一跳）封面 ⇒ 激活那一档跑了 ⇒ Esc 收得起。
 			"TestTheMiniCurtainAnswersAPointerClickAndTakesTheKeyboard",
 		},

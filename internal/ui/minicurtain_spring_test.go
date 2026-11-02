@@ -1,6 +1,7 @@
 package ui
 
-// 迷你播放器那个「歌词卷帘」的**弹簧**和**两道轴**这一组（票 #307）。
+// 迷你播放器那个「歌词卷帘」的**弹簧**和**间隙**这一组（票 #307，2026-11
+// 改版）。
 //
 // # 这一组量的是什么
 //
@@ -9,23 +10,26 @@ package ui
 //
 //  1. **展开是弹簧**：按 Issue 指定的 `w = 10.5` 展开，**回弹两三下、幅度递减**；
 //  2. **收起不弹**（过阻尼 ζ = 1.1），一路收回 84；
-//  3. **窗高全程 ≤ 84 + 236**，而**每一帧窗高 == 内容高**（过冲那一帧也不许
-//     超过目标——透明的那一块照样吃点击，文件头第 1 条）；
-//  4. **两道轴**：上轴在迷你窗顶边，下轴在卷帘下沿，**下沿到哪轴到哪**。
+//  3. **窗高全程 ≤ 84 + 缝 + 卷帘高**，而**每一帧窗高 == 内容高**（过冲那一帧
+//     也不许超过目标——透明的那一块照样吃点击，文件头第 1 条）；
+//  4. **卡片和歌词板之间那道缝**：窗比两张板加起来高那一条缝，而缝里的小
+//     三角指向封面列（票面：两块独立的板，不是连在一起的一张）。
+//
+// ⚠️ **旧版第 4 条是「两道轴」**（上轴钉窗顶、下轴贴卷帘下沿）——换「独立
+// 歌词板」之后那两条轴整个撤了，这一条换成了「那道缝在、而板在缝下面」。
 //
 // # 为什么逐帧推钟
 //
 // ⚠️ **推钟不数帧**：这一段是**按时间积分**的（弹簧自己按 `c.Now()` 的差
-// 积分），而无头 Tester 的钟站着不动。⇒ 每一步推 **20 毫秒**——无头那一档
-// 的刷新是 60Hz（16.7 毫秒一帧），推 20 毫秒正好跑**一帧**（下一帧在 33
-// 毫秒，落在窗口外）。
+// 积分），而无头 Tester 的钟站着不动。⇒ 每一步推 **`time.Second/60`**
+//（16.67 毫秒）——无头那一档的刷新是 60Hz，推一步正好跑**一帧**（下一帧
+// 在 33 毫秒，落在窗口外）。
 //
 // ⚠️ **别在 `tt.Advance` 之后又 `tt.Frame()`**：那会在同一个时刻上再跑一帧
-// （`dt = 0`，弹簧不动），而**第一帧**会把那 20 毫秒里剩下的零头也吃掉
-// ——弹簧的 `dt` 于是不是 16.7 而是 20 毫秒，「到全开要几帧」就量不准了。
+// （`dt = 0`，弹簧不动），而**第一帧**会把那一步里剩下的零头也吃掉
+// ——弹簧的 `dt` 于是不是 16.67，「到全开要几帧」就量不准了。
 
 import (
-	"image"
 	"image/color"
 	"testing"
 	"time"
@@ -154,7 +158,7 @@ func TestTheMiniCurtainUnrollsWithASpring(t *testing.T) {
 		heights[i] = f.height
 	}
 
-	// 🔴 **窗高全程 ≤ 84 + 236**，而**每一帧窗高 == 内容高**。
+	// 🔴 **窗高全程 ≤ 84 + 缝 + 卷帘高**，而**每一帧窗高 == 内容高**。
 	//
 	// ⚠️ **这两条是一件事的两头**：这一扇窗是透明的，而**透明的那一块照样
 	// 吃点击**（`minicurtain.go` 文件头第 1 条）——窗比内容高 20 像素，底下
@@ -162,16 +166,19 @@ func TestTheMiniCurtainUnrollsWithASpring(t *testing.T) {
 	//
 	// ⚠️ **「过冲那一帧」是这一条最要紧的一帧**：弹簧内部的 `p` 会超过 1，
 	// 而画出来的高度被**镜像**翻成「缩回去一点」（见 `minicurtain_spring.go`
-	// 的文件头）——所以窗高**从不超过** 84 + 236。
+	// 的文件头）——所以窗高**从不超过** 84 + 缝 + 卷帘高。
 	for i, f := range frames {
-		if f.window > miniHeight+miniCurtainH {
-			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d（84 + %d）："+
+		if f.window > miniHeight+miniCurtainGap+miniCurtainH {
+			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d（84 + 缝 %d + 卷帘 %d）："+
 				"过冲那一帧窗比内容高，而透明的那一块照样吃点击",
-				i, f.window, miniHeight+miniCurtainH, miniCurtainH)
+				i, f.window, miniHeight+miniCurtainGap+miniCurtainH, miniCurtainGap, miniCurtainH)
 		}
 		want := miniHeight + int(f.height+0.5)
+		if f.height > 0 {
+			want += miniCurtainGap
+		}
 		if f.window != want {
-			t.Errorf("第 %d 帧窗高是 %d，want %d（84 + 这一帧画出来的卷帘高 %.1f）："+
+			t.Errorf("第 %d 帧窗高是 %d，want %d（84 + 缝 + 这一帧画出来的卷帘高 %.1f）："+
 				"窗高必须每一帧都等于内容高", i, f.window, want, f.height)
 		}
 	}
@@ -273,11 +280,11 @@ func TestTheMiniCurtainRollsUpWithoutBouncing(t *testing.T) {
 	if got, want := frames[len(frames)-1].window, miniHeight; got != want {
 		t.Errorf("收起之后窗高是 %d，want %d", got, want)
 	}
-	// ⚠️ **窗高全程不许超过 84 + 236**：收起那一段是从满高往回走的，而过冲
-	// （如果有过冲）会是**先涨**——那正是「窗比内容高」那一条。
+	// ⚠️ **窗高全程不许超过 84 + 缝 + 卷帘高**：收起那一段是从满高往回走的，
+	// 而过冲（如果有过冲）会是**先涨**——那正是「窗比内容高」那一条。
 	for i, f := range frames {
-		if f.window > miniHeight+miniCurtainH {
-			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d", i, f.window, miniHeight+miniCurtainH)
+		if f.window > miniHeight+miniCurtainGap+miniCurtainH {
+			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d", i, f.window, miniHeight+miniCurtainGap+miniCurtainH)
 		}
 	}
 }
@@ -470,41 +477,30 @@ func TestTheMiniCurtainKeepsAFrameWhileTheActivationRetryIsOpen(t *testing.T) {
 	}
 }
 
-// miniCurtainLum 报一个颜色的亮度。
+// miniCurtainLum 报一个颜色的亮度（比缝隙里的箭头斑时用）。
 func miniCurtainLum(c color.RGBA) float64 {
 	return 0.299*float64(c.R) + 0.587*float64(c.G) + 0.114*float64(c.B)
 }
 
-// miniCurtainAxisRows 报画面底部那一段「轴」占着几行（从下往上数）。
+// TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard 盯「卡片和歌词板之间
+// 那道缝」（2026-11 改版）。
 //
-// ⚠️ **判据是「和纸身差得够多」**：那一段是从画面最底下往上数、直到某一行的
-// 颜色和纸身（画面中间那一行）差得不多为止。⇒ 量的是**轴那一段的行数**，
-// 而**轴的下沿永远是画面最底下那一行**。
-func miniCurtainAxisRows(img *image.RGBA) int {
-	b := img.Bounds()
-	x := b.Max.X - 20
-	paper := miniCurtainLum(img.RGBAAt(x, b.Max.Y/2))
-	rows := 0
-	for y := b.Max.Y - 1; y >= b.Min.Y; y-- {
-		if d := miniCurtainLum(img.RGBAAt(x, y)) - paper; d > 12 || d < -12 {
-			rows++
-			continue
-		}
-		break
-	}
-	return rows
-}
-
-// TestTheMiniCurtainHasTwoAxes 盯「两道轴」（票 #307）。
+// ⚠️ **这一条量两样**：
 //
-// ⚠️ **判据是画面**：轴是**看得见**的东西，而无头 Tester 量得到画面上的
-// 像素（`tt.Image()`）。⇒ 这一条量的是「**画面最底下那一行是轴**」和
-// 「**画面最顶上那几行是轴**」。
+//  1. **歌词板在卡片下面、中间隔着那条缝**（票面：两块独立的板，不是连成一
+//     张）——板的顶边必须在 `84 + 缝`；
+//  2. **缝里有一个小三角**：封面列中线（x=42）那一列在缝里的颜色，和同一行
+//     窗中央（x=160，三角画不到那儿）那一列**不一样**——三角画出来那一块
+//     和只有歌词板影子渐变的空当，在像素上分得开。
 //
-// ⚠️ **而且要跟着下沿走**：无头 Tester 的窗高是自己那个（不跟真窗口走），
-// 所以这一条**自己改 Tester 的尺寸**（`tt.SetSize`）来模拟「窗在长高」——
-// 改完之后**轴仍然贴在最底下那一行**（票面：「下沿到哪轴到哪」）。
-func TestTheMiniCurtainHasTwoAxes(t *testing.T) {
+// ⚠️ **「缝是透明区」在无头这一档量不到**：headless 的帧缓冲一开始就是一张
+// **不透明的白纸**（`mygo/ui/headless.go` 的 `image()`），画了的和没画的
+// 地方 alpha 都是 255——所以这一条**不量 alpha**（真窗那一半记在
+// `miniplayer_test.go` 末尾的清单里）。
+//
+// ⚠️ **旧版这一条量的是「两道轴」**（上轴钉窗顶、下轴贴卷帘下沿）：换「独立
+// 歌词板」之后那两条轴整个撤了——这一组**不量轴**，轴是已经不存在的东西。
+func TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard(t *testing.T) {
 	s, a := miniCurtainShell(t)
 	if err := enqueueTwo(a, t); err != nil {
 		t.Fatal(err)
@@ -514,49 +510,38 @@ func TestTheMiniCurtainHasTwoAxes(t *testing.T) {
 	tt := miniCurtainTester(s)
 	tt.Frame()
 
-	// 🔴 **上轴**：迷你窗顶边那一道（一直都在，收着的时候也在）。
-	//
-	// ⚠️ **量的是「顶上那几行和纸身不一样」**：上轴只有 6 高（封面从 y=7
-	// 起，再高就压到封面了——见 `minicurtain_axis.go` 那个常量）。
-	top := miniCurtainLum(tt.Image().RGBAAt(160, 5))
-	paper := miniCurtainLum(tt.Image().RGBAAt(160, 12))
-	if d := top - paper; d > -8 && d < 8 {
-		t.Errorf("迷你窗顶边那一行（y=5）的亮度是 %.0f，而下面纸身（y=12）是 %.0f："+
-			"**上轴不在顶边**（票面：「上轴 = 迷你窗顶边那一道」）", top, paper)
-	}
-	// ⚠️ **而顶边下面那一行是纸身**：上轴只有 6 高（y=0..5）。
-	if d := miniCurtainLum(tt.Image().RGBAAt(160, 6)) - paper; d > 4 || d < -4 {
-		t.Errorf("y=6 那一行的亮度是 %.0f，而纸身是 %.0f：上轴比 6 高了"+
-			"（它会压到封面的第一行）", miniCurtainLum(tt.Image().RGBAAt(160, 6)), paper)
-	}
-
-	// 展开。
 	clickCurtainCover(t, tt)
 	settleCurtain(t, tt, s, true)
 
-	// 🔴 **下轴**：贴着卷帘下沿那一道，**画面最底下那一行就是它**。
-	img := tt.Image()
-	rows := miniCurtainAxisRows(img)
-	if rows < 8 {
-		t.Errorf("画面最底下那一段只有 %d 行是轴，want ≥ 8：下轴（%d 高）"+
-			"没画出来，或者没贴在窗的下沿", rows, miniCurtainAxisH)
+	// 🔴 **歌词板的顶边在 84 + 缝**：紧贴着卡片（缝是 0）或者隔了更远，都是
+	// 结构错（票面：「卡片和板是两张独立的板，中间一条缝」）。
+	board, ok := tt.Find("迷你播放器歌词")
+	if !ok {
+		t.Fatalf("画面上找不到歌词板（它的名字是「迷你播放器歌词」），文字有 %q", tt.Texts())
 	}
-	if rows > miniCurtainAxisH {
-		t.Errorf("画面最底下那一段有 %d 行是轴，want ≤ %d：下轴是 %d 高",
-			rows, miniCurtainAxisH, miniCurtainAxisH)
+	if got, want := board.Y, float32(miniHeight+miniCurtainGap); got < want-1 || got > want+1 {
+		t.Errorf("歌词板的顶边在 y=%.1f，want %.0f（卡片 84 + 缝 %d）："+
+			"板和卡片之间的那道缝不对", got, want, miniCurtainGap)
 	}
 
-	// 🔴 **跟着下沿走**：把窗改矮（模拟真窗在长高 / 变矮），轴仍然贴在最底下。
-	//
-	// ⚠️ **这一条是「下沿到哪轴到哪」**：轴是**根**的绝对定位孩子（不是卷帘
-	// 那一段的），而根的高度就是窗的高度——理由见 `minicurtain_axis.go` 的
-	// 文件头。
-	for _, h := range []int{miniHeight + 100, miniHeight + 200, miniHeight + miniCurtainH} {
-		tt.SetSize(miniWidth, h)
-		tt.Frame()
-		if got := miniCurtainAxisRows(tt.Image()); got < 8 {
-			t.Errorf("窗改成 %d 高之后，画面最底下那一段只有 %d 行是轴："+
-				"下轴没有跟着下沿走", h, got)
+	// 🔴 **缝里有那个小三角**：三角画在封面列中线（x=42）上，而缝里的其余
+	// 部分只有歌词板那道影子——同一行上 x=42 和 x=160 的亮度差就分得出
+	// 「三角在不在」。
+	img := tt.Image()
+	maxDiff := 0.0
+	atY := -1
+	for y := miniHeight + 1; y < miniHeight+miniCurtainGap-1; y++ {
+		d := miniCurtainLum(img.RGBAAt(miniCoverCol/2, y)) - miniCurtainLum(img.RGBAAt(miniWidth/2, y))
+		if d < 0 {
+			d = -d
 		}
+		if d > maxDiff {
+			maxDiff, atY = d, y
+		}
+	}
+	if maxDiff < 4 {
+		t.Errorf("缝里 x=%d（封面列中线）和 x=%d（窗中央）同一行的亮度差最多 %.1f："+
+			"那个指向封面的小三角没画出来（y=%d）",
+			miniCoverCol/2, miniWidth/2, maxDiff, atY)
 	}
 }

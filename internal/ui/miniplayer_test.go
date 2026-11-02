@@ -53,6 +53,17 @@ func TestTheMiniWindowIsAtBiuNumbers(t *testing.T) {
 	if !opts.Transparent {
 		t.Error("窗口不是透明的：Biu 那边 transparent: true，圆角那一圈要透出桌面去")
 	}
+	// 🔴 **毛玻璃**（2026-11 改版）：两张板（卡片 / 歌词板）的底是**半透明**
+	// 的（`miniPanelAlpha`），而糊桌面那一下走窗级 `NSVisualEffectView`——
+	// 整窗一个材质（`VibrancyPopover`，popover 那一档的磨砂），两块板共用
+	// 它（`glass.Material` 那种元素级的只糊**窗内**内容，糊不到桌面）。
+	//
+	// ⚠️ **它只在真窗上糊得出来**：无头 Tester 里没有桌面可糊——「糊不糊」
+	// 列在文件末尾「真窗口才量得到」那一节；这一条量的是**开关本身**。
+	if opts.Vibrancy != mygo.VibrancyPopover {
+		t.Errorf("窗级毛玻璃不是 popover 那一档（%v）：桌面糊不出来，"+
+			"两张板就成了浮在透明窗上的灰板", opts.Vibrancy)
+	}
 	if !opts.AlwaysOnTop {
 		t.Error("窗口不置顶：它被别的窗口一盖就找不着了，而它是靠「一直看得见」成立的")
 	}
@@ -190,27 +201,42 @@ func TestTheMiniCardCoversTheWindow(t *testing.T) {
 
 	img := snapshot(tt)
 	surface := BuildTheme(s.app.SettingsSnapshot(), false).Surface
-	want := color.RGBA{surface.R, surface.G, surface.B, 255}
+	// ⚠️ **底是半透明的**（`miniPanelAlpha`，2026-11 改版）：这扇窗开了毛玻璃
+	// （`Vibrancy`），卡片的底压到 0.88——而无头 Tester 的帧缓冲是一张**不透
+	// 明的白纸**（见上面那段注释），于是画出来的像素是**源色盖白纸那份混合**
+	// （渲染器在 sRGB 里混，亮度上仍是「Surface 那一档」）——判据是「落在
+	// Surface 亮度那一档里」，而不是逐通道逐色阶对死。
+	wantLum := 0.299*float64(surface.R) + 0.587*float64(surface.G) + 0.114*float64(surface.B)
+	inCardBand := func(got color.RGBA) bool {
+		d := 0.299*float64(got.R) + 0.587*float64(got.G) + 0.114*float64(got.B) - wantLum
+		if d < 0 {
+			d = -d
+		}
+		// ⚠️ **容差 8**：混到白纸上亮度只抬高 1~2，而控件压上去的像素离它
+		// 差得远——8 之内全是底那一档。
+		return d < 8
+	}
 
 	// ⚠️ 量的是**覆盖率**而不是某一个像素：窗口正中间被控件压着（进度条和播放键
 	// 就摆在那儿），钉死一个像素的话改一下版面就得跟着改这条断言。
 	covered := 0
 	for y := 0; y < miniHeight; y++ {
 		for x := 0; x < miniWidth; x++ {
-			if miniPixel(img, x, y) == want {
+			if inCardBand(miniPixel(img, x, y)) {
 				covered++
 			}
 		}
 	}
 	half := miniWidth * miniHeight / 2
 	if covered < half {
-		t.Errorf("只有 %d/%d 个像素是主题的 Surface %#v：这一块没有自己的底，"+
+		t.Errorf("只有 %d/%d 个像素落在卡片底那一档（亮度 %.0f±8）：这一块没有自己的底，"+
 			"透明窗口在桌面上是隐形的（Transparent 的开关在 TestTheMiniWindowIsAtBiuNumbers）",
-			covered, miniWidth*miniHeight, want)
+			covered, miniWidth*miniHeight, wantLum)
 	}
-	if corner := miniPixel(img, 0, 0); corner == want {
-		t.Errorf("左上角也画成了 %#v：底是拿整窗刷满的，不是那块圆角卡片——"+
-			"贴边悬浮那一层（圆角那一圈透出桌面）就没有了", want)
+	// 角上不许有那一档：底是拿整窗刷满的话，角上也画上了。
+	if inCardBand(miniPixel(img, 0, 0)) {
+		t.Errorf("左上角也落进了卡片底那一档：底是拿整窗刷满的，不是那块圆角卡片——" +
+			"贴边悬浮那一层（圆角那一圈透出桌面）就没有了")
 	}
 }
 
@@ -955,16 +981,16 @@ func TestRenderMiniShots(t *testing.T) {
 //	   nonactivating `NSPanel`，无头 Tester 里没有窗口可点。
 //	6. Panel 开着的时候位置记忆仍然有效（票 #162 的硬指标）：`isZoomed` 是 Cocoa
 //	   的行为，窗口状态也要真窗口才写得出来（见 `MiniWindowOptions` 的实测表）。
-//	7. **迷你播放器歌词卷帘（票 #536）**：
-//	   a. **窗真的变高了**：真窗的高度 = 84 + 卷帘高（236），而**窗高严格等于
-//	      内容高度**——多出来的那一块是透明的，而**透明的那一块照样吃点击**
-//	      （这一条要真的把底下那个应用的按钮点一下才验得出）。
+//	7. **迷你播放器歌词卷帘（票 #536，2026-11 改版）**：
+//	   a. **窗真的变高了**：真窗的高度 = 84 + 缝 10 + 卷帘高（400），而**窗高
+//	      严格等于内容高度**——多出来的那一块是透明的，而**透明的那一块照样
+//	      吃点击**（这一条要真的把底下那个应用的按钮点一下才验得出）。
 //	   b. **`window-state.json` 里真的写着 320×84**：展开着关窗 → 落盘的是
-//	      320×320 还是 320×84（`StateKey` 抓的是关窗那一刻的宽高，
+//	      320×494 还是 320×84（`StateKey` 抓的是关窗那一刻的宽高，
 //	      `mygo/window_state.go` 的 `captureState`）。而**重启后开出来是不是
 //	      84 高**也是同一件事的另一半。
 //	   c. **WorkArea 真的夹住了**：把窗拖到屏幕下半部再点封面，卷帘的下边
-//	      不能超出工作区（而**放不下 120 的时候不展开**）。
+//	      不能超出工作区（而**放不下 200 的时候不展开**）。
 //	   d. **Esc 到不到得了这一扇窗**：迷你窗是 `Panel`，点它**不激活应用**，
 //	      于是键盘还在原来那个应用手里——Esc 走的是**那个应用的窗口**。
 //	      ⇒ 这一版在**展开的那一下**补了两步（`miniCurtainActivate`）：
@@ -979,6 +1005,10 @@ func TestRenderMiniShots(t *testing.T) {
 //	   e. **悬停展开可不可用**：这一版**没做悬停**（面板失焦时收不到鼠标移动，
 //	      BMG-280 §2.4），而「悬停能不能当增强」要等真窗上验过 hover 可用
 //	      之后才谈得上。
+//	   f. **毛玻璃真的糊出来**（`Vibrancy: mygo.VibrancyPopover`）：窗级
+//	      `NSVisualEffectView` 要真窗——无头 Tester 里没有桌面可糊。而「卡片
+//	      和歌词板是两张半透明的板（`miniPanelAlpha` 0.88）、中间那条缝是窗的
+//	      透明区」这件事，桌面透不透得出来只有真机看得见。
 //	8. **多显示器定位（票 #555）**：这一族的**系统行为**只有真机能验——
 //	   无头那一档量到的是「定位规划」那半（`minidisplays_test.go`），而**真
 //	   双屏 / 插拔 / 旋转不在台账里装**（台账只装代码能证明的那几条）。

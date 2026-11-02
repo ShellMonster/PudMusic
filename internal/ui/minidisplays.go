@@ -453,9 +453,28 @@ func (s *Shell) miniOnWindowMoved() {
 // ⚠️ **它只改目标，不动手**：改的是 `miniCurtain.target`，而窗高每帧跟着
 // 动画走（`miniCurtainSyncHeight`）——于是卷帘是**滑**到新高度的，不是
 // 突然跳过去的。
+//
+// 🔴 **塞不下的时候要真的收起**（评审抓到的那个）：用户把窗拖到「卡片底下
+// 塞不下 ≥200 的板」的地方时，`miniCurtainMaxHeight` 报 0——把它写进
+// `target` 就留下一个「`open=true` 而 `target=0`」的死状态：
+//
+//   - `miniCurtainFullHeight` 的缓存路径（`target > 0`）落空 ⇒ **每帧**去问
+//     原生那块工作区（`miniDisplayList` → `mygo.Screen.Displays()`）——那一笔
+//     正是 `target` 存在的理由（「每帧都问不起」）；
+//   - `open` 仍是 true、弹簧目标仍是原值，可板高 ≈ 0 ⇒ 「开着却什么也看
+//     不见」，要靠下一次 `miniOnWindowMoved` 自愈——用户看到的是「拖到贴底
+//     卷帘消失，拖回来又出现」。
+//
+// ⇒ 塞不下就当「收起」处理（`miniCurtainCollapseNow` 把 `open` / `target` /
+// 弹簧一起钉回 0）——**不留那个死状态**。代价是拖回来之后卷帘不会自己再展开
+// （它已经不是「开着」了）——那比「开着却看不见 + 每帧问一次原生」好。
 func (s *Shell) miniCurtainRetarget() {
 	if !s.miniCurtain.open {
 		return
 	}
-	s.miniCurtain.target = s.miniCurtainMaxHeight()
+	if h := s.miniCurtainMaxHeight(); h > 0 {
+		s.miniCurtain.target = h
+		return
+	}
+	s.miniCurtainCollapseNow()
 }

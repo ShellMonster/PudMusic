@@ -838,6 +838,16 @@ type Shell struct {
 	// 里摘的。
 	miniDisplaysOff func()
 
+	// miniAppActiveOff / miniAppResignOff 是「应用成/退前台」那两个订阅的
+	// **退订句柄**（理由同 `miniDisplaysOff`）：`mygo.App` 上的回调列表是
+	// 全局的，而闭包各自**拿着这一个外壳**——不摘的话每开一次迷你就多挂
+	// 两条，而它们跑的时候窗可能已经没了。
+	//
+	// ⚠️ **零值 = 「没订阅」**：假窗那一档不订阅（无头环境里没有应用），
+	// 真窗那一档在 `attachMiniWindowTo` 里装、在 `OnClosed` 里摘。
+	miniAppActiveOff func()
+	miniAppResignOff func()
+
 	// miniDisplays 是「这一刻有哪些显示器」那一问（**nil = 问真的**）。
 	//
 	// ⚠️ **它是给无头测试换掉的**（票 #555）：生产那一档问 `mygo.Screen`，
