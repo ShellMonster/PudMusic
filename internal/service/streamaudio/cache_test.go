@@ -550,3 +550,59 @@ func TestTheEvictionOrderFollowsTheFileTimes(t *testing.T) {
 		}
 	}
 }
+
+// TestProtectIsCounted 盯「保护是**引用计数**，不是布尔」（2026-11-02 复审的
+// P3-b）。
+//
+// # 为什么必须计数
+//
+// 收养的 finisher 在补完期间 Protect 着一份；补完的最后一拍和「切回同一首」
+// 撞上时，新播放的那一份会**再 Protect 一次**，而旧 drain 退出时的 Unprotect
+// 会把**新播放的保护**解掉——布尔表下这次解除是全局的，正在播的歌从此裸奔。
+// 计数下旧 drain 只减掉自己那一票，新播放的那一票还在。
+//
+// 🔴 **判据是淘汰行为**：两票保 + 解一票之后压上来容量压力，这份必须还在；
+// 解掉最后一票之后，它才轮得到被淘汰。
+//
+// ⚠️ **道具顺序摆过一次错**（第一次写这测试时踩的）：受保护那份必须**最后
+// 落盘**——SaveBytes 每次都会触发一轮淘汰，先把旧垫子摆上去，它才轮不到
+// 在 Protect 之前被当最老的删掉。
+func TestProtectIsCounted(t *testing.T) {
+	c := NewCache(t.TempDir()).WithCapacity(1000)
+	track, tier := "online|mv|BV1|1|", "q30280"
+	save := func(tr, tier string) {
+		t.Helper()
+		writeBytesFile(t, c, tr, tier, 400)
+		if err := c.SaveBytes(tr, tier, 400, "x", Meta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 垫子在前，受保护那份最后落盘（最新 → LRU 排最末）。
+	// ⚠️ **垫子只摆两块**：SaveBytes 每一次都会触发一轮内部淘汰，受保护
+	// 那份在拿到保护之前是会按「最老先删」被正常挤掉的（这个测试的道具
+	// 就在这上面摆过两次错）。
+	save("online|mv|BV1|2|", "q30280")
+	save(track, "q30216")
+	save(track, tier) // 1200 → 内部淘汰删掉最老的垫子 → 800
+
+	// 两票保护（finisher 一票、正在播的一票），退出只解一票。
+	c.Protect(track, tier)
+	c.Protect(track, tier)
+	c.Unprotect(track, tier)
+
+	// 压上来：垫子一轮轮往下挤，受保护那份很快变成最老的。
+	// 布尔表下第二块垫子落下时它就没了；计数下它还剩自己那一票。
+	save("online|mv|BV1|3|", "q30280") // 删掉 q30216
+	save("online|mv|BV1|4|", "q30280") // 受保护的最老，跳过它删这块
+	if _, err := os.Stat(c.BytesPath(track, tier)); err != nil {
+		t.Fatalf("还剩一票保护却被淘汰了：%v", err)
+	}
+
+	// 解掉最后一票：现在轮得到它了。
+	c.Unprotect(track, tier)
+	save("online|mv|BV1|5|", "q30280")
+	if _, err := os.Stat(c.BytesPath(track, tier)); err == nil {
+		t.Error("保护全解掉了却还占着坑——2 GB 上限被这一份架空")
+	}
+}

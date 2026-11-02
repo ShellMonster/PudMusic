@@ -1,4 +1,5 @@
-// 切歌之后，上一首的字节源**不再立刻关**：收养给后台的 finisher，等它下完。
+// 切歌 / 换档之后，被换下去的字节源**不再立刻关**：收养给后台的 finisher，
+// 等它下完。
 //
 // # 这条治的是什么（2026-11-02）
 //
@@ -16,13 +17,21 @@
 //	等完	源自己的 OnComplete 落缓存（那一份闭包认的还是这一首，不用重记）
 //	收尸	下完（或拉不动了）之后把源关掉，把自己从表里摘掉
 //
+// # 表为什么按「曲目 + 档」建键
+//
+// 同一首的两个档是**两个不同的缓存文件**，可以同时各有一条在补的源（换音质
+// 那一刻正是这个形状：旧档被收养、新档在播）。按曲目单键的话，新档收养会
+// 把旧档的登记**顶掉**——顶掉的那条从此没人能收回，下一次同一首再被点上，
+// 新源会截断旧档还在写的文件。
+//
 // # 边界
 //
-//   - **同一首被重新点上**：`cancelFinishersFor` 会先把在补的那条源关掉，
-//     再让新源去建——新源以 `O_TRUNC` 打开同一个缓存文件，两条源同时写
-//     同一个文件是绝对不许发生的。
+//   - **同一文件被重新点上**：精确回收（`cancelFinishersForCache`）会在新源
+//     建起来**之前**把写着同一个文件的在补源关掉——两条源同时写一个文件
+//     是绝对不许发生的。身份兜底（`cancelFinishersForItem`）罩住 cid 还没
+//     问出来、键算不出来那一路。
 //   - **退出**：`App.Close` 收掉所有在补的源。进程都要没了，下载到一半的
-//     缓存留不住——跨进程补完是另一件事（断点续传），这一层不做。
+//     缓存留不住——跨进程的半截由**断点续传**接手（偏移文件）。
 //   - **用户按停止 / 清空**：那一耳是「用户不要了」，照旧立刻关（Stop 那条
 //     路不收养）。
 
@@ -58,21 +67,24 @@ func (s *adoptedSource) Close() error {
 
 // sourceFinisher 是一条被收养的字节源。
 type sourceFinisher struct {
-	// identity 是这一首的**入口无关**身份（`byteCacheIdentity`）。同一首从
-	// 另一个入口被点上时（键可能还算不出来），靠它也能把在补的源找回来。
+	// identity 是这一首的**入口无关**身份（`byteCacheIdentity`）。cid 还没
+	// 问出来、键算不出来的时候，靠它把同一首的在补源找回来。
 	identity string
 	src      *audio.StreamSource
-	// track / tier 是这一份在缓存里的位置。**收养时要 Protect**（不许被
-	// 容量淘汰半路删掉——删了就是白下一整首，还落一份说谎的记录），
-	// 走人的时候要解除；两个动作配对，靠的就是这两栏。
+	// track / tier 是这一份在缓存里的位置（**表键就是这两样**）。收养时要
+	// Protect（不许被容量淘汰半路删掉），走人时要解除；两个动作配对。
 	track string
 	tier  string
 }
 
+// finisherKey 是在补源的表键：**曲目 + 档**——键就是缓存文件的身份，
+// 键相同 = 文件相同 = 绝对不许两条源同时活着。
+func finisherKey(track, tier string) string { return track + "\x00" + tier }
+
 // byteCacheIdentity 报这一首「不管从哪个入口进来都是这一个」的身份。
 //
-// 它比 `byteCacheTrack` 粗（mv 只认到 bvid，不分 P）——它只用于「把同一首
-// 的在补源收回来」这种宁可错杀的匹配，粗一点才罩得住 cid 还没补出来的那一路。
+// 它比 `byteCacheTrack` 粗（mv 只认到 bvid，不分 P）——它只用于「cid 还没
+// 补出来」那一路的兜底回收，宁可错杀不可漏杀。
 func byteCacheIdentity(it Item) string {
 	if it.Type == "audio" {
 		return "audio|" + it.Sid
@@ -83,15 +95,15 @@ func byteCacheIdentity(it Item) string {
 	return ""
 }
 
-// adoptPreviousTrack 把**刚被换下去的那一首**的字节源收养给后台补完。
+// adoptPreviousTrack 把**刚被换下去的那一条**的字节源收养给后台补完。
 //
-// 🔴 **必须在旧播放器关掉之前调**（`installOnlinePlayer` 的锁外段）：
-// 收养是「旧播放器的 Close 关不到它」的唯一手段，晚了源就死了。
+// 🔴 **必须在旧播放器关掉之前调**（各条安装路的锁外段）：收养是「旧播放器的
+// Close 关不到它」的唯一手段，晚了源就死了。
 //
 // ⚠️ **哪些条件不收养**：没有源（盘上缓存那一路）、键算不出来（收养了也没处
-// 记账）、`adopt` 是 nil（这一条不是开新歌那一路装上的——换音质 / 从播放位置
-// 重开那两条路装的源，换下去时照旧立刻关：它们是**同一首**的替换，留着写
-// 反而要和新的抢同一个缓存文件）。
+// 记账）、`adopt` 是 nil（这一条不是能安全让渡的那几路装上的——**从播放位置
+// 重开**那一路装的是**同曲同档**的替换源，让渡出去它会和新的抢同一个
+// 缓存文件，换下去时照旧立刻关）。
 func (a *App) adoptPreviousTrack(prev *onlineTrack) {
 	if prev == nil || prev.source == nil || prev.cacheTrack == "" || prev.adopt == nil {
 		return
@@ -113,7 +125,7 @@ func (a *App) adoptPreviousTrack(prev *onlineTrack) {
 		track:    prev.cacheTrack,
 		tier:     prev.cacheTier,
 	}
-	a.finishers[prev.cacheTrack] = f
+	a.finishers[finisherKey(prev.cacheTrack, prev.cacheTier)] = f
 	a.mu.Unlock()
 
 	// 🔴 **补完的那一份不许被淘汰半路删掉**（审查①的 P2-2）：缓存逼近上限
@@ -151,6 +163,10 @@ func (f *sourceFinisher) drain(a *App) {
 // 🔴 **Protect / Unprotect 必须配对**：收养那一刻标上的保护，在**每一条**
 // 退出路径（下完了、拉死了、被收回、退出全关）都要解掉——不然用户听过的
 // 每一首被切走的歌都会永远占着盘，2 GB 上限形同虚设。
+//
+// ⚠️ **引用计数**（复审的 P3-b）：补完的最后一拍和「切回同一首」撞上时，
+// 新播放 Protect 的一票不能被这里的 Unprotect 解掉——计数下这里只解
+// 自己收养时记下的那一票。
 func (a *App) removeFinisher(f *sourceFinisher) {
 	a.mu.Lock()
 	for k, v := range a.finishers {
@@ -164,42 +180,72 @@ func (a *App) removeFinisher(f *sourceFinisher) {
 	}
 }
 
-// cancelFinishersFor 把「和 it 是同一首」的在补源收回来（关掉）。
+// cancelFinishersForCache 把「正在写**这一个缓存文件**」的源收回来——
+// **在补的那条**，以及**正在播的那条**。
 //
-// 🔴 **它必须在为 it 建新的字节源之前调**：新源以 `O_TRUNC` 打开同一个
-// 缓存文件，两条源同时写一个文件写出来的就是垃圾。
+// 🔴 **它必须在为同一 (track, tier) 建新的字节源 / 读同一份缓存之前调**：
+// 新源以 `O_TRUNC` 打开文件，读的人不该撞上一个还在写的人。匹配精确到档：
+// 同首**另一档**是另一个文件，各补各的，不冲突也不该杀。
 //
-// 匹配分两档，**互斥**（审查①的 P2-1）：
+// 🔴 **「正在播的那条」也必须收**（2026-11-02 审查①的 P0-1，回归）：
+// 同一首点第二次时，新源会 `O_TRUNC` **截断**那个缓存文件——而正在播的
+// 旧源**不知情**，它继续从自己那个偏移往后写，于是盘上留下一个**洞**
+// （新源的 [0,128K) ∪ 旧源的 [200K,256K)，中间 [128K,200K) 是洞）。
 //
-//	键算得出来	只按键匹配。此时再用身份去匹配会把**不相干的在补源错杀**
-//			——同一个投稿的另一分 P（不同缓存文件，毫无冲突）会被
-//			白杀掉，保住半截下载的收益就丢了。
-//			⚠️ **同首另一档仍会被键匹配杀掉**（finisher 表按 track 建键，
-//			复审的 P3-a 指正）：行为是安全的「宁杀勿漏」——真正的
-//			同文件冲突必须挡，多杀的那几条只是丢了半截下载。
-//	键算不出来	退到身份匹配兜底（cid 还没问出来的那一路只有它罩得住，
-//			宁粗勿漏——漏了就是两条源同写一个文件）。
+// 改动前这一段是安全的：旧源随即被 `old.Close()` 关掉，洞只存在一瞬，
+// 下一趟从零重下就自愈了。**收养把它固化了**——而续传会从洞之后接着下，
+// 洞**永远填不上**，而文件大小与整首一致 → 记成 `complete:true` →
+// **永久坏缓存**（用户此后每次听这首都是坏字节，且系统永远不会重下它）。
 //
 // ⚠️ **锁外面关**：源的 `Close` 要等它的下载 goroutine 退出来。
-func (a *App) cancelFinishersFor(it Item) {
-	key := ""
-	if byteCacheKeyReady(it) {
-		key = byteCacheTrack(it)
+func (a *App) cancelFinishersForCache(track, tier string) {
+	if track == "" || tier == "" {
+		return
 	}
+	// 🔴 **正在播的那一条**：它写的是同一个缓存文件。
+	a.mu.Lock()
+	var playing *audio.StreamSource
+	if tr := a.online; tr != nil && tr.cacheTrack == track && tr.cacheTier == tier {
+		playing = tr.source
+	}
+	a.mu.Unlock()
+	if playing != nil {
+		// 关掉它（等它的下载 goroutine 退出来）。
+		//
+		// ⚠️ **它正在放的那一份会被打断**——但那一首本来就要被换下去
+		// （用户点了别的），而**留着它就会有两个写者同写一个文件**：新源
+		// `O_TRUNC` 截断文件，旧源不知情、继续从旧偏移往后写 → 盘上留下一个
+		// **洞**（新源的 [0,128K) ∪ 旧源的 [200K,250K)，中间是洞）。
+		//
+		// 改动前这一段是安全的（旧源随即被 `old.Close()` 关掉，洞只存在一瞬，
+		// 下一趟从零重下就自愈）；**收养把它固化了**——而续传会从洞之后接着
+		// 下，洞永远填不上，而大小与整首一致 → 记成 `complete:true` →
+		// **永久坏缓存**。
+		playing.Close()
+	}
+	a.mu.Lock()
+	f, ok := a.finishers[finisherKey(track, tier)]
+	if ok {
+		delete(a.finishers, finisherKey(track, tier))
+	}
+	a.mu.Unlock()
+	if ok {
+		f.src.Close()
+	}
+}
+
+// cancelFinishersForItem 按**入口无关身份**把同一首的在补源收回来——cid 还
+// 没问出来、键算不出来那一路的兜底（宁粗勿漏：漏了就是两条源同写一个文件）。
+// 键算得出来的调用方应该走 `cancelFinishersForCache`，别用这一档错杀别的分 P。
+func (a *App) cancelFinishersForItem(it Item) {
 	ident := byteCacheIdentity(it)
-	if key == "" && ident == "" {
+	if ident == "" {
 		return
 	}
 	a.mu.Lock()
 	var kill []*sourceFinisher
 	for k, f := range a.finishers {
-		matched := false
-		if key != "" {
-			matched = k == key
-		} else {
-			matched = ident != "" && f.identity == ident
-		}
-		if matched {
+		if f.identity == ident {
 			delete(a.finishers, k)
 			kill = append(kill, f)
 		}

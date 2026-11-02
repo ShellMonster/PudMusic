@@ -39,8 +39,11 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/perf"
@@ -263,7 +266,27 @@ type StreamSourceOptions struct {
 	// ⚠️ **别拿它当「续传」用**：这一层每次建源都从零开始下，
 	// 盘上已有的字节**不会**被认成「已经下过了」。真正要「接着下」的那一层
 	// 是 `internal/app` 的缓存（它知道某一首下到哪儿了）。
+	//
+	// 🔴 **2026-11-02 起有了续传**：`ResumeFrom` + `OffsetPath`。应用从盘上
+	// 的账本读出上一次的前沿，交给 `ResumeFrom`——源不再截断，把它种进
+	// `filled`，泵发 Range 从那里接着下（会话内换流续传走的就是同一套）。
+	// 「账本上的数可不可信」由应用校验（比过文件大小才传进来），这一层只做
+	// 一道底线：`ResumeFrom` 比文件还大就老实从零。
 	CachePath string
+
+	// ResumeFrom 是**顺序下载前沿**的起点：盘上已有 [0, ResumeFrom) 这一段
+	// 连续的字节（上一次下载留下的）。0 = 从零下（照旧截断打开）。
+	//
+	// ⚠️ **只在给了 `CachePath` 时有意义**：临时文件那一路没有「上一次」。
+	ResumeFrom int64
+
+	// OffsetPath 是**续传账本**的落点：源边下边把前沿记在这里（节流），
+	// Close 时补写最后一笔；下完（EOF）那一刻把账本退役——完整记录取代它。
+	// 空 = 不记账（临时文件那一路）。
+	//
+	// ⚠️ **写的是小文本，撕了也不致命**：应用解析不出来就当 0、从零重下
+	// ——那只是「没省下流量」，不会让用户听到坏东西。
+	OffsetPath string
 }
 
 // byteRange is a half-open interval of bytes already written to the cache.
@@ -423,7 +446,24 @@ type StreamSource struct {
 
 	// bytesAtLastCheck 只被看门狗写、只被泵读，用来判断「有没有进展」。
 	bytesAtLastCheck int64
+
+	// offsetPath / offsetWritten 是**续传账本**（2026-11-02）：前者是落点，
+	// 后者是「账本上已经记到第几字节」——节流用，前沿每多出
+	// offsetWriteInterval 才补一笔。只被泵 goroutine 碰，不需要锁。
+	offsetPath    string
+	offsetWritten int64
+	// offsetDone 是「这一份已经下完了」（账本已退役）。它由 `reportComplete`
+	// 置位——**关源那一刻的终态错（EOF）可能还没记上**（pump 报完成和
+	// `fail(io.EOF)` 之间有一拍），拿终态错当「下完了」的判据会把这
+	// 一次判成「没下完」，于是账本被写回一份**说谎的数**（说这一份只
+	// 下到一半，而它其实下完了）。
+	offsetDone atomic.Bool
 }
+
+// offsetWriteInterval 是续传账本的中途补写间隔：前沿每多出这么多字节
+// 才补一笔（Close 时无论如何补最后一笔）。不按更细的粒度写——那是每次
+// append 都一次小文件写，泵的热路径背不起。
+const offsetWriteInterval = int64(1 << 20)
 
 // NewStreamSource 建一个源并立刻开始下载。
 //
@@ -450,8 +490,21 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 	// 它知道某一首下到哪儿了，见 `StreamSourceOptions.CachePath` 的说明。）
 	var f *os.File
 	var path string
+	// 🔴 **续传的底线校验**（2026-11-02）：应用传来的起点必须真的在盘上
+	// ——起点比文件还大时硬信它，Range 会从「不存在的字节」续起，文件
+	// 前面全是洞。老实从零（照旧截断）。
+	resume := int64(0)
+	if o.CachePath != "" && o.ResumeFrom > 0 {
+		if st, err := os.Stat(o.CachePath); err == nil && st.Size() >= o.ResumeFrom {
+			resume = o.ResumeFrom
+		}
+	}
 	if o.CachePath != "" {
-		file, err := os.OpenFile(o.CachePath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
+		flags := os.O_RDWR | os.O_CREATE
+		if resume <= 0 {
+			flags |= os.O_TRUNC
+		}
+		file, err := os.OpenFile(o.CachePath, flags, 0o644)
 		if err != nil {
 			return nil, fmt.Errorf("audio: 建不了在线流的缓存文件：%w", err)
 		}
@@ -493,7 +546,13 @@ func NewStreamSource(o StreamSourceOptions) (*StreamSource, error) {
 		ctx:          ctx,
 		cancel:       cancel,
 		gauge:        o.Gauges,
+		offsetPath:   o.OffsetPath,
 	}
+	// 🔴 **把前沿种进去**（2026-11-02 续传）：盘上 [0, resume) 是上一次下载
+	// 留下的连续字节，泵的第一发请求会带 `Range: bytes=resume-`（它发的
+	// 就是 `Filled()`）。游标照旧从 0 起——解码器读的是整首，前半段正好
+	// 是盘上已有的那份。
+	s.filled = resume
 	// Options.Size 的 0 和 -1 都表示「还不知道」。不归一的话 size 会停在 0，
 	// 于是 Seek(0, SeekEnd) 立刻答 0——extaf 拿到的 AudioFileID 长度是 0，
 	// 不报错，只是永远没有声音（`verify-streaming.md` §5.4 记的那个坑）。
@@ -779,6 +838,7 @@ func (s *StreamSource) Close() error {
 	}
 	// 🔴 **持久缓存不删**：它是缓存，不是垃圾。
 	if persistent {
+		s.settleOffsetLedger()
 		s.clearTempGauge()
 		return errors.Join(errs...)
 	}
@@ -790,6 +850,159 @@ func (s *StreamSource) Close() error {
 	// 文件已经删了，账本跟着归零——这条流不该再占诊断快照里的任何字节。
 	s.clearTempGauge()
 	return errors.Join(errs...)
+}
+
+// writeOffset 把顺序下载前沿记进续传账本（小文本；撕了解析不出来，应用当
+// 0 处理从零重下——那只是没省下流量，不会坏）。只被泵 goroutine 和
+// Close 的收尾（此时泵已退）调，不需要锁。
+func (s *StreamSource) writeOffset(n int64) {
+	if s.offsetPath == "" || n <= 0 {
+		return
+	}
+	// 🔴 **账本只许前进，不许后退**（2026-11-02）：两代源可能**交错**地写
+	// 同一个账本——旧的那一代在被关掉时（它的 Close 要等它的下载 goroutine
+	// 退出来，可能比新的一代下完还晚）会把它那个**旧的**前沿写回来。
+	// 写回的是「这一份只下到一半」——**而它其实早就下完了**，下一次续传就
+	// 会从一个偏小的数起，白下那一段。
+	//
+	// 所以写之前先读一眼：账本上已经有更大的数（或者已经标了「下完」），
+	// 就不写。
+	//
+	// ⚠️ **这一步的读-比-写不是原子的**：两个写者真撞上时，可能都读到旧值
+	// 然后各写各的——但那只会让账本落在**两者之一**（都是合法的前沿），
+	// 而「谁更大」由下一次写补上。账本被撕了/写坏了的后果只是「从零重来」
+	// （见 `resumeOffsetFor`）。
+	cur, done := readOffsetLedger(s.offsetPath)
+	if done {
+		// 🔴 **盘上有 `done:` 标记，但这一份的完整记录不在了** → 这一代
+		// **要重下**，账本必须能覆盖（2026-11-02 审查①的 P0-2）。
+		//
+		// 那个 `done:` 可能是**上一代**留下的：它写完标记，而缓存层那一次
+		// 删除失败了（只读挂载 / 杀毒软件 / 权限）。而 `done:` 的语义是
+		// 「这一份已经完整」——**新一代确实要重下**（缓存里没有完整记录），
+		// 它写不下去的话，这一首的续传**永久失效**（每次都从零重下）。
+		//
+		// ⚠️ **判据是「完整记录还在不在」**（`streamaudio.Cache.Complete`）：
+		// 它在的话，这一份真的完整了，账本该退役；它不在的话，这个 `done:`
+		// 是过期的，挡着新一代就是错的。
+		if !s.resumeLedgerHasCompleteRecord() {
+			done = false
+		}
+	}
+	if done || cur >= n {
+		return
+	}
+	buf := strconv.AppendInt(make([]byte, 0, 20), n, 10)
+	writeOffsetFile(s.offsetPath, buf)
+	s.offsetWritten = n
+}
+
+// resumeLedgerHasCompleteRecord 报「这份字节的**完整记录**还在不在」。
+//
+// 账本和字节文件是**同一个 base 名**（`<base>.bin` / `<base>.bin.off`），
+// 而完整记录是 `<base>.json`——所以它的位置就是「把 `.bin.off` 换成 `.json`」。
+//
+// ⚠️ **这一层不解析记录内容**：只判「有没有那份记录」。内容对不对是缓存层
+// 的事（`Complete`），而这里要的只是「上一代说『下完了』，而那份记录还在
+// 不在」——不在的话，那个 `done:` 就是过期的。
+func (s *StreamSource) resumeLedgerHasCompleteRecord() bool {
+	if s.offsetPath == "" {
+		return false
+	}
+	meta := strings.TrimSuffix(s.offsetPath, ".off") + ".json"
+	_, err := os.Stat(meta)
+	return err == nil
+}
+
+// writeOffsetFile 原子地写账本（临时文件 + rename）。
+//
+// ⚠️ **原子是为了「读到半截」这件事不会发生**：`os.WriteFile` 是
+// truncate + write，进程在中间被杀就留下一份空文件或半截——那会让下一次
+// 续传解析不出来（从零重下，白费一遍流量）。临时文件 + rename 保证读者
+// 要么看到旧的完整内容，要么看到新的完整内容。
+func writeOffsetFile(path string, b []byte) {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		// 写不了就退回去直接写：账本是「尽力而为」的，解析不出来只是
+		// 从零重下（不会坏）。
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+}
+
+// readOffsetLedger 读账本上的前沿，以及「这一份是不是已经标了下完」。
+//
+// 读不出来（撕了 / 不在）→ (0, false)。
+func readOffsetLedger(path string) (int64, bool) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	text := string(raw)
+	if strings.HasPrefix(text, "done:") {
+		return 0, true
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(text), 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, false
+}
+
+// settleOffsetLedger 在 Close 的收尾处置账本：下完了（EOF）就退役——完整
+// 记录取代它；半截就补最后一笔，下一回来接着下。
+func (s *StreamSource) settleOffsetLedger() {
+	if s.offsetPath == "" {
+		return
+	}
+	s.mu.Lock()
+	filled := s.filled
+	s.mu.Unlock()
+	// 🔴 **「下完了」的判据是「账本退役过了」**，不是「终态错是 EOF」
+	// （2026-11-02）：pump 报完成之后、`fail(io.EOF)` 之前有一拍——拿终态错
+	// 当判据，这一下会把「下完了」判成「没下完」，账本被写回一个说谎的数。
+	done := s.offsetDone.Load()
+	if done {
+		// 下完了：账本没有存在的理由了（完整记录已落下）。删它是幂等的
+		// 兜底——缓存层在落完整记录时也删过一次。
+		_ = os.Remove(s.offsetPath)
+		return
+	}
+	// 🔴 **「长度是猜的」就不留账本**（2026-11-02 审查①的 P1-1）：服务器
+	// 不给 `Content-Length` 时，这一趟的字节**可能**下完了，也可能被掐了
+	// （客户端分不出这两者）——而账本写下的是「下到了多少」，那正好是**猜测
+	// 的总长**。
+	//
+	// 下一趟拿它发 `Range: bytes=<总长>-` → 服务器回 **416** → 源报错 →
+	// **这一首此后每次都放不出来**（账本不变，永远 416）。
+	//
+	// ⚠️ **代价**：这一份不会被记成完整缓存，下次要重下一遍（只是白费流量）。
+	s.mu.Lock()
+	sizeKnown := s.sizeKnown
+	s.mu.Unlock()
+	if !sizeKnown {
+		_ = os.Remove(s.offsetPath)
+		return
+	}
+	s.writeOffset(filled)
 }
 
 // fail 记一个终态错误并叫醒所有等着的人。可以重复调用，第一条赢。
@@ -844,10 +1057,34 @@ func (s *StreamSource) reportComplete() {
 	// 报错了会判成「没下完」。
 	size := s.filled
 	onComplete := s.onComplete
+	offsetPath := s.offsetPath
 	s.mu.Unlock()
+	// 🔴 **终态账本写在回调之前**（2026-11-02）：回调（`markByteCacheComplete`
+	// → `SaveBytes`）会把账本删掉——那是「完整记录取代账本」的设计。可是
+	// 那一删之后，旧一代源迟到的收尾（它的 Close 要等它的下载 goroutine 退
+	// 出来，可能更晚）会把**旧的**前沿写回来，账本里就有一份「只下到一半」
+	// 的谎——下一次续传从那个偏小的数起，白下那一段。
+	//
+	// 先写终态标记（`done:<长度>`）的话：后来的写回一律被「只许前进」的检查
+	// 挡掉（见 `writeOffset`），而缓存层那一次删除发生在回调里——顺序是
+	// 「写终态 → 落完整记录 → 删账本」，最终盘上干干净净。
+	if offsetPath != "" {
+		s.offsetDone.Store(true)
+		buf := append([]byte("done:"), strconv.AppendInt(make([]byte, 0, 20), size, 10)...)
+		_ = os.WriteFile(offsetPath, buf, 0o644)
+	}
 	if onComplete != nil {
 		onComplete(size)
 	}
+	// 🔴 **写「已下完」的终态账本，而不是直接删**（2026-11-02 续传）：
+	// 两代源可能**交错**地写同一个账本——旧的那一代在被关掉时（它的 Close
+	// 要等它的下载 goroutine 退出来，可能比新的一代下完还晚）会把它那个
+	// **旧的**前沿写回来。写回的是「这一份只下到一半」——**而它其实早就
+	// 下完了**，下一次续传就会从一个偏小的数起，白下那一段。
+	//
+	// 终态标记就是防这个的：账本里写着「已下完」时，任何后来的写回一律
+	// 不写（见 `writeOffset`）。而缓存层在「完整记录」落下之后会把整个
+	// 账本清掉（见 `streamaudio.Cache.SaveBytes`）。
 }
 
 // terminalErr 在没有别的错可报时给一个交代。
