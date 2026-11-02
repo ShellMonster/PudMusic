@@ -206,6 +206,11 @@ func (s *StreamSource) append(b []byte) error {
 	if first && s.onFirstBytes != nil {
 		s.onFirstBytes(s.Filled())
 	}
+	// 🔴 **续传账本**（2026-11-02）：前沿每多出一段才补一笔（Close 时无论
+	// 如何补最后一笔）——每次 append 都写一次小文件的话，泵的热路径背不起。
+	if s.offsetPath != "" && s.filled-s.offsetWritten >= offsetWriteInterval {
+		s.writeOffset(s.filled)
+	}
 	return nil
 }
 
@@ -434,6 +439,11 @@ func (s *StreamSource) sameContainer(urls []string) bool {
 func (s *StreamSource) restart() error {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
+
+	// 🔴 **续传账本跟着清**（2026-11-02）：文件从头重下了，旧前沿作废——
+	// 留着它，下一次续传会从一个比实际前沿大的数起（应用层的大小校验会拦，
+	// 但账本不该留一个已知说谎的数）。
+	s.offsetWritten = 0
 
 	s.mu.Lock()
 	n := int64(0)

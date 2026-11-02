@@ -169,13 +169,19 @@ type Cache struct {
 	capacity int64
 	// now 是时钟。nil 用 time.Now（给假时钟是为了让过期和淘汰能被测）。
 	now func() time.Time
-	// protect 是**正在用、不许淘汰**的那些份（按曲目 + 档）。
+	// protect 是**正在用、不许淘汰**的那些份（按曲目 + 档），**值是票数**。
 	//
 	// 🔴 **它必须有**：淘汰会按「最久没动过的先删」排，而「正在放的那一份」
 	// 恰恰是**刚被 Touch 过**的——但那只是在**容量只超了一点点**的时候
 	// 才保得住它。用户数据目录里堆满了缓存的时候，正在听的歌会被删掉，
 	// 歌就断了（那是最不能接受的一种后果）。
-	protect map[string]bool
+	//
+	// 🔴 **它必须是引用计数，不是布尔**（2026-11-02 复审的 P3-b）：一份可能
+	// 同时被两拨人标着——收养的 finisher（补完期间）和正在播的播放器。补完
+	// 的最后一拍和「切回同一首」撞上时，新播放 Protect 一票、旧 drain
+	// Unprotect 一票：布尔表下这次解除是**全局的**，正在播的歌从此裸奔；
+	// 计数下旧 drain 只减掉自己那一票。
+	protect map[string]int
 	// mu 护着这个结构体。
 	//
 	// 🔴 **它必须有**（2026-10-30 的第二轮审查）：`Protect` / `Unprotect`
@@ -203,7 +209,7 @@ func NewCache(dir string) *Cache {
 		dir:      dir,
 		capacity: DefaultCapacity,
 		now:      time.Now,
-		protect:  map[string]bool{},
+		protect:  map[string]int{},
 	}
 }
 
@@ -252,6 +258,24 @@ func (c *Cache) BytesPath(track, tier string) string {
 		return ""
 	}
 	return filepath.Join(c.dir, bytesPrefix+encode(track)+"-"+encode(tier)+".bin")
+}
+
+// OffsetPath 是「曲目 + 档」的**续传偏移账本**在磁盘上的位置（字节文件名
+// + ".off"）。空目录时是空串。
+//
+// 里面记的是字节源**顺序下载前沿**的字节数（8 字节文本）。一个下到一半的
+// 缓存文件盘上大小不可信（末尾那一段是并行取回来的，中间可能有洞——见
+// `service/audio` 的 `availAt`），「第几字节之前是连续的」只有源自己知道，
+// 它边下边把前沿记在这里；下一次播同一首，应用拿它当续传的 Range 起点。
+//
+// ⚠️ **生命周期**：写下它的是字节源（下完 → 删；半截 → 留着等续传）；
+// 这一层管的是它跟字节文件**同生共死**——`Remove` 连它一起删、
+// `SaveBytes`（下完）把它退役、`CleanOrphans` 清掉没了字节的孤儿。
+func (c *Cache) OffsetPath(track, tier string) string {
+	if c.dir == "" || track == "" || tier == "" {
+		return ""
+	}
+	return filepath.Join(c.dir, bytesPrefix+encode(track)+"-"+encode(tier)+".bin.off")
 }
 
 // bytesMetaPath 是「曲目 + 档」那一份的记录在磁盘上的位置。
@@ -373,6 +397,9 @@ func (c *Cache) SaveBytes(track, tier string, size int64, label string, meta Met
 	// 是**写入过程中**的时刻——下载要几十秒，于是那一秒和「下完」差着
 	// 几十秒。差得不多，但它不该由「下载中途的某一刻」决定。
 	diskcache.Touch(c.BytesPath(track, tier), now)
+	// 🔴 **完整记录落下的那一刻，续传账本退役**：下一次播这一首走的是
+	// 「查到完整记录 → 直接读盘」那一路，偏移再留着就是一份没人读的垃圾。
+	_ = os.Remove(c.OffsetPath(track, tier))
 	// 写完就顺手做一次容量淘汰——否则「一直下」会让缓存目录无上限地长。
 	c.Evict()
 	return nil
@@ -433,31 +460,37 @@ func (c *Cache) Touch(track, tier string) {
 	diskcache.Touch(path, c.now())
 }
 
-// Protect 标住「这一份正在用，不许淘汰」。
+// Protect 给「这一份正在用」记一票。多票并存（finisher + 正在播）时，
+// 一张 Unprotect 只解自己那一票。
 func (c *Cache) Protect(track, tier string) {
 	if c.dir == "" {
 		return
 	}
 	c.mu.Lock()
-	c.protect[protectKey(track, tier)] = true
+	c.protect[protectKey(track, tier)]++
 	c.mu.Unlock()
 }
 
-// Unprotect 解除「这一份正在用」。
+// Unprotect 解除「这一份正在用」的**一票**。没有票时是空操作。
 func (c *Cache) Unprotect(track, tier string) {
 	if c.dir == "" {
 		return
 	}
 	c.mu.Lock()
-	delete(c.protect, protectKey(track, tier))
+	k := protectKey(track, tier)
+	if n := c.protect[k]; n <= 1 {
+		delete(c.protect, k)
+	} else {
+		c.protect[k] = n - 1
+	}
 	c.mu.Unlock()
 }
 
-// isProtected 报这一份是不是「正在用」。
+// isProtected 报这一份是不是「还有人标着正在用」。
 //
 // ⚠️ **必须在持 `c.mu` 时调**（`Evict` 那一处）。
 func (c *Cache) isProtected(track, tier string) bool {
-	return c.protect[protectKey(track, tier)]
+	return c.protect[protectKey(track, tier)] > 0
 }
 
 // protectKey 是「曲目 + 档」的保护键。
@@ -471,6 +504,8 @@ func protectKey(track, tier string) string { return track + "\x00" + tier }
 func (c *Cache) Remove(track, tier string) {
 	_ = os.Remove(c.BytesPath(track, tier))
 	_ = os.Remove(c.bytesMetaPath(track, tier))
+	// 续传账本跟着走：字节没了，偏移就是一份指向不存在字节的起点。
+	_ = os.Remove(c.OffsetPath(track, tier))
 }
 
 // RemovePref 删掉「曲目 + 偏好」那张映射表的一条。
@@ -496,9 +531,10 @@ func (c *Cache) CleanOrphans() int {
 	if err != nil {
 		return 0
 	}
-	// 先把目录里的名字收成两张表（去掉后缀）。
+	// 先把目录里的名字收成几张表（去掉后缀）。
 	binSet := map[string]bool{}
 	jsonSet := map[string]bool{}
+	offSet := map[string]bool{}
 	for _, de := range entries {
 		name := de.Name()
 		switch {
@@ -506,9 +542,20 @@ func (c *Cache) CleanOrphans() int {
 			binSet[strings.TrimSuffix(name, ".bin")] = true
 		case strings.HasPrefix(name, bytesPrefix) && strings.HasSuffix(name, ".json"):
 			jsonSet[strings.TrimSuffix(name, ".json")] = true
+		case strings.HasPrefix(name, bytesPrefix) && strings.HasSuffix(name, ".bin.off"):
+			offSet[strings.TrimSuffix(name, ".bin.off")] = true
 		}
 	}
 	removed := 0
+	// 没有字节的偏移：续传账本指向一份不存在的东西，清。
+	for base := range offSet {
+		if binSet[base] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(c.dir, base+".bin.off")); err == nil {
+			removed++
+		}
+	}
 	// 没有配对记录的 `.bin`：上一次进程被杀留下的半截。
 	for base := range binSet {
 		if jsonSet[base] {

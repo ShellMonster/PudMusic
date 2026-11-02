@@ -45,7 +45,9 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -360,6 +362,9 @@ func (a *App) releaseByteCacheProtect(tr *onlineTrack) {
 // （用户看到的是「点了歌完全没反应」）。所以这里走的是
 // `runOnlineWithoutCache`——**跳过缓存判定**的那一条路。
 func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time.Duration, paused bool, run *loadRun) {
+	// 🔴 **正在写这份文件的在补源先收回来**：下面要 `audio.Open` 读它，
+	// 不该撞上一个还在写的人（2026-11-02；精确到档——别的档各写各的文件）。
+	a.cancelFinishersForCache(rec.Track, rec.Tier)
 	// 🔴 **把界面上要用的那些字段补回来**（2026-10-30 的第二轮审查）：
 	// 命中缓存时**不问 B 站**，所以作者名、封面、字幕那一对的 bvid/cid
 	// 都得**从上一次存下来的**拿（`streamaudio.Meta`）。
@@ -546,4 +551,38 @@ func fmtTier(tier string) string {
 		return "（未知档）"
 	}
 	return fmt.Sprintf("%s（%s）", tier, byteCacheTierLabel(tier))
+}
+
+// resumeOffsetFor 读**续传账本**，给出这一次取流的 Range 起点。
+//
+// 三条退路，每一条都是「从零重下」——那只是没省下流量，不会让用户听到
+// 坏东西：
+//
+//	账本撕了（写盘写到一半被杀，解析不出来）→ 0
+//	账本上的数 <= 0							→ 0
+//	账本上的数比盘上字节文件还大（账本说谎）	→ 0（前面全是洞）
+//
+// 🔴 **它只做本地校验，不发请求**：调用点在取流的最前面，网络一次都还不该碰。
+func resumeOffsetFor(offsetPath, cachePath string) int64 {
+	if offsetPath == "" || cachePath == "" {
+		return 0
+	}
+	raw, err := os.ReadFile(offsetPath)
+	if err != nil {
+		return 0
+	}
+	// 🔴 **「已下完」的终态账本不是续传起点**（2026-11-02）：那意味着这一份
+	// 早就完整了（完整记录已落下，账本只是还没被清）——从它续传就是白下一遍。
+	if bytes.HasPrefix(raw, []byte("done:")) {
+		return 0
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	st, err := os.Stat(cachePath)
+	if err != nil || n > st.Size() {
+		return 0
+	}
+	return n
 }
