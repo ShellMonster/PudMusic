@@ -245,7 +245,7 @@ func TestSearchSuggestsHistoryAfterTyping(t *testing.T) {
 	tt.Click(searchLabel)
 	tt.Type("周")
 
-	if !tt.HasText("搜索历史") {
+	if !tt.HasText(suggestHistoryHeading) {
 		t.Fatalf("敲了字没有弹出搜索历史浮层，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("周杰伦") || !tt.HasText("林俊杰") {
@@ -270,7 +270,7 @@ func TestSuggestCollapsesWhenSelectingOne(t *testing.T) {
 	tt.Frame()
 
 	tt.Click(searchLabel)
-	if !tt.HasText("搜索历史") {
+	if !tt.HasText(suggestHistoryHeading) {
 		t.Fatalf("浮层没开，文字有 %q", tt.Texts())
 	}
 	if err := tt.Click("周杰伦"); err != nil {
@@ -283,7 +283,7 @@ func TestSuggestCollapsesWhenSelectingOne(t *testing.T) {
 	if got := s.router.Path(); got != searchPath {
 		t.Errorf("选中一条之后在 %q，want %q", got, searchPath)
 	}
-	if tt.HasText("搜索历史") {
+	if tt.HasText(suggestHistoryHeading) {
 		t.Errorf("浮层还在画面上，文字有 %q", tt.Texts())
 	}
 }
@@ -309,7 +309,7 @@ func TestSuggestCollapsesOnEscape(t *testing.T) {
 	if s.searchSuggest {
 		t.Errorf("按了 Esc 浮层还开着，文字有 %q", tt.Texts())
 	}
-	if tt.HasText("搜索历史") {
+	if tt.HasText(suggestHistoryHeading) {
 		t.Errorf("浮层还在画面上，文字有 %q", tt.Texts())
 	}
 	if got := s.searchKeyword; got != "周" {
@@ -350,7 +350,7 @@ func TestSuggestCollapsesOnBlur(t *testing.T) {
 	if s.searchSuggest {
 		t.Errorf("失焦之后浮层还开着，文字有 %q", tt.Texts())
 	}
-	if tt.HasText("搜索历史") {
+	if tt.HasText(suggestHistoryHeading) {
 		t.Errorf("浮层还在画面上，文字有 %q", tt.Texts())
 	}
 }
@@ -371,7 +371,7 @@ func TestSuggestHiddenWhenTheSettingIsOff(t *testing.T) {
 	tt.Click(searchLabel)
 	tt.Type("周")
 
-	if tt.HasText("搜索历史") {
+	if tt.HasText(suggestHistoryHeading) {
 		t.Errorf("设置关了还摆历史浮层，文字有 %q", tt.Texts())
 	}
 	if got := len(s.hist.list()); got != 1 {
@@ -899,7 +899,7 @@ func TestSuggestChipDeleteRemovesOnlyThatOne(t *testing.T) {
 	tt.Frame()
 
 	tt.Click(searchLabel)
-	if !tt.HasText("搜索历史") {
+	if !tt.HasText(suggestHistoryHeading) {
 		t.Fatalf("浮层没开，文字有 %q", tt.Texts())
 	}
 	// 每条 chip 的 × 有自己的无障碍名字（「删除「周杰伦」」），所以点得准。
@@ -913,7 +913,7 @@ func TestSuggestChipDeleteRemovesOnlyThatOne(t *testing.T) {
 	}
 }
 
-// TestSuggestClearAllEmptiesTheHistory 验「清除全部」。
+// TestSuggestClearAllEmptiesTheHistory 验「清空全部」。
 func TestSuggestClearAllEmptiesTheHistory(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -922,14 +922,14 @@ func TestSuggestClearAllEmptiesTheHistory(t *testing.T) {
 	tt.Frame()
 
 	tt.Click(searchLabel)
-	if err := tt.Click("清除全部"); err != nil {
-		t.Fatalf("点不到「清除全部」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click(suggestClearLabel); err != nil {
+		t.Fatalf("点不到「清空全部」：%v，文字有 %q", err, tt.Texts())
 	}
 	if got := s.hist.list(); len(got) != 0 {
-		t.Errorf("清除全部之后还剩 %q", searchValues(got))
+		t.Errorf("清空全部之后还剩 %q", searchValues(got))
 	}
 	// 一条都没有了，浮层就不该再摆一块空板子。
-	if tt.HasText("搜索历史") {
+	if tt.HasText(suggestHistoryHeading) {
 		t.Errorf("清空之后浮层还摆着，文字有 %q", tt.Texts())
 	}
 }
@@ -978,12 +978,12 @@ func TestTheSearchMagnifierSearchesWhatIsInTheBox(t *testing.T) {
 	}
 }
 
-// TestTheClearAllButtonSaysWhatItDeletes 验「清除全部」**说清它删的是什么、能不能
+// TestTheClearAllButtonSaysWhatItDeletes 验「清空全部」**说清它删的是什么、能不能
 // 撤**（票 BMG-253）。
 //
 // # 为什么这一条不是「加一句提示」那么轻
 //
-// 「清除全部」是这一块**唯一的不可逆动作**：它一次性删掉全部搜索历史，而 B 站
+// 「清空全部」是这一块**唯一的不可逆动作**：它一次性删掉全部搜索历史，而 B 站
 // 那边没有「撤销」——删掉的那一条用户自己再也搜不回来。它原先是 12 像素的淡灰
 // 字、**一句提示都没有**，用户点了才知道自己删掉了什么。
 //
@@ -999,15 +999,15 @@ func TestTheClearAllButtonSaysWhatItDeletes(t *testing.T) {
 	}
 	tt.Frame()
 
-	clear, ok := tt.Find("清除全部")
+	clear, ok := tt.Find(suggestClearLabel)
 	if !ok {
-		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+		t.Fatalf("浮层上没有「清空全部」，文字有 %q", tt.Texts())
 	}
 	// 指针停上去，那句提示就该出来（界面层那一份是 0ms 出）。
 	tt.Move(clear.X+clear.W/2, clear.Y+clear.H/2)
 	tt.Frame()
 	if !tt.HasText(clearHistoryTip) {
-		t.Errorf("指针停在「清除全部」上没有那句提示（%q），文字有 %q",
+		t.Errorf("指针停在「清空全部」上没有那句提示（%q），文字有 %q",
 			clearHistoryTip, tt.Texts())
 	}
 }

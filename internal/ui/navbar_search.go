@@ -67,6 +67,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -74,15 +75,34 @@ import (
 )
 
 const (
-	// searchWidth 是搜索框多宽。Biu 是 `w-[280px]`（`search/index.tsx:73`）。
-	// 设计规范 v0.1 §7.4：宽 240、高 28、胶囊形（原 Biu 是 280 / 40 / 主题圆角）。
-	searchWidth = 240
+	// searchWidth 是搜索框多宽。2026-11 重设计从 240 提到 480（用户给的参考图里
+	// 它约是窗口四成宽）：顶栏以它为主位，联想面板跟着它同宽才摆得开。窄窗时
+	// `MinWidth(0)` 让它收缩，见 `viewSearchBox` 那段（票 #286）。
+	searchWidth = 480
 
-	// suggestWidth 是建议浮层多宽。Biu 是 `w-[360px]`（同文件 :101）。
+	// suggestWidth 是建议浮层的**宽度下限**。
 	//
-	// 比搜索框宽是 Biu 的原样：里面那几行是「搜索历史」的标题加一排 chip，
-	// 按输入框那么宽排不下。
+	// 2026-11 重设计后面板宽度**跟着胶囊走**（左对齐、同宽，见 `viewSuggest`）；
+	// 这个数只在窄窗胶囊被 `MinWidth(0)` 压到几十像素时垫底——再跟着缩，里面
+	// 那排折行的 chip 就摆不开了。旧口径「面板固定 360、比框宽」（Biu 的
+	// `w-[360px]`，同文件 :101）已废。
 	suggestWidth = 360
+
+	// suggestPanelLabel 是建议面板本体的无障碍名字。
+	//
+	// 🔴 **几何测试拿它当锚**（`navbar_search_align_test.go`）：`Tester.Find`
+	// 认「标着这个名字」的元素，返回的就是面板的矩形。面板以前没有名字——
+	// 读屏软件也念不出「这是个搜索建议面板」，这一句补上。
+	//
+	// ⚠️ **它必须和浮层里别的名字/文字都不一样**（`Find` 逐字相等，见
+	// `searchActionLabel` 那条）。
+	suggestPanelLabel = "搜索建议"
+
+	// suggestHistoryHeading / suggestClearLabel 是历史那一档的标题和右上角那枚
+	// 清空键的文案。2026-11 重设计照参考图叫「历史搜索」「清空全部」（原来是
+	// 「搜索历史」「清除全部」）。三档标题互不相同的铁律见 `suggestTermsHeading`。
+	suggestHistoryHeading = "历史搜索"
+	suggestClearLabel     = "清空全部"
 
 	// searchLabel 是搜索框的无障碍名字，也是测试认得它的凭据——无头 Tester 的
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
@@ -96,10 +116,9 @@ const (
 	// （而放大镜是「拿框里的词去搜」）。
 	searchActionLabel = "开始搜索"
 
-	// searchHeight 是搜索框多高。Biu 那个 Input 是 md 档（`h-10`，
-	// `search/index.tsx:72-96`；Tailwind 1 单位 = 4px）——40，顶栏 64 高，
-	// 上下各留 12。
-	searchHeight = 28
+	// searchHeight 是搜索框多高。2026-11 重设计从 28 提到 36：顶栏 64 高，
+	// 上下各留 14（旧口径 28 是设计规范 v0.1 §7.4 那一档）。
+	searchHeight = 36
 
 	// searchRadius 是搜索框的圆角：胶囊（高度的一半）。刻意不跟主题圆角走——胶囊是这个框的形状，
 	// 用户把全局圆角拖到 0 它也还是胶囊。
@@ -208,7 +227,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// 键 + 间隙）要 320，剩下给搜索框的只有八十来像素。
 	//
 	// **而 flex 的默认最小宽度是「内容的最小宽度」**：搜索框写死了
-	// `Width(280)`，于是它的最小宽度也是 280（`mygo/ui/layout.go` 的
+	// `Width(searchWidth)`，于是它的最小宽度也是那个宽（`mygo/ui/layout.go` 的
 	// `intrinsic`：宽度写死时，内容多小都按那个宽度算）——它一步都不肯让，
 	// 右边那几枚键于是被挤出窗口（实测「迷你」「动态」「头像」「登录」四枚
 	// 落在 x=904 之后，而窗口只有 900 宽）。
@@ -256,11 +275,79 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		// 两帧之间（`ui/textinput.go:121`），那一刻拿着的 Element 已经过期，
 		// 要改输入框里的字只能通过 `k.SetText`。我们要的恰恰是不改它。
 		field.OnTextKey(func(k ui.TextKey) bool {
-			if k.Key != ui.KeyEscape || !s.searchSuggest {
+			// Esc 收浮层（原来就有），浮层没开就还回输入框清字。
+			if k.Key == ui.KeyEscape {
+				if !s.searchSuggest {
+					return false
+				}
+				s.searchSuggest = false
+				s.nav.sel, s.nav.armed = -1, false
+				return true
+			}
+			// 键盘导航：↑↓ 在面板上上下走，回车搜选中的那一条。
+			//
+			// ⚠️ **只在浮层开着、而且面板上真有词可走时接管**：浮层没开时
+			// ↑↓ 还是输入框自己的（移动光标 / 历史那一套不归这里管），回车
+			// 还是「搜框里的词」。
+			if !s.searchSuggest {
 				return false
 			}
-			s.searchSuggest = false
-			return true
+			// 🔴 **带修饰键的方向键还给输入框**：`editor.wants()` 对
+			// `KeyUp/KeyDown` 在 `mods != 0` 时返回 `true`——单行框本来认
+			// `Shift+↓`（扩选到末尾）和 `Cmd+↓`（光标到末尾，macOS）。
+			// `OnTextKey` 回调返回 `true` 后编辑器再也看不到这个键，
+			// 扩选/光标移动就被吞成了面板导航（探针实测 `Cmd+↓` 会武装
+			// `sel=0`）。`KeyEnter` 的修饰键也会被吞（`Cmd+Enter` 触发选中项搜索），
+			// 同一条修。
+			if k.Mods != 0 {
+				return false
+			}
+			n := len(s.nav.items)
+			switch k.Key {
+			case ui.KeyDown:
+				if n == 0 {
+					return false
+				}
+				// 没选中时 ↓ 从顶上第一条开始（`sel=-1` 或零值 `sel=0` 都当
+				// 「还没选中」——后者是 `suggestNav{}` 的初值，点开面板
+				// 不经过 `Changed` 清零，第一次 ↓ 会从 1 开始跳过第一条）。
+				if !s.nav.armed {
+					s.nav.sel = 0
+				} else {
+					s.nav.sel = (s.nav.sel + 1 + n) % n
+				}
+				s.nav.armed, s.nav.reveal = true, true
+				s.nav.picked = s.nav.items[s.nav.sel]
+				return true
+			case ui.KeyUp:
+				if n == 0 {
+					return false
+				}
+				// 没选中时 ↑ 从底下最后一条开始（和 combobox 同一个惯例，
+				// `sel=-1` 或零值 `sel=0` 都当「还没选中」）。
+				if !s.nav.armed {
+					s.nav.sel = n - 1
+				} else {
+					s.nav.sel = (s.nav.sel - 1 + n) % n
+				}
+				s.nav.armed, s.nav.reveal = true, true
+				s.nav.picked = s.nav.items[s.nav.sel]
+				return true
+			case ui.KeyEnter:
+				// 没选中任何一条：放给输入框，回车搜框里的词。
+				if !s.nav.armed || s.nav.sel < 0 || s.nav.sel >= n {
+					return false
+				}
+				picked := s.nav.items[s.nav.sel]
+				// ⚠️ **先把词填回框里，再搜**（和点那一条同一件事，
+				// `viewHistoryChip` / `viewSuggestTerm` 的注释）：搜的词和框里
+				// 的词要对得上，按返回再回来才不是那个错的词。`k.SetText`
+				// 是这一刻唯一能改框里字的口（`textinput.go:173`）。
+				k.SetText(picked)
+				s.submitSearch(picked)
+				return true
+			}
+			return false
 		})
 
 		// 浮层什么时候开：**敲了一个字**、**点了一下这个框**——照 Biu 的
@@ -290,6 +377,9 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		if field.Changed() {
 			// 用户自己敲了 → 框里那个词从此是他的。
 			s.searchKeywordFilled = false
+			// 又敲了一个字：键盘导航的选中态清掉。那一摊词马上要换（防抖
+			// 之后联想会重拉），留着那个高亮会指着一条已经不对的词。
+			s.nav.sel, s.nav.armed = -1, false
 		}
 
 		switch {
@@ -311,6 +401,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			//
 			// 只认「按了」和「敲了字」，焦点自己回来就开不了——它只是个残留状态。
 			s.searchSuggest = false
+			s.nav.sel, s.nav.armed = -1, false
 		}
 
 		// 回车 = 拿这个词去搜。Biu 的 submitSearch。
@@ -344,7 +435,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}
-		s.viewSuggest(c, field)
+		s.viewSuggest(c, row)
 	})
 
 	// 指针压在框上、或者框拿着焦点：底色抬到 30%（上游那两条 `…/30`）。
@@ -384,7 +475,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 // 面板**第一次出现**的那一帧播一段进场：淡入 + 从下面升上来 10 DIP。
 // 判据是 `Shell.suggestShown`——**开着的时候内容变了不重播**（联想词返回来
 // 那一趟不重播），理由见文件头《面板的进场》那一段。
-func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
+func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 	if !s.searchSuggest {
 		// 面板没了：下一回它再出现的时候，那一下又是「进场」。
 		s.suggestShown = false
@@ -418,6 +509,14 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 		//
 		// 所以这一位是「**这一场**播过了没有」，**只在浮层关掉的时候**才复位
 		// （见上面那一支）。
+		//
+		// 🔴 **`nav.items`/`armed`/`sel`/`reveal` 也要清**：`s.searchSuggest` 还是
+		// true（设计：内容回来面板自己回来），但此时 `OnTextKey` 读到的是
+		// **上一帧那一摊旧词**——清空全部后 ↓ 还能武装、回车搜出去一条
+		// 用户没选的词（探针实测：清空全部后 ↓ → `sel=0 armed=true` →
+		// 回车搜「林俊杰」）。删唯一一条历史 chip 的 ×、热榜异步变空等同理。
+		s.nav.items = s.nav.items[:0]
+		s.nav.sel, s.nav.armed, s.nav.reveal = -1, false, false
 		return
 	}
 	t := c.Theme()
@@ -431,10 +530,28 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	justOpened := !s.suggestShown
 	s.suggestShown = true
 
-	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
+	// 🔴 **锚是外层胶囊（`anchor`），不是框里那个输入框**（2026-11 重设计）：
+	// 锚在输入框上的话面板左缘对齐的是**文字起点**（比胶囊左缘缩进
+	// `searchPadX+iconMd+searchGap` = 42），面板和框在屏幕上是错开的。
+	//
+	// ⚠️ 锚在胶囊上之后「点框上任何地方」都不再算框架的 `PressedOutside`，但
+	// **净行为没变**：放大镜提交走 `submitSearch` 收面板；清空 × 是一枚可聚焦
+	// 的按钮，按下那一帧焦点挪走，上面「失焦收起」那条照样把面板关掉（实测
+	// 见 `navbar_search_align_test.go` 的 TestClearingTheSearchBoxClosesThePanel）。
+	//
+	// 🔴 **宽度跟着胶囊走**（`anchor.Bounds()` 是上一帧的矩形，`element.go`
+	// 的 Bounds）：宽窗下胶囊是整宽的 `searchWidth`，面板同宽——面板和框
+	// 是一个整体；窄窗下胶囊缩下去，面板缩到 `suggestWidth` 为止，再缩
+	// 那排折行的 chip 就摆不开了。旧口径「固定 360」已废。
+	ui.PopoverBase(c, anchor, &s.searchSuggest, func(panel ui.Element) {
+		w := anchor.Bounds().W
+		if w < suggestWidth {
+			w = suggestWidth
+		}
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
-		p := popupPanel(t, panel.KeepFocus().
-			Width(suggestWidth).Padding(space.Px8))
+		// Label 是面板的无障碍名字，也是几何测试的锚（`suggestPanelLabel`）。
+		p := popupPanel(t, panel.KeepFocus().Label(suggestPanelLabel).
+			Width(w).Padding(space.Px8))
 
 		// ---- 进场：淡入 + 升上来 10 DIP（票 #259） ----
 		//
@@ -469,6 +586,29 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 		// 那个动画值还会不会被 view 读——会读就白换）。
 		p = p.Opacity(fade).Margin(rise, space.None, space.None, space.None)
 
+		// 键盘导航可走的词：历史在前、联想在后（画出来的顺序）。「大家在听」那几行
+		// 和联想词是同一种行（`viewSuggestTerm`），也接进来——↓ 在「还没敲字」那
+		// 一摊里也走得动。每帧重建：那一摊词每一帧都可能变。
+		//
+		// 🔴 **必须在 `p.Children` 之前填**：chip 和联想行在 Children **里面**调
+		// `navPicked`——items 要是等 Children 跑完才填，它们读到的是**上一帧**的
+		// 那一份，选中态永远滞后一帧（按一下 ↓ 要等两帧才看得见亮）。
+		s.nav.items = s.nav.items[:0]
+		if showHistory {
+			for _, item := range history {
+				s.nav.items = append(s.nav.items, item.Value)
+			}
+		}
+		s.nav.items = append(s.nav.items, terms...)
+		s.nav.items = append(s.nav.items, hot...)
+		// 🔴 **`items` 每帧重建，词会换序**：联想词异步回来、历史增删，`sel`
+		// 指的下标可能还合法、但那条词已经不是用户按方向键时看到的那一条。
+		// 「`items[sel]` 还是不是武装时记下那条」是唯一能验它的办法——
+		// 超界和换词都当成这条失效（回车还是搜框里的词，不是搜一条用户没选的词）。
+		if s.nav.sel >= len(s.nav.items) || (s.nav.armed && s.nav.items[s.nav.sel] != s.nav.picked) {
+			s.nav.sel, s.nav.armed = -1, false
+		}
+
 		p.Children(func() {
 			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
 			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
@@ -480,11 +620,15 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 				// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
 				// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
 				// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
+				// idx 是这一条在 `nav.items` 里的下标——历史在前、联想在后、「大家
+				// 在听」最后，`navPicked` 拿它比 `nav.sel`。
+				idx := 0
 				if showHistory {
 					s.viewSuggestHeader(c)
 					ui.Row(c).Key("suggest-history").Wrap().Gap(space.Px6).Children(func() {
 						for _, item := range history {
-							s.viewHistoryChip(c, item)
+							s.viewHistoryChip(c, item, idx)
+							idx++
 						}
 					})
 				}
@@ -492,15 +636,18 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 					if showHistory {
 						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
-					s.viewSuggestTerms(c, terms, failed)
+					s.viewSuggestTerms(c, terms, failed, &idx)
 				}
 				if len(hot) > 0 && len(terms) == 0 && !failed {
 					if showHistory {
 						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
-					s.viewSuggestHot(c, hot)
+					s.viewSuggestHot(c, hot, &idx)
 				}
 			})
+			// reveal 是「刚用方向键挪到一条」的一次性信号：画的时候 ScrollIntoView 读过
+			// 一次就清，不然后面每一帧都在往那条滚（用户自己往下翻会被拽回去）。
+			s.nav.reveal = false
 			s.trackScrollbar(suggestScroll)
 		})
 	})
@@ -597,11 +744,11 @@ func suggestPanelMaxH(winH float32) float32 {
 //
 // ⚠️ **它要说清两件事**：删掉的是什么、能不能撤。删历史**没有撤销**——
 // B 站那边没有这一条路，用户自己删掉的那一条再也搜不回来。
-const clearHistoryTip = "清除全部搜索历史，删掉之后不能撤销"
+const clearHistoryTip = "清空全部搜索历史，删掉之后不能撤销"
 
-// viewSuggestHeader 是浮层顶上那一行：「搜索历史」和「清除全部」。
+// viewSuggestHeader 是浮层顶上那一行：一只钟 +「历史搜索」，右边是「清空全部」。
 //
-// 「清除全部」照 Biu 的 `clearSearchHistory`（`search/index.tsx:122-138`）。
+// 「清空全部」照 Biu 的 `clearSearchHistory`（`search/index.tsx:122-138`）。
 //
 // 🔴 **它是这一块唯一的不可逆动作**（票 BMG-253）：它一次性删掉全部搜索历史，
 // 而 B 站那边没有「撤销」——所以它照**本仓库其它破坏性动作的画法**来：
@@ -617,20 +764,18 @@ const clearHistoryTip = "清除全部搜索历史，删掉之后不能撤销"
 //
 // ⚠️ **提示要说清它删的是什么、能不能撤**：原来它**一句提示都没有**，用户
 // 只看见一个 12px 的淡灰字，点了才知道自己删掉了什么。
+//
+// 标题行的形状（图标 + 14/400 的字）和另外两档共用 `viewSuggestHeading`。
 func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).Key("suggest-header").FillWidth().Gap(space.Px8).
-		AlignItems(ui.Center).Padding(space.Px2, space.Px4, space.Px6, space.Px4).Children(func() {
-		// 14/400（上游 `text-sm`，`search/index.tsx:126`）。**不许加粗**：
-		// 上游那一行是正文那一档，靠字号和上面那排 chip 分开，不靠字重。
-		ui.Text(c, "搜索历史").FontSize(scale.Font(c, scale.Size14)).Grow(1)
+	viewSuggestHeading(c, "suggest-header", iconClock, suggestHistoryHeading, func() {
 		// ⚠️ **字还是 12**（票面量过：标题 14、这一枚 12，见
 		// `navbar_search_form_test.go` 的那条用例）——所以图标那一枚也是 14
 		// 那一档的小图标，而不是 18 的大图标（18 会把这一行撑高）。
 		clear := flatButton(c, "")
 		clear.Children(func() {
 			ui.Icon(c, icon(iconDelete)).FontSize(iconSm)
-			ui.Text(c, "清除全部").FontSize(scale.Font(c, scale.Size12))
+			ui.Text(c, suggestClearLabel).FontSize(scale.Font(c, scale.Size12))
 		})
 		if s.withTip(c, clear, clearHistoryTip).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()
@@ -683,6 +828,14 @@ const (
 	// 图形最小的那一个（12 的叉对 12 的字）。现在关闭键占满 chip 整个高，
 	// 和标签按钮**一样高**。
 	historyChipClose = 24
+	// historyChipRadius 是 chip 的圆角：**高度的一半**，一枚药丸
+	// （2026-11 重设计，照用户给的参考图）。
+	//
+	// ⚠️ **刻意不跟 `t.Radius`**（原来是 t.Radius）：药丸是这枚 chip 的
+	// **形状**，和胶囊搜索框（`searchRadius`）同一个理由——用户把全局圆角
+	// 拖到 0 它也还是药丸。半径不写数字：chip 的高是 `historyChipClose`
+	// 撑着的（`historyChipPadY`=0），半径就是那一格的一半。
+	historyChipRadius = historyChipClose / 2
 	// historyChipGap 是标签按钮和关闭键之间那道缝。
 	//
 	// 🔴 **6 而不是 2**（票 BMG-253）：这两个按钮的后果**完全相反**（一个去搜
@@ -709,24 +862,52 @@ func historyChipBg(t *ui.Theme) ui.Color {
 // ⚠️ **形状是一枚 chip，不是一行带框的方块**：灰底、无描边、24 高。里面那两个
 // 按钮是扁平的（`flatButton` / `flatIconButton`），只在指针压上去时铺一层很淡的
 // 反馈；chip 自己的灰色底一直留着，所以它仍然是一个「小块」，而不是两枚按钮。
-func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
+func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem, idx int) {
 	t := c.Theme()
 	label := searchHistorySummary(item.Value)
 
-	ui.Row(c).Key("history:"+item.Value).Radius(t.Radius).
-		Background(historyChipBg(t)).
+	// 两档「亮起来」：
+	//
+	//   - **正在输入**（`match`）：chip 上的词和框里正在敲的一字不差——
+	//     `accentSoft` 的底 + `ink.AccentOn` 的字，照参考图（2026-11 重设计）；
+	//   - **键盘选中**（`nav`）：方向键刚挪到这一条——同一个 `accentSoft` 的底
+	//     + 主色字。两档是同一个视觉（「这一条是焦点」），但**来路不同**：
+	//     一个是跟着输入走的，一个是跟着方向键走的。
+	//
+	// 两档**都**只认那一枚 chip：matched 靠词比，nav 靠「这一条是不是
+	// items[sel]」。
+	match := item.Value == strings.TrimSpace(s.searchKeyword)
+	lit := match || s.navPicked(idx)
+	chipBg := historyChipBg(t)
+	if lit {
+		chipBg = accentSoft(t)
+	}
+
+	chip := ui.Row(c).Key("history:"+item.Value).Radius(historyChipRadius).
+		Background(chipBg).
 		// 左边不留内边距：那 8 像素归标签按钮，点了才落在这一条上。右边留 8，
 		// 给关闭键一圈和左面对称的留白。
 		//
 		// ⚠️ **上下不留**（`historyChipPadY`）：chip 的高由关闭键那一格撑着，
 		// 标签按钮也占满这 24——两个热区一样高。
 		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, space.None).
-		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
+		Gap(historyChipGap).AlignItems(ui.Center)
+	// 方向键刚挪到这一条：把它滚到看得见（折行那排 chip 可能被折到屏幕外）。
+	if s.navPicked(idx) && s.nav.reveal {
+		chip.ScrollIntoView()
+	}
+	chip.Children(func() {
 		// ⚠️ 标签按钮的上下内边距是 3（不是 `flatButton` 默认的 6）：套在 chip
 		// 里的话默认那个 6 会把 24 高撑到 30 以上，而它要和关闭键一样占满这 24。
-		if flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
+		labelBtn := flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
 			Padding(historyChipLabelPadY, historyChipLabelPadEnd,
-				historyChipLabelPadY, historyChipLabelPadX).Clicked() {
+				historyChipLabelPadY, historyChipLabelPadX)
+		// 高亮档的字染主色（`ink.AccentOn` = 「主色当字色」，对底 ≥4.5:1）；
+		// 不然 accentSoft 的浅底上默认字色看不出「就是这一条」。
+		if lit {
+			labelBtn = labelBtn.TextColor(ink.AccentOn(t))
+		}
+		if labelBtn.Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会
@@ -744,6 +925,16 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 			s.hist.remove(item.Value)
 		}
 	})
+}
+
+// navPicked 报「这一条是不是键盘导航正选中的那一条」。
+//
+// ⚠️ **按下标比对，不是按词**：历史里可能有「周杰伦」、联想词里也可能有
+// 「周杰伦」——按词比的话**同名的两条一起亮**，屏上两个区块各亮一条，用户
+// 看不出哪条才是「这一条」。`nav.sel` 是 `nav.items`（每帧重建、历史在前
+// 联想在后的扁平表）的**下标**，navPicked 比的是「这是第几条」。
+func (s *Shell) navPicked(idx int) bool {
+	return s.nav.armed && s.nav.sel == idx
 }
 
 // submitSearch 是「拿这个词去搜」：记进历史、带着词切到搜索页、收起浮层。
@@ -773,6 +964,11 @@ func (s *Shell) submitSearch(keyword string) {
 	}
 	s.hist.add(keyword)
 	s.searchSuggest = false
+	// 面板收起来之前，把键盘导航的选中态也清掉：sel/armed 挂在 Shell 上，
+	// 不关面板的话下一次开面板时它会**拿上一次的 sel 去搜**（armed 还挂着、
+	// sel 还指着一条用户没选的词）。Esc 和失焦那两条已经清了，这里是
+	// 点选 / 回车 / 清空 × 这三条共用的关面板点。
+	s.nav.sel, s.nav.armed = -1, false
 	target := searchPath + "?" + searchQuery + "=" + url.QueryEscape(keyword)
 	if s.router.Location() == target {
 		return

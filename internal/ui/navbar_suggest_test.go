@@ -88,7 +88,7 @@ func TestTypingBringsUpTheSuggestTerms(t *testing.T) {
 		}
 	}
 	// 历史那一档**同时还在**：它是同一个浮层里的另一档，不该被联想顶掉。
-	if !tt.HasText("搜索历史") || !tt.HasText("林俊杰") {
+	if !tt.HasText(suggestHistoryHeading) || !tt.HasText("林俊杰") {
 		t.Errorf("联想词把历史那一档顶掉了，文字有 %q", tt.Texts())
 	}
 	if got := f.suggestCalls(); len(got) != 1 || got[0] != "周杰" {
@@ -389,7 +389,7 @@ func TestAFailedSuggestSaysSoInsteadOfLookingEmpty(t *testing.T) {
 	waitFor(t, "那一次有问有答", func() bool { return f.suggestServed() >= 1 })
 	waitFrames(t, tt, "答回来之后那一帧", func() bool { return !s.app.SuggestState().Loading })
 
-	if !tt.HasText("搜索历史") || !tt.HasText("林俊杰") {
+	if !tt.HasText(suggestHistoryHeading) || !tt.HasText("林俊杰") {
 		t.Errorf("拉不到之后连历史那一档也没了，文字有 %q", tt.Texts())
 	}
 	// ⚠️ **联想词那一档要摆出来**：它摆的是那一句自己的话（不摆的话，这一栏空着，
@@ -468,7 +468,7 @@ func TestTypingTheSameWordAgainAsksAgain(t *testing.T) {
 //
 //  1. 位置：历史在上、联想在下（Biu 的 topContent 在结果列表上面）；
 //  2. 形状：联想是**一整行**（点哪儿都行），历史是一个小 chip（只有那一小块点得到）；
-//  3. 后果：「清除全部」只清历史那一档，联想词不受影响——所以它一定不是同一种东西。
+//  3. 后果：「清空全部」只清历史那一档，联想词不受影响——所以它一定不是同一种东西。
 func TestTheTwoSectionsAreToldApart(t *testing.T) {
 	f := newBiliFixture(t, 1)
 	f.setSuggestTerms("周杰", "周杰伦 晴天")
@@ -478,9 +478,14 @@ func TestTheTwoSectionsAreToldApart(t *testing.T) {
 
 	typeInSearch(t, tt, "周杰")
 	settleSuggestDebounce(s, tt)
-	waitFrames(t, tt, "两档都在", func() bool { return tt.HasText(suggestTermsHeading) && tt.HasText("搜索历史") })
+	waitFrames(t, tt, "两档都在", func() bool { return tt.HasText(suggestTermsHeading) && tt.HasText(suggestHistoryHeading) })
+	// 🔴 **量面板上的像素之前必须先把进场推完**：`waitFrames` 等的是 labels 树（建树
+	// 就有），而面板的 `Opacity` 是 `AnimateTo` 走的——动画没走完时面板是透明的，
+	// 量到的是底下的主窗口。这是这条断言曾经绿的唯一原因（那时 chip 是方块的，
+	// 像素本来就不同）；改成 pill 之后第一次露馅。
+	settleSuggestEnter(t, tt)
 
-	histHead, ok := tt.Find("搜索历史")
+	histHead, ok := tt.Find(suggestHistoryHeading)
 	if !ok {
 		t.Fatalf("没有「搜索历史」那一栏，文字有 %q", tt.Texts())
 	}
@@ -516,7 +521,14 @@ func TestTheTwoSectionsAreToldApart(t *testing.T) {
 	// 所以这里取两个「字左边」的像素比：chip 里侧那块是 chip 的底色，联想词那一行
 	// 同一处是浮层的底色。判据是「这两个点画出来不一样」——没有猜任何颜色值，
 	// 深浅两套主题下都成立。
-	chipIn := tt.Image().RGBAAt(int(chip.X)-3, int(chip.Y+chip.H/2))
+	//
+	// ⚠️ **`Find` 返回的是文本节点的矩形**（`ui/headless.go:461`），不是 chip 也
+	// 不是按钮——「林俊杰」三个字的 W 是 35.75、H 是 14.13，就是字本身。所以
+	// 「字左边 3px」已经是 chip **外**的留白（chip 左缘 = 字左 - `historyChipLabelPadX` 8），
+	// 量到的是面板底。要量到 chip 底，得**再往里 4px**——那时在 chip 的左 padding
+	// 里，chip 底已经画上了（半径 12 的弧也没收到这里）。联想行那边 +3 不变：
+	// 行左 padding `suggestTermPadX=8` 里 3px 仍是面板底。
+	chipIn := tt.Image().RGBAAt(int(chip.X)-4, int(chip.Y+chip.H/2))
 	termIn := tt.Image().RGBAAt(int(term.X)+3, int(term.Y+term.H/2))
 	if chipIn == termIn {
 		t.Errorf("历史那条 chip 和联想词那一行在字左边画出来一模一样（%v）——"+
@@ -528,7 +540,7 @@ func TestTheTwoSectionsAreToldApart(t *testing.T) {
 		t.Errorf("点联想词那一行的右端没选中（文字有 %q）", tt.Texts())
 	}
 
-	// ③ 后果：「清除全部」只动历史那一档。
+	// ③ 后果：「清空全部」只动历史那一档。
 	s2, tt2 := newSuggestShell(t, f)
 	s2.hist.add("林俊杰")
 	tt2.Frame()
@@ -536,14 +548,14 @@ func TestTheTwoSectionsAreToldApart(t *testing.T) {
 	settleSuggestDebounce(s2, tt2)
 	waitFrames(t, tt2, "两档都在", func() bool { return tt2.HasText(suggestTermsHeading) })
 
-	if err := tt2.Click("清除全部"); err != nil {
-		t.Fatalf("点不到「清除全部」：%v，文字有 %q", err, tt2.Texts())
+	if err := tt2.Click(suggestClearLabel); err != nil {
+		t.Fatalf("点不到「清空全部」：%v，文字有 %q", err, tt2.Texts())
 	}
 	if got := s2.hist.list(); len(got) != 0 {
-		t.Errorf("「清除全部」之后历史还剩 %q", searchValues(got))
+		t.Errorf("「清空全部」之后历史还剩 %q", searchValues(got))
 	}
 	if !tt2.HasText("周杰伦 晴天") {
-		t.Errorf("「清除全部」把联想词那一档也清了，文字有 %q", tt2.Texts())
+		t.Errorf("「清空全部」把联想词那一档也清了，文字有 %q", tt2.Texts())
 	}
 }
 
@@ -608,7 +620,7 @@ func TestEscapeTakesBothSectionsAway(t *testing.T) {
 	if s.searchSuggest {
 		t.Errorf("按了 Esc 浮层还开着，文字有 %q", tt.Texts())
 	}
-	for _, gone := range []string{suggestTermsHeading, "搜索历史", "周杰伦 晴天", "林俊杰"} {
+	for _, gone := range []string{suggestTermsHeading, suggestHistoryHeading, "周杰伦 晴天", "林俊杰"} {
 		if tt.HasText(gone) {
 			t.Errorf("按了 Esc 之后 %q 还在画面上，文字有 %q", gone, tt.Texts())
 		}
@@ -672,7 +684,7 @@ func TestTheHistorySettingDoesNotTakeTheSuggestWithIt(t *testing.T) {
 	tt.Frame()
 	waitFrames(t, tt, "联想词出来", func() bool { return tt.HasText(suggestTermsHeading) })
 
-	if tt.HasText("搜索历史") || tt.HasText("林俊杰") {
+	if tt.HasText(suggestHistoryHeading) || tt.HasText("林俊杰") {
 		t.Errorf("设置关了还摆着历史那一档，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("周杰伦 晴天") {

@@ -39,19 +39,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	// suggestTermsHeading 是那一档顶上那一句。
+	// suggestTermsHeading 是那一档顶上那一句。2026-11 重设计照参考图叫「搜索联想」
+	// （原来是「联想词」）。
 	//
-	// ⚠️ 它必须和「搜索历史」不一样，而**更要紧的是它必须和浮层里别的字都不一样**：
+	// ⚠️ 它必须和「历史搜索」不一样，而**更要紧的是它必须和浮层里别的字都不一样**：
 	// 无头 Tester 的 `Find` 认「画着这句字**或者**标着这个名字」的元素，两处叫同
-	// 一个名字的话，按名字找会撞车（返回先建的那个）。这里和历史那一档、搜索框
-	// 那个 placeholder（「搜索」）三处互不相同。
-	suggestTermsHeading = "联想词"
+	// 一个名字的话，按名字找会撞车（返回先建的那个）。这里和历史那一档、面板本体
+	// （`suggestPanelLabel`）、搜索框那个 placeholder（「搜索」）互不相同——「搜索联想」
+	// 和「搜索」是两个字串，`Find` 逐字相等，不撞。
+	suggestTermsHeading = "搜索联想"
 
 	// suggestTermsKey 是这一档那一块的键（铁律四）。它和历史那一档的
 	// `suggest-history` 分开，于是两栏是两块而不是一栏。
@@ -79,8 +82,15 @@ const (
 	// suggestTermPadY / suggestTermPadX 是联想词那一行的上下 / 左右留白。
 	//
 	// 比 chip 那圈大一点：chip 是小圆角的小块，而联想词是**一整行**，行高小一点
-	// 的话指针扫过去时行与行之间几乎没有可停的地方。
-	suggestTermPadY, suggestTermPadX = space.Px5, space.Px8
+	// 的话指针扫过去时行与行之间几乎没有可停的地方。2026-11 重设计把上下从 5
+	// 放到 8：行里多了一枚放大镜，参考图里每一行也更松（约 36 高）。
+	suggestTermPadY, suggestTermPadX = space.Px8, space.Px8
+
+	// suggestHeadingPadTop / Right / Bottom / Left 是三档标题行那一圈留白（历史
+	// 那一档原来就是这几个数，现在三档共用）。
+	suggestHeadingPadTop, suggestHeadingPadRight   = space.Px2, space.Px4
+	suggestHeadingPadBottom, suggestHeadingPadLeft = space.Px6, space.Px4
+	suggestTermsHeadingKey, suggestHotHeadingKey   = "suggest-terms-header", "suggest-hot-header"
 
 	// suggestTermsGap 是历史那一档和联想词那一档之间留的那一道空隙。
 	//
@@ -122,6 +132,43 @@ type suggestTerms struct {
 	// ⚠️ 浮层收掉时清零（见 `syncSuggest`）：下一次点开那个框看到的是**顶上**那几
 	// 条，而那一框里的词多半已经和上一次不是同一个问题了。
 	scroll ui.ScrollState
+}
+
+// suggestNav 是联想面板的**键盘导航**状态（2026-11 重设计）：↑↓ 在历史 chip
+// 和联想词两档之间上下走，回车搜选中的那一条。
+//
+// # 为什么是「扁平下标」
+//
+// 面板上摆着的是**两块**（历史那一排折行的 chip、联想词那一列整行），而方向键
+// 是**一条线**——用户按 ↓ 期望的是「走到下面那一条」，不管它在哪一档。所以这里
+// 把两档摊平成一条 `[]string`（画出来的顺序：历史在上、联想在下），`sel` 是它
+// 的下标。-1 = 没选中（回车还是搜框里的词）。
+//
+// ⚠️ **选中的是「词」不是「元素」**：chip 那一排是**折行**的，「林俊杰」在第几
+// 行第几列由面板宽和词长决定，下标 `sel` 不知道也不该知道——画的时候按「这一条
+// 词是不是 items[sel]」上选中底，布局的事交给布局。
+//
+// ⚠️ **`items` 每帧重建，词会换序**（联想词异步回来、历史增删）：`sel` 指的下标
+// 可能还合法，但那条词已经不是用户按方向键时看到的那一条了——回车搜到的就不是
+// 他选的那一条。所以武装时把那条词记在 `picked`，items 重建时验一下「items[sel]
+// 还是不是 picked」，变了就当这条失效（sel/armed 都回 -1/false，回车还是搜框里的词）。
+type suggestNav struct {
+	// items 是这一帧可走的词，扁平、按画出来的顺序：历史在前、联想在后。
+	// 每帧在 viewSuggest 里重建（那一摊词每一帧都可能变）。
+	items []string
+	// sel 是 items 里选中的下标，-1 = 没选中。
+	sel int
+	// armed 是「键盘导航被方向键激活过」。零值 `suggestNav{}` 的 `sel` 是 0，
+	// 会把第一条误当成选中——所以选中与否看 `armed`，不看 `sel` 自己是不是
+	// -1：只有按过方向键（置真）才算「用户选中了一条」，敲字 / 收浮层都把它
+	// 放回 false。
+	armed bool
+	// picked 是 armed 那一刻 `items[sel]` 的词——items 重建时拿它验 sel 还指不
+	// 指着同一条（上面那段注释），不是拿来显示的。
+	picked string
+	// reveal 是「刚用方向键挪到了这一条，把它滚到看得见」。
+	// 只在按方向键那一帧置真，画的时候读一次就清。
+	reveal bool
 }
 
 // syncSuggestPending 推进联想词那个防抖，**不碰收浮层那一支**。
@@ -208,7 +255,27 @@ func (s *Shell) suggestSearching() bool {
 	return !s.terms.pendingSince.IsZero()
 }
 
-// viewSuggestTerms 画浮层里那一档「联想词」。
+// viewSuggestHeading 画一档的标题行：一枚小图标 + 标题字，右边可选再摆点东西
+// （历史那一档摆「清空全部」）。三档共用，于是三行长得一样——两栏是平级的，
+// 谁也不比谁大：图标 `iconSm`、次要色；标题 14/400（上游历史标题是 `text-sm`，
+// **不许加粗**，靠字号和下面那排内容分开，不靠字重）。
+//
+// 2026-11 重设计照参考图给每一档加的图标：历史是一只钟、联想是一枚放大镜、
+// 「大家在听」是一个音符。
+func viewSuggestHeading(c *ui.Context, key, name, title string, trailing func()) {
+	t := c.Theme()
+	ui.Row(c).Key(key).FillWidth().Gap(space.Px8).AlignItems(ui.Center).
+		Padding(suggestHeadingPadTop, suggestHeadingPadRight, suggestHeadingPadBottom, suggestHeadingPadLeft).
+		Children(func() {
+			ui.Icon(c, icon(name)).FontSize(iconSm).TextColor(t.TextMuted)
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+			if trailing != nil {
+				trailing()
+			}
+		})
+}
+
+// viewSuggestTerms 画浮层里那一档「搜索联想」。
 //
 // ⚠️ **一个都没有、也没失败，就不摆**（调用方也判一次）：那一档空着的时候浮层上
 // 只有历史那一档，而历史那一档永远在——「联想这一栏空着」和「这一趟没拉到」在
@@ -216,16 +283,15 @@ func (s *Shell) suggestSearching() bool {
 //
 // ⚠️ **拉回来的那一刻不摆任何「正在找…」**：用户是在一个字一个字地打，联想是
 // 一闪一闪补上来的，中间摆一句「正在搜…」比不给还吵——他自己知道在等什么。
-func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
+// idx 是这一档在 `nav.items` 里的起始下标（历史在前、联想在后、「大家在听」最后），
+// `viewSuggestTerm` 拿它逐条递增后比 `nav.sel`。
+func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool, idx *int) {
 	if len(items) == 0 && !failed {
 		return
 	}
 	t := c.Theme()
 	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(space.Px2).Children(func() {
-		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
-		// 两处都是 14/400（上游历史标题是 `text-sm`；联想词这一栏没有标题，
-		// 这一句是我们自己的，跟着它走）。
-		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		viewSuggestHeading(c, suggestTermsHeadingKey, iconSearch, suggestTermsHeading, nil)
 		if len(items) == 0 {
 			// 失败：这一档说一句自己的话（理由见 suggestFailedNote）。
 			//
@@ -235,17 +301,19 @@ func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
 			return
 		}
 		for _, term := range items {
-			s.viewSuggestTerm(c, term)
+			s.viewSuggestTerm(c, term, *idx)
+			*idx++
 		}
 	})
 }
 
 // viewSuggestHot 画框里还没敲字时的「大家在听」那一档：热榜前几首的歌名，点一个就搜。
-func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
+func (s *Shell) viewSuggestHot(c *ui.Context, titles []string, idx *int) {
 	ui.Column(c).Key(suggestHotKey).FillWidth().Gap(space.Px2).Children(func() {
-		ui.Text(c, suggestHotHeading).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		viewSuggestHeading(c, suggestHotHeadingKey, iconEmptyMusic, suggestHotHeading, nil)
 		for _, title := range titles {
-			s.viewSuggestTerm(c, title)
+			s.viewSuggestTerm(c, title, *idx)
+			*idx++
 		}
 	})
 }
@@ -256,24 +324,39 @@ func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
 // 的、哪个是 B 站给的」这件事就没有答案了（规格第二条）。所以这里是**一整行**、
 // 左对齐、没有边框、悬停才显出底色——和那排带边框、带 × 的 chip 一眼能分开。
 //
-// ⚠️ **命中的那几个字染成上游那个粉**（票 #138 的顺带那一条）：上游把 B 站回包里
-// 命中的部分染成粉色（回包里的 `name` 把命中的字包在 `<em>` 里，上游渲染成粉
-// 色），而我们取的是干净的 `term`——**十行全是同一种灰，用户得逐行读完才知道
-// 哪条对得上自己敲的那几个字**。
+// 每一行左边一枚放大镜（2026-11 重设计照参考图）：它是「这是一个可以去搜的词」
+// 的图形提示，和顶栏那枚是同一个图标、次要色。
+//
+// ⚠️ **命中的那几个字染主色**（`suggestHitColor`）：十行全是同一种灰，用户得逐行
+// 读完才知道哪条对得上自己敲的那几个字。
 //
 // Label 不只是给测试用的：读屏软件念出来的是这一条词，而正文（Children 里那个
 // Text）不念。
-func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
+func (s *Shell) viewSuggestTerm(c *ui.Context, term string, idx int) {
 	t := c.Theme()
 	row := ui.ButtonBase(c).Label(term).
 		FillWidth().Radius(t.Radius).
 		Padding(suggestTermPadY, suggestTermPadX).
-		AlignItems(ui.Start)
-	// 悬停才显底色——平时一列字摆在那儿，指针扫过去有反应，用户才知道点得动。
-	if row.Hovered() {
+		Gap(space.Px8).AlignItems(ui.Center)
+	// 两种「亮起来」：
+	//   - 悬停（指针扫过去）——原来就有；
+	//   - 键盘选中（方向键刚挪到这一条，`navPicked(idx)`）——和悬停同一片底。
+	//
+	// 同一片 `SurfaceHover`：选中态不是新颜色，用户从「指针扫过会亮」已经知道
+	// 这一片亮是「这一条是焦点」。方向键挪到这一条时 `reveal` 把它滚到看得见。
+	//
+	// ⚠️ **按下标比、不是按词**：历史和联想里可能有同名的词（「周杰伦」在历史里
+	// 是一条、在联想里也是一条），按词比两条一起亮——屏上两个区块各亮一条，
+	// 用户看不出哪一条才是「这一条」。
+	picked := s.navPicked(idx)
+	if row.Hovered() || picked {
 		row = row.Background(t.SurfaceHover)
 	}
+	if picked && s.nav.reveal {
+		row.ScrollIntoView()
+	}
 	row.Children(func() {
+		ui.Icon(c, icon(iconSearch)).FontSize(iconSm).TextColor(t.TextMuted)
 		// ⚠️ **三段：前缀 / 命中段 / 后缀**。命中段是**自己算的**（拿用户已经
 		// 敲的词在 `term` 里找）——B 站回包里的 `name` 带 `<em>` 标签，而**服务层
 		// 取的是干净的 `term`**（那个判断是对的：拿带标签的 `name` 去搜，等于把
@@ -337,20 +420,20 @@ func splitSuggestion(typed, term string) (pre, hit, post string) {
 	return "", "", term
 }
 
-// suggestHitColor 是联想词那一行里「命中的那几个字」的颜色。
+// suggestHitColor 是联想词那一行里「命中的那几个字」的颜色：**主色当字色**那一档
+// （`ink.AccentOn`），2026-11 重设计照参考图定的——命中段跟主题主色走。
 //
-// ⚠️ **上游那个粉在浅色底上不够**：#F54180 压在白底上是 3.5:1（AA 的门槛是
-// 4.5:1），而这一行是 13px 的正文。所以**浅色那一档压暗一档**（5.2:1），深色
-// 那一档用上游那个数（压在深色底上是 5.0:1）。
+// ⚠️ **不能直接拿 `t.Accent`**：主色是用户可设的，浅色主题下默认那个亮绿压在白底
+// 上不到 2:1，整行读不出来（理由在 `flatbutton.go` 的 `flatCurrent` 那一段，票
+// #139 处理那一族）。`ink.AccentOn` 是从用户选的主色现算一个对底 ≥4.5:1 的变体，
+// 深色下原样——颜色的身份留着，字读得出来。
 //
-// ⚠️ **别拿主色当这一段的字色**：那个亮绿压在白底上不到 2:1，整行读不出来
-// （理由在 `flatbutton.go` 的 `flatCurrent` 那一段，票 #139 处理那一族）。
+// ⚠️ **也不是 `t.AccentText`**：那是「主色当**底**」时压在上面的黑 / 白字色
+// （`applyAccent` 按主色亮度挑的），和这里「主色当**字**」是两件事（`ink.go` 的
+// `AccentOn` 注释把两者的关系写清了）。
 //
-// 出处：上游 `src/app.css` 的 `.suggest_high_light,.keyword{color:#F54180}`。
+// 旧口径是上游写死的粉 `#F54180`（`src/app.css` 的 `.suggest_high_light`），浅色下
+// 还得压暗一档才过 AA——一个不随主题走的颜色，用户换了主色它还是粉的，已废。
 func suggestHitColor(t *ui.Theme) ui.Color {
-	pink := ui.Color{R: 0xF5, G: 0x41, B: 0x80, A: 255}
-	if t.Dark {
-		return pink
-	}
-	return pink.Mix(ui.Color{A: 255}, 0.2)
+	return ink.AccentOn(t)
 }
