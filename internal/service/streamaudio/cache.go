@@ -530,6 +530,117 @@ func (c *Cache) CleanOrphans() int {
 	return removed
 }
 
+// Migrate 把「曲目键换了形状」的那些份搬到新键下（2026-11-02）。
+//
+// 缓存键改形状之后（mv 剔掉 sid），**旧键下已经下完的那些份不能就这么丢了**
+// ——丢一份用户就多下一整首。remap 对每个曲目键给一个新键；返回 ok = false
+// 表示「这个键不是旧形状，别动它」。
+//
+// 三条规矩：
+//
+//	目标位已有完整份	→ 旧的直接清（留下的那份更好或一样）
+//	旧的那份自己不完整	→ 直接清（不完整的本来就不算缓存）
+//	其余			→ 搬：bin 原子改名，记录重写到新键下，旧记录删掉
+//
+// 「偏好 → 档」那张表跟着搬：搬过去的条件是「新键下这一档真有完整的字节」，
+// 指向不存在字节的映射搬过去也是一张谎话表。
+//
+// 它返回搬了几份（调用方拿去写日志）。**它只在挂载时调一次**：那时还没有
+// 任何字节源在写盘，改名不会和下载撞上。
+func (c *Cache) Migrate(remap func(track string) (string, bool)) int {
+	if c.dir == "" || remap == nil {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entries, err := c.readAll()
+	if err != nil {
+		return 0
+	}
+	moved := 0
+	for _, e := range entries {
+		oldTrack := e.Track
+		newTrack, ok := remap(oldTrack)
+		if !ok || newTrack == "" || newTrack == oldTrack {
+			continue
+		}
+		tgt, tgtOK := c.readBytes(newTrack, e.Tier)
+		switch {
+		case tgtOK && tgt.Complete, !e.Complete:
+			// 目标位已有完整份，或者旧的那份自己不完整：清掉旧的。
+			c.Remove(oldTrack, e.Tier)
+		default:
+			if c.moveEntry(e, oldTrack, newTrack) {
+				moved++
+			}
+		}
+		c.migratePrefs(oldTrack, newTrack)
+	}
+	return moved
+}
+
+// moveEntry 把一份完整的记录连字节一起搬到 newTrack 下。
+//
+// ⚠️ **失败要回滚**：bin 改了名而记录没写上，留下的就是「有 bin 没 json」
+// 的孤儿——那一档在容量账本之外，要等 CleanOrphans 才清得掉。
+func (c *Cache) moveEntry(e Bytes, oldTrack, newTrack string) bool {
+	binOld, binNew := c.BytesPath(oldTrack, e.Tier), c.BytesPath(newTrack, e.Tier)
+	if binOld == "" || binNew == "" {
+		return false
+	}
+	if _, err := os.Stat(binOld); err != nil {
+		// 有记录没字节：指向不存在字节的记录没有意义，让调用方清掉。
+		return false
+	}
+	if err := os.Rename(binOld, binNew); err != nil {
+		return false
+	}
+	e.Track = newTrack
+	if err := c.writeBytes(e); err != nil {
+		_ = os.Rename(binNew, binOld)
+		return false
+	}
+	_ = os.Remove(c.bytesMetaPath(oldTrack, e.Tier))
+	return true
+}
+
+// migratePrefs 把指向 oldTrack 的那些映射表搬到 newTrack 下。
+//
+// ⚠️ **只搬「新键下这一档真有完整字节」的那几条**：映射表指向一份不存在的
+// 字节，下一次查缓存会拿它去播一个不存在的文件（见 `Lookup` 的第 3 条判据
+// ——那条判据兜得住，但那张表本身就成了垃圾）。
+func (c *Cache) migratePrefs(oldTrack, newTrack string) {
+	dirEntries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return
+	}
+	for _, de := range dirEntries {
+		name := de.Name()
+		if !strings.HasPrefix(name, prefPrefix) || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(c.dir, name))
+		if err != nil {
+			continue
+		}
+		var p Pref
+		if json.Unmarshal(b, &p) != nil {
+			continue
+		}
+		if p.Track != oldTrack {
+			continue
+		}
+		_ = os.Remove(filepath.Join(c.dir, name))
+		if _, exists := c.readPref(newTrack, p.Pref); exists {
+			continue
+		}
+		if _, ok := c.Complete(newTrack, p.Tier); !ok {
+			continue
+		}
+		_ = c.SavePref(newTrack, p.Pref, p.Tier)
+	}
+}
+
 // Evict 按容量上限删掉最久没动过的那些份。
 //
 // ⚠️ **正在用的那一份不许删**（见 `protect` 那一栏的注释）：正在播的歌被删掉

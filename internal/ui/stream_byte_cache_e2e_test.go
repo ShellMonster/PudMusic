@@ -48,13 +48,20 @@ type streamCacheBili struct {
 	cdnCalls  atomic.Int32
 	// cdnByPath 数每一条 CDN 路径分别被拉了几次。
 	cdnByPath map[string]int
+	// overrides 按路径整段替换默认处理（给「停在半路」那些用例用）。
+	// 走了 override 的路径不走下面的 cdnByPath 计数——要数就自己数。
+	overrides map[string]http.HandlerFunc
 	mu        sync.Mutex
 }
 
 func newStreamCacheBili(t *testing.T, media []byte) *streamCacheBili {
 	t.Helper()
-	b := &streamCacheBili{cdnByPath: map[string]int{}}
+	b := &streamCacheBili{cdnByPath: map[string]int{}, overrides: map[string]http.HandlerFunc{}}
 	b.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h, ok := b.overrides[r.URL.Path]; ok {
+			h(w, r)
+			return
+		}
 		switch {
 		case r.URL.Path == "/x/web-interface/nav":
 			writeStreamCacheJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
@@ -229,5 +236,170 @@ func TestSwitchingBackDoesNotHitTheNetwork(t *testing.T) {
 	if biggest != int64(len(media)) {
 		t.Errorf("最大的缓存文件 = %d 字节，want %d（整首）——"+
 			"下过的字节没有留在盘上", biggest, len(media))
+	}
+}
+
+// TestTheCacheKeyIsTheSameFromBothEntrances 钉「同一首歌从两个入口进来，
+// 键是同一个」（2026-11-02）。
+//
+// # 它为什么必须存在
+//
+// 缓存键曾经照抄 `streamKey`（五栏全拼），而**同一个 mv 条目的 sid 在不在场
+// 取决于用户从哪个页面点的它**：收藏 / 合集进来的带 sid，队列恢复出来的不带。
+// 键跟着入口变，字节写在 A 键下、下一次用 B 键去查——缓存永远不命中
+// （实测：同一首歌八天取流九次，缓存目录里同一首存了两份）。
+//
+// 判据是**画面外的那件事**：带 sid 播完一遍（CDN 被拉了）之后，
+// 不带 sid 再点同一首——CDN 不该再被拉。
+func TestTheCacheKeyIsTheSameFromBothEntrances(t *testing.T) {
+	media, err := os.ReadFile(filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac"))
+	if err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	b := newStreamCacheBili(t, media)
+
+	cacheDir := t.TempDir()
+	a := app.New()
+	t.Cleanup(a.Close)
+	transport := &app.CredentialTransport{
+		Base:   b.Client().Transport,
+		Policy: app.DefaultInjectPolicy().AllowBiliHost(hostOfFixture(b.URL)),
+	}
+	cli := bili.NewClient(bili.Options{Transport: transport})
+	cli.TestOnlyPointHostsAtFixture(b.URL)
+	a.MountStreaming(app.Streaming{
+		Client: cli, Media: b.Client(), TempDir: t.TempDir(), CacheDir: cacheDir,
+	})
+
+	// 从「收藏」那个入口进来：带 sid。
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A", Sid: "999",
+		Title: "从收藏进来的那一首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "带 sid 那一趟开始出声", func() bool {
+		return a.Snapshot().Title == "从收藏进来的那一首"
+	})
+	waitFor(t, "带 sid 那一趟下完（缓存记上了）", func() bool {
+		for _, p := range cacheJSONs(t, cacheDir) {
+			raw, _ := os.ReadFile(p)
+			if strings.Contains(string(raw), `"complete":true`) {
+				return true
+			}
+		}
+		return false
+	})
+
+	// 从「队列恢复」那个入口进来：**同一首**，没有 sid。
+	// 一个字节都不该再要——键对不上就是这条用例的红。
+	hitsBefore := b.hitsFor("/cdn/A.flac")
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A",
+		Title: "从恢复进来的同一首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "不带 sid 那一趟开始出声", func() bool {
+		return a.Snapshot().Title == "从恢复进来的同一首"
+	})
+	if got := b.hitsFor("/cdn/A.flac"); got != hitsBefore {
+		t.Errorf("同一首歌换个入口进来，CDN 又被拉了 %d 次——"+
+			"键跟着入口变，缓存永远不命中", got-hitsBefore)
+	}
+}
+
+// TestSwitchingAwayStillFinishesThePreviousDownload 钉「切歌之后，上一首的字节
+// 在后台补完」（2026-11-02）。
+//
+// 切歌的那一瞬间上一首往往只下了一半；原来的行为是直接把源关掉，半截下载
+// 作废，缓存永远记不上「完整」。现在切歌时把源收养给后台的 finisher，等它
+// 下完再关——用户跳过的歌不再白下，下一次冷启动停在那一首上就是秒开。
+//
+// 判据是**缓存记录**：切走之后放行字节，A 那一份必须记成 complete:true，
+// 而且**不该有新的 CDN 请求**（补完走的是已经开着的那条连接）；
+// 再切回 A，一个字节都不该再要。
+func TestSwitchingAwayStillFinishesThePreviousDownload(t *testing.T) {
+	media, err := os.ReadFile(filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac"))
+	if err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	b := newStreamCacheBili(t, media)
+
+	// A 的 CDN 路径：发一半 → 停在半路等放行 → 发另一半。
+	// 自己数命中数（override 不走默认计数）。
+	var aHits atomic.Int32
+	gate := make(chan struct{})
+	mid := len(media) / 2
+	b.overrides["/cdn/A.flac"] = func(w http.ResponseWriter, r *http.Request) {
+		aHits.Add(1)
+		w.Header().Set("Content-Length", fmt.Sprint(len(media)))
+		w.Write(media[:mid])
+		w.(http.Flusher).Flush()
+		<-gate
+		w.Write(media[mid:])
+	}
+
+	cacheDir := t.TempDir()
+	a := app.New()
+	t.Cleanup(a.Close)
+	transport := &app.CredentialTransport{
+		Base:   b.Client().Transport,
+		Policy: app.DefaultInjectPolicy().AllowBiliHost(hostOfFixture(b.URL)),
+	}
+	cli := bili.NewClient(bili.Options{Transport: transport})
+	cli.TestOnlyPointHostsAtFixture(b.URL)
+	a.MountStreaming(app.Streaming{
+		Client: cli, Media: b.Client(), TempDir: t.TempDir(), CacheDir: cacheDir,
+	})
+
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A", Title: "第 A 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "「第 A 首」开始出声", func() bool {
+		return a.Snapshot().Title == "第 A 首"
+	})
+
+	// 切到 B：这一刻 A 的源被收养，A 的下载还停在半路。
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "B", Title: "第 B 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "「第 B 首」开始出声", func() bool {
+		return a.Snapshot().Title == "第 B 首"
+	})
+	hitsAtSwitch := aHits.Load()
+
+	// 放行：finisher 该把 A 下完并把缓存记成「完整」。
+	close(gate)
+	waitFor(t, "A 的缓存在后台记成完整", func() bool {
+		for _, p := range cacheJSONs(t, cacheDir) {
+			raw, _ := os.ReadFile(p)
+			if strings.Contains(string(raw), `"track":"online|mv|BV1|A|"`) &&
+				strings.Contains(string(raw), `"complete":true`) {
+				return true
+			}
+		}
+		return false
+	})
+	if got := aHits.Load(); got != hitsAtSwitch {
+		t.Errorf("后台补完又发了 %d 次新的 CDN 请求", got-hitsAtSwitch)
+	}
+
+	// 切回 A：一个字节都不该再要。
+	before := aHits.Load()
+	if err := a.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A", Title: "第 A 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "「第 A 首」从缓存回来", func() bool {
+		return a.Snapshot().Title == "第 A 首"
+	})
+	if got := aHits.Load(); got != before {
+		t.Errorf("切回 A 那一趟 CDN 又被拉了 %d 次——后台补完的字节没有被用上", got-before)
 	}
 }

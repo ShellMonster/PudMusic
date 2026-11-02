@@ -47,6 +47,7 @@ package app
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
@@ -56,9 +57,39 @@ import (
 
 // byteCacheTrack 是这一首的「曲目身份」（不含音质）。
 //
-// ⚠️ **它和 `streamKey` 是同一个东西**（`source|type|bvid|cid|sid`）：
-// 投稿那一路靠 bvid/cid，音乐库那一路靠 sid——两者不会撞。
-func byteCacheTrack(it Item) string { return streamKey(it) }
+// 🔴 **它不再照抄 `streamKey`**（2026-11-02）：`streamKey` 是
+// `source|type|bvid|cid|sid` 五栏全拼，而**同一个 mv 条目的 sid 在不在场
+// 取决于用户从哪个页面点的它**——收藏 / 合集进来的带 sid，队列恢复出来的
+// 不带（`PlaybackEntry` 没有 sid 那一栏）。键跟着入口变的话，字节写在
+// A 键下、下一次用 B 键去查，缓存永远不命中（实测：同一首歌八天取流九次，
+// 缓存目录里同一首存了两份）。
+//
+// 所以这里按「取流真正认什么」归一：
+//
+//	mv     只认 `bvid + cid`（`playurl` 问的就是它们，sid 从不参与取流）
+//	audio  只认 `sid`（音乐库的身份就是它；bvid/cid 即便在场也不是身份）
+//
+// 分 P 仍然分开（cid 不同 = 音频不同）；两种类型不会撞（`type` 栏还在）。
+func byteCacheTrack(it Item) string {
+	if it.Type == "audio" {
+		return it.Source + "|audio||" + it.Sid
+	}
+	return it.Source + "|mv|" + it.Bvid + "|" + it.Cid + "|"
+}
+
+// legacyByteCacheTrack 把 2026-11-02 之前的旧键认出来，给迁移用。
+//
+// 旧键照抄 `streamKey`，五栏全拼——于是 mv 那一路可能带着非空的 sid。
+// 新键永远不会（见 `byteCacheTrack`）。返回 ok = false 表示「这不是要迁移的键」。
+//
+// 它只认形状，不碰盘：真正的搬迁在 `streamaudio.Cache.Migrate` 那一层。
+func legacyByteCacheTrack(track string) (string, bool) {
+	f := strings.Split(track, "|")
+	if len(f) != 5 || f[1] != "mv" || f[4] == "" {
+		return "", false
+	}
+	return f[0] + "|" + f[1] + "|" + f[2] + "|" + f[3] + "|", true
+}
 
 // byteCacheKeyReady 报「这一首的缓存键现在算得出来吗」。
 //
@@ -341,7 +372,9 @@ func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time
 	a.protectByteCache(rec.Track, rec.Tier)
 	// ⚠️ **`a.online.source` 是 nil**：这一路没有字节源（字节已经在盘上了）。
 	// 读它的地方都判 nil（见 `reconnect.go` 和 `online.go` 的那几处）。
-	a.installOnlinePlayer(it, gen, ref, nil, p, at, paused, s, rec.Track, rec.Tier)
+	//
+	// ⚠️ **`adopt` 是 nil**：这一路没有字节源可以让渡。
+	a.installOnlinePlayer(it, gen, ref, nil, p, at, paused, s, rec.Track, rec.Tier, nil)
 }
 
 // rememberByteCacheTier 记下「这一首、这个偏好 → 这一档」。
