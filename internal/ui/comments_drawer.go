@@ -112,11 +112,10 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 		// 的 `commitElement` 记的是 `Rect{e.x, e.y, e.w, e.h}`），不查蒙版
 		// 的裁切——所以面板虽然画在蒙版的底边下面，它那截伸出来的部分照样
 		// 能吃点击、底下的播放条控件也够不到指针。
+		// ⚠️ **负的 `Bottom` 就是「伸出蒙版底边、贴到窗口底」**：`bottomInset`
+		// 已经是「底下那条的高度」（播放条 76 / 满屏控制栏 108），取负后
+		// 面板正好探出蒙版、盖住那一条。
 		panelBottom := -bottomInset
-		if s.full.open {
-			// 满屏底下那条是 108 高的控制栏——面板要伸到窗口底。
-			panelBottom = -fullControlsHeight
-		}
 		if s.commentsPhase == drawerOut {
 			// ⚠️ **退场那 200ms 里，这片蒙版不吃点击**（理由同 `queue_drawer.go`）：
 			// 它是**透明**的，用户看不见它，而它盖住整页——看不见的东西吃点击，
