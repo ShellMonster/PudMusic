@@ -18,11 +18,13 @@
 package audio
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"strconv"
 	"time"
@@ -49,6 +51,39 @@ func (s *StreamSource) pump() {
 			return
 		}
 		from := s.Filled()
+		// 🔴 **续传前抽查头部**（2026-11-02 审查②的 P0-1）：盘上留着的是
+		// **上一次**下载的前缀，而 B 站同一首（同一个 bvid+cid）返回的字节
+		// **不是契约稳定的**——稿件被替换、CDN 换对象、会员降级后拿到另一段
+		// 字节，而键和长度都没变。
+		//
+		// 于是「旧前缀 + 新内容」拼成一个大小与整首一致的 `.bin`，记成
+		// `complete:true` → **永久坏缓存**：用户此后每次切回这一首都播那段
+		// 拼接货，而且因为「大小对得上」，它**永远不会被重下**。
+		//
+		// 所以发主请求之前先拉一小段头部与盘上比对：不一样就**放弃续传**
+		//（清掉盘上那份，从零重下）——宁可白下一遍流量，也不让用户听到坏东西。
+		//
+		// ⚠️ **抽查失败（网络问题）不算「不是同一段」**：那走重试（换地址 /
+		// 退避），而不是把盘上那份白扔了。
+		if from > 0 {
+			same, err := s.verifyResumePrefix(from)
+			if err != nil {
+				if s.stopped() {
+					return
+				}
+				if !s.recover(from, err) {
+					return
+				}
+				continue
+			}
+			if !same {
+				// 不是同一段：清掉盘上那份，从零重来。
+				if err := s.restart(); err != nil {
+					return
+				}
+				continue
+			}
+		}
 		resp, done, err := s.get(from)
 		if err != nil {
 			done()
@@ -441,8 +476,15 @@ func (s *StreamSource) restart() error {
 	defer s.writeMu.Unlock()
 
 	// 🔴 **续传账本跟着清**（2026-11-02）：文件从头重下了，旧前沿作废——
-	// 留着它，下一次续传会从一个比实际前沿大的数起（应用层的大小校验会拦，
-	// 但账本不该留一个已知说谎的数）。
+	// 留着它，下一次续传会从一个比实际前沿大的数起。
+	//
+	// ⚠️ **必须真的删掉账本文件**（审查②的 P0-2）：只把内存里的
+	// `offsetWritten` 归零的话，**盘上**那份账本还写着旧的大数，而文件已经
+	// 被截断到比它小——账本指向一个不存在的字节。应用层的大小校验会拦下
+	// （从零重下），但源层自己那道自称兜底的底线校验兜不住这一种。
+	if s.offsetPath != "" {
+		_ = os.Remove(s.offsetPath)
+	}
 	s.offsetWritten = 0
 
 	s.mu.Lock()
@@ -680,4 +722,65 @@ func statusErr(resp *http.Response) error {
 		return errors.New("audio: CDN 说我们请求太快了")
 	}
 	return fmt.Errorf("audio: 在线流返回 HTTP %d", resp.StatusCode)
+}
+
+// resumePrefixCheckBytes 是「续传前抽查多少字节」的默认量。
+//
+// 64 KB 足够把「同一首歌的两段不同内容」认出来（音频容器头部 + 编码器
+// 特有的字节），而又不至于大到每次续传都白拉一片。
+const resumePrefixCheckBytes = 64 << 10
+
+// verifyResumePrefix 比对「这一次拿到的流」的头部与「盘上留着的那份」的
+// 头部，确认它们是同一段内容。
+//
+// 返回 same = false 表示「不是同一段」——调用方（`pour`）会放弃续传。
+//
+// ⚠️ **抽查失败（网络错误）不等于「不是同一段」**：那一次返回 err，让上层
+// 走它自己的重试路（换地址 / 退避），而不是把盘上那份白扔了——扔了只是
+// 白下一遍，而重试有可能成功。
+func (s *StreamSource) verifyResumePrefix(from int64) (bool, error) {
+	n := int64(resumePrefixCheckBytes)
+	if from < n {
+		n = from
+	}
+	if n <= 0 {
+		return true, nil
+	}
+	// 盘上那份的头部。
+	head := make([]byte, n)
+	s.writeMu.Lock()
+	got, err := s.file.ReadAt(head, 0)
+	s.writeMu.Unlock()
+	if err != nil && got < int(n) {
+		// 盘上读不出这么多字节：这份本来就不完整，从零来。
+		return false, nil
+	}
+	// 这一次的头部：单独发一个 Range 请求拉前 n 个字节。
+	ctx, cancel := context.WithCancel(s.ctx)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.currentURL(), nil)
+	if err != nil {
+		return false, fmt.Errorf("audio: 抽查续传头部：%w", err)
+	}
+	req.Header.Set("Range", fmt.Sprintf("bytes=0-%d", n-1))
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("audio: 抽查续传头部：%w", err)
+	}
+	defer resp.Body.Close()
+	fresh, err := io.ReadAll(io.LimitReader(resp.Body, n))
+	if err != nil {
+		return false, fmt.Errorf("audio: 抽查续传头部：%w", err)
+	}
+	if len(fresh) == 0 {
+		// 抽查拿不到内容：这一次请求问不出东西——**不能据此说「不是同一段」**
+		// （那会把盘上那份白扔了）。当作「查不了」，让上层走重试。
+		return false, fmt.Errorf("audio: 抽查续传头部：这次没拿到内容")
+	}
+	// 只比双方都有的一段。
+	m := len(fresh)
+	if int64(m) > n {
+		m = int(n)
+	}
+	return bytes.Equal(head[:m], fresh[:m]), nil
 }

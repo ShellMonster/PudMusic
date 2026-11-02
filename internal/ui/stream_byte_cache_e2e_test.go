@@ -547,8 +547,18 @@ func TestAColdStartResumesThePartialDownload(t *testing.T) {
 		t.Errorf("续传的 Range 起点 = %d，want 账本上的 %d——半截字节没有接上，"+
 			"冷启动还是从零等", got, ledger)
 	}
-	if got := aHits.Load(); got != hitsBefore+1 {
-		t.Errorf("第二次启动 CDN 被拉了 %d 次，want 恰好 1 次（Range 续传）", got-hitsBefore)
+	// 🔴 **盘上那份必须逐字节等于源字节**（2026-11-02 审查②的 P0-1）：
+	// 「Range 起点对」只验了**机械动作**——而 B 站同一首返回的字节不是契约
+	// 稳定的（稿件被替换 / CDN 换对象），一续传就可能拼出一个两段拼接的
+	// 文件：大小与整首一致 → 记成 complete → **永久坏缓存**。
+	// 所以这里比**内容**：盘上必须是干净的整首。
+	if err := assertCacheBytesEqual(t, cacheDir, media); err != nil {
+		t.Errorf("盘上那份不是干净的整首：%v", err)
+	}
+	// 🔴 **两次请求**：一次「头部抽查」（续传前确认这段内容还是不是同一段
+	// ——审查②的 P0-1），一次真正的续传。
+	if got := aHits.Load(); got != hitsBefore+2 {
+		t.Errorf("第二次启动 CDN 被拉了 %d 次，want 2 次（头部抽查 + Range 续传）", got-hitsBefore)
 	}
 	// 🔴 **账本必须退役**：要么没了，要么标着「已下完」（`done:`）——后者的
 	// 意思是「这一份完整了，账本只是还没被清」。而**不能**是一个说「只下到
@@ -610,4 +620,178 @@ func readLedger(t *testing.T, path string) int64 {
 		t.Fatalf("账本撕了：%q（%v）", string(raw), perr)
 	}
 	return n
+}
+
+// assertCacheBytesEqual 查缓存目录里那份 `.bin`，逐字节比对它和 want。
+//
+// ⚠️ **目录里可能有多份**（前面的用例留下的）：只看**最大的那个**——而
+// 「拼接的那份」也是最大的（它的大小与整首一致）。
+func assertCacheBytesEqual(t *testing.T, dir string, want []byte) error {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	var biggest string
+	var biggestSize int64 = -1
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".bin") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.Size() > biggestSize {
+			biggestSize = info.Size()
+			biggest = filepath.Join(dir, e.Name())
+		}
+	}
+	if biggest == "" {
+		return fmt.Errorf("缓存目录里没有 .bin")
+	}
+	got, err := os.ReadFile(biggest)
+	if err != nil {
+		return err
+	}
+	if len(got) != len(want) {
+		return fmt.Errorf("盘上 %d 字节，want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return fmt.Errorf("第 %d 字节 = %d，want %d——续传把两段内容拼起来了", i, got[i], want[i])
+		}
+	}
+	return nil
+}
+
+// TestAColdStartDoesNotSpliceDifferentContent 钉「**这一首换了内容就不许
+// 续传**」（2026-11-02 审查②的 P0-1）。
+//
+// B 站同一首（同一个 bvid+cid）返回的字节**不是契约稳定的**：稿件被替换、
+// CDN 换对象、会员降级后拿到另一段字节——而缓存键和长度都没变。于是上一次
+// 退出时留下的半截 + 这一次的新内容 = **一个两段拼接的文件**，大小与整首
+// 一致 → 记成 `complete:true` → **永久坏缓存**：用户此后每次切回这一首都播
+// 那段拼接货，而且因为「大小对得上」，它**永远不会被重下**。
+//
+// # 判据
+//
+// 第一次会话在 A 上留下半截（**旧内容**）；第二次会话 CDN 给**另一份内容**
+// ——续传必须被放弃（头部抽查认出「不是同一段」），盘上最后必须是**干净的
+// 新整首**，而不是两段拼接。
+func TestAColdStartDoesNotSpliceDifferentContent(t *testing.T) {
+	media, err := os.ReadFile(filepath.Join("..", "service", "audio", "flacdec", "testdata", "stereo16.flac"))
+	if err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	// 第二份内容：同样长，但字节不同（改掉开头几个——那正是「盘上留着的」
+	// 那一段，续传**不会重下**它）。
+	other := make([]byte, len(media))
+	copy(other, media)
+	for i := 0; i < 64; i++ {
+		other[i] = other[i] ^ 0xFF
+	}
+
+	b := newStreamCacheBili(t, media)
+	var aHits atomic.Int32
+	gate := make(chan struct{})
+	mid := len(media) / 2
+	served := media
+	b.overrides["/cdn/A.flac"] = func(w http.ResponseWriter, r *http.Request) {
+		aHits.Add(1)
+		start := int64(0)
+		if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
+			if n, perr := strconv.ParseInt(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"), 10, 64); perr == nil && n >= 0 {
+				start = n
+			}
+		}
+		if start > int64(len(served)) {
+			http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprint(int64(len(served))-start))
+		if start > 0 {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(served)-1, len(served)))
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		first := int64(mid)
+		if first < start {
+			first = start
+		}
+		if start < first {
+			w.Write(served[start:first])
+		}
+		w.(http.Flusher).Flush()
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+		if start < int64(mid) {
+			w.Write(served[mid:])
+		} else {
+			w.Write(served[start:])
+		}
+	}
+
+	cacheDir := t.TempDir()
+	var apps []*app.App
+	mount := func() *app.App {
+		a := app.New()
+		apps = append(apps, a)
+		transport := &app.CredentialTransport{
+			Base:   b.Client().Transport,
+			Policy: app.DefaultInjectPolicy().AllowBiliHost(hostOfFixture(b.URL)),
+		}
+		cli := bili.NewClient(bili.Options{Transport: transport})
+		cli.TestOnlyPointHostsAtFixture(b.URL)
+		a.MountStreaming(app.Streaming{
+			Client: cli, Media: b.Client(), TempDir: t.TempDir(), CacheDir: cacheDir,
+		})
+		return a
+	}
+
+	// 第一次：旧内容，下到一半就退出。
+	a1 := mount()
+	if err := a1.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A", Title: "第 A 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "「第 A 首」开始出声", func() bool {
+		return a1.Snapshot().Title == "第 A 首"
+	})
+	a1.Close()
+	ledger := readLedger(t, ledgerPathFor(t, cacheDir))
+	if ledger <= 0 || ledger > int64(mid) {
+		t.Fatalf("账本 = %d，want (0, %d]", ledger, mid)
+	}
+
+	// 第二次：这一首换了内容。
+	served = other
+	close(gate)
+	a2 := mount()
+	if err := a2.PlayFrom(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1", Cid: "A", Title: "第 A 首",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "第二次下完（缓存记上了）", func() bool {
+		for _, p := range cacheJSONs(t, cacheDir) {
+			raw, _ := os.ReadFile(p)
+			if strings.Contains(string(raw), `"track":"online|mv|BV1|A|"`) &&
+				strings.Contains(string(raw), `"complete":true`) {
+				return true
+			}
+		}
+		return false
+	})
+
+	// 🔴 **盘上必须是干净的新整首**，不是「旧前缀 + 新内容」。
+	if err := assertCacheBytesEqual(t, cacheDir, other); err != nil {
+		t.Errorf("盘上那份是拼起来的：%v", err)
+	}
+	for _, a := range apps {
+		a.Close()
+	}
 }

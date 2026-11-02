@@ -342,11 +342,16 @@ func (a *App) unprotectByteCache(track, tier string) {
 // 不会被淘汰——用户听过的每一首歌都会一直占着盘，2 GB 上限形同虚设。
 //
 // ⚠️ **nil 是安全的**：走网络那一路的那一条没有盘上缓存（`cacheTrack` 是空串）。
+//
+// 🔴 **只解「自己加过的那一票」**（2026-11-02 审查②的 P1-1）：保护是引用
+// 计数，而解除方不知道自己在解谁的票——网络那一路装的 track 从来没 protect
+// 过，它解除的其实是**后台 finisher 的那一票**。
 func (a *App) releaseByteCacheProtect(tr *onlineTrack) {
-	if tr == nil || tr.cacheTrack == "" || tr.cacheTier == "" {
+	if tr == nil || !tr.protected || tr.cacheTrack == "" || tr.cacheTier == "" {
 		return
 	}
 	a.unprotectByteCache(tr.cacheTrack, tr.cacheTier)
+	tr.protected = false
 }
 
 // playFromByteCache 用盘上那份字节把这一首放起来。
@@ -362,6 +367,9 @@ func (a *App) releaseByteCacheProtect(tr *onlineTrack) {
 // （用户看到的是「点了歌完全没反应」）。所以这里走的是
 // `runOnlineWithoutCache`——**跳过缓存判定**的那一条路。
 func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time.Duration, paused bool, run *loadRun) {
+	// 🔴 **「这一票是我加的」**（2026-11-02 审查②的 P1-1）：保护是引用
+	// 计数，解除方不知道自己在解谁的票——所以加票的地方要记下来。
+	protectTrack, protectTier := "", ""
 	// 🔴 **正在写这份文件的在补源先收回来**：下面要 `audio.Open` 读它，
 	// 不该撞上一个还在写的人（2026-11-02；精确到档——别的档各写各的文件）。
 	a.cancelFinishersForCache(rec.Track, rec.Tier)
@@ -402,13 +410,13 @@ func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time
 	// 用户点一下音质 chip 就会打断正在播的歌并重新下一遍（见
 	// `bili.SameTier`）。
 	applyTierToRef(ref, rec.Tier)
-	// 🔴 **这一份正在用，不许淘汰**（见 `streamaudio.Cache.Protect`）。
-	a.protectByteCache(rec.Track, rec.Tier)
+	// ⚠️ **保护票由 `installOnlinePlayer` 统一加**（2026-11-02 审查②的
+	// P1-1）：加票只加一次，票的归属记在 track 上（`protected`）。
 	// ⚠️ **`a.online.source` 是 nil**：这一路没有字节源（字节已经在盘上了）。
 	// 读它的地方都判 nil（见 `reconnect.go` 和 `online.go` 的那几处）。
 	//
 	// ⚠️ **`adopt` 是 nil**：这一路没有字节源可以让渡。
-	a.installOnlinePlayer(it, gen, ref, nil, p, at, paused, s, rec.Track, rec.Tier, nil)
+	a.installOnlinePlayer(it, gen, ref, nil, p, at, paused, s, rec.Track, rec.Tier, nil, protectTrack, protectTier)
 }
 
 // rememberByteCacheTier 记下「这一首、这个偏好 → 这一档」。

@@ -39,6 +39,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -876,8 +877,42 @@ func (s *StreamSource) writeOffset(n int64) {
 		return
 	}
 	buf := strconv.AppendInt(make([]byte, 0, 20), n, 10)
-	_ = os.WriteFile(s.offsetPath, buf, 0o644)
+	writeOffsetFile(s.offsetPath, buf)
 	s.offsetWritten = n
+}
+
+// writeOffsetFile 原子地写账本（临时文件 + rename）。
+//
+// ⚠️ **原子是为了「读到半截」这件事不会发生**：`os.WriteFile` 是
+// truncate + write，进程在中间被杀就留下一份空文件或半截——那会让下一次
+// 续传解析不出来（从零重下，白费一遍流量）。临时文件 + rename 保证读者
+// 要么看到旧的完整内容，要么看到新的完整内容。
+func writeOffsetFile(path string, b []byte) {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		// 写不了就退回去直接写：账本是「尽力而为」的，解析不出来只是
+		// 从零重下（不会坏）。
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(b); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		_ = os.WriteFile(path, b, 0o644)
+		return
+	}
 }
 
 // readOffsetLedger 读账本上的前沿，以及「这一份是不是已经标了下完」。

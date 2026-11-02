@@ -66,7 +66,14 @@ func TestCompletingTheDownloadRetiresTheOffset(t *testing.T) {
 func TestCleanOrphansSweepsTheLoneOffsets(t *testing.T) {
 	c := NewCache(t.TempDir())
 	// 有字节的偏移：留着（这一首还在续传账上）。
+	//
+	// ⚠️ **必须连记录一起造**（`SaveBytes`）：一份只有字节、没有记录的 `.bin`
+	// 是**孤儿**（上一次进程被杀留下的半截），CleanOrphans 会把它连同账本
+	// 一起清掉——那正是「正在续传的那一份」在崩溃后的归宿。
 	writeBytesFile(t, c, "online|mv|BV1|1|", "q30280", 100)
+	if err := c.SaveBytes("online|mv|BV1|1|", "q30280", 100, "x", Meta{}); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(c.OffsetPath("online|mv|BV1|1|", "q30280"), []byte("64"), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -42,7 +43,9 @@ func TestTheFrontierIsLedgeredOnCloseAndResumed(t *testing.T) {
 	// 闸门控住后半段，Close 时前沿必然停在半路。
 	gate := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if n := rangeStart(r); n >= 0 {
+		if n := rangeStart(r); n > 0 {
+			// 🔴 **只数主请求的起点**：续传前那一次「头部抽查」也是 0 起的
+			// Range（它要的就是头部），把它算进来就看不出续传的起点对不对。
 			rangeStarts.Store(n)
 		}
 		half := len(data) / 2
@@ -208,5 +211,105 @@ func TestABogusResumeStartsFresh(t *testing.T) {
 	}
 	if len(buf) != len(data) {
 		t.Fatalf("整首 = %d 字节，want %d", len(buf), len(data))
+	}
+}
+
+// TestAResumeOnDifferentBytesStartsFresh 盯「**这段内容变了就不许续传**」
+// （2026-11-02 审查②的 P0-1）。
+//
+// # 为什么这一条是 P0
+//
+// B 站同一首（同一个 bvid+cid）返回的字节**不是契约稳定的**：稿件被替换、
+// CDN 换对象、会员降级后拿到另一段字节——而缓存键和长度都没变。
+// 于是上一次退出时留下的半截 + 这一次拿回来的新内容 = **一个两段拼接的
+// 文件**，大小与整首一致 → 记成 `complete:true` → **永久坏缓存**：用户
+// 此后每次切回这一首都播那段拼接货，而且因为「大小对得上」，它**永远
+// 不会被重下**。
+//
+// # 判据
+//
+// 盘上放一份「旧内容」的半截，服务器这一次给**另一份**内容：续传必须
+// 被放弃（盘上那份被清掉，Range 从 0 起，整首完整）。
+func TestAResumeOnDifferentBytesStartsFresh(t *testing.T) {
+	old := payload(64 << 10)
+	fresh := payload(64 << 10)
+	// 🔴 **两份内容必须真的不同**（第一版这个用例把 `old` 和 `fresh` 都来自
+	// 同一个 `payload()`——它们一模一样，断言自然全绿，测了个寂寞）。
+	//
+	// ⚠️ **差异必须落在「盘上留着的」那一段**（前半段）：那是续传**不会重下**
+	// 的部分——而它正是用户会听到坏东西的地方。差异只放在后半段的话，
+	// 拼出来的文件跟新内容一模一样，测不出任何东西。
+	for i := 0; i < 32768; i++ {
+		fresh[i] = fresh[i] ^ 0xFF
+	}
+
+	var rangeStarts []int64
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := rangeStart(r)
+		mu.Lock()
+		rangeStarts = append(rangeStarts, start)
+		mu.Unlock()
+		// 这次给的是**新内容**。
+		serveBytes(w, r, fresh, len(fresh))
+	}))
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, "song.bin")
+	offsetPath := filepath.Join(dir, "song.bin.off")
+	// 盘上留下「旧内容」的前 32 KB + 一个说 32 KB 的账本。
+	if err := os.WriteFile(cachePath, old[:32<<10], 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(offsetPath, []byte("32768"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs: []string{srv.URL}, Client: srv.Client(),
+		CachePath: cachePath, OffsetPath: offsetPath,
+		ResumeFrom: 32768,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 0, len(fresh))
+	chunk := make([]byte, 8192)
+	deadline := time.Now().Add(10 * time.Second)
+	for len(buf) < len(fresh) {
+		n, rerr := s.Read(chunk)
+		buf = append(buf, chunk[:n]...)
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				break
+			}
+			t.Fatalf("读：%v", rerr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("没读够（%d / %d）", len(buf), len(fresh))
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// 🔴 **盘上那份必须是完整的新内容**（不是两段拼接）。
+	got, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(fresh) {
+		t.Fatalf("盘上 %d 字节，want %d", len(got), len(fresh))
+	}
+	fmt.Printf("[probe] rangeStarts=%v gotLen=%d\n", rangeStarts, len(got))
+	fmt.Printf("[probe] got[0:8]=%v fresh[0:8]=%v\n", got[:8], fresh[:8])
+	fmt.Printf("[probe] got[32768:32776]=%v fresh[32768:32776]=%v old[32768:32776]=%v\n", got[32768:32776], fresh[32768:32776], old[32768:32776])
+	// 🔴 **比整个文件**：拼接的证据在**前半段**（上一次留下的旧内容）。
+	for i := range fresh {
+		if got[i] != fresh[i] {
+			t.Fatalf("盘上第 %d 字节 = %d，want %d——续传把两段内容拼起来了"+
+				"（前半段是上一次留下的旧内容）", i, got[i], fresh[i])
+		}
 	}
 }

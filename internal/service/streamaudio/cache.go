@@ -557,13 +557,30 @@ func (c *Cache) CleanOrphans() int {
 		}
 	}
 	// 没有配对记录的 `.bin`：上一次进程被杀留下的半截。
+	//
+	// 🔴 **连它的续传账本一起删**（2026-11-02 审查②的 P2-4）：账本的孤儿
+	// 判据是「没有同名 `.bin`」，而 `.bin` 的孤儿判据是「没有同名 `.json`」——
+	// 两套判据不一致的话，「有 `.bin` + `.off`、没 `.json`」这一种会留下
+	// 一个**指向不存在字节的账本**（垃圾，要等下一轮 CleanOrphans 才清）。
 	for base := range binSet {
 		if jsonSet[base] {
+			continue
+		}
+		// 🔴 **有续传账本的 `.bin` 不当孤儿删**（2026-11-02 审查②的 P1-3）：
+		// 「只有字节、没有记录」通常意味着上一次进程死在两次写之间——而
+		// **有账本的那种是「正在续传的一份」**：删掉它，跨启动续传就白做了
+		// （下次从零重下）。
+		//
+		// ⚠️ **它没有记录就查不了完整性**（`Complete` 要记录那一栏），所以
+		// 这一份**不算**能播的缓存——但它是**半截字节**，下次续传要从它接着
+		// 下。记录那一份由应用层在**下一次建源时**补（`StartBytes`）。
+		if offSet[base] {
 			continue
 		}
 		if err := os.Remove(filepath.Join(c.dir, base+".bin")); err == nil {
 			removed++
 		}
+		_ = os.Remove(filepath.Join(c.dir, base+".bin.off"))
 	}
 	// 没有配对字节的 `.json`：指向一个不存在的字节文件。
 	for base := range jsonSet {
