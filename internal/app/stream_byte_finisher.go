@@ -180,16 +180,48 @@ func (a *App) removeFinisher(f *sourceFinisher) {
 	}
 }
 
-// cancelFinishersForCache 把「正在写**这一个缓存文件**」的在补源收回来。
+// cancelFinishersForCache 把「正在写**这一个缓存文件**」的源收回来——
+// **在补的那条**，以及**正在播的那条**。
 //
 // 🔴 **它必须在为同一 (track, tier) 建新的字节源 / 读同一份缓存之前调**：
 // 新源以 `O_TRUNC` 打开文件，读的人不该撞上一个还在写的人。匹配精确到档：
 // 同首**另一档**是另一个文件，各补各的，不冲突也不该杀。
 //
+// 🔴 **「正在播的那条」也必须收**（2026-11-02 审查①的 P0-1，回归）：
+// 同一首点第二次时，新源会 `O_TRUNC` **截断**那个缓存文件——而正在播的
+// 旧源**不知情**，它继续从自己那个偏移往后写，于是盘上留下一个**洞**
+// （新源的 [0,128K) ∪ 旧源的 [200K,256K)，中间 [128K,200K) 是洞）。
+//
+// 改动前这一段是安全的：旧源随即被 `old.Close()` 关掉，洞只存在一瞬，
+// 下一趟从零重下就自愈了。**收养把它固化了**——而续传会从洞之后接着下，
+// 洞**永远填不上**，而文件大小与整首一致 → 记成 `complete:true` →
+// **永久坏缓存**（用户此后每次听这首都是坏字节，且系统永远不会重下它）。
+//
 // ⚠️ **锁外面关**：源的 `Close` 要等它的下载 goroutine 退出来。
 func (a *App) cancelFinishersForCache(track, tier string) {
 	if track == "" || tier == "" {
 		return
+	}
+	// 🔴 **正在播的那一条**：它写的是同一个缓存文件。
+	a.mu.Lock()
+	var playing *audio.StreamSource
+	if tr := a.online; tr != nil && tr.cacheTrack == track && tr.cacheTier == tier {
+		playing = tr.source
+	}
+	a.mu.Unlock()
+	if playing != nil {
+		// 关掉它（等它的下载 goroutine 退出来）。
+		//
+		// ⚠️ **它正在放的那一份会被打断**——但那一首本来就要被换下去
+		// （用户点了别的），而**留着它就会有两个写者同写一个文件**：新源
+		// `O_TRUNC` 截断文件，旧源不知情、继续从旧偏移往后写 → 盘上留下一个
+		// **洞**（新源的 [0,128K) ∪ 旧源的 [200K,250K)，中间是洞）。
+		//
+		// 改动前这一段是安全的（旧源随即被 `old.Close()` 关掉，洞只存在一瞬，
+		// 下一趟从零重下就自愈）；**收养把它固化了**——而续传会从洞之后接着
+		// 下，洞永远填不上，而大小与整首一致 → 记成 `complete:true` →
+		// **永久坏缓存**。
+		playing.Close()
 	}
 	a.mu.Lock()
 	f, ok := a.finishers[finisherKey(track, tier)]

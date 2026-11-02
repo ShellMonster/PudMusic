@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -164,4 +166,154 @@ func cacheCompleteFor(t *testing.T, dir, track, tier string) bool {
 		}
 	}
 	return false
+}
+
+// TestTheSameTrackTwiceNeverLeavesAHole 盯「**同一首点两次，缓存里不留洞**」
+// （2026-11-02 审查①的 P0-1）。
+//
+// # 它盯的是什么
+//
+// 同一首点第二次 → 新源 `O_TRUNC` **截断**那个缓存文件 → 正在播的旧源不知情、
+// 继续从自己的偏移往后写 → 盘上是「新源的 [0,128K) ∪ 旧源的 [200K,256K)」，
+// **中间 [128K,200K) 是洞**。
+//
+// 改动前那一段是安全的（旧源随即被关掉，洞只存在一瞬，下一趟从零重下就自愈
+// 了）；**收养把它固化了**——而跨启动续传会从洞之后接着下：洞永远填不上，
+// 而文件大小与整首一致 → 记成 `complete:true` → **永久坏缓存**（用户此后
+// 每次听这首都是坏字节，系统永远不会重下它）。
+//
+// # 判据
+//
+// 点两次之后，缓存里那份字节必须**从头到尾连续**（没有洞）。
+func TestTheSameTrackTwiceNeverLeavesAHole(t *testing.T) {
+	media, err := os.ReadFile(flacFixturePath(t))
+	if err != nil {
+		t.Skipf("找不到 FLAC 测试素材：%v", err)
+	}
+	f := newStreamFixture(t)
+	f.media = media
+	// 🔴 **CDN 发一半就停住**：第一条源要停在「下载中」，第二次点击才会
+	// 撞上「旧源还在写、新源截断文件」那个窗口（洞的起点）。
+	// FLAC 素材只有 250 KB，瞬间就下完了——不加这个闸门，第二次点击时下载
+	// 早就结束，测试抓不到任何东西。
+	gate := make(chan struct{})
+	var once sync.Once
+	f.on("/cdn/A.flac", func(w http.ResponseWriter, r *http.Request) {
+		start := 0
+		if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
+			start, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"))
+		}
+		if start > len(media) {
+			http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.Header().Set("Content-Length", fmt.Sprint(len(media)-start))
+		if start > 0 {
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, len(media)-1, len(media)))
+			w.WriteHeader(http.StatusPartialContent)
+		}
+		mid := len(media) / 2
+		first := mid
+		if first < start {
+			first = start
+		}
+		if start < first {
+			w.Write(media[start:first])
+		}
+		w.(http.Flusher).Flush()
+		once.Do(func() { <-gate })
+		if start < mid {
+			w.Write(media[mid:])
+		} else {
+			w.Write(media[start:])
+		}
+	})
+	f.onPlayURLForCid("1", dashFor(cdnURL(f.URL, "A.flac", time.Hour), 30280, 110836))
+
+	cacheDir := t.TempDir()
+	a := app.New()
+	t.Cleanup(a.Close)
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(f.URL)
+	a.MountStreaming(app.Streaming{Client: cli, Media: f.Client(), TempDir: t.TempDir(), CacheDir: cacheDir})
+
+	it := app.Item{Source: "online", Type: "mv", Bvid: "BV1", Cid: "1", Title: "同一首"}
+	if err := a.PlayFrom(it); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 30*time.Second, "第一次开始出声", func() bool {
+		return a.Snapshot().Title == "同一首"
+	})
+	// ⚠️ **不等它下完就点第二次**（2026-11-02 审查①的 P0-1）：洞正是
+	// 「第一条源还在写 → 第二个源 `O_TRUNC` 截断文件 → 第一条源不知情、
+	// 继续从旧偏移写」造出来的。等它下完了再点，走的是缓存命中那一路，
+	// 压根不建源——那样的测试抓不到任何东西。
+	//
+	// ⚠️ **也不等它出声**：FLAC 素材很小，出声时字节早就下完了，而那份
+	// 完整字节在第二次点击时会被 `O_TRUNC` 截掉——正是洞的起点。所以这里
+	// 只等「开始出声」那一刻就立刻点第二次（下载多半还没完）。
+	time.Sleep(50 * time.Millisecond)
+
+	// 同一首再点一次。
+	if err := a.PlayFrom(it); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 30*time.Second, "第二次开始出声", func() bool {
+		return a.Snapshot().Title == "同一首"
+	})
+	// 放行闸门：让还活着的那条源把剩下的一半下完。
+	close(gate)
+	// 给后台那些源一点时间收尾。
+	time.Sleep(500 * time.Millisecond)
+
+	// 🔴 **盘上那份必须没有洞**：长度对得上，且**每一段都跟源字节一致**。
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bin string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".bin") {
+			bin = filepath.Join(cacheDir, e.Name())
+		}
+	}
+	if bin == "" {
+		t.Fatal("缓存目录里没有 .bin")
+	}
+	got, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) > len(media) {
+		t.Fatalf("盘上 %d 字节，比整首还长", len(got))
+	}
+	// 已下的那一段必须跟源字节**逐字节一致**（洞的位置会是零或别的内容）。
+	for i := range got {
+		if got[i] != media[i] {
+			t.Fatalf("盘上第 %d 字节 = %d，want %d——缓存里留了个洞",
+				i, got[i], media[i])
+		}
+	}
+	// 🔴 **两次点击之后，缓存里不能有两个写者留下的「两份记录」**：
+	// 同一首同一档只有一份缓存文件，而它的记录必须说「完整」。
+	// （洞的另一种形态是「两份记录各说各的」——那份旧的记录还留在盘上。）
+	// 🔴 **字节记录只能有一份**（`b-*.json`；`p-*.json` 是「偏好 → 档」的映射
+	// 表，本来就有好几份，不算）。
+	//
+	// ⚠️ **两份字节记录 = 两个写者**：同一个 (track, tier) 只有一份缓存文件，
+	// 而两条源各写一份记录时，字节文件是**两条源写的混合**（洞），而记录说
+	// 的 size 是其中一条的——「大小对得上」这道判据就拦不住了。
+	recs := 0
+	for _, p := range cacheJSONsIn(t, cacheDir) {
+		if !strings.HasPrefix(filepath.Base(p), "b-") {
+			continue
+		}
+		raw, _ := os.ReadFile(p)
+		if strings.Contains(string(raw), `"track":"online|mv|BV1|1|"`) {
+			recs++
+		}
+	}
+	if recs > 1 {
+		t.Errorf("同一首同一档有 %d 份字节记录——两个写者各留了一份", recs)
+	}
 }
