@@ -10,8 +10,8 @@ package ui
 //     鼠标移动，见 `minicurtain.go` 的文件头）；
 //  2. **设置开关**：默认开着；关着时点封面**什么也不发生**；展开着的时候
 //     把开关关掉 ⇒ **立刻收起**；
-//  3. **窗口高度 = 84 + 卷帘高**（这一扇窗是透明的，多出来的那一块照样吃
-//     点击）；
+//  3. **窗口高度 = 84 + 缝 + 卷帘高**（这一扇窗是透明的，多出来的那一块
+//     照样吃点击）；
 //  4. **收起之后状态里记的还是 320×84**（`StateKey` 记宽高）。
 //
 // # 无头 Tester 量不到的那几样
@@ -56,23 +56,22 @@ func miniCurtainShell(t *testing.T) (*Shell, *app.App) {
 	t.Cleanup(s.closePerWindow)
 	s.router.Transition = mygoui.TransitionNone
 	// 一块 1920×1080 的工作区，窗在它右上角（离顶 12）——往下能长 1080−12−84
-	// ＝ 984，**放得下**那个 236。
+	// ＝ 984，**放得下**那个 400 + 缝。
 	s.miniCurtainWork = miniCurtainRect{X: 0, Y: 0, Width: 1920, Height: 1080}
 	return s, a
 }
 
-// miniCurtainTester 开一扇**320×(84+卷帘高)**的 Tester。
+// miniCurtainTester 开一扇**320×(84+缝+卷帘高)**的 Tester。
 //
-// ⚠️ **为什么不是 320×84**：展开之后窗真的会变高（84 + 236 = 320），而无头
-// Tester 的窗口尺寸是**自己那个**——它不跟真窗口走（`mygo/ui/headless.go` 的
-// Tester 有自己的 `w` / `h`）。Tester 还是 84 高的话，卷帘那一段被排在**窗口
-// 外面**：绝对定位的那一枚「收起」键量出来是 0×0，而歌词那一段在画面上根本
-// 画不出来（被裁掉）。
+// ⚠️ **为什么不是 320×84**：展开之后窗真的会变高（84 + 10 + 400 = 494），
+// 而无头 Tester 的窗口尺寸是**自己那个**——它不跟真窗口走（`mygo/ui/headless.go`
+// 的 Tester 有自己的 `w` / `h`）。Tester 还是 84 高的话，卷帘那一段被排在
+// **窗口外面**：歌词板在画面上根本画不出来（被裁掉）。
 //
-// ⚠️ **320 是 84 + 236**：而这正是**真窗口展开后的高度**——所以这一档量到
-// 的版面就是用户看到的那一版。
+// ⚠️ **494 是 84 + 缝 + 400**：而这正是**真窗口展开后的高度**——所以这一档
+// 量到的版面就是用户看到的那一版。
 func miniCurtainTester(s *Shell) *mygoui.Tester {
-	return mygoui.NewTester(s.View, miniWidth, miniHeight+miniCurtainH)
+	return mygoui.NewTester(s.View, miniWidth, miniHeight+miniCurtainGap+miniCurtainH)
 }
 
 // miniCurtainHasLyrics 断「画面上有没有歌词」。
@@ -166,11 +165,16 @@ func TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain(t *testing.T) {
 	}
 }
 
-// TestTheMiniCurtainClosesWithTheCollapseButton 盯「点收起键收起」。
+// TestTheMiniCurtainClosesFromTheMenu 盯「『···』菜单里的「收起歌词」能收起」。
 //
-// 收起键是**卷帘里**那一枚（`iconChevronUp`），而它是**第三件**收起的东西
-// （另两件是「再点封面」和 Esc）。
-func TestTheMiniCurtainClosesWithTheCollapseButton(t *testing.T) {
+// ⚠️ **旧版这一条量的是「下轴上那一枚收起键」**——换「独立歌词板」之后地轴
+// 整个撤了，收起走三条路：再点封面、Esc、和「···」菜单里那一格。
+//
+// ⚠️ **菜单在无头 Tester 里走得通**：`Element.Menu` 是「钮按下去弹菜单」，
+// 而无头那一档的 `popupMenu` 把菜单记下来（`tt.Menu()` / `tt.ChooseMenuItem`
+// ——`mygo/ui/headless.go:584`）——所以这一条量得到「菜单里有那一格、而选它
+// 会收起」。
+func TestTheMiniCurtainClosesFromTheMenu(t *testing.T) {
 	s, a := miniCurtainShell(t)
 	if err := enqueueTwo(a, t); err != nil {
 		t.Fatal(err)
@@ -182,16 +186,46 @@ func TestTheMiniCurtainClosesWithTheCollapseButton(t *testing.T) {
 	clickCurtainCover(t, tt)
 	settleCurtain(t, tt, s, true)
 
-	btn, ok := tt.Find("收起歌词")
+	// 🔴 **「···」那枚钮在歌词板的右上角**（票面：和「歌词来自 X」同一行）。
+	btn, ok := tt.Find("歌词菜单")
 	if !ok {
-		t.Fatalf("画面上找不到收起那一枚，文字有 %q", tt.Texts())
+		t.Fatalf("画面上找不到「···」那枚菜单钮，文字有 %q", tt.Texts())
 	}
+	board, ok := tt.Find("迷你播放器歌词")
+	if !ok {
+		t.Fatalf("画面上找不到歌词板，文字有 %q", tt.Texts())
+	}
+	if btn.Y > board.Y+40 {
+		t.Errorf("「···」那枚钮的顶边在 y=%.1f，want ≤ %.1f（歌词板顶边 + 40）："+
+			"它不在歌词板的 header 那一行", btn.Y, board.Y+40)
+	}
+	if btn.X+btn.W < board.W-40 {
+		t.Errorf("「···」那枚钮的右边在 x=%.1f，want ≥ %.1f（歌词板右边 − 40）："+
+			"它不在右上角", btn.X+btn.W, board.W-40)
+	}
+
+	// 🔴 **菜单里有「收起歌词」那一格**：`Element.Menu` 是左键按下弹菜单，
+	// 而无头 Tester 记的是菜单的**标签表**。
 	tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
 	tt.Frame()
-	settleCurtain(t, tt, s, false)
+	items := tt.Menu()
+	found := false
+	for _, it := range items {
+		if it == "收起歌词" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("菜单里没有「收起歌词」那一格，菜单是 %q", items)
+	}
 
+	// 🔴 **选它会收起**。
+	if err := tt.ChooseMenuItem("收起歌词"); err != nil {
+		t.Fatalf("选不了「收起歌词」：%v（菜单是 %q）", err, items)
+	}
+	settleCurtain(t, tt, s, false)
 	if miniCurtainHasLyrics(tt) {
-		t.Errorf("点了收起之后卷帘还开着：画面上还有歌词，文字有 %q", tt.Texts())
+		t.Errorf("点了「收起歌词」之后卷帘还开着：画面上还有歌词，文字有 %q", tt.Texts())
 	}
 	if s.miniCurtain.open {
 		t.Error("卷帘还处于展开状态（`open` 还是 true）")
@@ -202,7 +236,7 @@ func TestTheMiniCurtainClosesWithTheCollapseButton(t *testing.T) {
 //
 // ⚠️ **这一条量的是「内容高度」不是「窗口高度」**：无头 Tester 里量不到真窗
 // 口的尺寸（Tester 有自己那个 320×84）。而**窗高必须等于内容高**这件事，
-// 在无头这一档能验的是另一半——**内容的高度就是 `84 + 卷帘高`**。
+// 在无头这一档能验的是另一半——**内容的高度就是 `84 + 缝 + 卷帘高`**。
 //
 // ⚠️ **判据是「卷帘那一块画到了哪儿」**：`Tester.Find` 报的是画出来的那一块
 // 的框，而卷帘是**绝对定位之外**的一段（它是根 Column 的第二个孩子），所以
@@ -229,7 +263,7 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 			"（它不能跟着卷帘一起长高）", card.H, miniHeight)
 	}
 
-	// 展开之后：卷帘那一块是 236 高（工作区放得下，所以是满的那一档）。
+	// 展开之后：歌词板那一块是 400 高（工作区放得下，所以是满的那一档）。
 	//
 	// ⚠️ **判据是「画出来的那一块」**：无头 Tester 量不到真窗口的尺寸，而
 	// **内容画到了哪儿**是量得到的——而「窗高 = 内容高」这件事正是要断的那
@@ -241,12 +275,12 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 	if curtain.H < miniCurtainH-1 || curtain.H > miniCurtainH+1 {
 		t.Errorf("卷帘画出来是 %.1f 高，want %d", curtain.H, miniCurtainH)
 	}
-	// ⚠️ **卷帘紧贴在迷你卡片下面**（不重叠、不留缝）：卷帘的上沿就是
-	// 迷你行（84 高）的下沿——而这一条是「窗高 = 内容高」的一半。
-	if got, want := curtain.Y, float32(miniHeight); got < want-1 || got > want+1 {
-		t.Errorf("卷帘的上沿在 y=%.1f，want %.0f：它必须紧贴在迷你卡片下面"+
-			"（中间留一道缝的话，窗就比内容高，而多出来的那一块透明区在吃点击）",
-			got, want)
+	// ⚠️ **卷帘在迷你卡片下面、中间隔着那道缝**：板的上沿是 84 + 缝——
+	// 板和卡片是**两张独立的板**（票面），中间那条缝是窗的透明区（它照吃
+	// 点击，那是换「独立板」这个外观接受的代价）。
+	if got, want := curtain.Y, float32(miniHeight+miniCurtainGap); got < want-1 || got > want+1 {
+		t.Errorf("卷帘的上沿在 y=%.1f，want %.0f（卡片 84 + 缝 %d）："+
+			"它和卡片之间的那道缝不对", got, want, miniCurtainGap)
 	}
 	// 宽度：卷帘铺满整窗（320），不窄一截。
 	if got, want := curtain.W, float32(miniWidth); got < want-1 || got > want+1 {
@@ -257,14 +291,15 @@ func TestTheMiniCurtainHeightFollowsTheAnimation(t *testing.T) {
 	if animH < miniCurtainH-1 || animH > miniCurtainH+1 {
 		t.Errorf("卷帘展开之后是 %.1f 高，want %d", animH, miniCurtainH)
 	}
-	// 窗高 = 84 + 卷帘高。
-	if got, want := s.miniCurtainTargetHeight(), miniHeight+miniCurtainH; got != want {
-		t.Errorf("窗该有 %d 高，want %d（84 + 卷帘 %d）", got, want, miniCurtainH)
+	// 窗高 = 84 + 缝 + 卷帘高。
+	if got, want := s.miniCurtainTargetHeight(), miniHeight+miniCurtainGap+miniCurtainH; got != want {
+		t.Errorf("窗该有 %d 高，want %d（84 + 缝 %d + 卷帘 %d）",
+			got, want, miniCurtainGap, miniCurtainH)
 	}
 	// ⚠️ **而且窗真的改到了那个高度**：这一句是「窗高跟着动画走」的那一半
 	// （`miniCurtainSyncHeight` 里那一句 `SetSize`）。
-	if got, want := s.miniCurtain.setHeight, miniHeight+miniCurtainH; got != want {
-		t.Errorf("窗高被改成了 %d，want %d（84 + 卷帘 %d）", got, want, miniCurtainH)
+	if got, want := s.miniCurtain.setHeight, miniHeight+miniCurtainGap+miniCurtainH; got != want {
+		t.Errorf("窗高被改成了 %d，want %d（84 + 缝 %d + 卷帘 %d）", got, want, miniCurtainGap, miniCurtainH)
 	}
 	// 收起之后窗高回到 84。
 	s.miniCurtainCollapse(tt.Now())
@@ -433,11 +468,11 @@ func TestTheMiniCurtainCollapsesWhenTheSwitchIsTurnedOff(t *testing.T) {
 //
 // ⚠️ **这是这一票踩到的一个真缺陷**：卷帘高度是一个**动画值**，而
 // `miniCurtainCollapseNow`（开关关掉 / 关窗那两条路走的）只把
-// `height` 归零了——**动画通道里的值还在 236**。于是下一帧那个
-// `AnimateTo(0)` 从 236 往 0 滑，窗于是**先弹回 320 高**，再一路缩到 84。
+// `height` 归零了——**动画通道里的值还在满高**。于是下一帧那个
+// `AnimateTo(0)` 从满高往 0 滑，窗于是**先弹回满高**，再一路缩到 84。
 //
-// 而那 240ms 里**窗比内容高**：这一扇窗是透明的，**透明的那一块照样吃
-// 点击**——底下那个应用的按钮就点不到那 236 像素。而票面要的是「**立刻
+// 而那几百毫秒里**窗比内容高**：这一扇窗是透明的，**透明的那一块照样吃
+// 点击**——底下那个应用的按钮就点不到那一段。而票面要的是「**立刻
 // 收起**」，不是「正在收」。
 //
 // ⚠️ **判据是「那一帧窗高就是 84」**（不是「最后到了 84」）：滑下去那条路
@@ -453,8 +488,8 @@ func TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack(t *testing.T) {
 
 	clickCurtainCover(t, tt)
 	settleCurtain(t, tt, s, true)
-	if got := s.miniCurtain.setHeight; got != miniHeight+miniCurtainH {
-		t.Fatalf("起点就不对：窗高是 %d，want %d", got, miniHeight+miniCurtainH)
+	if got := s.miniCurtain.setHeight; got != miniHeight+miniCurtainGap+miniCurtainH {
+		t.Fatalf("起点就不对：窗高是 %d，want %d", got, miniHeight+miniCurtainGap+miniCurtainH)
 	}
 
 	// 「立刻收起」（开关关掉 / 关窗那两条路走的就是它）。
@@ -467,10 +502,10 @@ func TestTheMiniCurtainCollapsesAtOnceWithoutBouncingBack(t *testing.T) {
 	if got := s.miniCurtain.height; got != 0 {
 		t.Errorf("立刻收起之后卷帘高 %.1f，want 0：它还在滑下去（窗会先弹回 320）", got)
 	}
-	if got := s.miniCurtain.setHeight; got != miniHeight {
-		t.Errorf("立刻收起之后窗高是 %d，want %d：窗不该先弹回 %d 再滑下来",
-			got, miniHeight, miniHeight+miniCurtainH)
-	}
+		if got := s.miniCurtain.setHeight; got != miniHeight {
+			t.Errorf("立刻收起之后窗高是 %d，want %d：窗不该先弹回 %d 再滑下来",
+				got, miniHeight, miniHeight+miniCurtainGap+miniCurtainH)
+		}
 	if miniCurtainHasLyrics(tt) {
 		t.Errorf("立刻收起之后画面上还有歌词：卷帘没有收起来，文字有 %q", tt.Texts())
 	}
@@ -591,21 +626,28 @@ func TestTheMiniCurtainIsClampedToTheWorkArea(t *testing.T) {
 		win  miniCurtainRect
 		want int
 	}{
-		{"窗口在右上角：放得下 236", miniCurtainRect{X: 1600, Y: 12, Width: 320, Height: 84}, miniCurtainH},
+		{"窗口在右上角：放得下 400", miniCurtainRect{X: 1600, Y: 12, Width: 320, Height: 84}, miniCurtainH},
 		{"窗口在正中间：够用但不满", miniCurtainRect{X: 800, Y: 400, Width: 320, Height: 84}, miniCurtainH},
 		{
-			// 窗底离工作区底边只剩 1080 − 900 − 84 = 96，减掉那道 12 的边距
-			// ＝ 84 < 120 ⇒ **不展开**。
+			// 卡片底离工作区底边只剩 1080 − 900 − 84 = 96，减掉缝 10 和边距 12
+			// ＝ 74 < 200 ⇒ **不展开**。
 			name: "窗口在屏幕下半部：放不下就不展开",
 			win:  miniCurtainRect{X: 1600, Y: 900, Width: 320, Height: 84},
 			want: 0,
 		},
 		{
-			// 剩 1080 − 800 − 84 = 196，减掉那道 12 的边距 ＝ 184：夹到 184
-			//（不是 236）。
-			name: "窗口在下半部：夹住",
+			// 剩 1080 − 800 − 84 = 196，减掉缝 10 和边距 12 ＝ 174 < 200 ⇒
+			// 不展开。
+			name: "窗口在下半部：不够也不展开",
 			win:  miniCurtainRect{X: 1600, Y: 800, Width: 320, Height: 84},
-			want: 184,
+			want: 0,
+		},
+		{
+			// 剩 1080 − 600 − 84 = 396，减掉缝 10 和边距 12 ＝ 374：夹到 374
+			//（不是 400）。
+			name: "窗口在下半部：夹住",
+			win:  miniCurtainRect{X: 1600, Y: 600, Width: 320, Height: 84},
+			want: 374,
 		},
 	} {
 		if got := miniCurtainHeight(work, c.win); got != c.want {
@@ -627,7 +669,7 @@ func TestTheMiniCurtainIsClampedToTheWorkArea(t *testing.T) {
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderMiniCurtainShots
 //
-// ⚠️ **两张都要出**：收起那一版（320×84）和展开那一版（320×320）——而
+// ⚠️ **两张都要出**：收起那一版（320×84）和展开那一版（320×494）——而
 // **卷帘那一版才是这一票要看的那一版**（布局 / 间距 / 层级 / 密度 / 对齐，
 // AGENTS.md §1《UI 票的验收必须有一次「视觉审查」》）。
 //

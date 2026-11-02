@@ -75,7 +75,7 @@ func newFakeMiniWindow() *fakeMiniWindow {
 	return &fakeMiniWindow{
 		width:  miniWidth,
 		height: miniHeight,
-		// 一块 1920×1080 的工作区，窗在它左上角——往下放得下那个 236。
+		// 一块 1920×1080 的工作区，窗在它左上角——往下放得下那个 400 + 缝。
 		work: mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 1080},
 	}
 }
@@ -171,7 +171,7 @@ func TestTheMiniCurtainLeavesACollapsedHeightInTheWindowState(t *testing.T) {
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
-	if got, want := fake.height, miniHeight+miniCurtainH; got != want {
+	if got, want := fake.height, miniHeight+miniCurtainGap+miniCurtainH; got != want {
 		t.Fatalf("展开之后窗高是 %d，want %d：这一条要断的是「展开着关窗」那一半",
 			got, want)
 	}

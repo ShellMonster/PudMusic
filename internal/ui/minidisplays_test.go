@@ -378,7 +378,11 @@ func TestTheMiniWindowIsReconciledAfterItIsBuilt(t *testing.T) {
 func TestTheMiniCurtainUsesTheScreenItIsOn(t *testing.T) {
 	displays := miniTestDisplays()
 	// 窗停在两块屏的同一个高度（都靠近工作区底边）。
-	cur := mygo.Rectangle{X: -2400, Y: 896, Width: miniWidth, Height: miniHeight}
+	//
+	// ⚠️ **Y=890**：卡片底到副屏工作区底边还剩 1200 − 974 − 10 − 12 = 204 ⇒
+	// 放得下（200 是下限）；而主屏的底边在 1055，974 离它只剩 59 ⇒ 按主屏
+	// 算放不下——「算的是哪块屏」这一下分得出。
+	cur := mygo.Rectangle{X: -2400, Y: 890, Width: miniWidth, Height: miniHeight}
 
 	// ⚠️ **用的是生产那一档用的那个函数**（`miniWindowOf.WorkArea` 调的就是
 	// 它），而不是另写一份——这样「生产那一步算错了」这一种回归会被这一条
@@ -388,8 +392,8 @@ func TestTheMiniCurtainUsesTheScreenItIsOn(t *testing.T) {
 		t.Fatalf("生产那一档算出来的工作区是 %+v，want %+v（副屏那一块）",
 			work, displays[1].WorkArea)
 	}
-	// 按副屏那块工作区算：窗底到工作区底边还剩 1200 − 980 − 12 = 208 ⇒
-	// 放得下（120 是下限，236 是上限）。
+	// 按副屏那块工作区算：卡片底（890+84=974）到工作区底边还剩
+	// 1200 − 974 − 10 − 12 = 204 ⇒ 放得下（200 是下限）。
 	h := miniCurtainHeight(work, cur)
 	if h < miniCurtainMinH {
 		t.Errorf("按副屏的工作区算卷帘高度是 %d，want >= %d（那儿放得下）",
@@ -416,13 +420,13 @@ func TestTheMiniCurtainUsesTheScreenItIsOn(t *testing.T) {
 func TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks(t *testing.T) {
 	s, _ := newMiniShell(t, nil)
 	fake := newFakeMiniWindow()
-	// 窗展开着（84 + 236 = 320 高），停在工作区顶上那 12。
+	// 窗展开着（84 + 缝 + 400 = 494 高），停在工作区顶上那 12。
 	fake.x, fake.y = 0, miniMargin
-	fake.height = miniHeight + miniCurtainH
+	fake.height = miniHeight + miniCurtainGap + miniCurtainH
 	s.attachMiniWindowTo(fake)
 	s.miniCurtain.open = true
 	s.miniCurtain.target = miniCurtainH
-	s.miniCurtain.setHeight = miniHeight + miniCurtainH
+	s.miniCurtain.setHeight = miniHeight + miniCurtainGap + miniCurtainH
 
 	// 那块屏的工作区变成 200 高（改了分辨率）。
 	next := mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 200}
@@ -451,20 +455,21 @@ func TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks(t *testing.T) {
 // ⇒ 量到的是「卷帘自己已经占掉的那一块」⇒ 目标高度**一级一级往下掉**（屏
 // 幕上显示高度一变，卷帘就越缩越短，最后缩成 0）。
 //
-// ⚠️ **判据是「工作区 500 高 ⇒ 目标还是 236」**：卡片底在 y=96，500 - 96 -
-// 12 = 392 ⇒ 够 ⇒ 目标就是上限那 236；而按窗底（y=332）量的话只剩 156。
+// ⚠️ **判据是「工作区 600 高 ⇒ 目标还是 400」**：卡片底在 y=96，600 - 96 -
+// 缝 10 - 边距 12 = 482 ⇒ 够 ⇒ 目标就是上限那 400；而按窗底（y=506）量的话
+// 只剩 82。
 func TestTheMiniCurtainRetargetsFromTheCardBottom(t *testing.T) {
-	for _, workHeight := range []int{500, 450} {
+	for _, workHeight := range []int{600, 550} {
 		s, _ := newMiniShell(t, nil)
 		fake := newFakeMiniWindow()
 		fake.x, fake.y = 0, miniMargin
-		fake.height = miniHeight + miniCurtainH
+		fake.height = miniHeight + miniCurtainGap + miniCurtainH
 		next := mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: workHeight}
 		fake.work = next
 		s.attachMiniWindowTo(fake)
 		s.miniCurtain.open = true
 		s.miniCurtain.target = miniCurtainH
-		s.miniCurtain.setHeight = miniHeight + miniCurtainH
+		s.miniCurtain.setHeight = miniHeight + miniCurtainGap + miniCurtainH
 		s.miniDisplays = func() []mygo.Display {
 			return []mygo.Display{{ID: 1, Primary: true, Bounds: next, WorkArea: next}}
 		}
