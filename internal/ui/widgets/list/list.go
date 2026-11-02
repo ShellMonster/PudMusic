@@ -217,6 +217,36 @@ type List struct {
 	// sel 是选中的行，-1 是没选。帧里的点击由 ui.List 自己写进来。
 	sel int
 
+	// rowSel 是**每一行标题那一列**的句柄（票 #703 的 A）。
+	//
+	// ⚠️ **框架全局只有一段选中**（`mygo/ui/textselection.go` 的 `rt.selection`，
+	// 一个 scope 一个）——所以每一行留一个句柄，⌘C 的时候挨个问「选中在你那儿吗」。
+	//
+	// ⚠️ **它是 `Handle` 而不是 `Element`**：行是虚拟化的，元素活不过一帧
+	// （`mygo/ui/frame.go` 的 Element 注释：「element from pass N used in pass
+	// N; keep a ui.Handle instead」）。用它 `Context.Resolve` 拿当帧那一个。
+	//
+	// ⚠️ **一个句柄只能绑一个元素**（框架的 `Bind` 会在同一个 build 里绑两个
+	// 时 panic），所以每一行得有一个自己的。
+	rowSel []ui.Handle
+
+	// rowSelParts 是**当帧读出来的那段选中**。
+	//
+	// ⚠️ **每帧读一次**：框架的选中会自己变（选中变了、段落被重建了、那一段
+	// 没了），所以不能记成一份「上一帧的」——⌘C 复制的那一段必须是**此刻**的。
+	rowSelParts []ui.SelectedText
+
+	// rowSelText 是 `rowSelParts` 那一行**复制出去的那一段字**（整行）。
+	//
+	// ⚠️ **每帧算一次**：那一行的时长会变（歌换了、时长改了），所以不能记成
+	// 一份「上一帧的」。
+	rowSelText string
+
+	// wiring 是**每一行那一列**记好的四样回调（票 #703 的 A，见 `row_select.go`
+	// 的 `rowWiring`）。按下标扩容、命中就不再建——每帧每行现建闭包的话，
+	// 首页那一档的逐帧分配预算直接爆掉（实测 80 次，上限 60）。
+	wiring []*rowWiring
+
 	// cache 是封面缓存。整个窗口共用一个，壳（Shell）建好之后传进来。
 	cache *imgcache.Cache
 
@@ -839,6 +869,19 @@ func (l *List) View(c *ui.Context) {
 	// 量滚动条的悬停。界面层下一帧据此把主题的滚动条色换深一档（`Hot` 的
 	// 注释；框架只有一个滚动条颜色）。
 	l.hot = scrollbar.Hot(list)
+
+	// ⚠️ **读当帧那一段文字选中**（票 #703 的 A）：行标题那一列现在可选中了，
+	// 而框架全局只有一段选中——⌘C 要复制的是它（整行），不是选中行。
+	//
+	// 🔴 **必须排在 `ui.List` 构建**之后****：`rowSel` 那些句柄是画行的时候
+	// （`Rows` 闭包里）绑上去的，而 `Resolve` 读的是**此刻**的绑定——排在前面
+	// 的话，上一帧的绑定已经关闭、这一帧的还没建，每一行都读出「无效」，
+	// **选区永远读不到**（实测：拖完之后 `rowSelText` 恒为空，⌘C 的整行复制
+	// 全瞎）。
+	//
+	// ⚠️ **读的是这一帧**，⌘C 用的是上一帧的值：⌘C 在帧间投递，中间隔了
+	// 用户拖选到按键的那些帧，拿到的就是「用户最后看到的那一段」——够新。
+	l.rowSelection(c)
 }
 
 // Hot 报上一次 View 时指针是不是压在这个列表的滚动条上。

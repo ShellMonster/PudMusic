@@ -226,6 +226,11 @@ func TestTheHomeBackToTopGoesBackToThatTab(t *testing.T) {
 // 自己的位置」那半句。
 //
 // 两档各滚一段，然后来回切：每一档都要停在自己那一段。
+//
+// ⚠️ **两档都要滚过**（对抗性审查抓的缺口）：只滚「音乐」的话，验的只是
+// 「没滚的那一档不污染别人」一个方向；反过来「滚过的鬼畜」也被记住，才是
+// 「各记各的」的完整含义—— ScrollState 挂回来之后（票 #703 的 B），这一条
+// 是它没把票 #370 带回来的主要钉子。
 func TestEachHomeTabKeepsItsOwnScrollAndItsOwnBackToTop(t *testing.T) {
 	b := newUIExplore(t)
 	homePagedArchives(b, 3)
@@ -253,10 +258,31 @@ func TestEachHomeTabKeepsItsOwnScrollAndItsOwnBackToTop(t *testing.T) {
 		t.Errorf("切到「%s」画着的是 %v，want 从第一首开始", homeTabs[1], titles(guichuTop))
 	}
 
+	// 「鬼畜」也滚一段：它要记住的是**自己的**这一段。
+	tt.Scroll(homeW/2, homeH/2, 0, 900)
+	homeFrame(tt)
+	guichu := homePagedPos(tt, "鬼畜")
+	if len(guichu) == 0 {
+		t.Fatalf("滚过之后「%s」那一档一首歌都没画出来", homeTabs[1])
+	}
+
 	// 切回「音乐」：还在它自己那一段。
 	clickTab(t, tt, 0)
 	if got := homePagedPos(tt, "音乐"); !slices.Equal(got, music) {
 		t.Errorf("切回「%s」，画面上是 %v，want 切走之前的 %v",
 			homeTabs[0], titles(got), titles(music))
+	}
+
+	// 再切回「鬼畜」：它也在**它自己**滚到的那一段（不是跟着「音乐」走）。
+	//
+	// ⚠️ **等的是「它自己那一屏的第一首」**：鬼畜已经滚过，第一首不在画面上
+	// 了——等它的话就是等一个永远不来的东西（实测等满 10 秒超时）。
+	clickTab(t, tt, 1)
+	waitFrames(t, tt, "鬼畜那一档又到了", func() bool {
+		return showsText(tt, guichu[0].title)
+	})
+	if got := homePagedPos(tt, "鬼畜"); !slices.Equal(got, guichu) {
+		t.Errorf("切回「%s」，画面上是 %v，want 它自己滚到的 %v",
+			homeTabs[1], titles(got), titles(guichu))
 	}
 }
