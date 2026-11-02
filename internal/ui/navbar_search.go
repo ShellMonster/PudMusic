@@ -74,15 +74,28 @@ import (
 )
 
 const (
-	// searchWidth 是搜索框多宽。Biu 是 `w-[280px]`（`search/index.tsx:73`）。
-	// 设计规范 v0.1 §7.4：宽 240、高 28、胶囊形（原 Biu 是 280 / 40 / 主题圆角）。
-	searchWidth = 240
+	// searchWidth 是搜索框多宽。2026-11 重设计从 240 提到 480（用户给的参考图里
+	// 它约是窗口四成宽）：顶栏以它为主位，联想面板跟着它同宽才摆得开。窄窗时
+	// `MinWidth(0)` 让它收缩，见 `viewSearchBox` 那段（票 #286）。
+	searchWidth = 480
 
-	// suggestWidth 是建议浮层多宽。Biu 是 `w-[360px]`（同文件 :101）。
+	// suggestWidth 是建议浮层的**宽度下限**。
 	//
-	// 比搜索框宽是 Biu 的原样：里面那几行是「搜索历史」的标题加一排 chip，
-	// 按输入框那么宽排不下。
+	// 2026-11 重设计后面板宽度**跟着胶囊走**（左对齐、同宽，见 `viewSuggest`）；
+	// 这个数只在窄窗胶囊被 `MinWidth(0)` 压到几十像素时垫底——再跟着缩，里面
+	// 那排折行的 chip 就摆不开了。旧口径「面板固定 360、比框宽」（Biu 的
+	// `w-[360px]`，同文件 :101）已废。
 	suggestWidth = 360
+
+	// suggestPanelLabel 是建议面板本体的无障碍名字。
+	//
+	// 🔴 **几何测试拿它当锚**（`navbar_search_align_test.go`）：`Tester.Find`
+	// 认「标着这个名字」的元素，返回的就是面板的矩形。面板以前没有名字——
+	// 读屏软件也念不出「这是个搜索建议面板」，这一句补上。
+	//
+	// ⚠️ **它必须和浮层里别的名字/文字都不一样**（`Find` 逐字相等，见
+	// `searchActionLabel` 那条）。
+	suggestPanelLabel = "搜索建议"
 
 	// searchLabel 是搜索框的无障碍名字，也是测试认得它的凭据——无头 Tester 的
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
@@ -96,10 +109,9 @@ const (
 	// （而放大镜是「拿框里的词去搜」）。
 	searchActionLabel = "开始搜索"
 
-	// searchHeight 是搜索框多高。Biu 那个 Input 是 md 档（`h-10`，
-	// `search/index.tsx:72-96`；Tailwind 1 单位 = 4px）——40，顶栏 64 高，
-	// 上下各留 12。
-	searchHeight = 28
+	// searchHeight 是搜索框多高。2026-11 重设计从 28 提到 36：顶栏 64 高，
+	// 上下各留 14（旧口径 28 是设计规范 v0.1 §7.4 那一档）。
+	searchHeight = 36
 
 	// searchRadius 是搜索框的圆角：胶囊（高度的一半）。刻意不跟主题圆角走——胶囊是这个框的形状，
 	// 用户把全局圆角拖到 0 它也还是胶囊。
@@ -208,7 +220,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 	// 键 + 间隙）要 320，剩下给搜索框的只有八十来像素。
 	//
 	// **而 flex 的默认最小宽度是「内容的最小宽度」**：搜索框写死了
-	// `Width(280)`，于是它的最小宽度也是 280（`mygo/ui/layout.go` 的
+	// `Width(searchWidth)`，于是它的最小宽度也是那个宽（`mygo/ui/layout.go` 的
 	// `intrinsic`：宽度写死时，内容多小都按那个宽度算）——它一步都不肯让，
 	// 右边那几枚键于是被挤出窗口（实测「迷你」「动态」「头像」「登录」四枚
 	// 落在 x=904 之后，而窗口只有 900 宽）。
@@ -344,7 +356,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}
-		s.viewSuggest(c, field)
+		s.viewSuggest(c, row)
 	})
 
 	// 指针压在框上、或者框拿着焦点：底色抬到 30%（上游那两条 `…/30`）。
@@ -384,7 +396,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 // 面板**第一次出现**的那一帧播一段进场：淡入 + 从下面升上来 10 DIP。
 // 判据是 `Shell.suggestShown`——**开着的时候内容变了不重播**（联想词返回来
 // 那一趟不重播），理由见文件头《面板的进场》那一段。
-func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
+func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 	if !s.searchSuggest {
 		// 面板没了：下一回它再出现的时候，那一下又是「进场」。
 		s.suggestShown = false
@@ -431,10 +443,28 @@ func (s *Shell) viewSuggest(c *ui.Context, field ui.Element) {
 	justOpened := !s.suggestShown
 	s.suggestShown = true
 
-	ui.PopoverBase(c, field, &s.searchSuggest, func(panel ui.Element) {
+	// 🔴 **锚是外层胶囊（`anchor`），不是框里那个输入框**（2026-11 重设计）：
+	// 锚在输入框上的话面板左缘对齐的是**文字起点**（比胶囊左缘缩进
+	// `searchPadX+iconMd+searchGap` = 42），面板和框在屏幕上是错开的。
+	//
+	// ⚠️ 锚在胶囊上之后「点框上任何地方」都不再算框架的 `PressedOutside`，但
+	// **净行为没变**：放大镜提交走 `submitSearch` 收面板；清空 × 是一枚可聚焦
+	// 的按钮，按下那一帧焦点挪走，上面「失焦收起」那条照样把面板关掉（实测
+	// 见 `navbar_search_align_test.go` 的 TestClearingTheSearchBoxClosesThePanel）。
+	//
+	// 🔴 **宽度跟着胶囊走**（`anchor.Bounds()` 是上一帧的矩形，`element.go`
+	// 的 Bounds）：宽窗下胶囊是整宽的 `searchWidth`，面板同宽——面板和框
+	// 是一个整体；窄窗下胶囊缩下去，面板缩到 `suggestWidth` 为止，再缩
+	// 那排折行的 chip 就摆不开了。旧口径「固定 360」已废。
+	ui.PopoverBase(c, anchor, &s.searchSuggest, func(panel ui.Element) {
+		w := anchor.Bounds().W
+		if w < suggestWidth {
+			w = suggestWidth
+		}
 		// KeepFocus 的理由见文件头。少这一句，浮层里的条目点不到。
-		p := popupPanel(t, panel.KeepFocus().
-			Width(suggestWidth).Padding(space.Px8))
+		// Label 是面板的无障碍名字，也是几何测试的锚（`suggestPanelLabel`）。
+		p := popupPanel(t, panel.KeepFocus().Label(suggestPanelLabel).
+			Width(w).Padding(space.Px8))
 
 		// ---- 进场：淡入 + 升上来 10 DIP（票 #259） ----
 		//
