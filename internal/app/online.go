@@ -517,6 +517,13 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		wake := a.wake
 		a.mu.Unlock()
 
+		// 🔴 **上一份的保护解除**（2026-11-02 复审的 P2-a）：tr 是「从缓存
+		// 命中播着的那一条」时它带着保护，而新装的 track `cacheTrack` 是空——
+		// 不在这里解的话，旧那份会**本会话内永远不可淘汰**（下一次切歌时
+		// prevTrack 已经是空键的新 track，release 成空操作）。
+		// `restreamFromByteCache` 一直是这么做的，三条换轨路要一致。
+		a.releaseByteCacheProtect(tr)
+
 		if old != nil {
 			old.Close()
 		}
@@ -2747,6 +2754,11 @@ func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack,
 		a.reopenInFlight = false
 		wake := a.wake
 		a.mu.Unlock()
+
+		// 🔴 **上一份的保护解除**（复审的 P2-a，理由同 `restreamOnline`）：
+		// tr 从缓存命中播着时带着保护，新装的 track 没有缓存键——不解的话
+		// 旧那份本会话内永远不可淘汰。
+		a.releaseByteCacheProtect(tr)
 
 		if old != nil {
 			old.Close()

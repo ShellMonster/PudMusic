@@ -617,10 +617,11 @@ func (c *Cache) Migrate(remap func(track string) (string, bool)) int {
 // 它拦下来，用户下次照旧重下）。有记录没字节、大小对不上：**就地清掉**
 // （指向不存在字节的记录没有意义），返回 false。
 //
-// ⚠️ **改名与重写之间进程死会丢这一份**（审查①的 P3-3，记录在案）：
-// 崩溃后下次 mount 的 CleanOrphans 会把「新键孤儿 bin + 旧键孤儿 json」
-// 两边都清掉。缓存语义下可接受（丢的后果只是重下一遍），进程内的失败
-// 有回滚。
+// 🔴 **步骤顺序是「写新记录 → 改名 → 删旧记录」**（2026-11-02 复审的 P3-c）：
+// 任何一步之间进程死，盘上至多剩一个孤儿 json——旧键那份完好无损，
+// 下一次 mount 的 CleanOrphans 把孤儿清掉就完了，**字节一份都不丢**。
+// （原来的顺序「改名 → 写新记录」在中间死的话，两边残骸都会被
+// CleanOrphans 清光，这一份就真丢了。）
 func (c *Cache) moveEntry(e Bytes, oldTrack, newTrack string) bool {
 	binOld, binNew := c.BytesPath(oldTrack, e.Tier), c.BytesPath(newTrack, e.Tier)
 	if binOld == "" || binNew == "" {
@@ -637,12 +638,13 @@ func (c *Cache) moveEntry(e Bytes, oldTrack, newTrack string) bool {
 		c.Remove(oldTrack, e.Tier)
 		return false
 	}
-	if err := os.Rename(binOld, binNew); err != nil {
-		return false
-	}
 	e.Track = newTrack
 	if err := c.writeBytes(e); err != nil {
-		_ = os.Rename(binNew, binOld)
+		_ = os.Remove(binNew)
+		return false
+	}
+	if err := os.Rename(binOld, binNew); err != nil {
+		_ = os.Remove(c.bytesMetaPath(newTrack, e.Tier))
 		return false
 	}
 	_ = os.Remove(c.bytesMetaPath(oldTrack, e.Tier))
