@@ -1875,13 +1875,19 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		// 「这一份缓存齐了」。
 		//
 		// ⚠️ **它在下载 goroutine 里调**：所以它只做一件事：写元数据
-		// （那一层自己管锁）。**不许在这里拿 `a.mu`**——那把锁是界面
-		// 每帧都要的。
+		// （那一层自己管锁）和写一行日志。**不许在这里拿 `a.mu`**——
+		// 那把锁是界面每帧都要的。
+		//
+		// ⚠️ **日志说「记上了」要以返回值为准**（审查①的 P3-1）：服务器
+		// 不给 `Content-Length` 时字节流会走完，但缓存**什么都没记**——
+		// 拿「下完了」当「记上了」，事后查日志会被骗。
 		OnComplete: func(size int64) {
 			if cachePath == "" {
 				return
 			}
-			a.markByteCacheComplete(it, s.Quality, ref, size)
+			if a.markByteCacheComplete(it, s.Quality, ref, size) {
+				a.logf("biu: 这一首的字节下完了，缓存记上了：%q（%s）", it.Title, ref.Label)
+			}
 		},
 	})
 	if err != nil {

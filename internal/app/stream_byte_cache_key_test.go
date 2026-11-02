@@ -32,9 +32,13 @@ func TestTheByteCacheTrackKeyStillSeparatesPagesAndKinds(t *testing.T) {
 		t.Error("不同分 P 的键撞上了")
 	}
 	// 音乐库那一路只认 sid：bvid / cid 在不在都一样。
+	// 🔴 **audio 的键是五栏**（`source|audio|||sid`，bvid/cid 两栏留空）：
+	// 旧版 streamKey 的 audio 键**就是这个形状**——新旧同形，音乐库那一半
+	// 曲库的旧缓存不需要迁移（2026-11-02 的第一版把它写成四栏，旧键全部
+	// 认不出来，是审查①挖出来的 P1）。
 	a := Item{Source: "online", Type: "audio", Sid: "7"}
 	aWithNoise := Item{Source: "online", Type: "audio", Sid: "7", Cid: "42"}
-	if byteCacheTrack(a) != "online|audio||7" {
+	if byteCacheTrack(a) != "online|audio|||7" {
 		t.Errorf("音乐库的键形状变了：%q", byteCacheTrack(a))
 	}
 	if byteCacheTrack(a) != byteCacheTrack(aWithNoise) {
@@ -57,9 +61,17 @@ func TestLegacyByteCacheTrackRecognizesOnlyOldMVKeys(t *testing.T) {
 	if _, ok := legacyByteCacheTrack("online|mv|BV1xx|42|"); ok {
 		t.Error("新形状的键被当成旧的迁移了")
 	}
-	// 音乐库的键两版同形：不动。
-	if _, ok := legacyByteCacheTrack("online|audio||7"); ok {
-		t.Error("音乐库的键被当成旧的迁移了")
+	// 音乐库的键两版同形（bvid/cid 两栏是空的）：不动。
+	if _, ok := legacyByteCacheTrack("online|audio|||7"); ok {
+		t.Error("同形的音乐库键被当成旧的迁移了")
+	}
+	// 音乐库带着 cid 噪声的旧键：归一到五栏的 audio 键。
+	got, ok := legacyByteCacheTrack("online|audio||42|7")
+	if !ok {
+		t.Error("带 cid 噪声的音乐库旧键没被认出来")
+	}
+	if want := "online|audio|||7"; got != want {
+		t.Errorf("音乐库旧键的迁移目标算错了：%q，want %q", got, want)
 	}
 	// 缺了 sid 栏的五段之外不是我们的键：不动。
 	if _, ok := legacyByteCacheTrack("local|mv|BV1xx|42"); ok {

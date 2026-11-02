@@ -547,6 +547,10 @@ func (c *Cache) CleanOrphans() int {
 //
 // 它返回搬了几份（调用方拿去写日志）。**它只在挂载时调一次**：那时还没有
 // 任何字节源在写盘，改名不会和下载撞上。
+//
+// ⚠️ **「目标位已有完整份」按 `Complete` 的全套判据算**（审查①的 P3-2）：
+// 只读记录那一栏（不 stat、不比大小）的话，一份「记录说完整、字节对不上」
+// 的坏对会让迁移把旧键下的**好份直接清掉**——那正是这个函数要免掉的事。
 func (c *Cache) Migrate(remap func(track string) (string, bool)) int {
 	if c.dir == "" || remap == nil {
 		return 0
@@ -564,9 +568,9 @@ func (c *Cache) Migrate(remap func(track string) (string, bool)) int {
 		if !ok || newTrack == "" || newTrack == oldTrack {
 			continue
 		}
-		tgt, tgtOK := c.readBytes(newTrack, e.Tier)
+		_, tgtPlayable := c.Complete(newTrack, e.Tier)
 		switch {
-		case tgtOK && tgt.Complete, !e.Complete:
+		case tgtPlayable, !e.Complete:
 			// 目标位已有完整份，或者旧的那份自己不完整：清掉旧的。
 			c.Remove(oldTrack, e.Tier)
 		default:
@@ -583,13 +587,30 @@ func (c *Cache) Migrate(remap func(track string) (string, bool)) int {
 //
 // ⚠️ **失败要回滚**：bin 改了名而记录没写上，留下的就是「有 bin 没 json」
 // 的孤儿——那一档在容量账本之外，要等 CleanOrphans 才清得掉。
+//
+// ⚠️ **字节要先验一遍再搬**（审查①的 P3-2 的另一面）：记录说 100 字节而
+// 盘上是 50，搬过去就是一份「永远查不到的完整份」（`Complete` 的判据会把
+// 它拦下来，用户下次照旧重下）。有记录没字节、大小对不上：**就地清掉**
+// （指向不存在字节的记录没有意义），返回 false。
+//
+// ⚠️ **改名与重写之间进程死会丢这一份**（审查①的 P3-3，记录在案）：
+// 崩溃后下次 mount 的 CleanOrphans 会把「新键孤儿 bin + 旧键孤儿 json」
+// 两边都清掉。缓存语义下可接受（丢的后果只是重下一遍），进程内的失败
+// 有回滚。
 func (c *Cache) moveEntry(e Bytes, oldTrack, newTrack string) bool {
 	binOld, binNew := c.BytesPath(oldTrack, e.Tier), c.BytesPath(newTrack, e.Tier)
 	if binOld == "" || binNew == "" {
 		return false
 	}
-	if _, err := os.Stat(binOld); err != nil {
-		// 有记录没字节：指向不存在字节的记录没有意义，让调用方清掉。
+	st, err := os.Stat(binOld)
+	if err != nil {
+		// 有记录没字节：指向不存在字节的记录没有意义，就地清掉。
+		c.Remove(oldTrack, e.Tier)
+		return false
+	}
+	if e.Size >= 0 && st.Size() != e.Size {
+		// 记录和字节对不上：这份本来就播不了，就地清掉。
+		c.Remove(oldTrack, e.Tier)
 		return false
 	}
 	if err := os.Rename(binOld, binNew); err != nil {
