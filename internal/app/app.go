@@ -391,6 +391,14 @@ type App struct {
 	// ⚠️ **nil = 不落盘**：没给缓存目录时（拿不到用户数据目录），
 	// 在线播放照旧走临时文件那一路。
 	byteCache *streamaudio.Cache
+	// finishers 是「切歌之后正在后台补完的那些字节源」，按缓存键记。
+	//
+	// 切歌不再立刻关上一首的源：收养给 finisher 等它下完，缓存才记得上
+	// 「完整」（见 stream_byte_finisher.go 那一节）。
+	//
+	// ⚠️ **它受 `a.mu` 管**：登记（切歌那一刻）、摘除（drain 退出）、收回
+	// （同一首被重新点上）各自从不同的 goroutine 来。
+	finishers map[string]*sourceFinisher
 	// onlineGen 是**播放代次**。每开一次在线流就加一，异步回来的结果
 	// 先对一遍，对不上就走人（快速切歌时旧曲的结果不能覆盖新曲）。
 	onlineGen int
@@ -1068,7 +1076,8 @@ type wakeEntry struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace)}
+		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace),
+		finishers: map[string]*sourceFinisher{}}
 	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
 	// 而它在「第一次取流有结果了」之前都算「还没准备好」——
 	// 界面上要靠它说一句话（见 App 里 `starting` 那段注释）。
@@ -1956,6 +1965,10 @@ func (a *App) Close() {
 	//
 	// ⚠️ **这一处是「全关」，不看代次**：进程都要没了，还有谁在等的源都该停。
 	a.abortAllPendingSources()
+	// 🔴 **在后台补完的那些也要收**（2026-11-02）：收养的源播放器关不到，
+	// 不收的话退出之后它们还在下载。进程一死下载本来就会断——跨进程补完
+	// 是另一件事（断点续传），这一层不做。
+	a.abortAllFinishers()
 	// 在途的那一趟**预取**也要掐：它还占着一条连接，而用户已经退出了。
 	a.invalidatePrefetch()
 	a.mu.Lock()

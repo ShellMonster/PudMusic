@@ -290,6 +290,15 @@ type onlineTrack struct {
 	// ⚠️ **换歌时要把上一份的保护解除**（见 `App.releaseByteCacheProtect`）。
 	cacheTrack string
 	cacheTier  string
+	// adopt 是「把这条源的 Close 让渡出去」的那只手（2026-11-02）。
+	//
+	// 换歌时 `adoptPreviousTrack` 调它：旧播放器的 closer 从此关不到这条源，
+	// 它归后台 finisher 管（等下完再关，缓存才记得上「完整」）。
+	//
+	// ⚠️ **只有「开新歌」那一路装上的源才有它**（`buildFromRef` 包的那一层）。
+	// 换音质 / 从播放位置重开那两条路装的是**同一首**的替换源——让渡出去的话
+	// 它会和新的抢同一个缓存文件，所以那些路是 nil，换下去时照旧立刻关。
+	adopt func()
 }
 
 // streamCacheMax 是「播放前预判」那个缓存最多留几条。
@@ -330,6 +339,15 @@ func (a *App) MountStreaming(s Streaming) {
 	// ⚠️ **锁外面调**：它要读盘（扫目录）。
 	if n := a.byteCacheSnapshot().CleanOrphans(); n > 0 {
 		a.logf("biu: 清掉了 %d 个没用的音频缓存残留", n)
+	}
+	// 🔴 **把旧键形状的那些份搬到新键下**（2026-11-02）：缓存键改了形状
+	// （mv 剔掉 sid），旧键下已经下完的那些份不能就这么丢了——丢一份用户就
+	// 多下一整首。
+	//
+	// ⚠️ **锁外面调，而且只在这一刻调**：那时还没有任何字节源在写盘，
+	// 改名不会和下载撞上。
+	if n := a.byteCacheSnapshot().Migrate(legacyByteCacheTrack); n > 0 {
+		a.logf("biu: 把 %d 份旧键形状的音频缓存搬到了新键下", n)
 	}
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
@@ -451,7 +469,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			a.rememberByteCacheTier(tr.item, q, ref)
 			return
 		}
-		src, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref, nil)
+		src, _, p, err := a.buildFromRef(context.Background(), s, tr.item, gen, ref, nil)
 		if err != nil {
 			a.failQualitySwitch(gen, q, err)
 			return
@@ -524,6 +542,9 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
 	q bili.AudioQuality, pos time.Duration, want bool, gen int,
 ) {
+	// 🔴 **同一首在后台还有一条被收养的源在补完的话，先把它收回来**：
+	// 这里要读的就是那个缓存文件（2026-11-02）。
+	a.cancelFinishersFor(tr.item)
 	p, err := a.buildFromCachedBytes(a.byteCachePathFor(rec.Track, rec.Tier), nil)
 	if err != nil {
 		a.logf("biu: 换音质：盘上那份字节打不开（重新取流）：%q：%v", tr.item.Title, err)
@@ -1202,6 +1223,11 @@ func (a *App) runOnlineWithoutCache(it Item, gen int, at time.Duration, paused b
 // 缺 cid 的**投稿**条目（搜索结果）算不出来——那一路**先问分 P**，
 // 再回来查缓存（见下面那一处）。
 func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, useCache bool) {
+	// 🔴 **同一首在后台还有一条被收养的源在补完的话，先把它收回来**
+	// （2026-11-02）：下面无论是走盘上缓存（`playFromByteCache` 要读那个
+	// 文件）还是走网络（`buildFromRef` 要截断那个文件），都不许还有人在写它。
+	a.cancelFinishersFor(it)
+
 	// 🔴 **冷启动那一段的第一取流时刻**（票 #478）：用户「双击 → 出声」
 	// 这条链上，「取流开始」是一个节点——而它在**恢复上次那一首**时
 	// 是在**开窗口之前**就发出去的（`RestorePlayback` 排在 `openWindow`
@@ -1348,7 +1374,7 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 	// ⚠️ **这一段的判据是「还有没有进展」**，不是「一共等了多久」——
 	// 理由见 `loadTimedOut` 那段注释（票 #220）。
 	a.rearmLoading(gen, it.Title, loadStageBytes)
-	src, p, err := a.buildFromRef(context.Background(), s, it, gen, ref, run)
+	src, adopt, p, err := a.buildFromRef(context.Background(), s, it, gen, ref, run)
 	if err != nil {
 		a.failPlay(gen, it, "开播放器", err)
 		return
@@ -1365,7 +1391,7 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 		cacheTrack = byteCacheTrack(it)
 		cacheTier = byteCacheTier(it, ref)
 	}
-	a.installOnlinePlayer(it, gen, ref, src, p, at, paused, s, cacheTrack, cacheTier)
+	a.installOnlinePlayer(it, gen, ref, src, p, at, paused, s, cacheTrack, cacheTier, adopt)
 }
 
 // installOnlinePlayer 把建好的播放器装到 App 上，并让它开始出声。
@@ -1379,7 +1405,7 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 // 盘上了，再包一层源是没有意义的）。
 func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	src *audio.StreamSource, p *audio.Player, at time.Duration, paused bool, s *Streaming,
-	cacheTrack, cacheTier string,
+	cacheTrack, cacheTier string, adopt func(),
 ) {
 	a.mu.Lock()
 	if a.onlineGen != gen || a.closed {
@@ -1445,7 +1471,7 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	prevTrack := a.online
 	a.online = &onlineTrack{
 		item: it, ref: ref, source: src, quality: ref.Label, gen: gen,
-		cacheTrack: cacheTrack, cacheTier: cacheTier,
+		cacheTrack: cacheTrack, cacheTier: cacheTier, adopt: adopt,
 	}
 	// 🔴 **「这一趟自己的那一条」在盘上缓存那一路是 nil**：那条路没有字节源
 	// （字节已经在盘上了，见 `playFromByteCache`），而 `loadSrc` 是给看门狗
@@ -1491,6 +1517,15 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// 🔴 **上一份的保护解除**（锁外面）：它不再被播了。
 	// ⚠️ **锁外面调**：它要拿 `a.mu`（取缓存对象），而那把锁上面还拿着。
 	a.releaseByteCacheProtect(prevTrack)
+
+	// 🔴 **上一首的源交给后台补完**（2026-11-02）：用户切歌的那一瞬间上一首
+	// 往往只下了一半，直接 `Close` 的话半截下载作废、缓存永远记不上「完整」。
+	// 收养之后旧播放器的 `Close` 关不到它，泵自己把它下完，`OnComplete` 落缓存。
+	//
+	// ⚠️ **必须在下面的 `old.Close()` 之前**：收养是「旧播放器的 closer 关不到
+	// 源」的唯一手段，晚了源就死了。收养不成的（没有源 / 键算不出来 /
+	// `adopt` 为 nil 的那几条路）照旧走下面的立即关。
+	a.adoptPreviousTrack(prevTrack)
 
 	// 🔴 **上一首的源关掉**（锁外面）：盘上缓存那一路的新播放器手上没有源，
 	// 所以上一首那条**没人关**——它会继续下到天亮，而它写进缓存的那一份会在
@@ -1723,7 +1758,7 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	src, p, err := a.buildFromRef(ctx, s, it, gen, ref, nil)
+	src, _, p, err := a.buildFromRef(ctx, s, it, gen, ref, nil)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1744,7 +1779,7 @@ func (a *App) buildOnline(ctx context.Context, s *Streaming, it Item, gen int) (
 // （看门狗看的就是它，理由见 `loadRun`）。
 func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	ref *bili.StreamRef, run *loadRun,
-) (*audio.StreamSource, *audio.Player, error) {
+) (*audio.StreamSource, func(), *audio.Player, error) {
 	// 🔴 **`OnRetry` / `OnReconnected` 这两个回调只做一件事：叫醒界面**。
 	//
 	// ⚠️ **这里没有「重连令牌」**：旧源的回调可能迟到（它还在退避里等着的时候
@@ -1787,6 +1822,13 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		cacheTrack = byteCacheTrack(it)
 		cacheTier = byteCacheTier(it, ref)
 	}
+	// 🔴 **同一首在后台还有一条被收养的源在补完的话，先把它收回来**：
+	// 下面的 `NewStreamSource` 会以 `O_TRUNC` 打开**同一个**缓存文件，
+	// 两条源同时写一个文件写出来的就是垃圾（2026-11-02）。
+	//
+	// ⚠️ **它要赶在 `StartBytes` 之前**：收回是等 `Close` 真正走完的
+	// （返回时旧源已经停了），而 StartBytes 会把那份「正在下」的记录重写。
+	a.cancelFinishersFor(it)
 	cachePath := a.byteCachePathFor(cacheTrack, cacheTier)
 	// 🔴 **先记下「这一份正在下」**（2026-10-30 的第二轮审查）：字节在下载的
 	// 那一段里是「只有 `.bin`、没有 `.json`」的——而那一档在容量账本之外，
@@ -1843,14 +1885,14 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 		},
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// 🔴 **把源记在 App 上**：建播放器的这一段里源已经在下载了，而代次可能在
 	// 建源期间变化。发布前先在同一把锁下确认它仍属于当前播放；旧代次不能碰当前
 	// 播放的源（否则会把新歌的源关掉，见 setPendingSource）。
 	if !a.setPendingSource(src, gen) {
 		src.Close()
-		return nil, nil, errStaleGen
+		return nil, nil, nil, errStaleGen
 	}
 	// 🔴 **「这一趟自己的那一条」**（票 #220）：看门狗问「这一段还有没有
 	// 进展」时要看的是**它**，不是上面那个共享的 `pendingSrc`——
@@ -1862,14 +1904,14 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	if run != nil && !a.setLoadSource(src, gen) {
 		a.clearPendingSource(src)
 		src.Close()
-		return nil, nil, errStaleGen
+		return nil, nil, nil, errStaleGen
 	}
 	// 🔴 **建源的这一小段时间里代次也可能变了**（用户切歌、或者超时闹钟响了）。
 	// 那就没人要这条流了——立刻关掉，别让它下到天亮。
 	if a.genStale(gen) {
 		a.clearPendingSource(src)
 		src.Close()
-		return nil, nil, errStaleGen
+		return nil, nil, nil, errStaleGen
 	}
 	// 🔴 **③ 解码第一帧**：`OpenStream` 要等解码器把这条流开起来，而
 	// AudioToolbox 探容器要 8 KB 左右的字节——**moov 在文件尾的 MP4 还要
@@ -1878,7 +1920,13 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	// ⚠️ **「开好」的时刻是 `OpenStream` 返回的那一刻**，不是它调用的前一刻：
 	// 头几个字节可能正好落在那两句之间，而那时候「解码」这一段还没开始。
 	// 拿调用前的时刻当终点会算出**负数**的③。
-	p, err := audio.OpenStream(src)
+	//
+	// ⚠️ **给播放器的是包了一层的源**（2026-11-02）：它的 Close 可以被
+	// 「收养」成空操作——切歌时旧源要交给后台补完，而旧播放器的 closer
+	// 会连源一起关。收养那一步在 `adoptPreviousTrack`；其余所有直接拿裸源
+	// 关的路径（超时掐源、退出全关）都不经过这层包装，照常生效。
+	wrapped := &adoptedSource{StreamSource: src}
+	p, err := audio.OpenStream(wrapped)
 	opened := time.Now()
 	// 🔴 **分段耗时落地**（票 #220）：② 是「建源 → 头几个字节到」，
 	// ③ 是「头几个字节到 → 解码器开好」。
@@ -1895,7 +1943,7 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	if err != nil {
 		a.clearPendingSource(src)
 		src.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// 音量和倍率**现读**（理由见上面那段注释）：建一条在线流要走网络，
 	// 这中间用户完全可能按了音量或者换了倍速。建完才读，读到的才是当下那个值。
@@ -1906,7 +1954,7 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 	a.applyFadeInLocked(p)
 	a.mu.Unlock()
 	p.SetVolume(vol).SetRate(rate).SetNormalize(norm).SetEQ(eq)
-	return src, p, nil
+	return src, wrapped.Adopt, p, nil
 }
 
 // errStaleGen 是「这一趟取流已经作废了」（代次变了：切歌了 / 超时了 / 退出了）。
