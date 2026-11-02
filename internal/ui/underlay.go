@@ -214,6 +214,7 @@ var pageSyncs = map[string]func(*Shell, *ui.Context){
 	historyPath:      (*Shell).syncHistory,
 	localMusicPath:   (*Shell).syncLocalMusic,
 	followPath:       (*Shell).syncFollow,
+	statsPath:        (*Shell).syncStats,
 }
 
 // syncComments 是评论的每帧副作用（排序切换 / 刷新 / 翻页 / 筛选用）。

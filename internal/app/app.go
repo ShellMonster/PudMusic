@@ -974,6 +974,15 @@ type App struct {
 	// 表现为「整个应用冻住」（进度条的时钟每一拍都要过 `a.mu`）。
 	report *playReporter
 
+	// stats 是「听歌统计」这一摊，见 listening_stats.go。
+	//
+	// ⚠️ **挂上之前是 nil**，而界面层要判空（它问的是「这一份在不在」）。
+	//
+	// ⚠️ **它有自己的锁**（在 `listeningTracker` 里），不在 `a.mu` 里：
+	// 它每 20Hz 跑一次，而 `a.mu` 是界面**每帧**都要的——统计绝不能把界面
+	// 卡住。
+	stats *statsStore
+
 	// artist 是当前这首的艺人（在线条目的 UP 主名）。本地文件是空的，
 	// 见 media.go 的 setArtist。它有两个用户：系统媒体会话，和界面上播放条
 	// 那一行 UP 名（`State.Artist`）。
@@ -1907,6 +1916,11 @@ func (a *App) Close() {
 	// 改这一格，落下去的就是**最后那个状态**。
 	// 设置的后台合并写也要在退出时同步收尾。
 	a.SavePlayback()
+	// 「听歌统计」也要在退出前强制落一次（它每 30 秒才落一次）。
+	//
+	// ⚠️ 排在 `close(a.done)` 之后：后台时钟已经停了，不会再有别的 goroutine
+	// 来改这一份，落下去的就是**最后那个状态**。
+	a.FlushListeningStats()
 	if settings != nil && settings.store != nil {
 		_ = settings.store.Close()
 	}
@@ -2114,6 +2128,25 @@ func (a *App) tick() {
 			// 「在不在放」它自己去 `a.playing` 读，不收这里那个局部变量——
 			// 理由见 `reportTick` 那段。
 			a.reportTick(ended && p != nil && p.Err() == nil)
+
+			// 「听歌统计」在这一拍上记一笔（见 listening_stats_mount.go）。
+			//
+			// ⚠️ **它不在 `reportTick` 里面**：那一条 `r == nil` 就 return，
+			// 而 `r` 只在挂了在线流之后才非 nil——**本地文件会被整条漏掉**。
+			//
+			// ⚠️ **位置这一栏只在 `p != nil` 的时候才算数**：暂停的时候
+			// 播放器压根没被问过位置，而「读出来的零值」和「真的回到开头了」
+			// 是两件事。
+			//
+			// ⚠️ **`pos` 是上面那一拍读出来的**：不要重读一遍——重读要再过一次
+			// 变速层那把锁（见上面那段关于 `p.Position()` 的警告）。
+			//
+			// ⚠️ **`fresh` 说「这一拍真的读到位置了」**：暂停的时候播放器压根
+			// 没被问过位置（`pos` 是零值），而「读出来的零值」和「真的回到
+			// 开头了」是两件事——分不清的话，暂停一次就会把位置当成跳回开头。
+			// ⚠️ **`dur` 一起给**：它判「听完」要用（那一首多长），而它就是
+			// 上面那一拍读出来的 `dur`（见 app.go 里 `dur := a.duration`）。
+			a.statsTick(p, pos, dur, p != nil && live, ended && p != nil && p.Err() == nil, now)
 
 			// 「这一拍要不要叫醒界面」——**跟着读数走，不跟着播放器的时钟走**
 			// （见 `readoutMoved`）。

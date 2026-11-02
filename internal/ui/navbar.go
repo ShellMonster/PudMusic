@@ -173,6 +173,19 @@ func (s *Shell) viewNav(c *ui.Context) {
 		//
 		// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
 		// 同一档配方，理由见上面「打开文件」那一枚。
+		//
+		// ⚠️ **听歌统计的这一枚在「迷你」左边**：它是**看自己的数据**的动作，
+		// 而「迷你」是**窗口级动作**——所以统计在前、窗口动作在后。
+		//
+		// ⚠️ **那一枚按钮带 Key**（"nav-stats"）：automation 的 `act` 是**按
+		// Key 找元素**的（不是按无障碍名）——没有 Key 的话，真窗口那一族 E2E
+		// 按不到它（而那一页**只有这一个入口**，按不到就等于没有）。
+		if s.withTip(c, iconKey(c, iconChart, "听歌统计", iconMd, false).
+			Key("nav-stats").
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
+			"看看听了多久、最爱听哪几首").Clicked() {
+			s.navigate(statsPath)
+		}
 		if s.withTip(c, iconKey(c, iconPiP, "迷你", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 			"缩成 320×84 的小窗贴边悬浮，音乐不停").Clicked() {

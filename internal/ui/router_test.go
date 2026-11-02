@@ -55,13 +55,15 @@ func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 // 兜底的 404 也不是一条能 Match 的模式，而是 viewRoutes 的 default 分支，
 // 所以它不在 routes 里。
 func TestFourteenRoutes(t *testing.T) {
-	if got := len(routes) + 1; got != 15 {
-		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 15（我们的 14 条 + 兜底 1 条）", got, len(routes))
+	// ⚠️ **第 15 条是听歌统计**（`/stats`）：它从顶栏右上角那枚图标进，
+	// 不进侧栏。
+	if got := len(routes) + 1; got != 16 {
+		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 16（我们的 15 条 + 兜底 1 条）", got, len(routes))
 	}
 	want := []string{
 		"/", "/follow", "/later", "/history", "/local-music", "/download-list",
 		"/settings", "/search", "/dynamic-feed", "/user/{id}", "/collection/{id}",
-		"/empty", "/mini-player", "/login",
+		"/empty", "/mini-player", "/login", "/stats",
 	}
 	for _, w := range want {
 		if got := lookup(w).Match; got != w {
