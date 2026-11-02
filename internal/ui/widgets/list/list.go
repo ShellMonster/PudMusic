@@ -217,6 +217,31 @@ type List struct {
 	// sel 是选中的行，-1 是没选。帧里的点击由 ui.List 自己写进来。
 	sel int
 
+	// rowSel 是**每一行标题那一列**的句柄（票 #703 的 A）。
+	//
+	// ⚠️ **框架全局只有一段选中**（`mygo/ui/textselection.go` 的 `rt.selection`，
+	// 一个 scope 一个）——所以每一行留一个句柄，⌘C 的时候挨个问「选中在你那儿吗」。
+	//
+	// ⚠️ **它是 `Handle` 而不是 `Element`**：行是虚拟化的，元素活不过一帧
+	// （`mygo/ui/frame.go` 的 Element 注释：「element from pass N used in pass
+	// N; keep a ui.Handle instead」）。用它 `Context.Resolve` 拿当帧那一个。
+	//
+	// ⚠️ **一个句柄只能绑一个元素**（框架的 `Bind` 会在同一个 build 里绑两个
+	// 时 panic），所以每一行得有一个自己的。
+	rowSel []ui.Handle
+
+	// rowSelParts 是**当帧读出来的那段选中**。
+	//
+	// ⚠️ **每帧读一次**：框架的选中会自己变（选中变了、段落被重建了、那一段
+	// 没了），所以不能记成一份「上一帧的」——⌘C 复制的那一段必须是**此刻**的。
+	rowSelParts []ui.SelectedText
+
+	// rowSelText 是 `rowSelParts` 那一行**复制出去的那一段字**（整行）。
+	//
+	// ⚠️ **每帧算一次**：那一行的时长会变（歌换了、时长改了），所以不能记成
+	// 一份「上一帧的」。
+	rowSelText string
+
 	// cache 是封面缓存。整个窗口共用一个，壳（Shell）建好之后传进来。
 	cache *imgcache.Cache
 
@@ -771,6 +796,10 @@ func (l *List) View(c *ui.Context) {
 	//
 	// ⚠️ **要在画行之前问**：焦点环是画在行上的，这一句晚了那一帧就少一圈环。
 	l.keys.Moved(l.sel)
+
+	// ⚠️ **读当帧那一段文字选中**（票 #703 的 A）：行标题那一列现在可选中了，
+	// 而框架全局只有一段选中——⌘C 要复制的是它（整行），不是选中行。
+	l.rowSelection(c)
 
 	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).

@@ -335,35 +335,42 @@ func (l *List) viewCard(r ui.ListRow) {
 		// 显示的字是清洗过的（`showOf`）：去掉视频宣传标签，歌手 / 专辑名挪到副标题，
 		// 现场版在副标题前加一枚「现场」小标签。
 		sh := ShowOf(m)
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).Children(func() {
-			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
-				MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			// ⚠️ **失效的条目那一行标签要画，哪怕它没有 UP 名**：
-			// 「已失效」是这一行**唯一**告诉用户「这一首放不了」的东西，
-			// 而失效的条目常常既没有 UP 名也不是「现场」——于是原来那个
-			// `sh.Owner != "" || sh.Live` 的判据会让它什么都不画，
-			// 用户看到的是一行灰字（灰是灰了，但**没说是为什么**）。
-			if ownerLineShown(sh, m.Item.Invalid) {
-				ownerLine(c, ownerRow{
-					shown: sh,
-					name:  m.Owner,
-					mid:   m.Item.ArtistMid,
-					// ⚠ **提示是记好的那一份**（`l.ownerTip`）：现算的话每帧
-					// 每一行一次字符串拼接（票 #313 那一类）。
-					tip:   l.ownerTip.At(i, m.Owner, OwnerTipText),
-					size:  scale.Font(c, scale.ListOwner),
-					lh:    leading.Owner,
-					color: ownerColor,
-					maxW:  listTitleMaxW,
-					acts:  l.acts,
-					// ⚠️ **失效的标签画在 UP 名前面**（`ownerLine` 那一处）：
-					// 它是这一行的**状态**，而 UP 名是**这一首是谁**——
-					// 状态在前，读起来是「这一首已经失效 · 某某」。
-					invalid: m.Item.Invalid,
-				})
-			}
-			progressBar(c, m)
-		})
+		// 🔴 **这一列是可选中的**（票 #703 的 A）：拖一下就能复制**整行**。
+		//
+		// ⚠️ **`HandleInput` 挂在这一列**外面**那一层**（理由见 `row_select.go`）。
+		durText := l.durText.At(i, m.Duration, formatDuration)
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).
+			HandleInput(func(ev ui.InputEvent) bool {
+				return rowTextInput(
+					func() { l.sel = i + leadRows(l.lead) },
+					l.input,
+					ev)
+			}).
+			Children(func() {
+				ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).
+					Selectable().
+					Bind(l.rowSelHandle(i)).
+					CopyData(rowCopyData(sh, durText)).
+					Children(func() {
+						titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+							MaxLines(listTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
+						if ownerLineShown(sh, m.Item.Invalid) {
+							ownerLine(c, ownerRow{
+								shown:   sh,
+								name:    m.Owner,
+								mid:     m.Item.ArtistMid,
+								tip:     l.ownerTip.At(i, m.Owner, OwnerTipText),
+								size:    scale.Font(c, scale.ListOwner),
+								lh:      leading.Owner,
+								color:   ownerColor,
+								maxW:    listTitleMaxW,
+								acts:    l.acts,
+								invalid: m.Item.Invalid,
+							})
+						}
+						progressBar(c, m)
+					})
+			})
 
 		// ④ 播放量 / ⑤ 投稿时间：这一页有才画（见 `Columns`）。两列都
 		// **留着位置**——没有这个数的那一行空着，但列宽不动，右边那几列
@@ -440,26 +447,39 @@ func (l *List) viewCompactCard(r ui.ListRow) {
 		l.viewIndex(c, i, playing, titleColor, m.Title, compactIndexWidth, 11)
 
 		sh := ShowOf(m)
-		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).Children(func() {
-			titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
-				MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
-			if ownerLineShown(sh, m.Item.Invalid) {
-				ownerLine(c, ownerRow{
-					shown: sh,
-					name:  m.Owner,
-					mid:   m.Item.ArtistMid,
-					// ⚠ **提示是记好的那一份**：理由同上面那一处。
-					tip:   l.ownerTip.At(i, m.Owner, OwnerTipText),
-					size:  scale.Font(c, scale.Size12),
-					lh:    leading.Owner,
-					color: ownerColor,
-					maxW:  listTitleMaxW,
-					acts:  l.acts,
-					// ⚠️ **失效的标签**：理由同上面那一处。
-					invalid: m.Item.Invalid,
-				})
-			}
-		})
+		// 🔴 **这一列也是可选中的**（票 #703 的 A）：理由和普通那一行一样。
+		durText := l.durText.At(i, m.Duration, formatDuration)
+		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).
+			HandleInput(func(ev ui.InputEvent) bool {
+				return rowTextInput(
+					func() { l.sel = i + leadRows(l.lead) },
+					l.input,
+					ev)
+			}).
+			Children(func() {
+				ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(space.Px2).
+					Selectable().
+					Bind(l.rowSelHandle(i)).
+					CopyData(rowCopyData(sh, durText)).
+					Children(func() {
+						titleText(c, sh.Title, l.hl, titleColor).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Compact).
+							MaxLines(compactTitleLines).Ellipsis("…").MaxWidth(listTitleMaxW)
+						if ownerLineShown(sh, m.Item.Invalid) {
+							ownerLine(c, ownerRow{
+								shown:   sh,
+								name:    m.Owner,
+								mid:     m.Item.ArtistMid,
+								tip:     l.ownerTip.At(i, m.Owner, OwnerTipText),
+								size:    scale.Font(c, scale.Size12),
+								lh:      leading.Owner,
+								color:   ownerColor,
+								maxW:    listTitleMaxW,
+								acts:    l.acts,
+								invalid: m.Item.Invalid,
+							})
+						}
+					})
+			})
 
 		// 播放量 / 投稿时间 / 时长：没有数也留着位置，理由同普通那一行
 		//（见那里）。三列的宽度是这一档自己那一组（见 `compact*Width`）。
