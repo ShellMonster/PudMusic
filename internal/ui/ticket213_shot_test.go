@@ -28,14 +28,14 @@ import (
 //
 // ⚠️ **名字里带一个很长的**：分组名过长时怎么办是这一票要定的事之一，出图里
 // 得看得见它是怎么处理的。
+//
+// ⚠️ **用 `uiFollowTagsOrdered`，不用 `uiFollowTags`**：出图是要给人看的，而
+// map 的遍历顺序是随机的——同一组数据深浅两张跑出来分组次序不一样的话，
+// 对图的人得先猜「这俩是不是同一组数据」。
 func followPaneShotFixture(t *testing.T) *uiExplore {
 	t.Helper()
 	b := newUIExplore(t)
-	uiFollowTags(b, map[int]any{
-		-10: "特别关注",
-		0:   "默认分组",
-		777: "常听的那些不太熟但是每首都想循环到会唱完整首的 UP 主",
-	})
+	uiFollowTagsOrdered(b, followPaneTags)
 	uiFollowList(b, 3, []any{
 		uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"),
 		uiFollowUser(13, "第三个 UP"),
