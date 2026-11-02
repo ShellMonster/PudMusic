@@ -162,11 +162,28 @@ func TestTheFollowPageShowsTheFollowedPeople(t *testing.T) {
 	// 页头：大号标题 + 关注总数。上游 index.tsx:206 的 `<h1>`（`全部关注` /
 	// 分组名 / `我的关注`）在左侧栏塌成同一个「我的关注」，而我们的页头是
 	// **这一页的名字**——「现在在哪一组」是右上角那个下拉自己的事。
-	if !showsText(tt, "我的关注") {
-		t.Errorf("页头没画「我的关注」，文字有 %q", tt.Texts())
+	//
+	// ⚠️ **「我的关注」侧栏里也有**（侧栏那一项的字）——`showsText` 找到
+	// 侧栏那一枚也算过，`Find` 回的也是第一枚（侧栏的）。所以这里数**有几
+	// 枚**：侧栏那一枚本来就在，页头那一枚画没画看的是「是不是 ≥2」。
+	count := 0
+	for _, txt := range tt.Texts() {
+		if txt == "我的关注" {
+			count++
+		}
 	}
-	if !showsText(tt, "3") {
-		t.Errorf("页头没画关注总数，文字有 %q", tt.Texts())
+	if count < 2 {
+		t.Errorf("「我的关注」只有 %d 枚——页头那一枚没画（侧栏那一枚是本来就有的）", count)
+	}
+	// ⚠️ **「3」也不能只问「树里有没有」**——树里任何一个单独的字「3」都算
+	// 过。它得是**页头上那一枚**：量它的位置——在侧栏右缘（`sideTargetWidth`）
+	// 之外才算。
+	total, ok := tt.Find("3")
+	if !ok {
+		t.Fatalf("页头没有关注总数，文字有 %q", tt.Texts())
+	}
+	if total.X < float32(sideTargetWidth(s.app.SettingsSnapshot()))-1 {
+		t.Errorf("总数「3」画在 x=%.1f——在侧栏那边，不是页头上那一枚", total.X)
 	}
 	// ⚠️ **分组都在下拉里**：点开才看得见，而 -10 和 0 是 B 站固定给的，
 	// 少了「特别关注」在网页版明明有。

@@ -121,7 +121,11 @@ func TestTheFollowGroupSelect(t *testing.T) {
 		t.Fatalf("按 Esc：%v", err)
 	}
 	// 弹层里那句话没了才算收掉（等「消失」也要等，不能问一次就当收了）。
-	if !waitForTreeGone(t, client, window, "选择关注分组", 15*time.Second, "全部关注", "正在加载分组", "分组没拉出来", "还没有分组") {
+	//
+	// ⚠️ **「全部关注」不在 gone 名单里**：它同时是触发器收起时写的字（停在
+	// 「全部关注」那一格时 `followPaneTitle` 就回它）——弹层收掉之后它**还在**
+	// 树上，拿它当「弹层独有的字」这一条就永远等不到它消失。
+	if !waitForTreeGone(t, client, window, "选择关注分组", 15*time.Second, "正在加载分组", "分组没拉出来", "还没有分组") {
 		t.Fatalf("按了 Esc 之后弹层没收掉：\n%s", treeDump(t, client, window))
 	}
 }
@@ -146,7 +150,12 @@ func followSelectOpen(t *testing.T, client *automationClient, window int) bool {
 		return false
 	}
 	// 弹层里独有的任何一句：三态里的哪一句都算「摆开了」。
-	for _, want := range []string{"全部关注", "正在加载分组", "分组没拉出来", "还没有分组"} {
+	//
+	// ⚠️ **「全部关注」不在名单里**：它同时是**触发器收起时**写的字（停在
+	// 「全部关注」那一格时 `followPaneTitle` 就回它）——拿它当「弹层开了」
+	// 的判据，会在弹层还没开时就命中（那一枚每帧都在）。这里只能靠**三态
+	// 独有的**那三句。
+	for _, want := range []string{"正在加载分组", "分组没拉出来", "还没有分组"} {
 		if waitForTree(t, client, window, want, 8*time.Second) {
 			return true
 		}

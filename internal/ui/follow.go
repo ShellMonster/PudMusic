@@ -808,7 +808,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	// ⚠️ Key 挂在外面的 Column 上，理由见 `dynamicfeed.go`。
 	ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth().Children(func() {
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
-		// 网格在分组栏**之后**登记，所以它赢——它是这一页的主内容。
+		// 网格是这一页里唯一的走位对象（分组栏已收成页头下拉，见票 #367 改版）。
 		//
 		// ⚠️ **登记的是 `&f.keys` 而不是裸的句柄**：这一份的 `TakeFocus` 还要
 		// 把游标摆到第一行（走进来就在第一格上）。
@@ -1305,7 +1305,7 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 // 🔴 **gen 也在这一份里**——它是「换分组 / 换搜索词时 +1」的那个代次，而下面
 // 拿它填进 `followResult` 就是**读**它。第一版这里是 `gen: int(f.gen)`，直接
 // 在 goroutine 里读界面线程正在写的那个字段：`go test -race` 一抓一个准
-// （Read at follow.go:889 / Previous write at selectFollowTab）。
+// （Read at follow.go:889 / Previous write at applyFollowTab）。
 //
 // 🔴 **loaded 在这儿是有用的，不是多传**：B 站那三个接口给的是**总数**，而
 // 「还有没有」要拿**累计加载数**去比总数——总数 25、每页 20，第二页发回来 5 个，
