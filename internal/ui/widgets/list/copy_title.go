@@ -1,27 +1,33 @@
-// 「⌘C 复制选中那一行的歌名」这一族（票 #685）。
+// 「⌘C 复制选中那一行」这一族（票 #685；票 #703 的 A 改了它的分工）。
 //
-// # 为什么是 ⌘C，而不是给行标题加 `Selectable`
+// # 它现在做的是**兜底**
 //
-// 🔴 **实测过**（票面记着，`TestClickingStillSelectsAndDoubleClickingStillPlays`
-// 再钉一遍）：行标题一旦 `Selectable`，点这段文字就**不再选中那一行**——框架
-// 把这一次按下当成了选字的起点（`mygo/ui/input.go` 的 `pointerDown` 先问
-// `pressTextSelection`，而它认的就是 `flagSelectable`），`Selected` 停在 -1。
-// 而「单击选中、双击播放」是这一列最要紧的两种手势。
+// 行标题那一列现在**可选中**了（票 #703 的 A，见 `row_select.go`），而拖选之后
+// 焦点落在**那段字**上——框架只把按键派给焦点那个元素（`mygo/ui/input.go` 的
+// `keyDownPhysical` 与 `editEvent` 都走 `focusHandler()`），列表这一层收不到
+// 那一段。
 //
-// ⇒ 走键盘：**列表拿焦点 + 有一行被选中**时，⌘C / 「编辑 › 拷贝」复制那一行的
-// 歌名。两条入口（`InputKeyDown` 与 `InputCommand`）都在这里接。
+// ⚠️ **而这一列按下的时候把焦点交回了列表**（`rowTextInput`）——于是列表这一层
+// **收得到** ⌘C 了，代价是**框架那一份复制不做了**（实测：焦点在列表上时
+// 「编辑 › 拷贝」复制出来是空的）。
 //
-// # 为什么不会和「拖选文字」抢
+// ⇒ 所以**两份复制都由列表这一层做**，分工是：
 //
-// 框架只在**焦点那个元素**上派发这两条（`mygo/ui/input.go` 的
-// `keyDownPhysical` 与 `editEvent` 都走 `focusHandler()`）。用户拖选了标题 /
-// 评论昵称之后，焦点落在**那段文字**上（`pressTextSelection` 把
-// `rt.focused` 设成段落），列表这一层的回调**根本收不到**这条命令——所以
-// 「剪贴板被文本选择占用」这件事天然轮不到这里判。
+//	有文字选中	复制**整行**（歌名 + UP 名 + 时长，理由见 `row_select.go`）
+//	没有选中	复制选中那一行的**歌名**（这一族原来的作用）
 //
-// ⚠️ **`acts.Copy` 为 nil 时什么都不做**（返回 false，让事件照旧往下走）：
-// 单独造这个包的测试没有界面层，那种情况下「复制」这件事压根不存在——不能
-// 因为没接上就抢走 ⌘C。
+// ⚠️ **为什么「没有选中」这一支还在**：用户用方向键选了行（焦点在列表上），
+// 按 ⌘C 复制的是那一行的歌名——而拖选之后按 ⌘C 复制的是刚拖选的那一段。
+// 两个入口各管各的（和页面里别的可选中区域一个规矩，见
+// `internal/ui/selectable_copy_test.go` 的
+// `TestCopyingASelectionStillBeatsTheSelectedRow`）。
+//
+// ⚠️ **只有真的复制了才返回 true**（返回 true = 这一下我吃掉了）：没选中行、
+// 或者 `acts.Copy` 没接上时返回 false——列表不该在没东西可复制的时候把 ⌘C
+// 吞掉（窗口那一层、别的控件还有可能要用它）。
+//
+// ⚠️ **复制的是「界面上显示的那个名字」**（`ShowOf` 清洗过的）：界面上写着
+// 「晴天」而复制出来是「【4K修复】晴天」，用户会以为复制错了行。
 package list
 
 import (
@@ -50,9 +56,13 @@ func copyCommand(ev ui.InputEvent) bool {
 // ⚠️ **静默的复制是最坏的那一种**：用户按了 ⌘C，界面上什么都没有，他不知道
 // 是复制成功了还是这一次按键丢了。列表右键菜单那一项也是这么做的
 // （`menu.go` 的 `copy-info`：「已复制歌曲信息」）。
-func notifyCopied(acts Actions) {
+//
+// ⚠️ **说什么跟着复制的内容走**（CodeAnt 评审点名的）：兜底复制的是歌名
+// （「已复制歌名」），拖选复制的是整行——歌名 + UP 名 + 时长（「已复制歌曲
+// 信息」）。复制了三行还说「歌名」，用户粘出来会以为复制错了。
+func notifyCopied(acts Actions, what string) {
 	if acts.Notify != nil {
-		acts.Notify("已复制歌名", notice.Success)
+		acts.Notify("已复制"+what, notice.Success)
 	}
 }
 
@@ -62,7 +72,7 @@ func notifyCopied(acts Actions) {
 //
 //  1. **先让 `KeyboardMode` 听一听**——它记「上一次是键盘还是指针」，焦点环
 //     靠它（`selection.go`）。它永远返回 false（只记不吃）。
-//  2. **再认 ⌘C**：有选中一行就复制那一行的歌名。
+//  2. **再认 ⌘C**：有文字选中就复制**整行**，没选中就复制选中那一行的歌名。
 //
 // ⚠️ **只有真的复制了才返回 true**（返回 true = 这一下我吃掉了）：没选中行、
 // 或者 `acts.Copy` 没接上时返回 false——列表不该在没东西可复制的时候把 ⌘C
@@ -77,11 +87,19 @@ func (l *List) input(ev ui.InputEvent) bool {
 	if !copyCommand(ev) || l.acts.Copy == nil {
 		return false
 	}
+	// ⚠️ **先看「有没有选中一段字」**（票 #703 的 A）：拖选之后那才是用户要的。
+	// ⚠️ **判的是「选中了字」**（`rowSelText` 只在真选中时非空，见
+	// `row_select.go` 的 `rowSelection`）：单击留的空选择不能把歌名兜底短路掉。
+	if l.rowSelText != "" {
+		l.acts.Copy(l.rowSelText)
+		notifyCopied(l.acts, "歌曲信息")
+		return true
+	}
 	m, ok := l.Selected()
 	if !ok {
 		return false
 	}
 	l.acts.Copy(ShowOf(m).Title)
-	notifyCopied(l.acts)
+	notifyCopied(l.acts, "歌名")
 	return true
 }
