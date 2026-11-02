@@ -67,6 +67,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -717,6 +718,14 @@ const (
 	// 图形最小的那一个（12 的叉对 12 的字）。现在关闭键占满 chip 整个高，
 	// 和标签按钮**一样高**。
 	historyChipClose = 24
+	// historyChipRadius 是 chip 的圆角：**高度的一半**，一枚药丸
+	// （2026-11 重设计，照用户给的参考图）。
+	//
+	// ⚠️ **刻意不跟 `t.Radius`**（原来是 t.Radius）：药丸是这枚 chip 的
+	// **形状**，和胶囊搜索框（`searchRadius`）同一个理由——用户把全局圆角
+	// 拖到 0 它也还是药丸。半径不写数字：chip 的高是 `historyChipClose`
+	// 撑着的（`historyChipPadY`=0），半径就是那一格的一半。
+	historyChipRadius = historyChipClose / 2
 	// historyChipGap 是标签按钮和关闭键之间那道缝。
 	//
 	// 🔴 **6 而不是 2**（票 BMG-253）：这两个按钮的后果**完全相反**（一个去搜
@@ -747,8 +756,18 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	t := c.Theme()
 	label := searchHistorySummary(item.Value)
 
-	ui.Row(c).Key("history:"+item.Value).Radius(t.Radius).
-		Background(historyChipBg(t)).
+	// ⚠️ **chip 上的词和框里正在敲的一字不差时，它换成「正在输入」那一档**
+	// （2026-11 重设计，照用户给的参考图）：`accentSoft` 的底 + `ink.AccentOn`
+	// 的字——和选中行同一套色。只认一字不差（TrimSpace 之后）；敲到一半
+	// 不匹配，退回灰底。
+	current := item.Value == strings.TrimSpace(s.searchKeyword)
+	chipBg := historyChipBg(t)
+	if current {
+		chipBg = accentSoft(t)
+	}
+
+	ui.Row(c).Key("history:"+item.Value).Radius(historyChipRadius).
+		Background(chipBg).
 		// 左边不留内边距：那 8 像素归标签按钮，点了才落在这一条上。右边留 8，
 		// 给关闭键一圈和左面对称的留白。
 		//
@@ -758,9 +777,15 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
 		// ⚠️ 标签按钮的上下内边距是 3（不是 `flatButton` 默认的 6）：套在 chip
 		// 里的话默认那个 6 会把 24 高撑到 30 以上，而它要和关闭键一样占满这 24。
-		if flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
+		labelBtn := flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
 			Padding(historyChipLabelPadY, historyChipLabelPadEnd,
-				historyChipLabelPadY, historyChipLabelPadX).Clicked() {
+				historyChipLabelPadY, historyChipLabelPadX)
+		// 高亮档的字染主色（`ink.AccentOn` = 「主色当字色」，对底 ≥4.5:1）；
+		// 不然 accentSoft 的浅底上默认字色看不出「就是这一条」。
+		if current {
+			labelBtn = labelBtn.TextColor(ink.AccentOn(t))
+		}
+		if labelBtn.Clicked() {
 			// ⚠️ **先把词填回框里**（Biu 的 `setValue(item.value)`，
 			// `search/index.tsx:154`）。不填的话用户点完历史，框里还是原来敲的
 			// 半截字，而页面那边搜的是这一条——两处对不上，按返回再回来还会

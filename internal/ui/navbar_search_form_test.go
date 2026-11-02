@@ -307,8 +307,10 @@ func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
 	panel := rgb(th.Background)
 	chip := rgb(historyChipBg(th))
 
-	// chip 自己的上下沿：在**右边那一段留白**那一列上量（那里只有它自己的底色）。
-	chipTop, chipBottom := verticalRun(tt.Image(), int(close.X+close.W+4),
+	// chip 自己的上下沿：在**标签按钮那一列**上量（那里离圆角半径 12 远，只有
+	// chip 自己的底色）。不能在最右边缘量——2026-11 改成药丸之后，最右那一列
+	// 上下各缺 12 的圆角，`verticalRun` 会只量到中间 16 高。
+	chipTop, chipBottom := verticalRun(tt.Image(), int(label.X+label.W/2),
 		int(label.Y+label.H/2), panel)
 	chipH := chipBottom - chipTop + 1
 
