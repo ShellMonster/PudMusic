@@ -301,6 +301,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 				// 没选中时 ↓ 从顶上第一条开始。
 				s.nav.sel = (s.nav.sel + 1 + n) % n
 				s.nav.armed, s.nav.reveal = true, true
+				s.nav.picked = s.nav.items[s.nav.sel]
 				return true
 			case ui.KeyUp:
 				if n == 0 {
@@ -309,6 +310,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 				// 没选中时 ↑ 从底下最后一条开始（和 combobox 同一个惯例）。
 				s.nav.sel = (s.nav.sel - 1 + n) % n
 				s.nav.armed, s.nav.reveal = true, true
+				s.nav.picked = s.nav.items[s.nav.sel]
 				return true
 			case ui.KeyEnter:
 				// 没选中任何一条：放给输入框，回车搜框里的词。
@@ -555,6 +557,29 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 		// 那个动画值还会不会被 view 读——会读就白换）。
 		p = p.Opacity(fade).Margin(rise, space.None, space.None, space.None)
 
+		// 键盘导航可走的词：历史在前、联想在后（画出来的顺序）。「大家在听」那几行
+		// 和联想词是同一种行（`viewSuggestTerm`），也接进来——↓ 在「还没敲字」那
+		// 一摊里也走得动。每帧重建：那一摊词每一帧都可能变。
+		//
+		// 🔴 **必须在 `p.Children` 之前填**：chip 和联想行在 Children **里面**调
+		// `navPicked`——items 要是等 Children 跑完才填，它们读到的是**上一帧**的
+		// 那一份，选中态永远滞后一帧（按一下 ↓ 要等两帧才看得见亮）。
+		s.nav.items = s.nav.items[:0]
+		if showHistory {
+			for _, item := range history {
+				s.nav.items = append(s.nav.items, item.Value)
+			}
+		}
+		s.nav.items = append(s.nav.items, terms...)
+		s.nav.items = append(s.nav.items, hot...)
+		// 🔴 **`items` 每帧重建，词会换序**：联想词异步回来、历史增删，`sel`
+		// 指的下标可能还合法、但那条词已经不是用户按方向键时看到的那一条。
+		// 「`items[sel]` 还是不是武装时记下那条」是唯一能验它的办法——
+		// 超界和换词都当成这条失效（回车还是搜框里的词，不是搜一条用户没选的词）。
+		if s.nav.sel >= len(s.nav.items) || (s.nav.armed && s.nav.items[s.nav.sel] != s.nav.picked) {
+			s.nav.sel, s.nav.armed = -1, false
+		}
+
 		p.Children(func() {
 			// 🔴 **这一层 `Scroll` 是「最下面那几条点得着」的全部**：MaxHeight 把它
 			// 压在屏幕之内，超出去的部分靠滚。没有它，少掉的是「词看得见」——而用户
@@ -566,11 +591,15 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 				// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
 				// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
 				// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
+				// idx 是这一条在 `nav.items` 里的下标——历史在前、联想在后、「大家
+				// 在听」最后，`navPicked` 拿它比 `nav.sel`。
+				idx := 0
 				if showHistory {
 					s.viewSuggestHeader(c)
 					ui.Row(c).Key("suggest-history").Wrap().Gap(space.Px6).Children(func() {
 						for _, item := range history {
-							s.viewHistoryChip(c, item)
+							s.viewHistoryChip(c, item, idx)
+							idx++
 						}
 					})
 				}
@@ -578,29 +607,15 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 					if showHistory {
 						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
-					s.viewSuggestTerms(c, terms, failed)
+					s.viewSuggestTerms(c, terms, failed, &idx)
 				}
 				if len(hot) > 0 && len(terms) == 0 && !failed {
 					if showHistory {
 						ui.Box(c).FillWidth().Height(suggestTermsGap)
 					}
-					s.viewSuggestHot(c, hot)
+					s.viewSuggestHot(c, hot, &idx)
 				}
 			})
-			// 键盘导航可走的词：历史在前、联想在后（画出来的顺序）。「大家在听」那几行
-			// 和联想词是同一种行（`viewSuggestTerm`），也接进来——↓ 在「还没敲字」那
-			// 一摊里也走得动。每帧重建：那一摊词每一帧都可能变。
-			s.nav.items = s.nav.items[:0]
-			if showHistory {
-				for _, item := range history {
-					s.nav.items = append(s.nav.items, item.Value)
-				}
-			}
-			s.nav.items = append(s.nav.items, terms...)
-			s.nav.items = append(s.nav.items, hot...)
-			if s.nav.sel >= len(s.nav.items) {
-				s.nav.sel, s.nav.armed = -1, false
-			}
 			// reveal 是「刚用方向键挪到一条」的一次性信号：画的时候 ScrollIntoView 读过
 			// 一次就清，不然后面每一帧都在往那条滚（用户自己往下翻会被拽回去）。
 			s.nav.reveal = false
@@ -818,7 +833,7 @@ func historyChipBg(t *ui.Theme) ui.Color {
 // ⚠️ **形状是一枚 chip，不是一行带框的方块**：灰底、无描边、24 高。里面那两个
 // 按钮是扁平的（`flatButton` / `flatIconButton`），只在指针压上去时铺一层很淡的
 // 反馈；chip 自己的灰色底一直留着，所以它仍然是一个「小块」，而不是两枚按钮。
-func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
+func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem, idx int) {
 	t := c.Theme()
 	label := searchHistorySummary(item.Value)
 
@@ -833,7 +848,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	// 两档**都**只认那一枚 chip：matched 靠词比，nav 靠「这一条是不是
 	// items[sel]」。
 	match := item.Value == strings.TrimSpace(s.searchKeyword)
-	lit := match || s.navPicked(item.Value)
+	lit := match || s.navPicked(idx)
 	chipBg := historyChipBg(t)
 	if lit {
 		chipBg = accentSoft(t)
@@ -849,7 +864,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, space.None).
 		Gap(historyChipGap).AlignItems(ui.Center)
 	// 方向键刚挪到这一条：把它滚到看得见（折行那排 chip 可能被折到屏幕外）。
-	if s.navPicked(item.Value) && s.nav.reveal {
+	if s.navPicked(idx) && s.nav.reveal {
 		chip.ScrollIntoView()
 	}
 	chip.Children(func() {
@@ -889,11 +904,14 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 // 在前联想在后的扁平表）的下标。词会有重复（历史和联想可能都是「周杰伦」）——
 // 比「这一条词是不是 items[sel]」而不是「这是第几条」，这样画到第几条就是第几条
 // 亮，同名的两条都亮也亮得对（它们本来就是同一个词）。
-func (s *Shell) navPicked(term string) bool {
-	if !s.nav.armed || s.nav.sel < 0 || s.nav.sel >= len(s.nav.items) {
-		return false
-	}
-	return s.nav.items[s.nav.sel] == term
+// navPicked 报「这一条是不是键盘导航正选中的那一条」。
+//
+// ⚠️ **按下标比对，不是按词**：历史里可能有「周杰伦」、联想词里也可能有
+// 「周杰伦」——按词比的话**同名的两条一起亮**，屏上两个区块各亮一条，用户
+// 看不出哪条才是「这一条」。`nav.sel` 是 `nav.items`（每帧重建、历史在前
+// 联想在后的扁平表）的**下标**，navPicked 比的是「这是第几条」。
+func (s *Shell) navPicked(idx int) bool {
+	return s.nav.armed && s.nav.sel == idx
 }
 
 // submitSearch 是「拿这个词去搜」：记进历史、带着词切到搜索页、收起浮层。
@@ -923,6 +941,11 @@ func (s *Shell) submitSearch(keyword string) {
 	}
 	s.hist.add(keyword)
 	s.searchSuggest = false
+	// 面板收起来之前，把键盘导航的选中态也清掉：sel/armed 挂在 Shell 上，
+	// 不关面板的话下一次开面板时它会**拿上一次的 sel 去搜**（armed 还挂着、
+	// sel 还指着一条用户没选的词）。Esc 和失焦那两条已经清了，这里是
+	// 点选 / 回车 / 清空 × 这三条共用的关面板点。
+	s.nav.sel, s.nav.armed = -1, false
 	target := searchPath + "?" + searchQuery + "=" + url.QueryEscape(keyword)
 	if s.router.Location() == target {
 		return

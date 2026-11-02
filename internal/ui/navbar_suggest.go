@@ -147,6 +147,11 @@ type suggestTerms struct {
 // ⚠️ **选中的是「词」不是「元素」**：chip 那一排是**折行**的，「林俊杰」在第几
 // 行第几列由面板宽和词长决定，下标 `sel` 不知道也不该知道——画的时候按「这一条
 // 词是不是 items[sel]」上选中底，布局的事交给布局。
+//
+// ⚠️ **`items` 每帧重建，词会换序**（联想词异步回来、历史增删）：`sel` 指的下标
+// 可能还合法，但那条词已经不是用户按方向键时看到的那一条了——回车搜到的就不是
+// 他选的那一条。所以武装时把那条词记在 `picked`，items 重建时验一下「items[sel]
+// 还是不是 picked」，变了就当这条失效（sel/armed 都回 -1/false，回车还是搜框里的词）。
 type suggestNav struct {
 	// items 是这一帧可走的词，扁平、按画出来的顺序：历史在前、联想在后。
 	// 每帧在 viewSuggest 里重建（那一摊词每一帧都可能变）。
@@ -158,6 +163,9 @@ type suggestNav struct {
 	// -1：只有按过方向键（置真）才算「用户选中了一条」，敲字 / 收浮层都把它
 	// 放回 false。
 	armed bool
+	// picked 是 armed 那一刻 `items[sel]` 的词——items 重建时拿它验 sel 还指不
+	// 指着同一条（上面那段注释），不是拿来显示的。
+	picked string
 	// reveal 是「刚用方向键挪到了这一条，把它滚到看得见」。
 	// 只在按方向键那一帧置真，画的时候读一次就清。
 	reveal bool
@@ -275,7 +283,9 @@ func viewSuggestHeading(c *ui.Context, key, name, title string, trailing func())
 //
 // ⚠️ **拉回来的那一刻不摆任何「正在找…」**：用户是在一个字一个字地打，联想是
 // 一闪一闪补上来的，中间摆一句「正在搜…」比不给还吵——他自己知道在等什么。
-func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
+// idx 是这一档在 `nav.items` 里的起始下标（历史在前、联想在后、「大家在听」最后），
+// `viewSuggestTerm` 拿它逐条递增后比 `nav.sel`。
+func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool, idx *int) {
 	if len(items) == 0 && !failed {
 		return
 	}
@@ -291,17 +301,19 @@ func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
 			return
 		}
 		for _, term := range items {
-			s.viewSuggestTerm(c, term)
+			s.viewSuggestTerm(c, term, *idx)
+			*idx++
 		}
 	})
 }
 
 // viewSuggestHot 画框里还没敲字时的「大家在听」那一档：热榜前几首的歌名，点一个就搜。
-func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
+func (s *Shell) viewSuggestHot(c *ui.Context, titles []string, idx *int) {
 	ui.Column(c).Key(suggestHotKey).FillWidth().Gap(space.Px2).Children(func() {
 		viewSuggestHeading(c, suggestHotHeadingKey, iconEmptyMusic, suggestHotHeading, nil)
 		for _, title := range titles {
-			s.viewSuggestTerm(c, title)
+			s.viewSuggestTerm(c, title, *idx)
+			*idx++
 		}
 	})
 }
@@ -320,7 +332,7 @@ func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
 //
 // Label 不只是给测试用的：读屏软件念出来的是这一条词，而正文（Children 里那个
 // Text）不念。
-func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
+func (s *Shell) viewSuggestTerm(c *ui.Context, term string, idx int) {
 	t := c.Theme()
 	row := ui.ButtonBase(c).Label(term).
 		FillWidth().Radius(t.Radius).
@@ -328,11 +340,15 @@ func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
 		Gap(space.Px8).AlignItems(ui.Center)
 	// 两种「亮起来」：
 	//   - 悬停（指针扫过去）——原来就有；
-	//   - 键盘选中（方向键刚挪到这一条，`navPicked`）——和悬停同一片底。
+	//   - 键盘选中（方向键刚挪到这一条，`navPicked(idx)`）——和悬停同一片底。
 	//
 	// 同一片 `SurfaceHover`：选中态不是新颜色，用户从「指针扫过会亮」已经知道
 	// 这一片亮是「这一条是焦点」。方向键挪到这一条时 `reveal` 把它滚到看得见。
-	picked := s.navPicked(term)
+	//
+	// ⚠️ **按下标比、不是按词**：历史和联想里可能有同名的词（「周杰伦」在历史里
+	// 是一条、在联想里也是一条），按词比两条一起亮——屏上两个区块各亮一条，
+	// 用户看不出哪一条才是「这一条」。
+	picked := s.navPicked(idx)
 	if row.Hovered() || picked {
 		row = row.Background(t.SurfaceHover)
 	}

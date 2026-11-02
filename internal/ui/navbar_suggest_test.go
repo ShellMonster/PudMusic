@@ -479,6 +479,11 @@ func TestTheTwoSectionsAreToldApart(t *testing.T) {
 	typeInSearch(t, tt, "周杰")
 	settleSuggestDebounce(s, tt)
 	waitFrames(t, tt, "两档都在", func() bool { return tt.HasText(suggestTermsHeading) && tt.HasText(suggestHistoryHeading) })
+	// 🔴 **量面板上的像素之前必须先把进场推完**：`waitFrames` 等的是 labels 树（建树
+	// 就有），而面板的 `Opacity` 是 `AnimateTo` 走的——动画没走完时面板是透明的，
+	// 量到的是底下的主窗口。这是这条断言曾经绿的唯一原因（那时 chip 是方块的，
+	// 像素本来就不同）；改成 pill 之后第一次露馅。
+	settleSuggestEnter(t, tt)
 
 	histHead, ok := tt.Find(suggestHistoryHeading)
 	if !ok {
@@ -516,7 +521,14 @@ func TestTheTwoSectionsAreToldApart(t *testing.T) {
 	// 所以这里取两个「字左边」的像素比：chip 里侧那块是 chip 的底色，联想词那一行
 	// 同一处是浮层的底色。判据是「这两个点画出来不一样」——没有猜任何颜色值，
 	// 深浅两套主题下都成立。
-	chipIn := tt.Image().RGBAAt(int(chip.X)-3, int(chip.Y+chip.H/2))
+	//
+	// ⚠️ **`Find` 返回的是文本节点的矩形**（`ui/headless.go:461`），不是 chip 也
+	// 不是按钮——「林俊杰」三个字的 W 是 35.75、H 是 14.13，就是字本身。所以
+	// 「字左边 3px」已经是 chip **外**的留白（chip 左缘 = 字左 - `historyChipLabelPadX` 8），
+	// 量到的是面板底。要量到 chip 底，得**再往里 4px**——那时在 chip 的左 padding
+	// 里，chip 底已经画上了（半径 12 的弧也没收到这里）。联想行那边 +3 不变：
+	// 行左 padding `suggestTermPadX=8` 里 3px 仍是面板底。
+	chipIn := tt.Image().RGBAAt(int(chip.X)-4, int(chip.Y+chip.H/2))
 	termIn := tt.Image().RGBAAt(int(term.X)+3, int(term.Y+term.H/2))
 	if chipIn == termIn {
 		t.Errorf("历史那条 chip 和联想词那一行在字左边画出来一模一样（%v）——"+
