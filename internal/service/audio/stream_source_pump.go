@@ -125,7 +125,14 @@ func (s *StreamSource) pour(resp *http.Response, from int64, buf []byte) error {
 
 	for {
 		if s.stopped() {
-			return nil
+			// 🔴 **源被关了不是「读完了」**（2026-11-02 审查②的 P0-2）：
+			// 返回哨兵而不是 nil——pump 把 nil 当「正常读完」，会在
+			// `reportComplete` 里以**截断的长度**报完成，上层把这一份
+			// 标成「完整的缓存」。文件大小和记录一致（都是截断的），
+			// 大小对账拦不住它，用户从此每次点这一首都播一首被掐断的歌。
+			// 「切歌把上一首收养给后台补完」让中途 Close 从罕见变成日常
+			// （切走再切回，每一次都是），所以这条必须有哨兵挡着。
+			return errSourceStopping
 		}
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {

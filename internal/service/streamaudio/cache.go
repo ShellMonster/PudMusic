@@ -562,23 +562,47 @@ func (c *Cache) Migrate(remap func(track string) (string, bool)) int {
 		return 0
 	}
 	moved := 0
+	// 🔴 **按曲目分组，pref 最后搬**（2026-11-02 审查②的 P1-1）：同一首的
+	// 多档在 readAll 里是**散开的**（目录序）。按条目边搬边动 pref 的话，
+	// 先处理的那一档会把**所有** pref 文件都删掉，而后处理那一档的字节
+	// 还没到新键下——它的 pref 被判「新键下没有完整字节」不搬，旧文件
+	// 又已经删了，这条偏好就这么丢了。先把一个曲目**所有档**的条目安顿完，
+	// 再做它的 pref 搬迁，「新键下有没有完整字节」看到的才是最终状态。
+	type trackGroup struct {
+		oldTrack string
+		newTrack string
+		entries  []Bytes
+	}
+	var groups []trackGroup
+	index := map[string]int{}
 	for _, e := range entries {
-		oldTrack := e.Track
-		newTrack, ok := remap(oldTrack)
-		if !ok || newTrack == "" || newTrack == oldTrack {
+		newTrack, ok := remap(e.Track)
+		if !ok || newTrack == "" || newTrack == e.Track {
 			continue
 		}
-		_, tgtPlayable := c.Complete(newTrack, e.Tier)
-		switch {
-		case tgtPlayable, !e.Complete:
-			// 目标位已有完整份，或者旧的那份自己不完整：清掉旧的。
-			c.Remove(oldTrack, e.Tier)
-		default:
-			if c.moveEntry(e, oldTrack, newTrack) {
-				moved++
+		if gi, seen := index[e.Track]; seen {
+			groups[gi].entries = append(groups[gi].entries, e)
+			continue
+		}
+		index[e.Track] = len(groups)
+		groups = append(groups, trackGroup{
+			oldTrack: e.Track, newTrack: newTrack, entries: []Bytes{e},
+		})
+	}
+	for _, g := range groups {
+		for _, e := range g.entries {
+			_, tgtPlayable := c.Complete(g.newTrack, e.Tier)
+			switch {
+			case tgtPlayable, !e.Complete:
+				// 目标位已有完整份，或者旧的那份自己不完整：清掉旧的。
+				c.Remove(g.oldTrack, e.Tier)
+			default:
+				if c.moveEntry(e, g.oldTrack, g.newTrack) {
+					moved++
+				}
 			}
 		}
-		c.migratePrefs(oldTrack, newTrack)
+		c.migratePrefs(g.oldTrack, g.newTrack)
 	}
 	return moved
 }

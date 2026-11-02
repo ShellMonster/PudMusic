@@ -70,7 +70,15 @@ func TestSwitchingAwayStillFinishesThePreviousDownload(t *testing.T) {
 			w.Write(media[start:first])
 		}
 		w.(http.Flusher).Flush()
-		<-gate
+		// ⚠️ **等放行要同时听请求的取消**（审查②的 P1-4）：任何一个前置断言
+		// 早失败的话，`t.Cleanup` 里的 `srv.Close` 会**等**这条卡住的连接——
+		// 等不到就是整个测试二进制超时 panic，真正的失败原因被盖掉。
+		// 测试进程退出时请求的 context 会取消，handler 从这儿走人。
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
 		if start < mid {
 			w.Write(media[mid:])
 		} else {

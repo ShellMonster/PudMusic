@@ -240,3 +240,70 @@ func TestTheCompleteCallbackFiresOnlyWhenTheLengthIsKnown(t *testing.T) {
 		}
 	})
 }
+
+// TestAClosedSourceNeverReportsComplete 盯「**中途被关的源不许报完成**」
+// （2026-11-02 审查②的 P0-2）。
+//
+// # 为什么这一条要紧
+//
+// 「切歌把上一首收养给后台补完」让「一条正在下的源中途被 Close」从罕见
+// （换音质 / 同首重开）变成了**日常**（切走再切回，每一次都是）。而 `pour`
+// 的读循环在两次读之间看到「源被关了」时，曾经把它当成「读完了」返回
+// nil——pump 于是以**截断的长度**报 `OnComplete`，上层把这一份标成
+// 「完整的缓存」：文件大小和记录一致（都是截断的），大小对账**拦不住**，
+// 用户从此每次点这一首都播一首被掐断的歌。
+//
+// # 判据
+//
+// 服务器把整首**一口气**倒出来（Content-Length 照给，`sizeKnown` 那道
+// 防线管不到这里），读循环转得飞快；测试盯着 `Filled()` 过半的那一刻
+// 当着泵的面把源关掉。**`OnComplete` 一次都不许响。**
+func TestAClosedSourceNeverReportsComplete(t *testing.T) {
+	data := payload(4 << 20)
+	var completed atomic.Bool
+	var completedSize atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+		chunk := 4 << 10
+		for off := 0; off < len(data); off += chunk {
+			end := off + chunk
+			if end > len(data) {
+				end = len(data)
+			}
+			if _, err := w.Write(data[off:end]); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	s, err := NewStreamSource(StreamSourceOptions{
+		URLs:      []string{srv.URL},
+		Client:    srv.Client(),
+		CachePath: filepath.Join(t.TempDir(), "song.bin"),
+		OnComplete: func(size int64) {
+			completed.Store(true)
+			completedSize.Store(size)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 下载推到一半，当着泵的面把源关掉。
+	deadline := time.Now().Add(10 * time.Second)
+	for s.Filled() < int64(len(data)/2) {
+		if time.Now().After(deadline) {
+			t.Fatalf("下载没推进到一半（%d / %d），测不了这个场景", s.Filled(), len(data))
+		}
+	}
+	s.Close()
+
+	// 给泵一点时间：如果它把「被关」当成「读完」，OnComplete 已经在路上了。
+	time.Sleep(300 * time.Millisecond)
+	if completed.Load() {
+		t.Fatalf("中途被关的源报了「下完了」（size=%d，总长 %d）——"+
+			"缓存会记下一首截断的歌，用户从此每次点这一首都播它",
+			completedSize.Load(), len(data))
+	}
+}
