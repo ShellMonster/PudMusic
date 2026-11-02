@@ -128,6 +128,18 @@ func TestTheApplicationMenu(t *testing.T) {
 // **这个应用的菜单**，而菜单是应用级的。
 func startRealApp(t *testing.T) (*automationClient, func()) {
 	t.Helper()
+	return startRealAppWithArgs(t)
+}
+
+// startRealAppWithArgs 同 `startRealApp`，但把 args 原样放在二进制后面——
+// 命令行里给的是一个音频文件的话，应用起来那一首就放起来了（框架的
+// `fileArgs` 把它投给 `OnOpenFile`，见 `internal/ui/openfile.go`）。
+//
+// ⚠️ **为什么单独一支而不给 `startRealApp` 加参数**：原来那三支调用方一个
+// 参数都不传，改签名的话那三处都得跟一遍——而「起应用」和「起应用放一首歌」
+// 是两件事，分开写读起来也清楚。
+func startRealAppWithArgs(t *testing.T, args ...string) (*automationClient, func()) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	socketDir, socket, err := makeAutomationSocket()
 	if err != nil {
@@ -136,7 +148,15 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 	}
 	binary := filepath.Join(socketDir, "biugo-e2e")
 	var buildOut, buildErr bytes.Buffer
-	build := exec.Command("go", "build", "-tags", "e2e", "-o", binary, ".")
+	// ⚠️ **`packageFileExtensions` 要按 mygo.json 注进去**：裸 `go build` 不跑
+	// `go tool mygo build` 的那一道 ldflags（`mygo/cmd/mygo/build.go` 的
+	// `packageFlags`），框架的 `fileArgs` 看到的就是空串——命令行里的音频文件
+	// **一件都不投**给 `OnOpenFile`（`mygo/deeplink.go:99`），而 `handleLaunchArgs`
+	// 又按「框架会交的我们不碰」把它跳过（`internal/ui/openfile.go`），症状是
+	// 「命令行给了文件、起来却什么都没放」。注进去之后，框架那一半照常投。
+	build := exec.Command("go", "build", "-tags", "e2e",
+		"-ldflags", "-X github.com/egoist/mygo.packageFileExtensions=mp3,flac,wav,m4a,aac,ogg,aiff,aif,aifc",
+		"-o", binary, ".")
 	build.Dir = repoRoot(t)
 	build.Stdout = &buildOut
 	build.Stderr = &buildErr
@@ -146,7 +166,7 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 		t.Fatalf("构建真应用（带 e2e 标签）：%v\nstdout:\n%s\nstderr:\n%s", err, buildOut.String(), buildErr.String())
 	}
 
-	cmd := exec.CommandContext(ctx, binary)
+	cmd := exec.CommandContext(ctx, binary, args...)
 	// ⚠️ **单独的一份数据目录**（`automation_e2e.go` 顶上那段说明了为什么）：
 	// 应用有单实例锁，而锁在用户数据目录里——**用户机器上已经跑着这个应用
 	// 时**（开发时几乎总是这样），E2E 起来的那一份会抢不到锁、把命令行递过去、
