@@ -180,8 +180,15 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// ⚠️ **那一枚按钮带 Key**（"nav-stats"）：automation 的 `act` 是**按
 		// Key 找元素**的（不是按无障碍名）——没有 Key 的话，真窗口那一族 E2E
 		// 按不到它（而那一页**只有这一个入口**，按不到就等于没有）。
+		//
+		// 🔴 **Key 必须在构造**之前**给**（`c.Key`，给下一个控件定身份），不能链在
+		// `iconKey(...)` 返回之后：`Element.Key` 是**事后 rekey**（换 `e.id` 和
+		// `e.st`），而悬停反馈是 `iconKey` → `iconButtonAccent` / `feel` 在**构造时**
+		// 按当时的 id 去问 `Hovered()` 的——rekey 之后命中链上挂的是新 id，拿旧 id
+		// 去问永远对不上，于是这一枚指针落上去既不换主色、也没有淡底。先例：
+		// `comments_entry.go` 的 `c.Key(commentsButtonKey)`。
+		c.Key("nav-stats")
 		if s.withTip(c, iconKey(c, iconChart, "听歌统计", iconMd, false).
-			Key("nav-stats").
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 			"看看听了多久、最爱听哪几首").Clicked() {
 			s.navigate(statsPath)
