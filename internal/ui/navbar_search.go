@@ -275,11 +275,56 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		// 两帧之间（`ui/textinput.go:121`），那一刻拿着的 Element 已经过期，
 		// 要改输入框里的字只能通过 `k.SetText`。我们要的恰恰是不改它。
 		field.OnTextKey(func(k ui.TextKey) bool {
-			if k.Key != ui.KeyEscape || !s.searchSuggest {
+			// Esc 收浮层（原来就有），浮层没开就还回输入框清字。
+			if k.Key == ui.KeyEscape {
+				if !s.searchSuggest {
+					return false
+				}
+				s.searchSuggest = false
+				s.nav.sel, s.nav.armed = -1, false
+				return true
+			}
+			// 键盘导航：↑↓ 在面板上上下走，回车搜选中的那一条。
+			//
+			// ⚠️ **只在浮层开着、而且面板上真有词可走时接管**：浮层没开时
+			// ↑↓ 还是输入框自己的（移动光标 / 历史那一套不归这里管），回车
+			// 还是「搜框里的词」。
+			if !s.searchSuggest {
 				return false
 			}
-			s.searchSuggest = false
-			return true
+			n := len(s.nav.items)
+			switch k.Key {
+			case ui.KeyDown:
+				if n == 0 {
+					return false
+				}
+				// 没选中时 ↓ 从顶上第一条开始。
+				s.nav.sel = (s.nav.sel + 1 + n) % n
+				s.nav.armed, s.nav.reveal = true, true
+				return true
+			case ui.KeyUp:
+				if n == 0 {
+					return false
+				}
+				// 没选中时 ↑ 从底下最后一条开始（和 combobox 同一个惯例）。
+				s.nav.sel = (s.nav.sel - 1 + n) % n
+				s.nav.armed, s.nav.reveal = true, true
+				return true
+			case ui.KeyEnter:
+				// 没选中任何一条：放给输入框，回车搜框里的词。
+				if !s.nav.armed || s.nav.sel < 0 || s.nav.sel >= n {
+					return false
+				}
+				picked := s.nav.items[s.nav.sel]
+				// ⚠️ **先把词填回框里，再搜**（和点那一条同一件事，
+				// `viewHistoryChip` / `viewSuggestTerm` 的注释）：搜的词和框里
+				// 的词要对得上，按返回再回来才不是那个错的词。`k.SetText`
+				// 是这一刻唯一能改框里字的口（`textinput.go:173`）。
+				k.SetText(picked)
+				s.submitSearch(picked)
+				return true
+			}
+			return false
 		})
 
 		// 浮层什么时候开：**敲了一个字**、**点了一下这个框**——照 Biu 的
@@ -309,6 +354,9 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		if field.Changed() {
 			// 用户自己敲了 → 框里那个词从此是他的。
 			s.searchKeywordFilled = false
+			// 又敲了一个字：键盘导航的选中态清掉。那一摊词马上要换（防抖
+			// 之后联想会重拉），留着那个高亮会指着一条已经不对的词。
+			s.nav.sel, s.nav.armed = -1, false
 		}
 
 		switch {
@@ -330,6 +378,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			//
 			// 只认「按了」和「敲了字」，焦点自己回来就开不了——它只是个残留状态。
 			s.searchSuggest = false
+			s.nav.sel, s.nav.armed = -1, false
 		}
 
 		// 回车 = 拿这个词去搜。Biu 的 submitSearch。
@@ -538,6 +587,23 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 					s.viewSuggestHot(c, hot)
 				}
 			})
+			// 键盘导航可走的词：历史在前、联想在后（画出来的顺序）。「大家在听」那几行
+			// 和联想词是同一种行（`viewSuggestTerm`），也接进来——↓ 在「还没敲字」那
+			// 一摊里也走得动。每帧重建：那一摊词每一帧都可能变。
+			s.nav.items = s.nav.items[:0]
+			if showHistory {
+				for _, item := range history {
+					s.nav.items = append(s.nav.items, item.Value)
+				}
+			}
+			s.nav.items = append(s.nav.items, terms...)
+			s.nav.items = append(s.nav.items, hot...)
+			if s.nav.sel >= len(s.nav.items) {
+				s.nav.sel, s.nav.armed = -1, false
+			}
+			// reveal 是「刚用方向键挪到一条」的一次性信号：画的时候 ScrollIntoView 读过
+			// 一次就清，不然后面每一帧都在往那条滚（用户自己往下翻会被拽回去）。
+			s.nav.reveal = false
 			s.trackScrollbar(suggestScroll)
 		})
 	})
@@ -756,17 +822,24 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 	t := c.Theme()
 	label := searchHistorySummary(item.Value)
 
-	// ⚠️ **chip 上的词和框里正在敲的一字不差时，它换成「正在输入」那一档**
-	// （2026-11 重设计，照用户给的参考图）：`accentSoft` 的底 + `ink.AccentOn`
-	// 的字——和选中行同一套色。只认一字不差（TrimSpace 之后）；敲到一半
-	// 不匹配，退回灰底。
-	current := item.Value == strings.TrimSpace(s.searchKeyword)
+	// 两档「亮起来」：
+	//
+	//   - **正在输入**（`match`）：chip 上的词和框里正在敲的一字不差——
+	//     `accentSoft` 的底 + `ink.AccentOn` 的字，照参考图（2026-11 重设计）；
+	//   - **键盘选中**（`nav`）：方向键刚挪到这一条——同一个 `accentSoft` 的底
+	//     + 主色字。两档是同一个视觉（「这一条是焦点」），但**来路不同**：
+	//     一个是跟着输入走的，一个是跟着方向键走的。
+	//
+	// 两档**都**只认那一枚 chip：matched 靠词比，nav 靠「这一条是不是
+	// items[sel]」。
+	match := item.Value == strings.TrimSpace(s.searchKeyword)
+	lit := match || s.navPicked(item.Value)
 	chipBg := historyChipBg(t)
-	if current {
+	if lit {
 		chipBg = accentSoft(t)
 	}
 
-	ui.Row(c).Key("history:"+item.Value).Radius(historyChipRadius).
+	chip := ui.Row(c).Key("history:"+item.Value).Radius(historyChipRadius).
 		Background(chipBg).
 		// 左边不留内边距：那 8 像素归标签按钮，点了才落在这一条上。右边留 8，
 		// 给关闭键一圈和左面对称的留白。
@@ -774,7 +847,12 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 		// ⚠️ **上下不留**（`historyChipPadY`）：chip 的高由关闭键那一格撑着，
 		// 标签按钮也占满这 24——两个热区一样高。
 		Padding(historyChipPadY, historyChipPadRight, historyChipPadY, space.None).
-		Gap(historyChipGap).AlignItems(ui.Center).Children(func() {
+		Gap(historyChipGap).AlignItems(ui.Center)
+	// 方向键刚挪到这一条：把它滚到看得见（折行那排 chip 可能被折到屏幕外）。
+	if s.navPicked(item.Value) && s.nav.reveal {
+		chip.ScrollIntoView()
+	}
+	chip.Children(func() {
 		// ⚠️ 标签按钮的上下内边距是 3（不是 `flatButton` 默认的 6）：套在 chip
 		// 里的话默认那个 6 会把 24 高撑到 30 以上，而它要和关闭键一样占满这 24。
 		labelBtn := flatButton(c, label).FontSize(scale.Font(c, scale.Size12)).
@@ -782,7 +860,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 				historyChipLabelPadY, historyChipLabelPadX)
 		// 高亮档的字染主色（`ink.AccentOn` = 「主色当字色」，对底 ≥4.5:1）；
 		// 不然 accentSoft 的浅底上默认字色看不出「就是这一条」。
-		if current {
+		if lit {
 			labelBtn = labelBtn.TextColor(ink.AccentOn(t))
 		}
 		if labelBtn.Clicked() {
@@ -803,6 +881,19 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem) {
 			s.hist.remove(item.Value)
 		}
 	})
+}
+
+// navPicked 报「这个词是不是键盘导航正选中的那一条」。
+//
+// ⚠️ **按下标比对，不是按下标当词**：`nav.sel` 是 `nav.items`（每帧重建、历史
+// 在前联想在后的扁平表）的下标。词会有重复（历史和联想可能都是「周杰伦」）——
+// 比「这一条词是不是 items[sel]」而不是「这是第几条」，这样画到第几条就是第几条
+// 亮，同名的两条都亮也亮得对（它们本来就是同一个词）。
+func (s *Shell) navPicked(term string) bool {
+	if !s.nav.armed || s.nav.sel < 0 || s.nav.sel >= len(s.nav.items) {
+		return false
+	}
+	return s.nav.items[s.nav.sel] == term
 }
 
 // submitSearch 是「拿这个词去搜」：记进历史、带着词切到搜索页、收起浮层。

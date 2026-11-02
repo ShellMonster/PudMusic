@@ -134,6 +134,35 @@ type suggestTerms struct {
 	scroll ui.ScrollState
 }
 
+// suggestNav 是联想面板的**键盘导航**状态（2026-11 重设计）：↑↓ 在历史 chip
+// 和联想词两档之间上下走，回车搜选中的那一条。
+//
+// # 为什么是「扁平下标」
+//
+// 面板上摆着的是**两块**（历史那一排折行的 chip、联想词那一列整行），而方向键
+// 是**一条线**——用户按 ↓ 期望的是「走到下面那一条」，不管它在哪一档。所以这里
+// 把两档摊平成一条 `[]string`（画出来的顺序：历史在上、联想在下），`sel` 是它
+// 的下标。-1 = 没选中（回车还是搜框里的词）。
+//
+// ⚠️ **选中的是「词」不是「元素」**：chip 那一排是**折行**的，「林俊杰」在第几
+// 行第几列由面板宽和词长决定，下标 `sel` 不知道也不该知道——画的时候按「这一条
+// 词是不是 items[sel]」上选中底，布局的事交给布局。
+type suggestNav struct {
+	// items 是这一帧可走的词，扁平、按画出来的顺序：历史在前、联想在后。
+	// 每帧在 viewSuggest 里重建（那一摊词每一帧都可能变）。
+	items []string
+	// sel 是 items 里选中的下标，-1 = 没选中。
+	sel int
+	// armed 是「键盘导航被方向键激活过」。零值 `suggestNav{}` 的 `sel` 是 0，
+	// 会把第一条误当成选中——所以选中与否看 `armed`，不看 `sel` 自己是不是
+	// -1：只有按过方向键（置真）才算「用户选中了一条」，敲字 / 收浮层都把它
+	// 放回 false。
+	armed bool
+	// reveal 是「刚用方向键挪到了这一条，把它滚到看得见」。
+	// 只在按方向键那一帧置真，画的时候读一次就清。
+	reveal bool
+}
+
 // syncSuggestPending 推进联想词那个防抖，**不碰收浮层那一支**。
 //
 // ⚠️ **它和 `syncSuggest` 的区别只有一处**：`syncSuggest` 在浮层关着 / 框里空了
@@ -297,9 +326,18 @@ func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
 		FillWidth().Radius(t.Radius).
 		Padding(suggestTermPadY, suggestTermPadX).
 		Gap(space.Px8).AlignItems(ui.Center)
-	// 悬停才显底色——平时一列字摆在那儿，指针扫过去有反应，用户才知道点得动。
-	if row.Hovered() {
+	// 两种「亮起来」：
+	//   - 悬停（指针扫过去）——原来就有；
+	//   - 键盘选中（方向键刚挪到这一条，`navPicked`）——和悬停同一片底。
+	//
+	// 同一片 `SurfaceHover`：选中态不是新颜色，用户从「指针扫过会亮」已经知道
+	// 这一片亮是「这一条是焦点」。方向键挪到这一条时 `reveal` 把它滚到看得见。
+	picked := s.navPicked(term)
+	if row.Hovered() || picked {
 		row = row.Background(t.SurfaceHover)
+	}
+	if picked && s.nav.reveal {
+		row.ScrollIntoView()
 	}
 	row.Children(func() {
 		ui.Icon(c, icon(iconSearch)).FontSize(iconSm).TextColor(t.TextMuted)

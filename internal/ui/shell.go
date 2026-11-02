@@ -759,6 +759,11 @@ type Shell struct {
 	// 挂在壳上而不是局部变量：即时模式每一帧都重画，「敲到哪儿了、从哪天起等的
 	// 那 500ms」下一帧就得还在。
 	terms suggestTerms
+	// nav 是联想面板的键盘导航状态（↑↓ + 回车选中，2026-11 重设计）。
+	//
+	// 挂在壳上：选中的是「词」，而词这一摊每一帧都在变（联想回来、历史增删、
+	// 又敲了一个字）——`sel` 跟着 `items` 走，`items` 每帧重建。
+	nav suggestNav
 	// feed 是「动态更新红点」的 5 分钟节奏。假时钟在 navbar_feed.go。
 	feed *feedPoller
 	// hist 是搜索历史。没挂上盘时是内存里的一份（见 searchhistory.go）。
