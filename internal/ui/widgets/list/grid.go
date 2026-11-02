@@ -152,6 +152,28 @@ type Grid struct {
 	// 一模一样（见 list.go 的同名字段）。
 	ownerTip rowkey.Memo[string, string]
 
+	// rowSelParts 是**当帧读出来的那段选中**（`rowSel` 那一列的）。
+	//
+	// ⚠️ **每帧读一次**：框架的选中会自己变（选中变了、段落被重建了、那一段
+	// 没了），所以不能记成一份「上一帧的」。
+	rowSelParts []ui.SelectedText
+
+	// rowSel 是**每一格标题那一列**的句柄（票 #703 的 A）。
+	//
+	// ⚠️ **一个句柄只能绑一个元素**（框架的 `Bind` 会在同一个 build 里绑两个
+	// 时 panic），所以每一格得有一个自己的。
+	rowSel []ui.Handle
+
+	// rowSelText 是**当前那段文字选中**复制出去的那一段字（整格，票 #703 的 A）。
+	//
+	// ⚠️ **它和列表那一档是同一件事**（理由见 `row_select.go`）：拖选之后按 ⌘C
+	// 复制的是**那一格**（歌名 + UP 名 + 时长），不是「用户拖到了哪几段」。
+	rowSelText string
+
+	// wiring 是**每一格那一列**记好的四样回调（票 #703 的 A，见 `row_select.go`
+	// 的 `rowWiring`；为什么记着不现建，见 `List.wiring`——同一笔账）。
+	wiring []*rowWiring
+
 	// sel 是选中的那一**首**，-1 是没选。帧里的点击由每一格自己写进来。
 	//
 	// ⚠️ 是「第几首」不是「第几格」：格子是布局，插入一首歌之后同一首歌的
@@ -606,6 +628,11 @@ func (g *Grid) View(c *ui.Context) {
 
 	// 量滚动条的悬停（理由同 `List.View` 末尾那一行）。
 	g.hot = scrollbar.Hot(e)
+
+	// ⚠️ **读当帧那一段文字选中**（票 #703 的 A）：理由同 `List` 那一档——
+	// 🔴 **必须排在 `ui.List` 构建**之后****：句柄是画格的时候绑的，排在前面
+	// 读到的永远是「无效」（理由见 `list.go` 那一段）。
+	g.rowSelection(c)
 }
 
 // Hot 报上一次 View 时指针是不是压在这个网格的滚动条上。见 `List.Hot`。
@@ -636,9 +663,18 @@ func (g *Grid) gridInput(ev ui.InputEvent) bool {
 	// `notifyCopied`）：收藏夹页按设置在两档之间切（`SwitchView`），而「选一首、
 	// ⌘C」在网格里也该成——不然同一个页面两种摆法两种行为。
 	if copyCommand(ev) && g.acts.Copy != nil {
+		// ⚠️ **先看「有没有选中一段字」**（票 #703 的 A）：拖选之后那才是
+		// 用户要的（整格）。
+		// ⚠️ **判的是「选中了字」**（`rowSelText` 只在真选中时非空，见
+		// `row_select.go` 的 `rowSelection`）。
+		if g.rowSelText != "" {
+			g.acts.Copy(g.rowSelText)
+			notifyCopied(g.acts, "歌曲信息")
+			return true
+		}
 		if m, ok := g.Selected(); ok {
 			g.acts.Copy(ShowOf(m).Title)
-			notifyCopied(g.acts)
+			notifyCopied(g.acts, "歌名")
 			return true
 		}
 	}
@@ -1106,46 +1142,73 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 		// 列表那一档的行高是定死的（`card.go` 的文件头），网格这一档不是——两处是
 		// 两件事，别把一边改成另一边的做法。
 		sh := ShowOf(m)
+		// 🔴 **这一列是可选中的**（票 #703 的 A）：拖一下就能复制**整格**
+		//（歌名 + UP 名 + 时长），而不只是「歌名那几个字」。
+		//
+		// ⚠️ **和列表那一档是同一套**（两层各管一摊：外层 `HandleInput` 接
+		// 手势，内层 `Selectable` 带作用域；`ContextMenu` 挂内层——框架的
+		// `textMenu` 对「Selectable 容器带菜单」让路，理由见 `row_select.go`
+		// 的文件头）。格子的 `ContextMenu` 保留——右键落在文字之外（封面、
+		// 空白）时走格子上那份。
+		//
+		// ⚠️ **`selectRow` 是原 `OnClick` 那一套**（选中 + 把焦点交给网格，票
+		// #453）：按在文字上时框架把焦点落在字上，格子自己的 `OnClick` 收不到
+		// release，所以选中要在按下这一头接回来；焦点也交回网格——点完按方向
+		// 键那一路（先 frame 再按键）走得到 `gridInput`。
+		// ⚠️ **四样回调是记好的那一份**（`wiringAt`，票 #313 的同一招，理由见
+		// `card.go` 普通行那一处）。
+		w := g.wiringAt(i)
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).PaddingY(cardGap).
+			HandleInput(w.input).
 			Children(func() {
-				ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
-					TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
-				ui.Row(c).Gap(cardGap).Children(func() {
-					if ownerLineShown(sh, m.Item.Invalid) {
-						ownerLine(c, ownerRow{
-							shown: sh,
-							name:  m.Owner,
-							mid:   m.Item.ArtistMid,
-							// ⚠ **提示是记好的那一份**（`g.ownerTip`）：现算的
-							// 话每帧每一格一次字符串拼接（票 #313 那一类）。
-							tip:   g.ownerTip.At(i, m.Owner, OwnerTipText),
-							size:  scale.Font(c, scale.ListOwner),
-							lh:    leading.Owner,
-							color: metaColor,
-							grow:  true,
-							acts:  g.acts,
-							// ⚠️ **失效的标签**：理由同 `card.go` 那一处。
-							invalid: m.Item.Invalid,
-						})
+				// 🔴 **可选中的那一列在**这一层**里面**：理由同 `card.go` 那一处
+				// （`row_select.go` 的文件头）。
+				ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(textGap).
+					Selectable().
+					ContextMenu(w.menu).
+					// ⚠️ **句柄绑在**可选中的那一列**上**：理由同 `card.go` 那一处。
+					Bind(g.rowSelHandle(i)).
+					CopyData(w.copy).
+					Children(func() {
+						ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.ListTitle)).LineHeight(leading.Title).
+							TextColor(titleColor).MaxLines(titleLines).Ellipsis("…")
+						ui.Row(c).Gap(cardGap).Children(func() {
+							if ownerLineShown(sh, m.Item.Invalid) {
+								ownerLine(c, ownerRow{
+									shown: sh,
+									name:  m.Owner,
+									mid:   m.Item.ArtistMid,
+									// ⚠ **提示是记好的那一份**（`g.ownerTip`）：现算的
+									// 话每帧每一格一次字符串拼接（票 #313 那一类）。
+									tip:   g.ownerTip.At(i, m.Owner, OwnerTipText),
+									size:  scale.Font(c, scale.ListOwner),
+									lh:    leading.Owner,
+									color: metaColor,
+									grow:  true,
+									acts:  g.acts,
+									// ⚠️ **失效的标签**：理由同 `card.go` 那一处。
+									invalid: m.Item.Invalid,
+								})
 
-					}
-					// 正在放的那一格：时长换成一句「正在播放」。
-					//
-					// ⚠️ **换掉时长而不是加在后面**：一格就那么宽，两样都画必然把
-					// 时长挤成「0:」——而用户读的是「正在放」不是那半截时长。
-					if playing {
-						// 标签带上歌名，理由见 card.go 那一处。颜色和上面那个歌名
-						// 是同一档「主色当字」（`ink.AccentOn`）。
-						ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
-							FontSize(scale.Font(c, scale.Size11)).TextColor(ink.AccentOn(t)).MaxLines(1)
-						return
-					}
-					// 时长没有就不画（Biu 的 `durationText` 为空时那一块
-					// 整个不渲染）。
-					if s := g.durText.At(i, m.Duration, formatDuration); s != "" {
-						ui.Text(c, s).FontSize(scale.Font(c, scale.Size12)).TextColor(metaColor).MaxLines(1)
-					}
-				})
+							}
+							// 正在放的那一格：时长换成一句「正在播放」。
+							//
+							// ⚠️ **换掉时长而不是加在后面**：一格就那么宽，两样都画必然把
+							// 时长挤成「0:」——而用户读的是「正在放」不是那半截时长。
+							if playing {
+								// 标签带上歌名，理由见 card.go 那一处。颜色和上面那个歌名
+								// 是同一档「主色当字」（`ink.AccentOn`）。
+								ui.Text(c, PlayingMark).Label(m.Title + " " + PlayingMark).
+									FontSize(scale.Font(c, scale.Size11)).TextColor(ink.AccentOn(t)).MaxLines(1)
+								return
+							}
+							// 时长没有就不画（Biu 的 `durationText` 为空时那一块
+							// 整个不渲染）。
+							if s := g.durText.At(i, m.Duration, formatDuration); s != "" {
+								ui.Text(c, s).FontSize(scale.Font(c, scale.Size12)).TextColor(metaColor).MaxLines(1)
+							}
+						})
+					})
 			})
 	})
 }

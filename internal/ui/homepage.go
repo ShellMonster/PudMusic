@@ -257,18 +257,11 @@ func newHomePage(cache *imgcache.Cache, acts list.Actions, wake func()) *homePag
 		// 按钮），再说一遍是噪音，而那一句还带着 B 站的原始码。
 		l.SetFailureNotice(false)
 		// ⚠️ **三档落在不同的位置上**（票 #368 的内容块按档分了 key，见
-		// homepage_pager.go 的 `homeBodyKeys`）：框架把滚动状态记在**元素的
-		// 位置**上，而同一个位置轮流画的几份列表会**抢同一份**——切回「音乐」
-		// 会落到第 6 首而不是它原来的第 19 首（实测）。
-		//
-		// 🔴 **不挂 ScrollState**（`list.PagedList.SetScrollState`）：挂着的时候
-		// 滚动位置由它记，而它记的是「元素那个位置」的——于是上一档留下的偏移
-		// 会拽走这一档（同一件事的另一面，见上面那一条）。
-		//
-		// 不挂它，那三档就各自按**自己的行锚点**记位置（`ui.ListState`，框架
-		// 本来就是按行记的）——而回顶那一枚的偏移改按行换算（列表那一档的行高
-		// 是定死的 64，差不到一行）。
-		l.SetScrollState(false)
+		// homepage_pager.go 的 `homeBodyKeys`）：滚动状态按元素位置记，同一个
+		// 位置轮流画的几份列表会抢同一份——key 不同就各是各的，互不干扰。
+		// 🔴 **挂 ScrollState**（`list.PagedList.SetScrollState` 的默认）：回顶
+		// 那一枚的门槛要的是**真实像素**（票 #703 的 B），按行换算（网格那一档
+		// 的行高是估的）会让按钮早一点或晚一点出现。
 		h.lists[i] = l
 	}
 
