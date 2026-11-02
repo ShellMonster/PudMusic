@@ -235,7 +235,7 @@ func TestTheMiniCardCoversTheWindow(t *testing.T) {
 	}
 	// 角上不许有那一档：底是拿整窗刷满的话，角上也画上了。
 	if inCardBand(miniPixel(img, 0, 0)) {
-		t.Errorf("左上角也落进了卡片底那一档：底是拿整窗刷满的，不是那块圆角卡片——"+
+		t.Errorf("左上角也落进了卡片底那一档：底是拿整窗刷满的，不是那块圆角卡片——" +
 			"贴边悬浮那一层（圆角那一圈透出桌面）就没有了")
 	}
 }
