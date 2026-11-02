@@ -97,6 +97,12 @@ const (
 	// `searchActionLabel` 那条）。
 	suggestPanelLabel = "搜索建议"
 
+	// suggestHistoryHeading / suggestClearLabel 是历史那一档的标题和右上角那枚
+	// 清空键的文案。2026-11 重设计照参考图叫「历史搜索」「清空全部」（原来是
+	// 「搜索历史」「清除全部」）。三档标题互不相同的铁律见 `suggestTermsHeading`。
+	suggestHistoryHeading = "历史搜索"
+	suggestClearLabel     = "清空全部"
+
 	// searchLabel 是搜索框的无障碍名字，也是测试认得它的凭据——无头 Tester 的
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
 	searchLabel = "搜索"
@@ -627,11 +633,11 @@ func suggestPanelMaxH(winH float32) float32 {
 //
 // ⚠️ **它要说清两件事**：删掉的是什么、能不能撤。删历史**没有撤销**——
 // B 站那边没有这一条路，用户自己删掉的那一条再也搜不回来。
-const clearHistoryTip = "清除全部搜索历史，删掉之后不能撤销"
+const clearHistoryTip = "清空全部搜索历史，删掉之后不能撤销"
 
-// viewSuggestHeader 是浮层顶上那一行：「搜索历史」和「清除全部」。
+// viewSuggestHeader 是浮层顶上那一行：一只钟 +「历史搜索」，右边是「清空全部」。
 //
-// 「清除全部」照 Biu 的 `clearSearchHistory`（`search/index.tsx:122-138`）。
+// 「清空全部」照 Biu 的 `clearSearchHistory`（`search/index.tsx:122-138`）。
 //
 // 🔴 **它是这一块唯一的不可逆动作**（票 BMG-253）：它一次性删掉全部搜索历史，
 // 而 B 站那边没有「撤销」——所以它照**本仓库其它破坏性动作的画法**来：
@@ -647,20 +653,18 @@ const clearHistoryTip = "清除全部搜索历史，删掉之后不能撤销"
 //
 // ⚠️ **提示要说清它删的是什么、能不能撤**：原来它**一句提示都没有**，用户
 // 只看见一个 12px 的淡灰字，点了才知道自己删掉了什么。
+//
+// 标题行的形状（图标 + 14/400 的字）和另外两档共用 `viewSuggestHeading`。
 func (s *Shell) viewSuggestHeader(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).Key("suggest-header").FillWidth().Gap(space.Px8).
-		AlignItems(ui.Center).Padding(space.Px2, space.Px4, space.Px6, space.Px4).Children(func() {
-		// 14/400（上游 `text-sm`，`search/index.tsx:126`）。**不许加粗**：
-		// 上游那一行是正文那一档，靠字号和上面那排 chip 分开，不靠字重。
-		ui.Text(c, "搜索历史").FontSize(scale.Font(c, scale.Size14)).Grow(1)
+	viewSuggestHeading(c, "suggest-header", iconClock, suggestHistoryHeading, func() {
 		// ⚠️ **字还是 12**（票面量过：标题 14、这一枚 12，见
 		// `navbar_search_form_test.go` 的那条用例）——所以图标那一枚也是 14
 		// 那一档的小图标，而不是 18 的大图标（18 会把这一行撑高）。
 		clear := flatButton(c, "")
 		clear.Children(func() {
 			ui.Icon(c, icon(iconDelete)).FontSize(iconSm)
-			ui.Text(c, "清除全部").FontSize(scale.Font(c, scale.Size12))
+			ui.Text(c, suggestClearLabel).FontSize(scale.Font(c, scale.Size12))
 		})
 		if s.withTip(c, clear, clearHistoryTip).TextColor(t.TextMuted).Clicked() {
 			s.hist.clear()

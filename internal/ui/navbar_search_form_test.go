@@ -199,7 +199,7 @@ func TestSearchHistoryIsAGreyChip(t *testing.T) {
 // TestSearchHistoryHeadingIsFourteenRegular 验历史标题 14/400。
 //
 // 400 那一半由代码里的「没有 Bold()」保证；画面上能量的是字号：同一行里
-// 「清除全部」是 12，标题比它高一档（14 的墨迹高度多 2.36 像素，13 只多 1.18）。
+// 「清空全部」是 12，标题比它高一档（14 的墨迹高度多 2.36 像素，13 只多 1.18）。
 func TestSearchHistoryHeadingIsFourteenRegular(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)
@@ -210,16 +210,16 @@ func TestSearchHistoryHeadingIsFourteenRegular(t *testing.T) {
 	}
 	tt.Frame()
 
-	head, ok := tt.Find("搜索历史")
+	head, ok := tt.Find(suggestHistoryHeading)
 	if !ok {
 		t.Fatalf("浮层上没有历史标题，文字有 %q", tt.Texts())
 	}
-	clear, ok := tt.Find("清除全部")
+	clear, ok := tt.Find(suggestClearLabel)
 	if !ok {
-		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+		t.Fatalf("浮层上没有「清空全部」，文字有 %q", tt.Texts())
 	}
 	if d := head.H - clear.H; d < 1.6 {
-		t.Errorf("历史标题高 %.2f、12 号的「清除全部」高 %.2f（差 %.2f）——"+
+		t.Errorf("历史标题高 %.2f、12 号的「清空全部」高 %.2f（差 %.2f）——"+
 			"标题还是 13 号（13 与 12 的墨迹高度只差 1.18）", head.H, clear.H, d)
 	}
 }
@@ -345,7 +345,7 @@ func TestTheHistoryChipCloseButtonIsNotSmallerThanItsLabel(t *testing.T) {
 	}
 }
 
-// TestTheClearAllButtonShowsATrashBin 验「清除全部」那一枚**画着垃圾桶**
+// TestTheClearAllButtonShowsATrashBin 验「清空全部」那一枚**画着垃圾桶**
 // （票 BMG-253）。
 //
 // # 为什么它要有牙齿
@@ -372,9 +372,9 @@ func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
 	// 像素，所以必须先让它淡进来。
 	settleSuggestEnter(t, tt)
 
-	clear, ok := tt.Find("清除全部")
+	clear, ok := tt.Find(suggestClearLabel)
 	if !ok {
-		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+		t.Fatalf("浮层上没有「清空全部」，文字有 %q", tt.Texts())
 	}
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
 	// 那枚图标画的是按钮的字色（次要色那一档）。
@@ -385,7 +385,7 @@ func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
 		H: clear.H,
 	}
 	if n := countNear(tt.Image(), icon, th.TextMuted); n == 0 {
-		t.Errorf("「清除全部」左边没有墨迹（%v）——它没有画那枚垃圾桶图标，"+
+		t.Errorf("「清空全部」左边没有墨迹（%v）——它没有画那枚垃圾桶图标，"+
 			"用户看不出这一下是不可逆的", icon)
 	}
 }

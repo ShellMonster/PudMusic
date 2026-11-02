@@ -11,7 +11,7 @@
 // # 存的图
 //
 //	12  顶栏右半：搜索框（放大镜静止 / 悬停）+ 头像（悬停）
-//	13  搜索建议浮层：历史 chip（连着那个「×」）+「清除全部」+ 它那句提示
+//	13  搜索建议浮层：历史 chip（连着那个「×」）+「清空全部」+ 它那句提示
 //	14  收藏夹头图区：创建者那一行（悬停在下划线上）
 package ui
 
@@ -89,7 +89,7 @@ func saveTicket253TopBar(t *testing.T, dir string, st app.Settings, dark bool, n
 	b.Close()
 }
 
-// saveTicket253Suggest 存搜索建议浮层：历史 chip（连着那个「×」）+「清除全部」。
+// saveTicket253Suggest 存搜索建议浮层：历史 chip（连着那个「×」）+「清空全部」。
 func saveTicket253Suggest(t *testing.T, dir string, st app.Settings, dark bool, name string) {
 	t.Helper()
 	b := newTestShell(t, at(1200, 800), systemIsDark(dark), withSettings(st))
@@ -103,14 +103,14 @@ func saveTicket253Suggest(t *testing.T, dir string, st app.Settings, dark bool, 
 	}
 	tt.Frame()
 
-	head, ok := tt.Find("搜索历史")
+	head, ok := tt.Find(suggestHistoryHeading)
 	if !ok {
 		t.Fatalf("浮层没开，文字有 %q", tt.Texts())
 	}
-	// 指针停在「清除全部」上：那一句提示（删的是什么、能不能撤）就该出来。
-	clear, ok := tt.Find("清除全部")
+	// 指针停在「清空全部」上：那一句提示（删的是什么、能不能撤）就该出来。
+	clear, ok := tt.Find(suggestClearLabel)
 	if !ok {
-		t.Fatalf("浮层上没有「清除全部」，文字有 %q", tt.Texts())
+		t.Fatalf("浮层上没有「清空全部」，文字有 %q", tt.Texts())
 	}
 	tt.Move(clear.X+clear.W/2, clear.Y+clear.H/2)
 	tt.Frame()

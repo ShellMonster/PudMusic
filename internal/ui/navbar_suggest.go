@@ -39,19 +39,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	// suggestTermsHeading 是那一档顶上那一句。
+	// suggestTermsHeading 是那一档顶上那一句。2026-11 重设计照参考图叫「搜索联想」
+	// （原来是「联想词」）。
 	//
-	// ⚠️ 它必须和「搜索历史」不一样，而**更要紧的是它必须和浮层里别的字都不一样**：
+	// ⚠️ 它必须和「历史搜索」不一样，而**更要紧的是它必须和浮层里别的字都不一样**：
 	// 无头 Tester 的 `Find` 认「画着这句字**或者**标着这个名字」的元素，两处叫同
-	// 一个名字的话，按名字找会撞车（返回先建的那个）。这里和历史那一档、搜索框
-	// 那个 placeholder（「搜索」）三处互不相同。
-	suggestTermsHeading = "联想词"
+	// 一个名字的话，按名字找会撞车（返回先建的那个）。这里和历史那一档、面板本体
+	// （`suggestPanelLabel`）、搜索框那个 placeholder（「搜索」）互不相同——「搜索联想」
+	// 和「搜索」是两个字串，`Find` 逐字相等，不撞。
+	suggestTermsHeading = "搜索联想"
 
 	// suggestTermsKey 是这一档那一块的键（铁律四）。它和历史那一档的
 	// `suggest-history` 分开，于是两栏是两块而不是一栏。
@@ -79,8 +82,15 @@ const (
 	// suggestTermPadY / suggestTermPadX 是联想词那一行的上下 / 左右留白。
 	//
 	// 比 chip 那圈大一点：chip 是小圆角的小块，而联想词是**一整行**，行高小一点
-	// 的话指针扫过去时行与行之间几乎没有可停的地方。
-	suggestTermPadY, suggestTermPadX = space.Px5, space.Px8
+	// 的话指针扫过去时行与行之间几乎没有可停的地方。2026-11 重设计把上下从 5
+	// 放到 8：行里多了一枚放大镜，参考图里每一行也更松（约 36 高）。
+	suggestTermPadY, suggestTermPadX = space.Px8, space.Px8
+
+	// suggestHeadingPadTop / Right / Bottom / Left 是三档标题行那一圈留白（历史
+	// 那一档原来就是这几个数，现在三档共用）。
+	suggestHeadingPadTop, suggestHeadingPadRight   = space.Px2, space.Px4
+	suggestHeadingPadBottom, suggestHeadingPadLeft = space.Px6, space.Px4
+	suggestTermsHeadingKey, suggestHotHeadingKey   = "suggest-terms-header", "suggest-hot-header"
 
 	// suggestTermsGap 是历史那一档和联想词那一档之间留的那一道空隙。
 	//
@@ -208,7 +218,27 @@ func (s *Shell) suggestSearching() bool {
 	return !s.terms.pendingSince.IsZero()
 }
 
-// viewSuggestTerms 画浮层里那一档「联想词」。
+// viewSuggestHeading 画一档的标题行：一枚小图标 + 标题字，右边可选再摆点东西
+// （历史那一档摆「清空全部」）。三档共用，于是三行长得一样——两栏是平级的，
+// 谁也不比谁大：图标 `iconSm`、次要色；标题 14/400（上游历史标题是 `text-sm`，
+// **不许加粗**，靠字号和下面那排内容分开，不靠字重）。
+//
+// 2026-11 重设计照参考图给每一档加的图标：历史是一只钟、联想是一枚放大镜、
+// 「大家在听」是一个音符。
+func viewSuggestHeading(c *ui.Context, key, name, title string, trailing func()) {
+	t := c.Theme()
+	ui.Row(c).Key(key).FillWidth().Gap(space.Px8).AlignItems(ui.Center).
+		Padding(suggestHeadingPadTop, suggestHeadingPadRight, suggestHeadingPadBottom, suggestHeadingPadLeft).
+		Children(func() {
+			ui.Icon(c, icon(name)).FontSize(iconSm).TextColor(t.TextMuted)
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+			if trailing != nil {
+				trailing()
+			}
+		})
+}
+
+// viewSuggestTerms 画浮层里那一档「搜索联想」。
 //
 // ⚠️ **一个都没有、也没失败，就不摆**（调用方也判一次）：那一档空着的时候浮层上
 // 只有历史那一档，而历史那一档永远在——「联想这一栏空着」和「这一趟没拉到」在
@@ -222,10 +252,7 @@ func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
 	}
 	t := c.Theme()
 	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(space.Px2).Children(func() {
-		// 标题和「搜索历史」那一句同一个字号和粗细：两栏是平级的，谁也不比谁大。
-		// 两处都是 14/400（上游历史标题是 `text-sm`；联想词这一栏没有标题，
-		// 这一句是我们自己的，跟着它走）。
-		ui.Text(c, suggestTermsHeading).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		viewSuggestHeading(c, suggestTermsHeadingKey, iconSearch, suggestTermsHeading, nil)
 		if len(items) == 0 {
 			// 失败：这一档说一句自己的话（理由见 suggestFailedNote）。
 			//
@@ -243,7 +270,7 @@ func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool) {
 // viewSuggestHot 画框里还没敲字时的「大家在听」那一档：热榜前几首的歌名，点一个就搜。
 func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
 	ui.Column(c).Key(suggestHotKey).FillWidth().Gap(space.Px2).Children(func() {
-		ui.Text(c, suggestHotHeading).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+		viewSuggestHeading(c, suggestHotHeadingKey, iconEmptyMusic, suggestHotHeading, nil)
 		for _, title := range titles {
 			s.viewSuggestTerm(c, title)
 		}
@@ -256,10 +283,11 @@ func (s *Shell) viewSuggestHot(c *ui.Context, titles []string) {
 // 的、哪个是 B 站给的」这件事就没有答案了（规格第二条）。所以这里是**一整行**、
 // 左对齐、没有边框、悬停才显出底色——和那排带边框、带 × 的 chip 一眼能分开。
 //
-// ⚠️ **命中的那几个字染成上游那个粉**（票 #138 的顺带那一条）：上游把 B 站回包里
-// 命中的部分染成粉色（回包里的 `name` 把命中的字包在 `<em>` 里，上游渲染成粉
-// 色），而我们取的是干净的 `term`——**十行全是同一种灰，用户得逐行读完才知道
-// 哪条对得上自己敲的那几个字**。
+// 每一行左边一枚放大镜（2026-11 重设计照参考图）：它是「这是一个可以去搜的词」
+// 的图形提示，和顶栏那枚是同一个图标、次要色。
+//
+// ⚠️ **命中的那几个字染主色**（`suggestHitColor`）：十行全是同一种灰，用户得逐行
+// 读完才知道哪条对得上自己敲的那几个字。
 //
 // Label 不只是给测试用的：读屏软件念出来的是这一条词，而正文（Children 里那个
 // Text）不念。
@@ -268,12 +296,13 @@ func (s *Shell) viewSuggestTerm(c *ui.Context, term string) {
 	row := ui.ButtonBase(c).Label(term).
 		FillWidth().Radius(t.Radius).
 		Padding(suggestTermPadY, suggestTermPadX).
-		AlignItems(ui.Start)
+		Gap(space.Px8).AlignItems(ui.Center)
 	// 悬停才显底色——平时一列字摆在那儿，指针扫过去有反应，用户才知道点得动。
 	if row.Hovered() {
 		row = row.Background(t.SurfaceHover)
 	}
 	row.Children(func() {
+		ui.Icon(c, icon(iconSearch)).FontSize(iconSm).TextColor(t.TextMuted)
 		// ⚠️ **三段：前缀 / 命中段 / 后缀**。命中段是**自己算的**（拿用户已经
 		// 敲的词在 `term` 里找）——B 站回包里的 `name` 带 `<em>` 标签，而**服务层
 		// 取的是干净的 `term`**（那个判断是对的：拿带标签的 `name` 去搜，等于把
@@ -337,20 +366,20 @@ func splitSuggestion(typed, term string) (pre, hit, post string) {
 	return "", "", term
 }
 
-// suggestHitColor 是联想词那一行里「命中的那几个字」的颜色。
+// suggestHitColor 是联想词那一行里「命中的那几个字」的颜色：**主色当字色**那一档
+// （`ink.AccentOn`），2026-11 重设计照参考图定的——命中段跟主题主色走。
 //
-// ⚠️ **上游那个粉在浅色底上不够**：#F54180 压在白底上是 3.5:1（AA 的门槛是
-// 4.5:1），而这一行是 13px 的正文。所以**浅色那一档压暗一档**（5.2:1），深色
-// 那一档用上游那个数（压在深色底上是 5.0:1）。
+// ⚠️ **不能直接拿 `t.Accent`**：主色是用户可设的，浅色主题下默认那个亮绿压在白底
+// 上不到 2:1，整行读不出来（理由在 `flatbutton.go` 的 `flatCurrent` 那一段，票
+// #139 处理那一族）。`ink.AccentOn` 是从用户选的主色现算一个对底 ≥4.5:1 的变体，
+// 深色下原样——颜色的身份留着，字读得出来。
 //
-// ⚠️ **别拿主色当这一段的字色**：那个亮绿压在白底上不到 2:1，整行读不出来
-// （理由在 `flatbutton.go` 的 `flatCurrent` 那一段，票 #139 处理那一族）。
+// ⚠️ **也不是 `t.AccentText`**：那是「主色当**底**」时压在上面的黑 / 白字色
+// （`applyAccent` 按主色亮度挑的），和这里「主色当**字**」是两件事（`ink.go` 的
+// `AccentOn` 注释把两者的关系写清了）。
 //
-// 出处：上游 `src/app.css` 的 `.suggest_high_light,.keyword{color:#F54180}`。
+// 旧口径是上游写死的粉 `#F54180`（`src/app.css` 的 `.suggest_high_light`），浅色下
+// 还得压暗一档才过 AA——一个不随主题走的颜色，用户换了主色它还是粉的，已废。
 func suggestHitColor(t *ui.Theme) ui.Color {
-	pink := ui.Color{R: 0xF5, G: 0x41, B: 0x80, A: 255}
-	if t.Dark {
-		return pink
-	}
-	return pink.Mix(ui.Color{A: 255}, 0.2)
+	return ink.AccentOn(t)
 }
