@@ -399,6 +399,25 @@ func newTestShell(t *testing.T, opts ...shellOpt) *testShell {
 		// 候选，而候选是 `inner` build 的时候登记的。
 		inner := view
 		view = func(c *mygoui.Context) {
+			// ⚠️ **这一帧的共享输入要先取一份**（票 #721）：生产路上那一句在
+			// `Shell.View` 里（`shell_view.go`），而 `withView` 换掉了整支 view
+			// ⇒ `Shell.View` 不会被调到 ⇒ `framePage` 永远是空的 ⇒
+			// `pageInput()` 的**每帧缓存永远不命中** ⇒ **每一帧都重建整份
+			// seam**。
+			//
+			// 实测（instrumented，`pageSeam()` 里数）：满屏播放器那一档**每帧重建
+			// 20 次**（生产是 1 次），而每一份 seam 是 6 次 / 96 字节 ⇒ 那一档
+			// 量到的 153 次里**有 114 次是测量台自己造出来的**——量的是一台
+			// 不存在的机器，不是用户看见的那一屏。
+			//
+			// ⚠️ **这里必须照抄生产的做法**（`Shell.View` 里那一句的位置也是
+			// **画之前**）：这一份是「这一帧页面读到的那一份共享状态」，而页面
+			// 是在 build 的时候读的——先取再画，页面读到的才是这一帧的。
+			//
+			// ⚠️ **App 被摘掉时不动这一份**（`captureFramePage` 那一段）：迷你
+			// 外壳有一条测试要临时把 App 摘掉，而那一次失败**要留在画的那一趟
+			// 里面**（崩溃兜底要验的就是它）。
+			s.captureFramePage()
 			inner(c)
 			s.drawTip(c)
 		}
