@@ -1198,14 +1198,20 @@ func (s *Shell) viewMiniCurtainMenu(c *ui.Context, t *ui.Theme) {
 						// ⚠️ **先回主窗再开弹窗**：那个弹窗画在主窗口那一层
 						// （`lyricssearch.go`），而这一扇是迷你窗——不切回去的话，
 						// 弹窗弹到一扇收着的窗上，用户看不见。
-						if s.main != nil && s.toggleMini != nil {
+						//
+						// ⚠️ **`s.main` 要在 `toggleMini` 之前抓**：`dropMini` 会把
+						// `mini.main` 摘成 nil，先调它再读 `s.main` 就读不到了——
+						// 弹窗落在**主窗那个外壳**上这一点要钉在这，不能靠
+						// 「恰好摘在 Open 之后」的顺序侥幸。
+						main := s.main
+						if main != nil && s.toggleMini != nil {
 							s.toggleMini()
 						}
 						// ⚠️ **开弹窗的是主窗那个外壳**：搜索状态是外壳自己的
 						// （`Shell.lyricSearch`），而两个外壳是**两份**——迷你这一份
 						// 从来没挂过那个弹窗。
-						if s.main != nil {
-							s.main.openLyricSearch()
+						if main != nil {
+							main.openLyricSearch()
 						}
 					}
 					if m.Item("收起歌词").Chosen() {
