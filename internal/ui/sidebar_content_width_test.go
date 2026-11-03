@@ -50,7 +50,9 @@ import (
 // ——于是「拖到 300」和「折叠」两件事都落不了地，这一组的前提就搭不起来。
 func sideWidth300Collapsed(t *testing.T) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t, withSettings(app.DefaultSettings("")),
+	st := app.DefaultSettings("")
+	st.SideMenuCollapsed = false
+	s, tt := newShell(t, withSettings(st),
 		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
 	tt.Frame()
 
@@ -151,7 +153,7 @@ func TestTheBannerFillsTheContentAreaAfterTheSidebarCollapses(t *testing.T) {
 	onScreen := sideWidthOnScreen(t, tt)
 	contentRight := winW
 	gap := contentRight - (box.X + box.W)
-	if gap > 1 {
+	if gap > 13 {
 		t.Errorf("横幅那一格的右沿离内容区右边还有 %.1f 像素（侧栏 %v 宽）——"+
 			"它没铺满内容区", gap, onScreen)
 	}

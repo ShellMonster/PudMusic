@@ -176,6 +176,7 @@ func (s *Shell) viewSide(c *ui.Context) {
 	// 去掉它，侧栏和内容区在浅色下会**完全一样**（两个都是 `#ffffff`），
 	// 于是「统一底色」就变成了「抹掉层次」，那正是这一票要避开的反面。
 	side.Width(w).AlignSelf(ui.Stretch).Background(s.sidebarBackground(c.Theme())).
+		Radius(24).Clip().
 		BorderWidth(0, sideDividerW, 0, 0).
 		BorderColor(c.Theme().Border.Alpha(sideDividerA)).
 		Children(func() {

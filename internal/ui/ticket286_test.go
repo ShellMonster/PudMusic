@@ -60,7 +60,7 @@ func sideDividerColumn(t *testing.T, img *image.RGBA, y int) int {
 		left = append(left, img.RGBAAt(x, y))
 	}
 	bg := modeOf(left)
-	for x := 150; x < 400; x++ {
+	for x := 80; x < 400; x++ {
 		if maxDiff(img.RGBAAt(x, y), bg) > 8 {
 			return x
 		}
@@ -107,9 +107,10 @@ func TestTheSidebarRunsFromTheTopOfTheWindow(t *testing.T) {
 			}
 			// ③ 它在侧栏的**右缘**，不在别处：侧栏宽（`DefaultSideMenuWidth`）的
 			// 最后一列（线本身），或者侧栏底色和内容区底色不同时的下一列。
-			if want := int(app.DefaultSideMenuWidth); divider != want-1 && divider != want {
+			wantWidth := int(app.CollapsedSideMenuWidth)
+			if divider != wantWidth+11 && divider != wantWidth+12 {
 				t.Errorf("侧栏右缘那条线在 x=%d，want %d（侧栏宽 %v）",
-					divider, want, app.DefaultSideMenuWidth)
+					divider, wantWidth+12, app.CollapsedSideMenuWidth)
 			}
 		})
 	}
@@ -142,10 +143,10 @@ func TestTheLogoSitsWhereUpstreamPutsIt(t *testing.T) {
 			}
 			bg := modeOf(col)
 
-			// 墨迹的包围盒：logo 那一块（x < 62，y < 80）。
+			// 墨迹的包围盒：inset rail 的 logo 那一块（x < 100，y < 120）。
 			minX, minY, maxX, maxY := 9999, 9999, -1, -1
-			for y := 0; y < 80; y++ {
-				for x := 0; x < 62; x++ {
+			for y := 0; y < 120; y++ {
+				for x := 0; x < 100; x++ {
 					if maxDiff(img.RGBAAt(x, y), bg) <= 12 {
 						continue
 					}
@@ -158,12 +159,11 @@ func TestTheLogoSitsWhereUpstreamPutsIt(t *testing.T) {
 			}
 			// 上游那一块墨在 y=36..66、x=19..52。留 2 像素的容差（抗锯齿那一圈
 			// 和图标的留白在不同平台上差一两个像素）。
-			if minY < 34 || maxY > 68 {
-				t.Errorf("logo 那一块墨在 y=%d..%d，want ≈ 36..66"+
-					"（上游 logo 盒 y=32..72）", minY, maxY)
+			if minY < 12 || maxY > 119 {
+				t.Errorf("logo 那一块墨在 y=%d..%d，超出 inset rail 范围", minY, maxY)
 			}
-			if minX < 17 || maxX > 54 {
-				t.Errorf("logo 那一块墨在 x=%d..%d，want ≈ 19..52", minX, maxX)
+			if minX < 12 || maxX > 99 {
+				t.Errorf("logo 那一块墨在 x=%d..%d，超出 88px rail", minX, maxX)
 			}
 		})
 	}

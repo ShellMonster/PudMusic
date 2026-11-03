@@ -282,7 +282,9 @@ func (f *folderBili) deals() []urlValues {
 // 而真窗口里这一句在 `Shell.Attach` 里。测试不走 Attach。
 func folderShell(t *testing.T, f *folderBili) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t)
+	st := app.DefaultSettings("")
+	st.SideMenuCollapsed = false
+	s, tt := newShell(t, withSettings(st))
 	s.app.SetWake(s.wake.invalidate)
 
 	s.app.MountCollections(app.CollectionRefs{Client: fixtureClient(t, f), Settle: 0})
