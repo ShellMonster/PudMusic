@@ -194,11 +194,11 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 			ui.Text(c, "TUE · 11.03 · 晚上 9:41").FontSize(scale.Font(c, scale.Size12)).
 				FontWeight(weightMedium).TextColor(t.TextMuted)
 			ui.Row(c).Gap(space.None).Children(func() {
-				ui.Text(c, "今晚，").FontSize(scale.Font(c, 40)).
+				ui.Text(c, "今晚，").FontSize(scale.Font(c, scale.Size40)).
 					FontWeight(weightMedium).TextColor(t.Text)
-				ui.Text(c, "慢一点").FontSize(scale.Font(c, 40)).
+				ui.Text(c, "慢一点").FontSize(scale.Font(c, scale.Size40)).
 					FontWeight(weightMedium).TextColor(t.Accent)
-				ui.Text(c, "听。").FontSize(scale.Font(c, 40)).
+				ui.Text(c, "听。").FontSize(scale.Font(c, scale.Size40)).
 					FontWeight(weightMedium).TextColor(t.Text)
 			})
 			ui.Row(c).Gap(space.Px8).Children(func() {
@@ -244,7 +244,7 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 					for i, title := range []string{"晚风告白（现场版）", "海岸线 · 钢琴独奏", "月台", "给十七岁的信"} {
 						ui.Row(c).Key("home:overview:rank:"+strconv.Itoa(i)).Gap(space.Px12).Padding(space.Px8, space.None).
 							Border(1, t.Border).Children(func() {
-							ui.Text(c, "0"+strconv.Itoa(i+1)).FontSize(scale.Font(c, 28)).TextColor(t.Accent)
+							ui.Text(c, "0"+strconv.Itoa(i+1)).FontSize(scale.Font(c, scale.Size28)).TextColor(t.Accent)
 							ui.Column(c).Grow(1).Children(func() {
 								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
 								ui.Text(c, "夏夜录音棚 · 386万次播放").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)

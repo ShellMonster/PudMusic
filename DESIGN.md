@@ -261,6 +261,7 @@ size_scale:
   Size24: 24   # 页标题（上游 h1 = text-2xl）
   Size28: 28   # 404 那一页的大字
   Size30: 30   # 合集 / 收藏夹头图区的大标题（上游 text-3xl）
+  Size40: 40   # 首页总览原型主标题（问候语）
 spacing:
   unit: 4
   page_horizontal: 16        # px-4；行内再加 8，视觉对齐在 24
