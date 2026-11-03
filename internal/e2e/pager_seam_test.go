@@ -171,7 +171,7 @@ func findSeamNode(t *testing.T, client *automationClient, window int) (seamNode,
 		t.Fatalf("读元素树：%v", err)
 	}
 	for _, n := range tree.Nodes {
-		if n.Label == "pager-seam" || n.Key == "home:pager:seam" {
+		if n.Label == "页面接缝" || n.Label == "pager-seam" || n.Key == "home:pager:seam" {
 			return n, true
 		}
 	}

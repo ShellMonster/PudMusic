@@ -504,7 +504,7 @@ func TestThePagerShowsASkeletonWhileTheTabIsStillLoading(t *testing.T) {
 // 分割线是半透明混色画上去的（主题的 `Border`），画面上扫不到精确颜色——
 // 所以这一条断两样：
 //
-//  1. **元素在**：接缝处那一格挂在「pager-seam」这个名字下（`tt.Find` 按
+//  1. **元素在**：接缝处那一格挂在「页面接缝」这个名字下（`tt.Find` 按
 //     Label 找）；
 //  2. **位置对**：它的横向位置在两页接缝上——左页右缘（`oldX + width`），
 //     上下顶满容器。
@@ -518,7 +518,7 @@ func TestThePagerDrawsASeamBetweenTheTwoPagesWhileSliding(t *testing.T) {
 	s, tt := newHome(t, fullSongs())
 
 	// 静态：没滑动，接缝不在画面上。
-	if _, ok := tt.Find("pager-seam"); ok {
+	if _, ok := tt.Find("页面接缝"); ok {
 		t.Fatalf("没滑动的时候接缝分割线已经在画面上了——它只在滑动中出现")
 	}
 
@@ -533,7 +533,7 @@ func TestThePagerDrawsASeamBetweenTheTwoPagesWhileSliding(t *testing.T) {
 	if g.oldTab < 0 || g.newTab < 0 {
 		t.Fatalf("动画中途两档没有同时在（oldTab=%d newTab=%d）", g.oldTab, g.newTab)
 	}
-	seam, ok := tt.Find("pager-seam")
+	seam, ok := tt.Find("页面接缝")
 	if !ok {
 		t.Fatalf("滑动中途接缝处没有分割线（文字有 %q）——\n"+
 			"两页接缝处要画一条竖线，盖住被竖切的卡片右缘", tt.Texts())
@@ -563,7 +563,7 @@ func TestThePagerDrawsASeamBetweenTheTwoPagesWhileSliding(t *testing.T) {
 	// 走完之后：接缝不在，分割线也不在。
 	tt.Advance(homePagerDuration + 100*time.Millisecond)
 	tt.Frame()
-	if _, ok := tt.Find("pager-seam"); ok {
+	if _, ok := tt.Find("页面接缝"); ok {
 		t.Errorf("滑动走完之后接缝分割线还在画面上——它只在滑动中出现")
 	}
 }

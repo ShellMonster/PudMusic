@@ -578,10 +578,13 @@ func (h *homePage) viewPager(c *ui.Context, s *Shell) {
 		//
 		// ⚠️ **不透明**：`Clip()` 已经把它裁在容器里，它自己是实色——不
 		// 叠 alpha，免得接缝位置在深色底下发虚。
-		ui.Box(c).Key("home:pager:seam").Label("pager-seam").
+		//
+		// ⚠️ **不设 `RoleNone`**：e2e 要靠元素树的 bounds 量它的位置（判据
+		// 见 `internal/e2e/pager_seam_test.go`），而 `RoleNone` 会把元素挡在
+		// 树外。Label 用中文，无障碍朗读不会蹦英文串。
+		ui.Box(c).Key("home:pager:seam").Label("页面接缝").
 			Absolute().Left(oldX + width).Top(0).Bottom(0).
-			Width(homePagerSeamW).Background(c.Theme().Border).
-			Role(ui.RoleNone)
+			Width(homePagerSeamW).Background(c.Theme().Border)
 	})
 	// ⚠️ **量的是容器的盒子**（上一帧的）：两档横向错开的距离就是它。
 	h.pagerBox = box.LayoutBounds()
