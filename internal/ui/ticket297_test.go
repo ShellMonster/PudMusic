@@ -630,14 +630,17 @@ func saveNarrowSettingsShot297(t *testing.T, dir, tag string, side float64, scal
 
 	save(t, dir, "97-设置-最坏-"+tag+"-"+name+".png", tt)
 
-	// 再出一张滚到「主题」那一排的：那一排才是这一票的判据所在。
-	scrollSettingsTo(t, tt, b.s, "主题模式")
-	save(t, dir, "98-设置-最坏主题段-"+tag+"-"+name+".png", tt)
+	// 再出一张滚到「主题」那一排的：那一排才是这一票的判据所在，而它现在
+	// 在皮肤页上（那一整块搬过去了）。
+	b.s.navigate(appearancePath)
+	tt.Frame()
+	scrollAppearanceTo(t, tt, b.s, "主题模式")
+	save(t, dir, "98-皮肤-最坏主题段-"+tag+"-"+name+".png", tt)
 	b.Close()
 }
 
-// scrollSettingsTo 把设置页滚到某一排可见为止（组名在可视区里）。
-func scrollSettingsTo(t *testing.T, tt *mygoui.Tester, s *Shell, group string) {
+// scrollAppearanceTo 把皮肤页滚到某一排可见为止（组名在可视区里）。
+func scrollAppearanceTo(t *testing.T, tt *mygoui.Tester, s *Shell, group string) {
 	t.Helper()
 	for range 120 {
 		if r, ok := tt.Find(group); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
@@ -650,5 +653,5 @@ func scrollSettingsTo(t *testing.T, tt *mygoui.Tester, s *Shell, group string) {
 			break // 已经到底了，再滚也不动
 		}
 	}
-	t.Fatalf("设置页上滚不到 %q 那一排，文字有 %q", group, tt.Texts())
+	t.Fatalf("皮肤页上滚不到 %q 那一排，文字有 %q", group, tt.Texts())
 }
