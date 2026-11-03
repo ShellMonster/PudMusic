@@ -100,7 +100,7 @@ const (
 // 是 2026-10-26 本仓库**原创**补的四套（补上冷色和水墨/紫/蓝几个色相，对比度
 // 按 WCAG 现算过）——数值不取自任何现成的公开色板。
 //
-// 旧外观没有这一格，默认方案仍是暖纸。
+// 旧外观没有这一格；新版本默认使用 cobalt 设计体系。
 
 // 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
 // `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
@@ -115,18 +115,19 @@ const (
 	ThemePresetInkPaper    ThemePreset = "ink-paper"    // 墨宣
 	ThemePresetSandalwood  ThemePreset = "sandalwood"   // 紫檀
 	ThemePresetIndigoNight ThemePreset = "indigo-night" // 靛夜
+	ThemePresetCobalt      ThemePreset = "cobalt"       // 钴蓝
 	ThemePresetClassic     ThemePreset = "classic"
 )
 
 // DefaultThemePreset 是新设置的默认方案。
 //
-// 它是**生产默认**：应用还没发版，没有需要保住的旧外观，所以默认一律是暖纸
+// 它是**生产默认**：应用还没发版，没有需要保住的旧外观，所以默认一律是钴蓝
 // （缺键、空串、不认识的值都落到这里，见 `pickEnum`）。
 //
 // 「经典」这个**用户选项**照旧保留（设置页方案卡里有它，摆在最后一行末尾），它自己那套配色有
 // 专门的用例盯着（`internal/ui/themepreset_test.go` 及那几处按方案各跑一遍的
 // 截图用例）。而「生产默认是暖纸」由本包里的测试盯着（`themepreset_test.go`）。
-var DefaultThemePreset = ThemePresetWarmPaper
+var DefaultThemePreset = ThemePresetCobalt
 
 // 音质档位。默认是有损的高品质档（音乐库 320K / 投稿 192K），无损/杜比是显式选项——
 // 拿不到时由取流那层自动退到最高有损，不报错。
@@ -673,7 +674,7 @@ func (s *Settings) normalize() {
 	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
 		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach,
 		ThemePresetCeladon, ThemePresetInkPaper, ThemePresetSandalwood,
-		ThemePresetIndigoNight, ThemePresetClassic)
+		ThemePresetIndigoNight, ThemePresetCobalt, ThemePresetClassic)
 	// 认不出的值归一成默认的有损档；无损和杜比拿不到时由取流层退档。
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityHigh,
 		AudioQualityLossless, AudioQualityDolby, AudioQualityHigh,

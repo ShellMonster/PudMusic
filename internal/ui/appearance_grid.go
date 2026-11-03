@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	// skinCardColumns 是主题方案那一组一行摆几张。八套方案折成 3 行
+	// skinCardColumns 是主题方案那一组一行摆几张。九套方案折成 3 行
 	//（3 + 3 + 2），每张够大才看得出「这是一张界面」而不是一块色。
 	skinCardColumns = 3
 	// skinCardThumbH 是货架卡里缩略图的高。约 3:2，比控件列那版（46）
