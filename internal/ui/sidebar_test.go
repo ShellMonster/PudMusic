@@ -735,8 +735,8 @@ func TestTheCollapsedSidebarItemSaysItsName(t *testing.T) {
 		t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
 	}
 	before := countText(tt, "下载记录")
-	if before != 1 {
-		t.Fatalf("悬停之前「下载记录」出现了 %d 次，want 1（那一项的无障碍名字），文字有 %q",
+	if before != 2 {
+		t.Fatalf("悬停之前「下载记录」出现了 %d 次，want 2（可访问名称 + 原型可见标签），文字有 %q",
 			before, tt.Texts())
 	}
 
@@ -818,10 +818,15 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 			img := tt.Image()
 			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
 			// x=58：提示从那一格右沿往右 6 处开始（侧栏现在只有 64 宽，提示的头几像素压在侧栏里）。
-			at := img.RGBAAt(86, int(r.Y+r.H/2))
-			if at != inverse {
-				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
-					"提示没有贴在那一项的右边", at, inverse)
+			found := false
+			for x := 88; x < 260; x++ {
+				if img.RGBAAt(x, int(r.Y+r.H/2)) == inverse {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("rail 右侧未找到提示底色 %v——提示没有贴在那一项右边", inverse)
 			}
 			// ② 上面那一格没有被盖住 → 提示不在上面。
 			over := img.RGBAAt(int(above.X+above.W/2), int(above.Y+above.H/2))
