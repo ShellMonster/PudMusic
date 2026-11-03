@@ -14,7 +14,11 @@
 // 判成 `>=` 还是 `>` 写错了只有这一条看得出来。
 package ui
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
 
 // TestFollowColumnsFollowThePortraitBreakpoints 钉住关注页那张表：
 //
@@ -89,5 +93,63 @@ func TestTheFollowCardIsTheSlimKind(t *testing.T) {
 	}
 	if sign.H > 25 {
 		t.Errorf("签名那一段 %.1f 高——MaxLines(2) 下是约 39，MaxLines(1) 该是约 19.6（用户要一行）", sign.H)
+	}
+}
+
+// TestTheSelectedCellDividesByTheGivenColumns 钉住 `selectedCell` 那一步除法本身：
+//
+//	格号 ÷ 列数 == 游标所在的行号
+//
+// 游标是**行号**（`sel`），而高亮是**格**——「这一格选中没有」要拿它的行号去比。
+// 列数给错了（比如换成上一帧的），这一除就把整行高亮挪到别的格上。
+func TestTheSelectedCellDividesByTheGivenColumns(t *testing.T) {
+	var k listKeys
+	k.sel = 0
+	// 4 列下第 0 行是格 0~3，5 列下是格 0~4：第 4 格是分界。
+	if k.selectedCell(4, 4) {
+		t.Error("4 列下游标在第 0 行，第 4 格不该选中（4/4=1）")
+	}
+	if !k.selectedCell(4, 5) {
+		t.Error("5 列下游标在第 0 行，第 4 格该选中（4/5=0）")
+	}
+	// 列数传 0 或负数（「还没量出列数」那一帧）要答「没选中」，不能除零。
+	if k.selectedCell(0, 0) || k.selectedCell(0, -1) {
+		t.Error("列数还没量出来的时候，没有一格该算选中")
+	}
+}
+
+// TestTheCardSeesTheFramesColumns 钉住「换列数那一帧，高亮拿的是这一帧的列数」。
+//
+// # 根因（票 #740 对抗性审查的 P1）
+//
+// `viewFollowCardGuarded` 原来调 `f.keys.selectedCell(i, f.cols)`——`f.cols` 是
+// **上一帧**的列数（`f.cols = cols` 在 `viewFollowGrid` 末尾、画完这一段才换，
+// `keepFollowAnchor` 要先拿旧列数算锚点）。而 `viewFollowRow` 已经按**这一帧的
+// 新列数**摆格子了。于是换列数的那一帧，高亮拿旧列数去算「游标在第几格」，
+// 落错行——选中行秃掉最后一格、下一行多一块环。
+//
+// 修法：`selectedCell` 吃「这一帧正在摆的 cols」——`viewFollowRow` 顺着传下来。
+//
+// # 为什么钉的是源码而不是截图
+//
+// 那一帧在真窗口里一闪而过，而无头 Tester 的 `SetSize`/`Frame` 都会在内部把帧
+// 推进到「再也没有东西要画」为止——等拿到图，`f.cols` 已经追上了新列数，
+// 旧代码也画对了。试过了，截不到。所以这一条照
+// `TestEveryPageThatDrawsItsOwnListRegistersIt` 的先例，钉在源码上：
+// `viewFollowCardGuarded` 必须把形参 `cols`（`viewFollowRow` 传下来的、这一帧
+// 正在摆的那个）递给 `selectedCell`，不许递 `f.cols`。
+func TestTheCardSeesTheFramesColumns(t *testing.T) {
+	src, err := os.ReadFile("follow.go")
+	if err != nil {
+		t.Fatalf("读不到 follow.go：%v", err)
+	}
+	body := string(src)
+	if !strings.Contains(body, "selectedCell(i, cols)") {
+		t.Error("viewFollowCardGuarded 没把这一帧的 cols 传给 selectedCell——" +
+			"换列数那一帧高亮会拿上一帧的列数算「游标在第几格」，落错行")
+	}
+	if strings.Contains(body, "selectedCell(i, f.cols)") {
+		t.Error("viewFollowCardGuarded 又把上一帧的 f.cols 递回给 selectedCell——" +
+			"换列数那一帧高亮落错行（票 #740 的 P1，别让这一行回来）")
 	}
 }

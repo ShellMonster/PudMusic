@@ -87,14 +87,16 @@ const GridGap = gridGap
 // 用途：给 `Grid` 之外的网格画格子（`internal/ui` 的稍后再看 / 历史记录那一档）。
 func CellWidth(w float32, cols int) float32 { return cellWidth(w, cols) }
 
-// GridColumnsFor 是容器有 w 那么宽时排几列。
+// GridColumnsFor 是容器有 w 那么宽时排几列（**歌卡网格**的表）。
 //
 // ⚠️ **判据是容器的宽，不是窗口的**——页面左边还有侧栏，窗口宽不等于网格宽。
 // 用它的页面要量自己那个列表元素的盒子（`Element.Bounds()` 量的是**上一帧**
 // 的盒子，和 `Grid.View` 末尾那一句同一个节奏）。
 //
-// 用途是给 `Grid` 之外的网格用（关注页的用户卡，见 `internal/ui/follow.go`）。
-// 两者必须用同一个函数，否则用户在同一窗口宽度下会看到两种列数。
+// ⚠️ **这张表是歌卡的密度**（封面 140 高、横长形）。人像卡那种更密的网格用
+// 页面自己的表——关注页是 `followColumnsFor`（`internal/ui/follow.go`），
+// 同一窗口宽度下刻意比这里多一列（用户 2026-11-03 参考网易云关注页拍板）。
+// 别把那张表改回这一个：列数不同是**拍板**，不是不一致。
 func GridColumnsFor(w float32) int { return columnsFor(w) }
 
 // columnsFor 是容器有 w 那么宽时排几列。

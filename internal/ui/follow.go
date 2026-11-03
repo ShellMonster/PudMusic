@@ -1020,13 +1020,17 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 				// 不占位也不画边框）。
 				return
 			}
-			s.viewFollowCardGuarded(c, f, j)
+			s.viewFollowCardGuarded(c, f, j, cols)
 		}
 	})
 }
 
 // viewFollowCardGuarded 画一张卡，画崩了只废掉这一张。
-func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
+//
+// ⚠️ **`cols` 是这一帧正在摆的列数**（`viewFollowRow` 传下来的），不是上一帧的
+// `f.cols`——换列数那一帧格子已经按新列数摆了，而 `f.cols` 要等这一段画完才换
+// （`keepFollowAnchor` 要先拿旧列数算锚点），拿旧的去算「游标在第几格」会落错行。
+func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i, cols int) {
 	u := f.users[i]
 	if f.failed[u.Mid] {
 		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
@@ -1042,7 +1046,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 			log.Printf("biu: 关注页那张卡画崩了（%d）：%v\n%s", u.Mid, rec, debug.Stack())
 		}
 	}()
-	s.viewFollowCard(c, u, f.keys.selectedCell(i, f.cols), f.keys.ring(c))
+	s.viewFollowCard(c, u, f.keys.selectedCell(i, cols), f.keys.ring(c))
 }
 
 // viewFollowCard 画一张卡。
