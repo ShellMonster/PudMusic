@@ -131,7 +131,7 @@ func TestNavigatingClosesTheQueueDrawer(t *testing.T) {
 		t.Skipf("找不到 FLAC 测试素材：%v", err)
 	}
 
-	client, stop := startRealAppWithArgs(t, flac)
+	client, stop := startRealAppWithArgs(t, false, flac)
 	defer stop()
 	window := firstContentWindow(t, client)
 

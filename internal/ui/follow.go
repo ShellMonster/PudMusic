@@ -1011,7 +1011,12 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 	// 卡右边空出来的那一块会整块变成悬停底（实测 522×233 的 `#e9e9ec`），而那里
 	// 什么都没有。悬停反馈是**卡**的事（卡自己刷**卡片那一档**的悬停，见
 	// `viewFollowCard`）。
-	grid = list.LayoutRow(grid, t)
+	//
+	// ⚠️ **缝的底色取卡片那一档，不是页面底色**：`LayoutRow` 默认刷
+	// `t.Background`，而卡片的底是 `cardBackground`（方案的 `surface1`）——
+	// 两档不一样的时候，缝就是一道道比卡片更深的「沟」（用户报的怪色）。
+	// 卡片靠圆角和影分出边界，不需要缝再深一档。
+	grid = list.LayoutRow(grid, t, s.cardBackground(t))
 	grid.Children(func() {
 		for k := range cols {
 			j := first + k

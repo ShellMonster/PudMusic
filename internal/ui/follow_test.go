@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -1489,6 +1490,17 @@ func TestTheFollowCardSitsOnItsOwnBackground(t *testing.T) {
 				}
 				if resting == toRGBA(th.Background) {
 					t.Fatalf("卡片的底色和页面底色一样（%v）——整片 UP 主会看着连成一块", resting)
+				}
+
+				// ①′ 两卡之间的缝 = 卡片底（用户报的「缝比卡深一截」那一档）。
+				// 头像左边那一小块量的是卡；两卡之间那条竖缝量的是行底——
+				// 它们现在该是一个色。
+				gapX := int(av.X) - int(list.GridGap)/2 - 1
+				if gapX < 0 {
+					gapX = int(av.X) - 4
+				}
+				if gap := tt.Image().RGBAAt(gapX, py); gap != resting {
+					t.Errorf("两卡之间的缝是 %v，卡片底是 %v——缝比卡深一截", gap, resting)
 				}
 
 				// ② 悬停那一档：看得见、不是控件那一层、是从卡片底推的。
