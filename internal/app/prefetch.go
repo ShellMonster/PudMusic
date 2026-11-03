@@ -39,6 +39,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
@@ -106,6 +107,16 @@ type prefetchEntry struct {
 	item Item
 	// ref 是备好的流地址。
 	ref *bili.StreamRef
+	// src 是**正在预下载的那条字节源**：备好了地址之后顺手把它建起来，
+	// 边下边把字节写进盘上缓存（`CachePath` + `OffsetPath` + `ResumeFrom`
+	// 那一套）。真播下一首的时候它会被 `cancelFinishersForCache` 收回来，
+	// 新源从账本接着下——那一段「等首字节 + 等 moov」就省掉了。
+	//
+	// ⚠️ **它登记在 `a.finishers` 里**（和被收养的那一种共用保护、收回、
+	// 退出全关那一套），所以这里**不再单独 Close**：收回走 finisher 那一路，
+	// 作废**也不收**（见 `invalidatePrefetch`：作废的只是「下一首的
+	// 答案」，而已经下进缓存文件的字节不是白下——它就是缓存）。
+	src *audio.StreamSource
 	// err 是失败的原因（state 是 prefetchFailed 时才有）。
 	err error
 	// cancel 是「掐掉在途的那一趟」（context.CancelFunc，可以调任意次）。
@@ -318,10 +329,46 @@ func (a *App) runPrefetch(gen int, ctx context.Context, it Item) {
 		a.prefetchMu.Unlock()
 		return
 	}
-	a.prefetch = &prefetchEntry{state: prefetchReady, item: resolved, ref: ref}
 	a.prefetchMu.Unlock()
 
-	a.logf("biu: 下一首的流地址备好了：%q（%s）", resolved.Title, ref.Label)
+	// 🔴 **地址备好了，顺手把字节也备上**（2026-11-04）：只备地址的话，
+	// 真播那一趟省下的是「问 B 站」那一趟，而「等首字节 + 等 moov +
+	// 开解码器」照样要等——慢网上那段才是大头。
+	//
+	// 建一条**不播**的字节源：它边下边把字节写进盘上缓存，真播时
+	// `cancelFinishersForCache` 收回来，`resumeOffsetFor` 从前沿接着下。
+	// 建不起来 / 没挂缓存就退回「只备了地址」那一档——那也比没有强。
+	//
+	// ⚠️ **必须在 `prefetchMu` 外面建**：它要拿 `a.mu` 看一眼「这一份
+	// 有没有人在写」，还要等「上一次写它的人」的下载 goroutine 退出来
+	// （`cancelFinishersForCache` 里的 `Close`）——那段时间 prefetchMu
+	// 一直占着的话，`MoveNext` 触发的 `invalidatePrefetch` 会被拖住，
+	// 而那是用户按下一首的那条路径。
+	src := a.startPrefetchBytes(ctx, s, resolved, ref)
+
+	a.prefetchMu.Lock()
+	if a.prefetchGen != gen {
+		// 建源这一会儿队列又变了：这一份没人要了。
+		//
+		// ⚠️ **源不能就这么扔**：它已经在写盘上那个文件了。收回走
+		// finisher 那一路（`cancelFinishersForCache`）——它已经登记
+		// 在表里了，摘掉 + Close 就行，账本最后一笔它会自己写上。
+		a.prefetchMu.Unlock()
+		if src != nil {
+			track := byteCacheTrack(resolved)
+			tier := byteCacheTier(resolved, ref)
+			a.cancelFinishersForCache(track, tier)
+		}
+		return
+	}
+	a.prefetch = &prefetchEntry{state: prefetchReady, item: resolved, ref: ref, src: src}
+	a.prefetchMu.Unlock()
+
+	if src != nil {
+		a.logf("biu: 下一首的流地址和字节都备上了：%q（%s）", resolved.Title, ref.Label)
+	} else {
+		a.logf("biu: 下一首的流地址备好了：%q（%s）", resolved.Title, ref.Label)
+	}
 }
 
 // prefetchFailed 记一次预取失败，并把它变成**黑名单**。
@@ -443,6 +490,9 @@ func (a *App) takePrefetch(next Item) (Item, *bili.StreamRef, bool) {
 	if !e.ref.Usable(time.Now()) {
 		return next, nil, false
 	}
+	// 🔴 **源不在这里收**：作废的只是「下一首的答案」，而这条源写的字节
+	// 已经落在它自己的缓存文件里——下完就是一份有效缓存，不是白下。
+	// 它留在 `a.finishers` 里由 `drain` 自然收尸。
 	return e.item, e.ref, true
 }
 
@@ -471,6 +521,9 @@ func (a *App) invalidatePrefetch() {
 	if e != nil && e.cancel != nil {
 		e.cancel()
 	}
+	// 🔴 **字节源不收**：作废的只是「下一首的地址」这个答案，而它已经
+	// 下进缓存文件的字节**就是缓存**——让它由 `drain` 下完收尸，
+	// 下一次真播那一首时正好命中续传。收回它才是白下。
 }
 
 // sameStreamTarget 报两项是不是**同一段流的同一个目标**。

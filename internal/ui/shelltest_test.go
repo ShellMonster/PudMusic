@@ -1018,3 +1018,14 @@ func waitPixel(t *testing.T, tt *mygoui.Tester, x, y int, want color.RGBA, what 
 	t.Errorf("%s：画面 (%d,%d) 那个点是 %v，want %v", what, x, y, got, want)
 	return got
 }
+
+// asColor 把一个像素换成 ui.Color，好和 `BuildTheme` 的输出直接比。
+func asColor(p color.RGBA) mygoui.Color {
+	return mygoui.Color{R: p.R, G: p.G, B: p.B, A: p.A}
+}
+
+// rgbaOf 是 asColor 的反过来：`BuildTheme` 拼出来的是 ui.Color，而读像素读到的
+// 是 color.RGBA，要拿前者去比后者的读数就得先换过去。
+func rgbaOf(c mygoui.Color) color.RGBA {
+	return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A}
+}

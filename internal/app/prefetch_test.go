@@ -679,3 +679,96 @@ func mustAtoi(t *testing.T, s string) int64 {
 	}
 	return n
 }
+
+// ---- 预取字节（2026-11-04）----
+
+// newOnlineAppWithCache 建一个挂了在线播放**和字节缓存**的 App。
+//
+// 字节缓存是「预取顺手把字节也下到盘上」那一票的前提——没挂 CacheDir 时
+// `startPrefetchBytes` 直接退回「只备地址」，而这一组要验的正是挂了之后
+// CDN 被打了（字节真的在往下走）。
+func newOnlineAppWithCache(t *testing.T, f *streamFixture, dir, cacheDir string) *app.App {
+	t.Helper()
+	a := app.New()
+	t.Cleanup(a.Close)
+
+	cli := bili.NewClient(bili.Options{})
+	cli.TestOnlyPointHostsAtFixture(f.URL)
+
+	a.MountStreaming(app.Streaming{Client: cli, Media: f.Client(), TempDir: dir, CacheDir: cacheDir})
+	return a
+}
+
+// TestTheNextTrackBytesArePrefetchedToo 盯「备好了地址，字节也在往下走」。
+//
+// 挂了字节缓存之后，备好地址的那一刻就该顺手把字节源建起来：
+// **第二首的 CDN 被打了**就是凭据（预热源在下它）。
+//
+// ⚠️ 判据是**路径级别**的计数（`watchCDN`）：总数里第一首自己那一次也在
+// 里面，分不出「打的是谁」——预热源打的是 `/cdn/BV2-2` 那一条。
+func TestTheNextTrackBytesArePrefetchedToo(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(1.0)
+	playURLBySong(f, 2*time.Hour)
+	second := watchCDN(f, "/cdn/BV2-2")
+
+	a := newOnlineAppWithCache(t, f, t.TempDir(), t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "第一首"), onlineItem("BV2", "2", "第二首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一首")
+	waitFor(t, 15*time.Second, "第二首的地址备好了", func() bool {
+		return f.playCalls.Load() >= 2
+	})
+	waitFor(t, 15*time.Second, "第二首的字节也在下了", func() bool {
+		return second.Load() > 0
+	})
+}
+
+// TestTheNextTrackPlaysFromPrefetchedBytes 盯「真播时接着预热下的那份放」。
+//
+// 预热源把字节写进了缓存文件，真播那一趟：
+//
+//  1. **取流接口不再打**（地址是备好的）；
+//  2. **CDN 不多打**——真播的源从预热写的前沿**接着下**，1 秒的歌在预热
+//     那十几秒里早就下完了，于是盘上那份是**完整缓存**，`audio.Open`
+//     直接播文件，CDN 一次都不碰。
+//
+// ⚠️ 判据是「第二首的 CDN 只被预热源打过」：真播时再打一次就是「续传没
+// 接上」或者「缓存没记上」——那两种都是要抓的。
+func TestTheNextTrackPlaysFromPrefetchedBytes(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(1.0)
+	playURLBySong(f, 2*time.Hour)
+	second := watchCDN(f, "/cdn/BV2-2")
+
+	a := newOnlineAppWithCache(t, f, t.TempDir(), t.TempDir())
+	if err := a.Enqueue(onlineItem("BV1", "1", "第一首"), onlineItem("BV2", "2", "第二首")); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一首")
+	waitFor(t, 15*time.Second, "第二首的地址备好了", func() bool {
+		return f.playCalls.Load() >= 2
+	})
+	// 等预热源把整首下完（1 秒的歌，十几秒绰绰有余）。
+	waitFor(t, 15*time.Second, "第二首的字节下完了", func() bool {
+		return second.Load() > 0
+	})
+	// 给完整记录落下留一拍：CDN 打完 ≠ 记录写完，`OnComplete` →
+	// `markByteCacheComplete` 是下载 goroutine 里顺手写的一小份 JSON。
+	time.Sleep(300 * time.Millisecond)
+	cdnBefore := second.Load()
+
+	// 这一首放完 → 自动切歌 → 放盘上那份完整缓存。
+	playing(t, a, "第二首")
+	if n := f.playCalls.Load(); n != 2 {
+		t.Errorf("切歌那一刻又取了一次流（取流接口一共被打了 %d 次，want 2）", n)
+	}
+	if n := second.Load(); n != cdnBefore {
+		t.Errorf("真播时又打了一次 CDN（预热 %d 次，真播后 %d 次——续传没接上，或缓存没记上）",
+			cdnBefore, n)
+	}
+	if st := a.Snapshot(); st.Err != "" {
+		t.Errorf("播放条上有错：%s", st.Err)
+	}
+}
