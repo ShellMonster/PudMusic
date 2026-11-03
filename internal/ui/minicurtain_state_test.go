@@ -69,6 +69,13 @@ type fakeMiniWindow struct {
 
 	// onMove 是「窗被挪动了」那个钩子（票 #555）。
 	onMove func()
+
+	// onResize 是「窗被改尺寸了」那个钩子（拉锯抖动那一票）。
+	//
+	// ⚠️ **它记的是「高度被别人改了」**：用户拖窗缘走的是原生
+	// `windowDidResize:`，和我们的 `SetSize` 到的是同一个钩子——区别只在
+	// 「报上来的高度是不是我们刚设的那个」。
+	onResize func()
 }
 
 func newFakeMiniWindow() *fakeMiniWindow {
@@ -116,6 +123,21 @@ func (f *fakeMiniWindow) move(x, y int) {
 	f.x, f.y = x, y
 	if f.onMove != nil {
 		f.onMove()
+	}
+}
+
+func (f *fakeMiniWindow) OnResize(fn func()) (off func()) {
+	f.onResize = fn
+	return func() { f.onResize = nil }
+}
+
+// resize 触发「窗被改尺寸了」那个钩子。
+//
+// ⚠️ **它先改，再触发**——和原生的顺序一样（`windowDidResize:` 报的是已经
+// 改完的 frame）。调用方先把 `f.height` 改成「用户拖到的那个高」，再调它。
+func (f *fakeMiniWindow) resize() {
+	if f.onResize != nil {
+		f.onResize()
 	}
 }
 

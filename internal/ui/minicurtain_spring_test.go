@@ -173,12 +173,11 @@ func TestTheMiniCurtainUnrollsWithASpring(t *testing.T) {
 				"过冲那一帧窗比内容高，而透明的那一块照样吃点击",
 				i, f.window, miniHeight+miniCurtainGap+miniCurtainH, miniCurtainGap, miniCurtainH)
 		}
-		want := miniHeight + int(f.height+0.5)
-		if f.height > 0 {
-			want += miniCurtainGap
-		}
+		// ⚠️ **窗高公式和生产那一个函数同一份**（`miniCurtainWinHeight`）：
+		// 板快收完的时候那条缝是渐出的（收尾那帧不许一下掉 12px）。
+		want := miniCurtainWinHeight(f.height)
 		if f.window != want {
-			t.Errorf("第 %d 帧窗高是 %d，want %d（84 + 缝 + 这一帧画出来的卷帘高 %.1f）："+
+			t.Errorf("第 %d 帧窗高是 %d，want %d（84 + 渐出的缝 + 这一帧画出来的卷帘高 %.1f）："+
 				"窗高必须每一帧都等于内容高", i, f.window, want, f.height)
 		}
 	}
@@ -543,5 +542,305 @@ func TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard(t *testing.T) {
 		t.Errorf("缝里 x=%d（封面列中线）和 x=%d（窗中央）同一行的亮度差最多 %.1f："+
 			"那个指向封面的小三角没画出来（y=%d）",
 			miniCoverCol/2, miniWidth/2, maxDiff, atY)
+	}
+}
+
+// TestTheMiniCurtainCollapseTailNeverDropsTwelvePixelsInOneFrame 盯「收起的
+// 最后一帧不许一下子掉 12 像素」（收起尾段抖动，Bug 1）。
+//
+// 🔴 **那条缝跟着板高渐出**：窗高 = 84 + 缝 + 板高，而**缝那 10 个像素在板
+// 快收完的时候才彻底消失**——旧版是 `h > 0` 就整段加 10：收尾那一帧板剩
+// 1.8px 而缝还是满的，一帧砍掉 12px（前面每一步才 1~3px），用户看到的就是
+// 「缩到一半忽然跳一下」。
+//
+// ⚠️ **判据是「窗高序列里相邻两帧最大的那一跳」**：弹簧是过阻尼的（收起
+// 不弹），所以窗高**单调下降**——而每一帧掉下来多少，量的是相邻差。缝里
+// 那 10px 渐出之后，每一帧掉的只是「板缩的那一点 + 缝跟着缩的那一点」，
+// 合起来封顶 5px（渐出那几帧每帧缝 + 板各缩 ~2px）。
+//
+// ⚠️ **断的是 `s.miniCurtain.setHeight`**（记下来的窗高），不是假窗——它
+// 正是 `miniCurtainSetHeight` 调 `SetSize` 之前比较的那个数，而「窗高一步
+// 跳 12」跳的就是它。
+func TestTheMiniCurtainCollapseTailNeverDropsTwelvePixelsInOneFrame(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+	tt.Frame()
+
+	clickCurtainCover(t, tt)
+	settleCurtain(t, tt, s, true)
+	if !s.miniCurtain.open {
+		t.Fatalf("起点就不对：卷帘没有展开")
+	}
+
+	s.miniCurtainCollapse(tt.Now())
+	// ⚠️ **先画一帧**：弹簧是在画视图的时候推的（同
+	// `TestTheMiniCurtainRollsUpWithoutBouncing` 里那一句）。
+	tt.Frame()
+	frames := miniCurtainFrames(t, tt, s, 60)
+
+	// 🔴 **尾段每一帧掉的量不许超过 5px**：缝渐出之后，收尾那几帧掉的只是
+	// 「板缩的 ~2px + 缝跟着缩的 ~2px」——而 12px 那一跳是「1.8px 的板 +
+	// 10px 的缝一起砍掉」。
+	//
+	// ⚠️ **只量尾段**（窗高 < 84 + 缝 + 缝 = 104 之后）：收起的前半程弹簧
+	// 一步就是 ~30px（那是弹簧自己快，不是这个 bug）——而这个 bug 只在
+	// 「板比缝还矮」的尾段出现（`h < miniCurtainGap` 那一段，缝还是整段加）。
+	tail := -1
+	for i, f := range frames {
+		if f.window < miniHeight+2*miniCurtainGap {
+			tail = i
+			break
+		}
+	}
+	if tail < 0 {
+		t.Fatalf("窗高序列里根本没有「板比缝矮」的尾段（%v）：判据覆盖不到这个 bug",
+			func() []int {
+				w := make([]int, len(frames))
+				for i, f := range frames {
+					w[i] = f.window
+				}
+				return w
+			}())
+	}
+	maxDrop := 0
+	maxAt := -1
+	for i := tail + 1; i < len(frames); i++ {
+		if d := frames[i-1].window - frames[i].window; d > maxDrop {
+			maxDrop, maxAt = d, i
+		}
+	}
+	if maxDrop > 5 {
+		wins := make([]int, len(frames))
+		for i, f := range frames {
+			wins[i] = f.window
+		}
+		t.Errorf("尾段第 %d 帧窗高一下掉了 %dpx（%v），want 每一帧 ≤ 5px："+
+			"那条缝（%dpx）在板快收完的时候还是整段砍掉的——它该跟着板高渐出",
+			maxAt, maxDrop, wins, miniCurtainGap)
+	}
+
+	// ⚠️ **整个收起过程窗高不许涨**（过阻尼，收起不弹——同
+	// `TestTheMiniCurtainRollsUpWithoutBouncing` 那一条，这里量的是窗高）。
+	for i := 1; i < len(frames); i++ {
+		if frames[i].window > frames[i-1].window {
+			t.Errorf("第 %d 帧窗高 %d 比上一帧 %d **涨回来了**：收起不该有回弹",
+				i, frames[i].window, frames[i-1].window)
+		}
+	}
+
+	// ⚠️ **板全开的时候缝要满**：渐出只发生在「板比缝还矮」的那一小段，
+	// 正常高度上窗高还是 84 + 缝 10 + 板高。
+	if got, want := miniCurtainWinHeight(miniCurtainH), miniHeight+miniCurtainGap+miniCurtainH; got != want {
+		t.Errorf("板全开的时候窗高是 %d，want %d（84 + 缝 %d + 板 %d）："+
+			"缝只在板快收完的时候才渐出", got, want, miniCurtainGap, miniCurtainH)
+	}
+}
+
+// TestTheMiniCurtainRetargetKeepsTheDrawnHeightContinuous 盯「跨屏 retarget
+// 不许让画出来的高度跳一下」（Bug 2b）。
+//
+// 🔴 **画出来的高度 = 比例 × 全开高**：`miniCurtainRetarget` 在跨屏拖动 /
+// 改分辨率的时候重写 `target`（比如 400 → 250），而比例不动 ⇒ 下一帧画出
+// 来的高度是 `0.9 × 250` 而不是 `0.9 × 400`——**一帧跳掉 ~135px**，用户看
+// 到的就是卷帘忽然矮一截再慢慢滑回去。
+//
+// ⇒ retarget 的时候要把弹簧**平移**：`p / v / pos` 都按「新的全开高」换算
+// （`spring.shift`），让「比例 × 新目标」**正好是**「比例 × 旧目标」——
+// 画出来的高度一个字都不跳，然后再滑到新目标。
+//
+// ⚠️ **这一条直接驱动生产那个弹簧**（`miniCurtainSpring.shift` 就是生产
+// 那一档用的）：模拟「展开到一半，全开高从 400 换成 250」，断**换目标那
+// 一帧画出来的高度和换之前那一帧差不到一个像素**。
+func TestTheMiniCurtainRetargetKeepsTheDrawnHeightContinuous(t *testing.T) {
+	sp := &miniCurtainSpring{}
+	t0 := time.Now()
+	sp.start(1, t0)
+
+	// 展开到一半：60fps 推 10 帧（~167ms），画出来的高度在 0.6~1 之间。
+	const fps = 60
+	frame := func(n int) time.Time { return t0.Add(time.Duration(n) * time.Second / fps) }
+	var ratio float64
+	for i := 1; i <= 10; i++ {
+		ratio = sp.step(frame(i))
+	}
+	if ratio <= 0 || ratio > 1 {
+		t.Fatalf("换目标那一刻的比例是 %.3f（want 0~1 之间）：起点就不对", ratio)
+	}
+
+	// 🔴 **模拟 retarget：目标变大（250 → 400 先记着，这里是 400 → 500）**——
+	// 画出来的**像素高度**不许跳。
+	//
+	// ⚠️ **先量「变大」**：`drawn' = min(drawn, newFull)`——目标变大的方向
+	// 画出来的高度**一点都不能跳**（`pos × 新全开 = pos × 旧全开`）。
+	before := ratio * 400
+	sp.shift(400, 500)
+	if after := sp.pos * 500; after-before < -1 || after-before > 1 {
+		t.Errorf("目标变大（400→500）那一刻画出来的高度从 %.1f 跳到 %.1f："+
+			"弹簧没有被平移", before, after)
+	}
+
+	// 🔴 **目标变小（500 → 250）**：画出来的高度只能落到**新目标**上
+	// （`drawn' = min(drawn, 250)`——画出来的高度永远不许超过目标，那是
+	// 票 #307 镜像守着的底线）——而**不是**「比例不动」旧版的
+	// `ratio × 250`（那一下要多掉 `ratio` 那一截）。
+	before = sp.pos * 500
+	sp.shift(500, 250)
+	if after := sp.pos * 250; after != 250 {
+		t.Errorf("目标变小（500→250）之后画出来的高度是 %.1f，want %d"+
+			"（落到新目标上，而不是 `ratio × 新目标` = %.1f 那样多跳一截）",
+			after, 250, before/500*250)
+	}
+
+	// ⚠️ **接着走不跳**：shift 之后再推一帧，画出来的高度还是连着上一帧
+	// 的（不是「停在原地等弹簧爬过去」）。
+	after := sp.pos * 250
+	next := sp.step(frame(11)) * 250
+	if d := next - after; d < -30 || d > 30 {
+		t.Errorf("shift 之后下一帧画出来 %.1f（上一帧 %.1f）："+
+			"速度没有跟着平移，弹簧从错的地方重新起步", next, after)
+	}
+}
+
+// TestTheMiniCurtainRetargetShiftAlsoCoversTheMirroredSpring 盯「展开那一支
+// 的镜像在 shift 里不破」。
+//
+// ⚠️ **展开那一段画出来的高度是 `1 − |1 − p|`（镜像）**：`p` 过冲到 1.1 的
+// 时候画出来的是 0.9——而 `pos` 存的正是那个**镜像后**的值。⇒ `shift` 拿
+// `pos` 换算**不会**把「过冲那一下」错算成「更高的板」（0.9 × 旧高 →
+// 0.9 × 新高，而不是 1.1 × 新高）。
+//
+// ⚠️ **而收起那一支不镜像**（`vis = max(0, p)`）：`pos == p`，shift 同一个
+// 公式两条都成立——所以这一条两支各推一遍。
+func TestTheMiniCurtainRetargetShiftAlsoCoversTheMirroredSpring(t *testing.T) {
+	t.Run("展开那一支（镜像）", func(t *testing.T) {
+		sp := &miniCurtainSpring{}
+		t0 := time.Now()
+		sp.start(1, t0)
+		// 推 16 帧让它真的过冲（ζ = 0.55 欠阻尼，峰在第 13~14 帧附近）。
+		for i := 1; i <= 16; i++ {
+			sp.step(t0.Add(time.Duration(i) * time.Second / 60))
+		}
+		if sp.p <= 1 {
+			t.Fatalf("推了 16 帧 `p` 还是 %.3f：这一段没有真的过冲，镜像那一半断不到", sp.p)
+		}
+		// 🔴 **过冲里 `p > 1`，而画出来的是镜像后的 `pos`**：shift 必须拿
+		// `pos` 换算（`p` 按 r 缩的话 1.16 × 1.6 ≈ 1.9 ⇒ vis ≈ 0，画出来
+		// 直接掉到底）。
+		//
+		// ⚠️ **drawn（≈375）> 新目标（250）⇒ 落到新目标**：画出来的高度
+		// 永远不许超过目标（#307 的底线），那一下只能到 250。
+		before := sp.pos * 400
+		sp.shift(400, 250)
+		if after := sp.pos * 250; after != 250 {
+			t.Errorf("过冲那一帧（drawn %.1f）shift 之后画出来 %.1f，want %d"+
+				"（落到新目标，而不是 vis(p 按 r 缩) 那样掉到底）", before, after, 250)
+		}
+	})
+
+	t.Run("收起那一支（不镜像）", func(t *testing.T) {
+		sp := &miniCurtainSpring{}
+		t0 := time.Now()
+		sp.start(1, t0)
+		// 先推到全开，再收起一半。
+		for i := 1; i <= 40; i++ {
+			sp.step(t0.Add(time.Duration(i) * time.Second / 60))
+		}
+		sp.start(0, t0.Add(40*time.Second/60))
+		for i := 41; i <= 50; i++ {
+			sp.step(t0.Add(time.Duration(i) * time.Second / 60))
+		}
+		// 🔴 **drawn（≈143）< 新目标（250）⇒ 一点都不能跳**：`pos × 250`
+		// 必须正好是 `pos × 400`。
+		before := sp.pos * 400
+		sp.shift(400, 250)
+		if after := sp.pos * 250; after-before < -1 || after-before > 1 {
+			t.Errorf("收起一半（drawn %.1f < 新目标 250）shift 之后画出来 %.1f："+
+				"连续的那一档断了", before, after)
+		}
+	})
+}
+
+// TestTheMiniCurtainSetSizeIsSuppressedWhileTheUserResizes 盯「用户拖窗缘的
+// 时候弹簧不往回拽」（Bug 2a）。
+//
+// 🔴 **拉锯是怎么来的**：动画期每一帧 `miniCurtainSyncHeight` 都会
+// `SetSize(want)`——而迷你窗**故意可缩放**（`MiniWindowOptions` 不给
+// `DisableResize`，拖宽拖高是位置记忆那一半的前提）。用户在动画期拖窗缘
+// 改高度：原生把高改成 200 → 下一帧弹簧把它拉回「84 + 比例 × 全开」→
+// 原生 `windowDidResize` 又报一次 → 再改回去…… 60Hz 的拉锯，窗高在两个
+// 值之间抖。
+//
+// ⇒ **外因 resize（用户拖的）要认出来**：`w.OnResize` 报上来的高度 ≠
+// 「我们最近一次 `SetSize` 设的那个」⇒ 那是用户拖的，弹簧**暂停对它写
+// `SetSize`**，而且弹簧被钉在用户拖到的那个高度上（`holdAt`）——松手之后
+// 从那儿接着走，不是从半路「跳回 84 再展开」。
+//
+// ⚠️ **「我们自己 `SetSize` 引起的那次 `windowDidResize`」不算**：它报上来
+// 的高度正好是我们刚设的那个（`setHeight` 记着它）——拿高度比就分得出
+// 「系统回执」和「用户在拖」。
+//
+// ⚠️ **这一条走生产那条路**：`attachMiniWindowTo` 装的 `OnResize` 钩子调
+// 的正是生产那个函数（`miniOnWindowResized`），假窗手动触发它。
+func TestTheMiniCurtainSetSizeIsSuppressedWhileTheUserResizes(t *testing.T) {
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+	tt.Frame()
+
+	fake := newFakeMiniWindow()
+	s.attachMiniWindowTo(fake)
+
+	clickCurtainCover(t, tt)
+	// ⚠️ **只推到一半**：动画还在走（`spring.moving` 为真）的时候用户伸手
+	// 拖窗缘——停稳之后再拖不是这个 bug。
+	for i := 0; i < 5; i++ {
+		tt.Advance(time.Second / 60)
+		tt.Frame()
+	}
+	if !s.miniCurtain.spring.moving {
+		t.Fatalf("推了 5 帧弹簧就停了：拉锯那一档（动画期用户拖窗）断不到")
+	}
+
+	// 🔴 **用户把窗高拖成 200**（不是我们设的任何一帧）：假窗先把自己改成
+	// 200，再触发「窗被改了」那个钩子——和原生 `windowDidResize` 的顺序一样
+	// （先改原生，再叫钩子）。
+	fake.height = 200
+	fake.resize()
+
+	// 🔴 **这一帧弹簧不许往回拽**：`miniCurtainSyncHeight` 还会跑（帧照出），
+	// 但它不许 `SetSize`——假窗的高度必须**还是 200**，不是「84 + 比例 × 400」。
+	tt.Advance(time.Second / 60)
+	tt.Frame()
+	if got := fake.height; got != 200 {
+		t.Errorf("用户拖窗改成 200 之后，弹簧又把它设成了 %d："+
+			"那一帧窗高被拽回动画值，拉锯就这么来的", got)
+	}
+
+	// 🔴 **弹簧被钉在用户拖到的高度上**：松手（150ms 没有外因 resize）之后
+	// 从 200 接着走——不是「跳回 84 再重新展开」。
+	//
+	// ⚠️ **钉的不是「弹簧的 goal」**：goal 还是 1（展开），钉的是**画出来的
+	// 高度**——200/400 = 0.5 那个比例上，松开手它从 0.5 往 1 走。
+	tt.Advance(200 * time.Millisecond)
+	tt.Frame()
+	// 那一帧弹簧应该已经「解冻」了，接着往 1 走——假窗的高度又归弹簧管。
+	if !s.miniCurtain.spring.moving {
+		t.Fatalf("用户松手之后弹簧没有接着走：卷帘停在半路不动了")
+	}
+	// ⚠️ **解冻之后窗高从 200 附近接着走**，不是从 84 或 400 跳过去。
+	tt.Advance(time.Second / 60)
+	tt.Frame()
+	if got := fake.height; got < 150 || got > miniHeight+miniCurtainGap+miniCurtainH {
+		t.Errorf("解冻之后窗高是 %d：它没有从用户拖到的 200 附近接着走"+
+			"（要么跳回 84 了，要么跳到全开高了）", got)
 	}
 }

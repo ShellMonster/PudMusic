@@ -84,9 +84,20 @@ const (
 	// 的那一块照样拦底下应用的点击——这是换「独立歌词板」这个外观接受
 	// 的代价（票 #536 那个「两张板拼成一块」的旧版就是为了消这条缝）。
 	//
-	// ⚠️ **小三角住在缝里**（`viewMiniCurtailArrow`）：10 正好容下一个
+	// ⚠️ **小三角住在缝里**（`viewMiniCurtainArrow`）：10 正好容下一个
 	// 6px 高的三角 + 上下各 2 的留空。
 	miniCurtainGap = 10
+
+	// miniCurtainResizeQuiet 是「外因 resize（用户拖窗缘）停下多久」算用户
+	// 松手了（Bug 2a）。
+	//
+	// ⚠️ **它没有现成的「live-resize 结束」事件可以挂**：框架只给
+	// `OnResize`（每一次 `windowDidResize:` 都叫，分不清是我们 `SetSize`
+	// 还是用户在拖）——所以「松手」按「**外因 resize 静默了多久**」判。
+	// 150ms 是「人拖动一下和拖动两下之间」的那个量级：比一帧长得多（拖
+	// 着的时候 `windowDidResize` 是几十毫秒一串地来的），又短到松手之后
+	// 卷帘几乎立刻接着走。
+	miniCurtainResizeQuiet = 150 * time.Millisecond
 
 	// miniPanelAlpha 是两张板（卡片 / 歌词板）底色的不透明度。
 	//
@@ -256,7 +267,35 @@ type miniCurtainState struct {
 	// ⚠️ **为什么要记**：窗口尺寸是**原生**的，而每一帧都会算一次目标高度——
 	// 不记的话每一帧都要调一次 `SetSize`（一次原生调用），而高度没变的那
 	// 几帧是白调的。
+	//
+	// ⚠️ **它也是「这一次 `windowDidResize:` 是不是我们引起的」的判据**
+	// （Bug 2a）：`w.OnResize` 报上来的高度正好等于它 ⇒ 那是我们自己
+	// `SetSize` 的回执；不等于 ⇒ 是**用户拖窗缘**改的。
 	setHeight int
+
+	// resizeForeign 是「窗的高度正在被**弹簧之外的人**改」那一档（Bug 2a）。
+	//
+	// 🔴 **它管的是拉锯**：动画期每一帧 `miniCurtainSyncHeight` 都
+	// `SetSize(want)`——而迷你窗**故意可缩放**（`MiniWindowOptions` 不给
+	// `DisableResize`，拖宽拖高是位置记忆那一半的前提）。用户在动画期拖
+	// 窗缘：原生把高改成 200 → 下一帧弹簧把它拽回「84 + 比例 × 全开」→
+	// 原生 `windowDidResize:` 又报一次 → 再拽回去…… 60Hz 的拉锯，窗高
+	// 在两个值之间抖。
+	//
+	// ⇒ 「报上来的高度 ≠ 我们最近 `SetSize` 的那个」⇒ 那是用户拖的：
+	// 这一帧起**暂停对窗写 `SetSize`**，并把弹簧**钉在用户拖到的高度上**
+	// （`holdAt`）——松手之后从那儿接着走，不是从半路「跳回 84 再展开」。
+	//
+	// ⚠️ **它是「最近一次外因 resize 的时刻」**：`zero` = 没在抢。而「松手」
+	// 按「外因 resize 静默了 `miniCurtainResizeQuiet`」判（框架没有现成的
+	// 「live-resize 结束」事件）。
+	resizeForeign time.Time
+
+	// resizeForeignH 是用户拖到的那个高度（`resizeForeign` 为真时的窗高）。
+	//
+	// ⚠️ **它喂给 `holdAt`**：钉弹簧的是「画出来的高度 = 用户拖到的高 /
+	// 全开高」——钉的是**比例**，松开手它从那个比例往 goal 走。
+	resizeForeignH int
 
 	// wasOpen 是**上一帧**开着没有。
 	//
@@ -761,6 +800,12 @@ type miniWindow interface {
 	// ⚠️ **它是票 #555 加的**：跨屏拖动之后要重新判它落在哪块屏上（而那一档
 	// 要能**在无头那一档触发**——所以它在这一层接口上，不在 `*mygo.Window` 上）。
 	OnMove(fn func()) (off func())
+	// OnResize 装「窗被改尺寸了」那个钩子（Bug 2a 的拉锯守卫）。
+	//
+	// ⚠️ **它分不出「是我们 `SetSize` 的还是用户拖窗缘的」**：原生
+	// `windowDidResize:` 对两者都叫——区别只能看「报上来的高度是不是我们
+	// 刚设的那个」（`miniOnWindowResized` 拿 `setHeight` 比）。
+	OnResize(fn func()) (off func())
 	// OnClose 装「关窗之前」那个钩子。
 	OnClose(fn func(e *mygo.CloseEvent)) (off func())
 }
@@ -787,6 +832,9 @@ func (m miniWindowOf) Native() *mygo.Window { return m.w }
 func (m miniWindowOf) OnMove(fn func()) (off func()) {
 	return m.w.OnMove(fn)
 }
+func (m miniWindowOf) OnResize(fn func()) (off func()) {
+	return m.w.OnResize(fn)
+}
 func (m miniWindowOf) OnClose(fn func(e *mygo.CloseEvent)) (off func()) {
 	return m.w.OnClose(fn)
 }
@@ -807,6 +855,36 @@ func (m miniWindowOf) OnClose(fn func(e *mygo.CloseEvent)) (off func()) {
 // `WhenReady` 之前）它就是 nil，而那一档要的是「窗高这一层逻辑对不对」。
 func (s *Shell) miniWindow() miniWindow {
 	return s.miniWin
+}
+
+// miniCurtainWinHeight 报「这一帧窗该有多高」（Bug 1：缝跟着板高渐出）。
+//
+// h 是**这一帧画出来的板高**（动画值，`s.miniCurtain.height`）。
+//
+// 🔴 **缝跟着板高渐出**：窗高 = 84 + 缝 + 板高——而**缝那 10 个像素在板
+// 快收完的时候才彻底消失**。旧版是 `h > 0` 就整段加 10：收尾那一帧板只剩
+// 1.8px 而缝还是满的，`1.8 + 10` 一帧砍掉 12px（前面每一步才掉 1~3px），
+// 用户看到的就是「缩到一半忽然跳一下」。
+//
+// ⇒ **缝按板高渐出**：`g = min(miniCurtainGap, h)`——板比缝还高的时候缝是
+// 满的（`miniCurtainGap`），板比缝矮的时候缝跟着它缩（`h`）。
+//   - 收尾那几帧：板 1.8 → 缝 1.8，窗高 = 84 + 3.6 → 掉 ~4px（不是 12）；
+//   - 板全开的时候：缝还是满的 10（窗高 = 84 + 10 + 板高），和旧版一样。
+//
+// ⚠️ **它和「画哪一段」是两件事**：`viewMiniCurtain` 只在 `h > 0` 的时候画
+// ——缝那一段（`viewMiniCurtainArrow`）是画在「板高 > 0 的那段区间上」的；
+// 而这里算的是**窗该有多高**——窗 = 卡片 + 缝 + 板，缝渐出不影响「缝里画
+// 不画三角」（三角只在板已经长出来的时候看得见）。
+func miniCurtainWinHeight(h float32) int {
+	if h <= 0 {
+		return miniHeight
+	}
+	// 板比缝矮的时候，缝跟着它缩（`miniCurtainGap` 之上不取）。
+	g := int(h + 0.5)
+	if g > miniCurtainGap {
+		g = miniCurtainGap
+	}
+	return miniHeight + g + int(h+0.5)
 }
 
 // miniCurtainTargetHeight 是这一帧**窗该有**多高。
@@ -874,6 +952,19 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	// `freeWhileBlurred`），所以**应用没被激活的时候帧照出**——于是这一档
 	// 还有机会跑（而那正是 F1 复现出来的那个状态）。
 	s.miniCurtainFocusTick(c.Now())
+
+	// 🔴 **外因 resize 静默了 ⇒ 用户松手了，接着走**（Bug 2a）。
+	//
+	// ⚠️ **判据是「最近一次外因 resize 的时刻」**：框架只给 `OnResize`
+	//（每一次 `windowDidResize:` 都叫，分不清是拖还是我们的 `SetSize`）——
+	// 所以「松手」按「外因 resize 静默了 `miniCurtainResizeQuiet`」判。
+	// 弹簧此刻钉在用户拖到的高度上（`miniOnWindowResized` 里 `holdAt`），
+	// 从这里起它朝 goal 接着走——下一帧的 `SetSize` 恢复（`resizeForeign`
+	// 清成零值）。
+	if !s.miniCurtain.resizeForeign.IsZero() &&
+		c.Now().Sub(s.miniCurtain.resizeForeign) >= miniCurtainResizeQuiet {
+		s.miniCurtain.resizeForeign = time.Time{}
+	}
 
 	// 🔴 **Esc 收起**（票面：「Esc、再次点击封面、点收起键都能收」）。
 	//
@@ -963,15 +1054,18 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	// ⚠️ **四舍五入到整像素**：窗口尺寸是整数，而动画值是浮点——每一帧
 	// 都调 `SetSize` 的话，同一个高度会被反复设成同一个整数（原生那一边
 	// 自己比），而**真的变了才设**省掉一次原生调用。
-	want := miniHeight + int(h+0.5)
-	// ⚠️ **窗高 = 84 + 缝 + 板高**（`miniCurtainGap` 那一条缝照吃点击，
-	// 所以板**往下挪** 10 而不是贴着卡片）——h 是**板高**，窗高要补上缝。
-	if h > 0 {
-		want += miniCurtainGap
-	}
-	if s.miniCurtain.setHeight != want {
-		s.miniCurtain.setHeight = want
-		s.miniCurtainSetHeight(want)
+	//
+	// 🔴 **用户正拖着窗缘的时候不写 `SetSize`**（Bug 2a）：不然 60Hz 的
+	// 「你拽我拽」——原生改成用户拖的高，下一帧又被拽回动画值。
+	// `miniOnWindowResized` 那一档已经把弹簧钉在用户拖到的高度上了，这里
+	// 唯一的活是**别插手**。而「外因 resize 静默了 ⇒ 用户松手」在开头已经
+	// 把 `resizeForeign` 清了——清了这里就恢复 `SetSize`。
+	if s.miniCurtain.resizeForeign.IsZero() {
+		want := miniCurtainWinHeight(h)
+		if s.miniCurtain.setHeight != want {
+			s.miniCurtain.setHeight = want
+			s.miniCurtainSetHeight(want)
+		}
 	}
 
 	// 念一句：展开 / 收起各念一次（读屏软件）。
