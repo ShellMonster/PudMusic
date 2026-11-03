@@ -291,6 +291,37 @@ func TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged(t *testing.T) {
 	}
 }
 
+// TestTheBadgeWidthNeverCollapsesToZero 钉住 **`MeasureText` 量不到的时候缺口
+// 不塌成空块**。
+//
+// 🔴 **对抗性审查查出的一笔**：字体后端还没就绪 / 量不到那一串时
+// `MeasureText` 回 0——不挡的话 `notchW` 只剩两侧 padding（14 ≥
+// `badgeNotchMinW`，连最小小宽那道兜底都救不回来），更糟的是 `Text` 的
+// `MinWidth(0).MaxWidth(0)` 会把**整串数字裁成零宽**——画面上剩一个空底色
+// 缺口，数字整个没了。
+//
+// ⚠️ **判据是 `badgeTextWidth` 那一支纯函数**：`MeasureText` 是 `*ui.Context`
+// 上的方法、mock 不掉，所以把「量出来的值 → 兜底后的值」抽了出来，这里
+// 0 / 负数 / 正常宽三档各喂一遍。
+func TestTheBadgeWidthNeverCollapsesToZero(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		measured float32
+		want     float32
+	}{
+		{"量不到（0）", 0, playbarBadgeMaxW},
+		{"量出负数（防御）", -3, playbarBadgeMaxW},
+		{"正常宽（1k+ ≈14）", 14.8, 14.8},
+		{"最宽档（99k+ ≈22）", 22.0, 22.0},
+	} {
+		if got := badgeTextWidth(c.measured); got != c.want {
+			t.Errorf("%s：badgeTextWidth(%.1f) = %.1f，want %.1f——"+
+				"量不到的时候没退回上限档，数字会被裁成零宽、剩一个空缺口",
+				c.name, c.measured, got, c.want)
+		}
+	}
+}
+
 // scaledCellInks 量「**界面上那一格**」在给定的系统文本缩放下，它自己的墨迹
 // 有多宽（带「+」的那一串，和不带「+」的那一串）。
 //
@@ -319,7 +350,7 @@ func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (
 			// 窗口左缘裁掉、墨迹才量得全。
 			mygoui.Spacer(c).Grow(1)
 			mygoui.Box(c).Size(iconMd, iconMd).Children(func() {
-				countBadge(c, countForText(withPlus), c.Theme().Background)
+				countBadge(c, countForText(withPlus), c.Theme().Background, 0)
 			})
 			mygoui.Spacer(c).Grow(1)
 		})

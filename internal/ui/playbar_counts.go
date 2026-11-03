@@ -311,7 +311,31 @@ func countKeyTip(name string, n int64, tip string) string {
 // ⚠️ **字号是**固定的**（`playbarBadgeFont`），不是 `scale.Font(c, …)`**——
 // 理由见那个常量的注释（系统文本放大 125% 就会切掉那个「+」，而「+」是这一族
 // 的语义）。
-func countBadge(c *ui.Context, n int64, bg ui.Color) {
+// badgeTextWidth 是「量出来的字宽」过一道兜底之后的宽度。
+//
+// 🔴 **`MeasureText` 量不到的时候不许把 0 传下去**（对抗性审查查出的一笔）：
+// 字体后端还没就绪 / 量不到那一串时它回 0——而不挡的话，`notchW` 只剩
+// 两侧 padding（14 ≥ `badgeNotchMinW`，**连最小小宽那道兜底都救不回来**），
+// 更糟的是 `Text` 的 `MinWidth(0).MaxWidth(0)` 会把**整串数字裁成零宽**——
+// 画面上剩一个空底色缺口，数字整个没了。⇒ 量不到就退回上限那一档
+// `playbarBadgeMaxW`（缺口画宽一点，可数字一定画得出）。
+//
+// ⚠️ **它是单独一支函数，不是 `countBadge` 里的一行**——`MeasureText` 是
+// `*ui.Context` 上的方法、mock 不掉，所以这条分支只能这样测：把「量出来的
+// 值 → 兜底后的值」抽成一个纯函数，0 / 负数 / 正常宽三档各喂一遍。
+func badgeTextWidth(measured float32) float32 {
+	if measured <= 0 {
+		return playbarBadgeMaxW
+	}
+	return measured
+}
+
+// `dx` 是缺口块这一帧的**水平平移**——它和图形同抖。赞键长按三连的时候
+// 图形盒子里那两层（底色 + 拇指）在抖（`likeShakeDX`），缺口块不吃同一个
+// 平移的话，按住 2.5s 全程是「图标在抖、缺口原地不动」——缺口漂离图标
+// （对抗性审查查出的一笔）。⇒ 抖动的那一条调用方把自己的 `dx` 传进来，
+// 不抖的调用方（收藏 / 评论 / 测试脚手架）传 0。
+func countBadge(c *ui.Context, n int64, bg ui.Color, dx float32) {
 	t := playbarCountText(n)
 	if t == "" {
 		// ⚠️ **没有数字时这一格不画**：缺口块连建都不建（占一个绝对定位的孩子是
@@ -326,6 +350,7 @@ func countBadge(c *ui.Context, n int64, bg ui.Color) {
 	// `badgeNotchPadR` 的余量 = 缺口块宽（左宽右窄：咬进图形的那一边留
 	// 一圈看得见的底色缝，理由见常量注释）。
 	textW, _ := c.MeasureText(0, ui.Span{Text: t, Size: playbarBadgeFont})
+	textW = badgeTextWidth(textW)
 	notchW := textW + badgeNotchPadL + badgeNotchPadR
 	if notchW < badgeNotchMinW {
 		notchW = badgeNotchMinW
@@ -338,7 +363,11 @@ func countBadge(c *ui.Context, n int64, bg ui.Color) {
 		// 右缘推出图形右缘 notchW − bite 像素，左缘就正好收在图形里 6 像素
 		// ——咬的是右上角那一小块，不是包着整个图形（理由见 `badgeNotchBite`）。
 		Attach(ui.AnchorTopRight, ui.AnchorTopRight).
-		Top(-badgeNotchOut).Right(-(notchW - badgeNotchBite)).
+		Top(-badgeNotchOut).Right(-(notchW-badgeNotchBite)).
+		// 🔴 **和图形同抖**：赞键长按三连的时候图形盒子里那两层在 `dx` 上抖，
+		// 缺口块不吃同一个平移就是「图标在抖、缺口原地不动」——按住 2.5s
+		// 全程缺口漂离图标。不抖的调用方传 0，这一条就是恒等变换。
+		Translate(dx, 0).
 		// ⚠️ **四个角全圆**：左下那一口是咬进图形的，其余三角探在外面（见
 		// `badgeNotchR`）。
 		Radius(badgeNotchR).
@@ -394,7 +423,8 @@ func countKeyIcon(c *ui.Context, iconName string, hovered, pressed bool, n int64
 		}
 		flat.PressScale(ic, pressed, false)
 		// 🔴 **缺口块挂在盒子右上角**——它是绝对定位的，不占布局，而它的父盒子
-		// 是 18×18，于是右上角正好是图形的右上角。
-		countBadge(c, n, bg)
+		// 是 18×18，于是右上角正好是图形的右上角。**dx 传 0**：收藏 / 评论没有
+		// 长按抖动（那是赞键独有的三连），缺口块不用跟着谁动。
+		countBadge(c, n, bg, 0)
 	})
 }
