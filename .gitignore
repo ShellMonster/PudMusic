@@ -38,3 +38,7 @@ docs/research/
 # 为什么值得留着：私钥一旦进了 git 历史就等于必须轮换密钥，而轮换会让已经装出去的
 # 老版本验不过之后的每一个版本——那时只能让所有人重新下载安装。
 mygo-update.key
+
+# 本地 spec / ticket 草稿，不上远端。
+docs/specs/
+.scratch/
