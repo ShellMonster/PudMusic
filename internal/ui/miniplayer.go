@@ -698,6 +698,16 @@ func (s *Shell) attachMiniWindowLifecycle(w miniWindow) {
 		// 刻的宽高）。
 		s.miniCurtainCollapseNow()
 	})
+
+	// 🔴 **窗被改尺寸了 ⇒ 判「是不是用户拖的」**（Bug 2a）。
+	//
+	// ⚠️ **它认不出「是我们 `SetSize` 的还是用户拖窗缘的」**：原生
+	// `windowDidResize:` 对两者都叫——判据是「报上来的高度是不是我们刚设
+	// 的那个」（`s.miniCurtain.setHeight`），见 `miniOnWindowResized`。
+	//
+	// ⚠️ **它装在 `miniWindow` 那一层上**（同 `OnMove`）：无头那一档要能
+	// 手动触发它（`fakeMiniWindow.resize`）。
+	w.OnResize(func() { s.miniOnWindowResized() })
 }
 
 // releaseMini 收掉迷你那个外壳自己那几摊**逐窗口**的资源。

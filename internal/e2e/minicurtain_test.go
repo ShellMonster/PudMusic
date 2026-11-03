@@ -150,6 +150,50 @@ func pumpHeightIs(t *testing.T, client *automationClient, id int, want float64, 
 	}
 }
 
+// pumpCollapseIsMonotone 等一扇窗的高度降到 want，**一边逼帧一边断「单调
+// 递减 + 尾段步长」**（收起不弹、收尾不跳）。
+//
+// ⚠️ **两条判据**：
+//
+//  1. **全程单调递减**：收起的弹簧是过阻尼（ζ = 1.1），高度**一路缩**——
+//     任何一次「涨回来」都是回弹（那是展开那一支的行为，不许出现在收起里）；
+//  2. **尾段每帧 ≤ maxStep**：窗高 < `tailUnder` 之后（板比缝矮那一段），
+//     缝渐出之后每一帧掉的只是「板缩的 ~2px + 缝跟着缩的 ~2px」（实测 ≤
+//     4px，取 6 留一点余地）——而旧版收尾那帧是「1.8px 的板 + 10px 的缝
+//     一起砍掉」= 12px，会被这一条抓住。
+//
+// ⚠️ **前半程不管步长**：弹簧前半段一步 ~30px 是它自己快，不是 bug。
+func pumpCollapseIsMonotone(t *testing.T, client *automationClient, id int, want, tailUnder, maxStep float64, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	prev := -1.0
+	for {
+		pumpFrame(t, client, id)
+		_, _, _, h, ok := windowBounds(t, client, id)
+		if ok {
+			if prev >= 0 {
+				if h > prev+1 {
+					t.Errorf("收起过程窗高从 %.0f 涨到 %.0f：收起不该有回弹", prev, h)
+					return false
+				}
+				if prev < tailUnder && prev-h > maxStep {
+					t.Errorf("尾段窗高从 %.0f 一下掉到 %.0f（%.0fpx），want 每帧 ≤ %.0fpx："+
+						"缝该跟着板高渐出，不能整段砍掉", prev, h, prev-h, maxStep)
+					return false
+				}
+			}
+			prev = h
+			if math.Abs(h-want) < 1 {
+				return true
+			}
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(16 * time.Millisecond)
+	}
+}
+
 // TestTheMiniLyricsCurtain 断三件事：迷你窗建出来是 320×84、点封面之后窗变成
 // 84 + 缝 + 400、选「收起歌词」之后窗回到 84。
 //
@@ -260,8 +304,17 @@ func TestTheMiniLyricsCurtain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("再点一次封面列：%v", err)
 	}
-	if !pumpHeightIs(t, client, miniID, 84, 15*time.Second) {
+	// 🔴 **收起的过程窗高只许往下走、尾段不许跳**：弹簧是过阻尼的（收起
+	// 不弹 ⇒ 单调递减），而「缝在板快收完的时候整段砍掉」那一版会让收尾
+	// 那帧掉 12px。这里一边逼帧一边量 `bounds.height`：全程断「不涨」，
+	// 尾段（窗高 < 104，即板比缝矮那一段）再断「每帧 ≤ 6px」。
+	//
+	// ⚠️ **采样是真时间**：`pumpFrame` 一次走一帧，相邻两次间隔 ~16ms+
+	// （一次 capture + 一次 bounds 查询）——比弹簧的步长密得多，任何「掉
+	// 12px」的单帧都跑不掉。而前半程弹簧一步 ~30px（它自己快，不是这个
+	// bug），所以步长判据只管尾段。
+	if !pumpCollapseIsMonotone(t, client, miniID, 84, 104, 6, 15*time.Second) {
 		_, _, _, h, _ := windowBounds(t, client, miniID)
-		t.Fatalf("再点封面之后迷你窗没有收回 84：bounds.height = %.0f", h)
+		t.Fatalf("收起的过程窗高不单调或尾段有单帧跳变（现在 h=%.0f）", h)
 	}
 }
