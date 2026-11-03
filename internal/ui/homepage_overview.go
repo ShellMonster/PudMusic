@@ -224,7 +224,7 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 							card := ui.Column(c).Grow(1).Gap(space.Px8).Padding(space.Px12).
 								Radius(24).Background(t.Surface).Border(1, t.Border)
 							card.Children(func() {
-								ui.Box(c).Height(56).FillWidth().Radius(16).Background(homeOverviewPlaceholder(t, i))
+								homeOverviewCover(c, t, i, 56)
 								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
 								ui.Text(c, []string{"臻声 FM · 剩 38 分钟", "我的收藏夹 · 剩 2 小时", "夏夜录音棚 · 剩 12 分钟"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 								ui.Box(c).Height(4).Width(float32(40 + i*24)).Radius(2).Background(t.Accent)
@@ -262,7 +262,7 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 					ui.Row(c).Gap(space.Px12).Children(func() {
 						for i, title := range []string{"夏末备忘录", "北纬三十度", "慢车"} {
 							ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
-								ui.Box(c).Height(140).FillWidth().Radius(12).Background(homeOverviewPlaceholder(t, i)).Border(1, t.Border)
+								homeOverviewCover(c, t, i, 140)
 								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
 								ui.Text(c, []string{"纸飞机乐队", "低频观测站", "南山南北"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 							})
@@ -281,6 +281,19 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 func homeOverviewPlaceholder(t *ui.Theme, index int) ui.Color {
 	colors := []ui.Color{t.Accent, t.Accent.Mix(t.Text, 0.2), t.Accent.Mix(t.Surface, 0.35)}
 	return colors[index%len(colors)]
+}
+
+// homeOverviewCover keeps the prototype's geometric cover language visible even
+// when a fixture has no remote artwork to render.
+func homeOverviewCover(c *ui.Context, t *ui.Theme, index int, height float32) {
+	base := homeOverviewPlaceholder(t, index)
+	accent := []ui.Color{ui.RGBA(255, 208, 64, 1), ui.RGBA(255, 108, 78, 1), ui.RGBA(241, 157, 197, 1)}[index%3]
+	ui.Box(c).Height(height).FillWidth().Radius(16).Clip().Background(base).Children(func() {
+		ui.Box(c).Absolute().Right(-height*0.18).Bottom(-height*0.28).
+			Size(height*0.78, height*0.78).Radius(height).Background(accent)
+		ui.Box(c).Absolute().Left(-height*0.18).Top(-height*0.24).
+			Size(height*0.64, height*0.64).Radius(height).Background(t.Surface.Alpha(0.82))
+	})
 }
 
 // cellW 是 n 列、缝为 gap 时一格的宽。
