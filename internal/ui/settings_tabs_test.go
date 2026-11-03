@@ -168,7 +168,7 @@ func TestPickingAColorChangesTheWholeTheme(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 
 	// 取色板是点色块之后在下面摆出来的，点里面的常用色。
-	openColorPicker(t, tt, "主色")
+	openColorPicker(t, tt, s, "主色")
 	if err := tt.Click("Red"); err != nil {
 		t.Fatalf("取色板里点不到红色：%v", err)
 	}
@@ -197,7 +197,7 @@ func TestTheColorItemGoesBackToFollowingTheTheme(t *testing.T) {
 		t.Error("没改过的时候不该摆「用默认」——那一格没有可退回的东西")
 	}
 
-	openColorPicker(t, tt, "背景")
+	openColorPicker(t, tt, s, "背景")
 	if err := tt.Click("Blue"); err != nil {
 		t.Fatalf("取色板里点不到蓝色：%v", err)
 	}
@@ -365,7 +365,7 @@ func TestTheProxyPasswordOnlyShowsWhereItMeansSomething(t *testing.T) {
 // 拖法照审阅给的复现：点滑块中点 → 推几帧 → 看存下来的值。
 func TestTheColorPickerKeepsTheTransparency(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	openColorPicker(t, tt, "主色")
+	openColorPicker(t, tt, s, "主色")
 	if err := tt.Click("Red"); err != nil {
 		t.Fatalf("取色板里点不到红色：%v", err)
 	}
@@ -572,12 +572,13 @@ func openFontMenu(t *testing.T, tt *mygoui.Tester, s *Shell) {
 	}
 }
 
-// openColorPicker 摆开某一块颜色的取色板。
-func openColorPicker(t *testing.T, tt *mygoui.Tester, label string) {
+// openColorPicker 摆开某一块颜色的取色板（皮肤页上——「颜色」那组搬过去了）。
+func openColorPicker(t *testing.T, tt *mygoui.Tester, s *Shell, label string) {
 	t.Helper()
-	if err := tt.Click(label); err != nil {
-		t.Fatalf("点不到「%s」那块颜色：%v，文字有 %q", label, err, tt.Texts())
-	}
+	// ⚠️ **先滚进可视区再点**：那一组在货架大卡下面，直接 `tt.Click` 会因为
+	// 那一格在屏幕外而拒绝点（`targetCenter` 的窗口边界检查）。
+	r := appearanceRect(t, tt, s, label)
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 }
 

@@ -33,15 +33,6 @@ var settingsSegmentSpots = []struct {
 	{"窗口关闭", "隐藏到托盘", "直接退出"},
 }
 
-// appearanceSegmentSpots 是皮肤页上那处分段控件（从设置页搬过去的「主题」）。
-var appearanceSegmentSpots = []struct {
-	what    string
-	chosen  string
-	notChos string
-}{
-	{"主题", "跟随系统", "浅色"},
-}
-
 // TestTheSettingsPageHasOnlyOneSegmentedControl 钉住「设置页只有一种分段控件」。
 //
 // # 此前同一页上有两套
@@ -93,25 +84,9 @@ func TestTheSettingsPageHasOnlyOneSegmentedControl(t *testing.T) {
 				}
 			}
 
-			// 「主题」那排搬到皮肤页了，同一种分段控件在那一页也得是这副长相。
-			openAppearance(t, tt)
-			for _, spot := range appearanceSegmentSpots {
-				chosen := appearanceRect(t, tt, s, spot.chosen)
-				other := appearanceRect(t, tt, s, spot.notChos)
-
-				got := modeOf(bandPixels(tt.Image(), buttonPadSpot(chosen)))
-				if !nearRGBA(got, rgbaOf(theme.Accent), 3) {
-					t.Errorf("「%s」选中的一档（%q）底色是 %v，want %v（实心主色底）——"+
-						"皮肤页的分段控件和设置页同一份画法（UI 报告 §4 的 F-17）",
-						spot.what, spot.chosen, got, rgbaOf(theme.Accent))
-				}
-				track := theme.Background.Mix(theme.Text, 0.06)
-				gotOther := modeOf(bandPixels(tt.Image(), buttonPadSpot(other)))
-				if !nearRGBA(gotOther, rgbaOf(track), 3) {
-					t.Errorf("「%s」没选中的那一档（%q）底色是 %v，want %v（轨道色）",
-						spot.what, spot.notChos, gotOther, rgbaOf(track))
-				}
-			}
+			// 「主题」那排搬到皮肤页了，但那里是货架卡不是分段控件——
+			// 选中态改由「选中卡的主色描边」断言（`appearance_grid_test.go` 里
+			// 那一条），这一条只管设置页这一边。
 		})
 	}
 }

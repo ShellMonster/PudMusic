@@ -215,9 +215,10 @@ func TestTheSelectedSideItemIsSolidAndReadable(t *testing.T) {
 	}
 }
 
-// TestThePresetCardsAreRowsOfFourEqualCards：设置页「主题方案」是**每行四张**
-// 等宽的预览卡（八套方案折两行），名字都画得出来、没被省略号吃掉；两行的左缘
-// 齐在一条线上。
+// TestThePresetCardsAreRowsOfFourEqualCards：皮肤页「主题方案」是**每行三张**
+// 等宽的货架卡（八套方案折成 3 / 3 / 2 三行），名字都画得出来、没被省略号
+// 吃掉；各行的左缘齐在一条线上。（原来是设置页每行四张的小卡，换成网易
+// 云那种货架式之后是每行三张的大卡。）
 func TestThePresetCardsAreRowsOfFourEqualCards(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 	type card struct {
@@ -246,12 +247,17 @@ func TestThePresetCardsAreRowsOfFourEqualCards(t *testing.T) {
 			rows = append(rows, []card{c})
 		}
 	}
-	if len(rows) != 2 {
-		t.Fatalf("方案卡折成 %d 行，want 2（每行四张）", len(rows))
+	wantRows := (len(themePresets) + skinCardColumns - 1) / skinCardColumns
+	if len(rows) != wantRows {
+		t.Fatalf("方案卡折成 %d 行，want %d（每行 %d 张）", len(rows), wantRows, skinCardColumns)
 	}
 	for ri, row := range rows {
-		if len(row) != presetRowColumns {
-			t.Fatalf("第 %d 行有 %d 张卡，want %d", ri+1, len(row), presetRowColumns)
+		wantCols := skinCardColumns
+		if ri == wantRows-1 && len(themePresets)%skinCardColumns != 0 {
+			wantCols = len(themePresets) % skinCardColumns // 最后一行摆不满
+		}
+		if len(row) != wantCols {
+			t.Fatalf("第 %d 行有 %d 张卡，want %d", ri+1, len(row), wantCols)
 		}
 		sort.Slice(row, func(i, j int) bool { return row[i].xCenter < row[j].xCenter })
 		step := row[1].xCenter - row[0].xCenter

@@ -108,15 +108,15 @@ var segmentRows = []struct {
 	options []string
 }{
 	{"显示样式档位", "「数据显示样式」", []string{"列表", "网格", "紧凑"}},
-	{"主题模式", "「主题」", []string{"跟随系统", "浅色", "深色"}},
 }
 
 // segmentRowsOnSettings / segmentRowsOnAppearance：上面那张表按「哪一页」拆开。
-// 「数据显示样式」留在设置页，「主题」搬到皮肤页了（appearance.go）——测试也
-// 跟着拆，各开各的页。
+// 设置页这两排都是带分段控件的行；皮肤页上没有分段控件了——「主题」在
+// 那里是四张货架卡（`appearance_grid.go` 的 `modeCard`），不是
+// `settingsSegment`。
 var (
-	segmentRowsOnSettings   = segmentRows[:1]
-	segmentRowsOnAppearance = segmentRows[1:]
+	segmentRowsOnSettings   = segmentRows
+	segmentRowsOnAppearance = segmentRows[:0]
 )
 
 // TestEverySettingsSegmentOptionHasAnIcon 钉住「设置页两处分段控件每一档都有
