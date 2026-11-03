@@ -329,6 +329,7 @@ const (
 	iconExpand     = "Arrows/expand-diagonal-line.svg"     // 放大
 	iconShrinkBack = "Arrows/expand-diagonal-2-line.svg"   // 还原
 	iconPiP        = "Media/picture-in-picture-2-line.svg" // 画中画
+	iconPalette    = "Design/palette-line.svg"             // 皮肤（主题方案）
 	iconRefresh    = "System/refresh-line.svg"             // 刷新
 	iconExternal   = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
 	iconEye        = "System/eye-line.svg"                 // 显示
@@ -452,6 +453,7 @@ var iconNames = []string{
 	iconViewGrid, iconViewList, iconGrid,
 	iconFolderAdd, iconEdit, iconEditBox, iconCalendar,
 	iconExpand, iconShrinkBack, iconPiP, iconRefresh, iconExternal,
+	iconPalette,
 	iconEye, iconEyeOff, iconWarning, iconQuestion,
 	iconImport, iconExport, iconAdd, iconFollowDone,
 	iconMoon, iconSun, iconComputer, iconClock, iconDisk, iconDeleteBin5,

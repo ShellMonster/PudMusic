@@ -124,7 +124,7 @@ func TestPresetIsInTheThemeCacheKey(t *testing.T) {
 func TestPickingAPresetOnTheSettingsPage(t *testing.T) {
 	start := app.DefaultSettings("")
 	start.ThemePreset = app.ThemePresetWarmPaper
-	tt, s, a, _ := shellOnSettings(t, start)
+	tt, s, a, _ := shellOnAppearance(t, start)
 
 	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetWarmPaper {
 		t.Fatalf("起点方案是 %q，want 暖纸", got)
@@ -140,7 +140,7 @@ func TestPickingAPresetOnTheSettingsPage(t *testing.T) {
 		t.Errorf("方案选了，主题强调色还是 %v", got.Accent)
 	}
 
-	r := settingRect(t, tt, s, "全局圆角")
+	r := appearanceRect(t, tt, s, "全局圆角")
 	x, y := r.X+r.W*0.85, r.Y+r.H/2
 	tt.Press(x, y)
 	tt.Frame()
@@ -167,7 +167,7 @@ func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
 		if tc.dark {
 			st.ThemeMode = app.ThemeModeDark
 		}
-		tt, _, _, _ := shellOnSettings(t, st)
+		tt, _, _, _ := shellOnAppearance(t, st)
 		sk, _, _ := presetSkinFor(tc.preset, tc.dark)
 		want := rgb(mygoui.Hex(sk.sidebar))
 		if got := tt.Image().RGBAAt(3, 560); !sameColor(got, want) {
@@ -181,7 +181,7 @@ func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
 	st := app.DefaultSettings("")
 	st.ThemePreset = app.ThemePresetClassic
 	st.ThemeMode = app.ThemeModeLight
-	tt, _, _, _ := shellOnSettings(t, st)
+	tt, _, _, _ := shellOnAppearance(t, st)
 	bg := rgb(BuildTheme(st, false).Background)
 	if got := tt.Image().RGBAAt(3, 560); !sameColor(got, bg) {
 		t.Errorf("经典：侧栏底是 %v，该沿用 Background %v", got, bg)
@@ -219,13 +219,13 @@ func TestTheSelectedSideItemIsSolidAndReadable(t *testing.T) {
 // 等宽的预览卡（八套方案折两行），名字都画得出来、没被省略号吃掉；两行的左缘
 // 齐在一条线上。
 func TestThePresetCardsAreRowsOfFourEqualCards(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 	type card struct {
 		xCenter, yCenter float32
 	}
 	cards := make([]card, 0, len(themePresets))
 	for _, p := range themePresets {
-		r := settingRect(t, tt, s, p.label)
+		r := appearanceRect(t, tt, s, p.label)
 		cards = append(cards, card{r.X + r.W/2, r.Y + r.H/2})
 	}
 	if len(cards) != len(themePresets) {

@@ -87,23 +87,6 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		// 是这一格的一部分，理由见 displaymode.go 的文件头。
 		s.settingRow(c, "数据显示样式", "",
 			func() { s.viewDisplayMode(c, st, ro) })
-		s.settingRow(c, "主题方案", "",
-			func() { s.pickThemePreset(c, st, ro) })
-		s.settingRow(c, "主题", "",
-			func() { s.pickTheme(c, st, ro) })
-		s.settingRow(c, "颜色", "",
-			func() { s.pickColors(c, st, ro) })
-		s.settingRow(c, "封面取色", "",
-			func() {
-				s.pickSwitch(c, "封面取色", "封面取色", st.CoverAccent, ro,
-					func(cur *app.Settings, on bool) { cur.CoverAccent = on })
-			})
-		s.settingRow(c, "字体", "",
-			func() { s.pickFont(c, st, ro) })
-		s.settingRow(c, "圆角", "",
-			func() { s.pickRadius(c, st, ro) })
-		s.settingRow(c, "背景清晰度", "",
-			func() { s.pickBackdropClarity(c, st, ro) })
 
 	})
 	s.settingGroup(c, "播放", func() {

@@ -40,9 +40,9 @@ func TestTheClarityTiersChangeBothTheCanvasAndTheBlur(t *testing.T) {
 }
 
 func TestChangingBackdropClarityThroughSettingsIsStored(t *testing.T) {
-	tt, s, a, path := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, a, path := shellOnAppearance(t, app.DefaultSettings(""))
 
-	settingRect(t, tt, s, "背景清晰度")
+	appearanceRect(t, tt, s, "背景清晰度")
 	openSelect(t, tt, "选择背景清晰度")
 	if !tt.HasText("高清（流量更大）") {
 		t.Fatalf("背景清晰度下拉没有高清选项，文字有 %q", tt.Texts())
@@ -67,7 +67,7 @@ func TestChangingBackdropClarityThroughSettingsIsStored(t *testing.T) {
 	}
 
 	// 再切回流畅，确认这个设置可以来回切换，而不是只写入一次。
-	settingRect(t, tt, s, "背景清晰度")
+	appearanceRect(t, tt, s, "背景清晰度")
 	openSelect(t, tt, "选择背景清晰度")
 	if err := tt.Click("流畅"); err != nil {
 		t.Fatalf("点不到流畅选项：%v，文字有 %q", err, tt.Texts())

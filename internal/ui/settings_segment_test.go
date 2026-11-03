@@ -29,9 +29,17 @@ var settingsSegmentSpots = []struct {
 	chosen  string
 	notChos string
 }{
-	{"主题", "跟随系统", "浅色"},
 	{"数据显示样式", "列表", "网格"},
 	{"窗口关闭", "隐藏到托盘", "直接退出"},
+}
+
+// appearanceSegmentSpots 是皮肤页上那处分段控件（从设置页搬过去的「主题」）。
+var appearanceSegmentSpots = []struct {
+	what    string
+	chosen  string
+	notChos string
+}{
+	{"主题", "跟随系统", "浅色"},
 }
 
 // TestTheSettingsPageHasOnlyOneSegmentedControl 钉住「设置页只有一种分段控件」。
@@ -77,6 +85,26 @@ func TestTheSettingsPageHasOnlyOneSegmentedControl(t *testing.T) {
 				// 没选中的那一档：自己**没有底色**，露出的是这一排共用的那条轨道
 				// （设计规范 §7.9：轨道 = 背景色混 6% 的文字色）。三处走同一个出口，
 				// 所以轨道色也只有一种；框架 `ui.Segmented` 的白色滑块不回到设置页。
+				track := theme.Background.Mix(theme.Text, 0.06)
+				gotOther := modeOf(bandPixels(tt.Image(), buttonPadSpot(other)))
+				if !nearRGBA(gotOther, rgbaOf(track), 3) {
+					t.Errorf("「%s」没选中的那一档（%q）底色是 %v，want %v（轨道色）",
+						spot.what, spot.notChos, gotOther, rgbaOf(track))
+				}
+			}
+
+			// 「主题」那排搬到皮肤页了，同一种分段控件在那一页也得是这副长相。
+			openAppearance(t, tt)
+			for _, spot := range appearanceSegmentSpots {
+				chosen := appearanceRect(t, tt, s, spot.chosen)
+				other := appearanceRect(t, tt, s, spot.notChos)
+
+				got := modeOf(bandPixels(tt.Image(), buttonPadSpot(chosen)))
+				if !nearRGBA(got, rgbaOf(theme.Accent), 3) {
+					t.Errorf("「%s」选中的一档（%q）底色是 %v，want %v（实心主色底）——"+
+						"皮肤页的分段控件和设置页同一份画法（UI 报告 §4 的 F-17）",
+						spot.what, spot.chosen, got, rgbaOf(theme.Accent))
+				}
 				track := theme.Background.Mix(theme.Text, 0.06)
 				gotOther := modeOf(bandPixels(tt.Image(), buttonPadSpot(other)))
 				if !nearRGBA(gotOther, rgbaOf(track), 3) {
@@ -155,7 +183,7 @@ var settingsScenes = []struct {
 // 右沿按**卡片内缘**算（内容段右沿往里一个卡片内边距）——宽度算式按哪张边，
 // 判据就按哪张边，不然量不出「挤出卡片」那种坏。
 //
-// ⚠️ **量法**：用 `settingRect` 把「主题模式」那一排**滚进可视区**再量它的盒子
+// ⚠️ **量法**：用 `settingRect` 把「显示样式档位」那一排**滚进可视区**再量它的盒子
 // ——不滚的话量到的是旧一帧的盒子，在滚动过的页面上会量错（评审那一版就量错过）。
 func TestTheSettingsControlColumnIsNeverCutOff(t *testing.T) {
 	for _, sc := range settingsScenes {
@@ -169,7 +197,7 @@ func TestTheSettingsControlColumnIsNeverCutOff(t *testing.T) {
 			}
 			homeFrame(tt)
 
-			ctrl := settingRect(t, tt, s, "主题模式")
+			ctrl := settingRect(t, tt, s, "显示样式档位")
 			// 分组卡片的内右沿：内容段右沿往里一个卡片内边距（16 内边距 + 1 描边）。
 			right := settingsContentRight(sc.winW, sc.side, sc.scale) - settingsCardInset
 			if ctrl.X+ctrl.W > right+1 {
@@ -216,7 +244,7 @@ func TestTheSettingsControlColumnKeepsItsFullWidth(t *testing.T) {
 			}
 			homeFrame(tt)
 
-			ctrl := settingRect(t, tt, s, "主题模式")
+			ctrl := settingRect(t, tt, s, "显示样式档位")
 			want := float32(settingsControlW) * sc.scale
 			if ctrl.W < want-0.5 {
 				t.Errorf("控件列只有 %.1f 宽，want ≥ %.1f——默认配置下主题那排四档"+

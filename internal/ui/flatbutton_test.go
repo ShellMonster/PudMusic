@@ -443,19 +443,34 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// ① 能写的那一版：同样的按钮，指针落上去要亮。
-			tt := openSettingsFor(t, dark, false)
+			// ① 能写的那一版：同样的按钮，指针落上去要亮（「浅色」在皮肤页上）。
+			b := openShellFor(t, dark, false)
+			b.s.navigate(appearancePath)
+			b.tt.Frame()
+			tt := b.tt
 			if d := hoverDelta(t, tt, "浅色"); d < 6 {
 				t.Fatalf("能写的那一档指针落上去只变了 %d（< 6）——"+
 					"下面「禁用键不亮」那条就没有对照，会白白地绿", d)
 			}
 
 			// ② 只读的那一版（设置来自更新的版本）：每一档都得一点不变。
-			ro := openSettingsFor(t, dark, true)
+			// 「浅色」在皮肤页（同一份设置、同一批禁用控件），「直接退出」在设置页。
+			bro := openShellFor(t, dark, true)
+			bro.s.navigate(appearancePath)
+			bro.tt.Frame()
+			ro := bro.tt
 			if !ro.HasText("设置只读") {
 				t.Fatalf("没有进只读那一版，文字有 %q", ro.Texts())
 			}
-			for _, label := range []string{"浅色", "直接退出"} {
+			for _, label := range []string{"浅色"} {
+				if d := hoverDelta(t, ro, label); d > probeTolerance {
+					t.Errorf("只读设置里的「%s」指针落上去变了 %d（> %d）——"+
+						"禁用键亮了，等于告诉用户这里点得动", label, d, probeTolerance)
+				}
+			}
+			bro.s.navigate(settingsPath)
+			bro.tt.Frame()
+			for _, label := range []string{"直接退出"} {
 				if d := hoverDelta(t, ro, label); d > probeTolerance {
 					t.Errorf("只读设置里的「%s」指针落上去变了 %d（> %d）——"+
 						"禁用键亮了，等于告诉用户这里点得动", label, d, probeTolerance)
@@ -471,11 +486,18 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 // （`TestSettingsPageRefusesToWriteAFileFromANewerVersion` 用的同一条路）。
 func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 	t.Helper()
+	return openShellFor(t, dark, readOnly).tt
+}
+
+// openShellFor 同 openSettingsFor，但把外壳也交回来——要再切去别的页（比如
+// 皮肤页）的调用方拿这个。
+func openShellFor(t *testing.T, dark, readOnly bool) *testShell {
+	t.Helper()
 	if !readOnly {
 		b := newTestShell(t, systemIsDark(dark))
 		b.s.navigate(settingsPath)
 		b.tt.Frame()
-		return b.tt
+		return b
 	}
 	path := filepath.Join(writableTempDir(t, "settings"), app.SettingsFileName)
 	// themeMode 要显式给：空字符串不是三档里的任何一个，三个主题按钮就都
@@ -497,7 +519,7 @@ func openSettingsFor(t *testing.T, dark, readOnly bool) *mygoui.Tester {
 	b := newTestShell(t, onApp(a), systemIsDark(dark))
 	b.s.navigate(settingsPath)
 	b.tt.Frame()
-	return b.tt
+	return b
 }
 
 // hoverDelta 是「指针落在这一格上」减「指针在别处」时，这一格的底色变了多少。

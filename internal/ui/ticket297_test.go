@@ -111,6 +111,14 @@ var segmentRows = []struct {
 	{"主题模式", "「主题」", []string{"跟随系统", "浅色", "深色"}},
 }
 
+// segmentRowsOnSettings / segmentRowsOnAppearance：上面那张表按「哪一页」拆开。
+// 「数据显示样式」留在设置页，「主题」搬到皮肤页了（appearance.go）——测试也
+// 跟着拆，各开各的页。
+var (
+	segmentRowsOnSettings   = segmentRows[:1]
+	segmentRowsOnAppearance = segmentRows[1:]
+)
+
 // TestEverySettingsSegmentOptionHasAnIcon 钉住「设置页两处分段控件每一档都有
 // 18px 图标」。
 //
@@ -135,13 +143,13 @@ func TestEverySettingsSegmentOptionHasAnIcon(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
+			tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""), systemIsDark(dark))
 			homeFrame(tt)
 
-			for _, row := range segmentRows {
+			for _, row := range segmentRowsOnAppearance {
 				// ⚠️ **先滚进可视区再量**：那一排在页面中间，不滚的话量到的是
 				// 旧一帧的盒子（评审那一版就量错过，见 `settingRect`）。
-				settingRect(t, tt, s, row.group)
+				appearanceRect(t, tt, s, row.group)
 
 				fingerprints := map[string]string{}
 				for _, label := range row.options {
@@ -183,11 +191,11 @@ func TestEverySettingsSegmentOptionHasAnIcon(t *testing.T) {
 // 留白多少（太阳的 rays 几乎顶到边，显示器的那块屏留了一像素），所以这里断
 // 的是**一个区间**而不是一个数。
 func TestTheSettingsSegmentIconsSitRightNextToTheirLabel(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 	homeFrame(tt)
 
-	for _, row := range segmentRows {
-		settingRect(t, tt, s, row.group)
+	for _, row := range segmentRowsOnAppearance {
+		appearanceRect(t, tt, s, row.group)
 		for _, label := range row.options {
 			text, ok := tt.Find(label)
 			if !ok {
@@ -232,31 +240,61 @@ func TestTheSettingsSegmentIconsSitRightNextToTheirLabel(t *testing.T) {
 // 有时是 4 段）。宽度是稳的。
 func TestTheSettingsSegmentLabelsAreNeverTruncated(t *testing.T) {
 	// 三排分段控件，每一档的标签。
-	rows := []struct {
+	rowsOnSettings := []struct {
 		group  string
 		labels []string
 	}{
 		{"显示样式档位", []string{"列表", "网格", "紧凑"}},
-		{"主题模式", []string{"跟随系统", "浅色", "深色"}},
 		{"窗口关闭方式", []string{"隐藏到托盘", "直接退出"}},
+	}
+	rowsOnAppearance := []struct {
+		group  string
+		labels []string
+	}{
+		{"主题模式", []string{"跟随系统", "浅色", "深色"}},
+	}
+
+	check := func(widthOf func(*testing.T, *mygoui.Tester, *Shell, string, string) float32,
+		wideTT *mygoui.Tester, wideS *Shell, narrowTT *mygoui.Tester, narrowS *Shell, rows []struct {
+			group  string
+			labels []string
+		}) {
+		for _, row := range rows {
+			for _, label := range row.labels {
+				wide := widthOf(t, wideTT, wideS, row.group, label)
+				narrow := widthOf(t, narrowTT, narrowS, row.group, label)
+				if absF(narrow-wide) > 1 {
+					t.Errorf("「%s」那一档的标签在最坏配置下是 %.1f 宽，而放得下的时候是 %.1f——"+
+						"它被裁了（控件列只有 318.7 宽，三等分装不下「图标 + 四个字」）",
+						label, narrow, wide)
+				}
+			}
+		}
 	}
 
 	// 放得下的一档：同样的 1.4 倍字号，侧栏没拉到最大（控件列 420 宽）。
 	wideTT, wideS := settingsScene(t, app.DefaultSideMenuWidth, 1.4)
 	// 放不下的一档：侧栏拉到 480（控件列 318.7 宽），字号同样是 1.4 倍。
 	narrowTT, narrowS := settingsScene(t, app.MaxSideMenuWidth, 1.4)
+	check(settingsLabelWidth, wideTT, wideS, narrowTT, narrowS, rowsOnSettings)
 
-	for _, row := range rows {
-		for _, label := range row.labels {
-			wide := settingsLabelWidth(t, wideTT, wideS, row.group, label)
-			narrow := settingsLabelWidth(t, narrowTT, narrowS, row.group, label)
-			if absF(narrow-wide) > 1 {
-				t.Errorf("「%s」那一档的标签在最坏配置下是 %.1f 宽，而放得下的时候是 %.1f——"+
-					"它被裁了（控件列只有 318.7 宽，三等分装不下「图标 + 四个字」）",
-					label, narrow, wide)
-			}
-		}
+	// 皮肤页上的那一排单独开一页。
+	wideA, wideSA := appearanceScene(t, app.DefaultSideMenuWidth, 1.4)
+	narrowA, narrowSA := appearanceScene(t, app.MaxSideMenuWidth, 1.4)
+	check(appearanceLabelWidth, wideA, wideSA, narrowA, narrowSA, rowsOnAppearance)
+}
+
+// appearanceScene 同 `settingsScene`，但停在皮肤页上（那一排搬过去了）。
+func appearanceScene(t *testing.T, side float64, scale float32) (*mygoui.Tester, *Shell) {
+	t.Helper()
+	tt, s, _, _ := shellOnAppearance(t, sideSceneSettings(side), at(900, 800),
+		withPrefs(mygoui.Preferences{TextScale: scale}))
+	for range 4 {
+		tt.Advance(200 * time.Millisecond)
+		tt.Frame()
 	}
+	homeFrame(tt)
+	return tt, s
 }
 
 // settingsScene 造一个停在设置页上的外壳（某一档侧栏宽 + 某一档字号）。
@@ -271,6 +309,24 @@ func settingsScene(t *testing.T, side float64, scale float32) (*mygoui.Tester, *
 	}
 	homeFrame(tt)
 	return tt, s
+}
+
+// appearanceLabelWidth 同 `settingsLabelWidth`，滚的是 `s.appearanceScroll`。
+func appearanceLabelWidth(t *testing.T, tt *mygoui.Tester, s *Shell, group, label string) float32 {
+	t.Helper()
+	for range 120 {
+		if r, ok := tt.Find(label); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
+			return r.W
+		}
+		before := s.appearanceScroll.Y
+		s.appearanceScroll.Y = before + 100
+		tt.Frame()
+		if s.appearanceScroll.Y == before {
+			break
+		}
+	}
+	t.Fatalf("皮肤页上滚不到 %q 那一排里的 %q，文字有 %q", group, label, tt.Texts())
+	return 0
 }
 
 // settingsLabelWidth 量设置页上某一档标签的宽（那一排先滚进可视区）。
@@ -587,10 +643,10 @@ func scrollSettingsTo(t *testing.T, tt *mygoui.Tester, s *Shell, group string) {
 		if r, ok := tt.Find(group); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
 			return
 		}
-		before := s.settings.scroll.Y
-		s.settings.scroll.Y = before + 100
+		before := s.appearanceScroll.Y
+		s.appearanceScroll.Y = before + 100
 		tt.Frame()
-		if s.settings.scroll.Y == before {
+		if s.appearanceScroll.Y == before {
 			break // 已经到底了，再滚也不动
 		}
 	}

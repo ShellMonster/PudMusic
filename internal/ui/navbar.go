@@ -193,6 +193,21 @@ func (s *Shell) viewNav(c *ui.Context) {
 			"看看听了多久、最爱听哪几首").Clicked() {
 			s.navigate(statsPath)
 		}
+		// ⚠️ **皮肤那一枚在「听歌统计」和「迷你」之间**：它是**外观**的动作，
+		// 排在「看数据」之后、「窗口级动作」之前——和「迷你」一样也是用户会
+		// 随手点的快捷入口，但不是窗口动作。
+		//
+		// ⚠️ **进的是独立页 `/appearance`，不是浮层**（用户拍板）：8 张方案卡 +
+		// 深浅四档 + 字体 + 颜色两块，弹层摆不下。
+		//
+		// 🔴 **Key 必须在构造之前给**（理由同上面 nav-stats 那一段）：automation
+		// 的 `act` 按 Key 找元素。
+		c.Key("nav-appearance")
+		if s.withTip(c, iconKey(c, iconPalette, "皮肤", iconMd, false).
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
+			"换主题方案、深浅模式和颜色").Clicked() {
+			s.navigate(appearancePath)
+		}
 		if s.withTip(c, iconKey(c, iconPiP, "迷你", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
 			"缩成 320×84 的小窗贴边悬浮，音乐不停").Clicked() {
