@@ -50,7 +50,8 @@ for platform in "${targets[@]}"; do
   target="${platform//\//-}"
   label="$(platform_label "$platform")"
   dir="$out/$target"
-  archive="$dir/$slug-$version-$label.tar.gz"
+  # ⚠️ **归档/安装包用品牌名 PudMusic**，不是 mygo.json 的 slug（slug 只能小写）。
+  archive="$dir/PudMusic-$version-$label.tar.gz"
   manifest="$dir/update-$target.json"
   [ -d "$dir" ] || { printf '缺少产物目录：%s\n' "$dir" >&2; exit 1; }
   [ -f "$archive" ] || { printf '%s 缺少更新归档：%s\n' "$target" "$archive" >&2; exit 1; }
@@ -58,11 +59,11 @@ for platform in "${targets[@]}"; do
 
   case "$platform" in
     darwin/*)
-      package="$dir/$slug-$version-$label.dmg"
+      package="$dir/PudMusic-$version-$label.dmg"
       [ -f "$package" ] || { printf '%s 缺少 macOS 安装包：%s\n' "$target" "$package" >&2; exit 1; }
       ;;
     windows/*)
-      package="$dir/$slug-setup-$version-$label.exe"
+      package="$dir/PudMusic-setup-$version-$label.exe"
       [ -f "$package" ] || { printf '%s 缺少 Windows 安装包：%s\n' "$target" "$package" >&2; exit 1; }
       ;;
   esac

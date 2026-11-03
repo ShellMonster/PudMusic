@@ -64,11 +64,12 @@ for platform in "$@"; do
   [ -d "$dir" ] || continue
 
   # tar.gz 更新归档：清单的 url 指着它。旧名是
-  # `<slug>-<version>-<target>.tar.gz`，新名是 `<slug>-<version>-<label>.tar.gz`。
+  # `<slug>-<version>-<target>.tar.gz`，新名是 `PudMusic-<version>-<label>.tar.gz`。
+  # 展示用品牌名 PudMusic，不是 mygo.json 的 slug（slug 只能小写）。
   version="$(python3 -c 'import json;print(json.load(open("mygo.json"))["version"])')"
   slug="$(python3 -c 'import json;print(json.load(open("mygo.json"))["slug"])')"
   archive_old="$dir/$slug-$version-$target.tar.gz"
-  archive_new="$dir/$slug-$version-$label.tar.gz"
+  archive_new="$dir/PudMusic-$version-$label.tar.gz"
   if [ -f "$archive_old" ]; then
     mv "$archive_old" "$archive_new"
     rewrite_manifest "$dir/update-$target.json" "$(basename "$archive_old")" "$(basename "$archive_new")"
@@ -89,13 +90,13 @@ for platform in "$@"; do
       old="$dir/pudmusic-"*"-$arch.dmg"
       for f in $old; do
         [ -f "$f" ] || continue
-        mv "$f" "$(dirname "$f")/$(basename "$f" | sed "s/-${arch}\.dmg$/-${label}.dmg/")"
+        mv "$f" "$(dirname "$f")/PudMusic-$version-$label.dmg"
       done
       ;;
     windows/*)
       for f in "$dir"/pudmusic-setup-*-"$arch".exe; do
         [ -f "$f" ] || continue
-        mv "$f" "$(dirname "$f")/$(basename "$f" | sed "s/-${arch}\.exe$/-${label}.exe/")"
+        mv "$f" "$(dirname "$f")/PudMusic-setup-$version-$label.exe"
       done
       ;;
   esac
