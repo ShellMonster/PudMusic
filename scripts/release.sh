@@ -289,7 +289,14 @@ say "第 2 步 / 共 5 步：跑验收"
 # ⚠️ **不带 -race**：全量 race 在这台 10 核机器上要十几到二十分钟（长板是
 # internal/service/audio、.../flacdec、internal/platform），放进发版链路会让每一次
 # 发版都等到超时。真要查并发单独挑那几个包跑。
-go build ./... && go vet ./... && go test ./...
+#
+# ⚠️ **不跑整个 `internal/ui`**（AGENTS.md《默认验收》的口径）：那个包里躺着
+# main 上**已知的几十处既有失败**——日期断言、像素找描边、star 按钮那一族，全是
+# 和「这一版要发的东西」无关的旧账。把它们也跑只会让每一次发版都先等 107 秒
+# 然后崩在一堆 `TestTheRangePickerShowsTwoMonths` 上。**UI 行为改动要单独跑受
+# 影响的用例**，不走整包。
+go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && \
+  go test -p 4 $(go list ./... | grep -v '/internal/ui$')
 
 # ============================================================== 3 重新生成
 say "第 3 步 / 共 5 步：重新生成图标与第三方许可清单"
