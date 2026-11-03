@@ -267,15 +267,16 @@ func TestMountSettingsUsesTheMyGoAppDataDirectory(t *testing.T) {
 // 用户真的能切
 // ─────────────────────────────────────────────────────────────────────────────
 
-// clickTheme 点主题那排的某一档（设置页上）。
+// clickTheme 点主题那排的某一档（皮肤页上——「主题」那一排从设置页搬到
+// `/appearance` 了）。
 //
-// ⚠️ **先滚进可视区再点**：外观组现在有八套方案折两行，这一排比从前矮不下去——
-// 在 900×600（最小窗口）那一档，「主题」整排被推到了可视区外，而 `tt.Click`
-// 只按标签找元素、不检查它滚出去了没有，点在窗外等于没点（和 `clickSetting`
-// 顶上那段注释说的是同一个坑）。
+// ⚠️ **先滚进可视区再点**：皮肤页上面排着八套方案折两行，「主题」这一排在
+// 小窗口那一档可能被推到可视区外，而 `tt.Click` 只按标签找元素、不检查它
+// 滚出去了没有，点在窗外等于没点（和 `clickSetting` 顶上那段注释说的是同一
+// 个坑）。
 func clickTheme(t *testing.T, tt *mygoui.Tester, s *Shell, label string) {
 	t.Helper()
-	r := settingRect(t, tt, s, label)
+	r := appearanceRect(t, tt, s, label)
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 }
@@ -329,7 +330,12 @@ func openSettings(t *testing.T, tt *mygoui.Tester) {
 // 钟冻住的时候也不会骗人——只会一路撞到上限然后大声报错。顺带还比原来准：
 // 原来要三帧不动才敢认停（两帧不够，动画停在某一帧上时两帧本来就一样），现在
 // 动画一结束就停，实测 16ms × 15 = 240ms，和那个 250ms 的切页动画对得上。
-func settleSettingsPage(t *testing.T, tt *mygoui.Tester) {
+func settleSettingsPage(t *testing.T, tt *mygoui.Tester) { settlePage(t, tt, "外观") }
+
+// settlePage 是 `settleSettingsPage` 的通用版：等切页动画走完，然后确认
+// `marker` 那一行真的量出了大小。皮肤页（「主题方案」那一组）和设置页
+// （「外观」）走的是同一个「等动画停」的判据，不各写一份。
+func settlePage(t *testing.T, tt *mygoui.Tester, marker string) {
 	t.Helper()
 	// step × maxSteps = 1.28s 的假时间，切页动画是 250ms：够走完，还留着余量。
 	const (
@@ -347,16 +353,16 @@ func settleSettingsPage(t *testing.T, tt *mygoui.Tester) {
 		// 「停了」还得是「停在对的地方」——这一页必须真的量出宽高。停在动画某一
 		// 帧上（或者还没排版就报了停）量出来是 0×0，而 `Tester.Click` 照着那个
 		// 坐标点下去照样返回 nil。在这儿喊停，别让下一步去报一个骗人的错。
-		cur, ok := tt.Find("外观")
+		cur, ok := tt.Find(marker)
 		if !ok {
-			t.Fatal("设置页不再要帧了，可「外观」这一行找不到了")
+			t.Fatalf("页面不再要帧了，可「%s」这一行找不到了", marker)
 		}
 		if cur.W <= 0 || cur.H <= 0 {
-			t.Fatalf("设置页停下来了但没量出大小（%v）：多半卡在了切页动画的某一帧上", cur)
+			t.Fatalf("页面停下来了但没量出大小（%v）：多半卡在了切页动画的某一帧上", cur)
 		}
 		return
 	}
-	t.Fatal("切页动画一直没停：设置页一直在滑")
+	t.Fatalf("切页动画一直没停：%q 一直在滑", marker)
 }
 
 // TestUserCanSwitchTheThemeFromTheInterface 是「主题三档能切」这条验收。
@@ -371,7 +377,7 @@ func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
 	// 系统是深色，起点是「跟随系统」。
 	tt, sh, a, path := shellWithSettings(t, app.ThemeModeSystem, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "起点：跟随系统，系统是深色")
-	openSettings(t, tt)
+	openAppearance(t, tt)
 
 	clickTheme(t, tt, sh, "浅色")
 	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeLight {
@@ -429,7 +435,7 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 	b := newTestShell(t, onApp(a), at(900, 600), systemIsDark(false))
 	tt := b.tt
 	tt.Frame()
-	openSettings(t, tt)
+	openAppearance(t, tt)
 
 	if !tt.HasText("设置只读") {
 		t.Errorf("界面上没有说清为什么切不了，文字有 %q", tt.Texts())

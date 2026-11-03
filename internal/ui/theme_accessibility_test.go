@@ -181,7 +181,10 @@ func TestTheDisabledThemeButtonsStayReadable(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			tt := openSettingsFor(t, dark, true)
+			b := openShellFor(t, dark, true)
+			b.s.navigate(appearancePath) // 主题三档在皮肤页上
+			b.tt.Frame()
+			tt := b.tt
 			if !tt.HasText("设置只读") {
 				t.Fatalf("没有进只读那一版，文字有 %q", tt.Texts())
 			}
@@ -190,9 +193,11 @@ func TestTheDisabledThemeButtonsStayReadable(t *testing.T) {
 				if !ok {
 					t.Fatalf("找不到「%s」，文字有 %q", label, tt.Texts())
 				}
-				// 按钮的底：取文字框左上角往里一点（往外会落到相邻选中档的边上）。那一块要么是页面底色
-				// （未选中的按钮透明），要么是选中那一档的淡底。
-				bg := tt.Image().RGBAAt(int(r.X)+2, int(r.Y)+2)
+				// 按钮的底：取文字框下方那一小条内边距（文字框左上角会落在
+				// 第一笔画的抗锯齿上，底色被污染 0.05~0.1 的对比度——皮肤页
+				// 那一排就这么栽的）。那一块要么是页面底色（未选中的按钮
+				// 透明），要么是选中那一档的淡底。
+				bg := tt.Image().RGBAAt(int(r.X+r.W/2), int(r.Y+r.H)+2)
 				text := deepestIn(tt.Image(), r, bg)
 				if got := contrastOf(text, bg); got < 3 {
 					t.Errorf("「%s」禁用之后的字 %v 压底色 %v 只有 %.2f:1（< 3）",

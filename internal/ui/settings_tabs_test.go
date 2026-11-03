@@ -66,7 +66,7 @@ func TestAllFourTabsAreThereAndEachDrawsItsOwnThing(t *testing.T) {
 // 这一条读的是**主题里的字体**，不是设置里的字符串：设置存对了而主题没跟着换，
 // 界面上一个字都不会变，而那正是「所有设置项都在界面上能改」会漏掉的那种失败。
 func TestPickingTheFontChangesWhatTheWholeWindowDrawsIn(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 
 	// 「系统默认」这一档要**一个字节都不改**主题：`t.Font` 的零值是系统自己的字体，
 	// 而设置里默认是 `"system-ui"`——那是另一个字符串，设上去全应用的字宽都会变
@@ -75,7 +75,7 @@ func TestPickingTheFontChangesWhatTheWholeWindowDrawsIn(t *testing.T) {
 		t.Fatalf("选了系统默认之后主题里的字体是 %q，应该是空的（= 系统自己的）", got)
 	}
 
-	openFontMenu(t, tt)
+	openFontMenu(t, tt, s)
 	// 挑系统里真有的**第一个等宽族**：名单是问系统要来的，写死一个「Menlo」
 	// 在别的机器上可能不存在（那还是「挑好的名单」的老思路）。
 	want := firstMonospacedFamily(t)
@@ -103,8 +103,8 @@ func TestPickingTheFontChangesWhatTheWholeWindowDrawsIn(t *testing.T) {
 // 面板上那一行不可能知道「它该用哪一族」——那一句 `.Font(family)` 是页面上唯一
 // 能让它知道的地方。
 func TestEveryFontOptionIsDrawnInItsOwnFont(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openFontMenu(t, tt)
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
+	openFontMenu(t, tt, s)
 
 	// 挑前几条系统字体当探针。名单是问系统要来的，所以**不写死族名**：写死的
 	// 名字在另一台机器上可能不存在，而这一条要验的是「每一条用它自己那一族」，
@@ -165,7 +165,7 @@ func renderedIn(t *testing.T, label, family string) inkShot {
 // 读的是 `BuildTheme` 出来的强调色和背景色，和设置里的十六进制串两样都查：串对了
 // 而主题没跟着变，界面上一根线都不会换颜色。
 func TestPickingAColorChangesTheWholeTheme(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 
 	// 取色板是点色块之后在下面摆出来的，点里面的常用色。
 	openColorPicker(t, tt, "主色")
@@ -188,7 +188,7 @@ func TestPickingAColorChangesTheWholeTheme(t *testing.T) {
 // 背景色的默认值是**空串**，意思是「跟着主题走」。Biu 那一格挑过一次之后就再也
 // 回不到这个状态，而那正是多数人想要的常态——所以这里多给了那个出口。
 func TestTheColorItemGoesBackToFollowingTheTheme(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 
 	if got := s.app.SettingsSnapshot().BackgroundColor; got != "" {
 		t.Fatalf("起点背景色不是空串，是 %q", got)
@@ -364,7 +364,7 @@ func TestTheProxyPasswordOnlyShowsWhereItMeansSomething(t *testing.T) {
 //
 // 拖法照审阅给的复现：点滑块中点 → 推几帧 → 看存下来的值。
 func TestTheColorPickerKeepsTheTransparency(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 	openColorPicker(t, tt, "主色")
 	if err := tt.Click("Red"); err != nil {
 		t.Fatalf("取色板里点不到红色：%v", err)
@@ -558,12 +558,11 @@ func TestHidingAMenuItemLeavesOtherGroupsAlone(t *testing.T) {
 // 小工具
 // ─────────────────────────────────────────────────────────────────────────────
 
-// openFontMenu 把字体那一格的下拉摆开。
-func openFontMenu(t *testing.T, tt *mygoui.Tester) {
+// openFontMenu 把字体那一格的下拉摆开（皮肤页上——「字体」那格搬过去了）。
+func openFontMenu(t *testing.T, tt *mygoui.Tester, s *Shell) {
 	t.Helper()
-	if err := tt.Click("选择字体"); err != nil {
-		t.Fatalf("点不到字体下拉：%v，文字有 %q", err, tt.Texts())
-	}
+	r := appearanceRect(t, tt, s, "选择字体")
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 	// 面板摆开之后第一个系统字体在画面上（「系统默认」那一条收起时本来就有，
 	// 不能拿它当判据）。

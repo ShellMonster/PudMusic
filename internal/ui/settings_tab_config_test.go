@@ -111,7 +111,9 @@ func TestImportingAConfigChangesOnlyWhatThatFileMentions(t *testing.T) {
 	if got.DownloadPath != "/Users/x/Downloads" {
 		t.Errorf("文件里没提下载目录，它被重置了：%q", got.DownloadPath)
 	}
-	// 换档位之后界面要真的跟着变，而不是设置变了画面还是旧的。
+	// 换档位之后界面要真的跟着变，而不是设置变了画面还是旧的。「深色」
+	// 那一档在皮肤页上（主题三档搬过去了）。
+	s.navigate(appearancePath)
 	tt.Frame()
 	if !hasExactText(tt, "深色") {
 		t.Errorf("导入之后画面没有重画，文字有 %q", tt.Texts())

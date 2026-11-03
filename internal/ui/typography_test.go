@@ -571,29 +571,39 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			b := newTestShell(t, systemIsDark(dark))
+			// ⚠️ **字号跟行不跟页**：「主题方案」那一整块搬到皮肤页了
+			// （`/appearance`），分组标题跟过去量；「数据显示样式」那行还留在
+			// 设置页，行标题在这里量。两个文本在各自的页上都是唯一的——
+			// 「皮肤」「主题」那种在分组标题 / 顶栏 Label / 路由标题里重名的
+			// 字都不能拿来量（`Tester.Find` 拿的是第一个匹配）。
 			b.s.navigate(settingsPath)
 			b.tt.Frame()
+			rowRect, rowOK := b.tt.Find("数据显示样式")
+			if !rowOK {
+				t.Fatalf("设置页上找不到行标题「数据显示样式」，文字有 %q", b.tt.Texts())
+			}
+			b.s.navigate(appearancePath)
+			b.tt.Frame()
+			grpRect, grpOK := b.tt.Find("主题方案")
+			if !grpOK {
+				t.Fatalf("皮肤页上找不到分组标题「主题方案」，文字有 %q", b.tt.Texts())
+			}
 
-			for _, want := range []struct {
+			// 两个盒子都是文本本身的高（分组标题与卡片之间是 Gap，不在盒内）。
+			for _, m := range []struct {
 				text string
 				size float32
 				what string
-				// padBottom 是这一行字自己带的下内边距——`Find` 给回来的是整个
-				// 元素盒子，分组标题自己垫了 4（标题与第一行之间的那一点空）。
-				padBottom float32
+				r    mygoui.Rect
 			}{
-				{text: "外观", size: 20, what: "分组标题"},
-				{text: "主题", size: 16, what: "行标题"},
+				{"数据显示样式", 16, "行标题", rowRect},
+				{"主题方案", 20, "分组标题", grpRect},
 			} {
-				r, ok := b.tt.Find(want.text)
-				if !ok {
-					t.Fatalf("设置页上找不到%s「%s」，文字有 %q", want.what, want.text, b.tt.Texts())
-				}
-				got := (r.H - want.padBottom) / textBoxPerSize
-				if math.Abs(float64(got-want.size)) > 0.8 {
-					t.Errorf("设置页%s「%s」折算出来是 %.1fpx，want %.0f——"+
+				got := m.r.H / textBoxPerSize
+				if math.Abs(float64(got-m.size)) > 0.8 {
+					t.Errorf("%s「%s」折算出来是 %.1fpx，want %.0f——"+
 						"设置页的三档字号是 20 / 16 / 14（DESIGN.md 的 typography）",
-						want.what, want.text, got, want.size)
+						m.what, m.text, got, m.size)
 				}
 			}
 		})

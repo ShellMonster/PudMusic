@@ -78,9 +78,9 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// ① 主题三档：默认那一档是「跟随系统」。
-			t.Run("设置页的档位按钮", func(t *testing.T) {
-				tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
+			// ① 主题三档：默认那一档是「跟随系统」（在皮肤页上——那一排搬过去了）。
+			t.Run("皮肤页的档位按钮", func(t *testing.T) {
+				tt, _, _, _ := shellOnAppearance(t, app.DefaultSettings(""), systemIsDark(dark))
 				theme := BuildTheme(app.DefaultSettings(""), dark)
 				assertSolidAccentOption(t, tt, "跟随系统", theme)
 			})

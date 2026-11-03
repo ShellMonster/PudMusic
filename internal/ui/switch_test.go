@@ -51,7 +51,7 @@ func switchKnobAt(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) string {
 // 那个坑），它会一直待在左半边；而如果它是瞬移的，第二段会变成「右」。
 // 只有「真的在飞」才是两头都有白像素。
 func TestTheSettingsSwitchSpringsItsKnobOver(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(true))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""), systemIsDark(true))
 
 	// ⚠️ **量的是「封面取色」那一颗**，不是「音量均衡」：音量均衡拨开之后会弹
 	// 一句提示，而**提示就浮在右下角**（356 宽、抬过播放条 90）——设置页的控件列
@@ -60,7 +60,7 @@ func TestTheSettingsSwitchSpringsItsKnobOver(t *testing.T) {
 	//
 	// ⚠️ **它默认是关的**（`CoverAccent` 默认关），而「显示搜索历史」默认是开的
 	// ——量一个默认就开着的开关，起点在右边。
-	sw := settingRect(t, tt, s, "开关：封面取色")
+	sw := appearanceRect(t, tt, s, "开关：封面取色")
 	if at := switchKnobAt(t, tt, sw); at != "左" {
 		t.Fatalf("开关关着的时候旋钮在%s（want 左）", at)
 	}
@@ -109,9 +109,9 @@ func TestTurningOnAnInvisibleEffectSaysOneShortLine(t *testing.T) {
 //
 // 判据见 `switch_hint.go`：这一格的效果用户自己看得见，弹一句就是噪音。
 func TestAVisibleEffectSaysNothing(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 
-	sw := settingRect(t, tt, s, "开关：封面取色")
+	sw := appearanceRect(t, tt, s, "开关：封面取色")
 	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
 	tt.Frame()
 

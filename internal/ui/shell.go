@@ -1008,6 +1008,13 @@ type Shell struct {
 	// 理由和 home 一模一样：切走再切回来要停在原来那一格上。
 	settings settingsPageState
 
+	// appearanceScroll 是皮肤页（/appearance）的滚动位置。
+	//
+	// ⚠️ **独立一格，不借 `s.settings.scroll`**：`settingRect` 那一族测试和
+	// 「滚到哪儿记哪儿」写的都是 settings 那一份——借过来的话皮肤页一滚，
+	// 设置页的滚动位置跟着跑（两页是**同一处记忆**是不对的）。
+	appearanceScroll ui.ScrollState
+
 	// stats 是听歌统计页自己那一摊：看哪一档、那份快照、Top 那两张表的状态。
 	// 见 stats_page.go。
 	//

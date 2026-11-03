@@ -890,8 +890,7 @@ func TestSpaceDoesNotActivateTheFocusedButton(t *testing.T) {
 func TestPickingATrackFadeLength(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	tt.Frame()
-	tt.Scroll(700, 400, 0, 700)
-	tt.Frame()
+	settingRect(t, tt, s, "选择淡入淡出时长")
 	openSelect(t, tt, "选择淡入淡出时长")
 	if err := tt.Click("5 秒"); err != nil {
 		t.Fatalf("找不到切歌淡入淡出的 5 秒档：%v（%q）", err, tt.Texts())
@@ -905,8 +904,7 @@ func TestPickingATrackFadeLength(t *testing.T) {
 func TestPickingAnEQPreset(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	tt.Frame()
-	tt.Scroll(700, 400, 0, 700)
-	tt.Frame()
+	settingRect(t, tt, s, "选择均衡器预设")
 	openSelect(t, tt, "选择均衡器预设")
 	if err := tt.Click("摇滚"); err != nil {
 		t.Fatalf("找不到均衡器的摇滚档：%v", err)
