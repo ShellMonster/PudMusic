@@ -88,9 +88,41 @@ func (a *App) rememberPlaybackResume() {
 // 装在 `installOnlinePlayer`（换上新播放器那一刻，锁已经在手里）：
 // 那里不能解锁再拿（中间那几行状态正在换），所以拼快照这一半在锁里做、
 // 落盘这一半排到锁外做（见 `installOnlinePlayer` 里 `resumeWrite` 那一段）。
+//
+// ⚠️ **串行落盘**：快速连续切两首时，两个 goroutine 的 `UpdateSettings`
+// 写顺序不保证和切歌顺序一致——后发的写可能先落、先发的写可能后落，
+// 最终记的是「第一首」而非「第二首」。所以落盘走一条 channel，谁来都
+// 只往一个 goroutine 里排，保证写的顺序和切的顺序一致。
 func (a *App) rememberPlaybackResumeLocked() {
 	key, pos := a.playbackResumeLocked()
-	go a.persistPlaybackResume(key, pos)
+	a.enqueuePlaybackResume(key, pos)
+}
+
+// enqueuePlaybackResume 把「要落盘的那一格」排进串行队列。
+//
+// ⚠️ **goroutine 是懒起的**：第一次用到才 `go`——`installOnlinePlayer` 在
+// 每次切歌都走，而它不一定有人真的退登过，懒起可以省一个常驻 goroutine。
+// 通道容量 1：满了就把旧的丢掉——「上一首的位置」晚于「这一首的」就没用了，
+// 丢旧留新。
+func (a *App) enqueuePlaybackResume(key string, pos time.Duration) {
+	a.resumeOnce.Do(func() {
+		a.resumeCh = make(chan PlaybackResume, 1)
+		go func() {
+			for r := range a.resumeCh {
+				a.persistPlaybackResume(r.TrackKey, time.Duration(r.PositionMs)*time.Millisecond)
+			}
+		}()
+	})
+	select {
+	case a.resumeCh <- PlaybackResume{TrackKey: key, PositionMs: pos.Milliseconds()}:
+	default:
+		// 满了：丢掉旧的那一格，塞新的——「上一首」晚于「这一首」就没用了。
+		select {
+		case <-a.resumeCh:
+		default:
+		}
+		a.resumeCh <- PlaybackResume{TrackKey: key, PositionMs: pos.Milliseconds()}
+	}
 }
 
 // playbackResumeLocked 读「此刻在放哪一首、放到哪儿了」。**必须在持锁时调**。

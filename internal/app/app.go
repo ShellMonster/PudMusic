@@ -316,8 +316,14 @@ type App struct {
 	// ⚠️ **它和 `a.title` 是两首**：`a.title` 是正在放的那一首，而这一份是
 	// 失败的那一首——不分开的话，出错那一栏显示的是**上一首**，用户读到的是
 	// 「这一首正在放，但它打不开」。
-	failedTitle   string
-	failedArtist  string
+	failedTitle  string
+	failedArtist string
+	// resumeOnce 和 resumeCh 是「断点续播」落盘的串行队列（见
+	// `enqueuePlaybackResume`）：快速连续切歌时，两把锁外的 `UpdateSettings`
+	// 顺序不保证和切歌顺序一致，会写成「先切的那首」。所以所有锁外落盘
+	// 都排进一条 channel、由一个 goroutine 串行写，保证顺序。
+	resumeOnce    sync.Once
+	resumeCh      chan PlaybackResume
 	failedBiliURL string
 	// pending 是「上一次用户想放的那一项」。
 	//
