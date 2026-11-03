@@ -844,3 +844,62 @@ func TestTheMiniCurtainSetSizeIsSuppressedWhileTheUserResizes(t *testing.T) {
 			"（要么跳回 84 了，要么跳到全开高了）", got)
 	}
 }
+
+// TestTheMiniCurtainDragToAShortBoardDoesNotSnapBack 盯「用户把窗缘拖到
+// 『板 < 10px』那一档松手后，窗不被拽回 84」（P1 审查抓到的那条）。
+//
+// 🔴 **板高要反解 `miniCurtainWinHeight` 的不动点**：窗高 = 84 + 缝 + 板高，
+// 而**缝是渐出的**（`min(gap, 板高)`）——拖到窗高 84~94 那一档时板 < 10px、
+// 缝 < 10px，按「常数缝」反解出来的是 0 或负，`holdAt(0)` 把弹簧钉到收着
+// ⇒ 松手后窗「啪」地回到 84，而不是从用户拖到的高度接着走。
+//
+// ⚠️ **反解是两段**：`h − 84 ≥ 2×gap` 时缝是满的（`b = h − 84 − gap`）；
+// 更矮时缝跟着板缩（`b = round((h − 84)/2)`）——窗高 90 那一格反解出的
+// 板高是 3 不是 −4。
+func TestTheMiniCurtainDragToAShortBoardDoesNotSnapBack(t *testing.T) {
+	// 先断反函数本身：`miniCurtainWinHeight` ↔ `miniCurtainBoardHeight`
+	// 往返不丢（渐出那一段是两条分支，边界 2×gap 两侧各取几格）。
+	for h := 1; h < 4*miniCurtainGap; h++ {
+		want := miniCurtainWinHeight(float32(h))
+		if got := miniCurtainBoardHeight(want); int(got+0.5) != h {
+			t.Errorf("板高 %d ⇒ 窗高 %d ⇒ 反解板高 %.1f：正反不是同一个数"+
+				"（缝渐出那一段的两条分支断了一条）", h, want, got)
+		}
+	}
+
+	s, a := miniCurtainShell(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle()
+	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n", "")
+	tt := miniCurtainTester(s)
+	tt.Frame()
+
+	fake := newFakeMiniWindow()
+	s.attachMiniWindowTo(fake)
+
+	clickCurtainCover(t, tt)
+	for i := 0; i < 5; i++ {
+		tt.Advance(time.Second / 60)
+		tt.Frame()
+	}
+	if !s.miniCurtain.spring.moving {
+		t.Fatalf("推了 5 帧弹簧就停了：动画期拖窗那一档断不到")
+	}
+
+	// 🔴 **用户把窗拖到 90 高**（板 ≈ 3px、缝 ≈ 3px 那一档）：旧版按常数缝
+	// 反解 `90 − 84 − 10 = −4` ⇒ 钉到 0，松手弹簧把窗拽回 84。
+	fake.height = 90
+	fake.resize()
+
+	// 弹簧钉的应该是「板 ≈ 3 / 全开」那一格，不是 0。
+	if got := s.miniCurtain.height; got <= 0 || got > 2*miniCurtainGap {
+		t.Errorf("窗拖到 90 之后 `s.miniCurtain.height` 是 %.1f："+
+			"反解没走缝渐出那一段（want 0 < h < %d）", got, 2*miniCurtainGap)
+	}
+	if pos := s.miniCurtain.spring.pos; pos <= 0 {
+		t.Errorf("窗拖到 90 之后弹簧 `pos` 是 %.3f：它被钉到了 0，"+
+			"松手会拽回 84 而不是从用户拖到的高度接着走", pos)
+	}
+}

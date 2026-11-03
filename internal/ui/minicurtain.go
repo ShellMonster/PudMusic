@@ -1094,7 +1094,13 @@ func (s *Shell) viewMiniCurtain(c *ui.Context, st app.State, t *ui.Theme, cardBG
 	//
 	// ⚠️ **它不画底**（缝就是窗的透明区）——画一块底的话，缝就成了「一段
 	// 半透明的带」，而不是「两块板之间的空当」。
-	s.viewMiniCurtainArrow(c, cardBG)
+	//
+	// 🔴 **缝里那一段的高度跟着窗的缝渐出**（`miniCurtainWinHeight`）：窗高
+	// 是「84 + min(缝, 板) + 板」，而这里排的是「84 + 缝这一块 + 板」——
+	// 缝这一块还按常数 10 排的话，板快收完那几帧「内容比窗高」，板尾被
+	// 裁到窗外去（P2 审查抓到的那条）。所以缝的高按同一个 `min(gap, 板)`
+	// 取——三角只在缝还容得下它的时候画。
+	s.viewMiniCurtainArrow(c, cardBG, h)
 	// 🔴 **歌词板是一张独立的圆角板**（不是旧版「从卡片底下拉出来的一段」）：
 	// 四角全圆、自己画底、自己带影——它和卡片之间那条缝是**窗的透明区**。
 	//
@@ -1155,17 +1161,26 @@ func miniCurtainCoverLabel(open bool) string {
 // 两笔拼成的**空心折线** ⌃（line 版），在 12px 里只剩两条一像素出头的
 // 细线——目标图要的是 popover 那种**实心**的指向尾巴。这里没有现成的实心
 // 三角图标，于是自己画（`Painter.FillPath`）。
-func (s *Shell) viewMiniCurtainArrow(c *ui.Context, cardBG ui.Color) {
+func (s *Shell) viewMiniCurtainArrow(c *ui.Context, cardBG ui.Color, boardH float32) {
+	// 🔴 **缝这一块的高是「窗的缝」同一个数**（`miniCurtainWinHeight` 的
+	// `min(gap, 板高)`）：窗高按渐出算、这里还按常数 10 排的话，板比缝矮的
+	// 那几帧「内容比窗高」，板尾被裁到窗外去。
+	gap := miniCurtainWinHeight(boardH) - miniHeight - int(boardH+0.5)
 	ui.Box(c).Key(miniCurtainArrowKey).
-		Height(miniCurtainGap).FillWidth().
+		Height(float32(gap)).FillWidth().
 		Draw(func(p *ui.Painter, r ui.Rect) {
+			// ⚠️ **缝容不下三角的时候不画**（渐出收尾那几帧）：三角 6 高，
+			// 缝 < 6 的时候它上下都出界——画出来的是「被窗裁掉的半个三角」。
+			if gap < 6 {
+				return
+			}
 			// 一个 12×6 的实心三角：尖朝上、底坐在歌词板的顶边上——跨在缝
 			// 和板边之间（缝 10 高，三角 6 高、居中 ⇒ 上沿 = (10−6)/2 = 2、
 			// 下沿 = 8）。
 			//
 			// ⚠️ **尖指向封面列的中线**：`miniCoverCol` 84 ⇒ 中线在 42；三角
 			// 宽 12 ⇒ 左沿在 42 − 6 = 36。
-			top := r.Y + (miniCurtainGap-6)/2
+			top := r.Y + float32(gap-6)/2
 			left := r.X + miniCoverCol/2 - 6
 			// ⚠️ **`Path` 的方法是指针接收者**（`MoveTo` / `LineTo` / `Close`），
 			// 字面量取不了址——要先命名再调，链式返回值才是它自己。
