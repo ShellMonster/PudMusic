@@ -28,6 +28,15 @@
 // （理由见 `queue_drawer.go` 那一段）：后者问的是「指针按在了不是这个元素的
 // 地方」，而播放条上按一下也算「按在外面」——于是按播放会顺手把抽屉关了。
 //
+// # 面板盖住底下的播放条
+//
+// 蒙版照旧在窗口上面留出 `playbarHeight`（76）那一截——它**不吃点击**的那截
+// 必须留出来，不然抽屉开着时按播放、上一首、下一首都会变成「点外面关抽屉」
+// （`queue_drawer.go` 那一段警告过）。但**面板**不再跟着蒙版留——它的
+// `Bottom` 是**负的**（−76），伸出蒙版的底边、贴着窗口下沿。底下的播放条
+// 被面板**藏在自己底下**（看不见、也点不到），而蒙版依然只在上面那段接「点
+// 外面」。
+//
 // # 满屏播放器那一枚不带数字
 //
 // 播放条那一枚**继续显示评论数**（票 #682 的两级逻辑照旧）；满屏那一枚**不带**
@@ -90,6 +99,23 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 		}
 		back := ui.Row(c).Key("comments-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset)
+		// ⚠️ **面板要盖住底下那条**（票：抽屉展开时播放条不该露出来）：
+		// 它的底不是蒙版的底（上面那 76 像素），而是**窗口的底**。负的
+		// `Bottom` 让面板**伸出蒙版下边**，贴着窗口下沿。
+		//
+		// ⚠️ **盖下去的是面板，不是蒙版**：蒙版也盖到底的话，点播放条那条带
+		// 会变成「点外面关抽屉」（`queue_drawer.go` 那一段警告过）；而面板
+		// 盖下去是把那一截**藏在自己底下**——底下的播放键拿不到点击，也
+		// 不会误触发关抽屉。
+		//
+		// ⚠️ **「盖下去」不挡命中**：hit-test 按的是元素自己的框（`runtime.go`
+		// 的 `commitElement` 记的是 `Rect{e.x, e.y, e.w, e.h}`），不查蒙版
+		// 的裁切——所以面板虽然画在蒙版的底边下面，它那截伸出来的部分照样
+		// 能吃点击、底下的播放条控件也够不到指针。
+		// ⚠️ **负的 `Bottom` 就是「伸出蒙版底边、贴到窗口底」**：`bottomInset`
+		// 已经是「底下那条的高度」（播放条 76 / 满屏控制栏 108），取负后
+		// 面板正好探出蒙版、盖住那一条。
+		panelBottom := -bottomInset
 		if s.commentsPhase == drawerOut {
 			// ⚠️ **退场那 200ms 里，这片蒙版不吃点击**（理由同 `queue_drawer.go`）：
 			// 它是**透明**的，用户看不见它，而它盖住整页——看不见的东西吃点击，
@@ -109,7 +135,7 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 			// 摆不出「从右边滑进来」——绝对定位按 **inset** 摆，那才是「从窗口
 			// 右边挪进来」能用的那一套（理由同 `queue_drawer.go`）。
 			panel := shadow.HeroMedium(ui.Column(c).Key("comments-drawer").
-				Absolute().Top(0).Bottom(0).Width(commentsDrawerWidth).
+				Absolute().Top(0).Bottom(panelBottom).Width(commentsDrawerWidth).
 				Background(s.cardBackground(t)).BorderStartWidth(1).BorderColor(t.Border), t)
 			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），
 			// 而「看不见的东西吃点击」才是坏的（那是底下那片蒙版）。

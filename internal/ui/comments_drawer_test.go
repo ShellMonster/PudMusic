@@ -203,6 +203,39 @@ func TestTheCommentsDrawerDoesNotEatThePlayBarClick(t *testing.T) {
 	}
 }
 
+// TestTheCommentsDrawerPanelCoversThePlayBarStrip 断「抽屉面板**盖住**底下的
+// 播放条」。
+//
+// 🔴 **用户明确要求了**：抽屉展开时底下那块播放条不该露出来——不是「点不动」
+// （那是蒙版的事），是「**看不见**」。
+//
+// ⚠️ **盖的是面板，不是蒙版**：蒙版也盖到底的话，点播放条那条带会变成「点外面
+// 关抽屉」——而用户按的是「播放」。面板盖下去是把那一截**藏在自己底下**，底下
+// 的控件拿不到点击，也不会误触发关抽屉。
+//
+// ⚠️ **判据是「面板下缘贴到窗口底」**：面板的 Bottom 是**相对于蒙版的底**的
+// （蒙版在窗口上面留出 playbarHeight），所以面板 Bottom(0) 时它的下缘 = 蒙版底 −
+// playbarHeight = 窗口底 − playbarHeight——**还不够**。要盖到底，面板的 Bottom 得是
+// **负的**（−playbarHeight），让它**伸出蒙版的底边**，贴着窗口下沿。
+func TestTheCommentsDrawerPanelCoversThePlayBarStrip(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	_, tt := newCommentsShell(t, b, mvItem(), 1400, 900)
+
+	// 面板是「评论」那个 RoleDialog——Find 到的是它的盒子。
+	panel, ok := tt.Find("评论")
+	if !ok {
+		t.Fatalf("画面上找不到评论抽屉面板，文字有 %q", tt.Texts())
+	}
+	// 面板下缘要贴到窗口底（900），而不是悬在播放条上面（900−76=824）。
+	//
+	// ⚠️ **容差 1 个像素**：阴影那一圈可能把盒子撑出去一点点，而「盖住」看的是
+	// 面板自己的下缘，不是影的外沿。
+	if panel.Y+panel.H < 900-1 {
+		t.Errorf("面板下缘在 %.1f，播放条那条带（%.1f~%d）还露在外面——"+
+			"面板要盖到窗口底", panel.Y+panel.H, float32(900-playbarHeight), 900)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 宽度
 // ─────────────────────────────────────────────────────────────────────────────
