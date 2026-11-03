@@ -33,7 +33,9 @@ func TestRenderHomeOverviewShots(t *testing.T) {
 	}
 	startOnOverview(t)
 	_, tt, _ := newHomeShell(t, homeDiscoverFake(t))
-	waitFrames(t, tt, "首页原型首屏", func() bool { return showsText(tt, "今晚，慢一点听。") && showsText(tt, "本周热榜") })
+	waitFrames(t, tt, "首页原型首屏", func() bool {
+		return showsText(tt, "今晚，") && showsText(tt, "慢一点") && showsText(tt, "听。") && showsText(tt, "本周热榜")
+	})
 	save(t, dir, "140-首页总览.png", tt)
 	tt.Scroll(700, 400, 0, 600)
 	waitFrames(t, tt, "首页原型下半屏", func() bool { return showsText(tt, "新歌速递") })

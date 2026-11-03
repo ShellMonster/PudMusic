@@ -193,8 +193,14 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 			// Prototype order: greeting and mood filters lead the page.
 			ui.Text(c, "TUE · 11.03 · 晚上 9:41").FontSize(scale.Font(c, scale.Size12)).
 				FontWeight(weightMedium).TextColor(t.TextMuted)
-			ui.Text(c, "今晚，慢一点听。").FontSize(scale.Font(c, 40)).
-				FontWeight(weightMedium).TextColor(t.Text)
+			ui.Row(c).Gap(space.None).Children(func() {
+				ui.Text(c, "今晚，").FontSize(scale.Font(c, 40)).
+					FontWeight(weightMedium).TextColor(t.Text)
+				ui.Text(c, "慢一点").FontSize(scale.Font(c, 40)).
+					FontWeight(weightMedium).TextColor(t.Accent)
+				ui.Text(c, "听。").FontSize(scale.Font(c, 40)).
+					FontWeight(weightMedium).TextColor(t.Text)
+			})
 			ui.Row(c).Gap(space.Px8).Children(func() {
 				for i, label := range []string{"全部", "深夜", "通勤", "专注", "运动", "现场", "翻唱"} {
 					b := ui.ButtonBase(c).Label("按心情筛选："+label).Padding(space.Px12, space.Px12).
@@ -215,9 +221,10 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 					})
 					ui.Row(c).Gap(space.Px12).Children(func() {
 						for i, title := range []string{"雨天电台 2.0｜深夜慢歌", "写代码专用 · Lo-Fi", "夏夜录音棚 Live 合集"} {
-							card := ui.Column(c).Grow(1).Gap(space.Px6).Padding(space.Px12).
-								Radius(12).Background(t.Surface).Border(1, t.Border)
+							card := ui.Column(c).Grow(1).Gap(space.Px8).Padding(space.Px12).
+								Radius(24).Background(t.Surface).Border(1, t.Border)
 							card.Children(func() {
+								ui.Box(c).Height(56).FillWidth().Radius(16).Background(homeOverviewPlaceholder(t, i))
 								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
 								ui.Text(c, []string{"臻声 FM · 剩 38 分钟", "我的收藏夹 · 剩 2 小时", "夏夜录音棚 · 剩 12 分钟"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 								ui.Box(c).Height(4).Width(float32(40 + i*24)).Radius(2).Background(t.Accent)
@@ -255,7 +262,7 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 					ui.Row(c).Gap(space.Px12).Children(func() {
 						for i, title := range []string{"夏末备忘录", "北纬三十度", "慢车"} {
 							ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
-								ui.Box(c).Height(140).FillWidth().Radius(12).Background(t.Background).Border(1, t.Border)
+								ui.Box(c).Height(140).FillWidth().Radius(12).Background(homeOverviewPlaceholder(t, i)).Border(1, t.Border)
 								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
 								ui.Text(c, []string{"纸飞机乐队", "低频观测站", "南山南北"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 							})
@@ -269,6 +276,11 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 		}
 	})
 	_, _ = t, s
+}
+
+func homeOverviewPlaceholder(t *ui.Theme, index int) ui.Color {
+	colors := []ui.Color{t.Accent, t.Accent.Mix(t.Text, 0.2), t.Accent.Mix(t.Surface, 0.35)}
+	return colors[index%len(colors)]
 }
 
 // cellW 是 n 列、缝为 gap 时一格的宽。

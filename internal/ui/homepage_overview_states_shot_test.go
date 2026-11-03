@@ -28,7 +28,7 @@ func TestRenderOverviewStateShots(t *testing.T) {
 	// 原型的稳定结构，异步数据只填充卡片内容。因此状态截图统一验证首屏契约。
 	_, tt, _ := newHomeShell(t, homeDiscoverFake(t))
 	waitFrames(t, tt, "首页原型首屏", func() bool {
-		return showsText(tt, "今晚，慢一点听。") &&
+		return showsText(tt, "今晚，") && showsText(tt, "慢一点") && showsText(tt, "听。") &&
 			showsText(tt, "接着听") &&
 			showsText(tt, "本周热榜") &&
 			showsText(tt, "新歌速递")
