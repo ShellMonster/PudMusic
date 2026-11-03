@@ -544,6 +544,11 @@ type App struct {
 	// lyricKey 是当前这首歌的缓存键。**换歌时才变**，界面靠它认出「换歌了」
 	// （同一首换流不重置，见 setLyricTrack）。
 	lyricKey string
+	// lyricTitle / lyricArtist 是当前这首歌的曲名和歌手，跟 lyricKey 一起换
+	// （2026-11-03）。歌词缓存拿它们验「这份词是不是给这一首存的」——对不上
+	// 就当没有（见 `lyrics.Cache.Load` 里那段），写缓存时也把这两个落下去。
+	lyricTitle  string
+	lyricArtist string
 	// lyricGen 是**歌词代次**。每换一次歌或换一次歌词源就加一，迟到的缓存读取
 	// 回来发现代次变了直接走人（见 loadLyrics）。
 	lyricGen int

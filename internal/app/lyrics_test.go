@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -142,7 +143,7 @@ func TestAnAdjustmentIsNotLostWhenTheSongChangesMidDebounce(t *testing.T) {
 	a.setLyricTrack(onlineSong("BV2", "2")) // 就在这半秒里换歌
 	clock.advance(lyricsSaveDelay)          // 让原来的窗口到期
 
-	if got, _ := c.Load(lyricKeyOf(first)); got.OffsetMS != -1000 {
+	if got, _ := c.Load(lyricKeyOf(first), "", ""); got.OffsetMS != -1000 {
 		t.Errorf("上一首的偏移落盘成了 %d，want -1000——那一次调整被换歌吞掉了",
 			got.OffsetMS)
 	}
@@ -193,7 +194,7 @@ func TestTheDebounceWindowHoldsTheWrite(t *testing.T) {
 	// 采用歌词**当场就写**（它要记住换来的这一版），所以下面的判据是缓存里的
 	// **偏移**，不是「有没有这条」。
 	a.PutLyrics("[00:01.00]词", "")
-	cached := func() int { e, _ := c.Load(lyricKeyOf(it)); return e.OffsetMS }
+	cached := func() int { e, _ := c.Load(lyricKeyOf(it), "", ""); return e.OffsetMS }
 
 	a.SetLyricsOffset(100)
 	clock.advance(window - time.Millisecond)
@@ -505,6 +506,100 @@ func TestLocalSongsKeyOnTheirFullPath(t *testing.T) {
 	}
 	if got := a.Lyrics().OffsetMS; got != 0 {
 		t.Errorf("换歌那一刻偏移是 %d，want 0", got)
+	}
+}
+
+// TestACachedEntryFromAnotherSongDoesNotLeak 是「同 key 不同歌不串词」的端到端。
+//
+// 🔴 **串歌的路**：同名翻唱、换源、手动搜错之后，缓存文件里那份歌词记的是
+// 上一首的曲名+歌手——读缓存时对不上就当「没有」，走重新拉取，而不是把
+// 上一份歌词错放出来。
+//
+// 时序：放 A 歌 → `PutLyrics` 把 A 的词连同 A 的曲名/歌手落盘 → 「同一首歌」
+// 以同 key 但**不同标题**重报（换源后标题变了，或另一首同 bvid+cid 的翻唱）→
+// 读回来的不该是 A 的词。
+func TestACachedEntryFromAnotherSongDoesNotLeak(t *testing.T) {
+	a, c, clock := lyricsAppOnFakeClock(t)
+
+	first := onlineSong("BV1", "1")
+	first.Title = "同名歌"
+	first.Artist = "原唱"
+	a.setLyricTrack(first)
+	a.PutLyrics("[00:01.00]原唱的词", "")
+
+	// 等它落盘，并确认曲名/歌手跟着下去了。
+	key := lyricKeyOf(first)
+	waitLyrics(t, 2*time.Second, "A 的歌词落盘", func() bool {
+		e, ok := c.Load(key, "", "")
+		return ok && e.Title == "同名歌" && e.Artist == "原唱"
+	})
+
+	// 同 key、不同标题+歌手的「另一首」：缓存里那份不是它的。
+	second := onlineSong("BV1", "1")
+	second.Title = "同名歌"
+	second.Artist = "翻唱"
+	a.setLyricTrack(second)
+
+	// 后台读盘回来：这一首没有词，而在线的歌没有「自动找」那一条路，于是
+	// 「加载中」只能靠兜底收掉——推进假钟到兜底窗口。
+	clock.advance(lyricsLoadingGrace)
+	waitLyrics(t, 2*time.Second, "读盘回来", func() bool {
+		return !a.Lyrics().Loading
+	})
+	if a.Lyrics().HasLyrics {
+		t.Errorf("同 key 不同歌读到了上一首的词：%+v", a.Lyrics().Rows)
+	}
+
+	// 换一个标题也不一样的：一样不串。
+	third := onlineSong("BV1", "1")
+	third.Title = "另一首歌"
+	third.Artist = "原唱"
+	a.setLyricTrack(third)
+	clock.advance(lyricsLoadingGrace)
+	waitLyrics(t, 2*time.Second, "读盘回来", func() bool {
+		return !a.Lyrics().Loading
+	})
+	if a.Lyrics().HasLyrics {
+		t.Errorf("标题不一样的也读到了上一首的词：%+v", a.Lyrics().Rows)
+	}
+
+	// 再换回**真的是那首**的（同 key、同曲名、同歌手）：缓存放行，词读回来。
+	a.setLyricTrack(first)
+	waitLyrics(t, 2*time.Second, "切回原唱，词读回来", func() bool {
+		return a.Lyrics().HasLyrics
+	})
+	if got := a.Lyrics().Rows[0].Text; got != "原唱的词" {
+		t.Errorf("切回原唱读到的是 %q，want 原唱的词", got)
+	}
+}
+
+// TestASearchedLyricRecordsTheIdentity 盯「手动搜来的那份也记曲名/歌手」。
+//
+// `origin=search` 那份走的是 `PutLyrics` → `putLyricsLocked`——它要是没记，
+// 用户在歌词搜索里找错的那份照样串到下一首上。
+func TestASearchedLyricRecordsTheIdentity(t *testing.T) {
+	a, c := lyricsApp(t)
+
+	it := onlineSong("BV1", "1")
+	it.Title = "搜的那首"
+	it.Artist = "歌手甲"
+	a.setLyricTrack(it)
+	a.PutLyrics("[00:01.00]搜来的词", "")
+
+	key := lyricKeyOf(it)
+	waitLyrics(t, 2*time.Second, "搜来的词落盘", func() bool {
+		e, ok := c.Load(key, "", "")
+		return ok && strings.Contains(e.Lyrics, "搜来的词")
+	})
+	e, ok := c.Load(key, "", "")
+	if !ok {
+		t.Fatal("搜来的词没落盘")
+	}
+	if e.Origin != lyrics.OriginSearch {
+		t.Errorf("来路 = %q，want %q", e.Origin, lyrics.OriginSearch)
+	}
+	if e.Title != "搜的那首" || e.Artist != "歌手甲" {
+		t.Errorf("搜来的那份没记上曲名/歌手：%+v", e)
 	}
 }
 

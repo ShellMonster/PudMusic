@@ -52,6 +52,18 @@ type Entry struct {
 	//
 	// 这一栏是我们自己加的，用来说明界面上展示的歌词来源。
 	Origin string `json:"origin,omitempty"`
+
+	// Title / Artist 是这份歌词**存的时候**那一首的曲名和歌手（2026-11-03）。
+	//
+	// 🔴 **它们的存在理由是「串歌」**：同名翻唱、换源、手动搜错之后，同一把
+	// 缓存键上那份歌词可能根本不是这一首的——读的时候拿当前这首的曲名/歌手
+	// 跟它对一遍，对不上就当「没有」（见 `Load` 里那段）。
+	//
+	// ⚠️ **两个字段都允许为空**（`omitempty`，老文件没有它们）：空的那个字段
+	// **不参与**比对——「不知道」不等于「对不上」。两个都空就是老记录，
+	// 按以前的行为放行（不迁移）。
+	Title  string `json:"title,omitempty"`
+	Artist string `json:"artist,omitempty"`
 }
 
 // Cache 是歌词缓存。目录为空的那一份只读不写（测试和「没挂上」时用）。
@@ -94,7 +106,21 @@ func (c *Cache) Path(key string) string {
 	return filepath.Join(c.dir, hex.EncodeToString(sum[:16])+".json")
 }
 
-// Load 读 key 这一条。没有这一条、文件坏了、目录都没建，都只是「没有」。
+// Load 读 key 这一条，并拿 wantTitle / wantArtist 验明正身（见下面那段）。
+// 没有这一条、文件坏了、目录都没建，都只是「没有」。
+//
+// 🔴 **身份对不上 = 「没有」**（2026-11-03）：这份歌词存的曲名或歌手和来问的
+// 不是同一首，就当这份缓存不存在——调用方会走重新拉取，而不是把上一首的歌词
+// 错放出来。同名翻唱、换源、手动搜错，三种串歌的路都被这一条断掉。
+//
+// ⚠️ **判据是逐字段的，两边都空才比**：记录里**记了**的字段，若 want 侧也
+// 给了值，就必须相等；任一侧没给（空串）的那个字段不参与判断——「不知道」
+// 不等于「对不上」（`Entry.Title` / `Entry.Artist` 的注释）。本地文件的歌手
+// 恒为空串，那一条就比曲名；老文件两个都没记，放行。
+//
+// ⚠️ **返回的是「没有」那一档（ok = false）**，不是「记录在、歌词没了」：
+// 那份记录里的偏移和字号也是**别人的**——它不属于这一首，留着只会把别人的
+// 调整装到这一首上。
 //
 // ⚠️ **读不出来一律当成没有，绝不报错**：歌词缓存坏掉的表现应该是「这首歌
 // 暂时没有歌词」，而不是应用开不起来。用户删掉缓存目录、清磁盘、换机器都
@@ -107,7 +133,7 @@ func (c *Cache) Path(key string) string {
 // ⇒ 所以过期的时候返回的是「**记录在、歌词没了**」：ok = true，而
 // `Lyrics` / `TLyrics` 是空串。调用方判断「有没有歌词」要看 `Lyrics`，
 // 不是看 ok。
-func (c *Cache) Load(key string) (Entry, bool) {
+func (c *Cache) Load(key, wantTitle, wantArtist string) (Entry, bool) {
 	path := c.Path(key)
 	if path == "" {
 		return Entry{}, false
@@ -118,6 +144,14 @@ func (c *Cache) Load(key string) (Entry, bool) {
 	}
 	var e Entry
 	if err := json.Unmarshal(b, &e); err != nil {
+		return Entry{}, false
+	}
+	// 身份对不上就当没有（见函数头那段）。两边都给了值的字段必须对上；
+	// 任一侧没给的字段不参与——老文件两个都没记，放行。
+	if e.Title != "" && wantTitle != "" && e.Title != wantTitle {
+		return Entry{}, false
+	}
+	if e.Artist != "" && wantArtist != "" && e.Artist != wantArtist {
 		return Entry{}, false
 	}
 	now := c.now()

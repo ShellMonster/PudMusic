@@ -57,7 +57,7 @@ func TestTheLyricsCacheGoesUnderTheUserDataDir(t *testing.T) {
 	if err := c.Save("bili-BV1-1", lyrics.Entry{Lyrics: "[00:01.00]词"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := c.Load("bili-BV1-1"); !ok {
+	if _, ok := c.Load("bili-BV1-1", "", ""); !ok {
 		t.Error("落下去读不回来")
 	}
 }
