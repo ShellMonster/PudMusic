@@ -442,12 +442,12 @@ func TestTheThreeCountsSayTheNumberToScreenReaders(t *testing.T) {
 // ⚠️ **判据是角标自身的 bounds 相对图形盒子 bounds 的位置**（视觉审查钉下的
 // 四条真值）：
 //
-//	角标的左缘收在图形右半部以内（≥ 图形中线）   （数字从图形的右上角里长出来）
-//	角标的左缘在图形右缘以内                   （嵌进去，不是贴在右缘外侧）
+//	角标的左缘落在缺口左缘 + PadL 那一带        （嵌进缺口里，左右留缝）
+//	角标的左缘不许深过「咬的那一口」            （缺口只咬右上角，不是包住图形）
 //	角标的下缘明显在图形中线的上方             （坐在右上角，不是骑在正中）
-//	角标的右缘没越过图形右缘 + 最宽那一档      （缺口主体探在图形外的空气里）
+//	角标的右缘没越过图形右缘 + 最宽探出量      （缺口主体探在图形外的空气里）
 //
-// 反过来说：外侧角标那一版（角标左缘正好落在图形右缘，一条缝都不重叠）、横排
+// 反过来说：外侧角标那一版（角标左缘正好贴图形右缘起排、上下位置也低）、横排
 // 那一版（角标中心 y ≈ 图形中心 y）和「缺口包住整个图形」那一版（宽字档数字
 // 左缘跑到图形左半去了）都立刻红。
 //
@@ -484,23 +484,24 @@ func TestTheThreeCountsSitInsideANotchOnTheIconsTopRight(t *testing.T) {
 		icx, icy := key.X+key.W/2, key.Y+key.H/2
 		iRight := icx + iconMd/2
 
-		// 🔴 **数字的左缘收在图形右半部以内**——缺口咬的是右上角那一小块，
-		// 数字的头几个字符从图形右上角的凹陷里长出来：左缘落在图形中线以右、
-		// 图形右缘以左。外侧角标那一版的左缘正好是图形右缘（`AnchorTopLeft`，
-		// 一条缝都不重叠），这条判据把两版分得干干净净。
-		if badge.X >= iRight-1 {
-			t.Errorf("「%s」的角标左缘在 %.1f，图形右缘在 %.1f——数字没有嵌进缺口"+
-				"（它还是贴在图形右缘外侧，而网易云式是收进缺口里、和图形有交叠）",
-				c.name, badge.X, iRight)
-		}
-		// 🔴 **左缘不许跑进图形左半**——缺口只咬右上角那一口
-		// （`badgeNotchBite`），宽字那一档（「99k+」≈22）的缺口主体往右探进
-		// 图形外的空气里。谁要是把缺口改成「包住整个图形」（宽字档数字左缘
-		// 跑到图形左半去），图形只剩半截、这条立刻红。
-		if badge.X < icx-1 {
-			t.Errorf("「%s」的角标左缘在 %.1f，图形中线在 %.1f——缺口咬得太深"+
+		// 🔴 **数字的左缘贴在缺口里、挨着图形右缘**——缺口块的左缘收进图形
+		// 右缘 `badgeNotchBite`，而数字左缘起在缺口左缘 + `badgeNotchPadL`：
+		// PadL > bite 时左缘探出图形右缘 PadL−bite 像素（那道看得见的底色
+		// 缝在数字**左边**）；PadL ≤ bite 时左缘收进图形。两档都钉：
+		// 左缘 ≥ iRight−2（不许深过咬的那一口 + 1）且 ≤ iRight+PadL−bite+1
+		// （不许飘到缺口右半截去）。外侧角标那一版的左缘起在图形右缘
+		// 紧贴（AnchorTopLeft 是 0 偏移、没有左边那道缝），这条判据也把
+		// 「缝挤没了」和「字贴到图形残笔上」两档分出来。
+		left := badge.X - iRight
+		if left < -float32(badgeNotchBite)-1 {
+			t.Errorf("「%s」的角标左缘在图形右缘以**内** %.1f——缺口咬得太深"+
 				"（它该只咬右上角那一小块，不是包住整个图形——宽字档那样会吃掉大半个图标）",
-				c.name, badge.X, icx)
+				c.name, -left)
+		}
+		if left > float32(badgeNotchPadL-badgeNotchBite)+1 {
+			t.Errorf("「%s」的角标左缘在图形右缘以**外** %.1f——数字飘出缺口去了"+
+				"（左缘该起在缺口左缘 + PadL 那一带 ≈ %.0f）",
+				c.name, left, float32(badgeNotchPadL-badgeNotchBite))
 		}
 		// 🔴 **下缘明显在图形中线的上方**——缺口挖的是右上角，数字坐在上 1/3
 		// 那一带，不是骑在图形正中。9 号字行高约 11，坐在缺口里时下缘 ≈
@@ -510,13 +511,15 @@ func TestTheThreeCountsSitInsideANotchOnTheIconsTopRight(t *testing.T) {
 				"（缺口嵌字是数字坐在右上角，不是居中）", c.name, badge.Y+badge.H, icy)
 		}
 		// 🔴 **右缘不许探出缺口**：缺口块右缘探出图形右缘 `notchW − bite`
-		// 像素（最宽那一档「99k+」是 ≈22.3），数字居中在缺口里——它的右缘
-		// 不越过缺口右缘。这条只钉「右缘 ≤ 图形右缘 + 最宽探出量 + 余量」，
-		// 不钉「整个在图形框里面」（缺口主体本来就在外面）。
-		if badge.X+badge.W > iRight+playbarBadgeMaxW-badgeNotchBite+1 {
+		// 像素（最宽那一档「99k+」是 textW+PadL+PadR−bite ≈ 30.3），数字的
+		// 右缘在缺口右缘以里 PadR——它的右缘不越过缺口右缘。这条只钉
+		//「右缘 ≤ 图形右缘 + 最宽探出量 + 余量」，不钉「整个在图形框里面」
+		//（缺口主体本来就在外面）。
+		if badge.X+badge.W > iRight+playbarBadgeMaxW+float32(badgeNotchPadL+badgeNotchPadR-badgeNotchBite)+1 {
 			t.Errorf("「%s」的角标右缘在 %.1f，缺口右缘最多在 %.1f——数字探出缺口去了"+
 				"（缺口探出的那一截是空着的余量，字该坐在缺口里）",
-				c.name, badge.X+badge.W, iRight+playbarBadgeMaxW-badgeNotchBite)
+				c.name, badge.X+badge.W,
+				iRight+playbarBadgeMaxW+float32(badgeNotchPadL+badgeNotchPadR-badgeNotchBite))
 		}
 	}
 }

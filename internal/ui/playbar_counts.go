@@ -159,6 +159,18 @@ const (
 	// 一半再小一点：再圆缺口就成了个胶囊、左上缘退成一道弧线，咬的那一口
 	// 反而没有「凹进去一块」的直感。
 	badgeNotchR = 5
+	// badgeNotchPadL / badgeNotchPadR 是缺口块在数字**左 / 右**各留的空隙。
+	//
+	// 🔴 **左 8、右 6，不对称**（视觉审查打回的那一笔）：缺口左缘那一边是
+	// **咬进图形里**的——数字的起笔和图形的残笔只隔这一道缝，3 像素实测是
+	// 「字身几乎顶在笔画上」（放大看比网易云那种「豁口里留一圈白」挤得多）。
+	// 左边给到 8（咬的那一边多咬一点没关系，要的是数字和被咬的笔画之间有
+	// 一眼能看到的底色缝）；右边探在空气里，6 就够。
+	//
+	// ⚠️ **缺口块宽跟着两边一起长**（`countBadge` 里 `textW + PadL + PadR`）——
+	// 不是「盒子不变、字往右挤」。
+	badgeNotchPadL = space.Px8
+	badgeNotchPadR = space.Px6
 	// badgeNotchMinW 是缺口块的**最小宽**。
 	//
 	// 缺口块随字长宽，但字很短的时候（「123」「1k+」之前的小数）块太小就缩成
@@ -310,9 +322,11 @@ func countBadge(c *ui.Context, n int64, bg ui.Color) {
 	// 父盒子的 padding box（18×18）给绝对定位元素的**可用宽**，fit 型盒子被
 	// 夹成 18 ——字再宽盒子也只有 18，「99k+」就漏出去了。所以这里先用
 	// `MeasureText` 量出那一串字的宽、**显式钉成盒子的宽**（量不准时退回
-	// 上限那一档 `playbarBadgeMaxW`）。字宽 + 两侧 `space.Px3` 的余量 = 缺口块宽。
+	// 上限那一档 `playbarBadgeMaxW`）。字宽 + 左 `badgeNotchPadL` + 右
+	// `badgeNotchPadR` 的余量 = 缺口块宽（左宽右窄：咬进图形的那一边留
+	// 一圈看得见的底色缝，理由见常量注释）。
 	textW, _ := c.MeasureText(0, ui.Span{Text: t, Size: playbarBadgeFont})
-	notchW := textW + 2*space.Px3
+	notchW := textW + badgeNotchPadL + badgeNotchPadR
 	if notchW < badgeNotchMinW {
 		notchW = badgeNotchMinW
 	}
@@ -329,9 +343,11 @@ func countBadge(c *ui.Context, n int64, bg ui.Color) {
 		// `badgeNotchR`）。
 		Radius(badgeNotchR).
 		Background(bg).
-		// 字在缺口里居中，左右各留 `space.Px3`——数字上下贴着缺口内沿、
-		// 左右各留一道缝，看着是「嵌进去」不是「糊上去」。
-		Padding(space.None, space.Px3).Center().
+		// 字在缺口里，左边留 `badgeNotchPadL`、右边留 `badgeNotchPadR`
+		// （CSS 序：上 右 下 左）——咬进图形的那一边是 8：数字起笔和图形
+		// 残笔之间要有一眼能看到的底色缝（视觉审查打回的那一笔：3 像素的
+		// 缝放大看是「字身几乎顶在笔画上」）。
+		Padding(space.None, badgeNotchPadR, space.None, badgeNotchPadL).Center().
 		// 🔴 **不吃指针**：它是「图形右上角挖出来的一个缺口」，不是一枚键——
 		// 底下的按钮照点，悬停照常。
 		PassThrough().
