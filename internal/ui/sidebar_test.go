@@ -39,8 +39,13 @@ func sideShell(t *testing.T, opts ...shellOpt) (*Shell, *app.App, *mygoui.Tester
 	if err := a.MountSettings(path); err != nil {
 		t.Fatal(err)
 	}
+	// Most drag/persistence cases exercise the expanded state explicitly; the
+	// product default is now the 88px prototype rail.
+	st := app.DefaultSettings("")
+	st.SideMenuCollapsed = false
 	b := newTestShell(t, append([]shellOpt{
 		onApp(a),
+		withSettings(st),
 		withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}),
 	}, opts...)...)
 	tt := b.tt
@@ -813,7 +818,7 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 			img := tt.Image()
 			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
 			// x=58：提示从那一格右沿往右 6 处开始（侧栏现在只有 64 宽，提示的头几像素压在侧栏里）。
-			at := img.RGBAAt(58, int(r.Y+r.H/2))
+			at := img.RGBAAt(86, int(r.Y+r.H/2))
 			if at != inverse {
 				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
 					"提示没有贴在那一项的右边", at, inverse)
@@ -1098,16 +1103,16 @@ func TestTheSideMenuRowsAreFortyHigh(t *testing.T) {
 // 形状分开了：旧形状的宽度是侧栏的宽度。
 //
 // 里面还得**有东西**：一格空的图标格和「图标没画出来」在盒子这一层长得一样。
-func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
+func TestTheCollapsedSideMenuItemUsesPrototypePillAndLabel(t *testing.T) {
 	_, _, tt := collapsedShell(t)
 
 	r, ok := tt.Find("下载记录")
 	if !ok {
 		t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
 	}
-	if r.W != sideIconCell || r.H != sideIconCell {
-		t.Errorf("折叠态那一格是 %.1f×%.1f，want %d×%d（上游折叠态摆的是一个 "+
-			"`h-10 w-10` 的图标格）", r.W, r.H, sideIconCell, sideIconCell)
+	if r.W != prototypeRailItemW || r.H != prototypeRailIconH+2*6+4+14 {
+		t.Errorf("折叠态那一格是 %.1f×%.1f，want %d×%d（原型 rail 项）", r.W, r.H,
+			prototypeRailItemW, prototypeRailIconH+2*6+4+14)
 	}
 	// 里面有墨：那一枚图标。
 	if n := sideInkPixels(tt.Image(), int(r.X), int(r.Y), int(r.X+r.W)-1, int(r.Y+r.H)-1); n == 0 {
@@ -1115,8 +1120,8 @@ func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
 	}
 	// ⚠️ **格子要居中**：侧栏折叠后是 72，而格子是 40——不居中的话它会贴在
 	// 左边沿上（上游那一格也是居中的）。
-	if got := r.X; got < 4 || got > 24 {
-		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 72 宽的侧栏里", got)
+	if got := r.X; got < 8 || got > 16 {
+		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 88 宽的 rail 里", got)
 	}
 }
 
