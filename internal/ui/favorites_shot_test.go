@@ -102,6 +102,27 @@ func TestRenderFavoritesShots(t *testing.T) {
 				}
 				save(t, dir, "83-侧栏-收藏夹-两组都有-"+name+".png", tt)
 			}
+
+			// 84 **有一条失效**：那一行留下（墓碑），置灰、写着「已失效」，
+			// 而不是从列表里消失。
+			{
+				f := newFolderBili(t, nil)
+				f.pages = [][]map[string]any{folderPage(1, 2)}
+				f.setCollected([]map[string]any{
+					{"id": 900, "title": "还在的那个", "mid": 77, "type": 11, "state": 0},
+					{"id": 901, "title": "失效的那个", "mid": 78, "type": 11, "state": 1},
+				})
+				s, tt := refreshShellOpts(t, f, "7", systemIsDark(dark))
+				s.app.RefreshFavorites()
+				waitFrames(t, tt, "两组都拉回来了（含墓碑）", func() bool {
+					return len(s.app.SideFavorites(app.FavoritesCreated)) == 2 &&
+						len(s.app.SideFavorites(app.FavoritesCollected)) == 2
+				})
+				for range 3 {
+					tt.Frame()
+				}
+				save(t, dir, "84-侧栏-收藏夹-有失效-"+name+".png", tt)
+			}
 		})
 	}
 }

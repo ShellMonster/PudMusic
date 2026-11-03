@@ -31,6 +31,7 @@ import (
 	"errors"
 	"log"
 	"strconv"
+	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
@@ -199,6 +200,14 @@ func (a *App) refreshFavoriteGroups(f *Favorites, c *collections, mid int64, ann
 		created, errCreated := a.fetchCreatedFolders(c, 0)
 		collected, errCollected := a.fetchCollectedFolders(c, mid)
 
+		// 「我创建的」那一路**不给 state**（created/list 没这一格），所以
+		// 失效的只能挨个问 `folder/info`：查不到（接口回非 0）的那一条标上
+		// 失效留下——不标的话它在侧栏上凭空消失，用户会以为是应用少拉了。
+		// 问失败**不算**（网络抖一下而已）：标错比不标更糟。
+		if errCreated == nil {
+			markDeadCreated(c, created)
+		}
+
 		// ⚠️ **顺序按存下的那份排**（见 `applySavedOrder`）：顺序不是接口给的，
 		// 是用户拖出来的。忘了排就等于每次刷新都把用户的排序冲掉。
 		order := a.SettingsSnapshot().SideMenuCollectionOrder
@@ -321,9 +330,54 @@ func collectedFavorites(list []bili.CollectedFolder) []Favorite {
 		out = append(out, Favorite{
 			ID: it.ID, Title: it.Title, Mid: it.Mid, Type: it.Type,
 			Cover: it.Cover, MediaCount: it.MediaCount,
+			// ⚠️ **失效的留下来**（`state != 0`）：标上，不滤——
+			// 墓碑正是为了「B 站恢复了还能回来」。
+			Invalid: it.Invalid,
 		})
 	}
 	return out
+}
+
+// markDeadCreated 把「我创建的」里**详情接口查不到**的那几条标成失效。
+//
+// ⚠️ **只有业务错误（`folder/info` 回非 0）才算「没了」**：网络抖、被限速、
+// 被风控那几种是「没问到」，标成失效的话用户会看到自己的收藏夹灰了一片——
+// 所以那几种**不动**（下一趟刷新再试）。风控单独拎出来是因为它**不是**业务
+// 错误码：`folder/info` 回 -352/-412 时 `errors.Is(err, ErrRiskControl)` 为真，
+// 而它**同时**不是 `ErrNetwork`——不排掉的话整片收藏夹会被误标灰（review）。
+//
+// ⚠️ **挨个问是顺带问，不是拦路**：一个收藏夹问不通，剩下的照问——
+// 它只是「标不标失效」这一件事，不是「这一趟拉没拉成」。
+//
+// ⚠️ **并发限制在 4**：`folder/info` 是 WBI 签名接口，十几个收藏夹挨个串行
+// 问会拖慢整个刷新、还容易被风控盯上（review）；4 路并发把串行十几次 RTT
+// 压到几次，又不至于一次全发出去撞风控。
+func markDeadCreated(c *collections, list []bili.CreatedFolder) {
+	if len(list) == 0 {
+		return
+	}
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 4)
+	for i := range list {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			_, err := c.refs.Client.CollectionInfo(context.Background(), list[i].ID, bili.CollectionFavorite)
+			if err == nil {
+				return
+			}
+			// 网络错 / 风控都不算「没了」：那是我们没问到，不是那边没有。
+			if errors.Is(err, bili.ErrNetwork) || errors.Is(err, bili.ErrTruncatedResponse) ||
+				errors.Is(err, bili.ErrBadResponse) || errors.Is(err, bili.ErrTooFrequent) ||
+				errors.Is(err, bili.ErrRiskControl) {
+				return
+			}
+			list[i].Invalid = true
+		}(i)
+	}
+	wg.Wait()
 }
 
 // createdFavorites 把 B 站那份翻成侧栏要的那一种。
@@ -339,6 +393,9 @@ func createdFavorites(list []bili.CreatedFolder, mid int64) []Favorite {
 		out = append(out, Favorite{
 			ID: it.ID, Title: it.Title, Mid: mid, Type: int(bili.CollectionFavorite),
 			Cover: it.Cover, MediaCount: it.MediaCount,
+			// ⚠️ **失效的留下**：created/list 不给 state，Invalid 是
+			// `markDeadCreated` 挨个问 `folder/info` 之后标上的。
+			Invalid: it.Invalid,
 		})
 	}
 	return out

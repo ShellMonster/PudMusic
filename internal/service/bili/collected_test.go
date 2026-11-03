@@ -99,11 +99,13 @@ func TestCollectedFoldersReadsTheTypeAndTheOwner(t *testing.T) {
 	}
 }
 
-// TestCollectedFoldersSkipsTheInvalidOnes 钉住失效的那几条要被滤掉。
+// TestCollectedFoldersMarksTheInvalidOnes 钉住失效的那几条**留在结果里**，
+// 标在 `Invalid` 上。
 //
-// `state != 0` 是「主人把收藏夹删了，而这一条还留着」。摆出来的话用户点进去
-// 看到的是一个打不开的页面。
-func TestCollectedFoldersSkipsTheInvalidOnes(t *testing.T) {
+// `state != 0` 是「主人把收藏夹删了，而这一条还留着」。滤掉的话侧栏上
+// 那一条会凭空消失，而 B 站那边恢复可见之后又凭空回来——所以标出来，
+// 画成什么交给界面那一层（墓碑那一档）。
+func TestCollectedFoldersMarksTheInvalidOnes(t *testing.T) {
 	f := newFakeBili(t)
 	f.on(pathFavCollected, func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{
@@ -119,11 +121,14 @@ func TestCollectedFoldersSkipsTheInvalidOnes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("拿到 %d 条，want 1（失效的那一条要滤掉）", len(got))
+	if len(got) != 2 {
+		t.Fatalf("拿到 %d 条，want 2（失效的那一条**留下**，标在 Invalid 上）", len(got))
 	}
-	if got[0].Title != "还有效的" {
-		t.Errorf("剩下的是 %q，want 还有效的", got[0].Title)
+	if got[0].Title != "还有效的" || got[0].Invalid {
+		t.Errorf("第一条是 %+v，want「还有效的」而且不失效", got[0])
+	}
+	if got[1].Title != "失效的那个" || !got[1].Invalid {
+		t.Errorf("第二条是 %+v，want「失效的那个」而且 Invalid", got[1])
 	}
 }
 

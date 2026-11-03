@@ -15,12 +15,14 @@ func TestCacheRoundTrip(t *testing.T) {
 		TLyrics:  "[00:01.00]你好",
 		OffsetMS: -250,
 		FontSize: 26,
+		Title:    "Hello",
+		Artist:   "Adele",
 	}
 	if err := c.Save("bili-BV1xx411c7mD-112233", want); err != nil {
 		t.Fatal(err)
 	}
 
-	got, ok := c.Load("bili-BV1xx411c7mD-112233")
+	got, ok := c.Load("bili-BV1xx411c7mD-112233", "Hello", "Adele")
 	if !ok {
 		t.Fatal("刚写进去就读不到")
 	}
@@ -28,8 +30,73 @@ func TestCacheRoundTrip(t *testing.T) {
 	// 以及「刚刚用过」），而调用方给的那一份里它们是零值。
 	if got.Lyrics != want.Lyrics || got.TLyrics != want.TLyrics ||
 		got.OffsetMS != want.OffsetMS || got.FontSize != want.FontSize ||
-		got.Origin != want.Origin {
+		got.Origin != want.Origin || got.Title != want.Title || got.Artist != want.Artist {
 		t.Errorf("读回来是 %+v，want %+v", got, want)
+	}
+}
+
+// TestAnEntryWithoutAnIdentityPassesForAnyone 盯「老文件没有那两个字段，按
+// 现在的行为放行」——不迁移。
+func TestAnEntryWithoutAnIdentityPassesForAnyone(t *testing.T) {
+	c := NewCache(t.TempDir())
+	// 手工造一份老记录：只写歌词文本，不带 Title/Artist。
+	old := `{"lyrics":"[00:01.00]老词","offset":100}`
+	key := "bili-BV1-1"
+	if err := os.WriteFile(c.Path(key), []byte(old), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// 老文件不知道自己是给谁存的，任何身份来读都放行。
+	e, ok := c.Load(key, "新歌名", "新歌手")
+	if !ok || e.Lyrics != "[00:01.00]老词" {
+		t.Fatalf("老记录没放行：ok=%v entry=%+v", ok, e)
+	}
+}
+
+// TestAMismatchedIdentityIsJustNoLyrics 盯「对不上就当没缓存」。
+//
+// 🔴 **同名翻唱、换源、手动搜错之后，歌词不再串**：这份歌词存的曲名或歌手
+// 和来问的不是同一首，就把它当成「没有」——让调用方走重新拉取，而不是把
+// 上一份歌词错放出来。
+//
+// ⚠️ **判据是逐字段的**：记录里有的字段（曲名、歌手）必须都对上；记录里
+// 没记的字段不参与判断（老文件那一支见上一条测试）。
+func TestAMismatchedIdentityIsJustNoLyrics(t *testing.T) {
+	c := NewCache(t.TempDir())
+	key := "bili-BV1-1"
+	if err := c.Save(key, Entry{
+		Lyrics: "[00:01.00]原唱的词", Title: "同名歌", Artist: "原唱",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 曲名对不上：翻唱和原唱同名，但唱的不是同一份词。
+	if _, ok := c.Load(key, "另一首歌", "原唱"); ok {
+		t.Error("曲名对不上还放行——这份歌词会错放到另一首歌上")
+	}
+	// 歌手对不上：同名翻唱。
+	if _, ok := c.Load(key, "同名歌", "翻唱"); ok {
+		t.Error("歌手对不上还放行——这份歌词会错放到翻唱上")
+	}
+	// 两个都对上：还是同一首，照旧读。
+	e, ok := c.Load(key, "同名歌", "原唱")
+	if !ok || e.Lyrics != "[00:01.00]原唱的词" {
+		t.Errorf("同一首歌读不到自己的词：ok=%v entry=%+v", ok, e)
+	}
+}
+
+// TestAnEntryWithOnlyOneIdentityFieldChecksThatOne 盯「只记了一半的也要比」：
+// 比如一份只有 Title 没有 Artist 的记录，歌手是谁都放行，但曲名必须对上。
+func TestAnEntryWithOnlyOneIdentityFieldChecksThatOne(t *testing.T) {
+	c := NewCache(t.TempDir())
+	key := "k"
+	if err := c.Save(key, Entry{Lyrics: "[00:01.00]词", Title: "歌"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := c.Load(key, "别的歌", "谁唱的都行"); ok {
+		t.Error("只记了曲名的记录，曲名对不上还放行")
+	}
+	if _, ok := c.Load(key, "歌", "谁唱的都行"); !ok {
+		t.Error("只记了曲名的记录，曲名对上了却不放行")
 	}
 }
 
@@ -49,10 +116,10 @@ func TestSongsDoNotShareAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, _ := c.Load(a); got.Lyrics != "[00:01.00]甲" {
+	if got, _ := c.Load(a, "", ""); got.Lyrics != "[00:01.00]甲" {
 		t.Errorf("甲被乙盖了：%+v", got)
 	}
-	if got, _ := c.Load(b); got.Lyrics != "[00:01.00]乙" {
+	if got, _ := c.Load(b, "", ""); got.Lyrics != "[00:01.00]乙" {
 		t.Errorf("乙被甲盖了：%+v", got)
 	}
 
@@ -79,10 +146,10 @@ func TestAMissingOrBrokenFileIsJustNoLyrics(t *testing.T) {
 	dir := t.TempDir()
 	c := NewCache(dir)
 
-	if _, ok := c.Load("没写过"); ok {
+	if _, ok := c.Load("没写过", "", ""); ok {
 		t.Error("没写过的键读出了东西")
 	}
-	if _, ok := c.Load(""); ok {
+	if _, ok := c.Load("", "", ""); ok {
 		t.Error("空键读出了东西")
 	}
 
@@ -93,7 +160,7 @@ func TestAMissingOrBrokenFileIsJustNoLyrics(t *testing.T) {
 	if err := os.WriteFile(c.Path("坏的那条"), []byte("{not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := c.Load("坏的那条"); ok {
+	if _, ok := c.Load("坏的那条", "", ""); ok {
 		t.Error("半份 JSON 读成了一首歌的歌词")
 	}
 }
@@ -122,7 +189,7 @@ func TestSaveIsAtomicAndLeavesNoRubbish(t *testing.T) {
 		t.Fatalf("写了 5 次之后目录里应该有 1 个文件，有 %d 个：%v", len(names), got)
 	}
 	// 写到最后一次的值：rename 真的换掉了，不是每次都写进同一个临时文件。
-	if got, _ := c.Load("同一首"); got.OffsetMS != 200 {
+	if got, _ := c.Load("同一首", "", ""); got.OffsetMS != 200 {
 		t.Errorf("最后一次写的是 %d，want 200", got.OffsetMS)
 	}
 }
@@ -135,7 +202,7 @@ func TestACacheWithoutADirJustDoesNothing(t *testing.T) {
 	if err := c.Save("k", Entry{Lyrics: "[00:01.00]词"}); err != nil {
 		t.Errorf("没配盘写东西不该是错误：%v", err)
 	}
-	if _, ok := c.Load("k"); ok {
+	if _, ok := c.Load("k", "", ""); ok {
 		t.Error("没配盘却读出了东西")
 	}
 	if c.Path("k") != "" {
@@ -167,7 +234,7 @@ func TestTheUserValuesSurviveTheExpiry(t *testing.T) {
 	}
 	// 第 8 天：歌词文本过期了。
 	clock = now.Add(8 * 24 * time.Hour)
-	e, ok := c.Load("歌")
+	e, ok := c.Load("歌", "", "")
 	if !ok {
 		t.Fatal("过期的那一份记录都不在了——用户自己的值就跟着没了")
 	}
@@ -212,7 +279,7 @@ func TestTheExpiryRollsWithEveryUse(t *testing.T) {
 	}
 	// 第 3 天：用户又听了这一首。
 	clock = now.Add(3 * 24 * time.Hour)
-	e, ok := c.Load("歌")
+	e, ok := c.Load("歌", "", "")
 	if !ok {
 		t.Fatal("第 3 天读不到")
 	}
@@ -235,13 +302,13 @@ func TestTheExpiryRollsWithEveryUse(t *testing.T) {
 	// 🔴 **第 9 天**：按「存下来」算早该删了（离存下来 9 天 > 7 天），
 	// 但用户第 3 天听过 ⇒ 还该在。
 	clock = now.Add(9 * 24 * time.Hour)
-	e, _ = c.Load("歌")
+	e, _ = c.Load("歌", "", "")
 	if e.Lyrics == "" {
 		t.Error("第 3 天听过，第 9 天就过期了——过期没有跟着使用滚动")
 	}
 	// 第 17 天（离最后一次用到 8 天）⇒ 该删了。
 	clock = now.Add(17 * 24 * time.Hour)
-	e, _ = c.Load("歌")
+	e, _ = c.Load("歌", "", "")
 	if e.Lyrics != "" {
 		t.Error("离最后一次用到满 7 天了还不过期——用户不听了它就该被清掉")
 	}

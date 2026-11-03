@@ -316,8 +316,14 @@ type App struct {
 	// ⚠️ **它和 `a.title` 是两首**：`a.title` 是正在放的那一首，而这一份是
 	// 失败的那一首——不分开的话，出错那一栏显示的是**上一首**，用户读到的是
 	// 「这一首正在放，但它打不开」。
-	failedTitle   string
-	failedArtist  string
+	failedTitle  string
+	failedArtist string
+	// resumeOnce 和 resumeCh 是「断点续播」落盘的串行队列（见
+	// `enqueuePlaybackResume`）：快速连续切歌时，两把锁外的 `UpdateSettings`
+	// 顺序不保证和切歌顺序一致，会写成「先切的那首」。所以所有锁外落盘
+	// 都排进一条 channel、由一个 goroutine 串行写，保证顺序。
+	resumeOnce    sync.Once
+	resumeCh      chan PlaybackResume
 	failedBiliURL string
 	// pending 是「上一次用户想放的那一项」。
 	//
@@ -544,6 +550,11 @@ type App struct {
 	// lyricKey 是当前这首歌的缓存键。**换歌时才变**，界面靠它认出「换歌了」
 	// （同一首换流不重置，见 setLyricTrack）。
 	lyricKey string
+	// lyricTitle / lyricArtist 是当前这首歌的曲名和歌手，跟 lyricKey 一起换
+	// （2026-11-03）。歌词缓存拿它们验「这份词是不是给这一首存的」——对不上
+	// 就当没有（见 `lyrics.Cache.Load` 里那段），写缓存时也把这两个落下去。
+	lyricTitle  string
+	lyricArtist string
 	// lyricGen 是**歌词代次**。每换一次歌或换一次歌词源就加一，迟到的缓存读取
 	// 回来发现代次变了直接走人（见 loadLyrics）。
 	lyricGen int
@@ -1380,6 +1391,9 @@ const (
 	// openRestore 是「恢复上次听到哪儿」：停在 at 那个位置、**不出声**，
 	// 打不开就**安静跳过**（一句红字都不冒）。
 	openRestore
+	// openResume 是「断点续播」：停在 at 那个位置、**出声**，
+	// 打不开就**安静跳过**（同 openRestore 那半句，启动时冒红字是应用在说自己）。
+	openResume
 )
 
 // openLocal 是「打开一个本地音频文件」的那一条路。
@@ -1389,9 +1403,16 @@ const (
 // 从头到尾都不 `Play()`。
 func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	paused := mode == openRestore
+	resume := mode == openResume
+	quiet := paused || resume
+	// 「断点续播」在换上新播放器**之前**记上一首（key + 位置）：这一格要在
+	// position 清零之前落盘（见 playback_resume.go）。
+	if mode == openPlay {
+		a.rememberPlaybackResume()
+	}
 	p, err := audio.Open(path)
 	if err != nil {
-		if paused {
+		if quiet {
 			// 🔴 **恢复那一趟：安静跳过**。
 			//
 			// 票 #347 的验收写的是「队列里的东西已经取不到了 / 路径没了 /
@@ -1490,7 +1511,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 位置清成 0 了——恢复出来的那一首会停在开头，而用户明明停在中间。
 	// （时长拿不到不算致命，见 `internal/service/audio/extaf` 的 Len()。）
 	pos := time.Duration(0)
-	if paused {
+	if paused || resume {
 		pos = at
 		if pos < 0 {
 			pos = 0
@@ -1511,6 +1532,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		// 放完之后队列照样往下走。
 		a.wantPlay, a.playing = false, false
 	} else {
+		// openResume 也走这一支：wantPlay/playing 都是 true（接着放 = 出声）。
 		a.wantPlay, a.playing = true, true
 	}
 	a.stopped = false
@@ -1542,6 +1564,8 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 是一句谎话，而读屏软件会照着念给用户听。
 	if paused {
 		a.announce("已恢复上次的位置：《" + title + "》")
+	} else if resume {
+		a.announce("接着放《" + title + "》")
 	} else {
 		a.announce("正在放《" + title + "》")
 	}
@@ -1571,6 +1595,10 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		}
 		p.Pause()
 	} else {
+		// openResume 也走这一支：停在 at、**出声**。
+		if pos > 0 {
+			p.Seek(pos)
+		}
 		p.Play()
 	}
 	a.publishMedia()
@@ -1925,6 +1953,10 @@ func (a *App) Close() {
 	// 改这一格，落下去的就是**最后那个状态**。
 	// 设置的后台合并写也要在退出时同步收尾。
 	a.SavePlayback()
+	// 「断点续播」这一格也在退出前落一次：记的是最后在放的那一首和它的
+	// 位置（见 playback_resume.go）。排在 `SavePlayback` 之后——它写的是
+	// 另一格，互不覆盖。
+	a.rememberPlaybackResume()
 	// 「听歌统计」也要在退出前强制落一次（它每 30 秒才落一次）。
 	//
 	// ⚠️ 排在 `close(a.done)` 之后：后台时钟已经停了，不会再有别的 goroutine

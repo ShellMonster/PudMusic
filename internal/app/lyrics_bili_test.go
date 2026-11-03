@@ -84,7 +84,7 @@ func TestTheBiliSubtitleComesOnItsOwn(t *testing.T) {
 	cache := lyrics.NewCache(cacheDir)
 	var entry lyrics.Entry
 	waitFor(t, 15*time.Second, "歌词落进缓存了", func() bool {
-		e, ok := cache.Load(key)
+		e, ok := cache.Load(key, "", "")
 		if ok && strings.Contains(e.Lyrics, "自动来的第一句") {
 			entry = e
 			return true
@@ -180,7 +180,7 @@ func TestAMusicLibraryEntryAlsoGetsItsLyrics(t *testing.T) {
 	// 缓存键是**音乐库那一条**的（sid），不是那个投稿的。
 	cache := lyrics.NewCache(cacheDir)
 	waitFor(t, 15*time.Second, "歌词落进缓存了", func() bool {
-		e, ok := cache.Load("bili-audio-1293494")
+		e, ok := cache.Load("bili-audio-1293494", "", "")
 		return ok && strings.Contains(e.Lyrics, "自动来的第一句")
 	})
 }

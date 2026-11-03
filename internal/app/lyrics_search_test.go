@@ -339,7 +339,7 @@ func TestAdoptingLandsOnTheSongThatIsPlaying(t *testing.T) {
 	if msg := a.AdoptLyricPreview(); msg != "" {
 		t.Fatalf("采用失败：%s", msg)
 	}
-	got, ok := c.Load(lyricKeyOf(it))
+	got, ok := c.Load(lyricKeyOf(it), "", "")
 	if !ok || got.Lyrics != "[00:01.00]找到的词" || got.TLyrics != "[00:01.00]found" {
 		t.Fatalf("缓存里是 %+v（有没有=%v）", got, ok)
 	}
@@ -371,7 +371,7 @@ func TestAdoptingRefusesAfterTheSongChanged(t *testing.T) {
 	if msg := a.AdoptLyricPreview(); msg == "" {
 		t.Error("换歌之后居然采用成功了")
 	}
-	if _, ok := c.Load(lyricKeyOf(first)); ok {
+	if _, ok := c.Load(lyricKeyOf(first), "", ""); ok {
 		t.Error("甲的缓存里被写上了乙的歌名配的那一份词")
 	}
 }
@@ -523,10 +523,10 @@ func TestAdoptingNeverWritesToAnotherSongsCache(t *testing.T) {
 		t.Fatalf("采用返回了 %q，want 空串（点上它的那一刻在放的就是甲）", msg)
 	}
 
-	if got, ok := c.Load(lyricKeyOf(onlineSong("BV2", "2"))); ok {
+	if got, ok := c.Load(lyricKeyOf(onlineSong("BV2", "2")), "", ""); ok {
 		t.Errorf("乙的缓存里被写进了甲的词：%+v", got)
 	}
-	if got, ok := c.Load(lyricKeyOf(first)); !ok || got.Lyrics != "[00:01.00]甲的词" {
+	if got, ok := c.Load(lyricKeyOf(first), "", ""); !ok || got.Lyrics != "[00:01.00]甲的词" {
 		t.Errorf("甲自己的缓存里没有它：%+v（有没有=%v）", got, ok)
 	}
 }

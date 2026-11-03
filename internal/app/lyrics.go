@@ -219,11 +219,22 @@ func lyricKeyOf(it Item) string {
 // setLyricTrack 报「现在放的是这一首」，走一遍**先重置、再从缓存恢复**。同一首重报
 // （比如换流之后重新报一次）直接返回：重置会把用户刚调好的偏移抹掉，而换流对用户来说
 // 是「歌没断过」。
+//
+// 🔴 **「同一首」的判据是缓存键 + 曲名 + 歌手三者都同**（2026-11-03）：同一把
+// 键但曲名/歌手变了，是**另一首**（同名翻唱、换源后同 key 的条目）——缓存里那份
+// 歌词记的是上一首的身份，读它会把上一首的词错放出来。所以身份变了要走完整的
+// 换歌路径：重置 → 重新读缓存（读的时候身份校验会挡住那份旧词）。
 func (a *App) setLyricTrack(it Item) {
 	key := lyricKeyOf(it)
 
 	a.mu.Lock()
-	same := a.lyricKey == key
+	same := a.lyricKey == key && a.lyricTitle == it.Title && a.lyricArtist == it.Artist
+	// 同 key 重报（换流之后重新报一次）不重置——但**曲名/歌手要更新**：换源
+	// 之后这一条目上记的可能是新的标题，而缓存的身份校验跟着它走（见
+	// `lyrics.Cache.Load`）。不更新的话一份刚换源的歌反而被自己上次存的词
+	// 挡住——那正是串歌判据想拦的反面。
+	a.lyricTitle = it.Title
+	a.lyricArtist = it.Artist
 	a.mu.Unlock()
 	if same {
 		return
@@ -302,6 +313,7 @@ func (a *App) loadLyrics(key string, gen int) {
 	a.mu.Lock()
 	c := a.lyricCache
 	wake := a.wake
+	title, artist := a.lyricTitle, a.lyricArtist
 	a.mu.Unlock()
 
 	if c == nil || key == "" {
@@ -321,7 +333,7 @@ func (a *App) loadLyrics(key string, gen int) {
 	}
 
 	go func() {
-		entry, ok := c.Load(key)
+		entry, ok := c.Load(key, title, artist)
 		rows := lyrics.Rows(entry.Lyrics, entry.TLyrics)
 
 		a.mu.Lock()
@@ -449,6 +461,11 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 		OffsetMS: a.lyricOffsetMS,
 		FontSize: a.lyricFontSize,
 		Origin:   origin,
+		// 🔴 **把「这是给谁存的」一起落下去**（2026-11-03）：同名翻唱、换源、
+		// 手动搜错之后，同一把键上这份词可能不是这一首的——读的时候拿当前这首
+		// 的曲名/歌手跟它对（见 `lyrics.Cache.Load`）。
+		Title:  a.lyricTitle,
+		Artist: a.lyricArtist,
 	}
 	a.lyricEntry = entry
 	a.lyricOrigin = origin
@@ -588,7 +605,7 @@ func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cac
 	{
 		// 缓存里已经有词了就别再下载（理由见上面那一条）。
 		if cache != nil {
-			if e, ok := cache.Load(key); ok && strings.TrimSpace(e.Lyrics) != "" {
+			if e, ok := cache.Load(key, it.Title, it.Artist); ok && strings.TrimSpace(e.Lyrics) != "" {
 				return true
 			}
 		}
