@@ -105,6 +105,13 @@ const homePagerDuration = 200 * time.Millisecond
 // 「零值 = 500ms 弹簧」不是「没动画」。
 var homePagerAnim = ui.Animation{Duration: homePagerDuration, Ease: motion.Unified}
 
+// homePagerSeamW 是滑动中两页接缝那条分割线的宽（DIP）。
+//
+// ⚠️ **和框架的 `ui.Divider` 同一个数**（1 DIP，`mygo/ui/widgets.go` 的
+// `coreDivider`）：侧栏右缘、队列抽屉头下那条线都是这个宽——接缝这一道是
+// 同一种「分界」，不是装饰带。
+const homePagerSeamW = 1
+
 // homeBodyKeys 是内容块**每一档**的 key。
 //
 // ⚠️ **存成 `any` 是为了一个分配都不多**：key 是 `any`，而把一个字符串装进
@@ -537,6 +544,47 @@ func (h *homePage) viewPager(c *ui.Context, s *Shell) {
 			h.viewPagerPage(c, s, oldTab, width)
 			h.viewPagerPage(c, s, newTab, width)
 		})
+
+		// 接缝分割线：盖在两页交界的那一道竖缝上。
+		//
+		// # 为什么要有它
+		//
+		// 两页是**紧挨着**平移的，而容器是**直角** `Clip()`——榜单页那张
+		// 112px 圆角 hero 被**拦腰竖切**，切出来的硬边和下一页直角内容
+		// 之间没有任何过渡，画面上是一道「尖」。
+		//
+		// ⇒ 在接缝处画一条竖线（网易云翻页那种缝隙感）：它盖住被竖切的
+		// 卡片右缘，也把两页顶部的高差弱化掉。
+		//
+		// ⚠️ **它是 Absolute 的，不是 strip 里的第三段**：挂在**容器**上
+		// （不是 strip 里）——容器是 `Clip()` 的那个框，它要的位置是「容器
+		// 里的接缝 x」（`oldX + width`）；塞进 strip 里就要跟着 strip 平移
+		// （那时接缝在 strip 里是恒定的 `width`，但它的**可见**位置跟着
+		// `oldX` 走，两者不是一回事），而且 strip 是一行，第三段会占一段
+		// 宽度、把右页挤歪。
+		//
+		// ⚠️ **x 是相对容器的**：`Left(oldX + width)`——`oldX` 是 strip 平移
+		// 量（≤0），接缝就是左页右缘。它不取 `newX`：那个数在 strip 里，
+		// 相对容器是 `width + oldX`，是同一个数——取 `oldX + width` 少绕
+		// 一层。
+		//
+		// ⚠️ **只在滑动中出现**：静止时接缝不在画面上（ViewPager 的样子），
+		// 分割线也就不画——所以它在 `oldTab >= 0` 那一支里建，不在稳态那一
+		// 支里。
+		//
+		// ⚠️ **色取主题的 `Border`**（`c.Theme().Border`）：和侧栏右缘、队列
+		// 抽屉头下那条线同一个 token（`ui.Divider` 也是这个色），不硬编。
+		// 宽度 1 DIP（和框架的 `ui.Divider` 一致）。
+		//
+		// ⚠️ **不透明**：`Clip()` 已经把它裁在容器里，它自己是实色——不
+		// 叠 alpha，免得接缝位置在深色底下发虚。
+		//
+		// ⚠️ **不设 `RoleNone`**：e2e 要靠元素树的 bounds 量它的位置（判据
+		// 见 `internal/e2e/pager_seam_test.go`），而 `RoleNone` 会把元素挡在
+		// 树外。Label 用中文，无障碍朗读不会蹦英文串。
+		ui.Box(c).Key("home:pager:seam").Label("页面接缝").
+			Absolute().Left(oldX + width).Top(0).Bottom(0).
+			Width(homePagerSeamW).Background(c.Theme().Border)
 	})
 	// ⚠️ **量的是容器的盒子**（上一帧的）：两档横向错开的距离就是它。
 	h.pagerBox = box.LayoutBounds()
