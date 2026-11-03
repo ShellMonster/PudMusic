@@ -331,10 +331,20 @@ func rowCover(t *ui.Theme, hovered bool) ui.Color {
 // 和 `rowCover` 同一个道理：列表直接摆在内容区里，内容区就是页面底色——刷成页面
 // 底色之后，这一行和它旁边的空白**一个像素都不差**，看不出有人动过手。
 //
+// # 底色可以换
+//
+// 默认是页面底色；调用方传一个 `bg` 就用它——关注页那一排卡片底是
+// `cardBackground`（方案的 `surface1`），缝刷 `t.Background` 的话卡与卡之间
+// 是一道道更深的「沟」，而卡片靠圆角和影分出边界，缝不用深一档。
+//
 // ⚠️ **别拿它去盖「条目行」**：条目行的悬停反馈是对的（那就是框架那一层），盖掉
 // 之后指针压在一条列表项上会一点反应都没有。
-func LayoutRow(row ui.Element, t *ui.Theme) ui.Element {
-	return row.Background(t.Background)
+func LayoutRow(row ui.Element, t *ui.Theme, bg ...ui.Color) ui.Element {
+	base := t.Background
+	if len(bg) > 0 {
+		base = bg[0]
+	}
+	return row.Background(base)
 }
 
 // rowFocusRing 是「键盘走到哪一行」那一圈环。

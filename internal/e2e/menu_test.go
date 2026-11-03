@@ -144,17 +144,23 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 // 三态（「分组没拉出来」）正是要验的。
 func startRealAppWith(t *testing.T, seedSession bool) (*automationClient, func()) {
 	t.Helper()
-	return startRealAppWithArgs(t)
+	return startRealAppWithArgs(t, seedSession)
 }
 
 // startRealAppWithArgs 同 `startRealApp`，但把 args 原样放在二进制后面——
 // 命令行里给的是一个音频文件的话，应用起来那一首就放起来了（框架的
 // `fileArgs` 把它投给 `OnOpenFile`，见 `internal/ui/openfile.go`）。
 //
+// 第一个参数是 `seedSession`（要不要先种一份假登录态，理由见
+// `startRealAppWith`），后面才是给应用的 args。把 seed 挪进这一个函数
+// 是因为「起应用」这一摊只有它认识 socketDir——而凭据要种进 socketDir 里
+// 那份数据目录，两个入口分开的话就种不进去了（评审发现的编译错就是这么
+// 来的：`startRealAppWith` 收了 `seedSession` 却递不下去）。
+//
 // ⚠️ **为什么单独一支而不给 `startRealApp` 加参数**：原来那三支调用方一个
 // 参数都不传，改签名的话那三处都得跟一遍——而「起应用」和「起应用放一首歌」
 // 是两件事，分开写读起来也清楚。
-func startRealAppWithArgs(t *testing.T, args ...string) (*automationClient, func()) {
+func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*automationClient, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	socketDir, socket, err := makeAutomationSocket()
