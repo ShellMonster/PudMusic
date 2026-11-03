@@ -487,6 +487,87 @@ func TestThePagerShowsASkeletonWhileTheTabIsStillLoading(t *testing.T) {
 	}
 }
 
+// TestThePagerDrawsASeamBetweenTheTwoPagesWhileSliding 钉住**滑动中两页接缝处有
+// 一条分割线**（本票）。
+//
+// # 为什么要有它
+//
+// 滑动的时候两页是**紧挨着**平移的（`Left(oldX)`），而容器是**直角** `Clip()`——
+// 榜单页那张 112px 圆角 hero 被**拦腰竖切**，切出来的硬边和下一页直角内容之间
+// 没有任何过渡，画面上是一道「尖」。
+//
+// ⇒ 修法是**在接缝处画一条竖向分割线**（网易云翻页那种缝隙感）：它盖住被竖切
+// 的卡片右缘，也把两页顶部的高差弱化掉。
+//
+// # 判据是**几何**，不是像素
+//
+// 分割线是半透明混色画上去的（主题的 `Border`），画面上扫不到精确颜色——
+// 所以这一条断两样：
+//
+//  1. **元素在**：接缝处那一格挂在「pager-seam」这个名字下（`tt.Find` 按
+//     Label 找）；
+//  2. **位置对**：它的横向位置在两页接缝上——左页右缘（`oldX + width`），
+//     上下顶满容器。
+//
+// 而「画上去的是不是分隔线颜色」由**出图自查**那一档看（BIU_SHOT_DIR），
+// 像素判据留给 e2e。
+//
+// ⚠️ **静态时不画**：两页都不动的时候接缝不在画面上（那是 ViewPager 的样子），
+// 分割线也就不该在——所以这一条也断「停着的时候那个名字不在」。
+func TestThePagerDrawsASeamBetweenTheTwoPagesWhileSliding(t *testing.T) {
+	s, tt := newHome(t, fullSongs())
+
+	// 静态：没滑动，接缝不在画面上。
+	if _, ok := tt.Find("pager-seam"); ok {
+		t.Fatalf("没滑动的时候接缝分割线已经在画面上了——它只在滑动中出现")
+	}
+
+	if err := tt.Click(homeTabs[1]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[1], err, tt.Texts())
+	}
+	// 推到动画的中途（旧的那一档已经走了一半，新的那一档刚进来一半）。
+	tt.Advance(25 * time.Millisecond)
+	tt.Frame()
+
+	g := homePagerView
+	if g.oldTab < 0 || g.newTab < 0 {
+		t.Fatalf("动画中途两档没有同时在（oldTab=%d newTab=%d）", g.oldTab, g.newTab)
+	}
+	seam, ok := tt.Find("pager-seam")
+	if !ok {
+		t.Fatalf("滑动中途接缝处没有分割线（文字有 %q）——\n"+
+			"两页接缝处要画一条竖线，盖住被竖切的卡片右缘", tt.Texts())
+	}
+
+	// 它的 x 在左页右缘（oldX + width），上下顶满容器。
+	//
+	// ⚠️ **容器的左沿用 `h.pagerBox`**（`viewPager` 每一帧量一份）：`tt.Find`
+	// 按 Label 找，而容器挂的是 key 不是 Label——它不会上树。`pagerBox` 报的
+	// 就是**上一帧**那个容器的盒子，接缝相对容器是 `oldX + width`，放到画面
+	// 上就是 `pagerBox.X + oldX + width`。
+	//
+	// ⚠️ **断「它贴在那个 x 上」，不断「它的宽是几」**：`tt.Find` 报的是裁切
+	// 之后的盒子，接缝那条线被容器裁掉的那一半不在盒子里——所以只断**左沿**。
+	wantX := s.home.pagerBox.X + g.oldX + g.width
+	if math.Abs(float64(seam.X-wantX)) > 2 {
+		t.Errorf("分割线的左沿在 x=%.1f，want %.1f（接缝 = 容器左沿 + oldX + width）——\n"+
+			"它要正好落在两页接缝上，盖住被竖切的卡片右缘", seam.X, wantX)
+	}
+	if seam.W <= 0 || seam.W > 8 {
+		t.Errorf("分割线的宽是 %.1f——它是一条细线（want 0 < W ≤ 8）", seam.W)
+	}
+	if seam.H <= 0 {
+		t.Errorf("分割线的高是 %.1f——它要顶满容器（竖向一条线）", seam.H)
+	}
+
+	// 走完之后：接缝不在，分割线也不在。
+	tt.Advance(homePagerDuration + 100*time.Millisecond)
+	tt.Frame()
+	if _, ok := tt.Find("pager-seam"); ok {
+		t.Errorf("滑动走完之后接缝分割线还在画面上——它只在滑动中出现")
+	}
+}
+
 // 免得「这一组用不到」被当成「没写」。
 var _ = mygoui.Smooth
 
