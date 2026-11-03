@@ -218,25 +218,54 @@ func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
 // ⚠️ **那两串身份是记好的那一份**（票 #339）：现拼的话每帧每行一到两次分配。
 func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
 	rows := make([]queueRow, 0, snapshot.Len())
+	// occurrence 是「这一行是第几份同一首」：队列允许同一首歌重复入队，每
+	// 一份各占一行、各有各的 key。第 0/1/2… 份的出现序号进 `queueRowKey`，
+	// 行 key 才互不相同。
+	//
+	// ⚠️ **用行 key 当指纹来数**（票：性能修正）：原来每行回扫前面所有行调
+	// `SameTrack`，500 项 ~12.5 万次比较。现在一行只算一次身份
+	// （`packQueueRowIdentity` 里的 `Item.Identity()`，被 `rowkey.Memo` 记
+	// 住），再拿「去掉了序号和下标的那一段 key」当 map 键前问一遍前面
+	// 有没有同 key 的行——判重语义不变（`SameTrack` 的口径就是
+	// `Identity()` 非空且相等），而**比较的是已算好的行 key**，不是两首的
+	// `Item`。
+	//
+	// ⚠️ **为什么不拿 `Item` 本身当 map 键**：`Item` 里有十几个字段，当键
+	// 的话比较一次是逐字段，而且得先拷贝一份 `it`（map 键不能是「指向队列
+	// 里那一格」的引用）。行 key 已经装好了「判重标识 + 序号 + 下标」那一
+	// 份，拿它当键**零新增字段、零新增拷贝**。
+	seen := make(map[string]int, snapshot.Len())
 	for i := 0; i < snapshot.Len(); i++ {
 		it, ok := snapshot.At(i)
 		if !ok {
 			continue
 		}
-		occurrence := 0
-		if app.SameTrack(it, it) {
-			for j := 0; j < i; j++ {
-				prev, ok := snapshot.At(j)
-				if ok && app.SameTrack(it, prev) {
-					occurrence++
-				}
-			}
-		}
-		raw := queueRowRaw{item: it, occurrence: occurrence}
-		if !app.SameTrack(it, it) {
-			raw.at = i
-		}
+		// 先按「序号 0」拿一份身份（`rowkey.Memo` 记住 `Item.Identity()` 的
+		// 结果，同一首歌只拼一次）；再看这一首在前面几行里出现过几次——
+		// 出现的次数就是这一行的 occurrence。`ident.id` 是判重标识
+		// （空 = 认不出身份，那种项不进 seen），所以认不出身份的行各走各的
+		// 下标，不会凑成同一首。
+		raw := queueRowRaw{item: it}
 		ident := ids.At(i, raw, packQueueRowIdentity)
+		if ident.id == "" {
+			// 认不出身份的那一档照旧按下标当身份（`SameTrack(it,it)` 为假
+			// 时 `raw.at = i`——同一份行 key 形状）。
+			raw.at = i
+			ident = ids.At(i, raw, packQueueRowIdentity)
+			rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
+			continue
+		}
+		occurrence := seen[ident.id]
+		if occurrence > 0 {
+			// ⚠️ **换一份原料再问一次**：`occurrence` 变了，行 key 也要变——
+			// `queueRowKey` 里是「标识 + 序号 + 下标」三样拼起来的：序号是
+			// occurrence，下标给 0（认得出身份的这一档下标不进 key——
+			// 和 `packQueueRowIdentity` 第一次那一问同一形状）。
+			ident = ids.At(i, queueRowRaw{item: it, occurrence: occurrence}, packQueueRowIdentity)
+			seen[ident.id] = occurrence + 1
+		} else if ident.id != "" {
+			seen[ident.id] = 1
+		}
 		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
 	}
 	return rows

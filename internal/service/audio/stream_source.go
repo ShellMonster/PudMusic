@@ -1201,6 +1201,14 @@ func (s *StreamSource) recordWrite(start, n int64) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// 快路径：正常顺序写区间一直是 `[0, filled)` 单条，新写的那块正好
+	// 接在它尾巴上——直接扩 end 就行，三趟循环（求和、合并、再求和）全白跑。
+	// 慢路径（乱序重发、断线重传出的洞）照旧走下面的合并。
+	if len(s.written) == 1 && s.written[0].end == start {
+		s.written[0].end = end
+		return n
+	}
+
 	before := int64(0)
 	for _, r := range s.written {
 		before += r.end - r.start

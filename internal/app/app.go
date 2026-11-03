@@ -635,6 +635,10 @@ type App struct {
 	fadeInUntil time.Time
 	// loud 是本地文件的响度扫描结果缓存（见 loudness_scan.go）。
 	loud loudnessCache
+	// loudID 是按曲目 Identity 的响度缓存 + 落盘（见 loudness_cache.go）。
+	loudID loudnessIdentityCache
+	// normalizeBoost 是「响度提升」开关的内存副本（Settings.NormalizeGainBoost）。
+	normalizeBoost bool
 	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
 	autoLyricTried map[string]bool
 	noAutoLyrics   bool
@@ -1357,6 +1361,18 @@ func (a *App) biliURLLocked() string {
 	return BiliLink(a.online.item)
 }
 
+// CoverURL 是「当前这首的封面地址」那一个字段的窄出口。
+//
+// ⚠️ **为什么不走 `Snapshot().CoverURL`**：`Snapshot()` 把整份 `State`（三十
+// 来个字段 + 章节切片拷贝 + BiliURL 拼接）值拷贝出去，而 `coverWash`/`coverSat`
+// 一帧被调三到五次、要的只是这一个串。`a.mu` 拿一下、回一个串就行——和
+// `Snapshot` 读到的是同一份（同一把锁、同一个字段）。
+func (a *App) CoverURL() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.cover
+}
+
 // setCover 记下当前这首的封面地址。
 //
 // 值不变就不叫醒界面：本地文件的封面是空串，每一次换歌、每一次入队都会走到
@@ -1471,7 +1487,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	//
 	// ⚠️ **送进去的是增益，不是音量那一格**：静音的时候增益是 0，而音量那一格
 	// 记的还是用户设的值（取消静音放回去的就是它）。
-	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetEQ(a.eqGains)
+	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetNormalizeGainBoost(a.normalizeBoost).SetEQ(a.eqGains)
 	a.applyFadeInLocked(p)
 	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p

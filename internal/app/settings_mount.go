@@ -64,6 +64,9 @@ func (a *App) MountSettings(path string) error {
 	store, err := OpenSettingsStore(path)
 	mountedSettings.Store(a, &settingsSlot{store: store, loadErr: err})
 
+	// 响度缓存跟着设置文件住同一个目录（见 loudness_cache.go）。
+	a.loudID.load(filepath.Join(filepath.Dir(path), loudnessCacheFile))
+
 	// 播放模式是**队列**的形状，队列不走挂载表（它跟着 App 走，见 app.go），
 	// 所以得在这里把它从设置搬过去。不搬的话用户设过的档每次启动都被
 	// NewQueue 的默认值盖掉——界面上写着「随机」，放完却按循环走。
@@ -90,8 +93,9 @@ func (a *App) MountSettings(path string) error {
 	a.volume = vol
 	a.muted = s.Muted
 	a.normalize = s.NormalizeVolume
+	a.normalizeBoost = s.NormalizeGainBoost
 	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
-	a.eqGains = audio.EQPresetByID(s.EQPreset).Gains
+	a.eqGains = s.EQGains()
 	a.vid.setQuality(bili.VideoQuality(s.VideoQuality))
 	if s.PlaybackRate > 0 {
 		a.rate = audio.SnapRate(s.PlaybackRate)
@@ -137,6 +141,7 @@ func (a *App) RecordSettingsFailure(err error) {
 // ⚠️ 「改设置 → 杀进程 → 重启 → 设置还在」这条验收靠的就是 store 里那次
 // 同步 Flush。SIGKILL 拦不住，任何异步写盘都得配一个同步收尾。
 func (a *App) CloseSettings() error {
+	a.loudID.flush()
 	v, ok := mountedSettings.LoadAndDelete(a)
 	if !ok {
 		return nil
@@ -181,6 +186,24 @@ func (a *App) MenuDisplayState() (mode DisplayMode, sidebarCollapsed bool) {
 	// ⚠️ **写死的两个默认值**：和 `DefaultSettings` 里那两栏一致
 	//（`DisplayModeList` / `false`）。
 	return DisplayModeList, false
+}
+
+// CoverAccentEnabled 只回「封面取色」那一枚开关。
+//
+// ⚠️ **为什么单独一个窄接口**：和 `MenuDisplayState` 同一路数（理由见它那段
+// 注释）——`coverWash` 一帧被播放条 / 评论区入口 / 点赞计数 / 迷你播放器调
+// 三到五次，每次 `SettingsSnapshot()` 都要拿锁 + 把整份 `Settings`（约 600
+// 字节，带切片和指针字段）值拷贝一遍，而这里要的只是一个布尔。
+//
+// ⚠️ **没挂过 store 时给 `false`**：和 `DefaultSettings` 里那一栏一致
+// （封面取色默认关），且**不调 `DefaultSettings("")`**——那会造一份带新
+// 指针的完整设置（一次堆分配），而这一句每帧都跑。
+func (a *App) CoverAccentEnabled() bool {
+	settingsReads.Add(1)
+	if slot := a.settingsSlot(); slot != nil && slot.store != nil {
+		return slot.store.Snapshot().CoverAccent
+	}
+	return false
 }
 
 // settingsReads 是「一共读了几次设置」的计数器。
@@ -255,9 +278,10 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	a.mu.Lock()
 	changed := a.normalize != s.NormalizeVolume
 	a.normalize = s.NormalizeVolume
+	a.normalizeBoost = s.NormalizeGainBoost
 	a.trackFade = time.Duration(s.TrackFadeSeconds) * time.Second
 	a.vid.setQuality(bili.VideoQuality(s.VideoQuality))
-	eq := audio.EQPresetByID(s.EQPreset).Gains
+	eq := s.EQGains()
 	eqChanged := a.eqGains != eq
 	a.eqGains = eq
 	p, path, local := a.player, a.path, a.online == nil
@@ -266,7 +290,7 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 		p.SetEQ(eq)
 	}
 	if changed && p != nil {
-		p.SetNormalize(s.NormalizeVolume)
+		p.SetNormalize(s.NormalizeVolume).SetNormalizeGainBoost(s.NormalizeGainBoost)
 		if s.NormalizeVolume && local {
 			a.startLoudnessScan(p, path)
 		}
