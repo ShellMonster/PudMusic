@@ -1115,8 +1115,9 @@ func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
 }
 
 // TestTheFollowCardTypographyAndItsHoverBar 钉住关注卡的两处：
-// 名字 18、签名 14（上游 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`），
-// 以及鼠标移上去才升起来的那条操作条（300ms，`translate-y-20` → 0）。
+// 名字 16、签名 14（上游 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`，
+// follow-slim 那一票把名字改成了 `Size16`，用户 2026-11-03 参考网易云关注页
+// 拍板），以及鼠标移上去才升起来的那条操作条（300ms，`translate-y-20` → 0）。
 func TestTheFollowCardTypographyAndItsHoverBar(t *testing.T) {
 	b := newUIExplore(t)
 	uiFollowTags(b, map[int]any{0: "默认分组"})
@@ -1136,15 +1137,15 @@ func TestTheFollowCardTypographyAndItsHoverBar(t *testing.T) {
 	// ① 字号。第二张卡的名字不是整行的无障碍名字（那是第一张卡的），所以
 	// `Find` 拿到的就是名字那一段文字本身；签名一直是唯一的。
 	//
-	// 量的是**盒子高**：行高跟着字号走，18 点那行实测 21.2、14 点加 1.4 行高
-	// 实测 19.6。取 20.5 / 19.0 两条线——旧值 15 / 12 分别是 17.7 / 16.8，
+	// 量的是**盒子高**：行高跟着字号走，16 点那行实测 18.8、14 点加 1.4 行高
+	// 实测 19.6。取 18 / 19 两条线——旧值 15 / 12 分别是 17.7 / 16.8，
 	// 离得够开。
 	name, ok := tt.Find("第二个 UP")
 	if !ok {
 		t.Fatalf("画面上找不到名字，文字有 %q", tt.Texts())
 	}
-	if name.H < 20.5 {
-		t.Errorf("名字那一段只有 %.1f 高，want ≥ 20.5（上游是 text-lg，18 点）", name.H)
+	if name.H < 18 {
+		t.Errorf("名字那一段只有 %.1f 高，want ≥ 18（16 点那一档实测 18.8）", name.H)
 	}
 	sign, ok := tt.Find("第二个 UP 的签名")
 	if !ok {
@@ -1152,6 +1153,12 @@ func TestTheFollowCardTypographyAndItsHoverBar(t *testing.T) {
 	}
 	if sign.H < 19 {
 		t.Errorf("签名那一段只有 %.1f 高，want ≥ 19（上游是 text-sm，14 点）", sign.H)
+	}
+	// ⚠️ **签名只留一行**（follow-slim 那一票：上游 `line-clamp-2` 改成了
+	// `MaxLines(1)`，用户 2026-11-03 参考网易云关注页拍板）。两行是约 39，
+	// 一行是约 19.6——卡 25 那条线，旧值差得够开。
+	if sign.H > 25 {
+		t.Errorf("签名那一段 %.1f 高——MaxLines(1) 下该是约 19.6（用户 2026-11-03 拍板只要一行）", sign.H)
 	}
 
 	// ② 操作条平时不在画面上。

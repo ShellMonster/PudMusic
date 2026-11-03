@@ -46,18 +46,18 @@ import (
 // # 为什么列数要等它稳
 //
 // 列数是按**上一帧**量出来的容器宽算的（`followPage.width` →
-// `list.GridColumnsFor`），头一帧按一个还没量准的宽排成 5 列，下一帧量到真的
-// 才排成 4 列（理由同 `follow.go` 里 `keepFollowAnchor` 那段）。不等它稳的话，
+// `followColumnsFor`），头一帧按一个还没量准的宽排成 6 列，下一帧量到真的
+// 才排成 5 列（理由同 `follow.go` 里 `keepFollowAnchor` 那段）。不等它稳的话，
 // 量到的是**上一档列数**摆出来的画面。
 //
-// ⚠️ **4 列是票 #367 之后的事**：左边 200 宽的分组栏收成页头那个下拉之后，
-// 同一个 1400×900 窗口里网格拿到 1148（≥ 1024 那一档），原来是 948（≥ 768
-// 那一档、3 列）。列数跟着容器宽走，所以这一处断言也跟着换。
+// ⚠️ **5 列是 follow-slim 那一票的事**：关注卡是人像卡、比歌卡窄，这一页
+// 自己拿一张断点表（`followColumnsFor`，1536/1280/1024/768 → 7/6/5/4），
+// 同一个 1400×900 窗口里网格拿到 1148（≥ 1024 那一档）于是是 5 列。
 func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 	b := newUIExplore(t)
 	uiFollowTags(b, map[int]any{0: "默认分组"})
-	// 六个 UP 主：窗口摆得下四列（左栏收成下拉之后网格宽 1148 ≥ 1024），
-	// 于是**两行**（4 + 2）——行间距量一次，列间距量三次。
+	// 六个 UP 主：窗口摆得下五列（网格宽 1148 ≥ 1024 那一档），
+	// 于是**两行**（5 + 1）——行间距量一次，列间距量四次。
 	uiFollowList(b, 6, []any{
 		uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"),
 		uiFollowUser(13, "第三个 UP"), uiFollowUser(14, "第四个 UP"),
@@ -71,11 +71,11 @@ func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 	tt.Frame()
 	f := s.followPageOf()
 	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 6 && f.tagStarted })
-	waitFrames(t, tt, "列数稳了", func() bool { return f.cols == list.GridColumnsFor(f.width) })
+	waitFrames(t, tt, "列数稳了", func() bool { return f.cols == followColumnsFor(f.width) })
 	tt.Frame()
 
-	if f.cols != 4 {
-		t.Fatalf("网格宽 %v 应该是 4 列，实际是 %d 列", f.width, f.cols)
+	if f.cols != 5 {
+		t.Fatalf("网格宽 %v 应该是 5 列，实际是 %d 列", f.width, f.cols)
 	}
 	if len(f.users) != 6 {
 		t.Fatalf("要六个人才量得出两行，实际是 %d 个", len(f.users))
@@ -85,7 +85,11 @@ func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 	cardW := list.CellWidth(f.width, f.cols)
 
 	// ① 行与行之间 16。
-	for row := 1; row < len(f.users)/f.cols; row++ {
+	//
+	// ⚠️ **行数按向上取整算**（6 人 / 5 列 = 2 行）：直接 `len/cols` 取整在
+	// 不满一行时会少一行——5 列 6 人是 1，于是第二行那一道缝永远量不到。
+	rows := (len(f.users) + f.cols - 1) / f.cols
+	for row := 1; row < rows; row++ {
 		above := followCardBox(t, tt, f.users[(row-1)*f.cols], cardW)
 		below := followCardBox(t, tt, f.users[row*f.cols], cardW)
 		if d := below.Y - (above.Y + above.H); absF(d-16) > 0.5 {
@@ -104,16 +108,17 @@ func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 		}
 	}
 
-	// ③ 卡里那圈留白还是 16。
+	// ③ 卡里那圈留白是 12（follow-slim 那一票把上游的 16 改成了 12，
+	// 用户 2026-11-03 参考网易云关注页拍板）。
 	//
-	// ⚠️ **这一条盯的是「缝是从哪儿来的」**：这一票的 16 是**行与行之间**的，
-	// 不是把卡里的留白加大凑出来的——留白加大了的话，卡和页面底之间也一起撑开
-	// 了，而那不是行间距（票面第 2 条）。
+	// ⚠️ **这一条盯的是「缝是从哪儿来的」**：行间距的 16 是**行与行之间**的，
+	// 不是卡里的留白——留白加大或减小，卡和页面底之间会跟着撑开或收紧，
+	// 而那不是行间距。
 	//
-	// 顺带一提：① 量出来的行缝正好是 16 这件事本身也钉住了它——留白要是被加大
-	// 过，行缝就会量成 0。
-	if followCardPad != 16 {
-		t.Errorf("卡里那圈留白是 %v，该是 16——这一票的缝是行间距，不是卡片内边距", followCardPad)
+	// 顺带一提：① 量出来的行缝正好是 16 这件事本身也钉住了它——留白要是被改
+	// 成了 16 以外凑行缝的数，行缝就会量成别的。
+	if followCardPad != 12 {
+		t.Errorf("卡里那圈留白是 %v，该是 12（follow-slim 那一票改的瘦卡留白）", followCardPad)
 	}
 }
 

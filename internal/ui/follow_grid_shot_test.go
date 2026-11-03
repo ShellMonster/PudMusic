@@ -13,17 +13,19 @@ package ui
 import (
 	"os"
 	"testing"
-
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // TestRenderFollowGridShots 把「我的关注」那个网格存成 PNG，深浅各一套。
 //
 // # 为什么摆九个 UP 主
 //
-// 窗口摆成 **1400 宽**（默认的 1200 只有两列），网格于是是**三列**，九个人排成
-// **三行**——行与行之间那 16 的缝有**两处**可看，列与列之间那 16 的缝有**两处**
-// 可看。
+// 窗口摆成 **1400 宽**，网格拿到 1148（≥ 1024 那一档）于是是**五列**——
+// 九个人排成**两行**（5 + 4）。行与行之间那 16 的缝有**一处**可看，
+// 列与列之间那 16 的缝有**四处**可看。
+//
+// ⚠️ **五列是 follow-slim 那一票的事**：关注卡是人像卡、比歌卡窄，这一页自己
+// 拿一张断点表（`followColumnsFor`，1536/1280/1024/768 → 7/6/5/4），
+// 和首页歌卡那张表刻意不同（用户 2026-11-03 参考网易云关注页拍板要更密）。
 func TestRenderFollowGridShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {
@@ -53,10 +55,10 @@ func TestRenderFollowGridShots(t *testing.T) {
 			f := s.followPageOf()
 			waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 9 && f.tagStarted })
 			// ⚠️ **列数要几帧才稳**：列数是按**上一帧**量出来的容器宽算的
-			// （`followPage.width` → `list.GridColumnsFor`），头一帧按一个还没量准
-			// 的宽排成 5 列，下一帧量到真的才排成 3 列（理由同 `follow.go` 里
+			// （`followPage.width` → `followColumnsFor`），头一帧按一个还没量准
+			// 的宽排成 6 列，下一帧量到真的才排成 5 列（理由同 `follow.go` 里
 			// `keepFollowAnchor` 那段）。不等它稳，拍下来的是**上一档列数**。
-			waitFrames(t, tt, "列数稳了", func() bool { return f.cols == list.GridColumnsFor(f.width) })
+			waitFrames(t, tt, "列数稳了", func() bool { return f.cols == followColumnsFor(f.width) })
 			// 指针挪开，别让它压在某一张卡上（悬停会升起来一条操作条）。
 			tt.Move(30, 30)
 			homeFrame(tt)
