@@ -674,7 +674,9 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 		// 外层保留稳定 key/点击链，拖动和键盘焦点仍由现有 Shell seam 管理。
 		item := ui.Column(c).Width(prototypeRailItemW).Padding(space.Px6, space.None, space.Px6, space.None).
 			Gap(space.Px4).AlignItems(ui.Center).Label(rt.Title).Children(func() {
-			cell := flatIconCellButton(c, name, rt.Title, sideIconSize, prototypeRailIconH).
+			// The outer rail item owns the accessible name; the icon cell is
+			// decorative so the visible label is announced only once.
+			cell := flatIconCellButton(c, name, "", sideIconSize, prototypeRailIconH).
 				Width(prototypeRailIconW).Height(prototypeRailIconH)
 			if selected {
 				cell = flatSolidCurrent(c, cell)
@@ -722,7 +724,9 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 // 一列扫的，晚 500ms 收会压在下一项上。
 func (s *Shell) sideItemTip(c *ui.Context, anchor ui.Element, text string) {
 	s.tipAt(c, anchor, text, tipMenu, func(panel, anchor ui.Element, t *ui.Theme) {
-		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(space.Px6)
+		// 72px item is centered in the 88px rail; add the remaining 8px plus
+		// the 6px optical gap so the tooltip starts at the rail's outer edge.
+		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(space.Px12)
 	}, true)
 }
 
