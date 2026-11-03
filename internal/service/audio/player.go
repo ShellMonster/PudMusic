@@ -437,6 +437,14 @@ func (p *Player) SetNormalize(on bool) *Player {
 	return p
 }
 
+// SetNormalizeGainBoost 开关「响度提升」：开了之后已知响度（ReplayGain 标签
+// 或整首量过的）轻的歌会被抬到目标响度，峰值不超过 -1 dBTP；关着维持
+// 「只压不抬」（见 normalize.go）。对未知响度的在线流永远无效。
+func (p *Player) SetNormalizeGainBoost(on bool) *Player {
+	p.tap.norm.boost.Store(on)
+	return p
+}
+
 // SetLoudness 告诉播放器这一首已经量好的响度（见 MeasureFile），开着音量均衡
 // 时按它给整首定增益，不再靠开头那几秒估。
 func (p *Player) SetLoudness(l Loudness) *Player {

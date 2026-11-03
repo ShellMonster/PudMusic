@@ -364,6 +364,11 @@ type Settings struct {
 	// （见 internal/service/audio/normalize.go）。默认关。
 	NormalizeVolume bool `json:"normalizeVolume"`
 
+	// NormalizeGainBoost 是「响度提升」开关：开着时已知响度（ReplayGain
+	// 标签或整首量过的）的轻的歌被抬到目标响度，峰值不过 -1 dBTP；
+	// 关着维持「只压不抬」。默认关（见 audio/normalize.go 的 boost 那一支）。
+	NormalizeGainBoost bool `json:"normalizeGainBoost"`
+
 	// MiniLyricsCurtain 是「迷你播放器点封面展开歌词卷帘」那个开关。**默认开**
 	// （票 #536，2026-10-26 主人定的）。
 	//

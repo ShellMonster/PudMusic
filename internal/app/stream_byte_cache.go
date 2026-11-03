@@ -225,10 +225,10 @@ func (a *App) buildFromCachedBytes(path string, run *loadRun) (*audio.Player, er
 	// 音量和倍率**现读**（和 `buildFromRef` 同一套规矩）：建播放链路这中间
 	// 用户完全可能按了音量或者换了倍速。
 	a.mu.Lock()
-	vol, rate, norm, eq := a.gainLocked(), a.rate, a.normalize, a.eqGains
+	vol, rate, norm, boost, eq := a.gainLocked(), a.rate, a.normalize, a.normalizeBoost, a.eqGains
 	a.applyFadeInLocked(p)
 	a.mu.Unlock()
-	p.SetVolume(vol).SetRate(rate).SetNormalize(norm).SetEQ(eq)
+	p.SetVolume(vol).SetRate(rate).SetNormalize(norm).SetNormalizeGainBoost(boost).SetEQ(eq)
 	return p, nil
 }
 
