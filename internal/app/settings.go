@@ -416,6 +416,31 @@ type Settings struct {
 	// EQPreset 是均衡器预设的 ID（见 audio.EQPresets），空或 "flat" = 关（默认）。
 	EQPreset string `json:"eqPreset"`
 
+	// EQCustomGains 是均衡器的「自定义」增益（dB，10 段，每段 -12..+12）。
+	//
+	// # 它和 EQPreset 是什么关系
+	//
+	// **生效的增益只有一个出口**：`EQCustomOn` 为真时用 `EQCustomGains`，
+	// 为假时照旧走 `EQPresetByID(EQPreset).Gains`（`UpdateSettings` /
+	// `MountSettings` 两边同一个算法）。`EQPreset` 在自定义开着的时候**不被
+	// 清零**——它记的是「自定义之前选的那一套」，用户切回去的时候下拉还认
+	// 得出它。
+	//
+	// 之所以不是「拖一下滑杆就把 EQPreset 改成 "custom"」：`EQPresetByID`
+	// 不认的 ID 会被 normalize 清成空（见下面 normalize 那段），自定义的
+	// ID 混进那一格活不过一次校验；分开两格，「选的是哪一套」和「自定义的
+	// 十段是多少」各记各的。
+	EQCustomOn    bool        `json:"eqCustomOn"`
+	EQCustomGains [10]float64 `json:"eqCustomGains"`
+	// EQCustomName 是「另存为预设」存下来的那套的名字；空 = 当前的自定义
+	// 还没存成预设（或存的那套被删了）。
+	EQCustomName string `json:"eqCustomName"`
+
+	// EQCustomPresets 是用户自己存的命名预设，最多 audio.EQMaxCustomPresets
+	// 套；出现在预设下拉里、可删。ID 以 `custom:` 起头（见
+	// `internal/ui/eq_panel.go`），永远不会和内置 ID 撞上。
+	EQCustomPresets []audio.EQPreset `json:"eqCustomPresets"`
+
 	// Muted 是静音标志。**它和音量分开存**（票 #311 / 报告 §3.3 的 B2）。
 	//
 	// ⚠️ **别再用「音量 0」顶替静音**：落盘之后那就是个坑——静音之后退出再
@@ -458,6 +483,20 @@ var knownSettingsKeys = func() map[string]bool {
 	}
 	return m
 }()
+
+// EQGains 是这份设置下均衡器该生效的十段增益。
+//
+// **唯一的解析出口**（`MountSettings` 和 `UpdateSettings` 都从它取值）：
+// `EQCustomOn` 为真时用 `EQCustomGains`——其中 `EQCustomName` 命中的那一套
+// 自定义预设（或当前还没存名的自定义）；为假时照旧走
+// `audio.EQPresetByID(EQPreset).Gains`。两格的关系写在 `EQCustomGains`
+// 那一格的注释里。
+func (s Settings) EQGains() [10]float64 {
+	if s.EQCustomOn {
+		return s.EQCustomGains
+	}
+	return audio.EQPresetByID(s.EQPreset).Gains
+}
 
 // MiniLyricsCurtainOn 报「迷你播放器点封面展开歌词卷帘」那一格是开是关。
 //
@@ -696,6 +735,36 @@ func (s *Settings) normalize() {
 	}
 	if audio.EQPresetByID(s.EQPreset).ID == "flat" {
 		s.EQPreset = ""
+	}
+	// 自定义均衡器这一组：增益逐段钳进 [-12, +12]；存的预设裁到上限、
+	// 逐段也钳一遍（手改的设置文件可能把数写飞）。「另存为预设」的名字
+	// 对不上任何一套存的预设时清掉——不然删掉那套之后，面板会把一段
+	// 「没有名字的自定义」当成那一套显示。
+	for i := range s.EQCustomGains {
+		s.EQCustomGains[i] = min(max(s.EQCustomGains[i], audio.EQGainMin), audio.EQGainMax)
+	}
+	if len(s.EQCustomPresets) > audio.EQMaxCustomPresets {
+		s.EQCustomPresets = s.EQCustomPresets[:audio.EQMaxCustomPresets]
+	}
+	if s.EQCustomPresets == nil {
+		s.EQCustomPresets = []audio.EQPreset{}
+	}
+	for i := range s.EQCustomPresets {
+		for j := range s.EQCustomPresets[i].Gains {
+			s.EQCustomPresets[i].Gains[j] = min(max(s.EQCustomPresets[i].Gains[j], audio.EQGainMin), audio.EQGainMax)
+		}
+	}
+	if s.EQCustomName != "" {
+		ok := false
+		for _, p := range s.EQCustomPresets {
+			if p.Name == s.EQCustomName {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			s.EQCustomName = ""
+		}
 	}
 	s.TrackFadeSeconds = min(max(s.TrackFadeSeconds, 0), MaxTrackFadeSeconds)
 	if !slices.Contains(VideoQualitySteps, s.VideoQuality) {

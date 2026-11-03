@@ -157,6 +157,14 @@ func (s *Shell) viewFullSettings(c *ui.Context) {
 		s.fullSwitchRow(c, "显示虚化背景", &blurred, func(on bool) {
 			s.setFullPrefs(func(p *app.FullPlayerPrefs) { p.ShowBlurredBackground = on })
 		})
+
+		// 均衡器：点开的是和设置页同一个面板（eq_panel.go），scope 带
+		// "full:" 前缀——理由见 eq_panel.go 文件头「键的分域」。
+		//
+		// ⚠️ **它在偏好面板里再套一层浮层**：满屏没有第二个地方放它，
+		// 而「均衡器」本来就是「声音的事」，归在这一组开关旁边。
+		s.fullEQRow(c)
+
 		if !blurred {
 			s.fullColorRow(c, "背景颜色", prefs.BackgroundColor,
 				toHex(c.Theme().Background), prefs.BackgroundColor != "",
@@ -230,6 +238,30 @@ func (s *Shell) fullSettingsHeader(c *ui.Context) {
 			Size(24, 24).Padding(space.None, space.Px4).Clicked() {
 			s.full.settings = false
 		}
+	})
+}
+
+// fullEQRow 是偏好面板里的「均衡器」行：左边标题，右边一枚「自定义」键，
+// 点开和设置页同一个滑杆面板（`eqPanelContent`，scope "full:"）。
+//
+// ⚠️ **面板开着的时候不藏界面**：`fullHiddenWith` 只认 `s.full.settings`，
+// 而这里的浮层挂在偏好面板里面——偏好面板本身就开着（`s.full.settings`
+// 是 true），所以「面板开着不动」那条已经盖住了，不用另记一个字段。
+func (s *Shell) fullEQRow(c *ui.Context) {
+	t := c.Theme()
+	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "均衡器").FontSize(scale.Font(c, scale.Size16)).FontWeight(500)
+		trig := flatButton(c, "自定义")
+		if trig.Clicked() {
+			s.settings.eqFullOpen = true
+		}
+		ui.PopoverBase(c, trig, &s.settings.eqFullOpen, func(panel ui.Element) {
+			popupPanel(t, panel.
+				AttachTo(trig, ui.AnchorLeft, ui.AnchorRight).
+				Margin(t.Space(1), space.None, space.None, space.None).
+				Label("均衡器面板"))
+			s.eqPanelContent(c, s.app.SettingsSnapshot(), "full:", false)
+		})
 	})
 }
 

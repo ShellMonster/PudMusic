@@ -41,6 +41,27 @@ func EQPresetByID(id string) EQPreset {
 	return EQPresets[0]
 }
 
+// EQMaxCustomPresets 是用户「另存为预设」能存的上限（套）。
+const EQMaxCustomPresets = 8
+
+// EQGainMin / EQGainMax 是每一段增益（dB）的范围，EQGainStep 是滑杆步进。
+const (
+	EQGainMin  = -12.0
+	EQGainMax  = 12.0
+	EQGainStep = 0.5
+)
+
+// EQFlat 判十段增益是不是全是 0（=「关」，解码路不处理任何采样，
+// 见 eqParams.flat）。
+func EQFlat(g [10]float64) bool {
+	for _, v := range g {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 const eqQ = 1.41
 
 // eqParams 是一套生效中的增益。gen 变了说明要重算滤波器。

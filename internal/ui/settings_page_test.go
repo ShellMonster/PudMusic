@@ -212,9 +212,10 @@ func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 	tt.Frame()
 	openAppearance(t, tt)
 
-	if err := tt.Click("深色"); err != nil {
-		t.Fatal(err)
-	}
+	// ⚠️ 皮肤页的卡是滚动的：「深色」那一张默认在窗口底边之外（见
+	// `appearanceRect` 的注释），裸 `tt.Click` 会点在窗外。
+	r := appearanceRect(t, tt, b.s, "深色")
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 
 	if !tt.HasText("主题没存上") {

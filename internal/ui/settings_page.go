@@ -64,6 +64,12 @@ type settingsPageState struct {
 	// 都重画一遍，局部变量下一帧就没了（见 Shell.searchKeyword 的注释）。
 	tab int
 
+	// eqOpen 是均衡器自定义面板开着没有，eqName 是「另存为预设」那个输入
+	// 框里的词（见 eq_panel.go）。同样是跨帧的界面状态，不能是局部变量。
+	eqOpen     bool
+	eqFullOpen bool
+	eqName     string
+
 	// scroll 是这一页的滚动位置。按 Tab 时回到顶上——Biu 的 Tabs 换了面板就是
 	// 新的一页，滚到一半切过去会落在半截上。
 	scroll ui.ScrollState
@@ -1091,19 +1097,79 @@ func (s *Shell) pickVideoQuality(c *ui.Context, st app.Settings, ro bool) {
 	})
 }
 
-// pickEQ 是均衡器预设：关 / 低音 / 人声 / 明亮 / 流行 / 摇滚。
+// pickEQ 是均衡器那一行的控件：预设下拉（内置六套 + 自定义预设 +
+// 「自定义」）、增益预览条、以及弹十段滑杆面板的「自定义」入口。
+//
+// 下拉里「自定义」那一项不弹面板——它是当前增益（自定义开着时的当前值）。
+// 要动滑杆走旁边那枚「自定义」键；「另存为预设」在面板里（eq_panel.go）。
 func (s *Shell) pickEQ(c *ui.Context, st app.Settings, ro bool) {
-	cur := audio.EQPresetByID(st.EQPreset).ID
-	chosen := 0
-	labels := make([]string, len(audio.EQPresets))
-	for i, p := range audio.EQPresets {
-		labels[i] = p.Name
-		if p.ID == cur {
-			chosen = i
-		}
+	t := c.Theme()
+
+	// 下拉的名单：内置预设 + 「自定义」（当前增益未存名时这一项是当前值），
+	// 再加上用户存的每一套。值是 ID / "custom" / "custom:<名字>"。
+	items := make([]enumItem[string], 0, len(audio.EQPresets)+len(st.EQCustomPresets)+1)
+	for _, p := range audio.EQPresets {
+		items = append(items, enumItem[string]{value: p.ID, label: p.Name})
 	}
-	s.pickIndexed(c, "均衡器", "选择均衡器预设", labels, chosen, ro, func(i int) {
-		id := audio.EQPresets[i].ID
-		s.applySetting("均衡器", func(c *app.Settings) { c.EQPreset = id })
+	items = append(items, enumItem[string]{value: eqCustomValue, label: "自定义"})
+	for _, p := range st.EQCustomPresets {
+		items = append(items, enumItem[string]{value: eqCustomPresetValue(p.Name), label: p.Name})
+	}
+
+	chosen := eqCurrentSelectValue(st)
+	w := s.settingsControlFitW(c, selectWidth)
+	ui.Row(c).AlignItems(ui.Center).Gap(space.Px8).Children(func() {
+		enumSelect(c, &chosen, items, "选择均衡器预设", w, 0, ro)
+		if chosen != eqCurrentSelectValue(st) {
+			s.applyEQSelect(st, chosen)
+		}
+		// 预览条画的是**当前生效的**十段增益（自定义开着画自定义那份，
+		// 关着画预设那份），全 0 时只剩一条中线。
+		eqGainPreview(c, st.EQGains())
+		trig := flatButton(c, "自定义").Disabled(ro)
+		if trig.Clicked() {
+			s.settings.eqOpen = true
+		}
+		ui.PopoverBase(c, trig, &s.settings.eqOpen, func(panel ui.Element) {
+			popupPanel(t, panel.
+				AttachTo(trig, ui.AnchorBottomEnd, ui.AnchorTopEnd).
+				Margin(t.Space(1), space.None, space.None, space.None).
+				Label("均衡器面板"))
+			s.eqPanelContent(c, s.app.SettingsSnapshot(), "", ro)
+		})
 	})
+}
+
+// applyEQSelect 是预设下拉选中某一项的那一笔：
+//
+//   - "custom"           → 只把自定义那一格开起来（增益是它自己落盘的那份）；
+//   - "custom:<名字>"    → 自定义开着，增益抄那一套存的，名字记上；
+//   - 其余（内置 ID）    → 照旧写 EQPreset，同时把自定义那一格关掉。
+func (s *Shell) applyEQSelect(st app.Settings, v string) {
+	switch {
+	case v == eqCustomValue:
+		s.applySetting("均衡器", func(cur *app.Settings) {
+			cur.EQCustomOn = true
+			cur.EQCustomName = ""
+		})
+	case strings.HasPrefix(v, "custom:"):
+		name := strings.TrimPrefix(v, "custom:")
+		s.applySetting("均衡器", func(cur *app.Settings) {
+			for _, p := range cur.EQCustomPresets {
+				if p.Name == name {
+					cur.EQCustomOn = true
+					cur.EQCustomGains = p.Gains
+					cur.EQCustomName = p.Name
+					return
+				}
+			}
+		})
+	default:
+		id := audio.EQPresetByID(v).ID
+		s.applySetting("均衡器", func(cur *app.Settings) {
+			cur.EQPreset = id
+			cur.EQCustomOn = false
+			cur.EQCustomName = ""
+		})
+	}
 }
