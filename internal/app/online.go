@@ -507,7 +507,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			return
 		}
 		old := a.player
-		p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+		a.syncSpectrumLocked(p)
 		a.player = p
 
 		a.duration = p.Duration()
@@ -619,7 +619,7 @@ func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
 		return
 	}
 	old := a.player
-	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+	a.syncSpectrumLocked(p)
 	a.player = p
 	a.duration = p.Duration()
 	a.setPositionLocked(pos)
@@ -1464,7 +1464,7 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// 落盘排到锁外做（`rememberPlaybackResumeLocked` 的 go 那一段）。
 	a.rememberPlaybackResumeLocked()
 	old := a.player
-	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+	a.syncSpectrumLocked(p)
 	a.player = p
 	a.title = it.Title
 
@@ -2816,7 +2816,7 @@ func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack,
 			return
 		}
 		old := a.player
-		nextPlayer.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+		a.syncSpectrumLocked(nextPlayer)
 		a.player = nextPlayer
 		a.duration = nextPlayer.Duration()
 		a.setPositionLocked(pos)

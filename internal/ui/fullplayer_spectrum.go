@@ -100,6 +100,12 @@ func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
 	bars := s.app.SpectrumBars(barCount, h)
 	color := spectrumColorOf(s.pagePrefs().SpectrumColor)
 
+	// 这一帧画出来了：报一声「真的有人在看」。FFT 跟着这一声走——满屏关着、
+	// 偏好关着、或者窗口看不见的时候，这里根本执行不到，解码那边整条分析链
+	// 就停着。见 `App.SetSpectrumWanted`。
+	seen := s.presence.seen()
+	s.app.SetSpectrumWanted(st.Playing && seen)
+
 	// 频谱离底边多远跟着控制条走（Biu 的 `index.tsx:370`）：
 	// 界面露着的时候压在控制条上方 12，藏起来的时候退到离底 24。
 	bottom := float32(fullSpectrumEdge)
@@ -117,7 +123,7 @@ func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
 		// 只在真的在放、而且**用户看得到这一扇窗**的时候要下一帧：暂停时条子
 		// 不动，一直要帧就是白烧 CPU（而全屏开着的时候这一层每个 pointer 移动
 		// 都在画）；窗口收在后台时同理（票 #156）。
-		if st.Playing && s.presence.seen() {
+		if st.Playing && seen {
 			p.AnimationFrame()
 		}
 	})

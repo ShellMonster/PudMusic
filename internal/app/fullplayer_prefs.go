@@ -525,7 +525,9 @@ func (a *App) SetFullPlayerPrefs(next FullPlayerPrefs) {
 	if wake != nil {
 		wake()
 	}
-	if player != nil {
-		player.SetSpectrumEnabled(next.ShowSpectrum)
-	}
+	// FFT 该不该跑由「偏好 × 有没有人在画」一起说了算——偏好只算资格，
+	// 有没有人在画是界面报上来的 `spectrumWanted`（见 fullplayer.go）。
+	a.mu.Lock()
+	a.syncSpectrumLocked(player)
+	a.mu.Unlock()
 }

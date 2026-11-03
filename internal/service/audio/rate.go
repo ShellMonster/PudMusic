@@ -476,6 +476,16 @@ func (v *varispeed) aNext() int64 {
 	nom := max(v.anchor+int64(v.hops+1)*ha, v.inFrom)
 	rad := v.searchRadius()
 
+	// ⚠️ **1 倍速不做相似度搜索**：原速时搜索半径给满（见 searchRadius），
+	// 而「和模板一模一样的那一段」就钉在名义位置上——余弦相似度在那一点
+	// 恒等于 1，是全局唯一满分，搜一圈几百个候选、每个候选几百次乘法，
+	// 最后挑的还是 nom。搜索的代价是每一跳 O(半径×比对长) ≈ 26 万次乘加
+	// （44.1kHz 下每秒约 1100 万次），跳过它整条链在原速下的开销就只剩
+	// 加窗和重叠相加。结果逐样本不变：`TestUnityRateIsSampleForSample` 钉着。
+	if v.rate() == DefaultRate {
+		return nom
+	}
+
 	// 不够比对的：没得选，名义位置就是最好的选择。
 	if v.avail() < int64(v.hop+v.corr) {
 		return nom

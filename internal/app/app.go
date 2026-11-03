@@ -672,6 +672,9 @@ type App struct {
 	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
 	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
 	specBars []float32
+	// spectrumWanted 记「界面此刻真的在画频谱」——满屏那一层开着、用户那一档
+	// 也开着、窗口也看得见。FFT 一路跟着它走，没人在看就整条停掉。
+	spectrumWanted atomic.Bool
 	// parts 是当前这首的分集列表，partsBvid 是它属于哪一个稿件。见 fullplayer.go。
 	partsMu     sync.Mutex
 	parts       []bili.VideoPart
@@ -1489,7 +1492,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	// 记的还是用户设的值（取消静音放回去的就是它）。
 	p.SetVolume(a.gainLocked()).SetRate(a.rate).SetNormalize(a.normalize).SetNormalizeGainBoost(a.normalizeBoost).SetEQ(a.eqGains)
 	a.applyFadeInLocked(p)
-	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
+	a.syncSpectrumLocked(p)
 	a.player = p
 	// 🔴 **上一份的保护解除**：本地文件顶上来了，那一份不再被播。
 	// ⚠️ **锁外面调**：它要拿 `a.mu`（取缓存对象），而那把锁上面还拿着。

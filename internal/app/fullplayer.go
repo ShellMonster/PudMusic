@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 )
 
@@ -46,6 +47,40 @@ func (a *App) SpectrumBars(barCount int, heightDip float32) []float32 {
 		return dst
 	}
 	return a.player.Bars(a.player.AudibleFrame(), barCount, heightDip, dst)
+}
+
+// SetSpectrumWanted 记「界面这一帧真的在画频谱」，没人在画就把 FFT 停掉。
+//
+// # 为什么有这个
+//
+// 「用户开没开频谱」（`FullPlayerPrefs.ShowSpectrum`）只是**资格**——开着的时候
+// 满屏播放器不展示、窗口最小化、切到迷你窗的时候，FFT 还在解码 goroutine 上每
+// ~10ms 跑一整窗。而「满屏开着」这个事实只住在界面层（`s.full.open`），App 自己
+// 不知道。所以由画的那一侧每帧报一声「我在画」，真没人在画就把整条分析链停掉。
+//
+// 判定在画的那一侧做（`fullplayer_spectrum.go`）：那里顺手就有「偏好开着没有、
+// 窗口看得见没有」两个数。App 只负责把「有没有人要」翻译成「FFT 跑不跑」。
+//
+// 可以从任意 goroutine 调：本身只动一个原子位和一把短锁。
+func (a *App) SetSpectrumWanted(wanted bool) {
+	if !a.spectrumWanted.CompareAndSwap(!wanted, wanted) {
+		return
+	}
+	a.mu.Lock()
+	p := a.player
+	show := a.fullPlayerPrefsValueLocked().ShowSpectrum
+	a.mu.Unlock()
+	if p != nil {
+		p.SetSpectrumEnabled(wanted && show)
+	}
+}
+
+// syncSpectrumLocked 把「FFT 现在该不该跑」重算一遍并推给手上的播放器。
+// 须持 a.mu。偏好改了、换新播放器了、界面说有人/没人画了，都归这里统一判。
+func (a *App) syncSpectrumLocked(p *audio.Player) {
+	if p != nil {
+		p.SetSpectrumEnabled(a.spectrumWanted.Load() && a.fullPlayerPrefsValueLocked().ShowSpectrum)
+	}
 }
 
 // ---- 分集 ----
