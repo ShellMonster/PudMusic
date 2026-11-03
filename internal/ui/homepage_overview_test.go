@@ -47,10 +47,10 @@ func TestRenderHomeOverviewShots(t *testing.T) {
 	}
 	startOnOverview(t)
 	_, tt, _ := newHomeShell(t, homeDiscoverFake(t))
-	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "排行榜") })
+	waitFrames(t, tt, "首页原型首屏", func() bool { return showsText(tt, "今晚，慢一点听。") && showsText(tt, "本周热榜") })
 	save(t, dir, "140-首页总览.png", tt)
 	tt.Scroll(700, 400, 0, 600)
-	waitFrames(t, tt, "迷你榜", func() bool { return showsText(tt, "播放全部") })
+	waitFrames(t, tt, "首页原型下半屏", func() bool { return showsText(tt, "新歌速递") })
 	save(t, dir, "141-首页总览-滚到榜单.png", tt)
 }
 
