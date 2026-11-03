@@ -291,6 +291,37 @@ func TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged(t *testing.T) {
 	}
 }
 
+// TestTheBadgeWidthNeverCollapsesToZero 钉住 **`MeasureText` 量不到的时候缺口
+// 不塌成空块**。
+//
+// 🔴 **对抗性审查查出的一笔**：字体后端还没就绪 / 量不到那一串时
+// `MeasureText` 回 0——不挡的话 `notchW` 只剩两侧 padding（14 ≥
+// `badgeNotchMinW`，连最小小宽那道兜底都救不回来），更糟的是 `Text` 的
+// `MinWidth(0).MaxWidth(0)` 会把**整串数字裁成零宽**——画面上剩一个空底色
+// 缺口，数字整个没了。
+//
+// ⚠️ **判据是 `badgeTextWidth` 那一支纯函数**：`MeasureText` 是 `*ui.Context`
+// 上的方法、mock 不掉，所以把「量出来的值 → 兜底后的值」抽了出来，这里
+// 0 / 负数 / 正常宽三档各喂一遍。
+func TestTheBadgeWidthNeverCollapsesToZero(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		measured float32
+		want     float32
+	}{
+		{"量不到（0）", 0, playbarBadgeMaxW},
+		{"量出负数（防御）", -3, playbarBadgeMaxW},
+		{"正常宽（1k+ ≈14）", 14.8, 14.8},
+		{"最宽档（99k+ ≈22）", 22.0, 22.0},
+	} {
+		if got := badgeTextWidth(c.measured); got != c.want {
+			t.Errorf("%s：badgeTextWidth(%.1f) = %.1f，want %.1f——"+
+				"量不到的时候没退回上限档，数字会被裁成零宽、剩一个空缺口",
+				c.name, c.measured, got, c.want)
+		}
+	}
+}
+
 // scaledCellInks 量「**界面上那一格**」在给定的系统文本缩放下，它自己的墨迹
 // 有多宽（带「+」的那一串，和不带「+」的那一串）。
 //
@@ -314,9 +345,14 @@ func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (
 	// 上的）——裸建会把它的中心钉在整行的右上角，量到的不是它的墨迹。
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		mygoui.Row(c).Children(func() {
+			// ⚠️ **缺口块会探出图形盒子的左界**（宽字那一档的缺口比 18 的盒子
+			// 还宽、往左长出去）——把盒子摆在行中间，探出去的那一截才不会被
+			// 窗口左缘裁掉、墨迹才量得全。
+			mygoui.Spacer(c).Grow(1)
 			mygoui.Box(c).Size(iconMd, iconMd).Children(func() {
-				countBadge(c, countForText(withPlus))
+				countBadge(c, countForText(withPlus), c.Theme().Background, 0)
 			})
+			mygoui.Spacer(c).Grow(1)
 		})
 	}, 300, 60)
 	tt.SetPreferences(mygoui.Preferences{TextScale: scale})
@@ -428,25 +464,25 @@ func TestTheThreeCountsSayTheNumberToScreenReaders(t *testing.T) {
 	}
 }
 
-// TestTheThreeCountsSitAsBadgesOnTheIconsTopRight 钉住**数字贴在图形右上角外侧**。
+// TestTheThreeCountsSitInsideANotchOnTheIconsTopRight 钉住**数字嵌在图形右上角的缺口里**。
 //
-// 🔴 **这是本票的主体**：数字从「图形右边那一格」挪成「图形右上角外侧挂着的
-// 角标」（网易云式）——它**不占布局**，而是 `Attach(AnchorTopRight,
-// AnchorTopLeft)` 把角标的左上角钉到图形盒子的右上角，**不收不压**：左缘就是
-// 图形右缘、上缘就是图形上缘。
+// 🔴 **这是本票的主体**：数字从「图形右上角外侧挂着的角标」挪成「嵌在图形
+// 右上角缺口里的读数」（网易云式）——它**不占布局**，缺口块钉在图形盒子的
+// 右上角、包住那个角往外探 `badgeNotchOut`，数字居中画在缺口里。
 //
 // ⚠️ **判据是角标自身的 bounds 相对图形盒子 bounds 的位置**（视觉审查钉下的
-// 三条真值）：
+// 四条真值）：
 //
-//	角标的上缘 ≈ 图形盒子的上缘            （它贴着图形上沿，不是居中）
-//	角标的左缘 ≈ 图形盒子的右缘            （内收会压回图标本体）
-//	角标的中心 > 图形盒子的右缘            （主体整个在图形右缘以右）
+//	角标的左缘落在缺口左缘 + PadL 那一带        （嵌进缺口里，左右留缝）
+//	角标的左缘不许深过「咬的那一口」            （缺口只咬右上角，不是包住图形）
+//	角标的下缘明显在图形中线的上方             （坐在右上角，不是骑在正中）
+//	角标的右缘没越过图形右缘 + 最宽探出量      （缺口主体探在图形外的空气里）
 //
-// 反过来说：横排那一版（角标上缘 ≈ 图形中心 y、左缘在图形右缘往右一整格之外）、
-// 「压住图形」那一版（角标中心落在图形内部）和「内收骑角」那一版（左缘收进
-// 图形右缘以内）都立刻红。
+// 反过来说：外侧角标那一版（角标左缘正好贴图形右缘起排、上下位置也低）、横排
+// 那一版（角标中心 y ≈ 图形中心 y）和「缺口包住整个图形」那一版（宽字档数字
+// 左缘跑到图形左半去了）都立刻红。
 //
-// ⚠️ **三枚都要断**：只断一枚的话，「收藏 / 评论走了角标、赞还停在横排」那
+// ⚠️ **三枚都要断**：只断一枚的话，「收藏 / 评论走了缺口、赞还停在外侧角标」那
 // 一档照样绿——而那一档正是本票最容易漏的（赞键的图形那一块是绝对定位的两层，
 // 和另外两枚不是同一条路径）。
 //
@@ -454,7 +490,7 @@ func TestTheThreeCountsSayTheNumberToScreenReaders(t *testing.T) {
 // 而那一枚键的框是它再往外一层。Tester 不给父链——所以这里**用按钮的框**倒推：
 // 按钮的**中心**就是图形盒子的中心（带数字时图形在按钮正中），图形盒子的半边
 // 是 `iconMd/2`。
-func TestTheThreeCountsSitAsBadgesOnTheIconsTopRight(t *testing.T) {
+func TestTheThreeCountsSitInsideANotchOnTheIconsTopRight(t *testing.T) {
 	tt, _ := countsPlaybarTester(t, 1200, 1286, 2468, 9999)
 
 	for _, c := range []struct {
@@ -477,28 +513,44 @@ func TestTheThreeCountsSitAsBadgesOnTheIconsTopRight(t *testing.T) {
 		// 图形盒子的中心 = 按钮的中心（带数字时图形在按钮正中、角标不占布局），
 		// 半边是 iconMd/2 = 9。
 		icx, icy := key.X+key.W/2, key.Y+key.H/2
-		iTop, iRight := icy-iconMd/2, icx+iconMd/2
+		iRight := icx + iconMd/2
 
-		// 🔴 **角标的上缘就是图形盒子的上缘**（`AnchorTopLeft` 对齐上沿，不挪——
-		// 视觉审查实测：往下压 2.5 数字中线就落到图标中线、看着是「居中」不是
-		// 「贴上沿」）。允许 ±1 的浮点晃。
-		if badge.Y < iTop-1 || badge.Y > iTop+1 {
-			t.Errorf("「%s」的角标上缘在 %.1f，图形上缘在 %.1f——它没有贴着图形上沿"+
-				"（网易云式是数字上缘≈图形上缘）", c.name, badge.Y, iTop)
+		// 🔴 **数字的左缘贴在缺口里、挨着图形右缘**——缺口块的左缘收进图形
+		// 右缘 `badgeNotchBite`，而数字左缘起在缺口左缘 + `badgeNotchPadL`：
+		// PadL > bite 时左缘探出图形右缘 PadL−bite 像素（那道看得见的底色
+		// 缝在数字**左边**）；PadL ≤ bite 时左缘收进图形。两档都钉：
+		// 左缘 ≥ iRight−2（不许深过咬的那一口 + 1）且 ≤ iRight+PadL−bite+1
+		// （不许飘到缺口右半截去）。外侧角标那一版的左缘起在图形右缘
+		// 紧贴（AnchorTopLeft 是 0 偏移、没有左边那道缝），这条判据也把
+		// 「缝挤没了」和「字贴到图形残笔上」两档分出来。
+		left := badge.X - iRight
+		if left < -float32(badgeNotchBite)-1 {
+			t.Errorf("「%s」的角标左缘在图形右缘以**内** %.1f——缺口咬得太深"+
+				"（它该只咬右上角那一小块，不是包住整个图形——宽字档那样会吃掉大半个图标）",
+				c.name, -left)
 		}
-		// 🔴 **角标的左缘就是图形盒子的右缘**（`AnchorTopLeft` 对齐右沿，不内收——
-		// 视觉审查实测：内收 1.5，「9k+」的 9 就压回拇指肚上）。允许 ±1 的浮点晃。
-		if badge.X < iRight-1 || badge.X > iRight+1 {
-			t.Errorf("「%s」的角标左缘在 %.1f，图形右缘在 %.1f——它没有贴着图形右缘"+
-				"（内收会压回图标本体，悬出去会离图形太远）", c.name, badge.X, iRight)
+		if left > float32(badgeNotchPadL-badgeNotchBite)+1 {
+			t.Errorf("「%s」的角标左缘在图形右缘以**外** %.1f——数字飘出缺口去了"+
+				"（左缘该起在缺口左缘 + PadL 那一带 ≈ %.0f）",
+				c.name, left, float32(badgeNotchPadL-badgeNotchBite))
 		}
-		// 🔴 **主体整个在图形右缘以右**：角标的中心离图形右缘还有半格字宽——
-		// 图形盒子的右半边一个像素都不该被数字盖到（中心锚那一版角标中心落在
-		// 图形内部，立刻红）。
-		bx := badge.X + badge.W/2
-		if bx < iRight {
-			t.Errorf("「%s」的角标中心在 %.1f，图形右缘在 %.1f——角标主体压住了图形"+
-				"（要的是挂在图形右肩外侧，不是盖在它上头）", c.name, bx, iRight)
+		// 🔴 **下缘明显在图形中线的上方**——缺口挖的是右上角，数字坐在上 1/3
+		// 那一带，不是骑在图形正中。9 号字行高约 11，坐在缺口里时下缘 ≈
+		// 图形上缘 + 10.5——离中线（上缘 + 9）还有一段。允许 ±1 的浮点晃。
+		if badge.Y+badge.H > icy+1 {
+			t.Errorf("「%s」的角标下缘在 %.1f，图形中线在 %.1f——数字骑到图形正中去了"+
+				"（缺口嵌字是数字坐在右上角，不是居中）", c.name, badge.Y+badge.H, icy)
+		}
+		// 🔴 **右缘不许探出缺口**：缺口块右缘探出图形右缘 `notchW − bite`
+		// 像素（最宽那一档「99k+」是 textW+PadL+PadR−bite ≈ 30.3），数字的
+		// 右缘在缺口右缘以里 PadR——它的右缘不越过缺口右缘。这条只钉
+		//「右缘 ≤ 图形右缘 + 最宽探出量 + 余量」，不钉「整个在图形框里面」
+		//（缺口主体本来就在外面）。
+		if badge.X+badge.W > iRight+playbarBadgeMaxW+float32(badgeNotchPadL+badgeNotchPadR-badgeNotchBite)+1 {
+			t.Errorf("「%s」的角标右缘在 %.1f，缺口右缘最多在 %.1f——数字探出缺口去了"+
+				"（缺口探出的那一截是空着的余量，字该坐在缺口里）",
+				c.name, badge.X+badge.W,
+				iRight+playbarBadgeMaxW+float32(badgeNotchPadL+badgeNotchPadR-badgeNotchBite))
 		}
 	}
 }

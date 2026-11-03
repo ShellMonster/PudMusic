@@ -864,13 +864,20 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		// 18 + 7 + 7 = 32，和没有数字时**一个字节都不差**。
 		ui.Box(c).Size(iconMd, iconMd).Children(func() {
 			drawIcon(c)
-			// 🔴 **角标**（票 #701 起、本票起收成右上角）：获赞数。
+			// 🔴 **缺口角标**（票 #701 起带数、本票起收成网易云式缺口）：获赞数。
 			//
-			// ⚠️ **走共享的那一份**（`countBadge`）：挂点 / 字号 / 上限 / 颜色
+			// ⚠️ **走共享的那一份**（`countBadge`）：缺口块 / 挂点 / 字号 / 颜色
 			// **只有一处**——赞键自己拼图形盒子（那两层是绝对定位的，有自己的锚
 			// 结构），但角标不许另写一份。
+			//
+			// ⚠️ **缺口色 = 按钮底下那块底**：播放条那一列的底是
+			// `coverWash(t.Background)`（和播放条自己同一个来源，`playbar.go`）。
+			//
+			// 🔴 **`dx` 传图形自己那一份抖**（不是 0）：长按三连的时候底下那两层
+			// 在 `dx` 上抖，缺口块不吃同一个平移就是「图标在抖、缺口原地不动」
+			// ——按住 2.5s 全程缺口漂离图标（对抗性审查查出的一笔）。
 			if hasCount {
-				countBadge(c, count)
+				countBadge(c, count, s.coverWash(c.Theme(), c.Theme().Background), dx)
 			}
 		})
 	})

@@ -110,8 +110,12 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 		Height(iconHitMd).Padding(space.None, space.Px7)
 	btn.Children(func() {
 		// ⚠️ **结构是共享的那一份**（`countKeyIcon`）：一个 18×18 的图形盒子，
-		// 角标挂在盒子的右上角。角标的上限 / 字号 / 挂点在 `playbar_counts.go`。
-		countKeyIcon(c, iconComments, btn.Hovered(), btn.Pressed(), count)
+		// 缺口块挂在盒子的右上角。缺口 / 字号 / 挂点在 `playbar_counts.go`。
+		//
+		// ⚠️ **缺口色 = 按钮底下那块底**：播放条那一列的底是
+		// `coverWash(t.Background)`（和这一列自己同一个来源，`playbar.go`）。
+		countKeyIcon(c, iconComments, btn.Hovered(), btn.Pressed(), count,
+			s.coverWash(c.Theme(), c.Theme().Background))
 	})
 
 	if s.withTip(c, btn, commentsKeyTip(count)).Clicked() {
