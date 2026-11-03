@@ -490,7 +490,7 @@ func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
 // 这条钉的是「控件列共一条基线」这个**规则**，设置页这边剩下的三个
 // `settingsControlW` 控件（预览列 / 两个下拉 / 一排分段）一样量得出。
 func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	homeFrame(tt)
 
 	// 内容那一段的右沿：分组标题（「外观」）铺满内容那一段的宽。
@@ -509,11 +509,10 @@ func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
 		{label: "选择音质偏好", what: "「音质偏好」那一行的下拉"},
 		{label: "窗口关闭方式", what: "「窗口关闭」那一排两个按钮"},
 	} {
-		r, ok := tt.Find(c.label)
-		if !ok {
-			t.Errorf("设置页上找不到%s（%q），文字有 %q", c.what, c.label, tt.Texts())
-			continue
-		}
+		// ⚠️ **先滚进可视区再量**：「窗口关闭」那一排在设置页的最下面，
+		// `Find` 拿到的框可能在屏幕外——Y 对不上就算了，滚屏后的框
+		// 读的是旧一帧，X 也可能是错的（评审那一版就量错过）。
+		r := settingRect(t, tt, s, c.label)
 		want := baseline
 		if r.X < want-0.5 || r.X > want+1.5 {
 			t.Errorf("%s 从 %.1f 起，而它该从 %.1f 起（控件列的左边缘是 %.1f）"+
