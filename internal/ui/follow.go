@@ -5,16 +5,17 @@
 // 左边一列 Tab（第一格是「全部关注(N)」，之后每个分组一格），右边一个虚拟网格
 // 装着关注的 UP 主，「全部关注」那一格顶上有一个搜索框。上游这一页的网格是
 // `VirtualGridPageList` ——**和首页的推荐网格是同一个组件**，所以列数断点、格子
-// 间距取的是同一份（`list.GridColumnsFor` / `list.GridGap`），别在这里另写一
-// 张断点表。
+// 间距取的是同一份（`list.GridColumnsFor` / `list.GridGap`）。但歌卡和人像卡
+// 密度不同，用户 2026-11-03 参考网易云关注页拍板要更密——所以这一页自己拿一张
+// 断点表（`followColumnsFor`），**和首页刻意不同**。
 //
 // # ⚠️ 为什么用户卡不直接用 `list.Grid`
 //
 // `list.Grid` 画的是**一首歌**：封面 / 歌名 / UP 名 / 时长，四个字段都取自
 // `list.Music`。一张用户卡是头像 / 昵称 / 签名 / 认证——`list.Music` 上**没有**
 // 这几个字段，硬塞进去就是把「一张卡」伪装成「一首歌」，而伪装不了的字段最后
-// 要么画成空要么被编出来。共用的是**那一半真的能共用**：列数断点和格子间距
-// （`list.GridColumnsFor` / `list.GridGap`），以及换列数时守住滚动锚点那一套
+// 要么画成空要么被编出来。共用的是**那一半真的能共用**：格子间距
+// （`list.GridGap`），以及换列数时守住滚动锚点那一套
 // （`keepAnchor`，见下）。
 //
 // # 🔴 铁律四：每一格的身份是那个人的 mid，每一行的身份是这一行第一个人的 mid
@@ -79,8 +80,11 @@ const (
 	followGroupSelectMinW = 120
 )
 
-// followCardSide 是一张卡上头像的边长。上游是 `h-32 w-32`（128）。
-const followCardSide = 128
+// followCardSide 是一张卡上头像的边长。
+//
+// ⚠️ **上游 HeroUI 是 `h-32 w-32`（128），但我们取的是 96**：用户 2026-11-03
+// 参考网易云关注页拍板——要的是那种清爽瘦卡，128 的头像在窄卡上占掉太多高度。
+const followCardSide = 96
 
 // followActionPillRadius 是「取消关注」那条药丸的圆角。**999**——
 // 药丸（胶囊）就是「圆角大于高度的一半」，999 是那个惯用的写法。
@@ -89,8 +93,50 @@ const followCardSide = 128
 // ——跟着它走的话，用户把圆角调到 0，这条药丸就变成一个方块了。
 const followActionPillRadius = 999
 
-// followCardPad 是卡里那圈留白。上游是 `p-4`（16）。
-const followCardPad = space.Px16
+// followCardPad 是卡里那圈留白。
+//
+// ⚠️ **上游是 `p-4`（16），但我们取的是 12**：用户 2026-11-03 参考网易云关注页
+// 拍板——瘦卡的留白跟着瘦。
+const followCardPad = space.Px12
+
+// followBreakpoint 是「到这个宽度就换成这么多列」。从宽到窄排，碰到的第一个算数。
+//
+// ⚠️ **和首页歌卡的断点表刻意不同**：歌卡（`list.Grid`）的封面 140 高、横长形，
+// Biu 那四档 1536/1280/1024/768 → 6/5/4/3 是歌卡的密度；而关注卡是**人像**
+// （头像 + 名字 + 一行签名），窄得多，同一宽度下排得开更多列——用户 2026-11-03
+// 参考网易云关注页拍板要更密。
+//
+// 判据是**容器**的宽，不是窗口的（理由同 `list.GridColumnsFor`）。
+type followBreakpoint struct {
+	width float32
+	cols  int
+}
+
+// followBreakpoints 是关注页那张表：1536/1280/1024/768 → 7/6/5/4，比 768 窄
+// 还有一档 3 列，兜底（还没量出宽度）也是 3 列——和「最窄那一档」同一个数，
+// 理由同 `list.gridMinCols`。
+var followBreakpoints = []followBreakpoint{
+	{1536, 7},
+	{1280, 6},
+	{1024, 5},
+	{768, 4},
+}
+
+// followMinCols 是最窄那一档的列数，也是宽度还没量出来时用的那个。
+const followMinCols = 3
+
+// followColumnsFor 是容器有 w 那么宽时排几列（关注页专用）。
+//
+// ⚠️ **和 `list.GridColumnsFor` 是两张表，别混**：歌卡和人像卡的密度不同
+// （理由见 `followBreakpoints`）。
+func followColumnsFor(w float32) int {
+	for _, b := range followBreakpoints {
+		if w >= b.width {
+			return b.cols
+		}
+	}
+	return followMinCols
+}
 
 // followRowGap 是**行与行之间**的缝。上游是 `virtual-grid-page-list` 的
 // `ROW_GAP = 16`（`src/components/virtual-grid-page-list/index.tsx:22`）。
@@ -764,7 +810,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		// ResizeObserver 晚一帧是同一个节奏。
 		w, _ = c.Size()
 	}
-	cols := list.GridColumnsFor(w)
+	cols := followColumnsFor(w)
 	// ⚠️ 必须在换掉 `f.cols` **之前**算锚点：keepFollowAnchor 里的行号是用**旧**
 	// 的列数换算的。`f.cols = cols` 在这一段的末尾（画完之后），不在这里。
 	s.keepFollowAnchor(f, cols)
@@ -1002,13 +1048,19 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i int) {
 // viewFollowCard 画一张卡。
 //
 // 结构照 Biu 的 `follow-list/user-card.tsx`：头像一块，下面昵称，再下面签名
-// （`line-clamp-2`）。**整张卡点一下 = 跳进那个 UP 的空间**（上游 `onPress`
+// （一行）。**整张卡点一下 = 跳进那个 UP 的空间**（上游 `onPress`
 // 就是 `navigate(/user/${u.mid})`）。
 //
 // ⚠️ **认证那一块画成一行字而不是头像右下角那枚闪电**：上游那一枚是
 // `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
 // 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
 // 了（`bili/follow.go`），摆一行字是最诚实的画法。
+//
+// # 为什么是「瘦卡」而不是上游那张大卡
+//
+// 上游 HeroUI 的卡是 `h-32 w-32` 头像 + `p-4` 留白 + `text-lg` 名字 +
+// `line-clamp-2` 签名，一张卡又宽又高。用户 2026-11-03 参考网易云关注页拍板：
+// 头像 96、留白 12、名字 16、签名只留一行——要的是那种清爽瘦卡。
 func (s *Shell) viewFollowCard(c *ui.Context, u app.FollowUser, selected, ring bool) {
 	t := c.Theme()
 	name := u.Name
@@ -1107,8 +1159,11 @@ func (s *Shell) viewFollowCard(c *ui.Context, u app.FollowUser, selected, ring b
 		// 卡片底再往文字色推一档，比页面底暗），所以指针压上去的时候那个洞
 		// 不会跟着卡片一起变没。
 		s.spaceAvatarWith(c, u.Face, followCardSide, false, t.Background)
-		// 名字 18、签名 14，照 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`。
-		ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).MaxLines(1).Ellipsis("…")
+		// 名字 16、签名 14。
+		//
+		// ⚠️ **上游是 `text-lg`（18），但我们取的是 `Size16`**：用户 2026-11-03
+		// 参考网易云关注页拍板——瘦卡的字号跟着瘦。
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size16)).MaxLines(1).Ellipsis("…")
 		if u.Official != "" {
 			ui.Text(c, u.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
 				MaxLines(1).Ellipsis("…")
@@ -1116,8 +1171,10 @@ func (s *Shell) viewFollowCard(c *ui.Context, u app.FollowUser, selected, ring b
 		// ⚠️ **签名空的时候整块不画**：Biu 那一格是空的，我们这里留一个 6 的
 		// 间距 + 一段空白，看起来像卡少了一截（理由同 `list.Grid` 里时长那一列）。
 		if u.Sign != "" {
+			// ⚠️ **上游是 `line-clamp-2`，但我们取的是 MaxLines(1)**：用户 2026-11-03
+			// 参考网易云关注页拍板——瘦卡的签名只留一行。
 			ui.Text(c, u.Sign).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Signature).TextColor(t.TextMuted).
-				TextAlign(ui.Center).MaxLines(2).Ellipsis("…")
+				TextAlign(ui.Center).MaxLines(1).Ellipsis("…")
 		}
 		s.viewFollowActions(c, u, shown)
 	})
