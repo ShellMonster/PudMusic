@@ -189,10 +189,9 @@ func TestTheDisabledThemeButtonsStayReadable(t *testing.T) {
 				t.Fatalf("没有进只读那一版，文字有 %q", tt.Texts())
 			}
 			for _, label := range []string{"跟随系统", "浅色", "深色"} {
-				r, ok := tt.Find(label)
-				if !ok {
-					t.Fatalf("找不到「%s」，文字有 %q", label, tt.Texts())
-				}
+				// ⚠️ **先滚进可视区**：主题那一组在货架大卡下面，不滚的话
+				// `Find` 拿到的是屏外（0×0）的框，取到的像素是空的。
+				r := appearanceRect(t, tt, b.s, label)
 				// 按钮的底：取文字框下方那一小条内边距（文字框左上角会落在
 				// 第一笔画的抗锯齿上，底色被污染 0.05~0.1 的对比度——皮肤页
 				// 那一排就这么栽的）。那一块要么是页面底色（未选中的按钮

@@ -63,10 +63,10 @@ func (s *Shell) viewAppearance(c *ui.Context, _ *ui.Route) {
 				}
 
 				s.settingGroup(c, "主题方案", func() {
-					s.pickThemePreset(c, st, ro)
+					s.pickThemePresetShelf(c, st, ro)
 				})
 				s.settingGroup(c, "主题", func() {
-					s.pickTheme(c, st, ro)
+					s.pickThemeModeShelf(c, st, ro)
 				})
 				s.settingGroup(c, "颜色", func() {
 					s.pickColors(c, st, ro)

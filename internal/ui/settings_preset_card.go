@@ -47,8 +47,11 @@ func presetPaletteFor(name app.ThemePreset, dark bool) presetPalette {
 }
 
 // presetThumb 画缩略图：左边侧栏条，右边 2×2 封面块，底下一条播放条带一枚圆。
-func presetThumb(c *ui.Context, p presetPalette, border ui.Color) {
-	ui.Row(c).FillWidth().Height(presetThumbH).Radius(presetThumbRadius).Background(p.bg).
+//
+// h 参数化：设置页/皮肤页小卡用 46（控件列里四张一排），皮肤页货架大
+// 卡用更大的——同一套色板、同一个画法，尺寸变，内容不变。
+func presetThumb(c *ui.Context, p presetPalette, border ui.Color, h float32) {
+	ui.Row(c).FillWidth().Height(h).Radius(presetThumbRadius).Background(p.bg).
 		Border(1, border).Clip().Children(func() {
 		ui.Column(c).Width(presetThumbSide).FillHeight().Background(p.sidebar).Children(func() {})
 		ui.Column(c).Grow(1).FillHeight().Padding(space.Px4).Gap(space.Px3).Children(func() {
@@ -88,7 +91,7 @@ func (s *Shell) presetCard(c *ui.Context, name app.ThemePreset, label string, w 
 	card.Children(func() {
 		// ⚠️ 按钮默认是横排（图标 + 字），这里要缩略图在上、名字在下，所以里面再套一列。
 		ui.Column(c).FillWidth().Gap(space.Px4).AlignItems(ui.Center).Children(func() {
-			presetThumb(c, pal, t.Border)
+			presetThumb(c, pal, t.Border, presetThumbH)
 			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).SingleLine().
 				TextColor(map[bool]ui.Color{true: t.Text, false: t.TextMuted}[selected])
 		})

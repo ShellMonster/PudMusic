@@ -443,12 +443,15 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// ① 能写的那一版：同样的按钮，指针落上去要亮（「浅色」在皮肤页上）。
+			// ① 能写的那一版：同样的按钮，指针落上去要亮（「浅色」在皮肤页上，
+			// 而那一排在第一屏下面——先滚进去）。
 			b := openShellFor(t, dark, false)
 			b.s.navigate(appearancePath)
 			b.tt.Frame()
 			tt := b.tt
-			if d := hoverDelta(t, tt, "浅色"); d < 6 {
+			if d := hoverDeltaIn(t, tt, "浅色", func() mygoui.Rect {
+				return appearanceRect(t, tt, b.s, "浅色")
+			}); d < 6 {
 				t.Fatalf("能写的那一档指针落上去只变了 %d（< 6）——"+
 					"下面「禁用键不亮」那条就没有对照，会白白地绿", d)
 			}
@@ -463,7 +466,9 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 				t.Fatalf("没有进只读那一版，文字有 %q", ro.Texts())
 			}
 			for _, label := range []string{"浅色"} {
-				if d := hoverDelta(t, ro, label); d > probeTolerance {
+				if d := hoverDeltaIn(t, ro, label, func() mygoui.Rect {
+					return appearanceRect(t, ro, bro.s, label)
+				}); d > probeTolerance {
 					t.Errorf("只读设置里的「%s」指针落上去变了 %d（> %d）——"+
 						"禁用键亮了，等于告诉用户这里点得动", label, d, probeTolerance)
 				}
@@ -528,10 +533,20 @@ func openShellFor(t *testing.T, dark, readOnly bool) *testShell {
 // 的主题，三个条件只差「指针在不在框里」。
 func hoverDelta(t *testing.T, tt *mygoui.Tester, label string) int {
 	t.Helper()
-	r, ok := tt.Find(label)
-	if !ok {
-		t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
-	}
+	return hoverDeltaIn(t, tt, label, func() mygoui.Rect {
+		r, ok := tt.Find(label)
+		if !ok {
+			t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
+		}
+		return r
+	})
+}
+
+// hoverDeltaIn 同 hoverDelta，但框的取法由调用方给——滚得动的页先滚进去
+// 再量（比如皮肤页那一排在第一屏下面，`tt.Find` 直接给回来的是屏外的框）。
+func hoverDeltaIn(t *testing.T, tt *mygoui.Tester, label string, rect func() mygoui.Rect) int {
+	t.Helper()
+	r := rect()
 	away := [2]float32{600, 20}
 	tt.Move(away[0], away[1])
 	tt.Frame()
