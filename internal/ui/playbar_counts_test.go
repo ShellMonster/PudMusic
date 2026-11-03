@@ -8,14 +8,15 @@
 //
 // # 🔴 宽度账是本票最要紧的一条
 //
-// 900 宽（应用的最小窗口宽）下，左边那一列的右端离进度条滑块左沿只剩 **5.20**
-// 像素——而**撞上去的后果是「点不动，而画面上看不出坏了」**（票 #216 那个坑：
-// 中间那一列是 `PassThrough` 的，可它的子节点照旧登记命中，于是左列撑出来的
-// 那一截被进度行的命中框盖住）。
+// 角标不占布局之后，第三段回到四枚 32 + 三道 3 的缝、左列保底 281——900 宽
+// （应用的最小窗口宽）下，左边那一列的右端离进度条滑块左沿是 **33.7** 像素
+// （横排那一版只有 5.20）。而**撞上去的后果是「点不动，而画面上看不出坏了」**
+// （票 #216 那个坑：中间那一列是 `PassThrough` 的，可它的子节点照旧登记命中，
+// 于是左列撑出来的那一截被进度行的命中框盖住）。
 //
-// ⚠️ **5.20 是「视觉间距」，不是碰撞缓冲**（理由见 `playbar_counts.go` 的文件
-// 头《两个口径》）：`MaxWidth` 在**布局层**硬夹住，所以左列的宽是**常数**
-// 309.5——**碰撞不可能发生**。那 5.20 是**留给人眼**的。
+// ⚠️ **33.7 是「视觉间距」，不是碰撞缓冲**（理由见 `playbar_counts.go` 的文件
+// 头《两个口径》）：角标 `Attach` 不占布局、左列的宽是**常数** 281——**碰撞
+// 不可能发生**。那 33.7 是**留给人眼**的。
 //
 // ⇒ `TestTheThreeCountsDoNotTouchTheProgressBar` 是这一组的主断言。
 //
@@ -156,33 +157,33 @@ func TestTheThreeCountsDisappearForALocalFile(t *testing.T) {
 // 🔴 **「+」是这一族的语义**（票面原话：「「+」恒表示「至少这么多」」）——
 // 把它截掉就变成了「正好 999」，那是**撒谎**。
 //
-// ⚠️ **判据是「每一档都装得下上限」**：数字格有 `MaxWidth(playbarCountMaxW)`
-// （24.5），而折法最宽的一档是「99k+」（实测 **24.49**）——**刚好装下**。
+// ⚠️ **判据是「每一档都装得下上限」**：数字格有 `MaxWidth(playbarBadgeMaxW)`
+// （22.5），而折法最宽的一档是「99k+」（9 号字实测 **≈22.0**）——**刚好装下**。
 //
 // ⇒ 所以这一条断的是**每一档**：**一个都不许截**。
 //
 // 🔴 **为什么「不许截」是硬要求**：**截断切的是末尾，而「+」永远是最后一个
-// 字符** —— 所以「+」**总是第一个被切掉的**（实测：「99k+」上限 24 → 墨迹
-// 20.00；上限 21 → 墨迹 14.00，比不带「+」的「99k」（18.52）**还短**）。
+// 字符** —— 所以「+」**总是第一个被切掉的**（10 号字那一版实测：「99k+」上限
+// 24 → 墨迹 20.00；上限 21 → 墨迹 14.00，比不带「+」的「99k」（18.52）**还短**）。
 // 而「+」是这一族的**语义**（「至少这么多」）——它被切掉就变成了「正好 99 千」，
 // 那是**撒谎**。
 //
 // ⚠️ **判据怎么算「装得下」**：**单独画一遍**那一串字（同一个上限、同一个字号），
 // 量**它自己**的墨迹——**不能**量真实布局里那一格的墨迹（左右就是邻居的图形，
-// 混进来就分不出哪一笔是那个「+」，实测那一格量出来 30 宽而字只有 24.49）。
+// 混进来就分不出哪一笔是那个「+」）。
 func TestTheCountNeverLosesItsPlus(t *testing.T) {
 	// ⚠️ **这些档位一个都不许截**。
 	//
 	// 🔴 **99999 和 100000 必须在这一档里**（第一版把它们漏了——而那正是唯一
 	// 会截掉「+」的那一档）：
 	//
-	//	99999  → 「99k+」（实测 24.49，**最宽的那一档**）
-	//	100000 → 「1亿+」（实测 23.61）
+	//	99999  → 「99k+」（9 号字实测 ≈22.0，**最宽的那一档**）
+	//	100000 → 「1亿+」（9 号字实测 ≈21.2）
 	//
-	// ⇒ 上限是 **24.5**，**刚好装下** 24.49 —— 而**上限再低一档（24）**，
+	// ⇒ 上限是 **22.5**，**刚好装下** ≈22.0 —— 而**上限再低一档（22）**，
 	// 「99k+」就装不下，而**截断切的是末尾，所以「+」第一个被切掉**
-	// （实测：「99k+」上限 24 → 墨迹 20.00；上限 21 → 墨迹 14.00，比不带
-	// 「+」的「99k」（18.52）**还短**）。
+	//（10 号字那一版实测：「99k+」上限 24 → 墨迹 20.00；上限 21 → 墨迹
+	// 14.00，比不带「+」的「99k」（18.52）**还短**）。
 	for _, n := range []int64{
 		1, 99, 999, 1000, 1234, 9999, 10000, 12345, 20000,
 		99999, 100000, 1000000,
@@ -214,28 +215,27 @@ func TestTheCountNeverLosesItsPlus(t *testing.T) {
 			// 🔴 **判据是「那一串字在**同样的上限**下画出来，末尾的那个「+」还在不在」**。
 			//
 			// ⚠️ **为什么不量真实布局里那一格的墨迹**：它**量不准**——左右两枚键的
-			// 图形就在旁边（实测：那一格的墨迹量出来是 30 宽，而字只有 24.49），
-			// 邻居的字迹混进来，分不出哪一笔是那个「+」。
+			// 图形就在旁边，邻居的字迹混进来，分不出哪一笔是那个「+」。
 			//
 			// ⇒ 所以**单独画一遍**那一串字（同一个上限、同一个字号），量它自己的
 			// 墨迹：**「+」被切掉时那一截短 4 像素以上**，而完整时只差 0.5~0.7
 			//（字有左右边距）。
 			//
 			// ⚠️ **为什么这个判据是对的**：截断**切的是末尾**，而「+」**永远是最后
-			// 一个字符** —— 所以「+」**总是第一个被切掉的**（实测：「99k+」上限 24
-			// → 墨迹 20.00；上限 21 → 墨迹 14.00，比不带「+」的「99k」（18.52）
-			// **还短**）。
-			ink := isolatedInkWidth(t, want, playbarCountMaxW)
+			// 一个字符** —— 所以「+」**总是第一个被切掉的**（10 号字那一版实测：
+			// 「99k+」上限 24 → 墨迹 20.00；上限 21 → 墨迹 14.00，比不带「+」的
+			// 「99k」（18.52）**还短**）。
+			ink := isolatedInkWidth(t, want, playbarBadgeMaxW)
 			var full float32
 			mygoui.NewTester(func(c *mygoui.Context) {
 				full, _ = c.MeasureText(0, mygoui.Span{
-					Text: want, Size: scale.Font(c, playbarCountFont)})
+					Text: want, Size: scale.Font(c, playbarBadgeFont)})
 			}, 300, 60).Frame()
 			if full-ink > 2 {
 				t.Errorf("数 %d（%q）被截了：同一个上限（%.1f）下那一串字的墨迹只有 %.2f，"+
 					"而字宽是 %.2f——差的那一截是末尾那个「+」"+
 					"（那个「+」是这一族的语义）",
-					n, want, playbarCountMaxW, ink, full)
+					n, want, playbarBadgeMaxW, ink, full)
 			}
 		})
 	}
@@ -244,7 +244,7 @@ func TestTheCountNeverLosesItsPlus(t *testing.T) {
 // TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged 钉住**系统文本放大时那个
 // 「+」还在**。
 //
-// 🔴 **这是「那一格的字号钉死在 10」那一条的判据**（票 #701 的审查）：
+// 🔴 **这是「那一格的字号钉死在 9」那一条的判据**（票 #701 的审查）：
 //
 // 那一格的字**不乘** `scale.Font`（用户的系统文本大小）。而如果它乘了，
 // **125% / 150% 是 Windows 上的常见设置**——那时：
@@ -270,11 +270,11 @@ func TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged(t *testing.T) {
 				withoutPlus := strings.TrimSuffix(want, "+")
 
 				// ⚠️ **量的是那一格**在放大之后**实际画出来**的样子——而那一格的
-				// 字号**钉死在 10**（不乘系统缩放），所以**字宽恒定** ⇒ 那个「+」
+				// 字号**钉死在 9**（不乘系统缩放），所以**字宽恒定** ⇒ 那个「+」
 				// **在任何 scale 下都在**。
 				//
 				// ⇒ 所以这一条要验的是「**字号真的没跟着缩放**」：如果有人把
-				// `playbarCountFont` 改回 `scale.Font(c, playbarCountFont)`，
+				// `playbarBadgeFont` 改回 `scale.Font(c, playbarBadgeFont)`，
 				// 下面这一测立刻红（那时字宽会涨、那一格会被截、「+」会没）。
 				ink, base := scaledCellInks(t, want, withoutPlus, sc)
 
@@ -294,7 +294,7 @@ func TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged(t *testing.T) {
 // scaledCellInks 量「**界面上那一格**」在给定的系统文本缩放下，它自己的墨迹
 // 有多宽（带「+」的那一串，和不带「+」的那一串）。
 //
-// 🔴 **走的是生产代码**（`countValueText`）——这是这一条能成立的原因：
+// 🔴 **走的是生产代码**（`countBadge`）——这是这一条能成立的原因：
 // 自己画一遍的话，字号是测试里写的那个数，而**被测的那件事恰恰是「字号乘不乘
 // 系统缩放」**——自己画就等于把要验的东西当成了前提。
 //
@@ -303,16 +303,20 @@ func TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged(t *testing.T) {
 // 会比不带「+」的还短**（实测 scale 1.25：17 < 23）。
 //
 // ⚠️ **单独画**：真实布局里那一格的左右**就是邻居的图形**，量墨迹会把邻居的
-// 字迹算进来（实测：那一格量出来 30 宽，而字只有 24.49）——分不出哪一笔是
-// 那个「+」。⇒ 这里让那一格**单独占一行**。
+// 字迹算进来——分不出哪一笔是那个「+」。⇒ 这里让那一格**单独占一行**。
 func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (float32, float32) {
 	t.Helper()
-	// 🔴 **带「+」的那一格走**生产代码**（`countValueText`）——这是这一条能成立的
+	// 🔴 **带「+」的那一格走**生产代码**（`countBadge`）——这是这一条能成立的
 	// 原因：自己画一遍的话，字号是测试里写的那个数，而**被测的那件事恰恰是
 	// 「字号乘不乘系统缩放」**——自己画就等于把要验的东西当成了前提。
+	//
+	// ⚠️ **角标要挂在一个图形盒子上**（它在按钮里是 `Attach` 在 18×18 的盒子
+	// 上的）——裸建会把它的中心钉在整行的右上角，量到的不是它的墨迹。
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		mygoui.Row(c).Children(func() {
-			countValueText(c, countForText(withPlus))
+			mygoui.Box(c).Size(iconMd, iconMd).Children(func() {
+				countBadge(c, countForText(withPlus))
+			})
 		})
 	}, 300, 60)
 	tt.SetPreferences(mygoui.Preferences{TextScale: scale})
@@ -320,7 +324,7 @@ func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (
 	with := inkWidthOf(t, tt, withPlus)
 
 	// ⚠️ **对照组是「同一串字去掉那个「+」」，而且它**不是折法的输出**——
-	// 折法那一档永远带「+」，所以**不能**喂给 `countValueText`（那样折出来还是
+	// 折法那一档永远带「+」，所以**不能**喂给 `countBadge`（那样折出来还是
 	// 带「+」的字，量的是同一串，两边相等，判据就成了空话——第一版就这么写的，
 	// 变异测试立刻揭穿了它）。
 	//
@@ -328,8 +332,8 @@ func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (
 	// 「那个「+」自己占多少像素」。
 	tt2 := mygoui.NewTester(func(c *mygoui.Context) {
 		mygoui.Row(c).Children(func() {
-			mygoui.Text(c, withoutPlus).FontSize(playbarCountFont).
-				MaxWidth(playbarCountMaxW).MaxLines(1).Ellipsis("…")
+			mygoui.Text(c, withoutPlus).FontSize(playbarBadgeFont).
+				MaxWidth(playbarBadgeMaxW).MaxLines(1).Ellipsis("…")
 		})
 	}, 300, 60)
 	tt2.SetPreferences(mygoui.Preferences{TextScale: scale})
@@ -341,7 +345,7 @@ func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (
 // countForText 把「一串字」换算成「能折出它的那一个数」。
 //
 // ⚠️ **它走的是折法自己的逆运算**：「99k+」⇒ 99000、「1亿+」⇒ 100000000。
-// 而**数字那一格画的是折出来的字**，所以要喂给 `countValueText` 的是**数**。
+// 而**数字那一格画的是折出来的字**，所以要喂给 `countBadge` 的是**数**。
 func countForText(s string) int64 {
 	body := strings.TrimSuffix(s, "+")
 	var head int64
@@ -420,6 +424,81 @@ func TestTheThreeCountsSayTheNumberToScreenReaders(t *testing.T) {
 		want := c.name + " " + list.CountText(c.count)
 		if _, ok := tt.Find(want); !ok {
 			t.Errorf("无障碍名字不是 %q（文字有 %q）——读屏用户听不到那个数", want, tt.Texts())
+		}
+	}
+}
+
+// TestTheThreeCountsSitAsBadgesOnTheIconsTopRight 钉住**数字贴在图形右上角外侧**。
+//
+// 🔴 **这是本票的主体**：数字从「图形右边那一格」挪成「图形右上角外侧挂着的
+// 角标」（网易云式）——它**不占布局**，而是 `Attach(AnchorTopRight,
+// AnchorTopLeft)` 把角标的左上角钉到图形盒子的右上角，**不收不压**：左缘就是
+// 图形右缘、上缘就是图形上缘。
+//
+// ⚠️ **判据是角标自身的 bounds 相对图形盒子 bounds 的位置**（视觉审查钉下的
+// 三条真值）：
+//
+//	角标的上缘 ≈ 图形盒子的上缘            （它贴着图形上沿，不是居中）
+//	角标的左缘 ≈ 图形盒子的右缘            （内收会压回图标本体）
+//	角标的中心 > 图形盒子的右缘            （主体整个在图形右缘以右）
+//
+// 反过来说：横排那一版（角标上缘 ≈ 图形中心 y、左缘在图形右缘往右一整格之外）、
+// 「压住图形」那一版（角标中心落在图形内部）和「内收骑角」那一版（左缘收进
+// 图形右缘以内）都立刻红。
+//
+// ⚠️ **三枚都要断**：只断一枚的话，「收藏 / 评论走了角标、赞还停在横排」那
+// 一档照样绿——而那一档正是本票最容易漏的（赞键的图形那一块是绝对定位的两层，
+// 和另外两枚不是同一条路径）。
+//
+// ⚠️ **图形盒子怎么找**：角标的父元素是图形盒子（`ui.Box(iconMd × iconMd)`），
+// 而那一枚键的框是它再往外一层。Tester 不给父链——所以这里**用按钮的框**倒推：
+// 按钮的**中心**就是图形盒子的中心（带数字时图形在按钮正中），图形盒子的半边
+// 是 `iconMd/2`。
+func TestTheThreeCountsSitAsBadgesOnTheIconsTopRight(t *testing.T) {
+	tt, _ := countsPlaybarTester(t, 1200, 1286, 2468, 9999)
+
+	for _, c := range []struct {
+		name  string
+		count int64
+	}{
+		{"评论", 1286},
+		{"收藏", 2468},
+		{"赞", 9999},
+	} {
+		want := list.CountText(c.count)
+		badge, ok := tt.Find(want)
+		if !ok {
+			t.Fatalf("「%s」键上没有角标 %q（文字有 %q）", c.name, want, tt.Texts())
+		}
+		key, ok := tt.Find(c.name + " " + want)
+		if !ok {
+			t.Fatalf("画面上找不到「%s」那一枚键（文字有 %q）", c.name, tt.Texts())
+		}
+		// 图形盒子的中心 = 按钮的中心（带数字时图形在按钮正中、角标不占布局），
+		// 半边是 iconMd/2 = 9。
+		icx, icy := key.X+key.W/2, key.Y+key.H/2
+		iTop, iRight := icy-iconMd/2, icx+iconMd/2
+
+		// 🔴 **角标的上缘就是图形盒子的上缘**（`AnchorTopLeft` 对齐上沿，不挪——
+		// 视觉审查实测：往下压 2.5 数字中线就落到图标中线、看着是「居中」不是
+		// 「贴上沿」）。允许 ±1 的浮点晃。
+		if badge.Y < iTop-1 || badge.Y > iTop+1 {
+			t.Errorf("「%s」的角标上缘在 %.1f，图形上缘在 %.1f——它没有贴着图形上沿"+
+				"（网易云式是数字上缘≈图形上缘）", c.name, badge.Y, iTop)
+		}
+		// 🔴 **角标的左缘就是图形盒子的右缘**（`AnchorTopLeft` 对齐右沿，不内收——
+		// 视觉审查实测：内收 1.5，「9k+」的 9 就压回拇指肚上）。允许 ±1 的浮点晃。
+		if badge.X < iRight-1 || badge.X > iRight+1 {
+			t.Errorf("「%s」的角标左缘在 %.1f，图形右缘在 %.1f——它没有贴着图形右缘"+
+				"（内收会压回图标本体，悬出去会离图形太远）", c.name, badge.X, iRight)
+		}
+		// 🔴 **主体整个在图形右缘以右**：角标的中心离图形右缘还有半格字宽——
+		// 图形盒子的右半边一个像素都不该被数字盖到（中心锚那一版角标中心落在
+		// 图形内部，立刻红）。
+		bx := badge.X + badge.W/2
+		if bx < iRight {
+			t.Errorf("「%s」的角标中心在 %.1f，图形右缘在 %.1f——角标主体压住了图形"+
+				"（要的是挂在图形右肩外侧，不是盖在它上头）", c.name, bx, iRight)
 		}
 	}
 }
@@ -522,15 +601,13 @@ func TestTheThreeCountsDoNotTouchTheProgressBar(t *testing.T) {
 					"它们碰上了（而撞上去的后果是**点不动**，票 #216）",
 					width, key.X+key.W, bar.X)
 			}
-			// ⚠️ **余量是「按数字格的上限算」的那一个**：第三段的宽按
-			// `playbarCountMaxW`（24.5）预留——所以**实测的余量是 5.20**。
+			// ⚠️ **余量是「按角标不占布局」的那一档**：第三段回到四枚 32 +
+			// 三道 3 的缝，左列保底 281——所以**实测的余量是 33.7**（横排那一版
+			// 是 5.20，那时数字占一格、第三段 165.5）。
 			//
-			// 🔴 **门槛是 5**：余量 0.7 扛不住一次字体变化，而撞上的后果是
-			// **点不动，而画面上看不出坏了**（票 #216 那个坑）。
-			//
-			// ⚠️ **5.20 是「装得下最宽那一档」换来的**：上限从 24 提到 24.5
-			// （为了装下「99k+」24.49，而截断**先切掉那个「+」**）⇒ 余量从
-			// 6.70 少到 5.20。
+			// 🔴 **门槛是 5**：票 #701 的验收线照旧（虽然这一票余量已经大得多——
+			// 门槛留着是怕下一个人把数字挪回行内、左列重新撞上滑块，票 #216
+			// 那个坑）。
 			if gap < 5 {
 				t.Errorf("宽度 %d：第三段离进度行只剩 %.2f 像素——"+
 					"余量不够，换一个字体就撞上去了（票 #216 那个坑：点不动，"+
@@ -585,46 +662,41 @@ func TestTheThreeCountsDoNotSqueezeTheTitle(t *testing.T) {
 //
 // 判据分两层：
 //
-//  1. 常量之间的账（`playbarActionsW` = 分集 32 + 三枚 44.5 = 165.5）；
+//  1. 常量之间的账（`playbarActionsW` = 四枚 32 + 三道键间缝 3×3 = 137）；
 //  2. 注释里那个「最小宽度：**N**」要与 `playbarLeftMinW` 算出来的数一致。
 func TestTheThreeCountsWidthMatchesTheCode(t *testing.T) {
-	if playbarActionsW != iconHitMd+3*(iconMd+playbarCountGap+playbarCountMaxW) {
-		t.Errorf("playbarActionsW = %v，want %v（分集 32 + 三枚带数字的键）",
-			playbarActionsW, iconHitMd+3*(iconMd+playbarCountGap+playbarCountMaxW))
+	// 🔴 **本票（角标）之后**：三枚键的数字**不占布局**，每一枚回到 32；
+	// 键与键之间留 3 的缝（角标探出之后叠在缝上，没缝三枚带数的键糊成一串）。
+	if playbarActionsW != 4*iconHitMd+3*playbarActionsGap {
+		t.Errorf("playbarActionsW = %v，want %v（四枚 32 + 三道键间缝 3 × 3）",
+			playbarActionsW, 4*iconHitMd+3*playbarActionsGap)
 	}
 	if playbarLeftMinW != coverSize+coverGap+trackTextMinW+coverGap+playbarActionsW {
 		t.Errorf("playbarLeftMinW = %v，want %v（52 + 8 + 76 + 8 + %v）",
 			playbarLeftMinW, coverSize+coverGap+trackTextMinW+coverGap+playbarActionsW,
 			playbarActionsW)
 	}
-	// 🔴 **900 宽下的余量**：按「上限」算的那一档（左列右沿离滑块左沿）。
+	// 🔴 **900 宽下的余量**（左列右沿离滑块左沿）。
 	//
-	//	左列右沿 = 16 + 309.5 = 325.5
+	//	左列右沿 = 16 + 281 = 297
 	//	滑块左沿 = 330.7
-	//	余量 = 5.2
+	//	余量 = 33.7
 	//
-	// ⚠️ **按上限算**（数字格 24.5）而不是按某一天的字宽：字宽随平台字体变，
-	// 而保底宽**必须是常数**（理由见 `playbar_counts.go` 的文件头《两个口径》）。
+	// ⚠️ **角标不占布局**（`Attach`）：第三段回到四枚 32 + 三道 3 的缝，
+	// 左列保底 281——横排那一版的 165.5 缩回 137，**28.5 净让给了进度条**。
 	//
-	// ⇒ 左列右沿 **325.5** 离滑块左沿 **330.7** 还有 **5.2**。
+	// ⇒ 左列右沿 **297.0** 离滑块左沿 **330.7** 还有 **33.7**。
 	// ⇒ 而**实测**（`TestTheThreeCountsDoNotTouchTheProgressBar` 量的是真实
-	// 布局）也是 **5.20**——因为第三段是按**上限**（24.5）预留的。
-	//
-	// ⚠️ **5.20 是「装得下最宽那一档」换来的**：上限从 24 提到 24.5（为了装下
-	// 「99k+」24.49，而截断会**先切掉那个「+」**）⇒ 余量从 6.70 少到 5.20。
+	// 布局）也是 **33.7**。
 	const sliderLeft = 330.7
 	gap := sliderLeft - (playbarPadX + playbarLeftMinW)
 	if gap < 0 {
 		t.Errorf("按上限算，左列右沿离滑块左沿还有 %.2f——已经撞上了", -gap)
 	}
-	// 🔴 **余量必须 ≥ 5**：余量 0.7 扛不住一次字体变化，而撞上的后果是
-	// **点不动，而画面上看不出坏了**（票 #216 那个坑）。
+	// 🔴 **余量必须 ≥ 5**：票 #701 的验收线照旧（虽然这一票余量已经大得多——
+	// 门槛留着是怕下一个人把数字挪回行内）。
 	if gap < 5 {
 		t.Errorf("按上限算余量是 %.2f——票 #701 的验收线是 ≥ 5", gap)
-	}
-	if gap > 6 {
-		t.Errorf("按上限算余量是 %.2f——比量出来的（5.20）宽太多，"+
-			"说明上限那一档算错了", gap)
 	}
 }
 
@@ -670,13 +742,13 @@ func TestTheCountFoldIsUsedByAllThreeKeys(t *testing.T) {
 // isolatedInkWidth 量「一串字在给定上限下画出来，**它自己**的墨迹有多宽」。
 //
 // ⚠️ **为什么要单独画**：真实布局里那一格的左右**就是邻居的图形**，量墨迹会
-// 把邻居的字迹算进来（实测：那一格量出来 30 宽，而字只有 24.49）——分不出
-// 哪一笔是那个「+」。⇒ 这里单独画一遍，四周没有别的东西。
+// 把邻居的字迹算进来——分不出哪一笔是那个「+」。⇒ 这里单独画一遍，四周没有
+// 别的东西。
 func isolatedInkWidth(t *testing.T, s string, maxW float32) float32 {
 	t.Helper()
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		mygoui.Row(c).Children(func() {
-			mygoui.Text(c, s).FontSize(scale.Font(c, playbarCountFont)).
+			mygoui.Text(c, s).FontSize(scale.Font(c, playbarBadgeFont)).
 				MaxWidth(maxW).MaxLines(1).Ellipsis("…")
 		})
 	}, 300, 60)

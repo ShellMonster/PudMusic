@@ -48,40 +48,11 @@ import (
 // 通道（画面上是「另一枚键莫名其妙缩着」）。
 const commentsButtonKey = "playbar:comments"
 
-// 播放条上评论键那个数字的几档。
+// 评论键那个数字的形状（票 #682 起带数，本票起收成**角标**）。
 //
-// # 🔴 宽度账（票 #682 / #701）
-//
-// 改之前这一枚是**纯图标键**：盒子 32（`iconHitMd`），图形 18（`iconMd`）。
-// 票 #682 给它加过数字（那一版是 32 + 2 + **33** = **67**，数字格的上限是
-// **33**）。
-//
-// ⚠️ **票 #701 把那个折法换掉了**（`list.CountText` 那一族：「1k+ / 10k+ /
-// 99k+ / 1亿+」），而那一族的宽由**数字格的上限**（**24.5**）说了算——比旧的
-// 33 还窄 8.5。而**这一枚键的形状也变了**：带数字时图形**紧贴**左沿（左右
-// 内边距 0），所以它的宽是 18 + 2 + 数字，**不是** 7 + 18 + 2 + 数字 + 7。
-//
-//	commentCountGap  2  图形和数字之间的缝（比 `space.Px4` 窄：它们是一格里的两半）
-//
-// ⚠️ **数字格的上限现在是 `playbarCountMaxW`（24.5）**，不是旧的 33——
-// **三个键共用一个上限**（理由见 `playbar_counts.go` 那个常量的注释：它挡的是
-// 「数字本身被拉出那一格」——而**左列的宽本来就是常数**，所以碰撞不可能发生）。
-// 旧的 33 是票 #682 的账，那时的折法最宽的一档是「99.9万」（32.95），而新折法
-// 最宽的是「99k+」（**24.49**）。
-//
-// ⚠️ **字号是 `Size10`**：这是播放条上最小的一档，而数字是**附属信息**
-// （图标才是那一枚键的身份）。再大一号（Size11）上面那个上限就不够了。
-const (
-	commentCountGap = playbarCountGap
-)
-
-// playbarCommentsW 是评论键**摆满**那一档的宽：18 + 2 + **24.5** = **44.5**。
-//
-// ⚠️ **它和 `iconHitMd` 不是同一个数**，所以 `playbarActionsW` 不能再用
-// 「四枚 × 32」算——那一条是票 #573 的账（四枚纯图标键），票 #682 之后评论
-// 那一枚比别的宽 35，票 #701 之后是三枚带数字的键（见 `playbar.go` 的
-// `playbarActionsW`）。
-const playbarCommentsW = iconMd + commentCountGap + playbarCountMaxW
+// ⚠️ **角标不占布局**：数字折成一个小字，挂在图形盒子的右上角——所以这一枚键
+// 的宽是 **32**（图形 18 + 两侧各 7），**带不带数字都一样**。宽度账和结构都在
+// `playbar_counts.go`（三枚键共用一份）。
 
 // commentsKeyLabel / commentsKeyTip 是评论键的无障碍名字和悬停提示。
 //
@@ -130,27 +101,17 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 	c.Key(commentsButtonKey)
 
 	// ⚠️ **壳走 `flat.Button`，内容自己拼**：`iconKey` 那一档只会画一个图标，
-	// 而这一枚要有「图形 + 数字」两半。壳、悬停淡底、圆角都和 `iconKey` 同一份
-	// （`flat.button`），只是内边距和缝按「一格里的两半」摆。
+	// 而这一枚要的是「图形盒子 + 右上角一枚角标」——壳、悬停淡底、圆角都和
+	// `iconKey` 同一份（`flat.button`）。
 	//
-	// 🔴 **左右内边距跟着数走**（`countKeyPadX`）：带数字时是 0（不然会宽出
-	// 14），没有数字时是 7（那时的形状和改之前一模一样）。
+	// 🔴 **内边距回到纯图标键那一档（每边 7）**：角标不占布局（它 `Attach` 在
+	// 图形盒子的右上角），所以这一枚的宽和没有数字时**一模一样**——32。
 	btn := flat.Button(c, "").Label(commentsKeyLabel(count)).
-		Height(iconHitMd).Padding(space.None, countKeyPadX(count)).Gap(commentCountGap)
+		Height(iconHitMd).Padding(space.None, space.Px7)
 	btn.Children(func() {
-		// ⚠️ **结构是共享的那一份**（`countKeyRow`）：「图形 │ 缝 2 │ 数字」，
-		// 而图形紧贴那一枚键的左沿（宽度账见 `playbar_counts.go` 的文件头）。
-		//
-		// ⚠️ **数字那一格的上限是 `playbarCountMaxW`（24.5）**：宽度账见上面
-		// 那几个常量——它是一道**保险**（折法改了也不撞滑块），而当前那个折法
-		// （`list.CountText`）最宽的一档是「99k+」（**24.49**），**刚好装满**
-		// 24.5。
-		//
-		// ⚠️ **当前折法一档都不截**：上限 24.5 是**保险**，不是「有一档会被
-		// 切掉」——「100…」那一档在当前折法里**压根不存在**（最宽的「99k+」
-		// 24.49 ≤ 24.5）。
-		countKeyRow(c, iconComments, count, btn.Hovered(), btn.Pressed(),
-			func(c *ui.Context) { countIcon(c, iconComments, btn.Hovered(), btn.Pressed()) })
+		// ⚠️ **结构是共享的那一份**（`countKeyIcon`）：一个 18×18 的图形盒子，
+		// 角标挂在盒子的右上角。角标的上限 / 字号 / 挂点在 `playbar_counts.go`。
+		countKeyIcon(c, iconComments, btn.Hovered(), btn.Pressed(), count)
 	})
 
 	if s.withTip(c, btn, commentsKeyTip(count)).Clicked() {
@@ -169,24 +130,23 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 //
 // ⚠️ **本地文件不摆**（同 `viewCommentsButton`）。
 //
-// 🔴 **满屏这一枚不带数字**（票 #682 的有意取舍）：播放条那一枚能带，是因为
-// 左列是**三段定宽**的（`playbarLeftMinW` 钉着，数字只吃自己那 24.5，歌名照旧
-// 76）。满屏底下那一行是**居中的 flex**（`viewFullControls` 的
-// `Justify(ui.Center)`）：这一行里任何一枚变宽，**播放键就离开窗口的竖直中轴**
-// ——而「三键落在中轴上」正是满屏底栏那条设计（`fullplayer_layout_test.go` 的
-// `TestTheFullPlayerBottomBarPaddingAndMaxWidth` 量着它；那里用的是本地文件，
-// 所以评论键不在，量到的中轴是准的）。给评论键加 24.5 会让播放键偏 12.25，而
-// 满屏那一行没有播放条左列那样的余量可以重排。
+// 🔴 **满屏这一枚不带数字**（票 #682 的有意取舍）：满屏底下那一行是**居中的
+// flex**（`viewFullControls` 的 `Justify(ui.Center)`）——这一行里任何一枚变宽，
+// **播放键就离开窗口的竖直中轴**（「三键落在中轴上」正是满屏底栏那条设计，
+// `fullplayer_layout_test.go` 的 `TestTheFullPlayerBottomBarPaddingAndMaxWidth`
+// 量着它；那里用的是本地文件，所以评论键不在，量到的中轴是准的）。
+//
+// ⚠️ **本票之后播放条那一枚也不再「加宽」了**（角标不占布局，它的宽是 32、
+// 和没有数字时一样）——但满屏那一枚**照旧不带**：播放条上角标挂得住，是因为
+// 那一枚键的图形右边是空气；满屏底栏那一枚**左右都是别的键**，角标会盖到
+// 邻居身上（那一行的缝只有几像素，而角标比它宽得多）。要补的话是另一票的账
+// （比如给那一枚单独留一格、或者把角标改成压在图标底下那种）。
 //
 // ⚠️ **但提示句可以带上那个数**（票 #701 之后的对齐）：数字**不进布局**——
 // 它只在那一句提示里，而提示是**浮在画面上的气泡**（不进那一行的 flex）——
 // ⇒ 所以「不带数字」这条取舍**管不到提示句**，而「提示句里说清是整个稿件的
 // 多少」是播放条那一枚已经有的（`countKeyTip`）。⇒ 两枚键的提示句现在
 // **说同样的话**。
-//
-// ⚠️ **同一份数据、同一个画法**：真要加数字的时候把那 24.5 从别处让出来
-// （比如把这一行改成「左右两组 + 中间一组」的 Grid），不能像播放条那样直接
-// 撑宽。
 func (s *Shell) viewFullCommentsButton(c *ui.Context, st app.State, base flat.Base) {
 	if !st.HasTrack || !s.app.CommentsWorthAsking() {
 		return
