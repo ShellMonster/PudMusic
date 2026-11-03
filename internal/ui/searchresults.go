@@ -24,18 +24,19 @@ import (
 
 // 三个 Tab。顺序就是侧栏／页面上从左到右的顺序。
 const (
+	searchTabAll = iota
 	// searchTabSong 是「歌曲」：只搜音乐分区（`tids=3`）。
-	searchTabSong = iota
+	searchTabSong
 	// searchTabVideo 是「视频」：全部分区。
 	searchTabVideo
 	// searchTabUser 是「用户」。
 	searchTabUser
-	// searchTabCount 是 Tab 的个数。加 Tab 要改这一处。
-	searchTabCount = 3
+	searchTabFavorite
+	searchTabCount
 )
 
-// searchTabNames 是三个 Tab 上的字。
-var searchTabNames = [searchTabCount]string{"歌曲", "视频", "用户"}
+// searchTabNames 是原型上的五个 Tab。
+var searchTabNames = [searchTabCount]string{"全部", "歌曲", "视频", "UP主", "收藏夹"}
 
 type videoSortOption struct {
 	Label string
@@ -179,13 +180,24 @@ func (s *Shell) searchFetcher(tab int) list.Fetcher {
 
 // fetchSearchTab 是搜索页唯一的应用层入口。UI 不知道 B 站请求、响应或错误编码。
 func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Page, error) {
+	if tab == searchTabFavorite {
+		return list.Page{}, nil
+	}
 	t := &s.search.lists[tab]
 	t.mu.Lock()
 	q, gen := t.query, t.gen
 	t.mu.Unlock()
 
+	backendTab := tab
+	if tab == searchTabAll || tab == searchTabSong {
+		backendTab = int(searchTabSong)
+	} else if tab == searchTabVideo {
+		backendTab = int(searchTabVideo - 1)
+	} else if tab == searchTabUser {
+		backendTab = int(searchTabUser - 1)
+	}
 	pg, err := s.app.SearchOf().Page(ctx, app.SearchQuery{
-		Tab:     app.SearchTab(tab),
+		Tab:     app.SearchTab(backendTab),
 		Keyword: q.keyword,
 		Sort:    app.SearchSort(q.sort),
 		Page:    page,
