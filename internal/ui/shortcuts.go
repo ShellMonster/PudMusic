@@ -71,6 +71,11 @@ func defaultShortcutSettings() shortcutSettings {
 		{"next", "Right"},
 		{"volumeUp", "Up"},
 		{"volumeDown", "Down"},
+		{"commandPalette", "K"},
+		// 收藏当前歌曲用 ⌘D：D 是「叮」（ding）的谐音那一档，也是浏览器
+		//「收藏这一页」用的那个键——用户从那边带过来的手感正好是同一件事。
+		{"favoriteCurrent", "D"},
+		{"cyclePlayMode", "J"},
 	}
 	in := make([]shortcutItem, 0, len(ids)+len(inAppOnlyShortcuts)+len(shiftedShortcuts))
 	global := make([]shortcutItem, 0, len(ids)+len(shiftedShortcuts))
@@ -121,6 +126,11 @@ func defaultShortcutSettings() shortcutSettings {
 // 迷你播放器用 ⇧⌘M（`Switch to MiniPlayer###M#shift`），照它。
 var shiftedShortcuts = []struct{ id, key string }{
 	{"toggleMiniMode", "M"},
+	// ⚠️ **「显示/隐藏主窗口」要多按一个 ⇧**：⌘H 是 macOS 的「隐藏本应用」
+	//（框架「应用」栏里「隐藏」那一项带的键，`mygo/menu.go:723`），
+	// ⌘W 又是「关闭窗口」（文件栏的 `RoleClose`）——两个裸的候选键都
+	// 归系统/菜单所有，而菜单的加速键**先于窗口**拿到那个键。⇧⌘H 没人占。
+	{"toggleMainWindow", "H"},
 }
 
 // inAppOnlyShortcuts 是只登记在应用内、没有全局那一半的命令：id 和默认键。
@@ -128,6 +138,10 @@ var shiftedShortcuts = []struct{ id, key string }{
 var inAppOnlyShortcuts = []struct{ id, key string }{
 	{"seekBack", "Shift+Left"},
 	{"seekForward", "Shift+Right"},
+	// 「打开播放队列抽屉」只在应用内有意义：在别的应用里按它，窗口不在
+	// 前台，抽屉开了也看不见——而这一条命令按下去用户期待的是「眼前弹出
+	// 那一列」。不占全局组合键。
+	{"toggleQueueDrawer", "CommandOrControl+Q"},
 }
 
 // defaultShortcutNames 是每条命令的显示名称。
@@ -149,6 +163,14 @@ var defaultShortcutNames = map[string]string{
 	"toggleMiniMode": "显示/隐藏迷你播放器",
 	"seekBack":       "快退 5 秒",
 	"seekForward":    "快进 5 秒",
+	"commandPalette": "命令面板",
+	// ⚠️ **「收藏当前歌曲」**：菜单那一项叫「添加到收藏夹…」是因为它开的是
+	// 一个弹窗（`menu.go` 的注释）；这里是命令的名字，说的是「这条命令做
+	// 什么」——和设置页同一栏里其它命令的口径一致（动词开头）。
+	"favoriteCurrent":   "收藏当前歌曲",
+	"cyclePlayMode":     "切换播放模式",
+	"toggleMainWindow":  "显示/隐藏主窗口",
+	"toggleQueueDrawer": "打开播放队列抽屉",
 }
 
 // shortcutKeys 是快捷键在内存里和磁盘上的那一份。

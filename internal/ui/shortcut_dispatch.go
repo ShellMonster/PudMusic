@@ -153,6 +153,25 @@ func (s *Shell) runShortcut(id string) {
 		s.seekBy(shortcutSeekStep)
 	case "toggleMiniMode":
 		s.toggleMiniPlayer()
+	case "commandPalette":
+		s.toggleCommandPalette()
+	case "favoriteCurrent":
+		// 走 `menu.go` 里那一半：`favoriteCurrent` 是「添加到收藏夹…」那个
+		// 弹窗的入口（它里面调 `App.PlayingItem` + `openFolderSelect`）。
+		s.favoriteCurrent()
+	case "cyclePlayMode":
+		s.app.CyclePlayMode()
+	case "toggleMainWindow":
+		// 托盘「显示/隐藏」那一项走的同一个出口（`tray.go` 的 toggleWindow）：
+		// 窗口不在了 `openWindow` 会重新开一个——所以这一条不是「只在窗口
+		// 开着时才有用」的命令。
+		s.toggleWindow()
+	case "toggleQueueDrawer":
+		// ⚠️ **翻转的是意图，不是阶段**：`drawerOpen` 是「用户想让它开还是关」，
+		// 而 `drawerPhase` 跟着它和动画走（`queue_drawer.go` 的 drawerPhase）。
+		// 直接写 `drawerPhase` 会把状态机推乱（退场那一帧写它等于把「关」
+		// 改成了「开」，而用户的意图那一栏没动）。
+		s.drawerOpen = !s.drawerOpen
 	}
 }
 

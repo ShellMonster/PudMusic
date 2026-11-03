@@ -95,7 +95,8 @@ func TestTheMenuCommandsAreDerivedFromTheMenuItself(t *testing.T) {
 // 顺序是用户的肌肉记忆——播放/暂停、上一首、下一首这个顺序在哪家播放器里
 // 都是这样。
 func TestTheCommandOrderIsTheOrderTheUserActsIn(t *testing.T) {
-	want := []string{"togglePlay", "prev", "next", "toggleMiniMode", "seekBack", "seekForward", "volumeUp", "volumeDown"}
+	want := []string{"togglePlay", "prev", "next", "toggleMiniMode", "seekBack", "seekForward", "volumeUp", "volumeDown",
+		"commandPalette", "favoriteCurrent", "cyclePlayMode", "toggleMainWindow", "toggleQueueDrawer"}
 	got := idsOf(commandSpecs)
 	if len(got) != len(want) {
 		t.Fatalf("命令表有 %d 条（%v），want %d 条（%v）", len(got), got, len(want), want)

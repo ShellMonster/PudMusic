@@ -285,6 +285,12 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 见 `viewFullPlayer` 的注释。
 	s.guardAt("全屏播放器", func(c *ui.Context) { s.viewFullPlayer(c, st) })(c)
 
+	// 命令面板（⌘K，command_palette.go）。**排在满屏之后**：它是模态的，
+	// 要盖住整页；满屏开着的时候用户在它上面按 ⌘K，面板要开在满屏**上面**，
+	// 而不是被满屏压住。Toast 仍然在最上面（执行命令之后那句提示要从面板
+	// 上浮过去）。
+	s.guardAt("命令面板", s.viewCommandPalette)(c)
+
 	// 歌词搜索与预览那两个弹窗（lyricssearch.go）。**排在满屏之后**：它们是模态
 	// 的、要盖住整页，而满屏盖住的是整个窗口——次序反过来的话用户在满屏里按到
 	// 那个旋钮会看见弹窗开在满屏底下。Toast 仍然在最上面（采用歌词之后那句

@@ -88,6 +88,13 @@ var commandSpecs = []commandSpec{
 	{id: "seekForward", name: "快进 5 秒"},
 	{id: "volumeUp", name: "音量加"},
 	{id: "volumeDown", name: "音量减"},
+	// 命令面板（⌘K）：它自己也是一条命令，于是它的键也在设置页上能改、
+	// 也能登记全局那一份（理由和别的命令一样：一个键只在一处定义）。
+	{id: "commandPalette", name: "命令面板"},
+	{id: "favoriteCurrent", name: "收藏当前歌曲"},
+	{id: "cyclePlayMode", name: "切换播放模式"},
+	{id: "toggleMainWindow", name: "显示/隐藏主窗口"},
+	{id: "toggleQueueDrawer", name: "打开播放队列抽屉"},
 }
 
 // commandByID 按 id 查一条命令。查不到返回零值（`ok` 为 false）。

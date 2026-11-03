@@ -259,7 +259,7 @@ func TestAShortcutFileFromANewerVersionIsRefusedOnThePage(t *testing.T) {
 // ⚠️ 那个 × 只在「不录的时候」才画，所以**正在录的那一格不会**中招——症状是
 // 「打开这一页全是空框，一格一个键都看不见」。
 func TestEveryRecorderCellActuallyDrawsItsKey(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	openSettingsTab(t, tt, "快捷键设置")
 
 	img := tt.Image()
@@ -273,16 +273,17 @@ func TestEveryRecorderCellActuallyDrawsItsKey(t *testing.T) {
 	} {
 		for _, it := range group.items {
 			text := formatAccel(accelerator(it.Shortcut))
-			r, ok := tt.Find(text)
-			if !ok {
-				t.Fatalf("%s那一列没有「%s」这个键，文字有 %q", group.header, it.Name, tt.Texts())
-			}
+			// ⚠️ **先滚进来再量**：这一页在 Scroll 里，底下的几行在窗口
+			// 底边之外——框还在（Find 找得到），但那一帧根本没画，量到的
+			// 就是「一个字都没有」的假红（理由见 settingRect）。
+			r := settingRect(t, tt, s, text)
 			if r.H <= 1 {
 				t.Errorf("%s「%s」那一格里的字塌成了 %.1f DIP 高"+
 					"（`Grow(1)` 的 Text 后面跟一个 Button 就是这个下场，见 shortcutRecorder）",
 					group.header, it.Name, r.H)
 				continue
 			}
+			img = tt.Image()
 			if ink := inkCount(img, r); ink == 0 {
 				t.Errorf("%s「%s」那一格里有字的位置 %q 框高 %.1f，却一个深色像素都没有："+
 					"字没画出来", group.header, it.Name, text, r.H)
@@ -382,8 +383,8 @@ func TestEveryRecorderCellHasAKeyOfItsOwn(t *testing.T) {
 			seen[key] = slot
 		}
 	}
-	if len(seen) != 12 {
-		t.Errorf("一共 %d 个 key，want 12（六条命令 × 两列）", len(seen))
+	if len(seen) != 2*len(cur.Shortcuts) {
+		t.Errorf("一共 %d 个 key，want %d（%d 条命令 × 两列）", len(seen), 2*len(cur.Shortcuts), len(cur.Shortcuts))
 	}
 }
 
@@ -413,10 +414,10 @@ func TestTheClearButtonInEveryRecorderCellActuallyClears(t *testing.T) {
 	for _, group := range [][]shortcutItem{cur.Shortcuts, cur.GlobalShortcuts} {
 		for _, item := range group {
 			label := "清空「" + item.Name + "」的快捷键"
-			r, ok := tt.Find(label)
-			if !ok {
-				t.Fatalf("没有「%s」那个 ×，文字有 %q", label, tt.Texts())
-			}
+			// ⚠️ **先滚进来再点**（理由见上面 TestEveryRecorderCellActuallyDrawsItsKey
+			// 那一支）：× 画在那几行里，底下的几行在窗口底边之外——点在窗外
+			// 等于没点。
+			r := settingRect(t, tt, s, label)
 			tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 			tt.Frame()
 
@@ -472,18 +473,17 @@ func sameShortcut(a, b []shortcutItem) bool {
 // 而 × 掉出框外时它的中心仍然可点（只是点在框外那块空白上），所以只验「点得动」
 // 抓不到「画成两层框、× 压着下一行」。
 func TestEveryRecorderCellKeepsItsClearButtonInside(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	openSettingsTab(t, tt, "快捷键设置")
 
 	cur := defaultShortcutSettings()
 	for _, item := range append(append([]shortcutItem{}, cur.Shortcuts...), cur.GlobalShortcuts...) {
-		cell, ok1 := tt.Find("应用内快捷键：" + item.Name)
-		if !ok1 {
-			cell, ok1 = tt.Find("全局快捷键：" + item.Name)
+		// ⚠️ **先滚进来再量几何**（理由同上）。
+		name := "应用内快捷键：" + item.Name
+		if _, ok := tt.Find(name); !ok {
+			name = "全局快捷键：" + item.Name
 		}
-		if !ok1 {
-			t.Fatalf("没有「%s」那一格，文字有 %q", item.Name, tt.Texts())
-		}
+		cell := settingRect(t, tt, s, name)
 		x, ok2 := tt.Find("清空「" + item.Name + "」的快捷键")
 		if !ok2 {
 			t.Fatalf("没有「%s」那个 ×，文字有 %q", item.Name, tt.Texts())

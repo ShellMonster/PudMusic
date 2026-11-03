@@ -26,26 +26,30 @@ func TestTheShortcutDefaultsAreStable(t *testing.T) {
 		{"next", "下一首", "CommandOrControl+Right", "CommandOrControl+Alt+Right"},
 		{"volumeUp", "音量加", "CommandOrControl+Up", "CommandOrControl+Alt+Up"},
 		{"volumeDown", "音量减", "CommandOrControl+Down", "CommandOrControl+Alt+Down"},
-		// ⚠️ **迷你播放器让开了 ⌘M**：那是 macOS 的「最小化」（框架「窗口」栏
-		// 里那一项带的加速键，`mygo/menu.go:743`），而**菜单的加速键先于窗口
-		// 拿到那个键**——抢它的结果是迷你播放器永远不响。详见
-		// `internal/ui/shortcuts.go` 的 `shiftedShortcuts`。
+		{"commandPalette", "命令面板", "CommandOrControl+K", "CommandOrControl+Alt+K"},
+		{"favoriteCurrent", "收藏当前歌曲", "CommandOrControl+D", "CommandOrControl+Alt+D"},
+		{"cyclePlayMode", "切换播放模式", "CommandOrControl+J", "CommandOrControl+Alt+J"},
+		// ⚠️ **迷你播放器让开了 ⌘M**（`shiftedShortcuts`），「显示/隐藏主窗口」
+		// 让开了 ⌘H / ⌘W：那是 macOS 的「隐藏本应用」和「关闭窗口」，而**菜单
+		// 的加速键先于窗口拿到那个键**——抢它的结果是这两条命令永远不响。
 		{"toggleMiniMode", "显示/隐藏迷你播放器", "CommandOrControl+Shift+M", "CommandOrControl+Alt+Shift+M"},
+		{"toggleMainWindow", "显示/隐藏主窗口", "CommandOrControl+Shift+H", "CommandOrControl+Alt+Shift+H"},
 	}
-	// 我们自己补的两条（快退 / 快进）只在应用内那一列，排在 Biu 那六条后面；
-	// 全局那一列仍然只有 Biu 的六条。
-	if len(got.Shortcuts) != len(want)+2 || len(got.GlobalShortcuts) != len(want) {
-		t.Fatalf("命令条数是 %d / %d，want %d / %d", len(got.Shortcuts), len(got.GlobalShortcuts), len(want)+2, len(want))
+	// 我们自己补的三条（快退 / 快进 / 打开播放队列抽屉）只在应用内那一列，
+	// 排在全局那一列的后面；全局那一列仍然只有应用内那一列的前面那几条。
+	if len(got.Shortcuts) != len(want)+3 || len(got.GlobalShortcuts) != len(want) {
+		t.Fatalf("命令条数是 %d / %d，want %d / %d", len(got.Shortcuts), len(got.GlobalShortcuts), len(want)+3, len(want))
 	}
 	for i, w := range want {
 		checkShortcut(t, "应用内", got.Shortcuts[i], w.id, w.name, w.in)
 		checkShortcut(t, "全局", got.GlobalShortcuts[i], w.id, w.name, w.global)
 	}
-	checkShortcut(t, "应用内", got.Shortcuts[6], "seekBack", "快退 5 秒", "Shift+Left")
-	checkShortcut(t, "应用内", got.Shortcuts[7], "seekForward", "快进 5 秒", "Shift+Right")
+	checkShortcut(t, "应用内", got.Shortcuts[10], "seekBack", "快退 5 秒", "Shift+Left")
+	checkShortcut(t, "应用内", got.Shortcuts[11], "seekForward", "快进 5 秒", "Shift+Right")
+	checkShortcut(t, "应用内", got.Shortcuts[12], "toggleQueueDrawer", "打开播放队列抽屉", "CommandOrControl+Q")
 	for _, g := range got.GlobalShortcuts {
-		if g.ID == "seekBack" || g.ID == "seekForward" {
-			t.Errorf("「%s」不该有全局那一半（⌘⌥ 加方向键要留给别的应用）", g.ID)
+		if g.ID == "seekBack" || g.ID == "seekForward" || g.ID == "toggleQueueDrawer" {
+			t.Errorf("「%s」不该有全局那一半（⌘⌥ 加方向键要留给别的应用；抽屉在窗口后面看不见）", g.ID)
 		}
 	}
 }

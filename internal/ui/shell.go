@@ -671,6 +671,22 @@ type Shell struct {
 	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
 	errDetailOpen bool
 
+	// 命令面板（⌘K）这一摊。**同样只由 view 在主线程上读写**。
+	//
+	// paletteOpen 是开没开。它不进设置，理由和 drawerOpen 一样：面板是
+	// 「我现在要发一条命令」这一下的事，关掉窗口就该是关着的。
+	paletteOpen bool
+	// paletteShown 是「这一场已经播过进场了」，和 suggestShown 同一个
+	// 用途：开着的时候内容变了不重播，只在关掉的时候复位（见
+	// command_palette.go）。
+	paletteShown bool
+	// paletteQuery 是输入框里那个词，paletteSel 是键盘选中的下标
+	//（-1 = 还没选中，回车跑第一条）。
+	paletteQuery string
+	paletteSel   int
+	// paletteScroll 是命令列表滚到哪儿了。
+	paletteScroll ui.ScrollState
+
 	// 顶栏这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// searchFocused 是搜索框有没有焦点，顶栏用它把输入区的底色抬到 30%
