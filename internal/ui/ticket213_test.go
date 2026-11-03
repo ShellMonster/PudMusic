@@ -1,17 +1,17 @@
-// 票 #367：「我的关注」那一页左边那列分组，按当前的设计风格重做。
+// 票 #367 改版：「我的关注」左边那列分组收成页头右上角的一枚下拉。
 //
-// 这一票只动**左边那一列**（`follow.go` 的 `viewFollowPane` / `viewFollowPaneRow`）：
-// 底色、选中态、字号、内边距、三态。**布局骨架（左列 + 右网格）和右边那个网格
-// 一个像素没动**。
+// 这一票把那一列从「200 宽 × 全高的常驻栏」改成「页头上一枚『全部关注 ▾』下拉」：
+// 选组是主动动作（分组是用户自己建的，想看有哪些分组是自己点开的），常驻一栏只为
+// 这一件事占地——内容区现在一行顶到窗口右缘。
 //
-// # 判据是**画面上的像素**，不是函数调用
+// # 判据是**画面上的像素**和**弹层里摆出来的字**
 //
-// 「像一家人」只能看画面：底色是不是同一片、选中那一格是不是同一层淡底、字
-// 是不是同一档。所以这一组量的是像素（`bandPixels` / `modeOf` / `farthestFrom`），
-// 而断「有没有写死颜色」的那一条量的是**源码**（照 `shadow_test.go` 那一族的路子）。
+// 原来钉在左栏上的那几条（「全部关注」和分组分得开、长名字截断不换行、三态都在），
+// 收成下拉之后一样都不能少——只是它们现在活在一个**弹层**里：断言前先点开触发器
+// （`tt.Click("选择关注分组")`），不然弹层里的字根本不在画面上。
 //
-// ⚠️ **深浅两套都要跑**：淡底那一层在浅色下和底色差得很远、在深色下只差十几个
-// 通道——只看浅色的话深色下那一层根本验不出来。
+// ⚠️ **深浅两套都要跑**：高亮那一档（实心主色底）在浅色下和底色差得很远、在深色下
+// 只差十几个通道——只看浅色的话深色下那一层根本验不出来。
 package ui
 
 import (
@@ -25,7 +25,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -49,7 +48,7 @@ var followPaneTags = []followTagSpec{
 // uiFollowTagsOrdered 给分组那一列装一份**顺序固定**的返回。
 //
 // ⚠️ **`uiFollowTags`（`follow_test.go`）用的是 map**，而 map 的遍历顺序是随机的
-// ——每一轮跑出来的分组次序都不一样。而这一票要断言「第一格和后面那几格分得
+// ——每一轮跑出来的分组次序都不一样。而这一票要断言「第一项和后面那几项分得
 // 开」，那要一个**确定的顺序**。
 func uiFollowTagsOrdered(b *uiExplore, tags []followTagSpec) {
 	b.on("/x/relation/tags", func(w http.ResponseWriter, r *http.Request) {
@@ -65,18 +64,9 @@ func uiFollowTagsOrdered(b *uiExplore, tags []followTagSpec) {
 
 // followPaneSettings 是这一组测试用的那份设置。
 //
-// ⚠️ **方案要显式写暖纸，不能靠 `app.DefaultSettings("")` 的默认**：这一组要量的是
-// **暖纸**这一套，而**经典那一套的 `sidebar` 就是页面底色**（两个都是白）——于是
-// 「这一列的底 == 方案的 `sidebar`」这条判据在经典底下**恒真**：把这一列的底整个
-// 删掉，测试照样绿（2026-10-25 的评审抓出来的）。
-//
-// 暖纸那一套的 `sidebar`（#EFE9DE）和页面底色（#F8F4ED）**不是一个色**，判据
-// 才立得住——`TestTheFollowPaneAndTheSidebarAreOneFamily` 里还有一条专门盯
-// 「这一套方案里这两个色不是同一个」。
-//
-// （票 #406 之后这一包的 `TestMain` 不再把方案钉成经典，所以显式写这一行是
-// **钉住这一组要量的那一套**，而不是「躲开默认」——两者的区别是：将来默认方案
-// 再变，这一组仍然量暖纸。）
+// ⚠️ **方案要显式写暖纸**：这一组量的是**暖纸**这一套，而经典那一套的 `sidebar`
+// 就是页面底色（两个都是白）——有些判据在它下面恒真（2026-10-25 的评审抓出来
+// 的那一处同形）。
 func followPaneSettings() app.Settings {
 	st := app.DefaultSettings("")
 	st.ThemePreset = app.ThemePresetWarmPaper
@@ -105,98 +95,31 @@ func followPaneShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 	return s, tt
 }
 
-// TestTheFollowPaneAndTheSidebarAreOneFamily 钉住「这一列和侧栏是同一片」。
+// openFollowGroupSelect 点开页头右上角那枚分组下拉。
 //
-// 三条判据：
+// ⚠️ **靠 Label 找**：触发器写的是当前那一格的名字（「全部关注」/ 某一组 /
+// 「我的关注」），那一格换组就变，而 Label 不变（`openSelect` 同一个理由）。
 //
-//  1. **底色是同一片**——侧栏那一栏和这一列都是方案的 `sidebar`（和内容区不同色）。
-//     改之前这一列是页面底色，于是它和内容区是一体的，而旁边的侧栏是另一片：
-//     两片导航区夹着一片内容区，中间那道界是内容区的边。
-//  2. **这一套方案里 `sidebar` 和页面底色不是同一个色**——不然第一条**恒真**
-//     （经典那一套的 `sidebar` 就是页面底色，见 `followPaneSettings` 的注释）。
-//  3. **选中那一格是同一层淡底**——两列都用 `flatCurrent`（`accentSoft` 淡底 +
-//     按那层底现算的字），所以两个色值逐字节相同。
-func TestTheFollowPaneAndTheSidebarAreOneFamily(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := followPaneShell(t, dark)
-			theme := BuildTheme(followPaneSettings(), dark)
-			img := tt.Image()
-
-			// 判据二：**这一套方案里，方案的 `sidebar` 和页面底色不是同一个色**。
-			//
-			// ⚠️ **这一条是前一条的前提**：两个色一样的话，「这一列的底 == 侧栏的底
-			// == 方案的 `sidebar`」恒成立——把这一列的底整个删掉，测试也绿
-			//（2026-10-25 的评审抓出来的）。
-			sidebar := s.sidebarBackground(theme)
-			if nearRGBA(rgbaOf(sidebar), rgbaOf(theme.Background), 3) {
-				t.Fatalf("这一套方案里 sidebar（%v）和页面底色（%v）是同一个色——"+
-					"「这一列的底是方案的 sidebar」这条判据在它下面恒真，换一套方案",
-					sidebar, theme.Background)
-			}
-
-			// 判据一：**底色同一片**。
-			//
-			// ⚠️ **取样点都在两栏的空处**（侧栏 x=190、这一列 x=390，都在底下那
-			// 一段空白里）：取在菜单项上会量到那一项的底，取在收藏夹上会量到别
-			// 的东西。
-			want := rgbaOf(sidebar)
-			sidePx := pixelAt(img, 190, 650)
-			panePx := pixelAt(img, 390, 650)
-			if !nearRGBA(sidePx, want, 3) {
-				t.Errorf("侧栏的底色是 %v，want %v", sidePx, want)
-			}
-			if !nearRGBA(panePx, want, 3) {
-				t.Errorf("分组那一列的底色是 %v，want %v——它要和侧栏是同一片"+
-					"（方案里的 `sidebar`）", panePx, want)
-			}
-			// 顺带钉住「内容区是另一片」：内容区的底是**页面底色**，不是 `sidebar`。
-			bodyPx := pixelAt(img, 500, 650)
-			if !nearRGBA(bodyPx, rgbaOf(theme.Background), 3) {
-				t.Errorf("内容区的底色是 %v，want %v（页面底色）", bodyPx, theme.Background)
-			}
-
-			// 判据三：**选中那一格是同一层淡底**。
-			sideCur, ok := tt.Find("我的关注")
-			if !ok {
-				t.Fatalf("侧栏上没有「我的关注」那一项，文字有 %q", tt.Texts())
-			}
-			paneCur, ok := tt.Find("全部关注(3)")
-			if !ok {
-				t.Fatalf("分组那一列上没有「全部关注(3)」那一格，文字有 %q", tt.Texts())
-			}
-			sideBg := modeOf(bandPixels(img, sideCur))
-			paneBgRow := modeOf(bandPixels(img, paneCur))
-			if !nearRGBA(sideBg, paneBgRow, 3) {
-				t.Errorf("侧栏当前项的底色是 %v，分组那一列当前项的底色是 %v——"+
-					"两列的选中态得是同一个数", sideBg, paneBgRow)
-			}
-			// 🔴 **这一档是实心主色底**（票：用户要「深底色 + 白字」）：淡底那一
-			// 档和侧栏底色的对比度只有 1.09:1 ~ 1.29:1——几乎分不出来。
-			if !nearRGBA(paneBgRow, rgbaOf(theme.Accent), 3) {
-				t.Errorf("分组那一列当前项的底色是 %v，want %v（实心主色底）",
-					paneBgRow, theme.Accent)
-			}
-		})
+// ⚠️ **不验「摆开之后画面上有什么」**：弹层里有三态（加载中 / 拉失败了 / 正常
+// 名单），三态摆的东西互不相同——验「全部关注(N) 在不在」会把前两态挡在外面。
+// 点开没点开由各调用方自己的断言兜底（它们都在找弹层里具体的字）。
+func openFollowGroupSelect(t *testing.T, tt *mygoui.Tester) {
+	t.Helper()
+	if err := tt.Click("选择关注分组"); err != nil {
+		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
 	}
+	tt.Frame()
 }
 
-// TestTheFollowPaneSelectedRowIsReadable 钉住「选中那一格：淡底 + 读得出来的字」。
+// TestTheFollowGroupSelectSeparatesAllFromTheGroups 钉住「全部关注(N)」和分组项
+// 分得开——它们不是一伙的：前一个是「我关注的人」这个全集，后一个是「B 站上我
+// 自己建的分组」。摆成同一个样子的时候用户分不清「这一格是全部」还是「这一格
+// 也是一个分组」。
 //
-// 三条判据缺一不可：
-//
-//  1. **底是 `accentSoft` 淡底**，不是实心主色（§七「我们比上游好、不要改回去」
-//     里那一条；实心主色那一档是「被选中的选项」，不是「当前在哪」）。
-//  2. **字是按那层底现算的**（浅色下是压深到 ≥4.5:1 的那一档，深色下是主色）。
-//  3. **量出来的对比度 ≥ 4.5:1**——前两条是「配方对不对」，这一条是「屏幕上读不
-//     读得出来」。
-//
-// 另外：**没选中的是次要色**——这一列是第二层导航，选中那一格才是要看的那一格。
-func TestTheFollowPaneSelectedRowIsReadable(t *testing.T) {
+// 判据是**中间那道线**：它画在第一项和第一个分组之间，线两侧是同色（弹层面板
+// 是页面底色），所以只能靠线本身分——而它得是**主题的分隔线**（`t.Border`），
+// 不是随便一道什么线。
+func TestTheFollowGroupSelectSeparatesAllFromTheGroups(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -204,99 +127,38 @@ func TestTheFollowPaneSelectedRowIsReadable(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			_, tt := followPaneShell(t, dark)
+			openFollowGroupSelect(t, tt)
 			theme := BuildTheme(followPaneSettings(), dark)
 			img := tt.Image()
 
 			cur, ok := tt.Find("全部关注(3)")
 			if !ok {
-				t.Fatalf("分组那一列上没有「全部关注(3)」那一格，文字有 %q", tt.Texts())
-			}
-			sib, ok := tt.Find("特别关注(1)")
-			if !ok {
-				t.Fatalf("分组那一列上没有「特别关注(1)」那一格，文字有 %q", tt.Texts())
-			}
-
-			// 底：实心主色（票：用户要「深底色 + 白字」）。
-			curBg := modeOf(bandPixels(img, cur))
-			if !nearRGBA(curBg, rgbaOf(theme.Accent), 3) {
-				t.Errorf("选中那一格的底色是 %v，want %v（实心主色底）",
-					curBg, theme.Accent)
-			}
-			// 字：主色底上读得出来的那一档（`t.AccentText`）。
-			//
-			// ⚠️ **容差是 24**：字是抗锯齿画的，量到的那个像素是字色和底色的混合。
-			curInk := farthestFrom(img, cur, curBg)
-			wantInk := flatSolidCurrentText(theme)
-			if !nearRGBA(curInk, rgbaOf(wantInk), 24) {
-				t.Errorf("选中那一格的字色是 %v，want %v", curInk, wantInk)
-			}
-			// 对比度：屏幕上真的读得出来。
-			if r := ink.Ratio(rgbaToColor(curInk), rgbaToColor(curBg)); r < 4.5 {
-				t.Errorf("选中那一格的字压在底上只有 %.2f:1（< 4.5）", r)
-			}
-
-			// 没选中的那一格：**次要色**。
-			//
-			// ⚠️ **那一格没有底色**（没选中的行不铺底），所以它的「众数」是这一列
-			// 的底色——字要从「离底最远的那一个像素」里量。
-			sibBg := modeOf(bandPixels(img, sib))
-			sibInk := farthestFrom(img, sib, sibBg)
-			if !nearRGBA(sibInk, rgbaOf(theme.TextMuted), 24) {
-				t.Errorf("没选中那一格的字色是 %v，want %v（次要色）",
-					sibInk, theme.TextMuted)
-			}
-		})
-	}
-}
-
-// TestTheFollowPaneSeparatesAllFromTheGroups 钉住「全部关注(N)」和分组格分得开。
-//
-// 它们不是一伙的：前一个是「我关注的人」这个全集，后一个是「B 站上我自己建的
-// 分组」。摆成同一个样子的时候用户分不清「这一格是全部」还是「这一格也是一个
-// 分组」。
-//
-// 判据是**中间那道线**：它画在第一个分组那一行的上面，线两侧是同色（这一列
-// 整列都是方案的 `sidebar`），所以只能靠线本身分——而它得是**主题的分隔线**
-// （`t.Border`），不是随便一道什么线。
-func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := followPaneShell(t, dark)
-			theme := BuildTheme(followPaneSettings(), dark)
-			img := tt.Image()
-
-			cur, ok := tt.Find("全部关注(3)")
-			if !ok {
-				t.Fatalf("分组那一列上没有「全部关注(3)」那一格，文字有 %q", tt.Texts())
+				t.Fatalf("分组下拉里没有「全部关注(3)」那一项，文字有 %q", tt.Texts())
 			}
 			first, ok := tt.Find("特别关注(1)")
 			if !ok {
-				t.Fatalf("分组那一列上没有「特别关注(1)」那一格，文字有 %q", tt.Texts())
+				t.Fatalf("分组下拉里没有「特别关注(1)」那一项，文字有 %q", tt.Texts())
 			}
 			second, ok := tt.Find("默认分组(1)")
 			if !ok {
-				t.Fatalf("分组那一列上没有「默认分组(1)」那一格，文字有 %q", tt.Texts())
+				t.Fatalf("分组下拉里没有「默认分组(1)」那一项，文字有 %q", tt.Texts())
 			}
 
-			paneBg := rgbaOf(s.sidebarBackground(theme))
-			// 线的颜色：主题的分隔线压在这一列的底上。
+			paneBg := rgbaOf(theme.Background)
+			// 线的颜色：主题的分隔线压在面板底上。
 			line := rgbaOf(theme.Border.Over(rgbaToColor(paneBg)))
-			// 选中那一格（全部关注）的淡底——**它是这一带另一种「不是线」的色**，
+			// 高亮那一档的实心底——**它是这一带另一种「不是线」的色**，
 			// 判据必须把它排除掉（理由见 findSeparator）。
-			selBg := rgbaOf(flatCurrentBg(theme))
+			selBg := rgbaOf(theme.Accent)
 
 			y := findSeparator(img, cur.X, cur.X+cur.W, cur.Y+cur.H, first.Y, paneBg, selBg, line)
 			if y < 0 {
 				t.Errorf("「全部关注(3)」和「特别关注(1)」之间没有分界——" +
-					"那一格（全部关注）和后面那些（分组）不是一伙的")
+					"那一项（全部关注）和后面那些（分组）不是一伙的")
 				return
 			}
-			// ⚠️ **分界只在第一格和分组之间**：分组和分组之间**不该**有线，
-			// 否则那一列看起来像一列表格。
+			// ⚠️ **分界只在第一项和分组之间**：分组和分组之间**不该**有线，
+			// 否则弹层看起来像一列表格。
 			if y2 := findSeparator(img, first.X, first.X+first.W, first.Y+first.H, second.Y,
 				paneBg, selBg, line); y2 >= 0 {
 				t.Errorf("「特别关注(1)」和「默认分组(1)」之间也有一道线（y=%d）——"+
@@ -305,12 +167,11 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 
 			// 🔴 **另一条独立的判据：分界那一带比别处宽**。
 			//
-			// 「全部关注」那一格和第一个分组之间要留出分界线自己的上下留白
-			// （4 + 4），而分组和分组之间只有行与行之间那 2 的缝。所以前者的
-			// 字距**明显更大**——线被删掉（或者被换成一段空隙）的话，这一条
-			// 也会红。
+			// 第一项和第一个分组之间要留出分界线自己的上下留白（4 + 4），而分组
+			// 和分组之间只有项与项之间那一点缝。所以前者的字距**明显更大**——线
+			// 被删掉（或者被换成一段空隙）的话，这一条也会红。
 			//
-			// ⚠️ **量的是「字」之间的距离**：行之间那 2 的缝在两处都有，只有
+			// ⚠️ **量的是「字」之间的距离**：项之间那点缝在两处都有，只有
 			// 分界那一带多出分界线自己的留白。
 			gapFirst := first.Y - (cur.Y + cur.H)
 			gapSecond := second.Y - (first.Y + first.H)
@@ -326,11 +187,11 @@ func TestTheFollowPaneSeparatesAllFromTheGroups(t *testing.T) {
 //
 // # 一行要算「那道线」，得同时满足三样
 //
-//  1. **不是这一列的底色**（`bg`）——底色的行不是线；
-//  2. **不是选中那一格的淡底**（`sel`）——⚠️ **这一条是必需的**（2026-10-25
-//     的评审抓出来的）：「全部关注」那一格就铺着淡底，而暖纸浅色下那层淡底
-//     （#E0F9E9）离那道线（#DBDBDB）**比离底色还近**——只判「离线更近」的
-//     话，淡底自己会被当成线，于是**把线删掉测试照样绿**。
+//  1. **不是面板的底色**（`bg`）——底色的行不是线；
+//  2. **不是高亮那一档的实心底**（`sel`）——⚠️ **这一条是必需的**（2026-10-25
+//     的评审抓出来的同形坑）：高亮那一格铺着实心底，而实心底离那道线**比离底色
+//     还近**——只判「离线更近」的话，实心底自己会被当成线，于是**把线删掉测试
+//     照样绿**。
 //  3. **离那道线更近**（或者至少不比离底色远）——线的那一档压上去的。
 //
 // ⚠️ **判据是「更靠近线那一档」，不是「等于线那个色」**：那一行的位置是算出来
@@ -347,7 +208,7 @@ func findSeparator(img *image.RGBA, x0, x1, y0, y1 float32, bg, sel, line color.
 				continue
 			}
 			if maxDiff(p, sel) < 6 {
-				// 和选中那一格的淡底一样 → 那是那一格的底，不是线。
+				// 和高亮那一档的实心底一样 → 那是那一项的底，不是线。
 				run = 0
 				continue
 			}
@@ -365,19 +226,19 @@ func findSeparator(img *image.RGBA, x0, x1, y0, y1 float32, bg, sel, line color.
 	return -1
 }
 
-// TestTheFollowPaneTruncatesALongGroupName 钉住「分组名太长怎么办」。
+// TestTheFollowGroupSelectTruncatesALongGroupName 钉住「分组名太长怎么办」。
 //
 // 答：**截断，不换行**——和侧栏收藏夹那一行、上游的 `truncate` 是同一个做法。
 //
 // 三条判据：
 //
-//  1. **那个名字一行放不下**（量出来比这一列能给的宽还长）——所以它**必须**被
+//  1. **那个名字一行放不下**（量出来比弹层能给的宽还长）——所以它**必须**被
 //     截断，否则就该换行了。
-//  2. **它就是一行**：那一行的字和旁边那些短名字的字一样高（换行的话会高出一截，
+//  2. **它就是一行**：那一项的字和旁边那些短名字的字一样高（换行的话会高出一截，
 //     把下面那些分组整体顶下去）。
-//  3. **它没有越过这一列的右缘**（截断，不是让它溢出到内容区那边去）。
-func TestTheFollowPaneTruncatesALongGroupName(t *testing.T) {
-	// ⚠️ **名字后面还跟着人数**（`全部关注(3)` 那一档的写法）：量宽度和找那一格
+//  3. **它没有越过弹层的右缘**（弹层 `MaxWidth` 就是它的硬边界）。
+func TestTheFollowGroupSelectTruncatesALongGroupName(t *testing.T) {
+	// ⚠️ **名字后面还跟着人数**（`全部关注(3)` 那一档的写法）：量宽度和找那一项
 	// 用的都是**画出来的那一句**。
 	const long = "常听的那些不太熟但是每首都想循环到会唱完整首的 UP 主(1)"
 
@@ -388,54 +249,60 @@ func TestTheFollowPaneTruncatesALongGroupName(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			_, tt := followPaneShell(t, dark)
+			openFollowGroupSelect(t, tt)
+
 			short, ok := tt.Find("特别关注(1)")
 			if !ok {
-				t.Fatalf("分组那一列上没有「特别关注(1)」那一格，文字有 %q", tt.Texts())
+				t.Fatalf("分组下拉里没有「特别关注(1)」那一项，文字有 %q", tt.Texts())
 			}
 
-			// 判据一：**那一句本身有多宽**比「那一格有多宽」重要。
+			// 判据一：**那一句本身有多宽**比「弹层有多宽」重要。
 			//
-			// ⚠️ **量的是同一个字号**（界面上那一格是 14，见 `follow.go`）。
+			// ⚠️ **量的是同一个字号**（弹层里那一项是 14，见 `follow.go`）。
 			var measured float32
 			mygoui.NewTester(func(c *mygoui.Context) {
 				measured, _ = c.MeasureText(0, mygoui.Span{Text: long, Size: 14})
 			}, 300, 60).Frame()
 			if measured <= short.W {
-				t.Skipf("那一句只有 %.1f 宽，这一格有 %.1f——放得下，这一票没测到"+
+				t.Skipf("那一句只有 %.1f 宽，这一项有 %.1f——放得下，这一票没测到"+
 					"「太长怎么办」", measured, short.W)
 			}
 
 			// 判据二：**它就是一行**：字的高度和旁边那一个短名字一样。
 			longBox, ok := tt.Find(long)
 			if !ok {
-				t.Fatalf("分组那一列上没有那个长名字，文字有 %q", tt.Texts())
+				t.Fatalf("分组下拉里没有那个长名字，文字有 %q", tt.Texts())
 			}
 			if longBox.H > short.H+1 {
 				t.Errorf("那个长名字占 %.1f 高，而短名字占 %.1f——它换行了，"+
 					"下面那些分组会被顶下去", longBox.H, short.H)
 			}
 
-			// 判据三：**没有越过这一列的右缘**。
+			// 判据三：**没有越过弹层的右缘**。
 			//
-			// ⚠️ **右缘是「全部关注(3)」那一格的右缘加一点**：那一格是这一列里
-			// 最宽的（它的底色铺满整列），而长名字那一格和它左对齐。
+			// ⚠️ **右缘是弹层里其它项的右缘**：弹层一整列对齐，最宽那一项的右缘
+			// 就是弹层的内缘——长名字那一项不许伸出去。
 			cur, ok := tt.Find("全部关注(3)")
 			if !ok {
-				t.Fatalf("分组那一列上没有「全部关注(3)」那一格，文字有 %q", tt.Texts())
+				t.Fatalf("分组下拉里没有「全部关注(3)」那一项，文字有 %q", tt.Texts())
 			}
 			if longBox.X+longBox.W > cur.X+cur.W+1 {
-				t.Errorf("那个长名字伸到 x=%.1f，而这一列到 x=%.1f——它溢出去了",
-					longBox.X+longBox.W, cur.X+cur.W)
+				t.Errorf("那个长名字伸到 x=%.1f，而「全部关注(3)」那一项到 x=%.1f——"+
+					"它溢出弹层了", longBox.X+longBox.W, cur.X+cur.W)
 			}
 		})
 	}
 }
 
-// TestTheFollowPaneHasThreeStates 钉住这一列的三态：**加载中 / 拉失败了 / 没有分组**。
+// TestTheFollowGroupSelectHasThreeStates 钉住弹层里的三态：
+// **加载中 / 拉失败了 / 没有分组**。
 //
-// 三句**互不通用**：用户读到「还没有分组」时不知道该做什么，而这一列的三种
-// 情形要做的下一步完全不同（等 / 重试 / 去建分组）。
-func TestTheFollowPaneHasThreeStates(t *testing.T) {
+// 三句**互不通用**：用户读到「还没有分组」时不知道该做什么，而这三种情形要做的
+// 下一步完全不同（等 / 重试 / 去建分组）。
+//
+// ⚠️ **三句都在弹层里**：断言前都要先点开触发器——不然弹层根本没摆开，画面上
+// 一句都没有。
+func TestTheFollowGroupSelectHasThreeStates(t *testing.T) {
 	t.Run("加载中", func(t *testing.T) {
 		b := newUIExplore(t)
 		gate := make(chan struct{})
@@ -451,11 +318,12 @@ func TestTheFollowPaneHasThreeStates(t *testing.T) {
 		tt.Frame()
 		homeFrame(tt)
 
+		openFollowGroupSelect(t, tt)
 		if !showsText(tt, "正在加载分组…") {
-			t.Errorf("分组还在拉，这一列上却没有「正在加载分组…」，文字有 %q", tt.Texts())
+			t.Errorf("分组还在拉，弹层里却没有「正在加载分组…」，文字有 %q", tt.Texts())
 		}
 		if showsText(tt, "还没有分组") {
-			t.Error("分组还在拉，这一列上却说了「还没有分组」——那两件事不一样")
+			t.Error("分组还在拉，弹层里却说了「还没有分组」——那两件事不一样")
 		}
 	})
 
@@ -473,14 +341,15 @@ func TestTheFollowPaneHasThreeStates(t *testing.T) {
 		waitFrames(t, tt, "分组拉失败了", func() bool { return f.tagErr != nil })
 		homeFrame(tt)
 
+		openFollowGroupSelect(t, tt)
 		if !showsText(tt, "分组没拉出来") {
-			t.Errorf("分组拉失败了，这一列上却没有说「分组没拉出来」，文字有 %q", tt.Texts())
+			t.Errorf("分组拉失败了，弹层里却没有说「分组没拉出来」，文字有 %q", tt.Texts())
 		}
 		if !showsText(tt, "重试拉分组") {
 			t.Errorf("分组拉失败了，却没有「重试拉分组」那一枚，文字有 %q", tt.Texts())
 		}
 		if showsText(tt, "还没有分组") {
-			t.Error("分组拉失败了，这一列上却说了「还没有分组」——用户会以为他真的没建过")
+			t.Error("分组拉失败了，弹层里却说了「还没有分组」——用户会以为他真的没建过")
 		}
 	})
 
@@ -496,26 +365,63 @@ func TestTheFollowPaneHasThreeStates(t *testing.T) {
 		waitFrames(t, tt, "分组到了（空的）", func() bool { return f.tagStarted })
 		homeFrame(tt)
 
+		openFollowGroupSelect(t, tt)
 		if !showsText(tt, "还没有分组") {
-			t.Errorf("一个分组都没有，这一列上却没有说「还没有分组」，文字有 %q", tt.Texts())
+			t.Errorf("一个分组都没有，弹层里却没有说「还没有分组」，文字有 %q", tt.Texts())
 		}
 		if showsText(tt, "正在加载分组…") {
-			t.Error("分组已经拉到了（是空的），这一列上却还在说「正在加载分组…」")
+			t.Error("分组已经拉到了（是空的），弹层里却还在说「正在加载分组…」")
 		}
 	})
 }
 
+// TestTheFollowGroupSelectShowsTheCurrentGroup 钉住「收起那一格写的是当前那一格
+// 的名字」——停在「全部关注」写「全部关注」，停在某一组写那一组的名字（上游
+// `index.tsx:206` 的 `<h1>` 同一个口径）。塌回「我的关注」的话，用户以为自己在
+// 看全部，而画面上摆的是某一组的人。
+func TestTheFollowGroupSelectShowsTheCurrentGroup(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{777: "常听的"})
+	uiFollowList(b, 1, []any{uiFollowUser(11, "全部关注里的那个人")})
+	uiFollowSearch(b, "", nil)
+	uiFollowTag(b, 777, []any{uiFollowUser(77, "常听的那个人")})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "第一格到了", func() bool { return len(f.users) == 1 && f.tagStarted })
+	tt.Frame()
+
+	// 停在「全部关注」：收起那一格写「全部关注」。
+	if !showsText(tt, "全部关注") {
+		t.Fatalf("收起那一格没写「全部关注」，文字有 %q", tt.Texts())
+	}
+
+	openFollowGroupSelect(t, tt)
+	if err := tt.Click("常听的(1)"); err != nil {
+		t.Fatalf("下拉里点不到「常听的」：%v，文字有 %q", err, tt.Texts())
+	}
+	waitFrames(t, tt, "换到那一组", func() bool { return f.tab == followTagTab(777) })
+	tt.Frame()
+
+	// 停在某一组：收起那一格写那一组的名字。
+	if !showsText(tt, "常听的") {
+		t.Errorf("换组之后收起那一格没跟着换，文字有 %q", tt.Texts())
+	}
+}
+
 // TestTheFollowPaneHasNoHardcodedColorsOrRadii 钉住「颜色和圆角不许写死」。
 //
-// 这一列的底色、淡底、字色、圆角**全都是从主题现算的**：主题方案换了整套跟着
+// 这一页的底色、淡底、字色、圆角**全都是从主题现算的**：主题方案换了整套跟着
 // 换（暖纸 / 暮光 / 柔雾 / 经典），而写死的色值只对其中一套是对的。
 //
-// 判据是**源码**：这一列不许出现颜色字面量，也不许给圆角写一个数。
+// 判据是**源码**：`follow.go` 不许出现颜色字面量，也不许给圆角写一个数。
 //
-// ⚠️ **认的是「这一列」那几处**：整个 `follow.go` 都不许有——右边那个网格
-// （`viewFollowCard` 那些）也是从主题取色的，而「取消关注」那一枚药丸的圆角
-// 是 **999**（药丸是形状，不跟主题走，见 `followActionPillRadius` 的注释）。
-// 所以药丸那一处是**特许**的，其余一处都不许写死。
+// ⚠️ **认的是整份 `follow.go`**：右边那个网格（`viewFollowCard` 那些）也是从
+// 主题取色的，而「取消关注」那一枚药丸的圆角是 **999**（药丸是形状，不跟主题走，
+// 见 `followActionPillRadius` 的注释）。所以药丸那一处是**特许**的，其余一处都
+// 不许写死。
 func TestTheFollowPaneHasNoHardcodedColorsOrRadii(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, "follow.go", nil, 0)

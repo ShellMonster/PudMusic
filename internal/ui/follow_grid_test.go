@@ -47,12 +47,17 @@ import (
 //
 // 列数是按**上一帧**量出来的容器宽算的（`followPage.width` →
 // `list.GridColumnsFor`），头一帧按一个还没量准的宽排成 5 列，下一帧量到真的
-// 才排成 3 列（理由同 `follow.go` 里 `keepFollowAnchor` 那段）。不等它稳的话，
+// 才排成 4 列（理由同 `follow.go` 里 `keepFollowAnchor` 那段）。不等它稳的话，
 // 量到的是**上一档列数**摆出来的画面。
+//
+// ⚠️ **4 列是票 #367 之后的事**：左边 200 宽的分组栏收成页头那个下拉之后，
+// 同一个 1400×900 窗口里网格拿到 1148（≥ 1024 那一档），原来是 948（≥ 768
+// 那一档、3 列）。列数跟着容器宽走，所以这一处断言也跟着换。
 func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 	b := newUIExplore(t)
 	uiFollowTags(b, map[int]any{0: "默认分组"})
-	// 六个 UP 主：窗口摆得下三列，于是**两行**——行间距量两次，列间距量两次。
+	// 六个 UP 主：窗口摆得下四列（左栏收成下拉之后网格宽 1148 ≥ 1024），
+	// 于是**两行**（4 + 2）——行间距量一次，列间距量三次。
 	uiFollowList(b, 6, []any{
 		uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"),
 		uiFollowUser(13, "第三个 UP"), uiFollowUser(14, "第四个 UP"),
@@ -69,8 +74,8 @@ func TestTheFollowGridHasSixteenBetweenRowsAndColumns(t *testing.T) {
 	waitFrames(t, tt, "列数稳了", func() bool { return f.cols == list.GridColumnsFor(f.width) })
 	tt.Frame()
 
-	if f.cols != 3 {
-		t.Fatalf("网格宽 %v 应该是 3 列，实际是 %d 列", f.width, f.cols)
+	if f.cols != 4 {
+		t.Fatalf("网格宽 %v 应该是 4 列，实际是 %d 列", f.width, f.cols)
 	}
 	if len(f.users) != 6 {
 		t.Fatalf("要六个人才量得出两行，实际是 %d 个", len(f.users))

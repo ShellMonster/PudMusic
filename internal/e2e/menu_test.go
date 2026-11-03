@@ -127,6 +127,22 @@ func TestTheApplicationMenu(t *testing.T) {
 // ⚠️ **编的是根目录那个 main**，不是 `fixture/` 里的那个——要验的就是
 // **这个应用的菜单**，而菜单是应用级的。
 func startRealApp(t *testing.T) (*automationClient, func()) {
+	return startRealAppWith(t, false)
+}
+
+// startRealAppWith 是 `startRealApp` 的内里，`seedSession` 说要不要先往
+// E2E 那份数据目录里塞一份**假**登录态。
+//
+// ⚠️ **为什么要有这一档**：有几页只在「登录了」才出现（侧栏的「我的关注 /
+// 稍后再看 / 历史记录」标了 `HideInMenuWhenLoggedOut`），而 E2E 起的是真
+// 应用——没凭据时它们压根不在菜单里，连路由都进不去。塞一份假 `session.json`
+// 之后应用当「已登录」跑（`fileStore.Load` 只看 SESSDATA 在不在），而那三页
+// 就都能进了。
+//
+// ⚠️ **假的是「登录态」，不是「B 站」**：接口还是会真发（假的 SESSDATA 会被
+// B 站拒），所以「列表拉到没有」走的是**真失败**那条路——而那一档的弹层
+// 三态（「分组没拉出来」）正是要验的。
+func startRealAppWith(t *testing.T, seedSession bool) (*automationClient, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	socketDir, socket, err := makeAutomationSocket()
@@ -135,6 +151,11 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 		t.Fatalf("创建自动化 socket：%v", err)
 	}
 	binary := filepath.Join(socketDir, "biugo-e2e")
+	// ⚠️ **先种凭据再启动**：`fileStore` 读的是启动那一刻的数据目录——
+	// 进程起来之后再写就来不及了（它只在启动时 Load 一次）。
+	if seedSession {
+		seedFakeSession(t, filepath.Join(socketDir, "data"))
+	}
 	var buildOut, buildErr bytes.Buffer
 	build := exec.Command("go", "build", "-tags", "e2e", "-o", binary, ".")
 	build.Dir = repoRoot(t)
@@ -171,6 +192,40 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 	conn := waitForAutomationSocket(t, socket, cmd, &stdout, &stderr)
 	client := &automationClient{conn: conn, enc: json.NewEncoder(conn), dec: bufio.NewReader(conn)}
 	return client, stop
+}
+
+// seedFakeSession 往 E2E 那份数据目录里写一份**假** `session.json`。
+//
+// ⚠️ **只让 `fileStore.Load` 当「已登录」**：判据是 `SESSDATA` 在不在
+// （`credentials.go` 的 `LoggedIn`）——值是不是真的能过 B 站不验（E2E 里
+// 接口真发、真被拒，而那正是「拉失败」那条路）。Cookies 里那三条（SESSDATA /
+// bili_jct / DedeUserID）和顶上的同名字段对齐，不然 `Normalize` 会以 Cookies
+// 为准把上面那三个字段抹掉。
+func seedFakeSession(t *testing.T, dataDir string) {
+	t.Helper()
+	dir := filepath.Join(dataDir, "credentials")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("建凭据目录：%v", err)
+	}
+	session := map[string]any{
+		"SESSDATA":   "e2e-fake-sessdata",
+		"bili_jct":   "e2e-fake-jct",
+		"DedeUserID": "2333",
+		"savedAt":    time.Now().UTC().Format(time.RFC3339),
+		"cookies": []map[string]any{
+			{"name": "SESSDATA", "value": "e2e-fake-sessdata", "domain": ".bilibili.com", "path": "/"},
+			{"name": "bili_jct", "value": "e2e-fake-jct", "domain": ".bilibili.com", "path": "/"},
+			{"name": "DedeUserID", "value": "2333", "domain": ".bilibili.com", "path": "/"},
+		},
+	}
+	blob, err := json.Marshal(session)
+	if err != nil {
+		t.Fatalf("序列化假登录态：%v", err)
+	}
+	// 权限收 0600：`fileStore.readFile` 会把比它宽的权限判成「被放宽」。
+	if err := os.WriteFile(filepath.Join(dir, "session.json"), blob, 0o600); err != nil {
+		t.Fatalf("写假登录态：%v", err)
+	}
 }
 
 // windowTitle 是那个内容窗口的标题。

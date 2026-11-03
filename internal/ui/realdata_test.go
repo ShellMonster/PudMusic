@@ -356,6 +356,12 @@ var realDataLedger = []realDataPage{
 			s.navigate(followPath)
 			realDataWait(t, tt, "关注的 UP 主画出来了",
 				func() bool { return tt.HasText("关注页那位 UP 主") })
+			// ⚠️ **「全部关注(N)」和分组名都在页头下拉里**（#367 改版）：点开
+			// 触发器它们才在画面上——`Want` 里的断言量的是「点开之后的那一屏」。
+			if err := tt.Click("选择关注分组"); err != nil {
+				t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
+			}
+			tt.Frame()
 			return s, tt
 		},
 		// ⚠️ 两条都要：一条是**接口给的真内容**，一条是「全部关注(N)」那个 N——

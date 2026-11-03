@@ -83,12 +83,14 @@ func enumSelect[T comparable](c *ui.Context, value *T, items []enumItem[T], labe
 //
 // MyGo 自己的 `ui.Select` 里那一个没导出（`ui/widgets.go` 的 `chevron`），这里
 // 自己画一个同样的，免得为了一个 10x10 的箭头去改框架。
-func chevronIcon() *ui.SVG {
-	const shape = `<path d="M2.5 4 L5 6.5 L7.5 4"/>`
-	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" ` +
-		`fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" ` +
-		`stroke-linejoin="round">` + shape + `</svg>`))
-}
+func chevronIcon() *ui.SVG { return chevronSVG }
+
+// chevronSVG 是解析好的那一份（`MustParseSVG` 的文档原话就是「解析一次，别在
+// view 里解析」）：解析一次实测 70 次分配 / 5.4 KB，每帧都解析的话一个下拉就
+// 顶爆关注页那一档的帧预算（票 #367 实测 +56 次 / +5.9 KB）。
+var chevronSVG = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" ` +
+	`fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" ` +
+	`stroke-linejoin="round"><path d="M2.5 4 L5 6.5 L7.5 4"/></svg>`))
 
 // settingsSelectH 是设置页下拉收起时的高度（设计规范 §7.9：控件 32 高）。
 const settingsSelectH = 32
