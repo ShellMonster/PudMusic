@@ -1459,6 +1459,10 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 		}
 		return
 	}
+	// 「断点续播」在换上新播放器**之前**记上一首（key + 位置）：这一格要在
+	// position 清零之前落盘（见 playback_resume.go）。锁已经在手里，
+	// 落盘排到锁外做（`rememberPlaybackResumeLocked` 的 go 那一段）。
+	a.rememberPlaybackResumeLocked()
 	old := a.player
 	p.SetSpectrumEnabled(a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	a.player = p
@@ -1479,7 +1483,7 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// ⚠️ **和 `restreamOnline` / `refreshOnlineNow` 同一个规矩**：那两处也是
 	// `a.position = pos` 不夹，只在 `pos < p.Duration()` 时才 Seek。
 	pos := time.Duration(0)
-	if paused {
+	if paused || at > 0 {
 		pos = at
 		if pos < 0 {
 			pos = 0
@@ -1637,6 +1641,11 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 		}
 		p.Pause()
 	} else {
+		// ⚠️ **断点续播也走这一支**（`playOnlineFrom` 的 at 是「从哪儿开始」）：
+		// 换音质 / 换流重开那两路 at 是 0（从头放），而续播那一趟 at > 0。
+		if pos > 0 {
+			p.Seek(pos)
+		}
 		p.Play()
 	}
 	a.publishMedia()
