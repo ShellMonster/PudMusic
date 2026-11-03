@@ -37,6 +37,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -53,9 +54,9 @@ const (
 	// 480 摆得开、在 900 的最小窗口上也不顶边。
 	paletteWidth = 480
 	// paletteTop 是面板顶边离窗口顶边多远：命令面板的惯例位置是「顶上
-	// 约 1/6 处」（VS Code / Raycast 都在那一带），96 在 560 高的最小
-	// 窗口上正好是那个比例。
-	paletteTop = 96
+	// 约 1/6 处」（VS Code / Raycast 都在那一带），Px96（96 DIP）在 560
+	// 高的最小窗口上正好是那个比例——值在 space 那张表上，这里不另写。
+	paletteTop = space.Px96
 	// paletteListMaxH 是命令列表的高度上限，超了滚。
 	paletteListMaxH = 320
 
@@ -194,7 +195,7 @@ func (s *Shell) viewCommandPalette(c *ui.Context) {
 		// 「底下还有一页」看得见——命令面板是叠上去的一小块，不是另一页。
 		back := ui.Row(c).Key("palette-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(ui.RGBA(0, 0, 0, 0.32)).
+			Background(ui.RGBA(0, 0, 0, scrim.Modal)).
 			// ⚠️ **水平居中靠 Row 的主轴**，不是靠绝对定位的百分比 + 负边距
 			//（那套在这个布局里没有「负边距把面板拉回中线」的语义——布局按
 			// inset 摆，LeftPercent 只是左沿）。`Justify(Center)` 让面板中线
