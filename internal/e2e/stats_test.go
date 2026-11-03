@@ -24,6 +24,11 @@ package e2e
 // ⚠️ **它跑的是整个应用**（不是 fixture）：要验的就是这个应用的那一枚图标。
 
 import (
+	"bytes"
+	"encoding/base64"
+	"image"
+	"image/draw"
+	"image/png"
 	"os"
 	"testing"
 	"time"
@@ -77,5 +82,168 @@ func TestTheStatsPage(t *testing.T) {
 		if !treeHasLabel(t, client, window, tab) {
 			t.Errorf("统计页上没有 %q 那一档：\n%s", tab, treeDump(t, client, window))
 		}
+	}
+}
+
+// TestTheStatsEntryHovers 断**真窗口里指针落到那一枚上，悬停反馈真的生效**。
+//
+// # 它修的是什么
+//
+// 那一枚原来把 `.Key("nav-stats")` 链在 `iconKey(...)` **返回之后**——
+// `Element.Key` 是**事后 rekey**（换元素 id），而悬停反馈在**构造时**就按旧
+// 位置 id 去对命中链，于是真窗口里指针落上去既不换主色、也没有悬停淡底。
+// 修法是把 Key 提前到构造之前（`c.Key`，见 navbar.go 那一段）。
+//
+// 界面层那一族（`TestTheStatsEntryLightsUpOnHover`）断的是像素（主色），而**真
+// 窗口里**这一条走 automation：先按 `key:"nav-stats"` 在 tree 里读出那一枚的
+// bounds，用 `input` 发 `pointerMove` 到它的中心，再 `capture` 前后两张 PNG
+// 比对那一块——悬停生效的话那一块必然变（图形变主色、底下多一层淡底）。
+//
+// ⚠️ **比对的是那一枚自己的 bounds，不是全屏**：别处（比如指针移过的路径上）
+// 也可能有像素变，那一枚自己变了才叫「悬停生效」。
+//
+// ⚠️ **要一个真窗口**：跑法和上面那条一样，
+// `BIU_RUN_MYGO_E2E=1 go test -tags e2e ./internal/e2e/ -run TestTheStatsEntryHovers`。
+func TestTheStatsEntryHovers(t *testing.T) {
+	if os.Getenv("BIU_RUN_MYGO_E2E") != "1" {
+		t.Skip("设置 BIU_RUN_MYGO_E2E=1 才运行真窗口 E2E")
+	}
+
+	client, stop := startRealApp(t)
+	defer stop()
+	window := firstContentWindow(t, client)
+
+	// 那一枚在顶栏上，按 Key 找到它并读出 bounds。
+	if !waitForTree(t, client, window, "听歌统计", 20*time.Second) {
+		t.Fatalf("顶栏上没有「听歌统计」那一枚：\n%s", treeDump(t, client, window))
+	}
+	type node struct {
+		Key    any `json:"key"`
+		Bounds struct {
+			X, Y, Width, Height float64
+		} `json:"bounds"`
+	}
+	var tree struct {
+		Nodes []node `json:"nodes"`
+	}
+	if err := automationCall(client, 301, "tree", map[string]any{"window": window}, &tree); err != nil {
+		t.Fatalf("读元素树：%v", err)
+	}
+	var box *node
+	for i := range tree.Nodes {
+		if tree.Nodes[i].Key == "nav-stats" {
+			box = &tree.Nodes[i]
+			break
+		}
+	}
+	if box == nil || box.Bounds.Width == 0 {
+		t.Fatalf("元素树里没有 key=nav-stats 的那一枚：\n%s", treeDump(t, client, window))
+	}
+
+	// ⚠️ **坐标是两个口径**：树的 `bounds` 是**内容区 DIP**，`capture` 的 PNG
+	// 是**像素**——Retina 上 1 DIP = 2 像素，直接把 DIP 当像素用，比对矩形会
+	// 落在那一枚右下方两倍处（P1，非 1× 屏上必然假红）。倍率从 `windows` 的
+	// `contentBounds`（DIP）和 PNG 的宽（像素）算出来，和 counts_test.go 的
+	// `captureGeom`/`captureWindow` 同一份换算。
+	var wins struct {
+		Windows []struct {
+			ID            int `json:"id"`
+			ContentBounds struct {
+				Width float64 `json:"width"`
+			} `json:"contentBounds"`
+		} `json:"windows"`
+	}
+	if err := automationCall(client, 302, "windows", nil, &wins); err != nil {
+		t.Fatalf("问窗口的 contentBounds：%v", err)
+	}
+	var dipW float64
+	for _, w := range wins.Windows {
+		if w.ID == window {
+			dipW = w.ContentBounds.Width
+		}
+	}
+	if dipW <= 0 {
+		t.Fatalf("窗口 %d 的 contentBounds 问不到：%+v", window, wins.Windows)
+	}
+
+	// captureShot 截一张内容区 PNG，返回解码后的 RGBA 和「DIP → 像素」的倍率。
+	//
+	// ⚠️ **`img.(*image.RGBA)` 不许硬断言**：解码路径哪天换了底层类型（NRGBA、
+	// Paletted），硬断言就是 panic 而不是报错。非 RGBA 时 `draw.Draw` 拷一份，
+	// 和 counts_test.go 同款。
+	captureShot := func() (*image.RGBA, float64) {
+		var shot struct {
+			PNG string `json:"png"`
+		}
+		if err := automationCall(client, 303, "capture", map[string]any{"window": window}, &shot); err != nil {
+			t.Fatalf("截窗口：%v", err)
+		}
+		raw, err := base64.StdEncoding.DecodeString(shot.PNG)
+		if err != nil {
+			t.Fatalf("capture 的 PNG 不是 base64：%v", err)
+		}
+		img, err := png.Decode(bytes.NewReader(raw))
+		if err != nil {
+			t.Fatalf("capture 的 PNG 解不开：%v", err)
+		}
+		b := img.Bounds()
+		rgba, ok := img.(*image.RGBA)
+		if !ok {
+			rgba = image.NewRGBA(b)
+			draw.Draw(rgba, b, img, b.Min, draw.Src)
+		}
+		return rgba, float64(b.Dx()) / dipW
+	}
+
+	// 先把指针挪到一个与那一枚无关的地方，截一张「没悬停」的底图。
+	if err := automationCall(client, 304, "input", map[string]any{
+		"window": window,
+		"events": []map[string]any{
+			{"type": "pointerMove", "x": 40, "y": 400},
+		},
+	}, nil); err != nil {
+		t.Fatalf("把指针挪开：%v", err)
+	}
+	_ = automationCall(client, 305, "idle", map[string]any{"window": window, "timeout": 2000}, nil)
+	before, scale := captureShot()
+
+	// 指针落到那一枚的中心，再截一张。
+	cx := box.Bounds.X + box.Bounds.Width/2
+	cy := box.Bounds.Y + box.Bounds.Height/2
+	if err := automationCall(client, 306, "input", map[string]any{
+		"window": window,
+		"events": []map[string]any{
+			{"type": "pointerMove", "x": cx, "y": cy},
+		},
+	}, nil); err != nil {
+		t.Fatalf("把指针落到那一枚上：%v", err)
+	}
+	_ = automationCall(client, 307, "idle", map[string]any{"window": window, "timeout": 2000}, nil)
+	after, _ := captureShot()
+
+	// 那一枚的 bounds（乘上 scale 换成像素）里要有像素真的变了（悬停淡底 +
+	// 图形换色，二者至少其一会把那一块改掉）。容差给 4 个通道级，躲开抗锯齿
+	// 那一两档。
+	x0, y0 := int(box.Bounds.X*scale), int(box.Bounds.Y*scale)
+	x1, y1 := int((box.Bounds.X+box.Bounds.Width)*scale), int((box.Bounds.Y+box.Bounds.Height)*scale)
+	changed := 0
+	for y := y0; y < y1 && y < after.Rect.Max.Y; y++ {
+		for x := x0; x < x1 && x < after.Rect.Max.X; x++ {
+			a, b := before.RGBAAt(x, y), after.RGBAAt(x, y)
+			d := func(p, q uint8) int {
+				if p > q {
+					return int(p) - int(q)
+				}
+				return int(q) - int(p)
+			}
+			if max(d(a.R, b.R), max(d(a.G, b.G), d(a.B, b.B))) > 4 {
+				changed++
+			}
+		}
+	}
+	if changed == 0 {
+		t.Errorf("指针落到 nav-stats（bounds %.0f,%.0f %.0fx%.0f）上之后，那一块一个像素都没变——"+
+			"悬停反馈没生效（`.Key` 在构造之后才调，rekey 换了 id，`Hovered()` 对不上）",
+			box.Bounds.X, box.Bounds.Y, box.Bounds.Width, box.Bounds.Height)
 	}
 }

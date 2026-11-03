@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -119,6 +120,60 @@ func TestTheStatsPageIsReachableFromTheNavbar(t *testing.T) {
 
 	if s.router.Path() != statsPath {
 		t.Errorf("点顶栏那枚没进统计页，停在 %q", s.router.Path())
+	}
+}
+
+// TestTheStatsEntryLightsUpOnHover 钉住「顶栏那枚听歌统计键，指针落上去要亮」。
+//
+// ## 它修的是什么
+//
+// 那一枚原来把 `.Key("nav-stats")` 链在 `iconKey(...)` **返回之后**——而
+// `Element.Key` 是**事后 rekey**（`mygo/ui/context.go` 的 `rekey`：换 `e.id`
+// 和 `e.st`）。悬停反馈是 `iconKey` → `flat.iconButtonAccent` / `feel` 在**构造
+// 时**按当时的位置 id 去问 `Hovered()` 的（`mygo/ui/input.go:1188`：命中链按
+// id 记），而 rekey 之后命中链上挂的是**新**的 keyed id——于是指针明明落在它
+// 上面，`Hovered()` 拿旧 id 去对却永远对不上：**没有主色图形、没有悬停淡底、
+// 提示也挂错 id**。
+//
+// 修法是把 Key 提前：构造**之前**给 `c.Key("nav-stats")`（Context 级 Key，给下
+// 一个控件定身份），那枚按钮从落生那一刻起就是 keyed id——和 `comments_entry.go`
+// 的 `c.Key(commentsButtonKey)` 同一个写法。Key 不能删：真窗口那一族 E2E 靠
+// automation `act` 按 `key:"nav-stats"` 找它（`internal/e2e/stats_test.go`）。
+//
+// 判据和 `TestTheTopBarIconKeysTurnAccentOnHover` 同一把尺子：悬停之后那一枚的
+// 框里必须出现主色像素（`hover:text-primary`），悬停之前一个都不许有。
+//
+// ⚠️ **断「它自己」，不再借「迷你」/「打开文件」那两枚捎带**：它们没链 `.Key`
+// 所以一直是对的——拿它们绿着当「这一排都好」的证据，这一条根本抓不到它。
+func TestTheStatsEntryLightsUpOnHover(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := navBarShell(t, app.DefaultThemePreset, dark)
+			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
+
+			btn, ok := tt.Find("听歌统计")
+			if !ok || btn.W == 0 {
+				t.Fatalf("顶栏上找不到「听歌统计」那一枚，文字有 %q", tt.Texts())
+			}
+			// 指针先离开：那时候画面上一个主色像素都不该有。
+			tt.Move(600, 400)
+			tt.Frame()
+			if n := nearPixels(tt.Image(), btn, want); n != 0 {
+				t.Errorf("没悬停的时候画面上已经有 %d 个主色像素——它平时是前景色的", n)
+			}
+			// 指针落到这一枚上。
+			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
+			tt.Frame()
+			if n := nearPixels(tt.Image(), btn, want); n < 4 {
+				t.Errorf("悬停之后画面上只有 %d 个主色像素（want ≥ 4）——"+
+					"图形没有变主色，悬停对它不生效（`.Key` 在 `iconKey` 返回之后才调，"+
+					"rekey 换了 id，构造时按旧 id 问的 `Hovered()` 永远对不上）", n)
+			}
+		})
 	}
 }
 
