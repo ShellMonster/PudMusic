@@ -314,7 +314,13 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 	releaseTestLock()
 
 	dir := t.TempDir()
-	const rounds = 10
+	// 10 轮不是凑数：修复前实测 20 轮里 17 轮两边都拿到锁，一轮三成的漏检率。
+	// 默认路径砍到 5 轮：坏实现五轮全放过的概率是 0.3^5 ≈ 0.24%，够低；而省下的
+	// 5 次子进程启动在 -race 下是最贵的部分。本地不带 -short 仍跑 10 轮。
+	rounds := 10
+	if testing.Short() {
+		rounds = 5
+	}
 	bothFirst := 0
 	for r := 1; r <= rounds; r++ {
 		// ⚠️ **答案文件必须一轮一个**（这里曾经十轮共用 pa/pb 两个文件）。
@@ -392,7 +398,15 @@ func TestLockSurvivorKeepsForwarding(t *testing.T) {
 	// 「没拿到内核锁的先等 ready 再碰框架那把锁」那一步（见 single_instance.go）。
 	// 这里能做的是：一旦那个顺序被改回去（比如有人图省事把两层调换，或者去掉
 	// ready 那一等），三轮里总会有一轮抓到 socket 被删掉。
-	for round := 1; round <= 3; round++ {
+	//
+	// 默认路径跑 2 轮：一轮有概率撞不上竞态，两轮已经把「socket 被删掉」抓到
+	// 一次的概率提得很高；而每轮是两个 stay 子进程加一轮转交，是这条用例最贵的
+	// 部分。本地不带 -short 仍跑 3 轮。
+	rounds := 3
+	if testing.Short() {
+		rounds = 2
+	}
+	for round := 1; round <= rounds; round++ {
 		t.Run(fmt.Sprintf("第%d轮", round), func(t *testing.T) {
 			survivorRound(t, dir, fmt.Sprintf("r%d", round))
 		})
@@ -509,6 +523,14 @@ func waitAnswerIs(t *testing.T, file, want string) {
 // first。而那两条并发测试在 Windows 上是 `t.Skip` 掉的，这个 bug 谁也没看见。
 // 现在这条不依赖 socket，所以它一定会在 Windows 上跑。
 func TestLockExclusiveIsExclusive(t *testing.T) {
+	// 这条验内核锁本身是互斥的。默认路径由 TestLockRacesTwoFreshProcesses 兜着
+	// ——它每轮子进程都走 lockExclusive，两个进程同时抢不到就是这条红的；「持锁
+	// 进程退出后锁跟着走」那半由 TestLockRejectsASecondProcess 兜着（它先自己拿
+	// 锁、再让子进程撞上来）。这条留的是 Windows 那份独立实现（LockFileEx）的
+	// 单独验证，macOS/Linux 上它验的事上面两条已经覆盖。子进程三连起是整包最贵
+	// 的单点之一，所以挂 Short。
+	testproc.Slow(t, "内核锁互斥在默认路径已由 TestLockRacesTwoFreshProcesses / "+
+		"TestLockRejectsASecondProcess 覆盖，这里单验 Windows 的 LockFileEx 分支")
 	isolateLockDir(t)
 	// 本进程不许占着锁，否则第一个子进程就抢不到了。
 	releaseTestLock()
@@ -616,6 +638,12 @@ func TestTheReadySignalSurvivesTheHeldLock(t *testing.T) {
 // 所以这里量的是**时间**：第一个实例已经写好 ready 之后，后来者必须在 1 秒内被放行。
 // 1 秒是 `lockPollEvery` 的六十多倍，正常路径一次轮询就该读到。
 func TestALateStarterDoesNotWaitForTheTimeout(t *testing.T) {
+	// 判的是「第二实例不等兜底」：ready 在的时候一次轮询就该读到。默认路径由
+	// TestLockSurvivorKeepsForwarding 兜着——它第三个实例必须拿到 second，socket
+	// 没了/ready 读不到的话那条先红。这里多验的是时间上限本身（1 秒 vs 5 秒兜底），
+	// 是一个 stay 子进程加一个完整 Lock() 往返，属于「量墙钟」的那类，挂 Short。
+	testproc.Slow(t, "「后来者立刻就绪」由 TestLockSurvivorKeepsForwarding 的"+
+		" third-instance 转交兜着，这里单验时间上限")
 	if runtime.GOOS == "windows" {
 		t.Skip("这条要两个进程各走一段 Lock（第一个还要真的建框架的 socket），" +
 			"在 Windows 上要等真机；Windows 那份 ready 读写由上面两条同进程地兜住")

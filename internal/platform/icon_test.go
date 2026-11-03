@@ -74,6 +74,7 @@ func readIconSource(t *testing.T) []byte {
 // 这条断的是**下限**，不是「必须正好是 1024」：图源给 2048 没问题（只是白占
 // 几 MB），给 512 则一定是缺陷。
 func TestTheArtworkIsBigEnoughForEverySize(t *testing.T) {
+	t.Parallel()
 	img, err := png.Decode(bytes.NewReader(iconSource))
 	if err != nil {
 		t.Fatalf("icon-source.png 不是合法的 PNG：%v", err)
@@ -98,6 +99,7 @@ func TestTheArtworkIsBigEnoughForEverySize(t *testing.T) {
 // 换个满幅不满幅的图源，症状不是报错：多留一圈白、或者圆角被切两次，出来的图标
 // 在 Dock 上是一块比别的应用小一圈的方块——**没有任何测试会红**。
 func TestTheArtworkIsFullBleed(t *testing.T) {
+	t.Parallel()
 	img, err := png.Decode(bytes.NewReader(iconSource))
 	if err != nil {
 		t.Fatalf("解 icon-source.png：%v", err)
@@ -137,6 +139,7 @@ func TestTheArtworkIsFullBleed(t *testing.T) {
 // 而且**没有任何地方会报错**——MyGo 照样渲出全部尺寸，只是图案已经不是代码里
 // 描述的那个。修法：`go generate ./internal/platform/`。
 func TestTheShippedIconIsTheOneTheCodeDraws(t *testing.T) {
+	t.Parallel()
 	want, err := AppIconPNG(1024)
 	if err != nil {
 		t.Fatalf("画图标：%v", err)
@@ -179,6 +182,7 @@ func TestTheShippedIconIsTheOneTheCodeDraws(t *testing.T) {
 // 平均没了（暖掉到 0，Dock 上是一块青绿的方块），或者底被吃掉（冷掉到 0）。
 // 真正糊掉的中间地带用肉眼在 32px 上看过，那张图还认得出是一只张着嘴的鸟。
 func TestEverySizeInTheSetStillReadsAsTheSubject(t *testing.T) {
+	t.Parallel()
 	for _, s := range append(append([]int{}, macIconSizes...), winIconSizes...) {
 		checkSizeStillReadsAsTheSubject(t, s)
 	}
@@ -275,6 +279,7 @@ func isDisc(c color.NRGBA) bool { return c.R < 90 && c.G < 90 && c.B < 90 }
 //   - **上下**：唱片落在 **50%~65%**（下半）—— 不是「居中」，是「别回到正中」
 //     （回到正中，红日的圆顶就又被上边切掉了，那正是用户要修的那件事）。
 func TestTheSubjectSitsInTheMiddle(t *testing.T) {
+	t.Parallel()
 	// 量的是**源图**（`iconArt()`），不是画出来的那一档：取景这件事发生在源图上，
 	// 而画的时候图案方块是**居中**贴进画布的（`fillIcon`），源图的中心也就是
 	// 图标的中心。拿 1024 那一档量，边缘的抗锯齿不会把小块吃掉。
@@ -303,6 +308,7 @@ func TestTheSubjectSitsInTheMiddle(t *testing.T) {
 // 有就说明日顶被上边削平了（那一版日是个被平切的弧，看着像缺了一块）。
 // 当前这张图里红日从画布的 **20.7%** 处才开始（上面留着天），余量很足。
 func TestTheSunIsNotCutAtTheTop(t *testing.T) {
+	t.Parallel()
 	art, err := iconArt()
 	if err != nil {
 		t.Fatalf("读源图：%v", err)

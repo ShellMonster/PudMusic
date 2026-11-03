@@ -327,10 +327,17 @@ func TestRateKeepsThePitch(t *testing.T) {
 		rate = 44100
 		f0   = 440.0
 	)
-	src := tone(rate, 1, f0, 1.5)
+	// dominantFreq 要 got 里有 ≥16384 帧才能开窗。最快档（2×）的输出约是
+	// 源的一半，所以 0.8 秒的源给出 ~17600 帧——刚刚盖住窗长，留一跳余量。
+	// 原来是 1.5 秒：七档里六档的输出都比窗长富余好几倍，多出来的部分对
+	// 「主峰 argmax」这条判据一个字都不贡献。
+	const pitchSeconds = 0.8
+	src := tone(rate, 1, f0, pitchSeconds)
 
 	for _, r := range RateSteps {
+		r := r
 		t.Run(rateLabel(r), func(t *testing.T) {
+			t.Parallel()
 			v := newVarispeed(&memDec{samples: src, ch: 1, rate: rate})
 			v.setRate(r)
 			got := drain(t, v, 1)
@@ -357,12 +364,19 @@ func TestRateKeepsThePitch(t *testing.T) {
 func TestRateShortensAndLengthens(t *testing.T) {
 	const (
 		rate = 44100
-		n    = 44100 * 2 // 两秒
+		// 断言是 输出:源 = 1:倍率 外加 max(6跳, 2%) 的容差——
+		// 它只跟「走了多少跳」有关，总长不进判据。0.6 秒够每个倍率走出
+		// 二十几跳（慢的 0.5 倍速也走十几跳），把 6 跳的容差钉死在噪声底下。
+		// 原来是 2 秒，其中一秒半都只是把这个比值多量了几遍。
+		lenSeconds = 0.6
+		n          = int(44100 * lenSeconds)
 	)
-	src := tone(rate, 2, 440, 2)
+	src := tone(rate, 2, 440, lenSeconds)
 
 	for _, r := range RateSteps {
+		r := r
 		t.Run(rateLabel(r), func(t *testing.T) {
+			t.Parallel()
 			v := newVarispeed(&memDec{samples: src, ch: 2, rate: rate})
 			v.setRate(r)
 			frames := int64(len(drain(t, v, 2)) / 2)
@@ -390,12 +404,21 @@ func TestSetPositionLandsWhereItWasAsked(t *testing.T) {
 	const (
 		rate = 44100
 		f0   = 330
+		// 判据是「第二跳对位的落点离名义位置 ≤ 2×search」。它只关心 seek 之后
+		// 头两跳——素材多长不进判据，只要够 seekTo 之后还铺得出两跳、且
+		// bestOffset 的 ±4 跳搜索窗不探出素材边界。1 秒的源、seek 到正中，
+		// 最慢的 0.5× 也只消耗 seekTo 之后 0.1 秒的源。原来是 6 秒/seek 到
+		// 3 秒，其中五秒都在给对位扫描提供永远扫不到的背景。
+		seekSeconds   = 1.0
+		seekToSeconds = 0.5
 	)
-	src := gritty(tone(rate, 1, f0, 6))
+	src := gritty(tone(rate, 1, f0, seekSeconds))
 
 	for _, r := range []float64{0.5, 0.75, 1, 1.5, 2} {
+		r := r
 		t.Run(rateLabel(r), func(t *testing.T) {
-			seekTo := int64(rate * 3) // 第三秒
+			t.Parallel()
+			seekTo := int64(rate * seekToSeconds)
 			v := newVarispeed(&memDec{samples: src, ch: 1, rate: rate})
 			v.setRate(r)
 			if err := v.SetPosition(seekTo); err != nil {
@@ -431,12 +454,19 @@ func TestSetPositionLandsWhereItWasAsked(t *testing.T) {
 func TestSourceAtWalksTheSong(t *testing.T) {
 	const (
 		rate = 44100
-		n    = 44100 * 3
+		// 判据三条：位置单调、斜率 1/倍率（容差 4跳+5%）、读完落在源长上
+		//（±6跳）。斜率每读 2048 帧就断一次，1 秒素材每档断 21~43 次——
+		// 抓「斜率错」绰绰有余。原来是 3 秒，多出来的只是把同一个斜率又量
+		// 了两遍。
+		walkSeconds = 1.0
+		n           = int(44100 * walkSeconds)
 	)
-	src := tone(rate, 2, 440, 3)
+	src := tone(rate, 2, 440, walkSeconds)
 
 	for _, r := range []float64{0.5, 1, 1.75, 2} {
+		r := r
 		t.Run(rateLabel(r), func(t *testing.T) {
+			t.Parallel()
 			v := newVarispeed(&memDec{samples: src, ch: 2, rate: rate})
 			v.setRate(r)
 			buf := make([]float32, 2048*2)
@@ -548,8 +578,15 @@ func TestSetRateMidStreamDoesNotJump(t *testing.T) {
 // 把用例打红。所以哪天有人把它调短了，是立刻发现，而不是悄悄地少验了后面几档
 // ——十二秒那会儿是白留了六秒（这一条 `-race` 下曾是整包最贵的单点）。
 func TestChangingRateMidStreamNeverGoesBackwards(t *testing.T) {
-	const rate = 44100
-	src := gritty(tone(rate, 1, 440, 6))
+	const (
+		rate = 44100
+		// 下限的量法见下面注释（3.3 秒）：4.5 秒是下限的 1.36 倍，留的是
+		// 「第 N 档就把源读完」那条红——素材真不够时它先报。原来是 6 秒，
+		// 是下限的一倍半；改成 4.5 秒省 25%，判据（绝对 256 帧 + 不读完会红）
+		// 一个字没动。
+		midStreamSeconds = 4.5
+	)
+	src := gritty(tone(rate, 1, 440, midStreamSeconds))
 
 	for _, step := range []struct {
 		name string
@@ -559,7 +596,9 @@ func TestChangingRateMidStreamNeverGoesBackwards(t *testing.T) {
 		{"慢到快", []float64{0.5, 0.75, 1, 1.25, 1.5, 1.75, 2}},
 		{"来回", []float64{2, 0.5, 2, 0.5, 1}},
 	} {
+		step := step
 		t.Run(step.name, func(t *testing.T) {
+			t.Parallel()
 			v := newVarispeed(&memDec{samples: src, ch: 1, rate: rate})
 			buf := make([]float32, 2048)
 
@@ -797,7 +836,9 @@ func TestPlayerSeekIsExactAtAnyRate(t *testing.T) {
 	want := 10 * time.Second
 
 	for _, r := range RateSteps {
+		r := r
 		t.Run(rateLabel(r), func(t *testing.T) {
+			t.Parallel()
 			p := New(&memDec{samples: src, ch: 1, rate: rate})
 			defer p.Close()
 			p.SetRate(r)

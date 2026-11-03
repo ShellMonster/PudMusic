@@ -33,7 +33,11 @@ func openFiles(t *testing.T) int {
 // that skips through a hundred tracks would run out.
 func TestCloseReleasesTheFile(t *testing.T) {
 	for _, name := range []string{"stereo16.flac", "stereo16.mp4", "stereo24.flac", "mono16.mp4"} {
+		name := name
 		t.Run(name, func(t *testing.T) {
+			// 不并行：这条数的是**本进程**的 fd 数，隔壁子测试同时开关文件会把
+			// 计数搅浑（实测并行跑全红：「after closing, 17 files still open,
+			// was 6」——那是别人手里的 fd，不是这条漏的）。
 			before := openFiles(t)
 			// Open several at once: a leak shows up as a rise that never comes back.
 			var decoders []*flacdec.Decoder

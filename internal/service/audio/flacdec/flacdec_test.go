@@ -29,7 +29,9 @@ func TestInterleaving(t *testing.T) {
 		{"stereo16.wav", "stereo16.flac", "stereo16.mp4"},
 		{"stereo24.wav", "stereo24.flac", "stereo24.mp4"},
 	} {
+		c := c
 		t.Run(c.flac, func(t *testing.T) {
+			t.Parallel()
 			src := readWAV(t, filepath.Join("testdata", c.wav))
 			want := make([]float32, len(src.samples))
 			for i, v := range src.samples {
@@ -107,7 +109,9 @@ func TestFormat(t *testing.T) {
 // position lands just as well.
 func TestSeekAccuracy(t *testing.T) {
 	for _, name := range append(stereoFixtures, "mono16.flac", "mono16.mp4") {
+		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			src := readWAV(t, wavOf(name))
 			d := open(t, name)
 			ch := d.Channels()
@@ -140,7 +144,9 @@ func TestSeekAccuracy(t *testing.T) {
 // past the end, before the start, and reading after seeking to the end.
 func TestSeekEdges(t *testing.T) {
 	for _, name := range append(stereoFixtures, "mono16.flac", "mono16.mp4") {
+		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			d := open(t, name)
 			total := d.Len()
 			if total < 2 {
@@ -208,10 +214,20 @@ func TestEOF(t *testing.T) {
 // an error rather than a clean end: a partial download must never play as if it
 // were the whole track.
 func TestTruncated(t *testing.T) {
+	// 判据是「切掉尾巴之后不能干净地 io.EOF」：切点比例本身不进判据，
+	// 七个比例只是在给「切在哪都会报错」留余量。默认路径跑三个代表点
+	//（开头刚过 STREAMINFO、中间、几乎到底），已经够把「把半首歌当整首放」
+	// 那种回归钉死；本地不带 -short 跑全量七个。
+	cuts := []float64{0.1, 0.5, 0.99}
+	if !testing.Short() {
+		cuts = []float64{0.1, 0.3, 0.5, 0.75, 0.9, 0.99, 0.999}
+	}
 	for _, name := range append(stereoFixtures, "mono16.flac", "mono16.mp4") {
+		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			full := readFile(t, filepath.Join("testdata", name))
-			for _, cut := range []float64{0.1, 0.3, 0.5, 0.75, 0.9, 0.99, 0.999} {
+			for _, cut := range cuts {
 				n := int(float64(len(full)) * cut)
 				d, err := flacdec.New(full[:n])
 				if err != nil {
@@ -234,7 +250,9 @@ func TestTruncated(t *testing.T) {
 // STREAMINFO declared can tell a short file from a whole one.
 func TestTruncatedAtFrameBoundary(t *testing.T) {
 	for _, name := range []string{"stereo16.flac", "stereo24.flac", "mono16.flac"} {
+		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			full := readFile(t, filepath.Join("testdata", name))
 			bounds := frameOffsets(t, full)
 			if len(bounds) < 3 {
@@ -243,7 +261,18 @@ func TestTruncatedAtFrameBoundary(t *testing.T) {
 			// bounds[0] cuts nothing, and the last entry is where parsing ran out,
 			// which is the end of the stream rather than a frame boundary: cutting
 			// there leaves the whole track, which must decode cleanly.
-			for _, off := range bounds[1 : len(bounds)-1] {
+			//
+			// 每个边界都验一遍是本包里最贵的单点之一（这条用例曾占整包
+			// -race 时间近一半）。判据是「切在任何一个**完好的**帧边界上都要报
+			// ErrTruncated」——切在哪个边界不进判据，全量扫只是在给「任何一处
+			// 都可能漏」留余量。默认路径取首、中、尾三个代表：把 STREAMINFO
+			// 的样本数校验钉死在「它真的会比对」这件事上，而不是「比对了 40 次」。
+			// 本地不带 -short 跑全量。
+			check := bounds[1 : len(bounds)-1]
+			if testing.Short() && len(check) > 3 {
+				check = []int64{check[0], check[len(check)/2], check[len(check)-1]}
+			}
+			for _, off := range check {
 				if off <= 0 || off >= int64(len(full)) {
 					t.Fatalf("%s: frame boundary %d is outside the file", name, off)
 				}

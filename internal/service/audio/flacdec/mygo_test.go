@@ -56,7 +56,9 @@ func TestMyGoReadSound(t *testing.T) {
 		{"stereo24.wav", "stereo24.flac", 4},
 		{"mono16.wav", "mono16.flac", 2},
 	} {
+		c := c
 		t.Run(c.flac, func(t *testing.T) {
+			t.Parallel()
 			d, err := flacdec.New(readFile(t, filepath.Join("testdata", c.flac)))
 			if err != nil {
 				t.Fatal(err)
@@ -90,7 +92,9 @@ func wantLength(name string) time.Duration {
 
 func TestMyGoPlayer(t *testing.T) {
 	for _, name := range []string{"stereo16.flac", "stereo16.mp4", "mono16.mp4"} {
+		name := name
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			d, err := flacdec.OpenFile(filepath.Join("testdata", name))
 			if err != nil {
 				t.Fatal(err)

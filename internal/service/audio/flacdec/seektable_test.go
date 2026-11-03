@@ -26,22 +26,26 @@ func TestSeekTable(t *testing.T) {
 	withTable := addSeekTable(t, data, 1.0)
 
 	t.Run("seeks land where they say", func(t *testing.T) {
+		t.Parallel()
 		checkSeeks(t, withTable)
 	})
 
 	t.Run("a wrong offset falls back to the index", func(t *testing.T) {
+		t.Parallel()
 		broken := addSeekTable(t, data, 1.0)
 		corruptSeekTable(t, broken, func(p []byte) { binary.BigEndian.PutUint64(p[8:], 1<<20) })
 		checkSeeks(t, broken)
 	})
 
 	t.Run("a wrong sample number falls back to the index", func(t *testing.T) {
+		t.Parallel()
 		broken := addSeekTable(t, data, 1.0)
 		corruptSeekTable(t, broken, func(p []byte) { binary.BigEndian.PutUint64(p[:8], 999999) })
 		checkSeeks(t, broken)
 	})
 
 	t.Run("a table of nothing but placeholders is ignored", func(t *testing.T) {
+		t.Parallel()
 		broken := addSeekTable(t, data, 1.0)
 		corruptSeekTable(t, broken, func(p []byte) { binary.BigEndian.PutUint64(p[:8], 0xFFFFFFFFFFFFFFFF) })
 		d, err := flacdec.New(broken)
