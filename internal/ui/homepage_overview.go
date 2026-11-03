@@ -188,7 +188,7 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 	scroll := ui.Scroll(c).Key("home:overview").Grow(1).TrackScroll(&h.ovScroll)
 	scroll.Children(func() {
 		col := ui.Column(c).Key("home:overview:body").FillWidth().Gap(space.Px28).
-			Padding(space.Px20, scrollbar.HotZone, space.Px24, space.None)
+			Padding(space.Px48, scrollbar.HotZone, space.Px24, space.None)
 		col.Children(func() {
 			// Prototype order: greeting and mood filters lead the page.
 			ui.Text(c, "TUE · 11.03 · 晚上 9:41").FontSize(scale.Font(c, scale.Size12)).
