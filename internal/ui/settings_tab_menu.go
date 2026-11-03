@@ -20,6 +20,7 @@ package ui
 
 import (
 	"slices"
+	"strconv"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -32,10 +33,111 @@ const menuGroupName = "系统默认菜单"
 
 // settingsMenu 是菜单那一页。
 func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
-	// 两张分组卡片：「系统默认菜单」（哪些入口看得见）和「侧栏」（折叠、宽度），
+	// 三张分组卡片：「系统默认菜单」（哪些入口看得见）、「收藏夹」（哪些收藏夹
+	// 摆得上侧栏）和「侧栏」（折叠、宽度），
 	// 和常规页同一套写法（设计规范 §7.9）。
 	s.settingGroup(c, menuGroupName, func() { s.pickMenuVisibility(c, st, ro) })
+	s.settingGroup(c, "收藏夹", func() { s.pickFavoriteVisibility(c, st, ro) })
 	s.settingGroup(c, "侧栏", func() { s.pickSideMenu(c, st, ro) })
+}
+
+// pickFavoriteVisibility 是「哪些收藏夹摆得上侧栏」那一组勾选框。
+//
+// 收藏夹行上的右键菜单有「隐藏」（`sidebar_favorites.go` 的 `favoriteAction`），
+// 藏掉的那一笔写进 `hiddenMenuKeys`——**和上面「系统默认菜单」是同一份名单**：
+// 菜单项存路由（"/later"），收藏夹存十进制 id（Biu 的 `String(item.id)`）。这一组
+// 是那份名单的**另一半**：藏进侧栏的收藏夹只有在这里才放得回来。
+//
+// 勾选语义和上面那组一样：勾上 = 侧栏看得见 = 不在 `hiddenMenuKeys` 里。写回走
+// `setFavoriteHidden`，它只动这一个键——名单里菜单项那几笔、别的收藏夹那几笔
+// 都原样留着（`mergeHiddenMenuKeys` 那一条的同一个理由）。
+func (s *Shell) pickFavoriteVisibility(c *ui.Context, st app.Settings, ro bool) {
+	t := c.Theme()
+	hidden := hiddenMenuKeys(st)
+
+	// 两组收藏夹挨着列：「我创建的」在上、「我收藏的」在下，和侧栏同一个顺序。
+	seen := make(map[string]bool)
+	any := false
+	for g := range favGroups {
+		grp := app.FavoriteGroup(g)
+		items := s.app.SideFavorites(grp)
+		if len(items) == 0 {
+			continue
+		}
+		any = true
+		ui.Text(c, grp.String()).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(t.TextMuted).Padding(space.Px8, space.None, space.Px2, space.None)
+		for _, f := range items {
+			key := strconv.FormatInt(f.ID, 10)
+			seen[key] = true
+			on := !hidden[key]
+			title := f.Title
+			if title == "" {
+				title = "（没名字）"
+			}
+			ui.Row(c).FillWidth().Padding(space.Px8, space.None).AlignItems(ui.Center).
+				Children(func() {
+					if ui.Checkbox(c, &on, title).
+						Label("在侧栏里显示收藏夹「" + title + "」").
+						Disabled(ro).Changed() {
+						s.setFavoriteHidden(f.ID, !on)
+					}
+				})
+		}
+	}
+
+	// 名单里还留着、可收藏夹已经不在接口返回里的那些 id（在 B 站那边删了、
+	// 或者换过账号）：摆出来是为了能清掉——不然那几笔永远躺在设置文件里。
+	var orphans []string
+	for _, k := range st.HiddenMenuKeys {
+		if _, err := strconv.ParseInt(k, 10, 64); err == nil && !seen[k] {
+			orphans = append(orphans, k)
+		}
+	}
+	for _, k := range orphans {
+		any = true
+		off := false
+		ui.Row(c).FillWidth().Padding(space.Px8, space.None).AlignItems(ui.Center).
+			Children(func() {
+				if ui.Checkbox(c, &off, "收藏夹 "+k+"（已不在列表里）").
+					Label("取消隐藏已不在列表里的收藏夹 " + k).
+					Disabled(ro).Changed() {
+					s.setFavoriteHidden(mustID(k), false)
+				}
+			})
+	}
+
+	if !any {
+		ui.Text(c, s.favEmptyText(s.app.LoggedIn())).
+			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
+			Padding(space.Px8, space.None)
+	}
+}
+
+// setFavoriteHidden 把这一个收藏夹在 `hiddenMenuKeys` 里写进 / 拿掉。
+//
+// 不走 `setHiddenMenuKeys`：那一个要的是「这一组的 keys + 勾上的 keys」，
+// 而收藏夹这组没有「全选」，逐行写就行——只动这一个 id，名单里别的键
+// （菜单项、别的收藏夹）一个都不碰。
+func (s *Shell) setFavoriteHidden(id int64, hide bool) {
+	key := strconv.FormatInt(id, 10)
+	s.applySetting("收藏夹显示", func(cur *app.Settings) {
+		if hide {
+			if !slices.Contains(cur.HiddenMenuKeys, key) {
+				cur.HiddenMenuKeys = append(slices.Clone(cur.HiddenMenuKeys), key)
+			}
+			return
+		}
+		cur.HiddenMenuKeys = slices.DeleteFunc(slices.Clone(cur.HiddenMenuKeys),
+			func(k string) bool { return k == key })
+	})
+}
+
+// mustID 把一个十进制字符串转回 id。**只有 ParseInt 过得去的才走到这**
+// （见 pickFavoriteVisibility 里 orphans 的判定）。
+func mustID(k string) int64 {
+	id, _ := strconv.ParseInt(k, 10, 64)
+	return id
 }
 
 // pickMenuVisibility 是「哪些菜单项看得见」那一组勾选框。
