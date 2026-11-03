@@ -111,6 +111,12 @@ type CreatedFolder struct {
 	MediaCount int
 	// Faved 是**这条内容**在不在里面。选择弹窗就是拿它填初始勾选的。
 	Faved bool
+	// Invalid 是「这个收藏夹已经失效」（UP 主删了、或设成仅自己可见）。
+	//
+	// ⚠️ **created/list 不返回它**：这个字段是 app 层「挨个问 folder/info」
+	// 核对之后填上的（见 `favorites_refresh.go` 的 `markDeadCreated`）——
+	// 所以这里读到的一定是「这一层问出来的结论」，不是接口给的。
+	Invalid bool
 }
 
 // createdListData 是 created/list 的 `data` 段。
