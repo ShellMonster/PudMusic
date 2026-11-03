@@ -87,4 +87,7 @@ func (s *Shell) viewAppearance(c *ui.Context, _ *ui.Route) {
 			})
 		})
 	})
+	// 同设置页：滚动条指针压上去深一档的悬停追踪（`trackScrollbar`）——
+	// 漏了的话这一页的滚动条永远停在默认色，和设置页不一样。
+	s.trackScrollbar(scroll)
 }
