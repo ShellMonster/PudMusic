@@ -940,7 +940,10 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	btn := flat.Button(c, "").Label(countKeyLabel("收藏", count)).
 		Height(iconHitMd).Padding(space.None, space.Px7)
 	btn.Children(func() {
-		countKeyIcon(c, favIcon(faved), btn.Hovered(), btn.Pressed(), count)
+		// ⚠️ **缺口色 = 按钮底下那块底**：播放条那一列的底是
+		// `coverWash(t.Background)`（和这一列自己同一个来源）。
+		countKeyIcon(c, favIcon(faved), btn.Hovered(), btn.Pressed(), count,
+			s.coverWash(c.Theme(), c.Theme().Background))
 	})
 	if faved {
 		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
