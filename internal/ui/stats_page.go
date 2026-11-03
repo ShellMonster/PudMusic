@@ -48,8 +48,18 @@ const (
 	statsTabAll
 )
 
-// statsTabNames 是四档上面的字。
-var statsTabNames = []string{"日", "周", "月", "全部"}
+// statsTabNames 是原型上可见的三档时间范围。
+// 底层仍保留「日」统计，供趋势和历史数据计算使用，但不在主导航中暴露。
+var statsTabNames = []string{"本周", "本月", "今年"}
+
+var statsVisibleTabs = [...]statsTab{statsTabWeek, statsTabMonth, statsTabAll}
+
+func statsVisibleTab(index int) statsTab {
+	if index < 0 || index >= len(statsVisibleTabs) {
+		return statsTabWeek
+	}
+	return statsVisibleTabs[index]
+}
 
 // statsPageState 是这一页自己的状态。
 //
@@ -93,7 +103,7 @@ type statsPageState struct {
 //
 // ⇒ 所以这里显式给 -1（和 `localPage` 的 `sel: -1` 一个道理）。
 func newStatsPageState() *statsPageState {
-	st := &statsPageState{trackSel: -1, artistSel: -1}
+	st := &statsPageState{trackSel: -1, artistSel: -1, tab: statsTabWeek, tabIndex: 0}
 	return st
 }
 

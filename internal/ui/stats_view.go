@@ -86,6 +86,8 @@ func (s *Shell) viewStats(c *ui.Context, _ *ui.Route) {
 	scroll.Children(func() {
 		ui.Column(c).FillWidth().Padding(space.None, pagePadX).Gap(space.Px16).
 			Children(func() {
+				ui.Text(c, "LISTENING").FontSize(scale.Font(c, scale.Size12)).
+					TextColor(c.Theme().TextMuted)
 				// 页头：标题。
 				ui.Text(c, "听歌统计").FontSize(scale.Font(c, scale.PageTitle))
 
@@ -136,7 +138,7 @@ func (s *Shell) syncStats(c *ui.Context) {
 	st := &s.statsPage
 	// ⚠️ **换档就重新拿**：四档的数字必须对得上档。
 	if st.tabIndex != int(st.tab) {
-		st.setTab(statsTab(st.tabIndex))
+		st.setTab(statsVisibleTab(st.tabIndex))
 		st.refresh(s.app)
 		st.loaded = true
 		return
@@ -147,7 +149,7 @@ func (s *Shell) syncStats(c *ui.Context) {
 	//
 	// ⚠️ **这里只管换档**：换档要重新算一遍（那一档是另一段区间）。
 	if st.tabIndex != int(st.tab) {
-		st.setTab(statsTab(st.tabIndex))
+		st.setTab(statsVisibleTab(st.tabIndex))
 		st.refresh(s.app)
 		st.loaded = true
 	}
