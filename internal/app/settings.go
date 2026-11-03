@@ -426,6 +426,13 @@ type Settings struct {
 	// 它们之间就没有「谁先谁后」的竞态（见 playback_state.go 文件头那张表）。
 	Playback PlaybackSnapshot `json:"playback"`
 
+	// PlaybackResume 是「断点续播」那一格：上次在放哪一首 + 放到哪儿了。
+	//
+	// 它和 `playback` 是两件事：那一格恢复的是**队列的样子**（停在那儿、
+	// 不出声），这一格恢复的是**正在听这件事**（接着放、出声）。只加可选键，
+	// 不涨 SchemaVersion（先例见 `SideMenuCollectionOrder`）。
+	PlaybackResume PlaybackResume `json:"playbackResume"`
+
 	// DynamicSeen 是「动态红点看到哪儿了」。
 	DynamicSeen DynamicSeen `json:"dynamicSeen"`
 }
