@@ -553,7 +553,7 @@ func DefaultSettings(downloadPath string) Settings {
 		PageTransition:    PageTransitionNone,
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
-		SideMenuCollapsed: false,
+		SideMenuCollapsed: true,
 		SideMenuWidth:     DefaultSideMenuWidth,
 		SideMenuCollectionOrder: SideMenuCollectionOrder{
 			Created:   []int64{},
