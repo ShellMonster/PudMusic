@@ -63,8 +63,9 @@ const (
 // 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
 const (
-	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。
-	CollapsedSideMenuWidth = 64.0
+	// Cobalt 原型 rail：宽 88，菜单使用图标胶囊和中文标签。
+	// 展开态仍可拖拽 180 到 300，保留原有可调整壳层行为。
+	CollapsedSideMenuWidth = 88.0
 	MinSideMenuWidth       = 180.0
 	MaxSideMenuWidth       = 300.0
 	DefaultSideMenuWidth   = 220.0
