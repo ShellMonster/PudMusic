@@ -315,6 +315,11 @@ platforms="$(IFS=,; echo "${targets[*]}")"
 # macos.signingIdentity，是 ad hoc）。这一条链只管自动更新。
 go tool mygo build -platform "$platforms"
 
+# 产物名换成平台友好的那一套（Apple-Silicon_macOS / Intel_macOS /
+# Windows_x86_64 / Windows_ARM64），清单里的下载地址一并改掉——
+# 签名签的是文件内容，改名不用重签。
+scripts/rename-release-assets.sh "${targets[@]}"
+
 # 收集产物，并且**核每一个目标都真的产出了带签名的清单**。
 #
 # 这是整个脚本最要紧的一道检查：没有私钥时 MyGo 不报错，它只是不打更新文件，

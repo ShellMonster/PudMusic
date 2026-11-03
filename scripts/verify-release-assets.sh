@@ -29,6 +29,18 @@ EOF
 [ -n "$slug" ] || { printf 'mygo.json 没有 slug\n' >&2; exit 1; }
 [ -n "$version" ] || { printf 'mygo.json 没有 version\n' >&2; exit 1; }
 
+# platform_label 把 GOOS/GOARCH 翻成资产名里那一段（和
+# `rename-release-assets.sh` 里那份同一个约定）。
+platform_label() {
+  case "$1" in
+    darwin/arm64)  echo "Apple-Silicon_macOS" ;;
+    darwin/amd64)  echo "Intel_macOS" ;;
+    windows/amd64) echo "Windows_x86_64" ;;
+    windows/arm64) echo "Windows_ARM64" ;;
+    *) echo "" ;;
+  esac
+}
+
 for platform in "${targets[@]}"; do
   case "$platform" in
     darwin/arm64|darwin/amd64|windows/amd64|windows/arm64) ;;
@@ -36,8 +48,12 @@ for platform in "${targets[@]}"; do
   esac
 
   target="${platform//\//-}"
+  label="$(platform_label "$platform")"
   dir="$out/$target"
-  archive="$dir/$slug-$version-$target.tar.gz"
+  # ⚠️ **归档/安装包用品牌名 PudMusic**，不是 mygo.json 的 slug（slug 只能
+  # 小写，而展示在 release 页上的名字按品牌拼——`rename-release-assets.sh`
+  # 里那一处注释）。清单文件名（update-<target>.json）不带 slug，不动。
+  archive="$dir/PudMusic-$version-$label.tar.gz"
   manifest="$dir/update-$target.json"
   [ -d "$dir" ] || { printf '缺少产物目录：%s\n' "$dir" >&2; exit 1; }
   [ -f "$archive" ] || { printf '%s 缺少更新归档：%s\n' "$target" "$archive" >&2; exit 1; }
@@ -45,13 +61,11 @@ for platform in "${targets[@]}"; do
 
   case "$platform" in
     darwin/*)
-      arch="${platform#*/}"
-      package="$dir/$slug-$version-$arch.dmg"
+      package="$dir/PudMusic-$version-$label.dmg"
       [ -f "$package" ] || { printf '%s 缺少 macOS 安装包：%s\n' "$target" "$package" >&2; exit 1; }
       ;;
     windows/*)
-      arch="${platform#*/}"
-      package="$dir/$slug-setup-$version-$arch.exe"
+      package="$dir/PudMusic-setup-$version-$label.exe"
       [ -f "$package" ] || { printf '%s 缺少 Windows 安装包：%s\n' "$target" "$package" >&2; exit 1; }
       ;;
   esac
