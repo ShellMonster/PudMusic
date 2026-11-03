@@ -28,10 +28,12 @@
 // 所以这一层**认它，但认不出来时按收藏夹处理**（11）：那是「最多打不开」，
 // 而「整条失败」会让用户以为自己收藏的不是收藏夹。
 //
-// # ⚠️ 失效的那几条要滤掉
+// # ⚠️ 失效的那几条**留在结果里**，标在 `Invalid` 上
 //
 // `state != 0` 是「这个收藏夹已经失效了」（主人删了它，但收藏关系还留着）。
-// 摆出来的话用户点进去看到的是一个打不开的页面。
+// 摆出来的话用户点进去看到的是一个打不开的页面——但**整条滤掉**更糟：
+// 侧栏上它会凭空消失，而 B 站那边恢复可见之后它又凭空回来。
+// 所以这一层标出来，画成什么、给不给点，交给界面那一层。
 package bili
 
 import (
@@ -78,6 +80,10 @@ type CollectedFolder struct {
 	// ⚠️ **它是 B 站上次统计的数字，不是实时的**（票 #270 的验收标准）——
 	// 用户在 B 站网页上刚加了一首，这边要等下一次刷新才数得对。那不是 bug。
 	MediaCount int
+	// Invalid 是「这个收藏夹已经失效」：接口的 `state` 不是 0
+	// （主人删了它，但收藏关系还留着）。**不是把它滤掉**——失效 ≠ 删除，
+	// B 站恢复可见之后刷新一次它就能回来。
+	Invalid bool
 }
 
 // CollectedFolders 拉「我收藏的收藏夹」那一页，page 从 1 起。
@@ -125,18 +131,16 @@ func (c *Client) CollectedFolders(ctx context.Context, upMid int64, page int) ([
 
 	out := make([]CollectedFolder, 0, len(d.List))
 	for _, f := range d.List {
-		// ⚠️ **state != 0 的是失效的**：主人把收藏夹删了，而这一条还留着。
-		// 摆出来的话用户点进去看到的是一个打不开的页面。
-		if f.State != 0 {
-			continue
-		}
 		out = append(out, CollectedFolder{
 			ID: f.ID, Title: decodeEntities(f.Title), Cover: normalizeImageURL(f.Cover), Mid: f.Mid,
 			Type: collectedType(f.Type), MediaCount: f.MediaCount,
+			// ⚠️ **state != 0 的是失效的**：主人把收藏夹删了，而这一条还留着。
+			// 留在结果里标上，不滤掉（见文件头）。
+			Invalid: f.State != 0,
 		})
 	}
-	// 「后面还有没有」按 **count** 算，不按这一页的条数算：这一页里可能有
-	// 被滤掉的失效条目，而 B 站的 count 是**没滤之前**的总数。
+	// 「后面还有没有」按 **count** 算，不按这一页的条数算：B 站的 count 是
+	// 总数，而这一页条数只是这一页回了多少。
 	return out, d.Count > CollectedFolderPageSize*page, nil
 }
 

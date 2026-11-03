@@ -76,6 +76,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -839,8 +840,10 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	// ——鼠标点得动，键盘走不到（报告 (b) 一节的第一个断口：「侧栏的收藏夹列表
 	// 键盘完全走不到」）。理由和口径见 `sidebar.go` 的 `sideFocusable`。
 	row = sideFocusable(row)
+	// 🔴 **失效那一档不进「当前」**：它是墓碑——主色底会让用户以为这是
+	// 「正在放/当前这一页」，而它恰恰是打不开的。
 	switch {
-	case cur:
+	case cur && !f.Invalid:
 		// 当前就在这一页：和侧栏菜单当前项**同一套**画法（`flatSolidCurrent`——
 		// **实心主色底** + 主色上读得出来的那一档字）。
 		//
@@ -866,7 +869,7 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 	// 🔴 **选中那一行要用「按那一层底算」的那一支**（`flatSolidCurrentFeel`）：
 	// 按主题算的话，浅色主题的正文色是黑的，8% 的黑压在主色底上几乎看不出
 	// 变化——那一行的悬停反馈等于没有。
-	if cur {
+	if cur && !f.Invalid {
 		row = flatSolidCurrentFeel(c, row)
 	} else {
 		row = flat.Feel(c, row)
@@ -891,18 +894,23 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 			// 上游那边是 CSS 的 `truncate`（`biu/src/components/menu/menu-item.tsx:111`
 			// 的 `className="pointer-events-none truncate"`），那是同一个意思。
 			ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).
-				TextColor(rowTextColor(t, cur)).Grow(1).
+				TextColor(rowTextColor(t, cur && !f.Invalid)).Grow(1).
 				MaxLines(1).Ellipsis("…")
+			if f.Invalid {
+				// ⚠️ **「已失效」和列表页上那枚同一个**：两处的字不一样的话，
+				// 用户在歌单页见过的那枚到这里就认不出来。
+				list.InvalidTag(c)
+			}
 			// 「N 首」：小字、次要色。
 			//
 			// 🔴 **选中那一行的小字要按主色底重算**：`t.TextMuted` 压在实心主色
 			// 底上只有 1.02:1 ~ 1.34:1——完全读不出来。
 			ui.Text(c, favCountText(f)).FontSize(scale.Font(c, scale.Size12)).
-				TextColor(countTextColor(t, cur)).Grow(1).MaxLines(1)
+				TextColor(countTextColor(t, cur && !f.Invalid)).Grow(1).MaxLines(1)
 		})
 	})
 
-	if row.Clicked() {
+	if row.Clicked() && !f.Invalid {
 		s.navigate(collectionPathOf(f))
 	}
 
@@ -998,7 +1006,14 @@ func (s *Shell) favoriteMenu(g app.FavoriteGroup, f app.Favorite, m *ui.Menu) {
 	for _, item := range favMenuItems(g) {
 		// ⚠️ 每一项都要 Item 一遍：菜单是这趟全部建出来的，只有 Chosen
 		// 的那一项为 true。少建一项，那一项就点不到。
-		if m.Item(item.label).Chosen() {
+		it := m.Item(item.label)
+		// ⚠️ **失效行的「播放」「添加到播放列表」是灰的**：那一行是墓碑，
+		// 内容已经不在了——摆得出来按不下去是撒谎，而「取消收藏」「隐藏」
+		// 照样能用（那两件事动的是我这边的记录，不是它）。
+		if f.Invalid && (item.key == "play" || item.key == "add-to-playlist") {
+			it.Disabled(true)
+		}
+		if it.Chosen() {
 			s.favoriteAction(f, item)
 			return
 		}
