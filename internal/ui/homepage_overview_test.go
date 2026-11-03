@@ -15,29 +15,15 @@ func startOnOverview(t *testing.T) {
 func TestTheOverviewShowsTilesAndLeadsIntoTheListPages(t *testing.T) {
 	startOnOverview(t)
 	_, tt, _ := newHomeShell(t, homeDiscoverFake(t))
-	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "新歌速递") && showsText(tt, "排行榜") })
-	for _, name := range []string{"热榜", "原创榜", "最近播放", "为你推荐"} {
+	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "新歌速递") && showsText(tt, "本周热榜") })
+	for _, name := range []string{"接着听", "历史记录", "本周热榜", "新歌速递"} {
 		if !showsText(tt, name) {
-			t.Fatalf("总览上没有「%s」入口", name)
+			t.Fatalf("总览上没有「%s」区块", name)
 		}
 	}
-	waitFrames(t, tt, "迷你榜", func() bool { return showsText(tt, "热榜第一名") && showsText(tt, "原创榜第一名") })
 	if showsText(tt, "鬼畜") {
-		t.Fatal("总览上不该有 Tab 那一排")
+		t.Fatal("总览上不该有旧的分类 Tab")
 	}
-	if err := tt.Click("热榜"); err != nil {
-		t.Fatal(err)
-	}
-	waitFrames(t, tt, "进了热榜列表", func() bool { return showsText(tt, "鬼畜") })
-	// ⚠️ **回总览走的是顶栏那一枚**（票 #706）：榜单名称左边那枚「返回发现」已经
-	// 被拿掉了——回总览这件事只剩顶栏一个入口（理由见 `navbar.go` 的
-	// `viewHomeBack`）。
-	back, ok := tt.Find(navBackLabel)
-	if !ok {
-		t.Fatalf("顶栏上没有后退，文字有 %q", tt.Texts())
-	}
-	tt.ClickAt(back.X+back.W/2, back.Y+back.H/2)
-	waitFrames(t, tt, "回到总览", func() bool { return showsText(tt, "排行榜") && !showsText(tt, "鬼畜") })
 }
 
 func TestRenderHomeOverviewShots(t *testing.T) {
@@ -69,11 +55,7 @@ func TestTheHeroBannerAdvancesByItselfAndStopsWhenHovered(t *testing.T) {
 func TestTheSidebarRecommendEntryLeadsBackToTheOverview(t *testing.T) {
 	startOnOverview(t)
 	s, tt, _ := newHomeShell(t, homeDiscoverFake(t))
-	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "排行榜") })
-	if err := tt.Click("热榜"); err != nil {
-		t.Fatal(err)
-	}
-	waitFrames(t, tt, "进了热榜列表", func() bool { return showsText(tt, "鬼畜") })
+	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "本周热榜") })
 	s.navigate(homePath)
-	waitFrames(t, tt, "回到总览", func() bool { return showsText(tt, "排行榜") && !showsText(tt, "鬼畜") })
+	waitFrames(t, tt, "回到总览", func() bool { return showsText(tt, "本周热榜") })
 }

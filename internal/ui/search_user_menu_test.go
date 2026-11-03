@@ -24,7 +24,7 @@ func TestTheUserRowMenuIsNotGreyedOut(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))

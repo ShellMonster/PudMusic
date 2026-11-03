@@ -402,10 +402,10 @@ func tabOf(name string) int {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 三个类型、三套排序
+// 原型五个 Tab，其中歌曲/视频/UP 主保留各自排序。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheThreeTypesAndTheirSorts 盯「分三种类型，每种都有对应排序」。
+// TestTheSearchTypesAndTheirSorts 盯「五个 Tab 与对应排序」。
 func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
@@ -422,25 +422,25 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 		}
 	}
 
-	// 切到「用户」：换成**它自己那一套**五档（`user-list/search-header.tsx:12-18`）。
-	if err := tt.Click("用户"); err != nil {
-		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
+	// 切到「UP主」：换成**它自己那一套**排序（`user-list/search-header.tsx:12-18`）。
+	if err := tt.Click("UP主"); err != nil {
+		t.Fatalf("点不到「UP主」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
-	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+	waitFrames(t, tt, "UP主那一页进来", loadedTo(s, searchTabUser, 1))
 
 	for _, o := range searchUserSorts {
 		if !tt.HasText(o.Label) {
-			t.Errorf("用户 Tab 上没有排序 %q，文字有 %q", o.Label, tt.Texts())
+			t.Errorf("UP主 Tab 上没有排序 %q，文字有 %q", o.Label, tt.Texts())
 		}
 	}
 	// 两档排序**不相同**：用户那五档是「粉丝数」「Lv 等级」，视频那五档是
 	// 「播放」「弹幕」。
 	if tt.HasText("最多弹幕") {
-		t.Errorf("用户 Tab 上还留着视频那一档的排序，文字有 %q", tt.Texts())
+		t.Errorf("UP主 Tab 上还留着视频那一档的排序，文字有 %q", tt.Texts())
 	}
 	// 用户不是歌，没有「全部播放」。
 	if tt.HasText("全部播放") {
-		t.Errorf("用户 Tab 上还有「全部播放」，文字有 %q", tt.Texts())
+		t.Errorf("UP主 Tab 上还有「全部播放」，文字有 %q", tt.Texts())
 	}
 }
 
@@ -461,7 +461,7 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 		return len(c) >= 2 && c[len(c)-1].sort == 2
 	})
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -575,7 +575,7 @@ func TestSearchRowsCarryStableIDs(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 用户 Tab
+// UP主 Tab
 // ─────────────────────────────────────────────────────────────────────────────
 
 // TestAMenuOnAUserGoesToTheirSpace 盯用户那一行按下去是什么：用户不是歌，右键菜单里
@@ -584,7 +584,7 @@ func TestAMenuOnAUserGoesToTheirSpace(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -609,7 +609,7 @@ func TestAddingAUserToTheQueueSaysWhyNot(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
