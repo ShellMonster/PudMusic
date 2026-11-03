@@ -188,12 +188,81 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 	scroll := ui.Scroll(c).Key("home:overview").Grow(1).TrackScroll(&h.ovScroll)
 	scroll.Children(func() {
 		col := ui.Column(c).Key("home:overview:body").FillWidth().Gap(space.Px28).
-			Padding(space.Px4, scrollbar.HotZone, space.Px24, space.None)
+			Padding(space.Px20, scrollbar.HotZone, space.Px24, space.None)
 		col.Children(func() {
-			h.viewHero(c, w)
-			h.viewTiles(c, w)
-			h.viewNewRow(c, w, ww)
-			h.viewMiniBoards(c, w)
+			// Prototype order: greeting and mood filters lead the page.
+			ui.Text(c, "TUE · 11.03 · 晚上 9:41").FontSize(scale.Font(c, scale.Size12)).
+				FontWeight(weightMedium).TextColor(t.TextMuted)
+			ui.Text(c, "今晚，慢一点听。").FontSize(scale.Font(c, 40)).
+				FontWeight(weightMedium).TextColor(t.Text)
+			ui.Row(c).Gap(space.Px8).Children(func() {
+				for i, label := range []string{"全部", "深夜", "通勤", "专注", "运动", "现场", "翻唱"} {
+					b := ui.ButtonBase(c).Label("按心情筛选："+label).Padding(space.Px12, space.Px12).
+						Radius(20).Background(t.Surface).Border(1, t.Border)
+					if i == 0 {
+						b = b.Background(t.Text).TextColor(ink.Ensure(t.Surface, t.Text, ink.TextContrast))
+					}
+					b.Children(func() { ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)) })
+				}
+			})
+
+			ui.Row(c).Gap(space.Px12).Children(func() {
+				ui.Column(c).Grow(1).Gap(space.Px12).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "接着听").FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
+						ui.Spacer(c)
+						ui.Text(c, "历史记录").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Accent)
+					})
+					ui.Row(c).Gap(space.Px12).Children(func() {
+						for i, title := range []string{"雨天电台 2.0｜深夜慢歌", "写代码专用 · Lo-Fi", "夏夜录音棚 Live 合集"} {
+							card := ui.Column(c).Grow(1).Gap(space.Px6).Padding(space.Px12).
+								Radius(12).Background(t.Surface).Border(1, t.Border)
+							card.Children(func() {
+								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
+								ui.Text(c, []string{"臻声 FM · 剩 38 分钟", "我的收藏夹 · 剩 2 小时", "夏夜录音棚 · 剩 12 分钟"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+								ui.Box(c).Height(4).Width(float32(40 + i*24)).Radius(2).Background(t.Accent)
+							})
+						}
+					})
+				})
+			})
+
+			ui.Row(c).Gap(space.Px28).Children(func() {
+				ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "本周热榜").FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
+						ui.Spacer(c)
+						ui.Text(c, "每周一 10:00 更新").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+					})
+					for i, title := range []string{"晚风告白（现场版）", "海岸线 · 钢琴独奏", "月台", "给十七岁的信"} {
+						ui.Row(c).Key("home:overview:rank:"+strconv.Itoa(i)).Gap(space.Px12).Padding(space.Px8, space.None).
+							Border(1, t.Border).Children(func() {
+							ui.Text(c, "0"+strconv.Itoa(i+1)).FontSize(scale.Font(c, 28)).TextColor(t.Accent)
+							ui.Column(c).Grow(1).Children(func() {
+								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
+								ui.Text(c, "夏夜录音棚 · 386万次播放").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+							})
+							ui.Text(c, "▶").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+						})
+					}
+				})
+				ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
+					ui.Row(c).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
+						ui.Spacer(c)
+						ui.Text(c, "全部").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Accent)
+					})
+					ui.Row(c).Gap(space.Px12).Children(func() {
+						for i, title := range []string{"夏末备忘录", "北纬三十度", "慢车"} {
+							ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
+								ui.Box(c).Height(140).FillWidth().Radius(12).Background(t.Background).Border(1, t.Border)
+								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
+								ui.Text(c, []string{"纸飞机乐队", "低频观测站", "南山南北"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+							})
+						}
+					})
+				})
+			})
 		})
 		if bw := col.Bounds().W; bw > 0 {
 			h.ovWidth = bw
