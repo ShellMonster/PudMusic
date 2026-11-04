@@ -306,30 +306,6 @@ func iconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, di
 	return b
 }
 
-// IconAccentOnHover 是「悬停时图形变主色」那一档字色。
-//
-// ⚠️ **问的是按钮的悬停**：图标的悬停要问它自己，而它那时候还没长在按钮里面
-// （`Children` 的回调是在建的时候跑的），问出来的是「它在按钮外面」。
-//
-// ⚠️ **不该染色时返回 ok=false**，调用方就**别设**颜色——那样图标接着继承按钮
-// 的字色（赞键那种「没赞是灰的、赞了是主色的」就是靠这一条）。
-//
-// 这条判断单独拿出来，是因为**图标键不止一种形状**：赞键那一枚是「图标 + 底下
-// 一圈背景」两层（见 `internal/ui/like.go`），它自己也要这一档主色——而「哪一档
-// 主色」只有这一个决定的地方。
-func IconAccentOnHover(c *ui.Context, disabled, hovered bool) (ui.Color, bool) {
-	return iconAccentOnHover(c, disabled, hovered, ThemeBase)
-}
-
-// IconAccentOnHoverOnBase 是 IconAccentOnHover 的「**底色可传**」变体：悬停时
-// 图形变的那一档主色按**给定的底**算。
-//
-// ⚠️ **给了底就按底算，不看主题深浅**：主题深浅管的是「页面上字压着的那块底」，
-// 而这里的底是调用方给的那一块——浅色主题下满屏播放器那一行也坐在深底上。
-func IconAccentOnHoverOnBase(c *ui.Context, disabled, hovered bool, base Base) (ui.Color, bool) {
-	return iconAccentOnHover(c, disabled, hovered, base)
-}
-
 // iconAccentOnHover 是「悬停时图形变主色」那一档字色（底色可传）。
 //
 // ⚠️ **不该染色时返回 ok=false**，调用方就**别设**颜色——那样图标接着继承按钮
