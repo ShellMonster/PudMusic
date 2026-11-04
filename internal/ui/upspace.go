@@ -515,7 +515,8 @@ func (s *Shell) viewUpSpace(c *ui.Context, r *ui.Route) {
 	// 状态（Tester 里当场 panic，真窗口里选中一个另一个也亮）。
 	// 翻回一张 Tab 只会问「还要不要下一页」，而 `started` 为真时答案是否。
 
-	ui.Column(c).Key("page:" + upPath).Grow(1).FillHeight().Children(func() {
+	// 原型 `.page { max-width: 1280px; margin: 0 auto }`：窗口再宽，页面也停在 1280 并居中。
+	ui.Column(c).Key("page:" + upPath).Grow(1).FillHeight().FillWidth().MaxWidth(space.PageMaxW).AlignSelf(ui.Center).Children(func() {
 		// ⚠️ **头图区和 Tab 条不在这里画**：它们是每张 Tab 那张列表的第 0 行
 		// （页内头部），跟着内容一起滚走，见 `viewSpaceTab`。
 		s.viewSpaceTab(c, sp)
