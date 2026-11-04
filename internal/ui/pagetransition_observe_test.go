@@ -9,9 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -32,19 +29,9 @@ import (
 // observeShell 造一个**走生产路**的外壳（不改生产的任何取值）。
 func observeShell(t *testing.T, dark bool) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	orig := coverCacheDir
-	coverCacheDir = func() string { return t.TempDir() }
-	t.Cleanup(func() { coverCacheDir = orig })
-
-	flag := hover.NewVisibleFlag()
-	hover.SetVisibleFlag(flag)
-	shimmer.SetVisibleFlag(flag)
-	a := app.New()
-	s := New(a)
-	tt := mygoui.NewTester(s.View, 1200, 800)
-	tt.SetDark(dark)
-	t.Cleanup(s.Close)
-	return s, tt
+	// 基座默认走生产的切页档（不覆盖 router.Transition），封面缓存目录也替成临时目录。
+	b := newTestShell(t, systemIsDark(dark))
+	return b.s, b.tt
 }
 
 func savePNG(t *testing.T, path string, img *image.RGBA) {

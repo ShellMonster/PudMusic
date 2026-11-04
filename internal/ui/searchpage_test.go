@@ -380,7 +380,8 @@ func TestSwitchingTabsKeepsWhereYouWere(t *testing.T) {
 	if !ok {
 		t.Fatalf("切回「歌曲」之后画面上没有 %q，文字有 %q", anchor, tt.Texts())
 	}
-	if after.Y != before.Y {
+	// float32 布局会带 1e-4 量级的噪声（700 vs 700.00006），0.01 远小于任何一次真的滚动。
+	if d := after.Y - before.Y; d < -0.01 || d > 0.01 {
 		t.Errorf("%q 的位置从 y=%v 变成 y=%v：切 Tab 重置了滚动位置", anchor, before.Y, after.Y)
 	}
 	// 而且**没有重新拉一遍**——重新拉的话加载行数会从 48 掉回 24。

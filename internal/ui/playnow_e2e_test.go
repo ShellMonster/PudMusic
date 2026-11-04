@@ -17,6 +17,7 @@ import (
 	"os"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo/ui"
@@ -61,13 +62,19 @@ func loadEveryUpSubmission(t *testing.T, tt interface {
 	Scroll(x, y, dx, dy float32)
 }, sp *upSpace, total int) {
 	t.Helper()
-	for i := 0; i < 400; i++ {
+	// 条件等待，不数次数：每一页是后台一趟 HTTP，满载时回来得慢。
+	deadline := time.Now().Add(waitBudget)
+	for {
 		tt.Frame()
 		p := sp.videos.Paged()
 		if p.Loaded >= total || (!p.Loading && !p.HasMore) {
 			break
 		}
+		if time.Now().After(deadline) {
+			t.Fatalf("等了 %v，投稿只加载了 %d / %d 首", waitBudget, p.Loaded, total)
+		}
 		tt.Scroll(400, 400, 0, 4000)
+		time.Sleep(2 * time.Millisecond)
 	}
 	if got := len(sp.videos.Items()); got != total {
 		t.Fatalf("列表里加载出了 %d 首，want %d", got, total)
