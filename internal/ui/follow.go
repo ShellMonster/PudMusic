@@ -432,7 +432,7 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	// ⚠️ **旗标在路由表里**（`Route.RequiresLogin`），而「要不要摆进侧栏」是
 	// 另一个标志（`Route.HideInMenuWhenLoggedOut`）——两件事，两个标志（票 #138）。
 	if lookup(followPath).RequiresLogin && !s.app.LoggedIn() {
-		s.viewNeedsLogin(c, "page:"+followPath, followNotLoggedIn)
+		s.viewLoggedOutPage(c, "page:"+followPath, "Following", "我的关注", "", "关注", homePath)
 		return
 	}
 

@@ -32,9 +32,10 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -76,6 +77,8 @@ const allAuthorsMid = 0
 type dynamicFeed struct {
 	// items 是右边已经拿到的动态。
 	items []app.Dynamic
+	// filterMid 是顶上那排 chip 选中的 UP 主（0 = 全部）。筛是在已经拉到的动态里筛的。
+	filterMid int64
 	// authors 是左边已经拿到的关注的人。
 	authors []app.FollowAuthor
 
@@ -212,17 +215,19 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 
 	f := s.dynamicFeedOf()
 
-	ui.Row(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().Children(func() {
-		s.viewAuthorPane(c, f)
-		// 动态卡片左右各 32：上游是外层 `px-4` 再套一层 `px-4`
-		// （`index.tsx:142` 的 ScrollContainer + 里面那个 `px-4 py-4`），
-		// 16 + 16 = 32。卡自己那一条的左右内边距因此是 0。
-		//
-		// ⚠️ **上沿那 16 是同一个 `py-4`**：上游那一层 `px-4 py-4` 上下也是 16，
-		// 而 UP 空间那一页的 Tab 面板是 `px-0 py-4`——**两页内容离上一段的距离
-		// 是同一个数**（票 #416：「两页口径一致」）。
-		ui.Column(c).Key("feed-items").Grow(1).FillHeight().
-			Padding(space.Px16, space.Px32, space.None, space.Px32).Children(func() {
+	w := s.spaceContentWidth(c)
+	if !s.app.LoggedIn() {
+		// 没登录不假装有内容：作者列的是「我关注的人」，没有登录态就没有这个列表。
+		// 「登录完回这一页」是票 #277 点名的那个例外（别的入口回首页）。
+		s.viewLoggedOutPage(c, "page:"+dynamicFeedPath, "Feed", "用户动态",
+			"关注的 UP 主最近分享了什么。", "动态", dynamicFeedPath)
+		return
+	}
+	ui.Column(c).Key("page:"+dynamicFeedPath).Grow(1).FillHeight().
+		Padding(space.None, space.PageHorizontal(w)).Children(func() {
+		pud.PageHead(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", w, nil)
+		s.viewFeedFilter(c, f)
+		ui.Column(c).Key("feed-items").Grow(1).FillHeight().Children(func() {
 			s.viewFeedItems(c, f)
 		})
 	})
@@ -267,233 +272,13 @@ func (s *Shell) syncDynamicFeed(c *ui.Context) {
 			go s.fetchFeed(ctx, f, feedAuthors, f.auth.cursor, f.auth.page)
 		}
 	}
-}
-
-// viewAuthorPane 是左边那一栏：标题 + 「全部」+ 关注的人 + 哨兵。
-func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
-	t := c.Theme()
-	ui.Column(c).Key("feed-authors").Width(authorPaneW).FillHeight().
-		Padding(space.Px8, space.Px8).Gap(space.Px4).
-		BorderWidth(0, 1, 0, 0).BorderColor(t.Border.Alpha(paneDividerA)).Children(func() {
-		// 上游这一栏的标题就是「用户动态」（`author-list.tsx:126`），左右
-		// 再缩 16（`px-4`）；这一栏自己已经有 8 的横向内边距，所以这里
-		// 只再补 8。
-		// ⚠️ **字重不写**（400）：这一栏的标题是 14/400（DESIGN.md §二）。
-		ui.Text(c, "用户动态").FontSize(scale.Font(c, scale.Size14)).PaddingX(space.Px8)
-		if !s.app.LoggedIn() {
-			// 没登录**不假装有内容**：作者栏列的是「我关注的人」，没有登录态
-			// 就没有这个列表。给一句能指路的，比一个空列表有用。
-			ui.Text(c, "登录之后能看到你关注的人").FontSize(scale.Font(c, scale.Size12)).
-				TextColor(t.TextMuted).PaddingX(space.Px8)
-			// ⚠️ **再给一个能立刻做完的事**（票 #277）：这一页没登录时作者栏
-			// 整个拉不出来，而「去登录」是唯一能解开它的动作——只有一句
-			// 「登录之后能看到你关注的人」的话，用户得自己再去顶栏找那枚图标。
-			//
-			// ⚠️ **它带一个「登录完去哪」**：从这一页进去的，登录完**回这一页**
-			// ——用户就是来看动态的，登录完落回首页等于把他白绕一圈
-			// （这一条是票 #277 点名的那个例外：别的入口回首页）。
-			//
-			// ⚠️ **读屏的名字要能和侧栏那一枚分清**：侧栏收藏夹区没登录时也有
-			// 一枚「去登录」，归宿是首页（`sidebar_favorites.go` 的
-			// `favEmptyAction`）。两枚同名不同宿，读屏软件念出来是一样的——
-			// 这里给它一个说出去哪的名字。测试定位这一枚也靠它
-			// （`TestLoginFromTheDynamicPageComesBackToTheDynamicPage`）。
-			if ui.Button(c, "去登录").Label("去登录，登录后回到动态页").Clicked() {
-				s.goLogin(dynamicFeedPath)
-			}
-			return
-		}
-
-		// 登录态过了才拉第一页。理由见 viewDynamicFeed 里那一段。
-		//
-		// ⚠️ **那一拉挪到 `syncDynamicFeed` 那一层了**（票 #161）：满屏开着的时候
-		// 这一页不画，而作者栏这一趟不能跟着一起停。
-
-		// ⚠️ **作者栏第一页拉失败也要说失败**：上面那一支是「登录之后能看到
-		// 你关注的人」，那是**没登录**的话；而拉失败了界面上一句话都不提，
-		// 切走再切回来也不会重拉（`want()` 因为 `err != nil` 一直挡着）。
-		auth := &f.auth
-		if !auth.started && auth.err != nil {
-			s.viewLoadError(c, "feed-err:authors", "关注的人", "重试加载关注的人", auth.err, func() {
-				auth.err = nil
-				if ctx := auth.begin(); ctx != nil {
-					go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
-				}
-			})
-			return
-		}
-		// 🔴 **第一页在途：说「正在加载」，不是「一个都没有」**（2026-10-27）。
-		//
-		// 原先这一支没有：`auth.started` 还是 false 时直接往下走，画出来是
-		// **标题 + 一行「全部」**——和「我真的一个都没关注」长得一模一样。
-		//
-		// ⚠️ **左栏只有 200 宽**（`authorPaneW`），摆不下 List 那一格八行骨架；
-		// 这里给一行转圈 + 一句话（和 `follow.go` 左栏那一条「正在加载分组…」
-		// 同一个形状、同一个字号）。
-		if !auth.started {
-			ui.Row(c).Key("feed-authors:loading").Gap(space.Px8).
-				Padding(space.Px8, space.Px8).AlignItems(ui.Center).Children(func() {
-				ui.Spinner(c).Label(loadingAuthorsText)
-				ui.Text(c, loadingAuthorsText).FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			})
-			return
-		}
-		sentinel := auth.started && (auth.hasMore || auth.err != nil)
-		rows := len(f.authors) + 1 // 「全部」那一行永远在
-		if sentinel {
-			rows++
-		}
-
-		st := &f.authState
-		// 🔴 铁律四：行身份是「这一行是谁」，不是序号。「全部」是
-		// `auth:0`，关注的人是 `auth:<mid>`（B 站的 mid 不会是 0，撞不上）。
-		// ⚠️ 身份在 `authRowKey` 里算——它自己记着那一份（见那个函数的注释）。
-		st.Key = func(i int) any { return authRowKey(f, i) }
-		st.Label = func(i int) string { return authRowLabel(f, i) }
-
-		// ⚠️ Key 挂在外面的 Column 上：List 是自己管状态的控件，事后再挂
-		// key 会 panic（`ui/element.go` 的 `Key`）。理由见 upspace_tabs.go。
-		ui.Column(c).Key("feed-author-list").Grow(1).FillHeight().Children(func() {
-			// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
-			// 作者栏先登记、动态栏后登记，于是动态栏赢——它是这一页的主内容。
-			s.registerContentFocus(list.HandleFocus(&st.Handle))
-			authorList := ui.List(c, st, rows).
-				Grow(1).FillHeight().
-				Rows(func(r ui.ListRow) {
-					defer func() {
-						if rec := recover(); rec != nil {
-							log.Printf("pudmusic: 作者栏那一行画崩了：%v\n%s", rec, debug.Stack())
-						}
-					}()
-					s.viewAuthorRow(r.Context, f, r.Index)
-				})
-			s.trackScrollbar(authorList)
-		})
-
-		if auth.want() {
-			if _, last := st.Visible(); last >= rows-1 {
-				if ctx := auth.begin(); ctx != nil {
-					go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
-				}
-			}
-		}
-	})
-}
-
-// authRowKey 是作者栏第 i 行的身份（铁律四）。
-func authRowKey(f *dynamicFeed, i int) any {
-	if i <= 0 {
-		return "auth:0"
-	}
-	if i-1 >= len(f.authors) {
-		return upSentinelKey{}
-	}
-	// ⚠️ **身份是预先装箱好的那一份**（`f.authRowKeys`）：理由见那个字段的注释。
-	//
-	// ⚠️ **按「第几个人」记**：那一行的身份跟着 mid 走，而 mid 不会因为多了一个
-	// 人而变——只有换了人才变。
-	return f.authRowKeys.At(i-1, f.authors[i-1].Mid, authIdentity)
-}
-
-// authIdentity 是作者栏一行的身份（铁律四）：`auth:<mid>`。
-//
-// ⚠️ **「全部」那一行不走这里**：它的身份是 "auth:0"，而那一行在
-// `authRowKey` 的 `i <= 0` 那一支就直接给了——**压根不进 memo**。所以这里
-// 的 raw 永远是「某一个人」的 mid，而 B 站的 mid 不会是 0（撞不上 "auth:0"）。
-//
-// 这一步会分配（拼字符串 + 装箱）——所以它只在 mid 变了的时候才走
-// （见 `rowkey.Memo` 的文件头）。
-func authIdentity(mid int64) any {
-	return "auth:" + strconv.FormatInt(mid, 10)
-}
-
-// authRowLabel 是作者栏第 i 行给无障碍用的名字。
-func authRowLabel(f *dynamicFeed, i int) string {
-	switch {
-	case i <= 0:
-		return "全部"
-	case i-1 < len(f.authors):
-		return f.authors[i-1].Name
-	}
-	return "加载更多关注的人"
-}
-
-// viewAuthorRow 画作者栏的一行。
-//
-// **点一行 = 跳进那个 UP 的空间**（见文件头）。「全部」那一行点了不动——
-// 它本来就是这一页本来的样子。
-func (s *Shell) viewAuthorRow(c *ui.Context, f *dynamicFeed, i int) {
-	t := c.Theme()
-
-	if i >= len(f.authors)+1 {
-		// ⚠️ **`auth := f.auth` 是复制，不是指针**（早一版就这么写的）：
-		// 复制品上的 `err = nil` / `begin()` 全都写在副本上，真实的闸门
-		// `loading` 仍是 false、`err` 仍非 nil —— 于是界面上那句失败一直挂着、
-		// 按钮一直可点，而每点一次就**并发发出一个重复的 pn 请求**
-		//（两次请求的回来顺序不保证，后到的把先到的结果盖掉）。
-		auth := f.feedPager(feedAuthors)
-		s.viewFeedSentinel(c, auth, "继续往下滚，加载更多关注的人", "重试加载关注的人", func() {
-			auth.err = nil
-			if ctx := auth.begin(); ctx != nil {
-				go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
-			}
-		})
-		return
-	}
-
-	all := i == 0
-	name := "全部"
-	face := ""
-	mid := int64(allAuthorsMid)
-	if !all {
-		a := f.authors[i-1]
-		name, face, mid = a.Name, a.Face, a.Mid
-		if name == "" {
-			name = "这个 UP 主"
-		}
-	}
-
-	box := ui.Row(c).Grow(1).Key("feed-author:" + strconv.FormatInt(mid, 10)).
-		Gap(space.Px12).Padding(space.Px8).Radius(t.Radius).AlignItems(ui.Center)
-	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
-	on := box.Hovered()
-	if all {
-		// 「全部」是**当前就在看的那一个**：和侧栏菜单当前项**同一套**画法
-		// （**实心主色底**，见 `flatSolidCurrent`）。
-		//
-		// 🔴 **这一列和关注页那一列、侧栏是邻居**：它们挨着摆，而「当前在哪」
-		// 在三处说的是同一件事——三种画法并排的话，用户看到的是「这个应用没
-		// 做完」。
-		//
-		// ⚠️ **字色是 `t.AccentText`**（主色底上读得出来的那一档），不是写死的
-		// 白字——理由见 `flatSolidCurrent`。
-		box = flatSolidCurrent(c, box)
-	} else if on {
-		box = box.Background(t.SurfaceHover)
-	}
-	if box.Clicked() && !all {
-		s.navigate(upPathOf(mid))
-	}
-	box.Children(func() {
-		if all {
-			// 「全部」没有头像。给一个方块底子，一眼能认出「这不是某个人」。
-			ui.Box(c).Size(authorAvatarS, authorAvatarS).Radius(t.Radius).Background(t.Surface)
-		} else {
-			// ⚠️ **指针移上去时那个圆头像放大 5%**：上游作者栏那一行是
-			// `<Avatar className="h-9 w-9 shrink-0 rounded-full transition-transform
-			// hover:scale-105">`（`dynamic-feed/user.tsx:46`）。放大的是**整个圆**
-			// （上游那个类加在 Avatar 上），不是里面那张图。
-			s.spaceAvatarZoom(c, face, authorAvatarS, false,
-				"feed-author-zoom:"+strconv.FormatInt(mid, 10), on)
-		}
-		ui.Text(c, name).Grow(1).FontSize(scale.Font(c, scale.Size14)).MaxLines(1).Ellipsis("…")
-	})
+	s.feedMoreAuthors(f)
 }
 
 // viewFeedItems 是右边那一片动态。
 func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	feed := &f.feed
+	items := f.visible()
 
 	// ⚠️ **「拉失败了」必须排在「空」前面**：反过来的话第一页拉失败时
 	// 界面上是「暂无动态」——一句话都不提失败，而 `started` 仍是 false、
@@ -520,7 +305,18 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// 「滚到底」和「容器没填满」两条保障一个都问不到 —— 后面的有效动态
 	// 永远不再加载。
 	keepLooking := f.started && feed.hasMore
-	if len(f.items) == 0 && !keepLooking {
+	if len(items) == 0 && !keepLooking {
+		if f.filterMid != 0 {
+			// 原型：筛了某位 UP 主却一条都没有。
+			s.viewEmpty(c, "feed:filtered", emptyState{
+				Title:  "这里没有能显示的动态",
+				Hint:   "这位 UP 主最近没有发布动态。",
+				Info:   true,
+				Icon:   iconEmptyFeed,
+				Action: &emptyAction{Label: "查看全部动态", Do: func() { f.filterMid = 0 }},
+			})
+			return
+		}
 		s.viewEmpty(c, "feed:"+feedEmptyKey(f), feedEmpty(f))
 		return
 	}
@@ -529,8 +325,13 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// **它占了行高**，所以「还在不在画面里」这件事才问得出来（Biu 的
 	// `count = hasMore ? items.length + 1 : items.length`）。
 	sentinel := f.started && (feed.hasMore || feed.err != nil)
-	rows := len(f.items)
+	rows := len(items)
 	if sentinel {
+		rows++
+	}
+	// 拉到头了：多一行「没有更多动态了」（原型的第三种尾部状态）。
+	endRow := f.started && !sentinel && len(items) > 0
+	if endRow {
 		rows++
 	}
 
@@ -539,17 +340,17 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// 而刷新时新动态会插到**前面**——拿序号当身份的话，用户盯着的那一条
 	// 会整个换成旁边那一条，而界面上看不出任何异样。
 	st.Key = func(i int) any {
-		if i >= len(f.items) {
+		if i >= len(items) {
 			return upSentinelKey{}
 		}
 		// ⚠️ **身份是预先装箱好的那一份**（`f.itemRowKeys`）：理由见那个字段的注释。
-		return f.itemRowKeys.At(i, f.items[i].ID, rowkey.Identity)
+		return f.itemRowKeys.At(i, items[i].ID, rowkey.Identity)
 	}
 	st.Label = func(i int) string {
-		if i >= len(f.items) {
+		if i >= len(items) {
 			return "加载更多动态"
 		}
-		return feedRowLabel(f.items[i])
+		return feedRowLabel(items[i])
 	}
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
@@ -559,7 +360,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		// ⚠️ **只在「一条都没画出来」时出现**：有内容的时候插一行字只是
 		// 噪音；而一条都没有的时候，用户看到的是**一片空白加一个转着的
 		// 圈**——像是坏了，而真相是「他们发的那些我们画不出来」。
-		if len(f.items) == 0 && f.drops.total() > 0 {
+		if len(items) == 0 && f.drops.total() > 0 {
 			s.viewDroppedNote(c, f.drops.counts)
 		}
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
@@ -583,7 +384,11 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 						log.Printf("pudmusic: 动态那一行画崩了：%v\n%s", rec, debug.Stack())
 					}
 				}()
-				if r.Index >= len(f.items) {
+				if r.Index >= len(items) {
+					if endRow {
+						feedEndNote(r.Context)
+						return
+					}
 					s.viewFeedSentinel(r.Context, feed, "继续往下滚，加载更多动态", "重试加载动态", func() {
 						feed.err = nil
 						if ctx := feed.begin(); ctx != nil {
@@ -592,14 +397,10 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 					})
 					return
 				}
-				s.viewDynamicCard(r.Context, f.items[r.Index],
+				s.viewDynamicCard(r.Context, items[r.Index],
 					f.keys.selected(r.Index), f.keys.ring(r.Context))
 			})
-		// ⚠️ **行间距由列表给**（上游 `mb-2` = 8）：卡片自己的下外边距**不能**
-		// 留着——那一段属于**行**（不在卡片里），而框架给「指针压着的那一行」铺
-		// 一层 `t.SurfaceHover`，留着它卡片底下就露出那一层（暖纸主题下是淡棕）。
-		// 理由和 `upspace_tabs.go` 里那一处一样（票 #416）。
-		dynList = dynList.GapY(space.Px8)
+		// 原型 `.post` 自己带上下 24 和底线，行间不再留缝。
 		s.trackScrollbar(dynList)
 	})
 
@@ -664,22 +465,28 @@ func feedRowLabel(d app.Dynamic) string {
 // 挡着（见 `upPager.want`），不然就是自己打自己——解了闸门 → 下一帧看见
 // 容器还没填满 → 又拉 → 又失败。
 func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel string, retry func()) {
-	t := c.Theme()
-	ui.Row(c).Key("feed-sentinel").Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
-		switch {
-		case p.err != nil:
-			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-			// 哨兵那一行上的重试：扁平（错误页那一档是 `viewLoadError`，不动）。
-			if retry != nil && flatButton(c, retryLabel).FontSize(scale.Font(c, scale.Size13)).Clicked() {
+	pl := tok.Of(c.Theme())
+	// 原型三种尾部：加载中是两条骨架；失败是「加载失败，点此重试」加一枚幽灵小键；
+	// 还有下一页是淡字「继续往下滚，加载更多动态」。
+	switch {
+	case p.err != nil:
+		ui.Column(c).Key("feed-sentinel").FillWidth().AlignItems(ui.Center).Gap(space.Px8).
+			Padding(space.Px24, space.None).Children(func() {
+			ui.Text(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size14)).TextColor(pl.Text2).SingleLine()
+			if retry != nil && pud.Button(c, "feed:retry", pud.Ghost, pud.Sm, retryLabel, "refresh").Clicked() {
 				retry()
 			}
-		case p.loading:
-			ui.Spinner(c)
-			ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
-		default:
-			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
-		}
-	})
+		})
+	case p.loading:
+		ui.Column(c).Key("feed-sentinel").FillWidth().Padding(space.Px16, space.None).Label("正在加载").Children(func() {
+			pud.SkeletonRow(c, "feed:sk1", 0)
+			pud.SkeletonRow(c, "feed:sk2", 0)
+		})
+	default:
+		ui.Row(c).Key("feed-sentinel").FillWidth().Justify(ui.Center).Padding(space.Px24, space.None).Children(func() {
+			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3)
+		})
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
