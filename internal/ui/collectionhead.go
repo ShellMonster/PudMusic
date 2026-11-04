@@ -20,6 +20,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
@@ -32,15 +33,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 头部尺寸（原型 `.col-head`）。
-const (
-	// collectionCoverSide 是头部封面的边长（`.cover.lg` 232）。
-	collectionCoverSide float32 = 232
-	// collectionHeadPad 是头部的上下内边距，也是封面和文字的缝（40）。
-	collectionHeadPad float32 = 40
-	// collectionOpsGap 是操作条上控件的缝（12）。
-	collectionOpsGap float32 = 12
-)
+// collectionCoverSide 是头部封面的边长（原型 `.cover.lg` 232）。
+const collectionCoverSide float32 = 232
 
 // tintBackground 是「封面取色按 mix 混进 bg」的那块纯色（原型
 // `color-mix(in srgb, var(--tint) N%, var(--bg))`）。
@@ -95,7 +89,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	// 颜色和高度（上一帧量到的）；这一行自己也刷同一色，盖住列表里那层页面底色。
 	p.bandBG = bg
 	row := ui.Row(c).Key("collection-header").FillWidth().AlignItems(ui.End).Gap(space.Px40).
-		Padding(collectionHeadPad, space.None, collectionHeadPad, space.None).Wrap().Background(bg)
+		Padding(space.Px40, space.None, space.Px40, space.None).Wrap().Background(bg)
 	defer func() {
 		if h := row.Bounds().H; h > 0 {
 			p.bandH = h
@@ -125,7 +119,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(240).AlignItems(ui.Start).Selectable().Children(func() {
 			typo.Eyebrow(c, collectionEyebrow(p.ref.Type, info))
 			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), scale.Font(c, collectionTitleSize(c))).
-				LineHeight(1.1).TextColor(pl.Text).MaxLines(2).Ellipsis("…").
+				LineHeight(leading.Display).TextColor(pl.Text).MaxLines(2).Ellipsis("…").
 				Margin(space.Px12, space.None, space.Px12, space.None)
 
 			s.viewCollectionMeta(c, p, info)
@@ -251,7 +245,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	info := s.app.Collection(p.ref)
 	empty := info.Loaded && info.MediaCount == 0
 
-	ui.Row(c).Key("collection-ops").FillWidth().Wrap().AlignItems(ui.Center).Gap(collectionOpsGap).
+	ui.Row(c).Key("collection-ops").FillWidth().Wrap().AlignItems(ui.Center).Gap(space.Px12).
 		Padding(space.Px24, space.None, space.Px8, space.None).Children(func() {
 		if pud.Button(c, "col:play", pud.Primary, pud.Std, "播放全部", "play").Disabled(empty).Clicked() {
 			s.playWholeCollection(p)

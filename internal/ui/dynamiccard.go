@@ -16,6 +16,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -243,7 +244,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring boo
 			// ⚠️ **投稿型动态的正文与稿件卡里的简介是同一句话时，正文不画**（见 `dynBodyRepeatsCard`）。
 			hasBody := d.Text != "" && !dynBodyRepeatsCard(d)
 			if hasBody {
-				ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size14)).LineHeight(1.7).MaxLines(8).
+				ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Post).MaxLines(8).
 					Margin(space.Px8, space.None, space.Px16, space.None)
 			}
 

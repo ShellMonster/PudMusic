@@ -20,9 +20,8 @@ import (
 
 // 原型 `.split { grid-template-columns: 200px 1fr; gap: 40px; margin-top: 24px }`。
 const (
-	followGroupW   float32 = 200
-	followSplitGap float32 = 40
-	followCardGap  float32 = 16
+	followGroupW  float32 = 200
+	followCardGap float32 = 16
 )
 
 // followColumnsFor 是右边那一格有 w 宽时卡片排几列：原型固定两列，窄到两张卡放不下
@@ -36,7 +35,7 @@ func followColumnsFor(w float32) int {
 
 // viewFollowSplit 是页头下面那一整块：左分组栏，右工具条 + 网格。
 func (s *Shell) viewFollowSplit(c *ui.Context, f *followPage) {
-	ui.Row(c).Key("follow:split").Grow(1).Gap(followSplitGap).AlignItems(ui.Start).
+	ui.Row(c).Key("follow:split").Grow(1).Gap(space.Px40).AlignItems(ui.Start).
 		Margin(space.Px24, space.None, space.None, space.None).Children(func() {
 		s.viewFollowGroups(c, f)
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).FillHeight().Children(func() {

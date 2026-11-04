@@ -5179,7 +5179,7 @@ var Items = []Item{
 			// （这一条早就有，这一票不许破坏它）。
 			"TestTheFollowCardSitsOnItsOwnBackground",
 			// 卡片那圈影还在（这一票碰的是底色和圆角，影不许动）。
-			"TestTheFollowCardHasAShadow",
+			"TestTheFollowCardIsLayeredByItsBorderNotAShadow",
 			// 卡片那一族（弹窗面板 / 抽屉面板）还是同一档料。
 			"TestDialogCardIsTheSurfaceToken",
 			"TestCardsAndDialogsStillStandOffTheBackground",
