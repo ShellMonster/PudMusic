@@ -35,15 +35,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -60,15 +59,15 @@ const upPathPrefix = "/user/"
 
 // 四张 Tab。**顺序照 Biu 上游**（`user-profile/index.tsx:73-104`）。
 const (
-	upTabDynamic = iota
-	upTabVideo
+	upTabVideo = iota
+	upTabDynamic
 	upTabCollection
 	upTabSeries
 	upTabCount
 )
 
 // upTabNames 是四个 Tab 上的字，顺序同上。
-var upTabNames = []string{"动态", "投稿", "收藏夹", "合集"}
+var upTabNames = []string{"投稿", "动态", "收藏夹", "合集"}
 
 // upSeriesPageSize 是「合集」Tab 一页几条。上游 `series/index.tsx:41` 是 20。
 const upSeriesPageSize = 20
@@ -183,6 +182,12 @@ type upSpace struct {
 
 	// videosStarted 是「投稿」Tab 拉过第一页了没有。见 viewSpaceVideos。
 	videosStarted bool
+	// videoOrder 是「投稿」的排序（`pubdate` / `click` / `stow`）；下拉在界面线程写、
+	// 拉页器在后台读，所以是原子的。videoSort 是下拉绑的那个下标。
+	videoOrder atomic.Value
+	videoSort  int
+	// videosTotal 是接口给的投稿总数（Tab 上的小计数），后台写、界面读。
+	videosTotal atomic.Int64
 
 	// leadSet 是「投稿」那张列表的页内头部装过了没有（只装一次）。
 	leadSet bool
@@ -199,6 +204,9 @@ type upSpace struct {
 	dynItems []app.Dynamic
 	// cols 是「收藏夹」和「合集」两张 Tab 的行。其余 Tab 那一格是空的。
 	cols [upTabCount][]app.SpaceCollection
+	// perRow 是「收藏夹」「合集」两张 Tab 一行摆几张卡（`pud.GridCols`，每帧按内容区宽重算）；
+	// 行是按它切出来的块，其余 Tab 恒为 1。
+	perRow [upTabCount]int
 	// seen 是**已经收进上面两份的行身份**，用来挡翻页重叠。
 	//
 	// ⚠️ 必须有：B 站翻页是会重叠的（同一页的东西挪了名次就会在两页里各出现
@@ -290,11 +298,12 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 		return sp
 	}
 	sp := &upSpace{mid: mid, mountGen: mountGen, header: s.app.UpSpaceOf(mid), notify: s.addToast}
+	sp.videoOrder.Store(upVideoSorts[0].order)
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
 	// 拿到的永远是对的 UP。
 	sp.videos = list.NewPaged(s.images, s.listActions(),
 		func(ctx context.Context, page int) (list.Page, error) {
-			return s.fetchVideos(ctx, mid, page)
+			return s.fetchVideos(ctx, sp, page)
 		})
 	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 	// 13px 淡灰缩在列表左上角，而「暂无投稿」是居中 15pt 两行。
@@ -569,222 +578,19 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 	}
 
 	// 另外三张 Tab 的首屏那一拉。
-	p := sp.pagerOf(sp.tab)
-	if !p.started && !p.loading {
-		if ctx := p.begin(); ctx != nil {
-			go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page, sp.mountGen)
-		}
-	}
-
-}
-
-// viewSpaceHeader 是头图 + 关注 + 统计。
-//
-// 四种状态画成四种样子（照 Biu `space-info.tsx`）：加载中 / 没读到（带一个
-// 重试）/ 拉黑了 / 正常。**四种都要能看出来是哪一种**——把「拉黑了」画成
-// 「没关注」的话，用户按下去发出去的是「取关」，而 B 站对拉黑中的用户回的是
-// 另一个码，界面上就成了一句看不懂的错。
-func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
-	t := c.Theme()
-	key := "space-header:" + strconv.FormatInt(sp.mid, 10)
-
-	switch {
-	case h.Loading && !h.Loaded:
-		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Center().Children(func() {
-			ui.Spinner(c).Label("正在打开这个 UP 主的空间")
-		})
-		return
-
-	case h.Err != "" && !h.Loaded:
-		ui.Column(c).Key(key).Height(upHeaderH).FillWidth().Center().Gap(space.Px10).
-			AlignItems(ui.Center).Children(func() {
-			// ⚠️ **字重不写**（400）：标题那一档是 400（DESIGN.md §二）。
-			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, scale.Size16))
-			ui.Text(c, h.Err).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(3)
-			// ⚠️ **失败之后只有人能让它再来一次**：上面那一行每帧都跑，
-			// 没有这道门就是一个每帧发一次请求的死循环（见那里的注释）。
-			if ui.Button(c, "再试一次").Clicked() {
-				sp.header.Load()
-			}
-		})
-		return
-
-	case h.Relation.Blocked():
-		// 上游是整页换成一张「已拉黑」的图（`space-info.tsx:69-75`）。这里
-		// 保留头像和名字：用户多半只是想确认「我拉黑的是不是这个人」。
-		ui.Row(c).Key(key).Height(upHeaderH).FillWidth().Gap(space.Px16).Center().Children(func() {
-			s.spaceAvatar(c, h.User.Face, upAvatarS, true)
-			ui.Column(c).Gap(space.Px4).Children(func() {
-				ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
-				ui.Text(c, "你把他拉黑了，他的内容在这儿看不到").
-					FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
-			})
-		})
-		return
-	}
-
-	// 横幅 + 压在它下沿的头像 + 写在页面底色上的信息。
 	//
-	// ⚠️ **横幅和信息行都是 `Absolute`**：框架的 Box 是一列，非绝对的子元素往下排；
-	// 不绝对定位的话它们各占一份高度，头像就掉到横幅下面去了。
-	ui.Box(c).Key(key).Height(upHeaderH).FillWidth().Clip().Children(func() {
-		// ① 横幅。没设头图的 UP 主占大多数（B 站给的是空对象）：画主题色渐变，
-		// 不画 B 站的占位图（那看着像加载失败）。
-		ui.Box(c).Absolute().Left(0).Right(0).Top(0).Height(upBannerH).Clip().Children(func() {
-			if h.User.Banner != "" {
-				// ⚠️ **宽度是横幅真正显示的宽**（票 #630）：它是通栏，宽就是
-				// 内容区的宽（窗口宽 − 侧栏宽）。
-				//
-				// ⚠️ **以前这里传的是 0**，而那个宽度**就是画的时候用的宽度**
-				// ——于是横幅从来没画出来过（票 #65 起的老 bug），票 #621 又给它
-				// 加了一层「要一张 64×64 正方缩略图」的浪费。
-				s.spaceFill(c, h.User.Banner, s.spaceContentWidth(c), upBannerH)
-			} else {
-				ui.Box(c).Height(upBannerH).FillWidth().LinearGradient(ui.LinearGradient{Angle: 135, Stops: []ui.GradientStop{
-					{Color: t.Background.Mix(t.Accent, 0.7), At: 0},
-					{Color: t.Background.Mix(t.Accent, 0.35), At: 1},
-				}})
-			}
-			// 底部淡进页面底色：横幅不是一块硬边的方块，头像压在上面也不突兀。
-			ui.Box(c).Absolute().Left(0).Right(0).Top(0).Bottom(0).
-				LinearGradient(ui.LinearGradient{Angle: 180, Stops: []ui.GradientStop{
-					{Color: ui.Transparent, At: 0.6},
-					{Color: t.Background, At: 1},
-				}})
-		})
-		// ② 头像 + 名字 + 认证徽章 + 签名，右边关注和统计。
-		//
-		// 排布照上游（`space-info.tsx:80-137`）：**一行**——左边是头像 +
-		// 名字那一列，右边是关注 + 统计；头像与名字那一列之间 16，左右两组
-		// 之间 32（上游的 `space-x-4` / `space-x-8`）。
-		//
-		// ⚠️ **横幅和信息行都是 `Absolute`**：框架的 Box 是一列，非绝对的子
-		// 元素往下排；不绝对定位的话它们各占一份高度，头像就掉到横幅下面去了。
-		ui.Row(c).Key("space-head-info").Absolute().Left(0).Right(0).Top(upAvatarTop).
-			Padding(space.None, upPadX).Gap(upActionsGap).AlignItems(ui.Start).Children(func() {
-			// 左组：头像 + 名字那一列。
-			ui.Row(c).Grow(1).Shrink(1).Gap(upHeadGap).AlignItems(ui.Start).Children(func() {
-				ui.Box(c).Size(upAvatarS+2*upAvatarRing, upAvatarS+2*upAvatarRing).
-					Radius((upAvatarS + 2*upAvatarRing) / 2).Background(t.Background).Center().Children(func() {
-					s.spaceAvatar(c, h.User.Face, upAvatarS, true)
-				})
-				ui.Column(c).Grow(1).Shrink(1).Gap(space.Px8).
-					Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
-					// 名字 + 认证徽章（上游那一行是 `flex items-center space-x-2`）。
-					ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-						// ⚠️ **字重是 500（`weightMedium`）**，不是 600（票 #241 / 报告 F-26）。
-						ui.Text(c, spaceName(h.User)).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium).
-							MaxLines(1).Ellipsis("…")
-						if h.User.Official != "" {
-							s.spaceBadge(c, h.User.Official)
-						}
-					})
-					// 签名（上游两行，`text-sm`）。
-					if h.User.Sign != "" {
-						ui.Text(c, h.User.Sign).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).MaxLines(2)
-					}
-				})
-			})
-			// 右组：关注按钮 + 统计。**上沿跟名字那一列齐**（上游那一组是
-			// `items-end`，而上游的名字那一列比头像矮得多——我们这一版的
-			// 名字那一列在横幅下面，跟它齐更接近参考图上「+ 关注」那一枚
-			// 跟昵称齐着的样子）。
-			ui.Box(c).Margin(upTextTop-upAvatarTop, space.None, space.None, space.None).Children(func() {
-				s.viewSpaceActions(c, sp, h)
-			})
-		})
-	})
-}
-
-// spaceBadge 是昵称右边那一枚认证徽章：**20 的圆 + 强调色底 + 一枚盾**。
-//
-// 上游是 `bg-primary flex h-5 w-5 items-center justify-center rounded-full
-// text-white ring-2 ring-white`（`space-info.tsx:97-101`），里面一枚 12 的
-// 闪电（`RiFlashlightFill`）。我们图标集里没有闪电那一枚，用的是盾
-// （`System/shield-check-line.svg`）——同样是「这一位是被认证过的」。
-//
-// ⚠️ **认证的说明文字不进画面**：上游把它放在提示里（`Tooltip`），这一页
-// 没有接那一层。它是徽章的**无障碍名字**（`Label`），读屏能读到；画面上
-// 少的是「认证：某某」那一行字（改之前是有的）。
-func (s *Shell) spaceBadge(c *ui.Context, official string) {
-	t := c.Theme()
-	ui.Box(c).Key("space-badge").Size(upBadgeS, upBadgeS).Radius(upBadgeS / 2).
-		Background(t.Accent).Label(official).Center().Children(func() {
-		ui.Icon(c, icon(iconVerified)).FontSize(12).TextColor(t.AccentText)
-	})
-}
-
-// viewSpaceActions 是右边那一排：关注按钮 + 粉丝数 + 等级。
-//
-// 两条画不画的规矩都抄上游：
-//   - **关注按钮**只在「登录了、且看的不是自己」时画（`space-info.tsx:100`）；
-//   - **「关注数」只在自己看自己时画**（`space-info.tsx:36-40` 的
-//     `hidden: !isSelf`）：别人的关注数是 B 站不公开的那一档，画出来是 0。
-//
-// ⚠️ 上游的统计**只有这三个**——没有获赞数、没有播放数（`space-info.tsx:31-45`
-// 的 `stats` 表就三行）。这一版照它，不自己加。
-func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
-	account := s.pageAccount()
-	isSelf := account.SelfMid == sp.mid
-
-	ui.Row(c).Key("space-actions").Gap(upStatGap).AlignItems(ui.Center).Children(func() {
-		// 关注按钮**只在「登录了、且看的不是自己」时画**（上游
-		// `space-info.tsx:100` 的 `Boolean(user?.isLogin) && !isSelf`）。
-		// 看自己的时候画一个「关注自己」是 B 站网页版都不做的事。
-		if !isSelf {
-			switch h.Follow(account.SelfMid, account.SelfMid != 0) {
-			case app.FollowDone:
-				// ⚠️ **关注是写接口**（要 CSRF、要网络、一个往返）。在界面线程
-				// 上直接调就是每按一次冻一下窗口，所以开后台；
-				// `UpSpace.Follow` 自己会叫醒界面（铁律三）。
-				if s.spaceFollowButton(c, true).Clicked() {
-					sp.follow(false)
-				}
-			case app.FollowAskable:
-				if s.spaceFollowButton(c, false).Clicked() {
-					sp.follow(true)
-				}
-			case app.FollowFailed:
-				// 🔴 **没查到就说没查到**。画一个能按的「关注」比不画更糟：
-				// 用户按下去是一次**取关**（B 站对没关注过的人「取关」是成功的），
-				// 于是他更确信自己关注过——而真相是我们压根没读到。
-				ui.Text(c, "关注状态没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
-				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).Clicked() {
-					sp.header.RetryRelation()
-					sp.header.Load()
-				}
+	// ⚠️ **投稿那张不走这一支**：它是 `list.PagedList`（上面那一段）。`pagerOf` 对它没有
+	// 对应的闸门、会退回动态那一份——投稿现在是默认的第一张 Tab，不挡的话打开空间页就
+	// 替「动态」发了一次拿不到东西的请求，把动态那一份标成「拉过了、什么都没有」。
+	if sp.tab != upTabVideo {
+		p := sp.pagerOf(sp.tab)
+		if !p.started && !p.loading {
+			if ctx := p.begin(); ctx != nil {
+				go s.fetchUp(ctx, sp, sp.tab, p.cursor, p.page, sp.mountGen)
 			}
 		}
+	}
 
-		// ⚠️ **整块统计只在登录后画**（上游 `space-info.tsx:125` 的
-		// `{user?.isLogin ? stats.map(...) : null}`）。
-		//
-		// 原因不是「没登录不好看」，是**画出来是个假数**：`/x/relation/stat`
-		// 要 Cookie，没登录时 B 站要么回 -101、要么给 0，而界面上会是一个
-		// 干干净净的「粉丝数 0」——用户会以为他真的一个粉丝都没有。等级也是
-		// 一块（上游把它算在 `stats` 里），跟着一起藏。
-		if account.SelfMid != 0 {
-
-			// 🔴 **没查到就画「没查到」，不画 0**。粉丝数 0 是一个**假数**
-			// （真实值可能是十几万），而它看起来完全正常——这是这一块最难受
-			// 的失败方式。等级来自 acc/info、登录就能读到，所以照画。
-			if h.StatOK() {
-				spaceStat(c, "粉丝数", formatCount(h.Stat.Follower))
-				if isSelf {
-					spaceDivider(c)
-					spaceStat(c, "关注数", formatCount(h.Stat.Following))
-				}
-				spaceDivider(c)
-			} else if h.StatFailed() {
-				ui.Text(c, "粉丝数没读到").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted)
-				if flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).Clicked() {
-					sp.header.RetryRelation()
-					sp.header.Load()
-				}
-			}
-			spaceStat(c, "等级", fmt.Sprintf("Lv%d", h.User.Level))
-		}
-	})
 }
 
 // follow 关注或取关（后台跑，失败给一句人话）。
@@ -796,86 +602,6 @@ func (sp *upSpace) follow(yes bool) {
 			sp.notify("关注没改成："+err.Error(), notice.Danger)
 		}
 	}()
-}
-
-// spaceFollowButton 是「关注」那一枚：**描边方块 + 一枚加号**。
-//
-// 上游是 HeroUI 的 `AsyncButton`（`variant="shadow"`，实心底 + 影），而参考图
-// （B 站 UP 主页）上是**描边方块**加一个「+」。这一版照参考图。
-//
-// ⚠️ **「已关注」那一档还是描边方块**：填成实心底的话，头图区里最响的那一块
-// 恰恰是用户**已经做过**的事——它不该抢注意力（而且那一档按下去是取关，
-// 越显眼越容易误按）。
-//
-// ⚠️ **加号那一枚是 `iconAdd`**（`System/add-line.svg`），和上游的
-// `RiAddLine size={18}` 同一个图形。
-//
-// # 🔴 它必须是 `ui.ButtonBase`，不能是 `ui.Row`
-//
-// `ui.ButtonBase` 才有 `Focusable()`（`mygo/ui/base.go:25-29`）：**Tab 走得到
-// 它、回车 / 空格按得动它**，读屏也当它是按钮（`mygo/ui/access.go:174`：
-// clickable + focusable 才是 `RoleButton`）。
-//
-// ⚠️ **`ui.Row` 只是一个容器**：`Clicked()` 只设 `flagClickable`（不设
-// `flagFocusable`），于是 Tab **跳过**它、回车按不动、读屏只当它是「容器里
-// 的一段字」——鼠标点得动，键盘用户完全够不着（票 #453 修的正是这一类断口，
-// 见 `sidebar_focus_test.go` 的文件头）。
-//
-// 改之前这一枚是 `ui.PrimaryButton`（框架的按钮），键盘是走得到的——这一版
-// 换成描边方块的时候**不能把那份可达性一起丢掉**。
-func (s *Shell) spaceFollowButton(c *ui.Context, following bool) ui.Element {
-	t := c.Theme()
-	label := "关注"
-	mark := icon(iconAdd)
-	if following {
-		label = "已关注"
-		mark = icon(iconFollowDone)
-	}
-	// ⚠️ **悬停 / 按下的反馈走 `flat.Feel`**：它压的是一层半透明的前景色，
-	// 而这一枚自己有描边（不是「无描边按钮」那一族），所以不能直接用
-	// `flat.Button`——那一份把描边也去掉了。
-	//
-	// ⚠️ **`flat.Feel` 不影响焦点**：它只是往元素上挂一个画的时候跑的
-	// `DrawOver`（`widgets/flat/flat.go:426-435`），标志一个都不动。
-	box := ui.ButtonBase(c).Key("space-follow").Gap(space.Px4).AlignItems(ui.Center).
-		Padding(space.Px6, space.Px12).Radius(t.Radius).
-		Border(1, t.Border).Background(t.Background)
-	box = flat.Feel(c, box)
-	box.Children(func() {
-		ui.Icon(c, mark).FontSize(16).TextColor(t.TextMuted)
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14))
-	})
-	return box
-}
-
-// spaceStat 是一个统计数字（上面是数、下面是名字）。
-//
-// 字号照上游 `space-info.tsx:131-133`：数字 `text-lg`（18），名字 `text-sm`（14）。
-//
-// ⚠️ **字重取 500（`weightMedium`），不是上游那个 600**（票 #241 / 报告 F-26）。
-// 上游是 `font-semibold`，而 600 在 `DESIGN.md` §二 的刻度里**有这一档却没有
-// 用途**——「600 是无主」：没有人能说出这三个数字为什么该是 600。500 才是
-// 仓库里唯一被命名的字重，用途正是「比正文重一档但不到标题那么重」。
-//
-// ⚠️ **字色是主题的字色**（`t.Text` / `t.TextMuted`），不是白字：这一块写在
-// **页面底色**上（横幅下面那一段），而头图区那一版「白字压在照片上」的做法
-// 早就换掉了（设计规范 v0.1 §7.18）——所以这里不需要为「任意照片 + 白字」
-// 算蒙版，字色跟着主题走，方案换一套整套跟着换。
-func spaceStat(c *ui.Context, label, value string) {
-	ui.Column(c).Key("space-stat:" + label).Gap(space.Px2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
-	})
-}
-
-// spaceDivider 是统计之间那条竖线：上游 `Divider orientation="vertical"
-// className="h-4"`（`space-info.tsx:136-137`），高 16。
-//
-// ⚠️ **它也是白字那一族**：主题那一档分隔线在浅色下是 #dbdbdb（亮）、在深色下
-// 是 #3f3f46（暗）——后者压在头图区那块深底上几乎看不见。这里是 35% 的白，
-// 两套主题下都看得见（图形只要 3:1）。
-func spaceDivider(c *ui.Context) {
-	ui.Box(c).Width(1).Height(16).Background(c.Theme().Border)
 }
 
 // spaceName 是这个 UP 显示在标题上的名字。还没加载时给一个占位，而不是空串

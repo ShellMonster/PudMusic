@@ -16,13 +16,12 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -204,117 +203,72 @@ func (s *Shell) viewCollectionRow(c *ui.Context, col app.SpaceCollection, select
 // `/user/{mid}`）。这是「能点进对应 UP 空间」那条验收在卡片上的落点。
 func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring bool) {
 	t := c.Theme()
-	// ⚠️ **通栏**：左右 0、只有一条下边框、透明底、直角。
+	pl := tok.Of(t)
+	// 原型 `.post`：44 头像 | 内容，缝 16，上下内边距 24，底下一条 line；`.feed` 最宽 760。
 	//
-	// 上游 `border-default-100 mb-2 w-full rounded-none border-b bg-transparent
-	// pb-4`（`dynamic-feed/item.tsx:80`）+ CardHeader 的 `pt-4`：
-	//   - **左右 0**：那 16（动态流那一页是 16+16 = 32，UP 空间是 `p-4` 的 16）
-	//     由页面那一层给——卡片自己再缩 16 的话，同一份内容上游左右各多出一段，
-	//     而上游那边是「图左右略宽」的（用户 2026-10-25 说的）；
-	//   - 上下各 16（`pt-4` / `pb-4`）；
-	//   - **只有一条下边框**（`border-b`）、**透明底**（`bg-transparent`）、
-	//     **直角**（`rounded-none`）；
-	//   - 距下一条 8（`mb-2`）——**那一段由列表的行间距给**（`upspace_tabs.go`
-	//     和 `dynamicfeed.go` 里的 `GapY`）。不给的话卡片自己的下外边距会把
-	//     **框架那一层行悬停底**露在卡片底下（就是那条棕带，见下面那段）。
-	//
-	// # 底下那条棕带是怎么来的，怎么没的
-	//
-	// 框架给「指针压着的那一行」铺一层 `t.SurfaceHover`（`mygo/ui/list.go` 的
-	// styleFn：`w.bg = t.SurfaceHover`）。那一层铺的是**整行**的矩形，而**行比
-	// 卡片高**（差着卡片自己的下外边距）——于是卡片**底下**那一条露出了框架
-	// 那一层。暖纸主题下 `t.SurfaceHover` 是**淡棕**（`surface2` 往字色推 4%），
-	// 用户看到的就是「莫名其妙的一层棕色阴影」（2026-10-25）。
-	//
-	// ⚠️ **盖掉的是那一层，不是把主题里那一档调淡**：调淡 `t.SurfaceHover` 会
-	// 波及全应用（关注页的网格、收藏夹页、下载记录页…）。
-	//
-	// ⚠️ **盖的办法是「卡片自己刷页面底色」**：卡片现在左右 0、上下 16，正好
-	// 填满整行，于是它刷的底色把框架那一层整个盖住——**悬停反馈本身还在**
-	// （作者名、赞、下一首播放、下载音频那几个键各自有反馈）。
-	card := ui.Column(c).Key("dyn:"+d.ID).Grow(1).
-		Padding(dynamicCardPadY, space.None, dynamicCardPadY, space.None).
-		// ⚠️ **底色刷成页面底色，是为了盖掉框架那一层悬停底**（见下面那段）。
-		Background(t.Background).
-		// 🔴 **字色钉回正文色，是无条件的**：框架的列表在**指针点一下**时就把
-		// 那一行标记成选中（`mygo/ui/list.go:708` 的 `w.Selected(on)`），那一笔
-		// 带着一块主色底和一层**白字**。底被上面那句盖掉了，白字盖不住——卡片里
-		// 没写死颜色的字（标题、UP 昵称、行尾那枚「⋯」）会继承它，压在浅底上
-		// 就是「点过的那张卡变成白字，看不清」（2026-10-26 用户实测）。在根上
-		// 钉一层正文色，继承到的是它；写死了颜色的字（「赞 N」、时间、简介）
-		// 不受影响。
-		TextColor(t.Text).
-		BorderWidth(0, 0, 1, 0).BorderColor(t.Border).
-		Gap(space.Px8)
+	// ⚠️ **底色刷成页面底色、字色钉回正文色**：框架给「指针压着 / 点过的那一行」铺主色底和
+	// 白字（`mygo/ui/list.go` 的 styleFn / `Selected`），底盖掉、字钉回，卡片自己的悬停反馈
+	// （名字、赞、播放键各自有）不受影响。
+	card := ui.Row(c).Key("dyn:"+d.ID).Grow(1).MaxWidth(feedMaxW).AlignItems(ui.Start).Gap(space.Px16).
+		Padding(space.Px24, space.None, space.Px24, space.None).
+		Background(pl.Bg).TextColor(pl.Text).
+		BorderWidth(0, 0, 1, 0).BorderColor(pl.Line)
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
-	//（理由见 `widgets/list/selection.go`）。
-	//
-	// ⚠️ **`hovered` 传 false**：框架那一层悬停底**已经被卡片自己刷的页面底色
-	// 盖掉了**（下面那段），所以「盖上去的颜色」恒是页面底色——传 true 的话，
-	// 指针停在一张**被选中**的动态上时，整条卡片会变成淡棕。
+	//（理由见 `widgets/list/selection.go`）。`hovered` 传 false：悬停底已经被盖掉了。
 	card = list.SelectedRow(card, t, selected, false, ring)
 	card.Children(func() {
-		// ① 头一行：**左边头像 + 昵称 / 「时间 · 动作」，右边「赞 + 数」与「⋯」**。
-		//
-		// 排布照上游（`user-profile/dynamic-list/item.tsx:113-160` 的
-		// `CardHeader className="flex items-start justify-between px-0 py-2"`）：
-		// 左边是 `User`（头像 + 名字 + 下面一行的「时间 · 动作」），右边是
-		// 赞和「⋯」那一组。
-		ui.Row(c).FillWidth().AlignItems(ui.Start).Children(func() {
-			// 左组：头像 + 名字那一列。
-			ui.Row(c).Grow(1).Shrink(1).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				s.spaceAvatar(c, d.Author.Face, dynamicAvatarS, false)
-				ui.Column(c).Gap(space.Px2).Children(func() {
-					// 昵称是**链接**不是装饰：它是「从这条动态进他空间」这条路。
-					//
-					// ⚠️ **它是「名字型链接」，不是一枚按钮**（票 #417）：上游那一格是
-					// `User` 的 `hover:underline`——**没有按钮壳、没有底色、没有胶囊**。
-					// 改之前这里画的是扁平按钮（左右各留一段内边距 + 圆角），于是那个
-					// 名字被一个胶囊包着，而指针落上去时胶囊才显出来——像一块底牌。
-					//
-					// ⚠️ **没有编号时点不动**（`d.Author.Mid > 0`）：那一句仍然显示——
-					// 「把名字藏起来是另一种撒谎」（理由同 `widgets/list` 的 `OwnerName`）。
-					name := d.Author.Name
-					if name == "" {
-						name = "这个 UP 主"
+		pud.Avatar(c, d.Author.Name, 44, ui.Color{}, s.upFaceDraw(d.Author.Face))
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			// ① 头一行：名字（链接，600）+ 「时间 · 发布了音乐」（12 号 text-3）。
+			ui.Row(c).Wrap().AlignItems(ui.Baseline).Gap(space.Px12).Children(func() {
+				// ⚠️ **名字是「名字型链接」不是按钮壳**（票 #417），没有编号时点不动。
+				name := d.Author.Name
+				if name == "" {
+					name = "这个 UP 主"
+				}
+				if flatLink(c, name).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).Clicked() && d.Author.Mid > 0 {
+					s.navigate(upPathOf(d.Author.Mid))
+				}
+				if d.Time != "" {
+					when := d.Time
+					if d.Kind == app.DynamicVideo && d.Video != nil {
+						when += " · 发布了音乐"
 					}
-					if flatLink(c, name).FontSize(scale.Font(c, scale.Size14)).Clicked() && d.Author.Mid > 0 {
-						s.navigate(upPathOf(d.Author.Mid))
-					}
-					// 「时间 · 动作」那一行（上游 `User` 的 `description`）。
-					if d.Time != "" {
-						when := d.Time
-						if d.Kind == app.DynamicVideo && d.Video != nil {
-							when += " · 发布了音乐"
-						}
-						ui.Text(c, when).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-					}
-				})
+					ui.Text(c, when).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).MaxLines(1)
+				}
 			})
-			// 右组：赞 + 数，还有「⋯」。
+
+			// ② 正文（14 号，行高 1.7，上 8 下 16）。
+			//
+			// ⚠️ **投稿型动态的正文与稿件卡里的简介是同一句话时，正文不画**（见 `dynBodyRepeatsCard`）。
+			hasBody := d.Text != "" && !dynBodyRepeatsCard(d)
+			if hasBody {
+				ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size14)).LineHeight(1.7).MaxLines(8).
+					Margin(space.Px8, space.None, space.Px16, space.None)
+			}
+
+			// ③ 内容：投稿的嵌入卡 / 图文的图。
+			gap := float32(space.Px8)
+			if hasBody {
+				gap = space.None
+			}
+			ui.Column(c).Margin(gap, space.None, space.None, space.None).Children(func() {
+				switch {
+				case d.Kind == app.DynamicVideo && d.Video != nil:
+					s.viewDynamicVideo(c, d.Video, d.Author)
+				case len(d.Pics) > 0:
+					s.viewDynamicPics(c, d.Pics)
+				}
+			})
+
+			// ④ 脚：赞、⋯（原型 `.post-foot`：缝 24，上 12，text-3 13 号）。
 			s.viewDynamicActions(c, d)
 		})
-
-		// ② 正文。
-		//
-		// ⚠️ **投稿型动态的正文与稿件卡里的简介是同一句话时，正文不画**：我们
-		// 这一版的投稿动态在正文空的时候**用简介顶上**（`bili` 那层，票 #344 的
-		// 判据要靠它），而参考图上那一句简介是**画在稿件卡里**的——两处都画
-		// 就是同一句话说两遍（改之前那一张卡也是两处都画，而画出来是「上面
-		// 一行字、卡里又一行一样的字」）。
-		if d.Text != "" && !dynBodyRepeatsCard(d) {
-			ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Copy).MaxLines(8)
-		}
-
-		// ③ 内容：三种类型。
-		switch {
-		case d.Kind == app.DynamicVideo && d.Video != nil:
-			s.viewDynamicVideo(c, d.Video, d.Author)
-		case len(d.Pics) > 0:
-			s.viewDynamicPics(c, d.Pics)
-		}
 	})
 }
+
+// feedMaxW 是动态流的最宽（原型 `.feed { max-width: 760px }`）。
+const feedMaxW = 760
 
 // dynBodyRepeatsCard 报「这一条的正文就是稿件卡里那一句简介」。
 //
@@ -349,34 +303,32 @@ func dynBodyRepeatsCard(d app.Dynamic) bool {
 // 放的：`dynamic-feed/item.tsx:145-150` 的 `onAddToNext` / `onDownloadAudio`）。
 // 它们原来在卡片最下面那一排（正文下面），而参考图上那一排没有它们。
 func (s *Shell) viewDynamicActions(c *ui.Context, d app.Dynamic) {
-	t := c.Theme()
-	ui.Row(c).Key("dyn-acts:" + d.ID).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
+	pl := tok.Of(c.Theme())
+	ui.Row(c).Key("dyn-acts:"+d.ID).Gap(space.Px24).AlignItems(ui.Center).
+		Margin(space.Px12, space.None, space.None, space.None).Children(func() {
 		liked, count := s.dynLikes.get(d.ID, d.Liked, d.LikeCount)
-		label := "赞"
-		if count > 0 {
-			label = "赞 " + strconv.Itoa(count)
-		}
-		// 上游那一枚是 `variant="light"`（`dynamic-feed/item.tsx:108-116`）：
-		// **拇指图标（18，赞过实心/没赞空心）+ 数字**，无边框无底。以前我们只画
-		// 「赞 N」两个字的文字键——用户 2026-10-26 点名要回上游那个大拇指。
-		// 壳走 `flat.ButtonContent`（和 Button 同一份壳），内容自己拼。
-		//
-		// 点亮的那一下是**看得见的**（「我赞过了」不是数字变大）：实心拇指 +
-		// 主色当字（浅色下取压深的那一档，理由见 `widgets/ink`）；没赞是空心
-		// 拇指 + 次要色。
-		col := t.TextMuted
-		thumb := likeIcon(liked)
+		// 赞：拇指图标 16 + 等宽数字；赞过是实心拇指 + accent-text，没赞是空心 + text-3，
+		// 悬停换正文色。点亮是**乐观**的（先点亮再发请求）。
+		thumb := "thumb"
+		col := pl.Text3
 		if liked {
-			col = ink.AccentOn(t)
+			thumb, col = "thumb-on", pl.AccentText
 		}
-		btn := flat.ButtonContent(c, func(c *ui.Context) {
-			ui.Icon(c, icon(thumb)).FontSize(18).TextColor(col)
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(col).SingleLine()
+		btn := ui.ButtonBase(c).Key("dyn-like:" + d.ID).Label("点赞 " + strconv.Itoa(count)).
+			Gap(space.Px6).AlignItems(ui.Center)
+		if btn.Hovered() && !liked {
+			col = pl.Text
+		}
+		btn.Children(func() {
+			ui.Icon(c, pud.Icon(thumb)).FontSize(16).TextColor(col)
+			if count > 0 {
+				typo.Mono(ui.Text(c, strconv.Itoa(count))).FontSize(scale.Font(c, scale.Size13)).TextColor(col).SingleLine()
+			}
 		})
 		if btn.Clicked() {
 			s.toggleDynamicLike(d)
 		}
-		// 「⋯」。
+		// 「⋯」：下一首播放 / 下载音频 / 在 B 站打开（只有投稿型动态有）。
 		s.viewDynamicMore(c, d)
 	})
 }
@@ -573,66 +525,46 @@ func (s *Shell) viewDynamicPics(c *ui.Context, pics []string) {
 // `play()` 补上「已经在队列里就定位过去、不重复入队」那一支）。
 // 起播失败由 list.Actions.PlayNow 的 Toast 说明。
 func (s *Shell) viewDynamicVideo(c *ui.Context, v *app.DynamicVideoItem, author app.DynamicAuthor) {
-	t := c.Theme()
-	box := ui.Row(c).Grow(1).AlignItems(ui.Center).Padding(space.Px8).
-		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
-		Clip().Key("dynv:" + v.Bvid)
+	pl := tok.Of(c.Theme())
+	// 原型 `.embed`：72 封面 | 标题 / 作者 / 读数 | 播放键；内边距 12、缝 16、圆角 12、
+	// surface 底、line 描边。整块可点：放这一首并立即播，保留原队列（票 #337 / #608）。
+	box := ui.Row(c).Key("dynv:"+v.Bvid).FillWidth().AlignItems(ui.Center).Gap(space.Px16).
+		Padding(space.Px12).Radius(tok.R12).Background(pl.Surface).Border(1, pl.Line)
+	hot := box.Hovered()
 	if box.Clicked() {
 		s.listActions().PlayNow(dynVideoItem(v, author))
 	}
+	if hot {
+		box = box.Border(1, pl.LineStrong)
+	}
 	box.Children(func() {
-		// ① 封面（16:9）+ 悬停罩上的播放键 + 右下角时长角标。
-		//
-		// ⚠️ **播放入口是封面上的悬停罩，不是卡右上一枚圆键**（上游
-		// `dynamic-feed/item.tsx:166-171`：封面 `absolute inset-0` 一层黑罩，
-		// 中间一枚 32 的白色播放三角，`opacity-0 group-hover:opacity-100`——
-		// 指针停在**卡上**（`group` 在外层那一格）罩才升起来）。我们原来在卡
-		// 最右边画了一枚实心主色圆键（#357 引入的），用户 2026-10-26 点名
-		// 「要像上游那样，不是在最右侧」。整块可点不变，这一枚罩只是**看得见的
-		// 入口**（和原来那枚圆键同一句话）。
-		//
-		// ⚠️ **罩的黑白走令牌**：上游是 `rgba(0,0,0,0.4)`，我们取共用的
-		// `scrim.Overlay`（35%，图上薄黑那一档，行封面悬停压暗同款）——界面层
-		// 不许写裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`）。
-		// 白三角和时长角标一样是纯白：它压在黑罩加照片上，主题色读不出来。
-		ui.Box(c).Size(dynamicCoverW, dynamicCoverH).Radius(t.Radius).Clip().Children(func() {
-			s.spaceThumb(c, v.Cover, dynamicCoverW, dynamicCoverH)
-			if box.Hovered() {
-				ui.Box(c).Absolute().Size(dynamicCoverW, dynamicCoverH).
-					Background(ui.RGBA(0, 0, 0, scrim.Overlay)).Center().Children(func() {
-					ui.Icon(c, icon(iconPlayFill)).FontSize(32).TextColor(ui.Color{R: 255, G: 255, B: 255, A: 255})
-				})
+		ui.Box(c).Size(72, 72).Radius(tok.R8).Clip().Background(pl.Surface2).Shrink(0).Children(func() {
+			s.spaceThumb(c, v.Cover, 72, 72)
+		})
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size16)).FontWeight(600).
+				TextColor(pl.Text).SingleLine().Ellipsis("…")
+			if author.Name != "" {
+				ui.Text(c, author.Name).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text2).
+					SingleLine().Ellipsis("…")
 			}
-			// ⚠️ **时长角标是黑底白字**（上游 `bg-black/70 px-1 text-xs
-			// text-white`），不是主题色——它压在封面那张照片上，主题色在深色
-			// 封面上读不出来。
-			//
-			// ⚠️ **那 70% 的黑走 `scrim.Badge`**（令牌表里那一档）：界面层不许
-			// 出现裸的遮罩 alpha（`widgets/scrim` 的 `TestNoScrimLiteralIsLeft`
-			// 盯着这件事）。
-			//
-			// ⚠️ **画在悬停罩的上面**（上游 z-20 > z-10）：罩升起来也不能把
-			// 时长盖掉。
+			meta := ""
+			if v.Play != "" {
+				meta = v.Play + " 播放"
+			}
 			if v.Duration != "" {
-				ui.Box(c).Absolute().Right(space.Px4).Bottom(space.Px4).
-					Padding(space.None, space.Px4).Radius(space.Px4).
-					Background(ui.RGBA(0, 0, 0, scrim.Badge)).Children(func() {
-					ui.Text(c, v.Duration).FontSize(scale.Font(c, scale.Size12)).TextColor(ui.Color{R: 255, G: 255, B: 255, A: 255})
-				})
+				if meta != "" {
+					meta += "  "
+				}
+				meta += v.Duration
+			}
+			if meta != "" {
+				typo.Mono(ui.Text(c, meta)).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).SingleLine()
 			}
 		})
-		// ② 右边那一列：标题 + 描述 + 播放量。
-		ui.Column(c).Grow(1).Shrink(1).Padding(space.Px12).Gap(space.Px4).Children(func() {
-			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size14)).
-				FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
-			if v.Desc != "" {
-				ui.Text(c, v.Desc).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
-					MaxLines(2).Ellipsis("…")
-			}
-			if meta := dynVideoMeta(v); meta != "" {
-				ui.Text(c, meta).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-			}
-		})
+		if pud.RoundButton(c, "dynv-play:"+v.Bvid, pud.Primary, pud.Std, "play", "播放 "+v.Title).Clicked() {
+			s.listActions().PlayNow(dynVideoItem(v, author))
+		}
 	})
 }
 

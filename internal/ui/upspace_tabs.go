@@ -8,8 +8,10 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -23,29 +25,36 @@ import (
 // 用的是 MyGo 自带的 `ui.Tabs`（`selected` 绑的是 sp.tab 那个地址）——点击、
 // 左右方向键、Home/End 全是框架给的，我们不去重写。
 func (s *Shell) viewSpaceTabs(c *ui.Context, sp *upSpace) {
-	// ⚠️ **Key 挂在外面的 Column 上，不能挂在 Tabs 上**：Tabs 是「自己管状态」
-	// 的那一类控件（Checkbox/Radio/Slider/List/TextInput 都一样），框架造它
-	// 的时候就把状态建好了，事后再挂 key 会 panic（`ui/element.go` 的 `Key`）。
-	// 给他外面套一层是最省事的做法。
-	// ⚠️ **下面那 16 是四张 Tab 共用的那一段**：Tab 那一条和内容之间留一段
-	// （上游那个 Tab 的**内容面板**是 `px-0 py-4`——上下各 16，左右那 16 由页面
-	// 外层给）。原来一点都没有，于是「动态」两个字底下一张卡片就顶上来
-	// （用户 2026-10-25 说的）。
-	//
-	// ⚠️ **上面那 16 是头图区和这一条之间的**：上游那一层是 `p-4`
-	// （`user-profile/index.tsx:130`），上下左右各 16——左右那两段由这一列的
-	// 左右内边距给，上下两段在这里给。
-	//
-	// ⚠️ **这一段给在 Tab 那一条上，不在内容面板里**：四张 Tab 的内容都摆在
-	// 下面那一个 `space-body` 里（`viewUpSpace`），所以这一段是**四张一起**的
-	// ——「一页两套口径」这件事从根上就不可能再有。
-	ui.Column(c).Key("space-tabs").Padding(space.Px16, upPad, space.Px16, upPad).Children(func() {
-		// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：这一排
-		// 和次级排序那几排不是同一个样子（票 #138）。
-		//
-		// ⚠️ `AlignSelf(ui.Start)`：同上，Column 默认 Stretch，轨道要包着字。
-		mainTabs(c, &sp.tab, tabMD, upTabNames...).AlignSelf(ui.Start)
+	pad := s.upPadFor(c)
+	// 原型 `.tabs`：离头部 32，下划线 Tab，每项带一个小计数（等宽 12 号 text-3）。
+	// 计数只在数得清的时候写（见 `upTabCountText`）。
+	ui.Column(c).Key("space-tabs").Padding(space.Px32, pad, space.None, pad).Children(func() {
+		tabs := make([]pud.Tab, upTabCount)
+		for i := range tabs {
+			tabs[i] = pud.Tab{Label: upTabNames[i], Count: upTabCountText(sp, i)}
+		}
+		pud.Tabs(c, "space-tabs:bar", &sp.tab, tabs)
 	})
+}
+
+// upTabCountText 是 Tab 上那个小计数：投稿用接口给的总数；另外三张只有「已经拉到头」
+// （没有下一页）时才数得清，其余情况不写（不写 0，也不写偏小的数）。
+func upTabCountText(sp *upSpace, tab int) string {
+	var n int
+	switch tab {
+	case upTabVideo:
+		n = int(sp.videosTotal.Load())
+	default:
+		p := sp.pagerOf(tab)
+		if !p.started || p.hasMore {
+			return ""
+		}
+		n = upRowItems(sp, tab)
+	}
+	if n <= 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 // viewSpaceTab 画当前那一张 Tab 的内容。
@@ -93,8 +102,9 @@ func (s *Shell) viewUpLead(c *ui.Context, sp *upSpace, tab int) {
 	if tab == upTabDynamic {
 		bottom = -space.Px8
 	}
-	ui.Column(c).Key("space-lead").AlignSelf(ui.Stretch).Background(c.Theme().Background).
-		Margin(space.None, -upPad, bottom, -upPad).Children(func() {
+	pad := s.upPadFor(c)
+	ui.Column(c).Key("space-lead").AlignSelf(ui.Stretch).Background(tok.Of(c.Theme()).Bg).
+		Margin(space.None, -pad, bottom, -pad).Children(func() {
 		s.viewSpaceLead(c, sp)
 		// 「有 N 条我们画不出来」那一行。
 		//
@@ -108,7 +118,14 @@ func (s *Shell) viewUpLead(c *ui.Context, sp *upSpace, tab int) {
 }
 
 // upLeadHeight 是页内头部的估高（回顶按钮判「滚过没有」用，差几十像素无妨）。
-const upLeadHeight = upHeaderH + 80
+const upLeadHeight = 168 + 48 + 160 + 130
+
+// upVideoSorts 是投稿的三档排序（原型 `u-sort`）：显示字和 B 站 `arc/search` 的 order。
+var upVideoSorts = [...]struct{ label, order string }{
+	{"最新发布", "pubdate"},
+	{"最多播放", "click"},
+	{"最多收藏", "stow"},
+}
 
 // viewSpaceVideos 是「投稿」Tab。
 //
@@ -166,22 +183,14 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 			Height: func() float32 { return upLeadHeight },
 			Draw: func(c *ui.Context) {
 				s.viewSpaceLead(c, sp)
-				// 工具条：全部播放 + 共几首（设计规范 §7.18，和首页、搜索页同一枚主按钮）。
-				//
-				// ⚠️ **上边那一格是 0**：Tab 那一条和这一段之间那 16 已经给了（`viewSpaceTabs`），
-				// 工具条自己再给一份的话，这一张 Tab 的间距就和另外三张不是同一个数了。
+				// 工具条（原型 `.toolbar`：离 Tab 24，排序图标 16 + 下拉，缝 12）。
+				// 「播放全部」已经是头部那一排的「播放投稿」。
 				ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
-					Padding(space.None, upPad, space.Px8, upPad).Children(func() {
-					p := sp.videos.Paged()
-					if playAllButton(c, p.Loading || p.Loaded == 0).Clicked() {
-						s.playAllSongs(sp.videos.Items())
-					}
-					if p.Loaded > 0 {
-						n := fmt.Sprintf("已加载 %d 首", p.Loaded)
-						if !p.HasMore {
-							n = fmt.Sprintf("共 %d 首", p.Loaded)
-						}
-						ui.Text(c, n).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
+					Padding(space.Px24, s.upPadFor(c), space.Px8, s.upPadFor(c)).Children(func() {
+					ui.Icon(c, pud.Icon("sort")).FontSize(16).TextColor(tok.Of(c.Theme()).Text3)
+					if toolbarSortSelect(c, &sp.videoSort, []int{0, 1, 2}, func(i int) string { return upVideoSorts[i].label }, 112) {
+						sp.videoOrder.Store(upVideoSorts[sp.videoSort].order)
+						sp.videos.Reload()
 					}
 				})
 				sp.videos.Header(c, "upspace:header")
@@ -200,6 +209,9 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 // 三张共用同一段翻页逻辑（upPager），各有各的行和 ListState。
 func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	p := sp.pagerOf(tab)
+	if tab == upTabCollection || tab == upTabSeries {
+		sp.perRow[tab] = pud.GridCols(s.spaceContentWidth(c) - 2*s.upPadFor(c))
+	}
 
 	// ① 首屏那一拉，必须在**画之前**发出去。
 	//
@@ -319,7 +331,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		}
 		sp.keys[tab].wire(c, st, s.focusSide)
 		spaceList := ui.List(c, st, rows).
-			Grow(1).FillHeight().FillWidth().PaddingX(upPad).
+			Grow(1).FillHeight().FillWidth().PaddingX(s.upPadFor(c)).
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
 			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、
 			// Tab 换焦点都还在。
@@ -380,12 +392,25 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 // id，理论上能撞上一个叫这个名字的；类型撞不上。
 type upSentinelKey struct{}
 
+// upRowItems 是第 tab 张 Tab 一共有几条（动态 / 收藏夹 / 合集）。
+func upRowItems(sp *upSpace, tab int) int {
+	if tab == upTabDynamic {
+		return len(sp.dynItems)
+	}
+	return len(sp.cols[tab])
+}
+
 // upRowCount 是第 tab 张 Tab 有几行内容（不含哨兵）。
 func upRowCount(sp *upSpace, tab int) int {
 	if tab == upTabDynamic {
 		return len(sp.dynItems)
 	}
-	return len(sp.cols[tab])
+	n := len(sp.cols[tab])
+	// 收藏夹 / 合集是卡片网格：一行 perRow 张，行数向上取整。
+	if per := max(sp.perRow[tab], 1); per > 1 {
+		return (n + per - 1) / per
+	}
+	return n
 }
 
 // upRowKey 是第 tab 张 Tab 第 i 行的身份（铁律四）。
@@ -404,10 +429,11 @@ func upRowKey(sp *upSpace, tab, i int) any {
 		// 的注释（票 #313）。
 		return sp.rowKeys[tab].At(i, upRowIdent{kind: 0, id: sp.dynItems[i].ID}, upRowIdentity)
 	case upTabCollection, upTabSeries:
-		if i >= len(sp.cols[tab]) {
+		first := i * max(sp.perRow[tab], 1)
+		if first >= len(sp.cols[tab]) {
 			return upSentinelKey{}
 		}
-		c := sp.cols[tab][i]
+		c := sp.cols[tab][first]
 		// ⚠️ 理由同上面那一处。
 		return sp.rowKeys[tab].At(i, upRowIdent{kind: 1, typ: c.Type, num: c.ID}, upRowIdentity)
 	}
@@ -460,8 +486,8 @@ func upRowLabel(sp *upSpace, tab, i int) string {
 		}
 		return "加载更多" + upTabNames[tab]
 	default:
-		if i < len(sp.cols[tab]) {
-			return sp.cols[tab][i].Title
+		if first := i * max(sp.perRow[tab], 1); first < len(sp.cols[tab]) {
+			return sp.cols[tab][first].Title
 		}
 		return "加载更多" + upTabNames[tab]
 	}
@@ -542,8 +568,28 @@ func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 			sp.keys[tab].selected(i), sp.keys[tab].ring(c))
 		return
 	}
-	s.viewCollectionRow(c, sp.cols[tab][i],
-		sp.keys[tab].selected(i), sp.keys[tab].ring(c))
+	// 收藏夹 / 合集：一行一块卡片（原型 `.card-grid` 的一行，格间距 24 / 16）。
+	w := s.spaceContentWidth(c)
+	pad := space.PageHorizontal(w)
+	per := max(sp.perRow[tab], 1)
+	gap := space.GridGapFor(w)
+	cell := pud.CellWidth(w-2*pad, per, gap)
+	first := i * per
+	items := sp.cols[tab][first:min(first+per, len(sp.cols[tab]))]
+	ui.Row(c).Key("space-coll-row:"+strconv.Itoa(first)).Gap(gap).AlignItems(ui.Start).
+		Padding(space.Px24, space.None, space.None, space.None).Children(func() {
+		for _, col := range items {
+			sub := "收藏夹"
+			if tab == upTabSeries {
+				sub = "合集"
+			}
+			sub += " · " + strconv.Itoa(col.Count) + " 首"
+			if pud.ColCard(c, "coll:"+strconv.Itoa(col.Type)+":"+strconv.FormatInt(col.ID, 10),
+				col.Title, sub, cell, s.collCoverDraw(col.Cover)) {
+				s.navigate(collectionPath(col.ID))
+			}
+		}
+	})
 }
 
 // upLoadErrorKey 是「这一张 Tab 第一页就拉失败」那一支的 key。
