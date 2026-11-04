@@ -27,6 +27,7 @@ package pud
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
@@ -41,9 +42,9 @@ func glyph(c *ui.Context, name string, size float32, col ui.Color) ui.Element {
 	return ui.Icon(c, Icon(name)).FontSize(size).TextColor(col)
 }
 
-// text 是一行正文字：字号过系统缩放。
+// text 是一行正文字：字号过系统缩放，行高 `leading.Body`（1.55）。
 func text(c *ui.Context, s string, size float32, col ui.Color) ui.Element {
-	return ui.Text(c, s).FontSize(scale.Font(c, size)).TextColor(col)
+	return ui.Text(c, s).FontSize(scale.Font(c, size)).TextColor(col).LineHeight(leading.Body)
 }
 
 // pal 是这一帧的令牌。

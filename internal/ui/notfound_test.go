@@ -23,47 +23,6 @@ func fakeClockAt(t *testing.T, s *Shell) *fakeClock {
 	return f
 }
 
-// TestNotFoundRedirectsHomeAfterThreeSeconds 是这一张的主验收点。
-//
-// 逐秒推进，每秒都查两件事：还在不在 404 上，倒计时写的对不对。3 秒一到就该
-// 自己回首页——不是「再等一会儿」，也不是回到首页还留着倒计时。
-func TestNotFoundRedirectsHomeAfterThreeSeconds(t *testing.T) {
-	s, tt := newShell(t)
-	fake := fakeClockAt(t, s)
-
-	s.navigate("/根本没有这一页")
-	tt.Frame()
-	if got := s.router.Path(); got != "/根本没有这一页" {
-		t.Fatalf("没停在 404 上（在 %q）", got)
-	}
-
-	// 3 → 2 → 1：每一跳之前先查数字对不对、还在不在 404 上。第 3 秒走完就该
-	// 回首页了，所以那一跳只查回没回。
-	for _, want := range []string{"3 秒后回到主页...", "2 秒后回到主页...", "1 秒后回到主页..."} {
-		if !tt.HasText(want) {
-			t.Fatalf("画面上不是 %q，文字有 %q", want, tt.Texts())
-		}
-		if got := s.router.Path(); got != "/根本没有这一页" {
-			t.Fatalf("还在倒计时却已经不在 404 上了（在 %q），画面上刚才是 %q", got, want)
-		}
-		fake.Advance(notFoundTick)
-		tt.Frame()
-	}
-
-	// 第三秒走完就该回首页了。
-	if got := s.router.Path(); got != "/" {
-		t.Fatalf("3 秒之后还在 %q，没回首页", got)
-	}
-	if tt.HasText("秒后回到主页...") {
-		t.Errorf("已经回首页了，画面上还留着倒计时，文字有 %q", tt.Texts())
-	}
-	// 判首页画出来了没有看它自己的那一排 Tab：`routes[0].Empty.Title` 那句
-	// 「暂无内容」是上游的共享默认文案，13 个页面都画它，拿它当判据等于没断。
-	if !tt.HasText(homeTabs[0]) {
-		t.Errorf("回首页之后首页没画出来，文字有 %q", tt.Texts())
-	}
-}
-
 // TestLeavingThe404PageCancelsTheRedirect 验「只在 404 上等才跳」。
 //
 // 漏了这一条的后果很具体：用户走进 404，看了两秒觉得不对，自己点回「历史记录」
@@ -614,5 +573,46 @@ func TestThe404PageHasAWayOutRightNow(t *testing.T) {
 	tt.Frame()
 	if got := s.router.Path(); got != "/" {
 		t.Errorf("回了首页之后倒计时还活着，又把用户拽到了 %q", got)
+	}
+}
+
+// TestNotFoundRedirectsHomeAfterThreeSeconds 是这一张的主验收点。
+//
+// 逐秒推进，每秒都查两件事：还在不在 404 上，倒计时写的对不对。3 秒一到就该
+// 自己回首页——不是「再等一会儿」，也不是回到首页还留着倒计时。
+func TestNotFoundRedirectsHomeAfterThreeSeconds(t *testing.T) {
+	s, tt := newShell(t)
+	fake := fakeClockAt(t, s)
+
+	s.navigate("/根本没有这一页")
+	tt.Frame()
+	if got := s.router.Path(); got != "/根本没有这一页" {
+		t.Fatalf("没停在 404 上（在 %q）", got)
+	}
+
+	// 3 → 2 → 1：每一跳之前先查数字对不对、还在不在 404 上。第 3 秒走完就该
+	// 回首页了，所以那一跳只查回没回。
+	for _, want := range []string{"3 秒后回到主页...", "2 秒后回到主页...", "1 秒后回到主页..."} {
+		if !tt.HasText(want) {
+			t.Fatalf("画面上不是 %q，文字有 %q", want, tt.Texts())
+		}
+		if got := s.router.Path(); got != "/根本没有这一页" {
+			t.Fatalf("还在倒计时却已经不在 404 上了（在 %q），画面上刚才是 %q", got, want)
+		}
+		fake.Advance(notFoundTick)
+		tt.Frame()
+	}
+
+	// 第三秒走完就该回首页了。
+	if got := s.router.Path(); got != "/" {
+		t.Fatalf("3 秒之后还在 %q，没回首页", got)
+	}
+	if tt.HasText("秒后回到主页...") {
+		t.Errorf("已经回首页了，画面上还留着倒计时，文字有 %q", tt.Texts())
+	}
+	// 判首页画出来了没有看它自己的那一排 Tab：`routes[0].Empty.Title` 那句
+	// 「暂无内容」是上游的共享默认文案，13 个页面都画它，拿它当判据等于没断。
+	if !tt.HasText(homeTabLabels[0]) {
+		t.Errorf("回首页之后首页没画出来，文字有 %q", tt.Texts())
 	}
 }

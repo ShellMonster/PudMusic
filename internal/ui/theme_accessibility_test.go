@@ -7,7 +7,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo/ui"
@@ -222,43 +221,6 @@ func TestTheScrollbarIsTenPixelsAndDeepensOnHover(t *testing.T) {
 	}
 	if luminanceRGBA(hot) > luminanceRGBA(idle) {
 		t.Errorf("滚动条悬停之后反而变亮了：%v → %v", idle, hot)
-	}
-}
-
-// TestTheNewMusicPlayingTitleIsReadable 是评审指出的 critical：首页「新歌速递」
-// 那一块的「正在播放」原来直接画 `t.Accent`，浅色下 1.92:1——同一屏上下面那几排
-// 列表是深绿、这一块是读不出来的亮绿。
-//
-// 判据是像素：卡片里离 `ink.AccentOn` 最近的那一笔与页面底色 ≥4.5:1。
-func TestTheNewMusicPlayingTitleIsReadable(t *testing.T) {
-	th := ui.LightTheme()
-	th.Accent = ui.Hex("#1ed760")
-	songs := []list.Music{
-		{ID: "a", Title: "新歌甲", Owner: "UP", Item: app.Item{Source: "online", Type: "mv", Bvid: "BV1", Title: "新歌甲"}},
-		{ID: "b", Title: "新歌乙", Owner: "UP", Item: app.Item{Source: "online", Type: "mv", Bvid: "BV2", Title: "新歌乙"}},
-		{ID: "c", Title: "新歌丙", Owner: "UP", Item: app.Item{Source: "online", Type: "mv", Bvid: "BV3", Title: "新歌丙"}},
-	}
-	playing := songs[1].Item.Identity()
-	acts := list.Actions{IsPlaying: func(it app.Item) bool { return it.Identity() == playing }}
-	g := newNewMusic(homeTestCache(t), acts, func() {})
-	g.SetSongs(songs)
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		c.SetTheme(th)
-		g.View(c)
-	}, 500, 320)
-	tt.Frame()
-
-	r, ok := tt.Find("新歌乙")
-	if !ok {
-		t.Fatalf("画面上找不到「新歌乙」，文字有 %q", tt.Texts())
-	}
-	want := ink.AccentOn(th)
-	text := nearestPixel(tt.Image(), r, want)
-	bg := tt.Image().RGBAAt(2, 2)
-	if got := contrastOf(text, bg); got < 4.5 {
-		t.Errorf("新歌速递里「正在播放」的歌名 %v 压底色 %v 只有 %.2f:1（< 4.5）"+
-			"——这一处还在直接用主色", text, bg, got)
 	}
 }
 

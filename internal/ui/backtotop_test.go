@@ -26,37 +26,6 @@ import (
 // 认得这一枚的唯一凭据）。
 const backTopLabel = "返回顶部"
 
-// TestTheHomePageHasABackToTop 钉住**首页**有那一枚。
-//
-// 首页是「歌最多的两页」之一（另一页是本地音乐），而它原先**没有**回顶——
-// 翻到第 80 首要一路把滚动条拖回去。
-func TestTheHomePageHasABackToTop(t *testing.T) {
-	_, tt := newHome(t, fullSongs())
-
-	if tt.HasText(backTopLabel) {
-		t.Fatalf("还没滚就出现回顶按钮了")
-	}
-
-	tt.Scroll(homeW/2, homeH/2, 0, 1200)
-	// ⚠️ **等条件，不数帧**：滚轮那一下要等布局把它收进去（机器忙的时候几帧不够，
-	// 而「不够」的样子就是「按钮没出现」——分不出是慢还是坏）。
-	waitFrames(t, tt, "首页滚下去之后回顶按钮出现", func() bool {
-		return tt.HasText(backTopLabel)
-	})
-
-	// 点它：回到顶上。
-	if err := tt.Click(backTopLabel); err != nil {
-		t.Fatalf("点不到回顶按钮：%v", err)
-	}
-	waitFrames(t, tt, "回到顶上之后回顶按钮消失", func() bool {
-		return !tt.HasText(backTopLabel)
-	})
-	pos := listPos(tt, homeTabs[0])
-	if len(pos) == 0 || pos[0].title != homeTabs[0]+" 1" {
-		t.Errorf("回到顶上之后画着的是 %v，want 从「%s 1」开始", titles(pos), homeTabs[0])
-	}
-}
-
 // TestTheLocalMusicPageHasABackToTop 钉住**本地音乐**有那一枚。
 //
 // 它是「歌最多的两页」里的另一页（本地文件能有几千首），上游那一页也有回顶

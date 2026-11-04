@@ -294,50 +294,6 @@ func TestUnknownRouteShowsThe404Page(t *testing.T) {
 	}
 }
 
-// TestPagePanicIsCaught 是铁律四的验收点：页面里 panic，进程不崩，
-// 显示错误页，日志里有记录。
-func TestPagePanicIsCaught(t *testing.T) {
-	s, tt := newShell(t)
-
-	// 把日志接到内存里，免得这一条 panic 糊在测试输出上，同时能验「记了日志」。
-	var logBuf bytes.Buffer
-	restore := logOutput(&logBuf)
-	t.Cleanup(restore)
-
-	// 换掉画页面内容的那一支，走的正是 viewRoutes 里 14 条路由用的那条 Guard。
-	s.pageBody = func(*mygoui.Context, *mygoui.Route, Route) { panic("这一页画崩了") }
-
-	// 起始页是首页，它现在有自己的一屏（三个 Tab），判据是那一排 Tab 里的第一个。
-	// ⚠️ 别再拿 `routes[0].Empty.Title` 当「起始页画出来了」的判据：首页接上内容
-	// 之后那一句话画在**每一个空着的 Tab 里面**，而这一屏的其余页面也都画
-	// 「暂无内容」（那是上游的共享默认文案），这个断言于是永远为真——它已经不再
-	// 断「起始页画出来了」，只是在别处找一个说得通的字。
-	if _, ok := tt.Find(homeTabs[0]); !ok {
-		t.Fatalf("起始页没画出来，文字有 %q", tt.Texts())
-	}
-	tt.Frame()
-	if s.crash == nil {
-		t.Fatal("页面 panic 了，外壳没有记住")
-	}
-	if !strings.Contains(errString(s.crash), "画崩了") {
-		t.Errorf("记住的 panic 是 %v", s.crash)
-	}
-	if !tt.HasText("界面出错了") {
-		t.Errorf("没有切到错误页，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("这一页画崩了") {
-		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
-	}
-
-	logged := logBuf.String()
-	if !strings.Contains(logged, "这一页画崩了") {
-		t.Errorf("日志里没有崩掉的原因：%q", logged)
-	}
-	if !strings.Contains(logged, "goroutine") {
-		t.Errorf("日志里没有栈：%q", logged)
-	}
-}
-
 // logOutput 把标准日志接到 buf 上，返回一个还原函数。
 func logOutput(buf *bytes.Buffer) func() {
 	old := log.Writer()
@@ -345,38 +301,6 @@ func logOutput(buf *bytes.Buffer) func() {
 	log.SetOutput(buf)
 	log.SetFlags(0)
 	return func() { log.SetOutput(old); log.SetFlags(flags) }
-}
-
-// TestPanicDoesNotBlockNavigation 验崩溃是**页面级**的：换一页就恢复正常。
-func TestPanicDoesNotBlockNavigation(t *testing.T) {
-	s, tt := newShell(t)
-	s.pageBody = func(*mygoui.Context, *mygoui.Route, Route) { panic("炸了") }
-	tt.Frame()
-	if s.crash == nil {
-		t.Fatal("没有记住崩溃")
-	}
-
-	// 错误页上要有一条走得出去的路：崩的是某一页，不一定非得是它自己。
-	if !tt.HasText("回到首页") {
-		t.Errorf("错误页上没有「回到首页」，文字有 %q", tt.Texts())
-	}
-	s.pageBody = s.pageContent // 假装这一页修好了
-
-	if err := tt.Click("回到首页"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-
-	if s.crash != nil {
-		t.Errorf("换页之后崩溃状态没复位：%v", s.crash)
-	}
-	if tt.HasText("界面出错了") {
-		t.Errorf("换页之后还在错误页，文字有 %q", tt.Texts())
-	}
-	// 同上：判首页画出来了没有，看它自己的那一排 Tab。
-	if _, ok := tt.Find(homeTabs[0]); !ok {
-		t.Errorf("没有回到首页，文字有 %q", tt.Texts())
-	}
 }
 
 // TestNavigateResetsTheCrash 验切路由会把崩溃状态复位——不然一页崩了之后
@@ -561,5 +485,81 @@ func TestSwipingBackAndForwardChangesThePage(t *testing.T) {
 	tt.Frame()
 	if got := s.router.Path(); got != "/later" {
 		t.Errorf("滑动前进之后在 %q，want /later", got)
+	}
+}
+
+// TestPagePanicIsCaught 是铁律四的验收点：页面里 panic，进程不崩，
+// 显示错误页，日志里有记录。
+func TestPagePanicIsCaught(t *testing.T) {
+	s, tt := newShell(t)
+
+	// 把日志接到内存里，免得这一条 panic 糊在测试输出上，同时能验「记了日志」。
+	var logBuf bytes.Buffer
+	restore := logOutput(&logBuf)
+	t.Cleanup(restore)
+
+	// 换掉画页面内容的那一支，走的正是 viewRoutes 里 14 条路由用的那条 Guard。
+	s.pageBody = func(*mygoui.Context, *mygoui.Route, Route) { panic("这一页画崩了") }
+
+	// 起始页是首页，它现在有自己的一屏（三个 Tab），判据是那一排 Tab 里的第一个。
+	// ⚠️ 别再拿 `routes[0].Empty.Title` 当「起始页画出来了」的判据：首页接上内容
+	// 之后那一句话画在**每一个空着的 Tab 里面**，而这一屏的其余页面也都画
+	// 「暂无内容」（那是上游的共享默认文案），这个断言于是永远为真——它已经不再
+	// 断「起始页画出来了」，只是在别处找一个说得通的字。
+	if _, ok := tt.Find(homeTabLabels[0]); !ok {
+		t.Fatalf("起始页没画出来，文字有 %q", tt.Texts())
+	}
+	tt.Frame()
+	if s.crash == nil {
+		t.Fatal("页面 panic 了，外壳没有记住")
+	}
+	if !strings.Contains(errString(s.crash), "画崩了") {
+		t.Errorf("记住的 panic 是 %v", s.crash)
+	}
+	if !tt.HasText("界面出错了") {
+		t.Errorf("没有切到错误页，文字有 %q", tt.Texts())
+	}
+	if !tt.HasText("这一页画崩了") {
+		t.Errorf("错误页上没有崩掉的原因，文字有 %q", tt.Texts())
+	}
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "这一页画崩了") {
+		t.Errorf("日志里没有崩掉的原因：%q", logged)
+	}
+	if !strings.Contains(logged, "goroutine") {
+		t.Errorf("日志里没有栈：%q", logged)
+	}
+}
+
+// TestPanicDoesNotBlockNavigation 验崩溃是**页面级**的：换一页就恢复正常。
+func TestPanicDoesNotBlockNavigation(t *testing.T) {
+	s, tt := newShell(t)
+	s.pageBody = func(*mygoui.Context, *mygoui.Route, Route) { panic("炸了") }
+	tt.Frame()
+	if s.crash == nil {
+		t.Fatal("没有记住崩溃")
+	}
+
+	// 错误页上要有一条走得出去的路：崩的是某一页，不一定非得是它自己。
+	if !tt.HasText("回到首页") {
+		t.Errorf("错误页上没有「回到首页」，文字有 %q", tt.Texts())
+	}
+	s.pageBody = s.pageContent // 假装这一页修好了
+
+	if err := tt.Click("回到首页"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	if s.crash != nil {
+		t.Errorf("换页之后崩溃状态没复位：%v", s.crash)
+	}
+	if tt.HasText("界面出错了") {
+		t.Errorf("换页之后还在错误页，文字有 %q", tt.Texts())
+	}
+	// 同上：判首页画出来了没有，看它自己的那一排 Tab。
+	if _, ok := tt.Find(homeTabLabels[0]); !ok {
+		t.Errorf("没有回到首页，文字有 %q", tt.Texts())
 	}
 }

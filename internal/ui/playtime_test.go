@@ -147,28 +147,6 @@ func TestTheSearchVideoTabShowsThePlayCountAndTheUploadTime(t *testing.T) {
 	}
 }
 
-// TestTheHomeTabShowsThePlayCountButNoUploadTime 钉住首页那一档。
-//
-// 上游首页是 `hidePubTime`（`pages/music-recommend/list.tsx:49`），而且它那一层
-// 的 `RecommendItem` 也没带 `pubdate`——所以表头上**不该**有「投稿时间」。
-func TestTheHomeTabShowsThePlayCountButNoUploadTime(t *testing.T) {
-	_, tt := newHome(t, homeSongs{
-		tabs: [homeTabCount][]list.Music{{
-			{ID: "a", Title: "首页的歌", Duration: time.Minute, View: 123_400},
-		}},
-	})
-
-	if !uiShows(tt, "播放量") {
-		t.Errorf("首页的表头上没有「播放量」：%q", tt.Texts())
-	}
-	if uiShows(tt, "投稿时间") {
-		t.Errorf("首页的表头上摆着「投稿时间」，而这一页没有那个数：%q", tt.Texts())
-	}
-	if !uiShows(tt, list.PlayCountText(123_400)) {
-		t.Errorf("首页行里没有播放量 %q：%q", list.PlayCountText(123_400), tt.Texts())
-	}
-}
-
 // TestTheCollectionTimeTitleFollowsTheContainer 钉住时间那一列的标题和取数
 // **随容器类型一起变**：收藏夹是 fav_time / 「收藏时间」，合集和系列是
 // pubtime / 「投稿时间」。

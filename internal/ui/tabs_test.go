@@ -4,12 +4,10 @@ import (
 	"image"
 	"image/color"
 	"math"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -373,67 +371,5 @@ func TestReduceMotionPutsTheBlockAtTheEndAtOnce(t *testing.T) {
 	}
 	if tt.FramePending() {
 		t.Errorf("开了减少动态效果之后界面还在要帧——说明还在走过渡")
-	}
-}
-
-// TestTheMainTabHeightMatchesUpstreamSizes 钉住两档高度：md 40 / lg 44。
-//
-// 上游的算法是「Tab 高 + 轨道上下各 4」：md 的 `h-8`（32）+ 8 = 40，lg 的
-// `h-9`（36）+ 8 = 44（DESIGN.md「Tab」一节）。首页那一排是 lg，其余三处是 md
-// （上游 `music-recommend/index.tsx:263` 和另外三处的 `size`）。
-func TestTheMainTabHeightMatchesUpstreamSizes(t *testing.T) {
-	t.Run("设置页是 md", func(t *testing.T) {
-		_, tt := newSettingsTabShell(t, false, false)
-		bar := tabBarAt(t, tt, settingsTabNames, false)
-		if got, want := bar.track.H, tabMD.track; got != want {
-			t.Errorf("设置页轨道高 %.0f，want %.0f", got, want)
-		}
-		if got, want := bar.pill.H, tabMD.block; got != want {
-			t.Errorf("设置页滑块高 %.0f，want %.0f", got, want)
-		}
-	})
-
-	t.Run("首页是 lg", func(t *testing.T) {
-		_, tt := newHome(t, homeSongs{
-			tabs: [homeTabCount][]list.Music{
-				homeSongsOf(homeTabs[0], 3),
-				homeSongsOf(homeTabs[1], 3),
-				homeSongsOf(homeTabs[2], 3),
-			},
-		})
-		bar := tabBarAt(t, tt, homeTabs[:], false)
-		if got, want := bar.track.H, tabLG.track; got != want {
-			t.Errorf("首页轨道高 %.0f，want %.0f——首页那一排上游是 size=\"lg\"", got, want)
-		}
-		if got, want := bar.pill.H, tabLG.block; got != want {
-			t.Errorf("首页滑块高 %.0f，want %.0f", got, want)
-		}
-	})
-}
-
-// TestRenderMainTabShots 把两档主 Tab 深浅两套存成 PNG，留给人眼和上游并排看。
-//
-//	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderMainTabShots
-func TestRenderMainTabShots(t *testing.T) {
-	dir := os.Getenv("BIU_SHOT_DIR")
-	if dir == "" {
-		t.Skip("设 BIU_SHOT_DIR 才会存图")
-	}
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			_, tt := newSettingsTabShell(t, dark, false)
-			save(t, dir, "主Tab-md-"+name+".png", tt)
-
-			_, homeTT := newHome(t, fullSongs())
-			// 首页的 shell 是另造的，深色偏好要单独设。
-			homeTT.SetDark(dark)
-			homeTT.Frame()
-			homeTT.Frame()
-			save(t, dir, "主Tab-lg-"+name+".png", homeTT)
-		})
 	}
 }

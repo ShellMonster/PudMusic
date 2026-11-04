@@ -53,6 +53,8 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -120,6 +122,11 @@ var tabSlide = motion.TabSlide
 // 用的是**同一个时长常量**和**同一条曲线**，所以「参数一样」这件事仍然由**那两
 // 个出口**保证（而不是由「它们是同一个变量」保证——后者是**巧合**，不是**保证**）。
 var tabSlideSynced = ui.Animation{Duration: homePagerDuration, Ease: motion.Unified}
+
+// homePagerDuration 是主 Tab 滑块和「底下内容」同步时的时长（200ms）。首页不再横滑切 Tab
+// 以后没有「底下内容」了，这个常量只剩 `tabSlideSynced` 一个读者，那一档由别的页面
+// 的改版票决定去留。
+const homePagerDuration = 200 * time.Millisecond
 
 // mainTabs 画一排主 Tab。selected 是当前选中的下标，size 决定 40 / 44 那一档。
 //

@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"context"
 	"image"
 	"net/http"
 	"sync"
@@ -1359,18 +1360,21 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 首页自己那一摊要在建好之后才有（它要用封面缓存），所以接在 images 后面。
 	// 操作接在应用状态上、提示接自己的 Toast，接法见 widgets/list 的 AppActions。
 	s.home = newHomePage(s.images, s.listActions(), s.wake.invalidate)
-	// 新歌速递那两块翻页键带提示；提示的状态挂在壳上（tooltip.go），所以这儿
-	// 把入口递进去。单独造那一块的测试拿到的是 nil，退回框架那枚。
-	s.home.newGrid.tip = s.tip
-	// 首页那一摊的取数接线（三个 Tab 的推荐单 + 新歌速递）：规则见
+	// 首页那一摊的取数接线（每日推荐 / 本周最热 / 新歌速递 / 最近播放 + 昵称）：规则见
 	// homepage_feed.go。这里只递「要拉什么」，不管什么时候拉。
 	s.home.initLoads(homeLoads{
 		mounted: func() bool { return s.app.RecommendOf().Mounted() },
-		tab:     s.fetchHomeTab,
-		new:     s.fetchHomeNewMusic,
-		board: func(tab int) (int, time.Time, bool) {
-			p, ok := s.app.RecommendOf().BoardPeriod(tab)
-			return p.Number, p.PublishedAt, ok
+		feed: func(ctx context.Context, tab, page int) ([]app.RecommendItem, int, error) {
+			return s.app.RecommendOf().Feed(ctx, tab, page)
+		},
+		newMusic: func(ctx context.Context) ([]app.RecommendItem, int, error) { return s.app.RecommendOf().NewMusic(ctx) },
+		trend:    s.app.RecommendOf().ChartTrend,
+		nickname: func(ctx context.Context) string {
+			nav, err := s.app.AccountNav(ctx)
+			if err != nil {
+				return ""
+			}
+			return nav.Name
 		},
 		selfMid: s.app.SelfMid,
 		wake:    s.wake.invalidate,

@@ -19,118 +19,12 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
 )
-
-// TestRenderTicket244Shots 把这一票改过的五处各存一张 PNG，深浅各一套。
-func TestRenderTicket244Shots(t *testing.T) {
-	dir := os.Getenv("BIU_SHOT_DIR")
-	if dir == "" {
-		t.Skip("设 BIU_SHOT_DIR 才会存图")
-	}
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			// ── D1：设置页那一段空档 ──────────────────────────────
-			//
-			// ⚠️ **两档窗口都要出**：内容那一段收在 780 之后，窄窗口（900）那一档
-			// 本来就放不下 780（可视区只有 700），画出来和收窄之前**一模一样**——
-			// 这一票只作用在宽窗口上，而那正是空档最长的那一档。
-			for _, winW := range []int{1200, 900} {
-				b := newTestShell(t, at(winW, 800), systemIsDark(dark),
-					withSettings(app.DefaultSettings("")))
-				tt := b.tt
-				openSettings(t, tt)
-				homeFrame(tt)
-				save(t, dir, fmt.Sprintf("90-设置页-整窗-%d-%s.png", winW, name), tt)
-
-				// 「外观」那一段放大：说明和右边那枚控件之间的空档在那儿。
-				head, ok := tt.Find("外观")
-				if !ok {
-					t.Fatalf("设置页上没有「外观」那个分组标题，文字有 %q", tt.Texts())
-				}
-				x0 := int(head.X) - 40
-				saveRect(t, dir, fmt.Sprintf("91-设置页-外观段-%d-%s.png", winW, name), tt,
-					x0, int(head.Y)-12, winW-x0-8, 300)
-				b.Close()
-			}
-
-			// ── B6 + E1 + E2：首页（长歌名 + 「全部播放」+ 有边的封面）──
-			saveHomeShot(t, dir, dark, name)
-
-			// ── B6：搜索页那一枚「全部播放」（和首页那一枚对比）────────
-			//
-			// ⚠️ **主题要真的跟着换**：上一版这一张「深色」和「浅色」逐字节相同
-			// （搜索页那一支没带主题入参）——那不是深色那一套，是同一张图存了两遍。
-			st := newSearchStub(10, 20)
-			_, searchTT := newSearchPage(t, "周杰伦", st, systemIsDark(dark))
-			waitFor(t, "搜索结果出来了", func() bool {
-				searchTT.Frame()
-				return searchTT.HasText(playAllLabel)
-			})
-			save(t, dir, "94-搜索页-全部播放-"+name+".png", searchTT)
-
-			// ── B5：迷你窗那枚提示 ──────────────────────────────────
-			saveMiniTipShot(t, dir, dark, name)
-		})
-	}
-}
-
-// saveHomeShot 存首页那一张：长歌名、首页的「全部播放」、有边的那几张封面。
-//
-// ⚠️ **封面走本机 `httptest`**：三张纯色图（近黑 / 白 / 中灰），而这一票要验的
-// 正是「深色下近黑的那一张有没有边」。
-func saveHomeShot(t *testing.T, dir string, dark bool, name string) {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/black.png":
-			w.Write(coverShotPNG(t, color.RGBA{0x12, 0x14, 0x1a, 0xff}))
-		case "/white.png":
-			w.Write(coverShotPNG(t, color.RGBA{0xff, 0xff, 0xff, 0xff}))
-		default:
-			w.Write(coverShotPNG(t, color.RGBA{0x80, 0x86, 0x92, 0xff}))
-		}
-	}))
-	defer srv.Close()
-
-	b := newTestShell(t, systemIsDark(dark))
-	s, tt := b.s, b.tt
-
-	// ⚠️ **歌名要长**：E1 那一档量的是「一个 630 像素的歌名不再占满整行中段」。
-	songs := []list.Music{
-		{ID: "a", Title: "这是一首名字特别特别长的歌，长到一行绝对放不下，你得拖到后面才能看见最后那几个字", Owner: "一个名字也很长的 UP 主——UP 主名字比歌名还长一点点点点点点", Cover: srv.URL + "/black.png"},
-		{ID: "b", Title: "短歌名", Owner: "UP 主", Cover: srv.URL + "/white.png"},
-		{ID: "c", Title: "中等长度的歌名——刚好在边界上晃一晃，看看会不会被裁得很难看", Owner: "另一个 UP 主", Cover: srv.URL + "/gray.png"},
-	}
-	s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: songs}})
-
-	// ⚠️ **等封面真的画上来**：图是异步的，图还没到的时候画面上是占位（那一档
-	// 本来就有边，量不出「有图那一档也描边」这件事）。
-	waitFor(t, "封面画上来了", func() bool {
-		tt.Frame()
-		return tt.HasText("这是一首名字特别特别长的歌")
-	})
-	waitFor(t, "三张封面都到了", func() bool {
-		tt.Frame()
-		return coverArrived(tt)
-	})
-	save(t, dir, "92-首页-长歌名与全部播放-"+name+".png", tt)
-	// 那一块放大：歌名的省略号、右边那几列、封面上那一圈边。
-	saveRect(t, dir, "93-首页-长歌名放大-"+name+".png", tt, 200, 60, 1000, 260)
-	b.Close()
-}
 
 // coverArrived 报首页那三张封面是不是都换成图了。
 //

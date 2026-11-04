@@ -40,23 +40,6 @@ func homeSongsWithOwnerMids(prefix string, n int) []list.Music {
 	return out
 }
 
-// TestClickingTheOwnerNameInAListRowGoesIntoThatSpace 钉住「首页推荐那一行的
-// UP 名点了进他的空间」。
-func TestClickingTheOwnerNameInAListRowGoesIntoThatSpace(t *testing.T) {
-	songs := homeSongs{
-		tabs: [homeTabCount][]list.Music{0: homeSongsWithOwnerMids("a", 3)},
-	}
-	s, tt := newHome(t, songs)
-
-	if err := tt.Click("a 的 UP 主 2"); err != nil {
-		t.Fatal(err)
-	}
-	want := upPathOf(ownerMidOf[1])
-	if got := s.router.Path(); got != want {
-		t.Errorf("点了第二行的 UP 名跳到了 %q，want %q", got, want)
-	}
-}
-
 // TestClickingTheOwnerNameInALibraryRowGoesIntoThatSpace 钉住「历史记录 / 稍后再看
 // 那一行的 UP 名点了进他的空间」。
 //
@@ -86,33 +69,6 @@ func TestClickingTheOwnerNameInALibraryRowGoesIntoThatSpace(t *testing.T) {
 				t.Errorf("点了 UP 名跳到了 %q，want %q", got, want)
 			}
 		})
-	}
-}
-
-// TestClickingTheOwnerNameInANewMusicCardGoesIntoThatSpace 钉住「首页「新歌速递」
-// 那一块的 UP 名点了进他的空间」。
-//
-// ⚠ **那一块自己画卡片**（`internal/ui/homepage_newmusic.go` 的 `viewCard`），
-// 不走 widgets/list ——同一页里两处 UP 名一处能点一处不能，是票 #360 的评审
-// 点出来的那处不一致。
-func TestClickingTheOwnerNameInANewMusicCardGoesIntoThatSpace(t *testing.T) {
-	var gotMid int64
-	var gotName string
-	acts := list.Actions{OpenOwner: func(mid int64, name string) {
-		gotMid, gotName = mid, name
-	}}
-	_, tt := newGridTester(t, acts, []list.Music{{
-		ID:    "n1",
-		Title: "夜空中最亮的星",
-		Owner: "逃跑计划",
-		Item:  app.Item{ArtistMid: 4242},
-	}}, 800, 900)
-
-	if err := tt.Click("逃跑计划"); err != nil {
-		t.Fatal(err)
-	}
-	if gotMid != 4242 || gotName != "逃跑计划" {
-		t.Errorf("点 UP 名进的是 %d/%q，want 4242/逃跑计划", gotMid, gotName)
 	}
 }
 

@@ -34,7 +34,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -146,24 +145,6 @@ func TestThePlaybarOwnerNameIsALinkNotAPill(t *testing.T) {
 	accent := flatColor(ink.AccentOn(th))
 	assertNameLinkUnderlines(t, tt, accent, "某个 UP 主", "播放条")
 	assertNoCapsule(t, tt, flatColor(th.Background), "某个 UP 主", "播放条")
-}
-
-// TestTheListOwnerNameIsALinkNotAPill 断列表行里那个 UP 名。
-//
-// ⚠️ **这里只断「有下划线」，不断「没有胶囊」**：那一行的左边盖着**行**的悬停底
-// （框架给「指针压着的那一行」铺的那一层），量不出名字自己有没有胶囊。
-//
-// ⚠️ 而且旧画法那一处**本来就没有胶囊**：`ownerButton` 给的是
-// `Padding(0, 0)`，胶囊正好等于字自己的盒子，看不出形状——它那会儿的悬停反馈
-// 是「一层灰蒙蒙的前景色盖在字上」。改完是「一道下划线」。
-func TestTheListOwnerNameIsALinkNotAPill(t *testing.T) {
-	songs := homeSongs{
-		tabs: [homeTabCount][]list.Music{0: homeSongsWithOwnerMids("a", 3)},
-	}
-	s, tt := newHome(t, songs)
-	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	accent := flatColor(ink.AccentOn(th))
-	assertNameLinkUnderlines(t, tt, accent, "a 的 UP 主 2", "列表行")
 }
 
 // TestTheActionButtonsAreStillButtons 断**反面**：同一张卡片上那几枚动作键

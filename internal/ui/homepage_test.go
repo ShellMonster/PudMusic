@@ -1,748 +1,389 @@
 package ui
 
+// 首页（问候区 + 今日一张 + 推荐 / 榜单 / 新歌三档）的测试。
+//
+// 取数本身（参数、签名、字段怎么落）由服务层和 app 层那两组钉
+// （`internal/service/bili/recommend_test.go`、`internal/app/recommend_test.go`）。这一组
+// 盯的是首页自己的：什么时候去要、三种状态各是什么样子、点了会做什么。断言面是画面上
+// 有什么字。
+//
+// ⚠️ 假 B 站复用空间 / 动态那一组的那台（`newUIExplore`）：它已经带 WBI 密钥那一段
+// （分区推荐要签名，签名之前先打 nav 拿 key）。
+
 import (
-	"cmp"
 	"fmt"
-	"slices"
+	"net/http"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
-	"github.com/egoist/mygo/ui"
+	mygoui "github.com/egoist/mygo/ui"
 )
 
-// 这一组跑的是 MyGo 的 Tester：和真窗口一模一样的布局、点击和滚动，只是画到内存里。
-// 所以「三个 Tab 切得动」「切回来还在原位」「新歌速递只在流行上」都能自动验，
-// 不用人守在窗口前面拖。
-
-// homeW / homeH 是无头窗口的大小。
-//
-// ⚠️ 宽度不能随便改小：新歌速递分列看的是**容器**的宽，窗口左边还有侧栏，窗口
-// 一窄容器更窄（Biu 那几个断点是在容器上分的，见 homepage_newmusic.go 的文件头）。
+// 首页那几个接口的路径（写字符串是为了测试自己看得见自己断言的是什么）。
 const (
-	homeW = 1200
-	homeH = 800
+	uiHomeRegionFeed   = "/x/web-interface/region/feed/rcmd"
+	uiHomeToplistList  = "/x/copyright-music-publicity/toplist/all_period"
+	uiHomeToplistMusic = "/x/copyright-music-publicity/toplist/music_list"
+	uiHomeNewMusic     = "/x/centralization/interface/new/music"
+	uiHomeNewBanner    = "/x/centralization/interface/new/music/banner"
 )
 
-// songName 是第 i 首（1 起）的歌名。
-func songName(prefix string, i int) string { return fmt.Sprintf("%s %d", prefix, i) }
-
-// homeSongsOf 造 n 行歌：歌名是「<prefix> 1」到「<prefix> n」，ID 带着 prefix，
-// 所以三个 Tab 的歌不串、也不会撞。
-func homeSongsOf(prefix string, n int) []list.Music {
-	out := make([]list.Music, n)
-	for i := range out {
-		out[i] = list.Music{
-			ID:    prefix + "-" + strconv.Itoa(i),
-			Title: songName(prefix, i+1),
-			Owner: prefix + " 的 UP 主",
-			Item:  app.Item{Title: songName(prefix, i+1)},
-		}
-	}
-	return out
-}
-
-// homeTestCache 造一个封面缓存。
-//
-// AddWake 不能省：图下完之后不唤醒，界面会永远停在占位（imgcache/view.go 顶上那条
-// 约定）。这一组里这些歌都不带封面地址，走的是「没有地址画空框」那一支，但留着
-// 的理由和真窗口一样，也免得哪天测试里加一个带地址的歌就踩上。
-func homeTestCache(t *testing.T) *imgcache.Cache {
+// newHomeShell 装一个指着假 B 站的首页：`MountLogin` 建那一个客户端，再递给
+// `MountRecommend`（建第二个客户端的话登录态、WBI 密钥、请求头都不是同一份）。
+func newHomeShell(t *testing.T, b *uiExplore, opts ...shellOpt) (*Shell, *mygoui.Tester, *app.App) {
 	t.Helper()
-	c := imgcache.New(imgcache.Options{})
-	c.AddWake(func() {})
-	t.Cleanup(c.Close)
-	return c
+	sh := newTestShell(t, append([]shellOpt{at(homeW, homeH), mounted(func(_ *testing.T, a *app.App) {
+		transport := &app.CredentialTransport{Base: b.Server.Client().Transport, Policy: app.DefaultInjectPolicy()}
+		cli := bili.NewClient(bili.Options{Transport: transport})
+		cli.TestOnlyPointHostsAtFixture(b.URL)
+		a.MountLogin(app.NewMemoryStore("home-test"), cli)
+		a.MountRecommend(cli)
+		a.MountStreaming(app.Streaming{Client: cli, Media: b.Server.Client()})
+	})}, opts...)...)
+	return sh.s, sh.tt, sh.a
 }
 
-// homeFrame 连跑几帧。
-//
-// 一帧不够：切 Tab 之后列表要重新排版，而行高是量出来的，量完才知道落在哪儿
-// （`mygo/ui/list.go` 的 ScrollTo 注释）。三帧是 widgets/list 那边用的同一个数。
-func homeFrame(tt *ui.Tester) {
-	for range 3 {
+// homePageSize 是分区推荐一页的条数（上游 `REGION_PAGE_SIZE = 15`）。
+const homePageSize = 15
+
+// homeArchiveData 造一份分区推荐的 data 段。歌名是「音乐 推的第 N 首」。
+func homeArchiveData() map[string]any {
+	archives := make([]map[string]any, 0, homePageSize)
+	for i := range homePageSize {
+		archives = append(archives, map[string]any{
+			"aid": 11 + i, "bvid": fmt.Sprintf("BV1home%d", i+1), "cid": 101 + i,
+			"duration": 185,
+			"title":    fmt.Sprintf("每日推荐 %d", i+1),
+			"cover":    fmt.Sprintf("https://f/home%d.jpg", i+1),
+			"author":   map[string]any{"mid": 7, "name": "推荐 UP"},
+			"stat":     map[string]any{"view": 1000},
+		})
+	}
+	return map[string]any{"archives": archives}
+}
+
+// homeChartData 造热榜那一期的 music_list：n 首，歌名「榜上第 N 名」。
+func homeChartData(n int) map[string]any {
+	list := make([]map[string]any, 0, n)
+	for i := range n {
+		list = append(list, map[string]any{
+			"music_id": fmt.Sprintf("m%d", i+1), "music_title": fmt.Sprintf("榜上第 %d 名", i+1),
+			"singer":        fmt.Sprintf("歌手%d", i+1),
+			"creation_bvid": fmt.Sprintf("BV1chart%d", i+1), "creation_aid": 500 + i,
+			"creation_first_cid": 900 + i, "creation_cover": fmt.Sprintf("https://f/chart%d.jpg", i+1),
+			"creation_duration": 200, "creation_play": 100000 - i*1000,
+		})
+	}
+	return map[string]any{"list": list}
+}
+
+// homeArchives 给一台假 B 站装上首页那几个接口。
+func homeArchives(b *uiExplore) {
+	b.on(uiHomeRegionFeed, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, homeArchiveData())
+	})
+	b.on(uiHomeToplistList, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": map[string]any{"2026": []map[string]any{
+			{"ID": 77, "priod": 12, "publish_time": time.Now().Add(-48 * time.Hour).Unix()},
+		}}})
+	})
+	b.on(uiHomeToplistMusic, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, homeChartData(24))
+	})
+	b.on(uiHomeNewMusic, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": []map[string]any{{
+			"id": 5, "music_title": "新歌速递里那首", "bvid": "BV1new", "aid": 5, "cid": 5,
+			"cover": "https://f/new.jpg", "author": "新歌手", "publish_time": "1-1", "total_vv": 12345,
+		}}})
+	})
+	b.on(uiHomeNewBanner, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": []map[string]any{}})
+	})
+}
+
+// clickHomeTab 点「推荐 / 榜单 / 新歌」里的一个，再画几帧。
+func clickHomeTab(t *testing.T, tt *mygoui.Tester, tab int) {
+	t.Helper()
+	if err := tt.Click(homeTabLabels[tab]); err != nil {
+		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabLabels[tab], err, tt.Texts())
+	}
+	homeFrame(tt)
+	settleHome(tt)
+}
+
+// TestTheHomePagePullsWhatItNeedsOnOpen 盯「什么时候发请求」：
+// 一进首页就拉每日推荐（音乐分区）和本周最热（热榜），新歌速递等点到「新歌」才拉。
+func TestTheHomePagePullsWhatItNeedsOnOpen(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	s, tt, _ := newHomeShell(t, b)
+
+	waitFrames(t, tt, "每日推荐拉回来了", func() bool { return showsText(tt, "每日推荐 1") })
+	waitFrames(t, tt, "热榜拉回来了", func() bool { return b.hit(uiHomeToplistMusic) })
+
+	if n := b.countHit(uiHomeRegionFeed); n != 1 {
+		t.Errorf("分区推荐发了 %d 次，want 1", n)
+	}
+	if got := b.lastQueryOf(uiHomeRegionFeed).Get("from_region"); got != "1003" {
+		t.Errorf("每日推荐的 from_region = %q，want 1003（音乐分区）", got)
+	}
+	if b.hit(uiHomeNewMusic) || b.hit(uiHomeNewBanner) {
+		t.Error("还停着「推荐」就把新歌速递拉了——它等点到「新歌」才拉")
+	}
+
+	// 每日推荐只摆 6 张，哪怕 B 站给了 15 条；行身份是 bvid（铁律四）。
+	if showsText(tt, "每日推荐 7") {
+		t.Error("每日推荐摆了第 7 张，原型只有 6 张")
+	}
+	songs := s.home.feed.sec[homeDaily].songs
+	if len(songs) == 0 || songs[0].ID != "BV1home1" {
+		t.Errorf("行身份 = %+v，want 第一首是 BV1home1", songs)
+	}
+}
+
+// TestTheNewTabPullsNewMusicOnceAndShowsTheUploadAge 盯「新歌」档：点到才拉、只拉一次、
+// 那一列写「x 天前上传」。
+func TestTheNewTabPullsNewMusicOnceAndShowsTheUploadAge(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	_, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "首页起来了", func() bool { return showsText(tt, "每日推荐 1") })
+
+	clickHomeTab(t, tt, homeTabNew)
+	waitFrames(t, tt, "新歌速递拉回来了", func() bool { return showsText(tt, "新歌速递里那首") })
+	if !b.hit(uiHomeNewMusic) || !b.hit(uiHomeNewBanner) {
+		t.Error("点到「新歌」之后没拉新歌速递的列表 / 头图位")
+	}
+	if !tt.HasText("上传") {
+		t.Errorf("「专辑」那一列没写「x 天前上传」，文字有 %q", tt.Texts())
+	}
+
+	// 切走再切回来不重拉。
+	before := b.countHit(uiHomeNewMusic)
+	clickHomeTab(t, tt, homeTabRec)
+	clickHomeTab(t, tt, homeTabNew)
+	if after := b.countHit(uiHomeNewMusic); after != before {
+		t.Errorf("切走再切回来重拉了新歌速递（%d → %d）", before, after)
+	}
+}
+
+// TestTheChartTabListsTheTopTwentyWithATrendColumn 盯「榜单」档：只画前 20 名，每一行有升降
+// 那一格（没有上一期记录时是「—」）。
+func TestTheChartTabListsTheTopTwentyWithATrendColumn(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	_, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "热榜拉回来了", func() bool { return b.hit(uiHomeToplistMusic) })
+
+	clickHomeTab(t, tt, homeTabChart)
+	waitFrames(t, tt, "榜上第一名画出来了", func() bool { return showsText(tt, "榜上第 1 名") })
+	if !tt.HasText("本周最热") || !tt.HasText("播放前 20") {
+		t.Errorf("没有「本周最热」和「播放前 20」，文字有 %q", tt.Texts())
+	}
+	if showsText(tt, "榜上第 21 名") {
+		t.Error("榜单画了第 21 名，原型只有前 20")
+	}
+	if !showsText(tt, "—") {
+		t.Errorf("没有上一期记录时升降应该是「—」，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAFailedSectionSaysSoAndOnlyRetriesWhenAsked 盯失败那一支：说清为什么、带重试、
+// 失败之后每帧不许重发（那是自己打自己）、点了「重试」才再来一次。
+func TestAFailedSectionSaysSoAndOnlyRetriesWhenAsked(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	b.on(uiHomeRegionFeed, func(w http.ResponseWriter, _ *http.Request) { uiExploreJSON(w, -403, nil) })
+	// 窗口拉高：「重试」在「今日一张」下面，默认 800 高的窗口里它在折线以下。
+	_, tt, _ := newHomeShell(t, b, at(homeW, 1600))
+
+	waitFrames(t, tt, "每日推荐拉失败", func() bool { return showsText(tt, "这一块没拉出来") })
+	hits := b.countHit(uiHomeRegionFeed)
+	for range 30 {
 		tt.Frame()
 	}
-}
+	if after := b.countHit(uiHomeRegionFeed); after != hits {
+		t.Fatalf("失败之后每帧在重发：%d → %d 次", hits, after)
+	}
 
-// settleHome 推着钟走一段，让**切 Tab 的那一段过渡**走完。
-//
-// ⚠️ **推钟是必须的**（AGENTS.md §2）：切 Tab 有过渡（票 #368 / #706），而
-// Tester 的钟站着不动——不推钟的话画面停在过渡的**第一帧**上（内容还在往
-// 右边滑），而逐像素的断言量到的就是那一帧（一个「切过去就换内容」的硬切
-// 实现也是那种画面，所以那样的断言断不出「有没有过渡」）。
-//
-// ⚠️ **推的是整段过渡**（票 #706）：那一段是**一次横滑**（`homePagerDuration`
-// = 200ms）——而**指示器和内容同起同落**，所以推完这一段两边都停住了。
-//
-// ⚠️ **主 Tab 那个滑块**（`tabs.go`）**也在这条的范围里**：首页那一排走
-// 「和底下同步」那一档（`tabSlideSynced`），时长和内容那一段**一样**
-// （200ms）——所以推完这一段它也停住了。
-func settleHome(tt *ui.Tester) {
-	tt.Advance(homePagerDuration + 50*time.Millisecond)
-	tt.Frame()
-}
-
-// newHome 给首页塞上歌，返回外壳和画着它的 Tester。
-//
-// ⚠️ 走的是 `newShell`（**完整的窗口**：顶栏 + 侧栏 + 首页 + 播放条），不是
-// 「只画首页」：侧栏上那一项「推荐音乐」和首页的 Tab 挨得很近，只画一半的话
-// 「点侧栏回首页」那两条根本走不到。
-func newHome(t *testing.T, songs homeSongs) (*Shell, *ui.Tester) {
-	t.Helper()
-	s, tt := newShell(t)
-	s.home.SetSongs(songs)
-	homeFrame(tt)
-	return s, tt
-}
-
-// fullSongs 是「三个 Tab 各四十首 + 新歌速递十二首」的一屏，够滚动也够分页。
-// homeSongTabs 是「塞得进歌、点进去就有它自己第一首」的那几档：前三档。后三档是榜和
-// 最近播放，歌是取数拉来的（最近播放没登录时还不发请求），由 homepage_discover_test.go 盯。
-const homeSongTabs = 3
-
-func fullSongs() homeSongs {
-	return homeSongs{
-		tabs: [homeTabCount][]list.Music{
-			homeSongsOf(homeTabs[0], 40),
-			homeSongsOf(homeTabs[1], 40),
-			homeSongsOf(homeTabs[2], 40),
-		},
-		new: homeSongsOf("新歌", 12),
+	// 修好，点「重试」。
+	b.on(uiHomeRegionFeed, func(w http.ResponseWriter, _ *http.Request) { uiExploreJSON(w, 0, homeArchiveData()) })
+	if err := tt.Click("重试"); err != nil {
+		t.Fatalf("点不到「重试」：%v，文字有 %q", err, tt.Texts())
+	}
+	waitFrames(t, tt, "重试之后拉回来了", func() bool { return showsText(tt, "每日推荐 1") })
+	if after := b.countHit(uiHomeRegionFeed); after != hits+1 {
+		t.Errorf("点一次「重试」应该多发一趟：%d → %d", hits, after)
 	}
 }
 
-// shows 报 s 此刻在不在画面上。
-//
-// ⚠️ **不能用 `tt.HasText`**：它是**子串**匹配（`ui/headless.go` 的
-// `strings.Contains`），而这几个 Tab 的名字互为子串——「本地音乐」里有「音乐」，
-// 首页上「音乐」那一档的 Tab 还在不在就永远为真。`tt.Find` 是**全等**匹配。
-func shows(tt *ui.Tester, s string) bool {
-	r, ok := tt.Find(s)
-	return ok && r.W > 0 && r.H > 0
-}
-
-// rowPos 是画面上画着的某一行：它是哪一首、上面离窗口顶多远。
-type rowPos struct {
-	title string
-	y     float32
-}
-
-// listPos 是某一档此刻画着的那些行，从上往下排。
-//
-// 用它判「还在不在原来的位置」而不是判「顶上那一行是哪一首」：虚拟列表在上下各
-// 多建两行给 Tab 和读屏用（`mygo/ui/list.go` 的 listOverscan），那些建在**视口
-// 之外**的行盒子是空的（宽 0），但它们仍然有 y——按 y 找「最上面那一行」会挑到
-// 视口上面那一行去（实测挑到的是真正顶上那首的前两首）。整屏的（歌，y）一起比，
-// 就没这个歧义了。
-//
-// ⚠️ 盒子是空的要**跳过**而不是停在那儿：只看「找没找到」会把画面外的那几行也算
-// 进来，断言就永远为真。
-func listPos(tt *ui.Tester, prefix string) []rowPos {
-	var out []rowPos
-	for i := 1; i <= 200; i++ {
-		r, ok := tt.Find(songName(prefix, i))
-		if !ok || r.W == 0 || r.H == 0 {
-			continue
-		}
-		out = append(out, rowPos{songName(prefix, i), r.Y})
-	}
-	slices.SortFunc(out, func(a, b rowPos) int {
-		if a.y != b.y {
-			return cmp.Compare(a.y, b.y)
-		}
-		return cmp.Compare(a.title, b.title)
-	})
-	return out
-}
-
-// titles 是给报错用的一行摘要：这一屏里画着的头几首和最后一首。
-func titles(pos []rowPos) string {
-	if len(pos) == 0 {
-		return "（一首歌都没画出来）"
-	}
-	head := make([]string, 0, 4)
-	for i, p := range pos {
-		if i == 3 {
-			head = append(head, "…")
-			break
-		}
-		head = append(head, p.title)
-	}
-	return fmt.Sprintf("%v 一直到 %s", head, pos[len(pos)-1].title)
-}
-
-// clickTab 点那三个 Tab 里的一个。
-//
-// ⚠️ **推钟把过渡走完**（`settleHome`）：切 Tab 有过渡（票 #368），而 Tester
-// 的钟站着不动——不推钟的话画面停在过渡的第一帧上。
-func clickTab(t *testing.T, tt *ui.Tester, tab int) {
-	t.Helper()
-	if err := tt.Click(homeTabs[tab]); err != nil {
-		t.Fatalf("点不到 %q 那一档：%v，文字有 %q", homeTabs[tab], err, tt.Texts())
-	}
-	homeFrame(tt)
-	settleHome(tt)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 三个 Tab 都能切
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheThreeTabsAllSwitch 是这一票的头一条：三个 Tab 都能切，切过去画的是
-// **那一档自己的歌**。
-//
-// 判据是画面上的字：切到「鬼畜」之后「音乐 1」必须从画面上消失、「鬼畜 1」必须
-// 出现。只断言 `s.home.tab` 变了的话，一个换了档但忘了换内容的实现照样绿。
-func TestTheThreeTabsAllSwitch(t *testing.T) {
-	s, tt := newHome(t, fullSongs())
-
-	for i, name := range homeTabs[:homeSongTabs] {
-		clickTab(t, tt, i)
-		if s.home.tab != i {
-			t.Errorf("点了 %q，落在第 %d 档，want %d", name, s.home.tab, i)
-		}
-		if !shows(tt, songName(name, 1)) {
-			t.Errorf("切到 %q，画面上没有它自己的第一首，文字有 %q", name, tt.Texts())
-		}
-		// 另外两档的歌一个都不该还在画面上。
-		for j, other := range homeTabs[:homeSongTabs] {
-			if j == i {
-				continue
-			}
-			if shows(tt, songName(other, 1)) {
-				t.Errorf("切到 %q，画面上还有 %q 的歌，文字有 %q", name, other, tt.Texts())
-			}
-		}
-	}
-}
-
-// TestTheHomeRouteShowsItsOwnPage 验**接线**：从别的页面点回首页，画的是首页自己
-// （那一排 Tab + 那一屏的歌），不是 router.go 兜底的那张空状态页。
-//
-// ⚠️ 这一条不能省：首页整个接在 `builtPage` 上，而接错了的话首页画的是
-// `pageContent` 的兜底分支——那一支照样画得出一屏东西，上面几条却全在往
-// `s.home` 的字段上读，读的是没被画过的那一份，全绿。
-func TestTheHomeRouteShowsItsOwnPage(t *testing.T) {
-	s, tt := newHome(t, fullSongs())
-
-	if err := tt.Click("本地音乐"); err != nil {
-		t.Fatal(err)
-	}
-	homeFrame(tt)
-	if shows(tt, homeTabs[0]) {
-		t.Fatalf("切到本地音乐之后首页的 Tab 还在画面上，文字有 %q", tt.Texts())
-	}
-
-	if err := tt.Click("推荐音乐"); err != nil {
-		t.Fatal(err)
-	}
-	homeFrame(tt)
-	if got := s.router.Path(); got != homePath {
-		t.Fatalf("点回首页停在 %q，want %q", got, homePath)
-	}
-	for _, name := range homeTabs[:homeSongTabs] {
-		if !shows(tt, name) {
-			t.Errorf("首页没有画出 %q 那一档的 Tab，文字有 %q", name, tt.Texts())
-		}
-	}
-	if !shows(tt, songName(homeTabs[0], 1)) {
-		t.Errorf("首页没有画出它自己的歌，文字有 %q", tt.Texts())
-	}
-	if tt.HasText(lookup("/local-music").Empty.Title) {
-		t.Errorf("首页画的是兜底那张空状态页，文字有 %q", tt.Texts())
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 切 Tab 的滚动位置
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestSwitchingBackRestoresThatTabsScrollPosition 是这一票的第二条：**切回某个
-// Tab 时它还在自己原来的位置**。
-//
-// 怎么算「还在原来的位置」：比**这一屏画着的是同一批歌、同样的上下位置**
-// （`listPos`），不判「顶上那一行是第几首」也不判像素。像素是**布局的产物**
-// （那一档的行高是定死的还是量出来的，看「数据显示样式」），而用户记住的是
-// 「我刚才在看的那一屏」。
-//
-// 四步都要走：记下滚之前的那一屏 → 在「音乐」滚一段 → 切到「鬼畜」滚一段 → 切回
-// 来比。**两条都断**（「音乐」和「鬼畜」各自的位置）：少断一条的话，「只有当前
-// 这一档记位置、其余的都回顶」那种实现也绿。
-func TestSwitchingBackRestoresThatTabsScrollPosition(t *testing.T) {
-	_, tt := newHome(t, fullSongs())
-
-	scrollTo := func(dy float32) {
-		// mygo 的 PointerScroll：**正的 DY 是往下滚**（platform/surface.go）。
-		tt.Scroll(homeW/2, homeH/2, 0, dy)
-		homeFrame(tt)
-	}
-
-	// 滚之前先记一份：没有它，「滚动之后这一屏 == 回到顶上那一屏」会全绿。
-	atStart := listPos(tt, homeTabs[0])
-
-	scrollTo(1200)
-	music := listPos(tt, homeTabs[0])
-	if len(music) == 0 {
-		t.Fatalf("滚过之后「%s」那一档一首歌都没画出来", homeTabs[0])
-	}
-	if slices.Equal(music, atStart) {
-		t.Fatalf("滚了 1200 像素之后画面上还是 %s：滚动没生效，后面的断言都白断",
-			titles(music))
-	}
-
-	clickTab(t, tt, 1)
-	scrollTo(2400)
-	guichu := listPos(tt, homeTabs[1])
-	if len(guichu) == 0 {
-		t.Fatalf("滚过之后「%s」那一档一首歌都没画出来", homeTabs[1])
-	}
-
-	clickTab(t, tt, 0)
-	if got := listPos(tt, homeTabs[0]); !slices.Equal(got, music) {
-		t.Errorf("切回「%s」，画面上是 %s，want 切走之前的 %s",
-			homeTabs[0], titles(got), titles(music))
-	}
-
-	clickTab(t, tt, 1)
-	if got := listPos(tt, homeTabs[1]); !slices.Equal(got, guichu) {
-		t.Errorf("切回「%s」，画面上是 %s，want 切走之前的 %s",
-			homeTabs[1], titles(got), titles(guichu))
-	}
-}
-
-// TestLeavingTheHomePageAndComingBackKeepsWhereYouWere 验**换路由**也不丢位置。
-//
-// 这是「切 Tab 恢复位置」那一条在另一条路上的同一个要求：用户不是在侧栏里换来
-// 换去、就是在这一页内部切 Tab，两条都要在原位。首页的状态长在 Shell 上（不是
-// view 的局部变量——即时模式每一帧都重画一遍，局部变量下一帧就没了）。
-func TestLeavingTheHomePageAndComingBackKeepsWhereYouWere(t *testing.T) {
-	s, tt := newHome(t, fullSongs())
-
-	tt.Scroll(homeW/2, homeH/2, 0, 1200)
-	homeFrame(tt)
-	before := listPos(tt, homeTabs[0])
-	if len(before) == 0 {
-		t.Fatalf("滚过之后「%s」那一档一首歌都没画出来", homeTabs[0])
-	}
-
-	s.navigate("/later")
-	homeFrame(tt)
-	if !tt.HasText(lookup("/later").Empty.Title) {
-		t.Fatalf("没切到稍后再看，文字有 %q", tt.Texts())
-	}
-
-	if err := tt.Click("推荐音乐"); err != nil {
-		t.Fatal(err)
-	}
-	homeFrame(tt)
-	if got := listPos(tt, homeTabs[0]); !slices.Equal(got, before) {
-		t.Errorf("从别的页面切回首页，画面上是 %s，want 切走之前的 %s",
-			titles(got), titles(before))
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 新歌速递只在「流行」上
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestNewMusicShowsOnlyOnThePopTab 是这一票的第三条：**新歌速递只在「流行」Tab
-// 顶部显示**。
-//
-// 逐个 Tab 走一遍：另外两个上面「新歌速递」一个都不许出现，「流行」上必须出现。
-// 只钉「流行上有」的话，一个三个 Tab 全都显示的实现也绿——那正是这条要消掉的。
-//
-// 顺带钉住「顶部」那半句：新歌速递的 y 必须**小于**那一档第一首的 y（它画在选中
-// 那一屏的列表之前，见 viewHome）。
-//
-// 上游出处：`music-recommend/index.tsx:295` 的
-// `{activeTab === "pop" && <NewMusicTop onLayoutChange={handlePopLayoutChange} />}`。
-func TestNewMusicShowsOnlyOnThePopTab(t *testing.T) {
-	_, tt := newHome(t, fullSongs())
-
-	for i, name := range homeTabs[:homeSongTabs] {
-		clickTab(t, tt, i)
-		shown := shows(tt, "新歌速递")
-		if want := i == homePopTab; shown != want {
-			if shown {
-				t.Errorf("「%s」上画了新歌速递，want 不画（上游只在 pop 上）", name)
-			} else {
-				t.Errorf("「%s」上没有新歌速递，文字有 %q", name, tt.Texts())
-			}
-			continue
-		}
-		// 「流行」上才有：接着钉「顶部」那半句——它在列表上面。
-		if !shown {
-			continue
-		}
-		rNew, okNew := tt.Find("新歌速递")
-		rSong, okSong := tt.Find(songName(name, 1))
-		if !okNew || !okSong {
-			t.Fatalf("找不到新歌速递或那一档的第一首，文字有 %q", tt.Texts())
-		}
-		if rNew.Y >= rSong.Y {
-			t.Errorf("新歌速递在 y=%v、%q 的第一首在 y=%v：它不在列表上面",
-				rNew.Y, name, rSong.Y)
-		}
-	}
-
-	// 再走一圈回到第一档：换 Tab 之后那一块跟着「流行」走，没有粘在别处。
-	clickTab(t, tt, homePopTab)
-	if !shows(tt, "新歌速递") {
-		t.Errorf("切回「流行」之后新歌速递不见了，文字有 %q", tt.Texts())
-	}
-	clickTab(t, tt, 0)
-	if shows(tt, "新歌速递") {
-		t.Errorf("从「流行」切走之后新歌速递还挂在画面上，文字有 %q", tt.Texts())
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 顶图跟着滚走（票 #369）
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheTopImagesScrollAwayWithTheList 钉住这一票的头一条：**滚动时顶图被滑出
-// 屏幕**。
-//
-// 判据是画面：滚一段之后新歌速递那几张图不在画面上了。
-//
-// ⚠️ **为什么它此前是红的**：新歌速递那一块是列表的**兄弟**（在列表的滚动容器
-// **外面**），所以滚动列表时它一动不动。上游那一页是
-// `{activeTab === "pop" && <NewMusicTop … />}` 和下面的列表在**同一个滚动容器**
-// 里（`music-recommend/index.tsx`），顶图跟着滚走。
-//
-// 怎么滚：滚轮要落在**列表**那一块上（`ui.Tester.Scroll` 给的是指针位置）。
-func TestTheTopImagesScrollAwayWithTheList(t *testing.T) {
-	_, tt := newHome(t, fullSongs())
-	clickTab(t, tt, homePopTab)
-
-	// 滚之前：顶图在画面上。
-	if !shows(tt, "新歌速递") {
-		t.Fatalf("切到「流行」之后新歌速递不在画面上，文字有 %q", tt.Texts())
-	}
-	if !shows(tt, songName("新歌", 1)) {
-		t.Fatalf("新歌速递那一块没有画出它的卡片，文字有 %q", tt.Texts())
-	}
-
-	// 滚一段。指针落在下面那一档的歌上（列表那一块）。
-	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+// TestTheHeroPlayButtonQueuesTheTwoTracks 盯「今日一张」：「播放」把那两首换进队列从第一首
+// 起播，「全部加入队列」把它们追加到队尾。
+func TestTheHeroPlayButtonQueuesTheTwoTracks(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	s, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "热榜拉回来了", func() bool { return len(s.home.feed.sec[homeChart].songs) > 0 })
 	homeFrame(tt)
 
-	// 顶图不见了。
-	if shows(tt, "新歌速递") {
-		t.Errorf("滚了 1200 像素之后新歌速递还在画面上——它没有跟着滚走，文字有 %q", tt.Texts())
+	var played, added [][]app.Item
+	s.home.acts.Play = func(items []app.Item) { played = append(played, items) }
+	s.home.acts.Add = func(items []app.Item) { added = append(added, items) }
+
+	if err := tt.Click("播放"); err != nil {
+		t.Fatalf("点不到「播放」：%v，文字有 %q", err, tt.Texts())
 	}
-	if shows(tt, songName("新歌", 1)) {
-		t.Errorf("滚了 1200 像素之后新歌速递的卡片还在画面上，文字有 %q", tt.Texts())
+	if len(played) != 1 || len(played[0]) != heroTrackCount {
+		t.Fatalf("「播放」换进队列的是 %v，want 一次、%d 首", played, heroTrackCount)
 	}
-	// 而下面那一档的歌还在（滚的是列表，不是把整页滚没了）。
-	if len(listPos(tt, homeTabs[homePopTab])) == 0 {
-		t.Errorf("滚了 1200 像素之后「%s」那一档一首歌都没画出来，文字有 %q",
-			homeTabs[homePopTab], tt.Texts())
+	if err := tt.Click("全部加入队列"); err != nil {
+		t.Fatalf("点不到「全部加入队列」：%v", err)
+	}
+	if len(added) != 1 || len(added[0]) != heroTrackCount {
+		t.Fatalf("「全部加入队列」追加的是 %v，want 一次、%d 首", added, heroTrackCount)
+	}
+	want := heroPick(s.home.feed.sec[homeChart].songs, s.home.day)
+	if played[0][0].Bvid != want[0].Item.Bvid {
+		t.Errorf("起播的第一首 = %q，want 今日一张 %q", played[0][0].Bvid, want[0].Item.Bvid)
 	}
 }
 
-// TestTheTabRowStaysPutWhileTheListScrolls 钉住这一票的第二条：**Tab 那一排留在
-// 滚动容器外面**（滚列表时它不动）。
-//
-// ⚠️ **它和上一条是一对**：顶图要跟着滚走，Tab 那一排不能跟着走——上游也是
-// （Tab 那一排在滚动容器外面，只有顶图和列表在里面）。
-//
-// 判据是**位置**：Tab 那一排的 y 在滚动前后要一模一样。判「还在不在」不够——
-// 它一直在，只是位置变了。
-func TestTheTabRowStaysPutWhileTheListScrolls(t *testing.T) {
-	_, tt := newHome(t, fullSongs())
-	clickTab(t, tt, homePopTab)
-
-	before, ok := tt.Find(homeTabs[homePopTab])
-	if !ok || before.H == 0 {
-		t.Fatalf("找不到「%s」那一档的 Tab，文字有 %q", homeTabs[homePopTab], tt.Texts())
+// TestHeroPickIsStableWithinADay 盯「今日一张」的取法：同一天不变，第二天换一首，
+// 不会选到没封面或放不了的条目。
+func TestHeroPickIsStableWithinADay(t *testing.T) {
+	songs := make([]list.Music, 0, 12)
+	for i := range 12 {
+		m := list.Music{ID: "id" + strconv.Itoa(i), Title: "歌" + strconv.Itoa(i), Cover: "https://f/c.jpg",
+			Item: app.Item{Bvid: "BV" + strconv.Itoa(i)}}
+		if i%3 == 0 {
+			m.Cover = "" // 没封面
+		}
+		songs = append(songs, m)
 	}
+	day := time.Date(2026, 11, 4, 21, 0, 0, 0, time.Local)
+	a := heroPick(songs, day)
+	b := heroPick(songs, day.Add(2*time.Hour))
+	if len(a) != heroTrackCount || a[0].ID != b[0].ID || a[1].ID != b[1].ID {
+		t.Fatalf("同一天选出的不一样：%v vs %v", a, b)
+	}
+	for _, m := range a {
+		if m.Cover == "" || m.Item.Bvid == "" {
+			t.Errorf("选到了没封面 / 放不了的条目 %+v", m)
+		}
+	}
+	next := heroPick(songs, day.AddDate(0, 0, 1))
+	if next[0].ID == a[0].ID {
+		t.Errorf("第二天还是同一首 %q", a[0].ID)
+	}
+	if got := heroPick(nil, day); got != nil {
+		t.Errorf("没有歌时选出了 %v", got)
+	}
+}
 
-	tt.Scroll(homeW/2, homeH-150, 0, 1200)
+// TestTheSmallTextHelpers 钉问候语、日期、时长、上传时间、升降那几个纯函数的口径。
+func TestTheSmallTextHelpers(t *testing.T) {
+	at := func(h int) time.Time { return time.Date(2026, 11, 4, h, 30, 0, 0, time.Local) }
+	for h, want := range map[int]string{0: "夜深了", 4: "夜深了", 5: "早上好", 10: "早上好", 11: "中午好",
+		13: "中午好", 14: "下午好", 17: "下午好", 18: "晚上好", 23: "晚上好"} {
+		if got := homeGreeting(at(h)); got != want {
+			t.Errorf("%d 点问候 = %q，want %q", h, got, want)
+		}
+	}
+	if got := homeDateText(at(9)); got != "11 月 4 日 · 星期三" {
+		t.Errorf("日期 = %q", got)
+	}
+	if got := homeClock(12*time.Hour + 40*time.Minute); got != "12:40" {
+		t.Errorf("本周已听 = %q", got)
+	}
+	if got := homeClock(0); got != "0:00" {
+		t.Errorf("零时长 = %q", got)
+	}
+	now := at(12)
+	for _, c := range []struct {
+		d    time.Time
+		want string
+	}{
+		{time.Time{}, "最近上传"},
+		{now, "今天 上传"},
+		{now.AddDate(0, 0, -1), "昨天 上传"},
+		{now.AddDate(0, 0, -3), "3 天前 上传"},
+	} {
+		if got := homeDaysAgo(c.d, now); got != c.want {
+			t.Errorf("homeDaysAgo(%v) = %q，want %q", c.d, got, c.want)
+		}
+	}
+	for _, c := range []struct {
+		delta int
+		ok    bool
+		want  string
+		up    bool
+	}{{3, true, "↑ 3", true}, {-2, true, "↓ 2", false}, {0, true, "—", false}, {5, false, "—", false}} {
+		if got, up := homeTrendText(c.delta, c.ok); got != c.want || up != c.up {
+			t.Errorf("homeTrendText(%d,%v) = %q,%v want %q,%v", c.delta, c.ok, got, up, c.want, c.up)
+		}
+	}
+}
+
+// TestACardThatCannotBePlayedSaysSoInsteadOfDoingNothing 盯「放不了的歌点了要说一声」：榜上有些
+// 条目没有稿件（`Type` 是 mv 而 `Bvid` 是空串），按下去不能没反应，也不能把它塞进队列。
+func TestACardThatCannotBePlayedSaysSoInsteadOfDoingNothing(t *testing.T) {
+	b := newTestShell(t, at(homeW, 1600))
+	s, tt := b.s, b.tt
+	daily := homeSongsOf("推荐", 3)
+	daily[0].Item = app.Item{Source: app.SourceOnline, Type: "mv", Title: daily[0].Title}
+	// 本地文件总是放得了的（走开文件那一路），拿它当「放得了」的那一首。
+	daily[1].Item = app.LocalItem(flacPath(t))
+	chart := homeSongsOf("榜上", 3)
+	for i := range chart {
+		chart[i].Cover, chart[i].Item.Bvid = "x", "BV1chart"+strconv.Itoa(i) // 让「今日一张」从榜里选，不和卡片抢字
+	}
+	s.home.SetSongs(daily, chart, nil, nil)
+	var played [][]app.Item
+	s.home.acts.Play = func(items []app.Item) { played = append(played, items) }
 	homeFrame(tt)
 
-	after, ok := tt.Find(homeTabs[homePopTab])
-	if !ok || after.H == 0 {
-		t.Fatalf("滚完之后找不到「%s」那一档的 Tab，文字有 %q", homeTabs[homePopTab], tt.Texts())
-	}
-	if after.Y != before.Y {
-		t.Errorf("滚列表的时候 Tab 那一排动了：y 从 %v 变成 %v——它应该留在滚动容器外面",
-			before.Y, after.Y)
-	}
-}
-
-// TestTheTopImagesScrollAwayInGridModeToo 验「数据显示样式 = 网格」那一档**也一样**。
-//
-// ⚠️ **这一档是另一个控件**：网格那一档不是 `list.List`，是 `list.Grid`（它自己
-// 一份 `ui.ListState`、自己一套列数分档）。页内头部要**两档都装**
-// （`SwitchView.SetLead`），漏了网格那一档的症状是「用户在设置里切成网格，新歌速递
-// 那一块就没了」——而它是这一屏的内容，不是列表的装饰。
-func TestTheTopImagesScrollAwayInGridModeToo(t *testing.T) {
-	// 「数据显示样式」是**设置**里的一格，所以要先把那份设置挂上（走的是
-	// 「先写盘、再挂上去」那条生产路，见 `withSettings`）。
-	st := app.DefaultSettings("")
-	st.DisplayMode = app.DisplayModeCard
-	s, tt := newShell(t, withSettings(st))
-	s.home.SetSongs(fullSongs())
-	homeFrame(tt)
-	clickTab(t, tt, homePopTab)
-
-	if !shows(tt, "新歌速递") {
-		t.Fatalf("网格那一档上没有新歌速递，文字有 %q", tt.Texts())
-	}
-
-	tt.Scroll(homeW/2, homeH-150, 0, 1200)
-	homeFrame(tt)
-
-	if shows(tt, "新歌速递") {
-		t.Errorf("网格那一档滚了 1200 像素之后新歌速递还在画面上，文字有 %q", tt.Texts())
-	}
-	if len(listPos(tt, homeTabs[homePopTab])) == 0 {
-		t.Errorf("网格那一档滚了 1200 像素之后一首歌都没画出来，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheTopImagesStayWhenTheListIsEmpty 验「下面那一档没歌的时候，顶图还在」。
-//
-// ⚠️ **顶图是这一屏的内容，不是列表的装饰**：新歌速递那一块和下面那一档的推荐单
-// 是两摊各拉各的（见 `homepage_feed.go` 的「四摊，各自独立」）。下面那一档没拉到
-// 的时候，上游那一页照样摆着 `<NewMusicTop/>`（`index.tsx:295`）。
-//
-// ⚠️ 而这一档**没有列表可挂**（一根歌都没有 → 画的是页面那一档的空状态，不是
-// 列表），所以顶图得自己站在上面——它平时是列表的第 0 行（页内头部）。
-func TestTheTopImagesStayWhenTheListIsEmpty(t *testing.T) {
-	songs := fullSongs()
-	songs.tabs[homePopTab] = nil
-	_, tt := newHome(t, songs)
-
-	clickTab(t, tt, homePopTab)
-	if !shows(tt, "新歌速递") {
-		t.Errorf("下面那一档没歌的时候顶图不见了，文字有 %q", tt.Texts())
-	}
-	// 新歌速递是两行大封面，空状态在它下面：窗口不高时要往下滚才看得到。
-	tt.Scroll(700, 400, 0, 600)
-	homeFrame(tt)
-	settleHome(tt)
-	if !shows(tt, lookup(homePath).Empty.Title) {
-		t.Errorf("下面那一档没歌的时候空状态不见了，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheMusicAndGuichuTabsAreNotTouched 钉住「另外两档没动」这一条。
-//
-// 两条判据：另外两档上**没有**新歌速递（上游本来就没有），而它们**照样能滚**
-// （这一票没把滚动容器挪到别处去）。
-//
-// ⚠️ 第二条是这一票真正可能踩坏的地方：顶图要滚走，实现就动了列表的滚动容器
-// ——而另外两档的列表是**共用同一套**的（`list.SwitchView`）。动坏了的症状是
-// 「另外两档滚不动了」。
-func TestTheMusicAndGuichuTabsAreNotTouched(t *testing.T) {
-	_, tt := newHome(t, fullSongs())
-
-	for _, tab := range []int{0, 1} {
-		clickTab(t, tt, tab)
-		if shows(tt, "新歌速递") {
-			t.Errorf("「%s」那一档上画了新歌速递（上游只有 pop 有）", homeTabs[tab])
-		}
-		atStart := listPos(tt, homeTabs[tab])
-		tt.Scroll(homeW/2, homeH-150, 0, 1200)
-		homeFrame(tt)
-		after := listPos(tt, homeTabs[tab])
-		if len(after) == 0 {
-			t.Errorf("「%s」那一档滚过去之后一首歌都没画出来", homeTabs[tab])
-			continue
-		}
-		if slices.Equal(after, atStart) {
-			t.Errorf("「%s」那一档滚了 1200 像素之后画面没变——它滚不动了", homeTabs[tab])
-		}
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 一行歌都没有时说的话
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheHomePageStillSaysWhyItIsEmpty 钉住首页的空状态**没被「接了内容」这一下
-// 弄丢**。
-//
-// 首页接进 `builtPage` 之后，`routes` 表里 `/` 那一条的 `Empty` 就不走
-// `pageContent` 的兜底分支了——而兜底那一支会把整页换掉，连上面那排 Tab 一起没。
-// 所以 `Empty` 换了个地方活：首页自己在 `viewHome` 里画它。
-//
-// 逐个 Tab 走一遍（三个 Tab 一行歌都没有时画的是同一句，所以三档都该有），再验
-// **两句话都在**：标题说「这里为什么空」，提示说「怎么才能不空」。
-func TestTheHomePageStillSaysWhyItIsEmpty(t *testing.T) {
-	want := lookup(homePath).Empty
-	if strings.TrimSpace(want.Title) == "" || strings.TrimSpace(want.Hint) == "" {
-		t.Fatalf("routes 表里 %s 的空状态自己就不全：%+v", homePath, want)
-	}
-
-	_, tt := newHome(t, homeSongs{})
-	for i, name := range homeTabs[:homeSongTabs] {
-		clickTab(t, tt, i)
-		if !shows(tt, want.Title) {
-			t.Errorf("「%s」上没有画出 %q，文字有 %q", name, want.Title, tt.Texts())
-		}
-		if !shows(tt, want.Title) {
-			t.Errorf("「%s」上没有画出「怎么才能不空」%q，文字有 %q", name, want.Hint, tt.Texts())
-		}
-		// Tab 那一排在空状态之上还看得见——不然用户连换一档都做不到。
-		if !shows(tt, name) {
-			t.Errorf("空着的时候 %q 那一档的 Tab 不见了，文字有 %q", name, tt.Texts())
-		}
-	}
-}
-
-// TestOneEmptyTabDoesNotBlankOutTheOthers 验「空状态是**那一档**的事」：三个 Tab
-// 各自有各自的歌，某一档是空的时候，另外两档照画自己的内容。
-//
-// 不然一个「只要有一档是空就整页画空状态」的实现会绿，而用户看到的是：点了一下
-// 别的 Tab，整页的歌没了。
-func TestOneEmptyTabDoesNotBlankOutTheOthers(t *testing.T) {
-	songs := fullSongs()
-	songs.tabs[1] = nil // 只有「鬼畜」是空的
-	_, tt := newHome(t, songs)
-
-	clickTab(t, tt, 1)
-	if !shows(tt, lookup(homePath).Empty.Title) {
-		t.Errorf("空着的那一档没有画空状态，文字有 %q", tt.Texts())
-	}
-
-	for _, i := range []int{0, 2} {
-		clickTab(t, tt, i)
-		if shows(tt, lookup(homePath).Empty.Title) {
-			t.Errorf("切到有歌的 %q，却画了空状态，文字有 %q", homeTabs[i], tt.Texts())
-		}
-		if !shows(tt, songName(homeTabs[i], 1)) {
-			t.Errorf("切到有歌的 %q，却没画出它的歌，文字有 %q", homeTabs[i], tt.Texts())
-		}
-	}
-}
-
-// TestTheLeadRowIsNeverTheCursor 钉住「页内头部那一行不是歌」。
-//
-// ⚠️ **基线上 Home 和 ↑ 都停在第一首歌上**（三档都一样）：页内头部占着框架的
-// **第 0 行**，而框架的游标记的是**行号**——于是 Home / ↑ 会把光标停在那一行上，
-// 而那一行不是歌：**选中项变成空**、**按 Enter 不放歌**、焦点环从「跟着那一行走」
-// 退回「画在整张列表上」，而票 #245 的 E4「↑ 在顶上一行时把焦点交回侧栏」在
-// 「流行」这一档也失效了（↑ 从第一首歌往上走会停在那一行上，而不是交回侧栏）。
-//
-// 所以逐键量：三档各按一次 Home 和一次 ↑，**光标都得停在第一首歌上**。
-func TestTheLeadRowIsNeverTheCursor(t *testing.T) {
-	// ⚠️ **窗口要有焦点**，否则框架的 `Focused()` 恒为假，「焦点在哪」这一整套
-	// 判据就全是假的（见 `focus_test.go` 那一条的注释）。
-	fc := &focusCtx{}
-	s, tt := newShell(t, fc.opt())
-	tt.SetFocused(true)
-	s.home.SetSongs(fullSongs())
-
-	for tab := range homeTabs[:homeSongTabs] {
-		clickTab(t, tt, tab)
-		// 把焦点交给这一档的列表，光标停在第一首歌上（和用户走进来时一样）。
-		s.home.lists[tab].TakeFocus()
-		homeFrame(tt)
-
-		// Home：光标该停在第一首歌上。
-		tt.Key(0, ui.KeyHome)
-		homeFrame(tt)
-		assertCursorOnFirstSong(t, s, tab, "Home")
-
-		// Enter：光标停在歌上时，它放的是**那一首**。
-		//
-		// ⚠️ **这里量的是「选中项」而不是队列**：测试里那些歌放不了（不是真的
-		// 音频），所以队列两种情况下都是空的 ✗ —— 区别在**光标停在哪一行**：
-		// 停在页内头部那一行时，`OnSubmit` 走 `playFrom(-1)`，**什么也不放**。
-		tt.Key(0, ui.KeyEnter)
-		homeFrame(tt)
-		assertCursorOnFirstSong(t, s, tab, "Enter")
-
-		// ↑：光标该**留在**第一首歌上（基线上 ↑ 在顶上一行时把焦点交回侧栏，
-		// 选中项不动；页内头部那一行不是歌，光标停上去的话选中项会变成空）。
-		s.home.lists[tab].TakeFocus()
-		homeFrame(tt)
-		tt.Key(0, ui.KeyUp)
-		homeFrame(tt)
-		assertCursorOnFirstSong(t, s, tab, "↑")
-
-		// ⚠️ **↑ 在顶上一行时把焦点交回侧栏**（票 #245 的 E4）：页内头部那一行
-		// 不是歌，光标停上去的话这一半就失效了——焦点既没交回侧栏，光标也空了。
-		if !s.sideAnchor.Focused(fc.c) {
-			t.Errorf("「%s」这一档在顶上一行按 ↑ 之后焦点没交回侧栏——"+
-				"光标大概停在页内头部那一行上了", homeTabs[tab])
-		}
-	}
-}
-
-// assertCursorOnFirstSong 断言这一档的光标停在**第一首歌**上。
-func assertCursorOnFirstSong(t *testing.T, s *Shell, tab int, key string) {
-	t.Helper()
-	m, ok := s.home.lists[tab].Selected()
-	want := songName(homeTabs[tab], 1)
-	if !ok || m.Title != want {
-		t.Errorf("「%s」这一档按 %s 之后选中的是 %q（ok=%v），want %q",
-			homeTabs[tab], key, m.Title, ok, want)
-	}
-}
-
-// TestTheNewMusicPagerIsClickableInsideTheList 钉住「翻页箭头点得动」。
-//
-// ⚠️ **这一块在列表的滚动区里**（它是「流行」那一档列表的第 0 行），而列表的浮动
-// 滚动条就贴在它的右边：指针一悬停滚动条就出现，**按下被滚动条抢走**（框架的
-// `pointerDown` 先问 `scrollbarPress`，滚动条那一帧画出来了就把这一次按下拿走），
-// 于是那两枚翻页箭头按了没反应——**用户翻不到第三页**。
-//
-// ⚠️ **单独造这一块的测试量不到**（`newGridTester` 那一块不在列表里，没有滚动条），
-// 所以这一条要**在首页上**跑。
-//
-// ⚠️ **两条都量**：直接点，和「先把指针悬停上去再点」——后者是评审探针里更狠的那条
-// （悬停让滚动条出现，之后每一次按下都被它拿走）。
-func TestTheNewMusicPagerIsClickableInsideTheList(t *testing.T) {
-	// 25 首：一页 10 首（上游 5 列 × 2 行）→ 三页，才翻得动。
-	songs := fullSongs()
-	songs.new = homeSongsOf("新歌", 25)
-	_, tt := newHome(t, songs)
-	clickTab(t, tt, homePopTab)
-
-	// 一路翻到第三页：1 / 3 → 2 / 3 → 3 / 3。
-	for _, want := range []string{"2 / 3", "3 / 3"} {
-		if err := tt.Click("下一页"); err != nil {
-			t.Fatalf("点不到「下一页」：%v，文字有 %q", err, tt.Texts())
-		}
-		homeFrame(tt)
-		if got := readout(tt); got != want {
-			t.Fatalf("翻页之后读数是 %q，want %q（箭头点不动：列表的浮动滚动条压在它上面）", got, want)
-		}
-	}
-
-	// 翻回第一页，再来一遍「先悬停再点」——悬停会让滚动条出现。
-	for range 2 {
-		if err := tt.Click("上一页"); err != nil {
-			t.Fatalf("点不到「上一页」：%v，文字有 %q", err, tt.Texts())
-		}
-		homeFrame(tt)
-	}
-	if got := readout(tt); got != "1 / 3" {
-		t.Fatalf("翻回第一页读数是 %q，want 1 / 3", got)
-	}
-
-	// 把指针悬停在「下一页」上（滚动条于是出现），再点它。
-	r, ok := tt.Find("下一页")
-	if !ok || r.W == 0 {
-		t.Fatalf("画面上找不到「下一页」，文字有 %q", tt.Texts())
-	}
-	tt.Move(r.X+r.W/2, r.Y+r.H/2)
-	homeFrame(tt)
-
-	if err := tt.Click("下一页"); err != nil {
-		t.Fatalf("点不到「下一页」：%v，文字有 %q", err, tt.Texts())
+	// 点封面：封面那枚按钮的无障碍名字就是歌名（卡片标题那行字不是按钮）。
+	if err := tt.Click("推荐 1"); err != nil {
+		t.Fatalf("点不到第一张卡：%v，文字有 %q", err, tt.Texts())
 	}
 	homeFrame(tt)
-	if got := readout(tt); got != "2 / 3" {
-		t.Errorf("悬停之后点「下一页」，读数是 %q，want 2 / 3（滚动条把这一次按下抢走了）", got)
+	if len(played) != 1 || len(played[0]) != 1 || !played[0][0].IsLocal() {
+		t.Fatalf("点第一张（放不了）之后换进队列的是 %+v，want 只有往后第一首放得了的那一首", played)
+	}
+}
+
+// TestTheHomePageUsesThePrototypePageMargins 钉首页的页边距（原型 `.page { padding: 8px 40px 64px }`
+// 和两条媒体查询）：窗口 > 1024 是 40，> 760 是 32，再窄 16；顶上是页顶 8 + 问候区 24。
+//
+// 数是**窗口宽**判的（媒体查询看视口），不是内容区——见 `homeLayoutFor`。
+func TestTheHomePageUsesThePrototypePageMargins(t *testing.T) {
+	for win, want := range map[float32]float32{1600: 40, 1200: 40, 1025: 40, 1024: 32, 800: 32, 761: 32, 760: 16, 600: 16} {
+		if got := homeLayoutFor(win).pad; got != want {
+			t.Errorf("窗口 %v 的页边距 = %v，want %v", win, got, want)
+		}
+	}
+
+	// 画面上：1200 的窗口里，最靠左的墨（Eyebrow / 标题的左缘）在侧栏右边 40。
+	b := newTestShell(t, at(1200, 800))
+	b.s.home.SetSongs(homeSongsOf("推荐", 6), homeSongsOf("榜上", 20), nil, nil)
+	for range 3 {
+		b.tt.Frame()
+	}
+	sideW := app.DefaultSideMenuWidth
+	area := contentArea(sideW)
+	if got, want := leftmostInk(b.tt.Image(), area), int(sideW)+40; got < want-2 || got > want+2 {
+		t.Errorf("首页的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 40）", got, want, int(sideW))
+	}
+	// 顶上：页顶 8 + 问候区 24 = 32，再加 Eyebrow 字形自己的上沿留白（几像素）。
+	lo, _, ok := firstBand(b.tt.Image(), area)
+	if !ok {
+		t.Fatalf("首页顶上一点墨都没有，文字有 %q", b.tt.Texts())
+	}
+	if top := lo - navMinHeight; top < 28 || top > 42 {
+		t.Errorf("首页的第一段墨从顶栏下缘往下 %d 像素开始，want 32 附近（页顶 8 + 问候区 24）", top)
 	}
 }

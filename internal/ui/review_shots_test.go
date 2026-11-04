@@ -4,7 +4,6 @@ package ui
 
 import (
 	"os"
-	"strconv"
 	"testing"
 	"time"
 
@@ -24,28 +23,6 @@ func themeName(dark bool) string {
 		return "深色"
 	}
 	return "浅色"
-}
-
-func TestRenderReviewHomeTabs(t *testing.T) {
-	dir := reviewDir(t)
-	for _, dark := range []bool{false, true} {
-		b := homeDiscoverFake(t)
-		_, tt, _ := newHomeShell(t, b, systemIsDark(dark))
-		waitFrames(t, tt, "第一档", func() bool { return showsText(tt, "音乐 推的第一首") })
-		for i, name := range homeTabs {
-			if i > 0 {
-				if err := tt.Click(name); err != nil {
-					t.Fatal(err)
-				}
-				tt.Advance(400 * time.Millisecond)
-				for range 4 {
-					tt.Frame()
-					time.Sleep(20 * time.Millisecond)
-				}
-			}
-			save(t, dir, "20-首页-"+strconv.Itoa(i)+name+"-"+themeName(dark)+".png", tt)
-		}
-	}
 }
 
 func TestRenderReviewFullPlayer(t *testing.T) {

@@ -27,82 +27,9 @@ import (
 // B6：「全部播放」两处画法统一
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestThePlayAllButtonIsTheSameOnBothPages 钉住「『全部播放』在两个页面上是
-// 同一枚」。
-//
-// # 同一个动作，两个页面
-//
-// 搜索结果页有「全部播放」，此前**首页没有**——用户在搜索页能按、在首页找不到，
-// 会以为是两个不同的功能（UX 报告 §2 的 B6）。
-//
-// # 判据是**两枚按钮的盒子一样**
-//
-// 同一个字、同一颗实心主色、同一枚控件 ⇒ 两处的盒子一模一样。而「一个页面有、
-// 另一个没有」这件事本身也由这一条断掉：少一个就量不成一对。
-//
-// ⚠️ **不判语义**：队列语义由票 #337 的行为测试钉住，这一票只统一画法。
-func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
-	// 首页：摆三首歌，那一枚按钮才是可按的。
-	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: playableSongsOf("a", 3)},
-	})
-	homeFrame(home.tt)
-	homeBtn, ok := home.tt.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("首页上没有 %q 那一枚，文字有 %q", playAllLabel, home.tt.Texts())
-	}
-
-	// 搜索结果页：同一个动作，那一枚按钮在排序那一排右边。
-	st := newSearchStub(10, 20)
-	_, searchTT := newSearchPage(t, "周杰伦", st)
-	waitFor(t, "搜索结果出来了", func() bool {
-		searchTT.Frame()
-		return searchTT.HasText(playAllLabel)
-	})
-	searchBtn, ok := searchTT.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("搜索页上没有 %q 那一枚，文字有 %q", playAllLabel, searchTT.Texts())
-	}
-
-	if homeBtn.W != searchBtn.W || homeBtn.H != searchBtn.H {
-		t.Errorf("两处的 %q 不是同一枚：首页是 %v，搜索页是 %v——"+
-			"同一个动作在两个页面上长得不一样，用户会以为是两个功能",
-			playAllLabel, homeBtn, searchBtn)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // B6 的另一半：两枚按钮按下去做的是同一件事
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestThePlayAllButtonReplacesQueueOnBothPages 验两个页面共用批量替换语义。
-// 在线搜索走本地 HTTP fixture，起播与队列都检查。
-func TestThePlayAllButtonReplacesQueueOnBothPages(t *testing.T) {
-	t.Run("首页", func(t *testing.T) {
-		home := newTestShell(t, withSettings(app.DefaultSettings("")))
-		seedThreeSongs(t, home.a)
-		page := localSongs(t, 3)
-		home.s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: page}})
-		homeFrame(home.tt)
-		if err := home.tt.Click(playAllLabel); err != nil {
-			t.Fatal(err)
-		}
-		assertQueueAndPlaying(t, home.a, []app.Item{page[0].Item, page[1].Item, page[2].Item}, 0)
-	})
-	t.Run("搜索", func(t *testing.T) {
-		st := newSearchStub(24, 24)
-		search, tt := newSearchPage(t, "周杰伦", st)
-		mountQueueStreaming(t, search.app)
-		settleText(t, tt, stubTitle(1, 0))
-		seedThreeSongs(t, search.app)
-		if err := tt.Click(playAllLabel); err != nil {
-			t.Fatal(err)
-		}
-		want, _ := playAllItems(st.rows(searchTabSong, 1))
-		assertQueueAndPlaying(t, search.app, want, 0)
-	})
-}
 
 // playableSongsOf 造 n 首**放得了**的歌（首页那一屏）。
 //
@@ -126,61 +53,4 @@ func playableSongsOf(prefix string, n int) []list.Music {
 		}
 	}
 	return out
-}
-
-// TestThePlayAllButtonSkipsTheUnplayableOnes 钉住「放不了的不要塞进队列」。
-//
-// # 为什么这一条要紧
-//
-// 首页「流行」那一档走音乐综合榜，而榜上**有些条目没有稿件**（纯音乐条目，
-// `related_archive` 是空的，`internal/app/recommend.go`）——那种行**画得出来**，
-// 但放不了。而同一页每一行的右键菜单对那种行是**灰**的（「立即播放 /
-// 从这一首往后听 / 下一首播放 / 添加到队列」四个入口都按不动，末尾还补一句
-// 为什么）。
-//
-// 「全部播放」是**整页一起换**的：它要是把放不了的也换进去，用户就会在队列里
-// 撞上几首按不动的歌，而界面上一个字的解释都没有。
-//
-// # 判据是**队列里那几项**
-//
-// 放得了的那一首进去了，放不了的那一首没进去；而且**跳过了几首要说一声**
-// （不然用户数不出「这一页有 2 首，而队列里换过去的是 1 首」）。
-func TestThePlayAllButtonSkipsTheUnplayableOnes(t *testing.T) {
-	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	// 队列先放一首。
-	if err := home.s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
-		t.Fatal(err)
-	}
-	// 本地音频夹具可实际起播；不可播条目必须被跳过并说明。
-	playable := writeCopy(t, t.TempDir(), "放得了的.flac")
-	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: {
-			{ID: "a", Title: "放得了的", Item: app.LocalItem(playable)},
-			// 🔴 **这一首放不了**：`Type` 是 mv 而 `Bvid` 是空串——榜上没有稿件
-			// 的纯音乐条目就是这个样子（`app.playableOnline` 的最后那一支）。
-			{ID: "b", Title: "放不了的", Item: app.Item{
-				Source: app.SourceOnline, Type: "mv", Title: "放不了的",
-			}},
-		}},
-	})
-	homeFrame(home.tt)
-	btn, ok := home.tt.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("首页上没有 %q 那一枚，文字有 %q", playAllLabel, home.tt.Texts())
-	}
-	home.tt.ClickAt(btn.X+btn.W/2, btn.Y+btn.H/2)
-	home.tt.Frame()
-
-	items := home.s.app.Queue().Items()
-	if len(items) != 1 {
-		t.Fatalf("队列里有 %d 项，want 1（只剩放得了的那一首）——"+
-			"放不了的那一首不该被塞进队列", len(items))
-	}
-	if items[0].Title != "放得了的" {
-		t.Errorf("队列第 1 项是 %q，want 「放得了的」", items[0].Title)
-	}
-	// 跳过了几首要说一声。
-	if !home.tt.HasText("有 1 首放不了") {
-		t.Errorf("没有说跳过了几首，文字有 %q", home.tt.Texts())
-	}
 }

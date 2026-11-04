@@ -10,7 +10,6 @@ import (
 	"image"
 	"net/http"
 	"sort"
-	"strconv"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
@@ -175,98 +174,6 @@ func TestTheAuthorPaneSaysItIsLoading(t *testing.T) {
 	if !tt.HasText(loadingAuthorsText) {
 		t.Fatalf("作者栏第一页在途，画面上却没有「%s」——用户会以为他真的一个都没关注；"+
 			"文字有 %q", loadingAuthorsText, tt.Texts())
-	}
-}
-
-// TestTheBoardHeroScrollsAwayWithTheList 钉住热榜 / 原创榜那一档的**页头跟着列表滚走**。
-//
-// 🔴 **2026-10-27 用户点名要的**：原先榜单那张头图（榜名 + 期数）和表头都在列表
-// **外面**，滚列表时它们钉在顶上不动——一屏只剩半屏能看歌。现在它们是列表的
-// 第 0 行（`list.Lead`），跟着内容一起滚走。
-//
-// 判据是**滚过之后那一块的位置**：钉住的会在原地，跟着滚的会往上（甚至出画面）。
-func TestTheBoardHeroScrollsAwayWithTheList(t *testing.T) {
-	startOnOverview(t)
-	b := homeDiscoverFake(t)
-	// ⚠️ **要多给几首**：`homeDiscoverFake` 只给一条，一屏装得下就压根滚不动——
-	// 「滚了 200 之后它还在原地」会被读成「钉住的」，而那其实是「没滚动」。
-	b.on(uiHomeToplistMusic, func(w http.ResponseWriter, r *http.Request) {
-		title := "热榜第一名"
-		if r.URL.Query().Get("list_id") == "9" {
-			title = "原创榜第一名"
-		}
-		list := make([]map[string]any, 0, 40)
-		for i := range 40 {
-			list = append(list, map[string]any{
-				"music_id": "MA" + strconv.Itoa(i), "music_title": title, "singer": "榜上歌手",
-				"creation_bvid": "BV" + strconv.Itoa(i), "creation_aid": i,
-				"creation_cover": "https://f/board.jpg", "creation_duration": 120, "creation_play": 5,
-			})
-		}
-		uiExploreJSON(w, 0, map[string]any{"list": list})
-	})
-	s_, tt, _ := newHomeShell(t, b)
-	waitFrames(t, tt, "总览", func() bool { return showsText(tt, "排行榜") })
-	if err := tt.Click("热榜"); err != nil {
-		t.Fatal(err)
-	}
-	waitFrames(t, tt, "进了热榜列表", func() bool { return showsText(tt, "鬼畜") })
-	// ⚠️ **锚点是页内头部那一行的 Label**（"榜单头图"），不是 `home:board:hero`
-	// 那个 Key：后者是头图自己的键，而 `Tester.Find` 认的是**文字和 Label**。
-	// 这一条要量的正是那一行（它跟着滚），所以锚在行上。
-	waitFrames(t, tt, "榜单头图", func() bool { _, ok := tt.Find("榜单头图"); return ok })
-
-	before, _ := tt.Find("榜单头图")
-	// 往下滚一大段（头图 112 高，滚 200 一定扫过它）。
-	//
-	// ⚠️ **多画几帧**：滚轮是**带滑动**的（`Tester.Scroll` 那一段注释：
-	// "a scroll container glides there over a moment"），只画一帧的话位置还在
-	// 原地——那一帧读到的 y 会让人以为「它是钉住的」。
-	tt.Scroll(homeW/2, homeH/2, 0, 1200)
-	homeFrame(tt)
-
-	// 🔴 **判据是「滚过之后那一块要么往上走了、要么已经不在画面上」**。
-	//
-	// ⚠️ **「不在画面上」单独不算过**：那一块要是**压根没画出来**（或者被别处
-	// 一起删了），`Find` 同样拿不到——那也是「不在画面上」，但页头并没有跟着滚。
-	// 所以先断「滚之前它确实在、而且位置合理」，再断「滚之后它不在了或者往上」。
-	//
-	// ⚠️ **`before.Y` 那一句不是在断「它在顶上」**（它本来就在列表第 0 行、
-	// Tab 条下面），而是留一个能核对的数：出问题时那句话里带着两个 y。
-	if before.Y <= 0 || before.Y > homeH {
-		t.Fatalf("滚之前页头的位置就不在窗口里（y=%.0f）——这一条量不下去", before.Y)
-	}
-	after, stillThere := tt.Find("榜单头图")
-	if stillThere && after.Y >= before.Y-1 {
-		t.Errorf("滚了 1200 之后头图还在 y=%.0f（滚之前 y=%.0f）——"+
-			"它是钉在顶上的，不是跟着列表滚走", after.Y, before.Y)
-	}
-	// 顺带把「滚动真的发生了」钉一下：`ScrollOffset` 得往前走过。
-	if off := s_.home.lists[homeHotTab].ScrollOffset(); off <= 0 {
-		t.Errorf("滚了 1200，列表报的滚动量还是 %.0f——滚动压根没发生，"+
-			"上面那条「位置上移」就不成立", off)
-	}
-}
-
-// TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing 钉住总览上「新歌速递」在拉
-// 的时候**摆骨架**，而不是整块消失。
-//
-// 🔴 **判据是「那一块还在不在」**：原先 `len(songs) == 0` 直接 return——连标题
-// 一起不见，数据到了整块冒出来，下面的磁贴和排行榜跟着往下跳一截。
-func TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing(t *testing.T) {
-	startOnOverview(t)
-	// 一台永远不回的假 B 站：新歌速递那一趟卡在路上。
-	b := newTestShell(t, append(blockedBiliOpts(t, true), at(1200, 800))...)
-	tt := b.tt
-	tt.Frame()
-	tt.Frame()
-
-	if !showsText(tt, "新歌速递") {
-		t.Fatalf("总览在拉的时候「新歌速递」整块都不见了（文字有 %q）——"+
-			"数据到了它才冒出来，下面的内容要往上跳一截", tt.Texts())
-	}
-	if !tt.HasText(loadingNewMusicText) {
-		t.Errorf("那一块没有骨架（找不到 %q），文字有 %q", loadingNewMusicText, tt.Texts())
 	}
 }
 

@@ -83,25 +83,23 @@ var realDataLedger = []realDataPage{
 			homeArchives(b)
 			s, tt, _ := newHomeShell(t, b)
 
-			// 先停在第一档：那是用户落地看到的那一屏，也是 Want 断言的那一屏。
-			realDataWait(t, tt, "第一档的推荐拉回来了", func() bool { return tt.HasText("音乐 推的第一首") })
+			// 先停在「推荐」：那是用户落地看到的那一屏，也是 Want 断言的那一屏。
+			realDataWait(t, tt, "推荐那一档的每日推荐拉回来了", func() bool { return tt.HasText("每日推荐 1") })
 
-			clickTab(t, tt, 1)
-			realDataWait(t, tt, "鬼畜那一档拉回来了", func() bool { return tt.HasText("鬼畜 推的第一首") })
-			clickTab(t, tt, 2)
-			realDataWait(t, tt, "流行那一档（榜 + 新歌速递）拉回来了", func() bool {
-				return tt.HasText("流行 榜上的歌") && tt.HasText("新歌速递里那首")
-			})
-			// 「流行」走的是音乐榜而不是第三个分区——那一档拿别的档的歌来顶，
-			// 界面上看着有内容，而这一条断言的是「它打的是哪个接口」。
-			if !b.hit(uiHomeMusicRank) {
-				t.Fatal("「流行」那一档没有打音乐榜那个接口（它拿的是别的那一批）")
+			clickHomeTab(t, tt, homeTabChart)
+			realDataWait(t, tt, "榜单那一档（热榜）拉回来了", func() bool { return tt.HasText("榜上第 1 名") })
+			// 榜单走的是音乐站的热榜（期数 + 那一期的内容），不是分区推荐——那一档拿别的档
+			// 的歌来顶，界面上看着有内容，而这一条断言的是「它打的是哪个接口」。
+			if !b.hit(uiHomeToplistMusic) {
+				t.Fatal("「榜单」那一档没有打热榜那个接口（它拿的是别的那一批）")
 			}
-			clickTab(t, tt, 0)
-			realDataWait(t, tt, "切回第一档", func() bool { return tt.HasText("音乐 推的第一首") })
+			clickHomeTab(t, tt, homeTabNew)
+			realDataWait(t, tt, "新歌那一档（新歌速递）拉回来了", func() bool { return tt.HasText("新歌速递里那首") })
+			clickHomeTab(t, tt, homeTabRec)
+			realDataWait(t, tt, "切回推荐", func() bool { return tt.HasText("每日推荐 1") })
 			return s, tt
 		},
-		Want: []string{"音乐 推的第一首"},
+		Want: []string{"每日推荐 1"},
 	},
 	{
 		Route: laterPath, Title: "稍后再看",

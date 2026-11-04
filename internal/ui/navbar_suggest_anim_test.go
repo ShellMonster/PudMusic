@@ -39,6 +39,9 @@ func suggestAnimShell(t *testing.T, dark bool, opts ...shellOpt) (*Shell, *mygou
 	b := newTestShell(t, append([]shellOpt{systemIsDark(dark)}, opts...)...)
 	b.tt.SetFocused(true)
 	b.s.hist.add(suggestAnimTerm)
+	// 停在一个干净的页面上：这组量的是浮层里那一个字旁边「画没画」，首页（问候区 + 主视觉）
+	// 的黑字正好叠在浮层底下，会被当成浮层的墨。
+	b.s.navigate("/empty")
 	b.tt.Frame()
 	return b.s, b.tt
 }

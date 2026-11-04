@@ -66,7 +66,7 @@ func DefaultDependencies() Dependencies {
 		MountCollections:     ui.MountCollections,
 		MountExplore:         func(a *app.App, cli *bili.Client) { a.MountExplore(cli) },
 		MountLibrary:         func(a *app.App, cli *bili.Client) { a.MountLibrary(cli) },
-		MountRecommend:       func(a *app.App, cli *bili.Client) { a.MountRecommend(cli) },
+		MountRecommend:       ui.MountRecommend,
 		MountLocalMusic:      ui.MountLocalMusic,
 		MountLyrics:          ui.MountLyrics,
 		MountComments:        ui.MountComments,

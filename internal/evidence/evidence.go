@@ -1099,11 +1099,6 @@ var Items = []Item{
 		Tests: []string{"TestFourteenRoutes", "TestParamRoutesMatch", "TestUnknownRouteShowsThe404Page"},
 	},
 	{
-		Category: Paging,
-		Spec:     "切路由：上一页的滚动位置留着，回来还在原处",
-		Tests:    []string{"TestLeavingTheHomePageAndComingBackKeepsWhereYouWere"},
-	},
-	{
 		// 🔴 **这一条钉的是「代码路径上没开着」**：框架 `Router.Transition` 的零值
 		// 是 `TransitionAuto`（一条 250ms 滑入 / 150ms 淡入），不显式关掉就是开着，
 		// 而 2026-10-25 实测证实**它一直开着**——现象只是「换页滑了一下」，
@@ -1138,24 +1133,6 @@ var Items = []Item{
 		Category: Paging,
 		Spec:     "翻页失败解锁、给重试，且不会自己绕圈",
 		Tests:    []string{"TestAFailedPageUnlocksAndOffersARetry", "TestAFailureOnTheVeryFirstPageLeavesOneWayOut"},
-	},
-	{
-		Category: Paging,
-		// 首页那三张 Tab 的「无限下滑」（票 #370）。四件事缺一不可：
-		//
-		//   - **滚到底自动拉下一段**（一直滑一直有，到 B 站没有更多为止）；
-		//   - **到头了说清楚**（「没有更多了」那一行——不是无限转圈、不是空白）；
-		//   - **切回某档还在原来那一段**（这一条是换列表换出来的，位置记在哪
-		//     可以换，但那个行为不能丢）；
-		//   - **「回到顶部」那一枚回的是当前这一档**（三档各记各的）。
-		Spec: "首页三张 Tab 无限下滑：滚到底自动拉下一段，到头说「没有更多了」；切回某档还在原处；回顶按钮回的是当前这一档",
-		Tests: []string{
-			"TestTheHomeKeepsLoadingMoreWhenYouScrollToTheEnd",
-			"TestTheHomeSaysThereIsNoMoreWhenThereIsNoMore",
-			"TestTheHomeBackToTopGoesBackToThatTab",
-			"TestEachHomeTabKeepsItsOwnScrollAndItsOwnBackToTop",
-			"TestSwitchingBackRestoresThatTabsScrollPosition",
-		},
 	},
 	{
 		Category: Paging,
@@ -1248,7 +1225,6 @@ var Items = []Item{
 			"TestTheCollectionGridCarriesThePlayCountIntoTheGradient",
 			"TestTheCollectionTimeTitleFollowsTheContainer",
 			"TestTheSearchVideoTabShowsThePlayCountAndTheUploadTime",
-			"TestTheHomeTabShowsThePlayCountButNoUploadTime",
 			"TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime",
 			// 评审返工：窄窗口下让位（先收时间列、再收播放量），标题与「⋯」不许被挤掉。
 			"TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow",
@@ -1690,7 +1666,6 @@ var Items = []Item{
 			"TestTheQueueRowOperationKeyTurnsAccentOnHover",
 			"TestTheQueueRowOperationKeyIsNamedAfterItsSong",
 			"TestTheQueueRowOperationKeyIsThirtyTwoSquare",
-			"TestTheNewMusicPagerTurnsAccentOnHover",
 			"TestTheTopBarKeysKeepTheirTipsAndNames",
 			"TestTheFullPlayerRowKeepsItsOwnRecipe",
 		},
@@ -2019,7 +1994,6 @@ var Items = []Item{
 		Spec: "封面不再在有图和占位之间反复切换：一屏封面按显示尺寸存得下、字节账不漏、还在下的那一张不参与淘汰、画面上正画着的那一张不参与淘汰（首页、历史记录、稍后再看三处）；普通大 PNG 逐行、基线 JPEG 按 MCU 行缩放，不分配整张原图且像素不变；EXIF 旋转图自己摆正再缩（不走 ui.DecodeBitmap，它会把整份原始字节钉在 bitmap 上）；缓存创建和重置均遵循环境预算；**向图床要的那一档的宽高比与那一格一致（≤3%）、横幅在 Retina 上不糊，而「存进缓存的那一份」仍然被 768 夹住（32MiB 预算不变）；满屏背景的清晰度可调（流畅/清晰/高清三档），而**解码按目标尺寸流式进行、内存峰值与源图大小无关**",
 		Tests: []string{
 			"TestTheSameCoverStaysReadyAcrossFrames",
-			"TestTheHomeCoversDoNotGoBackToPlaceholder",
 			"TestStoredCoversAreScaledDown",
 			"TestStreamingPNGMatchesExistingPixels",
 			"TestStreamingPNGFiltersAndChunks",
@@ -2040,7 +2014,6 @@ var Items = []Item{
 			"TestTheByteAccountDoesNotLeak",
 			"TestTheCoverOnScreenIsNotEvicted",
 			"TestACoverThatIsNoLongerOnScreenIsEvicted",
-			"TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash",
 			"TestTheHistoryPageCoversDoNotKeepFlashing",
 			"TestTheLaterPageCoversDoNotKeepFlashing",
 			// 票 #624：「向图床要多大」与「存进缓存多大」是两条线（票 #664）。
@@ -2113,19 +2086,12 @@ var Items = []Item{
 		// 它们各自有一句早退，而那句早退把「拉失败」和「没在拉」当成同一件事
 		// ——于是失败那一刻三块**整块消失**（连标题都没有），用户看到的是首页
 		// 内容区一片空白（票 #706）。
-		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈；空列表说的是「没有内容」；新歌速递那一块挂掉不牵连下面那一档；「发现」总览那三块在拉失败时**不许整块消失**（那是「一片空白」）",
+		Spec: "首页拉不到推荐：说的是「拉不到」并给一次重试、失败后不自己绕圈（点了「重试」才再拉一次）；一摊失败不牵连别的摊；没挂 B 站时不转骨架、直接说「没有」；放不了的卡片点了不塞进队列",
 		Tests: []string{
-			"TestAFailedRecommendSaysSoAndOffersARetry",
-			"TestAnEmptyRecommendListIsNotAFailure",
-			"TestTheNewMusicBlockFailsOnItsOwn",
-			"TestTheHomePageSaysItIsLoadingUntilTheFirstPageIsBack",
-			"TestNewMusicIsOnlyPulledOnThePopTab",
-			"TestLoggingInReloadsTheRecommendations",
-			"TestTheOverviewNeverGoesBlankWhenTheFetchFails",
-			"TestTheOverviewSaysItFailedAndOffersARetry",
-			"TestTheOverviewRetryStartsTheRequestAgain",
-			"TestAnEmptyOverviewIsNotAFailure",
-			"TestTheOverviewShowsSkeletonsWhileItIsStillLoading",
+			"TestAFailedSectionSaysSoAndOnlyRetriesWhenAsked",
+			"TestTheHomePagePullsWhatItNeedsOnOpen",
+			"TestTheNewTabPullsNewMusicOnceAndShowsTheUploadAge",
+			"TestACardThatCannotBePlayedSaysSoInsteadOfDoingNothing",
 		},
 	},
 	{
@@ -2231,7 +2197,6 @@ var Items = []Item{
 			"TestTheRealDataLedgerCoversEveryRoute",
 			"TestEveryRouteHasAPageViewOrAnOpenDebt",
 			// 各页从空状态落到真数据的那一步。
-			"TestTheThreeTabsAllSwitch",
 			"TestCollectionShowsTheHeaderAndTheOpsBar",
 			// 合集 / 系列那一页（票 #683 的缺陷 C）：它们走的是另外两个接口，
 			// 而「走错接口」在界面上就是一页空白——所以这一条要列在这个
@@ -2239,8 +2204,6 @@ var Items = []Item{
 			"TestTheSeasonPageListsItsArchives",
 			// 首页那一页的**取数**那一半（表上那一行走的就是这条链）：
 			// 三档各打各的接口，换了档拿到的是另一批。
-			"TestTheHomePagePullsTheTabYouAreLookingAt",
-			"TestEachTabPullsItsOwnList",
 		},
 	},
 	{
@@ -3240,7 +3203,6 @@ var Items = []Item{
 		Tests: []string{
 			// 列表：点一行 → 没有实心主色块（控件那一层 + 外壳那一层，深浅两套）。
 			"TestClickingARowLeavesNoSolidAccentBlock",
-			"TestClickingARowOnThePageLeavesNoSolidAccentBlock",
 			// 网格：点一格 → 同样没有实心主色块（两套控件各写各的，两边都要断）。
 			"TestClickingACardLeavesNoSolidAccentBlock",
 			// 本地音乐的「表格」那一档：点一行 → 同样没有实心主色块（框架的
@@ -3257,7 +3219,6 @@ var Items = []Item{
 			// 「鼠标点过之后再按方向键」那一路也得有指示——框架那个 `focusVisible`
 			// 方向键不会设回来，靠它那一路是哑的（控件那一层 + 外壳那一层）。
 			"TestTheKeyboardRingComesBackAfterAMouseClick",
-			"TestTheKeyboardRingComesBackAfterAMouseClickOnThePage",
 			"TestTheLaterRowKeepsItsRingAfterAMouseClick",
 			// 选中跟着**那一首**走，不跟着位置走（铁律四）——焦点环就是「选中画出来了」
 			// 唯一的证据，所以这一条现在量的是环的位置。
@@ -3528,7 +3489,6 @@ var Items = []Item{
 			"TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle",
 			"TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle",
 			// 回顶：首页 / 本地音乐 / 我的关注 / 下载记录 / 设置。
-			"TestTheHomePageHasABackToTop",
 			"TestTheLocalMusicPageHasABackToTop",
 			"TestTheFollowPageHasABackToTop",
 			"TestTheDownloadListHasABackToTop",
@@ -3659,7 +3619,6 @@ var Items = []Item{
 		Tests: []string{
 			"TestTheDynamicAuthorNameIsALinkNotAPill",
 			"TestThePlaybarOwnerNameIsALinkNotAPill",
-			"TestTheListOwnerNameIsALinkNotAPill",
 			"TestTheActionButtonsAreStillButtons",
 			"TestTheNameLinkIsKeyboardReachable",
 			"TestTheUnderlineColorFollowsTheTheme",
@@ -4236,89 +4195,15 @@ var Items = []Item{
 			// 迷你窗音量滑块那枚提示：它在，而且**在窗内**（窗只有 320×100，
 			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
 			// 两个页面上那两枚按钮是同一枚（盒子一模一样）。
-			"TestThePlayAllButtonIsTheSameOnBothPages",
 			// 两个页面上按下去，进去队列的都是这一页的歌。
-			"TestThePlayAllButtonReplacesQueueOnBothPages",
 			// **放不了的不要塞进队列**（判据 `app.CanPlay`，和右键菜单里那三个
 			// 入口是同一个）——而且跳过了几首要说一声。
-			"TestThePlayAllButtonSkipsTheUnplayableOnes",
 			// 超长歌名的墨迹有上限，不占满整行中段（量的是像素）。
 			"TestALongTitleDoesNotFillTheWholeRow",
 			// 短歌名一个字都不多让（上限不许反过来咬短歌名）。
 			"TestAShortTitleIsNotAffected",
 			// 「图取到了」那一档也描一圈边（深浅两套）。
 			"TestTheLoadedCoverHasAnEdgeOfItsOwn",
-		},
-	},
-	{
-		// 🔴 **这一条的错法是「静默」的**：顶图被冻在列表上面，滚动列表时它一动
-		// 不动——**没有一样会报错**，界面只是「不像上游那一页」。
-		//
-		// 上游那一页（`music-recommend/index.tsx`）的顶图和下面的列表在**同一个
-		// 滚动容器**里，所以顶图跟着滚走；而 Tab 那一排在滚动容器**外面**，滚
-		// 列表时它不动。
-		Category: Platform,
-		// 票 #369。
-		Spec: "首页「流行」那一屏：顶图（新歌速递）**跟着列表一起滚走**，而 Tab 那一排**留在滚动容器外面**（滚列表时它不动）；另外两档不受影响",
-		Tests: []string{
-			// 顶图滚一段之后不在画面上了，而下面那一档的歌还在。
-			"TestTheTopImagesScrollAwayWithTheList",
-			// 网格那一档（设置里的「数据显示样式」）也是一样的。
-			"TestTheTopImagesScrollAwayInGridModeToo",
-			// Tab 那一排的 y 在滚动前后一模一样。
-			"TestTheTabRowStaysPutWhileTheListScrolls",
-			// 另外两档没动：没有顶图，而且照样能滚。
-			"TestTheMusicAndGuichuTabsAreNotTouched",
-			// 下面那一档没歌的时候顶图还在（它是这一屏的内容，不是列表的装饰）。
-			"TestTheTopImagesStayWhenTheListIsEmpty",
-		},
-	},
-	{
-		// 🔴 **这一条的错法是「静默」的**：窗口一矮，新歌速递那一块就减成**一行**
-		// ——用户看到的是「4 张图」，而上游那一块永远是**两行**。没有一样会报错，
-		// 界面只是「不像上游那一页」。
-		//
-		// 上游 `new-music-top.tsx:157` 的 `pageSize = colCount * 2`：那个文件**只量
-		// `window.innerWidth`、从不量高度**，所以它永远是两行；列数也是按**窗口
-		// 宽**分档的（`:135` 与 `:209` 那组 Tailwind 视口断点），所以同一个窗口
-		// 宽度下我们摆几列、一页摆几首都和上游一样。
-		//
-		// ⚠️ **「下面那一档的歌在首屏之外」是上游的样子**，不是缺陷：上游那一块和
-		// 列表在同一个滚动容器里（`music-recommend/index.tsx:261`），矮窗口下这一
-		// 块占满首屏，歌要往下滚才看得到。
-		Category: Platform,
-		// 票 #475。
-		Spec: "首页「流行」那一档顶部的新歌速递：**永远两行**（不因窗口矮就减成一行），列数按**窗口宽**分档（上游那张表），默认窗口下画着 10 张",
-		Tests: []string{
-			// 窗口从最小高到很高，行数一个都不许变。
-			"TestTheBlockIsAlwaysTwoRows",
-			// 默认窗口（1200×800）下画着 10 张（上游 5 列 × 2 行）。
-			"TestTheDefaultWindowShowsTenCards",
-			// 改宽度列数跟着换（上游的断点），改高度行数不动。
-			"TestResizingTheWindowChangesTheColumnsNotTheRows",
-			// 列数那张表本身（上游的断点）。
-			"TestNewMusicColumnsFollowItsOwnBreakpoints",
-			// 封面永远是格子的宽、宽高相等（上游 `aspect-square w-full`）。
-			"TestTheCoverStaysSquareAtTheMinimumWindowHeight",
-			// 翻页箭头在列表里点得动（上游有这两枚箭头：`new-music-top.tsx:182-199`）。
-			"TestTheNewMusicPagerIsClickableInsideTheList",
-		},
-	},
-	{
-		// 🔴 **这一条的错法也是「静默」的**：那一枚按钮悬在 Tab 右边半截、
-		// 矮一截（28 而不是 40）、又没有那枚 ▶——**没有一样会报错**，界面
-		// 只是「不像这一页的操作，也不像全局操作」。
-		//
-		// 而它是首页和每一页列表上**唯一的主色实心块**，用户第一眼先看它。
-		Category: Platform,
-		// 票 #288（UX 报告 C-04 + C-05）。
-		Spec: "「全部播放」那一枚贴在内容区右沿、尺寸 114×40、带一枚 18 的 ▶ 图标（上游 HeroUI `Button size=\"md\"` 的逐像素实测值）",
-		Tests: []string{
-			// 右沿 = 内容区右沿、尺寸 114×40（1200 与 900 两档窗口，深浅两套）。
-			"TestThePlayAllButtonSitsAtTheRightEdgeOfTheContentArea",
-			// 那一枚里有一枚 18 的 ▶ 图标，而且它在字的**前面**（上游的
-			// `startContent`）。
-			"TestThePlayAllButtonHasThePlayIcon",
 		},
 	},
 	{
@@ -4344,25 +4229,17 @@ var Items = []Item{
 			"TestDoubleClickingAnUpSubmissionKeepsThePlaylist",
 			"TestDoubleClickingASongOutsideTheQueueAppendsIt",
 			"TestEnqueueAndPlayNowKeepsTheOldSelectionOnFailure",
-			"TestThePlayNowEntryAppendsAndStartsThatSong",
-			"TestThePlayAllButtonReplacesQueueAndStartsAtItsFirstSong",
-			"TestThePlayAllButtonReplacesQueueOnBothPages",
 			"TestPlayAllReplacesTheQueueWithSearchResults",
 			"TestTheUpSpacePlayAllReplacesTheQueue",
 			"TestOtherBatchEntriesReplaceQueueAndStartFirst",
-			"TestTheFourRowQueueActions",
 			"TestLibraryPlayNowPreservesTheQueue",
-			"TestSingleSongCardsPreserveTheQueue",
 			"TestChoosingPlayNowHandsOverJustThatSong",
-			"TestBothPlayEntriesAreOnTheRowMenu",
 			// 应用层那三条：**替换队列**这条路的契约（换掉 + 从第一首 + 起播失败
 			// 把原队列换回去）。
 			"TestPlayFromSwapsTheQueueAndStartsAtTheFirst",
 			"TestPlayFromWithNothingToPlayLeavesTheQueueAlone",
 			"TestPlayFromKeepsTheQueueWhenTheFirstSongWillNotPlay",
 			// 新歌速递那两枚播放钮（这一票把它们从 Play 改成 PlayNow）。
-			"TestClickingANewMusicCardQueuesExactlyThatSong",
-			"TestClickingTheHoverPlayButtonQueuesExactlyThatSong",
 			// 两页的行菜单**共用一份**（这一票把「立即播放」那一档收进共用那份），
 			// 各自最后那一项（移除 / 删除）仍各归各的。
 			"TestBothLibraryPagesOfferTheirOwnLastMenuItem",
@@ -5071,10 +4948,8 @@ var Items = []Item{
 			"TestTheCoverLoadingFillIsVisibleOnALightPage",
 			"TestTheCoverLoadingCellShimmers",
 			"TestTheAuthorPaneSaysItIsLoading",
-			"TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing",
 			"TestTheCollectionHeaderDoesNotClaimZeroMedia",
 			"TestTheCollectionOwnerRowKeepsItsSlot",
-			"TestTheBoardHeroScrollsAwayWithTheList",
 			"TestTheShimmerFlagIsTheWindowsOwnFlag",
 			"TestAbsoluteURLMakesProtocolRelativeAddressesFetchable",
 			"TestProtocolRelativeAddressesAreNotPermanentFailures",

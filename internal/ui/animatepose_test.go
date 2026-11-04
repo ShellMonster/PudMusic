@@ -82,6 +82,11 @@ func TestTheLikeBackgroundGrowsWithoutRebuildingThePlaybar(t *testing.T) {
 	e.s.app.SetLike(true, func(error) {})
 	waitFrames(t, e.tt, "赞出去了", func() bool { return e.s.app.LikeState().Liked })
 
+	// 先把页面自己的进场动画走完（首页的 Tab 下划线进场是 240ms 的 `ui.Transition`，而
+	// Tester 的钟站着不动——不推钟它就停在第一帧，下面那 400ms 里每帧都在重建界面，
+	// 数到的是它而不是赞的那一圈）。
+	e.tt.Advance(time.Second)
+	e.tt.Frame()
 	// 状态落地那一帧是重建（状态变了），从这儿开始数。
 	e.s.builds = buildTally{}
 	e.tt.Advance(400 * time.Millisecond)

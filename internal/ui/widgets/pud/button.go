@@ -39,16 +39,22 @@ const (
 //
 //	if pud.Button(c, "play-all", pud.Primary, pud.Std, "播放全部", "play").Clicked() { … }
 func Button(c *ui.Context, key string, kind Kind, size Size, label, icon string) ui.Element {
-	return button(c, key, kind, size, label, icon, false)
+	return button(c, key, kind, size, label, "", icon, false)
+}
+
+// ButtonMono 是 Button 加上字后面一小段等宽字（原型 `继续播放「歌名」<span class="mono">0:37</span>`）：
+// 字和等宽那段之间隔 8（`.btn` 的 gap）。
+func ButtonMono(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string) ui.Element {
+	return button(c, key, kind, size, label, mono, icon, false)
 }
 
 // RoundButton 是圆形的那一档（原型 `.btn-round`：宽 = 高，只放一枚图标）。label 是
 // 无障碍名字。
 func RoundButton(c *ui.Context, key string, kind Kind, size Size, icon, label string) ui.Element {
-	return button(c, key, kind, size, label, icon, true)
+	return button(c, key, kind, size, label, "", icon, true)
 }
 
-func button(c *ui.Context, key string, kind Kind, size Size, label, icon string, round bool) ui.Element {
+func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string, round bool) ui.Element {
 	p := pal(c)
 	h, padX, fs := tok.BtnH, float32(20), float32(scale.Size14)
 	if size == Sm {
@@ -102,6 +108,9 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, icon string,
 		}
 		if !round {
 			ui.Text(c, label).FontSize(scale.Font(c, fs)).FontWeight(600).TextColor(fg).SingleLine()
+			if mono != "" {
+				typo.Mono(ui.Text(c, mono)).FontSize(scale.Font(c, fs)).FontWeight(600).TextColor(fg).SingleLine()
+			}
 		}
 	})
 	return b

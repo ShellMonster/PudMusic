@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
@@ -82,6 +83,20 @@ func Display(e ui.Element, size float32) ui.Element {
 	return e.Font(DisplayFamily).FontSize(size).FontWeight(700)
 }
 
+// DisplayNatural 是宋体（Noto Serif SC）一行字的自然高度和字号的比（实测 48 号 = 68.98，
+// 约 1.437）。框架的 `LineHeight` / `FixedLineHeight` 只能把行高**加大**，不能压到自然高度
+// 以下，而原型的大标题行高是 1.05–1.3（`.hero-title` 1.05、`.h-page` 1.15），所以大标题会比
+// 原型高出一截。用 `DisplayTrim` 算出上下各该缩回多少，调用方用负外边距补回去。
+const DisplayNatural = 1.437
+
+// DisplayTrim 是 size 号宋体要按行高 lh 排时，上下各该用负外边距缩回的像素。
+func DisplayTrim(size, lh float32) float32 {
+	if lh >= DisplayNatural {
+		return 0
+	}
+	return (DisplayNatural - lh) * size / 2
+}
+
 // Mono 给文字套上等宽字体（只用在 Eyebrow 小标、kbd 键帽、音质角标）。字号、字重
 // 由调用方定。
 func Mono(e ui.Element) ui.Element {
@@ -109,6 +124,6 @@ const (
 // 页头那一行的位置是按 11 排的）。
 func Eyebrow(c *ui.Context, text string) ui.Element {
 	return Mono(ui.Text(c, strings.ToUpper(text))).
-		FontSize(EyebrowSize).FontWeight(600).LetterSpacing(EyebrowTracking).
+		FontSize(EyebrowSize).FontWeight(600).LetterSpacing(EyebrowTracking).LineHeight(leading.Body).
 		TextColor(tok.Of(c.Theme()).Text3).SingleLine()
 }
