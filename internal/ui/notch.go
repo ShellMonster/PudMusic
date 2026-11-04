@@ -1,39 +1,29 @@
-// macOS 刘海窗：贴在屏幕刘海那一块的一条迷你播放条，指针探进刘海区就展开
-// 成一张播放卡，移开一会儿自己收回去。
+// macOS 刘海窗：住在屏幕刘海那一块的一个迷你播放器。
 //
-// # 做法从哪来
+// # 形状
 //
-// 参考 [boring.notch](https://github.com/TheBoredTeam/boring.notch)（GPL-3.0，
-// 只学思路不抄代码）：`NSPanel` 设 `nonactivatingPanel` + 窗级压过菜单栏 +
-// `canJoinAllSpaces|stationary|ignoresCycle|fullScreenAuxiliary`，悬停时把
-// 藏在刘海底下的窗拉大、填上播放卡。那一套几何（刘海宽 = 屏宽 - 左右辅助
-// 区、菜单栏高 = frame - visibleFrame）在 `notch_darwin.go`。
+// 窗本身**一直都在**（`Panel` + `Transparent` + `raiseAboveMenuBar`：窗级
+// 压过菜单栏、每个空间都在、全屏也贴着），收着的时候画的东西是「刘海宽 ×
+// 刘海高」那么一小块，展开是「更宽 × 更深」的一张播放卡——窗尺寸不动，
+// 动的是画出来的形状。
 //
-// # 和迷你播放器的关系
+// 「指针进了刘海那一块」不总能靠窗口自己的 hover 拿：指针贴着菜单栏上方
+// 那一条走时，它压根没进窗。所以挂一条 NSEvent 全局/本地监听（`notch_darwin.go`
+// 的 `watchPointer`），指针一动就 `poll()`；`poll` 再算「在不在触发区」、
+// 「窗要不要吃点击」。
 //
-// 它是**第三扇窗**，不和主窗/迷你窗互斥：它自己一条命，开着的时候不挡
-// 那两个的开合（主窗收去后台、迷你停在角落的时候，刘海都还在）。三扇窗
-// 各一个 `Shell`、共用同一个 `internal/app.App`——和迷你那一份一样的接法
-// （`adoptShared` 接主窗口的封面缓存 / 快捷键 / 搜索历史 / notice）。
+// ⚠️ **收起不是隐藏窗**：窗一藏就永远收不到指针事件（那个监听是全局的，
+// 但「指针在这儿」得有人去算，而窗藏着的时候没人叫它）——所以收着的时候
+// 窗还在、画的是刘海形状，点击**穿透**到桌面（`SetIgnoreMouseEvents(true)`，
+// 见 `poll` 里那一段）。
 //
-// # 收起不是隐藏，是「缩回刘海底下」
+// # 三态 + 一个引导
 //
-// 窗本身一直在（`level = NSMainMenuWindowLevel + 2`、`transparent`）：收起
-// 时只有 **刘海宽 × 2px** 高，贴在刘海下缘那一行，画一条正在播放的指示；
-// 展开时整扇窗变高、把播放卡铺出来。
-//
-// ⚠️ **不能把收起的窗整个 Hide**：藏起来的窗不再收鼠标事件，而「指针探进
-// 刘海区」恰恰要靠一个全局事件 tap 看见（`notch_darwin.go` 的
-// `notchStartPointerWatch`）——窗一藏，那个 tap 没东西可喂，刘海就成了死的。
-//
-// # 交互时序（照 boring.notch 的那几个数）
-//
-//	指针进触发区 → 350ms 内一直在 → 展开（`openNotch`）
-//	展开中指针离开 → 350ms 宽限内回来 → 不收；过宽限 → 收起（`closeNotch`）
-//
-// 轮询在主窗口那一侧跑（`notchTick`）：框架拿不到「没进窗的鼠标」，所以
-// 「指针在不在刘海区」这件事由一个 60ms 一跳的定时器去读 CGEvent tap 交
-// 上来的位置——`notch_darwin.go` 的 `notchTapHandle`。
+//   - `notchWings`：刘海的两翼。收起时展开成「刘海宽 + 两侧翅膀」：左翼封面、
+//     右翼频谱条——boring.notch 的 live-activity 那一档，一直在、不占桌面。
+//   - `notchExpanded`：指针探进触发区停够 300ms 后展开的播放卡。
+//   - `notchIdle`：没歌时展开成「未在播放 + 打开应用」。
+//   - `notchHello`：第一次放歌时的引导（「刘海里也能控制播放 + 开启」）。
 package ui
 
 import (
@@ -47,65 +37,87 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 刘海窗的两个高度：
-//
-//   - `notchCollapsedH`（收起）只有 2px：贴在刘海下缘画一条「正在放」的
-//     指示，还没挡到桌面就几乎看不见——而它**得在那儿**（上面文件头那
-//     段：藏起来就收不到鼠标）。
-//   - `notchOpenH`（展开）140px：比迷你播放器（84）高一点——刘海区宽，排
-//     得开一行控制；而它不是常驻桌面控件，高一点不碍事。
+// 刘海窗的窗尺寸（固定，不变）：展开卡宽 468 + 两侧余量，高 240（刘海高 ~38
+// + 展开深度 ~178 + 余量）。窗尺寸由 `pinToTop` 一次钉在屏顶正中，之后
+// 不再动——动的是画出来的形状。
 const (
-	notchCollapsedW = 220 // 收起时的宽（刘海宽约 200 + 一点点余量）
-	notchCollapsedH = 2
+	notchWinW = 468 + 60
+	notchWinH = 240
 
-	notchOpenW = 640
-	notchOpenH = 140
+	notchOpenW  = 468 // 展开卡的宽
+	notchIdleW  = 330 // 无歌时那张卡的宽
+	notchHelloW = 340 // 引导那条的宽
 
-	// notchHoverOpenDelay / notchHoverExitDelay 是开合的两个毫秒数（照
-	// boring.notch 的 minimumHoverDuration / hoverExitDelayMilliseconds）。
-	notchHoverOpenDelay = 300 * time.Millisecond
-	notchHoverExitDelay = 350 * time.Millisecond
-
-	// notchPollInterval 是主窗那个「指针在不在刘海」的轮询间隔。
-	notchPollInterval = 60 * time.Millisecond
+	notchHoverOpenDelay = 300 * time.Millisecond // 指针停够多久才展开
+	notchHoverExitDelay = 350 * time.Millisecond // 走开多久才收起
+	notchSlack          = 6                      // 触发区比形状宽的余量（points）
 )
 
 // notchState 是刘海窗的开合状态机。
 type notchState int
 
 const (
-	notchClosed notchState = iota // 收着：刘海底下那条细指示
+	notchClosed notchState = iota // 收着：刘海底下那一小块
 	notchOpen                     // 展开：播放卡铺出来
 )
 
-// notchShell 是刘海窗自己的外壳字段（挂在 `Shell` 上，见 shell.go 那一段）。
+// notchShell 是刘海窗自己的状态（挂在 `Shell` 上，见 shell.go 那一段）。
 //
-// 它和 `miniCurtain` 是同一路数：状态（开/收）、进出时间（算宽限）、
-// 以及那个 CGEvent tap 报上来的指针位置。
+// ⚠️ **它长在每一个外壳上**：主窗和刘海外壳各有一份，但只有刘海外壳那一份
+// 被真用（`watchPointer`/`poll` 读写的都是它）。
 type notchShell struct {
 	state notchState
 
-	// pointerIn 是「指针现在在刘海触发区里吗」——tap 那边写、主线程读。
-	pointerIn bool
-	// 进出时间：算「停够 300ms 没有」和「走开 350ms 没有」。
-	inAt, outAt time.Time
+	// open 是「指针现在在它上面」（比 state 更底层：进出事件先到这里，
+	// `poll` 再决定开不开）。
+	open bool
 
-	// lastPointer / pointerAt 是 tap 最近报的那个点、和「现在在算的那一个」
-	//（去抖：同一位置不重复算进出）。
-	lastPointer notchNSPoint
-	pointerAt   notchNSPoint
-	hasPointer  bool
+	// hello 是「正在引导」（第一次放歌时从刘海里长出来那句提示）。
+	hello bool
+
+	// passing 是「窗此刻吃点击吗」——不吃时点击穿透到桌面。
+	passing bool
+
+	// enteredAt / lastInside 是算「停够 300ms 没有」「走开 350ms 没有」
+	// 的两个时刻。
+	enteredAt  time.Time
+	lastInside time.Time
+
+	// watched / unwatch 是指针监听那一对。
+	watched bool
+	unwatch func()
+
+	// polling 是「下一帧 poll 排上了没有」——自适应轮询的去抖。
+	polling bool
+
+	// active 是「应用是前台吗」：应用失焦时刘海收进屏顶——那时指针在它
+	// 上面的事没人看见，轮询可以放缓。
+	active bool
+
+	// w0, h0 是刘海的宽和高（points）。real 是这块屏真有一个刘海。
+	w0, h0 float32
+	real   bool
+
+	// screenX, screenY 是窗在屏上的左上角（屏幕坐标）。
+	screenX, screenY float32
+
+	// winW, winH 是窗的 DIP 尺寸（= notchWinW/notchWinH，留在这是给测试替）。
+	winW, winH float32
+
+	// 频谱条：见 `viewNotchLevels`。
+	bars []float32
+
+	// playing 是上一帧看到的「在放没有」——拿它找「开始放了」那个边沿。
+	playing bool
 }
 
 // NewNotch 建刘海窗那个外壳。**状态和主窗口、迷你窗共用同一个 App**。
 //
-// ⚠️ **它归「收不掉的第三扇窗」那一档**：所以 `OnClosed` 走 `releaseNotch`
-// （不收应用、不停播放——理由同 `attachMiniWindow` 顶上那一段），而**不是**
+// ⚠️ **它归「收不掉的第三扇窗」那一档**：`OnClosed` 走 `releaseNotch`（不收
+// 应用、不停播放——理由同 `attachMiniWindow` 顶上那一段），而**不是**
 // `Shell.Close`（那一个会 `s.app.Close()` 把正在放的歌停掉）。
 func NewNotch(a *app.App, main *Shell) *Shell {
 	s := newShellWithImages(a, "")
-	// 刘海窗是面板（Panel 语义），点它不激活应用——和迷你窗同一个理由：
-	// 「有没有焦点」不能拿来判它看不看得见（presence.go 的 freeWhileBlurred）。
 	s.presence.update(func(p *windowPresence) { p.freeWhileBlurred = true })
 	if main != nil {
 		s.adoptShared(main)
@@ -117,14 +129,13 @@ func NewNotch(a *app.App, main *Shell) *Shell {
 // NotchWindowOptions 是刘海窗那一扇的样子。
 //
 // 和 `MiniWindowOptions` 一路：`Transparent`（自己画底）、`Panel`（点不激活）、
-// `Frameless`、`AlwaysOnTop`——**没有** `StateKey`（它永远贴屏顶居中，没有
-// 「上次拖到哪儿」可言），也没有 `MinWidth/MinHeight`（收合/展开的尺寸由
-// 代码改，不由用户拖）。
+// `Frameless`。**没有 `StateKey`**（位置永远钉在屏顶正中）、**没有
+// `MinWidth/MinHeight`**（尺寸由代码钉死）。
 func NotchWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 	return mygo.WindowOptions{
 		Title:             "布丁音乐刘海",
-		Width:             notchCollapsedW,
-		Height:            notchCollapsedH,
+		Width:             notchWinW,
+		Height:            notchWinH,
 		Transparent:       true,
 		AlwaysOnTop:       true,
 		SkipTaskbar:       true,
@@ -135,22 +146,21 @@ func NotchWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		DisableMaximize:   true,
 		DisableFullScreen: true,
 		DisableMove:       true,
+		DisableShadow:     true,
+		Hidden:            true, // 先不显示：setEnabled 那一步再 ShowInactive
 		Content:           ui.View(view),
 	}
 }
 
-// openNotchPlayer 开出刘海窗。给「进迷你」之外的第三个入口用：
-// 主窗的 navbar、托盘、快捷键都能叫它。
+// openNotchPlayer 开出刘海窗。
 //
-// ⚠️ **它不挡主窗/迷你窗**：和 `openMiniPlayer` 不同，这里**不**收主窗——
-// 刘海是第三扇窗，开着它不该把用户手上的那扇收走。
+// ⚠️ **它不挡主窗/迷你窗**：刘海是第三扇窗，开着它不该把用户手上的那扇收走。
 func (s *Shell) openNotchPlayer() {
 	if s.notch == nil {
 		s.newNotchShell()
 		s.ensureNotchWindow()
 		return
 	}
-	// 已经开着就叫到前面（它可能正收在刘海底下，看不见的等价于不在）。
 	if w := s.notch.win; w != nil && !w.IsDestroyed() {
 		w.ShowInactive()
 	}
@@ -158,8 +168,6 @@ func (s *Shell) openNotchPlayer() {
 
 // newNotchShell 建出刘海那个外壳并和主窗口接上（`s.notch` 指过去、反向指回来）。
 // **不建窗口**——建窗口要事件循环，那一半在 `ensureNotchWindow`。
-//
-// ⚠️ **已经有一个就原样还回去**：连按两下「刘海」会开出两个刘海窗。
 func (s *Shell) newNotchShell() *Shell {
 	if s.notch != nil {
 		return s.notch
@@ -171,14 +179,12 @@ func (s *Shell) newNotchShell() *Shell {
 	return n
 }
 
-// closeNotchPlayer 关掉刘海窗。**叫回主窗的事不在它身上**：刘海本来就是「主窗
-// 还开着的时候加的那一扇」，关了它主窗该在哪儿还在哪儿。
+// closeNotchPlayer 关掉刘海窗。
 func (s *Shell) closeNotchPlayer() {
 	s.dropNotch()
 }
 
-// dropNotch 关掉刘海窗，返回「刚才确实开着」。和 `dropMini` 一个形状：
-// 先摘 `s.notch` 的反向指针再关窗，免得 `OnClosed` 回头再找一遍。
+// dropNotch 关掉刘海窗，返回「刚才确实开着」。
 func (s *Shell) dropNotch() bool {
 	n := s.notch
 	if n == nil {
@@ -192,29 +198,28 @@ func (s *Shell) dropNotch() bool {
 	return true
 }
 
-// ensureNotchWindow 真的把刘海窗开出来。**只能在应用 ready 之后调**
-// （`mygo.NewWindow` 在还没 ready 时是直接 panic 的，和 `ensureMiniWindow`
-// 顶上那句同一理由）。
+// ensureNotchWindow 真的把刘海窗开出来。**只能在应用 ready 之后调**。
 func (s *Shell) ensureNotchWindow() {
 	n := s.notch
 	mygo.App.WhenReady(func() {
 		if n == nil || s.notch != n || n.win != nil {
 			return
 		}
+		// 先量刘海：决定「真有一个刘海还是只有菜单栏」和两翼的尺寸。
+		n.notchMeasure()
 		opts := NotchWindowOptions(n.View)
 		w := mygo.NewWindow(opts)
 		n.attachNotchWindow(w)
-		// 🔴 macOS 原生半层：窗级压过菜单栏、贴屏顶居中、起全局指针监听。
-		// 这三件都要 `NativeHandle()` 拿到的 NSWindow*，所以排在建窗之后。
+		// 🔴 macOS 原生半层：抬到菜单栏之上、贴屏顶居中。
 		notchConfigure(w)
-		notchStartWatch(n)
-		n.installNotchPoll()
+		// 设置开着就把它亮出来；关着就藏着（窗在、看不见）。
+		n.notchSetEnabled(n.notchEnabled())
+		n.watchNotch()
+		n.notchPoll()
 	})
 }
 
 // bindNotchWindow 登记这一扇窗的唤醒句柄（铁律三：逐窗口挨个叫醒）。
-//
-// ⚠️ **重复调是空操作**（同 `bindMiniWindow`）：建外壳一次、真窗建好又一次。
 func (s *Shell) bindNotchWindow() {
 	if s.wakeRemove != nil {
 		return
@@ -225,249 +230,536 @@ func (s *Shell) bindNotchWindow() {
 // attachNotchWindow 把刘海窗接到它的外壳上。
 //
 // ⚠️ **和 `Attach`/`attachMiniWindow` 一样不复用**：主窗那套 `OnClosed` 会
-// 停播放（整应用收尾），迷你那套会叫回主窗——刘海窗的关只收它自己那一摊。
+// 停播放，迷你那套会叫回主窗——刘海窗的关只收它自己那一摊。
 func (s *Shell) attachNotchWindow(w *mygo.Window) {
 	s.win = w
 	s.bindNotchWindow()
 	s.watchWindow(w)
+	// 刘海窗不让 ⌘W / Esc 真的关掉：关了就收不到指针事件了。想关掉走
+	// 菜单「显示/隐藏刘海」或设置开关。
+	w.OnClose(func(e *mygo.CloseEvent) {
+		if !s.quitting {
+			e.PreventDefault()
+		}
+	})
 	w.OnClosed(func() {
 		if s.win == w {
 			s.win = nil
 		}
-		// 摘掉 tap 和轮询（tap 回调拿着这一个外壳，不摘就一直喂）。
-		notchStopWatch()
-		s.stopNotchPoll()
+		s.unwatchNotch()
 		s.releaseNotch()
-		// 通知主窗「刘海没了」：下次再按「刘海」得重新开一扇。
 		if s.main != nil && s.main.notch == s {
 			s.main.notch = nil
 		}
 	})
+	// 显示器变了（插拔 / 旋转）：重新量刘海、重新钉位置。
+	mygo.Screen.OnDisplaysChanged(func() {
+		s.notchMeasure()
+		notchReposition(s.win)
+	})
+	// 应用前台/后台：失焦时刘海收进屏顶，指针监听可以放缓。
+	s.notchSt.active = mygo.App.IsActive()
+	mygo.App.OnDidBecomeActive(func() { s.notchSt.active = true; s.notchPoll() })
+	mygo.App.OnDidResignActive(func() { s.notchSt.active = false })
 }
 
 // releaseNotch 收掉刘海窗自己占着的（逐窗口那一摊），不收应用。
-// 和 `releaseMini` 一个形状：它不 `s.app.Close()`。
+func boolPtr(b bool) *bool { return &b }
+
 func (s *Shell) releaseNotch() {
 	s.closePerWindow()
 }
 
-// ---- 开合状态机 ----
+// ---- 设置 ----
 
-// notchOpenNow 展开刘海（收着 → 铺成播放卡）。
-func (s *Shell) notchOpenNow() {
-	if s.notchState() == notchOpen {
-		return
-	}
-	s.notchSt.state = notchOpen
-	s.notchApplySize()
-	s.wake.invalidate()
+// notchEnabled 报「刘海窗」那一格是开是关。
+func (s *Shell) notchEnabled() bool {
+	return s.app.SettingsSnapshot().NotchPlayerOn()
 }
 
-// notchCloseNow 收起刘海（铺着 → 缩回刘海底下那条）。
-func (s *Shell) notchCloseNow() {
-	if s.notchState() == notchClosed {
+// notchSetEnabled 把刘海窗亮出来或者藏起来。
+func (s *Shell) notchSetEnabled(on bool) {
+	if s.win == nil {
+		return // 测试里没有真窗
+	}
+	if on == s.win.IsVisible() {
+		s.wake.invalidate()
+		s.watchNotch()
 		return
 	}
-	s.notchSt.state = notchClosed
-	s.notchApplySize()
-	s.wake.invalidate()
+	if on {
+		s.win.ShowInactive()
+		notchReposition(s.win)
+		s.watchNotch()
+		s.notchPoll()
+		return
+	}
+	s.notchSt.open, s.notchSt.hello = false, false
+	s.win.Hide()
+	s.watchNotch()
 }
 
-func (s *Shell) notchState() notchState { return s.notchSt.state }
+// watchNotch 按「刘海亮着没有」挂上/摘掉指针监听——刘海关着的时候，
+// 指针动一下就把应用叫醒一次是白花钱。
+func (s *Shell) watchNotch() {
+	on := s.notchEnabled() || s.notchSt.hello
+	switch {
+	case on && s.notchSt.unwatch == nil:
+		notchStartWatch(s)
+	case !on && s.notchSt.unwatch != nil:
+		s.unwatchNotch()
+	}
+}
 
-// notchApplySize 把窗的尺寸和位置改成当前状态那一档。
+func (s *Shell) unwatchNotch() { notchStopWatch(s) }
+
+// notchMeasure 量菜单栏那块屏的刘海：宽、高、有没有真刘海。
+func (s *Shell) notchMeasure() {
+	n := &s.notchSt
+	n.w0, n.h0, n.real = 200, 32, false
+	if w, h, ok := notchSize(); ok {
+		n.w0, n.h0, n.real = float32(w), float32(h), true
+	} else if h := menuBarHeight(); h > 0 {
+		// 没有刘海的屏上，刘海那么高就当「贴着菜单栏」。
+		n.h0 = float32(h)
+	}
+	if n.winW == 0 {
+		n.winW, n.winH = notchWinW, notchWinH
+	}
+	// 屏幕坐标下窗的左上角。
+	d := mygo.Screen.PrimaryDisplay()
+	n.screenX = float32(d.Bounds.X) + (float32(d.Bounds.Width)-n.winW)/2
+	n.screenY = float32(d.Bounds.Y)
+	if s.win != nil {
+		s.wake.invalidate()
+	}
+}
+
+// ---- 目标尺寸 ----
+
+// notchTarget 报此刻刘海的形状该是多大（宽、高，points）。
+func (s *Shell) notchTarget() (w, h float32) {
+	n := &s.notchSt
+	st := s.app.Snapshot()
+	switch {
+	case n.open && !st.HasTrack:
+		return notchIdleW, n.h0 + 72
+	case n.open:
+		return notchOpenW, n.h0 + 178
+	case n.hello && st.HasTrack:
+		return notchHelloW, n.h0 + 58
+	case st.HasTrack && s.notchEnabled() && st.Playing:
+		// 两翼：刘海宽 + 两边各一只翅膀（封面 + 频谱），不挡菜单栏文字。
+		return n.w0 + 2*max(0, n.h0-12) + 20, n.h0
+	default:
+		return n.w0, n.h0
+	}
+}
+
+// ---- 指针轮询 ----
+
+// notchPoll 是「指针现在在不在刘海触发区」那一次判断。
 //
-// ⚠️ **改位置要跟着尺寸一起改**：窗是贴屏顶居中的——高度变了而 Y 不动的话，
-// 展开的那一扇是从刘海底下**往下长**（对），但收起时要重新回到屏顶那条 2px。
-func (s *Shell) notchApplySize() {
-	w := s.win
-	if w == nil || w.IsDestroyed() {
+// 它是**事件驱动**的：`watchPointer` 报一次动它就跑一遍，而`pollAgain`
+// 在「悬停中/展开中/应用活跃但监听没挂上」时再排一次——指针不动的时候
+// 这条 chain 自己就停了，不一直轮询白花钱。
+func (s *Shell) notchPoll() {
+	n := &s.notchSt
+	if !s.notchEnabled() && !n.hello {
 		return
 	}
-	if s.notchSt.state == notchOpen {
-		w.SetSize(notchOpenW, notchOpenH)
-	} else {
-		w.SetSize(notchCollapsedW, notchCollapsedH)
+	pt := mygo.Screen.CursorScreenPoint()
+	w, h := s.notchTarget()
+	x := n.screenX + (n.winW-w)/2
+	px, py := float32(pt.X), float32(pt.Y)
+	inside := px >= x-notchSlack && px <= x+w+notchSlack &&
+		py >= n.screenY-notchSlack && py <= n.screenY+h+notchSlack
+	if !n.real && !n.open && !n.hello {
+		// 没刘海的屏：指针贴到屏顶正中那一条才算进——不然用户把窗停在
+		// 屏幕上半段也被算成「在刘海上」。
+		cx := n.screenX + n.winW/2
+		inside = px >= cx-n.w0/2 && px <= cx+n.w0/2 && py <= n.screenY+1
 	}
-	notchReposition(w)
+	now := s.clock.Now()
+	changed := false
+	if inside {
+		if n.lastInside.IsZero() || now.Sub(n.lastInside) > 100*time.Millisecond {
+			n.enteredAt = now
+		}
+		n.lastInside = now
+		if !n.open && !n.hello && now.Sub(n.enteredAt) >= notchHoverOpenDelay {
+			n.open, changed = true, true
+		}
+	} else if n.open && now.Sub(n.lastInside) > notchHoverExitDelay {
+		n.open, changed = false, true
+	}
+
+	// 点击穿透：指针不在那块形状上的时候，窗把点击让给桌面。
+	pass := !inside
+	if pass != n.passing {
+		n.passing = pass
+		if s.win != nil {
+			s.win.SetIgnoreMouseEvents(pass)
+		}
+	}
+	if changed {
+		s.wake.invalidate()
+	}
+	s.notchPollAgain(inside)
 }
 
-// ---- 轮询：指针在不在刘海 ----
-
-// installNotchPoll 在主窗这一侧装一个 60ms 一跳的轮询：读 tap 报上来的位置，
-// 进触发区 → 300ms 后展开；离开 → 350ms 宽限后收起。
-//
-// ⚠️ **轮询挂在刘海那个外壳上**（不是主窗）：它叫醒的是刘海窗
-// （`s.wake.invalidate`）。主窗挂不挂它无所谓——它不画刘海。
-func (s *Shell) installNotchPoll() {
-	// tap 报上来的位置先进 `s.notchSt.lastPointer`（`notchStartWatch` 那边
-	// 用 `notchMu` 写），轮询再拿去算「在不在触发区」——两件事情分开：
-	// tap 那边只管报点，开/收的判断全在这条 60ms 一跳的轮询里。
-	s.notchPollStop = s.clock.EveryFunc(notchPollInterval, func() {
-		s.notchTick()
+// notchPollAgain 再排一次 poll：指针在里面或开着的时候 33ms 一跳
+// （跟上动画）；应用活跃或监听没挂上的时候 100ms；不然下一次指针动
+// 会自己再进来。
+func (s *Shell) notchPollAgain(inside bool) {
+	n := &s.notchSt
+	var d time.Duration
+	switch {
+	case inside || n.open:
+		d = 33 * time.Millisecond
+	case n.active || !n.watched:
+		d = 100 * time.Millisecond
+	}
+	if d == 0 || n.polling {
+		return
+	}
+	n.polling = true
+	s.clock.EveryFunc(d, func() {
+		n.polling = false
+		s.notchPoll()
 	})
 }
 
-func (s *Shell) stopNotchPoll() {
-	if s.notchPollStop != nil {
-		s.notchPollStop()
-		s.notchPollStop = nil
-	}
-}
+// ---- 引导（第一次放歌）----
 
-// notchTick 是 60ms 一跳的那次判断。**主线程调**（`s.clock.EveryFunc` 的
-// 回调就在主线程上跑，和 `viewNotch` 同一条）。
+// notchGreet 是「第一次放歌的时候，从刘海里长出来那句提示」。
 //
-// ⚠️ **它读的是这个外壳自己的 `notchSt`**：tap 报来的点由 `notchStartWatch`
-// 写进这个外壳（`attachNotchWindow` 里 `notchStartWatch(n)`）——和 tap 那边
-// 用 `notchMu` 守着，这边读的时候同一把锁拿一下。
-func (s *Shell) notchTick() {
-	s.notchMu.Lock()
-	p := s.notchSt.lastPointer
-	has := s.notchSt.hasPointer
-	in := s.notchSt.pointerIn
-	s.notchMu.Unlock()
-	if !has {
+// ⚠️ **默认不开**的用户才走这条：已经开着的不会再被问候一次
+// （`NotchPlayerGreeted` 记过一次）。
+func (s *Shell) notchGreet() {
+	n := &s.notchSt
+	if s.notchEnabled() || s.app.SettingsSnapshot().NotchPlayerGreeted {
 		return
 	}
-
-	if in {
-		// 指针在区里挪了：重算「停够没有」。
-		if !p.equals(s.notchSt.pointerAt) {
-			s.notchSt.pointerAt = p
-			s.notchSt.inAt = s.clock.Now()
-			return
-		}
-		if s.notchSt.state == notchClosed && s.clock.Now().Sub(s.notchSt.inAt) >= notchHoverOpenDelay {
-			s.notchOpenNow()
-		}
+	s.app.UpdateSettings(func(set *app.Settings) { set.NotchPlayerGreeted = true })
+	n.hello = true
+	if s.win == nil {
 		return
 	}
-	if s.notchSt.state == notchOpen {
-		if !p.equals(s.notchSt.pointerAt) {
-			s.notchSt.pointerAt = p
-			s.notchSt.outAt = s.clock.Now()
+	s.win.ShowInactive()
+	notchReposition(s.win)
+	s.watchNotch()
+	s.notchPoll()
+	// 7 秒里指针没在上面就自己收回去。
+	time.AfterFunc(7*time.Second, func() {
+		if !n.hello {
 			return
 		}
-		if s.clock.Now().Sub(s.notchSt.outAt) >= notchHoverExitDelay {
-			s.notchCloseNow()
+		if n.open || !n.passing {
+			// 指针在它上面：再等 2 秒（别在用户正看着的时候收走）。
+			time.AfterFunc(2*time.Second, func() { s.notchBye() })
+			return
 		}
-	}
+		s.notchBye()
+	})
 }
 
-func (p notchNSPoint) equals(q notchNSPoint) bool {
-	return p.X == q.X && p.Y == q.Y
+// notchBye 结束引导：刘海收回屏顶，关着的话整个藏掉。
+func (s *Shell) notchBye() {
+	n := &s.notchSt
+	n.hello = false
+	s.wake.invalidate()
+	if s.notchEnabled() {
+		return
+	}
+	n.open = false
+	n.passing = true
+	if s.win != nil {
+		s.win.SetIgnoreMouseEvents(true)
+	}
+	// 一秒钟之后再 Hide：让「收进去」那一下先画完。
+	time.AfterFunc(time.Second, func() {
+		if !n.hello && !s.notchEnabled() && s.win != nil {
+			s.win.Hide()
+			s.watchNotch()
+		}
+	})
+}
+
+// notchKeep 是引导上那个「开启」键：把开关拨到开。
+func (s *Shell) notchKeep() {
+	s.notchSt.hello = false
+	s.app.UpdateSettings(func(set *app.Settings) { set.NotchPlayer = boolPtr(true) })
+	s.notchSetEnabled(true)
+}
+
+// toggleNotchPlayer 开 / 关刘海窗。
+func (s *Shell) toggleNotchPlayer() {
+	if s.main != nil {
+		s.main.toggleNotchPlayer()
+		return
+	}
+	if s.notch != nil {
+		s.closeNotchPlayer()
+		return
+	}
+	s.openNotchPlayer()
 }
 
 // ---- 绘制 ----
 
-// viewNotch 是刘海窗那一帧。
-//
-// 🔴 铁律二：先装主题。收合时画一条「正在放」的细指示；展开时一张播放卡
-// （封面 + 歌名/歌手 + 播放/暂停 + 上/下一首 + 进度条）。
+// viewNotch 是刘海窗那一帧：一个贴着刘海长出来的黑色形状 + 里面的三态内容。
 func (s *Shell) viewNotch(c *ui.Context) {
 	s.applyFrameTheme(c)
 	s.images.BeginFrame(c.Now())
 	st := s.app.Snapshot()
-	t := c.Theme()
+	n := &s.notchSt
 
-	if s.notchSt.state == notchOpen {
-		s.viewNotchOpen(c, st, t)
-		return
+	c.Root().Background(ui.Transparent)
+
+	tw, th := s.notchTarget()
+	spring := ui.Animation{Spring: ui.SpringOptions{Duration: 520 * time.Millisecond, Bounce: 0.28}}
+	if !n.open {
+		spring.Spring.Bounce = 0.12
 	}
-	s.viewNotchCollapsed(c, st, t)
+	stage := ui.Box(c).Fill()
+	w := max(0, stage.AnimateTo("w", tw, spring))
+	h := max(0, stage.AnimateTo("h", th, spring))
+	opened := float32(0)
+	if n.open {
+		opened = 1
+	}
+	open := stage.AnimateTo("open", opened, spring)
+	hello := stage.AnimateTo("hello", b2f(n.hello), spring)
+	foot := 10 + 18*open
+	flare := 6 + 8*open
+	cx := n.winW / 2
+
+	stage.Draw(func(p *ui.Painter, r ui.Rect) {
+		if w < 1 || h < 1 {
+			return
+		}
+		path := notchShape(r.X+cx, w, h, flare, foot)
+		if open > 0.05 {
+			p.Shadow(ui.Rect{X: r.X + cx - w/2, Y: r.Y + h - 40, W: w, H: 40},
+				foot, 0, 14, 30, -6, ui.RGBA(0, 0, 0, 0.45*open))
+		}
+		p.FillPath(path, ui.RGB(0, 0, 0))
+	})
+	stage.Children(func() {
+		body := ui.Box(c).Absolute().Top(0).Left(cx-w/2).Size(w, h).
+			Radius(0, 0, foot, foot).Clip().TextColor(ui.RGB(255, 255, 255))
+		body.Children(func() {
+			if !st.HasTrack {
+				s.viewNotchIdle(c, open, (w-notchIdleW)/2)
+				return
+			}
+			// 两翼只在展开没盖掉它们的时候画。
+			s.viewNotchWings(c, st, 1-open)
+			s.viewNotchHello(c, hello*(1-open), (w-notchHelloW)/2)
+			if open > 0.02 {
+				s.viewNotchExpanded(c, st, open, (w-notchOpenW)/2)
+			}
+		})
+	})
 }
 
-// ---- 收合：刘海底下那条细指示 ----
+// notchShape 画「刘海变胖」的那个轮廓：上边两角向外张开（flare）接进
+// 刘海的圆角，下边是圆角（foot）。纯几何。
+func notchShape(cx, w, h, flare, foot float32) *ui.Path {
+	const k = 0.5523 // 四分之一圆的贝塞尔控制点
+	l, r := cx-w/2, cx+w/2
+	p := &ui.Path{}
+	p.MoveTo(l-flare, 0)
+	p.CubeTo(l-flare+flare*k, 0, l, flare-flare*k, l, flare)
+	p.LineTo(l, h-foot)
+	p.CubeTo(l, h-foot+foot*k, l+foot-foot*k, h, l+foot, h)
+	p.LineTo(r-foot, h)
+	p.CubeTo(r-foot+foot*k, h, r, h-foot+foot*k, r, h-foot)
+	p.LineTo(r, flare)
+	p.CubeTo(r, flare-flare*k, r+flare-flare*k, 0, r+flare, 0)
+	p.Close()
+	return p
+}
 
-// viewNotchCollapsed 是收着的那一帧：一条贴着刘海下缘的细条，正在放就亮
-// 主色、没在放就暗掉。
+func b2f(b bool) float32 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// viewNotchWings 是刘海的两翼：左封面、右频谱条。
 //
-// ⚠️ **它只有 2px 高**：不是「窗藏起来了」——窗还在（文件头那段：藏起来
-// 就收不到 tap 报的点），是它画的东西几乎看不见。
-func (s *Shell) viewNotchCollapsed(c *ui.Context, st app.State, t *ui.Theme) {
-	ui.Box(c).Key("notch-collapsed").FillWidth().FillHeight().Children(func() {
-		bar := ui.Box(c).Key("notch-bar").Grow(1).FillHeight()
-		if st.Playing {
-			bar.Background(t.Accent)
+// ⚠️ **只在收起的时候画**（`shown = 1-open`）：展开卡盖下来的时候两翼
+// 藏在它底下，画两遍是白画。
+func (s *Shell) viewNotchWings(c *ui.Context, st app.State, shown float32) {
+	if shown < 0.02 {
+		return
+	}
+	n := &s.notchSt
+	sz := n.h0 - 12
+	ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(n.h0).
+		PaddingX(7).AlignItems(ui.Center).Opacity(shown).
+		Children(func() {
+			cov := ui.Box(c).Size(sz, sz).Radius(sz * 0.28).Clip()
+			if st.CoverURL == "" {
+				cov.Background(ui.RGBA(255, 255, 255, 0.12))
+			}
+			cov.Children(func() {
+				imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, sz, sz)
+			})
+			ui.Spacer(c)
+			s.viewNotchLevels(c, st, 16, sz*0.7, 4)
+		})
+}
+
+// viewNotchLevels 画频谱条：取当前帧的频谱条高度画几根柱。
+//
+// 颜色是封面主色染白一点（和满屏播放器那一排条同色系的取法）。
+func (s *Shell) viewNotchLevels(c *ui.Context, st app.State, w, h float32, count int) {
+	ui.Box(c).Size(w, h).Draw(func(p *ui.Painter, r ui.Rect) {
+		bars := s.app.SpectrumBars(count, 0)
+		if len(s.notchSt.bars) < count {
+			s.notchSt.bars = make([]float32, count)
+		}
+		live := false
+		for i, v := range bars {
+			s.notchSt.bars[i] = v
+			if v > 0.01 {
+				live = true
+			}
+		}
+		barW := r.W / float32(count*2-1)
+		for i, v := range s.notchSt.bars {
+			if v <= 0.01 {
+				continue
+			}
+			bh := max(2, v*r.H)
+			x := r.X + float32(i*2)*barW
+			p.Fill(ui.Rect{X: x, Y: r.Y + r.H - bh, W: barW, H: bh},
+				ui.RGBA(255, 255, 255, 0.9), 1)
+		}
+		if live {
+			p.AnimationFrame()
 		}
 	})
 }
 
-// ---- 展开：一张播放卡 ----
-
-// viewNotchOpen 是展开的那一帧：圆角卡片，封面 + 歌名/歌手 + 控制 + 进度。
-//
-// ⚠️ **底是自己画的**：窗是透明的（`NotchWindowOptions.Transparent`），
-// 框架清成透明，这一块不透明底是它唯一的底——不画的话窗在桌面上是隐形的
-// （同 `MiniWindowOptions` 顶上那一条）。
-//
-// ⚠️ **只有下缘圆角**：刘海窗是从刘海底下**往下长**的，上缘贴着刘海的
-// 圆角矩形本身、不该再圆一次；下缘圆角才是它自己的边。
-func (s *Shell) viewNotchOpen(c *ui.Context, st app.State, t *ui.Theme) {
-	cardBG := s.coverWash(t, t.Surface)
-
-	ui.Box(c).Key("notch-open").FillWidth().FillHeight().
-		Radius(t.Radius).Background(cardBG).Clip().
-		Children(func() {
-			ui.Row(c).Key("notch").Fill().Padding(space.Px12, space.Px12, space.Px12, space.Px12).
-				Gap(space.Px12).AlignItems(ui.Center).
-				Children(func() {
-					// 封面：56×56，圆角跟着主题。
-					ui.Box(c).Key("notch-cover").Width(56).Height(56).
-						Radius(t.Radius).Clip().
-						Children(func() {
-							if st.CoverURL == "" {
-								return
-							}
-							imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, 56, 56)
-						})
-					// 中列：歌名 / 歌手 / 进度条。
-					ui.Column(c).Key("notch-mid").Grow(1).FillHeight().
-						Gap(space.Px2).
-						Children(func() {
-							ui.Row(c).Key("notch-title-row").FillWidth().Gap(space.Px8).AlignItems(ui.Center).
-								Children(func() {
-									title := st.Title
-									if title == "" {
-										title = "未在播放"
-									}
-									ui.Text(c, title).Key("notch-title").
-										FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text).MaxLines(1).Ellipsis("…")
-									if st.Artist != "" {
-										ui.Text(c, st.Artist).Key("notch-artist").
-											FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-									}
-								})
-							ui.Box(c).Key("notch-progress").FillWidth().Padding(0, 0, 0, 0).
-								Children(func() { s.viewNotchProgress(c, st) })
-						})
-					// 控制键：上一首 / 播放 / 下一首。
-					ui.Row(c).Key("notch-transport").Gap(space.Px6).AlignItems(ui.Center).
-						Children(func() {
-							if flatIconButton(c, iconPrev, "上一首", 18).
-								Key("notch-prev").Size(28, 28).Padding(space.None, space.Px5).
-								Disabled(!s.app.CanPrev()).Clicked() {
-								s.app.Prev()
-							}
-							s.viewNotchPlay(c, st)
-							if flatIconButton(c, iconNext, "下一首", 18).
-								Key("notch-next").Size(28, 28).Padding(space.None, space.Px5).
-								Disabled(!s.app.CanNext()).Clicked() {
-								s.app.Next()
-							}
-						})
-				})
+// viewNotchHello 是引导那条：「刘海里也能控制播放 / 指针停在这里」+「开启」。
+func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
+	if shown < 0.02 {
+		return
+	}
+	n := &s.notchSt
+	row := ui.Row(c).Absolute().Top(n.h0+2).Left(left).Width(notchHelloW).
+		Padding(6, 14, 14, 20).Gap(12).AlignItems(ui.Center).
+		Opacity(max(0, shown*1.4-0.4))
+	row.Translate(0, (1-shown)*-8)
+	row.Children(func() {
+		title, hint := "刘海里也能控制播放", "指针停在这里，即可暂停、切歌"
+		if !n.real {
+			title, hint = "屏幕顶部也能控制播放", "指针移到顶部中央，即可暂停、切歌"
+		}
+		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).SingleLine()
+			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size12)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
 		})
+		b := ui.ButtonBase(c.Key("notch-keep")).Padding(6, 14).Radius(999).
+			Background(c.Theme().Accent).FocusRing(false).Label("开启刘海播放器")
+		b.Children(func() {
+			ui.Text(c, "开启").FontSize(scale.Font(c, scale.Size13)).FontWeight(600)
+		})
+		if b.Clicked() {
+			s.notchKeep()
+		}
+	})
 }
 
-// viewNotchPlay 是刘海窗上那一枚播放/暂停键。
-//
-// ⚠️ **画的是实心圆**（`transportIcon` 是 play-circle-fill）：它是这一行
-// 的视觉重心，和迷你窗上那一枚同一个安排（`viewMiniPlay`）。
+// viewNotchIdle 是「没歌」那张卡：「未在播放」+「打开」。
+func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
+	if open < 0.02 {
+		return
+	}
+	n := &s.notchSt
+	ui.Row(c).Absolute().Top(n.h0+4).Left(left).Width(notchIdleW).
+		Padding(10, 20, 14, 20).Gap(12).AlignItems(ui.Center).
+		Opacity(max(0, open*1.4-0.4)).Children(func() {
+		ui.Box(c).Size(36, 36).Radius(10).Background(c.Theme().Accent).Center().Children(func() {
+			ui.Icon(c, icon(iconPlay)).Size(18, 18).TextColor(ui.RGB(255, 255, 255))
+		})
+		ui.Column(c).Grow(1).Gap(2).Children(func() {
+			ui.Text(c, appName).FontSize(scale.Font(c, scale.Size14)).FontWeight(700)
+			ui.Text(c, "未在播放").FontSize(scale.Font(c, scale.Size12)).TextColor(ui.RGBA(255, 255, 255, 0.5))
+		})
+		b := ui.ButtonBase(c.Key("notch-open")).Padding(6, 14).Radius(999).
+			Background(ui.RGBA(255, 255, 255, 0.14)).FocusRing(false).Label("打开")
+		b.Children(func() {
+			ui.Text(c, "打开").FontSize(scale.Font(c, scale.Size13)).FontWeight(600)
+		})
+		if b.Clicked() {
+			s.restoreMainWindow()
+		}
+	})
+}
+
+// viewNotchExpanded 是展开的那张播放卡：封面 + 歌名/歌手 + 频谱 + 进度 + 控制。
+func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float32) {
+	n := &s.notchSt
+	col := ui.Column(c).Absolute().Top(n.h0+6).Left(left).Width(notchOpenW).
+		Padding(8, 22, 16, 22).Gap(12).
+		Opacity(max(0, open*1.4-0.4))
+	col.Translate(0, (1-open)*-10)
+	col.Children(func() {
+		// 上行：封面 + 歌名/歌手 + 频谱。
+		ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
+			cov := ui.Box(c).Size(60, 60).Radius(12).Clip()
+			if st.CoverURL == "" {
+				cov.Background(ui.RGBA(255, 255, 255, 0.12))
+			}
+			cov.Children(func() {
+				imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, 60, 60)
+			})
+			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
+				ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size15)).FontWeight(700).SingleLine()
+				if st.Loading {
+					ui.Text(c, "正在缓冲…").FontSize(scale.Font(c, scale.Size13)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
+				} else if st.Artist != "" {
+					ui.Text(c, st.Artist).FontSize(scale.Font(c, scale.Size13)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
+				}
+			})
+			s.viewNotchLevels(c, st, 26, 22, 5)
+		})
+		// 中行：进度。
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size11)).
+				FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.5)).Width(30)
+			s.viewNotchProgress(c, st)
+			ui.Text(c, "-"+clockOrDash(st.Duration-st.Position)).FontSize(scale.Font(c, scale.Size11)).
+				FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.5)).Width(34).TextAlign(ui.End)
+		})
+		// 下行：控制键。
+		ui.Box(c).Margin(-6, 0, 0, 0).Children(func() {
+			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+				if flatIconButton(c, iconPrev, "上一首", 18).
+					Key("notch-prev").Size(28, 28).Padding(space.None, space.Px5).
+					Disabled(!s.app.CanPrev()).Clicked() {
+					s.app.Prev()
+				}
+				s.viewNotchPlay(c, st)
+				if flatIconButton(c, iconNext, "下一首", 18).
+					Key("notch-next").Size(28, 28).Padding(space.None, space.Px5).
+					Disabled(!s.app.CanNext()).Clicked() {
+					s.app.Next()
+				}
+			})
+		})
+	})
+}
+
+// viewNotchPlay 是展开卡上那一枚播放/暂停键。
 func (s *Shell) viewNotchPlay(c *ui.Context, st app.State) {
 	const style = 36
-
 	if st.Playing {
 		b := flatIconButton(c, transportIcon(true), transportLabel(true), 28).
 			Key("notch-play").Size(style, style).Padding(space.None, space.Px4)
@@ -486,13 +778,7 @@ func (s *Shell) viewNotchPlay(c *ui.Context, st app.State) {
 	}
 }
 
-// viewNotchProgress 是刘海窗的进度条。
-//
-// ⚠️ **它和迷你那条是一份**（`miniScrub`/`miniHeld`）：三扇窗各画各的进度条，
-// 但「值归谁」是同一个约定——按住的时候值归用户、松手才 seek
-// （`viewMiniProgress` 顶上那句同一理由）。所以这里**不改**那一对字段：
-// 刘海窗和迷你窗不会同时开——它和迷你互斥这件事由调用方管（现在没有「同
-// 时开」的入口，见 `openNotchPlayer` 顶上那句）。
+// viewNotchProgress 是刘海窗的进度条（和迷你那条同一份 scrub 状态）。
 func (s *Shell) viewNotchProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 	sl := ui.Slider(c.Key("notch-progress"), &s.miniScrub, 0, 1).Grow(1).
@@ -508,20 +794,4 @@ func (s *Shell) viewNotchProgress(c *ui.Context, st app.State) {
 	case !s.miniHeld && known:
 		s.miniScrub = float64(st.Position) / float64(st.Duration)
 	}
-}
-
-// toggleNotchPlayer 开 / 关刘海窗。
-//
-// ⚠️ **刘海窗那一侧要绕回主窗口**（同 `toggleMiniPlayer` 那一段理由）：
-// 小窗那边的 `s.notch` 是 nil，照走会把刘海建在迷你外壳上——开出两扇。
-func (s *Shell) toggleNotchPlayer() {
-	if s.main != nil {
-		s.main.toggleNotchPlayer()
-		return
-	}
-	if s.notch != nil {
-		s.closeNotchPlayer()
-		return
-	}
-	s.openNotchPlayer()
 }

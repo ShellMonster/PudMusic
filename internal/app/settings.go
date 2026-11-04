@@ -394,6 +394,10 @@ type Settings struct {
 	// 得开——默认是开。
 	NotchPlayer *bool `json:"notchPlayer"`
 
+	// NotchPlayerGreeted 记「刘海窗已经问候过一次」：它默认关着的用户
+	// 第一次放歌时会从刘海里长出来一句引导，只长一次。
+	NotchPlayerGreeted bool `json:"notchPlayerGreeted"`
+
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
 

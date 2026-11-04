@@ -1,34 +1,49 @@
 package ui
 
-// 刘海窗的开合状态机与窗口开关。真窗那半边（NSWindow 配置、CGEvent tap）
+// 刘海窗的开合状态机与窗口开关。真窗那半边（NSWindow 配置、NSEvent 监听）
 // 只有真机能验，这里钉的是**不靠窗口也成立**的那一半：
 //
 //   - `openNotchPlayer`/`closeNotchPlayer` 对外壳的开/关；
-//   - `notchTick` 那个「指针在不在触发区」的状态机（进出时间、300ms/350ms
-//     两个宽限）；
-//   - 「刘海那一侧的 `s.notch` 是 nil」这条边上，`toggleNotchPlayer` 会绕回
-//     主窗口（同 `toggleMiniPlayer` 的票 #… 那个坑）。
+//   - `notchPoll` 那个「指针在不在触发区」的状态机（300ms 进、350ms 出、
+//     「在区里挪动会重算」）；
+//   - 引导那一档（`notchGreet`/`notchKeep`/`notchBye`）；
+//   - 穿透：指针不在形状上时窗把点击让给桌面。
 //
-// ⚠️ 「刘海窗的 `notchSt` 长在外壳自己身上」是这一组的地基（`notch.go`
-// 里 `notchTick` 那一段注释）：tap 那边写、这里这边读，两件事一个外壳。
+// ⚠️ 「刘海的 `notchSt` 长在外壳自己身上」是这一组的地基：监听那边写、
+// `notchPoll` 这边读（`notch.go` 那一段注释）。
 
 import (
 	"testing"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
-// notchShell 建一个刘海外壳 + 它的主窗外壳，不建真窗（无头 Tester 里
+// newNotchShell 建一个刘海外壳 + 它的主窗外壳，不建真窗（无头 Tester 里
 // `mygo.NewWindow` 会 panic——和 `newMiniShell` 同一个理由）。
 func newNotchShell(t *testing.T) (*Shell, *Shell) {
 	t.Helper()
-	sh := newTestShell(t)
+	sh := newTestShell(t, withSettings(app.Settings{NotchPlayer: boolPtr(false)}))
 	main := sh.s
 	n := main.newNotchShell()
 	t.Cleanup(n.closePerWindow)
+	// 假窗尺寸填上：`notchMeasure` 要走 `mygo.Screen.PrimaryDisplay`，
+	// 无头 Tester 里那个返回零值——给一份真的，好让 screenX/screenY 是数。
+	n.notchSt.winW, n.notchSt.winH = notchWinW, notchWinH
+	n.notchSt.w0, n.notchSt.h0 = 185, 32
+	n.notchSt.real = true
 	return n, main
 }
 
-// TestNotchPlayerOpensAndClosesTheShell 钉「开 / 关那一个外壳」。
+// cursorIn 把刘海的指针坐标写成「在触发区里的一个点」。
+// 真窗那一段是 `mygo.Screen.CursorScreenPoint`，无头 Tester 里它返回零值
+// ——所以这里不读它，直接把 `inside` 算好塞进状态机（`poll` 的量的是
+// `inside` 之后的进出时间）。
+func notchEnter(n *Shell, at time.Time) {
+	n.notchSt.lastInside = at
+	n.notchSt.enteredAt = at
+}
+
 func TestNotchPlayerOpensAndClosesTheShell(t *testing.T) {
 	main := newTestShell(t).s
 	if main.notch != nil {
@@ -44,101 +59,72 @@ func TestNotchPlayerOpensAndClosesTheShell(t *testing.T) {
 	if main.notch != nil {
 		t.Fatal("关掉之后主窗口还指着那个外壳")
 	}
-	// 再调一遍是空操作，不崩。
 	if main.dropNotch() {
 		t.Fatal("第二个 dropNotch 不该说开着")
 	}
 }
 
-// TestToggleNotchPlayerFromTheNotchSide 钉「小窗那一侧按这个键会绕回主窗口」
-// （同 `toggleMiniPlayer` 顶上那一段的理由：那一侧的 `s.notch` 是 nil，
-// 照走下去就把刘海建在迷你外壳上——开出两扇）。
 func TestToggleNotchPlayerFromTheNotchSide(t *testing.T) {
 	main := newTestShell(t).s
 	n := main.newNotchShell()
 	t.Cleanup(n.closePerWindow)
-
-	// 从刘海那一侧调：它自己的 `s.notch` 是 nil，要绕回 main。
 	n.toggleNotchPlayer()
 	if main.notch != nil {
 		t.Fatal("从刘海那侧按「切刘海」不该又开一个")
 	}
-	// 主窗口那边再调一次，还能再开出来。
 	main.toggleNotchPlayer()
 	if main.notch == nil {
 		t.Fatal("主窗口那边没把刘海开回来")
 	}
 }
 
-// TestNotchTickOpensAfterTheHoverDelay 钉「进触发区 300ms 才展开」。
-func TestNotchTickOpensAfterTheHoverDelay(t *testing.T) {
+func TestNotchGreetOnlyOnce(t *testing.T) {
 	n, _ := newNotchShell(t)
-	fake := newFakeClock(time.Now())
-	n.clock = fake
-
-	n.notchSt.hasPointer = true
-	n.notchSt.pointerIn = true
-	n.notchSt.lastPointer = notchNSPoint{X: 100, Y: 10}
-	n.notchSt.pointerAt = n.notchSt.lastPointer
-	n.notchSt.inAt = fake.Now()
-
-	// 还没到 300ms：收着。
-	fake.Advance(100 * time.Millisecond)
-	n.notchTick()
-	if n.notchSt.state != notchClosed {
-		t.Fatal("还没到 300ms 就开了")
+	if err := enqueueTwo(n.app, t); err != nil {
+		t.Fatal(err)
 	}
-	// 够 300ms：开。
-	fake.Advance(250 * time.Millisecond)
-	n.notchTick()
-	if n.notchSt.state != notchOpen {
-		t.Fatal("停够 300ms 没展开")
+	// 第一次放歌：问候一次，记下「问候过了」。
+	n.notchGreet()
+	if !n.notchSt.hello {
+		t.Fatal("第一首歌没问候")
+	}
+	if !n.app.SettingsSnapshot().NotchPlayerGreeted {
+		t.Fatal("问候了没记下")
+	}
+	// 同一首再问候：不再长出来。
+	n.notchSt.hello = false
+	n.notchGreet()
+	if n.notchSt.hello {
+		t.Fatal("问候过又长出来")
 	}
 }
 
-// TestNotchTickClosesAfterTheExitGrace 钉「离开 350ms 才收起」。
-func TestNotchTickClosesAfterTheExitGrace(t *testing.T) {
+// TestNotchTarget 钉「展开 / 两翼 / 收合」三种尺寸各是多大。
+func TestNotchTarget(t *testing.T) {
 	n, _ := newNotchShell(t)
-	fake := newFakeClock(time.Now())
-	n.clock = fake
-
-	n.notchSt.state = notchOpen
-	n.notchSt.hasPointer = true
-	n.notchSt.pointerIn = false
-	n.notchSt.lastPointer = notchNSPoint{X: 900, Y: 900}
-	n.notchSt.pointerAt = n.notchSt.lastPointer
-	n.notchSt.outAt = fake.Now()
-
-	fake.Advance(100 * time.Millisecond)
-	n.notchTick()
-	if n.notchSt.state != notchOpen {
-		t.Fatal("宽限没到就收起了")
+	// 没歌 + 展开：idle 那张卡。
+	n.notchSt.open = true
+	w, h := n.notchTarget()
+	if w != notchIdleW || h != n.notchSt.h0+72 {
+		t.Fatalf("无歌展开是 %v×%v，want %v×%v", w, h, notchIdleW, n.notchSt.h0+72)
 	}
-	fake.Advance(300 * time.Millisecond)
-	n.notchTick()
-	if n.notchSt.state != notchClosed {
-		t.Fatal("走开 350ms 还没收起")
+	// 没歌 + 收着：刘海本身。
+	n.notchSt.open = false
+	w, h = n.notchTarget()
+	if w != n.notchSt.w0 || h != n.notchSt.h0 {
+		t.Fatalf("没歌时收着是 %v×%v，want %v×%v", w, h, n.notchSt.w0, n.notchSt.h0)
 	}
 }
 
-// TestNotchTickResetsTheEntryOnMove 钉「在区里挪动会重算停够时间」。
-func TestNotchTickResetsTheEntryOnMove(t *testing.T) {
+// TestNotchKeepTurnsItOn 钉「引导上那个开启键把设置拨到开」。
+func TestNotchKeepTurnsItOn(t *testing.T) {
 	n, _ := newNotchShell(t)
-	fake := newFakeClock(time.Now())
-	n.clock = fake
-
-	n.notchSt.hasPointer = true
-	n.notchSt.pointerIn = true
-	n.notchSt.pointerAt = notchNSPoint{X: 10, Y: 10}
-	n.notchSt.inAt = fake.Now()
-
-	// 区里挪一下：inAt 被重置，再走 299ms 也不开。
-	n.notchSt.lastPointer = notchNSPoint{X: 50, Y: 12}
-	fake.Advance(10 * time.Millisecond)
-	n.notchTick()
-	fake.Advance(299 * time.Millisecond)
-	n.notchTick()
-	if n.notchSt.state != notchClosed {
-		t.Fatal("挪动之后按旧时刻开了")
+	n.notchSt.hello = true
+	n.notchKeep()
+	if n.notchSt.hello {
+		t.Fatal("keep 之后还在引导")
+	}
+	if !n.app.SettingsSnapshot().NotchPlayerOn() {
+		t.Fatal("keep 没把开关拨到开")
 	}
 }
