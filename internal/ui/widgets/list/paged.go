@@ -375,6 +375,9 @@ func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
 // SetPudRows 见 `List.SetPudRows`。
 func (p *PagedList) SetPudRows(on bool) { p.surf.List().SetPudRows(on) }
 
+// SetVideoCards 把网格那一档的格子画成原型的视频卡（UP 空间「投稿」，4 / 3 / 1 列）。
+func (p *PagedList) SetVideoCards(on bool) { p.surf.SetVideoCards(on) }
+
 // SetInsetX 见 `List.SetInsetX`。
 func (p *PagedList) SetInsetX(x float32) { p.surf.SetInsetX(x) }
 

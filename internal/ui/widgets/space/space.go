@@ -131,7 +131,7 @@ const (
 	Px90 = 90
 
 	// PageHorizontalLegacy 是改版前七页共用的页边距 16（`internal/ui` 的
-	// `pagePadX`）。T1–T7 重做页面时换成 `PageHorizontal(内容区宽)`。
+	// `pagePadX`）。新页面用 `PageHorizontalForWindow(窗口宽)`。
 	PageHorizontalLegacy = Px16
 	// PageVertical 是内容区上下内边距：0 像素
 	//（DESIGN.md `spacing.page_vertical`；上游没有 py）。
@@ -155,23 +155,18 @@ const (
 	SectionHeadGap = Px20
 	// PageBottom 是页面底部留白：64。
 	PageBottom = Px64
-	// GridGap 是卡片网格的格间距：24（内容区 < 760 时 16，见 `GridGapFor`）。
+	// GridGap 是卡片网格的格间距：24（窗口宽 ≤ 760 时 16，见 `GridGapForWindow`）。
 	GridGap = Px24
 	// PageTop 是页面顶部留白：8（原型 `.page { padding: 8px 40px 64px }`）。
 	PageTop = Px8
 )
 
-// 页边距随内容区宽度的三档（原型 `.page` 的 40 和两条媒体查询）。
-const (
-	// WideContent 及以上用 40。
-	WideContent = 1180
-	// MediumContent 及以上用 32；再窄用 16。
-	MediumContent = 760
-)
+// PageMaxW 是原型 `.page { max-width: 1280px }`：页面（含左右内边距）最宽 1280，窗口更宽时居中。
+const PageMaxW = 1280
 
-// PageHorizontalForWindow 是原型页面左右留白，按**窗口宽**（不是内容区宽）分档：> 1024 是 40，
+// PageHorizontalForWindow 是原型页面左右留白，按**窗口宽**（视口，不是内容区宽）分档：> 1024 是 40，
 // > 760 是 32，再窄 16（`.page` 的 padding-inline 和两个 `max-width` 媒体查询，index.html 262、
-// 934、949 行）。`PageHorizontal` 是按内容区宽的近似；要和原型 1:1 的页面用这一个。
+// 934、949 行）。
 func PageHorizontalForWindow(winW float32) float32 {
 	switch {
 	case winW > 1024:
@@ -190,24 +185,9 @@ func PageBottomForWindow(winW float32) float32 {
 	return PageBottom
 }
 
-// PageHorizontal 是内容区宽 contentW 时页面左右的内边距：≥1180 为 40，≥760 为 32，
-// 否则 16。contentW 是**内容区**（侧栏右边那一整块）的宽，不是窗口宽。
-//
-//	pad := space.PageHorizontal(s.contentW)
-//	ui.Column(c).Padding(space.PageTop, pad, space.PageBottom, pad)
-func PageHorizontal(contentW float32) float32 {
-	switch {
-	case contentW >= WideContent:
-		return Px40
-	case contentW >= MediumContent:
-		return Px32
-	}
-	return Px16
-}
-
-// GridGapFor 是卡片网格在这一宽度下的格间距：< 760 时 16，否则 24。
-func GridGapFor(contentW float32) float32 {
-	if contentW > 0 && contentW < MediumContent {
+// GridGapForWindow 是卡片网格在窗口宽 winW 时的格间距：≤ 760 时 16（`.card-grid` 的 `--od-gap`），否则 24。
+func GridGapForWindow(winW float32) float32 {
+	if winW > 0 && winW <= 760 {
 		return Px16
 	}
 	return GridGap

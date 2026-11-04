@@ -223,12 +223,14 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 			"关注的 UP 主最近分享了什么。", "动态", dynamicFeedPath)
 		return
 	}
-	ui.Column(c).Key("page:"+dynamicFeedPath).Grow(1).FillHeight().
-		Padding(space.None, space.PageHorizontalForWindow(w)).Children(func() {
-		pud.PageHead(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", w, nil)
-		s.viewFeedFilter(c, f)
-		ui.Column(c).Key("feed-items").Grow(1).FillHeight().Children(func() {
-			s.viewFeedItems(c, f)
+	ui.Column(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).FillHeight().Width(s.pageBodyW(c)).
+			Padding(space.PageTop, space.PageHorizontalForWindow(w), space.None, space.PageHorizontalForWindow(w)).Children(func() {
+			pud.PageHead(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", w, nil)
+			s.viewFeedFilter(c, f)
+			ui.Column(c).Key("feed-items").Grow(1).FillHeight().Children(func() {
+				s.viewFeedItems(c, f)
+			})
 		})
 	})
 }

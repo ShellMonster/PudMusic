@@ -30,7 +30,7 @@ const (
 	// 「从首页点到本地音乐，内容区左右各退 4 像素」这件事在界面上看不出来，
 	// 只有逐页量才量得出来。
 	//
-	// 2026-11：新页面用 `space.PageHorizontal(内容区宽)`（40 / 32 / 16 三档）；
+	// 2026-11：新页面用 `space.PageHorizontalForWindow(窗口宽)`（40 / 32 / 16 三档）；
 	// 这一个数留给还没改版的页面。
 	pagePadX = space.PageHorizontalLegacy
 

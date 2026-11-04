@@ -27,6 +27,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -239,6 +240,12 @@ type Grid struct {
 	// insetX 是网格左右的内边距（页边距）；页内头部用负外边距抵回去。见 `SetInsetX`。
 	insetX float32
 
+	// video 是「格子画成原型的视频卡」（`.vgrid` + `.vcard`）：4 / 3 / 1 列、格间距 24、16:9 缩略图。
+	// 见 `SetVideoCards`。
+	video bool
+	// winW 是这一帧的窗口宽（视频卡网格的断点按窗口宽，不按容器宽）。
+	winW float32
+
 	// scroll 是这个网格把滚动位置写回来的那个句柄，为 nil 时不写。理由同
 	// `List.scroll`：MyGo 的列表不往外说自己滚到哪儿了（回顶按钮和三重保障都要它）。
 	scroll *ui.ScrollState
@@ -388,6 +395,34 @@ func (g *Grid) SetLead(lead *Lead) { g.lead = lead }
 // SetInsetX 见 `List.SetInsetX`。
 func (g *Grid) SetInsetX(x float32) { g.insetX = x }
 
+// SetVideoCards 把格子换成原型的视频卡（`pud.VideoCard`，UP 空间「投稿」那一档）：列数按**窗口宽**
+// 分 4 / 3 / 1 列（`pud.VideoGridCols`，原型 `.vgrid`），格间距 24。传 false 退回歌卡网格。
+func (g *Grid) SetVideoCards(on bool) { g.video = on }
+
+// gridColsAt 是容器宽 w、窗口宽 winW 时排几列：视频卡按窗口宽，歌卡按容器宽。
+func (g *Grid) gridColsAt(w, winW float32) int {
+	if g.video {
+		return pud.VideoGridCols(winW)
+	}
+	return columnsFor(w)
+}
+
+// gap 是格间距：视频卡 24（`.vgrid { --od-gap: 24px }`），歌卡 16。
+func (g *Grid) gap() float32 {
+	if g.video {
+		return space.Px24
+	}
+	return gridGap
+}
+
+// cellW 是排 cols 列时一格的宽，缝按 `gap`。
+func (g *Grid) cellW(w float32, cols int) float32 {
+	if w <= 0 || cols <= 1 {
+		return w
+	}
+	return (w - float32(cols-1)*g.gap()) / float32(cols)
+}
+
 // SetScroll 让这个网格把滚动位置写进 s（每帧写一次）。理由见那个字段的注释。
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
@@ -520,7 +555,8 @@ func (g *Grid) View(c *ui.Context) {
 		w, _ = c.Size()
 	}
 
-	cols := columnsFor(w)
+	g.winW, _ = c.Size()
+	cols := g.gridColsAt(w, g.winW)
 	// ⚠️ 必须在换掉 g.cols **之前**算锚点：keepAnchor 那一段里的行号是用 g.cols
 	// （旧的列数）换算的。
 	g.keepAnchor(cols)
@@ -571,7 +607,7 @@ func (g *Grid) View(c *ui.Context) {
 	// 行数走 `rows()`：它算的是**上一帧的列数**（见那个方法的注释），而上面那个
 	// `cols` 是这一帧算出来的。两者只差一帧的宽度变化，不差哨兵——哨兵是同一个
 	// 字段算的。
-	cell := cellWidth(w, cols)
+	cell := g.cellW(w, cols)
 	// ⚠️ **`g.cols` 必须在算行数之前换成这一帧的**：行数是拿它去除的，而 `viewRow`
 	// 收的也是这一帧的 `cols`。晚一步的话（第一帧 `g.cols` 还是 0，按最窄那档 2
 	// 列算）行数会比这一帧真正画得下的多，多出来那几行里没有歌，于是走末尾哨兵
@@ -901,7 +937,7 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	guardFailed(&g.failedRow, "网格行", m.ID, func() {
 		// ⚠️ Stretch：格子要撑满这一行的高，选中那一格的底色才是一整块，
 		// 而不是只有歌名那一小块。
-		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(g.gap()).Children(func() {
 			for k := range cols {
 				i := first + k
 				// 越过最后一格，或者这一格是「歌画完了、又没装哨兵」的那一格：
@@ -973,7 +1009,7 @@ func (g *Grid) leadInput(ev ui.InputEvent) bool { return leadInput(g.lead, ev) }
 // 网格里的话，「转圈」会跟着列数在屏幕上左右跳——拖一次窗口边就换一个位置，而它
 // 是「这里正在加载」唯一的视觉标记。钉在左边至少是不动的。
 func (g *Grid) viewFooterRow(c *ui.Context, cols int, cell float32) {
-	ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+	ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(g.gap()).Children(func() {
 		for k := range cols {
 			if k > 0 {
 				return
@@ -1042,6 +1078,10 @@ func (g *Grid) viewCellGuarded(c *ui.Context, i int, cell float32) {
 // 那一半不画**——画一列空白比不画更难看，而用户看见半行字会以为这一格「数据不全」
 // （理由见 `Music.View`）。
 func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
+	if g.video {
+		g.viewVideoCell(c, i, cell)
+		return
+	}
 	t := c.Theme()
 	m := g.songs[i]
 	playing := isPlaying(g.acts, m.Item)

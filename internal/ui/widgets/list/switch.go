@@ -73,6 +73,9 @@ func (s *SwitchView) SetColumns(c Columns) { s.list.SetColumns(c) }
 // SetPudRows 见 `List.SetPudRows`。
 func (s *SwitchView) SetPudRows(on bool) { s.list.SetPudRows(on) }
 
+// SetVideoCards 见 `Grid.SetVideoCards`：网格那一档的格子画成原型的视频卡。
+func (s *SwitchView) SetVideoCards(on bool) { s.grid.SetVideoCards(on) }
+
 // SetInsetX 见 `List.SetInsetX`，两份都装。
 func (s *SwitchView) SetInsetX(x float32) {
 	s.list.SetInsetX(x)

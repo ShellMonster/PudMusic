@@ -218,12 +218,6 @@ func homeLayoutFor(win float32) homeLayout {
 	return l
 }
 
-// homeGreetSize / homeHeroSize 是问候语和「今日一张」标题的字号。原型是随视口宽度渐变的：
-// 问候语 `clamp(36px, 4vw, 56px)`（`.greet .h-page`），主视觉标题 `clamp(40px, 5vw, 72px)`
-// （`.hero-title`）。所以 1200 的窗口里分别是 48 和 60。
-func homeGreetSize(win float32) float32 { return scale.Fluid(36, 4, 56, win) }
-func homeHeroSize(win float32) float32  { return scale.Fluid(40, 5, 72, win) }
-
 // homeMaxW 是页面最宽（原型 `.page { max-width: 1280px }`）。
 const homeMaxW = 1280
 
@@ -329,7 +323,7 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 			typo.Eyebrow(c, homeDateText(now))
 			// 原型 `.h-page { line-height: 1.15; margin: 8px 0 0 }`：框架压不下宋体的自然行高，
 			// 用负外边距把多出来的那截补回去（见 `typo.DisplayNatural`）。
-			gs := scale.Font(c, homeGreetSize(h.win))
+			gs := scale.Font(c, scale.GreetTitleFluid(h.win))
 			trim := typo.DisplayTrim(gs, 1.15)
 			typo.Display(ui.Text(c, greeting), gs).LetterSpacing(gs*0.01).
 				Margin(space.Px8-trim, space.None, -trim, space.None)

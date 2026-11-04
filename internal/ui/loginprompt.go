@@ -85,10 +85,15 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, _ emptyState) {
 		what = "这些内容"
 	}
 	winW, _ := c.Size()
-	padX := space.PageHorizontal(winW - s.sideDrawnWidth(s.app.SettingsSnapshot()))
-	ui.Column(c).Key(key).Grow(1).FillWidth().Padding(space.None, padX).Children(func() {
-		if pud.LoginPrompt(c, key+":prompt", what) {
-			s.goLogin(homePath)
-		}
+	// 原型 `.page { padding: 8px 40px 64px; max-width: 1280px; margin: 0 auto }`：边距按窗口宽，
+	// 内容最宽 1280（含边距）并居中。
+	padX := space.PageHorizontalForWindow(winW)
+	inner := min(winW-s.sideDrawnWidth(s.app.SettingsSnapshot()), space.PageMaxW)
+	ui.Column(c).Key(key).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Width(inner).Padding(space.None, padX).Children(func() {
+			if pud.LoginPrompt(c, key+":prompt", what) {
+				s.goLogin(homePath)
+			}
+		})
 	})
 }

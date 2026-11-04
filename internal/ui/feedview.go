@@ -91,11 +91,14 @@ func (s *Shell) viewLoggedOutPage(c *ui.Context, key, eyebrow, title, lede, what
 	w := windowW(c)
 	// 窗口矮的时候「扫码登录」会落到播放条下面：页面要能滚（原型的 `.page` 就是滚动容器）。
 	scroll := ui.Scroll(c).Key(key).Grow(1).FillHeight().Children(func() {
-		ui.Column(c).FillWidth().Padding(space.None, space.PageHorizontalForWindow(w), space.Px64, space.PageHorizontalForWindow(w)).Children(func() {
-			pud.PageHead(c, eyebrow, title, lede, w, nil)
-			if pud.LoginPrompt(c, key+":login", what) {
-				s.goLogin(back)
-			}
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
+			ui.Column(c).Width(s.pageBodyW(c)).
+				Padding(space.PageTop, space.PageHorizontalForWindow(w), space.PageBottomForWindow(w), space.PageHorizontalForWindow(w)).Children(func() {
+				pud.PageHead(c, eyebrow, title, lede, w, nil)
+				if pud.LoginPrompt(c, key+":login", what) {
+					s.goLogin(back)
+				}
+			})
 		})
 	})
 	s.trackScrollbar(scroll)

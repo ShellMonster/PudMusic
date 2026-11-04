@@ -163,7 +163,7 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 			typo.Eyebrow(c, "今日一张 · Album of the day")
 			name := title.Clean(top.Title).Title
 			// 原型 `.hero-title { line-height: 1.05; margin: 12px 0 8px }`（补回行高见 `typo.DisplayNatural`）。
-			hs := scale.Font(c, homeHeroSize(h.win))
+			hs := scale.Font(c, scale.HeroTitleFluid(h.win))
 			trim := typo.DisplayTrim(hs, 1.05)
 			typo.Display(ui.Text(c, name), hs).LetterSpacing(hs*0.02).MaxLines(2).
 				Margin(space.Px12-trim, space.None, space.Px8-trim, space.None)

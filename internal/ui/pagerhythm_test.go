@@ -833,12 +833,12 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 
 // TestTheCollectionTitleIsTheBigOne 钉住收藏夹页大标题和它周围几行的排法（原型 `.col-title` 等）。
 //
-//  1. 字号是 `clamp(36px, 4.4vw, 64px)`（窗口宽，1200 时 52.8），`colTitleSize` 就是它。
+//  1. 字号是 `clamp(36px, 4.4vw, 64px)`（窗口宽，1200 时 52.8），`scale.CollectionTitleFluid` 就是它。
 //  2. 两行标题也照常排：名字真的会折成两行，文字列比封面矮 / 高都由内容说了算。
 //  3. Eyebrow / 标题 / 元信息 / 简介**左缘对齐**，自上而下依次排下来（标题上下各 12、简介上 12）。
 func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 	for _, c := range []struct{ w, want float32 }{{500, 36}, {818, 36}, {1200, 52.8}, {1500, 64}, {2400, 64}} {
-		if got := colTitleSize(c.w); absF(got-c.want) > 0.05 {
+		if got := scale.CollectionTitleFluid(c.w); absF(got-c.want) > 0.05 {
 			t.Errorf("窗口 %v 宽时标题 %v，want %v（clamp(36, 4.4vw, 64)）", c.w, got, c.want)
 		}
 	}
