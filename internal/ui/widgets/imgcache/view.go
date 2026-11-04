@@ -341,8 +341,7 @@ func drawSkeleton(c *ui.Context, w, h float32, glyph *ui.SVG) {
 	// ⚠️ **底色不能再是 Surface 往 Background 混**：浅色下那个混出来的色和页面
 	// 白几乎一样（见上面 `skeletonMix` 那一段）。用前景色 8% 是骨架屏那一档的
 	// 配方，两处于是同一个灰。
-	base := t.Text.Alpha(shimmer.BaseAlpha)
-	glow := t.Background.Alpha(shimmer.GlowAlpha)
+	base, glow := shimmer.Colors(t)
 	visible := shimmer.VisibleFlag()
 	ui.Column(c).Size(w, h).
 		Draw(func(p *ui.Painter, r ui.Rect) {

@@ -925,8 +925,7 @@ func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
 		//
 		// ⚠️ **圆角是 `side/2`**：这一格外面裁成了圆，扫光那一层不跟着裁的话
 		// 四个角上会露出方角。
-		base := t.Text.Alpha(shimmer.BaseAlpha)
-		glow := t.Background.Alpha(shimmer.GlowAlpha)
+		base, glow := shimmer.Colors(t)
 		visible := shimmer.VisibleFlag()
 		col = col.Radius(side / 2).Clip().Draw(func(p *ui.Painter, r ui.Rect) {
 			shimmer.Paint(p, r, side/2, base, glow, visible)

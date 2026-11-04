@@ -94,6 +94,7 @@ func TestTheScaleValuesAreLocked(t *testing.T) {
 		"Px40": 40,
 		"Px48": 48,
 		"Px64": 64,
+		"Px72": 72,
 		// 碎步（不在刻度上）。
 		"Px1":  1,
 		"Px3":  3,
@@ -105,7 +106,7 @@ func TestTheScaleValuesAreLocked(t *testing.T) {
 	got := map[string]int{
 		"None": None, "Px2": Px2, "Px4": Px4, "Px6": Px6, "Px8": Px8,
 		"Px10": Px10, "Px12": Px12, "Px16": Px16, "Px20": Px20,
-		"Px24": Px24, "Px28": Px28, "Px32": Px32, "Px40": Px40, "Px48": Px48, "Px64": Px64,
+		"Px24": Px24, "Px28": Px28, "Px32": Px32, "Px40": Px40, "Px48": Px48, "Px64": Px64, "Px72": Px72,
 		"Px1": Px1, "Px3": Px3, "Px5": Px5, "Px7": Px7, "Px9": Px9,
 		"Px90": Px90,
 	}

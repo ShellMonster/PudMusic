@@ -188,6 +188,23 @@ func Pop(e ui.Element, t *ui.Theme) ui.Element {
 		Shadow(0, 2, 8, 0, ui.RGBA(20, 22, 26, 0.08))
 }
 
+// Cover 是 `--shadow-cover`：大封面（收藏夹头部 232、「今日一张」、`.cover.lg`）
+// 底下那一层落影。
+//
+//	深色  0 24px 48px rgba(0,0,0,.5)
+//	浅色  0 20px 40px rgba(20,22,26,.22)
+func Cover(e ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return e.Shadow(0, 24, 48, 0, ui.RGBA(0, 0, 0, 0.5))
+	}
+	return e.Shadow(0, 20, 40, 0, ui.RGBA(20, 22, 26, 0.22))
+}
+
+// CoverPlay 是卡片封面上那枚悬停播放键（`.cover-play`）的影：0 8px 24px 35% 黑。
+func CoverPlay(e ui.Element) ui.Element {
+	return e.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.35))
+}
+
 // Popover 是**浮层面板**那一圈影：下拉、联想、日期面板、旋钮浮层。
 // 2026-11 起就是 `Pop`（§0′：原型的弹层都是 `--shadow-pop`）。
 func Popover(e ui.Element, t *ui.Theme) ui.Element { return Pop(e, t) }

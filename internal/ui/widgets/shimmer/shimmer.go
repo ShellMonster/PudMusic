@@ -27,6 +27,7 @@
 package shimmer
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"sync/atomic"
 	"time"
 
@@ -38,14 +39,6 @@ const (
 	Period = 1400 * time.Millisecond
 	// bandShare 是高光带占一块宽度的几成。
 	bandShare = 0.35
-	// BaseAlpha 是灰块底色（前景色）的不透明度。
-	//
-	// ⚠️ **它是「看得见」那一档的下限**：0.08 的前景色在浅色下是 #ebebeb 上下，
-	// 压在 #ffffff 的页面上一眼能看出是一块占位；再淡（0.04）就只剩「比白稍暗」，
-	// 一屏几十块看起来仍然是一片空白。
-	BaseAlpha float32 = 0.08
-	// GlowAlpha 是高光带中心（背景色）的不透明度。
-	GlowAlpha float32 = 0.55
 )
 
 // frameVisible 是「画这一帧的那个窗口，用户现在看得到吗」那一个开关。
@@ -95,17 +88,18 @@ func Block(c *ui.Context, key string, w, h, radius float32) ui.Element {
 	} else {
 		b = b.FillWidth()
 	}
-	t := c.Theme()
-	baseAlpha, glowAlpha := BaseAlpha, GlowAlpha
-	if t.Dark {
-		baseAlpha = 0.12
-		glowAlpha = 0.72
-	}
-	base, glow := t.Text.Alpha(baseAlpha), t.Background.Alpha(glowAlpha)
+	base, glow := Colors(c.Theme())
 	visible := frameVisible
 	return b.Draw(func(p *ui.Painter, r ui.Rect) {
 		Paint(p, r, radius, base, glow, visible)
 	})
+}
+
+// Colors 是占位块的底色和光带色：「深夜唱片行」§0′ 的原型 `.sk`——surface-2 底，
+// 光带是 `--hover` 那一档压色。骨架屏、封面占位、头像占位都用这一份。
+func Colors(t *ui.Theme) (base, glow ui.Color) {
+	p := tok.Of(t)
+	return p.Surface2, p.Hover
 }
 
 // Paint 画一块：底色 + 一道扫过的高光带。拆出来是为了让**不建元素的画法**
