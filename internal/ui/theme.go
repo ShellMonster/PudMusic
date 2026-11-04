@@ -21,6 +21,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
@@ -67,6 +68,8 @@ type themeKey struct {
 	// contrast / textScale 是桌面偏好（高对比度、字号缩放）。
 	contrast  bool
 	textScale float32
+	// fontScale 是设置页的「界面字号」档（紧凑 / 标准 / 大）。
+	fontScale app.FontScale
 }
 
 func coverHueOf(s app.Settings) float64 {
@@ -146,6 +149,7 @@ func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.T
 		dark:      effectiveDark(s, systemDark),
 		contrast:  p.HighContrast,
 		textScale: p.TextScale,
+		fontScale: s.FontScale,
 	}
 	if !c.valid || c.key != key {
 		base := buildTheme(s, systemDark, p)
@@ -206,6 +210,7 @@ func (s *Shell) applyFrameTheme(c *ui.Context) {
 	if st.CoverAccent {
 		st.CoverHue, st.CoverSat = s.tint.sync(s.app.Snapshot().CoverURL, s.wake.invalidate)
 	}
+	scale.SetUser(st.FontScale.Factor())
 	t := s.theme.of(st, systemDark, c.Preferences())
 	// 指针压在滚动条上时深一档（上游 `--os-handle-bg-hover`）。框架的绘制
 	// 只在**指针落在容器上**时画滚动条，所以这里只管「出现之后更明显」。
@@ -312,6 +317,10 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	// 字号走 `widgets/scale` 的 `scale.Font`，乘的是同一个比例。
 	if p.TextScale > 0 && p.TextScale != 1 {
 		t.FontSize *= p.TextScale
+	}
+	// 设置页的「界面字号」档（和系统缩放相乘；显式字号走 `scale.Font`，同一个乘子）。
+	if f := s.FontScale.Factor(); f != 1 {
+		t.FontSize *= f
 	}
 
 	// 滚动条宽度照上游 `--os-size: 10px`。框架默认 6。

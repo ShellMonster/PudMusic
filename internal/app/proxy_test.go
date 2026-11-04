@@ -423,3 +423,21 @@ func portOf(t *testing.T, hostPort string) int {
 }
 
 func intPtr(n int) *int { return &n }
+
+// 「不使用代理」（direct）连环境变量也不看；「使用系统代理」（none）照环境变量走。
+func TestDirectIgnoresTheEnvironmentWhileNoneFollowsIt(t *testing.T) {
+	t.Setenv("HTTP_PROXY", "http://env.example:3128")
+	t.Setenv("http_proxy", "http://env.example:3128")
+	t.Setenv("NO_PROXY", "")
+	t.Setenv("no_proxy", "")
+	req := proxyReq(t, "http://music.example/a")
+
+	got, err := ProxyForSettings(ProxySettings{Type: ProxyDirect}, req)
+	if err != nil || got != nil {
+		t.Errorf("direct = %v, %v；want 直连 (nil, nil)", got, err)
+	}
+	got, err = ProxyForSettings(ProxySettings{Type: ProxyNone}, req)
+	if err != nil || got == nil || got.Host != "env.example:3128" {
+		t.Errorf("none = %v, %v；want 环境变量里的代理", got, err)
+	}
+}

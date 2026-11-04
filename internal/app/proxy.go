@@ -78,10 +78,13 @@ func ProxyForSettings(ps ProxySettings, req *http.Request) (*url.URL, error) {
 	if req != nil && req.URL != nil && neverProxyHost(req.URL.Hostname()) {
 		return nil, nil
 	}
-	if ps.Type != ProxyNone && strings.TrimSpace(ps.Host) == "" {
+	if ps.Type != ProxyNone && ps.Type != ProxyDirect && strings.TrimSpace(ps.Host) == "" {
 		return nil, errProxyHostEmpty
 	}
 	switch ps.Type {
+	case ProxyDirect:
+		// 「不使用代理」：连环境变量也不看。
+		return nil, nil
 	case ProxyNone:
 		// ⚠️ 不用 `http.ProxyFromEnvironment`：它把环境变量**缓存**在进程级
 		// 的 sync.Once 里，第一次被调到之后就再也不读了。这里要的是「每一问
