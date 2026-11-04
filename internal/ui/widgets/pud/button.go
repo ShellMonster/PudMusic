@@ -1,6 +1,7 @@
 package pud
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -82,7 +83,12 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, icon string,
 			fg, bg = p.Text, p.Hover
 		}
 	case Danger:
+		// 原型是白字压 err；深色的 err（#F0716B）只有 2.5:1，换深字（和 Toast 的
+		// `readableOn` 同一个规矩）。
 		bg, fg = p.Err, ui.RGB(255, 255, 255)
+		if ink.Luminance(p.Err) > ink.PivotLuminance {
+			fg = p.Bg
+		}
 	}
 	b = b.Background(bg).Border(1, border).TextColor(fg).Transition(motion.Fade)
 	scaleTo := float32(1)

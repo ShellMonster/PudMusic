@@ -52,7 +52,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 | 字号 | `scale.Size11…Size64`、`scale.PageTitle 48 / SectionTitle 24 / HeroTitle 64 / Subhead 20`、`PageTitleFor(w)` / `HeroTitleFor(w)`（内容区 < 1024 降一档） | `widgets/scale` |
 | 字体 | `typo.Display(e, size)` 宋体 700、`typo.Mono(e)`、`typo.Num(e)`（tnum）、`typo.Eyebrow(c, s)` | `widgets/typo` |
 | 间距 | `space.Px40 / Px64`、`SectionGap 48 / SectionHeadGap 20 / PageBottom 64 / GridGap 24 / PageTop 8`、`PageHorizontal(contentW)` = 40 / 32 / 16、`GridGapFor(w)` | `widgets/space` |
-| 阴影 | `shadow.Pop`（`--shadow-pop`）、`shadow.Cover`（`--shadow-cover`）、`shadow.CoverPlay` | `widgets/shadow` |
+| 阴影 | `shadow.Pop`（`--shadow-pop`）、`shadow.CoverPlay`；`--shadow-cover`（大封面）数值：深色 `0 24 48 rgba(0,0,0,.5)`、浅色 `0 20 40 rgba(20,22,26,.22)`，T2 / T3 用到时在 `widgets/shadow` 加回（现在没有调用点，死档会让 `TestEveryShadowTierHasACallSite` 红） | `widgets/shadow` |
 | 动效 | `motion.EaseOut / EaseIn / Fast 160 / Med 240 / Slow 360`，过渡 `Fade / PopIn / ToastIn / ScrimIn / PageIn / FullIn / DrawerIn(w)`，`motion.Reduced(c)` | `widgets/motion/record.go` |
 | 图标 | `icon(pudHeart)` 等 `pud*` 常量；`pud.Icon("heart")` | `iconset/icons/Pud`、`icons.go` |
 | 公共组件 | `pud.Button / RoundButton / IconBtn / Chip / Kbd / Badge / PageHead / SecHead / Tabs / TrackHead / TrackRow / EqBars / CoverCard / ColCard / VideoCard / UCard / Avatar / GridCols / Empty / EmptyArt / LoginPrompt / Skeleton / Switch / SelectBox / MiniSearch / PopPanel / PopOpt / PopItem / Scrim / DrawerPanel / DrawerHead / DialogPanel / DialogBody / DialogFoot / Toast` | `widgets/pud` |

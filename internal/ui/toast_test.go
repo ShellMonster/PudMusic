@@ -431,17 +431,16 @@ func TestToastTextIsKeptVerbatim(t *testing.T) {
 // 票 #180：语义色、尺寸与位置、入场
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 上游那三个语义色（DESIGN.md §四）。
+// 「深夜唱片行」的语义色（DESIGN.md §0′，深浅各一份）。
 //
-// ⚠️ **写死在这里，而不是从主题里取**：这一组要断的就是「和上游一致」，
+// ⚠️ **写死在这里，而不是从主题里取**：这一组要断的就是「和令牌表一致」，
 // 从主题里取就变成自己跟自己比了。
-const (
-	toastUpstreamDanger  = "#f31260"
-	toastUpstreamWarning = "#f5a524"
-	toastUpstreamSuccess = "#17c964"
-	// toastUpstreamPrimary 是主色（Biu 的绿，用户能在设置里换）。
-	toastUpstreamPrimary = "#1ed760"
-)
+func toastTone(dark bool) (primary, success, warning, danger string) {
+	if dark {
+		return "#ff5d3d", "#5bc287", "#f2b04a", "#f0716b"
+	}
+	return "#d2391b", "#2e7d4f", "#9a5b06", "#c93b3b"
+}
 
 // TestTheToastTakesTheToneColor 验四种语义色画出来是**四个不同的颜色**。
 //
@@ -464,6 +463,12 @@ func TestTheToastTakesTheToneColor(t *testing.T) {
 			s, tt := newShell(t, systemIsDark(dark))
 			shortToasts(t, time.Minute)
 
+			primary, success, warning, danger := toastTone(dark)
+			// 红上的字：浅色白字；深色的红 #f0716b 比白字能读的下限亮，换深字（`readableOn`）。
+			dangerInk := "#ffffff"
+			if dark {
+				dangerInk = "#18181b"
+			}
 			seen := map[string]bool{}
 			for _, c := range []struct {
 				tone notice.Tone
@@ -475,10 +480,10 @@ func TestTheToastTakesTheToneColor(t *testing.T) {
 				// 绿和橙上压的是**深色字**（白字压在那两个上只有 2.19:1 / 2.04:1，
 				// 读不清），红上压的是**白字**（与确认框那颗红色的「确认」键一致），
 				// 主色那一档的字色跟着主题走。
-				{notice.Plain, toastUpstreamPrimary, "#18181b", "普通（主色）"},
-				{notice.Success, toastUpstreamSuccess, "#18181b", "成功"},
-				{notice.Warning, toastUpstreamWarning, "#18181b", "警告"},
-				{notice.Danger, toastUpstreamDanger, "#ffffff", "失败"},
+				{notice.Plain, primary, "#18181b", "普通（主色）"},
+				{notice.Success, success, "#18181b", "成功"},
+				{notice.Warning, warning, "#18181b", "警告"},
+				{notice.Danger, danger, dangerInk, "失败"},
 			} {
 				text := "这一条是" + c.what
 				s.addToast(text, c.tone)
@@ -487,7 +492,7 @@ func TestTheToastTakesTheToneColor(t *testing.T) {
 
 				got := toastColorAt(t, tt, text)
 				if got != toastRGBA(c.want) {
-					t.Errorf("%s那一条的卡片底色是 %v，want %s（上游的色相）", c.what, got, c.want)
+					t.Errorf("%s那一条的卡片底色是 %v，want %s（令牌表）", c.what, got, c.want)
 				}
 				if seen[c.want] {
 					t.Errorf("%s和前面某一条是同一个颜色（%s）——四种语义色必须是四个颜色", c.what, c.want)
@@ -531,9 +536,10 @@ func TestAFailedDownloadIsNotGreen(t *testing.T) {
 	tt.Frame()
 	settleToast(t, tt)
 
+	_, okHex, _, dangerHex := toastTone(false)
 	failed := toastColorAt(t, tt, "下载没成：")
-	if want := toastRGBA(toastUpstreamDanger); failed != want {
-		t.Errorf("下载失败那一条的底色是 %v，want %s（失败是红的，不是绿的）", failed, toastUpstreamDanger)
+	if want := toastRGBA(dangerHex); failed != want {
+		t.Errorf("下载失败那一条的底色是 %v，want %s（失败是红的，不是绿的）", failed, dangerHex)
 	}
 
 	// 成功那一条是绿的——两条不一样，才说明颜色是**跟着结果走**的。
@@ -544,8 +550,8 @@ func TestAFailedDownloadIsNotGreen(t *testing.T) {
 	settleToast(t, tt)
 
 	ok := toastColorAt(t, tt, "已加进下载队列")
-	if want := toastRGBA(toastUpstreamSuccess); ok != want {
-		t.Errorf("下载成功那一条的底色是 %v，want %s（成功是绿的）", ok, toastUpstreamSuccess)
+	if want := toastRGBA(okHex); ok != want {
+		t.Errorf("下载成功那一条的底色是 %v，want %s（成功是绿的）", ok, okHex)
 	}
 }
 
@@ -574,7 +580,8 @@ func TestTheToastSlidesIn(t *testing.T) {
 		t.Fatalf("提示没画出来，文字有 %q", tt.Texts())
 	}
 	x, y := toastSampleAt(r)
-	full := toastRGBA(toastUpstreamPrimary)
+	primaryHex, _, _, _ := toastTone(false)
+	full := toastRGBA(primaryHex)
 
 	// 第一帧：刚出现，几乎全透明——采到的是它底下那一片（不是卡片底色）。
 	start := tt.Image().RGBAAt(x, y)
@@ -606,7 +613,7 @@ func TestTheToastSlidesIn(t *testing.T) {
 	settleToast(t, tt)
 	done := tt.Image().RGBAAt(x, y)
 	if done != full {
-		t.Errorf("入场走完之后卡片的颜色是 %v，want %s", done, toastUpstreamPrimary)
+		t.Errorf("入场走完之后卡片的颜色是 %v，want %s", done, primaryHex)
 	}
 }
 
@@ -690,9 +697,10 @@ func TestTheToastEnterHonoursReduceMotion(t *testing.T) {
 	s.addToast(text, notice.Plain)
 	tt.Frame()
 
-	full := toastRGBA(toastUpstreamPrimary)
+	primaryHex, _, _, _ := toastTone(false)
+	full := toastRGBA(primaryHex)
 	if got := toastColorAt(t, tt, text); got != full {
-		t.Errorf("减少动态效果时第一帧卡片的颜色是 %v，want %s（直接到终点）", got, toastUpstreamPrimary)
+		t.Errorf("减少动态效果时第一帧卡片的颜色是 %v，want %s（直接到终点）", got, primaryHex)
 	}
 }
 

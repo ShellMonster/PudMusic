@@ -250,6 +250,10 @@ var boldOnScale = []struct {
 			"（pagerhythm.go 里写着为什么）",
 	},
 	{
+		file: "widgets/pud/button.go", mark: "Mono", count: 1,
+		why: "音质角标 HI-RES / SQ：原型 `.badge` 是 10 号等宽 700（DESIGN.md §0′）",
+	},
+	{
 		file: "widgets/typo/typo.go", mark: "DisplayFamily", count: 1,
 		why: "「深夜唱片行」的展示字体入口 `typo.Display`：20 号及以上的标题一律宋体 700" +
 			"（DESIGN.md §0′）。粗体只在这一处设，各页调它",
