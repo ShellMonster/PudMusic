@@ -1022,6 +1022,9 @@ func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 		app.PlayModeSequence: "order", app.PlayModeLoop: "repeat",
 		app.PlayModeSingle: "repeat1", app.PlayModeRandom: "shuffle",
 	}[st.PlayMode]
+	if name == "" { // 状态里还没有播放模式（刚启动 / 没歌）：按顺序播放画，别拿空名字去找图标
+		name = "order"
+	}
 	btn := s.withTip(c, pud.IconBtn(c, "pb-mode", name, "播放模式",
 		pud.IconOpts{On: st.PlayMode != app.PlayModeSequence}), st.PlayMode.Desc())
 
