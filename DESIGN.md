@@ -26,6 +26,26 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 **本节和下面各节冲突时，以本节为准。** 界面按原型 `PudMusic-全新原型设计/` 1:1 重做；原型和
 旧文档冲突时以原型为准。原型不在仓库里（里面是真实专辑图，不许进仓库），数值已经抄进这里和代码。
 
+### 旧章节状态表（T8 整理，以本节为准）
+
+下面各章是改版前（上游 Biu 口径）写的。**凡与 §0′ 冲突的数值一律已废弃**，章内不再逐条改；仍然有效的是章里没被 §0′ 点名的结构性规则。
+
+| 旧章节 | 状态 | 说明 |
+| --- | --- | --- |
+| 零、设计规范 v0.1 覆盖项 | **已废弃** | 主题方案、播放条 76、侧栏实心主色底、取流光圈旁的「第三行」等全部被 §0′ 取代；取流光圈（粗 0.07 / 缝 0.12 / 100° / 1.4s）仍有效 |
+| 令牌（yaml） | 已更新 | `color` / `typography` / `radius` / `structural` 已按 §0′ 重写；`size_scale` / `spacing` / `motion` 由单元测试对着代码校验 |
+| 一、换算与证据 | 有效 | |
+| 二、排版 | **部分废弃** | 字号以 §0′《其他令牌》和 `scale` 为准；页标题 24/400、「15 / 18 / 30」档、「粗体只在白名单」均已废弃；字重四档 400 / 500 / 600 / 700 |
+| 三、间距与结构 | **部分废弃** | 页边距 16、侧栏 220 / 64、搜索框 480×36、图标键 32、播放键 48、播放条 76 已废弃，见 §0′.T1 |
+| 四、颜色与状态 | **已废弃** | 主色 #1ed760、HeroUI 语义色、分隔线叠色均被 §0′《颜色令牌》取代 |
+| 四·五、阴影 | 有效（档位以 `widgets/shadow` 为准） | 深色阴影靠描边分层的新判据见 §0′.T3 / T7 |
+| 五、动效 | **部分废弃** | 曲线改 `ease-out (.2,.8,.2,1)`、时长 160 / 240 / 360；「主 Tab 滑块是弹簧」「设置开关是弹簧」「首页切 Tab 横向滑动」随旧组件删除而废弃 |
+| 六、控件规则 | **部分废弃** | 外壳、侧栏、顶栏、播放条、Tab、Toast、弹窗、列表与网格以 §0′.T1–T7 为准；加载态、UP 空间等未被点名的小节仍有效 |
+| 七、我们比上游好 | 有效 | 「主色当字色」处理改为 `AccentText` |
+| 八、怎么验 | 有效 | |
+| 九、已经拍板 | **部分废弃** | 被推翻的条目见 §0′《§九 里被推翻的条目》 |
+| 十、待定 | 有效 | |
+
 ### 用户拍板的决定（不要重提）
 
 1. **只有一套主题「深夜唱片行」**，分深色、浅色两份。暖纸 / 暮光 / 柔雾 / 青瓷 / 墨宣 / 紫檀 /
@@ -49,13 +69,13 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 | 封面取色混合比例 | `tok.TintHero 0.22 / TintCollection 0.26 / TintUpBand 0.34 / TintVideoThumb 0.40` | `widgets/tok` |
 | 圆角 | `tok.R4 / R8 / R12 / Pill` | `widgets/tok/size.go` |
 | 外壳与组件尺寸 | `tok.SideW 232 / SideCollapsedW 72 / TopH 60 / BarH 84 / IconHit 36 / PlayBtn 44 / SearchW×H 440×38 / BtnH 40 / BtnSmH 32 / ChipH 30 / RowH 60 …` | `widgets/tok/size.go` |
-| 字号 | `scale.Size11…Size64`、`scale.PageTitle 48 / SectionTitle 24 / HeroTitle 64 / Subhead 20`、`PageTitleFor(w)` / `HeroTitleFor(w)`（内容区 < 1024 降一档） | `widgets/scale` |
+| 字号 | `scale.Size11…Size64`、`scale.PageTitle 48 / SectionTitle 24 / HeroTitle 64 / Subhead 20`；流式字号按**窗口宽**：`scale.Fluid(min, vw, max, winW)`、`PageTitleFluid(winW)`（1200 宽 40.8）、`BigNumFluid(winW)` | `widgets/scale` |
 | 字体 | `typo.Display(e, size)` 宋体 700、`typo.Mono(e)`、`typo.Num(e)`（tnum）、`typo.Eyebrow(c, s)` | `widgets/typo` |
-| 间距 | `space.Px40 / Px64`、`SectionGap 48 / SectionHeadGap 20 / PageBottom 64 / GridGap 24 / PageTop 8`、`PageHorizontal(contentW)` = 40 / 32 / 16、`GridGapFor(w)` | `widgets/space` |
-| 阴影 | `shadow.Pop`（`--shadow-pop`）、`shadow.CoverPlay`；`--shadow-cover`（大封面）数值：深色 `0 24 48 rgba(0,0,0,.5)`、浅色 `0 20 40 rgba(20,22,26,.22)`，T2 / T3 用到时在 `widgets/shadow` 加回（现在没有调用点，死档会让 `TestEveryShadowTierHasACallSite` 红） | `widgets/shadow` |
+| 间距 | `space.Px40 / Px64`、`SectionGap 48 / SectionHeadGap 20 / PageBottom 64 / GridGap 24 / PageTop 8`、`PageHorizontalForWindow(winW)` = 40 / 32 / 16、`PageBottomForWindow(winW)` | `widgets/space` |
+| 阴影 | `shadow.Pop`（`--shadow-pop`）、`shadow.CoverPlay`；`--shadow-cover`（大封面）数值：深色 `0 24 48 rgba(0,0,0,.5)`、浅色 `0 20 40 rgba(20,22,26,.22)`，`widgets/shadow` 里每一档都必须有调用点（`TestEveryShadowTierHasACallSite`） | `widgets/shadow` |
 | 动效 | `motion.EaseOut / EaseIn / Fast 160 / Med 240 / Slow 360`，过渡 `Fade / PopIn / ToastIn / ScrimIn / PageIn / FullIn / DrawerIn(w)`，`motion.Reduced(c)` | `widgets/motion/record.go` |
 | 图标 | `icon(pudHeart)` 等 `pud*` 常量；`pud.Icon("heart")` | `iconset/icons/Pud`、`icons.go` |
-| 公共组件 | `pud.Button / RoundButton / IconBtn / Chip / Kbd / Badge / PageHead / SecHead / Tabs / TrackHead / TrackRow / EqBars / CoverCard / ColCard / VideoCard / UCard / Avatar / GridCols / Empty / EmptyArt / LoginPrompt / Skeleton / Switch / SelectBox / MiniSearch / PopPanel / PopOpt / PopItem / Scrim / DrawerPanel / DrawerHead / DialogPanel / DialogBody / DialogFoot / Toast` | `widgets/pud` |
+| 公共组件（页面一律用它们，旧的 `flat` 之外没有第二套） | `pud.Button / RoundButton / IconBtn / Chip / Kbd / Badge / PageHead / SecHead / Tabs / TrackHead / TrackRow / EqBars / CoverCard / ColCard / VideoCard / UCard / Avatar / GridCols / Empty / EmptyArt / LoginPrompt / Skeleton / Switch / SelectBox / MiniSearch / PopPanel / PopOpt / PopItem / Scrim / DrawerPanel / DrawerHead / DialogPanel / DialogBody / DialogFoot / Toast` | `widgets/pud` |
 
 组件陈列（深浅各一张，对照原型）：`internal/ui/components_shot_test.go`，
 `BIU_SHOT_DIR=… go test ./internal/ui/ -run TestRenderComponentShowcase`。
@@ -121,9 +141,11 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 ### 已知取舍（T0 留下的）
 
 - 原型 `.icon-btn.on` 给路径填 22% 淡色，框架的图标是单色遮罩，做不出半透明填充：心 / 星 / 赞「开着」用填满的 `*-on` 版本。
-- `widgets/pud` 是新建的公共包，旧的 `flat`、`tabs.go`、`switch.go`、`toast.go`、`popup.go`、`confirmmodal.go`、
-  `widgets/list/card.go` 等**未逐个改成原型样式**——它们随各票重做页面时换成 `pud` 里的对应组件（T0 只就地改了
-  颜色令牌、阴影、骨架屏、滑块轨道、弹窗面板底 / 圆角）。
+- 旧组件清理（T8）：`tabs.go`、`switch.go`、`widgets/list/card.go` 里的旧行画法（`viewCompactCard` / `viewIndex` 等）
+  已删，曲目行只有 `pud.TrackRow` 一套。`toast.go` / `popup.go` / `confirmmodal.go` 和 `widgets/flat` 里
+  仍有生产调用方的部分保留，随弹层重画再换成 `pud.PopPanel` / `Toast`。
+- 全屏播放器的固定暗色用 `pud.WithFull(func)` 夹住（defer 复位）；专辑列由页面传 `pud.AlbumModeFor(winW)`，
+  没有包级开关。
 - 登录图标保留 Remix 二维码（原型的 `user` 和 `logout` 在 18px 下分不开）；音量「小」一档由 `vol` 派生（`vol-low`）。
 
 ### §0′.T1 外壳
@@ -404,6 +426,8 @@ Tab 计数只在数得清时写、加入收藏夹没有「新建」输入行、�
 
 ## 零、设计规范 v0.1 覆盖项（2026-10-24，应用未发版时定的）
 
+> **【已废弃】** 本节整体被 §0′ 取代（主题方案、播放条 76、侧栏实心主色底、播放键等数值都已作废），仅作历史记录。取流光圈的比例仍有效。
+
 下面这几处**压过**本文件后面照上游 Biu 写的数。后文没改的地方仍以上游为准；
 和这里冲突的以这里为准。完整规范（token、组件、页面）在产品设计稿
 `macOS 音乐 App 设计规范 v0.1`，本节只记**代码里已经落地**的部分。
@@ -600,26 +624,20 @@ Tab 计数只在数得清时写、加入收藏夹没有「新建」输入行、�
 
 ```yaml
 color:
-  accent: "#1ed760"          # Biu 的绿，深浅两套同一个值
-  danger: "#f31260"
-  warning: "#f5a524"
-  success: "#17c964"
-  divider_dark: "rgba(255,255,255,0.15)"   # 深色叠出约 #3a3a3b
-  divider_light: "#dbdbdb"
+  # 「深夜唱片行」令牌的值只写在 §0′《颜色令牌》和 `widgets/tok`；旧的 Biu 绿 #1ed760、HeroUI 语义色已废弃。
+  accent_default: "#D2391B"   # 朱砂（浅色）；深色 #FF5D3D
+  ok: "#2E7D4F"
+  warn: "#9A5B06"
+  err: "#C93B3B"
+  line: "#E0E1E3"             # 浅色；深色 #26282D
 typography:
-  page_title:   { size: 24, weight: 400 }   # h1 = text-2xl，字重被重置为 inherit
-  settings_h2:  { size: 20, weight: 400 }
-  row_title:    { size: 16, weight: 500 }   # font-medium
-  list_title:   { size: 16, weight: 400 }
-  list_meta:    { size: 14, weight: 400 }   # UP 名 / 队列行副题
+  # 页标题 48（窗口宽 1200 时流式 40.8）、宋体 700，见 §0′。以下是仍在用的正文档位。
+  list_title:   { size: 14, weight: 500 }   # 曲目行歌名（pud.TrackRow）
+  list_meta:    { size: 12, weight: 400 }
   body:         { size: 14, weight: 400 }
-  h3:           { size: 18, weight: 400 }   # 队列抽屉标题；Preflight 重置字重
-  secondary:    { size: 12, weight: 400 }   # 时间等其余次要信息
-  weights: [400, 500, 600, 700, 800]
-  # ⚠️ **600 在刻度上、却没有用途**（票 #241 / 报告 F-26）：刻度表列了它，
-  # 而 §二 的用途表里没有它的位置——「600 是无主」：没有人能说出某一处为什么
-  # 该是 600。代码里那三处（UP 空间的名字和统计）已经改用 **500**。
-  # **别给 600 找一个用途**——那是给一个「没人能说出为什么」的数找理由。
+  secondary:    { size: 12, weight: 400 }
+  # 字重只写原型用到的四档（`TestOnlyThePrototypeWeightsAreWritten` 钉着）。
+  weights: [400, 500, 600, 700]
 # 字号刻度（票 #238 / 报告 F-18）：代码里的表是 `internal/ui/widgets/scale/size.go`。
 #
 # ⚠️ **这是「在用的全部字号」，不是一条只有六档的漂亮刻度**：界面上真的在用
@@ -657,10 +675,10 @@ spacing:
   list_gap: 16
   settings_group_gap: 24     # 原型 40，T6 改
 radius:
+  # 固定 4 / 8 / 12 / 胶囊，不再可调（`widgets/tok/size.go` 的 R4 / R8 / R12 / Pill）。
+  small: 4
   default: 8
-  max: 24                    # 设置里可调
-  popover: 8
-  playbar: 0
+  card: 12
 motion:
   # 曲线**只有一条**，值只写在 internal/ui/widgets/motion（详见 §五）：
   curve: cubic-bezier(0.16, 0.9, 0.21, 0.98)
@@ -683,15 +701,12 @@ shadow:
   heroui: [sm, md, lg]          # 深浅两套值不一样
 structural:
   window: { width: 1200, height: 800, min_width: 900, min_height: 560 }
-  sidebar: { expanded: 200, collapsed: 72, min: 160, max: 480 }
-  navbar_height: 64
-  playbar: { height: 76, padding_x: 16, cover: 52 }
-  list_row: { height: 64, cover: 48, compact_cover: 0 }
-  grid: { cover: 140, gap: 16, breakpoints: [1536, 1280, 1024, 768], columns: [6, 5, 4, 3, 2] }
-  queue_drawer: { width: 384, row: 64 }
-  parts_panel: { min_width: 500, row: 64 }
-  settings: { content_max_w: 780, control_column: 300 }
-  toast: { width: 356, offset_bottom: 90, offset_right: 8, max: 3, life: 2000ms }
+  sidebar: { expanded: 232, collapsed: 72 }
+  navbar_height: 60
+  playbar: { height: 84 }
+  list_row: { height: 60, compact_height: 44, cover: 40 }
+  settings: { control_column: 300 }
+  toast: { shape: inverse_pill, offset_bottom: 90, max: 3 }
   back_to_top: { threshold: 400, right: 40, bottom: 120, radius: pill }
 ```
 
@@ -707,6 +722,8 @@ structural:
 - **量出来的数和代码常量对不上时，两套都记下来**——那本身可能就是 bug。
 
 ## 二、排版
+
+> **【部分废弃】** 字号以 §0′《其他令牌》与 `widgets/scale` 为准；页标题 24/400、15 / 18 / 30 档、「粗体只在白名单」已作废。字重只用 400 / 500 / 600 / 700。
 
 **字号是一条刻度，不要一页一页单独调。**
 
@@ -799,6 +816,8 @@ structural:
 
 ## 三、间距与结构
 
+> **【部分废弃】** 页边距 16、侧栏 220 / 64、搜索框 480×36、图标键 32、播放键 48、播放条 76 已作废，以 §0′.T1 为准。
+
 | 项 | 值 |
 |---|---|
 | 页面左右内边距 | **16**（行内再加 8 → 视觉 24） |
@@ -831,6 +850,8 @@ structural:
 另一票的事。
 
 ## 四、颜色与状态
+
+> **【已废弃】** 主色 #1ed760、HeroUI 语义色、分隔线叠色均被 §0′《颜色令牌》取代；下文数值仅作历史记录。
 
 - **主色**：`#1ed760`，深浅两套同一个值。
 - **语义色**：危险 `#f31260`、警告 `#f5a524`、成功 `#17c964`（深浅两套同值）。
@@ -1117,6 +1138,8 @@ HeroUI 的 `<Tooltip>` / `<Modal>`（`layout/navbar/user-feed/index.tsx:50`、
 （UP 空间、动态流）占位圆仍然是 `t.Surface`——那正是「页面底往文字色推一档」。
 
 ## 五、动效
+
+> **【部分废弃】** 统一曲线改为 `ease-out (.2,.8,.2,1)`，时长 160 / 240 / 360；「主 Tab 滑块 / 设置开关是弹簧」「首页切 Tab 横向滑动」随旧组件删除而作废。
 
 ### 总纲
 
@@ -1839,6 +1862,8 @@ index.tsx:421-422` 那个分集面板是**自绘**的（不是 HeroUI 的 Drawer
 HeroUI `<Drawer>`**。
 
 ## 六、控件规则
+
+> **【部分废弃】** 外壳、侧栏、顶栏、播放条、Tab、Toast、弹窗、列表与网格的数值以 §0′.T1–T7 为准；未被 §0′ 点名的小节仍有效。
 
 ### 外壳布局（票 #286 / 报告 C-01）
 - **侧栏从窗口顶端贯到底**，播放条在底下**横贯整窗**；顶栏**只盖内容区那一段**
@@ -2751,6 +2776,8 @@ HeroUI `<Drawer>`**。
 - **不打真 B 站接口**，所有页面数据走内存夹具。
 
 ## 九、已经拍板、不要重新提的
+
+> **【部分废弃】** 被推翻的条目见 §0′《§九 里被推翻的条目》。
 
 - 毛玻璃用框架自带，不自绘等效效果。
 - 全局圆角可调（默认 8、上限 24）。
