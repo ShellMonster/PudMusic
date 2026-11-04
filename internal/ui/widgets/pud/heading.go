@@ -12,29 +12,41 @@ import (
 // ledeMaxW 是页头导语的最宽（原型 `max-width: 60ch`，14 号字约 560）。
 const ledeMaxW = 560
 
-// PageHead 是页头（原型 `.page-head`）：左边 Eyebrow + 48 号宋体标题 + 导语，右边
-// 操作区，底对齐；上 24 下 8 的内边距，左右两块隔 24。
+// PageHead 是页头（原型 `.page-head`）：左边 Eyebrow + 宋体标题 + 导语，右边
+// 操作区，底对齐；上 24 下 8 的内边距，左右两块隔 24。标题行高 1.15（`.h-page`），导语行高 1.55（正文）。
 //
-// contentW 是内容区宽（窄于 1024 时标题降到 32）；actions 可为 nil，里面直接放
-// `pud.Button`（原型 `.page-head .actions` 缝 8）。
+// winW 是**窗口宽**（标题字号按原型 `clamp(32px, 3.4vw, 48px)` 随窗口宽流动，`scale.PageTitleFluid`；
+// 1200 宽的窗口里是 40.8）；actions 可为 nil，里面直接放 `pud.Button`（原型 `.page-head .actions` 缝 8）。
 //
-//	pud.PageHead(c, "Library", "本地音乐", "把电脑里的歌拖进来……", s.contentW, func() {
+//	pud.PageHead(c, "Library", "本地音乐", "把电脑里的歌拖进来……", s.winW, func() {
 //		pud.Button(c, "import", pud.Ghost, pud.Std, "导入", "import")
 //	})
-func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, actions func()) {
-	p := pal(c)
+func PageHead(c *ui.Context, eyebrow, title, lede string, winW float32, actions func()) {
+	var ledeFn func()
+	if lede != "" {
+		p := pal(c)
+		ledeFn = func() {
+			text(c, lede, scale.Size14, p.Text2).LineHeight(leading.Body).MaxWidth(ledeMaxW).Margin(space.Px8, space.None, space.None, space.None)
+		}
+	}
+	PageHeadFn(c, eyebrow, title, winW, ledeFn, actions)
+}
+
+// PageHeadFn 是 `PageHead` 的一般形式：导语由调用方画（里面要放链接、等宽数字之类）。
+// ledeFn 里的内容会摆在标题下面；上边距 8 由调用方自己给。
+func PageHeadFn(c *ui.Context, eyebrow, title string, winW float32, ledeFn, actions func()) {
 	ui.Row(c).FillWidth().AlignItems(ui.End).Gap(space.Px24).Padding(space.Px24, space.None, space.Px8, space.None).
 		Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).Children(func() {
 				if eyebrow != "" {
 					typo.Eyebrow(c, eyebrow)
 				}
-				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFor(contentW))).LineHeight(leading.PageTitle)
+				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFluid(winW))).LineHeight(leading.PageTitle)
 				if eyebrow != "" {
 					t.Margin(space.Px8, space.None, space.None, space.None)
 				}
-				if lede != "" {
-					text(c, lede, scale.Size14, p.Text2).MaxWidth(ledeMaxW).Margin(space.Px8, space.None, space.None, space.None)
+				if ledeFn != nil {
+					ledeFn()
 				}
 			})
 			if actions != nil {

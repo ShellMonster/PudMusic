@@ -23,20 +23,35 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// switchKnobAt 是旋钮这一帧在轨道哪一半：「左」「右」，或者「半路」。
+// switchKnobAt 是旋钮这一帧在轨道哪里：按白色像素的重心在轨道宽度上的位置分「左」（< 35%）、
+// 「右」（> 65%）和「半路」。
+//
+// 原型的旋钮是 20 宽、离边 3、开时右移 18（`.switch::after`），所以关态的旋钮横跨轨道中线
+// （3..23，中线在 22）——按「哪一半有白像素」分会把静止的关态也判成半路，改按重心分。
 func switchKnobAt(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) string {
 	t.Helper()
-	left, right := knobHalves(tt.Image(), box)
-	switch {
-	case left > 0 && right == 0:
-		return "左"
-	case right > 0 && left == 0:
-		return "右"
-	case left > 0 && right > 0:
-		return "半路"
-	default:
+	img := tt.Image()
+	var sum, n float64
+	for y := max(int(box.Y), img.Rect.Min.Y); y < min(int(box.Y+box.H), img.Rect.Max.Y); y++ {
+		for x := max(int(box.X), img.Rect.Min.X); x < min(int(box.X+box.W), img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			if p.R < 190 || p.G < 190 || p.B < 190 {
+				continue
+			}
+			sum += float64(x) + 0.5 - float64(box.X)
+			n++
+		}
+	}
+	if n == 0 {
 		return "没有"
 	}
+	switch frac := sum / n / float64(box.W); {
+	case frac < 0.35:
+		return "左"
+	case frac > 0.65:
+		return "右"
+	}
+	return "半路"
 }
 
 // TestTheSettingsSwitchSpringsItsKnobOver 钉「旋钮是**弹**过去的，不是啪一下跳过去」。
@@ -53,7 +68,7 @@ func switchKnobAt(t *testing.T, tt *mygoui.Tester, box mygoui.Rect) string {
 func TestTheSettingsSwitchSpringsItsKnobOver(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""), systemIsDark(true))
 
-	// ⚠️ **量的是「封面取色」那一颗**，不是「音量均衡」：音量均衡拨开之后会弹
+	// ⚠️ **量的是「封面取色」那一颗**，不是「上报本机播放记录」：它拨开之后会弹
 	// 一句提示，而**提示就浮在右下角**（356 宽、抬过播放条 90）——设置页的控件列
 	// 正在右边，于是**提示把开关盖住了**（实测：提示那一块 y ∈ [666, 710]，
 	// 开关在 y=686）。「封面取色」的效果看得见，**不弹提示**，旋钮量得出来。
@@ -67,19 +82,28 @@ func TestTheSettingsSwitchSpringsItsKnobOver(t *testing.T) {
 
 	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
 	tt.Frame()
-	if at := switchKnobAt(t, tt, sw); at != "左" {
+	// ⚠️ 每次重新量开关的框：开了「封面取色」之后上面「强调色」那一行收起来，整页往上挪。
+	where := func() mygoui.Rect {
+		r, ok := tt.Find("开关：封面取色")
+		if !ok {
+			t.Fatalf("找不到「封面取色」的开关，文字有 %q", tt.Texts())
+		}
+		return r
+	}
+	if at := switchKnobAt(t, tt, where()); at != "左" {
 		t.Fatalf("按下去那一帧旋钮已经在%s了——它是啪一下跳过去的，不是弹过去的", at)
 	}
 
-	tt.Advance(100 * time.Millisecond)
+	// 原型的旋钮是 240ms 的回弹（`cubic-bezier(.3,1.4,.5,1)`），冲得快：推 40ms 就在半路上。
+	tt.Advance(40 * time.Millisecond)
 	tt.Frame()
-	if at := switchKnobAt(t, tt, sw); at != "半路" {
-		t.Fatalf("推了 100ms 之后旋钮在%s（want 半路）——它没有在动", at)
+	if at := switchKnobAt(t, tt, where()); at != "半路" {
+		t.Fatalf("推了 40ms 之后旋钮在%s（want 半路）——它没有在动", at)
 	}
 
 	tt.Advance(600 * time.Millisecond)
 	tt.Frame()
-	if at := switchKnobAt(t, tt, sw); at != "右" {
+	if at := switchKnobAt(t, tt, where()); at != "右" {
 		t.Fatalf("弹完了旋钮在%s（want 右）", at)
 	}
 }
@@ -91,13 +115,15 @@ func TestTheSettingsSwitchSpringsItsKnobOver(t *testing.T) {
 func TestTurningOnAnInvisibleEffectSaysOneShortLine(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
-	sw := settingRect(t, tt, s, "开关：音量均衡")
-	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
+	sw := settingRect(t, tt, s, "开关：上报本机播放记录")
+	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2) // 默认开着：先关
+	tt.Frame()
+	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2) // 再开：这一下才说话
 	tt.Frame()
 
-	want := "音量均衡：太响的歌会压下来"
+	want := "上报本机播放记录：B 站历史里能看见"
 	if !hasExactText(tt, want) {
-		t.Errorf("拨开「音量均衡」之后没有那句提示（want %q），文字有 %q", want, tt.Texts())
+		t.Errorf("拨开「上报本机播放记录」之后没有那句提示（want %q），文字有 %q", want, tt.Texts())
 	}
 	// ⚠️ **一句，不是一段**：提示里不许出现第二个句号/问号/叹号。
 	if n := strings.Count(want, "。") + strings.Count(want, "？") + strings.Count(want, "！"); n != 0 {
@@ -124,20 +150,22 @@ func TestAVisibleEffectSaysNothing(t *testing.T) {
 //
 // 这一句说的是「开了它会怎样」——关掉的时候说同一句就是错的。
 func TestTurningOffSaysNothing(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	off := app.DefaultSettings("")
+	off.ReportPlayHistory = false
+	tt, s, _, _ := shellOnSettings(t, off)
 
-	sw := settingRect(t, tt, s, "开关：音量均衡")
+	sw := settingRect(t, tt, s, "开关：上报本机播放记录")
 	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
 	tt.Frame()
 	if n := toastCount(s); n != 1 {
-		t.Fatalf("拨开「音量均衡」之后有 %d 条提示，want 1", n)
+		t.Fatalf("拨开「上报本机播放记录」之后有 %d 条提示，want 1", n)
 	}
 
 	// 再拨一次 = 关掉。
 	tt.ClickAt(sw.X+sw.W/2, sw.Y+sw.H/2)
 	tt.Frame()
 	if n := toastCount(s); n != 1 {
-		t.Errorf("关掉「音量均衡」之后有 %d 条提示，want 还是 1（关掉的时候不该说）", n)
+		t.Errorf("关掉「上报本机播放记录」之后有 %d 条提示，want 还是 1（关掉的时候不该说）", n)
 	}
 }
 

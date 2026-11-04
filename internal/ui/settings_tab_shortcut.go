@@ -1,138 +1,114 @@
-// 设置页的第三个 Tab：快捷键。照 Biu 的
-// `src/pages/settings/shortcut-settings.tsx`，连三列的宽度都照抄
-// （`grid-cols-[1fr_200px_200px]`，那一行在 `:102`）。
+// 设置页的「快捷键」Tab：原型 `SETTINGS.shortcut`——启用全局快捷键开关 + 一张三列表
+// （命令 / 应用内快捷键 / 全局快捷键），每一格是 `.kbd-rec` 录制键（录制中 / 未设置两种状态）。
 //
-// ## 冲突怎么判、判出来画成什么样
-//
-// 照 Biu 的 `handleChangeShortcut`（`shortcut-settings.tsx:23-39`）：**只在同一列
-// 之内**比，两列互不相干——应用内的 ⌘P 和全局的 ⌘P 可以同时存在，因为全局那个
-// 是在别的应用里按的。空键不算冲突（同一段里明写着「空快捷键不会冲突」）。
-//
-// 冲突的那一格描红，边上写一句「与「音量加」冲突」。Biu 用的是红色描边 +
-// errorMessage，抄的形状。
-//
-// ## 每一行的 key 用命令 id，不用序号
-//
-// 🔴 铁律四（`SPEC.md`）：动态列表的行要给**稳定且唯一**的 key，默认的元素身份是
-// 「父 ID + 兄弟序号」。这一页的行会随设置文件里有的命令而变，用序号的话前面
-// 少一行，后面所有行的录制状态（`FocusBind` 记在那一格上）会整体错配——用户点
-// 「音量加」结果开始录「音量减」。所以用 id。
+// 它读的不是 `app.Settings`：快捷键在**单独一份文件**里（见 shortcuts.go）。
 package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
-// enableGlobalLabel 是底下那个开关的字。Biu 是 `启用全局快捷键`。
+// enableGlobalLabel 是开关的标题。
 const enableGlobalLabel = "启用全局快捷键"
 
+// 表的三列：原型是 `table`（自动列宽），三列大致等分（实测 224 / 216 / 217），`.keys td` 左右 20。
+
 // settingsShortcuts 是快捷键那一页。
-//
-// 它读的不是 `app.Settings`：快捷键在**单独一份文件**里（Biu 自己也是单独一个
-// store，见 shortcuts.go）。
 func (s *Shell) settingsShortcuts(c *ui.Context) {
-	t := c.Theme()
+	p := tok.Of(c.Theme())
 	cur := s.keys.snapshot()
 	ro := s.keys.readOnly()
 
-	// 这一帧画到了录制格——viewShortcuts 靠它判断「正在录」还有没有意义
-	//（这一页不画了，录制状态就该收掉，理由见那里）。
+	// 这一帧画到了录制格——viewShortcuts 靠它判断「正在录」还有没有意义。
 	s.recorderShown = true
 
-	ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
-		if ro {
-			ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
-				FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
-		}
-		// 这一页两列分别管两件事，写出来，不然用户会以为「全局」那一列只是应用内
-		// 那一列的备份。挂掉的时候另有提示（syncGlobalShortcuts 弹的那一句），
-		// 写在这一页的是常态。
-		//
-		// ⚠️ 「切换mini/完整模式」那一条要在括号里说清楚：它切的是**两个窗口**
-		// （主窗口收起来 + 开一个小窗），所以从别的应用按它同样有用——而别的几条
-		// 应用内快捷键（下一首、暂停）不行，它们只是往这个进程的状态里写一笔，
-		// 界面上看不出变化。理由见 `shortcut_dispatch.go` 里 `toggleMiniPlayer` 的注释。
-		ui.Text(c, "应用内那一列：窗口在前台时按它就有用。全局那一列：切到别的"+
-			"应用时按它也有用（底下那个开关关掉就一个都不登记；「切换mini/完整模式」"+
-			"那一条切的是窗口，所以别的应用在前台时它也管用）。焦点在搜索框这类"+
-			"输入框里时快捷键让路，打的字照常进去。").
-			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+	if ro {
+		ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
+			FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(c.Theme()).Err).
+			Margin(space.None, space.None, space.Px12, space.None)
+	}
+	s.setGroup(c, "keys", "快捷键设置", func() {
+		s.card(c, "keys", ro, func(cd *setCard) {
+			cd.row("globalKeys", enableGlobalLabel, "应用在后台时，全局那一列依然生效", func() {
+				on := cur.EnableGlobalShortcuts
+				if pud.Switch(c, "set-sw:globalKeys", &on, "开关："+enableGlobalLabel) && !ro {
+					s.applyShortcutChange(enableGlobalLabel, func() error { return s.keys.setEnableGlobal(on) })
+				}
+			})
 
-		s.settingGroup(c, "快捷键设置", func() {
-			// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`），
-			// 右边那个「恢复默认」是 Biu 同一行里的按钮。
-			ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Padding(space.Px4, space.None).Children(func() {
-				ui.Text(c, "功能说明").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Grow(1)
-				ui.Text(c, "应用内快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
-				ui.Text(c, "全局快捷键").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Width(shortcutFieldWidth)
+			// 表头（`.keys th`：12 号 500 text-3，上 12 下 4、左右 20）。
+			ui.Row(c).Key("keys-head").FillWidth().Padding(space.Px12, setRowPadX, space.Px4, setRowPadX).Children(func() {
+				head := func(s string) ui.Element {
+					return ui.Text(c, s).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).FontWeight(500).TextColor(p.Text3).SingleLine()
+				}
+				head("命令").Grow(1).Shrink(1).MinWidth(0)
+				// 原型的 `th` 里「应用内快捷键」是右对齐的、下面的键却是左对齐（行内 `text-align:right`），照样。
+				ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.End).Children(func() { head("应用内快捷键") })
+				ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.End).Children(func() { head("全局快捷键") })
 			})
 
 			// 焦点那一截在循环**之外**按，见 `keepRecordingFocus` 的注释。
 			var rec ui.Element
-			for _, in := range cur.Shortcuts {
+			for i, in := range cur.Shortcuts {
 				global, _ := findShortcut(in.ID, cur.GlobalShortcuts)
-				if r := s.shortcutRow(c, in, global, cur, ro); r.Valid() {
+				if r := s.shortcutRow(c, in, global, cur, ro, i > 0); r.Valid() {
 					rec = r
 				}
 			}
 			s.keepRecordingFocus(rec)
-
-			// 底下一行：恢复默认在左，全局开关在右（Biu 放在右下角，`:134-136`）。
-			ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Padding(space.Px8, space.None).Children(func() {
-				if settingsButton(c, "恢复默认").FontSize(scale.Font(c, scale.Size12)).Disabled(ro).Clicked() {
-					s.applyShortcutChange("快捷键", s.keys.reset)
-				}
-				ui.Spacer(c).Grow(1)
-				on := cur.EnableGlobalShortcuts
-				if ui.Checkbox(c, &on, enableGlobalLabel).Disabled(ro).Changed() {
-					s.applyShortcutChange(enableGlobalLabel, func() error {
-						return s.keys.setEnableGlobal(on)
-					})
-				}
-			})
 		})
+		ui.Text(c, "点一下快捷键再按下新组合；Esc 取消，Delete 清空。").
+			FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
+			Margin(space.Px8, space.None, space.None, space.None)
 	})
 }
 
-// shortcutRow 是「功能说明 + 两个录制格」那一行。
+// shortcutRow 是「命令 + 两个录制格」那一行（`.keys td`：上下 14、左右 20、行间 1px line）。
 //
-// ⚠️ key 用命令 id（铁律四，见文件头）。
-func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcutSettings, ro bool) (rec ui.Element) {
-	// 名对不上的时候用这一帧的 `in.Name`：用户改了设置文件里的名字，界面上跟的是
-	// 他改过的那个，不是默认的那个。
+// ⚠️ key 用命令 id（铁律四）。
+func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcutSettings, ro, divider bool) (rec ui.Element) {
+	p := tok.Of(c.Theme())
+	// 名对不上的时候用这一帧的 `in.Name`：用户改了设置文件里的名字，界面上跟的是他改过的。
 	name := in.Name
 	if name == "" {
 		name = global.Name
 	}
-
-	ui.Row(c).Key("shortcut:"+in.ID).FillWidth().Gap(space.Px12).Padding(space.Px6, space.None).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+	if divider {
+		ui.Box(c).Key("shortcut-div:" + in.ID).FillWidth().Height(1).Background(p.Line)
+	}
+	ui.Row(c).Key("shortcut:"+in.ID).FillWidth().Padding(space.Px14, setRowPadX).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text).Grow(1).Shrink(1).MinWidth(0)
 
 		inSlot := shortcutSlot{id: in.ID}
 		globalSlot := shortcutSlot{global: true, id: in.ID}
 		other, bad := conflictOf(all.Shortcuts, in.ID, in.Shortcut)
-		if inCell := s.recorderCell(c, in, inSlot, conflictText(other, bad), ro); inCell.Valid() {
-			rec = inCell
-		}
+		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			if inCell := s.recorderCell(c, in, inSlot, conflictText(other, bad), ro); inCell.Valid() {
+				rec = inCell
+			}
+		})
 
 		other, bad = conflictOf(all.GlobalShortcuts, global.ID, global.Shortcut)
-		s.recorderCell(c, global, globalSlot, conflictText(other, bad), ro)
+		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.End).Children(func() {
+			s.recorderCell(c, global, globalSlot, conflictText(other, bad), ro)
+		})
 	})
 	return rec
 }
 
-// recorderCell 是一格录制框，底下那一行是冲突时的那句话。
-//
-// 冲突的字放在**框外面**：放在框里的话框要变高，两列的行高就不再一样，表格看着
-// 是歪的。
+// recorderCell 是一格录制框，底下那一行是冲突时的那句话（放在框外面：放在框里的话框要变高，
+// 两列的行高就不一样了）。
 func (s *Shell) recorderCell(c *ui.Context, item shortcutItem, slot shortcutSlot, conflict string, ro bool) (rec ui.Element) {
-	ui.Column(c).Width(shortcutFieldWidth).Gap(space.Px2).Children(func() {
+	ui.Column(c).Gap(space.Px2).Children(func() {
 		rec = s.shortcutRecorder(c, item, slot, conflict, ro)
 		if conflict != "" {
-			ui.Text(c, conflict).FontSize(scale.Font(c, scale.Size11)).TextColor(dangerText(c.Theme()))
+			ui.Text(c, conflict).FontSize(scale.Font(c, scale.Size11)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Err)
 		}
 	})
 	return rec
@@ -140,8 +116,7 @@ func (s *Shell) recorderCell(c *ui.Context, item shortcutItem, slot shortcutSlot
 
 // conflictText 是冲突时那句话。Biu：`与"${existing.name}"冲突`。
 //
-// 那个 ok 一路带上来是为了让「描红」和「写字」是**同一个**判断：分开判的话哪天
-// 改了一处，另一处还在按旧条件描红，界面上就出现一格红的却没说是撞了谁。
+// 那个 ok 一路带上来是为了让「描红」和「写字」是同一个判断。
 func conflictText(other shortcutItem, ok bool) string {
 	if !ok {
 		return ""
@@ -149,23 +124,13 @@ func conflictText(other shortcutItem, ok bool) string {
 	return "与「" + other.Name + "」冲突"
 }
 
-// applyShortcutChange 存一次改动；存不住就弹提示。
-//
-// 和 `applySetting` 同一个道理：静默丢掉是这一页最坏的失败方式——用户以为改了，
-// 下次打开又变回去，中间屏幕上什么也没发生过。
-//
-// 存住之后要把全局那一列重新登记一遍（`syncGlobalShortcuts`）：不改的话用户在
-// 这一页录了 ⌘⌥K，切到别的应用按 ⌘⌥K 还是上一条——而界面上明明白白写着新键。
+// applyShortcutChange 存一次改动；存不住就弹提示。存住之后把全局那一列重新登记一遍，菜单上
+// 那些命令项的加速键也要跟着变（票 #716：旧键会被菜单吃掉）。
 func (s *Shell) applyShortcutChange(what string, fn func() error) {
 	if err := fn(); err != nil {
 		s.addToast(what+"没存上："+err.Error(), notice.Danger)
 		return
 	}
 	s.syncGlobalShortcuts()
-	// ⚠️ **菜单上那些命令项的加速键要跟着变**（票 #716）。
-	//
-	// 「恢复默认」这一条走的就是这里——用户一键把八个键全恢复，而菜单上还留着
-	// 旧键的话，**旧键会被菜单吃掉**（菜单的加速键先于窗口拿到那个键，见
-	// `refreshMenuAccel` 的注释）。
 	s.refreshMenuAccel()
 }

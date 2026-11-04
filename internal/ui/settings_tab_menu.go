@@ -1,21 +1,10 @@
-// 设置页的第二个 Tab：菜单。照 Biu 的 `src/pages/settings/menu-settings.tsx`。
-//
-// Biu 那一页只有一件事：「设置侧边菜单项显示和隐藏」。本项目多两行——侧栏折叠和
-// 侧栏宽度——它们也是改同一个 `app.Settings`（`sideMenuCollapsed` /
-// `sideMenuWidth`），摆在这一页是因为它们讲的是同一件事：侧栏长什么样。
+// 设置页的「菜单」Tab：原型 `SETTINGS.menu`——侧栏各入口的显示开关、收藏夹显示开关。
 //
 // ## 一个键两组意思：`hiddenMenuKeys`
 //
-// 这一格存的是**被藏起来的**那些键（`hiddenMenuKeys`），而界面上画的是**还看得
-// 见的**那些。Biu 那一层是 `selectedKeys = groupKeys.filter(k => !value.includes(k))`
-// （`menu-settings.tsx:30`），勾上 = 看得见 = 不在 `hiddenMenuKeys` 里。差一层
-// 就差一个意思，所以这里把翻来覆去的那几句写成一个函数，不在控件旁边现推。
-//
-// 还有一层 Biu 有、这里也要有：**不属于这一组的键不能动**。`hiddenMenuKeys` 是
-// 一份全局名单，Biu 那边别的组（个人创建的菜单、个人收藏的菜单）往同一个键里写
-// 各自的 id（`menu-settings.tsx:57-101`）。那些组我们还没做（收藏夹的界面有了，
-// 设置这一页还没有），但名单里的它们的 id 得原样留着——写设置的那一段只处理本组
-// 的键（`setHiddenMenuKeys`）。
+// 存的是**被藏起来的**那些键，而界面上画的是**还看得见的**那些（开关开 = 看得见 = 不在
+// `hiddenMenuKeys` 里）。名单是一份全局的：菜单项存路由（"/later"），收藏夹存十进制 id；
+// 写设置的那一段只处理本组的键，别的组写进来的原样留着（`mergeHiddenMenuKeys`）。
 package ui
 
 import (
@@ -23,51 +12,56 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
-// menuGroupName 是那一组的标题。Biu 的 groupName 是「系统默认菜单」。
-const menuGroupName = "系统默认菜单"
-
 // settingsMenu 是菜单那一页。
 func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
-	// 三张分组卡片：「系统默认菜单」（哪些入口看得见）、「收藏夹」（哪些收藏夹
-	// 摆得上侧栏）和「侧栏」（折叠、宽度），
-	// 和常规页同一套写法（设计规范 §7.9）。
-	s.settingGroup(c, menuGroupName, func() { s.pickMenuVisibility(c, st, ro) })
-	s.settingGroup(c, "收藏夹", func() { s.pickFavoriteVisibility(c, st, ro) })
-	s.settingGroup(c, "侧栏", func() { s.pickSideMenu(c, st, ro) })
+	p := tok.Of(c.Theme())
+	s.setGroup(c, "menus", "侧栏菜单显示", func() {
+		// 原型 `.muted` 一句说明，上收 4、下留 12（和 h3 下面的 12 叠起来是 12 + 12 - 4）。
+		ui.Text(c, "关掉的入口不会出现在侧栏里，页面本身和数据都还在。").
+			FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().
+			Margin(space.Px4*-1, space.None, space.Px12, space.None)
+		s.card(c, "menus", ro, func(cd *setCard) { s.pickMenuVisibility(cd, st) })
+	})
+	s.setGroup(c, "folders", "收藏夹显示", func() {
+		s.card(c, "folders", ro, func(cd *setCard) { s.pickFavoriteVisibility(cd, st) })
+	})
 }
 
-// pickFavoriteVisibility 是「哪些收藏夹摆得上侧栏」那一组勾选框。
-//
-// 收藏夹行上的右键菜单有「隐藏」（`sidebar_favorites.go` 的 `favoriteAction`），
-// 藏掉的那一笔写进 `hiddenMenuKeys`——**和上面「系统默认菜单」是同一份名单**：
-// 菜单项存路由（"/later"），收藏夹存十进制 id（Biu 的 `String(item.id)`）。这一组
-// 是那份名单的**另一半**：藏进侧栏的收藏夹只有在这里才放得回来。
-//
-// 勾选语义和上面那组一样：勾上 = 侧栏看得见 = 不在 `hiddenMenuKeys` 里。写回走
-// `setFavoriteHidden`，它只动这一个键——名单里菜单项那几笔、别的收藏夹那几笔
-// 都原样留着（`mergeHiddenMenuKeys` 那一条的同一个理由）。
-func (s *Shell) pickFavoriteVisibility(c *ui.Context, st app.Settings, ro bool) {
-	t := c.Theme()
-	hidden := hiddenMenuKeys(st)
+// pickMenuVisibility 是「哪些菜单项看得见」那一组开关：每个入口一行，只有标题。
+func (s *Shell) pickMenuVisibility(cd *setCard, st app.Settings) {
+	keys := menuGroupKeys()
+	visible := visibleMenuKeys(keys, st.HiddenMenuKeys)
+	for _, k := range keys {
+		on := slices.Contains(visible, k)
+		title := menuTitle(k)
+		cd.row("menu:"+k, title, "", func() {
+			if pud.Switch(cd.c, "set-sw:menu:"+k, &on, "开关：在侧栏里显示「"+title+"」") && !cd.ro {
+				s.setHiddenMenuKeys(keys, withChecked(visible, k, on))
+			}
+		})
+	}
+}
 
-	// 两组收藏夹挨着列：「我创建的」在上、「我收藏的」在下，和侧栏同一个顺序。
+// pickFavoriteVisibility 是「哪些收藏夹摆得上侧栏」那一组开关：标题 + 「N 首」。
+//
+// 「我创建的」在上、「我收藏的」在下，和侧栏同一个顺序。名单里还留着、可收藏夹已经不在接口
+// 返回里的 id（在 B 站那边删了、或者换过账号）也摆出来，不然那几笔永远躺在设置文件里。
+func (s *Shell) pickFavoriteVisibility(cd *setCard, st app.Settings) {
+	c := cd.c
+	hidden := hiddenMenuKeys(st)
 	seen := make(map[string]bool)
 	any := false
 	for g := range favGroups {
 		grp := app.FavoriteGroup(g)
-		items := s.app.SideFavorites(grp)
-		if len(items) == 0 {
-			continue
-		}
-		any = true
-		ui.Text(c, grp.String()).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(t.TextMuted).Padding(space.Px8, space.None, space.Px2, space.None)
-		for _, f := range items {
+		for _, f := range s.app.SideFavorites(grp) {
+			any = true
 			key := strconv.FormatInt(f.ID, 10)
 			seen[key] = true
 			on := !hidden[key]
@@ -75,42 +69,28 @@ func (s *Shell) pickFavoriteVisibility(c *ui.Context, st app.Settings, ro bool) 
 			if title == "" {
 				title = "（没名字）"
 			}
-			ui.Row(c).FillWidth().Padding(space.Px8, space.None).AlignItems(ui.Center).
-				Children(func() {
-					if ui.Checkbox(c, &on, title).
-						Label("在侧栏里显示收藏夹「" + title + "」").
-						Disabled(ro).Changed() {
-						s.setFavoriteHidden(f.ID, !on)
-					}
-				})
-		}
-	}
-
-	// 名单里还留着、可收藏夹已经不在接口返回里的那些 id（在 B 站那边删了、
-	// 或者换过账号）：摆出来是为了能清掉——不然那几笔永远躺在设置文件里。
-	var orphans []string
-	for _, k := range st.HiddenMenuKeys {
-		if _, err := strconv.ParseInt(k, 10, 64); err == nil && !seen[k] {
-			orphans = append(orphans, k)
-		}
-	}
-	for _, k := range orphans {
-		any = true
-		off := false
-		ui.Row(c).FillWidth().Padding(space.Px8, space.None).AlignItems(ui.Center).
-			Children(func() {
-				if ui.Checkbox(c, &off, "收藏夹 "+k+"（已不在列表里）").
-					Label("取消隐藏已不在列表里的收藏夹 " + k).
-					Disabled(ro).Changed() {
-					s.setFavoriteHidden(mustID(k), false)
+			help := grp.String() + " · " + strconv.Itoa(f.MediaCount) + " 首"
+			cd.row("fav:"+key, title, help, func() {
+				if pud.Switch(c, "set-sw:fav:"+key, &on, "开关：在侧栏里显示收藏夹「"+title+"」") && !cd.ro {
+					s.setFavoriteHidden(f.ID, !on)
 				}
 			})
+		}
 	}
-
+	for _, k := range st.HiddenMenuKeys {
+		if _, err := strconv.ParseInt(k, 10, 64); err != nil || seen[k] {
+			continue
+		}
+		any = true
+		off := false
+		cd.row("fav:"+k, "收藏夹 "+k, "已不在列表里，打开可取消隐藏", func() {
+			if pud.Switch(c, "set-sw:fav:"+k, &off, "开关：取消隐藏已不在列表里的收藏夹 "+k) && !cd.ro {
+				s.setFavoriteHidden(mustID(k), false)
+			}
+		})
+	}
 	if !any {
-		ui.Text(c, s.favEmptyText(s.app.LoggedIn())).
-			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
-			Padding(space.Px8, space.None)
+		cd.row("fav-empty", s.favEmptyText(s.app.LoggedIn()), "", nil)
 	}
 }
 
@@ -138,48 +118,6 @@ func (s *Shell) setFavoriteHidden(id int64, hide bool) {
 func mustID(k string) int64 {
 	id, _ := strconv.ParseInt(k, 10, 64)
 	return id
-}
-
-// pickMenuVisibility 是「哪些菜单项看得见」那一组勾选框。
-//
-// ⚠️ **不能直接用 `ui.CheckboxGroup`**：它那一个「全选」是 MyGo 自己算的
-// （`ui/feedback.go` 的 `all := on == len(boxes) && on > 0`），而这一票明写了一条
-// 「全选」判定要**严格长度相等**（PLAN C-50：改成集合比较会让「部分选中」显示成
-// 全选）。这里自己画，好让那条判定是这一页的代码而不是框架的，测试也才钉得住。
-func (s *Shell) pickMenuVisibility(c *ui.Context, st app.Settings, ro bool) {
-	keys := menuGroupKeys()
-	// ⚠️ `visible` 是**看得见的那些键**，不是「看得见 / 看不见」的布尔数组。
-	// 「全选」那一格判的是它和 `keys` 的**长度**（见 menuAllChecked），所以它
-	// 必须是键的列表而不是一排 bool —— 一排 bool 和 keys 永远一样长，那条判定
-	// 就成了永远为真的空话。
-	visible := visibleMenuKeys(keys, st.HiddenMenuKeys)
-
-	all := menuAllChecked(keys, visible)
-	allOn := all
-	// ⚠️ 那个 `Label` 不能省，而且**不能只写标题**：左边侧栏上有一列同名菜单项，
-	// 界面上是「稍后再看」的那一行；不给名字的话读屏软件念出来只有「复选框」。
-	row := func(body func()) {
-		ui.Row(c).FillWidth().Padding(space.Px8, space.None).AlignItems(ui.Center).Children(body)
-	}
-	row(func() {
-		if ui.Checkbox(c, &allOn, "全选").Label("全选：" + menuGroupName).
-			Disabled(ro || len(keys) == 0).Changed() {
-			// 全选勾上 = `keys` 一个都不藏；全选取消 = 全部藏起来。Biu 是
-			// `onSelectionChange(checked ? groupKeys : [])`（`select-all-checkbox-group`）。
-			s.setHiddenMenuKeys(keys, pick(allOn, keys, nil))
-		}
-	})
-	// 勾选框的 `*bool` 是**一帧一读的局部量**：Changed 之后立刻写进设置，下一帧
-	// 再从设置里读回来。写不进去（只读）时读回旧值，勾自己弹回去。
-	for _, k := range keys {
-		on := slices.Contains(visible, k)
-		row(func() {
-			if ui.Checkbox(c, &on, menuTitle(k)).
-				Label("在侧栏里显示「" + menuTitle(k) + "」").Disabled(ro).Changed() {
-				s.setHiddenMenuKeys(keys, withChecked(visible, k, on))
-			}
-		})
-	}
 }
 
 // menuGroupKeys 是这一组的键：侧栏的默认菜单项。
@@ -275,115 +213,4 @@ func mergeHiddenMenuKeys(hidden, keys, visible []string) []string {
 		}
 	}
 	return slices.Compact(slices.Sorted(slices.Values(outside)))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 侧栏自己那两行
-// ─────────────────────────────────────────────────────────────────────────────
-
-// pickSideMenu 是侧栏折叠和宽度那两行。
-//
-// 宽度这一行**和拖把手是同一条路**：`commitSideWidth` 写的就是
-// `sideMenuWidth` / `sideMenuCollapsed` 那一对（见 sidebar.go），所以这里改了
-// 滑块、那边拖把手，两边不会互相打脸。
-func (s *Shell) pickSideMenu(c *ui.Context, st app.Settings, ro bool) {
-	s.settingRow(c, "折叠侧栏", "",
-		func() {
-			s.pickSwitch(c, "折叠侧栏", "折叠侧栏", st.SideMenuCollapsed, ro,
-				func(cur *app.Settings, on bool) { cur.SideMenuCollapsed = on })
-		})
-	w := st.SideMenuWidth
-	s.settingRow(c, "侧栏宽度", "", func() {
-		ui.Row(c).Key("setting:sideMenuWidth").Width(s.settingsControlFitW(c, settingsControlW)).
-			Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-			sl := ui.Slider(c, &w, app.MinSideMenuWidth, app.MaxSideMenuWidth).
-				Grow(1).Label("侧栏宽度").Disabled(ro)
-			if sl.Changed() {
-				s.applySetting("侧栏宽度", func(cur *app.Settings) { cur.SideMenuWidth = w })
-			}
-			ui.Textf(c, "%.0fpx", w).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
-		})
-	})
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 本地音乐目录
-// ─────────────────────────────────────────────────────────────────────────────
-
-// pickLocalMusicDirs 是本地音乐目录那一组：一个一个列出来，每个后面一个 ×，
-// 底下「添加文件夹」。
-//
-// ## 为什么摆在设置页上，而不是「本地音乐」那一页
-//
-// Biu 是摆在 local-music 页里的（`local-music/index.tsx` 的目录列表）。本项目
-// 的 local-music **早就接上了**（本地音乐扫描与页面，issue #30 已 CLOSED，commit
-// `2a28190`；那一页有自己的表格 / 列表 / 网格三档、行里的「打开文件夹」和
-// 「删除文件」），而这一组目录管理器**一直留在设置页**没搬过去。
-//
-// ⚠️ 这一点曾经被写反过：这段注释说「local-music 现在还是一个空状态……等它接上
-// 之后再搬过去」。接上早就在它之前发生了，而「等接上之后」这句话挂在代码上挂了
-// 很久——读的人会以为这一页还是占位，于是要么去重做一遍，要么以为这里摆错了地方。
-// **这一页和 Biu 不一致是真的**（Biu 把目录管理器摆在本地音乐页里），摆错位置是
-// 一件该改的事，但它不是「因为那一页还没接上」。
-func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
-	t := c.Theme()
-	s.settingGroup(c, "音乐库", func() {
-		ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).Grow(1).Children(func() {
-				ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
-				ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
-			})
-			if settingsButton(c, "添加文件夹").Width(104).Disabled(ro).Clicked() {
-				s.pickPath("本地音乐目录", true, func(path string) {
-					s.applySetting("本地音乐目录", func(cur *app.Settings) {
-						// 不加重复的：同一个目录摆两遍，音乐列表里也会出现两遍。
-						if !slices.Contains(cur.LocalMusicDirs, path) {
-							cur.LocalMusicDirs = append(slices.Clone(cur.LocalMusicDirs), path)
-						}
-					})
-				})
-			}
-		})
-
-		if len(st.LocalMusicDirs) == 0 {
-			ui.Text(c, "还没有目录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).Padding(space.Px4, space.None, space.None, space.None)
-			return
-		}
-		// 重复目录只画一次。设置文件可由用户直接编辑，两个相同目录在文件里合法；
-		// 但列表 key 必须唯一，否则渲染器会 panic。
-		seen := make(map[string]bool, len(st.LocalMusicDirs))
-		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
-			for i, dir := range st.LocalMusicDirs {
-				if seen[dir] {
-					continue
-				}
-				seen[dir] = true
-				ui.Row(c).Key("local-dir:" + dir).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-					// ⚠️ 这一行的 key 用的是**路径**，不是序号（🔴 铁律四）：删掉中间
-					// 那一条之后序号会整体前移一格，按序号排的身份就落到旁边那条上
-					// 了，而 × 删掉的是它自己那一格还是隔壁那一格，从画面上看不出来。
-					ui.Text(c, dir).FontSize(scale.Font(c, scale.Size13)).Grow(1).SingleLine()
-					if flatButton(c, "×").Label("移除目录「" + dir + "」").
-						FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Disabled(ro).Clicked() {
-						s.removeLocalMusicDir(i)
-					}
-				})
-			}
-		})
-	})
-}
-
-// removeLocalMusicDir 删掉第 i 个目录。
-//
-// ⚠️ 一定要 `Clone` 之后才 `Delete`：`SettingsSnapshot` 返回的切片是**和 store
-// 共享**的（`internal/app/settings.go` 的 Snapshot 注释里写着），直接 `Delete` 会
-// 把 store 里的顺序改掉，而那一格还没写盘——用户下次打开看到的顺序是乱的。
-func (s *Shell) removeLocalMusicDir(i int) {
-	s.applySetting("本地音乐目录", func(cur *app.Settings) {
-		list := slices.Clone(cur.LocalMusicDirs)
-		if i < 0 || i >= len(list) {
-			return
-		}
-		cur.LocalMusicDirs = slices.Delete(list, i, i+1)
-	})
 }

@@ -169,6 +169,27 @@ const (
 	MediumContent = 760
 )
 
+// PageHorizontalForWindow 是原型页面左右留白，按**窗口宽**（不是内容区宽）分档：> 1024 是 40，
+// > 760 是 32，再窄 16（`.page` 的 padding-inline 和两个 `max-width` 媒体查询，index.html 262、
+// 934、949 行）。`PageHorizontal` 是按内容区宽的近似；要和原型 1:1 的页面用这一个。
+func PageHorizontalForWindow(winW float32) float32 {
+	switch {
+	case winW > 1024:
+		return Px40
+	case winW > 760:
+		return Px32
+	}
+	return Px16
+}
+
+// PageBottomForWindow 是原型页面底部留白：窗口宽 ≤ 760 是 48，否则 64（`.page` 的 padding-bottom）。
+func PageBottomForWindow(winW float32) float32 {
+	if winW <= 760 {
+		return Px48
+	}
+	return PageBottom
+}
+
 // PageHorizontal 是内容区宽 contentW 时页面左右的内边距：≥1180 为 40，≥760 为 32，
 // 否则 16。contentW 是**内容区**（侧栏右边那一整块）的宽，不是窗口宽。
 //

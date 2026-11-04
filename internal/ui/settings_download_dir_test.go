@@ -55,58 +55,30 @@ func withDownloadDir(fallback string) shellOpt {
 	})
 }
 
-// shownPath 替掉设置页那个路径输入框，抓住**哪一格拿到了哪条路径**。
+// TestTheSettingsPageShowsWhereTheSongsWillLand 断设置页上「下载目录」那一行写的是**歌真正落下来
+// 的地方**，而不是空串或「未设置」：设置里没选过时显示默认落点（`App.DownloadDir()`）。
 //
-// ⚠️ **为什么只能从这一层钉**：只读输入框里的那个值是**框架画上去的**，不进
-// 渲染树（`Tester.Texts()` 里没有它，`HasText` 也量不到）——所以「那一格显示的
-// 是哪条路径」量画面量不出来，只能看**那一格拿到的是什么**。
-//
-// ⚠️ **它要钉的是「接线」**：把 `pickDownloadPath` 改回
-// `pathField(c, st.DownloadPath, ...)`（也就是「设置里没选过就显示未设置」那个
-// 改法之前的样子），这一条必须红——不然用户看到的就是「未设置」，而歌其实落
-// 在别处。
-func shownPath(t *testing.T, label string) *string {
-	t.Helper()
-	got := new(string)
-	orig := pathField
-	pathField = func(c *ui.Context, path, lbl string, ro bool) {
-		if lbl == label {
-			*got = path
-		}
-		orig(c, path, lbl, ro)
-	}
-	t.Cleanup(func() { pathField = orig })
-	return got
-}
-
-// TestTheSettingsPageShowsWhereTheSongsWillLand 断设置页上「下载目录」那一格
-// 显示的是**歌真正落下来的地方**，而不是一个空串。
-//
-// ⚠️ **反面的那一半也要断**：显示成「未设置」比显示错更坏——用户看到的是
-// 「我还没设过下载目录」，于是他跑去设一个，而默认落点（`~/Music/BiuGo`）其实
-// 一直在生效。
+// 显示成「未设置」比显示错更坏——用户看到的是「我还没设过下载目录」，于是他跑去设一个，而
+// 默认落点其实一直在生效。路径是行里的一段等宽字（原型 `.mono`），所以量得到。
 func TestTheSettingsPageShowsWhereTheSongsWillLand(t *testing.T) {
 	want := defaultDownloadsDir(t)
-	got := shownPath(t, "下载目录")
-
-	shellOnSettings(t, app.DefaultSettings(""), withDownloadDir(want))
-
-	if *got != want {
-		t.Errorf("设置页上「下载目录」那一格拿到的是 %q，want 默认落点 %q", *got, want)
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), withDownloadDir(want))
+	if !hasExactText(tt, want) {
+		t.Errorf("设置页上没有写出默认下载目录 %q，文字有 %q", want, tt.Texts())
+	}
+	if tt.HasText("未设置") {
+		t.Errorf("设置页把下载目录写成了「未设置」：%q", tt.Texts())
 	}
 }
 
-// TestTheSettingsPageStillShowsTheDirectoryTheUserPicked 断**手动选过的目录
-// 照旧**：默认落点改了，但它只管「没选过」的那一条。
+// TestTheSettingsPageStillShowsTheDirectoryTheUserPicked 断手动选过的目录照旧：默认落点只管
+// 「没选过」的那一条。
 func TestTheSettingsPageStillShowsTheDirectoryTheUserPicked(t *testing.T) {
 	fallback := defaultDownloadsDir(t)
 	picked := filepath.Join(filepath.Dir(fallback), "我自己的")
-	got := shownPath(t, "下载目录")
-
-	shellOnSettings(t, app.DefaultSettings(picked), withDownloadDir(fallback))
-
-	if *got != picked {
-		t.Errorf("设置页上「下载目录」那一格拿到的是 %q，want 用户选的那个 %q", *got, picked)
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(picked), withDownloadDir(fallback))
+	if !hasExactText(tt, picked) {
+		t.Errorf("设置页上没有写出用户选的目录 %q，文字有 %q", picked, tt.Texts())
 	}
 }
 

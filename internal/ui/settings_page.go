@@ -1,57 +1,44 @@
-// 设置页：Biu 的 `/settings`（`src/pages/settings/`，`index.tsx` 是那一页的壳）。
+// 设置页（`/settings`）：原型 `PAGES.settings` + `SETTINGS`，CSS 在 index.html 491–533 行。
 //
-// ## 四个 Tab 是哪四个
+// 结构：页头（Eyebrow `Preferences` + 「设置」）→ 左边 180 宽的分类导航（常规 / 外观 / 菜单 /
+// 快捷键 / 代理 / 关于）+ 缝 48 + 右边那一个 Tab 的分组卡。每个 Tab 在自己的文件里：
 //
-// 照 Biu 的 `index.tsx:124-138`：`常规设置` / `菜单设置` / `快捷键设置` /
-// `代理设置`，连顺序都照抄。每一个 Tab 的内容在各自的文件里（`settings_tab_*.go`），
-// 这一份只管壳、共用的行、以及「只读时怎么办」。
+//	settings_tab_general.go    常规：播放 / 系统 / 下载
+//	settings_tab_appearance.go 外观：深浅模式 / 颜色与字体 / 数据显示样式
+//	settings_tab_menu.go       菜单：侧栏入口 / 收藏夹显示
+//	settings_tab_shortcut.go   快捷键：全局开关 + 三列表
+//	settings_tab_proxy.go      代理：三选一 + 自定义表单
+//	settings_tab_about.go      关于：版本卡 + 开源许可 / 诊断信息
 //
-// ## 每一个控件改的都是**盘上已经有的键**，一个都不新造
+// 每一个控件改的都是**盘上已经有的键**，一个都不新造（`fontScale` 是这一版新增的，
+// 老文件缺这个键时落到标准）；快捷键改的是 `shortcuts.json`。
 //
-// 常规/菜单/代理三个 Tab 改的是 `app.Settings`（键名见
-// `internal/app/settings_test.go` 的 `biuKeys`）；快捷键 Tab 改的是
-// `shortcuts.json`（Biu 自己也是单独一个 store，见 shortcuts.go）。
-// 设置页是那些键的入口，不是键名的发明地——用户来回切 Biu 和 MyGo 时丢设置，
-// 是最难查的一类数据丢失。
-//
-// 🔴 本文件里的任何 view **不许**调 `c.SetTheme`：主题每帧开头装一次就够，
-// 别的页面照样生效（铁律二，见 theme.go）。
+// 🔴 本文件里的任何 view **不许**调 `c.SetTheme`：主题只在 `applyFrameTheme` 里装。
 package ui
 
 import (
-	"github.com/ShellMonster/PudMusic/internal/service/audio"
-	"github.com/ShellMonster/PudMusic/internal/service/bili"
-	"strconv"
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
 // settingsPath 是设置页那条路由，和 router.go 里登记的那一条是同一个字符串。
-//
-// 拿来和 `Route.Match` 比，而不是拿 `routes[6]`：那条表一改顺序，这里跟着错，
-// 而且错得很安静——设置页退回占位页，没人看得出来。
 const settingsPath = "/settings"
 
-// goToDownloadDirSetting 去设置页的「下载目录」那一项。
-//
-// ⚠️ **它不只切页**：设置页有四个 Tab，而「下载目录」在「常规设置」那一格的
-// 第三段（要往下滚才看得到）。只把用户送到设置页的话，等于让他自己把「下载
-// 记录页的一句话」翻译成「设置页第 N 个 Tab 的第 M 行」（报告 C1）。
-//
-// 所以这里三件事一起做：切到那一格、**指**着那一行（标题是主色）、让那一页
-// 把它滚进视野（见 settingRowElAt）。
-//
-// ⚠️ **它是从别的页面调过来的**：调用方是下载记录页（那一句「还没有下载
-// 目录」）。设置页自己不会指着谁——`settingsFocusNone` 就是「没指」。
+// pageMaxW 是原型 `.page` 的最大宽。
+const pageMaxW = 1280
+
+// goToDownloadDirSetting 去设置页的「下载目录」那一项：切到常规 Tab、指着那一行
+// （标题是主色）、让它滚进视野。从下载记录页的「还没有下载目录」跳过来用。
 func (s *Shell) goToDownloadDirSetting() {
 	s.settings.tab = settingsTabGeneral
 	s.settings.focus = settingsFocusDownload
@@ -59,1085 +46,215 @@ func (s *Shell) goToDownloadDirSetting() {
 	s.navigate(settingsPath)
 }
 
+// goToSettingsTab 去设置页的某一个 Tab（菜单「关于」走它）。
+func (s *Shell) goToSettingsTab(tab int) {
+	s.settings.tab = tab
+	s.navigate(settingsPath)
+}
+
 // settingsPageState 是设置页自己那一摊，**只由 view 在主线程上读写**。
 type settingsPageState struct {
-	// tab 是切在第几个 Tab。建在 Shell 上而不是每帧的局部变量：即时模式每一帧
-	// 都重画一遍，局部变量下一帧就没了（见 Shell.searchKeyword 的注释）。
+	// tab 是切在第几个 Tab。建在 Shell 上而不是局部变量：即时模式每一帧都重画一遍。
 	tab int
 
-	// eqOpen 是均衡器自定义面板开着没有，eqName 是「另存为预设」那个输入
-	// 框里的词（见 eq_panel.go）。同样是跨帧的界面状态，不能是局部变量。
+	// eqOpen / eqFullOpen / eqName 是均衡器自定义面板的状态（eq_panel.go，满屏播放器里用）。
 	eqOpen     bool
 	eqFullOpen bool
 	eqName     string
 
-	// scroll 是这一页的滚动位置。按 Tab 时回到顶上——Biu 的 Tabs 换了面板就是
-	// 新的一页，滚到一半切过去会落在半截上。
+	// scroll 是这一页的滚动位置；换 Tab 时回到顶上。
 	scroll ui.ScrollState
-
 	// shownTab 是上一帧画的是第几个 Tab，用它认出「刚按了 Tab」。
 	shownTab int
 
-	// focus 是「从别处跳过来时要指的那一项」（见 goToDownloadDirSetting）。
-	//
-	// ⚠️ **它不是路由**：跳过来的时候用户要的是「那一项」，不是「设置页」——
-	// 而设置页有四个 Tab、几十行，「下载目录」在第三段里，不指一下用户还得
-	// 自己找（报告 C1：「等于让用户自己把『下载记录页的一句话』翻译成『设置页
-	// 第 N 个 Tab 的第 M 行』」）。
+	// focus 是「从别处跳过来时要指的那一项」。它不是路由：用户要的是那一项。
 	focus settingsFocus
-
-	// focusScroll 记「把指着的那一行滚进视野」这件事**还没做**。
-	//
-	// ⚠️ **只做一次**：上游的 `Element.ScrollIntoView()` 说的是「在它该进视野的
-	// 那一帧调它」——每一帧都调的话，用户自己滚走了它又被拉回来。
-	//
-	// ⚠️ **它不需要跨帧地等**：上游那一行是「布局完就把周围的容器滚到刚好露出
-	// 它」，而「这一帧新建的元素这一帧就跟着进来」——所以从前那套「量不到就再要
-	// 一帧、最多试三次」的跨帧逻辑整个删掉了（那一套量的是**上一帧**的盒子，而
-	// 元素属于建它的那一遍，跨帧读是拿旧把手）。
+	// focusScroll 记「把指着的那一行滚进视野」这件事还没做（只做一次，否则用户自己
+	// 滚走了又被拉回来）。
 	focusScroll bool
 
-	// focusScrollFrom 记「滚进视野之前」的滚动位置。
-	//
-	// ⚠️ **它只用来判方向**：上游滚完之后那 16 像素的留白往哪边补，要看它是
-	// 往下滚的还是往上滚的（见 `syncSettings`）。
-	focusScrollFrom float32
+	// proxy 是代理自定义表单里还没保存的字（保存并测试才落盘）。
+	proxy proxyForm
 
-	// focusMargin 记「上游滚完之后那 16 像素的留白还没补上」。
-	//
-	// ⚠️ **补在下一帧**：上游那一行是在**布局完**之后才滚的（`reveal`），所以
-	// 滚完之后的位置要到下一帧才看得见——那 16 像素也就只能在那时候补
-	// （见 `syncSettings`）。
-	focusMargin bool
-
-	// descFloor 是说明列这一帧的**下限**（0 = 不给下限）。
-	//
-	// ⚠️ **每帧算一次**，不是每一行算一次：它取决于**内容区有多宽**
-	// （窗口宽 - 侧栏宽 - 内边距），而这一页的每一行都是同一个内容区。
-	// 算一次存下来，各行读它（见 `settingsDescFloor`）。
-	descFloor float32
-
-	// contentW 是**分组卡片里那一行**的宽（去页面内边距、去卡片内边距）。
-	//
-	// ⚠️ **控件列的宽度要钳在它里面**（`settingsControlFitW`）：分段控件那一族
-	// 跟字号缩放走（1.4 倍时 476），最窄那一档（窗口 900 + 侧栏 480）的卡内行宽
-	// 只有 274——不钳的话那一列就**比卡片还宽**，右边被切掉。
-	contentW float32
+	// fontList 是外观 Tab 里字体列表（虚拟列表）的状态。
+	fontList ui.ListState
 }
 
 // settingsFocus 是「从别处跳过来时要指的那一项」的身份。
 type settingsFocus string
 
 const (
-	// settingsFocusNone 是「没指着谁」。
-	settingsFocusNone settingsFocus = ""
-	// settingsFocusDownload 是「常规设置」里的「下载目录」那一行。
+	settingsFocusNone     settingsFocus = ""
 	settingsFocusDownload settingsFocus = "downloadPath"
 )
 
-// 四个 Tab。顺序就是从左到右的顺序，和 Biu 那一页一样。
+// 六个 Tab。顺序就是从上到下的顺序。
 const (
 	settingsTabGeneral = iota
+	settingsTabAppearance
 	settingsTabMenu
 	settingsTabShortcut
 	settingsTabProxy
+	settingsTabAbout
 )
 
-// settingsTabNames 是四个 Tab 上的字。照 Biu `index.tsx:125-137` 的 title。
-var settingsTabNames = []string{"常规设置", "菜单设置", "快捷键设置", "代理设置"}
-
-// 控件列的宽度。设置页每一行是「左边标题，右边控件」，**右边那一列
-// 全部按同一个基准宽度排**（票 #235 的 F-04），右边齐在分组卡片的内右沿，
-// 左边也就齐在同一条线上（卡片内右沿往左 `settingsControlW`）。
-//
-// 340 是这一列里**最宽的一份内容**量出来的：主题那排现在是**四档**（跟随系统 /
-// 浅色 / 深色 / 定时，定时是 #534 加的），每档「18 图标 + 4 缝 + 字 + 20 内边距」，
-// 「跟随系统」98、其余各 70，加三道 4 的缝和行内边距是 **324**——旧基准 300
-// （#297 时的三档口径）装不下，四档全被裁成「跟随…」「浅…」（2026-10-26 实测
-// 900 / 1200 两档窗口都截断）。
-//
-// ⚠️ **文本缩放大于 1 的时候这一排跟着变宽**（行宽取 `scale.Font(c, settingsControlW)`）：
-// 字一大「跟随系统」也要跟着长，不跟着走标签就会裁半。基准宽说的是**缩放为 1 的时候**。
-//
-// ⚠️ **三处分段控件走同一个出口**（`settingsSegment`）：设置页只有一种分段控件
-// （票 #240 / 报告 §4 的 F-17）。
-//
-// radiusReadoutW 是圆角行那个 px 读数的宽。
-const (
-	settingsControlW = 340
-	radiusReadoutW   = 48
-)
-
-// settingsDescMinW 是**说明列**的最小宽度（标题底下那句说明还在的行才有说明列）。
-//
-// # 为什么要有这个下限
-//
-// 每一行是「左边标题 + 一句说明，右边定宽控件」，**控件那一列是定宽的**，
-// 说明那一列吃剩下的——窗口越窄，说明被挤得越狠。280 是设计规范 v0.1
-// 定的那一档下限。
-//
-// 🔴 **这个下限是「有条件」的**，条件有两条：
-//
-//  1. **这一行的说明得存在**（`settingRowElAt`）：#530 把设置页的说明全部删了，
-//     现在每一行的 desc 都是空串——空说明给下限只会白白挤占控件列（900 宽那一档
-//     实测把下拉挤出分组卡片 14 像素）。哪天说明回来了，下限自动跟着回来。
-//  2. **内容区放得下它**（`settingsDescFloor`）：放不下时不给——说明列宁可窄一点，
-//     也不能把右边那列控件顶出卡片。
-//
-// ⚠️ **为什么不能无条件给**：说明列是**中文**，可以逐字换行，而控件列里那一族
-// （分段控件）**不能折**——它一折就散。所以说明列必须**自己定一个下限**，不许它
-// 被压成一个字宽（那说明等于没有）。
-//
-// ⚠️ **这一段曾经断言「框架的 flex 没有收缩」——那条断言是错的**（框架
-// v0.7.3 的 `shrink` 默认就是 1，见 `mygo/ui/context.go:88` 的 `e.shrink = 1`
-// 和 `mygo/ui/layout.go` 的 `resolveFlexible`；本仓库的 `playbar_rate.go:66`
-// 引的是对的那一份）。**说明列仍然要自己算下限，但理由是上面那条**（控件列
-// 不能折），不是「框架不会收缩」。
-const settingsDescMinW = 280
-
-// settingsDescFloor 是说明列这一帧的**下限**。
-//
-// 🔴 **下限是条件性的**，条件有两条：
-//
-//  1. **说明存在**——调用处（`settingRowElAt`）只在 desc 非空时才用这个值；
-//     #530 之后设置页的说明全部删空了，所以这一帧它通常是 0。
-//  2. **内容区放得下**（0 = 不给）：内容区够不够
-//     `说明列下限 + 缝 + 控件列的基准宽`。放不下时**不给下限**——说明列宁可
-//     窄一点，也不能把右边那列控件顶出卡片（控件列不能折，见上面
-//     `settingsDescMinW` 那一段）。
-//
-// ⚠️ **控件列的基准宽取「分段控件那一族」的**（`scale.Font(c, settingsControlW)`）：
-// 它是这一列里唯一跟着字号缩放走的（别的行都固定 340），所以它是最坏的一档。
-func (s *Shell) settingsDescFloor(c *ui.Context, st app.Settings) float32 {
-	need := float32(settingsDescMinW) + space.Px24 + scale.Font(c, settingsControlW)
-	if s.settingsContentInnerW(c, st) < need {
-		return 0
-	}
-	return settingsDescMinW
+// settingsTabs 是左边导航：名字 + 图标（原型 `tabs` 的第 2、3 项）。
+var settingsTabs = []struct{ label, icon string }{
+	{"常规", "settings"},
+	{"外观", "palette"},
+	{"菜单", "menu"},
+	{"快捷键", "keyboard"},
+	{"代理", "globe"},
+	{"关于", "info"},
 }
 
-// settingsContentInnerW 是**分组卡片里那一行**能占的宽。
+// viewSettings 是设置页本身。
 //
-// = 窗口宽 - 侧栏宽，收在内容段上限里（`MaxWidth` 是上限，居中），再减去页面
-// 左右内边距和**分组卡片自己的左右内边距**——现在每一组设置都住在卡片里
-// （`settingGroup`，内边距 16 + 描边 1），控件列的「放不放得下」要按**卡片里面**
-// 那一格算。此前不算卡片这一层，900 宽那一档把 300 宽的下拉挤出卡片右缘
-// 14 像素（2026-10-26 实测：下拉右缘 897，卡片外缘 877）。
-func (s *Shell) settingsContentInnerW(c *ui.Context, st app.Settings) float32 {
-	winW, _ := c.Size()
-	avail := winW - s.settingsSideWidth(st)
-	block := s.settingsContentMaxWAt(c)
-	if avail < block {
-		block = avail
-	}
-	return block - 2*settingsContentPad - 2*settingsCardInset
-}
-
-// settingsContentMaxWAt 是**这一帧**内容段的上限（**跟着系统字号缩放走**）。
-//
-// 🔴 **为什么上限要跟着字号走**（票 #244 / 评审）：
-//
-// 每一行是「左边标题 + 一句说明，右边一枚控件」，而**说明那一句话本身是跟着字号
-// 缩放的**（`scale.Font`）。内容段不跟着长的话，字号一大说明就**折行**——而说明
-// 折行会让**整行**变高、右边那列控件跟着往下挪半格，一页设置于是参差不齐
-// （`settingsDescMinW` 的注释写着这一条要避免）。
-//
-// 实测（1200 窗口，那句最长的说明「内容页排成列表、网格还是紧凑」）：
-//
-//	内容段不缩放	1.00 倍 1 行 / 1.25 倍 1 行 / 1.40 倍 1 行 / 1.50 倍 **2 行**
-//	                1.75 倍 3 行 / 2.00 倍 5 行
-//	内容段跟着缩放	1.00 倍 1 行 / 1.25 倍 1 行 / 1.40 倍 1 行 / 1.50 倍 1 行
-//	                1.75 倍 1 行 / 2.00 倍 2 行
-//
-// 也就是：跟着缩放之后，只有**窗口本身已经不够宽**的那一档（2.0 倍）才折——
-// 而那一档在改动之前也折（2 行）✓。
-//
-// ⚠️ **缩放之后上限会超过可视区**：1.4 倍时上限是 1092，而 1200 宽的窗口只有
-// 1000 可视——`MaxWidth` 是上限不是定值，于是那一档的内容段就是**可视区那么
-// 宽**（页面左右不留白）。这是对的：字大了就得多给地方。
-func (s *Shell) settingsContentMaxWAt(c *ui.Context) float32 {
-	return scale.Font(c, settingsContentMaxW)
-}
-
-// settingsControlFitW 是**这一帧**控件列能占的宽（上限）。
-//
-// 🔴 **为什么必须自己算**：这一列里是**不能折的控件**（分段控件那一族）——
-// 框架的 flex 会收缩（`shrink` 默认 1，见上面 `settingsDescMinW` 那一段），
-// 但收缩一个不能折的控件等于把它压扁，所以**它的宽得由这一层钉住**，而不是
-// 让 flex 去分。
-//
-// 算式：控件列 ≤ 卡片里那一行（`contentW`，见 `settingsContentInnerW`）- 缝 -
-// 说明列的最小宽。说明列的最小宽是**行标题的一个字**——中文可以逐字换行，
-// min-content 就是一个字宽；说明删掉之后（#530）那一列里只剩标题，而标题的
-// 字（16）比正文（14）大，按下限取小了的那一档算，最窄的那一档就会溢出那么
-// 一两个像素（2026-10-26 在「900 + 侧栏 300 + 字号 1.4」档实测溢出 1.7）。
-func (s *Shell) settingsControlFitW(c *ui.Context, base float32) float32 {
-	// ⚠️ **contentW 没算过（0）就用基准宽**：它由 `viewSettings` 每帧算一次，
-	// 而 shadow_test 那一族**脱页直呼**控件函数（`s.pickColors(c, …)`）——没有
-	// 页面上下文就没有这份宽，此时按基准宽画，别把一行控件塌成 0。
-	if s.settings.contentW <= 0 {
-		return base
-	}
-	descMin := scale.Font(c, scale.Size16) // 说明列的最小宽：行标题的一个字
-	if s.settings.descFloor > 0 {
-		descMin = s.settings.descFloor
-	}
-	room := s.settings.contentW - space.Px24 - descMin
-	if room < 0 {
-		room = 0
-	}
-	return min(base, room)
-}
-
-// settingsSideWidth 是这一帧侧栏占多宽。
-//
-// # ⚠️ **它的方向和 `sideDrawnWidth` 相反，别把它们改成同一个形状**
-//
-// 这一处要的**不是**「画面上侧栏有多宽」，而是「**内容区该按多宽来算，
-// 才不会把控件列推出内容区**」——而那要求的是**宁可算窄**（内容区算小 ⇒
-// 控件列的可用宽算小 ⇒ 早一点让位 ⇒ 不溢出）。
-//
-// ⚠️ **所以这里取「目标宽」和「画面上那一档」的**较大者**：宁可把内容区
-// 算窄一点也不算出宽（推出窗外是硬错，算窄只是挤一点）。
-//
-// # 为什么还要拿「画面上那一档」比
-//
-// 侧栏有 200ms 的过渡，过渡期间画面上的宽和目标宽**不一样**——而这一页的
-// 控件列是按内容区算的（`settingsContentInnerW`），算宽了就是溢出。
-//
-// # ⚠️ **「上一次拖动的终点」不是「画面上那一档」**
-//
-// `s.sideWidth` 是**上一次拖动的终点**，而 `commitSideWidth` **只写设置、
-// 不清它**——于是「拖到 300 → 折叠」这一路它停在 300，而画面上是 64。
-//
-// ⚠️ **这一处取大**不构成 bug：内容区被算成 900（而不是 1136）⇒ 控件列
-// 的可用宽算小 ⇒ **更保守** ⇒ 不会溢出。代价只是「折叠之后设置页的内容
-// 段窄了一截」——而那一段本来就有上限（`settingsContentMaxWAt`），多数
-// 窗口宽度下看不出来。
-//
-// ⚠️ **而横幅那边不能这样**：横幅要的是「**内容区有多宽**」这一个事实，
-// 算窄了就是**铺不满**（右侧空出 236 像素的一条空白带）。⇒ 那一边必须
-// 取**真实值**（`sideDrawnWidth`），不能取大。
-//
-// ⇒ **两处的方向是相反的**：这一处偏保守（宁可算窄），那一处要准确
-// （宁可算对）。**别为了「统一」把哪一边改坏。**
-func (s *Shell) settingsSideWidth(st app.Settings) float32 {
-	w := sideTargetWidth(st)
-	if drawn := s.sideDrawnWidth(st); float64(drawn) > w {
-		w = float64(drawn)
-	}
-	return float32(w)
-}
-
-// settingsContentPad 是设置的内容那一段左右与下边的内边距。
-//
-// 28 不是 Biu 的数（那是 `px-8 py-4` = 32 / 16），是**内容区页边距**那个已经
-// 批准的决定（比上游大 4px，调研判「很小」，见票 #124 的「不要动」那一节）。
-// 设置页是内容区里的一页，跟着走同一个数才不会在页面之间跳。
-//
-// ⚠️ **上边距是 0**（票 #166 的 G40）：上游那一页没有 py，我们此前四周都留
-// 28，于是设置页的内容比别的页、也比上游低一截。上边距单独收掉，左右和下边
-// 仍然是那个数——它是这一栏的内边距，不是页面根的上边距。
-const settingsContentPad = space.Px28
-
-// settingsGroupGap 是设置分组之间的间距。DESIGN.md 的
-// `spacing.settings_group_gap`：24（上游分节之间那个 `space-y-*` 换算下来的数）。
-//
-// 它同时用在两处：Tab 内容那一层（分组与分组之间），以及页头（标题、只读提示、
-// 主 Tab、内容）那一层。两处此前分别是 18 和 16，各说各的。
-const settingsGroupGap = space.SettingsGroupGap
-
-// selectWidth 是设置页那几个下拉框多宽。
-//
-// ⚠️ **它就是控件列的基准宽度**（`settingsControlW`）：这一列里别的控件都是
-// 340 宽，下拉要是还按上游那个 180（`system-settings.tsx:164`），这一列的左
-// 边缘就又落在两个位置上了——而那正是票 #235 要消灭的那件事。
-//
-// ⚠️ **实际宽度走 `settingsControlFitW`**（调用处）：窄窗口那一档按下限钳，
-// 不然 900 宽的下拉会溢出分组卡片。
-//
-// ⚠️ 代理那一页的下拉是另一个数（`proxySelectWidth`，240）：那一页是**两列**
-// 布局，不在这一列里。
-const selectWidth = settingsControlW
-
-// closeWindowOptions 是窗口关闭那两档，顺序就是从左到右的顺序。
-//
-// 值和 Biu 的 `closeWindowOption` 一字不差（`shared/settings/app-settings.ts:3`）。
-//
-// ⚠️「隐藏到托盘」这一档在 **macOS 上不是托盘**：那边不建托盘图标（与 Biu
-// 一致），它是「收进程序坞，点 Dock 图标回来」。页面上把这件事说出来——一个
-// 名字和实际行为对不上的选项，比没有更让人困惑。
-var closeWindowOptions = []struct {
-	value app.CloseWindowOption
-	label string
-}{
-	{app.CloseWindowHide, "隐藏到托盘"},
-	{app.CloseWindowExit, "直接退出"},
-}
-
-// settingsContentMaxW 是设置的内容收在多宽里（**1.0 倍字号时**）。
-//
-// 🔴 **900 是量出来的**：Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
-// （`biu/src/pages/settings/index.tsx:121`）。我们原来没有这一层：内容
-// `FillWidth()` 之后一路铺到窗口右边缘，于是窗口一宽，整页设置就跟着拉宽——
-// 右下角那个代理主机输入框能到 470 像素，而 Biu 那一档是两个 410 的格子。
-//
-// 「满宽拉到右边缘」在设置这一页上比在别的页上更糟，理由不是审美：那一行是
-// 「左边标题 + 右边控件」，控件那一头钉在屏幕边上之后，眼睛从标题扫到控件要
-// 横穿整块屏——而设置页是最需要逐行读的一页。
-//
-// ⚠️ 窄窗口上它**不会**顶到 900：`MaxWidth` 是上限不是定值，可视区多宽它就
-// 多宽（最小窗口 900 - 侧栏 200 = 700，两边还各留 28 的内边距）。
-//
-// # 🔴 **780：两端对齐的那一段空档太长了**（票 #244 / UX 报告 §2 的 D1）
-//
-// 每一行是「左边标题 + 一句说明，右边一枚控件」，**两端对齐**——说明在左沿、
-// 控件钉在右沿，中间空着。900 那一档下实测：说明那句在 x=277..475，控件在
-// x=822..1123，**中间空 347 像素**（用户改一个设置，眼睛要在屏幕两端来回横跳
-// 300~640 像素；而设置页是最需要逐行读的一页）。
-//
-// 收到 780 之后：内容那一段（去掉左右内边距）从 844 变成 724，说明列从 520
-// 变成 400，那一段空档从 **347 降到 ~230**。
-//
-// ⚠️ **别为腾地方再动控件列**：控件列的基准宽（340）是这一列里最宽的内容
-// （主题四档）量出来的，说明列的下限（`settingsDescMinW`，只在说明存在的行
-// 生效）是 F-27 的验收；缝（24）是设计规范的数。挤说明列腾宽度的活由
-// `settingsControlFitW` 干，不要把基准宽改回去——改回去主题那排又装不下四档。
-//
-// ⚠️ **最窄那一档不受影响**：窗口 900 时可视区只有 700（900 - 侧栏 200），
-// 那一档的内容段本来就是 700（`MaxWidth` 是上限），所以 780 和 900 在那一档
-// 画出来**一模一样**——这一条收窄只作用在宽窗口上。
-//
-// ⚠️ **这一帧真正用的是 `settingsContentMaxWAt`**：它跟着系统字号缩放走
-// （1.4 倍时上限 1092）——不跟着走的话，字号一大说明就折行，而说明折行会让
-// **整行**变高、右边那列控件往下挪半格（那一段的来由见那个函数的注释）。
-const settingsContentMaxW = 780
-
-// viewSettings 是设置页本身：标题 + 只读提示 + 四个 Tab。
-//
-// ⚠️ 外面这一层是 `Scroll`，里面那一层 `Column` 必须 `FillWidth()`。
-// MyGo 的 `Scroll` 是「一个带滚动标志的 Box」（`ui/scroll.go` 的 coreScroll），
-// **不约束子元素的宽度**——子元素按内容算宽。右边那些固定宽度的控件会被整排顶到
-// 窗口外面去，「深色」「直接退出」点不到，用户看见的是一片空白加半个按钮。
-// `FillWidth()` 才是把里面那一格钉到可视区宽度上的那一句。
-//
-// ⚠️ **收在中间靠的是外面那一层 `Center` + 里面那一层 `MaxWidth`**，不是给
-// 内边距加数：加内边距只是把内容往里推，右边缘仍然是窗口边缘，而设置页要收的
-// 是**内容那一段的宽度**（照 Biu 的 `m-auto`）。
+// ⚠️ 外面这一层是 `Scroll`，里面那一层 `Column` 必须 `FillWidth()`：Scroll 不约束子元素的
+// 宽度。收在中间靠 `Center` + `MaxWidth`（原型 `.page { max-width:1280px; margin:0 auto }`）。
 func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
-	t := c.Theme()
+	p := tok.Of(c.Theme())
 	st := s.app.SettingsSnapshot()
-	// 设置来自更新的版本时一个字都不许写回去。与其让用户按了没反应，不如把
-	// 控件全关掉，并说清为什么——跟这一页自己下面那排主题档位一个道理
-	// （`pickTheme`）。
-	//
-	// ⚠️ **这一句原来写的是「跟顶栏那三个按钮一个道理」**——顶栏从来没有过
-	// 主题按钮组，主题那几档就在这一页自己这儿（`pickTheme`，`app/settings.go`
-	// 那边也这么写）。它是在说「别让控件看起来还能按」这件事，而举的例子举错了。
 	ro := s.app.SettingsReadOnly()
-
-	// 说明列这一帧的下限（**有条件**：内容区放得下才给，见 `settingsDescFloor`）。
-	s.settings.descFloor = s.settingsDescFloor(c, st)
-	// 内容那一段的宽（控件列的宽度要钳在它里面）。
-	s.settings.contentW = s.settingsContentInnerW(c, st)
+	// 页边距和标题字号按**窗口宽**走（原型的媒体查询和 `clamp(32px, 3.4vw, 48px)` 都是视口宽）。
+	winW, _ := c.Size()
+	padX := space.PageHorizontalForWindow(winW)
 
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
 	scroll.Children(func() {
-		// 这一层是 `m-auto`：Column 的横向对齐（跨轴），所以内容那一段在
-		// 可视区里居中，而可视区不满 900 时它就是满的（`MaxWidth` 是上限）。
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Column(c).FillWidth().MaxWidth(s.settingsContentMaxWAt(c)).
-				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
-				Gap(settingsGroupGap).Children(func() {
-				typo.Display(ui.Text(c, "设置"), scale.Font(c, scale.PageTitle))
+			ui.Column(c).FillWidth().MaxWidth(pageMaxW).
+				Padding(space.PageTop, padX, space.PageBottomForWindow(winW), padX).
+				Transition(motion.PageIn).Children(func() {
+				pud.PageHead(c, "Preferences", "设置", "", winW, nil)
 
 				if ro {
+					// 设置来自更新的版本时一个字都不许写回去：控件全关，并说清为什么。
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
-						FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
+						FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(c.Theme()).Err).
+						Margin(space.Px8, space.None, space.None, space.None)
 				}
 
-				// ⚠️ **主 Tab 用轨道 + 滑块那一种**（`mainTabs`，见 tabs.go）：
-				// 这一排和次级排序那几排不是同一个样子（票 #138）。
-				//
-				// ⚠️ `AlignSelf(ui.Start)`：Column 的默认跨轴对齐是 Stretch，
-				// 不拦一下轨道会横贯整个内容区；上游那一条是包着字的
-				//（`inline-flex`）。
-				mainTabs(c, &s.settings.tab, tabMD, settingsTabNames...).AlignSelf(ui.Start)
-
-				ui.Column(c).FillWidth().Gap(settingsGroupGap).Children(func() {
-					switch s.settings.tab {
-					case settingsTabGeneral:
-						s.settingsGeneral(c, st, ro)
-					case settingsTabMenu:
-						s.settingsMenu(c, st, ro)
-					case settingsTabShortcut:
-						s.settingsShortcuts(c)
-					case settingsTabProxy:
-						s.settingsProxy(c, st, ro)
-					}
+				// 原型 `.set-layout`：两列（180 + 缝 48）；窗口 ≤ 1024 时一列、缝 24，分类导航横排（gap 8）。
+				stacked := winW <= 1024
+				var layout ui.Element
+				if stacked {
+					layout = ui.Column(c).Key("set-layout").FillWidth().Gap(space.Px24)
+				} else {
+					layout = ui.Row(c).Key("set-layout").FillWidth().Gap(setLayoutGap).AlignItems(ui.Start)
+				}
+				layout.Margin(space.Px24, space.None, space.None, space.None).Children(func() {
+					s.settingsNav(c, p, stacked)
+					ui.Column(c).Key("set-body").Grow(1).Shrink(1).MinWidth(0).Children(func() {
+						switch s.settings.tab {
+						case settingsTabGeneral:
+							s.settingsGeneral(c, st, ro)
+						case settingsTabAppearance:
+							s.settingsAppearance(c, st, ro)
+						case settingsTabMenu:
+							s.settingsMenu(c, st, ro)
+						case settingsTabShortcut:
+							s.settingsShortcuts(c)
+						case settingsTabProxy:
+							s.settingsProxy(c, st, ro)
+						case settingsTabAbout:
+							s.settingsAbout(c, st, ro)
+						}
+					})
 				})
 			})
 		})
 	})
 	s.trackScrollbar(scroll)
 
-	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
-	// `BackToTop`）。
-	//
-	// ⚠️ **这一页滚的是整页**（外面那个 `ui.Scroll`），不是某一栏——所以位置就是
-	// 那一个 `ScrollState`。
+	// 「回到顶部」那一枚（原型 `.btt`）：滚过 400 像素才出现。这一页滚的是整页（外面那个
+	// `ui.Scroll`），位置就是那一个 `ScrollState`。
 	list.BackToTop(c, s.settings.scroll.Y, func() { s.settings.scroll.Y = 0 })
+}
+
+// settingsNav 是左边的分类导航（`.set-nav`）：宽 180、项间缝 2；每项上下 10 左右 12、
+// 圆角 8、次要色字、图标 16 隔 10；悬停 hover 底 + 正文色；当前项 surface-2 底 + 正文色 600。
+func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
+	var nav ui.Element
+	if stacked {
+		nav = ui.Row(c).Key("set-nav").Gap(space.Px8)
+	} else {
+		nav = ui.Column(c).Key("set-nav").Width(setNavW).Shrink(0).Gap(space.Px2)
+	}
+	nav.Children(func() {
+		for i, tb := range settingsTabs {
+			on := s.settings.tab == i
+			b := ui.ButtonBase(c).Key("set-tab:"+tb.label).Label(tb.label).FillWidth().
+				Padding(space.Px10, space.Px12).Gap(space.Px10).AlignItems(ui.Center).Justify(ui.Start).Radius(tok.R8)
+			fg := p.Text2
+			switch {
+			case on:
+				b, fg = b.Background(p.Surface2), p.Text
+			case b.Hovered():
+				b, fg = b.Background(p.Hover), p.Text
+			}
+			b = b.Transition(motion.Fade)
+			if !stacked {
+				b = b.FillWidth()
+			}
+			b.Children(func() {
+				ui.Icon(c, pud.Icon(tb.icon)).FontSize(tok.IconSm).TextColor(fg)
+				t := ui.Text(c, tb.label).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(fg).SingleLine()
+				if on {
+					t.FontWeight(600)
+				}
+			})
+			if b.Clicked() {
+				s.settings.tab = i
+			}
+		}
+	})
 }
 
 // syncSettings 是设置页每帧的副作用：切走就停录、换 Tab 就回到顶上。
 //
-// ⚠️ **它们原来在 `viewSettings` 的最开头**，而设置页在满屏开着的时候不画
-// （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，「正在录快捷键」那一
-// 格还记着上一次录到一半的东西。
-//
-// ⚠️ **读的是上一帧的 `s.settings.tab`**：那一格是 `mainTabs` 在画的时候写的，
-// 而这一句原来也在 `mainTabs` 之前——所以挪过来之后读到的还是同一个值，行为
-// 一模一样。
+// ⚠️ 它们不在 `viewSettings` 里：设置页在满屏开着的时候不画（票 #161），不挪出来的话
+// 「正在录快捷键」那一格会一直记着上一次录到一半的东西。
 func (s *Shell) syncSettings(c *ui.Context) {
-	// ⚠️ **补上「指着的那一行」离边的那 16 像素**（`settingsFocusMargin`）。
-	//
-	// 上游的 `Element.ScrollIntoView()` 滚的是「**刚好露出这一行的盒子**」，
-	// 而我们从前自己滚的时候滚完留 16 像素（贴着边的那一行看起来像是被切掉了）。
-	// 上游没有「留白」这一说，所以这 16 像素我们自己补。
-	//
-	// ⚠️ **方向靠「滚之前的位置」判**：上游滚的是内容里的绝对位置，所以往下滚
-	// 和往上滚都要补，只是补的方向相反（`focusScrollFrom` 是滚之前那个位置）。
-	//
-	// ⚠️ **必须排在页面建之前**：滚动容器建的时候就把滚动位置拿走了
-	// （`TrackScroll` → `adoptScroll`）。而 `syncSettings` 正好排在页面建之前
-	// （见 `underlay.go`：副作用在前、画在后）。
-	//
-	// ⚠️ **补在下一帧**：上游那一行是在**布局完**之后才滚的（`reveal`），所以
-	// 滚完之后的位置要到下一帧才看得见——那 16 像素也就只能在那时候补。
-	if s.settings.focusMargin {
-		s.settings.focusMargin = false
-		switch {
-		case s.settings.scroll.Y > s.settings.focusScrollFrom:
-			// 往下滚的：再往下 16 像素。
-			s.settings.scroll.Y += settingsFocusMargin
-		case s.settings.scroll.Y < s.settings.focusScrollFrom:
-			// 往上滚的：再往上 16 像素。
-			s.settings.scroll.Y -= settingsFocusMargin
-		}
-	}
-
-	// 切走就停录：`FocusBind` 的「焦点在哪一格」在控件没建出来时会一直等下去，
-	// 切回来时焦点又回到那一格，用户在还没准备好的时候敲的第一下键就被录进去了。
+	// 切走就停录：焦点在控件没建出来时会一直等下去，切回来时第一下键就被录进去了。
 	if s.settings.tab != settingsTabShortcut {
 		s.recording = shortcutSlot{}
 		s.rejected = shortcutSlot{}
 	} else {
-		// ⚠️ **「这一帧画没画快捷键录制格」这个标志要在这儿也置**：满屏开着的时候
-		// 设置页不画，而 `viewShortcuts` 的兜底是「这一帧没画录制格就把正在录的
-		// 清掉」——不置的话，用户正在录的那一个快捷键会在满屏开着的时候被静默
-		// 取消（而录制期间窗口一个应用内组合键都不登记，用户看不见为什么）。
-		//
-		// 它原来在 `settingsShortcuts`（画的那一半）里，而那一半在满屏开着的时候
-		// 不跑。顺序对得上：`viewShortcuts` 读的是**上一帧**的值，而这一句和画的那
-		// 一句落在同一帧里。
+		// 满屏开着时设置页不画，而 `viewShortcuts` 的兜底是「这一帧没画录制格就把正在录的
+		// 清掉」——这里置上，免得正在录的被静默取消。
 		s.recorderShown = true
 	}
 
-	// 按 Tab 时回到顶上：Biu 换了面板就是新的一页。
+	// 按 Tab 时回到顶上。
 	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
 		s.settings.shownTab, s.settings.scroll.Y = tab, 0
-		// ⚠️ **指着的那一项只在它所在的那一格**：换到别的 Tab 就没东西可指了，
-		// 而留着它会让下一次跳过来以为已经指过（那一行不会再滚进视野）。
+		// 指着的那一项只在它所在的那一格：换走就没东西可指了。
 		if s.settings.focus != settingsFocusNone && tab != settingsTabGeneral {
 			s.settings.focus = settingsFocusNone
 		}
 	}
 }
 
-// settingsFocusMargin 是「指着的那一行」滚进视野之后离边留多少。
-//
-// 16 是「贴着边的那一行看起来像是被切掉了」和「别把无关的东西滚走太多」之间
-// 的那个数。
-//
-// ⚠️ **它是我们自己在上游滚完之后补上的**（见 `syncSettings`）：上游的
-// `ScrollIntoView()` 滚的是「刚好露出这一行的盒子」，没有「留白」这一说。
-//
-// ⚠️ **它垫的是滚动位置，不是那一行的盒子**：盒子还是原来那么高（标题 + 说明
-// 三十几像素），多出来的这 16 像素是**离可视区下沿的那一段空隙**——所以设置页
-// 里被指着那一行**下面**的每一行都还在原来的位置（内容总高也不变）。
-//
-// ⚠️ **数走 `space` 那张表**（界面层里不许出现表外的间距数字，见
-// `internal/ui/widgets/space`）：`Px16` 就是 16 像素那一档。
-const settingsFocusMargin = space.Px16
-
-// settingSection 是一组设置上面的那个标题。Biu 用的是 `<h2>`（system-settings.tsx
-// 的「外观」「播放」「下载」…），`text-xl` 也就是 **20px**，字重同样被 Preflight
-// 重置为 inherit——**不加粗**。
-//
-// ⚠️ 这一句原来写着「Biu 用的是 `<h2>`」就完了，既没写字号也没写字重，于是这一
-// 组标题在我们这边一路是 16/700：比上游小一档、还粗两档（票 #166 的 G06）。
-func (s *Shell) settingSection(c *ui.Context, title string) {
-	ui.Text(c, title).FontSize(scale.Font(c, scale.Size20)).Padding(space.None, space.None, space.Px4, space.None)
-}
-
-// settingsCardInset 是设置分组卡片左右各占掉的宽度：内边距 16 + 描边 1。
-const settingsCardInset = space.Px16 + 1
-
-// settingGroup 是一组设置：组标题 + 一张卡片（`surface1` 底、`radiusLg` 圆角、1px 描边）
-// 包着这一组的行（设计规范 §7.9）。取代原来的「标题 + 行 + 分隔线」那种平铺写法。
-//
-// 卡片底色和圆角走 `cardBackground` / `cardRadius`（方案里的 surface1 / radiusLg）。
-// 行与行之间靠行自己的上下内边距分开，不再画分隔线。
-func (s *Shell) settingGroup(c *ui.Context, title string, body func()) {
-	t := c.Theme()
-	ui.Column(c).Key("setting-group:"+title).FillWidth().Gap(space.Px8).Padding(space.None, space.None, space.Px8, space.None).
-		Children(func() {
-			ui.Text(c, title).FontSize(scale.Font(c, scale.Size20))
-			ui.Column(c).FillWidth().Padding(space.Px8, settingsCardInset-1).Background(s.cardBackground(t)).
-				Radius(s.cardRadius(t)).Border(1, t.Border).Children(body)
-		})
-}
-
-// settingSectionEnd 是两组设置之间那条分隔线。Biu 的 `<Divider />`。
-func (s *Shell) settingSectionEnd(c *ui.Context) {
-	ui.Divider(c).FillWidth()
-}
-
-// settingRow 是设置项的一行：左边标题加一句说明，右边控件。
-//
-// 排版照 Biu 那一行（`flex items-center justify-between`，左边 `mr-6 space-y-1`
-// 的标题和说明，右边固定宽度的控件）。两边的伸缩比例照抄：文字吃掉剩下的
-// 宽度，说明换行了控件也不会被挤走。
-func (s *Shell) settingRow(c *ui.Context, title, desc string, control func()) {
-	s.settingRowAt(c, "", title, desc, control)
-}
-
-// settingRowAt 是 settingRow 加上「这一行的身份」。
-//
-// 身份是给「从别处跳过来要指着一行」用的（见 settingsFocus）：**被指着的
-// 那一行，标题是主色**——它和旁边那些行一眼就分得开，而那一行多半在屏幕
-// 下面，滚过去之后用户第一眼看见的就是它。
-//
-// 空身份（`settingRow` 走的那条）就还是普通的一行。
-func (s *Shell) settingRowAt(c *ui.Context, key, title, desc string, control func()) {
-	t := c.Theme()
-	focused := key != "" && s.settings.focus == settingsFocus(key)
-	s.settingRowElAt(c, focused, func() {
-		txt := ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
-		if focused {
-			// ⚠️ **主色当字色取 `ink.AccentOn`**：浅色下主色本身压在白底上读
-			// 不出来（flatbutton.go 那一大段），而「指着的那一行」恰恰是用户
-			// 要找的那一行——它必须一眼看得见。
-			txt.TextColor(ink.AccentOn(t))
-		}
-	}, desc, control)
-}
-
-// settingRowEl 是 settingRow 那一行，标题那一格换成自己画的。
-//
-// 什么时候要它：标题**不是一段字**的时候——「关于应用」那一行要的是「当前版本
-// 0.1.0 → 1.2.0」这样一个两段、还带颜色的东西（照 Biu 的
-// `system-settings.tsx` 那一段）。硬塞进 `settingRow` 的字符串参数里就只剩一种
-// 颜色，而那一段新版本号用主色正是「有更新」这件事唯一的视觉标记。
-//
-// 其余的行一律用 `settingRow`：那一个签名足够的地方不要多一个。
-func (s *Shell) settingRowEl(c *ui.Context, title func(), desc string, control func()) {
-	s.settingRowElAt(c, false, title, desc, control)
-}
-
-// settingRowElAt 是 settingRowEl 加上「这一行正被指着」。
-//
-// ⚠️ **被指着的时候这一行要滚进视野**（上游那一行 `Element.ScrollIntoView()`）：
-// 「下载目录」在第三段里，不滚过去用户看见的就是「设置页打开了，可这里没有
-// 下载目录」。
-func (s *Shell) settingRowElAt(c *ui.Context, focused bool, title func(), desc string, control func()) {
-	t := c.Theme()
-	// 上下各留 10：设置行现在住在分组卡片里，行与行之间靠这点内边距分开（规范 §7.9：行高 ≥ 52）。
-	row := ui.Row(c).FillWidth().Gap(space.Px24).Padding(space.Px10, space.None).AlignItems(ui.Center)
-	if focused && s.settings.focusScroll {
-		// ⚠️ **只在这一帧调一次**：上游的规矩是「在它该进视野的那一帧调它」——
-		// 每一帧都调的话，用户自己滚走了它又被拉回来。
-		//
-		// ⚠️ **上游那一行替掉了我们从前那套跨帧的「滚进视野」**：它「布局完就把
-		// 周围的容器滚到刚好露出它」，而「这一帧新建的元素这一帧就跟着进来」——
-		// 所以不必再「量上一帧的盒子、量不到就再要一帧」（那一套量的元素属于建
-		// 它的那一遍，跨帧读是拿旧把手，而 `mygo vet` 报的就是这个）。
-		//
-		// ⚠️ **上游滚的是「刚好露出这一行的盒子」**：我们从前滚完留 16 像素
-		// （贴着边的那一行看起来像是被切掉了），上游没有「留白」这一说——那
-		// 16 像素在下一帧我们自己补（见 `syncSettings`）。
-		s.settings.focusScroll = false
-		// 记下滚之前的那个位置：补留白要靠它判方向（见 `syncSettings`）。
-		s.settings.focusScrollFrom = s.settings.scroll.Y
-		s.settings.focusMargin = true
-		row.ScrollIntoView()
-	}
-	row.Children(func() {
-		// ⚠️ **说明列有最小宽度**（`settingsDescMinW`）——但**只在这行真有说明的
-		// 时候**：#530 之后每一行的说明都是空串，空说明给下限只会白白挤占控件列
-		// （900 宽那一档实测把下拉挤出分组卡片 14 像素）。哪天说明回来了，下限
-		// 跟着回来（下限本身还是条件性的，见 `settingsDescFloor`）。
-		//
-		// 🔴 **下限是 0 的时候不许链 `MinWidth(0)`**：框架里 `minW` 一旦存在就
-		// 接管这一项的**自动最小宽**（`mygo/ui/layout.go` 的 `flexLayout`：
-		// 有 `minW` 就用它，没有才用内容的 min-content 宽）。于是
-		// `MinWidth(0)` 会把说明列的最小宽变成 **0**——中文可以逐字换行，
-		// 内容的 min-content 是一个字宽（19.6），给了 0 就连那一个字都不剩，
-		// 整行塌成 0 高，**标题在画面上整个消失**。
-		descCol := ui.Column(c).Grow(1)
-		if desc != "" && s.settings.descFloor > 0 {
-			descCol = descCol.MinWidth(s.settings.descFloor)
-		}
-		descCol.Children(func() {
-			title()
-			if desc != "" {
-				ui.Text(c, desc).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
-			}
-		})
-		control()
-	})
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 共用的控件
-// ─────────────────────────────────────────────────────────────────────────────
-
-// segmentOption 是分段控件的一档：一个标签 + 一枚图标。
-//
-// ⚠️ **图标名是 `icons.go` 里的常量**，不是随手写的路径：名字写错时 `icon()`
-// 返回 nil，而 `ui.Icon(nil)` 画出来是一格空白——画面上和「这一档本来就没有
-// 图标」**一模一样**（`icons_test.go` 那两条钉着每一个名字都在）。
-type segmentOption struct {
-	label string
-	// icon 是那一档的图标名（`icons.go` 的常量）。**空串 = 不画图标**。
-	icon string
-}
-
-// segmentButton 画分段控件的一档：一枚 18px 图标 + 一个标签。
-//
-// ⚠️ **图标是 18，不跟字号缩放走**：上游那两排的图标是写死的 `size={18}`
-// （`system-settings.tsx:77` / `:127`），而字是跟系统缩放走的——照上游就
-// 18 不动。跟着缩放的话 1.4 倍时那枚图标是 25，而「跟随系统」那一档本来
-// 就最宽。
-//
-// ⚠️ **图标那一档的内边距比纯文字那一档小**（10 而不是 14），图标和字之间的
-// 缝也收一道（4，flat.Button 默认是 6）：主题那排是**四档**，每一档收 2~4 像素
-// 才装得进控件列的 340——「跟随系统」98 + 其余三档各 70 + 三道缝，加行内边距
-// 正好 324。
-func segmentButton(c *ui.Context, opt segmentOption) ui.Element {
-	if opt.icon == "" {
-		return flatButton(c, opt.label)
-	}
-	t := c.Theme()
-	b := flatButton(c, "").Padding(t.Space(1.5), t.Space(2.5)).Gap(space.Px4)
-	// ⚠️ **图标和字是按钮的两个孩子**（不是一个「图标 + 字」的复合控件）：
-	// 图标的颜色从祖先的文字色继承（`mygo/ui/svg.go` 的 `coreIcon`），而
-	// 选中那一档是 `flatSolid` 铺的实心主色底 + `t.AccentText` 字——于是
-	// 图标也跟着变成 `AccentText`（压在主色底上一定读得出来）。
-	b.Children(func() { ui.Icon(c, icon(opt.icon)).FontSize(iconMd) })
-	b.Children(func() { ui.Text(c, opt.label).SingleLine() })
-	return b
-}
-
-// settingsSegment 是设置页的分段控件：一排互斥的档位，选中的那一档铺实心主色底。
-//
-// 🔴 **设置页只有这一种分段控件**（票 #240 / UI 报告 §4 的 F-17）。
-//
-// 此前同一页上有**两套**分段控件：框架的 `ui.Segmented`（**灰底轨道 + 白色滑块**，
-// 「数据显示样式」那一格）和自绘的三个按钮（**没有轨道，选中的那一档是实心主色底**，
-// 「主题」「窗口关闭」那两格）。两个并列的分段控件长得不一样，用户一眼看不出它们
-// 是同一类东西（Apple HIG「一致性：相同功能的控件外观相同」）。现在三处都走这里。
-//
-// # 为什么统一到「实心主色底」这一档，而不是换成框架的 `ui.Segmented`
-//
-//   - **「被选中的选项 = 实心主色底 + `t.AccentText` 字」是已经拍板的**
-//     （票 #239 / 审计 F-14，DESIGN.md §四）。那一节还明写「**F-17 没做之前，别把
-//     这一档当成定案**」——本票就是 F-17，本票来定案，而定案的方向是**沿用已定的
-//     那一档**，不是再添第三种。
-//   - **框架 `ui.Segmented` 没有滑块动画**：它的每一段各自换背景
-//     （`mygo@v0.6.3/ui/toggle.go` 的 `coreSegmented`），没有动画通道。有 250ms
-//     滑动动画的是**我们自己的 `mainTabs`**（票 #171），这一页从来没用过它。
-//   - **它填不满控件列那一格**：`ui.Segmented` 的宽度按内容算（`Shrink(0)`），
-//     换成它，那一列的左边缘就又落在两个位置上——那正是票 #235 刚消灭掉的那件事。
-//   - **「数据显示样式」那一格下面就是预览图**，选中的那张**不再描主色边**
-//     （`previewOne`）：药丸已经是那一格里的选中信号了，预览再描一圈主色，
-//     **同一格里就有两种「选中」信号**（票 #240 记过同一件事的另一半）。
-//
-// # 图标
-//
-// 每一档都带一枚 18px 图标（上游那两排就是「图标 + 文字」，见
-// `system-settings.tsx:56-153`）。**图标由这一处统一画**（`segmentButton`），
-// 档位表里只写名字——两排要是各画各的，过一阵子就分叉成两种样子，而那种分叉
-// 在界面上只是「这一枚比旁边那枚淡一点」，没人当它坏了。
-//
-// # 宽度跟着字号缩放走
-//
-// 「跟随系统」四个汉字最宽：1.4 倍时它连内边距要 120 像素，四档装不下 340 的
-// 旧口径，选中项会被裁成「跟随系…」。所以这一族的宽度
-// 是 `scale.Font(c, settingsControlW)`，不是 `settingsControlW`。
-//
-// # 只读时
-//
-// 选中那一档换成中性灰（`pickSelected`），字换成禁用灰（`flat.Dimmed`）——
-// 实心主色底乘完框架的 50% 不透明度之后字压在上面只剩 2.6:1，只读时用户会以为
-// 「这几个选项消失了」（`pickSelected` 的注释写着整段来由）。
-//
-// # 每一档的宽度是**它自己的内容**，不是等分
-//
-// ⚠️ **等分装不下「图标 + 四个汉字」**：`Grow(1)` 在框架里是**等分**
-// （`mygo/ui/layout.go` 的 `resolveFlexible`：`Grow` 把基准宽设成 0，于是每一格
-// 分到的是**整排的等份**，不是「内容 + 一份余量」）。四档等分的话每一格只有
-// (340 − 8 − 12) / 4 = 80，而「跟随系统」那一档要 98——标签会被裁成「跟随…」。
-//
-// 所以这一排**不 `Grow`**：每一档的宽度就是它自己的内容，剩下的空档由
-// `Justify(SpaceBetween)` 分到档与档之间。
-//
-// ⚠️ **`Shrink(1)` 是留给放不下那一档的**：真挤不下时（窗口 900 + 侧栏拉到 480
-// 那种极限档），按钮收缩、标签裁成「跟随…」，而**不是**把这一排顶出卡片。
-//
-// ⚠️ **「框架的 flex 不会收缩」那句话是错的**（框架 v0.7.3 的 `shrink` 默认
-// 就是 1）——**正因为它会收缩，`Shrink(1)` 才是「挤不下时收缩而不是溢出」这
-// 个选择的载体**：默认的 `shrink = 1` 正是这一排放不下时能被压窄的原因
-// （`Shrink(0)` 会让它顶出卡片，见上面 `settingsControlFitW` 的注释）。
-//
-// # w 是这一排多宽
-//
-// 0 = **填满父那一格**：「数据显示样式」那一格外面还套着一列预览（切换在上、
-// 预览在下），两样东西必须同宽，而那一格收窄时预览要跟着收窄。别的两处给
-// 控件列的基准宽（走 `settingsControlFitW` 钳过）。
-func (s *Shell) settingsSegment(c *ui.Context, key, group string, w float32, opts []segmentOption, chosen int, ro bool, pick func(i int)) {
-	// ⚠️ **那个 `Label(group)` 是给这一排起个组名**：读屏软件要知道这几个键是一组
-	// （互斥的几档），而 `Tester.Find` 也靠它量这一排的盒子——控件列的左边是不是
-	// 一条线，就靠它断（见 `TestTheSettingsControlsShareOneBaseline`）。
-	t := c.Theme()
-	// ⚠️ **`SpaceBetween`**：空档分在档与档之间，于是这一排的左右两端仍然
-	// 齐在控件列那一格的两条边上（`Justify(Start)` 的话右边会空出一截，
-	// 那一列看上去就参差了——票 #235 的 F-04）。
-	row := ui.Row(c).Key(key).Label(group).Gap(space.Px4).Justify(ui.SpaceBetween)
-	if w > 0 {
-		// ⚠️ **按卡片里那一行算宽度**（`settingsControlFitW`）：这一族的宽度跟着
-		// 字号缩放走（1.4 倍时 476），而最窄那一档（窗口 900 + 侧栏拉到 480）的
-		// 卡内行宽只有 274——不按它算，右边那一截会被切出卡片外面。
-		row = row.Width(s.settingsControlFitW(c, w))
-	} else {
-		row = row.FillWidth()
-	}
-	// ⚠️ **不给硬下限**：给 260 那种 `MinWidth` 的话，最窄那一档（放不下 260）会
-	// 回到「顶出卡片」——溢出比标签裁半坏。放不下时让 `Shrink(1)` 收缩、标签
-	// 裁半，那是刻意选的让步。
-	row = row.Padding(space.Px2).Radius(t.Radius + 2).
-		Background(t.Background.Mix(t.Text, 0.06))
-	row.Children(func() {
-		for i, opt := range opts {
-			// ⚠️ **不 `Grow`**（见顶上那一段）：宽度就是内容本身。
-			// `Shrink(1)` 是为了放不下时收缩而不是溢出。
-			b := segmentButton(c, opt).Shrink(1).Radius(t.Radius).Disabled(ro)
-			if i == chosen {
-				b = s.pickSelected(c, b, ro)
-			}
-			// ⚠️ 排在 `.Disabled(ro)` 和上面那一层 **之后**：禁用前那一档的字乘完
-			// 框架的 50% 只剩 2.6:1——只读时用户会以为这几个选项消失了。
-			// `flat.Dimmed` 里的注释写了整个来由。
-			b = flat.Dimmed(c, b)
-			if b.Clicked() {
-				pick(i)
-			}
-		}
-	})
-}
-
-// pickTheme 是主题那四档（跟随系统 / 浅色 / 深色 / 定时）。
-//
-// 换完之后 `applyFrameTheme` 下一帧就装上新主题：改档位 → UpdateSettings →
-// invalidate → 重画，一帧之内的事。走 `applySetting` 而不是 `SetThemeMode`，
-// 是为了和另外十几项共用同一条报错提示。
-//
-// ⚠️ **它和另外两处分段控件走同一个出口**（`settingsSegment`）：设置页只有一种
-// 分段控件（票 #240 / 报告 F-17）。选中的那一档是实心主色底（`flatSolid`）——
-// 这是「被选中的选项」在应用里**唯一**的画法（票 #239，审计 F-14）：下拉项的
-// 高亮也是它（`settings_enum.go` / `settings_font.go` / `collectionpage.go` 三处都走
-// 同一个出口）。
-//
-// ⚠️ **这一排是控件列里最宽的一份内容**：四档全带图标，「跟随系统」最宽，
-// 控件列的基准宽（`settingsControlW` = 340）就是照它量出来的——往这排里加档位
-// 或加字之前，先重算那个数（`TestTheSettingsControlColumnIsFilled` 钉着）。
-//
-// 上游 Biu 这一排是 HeroUI 的 `RadioGroup`，而 HeroUI 的 `Radio` 选中项就是
-// `bg-primary` 实心底 + `text-primary-foreground`——所以这一档是照上游的
-// （「定时」那一档是我们加的，上游只有前三档）。
-func (s *Shell) pickTheme(c *ui.Context, st app.Settings, ro bool) {
-	chosen := 0
-	opts := make([]segmentOption, len(themeModes))
-	for i, m := range themeModes {
-		opts[i] = segmentOption{label: m.label, icon: m.icon}
-		if m.mode == st.ThemeMode {
-			chosen = i
-		}
-	}
-	s.settingsSegment(c, "setting:themeMode", "主题模式", scale.Font(c, settingsControlW),
-		opts, chosen, ro, func(i int) {
-			mode := themeModes[i].mode
-			s.applySetting("主题", func(cur *app.Settings) { cur.ThemeMode = mode })
-		})
-}
-
-// pickSelected 是「被选中的选项」那一档：**实心主色底 + `t.AccentText` 字**。
-//
-// ⚠️ **只读（`ro`）时换成中性灰那一档**（`flatCurrent`）：框架对禁用元素是**整个
-// 乘 50% 不透明度**（`mygo/ui/paint.go:209-212`），于是实心主色底也跟着淡——
-// 底变成「主色 × 0.5 叠页面底色」，字换成 `ink.Disabled` 之后压在上面只有
-// **2.6:1（深色）/ 2.9:1（浅色）**，掉到 3:1 以下（那一档是非正文要的门槛）。
-//
-// 中性灰那一档乘完 50% 之后是 **4.43:1（深色）/ 3.28:1（浅色）** —— 读得出来，
-// 而**只读的时候这一档本来就不该那么响**。
-//
-// ⚠️ **画面上那一格是「灰底 + 灰字」，一点绿都没有**：字是 `flat.Dimmed` 换的
-// （`ink.Disabled`），而它排在 `flatCurrent` **之后**——所以主色那一档的字在只读
-// 时被盖掉了。实测：浅色底 #ededef / 字 #828285，深色底 #2b2b2e / 字 #909092。
-//
-// ⚠️ **别照着「只读时是灰底 + 主色的字」去写文档**（评审抓出来过一条）：那一档
-// 的**底**是中性灰，**字**是禁用灰——主色在只读时**根本不出现**。
-//
-// ⚠️ **这一档是设置页三处分段控件共用的**（`settingsSegment`）：设置页只有一种
-// 分段控件（票 #240 / 报告 §4 的 F-17）。
-func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
-	if ro {
-		// 只读时用控件那一层的中性底，不用主色淡底：框架再乘 50% 之后，带色的淡底
-		// 在暖色方案里压得字到不了 3:1。
-		return b.Background(c.Theme().Surface).TextColor(flatCurrentText(c.Theme(), false))
-	}
-	return flatSolid(c, b)
-}
-
-// pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup
-// orientation="horizontal"），我们用同一排按钮，选中的那个上主色。
-//
-// ⚠️ **它和「主题」「数据显示样式」那两处走同一个出口**（`settingsSegment`）：
-// 设置页只有一种分段控件（票 #240 / 报告 F-17）。
-func (s *Shell) pickCloseWindow(c *ui.Context, st app.Settings, ro bool) {
-	chosen := 0
-	opts := make([]segmentOption, len(closeWindowOptions))
-	for i, opt := range closeWindowOptions {
-		// ⚠️ **这一排没有图标**：那两档没有配得上语义的图标——「隐藏到托盘」
-		// 而「直接退出」能配
-		// 退出那一枚，可这一排只有它有图标的话，另一档空着更难看。
-		//
-		// 上游那两档本来也没有图标（`settings/index.tsx` 里那一行是横排单选，
-		// 只有文字），所以这不是「跟上游不一样」，是「上游也就这样」。
-		opts[i] = segmentOption{label: opt.label}
-		if opt.value == st.CloseWindowOption {
-			chosen = i
-		}
-	}
-	s.settingsSegment(c, "setting:closeWindowOption", "窗口关闭方式", scale.Font(c, settingsControlW),
-		opts, chosen, ro, func(i int) {
-			v := closeWindowOptions[i].value
-			s.applySetting("窗口关闭", func(cur *app.Settings) { cur.CloseWindowOption = v })
-		})
-}
-
-// pickAutoStart 是开机自启那个开关。
-//
-// 它和别的那几项不一样：**不是改一个键就完了**，得真的去系统里注册/注销登录项
-// （macOS 是 SMAppService / LaunchAgent，Windows 是注册表 Run 项）。所以走的是
-// `Shell.SetAutoStart`——先动系统、成功了才写设置，顺序反了会留下
-// 「设置说开、系统说关」，而启动时的对齐只补这一种（见 lifecycle.go 的注释）。
-//
-// 动不了的时候（没打包成 bundle、用户没给权限）弹一条提示，**设置一个字都不改**：
-// 界面上亮着一个实际上没开的开关，比暗着更坏——用户会以为明天开机它自己就起来了。
-func (s *Shell) pickAutoStart(c *ui.Context, st app.Settings, ro bool) {
-	on := st.AutoStart
-	// ⚠️ 这里**不能** .Key()。开关的旋钮是**动画**出来的（`springSwitch`：旋钮是
-	// 开关的一个孩子，动画记在那个孩子的节点上）；给它一个 Key 等于每帧换一个新
-	// 节点，动画每帧从头开始——于是这一页永远停不下来（实测：加了 Key 之后
-	// `settleSettingsPage` 跑满 60 帧还在滑，去掉就好了）。上面那两排按钮能加
-	// Key，是因为 Row 本身没有动画。
-	// ⚠️ 那个 `Label` 不能省，原因见 `pickSwitch`：开关自己一个字都没有。
-	//
-	// 用 `springSwitch` 而不是 `ui.Switch`：框架那一颗是 140ms 的**匀出**
-	// （`mygo/ui/widgets.go` 的 `coreSwitch`），不是弹簧——见 switch.go。
-	sw := springSwitch(c, &on).Label("开关：开机自启").Disabled(ro)
-	if !sw.Changed() {
-		return
-	}
-	if err := s.SetAutoStart(on); err != nil {
-		s.addToast("开机自启没设上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
-		// 下一帧 `on` 会从设置里重新读（没写成功，所以还是旧值），开关自己弹回去。
-		return
-	}
-	// ⚠️ **设上了才说**（理由见 `switch_hint.go`）：这一格的效果看不见——系统里
-	// 多了一个登录项，界面上什么也没变。
-	s.saySwitchHint("开机自启", on)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 // applySetting 改一项设置；写不出去就弹一条提示。
 //
-// **提示不能省**：静默地丢掉是这一页最坏的失败方式——用户以为改了，下次打开
-// 又变回去，中间屏幕上什么也没发生过。要报的不是「按了没反应」，是「存不住」：
-// 落盘失败时档位在内存里是改成功了的（这一点是对的，别回滚），丢的是磁盘上
-// 那一份，用户下次启动看到的才是旧值。
+// 提示不能省：静默地丢掉是这一页最坏的失败方式——用户以为改了，下次打开又变回去。
+// 落盘失败时档位在内存里是改成功了的（别回滚），丢的是磁盘上那一份。
 func (s *Shell) applySetting(what string, fn func(*app.Settings)) {
 	s.applySettingOK(what, fn)
 }
 
-// applySettingOK 是 applySetting 的「写成功了没有」那一版。
-//
-// ⚠️ **为什么要分两个**：开关那一格要在**写成功之后**才说「开了它会怎样」——
-// 写失败的时候已经弹了一条「没存上」，再说一句效果就是两句话打架，而那两句话
-// 有一句是假的（设置压根没存住）。
+// applySettingOK 是 applySetting 的「写成功了没有」那一版：开关要在写成功之后才说
+// 「开了它会怎样」，写失败时已经弹了「没存上」，再说一句效果就是两句话打架。
 func (s *Shell) applySettingOK(what string, fn func(*app.Settings)) bool {
 	if _, err := s.app.UpdateSettings(fn); err != nil {
 		s.addToast(what+"没存上："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 		return false
 	}
-	// ⚠️ **设置变了，菜单上的勾选态要跟着变**：显示模式、侧栏折叠那两样是
-	// 菜单里的勾选项，而菜单是系统画的、**不在窗口的画面里**——设置改了它
-	// 不会自己变（见 refreshMenuChecked）。
+	// 设置变了，菜单上的勾选态要跟着变（菜单是系统画的，不在窗口的画面里）。
 	s.refreshMenuChecked(s.app.Snapshot())
 	return true
 }
 
-// settingsButton 是设置页的次级按钮（选择、添加文件夹、导入导出、恢复默认）：
-// 32 高、`Surface` 底、1px 描边（设计规范 §7.9），不是裸文字。
-func settingsButton(c *ui.Context, label string) ui.Element {
-	t := c.Theme()
-	return flatButton(c, label).Height(settingsSelectH).Padding(space.None, space.Px12).
-		Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
-}
-
-// trackFadeSteps 是「切歌淡入淡出」那一排按钮的档位（秒，0 = 关）。
-var trackFadeSteps = []int{0, 3, 5, 8, 10, 15}
-
-// pickIndexed 是设置页里「从一串档位里选一档」的下拉：档位多（5～6 档）时
-// 分段控件的每一格只有 40 多像素，标签会被裁成「…」，所以改用下拉。
-func (s *Shell) pickIndexed(c *ui.Context, what, label string, labels []string, chosen int, ro bool, pick func(i int)) {
-	items := make([]enumItem[int], len(labels))
-	for i, l := range labels {
-		items[i] = enumItem[int]{value: i, label: l}
-	}
-	cur := chosen
-	// ⚠️ **宽度走 `settingsControlFitW`**：定宽 340 在窄窗口那一档会把下拉挤出
-	// 分组卡片（900 宽实测溢出 14 像素）。下限 0——放不下就让下拉自己收窄，
-	// 它的标签最长不过四个字，收得动。
-	enumSelect(c, &cur, items, label, s.settingsControlFitW(c, selectWidth), 0, ro)
-	if cur != chosen {
-		pick(cur)
-	}
-}
-
-// pickTrackFade 是切歌淡入淡出：关 / 3 / 5 / 8 / 10 / 15 秒。
-func (s *Shell) pickTrackFade(c *ui.Context, st app.Settings, ro bool) {
-	chosen := 0
-	labels := make([]string, len(trackFadeSteps))
-	for i, sec := range trackFadeSteps {
-		labels[i] = "关"
-		if sec > 0 {
-			labels[i] = strconv.Itoa(sec) + " 秒"
-		}
-		if sec == st.TrackFadeSeconds {
-			chosen = i
-		}
-	}
-	s.pickIndexed(c, "切歌淡入淡出", "选择淡入淡出时长", labels, chosen, ro, func(i int) {
-		v := trackFadeSteps[i]
-		s.applySetting("切歌淡入淡出", func(cur *app.Settings) { cur.TrackFadeSeconds = v })
-	})
-}
-
-// pickVideoQuality 是「视频画质」：优先的上限，这一集没有就自动降档。
-func (s *Shell) pickVideoQuality(c *ui.Context, st app.Settings, ro bool) {
-	chosen := 0
-	labels := make([]string, len(app.VideoQualitySteps))
-	for i, q := range app.VideoQualitySteps {
-		labels[i] = "720P"
-		if q != 0 {
-			labels[i] = bili.VideoQuality(q).Label()
-		}
-		if q == st.VideoQuality {
-			chosen = i
-		}
-	}
-	s.pickIndexed(c, "视频画质", "选择视频画质", labels, chosen, ro, func(i int) {
-		v := app.VideoQualitySteps[i]
-		s.applySetting("视频画质", func(cur *app.Settings) { cur.VideoQuality = v })
-	})
-}
-
-// pickEQ 是均衡器那一行的控件：预设下拉（内置六套 + 自定义预设 +
-// 「自定义」）、增益预览条、以及弹十段滑杆面板的「自定义」入口。
-//
-// 下拉里「自定义」那一项不弹面板——它是当前增益（自定义开着时的当前值）。
-// 要动滑杆走旁边那枚「自定义」键；「另存为预设」在面板里（eq_panel.go）。
-func (s *Shell) pickEQ(c *ui.Context, st app.Settings, ro bool) {
-	t := c.Theme()
-
-	// 下拉的名单：内置预设 + 「自定义」（当前增益未存名时这一项是当前值），
-	// 再加上用户存的每一套。值是 ID / "custom" / "custom:<名字>"。
-	items := make([]enumItem[string], 0, len(audio.EQPresets)+len(st.EQCustomPresets)+1)
-	for _, p := range audio.EQPresets {
-		items = append(items, enumItem[string]{value: p.ID, label: p.Name})
-	}
-	items = append(items, enumItem[string]{value: eqCustomValue, label: "自定义"})
-	for _, p := range st.EQCustomPresets {
-		items = append(items, enumItem[string]{value: eqCustomPresetValue(p.Name), label: p.Name})
-	}
-
-	chosen := eqCurrentSelectValue(st)
-	w := s.settingsControlFitW(c, selectWidth)
-	ui.Row(c).AlignItems(ui.Center).Gap(space.Px8).Children(func() {
-		enumSelect(c, &chosen, items, "选择均衡器预设", w, 0, ro)
-		if chosen != eqCurrentSelectValue(st) {
-			s.applyEQSelect(st, chosen)
-		}
-		// 预览条画的是**当前生效的**十段增益（自定义开着画自定义那份，
-		// 关着画预设那份），全 0 时只剩一条中线。
-		eqGainPreview(c, st.EQGains())
-		trig := flatButton(c, "自定义").Disabled(ro)
-		if trig.Clicked() {
-			s.settings.eqOpen = true
-		}
-		ui.PopoverBase(c, trig, &s.settings.eqOpen, func(panel ui.Element) {
-			popupPanel(t, panel.
-				AttachTo(trig, ui.AnchorBottomEnd, ui.AnchorTopEnd).
-				Margin(t.Space(1), space.None, space.None, space.None).
-				Label("均衡器面板"))
-			s.eqPanelContent(c, s.app.SettingsSnapshot(), "", ro)
-		})
-	})
-}
-
-// applyEQSelect 是预设下拉选中某一项的那一笔：
-//
-//   - "custom"           → 只把自定义那一格开起来（增益是它自己落盘的那份）；
-//   - "custom:<名字>"    → 自定义开着，增益抄那一套存的，名字记上；
-//   - 其余（内置 ID）    → 照旧写 EQPreset，同时把自定义那一格关掉。
-func (s *Shell) applyEQSelect(st app.Settings, v string) {
-	switch {
-	case v == eqCustomValue:
-		s.applySetting("均衡器", func(cur *app.Settings) {
-			cur.EQCustomOn = true
-			cur.EQCustomName = ""
-		})
-	case strings.HasPrefix(v, "custom:"):
-		name := strings.TrimPrefix(v, "custom:")
-		s.applySetting("均衡器", func(cur *app.Settings) {
-			for _, p := range cur.EQCustomPresets {
-				if p.Name == name {
-					cur.EQCustomOn = true
-					cur.EQCustomGains = p.Gains
-					cur.EQCustomName = p.Name
-					return
-				}
-			}
-		})
-	default:
-		id := audio.EQPresetByID(v).ID
-		s.applySetting("均衡器", func(cur *app.Settings) {
-			cur.EQPreset = id
-			cur.EQCustomOn = false
-			cur.EQCustomName = ""
-		})
-	}
-}
+// trimAppErr 去掉应用层错误前面那个「app: 」包名，剩下的是说给用户看的中文。
+func trimAppErr(err error) string { return strings.TrimPrefix(err.Error(), "app: ") }

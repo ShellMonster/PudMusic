@@ -80,13 +80,11 @@ func TestRenderNewUIShots(t *testing.T) {
 		b.Close()
 	})
 
-	// 3. 设置页「均衡器」自定义弹层（十段滑杆）。
+	// 3. 均衡器自定义面板（十段滑杆；设置页里的入口已删，单独摆在一个小窗口里）。
 	t.Run("eq-panel-settings", func(t *testing.T) {
 		want := app.DefaultSettings("")
 		want.EQPreset = "bass"
-		tt, s, _, _ := shellOnSettings(t, want)
-		tt.Frame()
-		openEQPanel(t, tt, s)
+		tt, _, _, _ := shellWithEQPanel(t, want)
 		tt.Advance(300 * time.Millisecond)
 		tt.Frame()
 		save(t, dir, "eq-panel-settings.png", tt)

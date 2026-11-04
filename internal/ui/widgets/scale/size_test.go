@@ -36,12 +36,12 @@ func TestTheSizeScaleValuesAreLocked(t *testing.T) {
 	want := map[string]int{
 		"Size10": 10, "Size11": 11, "Size12": 12, "Size13": 13,
 		"Size14": 14, "Size16": 16, "Size20": 20, "Size24": 24,
-		"Size28": 28, "Size32": 32, "Size48": 48, "Size64": 64,
+		"Size28": 28, "Size32": 32, "Size40": 40, "Size48": 48, "Size64": 64,
 	}
 	got := map[string]int{
 		"Size10": Size10, "Size11": Size11, "Size12": Size12, "Size13": Size13,
 		"Size14": Size14, "Size16": Size16, "Size20": Size20, "Size24": Size24,
-		"Size28": Size28, "Size32": Size32, "Size48": Size48, "Size64": Size64,
+		"Size28": Size28, "Size32": Size32, "Size40": Size40, "Size48": Size48, "Size64": Size64,
 	}
 	for name, w := range want {
 		g, ok := got[name]
@@ -125,7 +125,7 @@ func TestTheSizeScaleMatchesTheDesignScale(t *testing.T) {
 	got := map[string]int{
 		"Size10": Size10, "Size11": Size11, "Size12": Size12, "Size13": Size13,
 		"Size14": Size14, "Size16": Size16, "Size20": Size20, "Size24": Size24,
-		"Size28": Size28, "Size32": Size32, "Size48": Size48, "Size64": Size64,
+		"Size28": Size28, "Size32": Size32, "Size40": Size40, "Size48": Size48, "Size64": Size64,
 	}
 	for name, g := range got {
 		w, ok := tokens[name]

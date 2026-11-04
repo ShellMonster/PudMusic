@@ -152,8 +152,7 @@ func TestTheDisabledThemeButtonsStayReadable(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			b := openShellFor(t, dark, true)
-			b.s.navigate(appearancePath) // 主题三档在皮肤页上
-			b.tt.Frame()
+			showAppearance(b.s, b.tt) // 主题三档在设置页的外观 Tab 上
 			tt := b.tt
 			if !tt.HasText("设置只读") {
 				t.Fatalf("没有进只读那一版，文字有 %q", tt.Texts())

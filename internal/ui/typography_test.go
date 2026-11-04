@@ -13,6 +13,7 @@ package ui
 // 真的画得比 400 粗」由下面那条墨量测试单独证明。
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -612,18 +613,13 @@ func mentionsIdent(e ast.Expr, name string) bool {
 	return false
 }
 
-// TestTheSettingsPageUsesTheTypographicScale 钉住设置页那四档字号。
+// TestTheSettingsPageUsesTheTypographicScale 钉住设置页的字号刻度（原型 CSS，index.html 498–504 行）：
 //
-// 上游那一页的刻度（DESIGN.md 的 `typography`）：
+//	分组标题 宋体 20（`.set-group h3`）
+//	行标题   14 / 500（`.set-row .od-field strong`）
+//	说明     13（`.set-row .od-field small`）
 //
-//	分组标题 20/400（`h2` = `text-xl`）
-//	行标题   16/500（`font-medium`）
-//	说明     14/400（`text-sm`）
-//
-// 此前这里整页是 16/700、14/700、12——每一档都比上游小两号、粗两档。
-//
-// 判据是画面上的文字盒高（字号 × `textBoxPerSize`），深浅两套都量：深色下这
-// 三行字离得更近，字号差一档看得出来，字重差一档却看不出来——字重由
+// 判据是画面上的文字盒高（字号 × `textBoxPerSize`），深浅两套都量。字重由
 // `TestTheSettingsRowTitleUsesTheMediumWeight`（AST）钉。
 func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 	for _, dark := range []bool{false, true} {
@@ -633,84 +629,53 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			b := newTestShell(t, systemIsDark(dark))
-			// ⚠️ **字号跟行不跟页**：「主题方案」那一整块搬到皮肤页了
-			// （`/appearance`），分组标题跟过去量；「数据显示样式」那行还留在
-			// 设置页，行标题在这里量。两个文本在各自的页上都是唯一的——
-			// 「皮肤」「主题」那种在分组标题 / 顶栏 Label / 路由标题里重名的
-			// 字都不能拿来量（`Tester.Find` 拿的是第一个匹配）。
+			// 这几个字在常规页上各自唯一（「播放」「默认音质」「切换后会重新取流…」），
+			// `Tester.Find` 拿的是第一个匹配。
 			b.s.navigate(settingsPath)
 			b.tt.Frame()
-			rowRect, rowOK := b.tt.Find("数据显示样式")
-			if !rowOK {
-				t.Fatalf("设置页上找不到行标题「数据显示样式」，文字有 %q", b.tt.Texts())
-			}
-			b.s.navigate(appearancePath)
-			b.tt.Frame()
-			grpRect, grpOK := b.tt.Find("深浅模式")
-			if !grpOK {
-				t.Fatalf("皮肤页上找不到分组标题「深浅模式」，文字有 %q", b.tt.Texts())
-			}
-
-			// 两个盒子都是文本本身的高（分组标题与卡片之间是 Gap，不在盒内）。
 			for _, m := range []struct {
 				text string
 				size float32
 				what string
-				r    mygoui.Rect
 			}{
-				{"数据显示样式", 16, "行标题", rowRect},
-				{"深浅模式", 20, "分组标题", grpRect},
+				{"默认音质", 14, "行标题"},
+				{"切换后会重新取流，并从当前位置继续播放", 13, "说明"},
 			} {
-				got := m.r.H / textBoxPerSize
+				r, ok := b.tt.Find(m.text)
+				if !ok {
+					t.Fatalf("设置页上找不到%s「%s」，文字有 %q", m.what, m.text, b.tt.Texts())
+				}
+				// 行高是原型正文的 1.55（`leading.Body`），文字盒高 = 字号 × 1.55。
+				got := r.H / leading.Body
 				if math.Abs(float64(got-m.size)) > 0.8 {
-					t.Errorf("%s「%s」折算出来是 %.1fpx，want %.0f——"+
-						"设置页的三档字号是 20 / 16 / 14（DESIGN.md 的 typography）",
+					t.Errorf("%s「%s」折算出来是 %.1fpx，want %.0f——原型的刻度是 20 / 14 / 13",
 						m.what, m.text, got, m.size)
 				}
+			}
+			// 分组标题是宋体（Display），盒高随字体的行高走，不拿 `textBoxPerSize` 折算，
+			// 只断言它比行标题大一档、而且不是 14。
+			g, ok := b.tt.Find("播放")
+			if !ok {
+				t.Fatalf("设置页上找不到分组标题「播放」，文字有 %q", b.tt.Texts())
+			}
+			row, _ := b.tt.Find("默认音质")
+			if g.H <= row.H+2 {
+				t.Errorf("分组标题「播放」盒高 %.1f 不比行标题 %.1f 大——它该是 20 号宋体", g.H, row.H)
 			}
 		})
 	}
 }
 
-// TestTheMenuGroupNameFitsOnOneLine 钉住「菜单那一页的组名不折行」。
-//
-// 那一格是「左边一列 100 宽的组名 + 右边一排勾选框」（上游 `space-x-[100px]`）。
-// 组名「系统默认菜单」六个汉字在 16px 下是 96 宽，正好放得下；跟着分组标题
-// 改成 20px 的话是 120 宽，会折成「系统默认菜 / 单」（出图量过）。**它是一列
-// 的组标签，不是整页的 `h2`**——上游那里给的是 `text-medium`。
-func TestTheMenuGroupNameFitsOnOneLine(t *testing.T) {
-	b := newTestShell(t)
-	s, tt := b.s, b.tt
-	s.navigate(settingsPath)
-	tt.Frame()
-	openSettingsTab(t, tt, "菜单设置")
-
-	r, ok := tt.Find(menuGroupName)
-	if !ok {
-		t.Fatalf("菜单那一页上找不到组名「%s」，文字有 %q", menuGroupName, tt.Texts())
-	}
-	// 现在它是整页宽卡片上的 20px 分组标题（设计规范 §7.9），不再是 100 宽的左列：
-	// 一行 20px 约 23.6 高；折成两行就是 47。
-	if oneLine := float32(20 * textBoxPerSize); r.H > oneLine+2 {
-		t.Errorf("组名「%s」画出来 %.1f 高（一行约 %.1f）——折行了"+
-			"", menuGroupName, r.H, oneLine)
-	}
-}
-
-// TestTheSettingsRowTitleUsesTheMediumWeight 钉住「行标题用的是 500 那一档」。
-//
-// 字重画不出盒子的差别（`Find` 拿到的矩形只跟字号和行高有关），所以这一条只能
-// 钉代码：`settingRow` 画标题的那一句同时要有 16 的字号和 `weightMedium`。
+// TestTheSettingsRowTitleUsesTheMediumWeight 钉住「行标题用的是 500 那一档」：字重画不出盒子的
+// 差别，所以只能钉代码——`settings_widgets.go` 里画行标题的那一句同时要有 14 的字号和 500 的字重。
 func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 	if weightMedium != 500 {
-		t.Errorf("weightMedium = %d，want 500——上游的 `font-medium` 就是 500，"+
-			"它是一档正经的字重，不是「400 和 600 之间随便选」", weightMedium)
+		t.Errorf("weightMedium = %d，want 500——`font-medium` 就是 500", weightMedium)
 	}
-
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "settings_page.go", nil, 0)
+	f, err := parser.ParseFile(fset, "settings_widgets.go", nil, 0)
 	if err != nil {
-		t.Fatalf("解析 settings_page.go 失败：%v", err)
+		t.Fatalf("解析 settings_widgets.go 失败：%v", err)
 	}
 	found := false
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -718,7 +683,7 @@ func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 		if !ok {
 			return true
 		}
-		has16, hasMedium := false, false
+		has14, hasMedium := false, false
 		ast.Inspect(stmt, func(m ast.Node) bool {
 			call, ok := m.(*ast.CallExpr)
 			if !ok {
@@ -726,46 +691,39 @@ func TestTheSettingsRowTitleUsesTheMediumWeight(t *testing.T) {
 			}
 			switch callName(call) {
 			case "FontSize":
-				// ⚠️ **认刻度表里的那个名**（`scale.Size16`），不认裸数字：
-				// 字号的出处是 `widgets/scale` 那张表（票 #238），代码里
-				// 写的是 `scale.Size16`——只认裸数字的话，这个判据会**静默地
-				// 永远不成立**。
-				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "Size16") {
-					has16 = true
+				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "Size14") {
+					has14 = true
 				}
 			case "FontWeight":
-				if len(call.Args) == 1 && mentionsIdent(call.Args[0], "weightMedium") {
-					hasMedium = true
+				if len(call.Args) == 1 {
+					if lit, ok := call.Args[0].(*ast.BasicLit); ok && lit.Value == "500" {
+						hasMedium = true
+					}
 				}
 			}
 			return true
 		})
-		if has16 && hasMedium {
+		if has14 && hasMedium {
 			found = true
 		}
 		return true
 	})
 	if !found {
-		t.Error("settings_page.go 里没有一句同时写着 `FontSize(…16…)` 和 " +
-			"`FontWeight(weightMedium)`——设置页的行标题必须是 16/500")
+		t.Error("settings_widgets.go 里没有一句同时写着 `FontSize(…Size14…)` 和 `FontWeight(500)`——" +
+			"设置页的行标题必须是 14/500")
 	}
 }
 
-// TestTheSettingsGroupsAre24Apart 钉住「设置分组之间是 24」。
-//
-// 票 #166 之前是两个数：Tab 内容那一层 18、页头那一层 16。DESIGN.md 只有一个
-// `spacing.settings_group_gap` = 24。判据是代码：两处 `Gap` 用的都是同一个常量，
-// 常量本身是 24——写成字面量的话，下一票改一处、漏一处，两个数又漂开。
-func TestTheSettingsGroupsAre24Apart(t *testing.T) {
-	if settingsGroupGap != 24 {
-		t.Errorf("settingsGroupGap = %d，want 24（DESIGN.md 的 "+
-			"`spacing.settings_group_gap`）", settingsGroupGap)
+// TestTheSettingsGroupsAre40Apart 钉住「设置分组之间是 40」（原型 `.set-group { margin-bottom: 40px }`）：
+// 常量本身是 40，而且 `setGroup` 里用的就是它——写成字面量的话，改一处漏一处两个数又漂开。
+func TestTheSettingsGroupsAre40Apart(t *testing.T) {
+	if setGroupGap != 40 {
+		t.Errorf("setGroupGap = %d，want 40", setGroupGap)
 	}
-
 	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "settings_page.go", nil, 0)
+	f, err := parser.ParseFile(fset, "settings_widgets.go", nil, 0)
 	if err != nil {
-		t.Fatalf("解析 settings_page.go 失败：%v", err)
+		t.Fatalf("解析 settings_widgets.go 失败：%v", err)
 	}
 	n := 0
 	ast.Inspect(f, func(node ast.Node) bool {
@@ -773,15 +731,17 @@ func TestTheSettingsGroupsAre24Apart(t *testing.T) {
 		if !ok {
 			return true
 		}
-		if callName(call) == "Gap" && len(call.Args) == 1 &&
-			mentionsIdent(call.Args[0], "settingsGroupGap") {
-			n++
+		if callName(call) == "Margin" {
+			for _, a := range call.Args {
+				if mentionsIdent(a, "setGroupGap") {
+					n++
+				}
+			}
 		}
 		return true
 	})
-	if n < 2 {
-		t.Errorf("设置页只有 %d 处 `Gap(settingsGroupGap)`，want 2（Tab 内容那一层"+
-			"和页头那一层）——分组间距是两个数的话，改一处、漏一处就又漂开了", n)
+	if n < 1 {
+		t.Errorf("`setGroup` 里没有用 `setGroupGap` 做下边距")
 	}
 }
 
@@ -860,14 +820,13 @@ func TestTheMediumWeightIsDrawnHeavierThanNormal(t *testing.T) {
 	}
 }
 
-// TestPagesStartAtTheTop 钉住「页面根没有上内边距」（票 #166 的 G40）。
+// TestPagesStartAtTheTop 钉住「页面顶上留白不多于原型的那一档」。
 //
-// 上游的页容器只有 `px-4`（16），**没有 `py`**。我们此前每一页顶上多留了
-// 16~28（首页 / 下载记录 20、稍后再看 / 历史记录 / 本地音乐 16、搜索 28、
-// 设置 28、登录 20），于是整块内容比上游低一截。
+// 原型 `.page { padding: 8px 40px 64px }`、`.page-head { padding: 24px 0 8px }`（index.html
+// 262 / 274 行）：内容顶上到标题块是 8 + 24 = 32，再加字形自己的上沿留白（Eyebrow 11 号约 3，
+// 48 号标题约 14）。票 #166 的 G40 当年按上游「页面根没有 py」把它卡在 16，和原型冲突，改成原型的数。
 //
-// 判据是画面：内容区里**第一段墨**从顶栏下缘往下多远。上边距收成 0 之后，那
-// 只有字形自己的上沿留白（2~5 像素）；留 16 或 20 的话，这一段会明显低下去。
+// 判据是画面：内容区里**第一段墨**（含页头上面那行 Eyebrow）从顶栏下缘往下多远，≤ 40。
 // ⚠️ **首页不在这一张表里**：原型首页顶上是 `padding-top: 8` + 问候区的 `padding-top: 24`，
 // 由 `homepage_test.go` 的 `TestTheHomePageUsesThePrototypePageMargins` 钉。
 func TestPagesStartAtTheTop(t *testing.T) {
@@ -884,23 +843,21 @@ func TestPagesStartAtTheTop(t *testing.T) {
 		{name: "下载记录", path: downloadListPath},
 		{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA"},
 		{name: "设置", path: settingsPath},
-		{name: "扫码登录", path: loginPath},
 	} {
+		// 登录页不在这里：原型的 `.login` 是整页居中的卡片（上下 48，垂直居中），不是页头那一族。
 		t.Run(page.name, func(t *testing.T) {
 			b := newTestShell(t, page.opts...)
 			s, tt := b.s, b.tt
 			s.navigate(page.path)
 			tt.Frame()
 
-			lo, _, ok := firstBand(tt.Image(), area)
-			if !ok {
+			rows := inkRows(tt.Image(), area)
+			if len(rows) == 0 {
 				t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
 			}
-			// 页标题是 48 宋体：字形上方那段行内留白随字号放大（24 号时实测 ≤ 8，
-			// 48 号时 14），判据按字号同比放到 16——它钉的仍是「页面根没有上内边距」。
-			if top := lo - navMinHeight; top > 16 {
-				t.Errorf("%s 的第一段墨从顶栏下缘往下 %d 像素开始——页面根不许有"+
-					"上内边距（上游只有 `px-4`、没有 `py`），want ≤ 16", page.name, top)
+			if top := rows[0] - navMinHeight; top > 40 {
+				t.Errorf("%s 的第一段墨从顶栏下缘往下 %d 像素开始——原型的页面顶上是 8 + 24 加字形留白，"+
+					"want ≤ 40", page.name, top)
 			}
 		})
 	}

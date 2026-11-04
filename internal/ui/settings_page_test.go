@@ -9,7 +9,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/testproc"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -51,15 +50,21 @@ func clickSetting(t *testing.T, tt *mygoui.Tester, s *Shell, label string) {
 // 一块色块），它们只能靠自己的 Label 找，而找出来之后仍然要滚进来才点得到。
 func settingRect(t *testing.T, tt *mygoui.Tester, s *Shell, label string) mygoui.Rect {
 	t.Helper()
-	for range 24 {
-		if r, ok := tt.Find(label); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
+	for range 48 {
+		r, ok := tt.Find(label)
+		if ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
 			return r
 		}
+		// 在可视区上沿以上就往回滚（前面的断言可能已经把页滚到下面去了），否则往下滚。
+		step := float32(60)
+		if ok && r.Y < pageTop { // 滚出上沿时 Find 给的是贴在上沿、高 0 的框
+			step = -60
+		}
 		before := s.settings.scroll.Y
-		s.settings.scroll.Y = before + 60
+		s.settings.scroll.Y = max(before+step, 0)
 		tt.Frame()
 		if s.settings.scroll.Y == before {
-			break // 已经到底了，再滚也不动
+			break // 到头了，再滚也不动
 		}
 	}
 	t.Fatalf("设置页上滚不到 %q，文字有 %q", label, tt.Texts())
@@ -87,63 +92,97 @@ func shellOnSettings(t *testing.T, s app.Settings, opts ...shellOpt) (*mygoui.Te
 	return tt, b.s, b.a, b.settingsPath
 }
 
-// TestSettingsPageShowsItsContent 验切过去看到的是设置页，不是占位页。
-//
-// 逐项点名，是因为设置页最可能的失败是「画出来了，但少了一项」——用户看见一个
-// 缺了「窗口关闭」的设置页，不会知道还有一项。
+// TestSettingsPageShowsItsContent 验切过去看到的是设置页，不是占位页，并逐项点名：
+// 设置页最可能的失败是「画出来了，但少了一项」。
 func TestSettingsPageShowsItsContent(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
+	// 页头 + 六个分类 + 常规 Tab 的三组。
 	for _, want := range []string{
-		"设置", "外观", "数据显示样式",
-		"系统", "窗口关闭", "隐藏到托盘", "直接退出",
-		"开机自启",
+		"设置", "常规", "外观", "菜单", "快捷键", "代理", "关于",
+		"播放", "默认音质", "视频画质", "上报本机播放记录",
+		"系统", "开机自启", "关闭窗口时留在菜单栏", "开启刘海播放器", "更新提醒",
+		"下载", "下载目录", "更改",
 	} {
 		if !tt.HasText(want) {
 			t.Errorf("设置页上没有 %q，文字有 %q", want, tt.Texts())
 		}
 	}
-	// 「不是占位页」这一条要能失败才算数。原来这里查的是占位页那句
-	// 「这一页还没做」——那句话连同占位页一起没了，断言恒为真，验不到任何东西。
-	// 现在查的是这一页真的接上了自己的画法（builtPage），接不上就会退回空状态。
+	// 原型有、底层没有的条目不做假开关。
+	for _, no := range []string{"无缝播放", "恢复上次的播放", "记录播放历史", "切歌时显示通知", "默认下载内容"} {
+		if tt.HasText(no) {
+			t.Errorf("设置页上不该有没有底层支持的条目 %q", no)
+		}
+	}
 	if s.builtPage(lookup(settingsPath)) == nil {
 		t.Errorf("设置页没接上 builtPage，画出来的是空状态而不是设置页")
 	}
-	if tt.HasText("macOS 上不建托盘图标") {
-		t.Errorf("菜单栏图标已经有了，不该再解释「没有托盘」：%q", tt.Texts())
-	}
 }
 
-// TestTheSettingsPageIsReachableFromTheMenu 验入口在侧栏上——
-// 用户找得到，才谈得上「设置页最小可用」。
+// TestTheSettingsPageIsReachableFromTheMenu 验入口在侧栏上。
 func TestTheSettingsPageIsReachableFromTheMenu(t *testing.T) {
 	_, tt := newShell(t)
-
-	if tt.HasText("外观") {
+	if tt.HasText("默认音质") {
 		t.Fatal("还没点就在设置页上了")
 	}
 	openSettings(t, tt)
 }
 
-// TestChoosingTheCloseWindowOptionIsStored 验「关窗口时退出还是留在托盘里」
-// 这一项选得了、存得住。
-//
-// 托盘实现在 issue #28，这一版只管存储和选择——所以这里断言的是**盘上那份**，
-// 不是窗口关掉之后发生了什么：后者现在还不该有任何行为。
-func TestChoosingTheCloseWindowOptionIsStored(t *testing.T) {
+// TestTheSettingsTabsSwitchAndEachDrawsItsOwnThing 验六个分类各自画出自己的东西。
+func TestTheSettingsTabsSwitchAndEachDrawsItsOwnThing(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	for _, c := range []struct {
+		tab  string
+		want []string
+	}{
+		{"外观", []string{"深浅模式", "深色", "浅色", "跟随系统", "颜色与字体", "封面取色", "界面字号", "收起侧栏", "字体", "数据显示样式", "卡片", "列表", "紧凑"}},
+		{"菜单", []string{"侧栏菜单显示", "收藏夹显示"}},
+		{"快捷键", []string{"快捷键设置", "启用全局快捷键", "命令", "应用内快捷键", "全局快捷键"}},
+		{"代理", []string{"代理设置", "不使用代理", "使用系统代理", "自定义代理"}},
+		{"关于", []string{"开源许可", "诊断信息", "查看", "复制"}},
+		{"常规", []string{"播放", "系统", "下载"}},
+	} {
+		openSettingsTab(t, tt, c.tab)
+		for _, w := range c.want {
+			if !tt.HasText(w) {
+				t.Errorf("「%s」Tab 上没有 %q，文字有 %q", c.tab, w, tt.Texts())
+			}
+		}
+	}
+	// 主题方案卡片是用户拍板不做的（只保留一套主题）。
+	openSettingsTab(t, tt, "外观")
+	if tt.HasText("主题方案") {
+		t.Errorf("外观 Tab 上不该有「主题方案」：%q", tt.Texts())
+	}
+}
+
+// TestTheMenuAboutItemOpensTheAboutTab 验应用菜单的「关于」不再开弹窗，而是跳到设置页的「关于」Tab。
+func TestTheMenuAboutItemOpensTheAboutTab(t *testing.T) {
+	b := newTestShell(t)
+	b.tt.Frame()
+	b.s.openAbout()
+	settleSettingsPage(t, b.tt)
+	if b.s.router.Path() != settingsPath || b.s.settings.tab != settingsTabAbout {
+		t.Fatalf("菜单「关于」之后在 %q 的第 %d 个 Tab", b.s.router.Path(), b.s.settings.tab)
+	}
+	if !b.tt.HasText("开源许可") {
+		t.Errorf("「关于」Tab 没画出来：%q", b.tt.Texts())
+	}
+}
+
+// TestTheCloseWindowSwitchIsStored 验「关闭窗口时留在菜单栏」选得了、存得住：开 = hide，关 = exit。
+func TestTheCloseWindowSwitchIsStored(t *testing.T) {
 	want := app.DefaultSettings("")
-	want.CloseWindowOption = app.CloseWindowHide // Biu 的默认值
+	want.CloseWindowOption = app.CloseWindowHide
 	tt, s, a, path := shellOnSettings(t, want)
 
 	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowHide {
 		t.Fatalf("起点是 %q", got)
 	}
-
-	clickSetting(t, tt, s, "直接退出")
+	clickSetting(t, tt, s, "开关：关闭窗口时留在菜单栏")
 	tt.Frame()
-
 	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowExit {
-		t.Fatalf("点了「直接退出」之后设置是 %q", got)
+		t.Fatalf("关掉开关之后设置是 %q", got)
 	}
 	if err := a.FlushSettings(); err != nil {
 		t.Fatal(err)
@@ -155,22 +194,16 @@ func TestChoosingTheCloseWindowOptionIsStored(t *testing.T) {
 	if saved.CloseWindowOption != app.CloseWindowExit {
 		t.Errorf("落到盘上的是 %q，want exit", saved.CloseWindowOption)
 	}
-
-	// 换回去也要行：这是一对能来回切的选项，不是一个只写一次的开关。
-	clickSetting(t, tt, s, "隐藏到托盘")
+	// 换回去也要行。
+	clickSetting(t, tt, s, "开关：关闭窗口时留在菜单栏")
 	tt.Frame()
 	if got := a.SettingsSnapshot().CloseWindowOption; got != app.CloseWindowHide {
-		t.Errorf("点回「隐藏到托盘」之后设置是 %q", got)
+		t.Errorf("打开开关之后设置是 %q", got)
 	}
 }
 
-// TestSettingsPageSaysSoWhenAChangeCannotBeStored 验「存不住」时用户看得见。
-//
-// 这里的错是**当场**发生的：设置压根没挂上（拿不到应用数据目录就是这个结果），
-// 所以点下去立刻被拒。与其让用户按了没反应，不如说清为什么。
-//
-// 后台落盘失败（磁盘满、目录没了）是另一条路，那条由
-// `TestShellSaysSoWhenSettingsAreBroken` 盯。
+// TestSettingsPageSaysSoWhenAChangeCannotBeStored 验「存不住」时用户看得见：设置压根没挂上，
+// 点下去立刻被拒。后台落盘失败是另一条路，见 `TestShellSaysSoWhenSettingsAreBroken`。
 func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 	a := app.New()
 	a.RecordSettingsFailure(os.ErrNotExist)
@@ -178,31 +211,21 @@ func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 	b := newTestShell(t, onApp(a))
 	tt := b.tt
 	tt.Frame()
-	openAppearance(t, tt, b.s)
-
-	// ⚠️ 皮肤页的卡是滚动的：「深色」那一张默认在窗口底边之外（见
-	// `appearanceRect` 的注释），裸 `tt.Click` 会点在窗外。
-	r := appearanceRect(t, tt, b.s, "深色")
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-	tt.Frame()
+	openAppearance(t, tt)
+	clickTheme(t, tt, b.s, "浅色")
 
 	if !tt.HasText("主题没存上") {
 		t.Errorf("改不动的时候界面上没有提示，文字有 %q", tt.Texts())
 	}
-	// 提示之外界面照常画：这一帧要是 panic 了，测试进程自己就没了。
 	if !tt.HasText("深浅模式") {
 		t.Errorf("提示之外界面没画出来，文字有 %q", tt.Texts())
 	}
 }
 
-// TestSettingsPageRefusesToWriteAFileFromANewerVersion 验只读时**每一项**都改
-// 不了，不只是主题那一项。
-//
-// 逐项点是因为只读是整份文件的性质：主题被挡住了而「窗口关闭」还能改，用户
-// 会以为那一份存住了，下次升级回来才发现丢了一半。
+// TestSettingsPageRefusesToWriteAFileFromANewerVersion 验只读时每一项都改不了，不只是主题那一项：
+// 主题被挡住了而别的还能改，用户会以为那一份存住了，下次升级回来才发现丢了一半。
 func TestSettingsPageRefusesToWriteAFileFromANewerVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), app.SettingsFileName)
-	// 这个文件将来的版本号比我们高：一律只读，不备份、不改写。
 	if err := os.WriteFile(path, []byte(`{"schemaVersion": 99, "appSettings": {"themeMode": "dark"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -219,21 +242,15 @@ func TestSettingsPageRefusesToWriteAFileFromANewerVersion(t *testing.T) {
 	b := newTestShell(t, onApp(a))
 	s, tt := b.s, b.tt
 	tt.Frame()
-	// 皮肤页上先验只读横幅 + 「浅色」改不动；再回设置页点「直接退出」——
-	// 只读是整份文件的性质，两页都验一遍才算「每一项都改不了」。
-	openAppearance(t, tt, s)
+	openAppearance(t, tt)
 	if !tt.HasText("设置只读") {
-		t.Errorf("皮肤页上没有说清为什么改不了，文字有 %q", tt.Texts())
+		t.Errorf("没有说清为什么改不了，文字有 %q", tt.Texts())
 	}
-	if r := appearanceRect(t, tt, s, "浅色"); true {
-		tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-		tt.Frame()
-	}
-	openSettings(t, tt)
-	clickSetting(t, tt, s, "直接退出")
+	clickTheme(t, tt, s, "浅色")
+	openSettingsTab(t, tt, "常规")
+	clickSetting(t, tt, s, "开关：关闭窗口时留在菜单栏")
 	tt.Frame()
 
-	// 文件一个字都不能被我们改过。
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -295,13 +312,11 @@ func pageChildRoundTrip(t *testing.T) {
 	tt.Frame()
 
 	if mode == "write" {
-		openAppearance(t, tt, s)
-		if r := appearanceRect(t, tt, s, "深色"); true {
-			tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-			tt.Frame()
-		}
-		openSettings(t, tt)
-		clickSetting(t, tt, s, "直接退出")
+		openAppearance(t, tt)
+		clickTheme(t, tt, s, "深色")
+		openSettingsTab(t, tt, "常规")
+		// 「关闭窗口时留在菜单栏」默认开，关掉它就是 CloseWindowExit。
+		clickSetting(t, tt, s, "开关：关闭窗口时留在菜单栏")
 		tt.Frame()
 	}
 
@@ -375,233 +390,18 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 	}
 }
 
-// TestTheSettingsContentIsCappedAndCentered 钉住设置的内容收在中间一段宽度里。
-//
-// Biu 那一页是 `m-auto mb-6 max-w-[900px] px-8 py-4`
-// （`biu/src/pages/settings/index.tsx:121`）。我们原来没有这一层：内容
-// `FillWidth()` 之后一路铺到窗口右边缘，窗口一宽整页设置就跟着拉宽——右下角
-// 那个代理主机输入框能到 410 像素。
-//
-// ⚠️ **量的是内容那一段的左右两端，不是某一个控件**：左端取「外观」那个小标题
-// （它是内容那一列最左边的东西），右端取「窗口关闭方式」那一排（`settingRowEl`
-// 把控件钉在行尾，所以它那一格的右沿就是内容那一段的右沿）。两者之间的宽度
-// **加上左右各一份内边距**才是内容那一段的宽。圆角那套量具搬到皮肤页了
-// （`/appearance`），设置页这边量「窗口关闭」那一排。
-//
-// ⚠️ **两档窗口都要量**：宽过 900 的那一档验「封顶」，窄的那一档验「不封成
-// 一个死数」——`MaxWidth` 是上限，可视区多窄它就多窄，最小窗口（900 - 侧栏
-// 200 = 700）上照抄一个固定 900 会把右边推出去。
-func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
-
-	for _, winW := range []int{1200, 1400, 1000} {
-		// 侧栏固定 232，窗口宽 ≤ 1024 时收起成 72。
-		sideW := int(tok.SideW)
-		if float32(winW) <= tok.AutoCollapseBelow {
-			sideW = int(tok.SideCollapsedW)
-		}
-		tt, sh, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
-		homeFrame(tt)
-
-		// 「窗口关闭」那一排在页面很靠下的地方，800 高的窗口装不下整页——
-		// 被滚出可视区的元素框架量成 0×0，横向测量就废了。先把它滚进来再量。
-		settingRect(t, tt, sh, "窗口关闭方式")
-		left, okL := tt.Find("外观")
-		if !okL {
-			t.Fatalf("窗口 %d：设置页上没有「外观」那个小标题，文字有 %q", winW, tt.Texts())
-		}
-		right, okR := tt.Find("窗口关闭方式")
-		if !okR {
-			t.Fatalf("窗口 %d：设置页上没有「窗口关闭」那一排，文字有 %q", winW, tt.Texts())
-		}
-
-		// 内容那一段：左右各留一份内边距（settingsContentPad）。
-		blockLeft := left.X - settingsContentPad
-		// 控件在分组卡片里：右边还隔着卡片的内边距加描边。
-		blockRight := right.X + right.W + settingsContentPad + settingsCardInset
-		avail := float32(winW - sideW)
-
-		want := float32(settingsContentMaxW)
-		if avail < want {
-			want = avail
-		}
-		if got := blockRight - blockLeft; got != want {
-			t.Errorf("窗口 %d：设置的内容那一段是 %.1f 宽，want %.1f"+
-				"（可视区 %.1f，上限 %d）——要么铺满了窗口右边缘，要么被钉死在 %d 上",
-				winW, got, want, avail, settingsContentMaxW, settingsContentMaxW)
-		}
-
-		// 居中：左右留白一样多。
-		gotLeft := blockLeft - float32(sideW)
-		if want < avail {
-			wantPad := (avail - want) / 2
-			if gotLeft != wantPad {
-				t.Errorf("窗口 %d：内容那一段左边留了 %.1f，右边留了 %.1f——没居中",
-					winW, gotLeft, avail-want-gotLeft)
-			}
-		}
+// TestTheSettingsPageUsesThePageHead 钉住设置页的页头走 `pud.PageHead`（原型 `.page-head`：
+// Eyebrow `Preferences` + 宋体标题「设置」，标题字号 `scale.PageTitleFluid(窗口宽)`，原型的 clamp(32px, 3.4vw, 48px)）。
+func TestTheSettingsPageUsesThePageHead(t *testing.T) {
+	src, err := os.ReadFile("settings_page.go")
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-// TestTheSettingsControlsShareOneBaseline 钉住「设置页控件列的左边缘是一条线」。
-//
-// # 此前那一列的左边缘落在四个位置
-//
-// 762 / 801 / 822 / 942，而且其中两个控件**没填满自己的盒子**——那一列看上去
-// 是参差的（UI 报告 §4 的 F-04）。现在那一列有了一个基准宽度
-// （`settingsControlW`），每一行的控件都占同样宽的一格，右边齐在内容那一段
-// 的右沿，左边也就齐在同一条线上。
-//
-// # 判据是**画面**
-//
-// 量那一列里每一个控件的盒子，看它们是不是从同一条线上开始。那条线就是
-// 「内容那一段的右沿往左 `settingsControlW`」。
-//
-// ⚠️ **量的是盒子，不是那一行字**：按钮上的字是居中的，量字的位置量的是字，
-// 不是控件的边。分段控件那一排靠一个组名（`Label(...)`）才量得到它自己那一格。
-//
-// ⚠️ **外观那一套控件（主题 / 颜色 / 字体 / 圆角）搬到皮肤页了**——
-// 这条钉的是「控件列共一条基线」这个**规则**，设置页这边剩下的三个
-// `settingsControlW` 控件（预览列 / 两个下拉 / 一排分段）一样量得出。
-func TestTheSettingsControlsShareOneBaseline(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	homeFrame(tt)
-
-	// 内容那一段的右沿：分组标题（「外观」）铺满内容那一段的宽。
-	head, ok := tt.Find("外观")
-	if !ok {
-		t.Fatalf("设置页上没有「外观」那个分组标题，文字有 %q", tt.Texts())
+	if !strings.Contains(string(src), `pud.PageHead(c, "Preferences", "设置",`) {
+		t.Error("settings_page.go 没有用 `pud.PageHead(c, \"Preferences\", \"设置\", …)` 画页头")
 	}
-	// 控件在分组卡片里，右沿比标题行往里缩一个卡片的内边距加描边。
-	baseline := head.X + head.W - settingsControlW - settingsCardInset
-
-	for _, c := range []struct {
-		label string
-		what  string
-	}{
-		{label: "预览：列表", what: "「数据显示样式」那一列（三张预览）"},
-		{label: "选择音质偏好", what: "「音质偏好」那一行的下拉"},
-		{label: "窗口关闭方式", what: "「窗口关闭」那一排两个按钮"},
-	} {
-		// ⚠️ **先滚进可视区再量**：「窗口关闭」那一排在设置页的最下面，
-		// `Find` 拿到的框可能在屏幕外——Y 对不上就算了，滚屏后的框
-		// 读的是旧一帧，X 也可能是错的（评审那一版就量错过）。
-		r := settingRect(t, tt, s, c.label)
-		want := baseline
-		if r.X < want-0.5 || r.X > want+1.5 {
-			t.Errorf("%s 从 %.1f 起，而它该从 %.1f 起（控件列的左边缘是 %.1f）"+
-				"——那一列的左边缘得是一条线（UI 报告 §4 的 F-04）",
-				c.what, r.X, want, baseline)
-		}
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	if !tt.HasText("PREFERENCES") && !tt.HasText("Preferences") {
+		t.Errorf("页头上没有 Eyebrow「Preferences」：%q", tt.Texts())
 	}
-}
-
-// TestTheSettingsControlColumnIsFilled 钉住「控件列里的控件填满那一格」。
-//
-// F-04 抱怨的是两件事：左边缘落在四个位置，**以及两个控件没填满自己的盒子**
-// ——预览那三张右边空 16、色卡那两块右边空 91（UI 报告 §4 的 F-04）。
-// 上一条钉的是左边缘，这一条钉的是「填满」。
-//
-// ⚠️ **判据是代码里的那几个数**：色卡是两块各占一半（中间 12 的缝），下拉就是
-// 基准宽本身。预览那三张现在是 `Grow(1)` 等分（见 `displaymode.go`），写死的
-// 宽没有了对不上的必要。
-//
-// ⚠️ **340 的那一问也要钉**：基准宽必须装得下主题那排**四档**的内容——
-// 「跟随系统」98 + 其余三档各 70 + 三道 4 的缝 + 行内边距 4 = 324。#534 加了
-// 「定时」那一档之后没人重算这个数，四档全被裁成「跟随…」（2026-10-26 修的那
-// 个回归）；这条钉着它不再发生。
-func TestTheSettingsControlColumnIsFilled(t *testing.T) {
-	if settingsControlW != 340 {
-		t.Errorf("settingsControlW = %d，want 340——控件列的基准宽度是量出来的"+
-			"（主题那排四档里「跟随系统」最宽，窄了它会被画成「跟随…」）",
-			settingsControlW)
-	}
-	if selectWidth != settingsControlW {
-		t.Errorf("selectWidth = %d，want %d——那一列里的下拉也要按基准宽走，"+
-			"否则控件列的左边缘又落在两个位置上", selectWidth, settingsControlW)
-	}
-	// 四档装得下：段控件那排的内宽（基准宽 - 行内边距 2×2）≥ 四档内容 +
-	// 三道档间缝。宽度的三个成分（内边距 10、图标 18、缝 4）都写在
-	// `segmentButton` / `settingsSegment` 里，这里把账再算一遍。
-	themeContent := 2*2 + 3*4 + (4*(10+10) + 4*18 + 4*4) + (56 + 28*3)
-	if themeContent > settingsControlW {
-		t.Errorf("主题四档的内容要 %d，基准宽只有 %d——「跟随系统」会被裁成"+
-			"「跟随…」；要么收内边距/缝，要么把基准宽抬上去", themeContent, settingsControlW)
-	}
-}
-
-// TestTheSettingsInputsAreNotFullRowWide 钉住输入框不横跨整行。
-//
-// 那一格原来写的是 `Grow(1)`，而它所在那一行的左边（标题 + 说明）也是 `Grow(1)`
-// ——两边平分那一行，于是「系统默认」四个字摆在一个 410 宽的框里，而它右边什么
-// 都没有。那不是「点哪儿都行」的好心：用户要按准那个框的右下角才能展开它。
-//
-// ⚠️ **上限是控件列的基准宽度**（`settingsControlW`）：这一列里的控件都按它
-// 排（票 #235 的 F-04），所以「不横跨整行」这一条的上限也跟着它——
-// 比它宽的控件就该把那一行撑歪，而那一行左边还有标题和说明。
-//
-// ⚠️ **断的是控件自己的宽**：一个 410 宽的框里那四个字仍然是「点得准」的
-// （点框的哪儿都算点中），所以判据是**它有多宽**，不是「点一下有没有反应」。
-func TestTheSettingsInputsAreNotFullRowWide(t *testing.T) {
-	// 设置页这边剩下的下拉 + 皮肤页上的两个控件一起量——「不横跨整行」这条
-	// 规则跟着控件走，不跟着页走（那一整块搬到 /appearance 了）。
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(1400, 800))
-	homeFrame(tt)
-
-	for _, c := range []struct {
-		label string
-		want  float32
-	}{
-		{"选择音质偏好", selectWidth}, // 控件列的基准宽度
-	} {
-		r, ok := tt.Find(c.label)
-		if !ok {
-			t.Errorf("设置页上没有 %q，文字有 %q", c.label, tt.Texts())
-			continue
-		}
-		if r.W > c.want {
-			t.Errorf("%q 是 %.0f 宽，want ≤ %.0f——设置项不该横跨整行，"+
-				"用户得瞄准那个框才能点中", c.label, r.W, c.want)
-		}
-	}
-}
-
-// TestTheAppearanceInputsAreNotFullRowWide 是上面那一条的皮肤页版：
-// 「字体」那一格搬到皮肤页了，判据不变（控件列的基准宽度）。
-func TestTheAppearanceInputsAreNotFullRowWide(t *testing.T) {
-	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""), at(1400, 800))
-	homeFrame(tt)
-
-	for _, c := range []struct {
-		label string
-		want  float32
-	}{
-		{"选择字体", selectWidth}, // 控件列的基准宽度
-	} {
-		r := appearanceRect(t, tt, s, c.label)
-		if r.W > c.want {
-			t.Errorf("%q 是 %.0f 宽，want ≤ %.0f——控件不该横跨整行，"+
-				"用户得瞄准那个框才能点中", c.label, r.W, c.want)
-		}
-	}
-}
-
-// appearanceRect 是 `settingRect` 的皮肤页版：滚的是 `s.appearanceScroll`，
-// 不是 `s.settings.scroll`（设置页那份）。皮肤页（/appearance）那一整块
-// 控件从设置页搬来之后，原来钉在设置页上的那些测试改在皮肤页上跑——
-// 而它们的判据不变：滚到那一排、量框、量像素。
-func appearanceRect(t *testing.T, tt *mygoui.Tester, s *Shell, label string) mygoui.Rect {
-	t.Helper()
-	for range 24 {
-		if r, ok := tt.Find(label); ok && r.H > 0 && r.Y >= pageTop && r.Y+r.H <= pageBottom {
-			return r
-		}
-		before := s.appearanceScroll.Y
-		s.appearanceScroll.Y = before + 60
-		tt.Frame()
-		if s.appearanceScroll.Y == before {
-			break // 已经到底了，再滚也不动
-		}
-	}
-	t.Fatalf("皮肤页上滚不到 %q，文字有 %q", label, tt.Texts())
-	return mygoui.Rect{}
 }

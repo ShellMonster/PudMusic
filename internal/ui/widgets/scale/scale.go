@@ -36,8 +36,24 @@ import "github.com/egoist/mygo/ui"
 // 0 在框架那边是「没说」，落到 `preferences()` 里也会变成 1。
 func Font(c *ui.Context, n float32) float32 {
 	s := c.Preferences().TextScale
-	if s <= 0 || s == 1 {
+	if s <= 0 {
+		s = 1
+	}
+	s *= user
+	if s == 1 {
 		return n
 	}
 	return n * s
+}
+
+// user 是设置页「界面字号」那一档（紧凑 0.94 / 标准 1 / 大 1.08）的乘子，和系统文本
+// 缩放相乘。只在 UI 线程上读写：`Shell.applyFrameTheme` 每帧开头设一次。
+var user float32 = 1
+
+// SetUser 设「界面字号」乘子；0 和负数当 1。
+func SetUser(f float32) {
+	if f <= 0 {
+		f = 1
+	}
+	user = f
 }

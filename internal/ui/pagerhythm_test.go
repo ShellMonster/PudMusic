@@ -122,11 +122,16 @@ func firstBand(img *image.RGBA, area image.Rectangle) (lo, hi int, ok bool) {
 	if len(rows) == 0 {
 		return 0, 0, false
 	}
-	lo = rows[0]
-	hi = rows[0]
+	// 带的高度不到 minTitleBand 行的是页标题上面那行 Eyebrow（11 号等宽，墨迹约 10 行），
+	// 不是标题自己——跳过，取下一带（原型 `.page-head` 是 Eyebrow + 标题）。
+	const minTitleBand = 20
+	lo, hi = rows[0], rows[0]
 	for _, y := range rows[1:] {
 		if y > hi+1 {
-			break
+			if hi-lo+1 >= minTitleBand {
+				return lo, hi, true
+			}
+			lo = y
 		}
 		hi = y
 	}
@@ -326,10 +331,11 @@ func TestEveryPageTitleUsesTheSharedSize(t *testing.T) {
 	// 这几行字就是各页的页标题（首页没有页标题，理由见 `homepage.go`；收藏夹
 	// 那一页的大标题是 30，不走这个数）。
 	//
-	// ⚠️ **设置页和登录页也在名单里**：它们的**边距**归 #127（设置页要收进居中
-	// 那一栏），而**字号**是这一票的事——从设置页翻到下载记录，标题小两号正是
-	// 这一票要消掉的那一种。
-	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索", "设置", "扫码登录"}
+	// 设置页不在这里：它用 `pud.PageHead`（内部是 `typo.Display(…, scale.PageTitleFor(contentW))`，
+	// 窄内容区降到 32），由 `TestTheSettingsPageUsesThePageHead` 钉住。
+	// 登录页不在：原型的「扫码登录」是 `.h-page` 上的行内 `font-size:40px`（`scale.Size40`），
+	// 它是整页居中的卡片里的标题，不是 `.page-head` 里的页标题。
+	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索"}
 	for _, title := range titles {
 		if !titleUsesSharedSize(t, title) {
 			t.Errorf("页标题 %q 没有用 `typo.Display(…, scale.Font(c, scale.PageTitle))`——页标题的字号必须"+
@@ -500,8 +506,6 @@ func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
 				{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA", chars: 2},
 				// 设置页和登录页也在这一族里：它们的页标题同样是 `scale.PageTitle`
 				// （票 #166——「所有页面的大标题 24/400」）。
-				{name: "设置", path: settingsPath, chars: 2},
-				{name: "扫码登录", path: loginPath, chars: 4},
 			} {
 				b := newTestShell(t, append(page.opts, systemIsDark(dark))...)
 				s, tt := b.s, b.tt
@@ -866,11 +870,11 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 			tt.Frame()
 			tt.Frame()
 
-			if !tt.HasText("还没登录") {
-				t.Errorf("%s 没登录时没说「还没登录」，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText("登录后查看" + page.name) {
+				t.Errorf("%s 没登录时没说「登录后查看%s」，文字有 %q", page.name, page.name, tt.Texts())
 			}
-			if !tt.HasText("去登录") {
-				t.Errorf("%s 没登录时没给「去登录」那一步，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText("扫码登录") {
+				t.Errorf("%s 没登录时没给「扫码登录」那一步，文字有 %q", page.name, tt.Texts())
 			}
 			// 空列表那一句**不许**出现：用户要的是「先登录」，不是「这里没有」。
 			if empty := lookup(page.path).Empty.Title; tt.HasText(empty) {

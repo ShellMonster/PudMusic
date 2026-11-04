@@ -1,7 +1,6 @@
 package pud
 
 import (
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -39,22 +38,29 @@ const (
 //
 //	if pud.Button(c, "play-all", pud.Primary, pud.Std, "播放全部", "play").Clicked() { … }
 func Button(c *ui.Context, key string, kind Kind, size Size, label, icon string) ui.Element {
-	return button(c, key, kind, size, label, "", icon, false)
+	return button(c, key, kind, size, label, "", icon, false, false)
 }
 
 // ButtonMono 是 Button 加上字后面一小段等宽字（原型 `继续播放「歌名」<span class="mono">0:37</span>`）：
 // 字和等宽那段之间隔 8（`.btn` 的 gap）。
 func ButtonMono(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string) ui.Element {
-	return button(c, key, kind, size, label, mono, icon, false)
+	return button(c, key, kind, size, label, mono, icon, false, false)
+}
+
+// ButtonDisabled 是 Button 加「禁用」。禁用要在建的时候就告诉它，而不是返回之后再 `.Disabled(…)`：
+// 悬停底是建的时候按 `Hovered()` 铺的，返回之后再禁用就晚了——禁用的键指针落上去照样亮，
+// 等于告诉用户这里点得动（原型 `.btn:disabled { opacity:.45 }` 且 `:hover:not(:disabled)`）。
+func ButtonDisabled(c *ui.Context, key string, kind Kind, size Size, label, icon string, disabled bool) ui.Element {
+	return button(c, key, kind, size, label, "", icon, false, disabled)
 }
 
 // RoundButton 是圆形的那一档（原型 `.btn-round`：宽 = 高，只放一枚图标）。label 是
 // 无障碍名字。
 func RoundButton(c *ui.Context, key string, kind Kind, size Size, icon, label string) ui.Element {
-	return button(c, key, kind, size, label, "", icon, true)
+	return button(c, key, kind, size, label, "", icon, true, false)
 }
 
-func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string, round bool) ui.Element {
+func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string, round, disabled bool) ui.Element {
 	p := pal(c)
 	h, padX, fs := tok.BtnH, float32(20), float32(scale.Size14)
 	if size == Sm {
@@ -64,7 +70,7 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon s
 		padX = 12
 	}
 	b := ui.ButtonBase(c).Key(key).Height(h).Radius(h / 2).Gap(space.Px8).
-		AlignItems(ui.Center).Justify(ui.Center).Shrink(0)
+		AlignItems(ui.Center).Justify(ui.Center).Shrink(0).Disabled(disabled)
 	if round {
 		b = b.Width(h).Label(label)
 	} else {
@@ -89,12 +95,8 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon s
 			fg, bg = p.Text, p.Hover
 		}
 	case Danger:
-		// 原型是白字压 err；深色的 err（#F0716B）只有 2.5:1，换深字（和 Toast 的
-		// `readableOn` 同一个规矩）。
+		// 原型 `.btn-danger { background: var(--err); color: #fff }`：白字，两套主题都一样。
 		bg, fg = p.Err, ui.RGB(255, 255, 255)
-		if ink.Luminance(p.Err) > ink.PivotLuminance {
-			fg = p.Bg
-		}
 	}
 	b = b.Background(bg).Border(1, border).TextColor(fg).Transition(motion.Fade)
 	scaleTo := float32(1)

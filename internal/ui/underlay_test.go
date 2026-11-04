@@ -270,7 +270,7 @@ func TestTheSearchWatchStopsWhileTheFullPlayerIsOpen(t *testing.T) {
 // ⚠️ **判据是 `s.recording` 本身**，不是画面：满屏那一屏上根本看不见录制格。
 func TestTheShortcutRecordingSurvivesTheFullPlayer(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	clickCell(t, tt, "应用内快捷键：播放/暂停")
 	if s.recording == (shortcutSlot{}) {

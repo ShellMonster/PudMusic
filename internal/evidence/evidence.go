@@ -1174,11 +1174,9 @@ var Items = []Item{
 		//
 		// 判据是「描边里离主色更近」而不是「有几个主色像素」——边框是圆角加抗锯齿
 		// 画出来的，逐字比颜色永远是 0 个（见那条测试的注释）。
-		Spec: "「数据显示样式」旁边有预览：三张缩略图各画各的形状，而「现在是哪一档」只由药丸说（预览不带第二重选中信号）",
+		Spec: "「数据显示样式」是三张预览卡（卡片 / 列表 / 紧凑）：点哪张写哪一档，选中的那张描主色边，没选的描 line",
 		Tests: []string{
-			"TestTheDisplayStyleSettingShowsAPreviewOfEachStyle",
-			"TestThePreviewCarriesNoSelectionSignal",
-			"TestTheDisplayModeCellHasOnlyOneSelectedSignal",
+			"TestTheAppearanceTabStoresEachOfItsChoices",
 		},
 	},
 	{
@@ -1268,8 +1266,9 @@ var Items = []Item{
 		//
 		// 真机那一份是：用辅助功能读菜单栏（项、顺序、每一项的快捷键），
 		// 再真点一次「设置…」和「关于布丁音乐」。
-		Spec: "macOS 应用菜单：七栏（应用 / 文件 / 编辑 / 播放 / 歌曲 / 显示 / 窗口），「关于布丁音乐」开的是我们自己的面板（版本号、仓库、第三方许可），「设置…」在**主窗**开设置页（迷你开着也一样）；「播放」「歌曲」两栏的命令走快捷键那一套，加速键跟着设置走",
+		Spec: "macOS 应用菜单：七栏（应用 / 文件 / 编辑 / 播放 / 歌曲 / 显示 / 窗口），「关于布丁音乐」跳到设置页的「关于」Tab（旧的关于弹窗并进了设置页），「设置…」在**主窗**开设置页（迷你开着也一样）；「播放」「歌曲」两栏的命令走快捷键那一套，加速键跟着设置走",
 		Tests: []string{
+			"TestTheMenuAboutItemOpensTheAboutTab",
 			"TestTheAppMenuColumnFollowsTheMacOrder",
 			"TestTheAboutItemIsOurOwn",
 			"TestTheSettingsItemHasTheMacShortcut",
@@ -1278,12 +1277,6 @@ var Items = []Item{
 			"TestEveryColumnHasATitle",
 			"TestTheAppIsWrittenInChinese",
 			"TestTheSettingsMenuItemGoesToTheMainWindowEvenWithTheMiniInFront",
-			"TestTheAboutMenuItemBringsTheMainWindowBack",
-			"TestTheAboutPanelShowsTheNameTheVersionAndTheTwoEntries",
-			"TestTheAboutPanelVersionIsTheSameAsTheSettingsPage",
-			"TestTheAboutPanelRepoLinkOpensTheRepository",
-			"TestTheAboutPanelLicenseEntryOpensTheShippedNotices",
-			"TestTheAboutPanelClosesOnOK",
 			"TestThePlayColumnHasThePlayerControls",
 			"TestThePlayModeItemsAreRadios",
 			"TestThePlayModeCheckFollowsTheCurrentMode",
@@ -3080,7 +3073,7 @@ var Items = []Item{
 		// **都等于页面底色**，浮起来靠的是那圈影。所以括号里现在写的是「和页面
 		// 同源，浮起来靠影」。**这一句不改，台账就开始说谎**——而台账的
 		// 自检只查「那个测试函数还在不在」，查不出它断言的东西变了。
-		Spec: "界面骨架：侧栏/内容区/播放条三处底色同源且仍分得开（卡片与抽屉面板和页面同源，浮起来靠的是影）；设置内容收在中间一段宽度、输入框不横跨整行；页标题只出现一次；顶栏是上游那个高度；播放条右列次序照原型（音质/倍速/下载/歌词/队列/静音/音量），队列开关只在播放条上",
+		Spec: "界面骨架：侧栏/内容区/播放条三处底色同源且仍分得开（卡片与抽屉面板和页面同源，浮起来靠的是影）；页标题只出现一次；顶栏是上游那个高度；播放条右列次序照原型（音质/倍速/下载/歌词/队列/静音/音量），队列开关只在播放条上",
 		Tests: []string{
 			// 三处底色同源 + 分界仍在 + 卡片弹窗**仍浮得起来**（**互为反面，
 			// 缺一不可**：只钉第一条的话，「把整窗刷成一个颜色」会全绿，而浅色下
@@ -3110,8 +3103,6 @@ var Items = []Item{
 			"TestNoElementShadowIsWrittenAtTheCallSite",
 			"TestEveryShadowTierHasACallSite",
 			// 设置页：封顶 900 + 居中（两档窗口都量），控件不横跨整行。
-			"TestTheSettingsContentIsCappedAndCentered",
-			"TestTheSettingsInputsAreNotFullRowWide",
 			// 顶栏：高度照上游、上面没有页名，而页面自己那一份还在。
 			"TestTheTopBarIsBiuHeight",
 			"TestTheTopBarShowsNoPageTitle",
@@ -3844,11 +3835,10 @@ var Items = []Item{
 		//
 		// ⚠️ **判据全是画面上的东西**：图标是什么颜色、确认键是什么颜色、正文
 		// 的行高（= 字号）、日历上是几个月、进度条涂的是哪一块蓝。
-		Spec: "确认框是应用自绘的模态（按类型变色的警告图标 + 标题 + text-sm 正文 + **带壳的取消**（常驻底 + 描边，票 #228）+ 按类型变色的确认键）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
+		Spec: "确认框是应用自绘的模态（标题 + 正文 + **带壳的取消**（描边的幽灵键）+ 确认键：危险 / 警告是 err 底白字、普通是主色键，原型 `.btn-danger`）；日期范围是**双月**选择器（256 宽的触发键，弹出来是两个月并排，能挑起始和结束，没在筛的时候日历上什么都不亮）；下载进度条是**蓝**的（不是主色），出错的那一条是红的，完成那一格有一枚**绿勾**",
 		Tests: []string{
 			// 确认框：图标在不在、是不是按类型变色；确认键的颜色；正文的字号；
 			// 取消是不是带壳；**那个框在无障碍树里有没有名字**。
-			"TestTheConfirmDialogHasAToneColoredWarningIcon",
 			"TestTheConfirmButtonTakesTheToneColor",
 			"TestTheConfirmBodyIsTextSmall",
 			"TestTheCancelButtonKeepsItsShell",
@@ -4022,12 +4012,10 @@ var Items = []Item{
 		// 关闭」那两行会跟着字号变宽（它们的字要放得下），那一列的左边缘于是有
 		// 两条线——这不是回归，是那一行字要放得下（见 `settings_page.go` 的
 		// `settingsControlW` 与 DESIGN.md §三）。
-		Spec: "设置页的控件列有**一条共同的左边缘**（**文本缩放为 1 的时候**）：基准宽度 300，每一行的控件都从同一条线上开始并填满那一格（此前左边缘落在 762 / 801 / 822 / 942 四个位置，预览那三张右边空 16、色卡那两块右边空 91）；**粗体只出现在刻度写明的那几处**（页标题 / 分组标题 / 弹窗标题 / 空状态标题 / 列表里的名字一律 400；粗体只剩品牌字、收藏夹头图区那个大标题、404 那个数字、歌词浮层里那两个读数，和正在唱的那一行歌词——上游的 `font-extrabold`）",
+		Spec: "**粗体只出现在刻度写明的那几处**（页标题 / 分组标题 / 弹窗标题 / 空状态标题 / 列表里的名字一律 400；粗体只剩品牌字、收藏夹头图区那个大标题、404 那个数字、歌词浮层里那两个读数，和正在唱的那一行歌词——上游的 `font-extrabold`）",
 		Tests: []string{
 			// 控件列的左边缘是一条线（每一个控件都从同一条线上开始）。
-			"TestTheSettingsControlsShareOneBaseline",
 			// 那一列里的控件填满那一格（色卡两块、预览三张、下拉本身）。
-			"TestTheSettingsControlColumnIsFilled",
 			// 粗体只在刻度写明的那几处（AST：**递归扫整个 internal/ui**，找四样
 			// 东西——`.Bold()`、`FontWeight(字面量 ≥ 700)`、**字面量 ≥ 700 传给
 			// 一个字重参数**（调用点）、**字重常量 ≥ 700**）。
@@ -4053,24 +4041,12 @@ var Items = []Item{
 		// ⚠️ **那一档是「实心主色底」，不是灰轨 + 白滑块**：框架 `ui.Segmented`
 		// 没有滑块动画，宽度还按内容算（填不满控件列那一格），而「数据显示样式」
 		// 那一格下面就是预览图、选中那张描主色边——见 DESIGN.md §四。
-		Spec: "设置页只有**一种**分段控件：三处分段控件（主题四档 / 数据显示样式三档 / 窗口关闭两档）画法一致——选中的那一档是**实心主色底**，没有灰底轨道；说明列有**最小宽度**（只在说明存在的行生效——#530 之后设置页的说明全部删了，下限休眠）；控件列在默认配置下拿到**完整的基准宽**（340，装得下主题四档），放不下的极限档控件收窄而不是溢出",
+		Spec: "设置页是六个分类 Tab（常规 / 外观 / 菜单 / 快捷键 / 代理 / 关于）+ 分组卡：每个 Tab 画自己的东西，开关 / 下拉 / 主题卡 / 显示样式卡改的都是设置里已有的键并存得住",
 		Tests: []string{
-			// 三处分段控件的**选中档**底色都是实心主色、**没选中的那一档**都是
-			// 页面底色（深浅两套）。
-			"TestTheSettingsPageHasOnlyOneSegmentedControl",
-			// 默认配置下控件列拿到完整基准宽（1200 / 900 / 侧栏 320 / 字号 1.4）。
-			// 前身是钉「说明列有最小宽度」的 TestTheSettingsDescriptionColumnKeepsItsWidth
-			// ——#530 把说明删了之后那一列不复存在，这一条反过来护控件列。
-			"TestTheSettingsControlColumnKeepsItsFullWidth",
-			// **控件列不会被推出内容区**（七档配置：900 / 1200 / 870 × 默认侧栏 /
-			// 侧栏 480 / 侧栏 320 / 字号 1.4 倍 / 侧栏 480 + 1.4 倍）。
-			// ⚠️ 这一条是评审之后加的：框架的 flex 没有收缩，放不下就是溢出，
-			// 而第一版给说明列的是**无条件**的下限——内容区窄过
-			// 「320 + 24 + 260」时控件列被顶出窗口右缘。
-			"TestTheSettingsControlColumnIsNeverCutOff",
-			// 代理页那个下拉还是 240 宽（上游的 `w-[240px]`）：它不归设置页那一列
-			// 的下限管。
-			"TestTheProxyTypeSelectKeepsItsOwnWidth",
+			"TestTheSettingsTabsSwitchAndEachDrawsItsOwnThing",
+			"TestTheGeneralTabStoresEachOfItsChoices",
+			"TestTheAppearanceTabStoresEachOfItsChoices",
+			"TestTheProxyTabMapsItsThreeModesToTheSettings",
 		},
 	},
 	{
@@ -4587,7 +4563,6 @@ var Items = []Item{
 			// 设置开关：默认开着 / 关着时什么也不发生 / 展开着时关掉立刻收起 /
 			// 落盘。
 			"TestTheMiniLyricsCurtainSwitchIsOnByDefault",
-			"TestTheMiniCurtainSwitchIsOnTheSettingsPage",
 			"TestTheMiniCurtainDoesNothingWhenTheSwitchIsOff",
 			"TestTheMiniCurtainCollapsesWhenTheSwitchIsTurnedOff",
 			"TestTheMiniLyricsCurtainSwitchSurvivesARestart",

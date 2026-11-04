@@ -13,15 +13,24 @@ import (
 // 均衡器自定义这一组：拖一段 → 设置里那份增益变了且 EQCustomOn 开了；
 // 存预设 → 下拉里多一套、重启还在；预设切换 → 生效的增益跟着换。
 
-// openEQPanel 点开设置页「均衡器」行的「自定义」键，把滑杆面板摆出来。
-func openEQPanel(t *testing.T, tt *mygoui.Tester, s *Shell) {
+// shellWithEQPanel 造一个只摆着均衡器滑杆面板的无头窗口。
+//
+// 设置页里的「均衡器」入口已经删了（原型里 EQ 在满屏播放器，归满屏那一边接），面板本身
+// （`eqPanelContent`）和它写的设置不变，所以这里直接把它摆在一个小窗口里验。
+func shellWithEQPanel(t *testing.T, st app.Settings) (*mygoui.Tester, *Shell, *app.App, string) {
 	t.Helper()
-	r := settingRect(t, tt, s, "自定义")
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	b := newTestShell(t, withSettings(st))
+	tt := mygoui.NewTester(func(c *mygoui.Context) {
+		b.s.applyFrameTheme(c)
+		mygoui.Column(c).Width(560).Padding(16).Children(func() {
+			b.s.eqPanelContent(c, b.a.SettingsSnapshot(), "", false)
+		})
+	}, 640, 560)
 	tt.Frame()
-	if _, ok := tt.Find("均衡器面板"); !ok {
-		t.Fatalf("自定义均衡器面板没开，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("均衡器 31 Hz"); !ok {
+		t.Fatalf("均衡器面板没画出来，文字有 %q", tt.Texts())
 	}
+	return tt, b.s, b.a, b.settingsPath
 }
 
 // dragEQSlider 把第 band 段滑杆拖到「从底往上 f 的比例」（0 = -12，1 = +12）。
@@ -56,9 +65,7 @@ func eqBandFreq(band int) string {
 func TestDraggingAnEQBandTurnsOnCustom(t *testing.T) {
 	want := app.DefaultSettings("")
 	want.EQPreset = "bass"
-	tt, s, a, _ := shellOnSettings(t, want)
-	tt.Frame()
-	openEQPanel(t, tt, s)
+	tt, _, a, _ := shellWithEQPanel(t, want)
 
 	// 第 0 段（31 Hz）拖到顶（+12）。bass 预设的第 0 段是 6。
 	dragEQSlider(t, tt, 0, 1.0)
@@ -77,9 +84,7 @@ func TestDraggingAnEQBandTurnsOnCustom(t *testing.T) {
 // TestSavingACustomEQPreset 验「存为预设」把当前增益记成一套命名预设，
 // 重启之后还在下拉里。
 func TestSavingACustomEQPreset(t *testing.T) {
-	tt, s, a, path := shellOnSettings(t, app.DefaultSettings(""))
-	tt.Frame()
-	openEQPanel(t, tt, s)
+	tt, _, a, path := shellWithEQPanel(t, app.DefaultSettings(""))
 
 	dragEQSlider(t, tt, 0, 1.0)
 	r, ok := tt.Find("均衡器预设名称")
@@ -117,8 +122,8 @@ func TestSavingACustomEQPreset(t *testing.T) {
 	}
 }
 
-// TestSwitchingBetweenEQPresets 验预设切换：选「摇滚」写 EQPreset 并把
-// 自定义关掉；选一套存的自定义预设把增益换成那一套。
+// TestSwitchingBetweenEQPresets 验预设切换（`applyEQSelect`）：选「摇滚」写 EQPreset 并把自定义关掉；
+// 选一套存的自定义预设把增益换成那一套。预设的下拉入口归满屏播放器，这里验写设置的那一笔。
 func TestSwitchingBetweenEQPresets(t *testing.T) {
 	st := app.DefaultSettings("")
 	st.EQCustomOn = true
@@ -127,28 +132,18 @@ func TestSwitchingBetweenEQPresets(t *testing.T) {
 	st.EQCustomPresets = []audio.EQPreset{
 		{ID: "custom:深夜", Name: "深夜", Gains: st.EQCustomGains},
 	}
-	tt, s, a, _ := shellOnSettings(t, st)
-	tt.Frame()
+	b := newTestShell(t, withSettings(st))
+	b.tt.Frame()
 
-	settingRect(t, tt, s, "选择均衡器预设")
-	openSelect(t, tt, "选择均衡器预设")
-	if err := tt.Click("摇滚"); err != nil {
-		t.Fatalf("下拉里没有摇滚：%v（文字 %q）", err, tt.Texts())
-	}
-	tt.Frame()
-	if got := a.SettingsSnapshot(); got.EQPreset != "rock" || got.EQCustomOn {
+	b.s.applyEQSelect(b.a.SettingsSnapshot(), "rock")
+	if got := b.a.SettingsSnapshot(); got.EQPreset != "rock" || got.EQCustomOn {
 		t.Errorf("选了摇滚之后是 preset=%q customOn=%v", got.EQPreset, got.EQCustomOn)
 	}
 
-	openSelect(t, tt, "选择均衡器预设")
-	if err := tt.Click("深夜"); err != nil {
-		t.Fatalf("下拉里没有存的预设：%v（文字 %q）", err, tt.Texts())
-	}
-	tt.Frame()
-	got := a.SettingsSnapshot()
+	b.s.applyEQSelect(b.a.SettingsSnapshot(), eqCustomPresetValue("深夜"))
+	got := b.a.SettingsSnapshot()
 	if !got.EQCustomOn || got.EQCustomName != "深夜" || got.EQCustomGains[0] != 1 {
-		t.Errorf("选了存的预设之后是 on=%v name=%q gains=%v",
-			got.EQCustomOn, got.EQCustomName, got.EQCustomGains)
+		t.Errorf("选了存的预设之后是 on=%v name=%q gains=%v", got.EQCustomOn, got.EQCustomName, got.EQCustomGains)
 	}
 }
 

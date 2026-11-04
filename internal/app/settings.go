@@ -209,12 +209,39 @@ const (
 type ProxyType string
 
 const (
-	ProxyNone   ProxyType = "none"
+	// ProxyNone 是「使用系统代理」：照 HTTP_PROXY / HTTPS_PROXY / NO_PROXY 环境变量走
+	// （见 `ProxyForSettings`），没设环境变量就是直连。这一档是**老版本就有的默认值**，
+	// 键名不改，免得已发布用户的设置文件换了意思。
+	ProxyNone ProxyType = "none"
+	// ProxyDirect 是「不使用代理」：连环境变量也不看，一律直连（设置页「代理」Tab 的
+	// 第一档）。
+	ProxyDirect ProxyType = "direct"
 	ProxyHTTP   ProxyType = "http"
 	ProxyHTTPS  ProxyType = "https"
 	ProxySOCKS4 ProxyType = "socks4"
 	ProxySOCKS5 ProxyType = "socks5"
 )
+
+// FontScale 是「界面字号」三档（紧凑 / 标准 / 大）。
+type FontScale string
+
+const (
+	FontScaleSmall FontScale = "sm"
+	FontScaleStd   FontScale = "std"
+	FontScaleLarge FontScale = "lg"
+)
+
+// Factor 是这一档乘在文字上的比例：紧凑 0.94、标准 1、大 1.08（原型 `applyTheme` 里
+// `body.style.zoom` 的三个值）。认不出的值当标准。
+func (f FontScale) Factor() float32 {
+	switch f {
+	case FontScaleSmall:
+		return 0.94
+	case FontScaleLarge:
+		return 1.08
+	}
+	return 1
+}
 
 // ProxySettings 是代理配置。
 //
@@ -307,6 +334,7 @@ type Settings struct {
 	AutoStart                bool                     `json:"autoStart"`
 	CloseWindowOption        CloseWindowOption        `json:"closeWindowOption"`
 	FontFamily               string                   `json:"fontFamily"`
+	FontScale                FontScale                `json:"fontScale"`
 	BorderRadius             float64                  `json:"borderRadius"`
 	DownloadPath             string                   `json:"downloadPath"`
 	AudioQuality             AudioQuality             `json:"audioQuality"`
@@ -546,6 +574,7 @@ func DefaultSettings(downloadPath string) Settings {
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
 		FontFamily:        DefaultFontFamily,
+		FontScale:         FontScaleStd,
 		BorderRadius:      DefaultBorderRadius,
 		DownloadPath:      downloadPath,
 		AudioQuality:      AudioQualityHigh,
@@ -691,8 +720,9 @@ func (s *Settings) normalize() {
 		CloseWindowHide, CloseWindowExit)
 	// 设置文件里没有 playMode 这一格时它是空串，normalize 会把它变成默认档。
 	s.PlayMode = pickEnum(s.PlayMode, DefaultPlayMode, PlayModes...)
+	s.FontScale = pickEnum(s.FontScale, FontScaleStd, FontScaleSmall, FontScaleStd, FontScaleLarge)
 	s.ProxySettings.Type = pickEnum(s.ProxySettings.Type, ProxyNone,
-		ProxyNone, ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5)
+		ProxyNone, ProxyDirect, ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5)
 
 	if s.HiddenMenuKeys == nil {
 		s.HiddenMenuKeys = []string{}

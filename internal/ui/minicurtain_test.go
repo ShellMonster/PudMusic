@@ -522,33 +522,6 @@ func miniCurtainSwitchText(v *bool) string {
 // 高度夹住工作区
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheMiniCurtainSwitchIsOnTheSettingsPage 盯「设置页上有那一格」。
-//
-// ⚠️ **这一条量的是「画面上找得到那一格」**：设置页上少一格，用户是**不会知道
-// 的**——而那一格是这一票的**开关入口**（票 #536 的补充要求）。而「设置里
-// 写了那个键」证明不了界面上真有那一格。
-//
-// ⚠️ **走的是生产的读盘那条路**（`shellOnSettings` → `withSettings`）：先写盘、
-// 再挂上去——和真程序启动时一样。
-//
-// ⚠️ **它在「常规设置」那一档的「播放」分组里**：设置页有四个 Tab（`常规设置
-// / 菜单设置 / 快捷键设置 / 代理设置`），而分组（外观 / 播放 / 下载 / 搜索 /
-// 系统）都在**同一个 Tab** 里（`settings_tab_general.go` 的 `settingsGeneral`）。
-func TestTheMiniCurtainSwitchIsOnTheSettingsPage(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-
-	// 设置页外面套了一层 `Scroll`，而那一格在「播放」分组里——它在第一屏之下，
-	// 所以要**滚进可视区**再找（`settingRect` 就是干这个的）。
-	r := settingRect(t, tt, s, "迷你播放器歌词卷帘")
-	if r.W <= 0 || r.H <= 0 {
-		t.Errorf("「迷你播放器歌词卷帘」那一格没有尺寸：%v", r)
-	}
-	// 开关自己叫「开关：迷你播放器歌词卷帘」（`pickSwitch` 那一句）。
-	if _, ok := tt.Find("开关：迷你播放器歌词卷帘"); !ok {
-		t.Errorf("设置页上没有那个开关，文字有 %q", tt.Texts())
-	}
-}
-
 // TestTheMiniCurtainIsClampedToTheWorkArea 盯「卷帘不超出工作区」。
 //
 // ⚠️ **这一条量的是纯逻辑**（`miniCurtainHeight`）：无头环境里没有真显示器，

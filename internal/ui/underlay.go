@@ -214,13 +214,7 @@ var pageSyncs = map[string]func(*Shell, *ui.Context){
 	localMusicPath:   (*Shell).syncLocalMusic,
 	followPath:       (*Shell).syncFollow,
 	statsPath:        (*Shell).syncStats,
-	appearancePath:   (*Shell).syncAppearance,
 }
-
-// syncAppearance 是皮肤页的每帧副作用。**现在是空的**：那一页是纯设置控件，
-// 没有要自己盯的数据源（主题 / 字体都读 SettingsSnapshot，每帧现取）。
-// 留一行空函数好过让这张表和 `builtPage` 对不上（见表头上那段注释）。
-func (s *Shell) syncAppearance(c *ui.Context) {}
 
 // syncComments 是评论的每帧副作用（排序切换 / 刷新 / 翻页 / 筛选用）。
 //

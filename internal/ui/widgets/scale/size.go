@@ -54,6 +54,8 @@ const (
 	Size28 = 28
 	// Size32 是 Title：UP 主名、榜单序号大字、窄窗下的页标题 / 统计大数字（宋体 700）。
 	Size32 = 32
+	// Size40 是登录页的「扫码登录」标题（原型 `.h-page` 上的行内 `font-size:40px`，宋体 700）。
+	Size40 = 40
 	// Size48 是 Display：页标题、问候语、统计大数字（宋体 700）。
 	Size48 = 48
 	// Size64 是 Hero：「今日一张」专辑名、收藏夹 / 合集标题（宋体 700）。
@@ -74,6 +76,30 @@ const (
 	// Subhead 是品牌字、设置分组标题、历史日期头：20、宋体 700。
 	Subhead = Size20
 )
+
+// Fluid 是原型 `clamp(min, N vw, max)` 在窗口宽 winW 时的值：窗口宽的 vw%，夹在 min 和 max 之间。
+// 桌面应用的视口就是整个窗口，所以 winW 是**窗口宽**，不是内容区宽。winW ≤ 0（还没量到）取 max。
+func Fluid(min, vw, max, winW float32) float32 {
+	if winW <= 0 {
+		return max
+	}
+	v := winW * vw / 100
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
+// PageTitleFluid 是页标题（`.h-page`）在窗口宽 winW 时的字号：原型 `clamp(32px, 3.4vw, 48px)`
+// （index.html 268 行）——1200 宽的窗口里是 40.8，1412 以上才是 48。
+// `PageTitleFor` 是按内容区宽降一档的近似，要和原型 1:1 的页面用这一个。
+func PageTitleFluid(winW float32) float32 { return Fluid(Size32, 3.4, PageTitle, winW) }
+
+// BigNumFluid 是统计页大数字（`.big-num`）在窗口宽 winW 时的字号：`clamp(32px, 3.6vw, 48px)`。
+func BigNumFluid(winW float32) float32 { return Fluid(Size32, 3.6, PageTitle, winW) }
 
 // NarrowContent 是标题降档的分界：内容区宽度小于它时，48 → 32、64 → 48
 // （design-tokens.html 3.1：原型 `clamp(32px, 3.4vw, 48px)` 的桌面落法）。
