@@ -44,8 +44,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -82,49 +81,29 @@ func (s *Shell) viewErrorDetail(c *ui.Context, st app.State) {
 		// ⚠️ **空面板比没有更坏**：它写着「打不开」，而其实能播了。
 		return
 	}
-	ui.Column(c).Key("playbar:err-detail").Label("错误详情").
-		Gap(space.Px8).Padding(space.Px8, space.Px12).MaxWidth(t.Space(80)).
-		Children(func() {
-			// ⚠️ **标题是「打不开」而不是「错误详情」**：播放条上那一行写的是
-			// 「打不开：……」，这里用同一个说法，两处对得上。而
-			// `Label("错误详情")` 是给读屏软件和测试认的（`Tester.Find` 认的是
-			// 文字和 `Label`，不认 `Key`）——它是这一块的无障碍名字。
-			ui.Text(c, "打不开").FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted)
-			// 🔴 **可选中**：用户要拿这句话去提 issue（和更新对话框里那句错误
-			// 一个做法，`update_dialog.go`）。
-			//
-			// ⚠️ **`Wrap()` 不能省**：不换行的话这一句会按它自己的宽度排成一行
-			// （四十几个字 ≈ 480 像素），窄窗口上就顶出屏幕了。
-			//
-			// ⚠️ **宽度上限 320**（`t.Space(80)`，和悬停提示那一块同宽）：更宽
-			// 的话那句话排成一行、面板变成一条横幅；更窄的话它要排成五六行，
-			// 面板高得挡住半个内容区。
-			ui.Text(c, body).FontSize(scale.Font(c, scale.Size12)).
-				TextColor(dangerText(t)).Wrap().Selectable()
-			// 🔴 **「重试」和「在 B 站打开」都在这一层**（理由见文件头）：它们原来
-			// 和那句被截碎的话挤在同一行（75.7 像素 + 62 像素），而错误文案搬走
-			// 之后那一行就没有它们的位置了。
-			//
-			// ⚠️ **「重试」只给可重试的那一档**（`bili.Recoverable` 那张表）：给一个
-			// 按了也没用的重试比不给更糟——用户按两次发现还是那样，就不再信这个
-			// 应用了。
-			//
-			// ⚠️ **「在 B 站打开」只给有地址的那一档**：本地文件、或者压根没有稿件
-			// 身份的那一条，摆一枚点了打不开的按钮比不给更糟（理由见
-			// `titleClickable`）。
-			ui.Row(c).Gap(space.Px8).Children(func() {
-				if st.CanRetry {
-					if s.withTip(c, flatButton(c, "重试").FontSize(scale.Font(c, scale.Size12)),
-						"再试一次这一首").Clicked() {
-						s.retryPlay()
-					}
-				}
-				if st.BiliURL != "" {
-					if s.withTip(c, flatButton(c, "在 B 站打开").FontSize(scale.Font(c, scale.Size12)),
-						"在 B 站里听这一首").Clicked() {
-						s.openExternalURL(st.BiliURL)
-					}
-				}
-			})
-		})
+	// 原型 `popHtml('err')`：`<h5>打不开这一首</h5>` + `.pop-text` 的完整错误 + 两项
+	// （在 B 站打开 / 播放下一首）；`.pop.wide` 最小宽 300。面板本身由 `pbPopover` 按 `.pop` 画，
+	// `Label("错误详情")` 是读屏和测试认这一块的凭据。
+	//
+	// 🔴 **错误正文可选中**（用户要拿这句话去提 issue），`Wrap()` 不能省：不换行的话四十几个字会
+	// 排成一行（≈480 像素），窄窗口上就顶出屏幕了；`PopText` 自带最宽 300。
+	//
+	// ⚠️ **「重试」不在这一层**：它在播放键上（可重试时那一枚本身就是「重试」，见
+	// `viewErrorPlayKey`），而这一层只在不可重试时才开。
+	ui.Column(c).Key("playbar:err-detail").MinWidth(284).Children(func() {
+		pud.PopHeading(c, "打不开这一首")
+		pud.PopText(c, body).TextColor(dangerText(t)).Wrap().Selectable()
+		// 「在 B 站打开」只给有地址的那一档：本地文件、或者压根没有稿件身份的那一条，摆一项点了
+		// 打不开的比不给更糟（理由见 `titleClickable`）。
+		if st.BiliURL != "" {
+			if pud.PopItem(c, "err:open-bili", "在 B 站打开", false).Clicked() {
+				s.errDetailOpen = false
+				s.openExternalURL(st.BiliURL)
+			}
+		}
+		if pud.PopItem(c, "err:next", "播放下一首", false).Clicked() {
+			s.errDetailOpen = false
+			s.app.Next()
+		}
+	})
 }

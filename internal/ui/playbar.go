@@ -799,7 +799,7 @@ func (s *Shell) viewErrorPlayKey(c *ui.Context, st app.State) ui.Element {
 	// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局
 	// 之外**单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——
 	// 两者对不上，极难查。
-	ui.Popover(c, b, &s.errDetailOpen, func() {
+	s.pbPopover(c, b, &s.errDetailOpen, "错误详情", func() {
 		s.guardAt("错误详情", func(c *ui.Context) { s.viewErrorDetail(c, st) })(c)
 	})
 	return b
@@ -876,8 +876,8 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		Focusable().
 		// ⚠️ **名字不能叫「当前封面」**：里面那张图已经有一个了
 		// （`imgcache.View…(...).Label("当前封面")`），读屏会把两个都念一遍。
-		Label(copyCoverActionsLabel).
-		ContextMenu(func(m *ui.Menu) { s.viewCopyMenu(st, m) })
+		Label(copyCoverActionsLabel)
+	s.coverMenuShortcut(wrap)
 	wrap.Children(func() {
 		// 共享元素转场留在里面那张图上（它才是转场的那一半）。
 		//
@@ -933,6 +933,14 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 		// `wrap.Pressed()` 问出来（见 like.go 的 viewLikeRing）。状态机用两张
 		// 封面共用的 `s.like`，圆角传封面的那一个 6——环贴着外边框拐弯。
 		s.viewLikeRing(&s.like, c, wrap.Pressed(), coverRadius)
+	})
+
+	// 右键开原型的「当前封面的操作」弹层（`pud.PopPanel` / `PopOpt`），不再走系统原生菜单。
+	if wrap.RightClicked() {
+		s.coverMenuOpen = !s.coverMenuOpen
+	}
+	s.pbPopover(c, wrap, &s.coverMenuOpen, "封面菜单", func() {
+		s.guardAt("封面菜单", func(c *ui.Context) { s.viewCoverMenu(c, st) })(c)
 	})
 
 	if wrap.Clicked() {

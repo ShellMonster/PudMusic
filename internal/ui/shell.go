@@ -649,6 +649,10 @@ type Shell struct {
 	// 错一上来，面板是开着的——用户会看到一块不属于这句错的浮层。
 	errDetailOpen bool
 
+	// coverMenuOpen 是播放条封面的右键弹层开着没有（原型 `popHtml('cover')`，`pud.PopPanel`）。
+	// 只由 view 在主线程上读写；换歌 / 没歌时跟着收。
+	coverMenuOpen bool
+
 	// 命令面板（⌘K）这一摊。**同样只由 view 在主线程上读写**。
 	//
 	// paletteOpen 是开没开。它不进设置，理由和 drawerOpen 一样：面板是

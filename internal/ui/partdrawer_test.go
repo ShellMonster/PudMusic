@@ -19,6 +19,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -75,17 +76,17 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 
 	// 三集都在，第三集**没有标题**（B 站有时候不给）——这时要说「第 3 集」，
 	// 不是把行留成空白（空标题在列表里和「这一行没画出来」长得一模一样）。
-	for _, want := range []string{"第一集", "第二集", "第 3 集"} {
+	for _, want := range []string{"P1 · 第一集", "P2 · 第二集", "P3 · 第 3 集"} {
 		if !tt.HasText(want) {
 			t.Fatalf("浮层里没有 %q，文字有 %q", want, tt.Texts())
 		}
 	}
-	if !tt.HasText("共 3 集") {
+	if !tt.HasText("分集 · 3 集") {
 		t.Errorf("浮层头上没有说一共几集，文字有 %q", tt.Texts())
 	}
 
 	// 点第三集：立刻切过去，**不用先退出再进**。
-	if err := tt.Click("第 3 集"); err != nil {
+	if err := tt.Click("P3 · 第 3 集"); err != nil {
 		t.Fatalf("点不了第三集：%v（文字：%q）", err, tt.Texts())
 	}
 	waitFrames(t, tt, "换到第三集", func() bool {
@@ -128,7 +129,7 @@ func TestPickingTheEpisodeAlreadyPlayingStillClosesTheDrawer(t *testing.T) {
 	openPartsDrawer(t, tt)
 
 	// 队列里 cid 是 777，也就是「第一集」——正在放的就是它。
-	if err := tt.Click("第一集"); err != nil {
+	if err := tt.Click("P1 · 第一集"); err != nil {
 		t.Fatalf("点不了正在放的那一集：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
@@ -161,11 +162,11 @@ func TestEveryEpisodeRowCarriesItsNumber(t *testing.T) {
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
 
+	// 原型 `popHtml('parts')`：每一项写成 `P{n} · {标题}`，编号和标题在同一行文字里。
 	texts := tt.Texts()
-	for _, want := range []string{"1", "2", "3"} {
+	for _, want := range []string{"P1 · 第一集", "P2 · 第二集", "P3 · 第 3 集"} {
 		if !slices.Contains(texts, want) {
-			t.Errorf("浮层里没有把 %q 画成一个独立的编号（逐字相等的文字里没有它），"+
-				"画面上的文字有 %q", want, texts)
+			t.Errorf("浮层里没有 %q（每一项该是 `P{n} · {标题}`），画面上的文字有 %q", want, texts)
 		}
 	}
 }
@@ -209,44 +210,35 @@ func TestTheDrawerMarksTheEpisodeThatIsPlaying(t *testing.T) {
 			openPartsDrawer(t, tt)
 			tt.Frame()
 
-			theme := BuildTheme(app.DefaultSettings(""), dark)
-			want := playingRowBg(theme)
+			accent := rgbaOf(tok.Of(BuildTheme(app.DefaultSettings(""), dark)).AccentText)
 
 			// 队列里 cid 是 777，也就是「第一集」——正在放的就是它。
-			cur, ok := tt.Find("第一集")
+			cur, ok := tt.Find("P1 · 第一集")
 			if !ok {
-				t.Fatalf("浮层里没有「第一集」，文字有 %q", tt.Texts())
+				t.Fatalf("浮层里没有「P1 · 第一集」，文字有 %q", tt.Texts())
 			}
-			sib, ok := tt.Find("第二集")
+			sib, ok := tt.Find("P2 · 第二集")
 			if !ok {
-				t.Fatalf("浮层里没有「第二集」，文字有 %q", tt.Texts())
+				t.Fatalf("浮层里没有「P2 · 第二集」，文字有 %q", tt.Texts())
 			}
 			img := tt.Image()
-			got := modeOf(bandPixels(img, cur))
-			sibBg := modeOf(bandPixels(img, sib))
-			t.Logf("%s：正在放那一行 底 %v，旁边那一行 底 %v", name, got, sibBg)
-
-			if !nearRGBA(got, rgbaOf(want), 3) {
-				t.Errorf("%s：正在放那一行的底色是 %v，want %v（主色 20%% 那一层淡底）",
-					name, got, want)
+			count := func(r ui.Rect) (n int) {
+				for _, px := range bandPixels(img, r) {
+					if nearRGBA(px, accent, 4) {
+						n++
+					}
+				}
+				return n
 			}
-			if nearRGBA(got, rgbaOf(theme.Accent), 2) {
-				t.Errorf("%s：正在放那一行是**实心主色底** %v——那是改之前的样子"+
-					"（上游是 bg-primary/20 的那一层淡底）", name, got)
+			curInk, sibInk := count(cur), count(sib)
+			t.Logf("%s：accent-text 像素 正在放 %d，旁边 %d", name, curInk, sibInk)
+			// 原型 `.pop-opt[aria-checked="true"]`：accent-text 的字 600 加右边一枚对勾，没有淡底。
+			// 判据：正在放那一行里有 accent-text 的墨，旁边那一行一点没有。
+			if curInk == 0 {
+				t.Errorf("%s：正在放那一行里一个 accent-text 像素都没有（字和对勾该是 accent-text）", name)
 			}
-			if nearRGBA(got, sibBg, 3) {
-				t.Errorf("%s：正在放那一行和旁边那一行是同一个底色 %v——"+
-					"「哪一集在放」就看不出来了", name, got)
-			}
-			// ⚠️ **后一半**：没在放的那一行**不许**是实心主色底。
-			//
-			// 这一条是从改之前那一版搬过来的（那一版逐行量「框里主色像素占多少」，
-			// 没在放的那些行有上限）。少了它，把兄弟行也刷成实心主色底这一条照样
-			// 绿——而那时两行长得一样，「哪一集在放」已经说不清了。
-			if nearRGBA(sibBg, rgbaOf(theme.Accent), 2) {
-				t.Errorf("%s：没在放的那一行是**实心主色底** %v——"+
-					"「哪一集在放」就说不清了（上游是 bg-primary/20 的那一层淡底）",
-					name, sibBg)
+			if sibInk != 0 {
+				t.Errorf("%s：没在放的那一行里有 %d 个 accent-text 像素——「哪一集在放」说不清了", name, sibInk)
 			}
 		})
 	}
@@ -678,68 +670,29 @@ func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 	}
 }
 
-// TestTheDrawerIsOnlyAsTallAsItsContent 断「面板不是一块固定高的死面板」。
-//
-// ⚠️ **判据是量出来的高度差**：三集的时候这一块该是 `头(45) + 3×64 = 237`，而照抄
-// Biu 那个浮层的 `h-[60vh]` 封顶会画成 420——**下面空出 183 像素（一屏的 44%）**，
-// 而那块空白在界面上和「这个面板下面还有东西没画出来」长得一模一样。
-//
-// 顺带把封顶那一档也钉住：集数多到一屏放不下时，高度**停在上限**上（那一列靠
-// `ui.List` 自己滚），而不是跟着集数一路长下去盖住半个窗口。
-func TestTheDrawerIsOnlyAsTallAsItsContent(t *testing.T) {
-	for _, c := range []struct {
-		name  string
-		parts int
-		// want 是这一块该有多高（封顶那一档写上限）。
-		want float32
-	}{
-		{"三集", 3, partHeaderHeight + partDividerH + 3*partRowHeight},
-		{"一集", 1, partHeaderHeight + partDividerH + partRowHeight},
-		// 一屏（winH 460）上限 276，减掉头 45 剩 231，只放得下 3 行（**整行取整**，
-		// 不切半行）；24 集超出，所以停在 45 + 3×64 = 237，而不是撑到 276。
-		{"集多到封顶", 24, partHeaderHeight + partDividerH + 3*partRowHeight},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			// 这一条断的是纯计算那一层，所以直接喂行数：真去造 24 集要一份 24 项的
-			// 回包，而「高度算得对不对」跟那一集是不是真的存在没有关系。
-			if got := partDrawerHeight(c.parts, 460); got != c.want {
-				t.Errorf("%d 集的时候这一块是 %.0f 高，want %.0f", c.parts, got, c.want)
-			}
-		})
-	}
-
-	// 画出来的那一块：真的按行数收高，而不是一块固定高的面板。
+// TestThePartsPopoverIsOnlyAsTallAsItsContent 断分集弹层按内容收高（原型 `.pop`：内边距 8，
+// `h5` 加每集一个 36 高的 `pop-opt`），不是一块固定高的死面板。
+func TestThePartsPopoverIsOnlyAsTallAsItsContent(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
 
-	// 量的是**面板自己**的框（靠那个 `Label("分集列表")` 找得到），不是某一行的 y。
 	panel, ok := tt.Find("分集列表")
 	if !ok {
 		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
 	}
-	want := float32(partHeaderHeight + partDividerH + 3*partRowHeight)
-	// 面板内还有框架那 8 的内边距（`stylePanel` 的 `t.Space(1)` 上下各 4）。
-	if got := panel.H - 8; got > want {
-		t.Errorf("三集的时候这块是 %.0f 高（去掉 8 的内边距是 %.0f），want ≤ %.0f——"+
-			"面板在最后一行下面空出了一大片（照 Biu 的 h-[60vh] 封顶的话是 420）",
-			panel.H, got, want)
+	// 三集：上下内边距 16 + 标题 ≤ 35 + 3 × 36 = 159；留 12 的余量。
+	if panel.H > 171 {
+		t.Errorf("三集的时候这块是 %.0f 高，want ≤ 171——面板在最后一行下面空出了一片", panel.H)
+	}
+	if panel.H < 3*36 {
+		t.Errorf("三集的时候这块只有 %.0f 高，连三行 36 的选项都放不下", panel.H)
 	}
 }
 
-// TestTheDrawerMatchesTheUpstreamWidthAndRowHeight 钉住「分集面板 ≥500 宽、
-// 行高 64」（票 #177）。
-//
-// 两个数都照上游 `layout/playbar/left/page-list.tsx`：`min-w-[500px]`
-// （`:29`）和传给分集列表的 `itemHeight={64}`（`:52`）。DESIGN.md 的
-// `parts_panel` 也是这两个数。改之前是 360 / 40。
-//
-// 行高量的是**两行标题文字的垂直距离**：两行都是同样的字、在同样高的行里居中，
-// 所以这个差就是行高本身。面板宽量的是面板自己的框（`Label("分集列表")`），
-// 不是里面某一行的字——字宽跟标题长短走，量它验不出面板多宽。
-func TestTheDrawerMatchesTheUpstreamWidthAndRowHeight(t *testing.T) {
-	// 用**最小窗口** 900×560 量：500 宽的面板要放得下，这才是「更宽」真正的
-	// 代价所在（窗口再小就不支持了，DESIGN.md 的 window.min_width 是 900）。
+// TestThePartsPopoverMatchesThePrototype 钉住分集弹层的行高和宽度：每一项 36 高
+// （`.pop-opt` 内边距 8 + 13 号字行高 1.55），面板最小宽 200（`.pop { min-width: 200px }`）。
+func TestThePartsPopoverMatchesThePrototype(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false, at(900, 560))
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
@@ -748,23 +701,19 @@ func TestTheDrawerMatchesTheUpstreamWidthAndRowHeight(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
 	}
-	const wantWidth, wantRow = 500, 64
-	if panel.W < wantWidth {
-		t.Errorf("分集面板只有 %.1f 宽，want ≥ %d（上游的 min-w-[500px]）——"+
-			"长标题在 360 里二十个字就截了", panel.W, wantWidth)
+	if panel.W < 200 {
+		t.Errorf("分集面板只有 %.1f 宽，want ≥ 200（原型 .pop 的 min-width）", panel.W)
 	}
-
-	first, ok := tt.Find("第一集")
+	first, ok := tt.Find("P1 · 第一集")
 	if !ok {
 		t.Fatalf("画面上找不到第一集，文字有 %q", tt.Texts())
 	}
-	second, ok := tt.Find("第二集")
+	second, ok := tt.Find("P2 · 第二集")
 	if !ok {
 		t.Fatalf("画面上找不到第二集，文字有 %q", tt.Texts())
 	}
-	if got := second.Y - first.Y; widthGap(got-wantRow) > 1 {
-		t.Errorf("两集之间隔了 %.2f，want %d——行高没对齐上游的 itemHeight={64}",
-			got, wantRow)
+	if got := second.Y - first.Y; widthGap(got-36) > 1 {
+		t.Errorf("两集之间隔了 %.2f，want 36（原型 .pop-opt）", got)
 	}
 }
 

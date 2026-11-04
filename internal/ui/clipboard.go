@@ -6,7 +6,7 @@
 //	复制封面		把当前封面作为 PNG 放进剪贴板
 //
 // 入口是**当前封面上的右键菜单**（播放条上那一张、满屏里那一张共用同一份
-// 菜单，见 `viewCopyMenu`）——而**不是**在播放条上再摆一枚键：
+// 菜单，见 `viewCoverMenu`）——而**不是**在播放条上再摆一枚键：
 //
 //   - 播放条左边那一列的宽度是被**钉死的**（`playbarLeftMinW` = 272，票 #573
 //     之后），加一枚键就要动那个数，而那个数一动，窄窗口下歌名的宽度跟着变
@@ -49,6 +49,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -321,7 +322,7 @@ func (s *Shell) claim() uint64 {
 	return gen
 }
 
-// viewCopyMenu 建当前这一首的「复制」菜单。播放条上那一张封面和满屏里那一张
+// viewCoverMenu 建当前这一首的「复制」菜单。播放条上那一张封面和满屏里那一张
 // 共用它（两处的入口是同一个动作）。
 //
 // ⚠️ **每一项都要 `m.Item` 一遍**：菜单是这趟全部建出来的，只有被 `Chosen`
@@ -331,21 +332,43 @@ func (s *Shell) claim() uint64 {
 // ⚠️ **st 是这一帧的那一份**（外面画这一块时读出来的），不是现读快照：菜单是
 // **弹出那一刻**才建的，而现读快照拿到的是**弹出之后**的样子——那一帧可能已经
 // 换歌了（菜单里的歌名和用户右键时看到的那一首对不上）。
-func (s *Shell) viewCopyMenu(st app.State, m *ui.Menu) {
-	hasCover := st.CoverURL != ""
+// coverMenuShortcut 在封面上查菜单键 / Shift+F10：按过就开关封面弹层（键盘够得着这一份菜单）。
+//
+// ⚠️ 用 `Shortcut`（构建时查询）而不是 `HandleInput`：后者会把封面当成「自己吃输入」的元素，
+// 压在封面上的「看视频」角标就收不到点击了（`TestAnOnlineVideoShowsAPlayBadgeOnTheCover`）。
+func (s *Shell) coverMenuShortcut(e ui.Element) {
+	if e.Shortcut(0, ui.KeyContextMenu) || e.Shortcut(ui.Shift, ui.KeyF10) {
+		s.coverMenuOpen = !s.coverMenuOpen
+	}
+}
 
+func (s *Shell) viewCoverMenu(c *ui.Context, st app.State) {
+	hasCover := st.CoverURL != ""
+	pud.PopHeading(c, copyCoverActionsLabel)
 	// 「复制歌曲信息」什么时候都摆得出来：本地文件也有歌名和路径。
-	if m.Item(copyInfoLabel).Chosen() {
+	if pud.PopItem(c, "cover:copy-info", copyInfoLabel, false).Clicked() {
+		s.coverMenuOpen = false
 		s.copySongInfo(st)
-		return
 	}
-	// 「复制封面」没有封面时按不动（灰的），末尾再补一句为什么。
-	if m.Item(copyCoverLabel).Disabled(!hasCover).Chosen() {
-		s.copyCover(st)
-		return
+	// 「复制封面」没有封面时不摆，换成一句说明为什么（按不动而不说为什么等于让用户猜）。
+	if hasCover {
+		if pud.PopItem(c, "cover:copy-cover", copyCoverLabel, false).Clicked() {
+			s.coverMenuOpen = false
+			s.copyCover(st)
+		}
+	} else {
+		pud.PopText(c, copyNoCoverNote)
 	}
-	if !hasCover {
-		m.Item(copyNoCoverNote).Disabled(true)
+	// 在线的歌才有「一键三连」和「在 B 站打开」（原型 `TR[t.id] ?` / `open-bili`）。
+	if st.BiliURL != "" {
+		if s.app.Likeable() && pud.PopItem(c, "cover:triple", "一键三连", false).Clicked() {
+			s.coverMenuOpen = false
+			s.tripleNow()
+		}
+		if pud.PopItem(c, "cover:open-bili", "在 B 站打开", false).Clicked() {
+			s.coverMenuOpen = false
+			s.openExternalURL(st.BiliURL)
+		}
 	}
 }
 

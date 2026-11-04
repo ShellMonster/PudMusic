@@ -33,40 +33,9 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
-	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
-)
-
-// 这一列的尺寸。
-//
-// 宽度和行高都是上游那两个数（`layout/playbar/left/page-list.tsx:29` 的
-// `min-w-[500px]`、同一处传给 `MusicPageList` 的 `itemHeight={64}`），
-// DESIGN.md 的 `parts_panel` 也是这两个数。
-//
-// ⚠️ **原来这里写着「不是 Biu 那个 500」**，理由是「500 是给封面 + 标题 + 时长
-// 留的，而我们不画封面和时长，只留标题」。那个理由只在「只留标题」成立时才成立，
-// 而用户看到的是**同一个浮层**：它在 Biu 里是 500 宽、64 一行，在我们这里只有
-// 360 / 40——长标题截得比上游早，行挤得像一串标签。这一票按 DESIGN.md 对齐到
-// 上游的数，代价是浮层更宽——它仍然比最小窗口（900）窄得多。
-const (
-	// partDrawerWidth 是这一列多宽。500 是上游的 `min-w-[500px]`：分集标题常是
-	// 「某某合集 第 N 集」这种长句，500 里放得下三十多个字才截。
-	partDrawerWidth = 500
-	// partHeaderHeight 是顶上那一条（照 Biu 的 `px-4 py-3`，够放一行 14 号字）。
-	partHeaderHeight = 44
-	// partRowHeight 是一行多高。64 是上游传给 `MusicPageList` 的
-	// `itemHeight={64}`，和列表行、队列行同一个数（DESIGN.md 的 `parts_panel`）。
-	partRowHeight = 64
-	// partNumW 是编号那一列的宽。「100」在 12 号字下不到 24，28 是给三位数留的。
-	partNumW = 28
-	// partListMaxHeight 是下面那一列的**上限**。60vh 是 Biu 那个浮层的
-	// `h-[60vh]`，420 是封顶（Biu 那边没有封顶，它靠窗口高度）。
-	partListMaxHeight = 420
-	// partDividerH 是顶上那条分隔线。
-	partDividerH = 1
 )
 
 // viewPartButton 是播放条上那个「分集」键，加上它弹出来的那一列。
@@ -133,7 +102,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	// ⚠️ 浮层那一层外面包一层 Guard（铁律三）：它是在**播放条这一层的布局之外**
 	// 单独建的，它一崩坏掉的是整块浮层，而报错的地方在播放条上——两者对不上，
 	// 极难查。
-	ui.Popover(c, btn, &s.partOpen, func() {
+	s.pbPopover(c, btn, &s.partOpen, "分集列表", func() {
 		s.guardAt("分集抽屉", s.viewPartDrawer)(c)
 	})
 }
@@ -198,61 +167,45 @@ func partEntryTooltip(parts []bili.VideoPart, cur app.Item, worthAsking bool, er
 	return "共 " + strconv.Itoa(len(parts)) + " 集，" + at + "（点一下看全部）"
 }
 
-// partDrawerHeight 是这一块该有多高：**按内容算**，不是一块固定高的死面板。
-//
-// ⚠️ **为什么不能照抄一个固定高度**：这个上限（`partListMaxHeight`）是照 Biu 那个
-// 浮层的 `h-[60vh]` 抄的，而 Biu 那一列**每行带一张 48×48 的封面**、行高 64——三集就
-// 占 192，一块 420 高的面板正好装得下。我们**不画封面**（`bili.VideoPart` 没有每集的
-// 首帧图，见文件头），行仍然是上游那个 64：三集是 3×64 = 192，固定画 420 的话会在
-// 下面**空出 183 像素（一屏的 44%）**，而那块空白在界面上和「这个面板下面还有东西
-// 没画出来」长得一模一样。所以高度按行数算。
-//
-// 集数多的时候封顶在 `min(winH*0.6, partListMaxHeight)`，那一列照旧滚动（`ui.List`）。
-//
-// `n` 是这一帧要画的几行；空状态那一句话也算一行的位置（它是一行 12 号字带 12 的
-// 内边距），所以这里按**至少一行**算——否则那句「问不出分集」会被挤到面板外面。
-func partDrawerHeight(n int, winH float32) float32 {
-	head := float32(partHeaderHeight + partDividerH)
-	cap := min(winH*0.6, partListMaxHeight)
-	if cap <= head {
-		return cap
-	}
-	// 一屏放得下几行。
-	if fits := int((cap - head) / partRowHeight); n > fits {
-		n = fits
-	}
-	return head + float32(max(n, 1))*partRowHeight
-}
+// partPopMaxH 是分集弹层里那一列的高度上限：集数多时这一列自己滚（`.pop` 本身没有上限，
+// 原型只有 5 集；真实稿件可能上百集，所以封顶在 min(窗口高 × 0.6, 360)）。
+const partPopMaxH = 360
 
-// viewPartDrawer 是浮层里的那一列。
-//
-// ⚠️ **背景和圆角是 `ui.Popover` 给的**（`corePopover` → `stylePanel`：主题底色
-// + 圆角 + 一圈边 + 阴影），这里只摆内容——自己再画一层底色的话，底下那一层透
-// 不出来，浮层看着就比实际大一圈。
+// partPopMaxW 是分集弹层的最宽：标题常是「某某合集 第 N 集」这种长句，超出就省略。
+const partPopMaxW = 360
+
+// viewPartDrawer 是分集弹层里的内容（原型 `popHtml('parts')`）：
+// `<h5>分集 · N 集</h5>` 加每集一个 `pop-opt`（`P{n} · {标题}`，正在放的那集 accent-text 600 + 对勾）。
+// 面板本身（surface 底、1 像素描边、圆角 12、`--shadow-pop`、内边距 8、最小宽 200）由
+// `pbPopover` 按 `.pop` 画。
 func (s *Shell) viewPartDrawer(c *ui.Context) {
-	t := c.Theme()
 	_, winH := c.Size()
-
-	ui.Column(c).Key("part-drawer").Width(partDrawerWidth).
-		Height(partDrawerHeight(len(s.partRows), winH)).
-		// ⚠️ 这一对**不许省**：它是无头 Tester 量这一块高度的**唯一凭据**
-		// （`Tester.Find` 认的是文字和 `Label`，不认 `Key`），而 `TestTheDrawerIsOnly
-		// AsTallAsItsContent` 量的就是它。它本身也该有——`queue_drawer.go` 那个抽屉
-		// 同样挂着 `Role(ui.RoleDialog).Label(...)`，读屏软件据此知道这块是一个弹层。
-		Role(ui.RoleDialog).Label("分集列表").
-		Children(func() {
-			s.viewPartDrawerHeader(c, t)
-
-			switch {
-			case len(s.partRows) == 0:
-				// 一片空白在界面上和「这一首没有分集」长得一模一样。而分集是问 B 站
-				// 问来的，问不到是网络/风控的事，不是这一首没有分集——三句话说开。
-				ui.Text(c, s.partDrawerWhy()).FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).Padding(space.Px12)
-			default:
-				s.viewPartDrawerList(c, t)
+	if len(s.partRows) == 0 {
+		// 一片空白和「这一首没有分集」长得一模一样；分集是问 B 站问来的，问不到是网络 / 风控
+		// 的事——三句话说开（`partsHowItIs`）。
+		pud.PopHeading(c, "分集")
+		pud.PopText(c, s.partDrawerWhy())
+		return
+	}
+	pud.PopHeading(c, "分集 · "+strconv.Itoa(len(s.partRows))+" 集")
+	// 外面这一层 Column 是必需的：滚动容器直接当别的容器的下一层时，里面文字的盒子量出来是 0×0
+	// （见 `viewSpaceList` 里同一条）。
+	ui.Column(c).Key("part-pop:list").MaxWidth(partPopMaxW).Children(func() {
+		sc := ui.Scroll(c).Key("part-pop:scroll").MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
+			for _, r := range s.partRows {
+				label := "P" + strconv.Itoa(r.page) + " · " + r.title
+				if pud.PopOpt(c, "part:"+r.key, label, "", r.active).Clicked() {
+					// 选完就收：收在换集**之前**——`PlayPart` 要清轨道再异步取流，那几百毫秒里
+					// 摆着上一集的行更让人以为换失败了。
+					s.partOpen = false
+					if err := s.app.PlayPart(r.cid); err != nil {
+						s.addToast("换不了这一集："+err.Error(), notice.Danger)
+					}
+				}
 			}
 		})
+		s.trackScrollbar(sc)
+	})
 }
 
 // partDrawerWhy 是空状态那一行说的话（问到了就不画它）。
@@ -260,119 +213,4 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 // 走的是 `partsHowItIs`——和键上那个悬停提示同一个出口，理由见那一条。
 func (s *Shell) partDrawerWhy() string {
 	return partsHowItIs(len(s.partRows), s.app.PartsWorthAsking(), s.app.PartsErr())
-}
-
-// viewPartDrawerHeader 是顶上那一条：「分集」和共几集。
-//
-// 共几集**写在浮层上而不是只写在键的悬停提示里**：提示要等鼠标停上去，而列表
-// 一打开用户第一眼要的就是「一共几个」——他好判断自己滑到哪里为止。
-func (s *Shell) viewPartDrawerHeader(c *ui.Context, t *ui.Theme) {
-	ui.Column(c).FillWidth().Children(func() {
-		ui.Row(c).FillWidth().Height(partHeaderHeight).PaddingX(space.Px12).
-			AlignItems(ui.Center).Children(func() {
-			// ⚠️ **字重不写**（400）：抽屉标题那一档是 400（DESIGN.md §二）。
-			ui.Text(c, "分集").FontSize(scale.Font(c, scale.Size14)).Grow(1)
-			if n := len(s.partRows); n > 0 {
-				ui.Text(c, "共 "+strconv.Itoa(n)+" 集").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-			}
-		})
-		// 框架的 `ui.Divider`：1 DIP、无圆角、无内边距、取 `t.Border`——和原来
-		// 手搓的那一行逐字一样。外面是 `Column`，所以它给的是高 1 的那条横线。
-		ui.Divider(c)
-	})
-}
-
-// viewPartDrawerList 是浮层里那一列。
-func (s *Shell) viewPartDrawerList(c *ui.Context, t *ui.Theme) {
-	rows := s.partRows
-	// ⚠️ **身份是预先装箱好的那一份**（`s.partRowKeys`）：理由见
-	// `shell.go` 里那个字段的注释（票 #313）。
-	s.partList.Key = func(i int) any {
-		return s.partRowKeys.At(i, rows[i].key, rowkey.Identity)
-	}
-	s.partList.Label = func(i int) string { return rows[i].title }
-
-	e := ui.List(c, &s.partList, len(rows), func(i int) {
-		s.viewPartRow(c, rows[i], t)
-	}).Grow(1).FillWidth()
-	s.trackScrollbar(e)
-}
-
-// viewPartRow 是分集列表里的一行：编号 + 标题。
-//
-// ⚠️ 悬停要**在 Children 之前**问：指针是在布局那一步才知道落在哪儿的
-// （和 `queue_drawer.go` 的 `viewQueueRow` 同一个道理）。
-func (s *Shell) viewPartRow(c *ui.Context, r partRow, t *ui.Theme) {
-	row := ui.Row(c).Key(r.key).Grow(1).Height(partRowHeight).
-		PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).Radius(t.Radius)
-	switch {
-	case r.active:
-		// 上游那一行走的是 `variant="flat" color="primary"`
-		// （`layout/playbar/left/page-list.tsx`）——HeroUI 的 flat+primary 展开是
-		// `bg-primary/20 text-primary-600`，也就是**主色 20% 那一层淡底**
-		// （浅色下落在面板底 #ffffff 上是 #d2f7df，上游实图那个数）。
-		//
-		// 上游**满屏**那个分集面板也是同一个数（`data-[active=true]:bg-primary/20`），
-		// 但**我们满屏那一处是另一档**（玻璃面板上的一层中性色，见 `viewFullPartsList`）
-		// ——那不是这一票管的事。
-		//
-		// 别的记号（左边一条色杠、单独一个图标）都没有用：这一列没有封面，
-		// 一行字加一个数字，靠底色认人最快。
-		//
-		// ⚠️ **之前这里是实心主色底**（票 #323）：改之前那一档和上游差着一个数，
-		// 而队列抽屉的「正在播放」那一行在票 #294 已经改回上游那一档了——同一件
-		// 事，两个抽屉差着两种画法。现在两个抽屉共用同一份配方（`playingrow.go`）。
-		//
-		// ⚠️ **不是实心主色底**：实心那一档是「被选中的选项」（`flatSolid`），
-		// 票 #197 刚把列表选中行的实心主色底去掉。这一档说的是「这一集在放」。
-		row = row.Background(playingRowBg(t))
-	case row.Hovered():
-		row = row.Background(t.SurfaceHover)
-	}
-
-	row.Children(func() {
-		ui.Text(c, strconv.Itoa(r.page)).Width(partNumW).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(partRowText(t, r.active, true))
-		ui.Text(c, r.title).Grow(1).FontSize(scale.Font(c, scale.Size13)).
-			TextColor(partRowText(t, r.active, false)).SingleLine()
-	})
-
-	if row.Clicked() {
-		// 选完就收：Biu 的 `onPressItem={onClose}`。
-		// 收在换集**之前**——`PlayPart` 要清轨道再异步取流，那几百毫秒里这一列
-		// 摆着的是正在放的那一集的空状态（还没有歌），比摆着上一集的行更让人
-		// 以为换失败了。
-		s.partOpen = false
-		if err := s.app.PlayPart(r.cid); err != nil {
-			s.addToast("换不了这一集："+err.Error(), notice.Danger)
-		}
-	}
-}
-
-// partRowText 是一行里那两段字各该用什么颜色。
-//
-// numbered 那一位（编号）在非选中时比标题更弱：它是**定位**用的（找第几集），
-// 而标题才是**读**的那一句。把两者画成一个粗细，用户扫一列的时候先看到的是
-// 一排数字。
-//
-// ⚠️ **正在放的那一行按它自己那层淡底重算**（票 #323）：底从实心主色换成主色
-// 20% 那一层淡底之后，底上的字也得跟着换——
-//
-//   - **标题**：主色当字，按那层淡底算（`playingRowText`，浅色 #127d38）。
-//   - **编号**：次要色，按同一层淡底算（浅色 #6b6b74）——它跟没在放的那些行
-//     里的编号是同一档，只是底换了要重算。
-//
-// 换之前那一行是实心主色底 + `t.AccentText`（白）——白字压在淡底上读不出来，
-// 所以底和字必须一起换（见 `playingrow.go`）。
-func partRowText(t *ui.Theme, active, numbered bool) ui.Color {
-	switch {
-	case active && numbered:
-		return ink.Ensure(t.TextMuted, playingRowBg(t), 4.5)
-	case active:
-		return playingRowText(t)
-	case numbered:
-		return t.TextMuted
-	default:
-		return t.Text
-	}
 }
