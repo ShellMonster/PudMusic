@@ -313,7 +313,6 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	// `Now` 传的是 `s.now`（闭包），不是 `s.clock.Now`（值）。
 	sp.videos.SetColumns(list.Columns{PlayCount: true, PubTime: true, Now: s.now})
 	// 行和表头画原型样式（`pud.TrackRow` / `pud.TrackHead`）。
-	sp.videos.SetPudRows(true)
 	s.upSpaces[mid] = sp
 	return sp
 }

@@ -331,9 +331,6 @@ type List struct {
 	// 每帧崩一次，日志被刷爆、帧率拖垮——比画不出来糟得多。
 	failed map[string]bool
 
-	// pud 报行和表头是不是画原型样式（见 `SetPudRows`）。
-	pud bool
-
 	// albumMode 是「专辑」那一列画不画（原型 `@media (max-width: 1180px)` 按窗口宽，见 `SetAlbumMode`）。
 	albumMode pud.AlbumMode
 

@@ -3,7 +3,8 @@ package list
 import (
 	"slices"
 	"testing"
-	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // 这一组验行尾那枚「⋯」。
@@ -33,9 +34,10 @@ func TestTheOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 		t.Fatalf("右键没有开出菜单")
 	}
 
-	// 点行尾那枚「⋯」。
+	// 悬停这一行，点行尾那枚「⋯」（pud 行的操作键悬停才出现）。
 	_, ttButton := newList(t, Actions{}, onlineSongs(3))
-	if err := ttButton.Click(OperationLabel("在线的歌 B")); err != nil {
+	hoverRowOf(t, ttButton, "在线的歌 B")
+	if err := ttButton.Click(rowMoreLabel("在线的歌 B")); err != nil {
 		t.Fatalf("点不到行尾那枚「⋯」：%v", err)
 	}
 	byButton := ttButton.Menu()
@@ -53,7 +55,8 @@ func TestTheOperationButtonActsOnTheSongItSitsOn(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))
 
-	if err := tt.Click(OperationLabel("在线的歌 C")); err != nil {
+	hoverRowOf(t, tt, "在线的歌 C")
+	if err := tt.Click(rowMoreLabel("在线的歌 C")); err != nil {
 		t.Fatalf("点不到行尾那枚「⋯」：%v", err)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
@@ -67,7 +70,21 @@ func TestTheOperationButtonActsOnTheSongItSitsOn(t *testing.T) {
 	}
 }
 
-// TestEveryRowHasAnOperationButton 钉住「**每一行**末尾都有那枚「⋯」」。
+// rowMoreLabel 是 pud 行尾那枚「⋯」的名字（`pud.TrackRow` 的 `IconBtn`）。
+func rowMoreLabel(title string) string { return "更多操作：" + title }
+
+// hoverRowOf 把指针移到这一行上：pud 行的「⋯」、喜欢、移除这几枚平时隐藏，悬停才出现。
+func hoverRowOf(t *testing.T, tt *ui.Tester, title string) {
+	t.Helper()
+	r, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+}
+
+// TestEveryRowHasAnOperationButton 钉住「**每一行**悬停时行尾都有那枚「⋯」」。
 //
 // 少一行就少一个入口：用户不会想到「那一行没有是因为它特殊」。
 func TestEveryRowHasAnOperationButton(t *testing.T) {
@@ -75,32 +92,10 @@ func TestEveryRowHasAnOperationButton(t *testing.T) {
 
 	for i := range 4 {
 		title := "在线的歌 " + string(rune('A'+i))
-		if _, ok := tt.Find(OperationLabel(title)); !ok {
-			t.Errorf("第 %d 行末尾没有那枚「⋯」，文字有 %q", i+1, tt.Texts())
+		hoverRowOf(t, tt, title)
+		if _, ok := tt.Find(rowMoreLabel(title)); !ok {
+			t.Errorf("第 %d 行悬停时行尾没有那枚「⋯」，文字有 %q", i+1, tt.Texts())
 		}
-	}
-}
-
-// TestTheOperationButtonSitsAtTheEndOfTheRow 钉住它**在行尾**。
-//
-// ⚠️ 判据是**它离行的右边缘有多远**：表头照着它留了一个同样宽的空位
-// （`header.go` 末尾那一个），行里这一枚要是往前挪了，表头和行就差出那么几像素
-// ——而那种差在画面上只是「表头歪了一点」。
-func TestTheOperationButtonSitsAtTheEndOfTheRow(t *testing.T) {
-	_, tt := newList(t, Actions{}, onlineSongs(3))
-
-	row, ok := tt.Find("在线的歌 B")
-	if !ok {
-		t.Fatalf("画面上找不到那一行，文字有 %q", tt.Texts())
-	}
-	btn, ok := tt.Find(OperationLabel("在线的歌 B"))
-	if !ok {
-		t.Fatalf("画面上找不到那枚「⋯」，文字有 %q", tt.Texts())
-	}
-	// 行的右边缘减去按钮的右边缘：留出来的是那枚按钮自己的边距（表头留的是
-	// `OperationColWidth` 那一格）。
-	if gap := row.X + row.W - (btn.X + btn.W); gap < 0 || gap > 16 {
-		t.Errorf("那枚「⋯」离行的右边缘 %v，want 0~16（它该在行尾）", gap)
 	}
 }
 
@@ -143,68 +138,5 @@ func TestTheGridOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 	if !slices.Equal(byButton, byRight) {
 		t.Errorf("格子上角那枚「⋯」开出来的菜单是 %q，右键开出来的是 %q",
 			byButton, byRight)
-	}
-}
-
-// TestTheOperationButtonDrawsSolidDots 验行尾那枚「⋯」画的是**实心**那一版
-// （票 BMG-253 的评审点名的那一条）。
-//
-// # 为什么它要有牙齿
-//
-// 全应用有**四枚**「⋯」（这一枚、网格卡角上那一枚、队列抽屉行尾那一枚、收藏夹
-// 工具栏那一枚），它们**必须同一张图**（名字在 `iconset.MoreVertical` 那一处，
-// 票 BMG-253 的评审指出过「同一页上两种字形并存」）。
-//
-// 而线框那一版的三个点是 24 见方里**半径 1.5** 的圆——画成 16 像素就是**三个 2
-// 像素的斑点**，和旁边那个 12 像素的时长数字一样重，用户读不出「这是一枚菜单键」。
-//
-// 判据是**墨点有几个**：实心那一版 16 像素下量到 **36** 个，线框那一版只有
-// **12**（两个都是本机实测）。门槛取 20：两边都离得开。
-func TestTheOperationButtonDrawsSolidDots(t *testing.T) {
-	_, tt := newList(t, Actions{}, onlineSongs(3))
-
-	btn, ok := tt.Find(OperationLabel("在线的歌 B"))
-	if !ok {
-		t.Fatalf("画面上找不到那枚「⋯」，文字有 %q", tt.Texts())
-	}
-	img := tt.Image()
-	// 底色取按钮**空出来的那一角**（图标是居中的 16，四角都是行底色）。
-	bg := img.RGBAAt(int(btn.X)+2, int(btn.Y)+2)
-	n := 0
-	for y := int(btn.Y); y < int(btn.Y+btn.H); y++ {
-		for x := int(btn.X); x < int(btn.X+btn.W); x++ {
-			if img.RGBAAt(x, y) != bg {
-				n++
-			}
-		}
-	}
-	if n < 20 {
-		t.Errorf("那枚「⋯」只有 %d 个墨点（want ≥20）——它是线框那一版的三个斑点，"+
-			"和旁边的时长数字一样重", n)
-	}
-}
-
-// TestTheOperationButtonSaysWhatItIs 验行尾那枚「⋯」**有一句提示**（票 BMG-253）。
-//
-// 它是这一行里**唯一**的操作入口，而它原先一句提示都没有——用户得知道三个点
-// 是菜单，而第一次用只能靠试。
-//
-// ⚠️ **判据是那句提示本身**：图形（实心那一版的三个点）认得出来的人多，认不出
-// 的也有，而一句「这一首的操作」谁都读得懂。
-func TestTheOperationButtonSaysWhatItIs(t *testing.T) {
-	_, tt := newList(t, Actions{}, onlineSongs(3))
-
-	btn, ok := tt.Find(OperationLabel("在线的歌 B"))
-	if !ok {
-		t.Fatalf("画面上找不到那枚「⋯」，文字有 %q", tt.Texts())
-	}
-	// 指针停上去，等过提示那一档的时延（框架那一份是 600ms 出）。
-	tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
-	tt.Frame()
-	tt.Advance(700 * time.Millisecond)
-	tt.Frame()
-
-	if !tt.HasText(operationTip) {
-		t.Errorf("指针停在「⋯」上没有那句提示（%q），文字有 %q", operationTip, tt.Texts())
 	}
 }

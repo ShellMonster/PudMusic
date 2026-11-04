@@ -29,13 +29,6 @@ func (l *List) RowWidth() float32 {
 	return pudDefaultW
 }
 
-// usesPudRow 报这个列表此刻画不画原型那种行（多选态也是，见文件头）。
-func (l *List) usesPudRow() bool { return l.pud }
-
-// SetPudRows 让这个列表的行和表头改用原型样式（`pud.TrackRow` / `pud.TrackHead`）。
-// 默认关：没改版的页面保持旧行，改版的页面在建列表时打开它。
-func (l *List) SetPudRows(on bool) { l.pud = on }
-
 // SetAlbumMode 说「专辑」那一列画不画。页面每帧用 `pud.AlbumModeFor(窗口宽)` 传进来；
 // 行和表头读同一个值才对得齐。零值是 `pud.AlbumAuto`（只看列表自己的宽）。
 func (l *List) SetAlbumMode(m pud.AlbumMode) { l.albumMode = m }
@@ -67,11 +60,13 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		Title:     sh.Title,
 		Artist:    sh.Extra,
 		Owner:     m.Owner,
+		OwnerTip:  OwnerTipText(m.Owner),
 		Plays:     l.countText.At(i, m.View, PlayCountText),
 		Duration:  l.durText.At(i, m.Duration, formatDuration),
 		Playing:   playing,
 		Compact:   l.view == ViewCompact,
 		AlbumCol:  l.albumMode,
+		Chosen:    r.Selected(),
 		Highlight: l.hl,
 		Dim:       m.Item.Invalid,
 		CanLike:   !user && l.acts.FavSelect != nil,

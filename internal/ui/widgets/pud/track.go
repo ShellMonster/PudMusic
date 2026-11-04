@@ -123,8 +123,8 @@ type Track struct {
 	Index string
 	// Title / Artist 是歌名和歌手；Album 是专辑那一列（空 = 画「本地文件」那类调用方给的字）。
 	Title, Artist, Album string
-	// Owner 是 UP 主名；空 = 画一个淡色的「—」。
-	Owner string
+	// Owner 是 UP 主名；空 = 画一个淡色的「—」。OwnerTip 是悬停在它上面的提示（空 = 不挂）。
+	Owner, OwnerTip string
 	// Quality 是音质角标："HI-RES" 画主色那一版、"SQ" 画普通那一版、空不画。
 	Quality string
 	// Plays / Danmaku 是播放量和弹幕数（"12.3万"）；Plays 为空那一格画「—」。
@@ -140,6 +140,9 @@ type Track struct {
 	Liked, CanLike bool
 	// Selected 是批量选择里选中了：整行 accent-soft 底。
 	Selected bool
+	// Chosen 是列表里「键盘 / 指针选中」的那一行（框架会给它铺一块实心主色底，调用方用 `RowWire`
+	// 盖掉）。选中行的底色不走淡入淡出：过渡会让框架那块主色底多留 100ms，点一下行就闪一下主色。
+	Chosen bool
 	// Removable 是行尾多一枚「移除」（稍后再看、历史记录）。
 	Removable bool
 	// Compact 是紧凑档：行高 44、不画封面（原型 `.tlist.compact`）。
@@ -191,10 +194,17 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 	switch {
 	case t.Selected:
 		row = row.Background(p.AccentSoft)
+	case t.Chosen && hot:
+		// 框架给选中行铺了一块实心主色底；半透明的 Hover 叠上去会把主色透出来，所以先合到页面底色（和 list 的 `rowCover` 同一个口径）上变成不透明。
+		row = row.Background(p.Hover.Over(c.Theme().Background))
+	case t.Chosen:
+		row = row.Background(c.Theme().Background)
 	case hot:
 		row = row.Background(p.Hover)
 	}
-	row = row.Transition(motion.Fade)
+	if !t.Chosen {
+		row = row.Transition(motion.Fade)
+	}
 	row.Children(func() {
 		// 序号 / 播放键 / eq-bars。
 		ui.Box(c).Size(colIdx, 32).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
@@ -257,6 +267,9 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				return
 			}
 			b := ui.ButtonBase(c).Key(key + ":owner")
+			if t.OwnerTip != "" {
+				b = b.Tooltip(t.OwnerTip)
+			}
 			fg := p.Text2
 			if b.Hovered() {
 				fg = p.Text

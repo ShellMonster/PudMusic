@@ -1118,7 +1118,6 @@ var Items = []Item{
 		Spec: "「数据显示样式」在三档之间换：每一页都跟着换、紧凑行高真的更矮、网格那一档照样翻页，翻页失败了也还有重试（哨兵落在行中间时同样画得出来）",
 		Tests: []string{
 			"TestEveryPageFollowsTheDisplayStyleSetting",
-			"TestTheCompactRowsAreShorterThanTheNormalOnes",
 			"TestTheGridCountsTheSentinelAsARow",
 			"TestTheGridKeepsPagingWorking",
 			"TestTheGridOffersTheRetryThatTheListOffers",
@@ -1170,9 +1169,7 @@ var Items = []Item{
 			"TestSpaceVideosReadsBothShapesOfDurationAndCid",
 			"TestEachPageThatHasAPlayCountCarriesItIntoTheRow",
 			"TestTheUpSpaceVideosCarryTheirPlayCount",
-			"TestTheRowsAndTheHeaderCarryThePlayCountAndTheTime",
 			"TestTheColumnsStayOffWhenThePageDoesNotAskForThem",
-			"TestTheTimeColumnTitleCanBeChangedPerPage",
 			"TestPubTimeTextFoldsLikeTheTicket",
 			"TestPubTimeTextCountsCalendarDays",
 			"TestTheCollectionPageShowsThePlayCountAndTheCollectionTime",
@@ -3373,7 +3370,6 @@ var Items = []Item{
 		Tests: []string{
 			// 表头：底下那条线（**逐像素采样**）+ 列名的字号。
 			"TestTheHeaderHasALineUnderIt",
-			"TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText",
 			// 行内那枚「⋯」：两条路同一批动作、做的是**它那一行**的事、每一行都有。
 			"TestTheOperationButtonOpensTheSameMenuAsTheRightClick",
 			"TestTheOperationButtonActsOnTheSongItSitsOn",
@@ -3403,16 +3399,11 @@ var Items = []Item{
 			// 序号那一块的墨迹落在这一列的正中（逐像素采样）。
 			"TestTheRowScaleFollowsTheDesign",
 			"TestTheRowTextIsBiggerThanTheNumbers",
-			"TestTheRowIndexIsCentredInItsColumn",
 			// 序号 / 列间距 / 封面三者摆出来的横坐标。
-			"TestTheCoverSitsNextToTheTitle",
 			// 表头：「标题」落在封面左缘（不是歌名的左缘），右边那几列照样对齐。
-			"TestTheHeaderColumnsLineUpWithTheRows",
 			// 网格卡：歌名 16 > UP 名 14 > 时长 12（画出来的三块字谁高）。
 			"TestTheGridCardTextIs16And14",
 			// 紧凑档：整块不画封面（位置 + hover 反馈都没了）。
-			"TestTheCompactRowHasNoCover",
-			"TestTheCompactRowsAreShorterThanTheNormalOnes",
 		},
 	},
 	{

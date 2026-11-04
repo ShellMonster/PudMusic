@@ -169,7 +169,6 @@ func (st *searchState) init(s *Shell) {
 		// 播放量 / 投稿时间：歌曲和视频两档有，用户那一档两样都没有（见
 		// `searchColumns`）。**装在这里而不是每一帧**：一档 Tab 的列不会变。
 		st.lists[i].list.SetColumns(searchColumns(i, s))
-		st.lists[i].list.SetPudRows(true)
 	}
 }
 

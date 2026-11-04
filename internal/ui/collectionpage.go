@@ -273,7 +273,6 @@ func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 		Now:          s.now,
 	})
 	// 行和表头画原型样式（`pud.TrackRow` / `pud.TrackHead`，多选态序号格换成勾选框）。
-	l.SetPudRows(true)
 	return l
 }
 

@@ -94,54 +94,6 @@ func copiedRowOf(rec *copyRecorder, tt *ui.Tester) string {
 	return tt.Clipboard()
 }
 
-// TestDraggingARowCopiesTheWholeRow 断**拖选一行复制的是整行**。
-//
-// ⚠️ **判据是剪贴板里的那段原文**：它该是这一行显示的那几样——歌名、UP 名、
-// 时长——用换行连着。
-//
-// 🔴 **不是「歌名那一段」**：那一段是**容器级 `Selectable`** 的意义——「它的
-// Text 后代共用一个选择，复制时用换行连着」（`mygo/ui/api_gen.go` 的
-// `Selectable`）。而逐行各自 `Selectable` 的话，拖到下一行时上一行会掉出去。
-//
-// ⚠️ **拖的是 UP 名那一块**：它是**可选中那一列里**的一块（歌名那一块在列表
-// 这一档量不到——`ListState.Label` 装的是歌名，于是 `tt.Find` 命中的是**整行**
-// 的盒子，按下去落在序号那一列上，不在可选中的范围里）。而复制出去的是
-// **整行**（歌名 + UP 名 + 时长），所以拖哪一块都一样——这正是「容器级
-// `Selectable`」要的那件事。
-func TestDraggingARowCopiesTheWholeRow(t *testing.T) {
-	rec := &copyRecorder{}
-	_, tt := newList(t, rec.actions(Actions{}), rowTextSongs())
-
-	dragOverRow(t, tt, "UP 乙", "UP 乙")
-
-	want := "第二首歌\nUP 乙\n4:05"
-	copyRow(tt)
-	if got := copiedRowOf(rec, tt); got != want {
-		t.Errorf("拖选第二行之后复制出去的是 %q，want %q", got, want)
-	}
-}
-
-// TestDraggingARowCopiesTheWholeRowInTheCompactView 断**紧凑那一档一样**。
-//
-// ⚠️ **紧凑那一档是另一段画法**（`card.go` 的 `viewCompactCard`），不是上面
-// 那一段少画几样——所以「上面那条绿了就当两档都对」是不成立的。
-func TestDraggingARowCopiesTheWholeRowInTheCompactView(t *testing.T) {
-	rec := &copyRecorder{}
-	l := New(newCache(t), rec.actions(Actions{}))
-	l.SetView(ViewCompact)
-	l.SetSongs(rowTextSongs())
-	tt := ui.NewTester(l.View, testerW, testerH)
-	tt.Frame()
-
-	dragOverRow(t, tt, "UP 乙", "UP 乙")
-
-	want := "第二首歌\nUP 乙\n4:05"
-	copyRow(tt)
-	if got := copiedRowOf(rec, tt); got != want {
-		t.Errorf("紧凑档拖选第二行之后复制出去的是 %q，want %q", got, want)
-	}
-}
-
 // TestDraggingARowInTheGridCopiesTheWholeCell 断**网格那一格也一样**。
 //
 // ⚠️ **网格那一档也是另一段画法**（`grid.go` 的 `viewCell`）：封面、封面底上

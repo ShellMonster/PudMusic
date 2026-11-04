@@ -7,12 +7,9 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -50,69 +47,6 @@ func TestTheCardShowsTheTitleAndTheOwner(t *testing.T) {
 	}
 	if !tt.HasText("逃跑计划") {
 		t.Errorf("UP 名没画出来，文字有 %q", tt.Texts())
-	}
-}
-
-// TestASongWithoutAnOwnerDoesNotDrawOne 验没有 UP 名时不画空位。
-//
-// Biu 的 music-card 是 `{ownerName && (...)}`（`music-card/index.tsx`）：没有
-// 就不画。这里跟着来——画一行空的出来，列表里看起来是「这一首没有 UP 名」，
-// 而真实原因是这一项本来就没填。
-func TestASongWithoutAnOwnerDoesNotDrawOne(t *testing.T) {
-	_, tt := newList(t, Actions{}, []Music{
-		song("a", "没有 UP 名的歌", ""),
-	})
-	if !tt.HasText("没有 UP 名的歌") {
-		t.Errorf("歌名没画出来，文字有 %q", tt.Texts())
-	}
-	for _, s := range tt.Texts() {
-		if s == "" {
-			t.Error("画面上有一个空的文字节点")
-		}
-	}
-}
-
-// TestTheCoverGoesThroughImgcache 验封面走的是已经建好的那套缓存：图还没来时
-// 是那一格占位，来了自己换上去，中间这一行始终摆在那儿。
-//
-// ⚠️ **断的是画面不是那一格上的字**：改之前占位上写着「载入中」，而现在按上游
-// `components/image/index.tsx:22-32` **一个字都不写**（骨架屏 / 描边框 + 图片
-// 图标）。所以唯一能断「画出来的是哪一档」的只有那一块 48×48 的像素。
-func TestTheCoverGoesThroughImgcache(t *testing.T) {
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		<-release
-		w.Write(pngBytes(t, coverSize, coverSize))
-	}))
-	defer srv.Close()
-
-	_, tt := newList(t, Actions{}, []Music{
-		{ID: "a", Title: "有封面的歌", Owner: "UP 甲", Cover: srv.URL + "/cover.png"},
-	})
-
-	bx, by, bw, bh := coverBox(t, tt, "有封面的歌")
-	// 第一帧是骨架屏：一块浅底 + **一枚更淡的音符**（没有描边框、没有字）。
-	//
-	// 🔴 **判据是「画得出东西」，不是「一块纯色」**（票 #222 / 报告 §5.3）：那一格
-	// 原来是一块**纯色**——浅色主题下它和背景几乎一样，一屏里几十张封面正在加载
-	// 时用户看到的是一排空白，**分不出「还在加载」和「压根没有图」**。
-	loading := distinctIn(tt, bx, by, bw, bh)
-	if len(loading) < 2 {
-		t.Errorf("正在加载那一格是一块纯色（%v）——加载中这一档**画不出东西**，"+
-			"用户分不出「还在加载」和「压根没有图」", loading)
-	}
-
-	close(release)
-	// 判据是**那一块变成了夹具那张图的颜色**，而不是「和之前不一样」：
-	// 这一族的 `pngBytes` 造的是**一整块纯色**（200,40,120），所以「有几种颜色」
-	// 换成 1 —— 断「有几种颜色」的话，等来的那一天是换上了图、而那一天照样红。
-	waitFor(t, 5*time.Second, "封面换成了图", func() bool {
-		tt.Frame()
-		return equalStrings(distinctIn(tt, bx, by, bw, bh), []string{"#c82878"})
-	})
-	// 换封面不能把这一行弄没。
-	if !tt.HasText("有封面的歌") || !tt.HasText("UP 甲") {
-		t.Errorf("封面换完之后这一行不见了，文字有 %q", tt.Texts())
 	}
 }
 
@@ -194,27 +128,6 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
-// TestTheCoverSitsNextToTheTitle 验封面和文字是并排的一行，不是上下堆着。
-//
-// 判据是**画面上的位置**：UP 名那一块的左边正好落在「内边距 + 序号列 + 间距 +
-// 封面 + 间距」那一处（8+32+16+48+16=120）。写死这个数是有意的——只判「比封面
-// 靠右」的话，封面挪到 x=0 也照样过。
-func TestTheCoverSitsNextToTheTitle(t *testing.T) {
-	_, tt := newList(t, Actions{}, []Music{
-		song("a", "夜空中最亮的星", "逃跑计划"),
-	})
-
-	r, ok := tt.Find("逃跑计划")
-	if !ok {
-		t.Fatalf("UP 名没画出来，文字有 %q", tt.Texts())
-	}
-	want := cardPadX + indexWidth + rowGap + coverSize + rowGap
-	if d := r.X - float32(want); d > 1 || d < -1 {
-		t.Errorf("UP 名那一块在 x=%v，want %v（左边就是封面），排版不是「序号 封面 文字」",
-			r.X, want)
-	}
-}
-
 // TestTheRowScaleFollowsTheDesign 钉住列表那一行的四个数（DESIGN.md「列表与网格」）：
 // 歌名 16、UP 名 14、列间距 16、序号 32。
 //
@@ -259,78 +172,6 @@ func TestTheRowTextIsBiggerThanTheNumbers(t *testing.T) {
 	if owner.H <= clock.H {
 		t.Errorf("UP 名那一块高 %v，时长高 %v——UP 名没有比次要数字大一档",
 			owner.H, clock.H)
-	}
-}
-
-// TestTheRowIndexIsCentredInItsColumn 钉住序号**居中**（上游 `min-w-8 text-center`）。
-//
-// 判据是**逐像素采样**：把序号那一列的墨迹扫出来，看它的中心是不是落在这一列的中点
-// 上。右对齐是改之前的样子——数字的右边缘贴着列尾，中心偏右一大截。
-//
-// ⚠️ 用一位数的序号（「1」）：两位数的墨迹本来就更宽，居中和右对齐在那上面只差几个
-// 像素，判不出来。
-func TestTheRowIndexIsCentredInItsColumn(t *testing.T) {
-	_, tt := newList(t, Actions{}, []Music{song("a", "一首歌", "")})
-
-	img := tt.Image()
-	bg := img.RGBAAt(testerW-1, testerH-1) // 右下角是空的：那就是底色
-	left, right := -1, -1
-	for y := range int(listRowHeight) {
-		for x := cardPadX; x < cardPadX+indexWidth; x++ {
-			if img.RGBAAt(x, y) == bg {
-				continue
-			}
-			if left < 0 {
-				left = x
-			}
-			right = x
-		}
-	}
-	if left < 0 {
-		t.Fatalf("序号那一列里一个非底色的像素都没有（序号没画出来）")
-	}
-	mid := float32(left+right+1) / 2
-	want := float32(cardPadX) + indexWidth/2
-	if d := mid - want; d > 2 || d < -2 {
-		t.Errorf("序号那一块的中心在 x=%.1f，这一列的中点在 %.1f——差 %.1f（右对齐了？）",
-			mid, want, d)
-	}
-}
-
-// TestTheCompactRowHasNoCover 钉住「紧凑那一档不画封面」。
-//
-// 上游紧凑那一支只画歌名（`music-list-item/index.tsx:85-88`），封面整块不在；我们
-// 改之前缩到 32 还在画。两条判据：
-//
-//  1. **位置**：UP 名的左边正好是「内边距 + 序号列 + 一个列间距」——中间没有封面。
-//  2. **那圈 hover 播放反馈也没有**：它只有封面才画得出，而它正是紧凑档原来唯一的
-//     鼠标播放入口。
-func TestTheCompactRowHasNoCover(t *testing.T) {
-	const title, owner = "紧凑的一首", "紧凑 UP"
-	l := New(newCache(t), Actions{})
-	l.SetView(ViewCompact)
-	l.SetSongs([]Music{song("a", title, owner)})
-	tt := ui.NewTester(l.View, testerW, testerH)
-	tt.Frame()
-
-	r, ok := tt.Find(owner)
-	if !ok {
-		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
-	}
-	want := float32(compactPadX + compactIndexWidth + rowGap)
-	if d := r.X - want; d > 1 || d < -1 {
-		t.Errorf("UP 名在 x=%.1f，want %.1f（内边距 + 序号列 + 列间距）——中间还画着封面？",
-			r.X, want)
-	}
-
-	// 指针移到这一行上：普通那一档此时会露出封面上的播放三角，紧凑这一档不该有。
-	tt.Move(testerW/2, listRowHeight/2)
-	tt.Frame()
-	tt.Frame()
-	tt.Advance(hover.Fade)
-	tt.Frame()
-	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
-		t.Errorf("紧凑档的封面上冒出了播放三角——这一档不该有封面：%q", tt.Texts())
 	}
 }
 

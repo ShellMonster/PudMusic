@@ -402,7 +402,6 @@ func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 	p.cards = list.NewSwitchView(cache, acts)
 	p.cards.SetEmpty("") // 空状态由这一页自己说，见 viewEmpty
 	// 曲目行用原型样式；「专辑」那一列写「格式 · 大小」，没有播放量（文件没有播放量）。
-	p.cards.SetPudRows(true)
 	p.cards.SetColumns(list.Columns{Text: func(m list.Music) string { return p.texts[m.ID] }})
 	// 外面包一层 recover：view 里 panic 会一路穿出 Cocoa 事件循环把整个
 	// 进程带走。建的时候包一次就够（每帧包一次是白花开闭包）。
@@ -703,7 +702,6 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		//
 		// 表格那一档走的是上面那个 `case`（`ui.Table` 自带表头，`localColumns`），所以
 		// 走不到这里来。
-		p.cards.SetPudRows(true)
 		p.cards.View(c)
 		if p.noteScrollbar != nil {
 			p.noteScrollbar(p.cards.Hot())

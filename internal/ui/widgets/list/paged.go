@@ -373,9 +373,6 @@ func (p *PagedList) Selected() (Music, bool) { return p.surf.Selected() }
 // 这一页没变」——正是本票要消灭的那一种。
 func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
 
-// SetPudRows 见 `List.SetPudRows`。
-func (p *PagedList) SetPudRows(on bool) { p.surf.List().SetPudRows(on) }
-
 // SetAlbumMode 见 `List.SetAlbumMode`。
 func (p *PagedList) SetAlbumMode(m pud.AlbumMode) { p.surf.List().SetAlbumMode(m) }
 

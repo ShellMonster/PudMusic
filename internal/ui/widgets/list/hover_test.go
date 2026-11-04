@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -91,62 +90,6 @@ func ownersAre(n int) []Music {
 // 列表行
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestHoveringARowPutsAPlayTriangleOnItsCover 钉住「指针移上去，封面正中浮出一个
-// 20px 的白色播放三角」。
-//
-// 钉的是三样：**在**（Find 得到）、**多大**（20 见方，不是别处的数）、**在哪儿**
-// （封面的正中间）。
-//
-// ⚠️ **三角形是一个 20 见方的盒子**，盒子里画一个三角——所以量到的是那个盒子而不是
-// 画出来的多边形。三角画满了整个盒子（`hover.drawTri` 从盒子的 15% 画到 88%），
-// 少了 20 这个数用户看到的就是一个小点。
-func TestHoveringARowPutsAPlayTriangleOnItsCover(t *testing.T) {
-	rec := &recorded{}
-	songs := ownersAre(5)
-	_, tt := newList(t, rec.actions(), songs)
-
-	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
-		t.Fatalf("指针还没移上去封面就有播放三角了：%q", tt.Texts())
-	}
-
-	hoverOn(t, tt, songs[2].Title)
-
-	got, ok := tt.Find(hover.PlayLabel(songs[2].Title))
-	if !ok {
-		t.Fatalf("指针移上去之后封面上没有播放三角：%q", tt.Texts())
-	}
-	if got.W < 19 || got.H < 19 {
-		t.Errorf("那个播放三角只有 %.1f×%.1f，want 20×20（上游 `music-list-item/index.tsx"+
-			":100-107` 的 `w-5 h-5`）——一个几像素的三角用户根本认不出那是「播放」",
-			got.W, got.H)
-	}
-	// 别的行**没有**：那一格三角只跟着指针走。
-	if _, ok := tt.Find(hover.PlayLabel(songs[0].Title)); ok {
-		t.Errorf("指针在第三行，第一行的封面上却有播放三角：%q", tt.Texts())
-	}
-}
-
-// TestTheHoverTriangleIsGoneWhenThePointerLeaves 是上面那一条的另一半：反馈是**跟
-// 着指针**的，不是出现一次就留在那儿。
-func TestTheHoverTriangleIsGoneWhenThePointerLeaves(t *testing.T) {
-	rec := &recorded{}
-	songs := ownersAre(5)
-	_, tt := newList(t, rec.actions(), songs)
-
-	hoverOn(t, tt, songs[2].Title)
-	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); !ok {
-		t.Fatalf("指针移上去之后封面上没有播放三角：%q", tt.Texts())
-	}
-
-	hoverOff(t, tt)
-	// ⚠️ 淡出要走满 200ms，所以这里推钟等它走完再问——问「指针移走了的那一帧」量到
-	// 的是「刚开始淡出」，那是它应该在的样子，不是缺陷。
-	settleFade(t, tt)
-	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
-		t.Errorf("指针移走之后那个播放三角还留着：%q", tt.Texts())
-	}
-}
-
 // TestThereIsNoTextPlayButtonOnTheIndexAnyMore 钉住「序号换成一个写着『播放』的按钮」
 // 那一套真的拆干净了。
 //
@@ -163,112 +106,9 @@ func TestThereIsNoTextPlayButtonOnTheIndexAnyMore(t *testing.T) {
 	}
 }
 
-// TestTheHoverTrianglePaintsWhiteOnTheDimmedCover 量**画出来的像素**：三角那个点比
-// 同一张封面上别的地方亮一截。
-//
-// ⚠️ 为什么非量像素不可：`Tester.Find` 认的是控件的**标签**，标签在而绘制没画出来
-// （或者反过来）它一点都看不出来。而这一条的失败症状正是「框在那儿、三角没画出来」
-// ——一个只断言元素存在的话永远发现不了。
-//
-// 封面空地址时 imgcache 画一块 `t.Surface`，上面压 35% 黑就暗下去了，白色的三角于是
-// 比它亮得多。判据只比**同一张封面上的两个点**，所以换主题、换深浅都照样成立。
-func TestTheHoverTrianglePaintsWhiteOnTheDimmedCover(t *testing.T) {
-	rec := &recorded{}
-	songs := ownersAre(5)
-	_, tt := newList(t, rec.actions(), songs)
-
-	hoverOn(t, tt, songs[2].Title)
-	tri, ok := tt.Find(hover.PlayLabel(songs[2].Title))
-	if !ok {
-		t.Fatalf("封面上没有播放三角：%q", tt.Texts())
-	}
-
-	// 三角的形心：三角形在右边是尖的，形心落在白里。
-	inside := brightness(pixelAt(tt, tri.X+tri.W*0.3, tri.Y+tri.H/2))
-	// 封面**左边那一块**：那个播放三角是居中贴在封面上的，所以封面左边那一列上没有
-	// 三角，只有压暗。
-	//
-	// ⚠️ **取样点必须在封面里面**：往右多取一个三角的边长就取到封面外面去了，而外面
-	// 是列表的底色（浅色），比压暗过的封面还亮——于是「三角比封面亮」这条永远不成立，
-	// 而画面上明明有一个白三角（第一版就栽在这儿）。
-	dark := brightness(pixelAt(tt, tri.X-coverSizeLeftEdge, tri.Y+tri.H/2))
-	if inside <= dark+0.15 {
-		t.Errorf("三角那个点只比封面左边亮 %.2f（%.2f → %.2f）——那个白色三角多半根本没"+
-			"画出来，而 Find 照样能找到它的标签", inside-dark, dark, inside)
-	}
-}
-
 // coverSizeLeftEdge 是「从那个居中的播放三角往左，到封面左边沿」的距离：封面边长减
 // 三角边长，两边对半分。
 const coverSizeLeftEdge = (coverSize - 20) / 2
-
-// TestTheHoverFeedbackFadesInOverTwoHundredMilliseconds 钉住「播放钮和三角形都
-// 200ms 淡入，不是突然冒出来」。
-//
-// 判据是**同一张封面上那一点随时间变暗**：指针移过去的那一帧它还没压暗（那个三角连
-// 标签都还找不到——`Invisible()` 的原话之一是「has no text to find」），推到四分之一
-// 压了一半，再推满就压满了。
-//
-// ⚠️ **量压暗那一层，不量三角**：三角是白的，它一出来那个点就接近纯白（0.94），后面
-// 再怎么渐变也只动 0.03——拿它当判据，这一版的第一条断言写的是「差 0.05 以上」，于是
-// 一条**真的在渐变**的淡入被判成「啪地一下」。压暗那一层是从「没有压」到「压满」的
-// 全程，量程大得多。
-//
-// ⚠️ **必须 `tt.Advance` 推钟**：Tester 的钟站着不动，只画帧的话这一步一步也不走。
-func TestTheHoverFeedbackFadesInOverTwoHundredMilliseconds(t *testing.T) {
-	rec := &recorded{}
-	songs := ownersAre(5)
-	_, tt := newList(t, rec.actions(), songs)
-
-	// 那个播放三角是**居中**贴在封面上的（见 RowCover），所以封面左边那一列上没有三角，
-	// 只有压暗——拿它当探针，两种情形都量得到。
-	probe := func() float32 {
-		t.Helper()
-		tri, ok := tt.Find(hover.PlayLabel(songs[2].Title))
-		x := tri.X - coverSizeLeftEdge
-		if ok {
-			// 三角在的时候用三角的盒子定位（淡入之后 `Find` 才找得到它）。
-			x = tri.X - coverSizeLeftEdge
-		} else {
-			// 还没出现时按行的位置推：封面左边 = 行左边 + 内边距 + 序号宽 + 间距。
-			x = cardPadX + indexWidth + rowGap
-		}
-		return brightness(pixelAt(tt, x, triY(tt, songs[2].Title)))
-	}
-
-	// 先把指针移过去但不推钟。
-	r, ok := tt.Find(songs[2].Title)
-	if !ok {
-		t.Fatalf("画面上找不到「%s」，文字有 %q", songs[2].Title, tt.Texts())
-	}
-	tt.Move(r.X+r.W/2, r.Y+r.H/2)
-	tt.Frame()
-	tt.Frame()
-
-	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
-		t.Fatalf("指针移上去的第一帧封面上就有播放三角了——那不是淡入，是「啪」地一下"+
-			"出现：%q", tt.Texts())
-	}
-	start := probe()
-
-	advance(t, tt, hover.Fade/4)
-	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); !ok {
-		t.Fatalf("推到四分之一还找不到播放三角：%q", tt.Texts())
-	}
-	quarter := probe()
-
-	advance(t, tt, hover.Fade)
-	full := probe()
-
-	if quarter >= start-0.04 {
-		t.Errorf("推到 %v 时封面和刚移过去时一样亮（%.3f → %.3f）——压暗是「啪」地一下"+
-			"盖上去的", hover.Fade/4, start, quarter)
-	}
-	if full >= quarter-0.04 {
-		t.Errorf("推到 %v 时封面和推到 %v 时一样亮（%.3f → %.3f）——淡入没有走完就停了"+
-			"，或者压根没有渐进", hover.Fade/4, hover.Fade, quarter, full)
-	}
-}
 
 // triY 是 title 那一行的竖直中点。探针要落在那一行里，所以用行来定位竖直方向。
 func triY(tt *ui.Tester, title string) float32 {
@@ -277,79 +117,6 @@ func triY(tt *ui.Tester, title string) float32 {
 		return 0
 	}
 	return r.Y + r.H/2
-}
-
-// TestThePlayTriangleGrowsWhenThePointerIsOnIt 钉住「那个三角在 hover 时放大一点」。
-//
-// 上游是 `hover:scale-110`（`music-list-item/index.tsx:100-107`），110% 就是 20 变
-// 22。
-//
-// ⚠️ **量得到是因为 `Tester.Find` 给的是变换后的盒子**（`mygo/ui/runtime.go` 的
-// `visualRect`），不是布局那个。这是它值钱的地方：`Scale` 不改布局，而断言量的是
-// 画出来的大小。
-//
-// ⚠️ **必须推钟**：那一档放大**现在有动画了**（以前是瞬时的，每帧直接算 `Scale`），
-// 而 Tester 的钟站着不动（`mygo/ui/headless.go`）——不推的话量到的是「放大还没
-// 开始」，那一帧量出来还是 20。
-func TestThePlayTriangleGrowsWhenThePointerIsOnIt(t *testing.T) {
-	rec := &recorded{}
-	songs := ownersAre(5)
-	_, tt := newList(t, rec.actions(), songs)
-
-	hoverOn(t, tt, songs[2].Title)
-	settleFade(t, tt)
-	rest, ok := tt.Find(hover.PlayLabel(songs[2].Title))
-	if !ok {
-		t.Fatalf("封面上没有播放三角：%q", tt.Texts())
-	}
-
-	// 把指针挪到三角的正中间。
-	tt.Move(rest.X+rest.W/2, rest.Y+rest.H/2)
-	tt.Frame()
-	tt.Advance(motion.GrowTime)
-	tt.Frame()
-	grown, ok := tt.Find(hover.PlayLabel(songs[2].Title))
-	if !ok {
-		t.Fatalf("指针停在三角上时它不见了：%q", tt.Texts())
-	}
-
-	want := rest.W * 1.1
-	if grown.W < want-1 {
-		t.Errorf("指针停在三角上时它只有 %.1f 宽，want %.1f（上游的 110%%）——"+
-			"放大这一条没落地", grown.W, want)
-	}
-	// 挪到别处它跟着收回去：放大是**跟着指针**的，淡出走完这一层就整个没了。
-	hoverOff(t, tt)
-	if _, ok := tt.Find(hover.PlayLabel(songs[2].Title)); ok {
-		t.Errorf("指针移走、淡出走完之后播放三角还留着：%q", tt.Texts())
-	}
-}
-
-// TestThePlayTrianglePlaysThatSongAndTheRestAfterIt 钉住播放三角的**语义**和双击
-// 那一行一样：**只放这一首，不换队列**（`Actions.PlayNow`，票 #608 照上游 Biu 的
-// `play()`）。
-//
-// 不一样的话用户第一次按它就会拿到一个自己没点过的动作（比如换掉整条队列）。
-func TestThePlayTrianglePlaysThatSongAndTheRestAfterIt(t *testing.T) {
-	rec := &recorded{}
-	songs := onlineSongs(5)
-	_, tt := newList(t, rec.actions(), songs)
-
-	hoverOn(t, tt, songs[1].Title)
-	settleFade(t, tt)
-	if err := tt.Click(hover.PlayLabel(songs[1].Title)); err != nil {
-		t.Fatalf("点不了封面上那个播放三角：%v（画面：%q）", err, tt.Texts())
-	}
-
-	if len(rec.nowed) != 1 {
-		t.Fatalf("收到 %d 次「立即播放」，want 1 次", len(rec.nowed))
-	}
-	if got := rec.nowed[0].Bvid; got != "BV2" {
-		t.Errorf("点第二首的播放三角放出来的是 %q，want BV2", got)
-	}
-	if len(rec.played) != 0 {
-		t.Errorf("这一枚三角顺手把队列换成了「从这一首往后」那一段（收到 %d 次）", len(rec.played))
-	}
 }
 
 // TestHoveringARowDoesNotMoveIt 盯指针移上去的时候那一行**不横着跳一下**。

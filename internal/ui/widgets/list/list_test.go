@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -197,9 +198,9 @@ func TestALongListScrollsToTheRightRowEvenWithVeryLongTitles(t *testing.T) {
 	if !ok {
 		t.Fatalf("紧跟的那一行没在画面上，文字有 %q", tt.Texts())
 	}
-	// 差值是**行高**（64），不是全表的平均值——歌名再长也不改这一条。
-	if got := next.Y - top.Y; got < 63 || got > 65 {
-		t.Errorf("第一行到第二行隔了 %v，want 64（行高是定死的一个值）", got)
+	// 差值是**行高**（`tok.RowH` 60），不是全表的平均值——歌名再长也不改这一条。
+	if got := next.Y - top.Y; got < tok.RowH-1 || got > tok.RowH+1 {
+		t.Errorf("第一行到第二行隔了 %v，want %v（行高是定死的一个值）", got, float32(tok.RowH))
 	}
 	if onScreen(tt, "歌 1") {
 		t.Error("滚到第 2501 首，第一行还画在画面上")
@@ -242,15 +243,15 @@ func TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 		song("s3", "歌 3", "UP 丙"),
 	})
 
-	// ① 三行一样高，而且就是 64。
+	// ① 三行一样高，而且就是 `tok.RowH`（60，原型 `.trow`）。
 	for _, title := range []string{"歌 1", long + "乙", "歌 3"} {
 		r, ok := tt.Find(title)
 		if !ok {
 			t.Fatalf("画面上找不到 %q，文字有 %q", title, tt.Texts())
 		}
-		if r.H != listRowHeight {
+		if r.H != tok.RowH {
 			t.Errorf("「%s」那一行高 %v，want %v（行高是定死的一个值）",
-				title, r.H, listRowHeight)
+				title, r.H, float32(tok.RowH))
 		}
 	}
 
@@ -258,8 +259,8 @@ func TestEveryRowIsTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 	//
 	// ⚠️ 留 0.5 的余量：量出来的位置是浮点排版的结果，逐位相等不是「对齐」的
 	// 证据（同一屏里两次排版的末位可能差一丁点）。这里要证的是「没脱节」。
-	if got := pitch(t, tt, "歌 1", long+"乙"); got < listRowHeight-0.5 || got > listRowHeight+0.5 {
-		t.Errorf("第一行到第二行隔了 %v，want %v（行高是定死的一个值）", got, listRowHeight)
+	if got := pitch(t, tt, "歌 1", long+"乙"); got < tok.RowH-0.5 || got > tok.RowH+0.5 {
+		t.Errorf("第一行到第二行隔了 %v，want %v（行高是定死的一个值）", got, float32(tok.RowH))
 	}
 
 	// ③ 歌名只占一行：UP 名在行内的位置和短歌名那一行一样。

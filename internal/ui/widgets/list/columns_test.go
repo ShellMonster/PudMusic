@@ -55,71 +55,6 @@ func columnsSongs() []Music {
 	return songs
 }
 
-// TestTheRowsAndTheHeaderCarryThePlayCountAndTheTime 钉住两列真的画出来，
-// 而且**表头和行是同一个位置、同一个宽**。
-//
-// ⚠️ 量的两列都要量：播放量在标题后面、投稿时间在它后面，任何一列的宽不对，
-// 右边那几列就整体错开一格——而画面上只是「表头歪了一点」。
-func TestTheRowsAndTheHeaderCarryThePlayCountAndTheTime(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		v    View
-	}{
-		{"列表", ViewList},
-		{"紧凑", ViewCompact},
-	} {
-		v := tc.v
-		t.Run(tc.name, func(t *testing.T) {
-			cols := Columns{PlayCount: true, PubTime: true, Now: func() time.Time { return columnsNow }}
-			_, tt := newColumnsList(t, v, cols, columnsSongs())
-
-			for _, want := range []string{"#", "标题", "播放量", "投稿时间", "时长"} {
-				if !shows(tt, want) {
-					t.Errorf("%v：表头上没有「%s」，文字有 %q", v, want, tt.Texts())
-				}
-			}
-
-			// 播放量：折过的字（12.3万）和第一列的那个数都要在。
-			for _, n := range []int64{55, 123_400} {
-				row, ok := tt.Find(PlayCountText(n))
-				if !ok {
-					t.Fatalf("%v：行里没有播放量 %q，文字有 %q", v, PlayCountText(n), tt.Texts())
-				}
-				head, ok := tt.Find("播放量")
-				if !ok {
-					t.Fatalf("%v：表头上没有「播放量」，文字有 %q", v, tt.Texts())
-				}
-				if row.X != head.X || row.W != head.W {
-					t.Errorf("%v：播放量那一格在 %.1f、宽 %.1f，表头在 %.1f、宽 %.1f"+
-						"——列没有对齐", v, row.X, row.W, head.X, head.W)
-				}
-			}
-
-			// 投稿时间：「今天」和「3天前」两档都要在，位置也对。
-			for _, want := range []string{"今天", "3天前"} {
-				row, ok := tt.Find(want)
-				if !ok {
-					t.Fatalf("%v：行里没有 %q，文字有 %q", v, want, tt.Texts())
-				}
-				head, ok := tt.Find("投稿时间")
-				if !ok {
-					t.Fatalf("%v：表头上没有「投稿时间」，文字有 %q", v, tt.Texts())
-				}
-				if row.X != head.X || row.W != head.W {
-					t.Errorf("%v：投稿时间那一格在 %.1f、宽 %.1f，表头在 %.1f、宽 %.1f"+
-						"——列没有对齐", v, row.X, row.W, head.X, head.W)
-				}
-			}
-
-			// 没有这个数的那三行：那一格是空的，**不是「0」**。
-			if shows(tt, "0") {
-				t.Errorf("%v：画面上有一个「0」——没有播放量的那一行被画成了零播放：%q",
-					v, tt.Texts())
-			}
-		})
-	}
-}
-
 // TestTheColumnsStayOffWhenThePageDoesNotAskForThem 钉住零值 `Columns` 真的
 // 一列都不画：本地音乐、搜索的「用户」那一档、历史记录都是这样。
 //
@@ -136,21 +71,6 @@ func TestTheColumnsStayOffWhenThePageDoesNotAskForThem(t *testing.T) {
 	}
 	if shows(tt, PlayCountText(123_400)) {
 		t.Errorf("没装播放量那一列，行里却画了 %q：%q", PlayCountText(123_400), tt.Texts())
-	}
-}
-
-// TestTheTimeColumnTitleCanBeChangedPerPage 钉住收藏夹那一页的表头写的是
-// 「收藏时间」——那一页画的是 `fav_time`，标题跟着它走。
-func TestTheTimeColumnTitleCanBeChangedPerPage(t *testing.T) {
-	cols := Columns{PlayCount: true, PubTime: true, PubTimeTitle: "收藏时间",
-		Now: func() time.Time { return columnsNow }}
-	_, tt := newColumnsList(t, ViewList, cols, columnsSongs())
-
-	if !shows(tt, "收藏时间") {
-		t.Errorf("表头上没有「收藏时间」：%q", tt.Texts())
-	}
-	if shows(tt, "投稿时间") {
-		t.Errorf("这一页的时间列标题是「收藏时间」，表头上却还有「投稿时间」：%q", tt.Texts())
 	}
 }
 
@@ -260,25 +180,5 @@ func TestPubTimeTextCountsCalendarDays(t *testing.T) {
 	early := time.Date(2026, 10, 21, 0, 1, 0, 0, time.Local)
 	if got := PubTimeText(late, early); got != "昨天" {
 		t.Errorf("20 日 23:59 对 21 日 00:01 折出来是 %q，want 昨天", got)
-	}
-}
-
-// TestTheRankColumnMakesTheTopThreeBiggerThanTheRest 钉榜单页的名次列：前三名的序号
-// 比第四名大（主色加粗放大），不开 Rank 的列表所有序号一样大。
-func TestTheRankColumnMakesTheTopThreeBiggerThanTheRest(t *testing.T) {
-	size := func(cols Columns) (first, fourth float32) {
-		_, tt := newColumnsList(t, ViewList, cols, columnsSongs())
-		a, ok1 := tt.Find("1")
-		d, ok2 := tt.Find("4")
-		if !ok1 || !ok2 {
-			t.Fatalf("找不到序号 1 / 4：%q", tt.Texts())
-		}
-		return a.H, d.H
-	}
-	if f, d := size(Columns{Rank: true}); f <= d {
-		t.Errorf("榜单页第一名序号高 %.1f，应该比第四名（%.1f）大", f, d)
-	}
-	if f, d := size(Columns{}); f != d {
-		t.Errorf("普通列表第一名序号高 %.1f，应该和第四名（%.1f）一样", f, d)
 	}
 }

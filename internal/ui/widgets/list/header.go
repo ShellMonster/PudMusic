@@ -246,11 +246,8 @@ func Header(c *ui.Context, spec HeaderSpec) {
 func (l *List) Header(c *ui.Context, key string) {
 	// `Columns()` 不是 `l.cols`：窄窗口下它会先把「投稿时间」收掉，表头和
 	// 行读同一份（见 `List.Columns`）。
-	if l.usesPudRow() {
-		l.PudHeader(c)
-		return
-	}
-	Header(c, CardHeaderSpec(l.view, l.Columns(), l.HasSelection(), key))
+	_ = key
+	l.PudHeader(c)
 }
 
 // Header 同上，走这一层是因为页面拿到的常常是 `PagedList` 而不是 `List`。

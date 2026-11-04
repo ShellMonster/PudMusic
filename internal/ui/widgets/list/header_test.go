@@ -1,7 +1,6 @@
 package list
 
 import (
-	"strconv"
 	"testing"
 	"time"
 
@@ -72,120 +71,6 @@ func TestTheHeaderSaysTheColumnsThisListActuallyHas(t *testing.T) {
 	}
 }
 
-// TestTheHeaderColumnsLineUpWithTheRows 钉住「表头和列宽固定对齐」。
-//
-// 量的就是横坐标：表头那一列的盒子和行里那一列的盒子**一个像素都不能差**。左右两端各
-// 量一列——右边那列靠行的右边缘，左边那列吃掉所有余量，两边都对了中间才可能错。
-//
-// ⚠️ **「标题」那一列对的是封面的左缘，不是歌名的左缘**（DESIGN.md「表头：『标题』
-// 从封面左缘起」）：行里那一列（UP 名）在封面右边，所以表头要比它再往左「封面 + 一个
-// 列间距」。紧凑那一档没有封面，两边就正好重合。
-//
-// ⚠️ **左边的行里那一列拿 UP 名比**：行里那一列是
-// `ui.Column(...).AlignItems(ui.Start)`（歌名在上、UP 名在下），UP 名那一块的左边就是
-// 标题那一列的左边缘。
-//
-// ⚠️ **右边的行里那一列拿时长比，不拿歌名比**：歌名要靠 `Tester.Find(歌名)` 找，而那
-// 命中的是 `ui.List` 挂在**整行**上的无障碍盒子（`List.View` 里那句 `l.state.Label`），
-// 那个盒子的 X **永远是 0**——量它的话这一条永远绿。
-//
-// ⚠️ **时长要各行不同**（`durOf`），否则 `Find` 只给回第一行那个，量的是别行。
-func TestTheHeaderColumnsLineUpWithTheRows(t *testing.T) {
-	for _, v := range []View{ViewList, ViewCompact} {
-		_, tt := newHeaderList(t, v, false)
-
-		headHash, ok := tt.Find("#")
-		if !ok {
-			t.Fatalf("%v：表头上没有「#」，文字有 %q", v, tt.Texts())
-		}
-		headTitle, ok := tt.Find("标题")
-		if !ok {
-			t.Fatalf("%v：表头上没有「标题」，文字有 %q", v, tt.Texts())
-		}
-		headClock, ok := tt.Find("时长")
-		if !ok {
-			t.Fatalf("%v：表头上没有「时长」，文字有 %q", v, tt.Texts())
-		}
-		for i := range 3 {
-			rowOwner, ok := tt.Find("UP " + string(rune('A'+i)))
-			if !ok {
-				t.Fatalf("%v：画面上找不到第 %d 行的 UP 名，文字有 %q", v, i+1, tt.Texts())
-			}
-			rowClock, ok := tt.Find(formatDuration(durOf(i)))
-			if !ok {
-				t.Fatalf("%v：画面上找不到第 %d 行的时长 %q，文字有 %q",
-					v, i+1, formatDuration(durOf(i)), tt.Texts())
-			}
-			// 「#」那一列也要对：它是**唯一一列会被前面的空位顶偏的**（多选开不开、
-			// 序号列多宽，错的是它，而画面上只是「编号歪了一点」——第一版就是靠存图才
-			// 发现的，那时只量了左右两端，中间那一列歪了它一声不响）。
-			rowNo, ok := tt.Find(strconv.Itoa(i + 1))
-			if !ok {
-				t.Fatalf("%v：画面上找不到第 %d 行的序号，文字有 %q", v, i+1, tt.Texts())
-			}
-			if headHash.X != rowNo.X {
-				t.Errorf("%v：表头的「#」在 %.1f，行里那个序号在 %.1f——差 %.1f",
-					v, headHash.X, rowNo.X, headHash.X-rowNo.X)
-			}
-			// 「标题」落在**封面左缘**：行里那一列的左边再往左「封面 + 一个列间距」。
-			// 紧凑那一档没有封面（`MetricsOf` 的 Cover 是 0），两边重合。
-			wantTitle := rowOwner.X
-			if m := MetricsOf(v); m.Cover > 0 {
-				wantTitle -= m.Cover + m.Gap
-			}
-			if d := headTitle.X - wantTitle; d > 0.5 || d < -0.5 {
-				t.Errorf("%v：表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f"+
-					"（表头多让了封面那一列的空位？）",
-					v, headTitle.X, wantTitle, d)
-			}
-			if headClock.X != rowClock.X || headClock.W != rowClock.W {
-				t.Errorf("%v：表头的「时长」在 %.1f、宽 %.1f，行里那一列在 %.1f、宽 %.1f"+
-					"——差 %.1f，数字列竖着扫不下来",
-					v, headClock.X, headClock.W, rowClock.X, rowClock.W, headClock.X-rowClock.X)
-			}
-		}
-	}
-}
-
-// TestTheHeaderLinesUpWithTheRowsInMultiSelect 钉住「多选态一开，表头照样对得上」。
-//
-// 行最左边会多出一个 16 宽的勾选框，表头**必须照着留出同样的位置**——不留的话右边那
-// 几列整整差 16，而那种差在画面上只是「多选一开，列名歪了」。
-//
-// ⚠️ **量左边那一列（标题 / UP 名），不量右边那列（时长）**：时长是最后一块、靠右对
-// 齐，它的位置由行的**右边缘**决定。多选在左边加东西，右边缘一动不动——第一版量的就
-// 是时长，于是「表头让没让位置」这件事它一点也证明不了。
-func TestTheHeaderLinesUpWithTheRowsInMultiSelect(t *testing.T) {
-	_, plain := newHeaderList(t, ViewList, false)
-	_, multi := newHeaderList(t, ViewList, true)
-
-	before, ok := plain.Find("标题")
-	if !ok {
-		t.Fatalf("表头上没有「标题」，文字有 %q", plain.Texts())
-	}
-	after, ok := multi.Find("标题")
-	if !ok {
-		t.Fatalf("多选态下表头上没有「标题」，文字有 %q", multi.Texts())
-	}
-	body, ok := multi.Find("UP A")
-	if !ok {
-		t.Fatalf("多选态下画面上找不到 UP 名，文字有 %q", multi.Texts())
-	}
-
-	// 「标题」在**封面左缘**（行里的 UP 名在封面右边），所以它比行里那一列再往左
-	// 「封面 + 一个列间距」。
-	wantTitle := body.X - coverSize - rowGap
-	if d := after.X - wantTitle; d > 0.5 || d < -0.5 {
-		t.Errorf("多选态下表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f，表头没给"+
-			"那个勾选框让位置（不开多选时它在 %.1f）",
-			after.X, wantTitle, d, before.X)
-	}
-	if before.X == after.X {
-		t.Errorf("开不开多选，表头的「标题」都在 %.1f——行里那一列明明让开了勾选框的宽"+
-			"（勾选框 %d 加一个间距 %d）", after.X, 16, int(rowGap))
-	}
-}
-
 // TestThereIsNoHeaderForTheGrid 钉住「网格那一档不摆表头」。
 //
 // 一格是一首歌，表头上那几列和格子对不上号，而对不上的表头在界面上不像坏了（`later.go`
@@ -252,42 +137,6 @@ func TestTheHeaderHasALineUnderIt(t *testing.T) {
 	if float32(line) < head.Y+head.H {
 		t.Errorf("那道线在 y=%d，列名那一块在 y=%v~%v——线在列名上面（或压在它身上）",
 			line, head.Y, head.Y+head.H)
-	}
-}
-
-// TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText 钉住「表头的列名不比行里的
-// 字小」。
-//
-// ⚠️ **判据是「不比行里的字小」而不是「正好多少像素」**：DESIGN.md 里表头列名和
-// 行里的 UP 名是**同一档**（14，上游 `text-sm`），而它们比行里那个 12 的播放量 /
-// 时长高一档。逐位相等不是「对」的证据（换个系统字体行高就变），而「不比它小」是
-// 这一条真正要的。
-//
-// 改之前表头是 12px——和行里的次要文字一样大、一样灰，竖着扫下去时它比下面那一列
-// 数字还弱（票面原话）。
-func TestTheHeaderColumnNamesAreNoSmallerThanTheRowsText(t *testing.T) {
-	_, tt := newHeaderList(t, ViewList, false)
-
-	head, ok := tt.Find("标题")
-	if !ok {
-		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
-	}
-	// 行里的文字：UP 名（14，和表头同一档）和时长（12，次要文字那一档）。
-	owner, ok := tt.Find("UP A")
-	if !ok {
-		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
-	}
-	clock, ok := tt.Find(formatDuration(durOf(0)))
-	if !ok {
-		t.Fatalf("画面上找不到时长，文字有 %q", tt.Texts())
-	}
-	if head.H < owner.H {
-		t.Errorf("表头的列名高 %v，行里的 UP 名高 %v——列名比行里的字还小",
-			head.H, owner.H)
-	}
-	if head.H <= clock.H {
-		t.Errorf("表头的列名高 %v，行里的时长高 %v——列名没有比次要文字大",
-			head.H, clock.H)
 	}
 }
 

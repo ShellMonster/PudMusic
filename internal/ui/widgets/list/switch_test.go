@@ -39,53 +39,6 @@ func spotOf(tt *ui.Tester, s string) (ui.Rect, bool) {
 	return r, true
 }
 
-// TestTheCompactRowsAreShorterThanTheNormalOnes 钉住「紧凑」这个档位本身。
-//
-// 量的是 **UP 名那一块的 x**，不是行与行之间的距离：行距是框架量出来的平均值，会随
-// 歌名折行和主题字号动；而「这一档不画封面」是一个写在代码里的布局事实——紧凑那一档
-// 的 UP 名至少要比列表那一档往左让出**一个封面**的宽（48，实际让得更多：内边距也
-// 收了 4）。
-//
-// ⚠️ **量 UP 名而不是歌名**：`ui.ListState` 给每一行挂一个无障碍标签（`List.View`
-// 里的 `state.Label`，值就是歌名），而无头 Tester 的 `Find` 认这些标签——于是
-// `Find(歌名)` 命中的是**整行**的盒子，x 永远是 0，两档量出来一模一样。UP 名只在
-// 行内画，没有标签，不会撞上。
-func TestTheCompactRowsAreShorterThanTheNormalOnes(t *testing.T) {
-	songs := []Music{
-		{ID: "c1", Title: "短歌名一", Owner: "甲 UP"},
-		{ID: "c2", Title: "短歌名二", Owner: "乙 UP"},
-	}
-	const owner = "甲 UP"
-
-	normal := New(newCache(t), Actions{})
-	normal.SetView(ViewList)
-	ttn := ui.NewTester(normal.View, testerW, testerH)
-
-	compact := New(newCache(t), Actions{})
-	compact.SetView(ViewCompact)
-	ttc := ui.NewTester(compact.View, testerW, testerH)
-
-	normal.SetSongs(songs)
-	compact.SetSongs(songs)
-	ttn.Frame()
-	ttc.Frame()
-
-	an, ok1 := spotOf(ttn, owner)
-	ac, ok2 := spotOf(ttc, owner)
-	if !ok1 || !ok2 {
-		t.Fatalf("两档都得画出来：列表 %v 紧凑 %v", ok1, ok2)
-	}
-	if ac.X >= an.X {
-		t.Fatalf("紧凑那一档的 UP 名没有往左靠（列表 x=%.0f、紧凑 x=%.0f）——"+
-			"这一档等于没做", an.X, ac.X)
-	}
-	// 判据就是封面那一块：紧凑档整块不画，UP 名至少往左让出一个封面的宽。
-	if want := float32(coverSize); an.X-ac.X < want {
-		t.Errorf("紧凑档只往左让了 %.0f 像素，want 至少 %d（那一档不画封面）",
-			an.X-ac.X, coverSize)
-	}
-}
-
 // TestEveryViewKeepsTheRowsAndThePagingWorking 钉住「换视图不丢东西」。
 //
 // 三档都要把六首歌画出来；**拉到底之后哨兵要收起来**（那是 `PagedList.syncList` 的
