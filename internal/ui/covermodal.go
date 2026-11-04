@@ -348,9 +348,6 @@ func readAndDecodeCover(path string) (*image.RGBA, error) {
 	return decodeCover(raw)
 }
 
-// coverHint 是封面那一格下面那句提示。照抄 Biu（`image-upload/index.tsx:159`）。
-const coverHint = "建议上传高清封面 ≥960×600，jpeg 或 png 格式，图片 ≤5MB"
-
 // coverPreviewW / coverPreviewH 是编辑弹窗里封面那一格的大小。
 //
 // ⚠️ **240×150 照抄 Biu**（`favorites-edit-modal/index.tsx:196-197` 的

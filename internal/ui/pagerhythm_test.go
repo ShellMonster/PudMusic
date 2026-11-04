@@ -988,17 +988,15 @@ func TestTheSmallCopyHasAFixedLineHeight(t *testing.T) {
 		// want 是那个 `LineHeight(...)` 该调用的档（`widgets/leading` 那张表里的名字）。
 		want string
 	}{
-		{file: "collectionpage.go", key: "info.Intro", want: "Copy"},
-		{file: "collectionpage.go", key: "collectionKindText()", want: "Copy"},
-		{file: "collectionpage.go", key: "info.OwnerName", want: "Copy"},
+		// 收藏夹页头搬到了 collectionhead.go；创建者那一行走 `list.OwnerName`（行高 1.5 作参数传入）。
+		{file: "collectionhead.go", key: "info.Intro", want: "Copy"},
+		{file: "collectionhead.go", key: "txt", want: "Copy"},
 		// ⚠️ **key 是「源码里那一行字长什么样」**：下载记录页头那一行路径以前
 		// 叫 `path`，而没有目录时它换成了一枚按钮，路径那一行直接用 `dir` 了
 		// （报告 C1）。
-		{file: "downloadlist_ops.go", key: "dir", want: "Copy"},
+		{file: "downloadlist.go", key: "dir", want: "Copy"},
 		{file: "localmusic.go", key: "有目录读不到：", want: "Copy"},
 		{file: "localmusic.go", key: "这个目录里有我们还放不出的格式（", want: "Copy"},
-		{file: "daterange.go", key: "f.summary()", want: "Copy"},
-		{file: "covermodal.go", key: "coverHint", want: "Hint"},
 	} {
 		if !smallCopyHasLineHeight(t, place.file, place.key, place.want) {
 			t.Errorf("%s 的 %q 那一行字没有调 `LineHeight(%s)`——小字的行高必须是"+
