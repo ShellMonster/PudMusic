@@ -289,7 +289,7 @@ func TestUnknownRouteShowsThe404Page(t *testing.T) {
 	if !tt.HasText("页面不存在") {
 		t.Errorf("没有落到 404 页，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText("没有「/根本没有这一页」这一页") {
+	if !tt.HasText("这一页走丢了") {
 		t.Errorf("404 没有说清楚，文字有 %q", tt.Texts())
 	}
 }
