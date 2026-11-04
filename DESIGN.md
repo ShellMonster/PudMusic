@@ -69,7 +69,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 | 封面取色混合比例 | `tok.TintHero 0.22 / TintCollection 0.26 / TintUpBand 0.34 / TintVideoThumb 0.40` | `widgets/tok` |
 | 圆角 | `tok.R4 / R8 / R12 / Pill` | `widgets/tok/size.go` |
 | 外壳与组件尺寸 | `tok.SideW 232 / SideCollapsedW 72 / TopH 60 / BarH 84 / IconHit 36 / PlayBtn 44 / SearchW×H 440×38 / BtnH 40 / BtnSmH 32 / ChipH 30 / RowH 60 …` | `widgets/tok/size.go` |
-| 字号 | `scale.Size11…Size64`、`scale.PageTitle 48 / SectionTitle 24 / HeroTitle 64 / Subhead 20`；流式字号按**窗口宽**：`scale.Fluid(min, vw, max, winW)`、`PageTitleFluid(winW)`（1200 宽 40.8）、`BigNumFluid(winW)` | `widgets/scale` |
+| 字号 | `scale.Size11…Size64`、`scale.PageTitle 48 / SectionTitle 24 / HeroTitle 64 / Subhead 20`、`scale.Fluid` 及 `PageTitleFluid` / `HeroTitleFluid` / `GreetTitleFluid` / `CollectionTitleFluid` / `FullTitleFluid` / `BigNumFluid`（原型 `clamp(min, N vw, max)`，传窗口宽） | `widgets/scale` |
 | 字体 | `typo.Display(e, size)` 宋体 700、`typo.Mono(e)`、`typo.Num(e)`（tnum）、`typo.Eyebrow(c, s)` | `widgets/typo` |
 | 间距 | `space.Px40 / Px64`、`SectionGap 48 / SectionHeadGap 20 / PageBottom 64 / GridGap 24 / PageTop 8`、`PageHorizontalForWindow(winW)` = 40 / 32 / 16、`PageBottomForWindow(winW)` | `widgets/space` |
 | 阴影 | `shadow.Pop`（`--shadow-pop`）、`shadow.CoverPlay`；`--shadow-cover`（大封面）数值：深色 `0 24 48 rgba(0,0,0,.5)`、浅色 `0 20 40 rgba(20,22,26,.22)`，`widgets/shadow` 里每一档都必须有调用点（`TestEveryShadowTierHasACallSite`） | `widgets/shadow` |

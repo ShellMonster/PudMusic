@@ -136,9 +136,9 @@ func TestTheTableMatchesTheDesignTokens(t *testing.T) {
 	alias := map[string]int{
 		"unit":                   Unit,
 		"page_horizontal_legacy": PageHorizontalLegacy,
-		"page_horizontal_wide":   int(PageHorizontal(WideContent)),
-		"page_horizontal_medium": int(PageHorizontal(MediumContent)),
-		"page_horizontal_narrow": int(PageHorizontal(MediumContent - 1)),
+		"page_horizontal_wide":   int(PageHorizontalForWindow(1200)),
+		"page_horizontal_medium": int(PageHorizontalForWindow(1024)),
+		"page_horizontal_narrow": int(PageHorizontalForWindow(760)),
 		"page_top":               PageTop,
 		"page_bottom":            PageBottom,
 		"section_gap":            SectionGap,
@@ -165,17 +165,25 @@ func TestTheTableMatchesTheDesignTokens(t *testing.T) {
 	}
 }
 
-// TestPageHorizontalHasThreeSteps：页边距按内容区宽 ≥1180 / ≥760 / 更窄分 40 / 32 / 16。
+// TestPageHorizontalHasThreeSteps：页边距按**窗口宽** > 1024 / > 760 / 更窄分 40 / 32 / 16
+// （原型 `.page` 的 padding-inline 与两条 max-width 媒体查询），底边距 ≤ 760 时 48。
 func TestPageHorizontalHasThreeSteps(t *testing.T) {
 	for _, c := range []struct{ w, want float32 }{
-		{1400, 40}, {1180, 40}, {1179, 32}, {760, 32}, {759, 16}, {0, 16},
+		{1400, 40}, {1200, 40}, {1025, 40}, {1024, 32}, {761, 32}, {760, 16}, {0, 16},
 	} {
-		if got := PageHorizontal(c.w); got != c.want {
-			t.Errorf("内容区 %.0f：页边距 %v，want %v", c.w, got, c.want)
+		if got := PageHorizontalForWindow(c.w); got != c.want {
+			t.Errorf("窗口 %.0f：页边距 %v，want %v", c.w, got, c.want)
 		}
 	}
-	if GridGapFor(700) != 16 || GridGapFor(1200) != 24 {
-		t.Errorf("网格格间距：窄 %v / 宽 %v，want 16 / 24", GridGapFor(700), GridGapFor(1200))
+	if GridGapForWindow(760) != 16 || GridGapForWindow(761) != 24 || GridGapForWindow(1200) != 24 {
+		t.Errorf("网格格间距：760 → %v / 761 → %v / 1200 → %v，want 16 / 24 / 24",
+			GridGapForWindow(760), GridGapForWindow(761), GridGapForWindow(1200))
+	}
+	if PageBottomForWindow(760) != 48 || PageBottomForWindow(761) != 64 {
+		t.Errorf("页底边距：760 → %v / 761 → %v，want 48 / 64", PageBottomForWindow(760), PageBottomForWindow(761))
+	}
+	if PageMaxW != 1280 {
+		t.Errorf("PageMaxW = %v，want 1280", PageMaxW)
 	}
 }
 

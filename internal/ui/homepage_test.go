@@ -20,6 +20,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -373,17 +374,19 @@ func TestTheHomePageUsesThePrototypePageMargins(t *testing.T) {
 	for range 3 {
 		b.tt.Frame()
 	}
-	sideW := app.DefaultSideMenuWidth
+	// 侧栏实际绘制宽是 tok.SideW（232，原型 `--side-w`），不是设置里的默认值 220。
+	sideW := float64(tok.SideW)
 	area := contentArea(sideW)
 	if got, want := leftmostInk(b.tt.Image(), area), int(sideW)+40; got < want-2 || got > want+2 {
 		t.Errorf("首页的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 40）", got, want, int(sideW))
 	}
 	// 顶上：页顶 8 + 问候区 24 = 32，再加 Eyebrow 字形自己的上沿留白（几像素）。
-	lo, _, ok := firstBand(b.tt.Image(), area)
-	if !ok {
+	// 量第一行有墨的位置（Eyebrow 的字形）；`firstBand` 会跳过不足 20 行的 Eyebrow 带，量到的是标题。
+	rows := inkRows(b.tt.Image(), area)
+	if len(rows) == 0 {
 		t.Fatalf("首页顶上一点墨都没有，文字有 %q", b.tt.Texts())
 	}
-	if top := lo - navMinHeight; top < 28 || top > 42 {
+	if top := rows[0] - navMinHeight; top < 28 || top > 42 {
 		t.Errorf("首页的第一段墨从顶栏下缘往下 %d 像素开始，want 32 附近（页顶 8 + 问候区 24）", top)
 	}
 }

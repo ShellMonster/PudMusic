@@ -210,7 +210,7 @@ func TestTheLastCopyActionWinsOverAnEarlierCover(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
 	// 等那一趟真的走到网络上了（再放行才是「先发起的」）。
@@ -224,7 +224,7 @@ func TestTheLastCopyActionWinsOverAnEarlierCover(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
+	if err := chooseCoverItem(tt, copyInfoLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
 	}
 	if clip.textIs() == "" {
@@ -279,7 +279,7 @@ func TestAnEarlierCoverDoesNotOverwriteALaterCover(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
 	select {
@@ -294,7 +294,7 @@ func TestAnEarlierCoverDoesNotOverwriteALaterCover(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
 	// 等第二次真的写进去了。
@@ -479,7 +479,7 @@ func TestACoverAlreadyInsideTheWriteDoesNotWinOverALaterText(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
 

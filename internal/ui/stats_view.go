@@ -311,7 +311,9 @@ func (s *Shell) viewStatsBars(c *ui.Context, rng statsRange, w float32) {
 		label := func(txt string, cx, cy float32, col ui.Color, alignRight bool) {
 			t := typo.Mono(ui.Text(c, txt)).FontSize(fs).TextColor(col).SingleLine().Absolute()
 			if alignRight {
-				t.Right(w - (offX + cx*scaleX)).Top((cy - 6) * scaleX)
+				// 纵轴刻度和参考线同一条基线：和下面的柱上数字一样要加垂直居中的 offY（原来漏了，
+				// 图比 640×240 窄时 offY 可达 40 多，「0」就比基线高出一截）。
+				t.Right(w - (offX + cx*scaleX)).Top(offY + (cy-6)*scaleX)
 				return
 			}
 			t.Left(offX + cx*scaleX - 20).Width(40).TextAlign(ui.Center).Top(offY + (cy-6)*scaleX)

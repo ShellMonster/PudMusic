@@ -41,6 +41,13 @@ import (
 //go:embed fonts/NotoSerifSC-Bold-subset.ttf
 var serifBold []byte
 
+// serifRegular 是同一族的常规体（wght=400，字符范围和 Bold 那份一样）：原型里没写字重的宋体
+// （`.ly` 歌词、`.day-head`、`.set-group h3`、`.drawer-head h2`、`.dlg-body h2`、`.empty strong`、
+// `.login-prompt strong`、`.lprev`）用它。和 Bold 注册在同一个族名下，框架按字重挑。
+//
+//go:embed fonts/NotoSerifSC-Regular-subset.ttf
+var serifRegular []byte
+
 // DisplayFamily 是随包宋体注册进框架时用的族名。别处不要写这个字面量，用 `Display`。
 const DisplayFamily = "PudMusic Serif"
 
@@ -54,6 +61,9 @@ var (
 func Register() error {
 	registerOnce.Do(func() {
 		registerErr = ui.RegisterFont(serifBold, DisplayFamily)
+		if registerErr == nil {
+			registerErr = ui.RegisterFont(serifRegular, DisplayFamily)
+		}
 		monoFamily = pickMono()
 	})
 	return registerErr
@@ -81,6 +91,14 @@ func pickMono() string {
 func Display(e ui.Element, size float32) ui.Element {
 	_ = Register()
 	return e.Font(DisplayFamily).FontSize(size).FontWeight(700)
+}
+
+// DisplayRegular 给文字套上宋体常规（400）：原型里写了 `font-family: var(--font-display)` 而没写
+// `font-weight` 的地方（`.ly`、`.day-head`、`.set-group h3`、`.drawer-head h2`、`.dlg-body h2`、
+// `.empty strong`、`.login-prompt strong`、`.lprev`）。写了 700 的标题用 `Display`。
+func DisplayRegular(e ui.Element, size float32) ui.Element {
+	_ = Register()
+	return e.Font(DisplayFamily).FontSize(size).FontWeight(400)
 }
 
 // DisplayNatural 是宋体（Noto Serif SC）一行字的自然高度和字号的比（实测 48 号 = 68.98，

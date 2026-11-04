@@ -2,23 +2,23 @@ package pud
 
 import "testing"
 
-// TestGridColsStepDownWithTheContentArea：6 / 5 / 4 / 2 列（原型 `.card-grid` 的媒体查询，
-// 窗口宽减去侧栏 232 换成内容区宽）。
-func TestGridColsStepDownWithTheContentArea(t *testing.T) {
+// TestGridColsStepDownWithTheWindowWidth：6 / 5 / 4 / 2 列（原型 `.card-grid` 的 `max-width` 媒体查询，
+// 按窗口宽）；视频网格 4 / 3 / 1 列。
+func TestGridColsStepDownWithTheWindowWidth(t *testing.T) {
 	for _, c := range []struct {
 		w    float32
 		want int
-	}{{1400, 6}, {1048, 6}, {1047, 5}, {948, 5}, {947, 4}, {760, 4}, {759, 2}, {0, 2}} {
+	}{{1600, 6}, {1281, 6}, {1280, 5}, {1200, 5}, {1181, 5}, {1180, 4}, {761, 4}, {760, 2}, {0, 2}} {
 		if got := GridCols(c.w); got != c.want {
-			t.Errorf("内容区 %.0f：%d 列，want %d", c.w, got, c.want)
+			t.Errorf("窗口 %.0f：%d 列，want %d", c.w, got, c.want)
 		}
 	}
 	for _, c := range []struct {
 		w    float32
 		want int
-	}{{1100, 4}, {948, 4}, {900, 3}, {760, 3}, {700, 1}} {
+	}{{1600, 4}, {1181, 4}, {1180, 3}, {761, 3}, {760, 1}, {0, 1}} {
 		if got := VideoGridCols(c.w); got != c.want {
-			t.Errorf("内容区 %.0f：视频 %d 列，want %d", c.w, got, c.want)
+			t.Errorf("窗口 %.0f：视频 %d 列，want %d", c.w, got, c.want)
 		}
 	}
 	if got := CellWidth(1020, 6, 24); got != 150 {

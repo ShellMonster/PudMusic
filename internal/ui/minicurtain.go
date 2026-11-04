@@ -85,11 +85,10 @@ const (
 
 	// miniPanelAlpha 是卡片底色的不透明度。
 	//
-	// ⚠️ **0.88**：这一扇窗开了毛玻璃（`MiniWindowOptions.Vibrancy`），
-	// 全不透的底（1.0）会把糊完的桌面整个盖掉，而太透（<0.8）字就压不住
-	// 桌面——0.88 是「字读得清、桌面又透得出」的那一档。原型是不透明的
-	// surface；保留毛玻璃是任务明确要求保留的行为。
-	miniPanelAlpha = 0.88
+	// ⚠️ **1.0（不透明）**：原型 `.mini { background: var(--surface) }` 是不透明的 surface，
+	// 用户要求严格按原型（T8），所以不再留 0.88 的半透明。窗口仍然开着毛玻璃材质
+	// （`MiniWindowOptions.Vibrancy`，开关本身有测试钉着），只是被不透明的底盖住。
+	miniPanelAlpha = 1.0
 
 	// miniCurtainMargin 是卷帘底边离工作区底边留的那一道。
 	//

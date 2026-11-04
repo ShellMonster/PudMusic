@@ -302,7 +302,7 @@ func TestTheCoverMenuOffersTheTwoCopyActions(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v（文字：%q）", err, tt.Texts())
 	}
-	got := tt.Menu()
+	got := tt.Texts()
 	for _, want := range []string{copyInfoLabel, copyCoverLabel} {
 		if !slicesContains(got, want) {
 			t.Errorf("菜单里没有 %q：%q", want, got)
@@ -310,11 +310,10 @@ func TestTheCoverMenuOffersTheTwoCopyActions(t *testing.T) {
 	}
 }
 
-// TestTheCopyCoverItemIsGreyWithoutACover 断**没有封面时那一项是灰的，而且说清楚
-// 为什么**。
+// TestTheCopyCoverItemIsGreyWithoutACover 断**没有封面时不摆「复制封面」，而且说清楚为什么**。
 //
-// ⚠️ **按不动而不说为什么等于让用户猜**（同一句话在 `widgets/list/menu.go` 的
-// `note` 那一栏写着）。所以除了那一项是灰的，末尾还要补一句说明。
+// ⚠️ **按不动而不说为什么等于让用户猜**：封面弹层（原型 `popHtml('cover')`，`pud.PopItem`）没有
+// 「灰掉」这一档，所以没有封面时这一项不摆，换成一句说明（`copyNoCoverNote`）。
 //
 // ⚠️ **本地文件永远是这一档**（见 `app.State.CoverURL`）——而本地文件是常客。
 func TestTheCopyCoverItemIsGreyWithoutACover(t *testing.T) {
@@ -325,16 +324,18 @@ func TestTheCopyCoverItemIsGreyWithoutACover(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v（文字：%q）", err, tt.Texts())
 	}
-	got := tt.Menu()
-	if !slicesContains(got, copyCoverLabel) {
-		t.Fatalf("菜单里连「复制封面」那一项都没有：%q", got)
+	got := tt.Texts()
+	if !slicesContains(got, copyInfoLabel) {
+		t.Fatalf("弹层里连「复制歌曲信息」都没有：%q", got)
 	}
 	if !slicesContains(got, copyNoCoverNote) {
-		t.Errorf("菜单末尾没有说清楚为什么不能复制：%q", got)
+		t.Errorf("弹层里没有说清楚为什么不能复制封面：%q", got)
 	}
-	// 灰的那一项按不动：框架的 `ChooseMenuItem` 会对禁用的项报错。
-	if err := tt.ChooseMenuItem(copyCoverLabel); err == nil {
-		t.Errorf("没有封面时「复制封面」还能按——它该是灰的")
+	if slicesContains(got, copyCoverLabel) {
+		t.Errorf("没有封面时弹层里还摆着「复制封面」：%q", got)
+	}
+	if err := chooseCoverItem(tt, copyCoverLabel); err == nil {
+		t.Errorf("没有封面时「复制封面」还点得到")
 	}
 }
 
@@ -355,8 +356,8 @@ func TestChoosingCopySongInfoPutsTheTextOnTheClipboard(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
-		t.Fatalf("选不了 %q：%v（菜单：%q）", copyInfoLabel, err, tt.Menu())
+	if err := chooseCoverItem(tt, copyInfoLabel); err != nil {
+		t.Fatalf("选不了 %q：%v（菜单：%q）", copyInfoLabel, err, tt.Texts())
 	}
 
 	got := clip.textIs()
@@ -378,7 +379,7 @@ func TestAFailedCopySaysSo(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyInfoLabel); err != nil {
+	if err := chooseCoverItem(tt, copyInfoLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyInfoLabel, err)
 	}
 
@@ -410,8 +411,8 @@ func TestCopyCoverPutsAPNGOnTheClipboard(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
-		t.Fatalf("选不了 %q：%v（菜单：%q）", copyCoverLabel, err, tt.Menu())
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
+		t.Fatalf("选不了 %q：%v（菜单：%q）", copyCoverLabel, err, tt.Texts())
 	}
 
 	// 编码在后台那条线上（要下网络 + 解一张图），所以等它。
@@ -442,7 +443,7 @@ func TestCopyCoverWithoutACoverWritesNothing(t *testing.T) {
 		t.Fatalf("右键不了封面：%v", err)
 	}
 	// 那一项是灰的：框架不让你选一个禁用的项（`ChooseMenuItem` 会报错）。
-	if err := tt.ChooseMenuItem(copyCoverLabel); err == nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err == nil {
 		t.Fatalf("没有封面时「复制封面」还能按——它该是灰的")
 	}
 	if len(clip.imageIs()) != 0 {
@@ -467,7 +468,7 @@ func TestAFailedCoverCopySaysSo(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
 
@@ -512,7 +513,7 @@ func TestAFailedCoverEncodeSaysSo(t *testing.T) {
 	if err := tt.RightClick("当前封面"); err != nil {
 		t.Fatalf("右键不了封面：%v", err)
 	}
-	if err := tt.ChooseMenuItem(copyCoverLabel); err != nil {
+	if err := chooseCoverItem(tt, copyCoverLabel); err != nil {
 		t.Fatalf("选不了 %q：%v", copyCoverLabel, err)
 	}
 
@@ -553,7 +554,7 @@ func TestTheMenuKeyOpensTheCopyMenuOnTheCover(t *testing.T) {
 
 	tt.Key(0, mygoui.KeyContextMenu)
 	tt.Frame()
-	got := tt.Menu()
+	got := tt.Texts()
 	if !slicesContains(got, copyInfoLabel) {
 		t.Errorf("菜单键开出来的不是这一份菜单：%q", got)
 	}
@@ -569,4 +570,14 @@ func slicesContains(list []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// chooseCoverItem 点封面右键弹层里的一项（原型 `popHtml('cover')`，`pud.PopItem`）。
+// 弹层里没有这一项（比如没有封面时不摆「复制封面」）时返回错误。
+func chooseCoverItem(tt *mygoui.Tester, label string) error {
+	if err := tt.Click(label); err != nil {
+		return err
+	}
+	tt.Frame()
+	return nil
 }

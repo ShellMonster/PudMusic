@@ -166,6 +166,8 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	// 这一张 Tab 是歌的列表——动态 / 收藏夹 / 合集那三张画的是卡片和数字，网格那一
 	// 档对它们没有意义（见 upspace_tabs.go 的文件头）。
 	sp.videos.SetView(s.displayView())
+	// 卡片档画成原型的视频卡（`.vgrid` 4 列，≤1180 时 3 列，≤760 时 1 列，格间距 24）。
+	sp.videos.SetVideoCards(true)
 	// ⚠️ **外面这一层 Column 是必需的**：这一页的内容是摆在一个 `ui.Row` 里
 	// （`viewUpSpace` 的 `space-body`），而表头那一行是 `FillWidth` 的——直接当兄弟
 	// 摆进去的话它把整行的宽都吃掉了，列表被挤成 0 宽，于是**一首歌都看不见**（实测
@@ -575,7 +577,7 @@ func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 	w := s.spaceContentWidth(c)
 	pad := s.upPadFor(c)
 	per := max(sp.perRow[tab], 1)
-	gap := winGridGap(windowW(c))
+	gap := space.GridGapForWindow(windowW(c))
 	cell := pud.CellWidth(w-2*pad, per, gap)
 	first := i * per
 	items := sp.cols[tab][first:min(first+per, len(sp.cols[tab]))]

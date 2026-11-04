@@ -428,7 +428,7 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	// `pages/video-collection/favorites/index.tsx:436`）。
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
-	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).
+	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).FillWidth().MaxWidth(space.PageMaxW).AlignSelf(ui.Center).
 		Padding(space.None, space.PageHorizontalForWindow(windowW(c))).
 		Draw(func(pp *ui.Painter, r ui.Rect) { s.paintCollectionBand(pp, r, p) }).Children(func() {
 		// 🔴 **头图区、操作条、表头都在列表的滚动区里**（票 #625）：它们是

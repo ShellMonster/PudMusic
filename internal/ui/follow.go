@@ -437,11 +437,14 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 	}
 
 	w := windowW(c)
-	ui.Column(c).Key("page:"+followPath).Grow(1).Padding(space.None, space.PageHorizontalForWindow(w)).
-		Children(func() {
-			pud.PageHead(c, "Following", "我的关注", "", w, nil)
-			s.viewFollowSplit(c, f)
-		})
+	pad := space.PageHorizontalForWindow(w)
+	ui.Column(c).Key("page:" + followPath).Grow(1).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Width(s.pageBodyW(c)).Padding(space.PageTop, pad, space.None, pad).
+			Children(func() {
+				pud.PageHead(c, "Following", "我的关注", "", w, nil)
+				s.viewFollowSplit(c, f)
+			})
+	})
 
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
 	// `BackToTop`）。

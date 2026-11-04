@@ -14,10 +14,10 @@
 //
 // **正文段**：11 / 12 / 13 / 14 / 16（系统字体；11 是等宽的 Eyebrow / kbd）。
 // **展示段**：20 / 24 / 32 / 48 / 64（宋体 700，走 `widgets/typo` 的 `Display`）。
-// **角色专属**：10（音质角标）、28（全屏歌词当前句）。
+// **角色专属**：10（音质角标）、15（迷你播放器歌名，原型行内 `font-size:15px`）、28（全屏歌词当前句）。
 //
-// 15 / 18 / 30 三档已退役：引用迁到相邻档（15 → 16、18 → 20 或分区标题 24、
-// 30 → 32），见 DESIGN.md §0′。
+// 18 / 30 两档已退役：引用迁到相邻档（18 → 20 或分区标题 24、30 → 32），见 DESIGN.md §0′。
+// 15 按原型恢复，只给迷你播放器歌名用。
 //
 // # 为什么表里也放这些「不在刻度上」的档
 //
@@ -44,6 +44,8 @@ const (
 	Size13 = 13
 	// Size14 是正文 / 说明（上游 `text-sm`）。
 	Size14 = 14
+	// Size15 是迷你播放器的歌名（原型 `.mini` 里 `<strong style="font-size:15px">`）。
+	Size15 = 15
 	// Size16 是列表 / 网格 / 队列的歌名（上游 `text-base`）。
 	Size16 = 16
 	// Size20 是 Subhead：品牌字、设置分组标题、历史日期头（宋体 700）。
@@ -101,25 +103,19 @@ func PageTitleFluid(winW float32) float32 { return Fluid(Size32, 3.4, PageTitle,
 // BigNumFluid 是统计页大数字（`.big-num`）在窗口宽 winW 时的字号：`clamp(32px, 3.6vw, 48px)`。
 func BigNumFluid(winW float32) float32 { return Fluid(Size32, 3.6, PageTitle, winW) }
 
-// NarrowContent 是标题降档的分界：内容区宽度小于它时，48 → 32、64 → 48
-// （design-tokens.html 3.1：原型 `clamp(32px, 3.4vw, 48px)` 的桌面落法）。
-const NarrowContent = 1024
+// HeroTitleFluid 是「今日一张」主视觉标题（`.hero-title`）在窗口宽 winW 时的字号：原型
+// `clamp(40px, 5vw, 72px)`（index.html 369 行）——1200 宽的窗口里是 60，1440 以上才是 72。
+func HeroTitleFluid(winW float32) float32 { return Fluid(40, 5, 72, winW) }
 
-// PageTitleFor 是这一宽度的内容区里页标题该用的字号（还没乘系统缩放）。
-func PageTitleFor(contentW float32) float32 {
-	if contentW > 0 && contentW < NarrowContent {
-		return Size32
-	}
-	return PageTitle
-}
+// GreetTitleFluid 是首页问候语（`.greet .h-page`）在窗口宽 winW 时的字号：`clamp(36px, 4vw, 56px)`
+// （index.html 364 行）——1200 宽的窗口里是 48。
+func GreetTitleFluid(winW float32) float32 { return Fluid(36, 4, 56, winW) }
 
-// HeroTitleFor 是这一宽度的内容区里 Hero 标题该用的字号（还没乘系统缩放）。
-func HeroTitleFor(contentW float32) float32 {
-	if contentW > 0 && contentW < NarrowContent {
-		return Size48
-	}
-	return HeroTitle
-}
+// CollectionTitleFluid 是收藏夹 / 合集标题（`.col-title`）：`clamp(36px, 4.4vw, 64px)`，1200 宽是 52.8。
+func CollectionTitleFluid(winW float32) float32 { return Fluid(36, 4.4, Size64, winW) }
+
+// FullTitleFluid 是全屏播放器歌名（`.full-title`）：`clamp(28px, 3vw, 40px)`，1200 宽是 36。
+func FullTitleFluid(winW float32) float32 { return Fluid(28, 3, 40, winW) }
 
 // 角色别名：同一个档位在不同语境里有不同的名字。
 //

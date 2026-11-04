@@ -74,6 +74,9 @@ func (s *SwitchView) SetColumns(c Columns) { s.list.SetColumns(c) }
 // SetAlbumMode 见 `List.SetAlbumMode`。
 func (s *SwitchView) SetAlbumMode(m pud.AlbumMode) { s.list.SetAlbumMode(m) }
 
+// SetVideoCards 见 `Grid.SetVideoCards`：网格那一档的格子画成原型的视频卡。
+func (s *SwitchView) SetVideoCards(on bool) { s.grid.SetVideoCards(on) }
+
 // SetInsetX 见 `List.SetInsetX`，两份都装。
 func (s *SwitchView) SetInsetX(x float32) {
 	s.list.SetInsetX(x)

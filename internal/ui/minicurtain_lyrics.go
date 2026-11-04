@@ -41,10 +41,6 @@ import (
 // 两个不同的键。
 const miniCurtainLyricsKey = "mini:curtain:lyrics"
 
-// miniCurtainActiveWeight 是当前句的字重（原型 `.ly.cur` 是 700；系统字体里 600 与 700
-// 同一档，且粗体只在刻度写明的几处——见 `TestOnlyTheScaleIsBold`）。
-const miniCurtainActiveWeight = 600
-
 // viewMiniCurtainLyrics 画卷帘里的歌词：**当前句居中**（原型 `.curtain .lyrics`）。
 //
 // viewH 是**这一帧歌词区有多高**（= 卷帘高 − 顶上那条 1 像素的线）。
@@ -122,11 +118,11 @@ func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, row lyrics.Row, p 
 	// 随 presence 插值，居中算法本来就是按当下的框算的。
 	size := miniCurtainFontSize * (1 + (miniCurtainActiveScale-1)*presence)
 	return line.Children(func() {
-		t := ui.Text(c, row.Text).FontSize(scale.Font(c, size)).
+		// 原型 `.curtain .ly` 继承 `.ly` 的宋体：非当前句常规，当前句 700（`.ly.cur`）。
+		// 字体的取值和满屏歌词是同一处（`fullLyricFace`）。
+		family, weight := fullLyricFace(i == active)
+		ui.Text(c, row.Text).Font(family).FontWeight(weight).FontSize(scale.Font(c, size)).
 			FixedLineHeight(miniCurtainLineH).TextColor(col)
-		if i == active {
-			t.FontWeight(miniCurtainActiveWeight)
-		}
 	})
 }
 

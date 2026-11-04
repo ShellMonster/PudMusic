@@ -686,8 +686,8 @@ func (s *Shell) viewLyricPreviewBody(c *ui.Context, pv app.LyricPreviewState) {
 						if !ok {
 							continue
 						}
-						typo.Display(ui.Text(c, line), scale.Font(c, scale.Size14)).
-							FixedLineHeight(scale.Font(c, scale.Size14) * 1.9).FontWeight(400).TextColor(p.Text2)
+						typo.DisplayRegular(ui.Text(c, line), scale.Font(c, scale.Size14)).
+							FixedLineHeight(scale.Font(c, scale.Size14) * 1.9).TextColor(p.Text2)
 					}
 				})
 			})

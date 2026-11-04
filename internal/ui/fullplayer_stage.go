@@ -91,7 +91,6 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, r ui.Rect, phase app.
 		// 🔴 **可聚焦**：没有它，键盘（菜单键 / Shift+F10）够不着这一份菜单。
 		// ⚠️ 名字不能叫「当前封面」：里面那张图已经有一个了。
 		Focusable().Label(copyCoverActionsLabel).
-		ContextMenu(func(m *ui.Menu) { s.viewCopyMenu(st, m) }).
 		AnimatePose(ui.Pose{Scale: scaleTo}, fullCoverAnim)
 	box.Children(func() {
 		if videoOn {
@@ -117,6 +116,19 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, r ui.Rect, phase app.
 			s.viewVideoBadge(c)
 		}
 	})
+	// 右键 / 菜单键开封面弹层（原型 `popHtml('cover')`），内容和播放条封面是同一份。
+	if box.RightClicked() {
+		s.coverMenuOpen = !s.coverMenuOpen
+	}
+	s.coverMenuShortcut(box)
+	if s.coverMenuOpen {
+		ui.PopoverBase(c, box, &s.coverMenuOpen, func(panel ui.Element) {
+			pud.PopStyle(c, panel, "full-pop-cover", tok.PopMinW).
+				AttachTo(box, ui.AnchorBottomStart, ui.AnchorTopStart).
+				Margin(space.Px12, space.None, space.None, space.None)
+			ui.Column(c).Children(func() { s.viewCoverMenu(c, st) })
+		})
+	}
 }
 
 // fullCoverKeyFor 是满屏封面格子的键（带封面地址）。拼出来的字符串缓存着，地址不变就不再拼。

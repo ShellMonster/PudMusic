@@ -11,29 +11,29 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// GridCols 是卡片网格在这一内容区宽度下排几列（原型 `.card-grid`：6 列，窗口
-// 1280 / 1180 / 760 处降到 5 / 4 / 2 列；那三条媒体查询换成内容区宽，减去侧栏 232）。
+// GridCols 是卡片网格在**窗口宽** winW 时排几列（原型 `.card-grid`：6 列，`max-width` 1280 / 1180 / 760
+// 三条媒体查询降到 5 / 4 / 2 列，index.html 321、911、913、964 行）。窗口宽是视口，不是内容区宽。
 //
-//	≥ 1048 → 6   ≥ 948 → 5   ≥ 760 → 4   更窄 → 2
-func GridCols(contentW float32) int {
+//	> 1280 → 6   > 1180 → 5   > 760 → 4   ≤ 760 → 2
+func GridCols(winW float32) int {
 	switch {
-	case contentW >= 1048:
+	case winW > 1280:
 		return 6
-	case contentW >= 948:
+	case winW > 1180:
 		return 5
-	case contentW >= 760:
+	case winW > 760:
 		return 4
 	}
 	return 2
 }
 
-// VideoGridCols 是视频卡网格的列数（原型 `.vgrid`：4 列，内容区 < 948 时 3 列，
-// < 760 时 1 列）。
-func VideoGridCols(contentW float32) int {
+// VideoGridCols 是视频卡网格（原型 `.vgrid`）在窗口宽 winW 时的列数：4 列，≤ 1180 时 3 列，
+// ≤ 760 时 1 列（index.html 772、907、908 行）。
+func VideoGridCols(winW float32) int {
 	switch {
-	case contentW >= 948:
+	case winW > 1180:
 		return 4
-	case contentW >= 760:
+	case winW > 760:
 		return 3
 	}
 	return 1

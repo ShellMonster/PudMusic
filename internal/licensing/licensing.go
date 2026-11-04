@@ -116,7 +116,7 @@ const VendoredGoMP3LicenseSource = "internal/service/audio/mp3dec/gomp3/LICENSE"
 const GoJPEGLicenseRelPath = "resources/licenses/go-image-jpeg-LICENSE.txt"
 const GoJPEGLicenseSource = "internal/ui/widgets/imgcache/internal/jpegrows/LICENSE"
 
-// FontLicenseRelPath 是随包宋体（Noto Serif SC Bold 子集，「深夜唱片行」的标题
+// FontLicenseRelPath 是随包宋体（Noto Serif SC Bold 与 Regular 两份子集，「深夜唱片行」的标题
 // 字体）那一份 SIL Open Font License 1.1 原文，随包发出去。
 //
 // 字体和图标一样是编进二进制的**资源**（`internal/ui/widgets/typo` 用
@@ -216,7 +216,7 @@ const noticesHeader = `# BiuGo 第三方许可清单
 #
 # go-image-jpeg-LICENSE.txt Go image/jpeg 的 MCU 行存储改版（BSD-3-Clause）。
 #
-# noto-serif-sc-OFL.txt     标题字体（Noto Serif SC Bold 的 GB2312 子集，
+# noto-serif-sc-OFL.txt     标题字体（Noto Serif SC Bold / Regular 的 GB2312 子集，
 #                          SIL Open Font License 1.1）。字体是 //go:embed 编进
 #                          二进制的资源，go list -deps 看不见它；OFL 要求随字体
 #                          一起发出这份原文。子集只裁了字符，没改字形。

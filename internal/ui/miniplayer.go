@@ -721,9 +721,8 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// **它占掉整张卡片**（迷你那一扇不画 toast，而迷你常常就是用户眼前那一扇）。
 	noticeText, noticeTone, hasNotice := s.miniNotice()
 
-	// 卡片底：surface（封面取色开着时染一点）。窗开了毛玻璃
-	// （`MiniWindowOptions.Vibrancy`），全不透的底会把糊完的桌面整个盖掉，所以
-	// 底是半透明的（`miniPanelAlpha`）。有那句话的时候换语义色。
+	// 卡片底：不透明的 surface（原型 `.mini`，封面取色开着时染一点；`miniPanelAlpha` = 1）。
+	// 有那句话的时候换语义色。
 	cardBG := s.coverWash(t, p.Surface).Alpha(miniPanelAlpha)
 	noticeFG := t.Text
 	if hasNotice {
@@ -836,8 +835,8 @@ func (s *Shell) viewMiniTop(c *ui.Context, st app.State, p tok.Palette, curtainO
 					title = nothingPlaying.Title
 					col = p.Text2
 				}
-				// 原型 `<strong>` 15 号（15 已从刻度退役，取最近的 14）；系统字体里 600 与 700 是同一档。
-				ui.Text(c, title).Key("mini-title").FontSize(scale.Font(c, scale.Size14)).FontWeight(miniTitleWeight).
+				// 原型 `<strong style="font-size:15px">`：15 号（`scale.Size15`）。
+				ui.Text(c, title).Key("mini-title").FontSize(scale.Font(c, scale.Size15)).FontWeight(miniTitleWeight).
 					FixedLineHeight(24).MaxLines(1).Ellipsis("…").TextColor(col)
 				ui.Text(c, st.Artist).Key("mini-artist").FontSize(scale.Font(c, scale.Size12)).
 					FixedLineHeight(20).MaxLines(1).Ellipsis("…").TextColor(p.Text2)

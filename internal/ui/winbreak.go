@@ -1,11 +1,11 @@
 // 原型的断点和流式字号都是按**窗口宽**算的（`@media (max-width: …)`、`clamp(…vw…)`，COMMON.md
 // 「断点和流式字号一律按窗口宽度计算」）。页边距、标题字号、网格列数用 main 上统一的那一套：
-// `space.PageHorizontalForWindow`、`scale.PageTitleFluid` / `scale.Fluid`、`homeLayoutFor(winW).cols`。
-// 这里只留它们没有覆盖的两个：窗口宽取值、收藏夹大标题的字号、网格间距。
+// `space.PageHorizontalForWindow` / `space.GridGapForWindow`、`scale.*Fluid`、`pud.GridCols(winW)`。
+// 这里只留窗口宽的取值。
 package ui
 
 import (
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -15,13 +15,13 @@ func windowW(c *ui.Context) float32 {
 	return w
 }
 
-// winGridGap 是卡片网格的格间距：24；窗口 ≤ 760 为 16（`.card-grid` 的媒体查询）。
-func winGridGap(w float32) float32 {
-	if w <= 760 {
-		return 16
+// pageBodyW 是原型 `.page { max-width: 1280px; margin: 0 auto }` 里页面的宽：内容区（窗口宽 − 侧栏）
+// 封顶 1280（含左右内边距）。量不出内容区时取 1280。页面外壳用它：外层 `AlignItems(ui.Center)`，
+// 里层 `Width(s.pageBodyW(c))`。
+func (s *Shell) pageBodyW(c *ui.Context) float32 {
+	cw := s.spaceContentWidth(c)
+	if cw <= 0 || cw > space.PageMaxW {
+		return space.PageMaxW
 	}
-	return 24
+	return cw
 }
-
-// colTitleSize 是 `.col-title` 的字号：`clamp(36px, 4.4vw, 64px)`（1200 宽时 52.8）。
-func colTitleSize(w float32) float32 { return scale.Fluid(36, 4.4, scale.HeroTitle, w) }

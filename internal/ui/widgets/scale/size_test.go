@@ -86,20 +86,25 @@ func TestTheRoleAliasesPointAtTheRightSize(t *testing.T) {
 	}
 }
 
-// TestTitlesStepDownInANarrowContentArea：内容区窄于 1024 时页标题 48 → 32、
-// Hero 64 → 48（design-tokens.html 3.1）；宽度未知（0）时按宽的那一档。
-func TestTitlesStepDownInANarrowContentArea(t *testing.T) {
+// TestFluidTitlesFollowTheWindowWidth：流式字号是原型 `clamp(min, N vw, max)` 在**窗口宽**下的值
+// （COMMON.md 更正：断点和流式字号一律按窗口宽算）；宽度未知（0）时取 max。
+func TestFluidTitlesFollowTheWindowWidth(t *testing.T) {
+	near := func(a, b float32) bool { d := a - b; return d < 0.01 && d > -0.01 }
 	for _, c := range []struct {
-		w          float32
-		page, hero float32
+		name string
+		got  func(float32) float32
+		w    float32
+		want float32
 	}{
-		{0, 48, 64}, {1400, 48, 64}, {1024, 48, 64}, {1023, 32, 48}, {700, 32, 48},
+		{"页标题", PageTitleFluid, 1200, 40.8}, {"页标题", PageTitleFluid, 800, 32}, {"页标题", PageTitleFluid, 1600, 48}, {"页标题", PageTitleFluid, 0, 48},
+		{"问候语", GreetTitleFluid, 1200, 48}, {"问候语", GreetTitleFluid, 900, 36}, {"问候语", GreetTitleFluid, 1600, 56},
+		{"主视觉", HeroTitleFluid, 1200, 60}, {"主视觉", HeroTitleFluid, 700, 40}, {"主视觉", HeroTitleFluid, 1600, 72},
+		{"收藏夹", CollectionTitleFluid, 1200, 52.8}, {"收藏夹", CollectionTitleFluid, 700, 36}, {"收藏夹", CollectionTitleFluid, 1600, 64},
+		{"全屏歌名", FullTitleFluid, 1200, 36}, {"全屏歌名", FullTitleFluid, 800, 28}, {"全屏歌名", FullTitleFluid, 1600, 40},
+		{"统计大数字", BigNumFluid, 1200, 43.2}, {"统计大数字", BigNumFluid, 800, 32},
 	} {
-		if got := PageTitleFor(c.w); got != c.page {
-			t.Errorf("内容区 %.0f：页标题 %v，want %v", c.w, got, c.page)
-		}
-		if got := HeroTitleFor(c.w); got != c.hero {
-			t.Errorf("内容区 %.0f：Hero %v，want %v", c.w, got, c.hero)
+		if got := c.got(c.w); !near(got, c.want) {
+			t.Errorf("%s @窗口 %.0f = %v，want %v", c.name, c.w, got, c.want)
 		}
 	}
 }

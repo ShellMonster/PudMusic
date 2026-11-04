@@ -136,7 +136,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 		// ② 文字列：Eyebrow / 标题 / 元信息 / 简介。整列可选中复制（票 #685）。
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(240).AlignItems(ui.Start).Selectable().Children(func() {
 			typo.Eyebrow(c, collectionEyebrow(p.ref.Type, info))
-			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), scale.Font(c, colTitleSize(windowW(c)))).
+			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), scale.Font(c, scale.CollectionTitleFluid(windowW(c)))).
 				LineHeight(leading.Display).TextColor(pl.Text).MaxLines(2).Ellipsis("…").
 				Margin(space.Px12, space.None, space.Px12, space.None)
 

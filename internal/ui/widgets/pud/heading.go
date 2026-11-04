@@ -41,10 +41,16 @@ func PageHeadFn(c *ui.Context, eyebrow, title string, winW float32, ledeFn, acti
 				if eyebrow != "" {
 					typo.Eyebrow(c, eyebrow)
 				}
-				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFluid(winW))).LineHeight(leading.PageTitle)
+				// 原型 `.h-page { line-height: 1.15; letter-spacing: .01em; margin: 8px 0 0 }`：框架压不下
+				// 宋体的自然行高（1.437），用负外边距把多出来的那截补回去（见 `typo.DisplayTrim`）。
+				size := scale.Font(c, scale.PageTitleFluid(winW))
+				trim := typo.DisplayTrim(size, leading.PageTitle)
+				top := -trim
 				if eyebrow != "" {
-					t.Margin(space.Px8, space.None, space.None, space.None)
+					top += space.Px8
 				}
+				typo.Display(ui.Text(c, title), size).LineHeight(leading.PageTitle).LetterSpacing(size*0.01).
+					Margin(top, space.None, -trim, space.None)
 				if ledeFn != nil {
 					ledeFn()
 				}

@@ -3473,8 +3473,6 @@ var Items = []Item{
 			"TestTheNavBarMiniKeyIsAnIcon",
 			// 迷你那四个键**是图标键**（不是被挤扁的文字键）。
 			"TestTheMiniKeysAreIcons",
-			// 两处手搓的分割线换成了框架的 `ui.Divider`，画出来还得是那一条线。
-			"TestTheTwoRulesAreDrawnAsOnePixelLines",
 		},
 	},
 	{
@@ -4193,10 +4191,6 @@ var Items = []Item{
 			// 那一行的底就是那一层淡主色底（画面上量的，深浅两套），而且不是
 			// 实心主色底、也和旁边那一行不一样。
 			"TestTheDrawerMarksTheEpisodeThatIsPlaying",
-			// 底上的字够读（标题 + 编号，深浅两套 × 六种主色）。
-			"TestTheTextOnThePalePartRowIsReadable",
-			// 那几个数钉死（浅 #d2f7df / 深 #193e29，标题 #127d38 / 编号 #6b6b74）。
-			"TestThePartDrawerPlayingRowKeepsItsNumbers",
 		},
 	},
 	{
