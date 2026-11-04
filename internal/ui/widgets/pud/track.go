@@ -1,6 +1,7 @@
 package pud
 
 import (
+	"strings"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
@@ -101,6 +102,15 @@ type Track struct {
 	Removable bool
 	// Compact 是紧凑档：行高 44、不画封面（原型 `.tlist.compact`）。
 	Compact bool
+	// Highlight 是要在歌名里标成主色加粗的搜索词（空 = 不标；大小写不敏感，只标第一处）。
+	Highlight string
+	// Dim 把整行压成次要色（失效的条目）。
+	Dim bool
+	// RowWire 在行元素建好、读悬停之前调一次：调用方在这里给行挂右键菜单、
+	// 输入处理这类行级接线，返回挂好的行。nil = 不挂。
+	RowWire func(row ui.Element) ui.Element
+	// Menu 是「⋯」点开的菜单（也就是右键菜单那一份）。nil 时「⋯」只报 `More` 事件。
+	Menu func(m *ui.Menu)
 }
 
 // TrackEvents 是这一帧在这一行上发生的事。
@@ -124,6 +134,9 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 	}
 	row := ui.Row(c).Key(key).Width(w).Height(h).Radius(tok.R8).PaddingX(space.Px12).
 		Gap(space.Px16).AlignItems(ui.Center)
+	if t.RowWire != nil {
+		row = t.RowWire(row)
+	}
 	hot := row.Hovered()
 	ev.Hovered = hot
 	switch {
@@ -164,7 +177,11 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				if t.Playing {
 					name = p.AccentText
 				}
-				text(c, t.Title, scale.Size14, name).FontWeight(500).SingleLine().Ellipsis("…")
+				if t.Dim && !t.Playing {
+					name = p.Text2
+				}
+				titleText(c, t.Title, t.Highlight, name, p.AccentText).FontSize(scale.Font(c, scale.Size14)).
+					FontWeight(500).SingleLine().Ellipsis("…")
 				ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 					if t.Quality != "" {
 						Badge(c, t.Quality, t.Quality == "HI-RES")
@@ -219,7 +236,11 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				ev.Like = IconBtn(c, key+":like", ic, label, IconOpts{Row: true, On: t.Liked}).Clicked()
 			}
 			if hot {
-				ev.More = IconBtn(c, key+":more", "more", "更多操作："+t.Title, IconOpts{Row: true}).Clicked()
+				more := IconBtn(c, key+":more", "more", "更多操作："+t.Title, IconOpts{Row: true})
+				if t.Menu != nil {
+					more = more.Menu(t.Menu)
+				}
+				ev.More = more.Clicked()
 			}
 		})
 	})
@@ -257,6 +278,27 @@ func EqBars(c *ui.Context, key string, moving bool) ui.Element {
 		}
 	})
 	return box
+}
+
+// titleText 是歌名那一行字；hl 非空且命中时把命中的那一段标成 mark 色、700 粗。
+func titleText(c *ui.Context, s, hl string, color, mark ui.Color) ui.Element {
+	if hl == "" {
+		return ui.Text(c, s).TextColor(color)
+	}
+	ls, lh := strings.ToLower(s), strings.ToLower(hl)
+	if len(ls) != len(s) || len(lh) != len(hl) {
+		return ui.Text(c, s).TextColor(color)
+	}
+	i := strings.Index(ls, lh)
+	if i < 0 {
+		return ui.Text(c, s).TextColor(color)
+	}
+	j := i + len(hl)
+	return ui.RichText(c,
+		ui.Span{Text: s[:i], Color: color},
+		ui.Span{Text: s[i:j], Color: mark, Weight: 700},
+		ui.Span{Text: s[j:], Color: color},
+	)
 }
 
 func abs32(v float32) float32 {
