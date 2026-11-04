@@ -318,15 +318,8 @@ func Run(a *app.App, sess *media.Session) error {
 	if err := a.RestorePlayback(); err != nil {
 		log.Printf("biu: 恢复上次播放的状态失败：%v", err)
 	}
-	// 「断点续播」接着放：队列已经按 `playback` 恢复出来了，这一趟在里面
-	// 找到上次在放的那一首、把它**放起来**（出声、往回退几秒接上下文）。
-	// 取不到流的照 `unplayable.go` 那一套说原因，不静默卡在 0:00。
-	//
-	// ⚠️ **排在 `RestorePlayback` 之后**：它要靠那份队列，先跑队列才在。
-	// 没挂在线取流 / 队列里没有那条 → 安静走人，`playback` 那一格照旧停着。
-	if err := a.ResumePlayback(); err != nil {
-		log.Printf("biu: 断点续播失败：%v", err)
-	}
+	// 启动时只恢复队列、当前歌曲和播放进度，保持暂停。
+	// 用户点击播放后才进入正常的断点续播流程，避免打开应用时自动出声。
 
 	mygo.App.WhenReady(func() {
 		// 🔴 **冷启动那一段的「应用就绪」时刻**（票 #478）：这一句之前是
