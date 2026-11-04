@@ -99,13 +99,13 @@ fi
     printf '\n[查看完整变更记录](%s)\n' "$compare"
   fi
   printf '\n## 下载\n\n'
-  printf '请按系统和架构选择下方资产；Release 页面中的资产标签会标明对应平台。自动更新清单由构建流程生成并随 Release 上传。\n\n'
-  printf '| 系统 | 架构 | 安装包 | 更新归档 | 自动更新清单 |\n'
-  printf '| --- | --- | --- | --- | --- |\n'
-  printf '| macOS | Apple Silicon | `PudMusic-%s-Apple-Silicon_macOS.dmg` | `PudMusic-%s-Apple-Silicon_macOS.tar.gz` | `update-darwin-arm64.json` |\n' "$version" "$version"
-  printf '| macOS | Intel | `PudMusic-%s-Intel_macOS.dmg` | `PudMusic-%s-Intel_macOS.tar.gz` | `update-darwin-amd64.json` |\n' "$version" "$version"
-  printf '| Windows | x86_64 | `PudMusic-setup-%s-Windows_x86_64.exe` | `PudMusic-%s-Windows_x86_64.tar.gz` | `update-windows-amd64.json` |\n' "$version" "$version"
-  printf '| Windows | ARM64 | `PudMusic-setup-%s-Windows_ARM64.exe` | `PudMusic-%s-Windows_ARM64.tar.gz` | `update-windows-arm64.json` |\n' "$version" "$version"
+  printf '请按系统和架构选择下方对应的安装包；`update-*` 文件是自动更新用的，普通用户不用手动下载。\n\n'
+  printf '| 系统 | 架构 | 安装包 |\n'
+  printf '| --- | --- | --- |\n'
+  printf '| macOS | Apple Silicon | `PudMusic-%s-Apple-Silicon_macOS.dmg` |\n' "$version"
+  printf '| macOS | Intel | `PudMusic-%s-Intel_macOS.dmg` |\n' "$version"
+  printf '| Windows | x86_64 | `PudMusic-setup-%s-Windows_x86_64.exe` |\n' "$version"
+  printf '| Windows | ARM64 | `PudMusic-setup-%s-Windows_ARM64.exe` |\n' "$version"
   printf '\n'
   printf '安装包未进行 Apple 公证或 Windows 代码签名。\n'
   printf '\n## 校验\n\n'

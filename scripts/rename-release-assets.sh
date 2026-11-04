@@ -64,21 +64,22 @@ for platform in "$@"; do
   [ -d "$dir" ] || continue
 
   # tar.gz 更新归档：清单的 url 指着它。旧名是
-  # `<slug>-<version>-<target>.tar.gz`，新名是 `PudMusic-<version>-<label>.tar.gz`。
-  # 展示用品牌名 PudMusic，不是 mygo.json 的 slug（slug 只能小写）。
+  # `<slug>-<version>-<target>.tar.gz`，新名是 `update-<target>.tar.gz`。
+  # 名字归到 update-* 一族是为了让安装包（PudMusic-*.dmg / PudMusic-setup-*.exe）
+  # 在 GitHub 资产列表里排在最前——网页按文件名字典序排，小写 u 永远在大写 P 之后。
   version="$(python3 -c 'import json;print(json.load(open("mygo.json"))["version"])')"
   slug="$(python3 -c 'import json;print(json.load(open("mygo.json"))["slug"])')"
   archive_old="$dir/$slug-$version-$target.tar.gz"
-  archive_new="$dir/PudMusic-$version-$label.tar.gz"
+  archive_new="$dir/update-$target.tar.gz"
   if [ -f "$archive_old" ]; then
     mv "$archive_old" "$archive_new"
     rewrite_manifest "$dir/update-$target.json" "$(basename "$archive_old")" "$(basename "$archive_new")"
   fi
 
-  # delta 差分包：清单 deltas[].url 指着它。
+  # delta 差分包：清单 deltas[].url 指着它。同样归 update-* 一族排后。
   for d in "$dir"/*"-to-"*"-$target.delta"; do
     [ -f "$d" ] || continue
-    new="$(dirname "$d")/$(basename "$d" | sed "s/-${target}\.delta$/-${label}.delta/")"
+    new="$(dirname "$d")/$(basename "$d" | sed -e "s/^${slug}-/update-delta-/" -e "s/-${target}\.delta$/-${label}.delta/")"
     mv "$d" "$new"
     rewrite_manifest "$dir/update-$target.json" "$(basename "$d")" "$(basename "$new")"
   done

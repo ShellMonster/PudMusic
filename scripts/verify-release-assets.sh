@@ -50,8 +50,8 @@ for platform in "${targets[@]}"; do
   target="${platform//\//-}"
   label="$(platform_label "$platform")"
   dir="$out/$target"
-  # ⚠️ **归档/安装包用品牌名 PudMusic**，不是 mygo.json 的 slug（slug 只能小写）。
-  archive="$dir/PudMusic-$version-$label.tar.gz"
+  # ⚠️ 更新归档归 update-* 一族（排资产列表后面），安装包用品牌名 PudMusic。
+  archive="$dir/update-$target.tar.gz"
   manifest="$dir/update-$target.json"
   [ -d "$dir" ] || { printf '缺少产物目录：%s\n' "$dir" >&2; exit 1; }
   [ -f "$archive" ] || { printf '%s 缺少更新归档：%s\n' "$target" "$archive" >&2; exit 1; }
