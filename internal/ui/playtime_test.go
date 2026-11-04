@@ -297,26 +297,6 @@ func TestRenderPlayTimeShots(t *testing.T) {
 	}
 }
 
-// TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime 钉住稍后再看那一页
-// **两列时间都在**。
-//
-// 上游画的是 `pubdate`（「投稿时间」），而这一页的日期筛选筛的是 `add_at`
-// （「加入时间」）——两列各回答一半问题，拿一个顶另一个总有一半没答案。
-func TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime(t *testing.T) {
-	tt, _ := laterHoverShell(t)
-
-	for _, want := range []string{"加入时间", "投稿时间"} {
-		if !uiShows(tt, want) {
-			t.Errorf("稍后再看的表头上没有「%s」，文字有 %q", want, tt.Texts())
-		}
-	}
-	// 夹具里每一条的 pubdate 都是 1700000000（2023-11-14），在假时钟
-	// （2026-10-16）眼里是跨年，所以那一格写 `YYYY-MM-DD`。
-	if want := list.PubTimeText(time.Unix(1700000000, 0), now); !uiShows(tt, want) {
-		t.Errorf("行里没有投稿时间 %q：%q", want, tt.Texts())
-	}
-}
-
 // TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow 钉住窄窗口下的让位。
 //
 // 评审量到过：最小窗口 900 + 侧栏 480 时，本票新加的两列把标题列挤成 0，
@@ -425,44 +405,5 @@ func TestTheSearchListGivesWayToTheTitleAtTheWidestSidebar(t *testing.T) {
 	// 侧栏上限现在是 300，最小窗口下搜索列表放得下全部列；这一条只守「标题不被挤成…」。
 	if !uiShows(tt, stubTitle(1, 0)) {
 		t.Errorf("行里的歌名不在画面上：%q", tt.Texts())
-	}
-}
-
-// TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths 钉住稍后再看那一页的让位。
-//
-// 评审量到过：加了「投稿时间」之后，900 宽 + 侧栏 400 起行尾「⋯」被挤成 0；
-// 侧栏 480 时连新的时间列本身都被裁。现在 `laterTimeCols` 两级让位：
-//
-//	400：投稿时间放不下 → 收它；基线五列还是留不出标题 → 「加入时间」也收
-//	480：两列都收
-//
-// 两档都要验「标题读得出几个字、行尾『⋯』还在」——那两个数随列间距 / 序号宽度
-// 变（16 / 32 这一档改过一次），所以判据是拿得到的宽，不是某个具体像素。
-func TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths(t *testing.T) {
-	for _, side := range []float64{300} {
-		t.Run(strconv.FormatInt(int64(side), 10), func(t *testing.T) {
-			st := app.DefaultSettings("")
-			st.SideMenuWidth = side
-			f := newLibFake(t).withLater(1, 4, libTitles...)
-			tt, s := libraryShellOpts(t, f, laterPath, withSettings(st), at(minWindowW, minWindowH),
-				withPrefs(ui.Preferences{ReduceMotion: true, TextScale: 1}))
-			waitFrames(t, tt, "稍后再看第一页", func() bool {
-				return rowsShown(&s.laterPage) == 4
-			})
-			for range 3 {
-				tt.Frame()
-			}
-
-			// 侧栏上限收到 300 之后最小窗口下两列时间都放得下，不再有「放不下」的那一档；
-			// 剩下要守的是：标题读得出、行尾「⋯」不被挤出画面（下面两条）。
-			op, ok := tt.Find(list.OperationLabel(libTitles[0]))
-			if !ok || op.W <= 0 {
-				t.Errorf("侧栏 %.0f：行尾的「⋯」被挤出画面（%v）：%q", side, op, tt.Texts())
-			}
-			head, ok := tt.Find("标题")
-			if !ok || head.W < 40 {
-				t.Errorf("侧栏 %.0f：表头「标题」只剩 %v 宽（want ≥ 40）", side, head)
-			}
-		})
 	}
 }

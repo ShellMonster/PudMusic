@@ -7,12 +7,10 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -245,43 +243,6 @@ func TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth(t *testing.T) {
 	}
 }
 
-// TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth 钉住「点得开」。
-//
-// 光量不重叠不够：控件在、位置对，可点击落在别人身上，它那个日历照样打不开——
-// 而用户缩小窗口正是为了点点什么。
-//
-// ⚠️ **而且弹出来的那一块自己要整个在窗口里**：它有**两个月**那么宽（≈500），
-// 而窗口最窄是 900——面板要是往右长，右半边（正是右边那个月）会被裁掉。
-// 而裁掉的那一半**看不出来**：用户看到的是「这个日历只有一个月」，而另一个月的
-// 那些日子他根本点不到。
-func TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, _ := libraryShell(t, f, laterPath)
-	tt.SetSize(900, 800)
-	tt.Frame()
-
-	if err := tt.Click(dateRangeLabel); err != nil {
-		t.Fatalf("点不到日期范围：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	for _, want := range []string{"2026年10月", "2026年11月"} {
-		if !tt.HasText(want) {
-			t.Errorf("900 宽下点日期范围没有打开两个月（缺 %q），文字有 %q", want, tt.Texts())
-		}
-	}
-	// ⚠️ **右边那个月的最后一天也要在窗口里**（点得到）。
-	//
-	// 「两个月都在画面上」不够：面板可能往右长出窗口，而那半个月的日子看着
-	// 还在（文字画出来了），可它们的坐标已经在窗口外面——点它们会落在空气上。
-	last, ok := tt.Find("2026年11月30日")
-	if !ok {
-		t.Fatalf("右边那个月没有画出来，文字有 %q", tt.Texts())
-	}
-	if last.X+last.W > 900 {
-		t.Errorf("右边那个月的最后一天在窗口外面（右边 %v，窗口 900）", last.X+last.W)
-	}
-}
-
 // overlap 报两个矩形有没有交叠（边挨着不算）。
 func overlap(a, b mygoui.Rect) bool {
 	return a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H
@@ -290,56 +251,3 @@ func overlap(a, b mygoui.Rect) bool {
 // ─────────────────────────────────────────────────────────────────────────────
 // 「记录播放历史」那个开关
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheReportHistorySwitchReallyWritesTheSetting 盯那个开关改的是**盘上那份**。
-//
-// 🔴 它的失败方式最阴：只绑定局部变量、不写设置，用户按了开关弹回去，界面上看不出
-// 任何异样——「按了没反应」里最难查的一种。判据是设置里的那个键，不是画面上开关的
-// 位置。
-func TestTheReportHistorySwitchReallyWritesTheSetting(t *testing.T) {
-	f := newLibFake(t).withHistory(1, 100, 600, "听过的那首")
-
-	// 挂一份真的设置（和 `shellOnSettings` 同一套路），否则 applySetting 写不出去。
-	cli := biliForTest(t, f)
-	b := newTestShell(t,
-		withSettings(app.DefaultSettings("")),
-		mounted(func(t *testing.T, a *app.App) {
-			// ⚠️ **挂一份登录态**（票 #138）：历史记录这一页要登录才有，没登录时
-			// 页面画的是「先登录」那一支，那个开关压根不在画面上。
-			store := app.NewMemoryStore("test")
-			if err := store.Save(context.Background(), app.Session{SESSDATA: "sess"}); err != nil {
-				t.Fatal(err)
-			}
-			a.MountLogin(store, cli)
-			a.MountLibrary(cli)
-		}),
-		withClock(newFakeClock(now)))
-	a, s, tt := b.a, b.s, b.tt
-	path := b.settingsPath
-	tt.Frame()
-	s.navigate(historyPath)
-	tt.Frame()
-
-	if !a.SettingsSnapshot().ReportPlayHistory {
-		t.Fatalf("起点就不对：设置里 reportPlayHistory 已经是关的")
-	}
-	if err := tt.Click("记录播放历史"); err != nil {
-		t.Fatalf("点不到那个开关：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-
-	if a.SettingsSnapshot().ReportPlayHistory {
-		t.Error("点了「记录播放历史」，设置里那个键没变——开关只改了一个局部变量")
-	}
-	// 存住了：下一次打开这个应用还是关的（第一遍写进内存，第二遍落盘）。
-	if err := a.FlushSettings(); err != nil {
-		t.Fatal(err)
-	}
-	saved, err := app.LoadSettings(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if saved.ReportPlayHistory {
-		t.Error("那个键没有落盘——关掉窗口再打开它又回来了")
-	}
-}

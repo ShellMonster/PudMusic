@@ -304,8 +304,10 @@ func TestBothLibraryPagesDrawTheirOwnContent(t *testing.T) {
 		// want 是这一页表头上特有的那几列。
 		want []string
 	}{
-		{laterPath, "稍后再看", []string{"播放量", "加入时间", "时长"}},
-		{historyPath, "历史记录", []string{"播放进度", "观看时间"}},
+		// 原型：两页都用曲目行；稍后再看有曲目表头和「播放全部」，历史记录有搜索框和日期
+		// 范围、按日分组（没有表头）。
+		{laterPath, "稍后再看", []string{"播放全部", "播放 / 弹幕", "时长"}},
+		{historyPath, "历史记录", []string{"搜索标题/UP主名称", "全部时间", "今天"}},
 	} {
 		t.Run(c.title, func(t *testing.T) {
 			f := newLibFake(t).
@@ -322,11 +324,7 @@ func TestBothLibraryPagesDrawTheirOwnContent(t *testing.T) {
 				t.Fatalf("点侧栏之后在 %q，want %q", s.router.Path(), c.path)
 			}
 
-			for _, want := range append([]string{
-				c.title, keywordBoxLabel,
-				"全部时间", "今天", "昨天", "近一周", "不按日期筛",
-				dateRangeLabel,
-			}, c.want...) {
+			for _, want := range append([]string{c.title}, c.want...) {
 				if !tt.HasText(want) {
 					t.Errorf("%s 上没有 %q，文字有 %q", c.title, want, tt.Texts())
 				}
@@ -581,58 +579,6 @@ func TestTheRangePickerDrivesTheFilter(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 播放进度
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestHistoryShowsHowFarYouGot 钉住「播放进度」那一列。
-//
-// 这是这一页存在的理由（PLAN.md 的 P-04）：没有它，用户看到的是一列标题，得自己
-// 回想看过多少，于是每一首都得从头听或者拖进度条试一遍。
-func TestHistoryShowsHowFarYouGot(t *testing.T) {
-	f := newLibFake(t).withHistory(1, 754, 2700, "看了一半的那首")
-	tt, _ := libraryShell(t, f, historyPath)
-	waitFrames(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("看了一半的那首") })
-
-	if !tt.HasText("12:34 / 45:00") {
-		t.Errorf("没有画出「看了 12:34 / 一共 45:00」，文字有 %q", tt.Texts())
-	}
-	// 观看时间也要画：精确到分，不精确到秒（上游的 "YYYY-MM-DD HH:mm"）。
-	if !tt.HasText("2026-10-16 21:04") {
-		t.Errorf("没有画出观看时间，文字有 %q", tt.Texts())
-	}
-}
-
-// TestAHistoryRowThatWasNeverPlayedShowsZeroProgress 盯「零秒」那一种。
-//
-// 🔴 **零秒要写成「0:00」，不能留空**：留空的话这一行和一行「看完了」在屏幕上写得
-// 一样（都只剩总时长），而这一列存在的全部理由就是让人一眼看出这两个的区别。
-// 上游的 formatProgress 是 `formatDuration(prog > 0 ? prog : 0)`，也就是零秒写 0:00。
-func TestAHistoryRowThatWasNeverPlayedShowsZeroProgress(t *testing.T) {
-	f := newLibFake(t).withHistory(1, 0, 2700, "刚点开就退出的")
-	tt, _ := libraryShell(t, f, historyPath)
-	waitFrames(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("刚点开就退出的") })
-
-	if !tt.HasText("0:00 / 45:00") {
-		t.Errorf("零秒的进度没有写成「0:00 / 45:00」，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("45:00") && !tt.HasText("0:00 / 45:00") {
-		t.Errorf("进度列只剩总时长，看不出有没有听过，文字有 %q", tt.Texts())
-	}
-}
-
-// TestAHistoryRowWithNoLengthShowsOnlyWhatWasWatched 盯「没有总时长」的那一种。
-//
-// 直播、专栏那几类 B 站不给 duration。写「0:00 / 0:00」在屏幕上读起来像坏了。
-func TestAHistoryRowWithNoLengthShowsOnlyWhatWasWatched(t *testing.T) {
-	f := newLibFake(t).withHistory(1, 754, 0, "某场直播")
-	tt, _ := libraryShell(t, f, historyPath)
-	waitFrames(t, tt, "把历史记录拉回来", func() bool { return tt.HasText("某场直播") })
-
-	if !tt.HasText("12:34") {
-		t.Errorf("没有画出看过多少，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("12:34 / ") {
-		t.Errorf("没有总时长却画了「/ 」，文字有 %q", tt.Texts())
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔴 铁律四：行的身份

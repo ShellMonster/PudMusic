@@ -22,6 +22,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"strconv"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
@@ -174,9 +175,31 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 // ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, scale.Size16))` / `FontSize(scale.Font(c, scale.Size12))`
 // 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
 func emptyContent(c *ui.Context, e emptyState) {
-	emptyArt(c, e.Icon)
-	emptyCopy(c, e)
-	drawEmptyAction(c, e)
+	var action func()
+	if e.Action != nil && e.Action.Label != "" && e.Action.Do != nil {
+		action = func() {
+			if pud.Button(c, "empty:action", pud.Ghost, pud.Std, e.Action.Label, "").Clicked() {
+				e.Action.Do()
+			}
+		}
+	}
+	// 原型 `.empty`：插画 + 24 宋体标题 + 说明 + 可选操作（DESIGN.md §0′.T7）。
+	pud.Empty(c, pudArtOf(e.Icon), e.Title, e.Hint, action)
+}
+
+// pudArtOf 把空状态的图标名换成原型插画右上角那枚小标。
+func pudArtOf(icon string) pud.ArtKind {
+	switch icon {
+	case iconEmptySearch:
+		return pud.ArtSearch
+	case iconEmptyLater, iconEmptyHistory:
+		return pud.ArtClock
+	case iconEmptyDownload:
+		return pud.ArtDownload
+	case iconEmptyLogin:
+		return pud.ArtLock
+	}
+	return pud.ArtPlain
 }
 
 // drawEmptyAction 是空状态里那一个按钮。

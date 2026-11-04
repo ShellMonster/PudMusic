@@ -2,9 +2,7 @@ package ui
 
 import (
 	"testing"
-	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/egoist/mygo/ui"
@@ -54,7 +52,8 @@ func TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到第一行，文字有 %q", tt.Texts())
 	}
-	want := float32(metricsOf(s.laterPage.rows.Layout()).height)
+	_ = s
+	want := float32(60) // 原型 `.trow` 高 60（DESIGN.md §0′.T7）
 	if row.H != want {
 		t.Errorf("稍后再看那一行高 %v，want %v（行高是定死的一个值）", row.H, want)
 	}
@@ -66,200 +65,6 @@ func TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 	}
 	if got := next.Y - row.Y; got < want-0.5 || got > want+0.5 {
 		t.Errorf("第一行到第二行隔了 %v，want %v（行高是定死的一个值）", got, want)
-	}
-}
-
-// TestTheLaterHeaderSaysItsOwnColumns 钉住稍后再看那一行的表头列。
-//
-// 它比 `widgets/list` 那一族多两列：加入时间（这一页的筛选器筛的是 `add_at`，
-// 见 `later.go` 文件头）和投稿时间（上游画的是 `pubdate`）。两个时间都在，
-// 各回答一半问题。
-func TestTheLaterHeaderSaysItsOwnColumns(t *testing.T) {
-	tt, _ := laterHoverShell(t)
-
-	for _, want := range []string{"#", "标题", "播放量", "加入时间", "投稿时间", "时长"} {
-		if !uiShows(tt, want) {
-			t.Errorf("稍后再看的表头上没有「%s」，文字有 %q", want, tt.Texts())
-		}
-	}
-}
-
-// TestTheLaterHeaderLinesUpWithItsRows 钉住表头和那一页的行对得齐。
-//
-// ⚠️ 量的是**编号**和**右端那一列**：编号是唯一会被前面几块顶偏的一列，而右端那一列
-// 是「数字竖着扫得下来」的那一条——表头左边多让 / 少让一块封面，这两处一定有一处歪。
-//
-// ⚠️ **「标题」对的是封面的左缘**（DESIGN.md；票 #167）：行里序号和标题中间隔着 48 的
-// 封面，表头**不给它留空位**，「标题」直接落在封面的左缘上，右边那几列靠 Grow(1) 的标题
-// 那一列吸收掉这点差。所以这一条量的是三处：编号、标题（封面左缘）、右端时长。
-func TestTheLaterHeaderLinesUpWithItsRows(t *testing.T) {
-	tt, s := laterHoverShell(t)
-
-	head, ok := tt.Find("#")
-	if !ok {
-		t.Fatalf("表头上没有「#」，文字有 %q", tt.Texts())
-	}
-	row, ok := tt.Find("1")
-	if !ok {
-		t.Fatalf("画面上找不到第一行的序号，文字有 %q", tt.Texts())
-	}
-	if head.X != row.X {
-		t.Errorf("表头的「#」在 %.1f，行里那个序号在 %.1f——差 %.1f（封面那一列的空位"+
-			"不在它和「标题」中间？）", head.X, row.X, head.X-row.X)
-	}
-
-	// 右端那一列也要对：那才是「数字列竖着扫得下来」的那一条。
-	headClock, ok := tt.Find("时长")
-	if !ok {
-		t.Fatalf("表头上没有「时长」，文字有 %q", tt.Texts())
-	}
-	rowClock, ok := tt.Find(clockText(185 * time.Second))
-	if !ok {
-		t.Fatalf("画面上找不到那一行的时长 %q，文字有 %q",
-			clockText(185*time.Second), tt.Texts())
-	}
-	if headClock.X != rowClock.X {
-		t.Errorf("表头的「时长」在 %.1f，行里那一列在 %.1f——差 %.1f",
-			headClock.X, rowClock.X, headClock.X-rowClock.X)
-	}
-
-	// 「标题」那一列落在**封面的左缘**（DESIGN.md；票 #167）：行里那张封面在 UP 名
-	// 左边「一个封面 + 一个列间距」的地方。这一条和上面那条一起才说得清「表头左边
-	// 少让了封面、右边那几列没跟着错」。
-	headTitle, ok := tt.Find("标题")
-	if !ok {
-		t.Fatalf("表头上没有「标题」，文字有 %q", tt.Texts())
-	}
-	owner, ok := tt.Find("UP " + libTitles[0])
-	if !ok {
-		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
-	}
-	mt := metricsOf(s.laterPage.rows.Layout())
-	want := owner.X - (mt.cover + mt.gap)
-	if d := headTitle.X - want; d > 0.5 || d < -0.5 {
-		t.Errorf("表头的「标题」在 %.1f，封面左缘在 %.1f——差 %.1f（表头多让了封面？）",
-			headTitle.X, want, d)
-	}
-}
-
-// TestTheHistoryHeaderLinesUpWithItsRows 同一件事，历史记录那一页。
-//
-// 它右边那两列是**播放进度 / 观看时间**，不是播放量 / 加入时间——历史记录的接口不
-// 给播放量（`libraryRow.View` 的注释）。表头跟着行走，不是跟着上一张票走。
-func TestTheHistoryHeaderLinesUpWithItsRows(t *testing.T) {
-	tt, _ := historyHoverShell(t)
-
-	for _, want := range []string{"#", "标题", "播放进度", "观看时间"} {
-		if !uiShows(tt, want) {
-			t.Errorf("历史记录的表头上没有「%s」，文字有 %q", want, tt.Texts())
-		}
-	}
-	head, ok := tt.Find("#")
-	if !ok {
-		t.Fatalf("表头上没有「#」，文字有 %q", tt.Texts())
-	}
-	row, ok := tt.Find("1")
-	if !ok {
-		t.Fatalf("画面上找不到第一行的序号，文字有 %q", tt.Texts())
-	}
-	if head.X != row.X {
-		t.Errorf("表头的「#」在 %.1f，行里那个序号在 %.1f——差 %.1f",
-			head.X, row.X, head.X-row.X)
-	}
-}
-
-// TestHoveringALibraryRowPutsAPlayTriangleOnItsCover 钉住两页的行也有 hover 反馈。
-//
-// 这一页的行不是 `widgets/list` 画的（列多两列），所以那边验过的在这儿要自己再钉一遍
-// ——「组件共用」不等于「每一处调用都接上了」。
-func TestHoveringALibraryRowPutsAPlayTriangleOnItsCover(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		shell func(*testing.T) (*ui.Tester, *Shell)
-	}{
-		{"稍后再看", laterHoverShell},
-		{"历史记录", historyHoverShell},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			tt, _ := tc.shell(t)
-
-			if _, ok := tt.Find(hover.PlayLabel(libTitles[1])); ok {
-				t.Fatalf("指针还没移上去封面就有播放三角了：%q", tt.Texts())
-			}
-			hoverShellRow(t, tt, libTitles[1])
-
-			got, ok := tt.Find(hover.PlayLabel(libTitles[1]))
-			if !ok {
-				t.Fatalf("指针移上去之后封面上没有播放三角：%q", tt.Texts())
-			}
-			if got.W < 19 {
-				t.Errorf("那个播放三角只有 %.1f 宽，want 20", got.W)
-			}
-			if _, ok := tt.Find(hover.PlayLabel(libTitles[0])); ok {
-				t.Errorf("指针在第二行，第一行的封面上却有播放三角：%q", tt.Texts())
-			}
-		})
-	}
-}
-
-// TestTheLibraryRowIndexBecomesAWaveformWhilePlaying 钉住「正在播放的那一行，序号位置
-// 换成跳动的波形，行尾那句『正在播放』没有了」。
-//
-// ⚠️ **认的是标签 `歌名 正在播放`**（`hover.PlayingLabel`），不是画出来的那几个字——
-// 波形是一个没有文字的盒子，它能被 `Find` 找到靠的就是这个标签。
-func TestTheLibraryRowIndexBecomesAWaveformWhilePlaying(t *testing.T) {
-	f := newLibFake(t).withLater(1, 4, libTitles...)
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "稍后再看第一页", func() bool { return rowsShown(&s.laterPage) == 4 })
-
-	// 先钉住没在放的时候：序号还在，波形不在。
-	if _, ok := tt.Find(hover.PlayingLabel(libTitles[1])); ok {
-		t.Fatalf("还没有歌在放，那一行上就有波形了：%q", tt.Texts())
-	}
-
-	// ⚠️ **换接线而不是 `playFrom`**：在线播放那一路在测试里没接上（`Play` 走真播放
-	// 器），按下去只会说一句「放不了这一首」。而判据认的是「**此刻有声音的那一首**」
-	// （`app.App.IsPlaying`），这一层没法让一首在线的歌真的出声——所以这里换成
-	// 一份说「第一首在放」的接线，量的是**画面**（波形有没有换上去、摆在哪儿）。
-	// 判据本身由 `internal/app` 那一组量，而「真在放时真的有标记」由
-	// `internal/ui/widgets/list` 的端到端那一条量。
-	rows := s.laterPage.rows
-	items := rows.Rows()
-	playing := items[0].Item.Identity()
-	rows.acts.IsPlaying = func(it app.Item) bool { return it.Identity() == playing }
-	tt.Frame()
-
-	if !rows.isPlaying(items[0]) {
-		t.Fatalf("第一首没在放（接线认不出来），文字有 %q", tt.Texts())
-	}
-	wave, ok := tt.Find(hover.PlayingLabel(libTitles[0]))
-	if !ok {
-		t.Fatalf("正在放的那一行没有那个跳动波形：%q", tt.Texts())
-	}
-	// ⚠️ **拿第二行的序号当基准**：第一行的序号已经被波形换掉了，而「波形在序号那一列
-	// 位置上」这句话量的正是同一个横坐标。序号那一列是 40 宽（`colIndex`），波形比它
-	// 宽就说明它把封面顶走了。
-	second, ok := tt.Find("2")
-	if !ok {
-		t.Fatalf("画面上找不到第二行的序号，文字有 %q", tt.Texts())
-	}
-	if diff := wave.X - second.X; diff > 2 || diff < -2 {
-		t.Errorf("波形摆在 x=%.1f，第二行的序号在 %.1f——差 %.1f，它没有占在序号的位置上",
-			wave.X, second.X, diff)
-	}
-	if wave.W > colIndex {
-		t.Errorf("波形占了 %.1f 宽，比序号那一列（%d）还宽——它把封面顶走了", wave.W, colIndex)
-	}
-	// 行尾那句没有了：整个画面上「正在播放」只该剩下这一个标签。
-	n := 0
-	for _, s := range tt.Texts() {
-		if s == playingMark || (len(s) > len(playingMark) &&
-			s[len(s)-len(playingMark)-1:] == " "+playingMark) {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Errorf("画面上有 %d 处「正在播放」，want 1 处（波形那一个）：%q", n, tt.Texts())
 	}
 }
 

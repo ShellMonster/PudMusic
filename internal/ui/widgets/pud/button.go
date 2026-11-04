@@ -217,3 +217,25 @@ func Badge(c *ui.Context, label string, hires bool) ui.Element {
 		TextColor(fg).Border(1, border).Radius(tok.R4).PaddingX(space.Px6).Height(tok.BadgeH).
 		SingleLine().Shrink(0)
 }
+
+// DropButton 是带下拉箭头的小幽灵键（原型 `.btn.btn-ghost.btn-sm` 里放「图标 + 文字 + down」，
+// 如历史记录的日期范围）：高 32、左右 14、icon 16 + 文字 13 号 600 + 右边 16 的向下箭头，缝 8。
+func DropButton(c *ui.Context, key, label, icon string) ui.Element {
+	p := pal(c)
+	b := ui.ButtonBase(c).Key(key).Label(label).Height(tok.BtnSmH).Radius(tok.BtnSmH / 2).PaddingX(space.Px14).
+		Gap(space.Px8).AlignItems(ui.Center).Justify(ui.Center).Shrink(0)
+	var bg, border ui.Color
+	border = p.LineStrong
+	if b.Hovered() {
+		bg, border = p.Hover, p.Text3
+	}
+	b = b.Background(bg).Border(1, border).TextColor(p.Text).Transition(motion.Fade)
+	b.Children(func() {
+		if icon != "" {
+			glyph(c, icon, tok.IconSm, p.Text)
+		}
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).FontWeight(600).TextColor(p.Text).SingleLine()
+		glyph(c, "down", tok.IconSm, p.Text)
+	})
+	return b
+}

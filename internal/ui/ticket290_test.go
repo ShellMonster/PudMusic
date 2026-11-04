@@ -23,37 +23,6 @@ import (
 // L-01：日期筛选排贴内容区左缘
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheDateFilterRowStartsAtTheLeftEdge 钉住「日期筛选排贴内容区左缘」。
-//
-// 上游是 `flex w-full items-center justify-between`（`later/search.tsx:25`），
-// 日期那一组是它的**左半边**，所以它从内容区左缘起（实测 x=215）。
-//
-// ⚠️ **我们原来把整排居中了**（`daterange.go` 的 `.Center()`）：596 宽的一排
-// 落在 x=402..997，内容区左边空出 186、右边空出 187。
-//
-// 判据是**它和搜索框左对齐**：搜索框和日期那一排在同一列里（`librarypage.go`
-// 的 `viewFilters`），而那一列从内容区左缘起。所以两者的左沿之差，只剩日期
-// 按钮自己的内边距——居中的话那是 186。
-func TestTheDateFilterRowStartsAtTheLeftEdge(t *testing.T) {
-	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
-	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "日期筛选排画出来了", func() bool { return tt.HasText("全部时间") })
-
-	box, ok := tt.Find(keywordBoxLabel)
-	if !ok {
-		t.Fatalf("找不到搜索框，文字有 %q", tt.Texts())
-	}
-	preset, ok := tt.Find("全部时间")
-	if !ok {
-		t.Fatalf("找不到日期筛选的「全部时间」，文字有 %q", tt.Texts())
-	}
-	// 30 是「日期按钮自己的内边距 + 一点余量」——离左缘一整个按钮宽（186）就
-	// 一定是又被居中了。
-	if d := preset.X - box.X; d > 30 {
-		t.Errorf("日期筛选排离内容区左缘 %.0f 像素（want ≤30）——它又被居中了", d)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // L-04：稍后再看页头右上角的「清除已看完」
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,15 +35,17 @@ func TestTheDateFilterRowStartsAtTheLeftEdge(t *testing.T) {
 // 判据是**它在右端**：内容区的右缘是窗口宽减去页内边距（`pagePadX` = 16），
 // 按钮的右沿就贴着那一条（按钮自己还有 8 的右内边距）。
 func TestTheLaterHeaderHasAClearViewedButton(t *testing.T) {
-	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
+	f := newLibFake(t)
+	f.later[1] = shotLaterBody()
 	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText("清除已看完") })
+	const label = "删除已看完的 1" // 原型：「删除已看完的 N」，N 是已看完的条数
+	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText(label) })
 
-	btn, ok := tt.Find("清除已看完")
+	btn, ok := tt.Find(label)
 	if !ok {
-		t.Fatalf("稍后再看页头右侧没有「清除已看完」，文字有 %q", tt.Texts())
+		t.Fatalf("稍后再看页头右侧没有「%s」，文字有 %q", label, tt.Texts())
 	}
-	right := float32(tt.Image().Rect.Max.X) - pagePadX
+	right := float32(tt.Image().Rect.Max.X) - 32 // 内容区右页边距（窗口 1200、内容区 968 → 32）
 	if d := right - (btn.X + btn.W); d > 30 {
 		t.Errorf("「清除已看完」的右沿离内容区右缘 %.0f 像素（want ≤30）——"+
 			"它没有落在页头的右端", d)
@@ -93,11 +64,12 @@ func TestTheLaterHeaderHasAClearViewedButton(t *testing.T) {
 func TestTheClearViewedButtonAsksBeforeItDeletes(t *testing.T) {
 	const delPath = "/x/v2/history/toview/del"
 
-	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
+	f := newLibFake(t)
+	f.later[1] = shotLaterBody()
 	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText("清除已看完") })
+	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText("删除已看完的 1") })
 
-	if err := tt.Click("清除已看完"); err != nil {
+	if err := tt.Click("删除已看完的 1"); err != nil {
 		t.Fatalf("点不了「清除已看完」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()

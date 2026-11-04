@@ -77,6 +77,9 @@ type libraryPage struct {
 	// 一个返回值传下去：`viewFilters` 画完之后还要拿它判要不要换查询，而那一段
 	// 和画筛选器不在同一个闭包里。
 	submitted bool
+
+	// rng 是原型样式的日期筛选弹层状态（历史记录用）。
+	rng pudRangeState
 }
 
 // init 把这一页接上。
@@ -89,6 +92,7 @@ func (p *libraryPage) init(now time.Time,
 	render func(*ui.Context, ui.ListRow) ui.Element, menu func(*ui.Menu, int),
 	fetch libraryFetcher, acts list.Actions, empty emptyState) {
 	p.dates = newDateFilter(now)
+	p.rng = newPudRangeState()
 	p.rows = newPagedRows(render, menu, fetch, acts, p.query)
 	p.rows.SetEmpty(empty)
 }

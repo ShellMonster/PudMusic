@@ -39,9 +39,9 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -162,32 +162,27 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 
 	p := &s.historyPage
 	now := s.clock.Now()
-	st := s.app.SettingsSnapshot()
-	// 设置来自更新的版本时一个字都不许写回去：把开关关掉，别摆一个按了没反应
-	// 的（和设置页同一个理由，见 settings_page.go）。
-	ro := s.app.SettingsReadOnly()
 
-	ui.Column(c).Key("page:"+historyPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
-		Children(func() {
-			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
-			ui.Row(c).FillWidth().Center().Children(func() {
-				typo.Display(ui.Text(c, "历史记录"), scale.Font(c, scale.PageTitle)).Grow(1)
-				s.viewReportHistory(c, st.ReportPlayHistory, ro)
-			})
+	s.pudPage(c, "page:"+historyPath, func(contentW, listW float32) {
+		// 原型这一页没有「记录播放历史」开关（它在设置里）；开关函数保留给设置页复用。
+		pud.PageHead(c, "History", "历史记录", "", contentW, nil)
 
-			// 换查询要在**画列表之前**（理由见 later.go 里同一句）。
-			if p.viewFilters(c, now) || p.keywordChanged(now, p.submitted) {
-				p.apply()
-			}
-
-			// 表头**只在列表 / 紧凑两档**摆，理由见 later.go 那一处。
-			//
-			// ⚠️ **摆法（列表 / 紧凑 / 网格）在 `syncLibraryPage` 那一层装**，理由同
-			// later.go 那一处（票 #161）。
-			viewLibraryHeader(c, p.rows, historyHeaderSpec, historyHeaderKey)
-			p.rows.View(c)
-			s.noteScrollbar(p.rows.Hot())
+		// 工具条：搜索框 + 日期范围（原型 `.toolbar`）。换查询要在**画列表之前**
+		// （理由见 later.go 里同一句）。
+		changed := false
+		pudToolbar(c, "history:toolbar", func() {
+			in := pud.MiniSearch(c, "history:q", &p.draft, "搜索标题/UP主名称", 180)
+			p.submitted = in.Submitted()
+			changed = s.viewPudRange(c, "history:range", &p.rng, p.dates, now)
 		})
+		if changed || p.keywordChanged(now, p.submitted) {
+			p.apply()
+		}
+
+		// 原型的历史记录是 `noHead` 的分组列表：没有表头，每组只有组头。
+		p.rows.View(c)
+		s.noteScrollbar(p.rows.Hot())
+	})
 }
 
 // syncHistory 是「历史记录」这一页每帧的副作用。
@@ -234,45 +229,13 @@ func (s *Shell) viewReportHistory(c *ui.Context, on, ro bool) {
 // drawHistoryRow 画第 r 行。行首和稍后再看共用（`libraryRowHead`），右边那两列
 // 不同：播放进度 / 观看时间。
 func (s *Shell) drawHistoryRow(c *ui.Context, r ui.ListRow) ui.Element {
-	t := c.Theme()
-	rows := s.historyPage.rows
-	m := rows.Rows()[r.Index]
-	playing := rows.isPlaying(m)
-	mt := metricsOf(rows.Layout())
-	face := libraryRowFace(t, playing)
-
-	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）。
-	//
-	// ⚠️ **行高定死**（`mt.height`）：理由同 `drawLaterRow` 里那一处。
-	row := ui.Row(c).Key("history-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX).Height(mt.height)
-	onRow := row.Hovered()
-
-	// 选中那一行：盖掉框架那一块实心主色底，键盘走到它上面时给它一圈焦点环
-	//（理由见 `widgets/list/selection.go`）。
-	//
-	// ⚠️ **环的条件是「列表有键盘焦点」且「上一次输入是键盘」**：鼠标点过之后
-	// 方向键挪了游标，那一行也得有指示（框架那个 `focusVisible` 方向键不会设回来）。
-	row = list.SelectedRow(row, t, r.Selected(), onRow,
-		rows.keys.On() && list.Focused(c, &rows.state))
-
-	return row.Children(func() {
-		viewLibraryRowHead(c, r, m, rows, s.images, mt, face, onRow,
-			func() { rows.playFrom(r.Index) })
-
-		ui.Text(c, progressText(m.Progress, m.Duration)).Width(mt.progress).
-			TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-		ui.Text(c, viewedAtText(m.ViewedAt)).Width(mt.viewedAt).
-			TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-
-		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（理由同
-		// `drawLaterRow` 里那一处）。
-		ui.Box(c).Width(list.OperationColWidth).Children(func() {
-			// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同
-			// `later.go` 的 `drawLaterRow` 里那一处（票 #313）。
-			list.Operation(c, rows.opText.At(r.Index, m.Title, list.OperationLabel), face.title,
-				func(m *ui.Menu) { rows.menu(m, r.Index) })
-		})
+	return s.drawLibraryPudRow(c, r, s.historyPage.rows, libraryRowSpec{
+		key:     "history-row:",
+		colText: historyColText,
+		byDay:   true,
+		remove: func(i int) {
+			s.historyPage.rows.Remove(i, s.app.LibraryOf().RemoveHistory)
+		},
 	})
 }
 
