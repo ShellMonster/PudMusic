@@ -90,7 +90,6 @@ var themePresets = []struct {
 	preset app.ThemePreset
 	label  string
 }{
-	{app.ThemePresetCobalt, "钴蓝"},
 	{app.ThemePresetWarmPaper, "暖纸"},
 	{app.ThemePresetDuskAmber, "暮光"},
 	{app.ThemePresetSoftPeach, "柔雾"},

@@ -8,14 +8,14 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 )
 
-// TestThemePresetDefaultsToCobalt：默认是钴蓝。
-func TestThemePresetDefaultsToCobalt(t *testing.T) {
-	if got := app.DefaultSettings("").ThemePreset; got != app.ThemePresetCobalt {
-		t.Fatalf("默认方案是 %q，想要钴蓝", got)
+// TestThemePresetDefaultsToWarmPaper：默认是暖纸。
+func TestThemePresetDefaultsToWarmPaper(t *testing.T) {
+	if got := app.DefaultSettings("").ThemePreset; got != app.ThemePresetWarmPaper {
+		t.Fatalf("默认方案是 %q，想要暖纸", got)
 	}
 }
 
-// TestThemePresetLoad：认识的方案原样读回，不认识的、空的退回默认钴蓝而不是报错。
+// TestThemePresetLoad：认识的三套原样读回，不认识的、空的退回默认暖纸而不是报错。
 func TestThemePresetLoad(t *testing.T) {
 	cases := []struct {
 		raw  string
@@ -28,10 +28,9 @@ func TestThemePresetLoad(t *testing.T) {
 		{`"ink-paper"`, app.ThemePresetInkPaper},
 		{`"sandalwood"`, app.ThemePresetSandalwood},
 		{`"indigo-night"`, app.ThemePresetIndigoNight},
-		{`"cobalt"`, app.ThemePresetCobalt},
 		{`"classic"`, app.ThemePresetClassic},
-		{`""`, app.ThemePresetCobalt},
-		{`"neon"`, app.ThemePresetCobalt},
+		{`""`, app.ThemePresetWarmPaper},
+		{`"neon"`, app.ThemePresetWarmPaper},
 	}
 	for _, c := range cases {
 		path := filepath.Join(t.TempDir(), "settings.json")

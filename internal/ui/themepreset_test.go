@@ -12,7 +12,7 @@ import (
 // allPresets 是「除经典外」的全部方案。新增方案必须加进这份清单——下面那几条
 // 对比度/覆盖/弹窗底色的检查都按它逐套跑。
 var allPresets = []app.ThemePreset{
-	app.ThemePresetCobalt, app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
 	app.ThemePresetCeladon, app.ThemePresetInkPaper, app.ThemePresetSandalwood,
 	app.ThemePresetIndigoNight,
 }
@@ -34,34 +34,6 @@ func presetRatio(a, b mygoui.Color) float64 {
 		x, y = y, x
 	}
 	return (x + 0.05) / (y + 0.05)
-}
-
-func TestCobaltPresetMatchesPrototypeTokens(t *testing.T) {
-	cases := []struct {
-		dark                        bool
-		bg, sidebar, surface2       string
-		text1, text2, accent, onAcc string
-		radius, rowHeight, radiusLg float32
-	}{
-		{false, "#EDEEF1", "#FFFFFF", "#F4F5F7", "#0E0F12", "#4A4E57", "#2D3FE0", "#FFFFFF", 12, 64, 24},
-		{true, "#0F1013", "#1A1B20", "#15161A", "#F2F3F5", "#B4B8C2", "#7B8BFF", "#0E0F12", 12, 64, 24},
-	}
-	for _, tc := range cases {
-		sk, shape, ok := presetSkinFor(app.ThemePresetCobalt, tc.dark)
-		if !ok {
-			t.Fatalf("dark=%v：找不到 cobalt 方案", tc.dark)
-		}
-		got := []string{sk.bg, sk.sidebar, sk.surface2, sk.text1, sk.text2, sk.accent, sk.onAccent}
-		want := []string{tc.bg, tc.sidebar, tc.surface2, tc.text1, tc.text2, tc.accent, tc.onAcc}
-		for i := range want {
-			if got[i] != want[i] {
-				t.Errorf("dark=%v token[%d]=%q，want %q", tc.dark, i, got[i], want[i])
-			}
-		}
-		if shape.radius != tc.radius || shape.rowHeight != tc.rowHeight || shape.radiusLg != tc.radiusLg {
-			t.Errorf("dark=%v shape=%+v，want radius=%v rowHeight=%v radiusLg=%v", tc.dark, shape, tc.radius, tc.rowHeight, tc.radiusLg)
-		}
-	}
 }
 
 // TestClassicPresetChangesNothing：经典方案和没有这个功能时拼出来的主题一字不差
@@ -244,7 +216,7 @@ func TestTheSelectedSideItemIsSolidAndReadable(t *testing.T) {
 }
 
 // TestThePresetCardsAreRowsOfFourEqualCards：皮肤页「主题方案」是**每行三张**
-// 等宽的货架卡（九套方案折成 3 / 3 / 3 三行），名字都画得出来、没被省略号
+// 等宽的货架卡（八套方案折成 3 / 3 / 2 三行），名字都画得出来、没被省略号
 // 吃掉；各行的左缘齐在一条线上。（原来是设置页每行四张的小卡，换成网易
 // 云那种货架式之后是每行三张的大卡。）
 func TestThePresetCardsAreRowsOfFourEqualCards(t *testing.T) {

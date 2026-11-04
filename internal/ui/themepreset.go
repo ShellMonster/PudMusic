@@ -107,13 +107,6 @@ var presets = map[app.ThemePreset]preset{
 		dark:  presetSkin{"#121722", "#171D2B", "#1D2433", "#262F42", "#E5EAF2", "#97A2B8", "#7AA5E8", "#0C1120", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
 		shape: presetShape{radius: 8, rowHeight: 40, radiusLg: 12},
 	},
-	app.ThemePresetCobalt: {
-		// cobalt：PudMusic 新原型的钴蓝体系。浅色以 #EDEEF1 为窗口底，
-		// 深色独立使用近黑底；强调色在深色下提亮，并压深字保证可读性。
-		light: presetSkin{"#EDEEF1", "#FFFFFF", "#FFFFFF", "#F4F5F7", "#0E0F12", "#4A4E57", "#2D3FE0", "#FFFFFF", 0.13, 0.14, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#0F1013", "#1A1B20", "#1A1B20", "#15161A", "#F2F3F5", "#B4B8C2", "#7B8BFF", "#0E0F12", 0.18, 0.12, 0.60, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 12, rowHeight: 64, radiusLg: 24},
-	},
 }
 
 // presetSkinFor 取方案在这一档深浅下的颜色；经典（或不认识的名字）返回 false。
