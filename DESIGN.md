@@ -261,7 +261,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 
 **被 §0′ 覆盖**：下面「设置页」「登录页」「对话框 / 确认框」「更新弹窗」「关于」「皮肤页」各节里和这里冲突的数（内容段 780 封顶 / 控件列 340 / 行标题 16·500 / 说明 14 / 分组间 24 / 分段控件药丸 / 4 个 Tab 的名字 / 弹窗标题 16·400 / 确认框图标与色调确认键等）一律作废。数值来源是原型 `index.html` 491–544、639–646、821–824 行和 `app.js` 的 `SETTINGS` / `PAGES.login` / `openUpdate`。
 
-**页面骨架**（`settings_page.go`）：`.page` 内边距 `8 / padX / 64`（`padX`、底边按**窗口宽**：`space.PageHorizontalForWindow` > 1024 → 40、> 760 → 32、否则 16；`PageBottomForWindow` ≤ 760 → 48），最大宽 1280 居中；页头 `pud.PageHeadAt`（Eyebrow `Preferences` + 宋体 700「设置」，标题 `scale.PageTitleForWindow` = clamp(32, 3.4vw, 48)，行高 1.15）；下面 `.set-layout`：左 180 宽分类导航 + 缝 48 + 右边内容，上距 24；窗口 ≤ 1024 时一列、缝 24、导航横排（缝 8）。导航项：上下 10 左右 12、圆角 8、图标 16 隔 10、次要色；悬停 hover 底 + 正文色；当前项 surface-2 底 + 正文色 600。六个 Tab：常规 / 外观 / 菜单 / 快捷键 / 代理 / 关于。
+**页面骨架**（`settings_page.go`）：`.page` 内边距 `8 / padX / 64`（`padX`、底边按**窗口宽**：`space.PageHorizontalForWindow` > 1024 → 40、> 760 → 32、否则 16；`PageBottomForWindow` ≤ 760 → 48），最大宽 1280 居中；页头 `pud.PageHead(…, winW, …)`（Eyebrow `Preferences` + 宋体 700「设置」，标题 `scale.PageTitleFluid(winW)` = clamp(32, 3.4vw, 48)，行高 1.15）；下面 `.set-layout`：左 180 宽分类导航 + 缝 48 + 右边内容，上距 24；窗口 ≤ 1024 时一列、缝 24、导航横排（缝 8）。导航项：上下 10 左右 12、圆角 8、图标 16 隔 10、次要色；悬停 hover 底 + 正文色；当前项 surface-2 底 + 正文色 600。六个 Tab：常规 / 外观 / 菜单 / 快捷键 / 代理 / 关于。
 
 **行与卡**（`settings_widgets.go`）：`.set-group` 下空 40、最宽 720，小标题宋体 20 下空 12；`.set-card` 1px line、圆角 12、surface 底；`.set-row` 上下 16 左右 20、最小高 64、缝 16，行间 1px line；标题 14 / 500、说明 13 text-2，两者之间空 16（`--od-gap`）。**所有正文行高 1.55**（`leading.Body`，原型 `body { font: 400 14px/1.55 }`）。下拉 `dropSelect`：高 36、左 12 右 10、圆角 8、line-strong 描边、surface-2 底、13 号字 + 14 的向下箭头（text-3）；展开面板是 `.pop`（surface、line、圆角 12、`--shadow-pop`、内边距 8、最小宽 200），选项 `PopOpt` 的样子（选中 accent-text 600 + 对勾 14）。开关 `pud.Switch`（44×26）。
 
@@ -288,8 +288,8 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 **页面外壳**（`internal/ui/listpage.go` 的 `pudPage`）：内容区居中、最宽 1280、上 8；**断点和流式字号一律按窗口宽 winW**
 （原型的视口）——左右页边距 `space.PageHorizontalForWindow(winW)`（> 1024 为 40、> 760 为 32、其余 16）；页头一律
 `pud.PageHead(…, winW, …)`：Eyebrow 11 + 宋体 700 标题，字号 `scale.PageTitleFluid(winW)` = clamp(32, 3.4vw, 48)（1200 → 40.8），
-行高 1.15 = `leading.DisplayTitle`，导语行高 1.55 = `leading.Body`。窗口宽 ≤ 1180 去掉曲目行的「专辑」列
-（`pud.SetAlbumHidden`，页面外壳每帧设）。
+行高 1.15 = `leading.PageTitle`，导语行高 1.55 = `leading.Body`。窗口宽 ≤ 1180 去掉曲目行的「专辑」列
+（`pud.SetAlbumHidden`，页面外壳每帧设；首页等不走外壳的页用 `pud.AlbumShown` / `pud.AlbumHidden` 直接说）。
 
 **曲目行**（`widgets/list` 的 `SetPudRows(true)` 之后走 `pud.TrackRow`，默认关）：行高 60（紧凑 44）、
 列 `40 | 标题 2.2fr | 专辑 1.2fr | UP 主 1fr | 播放/弹幕 88 | 时长 56 | 操作 96`、列隔 16、左右 12；

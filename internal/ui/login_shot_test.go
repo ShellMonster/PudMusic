@@ -123,7 +123,7 @@ func shotNotFound(t *testing.T, dir, name string, dark bool) {
 	s, tt := b.s, b.tt
 	s.navigate("/没有这一页")
 	waitFrames(t, tt, "404 画出来了", func() bool {
-		return tt.HasText("404")
+		return tt.HasText("这一页走丢了")
 	})
 	save(t, dir, fmt.Sprintf("114-404-回到主页-%s.png", name), tt)
 	b.Close()
