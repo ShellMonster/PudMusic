@@ -267,6 +267,10 @@ func TestRenderFullPlayerOnlineShot(t *testing.T) {
 			waitFrames(t, tt, "满屏开出来了", func() bool { return tt.HasText("NOW PLAYING · 1 / 1") })
 			settleFull(t, tt)
 			save(t, dir, name+"-full-online.png", tt)
+			s.full.popQuality = true
+			tt.Frame()
+			settleFull(t, tt)
+			save(t, dir, name+"-full-online-pop-quality.png", tt)
 		})
 	}
 }

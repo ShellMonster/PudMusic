@@ -321,7 +321,7 @@ func (s *Shell) viewFullQuality(c *ui.Context, st app.State) {
 		cur := app.BiliToPref
 		for _, q := range qualityChoices {
 			q := q
-			if pud.PopOpt(c, "full:q:"+q.Label(), q.Label(), "", cur(q) == st.QualityPref).Clicked() {
+			if pud.PopOpt(c, "full:q:"+q.Label(), q.Label(), qualityNote(q), cur(q) == st.QualityPref).Clicked() {
 				s.closeFullPops()
 				if cur(q) != st.QualityPref {
 					s.app.SetAudioQuality(q)
@@ -330,6 +330,26 @@ func (s *Shell) viewFullQuality(c *ui.Context, st app.State) {
 			}
 		}
 	})
+}
+
+// qualityNote 是音质选项名字下面那行小字（原型 `opt(..., sub)`：`FLAC 16bit` / `AAC 320k`）。
+//
+// ⚠️ 原型里的编码和位深是假数据；这里只写 B 站音质档本身的说法（`bili.Quality.Label` 里那几个码率：
+// 192K / 128K / 64K，以及无损 / 杜比的名字），不编没有出处的编码参数。
+func qualityNote(q bili.AudioQuality) string {
+	switch q {
+	case bili.AudioLossless:
+		return "Hi-Res / FLAC 无损"
+	case bili.AudioDolby:
+		return "杜比全景声"
+	case bili.AudioHigh:
+		return "192K"
+	case bili.AudioMedium:
+		return "128K"
+	case bili.AudioLow:
+		return "64K"
+	}
+	return ""
 }
 
 // fullRateText 是倍速的字：`1×` / `1.25×`。

@@ -98,6 +98,17 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, r ui.Rect, phase app.
 			s.viewVideoWindow(c, phase, r.W, r.H, false)
 			return
 		}
+		// 封面还没来 / 没有封面：原型的占位是外面那层 `rgba(255,255,255,.06)`，中间一枚 text-3 的图片图标
+		// （`imgcache` 自己的占位按**当前主题**上色，浅色主题下会在这块固定暗底上亮成一块白）。
+		if st.CoverURL == "" || !s.pageImages().GetSized(st.CoverURL, r.W, r.H).Ready() {
+			ui.Box(c).Key("full-cover-empty").Size(r.W, r.H).Center().Label("当前封面").Children(func() {
+				ui.Icon(c, pud.Icon("image")).FontSize(r.W * 0.18).TextColor(tok.Full.Text3)
+			})
+			if s.app.VideoAvailable() {
+				s.viewVideoBadge(c)
+			}
+			return
+		}
 		id := coverIdentity(s, st)
 		cover := imgcache.ViewFlat(c, s.pageImages(), st.CoverURL, r.W, r.H, tok.R8).
 			Label("当前封面").Key(s.fullCoverKeyFor(st.CoverURL))
