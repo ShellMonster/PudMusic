@@ -371,11 +371,6 @@ func TestRenderPlayBarColorShots(t *testing.T) {
 		tt.Frame()
 		save(t, dir, "A3-播放条-倍速浮层-"+name+".png", tt)
 
-		// A4：音量浮层——32×160 的竖滑块、16 的旋钮、12 号字的百分比。
-		tt, _ = bottomBarTester(t, fullBarState(), 1200, 360, dark)
-		hoverVolumeKey(t, tt)
-		save(t, dir, "A4-播放条-音量浮层-"+name+".png", tt)
-
 		// A5：图标键悬停——图形变主色（不是只多一层淡底）。
 		tt, _ = bottomBarTester(t, fullBarState(), 1200, 360, dark)
 		mode, ok := tt.Find("播放模式")

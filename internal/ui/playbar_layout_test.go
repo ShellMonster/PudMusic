@@ -692,19 +692,11 @@ func TestRenderPlayBarRedoShots(t *testing.T) {
 			save(t, dir, fmt.Sprintf("70-播放条-%d-%s.png", width, name), tt)
 		}
 
-		// 音量浮层开着：一根竖滑块 + 底下的百分比。
-		//
-		// ⚠️ **这一张把播放条摆在窗口底下**（真窗口里它就在那儿）：浮层是从
-		// 播放条**往上**弹的，摆在顶上就被窗口裁掉半张。
-		tt, _ := bottomBarTester(t, barState(), 1200, 320, dark)
-		hoverVolumeKey(t, tt)
-		save(t, dir, "72-播放条-音量浮层-"+name+".png", tt)
-
 		// 封面悬停：那一层黑罩和它正中那枚箭头（票 #173 把它放到 32）。
 		//
 		// ⚠️ **必须悬停才有**：那一层是 `wrap.Hovered()` 才画的，而箭头是**白色
 		// 92%** 压在 50% 的黑罩上——不悬停就只剩一块空的封面。
-		tt, _ = playbarTester(t, barState(), 1200, playbarHeight, dark)
+		tt, _ := playbarTester(t, barState(), 1200, playbarHeight, dark)
 		cover, ok := tt.Find("当前封面")
 		if !ok {
 			t.Fatalf("画面上找不到封面，文字有 %q", tt.Texts())
@@ -789,21 +781,4 @@ func bottomBarTester(t *testing.T, st app.State, width, height int, dark bool) (
 	tt := b.tt
 	tt.Frame()
 	return tt, b.s
-}
-
-// hoverVolumeKey 把指针停在音量图标上，等那 300 毫秒过去（浮层是悬停**一会儿**
-// 才出来的，上游那个 Tooltip 的 `delay={300}`）。
-//
-// ⚠️ **必须推钟**：无头 Tester 的钟站着不动（只有 `Advance` 能推它），而那
-// 300 毫秒是框架的**动画**在走——不推钟它永远走不完，于是浮层永远不出来。
-// 这一条是「用 `tt.Advance(d)` 配 `tt.FramePending()`」那个写法（CLAUDE.md §2）。
-func hoverVolumeKey(t *testing.T, tt *mygoui.Tester) {
-	t.Helper()
-	icon, ok := volumeKeyOnTheBar(tt)
-	if !ok {
-		t.Fatalf("播放条上找不到音量那一枚，文字有 %q", tt.Texts())
-	}
-	tt.Move(icon.X+icon.W/2, icon.Y+icon.H/2)
-	tt.Advance(volHoverDelay)
-	tt.Frame()
 }

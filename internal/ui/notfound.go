@@ -43,7 +43,6 @@ func (s *Shell) syncRoute() {
 //   - `partOpen`（分集浮层，框架 `Popover`）；
 //   - `rateOpen`（倍速菜单，框架 `Popover`）；
 //   - `sleepOpen`（睡眠定时，`Popover`）；
-//   - `volOpen`（音量，`Popover`）；
 //   - `errDetailOpen`（播放条「错误详情」，`Popover`）；
 //   - `searchSuggest`（搜索联想面板，`PopoverBase`）；
 //   - `avatarMenuOpen`（头像下拉，`PopoverBase`）；
@@ -94,7 +93,6 @@ func (s *Shell) closeOverlaysForNav() {
 	s.partOpen = false
 	s.rateOpen = false
 	s.sleepOpen = false
-	s.volOpen = false
 	s.errDetailOpen = false
 	s.searchSuggest = false
 	s.avatarMenuOpen = false

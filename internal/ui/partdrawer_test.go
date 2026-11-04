@@ -578,7 +578,7 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 			// 不许被花掉的那几样。
 			for _, what := range []string{
 				"播放进度", // 进度条：拖一个位置要点半天，那不是不好用，是用不了
-				"播放模式", "下载", "加歌",
+				"播放模式", "下载当前歌曲",
 			} {
 				if without[what] == 0 || with[what] == 0 {
 					t.Fatalf("宽度 %d：%q 有一档量不到（单 P %.0f / 多 P %.0f）——"+
@@ -600,10 +600,10 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 					t.Fatalf("宽度 %d：%q 有一档量不到（单 P %.0f / 多 P %.0f）——"+
 						"量的是「它有多宽」，量不到就没法比", width, what, without[what], with[what])
 				}
-				if d := widthGap(without[what] - with[what]); d > partsKeyWidth {
+				// 原型把分集键放进了右列（绝对定位），左列的歌名 / UP 名一个像素都不让。
+				if d := widthGap(without[what] - with[what]); d > partsWidthSlack {
 					t.Errorf("宽度 %d：「%s」单 P %.1f / 多 P %.1f（让位 %.1f）——"+
-						"它只能让出这个键自己那一格（%d）", width, what, without[what], with[what],
-						d, partsKeyWidth)
+						"分集键在右列，不该挤左列", width, what, without[what], with[what], d)
 				}
 			}
 
@@ -806,7 +806,7 @@ func playbarWidths(t *testing.T, width int, pages []any) map[string]float32 {
 	for _, what := range []string{
 		"分集", "一首歌的名字很长很长很长很长",
 		"一个非常非常非常非常非常非常长的 UP 主名字",
-		"播放进度", "播放模式", "下载", "加歌",
+		"播放进度", "播放模式", "下载当前歌曲",
 	} {
 		if r, ok := tt.Find(what); ok {
 			out[what] = r.W

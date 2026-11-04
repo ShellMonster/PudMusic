@@ -121,7 +121,7 @@ func TestEveryPageViewIsGuarded(t *testing.T) {
 //   - `partOpen`（分集浮层）：框架 `Popover`——「点外面自己关」那一条对**换页**
 //     无效（换页不是「点外面」），所以得显式收。
 //   - `rateOpen`（倍速菜单）：同上，框架 Popover。
-//   - `sleepOpen` / `volOpen` / `errDetailOpen`（播放条上同款的 Popover）。
+//   - `sleepOpen` / `errDetailOpen`（播放条上同款的 Popover）。
 //   - `searchSuggest`（搜索联想，`PopoverBase`）/ `avatarMenuOpen` /
 //     `dynMenuOpen`（同款 PopoverBase）。
 //   - `full.partsOpen`（满屏的分集面板）与 `lyric` / `fullLyric` 各自的
@@ -156,11 +156,10 @@ func TestEveryPageViewIsGuarded(t *testing.T) {
 // 自己收回去，和 `partOpen` 是同一个坑；而 `tt.SetFocused(true)` 无头窗口默认
 // 是没焦点的，少这一句点了也白点）。
 //
-// ⚠️ **其余几枚是「置位就够了」**：`sleepOpen` / `volOpen` / `errDetailOpen` /
+// ⚠️ **其余几枚是「置位就够了」**：`sleepOpen` / `errDetailOpen` /
 // `avatarMenuOpen` / `dynMenuOpen` / `queueClearOpen` /
 // `full.partsOpen` / `lyric` 与 `fullLyric` 的 `offsetOpen`/`fontOpen`——
-// 它们都是「点了开、不点不收」的普通标志（`volOpen` 有个闲置宽限，但下一帧
-// 断言时远没到点），没有 `partOpen`/`searchSuggest` 那种每帧收回的分支。
+// 它们都是「点了开、不点不收」的普通标志（音量浮层已随原型改成内联滑块删除），没有 `partOpen`/`searchSuggest` 那种每帧收回的分支。
 func openAllOverlays(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	t.Helper()
 	// ⚠️ **搜索联想不在这里开**（单独有 `TestNavigatingClosesTheSuggest`）：
@@ -172,7 +171,6 @@ func openAllOverlays(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	s.queueClearOpen = true
 	s.rateOpen = true
 	s.sleepOpen = true
-	s.volOpen = true
 	s.errDetailOpen = true
 	s.avatarMenuOpen = true
 	s.dynMenuOpen = true
@@ -196,7 +194,6 @@ func overlaysStillOpen(s *Shell) map[string]bool {
 		"分集浮层":    s.partOpen,
 		"倍速菜单":    s.rateOpen,
 		"睡眠定时":    s.sleepOpen,
-		"音量浮层":    s.volOpen,
 		"错误详情":    s.errDetailOpen,
 		"头像下拉":    s.avatarMenuOpen,
 		"动态卡片菜单":  s.dynMenuOpen,
