@@ -187,9 +187,9 @@ func TestTheStatsRouteIsRegistered(t *testing.T) {
 	if got := lookup(statsPath).Match; got != statsPath {
 		t.Errorf("lookup(%q) 认出的是 %q", statsPath, got)
 	}
-	// ⚠️ **它不进侧栏**：它的入口是顶栏那枚图标。
-	if lookup(statsPath).InMenu {
-		t.Errorf("统计那一页进了侧栏菜单（它的入口是顶栏那枚图标）")
+	// 原型把它放进侧栏（设置之前），顶栏上的统计图标没有了。
+	if !lookup(statsPath).InMenu {
+		t.Errorf("统计那一页没进侧栏菜单（原型的入口在侧栏）")
 	}
 }
 

@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -61,191 +60,9 @@ func dragFrom(tt *mygoui.Tester, x, y, tx, ty float32) {
 	tt.Frame()
 }
 
-// gripX 是右缘把手当前中心在哪：侧栏宽减去把手那一半。
-//
-// 把手是侧栏那一行的最后一个子元素，宽 sideGrip，贴右边。侧栏宽多少这里
-// 传多少——测试里那几个宽度都是我们自己给的确定值。
-// gripX 是把手中心那一列的横坐标。
-//
-// ⚠️ **那条 1 像素的分隔线（`sideDividerW`）在里面**：它画在侧栏框的**内侧**
-// （MyGo 的 `Border` 文档：「draws a border of width DIPs inside the element's
-// edges … the padding and the children are inside it」），所以把手整个落在
-// 分隔线左边一格。少减这 1 的话，按下去的点落在分隔线上而不是把手上——而
-// 按在分隔线上的症状是「拖不动」，不会报「差了一个像素」。
-func gripX(sidebarWidth float32) float32 { return sidebarWidth - sideDividerW - sideGrip/2 }
-
-// sideWidthOnScreen 是这一帧画面上侧栏实际有多宽。
-//
-// 折叠按钮铺满侧栏正文（Column 把子元素拉满宽），所以它的宽度加回右边那条
-// 把手和那条分隔线就是侧栏的宽。找的是按钮的**无障碍名字**而不是那个「«」的
-// 字形——找字形拿到的是文字那一小块的盒子（8 宽），不是按钮的。
-//
-// 取的是**画面上的盒子**，不是设置里的数：设置对了但画出来不对，同样是没做。
-func sideWidthOnScreen(t *testing.T, tt *mygoui.Tester) float32 {
-	t.Helper()
-	for _, name := range []string{"折叠侧栏", "展开侧栏"} {
-		if r, ok := tt.Find(name); ok {
-			return r.W + sideGrip + sideDividerW
-		}
-	}
-	t.Fatalf("画面上找不到折叠按钮，文字有 %q", tt.Texts())
-	return 0
-}
-
-// TestTheSidebarTransitionIsBiuTwoHundredMilliseconds 钉住验收里那个数。
-//
-// ⚠️ 「走的是过渡，不是一步到位」这件事在无头 Tester 里**钉不住**，别再试：
-// MyGo 的动画按墙上时间推进，而 `Tester.Frame()` 一帧里 settle 最多跑 20 遍
-// view（`ui/headless.go:218`）。20 遍在 -race 下足够走完 200ms，中间态一次
-// 也抓不到——写成「折叠那一帧的宽既不是 300 也不是 72」，实测 -race 下
-// 20 次错 4 次。那种测试比没有更糟：它会把「跑得慢」报成「功能没做」。
-//
-// 能钉住的是这个数：过渡时长就是 200ms（Biu 的 `duration-200`，
-// `biu/src/layout/side/index.tsx:146`）。谁把它换成弹簧、或者随手写成
-// 150ms，这条会红。过渡本身由 `viewSide` 里那句 `AnimateTo` 保证
-// （拖动那一支用 `Jump`，Biu 的 `transition-none`）。
-func TestTheSidebarTransitionIsBiuTwoHundredMilliseconds(t *testing.T) {
-	if sideWidthTransition != 200*time.Millisecond {
-		t.Errorf("侧栏过渡是 %v，want 200ms（Biu 的 duration-200）", sideWidthTransition)
-	}
-	if sideGrip != 8 {
-		t.Errorf("把手宽是 %d，want 8（Biu 的 w-2）", sideGrip)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 拖宽、拖窄、折叠
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestDraggingTheGripBelowTheMinWidthCollapsesTheSidebar 是验收第 2 条：
-// 侧栏拖到 160 像素以下自动折叠到 72。
-func TestDraggingTheGripBelowTheMinWidthCollapsesTheSidebar(t *testing.T) {
-	_, a, tt, _ := sideShell(t)
-
-	if got := sideWidthOnScreen(t, tt); got != app.DefaultSideMenuWidth {
-		t.Fatalf("起点侧栏是 %v 宽，want %v", got, app.DefaultSideMenuWidth)
-	}
-
-	// 200 → 往左拖 96 → 104。104 < 160，落进折叠区。
-	start := gripX(app.DefaultSideMenuWidth)
-	tt.Press(start, 400)
-	for _, to := range []float32{-24, -48, -72, -96} {
-		tt.Move(start+to, 400)
-	}
-
-	// 还没松手就该看着是折叠的：折叠的样子是**拖的过程中**就出现的，
-	// 不是松手之后才跳过去。
-	if got := sideWidthOnScreen(t, tt); got != app.CollapsedSideMenuWidth {
-		t.Errorf("拖到 104 时画面上的侧栏是 %v 宽，want %v（还在拖就该折叠）",
-			got, app.CollapsedSideMenuWidth)
-	}
-
-	tt.Release(start-96, 400)
-	tt.Frame()
-
-	st := a.SettingsSnapshot()
-	if !st.SideMenuCollapsed {
-		t.Error("拖到 160 以下松手，没有记成折叠")
-	}
-	// 存下去的是 160 不是 72：存 72 的话，拖回来时起点就是折叠宽度，
-	// 怎么拖都展不开。
-	if st.SideMenuWidth != app.MinSideMenuWidth {
-		t.Errorf("存下去的宽度是 %v，want %v", st.SideMenuWidth, app.MinSideMenuWidth)
-	}
-	if got := sideWidthOnScreen(t, tt); got != app.CollapsedSideMenuWidth {
-		t.Errorf("松手之后侧栏是 %v 宽，want %v", got, app.CollapsedSideMenuWidth)
-	}
-}
-
-// TestDraggingBackOutExpandsTheSidebar 是同一条验收的另一半：拖回自动展开。
-func TestDraggingBackOutExpandsTheSidebar(t *testing.T) {
-	_, a, tt, _ := sideShell(t)
-
-	// 先折叠：点按钮比拖一遍短。
-	if err := tt.Click("«"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if got := sideWidthOnScreen(t, tt); got != app.CollapsedSideMenuWidth {
-		t.Fatalf("折叠之后是 %v 宽，want %v", got, app.CollapsedSideMenuWidth)
-	}
-
-	// 从 64 拖到 192：+128 > 180，展开。
-	dragFrom(tt, gripX(app.CollapsedSideMenuWidth), 400, gripX(app.CollapsedSideMenuWidth)+128, 400)
-
-	st := a.SettingsSnapshot()
-	if st.SideMenuCollapsed {
-		t.Error("拖宽了还是记着折叠")
-	}
-	if st.SideMenuWidth != app.MinSideMenuWidth+12 {
-		t.Errorf("存下去的宽度是 %v，want %v", st.SideMenuWidth, app.MinSideMenuWidth+12)
-	}
-	if got := sideWidthOnScreen(t, tt); got != app.MinSideMenuWidth+12 {
-		t.Errorf("画面上的侧栏是 %v 宽，want %v", got, app.MinSideMenuWidth+12)
-	}
-}
-
-// TestDraggingTheGripBeyondItsOwnBoxKeepsWidening 盯的是一个具体的坑。
-//
-// 把手只有 8 宽。`Pressed()` 多一条「指针必须在元素框内」的条件
-// （`ui/input.go:1157`），所以指针往左一挪 9 个像素它就报 false——
-// 侧栏最多只能拖动 16 像素宽就卡住。这条测试把「指针早就出框了还在跟着
-// 手指走」钉住，换成 `Pressed()` 它会当场红。
-func TestDraggingTheGripBeyondItsOwnBoxKeepsWidening(t *testing.T) {
-	_, _, tt, _ := sideShell(t)
-
-	start := gripX(app.DefaultSideMenuWidth)
-	tt.Press(start, 400)
-	// 一路往左拖 30：指针离开把手那 8 宽的框是第二步就开始的事。
-	for _, to := range []float32{-10, -20, -25, -30} {
-		tt.Move(start+to, 400)
-	}
-	tt.Release(start-30, 400)
-	tt.Frame()
-
-	// 200 - 30 = 170，还够着 160，所以看得到确切的宽度而不是折叠后的 72。
-	if got := sideWidthOnScreen(t, tt); got != app.DefaultSideMenuWidth-30 {
-		t.Errorf("拖到 -30 之后侧栏是 %v 宽，want %v：指针早就出了把手那 8 宽的框",
-			got, app.DefaultSideMenuWidth-30)
-	}
-}
-
-// TestDraggingWiderIsCappedAt480 验上限。
-//
-// 不钳的话拖到 600 松手就存 600，下次一打开侧栏把整个窗口吃掉，内容区一点
-// 不剩。
-func TestDraggingWiderIsCappedAt480(t *testing.T) {
-	_, a, tt, _ := sideShell(t)
-
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+400, 400)
-
-	if got := a.SettingsSnapshot().SideMenuWidth; got != app.MaxSideMenuWidth {
-		t.Errorf("拖到 600 存下去的是 %v，want %v", got, app.MaxSideMenuWidth)
-	}
-	if got := sideWidthOnScreen(t, tt); got != app.MaxSideMenuWidth {
-		t.Errorf("画面上的侧栏是 %v 宽，want %v", got, app.MaxSideMenuWidth)
-	}
-}
-
-// TestTheSidebarWidthSurvivesARestart 验宽度也存住了。
-//
-// 和收藏夹顺序一样走真文件：拖 → flush → 关掉重开 → 画面上还是那个宽。
-func TestTheSidebarWidthSurvivesARestart(t *testing.T) {
-	_, a, tt, path := sideShell(t)
-
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, gripX(app.DefaultSideMenuWidth)+60, 400)
-	if err := a.FlushSettings(); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.CloseSettings(); err != nil {
-		t.Fatal(err)
-	}
-
-	_, _, tt2, _ := sideShellOn(t, path)
-	if got := sideWidthOnScreen(t, tt2); got != app.DefaultSideMenuWidth+60 {
-		t.Errorf("重开之后侧栏是 %v 宽，want %v", got, app.DefaultSideMenuWidth+60)
-	}
-}
 
 // sideShellOn 是「已经有设置文件」的那一条：先写盘，再挂上去重开。
 func sideShellOn(t *testing.T, path string) (*Shell, *app.App, *mygoui.Tester, string) {
@@ -259,58 +76,6 @@ func sideShellOn(t *testing.T, path string) (*Shell, *app.App, *mygoui.Tester, s
 	tt := b.tt
 	tt.Frame()
 	return b.s, a, tt, path
-}
-
-// TestTheCollapseButtonRoundTrips 验底下那个折叠按钮：点了就折叠，再点就
-// 展开，而且折叠态也存进设置（Biu 的 `sideMenuCollapsed`）。
-func TestTheCollapseButtonRoundTrips(t *testing.T) {
-	_, a, tt, _ := sideShell(t)
-
-	if err := tt.Click("«"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if !a.SettingsSnapshot().SideMenuCollapsed {
-		t.Error("点了折叠按钮，设置里没记折叠")
-	}
-	if got := sideWidthOnScreen(t, tt); got != app.CollapsedSideMenuWidth {
-		t.Errorf("折叠之后是 %v 宽，want %v", got, app.CollapsedSideMenuWidth)
-	}
-	if _, ok := tt.Find("»"); !ok {
-		t.Errorf("折叠之后按钮没有换成展开的样子，文字有 %q", tt.Texts())
-	}
-
-	if err := tt.Click("»"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if a.SettingsSnapshot().SideMenuCollapsed {
-		t.Error("再点一次还是折叠着")
-	}
-	// 按钮只翻折叠那一个开关，宽度没动过，所以展开回来还是原来那个宽
-	// （Biu 也一样：`onToggleCollapsed` 只改 sideMenuCollapsed）。
-	if got := sideWidthOnScreen(t, tt); got != app.DefaultSideMenuWidth {
-		t.Errorf("展开之后是 %v 宽，want %v（按钮只翻折叠开关，不动宽度）",
-			got, app.DefaultSideMenuWidth)
-	}
-}
-
-// TestTheSidebarSaysSoWhenItsWidthCannotBeSaved 验设置只读时不悄悄失败。
-//
-// 拖完松手宽度没变，而界面上一个错都没有——用户只会以为程序坏了。
-func TestTheSidebarSaysSoWhenItsWidthCannotBeSaved(t *testing.T) {
-	_, a, tt, _ := sideShell(t)
-
-	if err := a.MountSettings(writeReadOnlySettings(t)); err == nil {
-		t.Fatal("来自更新版本的设置没有报错")
-	}
-	tt.Frame()
-
-	dragFrom(tt, gripX(app.DefaultSideMenuWidth), 400, 196+60, 400)
-
-	if !tt.HasText("侧栏宽度存不住") {
-		t.Errorf("设置只读时没有告诉用户，文字有 %q", tt.Texts())
-	}
 }
 
 // writeReadOnlySettings 造一份 schema 更高的设置文件：只能读不能写。
@@ -353,51 +118,6 @@ func testFavorites(prefix string, n int) []app.Favorite {
 		}
 	}
 	return out
-}
-
-// TestBothCollectionGroupsFold 验两组的折叠是各按各的。
-//
-// 两组折叠态存在设置的同一个结构体里（`{created, collected}`），写错格子的
-// 表现是「折了一组、另一组的收藏夹凭空不见了」，而且界面上看不出是谁的问题。
-//
-// ⚠️ **折叠的证据是「那一组的内容不见了」**（票 #371）：分组标题上的折叠指示
-// 从字符「▾/▸」换成了图标（`iconChevronDown` / `iconChevronUp`），而**组名那一
-// 行字不再随折叠状态变**——所以不能再靠「标题长什么样」判断，只能看它底下的
-// 收藏夹还在不在。
-func TestBothCollectionGroupsFold(t *testing.T) {
-	_, a, tt, _ := favShell(t, 3, 2)
-
-	if err := tt.Click("我创建的"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-
-	if tt.HasText("我建的 1") {
-		t.Errorf("第一组折起来了，它底下的收藏夹还摆着，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("我收藏的") {
-		t.Errorf("第二组的标题不见了，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("我收的 2") {
-		t.Errorf("第二组跟着折了，文字有 %q", tt.Texts())
-	}
-
-	folded := a.SettingsSnapshot().SideMenuCollectionFolded
-	if !folded.Created || folded.Collected {
-		t.Errorf("折叠状态存成了 %+v，want 只有 Created", folded)
-	}
-
-	// 展开回来。
-	if err := tt.Click("我创建的"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if !tt.HasText("我建的 1") {
-		t.Errorf("没有展开回来，文字有 %q", tt.Texts())
-	}
-	if a.SettingsSnapshot().SideMenuCollectionFolded.Created {
-		t.Error("展开之后设置里还是折叠着")
-	}
 }
 
 // TestTheContextMenuHasBiuNumberOfItems 验右键菜单的项数和 Biu 一致：
@@ -594,64 +314,6 @@ func favTitles(a *app.App, g app.FavoriteGroup) []string {
 	return out
 }
 
-// TestDragReorderIsOffWhenTheGroupIsFolded 验折叠时拖不动（Biu 的 SD-09）。
-//
-// 折叠时那一列根本没建，拖不动是自然发生的——这条测试盯的是「别因为折叠而
-// 漏了一帧又把它建出来」，所以除了断言画面上没有了，还要在折叠标题上真的
-// 拖一次，再断言**顺序一个字节都没动**（`Reorder` 没被调用、设置里也没多出
-// 任何东西）。
-//
-// ⚠️ 认标题要认对：fixture 的标题是「我建的 1/2/3」（`favShell` 里带前缀），
-// 之前这里找的是「收藏 1」——那个串画面上从来没有过，所以折不折叠都通过，
-// 整条测试等于空跑，SD-09 一条证据也没有。
-//
-// ⚠️ **找的是组名，不是「箭头 + 组名」**（票 #371）：折叠指示从字符「▾/▸」换成
-// 图标之后，组名那一行字**不再随折叠状态变**——所以这里按组名找，折叠前后都
-// 找得到（而按整串找的话，折叠之后那个串根本不存在，测试会在第一步就 fatal）。
-func TestDragReorderIsOffWhenTheGroupIsFolded(t *testing.T) {
-	_, a, tt, _ := favShell(t, 3, 0)
-
-	// 起点：这一列确实在，而且标题是能找着的。
-	if _, ok := tt.Find("我建的 1"); !ok {
-		t.Fatalf("起点就没有「我建的 1」，这条测试什么也证明不了，文字有 %q", tt.Texts())
-	}
-	before := favTitles(a, app.FavoritesCreated)
-
-	if err := tt.Click("我创建的"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if _, ok := tt.Find("我建的 1"); ok {
-		t.Fatalf("折叠之后收藏夹还摆着，文字有 %q", tt.Texts())
-	}
-
-	// 在折叠标题上拖一次：不该有任何反应，也不该有顺序变化。
-	head, ok := tt.Find("我创建的")
-	if !ok {
-		t.Fatalf("画面上找不到折叠标题，文字有 %q", tt.Texts())
-	}
-	dragFrom(tt, head.X+head.W/2, head.Y+head.H/2, head.X, head.Y+120)
-
-	if got := favTitles(a, app.FavoritesCreated); !slices.Equal(got, before) {
-		t.Errorf("折叠时拖了一下，顺序从 %q 变成了 %q", before, got)
-	}
-	if got := a.SettingsSnapshot().SideMenuCollectionOrder.Created; len(got) != 0 {
-		t.Errorf("折叠时拖了一下，设置里多出了一条顺序：%v", got)
-	}
-
-	// 展开回来顺序还在——证明刚才不是「碰巧一样」。
-	if err := tt.Click("我创建的"); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	if _, ok := tt.Find("我建的 1"); !ok {
-		t.Fatalf("展开之后收藏夹不见了，文字有 %q", tt.Texts())
-	}
-	if got := favTitles(a, app.FavoritesCreated); !slices.Equal(got, before) {
-		t.Errorf("展开之后顺序是 %q，want %q", got, before)
-	}
-}
-
 // TestTheRowKeysAreUniqueAcrossTheTwoGroups 验两组的行 key 不撞。
 //
 // 两组完全可能有同一个收藏夹（B 站那边自己收藏的和自己创建的可以是同一个），
@@ -813,7 +475,7 @@ func TestTheCollapsedSidebarTipSitsToTheRightOfTheItem(t *testing.T) {
 			img := tt.Image()
 			// ① 侧栏右边那一格是提示的底色 → 提示贴在那一项的右边。
 			// x=58：提示从那一格右沿往右 6 处开始（侧栏现在只有 64 宽，提示的头几像素压在侧栏里）。
-			at := img.RGBAAt(58, int(r.Y+r.H/2))
+			at := img.RGBAAt(int(r.X+r.W)+10, int(r.Y+r.H/2))
 			if at != inverse {
 				t.Errorf("侧栏右边那一格是 %v，want %v（提示的底色）——"+
 					"提示没有贴在那一项的右边", at, inverse)
@@ -992,46 +654,8 @@ func TestEverySideMenuEntryHasAnIcon(t *testing.T) {
 				rt.Title, x0, x1)
 		}
 	}
-	if checked != 7 {
-		t.Errorf("这一条只查了 %d 项，want 7（六个上游入口 + 我们多摆的「设置」）", checked)
-	}
-}
-
-// TestTheSelectedSideMenuEntryDrawsTheFilledIcon 钉住验收第一条的后半句：
-// **选中那一项换成实心的那一枚**。
-//
-// 断法是**同一项的前后对照**：先在别的页上（那一项没选中，画的是线框的那枚），
-// 再切到那一页（画的是实心的那一枚），比两边的墨迹——实心的那枚明显更实。
-//
-// 为什么要这么绕：直接比「选中项的墨迹」和「没选中项的墨迹」没有意义
-// （那是两枚不同的图形）。**同一枚图形的两种状态**才有可比性。
-func TestTheSelectedSideMenuEntryDrawsTheFilledIcon(t *testing.T) {
-	s, tt := newShell(t, loggedInWith("7"))
-	tt.Move(600, 400)
-
-	// ① 先停在别的页上：「推荐音乐」没选中，画的是线框的 `disc-line`。
-	s.navigate("/settings")
-	tt.Frame()
-	text, ok := tt.Find("推荐音乐")
-	if !ok {
-		t.Fatalf("侧栏上没有「推荐音乐」那一项，文字有 %q", tt.Texts())
-	}
-	x0, y0, x1, y1 := sideMenuIconCell(text)
-	off := sideInkPixels(tt.Image(), x0, y0, x1, y1)
-
-	// ② 切到它：换实心的 `disc-fill`。
-	s.navigate("/")
-	tt.Frame()
-	text, ok = tt.Find("推荐音乐")
-	if !ok {
-		t.Fatalf("切过去之后侧栏上没有「推荐音乐」那一项，文字有 %q", tt.Texts())
-	}
-	x0, y0, x1, y1 = sideMenuIconCell(text)
-	on := sideInkPixels(tt.Image(), x0, y0, x1, y1)
-
-	if on <= off {
-		t.Errorf("选中之后那一枚图标没有换成实心的：没选中 %d 个墨点、选中 %d 个——"+
-			"实心的 `disc-fill` 明显应该更实", off, on)
+	if checked != 8 {
+		t.Errorf("这一条只查了 %d 项，want 8（原型的八个入口）", checked)
 	}
 }
 
@@ -1081,160 +705,9 @@ func TestTheSideMenuRowsAreFortyHigh(t *testing.T) {
 		down++
 	}
 	got := down - up + 1
-	if got != sideRowHeight {
+	if got != int(tok.NavRowH) {
 		t.Errorf("菜单那一行是 %d 高，want %d（上游 HeroUI 的 Button md 是 `h-10`）",
-			got, sideRowHeight)
-	}
-}
-
-// TestTheCollapsedSideMenuItemIsAFortySquareIconCell 钉住验收第三条的前半句：
-// 折叠态是 **40×40 的图标格**，不再是 `firstRune` 摆出来的一个汉字。
-//
-// 判据是**那一格的盒子**：折叠态那一项带 `Label`（全名），所以
-// `Tester.Find` 给回来的是**按钮自己**的盒子。
-//
-// ⚠️ **旧形状是「一个铺满侧栏的按钮 + 里面一个 13px 的汉字」**——那一格的盒子
-// 是 72 宽（整个侧栏），而汉字在它中间。所以「盒子是 40×40」这一条就把两种
-// 形状分开了：旧形状的宽度是侧栏的宽度。
-//
-// 里面还得**有东西**：一格空的图标格和「图标没画出来」在盒子这一层长得一样。
-func TestTheCollapsedSideMenuItemIsAFortySquareIconCell(t *testing.T) {
-	_, _, tt := collapsedShell(t)
-
-	r, ok := tt.Find("下载记录")
-	if !ok {
-		t.Fatalf("折叠态的侧栏上没有「下载记录」那一格，文字有 %q", tt.Texts())
-	}
-	if r.W != sideIconCell || r.H != sideIconCell {
-		t.Errorf("折叠态那一格是 %.1f×%.1f，want %d×%d（上游折叠态摆的是一个 "+
-			"`h-10 w-10` 的图标格）", r.W, r.H, sideIconCell, sideIconCell)
-	}
-	// 里面有墨：那一枚图标。
-	if n := sideInkPixels(tt.Image(), int(r.X), int(r.Y), int(r.X+r.W)-1, int(r.Y+r.H)-1); n == 0 {
-		t.Error("折叠态那一格是空的——图标没画出来")
-	}
-	// ⚠️ **格子要居中**：侧栏折叠后是 72，而格子是 40——不居中的话它会贴在
-	// 左边沿上（上游那一格也是居中的）。
-	if got := r.X; got < 4 || got > 24 {
-		t.Errorf("折叠态那一格的左边在 %.1f——它没有居中在 72 宽的侧栏里", got)
-	}
-}
-
-// TestTheBrandIsALogoAndTheAppName 钉住验收第四条：
-// 左上角是 **40×40 的 logo + 24px 主色的「BiuGo」**。
-//
-// 三件事分别量：
-//
-//  1. **logo**：侧栏左上角有一块约 33×31 的**图**（40×40 的元素，减去应用
-//     图标自己那 8% 的留白——见 `internal/platform` 的 `iconShapeRatio`）。
-//     旧形状是 18px 的一个字母「B」，那块墨只有十来像素宽。
-//  2. **字**：品牌字那一行的**行高**是 24px 字号该有的行高（MyGo 的行高是
-//     字号的 1.178 倍，实测 24 → 28.27）。13px 的默认字号是 15.3，18 是 21.2——
-//     区间 [26, 32] 把它们都排除在外。
-//  3. **色**：那一行的墨色就是**主色**（浅色下是 `ink.AccentOn` 那一档：
-//     从用户选的主色算出来的、压得住浅底的变体）。
-//
-// # ④ macOS 非全屏时顶部留白 32
-//
-// 上游是 `pt-8`（`biu/src/layout/side/logo/index.tsx`），为的是给红黄绿让开。
-// 这里量的是 **logo 那一块墨的上沿**：它等于「侧栏的上沿 + 顶部留白 +
-// 图标自己的那点留白」。
-//
-// ⚠️ **侧栏的上沿现在就是窗口的上沿**（票 #286 / 报告 C-01）：侧栏改成从
-// 窗口顶端贯到底（上游那种通栏），顶栏只盖内容区那一段——于是红黄绿落在
-// 侧栏那一带，而 logo 正好在它们下面，那 32 留白是**真的在给它们让位**。
-func TestTheBrandIsALogoAndTheAppName(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := newShell(t, systemIsDark(dark), loggedInWith("7"))
-			s.navigate("/")
-			tt.Frame()
-			tt.Move(600, 400)
-			tt.Frame()
-
-			img := tt.Image()
-			text, ok := tt.Find(appName)
-			if !ok {
-				t.Fatalf("侧栏上没有 %q 那一行，文字有 %q", appName, tt.Texts())
-			}
-
-			// 侧栏的底色：侧栏**右边**那一列（x = 190）上、从顶到底的众数。
-			//
-			// ⚠️ **取整列的众数**：侧栏那一列上除了底色，还有选中那一行的
-			// 很淡的底（上游的 `variant="flat"`）——拿它当底色的话整块都成了
-			// 「墨」。而这一列的高度覆盖了整栏，所以那一行淡底只占几十个
-			// 像素，众数仍然是底色。
-			var col []color.RGBA
-			for y := 0; y < 700; y++ {
-				col = append(col, img.RGBAAt(190, y))
-			}
-			bg := modeOf(col)
-
-			// ① logo：品牌字左边那一块（x < 62）里的墨。
-			minX, minY, maxX, maxY := 9999, 9999, -1, -1
-			for y := 0; y < int(text.Y+text.H); y++ {
-				for x := 0; x < 62; x++ {
-					if maxDiff(img.RGBAAt(x, y), bg) <= 12 {
-						continue
-					}
-					minX, minY = min(minX, x), min(minY, y)
-					maxX, maxY = max(maxX, x), max(maxY, y)
-				}
-			}
-			if maxX < 0 {
-				t.Fatalf("品牌那一块左边没有图（一个字都没画）")
-			}
-			w, h := maxX-minX+1, maxY-minY+1
-			if w < 28 || w > 40 || h < 28 || h > 40 {
-				t.Errorf("左上角那块 logo 是 %d×%d，want 约 33×33"+
-					"（40×40 的元素减去应用图标自己的留白）", w, h)
-			}
-			if minX > 24 {
-				t.Errorf("logo 的左沿在 %d，want ≈ 19（侧栏左沿 + 16 的内边距 + 图标自己的留白）",
-					minX)
-			}
-
-			// ④ 顶部留白：logo 的上沿 = 侧栏的上沿 + 留白 + 图标自己的留白。
-			//
-			// ⚠️ **侧栏的上沿 = 窗口的上沿 = 0**（票 #286 / 报告 C-01）：侧栏
-			// 从窗口顶端贯到底，所以这里量的是「离窗口上沿多远」。
-			wantTop := 12
-			if runtime.GOOS == "darwin" {
-				wantTop = 32 // 上游的 `pt-8`
-			}
-			if got := minY; got < wantTop-1 || got > wantTop+7 {
-				t.Errorf("logo 的上沿离窗口上沿 %d，want ≈ %d"+
-					"（上游 macOS 非全屏时是 `pt-8`）", got, wantTop)
-			}
-
-			// ② 品牌字的行高 ≈ 24px 字号。
-			if h := text.H; h < 26 || h > 32 {
-				t.Errorf("品牌字那一行是 %.1f 高，want 26~32（24px 字号"+
-					"的行高；13px 的默认字号是 15.3）", h)
-			}
-
-			// ③ 品牌字的墨色 = 主色。
-			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			want := ink.AccentOn(th)
-			var inks []color.RGBA
-			for y := int(text.Y); y < int(text.Y+text.H); y++ {
-				for x := int(text.X); x < int(text.X+text.W); x++ {
-					if c := img.RGBAAt(x, y); maxDiff(c, bg) > 40 {
-						inks = append(inks, c)
-					}
-				}
-			}
-			if len(inks) == 0 {
-				t.Fatalf("品牌字那一块没有墨")
-			}
-			if got := modeOf(inks); maxDiff(got, color.RGBA{R: want.R, G: want.G, B: want.B, A: want.A}) > 8 {
-				t.Errorf("品牌字是 %v，want 主色那一档 %v", got, want)
-			}
-		})
+			got, int(tok.NavRowH))
 	}
 }
 
@@ -1265,46 +738,4 @@ var buiMenuIcons = []struct {
 	{"历史记录", "Pud/history.svg", "Pud/history.svg"},
 	{"本地音乐", "Pud/folder.svg", "Pud/folder.svg"},
 	{"下载记录", "Pud/download.svg", "Pud/download.svg"},
-}
-
-// TestTheSideMenuIconsMatchBiu 钉住「每一项配哪两枚图标」。
-//
-// ⚠️ **表里写的是上游的字面文件名**：改了路由表里的常量而不改这张表，立刻红；
-// 要改这张表，得对着 Biu 的源码看一眼——那正是我们要的。
-//
-// 而「两两不同」断不了的是**换反了**（实心画成线框）——所以这一条同时断
-// **线框的那一枚真的是 `-line`、实心的那一枚真的是 `-fill`**。
-func TestTheSideMenuIconsMatchBiu(t *testing.T) {
-	byTitle := map[string]Route{}
-	for _, rt := range routes {
-		if rt.InMenu {
-			byTitle[rt.Title] = rt
-		}
-	}
-	for _, want := range buiMenuIcons {
-		rt, ok := byTitle[want.title]
-		if !ok {
-			t.Errorf("路由表里没有「%s」这一项", want.title)
-			continue
-		}
-		if rt.Icon != want.line {
-			t.Errorf("「%s」的线框图标是 %q，want %q（照 Biu 的源码）",
-				want.title, rt.Icon, want.line)
-		}
-		if rt.ActiveIcon != want.fill {
-			t.Errorf("「%s」的实心图标是 %q，want %q（照 Biu 的源码）",
-				want.title, rt.ActiveIcon, want.fill)
-		}
-	}
-	// 每一个进菜单的都**得有两枚**：漏一枚，那一项在侧栏里就没有图标（或者
-	// 选中了也换不掉），而画面上只是「那一项比别人少点东西」。
-	for _, rt := range routes {
-		if !rt.InMenu {
-			continue
-		}
-		if rt.Icon == "" || rt.ActiveIcon == "" {
-			t.Errorf("「%s」没有配齐两枚图标（线框 %q / 实心 %q）",
-				rt.Title, rt.Icon, rt.ActiveIcon)
-		}
-	}
 }

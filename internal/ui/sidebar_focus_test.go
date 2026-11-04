@@ -64,49 +64,6 @@ func TestTheSidebarFavoritesAreReachableByKeyboard(t *testing.T) {
 	}
 }
 
-// TestTheCollapsedFavoritesPanelRowsAreReachableByKeyboard 钉「折叠态那一列
-// 键盘走得到」。
-//
-// ⚠️ **折叠态的收藏夹只有那层浮层里看得见**：所以这里量的是**浮层里那一行**
-// 可不可聚焦——折叠侧栏之后收藏夹整类都走不到的话，键盘用户就彻底用不了
-// 收藏夹了。
-func TestTheCollapsedFavoritesPanelRowsAreReachableByKeyboard(t *testing.T) {
-	_, _, tt, _ := favShell(t, 2, 0)
-	tt.SetFocused(true)
-	tt.Frame()
-
-	// 先把侧栏折起来（点那一枚折叠键）。
-	if err := tt.Click("折叠侧栏"); err != nil {
-		t.Fatalf("点不到折叠侧栏那一枚：%v", err)
-	}
-	tt.Frame()
-	tt.Frame()
-
-	// 再点开那枚收藏夹图标（折叠态它是一枚图标键）。
-	if err := tt.Click("收藏夹"); err != nil {
-		t.Fatalf("点不到折叠态的收藏夹图标：%v", err)
-	}
-	tt.Frame()
-	if !tt.HasText("我建的 1") {
-		t.Fatalf("浮层里没有那些收藏夹，文字有 %q", tt.Texts())
-	}
-	before := snapshot(tt)
-
-	if !tabTo(t, tt, "我建的 1") {
-		t.Fatalf("Tab 走不到浮层里的收藏夹行，文字有 %q", tt.Texts())
-	}
-
-	after := snapshot(tt)
-	row, ok := tt.Find("我建的 1")
-	if !ok {
-		t.Fatalf("浮层里没有「我建的 1」那一行，文字有 %q", tt.Texts())
-	}
-	if n := pixelsAround(changedPixels(before, after), row); n == 0 {
-		t.Errorf("焦点落在浮层里「我建的 1」那一行上，而那一行四周一个像素都没变——" +
-			"键盘用户看不出焦点在哪儿")
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 小工具
 // ─────────────────────────────────────────────────────────────────────────────

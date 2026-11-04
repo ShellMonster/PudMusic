@@ -85,7 +85,7 @@ func TestFourteenRoutes(t *testing.T) {
 // TestParamRoutesMatch 验带参数的路由：/collection/123 要能认出收藏夹那一条。
 func TestParamRoutesMatch(t *testing.T) {
 	for _, p := range []string{"/user/123", "/collection/456", "/collection/a-b_c"} {
-		if got := lookup(p).Title; got != routes[9].Title && got != routes[10].Title {
+		if got := lookup(p).Title; got != "UP 主空间" && got != "收藏夹 / 合集 / 系列" {
 			t.Errorf("lookup(%q) 认出的是 %q", p, got)
 		}
 	}

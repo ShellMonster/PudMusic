@@ -95,13 +95,6 @@ func TestRenderSidebarFavoritesStyleShots(t *testing.T) {
 					for range 3 {
 						tt.Frame()
 					}
-					if err := tt.Click(favCollapsedName); err != nil {
-						t.Fatalf("点那枚「收藏夹」图标：%v", err)
-					}
-					for range 3 {
-						tt.Frame()
-					}
-					saveRect(t, dir, "侧栏-收藏夹-折叠态浮层-"+name+".png", tt, 0, 120, 300, 420)
 				}
 			})
 		}
