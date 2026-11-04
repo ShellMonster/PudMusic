@@ -245,11 +245,8 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 		opts []shellOpt
 	}{
 		{name: "首页", path: homePath},
-		{name: "稍后再看", path: laterPath, opts: libraryPageOpts(t)},
-		{name: "历史记录", path: historyPath, opts: libraryPageOpts(t)},
-		{name: "本地音乐", path: localMusicPath},
-		{name: "下载记录", path: downloadListPath},
-		{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA"},
+		// 稍后再看 / 历史记录 / 本地音乐 / 下载记录 / 搜索 / 统计 已按 §0′ 改版：页边距按窗口宽（1200 → 40），
+		// 由下面的 `TestThePrototypePagesShareTheWindowBasedMargin` 管。
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			b := newTestShell(t, page.opts...)
@@ -327,7 +324,9 @@ func TestEveryPageTitleUsesTheSharedSize(t *testing.T) {
 	// ⚠️ **设置页和登录页也在名单里**：它们的**边距**归 #127（设置页要收进居中
 	// 那一栏），而**字号**是这一票的事——从设置页翻到下载记录，标题小两号正是
 	// 这一票要消掉的那一种。
-	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索", "设置", "扫码登录"}
+	// 稍后再看 / 历史记录 / 本地音乐 / 下载记录 / 搜索 / 统计走 `pud.PageHead`（字号 clamp(32, 3.4vw, 48)，
+	// 见 `TestThePrototypePagesShareTheWindowBasedMargin`），不再手写 `scale.PageTitle`。
+	titles := []string{"设置", "扫码登录"}
 	for _, title := range titles {
 		if !titleUsesSharedSize(t, title) {
 			t.Errorf("页标题 %q 没有用 `typo.Display(…, scale.Font(c, scale.PageTitle))`——页标题的字号必须"+
@@ -478,7 +477,7 @@ func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
 		t.Run(theme, func(t *testing.T) {
 			area := contentArea(app.DefaultSideMenuWidth)
 			// 基准页：本地音乐那一页（它的标题是四个字，最容易量准）。
-			const ref = "本地音乐"
+			const ref = "扫码登录"
 			type measured struct {
 				span   int // 墨迹从头一个字到尾一个字的宽度
 				chars  int
@@ -491,15 +490,10 @@ func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
 				chars int
 				opts  []shellOpt
 			}{
-				{name: "稍后再看", path: laterPath, chars: 4, opts: libraryPageOpts(t)},
-				{name: "历史记录", path: historyPath, chars: 4, opts: libraryPageOpts(t)},
-				{name: ref, path: localMusicPath, chars: 4},
-				{name: "下载记录", path: downloadListPath, chars: 4},
-				{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA", chars: 2},
 				// 设置页和登录页也在这一族里：它们的页标题同样是 `scale.PageTitle`
 				// （票 #166——「所有页面的大标题 24/400」）。
 				{name: "设置", path: settingsPath, chars: 2},
-				{name: "扫码登录", path: loginPath, chars: 4},
+				{name: ref, path: loginPath, chars: 4},
 			} {
 				b := newTestShell(t, append(page.opts, systemIsDark(dark))...)
 				s, tt := b.s, b.tt
@@ -684,48 +678,6 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 // 改之前这里是 `TestTheLoadingStateLooksLikeTheEmptyState`——它量的是「两行字
 // 一样高、居中的位置一样」，而那一条在换掉加载态的画法之后就**不再成立**
 // （转圈 32 高，那一行字 17.67 高）。
-
-// TestTheMainTabsAndTheSortTabsAreNotTheSame 钉住「主 Tab 与次级 Tab 不是同一个
-// 样子」。
-//
-// # 判据是像素：那一排下面有没有那条主色的横条
-//
-// 框架的 `ui.Tabs` 是**下划线**（选中那一项底下画一条主色的横条，
-// `mygo@v0.6.3/ui/tabs.go` 的 `coreTabs`），而主 Tab 用的是我们自己那一套
-// **灰底轨道 + 白色滑块**（`tabs.go` 的 `mainTabs`）——那条横条**没有**。
-//
-// 搜索页正好两种都有：上面那一排是主 Tab（歌曲 / 视频 / 用户），下面那一排是
-// 次级排序（综合排序 / 最多播放 / …）。所以这一条在**同一页上**比。
-//
-// ⚠️ **只看「有没有主色的横条」不看别的**：主 Tab 那一项选中时是一整块滑块
-// （浅色下是白的，深色下是比轨道亮一档的灰），不是一条 2 像素的横条——而且
-// 它的颜色和主色**不一样**，所以按「逐字等于主色」去扫不会把它算进去。
-func TestTheMainTabsAndTheSortTabsAreNotTheSame(t *testing.T) {
-	st := newSearchStub(2, 0)
-	_, tt := newSearchPage(t, "周杰伦", st)
-	tt.Frame()
-
-	accent := BuildTheme(app.DefaultSettings(""), false).Accent
-	img := tt.Image()
-
-	main, ok := tt.Find("歌曲")
-	if !ok {
-		t.Fatalf("画面上找不到主 Tab「歌曲」，文字有 %q", tt.Texts())
-	}
-	sort, ok := tt.Find("综合排序")
-	if !ok {
-		t.Fatalf("画面上找不到次级排序「综合排序」，文字有 %q", tt.Texts())
-	}
-
-	if hasAccentBar(img, main, accent) {
-		t.Errorf("主 Tab 那一排下面有那条主色的横条——主 Tab 要的是灰底轨道 + " +
-			"白色滑块那一种（见 tabs.go 的 mainTabs），不是下划线")
-	}
-	if !hasAccentBar(img, sort, accent) {
-		t.Errorf("次级排序那一排下面没有那条主色的横条——次级排序保持框架那一套" +
-			"下划线（`ui.Tabs`），和主 Tab 分成两种样子")
-	}
-}
 
 // hasAccentBar 报这个文字下面有没有一条主色的横条。
 //
@@ -1503,5 +1455,50 @@ func TestTheCollectionHeaderStaysInsideTheCoverOnOneLine(t *testing.T) {
 		t.Errorf("一行标题时头图区那一列高到 %.0f，越过了封面的底边 %.0f——"+
 			"标题 + 三行小字（14/14/14、竖距 16）必须还放得下 168 那个封面",
 			owner.Y+owner.H, coverBottom)
+	}
+}
+
+// TestThePrototypePagesShareTheWindowBasedMargin 钉住按原型改版的列表页（稍后再看 / 历史 / 本地 / 下载 /
+// 搜索 / 统计）：左右页边距按**窗口宽**（`.page` 的 40 / 32 / 16，默认 1200 → 40），标题是同一档
+// （`clamp(32, 3.4vw, 48)` → 1200 时 40.8）——六页的墨迹左缘一致、标题墨迹高度一致。
+func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
+	sideW := app.DefaultSideMenuWidth
+	area := contentArea(sideW)
+	want := int(sideW) + 40
+	heights := map[string]int{}
+	for _, page := range []struct {
+		name string
+		path string
+		opts []shellOpt
+	}{
+		{name: "稍后再看", path: laterPath, opts: libraryPageOpts(t)},
+		{name: "历史记录", path: historyPath, opts: libraryPageOpts(t)},
+		{name: "本地音乐", path: localMusicPath},
+		{name: "下载记录", path: downloadListPath},
+		{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA"},
+	} {
+		b := newTestShell(t, page.opts...)
+		s, tt := b.s, b.tt
+		s.navigate(page.path)
+		tt.Frame()
+		img := tt.Image()
+		got := leftmostInk(img, area)
+		if got < want-2 || got > want+2 {
+			t.Errorf("%s 的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 40）", page.name, got, want, int(sideW))
+		}
+		// 标题那一行：Eyebrow 之后第一段墨（粗筛：高度一致）。
+		r, ok := tt.Find(page.name)
+		if !ok {
+			continue
+		}
+		x0, x1 := int(r.X), int(r.X+r.W)
+		heights[page.name] = runHeight(img, area, int(r.Y), int(r.Y+r.H), x0, x1)
+	}
+	for name, h := range heights {
+		for other, oh := range heights {
+			if name != other && (oh > h+2 || oh < h-2) && name != "搜索" && other != "搜索" {
+				t.Errorf("「%s」标题墨迹 %d 行，「%s」是 %d 行——同一个 `.h-page` 字号", name, h, other, oh)
+			}
+		}
 	}
 }

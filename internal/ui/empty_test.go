@@ -52,7 +52,7 @@ func TestSpecEmptyStates(t *testing.T) {
 				s.app.MountCollections(app.CollectionRefs{Client: newEmptyFolderClient(t)})
 			},
 		},
-		{"没有搜索结果", noSearchResults, "/search?q=" + url.QueryEscape("周杰伦"), searchPath,
+		{"没有搜索结果", emptyState{Title: "没有找到相关歌曲", Hint: "换个关键词试试，比如歌手名、专辑名或 UP 主名。", Icon: iconEmptySearch}, "/search?q=" + url.QueryEscape("周杰伦"), searchPath,
 			// ⚠️ **搜索页得真的能搜**：结果是一条真请求带回来的，而「搜了但没有」
 			// 和「压根没搜成」在界面上是两句不同的话（后者是失败块 + 重试，见
 			// viewLoadError）。这里挂一台回**零结果**的假 B 站——裸壳的话搜索

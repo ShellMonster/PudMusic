@@ -220,7 +220,7 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 						return
 					}
 					for _, r := range d.rows {
-						d.viewRow(c, s, r, listW)
+						d.viewRow(c, s, r, listW, contentW)
 					}
 				})
 		})

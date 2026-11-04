@@ -505,14 +505,16 @@ func (p *localPage) view(c *ui.Context) {
 	p.sel = indexOfTrackID(p.rows, p.selID)
 	p.lastSel = p.sel
 
-	// 页面外壳：原型 `.page`（居中、最宽 1280、边距 40 / 32 / 16）。
-	cw := float32(1200 - 232)
+	// 页面外壳：原型 `.page`（居中、最宽 1280、边距 40 / 32 / 16，断点按窗口宽）。
+	winW, _ := c.Size()
+	cw := winW - tok.SideW
 	if p.contentW != nil {
 		if w := p.contentW(c); w > 0 {
 			cw = w
 		}
 	}
-	pad := space.PageHorizontal(cw)
+	pad := space.PageHorizontalForWindow(winW)
+	pud.SetAlbumHidden(winW <= 1180)
 	inner := min(cw, float32(pudPageMaxW))
 	ui.Column(c).Key("page:" + localMusicPath).Grow(1).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Width(inner).Padding(space.PageTop, pad, space.None, pad).
@@ -520,7 +522,7 @@ func (p *localPage) view(c *ui.Context) {
 			// 页头、拖入区、工具条、表头都画在列表的滚动区里（`list.Lead`）：原型整页一起
 			// 滚，不然 800 高的窗口里只剩三行歌。一首都没有时没有列表，直接画。
 			top := func(c *ui.Context) {
-				p.viewHead(c, cw, st)
+				p.viewHead(c, winW, st)
 				p.viewDropZone(c, st)
 				p.viewToolbar(c, st)
 				p.viewWarnings(c, t, st)

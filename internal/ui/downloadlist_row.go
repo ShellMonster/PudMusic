@@ -2,8 +2,7 @@
 //
 //	封面 48 | 文件名 2fr | 大小或进度条 1.4fr | 状态 110 | 操作 120
 //
-// 列与列隔 16、内边距 12、底下一条 1 像素 line；列表宽小于 480（原型 `max-width: 760px` 的
-// 窗口减掉侧栏）时去掉大小 / 进度那一列。
+// 列与列隔 16、内边距 12、底下一条 1 像素 line；窗口宽 ≤ 760 时去掉大小 / 进度那一列。
 package ui
 
 import (
@@ -22,15 +21,15 @@ const (
 	dlCover    = 48  // `.drow .t-cover`
 	dlStatusW  = 110 // 状态列
 	dlOpsW     = 120 // 操作列
-	dlHideBar  = 480 // 小于这个列表宽就不画大小 / 进度那一列
+	dlHideBar  = 760 // 窗口宽 ≤ 760（原型 `@media (max-width: 760px)`）不画大小 / 进度那一列
 	dlProgH    = 4   // `.prog` 高
 	dlStatusPt = 6   // `.status::before` 圆点直径
 )
 
 // viewRow 画一行。w 是列表宽。
-func (d *downloadsPage) viewRow(c *ui.Context, s *Shell, r download.Snapshot, w float32) {
+func (d *downloadsPage) viewRow(c *ui.Context, s *Shell, r download.Snapshot, w, winW float32) {
 	p := tok.Of(c.Theme())
-	narrow := w < dlHideBar
+	narrow := winW <= dlHideBar
 	ui.Row(c).Key("dl:" + r.ID).Width(w).Padding(space.Px12).Gap(space.Px16).AlignItems(ui.Center).
 		Draw(func(pp *ui.Painter, rc ui.Rect) {
 			pp.Fill(ui.Rect{X: rc.X, Y: rc.Y + rc.H - 1, W: rc.W, H: 1}, p.Line, 0)

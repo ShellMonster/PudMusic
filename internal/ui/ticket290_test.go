@@ -15,8 +15,6 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -95,60 +93,6 @@ func TestTheClearViewedButtonAsksBeforeItDeletes(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // L-06：下载记录的筛选排在卡片里面
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheDownloadFilterRowSitsInsideTheCard 钉住「筛选排在卡片**里面**」。
-//
-// 上游那一张 `Card` 包住的是「筛选 + 表头 + 表体」三样（筛选排是 `Table` 的
-// `topContent`，而那张 `Table` 在 `Card` 里，`download-list/index.tsx:105-135`）。
-// 我们原来把筛选排摆在卡片**外面**——卡片的边线在 y=135、筛选排在 y=108..123。
-//
-// 判据是**像素**：筛选排那一行的正上方必须有「不是页面底色」的像素——那是卡片
-// 顶边那道影（浅色下是 1 像素的黑边，深色下是 1 像素的白内边，见
-// `widgets/shadow` 的 `HeroSmall`）。卡片在筛选排**上面**才说明筛选排在卡片
-// 里面；卡片在下面（原来的样子）的话，筛选排上面只有页面底色。
-//
-// ⚠️ **量的那一列要挑干净的**：窗口 1200 宽、内容区 216..1184，而页头那一行
-// 上有字的地方是 217..305（标题）、332..420（没有下载目录时的那一句）、1160
-// 之后（那枚垃圾桶）。x=600 那一列上什么都没有——量到标题的笔画的话，这一条
-// 就会「绿」而其实没绿。
-func TestTheDownloadFilterRowSitsInsideTheCard(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := newRows(t, dlSnapshot("歌 甲", download.StatusDone, dlChunk, dlChunk))
-			tt.SetDark(dark)
-			dlFrame(tt)
-
-			// 「筛选」是那一组单选的无障碍名字（`downloadlist_filter.go`），
-			// 它的框是**整组**——从最左边那个单选圆的左沿起。
-			group, ok := tt.Find("筛选")
-			if !ok {
-				t.Fatalf("找不到筛选那一组，文字有 %q", tt.Texts())
-			}
-			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			page := rgbaOf(th.Background)
-			img := tt.Image()
-
-			// 从筛选排的顶边往上找 40 像素：那儿必须有卡片的边。
-			const probeX = 600
-			top := round32(group.Y)
-			edge := false
-			for y := top - 1; y > top-40; y-- {
-				if maxDiff(img.RGBAAt(clampX(img, probeX), clampY(img, y)), page) > 2 {
-					edge = true
-					break
-				}
-			}
-			if !edge {
-				t.Errorf("筛选排上方 40 像素全是页面底色 %v——卡片不在筛选排上面，"+
-					"筛选排还在卡片外面", page)
-			}
-		})
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S-10：队列抽屉表头的条数紧跟「播放列表」

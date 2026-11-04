@@ -188,3 +188,15 @@ func GridGapFor(contentW float32) float32 {
 	}
 	return GridGap
 }
+
+// PageHorizontalForWindow 是窗口宽 winW 时 `.page` 左右的内边距：原型默认 40，窗口 ≤ 1024 变 32，
+// ≤ 760 变 16。断点按窗口宽（不是内容区宽）。
+func PageHorizontalForWindow(winW float32) float32 {
+	switch {
+	case winW > 1024:
+		return Px40
+	case winW > 760:
+		return Px32
+	}
+	return Px16
+}

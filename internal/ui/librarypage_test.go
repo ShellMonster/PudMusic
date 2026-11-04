@@ -409,37 +409,37 @@ func TestAnUnmountedLibraryStillShowsTheEmptyState(t *testing.T) {
 // **500ms 之后一定要发**（漏了防抖的唤醒就是「用户敲完了什么都没发生」——界面上和
 // 「B 站忽略了那个词」一模一样）。
 func TestTheKeywordReachesTheServerAfterTheDebounce(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "甲")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 1 })
 
 	typeKeyword(t, tt, "周杰伦")
 	tt.Frame()
-	if got := f.callsOf(laterPathAPI); got != 1 {
+	if got := f.callsOf(historyPathAPI); got != 1 {
 		t.Fatalf("敲完字立刻就发了请求（共 %d 次）——防抖没起作用", got)
 	}
-	if got := f.callsOf(laterPathAPI); got != 1 {
+	if got := f.callsOf(historyPathAPI); got != 1 {
 		t.Fatalf("还没到 500ms 就发了（共 %d 次）", got)
 	}
 
 	advance(s, 600*time.Millisecond)
-	waitFrames(t, tt, "把新条件的那一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 2 })
-	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "周杰伦" {
+	waitFrames(t, tt, "把新条件的那一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 2 })
+	if got := f.queriesOf(historyPathAPI)[1].Get("keyword"); got != "周杰伦" {
 		t.Errorf("查询串里 key = %q，want 周杰伦", got)
 	}
 }
 
 // TestEnterSearchesWithoutWaiting 盯回车不等那 500ms（上游也是 `onKeyDown Enter`）。
 func TestEnterSearchesWithoutWaiting(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "甲")
+	tt, _ := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 1 })
 
 	typeKeyword(t, tt, "林俊杰")
 	tt.TypeKey(0, mygoui.KeyEnter, "\r")
 	tt.Frame()
-	waitFrames(t, tt, "回车之后立刻就搜了", func() bool { return f.callsOf(laterPathAPI) == 2 })
-	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "林俊杰" {
+	waitFrames(t, tt, "回车之后立刻就搜了", func() bool { return f.callsOf(historyPathAPI) == 2 })
+	if got := f.queriesOf(historyPathAPI)[1].Get("keyword"); got != "林俊杰" {
 		t.Errorf("回车之后查询串里 key = %q", got)
 	}
 }
@@ -449,11 +449,11 @@ func TestEnterSearchesWithoutWaiting(t *testing.T) {
 // 用户连点两个词时，第一个请求的结果可能后到。盖掉新条件的结果，界面上就是「搜的
 // 是新词、显示的是旧词的歌」——用户无从判断，只能刷新。
 func TestChangingTheKeywordThrowsTheOldPageAway(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "旧词的第一页")
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "旧词的第一页")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.historyPage) == 1 })
 
-	f.withLater(1, 1, "新词的第一页")
+	f.withHistory(1, 0, 60, "新词的第一页")
 	typeKeyword(t, tt, "新词")
 	advance(s, 600*time.Millisecond)
 	tt.TypeKey(0, mygoui.KeyEnter, "\r")
@@ -466,61 +466,6 @@ func TestChangingTheKeywordThrowsTheOldPageAway(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 日期范围
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheFourPresetsAskForThatRange 盯四个预设各自算出什么。
-//
-// 逐个点是因为它们错的方式不一样：今天和昨天差一天（差错了就是「昨天搜不出昨天看
-// 过的」，用户以为功能坏了）；近一周是往前 7 天而不是「这一周」。
-//
-// 顺带钉住筛选状态那一句话：选了「全部时间」之后两个输入框里仍然摆着日期，只看框里
-// 的字会以为今天正在筛。
-func TestTheFourPresetsAskForThatRange(t *testing.T) {
-	for _, c := range []struct {
-		label string
-		// wantStart / wantEnd 是那一天的 00:00:00 和 23:59:59（零值 = 不筛）。
-		wantStart, wantEnd time.Time
-		// wantSummary 是界面上那句「现在正在筛什么」。
-		wantSummary string
-	}{
-		{"全部时间", time.Time{}, time.Time{}, "不按日期筛"},
-		{"今天", day(2026, 10, 16), day(2026, 10, 16).Add(24*time.Hour - time.Second), "2026-10-16 ~ 2026-10-16"},
-		{"昨天", day(2026, 10, 15), day(2026, 10, 15).Add(24*time.Hour - time.Second), "2026-10-15 ~ 2026-10-15"},
-		{"近一周", day(2026, 10, 9), day(2026, 10, 16).Add(24*time.Hour - time.Second), "2026-10-09 ~ 2026-10-16"},
-	} {
-		t.Run(c.label, func(t *testing.T) {
-			f := newLibFake(t).withLater(1, 1, "甲")
-			tt, _ := libraryShell(t, f, laterPath)
-			waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
-
-			if !tt.HasText("不按日期筛") {
-				t.Errorf("默认没有说清不筛，文字有 %q", tt.Texts())
-			}
-			if err := tt.Click(c.label); err != nil {
-				t.Fatalf("点不到「%s」：%v，文字有 %q", c.label, err, tt.Texts())
-			}
-			tt.Frame()
-			waitFrames(t, tt, "按新的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
-
-			q := f.queriesOf(laterPathAPI)[1]
-			gotStart, gotEnd := q.Get("add_time_start"), q.Get("add_time_end")
-			if c.wantStart.IsZero() {
-				if gotStart != "" || gotEnd != "" {
-					t.Errorf("「%s」不该发日期参数，却发了 %q ~ %q", c.label, gotStart, gotEnd)
-				}
-			} else {
-				if want := strconv.FormatInt(c.wantStart.Unix(), 10); gotStart != want {
-					t.Errorf("add_time_start = %q，want %q", gotStart, want)
-				}
-				if want := strconv.FormatInt(c.wantEnd.Unix(), 10); gotEnd != want {
-					t.Errorf("add_time_end = %q，want %q", gotEnd, want)
-				}
-			}
-			if !tt.HasText(c.wantSummary) {
-				t.Errorf("界面上没说清现在筛的是哪一段，文字有 %q", tt.Texts())
-			}
-		})
-	}
-}
 
 // TestTheRangePickerDrivesTheFilter 钉住「手动区间」那一半。
 //

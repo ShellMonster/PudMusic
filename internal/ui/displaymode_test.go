@@ -154,6 +154,8 @@ type pageCase struct {
 	// 滚走（`upspace_tabs.go` 的 `viewSpaceTab` 那段注释）；900×560 不滚的话
 	// 第二行差几个像素在折叠线下面——那是「还没滚」，不是「画不出来」。
 	nudge func(t *testing.T, tt *mygoui.Tester)
+	// nudgeEach 让 nudge 在每切一档之后再滚一次（三档各有自己的滚动状态，本地音乐的页头在列表里）。
+	nudgeEach bool
 }
 
 // displayPages 是**接了这个设置的每一页**。
@@ -173,7 +175,14 @@ var displayPages = []pageCase{
 	}},
 	{name: "稍后再看", open: openLaterForDisplay},
 	{name: "历史记录", open: openHistoryForDisplay},
-	{name: "本地音乐", open: openLocalForDisplay},
+	{name: "本地音乐", open: openLocalForDisplay, nudgeEach: true, nudge: func(t *testing.T, tt *mygoui.Tester) {
+		// 页头 / 拖入区 / 表头在列表的滚动区里（整页一起滚），最小窗口里得往下滚一截才看得到前两首。
+		t.Helper()
+		tt.Scroll(500, 450, 0, 300)
+		for range 2 {
+			tt.Frame()
+		}
+	}},
 }
 
 // TestEveryPageFollowsTheDisplayStyleSetting 是本票的核心验收。
@@ -503,9 +512,7 @@ func openLocalForDisplay(t *testing.T) (*Shell, *mygoui.Tester, [3]string) {
 		libSong(t, root, title+".mp3")
 	}
 	tt, s, _, _ := shellOnLocalMusic(t, root)
-	if err := tt.Click(localStyles[localStyleSong]); err != nil {
-		t.Fatalf("切不到「%s」那一档：%v，文字有 %q", localStyles[localStyleSong], err, tt.Texts())
-	}
+	// 表格那一档随 §0′ 删了：本地音乐只剩曲目行一档，不用再切。
 	tt.Frame()
 	mountDisplay(t, s.app)
 	wideEnough(tt)
@@ -731,6 +738,9 @@ func TestEveryViewSurvivesTheNarrowestWindow(t *testing.T) {
 				app.DisplayModeCompact, app.DisplayModeCard, app.DisplayModeList,
 			} {
 				setDisplay(t, s.app, tt, m)
+				if p.nudgeEach && p.nudge != nil {
+					p.nudge(t, tt)
+				}
 				if tt.HasText("画不出来") {
 					t.Errorf("%s 那一档下画面上有「画不出来」：%q", m, tt.Texts())
 				}

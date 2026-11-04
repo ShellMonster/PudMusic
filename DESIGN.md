@@ -156,9 +156,11 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 `index.html` 的 CSS；和下面旧章节冲突的段落（旧的列表行 64 高、封面 48、表格五列、卡片 + 影的
 下载表、日 / 周 / 月 / 全部统计 Tab、「搜索【x】的结果」标题等）**被 §0′ 覆盖**。
 
-**页面外壳**（`internal/ui/listpage.go` 的 `pudPage`）：内容区居中、最宽 1280、左右 `PageHorizontal(contentW)`、
-上 8；页头一律 `pud.PageHead`（Eyebrow 英文 11 + 48 宋体 700 标题，行高 1.15 = `leading.DisplayTitle` + 导语，
-行高 1.55 = `leading.Body`）。
+**页面外壳**（`internal/ui/listpage.go` 的 `pudPage`）：内容区居中、最宽 1280、上 8；**断点和流式字号一律按窗口宽 winW**
+（原型的视口）——左右页边距 `space.PageHorizontalForWindow(winW)`（> 1024 为 40、> 760 为 32、其余 16）；页头一律
+`pud.PageHead(…, winW, …)`：Eyebrow 11 + 宋体 700 标题，字号 `scale.PageTitleFluid(winW)` = clamp(32, 3.4vw, 48)（1200 → 40.8），
+行高 1.15 = `leading.DisplayTitle`，导语行高 1.55 = `leading.Body`。窗口宽 ≤ 1180 去掉曲目行的「专辑」列
+（`pud.SetAlbumHidden`，页面外壳每帧设）。
 
 **曲目行**（`widgets/list` 的 `SetPudRows(true)` 之后走 `pud.TrackRow`，默认关）：行高 60（紧凑 44）、
 列 `40 | 标题 2.2fr | 专辑 1.2fr | UP 主 1fr | 播放/弹幕 88 | 时长 56 | 操作 96`、列隔 16、左右 12；
@@ -173,7 +175,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 | 历史记录 | 无表头、按日分组：组头「今天 / 昨天 / M 月 D 日」宋体 20 + 「N 首」12 等宽 text-3，上 32 下 8；工具条 = `MiniSearch`(180) + `DropButton`「日历 + 范围 + 下箭头」弹层（今天 / 最近 7 / 14 / 30 天 / 不按日期筛 + 开始 / 结束两个输入 + 应用） |
 | 本地音乐 | 导语「N 个文件 · 支持 FLAC、MP3……」；拖入区 = 1px 虚线 `line-strong`、圆角 12、内边距 24、离上 24、48 圆形图标位 + 16 粗 / 13 text-2 两行 + 「选择文件夹」；页头 / 拖入区 / 表头放进列表 `Lead`，整页一起滚；行菜单末尾「在访达里显示」「删除文件」 |
 | 下载记录 | `.drow`：封面 48 / 名字 2fr / 大小或 4 高进度条 1.4fr / 状态 110（6 圆点 + 12 字，完成 ok、下载中 accent-text 等宽 %、排队 / 暂停 text-3、失败 err）/ 操作 120；行内边距 12、行间 1px `line`；筛选 `ChipCount`（全部 / 下载中 / 已完成 / 失败，上 24 缝 8）；没有卡片、没有影 |
-| 听歌统计 | 只有最近 7 天；`stat-strip` 四格（上下各 1px line，格内 24，第 2 格起左 1px line）大数字 `PageTitleFor` 号宋体 + 0.45em 单位；两栏 1.4fr/1fr 缝 48 上 48；柱状图按 640×220 viewBox 等比缩放（柱宽 48、圆角 4、今天主色其余 `line-strong`）；歌手条 24 / 120 / 1fr / 72，第一名主色；「本周单曲循环」曲目行 |
+| 听歌统计 | 只有最近 7 天；`stat-strip` 四格（上下各 1px line，格内 24，第 2 格起左 1px line；窗口 ≤ 1024 两列、≤ 760 一列）大数字 `scale.BigNumFluid(winW)` = clamp(32, 3.6vw, 48)（1200 → 43.2）宋体 + 0.45em 单位；两栏 1.4fr/1fr 缝 48 上 48（窗口 ≤ 1180 叠成一栏）；柱状图按 640×220 viewBox 等比缩放（柱宽 48、圆角 4、今天主色其余 `line-strong`）；歌手条 24 / 120 / 1fr / 72，第一名主色；「本周单曲循环」曲目行 |
 | 404 | 搜索插画 + 「这一页走丢了」+ 说明 + 主色「回到推荐音乐」；不倒计时、不自动跳走 |
 
 **取舍与偏离**（详见各票报告）：UP 主卡不画关注键（没有关注写接口）；日期筛选的预设和自定义区间保留，旧的双月日历

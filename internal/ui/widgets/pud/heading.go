@@ -15,7 +15,7 @@ const ledeMaxW = 560
 // PageHead 是页头（原型 `.page-head`）：左边 Eyebrow + 48 号宋体标题 + 导语，右边
 // 操作区，底对齐；上 24 下 8 的内边距，左右两块隔 24。
 //
-// contentW 是内容区宽（窄于 1024 时标题降到 32）；actions 可为 nil，里面直接放
+// contentW 是**窗口宽**（标题字号按原型 `clamp(32, 3.4vw, 48)` 随窗口宽流动，`scale.PageTitleFluid`）；actions 可为 nil，里面直接放
 // `pud.Button`（原型 `.page-head .actions` 缝 8）。
 //
 //	pud.PageHead(c, "Library", "本地音乐", "把电脑里的歌拖进来……", s.contentW, func() {
@@ -42,7 +42,7 @@ func PageHeadFn(c *ui.Context, eyebrow, title string, contentW float32, ledeFn, 
 					typo.Eyebrow(c, eyebrow)
 				}
 				// 原型 `.h-page { line-height: 1.15 }`。
-				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFor(contentW))).LineHeight(leading.DisplayTitle)
+				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFluid(contentW))).LineHeight(leading.DisplayTitle)
 				if eyebrow != "" {
 					t.Margin(space.Px8, space.None, space.None, space.None)
 				}

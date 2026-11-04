@@ -153,7 +153,7 @@ func statWeekDelta(cur, prev int64) string {
 
 // viewStatStrip 是原型 `.stat-strip`：上下各一条 line，四格等宽，格内 24 / 24 / 24 / 0，第二格起
 // 左边一条 line 加 24 的左内边距；窄内容区变 2×2。
-func (s *Shell) viewStatStrip(c *ui.Context, st *statsPageState, rng statsRange, now time.Time, contentW float32) {
+func (s *Shell) viewStatStrip(c *ui.Context, st *statsPageState, rng statsRange, now time.Time, contentW float32) { // contentW 是窗口宽
 	p := tok.Of(c.Theme())
 	prevStart := now.AddDate(0, 0, -(2*statsDays - 1))
 	prevEnd := now.AddDate(0, 0, -statsDays)
@@ -165,9 +165,13 @@ func (s *Shell) viewStatStrip(c *ui.Context, st *statsPageState, rng statsRange,
 		{[]string{strconv.Itoa(statNewArtists(st.data, rng.From, rng.To)), "位"}, "新认识的歌手"},
 		{[]string{strconv.Itoa(st.data.Streak(now)), "天"}, "连续听歌"},
 	}
-	size := scale.PageTitleFor(contentW)
+	// 大数字按窗口宽流动（`clamp(32, 3.6vw, 48)`）；格数按窗口宽：≤1024 两列、≤760 一列。
+	size := scale.BigNumFluid(contentW)
 	perRow := 4
-	if contentW < pudWideStats {
+	switch {
+	case contentW <= 760:
+		perRow = 1
+	case contentW <= 1024:
 		perRow = 2
 	}
 	line := func(pp *ui.Painter, r ui.Rect, top, bottom bool) {
@@ -219,12 +223,9 @@ func (s *Shell) viewStatStrip(c *ui.Context, st *statsPageState, rng statsRange,
 		})
 }
 
-// pudWideStats 是四格并排的最小内容区宽（原型 `@media (max-width: 1180px)` 减掉侧栏 232）。
-const pudWideStats = 948
-
 // viewStatsTwoCol 是两栏：左 1.4fr 每天收听，右 1fr 最常听的歌手，缝 48，上 48；窄内容区叠成一栏。
 func (s *Shell) viewStatsTwoCol(c *ui.Context, st *statsPageState, rng statsRange, contentW, listW float32) {
-	stack := contentW < pudWideStats
+	stack := contentW <= 1180 // 原型 `@media (max-width: 1180px)`，按窗口宽
 	artists := st.statsPeriodArtists(rng)
 	if len(artists) > statsTopLimit {
 		artists = artists[:statsTopLimit]
@@ -270,15 +271,18 @@ func (s *Shell) viewStatsBars(c *ui.Context, rng statsRange, w float32) {
 		return
 	}
 	mins := make([]float64, n)
-	maxMin := 60.0
+	maxMin := 0.0
 	for i, d := range rng.Days {
 		mins[i] = float64(d.Ms) / float64(time.Minute/time.Millisecond)
 		if mins[i] > maxMin {
 			maxMin = mins[i]
 		}
 	}
-	// 参考线每 60 分钟一条，最高那条不低于数据。
-	top := float64(int(maxMin/60+0.999)) * 60
+	// 纵轴上限：原型是固定的 200（参考线 0 / 60 / 120 / 180）；数据超过 200 时按 20 取整往上放。
+	top := float64(int(maxMin/20+0.999)) * 20
+	if top < 200 {
+		top = 200
+	}
 	scaleX := w / statsChartW
 	if sy := float32(statsChartBox) / statsChartH; sy < scaleX {
 		scaleX = sy

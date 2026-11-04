@@ -2,6 +2,7 @@ package pud
 
 import (
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
@@ -32,9 +33,16 @@ const (
 	pageMargin     = 40
 )
 
+// albumHidden 是「窗口宽 ≤ 1180，去掉专辑列」（原型 `@media (max-width: 1180px)`）。页面外壳每帧按窗口宽
+// 设一次（`SetAlbumHidden`）；窗口没到断点但列表自己窄时（侧栏被拖宽）`trackCols` 仍按列表宽去掉。
+var albumHidden atomic.Bool
+
+// SetAlbumHidden 设「窗口宽 ≤ 1180」这一档（见 `albumHidden`）。
+func SetAlbumHidden(on bool) { albumHidden.Store(on) }
+
 // trackCols 是这一宽度下三列弹性列的宽：标题、专辑（0 = 不画）、UP 主。
 func trackCols(w float32) (main, album, owner float32) {
-	hide := w > 0 && w+2*pageMargin < HideAlbumBelow
+	hide := (w > 0 && w+2*pageMargin < HideAlbumBelow) || albumHidden.Load()
 	n := float32(7)
 	if hide {
 		n = 6

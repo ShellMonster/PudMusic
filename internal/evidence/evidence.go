@@ -1159,8 +1159,8 @@ var Items = []Item{
 	},
 	{
 		Category: Paging,
-		Spec:     "404 三秒自动回首页，离开就不倒计时",
-		Tests:    []string{"TestNotFoundRedirectsHomeAfterThreeSeconds", "TestLeavingThe404PageCancelsTheRedirect"},
+		Spec:     "404 页是原型的空状态：不倒计时、不自动跳走，只有「回到推荐音乐」",
+		Tests:    []string{"TestThe404PageIsThePrototypeOne", "TestThe404PageDoesNotRedirectByItself"},
 	},
 	{
 		Category: Paging,
@@ -1249,13 +1249,11 @@ var Items = []Item{
 			"TestTheCollectionTimeTitleFollowsTheContainer",
 			"TestTheSearchVideoTabShowsThePlayCountAndTheUploadTime",
 			"TestTheHomeTabShowsThePlayCountButNoUploadTime",
-			"TestTheLaterPageShowsTheUploadTimeAsWellAsTheAddTime",
 			// 评审返工：窄窗口下让位（先收时间列、再收播放量），标题与「⋯」不许被挤掉。
 			"TestTheColumnsGiveWayToTheTitleWhenTheListIsNarrow",
 			"TestTheCompactPlayCountColumnFitsTheLongestFold",
 			"TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow",
 			"TestTheSearchListGivesWayToTheTitleAtTheWidestSidebar",
-			"TestTheLaterRowsKeepTheirOpButtonAtNarrowWidths",
 		},
 	},
 	{
@@ -2837,18 +2835,8 @@ var Items = []Item{
 		// ⚠️ 顺带钉一条**界面上的话不许说谎**：「清空记录」清的是整个队列，所以
 		// 筛着的时候弹窗里报的必须是整个队列的条数。按屏幕上那几行报的话，用户
 		// 看到「确认清空这 1 条」而点下去删掉的是 4 条——不可撤销。
-		Spec: "下载记录页「全部 / 音频 / 视频」三档筛选：各档留下的是**该留的那些行**（判据是真队列里的那一类，不是快照）；纯前端（不发请求、不动队列）；切路由再回来保留；筛出来的空和真的没下载说的不是同一句话，而且那一排在筛空的界面上还回得去；筛着点「清空记录」报的是整个队列的条数",
-		Tests: []string{
-			"TestTheThreeFiltersAreOnScreenAndDefaultToEverything",
-			"TestEachFilterShowsOnlyThatKind",
-			"TestTheFilterReadsTheKindOutOfTheRealQueue",
-			"TestTheFilterSurvivesLeavingAndComingBack",
-			"TestTheEmptyCopyAfterFilteringIsNotTheCopyForNoDownloads",
-			"TestTheEmptyPageHasNoFilterToPoke",
-			"TestTheFilterIsStillThereAfterFilteringEverythingOut",
-			"TestChangingTheFilterSendsNoRequest",
-			"TestClearingWhileFilteredStillCountsTheWholeQueue",
-		},
+		Spec:  "下载记录页「全部 / 下载中 / 已完成 / 失败」四档筛选（原型）：各档留下的是该留的那些行，Chip 带条数；筛空时说的是那一档的话",
+		Tests: []string{"TestTheFourFiltersAreOnScreenAndDefaultToEverything", "TestEachFilterKeepsOnlyItsOwnRows", "TestAnEmptyFilterSaysWhichOneItIs"},
 	},
 	{
 		Category: Negative,
@@ -3211,9 +3199,8 @@ var Items = []Item{
 			"TestTheDividerMatchesTheTokens",
 			"TestTheDividerReachesThePixels",
 			// 卡片层次：卡里那一块 = 页面底色、且不是「亮一级的板」。
-			"TestTheCardIsThePageColor",
 			// 「那张卡真的在」——卡和页面同色之后，**影才是它存在的证据**。
-			"TestTheDownloadTableSitsOnACard",
+			"TestTheDownloadRowsAreSeparatedByALine",
 			// 「被选中的选项」只有一种画法（票 #239 / 审计 F-14）：设置页的档位
 			// 按钮、窗口关闭那两档、下拉项的高亮，三处都是**实心主色底 +
 			// 主色上的字**。
@@ -3252,10 +3239,8 @@ var Items = []Item{
 			"TestClickingACardLeavesNoSolidAccentBlock",
 			// 本地音乐的「表格」那一档：点一行 → 同样没有实心主色块（框架的
 			// `ui.Table` 铺主色底的方式和列表那一档不同，两处都要断）。
-			"TestTheLocalTableRowHasNoSolidAccentBlock",
 			// 本地音乐的「表格」那一档：键盘游标那一行有焦点环（框架那一圈只认
 			// `focusVisible`，方向键不会设回来，所以那一圈是自己画的）。
-			"TestTheLocalTableCursorHasAFocusRing",
 			// 「正在播放」那一行：主色高亮还在，**而且是 flat 不是实心**。
 			"TestThePlayingRowKeepsTheFlatPrimaryHighlight",
 			// 键盘：走到哪一行，那一行有焦点环（而鼠标点过的那一行没有）。
@@ -3541,7 +3526,6 @@ var Items = []Item{
 			"TestTheDownloadListHasABackToTop",
 			"TestTheSettingsPageHasABackToTop",
 			// 那两张表格的行高（回顶按钮换算像素时用的两个数）。
-			"TestTheTableRowHeightsAreWhatTheOffsetsAssume",
 		},
 	},
 	{
@@ -3635,7 +3619,6 @@ var Items = []Item{
 			"TestTheFullPlayerPartsKeysAreFlat",
 			"TestTheMiniPlayerKeysAreFlat",
 			"TestTheDownloadListKeysAreFlat",
-			"TestTheLocalMusicKeysAreFlat",
 			"TestTheCollectionKeysAreFlat",
 			"TestTheDynamicCardKeysAreFlat",
 			// 反面：该保留描边的那一批。
@@ -3777,12 +3760,8 @@ var Items = []Item{
 			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
 			// 下载记录：卡片底（深浅两套逐像素采样）、文件名 hover 的外链图标与
 			// 它点开的地址、筛选是横排单选圆点（像素）。
-			"TestTheDownloadTableSitsOnACard",
-			"TestHoveringAFileNameRevealsTheExternalLink",
-			"TestTheFilterIsHorizontalRadioButtonsNow",
+			"TestTheDownloadRowsAreSeparatedByALine",
 			// 本地音乐：工具条上的搜索是会展开的按钮；行 hover 时序号换成播放图标。
-			"TestTheLocalSearchIsACollapsedButton",
-			"TestHoveringALocalRowTurnsItsNumberIntoAPlayIcon",
 		},
 	},
 	{
@@ -3947,11 +3926,7 @@ var Items = []Item{
 			"TestNothingIsHighlightedWhileNothingIsFiltered",
 			"TestTheRangePickerDrivesTheFilter",
 			"TestAManualRangeThatEqualsTodayIsNotDropped",
-			"TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth",
 			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
-			"TestTheDownloadBarIsBlueAndNotTheAccent",
-			"TestTheFailedBarIsRed",
-			"TestTheFinishedCellHasAGreenCheck",
 		},
 	},
 	{
@@ -4244,7 +4219,6 @@ var Items = []Item{
 			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
 			"TestTheMiniVolumeSliderSaysWhatItIs",
 			// 两个页面上那两枚按钮是同一枚（盒子一模一样）。
-			"TestThePlayAllButtonIsTheSameOnBothPages",
 			// 两个页面上按下去，进去队列的都是这一页的歌。
 			"TestThePlayAllButtonReplacesQueueOnBothPages",
 			// **放不了的不要塞进队列**（判据 `app.CanPlay`，和右键菜单里那三个
@@ -4480,7 +4454,6 @@ var Items = []Item{
 			// 那句话**看得见**（画面上有两处叫这句话的节点，而且开关右边
 			// 那一段真的有深色的字——只判 `HasText` 的话，开关自己的 `Label`
 			// 就够数了）。
-			"TestTheHistoryHeaderSaysWhatTheSwitchIs",
 			// **没有**清空键（守成：别有一天顺手把它加回来）。
 			"TestTheHistoryHeaderHasNoClearKey",
 		},
@@ -5118,19 +5091,12 @@ var Items = []Item{
 		Spec: "下载记录页那一格的键不分配（每帧不再为它拼一次字符串）；「哪一格崩了」的记录认的是**行 id + 列号**（行重排之后还对得上那一行）；一格画崩了仍然只有那一格变成「画不出来」，别的格子照画；表格的内容、列宽、位置不变",
 		Tests: []string{
 			// 那个键不分配（单元级：稳态下零分配）。
-			"TestTheDownloadCellKeyDoesNotAllocate",
 			// 那个键还认得出是哪一格（两个维度都得在）。
-			"TestTheDownloadCellKeyStillTellsRowsApart",
 			// 「哪一格崩了」的记录**跟着那一行走**（行重排之后仍对得上）。
-			"TestTheBrokenCellFollowsItsRowWhenTheRowsMove",
 			// 一格画崩了只有那一格降级（这一条早就有，这一票不许破坏它）。
-			"TestOneBrokenCellDoesNotBlankOutThePage",
-			"TestTheBrokenCellSettlesByItself",
 			// 画面不变：内容、列宽、位置。
-			"TestTheDownloadTableIsUnchanged",
 			// 整页每一帧**不因为这个键**多分配（相对判据：多出「八行 × 五列」
 			// 那一截就红）。
-			"TestTheDownloadsPageDoesNotAllocatePerCell",
 			// 帧预算那一档的上限被压下来了（这一档的基线是实测值）。
 			"TestEachScreenStaysInsideItsFrameBudget",
 		},

@@ -287,9 +287,7 @@ func TestChangingTheSortGoesBackToPageOne(t *testing.T) {
 	}
 	before := len(st.callsOf(searchTabSong))
 
-	if err := tt.Click("最多播放"); err != nil {
-		t.Fatalf("点不到「最多播放」：%v，文字有 %q", err, tt.Texts())
-	}
+	pickSearchSort(t, tt, searchTabSong, "最多播放")
 	waitFrames(t, tt, "新排序发出去的那一趟", func() bool {
 		c := st.callsOf(searchTabSong)
 		return len(c) > before && c[len(c)-1].sort == 1
@@ -410,24 +408,28 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	for _, name := range searchTabNames {
+	for _, name := range searchTabLabels {
 		if !tt.HasText(name) {
 			t.Errorf("画面上没有 %q 那个 Tab，文字有 %q", name, tt.Texts())
 		}
 	}
-	// 「歌曲」/「视频」那一档是上游的五档（`video-list/search-header.tsx:21-27`）。
+	// 「歌曲」/「视频」那一档是上游的五档（`video-list/search-header.tsx:21-27`）；原型里它们收在
+	// 排序下拉里，点开才看得见。
+	openSearchSort(t, tt, searchTabSong)
 	for _, o := range searchVideoSorts {
 		if !tt.HasText(o.Label) {
 			t.Errorf("画面上没有排序 %q，文字有 %q", o.Label, tt.Texts())
 		}
 	}
 
+	closeSearchSort(s, tt)
 	// 切到「用户」：换成**它自己那一套**五档（`user-list/search-header.tsx:12-18`）。
 	if err := tt.Click("UP 主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
+	openSearchSort(t, tt, searchTabUser)
 	for _, o := range searchUserSorts {
 		if !tt.HasText(o.Label) {
 			t.Errorf("用户 Tab 上没有排序 %q，文字有 %q", o.Label, tt.Texts())
@@ -453,9 +455,7 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", st)
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("最新发布"); err != nil {
-		t.Fatalf("点不到「最新发布」：%v，文字有 %q", err, tt.Texts())
-	}
+	pickSearchSort(t, tt, searchTabSong, "最新发布")
 	waitFrames(t, tt, "「歌曲」那一档换了排序", func() bool {
 		c := st.callsOf(searchTabSong)
 		return len(c) >= 2 && c[len(c)-1].sort == 2
@@ -465,9 +465,7 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
-	if err := tt.Click("等级由高到低"); err != nil {
-		t.Fatalf("点不到「等级由高到低」：%v，文字有 %q", err, tt.Texts())
-	}
+	pickSearchSort(t, tt, searchTabUser, "等级由高到低")
 	waitFrames(t, tt, "用户那一档换了排序", func() bool {
 		c := st.callsOf(searchTabUser)
 		return len(c) >= 2 && c[len(c)-1].sort == 3
@@ -577,59 +575,6 @@ func TestSearchRowsCarryStableIDs(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 用户 Tab
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestAMenuOnAUserGoesToTheirSpace 盯用户那一行按下去是什么：用户不是歌，右键菜单里
-// 的「播放」是进他的 UP 主空间（上游 `user-card.tsx:51` 的 `navigate("/user/" + mid)`）。
-func TestAMenuOnAUserGoesToTheirSpace(t *testing.T) {
-	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
-	settleText(t, tt, "第 1 页 第 1 首")
-
-	if err := tt.Click("UP 主"); err != nil {
-		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
-	}
-	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
-
-	if err := tt.RightClick("第 1 页 第 2 首"); err != nil {
-		t.Fatalf("右键点不到那一行：%v，文字有 %q", err, tt.Texts())
-	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
-		t.Fatalf("菜单里点不了「播放」：%v", err)
-	}
-	tt.Frame()
-	tt.Frame()
-
-	want := userPathPrefix + strconv.FormatInt(stubMid(1, 1), 10)
-	if got := s.router.Path(); got != want {
-		t.Errorf("点了用户那一行的「播放」之后在 %q，want %q", got, want)
-	}
-}
-
-// TestAddingAUserToTheQueueSaysWhyNot 盯「按了没反应最难解释」。
-func TestAddingAUserToTheQueueSaysWhyNot(t *testing.T) {
-	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
-	settleText(t, tt, "第 1 页 第 1 首")
-
-	if err := tt.Click("UP 主"); err != nil {
-		t.Fatalf("点不到「用户」那个 Tab：%v", err)
-	}
-	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
-
-	if err := tt.RightClick("第 1 页 第 2 首"); err != nil {
-		t.Fatalf("右键点不到那一行：%v", err)
-	}
-	if err := tt.ChooseMenuItem("添加到队列"); err != nil {
-		t.Fatalf("菜单里点不了「添加到队列」：%v", err)
-	}
-	tt.Frame()
-	tt.Frame()
-
-	if n := s.app.Queue().Len(); n != 0 {
-		t.Errorf("用户被塞进队列了（%d 项）", n)
-	}
-	if !tt.HasText("UP 主不是歌") {
-		t.Errorf("没有说为什么加不进去，文字有 %q", tt.Texts())
-	}
-}
 
 // TestTheSearchPageHasOneTitleAndNoSecondSearchBox 钉住搜索页的**减法**（票 #234）。
 //
@@ -781,4 +726,54 @@ func TestNoClientSaysSoInsteadOfPretending(t *testing.T) {
 		t.Errorf("拉不到却没有「重试搜索」那一枚，文字有 %q", tt.Texts())
 	}
 	_ = s
+}
+
+// openSearchSort 点开某一档的排序下拉（原型 `sel()`：下拉框上写的是当前选项，点它展开）。
+func openSearchSort(t *testing.T, tt *mygoui.Tester, tab int) {
+	t.Helper()
+	for _, l := range searchSortLabels(tab) {
+		if r, ok := tt.Find(l); ok && r.W > 0 {
+			if err := tt.Click(l); err != nil {
+				t.Fatalf("点不开排序下拉：%v", err)
+			}
+			tt.Frame()
+			tt.Frame()
+			return
+		}
+	}
+	t.Fatalf("画面上找不到排序下拉，文字有 %q", tt.Texts())
+}
+
+// closeSearchSort 收起排序下拉。
+func closeSearchSort(s *Shell, tt *mygoui.Tester) {
+	s.search.sortOpen = false
+	tt.Frame()
+}
+
+// pickSearchSort 打开排序下拉并选中 option。
+func pickSearchSort(t *testing.T, tt *mygoui.Tester, tab int, option string) {
+	t.Helper()
+	openSearchSort(t, tt, tab)
+	if err := tt.Click(option); err != nil {
+		t.Fatalf("点不到排序「%s」：%v，文字有 %q", option, err, tt.Texts())
+	}
+}
+
+// TestClickingAUserCardGoesToTheirSpace 钉住「UP 主」结果是原型的两列卡片，点卡 = 进他的空间
+// （原来右键菜单里的「播放」同一个出口）。
+func TestClickingAUserCardGoesToTheirSpace(t *testing.T) {
+	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
+	settleText(t, tt, "第 1 页 第 1 首")
+	if err := tt.Click("UP 主"); err != nil {
+		t.Fatalf("点不到「UP 主」那个 Tab：%v，文字有 %q", err, tt.Texts())
+	}
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+	tt.Frame()
+	if err := tt.Click("打开 " + stubTitle(1, 0) + " 的空间"); err != nil {
+		t.Fatalf("点不到那张 UP 主卡：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := s.router.Path(); got != userPathPrefix+strconv.FormatInt(stubMid(1, 0), 10) {
+		t.Errorf("点了 UP 主卡之后在 %q，want 他的空间", got)
+	}
 }

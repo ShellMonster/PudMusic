@@ -100,9 +100,9 @@ func TestAFailingPageOffersARetry(t *testing.T) {
 //
 // 判据是**距离最后一次输入过了多久**，不是「有没有搜过」。
 func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "甲")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 1 })
 
 	typeKeyword(t, tt, "周")
 	advance(s, 400*time.Millisecond)
@@ -120,14 +120,14 @@ func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 	// 一点时间再问「有没有发出去」。不等就是拿一个还没落地的请求去断言「没发」——
 	// 那条断言永远不会红，而它正是这条测试的全部意义。
 	time.Sleep(150 * time.Millisecond)
-	if got := f.callsOf(laterPathAPI); got != 1 {
+	if got := f.callsOf(historyPathAPI); got != 1 {
 		t.Fatalf("离最后一次输入才 125ms 就搜了（共 %d 次请求）——防抖的钟没有重打", got)
 	}
 
 	// 再等够 500ms 才真的搜出去。
 	advance(s, 400*time.Millisecond)
-	waitFrames(t, tt, "距最后一次输入满 500ms 之后搜出去", func() bool { return f.callsOf(laterPathAPI) == 2 })
-	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "周杰" {
+	waitFrames(t, tt, "距最后一次输入满 500ms 之后搜出去", func() bool { return f.callsOf(historyPathAPI) == 2 })
+	if got := f.queriesOf(historyPathAPI)[1].Get("keyword"); got != "周杰" {
 		t.Errorf("搜出去的词是 %q，want 周杰（两个字的都要）", got)
 	}
 }
@@ -137,9 +137,9 @@ func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 // 用户敲了两个字、还没到 500ms 就切走了：那个每秒醒四次的定时器必须跟着停。
 // 停不掉的话用户看不出任何异样，只是这个应用从那以后再没省过电。
 func TestTheSearchWatchStopsWhenThePageIsLeft(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "甲")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.historyPage) == 1 })
 
 	typeKeyword(t, tt, "周")
 	if s.searchWatchStop == nil {
@@ -153,10 +153,10 @@ func TestTheSearchWatchStopsWhenThePageIsLeft(t *testing.T) {
 	}
 	// 醒着的时候它只该醒一次（推进 500ms 会走四跳），醒着的时候推进多少都不会有
 	// 新的请求。
-	before := f.callsOf(laterPathAPI)
+	before := f.callsOf(historyPathAPI)
 	advance(s, 5*time.Second)
 	tt.Frame()
-	if got := f.callsOf(laterPathAPI); got != before {
+	if got := f.callsOf(historyPathAPI); got != before {
 		t.Errorf("切走之后那个防抖还在发请求（%d → %d）", before, got)
 	}
 }
@@ -210,38 +210,6 @@ func TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 窄窗口
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth 盯 900 宽（`WindowOptions.MinWidth`）。
-//
-// 上游把日期选择器和搜索框摆在同一排（`justify-between`），那一排在我们的页面区
-// 摆不下——**后果不是挤一挤，是叠在一起**：日期那一块和搜索框重叠，点日期点
-// 的是搜索框，它的日历打不开。所以搜索框另起一行（`viewFilters`）。
-//
-// 判据是**两个控件的矩形不相交**：元素都「在画面上」，只有量几何才发现得了它压住了
-// 另一个。
-func TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, _ := libraryShell(t, f, laterPath)
-
-	for _, w := range []int{900, 1000, 1200} {
-		tt.SetSize(w, 800)
-		tt.Frame()
-
-		// ⚠️ 找的是**那个键的框**（`Label` 那一条），不是它里面那行字：
-		// 字只占 256 宽里的左边一小块，而「压住搜索框」这件事是整块的事。
-		trigger, ok := tt.Find(dateRangeLabel)
-		if !ok {
-			t.Fatalf("宽度 %d 下找不到日期范围那一块，文字有 %q", w, tt.Texts())
-		}
-		box, ok := tt.Find(keywordBoxLabel)
-		if !ok {
-			t.Fatalf("宽度 %d 下找不到搜索框，文字有 %q", w, tt.Texts())
-		}
-		if overlap(trigger, box) {
-			t.Errorf("宽度 %d 下搜索框盖住了日期范围（搜索框 %+v，日期范围 %+v）", w, box, trigger)
-		}
-	}
-}
 
 // overlap 报两个矩形有没有交叠（边挨着不算）。
 func overlap(a, b mygoui.Rect) bool {

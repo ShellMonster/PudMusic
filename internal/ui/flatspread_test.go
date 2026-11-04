@@ -284,34 +284,6 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 // 三、下载记录
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheDownloadListKeysAreFlat 页头那两枚和行里那几枚操作。
-func TestTheDownloadListKeysAreFlat(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			// 一行下完的（「打开」+「删除」）和一行出错的（「重试」+「删除」）：
-			// 五种操作里亮得最多的那两档都量到。
-			//
-			// ⚠️ **走 `newDownloads`（真引擎）而不是 `newRows`（快照）**：
-			// 页头那颗「打开文件夹」只在真有下载目录的时候才摆，而快照那一套
-			// 外壳没挂下载（`DownloadDir()` 是空的），量不到它。
-			s, tt := newDownloads(t,
-				newTask("歌 甲", download.StatusDone, dlChunk, 100),
-				newTask("歌 乙", download.StatusError, dlProgress, 50),
-			)
-			tt.SetDark(dark)
-			tt.Frame()
-			noPointer(tt)
-
-			assertKeysFlat(t, tt, "下载记录", "清空记录", "打开", "重试", "删除")
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "下载记录", "打开文件夹")
-		})
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 四、本地音乐
 // ─────────────────────────────────────────────────────────────────────────────

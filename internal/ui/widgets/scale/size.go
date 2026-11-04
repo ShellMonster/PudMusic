@@ -180,3 +180,20 @@ const (
 	// 我们原来写的是 11（票 #220 / 报告 §3.9 对齐上游）。
 	VolPercentFont = Size12
 )
+
+// PageTitleFluid 是页标题（`.h-page`）在窗口宽 winW 时的字号：原型 `clamp(32px, 3.4vw, 48px)`。
+// 断点和 vw 都按**窗口宽**算（桌面应用的视口就是整个窗口），不是内容区宽。
+func PageTitleFluid(winW float32) float32 { return clampF(winW*0.034, Size32, PageTitle) }
+
+// BigNumFluid 是统计页大数字（`.big-num`）在窗口宽 winW 时的字号：`clamp(32px, 3.6vw, 48px)`。
+func BigNumFluid(winW float32) float32 { return clampF(winW*0.036, Size32, PageTitle) }
+
+func clampF(v, lo, hi float32) float32 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}

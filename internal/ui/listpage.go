@@ -1,7 +1,7 @@
 // 「深夜唱片行」列表类页面（搜索、稍后再看、历史、本地音乐、下载、统计）共用的骨架和
 // 几件小零件，DESIGN.md §0′.T7。
 //
-// 页面外壳是原型的 `.page`：内容区居中、最宽 1280、左右边距 40 / 32 / 16、上 8；页头是
+// 页面外壳是原型的 `.page`：内容区居中、最宽 1280、左右边距 40 / 32 / 16（按窗口宽）、上 8；页头是
 // `pud.PageHead`（Eyebrow + 48 宋体标题 + 导语 + 右侧操作）。
 package ui
 
@@ -19,19 +19,19 @@ const pudPageMaxW = 1280
 
 // pudPage 摆一页的外壳。key 是页面根元素的身份；body 收到内容区宽（窗口宽 − 侧栏宽，
 // 页头据此决定标题字号）和**可用内容宽**（去掉页边距、封顶 1280 之后，曲目行 / 表头用它）。
-func (s *Shell) pudPage(c *ui.Context, key string, body func(contentW, listW float32)) {
+func (s *Shell) pudPage(c *ui.Context, key string, body func(winW, listW float32)) {
+	// 断点和流式字号一律按**窗口宽**（原型的视口），页边距 / 标题字号 / 专辑列都由它定。
+	winW, _ := c.Size()
 	cw := s.spaceContentWidth(c)
 	if cw <= 0 {
-		cw = 1200 - tok.SideW
+		cw = winW - tok.SideW
 	}
-	pad := space.PageHorizontal(cw)
-	inner := cw
-	if inner > pudPageMaxW {
-		inner = pudPageMaxW
-	}
+	pad := space.PageHorizontalForWindow(winW)
+	pud.SetAlbumHidden(winW <= 1180)
+	inner := min(cw, pudPageMaxW)
 	ui.Column(c).Key(key).Grow(1).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Width(inner).Padding(space.PageTop, pad, space.None, pad).
-			AlignItems(ui.Stretch).Children(func() { body(cw, inner-2*pad) })
+			AlignItems(ui.Stretch).Children(func() { body(winW, inner-2*pad) })
 	})
 }
 
