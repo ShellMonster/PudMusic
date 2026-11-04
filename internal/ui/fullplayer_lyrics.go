@@ -86,7 +86,7 @@ func (s *Shell) viewFullLyHead(c *ui.Context, snap app.LyricsSnapshot, g fullGeo
 			label = "歌词翻译"
 		}
 		chip := pud.Chip(c, "full:ly-trans", label, "translate", s.full.lyTrans && has).
-			Height(26).Radius(13)
+			Height(26).Radius(tok.Pill)
 		// 原型：高 26、surface 8% 白底；选中 = 纸白底深字（`.ly-head .chip[aria-pressed]`）。
 		if !has {
 			chip = chip.Disabled(true)
@@ -285,7 +285,7 @@ func fmtSeconds(v float64) string {
 // fullKnob 是一枚旋钮（原型 `.knob`）：32 的圆、surface 8% 白底、悬停 16%，里面是 12 号等宽 600 的字
 // 或 16 的图标。
 func fullKnob(c *ui.Context, key, label, txt, icon string) ui.Element {
-	b := ui.ButtonBase(c).Key(key).Label(label).Size(32, 32).Radius(16).Shrink(0).
+	b := ui.ButtonBase(c).Key(key).Label(label).Size(32, 32).Radius(tok.Pill).Shrink(0).
 		AlignItems(ui.Center).Justify(ui.Center)
 	bg := ui.RGBA(255, 255, 255, 0.08)
 	if b.Hovered() {

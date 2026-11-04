@@ -611,7 +611,7 @@ func (p *localPage) viewDropZone(c *ui.Context, _ app.LocalMusicState) {
 		Margin(space.Px24, space.None, space.None, space.None).
 		Draw(func(pp *ui.Painter, r ui.Rect) { pp.StrokeDashed(r, t.LineStrong, tok.R12, 1) }).
 		Children(func() {
-			ui.Box(c).Size(48, 48).Radius(24).Background(t.Surface2).Shrink(0).
+			ui.Box(c).Size(48, 48).Radius(tok.Pill).Background(t.Surface2).Shrink(0).
 				AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 				ui.Icon(c, pud.Icon("import")).FontSize(22).TextColor(t.Text2)
 			})

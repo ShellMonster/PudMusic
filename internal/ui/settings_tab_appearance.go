@@ -171,8 +171,8 @@ func (s *Shell) themeCard(c *ui.Context, label string, mode app.ThemeMode, selec
 				ui.Box(c).Key("tp-side:" + label).Grow(28).FillHeight().Background(side)
 				ui.Column(c).Grow(72).FillHeight().Children(func() {
 					ui.Column(c).Grow(1).FillWidth().Padding(space.Px12).Children(func() {
-						ui.Box(c).Key("tp-a:" + label).Width(0).FillWidth().Height(8).Radius(4).Background(fg.Alpha(0.8))
-						ui.Box(c).Key("tp-b:"+label).FillWidth().Height(6).Radius(3).Background(fg.Alpha(0.4)).
+						ui.Box(c).Key("tp-a:" + label).Width(0).FillWidth().Height(8).Radius(tok.R4).Background(fg.Alpha(0.8))
+						ui.Box(c).Key("tp-b:"+label).FillWidth().Height(6).Radius(tok.R3).Background(fg.Alpha(0.4)).
 							Margin(space.Px6, space.None, space.None, space.None)
 					})
 					ui.Box(c).Key("tp-bar:" + label).FillWidth().Height(20).Background(bar)

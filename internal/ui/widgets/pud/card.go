@@ -151,7 +151,7 @@ func VideoCard(c *ui.Context, key string, v Video, w float32) (open bool) {
 				v.Cover(c, w, h)
 			}
 			stat := func() ui.Element {
-				return ui.Row(c).Background(ui.RGBA(0, 0, 0, scrim.VideoChip)).Radius(6).Padding(space.Px3, space.Px8).Gap(space.Px10).
+				return ui.Row(c).Background(ui.RGBA(0, 0, 0, scrim.VideoChip)).Radius(tok.R6).Padding(space.Px3, space.Px8).Gap(space.Px10).
 					AlignItems(ui.Center)
 			}
 			stat().Absolute().Left(8).Bottom(8).Children(func() {
@@ -168,7 +168,7 @@ func VideoCard(c *ui.Context, key string, v Video, w float32) (open bool) {
 			})
 			if v.Duration != "" {
 				typo.Mono(ui.Text(c, v.Duration)).FontSize(12).FontWeight(500).TextColor(ui.RGB(255, 255, 255)).
-					Background(ui.RGBA(0, 0, 0, scrim.VideoChip)).Radius(6).Padding(space.Px3, space.Px6).SingleLine().
+					Background(ui.RGBA(0, 0, 0, scrim.VideoChip)).Radius(tok.R6).Padding(space.Px3, space.Px6).SingleLine().
 					Absolute().Right(8).Bottom(8)
 			}
 		})

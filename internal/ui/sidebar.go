@@ -244,7 +244,7 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool, 
 	b.Children(func() {
 		if selected {
 			ui.Box(c).Absolute().Left(0).Top(sideBarInset).Bottom(sideBarInset).Width(3).
-				Radius(2).Background(p.Accent)
+				Radius(tok.R2).Background(p.Accent)
 		}
 		iconCol := fg
 		if selected {

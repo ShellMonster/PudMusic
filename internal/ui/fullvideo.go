@@ -14,6 +14,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"image"
 	"time"
 
@@ -84,7 +85,7 @@ func (s *Shell) drawVideo(p *ui.Painter, r ui.Rect, radius float32) {
 func (s *Shell) viewVideoBadge(c *ui.Context) {
 	b := ui.ButtonBase(c).Key(fullVideoBadgeKey).Label("看视频").
 		Absolute().Right(12).Bottom(12).Height(32).PaddingX(space.Px12).Gap(space.Px6).
-		AlignItems(ui.Center).Radius(16).Background(ui.RGBA(0, 0, 0, scrim.VideoBadge)).Cursor(ui.CursorPointer)
+		AlignItems(ui.Center).Radius(tok.Pill).Background(ui.RGBA(0, 0, 0, scrim.VideoBadge)).Cursor(ui.CursorPointer)
 	b.Children(func() {
 		white := ui.RGB(255, 255, 255)
 		ui.Icon(c, pud.Icon("video")).FontSize(14).TextColor(white)
@@ -163,7 +164,7 @@ func (s *Shell) viewVideoModeKeys(c *ui.Context, on bool, right, bottom, top flo
 
 func (s *Shell) videoModeKey(c *ui.Context, key, name, label string) ui.Element {
 	b := ui.Box(c).Key(key).Role(ui.RoleButton).Label(label).Size(28, 28).
-		Radius(14).Background(ui.RGBA(0, 0, 0, scrim.Media)).Center().Cursor(ui.CursorPointer)
+		Radius(tok.Pill).Background(ui.RGBA(0, 0, 0, scrim.Media)).Center().Cursor(ui.CursorPointer)
 	b.Children(func() {
 		ui.Icon(c, icon(name)).FontSize(16).TextColor(ui.RGBA(255, 255, 255, 0.95))
 	})
@@ -241,7 +242,7 @@ func (s *Shell) viewVideoQuality(c *ui.Context, right, bottom, top float32) {
 	}
 	white := ui.RGBA(255, 255, 255, 0.95)
 	pill := ui.Box(c).Key(fullVideoQualityKey).Role(ui.RoleButton).Label("清晰度").
-		Height(28).PaddingX(space.Px10).Radius(14).Background(ui.RGBA(0, 0, 0, scrim.Media)).
+		Height(28).PaddingX(space.Px10).Radius(tok.Pill).Background(ui.RGBA(0, 0, 0, scrim.Media)).
 		Center().Cursor(ui.CursorPointer)
 	pill.Children(func() {
 		ui.Text(c, cur.Label()).FontSize(13).TextColor(white)
@@ -253,7 +254,7 @@ func (s *Shell) viewVideoQuality(c *ui.Context, right, bottom, top float32) {
 		return
 	}
 	menu := ui.Column(c).Key("full:video:quality:menu").Absolute().Right(0).Gap(space.Px2).Padding(space.Px6).
-		Radius(10).Background(ui.RGBA(0, 0, 0, scrim.Badge))
+		Radius(tok.R10).Background(ui.RGBA(0, 0, 0, scrim.Badge))
 	if top > 0 {
 		menu = menu.Top(36)
 	} else {
@@ -267,7 +268,7 @@ func (s *Shell) viewVideoQuality(c *ui.Context, right, bottom, top float32) {
 				col = ui.Color{R: 0xE8, G: 0x8A, B: 0x5E, A: 255}
 			}
 			item := ui.Box(c).Key(fullVideoQItemKey + q.Label()).Role(ui.RoleButton).Label(q.Label()).
-				Height(30).PaddingX(space.Px12).Radius(6).Center().Cursor(ui.CursorPointer)
+				Height(30).PaddingX(space.Px12).Radius(tok.R6).Center().Cursor(ui.CursorPointer)
 			item.Children(func() { ui.Text(c, q.Label()).FontSize(13).TextColor(col) })
 			if item.Clicked() {
 				s.vv.qOpen = false

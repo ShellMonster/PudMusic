@@ -189,7 +189,7 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 		if o.Count != "" {
 			// `.cnt`：top 1 / right -4，侧栏底、次要色、600 10 等宽、2/4 内边距、圆角 6。
 			typo.Mono(ui.Text(c, o.Count)).FontSize(10).FontWeight(600).TextColor(p.Text2).
-				Background(p.Side).Padding(space.Px2, space.Px4).Radius(6).SingleLine().
+				Background(p.Side).Padding(space.Px2, space.Px4).Radius(tok.R6).SingleLine().
 				Absolute().Top(1).Right(-4)
 		}
 	})

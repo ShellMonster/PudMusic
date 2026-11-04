@@ -255,7 +255,7 @@ func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState) {
 // 字变正文色。
 func (s *Shell) loginStepRow(c *ui.Context, p tok.Palette, n int, label string, done bool) {
 	ui.Row(c).Key("login-step:" + label).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-		circle := ui.Row(c).Width(22).Height(22).Radius(11).Shrink(0).Justify(ui.Center).AlignItems(ui.Center)
+		circle := ui.Row(c).Width(22).Height(22).Radius(tok.Pill).Shrink(0).Justify(ui.Center).AlignItems(ui.Center)
 		fg := p.Text2
 		if done {
 			circle = circle.Background(p.Accent).Border(1, p.Accent)

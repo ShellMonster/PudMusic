@@ -822,7 +822,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem, idx int) {
 			s.searchKeyword = item.Value
 			s.submitSearch(item.Value)
 		}
-		del := ui.ButtonBase(c).Label("删除「"+label+"」").Size(20, 20).Radius(10).
+		del := ui.ButtonBase(c).Label("删除「"+label+"」").Size(20, 20).Radius(tok.Pill).
 			AlignItems(ui.Center).Justify(ui.Center)
 		del.Children(func() {
 			ui.Icon(c, pud.Icon("x")).FontSize(tok.IconXs).TextColor(p.Text3)

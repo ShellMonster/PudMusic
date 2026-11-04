@@ -216,7 +216,7 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				}
 			case hot:
 				b := ui.ButtonBase(c).Key(key+":play").Label("播放 "+t.Title).Size(32, 32).
-					Radius(16).AlignItems(ui.Center).Justify(ui.Center)
+					Radius(tok.Pill).AlignItems(ui.Center).Justify(ui.Center)
 				b.Children(func() { glyph(c, "play", tok.IconSm, p.Text) })
 				ev.Play = b.Clicked()
 			case t.Playing:

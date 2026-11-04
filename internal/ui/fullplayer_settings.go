@@ -154,7 +154,7 @@ func (s *Shell) viewFullSwatch(c *ui.Context, key string, sw fullSwatch, checked
 	if checked {
 		border = tok.Full.Text
 	}
-	b := ui.ButtonBase(c).Key(key).Label(sw.name).Size(24, 24).Radius(12).Shrink(0).
+	b := ui.ButtonBase(c).Key(key).Label(sw.name).Size(24, 24).Radius(tok.Pill).Shrink(0).
 		Background(fill).Border(2, border).Transition(motion.Fade)
 	return b
 }

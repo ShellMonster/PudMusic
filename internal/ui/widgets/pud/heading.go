@@ -5,6 +5,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
@@ -141,7 +142,7 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 					}
 					if on {
 						ui.Box(c).Key(key + ":bar").Absolute().Left(0).Right(0).Bottom(-1).Height(2).
-							Radius(2).Background(p.Accent).
+							Radius(tok.R2).Background(p.Accent).
 							Transition(ui.ElementTransition{
 								Duration: motion.Med, Ease: motion.EaseOut,
 								Enter: &ui.Motion{Scale: 0.3, Opacity: 0},

@@ -217,7 +217,7 @@ func (s *Shell) updateProgress(c *ui.Context, p tok.Palette, st app.UpdateState)
 			if st.Total > 0 {
 				frac = float32(st.Percent / 100)
 			}
-			ui.Box(c).Key("update-bar").Grow(1).Height(6).Radius(2).Background(p.Surface2).
+			ui.Box(c).Key("update-bar").Grow(1).Height(6).Radius(tok.R2).Background(p.Surface2).
 				Label("下载进度").
 				Draw(func(pp *ui.Painter, r ui.Rect) {
 					pp.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * min(max(frac, 0), 1), H: r.H}, p.Accent, 2)
