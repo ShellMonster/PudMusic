@@ -384,6 +384,18 @@ type Settings struct {
 	// 这一格使用指针，区分「未设置」和「用户关闭」。缺少字段时由 normalize 填入默认值。
 	MiniLyricsCurtain *bool `json:"miniLyricsCurtain"`
 
+	// NotchPlayer 是「刘海窗」那个开关：指针探进屏幕刘海区时展开一张播放卡。
+	// **默认开**（装上是给用 MacBook 的人的——没有刘海的机器上它就是「贴
+	// 菜单栏的一条」，不碍事）。
+	//
+	// ⚠️ **用指针**，同 `MiniLyricsCurtain`：「没设过」和「用户关了」要分
+	// 得开——默认是开。
+	NotchPlayer *bool `json:"notchPlayer"`
+
+	// NotchPlayerGreeted 记「刘海窗已经问候过一次」：它默认关着的用户
+	// 第一次放歌时会从刘海里长出来一句引导，只长一次。
+	NotchPlayerGreeted bool `json:"notchPlayerGreeted"`
+
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
 
@@ -506,6 +518,14 @@ func (s Settings) EQGains() [10]float64 {
 //
 // ⚠️ 正常路径上 `normalize()` 已经把 nil 填成默认了（见 `Settings.normalize`），
 // 而这里再兜一次是因为**零值 `Settings{}`** 也可能出现（界面上手工拼的那几处）。
+// NotchPlayerOn 报「刘海窗」那一格是开是关。默认开（nil = 没设过 = 开）。
+func (s Settings) NotchPlayerOn() bool {
+	if s.NotchPlayer == nil {
+		return true
+	}
+	return *s.NotchPlayer
+}
+
 func (s Settings) MiniLyricsCurtainOn() bool {
 	if s.MiniLyricsCurtain == nil {
 		return DefaultMiniLyricsCurtain

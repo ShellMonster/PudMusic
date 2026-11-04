@@ -1193,6 +1193,21 @@ type Shell struct {
 	// 指回来，关掉自己之后把主窗口的 `mini` 清成 nil。
 	mini *Shell
 
+	// notch 是刘海窗那个外壳，nil = 没开。见 notch.go。
+	//
+	// ⚠️ **只有主窗口的外壳有它**：刘海窗自己不再开第二个（同 `mini`），
+	// 而它那一侧靠 `main` 指回来，关掉自己之后把主窗口的 `notch` 清成 nil。
+	notch *Shell
+
+	// notchSt 是刘海窗自己的开合状态（开/收、进出时间、tap 报上来的指针）。
+	// 它长在**每一个外壳上**——主窗和刘海窗各有一份，但只有刘海那个外壳
+	// 的那份真被用（`notchTick` 读写的就是它）。
+	notchSt notchShell
+
+	// notchPollStop 是刘海窗那个「指针在不在刘海区」轮询的停掉动作
+	//（`every` 给的）。刘海窗关掉时调它（`attachNotchWindow` 的 OnClosed）。
+	notchPollStop func()
+
 	// main 是「我是被主窗口开出来的那个」这条边，只在迷你窗口那一侧有值。
 	// 见 `attachMiniWindow`。
 	main *Shell
