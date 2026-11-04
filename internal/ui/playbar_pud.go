@@ -60,7 +60,7 @@ func (s *Shell) pbPopover(c *ui.Context, anchor ui.Element, open *bool, name str
 	ui.PopoverBase(c, anchor, open, func(panel ui.Element) {
 		p := tok.Of(c.Theme())
 		shadow.Pop(panel.
-			AttachTo(anchor, ui.AnchorBottomEnd, ui.AnchorTopEnd).
+			AttachTo(anchor, ui.AnchorBottomStart, ui.AnchorTopStart).
 			Margin(space.Px12, space.None, space.None, space.None).
 			MinWidth(tok.PopMinW).Padding(space.Px8).Radius(tok.R12).
 			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn).

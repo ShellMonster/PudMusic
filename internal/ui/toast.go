@@ -473,7 +473,7 @@ func (s *Shell) viewToast(c *ui.Context, t toast) {
 	e = shadow.Pop(e, c.Theme())
 	e.Children(func() {
 		ui.Icon(c, pud.Icon(toastIcon(t.tone))).FontSize(tok.IconSm).TextColor(p.Bg).PassThrough()
-		ui.Text(c, t.text).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).
+		ui.Text(c, t.text).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).FixedLineHeight(20.15).
 			TextColor(p.Bg).SingleLine().PassThrough()
 	})
 	// 指针停在上面时先不收（`expire` 里读这一位）。

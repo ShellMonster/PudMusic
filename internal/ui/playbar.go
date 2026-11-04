@@ -301,7 +301,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 文件」：在线条目也可能没有稿件身份（既没有 bvid 也没有 sid），
 			// 那时候没有页面可跳——上游那边拼出来的是
 			// `bilibili.com/video/undefined`，那是个 404。
-			name := ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).
+			name := ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).FixedLineHeight(21.7).
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
 			if titleClickable(st) {
@@ -580,7 +580,7 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	if mid <= 0 {
 		// 没有编号时是**普通文字**：它在那一列里本来就是左对齐的（列是
 		// `AlignItems` 默认的 Stretch，文字从左沿起）。
-		ui.Text(c, name).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size12)).
+		ui.Text(c, name).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size12)).FixedLineHeight(18.6).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
@@ -597,7 +597,7 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
 	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
 	if s.withTip(c, flatLink(c, name).Grow(1).MinWidth(artistMinW).
-		FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
+		FontSize(scale.Font(c, scale.Size12)).FixedLineHeight(18.6).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), list.OwnerTipText(name)).Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(mid, 10))
 	}

@@ -25,7 +25,7 @@ func PopPanel(c *ui.Context, key string) ui.Element {
 
 // PopHeading 是弹层里的小标题（原型 `.pop h5`：12 号 text-3，左右 8、上 4 下 8）。
 func PopHeading(c *ui.Context, s string) ui.Element {
-	return text(c, s, scale.Size12, pal(c).Text3).Margin(space.Px4, space.Px8, space.Px8, space.Px8)
+	return text(c, s, scale.Size12, pal(c).Text3).FixedLineHeight(18.6).Margin(space.Px4, space.Px8, space.Px8, space.Px8)
 }
 
 // PopSep 是弹层里的分隔线（原型 `.pop-sep`：1 像素 line，上下 6、左右 4）。
@@ -46,12 +46,13 @@ func PopOpt(c *ui.Context, key, label, note string, checked bool) ui.Element {
 	b = b.Transition(motion.Fade)
 	b.Children(func() {
 		ui.Column(c).Grow(1).Children(func() {
-			t := text(c, label, scale.Size13, p.Text).SingleLine()
+			// 原型行高 1.55（body 继承）：13 号 ≈ 20.15，一项 8 + 20 + 8 = 36。
+			t := text(c, label, scale.Size13, p.Text).FixedLineHeight(20.15).SingleLine()
 			if checked {
 				t.TextColor(p.AccentText).FontWeight(600)
 			}
 			if note != "" {
-				note := text(c, note, scale.Size12, p.Text3).SingleLine()
+				note := text(c, note, scale.Size12, p.Text3).FixedLineHeight(18.6).SingleLine()
 				if checked {
 					note.TextColor(p.AccentText)
 				}
@@ -79,7 +80,7 @@ func PopItem(c *ui.Context, key, label string, danger bool) ui.Element {
 		if danger {
 			fg = p.Err
 		}
-		text(c, label, scale.Size13, fg).SingleLine().Grow(1)
+		text(c, label, scale.Size13, fg).FixedLineHeight(20.15).SingleLine().Grow(1)
 	})
 	return b
 }
@@ -193,7 +194,7 @@ func Toast(c *ui.Context, key, msg, icon, action string) (acted bool) {
 		if icon != "" {
 			glyph(c, icon, tok.IconSm, p.Bg)
 		}
-		text(c, msg, scale.Size13, p.Bg).FontWeight(500).SingleLine()
+		text(c, msg, scale.Size13, p.Bg).FontWeight(500).FixedLineHeight(20.15).SingleLine()
 		if action != "" {
 			b := ui.ButtonBase(c).Key(key+":action").Margin(space.None, space.None, space.None, space.Px8)
 			b.Children(func() {

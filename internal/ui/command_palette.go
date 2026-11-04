@@ -52,7 +52,7 @@ const (
 	// paletteInputLabel 是顶上那个输入框的名字。
 	paletteInputLabel = "搜索命令"
 	// paletteEmptyNote 是一个命令都没搜到的时候说的那句话。
-	paletteEmptyNote = "没有这条命令"
+	paletteEmptyNote = "没有匹配的命令或歌曲"
 
 	// paletteWidth 是面板的宽。命令名最长也就「显示/隐藏迷你播放器」十个字，
 	// 480 摆得开、在 900 的最小窗口上也不顶边。
@@ -231,7 +231,7 @@ func (s *Shell) viewCommandPalette(c *ui.Context) {
 		back := ui.Row(c).Key("palette-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
 			Background(ui.RGBA(0, 0, 0, scrim.Dialog)).
-			Justify(ui.Center).
+			Justify(ui.Center).AlignItems(ui.Start).
 			Modal().Transition(motion.ScrimIn)
 		back.Children(func() {
 			p := tok.Of(c.Theme())
@@ -269,12 +269,13 @@ func (s *Shell) viewPaletteInput(c *ui.Context, entries []paletteEntry) {
 		}).Children(func() {
 		ui.Icon(c, pud.Icon("search")).FontSize(tok.Icon).TextColor(p.Text3).Shrink(0)
 		s.viewPaletteField(c, entries)
+		pud.Kbd(c, "esc").Shrink(0)
 	})
 }
 
 func (s *Shell) viewPaletteField(c *ui.Context, entries []paletteEntry) {
 	field := ui.TextInputBase(c, &s.paletteQuery).
-		Label(paletteInputLabel).Placeholder("输入命令或页面名").
+		Label(paletteInputLabel).Placeholder("跳转页面、执行操作，或搜索歌曲…").
 		Grow(1).FontSize(scale.Font(c, scale.Size16))
 	field.Focus()
 	field.OnTextKey(func(k ui.TextKey) bool {
@@ -372,7 +373,8 @@ func (s *Shell) viewPaletteRow(c *ui.Context, e paletteEntry, idx int) {
 	}
 	row.Children(func() {
 		ui.Icon(c, pud.Icon(entry.icon)).FontSize(tok.IconSm).TextColor(iconCol).Shrink(0)
-		ui.Text(c, entry.label).FontSize(scale.Font(c, scale.Size14)).Grow(1).MaxLines(1).Ellipsis("…")
+		ui.Text(c, entry.label).FontSize(scale.Font(c, scale.Size14)).FixedLineHeight(21.7).
+			Grow(1).MaxLines(1).Ellipsis("…")
 		if entry.id != "" {
 			if _, it, ok := findShortcutInDefaults(entry.id); ok && it.Shortcut != "" {
 				pud.Kbd(c, formatAccel(accelerator(it.Shortcut)))

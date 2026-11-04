@@ -505,7 +505,7 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 	}
 	// Key 挂在外面这一格上：里面那一枚是**按钮**，而 Key 挂在「创建时处理过
 	// 输入」的控件上会 panic（`ui/element.go:658`）。
-	ui.Column(c).Key("avatar").Children(func() {
+	ui.Column(c).Key("avatar").Margin(space.None, space.None, space.None, space.Px4).Children(func() {
 		hit := ui.ButtonBase(c).Size(avatarHit, avatarHit).Padding(space.None).Radius(avatarHit / 2).
 			Label(avatarLabel)
 		// 原型 `.top-me`：悬停 2 像素 `line-strong` 环，展开 / 聚焦时 2 像素 `accent` 环。

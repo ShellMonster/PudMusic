@@ -519,7 +519,7 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 		// 进场 `motion.PopIn`（4 下滑 + 淡入，240ms）。
 		pl := tok.Of(t)
 		p := shadow.Pop(panel.KeepFocus().Label(suggestPanelLabel).
-			Width(w).Padding(space.Px12).Radius(tok.R12).
+			Width(w).Margin(space.Px8, space.None, space.None, space.None).Padding(space.Px12).Radius(tok.R12).
 			Background(pl.Surface).Border(1, pl.Line).Transition(motion.PopIn), t)
 
 		// ---- 进场：淡入 + 升上来 10 DIP（票 #259） ----

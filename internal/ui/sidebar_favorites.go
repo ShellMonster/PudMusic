@@ -373,13 +373,14 @@ func (s *Shell) viewFavoriteRow(c *ui.Context, g app.FavoriteGroup, f app.Favori
 		}
 		ui.Column(c).Grow(1).AlignItems(ui.Start).Children(func() {
 			// 🔴 单行 + 省略号：名字一长这一行会长高，把下面的行整体顶下去。
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).
+			// 原型行高 1.55（body 继承）：13 号 ≈ 20，11 号 ≈ 17，一行就是 6 + 37 + 6 = 49。
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).FixedLineHeight(20).
 				TextColor(fg).Grow(1).MaxLines(1).Ellipsis("…")
 			if f.Invalid {
 				// 「已失效」和列表页上那枚同一个。
 				list.InvalidTag(c)
 			}
-			ui.Text(c, favCountText(f)).FontSize(scale.Font(c, scale.Size11)).
+			ui.Text(c, favCountText(f)).FontSize(scale.Font(c, scale.Size11)).FixedLineHeight(17).
 				TextColor(p.Text3).Grow(1).MaxLines(1)
 		})
 	})
