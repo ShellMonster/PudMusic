@@ -182,7 +182,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 const (
 	// loginQRSide / loginQRPad 是 `.qr`：240×240、内边距 16（二维码本身画在 208 的框里）。
 	loginQRSide = 240
-	loginQRPad  = 16
+	loginQRPad  = space.Px16
 	// loginTextW 是右列的最大宽（`minmax(0, 320px)`）。
 	loginTextW = 320
 )

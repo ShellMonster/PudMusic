@@ -30,11 +30,11 @@ const (
 	// setGroupMaxW 是 `.set-group` 的最大宽。
 	setGroupMaxW = 720
 	// setGroupGap 是分组之间的距离（`.set-group` 的 margin-bottom）。
-	setGroupGap = 40
+	setGroupGap = space.Px40
 	// setRowMinH / setRowPadY / setRowPadX 是 `.set-row` 的最小高和内边距。
 	setRowMinH = 64
-	setRowPadY = 16
-	setRowPadX = 20
+	setRowPadY = space.Px16
+	setRowPadX = space.Px20
 	// setNavW / setLayoutGap 是 `.set-layout` 的两列：180 的分类导航 + 缝 48。
 	setNavW      = 180
 	setLayoutGap = 48

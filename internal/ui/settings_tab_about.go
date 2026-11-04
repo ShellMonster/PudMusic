@@ -102,7 +102,7 @@ func (s *Shell) aboutUpdateButton(c *ui.Context, us app.UpdateState) {
 		// 正在查 / 正在下：幽灵键的样子 + 转圈 + 字（字不能拿掉，否则按钮缩成小方块，宽度会跳）。
 		p := tok.Of(c.Theme())
 		base := ui.ButtonBase(c).Key("set-update").Height(tok.BtnH).Radius(tok.BtnH/2).
-			PaddingX(20).AlignItems(ui.Center).Justify(ui.Center).Border(1, p.LineStrong).Shrink(0)
+			PaddingX(space.Px20).AlignItems(ui.Center).Justify(ui.Center).Border(1, p.LineStrong).Shrink(0)
 		busyButton(c, base, label, p.Text)
 		return
 	}
