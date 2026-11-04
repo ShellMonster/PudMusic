@@ -10,6 +10,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // Actions 是这个列表会做的操作。
@@ -139,6 +140,10 @@ type Actions struct {
 	// ⚠️ **为 nil 时什么都不登记**：单独造这个包的测试没有界面层，那种情况下
 	// 「进内容区」这件事压根不发生（没有界面层就没有侧栏）。
 	Focus func(l Focusable)
+
+	// MenuExtra 在标准菜单项之后接这一页自己的菜单项（本地音乐的「在访达里显示」「删除文件」）。
+	// 它和标准项走同一份菜单：自己 `m.Item(...).Chosen()`，被选中就做事。nil = 没有。
+	MenuExtra func(m *ui.Menu, song Music)
 
 	// FocusOut 是「键盘往回走、列表已经在顶上一行了」时该做的事。
 	//

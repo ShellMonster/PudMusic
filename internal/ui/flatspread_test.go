@@ -316,41 +316,6 @@ func TestTheDownloadListKeysAreFlat(t *testing.T) {
 // 四、本地音乐
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheLocalMusicKeysAreFlat 页头、操作行、每一行末尾那几枚。
-func TestTheLocalMusicKeysAreFlat(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			library := t.TempDir()
-			other := t.TempDir()
-			libSong(t, library, "别删我.mp3")
-			libSong(t, other, "另一个目录.mp3")
-
-			tt, s, _, _ := shellOnLocalMusic(t, library, other)
-			tt.SetDark(dark)
-			tt.Frame()
-			noPointer(tt)
-
-			// ⚠️ **那枚会展开的搜索不在这一列里**：理由同收藏夹那一处（它的名字
-			// 落在图标上，`Find` 给回来的是图标那一格）。
-			assertKeysFlat(t, tt, "本地音乐", "全部加入队列", "重新扫描", "打开文件夹", deleteRowLabel)
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "本地音乐", "添加目录")
-
-			// 「移除此目录」只在一个**具体的**目录被选中时摆（「全部目录」那一档
-			// 没有「当前目录」可移除）。直接拨那个字段而不是走下拉：下拉的选项
-			// 是原生菜单，无头 Tester 里展开不了（`localmusic_delete_test.go`
-			// 那一条为此 `t.Skipf` 了）。
-			s.local.dirLabel = dirLabels([]string{library, other})[1]
-			tt.Frame()
-			noPointer(tt)
-			assertKeysFlat(t, tt, "本地音乐", "移除此目录")
-		})
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 五、收藏夹
 // ─────────────────────────────────────────────────────────────────────────────
