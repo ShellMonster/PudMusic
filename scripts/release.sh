@@ -1,37 +1,21 @@
 #!/usr/bin/env bash
-# 本机一键发版：核版本 → 跑测试 → 重生成 → 打**带签名**的更新包 → 挂一个草稿 Release。
+# 发版入口：本地只做**前置检查**，然后打 tag 推上去——真正的构建、签名、
+# 挂草稿 Release 都在 CI（.github/workflows/release.yml）里做。
 #
-#   scripts/release.sh                 # 四个首发目标
-#   scripts/release.sh darwin/arm64    # 只发一个
+#   scripts/release.sh
 #
-# 真正干活的还是 MyGo 自带的 CLI（`go tool mygo build`）。这个脚本做的是它不做、
-# 而**漏了不会报错**的那几件：核三处版本号一致、跑验收、重新生成图标与许可清单、
-# 检查更新包真的带签名、用 `gh` 把标签推上去并挂成**草稿** Release。
+# 为什么这么拆：本地和 CI 同时构建上传会让 release 上躺两套文件名（mygo 原名 +
+# 品牌名），而 CI 末尾一步 `gh release edit --draft` 还会把已发布的 release
+# 误拖回草稿。链路只留 CI 一条，本地只保证「tag 打在对的代码上、该核的都核过」。
 #
-# ⚠️ 为什么挂草稿而不是直接发布：草稿里的资产**匿名取不到**，而 MyGo 的更新源是
-# 从正式发布的 release 里读清单的。所以这个脚本跑完**还不算发完**，人看过之后要
-# 把草稿转正式（`gh release edit v0.1.0 --draft=false`），那一步才是应用开始
-# 看得到新版本的那一刻。
+# ⚠️ 这个脚本跑完**还不算发完**：tag 推上去会触发 CI 构建并挂**草稿**，人看过
+# 草稿里的资产和说明之后，把它转正式（`gh release edit <tag> --draft=false`）
+# 才是应用开始看得到新版本的那一刻——草稿资产匿名取不到。
 #
-# ⚠️ 这条链路的私钥在 `~/.config/biu-mygo/mygo-update.key`（能用
-# `MYGO_UPDATE_KEY_FILE` 改路径）。**丢了它就再也发不了更新，而且已经装出去的
-# 老版本会验不过之后的每一个版本**——备份在哪要写在发版说明里，别只放在本机。
+# ⚠️ 签名私钥在 repo secret `MYGO_UPDATER_PRIVATE_KEY`，不在本机。
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-
-ALL_TARGETS=(
-  darwin/arm64
-  darwin/amd64
-  windows/amd64
-  windows/arm64
-)
-
-if [ "$#" -gt 0 ]; then
-  targets=("$@")
-else
-  targets=("${ALL_TARGETS[@]}")
-fi
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\n\033[31m错误：%s\033[0m\n' "$*" >&2; exit 1; }
@@ -50,8 +34,8 @@ need gh "装 GitHub CLI（brew install gh）并登录：gh auth login"
 # bash 就是它）把那个字符的头一个字节并进变量名**——`$变量` + 全角逗号会解析成
 # 一个不存在的 `变量…`，`set -u` 下当场崩在那一行。
 #
-# 危险的不是崩，是**崩在哪**：第 5 步崩之前已经把标签推出去了，于是留下一个
-# 「有标签、没有 release」的半截发版，而 `bash -n` 查不出来（语法是对的）。
+# 危险的不是崩，是**崩在哪**：万一崩在 tag 已经推出去之后，就留下一个
+# 「有标签、CI 已在跑」的半截发版，而 `bash -n` 查不出来（语法是对的）。
 #
 # 所以动手之前先扫一遍自己。不用 `grep -P`（BSD grep 未必有），用 LC_ALL=C 下的
 # `[^ -~]`：它只看字节，落在可打印 ASCII 之外就算，正好是「非 ASCII」。
@@ -131,7 +115,7 @@ changelog_section() {
 }
 
 # ================================================================ 1 前置检查
-say "第 1 步 / 共 5 步：前置检查"
+say "第 1 步 / 共 2 步：前置检查"
 
 # 1.1 工作区干净。发版打的是 HEAD 上那一份代码，脏工作区打出来的产物和标签对不上。
 if [ -n "$(git status --porcelain)" ]; then
@@ -160,8 +144,8 @@ if [ -z "$publish_repo" ] && [ -z "$update_url" ]; then
   两个字段二选一：updates.github 是放更新的**公开**仓库（owner/name），
   updates.url 是放更新的 HTTPS 目录。"
 fi
-[ -n "$publish_repo" ] || die "mygo.json 用的是 updates.url，而这个脚本只走 GitHub 那一路
-（第 5 步是 gh release create）。要发到自己的服务器或 S3，得另写一条上传链路。"
+[ -n "$publish_repo" ] || die "mygo.json 用的是 updates.url，而这条链路只走 GitHub
+（CI 里是 gh release create）。要发到自己的服务器或 S3，得另写一条上传链路。"
 
 # 公开性：MyGo 的更新源要求**公开**仓库——release 资产是给所有人匿名下载的，私有
 # 仓库的资产匿名取不到，而**哪一处都不会报错**：应用只是一直查不到更新。
@@ -194,7 +178,7 @@ case "$visibility" in
 
       仓库转公开之后同一条配置自动就通了，**不用改任何配置**，也不用重发。
 
-      这也是为什么第 5 步挂的是草稿：先别发布。
+      这也是为什么 CI 挂的是草稿：先别发布。
 EOF
     ;;
   *) die "$publish_repo 的可见性是 ${visibility}，认不出来。GitHub 改了取值？" ;;
@@ -214,7 +198,8 @@ notes="$(changelog_section "$version")"
 # 签名和文件却还是上一次那套。已经推到远端且**指向 HEAD** 的标签放行——那是上
 # 一次跑到一半留下的。
 #
-# 「接着走完」这一半在第 5 步：那里的标签推得出去、也有删草稿重挂的续跑路径。
+# 「接着走完」这一半在 CI：tag 推上去会触发构建并挂草稿，草稿存在时 CI 会清掉
+# 旧资产重传，是幂等的。
 # 这里只管住一件事——**别把标签打在和已有标签不同的提交上**，那是重发。
 head_sha="$(git rev-parse HEAD)"
 if tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null)"; then
@@ -252,107 +237,8 @@ if ! git merge-base --is-ancestor "$head_sha" origin/main 2>/dev/null; then
 EOF
 fi
 
-# 1.5 签名私钥。**它不在仓库里**，所以每次发版都要现读；读不到就停，不要打出
-# 一个没有签名的更新包——那种包用户装不上，而且要等下一次有人报「更新失败」。
-key_file="${MYGO_UPDATE_KEY_FILE:-$HOME/.config/biu-mygo/mygo-update.key}"
-if [ -z "${MYGO_UPDATER_PRIVATE_KEY:-}" ]; then
-  [ -f "$key_file" ] || die "读不到更新签名私钥：$key_file
-
-  **丢了私钥就再也发不了更新**，而且已经装出去的老版本会验不过之后的每一个版本。
-  还没有就生成一对（私钥别进仓库）：
-    go tool mygo keygen -o \"$(dirname "$key_file")\"
-  公钥（同一目录的 mygo-update.pub）要写进 mygo.json 的 updates.publicKey。
-  别的地方存：MYGO_UPDATE_KEY_FILE=/path/to/mygo-update.key scripts/release.sh"
-  MYGO_UPDATER_PRIVATE_KEY="$(cat "$key_file")"
-  export MYGO_UPDATER_PRIVATE_KEY
-fi
-
-# Windows 的 NSIS 安装包要 makensis，理由和 scripts/build.sh 一样：MyGo 遇到没有它
-# 会跳过安装包只打一行提示，脚本「成功」了而产物里没有 .exe。
-for t in "${targets[@]}"; do
-  case "$t" in
-    windows/*)
-      command -v makensis >/dev/null 2>&1 || die "要打 Windows 安装包就需要 NSIS（makensis），这台机器上没有。
-  macOS:  brew install nsis
-  Debian: sudo apt install nsis
-  不想装的话，只发一个目标：scripts/release.sh darwin/arm64"
-      ;;
-  esac
-done
-
-printf '  版本 %s（标签 %s）→ %s\n' "$version" "$tag" "$publish_repo"
-printf '  目标 %s\n' "$(IFS=,; echo "${targets[*]}")"
-printf '  私钥 %s\n' "$key_file"
-
-# ================================================================== 2 验收
-say "第 2 步 / 共 5 步：跑验收"
-# ⚠️ **不带 -race**：全量 race 在这台 10 核机器上要十几到二十分钟（长板是
-# internal/service/audio、.../flacdec、internal/platform），放进发版链路会让每一次
-# 发版都等到超时。真要查并发单独挑那几个包跑。
-#
-# ⚠️ **不跑整个 `internal/ui`**（AGENTS.md《默认验收》的口径）：那个包里躺着
-# main 上**已知的几十处既有失败**——日期断言、像素找描边、star 按钮那一族，全是
-# 和「这一版要发的东西」无关的旧账。把它们也跑只会让每一次发版都先等 107 秒
-# 然后崩在一堆 `TestTheRangePickerShowsTwoMonths` 上。**UI 行为改动要单独跑受
-# 影响的用例**，不走整包。
-go build -trimpath -p 4 ./... && go vet -trimpath -p 4 ./... && \
-  go test -p 4 $(go list ./... | grep -v '/internal/ui$')
-
-# ============================================================== 3 重新生成
-say "第 3 步 / 共 5 步：重新生成图标与第三方许可清单"
-# 图案和清单都是算出来的生成物。**改了图案或依赖却忘了重新生成，仓库里躺着的是
-# 旧文件，而没有任何一处会报错**——所以这里跑一遍并检查 git diff。
-go generate ./internal/platform/ ./internal/licensing/
-if ! git diff --quiet; then
-  git --no-pager diff --stat >&2
-  die "生成出来的东西和提交的不一致，把上面这些改动提交了再跑一次。"
-fi
-
-# ============================================================== 4 打更新包
-say "第 4 步 / 共 5 步：打带签名的更新包"
-platforms="$(IFS=,; echo "${targets[*]}")"
-# ⚠️ 不公证、不签名 Developer ID：那一票还没定（mygo.json 里没有
-# macos.signingIdentity，是 ad hoc）。这一条链只管自动更新。
-go tool mygo build -platform "$platforms"
-
-# 产物名换成平台友好的那一套（Apple-Silicon_macOS / Intel_macOS /
-# Windows_x86_64 / Windows_ARM64），清单里的下载地址一并改掉——
-# 签名签的是文件内容，改名不用重签。
-scripts/rename-release-assets.sh "${targets[@]}"
-
-# 收集产物，并且**核每一个目标都真的产出了带签名的清单**。
-#
-# 这是整个脚本最要紧的一道检查：没有私钥时 MyGo 不报错，它只是不打更新文件，
-# 于是产物里躺着一个永远不会更新的安装包，而签收的人要等用户报障才发现。
-scripts/verify-release-assets.sh "${targets[@]}"
-
-assets=()
-for t in "${targets[@]}"; do
-  target="${t/\//-}"
-  dir="build/$target"
-  while IFS= read -r f; do
-    [ -n "$f" ] && assets+=("$f")
-  done < <(find "$dir" -maxdepth 1 -type f \
-    \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*-setup-*.exe' \) -print | sort)
-  assets+=("$dir/update-$target.json")
-done
-
-say "产物"
-for f in "${assets[@]}"; do
-  printf '  %-56s %6s\n' "$f" "$(du -h "$f" | cut -f1)"
-done
-
-say "包体归因"
-# 主可执行文件 / Resources / 其他（安装后解包体积）和安装包/压缩包（下载体积）
-# 分开报，再列链接依赖与资源来源。量的是 build/ 里的产物，不是模块缓存。
-go run ./internal/perf/cmd/artifact-report
-
-# ========================================================== 5 草稿 Release
-say "第 5 步 / 共 5 步：推标签并挂草稿 Release"
-
-notes_file="$(mktemp)"
-trap 'rm -f "$notes_file"' EXIT
-printf '%s\n' "$notes" >"$notes_file"
+# ============================================================ 2 打 tag 并推送
+say "第 2 步 / 共 2 步：打标签并推送（CI 接手构建与发布）"
 
 # 本地打标签再推，而不是让 gh 顺手建一个：gh 默认按**远端默认分支**的 HEAD 建标签，
 # 而我们要的是本机 HEAD——两者不一定同一个提交。标签冲突要在推之前就撞出来。
@@ -363,48 +249,13 @@ else
 fi
 git push origin "$tag"
 
-# 重跑要先清掉上一次留下的草稿：`gh release create` 在同一个 tag 上已有 release 时
-# 直接失败（没有 --clobber，那是 gh release upload 的选项），而标签在上面已经推上去了
-# ——于是第 1.4 步说的「重跑要能接着走完」在 release 这一半原本是假的。
-#
-# 只删**草稿**：已发布的 release 是发出去过的东西，删它等于撤一次发版，那不是
-# 「重跑」而是另一个决定，脚本没有资格替人做。
-existing_is_draft() { gh release view "$tag" --repo "$publish_repo" --json isDraft -q .isDraft 2>/dev/null; }
-
-if state="$(existing_is_draft)"; then
-  case "$state" in
-    true)
-      say "删掉上一次留下的草稿 Release ${tag}，重挂一遍"
-      gh release delete "$tag" --repo "$publish_repo" --yes
-      ;;
-    false)
-      die "$tag 的 Release 已经**发布**了，不再重挂。
-  这一版已经发出去过，重挂会让装着的用户拿到一份对不上的更新。
-  要改这一版就把 mygo.json 的 version 升到下一个版本。"
-      ;;
-    *)
-      die "查不到 $tag 的 Release 状态（gh 报的是 ${state}）。"
-      ;;
-  esac
-fi
-
-# --verify-tag：标签已经推上去了，别让 gh 再建一个。
-# --draft：**不正式发布**。草稿里的资产匿名取不到，应用看不到新版本——这是有意的，
-# 先让人看过再发。
-gh release create "$tag" \
-  --repo "$publish_repo" \
-  --verify-tag \
-  --draft \
-  --title "$tag" \
-  --notes-file "$notes_file" \
-  "${assets[@]}"
-
-say "草稿 Release 已挂上（还没发布）"
+say "标签已推送，CI 会接管剩下的：构建 → 重命名 → 校验 → 挂草稿 Release"
 cat <<EOF
-  gh release view "$tag" --repo $publish_repo
-  gh release edit "$tag" --repo $publish_repo --draft=false   # 确认之后才发出去
+  看 CI 进度：  gh run list --repo $publish_repo --workflow release.yml --limit 3
+  看草稿：      gh release view "$tag" --repo $publish_repo
+
+  CI 跑完会留下一份**草稿** Release。人看过资产和说明之后转正式：
+    gh release edit "$tag" --repo $publish_repo --draft=false
 
   ⚠️ 正式发出去之前，它只是一份草稿：资产匿名取不到，应用查不到新版本。
-  ⚠️ 私钥 $key_file —— 备份在哪请写进发版说明，别只留在本机。
-     丢了它就再也发不了更新，而且已经装出去的老版本会验不过之后的每一个版本。
 EOF
