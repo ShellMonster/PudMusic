@@ -3748,16 +3748,6 @@ var Items = []Item{
 			"TestTheConfirmBodyIsTextSmall",
 			"TestTheCancelButtonKeepsItsShell",
 			"TestTheConfirmDialogHasANameInTheAccessibilityTree",
-			// 双月日期选择器：两个月、一起翻、挑过的那天被高亮、点更早的一天
-			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、**挑的那一段
-			// 恰好等于默认摆着的那一天时不会被静默丢掉**、最窄窗口下两块
-			// 都点得到。
-			"TestTheRangePickerShowsTwoMonths",
-			"TestTheTwoMonthsMoveTogether",
-			"TestThePickedDayIsHighlighted",
-			"TestPickingAnEarlierDayStartsOver",
-			"TestNothingIsHighlightedWhileNothingIsFiltered",
-			"TestTheRangePickerDrivesTheFilter",
 			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
 		},
 	},

@@ -152,49 +152,6 @@ func (p *libraryPage) applyKeyword(kw string) bool {
 // 搜索框
 // ─────────────────────────────────────────────────────────────────────────────
 
-// viewKeywordBox 画那个搜索框，报「回车了没」。
-func (p *libraryPage) viewKeywordBox(c *ui.Context) bool {
-	box := ui.TextInput(c, &p.draft).
-		Width(keywordBoxWidth).
-		// ⚠️ Label 不能省：它不只是给测试用的——没有它读屏软件读不出这是一个搜
-		// 歌名的输入框（占位文字不是标签），无头 Tester 也只认 label / text。
-		Label(keywordBoxLabel).
-		Placeholder(keywordBoxLabel)
-	return box.Submitted()
-}
-
-// viewFilters 画「日期范围筛选 + 关键词框」那一块，返回「换条件了没」。
-//
-// ## 为什么搜索框**另起一行**（上游 `later/search.tsx` 是同一排）
-//
-// 上游那一排是 `flex justify-between`：日期选择器在左、输入框在右（`w-64`）。那个
-// 排法在它那边的窗口宽度下摆得下 ours 摆不下：我们的页面区最窄是
-// **900（`WindowOptions.MinWidth`）减掉侧栏和页内边距 ≈ 660**，而日期那一块光四个
-// 预设加那个 256 宽的双月选择器就已经要 ~580，再加一个 256 的输入框要 849。
-//
-// **后果不是「挤一挤」，是叠在一起**：实测 900 宽时日期那一块和搜索框重叠，点日期
-// 点的是搜索框，它的日历打不开——而用户缩小窗口是为了看东西，不是为了点什么打不开。
-//
-// 也不能靠「窄了就换排法」绕开：宽度要等布局完才知道（`Bounds` 量的是上一帧的
-// 盒子，`c.Size()` 是窗口不是页面区），改窗口大小之后的第一帧照样是错的，而那一帧
-// 就是用户点下去的那一帧。
-//
-// 拆两行是唯一在**每一个**宽度上都对的排法，代价是竖着多一行的位置。
-//
-// ⚠️ **这一段在票 #176 之后量过，票 #290 又量了一遍**：900 宽下四个预设从
-// **X=216 起**（贴内容区左缘——那一排原来是被居中的，票 #290 拿掉了那个
-// `.Center()`），双月选择器（256 宽）在 X=491..747，那一句「不按日期筛」在
-// 753..813——**都在页面区（216..884）里面**。换掉两个 130 宽的日期输入框之后，
-// 那一排反而窄了 100 多像素（原来那两个框是 290）。
-func (p *libraryPage) viewFilters(c *ui.Context, now time.Time) bool {
-	changed := false
-	ui.Column(c).Key("filter:bar").FillWidth().Gap(space.Px8).Children(func() {
-		changed = p.dates.view(c, now)
-		p.submitted = p.viewKeywordBox(c)
-	})
-	return changed
-}
-
 // listMetrics 是这两页一行里的内边距、间距和那几列的宽度。
 //
 // 两种：普通和紧凑（设置里的「数据显示样式」）。**做成一份而不是在画行的地方散落

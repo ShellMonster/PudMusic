@@ -467,60 +467,6 @@ func TestChangingTheKeywordThrowsTheOldPageAway(t *testing.T) {
 // 日期范围
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheRangePickerDrivesTheFilter 钉住「手动区间」那一半。
-//
-// 只点预设的话「手动挑一天」那条路就没人走过——而它是日期筛选里唯一能让用户挑到
-// **今天没有预设覆盖**的那一段的办法。
-//
-// ⚠️ **这里点的是双月日历里的日子**（票 #176 / G34 换掉了原来那两个日期输入
-// 框）：点一下是**起始**，再点一下是**结束**，两次点完才换条件。
-func TestTheRangePickerDrivesTheFilter(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
-
-	// 点开日期范围那一块，它会弹出**两个月**的日历。
-	if err := tt.Click(dateRangeLabel); err != nil {
-		t.Fatalf("点不到日期范围：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	for _, want := range []string{"2026年10月", "2026年11月"} {
-		if !tt.HasText(want) {
-			t.Fatalf("日历没打开（缺 %q），文字有 %q", want, tt.Texts())
-		}
-	}
-
-	// 先点起始：2026-10-03。
-	if err := tt.Click("2026年10月3日"); err != nil {
-		t.Fatalf("日历上点不到 10 月 3 号：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	// ⚠️ **只点起始还不换条件**：区间还没挑完，这时候重拉一次列表是白拉的。
-	if got := f.callsOf(laterPathAPI); got != 1 {
-		t.Fatalf("只挑了起始就重拉了列表（%d 次），区间还没挑完", got)
-	}
-
-	// 再点结束：2026-10-20。
-	if err := tt.Click("2026年10月20日"); err != nil {
-		t.Fatalf("日历上点不到 10 月 20 号：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-
-	waitFrames(t, tt, "按手动挑的日期重新拉", func() bool { return f.callsOf(laterPathAPI) == 2 })
-	q := f.queriesOf(laterPathAPI)[1]
-	if got := q.Get("add_time_start"); got != strconv.FormatInt(day(2026, 10, 3).Unix(), 10) {
-		t.Errorf("手动挑了区间之后 add_time_start = %q，want 2026-10-03 那一秒", got)
-	}
-	// 结束是那一天那 23:59:59（闭区间，见 endOfDay 的注释）。
-	if got, want := q.Get("add_time_end"), strconv.FormatInt(day(2026, 10, 20).Add(24*time.Hour-time.Second).Unix(), 10); got != want {
-		t.Errorf("手动挑了区间之后 add_time_end = %q，want %q", got, want)
-	}
-	// 手动挑过之后四个预设一个都不该亮着，也不该还说着「不按日期筛」。
-	if tt.HasText("不按日期筛") {
-		t.Error("手动挑了日期，界面上还说着「不按日期筛」")
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 播放进度
 // ─────────────────────────────────────────────────────────────────────────────
