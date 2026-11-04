@@ -649,7 +649,6 @@ spacing:
   page_horizontal_wide: 40   # 内容区 ≥ 1180
   page_horizontal_medium: 32 # 内容区 ≥ 760
   page_horizontal_narrow: 16 # 内容区 < 760
-  page_vertical: 0           # 旧口径（上游没有 py）
   page_top: 8                # .page 顶部
   page_bottom: 64            # .page 底部
   section_gap: 48            # .sec

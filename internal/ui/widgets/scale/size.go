@@ -127,20 +127,6 @@ func HeroTitleFor(contentW float32) float32 {
 // 角色成立的地方用它（`scale.PageTitle = scale.PageTitle`），
 // 讲的是「这一处要哪一档」而不是「这一处是几」。
 const (
-	// CollectionTitle 是合集 / 收藏夹头图区的大标题。30 那一档退役后先归到
-	// 相邻的 32；T3 按原型换成 `HeroTitle`（64）。
-	CollectionTitle = Size32
-	// NotFoundTitle 是 404 那一页的大字：它是那一页上最大的一个字。
-	NotFoundTitle = Size28
-	// NewMusicTitle 是「新歌速递」那一行标题的字号。
-	//
-	// 上游那一处是整页唯一的 `<h1>`（`new-music-top.tsx:178`），字号照
-	// DESIGN.md 的「页标题 24/400」：24 号、**不加粗**（权重由 Preflight 重置成
-	// inherit）。这一块要「立得住」靠的是字号，不是字重。
-	NewMusicTitle = Size24
-	// BrandName 是品牌字（应用名）的字号。上游 `text-2xl` = 24
-	// （DESIGN.md 的排版表：品牌字 = 24 / 粗体 / 主色）。
-	BrandName = Size24
 	// PlayerTitle 是播放器（满屏 / 迷你播放器）那一页的歌名（上游 `h2` =
 	// `text-xl`）。
 	//
@@ -151,9 +137,6 @@ const (
 	ListTitle = Size16
 	// ListOwner 是列表那一行的 UP 名 / 副题（DESIGN.md 的「列表 UP 名 14」）。
 	ListOwner = Size14
-	// CollectionCopy 是合集头图区下面那三行字（简介 / 类型 + 条数 / 创建者），
-	// 都是 `text-sm` = **14**（上游同一个文件 :53-113）。
-	CollectionCopy = Size14
 	// LyricsTranslation 是译文那一行的字号，抄 `index.tsx:344` 的 `text-sm`
 	// （0.875rem = 14px）。**是死的**，不跟着原词那个字号走——上游的
 	// `text-sm` 就是绝对值，12px 的歌词配 14px 的翻译是 Biu 自己的样子。
@@ -185,21 +168,6 @@ const (
 	// 就是靠表头才对得齐的。上游那边列名 14、次要文字 14、播放量 / 时长 12，列名站在
 	// 它们上面。
 	HeaderFont = Size14
-	// ToastFont 是卡片上那行字的字号（上游 `text-sm` = 14）。
-	//
-	// 字重是 `weightMedium`（500，上游的 `font-medium`）——此前是 13/400。
-	ToastFont = Size14
-	// FavPanelItem 是收藏夹浮层里那一项的字。
-	//
-	// ⚠️ **14（票 #371）**：这一层是折叠侧栏时的收藏夹入口，而它列的是**收藏
-	// 夹名**——和侧栏里那几行是同一样东西，就得是同一个号（正文 14）。原来是
-	// 13（副题那一档），于是同一个名字在两个地方是两种大小。
-	FavPanelItem = Size14
-	// RateMenuFont 是浮层里那七行的字号：**12**。
-	//
-	// 上游那一列的按钮是 `size="sm"`，HeroUI 那个档的字是 `text-tiny`（12）。
-	// 字大一号，44 宽就装不下「0.75x」了（见 playbar_rate.go 那段）。
-	RateMenuFont = Size12
 	// VolPercentFont 是浮层底下那个百分比的字号：**12**。
 	//
 	// 上游是 `endContent` 的 `text-xs`（12，`music-volume/index.tsx:126-149`），

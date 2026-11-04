@@ -96,8 +96,6 @@ const (
 	Px16 = 16
 	// Px20 是 20 像素（五格）。
 	Px20 = 20
-	// Px22 是 22 像素（五格半）——刘海播放卡的左右内边距是这一档。
-	Px22 = 22
 	// Px24 是 24 像素（六格）——设置分组间距是这一档。
 	Px24 = 24
 	// Px28 是 28 像素（七格）。
@@ -133,9 +131,6 @@ const (
 	// PageHorizontalLegacy 是改版前七页共用的页边距 16（`internal/ui` 的
 	// `pagePadX`）。T1–T7 重做页面时换成 `PageHorizontal(内容区宽)`。
 	PageHorizontalLegacy = Px16
-	// PageVertical 是内容区上下内边距：0 像素
-	//（DESIGN.md `spacing.page_vertical`；上游没有 py）。
-	PageVertical = None
 	// ListGap 是列表那一行里各列之间的间距：16 像素
 	//（DESIGN.md `spacing.list_gap`）。
 	ListGap = Px16

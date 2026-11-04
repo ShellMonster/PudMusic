@@ -62,24 +62,16 @@ func TestTheSizeScaleValuesAreLocked(t *testing.T) {
 // 有人把 `PageTitle` 指向 `Size14`，画面上歌名的层次就没了，而这一条会红。
 func TestTheRoleAliasesPointAtTheRightSize(t *testing.T) {
 	want := map[string]int{
-		"PageTitle": 48, "SectionTitle": 24, "HeroTitle": 64, "Subhead": 20,
-		"CollectionTitle": 32, "NotFoundTitle": 28,
-		"NewMusicTitle": 24, "BrandName": 24, "ListTitle": 16, "ListOwner": 14,
-		"CollectionCopy": 14, "LyricsTranslation": 14, "EmptyTitle": 24,
+		"PageTitle": 48, "SectionTitle": 24, "HeroTitle": 64, "Subhead": 20, "ListTitle": 16, "ListOwner": 14, "LyricsTranslation": 14, "EmptyTitle": 24,
 		"EmptyHint": 12, "EmptyPageTitle": 20, "LyricValue": 10,
-		"HeaderFont": 14, "ToastFont": 14, "FavPanelItem": 14,
-		"RateMenuFont": 12, "VolPercentFont": 12,
+		"HeaderFont": 14, "VolPercentFont": 12,
 	}
 	got := map[string]int{
 		"PageTitle": PageTitle, "SectionTitle": SectionTitle,
-		"HeroTitle": HeroTitle, "Subhead": Subhead, "CollectionTitle": CollectionTitle,
-		"NotFoundTitle": NotFoundTitle, "NewMusicTitle": NewMusicTitle,
-		"BrandName": BrandName, "ListTitle": ListTitle, "ListOwner": ListOwner,
-		"CollectionCopy": CollectionCopy, "LyricsTranslation": LyricsTranslation,
+		"HeroTitle": HeroTitle, "Subhead": Subhead, "ListTitle": ListTitle, "ListOwner": ListOwner, "LyricsTranslation": LyricsTranslation,
 		"EmptyTitle": EmptyTitle, "EmptyHint": EmptyHint,
 		"EmptyPageTitle": EmptyPageTitle, "LyricValue": LyricValue,
-		"HeaderFont": HeaderFont, "ToastFont": ToastFont,
-		"FavPanelItem": FavPanelItem, "RateMenuFont": RateMenuFont,
+		"HeaderFont":     HeaderFont,
 		"VolPercentFont": VolPercentFont,
 	}
 	for name, w := range want {

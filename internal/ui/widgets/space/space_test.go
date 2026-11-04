@@ -139,7 +139,6 @@ func TestTheTableMatchesTheDesignTokens(t *testing.T) {
 		"page_horizontal_wide":   int(PageHorizontal(WideContent)),
 		"page_horizontal_medium": int(PageHorizontal(MediumContent)),
 		"page_horizontal_narrow": int(PageHorizontal(MediumContent - 1)),
-		"page_vertical":          PageVertical,
 		"page_top":               PageTop,
 		"page_bottom":            PageBottom,
 		"section_gap":            SectionGap,
