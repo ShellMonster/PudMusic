@@ -153,7 +153,7 @@ func TestChangingTheDownloadDirectorySaysWhereItTakesEffect(t *testing.T) {
 
 	fake := &fakePicker{path: "/music/downloads"}
 	s.picker = fake
-	clickSetting(t, tt, s, "选择")
+	clickSetting(t, tt, s, "更改")
 	waitFor(t, "下载目录写进设置", func() bool {
 		return a.SettingsSnapshot().DownloadPath == "/music/downloads"
 	})

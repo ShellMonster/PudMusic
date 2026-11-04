@@ -63,12 +63,13 @@ func (f localTableFocus) TakeFocus() {
 // 键盘不好使。**评审已经在这上面抓到过两回**（我的关注 / 用户动态 / UP 主空间那
 // 几页，还有本地音乐页的表格——它是默认那一档，而清单当时正正好漏着它）。
 var focusNotRegistered = map[string]string{
-	"sidebar_favorites.go": "侧栏里的收藏夹（在侧栏里，不在内容区）",
-	"queue_drawer.go":      "右下角的播放列表抽屉",
-	"partdrawer.go":        "「分 P」那个抽屉",
-	"folderselect.go":      "「放进哪些收藏夹」那个弹窗",
-	"lyricssearch.go":      "歌词搜索那个弹窗",
-	"fullplayer.go":        "满屏播放器",
+	"sidebar_favorites.go":       "侧栏里的收藏夹（在侧栏里，不在内容区）",
+	"queue_drawer.go":            "右下角的播放列表抽屉",
+	"partdrawer.go":              "「分 P」那个抽屉",
+	"folderselect.go":            "「放进哪些收藏夹」那个弹窗",
+	"lyricssearch.go":            "歌词搜索那个弹窗",
+	"fullplayer.go":              "满屏播放器",
+	"settings_tab_appearance.go": "设置页「外观」Tab 里的字体列表：它是一组设置项，不是内容区的主列表（方向键走位走 Tab 键）",
 	// ⚠️ **下载记录页的表格还没有游标**（`ui.ListState.Selected` 没装），所以方向键
 	// 在它上面**挪不动**——「内容区里能走位的列表」暂时还不包括它。
 	// 而它**确实**是内容区的列表，所以这一条要跟着那张表格装上游标一起撤掉。

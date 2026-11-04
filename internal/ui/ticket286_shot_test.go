@@ -78,7 +78,7 @@ func TestRenderTicket286Shots(t *testing.T) {
 			{
 				b := newTestShell(t, systemIsDark(dark), withSettings(app.DefaultSettings("")))
 				b.s.navigate("/settings")
-				waitFrames(t, b.tt, "设置页", func() bool { return b.tt.HasText("常规设置") })
+				waitFrames(t, b.tt, "设置页", func() bool { return b.tt.HasText("常规") })
 				shotShell("03-设置页", b.s, b.tt)
 				b.Close()
 			}

@@ -33,7 +33,7 @@ func inkCount(img *image.RGBA, r mygoui.Rect) int {
 // 很容易被误判成「录制功能没做」。
 func TestRecordingAShortcutStoresIt(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	clickCell(t, tt, "应用内快捷键：播放/暂停")
 	if got := s.recording; got != (shortcutSlot{id: "togglePlay"}) {
@@ -63,7 +63,7 @@ func TestRecordingAShortcutStoresIt(t *testing.T) {
 //   - 没失焦 → 用户按 Esc 以为退出了，下一次按键又被这一格吃掉录进去。
 func TestEscapeWhileRecordingBlursAndRecordsNothing(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	clickCell(t, tt, "应用内快捷键：播放/暂停")
 	tt.Key(0, mygoui.KeyEscape)
@@ -98,7 +98,7 @@ func TestEscapeWhileRecordingBlursAndRecordsNothing(t *testing.T) {
 func TestBackspaceAndDeleteClearTheCell(t *testing.T) {
 	for _, key := range []mygoui.Key{mygoui.KeyBackspace, mygoui.KeyDelete} {
 		tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-		openSettingsTab(t, tt, "快捷键设置")
+		openSettingsTab(t, tt, "快捷键")
 
 		clickCell(t, tt, "应用内快捷键：播放/暂停")
 		tt.Key(0, key)
@@ -124,7 +124,7 @@ func TestBackspaceAndDeleteClearTheCell(t *testing.T) {
 // 让用户知道「刚才那一下没录上」。所以这一条两样都验。
 func TestAKeyThatCannotBeAShortcutIsNotStored(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	clickCell(t, tt, "应用内快捷键：播放/暂停")
 	tt.Key(0, mygoui.KeyInsert)
@@ -151,7 +151,7 @@ func TestAKeyThatCannotBeAShortcutIsNotStored(t *testing.T) {
 // 音量加、开始录的还是播放/暂停」，界面上没有任何报错。
 func TestRecordingMovesToWhicheverCellWasClicked(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	clickCell(t, tt, "应用内快捷键：播放/暂停")
 	clickCell(t, tt, "应用内快捷键：下一首")
@@ -171,7 +171,7 @@ func TestRecordingMovesToWhicheverCellWasClicked(t *testing.T) {
 // 而界面上那一格和另一列长得一模一样。
 func TestTheGlobalColumnIsRecordedSeparately(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	clickCell(t, tt, "全局快捷键：音量加")
 	tt.Key(mygoui.Super|mygoui.Alt, mygoui.KeyI)
@@ -188,7 +188,7 @@ func TestTheGlobalColumnIsRecordedSeparately(t *testing.T) {
 // 画出来的是红描边 + 一句「与「音量加」冲突」。
 func TestTwoCellsWithTheSameKeyAreMarkedAsConflicting(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	if tt.HasText("与「") {
 		t.Fatalf("默认那六条里就有冲突，文字有 %q", tt.Texts())
@@ -228,7 +228,7 @@ func TestAShortcutFileFromANewerVersionIsRefusedOnThePage(t *testing.T) {
 	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
 	// 造一份「来自更新版本」的快捷键文件。
 	s.keys = newShortcutKeys(writeShortcutFileFromNewer(t))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	if !tt.HasText("快捷键只读") {
 		t.Fatalf("这一页没说清为什么改不了，文字有 %q", tt.Texts())
@@ -260,7 +260,7 @@ func TestAShortcutFileFromANewerVersionIsRefusedOnThePage(t *testing.T) {
 // 「打开这一页全是空框，一格一个键都看不见」。
 func TestEveryRecorderCellActuallyDrawsItsKey(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	img := tt.Image()
 	cur := defaultShortcutSettings()
@@ -328,7 +328,7 @@ func TestTheRecorderCellsKeepTheirIdentityWhenTheCommandListChanges(t *testing.T
 	}
 	for _, c := range cases {
 		tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-		openSettingsTab(t, tt, "快捷键设置")
+		openSettingsTab(t, tt, "快捷键")
 
 		// 先点第二行那一列（`prev`）开始录。
 		clickCell(t, tt, "全局快捷键：上一首")
@@ -392,67 +392,6 @@ func TestEveryRecorderCellHasAKeyOfItsOwn(t *testing.T) {
 // 那一格右上角那个 ×
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheClearButtonInEveryRecorderCellActuallyClears 验十二个 × **每一个都点得动**、
-// 而且点了真的会清空。
-//
-// 这一条是被一个从头带进来的 bug 逼出来的，两处原因叠在一起，缺一处都看不出来：
-//
-//  1. **那一格是 `ui.Box`（列）**，子元素从上往下排，而且每一个都拉满列宽——于是
-//     「键 + ×」变成上下两层，× 那一块（184x29.3）整个掉到 30 高的框**外面**，落在
-//     命中区之外。整格扫 60 个点，一个都点不到它。
-//  2. **× 只在「没在录」的时候摆**：点它的那一下指针事件先落地，我们的
-//     `InputPointerDown` 立刻把 `s.recording` 设成这一格，紧接着 view 才跑——那一帧
-//     「正在录」成立，× 根本没被建出来，`Clicked()` 读不到。
-//
-// 症状是「整格扫 60 个点：清空 0 个，50 个反而把那一格切进录制状态」。两处都改成
-// Biu 的样子（那一格是 Row；× 只要有值就摆着）之后才有这一条。
-func TestTheClearButtonInEveryRecorderCellActuallyClears(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
-
-	cur := defaultShortcutSettings()
-	for _, group := range [][]shortcutItem{cur.Shortcuts, cur.GlobalShortcuts} {
-		for _, item := range group {
-			label := "清空「" + item.Name + "」的快捷键"
-			// ⚠️ **先滚进来再点**（理由见上面 TestEveryRecorderCellActuallyDrawsItsKey
-			// 那一支）：× 画在那几行里，底下的几行在窗口底边之外——点在窗外
-			// 等于没点。
-			r := settingRect(t, tt, s, label)
-			tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-			tt.Frame()
-
-			got := s.keys.snapshot()
-			list := got.Shortcuts
-			if _, isGlobal := findShortcut(item.ID, got.GlobalShortcuts); isGlobal &&
-				sameShortcut(got.GlobalShortcuts, got.Shortcuts) {
-				list = got.GlobalShortcuts
-			}
-			if it, _ := findShortcut(item.ID, list); it.Shortcut != "" {
-				t.Errorf("点了「%s」的 × 之后那一格还是 %q", label, it.Shortcut)
-			}
-			// 清空是一个收尾动作：不该把这一格留在「等着录下一个键」的状态里。
-			if s.recording != (shortcutSlot{}) {
-				t.Errorf("点了「%s」的 × 之后还在录 %+v", label, s.recording)
-			}
-			// 清空之后那一格画的是「未设置」，× 也不摆了。
-			if !hasExactText(tt, "未设置") {
-				t.Errorf("清空之后那一格画的不是「未设置」，文字有 %q", tt.Texts())
-			}
-			// 摆回默认值，好让下一个 × 有东西可清。
-			if err := s.keys.set(shortcutSlot{id: item.ID}, item.Shortcut); err != nil {
-				t.Fatal(err)
-			}
-			if _, isGlobal := findShortcut(item.ID, s.keys.snapshot().GlobalShortcuts); isGlobal &&
-				sameShortcut(s.keys.snapshot().GlobalShortcuts, s.keys.snapshot().Shortcuts) {
-				if err := s.keys.set(shortcutSlot{global: true, id: item.ID}, item.Shortcut); err != nil {
-					t.Fatal(err)
-				}
-			}
-			tt.Frame()
-		}
-	}
-}
-
 // sameShortcut 报两列的内容一模一样（默认设置里两列只差一个 Alt）。
 func sameShortcut(a, b []shortcutItem) bool {
 	if len(a) != len(b) {
@@ -466,47 +405,38 @@ func sameShortcut(a, b []shortcutItem) bool {
 	return true
 }
 
-// TestEveryRecorderCellKeepsItsClearButtonInside 验 × **在格子里面**，键在格子里
-// **上下居中**。
-//
-// 这一条盯的是上一条那个 bug 的另一半（几何那一半）：上一条点的是 × 的**中心**，
-// 而 × 掉出框外时它的中心仍然可点（只是点在框外那块空白上），所以只验「点得动」
-// 抓不到「画成两层框、× 压着下一行」。
-func TestEveryRecorderCellKeepsItsClearButtonInside(t *testing.T) {
+// TestEveryRecorderCellIsA32TallBoxWithItsKeyCentered 验每一格录制框（原型 `.kbd-rec`）高 32、
+// 最小宽 120，里面的键上下居中、不掉出格子。
+func TestEveryRecorderCellIsA32TallBoxWithItsKeyCentered(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
 	cur := defaultShortcutSettings()
-	for _, item := range append(append([]shortcutItem{}, cur.Shortcuts...), cur.GlobalShortcuts...) {
-		// ⚠️ **先滚进来再量几何**（理由同上）。
-		name := "应用内快捷键：" + item.Name
-		if _, ok := tt.Find(name); !ok {
-			name = "全局快捷键：" + item.Name
-		}
-		cell := settingRect(t, tt, s, name)
-		x, ok2 := tt.Find("清空「" + item.Name + "」的快捷键")
-		if !ok2 {
-			t.Fatalf("没有「%s」那个 ×，文字有 %q", item.Name, tt.Texts())
-		}
-		if x.X < cell.X || x.Y < cell.Y ||
-			x.X+x.W > cell.X+cell.W || x.Y+x.H > cell.Y+cell.H {
-			t.Errorf("「%s」那个 × 掉出了格子：× %.1f,%.1f %.1fx%.1f，格 %.1f,%.1f %.1fx%.1f",
-				item.Name, x.X, x.Y, x.W, x.H, cell.X, cell.Y, cell.W, cell.H)
-		}
-
-		// 键在格子里上下居中：文字的中线和格子的中线差不到两个像素。
-		key, ok3 := tt.Find(formatAccel(accelerator(item.Shortcut)))
-		if !ok3 {
-			t.Fatalf("「%s」那一格里没有键 %q", item.Name, item.Shortcut)
-		}
-		mid := func(r mygoui.Rect) float32 { return r.Y + r.H/2 }
-		if d := mid(key) - mid(cell); d > 2 || d < -2 {
-			t.Errorf("「%s」那一格里的键没有上下居中：键中线 %.1f，格子中线 %.1f",
-				item.Name, mid(key), mid(cell))
-		}
-		// 键也不能被挤到第二行（`ui.Box` 是列，排成两层就是那个症状）。
-		if key.Y+key.H > cell.Y+cell.H {
-			t.Errorf("「%s」那一格里的键掉出了格子", item.Name)
+	for _, col := range []struct {
+		label string
+		items []shortcutItem
+	}{{"应用内快捷键：", cur.Shortcuts}, {"全局快捷键：", cur.GlobalShortcuts}} {
+		for _, item := range col.items {
+			cell := settingRect(t, tt, s, col.label+item.Name)
+			if cell.H != 32 || cell.W < 120 {
+				t.Errorf("「%s%s」那一格是 %.1fx%.1f，want 高 32、宽 ≥ 120（`.kbd-rec`）", col.label, item.Name, cell.W, cell.H)
+			}
+			if item.Shortcut == "" {
+				continue // 没设键的那一格显示「未设置」
+			}
+			// 键就是格子里的那段等宽字（默认值里两列的键各不相同，按键名找得到唯一一处）。
+			k, ok := tt.Find(formatAccel(accelerator(item.Shortcut)))
+			if !ok {
+				t.Errorf("「%s%s」那一格里找不到键 %q", col.label, item.Name, item.Shortcut)
+				continue
+			}
+			mid := func(r mygoui.Rect) float32 { return r.Y + r.H/2 }
+			if d := mid(k) - mid(cell); d > 2 || d < -2 {
+				t.Errorf("「%s%s」那一格里的键没有上下居中：键中线 %.1f，格子中线 %.1f", col.label, item.Name, mid(k), mid(cell))
+			}
+			if k.X < cell.X || k.X+k.W > cell.X+cell.W {
+				t.Errorf("「%s%s」那一格里的键掉出了格子", col.label, item.Name)
+			}
 		}
 	}
 }

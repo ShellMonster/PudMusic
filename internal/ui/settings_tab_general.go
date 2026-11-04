@@ -1,19 +1,49 @@
-// 设置页的第一个 Tab：常规。照 Biu 的 `src/pages/settings/system-settings.tsx`
-// 逐段抄，顺序也照抄（外观 / 播放 / 下载 / 搜索 / 系统）。
+// 设置页的「常规」Tab：原型 `SETTINGS.general`（播放 / 系统 / 下载三组）。
 //
-// 分工照着读：**外观 / 播放 / 下载 / 搜索 / 系统**在这一份；「关于应用」
-// （版本号 + 检查更新 + 更新日志）在 `update_entry.go`，摆在这一页的最末尾。
-// 导出/导入配置那两段已经去掉了（2026-11-04，用户要求）。
+// 原型有、底层没有的条目**不做假开关**：无缝播放（解码层本来就裁头尾静音，没有开关）、
+// 恢复上次的播放（断点续播常开，没有开关）、记录播放历史、切歌时显示通知、默认下载内容
+// （音频 / 视频）——这几项设置里没有对应的键，见 DESIGN.md §0′.T6。
+// 原型没有的旧条目（切歌淡入淡出、音量均衡、均衡器、迷你歌词卷帘、搜索历史、FFmpeg 路径、
+// 本地音乐目录、背景清晰度）界面入口已删除，设置里的键和 service 层能力保留。
 package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
-// displayModes 是「数据显示样式」那三档，顺序就是从左到右的顺序。
+// audioQualities 是音质那几档，键值和 `app.AudioQuality` 一字不差。
+//
+// 🔴 没有「自动」这一档（票 #581）：默认是「高品质」，无损 / 杜比是显式选项，拿不到时
+// 取流层自动退档（切到这两档时 `qualitySwitchToast` 说一句）。
+var audioQualities = []struct {
+	quality app.AudioQuality
+	label   string
+}{
+	{app.AudioQualityLossless, "无损"},
+	{app.AudioQualityDolby, "杜比全景声"},
+	{app.AudioQualityHigh, "高品质"},
+	{app.AudioQualityMedium, "中等"},
+	{app.AudioQualityLow, "低品质"},
+}
+
+// audioQualityHint 是每一档底下那句话（原型 `popHtml` 里的 note，设置页不画，留给气泡 / 提示用）。
+var audioQualityHint = map[app.AudioQuality]string{
+	app.AudioQualityLossless: "FLAC / Hi-Res（这首没有就自动用 192K）",
+	app.AudioQualityDolby:    "杜比全景声（这首没有就自动用 192K）",
+	app.AudioQualityHigh:     "192~320 kbps（默认）",
+	app.AudioQualityMedium:   "128 kbps",
+	app.AudioQualityLow:      "64 kbps",
+}
+
+// displayModes 是「数据显示样式」那三档（列表 / 网格 / 紧凑），原生菜单「显示」栏用它。设置页「外观」
+// Tab 里的三张预览卡用的是原型的顺序和名字（卡片 / 列表 / 紧凑），见 `displayStyleCards`。
 //
 // Biu 那一格是三个带图标的 Tab（列表 / 网格 / 紧凑，`system-settings.tsx:65-101`）。
 //
@@ -36,260 +66,102 @@ var displayModes = []struct {
 	{app.DisplayModeCompact, "紧凑", iconFileList},
 }
 
-// audioQualities 是音质那几档。Biu 用的是 `w-[180px]` 的下拉（`:247`），
-// 键值一字不差（`app.AudioQuality` 那边对过）。
-//
-// 🔴 **没有「自动」这一档**（票 #581）：默认是「高品质」（音乐库 320K / 投稿
-// 192K），无损/杜比是显式选项——以前这里的「自动」有无损先抢无损，每一首
-// 投稿都按 9 倍于 192K 的码率起播。设置文件里存着的 `"auto"` 由
-// `app.Settings` 归一化兜底成「高品质」，这里不用管。
-var audioQualities = []struct {
-	quality app.AudioQuality
-	label   string
-}{
-	{app.AudioQualityLossless, "无损"},
-	{app.AudioQualityDolby, "杜比全景声"},
-	{app.AudioQualityHigh, "高品质"},
-	{app.AudioQualityMedium, "中等"},
-	{app.AudioQualityLow, "低品质"},
-}
-
-// audioQualityHint 是每一档底下那句话。它跟着选中的那一档变：用户从「无损」
-// 换到「高品质」时底下那句话要跟着换，否则「这一档到底是什么」还是没地方看。
-//
-// ⚠️ **无损/杜比的两句要说清「拿不到会退档」**（票 #581）：点名档不是每首
-// 都有，拿不到时自动退到最高有损，界面上另有一句提示说了实际用的哪一档。
-var audioQualityHint = map[app.AudioQuality]string{
-	app.AudioQualityLossless: "FLAC / Hi-Res（这首没有就自动用 192K）",
-	app.AudioQualityDolby:    "杜比全景声（这首没有就自动用 192K）",
-	app.AudioQualityHigh:     "192~320 kbps（默认）",
-	app.AudioQualityMedium:   "128 kbps",
-	app.AudioQualityLow:      "64 kbps",
-}
+// updateNotificationTitle 是「更新提醒」那一行的标题。它和 `switchHint` 的键是同一个字
+// （见 `switch_hint.go`）：那一格的效果在界面上看不出来（通知弹在通知中心），所以拨开之后
+// 要有一句话说明它会做什么，那句话是按标题查表的。
+const updateNotificationTitle = "更新提醒"
 
 // settingsGeneral 是常规那一页。
 func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
-	s.settingGroup(c, "外观", func() {
-		// ⚠️ 这一格走 `viewDisplayMode`（切换 + 预览），不是光 `pickDisplayMode`：预览
-		// 是这一格的一部分，理由见 displaymode.go 的文件头。
-		s.settingRow(c, "数据显示样式", "",
-			func() { s.viewDisplayMode(c, st, ro) })
+	s.setGroup(c, "play", "播放", func() {
+		s.card(c, "play", ro, func(cd *setCard) {
+			qItems := make([]enumItem[app.AudioQuality], len(audioQualities))
+			for i, q := range audioQualities {
+				qItems[i] = enumItem[app.AudioQuality]{value: q.quality, label: q.label}
+			}
+			selectRow(cd, "quality", "默认音质", "切换后会重新取流，并从当前位置继续播放", st.AudioQuality, qItems,
+				func(q app.AudioQuality) {
+					s.applySetting("音质偏好", func(cur *app.Settings) { cur.AudioQuality = q })
+					// 应用层把这一笔同步给正在放的那首；切到无损 / 杜比的那一下说一句降档规矩。
+					qualitySwitchToast(s, app.PrefToBili(q))
+				})
 
-	})
-	s.settingGroup(c, "播放", func() {
-		s.settingRow(c, "音质偏好", "",
-			func() { s.pickAudioQuality(c, st, ro) })
-		s.settingRow(c, "上报本机播放记录", "",
-			func() {
-				s.pickSwitch(c, "上报本机播放记录", "播放记录上报", st.ReportPlayHistory, ro,
-					func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
-			})
-		s.settingRow(c, "切歌淡入淡出", "",
-			func() { s.pickTrackFade(c, st, ro) })
-		s.settingRow(c, "视频画质", "",
-			func() { s.pickVideoQuality(c, st, ro) })
-		s.settingRow(c, "均衡器", "",
-			func() { s.pickEQ(c, st, ro) })
-		s.settingRow(c, "音量均衡", "",
-			func() {
-				s.pickSwitch(c, "音量均衡", "音量均衡", st.NormalizeVolume, ro,
-					func(cur *app.Settings, on bool) { cur.NormalizeVolume = on })
-			})
-		// 迷你播放器那个歌词卷帘（票 #536）。
-		//
-		// ⚠️ **它归在「播放」这一组**：它管的是迷你播放器上**放歌时**的那块
-		// 歌词区，不是外观也不是下载。而迷你播放器本身也是「播放」那一件事
-		// 的一部分（它是「把播放器缩到桌面上」那个入口）。
-		//
-		// ⚠️ **默认是开的**（`app.DefaultMiniLyricsCurtain`）：用户装上就有
-		// 卷帘这个效果，而**不用**去设置里找一格把它打开。
-		//
-		// ⚠️ **不进 `switchHint` 表**：那一表只收「效果看不见」的格
-		// （`switch_hint.go` 的文件头），而这一格**看得见**——用户点一下迷你窗
-		// 的封面就知道它管不管用。
-		s.settingRow(c, "迷你播放器歌词卷帘", "",
-			func() {
-				s.pickSwitch(c, "迷你播放器歌词卷帘", "迷你播放器歌词卷帘",
-					st.MiniLyricsCurtainOn(), ro,
-					func(cur *app.Settings, on bool) {
-						v := on
-						cur.MiniLyricsCurtain = &v
-					})
-			})
+			vItems := make([]enumItem[int], len(app.VideoQualitySteps))
+			for i, q := range app.VideoQualitySteps {
+				label := "720P"
+				if q != 0 {
+					label = bili.VideoQuality(q).Label()
+				}
+				vItems[i] = enumItem[int]{value: q, label: label}
+			}
+			selectRow(cd, "videoq", "视频画质", "满屏播放器里看视频时用的清晰度", st.VideoQuality, vItems,
+				func(q int) { s.applySetting("视频画质", func(cur *app.Settings) { cur.VideoQuality = q }) })
 
-		// 刘海窗（macOS）：指针探进刘海区时展开一张播放卡。
-		s.settingRow(c, "刘海播放条", "",
-			func() {
-				s.pickSwitch(c, "刘海播放条", "刘海播放条",
-					st.NotchPlayerOn(), ro,
-					func(cur *app.Settings, on bool) {
-						v := on
-						cur.NotchPlayer = &v
-					})
-			})
-
-	})
-	s.settingGroup(c, "下载", func() {
-		// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
-		// （见 goToDownloadDirSetting）——设置页有四个 Tab、几十行，不指一下用户
-		// 还得自己找「下载目录」在哪儿。
-		s.settingRowAt(c, string(settingsFocusDownload), "下载目录", "",
-			func() { s.pickDownloadPath(c, st, ro) })
-		s.settingRow(c, "FFmpeg 路径", "",
-			func() { s.pickFFmpegPath(c, st, ro) })
-	})
-
-	s.pickLocalMusicDirs(c, st, ro)
-
-	s.settingGroup(c, "搜索", func() {
-		s.settingRow(c, "显示搜索历史", "",
-			func() {
-				s.pickSwitch(c, "显示搜索历史", "显示搜索历史", st.ShowSearchHistory, ro,
-					func(cur *app.Settings, on bool) { cur.ShowSearchHistory = on })
-			})
-
-	})
-	s.settingGroup(c, "系统", func() {
-		s.settingRow(c, "窗口关闭", "",
-			func() { s.pickCloseWindow(c, st, ro) })
-		s.settingRow(c, "开机自启", "",
-			func() { s.pickAutoStart(c, st, ro) })
-
-		// 「关于应用」摆在最后。
-		//
-		// ⚠️ 它**不是** `settingRow`，也不吃 `ro`：更新那一摊的状态在 `App` 上，不在
-		// 设置文件里，而「只读」保护的是**设置文件**——更新器写的是自己那一份
-		// （`app-update.json`），从没碰过用户的 `app-settings.json`。让这一格跟着
-		// `ro` 变灰，会在「设置来自更新的版本」这一个场景里，把一个本来完全可用的
-		// 更新入口关掉。
-	})
-	s.settingsUpdate(c, s.app.UpdateSnapshot(), ro)
-}
-
-// pickSwitch 是一个开关行。set 拿到的是这一帧开关上的新值。
-//
-// 写不进去（只读）时下一帧 `on` 会重新从设置里读出来，开关自己弹回去——和
-// pickAutoStart 里那个开关是同一个道理，注释见那里。
-//
-// ⚠️ 那个 `Label` **不能省**：开关画出来只有一个旋钮，一个字都没有，于是它对读屏
-// 软件、对无头 Tester 都是「一个没有名字的东西」。左边那行标题是它的兄弟节点，
-// 不是它的名字——不配 Label 的话读屏念出来只有「开关」，用户不知道是哪一个。
-//
-// 名字写成「开关：那一行的标题」而不是照抄标题，有两个用处：读屏念出来是
-// 「开关：上报本机播放记录」（知道这是个开关）；界面上那行标题**一字不差**地摆着，
-// 名字撞上去的话无头 Tester 的 `Find` 只会找到标题那一处，点都点不到开关。
-//
-// ⚠️ **效果看不见的那几格，拨开之后要说一句**（`saySwitchHint`）：界面上没有任何
-// 变化能告诉用户「它生效了」。说得出口的是那一句短的，说不出口的不说（理由见
-// `switch_hint.go`）。
-func (s *Shell) pickSwitch(c *ui.Context, title, key string, on bool, ro bool, set func(*app.Settings, bool)) {
-	// ⚠️ 和 pickAutoStart 一样不给 Switch 加 Key（见那里的注释：加了 Key 之后
-	// 旋钮动画每帧从头开始，那一页永远停不下来）。
-	if springSwitch(c, &on).Label("开关：" + title).Disabled(ro).Changed() {
-		// ⚠️ **写成功了才说**：写失败的时候已经弹了一条「没存上」，再说一句
-		// 「开了它会怎样」就是两句话打架（`applySettingOK` 那一版）。
-		if s.applySettingOK(key, func(cur *app.Settings) { set(cur, on) }) {
-			s.saySwitchHint(title, on)
-		}
-	}
-}
-
-// pickDisplayMode 是「数据显示样式」那三档。
-//
-// ⚠️ **它和「主题」「窗口关闭」那两处走同一个出口**（`settingsSegment`）：
-// 设置页只有一种分段控件（票 #240 / 报告 F-17）。
-//
-// 这一格此前是框架的 `ui.Segmented`（**灰底轨道 + 白色滑块**），而同一页的
-// 「主题」是自绘的三个按钮（**没有轨道，选中的那一档是实心主色底**）——两个并列的
-// 分段控件长得不一样。为什么归到实心主色底那一档而不是反过来，理由写在
-// `settingsSegment` 的注释里。
-func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
-	chosen := 0
-	opts := make([]segmentOption, len(displayModes))
-	for i, m := range displayModes {
-		opts[i] = segmentOption{label: m.label, icon: m.icon}
-		if m.mode == st.DisplayMode {
-			chosen = i
-		}
-	}
-	s.settingsSegment(c, "setting:displayModePick", "显示样式档位", 0,
-		opts, chosen, ro, func(i int) {
-			mode := displayModes[i].mode
-			s.applySetting("数据显示样式", func(cur *app.Settings) { cur.DisplayMode = mode })
+			cd.switchRow("report", "上报本机播放记录", "把播放进度同步到 B 站账号，换设备可以接着看", st.ReportPlayHistory,
+				func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
 		})
-}
+	})
 
-// pickAudioQuality 是音质那个下拉。
-func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
-	items := make([]enumItem[app.AudioQuality], len(audioQualities))
-	for i, q := range audioQualities {
-		items[i] = enumItem[app.AudioQuality]{value: q.quality, label: q.label}
-	}
-	// 一帧一读的局部量：控件建的时候把新值写进 `quality`，紧接着这里读到的就是它。
-	// 存不进去（只读）时下一帧重新从设置里读，下拉自己弹回去。
-	quality := st.AudioQuality
-	enumSelect(c, &quality, items, "选择音质偏好", s.settingsControlFitW(c, selectWidth), 0, ro)
-	if quality != st.AudioQuality {
-		s.applySetting("音质偏好", func(cur *app.Settings) { cur.AudioQuality = quality })
-		// 应用层把这一笔同步给正在放的那首（`UpdateSettings` → `SetAudioQuality`）。
-		// 切到无损/杜比的那一下说一句降档规矩——只在切换时说，理由见那边的注释。
-		qualitySwitchToast(s, app.PrefToBili(quality))
-	}
-}
+	s.setGroup(c, "system", "系统", func() {
+		s.card(c, "system", ro, func(cd *setCard) {
+			cd.row("autostart", "开机自启", "登录后会自动打开", func() { s.autoStartSwitch(c, st, ro) })
+			cd.switchRow("tray", "关闭窗口时留在菜单栏", "播放不会中断，可以从菜单栏图标回来",
+				st.CloseWindowOption == app.CloseWindowHide,
+				func(cur *app.Settings, on bool) {
+					cur.CloseWindowOption = app.CloseWindowExit
+					if on {
+						cur.CloseWindowOption = app.CloseWindowHide
+					}
+				})
+			cd.switchRow("notch", "开启刘海播放器", "指针移到屏幕顶部中央，即可暂停、切歌（仅 macOS）", st.NotchPlayerOn(),
+				func(cur *app.Settings, on bool) { v := on; cur.NotchPlayer = &v })
+			cd.switchRow("updateRemind", updateNotificationTitle, "有新版本时弹出更新日志", st.UpdateNotificationEnabled(),
+				func(cur *app.Settings, on bool) { v := on; cur.UpdateNotification = &v })
+		})
+	})
 
-// pickBackdropClarity 是「背景清晰度」那一格（票 #666）。
-//
-// 满屏播放器的背景本来是「封面放大四倍、明显模糊」——清晰度天生就低。这一格
-// 让用户自己挑，三档按**像素量级**分（27 万 / 103 万 / 397 万像素）。
-//
-// ⚠️ **标签要说清代价**：只写「高清」的话用户不知道它要下多大的图。所以
-// 「高清」后面带了那半句。
-func (s *Shell) pickBackdropClarity(c *ui.Context, st app.Settings, ro bool) {
-	items := []enumItem[app.BackdropClarity]{
-		{value: app.BackdropClaritySmooth, label: "流畅"},
-		{value: app.BackdropClarityClear, label: "清晰"},
-		{value: app.BackdropClarityHD, label: "高清（流量更大）"},
-	}
-	clarity := st.BackdropClarity
-	enumSelect(c, &clarity, items, "选择背景清晰度", s.settingsControlFitW(c, selectWidth), 0, ro)
-	if clarity != st.BackdropClarity {
-		s.applySetting("背景清晰度", func(cur *app.Settings) { cur.BackdropClarity = clarity })
-	}
-}
-
-// pickDownloadPath 是下载目录那一格：一个只读的路径 + 一个「选择」。
-//
-// ⚠️ **改完要说一声它管到哪儿去**（报告 D3）：设置页和下载记录页是**两页**，
-// 用户在这一页改完，看不见另一页变了——而「改了一个地方、另一个地方不变」是
-// 用户最容易当成「设置没生效」的那一种形态。这一句说清两件事：下载记录页上
-// 写的就是它，下完的歌也放在那儿。
-func (s *Shell) pickDownloadPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:downloadPath").Width(s.settingsControlFitW(c, settingsControlW)).
-		Gap(space.Px8).Children(func() {
-		pathField(c, s.downloadDirShown(st), "下载目录", ro)
-		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
-			s.pickPath("下载目录", true, func(path string) {
-				s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
-				s.addToast("下载目录已改：下载记录页上写的就是它，下完的歌放在那儿",
-					notice.Success)
+	s.setGroup(c, "download", "下载", func() {
+		s.card(c, "download", ro, func(cd *setCard) {
+			focused := s.settings.focus == settingsFocusDownload
+			p := tok.Of(c.Theme())
+			cd.rowFocus("downloadDir", focused, func() {
+				t := rowTitle(c, "下载目录")
+				if focused {
+					t.TextColor(p.AccentText)
+				}
+				typo.Mono(ui.Text(c, s.downloadDirShown(st))).FontSize(scale.Font(c, scale.Size13)).
+					TextColor(p.Text2).Wrap()
+			}, func() {
+				if pud.ButtonDisabled(c, "set-pick-dir", pud.Ghost, pud.Sm, "更改", "", ro).Clicked() {
+					s.pickPath("下载目录", true, func(path string) {
+						s.applySetting("下载目录", func(cur *app.Settings) { cur.DownloadPath = path })
+						s.addToast("下载目录已改：下载记录页上写的就是它，下完的歌放在那儿", notice.Success)
+					})
+				}
 			})
-		}
+		})
 	})
 }
 
-// downloadDirShown 是设置页上那一格显示的路径。
+// autoStartSwitch 是开机自启那个开关。
 //
-// ⚠️ **显示的是「歌真正落下来的地方」，不是设置里存的那个原始值**：设置里
-// `downloadPath` 的默认值是**空串**（`DefaultSettings("")`），而绝大多数用户
-// 走的正是这一条——空串显示成「未设置」，而歌其实落到了「音乐」目录下的应用
-// 子目录里。用户看到的和实际发生的对不上，而这一格恰恰是回答「我的歌下到哪儿
-// 了」的那一格。
-//
-// 所以没选过时显示**默认落点**（`App.DownloadDir()`，也就是
-// `~/Music/BiuGo` 那条路），选过就显示选过的那个。
-//
-// ⚠️ **它和下载记录页页头上写的那条路径是同一个字符串**：按钮上写的、按下去
-// 打开的、歌真正落下来的地方，必须是同一个（见 `app.DownloadDir` 的注释）。
+// 它不是改一个键就完了：得真的去系统里注册 / 注销登录项（`Shell.SetAutoStart`——先动系统、
+// 成功了才写设置）。动不了时弹一条提示，设置一个字都不改，开关下一帧自己弹回去：亮着一个
+// 实际上没开的开关比暗着更坏。
+func (s *Shell) autoStartSwitch(c *ui.Context, st app.Settings, ro bool) {
+	on := st.AutoStart
+	if !pud.Switch(c, "set-sw:autostart", &on, "开关：开机自启") || ro {
+		return
+	}
+	if err := s.SetAutoStart(on); err != nil {
+		s.addToast("开机自启没设上："+trimAppErr(err), notice.Danger)
+		return
+	}
+	s.saySwitchHint("开机自启", on)
+}
+
+// downloadDirShown 是设置页上那一格显示的路径：歌真正落下来的地方，不是设置里存的原始值
+// （默认是空串，实际落到「音乐」目录下的应用子目录；和下载记录页页头是同一个字符串）。
 func (s *Shell) downloadDirShown(st app.Settings) string {
 	if p := st.DownloadPath; p != "" {
 		return p
@@ -297,93 +169,7 @@ func (s *Shell) downloadDirShown(st app.Settings) string {
 	return s.app.DownloadDir()
 }
 
-// pickFFmpegPath 是 FFmpeg 路径那一格，和下载目录同一套。
-func (s *Shell) pickFFmpegPath(c *ui.Context, st app.Settings, ro bool) {
-	ui.Row(c).Key("setting:ffmpegPath").Width(s.settingsControlFitW(c, settingsControlW)).
-		Gap(space.Px8).Children(func() {
-		pathField(c, st.FFmpegPath, "FFmpeg 路径", ro)
-		if settingsButton(c, "选择").Width(72).Disabled(ro).Clicked() {
-			s.pickPath("FFmpeg 路径", false, func(path string) {
-				s.applySetting("FFmpeg 路径", func(cur *app.Settings) { cur.FFmpegPath = path })
-			})
-		}
-	})
-}
-
-// pathField 是一个只读的路径输入框，空的时候摆「未设置」两个字。
-//
-// Biu 那边用的是 `isDisabled`（`system-settings.tsx:295`），连字一起灰掉，用户
-// 看不出那里本来摆着一条路径。这里用 `ReadOnly`：字还能被选中复制（「这个目录
-// 到底是哪儿」是用户真会问的问题），要改只能走「选择」。
-//
-// ⚠️ **它是包级变量而不是方法**：设置页上那一格显示的**是哪条路径**，是
-// 「用户看到的当前下载目录」这件事的全部，而只读输入框里的那个值**不在渲染树
-// 里**——`Tester.Texts()` 量不到它（那是框架画的，不是元素）。所以「那一格拿到
-// 了哪条路径」只能从**这一层**钉，而这一层要能替身，替身就得是个变量。
-//
-// （跟 `userDataDir`（用户数据目录）、`coverCacheDir`（封面缓存）是同一类接缝。）
-var pathField = func(c *ui.Context, path, label string, ro bool) {
-	shown := path
-	if shown == "" {
-		shown = "未设置"
-	}
-	// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
-	// 挂上去直接 panic（`ui/element.go:658`）。外面那一格有 Key 就够了。
-	ui.TextInput(c, &shown).Grow(1).Height(settingsSelectH).Label(label).ReadOnly(true)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 颜色
-// ─────────────────────────────────────────────────────────────────────────────
-
-// 色块多大。Biu 是 `w-[100px]` 加一个 `h-[40px]` 的上半截加一行字
-// （`color-settings.tsx:26-28`）。
-//
-// ⚠️ **宽度跟着控件列的基准走**（`settingsControlW`）：这一行里只有那两块色卡，
-// 它们不填满那一格的话，**这一行的右边缘就比上面那几行短一截**——那正是
-// 「控件列没有共同基准」的一半（UI 报告 §4 的 F-04）。
-//
-// 上游是 100：它那一行的格子也就是它自己的宽度，而**色块是纯色**——宽一点
-// 不损失任何信息（颜色还是那个颜色），换来的是这一行和上面几行一样齐。
-
-// colorOfHex 把设置里那个字符串变成一个颜色，认不出就退回不透明的黑。
-//
-// 解析用的是 `theme.go` 里那一份，**不是** `ui.Hex`：后者对不合法的输入直接
-// panic（`ui/color.go:33`），而这里是设置文件里的用户输入，为一个画错的颜色把
-// 整个进程带走不划算。
-func colorOfHex(s string) ui.Color {
-	if col, ok := parseHexColor(s); ok {
-		return col
-	}
-	return ui.Color{A: 255}
-}
-
-// toHex 把一个颜色写成设置里存的那个串。
-//
-// 🔴 **不透明的时候才写 6 位；半透明写 8 位**（`#rrggbbaa`）。只写 RGB 的话，取色板
-// 上那条 **Opacity** 滑块调出来的透明度会被**悄悄丢掉**：用户拖到一半，界面上是半透明
-// 的，存下去却是全不透明，下一帧又跳回去（实测：拖到中点保存下来还是 `#ef4444`，
-// `BuildTheme().Accent.A` 是 255 而不是 ~128）。
-//
-// 8 位写法设置那边认得：`internal/app/settings.go` 的 `hexColor` 收 3/4/6/8 位，
-// `theme.go` 的 `parseHexColor` 也解 8 位——所以这不是新格式，是那个格式本来就有、
-// 一直没人写。
-func toHex(col ui.Color) string {
-	const hex = "0123456789abcdef"
-	out := "#" + string([]byte{
-		hex[col.R>>4], hex[col.R&0xf],
-		hex[col.G>>4], hex[col.G&0xf],
-		hex[col.B>>4], hex[col.B&0xf],
-	})
-	// 全不透明时仍然写 6 位：Biu 的默认色是 `#1ed760` 这种 6 位的，多两位会让
-	// 「和 Biu 存的那份一模一样」这件事变得比必要的更难。
-	if col.A == 255 {
-		return out
-	}
-	return out + string([]byte{hex[col.A>>4], hex[col.A&0xf]})
-}
-
-// pick 是「三样里挑一样」的那个小工具，Go 没有内建的三元。
+// pick 是「二选一」的那个小工具，Go 没有内建的三元。
 func pick[T any](cond bool, yes, no T) T {
 	if cond {
 		return yes

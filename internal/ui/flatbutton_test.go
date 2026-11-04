@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -443,14 +444,13 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// ① 能写的那一版：同样的按钮，指针落上去要亮（「浅色」在皮肤页上，
-			// 而那一排在第一屏下面——先滚进去）。
+			// ① 能写的那一版：同样的按钮，指针落上去要亮（拿设置页「下载目录」那一行的
+			// 「更改」键——幽灵键，悬停铺 hover 底）。
 			b := openShellFor(t, dark, false)
-			b.s.navigate(appearancePath)
-			b.tt.Frame()
+			showTab(b.s, b.tt, settingsTabGeneral)
 			tt := b.tt
-			if d := hoverDeltaIn(t, tt, "浅色", func() mygoui.Rect {
-				return appearanceRect(t, tt, b.s, "浅色")
+			if d := hoverDeltaIn(t, tt, "更改", func() mygoui.Rect {
+				return padRect(settingRect(t, tt, b.s, "更改"))
 			}); d < 6 {
 				t.Fatalf("能写的那一档指针落上去只变了 %d（< 6）——"+
 					"下面「禁用键不亮」那条就没有对照，会白白地绿", d)
@@ -459,24 +459,15 @@ func TestADisabledFlatButtonDoesNotLightUpOnHover(t *testing.T) {
 			// ② 只读的那一版（设置来自更新的版本）：每一档都得一点不变。
 			// 「浅色」在皮肤页（同一份设置、同一批禁用控件），「直接退出」在设置页。
 			bro := openShellFor(t, dark, true)
-			bro.s.navigate(appearancePath)
-			bro.tt.Frame()
+			showTab(bro.s, bro.tt, settingsTabGeneral)
 			ro := bro.tt
 			if !ro.HasText("设置只读") {
 				t.Fatalf("没有进只读那一版，文字有 %q", ro.Texts())
 			}
-			for _, label := range []string{"浅色"} {
+			for _, label := range []string{"更改"} {
 				if d := hoverDeltaIn(t, ro, label, func() mygoui.Rect {
-					return appearanceRect(t, ro, bro.s, label)
+					return padRect(settingRect(t, ro, bro.s, label))
 				}); d > probeTolerance {
-					t.Errorf("只读设置里的「%s」指针落上去变了 %d（> %d）——"+
-						"禁用键亮了，等于告诉用户这里点得动", label, d, probeTolerance)
-				}
-			}
-			bro.s.navigate(settingsPath)
-			bro.tt.Frame()
-			for _, label := range []string{"直接退出"} {
-				if d := hoverDelta(t, ro, label); d > probeTolerance {
 					t.Errorf("只读设置里的「%s」指针落上去变了 %d（> %d）——"+
 						"禁用键亮了，等于告诉用户这里点得动", label, d, probeTolerance)
 				}
@@ -554,6 +545,9 @@ func hoverDeltaIn(t *testing.T, tt *mygoui.Tester, label string, rect func() myg
 	idle := probeFill(before, r)
 
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
+	// 「深夜唱片行」的按钮悬停底是 160ms 的渐变（`motion.Fade`），Tester 的钟不推就停在第一帧。
+	tt.Advance(300 * time.Millisecond)
 	tt.Frame()
 	return maxDiff(probeFill(tt.Image(), r), idle)
 }
@@ -803,4 +797,10 @@ func TestRenderFlatShots(t *testing.T) {
 			save(t, dir, "21-"+name+"-队列抽屉.png", tt)
 		})
 	}
+}
+
+// padRect 把按钮里那段字的框放大到整枚按钮（`pud.Button` 的字框比按钮小：左右 14、上下 6 的内边距），
+// 悬停底铺的是整枚按钮，采样点要落在字的外面。
+func padRect(r mygoui.Rect) mygoui.Rect {
+	return mygoui.Rect{X: r.X - 12, Y: r.Y - 6, W: r.W + 24, H: r.H + 12}
 }

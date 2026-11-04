@@ -57,6 +57,7 @@ func TestTheCheckUpdateButtonTurnsAndGreysOut(t *testing.T) {
 	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
+	openSettingsTab(t, tt, "关于")
 
 	f := &updFixture{t: t, tt: tt, s: b.s, a: b.a, be: &gu.fakeUpdate}
 	f.pressEntry(t, "检查更新")
@@ -119,6 +120,7 @@ func TestTheBusyUpdateButtonKeepsItsText(t *testing.T) {
 	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
+	openSettingsTab(t, tt, "关于")
 
 	f := &updFixture{t: t, tt: tt, s: b.s, a: b.a, be: &gu.fakeUpdate}
 	f.pressEntry(t, "检查更新")

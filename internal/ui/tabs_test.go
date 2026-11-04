@@ -142,26 +142,33 @@ func textCenterX(t *testing.T, tt *mygoui.Tester, label string) float32 {
 	return r.X + r.W/2
 }
 
-// newSettingsTabShell 打开设置页（主 Tab 是 md 那档：40）。
+// settingsTabNames 是这组测试里摆在 mainTabs 上的四个标签。设置页自己已经换成左侧分类导航
+// （DESIGN.md §0′.T6），主 Tab 这个控件还在别的页面用，所以这里用一个只摆它的小窗口来验。
+var settingsTabNames = []string{"常规设置", "菜单设置", "快捷键设置", "代理设置"}
+
+// newSettingsTabShell 造一个只摆着 mainTabs（md 那档：40）的无头窗口。返回的 Shell 恒为 nil，
+// 留着签名是为了让下面这一族测试不用改。
 func newSettingsTabShell(t *testing.T, dark, reduce bool) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	opts := []shellOpt{withSettings(app.DefaultSettings(""))}
-	if dark {
-		opts = append(opts, systemIsDark(true))
-	}
+	sel := 0
+	tt := mygoui.NewTester(func(c *mygoui.Context) {
+		ApplyTheme(c, app.DefaultSettings(""), dark)
+		mygoui.Column(c).FillWidth().FillHeight().Padding(24).Background(c.Theme().Background).Children(func() {
+			mainTabs(c, &sel, tabMD, settingsTabNames...).AlignSelf(mygoui.Start)
+		})
+	}, 900, 300)
+	tt.SetDark(dark)
 	if reduce {
-		opts = append(opts, withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
+		tt.SetPreferences(mygoui.Preferences{ReduceMotion: true, TextScale: 1})
 	}
-	s, tt := newShell(t, opts...)
-	s.navigate("/settings")
-	waitFrames(t, tt, "设置页的主 Tab 画出来", func() bool {
+	waitFrames(t, tt, "主 Tab 画出来", func() bool {
 		r, ok := tt.Find(settingsTabNames[0])
 		return ok && r.W > 0 && r.H > 0
 	})
 	// 滑块要等**上一帧**的布局量出来才画（tabs.go 的 mainTabs），多画一帧。
 	tt.Frame()
 	tt.Frame()
-	return s, tt
+	return nil, tt
 }
 
 // TestTheMainTabBarHasAGrayTrackAndASelectedBlock 钉住「灰底轨道 + 选中的那一块」。

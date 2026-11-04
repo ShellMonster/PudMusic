@@ -16,9 +16,10 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -190,14 +191,11 @@ func formatAccel(a accelerator) string {
 const (
 	// recordingHint 是「正在录、而这一格现在还没有键」时那一格里的字。已经设过键的
 	// 那一格在录的时候照常显示它现在的键。
-	recordingHint = "按下新的快捷键"
+	recordingHint = "按下新的快捷键…"
 
 	// shortcutFieldWidth / shortcutFieldHeight 是快捷键输入框的尺寸。
-	shortcutFieldWidth  = 200
-	shortcutFieldHeight = 30
-
-	// clearButtonSize 是清空按钮的边长。固定尺寸后按钮不会撑满输入框高度。
-	clearButtonSize = 18
+	shortcutFieldWidth  = 120
+	shortcutFieldHeight = 32
 )
 
 // shortcutRecorder 画快捷键那一格：没在录的时候显示它现在的键，点了开始录。
@@ -217,79 +215,41 @@ const (
 // 它的零值 `shortcutSlot{}` 表示「没有在录」，给 FocusBind 的正是「清成零值等于
 // 让焦点走开」这条语义（`ui/focus_binding.go`）。
 func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcutSlot, conflict string, ro bool) (rec ui.Element) {
-	t := c.Theme()
+	p := tok.Of(c.Theme())
 	recording := s.recording == slot
 
-	// 已设置快捷键时，录制过程中继续显示当前值；录制状态由边框和焦点环表示。
-	//
-	// ⚠️ 一格没设键的时候正在录也要说清「现在按下去就会录上」——空框配主色描边，
-	// 用户会以为那是一个空的按钮。
-	border := t.Border
+	// 原型 `.kbd-rec`：高 32、最小宽 120、左右 10、圆角 8、line-strong 描边、surface-2 底、
+	// 等宽 12/500；录制中描边 accent、字 accent-text、底 accent-soft；没设键时字 text-3。
+	// 录制中不管有没有键都写「按下新的快捷键…」（原型 `rec ? '按下新的快捷键…'`）。
+	border, bg, fg := p.LineStrong, p.Surface2, p.Text
 	text := formatAccel(accelerator(item.Shortcut))
 	switch {
-	case item.Shortcut == "" && recording:
-		border = t.Accent
+	case recording:
+		border, bg, fg = p.Accent, p.AccentSoft, p.AccentText
 		text = recordingHint
 	case item.Shortcut == "":
-		text = "未设置"
-	case recording:
-		border = t.Accent
+		fg, text = p.Text3, "未设置"
 	}
 	// 描红表示两种错误：与其他快捷键冲突，或刚才按下的键不能录成快捷键。
-	// 冲突时同时显示发生冲突的命令，便于用户修正。
-	invalid := conflict != "" || s.rejected == slot
-	if invalid {
-		border = t.Danger
-	}
-	color := t.Text
-	switch {
-	case recording:
-		// 「正在录」这几个字是主色当**字**：浅色下换成与底色 ≥4.5:1 的
-		// 变体（理由见 `widgets/ink`），否则录到一半的话读不出来。
-		color = ink.AccentOn(t)
-	case invalid:
-		// ⚠️ **取「危险色当**字色**」的那一档**（票 #241 / 报告 F-22）：这一格是
-		// 画在 `Background(t.Surface)` 上的，而浅色下原值 `#f31260` 压在那上面
-		// 只有 **3.77:1**——「这一格和别的键撞了」是最该读出来的一句话。
-		//
-		// 那一档（`dangerText` → `ink.SemanticOn`）对的是**最严的那个底**
-		// （`t.SurfaceHover`：浅色下最暗、深色下最亮），而 `t.Surface` 夹在中间
-		// ——所以它在 `t.Surface` 上也够 4.5:1。
-		color = dangerText(t)
+	if conflict != "" || s.rejected == slot {
+		border, fg = p.Err, dangerText(c.Theme())
 	}
 
-	// `ui.Box` 是列布局，子元素会上下排列；这里必须用行布局，让快捷键文本和清空按钮
-	// 保持在同一行并垂直居中。
 	field := ui.Row(c).Key(shortcutFieldKey(slot)).
-		Width(shortcutFieldWidth).Height(shortcutFieldHeight).
-		Radius(t.Radius).Background(t.Surface).Border(1, border).
-		Padding(space.None, space.Px8).AlignItems(ui.Center).
+		MinWidth(shortcutFieldWidth).Height(shortcutFieldHeight).Shrink(0).Justify(ui.Center).
+		Radius(tok.R8).Background(bg).Border(1, border).
+		Padding(space.None, space.Px10).AlignItems(ui.Center).
 		FocusBind(&s.recording, slot).Label(recorderLabel(item, slot))
 	if ro {
-		// 只读时这一格既不该吃键也不该抢焦点：Disabled 的元素不取焦点、不响应
-		// 点击、不处理输入（`ui/element.go:1299`）。FocusBind 已经把它标成可
-		// 聚焦了，所以这里必须补上这一句，否则用户一点就进到「正在录」那一支，
-		// 而按什么键都存不住。
+		// 只读时这一格既不该吃键也不该抢焦点（FocusBind 已经把它标成可聚焦了，要补 Disabled）。
 		field = field.Disabled(true)
 	} else {
 		s.takeRecordedKey(field, slot)
 	}
 
 	field.Children(func() {
-		// `Grow(1)`：把 × 右边剩下的宽度全吃掉，于是 × 永远贴着右边，超长的键被
-		// `SingleLine` 截断而不是把 × 顶出框外（手改过的设置文件里可能有很长的值）。
-		ui.Text(c, text).FontSize(scale.Font(c, scale.Size13)).SingleLine().Grow(1).Shrink(0).TextColor(color)
-		// 清空按钮只要有值就显示，且点击后同时清空并退出录制。
-		// 录制状态在指针事件处理后更新，因此按钮必须在录制状态下继续存在。
-		if !ro && item.Shortcut != "" &&
-			ui.Button(c, "×").Label("清空「"+item.Name+"」的快捷键").
-				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
-				Size(clearButtonSize, clearButtonSize).Padding(space.None).Radius(clearButtonSize/2).
-				Clicked() {
-			s.rejected = shortcutSlot{}
-			s.recording = shortcutSlot{}
-			s.applyShortcut(slot, "")
-		}
+		typo.Mono(ui.Text(c, text)).FontSize(scale.Font(c, scale.Size12)).FontWeight(500).
+			SingleLine().TextColor(fg)
 	})
 
 	if recording && !ro {

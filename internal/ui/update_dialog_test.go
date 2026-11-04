@@ -130,6 +130,8 @@ func newUpdFixture(t *testing.T, rel *app.UpdateRelease, opts ...shellOpt) *updF
 	tt := b.tt
 	tt.Frame()
 	openSettings(t, tt)
+	// 更新入口在设置页的「关于」Tab 里（原型 `SETTINGS.about`）。
+	openSettingsTab(t, tt, "关于")
 	return &updFixture{t: t, tt: tt, s: b.s, a: b.a, be: be}
 }
 
@@ -177,14 +179,14 @@ func (f *updFixture) openDialog(t *testing.T) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 设置页上有「关于应用」那一段：当前版本 + 那个按钮。
+// 设置页的「关于」Tab 上有版本说明 + 那个按钮。
 //
 // 断的是**入口真的在那儿**：Biu 的 `system-settings.tsx` 最末就是这一段，而我们
 // 之前没有它（那一段当时整段没摆）。
 func TestTheSettingsPageHasAnAboutSectionWithTheVersionAndAButton(t *testing.T) {
 	f := newUpdFixture(t, nil)
 
-	for _, want := range []string{"关于应用", "当前版本 0.1.0", "检查更新"} {
+	for _, want := range []string{"布丁音乐 PudMusic", "当前版本 0.1.0", "检查更新"} {
 		if !f.tt.HasText(want) {
 			t.Errorf("设置页上没有 %q，文字有 %q", want, f.tt.Texts())
 		}

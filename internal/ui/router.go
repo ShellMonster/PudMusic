@@ -217,10 +217,6 @@ var routes = []Route{
 	// 没人会看到的话。空状态是这一页**自己里面**画的（见 stats_view.go 的
 	// `viewStatsEmpty`）。
 	{Match: statsPath, Title: "听歌统计"},
-	// ⚠️ **皮肤页不进侧栏**（用户拍板：顶栏那枚 palette 图标就是它的入口，
-	// 侧栏不重复——和「设置」当初从顶栏拿掉同一条纪律：同一动作两个入口
-	// 会不一致）。它有内容（appearance.go），不填 Empty。
-	{Match: appearancePath, Title: "皮肤"},
 }
 
 // notFound 是兜底那一条：路径谁都不匹配就是它，对应 Biu 的 P-30。
@@ -399,10 +395,6 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 		//
 		// ⚠️ **空状态在它自己里面画**（「还没有听歌记录」），理由同 follow.go。
 		return s.viewStats
-	case appearancePath:
-		// 皮肤页：主题方案 + 主题模式 + 颜色 + 封面取色 + 字体 + 圆角 +
-		// 背景清晰度（appearance.go），设置页「常规 → 外观」那一整块搬来的。
-		return s.viewAppearance
 	}
 	return nil
 }

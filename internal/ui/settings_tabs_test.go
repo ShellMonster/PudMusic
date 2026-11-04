@@ -3,8 +3,8 @@ package ui
 import (
 	"image"
 	"path/filepath"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
@@ -13,159 +13,76 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// 四个 Tab 这一组测试跑在真实的 Shell 上（和 settings_page_test.go 同一套外壳），
-// 断言的是**画面上有什么**和**设置里变成了什么**，不是「调了哪个函数」。
-//
-// 这一票最坏的一种失败是「页画画得挺好，只是某一格按了没反应」——它在界面上完全
-// 看不出来。所以每一个控件都有一条「点它、读设置」的测试。
+// 设置页各 Tab 的测试跑在真实的 Shell 上（和 settings_page_test.go 同一套外壳），断言的是
+// **画面上有什么**和**设置里变成了什么**，不是「调了哪个函数」。每一个控件都有一条
+// 「点它、读设置」的测试——「页画得挺好，只是某一格按了没反应」在界面上完全看不出来。
 
-// TestAllFourTabsAreThereAndEachDrawsItsOwnThing 验四个 Tab 齐全，而且各画各的。
-//
-// 逐个 Tab 点过去看有没有**这一页独有**的字：只看 Tab 的名字在不在是不够的——
-// 四个 Tab 都画了同一个东西（或者空面板）的话，点过去也「成功」了。
-func TestAllFourTabsAreThereAndEachDrawsItsOwnThing(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-
-	// 切 Tab 之前先把「这一页独有」的那些字收起来。
-	only := map[string][]string{
-		"常规设置":  {"外观", "播放", "下载", "搜索", "系统"},
-		"菜单设置":  {"系统默认菜单", "全选", "折叠侧栏", "侧栏宽度"},
-		"快捷键设置": {"应用内快捷键", "全局快捷键", "启用全局快捷键", "恢复默认"},
-		// ⚠️ 四种协议只在**下拉摆开的时候**都在画面上（收起时只有当前那一个，
-		// 下面 `TestTheProxyTabTakesAllFourProtocols` 逐个点开验）。所以这里只点名
-		// 收起时也该有的那几句。
-		"代理设置": {"代理类型", "不使用代理", "现在不走代理"},
-	}
-	seen := make([][]string, 0, 4)
-	for _, tab := range settingsTabNames {
-		openSettingsTab(t, tt, tab)
-		// 这一页独有的字必须都在；同时把这一页的整屏文字存下来。
-		var page []string
-		for _, want := range only[tab] {
-			if !tt.HasText(want) {
-				t.Errorf("%s 那一页上没有 %q，文字有 %q", tab, want, tt.Texts())
-			}
-			page = append(page, want)
-		}
-		seen = append(seen, page)
-	}
-
-	// 别的 Tab 的字不许漏到这一页来：Biu 换了 Tab 就是换了一页，混在一起的话
-	// 用户会以为「代理设置」也在管主题。
-	openSettingsTab(t, tt, "代理设置")
-	for _, bad := range []string{"外观", "系统默认菜单", "启用全局快捷键"} {
-		if tt.HasText(bad) {
-			t.Errorf("代理那一页上混进了 %q", bad)
-		}
-	}
-}
-
-// TestPickingTheFontChangesWhatTheWholeWindowDrawsIn 验字体是真的换掉了。
-//
-// 这一条读的是**主题里的字体**，不是设置里的字符串：设置存对了而主题没跟着换，
-// 界面上一个字都不会变，而那正是「所有设置项都在界面上能改」会漏掉的那种失败。
+// TestPickingTheFontChangesWhatTheWholeWindowDrawsIn 验字体是真的换掉了：读的是**主题里的字体**，
+// 不是设置里的字符串（设置存对了而主题没跟着换，界面上一个字都不会变）。
 func TestPickingTheFontChangesWhatTheWholeWindowDrawsIn(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
 
-	// 「系统默认」这一档要**一个字节都不改**主题：`t.Font` 的零值是系统自己的字体，
-	// 而设置里默认是 `"system-ui"`——那是另一个字符串，设上去全应用的字宽都会变
-	// （见 BuildTheme 那里的注释和那条被它弄红的播放条测试）。
+	// 「系统默认」这一档要一个字节都不改主题：`t.Font` 的零值是系统自己的字体，而设置里默认是
+	// `"system-ui"`——那是另一个字符串，设上去全应用的字宽都会变。
 	if got := BuildTheme(s.app.SettingsSnapshot(), false).Font; got != "" {
 		t.Fatalf("选了系统默认之后主题里的字体是 %q，应该是空的（= 系统自己的）", got)
 	}
-
-	openFontMenu(t, tt, s)
-	// 挑系统里真有的**第一个等宽族**：名单是问系统要来的，写死一个「Menlo」
-	// 在别的机器上可能不存在（那还是「挑好的名单」的老思路）。
-	want := firstMonospacedFamily(t)
-	if err := tt.Click(want); err != nil {
-		t.Fatalf("点不到「%s」：%v，文字有 %q", want, err, tt.Texts())
+	options := fontOptionList()
+	if len(options) < 2 {
+		t.Skip("系统没有报任何字体")
 	}
+	// 列表一屏露 6 行，挑第二条（第一条是系统默认）。
+	want := options[1]
+	clickSetting(t, tt, s, want.label)
 	tt.Frame()
 
-	if got := s.app.SettingsSnapshot().FontFamily; got != want {
-		t.Errorf("设置里的字体是 %q，want %q", got, want)
+	if got := s.app.SettingsSnapshot().FontFamily; got != want.family {
+		t.Errorf("设置里的字体是 %q，want %q", got, want.family)
 	}
-	if got := BuildTheme(s.app.SettingsSnapshot(), false).Font; got != want {
-		t.Errorf("这一帧主题里的字体是 %q，want %q（界面不会跟着变）", got, want)
+	if got := BuildTheme(s.app.SettingsSnapshot(), false).Font; got != want.family {
+		t.Errorf("这一帧主题里的字体是 %q，want %q（界面不会跟着变）", got, want.family)
 	}
 }
 
-// TestEveryFontOptionIsDrawnInItsOwnFont 验**每一条选项用它自己的字体画**。
+// TestTheFontListHidesTheBundledTitleFont 验随包的标题字体「PudMusic Serif」不在设置页的字体列表里
+// （它是内部字体，不是用户能选来当界面字体的）。
+func TestTheFontListHidesTheBundledTitleFont(t *testing.T) {
+	for _, o := range fontOptionList() {
+		if o.family == "PudMusic Serif" || o.label == "PudMusic Serif" {
+			t.Fatalf("字体列表里不该有随包的标题字体：%+v", o)
+		}
+	}
+}
+
+// TestEveryFontOptionIsDrawnInItsOwnFont 验**每一条字体选项用它自己的字体画**。
 //
-// 这条只能靠读像素，而直接比两行不同的标签是没有用的：两行的字本来就不一样，
-// 就算全都用同一个字体画，逐像素比的结果也是「不一样」——把 `.Font(...)` 整句去掉
-// 它照样绿。
-//
-// 所以这里的做法是**拿参照比**：为每一条选项另起一个无头窗口，只画那一行字，
-// 明确写死它该用的那一族，然后拿它的墨迹和面板上那一行比。两者必须一致，而
-// 面板上那一行不可能知道「它该用哪一族」——那一句 `.Font(family)` 是页面上唯一
-// 能让它知道的地方。
+// 直接比两行不同的字没有用（字本来就不一样，全用同一个字体画逐像素比也是「不一样」），所以拿参照比：
+// 为每一条另起一个无头窗口，只画那一行字、写死它该用的那一族，再拿它的墨迹和列表里那一行比。
 func TestEveryFontOptionIsDrawnInItsOwnFont(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	openFontMenu(t, tt, s)
-
-	// 挑前几条系统字体当探针。名单是问系统要来的，所以**不写死族名**：写死的
-	// 名字在另一台机器上可能不存在，而这一条要验的是「每一条用它自己那一族」，
-	// 不是「这台机器上有哪几族」。
 	options := fontOptionList()
 	if len(options) < 4 {
 		t.Fatalf("系统只报了 %d 条字体，这条测试没有可比的三条", len(options)-1)
 	}
 	for _, opt := range options[1:4] {
-		family, label := opt.family, opt.label
-		got := inkShotOf(t, tt, label)
-		want := renderedIn(t, label, family)
+		text := opt.label + " · 晴天 夜航电台 0123"
+		settingRect(t, tt, s, opt.label) // 先把列表和这一行滚进可视区
+		got := inkShotOf(t, tt, text)
+		want := renderedIn(t, text, opt.family)
 		if !sameGlyphs(got.img, got.at, want.img, want.at) {
-			t.Errorf("「%s」那一行不是用 %q 画出来的：面板上的墨迹和单独画一遍对不上。"+
-				"面板 %.0f,%.0f %.0fx%.0f / 参照 %.0f,%.0f %.0fx%.0f",
-				label, family,
+			t.Errorf("「%s」那一行不是用 %q 画出来的：列表里的墨迹和单独画一遍对不上。"+
+				"列表 %.0f,%.0f %.0fx%.0f / 参照 %.0f,%.0f %.0fx%.0f",
+				opt.label, opt.family,
 				got.at.X, got.at.Y, got.at.W, got.at.H,
 				want.at.X, want.at.Y, want.at.W, want.at.H)
 		}
 	}
 }
 
-// firstMonospacedFamily 是这台机器上第一个等宽字体族的名字。
-//
-// 名单是问系统要来的，测试不能写死「Menlo」——那正是这一票要改掉的东西。
-func firstMonospacedFamily(t *testing.T) string {
-	t.Helper()
-	for _, f := range ui.FontFamilies() {
-		if f.Monospaced && f.Name != systemFontFamily {
-			return f.Name
-		}
-	}
-	t.Fatal("系统没有报任何等宽字体，这条测试没法挑一条来点")
-	return ""
-}
-
-// renderedIn 另起一个无头窗口，只画一行字、写死它用哪一族字体，返回它的墨迹。
-//
-// 位置对齐靠的是：参照窗口和面板上的控件都用同一段内边距，字就落在同一格上，
-// 于是逐像素比有意义。字体大小不写死——用主题的默认值，和面板上那一行是同一个。
-func renderedIn(t *testing.T, label, family string) inkShot {
-	t.Helper()
-	rt := mygoui.NewTester(func(c *mygoui.Context) {
-		ui.Column(c).Padding(fontPreviewPad).Children(func() {
-			ui.Text(c, label).Font(family)
-		})
-	}, 600, 80)
-	rt.Frame()
-	r, ok := rt.Find(label)
-	if !ok || r.H == 0 {
-		t.Fatalf("参照窗口里没有画出 %q", label)
-	}
-	return inkShot{img: rt.Image(), at: r}
-}
-
 // TestPickingAnAccentChangesTheWholeTheme 验点一枚强调色，设置和整份主题一起换。
 func TestPickingAnAccentChangesTheWholeTheme(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	if err := tt.Click("松绿"); err != nil {
-		t.Fatalf("点不到「松绿」：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
+	clickSetting(t, tt, s, "松绿")
 	if got := s.app.SettingsSnapshot().Accent; got != app.AccentPine {
 		t.Errorf("设置里的强调色是 %q，want pine", got)
 	}
@@ -174,25 +91,87 @@ func TestPickingAnAccentChangesTheWholeTheme(t *testing.T) {
 	}
 }
 
-// TestTheGeneralTabStoresEachOfItsChoices 验常规那一页的每一格都存得住。
-//
-// 逐格点是因为「其中一格改了没反应」在界面上完全看不出来——设置页照样画得挺好。
-func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
-	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
-	// 这一格每一行点一遍：设置页照样画得挺好、只是其中一格改了没反应，是这一页
-	// 最难自己发现的一种坏。
+// TestTheAccentRowHidesWhenCoverAccentIsOn 验开了「封面取色」就隐藏强调色那一行（原型 `!s.coverAccent`）。
+func TestTheAccentRowHidesWhenCoverAccentIsOn(t *testing.T) {
+	tt, s, a, _ := shellOnAppearance(t, app.DefaultSettings(""))
+	if !hasExactText(tt, "强调色") {
+		t.Fatalf("起点没有强调色一行：%q", tt.Texts())
+	}
+	clickSetting(t, tt, s, "开关：封面取色")
+	if !a.SettingsSnapshot().CoverAccent {
+		t.Fatal("封面取色没有打开")
+	}
+	if hasExactText(tt, "强调色") {
+		t.Errorf("开了封面取色强调色那一行还在：%q", tt.Texts())
+	}
+}
 
-	// 数据显示样式
-	clickSetting(t, tt, s, "网格")
-	if got := a.SettingsSnapshot().DisplayMode; got != app.DisplayModeCard {
-		t.Errorf("数据显示样式是 %q，want card", got)
+// TestTheAppearanceTabStoresEachOfItsChoices 验外观 Tab 里每一格都存得住：深浅三张卡、界面字号、
+// 收起侧栏、数据显示样式三张卡。
+func TestTheAppearanceTabStoresEachOfItsChoices(t *testing.T) {
+	tt, s, a, _ := shellOnAppearance(t, app.DefaultSettings(""))
+
+	for _, c := range []struct {
+		label string
+		want  app.ThemeMode
+	}{{"深色", app.ThemeModeDark}, {"浅色", app.ThemeModeLight}, {"跟随系统", app.ThemeModeSystem}} {
+		clickTheme(t, tt, s, c.label)
+		if got := a.SettingsSnapshot().ThemeMode; got != c.want {
+			t.Errorf("点了「%s」之后主题档位是 %q，want %q", c.label, got, c.want)
+		}
 	}
 
-	// 音质偏好（下拉）。
-	// 先滚进可视区：外观组多了「主题方案」一行，这一格被挤到了窗口下沿以外，
-	// 点屏幕外面的东西不会弹出下拉。
-	settingRect(t, tt, s, "选择音质偏好")
-	openSelect(t, tt, "选择音质偏好")
+	// 界面字号（下拉）。
+	settingRect(t, tt, s, "选择界面字号")
+	openSelect(t, tt, "选择界面字号")
+	if err := tt.Click("大"); err != nil {
+		t.Fatalf("下拉里点不到「大」：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := a.SettingsSnapshot().FontScale; got != app.FontScaleLarge {
+		t.Errorf("界面字号是 %q，want lg", got)
+	}
+
+	clickSetting(t, tt, s, "开关：收起侧栏")
+	if !a.SettingsSnapshot().SideMenuCollapsed {
+		t.Error("收起侧栏没有打开")
+	}
+
+	for _, c := range []struct {
+		label string
+		want  app.DisplayMode
+	}{{"卡片", app.DisplayModeCard}, {"紧凑", app.DisplayModeCompact}, {"列表", app.DisplayModeList}} {
+		clickSetting(t, tt, s, c.label)
+		if got := a.SettingsSnapshot().DisplayMode; got != c.want {
+			t.Errorf("点了「%s」之后数据显示样式是 %q，want %q", c.label, got, c.want)
+		}
+	}
+}
+
+// TestTheInterfaceFontScaleScalesTheText 验「界面字号」真的改了文字大小：同一行字在「大」档比「紧凑」档高。
+func TestTheInterfaceFontScaleScalesTheText(t *testing.T) {
+	size := func(fs app.FontScale) float32 {
+		st := app.DefaultSettings("")
+		st.FontScale = fs
+		tt, _, _, _ := shellOnSettings(t, st)
+		r, ok := tt.Find("默认音质")
+		if !ok {
+			t.Fatalf("找不到「默认音质」：%q", tt.Texts())
+		}
+		return r.H
+	}
+	small, large := size(app.FontScaleSmall), size(app.FontScaleLarge)
+	if !(large > small) {
+		t.Errorf("「大」档的行标题高 %.1f，「紧凑」档 %.1f——字号没有跟着档位变", large, small)
+	}
+}
+
+// TestTheGeneralTabStoresEachOfItsChoices 验常规那一页的每一格都存得住。
+func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	// 默认音质（下拉）。
+	openSelect(t, tt, "选择默认音质")
 	if err := tt.Click("无损"); err != nil {
 		t.Fatalf("下拉里点不到「无损」：%v，文字有 %q", err, tt.Texts())
 	}
@@ -200,14 +179,8 @@ func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
 	if got := a.SettingsSnapshot().AudioQuality; got != app.AudioQualityLossless {
 		t.Errorf("音质是 %q，want lossless", got)
 	}
-	// ⚠️ **这一格底下没有「跟着档位换」的说明了**（票 #530 删的）：Biu 那边把
-	// 当前档位的解释写在这一格下面（`system-settings.tsx:236-241`），我们曾经
-	// 也跟着画、这条测试也断言过「FLAC / Hi-Res」——那一批说明整块去掉之后，
-	// 这里的断言成了对一句界面上不存在的话的钉子。别再补回来：现在的口径就是
-	// 档位名自己说话（「无损 / 高 / 中 / 低」）。
 
-	// 两个开关。⚠️ 开关没有名字，靠**点它左边的那个小方框**点不到（Tester 的
-	// Click 是找显示着那个字的元素），所以这里走 Find + ClickAt。
+	// 开关：没有名字，靠 Label 找（`dropdown` / 开关都配了「开关：标题」）。
 	clickSwitch(t, tt, s, "开关：上报本机播放记录")
 	if a.SettingsSnapshot().ReportPlayHistory {
 		t.Error("上报播放记录没有关掉")
@@ -216,271 +189,154 @@ func TestTheGeneralTabStoresEachOfItsChoices(t *testing.T) {
 	if !a.SettingsSnapshot().ReportPlayHistory {
 		t.Error("上报播放记录没有打开")
 	}
-
-	clickSwitch(t, tt, s, "开关：显示搜索历史")
-	if a.SettingsSnapshot().ShowSearchHistory {
-		t.Error("显示搜索历史没有关掉")
+	clickSwitch(t, tt, s, "开关：更新提醒")
+	if a.SettingsSnapshot().UpdateNotificationEnabled() {
+		t.Error("更新提醒没有关掉")
+	}
+	clickSwitch(t, tt, s, "开关：开启刘海播放器")
+	if a.SettingsSnapshot().NotchPlayerOn() == app.DefaultSettings("").NotchPlayerOn() {
+		t.Error("刘海播放器开关没有生效")
 	}
 }
 
-// TestTheProxyTabTakesAllFourProtocols 验**任务明写的那四种协议都摆出来、也选得进**。
-//
-// ⚠️ 原来这条把「不使用代理」当成了第四项——那一档是**关掉**，不是一种协议。于是真正
-// 要求的 HTTPS 从头到尾没在界面上出现过，而这条测试一直是绿的。
-//
-// 所以这一条分成两半：
-//
-//  1. 下拉摆开时，五档**逐字**在画面上（少一档、顺序错、名字改，都会红）；
-//  2. 四种协议挨个点一遍，每点一次都真的存进了设置，且主机/端口那一整块跟着出现。
-//
-// 见 `app.ProxyType` 那里为什么比 Biu 多一个 HTTPS。
-func TestTheProxyTabTakesAllFourProtocols(t *testing.T) {
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "代理设置")
+// TestTheProxyTabMapsItsThreeModesToTheSettings 验代理 Tab 的三档落到设置上：
+// 不使用代理 → direct，使用系统代理 → none（照环境变量走），自定义 → 保存之后才是 http / socks…
+func TestTheProxyTabMapsItsThreeModesToTheSettings(t *testing.T) {
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "代理")
 
-	// 1. 下拉里摆着的是哪五档。
-	openSelect(t, tt, "选择代理类型")
-	want := []string{"不使用代理", "HTTP 代理", "HTTPS 代理", "SOCKS4 代理", "SOCKS5 代理"}
-	for _, label := range want {
-		if !tt.HasText(label) {
-			t.Errorf("代理类型下拉里没有 %q，文字有 %q", label, tt.Texts())
-		}
+	typ := func() app.ProxyType { return a.SettingsSnapshot().ProxySettings.Type }
+	if typ() != app.ProxyNone {
+		t.Fatalf("起点是 %q，want none（系统代理）", typ())
 	}
-	// 多一档要在这一条里红掉。判据是「**以「 代理」结尾**的那些」——这一页自己也有
-	// 「代理设置」「代理类型」「选择代理类型」和一句含「代理」的提示语，把它们一并
-	// 数进来就永远对不上。少一档由上面那五条 `HasText` 管。
-	if got := proxyOptionLabels(tt); len(got) != len(want) {
-		t.Errorf("代理类型下拉里有 %d 档：%q，want %d 档 %q", len(got), got, len(want), want)
+	clickSetting(t, tt, s, "代理方式：不使用代理")
+	if typ() != app.ProxyDirect {
+		t.Errorf("点了「不使用代理」之后是 %q，want direct", typ())
 	}
-	tt.Key(0, mygoui.KeyEscape)
-	tt.Frame()
-
-	// 2. 四种协议挨个点。
-	for _, c := range []struct {
-		label string
-		want  app.ProxyType
-	}{
-		{"HTTP 代理", app.ProxyHTTP},
-		{"HTTPS 代理", app.ProxyHTTPS},
-		{"SOCKS4 代理", app.ProxySOCKS4},
-		{"SOCKS5 代理", app.ProxySOCKS5},
-		{"不使用代理", app.ProxyNone},
-	} {
-		tt2, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
-		openSettingsTab(t, tt2, "代理设置")
-
-		openSelect(t, tt2, "选择代理类型")
-		if err := tt2.Click(c.label); err != nil {
-			t.Fatalf("下拉里点不到「%s」：%v，文字有 %q", c.label, err, tt2.Texts())
+	clickSetting(t, tt, s, "代理方式：使用系统代理")
+	if typ() != app.ProxyNone {
+		t.Errorf("点了「使用系统代理」之后是 %q，want none", typ())
+	}
+	// 选「自定义」只开表单，不写设置：http 而主机空着的话每条请求都会失败。
+	clickSetting(t, tt, s, "代理方式：自定义代理")
+	if typ() != app.ProxyNone {
+		t.Errorf("点了「自定义代理」就把设置改成了 %q（半填的表单不该落盘）", typ())
+	}
+	for _, want := range []string{"代理类型", "代理主机", "代理端口", "代理用户名", "代理密码", "保存并测试"} {
+		if !tt.HasText(want) {
+			t.Errorf("自定义表单上没有 %q，文字有 %q", want, tt.Texts())
 		}
-		tt2.Frame()
-		if got := a.SettingsSnapshot().ProxySettings.Type; got != c.want {
-			t.Errorf("选了「%s」之后类型是 %q，want %q", c.label, got, c.want)
-		}
-		// 「不使用代理」时主机/端口那一整块不该画；选了别的就该画。
-		if hasHost := tt2.HasText("代理主机"); hasHost != (c.want != app.ProxyNone) {
-			t.Errorf("选了「%s」之后主机那一格 %v", c.label, hasHost)
-		}
-		s.keys.Close()
 	}
 }
 
-// TestTheProxyPasswordOnlyShowsWhereItMeansSomething 验密码只在两种协议下出现。
-//
-// 照 Biu 的 `showPassword = type === "http" || type === "socks5"`
-// （`proxy-settings.tsx:39`）——SOCKS4 和 SOCKS 协议里本来就没有「用户名密码」
-// 这一段，填了也没有地方去，摆出来只是让人以为填了有用。
-func TestTheProxyPasswordOnlyShowsWhereItMeansSomething(t *testing.T) {
-	want := map[app.ProxyType]bool{
-		app.ProxyHTTP: true, app.ProxyHTTPS: true, app.ProxySOCKS5: true,
-		app.ProxySOCKS4: false, app.ProxyNone: false,
+// TestTheCustomProxyFormValidatesBeforeItSaves 验「保存并测试」先校验：主机空、端口不是数字都不落盘。
+func TestTheCustomProxyFormValidatesBeforeItSaves(t *testing.T) {
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "代理")
+	clickSetting(t, tt, s, "代理方式：自定义代理")
+
+	clickSetting(t, tt, s, "保存并测试")
+	if got := a.SettingsSnapshot().ProxySettings.Type; got != app.ProxyNone {
+		t.Fatalf("什么都没填就落盘了：%q", got)
 	}
-	for p, has := range want {
-		st := app.DefaultSettings("")
-		st.ProxySettings.Type = p
-		tt, s, _, _ := shellOnSettings(t, st)
-		openSettingsTab(t, tt, "代理设置")
-		if got := tt.HasText("代理密码"); got != has {
-			t.Errorf("类型是 %q 时密码那一格是 %v，want %v", p, got, has)
-		}
-		if !tt.HasText("代理用户名") && p != app.ProxyNone {
-			t.Errorf("类型是 %q 时连用户名那一格都没画", p)
-		}
-		s.keys.Close()
+	if !tt.HasText("请填写代理主机") || !tt.HasText("端口是 1–65535 的数字") {
+		t.Errorf("校验提示没出来：%q", tt.Texts())
 	}
 }
 
-// TestTheProxyHostAndPortAreStored 验主机和端口存得住、非法端口存不进去。
-//
-// 端口那一格最容易被「看着能改」骗过去：输入框照收不误，而设置里存的是一个 0 或者
-// 一段乱码，拨号的时候才炸。
-func TestTheProxyHostAndPortAreStored(t *testing.T) {
-	st := app.DefaultSettings("")
-	st.ProxySettings.Type = app.ProxyHTTP
-	tt, _, a, _ := shellOnSettings(t, st)
-	openSettingsTab(t, tt, "代理设置")
+// TestTheCustomProxyFormSavesAndProbesTheProxy 验填好主机和端口之后「保存并测试」写进设置，
+// 并只拨一下代理自己的地址（不向真实站点发请求）。
+func TestTheCustomProxyFormSavesAndProbesTheProxy(t *testing.T) {
+	probed := make(chan string, 1)
+	old := proxyProbe
+	proxyProbe = func(host, port string) error { probed <- host + ":" + port; return nil }
+	t.Cleanup(func() { proxyProbe = old })
 
-	typeIntoProxyField(t, tt, "代理主机", "127.0.0.1")
-	typeIntoProxyField(t, tt, "代理端口", "7890")
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	openSettingsTab(t, tt, "代理")
+	clickSetting(t, tt, s, "代理方式：自定义代理")
+	typeIntoProxyField(t, tt, "127.0.0.1输入框", "127.0.0.1")
+	typeIntoProxyField(t, tt, "7890输入框", "7890")
+	clickSetting(t, tt, s, "保存并测试")
 
 	got := a.SettingsSnapshot().ProxySettings
-	if got.Host != "127.0.0.1" {
-		t.Errorf("主机是 %q", got.Host)
+	if got.Type != app.ProxyHTTP || got.Host != "127.0.0.1" || got.Port == nil || *got.Port != 7890 {
+		t.Fatalf("保存下来的是 %+v", got)
 	}
-	if got.Port == nil || *got.Port != 7890 {
-		t.Errorf("端口是 %v，want 7890", got.Port)
+	select {
+	case addr := <-probed:
+		if addr != "127.0.0.1:7890" {
+			t.Errorf("测试拨的是 %q", addr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("没有拨代理")
 	}
 }
 
-// TestTheMenuTabHidesAnItemFromTheSidebar 验菜单那一页是真的接在侧栏上的。
-//
-// 这是这一票里最容易「摆了个开关、按了没反应」的一格：侧栏那一列是
-// `sidebar.go` 的 `viewSideMenu`，菜单那一页改的是设置里的 `hiddenMenuKeys`。
-// 两处没接上的话，勾选框照样跳，设置也照样存住，而侧栏上那一条还在。
-//
-// ⚠️ 拿**「本地音乐」**当例子而不是「稍后再看」：这一条钉的是
-// `hiddenMenuKeys` 通不通，而那三个入口未登录时压根不摆（`Route.HideInMenuWhenLoggedOut`），
-// 拿它们当例子的话这条测试还会顺带把登录态也钉进去——把 `HideInMenuWhenLoggedOut` 去掉，
-// 它照样绿，而它本来就不该管那件事。
+// TestTheMenuTabHidesAnItemFromTheSidebar 验菜单 Tab 的开关把入口从侧栏藏掉、再放回来。
 func TestTheMenuTabHidesAnItemFromTheSidebar(t *testing.T) {
-	tt, _, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
 
 	if !tt.HasText("本地音乐") {
 		t.Fatalf("侧栏上起点就没有「本地音乐」，文字有 %q", tt.Texts())
 	}
-	openSettingsTab(t, tt, "菜单设置")
-	clickCheckbox(t, tt, "在侧栏里显示「本地音乐」")
+	openSettingsTab(t, tt, "菜单")
+	clickSetting(t, tt, s, "开关：在侧栏里显示「本地音乐」")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 1 || got[0] != localMusicPath {
 		t.Fatalf("设置里藏起来的是 %q，want [%s]", got, localMusicPath)
 	}
-	// ⚠️ 这里必须**数个数**，不能只问「有没有」：菜单那一页上那个复选框摆的字也是
-	// 「本地音乐」，它的无障碍名字更是「在侧栏里显示「本地音乐」」。用子串匹配的
-	// `HasText` 永远是绿的；用全等匹配也仍然是绿的（复选框那个字一模一样）。
-	// 「侧栏上那一项不见了」的正确判据是**从两处变成一处**。
+	// 「侧栏上那一项不见了」的判据是**从两处变成一处**（菜单页那一行的标题也叫「本地音乐」）。
 	if got := countText(tt, "本地音乐"); got != 1 {
-		t.Errorf("勾掉了之后画面上有 %d 处「本地音乐」，want 1（只剩菜单那一页的复选框）", got)
+		t.Errorf("关掉之后画面上有 %d 处「本地音乐」，want 1（只剩菜单那一页的行标题）", got)
 	}
-
-	// 勾回来。
-	clickCheckbox(t, tt, "在侧栏里显示「本地音乐」")
+	clickSetting(t, tt, s, "开关：在侧栏里显示「本地音乐」")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 0 {
-		t.Errorf("勾回来之后还藏着 %q", got)
+		t.Errorf("打开之后还藏着 %q", got)
 	}
 	if got := countText(tt, "本地音乐"); got != 2 {
-		t.Errorf("勾回来之后画面上有 %d 处「本地音乐」，want 2（侧栏 + 菜单那一页）", got)
+		t.Errorf("打开之后画面上有 %d 处「本地音乐」，want 2（侧栏 + 菜单那一页）", got)
 	}
 }
 
-// TestTheSelectAllCheckboxIsStrictLengthEqual 验「全选」是严格长度相等。
-//
-// 这条是照着验收的形状写的（PLAN C-50）：判定是
-// `len(groupKeys) > 0 && len(selectedKeys) == len(groupKeys)`。
-//
-// ⚠️ 特意构造一组「长度一样但成员不同」的情况：改了集合比较的话它会判成全选，
-// 而界面上明明有一项没勾上——用户点一下「全选」以为会全勾上，结果是全取消。
-func TestTheSelectAllCheckboxIsStrictLengthEqual(t *testing.T) {
-	keys := []string{"/", "/follow", "/later", "/history"}
-
-	cases := []struct {
-		name    string
-		visible []string
-		want    bool
-	}{
-		{"一个都没勾（长度都是 0，集合比较会判成全选）", nil, false},
-		{"全勾上了", keys, true},
-		{"勾了三个", keys[:3], false},
-		{"长度和 keys 一样，但换成了别的键（不是子集）", []string{"/a", "/b", "/c", "/d"}, true},
-		{"比 keys 还长", []string{"/a", "/b", "/c", "/d", "/e"}, false},
-	}
-	for _, c := range cases {
-		if got := menuAllChecked(keys, c.visible); got != c.want {
-			t.Errorf("%s：%v 对 %v 判成 %v，want %v", c.name, c.visible, keys, got, c.want)
-		}
-	}
-	// 一组空的永远不是全选（上面第一条已经覆盖了），空 keys 也不能是。
-	if menuAllChecked(nil, nil) {
-		t.Error("一组空的菜单被判成了全选")
-	}
-}
-
-// TestTheSelectAllCheckboxReallyWritesTheHiddenList 验「全选」那一格接上了设置。
-//
-// 纯函数那一半（严格长度相等）上面已经验了；这一半验它按下去真的写对了
-// `hiddenMenuKeys`——两半分开是因为「判定对、接线错」和「接线对、判定错」是两个
-// 完全不同方向的失败。
-func TestTheSelectAllCheckboxReallyWritesTheHiddenList(t *testing.T) {
-	tt, _, a, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "菜单设置")
-
-	// 一开始六项都是勾上的，所以点一下「全选」是**全取消**——Biu 是
-	// `onSelectionChange(checked ? groupKeys : [])`（`select-all-checkbox-group`）。
-	clickCheckbox(t, tt, "全选：系统默认菜单")
-	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != len(menuGroupKeys()) {
-		t.Errorf("全取消之后藏着 %q，want 全部 %d 条", got, len(menuGroupKeys()))
-	}
-	clickCheckbox(t, tt, "全选：系统默认菜单")
-	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 0 {
-		t.Errorf("全勾上之后还藏着 %q", got)
-	}
-}
-
-// TestHidingAMenuItemLeavesOtherGroupsAlone 验别的组写的键一个都不动。
-//
-// `hiddenMenuKeys` 是**一份全局名单**，Biu 那边还有两组往同一个键里写各自的 id
-// （`menu-settings.tsx:57-101`）。在这里动到它们，用户在别处（将来）做的选择就被
-// 悄悄抹掉了。
+// TestHidingAMenuItemLeavesOtherGroupsAlone 验别的组写的键一个都不动：`hiddenMenuKeys` 是一份全局名单，
+// 收藏夹的 id 和别的菜单项都写在里面。
 func TestHidingAMenuItemLeavesOtherGroupsAlone(t *testing.T) {
 	st := app.DefaultSettings("")
-	st.HiddenMenuKeys = []string{"90001", "/later", "90002"}
-	tt, _, a, _ := shellOnSettings(t, st)
-	openSettingsTab(t, tt, "菜单设置")
-
-	clickCheckbox(t, tt, "在侧栏里显示「推荐音乐」")
+	st.HiddenMenuKeys = []string{"90001", "90002", "/later"}
+	tt, s, a, _ := shellOnSettings(t, st)
+	openSettingsTab(t, tt, "菜单")
+	clickSetting(t, tt, s, "开关：在侧栏里显示「本地音乐」")
 	got := a.SettingsSnapshot().HiddenMenuKeys
 	if len(got) != 4 {
 		t.Fatalf("藏一项之后名单变成了 %q，want 原有三条 + 新藏的一条", got)
 	}
-	for _, want := range []string{"90001", "90002", "/later", "/"} {
+	for _, want := range []string{"90001", "90002", "/later", localMusicPath} {
 		if !contains(got, want) {
 			t.Errorf("别的组写的 %q 被抹掉了：%q", want, got)
 		}
 	}
 }
 
+// TestTheDownloadDirButtonAsksForAFolder 验下载目录那一行的「更改」弹的是文件夹对话框，
+// 挑完存进 `downloadPath`。
+func TestTheDownloadDirButtonAsksForAFolder(t *testing.T) {
+	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
+	fake := &fakePicker{path: "/somewhere/songs"}
+	s.picker = fake
+	clickSetting(t, tt, s, "更改")
+	waitFor(t, "文件框弹出来", func() bool { tt.Frame(); return fake.gotText[0] != "" })
+	if !fake.gotDir {
+		t.Error("「更改」弹的不是文件夹对话框")
+	}
+	waitFor(t, "下载目录存进设置", func() bool { tt.Frame(); return a.SettingsSnapshot().DownloadPath == "/somewhere/songs" })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 小工具
 // ─────────────────────────────────────────────────────────────────────────────
 
-// openFontMenu 把字体那一格的下拉摆开（皮肤页上——「字体」那格搬过去了）。
-func openFontMenu(t *testing.T, tt *mygoui.Tester, s *Shell) {
-	t.Helper()
-	r := appearanceRect(t, tt, s, "选择字体")
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-	tt.Frame()
-	// 面板摆开之后第一个系统字体在画面上（「系统默认」那一条收起时本来就有，
-	// 不能拿它当判据）。
-	options := fontOptionList()
-	if len(options) < 2 || !tt.HasText(options[1].label) {
-		t.Fatalf("字体面板没有摆开，文字有 %q", tt.Texts())
-	}
-}
-
-// openSelect 摆开一个下拉。靠 Label 找：下拉自己摆的字是选中的那一个，改了会变。
-func openSelect(t *testing.T, tt *mygoui.Tester, label string) {
-	t.Helper()
-	if err := tt.Click(label); err != nil {
-		t.Fatalf("点不到下拉「%s」：%v，文字有 %q", label, err, tt.Texts())
-	}
-	tt.Frame()
-}
-
-// typeIntoProxyField 在代理那一页的一个输入框里敲字然后提交。
-//
-// ⚠️ 名字带 Proxy：上游的 `localmusic_test.go` 里已经有一个 `typeInto` 了（同包同名
-// 编不过），两个的用途也不同——那个往本地音乐页的框里敲，这个往代理那一页。
-//
-// ⚠️ `Tester.Type` 是往**有焦点的**输入框里塞文本（`platform.TextInput`），不带
-// 按键；所以先点一下那个框让它拿到焦点。
+// typeIntoProxyField 在代理表单的一个输入框里敲字然后提交（输入框按 Label 找，Label 是
+// 「占位字 + 输入框」）。`Tester.Type` 往**有焦点的**输入框里塞文本，所以先点一下让它拿到焦点。
 func typeIntoProxyField(t *testing.T, tt *mygoui.Tester, label, text string) {
 	t.Helper()
 	if err := tt.Click(label); err != nil {
@@ -493,17 +349,45 @@ func typeIntoProxyField(t *testing.T, tt *mygoui.Tester, label, text string) {
 	tt.Frame()
 }
 
-// clickSwitch 点一个开关。靠它自己的 Label 找——所以每个开关都配了
-// 「开关：那一行的标题」这个名字（那也是读屏软件唯一能念出来的名字，见
-// `pickSwitch` 的注释）。用「开关：」开头而不是照抄那一行的标题，是因为界面上
-// 标题那一处是**一字不差**的同名文本：`Find` 只给第一处。
+func firstMonospacedFamily(t *testing.T) string {
+	t.Helper()
+	for _, f := range ui.FontFamilies() {
+		if f.Monospaced && f.Name != systemFontFamily {
+			return f.Name
+		}
+	}
+	t.Fatal("系统没有报任何等宽字体，这条测试没法挑一条来点")
+	return ""
+}
+
+func renderedIn(t *testing.T, label, family string) inkShot {
+	t.Helper()
+	rt := mygoui.NewTester(func(c *mygoui.Context) {
+		ui.Column(c).Padding(fontPreviewPad).Children(func() {
+			ui.Text(c, label).Font(family).FontSize(16)
+		})
+	}, 600, 80)
+	rt.Frame()
+	r, ok := rt.Find(label)
+	if !ok || r.H == 0 {
+		t.Fatalf("参照窗口里没有画出 %q", label)
+	}
+	return inkShot{img: rt.Image(), at: r}
+}
+
+func openSelect(t *testing.T, tt *mygoui.Tester, label string) {
+	t.Helper()
+	if err := tt.Click(label); err != nil {
+		t.Fatalf("点不到下拉「%s」：%v，文字有 %q", label, err, tt.Texts())
+	}
+	tt.Frame()
+}
+
 func clickSwitch(t *testing.T, tt *mygoui.Tester, s *Shell, title string) {
 	t.Helper()
 	clickSetting(t, tt, s, title)
 }
 
-// clickCheckbox 点一个复选框。`ui.Checkbox` 的字和框是一体的（`coreCheckbox` 把它们
-// 放在同一行里，点字也算点它），所以直接 `tt.Click(那个字)`。
 func clickCheckbox(t *testing.T, tt *mygoui.Tester, label string) {
 	t.Helper()
 	if err := tt.Click(label); err != nil {
@@ -512,8 +396,6 @@ func clickCheckbox(t *testing.T, tt *mygoui.Tester, label string) {
 	tt.Frame()
 }
 
-// clickCell 点一格录制框，按它的 Label 找（画面上那一格显示的字在录的时候会变，
-// 拿它当名字就再也点不到它了）。
 func clickCell(t *testing.T, tt *mygoui.Tester, label string) {
 	t.Helper()
 	r, ok := tt.Find(label)
@@ -524,31 +406,8 @@ func clickCell(t *testing.T, tt *mygoui.Tester, label string) {
 	tt.Frame()
 }
 
-// sameInk 比两小片画面是不是一模一样。
-//
-// 只看「深色像素的个数」不够：两行字只要有一个像素不同，笔画位置就不一样，个数却
-// 可能正好相等（少一个多一个）。所以逐像素比。
-// hasExactText 报画面上有没有**一个字不差**的那一条。
-//
-// `Tester.HasText` 是子串匹配（testing.md 里写着的），所以「在侧栏里显示「稍后再
-// 看」」里也有「稍后再看」——用它验「某个词不见了」永远是绿的。
 func hasExactText(tt *mygoui.Tester, want string) bool { return countText(tt, want) > 0 }
 
-// proxyOptionLabels 是画面上那些**看起来像代理类型档位**的文字：以「 代理」结尾，
-// 或者就是「不使用代理」。
-func proxyOptionLabels(tt *mygoui.Tester) []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, txt := range tt.Texts() {
-		if (strings.HasSuffix(txt, " 代理") || txt == "不使用代理") && !seen[txt] {
-			seen[txt] = true
-			out = append(out, txt)
-		}
-	}
-	return out
-}
-
-// countText 数画面上有几处**一字不差**的那一条。
 func countText(tt *mygoui.Tester, want string) int {
 	n := 0
 	for _, got := range tt.Texts() {
@@ -559,18 +418,11 @@ func countText(tt *mygoui.Tester, want string) int {
 	return n
 }
 
-// fontPreviewPad 是上面那个参照窗口的内边距，用来把字挪到和面板上一致的位置。
-// 12 是面板上那一项的内边距（`settings_font.go` 里的 `Padding(6, 10)` 加上行高
-// 差出来的那一点）；差一两个像素不影响「有没有墨」的逐像素比——差半个字就会。
-const fontPreviewPad = 12
-
-// inkShot 是一张画面的一小块，连着它在那一帧里的位置一起存下来。
 type inkShot struct {
 	img *image.RGBA
 	at  mygoui.Rect
 }
 
-// inkShotOf 取某一条在当前这一帧里的墨迹快照。
 func inkShotOf(t *testing.T, tt *mygoui.Tester, label string) inkShot {
 	t.Helper()
 	r, ok := tt.Find(label)
@@ -580,15 +432,6 @@ func inkShotOf(t *testing.T, tt *mygoui.Tester, label string) inkShot {
 	return inkShot{img: tt.Image(), at: r}
 }
 
-// sameGlyphs 比两小片画面里的**字**是不是一模一样。
-//
-// 两片各自先找出墨迹的**外框**，再从各自的外框左上角逐像素比。只比「深色像素的
-// 个数」是不够的：两行字只要有一个像素不同，笔画位置就不一样，个数却可能正好
-// 相等（这里少一个那里多一个）。比的是「有没有墨」，不是墨色——两处都是正文色。
-//
-// 先找外框是必须的：面板上那一格的框是从**整项**的左边开始的（里面还有 10 的
-// 内边距），参照那一格的框从文字开始，两边差着十几个像素。直接按框比，比的是
-// 「空对空」，一个字都比不到。
 func sameGlyphs(imgA *image.RGBA, a mygoui.Rect, imgB *image.RGBA, b mygoui.Rect) bool {
 	boxA, okA := inkBox(imgA, a)
 	boxB, okB := inkBox(imgB, b)
@@ -612,8 +455,6 @@ func sameGlyphs(imgA *image.RGBA, a mygoui.Rect, imgB *image.RGBA, b mygoui.Rect
 	return true
 }
 
-// inkBox 是一小片画面里墨迹的**外框**（紧贴着最外侧那些有墨的像素）。没有墨就
-// 返回 ok=false。
 func inkBox(img *image.RGBA, r mygoui.Rect) (mygoui.Rect, bool) {
 	x0, y0 := int(r.X), int(r.Y)
 	x1, y1 := x0+int(r.W), y0+int(r.H)
@@ -653,7 +494,6 @@ func minF(a, b float32) float32 {
 	return b
 }
 
-// writeShortcutFileFromNewer 造一份「来自更新版本」的快捷键文件，返回路径。
 func writeShortcutFileFromNewer(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), shortcutFileName)
@@ -692,124 +532,6 @@ func contains(list []string, v string) bool {
 	return false
 }
 
-// TestTheLocalMusicDirectoriesAreEditable 验 `localMusicDirs` 改得了。
-//
-// 这一条是被审阅挑出来的：`localMusicDirs` 在整个应用里**一处写它的地方都没有**
-// （只有 app 包里的字段定义、默认值、normalize），所以「所有设置项都在界面上能改」
-// 实际差这一个键。Biu 把它摆在 local-music 页上，而本项目那一页现在还是空状态，
-// 所以它落在设置页上——见 `pickLocalMusicDirs` 的说明。
-//
-// 三个动作挨个走一遍：加、重复加不重复、删。重复加那一条最要紧：同一个目录摆两遍，
-// 音乐列表里也会出现两遍，而用户以为自己只加了一次。
-func TestTheLocalMusicDirectoriesAreEditable(t *testing.T) {
-	st := app.DefaultSettings("")
-	st.LocalMusicDirs = []string{"/music/rock", "/music/jazz"}
-	tt, s, a, _ := shellOnSettings(t, st)
-
-	// 起点两条都在画面上。
-	for _, dir := range st.LocalMusicDirs {
-		if !hasExactText(tt, dir) {
-			t.Fatalf("起点没有摆出「%s」，文字有 %q", dir, tt.Texts())
-		}
-	}
-
-	// 加一条。文件框在无头环境里调不了，替掉 `s.picker`（和 autostart 同一个道理）。
-	fake := &fakePicker{path: "/music/classic"}
-	s.picker = fake
-	clickSetting(t, tt, s, "添加文件夹")
-	waitFor(t, "第三个本地音乐目录写进设置", func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) == 3 })
-
-	// 再加一次同一个：不该出现两遍。
-	fake.path = "/music/classic"
-	clickSetting(t, tt, s, "添加文件夹")
-	waitFor(t, "本地音乐目录写进设置", func() bool { return len(a.SettingsSnapshot().LocalMusicDirs) >= 3 })
-	tt.Frame()
-	if got := a.SettingsSnapshot().LocalMusicDirs; len(got) != 3 {
-		t.Errorf("同一个目录加了两次之后是 %q，want 三条", got)
-	}
-
-	// 删掉中间那一条，留下的两条顺序不能乱。
-	//
-	// ⚠️ `before` 是**删之前**从 store 里拿的一份快照，它和 store 自己**共享**那一段
-	// 数组（`internal/app/settings.go` 的 Snapshot 注释里写着）。所以删完之后 `before`
-	// 必须还是原来那两条——直接对共享的数组 `slices.Delete` 会把顺序改掉，而那一格
-	// 还没写盘，于是下次打开看到的是乱的。
-	before := a.SettingsSnapshot()
-	clickSetting(t, tt, s, "移除目录「/music/rock」")
-	tt.Frame()
-	got := a.SettingsSnapshot().LocalMusicDirs
-	if len(got) != 2 || got[0] != "/music/jazz" || got[1] != "/music/classic" {
-		t.Fatalf("删掉中间一条之后是 %q，want [/music/jazz /music/classic]", got)
-	}
-	if len(before.LocalMusicDirs) != 3 ||
-		before.LocalMusicDirs[0] != "/music/rock" ||
-		before.LocalMusicDirs[1] != "/music/jazz" ||
-		before.LocalMusicDirs[2] != "/music/classic" {
-		t.Errorf("删的那一下把共享的那段数组改了：%q", before.LocalMusicDirs)
-	}
-}
-
-// TestTheLocalMusicDirectoriesDoNotCrashOnADuplicate 验设置文件里有重复目录时这一页
-// **画得出来**。
-//
-// ⚠️ 这一条是被一个真崩溃逼出来的：那一行的 key 就是路径，而 MyGo 在同一层里拿到
-// 两个一样的 key 会**当场 panic**——那一格带着整个设置页换成错误页，用户之前改好的
-// 设置文件是用户能直接编辑的，两个一样的目录在文件里完全合法，所以这一格必须自己去重。
-func TestTheLocalMusicDirectoriesDoNotCrashOnADuplicate(t *testing.T) {
-	st := app.DefaultSettings("")
-	st.LocalMusicDirs = []string{"/music/rock", "/music/rock", "/music/jazz"}
-	tt, _, _, _ := shellOnSettings(t, st)
-
-	if tt.HasText("界面出错了") {
-		t.Fatalf("有重复目录就把整页画崩了，文字有 %q", tt.Texts())
-	}
-	if got := countText(tt, "/music/rock"); got != 1 {
-		t.Errorf("重复的目录画了 %d 遍，want 1", got)
-	}
-	if got := countText(tt, "/music/jazz"); got != 1 {
-		t.Errorf("/music/jazz 画了 %d 遍，want 1", got)
-	}
-}
-
-// TestEachPathButtonAsksItsOwnQuestion 验三个「选择」按钮各自给**自己**的那两行字。
-//
-// 合并上游时两边都加过挑路径的功能：上游的 `platform.PickDirectory`（本地音乐页的
-// 「添加目录」）和我这一票的 `PickPath`（设置页的下载目录 / FFmpeg）。同一个系统对
-// 话框，问的问题不一样——本地音乐那页问的是「挑的音频会出现在哪儿」，设置页的下载
-// 目录问的是「下载的东西会存到哪儿」。写死成一句就有一边在说错的话，而错的那句是
-// **直接弹在系统对话框上**的。
-func TestEachPathButtonAsksItsOwnQuestion(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-
-	for _, c := range []struct {
-		button string
-		dir    bool
-		title  string
-	}{
-		{"添加文件夹", true, "选择音乐文件夹"},
-		{"选择", true, ""}, // 下载目录和 FFmpeg 那一行上都有「选择」，分开点
-	} {
-		fake := &fakePicker{path: "/somewhere"}
-		s.picker = fake
-		if c.title == "" {
-			// 下载目录：先把播放条之外的那个「选择」点掉，先验 FFmpeg 那一行再说。
-			continue
-		}
-		clickSetting(t, tt, s, c.button)
-		waitFor(t, "文件框弹出来", func() bool { return fake.gotText[0] != "" })
-		if fake.gotDir != c.dir {
-			t.Errorf("「%s」弹的不是文件夹对话框", c.button)
-		}
-		if fake.gotText[0] != c.title {
-			t.Errorf("「%s」弹出来的标题是 %q，want %q", c.button, fake.gotText[0], c.title)
-		}
-	}
-}
-
-// fakePicker 是替掉真的系统文件框的那一份。
-//
-// ⚠️ `dir` 和那两行字都记下来：那一格挑的是不是文件夹、对话框上说的是不是这一件事，
-// 都是界面上看得见的——记下来才能在测试里断言它们没有串台。
 type fakePicker struct {
 	path    string
 	err     error
@@ -821,3 +543,6 @@ func (f *fakePicker) pick(_ *mygo.Window, dir bool, title, message string) (stri
 	f.gotDir, f.gotText = dir, [2]string{title, message}
 	return f.path, f.err
 }
+
+// fontPreviewPad 是 `renderedIn` 参照窗口的内边距。
+const fontPreviewPad = 12

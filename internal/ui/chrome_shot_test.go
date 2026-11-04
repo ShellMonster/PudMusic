@@ -67,14 +67,14 @@ func TestRenderChromeShots(t *testing.T) {
 
 			// 03 设置页：内容收在中间一段宽度里，页标题只出现一次。
 			s.navigate("/settings")
-			waitFrames(t, tt, "设置页", func() bool { return tt.HasText("常规设置") })
+			waitFrames(t, tt, "设置页", func() bool { return tt.HasText("常规") })
 			tt.Move(1180, 400)
 			homeFrame(tt)
 			save(t, dir, "03-设置-"+name+".png", tt)
 
 			// 04 代理那一页：两列输入框，是「别横跨整行」看得最清楚的一页
 			//（它本来就是两列，列宽跟着容器走）。
-			openSettingsTab(t, tt, "代理设置")
+			openSettingsTab(t, tt, "代理")
 			tt.Move(1180, 400)
 			homeFrame(tt)
 			save(t, dir, "04-设置-代理-"+name+".png", tt)

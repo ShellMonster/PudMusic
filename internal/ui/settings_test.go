@@ -286,7 +286,7 @@ func openSettings(t *testing.T, tt *mygoui.Tester) {
 		t.Fatalf("侧栏上点不到「设置」：%v，文字有 %q", err, tt.Texts())
 	}
 	settleSettingsPage(t, tt)
-	if !tt.HasText("窗口关闭") {
+	if !tt.HasText("开机自启") {
 		t.Fatalf("切到设置页了但没画出内容，文字有 %q", tt.Texts())
 	}
 }
@@ -328,7 +328,7 @@ func openSettings(t *testing.T, tt *mygoui.Tester) {
 // 钟冻住的时候也不会骗人——只会一路撞到上限然后大声报错。顺带还比原来准：
 // 原来要三帧不动才敢认停（两帧不够，动画停在某一帧上时两帧本来就一样），现在
 // 动画一结束就停，实测 16ms × 15 = 240ms，和那个 250ms 的切页动画对得上。
-func settleSettingsPage(t *testing.T, tt *mygoui.Tester) { settlePage(t, tt, "外观") }
+func settleSettingsPage(t *testing.T, tt *mygoui.Tester) { settlePage(t, tt, "常规") }
 
 // settlePage 是 `settleSettingsPage` 的通用版：等切页动画走完，然后确认
 // `marker` 那一行真的量出了大小。皮肤页（「主题方案」那一组）和设置页

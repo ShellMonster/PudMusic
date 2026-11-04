@@ -159,19 +159,7 @@ var realDataLedger = []realDataPage{
 		},
 		// 这一页的内容不是 B 站给的，是它自己那一页设置项。判据是「有一整排真实
 		// 的设置项在画面上」——不是一句空状态。
-		Want: []string{"数据显示样式", "开机自启"},
-	},
-	{
-		Route: appearancePath, Title: "皮肤",
-		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
-			s, tt := newShell(t)
-			s.navigate(appearancePath)
-			realDataFrames(tt, 3)
-			return s, tt
-		},
-		// 同设置页：内容是它自己那一页设置控件（主题方案那八张卡 + 三档 +
-		// 颜色 + 字体 + 圆角 + 背景清晰度），不是一句空状态。
-		Want: []string{"主题方案", "跟随系统"},
+		Want: []string{"默认音质", "开机自启"},
 	},
 	{
 		Route: statsPath, Title: "听歌统计",

@@ -394,6 +394,7 @@ size_scale:
   Size24: 24   # Section：分区 / 抽屉 / 对话框 / 空状态标题（宋体 700）
   Size28: 28   # 全屏歌词当前句
   Size32: 32   # Title：UP 主名、榜单序号、窄窗页标题（宋体 700）
+  Size40: 40   # 登录页的「扫码登录」标题（原型 `style="font-size:40px"`，宋体 700）
   Size48: 48   # Display：页标题（宋体 700）
   Size64: 64   # Hero：「今日一张」、收藏夹标题（宋体 700）
 spacing:

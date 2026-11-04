@@ -110,7 +110,7 @@ func shellOnShortcutPage(t *testing.T) (*Shell, *mygoui.Tester, *fakeHotkeys, *[
 	h := newFakeHotkeys()
 	s.hotkeys = h
 	got := watchCommands(s)
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 	return s, tt, h, got
 }
 
@@ -421,7 +421,7 @@ func TestTheShortcutsComeBackTheMomentARecordingFinishes(t *testing.T) {
 	// ③ 重新打开设置页、停在快捷键那一页再按。
 	s.navigate("/settings")
 	tt.Frame()
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 	tt.Key(mygoui.Cmd|mygoui.Shift, mygoui.KeyM)
 	tt.Frame()
 	if len(*got) != 3 {
@@ -676,8 +676,9 @@ func TestRecordingAGlobalShortcutRegistersTheNewKey(t *testing.T) {
 
 // TestResettingTheShortcutsRegistersThemAgain 验「恢复默认」也重新登记。
 //
-// 恢复默认改的是**整份**两列，而它走的是 `applyShortcutChange` 那条出口。两条
-// 出口漏掉一条的症状一样：点完「恢复默认」，别的应用里还是旧的键。
+// 设置页上原型没有「恢复默认」按钮（入口已删，`keys.reset` 保留），所以直接走它的出口
+// `applyShortcutChange`。恢复默认改的是**整份**两列，两条出口漏掉一条的症状一样：恢复之后，
+// 别的应用里还是旧的键。
 func TestResettingTheShortcutsRegistersThemAgain(t *testing.T) {
 	s, tt, hot, _ := shellOnShortcutPage(t)
 	// 先改一个全局键，再点「恢复默认」——两次都走设置页。两次的出口不同
@@ -689,9 +690,7 @@ func TestResettingTheShortcutsRegistersThemAgain(t *testing.T) {
 		t.Fatalf("改完之后没有登记新键：%q", hot.registered)
 	}
 
-	// ⚠️ 「恢复默认」在那一页最底下：命令表变长之后它在窗口底边之外，先
-	// 滚进去再点（`tt.Click` 不查可视区，理由见 `settingRect`）。
-	clickSetting(t, tt, s, "恢复默认")
+	s.applyShortcutChange("快捷键", s.keys.reset)
 	tt.Frame()
 
 	if hot.has("CommandOrControl+Alt+Z") {
@@ -823,22 +822,19 @@ func TestSyncingTwiceLeavesNoDuplicate(t *testing.T) {
 // 设置页上写给用户看的那一句
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheShortcutPageSaysWhatTheTwoColumnsAreFor 验这一页把两列的分别说清。
+// TestTheShortcutPageSaysWhatTheTwoColumnsAreFor 验这一页照原型把两列的分别说清：
+// 「启用全局快捷键」下面那句「应用在后台时，全局那一列依然生效」，表底下那句「点一下快捷键再按下
+// 新组合；Esc 取消，Delete 清空」（原型 `SETTINGS.shortcut`）。
 //
-// 一句已经不做的话留在页面上，比没有更坏：用户按了 ⌘P 发现能用了，而页面上仍然
-// 写着「按下去什么也不会发生」，于是反过来以为应用出了别的毛病。
-//
-// 「切换mini/完整模式」那一行也在这一条里：它切的是**两个窗口**（主窗口收起来 +
-// 开一个 320×100 的小窗），所以从别的应用按它同样有用——而别的五条只是往这个进程
-// 的状态里写一笔，界面上看不出变化。不说出来的话，读者会以为那一列的六条是一个
-// 意思。
+// 一句已经不做的话留在页面上，比没有更坏：用户按了 ⌘P 发现能用了，而页面上仍然写着「按下去什么也
+// 不会发生」，于是反过来以为应用出了别的毛病。
 func TestTheShortcutPageSaysWhatTheTwoColumnsAreFor(t *testing.T) {
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 
-	for _, want := range []string{"应用内那一列", "全局那一列", "输入框", "切换mini/完整模式」那一条切的是窗口"} {
+	for _, want := range []string{"应用在后台时，全局那一列依然生效", "点一下快捷键再按下新组合；Esc 取消，Delete 清空。"} {
 		if !tt.HasText(want) {
-			t.Errorf("这一页没在说「%s」是怎么回事，文字有 %q", want, tt.Texts())
+			t.Errorf("这一页没在说「%s」，文字有 %q", want, tt.Texts())
 		}
 	}
 	if tt.HasText("这一版先把键录下来存住") {
@@ -882,40 +878,12 @@ func TestABareSpaceTogglesPlayback(t *testing.T) {
 func TestSpaceDoesNotActivateTheFocusedButton(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	got := watchCommands(s)
-	openSettingsTab(t, tt, "菜单设置")
+	openSettingsTab(t, tt, "菜单")
 	tt.Frame()
 	tt.Key(0, mygoui.KeySpace)
 	tt.Frame()
 	if len(*got) == 0 || (*got)[len(*got)-1] != "togglePlay" {
 		t.Errorf("点过标签之后按空格触发的是 %v，want 以 togglePlay 结尾", *got)
-	}
-}
-
-func TestPickingATrackFadeLength(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	tt.Frame()
-	settingRect(t, tt, s, "选择淡入淡出时长")
-	openSelect(t, tt, "选择淡入淡出时长")
-	if err := tt.Click("5 秒"); err != nil {
-		t.Fatalf("找不到切歌淡入淡出的 5 秒档：%v（%q）", err, tt.Texts())
-	}
-	tt.Frame()
-	if got := s.app.SettingsSnapshot().TrackFadeSeconds; got != 5 {
-		t.Errorf("点了 5 秒，设置里是 %d", got)
-	}
-}
-
-func TestPickingAnEQPreset(t *testing.T) {
-	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	tt.Frame()
-	settingRect(t, tt, s, "选择均衡器预设")
-	openSelect(t, tt, "选择均衡器预设")
-	if err := tt.Click("摇滚"); err != nil {
-		t.Fatalf("找不到均衡器的摇滚档：%v", err)
-	}
-	tt.Frame()
-	if got := s.app.SettingsSnapshot().EQPreset; got != "rock" {
-		t.Errorf("点了摇滚，设置里是 %q", got)
 	}
 }
 

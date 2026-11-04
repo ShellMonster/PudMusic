@@ -300,14 +300,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 「已经换上这一版」要从预览弹窗上浮过去）。
 	s.guardAt("歌词弹窗", s.viewLyricDialogs)(c)
 
-	// 关于面板（about.go）。**排在满屏之后**：它是模态的、要盖住整页，而满屏
-	// 盖住的是整个窗口——次序反过来的话，用户在满屏里从应用菜单点「关于」，
-	// 看到的面板开在满屏底下。
-	//
-	// ⚠️ 它自己包了一层 Guard（那一块是从菜单进来的，崩了的话用户连是哪一块
-	// 都说不出来），所以这里**不再包一层**。
-	s.viewAbout(c)
-
 	s.viewToasts(c)
 
 	// 记下这一帧停在哪条路由上（下一帧的「刚进这一页」就是拿它比出来的）。
@@ -327,10 +319,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 		if s.settings.focus != settingsFocusNone {
 			s.settings.focus = settingsFocusNone
 		}
-		// ⚠️ **那 16 像素的留白也别留着**：它是给「刚跳过来」这件事的——用户
-		// 跳过来之后立刻走掉的话，下一次进设置页时它补在别的地方，页面就无故
-		// 差了 16 像素（见 syncSettings）。
-		s.settings.focusMargin = false
 	}
 }
 

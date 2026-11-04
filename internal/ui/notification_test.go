@@ -959,19 +959,14 @@ func (c *graceCatcher) fire(t *testing.T) {
 // ⚠️ **而它得摆在「关于应用」那一段里**：「有更新了」是那一段的东西，而摆在
 // 别处的话用户找不到它。
 func TestTheUpdateNotificationSwitchIsOnTheSettingsPage(t *testing.T) {
-	// ⚠️ **更新得挂上**：那一格在「关于应用」那一段里，而那一段整体是由
-	// `settingsUpdate` 画的——它没挂更新时**整段都不摆**（理由见那里的注释）。
-	gu := newFakeUpdate("9.9.9", nil)
-	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), mounted(func(_ *testing.T, a *app.App) {
-		a.MountUpdates(gu, filepath.Join(t.TempDir(), "app-update.json"))
-	}))
+	// 「更新提醒」在常规 Tab 的「系统」组里（原型 `SETTINGS.general`），不依赖更新有没有挂上。
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 
 	if !tt.HasText(updateNotificationTitle) {
 		t.Fatalf("设置页上没有 %q 那一行，文字有 %q", updateNotificationTitle, tt.Texts())
 	}
-	// 它得在「关于应用」那一段里（用户找的是「有更新了」那一件事）。
-	if !tt.HasText(updateSection) {
-		t.Fatalf("设置页上没有 %q 那一段，文字有 %q", updateSection, tt.Texts())
+	if !tt.HasText("系统") {
+		t.Fatalf("设置页上没有「系统」那一组，文字有 %q", tt.Texts())
 	}
 }
 

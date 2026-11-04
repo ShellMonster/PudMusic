@@ -14,7 +14,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -326,7 +325,7 @@ const longToastText = "有几个全局快捷键没登记上：播放/暂停（�
 // 测试没人会去读）。
 func TestTheToastCardItselfDoesNotBlockClicks(t *testing.T) {
 	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
-	openSettingsTab(t, tt, "快捷键设置")
+	openSettingsTab(t, tt, "快捷键")
 	shortToasts(t, time.Minute)
 
 	// 摆满 `toastLimit` 条，而且**用真的那种长句子**：短句子只占一行，卡片矮，三条
@@ -350,15 +349,8 @@ func TestTheToastCardItselfDoesNotBlockClicks(t *testing.T) {
 
 	under := 0
 	def := defaultShortcutSettings()
-	// 🔴 **两列都看**（应用内 / 全局）：每一列的 × 都在**自己那个录制框的右端**，
-	// 而两列的 × **离内容段的右沿一样远**——内容段收窄之后（票 #244 的 D1：设置
-	// 页的内容段从 900 收到 780），「应用内」那一列的 × 挪出了卡片盖住的那一片，
-	// 而「全局」那一列的还在底下。
-	//
-	// ⚠️ **位置是算出来的，不是 `Find` 出来的**：两列的 × 叫**同一个名字**
-	// （「清空「X」的快捷键」），`Find` 只给第一个（应用内那一列的）。而 × 在录制
-	// 框的右端——框的内边距 8、× 自己 18 宽，所以它的中心在「框的右沿往左
-	// 8 + 9」。
+	// 两列都看（应用内 / 全局）：点每个录制框的中心，点中了就进入「正在录」（`s.recording == slot`）。
+	// 卡片把点击吃了的话，那一下点空，`s.recording` 还是零值。
 	for _, col := range []struct {
 		label  string
 		global bool
@@ -372,30 +364,22 @@ func TestTheToastCardItselfDoesNotBlockClicks(t *testing.T) {
 			if !found {
 				t.Fatalf("没有「%s%s」那一格，文字有 %q", col.label, item.Name, tt.Texts())
 			}
-			cx := cell.X + cell.W - space.Px8 - clearButtonSize/2
-			cy := cell.Y + cell.H/2
+			cx, cy := cell.X+cell.W/2, cell.Y+cell.H/2
 			if cx < stack.X || cx > stack.X+stack.W || cy < stack.Y || cy > stack.Y+stack.H {
-				continue // 这个 × 不在卡片底下
+				continue // 这一格不在卡片底下
 			}
 			under++
 			tt.ClickAt(cx, cy)
 			tt.Frame()
-			list := s.keys.snapshot().Shortcuts
-			if col.global {
-				list = s.keys.snapshot().GlobalShortcuts
+			if want := (shortcutSlot{id: item.ID, global: col.global}); s.recording != want {
+				t.Errorf("卡片压着的那一格点不动：%s 没进入录制（卡片把点击吃了）", item.Name)
 			}
-			if it, _ := findShortcut(item.ID, list); it.Shortcut != "" {
-				t.Errorf("卡片压着的那一格点不动：%s 还是 %q（卡片把点击吃了）", item.Name, it.Shortcut)
-			}
-			// 摆回默认值，好让下一格有东西可清。
-			if err := s.keys.set(shortcutSlot{id: item.ID, global: col.global}, item.Shortcut); err != nil {
-				t.Fatal(err)
-			}
+			s.recording = shortcutSlot{}
 			tt.Frame()
 		}
 	}
 	if under == 0 {
-		t.Fatalf("卡片底下一个 × 都没有（被压住的那一片在 %v，窗口 1200x800）："+
+		t.Fatalf("卡片底下一个录制框都没有（被压住的那一片在 %v，窗口 1200x800）："+
 			"这一条量的是「卡片压着可点的东西」，一格都不在底下就等于没量", stack)
 	}
 }

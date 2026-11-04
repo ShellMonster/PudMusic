@@ -24,6 +24,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -304,7 +305,7 @@ func TestTheShortcutConflictTextIsReadable(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
-			openSettingsTab(t, tt, "快捷键设置")
+			openSettingsTab(t, tt, "快捷键")
 
 			// 造一个冲突：把「上一首」录成 ⌘P（和「播放/暂停」撞了）。
 			clickCell(t, tt, "应用内快捷键：上一首")
@@ -319,10 +320,10 @@ func TestTheShortcutConflictTextIsReadable(t *testing.T) {
 				t.Fatalf("找不到那一格，文字有 %q", tt.Texts())
 			}
 			th := BuildTheme(app.DefaultSettings(""), dark)
-			// 那一格的底是 `t.Surface`（`shortcut_keys.go` 的 recorderCell）。
-			bg := rgb(th.Surface)
-			// 字在格的左边（右边那颗是「×」键，它的颜色不是危险色）。
-			x0, x1 := int(cell.X)+9, int(cell.X)+9+45
+			// 那一格的底是 surface-2（原型 `.kbd-rec`，`shortcut_keys.go` 的 shortcutRecorder）。
+			bg := rgb(tok.Of(th).Surface2)
+			// 字居中，整格里面（去掉两边的描边）找最深的那个。
+			x0, x1 := int(cell.X)+3, int(cell.X+cell.W)-3
 			y0, y1 := int(cell.Y)+2, int(cell.Y+cell.H)-2
 			got, ok := darkestIn(tt, x0, y0, x1, y1, bg)
 			if !ok {

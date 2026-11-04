@@ -34,8 +34,8 @@ func TestHiddenFavoritesShowUpOnTheSettingsTab(t *testing.T) {
 	}
 
 	// 设置页两个都摆——藏起来的那个是「勾掉」的状态。
-	openSettingsTab(t, tt, "菜单设置")
-	for _, want := range []string{"收藏夹", "我创建的", "藏起来的", "看得见的"} {
+	openSettingsTab(t, tt, "菜单")
+	for _, want := range []string{"收藏夹显示", "藏起来的", "看得见的", "我创建的 · 0 首"} {
 		if !hasExactText(tt, want) {
 			t.Fatalf("设置页上没有 %q，文字有 %q", want, tt.Texts())
 		}
@@ -51,9 +51,9 @@ func TestUnhidingAFavoriteFromTheSettingsTab(t *testing.T) {
 
 	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 42, Title: "藏起来的"}})
 	tt.Frame()
-	openSettingsTab(t, tt, "菜单设置")
+	openSettingsTab(t, tt, "菜单")
 
-	clickCheckbox(t, tt, "在侧栏里显示收藏夹「藏起来的」")
+	clickSetting(t, tt, s, "开关：在侧栏里显示收藏夹「藏起来的」")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 0 {
 		t.Fatalf("勾回来之后还藏着 %q", got)
 	}
@@ -69,9 +69,9 @@ func TestHidingAFavoriteFromTheSettingsTab(t *testing.T) {
 
 	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 7, Title: "看得见的"}})
 	tt.Frame()
-	openSettingsTab(t, tt, "菜单设置")
+	openSettingsTab(t, tt, "菜单")
 
-	clickCheckbox(t, tt, "在侧栏里显示收藏夹「看得见的」")
+	clickSetting(t, tt, s, "开关：在侧栏里显示收藏夹「看得见的」")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; !slices.Contains(got, "7") {
 		t.Fatalf("勾掉之后没藏进设置：%q", got)
 	}
@@ -88,14 +88,14 @@ func TestHidingAFavoriteFromTheSettingsTab(t *testing.T) {
 func TestAnOrphanedHiddenFavoriteIsStillReachable(t *testing.T) {
 	st := app.DefaultSettings("")
 	st.HiddenMenuKeys = []string{"99999"}
-	tt, _, a, _ := shellOnSettings(t, st)
+	tt, s, a, _ := shellOnSettings(t, st)
 
 	// 接口那边一个收藏夹都没有（SetFavorites 都不调），只有名单里这一笔。
-	openSettingsTab(t, tt, "菜单设置")
-	if !hasExactText(tt, "收藏夹 99999（已不在列表里）") {
+	openSettingsTab(t, tt, "菜单")
+	if !hasExactText(tt, "收藏夹 99999") {
 		t.Fatalf("孤儿的那笔没摆出来，文字有 %q", tt.Texts())
 	}
-	clickCheckbox(t, tt, "取消隐藏已不在列表里的收藏夹 99999")
+	clickSetting(t, tt, s, "开关：取消隐藏已不在列表里的收藏夹 99999")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; len(got) != 0 {
 		t.Fatalf("勾上之后孤儿的那笔还在：%q", got)
 	}
@@ -107,10 +107,10 @@ func TestAnOrphanedHiddenFavoriteIsStillReachable(t *testing.T) {
 func TestMenuVisibilitySettingsLeaveFavoritesAlone(t *testing.T) {
 	st := app.DefaultSettings("")
 	st.HiddenMenuKeys = []string{"42"}
-	tt, _, a, _ := shellOnSettings(t, st)
-	openSettingsTab(t, tt, "菜单设置")
+	tt, s, a, _ := shellOnSettings(t, st)
+	openSettingsTab(t, tt, "菜单")
 
-	clickCheckbox(t, tt, "在侧栏里显示「推荐音乐」")
+	clickSetting(t, tt, s, "开关：在侧栏里显示「推荐音乐」")
 	if got := a.SettingsSnapshot().HiddenMenuKeys; !slices.Contains(got, "42") {
 		t.Fatalf("菜单的勾选把收藏夹那笔抹掉了：%q", got)
 	}
