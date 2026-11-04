@@ -179,17 +179,17 @@ func advanceUntil(t *testing.T, tt *mygoui.Tester, what string, cond func() bool
 
 // TestTheMiniWindowShowsTheNewStateWhileTheMainWindowIsUnseen 是这一条的正文。
 //
-// 判据：**后台改了音量之后，迷你窗的画面上出现的是新音量**（静音那一枚的
-// 无障碍名从「静音」变成「取消静音」）——而不是停在旧内容。
+// 判据：**后台放进歌之后，迷你窗的画面上出现的是新歌名**（「暂无播放内容」
+// 换成歌名）——而不是停在旧内容。
 //
 // ⚠️ **它和 `window_seen_test.go` 里那一条不是同一件事**：那一条量的是唤醒
 // 句柄那一层（`FramePending`），这一条量的是**画面**。
 func TestTheMiniWindowShowsTheNewStateWhileTheMainWindowIsUnseen(t *testing.T) {
 	f := newMiniWakeFixture(t)
 
-	// 起点：迷你窗画着「静音」那一枚（音量没被静音过）。
-	if _, ok := f.miniTT.Find("静音"); !ok {
-		t.Fatalf("起点就不对：迷你窗上没有「静音」那一枚，这一条就验不到东西（文字有 %q）",
+	// 起点：迷你窗画着「暂无播放内容」（队列是空的）。
+	if !f.miniTT.HasText("暂无播放内容") {
+		t.Fatalf("起点就不对：迷你窗上没有「暂无播放内容」，这一条就验不到东西（文字有 %q）",
 			f.miniTT.Texts())
 	}
 
@@ -214,12 +214,14 @@ func TestTheMiniWindowShowsTheNewStateWhileTheMainWindowIsUnseen(t *testing.T) {
 	drain(t, f.mainTT, "主窗")
 	drain(t, f.miniTT, "迷你窗")
 
-	// 后台改了一份状态：音量归零（于是静音了）。
+	// 后台改了一份状态：放进两首歌、第一首开始放（于是歌名换了）。
 	//
 	// ⚠️ **这一条要的是「后台」那一支**：`App.SetVolume` 改完状态会叫醒
 	// **每一个**登记过的窗口（铁律三，`wakeAll`）——而叫醒是**逐窗口**的：
 	// 主窗看不见就丢掉，迷你窗看得见就接住。
-	f.app.SetVolume(0)
+	if err := enqueueTwo(f.app, t); err != nil {
+		t.Fatal(err)
+	}
 
 	// ⚠️ **迷你窗得自己「要帧」**：那正是「后台叫醒了它」的样子（唤醒 =
 	// 要一帧）。
@@ -228,7 +230,7 @@ func TestTheMiniWindowShowsTheNewStateWhileTheMainWindowIsUnseen(t *testing.T) {
 	// Tester 是拉式的，自己 `Frame()` 一下画面就更新了，于是「迷你窗压根没
 	// 被叫醒」这种坏法照样绿。
 	if !f.miniTT.FramePending() {
-		t.Fatalf("主窗口失焦、迷你窗口看得见，后台改了音量，迷你窗却没有要帧——" +
+		t.Fatalf("主窗口失焦、迷你窗口看得见，后台改了状态，迷你窗却没有要帧——" +
 			"它会停在旧内容（铁律三：逐窗口叫醒）")
 	}
 
@@ -240,17 +242,16 @@ func TestTheMiniWindowShowsTheNewStateWhileTheMainWindowIsUnseen(t *testing.T) {
 	// 断的是「排掉之后的状态」——**信号被自己抹掉了**（实测：把
 	// `invalidateIf` 改成不问 `seen`，这一条照样绿）。
 	if f.mainTT.FramePending() {
-		t.Error("主窗口失焦了，后台改了音量，它却又要起帧——" +
+		t.Error("主窗口失焦了，后台改了状态，它却又要起帧——" +
 			"看不见的窗口那些帧全是白烧的电（票 #156）")
 	}
 
-	// 而迷你窗画出来的那一帧上，静音那一枚的名字变了。
+	// 而迷你窗画出来的那一帧上，歌名换成了新歌。
 	advanceUntil(t, f.miniTT, "迷你窗的画面上出现新状态", func() bool {
-		_, ok := f.miniTT.Find("取消静音")
-		return ok
+		return f.miniTT.HasText(flacBaseName)
 	})
-	if _, ok := f.miniTT.Find("取消静音"); !ok {
-		t.Errorf("主窗口失焦之后，后台改了音量，迷你窗的画面上却没有跟着改（文字有 %q）——"+
+	if !f.miniTT.HasText(flacBaseName) {
+		t.Errorf("主窗口失焦之后，后台改了状态，迷你窗的画面上却没有跟着改（文字有 %q）——"+
 			"迷你播放器是用户唯一看着的那一扇，它停在旧内容，用户看到的是过时的状态",
 			f.miniTT.Texts())
 	}

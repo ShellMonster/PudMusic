@@ -32,7 +32,6 @@
 package ui
 
 import (
-	"math"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -136,7 +135,7 @@ func miniDisplayFor(displays []mygo.Display, r mygo.Rectangle) mygo.Display {
 // ⚠️ **判据和框架那一版一样**（`mygo/window_state.go` 的 `onDisplay`）：
 // 横向至少露出 100（窗比 100 窄就按窗宽算）、纵向至少露出 50。
 //
-// ⚠️ **为什么不用「露一点就算」**：一块 320×84 的迷你窗，露 10 像素出来，
+// ⚠️ **为什么不用「露一点就算」**：一块 380×194 的迷你窗，露 10 像素出来，
 // 用户根本看不见它——而「看不见」和「窗没了」在界面上长得一模一样。
 func miniRectReachable(r, work mygo.Rectangle) bool {
 	if r.Width <= 0 || r.Height <= 0 || work.Width <= 0 || work.Height <= 0 {
@@ -177,7 +176,7 @@ func miniWorkAreaOf(displays []mygo.Display, bounds mygo.Rectangle) mygo.Rectang
 // miniClampInto 把 r 挪进 work（**大小一个字都不改**）。
 //
 // ⚠️ **大小不动**：迷你窗有 `MinWidth/MinHeight`（`MiniWindowOptions`），
-// 缩到比 320×84 还小是**框架不允许**的——而工作区比窗还窄的时候（改了这
+// 缩到比 380×194 还小是**框架不允许**的——而工作区比窗还窄的时候（改了这
 // 块屏的分辨率），正确的做法是**把左上角对齐到工作区的左上角**，而不是
 // 把窗改小（改小的话窗控件会被裁掉）。
 func miniClampInto(r mygo.Rectangle, work mygo.Rectangle) mygo.Rectangle {
@@ -385,7 +384,7 @@ func (s *Shell) miniReconcileDisplayNow() {
 // 之后原来那个位置可能已经超出工作区——一样要夹回去。
 //
 // 🔴 **而「窗比新的工作区还高」也在这一档里**：那一块多出来的部分是**透明**
-// 的，而透明的那一块照样吃点击——于是卷帘得**立刻收起来**，窗高回到 84
+// 的，而透明的那一块照样吃点击——于是卷帘得**立刻收起来**，窗高回到 194
 // （见下面那一段）。
 func (s *Shell) miniOnDisplaysChanged() {
 	w := s.miniWindow()
@@ -406,7 +405,7 @@ func (s *Shell) miniOnDisplaysChanged() {
 	//
 	// ⚠️ **为什么必须收**：这一扇窗是**透明**的，而**多出来的那一块照样吃
 	// 点击**（`minicurtain.go` 的文件头第 1 条）——那块屏的工作区从 1080 变
-	// 成 200 之后，窗还停在 320 高，底下那 120 像素在屏幕外，而窗**还在那
+	// 成 200 之后，窗还停在 414 高，底下那 214 像素在屏幕外，而窗**还在那
 	// 儿挡着**别的应用的点击。
 	//
 	// ⚠️ **收起了位置要重算**：高度变了，「左上角该在哪儿」也跟着变
@@ -500,11 +499,11 @@ func (s *Shell) miniCurtainRetarget() {
 //   - 高度 ≠ 它 ⇒ 是**用户拖窗缘**改的：弹簧**立刻停笔**
 //     （`resizeForeign` 记下这一刻，`miniCurtainSyncHeight` 里那一支不再
 //     `SetSize`），而且把弹簧**钉在用户拖到的高度上**（`holdAt`）——松开手
-//     之后从那儿接着走，不是「跳回 84 再展开」。
+//     之后从那儿接着走，不是「跳回 194 再展开」。
 //
 // ⚠️ **只在卷帘有动画的时候管**：卷帘收着（`height ≤ 0` 且没开着）的时候，
 // 弹簧压根不在写窗高，用户拖窗是**唯一**改尺寸的人——那一档没有拉锯可守
-// （`miniCurtainCollapseNow` 已经把窗钉回 84 了，而用户要是再往高拖，那是
+// （`miniCurtainCollapseNow` 已经把窗钉回 194 了，而用户要是再往高拖，那是
 // 位置记忆的事，`StateKey` 记的就是那个高）。
 //
 // ⚠️ **「松手」不在这里判**：框架没有「live-resize 结束」的事件——它按
@@ -553,33 +552,13 @@ func (s *Shell) miniOnWindowResized() {
 	}
 }
 
-// miniCurtainBoardHeight 是 `miniCurtainWinHeight` 的**反函数**：拿窗高反解
-// 板高（`miniOnWindowResized` 钉弹簧用）。
-//
-// 🔴 **缝渐出之后它是两段，不是一个常数**：`miniCurtainWinHeight` 那一侧
-// 窗高 = 84 + 缝 + 板高，而**缝 = min(miniCurtainGap, 板高取整)**——
-//
-//   - 板比缝还高（`h − miniHeight ≥ 2×miniCurtainGap`）：缝是满的，
-//     `b = h − miniHeight − miniCurtainGap`；
-//   - 板比缝矮（`h − miniHeight < 2×miniCurtainGap`）：缝跟着板缩，
-//     `h − miniHeight = b + round(b) ≈ 2b`，`b = round((h − miniHeight)/2)`。
-//
-// 拿常数缝反解（`h − miniHeight − miniCurtainGap`）的话，用户把窗缘拖到
-// 「板 < 10px」那一档（窗高 84~94）时 board 反解成 0 或负——松手后
-// `holdAt(0)` 把窗拽回 84，而不是从用户拖到的高度接着走（P1 审查抓到
-// 的那条）。
-//
-// ⚠️ **取整是 `int(x+0.5)`（round），跟 `miniCurtainWinHeight` 同一把尺**
-// ——正解反解用的舍入不一样的话，同一扇窗高会反解出隔壁那一档的板高。
+// miniCurtainBoardHeight 由窗高反解卷帘那一块有多高（`miniCurtainWinHeight` 的逆）：
+// 窗高 = 194 + 卷帘高，所以卷帘高 = 窗高 − 194。用户拖窗缘时拿它把弹簧钉在
+// 用户拖到的高度上（`miniOnWindowResized`）。
 func miniCurtainBoardHeight(winH int) float64 {
 	r := winH - miniHeight
 	if r <= 0 {
 		return 0
 	}
-	// 板比缝矮那一段：h − 84 = b + round(b)，两段的分界在 r = 2×gap
-	//（b = gap 那一格正好落在「缝刚满」上，两段公式给出同一个数）。
-	if r < 2*miniCurtainGap {
-		return math.Floor(float64(r)/2 + 0.5)
-	}
-	return float64(r - miniCurtainGap)
+	return float64(r)
 }

@@ -31,22 +31,30 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
-// 刘海窗的窗尺寸（固定，不变）：展开卡宽 468 + 两侧余量，高 240（刘海高 ~38
-// + 展开深度 ~178 + 余量）。窗尺寸由 `pinToTop` 一次钉在屏顶正中，之后
+// 刘海窗的窗尺寸（固定，不变）：展开卡宽 380 + 两侧余量，高 168（刘海高 ~38
+// + 展开深度 80 + 余量）。窗尺寸由 `pinToTop` 一次钉在屏顶正中，之后
 // 不再动——动的是画出来的形状。
 const (
-	notchWinW = 468 + 60
-	notchWinH = 240
+	notchWinW = notchOpenW + 60
+	notchWinH = 168
 
-	notchOpenW  = 468 // 展开卡的宽
+	notchOpenW  = 380 // 展开卡的宽（原型 `#notch:hover { width: 380px }`）
+	notchOpenH  = 80  // 展开比刘海多出来的深度（原型 112 − 32）
 	notchIdleW  = 330 // 无歌时那张卡的宽
 	notchHelloW = 340 // 引导那条的宽
+
+	notchWingCover = 20         // 两翼封面边长（原型 `.notch-min img`）
+	notchWingPad   = space.Px12 // 两翼离边的内边距
+	notchCardCover = 56         // 展开卡封面（原型 `.notch-card img`）
 
 	notchHoverOpenDelay = 300 * time.Millisecond // 指针停够多久才展开
 	notchHoverExitDelay = 350 * time.Millisecond // 走开多久才收起
@@ -103,9 +111,6 @@ type notchShell struct {
 
 	// winW, winH 是窗的 DIP 尺寸（= notchWinW/notchWinH，留在这是给测试替）。
 	winW, winH float32
-
-	// 频谱条：见 `viewNotchLevels`。
-	bars []float32
 
 	// playing 是上一帧看到的「在放没有」——拿它找「开始放了」那个边沿。
 	playing bool
@@ -345,12 +350,12 @@ func (s *Shell) notchTarget() (w, h float32) {
 	case n.open && !st.HasTrack:
 		return notchIdleW, n.h0 + 72
 	case n.open:
-		return notchOpenW, n.h0 + 178
+		return notchOpenW, n.h0 + notchOpenH
 	case n.hello && st.HasTrack:
 		return notchHelloW, n.h0 + 58
 	case st.HasTrack && s.notchEnabled() && st.Playing:
 		// 两翼：刘海宽 + 两边各一只翅膀（封面 + 频谱），不挡菜单栏文字。
-		return n.w0 + 2*max(0, n.h0-12) + 20, n.h0
+		return n.w0 + 2*(notchWingPad+notchWingCover), n.h0
 	default:
 		return n.w0, n.h0
 	}
@@ -531,7 +536,8 @@ func (s *Shell) viewNotch(c *ui.Context) {
 	}
 	open := stage.AnimateTo("open", opened, spring)
 	hello := stage.AnimateTo("hello", b2f(n.hello), spring)
-	foot := 10 + 18*open
+	// 收起时底角 16，展开 24（原型 `border-radius: 0 0 16px 16px` → `0 0 24px 24px`）。
+	foot := 16 + 8*open
 	flare := 6 + 8*open
 	cx := n.winW / 2
 
@@ -540,10 +546,7 @@ func (s *Shell) viewNotch(c *ui.Context) {
 			return
 		}
 		path := notchShape(r.X+cx, w, h, flare, foot)
-		if open > 0.05 {
-			p.Shadow(ui.Rect{X: r.X + cx - w/2, Y: r.Y + h - 40, W: w, H: 40},
-				foot, 0, 14, 30, -6, ui.RGBA(0, 0, 0, 0.45*open))
-		}
+		// 原型的刘海没有阴影（`#notch` 只有黑底和圆角），所以这里也不画。
 		p.FillPath(path, ui.RGB(0, 0, 0))
 	})
 	stage.Children(func() {
@@ -554,8 +557,8 @@ func (s *Shell) viewNotch(c *ui.Context) {
 				s.viewNotchIdle(c, open, (w-notchIdleW)/2)
 				return
 			}
-			// 两翼只在展开没盖掉它们的时候画。
-			s.viewNotchWings(c, st, 1-open)
+			// 顶上那一行（封面 + eq）收起、展开都在（原型展开态里它仍是第一行）。
+			s.viewNotchWings(c, st, 1)
 			s.viewNotchHello(c, hello*(1-open), (w-notchHelloW)/2)
 			if open > 0.02 {
 				s.viewNotchExpanded(c, st, open, (w-notchOpenW)/2)
@@ -589,61 +592,41 @@ func b2f(b bool) float32 {
 	return 0
 }
 
-// viewNotchWings 是刘海的两翼：左封面、右频谱条。
+// 刘海里的颜色：刘海永远是黑的（原型 `#notch { background: #000; color: #ecebe8 }`），
+// 不随深浅主题变，字色取全屏播放器那一组固定暗色（`tok.Full`，同一份 #ecebe8 / #a6a8ae）。
 //
-// ⚠️ **只在收起的时候画**（`shown = 1-open`）：展开卡盖下来的时候两翼
-// 藏在它底下，画两遍是白画。
+// 字重 600：原型的歌名是 `<strong>`（700），系统字体里两者同一档；字重用命名常量，
+// 理由同 `miniTitleWeight`。
+const notchTitleWeight = 600
+
+// viewNotchWings 是刘海的两翼（原型 `.notch-min`）：左翼 20×20 的封面（圆角 4），
+// 右翼是三根跳动的 eq 柱；两侧各留 12。**只在收起的时候画**（`shown = 1-open`）：
+// 展开卡盖下来的时候两翼藏在它底下，画两遍是白画。
+//
+// ⚠️ **展开后顶上那一行还在**：原型的展开态里 `.notch-min` 仍然在最上面一行（封面 +
+// eq），卡片在它底下——所以展开时这一行也要画，`viewNotch` 传的是 1 而不是 1-open。
 func (s *Shell) viewNotchWings(c *ui.Context, st app.State, shown float32) {
 	if shown < 0.02 {
 		return
 	}
 	n := &s.notchSt
-	sz := n.h0 - 12
-	ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(n.h0).
-		PaddingX(space.Px7).AlignItems(ui.Center).Opacity(shown).
+	ui.Row(c).Key("notch-min").Absolute().Top(0).Left(0).Right(0).Height(n.h0).
+		PaddingX(space.Px12).AlignItems(ui.Center).Opacity(shown).
 		Children(func() {
-			cov := ui.Box(c).Size(sz, sz).Radius(sz * 0.28).Clip()
+			cov := ui.Box(c).Size(notchWingCover, notchWingCover).Radius(tok.R4).Clip().Shrink(0)
 			if st.CoverURL == "" {
-				cov.Background(ui.RGBA(255, 255, 255, 0.12))
+				cov.Background(ui.RGB(34, 34, 34))
 			}
 			cov.Children(func() {
-				imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, sz, sz)
+				// ⚠️ 半径要明说 4：`ViewTitled` 跟主题圆角（8），在 20 的方块上就成了圆。
+				imgcache.ViewRadius(c, s.images, st.CoverURL, notchWingCover, notchWingCover, tok.R4)
 			})
-			ui.Spacer(c)
-			s.viewNotchLevels(c, st, 16, sz*0.7, 4)
+			ui.Spacer(c).Grow(1)
+			// eq 只在放的时候跳；暂停时是空的（原型 `S.playing ? '<i></i><i></i><i></i>' : ''`）。
+			if st.Playing {
+				pud.EqBars(c, "notch-eq", true)
+			}
 		})
-}
-
-// viewNotchLevels 画频谱条：取当前帧的频谱条高度画几根柱。
-//
-// 颜色是封面主色染白一点（和满屏播放器那一排条同色系的取法）。
-func (s *Shell) viewNotchLevels(c *ui.Context, st app.State, w, h float32, count int) {
-	ui.Box(c).Size(w, h).Draw(func(p *ui.Painter, r ui.Rect) {
-		bars := s.app.SpectrumBars(count, 0)
-		if len(s.notchSt.bars) < count {
-			s.notchSt.bars = make([]float32, count)
-		}
-		live := false
-		for i, v := range bars {
-			s.notchSt.bars[i] = v
-			if v > 0.01 {
-				live = true
-			}
-		}
-		barW := r.W / float32(count*2-1)
-		for i, v := range s.notchSt.bars {
-			if v <= 0.01 {
-				continue
-			}
-			bh := max(2, v*r.H)
-			x := r.X + float32(i*2)*barW
-			p.Fill(ui.Rect{X: x, Y: r.Y + r.H - bh, W: barW, H: bh},
-				ui.RGBA(255, 255, 255, 0.9), 1)
-		}
-		if live {
-			p.AnimationFrame()
-		}
-	})
 }
 
 // viewNotchHello 是引导那条：「刘海里也能控制播放 / 指针停在这里」+「开启」。
@@ -662,13 +645,18 @@ func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
 			title, hint = "屏幕顶部也能控制播放", "指针移到顶部中央，即可暂停、切歌"
 		}
 		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px2).Children(func() {
-			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).SingleLine()
-			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size12)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(notchTitleWeight).
+				TextColor(tok.Full.Text).SingleLine()
+			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Full.Text2).SingleLine()
 		})
-		b := ui.ButtonBase(c.Key("notch-keep")).Padding(space.Px6, space.Px14).Radius(999).
-			Background(c.Theme().Accent).FocusRing(false).Label("开启刘海播放器")
+		// 「开启」是主色胶囊（原型 `.btn-primary.btn-sm`：32 高、左右 14、13 号 600）。
+		p := tok.Of(c.Theme())
+		b := ui.ButtonBase(c.Key("notch-keep")).Height(tok.BtnSmH).PaddingX(space.Px14).
+			Radius(tok.BtnSmH / 2).Background(p.Accent).AlignItems(ui.Center).Justify(ui.Center).
+			FocusRing(false).Label("开启刘海播放器")
 		b.Children(func() {
-			ui.Text(c, "开启").FontSize(scale.Font(c, scale.Size13)).FontWeight(600)
+			ui.Text(c, "开启").FontSize(scale.Font(c, scale.Size13)).FontWeight(notchTitleWeight).
+				TextColor(p.AccentInk).SingleLine()
 		})
 		if b.Clicked() {
 			s.notchKeep()
@@ -676,26 +664,33 @@ func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
 	})
 }
 
-// viewNotchIdle 是「没歌」那张卡：「未在播放」+「打开」。
+// viewNotchIdle 是「没歌」那张卡：「PudMusic / 未在播放」+「打开」。
+//
+// 原型的空闲态（没歌时）展开只有顶上那一行、没有卡片；这里多一张小卡是为了给「没歌也想
+// 回到应用」留一个入口——样式照展开卡的那一套（黑底、#ecebe8 / #a6a8ae、32 高的胶囊键）。
 func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 	if open < 0.02 {
 		return
 	}
 	n := &s.notchSt
+	p := tok.Of(c.Theme())
 	ui.Row(c).Absolute().Top(n.h0+4).Left(left).Width(notchIdleW).
 		Padding(space.Px10, space.Px20, space.Px14, space.Px20).Gap(space.Px12).AlignItems(ui.Center).
 		Opacity(max(0, open*1.4-0.4)).Children(func() {
-		ui.Box(c).Size(36, 36).Radius(10).Background(c.Theme().Accent).Center().Children(func() {
-			ui.Icon(c, icon(iconPlay)).Size(18, 18).TextColor(ui.RGB(255, 255, 255))
+		ui.Box(c).Size(36, 36).Radius(tok.R8).Background(p.Accent).Center().Shrink(0).Children(func() {
+			ui.Icon(c, pud.Icon("play")).FontSize(18).TextColor(p.AccentInk)
 		})
 		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-			ui.Text(c, appName).FontSize(scale.Font(c, scale.Size14)).FontWeight(700)
-			ui.Text(c, "未在播放").FontSize(scale.Font(c, scale.Size12)).TextColor(ui.RGBA(255, 255, 255, 0.5))
+			ui.Text(c, appName).FontSize(scale.Font(c, scale.Size14)).FontWeight(notchTitleWeight).
+				TextColor(tok.Full.Text)
+			ui.Text(c, "未在播放").FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Full.Text2)
 		})
-		b := ui.ButtonBase(c.Key("notch-open")).Padding(space.Px6, space.Px14).Radius(999).
-			Background(ui.RGBA(255, 255, 255, 0.14)).FocusRing(false).Label("打开")
+		b := ui.ButtonBase(c.Key("notch-open")).Height(tok.BtnSmH).PaddingX(space.Px14).
+			Radius(tok.BtnSmH / 2).Background(tok.Full.Hover).AlignItems(ui.Center).Justify(ui.Center).
+			FocusRing(false).Label("打开")
 		b.Children(func() {
-			ui.Text(c, "打开").FontSize(scale.Font(c, scale.Size13)).FontWeight(600)
+			ui.Text(c, "打开").FontSize(scale.Font(c, scale.Size13)).FontWeight(notchTitleWeight).
+				TextColor(tok.Full.Text).SingleLine()
 		})
 		if b.Clicked() {
 			s.restoreMainWindow()
@@ -703,95 +698,65 @@ func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 	})
 }
 
-// viewNotchExpanded 是展开的那张播放卡：封面 + 歌名/歌手 + 频谱 + 进度 + 控制。
+// viewNotchExpanded 是展开的那张播放卡（原型 `.notch-card`）：内边距 4 / 16 / 16，
+// 三列 56 / 1fr / auto、列间距 12、垂直居中——56 的封面（圆角 8）、歌名（14 号 600）
+// 加「歌手 · 时间」（12 号 #a6a8ae，时间等宽）、上一首 / 播放 / 下一首三枚 36 的图标键
+// （#ecebe8）。**没有进度条、没有频谱**：原型的刘海就是这一张小卡。
 func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float32) {
 	n := &s.notchSt
-	col := ui.Column(c).Absolute().Top(n.h0+6).Left(left).Width(notchOpenW).
-		Padding(space.Px8, space.Px22, space.Px16, space.Px22).Gap(space.Px12).
+	row := ui.Row(c).Key("notch-card").Absolute().Top(n.h0).Left(left).Width(notchOpenW).
+		Padding(space.Px4, space.Px16, space.Px16, space.Px16).Gap(space.Px12).AlignItems(ui.Center).
 		Opacity(max(0, open*1.4-0.4))
-	col.Translate(0, (1-open)*-10)
-	col.Children(func() {
-		// 上行：封面 + 歌名/歌手 + 频谱。
-		ui.Row(c).Gap(space.Px14).AlignItems(ui.Center).Children(func() {
-			cov := ui.Box(c).Size(60, 60).Radius(12).Clip()
-			if st.CoverURL == "" {
-				cov.Background(ui.RGBA(255, 255, 255, 0.12))
+	row.Translate(0, (1-open)*-10)
+	row.Children(func() {
+		cov := ui.Box(c).Size(notchCardCover, notchCardCover).Radius(tok.R8).Clip().Shrink(0)
+		if st.CoverURL == "" {
+			cov.Background(ui.RGB(34, 34, 34))
+		}
+		cov.Children(func() {
+			imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, notchCardCover, notchCardCover)
+		})
+		ui.Column(c).Key("notch-info").Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size14)).FontWeight(notchTitleWeight).
+				TextColor(tok.Full.Text).SingleLine()
+			sub := st.Artist
+			if st.Loading {
+				sub = "正在缓冲…"
 			}
-			cov.Children(func() {
-				imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, 60, 60)
-			})
-			ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
-				ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).SingleLine()
-				if st.Loading {
-					ui.Text(c, "正在缓冲…").FontSize(scale.Font(c, scale.Size13)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
-				} else if st.Artist != "" {
-					ui.Text(c, st.Artist).FontSize(scale.Font(c, scale.Size13)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
+			ui.Row(c).Key("notch-sub").MinWidth(0).Children(func() {
+				if sub != "" {
+					ui.Text(c, sub+" · ").FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Full.Text2).SingleLine()
 				}
+				typo.Mono(ui.Text(c, miniClock(st.Position))).FontSize(scale.Font(c, scale.Size12)).
+					TextColor(tok.Full.Text2).SingleLine()
 			})
-			s.viewNotchLevels(c, st, 26, 22, 5)
 		})
-		// 中行：进度。
-		ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size11)).
-				FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.5)).Width(30)
-			s.viewNotchProgress(c, st)
-			ui.Text(c, "-"+clockOrDash(st.Duration-st.Position)).FontSize(scale.Font(c, scale.Size11)).
-				FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.5)).Width(34).TextAlign(ui.End)
-		})
-		// 下行：控制键。
-		ui.Box(c).Margin(-6, space.None, space.None, space.None).Children(func() {
-			ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).Children(func() {
-				if flatIconButton(c, iconPrev, "上一首", 18).
-					Key("notch-prev").Size(28, 28).Padding(space.None, space.Px5).
-					Disabled(!s.app.CanPrev()).Clicked() {
-					s.app.Prev()
-				}
-				s.viewNotchPlay(c, st)
-				if flatIconButton(c, iconNext, "下一首", 18).
-					Key("notch-next").Size(28, 28).Padding(space.None, space.Px5).
-					Disabled(!s.app.CanNext()).Clicked() {
-					s.app.Next()
-				}
-			})
+		ink := tok.Full.Text
+		ui.Row(c).Key("notch-ctl").Shrink(0).Children(func() {
+			if pud.IconBtn(c, "notch-prev", "prev", "上一首", pud.IconOpts{Color: ink}).
+				Disabled(!s.app.CanPrev()).Clicked() {
+				s.app.Prev()
+			}
+			s.viewNotchPlay(c, st, ink)
+			if pud.IconBtn(c, "notch-next", "next", "下一首", pud.IconOpts{Color: ink}).
+				Disabled(!s.app.CanNext()).Clicked() {
+				s.app.Next()
+			}
 		})
 	})
 }
 
-// viewNotchPlay 是展开卡上那一枚播放/暂停键。
-func (s *Shell) viewNotchPlay(c *ui.Context, st app.State) {
-	const style = 36
+// viewNotchPlay 是展开卡上那一枚播放 / 暂停键：和另外两枚一样的图标键（原型里它在刘海里
+// 不画实心圆），取流时外面绕那一圈光（票 #271）。
+func (s *Shell) viewNotchPlay(c *ui.Context, st app.State, ink ui.Color) {
+	name := "play"
 	if st.Playing {
-		b := flatIconButton(c, transportIcon(true), transportLabel(true), 28).
-			Key("notch-play").Size(style, style).Padding(space.None, space.Px4)
-		b = s.withLoadHalo(c, b, st, 28, true)
-		if b.Clicked() {
-			s.app.Toggle()
-		}
-		return
+		name = "pause"
 	}
-	b := flatIconButton(c, transportIcon(false), transportLabel(false), 28).
-		Key("notch-play").Size(style, style).Padding(space.None, space.Px4).
-		Disabled(!st.HasTrack)
-	b = s.withLoadHalo(c, b, st, 28, st.HasTrack)
+	b := pud.IconBtn(c, "notch-play", name, transportLabel(st.Playing), pud.IconOpts{Color: ink}).
+		Disabled(!st.HasTrack && !st.Playing)
+	b = s.withLoadHalo(c, b, st, tok.IconHit, st.HasTrack)
 	if b.Clicked() {
 		s.app.Toggle()
-	}
-}
-
-// viewNotchProgress 是刘海窗的进度条（和迷你那条同一份 scrub 状态）。
-func (s *Shell) viewNotchProgress(c *ui.Context, st app.State) {
-	known := st.Duration > 0
-	sl := ui.Slider(c.Key("notch-progress"), &s.miniScrub, 0, 1).Grow(1).
-		Height(10).Label("播放进度").Disabled(!known)
-	sl = withChapterDotsCore(sl, st.Chapters, st.Duration)
-	switch held := sl.Pressed(); {
-	case held && !s.miniHeld:
-		s.miniHeld = true
-		s.app.ScrubStart()
-	case !held && s.miniHeld:
-		s.miniHeld = false
-		s.app.ScrubEnd(s.miniScrub)
-	case !s.miniHeld && known:
-		s.miniScrub = float64(st.Position) / float64(st.Duration)
 	}
 }

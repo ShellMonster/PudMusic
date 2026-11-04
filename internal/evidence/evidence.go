@@ -1596,13 +1596,13 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器：320×100 的透明置顶小窗（43）",
+		Spec:     "迷你播放器：380×194 的透明置顶小窗（43，原型 `.mini`）",
 		Tests: []string{
 			// 窗口那几个开关，含「不许装回 `DisableResize`」——`isMaximized` 恒为真
 			// 的话 `StateKey` 一条都存不下来，用户拖到哪都不会被记住。
 			// ⚠️ 这一条证的是**开关摆对了**，不是「真存下来了」：真落盘要真窗口
 			// （见本节末尾「真机才量得到」那条）。
-			"TestTheMiniWindowIsAtBiuNumbers",
+			"TestTheMiniWindowIsAtThePrototypeNumbers",
 			"TestTheMiniWindowParksInTheTopRightCorner",
 			// 透明窗口自己给了不透明底——不画的话它在桌面上是隐形的。
 			"TestTheMiniCardCoversTheWindow",
@@ -1628,23 +1628,13 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）、调音量",
+		Spec:     "迷你播放器里能换歌、上下一首（44）、拖进度条（45）（音量 / 静音入口按原型删掉）",
 		Tests: []string{
 			"TestTheMiniWindowStepsThroughTheQueue",
 			"TestDraggingTheMiniProgressSeeksOnlyOnRelease",
-			"TestTheMiniVolumeSliderSetsTheVolume",
 			// 静音在小窗里**看得出来**（票 #345）：滑块停在用户设的那一档
 			// （静音是它自己的一格），所以能说明「现在是静音」的只有那枚图标。
-			"TestTheMiniWindowShowsTheMuteState",
-			"TestClickingTheMiniMuteIconUnmutes",
-			"TestTheMiniMuteIconFollowsTheApp",
-			"TestTheMiniMuteIconSaysItIsMuted",
-			"TestTheMiniMuteIconMatchesThePlayBar",
 			"TestTheMuteGlyphDiffersFromTheLoudOne",
-			"TestTheMiniMuteStateSurvivesARestart",
-			"TestTheMiniMuteIconIsThereWithoutATrack",
-			"TestTheMiniVolumeTipSaysItIsMuted",
-			"TestTheMiniMuteIconSaysCancelMuteWhenThereIsNoSound",
 			// 小窗里认的是**用户配的那一份**而不是出厂默认值；以及在小窗里按
 			//「切换mini/完整模式」是关掉而不是再开一个。
 			// （设置页写着「窗口在前台时按它就有用」，而小窗是最常停在前面的那一扇。）
@@ -1669,9 +1659,12 @@ var Items = []Item{
 	},
 	{
 		Category: Platform,
-		Spec:     "迷你播放器这一块本身：装得下 320×84、那几枚键是图标键（框对、图形在）、控件身份稳（铁律四）",
+		Spec:     "迷你播放器这一块本身：封面 / 控制行 / 进度行按原型的格子摆（TestTheMiniCoverIsSeventyTwoAtTheCardPadding、TestTheMiniControlsFollowThePrototypeGrid）、没有控件掉出窗口、那几枚键是图标键（框对、图形在）、控件身份稳（铁律四）",
 		Tests: []string{
-			"TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour",
+			"TestTheMiniCardKeepsEverythingInsideTheWindow",
+			"TestTheMiniWindowIsTheCardSize",
+			"TestTheMiniCoverIsSeventyTwoAtTheCardPadding",
+			"TestTheMiniControlsFollowThePrototypeGrid",
 			"TestTheMiniKeysAreIcons",
 			"TestTheMiniControlsKeepTheirIdentityWhenTheLabelChanges",
 		},
@@ -4235,14 +4228,13 @@ var Items = []Item{
 		// 报错**，界面只是「不好用」。
 		Category: Platform,
 		// 票 #244（UX 报告 §2 的 D1 / B5 / B6 / E1 / E2）。
-		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；迷你窗的音量滑块**有悬停提示**（而且那枚提示**看得见**）；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #337 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
+		Spec: "布局一批：设置页每一行的说明和控件之间**不空着几百像素**；「全部播放」在两个页面上是**同一枚**（画法统一；语义是票 #337 拍板的那一条）；列表里的**超长歌名不占满整行中段**；**深色下的封面有边**（不再和行的底色融成一片）",
 		Tests: []string{
 			// 设置页那一段空档（1200 / 900 两档窗口，量的是画面上的字迹）。
 			// **字号放大时说明不折行**（1.0 / 1.25 / 1.4 / 1.5 / 1.75 五档）——
 			// 折行会让整行变高、右边那列控件往下挪半格。
 			// 迷你窗音量滑块那枚提示：它在，而且**在窗内**（窗只有 320×100，
 			// 而滑块在第一行——摆在上面的话整个提示落在窗外）。
-			"TestTheMiniVolumeSliderSaysWhatItIs",
 			// 两个页面上那两枚按钮是同一枚（盒子一模一样）。
 			"TestThePlayAllButtonIsTheSameOnBothPages",
 			// 两个页面上按下去，进去队列的都是这一页的歌。
@@ -4759,12 +4751,11 @@ var Items = []Item{
 		// 记在 `internal/ui/miniplayer_test.go` 末尾那一节「真窗口才量得到」
 		// 里（人工清单，不在台账里装）。
 		Category: Platform,
-		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 「···」菜单三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
+		Spec:     "迷你播放器点封面展开歌词卷帘（点封面 / Esc / 歌词键三条路都收；开关默认开着，关着时点封面什么也不发生；展开着时把开关关掉 ⇒ 立刻收起）",
 		Tests: []string{
 			// 展开 / 收起的三条路（封面 / 「···」菜单 / Esc）。
 			"TestTheMiniCurtainOpensWhenTheCoverIsClicked",
 			"TestTheMiniCurtainClosesWhenTheCoverIsClickedAgain",
-			"TestTheMiniCurtainClosesFromTheMenu",
 			"TestTheMiniCurtainClosesWithEscape",
 			// 窗口高度 = 84 + 卷帘高（那一扇窗是透明的，多出来的那一块照样吃
 			// 点击）。
@@ -4802,7 +4793,7 @@ var Items = []Item{
 			"TestTheMiniCurtainRollsUpWithoutBouncing",
 			// - 两张板独立：卡片和歌词板之间有一条缝，缝里有一个指向封面的
 			//   小三角。
-			"TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard",
+			"TestTheMiniCurtainIsInsideTheCardWithoutAGap",
 			// - 激活失败了就再试（F1 那个判据）。
 			"TestTheMiniCurtainRetriesTheActivation",
 			// - 展开到一半就收起：**不许先长高**（换目标 = 速度归零）。

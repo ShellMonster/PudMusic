@@ -12,12 +12,12 @@
 //  1. **窗口高度必须严格等于内容高度**。这一扇窗是**透明**的
 //     （`MiniWindowOptions` 的 `Transparent: true`），而透明的那一块
 //     **照样吃点击**——窗比内容高 20 像素，底下那个应用的按钮就点不到
-//     那 20 像素。⇒ 窗口高度 = 84 + 卷帘高度，**每一帧都跟着动画走**。
-//  2. **收起时的尺寸要落盘成 84**。`StateKey: "mini-player"` 会把**宽高
+//     那 20 像素。⇒ 窗口高度 = 194 + 卷帘高度，**每一帧都跟着动画走**。
+//  2. **收起时的尺寸要落盘成 194**。`StateKey: "mini-player"` 会把**宽高
 //     也记进去**（`mygo/window_state.go:196` 的 `captureState`），而抓状态
 //     是在关窗那一刻（`closeState()`）。⇒ 收起 / 关窗 / 退出三条路都要先
-//     把窗高改回 84 再关，否则下次开出来是个 320×320 的透明大窗。
-//  3. **卷帘不能长出工作区**。窗被用户拖到屏幕下半部时，往下长 236 会出屏
+//     把窗高改回 194 再关，否则下次开出来是个 380×414 的透明大窗。
+//  3. **卷帘不能长出工作区**。窗被用户拖到屏幕下半部时，往下长 220 会出屏
 //     ⇒ 高度按**那扇窗所在显示器的工作区**夹住（`WorkArea`）。
 //
 // # 主触发是「点一下」，不是「移上去」
@@ -37,7 +37,7 @@
 //
 //   - 点封面**什么也不发生**（不报错、不弹一下、不改高度）——那档里这一整套
 //     代码压根不该被触发；
-//   - 展开着的时候把开关关掉 ⇒ **立刻收起**（迷你窗回到 320×84）。
+//   - 展开着的时候把开关关掉 ⇒ **立刻收起**（迷你窗回到 380×194）。
 //
 // 「立刻收起」怎么做到：设置改完之后 `App.UpdateSettings` → `a.invalidate()`
 // **挨个叫醒每个窗口**（铁律三），迷你窗下一帧读到的设置已经是关的 ⇒ 收起。
@@ -49,44 +49,28 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	// miniCurtainH 是歌词板展开时的高度。
-	//
-	// ⚠️ **400 按目标图的形状**：歌词板在 320 宽里竖着摆「当前句居中」的一
-	// 屏——比旧卷帘的 236 高出一截（旧版是「当前句贴下沿」，只看得见历史句；
-	// 这一版要同时装下上面那几句历史、中间放大的当前句和下面那几句未来）。
+	// miniCurtainH 是卷帘展开时的高度（原型 `.curtain.open { height: 220px }`），
+	// **含**顶上那 1 像素分隔线。卷帘是卡片里面的一段，不是独立的板。
 	//
 	// ⚠️ **它是「最多」而不是「总是」**：实际高度按工作区夹住（见
 	// `miniCurtainHeight`），而夹出来的那个数还受 `miniCurtainMinH` 那一道
 	// 门限管着（放不下就不展开，见那个常量的注释）。
-	miniCurtainH = 400
+	miniCurtainH = 220
 
-	// miniCurtainMinH 是歌词板**最少**有多高才值得展开。
+	// miniCurtainMinH 是卷帘**最少**有多高才值得展开。
 	//
 	// ⚠️ **放不下就不展开**：这一扇窗是透明的，而**透明的那一块照样吃点击**
 	// ——窗长高 30 像素，底下那个应用的按钮就点不到那 30 像素。所以「只剩
-	// 这么点地方」的时候宁可**什么都不做**（用户看不出来少了什么），也不要
-	// 拉出一条又窄又矮、还挡着底下应用的歌词板。
-	//
-	// 200 是「当前句居中之后还读得出上下文」的下限：当前句放大到 19.5，
-	// 上下各还能留三四行普通句（13px 一行约 18）。
-	miniCurtainMinH = 200
-
-	// miniCurtainGap 是卡片底边到歌词板顶边那一条**缝**的高。
-	//
-	// ⚠️ **它照吃点击**（这一扇窗是透明的）：那一条缝里没有内容，而透明
-	// 的那一块照样拦底下应用的点击——这是换「独立歌词板」这个外观接受
-	// 的代价（票 #536 那个「两张板拼成一块」的旧版就是为了消这条缝）。
-	//
-	// ⚠️ **小三角住在缝里**（`viewMiniCurtainArrow`）：10 正好容下一个
-	// 6px 高的三角 + 上下各 2 的留空。
-	miniCurtainGap = 10
+	// 这么点地方」的时候宁可**什么都不做**，也不要拉出一条又窄又矮、还挡着底下
+	// 应用的歌词区。140 是「当前句居中之后还读得出上下文」的下限。
+	miniCurtainMinH = 140
 
 	// miniCurtainResizeQuiet 是「外因 resize（用户拖窗缘）停下多久」算用户
 	// 松手了（Bug 2a）。
@@ -99,12 +83,12 @@ const (
 	// 卷帘几乎立刻接着走。
 	miniCurtainResizeQuiet = 150 * time.Millisecond
 
-	// miniPanelAlpha 是两张板（卡片 / 歌词板）底色的不透明度。
+	// miniPanelAlpha 是卡片底色的不透明度。
 	//
 	// ⚠️ **0.88**：这一扇窗开了毛玻璃（`MiniWindowOptions.Vibrancy`），
 	// 全不透的底（1.0）会把糊完的桌面整个盖掉，而太透（<0.8）字就压不住
-	// 桌面——0.88 是「字读得清、桌面又透得出」的那一档（视觉审查按目标图
-	// 那个磨砂感取的）。
+	// 桌面——0.88 是「字读得清、桌面又透得出」的那一档。原型是不透明的
+	// surface；保留毛玻璃是任务明确要求保留的行为。
 	miniPanelAlpha = 0.88
 
 	// miniCurtainMargin 是卷帘底边离工作区底边留的那一道。
@@ -128,19 +112,25 @@ const (
 	// 永远 ≤ 目标，见 `minicurtain_spring.go` 的文件头）。
 	miniCurtainDuration = 240 * time.Millisecond
 
-	// miniCurtainFontSize 是卷帘那一档的歌词字号。
+	// miniCurtainFontSize 是卷帘里的歌词字号（原型 `.curtain .ly`：16）。
 	//
-	// ⚠️ **13 不是用户偏好里那个字号**（`LyricsSnapshot.FontSize`，12~48）：
-	// 满屏那一屏在 1200 宽的窗里，20px 的字一行十几个；而卷帘只有 320 宽，
-	// 20px 的字（当前行 ×1.5 = 30px）一行只有**十个**字——一屏三行就没了。
-	// 13px（当前行 19.5px）是 BMG-280 §10.2 第 7 条给的那一档。
-	//
-	// ⚠️ **它不跟用户的字号偏好走**，而用户偏好**也不该**跟它走：卷帘是
-	// 「一直挂在桌面上的一小块」，字号太大就挤不下了。
-	miniCurtainFontSize = scale.Size13
+	// ⚠️ **它不跟用户偏好里那个字号走**（`LyricsSnapshot.FontSize`，12~48）：
+	// 卷帘是「一直挂在桌面上的一小块」，字号太大就挤不下了。当前句放大 1.08 倍
+	// （`miniCurtainActiveScale`）。
+	miniCurtainFontSize = scale.Size16
 
-	// miniCurtainPadX 是卷帘里歌词那一列左右那一份内边距。
-	miniCurtainPadX = space.Px12
+	// miniCurtainActiveScale 是当前句的放大倍数（原型 `.curtain .ly.cur`）。
+	miniCurtainActiveScale = 1.08
+
+	// miniCurtainLineH 是每一句的行高（原型里 `.ly` 的行高 1.5 × 16 = 24；加上下各 6
+	// 的内边距，句与句之间正好隔 36）。
+	miniCurtainLineH = 24
+
+	// miniCurtainLinePadY 是每一句上下各留的内边距（原型 `.curtain .ly { padding: 6px 0 }`）。
+	miniCurtainLinePadY = space.Px6
+
+	// miniCurtainPadX 是卷帘里歌词那一列左右的内边距（原型 `.lyrics-inner` 的 20）。
+	miniCurtainPadX = space.Px20
 
 	// miniCurtainFocusWindow 是「把键盘抢到迷你窗这一扇」那一段的**窗口**
 	// （毫秒）。
@@ -177,6 +167,9 @@ const (
 	// miniCurtainAreaKey 是卷帘里歌词区那一块的键（铁律四）。
 	miniCurtainAreaKey = "mini:curtain:area"
 
+	// miniCurtainLineKey 是卷帘顶上那条 1 像素分隔线的键。
+	miniCurtainLineKey = "mini:curtain:line"
+
 	// miniCurtainEmptyKey 是「暂无歌词」那一块的键（铁律四）。
 	miniCurtainEmptyKey = "mini:curtain:empty"
 
@@ -189,17 +182,8 @@ const (
 	// miniCurtainCoverKey 是封面那一列（**展开 / 收起的触发器**）的键。
 	miniCurtainCoverKey = "mini:curtain:cover"
 
-	// miniCurtainMenuKey 是歌词板右上角「···」那一枚的键。
-	miniCurtainMenuKey = "mini:curtain:menu"
-
 	// miniCurtainBodyKey 是卷帘里「歌词 / 空状态」那一块的键。
 	miniCurtainBodyKey = "mini:curtain:body"
-
-	// miniCurtainOriginKey 是卷帘左上角「歌词来自 B 站」那一行的键。
-	miniCurtainOriginKey = "mini:curtain:origin"
-
-	// miniCurtainArrowKey 是缝里那个指向封面的小三角的键（铁律四）。
-	miniCurtainArrowKey = "mini:curtain:arrow"
 )
 
 // miniCurtainFocusState 是「把键盘抢到迷你窗这一扇」那一档的状态（票 #307
@@ -235,7 +219,7 @@ type miniCurtainFocusState struct {
 //   - height 是**这一帧画出来多高**（弹簧算出来的那个值）；
 //   - target 是**这一帧窗该有多高**（动画到位之后 = 展开高）。
 //
-// 把 open 当 height 用的话，收起动画的第一帧窗就一下子缩回 84——而那一帧
+// 把 open 当 height 用的话，收起动画的第一帧窗就一下子缩回 194——而那一帧
 // 卷帘还画着 80 高，**窗比内容矮**（卷帘的下半截被裁掉）；把 height 当
 // open 用的话，动画走一半时再点一次封面会「再展开一次」而不是收起。
 type miniCurtainState struct {
@@ -250,7 +234,7 @@ type miniCurtainState struct {
 	// 只发生在 `p` 上，而 `height` 永远 ≤ 目标（见 `minicurtain_spring.go`）。
 	height float32
 
-	// target 是**窗该有多高**（= 84 + 卷帘高）。它在点开之前算好
+	// target 是**窗该有多高**（= 194 + 卷帘高）。它在点开之前算好
 	// （点开那一刻就要知道能长多高），在收起期间保持不变。
 	target int
 
@@ -278,13 +262,13 @@ type miniCurtainState struct {
 	// 🔴 **它管的是拉锯**：动画期每一帧 `miniCurtainSyncHeight` 都
 	// `SetSize(want)`——而迷你窗**故意可缩放**（`MiniWindowOptions` 不给
 	// `DisableResize`，拖宽拖高是位置记忆那一半的前提）。用户在动画期拖
-	// 窗缘：原生把高改成 200 → 下一帧弹簧把它拽回「84 + 比例 × 全开」→
+	// 窗缘：原生把高改成 200 → 下一帧弹簧把它拽回「194 + 比例 × 全开」→
 	// 原生 `windowDidResize:` 又报一次 → 再拽回去…… 60Hz 的拉锯，窗高
 	// 在两个值之间抖。
 	//
 	// ⇒ 「报上来的高度 ≠ 我们最近 `SetSize` 的那个」⇒ 那是用户拖的：
 	// 这一帧起**暂停对窗写 `SetSize`**，并把弹簧**钉在用户拖到的高度上**
-	// （`holdAt`）——松手之后从那儿接着走，不是从半路「跳回 84 再展开」。
+	// （`holdAt`）——松手之后从那儿接着走，不是从半路「跳回 194 再展开」。
 	//
 	// ⚠️ **它是「最近一次外因 resize 的时刻」**：`zero` = 没在抢。而「松手」
 	// 按「外因 resize 静默了 `miniCurtainResizeQuiet`」判（框架没有现成的
@@ -327,18 +311,18 @@ func miniCurtainEnabled(st app.Settings) bool {
 // 窗现在的位置（**只有 X/Y 用得上**，见下面那一段）。
 //
 // ⚠️ **只有往下这一边会不够**：卷帘是往**下**长的，而窗的左右两边它一个
-// 像素都不占（宽度还是 320）。
+// 像素都不占（宽度还是 380）。
 //
 // ⚠️ **不够就不展开**（返回 0）：透明窗多出来的那一块照样吃点击，而一条
 // 只有几十像素高的卷帘既读不出歌词又挡着底下的应用——那比不展开更坏。
 //
 // 🔴 **量的是「卡片底下」到工作区底边，不是「窗底下」**：
 //
-// 迷你窗是**上下两段**（`viewMini`）：上面那 84 高是卡片（那个
+// 迷你窗是**上下两段**（`viewMini`）：上面那 194 高是卡片（那个
 // `Height(miniHeight)` 的 Row），卷帘挂在它**下面**。⇒ 卷帘能长多高，量
 // 的是**卡片底下**到工作区底边还剩多少。
 //
-// ⚠️ **为什么不能拿窗现在的高度去量**：窗展开着的时候高度是「84 + 卷帘
+// ⚠️ **为什么不能拿窗现在的高度去量**：窗展开着的时候高度是「194 + 卷帘
 // 高」——拿那个底边去量，量到的是「卷帘自己已经占掉的那一块」⇒ 目标高度
 // 一级一级往下掉（屏幕上显示高度一变，卷帘就越缩越短，最后缩成 0）。而
 // 「那块屏改了分辨率」正是最容易触发它的那一下（票 #555）。
@@ -348,10 +332,10 @@ func miniCurtainHeight(work mygo.Rectangle, win mygo.Rectangle) int {
 	}
 	// 卡片底到工作区底边还剩多少（底下留一道 12 的边距）。
 	//
-	// ⚠️ **卡片永远是 84 高**（`miniHeight`）：用户可以把窗往高里拖（迷你窗
-	// 故意没给 `DisableResize`），而卡片那一段是钉死 84 的——多出来的那一块
+	// ⚠️ **卡片永远是 194 高**（`miniHeight`）：用户可以把窗往高里拖（迷你窗
+	// 故意没给 `DisableResize`），而卡片那一段是钉死 194 的——多出来的那一块
 	// 是面板自己的底（不透明，不吃点击的那种空，见 `viewMini`）。
-	down := work.Y + work.Height - (win.Y + miniHeight + miniCurtainGap) - miniCurtainMargin
+	down := work.Y + work.Height - (win.Y + miniHeight) - miniCurtainMargin
 	if down < miniCurtainMinH {
 		return 0
 	}
@@ -668,7 +652,7 @@ func (s *Shell) miniCurtainWorkAreaOf(w miniWindow) mygo.Rectangle {
 	return w.WorkArea()
 }
 
-// miniCurtainCollapse 收起卷帘：窗高回到 84。
+// miniCurtainCollapse 收起卷帘：窗高回到 194。
 //
 // **幂等**（收着的时候再调一次什么也不做）。
 func (s *Shell) miniCurtainCollapse(now time.Time) {
@@ -678,15 +662,15 @@ func (s *Shell) miniCurtainCollapse(now time.Time) {
 	// 而那时候卷帘已经收着了，用户根本没在用它。
 	s.miniCurtainWantsKey = false
 	if !s.miniCurtain.open && s.miniCurtain.height <= 0 {
-		// 已经收着了。⚠️ **但窗高还是得钉回 84**：上一次收起的动画中途窗被
+		// 已经收着了。⚠️ **但窗高还是得钉回 194**：上一次收起的动画中途窗被
 		// 拖走了、或者展开到一半窗被关掉，收起这一句没走完——窗就留在一个
-		// 高于 84 的状态，而 `StateKey` 会把那个高度记下来。
+		// 高于 194 的状态，而 `StateKey` 会把那个高度记下来。
 		s.miniCurtainSetHeight(miniHeight)
 		return
 	}
 	s.miniCurtain.open = false
 	// ⚠️ **弹簧朝 0 走**（票 #307）：收起是**过阻尼**的（ζ = 1.1）⇒ 一路
-	// 收回 84，中间**没有过冲**（而「不弹」是票面点名要的）。
+	// 收回 194，中间**没有过冲**（而「不弹」是票面点名要的）。
 	//
 	// ⚠️ **弹簧的 `p` 还在 1**（它是从那儿往 0 走的）——而画出来的高度
 	// 一路上都在缩，窗也跟着缩 ⇒ **每一帧窗高 == 内容高**。
@@ -722,7 +706,7 @@ func (s *Shell) miniCurtainCollapseNow() {
 	// ⚠️ **下一次点开会重算**（`miniCurtainToggle` 里那句 `target = h`）。
 	s.miniCurtain.target = 0
 	// ⚠️ **弹簧也要归零**：只把 `height` 归零的话，下一帧那个弹簧会从 1
-	// 往 0 走——窗于是**先弹回 320 再缩到 84**，那几百毫秒里窗比内容高
+	// 往 0 走——窗于是**先弹回 414 再缩到 194**，那几百毫秒里窗比内容高
 	// （透明的那一块在吃点击），而票面要的是「**立刻收起**」。
 	s.miniCurtain.spring.reset()
 	s.miniCurtainSetHeight(miniHeight)
@@ -730,7 +714,7 @@ func (s *Shell) miniCurtainCollapseNow() {
 
 // miniCurtainSetHeight 把这一扇窗的高度改成 h（**宽度不动**）。
 //
-// ⚠️ **宽度取窗现在那个宽**，不写死 320：用户可以把窗往宽拖（迷你窗故意
+// ⚠️ **宽度取窗现在那个宽**，不写死 380：用户可以把窗往宽拖（迷你窗故意
 // 没有 `DisableResize`，理由见 `MiniWindowOptions`），而卷帘是**贴在窗的
 // 下面**的——窗多宽卷帘就多宽。
 //
@@ -753,12 +737,12 @@ func (s *Shell) miniCurtainSetHeight(h int) {
 //
 // ⚠️ **它为什么存在**：卷帘要改的是**窗的原生尺寸**，而无头 Tester 里**没有
 // 真窗口**（`mygo.NewWindow` 在应用没 ready 时直接 panic，
-// `mygo/window.go:382`）。于是「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘的
-// 是 320×84」这条**在无头那一档量不到**。
+// `mygo/window.go:382`）。于是「关窗之前把窗高改回 194 ⇒ `StateKey` 落盘的
+// 是 380×194」这条**在无头那一档量不到**。
 //
 // ⇒ 抽这一层接口，生产实现是 `*mygo.Window`，而测试实现是一个**假窗**
 // （记住最后一次 `SetSize`，能手动触发 `OnClose`）。这样「关窗钩子有没有把
-// 高度改回 84」就变成**可测的**——而**删掉那个钩子，这条用例必须红**。
+// 高度改回 194」就变成**可测的**——而**删掉那个钩子，这条用例必须红**。
 //
 // ⚠️ **别把 `s.win` 的类型整个换掉**：`s.win` 在十几处被当 `*mygo.Window`
 // 用（`platform.RestoreFromBackground(s.win)` 那一类），换类型会波及一大片
@@ -857,34 +841,16 @@ func (s *Shell) miniWindow() miniWindow {
 	return s.miniWin
 }
 
-// miniCurtainWinHeight 报「这一帧窗该有多高」（Bug 1：缝跟着板高渐出）。
+// miniCurtainWinHeight 报「这一帧窗该有多高」：卡片收起的 194 加上卷帘这一帧的高度。
 //
-// h 是**这一帧画出来的板高**（动画值，`s.miniCurtain.height`）。
-//
-// 🔴 **缝跟着板高渐出**：窗高 = 84 + 缝 + 板高——而**缝那 10 个像素在板
-// 快收完的时候才彻底消失**。旧版是 `h > 0` 就整段加 10：收尾那一帧板只剩
-// 1.8px 而缝还是满的，`1.8 + 10` 一帧砍掉 12px（前面每一步才掉 1~3px），
-// 用户看到的就是「缩到一半忽然跳一下」。
-//
-// ⇒ **缝按板高渐出**：`g = min(miniCurtainGap, h)`——板比缝还高的时候缝是
-// 满的（`miniCurtainGap`），板比缝矮的时候缝跟着它缩（`h`）。
-//   - 收尾那几帧：板 1.8 → 缝 1.8，窗高 = 84 + 3.6 → 掉 ~4px（不是 12）；
-//   - 板全开的时候：缝还是满的 10（窗高 = 84 + 10 + 板高），和旧版一样。
-//
-// ⚠️ **它和「画哪一段」是两件事**：`viewMiniCurtain` 只在 `h > 0` 的时候画
-// ——缝那一段（`viewMiniCurtainArrow`）是画在「板高 > 0 的那段区间上」的；
-// 而这里算的是**窗该有多高**——窗 = 卡片 + 缝 + 板，缝渐出不影响「缝里画
-// 不画三角」（三角只在板已经长出来的时候看得见）。
+// h 是**这一帧画出来的卷帘高**（动画值，`s.miniCurtain.height`，含顶上那条分隔线）。
+// 卷帘在卡片里面，没有缝，所以窗高就是 `miniHeight + h`——窗高必须严格等于内容高
+// （文件头第 1 条）。
 func miniCurtainWinHeight(h float32) int {
 	if h <= 0 {
 		return miniHeight
 	}
-	// 板比缝矮的时候，缝跟着它缩（`miniCurtainGap` 之上不取）。
-	g := int(h + 0.5)
-	if g > miniCurtainGap {
-		g = miniCurtainGap
-	}
-	return miniHeight + g + int(h+0.5)
+	return miniHeight + int(h+0.5)
 }
 
 // miniCurtainTargetHeight 是这一帧**窗该有**多高。
@@ -896,10 +862,10 @@ func (s *Shell) miniCurtainTargetHeight() int {
 	if h <= 0 {
 		return miniHeight
 	}
-	return miniHeight + miniCurtainGap + h
+	return miniHeight + h
 }
 
-// miniCurtainFullHeight 报卷帘**全开**时有多高（像素，**不含**那 84）。
+// miniCurtainFullHeight 报卷帘**全开**时有多高（像素，**不含**那 194）。
 //
 // ⚠️ **它跟「开着还是收着」是两件事**（票 #307 的坑）：收起的那一下
 // `s.miniCurtain.open` **立刻**就变成 false 了（那是「用户的意图」），而
@@ -928,7 +894,7 @@ func (s *Shell) miniCurtainFullHeight() int {
 }
 
 // miniCurtainSyncHeight 把卷帘高度那个**弹簧**推一帧，并把窗口高度改成
-// 「84 + 这一帧的卷帘高」。
+// 「194 + 这一帧的卷帘高」。
 //
 // ⚠️ **它每帧都要调**（`viewMini` 开头那一支），因为两样东西都在动：
 // 弹簧在动，而**窗口高度必须跟着它动**——这一扇窗是透明的，而透明的那
@@ -1000,11 +966,11 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	//
 	// ⚠️ **它返回的是「画出来的高度」**（0~1），不是弹簧内部那个 `p`——
 	// 过冲被翻成「回弹时略微缩回去一点」（镜像），所以这个值**永远 ≤ 1**
-	// ⇒ **窗高永远 ≤ 84 + 卷帘高**（文件头第 1 条那条坑不会回来）。
+	// ⇒ **窗高永远 ≤ 194 + 卷帘高**（文件头第 1 条那条坑不会回来）。
 	//
 	// ⚠️ **「立刻收起」那一下已经把弹簧钉到 0 了**（`miniCurtainCollapseNow`
 	// 里 `spring.p = 0` / `spring.v = 0` / `moving = false`）——所以这里推
-	// 出来的是 0，而**窗于是这一帧就已经是 84**，不会「先弹回 320 再缩」。
+	// 出来的是 0，而**窗于是这一帧就已经是 194**，不会「先弹回 414 再缩」。
 	//
 	// ⚠️ **目标高度（像素）先算出来**：弹簧走的是**相对量**（0~1），而窗高
 	// 是**像素**——所以「这一帧该多高」= 比例 × 目标像素高。
@@ -1013,7 +979,7 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	// ⚠️ **全开高跟「开着还是收着」无关**（票 #307 的坑）：收起的那一下
 	// `open` **立刻**就变成 false 了，而**卷帘还要再花几百毫秒才缩回 0**。
 	// ⇒ 基数是 `miniCurtainFullHeight`（**不**是 `miniCurtainTargetHeight`
-	// ——后者在收着的时候是 84，拿它当基数，收起就变成「一帧消失」）。
+	// ——后者在收着的时候是 194，拿它当基数，收起就变成「一帧消失」）。
 	//
 	// ⚠️ **比例是 0 的时候不必问原生**（`miniCurtainFullHeight` 会问）：
 	// 比例 0 ⇒ 高度 0 ⇒ 与基数无关。
@@ -1075,127 +1041,30 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	}
 }
 
-// viewMiniCurtain 画「缝 + 歌词板」那两段（迷你卡片下面）。
+// viewMiniCurtain 画卡片里面的歌词卷帘（原型 `.curtain`）：顶上 1 像素 `line` 分隔线，
+// 下面是歌词区。h 是**这一帧**卷帘的总高（动画值，含那条线）。
 //
-// h 是**这一帧**歌词板该有多高（动画值）。
-//
-// ⚠️ **h <= 0 的时候一个字都不画**：窗高已经回到 84，而这一段要是还画着，
-// 窗就比内容矮——下半截歌词板被裁掉，而裁掉的那一截在命中链里**还在**
-// （框架的命中链是按上一帧的盒子算的），于是用户按到的是一块看不见的东西。
-//
-// ⚠️ **缝和歌词板是两段，不是一块**：缝（`miniCurtainGap`）是**透明**的
-// ——它里面只有一个指向封面的小三角，而透明的那一块照样吃点击（这是换
-// 「独立歌词板」这个外观接受的代价，见 `viewMini` 那一段长注释）。
-func (s *Shell) viewMiniCurtain(c *ui.Context, st app.State, t *ui.Theme, cardBG ui.Color, h float32) {
+// ⚠️ **h <= 0 的时候一个字都不画**：窗高已经回到 194，而这一段要是还画着，
+// 窗就比内容矮——下半截被裁掉，而裁掉的那一截在命中链里**还在**（框架的命中链是按
+// 上一帧的盒子算的），于是用户按到的是一块看不见的东西。
+func (s *Shell) viewMiniCurtain(c *ui.Context, st app.State, t *ui.Theme, p tok.Palette, h float32) {
 	if h <= 0 {
 		return
 	}
-	// 缝：透明、里有一个小三角。
-	//
-	// ⚠️ **它不画底**（缝就是窗的透明区）——画一块底的话，缝就成了「一段
-	// 半透明的带」，而不是「两块板之间的空当」。
-	//
-	// 🔴 **缝里那一段的高度跟着窗的缝渐出**（`miniCurtainWinHeight`）：窗高
-	// 是「84 + min(缝, 板) + 板」，而这里排的是「84 + 缝这一块 + 板」——
-	// 缝这一块还按常数 10 排的话，板快收完那几帧「内容比窗高」，板尾被
-	// 裁到窗外去（P2 审查抓到的那条）。所以缝的高按同一个 `min(gap, 板)`
-	// 取——三角只在缝还容得下它的时候画。
-	s.viewMiniCurtainArrow(c, cardBG, h)
-	// 🔴 **歌词板是一张独立的圆角板**（不是旧版「从卡片底下拉出来的一段」）：
-	// 四角全圆、自己画底、自己带影——它和卡片之间那条缝是**窗的透明区**。
-	//
-	// ⚠️ **宽度是 100% 而不是写死 320**：窗可以往宽拖（迷你窗故意没有
-	// `DisableResize`），而歌词板是贴在窗下面的——窗多宽它就多宽。
-	shadow.Popover(
-		ui.Box(c).Key(miniCurtainAreaKey).
-			FillWidth().Height(h).
-			// ⚠️ **四角全圆**（`t.Radius`）：它不是「从卡片底下拉出来的」，
-			// 于是没有「上面两个角跟着卡片、下面两个角方」那笔账——**四边
-			// 都是一张独立的板**。
-			Radius(t.Radius).
-			// ⚠️ **底是半透明的**（`miniPanelAlpha`）：和卡片同一档——全不透
-			// 会把糊完的桌面整个盖掉。
-			Background(cardBG).Clip().
-			// ⚠️ **名字挂在这块上**：读屏软件念得出「迷你播放器歌词」，而
-			// 无头 Tester 也靠它量歌词板那一块的框。
-			Label("迷你播放器歌词").
-			// ⚠️ **它也是拖动区**：迷你窗是 frameless 的，没有标题栏——用户要
-			// 能从歌词板上把窗拖走（上面那张卡片上的拖动区在 84 高那一段，而
-			// 展开之后用户的手多半落在歌词板这一块上）。
-			DragWindow().
-			Children(func() {
-				snap := s.app.Lyrics()
-				s.viewMiniCurtainBody(c, st, snap, t, h)
-				// ⚠️ **「歌词来自 B 站」与「···」那两枚是歌词板的**绝对定位**
-				// 孩子**（票面）：它**不能**占歌词区的高度——
-				//
-				// 歌词区的高度是「当前句居中」那个算法里的一个数，而那个数
-				// 得是**正好**的（上下那两段居中留白要等于它）。⇒ 说明句和
-				// 菜单钮只能**画在歌词区外面**。
-				s.viewMiniCurtainOrigin(c, snap, t)
-				s.viewMiniCurtainMenu(c, t)
-			}),
-		t)
+	ui.Column(c).Key(miniCurtainAreaKey).FillWidth().Height(h).Clip().
+		// ⚠️ **名字挂在这块上**：读屏软件念得出「迷你播放器歌词」，而
+		// 无头 Tester 也靠它量卷帘那一块的框。
+		Label("迷你播放器歌词").Children(func() {
+		ui.Box(c).Key(miniCurtainLineKey).FillWidth().Height(1).Background(p.Line)
+		snap := s.app.Lyrics()
+		s.viewMiniCurtainBody(c, st, snap, t, p, h-1)
+	})
 }
 
-// miniCurtainCoverLabel 是封面那一列（触发器）读屏念的名字。
+// viewMiniCurtainBody 是卷帘里面那一块：歌词（或者「暂无歌词」）。
 //
-// ⚠️ **它跟着 open 走**：这一版封面列是**唯一的指针收起路**——卷帘展开的
-// 时候它还叫「展开歌词」的话，读屏用户听到的和按下去的结果正好相反。
-func miniCurtainCoverLabel(open bool) string {
-	if open {
-		return "收起歌词"
-	}
-	return "展开歌词"
-}
-
-// viewMiniCurtainArrow 画缝里那个指向封面列的小三角。
-//
-// ⚠️ **它是「这一段是歌词板的」的视觉证据**：独立的两块板之间没有别的
-// 联系，那一枚三角告诉用户「下面这一块是从这张卡片里拉出来的」。
-//
-// ⚠️ **它在缝的正中间**（`miniCurtainGap` 高 10），横着对准封面列的中线
-// （`miniCoverCol` 84 ⇒ 中线在 42），色是歌词板那个底（`cardBG`）。
-//
-// ⚠️ **它是实心三角而不是那枚 `arrow-drop-up` 图标**：图标集里那一枚是
-// 两笔拼成的**空心折线** ⌃（line 版），在 12px 里只剩两条一像素出头的
-// 细线——目标图要的是 popover 那种**实心**的指向尾巴。这里没有现成的实心
-// 三角图标，于是自己画（`Painter.FillPath`）。
-func (s *Shell) viewMiniCurtainArrow(c *ui.Context, cardBG ui.Color, boardH float32) {
-	// 🔴 **缝这一块的高是「窗的缝」同一个数**（`miniCurtainWinHeight` 的
-	// `min(gap, 板高)`）：窗高按渐出算、这里还按常数 10 排的话，板比缝矮的
-	// 那几帧「内容比窗高」，板尾被裁到窗外去。
-	gap := miniCurtainWinHeight(boardH) - miniHeight - int(boardH+0.5)
-	ui.Box(c).Key(miniCurtainArrowKey).
-		Height(float32(gap)).FillWidth().
-		Draw(func(p *ui.Painter, r ui.Rect) {
-			// ⚠️ **缝容不下三角的时候不画**（渐出收尾那几帧）：三角 6 高，
-			// 缝 < 6 的时候它上下都出界——画出来的是「被窗裁掉的半个三角」。
-			if gap < 6 {
-				return
-			}
-			// 一个 12×6 的实心三角：尖朝上、底坐在歌词板的顶边上——跨在缝
-			// 和板边之间（缝 10 高，三角 6 高、居中 ⇒ 上沿 = (10−6)/2 = 2、
-			// 下沿 = 8）。
-			//
-			// ⚠️ **尖指向封面列的中线**：`miniCoverCol` 84 ⇒ 中线在 42；三角
-			// 宽 12 ⇒ 左沿在 42 − 6 = 36。
-			top := r.Y + float32(gap-6)/2
-			left := r.X + miniCoverCol/2 - 6
-			// ⚠️ **`Path` 的方法是指针接收者**（`MoveTo` / `LineTo` / `Close`），
-			// 字面量取不了址——要先命名再调，链式返回值才是它自己。
-			path := &ui.Path{}
-			path.MoveTo(left, top+6).LineTo(left+6, top).LineTo(left+12, top+6).Close()
-			p.FillPath(path, cardBG)
-		})
-}
-
-// viewMiniCurtainBody 是歌词板里面那一块：歌词（或者「暂无歌词」）。
-//
-// ⚠️ **歌词区占满整板**：说明句（「歌词来自 X」）和菜单钮（「···」）都画在
-// 它**外面**（绝对定位），所以这一块不留它们的位——居中算法要的就是这块板
-// 的实际高。
-func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.LyricsSnapshot, t *ui.Theme, h float32) {
+// viewH 是歌词区这一帧的高（卷帘总高减掉那条 1 像素的线）。
+func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.LyricsSnapshot, t *ui.Theme, p tok.Palette, viewH float32) {
 	lv := &s.miniLyric
 	// 🔴 认换歌在这一帧的最开头，早于任何一句决定（同 lyrics.go 那一处）。
 	lv.onSong(snap.Key)
@@ -1211,22 +1080,17 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.Lyrics
 	// 一帧大一截。
 	ui.Column(c).Key(miniCurtainBodyKey).Grow(1).FillWidth().Children(func() {
 		if active < 0 {
-			// ⚠️ **「还没好」和「没有」两档分开**（2026-10-27）：换歌之后歌词
-			// 要先读盘、等字幕、必要时自动找一次。原先那段时间直接写「暂无
-			// 歌词」——用户读到的是结论，而真相是过程。
-			//
-			// ⚠️ **加载中是一枚转圈**（不是一行字）：这一档说的是过程，
-			// 而「暂无歌词」是一个结论——两档摆成一样就是把过程说成结论。
+			// ⚠️ **「还没好」和「没有」两档分开**：换歌之后歌词要先读盘、等字幕、
+			// 必要时自动找一次——那段时间不能直接写「暂无歌词」（读到的是结论，
+			// 而真相是过程）。
 			if snap.Loading {
-				s.viewMiniCurtainLoading(c, t)
+				s.viewMiniCurtainLoading(c, p)
 				return
 			}
-			s.viewMiniCurtainEmpty(c, t)
+			s.viewMiniCurtainEmpty(c, p)
 			return
 		}
-		// 🔴 **歌词当前句居中**（和满屏那一屏一个语义）：歌词区有多高，这一
-		// 块就有多高——说明句和菜单钮不占它的高。
-		s.viewMiniCurtainLyrics(c, snap, active, t, h)
+		s.viewMiniCurtainLyrics(c, snap, active, t, p, viewH)
 	})
 
 	if active < 0 {
@@ -1235,6 +1099,17 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.Lyrics
 	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是
 	// **上一帧**量到的（理由同 lyrics.go 里那一处）。
 	s.miniCurtainLyricPlace(c, active, lyricShapeOf(snap.Rows))
+}
+
+// miniCurtainCoverLabel 是封面那一列（触发器）读屏念的名字。
+//
+// ⚠️ **它跟着 open 走**：这一版封面列是**唯一的指针收起路**——卷帘展开的
+// 时候它还叫「展开歌词」的话，读屏用户听到的和按下去的结果正好相反。
+func miniCurtainCoverLabel(open bool) string {
+	if open {
+		return "收起歌词"
+	}
+	return "展开歌词"
 }
 
 // miniCurtainAnnounce 念一句「歌词卷帘展开 / 收起」。
@@ -1256,77 +1131,11 @@ func (s *Shell) miniCurtainAnnounce(open bool) {
 // 走 `viewMain`），而这一扇是迷你窗——在小窗里点它，弹窗会弹到主窗口上去，
 // 而主窗口那时候是收着的（进迷你就是 `HideToBackground`）。⇒ 那个入口在
 // 这一档是**兑现不了的**，所以不放。
-func (s *Shell) viewMiniCurtainEmpty(c *ui.Context, t *ui.Theme) {
+func (s *Shell) viewMiniCurtainEmpty(c *ui.Context, p tok.Palette) {
 	ui.Box(c).Key(miniCurtainEmptyKey).Grow(1).FillWidth().Center().
 		Children(func() {
 			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.Size13)).
-				TextColor(t.TextMuted)
-		})
-}
-
-// viewMiniCurtainOrigin 是歌词板左上角那一行「歌词来自 B 站 / 歌词来自搜索」。
-//
-// ⚠️ **它是歌词板的绝对定位孩子**（票面）：它**不能**占歌词区的高度
-// ——「当前句居中」那个算法里，「歌词区有多高」是一个**要正好对上**的数，
-// 而这一行要是占了高度，那个数就差了 20 多像素 ⇒ 当前句就不在正中。
-//
-// ⚠️ **它画在左上角**：右边是「···」那一枚菜单钮的地盘（`viewMiniCurtainMenu`），
-// 而左边是歌词的起点。
-//
-// ⚠️ **它跟满屏那一屏的那一行是同一个来源**（`lyricOriginText`）：那一句
-// 说的是「这份歌词是怎么来的」，而用户分不清 B 站带来的和搜来的那两种。
-func (s *Shell) viewMiniCurtainOrigin(c *ui.Context, snap app.LyricsSnapshot, t *ui.Theme) {
-	text := lyricOriginText(snap.Origin)
-	if text == "" {
-		return
-	}
-	ui.Box(c).Key(miniCurtainOriginKey).
-		Absolute().Top(space.Px4).Left(miniCurtainPadX).
-		Children(func() {
-			ui.Text(c, text).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-		})
-}
-
-// viewMiniCurtainMenu 是歌词板右上角那一枚「···」菜单钮。
-//
-// ⚠️ **它和「歌词来自 X」同一行**（票面）：左右各一枚，都是歌词板的绝对
-// 定位孩子——不占歌词区的高（理由见 `viewMiniCurtainOrigin`）。
-//
-// ⚠️ **菜单走框架的 `Element.Menu`**（左键弹，不是右键的 `ContextMenu`）：
-// 三条——「找歌词」（回主窗开那个搜索弹窗）、「收起歌词」。那个「找歌词」
-// 的弹窗画在**主窗口**那一层（`lyricssearch.go` 走 `viewMain`），而这一扇
-// 是迷你窗——所以点下去得**先回主窗**（`toggleMini`），弹窗才开得出来。
-func (s *Shell) viewMiniCurtainMenu(c *ui.Context, t *ui.Theme) {
-	ui.Box(c).Key(miniCurtainMenuKey).
-		Absolute().Top(space.Px4).Right(space.Px8).
-		Children(func() {
-			flatIconButton(c, iconMore, "歌词菜单", 16).
-				Key(miniCurtainMenuKey+":btn").Size(20, 20).Padding(space.None, space.Px2).
-				Menu(func(m *ui.Menu) {
-					if m.Item("找歌词").Chosen() {
-						// ⚠️ **先回主窗再开弹窗**：那个弹窗画在主窗口那一层
-						// （`lyricssearch.go`），而这一扇是迷你窗——不切回去的话，
-						// 弹窗弹到一扇收着的窗上，用户看不见。
-						//
-						// ⚠️ **`s.main` 要在 `toggleMini` 之前抓**：`dropMini` 会把
-						// `mini.main` 摘成 nil，先调它再读 `s.main` 就读不到了——
-						// 弹窗落在**主窗那个外壳**上这一点要钉在这，不能靠
-						// 「恰好摘在 Open 之后」的顺序侥幸。
-						main := s.main
-						if main != nil && s.toggleMini != nil {
-							s.toggleMini()
-						}
-						// ⚠️ **开弹窗的是主窗那个外壳**：搜索状态是外壳自己的
-						// （`Shell.lyricSearch`），而两个外壳是**两份**——迷你这一份
-						// 从来没挂过那个弹窗。
-						if main != nil {
-							main.openLyricSearch()
-						}
-					}
-					if m.Item("收起歌词").Chosen() {
-						s.miniCurtainCollapse(c.Now())
-					}
-				})
+				TextColor(p.Text3)
 		})
 }
 
@@ -1338,13 +1147,9 @@ func (s *Shell) viewMiniCurtainMenu(c *ui.Context, t *ui.Theme) {
 //
 // ⚠️ **它和 `miniCurtainEmptyKey` 分开**：同一个键上换内容，读屏软件读到的是
 // 同一句话，而这两档说的是两件事。
-func (s *Shell) viewMiniCurtainLoading(c *ui.Context, t *ui.Theme) {
+func (s *Shell) viewMiniCurtainLoading(c *ui.Context, p tok.Palette) {
 	ui.Box(c).Key(miniCurtainLoadingKey).Grow(1).FillWidth().Center().
 		Children(func() {
-			ui.Spinner(c).Label(lyricsLoadingText).TextColor(t.TextMuted)
+			ui.Spinner(c).Label(lyricsLoadingText).TextColor(p.Text3)
 		})
 }
-
-// ⚠️ **「收起」那一枚没有了**（票面）：旧版它坐在下轴那根杆上，而那一版
-// 的「地轴」整个去掉了——收起走三条路：再点封面、Esc、和「···」菜单里
-// 那一格（`viewMiniCurtainMenu`）。

@@ -26,7 +26,11 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -37,34 +41,30 @@ import (
 // 两个不同的键。
 const miniCurtainLyricsKey = "mini:curtain:lyrics"
 
-// viewMiniCurtainLyrics 画歌词板里的歌词：**当前句居中**。
+// miniCurtainActiveWeight 是当前句的字重（原型 `.ly.cur` 是 700；系统字体里 600 与 700
+// 同一档，且粗体只在刻度写明的几处——见 `TestOnlyTheScaleIsBold`）。
+const miniCurtainActiveWeight = 600
+
+// viewMiniCurtainLyrics 画卷帘里的歌词：**当前句居中**（原型 `.curtain .lyrics`）。
 //
-// viewH 是**这一帧歌词区有多高**（= 歌词板高）。
+// viewH 是**这一帧歌词区有多高**（= 卷帘高 − 顶上那条 1 像素的线）。
 //
 // ⚠️ **它必须正好等于歌词区实际的高**：上下那两段居中留白就是按它算的，
 // 而「当前句在正中」这件事**全靠「留白 == 歌词区的高一半」**那个等式。
 // 差一个像素，当前句就差一个像素。
-func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, active int, t *ui.Theme, viewH float32) {
+//
+// # 样式（原型 `.curtain .ly`）
+//
+// 16 号、左对齐、每句上下各 6 的内边距；平时 `text-3`，当前句 `text`、放大
+// 1.08 倍（以左边缘为原点）、加粗。上下两条渐隐盖到卡片的底。
+//
+// ⚠️ **不复用满屏那一屏的 `lyricLine`**：那一行是 1.5 倍放大 + 不透明度插值 +
+// 800 字重（上游的样子，`lyrics.go` 归全屏播放器那一票），而这里要的是原型的
+// 「变色 + 放大 1.08」。⇒ 另起一个 `miniCurtainLine`，`lyrics.go` 一个字都不动。
+// 字体用系统正文字体：随包的宋体只有 Bold 一档，整屏歌词都用它会变成一屏粗体。
+func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, active int, t *ui.Theme, p tok.Palette, viewH float32) {
 	lv := &s.miniLyric
-	// ⚠️ **歌词板自己那一档字号**：满屏那一屏用的是**用户偏好里的字号**
-	//（12~48），而 320 宽里放 20px 的字（当前行 ×1.5 = 30px）一行只有十个
-	// 字。这里传一份**改了字号的快照副本**进去。
-	cur := snap
-	cur.FontSize = miniCurtainFontSize
-	st := lyricStyle{
-		color: t.Text,
-		muted: t.TextMuted,
-		// ⚠️ **渐隐盖到 `t.Surface`**：歌词板的底是 `Surface`（半透明那一层），
-		// 盖到 `t.Background` 的话，那条渐隐带子会是**另一个色**——一眼就看
-		// 出「这一块不是一张板」。
-		fade: t.Surface,
-		area: miniCurtainLyricsKey,
-		ns:   miniCurtainNS,
-		// ⚠️ **每一行居中**：歌词板只有 320 宽，而「正在唱的那一句」是放大的
-		// ——居中才看得出它是当前句。
-		center: true,
-		padX:   miniCurtainPadX,
-	}
+	fade := s.coverWash(t, p.Surface)
 
 	scroll := ui.Scroll(c).Key(miniCurtainLyricsKey).Grow(1).FillWidth().
 		TrackScroll(&lv.scroll)
@@ -74,13 +74,13 @@ func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, ac
 		// 那几句也滚得到中间）。和满屏那一屏是**同一张账**。
 		//
 		// ⚠️ **留白必须正好是歌词区这一帧的高一半**：差一个像素，当前句就
-		// 差一个像素——而歌词板的高每帧跟着弹簧走，所以留白也得跟着变。
-		content := ui.Column(c).Gap(lyricsLineGap).
+		// 差一个像素——而卷帘的高每帧跟着弹簧走，所以留白也得跟着变。
+		content := ui.Column(c).
 			Padding(viewH/2, miniCurtainPadX, viewH/2, miniCurtainPadX).
-			AlignItems(ui.Center)
+			AlignItems(ui.Start)
 		content.Children(func() {
-			for i, row := range cur.Rows {
-				line := s.lyricLine(c, lv, i, active, row, cur.FontSize, st)
+			for i, row := range snap.Rows {
+				line := s.miniCurtainLine(c, i, active, row, p)
 				if i == active {
 					lv.line = line.Bounds()
 				}
@@ -88,13 +88,46 @@ func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, ac
 		})
 	})
 	// ⚠️ **上下两条渐隐**：和满屏那一屏是**同一张表**（`lyricsFadeTopStops` /
-	// `lyricsFadeBottomStops`）——历史句从上沿淡出去，未来句从下沿淡出去。
-	scroll.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		paintLyricFade(p, r, st.fade)
+	// `lyricsFadeBottomStops`，原型 `.lyrics` 的 mask 18% / 82%）。
+	scroll.DrawOver(func(pt *ui.Painter, r ui.Rect) {
+		paintLyricFade(pt, r, fade)
 	})
 	// ⚠️ **量的是滚动容器自己的框**（`Bounds()` 读的是上一帧的那一份）：它
 	// 就是「歌词区有多高」那个数——而上面那两段留白必须跟它**一样高**。
 	lv.box = scroll.Bounds()
+}
+
+// miniCurtainLine 画一句歌词。
+//
+// 「这一句正在唱」在这一行上是一个 0/1 的值，换句时由 240ms 的 ease-out 推过去
+// （原型 `.ly` 的 `transition: color var(--t-med), transform var(--t-slow)`）。
+func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, row lyrics.Row, p tok.Palette) ui.Element {
+	line := ui.Column(c).Key(lyricLineKey{ns: miniCurtainNS, at: row.At, i: i}).
+		Padding(miniCurtainLinePadY, space.None)
+	target := float32(0)
+	if i == active {
+		target = 1
+	}
+	var presence float32
+	if s.snapScroll {
+		// 窗口刚从看不见恢复过来的那一帧**一次到位**：用户要看的是「现在唱到哪一句」，
+		// 不是一段补放的变色 / 放大。
+		presence = line.Jump(lyricPresenceKey, target)
+	} else {
+		presence = line.AnimateTo(lyricPresenceKey, target, ui.Animation{Duration: motion.Med, Ease: motion.EaseOut})
+	}
+	col := p.Text3.Mix(p.Text, presence)
+	// ⚠️ **放大走字号（布局），不走 pose**：pose 的缩放以元素中心为原点，而这些行是
+	// 左对齐的——放大会把左边缘往外推；原型是 `transform-origin: left center`。字号
+	// 随 presence 插值，居中算法本来就是按当下的框算的。
+	size := miniCurtainFontSize * (1 + (miniCurtainActiveScale-1)*presence)
+	return line.Children(func() {
+		t := ui.Text(c, row.Text).FontSize(scale.Font(c, size)).
+			FixedLineHeight(miniCurtainLineH).TextColor(col)
+		if i == active {
+			t.FontWeight(miniCurtainActiveWeight)
+		}
+	})
 }
 
 // miniCurtainLyricPlace 把「当前句居中」那个滚动位置算出来并下发。

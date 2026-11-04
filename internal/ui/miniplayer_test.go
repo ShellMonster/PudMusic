@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -24,7 +25,7 @@ import (
 // 窗口骨架
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheMiniWindowIsAtBiuNumbers 盯窗口那几个开关。
+// TestTheMiniWindowIsAtThePrototypeNumbers 盯窗口那几个开关。
 //
 // 数字和出处抄 Biu 的 `electron/mini-player.ts:12-27`：`width: 320, height: 100`、
 // `transparent: true`、`alwaysOnTop: true`、`skipTaskbar: true`、`frame: false`。
@@ -40,15 +41,15 @@ import (
 // ⚠️ `Frameless: true` 在这里**是想要的**，和主窗口正相反。主窗口要的是「红黄绿
 // 留着」（`window.go` 里 `hiddenTitleBar = !Frameless && …`），而 Biu 的迷你窗口
 // 压根没有系统控件（`frame: false`），它自己画一整块。
-func TestTheMiniWindowIsAtBiuNumbers(t *testing.T) {
+func TestTheMiniWindowIsAtThePrototypeNumbers(t *testing.T) {
 	const (
-		biuWidth  = 320 // electron/mini-player.ts:16
-		biuHeight = 84  // electron/mini-player.ts:17
+		biuWidth  = 380 // 原型 `.mini { width: 380px }`（DESIGN.md §0′.T5）
+		biuHeight = 194 // 收起时的卡片高；卷帘在卡片里面往下展开 220
 	)
 	opts := MiniWindowOptions(nil)
 
 	if opts.Width != biuWidth || opts.Height != biuHeight {
-		t.Errorf("迷你窗口是 %d×%d，Biu 是 %d×%d", opts.Width, opts.Height, biuWidth, biuHeight)
+		t.Errorf("迷你窗口是 %d×%d，原型是 %d×%d", opts.Width, opts.Height, biuWidth, biuHeight)
 	}
 	if !opts.Transparent {
 		t.Error("窗口不是透明的：Biu 那边 transparent: true，圆角那一圈要透出桌面去")
@@ -78,7 +79,7 @@ func TestTheMiniWindowIsAtBiuNumbers(t *testing.T) {
 	// `"mini-player"` 这个键都不会有，**每次开都回到右上角**（真机实测过）。
 	// 完整的链路和四个变体的实测表在 `MiniWindowOptions` 的注释里。
 	//
-	// 「不能缩」改由 MinWidth/MinHeight 兜：用户拖不到比 320×100 更小，那三行控件
+	// 「不能缩」改由 MinWidth/MinHeight 兜：用户拖不到比 380×194 更小，那三行控件
 	// 就永远不会被裁掉。往大拖没有后果（右边那一列是 `Grow(1)`）。
 	//
 	// 所以断的是**下限**，而 `DisableResize` 一旦回来就会红——它正是那条让下限失效
@@ -194,13 +195,13 @@ func TestTheMiniWindowParksInTheTopRightCorner(t *testing.T) {
 // ⚠️ 「透明」这件事本身在无头环境里量不到：headless 的帧缓冲一开始是一张**不透
 // 明的白纸**（`mygo/ui/headless.go` 的 `image()` 直接给宿主那张），所以「没画的
 // 地方」和「画了白色」在像素上长得一样。开关那一半在
-// `TestTheMiniWindowIsAtBiuNumbers`，真窗口那一半在文件末尾的清单里。
+// `TestTheMiniWindowIsAtThePrototypeNumbers`，真窗口那一半在文件末尾的清单里。
 func TestTheMiniCardCoversTheWindow(t *testing.T) {
 	s, _ := newMiniShell(t, nil)
 	tt := miniTester(s)
 
 	img := snapshot(tt)
-	surface := BuildTheme(s.app.SettingsSnapshot(), false).Surface
+	surface := tok.Of(BuildTheme(s.app.SettingsSnapshot(), false)).Surface
 	// ⚠️ **底是半透明的**（`miniPanelAlpha`，2026-11 改版）：这扇窗开了毛玻璃
 	// （`Vibrancy`），卡片的底压到 0.88——而无头 Tester 的帧缓冲是一张**不透
 	// 明的白纸**（见上面那段注释），于是画出来的像素是**源色盖白纸那份混合**
@@ -230,7 +231,7 @@ func TestTheMiniCardCoversTheWindow(t *testing.T) {
 	half := miniWidth * miniHeight / 2
 	if covered < half {
 		t.Errorf("只有 %d/%d 个像素落在卡片底那一档（亮度 %.0f±8）：这一块没有自己的底，"+
-			"透明窗口在桌面上是隐形的（Transparent 的开关在 TestTheMiniWindowIsAtBiuNumbers）",
+			"透明窗口在桌面上是隐形的（Transparent 的开关在 TestTheMiniWindowIsAtThePrototypeNumbers）",
 			covered, miniWidth*miniHeight, wantLum)
 	}
 	// 角上不许有那一档：底是拿整窗刷满的话，角上也画上了。
@@ -737,11 +738,11 @@ func TestTheMiniBackButtonGoesBackToTheMainWindow(t *testing.T) {
 	mini, _ := newMiniShell(t, func() { back++ })
 	tt := miniTester(mini)
 
-	if err := tt.Click("退出"); err != nil {
+	if err := tt.Click("切换mini/完整模式"); err != nil {
 		t.Fatal(err)
 	}
 	if back != 1 {
-		t.Errorf("点了「退出」之后那个开关被调了 %d 次，want 1", back)
+		t.Errorf("点了「切换mini/完整模式」之后那个开关被调了 %d 次，want 1", back)
 	}
 }
 
@@ -800,46 +801,6 @@ func TestTheMiniWindowStepsThroughTheQueue(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText(flacBaseName) {
 		t.Errorf("点了「上一首」没回到 %q，文字有 %q", flacBaseName, tt.Texts())
-	}
-}
-
-// TestTheMiniVolumeSliderSetsTheVolume 盯音量（这一票点名要的）。
-//
-// Biu 的迷你播放器**没有音量**（`pages/mini-player/index.tsx` 里没有），所以这一条
-// 没有上游可抄：滑块该在标题那一行还是控制那一行、给多宽，是我们自己排的账（见
-// `viewMiniTitleRow`）。
-//
-// 断法：拖音量条之后 `App.Snapshot().Volume` 跟着变——**不是**量画出来那条槽的长
-// 度（那个量的是「看得见」，量不到「按下去有没有用」）。
-func TestTheMiniVolumeSliderSetsTheVolume(t *testing.T) {
-	s, a := newMiniShell(t, nil)
-	if err := enqueueTwo(a, t); err != nil {
-		t.Fatal(err)
-	}
-	a.SetVolume(1)
-	tt := miniTester(s)
-
-	bar, ok := tt.Find("音量")
-	if !ok {
-		t.Fatalf("画面上找不到音量条，文字有 %q", tt.Texts())
-	}
-	y := bar.Y + bar.H/2
-	// 按到最左：音量应该是 0。
-	tt.Press(bar.X+1, y)
-	tt.Move(bar.X+1, y)
-	tt.Release(bar.X+1, y)
-	tt.Frame()
-	if v := a.Snapshot().Volume; v > 0.05 {
-		t.Errorf("把音量条按到最左，音量是 %.2f：拖动没接到 App 上", v)
-	}
-
-	// 按到最右：满。
-	tt.Press(bar.X+bar.W-1, y)
-	tt.Move(bar.X+bar.W-1, y)
-	tt.Release(bar.X+bar.W-1, y)
-	tt.Frame()
-	if v := a.Snapshot().Volume; v < 0.95 {
-		t.Errorf("把音量条按到最右，音量是 %.2f", v)
 	}
 }
 

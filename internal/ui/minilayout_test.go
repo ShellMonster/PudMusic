@@ -1,14 +1,12 @@
 package ui
 
-// 迷你播放器的**版面**和**元素身份**这两组。
+// 迷你播放器的**版面**和**元素身份**这两组（原型 `.mini`，DESIGN.md §0′.T5）。
 //
-// 320×84 是写死的（票 #357 把 Biu 的 320×100 重设计成 320×84），而这一票往里塞了封面、歌名、
-// 音量、退出、进度、上一首 / 播放 / 下一首。装不下的时候症状特别隐蔽：控件**还在**
-//（无头 Tester 读的是控件的文本，被裁的只是画出来的那几个字），而版面引擎会把挤不
-// 下的控件按比例缩掉、**一个都不掉出窗口**。
-//
-// 所以这一组量的不是「有没有掉出去」，而是那笔**账**：右边那一列有多宽、控件各自
-// 要多少、以及画出来的那几个字有没有被裁。
+// 窗口是一张 380 宽、收起时 194 高的卡片：1 像素描边 + 拖动条 44 + 主区 120（封面 72、
+// 歌名 24 + 歌手 20 + 控制行 8 + 36）+ 进度行 16 + 底内边距 12 + 1 像素描边。
+// 这一组量的是**这笔账**：封面落在哪儿、三个控制键各占多宽、两端的时间和进度条怎么分。
+// 数全部**写死字面量**（取自原型 CSS 与参考图实测），不去引用 `miniplayer.go` 里的常量——
+// 两边用同一个常量的话，常量一改、期望跟着改，测试照样全绿。
 //
 // 另一半（窗口开关、控制、两个窗口共享状态）在 `miniplayer_test.go`。
 
@@ -22,29 +20,31 @@ import (
 // 版面
 // ─────────────────────────────────────────────────────────────────────────────
 
-// biuMiniCoverCol 是迷你播放器**封面那一列**的宽：84。
+// TestTheMiniWindowIsTheCardSize 盯「窗口就是原型那张卡片」：380 × 194。
 //
-// Biu 那边原本是 `h-full w-[100px]`（`pages/mini-player/index.tsx:28`），票 #357
-// 把整个迷你播放器重设计成 320×84 之后，这一列跟着收窄到 **84**。
-//
-// ⚠️ **写死字面量，不去用 `miniplayer.go` 里的 `miniCoverCol`**：两边都用同一个
-// 常量的话，常量一改、期望跟着改，测试照样全绿——而「封面列 84」正是这一票
-// （#168 / G10）要钉死的那一个数。`playbar_cover_test.go` 里那几个 `biu*`
-// 常量是同一个道理。
-const biuMiniCoverCol = 84
+// 194 是原型各段高度加起来的数（见文件头）；它同时是卷帘收起时的窗高，
+// `StateKey` 落盘的也是它。
+func TestTheMiniWindowIsTheCardSize(t *testing.T) {
+	if miniWidth != 380 {
+		t.Errorf("迷你窗宽 %d，want 380（原型 `.mini { width: 380px }`）", miniWidth)
+	}
+	if want := 1 + 44 + 120 + 16 + 12 + 1; miniHeight != want || miniHeight != 194 {
+		t.Errorf("迷你窗收起时高 %d，want %d（描边 1 + 拖动条 44 + 主区 120 + 进度 16 + 底 12 + 描边 1）",
+			miniHeight, want)
+	}
+}
 
-// TestTheMiniCoverColumnIsBiuWidth 盯「封面列 84」（票 #168 / G10）。
-//
-// 断的是**画面上画出来的那张封面**：72×72、落在 (6,6)——于是封面列就是
-// 6（卡片内边距）+ 72 + 6 = 84，而右边那一列从 x=90 起（进度条量出来的）。
+// TestTheMiniCoverIsSeventyTwoAtTheCardPadding 盯封面：72×72、圆角 8，落在
+// 卡片内边距之后（x = 描边 1 + 内边距 16 = 17）；竖直方向在主区那一行里居中
+// （主区内容 88 高，封面 72，所以比内容顶低 8：y = 1 + 44 + 16 + 8 = 69）。
 //
 // ⚠️ **判据是像素而不是控件的尺寸**：封面那一格是 `ui.Box`，没有可及名字，
-// `Tester.Find` 找不到它；而「那一格被画成了多大、摆在哪儿」正是这一票要钉的
-// 东西。封面夹具是一张纯色图（`coverColor`），一扫就知道它画在哪儿。
+// `Tester.Find` 找不到它；而「那一格被画成了多大、摆在哪儿」正是要钉的东西。
+// 封面夹具是一张纯色图（`coverColor`），一扫就知道它画在哪儿。
 //
 // ⚠️ **等的是「图真的画上来了」**：图是异步来的，而等待条件必须是「画面上出现
 // 了那个颜色」——`miniCoverBox` 返回空框就是还没到。
-func TestTheMiniCoverColumnIsBiuWidth(t *testing.T) {
+func TestTheMiniCoverIsSeventyTwoAtTheCardPadding(t *testing.T) {
 	s, a := newMiniShell(t, nil)
 	if err := enqueueTwoWithCover(a, t); err != nil {
 		t.Fatal(err)
@@ -57,157 +57,103 @@ func TestTheMiniCoverColumnIsBiuWidth(t *testing.T) {
 		return !miniCoverBox(tt).Empty()
 	})
 	box := miniCoverBox(tt)
-
-	// 封面本身：封面列 84 − 左右各 6 = 72 的方图，落在卡片内边距之后。
-	//
-	// ⚠️ **画面上量到的是「图」，不是「那一格」**：那一格外面还有一圈 1 像素的
-	// 边（票 #244 / UX 报告 §2 的 E2：深色下一张近黑的封面和行的底色几乎一样，
-	// 「图取到了」那一档也要描一圈边），而**那一圈边是画在格子里面那一圈**——
-	// 所以格子还是 72×72、位置一点没动，图本身让出来 2 像素。
+	// 封面图外面有一圈 1 像素的边（`imgcache.ViewTitled` 画的，深色下近黑的封面也要有边），
+	// 那一圈画在格子里面——格子仍是 72×72，图本身让出 2 像素。
 	const frame = 1
 	if box.Dx() != 72-2*frame || box.Dy() != 72-2*frame {
-		t.Errorf("封面是 %dx%d，want %dx%d（封面列 %d 减去左右各 %d 的内边距，"+
-			"再减去那一圈 1 像素的边），画在 %v",
-			box.Dx(), box.Dy(), 72-2*frame, 72-2*frame, biuMiniCoverCol, miniPad, box)
+		t.Errorf("封面是 %dx%d，want %dx%d（72 的格子减去那一圈 1 像素的边，原型 `.mini-cover`），画在 %v",
+			box.Dx(), box.Dy(), 72-2*frame, 72-2*frame, box)
 	}
-	if box.Min.X != miniPad+frame || box.Min.Y != miniPad+frame {
-		t.Errorf("封面的左上角在 (%d,%d)，want (%d,%d)：它没有贴着卡片内边距（"+
-			"那一圈 1 像素的边算在里面）",
-			box.Min.X, box.Min.Y, miniPad+frame, miniPad+frame)
+	if box.Min.X != 17+frame || box.Min.Y != 69+frame {
+		t.Errorf("封面的左上角在 (%d,%d)，want (%d,%d)（描边 1 + 内边距 16；主区内居中；再让出那圈边）",
+			box.Min.X, box.Min.Y, 17+frame, 69+frame)
 	}
-	// 封面列 = 左边 6 + 封面 72 + 右边 6 = 84。
-	//
-	// ⚠️ **算的是「格子」**：格子的左边是图再往左 1 像素（那一圈边），右边也是。
-	if got, want := box.Min.X-frame+box.Dx()+2*frame+miniPad, biuMiniCoverCol; got != want {
-		t.Errorf("封面那一列是 %d 宽，want %d（票 #357 重设计后的封面列）", got, want)
+	// 右边那一列从封面右缘 + 16 起：x = 17 + 72 + 16 = 105；上一首键就是它的第一格。
+	prev, ok := tt.Find("上一首")
+	if !ok {
+		t.Fatalf("画面上找不到「上一首」，文字有 %q", tt.Texts())
 	}
-	// 右边那一列从 90 起（封面列 84 + 那一列自己的 6 的内边距）。
-	if got, want := progressRect(t, tt).X, float32(biuMiniCoverCol+miniPad); got != want {
-		t.Errorf("进度条从 x=%.1f 开始，want %.1f：封面列不是 %d 宽",
-			got, want, biuMiniCoverCol)
+	if prev.X != 105 {
+		t.Errorf("右边那一列从 x=%.1f 起，want 105（封面右缘 89 + 列间距 16）", prev.X)
 	}
 }
 
-// TestTheMiniVolumeSliderSurvivesTheBiggerCover 盯「封面变大之后音量还在，而且
-// 没被挤瘦」。
+// TestTheMiniControlsFollowThePrototypeGrid 盯控制行和进度行的格子：
 //
-// 票 #168 的一条规定是**音量保留**（上游的迷你播放器没有音量，是用户定的）。
-// 封面那一列 84，右边那一列的内容框就只剩 224——而控制那一行摆的是
-// 「上一首 / 播放 / 下一首 / 静音图标 / 音量」，挤不下了的话**版面引擎会把控件
-// 按比例缩掉**：音量的滑槽悄悄短一截，而**界面上看不出坏了**（它还在那儿，只是不
-// 那么满了）。
+//   - 上一首 / 播放 / 下一首各 36×36、间距 4：x = 105 / 145 / 185，y = 113
+//     （主区顶 61 + 歌名 24 + 歌手 20 + 上边距 8）；
+//   - 喜欢、歌词靠右，右缘在 380 − 1 − 16 = 363；
+//   - 进度行：两端时间各 40 宽，进度条从 17 + 40 + 12 = 69 起，到 363 − 40 − 12 = 311 止。
 //
-// 所以断两样：音量**还在**（找得到它），而且**还是 80 宽**（没被缩）。
-func TestTheMiniVolumeSliderSurvivesTheBiggerCover(t *testing.T) {
+// 播放键是 36 的实心圆（正文色底），而不是 44（播放条那一枚）。
+func TestTheMiniControlsFollowThePrototypeGrid(t *testing.T) {
 	s, a := newMiniShell(t, nil)
 	if err := enqueueTwoWithCover(a, t); err != nil {
 		t.Fatal(err)
 	}
 	a.Toggle()
 	tt := miniTester(s)
+	tt.Frame()
 
-	bar, ok := tt.Find("音量")
-	if !ok {
-		t.Fatalf("画面上找不到音量条，文字有 %q", tt.Texts())
+	for _, want := range []struct {
+		label string
+		x, y  float32
+	}{
+		{"上一首", 105, 113},
+		{"播放", 145, 113},
+		{"下一首", 185, 113},
+	} {
+		r, ok := tt.Find(want.label)
+		if !ok {
+			t.Fatalf("画面上找不到 %q，文字有 %q", want.label, tt.Texts())
+		}
+		if r.W != 36 || r.H != 36 || r.X != want.x || r.Y != want.y {
+			t.Errorf("%q 的框是 (%.1f,%.1f %.1f×%.1f)，want (%.0f,%.0f 36×36)",
+				want.label, r.X, r.Y, r.W, r.H, want.x, want.y)
+		}
 	}
-	// 80 是我们自己定的那个数（上游没有音量，抄不到），写死字面量：拿常量去比
-	// 常量，常量一改两边一起变，这条就白钉了。
-	const wantW = 80
-	if bar.W != wantW {
-		t.Errorf("音量条是 %.1f 宽，want %d：它被挤瘦了（封面列占了 84 之后，"+
-			"右边那一列的内容框只剩 224，而版面引擎会把挤不下的控件按比例缩掉）", bar.W, wantW)
+
+	// 歌词键是控制行最右一格：右缘 363。
+	lyr, ok := tt.Find("歌词")
+	if !ok {
+		t.Fatalf("画面上找不到「歌词」键，文字有 %q", tt.Texts())
+	}
+	if lyr.X+lyr.W != 363 || lyr.W != 36 {
+		t.Errorf("「歌词」键的框是 (%.1f..%.1f)，want 右缘 363、宽 36", lyr.X, lyr.X+lyr.W)
+	}
+
+	// 进度条：从 69 到 311，高 16。
+	bar := progressRect(t, tt)
+	if bar.X != 69 || bar.X+bar.W != 311 || bar.H != 16 {
+		t.Errorf("进度条是 x=%.1f..%.1f 高 %.1f，want 69..311 高 16（两端时间各 40 + 间距 12）",
+			bar.X, bar.X+bar.W, bar.H)
+	}
+
+	// 回到主窗口的键在拖动条右端：右缘 380 − 1 − 8 = 371，36×36，顶 1 + 8 = 9。
+	back, ok := tt.Find("切换mini/完整模式")
+	if !ok {
+		t.Fatalf("画面上找不到「切换mini/完整模式」，文字有 %q", tt.Texts())
+	}
+	if back.W != 36 || back.H != 36 || back.X+back.W != 371 || back.Y != 9 {
+		t.Errorf("回到主窗口的键是 (%.1f,%.1f %.1f×%.1f)，want 右缘 371、顶 9、36×36",
+			back.X, back.Y, back.W, back.H)
 	}
 }
 
-// TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour 盯「320×84 装得下」。
-//
-// ⚠️ **名字从 `…ByOneHundred` 改成 `…ByEightyFour`**：窗口在票 #357 之后是
-// 320×84（原 320×100），而旧名字说的是**已经不存在的那个尺寸**——名字说的和
-// 量到的不是一回事，就跟注释说谎一样（AGENTS.md §7）。`internal/evidence` 的
-// 台账同步改了。
-//
-// 窗口尺寸是写死的 320×84，而这一票在封面右边那一列里放了标题 +
-// 音量 + 退出、进度、上一首 + 播放 + 下一首。装不下的症状很隐蔽：控件**还在**
-// （无头 Tester 读的是控件的文本，被裁的只是画出来的那几个字），而版面引擎会把挤
-// 不下的控件按比例缩掉、**一个都不掉出窗口**——所以「有没有掉出去」「有没有互相
-// 压着」这两条断言自己量不出来。
-//
-// 量出来的那条是**账**：右边那一列有多宽（内容框：320 − 封面列 84 − 左右各 6 的
-// 内边距 = **224**），而控制那一行一共要多少。列一变窄账就对不上，而对不上的后果是
-// 「上一首」被缩成「上一…」。
-//
-// ⚠️ **一定要带封面跑这一条**：封面在的时候右边那一列的内容框只有 224 宽
-// （320 − 84 − 12），没有封面时是 308——宽了 84 的那一档量不到真正紧的那一档。
-func TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour(t *testing.T) {
-	const gap = 6 // 两行都是 `Gap(6)`
-
+// TestTheMiniCardKeepsEverythingInsideTheWindow 盯「没有任何控件掉出窗口、也没有
+// 两个控件互相压着」（命中链只认最上面那个，被压住的那个永远按不到，而 `Find` 照样
+// 找得到它的名字）。
+func TestTheMiniCardKeepsEverythingInsideTheWindow(t *testing.T) {
 	s, a := newMiniShell(t, nil)
 	if err := enqueueTwoWithCover(a, t); err != nil {
 		t.Fatal(err)
 	}
-	a.Toggle() // 暂停：播放键上写的是「播放」而不是「暂停」
+	a.Toggle()
 	tt := miniTester(s)
-	progress := progressRect(t, tt)
+	tt.Frame()
 
-	// 封面列在不在，是这一条量的是不是「紧的那一档」的分水岭：
-	// 封面列 84 + 它右边那一列 6 的内边距 = 90。没有封面时进度条从 6 开始。
-	if got, want := progress.X, float32(miniCoverCol+miniPad); got != want {
-		t.Fatalf("封面没有让出左边那一列：进度条从 x=%.1f 开始（want %.1f），"+
-			"这一条量到的不是最挤的那一档", got, want)
-	}
-
-	// 账一：**控制那一行**。左边三枚键（上一首 / 播放 / 下一首）、右端的
-	// 静音图标 + 音量滑块，中间一个弹性空档。
-	//
-	// ⚠️ **必须把两组加在一起比，不能各自跟整列宽比**：两组在**同一行**里
-	// （`viewMiniTransport` 一行），而版面引擎是**整行**排的——各自比的话
-	// 两笔账都恒成立（96 ≤ 224、120 ≤ 224），把静音图标加宽到 34 这一行
-	// 越过内容框了，用例还全绿。
-	//
-	// ⚠️ **六样东西五道缝**：那一行是「上一首 / 播放 / 下一首 / 弹性空档 /
-	// 静音图标 / 音量滑块」，中间那个弹性空档**也占一道缝**。
-	transport := 2*miniStepW + miniPlayW + miniMuteIconW + miniVolumeW + 5*gap
-	// 账二：标题那一行。歌名有下限（`MinWidth`，再窄就一个字都不剩）、退出。
-	//
-	// ⚠️ **音量组在第三行，不在第一行**（票 #345）：静音图标说的是**音量**，
-	// 而音量滑块在第三行右端——图标和它隔了一行就成了「窗里有个喇叭，不知道
-	// 管谁」。
-	titleRow := miniTitleMinW + miniBackBtnW + gap
-	// ⚠️ **尺子是内容框的宽（224），不是进度条的宽**：进度条是 `Grow(1)` 的，
-	// **这一行挤不下时它自己撑开**（实测 228）——量它等于量「挤成了什么样」，
-	// 而账要比的是「内容框有多宽」。
-	//
-	// 内容框：窗宽 320 − 封面列 84 − 左右各 6 的内边距 = 224。
-	colW := float32(miniWidth - miniCoverCol - 2*miniPad)
-	for _, b := range []struct {
-		what string
-		need float32
-	}{
-		{"控制那一行（三枚键 + 静音图标 + 音量）", float32(transport)},
-		{"歌名 + 退出", float32(titleRow)},
-	} {
-		if colW+0.5 < b.need {
-			t.Errorf("%s 要 %.0f 宽，而右边那一列只有 %.0f：版面引擎会把挤不下的控件"+
-				"按比例缩掉（控件还在、文本也还在，只是画出来的那几个字被裁了）",
-				b.what, b.need, colW)
-		}
-	}
-
-	// 另外两条：都掉到窗口外面去了，或者互相压着（命中链只认最上面那个，被压住的
-	// 那个永远按不到，而 Find 照样找得到它的名字）。
-	//
-	// ⚠️ **静音图标也在这一列里**（票 #345 加的）：它和滑块挨着，两边挨着的
-	// 控件压在一起就是「点得到名字、按不到」。
 	w, h := float32(miniWidth), float32(miniHeight)
-	// ⚠️ **右缘是「窗口宽 − 内边距」，不是窗口宽**：内容框右缘是 320 − 6 = 314，
-	// 而这一列的控件**可以合法地画到 314**（那才是设计的位置）。拿 320 当上限
-	// 的话，控件多伸 6 像素（进到内边距里）也看不出来。
-	//
-	// 而**更不能拿进度条的宽当尺子**：它是 `Grow(1)` 的，**装不下时它自己撑开**
-	//（实测：控件越过内容框时进度条量出来是 228，而不是 224）——于是
-	// 「进度条有多宽」量的是「这一行挤成了什么样」，不是「内容框有多宽」。
-	contentRight := w - float32(miniPad)
-	names := []string{"上一首", "播放", "下一首", "退出", "音量", "播放进度", "静音"}
+	names := []string{"上一首", "播放", "下一首", "切换mini/完整模式", "播放进度", "歌词"}
 	rects := make(map[string]mygoui.Rect, len(names))
 	for _, n := range names {
 		r, ok := tt.Find(n)
@@ -218,45 +164,25 @@ func TestTheMiniCardFitsInThreeHundredAndTwentyByEightyFour(t *testing.T) {
 			t.Errorf("%q 的框 (%.1f,%.1f %.1f×%.1f) 掉到 %d×%d 外面去了",
 				n, r.X, r.Y, r.W, r.H, miniWidth, miniHeight)
 		}
-		// ⚠️ **越过内容框右缘**：那 6 像素的内边距是设计要的（圆角那半圈留白），
-		// 控件压上去就是「贴边糊住」。这一条是**版面那条账的兜底**——账算的是
-		// 「需要多宽」，而这条量的是「实际画到哪儿了」。
-		if r.X+r.W > contentRight+0.5 {
-			t.Errorf("%q 的右缘在 %.1f，越过了内容框右缘 %.1f：它压在内边距上"+
-				"（这一行挤不下时版面引擎会把控件按比例缩掉，而缩掉的量全落在右端）",
-				n, r.X+r.W, contentRight)
-		}
 		rects[n] = r
 	}
 	for i, a1 := range names {
 		for _, b1 := range names[i+1:] {
 			if overlap(rects[a1], rects[b1]) {
-				t.Errorf("%q 和 %q 的框重叠了（%v / %v）：命中链只认最上面那个，"+
-					"被压住的那个永远按不到，而 Find 照样找得到它的名字",
-					a1, b1, rects[a1], rects[b1])
+				t.Errorf("%q 和 %q 的框重叠了（%v / %v）", a1, b1, rects[a1], rects[b1])
 			}
 		}
 	}
 }
 
-// TestTheMiniKeysAreIcons 盯那四个键**真的是图标键**。
-//
-// 这条原来是 `TestTheMiniLabelsAreNotTruncated`：那时候四个键是写着「上一首」的
-// 文字键，判据是「画出来的框不窄于那几个字的自然宽」。这一票把它们换成了图标键
-// （上游 `pages/mini-player/index.tsx:165-212` 那一排），于是那个判据整条都不再
-// 成立——现在要断的是反过来的一件事：**框就是图标键的框，而且里面真的画了图形**。
-//
-// 两条一起断，缺一不可：
-//
-//   - 框的宽高**等于** `miniStepW` / `miniPlayW`（不是「不大于」）：文字键那会儿
-//     这两个数是 64 / 72，谁把它们改回去了，这里立刻红。
-//   - 框里有一枚图形（`scanGlyph` 的墨迹不为空）：一个空的图标键点得到、也叫得出
-//     名字，但画面上什么都没有。
+// TestTheMiniKeysAreIcons 盯那几个键**真的是图标键**：框就是图标键的框（36×36），
+// 而且里面真的画了图形（`scanGlyph` 的墨迹不为空）——一个空的图标键点得到、也叫得出
+// 名字，但画面上什么都没有。
 //
 // ⚠️ **「按名字找得到」本身就是「有可及名字」这一条的证据**：MyGo 的
-// `Tester.Find` 找的是「有文字**或有可及名字**」的元素（`mygo/ui/runtime.go:1065`
-// 那一段），而图标键画不出字——找得到，说明那个名字确实挂在按钮上（图标对辅助
-// 技术不可见，`mygo/ui/svg.go` 的 Icon 文档：「unless Label names them」）。
+// `Tester.Find` 找的是「有文字**或有可及名字**」的元素，而图标键画不出字——找得到，
+// 说明那个名字确实挂在按钮上（图标对辅助技术不可见，`mygo/ui/svg.go` 的 Icon 文档：
+// 「unless Label names them」）。
 func TestTheMiniKeysAreIcons(t *testing.T) {
 	s, a := newMiniShell(t, nil)
 	if err := enqueueTwoWithCover(a, t); err != nil {
@@ -264,23 +190,24 @@ func TestTheMiniKeysAreIcons(t *testing.T) {
 	}
 	a.Toggle() // 暂停：播放键上写的是「播放」
 	tt := miniTester(s)
-	progress := progressRect(t, tt) // 同上：封面在，才是最挤的那一档
+	tt.Frame()
 
 	for _, want := range []struct {
 		label string
 		size  float32
 	}{
-		{"上一首", miniStepW},
-		{"播放", miniPlayW},
-		{"下一首", miniStepW},
-		{"退出", miniBackBtnW},
+		{"上一首", 36},
+		{"播放", 36},
+		{"下一首", 36},
+		{"切换mini/完整模式", 36},
+		{"歌词", 36},
 	} {
 		r, ok := tt.Find(want.label)
 		if !ok {
 			t.Fatalf("画面上找不到 %q，文字有 %q", want.label, tt.Texts())
 		}
-		// `Tester.Find` 报的是**画出来的那一块**（内部和父框的裁剪区求交，
-		// `mygo/ui/runtime.go:1066`），所以「被挤扁了」在这里表现为框变小。
+		// `Tester.Find` 报的是**画出来的那一块**（内部和父框的裁剪区求交），
+		// 所以「被挤扁了」在这里表现为框变小。
 		if r.W < want.size-0.5 || r.H < want.size-0.5 {
 			t.Errorf("%q 的键是 %.1f×%.1f，want 至少 %.0f×%.0f：它不是图标键的框",
 				want.label, r.W, r.H, want.size, want.size)
@@ -290,9 +217,6 @@ func TestTheMiniKeysAreIcons(t *testing.T) {
 				"名字还在、按得动，可用户看不见它", want.label, s.bg)
 		}
 	}
-
-	// 84 高的窗里三个键靠左，音量在同一行的右端（设计规范 v0.1 §7.6），不再要求居中。
-	_ = progress
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

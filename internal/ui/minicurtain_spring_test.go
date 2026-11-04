@@ -168,10 +168,10 @@ func TestTheMiniCurtainUnrollsWithASpring(t *testing.T) {
 	// 而画出来的高度被**镜像**翻成「缩回去一点」（见 `minicurtain_spring.go`
 	// 的文件头）——所以窗高**从不超过** 84 + 缝 + 卷帘高。
 	for i, f := range frames {
-		if f.window > miniHeight+miniCurtainGap+miniCurtainH {
-			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d（84 + 缝 %d + 卷帘 %d）："+
+		if f.window > miniHeight+miniCurtainH {
+			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d（%d + 卷帘 %d）："+
 				"过冲那一帧窗比内容高，而透明的那一块照样吃点击",
-				i, f.window, miniHeight+miniCurtainGap+miniCurtainH, miniCurtainGap, miniCurtainH)
+				i, f.window, miniHeight+miniCurtainH, miniHeight, miniCurtainH)
 		}
 		// ⚠️ **窗高公式和生产那一个函数同一份**（`miniCurtainWinHeight`）：
 		// 板快收完的时候那条缝是渐出的（收尾那帧不许一下掉 12px）。
@@ -282,8 +282,8 @@ func TestTheMiniCurtainRollsUpWithoutBouncing(t *testing.T) {
 	// ⚠️ **窗高全程不许超过 84 + 缝 + 卷帘高**：收起那一段是从满高往回走的，
 	// 而过冲（如果有过冲）会是**先涨**——那正是「窗比内容高」那一条。
 	for i, f := range frames {
-		if f.window > miniHeight+miniCurtainGap+miniCurtainH {
-			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d", i, f.window, miniHeight+miniCurtainGap+miniCurtainH)
+		if f.window > miniHeight+miniCurtainH {
+			t.Errorf("第 %d 帧窗高是 %d，want ≤ %d", i, f.window, miniHeight+miniCurtainH)
 		}
 	}
 }
@@ -481,25 +481,17 @@ func miniCurtainLum(c color.RGBA) float64 {
 	return 0.299*float64(c.R) + 0.587*float64(c.G) + 0.114*float64(c.B)
 }
 
-// TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard 盯「卡片和歌词板之间
-// 那道缝」（2026-11 改版）。
+// TestTheMiniCurtainIsInsideTheCardWithoutAGap 盯「卷帘是卡片里面的一段，不是
+// 隔着一条缝的另一张板」（原型 `.curtain`，DESIGN.md §0′.T5）。
 //
-// ⚠️ **这一条量两样**：
+// 卷帘的顶边必须正好在卡片收起时的底边（`miniHeight`），整块高度是
+// `miniCurtainH`（含顶上那条 1 像素分隔线）；旧版那道 10 像素的缝和缝里的小三角
+// 已经不存在。
 //
-//  1. **歌词板在卡片下面、中间隔着那条缝**（票面：两块独立的板，不是连成一
-//     张）——板的顶边必须在 `84 + 缝`；
-//  2. **缝里有一个小三角**：封面列中线（x=42）那一列在缝里的颜色，和同一行
-//     窗中央（x=160，三角画不到那儿）那一列**不一样**——三角画出来那一块
-//     和只有歌词板影子渐变的空当，在像素上分得开。
-//
-// ⚠️ **「缝是透明区」在无头这一档量不到**：headless 的帧缓冲一开始就是一张
-// **不透明的白纸**（`mygo/ui/headless.go` 的 `image()`），画了的和没画的
-// 地方 alpha 都是 255——所以这一条**不量 alpha**（真窗那一半记在
-// `miniplayer_test.go` 末尾的清单里）。
-//
-// ⚠️ **旧版这一条量的是「两道轴」**（上轴钉窗顶、下轴贴卷帘下沿）：换「独立
-// 歌词板」之后那两条轴整个撤了——这一组**不量轴**，轴是已经不存在的东西。
-func TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard(t *testing.T) {
+// ⚠️ **「缝是透明区」在无头这一档量不到**（headless 的帧缓冲一开始就是一张不透明
+// 的白纸，画了的和没画的地方 alpha 都是 255），所以这一条量的是**框**：卷帘的框
+// 紧贴在 `miniHeight` 上，而不是 `miniHeight + 缝`。
+func TestTheMiniCurtainIsInsideTheCardWithoutAGap(t *testing.T) {
 	s, a := miniCurtainShell(t)
 	if err := enqueueTwo(a, t); err != nil {
 		t.Fatal(err)
@@ -512,36 +504,18 @@ func TestTheMiniCurtainHasAGapBetweenTheCardAndTheBoard(t *testing.T) {
 	clickCurtainCover(t, tt)
 	settleCurtain(t, tt, s, true)
 
-	// 🔴 **歌词板的顶边在 84 + 缝**：紧贴着卡片（缝是 0）或者隔了更远，都是
-	// 结构错（票面：「卡片和板是两张独立的板，中间一条缝」）。
 	board, ok := tt.Find("迷你播放器歌词")
 	if !ok {
-		t.Fatalf("画面上找不到歌词板（它的名字是「迷你播放器歌词」），文字有 %q", tt.Texts())
+		t.Fatalf("画面上找不到卷帘（它的名字是「迷你播放器歌词」），文字有 %q", tt.Texts())
 	}
-	if got, want := board.Y, float32(miniHeight+miniCurtainGap); got < want-1 || got > want+1 {
-		t.Errorf("歌词板的顶边在 y=%.1f，want %.0f（卡片 84 + 缝 %d）："+
-			"板和卡片之间的那道缝不对", got, want, miniCurtainGap)
+	if got, want := board.Y, float32(miniHeight); got < want-1 || got > want+1 {
+		t.Errorf("卷帘的顶边在 y=%.1f，want %.0f（卡片收起时的底边，中间没有缝）", got, want)
 	}
-
-	// 🔴 **缝里有那个小三角**：三角画在封面列中线（x=42）上，而缝里的其余
-	// 部分只有歌词板那道影子——同一行上 x=42 和 x=160 的亮度差就分得出
-	// 「三角在不在」。
-	img := tt.Image()
-	maxDiff := 0.0
-	atY := -1
-	for y := miniHeight + 1; y < miniHeight+miniCurtainGap-1; y++ {
-		d := miniCurtainLum(img.RGBAAt(miniCoverCol/2, y)) - miniCurtainLum(img.RGBAAt(miniWidth/2, y))
-		if d < 0 {
-			d = -d
-		}
-		if d > maxDiff {
-			maxDiff, atY = d, y
-		}
+	if got, want := board.H, float32(miniCurtainH); got < want-1 || got > want+1 {
+		t.Errorf("卷帘高 %.1f，want %d（原型 `.curtain.open { height: 220px }`）", got, miniCurtainH)
 	}
-	if maxDiff < 4 {
-		t.Errorf("缝里 x=%d（封面列中线）和 x=%d（窗中央）同一行的亮度差最多 %.1f："+
-			"那个指向封面的小三角没画出来（y=%d）",
-			miniCoverCol/2, miniWidth/2, maxDiff, atY)
+	if board.Y+board.H > float32(miniHeight+miniCurtainH)+1 {
+		t.Errorf("卷帘的底边在 y=%.1f，超出了窗高 %d", board.Y+board.H, miniHeight+miniCurtainH)
 	}
 }
 
@@ -587,12 +561,12 @@ func TestTheMiniCurtainCollapseTailNeverDropsTwelvePixelsInOneFrame(t *testing.T
 	// 「板缩的 ~2px + 缝跟着缩的 ~2px」——而 12px 那一跳是「1.8px 的板 +
 	// 10px 的缝一起砍掉」。
 	//
-	// ⚠️ **只量尾段**（窗高 < 84 + 缝 + 缝 = 104 之后）：收起的前半程弹簧
+	// ⚠️ **只量尾段**（窗高 < 194 + 10 之后）：收起的前半程弹簧
 	// 一步就是 ~30px（那是弹簧自己快，不是这个 bug）——而这个 bug 只在
-	// 「板比缝还矮」的尾段出现（`h < miniCurtainGap` 那一段，缝还是整段加）。
+	// 最后几帧（板只剩十来像素）的尾段出现。
 	tail := -1
 	for i, f := range frames {
-		if f.window < miniHeight+2*miniCurtainGap {
+		if f.window < miniHeight+10 {
 			tail = i
 			break
 		}
@@ -620,8 +594,8 @@ func TestTheMiniCurtainCollapseTailNeverDropsTwelvePixelsInOneFrame(t *testing.T
 			wins[i] = f.window
 		}
 		t.Errorf("尾段第 %d 帧窗高一下掉了 %dpx（%v），want 每一帧 ≤ 5px："+
-			"那条缝（%dpx）在板快收完的时候还是整段砍掉的——它该跟着板高渐出",
-			maxAt, maxDrop, wins, miniCurtainGap)
+			"收尾那几帧窗高应该是平滑地收（卷帘里面没有缝，只有板在缩）",
+			maxAt, maxDrop, wins)
 	}
 
 	// ⚠️ **整个收起过程窗高不许涨**（过阻尼，收起不弹——同
@@ -633,11 +607,9 @@ func TestTheMiniCurtainCollapseTailNeverDropsTwelvePixelsInOneFrame(t *testing.T
 		}
 	}
 
-	// ⚠️ **板全开的时候缝要满**：渐出只发生在「板比缝还矮」的那一小段，
-	// 正常高度上窗高还是 84 + 缝 10 + 板高。
-	if got, want := miniCurtainWinHeight(miniCurtainH), miniHeight+miniCurtainGap+miniCurtainH; got != want {
-		t.Errorf("板全开的时候窗高是 %d，want %d（84 + 缝 %d + 板 %d）："+
-			"缝只在板快收完的时候才渐出", got, want, miniCurtainGap, miniCurtainH)
+	// ⚠️ **板全开的时候窗高是 194 + 板高**（卷帘在卡片里面，没有缝）。
+	if got, want := miniCurtainWinHeight(miniCurtainH), miniHeight+miniCurtainH; got != want {
+		t.Errorf("板全开的时候窗高是 %d，want %d（%d + 卷帘 %d）", got, want, miniHeight, miniCurtainH)
 	}
 }
 
@@ -810,18 +782,18 @@ func TestTheMiniCurtainSetSizeIsSuppressedWhileTheUserResizes(t *testing.T) {
 		t.Fatalf("推了 5 帧弹簧就停了：拉锯那一档（动画期用户拖窗）断不到")
 	}
 
-	// 🔴 **用户把窗高拖成 200**（不是我们设的任何一帧）：假窗先把自己改成
-	// 200，再触发「窗被改了」那个钩子——和原生 `windowDidResize` 的顺序一样
+	// 🔴 **用户把窗高拖成 300**（不是我们设的任何一帧）：假窗先把自己改成
+	// 300，再触发「窗被改了」那个钩子——和原生 `windowDidResize` 的顺序一样
 	// （先改原生，再叫钩子）。
-	fake.height = 200
+	fake.height = 300
 	fake.resize()
 
 	// 🔴 **这一帧弹簧不许往回拽**：`miniCurtainSyncHeight` 还会跑（帧照出），
 	// 但它不许 `SetSize`——假窗的高度必须**还是 200**，不是「84 + 比例 × 400」。
 	tt.Advance(time.Second / 60)
 	tt.Frame()
-	if got := fake.height; got != 200 {
-		t.Errorf("用户拖窗改成 200 之后，弹簧又把它设成了 %d："+
+	if got := fake.height; got != 300 {
+		t.Errorf("用户拖窗改成 300 之后，弹簧又把它设成了 %d："+
 			"那一帧窗高被拽回动画值，拉锯就这么来的", got)
 	}
 
@@ -839,7 +811,7 @@ func TestTheMiniCurtainSetSizeIsSuppressedWhileTheUserResizes(t *testing.T) {
 	// ⚠️ **解冻之后窗高从 200 附近接着走**，不是从 84 或 400 跳过去。
 	tt.Advance(time.Second / 60)
 	tt.Frame()
-	if got := fake.height; got < 150 || got > miniHeight+miniCurtainGap+miniCurtainH {
+	if got := fake.height; got < 250 || got > miniHeight+miniCurtainH {
 		t.Errorf("解冻之后窗高是 %d：它没有从用户拖到的 200 附近接着走"+
 			"（要么跳回 84 了，要么跳到全开高了）", got)
 	}
@@ -859,7 +831,7 @@ func TestTheMiniCurtainSetSizeIsSuppressedWhileTheUserResizes(t *testing.T) {
 func TestTheMiniCurtainDragToAShortBoardDoesNotSnapBack(t *testing.T) {
 	// 先断反函数本身：`miniCurtainWinHeight` ↔ `miniCurtainBoardHeight`
 	// 往返不丢（渐出那一段是两条分支，边界 2×gap 两侧各取几格）。
-	for h := 1; h < 4*miniCurtainGap; h++ {
+	for h := 1; h < 40; h++ {
 		want := miniCurtainWinHeight(float32(h))
 		if got := miniCurtainBoardHeight(want); int(got+0.5) != h {
 			t.Errorf("板高 %d ⇒ 窗高 %d ⇒ 反解板高 %.1f：正反不是同一个数"+
@@ -890,13 +862,13 @@ func TestTheMiniCurtainDragToAShortBoardDoesNotSnapBack(t *testing.T) {
 
 	// 🔴 **用户把窗拖到 90 高**（板 ≈ 3px、缝 ≈ 3px 那一档）：旧版按常数缝
 	// 反解 `90 − 84 − 10 = −4` ⇒ 钉到 0，松手弹簧把窗拽回 84。
-	fake.height = 90
+	fake.height = miniHeight + 6
 	fake.resize()
 
 	// 弹簧钉的应该是「板 ≈ 3 / 全开」那一格，不是 0。
-	if got := s.miniCurtain.height; got <= 0 || got > 2*miniCurtainGap {
+	if got := s.miniCurtain.height; got <= 0 || got > 12 {
 		t.Errorf("窗拖到 90 之后 `s.miniCurtain.height` 是 %.1f："+
-			"反解没走缝渐出那一段（want 0 < h < %d）", got, 2*miniCurtainGap)
+			"反解把板高钉成了 0（want 0 < h ≤ 12）", got)
 	}
 	if pos := s.miniCurtain.spring.pos; pos <= 0 {
 		t.Errorf("窗拖到 90 之后弹簧 `pos` 是 %.3f：它被钉到了 0，"+

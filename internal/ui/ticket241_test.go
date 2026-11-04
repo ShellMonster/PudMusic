@@ -171,46 +171,6 @@ func TestTheConfirmPanelIsWideEnough(t *testing.T) {
 // F-21　迷你窗的音量滑块不再用主色
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheMiniVolumeIsNotTheAccent 钉住「迷你窗里那根音量滑块不是主色绿的」。
-//
-// 迷你播放器只有 320×100，那条音量滑块原来是**实心主色填充**——纯 #1ed760 占
-// 那扇窗的 0.97%，是整扇窗里最大的一块颜色，而它是**次要**的一档（音量），
-// 同窗那条播放位置（主要的）反倒不是彩色的。
-//
-// 判据：**音量那一格里一块主色像素都没有**。
-func TestTheMiniVolumeIsNotTheAccent(t *testing.T) {
-	requireTestAudio(t)
-	a := app.New()
-	t.Cleanup(a.Close)
-	main := newTestShell(t, onApp(a)).s
-	s := NewMini(a, main, nil)
-	t.Cleanup(s.closePerWindow)
-
-	if err := enqueueTwoWithCover(a, t); err != nil {
-		t.Fatal(err)
-	}
-	a.SetVolume(0.6)
-
-	tt := miniTester(s)
-	waitFor(t, "封面画上来了", func() bool {
-		tt.Frame()
-		return !miniCoverBox(tt).Empty()
-	})
-
-	vol, ok := tt.Find("音量")
-	if !ok {
-		t.Fatalf("迷你窗里找不到那根音量滑块，文字有 %q", tt.Texts())
-	}
-	accent := hexColorOf(t, "#1ed760")
-	x0, y0 := int(vol.X)-2, int(vol.Y)-2
-	x1, y1 := int(vol.X+vol.W)+2, int(vol.Y+vol.H)+2
-	n := countPixelsIn(t, tt, x0, y0, x1, y1, accent)
-	if n > 0 {
-		t.Errorf("音量滑块那一格里有 %d 块主色像素——那一扇窗只有 320×100，"+
-			"主色绿占那么大一块，比同窗那条播放位置（主要的）还响", n)
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // F-22　语义色当字色要压深
 // ─────────────────────────────────────────────────────────────────────────────

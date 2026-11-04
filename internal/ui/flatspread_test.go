@@ -31,6 +31,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -244,10 +245,12 @@ func TestTheFullPlayerPartsKeysAreFlat(t *testing.T) {
 // 二、迷你播放器
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheMiniPlayerKeysAreFlat 迷你窗口上那四个图标键。
+// TestTheMiniPlayerKeysAreFlat 迷你窗口上的图标键（上一首 / 下一首 / 回到主窗口 /
+// 歌词）：没有描边圈，悬停才出 hover 底。
 //
-// ⚠️ 音量**不在这里**：它是用户定下来要留的（上游迷你播放器没有），这一票只把
-// 按钮换成图标，一个字都没动它。
+// ⚠️ **播放键不在这里**：原型里它是 36 的实心正文色圆（`.play-btn`），它那一圈
+// 本来就是一块和底色反差最大的实心——量「有没有圈」对它没有意义。
+// ⚠️ 音量 / 静音也不在了：原型的迷你窗没有它们（DESIGN.md §0′.T5）。
 func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -265,15 +268,13 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 			tt.Frame()
 			noPointerMini(tt)
 
-			bg := flatColor(BuildTheme(s.app.SettingsSnapshot(), dark).Surface)
+			bg := flatColor(tok.Of(BuildTheme(s.app.SettingsSnapshot(), dark)).Surface)
 			img := tt.Image()
-			for _, label := range []string{"上一首", "播放", "下一首", "退出"} {
+			for _, label := range []string{"上一首", "下一首", "切换mini/完整模式", "歌词"} {
 				r, ok := tt.Find(label)
 				if !ok {
 					t.Fatalf("迷你播放器上找不到 %q，文字有 %q", label, tt.Texts())
 				}
-				// 84 高的窗里键的上沿紧挨进度条滑钮的软影子，上沿不量（左右下仍量）。
-				r.Y, r.H = r.Y+4, r.H-4
 				assertNoRing(t, img, r, bg, "迷你播放器 "+label)
 			}
 		})
