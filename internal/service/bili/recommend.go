@@ -130,6 +130,9 @@ type RecommendItem struct {
 	// ViewAt / Progress 只有「最近播放」（观看历史）填：什么时候看的、看到哪儿。
 	ViewAt   time.Time
 	Progress time.Duration
+	// PublishedAt 是上架日期（本地时区的当天零点），只有新歌速递填。接口只给「月-日」，
+	// 年份按「不晚于现在」推出来，见 `parsePublishMD`。
+	PublishedAt time.Time
 }
 
 // errReadRecommend 是「HTTP 200、code 0，但 data 的形状不是我们认识的那个」。
@@ -415,6 +418,10 @@ type newMusicData struct {
 		Cid        flexInt64 `json:"cid"`
 		Cover      string    `json:"cover"`
 		Author     string    `json:"author"`
+		// PublishTime 是上架日期，形如 "10-21"（月-日，没有年）。
+		PublishTime string `json:"publish_time"`
+		// TotalVV 是这首歌在站内的总播放量。
+		TotalVV int64 `json:"total_vv"`
 	} `json:"list"`
 }
 
@@ -432,6 +439,7 @@ type newMusicBannerData struct {
 		Cid          flexInt64 `json:"cid"`
 		Cover        string    `json:"cover"`
 		Author       string    `json:"author"`
+		PublishTime  string    `json:"publish_time"`
 	} `json:"list"`
 }
 
@@ -466,7 +474,9 @@ func (c *Client) NewMusic(ctx context.Context) ([]RecommendItem, error) {
 			Title: decodeEntities(it.MusicTitle), Cover: normalizeImageURL(it.Cover),
 			Owner: decodeEntities(it.Author),
 			// 身份的最后那一格：这个接口给的 `id` 是歌的 id，不是稿件的。
-			TrackID: strconv.FormatInt(it.Id, 10),
+			TrackID:     strconv.FormatInt(it.Id, 10),
+			View:        it.TotalVV,
+			PublishedAt: parsePublishMD(it.PublishTime, time.Now()),
 		})
 	}
 	return out, nil
@@ -496,9 +506,32 @@ func (c *Client) NewMusicBanner(ctx context.Context) ([]RecommendItem, error) {
 		out = append(out, RecommendItem{
 			Bvid: it.Bvid, Aid: int64(it.Aid), Cid: int64(it.Cid),
 			Title: decodeEntities(it.ArchiveTitle), Cover: normalizeImageURL(it.Cover),
-			Owner:   it.Author,
-			TrackID: it.MusicID,
+			Owner:       it.Author,
+			TrackID:     it.MusicID,
+			PublishedAt: parsePublishMD(it.PublishTime, time.Now()),
 		})
 	}
 	return out, nil
+}
+
+// parsePublishMD 把新歌速递给的「月-日」（如 "10-21"）换成本地时区当天零点。
+//
+// 接口不给年份：按「不晚于 now」取最近的那一年（12 月看到的 "1-3" 是今年，1 月看到的
+// "12-30" 是去年）。认不出来返回零值，界面据此不画「x 天前上传」。
+func parsePublishMD(s string, now time.Time) time.Time {
+	var m, d int
+	if n, err := fmt.Sscanf(strings.TrimSpace(s), "%d-%d", &m, &d); err != nil || n != 2 {
+		return time.Time{}
+	}
+	if m < 1 || m > 12 || d < 1 || d > 31 {
+		return time.Time{}
+	}
+	t := time.Date(now.Year(), time.Month(m), d, 0, 0, 0, 0, now.Location())
+	if t.Month() != time.Month(m) { // 2-30 之类不存在的日子
+		return time.Time{}
+	}
+	if t.After(now) {
+		t = t.AddDate(-1, 0, 0)
+	}
+	return t
 }

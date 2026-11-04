@@ -57,6 +57,8 @@ type AccountNav struct {
 	// ⚠️ **空串分不出「没设头像」和「没登录」**：B 站对这两种都回空。界面别拿
 	// 它判登录态——`LoggedIn` 才是那一位判据。
 	Face string
+	// Name 是昵称（首页问候语「晚上好，昵称」用）。空串 = B 站没给。
+	Name string
 }
 
 // errAccountNavUnavailable 是「这个 App 没挂登录 / 没挂 B 站客户端」。
@@ -90,5 +92,5 @@ func (a *App) AccountNav(ctx context.Context) (AccountNav, error) {
 	if err != nil {
 		return AccountNav{}, err
 	}
-	return AccountNav{LoggedIn: n.LoggedIn, Face: n.Face}, nil
+	return AccountNav{LoggedIn: n.LoggedIn, Face: n.Face, Name: n.Uname}, nil
 }

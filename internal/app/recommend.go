@@ -63,6 +63,10 @@ type Recommend struct {
 	hot        []string
 	hotAt      time.Time
 	hotLoading bool
+
+	// chart / chartPath 是热榜名次的本地记录，见 chart_history.go。
+	chart     chartHistory
+	chartPath string
 }
 
 // hotSongsShown 是「大家在听」摆几个词；hotSongsTTL 是一份词用多久再换。
@@ -166,6 +170,8 @@ type RecommendItem struct {
 	// ViewAt / Progress 只有最近播放填：看的时刻、看到哪儿。
 	ViewAt   time.Time
 	Progress time.Duration
+	// PublishedAt 是上架日期（当天零点），只有新歌速递填；零值 = 没给。
+	PublishedAt time.Time
 	// Item 是播放和右键菜单真正用的那一项。已是 `Source: "online"`。
 	//
 	// ⚠️ **榜上有些条目没有稿件**（纯音乐条目，`related_archive` 是空的），
@@ -207,7 +213,8 @@ func recommendItems(in []bili.RecommendItem) (out []RecommendItem, dropped int) 
 			Owner: it.Owner, OwnerMid: it.OwnerMid,
 			Duration: it.Duration, View: it.View,
 			ViewAt: it.ViewAt, Progress: it.Progress,
-			Item: recommendItem(it),
+			PublishedAt: it.PublishedAt,
+			Item:        recommendItem(it),
 		})
 	}
 	return out, dropped
@@ -345,6 +352,13 @@ func (r *Recommend) toplist(ctx context.Context, tab, page int) ([]RecommendItem
 		return nil, 0, err
 	}
 	out, dropped := recommendItems(items)
+	if tab == HomeTabHot {
+		ids := make([]string, len(out))
+		for i, it := range out {
+			ids[i] = it.ID
+		}
+		r.noteChart(period.ID, ids)
+	}
 	return out, dropped, nil
 }
 
