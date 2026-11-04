@@ -52,7 +52,7 @@ func TestFavoritingFromTheLaterListOpensTheDialog(t *testing.T) {
 	// ⚠️ **要等**：这些页面的条目只有 bvid，而弹窗要 avid，所以按下去之后
 	// 还要在后台问一次 B 站才开（`app.ResolveFavoriteID`）。只跑一帧的话读到的
 	// 是「还没开」。
-	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
+	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("添加到收藏夹") })
 
 	if tt.HasText("还没接 B 站接口") {
 		t.Errorf("按了「收藏」说的是「还没接」，文字有 %q", tt.Texts())
@@ -82,7 +82,7 @@ func TestFavoritingFromTheHistoryListOpensTheDialog(t *testing.T) {
 	}
 	// 要等：这些页面的条目只有 bvid，开弹窗前要在后台问一次稿件 id
 	// （见上面那一条的注释）。
-	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
+	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("添加到收藏夹") })
 }
 
 // TestFavoritingFromTheSearchListOpensTheDialog 搜索结果那一页。
@@ -108,7 +108,7 @@ func TestFavoritingFromTheSearchListOpensTheDialog(t *testing.T) {
 	}
 	// 要等：搜索结果的条目只有 bvid（`bili.VideoHit` 不给 avid），开弹窗前
 	// 要在后台问一次稿件 id。
-	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("放到收藏夹") })
+	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("添加到收藏夹") })
 	if tt.HasText("还没接 B 站接口") {
 		t.Errorf("按了「收藏」说的是「还没接」，文字有 %q", tt.Texts())
 	}

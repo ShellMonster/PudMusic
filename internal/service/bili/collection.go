@@ -216,6 +216,11 @@ type CollectionInfo struct {
 	Private    bool
 	Default    bool
 	Faved      bool
+	// PlayCount / FavCount 是收藏夹的总播放量和被收藏数（`folder/info` 的
+	// `cnt_info.play` / `cnt_info.collect`）。合集、系列的接口不给，零值就是
+	// 「没有这个数」，界面不画那一格。
+	PlayCount int64
+	FavCount  int64
 }
 
 // folderInfoData 是 `data` 段。
@@ -228,7 +233,11 @@ type folderInfoData struct {
 	Type       int    `json:"type"`
 	MediaCount int    `json:"media_count"`
 	FavState   int    `json:"fav_state"`
-	Upper      struct {
+	CntInfo    struct {
+		Collect int64 `json:"collect"`
+		Play    int64 `json:"play"`
+	} `json:"cnt_info"`
+	Upper struct {
 		Mid  int64  `json:"mid"`
 		Name string `json:"name"`
 		Face string `json:"face"`
@@ -282,9 +291,11 @@ func (c *Client) CollectionInfo(ctx context.Context, id int64, typ CollectionTyp
 		// 不会再变成「永久失败的空框」。
 		Owner: CollectionOwner{Mid: d.Upper.Mid, Name: d.Upper.Name,
 			Face: normalizeImageURL(d.Upper.Face)},
-		Private: d.Attr&1 == 1,
-		Default: (d.Attr>>1)&1 == 0,
-		Faved:   d.FavState == 1,
+		PlayCount: d.CntInfo.Play,
+		FavCount:  d.CntInfo.Collect,
+		Private:   d.Attr&1 == 1,
+		Default:   (d.Attr>>1)&1 == 0,
+		Faved:     d.FavState == 1,
 	}, nil
 }
 

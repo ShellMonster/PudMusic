@@ -52,12 +52,13 @@ func collectionMediaWithNumbers(id int, title string, play, favAge, pubAge int) 
 // 一个和标题对不上的时间。
 func TestTheCollectionPageShowsThePlayCountAndTheCollectionTime(t *testing.T) {
 	m := collectionMediaWithNumbers(1, "有数的歌", 123_400, 3, 100)
-	_, s, tt := collectionShellOpts(t, []shellOpt{withClock(newFakeClock(playtimeNow))},
+	// 窗口摆宽一点：列表窄于 948 时「专辑」那一列（时间写在里面）被隐掉，原型 ≤1180 的口径。
+	_, s, tt := collectionShellOpts(t, []shellOpt{withClock(newFakeClock(playtimeNow)), at(1500, 900)},
 		"", "77", m)
 	waitSongs(t, tt, s, 1)
 
-	// 表头：两列都在，时间那列叫「收藏时间」。
-	for _, want := range []string{"播放量", "收藏时间"} {
+	// 表头（原型 `.tl-head`）：「播放 / 弹幕」和「专辑」——时间（这一页是收藏时间）写在「专辑」那一列里。
+	for _, want := range []string{"播放 / 弹幕", "专辑"} {
 		if !uiShows(tt, want) {
 			t.Errorf("收藏夹的表头上没有「%s」，文字有 %q", want, tt.Texts())
 		}
@@ -306,6 +307,11 @@ func TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow(t *testing.T) {
 			for range 3 {
 				tt.Frame()
 			}
+			// 头部（232 封面 + 上下 40）加操作条比从前高，最小窗口里表头在播放条底下：先滚一段。
+			tt.Scroll(500, 450, 0, 300)
+			for range 3 {
+				tt.Frame()
+			}
 
 			head, ok := tt.Find("标题")
 			if !ok {
@@ -319,34 +325,40 @@ func TestTheColumnsLeaveTheTitleVisibleInTheNarrowestWindow(t *testing.T) {
 				t.Errorf("侧栏 %.0f：行里没有 UP 名（标题列被挤没了）：%q",
 					tc.side, tt.Texts())
 			}
-			// 收藏夹那一列的表头写的是「收藏时间」（`collectionTimeTitle`），
-			// 不是「投稿时间」——查错字的话会以为它在、其实没有。
-			if got := uiShows(tt, "收藏时间"); got != tc.wantPub {
-				t.Errorf("侧栏 %.0f：「收藏时间」那一列在不在=%v，want %v",
-					tc.side, got, tc.wantPub)
+			// 原型表头：窗口 ≤1180 隐掉「专辑」那一列（时间写在里面），「播放 / 弹幕」留着。
+			if got := uiShows(tt, "专辑"); got {
+				t.Errorf("侧栏 %.0f：最窄窗口里「专辑」那一列还在", tc.side)
 			}
-			if got := uiShows(tt, "播放量"); got != tc.wantPlay {
+			if got := uiShows(tt, "播放 / 弹幕"); got != tc.wantPlay {
 				t.Errorf("侧栏 %.0f：播放量那一列在不在=%v，want %v", tc.side, got, tc.wantPlay)
 			}
 
 			// 表头和行里那一格必须对得上（评审量到过错开 9.9 像素）。
 			if tc.wantPlay {
-				headCount, ok := tt.Find("播放量")
+				headCount, ok := tt.Find("播放 / 弹幕")
 				if !ok {
-					t.Fatalf("侧栏 %.0f：表头上没有「播放量」，文字有 %q", tc.side, tt.Texts())
+					t.Fatalf("侧栏 %.0f：表头上没有「播放 / 弹幕」，文字有 %q", tc.side, tt.Texts())
 				}
 				rowCount, ok := tt.Find(list.PlayCountText(123_400))
 				if !ok {
 					t.Fatalf("侧栏 %.0f：行里没有播放量 %q：%q",
 						tc.side, list.PlayCountText(123_400), tt.Texts())
 				}
-				if rowCount.X != headCount.X || rowCount.W != headCount.W {
-					t.Errorf("侧栏 %.0f：播放量那一格 X=%.1f W=%.1f，表头 X=%.1f W=%.1f——错开了",
-						tc.side, rowCount.X, rowCount.W, headCount.X, headCount.W)
+				// 两格都是右对齐的 88 宽那一列：右缘必须对上。
+				if absF((rowCount.X+rowCount.W)-(headCount.X+headCount.W)) > 1 {
+					t.Errorf("侧栏 %.0f：播放量那一格右缘 %.1f，表头右缘 %.1f——错开了",
+						tc.side, rowCount.X+rowCount.W, headCount.X+headCount.W)
 				}
 			}
 			// 行尾的「⋯」也要在（它被挤出画面之后，这一行就只剩右键能开菜单了）。
-			op, ok := tt.Find(list.OperationLabel("歌 一"))
+			// 原型 `.hide-idle`：平时隐着，指针停在行上才出来，所以先把指针放到歌名那一列上。
+			if row, ok := tt.Find("歌 一"); ok {
+				tt.Move(row.X+130, row.Y+row.H/2)
+				for range 3 {
+					tt.Frame()
+				}
+			}
+			op, ok := tt.Find("更多操作：歌 一")
 			if !ok || op.W <= 0 {
 				t.Errorf("侧栏 %.0f：行尾的「⋯」被挤出画面（%v）", tc.side, op)
 			}

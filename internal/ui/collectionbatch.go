@@ -30,8 +30,12 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -53,39 +57,64 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 	// 框架点它时 `Changed()` 响，我们再照总数重算一次该全选还是全不选。
 	all := p.allSelected()
 
-	ui.Row(c).Key("collection-batch-bar").Center().Gap(space.Px12).Padding(space.Px10, space.None).
-		Background(t.Surface).Children(func() {
-		if ui.Checkbox(c, &all, "全选").Label("全选").Changed() {
+	pl := tok.Of(t)
+	info := s.app.Collection(p.ref)
+	// 原型 `.batch`：贴在页底（离底 16、离上 16），内边距 12/16、缝 12、放不下换行，圆角 12、
+	// surface 底、1 像素 line-strong 描边、`--shadow-pop`。
+	bar := ui.Row(c).Key("collection-batch-bar").FillWidth().Wrap().AlignItems(ui.Center).Gap(space.Px12).
+		Padding(space.Px12, space.Px16).Margin(space.Px16, space.None, space.Px16, space.None).
+		Radius(tok.R12).Background(pl.Surface).Border(1, pl.LineStrong)
+	bar = shadow.Pop(bar, t)
+	bar.Children(func() {
+		// 「已选 N 首」（14 / 600，N 等宽），撑开把按钮推到右边（`margin-right:auto`）。
+		ui.Row(c).Grow(1).Gap(space.Px4).AlignItems(ui.Baseline).Children(func() {
+			ui.Text(c, "已选").FontSize(scale.Font(c, scale.Size14)).FontWeight(600).TextColor(pl.Text)
+			typo.Mono(ui.Text(c, strconv.Itoa(chosen))).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).TextColor(pl.Text)
+			ui.Text(c, "首").FontSize(scale.Font(c, scale.Size14)).FontWeight(600).TextColor(pl.Text)
+		})
+		if ui.Checkbox(c, &all, "").Label("全选").Changed() {
 			s.toggleSelectAll(p, !p.allSelected())
 		}
-		ui.Text(c, "已选 "+strconv.Itoa(chosen)+" 首").FontSize(scale.Font(c, scale.Size13)).
-			TextColor(t.TextMuted)
-
-		dl := ui.Button(c, "批量下载")
+		ui.Text(c, "全选").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text).Margin(space.None, space.None, space.None, -4)
+		none := chosen == 0
+		if pud.Button(c, "batch:queue", pud.Ghost, pud.Sm, "加入队列", "queue").Disabled(none).Clicked() {
+			s.enqueueCollectionPicked(p)
+		}
+		// 下载服务没挂上时键是灰的，悬停说清为什么（和从前一样）。
+		dl := pud.Button(c, "batch:dl", pud.Ghost, pud.Sm, "批量下载", "download").Disabled(none || !s.app.DownloaderMounted())
 		if !s.app.DownloaderMounted() {
-			dl = s.withTip(c, dl.Disabled(true), "这个应用没把下载服务挂上")
+			dl = s.withTip(c, dl, "这个应用没把下载服务挂上")
 		}
 		if dl.Clicked() {
 			s.askConfirm(p, confirmDownload, chosen, true)
 		}
-
-		// 🔴 **批量删除只对收藏夹摆**（票 #683 的复审）：`batch-del` 是收藏夹那套
-		// 接口，合集 / 系列里没有「从这里删内容」这个动作。摆出来按下去只会得到
-		// 一句 B 站的错，而 `app.RemoveMedias` 现在也会直接拒绝。
-		//
-		// ⚠️ **批量下载留着**：它按 bvid 走下载服务，和容器类型无关。
-		if p.ref.Type == bili.CollectionFavorite {
-			if ui.Button(c, "批量删除").Clicked() {
+		// 🔴 **批量删除只对自己的收藏夹摆**（原型 `c.mine && !isLiked`；合集 / 系列也没有
+		// 「从这里删内容」这个动作，见票 #683）。批量下载按 bvid 走下载服务，和容器类型无关。
+		if p.ref.Type == bili.CollectionFavorite && s.collectionMine(info) {
+			del := pud.Button(c, "batch:del", pud.Ghost, pud.Sm, "批量删除", "trash").Disabled(none)
+			del = del.TextColor(pl.Err)
+			if del.Clicked() {
 				s.askConfirm(p, confirmDelete, chosen, true)
 			}
 		}
-
-		ui.Spacer(c)
-
-		if ui.Button(c, "退出多选").Clicked() {
+		if pud.Button(c, "batch:off", pud.Quiet, pud.Sm, "退出多选", "").Clicked() {
 			s.toggleCollectionMulti(p)
 		}
 	})
+}
+
+// enqueueCollectionPicked 把勾上的歌追加到队列末尾（批量条上的「加入队列」）。
+func (s *Shell) enqueueCollectionPicked(p *collectionPage) {
+	items, skipped := app.QueueItemsOfMediasCounting(s.pickedMedias(p))
+	if len(items) == 0 {
+		s.addToast("这几首都放不了或已失效", notice.Warning)
+		return
+	}
+	if err := s.app.Enqueue(items...); err != nil {
+		s.addToast("加不进队列："+err.Error(), notice.Danger)
+		return
+	}
+	s.addToast(collectionBatchToast("已加入 "+strconv.Itoa(len(items))+" 首", skipped), notice.Success)
 }
 
 // askConfirm 记下「这件事要用户点一下确定」。

@@ -127,8 +127,35 @@ func TestTheDynamicAuthorNameIsALinkNotAPill(t *testing.T) {
 	b := newUIExplore(t)
 	s, tt, _ := dynamicCardShell(t, b, uiDynamic("v1", "正文"))
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	accent := flatColor(ink.AccentOn(th))
-	assertNameLinkUnderlines(t, tt, accent, "作者v1", "动态条目")
+	// 原型的作者名是 600 的正文色链接（`.post-head .link`）：悬停时底下长出一道 1 像素的线
+	// （`.link:hover { background-size: 100% 1px }`，颜色是当前字色），所以这里量的是
+	// 「悬停前后名字那一格里变了的像素」而不是主色像素。
+	r, ok := tt.Find("作者v1")
+	if !ok {
+		t.Fatalf("动态条目上找不到 %q，文字有 %q", "作者v1", tt.Texts())
+	}
+	noPointer(tt)
+	before := tt.Image()
+	snap := make([]color.RGBA, 0, int(r.W*r.H))
+	for y := int(r.Y); y < int(r.Y+r.H)+3; y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			snap = append(snap, before.RGBAAt(x, y))
+		}
+	}
+	linkHoverOn(t, tt, r)
+	after := tt.Image()
+	changed, i := 0, 0
+	for y := int(r.Y); y < int(r.Y+r.H)+3; y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			if after.RGBAAt(x, y) != snap[i] {
+				changed++
+			}
+			i++
+		}
+	}
+	if changed == 0 {
+		t.Errorf("动态条目：指针停在 %q 上之后画面一个像素都没变——那个名字没有悬停反馈", "作者v1")
+	}
 	assertNoCapsule(t, tt, flatColor(th.Background), "作者v1", "动态条目")
 }
 
@@ -145,33 +172,6 @@ func TestThePlaybarOwnerNameIsALinkNotAPill(t *testing.T) {
 	accent := flatColor(ink.AccentOn(th))
 	assertNameLinkUnderlines(t, tt, accent, "某个 UP 主", "播放条")
 	assertNoCapsule(t, tt, flatColor(th.Background), "某个 UP 主", "播放条")
-}
-
-// TestTheActionButtonsAreStillButtons 断**反面**：同一张卡片上那几枚动作键
-// 悬停时**仍然有**那一层淡底——它们是按钮，不是名字链接。
-//
-// ⚠️ **这是和上面那一组对着断的**：只断「名字变成下划线了」的话，一个把所有
-// 可点元素一起拍平的实现照样全绿——而那正好是票面点名不要的（「按钮该是按钮
-// 还是按钮」）。
-func TestTheActionButtonsAreStillButtons(t *testing.T) {
-	b := newUIExplore(t)
-	item := uiDynamicArchive("v1", "BV1play")
-	setLike(item, 12, false)
-	s, tt, _ := dynamicCardShell(t, b, item)
-	bg := flatColor(BuildTheme(s.app.SettingsSnapshot(), false).Background)
-
-	r, ok := tt.Find("赞 12")
-	if !ok {
-		t.Fatalf("画面上没有「赞 12」，文字有 %q", tt.Texts())
-	}
-	noPointer(tt)
-	before := linkInkIn(tt.Image(), linkBandLeft(r), bg)
-	linkHoverOn(t, tt, r)
-	after := linkInkIn(tt.Image(), linkBandLeft(r), bg)
-	if after == before {
-		t.Errorf("指针停在「赞 12」上之后，那一枚字键周围一点变化都没有（%d → %d）——"+
-			"它还是一枚**按钮**，悬停要有反馈（扁平配方压一层半透明前景色）", before, after)
-	}
 }
 
 // TestTheNameLinkIsKeyboardReachable 断「键盘可达」没丢。

@@ -44,14 +44,13 @@ func TestTheSidebarsNewButtonOpensTheEditDialog(t *testing.T) {
 
 	wantText(t, tt, "新建收藏夹")
 	wantText(t, tt, "点击上传图片")
-	wantText(t, tt, coverHint)
 	// ⚠️ 断言的是 `Label`（名称 / 简介）而不是 `Placeholder`
 	// （「请输入收藏夹名称」）：Placeholder 不是无障碍标签，Tester 找不到它
 	// ——而 Label 才是读屏软件读到的那个，也是用户 Tab 过去时听到的那个。
 	wantText(t, tt, "名称")
 	wantText(t, tt, "简介")
 	wantText(t, tt, "公开")
-	wantText(t, tt, "提交")
+	wantText(t, tt, "新建")
 	wantText(t, tt, "取消")
 	// ⚠️ **刚打开时不画「名称为必填项」**：照抄 Biu 的
 	// `touchedFields.title || isSubmitted`（`favorites-edit-modal/index.tsx:215`）。
@@ -162,7 +161,7 @@ func TestSubmittingCannotBeDismissed(t *testing.T) {
 	settleFrame(tt)
 	openNewFolder(s, "通勤路上")
 	settleFrame(tt)
-	if err := tt.Click("提交"); err != nil {
+	if err := tt.Click("新建"); err != nil {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
@@ -212,7 +211,7 @@ func TestTheRequiredHintWaitsUntilTheNameIsTouched(t *testing.T) {
 
 	// 还没碰：提交按钮是禁用的（valid 是判据），红字也不画。
 	dontWantText(t, tt, "名称为必填项")
-	submit, ok := tt.Find("提交")
+	submit, ok := tt.Find("新建")
 	if !ok {
 		t.Fatalf("提交按钮找不到，文字有 %q", tt.Texts())
 	}
@@ -263,8 +262,8 @@ func TestPickingACoverOpensTheCropDialog(t *testing.T) {
 	openCropDialog(t, s, tt)
 
 	wantText(t, tt, "裁剪封面")
-	wantText(t, tt, "上传")
-	wantText(t, tt, "取消")
+	wantText(t, tt, "确定")
+	wantText(t, tt, "返回")
 
 	// ⚠️ 初始框是 10/10/80/80，而图是 4:3 —— H 会被按 16:9 掰小
 	// （见 fitCrop）。这里钉的是「宽还是 80、左上还是 10」。
@@ -308,7 +307,7 @@ func TestTheUploadedCoverIsSixteenByNine(t *testing.T) {
 				return s.folderEdit.crop.dpr == tc.scale
 			})
 
-			if err := tt.Click("上传"); err != nil {
+			if err := tt.Click("确定"); err != nil {
 				t.Fatal(err)
 			}
 			waitFrames(t, tt, "封面传上去", func() bool { return len(f.coversSent()) == 1 })

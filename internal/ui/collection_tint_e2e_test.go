@@ -236,18 +236,17 @@ func glowPixelsInHeader(t *testing.T, tt *ui.Tester) int {
 		t.Fatal("头图区的标题找不到")
 	}
 	img := tt.Image()
-	// 头图区上沿那一带（光晕从上面最浓往下淡）。
+	// 头部是一整块取色底（原型 `.col-head`：封面色按 26% 混进 bg）：数标题右边那一片里
+	// 「比页面底更红」的像素（R 高出 G 至少 12）。
 	y0 := max(int(cover.Y)-14, 0)
 	y1 := min(int(cover.Y)+6, img.Rect.Max.Y)
-	// 从封面右边那一列往右看（封面那一块是图片，不是光晕）。
 	x0 := int(cover.X) + int(cover.W) + 8
 	x1 := min(x0+200, img.Rect.Max.X)
 	n := 0
 	for y := y0; y < y1; y++ {
 		for x := x0; x < x1; x++ {
 			p := img.RGBAAt(x, y)
-			// 比浅色底（239, 233, 222）更红：R 高出 G 至少 12。
-			if p.R >= 235 && int(p.R)-int(p.G) >= 12 {
+			if int(p.R)-int(p.G) >= 12 {
 				n++
 			}
 		}

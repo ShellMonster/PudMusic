@@ -12,9 +12,6 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -577,21 +574,17 @@ func TestCollectionShowsTheHeaderAndTheOpsBar(t *testing.T) {
 	// ① 头图区：标题、类型 + 条目数、创建者。
 	wantText(t, tt, "通勤路上")
 	wantText(t, tt, "早上听")
-	wantText(t, tt, "公开收藏夹 • 3 条视频")
+	wantText(t, tt, "收藏夹") // Eyebrow（原型 `.eyebrow`：类型，私密的加「 · 私密」）
+	wantText(t, tt, "3 首")
 	wantText(t, tt, "UP 小明")
 
 	// ② 操作条：四个动作 + 排序 + 多选开关。
-	for _, label := range []string{"播放全部", "添加到播放列表", "多选", "排序：最近收藏"} {
+	for _, label := range []string{"播放全部", "随机播放", "多选", "排序：最近收藏"} {
 		wantText(t, tt, label)
 	}
-	// 星标：此刻没收藏。它是图标键（上游 `fav-toggle.tsx` 那一枚），名字挂在
-	// `Label` 上——`Find` 找得到，但画面上一个「☆」字都没有，所以这里量的是
-	// 那一格里**有没有图形**。
-	if r, ok := tt.Find("收藏这个收藏夹"); !ok {
-		t.Errorf("操作条上没有星标，文字有 %q", tt.Texts())
-	} else if s := scanGlyph(tt, "收藏这个收藏夹"); s.ink == "" {
-		t.Errorf("星标那一格是空的（%.1f,%.1f %.1fx%.1f，只有底色 %v）——没画出图标",
-			r.X, r.Y, r.W, r.H, s.bg)
+	// 「收藏」：幽灵键，此刻没收藏（收藏了写「已收藏」）。
+	if _, ok := tt.Find("收藏"); !ok {
+		t.Errorf("操作条上没有「收藏」键，文字有 %q", tt.Texts())
 	}
 
 	// ③ 列表：那一页的歌真的画出来了。
@@ -623,7 +616,7 @@ func TestCollectionShowsTheBatchBarOnlyInMultiMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
-	for _, label := range []string{"全选", "已选 0 首", "批量下载", "批量删除", "退出多选"} {
+	for _, label := range []string{"全选", "已选", "批量下载", "退出多选"} {
 		wantText(t, tt, label)
 	}
 }
@@ -639,9 +632,10 @@ func TestPrivateFoldersSaySo(t *testing.T) {
 	// ⚠️ 判据是**画面上那句话**而不是「缓存里那个字段变了」：缓存改完到下一帧
 	// 画出来之间还有一步，只查缓存的话断言会在那一步之前就通过。
 	waitFrames(t, tt, "新的元信息画出来", func() bool {
-		return tt.HasText("私密收藏夹 • 1 条视频")
+		return tt.HasText("收藏夹 · 私密")
 	})
-	wantText(t, tt, "私密收藏夹 • 1 条视频")
+	wantText(t, tt, "收藏夹 · 私密")
+	wantText(t, tt, "仅自己可见")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -670,10 +664,11 @@ func TestAllThreeSortsReachTheInterface(t *testing.T) {
 		// ⚠️ 判据是**服务器真的收到了那一次请求**，不是「下拉上的字变了」。
 		// 换档会重建整个分页列表，而那一页是后台拉回来的——查得早了会看到
 		// 上一次的 order，于是这条用例变成按运气过的。
-		n := i + 2
-		waitFrames(t, tt, "第 "+strconv.Itoa(n)+" 次内容请求带着 order="+want[i+1], func() bool {
+		//
+		// 开页时列表可能连拉两页（视口没填满就接着拉下一页），所以不数是第几次，看**最近一次**。
+		waitFrames(t, tt, "换档之后有一次内容请求带着 order="+want[i+1], func() bool {
 			got := b.seenOrders()
-			return len(got) >= n && got[n-1] == want[i+1]
+			return len(got) > 0 && got[len(got)-1] == want[i+1]
 		})
 	}
 }
@@ -904,93 +899,36 @@ func TestTheCollectionOpsRowStillFitsAtTheMinWindow(t *testing.T) {
 				if !ok {
 					t.Fatalf("%s：画面上找不到排序下拉，文字有 %q", name, tt.Texts())
 				}
-				// 搜索收着的时候是一枚图标键（「搜索是会展开的按钮」那一半）。
-				button, ok := tt.Find(collectionSearchLabel)
+				// 原型的搜索是常驻的迷你搜索框（`.mini-search`），不再是会展开的图标键。
+				box, ok := tt.Find(collectionSearchLabel)
 				if !ok {
-					t.Fatalf("%s：画面上找不到那枚搜索按钮，文字有 %q", name, tt.Texts())
+					t.Fatalf("%s：画面上找不到搜索框，文字有 %q", name, tt.Texts())
 				}
-				if button.W > 40 {
-					t.Errorf("%s：搜索收着的时候宽 %.1f——那是一枚图标键，不是一个常驻输入框",
-						name, button.W)
-				}
-				// 收起态：多选不许压到搜索上。
 				multi, ok := tt.Find("多选")
 				if !ok {
 					t.Fatalf("%s：画面上找不到「多选」，文字有 %q", name, tt.Texts())
 				}
-				if multi.X+multi.W > button.X {
-					t.Errorf("%s：收起态「多选」的右缘是 %.1f，压到了搜索的左缘 %.1f 上"+
-						"（重叠 %.1f）——两组之间没有让位机制", name,
-						multi.X+multi.W, button.X, multi.X+multi.W-button.X)
+				// 左边那一组（播放全部 … 多选 … 更多）和右边那一组（排序 + 搜索）装不下时，右边那一组
+				// 整个换到下一行（`.col-actions { flex-wrap: wrap }`），**永远不重叠**：
+				// 要么「多选」在搜索框左边，要么搜索框在「多选」下面一行。
+				sameRow := box.Y < multi.Y+multi.H && multi.Y < box.Y+box.H
+				if sameRow && multi.X+multi.W > sort.X {
+					t.Errorf("%s：「多选」的右缘 %.1f 压到了排序下拉的左缘 %.1f 上（同一行里重叠）",
+						name, multi.X+multi.W, sort.X)
 				}
-				// 展开之后才量输入框——挤的时候它要让位，但要停在自己的下限上。
-				if err := tt.Click(collectionSearchLabel); err != nil {
-					t.Fatalf("%s：点不开搜索：%v", name, err)
-				}
-				tt.Frame()
-				box, ok := tt.Find(collectionSearchLabel)
-				if !ok {
-					t.Fatalf("%s：点开之后没有输入框，文字有 %q", name, tt.Texts())
-				}
-				// 收起时那枚图标键是 `iconHitMd` 见方；展开后至少是
-				// `collectionSearchMinWidth`（40）。所以「还是那一枚图标键」=
-				// 没展开，而不能拿 40 当分界：最窄那一档展开后正好就是 40。
-				//
-				// ⚠️ **分界必须跟着 `iconHitMd` 走，不许写死一个数**：图标键的
-				// 点击区从 28 长到 32（上游那一档）之后，写死的 30 就成了**死
-				// 阈值**——收起态那枚是 32 宽，32 > 30，于是「切页回来搜索收起
-				// 了」这个 bug 再也测不出来（变异实验：基线上红、改动后绿）。
-				if box.W <= iconHitMd {
-					t.Fatalf("%s：点开之后还是一个 %.1f 宽的按钮——搜索没有展开",
-						name, box.W)
-				}
-				// 展开态：多选也不许压到输入框上（展开的框更靠左）。
-				multi, ok = tt.Find("多选")
-				if !ok {
-					t.Fatalf("%s：展开之后找不到「多选」，文字有 %q", name, tt.Texts())
-				}
-				if multi.X+multi.W > box.X {
-					t.Errorf("%s：展开态「多选」的右缘是 %.1f，压到了输入框的左缘 %.1f 上"+
-						"（重叠 %.1f）", name, multi.X+multi.W, box.X, multi.X+multi.W-box.X)
-				}
-				// 展开会把排序下拉往左推，重新量一次。
-				sort, ok = tt.Find("排序：最近收藏")
-				if !ok {
-					t.Fatalf("%s：展开搜索之后排序下拉不见了，文字有 %q", name, tt.Texts())
-				}
-
-				// 页边距是页面根那一层的 `pagePadX`（收藏夹的根是
-				// `Padding(0, pagePadX)`；票 #166 把它从 20 收成 16）：这一列的右缘
-				// 应该是 900 - 16 = 884。
-				//
-				// ⚠️ **那 4 个像素的余量**：排序下拉那个触发器的**盒子**比它的布局
-				// 基线宽 3.2（描边那一圈），所以它的右缘会比基线的右缘多出那么一点。
-				// 量的是盒子，就得多留那 3.2。
-				wantRight := float32(minWindowW-pagePadX) + 4
-				if right := sort.X + sort.W; right > wantRight {
-					t.Errorf("%s：排序下拉的右缘是 %.1f，越过了页边距（want ≤ %.0f）",
-						name, right, wantRight)
-				}
-				// **排序下拉必须完整**——「最近收藏 ▾」那一个字都不能少。
-				// 它的自然宽跟着字号缩放走（83.2 → 116.5），所以下限也跟着走。
+				// 排序下拉必须完整（自然宽跟着字号缩放走），而且不许越过窗口右缘。
 				wantSort := float32(collectionSortMinW)*scale - 1
 				if sort.W < wantSort {
-					t.Errorf("%s：排序下拉被压到 %.1f 宽了（want ≥ %.1f）——"+
-						"「最近收藏 ▾」被裁掉了", name, sort.W, wantSort)
+					t.Errorf("%s：排序下拉被压到 %.1f 宽了（want ≥ %.1f）——「最近收藏 ▾」被裁掉了",
+						name, sort.W, wantSort)
 				}
-				// 输入框是那个让位的：它可以窄，但不许窄过自己的下限。
-				if box.W < collectionSearchMinWidth {
-					t.Errorf("%s：那个输入框被压到 %.1f 宽了（want ≥ %d）",
-						name, box.W, collectionSearchMinWidth)
-				}
-				// 都不许跑出窗口。
-				if right := box.X + box.W; right > minWindowW {
-					t.Errorf("%s：输入框的右缘是 %.1f，跑出窗口了（want ≤ %d）",
-						name, right, minWindowW)
-				}
-				if right := sort.X + sort.W; right > minWindowW {
-					t.Errorf("%s：排序下拉的右缘是 %.1f，跑出窗口了（want ≤ %d）",
-						name, right, minWindowW)
+				for _, r := range []struct {
+					what string
+					x, w float32
+				}{{"搜索框", box.X, box.W}, {"排序下拉", sort.X, sort.W}} {
+					if right := r.x + r.w; right > minWindowW {
+						t.Errorf("%s：%s的右缘是 %.1f，跑出窗口了（want ≤ %d）", name, r.what, right, minWindowW)
+					}
 				}
 			})
 		}
@@ -1119,58 +1057,6 @@ func TestCollectionEntriesFeedTheMediaSession(t *testing.T) {
 // 票 #175：头图区、操作条、搜索按钮
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheCollectionHeaderShowsTheCreatorAvatar 创建者那一行前面有一枚 24 的圆头像，
-// 而且**里头是那张图**。
-//
-// # 两条判据，缺一条都不算
-//
-//   - **盒子是 24×24**（`Find` 认的是头像那一格的 `Label`）。
-//   - **图真的出来了**：中心像素是那枚图的颜色。
-//
-// ⚠️ **第二条是这一条的关键**：地址抓不到时（协议相对地址没补协议、图还在路上、
-// 抓失败）画的是一块同色的圆占位——**盒子还是 24×24**，所以只量盒子的话，一个
-// 永远抓不到图的空圆也是绿的（评审第 1 条就是这么漏过去的：真机上那一枚头像
-// 永远是空的，因为 B 站的 `upper.face` 是协议相对地址，而封面缓存的
-// `http.Client` 抓不了那种地址）。
-//
-// ⚠️ **图要从一个普通 http 的小服务器来**：封面缓存用的是默认的 `http.Client`，
-// 它不认自签证书——夹具那个是 TLS 的，抓不动。
-func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
-	if collectionOwnerAvatarSize != 24 {
-		t.Errorf("collectionOwnerAvatarSize = %d，want 24（票面）", collectionOwnerAvatarSize)
-	}
-
-	// 一枚 1×1 的红图。
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "image/png")
-		img := image.NewRGBA(image.Rect(0, 0, 1, 1))
-		img.Set(0, 0, color.RGBA{R: 255, A: 255})
-		if err := png.Encode(w, img); err != nil {
-			t.Errorf("编码那枚头像图失败：%v", err)
-		}
-	}))
-	defer srv.Close()
-
-	b := newCollectionBili(t)
-	b.setMedias(mediaOf(1, "歌 一"))
-	b.infos["upper"] = map[string]any{"mid": 1, "name": "UP 小明", "face": srv.URL + "/face.png"}
-	_, s, tt := collectionShellFrom(t, b, nil, "", "12345")
-	waitSongs(t, tt, s, 1)
-
-	r, ok := tt.Find(collectionOwnerAvatarLabel)
-	if !ok {
-		t.Fatalf("头图区里找不到创建者头像（%q），文字有 %q", collectionOwnerAvatarLabel, tt.Texts())
-	}
-	if r.W < 23 || r.W > 25 || r.H < 23 || r.H > 25 {
-		t.Errorf("创建者头像是 %.0f×%.0f，want 24×24（票面）", r.W, r.H)
-	}
-	// 等那张图到（封面缓存是后台抓的，到了会叫醒界面）。
-	waitFrames(t, tt, "头像图到了", func() bool {
-		c := tt.Image().RGBAAt(round32(r.X+r.W/2), round32(r.Y+r.H/2))
-		return c.R > 200 && c.G < 80 && c.B < 80
-	})
-}
-
 // TestTheCollectionCreatorOpensThatSpace 验头图区那个「创建者」**能点进他的空间**
 // （票 BMG-253）。
 //
@@ -1181,7 +1067,8 @@ func TestTheCollectionHeaderShowsTheCreatorAvatar(t *testing.T) {
 //
 // 两条路都要钉：名字（那一枚和列表里的 UP 名是**同一个出口**）和头像。
 func TestTheCollectionCreatorOpensThatSpace(t *testing.T) {
-	for _, what := range []string{"名字", "头像"} {
+	// 原型里创建者只是一枚名字链接（没有头像），所以只剩「名字」这一支。
+	for _, what := range []string{"名字"} {
 		t.Run(what, func(t *testing.T) {
 			b := newCollectionBili(t)
 			b.setMedias(mediaOf(1, "歌 一"))
@@ -1250,65 +1137,6 @@ func TestTheCollectionCreatorNameLooksLikeALink(t *testing.T) {
 	}
 }
 
-// TestTheCollectionSearchIsACollapsedButton 搜索收着是一枚图标键，点开才是输入框。
-//
-// 这是票 #175 的验收项：**搜索是会展开的按钮**（现在是一个常驻 180 的输入框）。
-// 三条判据，缺一条都不算：
-//
-//   - 刚进来那一下是一枚 32 的图标键（`iconHitMd`），不是输入框；
-//   - 点开之后是一个 40 高的输入框，而且**焦点已经在里面**（用户点放大镜就是
-//     为了打字）；
-//   - 点别的控件之后它收回去（上游的 `useClickAway`）。
-func TestTheCollectionSearchIsACollapsedButton(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
-	waitSongs(t, tt, s, 2)
-
-	r, ok := tt.Find(collectionSearchLabel)
-	if !ok {
-		t.Fatalf("找不到搜索，文字有 %q", tt.Texts())
-	}
-	// 收起态那枚是 `iconHitMd` × `iconMd` 的一枚图标键（上游 HeroUI 的
-	// `isIconOnly` 恒是 32×32，见 `icons.go` 的 `iconHit`）。
-	if r.W > iconHitMd || r.H > iconMd {
-		t.Errorf("搜索刚进来就是 %.0f×%.0f——那是一枚图标键（%d×%d），"+
-			"不该是一个常驻输入框", r.W, r.H, iconHitMd, iconMd)
-	}
-
-	tt.SetFocused(true)
-	if err := tt.Click(collectionSearchLabel); err != nil {
-		t.Fatalf("点不开搜索：%v", err)
-	}
-	tt.Frame()
-
-	r, ok = tt.Find(collectionSearchLabel)
-	if !ok {
-		t.Fatalf("点开之后搜索不见了，文字有 %q", tt.Texts())
-	}
-	if r.W <= iconHitMd {
-		t.Fatalf("点开之后还是 %.0f 宽——搜索没有展开", r.W)
-	}
-	if r.H < 39 || r.H > 41 {
-		t.Errorf("展开后的输入框是 %.0f 高，want 40（上游 `h-10`）", r.H)
-	}
-	if !tt.Focused(collectionSearchLabel) {
-		t.Error("展开之后焦点不在输入框里——用户点放大镜就是为了打字")
-	}
-
-	// 点别的控件（它拿得走焦点）→ 收回去。
-	if err := tt.Click("多选"); err != nil {
-		t.Fatalf("点多选：%v", err)
-	}
-	tt.Frame()
-	tt.Frame()
-	r, ok = tt.Find(collectionSearchLabel)
-	if !ok {
-		t.Fatalf("收回之后搜索不见了，文字有 %q", tt.Texts())
-	}
-	if r.W > iconHitMd {
-		t.Errorf("点了别处之后搜索还是 %.0f 宽——它没有收回去", r.W)
-	}
-}
-
 // TestThePlayAllButtonIsFortyHigh 操作条那枚主按钮是 40 高（上游 `Button` 的 md）。
 //
 // 判据是**像素**：主按钮是实心主色，字上面 / 下面各 8 像素必须还是主色。
@@ -1328,6 +1156,13 @@ func TestThePlayAllButtonIsFortyHigh(t *testing.T) {
 			waitSongs(t, tt, s, 1)
 			tt.SetDark(dark)
 			tt.Frame()
+			// 按钮底色有 160ms 的淡入淡出：推测试钟让它走完，量的才是终点色。
+			for range 40 {
+				if !tt.FramePending() {
+					break
+				}
+				tt.Advance(16 * time.Millisecond)
+			}
 
 			text, ok := tt.Find("播放全部")
 			if !ok {

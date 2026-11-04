@@ -196,9 +196,12 @@ func TestLoginFromTheDynamicPageComesBackToTheDynamicPage(t *testing.T) {
 	tt, s := loginFlowTester(t, a, dynamicFeedPath)
 	tt.Frame()
 
-	if err := tt.Click("去登录，登录后回到动态页"); err != nil {
-		t.Fatalf("动态页上点不到作者栏那枚「去登录」：%v，文字有 %q", err, tt.Texts())
+	// 动态页没登录是原型的 `loginPrompt('动态')`：页头 + 「扫码登录」，登录完回动态页。
+	if err := tt.Click("扫码登录"); err != nil {
+		t.Fatalf("动态页上点不到「扫码登录」：%v，文字有 %q", err, tt.Texts())
 	}
+	tt.Frame()
+	tt.Frame()
 	tt.Frame()
 	if got := s.router.Path(); got != loginPath {
 		t.Fatalf("点了「去登录」之后停在 %q，want %q", got, loginPath)

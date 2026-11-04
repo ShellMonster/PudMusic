@@ -131,10 +131,8 @@ func TestTheUpSpaceVideosCarryTheirPlayCount(t *testing.T) {
 	if got, want := m.PubTime.Unix(), int64(1700000000); got != want {
 		t.Errorf("翻过来之后投稿时间是 %d，want %d（接口的 created）", got, want)
 	}
-	// 表头两列都在。
-	for _, want := range []string{"播放量", "投稿时间"} {
-		if !uiShows(tt, want) {
-			t.Errorf("UP 空间的表头上没有「%s」，文字有 %q", want, tt.Texts())
-		}
+	// 表头（原型 `.tl-head`）：播放量那一列叫「播放 / 弹幕」，投稿时间写在「专辑」那一列里。
+	if !uiShows(tt, "播放 / 弹幕") {
+		t.Errorf("UP 空间的表头上没有「播放 / 弹幕」，文字有 %q", tt.Texts())
 	}
 }

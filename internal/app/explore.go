@@ -270,6 +270,10 @@ func (s *UpSpace) Load() {
 				statErr = err
 				if err == nil {
 					mapped := mapStats(v)
+					// 获赞是另一个接口，尽力而为：拿不到就留 0，界面不画那一格。
+					if likes, lerr := cli.UpLikes(ctx, mid); lerr == nil {
+						mapped.Likes = likes
+					}
 					stat = &mapped
 				}
 

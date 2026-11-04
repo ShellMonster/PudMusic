@@ -71,7 +71,6 @@ var recentEmpty = emptyState{
 var loginPromptWhat = map[string]string{
 	"page:" + laterPath:   "稍后再看",
 	"page:" + historyPath: "历史记录",
-	"page:" + followPath:  "我的关注",
 	"home:recent:login":   "最近播放",
 }
 

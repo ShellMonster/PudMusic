@@ -203,11 +203,11 @@ func TestTheSelectableCollectionHeaderStillTakesItsClicks(t *testing.T) {
 		waitSongs(t, tt, s, 1)
 		tt.Frame()
 
-		if err := tt.Click("收藏这个收藏夹"); err != nil {
+		if err := tt.Click("收藏"); err != nil {
 			t.Fatalf("点不到星标：%v，文字有 %q", err, tt.Texts())
 		}
 		waitFrames(t, tt, "收藏成功", func() bool {
-			return s.app.Collection(s.collection.ref).Faved && tt.HasText("已收藏这个收藏夹")
+			return s.app.Collection(s.collection.ref).Faved && tt.HasText("已收藏")
 		})
 	})
 
@@ -216,8 +216,9 @@ func TestTheSelectableCollectionHeaderStillTakesItsClicks(t *testing.T) {
 		waitSongs(t, tt, s, 1)
 		tt.Frame()
 
-		if err := tt.Click("更多操作"); err != nil {
-			t.Fatalf("点不到 ⋯：%v，文字有 %q", err, tt.Texts())
+		// 原型把「下载全部音频 / 视频」放在单独的「下载」圆键菜单里。
+		if err := tt.Click("下载全部"); err != nil {
+			t.Fatalf("点不到下载菜单：%v，文字有 %q", err, tt.Texts())
 		}
 		settleFrame(tt)
 		got := tt.Menu()
@@ -267,7 +268,8 @@ func TestCmdCCopiesTheSelectedRowTitleInTheCollectionPage(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到第二首，文字有 %q", tt.Texts())
 	}
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	// 行正中央是 UP 主那一列（一枚进空间的链接），点歌名那一列才是「点这一行」。
+	tt.ClickAt(r.X+130, r.Y+r.H/2)
 	tt.Frame()
 	if got, ok := s.collection.list.Selected(); !ok || got.Title != "歌 二" {
 		t.Fatalf("点第二首之后选中的是 (%q, %v)，want 歌 二", got.Title, ok)
@@ -309,7 +311,8 @@ func TestCopyingASelectionStillBeatsTheSelectedRow(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到第二首，文字有 %q", tt.Texts())
 	}
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	// 行正中央是 UP 主那一列（一枚进空间的链接），点歌名那一列才是「点这一行」。
+	tt.ClickAt(r.X+130, r.Y+r.H/2)
 	tt.Frame()
 	if got, ok := s.collection.list.Selected(); !ok || got.Title != "歌 二" {
 		t.Fatalf("先摆好的前提没成立：选中的是 (%q, %v)", got.Title, ok)
@@ -390,7 +393,8 @@ func TestClickingInsideTheHeaderColumnSelectsTheFirstSong(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到第二首，文字有 %q", tt.Texts())
 	}
-	tt.ClickAt(second.X+second.W/2, second.Y+second.H/2)
+	// 行正中央是 UP 主那一列（进空间的链接），点歌名那一列才是「点这一行」。
+	tt.ClickAt(second.X+130, second.Y+second.H/2)
 	tt.Frame()
 	if got, ok := s.collection.list.Selected(); !ok || got.Title != "歌 二" {
 		t.Fatalf("先摆好的前提没成立：选中的是 (%q, %v)", got.Title, ok)

@@ -23,12 +23,17 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -106,51 +111,66 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 	t := c.Theme()
 	busy := e.busy()
 
-	modal := ui.Modal(c, &e.open, func() {
-		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
-		ui.Text(c, e.heading()).FontSize(scale.Font(c, scale.Size16))
-		s.viewCoverPicker(c, e)
-
-		// 名称。⚠️ `Placeholder` 和 `Label` 不同时给：`Label` 是给读屏软件
-		// 读的（那里写「名称」），`Placeholder` 是给眼睛看的（那里写
-		// 「请输入收藏夹名称」）。两个都写的话界面上会出现两份同样的字。
-		name := ui.TextInput(c, &e.title).Placeholder("请输入收藏夹名称").
-			Disabled(busy).Width(coverPreviewW + 60)
-		name.Label("名称")
-		if name.Changed() {
-			e.touched = true
-		}
-
-		intro := ui.TextArea(c, &e.intro).Placeholder("可选，简单介绍此收藏夹").
-			Disabled(busy).Width(coverPreviewW + 60).Height(84)
-		intro.Label("简介")
-
-		// 公开 / 私密。Biu 是一个 Switch（`favorites-edit-modal/index.tsx:243`）。
-		pub := ui.Toggle(c, &e.public, publicLabel(e.public)).Disabled(busy)
-		pub.Label("公开还是私密")
-
-		// ⚠️ **碰过之后才画**（理由见 touched 那个字段）。
-		if !e.valid() && !busy && e.touched {
-			ui.Text(c, "名称为必填项").FontSize(scale.Font(c, scale.Size11)).TextColor(dangerText(t))
-		}
-
-		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "取消").Disabled(e.submitting).Clicked() {
+	modal := ui.DialogBase(c, &e.open, func(backdrop, panel ui.Element) {
+		dlgPanel(c, backdrop, panel, e.heading(), dlgSheetW)
+		pl := tok.Of(t)
+		dlgBody(c, e.heading(), "", func() {
+			// 原型 `.form-grid`：左边 128 见方的封面格，右边表单，缝 24，离标题 16。
+			ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(space.Px24).Margin(space.Px16, space.None, space.None, space.None).
+				Children(func() {
+					ui.Column(c).Shrink(0).Children(func() { s.viewCoverPicker(c, e) })
+					ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(space.Px16).Children(func() {
+						// 名称：`.field`（标签 13 / 500，缝 6）+ 40 高输入框。
+						ui.Column(c).Gap(space.Px6).Children(func() {
+							ui.Row(c).Gap(space.Px4).Children(func() {
+								ui.Text(c, "名称").FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(pl.Text)
+								ui.Text(c, "*").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Err)
+							})
+							// ⚠️ `Placeholder` 给眼睛看，`Label` 给读屏软件读。
+							name := ui.TextInput(c, &e.title).Placeholder("请输入收藏夹名称").
+								Disabled(busy).FillWidth().Height(40)
+							name.Label("名称")
+							if name.Changed() {
+								e.touched = true
+							}
+							// ⚠️ **碰过之后才画**（理由见 touched 那个字段）。
+							if !e.valid() && !busy && e.touched {
+								ui.Text(c, "名称为必填项").FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Err)
+							}
+						})
+						// 简介：88 起的文本域 + 右下角计数（等宽 12 text-3，`n / 200`）。
+						ui.Column(c).Gap(space.Px6).Children(func() {
+							ui.Text(c, "简介").FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(pl.Text)
+							intro := ui.TextArea(c, &e.intro).Placeholder("可以不填").
+								Disabled(busy).FillWidth().Height(88)
+							intro.Label("简介")
+							typo.Mono(ui.Text(c, strconv.Itoa(utf8.RuneCountInString(e.intro))+" / 200")).
+								FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).AlignSelf(ui.End)
+						})
+						// 私密：开关 + 两行字（原型 `fe-priv`）。
+						ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+							priv := !e.public
+							if pud.Switch(c, "folderedit:priv", &priv, "私密收藏夹") {
+								e.public = !priv
+							}
+							ui.Column(c).Children(func() {
+								ui.Text(c, "私密收藏夹").FontSize(scale.Font(c, scale.Size14)).FontWeight(500).TextColor(pl.Text)
+								hint := "公开：别人能在你的空间看到"
+								if priv {
+									hint = "只有你自己能看到"
+								}
+								ui.Text(c, hint).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3)
+							})
+						})
+					})
+				})
+		})
+		dlgFoot(c, nil, func() {
+			if pud.Button(c, "folderedit:cancel", pud.Ghost, pud.Std, "取消", "").Disabled(e.submitting).Clicked() {
 				s.closeFolderEdit()
 			}
-			// ⚠️ **提交中那一档是「转起来 + 灰下去」**（票 #178）：原来只是把字
-			// 换成「提交中…」，而 Biu 那个 `<AsyncButton isLoading>` 画的是一枚
-			// **转圈**的按钮——「在忙」这件事只靠字说，没有一个能一眼看出来的
-			// 样子。共用的那一档见 `loading.go` 的 `busyPrimaryButton`。
-			//
-			// ⚠️ **「提交中」和「还在拉封面」是两件事**：后者那个按钮是灰着的，
-			// 但它**不是在忙**——它上面不该转圈（转圈会让用户以为还在提交）。
-			if e.submitting {
-				busyPrimaryButton(c, submitLabel(true))
-				return
-			}
-			sub := ui.PrimaryButton(c, submitLabel(false)).Disabled(busy || !e.valid())
-			if sub.Clicked() {
+			// 「提交中」是转圈的主色键；「还在拉封面」只是灰着，不转圈（两件事）。
+			if dlgPrimary(c, "folderedit:ok", submitLabel(e.submitting, e.editID > 0), e.submitting, busy || !e.valid()) {
 				s.submitFolderEdit(e)
 			}
 		})
@@ -176,11 +196,14 @@ func publicLabel(public bool) string {
 }
 
 // submitLabel 是提交按钮上的字。
-func submitLabel(busy bool) string {
-	if busy {
+func submitLabel(busy, editing bool) string {
+	switch {
+	case busy:
 		return "提交中…"
+	case editing:
+		return "保存"
 	}
-	return "提交"
+	return "新建"
 }
 
 // folderResultTone 是后台那一条结果的语气：成了是绿的，没成是红的。

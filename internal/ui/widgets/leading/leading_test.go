@@ -34,10 +34,12 @@ func TestTheLeadingValuesAreLocked(t *testing.T) {
 	want := map[string]float64{
 		"Owner": 1.0, "Compact": 1.2, "Lyrics": 1.375, "Signature": 1.4,
 		"Title": 1.5, "Copy": 1.5, "Result": 1.6, "Body": 1.55, "PageTitle": 1.15, "Hint": 1.7,
+		"Display": 1.1,
 	}
 	got := map[string]float64{
 		"Owner": Owner, "Compact": Compact, "Lyrics": Lyrics, "Signature": Signature,
 		"Title": Title, "Copy": Copy, "Result": Result, "Body": Body, "PageTitle": PageTitle, "Hint": Hint,
+		"Display": Display,
 	}
 	for name, w := range want {
 		g, ok := got[name]

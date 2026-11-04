@@ -169,11 +169,13 @@ func headerCoverRect(t *testing.T, tt *ui.Tester) ui.Rect {
 	if !ok {
 		t.Fatalf("头图区的标题找不到，文字有 %q", tt.Texts())
 	}
+	// 封面 232 见方，和标题那一列隔 40（`.col-head` 的 gap），封面底边和文字列底边对齐：
+	// 取标题往左 40+232，往上取到封面上沿（封面比文字列高，文字列底对齐）。
 	return ui.Rect{
-		X: title.X - collectionCoverW - space.Px16,
-		Y: title.Y,
-		W: collectionCoverW,
-		H: collectionCoverH,
+		X: title.X - space.Px40 - collectionCoverSide,
+		Y: title.Y - (collectionCoverSide - 160),
+		W: collectionCoverSide,
+		H: collectionCoverSide,
 	}
 }
 
@@ -221,14 +223,14 @@ func TestTheCollectionHeaderShowsTheFallbackCoverWhenTheFirstIsDead(t *testing.T
 	if !pics.saw("dead-first") {
 		t.Fatalf("接口给的那张封面一次都没请求——那兜底是被别的东西触发的：%v", pics.seen())
 	}
-	// ② 兜底那张是按**头图区自己的尺寸**要的（`200w_168h_1c`），不是列表行
+	// ② 兜底那张是按**头图区自己的尺寸**要的（`232w_232h_1c`），不是列表行
 	//    那一档小图：`GetSized` 的键是 (地址, 宽, 高)，要错了尺寸等于白画。
-	if !pics.saw("@200w_168h_1c.webp") {
+	if !pics.saw("@256w_256h_1c.webp") {
 		tail := pics.seen()
 		if len(tail) > 12 {
 			tail = tail[:12]
 		}
-		t.Fatalf("头图区没有按 200×168 那一档要过图：%v", tail)
+		t.Fatalf("头图区没有按 232×232（落在 256 那一档缓存）要过图：%v", tail)
 	}
 
 	// ③ 头图区那块真的铺满了蓝（不是只描了一条边）。

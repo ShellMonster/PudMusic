@@ -152,11 +152,16 @@ type Track struct {
 	RowWire func(row ui.Element) ui.Element
 	// Menu 是「⋯」点开的菜单（也就是右键菜单那一份）。nil 时「⋯」只报 `More` 事件。
 	Menu func(m *ui.Menu)
+	// Multi 是批量选择态：序号那一格换成一枚勾选框（原型 `trackRows` 的 `multi`），
+	// Checked 是它勾没勾（同时也该把 Selected 置上，整行 accent-soft 底）。
+	Multi, Checked bool
 }
 
 // TrackEvents 是这一帧在这一行上发生的事。
 type TrackEvents struct {
 	Play, Like, More, Owner, Remove bool
+	// Check 是批量选择态下勾选框被点了。
+	Check bool
 	// Hovered 是指针在这一行上（调用方要做右键菜单、拖动时可用）。
 	Hovered bool
 }
@@ -191,6 +196,11 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 		// 序号 / 播放键 / eq-bars。
 		ui.Box(c).Size(colIdx, 32).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			switch {
+			case t.Multi:
+				on := t.Checked
+				if ui.Checkbox(c, &on, "").Label("选择 " + t.Title).Changed() {
+					ev.Check = true
+				}
 			case hot:
 				b := ui.ButtonBase(c).Key(key+":play").Label("播放 "+t.Title).Size(32, 32).
 					Radius(16).AlignItems(ui.Center).Justify(ui.Center)

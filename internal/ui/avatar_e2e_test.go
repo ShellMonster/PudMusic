@@ -246,9 +246,9 @@ func TestTheAvatarIsStillDrawn(t *testing.T) {
 	if !ok {
 		t.Fatalf("关注页上找不到那个头像（%q），文字有 %q", face, tt.Texts())
 	}
-	// 那一格该是**方的**（头像要正方形，见 `followCardSide`）。
-	if r.W < followCardSide-1 || r.W > followCardSide+1 {
-		t.Errorf("头像那一格是 %v，want %d 见方（头像要正方形）", r, followCardSide)
+	// 那一格该是**方的**（头像要正方形，原型 `.ucard` 的头像 56）。
+	if r.W < 55 || r.W > 57 {
+		t.Errorf("头像那一格是 %v，want 56 见方（头像要正方形）", r)
 	}
 
 	// 中心那一像素该是**红的**（假图床给的是纯红图）。

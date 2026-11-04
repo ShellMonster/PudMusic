@@ -3475,6 +3475,8 @@ var Items = []Item{
 			"TestTheFullPlayerKeysAreFlat",
 			"TestTheMiniPlayerKeysAreFlat",
 			"TestTheCollectionKeysAreFlat",
+			"TestTheDownloadListKeysAreFlat",
+			"TestTheLocalMusicKeysAreFlat",
 			"TestTheDynamicCardKeysAreFlat",
 			// 反面：该保留描边的那一批。
 			"TestTheDialogButtonsStayOutlined",
@@ -3505,6 +3507,7 @@ var Items = []Item{
 			"TestTheDynamicAuthorNameIsALinkNotAPill",
 			"TestThePlaybarOwnerNameIsALinkNotAPill",
 			"TestTheActionButtonsAreStillButtons",
+			"TestTheListOwnerNameIsALinkNotAPill",
 			"TestTheNameLinkIsKeyboardReachable",
 			"TestTheUnderlineColorFollowsTheTheme",
 		},
@@ -3597,10 +3600,8 @@ var Items = []Item{
 		Spec: "收藏夹头图区：标题下面那三行字都是 14、行与行之间是 16、创建者有一枚 24 的头像（四块左缘对齐；一行标题时那一列不越过封面的下缘）；操作条那枚主按钮是 40 高；「按歌名找」是一枚**会展开的按钮**（收起是图标键，展开是输入框，点别处收回去，切页回来不抢键盘焦点），且它在每一个侧栏宽度和系统字号缩放下都不压到「多选」上；下载记录的表有一张卡片底，文件名 hover 长出外链图标并能点开 B 站页面，筛选是横排的单选圆点；本地音乐的工具条是图标键，行 hover 时序号换成播放图标",
 		Tests: []string{
 			// 收藏夹头图区：字号（AST）、竖距与左缘（画面）、头像的大小。
-			"TestTheCollectionHeaderCopyIsFourteen",
 			"TestTheCollectionTitleIsTheBigOne",
 			"TestTheCollectionHeaderStaysInsideTheCoverOnOneLine",
-			"TestTheCollectionHeaderShowsTheCreatorAvatar",
 			// 头像那个地址要**抓得到**（B 站给的是协议相对地址，不补协议就是
 			// 一块永远抓不到图的空圆）。
 			"TestTheOwnerFaceGetsItsProtocol",
@@ -3608,7 +3609,6 @@ var Items = []Item{
 			// 点别处收起 / 切页回来不抢焦点）；两个分组在每一个侧栏宽度和字号
 			// 缩放下都不重叠。
 			"TestThePlayAllButtonIsFortyHigh",
-			"TestTheCollectionSearchIsACollapsedButton",
 			"TestTheCollectionSearchDoesNotStealTheFocusWhenComingBack",
 			"TestTheCollectionOpsRowStillFitsAtTheMinWindow",
 			// 下载记录：卡片底（深浅两套逐像素采样）、文件名 hover 的外链图标与
@@ -3640,9 +3640,9 @@ var Items = []Item{
 		Spec: "UP 空间头图区（设计规范 v0.1 §7.18，取代上游压黑蒙版 + 白字的做法）：横幅 132 高、底部淡进页面底色；头像 112 压在横幅下沿；名字、认证徽章、签名、统计写在**页面底色**上，字色用主题自己的字色，不再依赖头图是什么图",
 		Tests: []string{
 			// 头像 112、左右留白 32、头像压在横幅下沿、昵称与徽章与签名的排布。
-			"TestTheSpaceAvatarIs112AndTheHeaderPads32",
+			"TestTheSpaceAvatarIs112AndTheHeaderUsesThePagePadding",
 			"TestTheHeaderPutsTheNameTheBadgeAndTheSignInOneRow",
-			"TestTheFollowButtonIsAnOutlinedBox",
+			"TestTheFollowButtonIsPrimaryUntilFollowed",
 			"TestTheHeaderShowsTheBadgeOnlyWhenThereIsOne",
 			// 「关注」那一枚**键盘走得到、回车按得动**（它换成了自绘的描边
 			// 方块，而自绘的那一版一开始用的是 `ui.Row`——那是个容器，
@@ -3706,10 +3706,10 @@ var Items = []Item{
 		Category: Platform,
 		Spec:     "UP 空间的动态条目：左边头像 + 昵称，下面一行「时间 · 动作」，右边「赞 + 数」与「⋯」；稿件卡横排（封面 192×128 + 右下角时长角标，右边标题 / 描述 / 播放量），带圆角、描边和卡片底",
 		Tests: []string{
-			"TestTheDynamicItemPutsTheTimeUnderTheNameAndTheLikeOnTheRight",
+			"TestTheDynamicItemPutsTheTimeBesideTheNameAndTheLikeInTheFoot",
 			"TestTheMoreMenuHoldsTheMusicActions",
-			"TestTheArchiveCardIsHorizontalWithADurationBadge",
-			"TestTheDynamicPaneCardAndCoverMatchUpstream",
+			"TestTheArchiveCardIsAnEmbedWithAPlayButton",
+			"TestTheDynamicFeedMatchesThePrototypeLayout",
 		},
 	},
 	{
@@ -4762,6 +4762,7 @@ var Items = []Item{
 			"TestTheCoverLoadingFillIsVisibleOnALightPage",
 			"TestTheCoverLoadingCellShimmers",
 			"TestTheAuthorPaneSaysItIsLoading",
+			"TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing",
 			"TestTheCollectionHeaderDoesNotClaimZeroMedia",
 			"TestTheCollectionOwnerRowKeepsItsSlot",
 			"TestTheShimmerFlagIsTheWindowsOwnFlag",
@@ -4850,9 +4851,9 @@ var Items = []Item{
 			"TestEachScreenStaysInsideItsFrameBudget",
 			// 画面：卡片底是**卡片那一档**、悬停那一档从卡片自己的底出发
 			// （这一条早就有，这一票不许破坏它）。
-			"TestTheFollowCardSitsOnItsOwnBackground",
+			"TestTheFollowCardIsLayeredByItsBorderNotAShadow",
 			// 卡片那圈影还在（这一票碰的是底色和圆角，影不许动）。
-			"TestTheFollowCardHasAShadow",
+			"TestTheFollowCardIsLayeredByItsBorderNotAShadow",
 			// 卡片那一族（弹窗面板 / 抽屉面板）还是同一档料。
 			"TestDialogCardIsTheSurfaceToken",
 			"TestCardsAndDialogsStillStandOffTheBackground",

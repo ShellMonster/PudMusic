@@ -161,8 +161,8 @@ func TestTheUpSpacePlayAllReplacesTheQueue(t *testing.T) {
 	tt.Frame()
 
 	old := seedThreeSongs(t, a)
-	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("播放投稿"); err != nil {
+		t.Fatalf("点不到「播放投稿」：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "队列换成这一页的歌", func() bool {
 		got := a.Queue().Items()

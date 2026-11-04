@@ -4,6 +4,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"image"
 	"image/color"
 	"net/http"
@@ -93,44 +94,41 @@ func TestTheAuthorListPagesAndEachRowGoesToThatSpace(t *testing.T) {
 	tt.Frame()
 
 	if !tt.HasText("全部") {
-		t.Errorf("作者栏第一行该是「全部」，文字有 %q", tt.Texts())
+		t.Errorf("chip 横排第一枚该是「全部」，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("第一个 UP") {
 		t.Errorf("关注的人没画出来，文字有 %q", tt.Texts())
 	}
 
-	// 翻页：滚到作者栏底部（哨兵进画面）就会拉下一页。
-	//
-	// ⚠️ **等的是终态而不是「多了一个」**：这一栏装不满时哨兵一直在画面里，
-	// 于是**一次滚动可能连翻好几页**（实测一帧就从 2 个翻到 5 个）。早一版按
-	// 「翻一页」一步一步等，读 `before` 的那一刻下一页可能已经到了，
-	// 于是永远等不到「比 before 多一个」。
-	//
-	// ⚠️ **滚到末尾只能等条件**（见 `scrollToEnd`）。早一版是「外层 5 轮、内层
-	// 每轮滚 3 下」，而那两层数的是次数：判据落在外层的条件上，可内层那 3 下
-	// 滚没滚到末尾没人管——作者栏那一列是 `5 个人 + 1 个哨兵`，第五个人是哪一趟
-	// 回来的就停在哪，于是断的 `第五页的一个`（末尾那一个）有时在画面上有时没有。
-	//
-	// ⚠️ 判据是**作者栏那一份**状态（`authState`），不是右边动态那一份。
-	scrollToEnd(t, tt, 60, 400, "作者栏的末尾", f.authState.AtEnd)
-	waitFrames(t, tt, "作者栏翻到底", func() bool {
+	// chip 横排没有滚动可以「滚到底」，所以一页页自动往后拉，直到 total 拉完。
+	waitFrames(t, tt, "关注的人拉完", func() bool {
 		return len(f.authors) == 5 || (f.auth.started && !f.auth.hasMore)
 	})
 	tt.Frame()
-	scrollToEnd(t, tt, 60, 400, "作者栏的末尾", f.authState.AtEnd)
 	if len(f.authors) != 5 {
-		t.Fatalf("翻了之后作者栏有 %d 个人，want 5（total 就是 5）", len(f.authors))
+		t.Fatalf("拉完之后有 %d 个人，want 5（total 就是 5）", len(f.authors))
 	}
 	if !showsText(tt, "第五页的一个") {
-		t.Errorf("翻页之后新一页的人没画出来，文字有 %q", tt.Texts())
+		t.Errorf("后面几页的人没画出来，文字有 %q", tt.Texts())
 	}
 
-	// 点一个作者 = 跳进他的 UP 空间。
+	// 点一枚 chip = 按这位 UP 主筛动态（原型 `feed-up`），不跳走；再点「全部」回来。
 	if err := tt.Click("第三页的一个"); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.router.Path(); got != "/user/13" {
-		t.Errorf("点了作者跳到了 %q，want /user/13", got)
+	tt.Frame()
+	if f.filterMid != 13 {
+		t.Errorf("点了 chip 之后筛的是 %d，want 13", f.filterMid)
+	}
+	if got := s.router.Path(); got != dynamicFeedPath {
+		t.Errorf("点 chip 不该跳页，路径变成了 %q", got)
+	}
+	if err := tt.Click("全部"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if f.filterMid != 0 {
+		t.Errorf("点了「全部」之后筛的还是 %d", f.filterMid)
 	}
 }
 
@@ -148,12 +146,11 @@ func TestTheAuthorListIsNotShownWithoutALogin(t *testing.T) {
 
 	s.navigate(dynamicFeedPath)
 	tt.Frame()
-	f := s.dynamicFeedOf()
-	waitFrames(t, tt, "动态到了", func() bool { return f.started })
 	tt.Frame()
 
-	if !tt.HasText("登录之后能看到你关注的人") {
-		t.Errorf("没登录时作者栏该说清为什么是空的，文字有 %q", tt.Texts())
+	// 原型 `loginPrompt('动态')`：整页换成「登录后查看动态」，不假装有内容。
+	if !tt.HasText("登录后查看动态") {
+		t.Errorf("没登录时该说清为什么是空的，文字有 %q", tt.Texts())
 	}
 	if b.hit("/x/relation/followings") {
 		t.Error("没登录还去问了关注列表（那个接口会回 -101）")
@@ -464,10 +461,9 @@ func TestTheAuthorRetryWhilePendingDoesNotSendASecondRequest(t *testing.T) {
 	}
 }
 
-// TestTheDynamicPaneCardAndCoverMatchUpstream 钉住动态流这一页的结构尺寸：
-// 左栏 256（上游 `w-64`）、卡片左右各 32、作者头像 36、投稿封面 192×128、
-// 每张卡片一条下边框，以及左栏右缘那条分界线。
-func TestTheDynamicPaneCardAndCoverMatchUpstream(t *testing.T) {
+// TestTheDynamicFeedMatchesThePrototypeLayout 钉住动态流这一页的结构尺寸（原型 `PAGES.feed`）：
+// 页边距按窗口宽、`.feed` 最宽 760、头像 44、嵌入卡封面 72，每条动态一条下边框。
+func TestTheDynamicFeedMatchesThePrototypeLayout(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "我自己", 0, 1)
 	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
@@ -491,59 +487,40 @@ func TestTheDynamicPaneCardAndCoverMatchUpstream(t *testing.T) {
 	tt.Frame()
 
 	pageLeft := float32(sideTargetWidth(s.app.SettingsSnapshot()))
+	winW := float32(tt.Image().Bounds().Dx())
+	img := tt.Image()
 
-	// ① 左边那一栏 256，卡片左右各 32。第一张卡那一行的无障碍盒子就是
-	// 卡片的内容区（`st.Label` 挂在整行上），它的左右缘同时钉住这两个数。
+	// ① 这一行的无障碍盒子（`st.Label` 挂在整行上）左缘 = 页边距，右缘 = 窗口右边减页边距。
 	card, ok := tt.Find("第一条正文")
 	if !ok {
 		t.Fatalf("画面上找不到第一条动态，文字有 %q", tt.Texts())
 	}
-	wantLeft := pageLeft + authorPaneW + 32
-	if card.X != wantLeft {
-		t.Errorf("卡片左缘在 %.1f，want %.1f（左栏 %d + 左右 32）", card.X, wantLeft, authorPaneW)
+	if want := pageLeft + space.PageHorizontalForWindow(winW); card.X != want {
+		t.Errorf("动态那一行左缘在 %.1f，want %.1f（页边距 %.0f）", card.X, want, space.PageHorizontalForWindow(winW))
 	}
-	winW := float32(tt.Image().Bounds().Dx())
-	if got := winW - (card.X + card.W); got != 32 {
-		t.Errorf("卡片离页面右缘 %.1f，want 32", got)
+	if got := winW - (card.X + card.W); got != space.PageHorizontalForWindow(winW) {
+		t.Errorf("动态那一行离页面右缘 %.1f，want %.0f", got, space.PageHorizontalForWindow(winW))
 	}
 
-	// ② 左栏右缘那条分界线：上游 `border-r` + `border-divider/40`。
-	img := tt.Image()
-	bx := int(pageLeft) + authorPaneW - 1
-	if got, ref := img.RGBAAt(bx, 400), img.RGBAAt(bx-4, 400); got == ref {
-		t.Errorf("左栏右缘 (%d,400) 是 %v，和左边四像素一样——那条分界线没画", bx, got)
-	}
-
-	// ③ 左栏每行的头像 36（上游 `h-9 w-9`）。
-	av, ok := tt.Find("https://f/author-11.jpg")
-	if !ok {
-		t.Fatalf("作者栏头像没画出来，文字有 %q", tt.Texts())
-	}
-	if av.W != 36 || av.H != 36 {
-		t.Errorf("作者栏头像量出来是 %.1f×%.1f，want 36×36", av.W, av.H)
-	}
-
-	// ④ 投稿封面 192×128（上游 `w-48 h-32`，`user-profile/dynamic-list/item.tsx:180`）。
-	//
-	// ⚠️ **不是方的**：改之前是 96 见方（纯音频产品的旧设计，设计规范 v0.1
-	// §7.17），票 #268 照 B 站 UP 主页那张参考图改成 16:9 的横图。
+	// ③ 嵌入卡封面 72 见方。
 	cover, ok := tt.Find("https://f/c.jpg")
 	if !ok {
-		t.Fatalf("投稿封面没画出来，文字有 %q", tt.Texts())
+		t.Fatalf("嵌入卡封面没画出来，文字有 %q", tt.Texts())
 	}
-	if cover.W != 192 || cover.H != 128 {
-		t.Errorf("投稿封面量出来是 %.1f×%.1f，want 192×128", cover.W, cover.H)
+	if cover.W != 72 || cover.H != 72 {
+		t.Errorf("嵌入卡封面量出来是 %.1f×%.1f，want 72×72", cover.W, cover.H)
 	}
 
-	// ⑤ 两张卡之间那条下边框：扫两行之间，找一行**贯穿卡片整宽**的线。
+	// ④ 两条动态之间那条下边框：扫两行之间，找一行贯穿卡片整宽的线。
 	second, ok := tt.Find("投稿 BV1xx")
 	if !ok {
 		t.Fatalf("画面上找不到第二条动态，文字有 %q", tt.Texts())
 	}
+	// `.feed` 最宽 760，下边框就铺这 760。
 	ref := img.RGBAAt(int(card.X)+4, int(card.Y)+4)
-	if _, ok := fullWidthRule(img, int(card.X), int(card.X+card.W),
+	if _, ok := fullWidthRule(img, int(card.X), int(card.X)+feedMaxW,
 		int(card.Y), int(second.Y), ref); !ok {
-		t.Errorf("两张动态之间没有贯穿卡片宽的一条下边框（卡片边框 `border-b` 没画）")
+		t.Errorf("两条动态之间没有贯穿 760 宽的一条下边框（`.post` 的 border-bottom 没画）")
 	}
 }
 

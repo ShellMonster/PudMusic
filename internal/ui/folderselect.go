@@ -27,8 +27,10 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -93,7 +95,7 @@ func (s *Shell) openFolderSelect(item app.Item) {
 func (s *Shell) openFolderSelectNow(item app.Item, rid int64, typ int) {
 	f := &folderSelect{
 		open: true, rid: rid, contentType: typ,
-		title:  "把《" + firstNonEmpty(item.Title, "这一首") + "》放到收藏夹",
+		title:  "「" + firstNonEmpty(item.Title, "这一首") + "」可以同时放进多个收藏夹。",
 		picked: map[int64]bool{},
 	}
 	// 先摆上上一份（打开过的话），这样第二次打开不是从空白开始——网络慢的时候
@@ -203,49 +205,41 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 	}
 	t := c.Theme()
 
-	modal := ui.Modal(c, &f.open, func() {
-		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
-		ui.Text(c, f.title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…")
-		// 「全选」那一行。⚠️ 判据是**当前列表里的每一行都勾上了**（严格长度
-		// 相等），理由和批量操作条那一处一样：`collectionbatch.go` 的
-		// `allSelected`。在这里换成「有没有一个没勾」的话，用户勾到一半时
-		// 那一格会是「全不选」的样子，而不是「部分选中」。
-		all := f.allSelected()
-		ui.Row(c).Gap(space.Px10).Center().Children(func() {
+	modal := ui.DialogBase(c, &f.open, func(backdrop, panel ui.Element) {
+		dlgPanel(c, backdrop, panel, "添加到收藏夹", dlgSheetW)
+		// 原型 `openFolderPick`：标题「添加到收藏夹」+ 一句说明 + 收藏夹列表 + 脚。
+		dlgBody(c, "添加到收藏夹", f.title, func() {
+			pl := tok.Of(t)
+			switch {
+			case !f.loaded && len(f.list) == 0:
+				ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3).
+					Margin(space.Px16, space.None, space.None, space.None)
+			case len(f.list) == 0:
+				ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3).
+					Margin(space.Px16, space.None, space.None, space.None)
+			default:
+				// `.pick-list`：离说明 16，最高 280，行距 4。
+				pickScroll := ui.Scroll(c).FillWidth().MaxHeight(280).Margin(space.Px16, space.None, space.None, space.None).
+					Children(func() {
+						ui.List(c, &f.ls, len(f.list), func(i int) { s.viewFolderPickRow(c, f, i) }).GapY(space.Px4)
+					})
+				s.trackScrollbar(pickScroll)
+			}
+		})
+		// 脚：左边是「全选 / 已选 N 个」（原型没有，保留的是多选能力），右边取消 + 确定。
+		dlgFoot(c, func() {
+			all := f.allSelected()
 			if ui.Checkbox(c, &all, "全选").Label("全选").Disabled(f.submitting).Changed() {
 				f.toggleAll(!f.allSelected())
 			}
-			ui.Text(c, "已选 "+strconv.Itoa(len(f.picked))+" 个收藏夹").
-				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-			ui.Spacer(c)
-			ui.Text(c, selectListHint(f)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-		})
-
-		if !f.loaded && len(f.list) == 0 {
-			ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Padding(space.Px12)
-		} else if len(f.list) == 0 {
-			ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted).Padding(space.Px12)
-		} else {
-			pickScroll := ui.Scroll(c).Height(300).Children(func() {
-				ui.List(c, &f.ls, len(f.list), func(i int) { s.viewFolderPickRow(c, f, i) })
-			})
-			s.trackScrollbar(pickScroll)
-		}
-
-		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "取消").Disabled(f.submitting).Clicked() {
+			ui.Text(c, "已选 "+strconv.Itoa(len(f.picked))+" 个收藏夹").FontSize(scale.Font(c, scale.Size12)).
+				TextColor(tok.Of(t).Text3).SingleLine().Ellipsis("…")
+		}, func() {
+			if pud.Button(c, "folderpick:cancel", pud.Ghost, pud.Std, "取消", "").Disabled(f.submitting).Clicked() {
 				s.closeFolderSelect()
 			}
-			// ⚠️ **提交中那一档是「转起来 + 灰下去」**（票 #178）：原来只是把字
-			// 换成「提交中…」，而 Biu 那个 `<AsyncButton isLoading>` 画的是一枚
-			// **转圈**的按钮——「在忙」这件事只靠字说，没有一个能一眼看出来的
-			// 样子。共用的那一档见 `loading.go` 的 `busyPrimaryButton`。
-			if f.submitting {
-				busyPrimaryButton(c, confirmLabel(true))
-				return
-			}
-			sub := ui.PrimaryButton(c, confirmLabel(false)).Disabled(!f.changed())
-			if sub.Clicked() {
+			// 提交中是「转起来 + 灰下去」（票 #178）。
+			if dlgPrimary(c, "folderpick:ok", confirmLabel(f.submitting), f.submitting, !f.changed()) {
 				s.submitFolderSelect(f)
 			}
 		})
@@ -261,7 +255,7 @@ func confirmLabel(busy bool) string {
 	if busy {
 		return "提交中…"
 	}
-	return "确认"
+	return "确定"
 }
 
 // selectListHint 是右上角那一小行。
@@ -286,22 +280,33 @@ func selectListHint(f *folderSelect) string {
 // 少一行的话用户得瞄着那个小方框点，而弹窗里一列都是这种行——瞄错的次数
 // 不少，症状是「有时候勾不上」。
 func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
-	t := c.Theme()
+	pl := tok.Of(c.Theme())
 	item := f.list[i]
 
-	row := ui.Column(c).Key(favSelectRowKey(item.ID)).Grow(1).
-		Radius(t.Radius).Padding(space.Px6, space.Px8).Gap(space.Px2)
+	// 原型 `.pick-row`：勾 + 32 封面 + 名字（14 / 500）与「N 首 · 公开」（12 text-3），
+	// 内边距 8、缝 12、圆角 8、悬停 hover 底。
+	row := ui.Row(c).Key(favSelectRowKey(item.ID)).FillWidth().AlignItems(ui.Center).Gap(space.Px12).
+		Padding(space.Px8).Radius(tok.R8)
 	if row.Hovered() {
-		row = row.Background(t.SurfaceHover)
+		row = row.Background(pl.Hover)
 	}
-
 	row.Children(func() {
 		on := f.picked[item.ID]
-		ui.Row(c).Gap(space.Px8).Center().Children(func() {
-			if ui.Checkbox(c, &on, item.Title).Disabled(f.submitting).Changed() {
-				f.toggle(item.ID)
+		if ui.Checkbox(c, &on, "").Label(item.Title).Disabled(f.submitting).Changed() {
+			f.toggle(item.ID)
+		}
+		ui.Box(c).Size(32, 32).Radius(tok.R4).Clip().Background(pl.Surface2).Shrink(0).
+			AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+			if item.Cover != "" {
+				s.collCoverDraw(item.Cover)(c, 32, 32)
+			} else {
+				ui.Icon(c, pud.Icon("folder")).FontSize(16).TextColor(pl.Text3)
 			}
-			ui.Text(c, selectRowSubtitle(item)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+		})
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
+			ui.Text(c, item.Title).FontSize(scale.Font(c, scale.Size14)).FontWeight(500).TextColor(pl.Text).
+				SingleLine().Ellipsis("…")
+			ui.Text(c, selectRowSubtitle(item)).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).SingleLine()
 		})
 	})
 	if row.Clicked() {
@@ -315,9 +320,11 @@ func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 // 私密的那几个标出来——用户同时有公开和私密的收藏夹时，界面上分不出哪几个
 // 是私密的，而「我收藏到别人也能看见的地方去了」是一个要靠肉眼发现的错误。
 func selectRowSubtitle(f bili.CreatedFolder) string {
-	sub := strconv.Itoa(f.MediaCount) + " 个内容"
+	sub := strconv.Itoa(f.MediaCount) + " 首"
 	if f.Private {
 		sub += " · 私密"
+	} else {
+		sub += " · 公开"
 	}
 	return sub
 }

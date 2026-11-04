@@ -36,13 +36,9 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -225,6 +221,11 @@ type collectionPage struct {
 
 	// confirm 是「要不要用户点一下确认」。
 	confirm confirmRequest
+
+	// bandBG / bandH 是头部通栏色块的颜色和高度（`viewCollectionHeader` 每帧记，
+	// 页根的 Draw 用；高度是上一帧量到的）。
+	bandBG ui.Color
+	bandH  float32
 }
 
 // newCollectionPage 建这一页的状态。
@@ -270,6 +271,8 @@ func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 		PubTimeTitle: collectionTimeTitle(p.ref.Type),
 		Now:          s.now,
 	})
+	// 行和表头画原型样式（`pud.TrackRow` / `pud.TrackHead`，多选态序号格换成勾选框）。
+	l.SetPudRows(true)
 	return l
 }
 
@@ -425,7 +428,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	// `pages/video-collection/favorites/index.tsx:436`）。
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
-	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).Padding(space.None, pagePadX).Children(func() {
+	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).
+		Padding(space.None, space.PageHorizontalForWindow(windowW(c))).
+		Draw(func(pp *ui.Painter, r ui.Rect) { s.paintCollectionBand(pp, r, p) }).Children(func() {
 		// 🔴 **头图区、操作条、表头都在列表的滚动区里**（票 #625）：它们是
 		// **列表的第 0 行**（页内头部，`list.Lead`），跟着内容一起滚走。
 		//
@@ -770,10 +775,10 @@ func collectionRefOfPath(path, query string) app.CollectionRef {
 
 // ── 头图区 ─────────────────────────────────────────────────────────────────
 
-// 头图区那几个尺寸。照 Biu 的 `header/index.tsx`：封面 200×168（不是方的）。
+// 头图区封面尺寸：原型 `.cover.lg` 232 见方。
 const (
-	collectionCoverW = 200
-	collectionCoverH = 168
+	collectionCoverW = 232
+	collectionCoverH = 232
 
 	// collectionHeadGap 是那三行字之间的行距：`space-y-4` = **16**
 	// （上游同一个文件 :53-113）。
@@ -872,188 +877,8 @@ func (s *Shell) collectionHeaderCover(ref app.CollectionRef, info app.Collection
 	return s.app.FolderFallbackCover(ref)
 }
 
-// viewCollectionHeader 是顶部头图区：封面 + 标题 + 简介 + 类型和条数 + 创建者。
-//
-// 文案和排列照抄 `src/pages/video-collection/header/index.tsx:53-113`：右边那一
-// 列是 `space-y-4`，标题 `text-3xl font-bold`，下面三行都是 `text-sm`（14）。
-func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
-	t := c.Theme()
-	info := s.app.Collection(p.ref)
-	// 光晕跟着**这一帧真正画的那张封面**走（见 `collectionHeaderCover`）：
-	// 兜底换上之后颜色也要换，否则会出现「封面是第二首的、光晕还是第一首
-	// （失效那张）的颜色」——而失效那张往往根本没有颜色可给。
-	//
-	// ⚠️ `sync` 的缓存键就是**它收到的那个地址**（`covertint_cache_test.go` 的
-	// `TestTheTintCacheIsKeyedByTheURL` 钉着），所以换地址天然换色、切回来也
-	// 命得中原来那一条。
-	cover := s.collectionHeaderCover(p.ref, info)
-	hue, sat := s.tint.sync(cover, s.wake.invalidate)
-	glow := collectionGlow(t, hue, sat)
-
-	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	//
-	// 设计稿 docs/design-mockups/collection_header.png：头图区是一块带封面主色光晕的
-	// 横幅——从封面色（浅色 18% / 深色 28%）自上而下淡到透明。取不到色（封面空、
-	// 还没下回来、灰得没颜色）时没有光晕，画面和以前一样。
-	ui.Row(c).Key("collection-header").Gap(space.Px16).Padding(space.Px20, space.Px20, space.Px20).
-		Radius(t.Radius * 2).LinearGradient(glow).
-		Children(func() {
-			// ① 封面。
-			//
-			// ⚠️ **元信息还没回来时传空地址就是「画成没有封面」**（2026-10-27）：
-			// `info.Cover` 在 `!Loaded` 时是空串，而 `imgcache` 把空地址当
-			// 「**本来就没有**」那一档画（浅底 + 描边框 + 图片图标）——于是一个
-			// **有封面**的收藏夹在打开的头几帧里会先画成「没有封面」，数据到了
-			// 才换成图。那两档的含义是相反的。
-			//
-			// 所以 `!Loaded` 时直接画「正在加载」那一档（一块带扫光的灰）。
-			//
-			// ⚠️ **`cover` 是三层兜底之后的那一张**（见 `collectionHeaderCover`）：
-			// 接口给的那张拉不下来时它是夹里下一首的，而不是那张坏图。
-			//
-			// ⚠️ **兜底地址也走 `imgcache.View` 的原始地址**（不带 `@…` 参数）：
-			// 那一格按 `collectionCoverW × collectionCoverH` **自己**向图床要
-			// 对应的一档（`GetSized`），和判断「拉失败」时用的是同一个尺寸。
-			// 手动拼一副参数的话两边就成了两个缓存条目——判完了还是画不出来。
-			if info.Loaded {
-				shadow.TailwindLG(imgcache.View(c, s.images, cover, collectionCoverW, collectionCoverH))
-			} else {
-				shadow.TailwindLG(imgcache.Loading(c, collectionCoverW, collectionCoverH, imgcache.Shape{}))
-			}
-
-			// 🔴 **文字那一列是可选中复制的**（票 #685）：用户想复制的是「这个
-			// 收藏夹叫什么、简介写了什么」——拖一下、Cmd+C 就该粘得出来。
-			//
-			// ⚠️ **作用域给在**这一列**上，不给每一行各来一次**：一个容器上的
-			// `Selectable` 让里面所有 Text / RichText 共用一个选择
-			// （`mygo/ui/api_gen.go` 的 `Selectable`：「On a container, its Text
-			// and RichText descendants share one selection. Copy joins their
-			// selected text with newlines, in the order they were built.」）。
-			// 逐行各加一次的话，从标题拖到简介时第一行会掉出作用域——用户得
-			// 复制三次，而他要的是「一整段」。
-			//
-			// ⚠️ **创建者那一行不用 `Unselectable`**：那个名字是
-			// `list.OwnerName`（一枚 `ButtonBase` 做的名字型链接），而框架对
-			// 控件里的字本来就不给选（同一份文档：「Text inside controls, such
-			// as buttons and text inputs, keeps the control's interaction」；
-			// 判据在 `mygo/ui/textselection.go` 的 `prepareSelectable`：祖先带
-			// `flagClickable` 就停）。多加一道 `Unselectable` 反而会把这一行
-			// **整个**踢出选择作用域，将来它旁边真要加一段说明字也选不了了。
-			//
-			// ⚠️ **封面不在这**一列里：它在外面那个 `Row` 里，是图片、没有字。
-			ui.Column(c).Grow(1).AlignItems(ui.Start).Gap(collectionHeadGap).Selectable().Children(func() {
-				// ⚠️ **这个标题是 30（`scale.CollectionTitle`），不是页标题那个数**：
-				// 头图区的大标题抄上游 `text-3xl`，见 pagerhythm.go 那段。
-				ui.Text(c, collectionTitleText(p.ref.Type, info)).FontSize(scale.Font(c, scale.CollectionTitle)).Bold().
-					MaxLines(2).Ellipsis("…")
-
-				// ② 简介。Biu 是 `line-clamp-1`，有才画。
-				if info.Intro != "" {
-					ui.Text(c, info.Intro).FontSize(scale.Font(c, scale.CollectionCopy)).LineHeight(leading.Copy).
-						TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
-				}
-
-				// ③ 类型 + 条目数。Biu 写的是「{公开|私密}收藏夹 • N 条视频」
-				// （`header/index.tsx:88-96`）——**条目数永远说「条视频」**，
-				// 上游连音频也是这么写的，这里照抄。
-				//
-				// 🔴 **没拉到之前不写数**（2026-10-27）：`CollectionInfo` 在
-				// `!Loaded` 时是零值，照写就是**「公开收藏夹 • 0 条视频」**——
-				// 那个 0 是**假数**（真实值可能是几百），和 UP 空间那边
-				// 「粉丝数 0」是同一种错（见 `SpaceHeader.StatOK` 的注释）。
-				// 这一档只写类型，数等到手了再补。
-				ui.Text(c, collectionHeaderKindText(p.ref.Type, info)).
-					FontSize(scale.Font(c, scale.CollectionCopy)).LineHeight(leading.Copy).
-					TextColor(t.TextMuted).MaxLines(1)
-
-				// ④ 创建者：一枚 24 的圆头像 + 14 的昵称（上游是一个 `User`）。
-				//
-				// ⚠️ **没拉到之前这一行要留位**（2026-10-27）：`OwnerName` 在
-				// `!Loaded` 时是空串，原先整行不画——数据到了这一行凭空冒出来，
-				// 头图区高度跳一截（下面的操作条和列表跟着往下走）。所以那一档
-				// 摆一行**同高的骨架**（一个 24 的圆 + 一道 14 高的字条）。
-				if !info.Loaded {
-					ui.Row(c).Key("collection-owner:skel").Gap(space.Px8).Center().
-						Label(collectionOwnerLoadingText).Children(func() {
-						skeleton.Block(c, "collection-owner:skel:av",
-							collectionOwnerAvatarSize, collectionOwnerAvatarSize, collectionOwnerAvatarSize/2)
-						skeleton.Block(c, "collection-owner:skel:n", 96, 14, 4)
-					})
-				} else if info.OwnerName != "" {
-					ui.Row(c).Gap(space.Px8).Center().Children(func() {
-						s.viewCollectionOwnerAvatar(c, info.OwnerFace, info.OwnerMid)
-						// 🔴 **名字是一枚可点的名字型链接**（票 BMG-253）：这一行
-						// 原先**整个都点不动**——用户看到「某某创建的」却进不去他的
-						// 空间，而**同一页的列表里每一行的 UP 名是能点进去的**
-						// （一页两套）。
-						//
-						// ⚠️ **走 `list.OwnerName`**：那是列表里那一枚的**同一个
-						// 出口**——同一档反馈、同一套下划线、同一句提示。两处各画
-						// 各的的话，同一个 UP 名在一处有下划线、在另一处没有。
-						list.OwnerName(c, info.OwnerName, info.OwnerName,
-							list.OwnerTipText(info.OwnerName), info.OwnerMid,
-							scale.Font(c, scale.CollectionCopy), leading.Copy,
-							t.TextMuted, s.ownerActions())
-					})
-				}
-			})
-		})
-}
-
 // collectionOwnerLoadingText 是创建者那一行骨架的无障碍名字。
 const collectionOwnerLoadingText = "正在加载收藏夹信息"
-
-// viewCollectionOwnerAvatar 是创建者那一枚圆头像（`collectionOwnerAvatarSize`）。
-//
-// 地址空着、还没下回来、或者下失败时画一块圆占位——**头像这一格不消失**：
-// 它是「创建者」那一行的开头，消失之后那一行只剩一个名字，左边凭空空出一格；
-// 而占位的大小和真头像一样，换上来的时候那一行不会动。
-//
-// 🔴 **有地址的三态交给 `imgcache`**（2026-10-27）：这一格原先只判 `Ready()`，
-// 其余三种画的是同一块 `Surface` 圆——而它下面的底就是 `Surface`，于是那一格
-// 在加载中看着**什么都没画**（一块和底同色的圆）。现在加载中带扫光、失败带
-// 描边框和人形，和「他压根没设头像」分得开。
-//
-// 🔴 **它是一枚按钮**（票 BMG-253）：这一行原先整个都点不动——用户看到「某某
-// 创建的」却进不去他的空间。悬停时外面多一圈主色的环（和顶栏那个头像同一套，
-// 见 `avatarHoverRing`），所以它**看起来也是能点的**。
-//
-// ⚠️ **没有编号时它不是按钮**：那一页压根没给创建者的编号，而点它只能跳到一个
-// 空路径（理由同 `list.OwnerName` 那一段：把入口画成能点的、点下去却到不了
-// 地方，比不画更坏）。
-func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string, mid int64) {
-	t := c.Theme()
-	side := float32(collectionOwnerAvatarSize)
-	// 那一枚圆（占位 / 真图都在里面）。
-	//
-	// ⚠️ **名字只挂一处**：可点的那一格把名字挂在**按钮**上（下面），里面这一
-	// 格就不挂——两处都挂的话辅助技术会念两遍，而画面上只有一枚圆。
-	draw := func(label string) {
-		ui.Box(c).Size(side, side).Radius(side / 2).Clip().
-			Background(t.Surface).Label(label).Children(func() {
-			if face == "" {
-				return
-			}
-			imgcache.States(c, s.images, face, side, side, side/2, imgcache.AvatarShape())
-		})
-	}
-	if mid <= 0 {
-		draw(collectionOwnerAvatarLabel)
-		return
-	}
-	hit := ui.ButtonBase(c).Size(side, side).Padding(space.None).
-		Label(collectionOwnerAvatarLabel).
-		// ⚠️ **角色是「按钮」**：框架的 `ui.ButtonBase` **不给角色**（只有
-		// `ui.Button` 给），而这一枚是这一票新加的按钮——辅助技术得念得出它是
-		// 一个按得动的东西。
-		Role(ui.RoleButton)
-	// ⚠️ hover 要在 Children **之前**问（理由同顶栏那个头像）。
-	hit = avatarHoverRing(c, hit, hit.Hovered(), side)
-	hit.Children(func() { draw("") })
-	if hit.Clicked() {
-		s.openOwnerSpace(mid)
-	}
-}
 
 // collectionTitleText 是头图区那个大标题。
 //
@@ -1108,149 +933,6 @@ func collectionHeaderKindText(typ bili.CollectionType, info app.CollectionInfo) 
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────
 
-// viewCollectionOps 是头图区下面那一排：左边四个动作 + 多选，右边「按歌名找 +
-// 排序」。项和顺序照 Biu 的 `src/pages/video-collection/operation/index.tsx:33-56`
-// （上游右边就是 `SearchWithSort`）。主按钮是上游 `Button` 默认的 md 档：**40 高**。
-//
-// # 两组之间必须有让位机制（这一条是机器钉着的）
-//
-// 两组的宽度**跟着系统字号缩放走**：排序下拉的自然宽在 1.0 倍下是 83.2，1.4 倍
-// 下是 116.5；「播放全部」「多选」那两串字也一样。而最快的那一档（窗口 900 +
-// 侧栏 480）内容区只有 **388**——字号一大，两组就装不下了。
-//
-// ⚠️ **装不下的时候左边那一组自己换行**（`Wrap`）：多选开关落到第二行，那一排
-// 于是高一点，但**两组永远不重叠**。实测（评审第 1 条的同一组数）：
-//
-//	字号 1.25 侧栏 480：换行之前多选的右缘 750.6、搜索的左缘 744.0（重叠 6.6）；
-//	                换行之后多选的右缘 636.1、搜索的左缘 744.0（不重叠）。
-//	字号 1.40 侧栏 480：换行之前重叠 30.7；换行之后多选的右缘 631.8、搜索 731.5。
-//
-// 换行的**代价**是那一排在最挤的那一档会高出一行——比「两个控件叠在一起」好得多。
-//
-// # 右边那一组不许被挤扁
-//
-// 排序下拉**必须有最小宽**（`collectionSortMinW`，按字号缩放跟着长）：没有它，
-// 框架挤不下时先扣它——实测被裁成 66.6 宽、右缘跑到 900（已经出窗口），最后
-// 一个字和那个「▾」都不见了。搜索是那个该让位的，它的下限是
-// `collectionSearchMinWidth`（40）。见 `viewCollectionSort`。
-func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
-	t := c.Theme()
-
-	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	//
-	// ⚠️ **右边那一组自己 `Grow(1)` + `Justify(End)`，不是外面一个 `Spacer`**：
-	// `Spacer` 自己也是一个子元素，它两边各占一道 8 的缝——最窄那一档里那 16
-	// 像素正好把搜索挤到下限以下（实测多出 8.6）。让右边那一组把剩下的空地
-	// 全吃掉、内容靠右，既不留缝，搜索框又有一个能长到 240 的地方。
-	ui.Row(c).Key("collection-ops").FillWidth().Center().
-		Padding(space.None, space.None, space.Px12).Children(func() {
-		// ⚠️ **`Wrap` 是这一排的让位机制**（理由见文件头那两段）：这一组放不
-		// 下时它自己换行，而不是让内容溢出到右边那一组身上。
-		ui.Row(c).Gap(space.Px8).Center().Wrap().Children(func() {
-			// 上游那枚主按钮是 `Button` 默认的 md 档：**40 高**。
-			if ui.PrimaryButton(c, "播放全部").Height(collectionOpsButtonH).Clicked() {
-				s.playWholeCollection(p)
-			}
-			// 上游是一枚 `size="md" variant="flat"` 的图标键
-			// （`operation/index.tsx:44`，tooltip「添加到播放列表」）。
-			if s.withTip(c, flatIconButton(c, iconEnqueue, "添加到播放列表", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "添加到播放列表").Clicked() {
-				s.addWholeCollectionToQueue(p)
-			}
-			s.viewCollectionStar(c, p)
-			s.viewCollectionMore(c, p)
-
-			// 多选开关。多选态开着时这一排还在，只是列表左边多了一列勾。
-			// 它是文字键（那是「一个模式」，不是一个动作），但同样不走
-			// `ui.Button`——那一圈描边在这一排上是唯一的异类。
-			multi := flatButton(c, "多选")
-			if p.multi {
-				multi = multi.Background(t.SurfaceHover)
-			}
-			if multi.Clicked() {
-				s.toggleCollectionMulti(p)
-			}
-		})
-
-		// 右边「按歌名找 + 排序」，照上游 `SearchWithSort` 的次序。
-		//
-		// ⚠️ **`Grow(1)` 是给搜索框留的那块地**：它自己上限 240，而 `Grow` 只
-		// 在有富余的父宽度里才长。少了这一句，输入框永远是 40 宽（实测截图里
-		// 一个字都填不满）。`Justify(End)` 让这一组贴着页边距。
-		ui.Row(c).Grow(1).Gap(space.Px8).Center().Justify(ui.End).Children(func() {
-			s.viewCollectionSearch(c, p)
-			// ⚠️ **合集 / 系列不摆排序下拉**（理由见 `collectionSortSupported`）。
-			if collectionSortSupported(p.ref.Type) {
-				s.viewCollectionSort(c, p)
-			}
-		})
-	})
-}
-
-// viewCollectionStar 是收藏 / 取消收藏那个星标。
-//
-// Biu 是实心 / 空心两个图标（`operation/fav-toggle.tsx:12-20`），而且是
-// `isIconOnly size="md" variant="flat"` 的一枚图标键。我们照它——图标集里
-// `iconStar` / `iconStarFilled` 就是那两个文件，画哪一张仍由 `favIcon` 说了算
-// （状态图标唯一出口那条规矩）。
-//
-// ⚠️ Biu 那一侧对「视频系列」和「自己创建的收藏夹」不画这个按钮
-// （`operation/index.tsx:47-49`）。这一页拿不到「是不是自己创建的」
-// （`fav_state` 说的是这个容器有没有被别人收藏），所以**收藏夹**那一档两种都画
-// ——让服务端拒绝比在界面上猜一个条件准。
-//
-// 🔴 **系列不画**（票 #683 的复审）：B 站没有「收藏一个系列」这个动作（上游
-// `operation/index.tsx` 也是这么分的），摆出来按下去只会得到一句看不懂的错。
-// 合集照画——`fav/season/fav` 是有的。
-func (s *Shell) viewCollectionStar(c *ui.Context, p *collectionPage) {
-	if p.ref.Type == bili.CollectionSeries {
-		return
-	}
-	info := s.app.Collection(p.ref)
-	// ⚠️ **那句话带上这一类的名字**（票 #683 的复审）：合集页上写「收藏这个收藏夹」
-	// 说的是另一件事——用户点的是合集，页面上也写着「视频合集」。收藏夹那一档
-	// 一个字都不改（「收藏这个收藏夹」，不管公开还是私密——原来就是这样）。
-	tip := "收藏这个收藏夹"
-	if p.ref.Type != bili.CollectionFavorite {
-		tip = "收藏这个" + p.ref.Type.Label()
-	}
-	if info.Faved {
-		tip = "取消收藏"
-	}
-	if s.withTip(c, flatIconButton(c, favIcon(info.Faved), tip, iconMd).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), tip).Clicked() {
-		s.setCollectionFav(p, !info.Faved)
-	}
-}
-
-// viewCollectionMore 是那个 ⋯ 菜单。
-//
-// 项照 Biu 的 `operation/menu.tsx:37-100`：下载全部音频 / 下载全部视频 /
-// 清除失效内容 / 删除。「下载」两条走的是同一个接口（B 站给的是同一条音频
-// 流，「音频 / 视频」是**下载器**那边的分别），所以现在它们是同一条路。
-//
-// ⚠️ **「删除」改成了「删除收藏夹」，而且旁边多了一项「从侧栏移除」**——
-// 上游那两项都没有。理由是规格点名要「删 B 站那边的」和「只删本地记录」摆成
-// **两个选项**（issue #100，父规格 #91 的第 28 条）：只摆一个「删除」的话，
-// 用户按之前分不清那一下到底是 B 站上的收藏夹没了，还是只是这一侧不显示了。
-func (s *Shell) viewCollectionMore(c *ui.Context, p *collectionPage) {
-	items := s.collectionMoreItemsFor(p)
-	// 上游是一枚 `isIconOnly variant="flat"` 的 ⋯（`operation/menu.tsx:114`）。
-	// `.Menu()` 本身就是「按钮 + 菜单」（`mygo/ui/menu.go` 顶上那个例子就是用
-	// `ButtonBase` 拼的），所以扁平配方接得上——`ui.MenuButton` 那一版会自己
-	// 画一圈描边和一枚 ▾，放在这一排新扁平的三枚旁边就它一个不是。
-	s.withTip(c, flatIconButton(c, iconMore, "更多操作", iconMd).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "更多").
-		Menu(func(m *ui.Menu) {
-			for _, item := range items {
-				if m.Item(item.label).Chosen() {
-					s.collectionMoreAction(p, item)
-					return
-				}
-			}
-		})
-}
-
 // collectionMoreBaseItems 是 ⋯ 菜单里**每一页都有**的那几项。文案照 Biu。
 var collectionMoreBaseItems = []collectionMenuItem{
 	{key: "download-audio", label: "下载全部音频"},
@@ -1281,30 +963,6 @@ var collectionMoreOwnerItems = []collectionMenuItem{
 // 侧栏那个「隐藏」作用一样，但没有和「删除」并排摆出来过。
 var collectionMoreForgetItem = collectionMenuItem{key: "forget-folder", label: "从侧栏移除"}
 
-// collectionMoreItemsFor 是 ⋯ 菜单此刻摆得出来的那些项，**按显示顺序**。
-//
-// ⚠️ **每次返回一份新的**：往那张包级切片上 append，就是让「多开一次菜单」
-// 变成一个跨帧的副作用，而那种错没有一处测试会红。
-//
-// ⚠️ **元信息还没回来时，下面三项一个都摆不出来**：它们全都要收藏夹的名字，
-// 而名字在那之前是「正在加载…」。把那句话念进一个不可撤销的确认框里是最糟的
-// 一种——用户读到「删掉「正在加载…」吗」只会点确定。留两个下载项（B 站那边
-// 的歌还没到，点了也只能下载到零首，那条路径自己会说清楚）。
-func (s *Shell) collectionMoreItemsFor(p *collectionPage) []collectionMenuItem {
-	info := s.app.Collection(p.ref)
-	items := make([]collectionMenuItem, 0, len(collectionMoreBaseItems)+len(collectionMoreOwnerItems)+1)
-	items = append(items, collectionMoreBaseItems...)
-	if !info.Loaded {
-		return items
-	}
-	// ⚠️ **这两项只属于收藏夹**（理由见 `collectionMoreOwnerItems`）：合集 / 系列
-	// 上 B 站没有这两个动作，摆出来就是一条注定失败的路。
-	if p.ref.Type == bili.CollectionFavorite && s.app.CanDeleteCollection(p.ref) {
-		items = append(items, collectionMoreOwnerItems...)
-	}
-	return append(items, collectionMoreForgetItem)
-}
-
 // collectionMoreAction 是 ⋯ 菜单里那一项被选中之后做的事。
 //
 // 🔴 **这一层一个都不动手**：真正那一下都在 `viewCollectionConfirm` 里——确认框
@@ -1316,6 +974,16 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 		// 「全部」也要问一次：它是这一票的验收项，而且下载会占磁盘和带宽，
 		// 按错一次就是几百兆白下。
 		s.askConfirm(p, confirmDownload, p.list.List().Len(), false)
+	case "edit-folder":
+		s.openFolderEdit(p.ref.ID)
+	case "copy-link":
+		if err := s.copyText(collectionLink(p.ref)); err != nil {
+			s.addToast("复制不了链接："+err.Error(), notice.Danger)
+		} else {
+			s.addToast("已复制链接", notice.Success)
+		}
+	case "enqueue":
+		s.addWholeCollectionToQueue(p)
 	case "clear-invalid":
 		s.askConfirmAbout(p, confirmClearInvalid, 0, false, collectionTitleText(p.ref.Type, s.app.Collection(p.ref)))
 	case "delete-folder":
@@ -1327,54 +995,6 @@ func (s *Shell) collectionMoreAction(p *collectionPage, item collectionMenuItem)
 		// 实现细节说给用户听。这一支是「按了一个我们还没接上的动作」，用户
 		// 需要知道的只是「这一下现在按不了」。
 		s.addToast("「"+item.label+"」现在还不能用", notice.Warning)
-	}
-}
-
-// viewCollectionSort 是排序下拉。**只有收藏夹页摆它**（见
-// `collectionSortSupported`：合集 / 系列的接口不认这几档）。
-//
-// ⚠️ 用 `SelectBase` 而不是 `ui.Select`：后者收的是 `[]string`，而排序在
-// B 站那边是一个枚举。拿字去当排序，中间就多一处「显示的字」和「发给接口的
-// order」可能对不上的地方——那个错在界面上完全看不出来。
-//
-// 换档之后**这里整个换掉下面那个列表**（见 newCollectionList 的注释）：排序是
-// 接口排的，本地重排会同时踩两个坑（分页只对一种排序有效、行身份整体错位）。
-func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
-	t := c.Theme()
-	sel := ui.SelectBase[bili.CollectionSort](c, &p.sort)
-
-	trigger := sel.Trigger.Padding(space.Px4, space.Px10).Radius(t.Radius).Border(1, t.Border).
-		MinWidth(scale.Font(c, collectionSortMinW))
-	trigger.Children(func() {
-		ui.Text(c, p.sort.Label()).SingleLine()
-		ui.Text(c, " ▾").TextColor(t.TextMuted)
-	})
-	trigger.Label("排序：" + p.sort.Label())
-
-	sel.Popup(func(panel ui.Element) {
-		// 外观走共享出口（`popupPanel`）：这一处原来只有底色和描边，没有
-		// 阴影——和旁边框架自己弹的浮层差一层影子。
-		popupPanel(t, panel.Padding(space.Px4))
-		for _, sort := range bili.CollectionSorts {
-			item := sel.Item(sort).Padding(space.Px6, space.Px10).Radius(t.Radius)
-			switch {
-			case item.Highlighted():
-				// 高亮走「被选中的选项」那一个出口（实心主色底 + `t.AccentText`
-				// 字，票 #239，审计 F-14）。
-				item = flatSolid(c, item)
-			case sort == p.sort:
-				// 当前值（不是「选中」）：淡底、没有主色。
-				item = item.Background(t.Surface)
-			}
-			item.Children(func() { ui.Text(c, sort.Label()).SingleLine() })
-		}
-	})
-
-	// ⚠️ 判据是「下拉那一档」和「列表是按哪一档建的」不一样，不是
-	// `trigger.Changed()`：Changed 只在**点了那一帧**为真，而重画这一页
-	// （切标签页、窗口从后台回来）时那一帧已经过去了，列表会永远停在旧排序。
-	if p.sort != p.listSort {
-		s.setCollectionSort(p)
 	}
 }
 
@@ -1418,7 +1038,7 @@ const collectionSortMinW = 83.2
 //
 // ⚠️ **Label 不能省**：它不只是给测试用的——没有它读屏软件读不出这是一个搜
 // 歌名的控件（占位文字不是标签），无头 Tester 也只认 label / text。
-const collectionSearchLabel = "搜索歌名"
+const collectionSearchLabel = collectionSearchLabelText
 
 // collectionSearchUnsupportedTip 是合集 / 系列页那枚**按不动**的放大镜为什么按不动。
 //
@@ -1452,48 +1072,6 @@ func collectionSearchSupported(typ bili.CollectionType) bool {
 // 之后再把这一条放开、同时把 `sort_reverse` 一路传下去。
 func collectionSortSupported(typ bili.CollectionType) bool {
 	return typ == bili.CollectionFavorite
-}
-
-// viewCollectionSearch 是「按歌名找」，**一枚会展开的按钮**。
-//
-// 上游那一排的右边是 `SearchWithSort`（`components/search-with-sort/index.tsx`），
-// 里面是「搜索 + 排序」两样；我们之前只抄了排序那一半，于是这一页**只能缩小
-// 到「哪一档排序」，缩不到「某几首」**——一个 800 首歌的收藏夹里，用户只能靠
-// 滚和看。后来补上了搜索，但补成了一个**常驻 180 的输入框**；上游那个是收起
-// 时一枚放大镜、点开才展开（`components/search-button/index.tsx`）。
-//
-// ⚠️ **筛是接口筛的**（`bili.CollectionMedias` 顶上那一段）：本地筛只能筛已经
-// 拉下来的那 20 首，搜「告白气球」在第 300 首的话，界面上的表现是「搜了没反应」。
-//
-// ⚠️ **回车立刻搜，防抖 500ms**：抄上游（`components/search-button/index.tsx`
-// 的 `useDebounceFn(..., { wait: 500 })`），也和这一页的邻居一致（`librarypage.go`
-// 的 `searchDebounce`）。回车不等那 500ms——用户按下回车就是想现在搜。
-//
-// 🔴 **合集 / 系列不摆搜索框**（票 #683 的复审）：那两个内容接口没有 `keyword`，
-// `LoadCollectionPage` 对非空词会返回「还不能按歌名找」，而列表控件会把整页换成
-// 「加载失败，点此重试」并弹一句带 `biu:` 前缀的错。判据和「发不发请求」用的是
-// 同一个（`collectionSearchSupported`）。
-func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
-	// 🔴 **合集 / 系列：按灰，提示说清为什么**（票 #683 的复审）。绝不接进
-	// fetcher——`draft` / `pendingSince` 也一起清掉，那个 500ms 的钟别醒着
-	// （`collectionSearching` 看的就是 `pendingSince`）。
-	if !collectionSearchSupported(p.ref.Type) {
-		p.draft = p.keyword
-		p.pendingSince = time.Time{}
-		p.submitted = false
-		expandableSearch(c, s.tip, &p.search, &p.draft, collectionSearchLabel,
-			collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown(),
-			collectionSearchUnsupportedTip)
-		return
-	}
-	box := expandableSearch(c, s.tip, &p.search, &p.draft, collectionSearchLabel,
-		collectionSearchMinWidth, collectionSearchWidth, s.pageJustShown(), "")
-	p.submitted = box.Submitted()
-
-	// 判据和排序那一处一个写法：这一帧条件变了就换查询。
-	if s.collectionSearchChanged(p) {
-		s.reloadCollection(p)
-	}
 }
 
 // collectionSearchChanged 报这一帧搜索条件变了没，变了就换查询。
@@ -1556,24 +1134,4 @@ func (s *Shell) collectionSearching() bool {
 		return false
 	}
 	return !p.pendingSince.IsZero()
-}
-
-// collectionGlow 是头图区背景光晕：封面主色自上而下淡到透明。
-//
-// 没取到颜色（饱和度 0）时两端都是透明，等于没有。浅色底上压 18%、深色底上 28%
-// （深底上同样的透明度看着更淡）。
-func collectionGlow(t *ui.Theme, hue, sat float64) ui.LinearGradient {
-	if sat <= 0 {
-		return ui.LinearGradient{}
-	}
-	dark := int(t.Background.R)+int(t.Background.G)+int(t.Background.B) < 3*128
-	col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(dark))
-	if !ok {
-		return ui.LinearGradient{}
-	}
-	a := float32(0.18)
-	if dark {
-		a = 0.28
-	}
-	return ui.LinearGradient{From: col.Alpha(a), To: col.Alpha(0), Angle: 180}
 }

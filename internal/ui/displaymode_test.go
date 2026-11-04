@@ -163,8 +163,15 @@ type pageCase struct {
 // 理由写在 `displayPagesMissAndWhy`。
 var displayPages = []pageCase{
 	{name: "搜索结果", open: openSearchForDisplay},
-	{name: "收藏夹", open: openCollectionForDisplay},
-	{name: "UP 空间的投稿", open: openUpSpaceForDisplay, nudge: func(t *testing.T, tt *mygoui.Tester) {
+	{name: "收藏夹", open: openCollectionForDisplay, nudgeEach: true, nudge: func(t *testing.T, tt *mygoui.Tester) {
+		t.Helper()
+		// 头部（232 封面 + 上下 40）加操作条比从前高，最窄窗口里第一行落在播放条底下：先滚一段。
+		tt.Scroll(500, 450, 0, 400)
+		for range 2 {
+			tt.Frame()
+		}
+	}},
+	{name: "UP 空间的投稿", open: openUpSpaceForDisplay, nudgeEach: true, nudge: func(t *testing.T, tt *mygoui.Tester) {
 		t.Helper()
 		tt.Scroll(500, 450, 0, 160)
 		for range 2 {
@@ -727,7 +734,8 @@ func TestTheBatchOpsStillWorkInEveryView(t *testing.T) {
 					tt.Frame()
 				}
 			}
-			if !tt.HasText("已选 2 首") {
+			// 批量条上「已选 N 首」是三段字（N 是单独的一段等宽字）。
+			if !tt.HasText("已选") || !tt.HasText("2") {
 				t.Errorf("%s 那一档下逐首勾完显示的是 %q，want「已选 2 首」",
 					m, tt.Texts())
 			}

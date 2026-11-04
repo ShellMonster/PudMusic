@@ -173,8 +173,9 @@ func TestDoubleClickingAnUpSubmissionKeepsThePlaylist(t *testing.T) {
 	for i := 0; i < 6; i++ {
 		tt.Frame()
 	}
-	if err := tt.Click(playAllLabel); err != nil {
-		t.Fatalf("点「%s」：%v（画面：%q）", playAllLabel, err, tt.Texts())
+	// 原型把「播放全部」放在头部那一排，名字是「播放投稿」。
+	if err := tt.Click("播放投稿"); err != nil {
+		t.Fatalf("点「播放投稿」：%v（画面：%q）", err, tt.Texts())
 	}
 	waitFor(t, "队列装进这一页的 112 首", func() bool { return a.Queue().Len() == total })
 

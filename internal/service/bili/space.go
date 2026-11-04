@@ -51,6 +51,9 @@ const (
 	spaceRelationPath = "/x/space/wbi/acc/relation"
 	// relationStatPath 是关注数 / 粉丝数。
 	relationStatPath = "/x/relation/stat"
+
+	// upStatPath 是 UP 主的获赞数（`likes`）。
+	upStatPath = "/x/space/upstat"
 	// relationModifyPath 是写接口：关注 / 取关 / 拉黑 / 取消拉黑。
 	relationModifyPath = "/x/relation/modify"
 	// spaceVideoPath 是「投稿」Tab。
@@ -274,6 +277,28 @@ func (c *Client) RelationStatOf(ctx context.Context, vmid int64) (*RelationStat,
 		return nil, fmt.Errorf("bili: 关注数那一份返回读不懂：%w", err)
 	}
 	return &RelationStat{Following: d.Following, Follower: d.Follower}, nil
+}
+
+// UpLikes 问 B 站要一个 UP 主的总获赞数（`/x/space/upstat` 的 `likes`）。
+//
+// ⚠️ **它只是头部统计里的一格**：调用方失败就不画那一格，不要拿 0 顶上。
+func (c *Client) UpLikes(ctx context.Context, mid int64) (int64, error) {
+	if mid <= 0 {
+		return 0, fmt.Errorf("bili: 空间 id 不对（mid=%d）", mid)
+	}
+	q := url.Values{}
+	q.Set("mid", strconv.FormatInt(mid, 10))
+	raw, err := c.Do(ctx, Call{Method: "GET", URL: c.hostAPI + upStatPath, Query: q})
+	if err != nil {
+		return 0, err
+	}
+	var d struct {
+		Likes int64 `json:"likes"`
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return 0, fmt.Errorf("bili: 获赞数那一份返回读不懂：%w", err)
+	}
+	return d.Likes, nil
 }
 
 // RelationAction 是写接口的动作码。

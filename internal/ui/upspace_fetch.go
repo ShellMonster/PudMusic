@@ -31,13 +31,16 @@ import (
 
 // fetchVideos 是「投稿」Tab 的拉页器。**在后台 goroutine 里跑**
 // （`list.PagedList.load`），所以里面不许碰界面状态。
-func (s *Shell) fetchVideos(ctx context.Context, mid int64, page int) (list.Page, error) {
+func (s *Shell) fetchVideos(ctx context.Context, sp *upSpace, page int) (list.Page, error) {
+	mid := sp.mid
+	order, _ := sp.videoOrder.Load().(string)
 	pg, err := s.app.UpVideos(ctx, app.SpaceVideoQuery{
-		Mid: mid, Page: page, Size: bili.UpVideoDefaultSize,
+		Mid: mid, Page: page, Size: bili.UpVideoDefaultSize, Order: order,
 	})
 	if err != nil {
 		return list.Page{}, err
 	}
+	sp.videosTotal.Store(int64(pg.Total))
 	songs := make([]list.Music, 0, len(pg.Videos))
 	for _, v := range pg.Videos {
 		songs = append(songs, list.Music{

@@ -7,6 +7,7 @@ package ui
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"image"
 	"image/color"
 	"net/http"
@@ -194,6 +195,9 @@ func openSpace(t *testing.T, s *Shell, tt *mygoui.Tester, mid int64) *upSpace {
 	s.navigate(upPathOf(mid))
 	tt.Frame()
 	sp := s.upSpaces[mid]
+	// 页面默认停在「投稿」（原型顺序：投稿 / 动态 / 收藏夹 / 合集）。这一组用例大多是为
+	// 「动态」写的，所以帮手默认切到动态；要测投稿的用例自己把 `sp.tab` 写回 `upTabVideo`。
+	sp.tab = upTabDynamic
 	waitFor(t, "头加载完", func() bool {
 		h := sp.header.Snapshot()
 		return h.Loaded || h.Err != ""
@@ -420,11 +424,11 @@ func TestTheSpaceHeaderShowsTheBannerTheNameAndTheStats(t *testing.T) {
 	if !tt.HasText("这是一个签名") {
 		t.Errorf("签名没画出来，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText("粉丝数") || !tt.HasText("12.3万") {
+	if !tt.HasText("粉丝") || !tt.HasText("12.3万") {
 		t.Errorf("粉丝数没画出来（123456 该写成「12.3万」），文字有 %q", tt.Texts())
 	}
-	if !tt.HasText("等级") || !tt.HasText("Lv4") {
-		t.Errorf("等级没画出来，文字有 %q", tt.Texts())
+	if !tt.HasText("LV4") {
+		t.Errorf("等级角标没画出来，文字有 %q", tt.Texts())
 	}
 	if !showsText(tt, "关注") {
 		t.Errorf("关注按钮没画出来，文字有 %q", tt.Texts())
@@ -470,7 +474,7 @@ func TestTheStatsAreThereWithALogin(t *testing.T) {
 
 	openSpace(t, s, tt, 42)
 
-	for _, want := range []string{"粉丝数", "12.3万", "等级", "Lv4"} {
+	for _, want := range []string{"粉丝", "12.3万", "LV4"} {
 		if !showsText(tt, want) {
 			t.Errorf("登录后该有 %q，文字有 %q", want, tt.Texts())
 		}
@@ -565,9 +569,9 @@ func TestTheAddressWithoutAnIDSaysWhichOneItWas(t *testing.T) {
 
 // TestTheFourTabsAreThereInBiuOrder 钉住四个 Tab 的名字和顺序。
 //
-// 用户在这个窗口里看过上游，顺序反了他要找的那一格就不在原来的位置上。
+// 顺序照原型（投稿 / 动态 / 收藏夹 / 合集），默认停在第一个。
 func TestTheFourTabsAreThereInBiuOrder(t *testing.T) {
-	want := []string{"动态", "投稿", "收藏夹", "合集"}
+	want := []string{"投稿", "动态", "收藏夹", "合集"}
 	if len(upTabNames) != len(want) {
 		t.Fatalf("Tab 有 %d 个，want %d", len(upTabNames), len(want))
 	}
@@ -723,14 +727,11 @@ func TestTheHeaderIsNotSqueezedToZeroWidth(t *testing.T) {
 
 	// ② 统计那几格必须**在同一条横线上**。零宽时它们被折成两行，而「折行」
 	// 是量得出来的：同一个头图区里，数字在「粉丝数」下面多少点。
-	fan, ok1 := tt.Find("粉丝数")
-	lv, ok2 := tt.Find("等级")
+	// 统计现在是「粉丝 / 获赞」两栏（关注数只在看自己时画），等级是名字旁的 LV 角标。
+	fan, ok1 := tt.Find("粉丝")
+	lv, ok2 := tt.Find("LV4")
 	if !ok1 || !ok2 {
-		t.Fatalf("统计没画出来（粉丝数 %v / 等级 %v），文字有 %q", ok1, ok2, tt.Texts())
-	}
-	if dy := abs32(lv.Y - fan.Y); dy > 2 {
-		t.Errorf("「粉丝数」(y=%.1f) 和「等级」(y=%.1f) 不在同一条横线上（差 %.1f）"+
-			"——统计被折成了两行", fan.Y, lv.Y, dy)
+		t.Fatalf("统计没画出来（粉丝 %v / LV %v），文字有 %q", ok1, ok2, tt.Texts())
 	}
 	if fan.W <= 0 || lv.W <= 0 {
 		t.Errorf("统计那一格被压成零宽了（%.0f / %.0f）", fan.W, lv.W)
@@ -1739,7 +1740,8 @@ func TestEveryRowHasALabelAndACollectionRowGoesToItsPage(t *testing.T) {
 	waitFrames(t, tt, "收藏夹加载完", func() bool { return sp.fav.started })
 	tt.Frame()
 
-	if err := tt.Click("点我"); err != nil {
+	// 原型 `colCard`：封面是那枚按钮（名字「打开 …」），下面的标题只是字。
+	if err := tt.Click("打开 点我"); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.router.Path(); got != "/collection/100" {
@@ -1757,7 +1759,7 @@ func rowKeys(sp *upSpace, tab, n int) []any {
 	return out
 }
 
-// TestTheSpaceAvatarIs112AndTheHeaderPads32 钉住头图区那几个数：
+// TestTheSpaceAvatarIs112AndTheHeaderUsesThePagePadding 钉住头图区那几个数：
 // 头像 112、左右留白 32（上游 `space-info.tsx:83` 的 `px-8`）、头像与昵称之间
 // 16（上游那一行的 `space-x-4`）。
 //
@@ -1765,7 +1767,7 @@ func rowKeys(sp *upSpace, tab, n int) []any {
 // 上**，而我们这一版把它们写在**页面底色**上（设计规范 v0.1 §7.18，票 #268
 // 照参考图重排之后仍然是这一套）——横幅于是是一条独立的横幅，头像有一半压在
 // 横幅上，112 是「压得住又不至于把横幅整个盖掉」的那个数。
-func TestTheSpaceAvatarIs112AndTheHeaderPads32(t *testing.T) {
+func TestTheSpaceAvatarIs112AndTheHeaderUsesThePagePadding(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "量尺寸的 UP 主", 0, 123456)
 	s, tt, _ := newSpaceShell(t, b, true, "77")
@@ -1781,38 +1783,26 @@ func TestTheSpaceAvatarIs112AndTheHeaderPads32(t *testing.T) {
 
 	winW := float32(tt.Image().Bounds().Dx())
 	pageLeft := float32(sideTargetWidth(s.app.SettingsSnapshot()))
-	if got := av.X - pageLeft; got != 32+upAvatarRing {
-		t.Errorf("头像离页面左缘 %.1f，want 35（左右留白 32 + 3 的底色环）", got)
+	// 页边距按窗口宽算（原型 `.page`：> 1024 为 40，≤ 1024 为 32，≤ 760 为 16）。
+	if got, want := av.X-pageLeft, space.PageHorizontalForWindow(winW); got != want {
+		t.Errorf("头像离页面左缘 %.1f，want %.0f（窗口 %.0f 宽时的页边距）", got, want, winW)
 	}
 	name, ok := tt.Find("量尺寸的 UP 主")
 	if !ok {
 		t.Fatalf("画面上找不到昵称，文字有 %q", tt.Texts())
 	}
-	if got := name.X - (av.X + av.W); got != 16+upAvatarRing {
-		t.Errorf("昵称离头像右边 %.1f，want 19（间距 16 + 3 的底色环）", got)
+	// 头像和名字那一列隔 24（原型 `.up-head { gap: 24px }`）。
+	if got := name.X - (av.X + av.W); got != 24 {
+		t.Errorf("昵称离头像右边 %.1f，want 24", got)
 	}
-	lv, ok := tt.Find("Lv4")
-	if !ok {
-		t.Fatalf("画面上找不到「Lv4」，文字有 %q", tt.Texts())
-	}
-	if got := winW - (lv.X + lv.W); got != 32 {
-		t.Errorf("统计离页面右缘 %.1f，want 32（上游同一行 px-8）", got)
+	// 等级是名字旁边的 LV 角标（原型 `.badge`），不再是统计里的一栏。
+	if _, ok := tt.Find("LV4"); !ok {
+		t.Fatalf("画面上找不到「LV4」，文字有 %q", tt.Texts())
 	}
 
-	// 头像压在 132 高的横幅下沿：环的上沿在 88，头像再进去 3。
-	if av.Y-navMinHeight != upAvatarTop+upAvatarRing {
-		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want %d", av.Y, av.Y-64, upAvatarTop+upAvatarRing)
-	}
-
-	// 头像那圈 `shadow-lg`：头像正下方那一带的底色，要比同一块头图的别处暗。
-	// 没有影子的版本实测是 0 个暗像素——判据取 200，离「有」和「没有」都远。
-	img := tt.Image()
-	ref := img.RGBAAt(int(av.X+av.W+60), int(av.Y+av.H+3))
-	shadowed := mygoui.Rect{X: av.X + 20, Y: av.Y + av.H + 1, W: av.W - 40, H: 8}
-	plain := mygoui.Rect{X: av.X + 250, Y: av.Y + av.H + 1, W: 100, H: 8}
-	if n := darkerIn(img, shadowed, ref, 2); n < 200 {
-		t.Errorf("头像底下的影子只有 %d 个暗像素（没有影子的地方是 %d 个）——"+
-			"`shadow-lg` 没画出来", n, darkerIn(img, plain, ref, 2))
+	// 头像压在 168 高的头图带下沿：头部往上压 48，所以头像（含环）上沿在页面顶往下 120。
+	if av.Y-64 != upAvatarTop {
+		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want %d", av.Y, av.Y-64, upAvatarTop)
 	}
 }
 

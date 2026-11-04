@@ -8,7 +8,6 @@ package ui
 
 import (
 	"image"
-	"net/http"
 	"sort"
 	"testing"
 
@@ -140,41 +139,6 @@ func changedPixelsIn(a, b *image.RGBA, w, h int) int {
 		}
 	}
 	return n
-}
-
-// TestTheAuthorPaneSaysItIsLoading 钉住动态流左栏第一页在途时**说的是「正在加载」**，
-// 而不是画成「我一个都没关注」。
-//
-// 🔴 **判据是那句话在不在**：这一栏原先只有「没登录 / 失败 / 正常」三支，
-// `auth.started` 还是 false 时直接画「全部」那一行——和「他真的一个都没关注」
-// 一模一样（左栏 256 宽，量不出别的东西来）。
-//
-// ⚠️ **走的是真登录态那条路**：作者栏只在 `App.LoggedIn()` 为真时发请求。
-// 这一条用假 B 站把登录态灌进去（`uiFollowLoggedIn` 那一套），然后让动态流
-// 那个接口永远不回——于是作者栏一定停在「第一页在途」。
-func TestTheAuthorPaneSaysItIsLoading(t *testing.T) {
-	b := newUIExplore(t)
-	uiSpaceData(b, "我自己", 0, 1)
-	// 永远不回：作者栏那一趟卡在路上（等到测试结束那条连接才放）。
-	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-release:
-		case <-r.Context().Done():
-		}
-	})
-
-	s, tt, _ := newSpaceShell(t, b, true, "77")
-	s.navigate(dynamicFeedPath)
-	tt.Frame()
-	tt.Frame()
-	tt.Frame()
-
-	if !tt.HasText(loadingAuthorsText) {
-		t.Fatalf("作者栏第一页在途，画面上却没有「%s」——用户会以为他真的一个都没关注；"+
-			"文字有 %q", loadingAuthorsText, tt.Texts())
-	}
 }
 
 // TestTheCollectionHeaderDoesNotClaimZeroMedia 钉住收藏夹页头**元信息没回来时

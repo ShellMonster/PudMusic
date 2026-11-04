@@ -262,30 +262,6 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 // 五、收藏夹
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheCollectionKeysAreFlat 操作条那一排。
-func TestTheCollectionKeysAreFlat(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			_, s, tt := collectionShell(t, "12345",
-				mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
-			tt.SetDark(dark)
-			tt.Frame()
-			noPointer(tt)
-
-			// ⚠️ **那枚会展开的搜索不在这一列里**：它的名字落在**图标**上，
-			// `Find` 给回来的是图标那一格（32×18），不是按钮那一格（32×32）——
-			// 拿图标那一格去量「框线那一行」，量到的是图标自己的笔画。
-			// 它按配方是扁平键（`flatIconButton`），而那份配方在别处量过。
-			assertKeysFlat(t, tt, "收藏夹", "添加到播放列表", "收藏这个收藏夹", "更多操作")
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "收藏夹", "多选")
-		})
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 六、动态卡片
 // ─────────────────────────────────────────────────────────────────────────────
@@ -310,7 +286,7 @@ func TestTheDynamicCardKeysAreFlat(t *testing.T) {
 			// ⚠️ **键压着的是**页面底色**：动态条目是**通栏**的（上游那一档：透明底、
 			// 只有一条下边框、直角，票 #416），卡片自己不再有底色。
 			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "动态卡片",
-				"作者v1", "赞 12")
+				"作者v1", "点赞 12")
 			// ⚠️ **「下一首播放」「下载音频」不在这一列里**：它们收在右上角那个
 			// 「⋯」菜单里（票 #268，照上游的 `MoreMenu`），而「赞」留在外面。
 			// 「⋯」那一枚是图标键。

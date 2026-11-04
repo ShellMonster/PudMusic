@@ -19,6 +19,7 @@ import (
 	"context"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 
@@ -249,13 +250,22 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 
 	// 稍后再看 / 历史记录 / 本地音乐 / 下载记录 / 搜索 / 统计 已按 §0′ 改版：页边距按窗口宽（1200 → 40），
 	// 由 `TestThePrototypePagesShareTheWindowBasedMargin` 管；首页由 `homepage_test.go` 管。
-	// 这一张表里只剩还没改版的收藏夹（T3 接手时一并改掉）。
+	// 这一张表里只剩收藏夹：它的头部是通栏取色底，页边距要看头部下面的操作条（T3 已按窗口宽 1200 → 40 改完）。
+	// 关注 / 动态页在 `TestThePrototypePagesShareTheWindowBasedMargin`。
 
 	// 收藏夹那一页**要等容器拉回来**：头图区第一帧是「正在加载…」，那一帧画面上
 	// 最靠左的是居中的那一格（不是内容区的左缘）。等它加载完，头图区和下面
 	// 那一排「播放全部」都在左缘上。
 	t.Run("收藏夹", func(t *testing.T) {
 		_, _, tt := collectionShellOpts(t, nil, "", "12345", mediaOf(1, "歌 一"))
+		// 头部是通栏取色底（原型 `margin: 0 -40px`），从内容区左缘就有墨；页边距看的是它下面
+		// 那一排操作条：「播放全部」键贴着页边距（窗口宽 1200 → 40）。
+		play, ok := tt.Find("播放全部")
+		if !ok {
+			t.Fatalf("找不到「播放全部」，文字有 %q", tt.Texts())
+		}
+		want := want - wantPad + int(space.PageHorizontalForWindow(float32(tt.Image().Bounds().Dx())))
+		area := image.Rect(area.Min.X, int(play.Y)-12, area.Max.X, int(play.Y+play.H)+12)
 		got := leftmostInk(tt.Image(), area)
 		if got < 0 {
 			t.Fatalf("这一页上一点墨都没有，文字有 %q", tt.Texts())
@@ -785,10 +795,12 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 	for _, page := range []struct {
 		name string
 		path string
+		// said / action 是这一页没登录时说的话和给的那一步：都是原型的 `loginPrompt(what)`。
+		said, action string
 	}{
-		{name: "我的关注", path: followPath},
-		{name: "稍后再看", path: laterPath},
-		{name: "历史记录", path: historyPath},
+		{name: "我的关注", path: followPath, said: "登录后查看关注", action: "扫码登录"},
+		{name: "稍后再看", path: laterPath, said: "登录后查看稍后再看", action: "扫码登录"},
+		{name: "历史记录", path: historyPath, said: "登录后查看历史记录", action: "扫码登录"},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			// ⚠️ **B 站客户端要挂着、但不登录**：没挂上的时候页面画的是「还没接上
@@ -800,11 +812,11 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 			tt.Frame()
 			tt.Frame()
 
-			if !tt.HasText("登录后查看" + page.name) {
-				t.Errorf("%s 没登录时没说「登录后查看%s」，文字有 %q", page.name, page.name, tt.Texts())
+			if !tt.HasText(page.said) {
+				t.Errorf("%s 没登录时没说「%s」，文字有 %q", page.name, page.said, tt.Texts())
 			}
-			if !tt.HasText("扫码登录") {
-				t.Errorf("%s 没登录时没给「扫码登录」那一步，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText(page.action) {
+				t.Errorf("%s 没登录时没给「%s」那一步，文字有 %q", page.name, page.action, tt.Texts())
 			}
 			// 空列表那一句**不许**出现：用户要的是「先登录」，不是「这里没有」。
 			if empty := lookup(page.path).Empty.Title; tt.HasText(empty) {
@@ -819,34 +831,28 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 	}
 }
 
-// TestTheCollectionTitleIsTheBigOne 钉住「收藏夹页大标题 30」和它下面那三行的
-// 排法。
+// TestTheCollectionTitleIsTheBigOne 钉住收藏夹页大标题和它周围几行的排法（原型 `.col-title` 等）。
 //
-// # 三件事
-//
-//  1. **那个数是 30**（上游 `text-3xl`），而页标题是 24——两处不是同一个数。
-//  2. **两行标题也照常排**：30px 的名字真的会折成两行，这时头图区那一列会比
-//     封面（168）高——上游的 `space-y-4` 也是这个结果，头图区的高度由最高的
-//     那一列说了算。**不要**为了把这一列压回 168 去动竖距。
-//  3. 标题 / 简介 / 类型和条数 / 创建者四块**左缘对齐**，相邻两块之间 **16**
-//     （票 #175 的验收：14/14/14、竖距 16）。
+//  1. 字号是 `clamp(36px, 4.4vw, 64px)`（窗口宽，1200 时 52.8），`colTitleSize` 就是它。
+//  2. 两行标题也照常排：名字真的会折成两行，文字列比封面矮 / 高都由内容说了算。
+//  3. Eyebrow / 标题 / 元信息 / 简介**左缘对齐**，自上而下依次排下来（标题上下各 12、简介上 12）。
 func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
-	// 30 那一档退役（§0′），先归到相邻的 32；T3 按原型换成 HeroTitle（64）。
-	if scale.CollectionTitle != 32 {
-		t.Errorf("scale.CollectionTitle = %d，want 32（30 退役后的相邻档）", scale.CollectionTitle)
+	for _, c := range []struct{ w, want float32 }{{500, 36}, {818, 36}, {1200, 52.8}, {1500, 64}, {2400, 64}} {
+		if got := colTitleSize(c.w); absF(got-c.want) > 0.05 {
+			t.Errorf("窗口 %v 宽时标题 %v，want %v（clamp(36, 4.4vw, 64)）", c.w, got, c.want)
+		}
 	}
 	// 一个长到要折两行的名字。
 	long := "这是一个很长很长很长很长很长很长很长很长很长很长的收藏夹名字"
 	_, s, tt := collectionShellWithTitle(t, long)
 	_ = s
 
-	// 先确认那个名字**真的折成了两行**（否则下面的竖距验的是一行）——
-	// 30px 的一行是 35.3 高，两行是 70.6。
+	// 先确认那个名字**真的折成了两行**（否则下面的竖距验的是一行）。
 	title, ok := tt.Find(long)
 	if !ok {
 		t.Fatalf("头图区里找不到那个大标题，文字有 %q", tt.Texts())
 	}
-	if title.H < 60 {
+	if title.H < 100 {
 		t.Fatalf("那个名字没有折成两行（高 %.1f）——下面那几条就成了一句空话", title.H)
 	}
 
@@ -856,9 +862,8 @@ func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 	}
 	blocks := []block{{"标题", title}}
 	for _, item := range []struct{ what, key string }{
+		{"元信息", "1 首"},
 		{"简介", "早上听"},
-		{"类型和条数", "公开收藏夹 • 1 条视频"},
-		{"创建者头像", collectionOwnerAvatarLabel},
 	} {
 		r, ok := tt.Find(item.key)
 		if !ok {
@@ -866,23 +871,28 @@ func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 		}
 		blocks = append(blocks, block{item.what, r})
 	}
-
-	// 四块的左缘是同一条线。创建者那一块量的是**头像**（昵称在头像右边 8+24）。
+	// 作者链接是元信息那一行的第一段：和标题左缘对齐。
+	if r, ok := tt.Find("UP 小明"); ok {
+		blocks = append(blocks, block{"作者", r})
+	}
 	for _, b := range blocks[1:] {
+		// 元信息那一行（作者之后的各段）有 8 的左外边距，只比作者那一段。
+		if b.what == "元信息" {
+			continue
+		}
 		if d := b.box.X - blocks[0].box.X; d < -1 || d > 1 {
-			t.Errorf("%s的左缘是 %.1f，标题是 %.1f（差 %.1f）——头图区这四块要左对齐",
+			t.Errorf("%s的左缘是 %.1f，标题是 %.1f（差 %.1f）——头图区文字列要左对齐",
 				b.what, b.box.X, blocks[0].box.X, d)
 		}
 	}
-	// 相邻两块之间是 16（`collectionHeadGap`）。
-	if collectionHeadGap != 16 {
-		t.Errorf("collectionHeadGap = %d，want 16（上游 `space-y-4`）", collectionHeadGap)
-	}
+	// 自上而下：标题 → 元信息 → 简介，竖着不重叠。
 	for i := 1; i < len(blocks); i++ {
-		gap := blocks[i].box.Y - (blocks[i-1].box.Y + blocks[i-1].box.H)
-		if gap < 15 || gap > 17 {
-			t.Errorf("%s和%s之间的竖距是 %.1f，want 16（±1）——头图区那三行字之间"+
-				"是 `space-y-4`", blocks[i-1].what, blocks[i].what, gap)
+		if blocks[i].what == "作者" {
+			continue
+		}
+		if blocks[i].box.Y < blocks[0].box.Y+blocks[0].box.H-1 && blocks[i].what != "标题" {
+			t.Errorf("%s（y=%.1f）压到了标题（%.1f..%.1f）上", blocks[i].what,
+				blocks[i].box.Y, blocks[0].box.Y, blocks[0].box.Y+blocks[0].box.H)
 		}
 	}
 }
@@ -1375,25 +1385,6 @@ func mentionsKey(e ast.Expr, key string) bool {
 	return found
 }
 
-// TestTheCollectionHeaderCopyIsFourteen 钉住头图区那三行小字是 **14**。
-//
-// # 判据是 AST
-//
-// 像素那一层量的是「墨迹有多高」，而字号和墨迹之间隔着一个随字体而异的系数
-// （同 `TestEveryPageTitleUsesTheSharedSize` 的理由）。票面给的是三个 14
-// （简介 / 类型和条数 / 创建者），精确的那个数只能由代码里的调用钉住。
-func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
-	if scale.CollectionCopy != 14 {
-		t.Errorf("scale.CollectionCopy = %d，want 14（上游 `text-sm`）", scale.CollectionCopy)
-	}
-	for _, key := range []string{"info.Intro", "collectionHeaderKindText()", "info.OwnerName"} {
-		if !textUsesFontSize(t, "collectionpage.go", key, "CollectionCopy") {
-			t.Errorf("头图区的 %q 没有用 `FontSize(scale.Font(c, scale.CollectionCopy))`"+
-				"——那三行小字必须是 14", key)
-		}
-	}
-}
-
 // ⚠️ **第三行那个锚点 2026-10-27 换了名字**：原先那一句直接调
 // `collectionKindText(typ, private)`，现在走 `collectionHeaderKindText(typ, info)`
 // ——「元信息没回来时不许写出那个假 0」这条判据要读 `info.Loaded`（见那个函数
@@ -1443,7 +1434,7 @@ func TestTheCollectionHeaderStaysInsideTheCoverOnOneLine(t *testing.T) {
 }
 
 // TestThePrototypePagesShareTheWindowBasedMargin 钉住按原型改版的列表页（稍后再看 / 历史 / 本地 / 下载 /
-// 搜索 / 统计）：左右页边距按**窗口宽**（`.page` 的 40 / 32 / 16，默认 1200 → 40），标题是同一档
+// 搜索 / 统计 / 我的关注 / 用户动态；收藏夹和 UP 空间的页边距见各自的测试）：左右页边距按**窗口宽**（`.page` 的 40 / 32 / 16，默认 1200 → 40），标题是同一档
 // （`clamp(32, 3.4vw, 48)` → 1200 时 40.8）——六页的墨迹左缘一致、标题墨迹高度一致。
 func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
 	sideW := float64(tok.SideW) // 侧栏固定 232
@@ -1460,6 +1451,9 @@ func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
 		{name: "本地音乐", path: localMusicPath},
 		{name: "下载记录", path: downloadListPath},
 		{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA"},
+		// T3：没登录时关注 / 动态页是页头 + 「登录后查看…」，页头和页边距与登录后同一套。
+		{name: "我的关注", path: followPath},
+		{name: "用户动态", path: dynamicFeedPath},
 	} {
 		b := newTestShell(t, page.opts...)
 		s, tt := b.s, b.tt

@@ -14,10 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -160,7 +158,7 @@ func TestTheFollowPageShowsTheFollowedPeople(t *testing.T) {
 			t.Errorf("关注的 %q 没画出来，文字有 %q", want, tt.Texts())
 		}
 	}
-	// 页头：大号标题 + 关注总数。上游 index.tsx:206 的 `<h1>`（`全部关注` /
+	// 页头：「我的关注」+ 左边分组栏。上游 index.tsx:206 的 `<h1>`（`全部关注` /
 	// 分组名 / `我的关注`）在左侧栏塌成同一个「我的关注」，而我们的页头是
 	// **这一页的名字**——「现在在哪一组」是右上角那个下拉自己的事。
 	//
@@ -176,30 +174,15 @@ func TestTheFollowPageShowsTheFollowedPeople(t *testing.T) {
 	if count < 2 {
 		t.Errorf("「我的关注」只有 %d 枚——页头那一枚没画（侧栏那一枚是本来就有的）", count)
 	}
-	// ⚠️ **「3」也不能只问「树里有没有」**——树里任何一个单独的字「3」都算
-	// 过。它得是**页头上那一枚**：量它的位置——在侧栏右缘（`sideTargetWidth`）
-	// 之外才算。
-	total, ok := tt.Find("3")
-	if !ok {
-		t.Fatalf("页头没有关注总数，文字有 %q", tt.Texts())
-	}
-	if total.X < float32(sideTargetWidth(s.app.SettingsSnapshot()))-1 {
-		t.Errorf("总数「3」画在 x=%.1f——在侧栏那边，不是页头上那一枚", total.X)
-	}
-	// ⚠️ **分组都在下拉里**：点开才看得见，而 -10 和 0 是 B 站固定给的，
-	// 少了「特别关注」在网页版明明有。
-	//
-	// ⚠️ 名字后面那个括号也在断言里：上游 `index.tsx:238` 是
-	// `${tag.name}${tag.count ? `(${tag.count})` : ""}`，而 0 的那一档不画括号
-	// ——差的就是这一处，而空括号在界面上像加载坏了。
-	if err := tt.Click("全部关注"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	for _, want := range []string{"全部关注(3)", "特别关注(1)", "默认分组(1)", "常听的(1)"} {
+	// 分组栏（原型 `.group-col`）：「全部关注」+ 计数，分隔线，下面是各个分组。
+	// 计数是单独的一段等宽字，所以名字和数各是一枚。-10 和 0 是 B 站固定给的。
+	for _, want := range []string{"全部关注", "特别关注", "默认分组", "常听的"} {
 		if !showsText(tt, want) {
-			t.Errorf("下拉里没有 %q 那一项，文字有 %q", want, tt.Texts())
+			t.Errorf("分组栏里没有 %q 那一项，文字有 %q", want, tt.Texts())
 		}
+	}
+	if !showsText(tt, "3") {
+		t.Errorf("「全部关注」后面没有计数 3，文字有 %q", tt.Texts())
 	}
 	// 签名和认证也要画出来（它们是这张卡上除头像之外仅有的两行字）。
 	if !showsText(tt, "第一个 UP 的签名") {
@@ -222,8 +205,8 @@ func TestNotLoggedInSaysSoAndSendsNothing(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	if !showsText(tt, "登录后查看我的关注") {
-		t.Errorf("没登录时该说「登录后查看我的关注」，文字有 %q", tt.Texts())
+	if !showsText(tt, "登录后查看关注") {
+		t.Errorf("没登录时该说「登录后查看关注」，文字有 %q", tt.Texts())
 	}
 	// ⚠️ **不能是「没关注任何人」那一句**：用户登录完发现还是空的，会以为是
 	// 登录坏了。
@@ -240,8 +223,8 @@ func TestNotLoggedInSaysSoAndSendsNothing(t *testing.T) {
 		}
 	}
 	// 还得给一条路走。
-	if !showsText(tt, "去登录") {
-		t.Errorf("没登录时没给「去登录」那一步，文字有 %q", tt.Texts())
+	if !showsText(tt, "扫码登录") {
+		t.Errorf("没登录时没给「扫码登录」那一步，文字有 %q", tt.Texts())
 	}
 }
 
@@ -291,13 +274,9 @@ func TestEachTagTabShowsThatTagsPeople(t *testing.T) {
 	waitFrames(t, tt, "第一格到了", func() bool { return len(f.users) == 1 && f.tagStarted })
 	tt.Frame()
 
-	// ⚠️ **切组走下拉**：先点开触发器（它写的是当前那一格的名字），再选那一项。
-	if err := tt.Click("全部关注"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	if err := tt.Click("常听的(1)"); err != nil {
-		t.Fatalf("下拉里点不到「常听的」：%v，文字有 %q", err, tt.Texts())
+	// 切组：直接点分组栏里那一项。
+	if err := tt.Click("常听的"); err != nil {
+		t.Fatalf("分组栏里点不到「常听的」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
 	// ⚠️ 等的是**那一个人**，不是「有一个人」：切组之前画面上就已经有一个人了，
@@ -313,10 +292,9 @@ func TestEachTagTabShowsThatTagsPeople(t *testing.T) {
 	if showsText(tt, "全部关注里的那个人") {
 		t.Errorf("换组之后上一组的人还在画面上，文字有 %q", tt.Texts())
 	}
-	// ⚠️ **下拉上的字跟着换**：停在某一组的时候触发器该写那一组的名字（上游
-	// index.tsx:206 那一支），而塌回「全部关注」的话用户以为自己在看全部。
+	// 当前组那一项是 surface-2 底 + 600 字，名字还在栏里。
 	if !showsText(tt, "常听的") {
-		t.Errorf("分组下拉没跟着换组，文字有 %q", tt.Texts())
+		t.Errorf("分组栏里没有「常听的」，文字有 %q", tt.Texts())
 	}
 	// ⚠️ **搜索框只在「全部关注」那一格画**（上游 index.tsx:280）：B 站的搜索
 	// 接口搜的是「我关注的人」的全集，搜不出「某一组里的谁」。
@@ -362,12 +340,7 @@ func TestTheSearchBoxFindsAFollowedPerson(t *testing.T) {
 	}
 	// ⚠️ **「全部关注(N)」那个 N 不能被搜到的结果顶掉**：搜「周杰伦」搜到 1 个，
 	// 而下拉里挂着的 N 说的是我关注了 1 个人——两件事，挂错了就是一句假话。
-	// 下拉项点开才看得见，所以先开下拉再断。
-	if err := tt.Click("全部关注"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	if !showsText(tt, "全部关注(1)") {
+	if !showsText(tt, "全部关注") || !showsText(tt, "1") {
 		t.Errorf("「全部关注」那个 N 被搜索结果顶掉了，文字有 %q", tt.Texts())
 	}
 }
@@ -910,13 +883,10 @@ func TestAFailedTagListDoesNotRetryItselfForever(t *testing.T) {
 			"「没拉到」，而每次失败都要一帧新画面，于是自己转起来了",
 			after-before, before, after)
 	}
-	// 失败之后要说得清，并且给一条路走。这两句在下拉**弹层里**，先点开触发器。
+	// 失败之后要说得清，并且给一条路走：两句都直接在分组栏里。
 	//
 	// ⚠️ **这里要用 `tt.HasText`（子串），不能用 `showsText`（全等）**：那一行是
 	// 「分组没拉出来：<原因>」，原因跟着错走，而全等匹配钉不住一个前缀。
-	if err := tt.Click("选择关注分组"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
 	tt.Frame()
 	if !tt.HasText("分组没拉出来") {
 		t.Errorf("没说清是分组没拉出来，文字有 %q", tt.Texts())
@@ -954,19 +924,13 @@ func TestAFailedTagListCanBeRetriedByHand(t *testing.T) {
 	waitFrames(t, tt, "分组拉失败了", func() bool { return f.tagErr != nil })
 
 	failed = false // B 站这一次肯给了
-	// 「重试拉分组」在下拉**弹层里**：先点开触发器。
-	if err := tt.Click("选择关注分组"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
 	tt.Frame()
 	if err := tt.Click("重试拉分组"); err != nil {
 		t.Fatalf("点不到重试：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "重试之后分组到了", func() bool { return f.tagStarted && f.tagErr == nil })
 	tt.Frame()
-	// ⚠️ **别再点一下触发器**：「重试拉分组」是弹层里的普通按钮，不是下拉的
-	// `Item`——点它不收弹层（弹层还开着），再点触发器就是把它**关上**。
-	// 弹层每帧都重建，新拉到的分组自己长出来。
+	// 分组栏每帧重建，新拉到的分组自己长出来。
 	// ⚠️ 同样是子串：那一格的名字后面跟着 `(1)`（B 站的分组成员数）。
 	if !tt.HasText("重试之后有了") {
 		t.Errorf("重试之后分组没画出来，文字有 %q", tt.Texts())
@@ -1022,13 +986,10 @@ func TestAFullyOverlappingPageStillLoadsTheNextOne(t *testing.T) {
 	tt.Frame()
 	scrollFollowToEnd(t, tt, f)
 
-	// 总数挂在下拉的「全部关注(N)」那一项上：点开下拉再断。
-	if err := tt.Click("全部关注"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
+	// 总数是「全部关注」后面那一段计数。
 	tt.Frame()
-	if !showsText(tt, "全部关注(39)") {
-		t.Errorf("下拉里的总数对不上，文字有 %q", tt.Texts())
+	if !showsText(tt, "39") {
+		t.Errorf("分组栏里的总数对不上，文字有 %q", tt.Texts())
 	}
 	// ⚠️ **断的是「末尾」**：滚到底之后画面上是 25..39，所以问的是 UP 39。
 	// （问 UP 21 量到的是「屏幕能显示几行」，不是「分页有没有停」。）
@@ -1062,20 +1023,16 @@ func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
 		return f.selfMid == 77 && f.total == 7
 	})
 	tt.Frame()
-	// 「全部关注(7)」是下拉项，点开下拉才看得见；而判据是**画面上**那句话，
-	// 所以先开下拉再断。
-	if err := tt.Click("全部关注"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
+	// 计数是「全部关注」后面那一段字；判据是**画面上**那个数。
 	tt.Frame()
-	if !showsText(tt, "全部关注(7)") {
+	if !showsText(tt, "7") {
 		t.Fatalf("第一个账号的总数没画出来，文字有 %q", tt.Texts())
 	}
 
 	// 换分组：那个 N **不许动**——它说的是「这个账号关注了多少人」，跟着账号走而
 	// 不跟着「停在哪个分组」走（Biu 那边换组它也还在，见 `index.tsx:224`）。
-	if err := tt.Click("默认分组(1)"); err != nil {
-		t.Fatalf("下拉里点不到分组：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("默认分组"); err != nil {
+		t.Fatalf("分组栏里点不到分组：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
 	waitFrames(t, tt, "切到那一组", func() bool { return f.tab == followTagTab(0) })
@@ -1105,137 +1062,13 @@ func TestSwitchingAccountsDoesNotKeepTheOldTotal(t *testing.T) {
 	// 触发器上的字会跟着换，而「全部关注(7)」那一句也会跟着消失——所以它**不用
 	// 真的看得见**，只要不再出现在画面的文字里就算数。
 	waitFrames(t, tt, "新账号的那个 N 掉下来了", func() bool {
-		return f.selfMid == 88 && !showsText(tt, "全部关注(7)")
+		return f.selfMid == 88 && !showsText(tt, "7")
 	})
 	if f.total != 0 {
 		t.Errorf("换账号之后那个 N 仍然是 %d——它是上一个账号的关注数", f.total)
 	}
-	if showsText(tt, "全部关注(7)") {
-		t.Errorf("新账号的下拉上还挂着上一个账号的关注数，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheFollowCardTypographyAndItsHoverBar 钉住关注卡的两处：
-// 名字 16、签名 14（上游 `user-card.tsx:84-85` 的 `text-lg` / `text-sm`，
-// follow-slim 那一票把名字改成了 `Size16`，用户 2026-11-03 参考网易云关注页
-// 拍板），以及鼠标移上去才升起来的那条操作条（300ms，`translate-y-20` → 0）。
-func TestTheFollowCardTypographyAndItsHoverBar(t *testing.T) {
-	b := newUIExplore(t)
-	uiFollowTags(b, map[int]any{0: "默认分组"})
-	uiFollowList(b, 3, []any{
-		uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"), uiFollowUser(13, "第三个 UP"),
-	})
-	uiFollowSearch(b, "", nil)
-	uiFollowTag(b, 0, []any{})
-
-	s, tt, _ := newSpaceShell(t, b, true, "77")
-	s.navigate(followPath)
-	tt.Frame()
-	f := s.followPageOf()
-	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 3 && f.tagStarted })
-	tt.Frame()
-
-	// ① 字号。第二张卡的名字不是整行的无障碍名字（那是第一张卡的），所以
-	// `Find` 拿到的就是名字那一段文字本身；签名一直是唯一的。
-	//
-	// 量的是**盒子高**：行高跟着字号走，16 点那行实测 18.8、14 点加 1.4 行高
-	// 实测 19.6。取 18 / 19 两条线——旧值 15 / 12 分别是 17.7 / 16.8，
-	// 离得够开。
-	name, ok := tt.Find("第二个 UP")
-	if !ok {
-		t.Fatalf("画面上找不到名字，文字有 %q", tt.Texts())
-	}
-	if name.H < 18 {
-		t.Errorf("名字那一段只有 %.1f 高，want ≥ 18（16 点那一档实测 18.8）", name.H)
-	}
-	sign, ok := tt.Find("第二个 UP 的签名")
-	if !ok {
-		t.Fatalf("画面上找不到签名，文字有 %q", tt.Texts())
-	}
-	if sign.H < 19 {
-		t.Errorf("签名那一段只有 %.1f 高，want ≥ 19（上游是 text-sm，14 点）", sign.H)
-	}
-	// ⚠️ **签名只留一行**（follow-slim 那一票：上游 `line-clamp-2` 改成了
-	// `MaxLines(1)`，用户 2026-11-03 参考网易云关注页拍板）。两行是约 39，
-	// 一行是约 19.6——卡 25 那条线，旧值差得够开。
-	if sign.H > 25 {
-		t.Errorf("签名那一段 %.1f 高——MaxLines(1) 下该是约 19.6（用户 2026-11-03 拍板只要一行）", sign.H)
-	}
-
-	// ② 操作条平时不在画面上。
-	if _, ok := tt.Find("取消关注"); ok {
-		t.Fatalf("还没 hover，操作条就已经在画面上了（文字有 %q）", tt.Texts())
-	}
-	av, ok := tt.Find(f.users[1].Face)
-	if !ok {
-		t.Fatalf("第二张卡的头像没画出来，文字有 %q", tt.Texts())
-	}
-	tt.Move(av.X+av.W/2, av.Y+av.H/2)
-	tt.Frame()
-	// 悬停的那一帧动画才刚开始，位置还藏在卡片下沿外。
-	if _, ok := tt.Find("取消关注"); ok {
-		t.Fatalf("刚移上去的那一帧操作条就已经到位了——300ms 上滑没走")
-	}
-
-	// 推钟：150ms 时已经在画面里，但还没升到终点；再走完 300ms 就到顶。
-	tt.Advance(150 * time.Millisecond)
-	tt.Frame()
-	mid, ok := tt.Find("取消关注")
-	if !ok {
-		t.Fatalf("hover 150ms 之后操作条还没出现，文字有 %q", tt.Texts())
-	}
-	tt.Advance(250 * time.Millisecond)
-	tt.Frame()
-	done, ok := tt.Find("取消关注")
-	if !ok {
-		t.Fatalf("hover 400ms 之后操作条不见了，文字有 %q", tt.Texts())
-	}
-	if done.Y >= mid.Y {
-		t.Errorf("操作条在 150ms 时 y=%.1f、走完之后 y=%.1f——没有往上滑", mid.Y, done.Y)
-	}
-
-	// ③ 移开就收回去（同一段 300ms 走完）。
-	tt.Move(5, 5)
-	tt.Frame()
-	tt.Advance(400 * time.Millisecond)
-	tt.Frame()
-	if _, ok := tt.Find("取消关注"); ok {
-		t.Errorf("指针移开之后操作条还留在画面上，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheFollowPageHasNoLeftPane 钉住「我的关注」不再有左边那一栏。
-//
-// 票：分组从「页内一栏」降为「页头里的下拉」——200 宽 × 全高的分栏整个删掉，
-// 内容区直接从侧栏右边开始，一行顶到窗口右缘。
-func TestTheFollowPageHasNoLeftPane(t *testing.T) {
-	b := newUIExplore(t)
-	uiFollowTags(b, map[int]any{0: "默认分组"})
-	uiFollowList(b, 1, []any{uiFollowUser(11, "一个人")})
-	uiFollowSearch(b, "", nil)
-	uiFollowTag(b, 0, []any{})
-
-	s, tt, _ := newSpaceShell(t, b, true, "77")
-	s.navigate(followPath)
-	tt.Frame()
-	f := s.followPageOf()
-	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 1 && f.tagStarted })
-	tt.Frame()
-
-	// 内容区（那张卡）的左缘应该贴着侧栏右缘，而不是再让出 200。
-	//
-	// ⚠️ 量的不是「pane 还在不在」（代码里已经没有 pane 了），而是「卡是不是从
-	// 侧栏右边就开始」——这才是「没有左栏」在画面上的意思。卡本身没有文字，
-	// 拿卡上的名字定位：第一张卡的名字就在卡上，它的左缘 ≈ 卡的左缘。
-	av, ok := tt.Find("一个人")
-	if !ok {
-		t.Fatalf("卡上的名字没画出来，文字有 %q", tt.Texts())
-	}
-	sideW := float32(sideTargetWidth(s.app.SettingsSnapshot()))
-	// 内容区从侧栏右缘开始，左边还有页边距（pagePadX）+ 卡里那圈留白。
-	// 留出 200+ 才可能是「左栏还在」——这里卡一个比那小得多的数。
-	if av.X-sideW > 64 {
-		t.Errorf("内容区的左缘在侧栏右边 %.0f 之外——左边那一栏还占着位置", av.X-sideW)
+	if showsText(tt, "7") {
+		t.Errorf("新账号的分组栏上还挂着上一个账号的关注数，文字有 %q", tt.Texts())
 	}
 }
 
@@ -1256,17 +1089,21 @@ func TestUnfollowingFromTheCardRemovesIt(t *testing.T) {
 	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 2 && f.tagStarted })
 	tt.Frame()
 
-	av, ok := tt.Find(f.users[1].Face)
-	if !ok {
-		t.Fatalf("第二张卡的头像没画出来，文字有 %q", tt.Texts())
+	// 取消关注是卡片右边那枚常驻的「已关注」键（原型 `.ucard` 的关注键）：第二张卡的那一枚。
+	if _, ok := tt.Find("打开 第二个 UP 的空间"); !ok {
+		t.Fatalf("第二张卡没画出来，文字有 %q", tt.Texts())
 	}
-	tt.Move(av.X+av.W/2, av.Y+av.H/2)
-	tt.Frame()
-	tt.Advance(400 * time.Millisecond)
-	tt.Frame()
-	if err := tt.Click("取消关注"); err != nil {
-		t.Fatalf("点不到操作条上的取消关注：%v，文字有 %q", err, tt.Texts())
+	btns := 0
+	for _, txt := range tt.Texts() {
+		if txt == "已关注" {
+			btns++
+		}
 	}
+	if btns != 2 {
+		t.Fatalf("两张卡该各有一枚「已关注」键，实际 %d 枚，文字有 %q", btns, tt.Texts())
+	}
+	second, _ := tt.Find("打开 第二个 UP 的空间")
+	tt.ClickAt(second.X+second.W-50, second.Y+second.H/2)
 
 	waitFrames(t, tt, "取关之后那一格没了", func() bool { return len(f.users) == 1 })
 	tt.Frame()
@@ -1276,13 +1113,10 @@ func TestUnfollowingFromTheCardRemovesIt(t *testing.T) {
 	if !b.hit("/x/relation/modify") {
 		t.Errorf("取关没有真的发出去（假 B 站没收到 /x/relation/modify）")
 	}
-	// 取关之后下拉里的「全部关注(N)」跟着减一：点开下拉再断。
-	if err := tt.Click("全部关注"); err != nil {
-		t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-	}
+	// 取关之后「全部关注」后面的计数跟着减一。
 	tt.Frame()
-	if !showsText(tt, "全部关注(1)") {
-		t.Errorf("取关之后下拉里的人数没跟着减一，文字有 %q", tt.Texts())
+	if !showsText(tt, "1") {
+		t.Errorf("取关之后分组栏里的人数没跟着减一，文字有 %q", tt.Texts())
 	}
 }
 
@@ -1290,245 +1124,9 @@ func TestUnfollowingFromTheCardRemovesIt(t *testing.T) {
 // 那一行是「布局」，不是「条目」
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheFollowGridRowHasNoHoverSlab 钉住「我的关注」右栏那一块 522×233 的
-// 灰板（第二轮审计的 L-30）。
-//
-// # 那块灰板是什么
-//
-// 框架给「指针压着的那一行」铺一层 `t.SurfaceHover`（`mygo/ui/list.go` 的
-// styleFn：`w.bg = t.SurfaceHover`）。这一页的行是**一排卡**，它比卡宽——
-// 卡右边空出来的那一块会整块变成悬停底（浅色 `#e9e9ec`、深色 `#323236`），
-// 而那里**什么都没有**。上游那一块是纯白。
-//
-// 悬停反馈是**卡**的事（卡自己刷**卡片那一档**的悬停，见 `viewFollowCard`），
-// 不是行的事。
-//
-// # 判据是「两帧一模一样」
-//
-// 指针停在卡右边的空白上，和指针停在左栏（离内容区远远的），画面必须**一个像素
-// 都不差**。比「那个位置是什么颜色」稳：颜色要跟着主题和底色走，而「有没有变」
-// 不用。
-func TestTheFollowGridRowHasNoHoverSlab(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			b := newUIExplore(t)
-			uiFollowTags(b, map[int]any{0: "默认分组"})
-			// 只有**一张**卡：那一行右边空出来一大块，灰板就露在那里。
-			uiFollowList(b, 1, []any{uiFollowUser(11, "一个人")})
-			uiFollowSearch(b, "", nil)
-			uiFollowTag(b, 0, []any{})
-
-			s, tt := shotSpaceShell(t, b, dark, true, "77")
-			s.navigate(followPath)
-			tt.Frame()
-			f := s.followPageOf()
-			waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 1 && f.tagStarted })
-			homeFrame(tt)
-
-			av, ok := tt.Find(f.users[0].Face)
-			if !ok {
-				t.Fatalf("卡上的头像没画出来，文字有 %q", tt.Texts())
-			}
-
-			// ① 指针停在卡右边那块空白上（卡右边还留着那圈影，所以再往右点）。
-			tt.Move(av.X+av.W+140, av.Y+av.H/2)
-			homeFrame(tt)
-			hovered := tt.Image()
-
-			// ② 指针停在内容区左边那片空白上（离卡远远的）。
-			tt.Move(250, 600)
-			homeFrame(tt)
-			away := tt.Image()
-
-			// 卡右边那一整块必须一模一样。
-			for y := int(av.Y); y < int(av.Y+av.H); y++ {
-				for x := int(av.X + av.W); x < hovered.Bounds().Dx(); x++ {
-					if hovered.At(x, y) != away.At(x, y) {
-						t.Fatalf("指针停在卡右边的空白上，那一块就变了（%d,%d：%v → %v）——"+
-							"框架那一层行悬停底漏出来了", x, y, away.At(x, y), hovered.At(x, y))
-					}
-				}
-			}
-		})
-	}
-}
-
-// TestTheFollowSentinelRowHasNoHoverSlab 钉住末尾那一行（哨兵）也一样。
-//
-// ⚠️ **哨兵那一行也是布局**：它装的是一句「继续往下滚」或者「加载失败：…」，
-// 而框架那一层行悬停底会铺满整行——上游那一块是纯白。
-//
-// # 怎么让哨兵那一行**停下来**
-//
-// 第 1 页给 1 个人而总数写 2，于是「还有更多」、末尾有哨兵；第 2 页**失败**，
-// 于是 `f.pager.err` 有值、闸门关上（`upPager.want` 那一段），哨兵停在
-// 「加载失败：…」等重试，不再自己拉——画面于是是稳的，可以逐像素比。
-func TestTheFollowSentinelRowHasNoHoverSlab(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			b := newUIExplore(t)
-			uiFollowTags(b, map[int]any{0: "默认分组"})
-			b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Query().Get("pn") == "1" {
-					uiExploreJSON(w, 0, map[string]any{"total": 2,
-						"list": []any{uiFollowUser(11, "一个人")}})
-					return
-				}
-				uiExploreJSON(w, -101, nil)
-			})
-			uiFollowSearch(b, "", nil)
-			uiFollowTag(b, 0, []any{})
-
-			s, tt := shotSpaceShell(t, b, dark, true, "77")
-			s.navigate(followPath)
-			tt.Frame()
-			f := s.followPageOf()
-			waitFrames(t, tt, "第二页拉失败了", func() bool { return f.pager.err != nil })
-			homeFrame(tt)
-
-			btn, ok := tt.Find("重试加载关注的人")
-			if !ok {
-				t.Fatalf("哨兵那一行没画出来，文字有 %q", tt.Texts())
-			}
-
-			// ① 指针停在哨兵那一行靠右的空白上（那一行居中摆一句，两边是空的）。
-			tt.Move(1100, btn.Y+btn.H/2)
-			homeFrame(tt)
-			hovered := tt.Image()
-
-			// ② 指针停在内容区左边那片空白上。
-			tt.Move(250, 600)
-			homeFrame(tt)
-			away := tt.Image()
-
-			// 哨兵那一行的右半边必须一模一样。
-			for y := int(btn.Y) - 6; y < int(btn.Y+btn.H)+6; y++ {
-				for x := 900; x < hovered.Bounds().Dx(); x++ {
-					if hovered.At(x, y) != away.At(x, y) {
-						t.Fatalf("指针停在哨兵那一行上，那一块就变了（%d,%d：%v → %v）——"+
-							"框架那一层行悬停底漏出来了", x, y, away.At(x, y), hovered.At(x, y))
-					}
-				}
-			}
-		})
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 那张卡看得出是一张卡（票 #244）
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheFollowCardSitsOnItsOwnBackground 钉住「我的关注」右栏那些 UP 主
-// **看得出是一张一张的方块小卡片**。
-//
-// # 三条判据
-//
-//  1. **卡片底 ≠ 页面底**：卡片底走**卡片那一档**（`Shell.cardBackground`）——
-//     那一档和页面底差得开，那一片才看得出是一张一张的卡。原来那张卡取的是
-//     `t.Background`（和页面底同一个底），于是整片 UP 主看着是**一整块**。
-//  2. **悬停那一档从卡片自己的底出发**：常态和悬停在**同一条色阶**上（悬停是
-//     卡片底往文字色推一档），不是跳到控件那一层去。
-//  3. **推的量是「一档」**：对着上游 `content1 → content2`（zinc 的一格）——
-//     推成两档就跳得太远了。
-//
-// # 为什么要量像素
-//
-// 卡片底是**画出来**的，代码里写的那个色和画面上那个色中间隔着主题的装配
-// （方案 / 深浅 / 用户挑的底色）。量像素量的是**画面上真正画出来的那个色**。
-//
-// ⚠️ **量的是头像左边那一小块**：卡里的内容是**居中**的（`AlignItems(Center)`），
-// 所以头像左边那一块除了底色什么也没有——而头像的**圆**在那一列上，圆外的那
-// 一圈还是卡片的底。
-func TestTheFollowCardSitsOnItsOwnBackground(t *testing.T) {
-	for _, preset := range []app.Accent{app.AccentIndigo, app.AccentCinnabar} {
-		for _, dark := range []bool{false, true} {
-			shade := "浅色"
-			if dark {
-				shade = "深色"
-			}
-			t.Run(string(preset)+"-"+shade, func(t *testing.T) {
-				st := app.DefaultSettings("")
-				st.Accent = preset
-				st.ThemeMode = app.ThemeModeLight
-				if dark {
-					st.ThemeMode = app.ThemeModeDark
-				}
-				b := newUIExplore(t)
-				uiFollowTags(b, map[int]any{0: "默认分组"})
-				uiFollowList(b, 2, []any{
-					uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"),
-				})
-				uiFollowSearch(b, "", nil)
-				uiFollowTag(b, 0, []any{})
-
-				s, tt, _ := newSpaceShell(t, b, true, "77", withSettings(st))
-				s.navigate(followPath)
-				tt.Frame()
-				f := s.followPageOf()
-				waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 2 && f.tagStarted })
-				tt.Frame()
-
-				th := s.theme.base
-				av, ok := tt.Find(f.users[1].Face)
-				if !ok {
-					t.Fatalf("第二张卡的头像没画出来，文字有 %q", tt.Texts())
-				}
-				px, py := int(av.X-20), int(av.Y+av.H/2)
-				resting := tt.Image().RGBAAt(px, py)
-
-				// ① 卡片底 = 卡片那一档，且 ≠ 页面底。
-				if want := toRGBA(s.cardBackground(th)); resting != want {
-					t.Fatalf("卡片的底色是 %v，该是卡片那一档 %v", resting, want)
-				}
-				if resting == toRGBA(th.Background) {
-					t.Fatalf("卡片的底色和页面底色一样（%v）——整片 UP 主会看着连成一块", resting)
-				}
-
-				// ①′ 两卡之间的缝 = 卡片底（用户报的「缝比卡深一截」那一档）。
-				// 头像左边那一小块量的是卡；两卡之间那条竖缝量的是行底——
-				// 它们现在该是一个色。
-				gapX := int(av.X) - int(list.GridGap)/2 - 1
-				if gapX < 0 {
-					gapX = int(av.X) - 4
-				}
-				if gap := tt.Image().RGBAAt(gapX, py); gap != resting {
-					t.Errorf("两卡之间的缝是 %v，卡片底是 %v——缝比卡深一截", gap, resting)
-				}
-
-				// ② 悬停那一档：看得见、不是控件那一层、是从卡片底推的。
-				tt.Move(av.X+av.W/2, av.Y+av.H/2)
-				tt.Frame()
-				hovered := tt.Image().RGBAAt(px, py)
-				if hovered == resting {
-					t.Fatalf("指针压在卡上，底色没变（%v）——悬停看不出来", hovered)
-				}
-				if hovered == toRGBA(th.Surface) {
-					t.Errorf("悬停那一档是控件那一层 %v——常态和悬停不在同一条色阶上", hovered)
-				}
-
-				// ③ 推的量是「一档」：离卡片底近，离文字色还远（上游 content1 →
-				// content2 是 zinc 的一格，也就是百分之几）。
-				step := colorGap(hovered, resting)
-				full := colorGap(toRGBA(th.Text), resting)
-				if full == 0 {
-					t.Fatalf("卡片底和文字色一个色（%v）", resting)
-				}
-				if step*12 > full {
-					t.Errorf("悬停那一档推了 %v（离卡片底），而卡片底到文字色一共 %v——"+
-						"推得比上游 content1 → content2 那一档远", step, full)
-				}
-			})
-		}
-	}
-}
 
 // colorGap 是两个颜色差多少（三个通道的平均差）。
 //

@@ -41,8 +41,11 @@ func doubleClickRow(t *testing.T, tt *mygoui.Tester, title string) {
 	if !ok {
 		t.Fatalf("画面上找不到那一行 %q，文字有 %q", title, tt.Texts())
 	}
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	// 行盒子的正中央在 UP 主那一列上（那里是一枚进空间的链接），所以点歌名那一列：
+	// 序号 40 + 缝 16 + 封面 40 + 缝 12 之后就是歌名，再往里一点。
+	x, y := r.X+130, r.Y+r.H/2
+	tt.ClickAt(x, y)
+	tt.ClickAt(x, y)
 }
 
 // TestPlayingAMultiPartFromTheCollectionWritesTheCidBack 是缺陷 D 的钉子。

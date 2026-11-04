@@ -45,6 +45,8 @@ func (r SpaceRelation) Blocked() bool  { return r == RelationBlocked }
 type RelationStats struct {
 	Following int64
 	Follower  int64
+	// Likes 是总获赞数；0 = 没取到（单独一个接口，失败不影响别的统计）。
+	Likes int64
 }
 
 // SpaceHeaderSnapshot is the complete UP-space header snapshot consumed by UI.
