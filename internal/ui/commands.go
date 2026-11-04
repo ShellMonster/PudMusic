@@ -84,6 +84,7 @@ var commandSpecs = []commandSpec{
 	{id: "prev", name: "上一首"},
 	{id: "next", name: "下一首"},
 	{id: "toggleMiniMode", name: "显示/隐藏迷你播放器"},
+	{id: "toggleNotchMode", name: "显示/隐藏刘海"},
 	{id: "seekBack", name: "快退 5 秒"},
 	{id: "seekForward", name: "快进 5 秒"},
 	{id: "volumeUp", name: "音量加"},

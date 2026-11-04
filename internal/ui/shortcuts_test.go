@@ -33,6 +33,8 @@ func TestTheShortcutDefaultsAreStable(t *testing.T) {
 		// 让开了 ⌘H / ⌘W：那是 macOS 的「隐藏本应用」和「关闭窗口」，而**菜单
 		// 的加速键先于窗口拿到那个键**——抢它的结果是这两条命令永远不响。
 		{"toggleMiniMode", "显示/隐藏迷你播放器", "CommandOrControl+Shift+M", "CommandOrControl+Alt+Shift+M"},
+		// ⌘N 在 macOS 上是「新建窗口」，让开 ⇧⌘N（同上面 ⌘M / ⌘H 的理由）。
+		{"toggleNotchMode", "显示/隐藏刘海", "CommandOrControl+Shift+N", "CommandOrControl+Alt+Shift+N"},
 		{"toggleMainWindow", "显示/隐藏主窗口", "CommandOrControl+Shift+H", "CommandOrControl+Alt+Shift+H"},
 	}
 	// 我们自己补的三条（快退 / 快进 / 打开播放队列抽屉）只在应用内那一列，
@@ -44,9 +46,9 @@ func TestTheShortcutDefaultsAreStable(t *testing.T) {
 		checkShortcut(t, "应用内", got.Shortcuts[i], w.id, w.name, w.in)
 		checkShortcut(t, "全局", got.GlobalShortcuts[i], w.id, w.name, w.global)
 	}
-	checkShortcut(t, "应用内", got.Shortcuts[10], "seekBack", "快退 5 秒", "Shift+Left")
-	checkShortcut(t, "应用内", got.Shortcuts[11], "seekForward", "快进 5 秒", "Shift+Right")
-	checkShortcut(t, "应用内", got.Shortcuts[12], "toggleQueueDrawer", "打开播放队列抽屉", "CommandOrControl+Q")
+	checkShortcut(t, "应用内", got.Shortcuts[11], "seekBack", "快退 5 秒", "Shift+Left")
+	checkShortcut(t, "应用内", got.Shortcuts[12], "seekForward", "快进 5 秒", "Shift+Right")
+	checkShortcut(t, "应用内", got.Shortcuts[13], "toggleQueueDrawer", "打开播放队列抽屉", "CommandOrControl+Q")
 	for _, g := range got.GlobalShortcuts {
 		if g.ID == "seekBack" || g.ID == "seekForward" || g.ID == "toggleQueueDrawer" {
 			t.Errorf("「%s」不该有全局那一半（⌘⌥ 加方向键要留给别的应用；抽屉在窗口后面看不见）", g.ID)

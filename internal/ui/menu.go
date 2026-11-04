@@ -189,6 +189,12 @@ func windowColumn(s *Shell) []*mygo.MenuItem {
 			},
 			Accelerator: s.menuAccelFor("toggleMiniMode"),
 		},
+		mygo.Separator(), {ID: menuCommandIDPrefix + "toggleNotchMode", Label: "显示/隐藏刘海",
+			Type: mygo.MenuItemCheckbox,
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				s.onShortcut("toggleNotchMode")
+			},
+		},
 		mygo.Separator(),
 		// 框架「窗口」栏自带的那三项。
 		{Role: mygo.RoleMinimize},
@@ -500,6 +506,8 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	sidebar := !sidebarCollapsed
 	// 迷你窗开着 = 勾上了「显示/隐藏迷你播放器」。
 	mini := s.mini != nil
+	// 刘海窗开着 = 勾上了「显示/隐藏刘海」。
+	notch := s.notch != nil
 	// 「歌曲」那一栏：有歌才有那几项。
 	hasTrack := st.HasTrack
 	// ⚠️ **「赞」和「显示评论」各有各的判据**（理由见下面改的那几行）：
@@ -511,14 +519,14 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 
 	cur := s.menuState
 	if cur.playMode == mode && cur.displayMode == display && cur.sidebar == sidebar &&
-		cur.mini == mini && cur.hasTrack == hasTrack && cur.hasArtist == hasArtist &&
+		cur.mini == mini && cur.notch == notch && cur.hasTrack == hasTrack && cur.hasArtist == hasArtist &&
 		cur.likeable == likeable && cur.commentsWorthAsking == commentsWorthAsking {
 		// ⚠️ **一样就什么都不做**：每帧都往主线程投一次任务，是白花的钱。
 		return
 	}
 	s.menuState = menuState{
 		playMode: mode, displayMode: display, sidebar: sidebar,
-		mini: mini, hasTrack: hasTrack, hasArtist: hasArtist,
+		mini: mini, notch: notch, hasTrack: hasTrack, hasArtist: hasArtist,
 		likeable: likeable, commentsWorthAsking: commentsWorthAsking,
 	}
 
@@ -542,6 +550,9 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	}
 	if it := s.menu.ItemByID(menuCommandIDPrefix + "toggleMiniMode"); it != nil {
 		it.SetChecked(mini)
+	}
+	if it := s.menu.ItemByID(menuCommandIDPrefix + "toggleNotchMode"); it != nil {
+		it.SetChecked(notch)
 	}
 
 	// ⚠️ **「歌曲」那一栏的判据不是一个「有没有歌」**：每一项要什么，各有各的。
@@ -615,6 +626,7 @@ type menuState struct {
 	displayMode app.DisplayMode
 	sidebar     bool
 	mini        bool
+	notch       bool
 	hasTrack    bool
 	hasArtist   bool
 	// likeable 是「当前这一首能不能赞」（`App.Likeable`）。

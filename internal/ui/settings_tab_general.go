@@ -119,6 +119,17 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 					})
 			})
 
+		// 刘海窗（macOS）：指针探进刘海区时展开一张播放卡。
+		s.settingRow(c, "刘海播放条", "",
+			func() {
+				s.pickSwitch(c, "刘海播放条", "刘海播放条",
+					st.NotchPlayerOn(), ro,
+					func(cur *app.Settings, on bool) {
+						v := on
+						cur.NotchPlayer = &v
+					})
+			})
+
 	})
 	s.settingGroup(c, "下载", func() {
 		// ⚠️ **这一行有身份**（`settingRowAt`）：从下载记录页跳过来的时候要指着它
