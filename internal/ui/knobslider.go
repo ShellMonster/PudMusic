@@ -46,6 +46,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
@@ -145,7 +146,7 @@ func knobFullLook(idle, base ui.Color) sliderLook {
 		// 一根不能拖的进度条不该是主色的，而这一屏上「主色 = 可交互」的信号
 		// 正是那枚实心播放键）。
 		fill: func(t *ui.Theme) (ui.Color, ui.Color, ui.Color) {
-			return idle, ink.AccentOnBase(t, base, ink.GraphicContrast), t.Border
+			return idle, ink.AccentOnBase(t, base, ink.GraphicContrast), rangeRail(t)
 		},
 	}
 }
@@ -407,7 +408,7 @@ func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLo
 			// 「旋钮画的地方」和「按下去算出来的值」对不上（评审指出来的）。
 			cy = r.Y + look.knobH/2 + (r.H-look.knobH)*(1-frac)
 			track = ui.Rect{X: cx - look.trackW/2, Y: r.Y, W: look.trackW, H: r.H}
-			p.Fill(track, t.Border, look.trackW/2)
+			p.Fill(track, rangeRail(t), look.trackW/2)
 			// 🔴 **填过的那一段是从旋钮往下到轨道底**：值 0 时旋钮压在底上，
 			// 填过的那一段是**空的**；值 1 时旋钮在顶上，那一段是**满的**。
 			//
@@ -421,7 +422,7 @@ func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLo
 			// 旋钮的中心：frac=0 时压在轨道最左边，frac=1 时在最右边，半个旋钮留在
 			// 轨道里（那个 `PaddingX` 就是为它留的）。
 			cx = r.X + look.knobW/2 + (r.W-look.knobW)*frac
-			p.Fill(track, t.Border, trackW/2)
+			p.Fill(track, rangeRail(t), trackW/2)
 			p.Fill(ui.Rect{X: track.X, Y: track.Y, W: cx - track.X, H: trackW},
 				fill, trackW/2)
 		}
@@ -523,3 +524,7 @@ func paintKnob(p *ui.Painter, t *ui.Theme, knob ui.Rect, rad float32, face ui.Co
 		p.FocusRing(knob, [4]float32{rad, rad, rad, rad})
 	}
 }
+
+// rangeRail 是滑块轨道没填过的那一段：原型 `.range` 的 `--line-strong`
+// （「深夜唱片行」§0′；`--line` 压在 bg 上太淡，轨道会像断了一样）。
+func rangeRail(t *ui.Theme) ui.Color { return tok.Of(t).LineStrong }

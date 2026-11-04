@@ -131,16 +131,10 @@ const (
 	searchPadX = space.Px12
 	searchGap  = space.Px12
 
-	// 搜索框的底色：上游 `bg-default-400/20 dark:bg-default-500/20`
-	// （`search/index.tsx:97`），hover / focus 各抬到 30%。default-400 / 500
-	// 就是 HeroUI 那套灰里的 `#a1a1aa` / `#71717a`（报告 03 逐字对过）。
-	//
-	// ⚠️ **深浅两套不是同一个灰**：浅色下用 400，深色下用 500——同一个 400 压在
-	// `#18181b` 上比底色亮一大截，框会像一块浮起来的板。
-	searchGrayLightR, searchGrayLightG, searchGrayLightB         = 0xa1, 0xa1, 0xaa
-	searchGrayDarkR, searchGrayDarkG, searchGrayDarkB            = 0x71, 0x71, 0x7a
-	searchBgIdle                                         float32 = 0.20
-	searchBgHot                                          float32 = 0.30
+	// 搜索框的底色：次要字色压 20%，hover / focus 抬到 30%（顶栏的 440×38
+	// 胶囊由 T1 按原型 `.search-box` 重做）。
+	searchBgIdle float32 = 0.20
+	searchBgHot  float32 = 0.30
 
 	// 那个叉：图标边长和点击区。Biu 的 `isClearable` 是一个 16 的叉，
 	// 这里的叉小一点（12）——40 高的框里放 16 的叉也不挤，但 12 和旁边的
@@ -159,13 +153,7 @@ func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
 	if hot {
 		a = searchBgHot
 	}
-	if presetActive() {
-		return t.TextMuted.Alpha(a)
-	}
-	if t.Dark {
-		return ui.RGBA(searchGrayDarkR, searchGrayDarkG, searchGrayDarkB, a)
-	}
-	return ui.RGBA(searchGrayLightR, searchGrayLightG, searchGrayLightB, a)
+	return t.TextMuted.Alpha(a)
 }
 
 // searchFieldBorder 是搜索框这一刻的描边色。
@@ -796,9 +784,6 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 // ⚠️ **别再给它加描边**：上游 solid Chip 没有 border，一眼看过去就是一块很淡的
 // 灰。加一圈 `t.Border` 之后它又会变回「带框的方块」——那正是这张票要收掉的。
 const (
-	historyChipLightR, historyChipLightG, historyChipLightB uint8 = 0xd4, 0xd4, 0xd8
-	historyChipDarkR, historyChipDarkG, historyChipDarkB    uint8 = 0x3f, 0x3f, 0x46
-
 	// historyChipPadRight 是 chip 右边那 8 像素：给关闭键一圈和左面对称的留白。
 	historyChipPadRight = space.Px8
 	// historyChipLabelPadX 是标签按钮**左边**的内边距，也是 chip 左半圈那 8
@@ -842,13 +827,7 @@ const (
 
 // historyChipBg 是那枚灰色 Chip 的底色。深浅两套是 HeroUI default 色阶的两头。
 func historyChipBg(t *ui.Theme) ui.Color {
-	if presetActive() {
-		return t.Surface.Mix(t.Text, 0.08)
-	}
-	if t.Dark {
-		return ui.RGBA(historyChipDarkR, historyChipDarkG, historyChipDarkB, 1)
-	}
-	return ui.RGBA(historyChipLightR, historyChipLightG, historyChipLightB, 1)
+	return t.Surface.Mix(t.Text, 0.08)
 }
 
 // viewHistoryChip 是浮层里的一条历史。

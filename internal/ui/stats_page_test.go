@@ -152,7 +152,7 @@ func TestTheStatsEntryLightsUpOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			s, tt := navBarShell(t, app.DefaultThemePreset, dark)
+			s, tt := navBarShell(t, app.DefaultAccent, dark)
 			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
 
 			btn, ok := tt.Find("听歌统计")

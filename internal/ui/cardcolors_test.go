@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -278,125 +279,52 @@ func TestTheWholeWindowStopsReadingSettingsPerCard(t *testing.T) {
 // ② 三个值的数值：一个字节都不许变
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheCardColorsAreExactlyWhatTheyWere 钉住「三个值和现在**完全一致**」。
-//
-// # 判据：算出来的三个值和「按老算法现算的」逐字节相同
-//
-// 老算法就是那三行（方案里是 `surface1` / `radiusLg` / 底色往文字色推 4%；
-// 经典是 `Surface` / 圆角 × 1.5 / 底色往黑或白推 `surfaceStep`）——**照抄在
-// 下面那个 `wantCardPalette` 里**，而它要跟**生产代码算出来的那一份**比。
-//
-// ⚠️ **照抄不是为了重复实现**：这是「这一票只改这些值**怎么算出来的**，不改
-// 它们**是多少**」那条验收的钉子——照抄的那一份是**独立的一份算术**，而生产
-// 那一份是**缓存里存着的**。两者要是对不上，是「算错了」的信号。
-//
-// ⚠️ **深浅两档都跑**：方案里浅色和深色是**两套独立调校的值**（不是反相），
-// 而经典那一档的悬停推的量也不一样（浅色往黑、深色往白）。
-func TestTheCardColorsAreExactlyWhatTheyWere(t *testing.T) {
-	for _, preset := range []app.ThemePreset{app.ThemePresetClassic, app.ThemePresetWarmPaper, app.ThemePresetInkPaper} {
+// TestTheCardColorsAreTheTokens 钉住卡片那一档就是令牌表里那几样：`--surface`
+// 底、12 圆角、surface 叠 `--hover` 的悬停底、`--side` 侧栏底（深浅两份、四种
+// 强调色都一样——卡片不随强调色变）。
+func TestTheCardColorsAreTheTokens(t *testing.T) {
+	for _, accent := range app.Accents {
 		for _, dark := range []bool{false, true} {
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = accent
 			st.ThemeMode = app.ThemeModeLight
 			if dark {
 				st.ThemeMode = app.ThemeModeDark
 			}
-			s, tt, _ := cardColorShell(t, 4, withSettings(st))
+			s, _, _ := cardColorShell(t, 4, withSettings(st))
 			th := BuildTheme(st, dark)
-			got := s.cardStyleOf(th)
-			want := wantCardPalette(th, preset)
-			if got != want {
-				t.Errorf("%s（dark=%v）：卡片那三个值是 %+v，该是 %+v",
-					preset, dark, got, want)
+			p := tok.Of(th)
+			want := cardPalette{bg: p.Surface, radius: 12, hover: composite(p.Surface, p.Hover), sidebar: p.Side}
+			if got := s.cardStyleOf(th); got != want {
+				t.Errorf("%s（dark=%v）：卡片那一档是 %+v，该是 %+v", accent, dark, got, want)
 			}
-			_ = tt
+			if want.hover == want.bg {
+				t.Errorf("%s（dark=%v）：悬停底和卡片底一样，指针压上去看不出变化", accent, dark)
+			}
 		}
 	}
 }
 
-// wantCardPalette 是「按老算法现算的那一份」——照抄 `cardPaletteOf` 之前那三个
-// 函数里的算法，用来钉「一个字节都不许变」。
-//
-// ⚠️ **这是有意重复**：老算法已经不在生产代码里了（它现在住在
-// `cardPaletteOf` 里），而这一份是**照着老算法抄的**——两者对不上就是回归。
-func wantCardPalette(th *mygoui.Theme, preset app.ThemePreset) cardPalette {
-	if sk, shape, ok := presetSkinFor(preset, th.Dark); ok {
-		bg := mygoui.Hex(sk.surface1)
-		return cardPalette{
-			bg:      bg,
-			radius:  shape.radiusLg,
-			hover:   bg.Mix(th.Text, presetHoverMix),
-			sidebar: mygoui.Hex(sk.sidebar),
-			preset:  true,
-		}
-	}
-	bg := th.Surface
-	mix := mygoui.Color{A: 255}
-	step := surfaceStepLight
-	if th.Dark {
-		mix = mygoui.Color{R: 255, G: 255, B: 255, A: 255}
-		step = surfaceStepDark
-	}
-	return cardPalette{
-		bg:      bg,
-		radius:  th.Radius * 1.5,
-		hover:   bg.Mix(mix, step),
-		sidebar: th.Background,
-	}
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ③ 换了方案 / 系统深浅变了，立刻跟着变
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheCardColorsFollowThePresetChange 钉住「换了主题方案，卡片底色和圆角
-// **立刻**跟着变」。
-//
-// # 判据：改完设置的**下一帧**，那三个值就是新方案的那一份
-//
-// ⚠️ **「立刻」这一条是这一票的风险所在**：卡片那三个值现在住在**缓存**里，
-// 而缓存的键是 `themeKey`——它含**方案**和**深浅**（`theme.go` 里 `themeKey`
-// 的注释写得很清楚）。于是「键变了就重算」=「改了立刻生效」。
-//
-// ⚠️ **走 `UpdateSettings` 而不是直接改字段**：那份设置在 `SettingsStore` 里，
-// 而 `SettingsSnapshot` 是从那儿拿的——直接改 `s.app` 上的字段改不到它。
-func TestTheCardColorsFollowThePresetChange(t *testing.T) {
+// TestTheCardColorsFollowTheModeChange 钉住「设置里换了深浅档，卡片**立刻**跟着变」
+// （卡片那一档住在主题缓存里，缓存的键里有深浅）。
+func TestTheCardColorsFollowTheModeChange(t *testing.T) {
 	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetClassic
 	st.ThemeMode = app.ThemeModeLight
 	s, tt, a := cardColorShell(t, 4, withSettings(st))
 
 	before := s.cardStyleOf(s.theme.base)
-	if before.bg != s.theme.base.Surface {
-		t.Fatalf("经典那一档的卡片底该是控件那一层 %v，却是 %v",
-			s.theme.base.Surface, before.bg)
+	if want := tok.Base(false, "cinnabar").Surface; before.bg != want {
+		t.Fatalf("浅色那一档的卡片底该是 %v，却是 %v", want, before.bg)
 	}
-
-	// 换成墨宣：下一帧就该是墨宣的那一份。
-	//
-	// ⚠️ **为什么是墨宣而不是暖纸**：经典那一档的圆角是「主题圆角 × 1.5」
-	// （默认 8 → 12），而**暖纸的 `radiusLg` 恰好也是 12**——换过去圆角**看起来
-	// 没变**，于是「换了方案圆角立刻跟着变」这条判据就断不出来了。墨宣的
-	// `radiusLg` 是 **8**，和经典的 12 差得开。
 	if _, err := a.UpdateSettings(func(cur *app.Settings) {
-		cur.ThemePreset = app.ThemePresetInkPaper
+		cur.ThemeMode = app.ThemeModeDark
 	}); err != nil {
-		t.Fatalf("换方案：%v", err)
+		t.Fatalf("换深浅：%v", err)
 	}
 	tt.Frame()
-
 	after := s.cardStyleOf(s.theme.base)
-	sk, shape, _ := presetSkinFor(app.ThemePresetInkPaper, false)
-	want := mygoui.Hex(sk.surface1)
-	if after.bg != want {
-		t.Errorf("换了方案之后卡片底是 %v，该是墨宣的 surface1 %v——"+
-			"「立刻生效」这条断了（缓存的键里没有方案？）", after.bg, want)
-	}
-	if after.radius != shape.radiusLg {
-		t.Errorf("换了方案之后卡片圆角是 %v，该是 radiusLg %v", after.radius, shape.radiusLg)
-	}
-	if after.bg == before.bg || after.radius == before.radius {
-		t.Errorf("换了方案之后那三个值一个都没变（%+v → %+v）", before, after)
+	if want := tok.Base(true, "cinnabar").Surface; after.bg != want {
+		t.Errorf("换成深色之后卡片底是 %v，该是 %v——「立刻生效」这条断了", after.bg, want)
 	}
 }
 
@@ -412,14 +340,12 @@ func TestTheCardColorsFollowThePresetChange(t *testing.T) {
 // 出「设置压过了系统」。这一条反过来：设置说「跟随系统」，系统变了就该跟着变。
 func TestTheCardColorsFollowTheSystemDarkChange(t *testing.T) {
 	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetWarmPaper
 	st.ThemeMode = app.ThemeModeSystem
 	s, tt, _ := cardColorShell(t, 4, withSettings(st), systemIsDark(false))
 
 	light := s.cardStyleOf(s.theme.base)
-	lightSk, _, _ := presetSkinFor(app.ThemePresetWarmPaper, false)
-	if light.bg != mygoui.Hex(lightSk.surface1) {
-		t.Fatalf("浅色那一档的卡片底是 %v，该是 %v", light.bg, mygoui.Hex(lightSk.surface1))
+	if want := tok.Base(false, "cinnabar").Surface; light.bg != want {
+		t.Fatalf("浅色那一档的卡片底是 %v，该是 %v", light.bg, want)
 	}
 
 	// 系统切到深色。
@@ -427,13 +353,9 @@ func TestTheCardColorsFollowTheSystemDarkChange(t *testing.T) {
 	tt.Frame()
 
 	dark := s.cardStyleOf(s.theme.base)
-	darkSk, darkShape, _ := presetSkinFor(app.ThemePresetWarmPaper, true)
-	if dark.bg != mygoui.Hex(darkSk.surface1) {
-		t.Errorf("系统切到深色之后卡片底是 %v，该是深色那一档的 surface1 %v——"+
-			"「立刻跟上」这条断了（缓存的键里没有深浅？）", dark.bg, mygoui.Hex(darkSk.surface1))
-	}
-	if dark.radius != darkShape.radiusLg {
-		t.Errorf("系统切到深色之后卡片圆角是 %v，该是 radiusLg %v", dark.radius, darkShape.radiusLg)
+	if want := tok.Base(true, "cinnabar").Surface; dark.bg != want {
+		t.Errorf("系统切到深色之后卡片底是 %v，该是深色那一档的 surface %v——"+
+			"「立刻跟上」这条断了（缓存的键里没有深浅？）", dark.bg, want)
 	}
 	if dark.bg == light.bg {
 		t.Errorf("系统切到深色之后卡片底没变（%v）", dark.bg)

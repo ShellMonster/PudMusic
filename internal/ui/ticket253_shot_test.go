@@ -34,13 +34,13 @@ func TestRenderTicket253Shots(t *testing.T) {
 
 	for _, c := range []struct {
 		label  string
-		preset app.ThemePreset
+		preset app.Accent
 		dark   bool
 	}{
-		{"暖纸", app.ThemePresetWarmPaper, false},
-		{"暖纸", app.ThemePresetWarmPaper, true},
-		{"经典", app.ThemePresetClassic, false},
-		{"经典", app.ThemePresetClassic, true},
+		{"暖纸", app.AccentCinnabar, false},
+		{"暖纸", app.AccentCinnabar, true},
+		{"经典", app.AccentIndigo, false},
+		{"经典", app.AccentIndigo, true},
 	} {
 		name := "浅色"
 		if c.dark {
@@ -48,7 +48,7 @@ func TestRenderTicket253Shots(t *testing.T) {
 		}
 		t.Run(c.label+"-"+name, func(t *testing.T) {
 			st := app.DefaultSettings("")
-			st.ThemePreset = c.preset
+			st.Accent = c.preset
 			if c.dark {
 				st.ThemeMode = app.ThemeModeDark
 			}

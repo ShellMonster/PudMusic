@@ -1,41 +1,27 @@
 package ui
 
 import (
+	mygoui "github.com/egoist/mygo/ui"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	mygoui "github.com/egoist/mygo/ui"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 )
 
-// TestDialogCardFollowsThePreset：套了方案，弹窗面板用方案的 surface1 / radiusLg；
-// 经典不变（底色 = Background）。
-func TestDialogCardFollowsThePreset(t *testing.T) {
-	for _, name := range allPresets {
+// TestDialogCardIsTheSurfaceToken：弹窗面板是 `--surface` 底、12 圆角，和页面
+// 底色分得开（深浅两份）。
+func TestDialogCardIsTheSurfaceToken(t *testing.T) {
+	for _, dark := range []bool{false, true} {
 		st := app.DefaultSettings("")
-		st.ThemePreset = name
-		st.ThemeMode = app.ThemeModeLight
-		b := newTestShell(t, withSettings(st))
-		b.tt.Frame()
-		th := BuildTheme(st, false)
-		sk, shape, _ := presetSkinFor(name, false)
+		th := BuildTheme(st, dark)
 		got := dialogCard(th)
-		if got.bg != mygoui.Hex(sk.surface1) || got.radius != shape.radiusLg {
-			t.Errorf("%s：弹窗面板是 %+v，该是 surface1 %s / radiusLg %v", name, got, sk.surface1, shape.radiusLg)
+		if want := tok.Of(th).Surface; got.bg != want || got.radius != 12 {
+			t.Errorf("深色=%v：弹窗面板是 %+v，该是 surface %v / 12", dark, got, want)
 		}
 		if got.bg == th.Background {
-			t.Errorf("%s：弹窗面板和页面同色，没有层次", name)
+			t.Errorf("深色=%v：弹窗面板和页面同色，没有层次", dark)
 		}
-	}
-
-	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetClassic
-	st.ThemeMode = app.ThemeModeLight
-	b := newTestShell(t, withSettings(st))
-	b.tt.Frame()
-	th := BuildTheme(st, false)
-	if got := dialogCard(th); got.bg != th.Background || got.radius != th.Space(2.5) {
-		t.Errorf("经典：弹窗面板是 %+v，该保持原样 {Background, 2.5 单位}", got)
 	}
 }
 

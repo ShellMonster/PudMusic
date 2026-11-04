@@ -267,8 +267,7 @@ func TestTheHighlightInkStaysReadableOnItsOwnWash(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, hex := range accents {
 				s := app.DefaultSettings("")
-				s.PrimaryColor = hex
-				theme := BuildTheme(s, dark)
+				theme := themeWithAccent(s, hex, dark)
 				mark := commentMarkOf(theme)
 				if mark.Bg.A == 0 {
 					t.Fatalf("主色 %s：高亮底色是透明的", hex)

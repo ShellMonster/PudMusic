@@ -29,11 +29,11 @@ import (
 // ⚠️ **四套全出**，不是两套：方案那一层改的是主色、底色、卡片色和圆角，而这一票
 // 的两处新东西（那一枚「人」是白的一层、失败那一格是 `t.Warning`）压在不同的底色
 // 上——多一套方案就多一组主色/底色的组合。
-var ticket455Presets = []app.ThemePreset{
-	app.ThemePresetWarmPaper,
-	app.ThemePresetDuskAmber,
-	app.ThemePresetSoftPeach,
-	app.ThemePresetClassic,
+var ticket455Presets = []app.Accent{
+	app.AccentCinnabar,
+	app.AccentAmber,
+	app.AccentPine,
+	app.AccentIndigo,
 }
 
 // TestRenderTicket455Shots 存这一票改过的那几处：四套方案 × 深浅两套。
@@ -51,7 +51,7 @@ func TestRenderTicket455Shots(t *testing.T) {
 			t.Run(string(preset)+"-"+shade, func(t *testing.T) {
 				// 这一套方案的设置（主题方案是设置里的一格）。
 				set := app.DefaultSettings("")
-				set.ThemePreset = preset
+				set.Accent = preset
 
 				// ① 搜索页「用户」那一档（列表）：指针停在第一行上——封面上那一枚
 				// 是「一个人」，不是播放三角了。
@@ -71,7 +71,7 @@ func TestRenderTicket455Shots(t *testing.T) {
 				// 于是第一首给回的是整行那个盒子（指针落在行边上），第二格才是自己
 				// 那一小块。
 				setCard := app.DefaultSettings("")
-				setCard.ThemePreset = preset
+				setCard.Accent = preset
 				setCard.DisplayMode = app.DisplayModeCard
 				stCard := newSearchStub(6, 6)
 				sCard, ttCard := newSearchPage(t, "周杰伦", stCard,
@@ -86,7 +86,7 @@ func TestRenderTicket455Shots(t *testing.T) {
 
 				// ② 搜索页拉失败：失败自己的说法 + 一个「重试搜索」。
 				setFail := app.DefaultSettings("")
-				setFail.ThemePreset = preset
+				setFail.Accent = preset
 				st2 := newSearchStub(24, 24)
 				st2.fail = searchFetchFail
 				s2, tt2 := newSearchPage(t, "周杰伦", st2,

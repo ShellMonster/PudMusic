@@ -43,8 +43,8 @@ func TestTheQueuePlayingRowUsesAPalePrimaryBackground(t *testing.T) {
 			// 上游那个数：浅色下 ≈#d2f7df（主色 #1ed760 的 20% 铺在 #ffffff 上）。
 			// ⚠️ **这是硬编码的那个数**：它认的是「主色 20%」这条配方，不是「当前
 			// 主色 20%」——用户换了主色时下面那条（want）才是判据。
-			if !dark && want != mygoui.Hex("#d2f7df") {
-				t.Errorf("浅色下「正在播放」那一行的底是 %v，want #d2f7df（上游那个数）", want)
+			if !dark && want != mygoui.Hex("#efd0c9") {
+				t.Errorf("浅色下「正在播放」那一行的底是 %v，want #efd0c9（朱砂 20%% 铺在 --bg 上）", want)
 			}
 
 			b := newTestShell(t, at(winW, winH), systemIsDark(dark))
@@ -122,8 +122,7 @@ func TestTheTextOnThePalePrimaryRowIsReadable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, hex := range accents {
 				s := app.DefaultSettings("")
-				s.PrimaryColor = hex
-				theme := BuildTheme(s, dark)
+				theme := themeWithAccent(s, hex, dark)
 				bg := playingRowBg(theme)
 
 				// 歌名：主色当字，按**那一层淡底**算。
@@ -164,10 +163,10 @@ func TestThePalePrimaryRowKeepsItsNumbers(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			theme := BuildTheme(app.DefaultSettings(""), dark)
 			bg := playingRowBg(theme)
-			want := mygoui.Hex("#d2f7df")
+			want := mygoui.Hex("#efd0c9") // 浅色朱砂 20% 铺在 --bg #F6F6F5 上
 			if dark {
 				// 主色 #1ed760 的 20% 铺在 #18181b 上。
-				want = mygoui.Hex("#193e29")
+				want = mygoui.Hex("#3e1f1a") // 深色朱砂 20% 铺在 --bg #0E0F11 上
 			}
 			if bg != want {
 				t.Errorf("%s：淡主色底是 %v，want %v", name, bg, want)

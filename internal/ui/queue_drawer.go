@@ -365,7 +365,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 			// （`mygo/ui/layout.go` 的 flexLayout：`free := max(contentMain-ln.main, 0)`，
 			// 剩下的地方被夹成 0，条目落在起点）。绝对定位按 **inset** 摆，
 			// 那才是「从窗口右边挪进来」能用的那一套。
-			panel := shadow.HeroMedium(ui.Column(c).Key("queue-drawer").
+			panel := shadow.Pop(ui.Column(c).Key("queue-drawer").
 				Absolute().Top(0).Bottom(0).Width(queueDrawerWidth).
 				Background(s.cardBackground(t)).BorderStartWidth(1).BorderColor(t.Border), t)
 			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），

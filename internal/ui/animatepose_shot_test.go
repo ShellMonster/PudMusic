@@ -34,17 +34,17 @@ import (
 func animatePoseShots() []struct {
 	name   string
 	dark   bool
-	preset app.ThemePreset
+	preset app.Accent
 } {
 	return []struct {
 		name   string
 		dark   bool
-		preset app.ThemePreset
+		preset app.Accent
 	}{
-		{"浅色-暖纸", false, app.ThemePresetWarmPaper},
-		{"深色-暖纸", true, app.ThemePresetWarmPaper},
-		{"深色-暮光", true, app.ThemePresetDuskAmber},
-		{"浅色-柔雾", false, app.ThemePresetSoftPeach},
+		{"浅色-暖纸", false, app.AccentCinnabar},
+		{"深色-暖纸", true, app.AccentCinnabar},
+		{"深色-暮光", true, app.AccentAmber},
+		{"浅色-柔雾", false, app.AccentPine},
 	}
 }
 
@@ -62,7 +62,7 @@ func TestRenderAnimatePoseShots(t *testing.T) {
 	for _, tc := range animatePoseShots() {
 		t.Run(tc.name, func(t *testing.T) {
 			settings := app.DefaultSettings("")
-			settings.ThemePreset = tc.preset
+			settings.Accent = tc.preset
 
 			// ---- 满屏：亮着 / 藏了 ----
 			fc := newFakeClock(time.Unix(1_700_000_000, 0))

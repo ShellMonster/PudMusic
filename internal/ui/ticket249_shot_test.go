@@ -26,7 +26,7 @@ import (
 )
 
 // shotName 给这一轮存图起个名：方案 + 深浅。
-func shotName(preset app.ThemePreset, dark bool) string {
+func shotName(preset app.Accent, dark bool) string {
 	name := string(preset)
 	if dark {
 		name += "-深色"
@@ -46,7 +46,7 @@ func TestRenderTicket249Shots(t *testing.T) {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
 
-	for _, preset := range []app.ThemePreset{app.ThemePresetWarmPaper, app.ThemePresetDuskAmber} {
+	for _, preset := range []app.Accent{app.AccentCinnabar, app.AccentAmber} {
 		for _, dark := range []bool{false, true} {
 			name := shotName(preset, dark)
 

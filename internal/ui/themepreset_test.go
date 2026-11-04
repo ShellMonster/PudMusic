@@ -2,20 +2,15 @@ package ui
 
 import (
 	"math"
-	"sort"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// allPresets 是「除经典外」的全部方案。新增方案必须加进这份清单——下面那几条
-// 对比度/覆盖/弹窗底色的检查都按它逐套跑。
-var allPresets = []app.ThemePreset{
-	app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
-	app.ThemePresetCeladon, app.ThemePresetInkPaper, app.ThemePresetSandalwood,
-	app.ThemePresetIndigoNight,
-}
+// 「深夜唱片行」主题的用例（DESIGN.md §0′）：令牌的对比度、强调色进缓存键、
+// 侧栏底色、弹窗与 Toast 的字。
 
 func presetLum(c mygoui.Color) float64 {
 	f := func(v uint8) float64 {
@@ -36,280 +31,124 @@ func presetRatio(a, b mygoui.Color) float64 {
 	return (x + 0.05) / (y + 0.05)
 }
 
-// TestClassicPresetChangesNothing：经典方案和没有这个功能时拼出来的主题一字不差
-// （那份「没有方案」的主题就是 classic）。
-func TestClassicPresetChangesNothing(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		s := app.DefaultSettings("")
-		s.ThemePreset = app.ThemePresetClassic
-		got := BuildTheme(s, dark)
-		s.ThemePreset = app.ThemePreset("不存在的方案")
-		if *BuildTheme(s, dark) != *got {
-			t.Errorf("dark=%v：不认识的方案改动了主题（该和经典一样不套方案）", dark)
-		}
-		if got.Accent != mygoui.Hex(app.DefaultPrimaryColor) {
-			t.Errorf("dark=%v：经典的强调色不是 Biu 绿：%v", dark, got.Accent)
-		}
-	}
-}
-
-// TestPresetOverridesUserColorsAndRadius：选了方案就压过主色 / 底色 / 圆角。
-func TestPresetOverridesUserColorsAndRadius(t *testing.T) {
-	for _, name := range allPresets {
+// TestTheTokensKeepTheirContrast：design-tokens.html 表 2-6 的对比度是承诺，四种
+// 强调色 × 深浅两份实算都不得低于 4.5:1（浅色朱砂当字色那一档本来就不过，所以
+// 主色只当底，当字用的是 AccentText）。
+func TestTheTokensKeepTheirContrast(t *testing.T) {
+	for _, a := range app.Accents {
 		for _, dark := range []bool{false, true} {
-			s := app.DefaultSettings("")
-			s.ThemePreset = name
-			s.PrimaryColor = "#00ff00"
-			s.BackgroundColor = "#123456"
-			s.BorderRadius = 20
-			s.ThemeMode = app.ThemeModeLight
-			if dark {
-				s.ThemeMode = app.ThemeModeDark
-			}
-			th := BuildTheme(s, false)
-			sk, shape, _ := presetSkinFor(name, dark)
-			if th.Dark != dark {
-				t.Fatalf("%s dark=%v：深浅不对", name, dark)
-			}
-			if th.Background != mygoui.Hex(sk.bg) || th.Accent != mygoui.Hex(sk.accent) || th.Radius != shape.radius {
-				t.Errorf("%s dark=%v：方案没压过用户设置：bg=%v accent=%v radius=%v", name, dark, th.Background, th.Accent, th.Radius)
-			}
-		}
-	}
-}
-
-// TestPresetContrast：规范表里的对比度是承诺，实算不得低于它。
-func TestPresetContrast(t *testing.T) {
-	for _, name := range allPresets {
-		for _, dark := range []bool{false, true} {
-			sk, _, _ := presetSkinFor(name, dark)
-			bg, text1, text2 := mygoui.Hex(sk.bg), mygoui.Hex(sk.text1), mygoui.Hex(sk.text2)
-			acc, on := mygoui.Hex(sk.accent), mygoui.Hex(sk.onAccent)
-			checks := []struct {
+			p := tok.Base(dark, string(a))
+			for _, c := range []struct {
 				what string
 				got  float64
 			}{
-				{"正文/底", presetRatio(text1, bg)},
-				{"副文字/底", presetRatio(text2, bg)},
-				{"强调色/底（当文字用）", presetRatio(acc, bg)},
-				{"强调色上的字", presetRatio(on, acc)},
-			}
-			for _, c := range checks {
+				{"正文/bg", presetRatio(p.Text, p.Bg)},
+				{"次要/bg", presetRatio(p.Text2, p.Bg)},
+				{"第三级/bg", presetRatio(p.Text3, p.Bg)},
+				{"第三级/surface", presetRatio(p.Text3, p.Surface)},
+				{"主色当字/bg", presetRatio(p.AccentText, p.Bg)},
+				{"主色底上的字", presetRatio(p.AccentInk, p.Accent)},
+				{"danger/bg", presetRatio(p.Err, p.Bg)},
+			} {
 				if c.got < 4.5 {
-					t.Errorf("%s dark=%v %s 只有 %.2f:1，不到 4.5", name, dark, c.what, c.got)
+					t.Errorf("%s 深色=%v %s 只有 %.2f:1，不到 4.5", a, dark, c.what, c.got)
 				}
 			}
 		}
 	}
 }
 
-// TestPresetIsInTheThemeCacheKey：换方案下一帧就得换主题（缓存键里要有方案）。
-func TestPresetIsInTheThemeCacheKey(t *testing.T) {
+// TestTokOfMatchesTheBaseForEveryAccent：页面和控件拿的 `tok.Of(主题)` 和装主题用的
+// `tok.Base` 是同一组值（`Of` 是从主色反查回强调色的）。
+func TestTokOfMatchesTheBaseForEveryAccent(t *testing.T) {
+	for _, a := range app.Accents {
+		for _, dark := range []bool{false, true} {
+			s := app.DefaultSettings("")
+			s.Accent = a
+			if got, want := tok.Of(BuildTheme(s, dark)), tok.Base(dark, string(a)); got != want {
+				t.Errorf("%s 深色=%v：tok.Of = %+v\nwant %+v", a, dark, got, want)
+			}
+		}
+	}
+}
+
+// TestTokOfDerivesTheCoverAccent：封面取色给的主色不在四种之内时，主色当字那一档
+// 从底色现推到 ≥4.5:1，焦点环跟着主色。
+func TestTokOfDerivesTheCoverAccent(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		th := themeWithAccent(app.DefaultSettings(""), "#ffe600", dark)
+		p := tok.Of(th)
+		if r := presetRatio(p.AccentText, p.Bg); r < 4.5 {
+			t.Errorf("深色=%v：现推的主色字只有 %.2f:1", dark, r)
+		}
+		if p.Focus != th.Accent || p.AccentInk != th.AccentText {
+			t.Errorf("深色=%v：焦点环 / 底上字没跟着封面色：%+v", dark, p)
+		}
+	}
+}
+
+// TestTheAccentIsInTheThemeCacheKey：换强调色下一帧就得换主题（缓存键里要有它）。
+func TestTheAccentIsInTheThemeCacheKey(t *testing.T) {
 	var c themeCache
 	s := app.DefaultSettings("")
-	s.ThemePreset = app.ThemePresetClassic
 	a := c.of(s, false, mygoui.Preferences{})
-	s.ThemePreset = app.ThemePresetDuskAmber
+	s.Accent = app.AccentAmber
 	b := c.of(s, false, mygoui.Preferences{})
 	if a == b || a.Accent == b.Accent {
-		t.Fatal("换了方案缓存还在给旧主题")
+		t.Fatal("换了强调色缓存还在给旧主题")
 	}
 	if c.of(s, false, mygoui.Preferences{}) != b {
-		t.Error("方案没变，缓存应该复用同一份")
+		t.Error("强调色没变，缓存应该复用同一份")
 	}
 }
 
-// TestPickingAPresetOnTheSettingsPage：设置页点一档方案 → 设置里变了、主题下一帧换了；
-// 再去拖圆角滑块，方案被清回经典（改了就得有反应，不能被方案压住）。
-func TestPickingAPresetOnTheSettingsPage(t *testing.T) {
-	start := app.DefaultSettings("")
-	start.ThemePreset = app.ThemePresetWarmPaper
-	tt, s, a, _ := shellOnAppearance(t, start)
-
-	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetWarmPaper {
-		t.Fatalf("起点方案是 %q，want 暖纸", got)
-	}
-	clickSetting(t, tt, s, "暮光")
-	tt.Frame()
-	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetDuskAmber {
-		t.Fatalf("点「暮光」之后方案是 %q", got)
-	}
-	got := s.theme.of(a.SettingsSnapshot(), false, mygoui.Preferences{})
-	sk, _, _ := presetSkinFor(app.ThemePresetDuskAmber, got.Dark)
-	if got.Accent != mygoui.Hex(sk.accent) {
-		t.Errorf("方案选了，主题强调色还是 %v", got.Accent)
-	}
-
-	r := appearanceRect(t, tt, s, "全局圆角")
-	x, y := r.X+r.W*0.85, r.Y+r.H/2
-	tt.Press(x, y)
-	tt.Frame()
-	tt.Release(x, y)
-	tt.Frame()
-	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetClassic {
-		t.Errorf("拖了圆角之后方案还是 %q，应当回到经典", got)
-	}
-}
-
-// TestTheSidebarTakesThePresetsOwnColor：套了方案，侧栏底是方案里的 `sidebar`，
-// 不是内容区的 Background；经典沿用 Background（侧栏和内容区同色，靠右缘那条线分界）。
-func TestTheSidebarTakesThePresetsOwnColor(t *testing.T) {
-	for _, tc := range []struct {
-		preset app.ThemePreset
-		dark   bool
-	}{
-		{app.ThemePresetWarmPaper, false}, {app.ThemePresetWarmPaper, true},
-		{app.ThemePresetDuskAmber, true}, {app.ThemePresetSoftPeach, false},
-	} {
+// TestTheSidebarTakesTheSideToken：侧栏底是 `--side`，和内容区的 bg 不同色。
+func TestTheSidebarTakesTheSideToken(t *testing.T) {
+	for _, dark := range []bool{false, true} {
 		st := app.DefaultSettings("")
-		st.ThemePreset = tc.preset
 		st.ThemeMode = app.ThemeModeLight
-		if tc.dark {
+		if dark {
 			st.ThemeMode = app.ThemeModeDark
 		}
 		tt, _, _, _ := shellOnAppearance(t, st)
-		sk, _, _ := presetSkinFor(tc.preset, tc.dark)
-		want := rgb(mygoui.Hex(sk.sidebar))
-		if got := tt.Image().RGBAAt(3, 560); !sameColor(got, want) {
-			t.Errorf("%s dark=%v：侧栏底是 %v，该是方案的 sidebar %v", tc.preset, tc.dark, got, want)
+		p := tok.Base(dark, "cinnabar")
+		if got := tt.Image().RGBAAt(3, 560); !sameColor(got, rgb(p.Side)) {
+			t.Errorf("深色=%v：侧栏底是 %v，该是 --side %v", dark, got, p.Side)
 		}
-		if mygoui.Hex(sk.sidebar) == mygoui.Hex(sk.bg) {
-			t.Errorf("%s dark=%v：sidebar 和 bg 同色，侧栏就分不出层次了", tc.preset, tc.dark)
+		if p.Side == p.Bg {
+			t.Errorf("深色=%v：side 和 bg 同色，侧栏就分不出层次了", dark)
 		}
-	}
-
-	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetClassic
-	st.ThemeMode = app.ThemeModeLight
-	tt, _, _, _ := shellOnAppearance(t, st)
-	bg := rgb(BuildTheme(st, false).Background)
-	if got := tt.Image().RGBAAt(3, 560); !sameColor(got, bg) {
-		t.Errorf("经典：侧栏底是 %v，该沿用 Background %v", got, bg)
 	}
 }
 
-// TestTheSelectedSideItemIsSolidAndReadable：选中的侧栏项底是**实心主色底**
-// （票：用户要「深底色 + 白字」），字取 `t.AccentText`，压在主色底上仍 ≥ 3:1。
-//
-// ⚠️ **这一档换过一次**：原来是 `accentSoft` 淡底（对侧栏底 1.08:1 ~ 1.29:1，
-// 几乎分不出来），换成实心底之后那两条断言就都过时了——删掉，换成现在这两条。
+// TestTheSelectedSideItemIsSolidAndReadable：选中的侧栏项（T1 之前的样子）底是
+// 实心主色底，字取 `t.AccentText`，压在主色底上 ≥ 3:1。
 func TestTheSelectedSideItemIsSolidAndReadable(t *testing.T) {
-	for _, name := range allPresets {
+	for _, a := range app.Accents {
 		for _, dark := range []bool{false, true} {
 			s := app.DefaultSettings("")
-			s.ThemePreset = name
-			s.ThemeMode = app.ThemeModeLight
-			if dark {
-				s.ThemeMode = app.ThemeModeDark
-			}
-			th := BuildTheme(s, false)
+			s.Accent = a
+			th := BuildTheme(s, dark)
 			if got, want := flatSolidCurrentText(th), th.AccentText; got != want {
-				t.Errorf("%s dark=%v：选中项的字 %v，该是 AccentText %v", name, dark, got, want)
+				t.Errorf("%s dark=%v：选中项的字 %v，该是 AccentText %v", a, dark, got, want)
 			}
-			// 🔴 **字压在主色底上 ≥ 3:1**：图形那一档的判据（`ink` 的规矩）。
-			// 方案自带的 `onAccent` 和 applyAccent 挑的黑 / 白都该过这条。
 			if r := presetRatio(flatSolidCurrentText(th), th.Accent); r < 3 {
-				t.Errorf("%s dark=%v：选中项的字压在主色底上只有 %.2f:1", name, dark, r)
+				t.Errorf("%s dark=%v：选中项的字压在主色底上只有 %.2f:1", a, dark, r)
 			}
 		}
 	}
 }
 
-// TestThePresetCardsAreRowsOfFourEqualCards：皮肤页「主题方案」是**每行三张**
-// 等宽的货架卡（八套方案折成 3 / 3 / 2 三行），名字都画得出来、没被省略号
-// 吃掉；各行的左缘齐在一条线上。（原来是设置页每行四张的小卡，换成网易
-// 云那种货架式之后是每行三张的大卡。）
-func TestThePresetCardsAreRowsOfFourEqualCards(t *testing.T) {
-	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	type card struct {
-		xCenter, yCenter float32
-	}
-	cards := make([]card, 0, len(themePresets))
-	for _, p := range themePresets {
-		r := appearanceRect(t, tt, s, p.label)
-		cards = append(cards, card{r.X + r.W/2, r.Y + r.H/2})
-	}
-	if len(cards) != len(themePresets) {
-		t.Fatalf("方案卡有 %d 张，want %d", len(cards), len(themePresets))
-	}
-	// 按纵坐标分行（同一行的 y 中心差不过 1 像素）。
-	rows := [][]card{}
-	for _, c := range cards {
-		found := false
-		for ri := range rows {
-			if d := c.yCenter - rows[ri][0].yCenter; d < 2 && d > -2 {
-				rows[ri] = append(rows[ri], c)
-				found = true
-				break
-			}
-		}
-		if !found {
-			rows = append(rows, []card{c})
-		}
-	}
-	wantRows := (len(themePresets) + skinCardColumns - 1) / skinCardColumns
-	if len(rows) != wantRows {
-		t.Fatalf("方案卡折成 %d 行，want %d（每行 %d 张）", len(rows), wantRows, skinCardColumns)
-	}
-	for ri, row := range rows {
-		wantCols := skinCardColumns
-		if ri == wantRows-1 && len(themePresets)%skinCardColumns != 0 {
-			wantCols = len(themePresets) % skinCardColumns // 最后一行摆不满
-		}
-		if len(row) != wantCols {
-			t.Fatalf("第 %d 行有 %d 张卡，want %d", ri+1, len(row), wantCols)
-		}
-		sort.Slice(row, func(i, j int) bool { return row[i].xCenter < row[j].xCenter })
-		step := row[1].xCenter - row[0].xCenter
-		if step < 40 {
-			t.Fatalf("第 %d 行相邻两张卡的中心只差 %.1f，卡片被挤扁了", ri+1, step)
-		}
-		for i := 2; i < len(row); i++ {
-			if d := row[i].xCenter - row[i-1].xCenter - step; d > 1 || d < -1 {
-				t.Errorf("第 %d 行第 %d 张和前一张的间距是 %.1f，其余是 %.1f——卡不等宽",
-					ri+1, i+1, row[i].xCenter-row[i-1].xCenter, step)
-			}
-		}
-		if ri > 0 && d2(row[0].xCenter, rows[ri-1][0].xCenter) > 1 {
-			t.Errorf("第 %d 行的左缘（%.1f）和上一行（%.1f）没对齐", ri+1, row[0].xCenter, rows[ri-1][0].xCenter)
-		}
-	}
-}
-
-func d2(a, b float32) float32 {
-	if a > b {
-		return a - b
-	}
-	return b - a
-}
-
-// TestToastAndConfirmTextIsReadableOnEveryPresetColor：方案的语义色当底时（Toast、
-// 确认键），字色在每套、每档深浅下都 ≥ 3:1；经典的惯用字色不被换掉。
-func TestToastAndConfirmTextIsReadableOnEveryPresetColor(t *testing.T) {
-	for _, name := range append(append([]app.ThemePreset{}, allPresets...), app.ThemePresetClassic) {
-		for _, dark := range []bool{false, true} {
-			s := app.DefaultSettings("")
-			s.ThemePreset = name
-			s.ThemeMode = app.ThemeModeLight
-			if dark {
-				s.ThemeMode = app.ThemeModeDark
-			}
-			th := BuildTheme(s, false)
-			for tone, bg := range map[string]mygoui.Color{"success": th.Success, "warning": th.Warning, "danger": th.Danger} {
-				for _, pref := range []mygoui.Color{toastOnSemantic, toastOnDanger, confirmOnWarning, dialogOnDanger} {
-					got := readableOn(bg, pref)
-					if r := presetRatio(got, bg); r < 3 {
-						t.Errorf("%s dark=%v %s：字压在底上只有 %.2f:1", name, dark, tone, r)
-					}
-				}
-			}
-			if name == app.ThemePresetClassic {
-				for _, c := range []struct {
-					bg, pref mygoui.Color
-				}{{th.Success, toastOnSemantic}, {th.Warning, toastOnSemantic}, {th.Danger, toastOnDanger}} {
-					if readableOn(c.bg, c.pref) != c.pref {
-						t.Errorf("经典 dark=%v：惯用字色被换掉了（经典要一个像素不变）", dark)
-					}
+// TestToastAndConfirmTextIsReadableOnEverySemanticColor：语义色当底时（Toast、确认键），
+// 字色在深浅两份下都 ≥ 3:1。
+func TestToastAndConfirmTextIsReadableOnEverySemanticColor(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		th := BuildTheme(app.DefaultSettings(""), dark)
+		for tone, bg := range map[string]mygoui.Color{"success": th.Success, "warning": th.Warning, "danger": th.Danger} {
+			for _, pref := range []mygoui.Color{toastOnSemantic, toastOnDanger, confirmOnWarning, dialogOnDanger} {
+				got := readableOn(bg, pref)
+				if r := presetRatio(got, bg); r < 3 {
+					t.Errorf("dark=%v %s：字压在底上只有 %.2f:1", dark, tone, r)
 				}
 			}
 		}
@@ -331,10 +170,7 @@ func TestThePlaybarShowsACleanTitle(t *testing.T) {
 	}
 }
 
-// cardColorOf 是卡片在这份设置下该是的底色：方案里是 surface1，经典就是页面底色。
-func cardColorOf(st app.Settings, th *mygoui.Theme) mygoui.Color {
-	if sk, _, ok := presetSkinFor(st.ThemePreset, th.Dark); ok {
-		return mygoui.Hex(sk.surface1)
-	}
-	return th.Background
+// cardColorOf 是卡片在这份设置下该是的底色：`--surface`。
+func cardColorOf(_ app.Settings, th *mygoui.Theme) mygoui.Color {
+	return tok.Of(th).Surface
 }

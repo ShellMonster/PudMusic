@@ -74,15 +74,15 @@ func TestRenderTicket370PresetShots(t *testing.T) {
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetClassic,
-		app.ThemePresetWarmPaper,
-		app.ThemePresetDuskAmber,
-		app.ThemePresetSoftPeach,
+	for _, preset := range []app.Accent{
+		app.AccentIndigo,
+		app.AccentCinnabar,
+		app.AccentAmber,
+		app.AccentPine,
 	} {
 		t.Run(string(preset), func(t *testing.T) {
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = preset
 			sh := newTestShell(t, withSettings(st))
 			s, tt := sh.s, sh.tt
 

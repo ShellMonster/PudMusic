@@ -58,10 +58,10 @@ func upTabShotFixture(t *testing.T) *uiExplore {
 }
 
 // upTabShotShell 造一个停在 UP 空间「动态」那一页的壳。
-func upTabShotShell(t *testing.T, dark bool, preset app.ThemePreset) (*Shell, *mygoui.Tester) {
+func upTabShotShell(t *testing.T, dark bool, preset app.Accent) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	st := app.DefaultSettings("")
-	st.ThemePreset = preset
+	st.Accent = preset
 	b := upTabShotFixture(t)
 	s, tt, _ := newSpaceShell(t, b, true, "77",
 		systemIsDark(dark), withSettings(st),
@@ -91,23 +91,23 @@ func TestRenderUpSpaceTabShots(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// 01 经典（Biu 绿）：这一族的那一档底色。
 			{
-				_, tt := upTabShotShell(t, dark, app.ThemePresetClassic)
+				_, tt := upTabShotShell(t, dark, app.AccentIndigo)
 				save(t, dir, "70-UP空间-动态-经典-"+name+".png", tt)
 			}
 			// 02 暖纸（默认方案）：**那条棕带就是在这一档上冒出来的**
 			// （`t.SurfaceHover` = `surface2` 往字色推 4%，是淡棕）。
 			{
-				_, tt := upTabShotShell(t, dark, app.ThemePresetWarmPaper)
+				_, tt := upTabShotShell(t, dark, app.AccentCinnabar)
 				save(t, dir, "71-UP空间-动态-暖纸-"+name+".png", tt)
 			}
 			// 03 暮光·琥珀：另一套色相。
 			{
-				_, tt := upTabShotShell(t, dark, app.ThemePresetDuskAmber)
+				_, tt := upTabShotShell(t, dark, app.AccentAmber)
 				save(t, dir, "72-UP空间-动态-暮光-"+name+".png", tt)
 			}
 			// 04 悬停：指针停在一条动态上——**底下不许再有一条棕色的带**。
 			{
-				_, tt := upTabShotShell(t, dark, app.ThemePresetWarmPaper)
+				_, tt := upTabShotShell(t, dark, app.AccentCinnabar)
 				r, ok := tt.Find("https://f/author-11.jpg")
 				if !ok {
 					t.Fatalf("画面上找不到那个头像，文字有 %q", tt.Texts())
@@ -119,7 +119,7 @@ func TestRenderUpSpaceTabShots(t *testing.T) {
 			// 05 动态流那一页：同一个组件在另一页上的样子（左右 32 而不是 16）。
 			{
 				st := app.DefaultSettings("")
-				st.ThemePreset = app.ThemePresetWarmPaper
+				st.Accent = app.AccentCinnabar
 				b := upTabShotFixture(t)
 				s, tt, _ := newSpaceShell(t, b, true, "77",
 					systemIsDark(dark), withSettings(st),

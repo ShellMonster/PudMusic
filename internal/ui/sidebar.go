@@ -47,15 +47,9 @@ const (
 	// 字），这里取 28。
 	sideCollapseHeight = 28
 
-	// sideDividerW / sideDividerA 是右缘那条分隔线的宽度和浓度。
-	//
-	// 照 Biu 的 `border-divider/30 border-r-1`（`side/index.tsx:145`）：
-	// 1 像素、透明度 30%。**不能照抄 `t.Border` 原色**——深色下那道线
-	// （票 #172 之后是 15% 白叠出来的 `#3b3b3d`）压在 `#17181a` 上是一道亮线，
-	// 比上游那道明显得多（flatbutton.go 的文件头记的就是这件事：同一个色在深浅
-	// 两套里的观感完全不同）。
+	// sideDividerW 是右缘那条分隔线的宽度：原型 `.side { border-right: 1px solid
+	// var(--line) }`，实色 `--line`（就是 `t.Border`），不再压 30%。
 	sideDividerW = 1
-	sideDividerA = 0.3
 
 	// sideRowHeight 是侧栏菜单里一行的高。
 	//
@@ -172,7 +166,7 @@ func (s *Shell) viewSide(c *ui.Context) {
 	// 于是「统一底色」就变成了「抹掉层次」，那正是这一票要避开的反面。
 	side.Width(w).AlignSelf(ui.Stretch).Background(s.sidebarBackground(c.Theme())).
 		BorderWidth(0, sideDividerW, 0, 0).
-		BorderColor(c.Theme().Border.Alpha(sideDividerA)).
+		BorderColor(c.Theme().Border).
 		Children(func() {
 			// ⚠️ FillHeight 不能省：Row 是把子元素**垂直居中**摆的（MyGo 的
 			// `docs/ui/layout.md`：「Row places them from left to right and

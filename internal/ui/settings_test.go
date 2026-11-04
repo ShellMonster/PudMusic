@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -70,15 +71,12 @@ func shellWithSettings(t *testing.T, mode app.ThemeMode, systemDark bool,
 }
 
 // wantBackground 是「设置 + 系统外观」这一对在采样点（侧栏那一带）该画出来的底色：
-// 选了方案就是方案的 sidebar，经典就是主题的 Background。
+// 侧栏底色 `--side`。
 func wantBackground(t *testing.T, a *app.App, systemDark bool) mygoui.Color {
 	t.Helper()
 	st := a.SettingsSnapshot()
 	th := BuildTheme(st, systemDark)
-	if sk, _, ok := presetSkinFor(st.ThemePreset, th.Dark); ok {
-		return mygoui.Hex(sk.sidebar)
-	}
-	return th.Background
+	return tok.Of(th).Side
 }
 
 // assertBackground 断言画面上那个采样点（sampleX / sampleY 在文件头上）就是

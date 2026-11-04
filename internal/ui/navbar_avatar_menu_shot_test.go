@@ -24,9 +24,9 @@ func TestRenderAvatarMenuShots(t *testing.T) {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
 
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetClassic, app.ThemePresetWarmPaper,
-		app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	for _, preset := range []app.Accent{
+		app.AccentIndigo, app.AccentCinnabar,
+		app.AccentAmber, app.AccentPine,
 	} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
@@ -36,7 +36,7 @@ func TestRenderAvatarMenuShots(t *testing.T) {
 			name := string(preset) + "-" + shade
 			t.Run(name, func(t *testing.T) {
 				st := app.DefaultSettings("")
-				st.ThemePreset = preset
+				st.Accent = preset
 				st.ThemeMode = app.ThemeModeLight
 				if dark {
 					st.ThemeMode = app.ThemeModeDark

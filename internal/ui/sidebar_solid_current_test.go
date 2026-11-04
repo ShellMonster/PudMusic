@@ -27,6 +27,7 @@ package ui
 // **1.02:1 ~ 1.34:1**，完全读不出来。
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -82,11 +83,11 @@ func TestTheSelectedSidebarRowIsSolid(t *testing.T) {
 // ⚠️ **次要字（「N 首」）也算**：它在实心主色底上压 `t.TextMuted` 只有
 // 1.02:1 ~ 1.34:1——完全读不出来。
 func TestTheSelectedSidebarRowTextIsReadable(t *testing.T) {
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetClassic, app.ThemePresetWarmPaper,
-		app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
-		app.ThemePresetCeladon, app.ThemePresetInkPaper,
-		app.ThemePresetSandalwood, app.ThemePresetIndigoNight,
+	for _, preset := range []app.Accent{
+		app.AccentIndigo, app.AccentCinnabar,
+		app.AccentAmber, app.AccentPine,
+		app.AccentPine, app.AccentCinnabar,
+		app.AccentIndigo, app.AccentIndigo,
 	} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
@@ -94,7 +95,7 @@ func TestTheSelectedSidebarRowTextIsReadable(t *testing.T) {
 				shade = "深色"
 			}
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = preset
 			th := BuildTheme(st, dark)
 			for _, c := range []struct {
 				what string
@@ -121,11 +122,11 @@ func TestTheSelectedSidebarRowTextIsReadable(t *testing.T) {
 // 判据取 **≥ 1.3:1**：实心主色底对侧栏底是 4.34:1 ~ 6.72:1，而淡底那一档是
 // 1.09:1 ~ 1.29:1 —— 1.3 是把两档分开的那个线。
 func TestTheSelectedSidebarRowStandsOutFromTheSidebar(t *testing.T) {
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetClassic, app.ThemePresetWarmPaper,
-		app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
-		app.ThemePresetCeladon, app.ThemePresetInkPaper,
-		app.ThemePresetSandalwood, app.ThemePresetIndigoNight,
+	for _, preset := range []app.Accent{
+		app.AccentIndigo, app.AccentCinnabar,
+		app.AccentAmber, app.AccentPine,
+		app.AccentPine, app.AccentCinnabar,
+		app.AccentIndigo, app.AccentIndigo,
 	} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
@@ -133,12 +134,9 @@ func TestTheSelectedSidebarRowStandsOutFromTheSidebar(t *testing.T) {
 				shade = "深色"
 			}
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = preset
 			th := BuildTheme(st, dark)
-			sidebar := th.Background
-			if sk, _, ok := presetSkinFor(preset, dark); ok {
-				sidebar = mygoui.Hex(sk.sidebar)
-			}
+			sidebar := tok.Of(th).Side
 			if r := ink.Ratio(th.Accent, sidebar); r < 1.3 {
 				t.Errorf("%s / %s：选中那一行的底（主色 %v）压侧栏底 %v 只有 %.2f:1（< 1.3）",
 					preset, shade, th.Accent, sidebar, r)

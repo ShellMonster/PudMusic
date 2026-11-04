@@ -68,7 +68,7 @@ func TestSettingsSnapshotWithoutAMount(t *testing.T) {
 	if !reflect.DeepEqual(got, app.DefaultSettings("")) {
 		t.Errorf("没挂设置时给的不是默认值：%+v", got)
 	}
-	if got.ThemeMode != app.ThemeModeSystem || got.PrimaryColor == "" || got.BorderRadius <= 0 {
+	if got.ThemeMode != app.ThemeModeSystem || got.Accent == "" || got.BorderRadius <= 0 {
 		t.Errorf("这份设置画出来的界面会不对：%+v", got)
 	}
 }

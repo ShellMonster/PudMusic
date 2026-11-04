@@ -253,6 +253,11 @@ func TestTheDynamicItemIsFullWidthWithOneBottomBorder(t *testing.T) {
 			}
 			for _, x := range []int{int(card.X), int(card.X+card.W) - 1} {
 				for y := int(card.Y); y < bottom; y++ {
+					// 头像贴着卡片左缘（上面那条断言钉的），它的占位底可能正好是
+					// 描边那一色（`--line` 是实色）——那是头像，不是侧边描边。
+					if float32(x) >= av.X && float32(x) < av.X+av.W && float32(y) >= av.Y && float32(y) < av.Y+av.H {
+						continue
+					}
 					if got := img.RGBAAt(x, y); got == border {
 						t.Fatalf("卡片侧边（x=%d）在 y=%d 也有一道描边（%v）——"+
 							"动态条目只留一条下边框", x, y, got)

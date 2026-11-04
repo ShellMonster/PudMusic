@@ -8,8 +8,8 @@ import (
 )
 
 // 皮肤页（/appearance）：顶栏 palette 图标进的一页，设置页「常规 → 外观」那
-// 一整块搬来的（主题方案 + 主题模式 + 颜色 + 封面取色 + 字体 + 圆角 +
-// 背景清晰度）。
+// 一整块搬来的（深浅模式 + 强调色 + 封面取色 + 字体 + 背景清晰度；主题方案、
+// 自定义颜色、圆角 2026-11 随「深夜唱片行」删掉，见 DESIGN.md §0′）。
 
 // openAppearance 从顶栏那枚 palette 图标进皮肤页。走的是用户真的走的那条路。
 func openAppearance(t *testing.T, tt *mygoui.Tester) {
@@ -17,8 +17,8 @@ func openAppearance(t *testing.T, tt *mygoui.Tester) {
 	if err := tt.Click("皮肤"); err != nil {
 		t.Fatalf("顶栏上点不到「皮肤」：%v，文字有 %q", err, tt.Texts())
 	}
-	settlePage(t, tt, "主题方案") // 等切页动画停，皮肤页认「主题方案」那一组
-	if !tt.HasText("主题方案") {
+	settlePage(t, tt, "深浅模式") // 等切页动画停，皮肤页认「深浅模式」那一组
+	if !tt.HasText("深浅模式") {
 		t.Fatalf("切到皮肤页了但没画出内容，文字有 %q", tt.Texts())
 	}
 }
@@ -36,7 +36,7 @@ func shellOnAppearance(t *testing.T, s app.Settings, opts ...shellOpt) (*mygoui.
 // TestTheAppearancePageHasTheWholeThemeBlock 验那一整块控件都在页上。
 func TestTheAppearancePageHasTheWholeThemeBlock(t *testing.T) {
 	tt, _, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	for _, want := range []string{"皮肤", "主题方案", "暖纸", "主题", "颜色", "封面取色", "字体", "圆角", "背景清晰度"} {
+	for _, want := range []string{"皮肤", "深浅模式", "强调色", "封面取色", "字体", "背景清晰度"} {
 		if !tt.HasText(want) {
 			t.Errorf("皮肤页上没有 %q，文字有 %q", want, tt.Texts())
 		}
@@ -51,21 +51,27 @@ func TestTheAppearanceButtonIsInTheNavbar(t *testing.T) {
 	}
 }
 
-// TestPickingAPresetOnTheAppearancePage：皮肤页点一档方案 → 设置里变了、
-// 主题下一帧换了。（`TestPickingAPresetOnTheSettingsPage` 的迁移——那一整块
-// 控件搬到这一页了。）
-func TestPickingAPresetOnTheAppearancePage(t *testing.T) {
-	start := app.DefaultSettings("")
-	start.ThemePreset = app.ThemePresetWarmPaper
-	tt, s, a, _ := shellOnAppearance(t, start)
-
-	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetWarmPaper {
-		t.Fatalf("起点方案是 %q，want 暖纸", got)
+// TestTheAppearancePageHasNoPresetGridOrCustomColors：方案网格、自定义主色/底色、
+// 圆角滑块、「定时」档都不在了（§0′ 用户拍板）；封面取色开着时强调色那一行也不画。
+func TestTheAppearancePageHasNoPresetGridOrCustomColors(t *testing.T) {
+	tt, _, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
+	for _, gone := range []string{"主题方案", "暖纸", "经典", "主色", "全局圆角"} {
+		if tt.HasText(gone) {
+			t.Errorf("皮肤页上还有 %q", gone)
+		}
 	}
-	clickSetting(t, tt, s, "暮光")
-	tt.Frame()
-	if got := a.SettingsSnapshot().ThemePreset; got != app.ThemePresetDuskAmber {
-		t.Fatalf("点「暮光」之后方案是 %q", got)
+	// 深浅模式只有三档（「定时」删了；画面上别处还有「睡眠定时」，所以按卡数）。
+	for _, want := range []string{"朱砂", "靛青", "松绿", "琥珀"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Errorf("皮肤页上没有强调色 %q", want)
+		}
+	}
+
+	st := app.DefaultSettings("")
+	st.CoverAccent = true
+	tt2, _, _, _ := shellOnAppearance(t, st)
+	if _, ok := tt2.Find("朱砂"); ok {
+		t.Error("封面取色开着时强调色那一行不该画（原型 appearance() 的条件）")
 	}
 }
 

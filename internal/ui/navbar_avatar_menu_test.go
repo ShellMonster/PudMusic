@@ -459,9 +459,9 @@ func TestEveryAvatarMenuItemHasAnIcon(t *testing.T) {
 // `accentSoft`（浅色 14%、深色 18%），对比度也跟着方案走。
 func TestTheDangerItemKeepsItsContrastOnTheHighlightedRow(t *testing.T) {
 	danger := avatarMenuItem{label: "退出登录", danger: true}
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetClassic, app.ThemePresetWarmPaper,
-		app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	for _, preset := range []app.Accent{
+		app.AccentIndigo, app.AccentCinnabar,
+		app.AccentAmber, app.AccentPine,
 	} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
@@ -469,7 +469,7 @@ func TestTheDangerItemKeepsItsContrastOnTheHighlightedRow(t *testing.T) {
 				shade = "深色"
 			}
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = preset
 			st.ThemeMode = app.ThemeModeLight
 			if dark {
 				st.ThemeMode = app.ThemeModeDark

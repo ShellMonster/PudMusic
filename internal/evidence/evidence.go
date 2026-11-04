@@ -3205,10 +3205,10 @@ var Items = []Item{
 		Spec: "配色：危险/警告/成功三个语义色是上游那一档（深浅两套同一个值）；分隔线深色是 15% 白叠在当前底色上、浅色是 #dbdbdb；深色下卡片和页面底色同源、浮起来靠的是那圈影，浅色下卡片不是一块灰；**被选中的选项**（设置页那些：主题三档 / 窗口关闭两档 / 下拉项的高亮）是实心主色底 + 主色上的字，只有一种画法",
 		Tests: []string{
 			// 三个语义色：主题里的值 + 画面上那个像素。
-			"TestTheSemanticColorsMatchUpstream",
+			"TestTheSemanticColorsMatchTheTokens",
 			"TestTheSemanticColorsReachThePixels",
 			// 分隔线：主题里的值（深色那档跟着用户挑的底色重算）+ 画面上那一列。
-			"TestTheDividerMatchesUpstream",
+			"TestTheDividerMatchesTheTokens",
 			"TestTheDividerReachesThePixels",
 			// 卡片层次：卡里那一块 = 页面底色、且不是「亮一级的板」。
 			"TestTheCardIsThePageColor",
@@ -5168,9 +5168,9 @@ var Items = []Item{
 			// 整窗口径（用户感受到的那一帧）：差值也不许随卡数涨。
 			"TestTheWholeWindowStopsReadingSettingsPerCard",
 			// 三个值的数值：一个字节都不许变（照抄老算法的那一份算术）。
-			"TestTheCardColorsAreExactlyWhatTheyWere",
+			"TestTheCardColorsAreTheTokens",
 			// 换了主题方案之后立刻跟着变。
-			"TestTheCardColorsFollowThePresetChange",
+			"TestTheCardColorsFollowTheModeChange",
 			// 系统在浅色/深色之间切换时立刻跟上。
 			"TestTheCardColorsFollowTheSystemDarkChange",
 			// 帧预算那一档的「每帧读几次设置」那一栏（上限 4 次）。
@@ -5181,7 +5181,7 @@ var Items = []Item{
 			// 卡片那圈影还在（这一票碰的是底色和圆角，影不许动）。
 			"TestTheFollowCardHasAShadow",
 			// 卡片那一族（弹窗面板 / 抽屉面板）还是同一档料。
-			"TestDialogCardFollowsThePreset",
+			"TestDialogCardIsTheSurfaceToken",
 			"TestCardsAndDialogsStillStandOffTheBackground",
 			"TestTheAvatarMenuPanelLooksLikeACard",
 			"TestTheCollapsedFavoritesPanelIsACard",

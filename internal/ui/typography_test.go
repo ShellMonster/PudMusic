@@ -584,9 +584,9 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 			}
 			b.s.navigate(appearancePath)
 			b.tt.Frame()
-			grpRect, grpOK := b.tt.Find("主题方案")
+			grpRect, grpOK := b.tt.Find("深浅模式")
 			if !grpOK {
-				t.Fatalf("皮肤页上找不到分组标题「主题方案」，文字有 %q", b.tt.Texts())
+				t.Fatalf("皮肤页上找不到分组标题「深浅模式」，文字有 %q", b.tt.Texts())
 			}
 
 			// 两个盒子都是文本本身的高（分组标题与卡片之间是 Gap，不在盒内）。
@@ -597,7 +597,7 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 				r    mygoui.Rect
 			}{
 				{"数据显示样式", 16, "行标题", rowRect},
-				{"主题方案", 20, "分组标题", grpRect},
+				{"深浅模式", 20, "分组标题", grpRect},
 			} {
 				got := m.r.H / textBoxPerSize
 				if math.Abs(float64(got-m.size)) > 0.8 {

@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -164,38 +163,6 @@ func TestChoosingTheCloseWindowOptionIsStored(t *testing.T) {
 	}
 }
 
-// TestDraggingTheRadiusSliderChangesTheSetting 验圆角滑块接上了。
-//
-// 滑块是最容易「画在那儿、拖着不动」的一个控件：读的是设置里的值，改的是
-// 另一个地址上的副本，没接上的时候屏幕上照样有那根条。所以这里按住拖一段，
-// 断言设置真的变了——并且变完之后主题里那个圆角也跟着变了。
-func TestDraggingTheRadiusSliderChangesTheSetting(t *testing.T) {
-	want := app.DefaultSettings("")
-	want.BorderRadius = app.DefaultBorderRadius
-	tt, sh, a, _ := shellOnAppearance(t, want)
-
-	if a.SettingsSnapshot().BorderRadius != app.DefaultBorderRadius {
-		t.Fatalf("起点圆角是 %v，want %v", a.SettingsSnapshot().BorderRadius, app.DefaultBorderRadius)
-	}
-
-	// 先滚进可视区再按：直接 `Find` 拿到的框可能在屏幕外，按下去是空的。
-	r := appearanceRect(t, tt, sh, "全局圆角")
-	// 按在滑块靠右 85% 的地方：从 8 挪到接近 24，是一眼能看出来的变化。
-	x, y := r.X+r.W*0.85, r.Y+r.H/2
-	tt.Press(x, y)
-	tt.Frame()
-	tt.Release(x, y)
-	tt.Frame()
-
-	got := a.SettingsSnapshot().BorderRadius
-	if got <= app.DefaultBorderRadius {
-		t.Errorf("拖了滑块，圆角还是 %v（起点 %v）", got, app.DefaultBorderRadius)
-	}
-	if got > app.MaxBorderRadius {
-		t.Errorf("圆角 %v 越过了上限 %v", got, app.MaxBorderRadius)
-	}
-}
-
 // TestSettingsPageSaysSoWhenAChangeCannotBeStored 验「存不住」时用户看得见。
 //
 // 这里的错是**当场**发生的：设置压根没挂上（拿不到应用数据目录就是这个结果），
@@ -222,7 +189,7 @@ func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 		t.Errorf("改不动的时候界面上没有提示，文字有 %q", tt.Texts())
 	}
 	// 提示之外界面照常画：这一帧要是 panic 了，测试进程自己就没了。
-	if !tt.HasText("主题方案") {
+	if !tt.HasText("深浅模式") {
 		t.Errorf("提示之外界面没画出来，文字有 %q", tt.Texts())
 	}
 }
@@ -543,17 +510,6 @@ func TestTheSettingsControlColumnIsFilled(t *testing.T) {
 			"（主题那排四档里「跟随系统」最宽，窄了它会被画成「跟随…」）",
 			settingsControlW)
 	}
-	for _, c := range []struct {
-		what string
-		got  float64
-	}{
-		{"两块色卡加中间的缝", float64(colorItemWidth*2 + colorItemGap)},
-	} {
-		if math.Abs(c.got-float64(settingsControlW)) > 0.01 {
-			t.Errorf("%s 是 %.2f，want %.0f——它们要正好铺满控件列那一格，"+
-				"差一像素那一行的右边缘就参差了", c.what, c.got, float64(settingsControlW))
-		}
-	}
 	if selectWidth != settingsControlW {
 		t.Errorf("selectWidth = %d，want %d——那一列里的下拉也要按基准宽走，"+
 			"否则控件列的左边缘又落在两个位置上", selectWidth, settingsControlW)
@@ -605,7 +561,7 @@ func TestTheSettingsInputsAreNotFullRowWide(t *testing.T) {
 }
 
 // TestTheAppearanceInputsAreNotFullRowWide 是上面那一条的皮肤页版：
-// 「字体」「圆角」那两格搬到皮肤页了，判据不变（控件列的基准宽度）。
+// 「字体」那一格搬到皮肤页了，判据不变（控件列的基准宽度）。
 func TestTheAppearanceInputsAreNotFullRowWide(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""), at(1400, 800))
 	homeFrame(tt)
@@ -614,8 +570,7 @@ func TestTheAppearanceInputsAreNotFullRowWide(t *testing.T) {
 		label string
 		want  float32
 	}{
-		{"选择字体", selectWidth},      // 控件列的基准宽度
-		{"全局圆角", settingsControlW}, // 那一行的盒子
+		{"选择字体", selectWidth}, // 控件列的基准宽度
 	} {
 		r := appearanceRect(t, tt, s, c.label)
 		if r.W > c.want {

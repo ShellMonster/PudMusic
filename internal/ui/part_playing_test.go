@@ -45,10 +45,10 @@ func TestThePartDrawerPlayingRowKeepsItsNumbers(t *testing.T) {
 			theme := BuildTheme(app.DefaultSettings(""), dark)
 
 			bg := playingRowBg(theme)
-			want := mygoui.Hex("#d2f7df")
+			want := mygoui.Hex("#efd0c9") // 浅色朱砂 20% 铺在 --bg #F6F6F5 上
 			if dark {
 				// 主色 #1ed760 的 20% 铺在 #18181b 上。
-				want = mygoui.Hex("#193e29")
+				want = mygoui.Hex("#3e1f1a") // 深色朱砂 20% 铺在 --bg #0E0F11 上
 			}
 			if bg != want {
 				t.Errorf("%s：淡主色底是 %v，want %v", name, bg, want)
@@ -65,8 +65,8 @@ func TestThePartDrawerPlayingRowKeepsItsNumbers(t *testing.T) {
 					t.Errorf("深色：标题是 %v，want 主色本身 %v", title, theme.Accent)
 				}
 			} else {
-				if title != mygoui.Hex("#127d38") {
-					t.Errorf("浅色：标题是 %v，want #127d38（压深的主色）", title)
+				if title != mygoui.Hex("#ae2f16") {
+					t.Errorf("浅色：标题是 %v，want #ae2f16（压深的朱砂）", title)
 				}
 				if title == theme.Accent {
 					t.Errorf("浅色：标题就是主色本身 %v——它压淡底只有 1.65:1，读不出来",
@@ -81,8 +81,8 @@ func TestThePartDrawerPlayingRowKeepsItsNumbers(t *testing.T) {
 					t.Errorf("深色：编号是 %v，want 次要色 %v（深色下原样就够）",
 						num, theme.TextMuted)
 				}
-			} else if num != mygoui.Hex("#6b6b74") {
-				t.Errorf("浅色：编号是 %v，want #6b6b74（次要色按淡底重算）", num)
+			} else if num != mygoui.Hex("#50535a") {
+				t.Errorf("浅色：编号是 %v，want #50535a（次要色压淡底已经够，原样）", num)
 			}
 
 			// 没在放的那些行：一个字都不改（底是面板底，字是正文色 / 次要色）。
@@ -124,8 +124,7 @@ func TestTheTextOnThePalePartRowIsReadable(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			for _, hex := range accents {
 				s := app.DefaultSettings("")
-				s.PrimaryColor = hex
-				theme := BuildTheme(s, dark)
+				theme := themeWithAccent(s, hex, dark)
 				bg := playingRowBg(theme)
 
 				for _, c := range []struct {

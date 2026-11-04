@@ -1,378 +1,109 @@
-// 主题方案：暖纸·赤陶 / 暮光·琥珀 / 柔雾·蜜桃来自设计规范 v0.1 §2；青瓷 / 墨宣 /
-// 紫檀 / 靛夜是本仓库 2026-10-26 原创补的四套（冷色系和水墨/紫/蓝几个色相）。
+// 主题：「深夜唱片行」——应用唯一的一套主题，分深色、浅色两份（DESIGN.md §0′）。
 //
-// 每套含浅色、深色各一份，深色是**独立调校**的，不是浅色反相。规范的 token 表
-// 抄自规范；原创那四套的每个值都按 WCAG 现算过对比度（正文 ≥10:1、次要字 ≥4.5:1、
-// 强调底上的字 ≥4.5:1，和暖纸一档的带子一致）——改之前先跑一遍那套算法
-// （`internal/ui/themepreset_test.go` 的对比度用例也在盯着）。
+// 2026-11 用户拍板：暖纸、暮光、柔雾、青瓷、墨宣、紫檀、靛夜、经典八套方案全部
+// 删掉，自定义主色、自定义底色、「定时」档也一起删掉。强调色四选一（朱砂 / 靛青 /
+// 松绿 / 琥珀）外加「封面取色」。
 //
-// ## 套在哪一步
+// 颜色令牌的唯一出处是 `widgets/tok`（数值抄自原型 `index.html` 69–120 行）。这个
+// 文件只管「卡片那一档」这几样 `ui.Theme` 里没有的东西怎么按帧算、怎么缓存。
 //
-// `buildTheme` 先照老办法拼出主题（框架默认 + 用户的底色/主色/圆角），**最后**
-// 才把方案盖上去：方案选了就压过 `primaryColor` / `backgroundColor` /
-// `borderRadius` 三项。空方案（经典）一个字节都不动，见 `app.ThemePreset`。
-//
-// 🔴 铁律一不变：方案是 `buildTheme` 的一部分，每帧开头照样装一次；`themeKey`
-// 里带着方案名，换方案下一帧就生效。
+// 🔴 铁律一不变：主题在 `applyFrameTheme` 里每帧开头装一次（见 `theme.go`）。
 package ui
 
 import (
-	"sync/atomic"
-
-	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
-// presetSkin 是一套方案在一种深浅下的颜色。
-type presetSkin struct {
-	bg, sidebar, surface1, surface2, text1, text2, accent, onAccent string
-	// accentSoftA / borderA / focusA 是透明度（0~1）：选中底、描边、焦点环。
-	accentSoftA, borderA, focusA float32
-	// danger / success / warning 是语义色（三套共用，浅深各一份）。
-	danger, success, warning string
-}
-
-// presetShape 是一套方案的形状：圆角和行高（行高给列表用，主题里没有这个字段）。
-type presetShape struct {
-	radius    float32
-	rowHeight float32
-	// radiusLg 是卡片、弹层的圆角（规范 §3.2 的 radiusLg）。
-	radiusLg float32
-}
-
-type preset struct {
-	light, dark presetSkin
-	shape       presetShape
-}
-
-// 语义色：规范 §2.3，三套共用。
+// 圆角令牌（原型 `--r-4` / `--r-8` / `--r-12` / `--r-pill`）。
+//
+//	radiusSm   = 4   小封面、kbd、角标
+//	radiusMd   = 8   控件、列表行、封面（也是 `t.Radius`）
+//	radiusLg   = 12  卡片、抽屉、弹层、对话框、主视觉区
+//	radiusPill = 999 按钮、Chip、搜索框、Toast（框架按高度的一半画）
+//
+// 公共组件那边用的是 `widgets/pud` 里同名的导出常量，值是同一份。
 const (
-	presetDangerLight, presetDangerDark   = "#C93B3B", "#F0716B"
-	presetSuccessLight, presetSuccessDark = "#2E7D4F", "#5BC287"
-	presetWarningLight, presetWarningDark = "#9A5B06", "#F2B04A"
+	radiusSm   float32 = 4
+	radiusMd   float32 = 8
+	radiusLg   float32 = 12
+	radiusPill float32 = 999
 )
 
-// 方案里控件那三档的比例（`applyPreset`）：悬停往文字色推 4%、按下推 8%。
-//
-// ⚠️ **卡片那一档的悬停推的量也是这 4%**（`cardHoverBackground`）——所以这
-// 两个数是一对，别在别处另写。
-const (
-	presetHoverMix   = 0.04
-	presetPressedMix = 0.08
-)
-
-var presets = map[app.ThemePreset]preset{
-	app.ThemePresetWarmPaper: {
-		light: presetSkin{"#F8F4ED", "#EFE9DE", "#FDFBF7", "#F1EBE0", "#2A2420", "#6B6158", "#A8552E", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#1C1815", "#231E1A", "#2A2420", "#342D28", "#F3ECE3", "#B8AC9F", "#E58A5A", "#1C1409", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 8, rowHeight: 40, radiusLg: 12},
-	},
-	app.ThemePresetDuskAmber: {
-		light: presetSkin{"#FAF5EA", "#F1E9D8", "#FFFDF8", "#F3EAD8", "#2B2218", "#6A5C48", "#9A5F08", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#16120E", "#1D1813", "#26201A", "#302922", "#F6EEE2", "#BDAF9C", "#E9A23B", "#1A1208", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 10, rowHeight: 44, radiusLg: 14},
-	},
-	app.ThemePresetSoftPeach: {
-		light: presetSkin{"#FFF9F5", "#FBEFE8", "#FFFFFF", "#FBEEE6", "#2E2523", "#6F605C", "#B4492E", "#FFFFFF", 0.12, 0.10, 0.55, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#1F1A1E", "#262026", "#2E272E", "#382F38", "#F7EEF0", "#C0B2B8", "#F2937A", "#2A140D", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 12, rowHeight: 44, radiusLg: 18},
-	},
-	// 下面四套是本仓库原创（2026-10-26），补的是现有三套全是暖色的缺口：
-	// 青瓷管冷灰绿、靛夜管蓝、紫檀管紫、墨宣管水墨+一方印。色值是照 WCAG
-	// 对比度现配的，不是从任何现成色板抄的（内置预设不碰第三方配色，见
-	// DESIGN.md §零）。
-	app.ThemePresetCeladon: {
-		// 青瓷：冷灰绿的瓷面。强调色是深青瓷（浅色下当文字用也 ≥4.5:1，白字压上
-		// 5.5:1），深色下换成亮一档的瓷青。
-		light: presetSkin{"#F1F5F3", "#E3EBE7", "#FAFCFB", "#E6EEE9", "#1F2A26", "#5A6A62", "#2A7564", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#131A18", "#19221F", "#1E2825", "#28332E", "#E7EEEA", "#9CAFA6", "#62BBA1", "#0C1310", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 10, rowHeight: 40, radiusLg: 14},
-	},
-	app.ThemePresetInkPaper: {
-		// 墨宣：宣纸底、墨字、一方朱砂印。圆角收得最扁（4/8）——印章是方的，
-		// 这一档的性子就是「正」。朱砂和语义色的危险红拉开过（色相 16° vs 3°）。
-		light: presetSkin{"#F7F6F1", "#ECEBE4", "#FCFBF7", "#EFEDE6", "#26241E", "#6D6A5F", "#B0492F", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#191816", "#201E1B", "#262420", "#302D27", "#EDEAE2", "#A8A399", "#D97B5A", "#1A0E0B", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 4, rowHeight: 40, radiusLg: 8},
-	},
-	app.ThemePresetSandalwood: {
-		// 紫檀：紫木的深与雅。圆角放大到 12/18（和柔雾同档），整套装起来更软。
-		light: presetSkin{"#F5F3F7", "#E9E5EE", "#FBFAFD", "#EBE7F0", "#24202E", "#635D72", "#614693", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#161320", "#1C1826", "#221D2E", "#2C263A", "#EBE8F2", "#A49CB6", "#A98FDE", "#150F20", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 12, rowHeight: 44, radiusLg: 18},
-	},
-	app.ThemePresetIndigoNight: {
-		// 靛夜：蓝布与靛青。现有几套里唯一管「蓝」的档。
-		light: presetSkin{"#F1F4F8", "#E3E9F0", "#FAFBFD", "#E6EBF2", "#1E2530", "#596373", "#2F5DA8", "#FFFFFF", 0.14, 0.12, 0.60, presetDangerLight, presetSuccessLight, presetWarningLight},
-		dark:  presetSkin{"#121722", "#171D2B", "#1D2433", "#262F42", "#E5EAF2", "#97A2B8", "#7AA5E8", "#0C1120", 0.18, 0.14, 0.70, presetDangerDark, presetSuccessDark, presetWarningDark},
-		shape: presetShape{radius: 8, rowHeight: 40, radiusLg: 12},
-	},
-}
-
-// presetSkinFor 取方案在这一档深浅下的颜色；经典（或不认识的名字）返回 false。
-func presetSkinFor(p app.ThemePreset, dark bool) (presetSkin, presetShape, bool) {
-	pr, ok := presets[p]
-	if !ok {
-		return presetSkin{}, presetShape{}, false
-	}
-	if dark {
-		return pr.dark, pr.shape, true
-	}
-	return pr.light, pr.shape, true
-}
-
-// applyPreset 把方案盖到已经拼好的主题上。经典（空方案）什么都不做。
-//
-// 映射（规范 token → `ui.Theme`）：
-//
-//	bg        → Background
-//	surface2  → Surface（控件那一层）；SurfaceHover / SurfacePressed 往文字色推 4% / 8%
-//	text1     → Text；text2 → TextMuted
-//	border    → Border = text1 @ borderA（透明度，换底色自动适配）
-//	accent    → 走 `applyAccent`，再把 AccentText 换成方案的 onAccent，Focus 换成方案的焦点环
-//
-// sidebar / surface1 在 `ui.Theme` 里没有对应字段，**这一版不接**：侧栏仍用
-// Background。要接得单开一票改侧栏和卡片的画法。
-func applyPreset(t *ui.Theme, name app.ThemePreset) {
-	sk, shape, ok := presetSkinFor(name, t.Dark)
-	if !ok {
-		return
-	}
-	hex := func(s string) ui.Color { return ui.Hex(s) }
-
-	t.Background = hex(sk.bg)
-	t.Text, t.TextMuted = hex(sk.text1), hex(sk.text2)
-	t.Surface = hex(sk.surface2)
-	t.SurfaceHover = t.Surface.Mix(t.Text, presetHoverMix)
-	t.SurfacePressed = t.Surface.Mix(t.Text, presetPressedMix)
-	t.Border = t.Text.Alpha(sk.borderA)
-
-	acc := hex(sk.accent)
-	applyAccent(t, acc)
-	t.AccentText = hex(sk.onAccent)
-	t.Focus = acc.Alpha(sk.focusA)
-
-	t.Danger, t.Success, t.Warning = hex(sk.danger), hex(sk.success), hex(sk.warning)
-	t.Radius = shape.radius
-}
-
-// sidebarBackground 是侧栏这一帧的底色：方案里的 `sidebar`（规范 §2），经典不套方案、
-// 沿用主题的 Background。
-//
-// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
-// 理由见 `cardPalette` 顶上那一段（那一份里连侧栏那一档底色一起算了）。
+// sidebarBackground 是侧栏这一帧的底色（`--side`）。
 func (s *Shell) sidebarBackground(t *ui.Theme) ui.Color {
 	return s.cardStyleOf(t).sidebar
 }
 
-// accentSoft 是「强调色的淡底」：底色往强调色推一点（规范 §2 的 `accentSoft`，
-// 浅色 12~14%、深色 18%）。选中行、选中的左栏项用它做底。
+// accentSoft 是强调色的淡底（`--accent-soft`，合到 bg 上的不透明色，见 `tok.Palette`）。
 func accentSoft(t *ui.Theme) ui.Color {
-	a := float32(0.14)
-	if t.Dark {
-		a = 0.18
-	}
-	return t.Background.Mix(t.Accent, a)
+	return tok.Of(t).AccentSoft
 }
 
-// cardPalette 是「卡片那一档」的三个值：**底色**、**圆角**、**悬停那一档底色**。
+// cardPalette 是「卡片那一档」的几个值：底色、圆角、悬停底、侧栏底。
 //
-// # 为什么它们三个是一份
-//
-// 三个值都只依赖两样东西：**主题方案**和**深浅**（外加主题自己的
-// `Surface` / `Radius` / `Text`——而那三样在主题里也是跟着方案和深浅走的）。
-// 于是它们和**主题本身**是同一层的东西：主题只在「设置变了 / 系统深浅变了 /
-// 桌面偏好变了」的时候才变，那三样都在 `themeKey` 里。
-//
-// ⚠️ **它们原来各自去读一遍设置**（`cardBackground` / `cardRadius` /
-// `cardHoverBackground` 三个函数各读一次），而关注页那一列卡**每一张、每一帧**
-// 都要用这三个值——于是「一帧读几次设置」是**每张卡乘以几**的（实测整窗
-// 400 次/帧、隔离 48 次/帧，票 #628）。
-//
-// 新的做法是**跟主题同一层地算一次、存起来**，各处去读那一份——见
-// `themeCache`（`theme.go`）。
+// 它们只依赖深浅和强调色——和主题本身是同一层的东西，所以跟着主题一起算、一起
+// 缓存（`themeCache.card`），而不是每张卡各算一遍（票 #628 / #632 的理由仍成立）。
 type cardPalette struct {
-	// bg 是卡片、弹层的底色：方案里的 `surface1`；经典沿用控件那一层 `Surface`。
+	// bg 是卡片、弹层、抽屉、对话框的底色：`--surface`。
 	bg ui.Color
-	// radius 是卡片、弹层的圆角：方案里的 `radiusLg`；经典就是主题圆角的 1.5 倍。
+	// radius 是它们的圆角：`--r-12`。
 	radius float32
-	// hover 是「一张卡片被指针压着」那一档底色：从**卡片自己的底**出发，往
-	// 文字色推一档（理由见 `cardHoverBackground`）。
+	// hover 是一张卡被指针压着时的底：surface 上叠一层 `--hover`。
 	hover ui.Color
-	// sidebar 是侧栏那一帧的底色：方案里的 `sidebar`（规范 §2）；经典沿用主题的
-	// Background。
-	//
-	// ⚠️ **它和卡片那三个值是同一份**：它们都只依赖**方案**和**深浅**，而那一
-	// 档的查表（`presetSkinFor`）就是「方案 + 深浅 → 那一档的颜色」。于是**一次
-	// 查表**出三样东西，而不是三样各查一次。
+	// sidebar 是侧栏、播放条的底色：`--side`。
 	sidebar ui.Color
-	// preset 是「这一份套着方案（不是经典）」：写死的冷灰（zinc）在暖色方案里
-	// 要换成跟着主题走的色（理由见 `cardStyle.preset`）。
-	preset bool
 }
 
-// cardPaletteOf 按主题和方案算卡片那三个值。
-//
-// ⚠️ **这是纯函数**：不读设置、不分配。于是它能被**每帧算一次**（而不是每张卡
-// 一次）——「每张卡一次」的那些读设置才是这一票要消灭的那几百次。
-//
-// # 两个分支和「原来那三个函数」逐字对应
-//
-//   - **方案**：底色是 `surface1`、圆角是 `radiusLg`、悬停往文字色推
-//     `presetHoverMix`；
-//   - **经典**：底色是控件那一层 `Surface`、圆角是主题圆角的 1.5 倍、悬停往
-//     黑/白推 `surfaceStep`（`applyBackground` 那个算法）。
-//
-// ⚠️ **悬停那一档是从「卡片自己的底」推的**，不是从页面底推的——理由见
-// `cardHoverBackground` 顶上那一段。
-func cardPaletteOf(t *ui.Theme, preset app.ThemePreset) cardPalette {
-	if sk, shape, ok := presetSkinFor(preset, t.Dark); ok {
-		bg := ui.Hex(sk.surface1)
-		return cardPalette{
-			bg:      bg,
-			radius:  shape.radiusLg,
-			hover:   bg.Mix(t.Text, presetHoverMix),
-			sidebar: ui.Hex(sk.sidebar),
-			preset:  true,
-		}
-	}
-	bg := t.Surface
-	mix := ui.Color{A: 255} // 黑
-	step := surfaceStepLight
-	if t.Dark {
-		mix = ui.Color{R: 255, G: 255, B: 255, A: 255}
-		step = surfaceStepDark
-	}
+// cardPaletteOf 按主题算卡片那一档。纯函数：不读设置、不分配。
+func cardPaletteOf(t *ui.Theme) cardPalette {
+	p := tok.Of(t)
 	return cardPalette{
-		bg:      bg,
-		radius:  t.Radius * 1.5,
-		hover:   bg.Mix(mix, step),
-		sidebar: t.Background,
+		bg:      p.Surface,
+		radius:  radiusLg,
+		hover:   composite(p.Surface, p.Hover),
+		sidebar: p.Side,
 	}
 }
 
-// cardBackground 是卡片、弹层的底色：方案里的 `surface1`；经典沿用控件那一层 `Surface`。
-//
-// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
-// 理由见 `cardPalette` 顶上那一段。
+// composite 把半透明的 fg 合到不透明的 bg 上，得到不透明色。
+func composite(bg, fg ui.Color) ui.Color {
+	return bg.Mix(ui.Color{R: fg.R, G: fg.G, B: fg.B, A: 255}, float32(fg.A)/255)
+}
+
+// cardBackground 是卡片、弹层的底色（`--surface`）。
 func (s *Shell) cardBackground(t *ui.Theme) ui.Color {
 	return s.cardStyleOf(t).bg
 }
 
-// cardRadius 是卡片、弹层的圆角：方案里的 `radiusLg`；经典就是主题圆角的 1.5 倍。
-//
-// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
-// 理由见 `cardPalette` 顶上那一段。
+// cardRadius 是卡片、弹层的圆角（12）。
 func (s *Shell) cardRadius(t *ui.Theme) float32 {
 	return s.cardStyleOf(t).radius
 }
 
-// cardHoverBackground 是「一张卡片被指针压着」那一档底色：从**卡片自己的底**
-// 出发，往文字色推一档。
-//
-// ⚠️ **它读的是这一帧算好的那一份**（`Shell.cardStyleOf`），不再自己去读设置——
-// 理由见 `cardPalette` 顶上那一段。
-//
-// # 为什么基数是卡片底，而不是页面底或控件层
-//
-// 常态底是**卡片那一档**（`cardBackground`），于是悬停那一档必须**从它出发**
-// 推——推出来的两档在**同一条色阶**上（卡片底 → 卡片底的悬停）。而「常态在
-// 页面底、悬停跳到控件层」那一种，悬停看着像是**换了一张卡**，不是这张卡被
-// 按住了。
-//
-// # 推多少：对着上游 `content1 → content2` 那一档
-//
-// 上游那张关注卡是 HeroUI 的 `<Card isHoverable>`（`follow-list/user-card.tsx:60`），
-// 常态 `bg-content1`、悬停 `bg-content2`。HeroUI 的 content1 → content2 是
-// **zinc 的一格**：浅色 zinc-0 → zinc-100（#ffffff → #f4f4f5）、深色
-// zinc-900 → zinc-800（#18181b → #27272a）。
-//
-// 而那正好就是我们主题里 `Background → Surface` 走的那一档（`applyBackground`
-// 的 `surfaceStep`：浅色往黑 4.3%、深色往白 6.5%）——所以这里用的是**那一
-// 档的比例**，基数换成卡片底。经典那一支推出来的值和主题自己的 `SurfaceHover`
-// 逐字节相同（浅色 #e9e9ec），因为经典里卡片那一档就是 `Surface`。
-//
-// ⚠️ **不是 `SurfaceHover` 那一档**：那是**两档**（浅色 8.6%、深色 11.3%），
-// 推过去比上游大了一倍，悬停会跳得太远。
-//
-// # 两支各按各的算法（和主题自己算 `SurfaceHover` 时一样）
-//
-//   - 经典：底色往黑/白推 `surfaceStep`（`applyBackground` 那个算法）；
-//   - 方案：往文字色推 `presetHoverMix`（`applyPreset` 那个算法）。
+// cardHoverBackground 是「一张卡片被指针压着」那一档底色：从卡片自己的底出发叠
+// 一层 `--hover`（原型 `.ucard:hover` 是换到 surface，那一处在 T3 自己画）。
 func (s *Shell) cardHoverBackground(t *ui.Theme) ui.Color {
 	return s.cardStyleOf(t).hover
 }
 
-// cardStyleOf 取出这一帧该用的卡片那一份。
-//
-// # 走缓存的那条路（生产上唯一会走到的）
-//
-// 主题缓存（`themeCache`）**每帧开头装一次主题**（`applyFrameTheme`），而它
-// 算主题的时候顺手把卡片那三个值也算了——那三个值和主题是**同一层**的东西
-// （只依赖方案和深浅，而那两样都在 `themeKey` 里）。
-//
-// 于是「卡片那三个值」和「主题」是**同一份缓存、同一个键**：键变了（方案换了 /
-// 深浅变了 / 设置变了）下一帧就是新的，而键没变就一直复用。
-//
-// # 那条兜底的路
-//
-// 调用方传的 `t` 那一档深浅和缓存里那一档**不一样**时（比如测试里拿
-// `BuildTheme(...)` 现拼一份），缓存里那一份就不能用了——于是按同一个算法现算
-// 一次（**不读设置**：方案名从缓存的键里拿）。
-//
-// ⚠️ **缓存还没算过的时候**（第一帧之前）那条键是零值，而零值的方案名是空串
-// ——**空串 = 经典**，而用户此刻设的可能是暖纸。于是那一档**要读一次设置**
-// 拿真的方案名。这条路只在「主题还没算过」时走（生产上第一帧之前），而
-// **每张卡**走的是上面那条缓存的路——所以它不是「每张卡一次」。
+// cardStyleOf 取出这一帧该用的卡片那一份：缓存里有、深浅也对得上就用缓存，
+// 否则现算（测试里拿 `BuildTheme` 现拼的主题会走到现算那一支）。
 func (s *Shell) cardStyleOf(t *ui.Theme) cardPalette {
-	if !s.theme.valid {
-		return cardPaletteOf(t, s.app.SettingsSnapshot().ThemePreset)
-	}
-	if t.Dark == s.theme.key.dark {
+	if s.theme.valid && t.Dark == s.theme.key.dark && t.Accent == s.theme.base.Accent {
 		return s.theme.card
 	}
-	return cardPaletteOf(t, s.theme.key.preset)
+	return cardPaletteOf(t)
 }
 
-// cardStyle 是这一帧弹窗面板用的底色和圆角。
+// cardStyle 是弹窗面板用的底色和圆角。
 type cardStyle struct {
 	bg     ui.Color
 	radius float32
-	// preset 是这一帧套着方案（不是经典）：写死的冷灰（zinc）在暖色方案里要换成跟着主题走的色。
-	preset bool
 }
 
-// presetActive 报这一帧是不是套着方案。还没发布过（测试里直接画一块）就当经典。
-func presetActive() bool {
-	p := frameCard.Load()
-	return p != nil && p.preset
-}
-
-// frameCard 是「这一帧的弹窗面板长什么样」：`applyFrameTheme` 每帧开头发布，
-// 弹窗（`confirmModal` 那类不挂在 Shell 上的自由函数）读。
-//
-// 为什么要发布：`ui.Theme` 里没有「卡片底色」这个字段，而自由函数拿不到 Shell。
-// 同一个进程里所有窗口共用同一份设置，所以这是一份全局值而不是每窗口一份。
-var frameCard atomic.Pointer[cardStyle]
-
-// publishCard 在每帧开头算好弹窗面板的样子并发布。方案里的 `surface1` / `radiusLg`；
-// 经典保持原样（底色 = Background，圆角 = 2.5 个间距单位），一个像素不动。
-//
-// ⚠️ **它读的是缓存里那一份**（`Shell.cardStyleOf`），不再自己去读设置——
-// 弹窗面板的底色和圆角就是**卡片那一档**的同一组值（`surface1` / `radiusLg`），
-// 所以它们本来就在同一份缓存里（理由见 `cardPalette` 顶上那一段）。
-func (s *Shell) publishCard(t *ui.Theme) {
-	cs := cardStyle{bg: t.Background, radius: t.Space(2.5)}
-	if pal := s.cardStyleOf(t); pal.preset {
-		cs = cardStyle{bg: pal.bg, radius: pal.radius, preset: true}
-	}
-	frameCard.Store(&cs)
-}
-
-// dialogCard 读这一帧发布的弹窗面板样子；还没发布过（测试里直接画一块）就用经典那份。
+// dialogCard 是弹窗面板（确认框、关于、更新日志那类不挂在 Shell 上的自由函数）
+// 的样子：`--surface` 底、12 圆角。只有一套主题，按深浅现取就是，不用再每帧发布。
 func dialogCard(t *ui.Theme) cardStyle {
-	if p := frameCard.Load(); p != nil {
-		return *p
-	}
-	return cardStyle{bg: t.Background, radius: t.Space(2.5)}
+	return cardStyle{bg: tok.Of(t).Surface, radius: radiusLg}
 }

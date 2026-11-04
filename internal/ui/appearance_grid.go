@@ -10,7 +10,7 @@
 //
 // # 缩略图是真画的
 //
-// 颜色取自方案/主题在**当前深浅**下的色板（`presetPaletteFor` / `BuildTheme`），
+// 颜色取自那一档深浅下的主题（`BuildTheme`），
 // 不是图片：色板一改缩略图自己跟着改，不用重新出图。
 package ui
 
@@ -19,84 +19,59 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	// skinCardColumns 是主题方案那一组一行摆几张。八套方案折成 3 行
-	//（3 + 3 + 2），每张够大才看得出「这是一张界面」而不是一块色。
-	skinCardColumns = 3
-	// skinCardThumbH 是货架卡里缩略图的高。约 3:2，比控件列那版（46）
-	// 大两倍——那版要塞进 79 宽的格子，这一版一张卡 ~220 宽。
-	skinCardThumbH = 132
-	// modeCardColumns 是主题模式那一组一行摆几张：跟随系统 / 浅色 /
-	// 深色 / 定时 四张一行。
-	modeCardColumns = 4
-	// modeCardThumbH 是模式卡的缩略图高，比方案卡矮一点——它只有一个
-	// 「深浅」的维度要表达。
-	modeCardThumbH = 88
+	// modeCardColumns 是深浅模式那一组一行摆几张：深色 / 浅色 / 跟随系统
+	// 三张一行（原型 `.theme-cards` 是 `repeat(3, 1fr)`、缝 16）。
+	modeCardColumns = 3
+	// modeCardThumbH 是模式卡的缩略图高（原型 `.theme-card .pv` 96）。
+	modeCardThumbH = 96
+
+	// 缩略图的几档圆角和侧栏宽（刻意不跟主题走：缩略图是窗口的缩影）。
+	presetThumbRadius = 8
+	presetThumbSide   = 14
+	presetBlockRadius = 2
+	presetDotRadius   = 3
+
+	// swatchSize / swatchDot 是强调色那一圈：外圈 36（选中时 2 像素正文色描边）、
+	// 里面一枚 26 的色点（原型 `.swatch` / `.swatch i`），四枚之间 12 的缝。
+	swatchSize = 36
+	swatchDot  = 26
+	swatchGap  = space.Px12
 )
 
-// pickThemePresetShelf 是主题方案那一组货架卡：一行三张铺满内容宽。
+// pickAccent 是强调色那一排：四枚色点（朱砂 / 靛青 / 松绿 / 琥珀）。
 //
-// 写法和设置页 `pickThemePreset` 同一条心路：点一张 → `ThemePreset` 写进
-// 设置，应用层把那一套色板盖到主题上。选中卡带主色描边（`presetCard`
-// 那一套），hover 带文字色描边。
-func (s *Shell) pickThemePresetShelf(c *ui.Context, st app.Settings, ro bool) {
-	w := s.settings.contentW
-	if w <= 0 {
-		w = settingsContentMaxW
-	}
-	cardW := (w - float32(skinCardColumns-1)*space.Px12) / skinCardColumns
-	col := ui.Column(c).Key("appearance:themePreset").Label("主题方案").Gap(space.Px12).FillWidth()
-	col.Children(func() {
-		for start := 0; start < len(themePresets); start += skinCardColumns {
-			end := min(start+skinCardColumns, len(themePresets))
-			ui.Row(c).FillWidth().Gap(space.Px12).Children(func() {
-				for _, p := range themePresets[start:end] {
-					if s.skinCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
-						pick := p.preset
-						s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
-					}
-				}
+// 封面取色开着时强调色跟着封面走，这一排**不画**（原型 `appearance()` 里
+// `!s.coverAccent` 才出这一行）。外观页的版式由 T6 重做；这一排是 T0 换掉旧的
+// 「主题方案」网格时留下的最小可用实现。
+func (s *Shell) pickAccent(c *ui.Context, st app.Settings, ro bool) {
+	t := c.Theme()
+	row := ui.Row(c).Key("appearance:accent").Label("强调色").Gap(swatchGap).AlignItems(ui.Center)
+	row.Children(func() {
+		for _, o := range accentOptions {
+			selected := o.accent == st.Accent
+			b := ui.ButtonBase(c).Key("accent:" + string(o.accent)).Label(o.label).
+				Width(swatchSize).Height(swatchSize).Radius(swatchSize / 2).
+				Justify(ui.Center).AlignItems(ui.Center).Disabled(ro)
+			ring := ui.Color{}
+			if selected {
+				ring = t.Text
+			}
+			b = b.Border(2, ring)
+			b.Children(func() {
+				ui.Column(c).Width(swatchDot).Height(swatchDot).Radius(swatchDot / 2).
+					Background(tok.AccentColor(string(o.accent), t.Dark)).Children(func() {})
 			})
+			if b.Clicked() {
+				pick := o.accent
+				s.applySetting("强调色", func(cur *app.Settings) { cur.Accent = pick })
+			}
 		}
 	})
-}
-
-// skinCard 是货架上那张大卡：缩略图在上（高 skinCardThumbH），名字在下。
-func (s *Shell) skinCard(c *ui.Context, name app.ThemePreset, label string, w float32, selected, ro bool) ui.Element {
-	t := c.Theme()
-	pal := presetPaletteFor(name, t.Dark)
-
-	card := ui.ButtonBase(c).Key("preset:" + string(name)).Width(w).
-		Padding(space.Px4).Radius(t.Radius).Disabled(ro)
-	if card.Hovered() && !selected {
-		// ⚠️ **hover 也填底**：货架卡的描边在外圈，卡里字那一块没有填充变化
-		// 的话「指针落上来」在字的区域一个像素都不变——和 flatButton 的 hover
-		// 手感（SurfaceHover 淡底）对齐。
-		card = card.Background(t.SurfaceHover)
-	}
-	ring := ui.Color{}
-	switch {
-	case selected:
-		ring = t.Accent
-	case card.Hovered():
-		ring = t.TextMuted
-	}
-	if ring != (ui.Color{}) {
-		card = card.Border(2, ring)
-	} else {
-		card = card.Border(2, ui.Color{})
-	}
-	card.Children(func() {
-		ui.Column(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-			presetThumb(c, pal, t.Border, skinCardThumbH)
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).SingleLine().
-				TextColor(s.cardLabelColor(t, selected, ro))
-		})
-	})
-	return card
 }
 
 // cardLabelColor 是货架卡上那一行名字的字色。
@@ -115,16 +90,16 @@ func (s *Shell) cardLabelColor(t *ui.Theme, selected, ro bool) ui.Color {
 	return t.TextMuted
 }
 
-// pickThemeModeShelf 是主题模式那一组：四张 mini 卡，每张画的是「这档主题
+// pickThemeModeShelf 是深浅模式那一组：三张 mini 卡，每张画的是「这档主题
 // 下窗口长什么样」——浅色那张画浅色主题、深色那张画深色主题、跟随系统
-// 和定时画左右半半（左浅右深）。
+// 画左右半半（左浅右深）。
 func (s *Shell) pickThemeModeShelf(c *ui.Context, st app.Settings, ro bool) {
 	w := s.settings.contentW
 	if w <= 0 {
 		w = settingsContentMaxW
 	}
-	cardW := (w - float32(modeCardColumns-1)*space.Px12) / modeCardColumns
-	row := ui.Row(c).Key("appearance:themeMode").Label("主题模式").Gap(space.Px12).FillWidth()
+	cardW := (w - float32(modeCardColumns-1)*space.Px16) / modeCardColumns
+	row := ui.Row(c).Key("appearance:themeMode").Label("深浅模式").Gap(space.Px16).FillWidth()
 	row.Children(func() {
 		for _, m := range themeModes {
 			mode := m.mode
@@ -136,7 +111,7 @@ func (s *Shell) pickThemeModeShelf(c *ui.Context, st app.Settings, ro bool) {
 }
 
 // modeCard 画主题模式那一张小卡。缩略图是「这档深浅下的迷你窗口」：
-// 跟随系统和定时是左浅右深两半（它们本来就是「看时间决定」的档）。
+// 跟随系统是左浅右深两半。
 func (s *Shell) modeCard(c *ui.Context, m struct {
 	mode  app.ThemeMode
 	label string
@@ -180,7 +155,7 @@ func (s *Shell) modeThumb(c *ui.Context, mode app.ThemeMode, border ui.Color) {
 	case app.ThemeModeDark:
 		s.modeThumbHalf(c, *BuildTheme(st, true), border)
 	default:
-		// 跟随系统 / 定时：左半画浅色、右半画深色，一眼读出「两边都会换」。
+		// 跟随系统：左半画浅色、右半画深色，一眼读出「两边都会换」。
 		ui.Row(c).FillWidth().Height(modeCardThumbH).Radius(presetThumbRadius).Border(1, border).
 			Clip().Children(func() {
 			ui.Column(c).Grow(0.5).FillHeight().Children(func() {
@@ -204,7 +179,7 @@ func (s *Shell) modeThumbHalf(c *ui.Context, th ui.Theme, border ui.Color) {
 }
 
 // modeThumbFill 是缩略图里的内容：一条侧栏 + 两行封面块 + 一条播放条，
-// 和 `presetThumb` 同一形状，只是色板来自主题而不是方案。
+// 色板来自那一档深浅的主题。
 func (s *Shell) modeThumbFill(c *ui.Context, th ui.Theme) {
 	ui.Row(c).Grow(1).FillHeight().Background(th.Background).Children(func() {
 		ui.Column(c).Width(presetThumbSide * 2).FillHeight().Background(th.Surface).Children(func() {})

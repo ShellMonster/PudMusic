@@ -124,7 +124,7 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 			// ⚠️ **面板是绝对定位的**：进出场要动的是**布局位置**，而 flex 那一套
 			// 摆不出「从右边滑进来」——绝对定位按 **inset** 摆，那才是「从窗口
 			// 右边挪进来」能用的那一套（理由同 `queue_drawer.go`）。
-			panel := shadow.HeroMedium(ui.Column(c).Key("comments-drawer").
+			panel := shadow.Pop(ui.Column(c).Key("comments-drawer").
 				Absolute().Top(0).Bottom(0).Width(commentsDrawerWidth).
 				Background(s.cardBackground(t)).BorderStartWidth(1).BorderColor(t.Border), t)
 			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），

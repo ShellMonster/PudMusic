@@ -28,14 +28,14 @@ import (
 // shotTester 造一个只画播放条的外壳（装应用的主题），喂一份手摆的状态。
 func shotTester(t *testing.T, st app.State, dark bool) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	return shotTesterPreset(t, st, dark, app.ThemePresetWarmPaper)
+	return shotTesterPreset(t, st, dark, app.AccentCinnabar)
 }
 
 // shotTesterPreset 造一个只画播放条的外壳，用**指定的主题方案**。
-func shotTesterPreset(t *testing.T, st app.State, dark bool, preset app.ThemePreset) (*Shell, *mygoui.Tester) {
+func shotTesterPreset(t *testing.T, st app.State, dark bool, preset app.Accent) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	settings := app.DefaultSettings("")
-	settings.ThemePreset = preset
+	settings.Accent = preset
 	b := newTestShell(t, at(1200, coverWinH), systemIsDark(dark), withSettings(settings),
 		withView(func(s *Shell) func(*mygoui.Context) {
 			return func(c *mygoui.Context) {
@@ -107,7 +107,7 @@ func TestRenderLoadHaloShots(t *testing.T) {
 			// **另外两套主题方案**各看一眼（暖纸·赤陶是默认的那一套，
 			// 上面几张就是它）：光圈是 `t.Accent`，而强调色**逐套不同**——
 			// 所以每一套都要看得出「那一圈光还在」。
-			for _, preset := range []app.ThemePreset{app.ThemePresetDuskAmber, app.ThemePresetClassic} {
+			for _, preset := range []app.Accent{app.AccentAmber, app.AccentIndigo} {
 				_, pt := shotTesterPreset(t, st, dark, preset)
 				pt.Advance(350 * time.Millisecond)
 				pt.Frame()
