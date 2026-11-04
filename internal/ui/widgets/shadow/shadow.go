@@ -188,6 +188,17 @@ func Pop(e ui.Element, t *ui.Theme) ui.Element {
 		Shadow(0, 2, 8, 0, ui.RGBA(20, 22, 26, 0.08))
 }
 
+// Cover 是大封面的影（原型 `--shadow-cover`，收藏夹头部那张 232 的封面）：
+//
+//	深色  0 24px 48px rgba(0,0,0,.5)
+//	浅色  0 20px 40px rgba(20,22,26,.22)
+func Cover(e ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return e.Shadow(0, 24, 48, 0, ui.RGBA(0, 0, 0, 0.5))
+	}
+	return e.Shadow(0, 20, 40, 0, ui.RGBA(20, 22, 26, 0.22))
+}
+
 // CoverPlay 是卡片封面上那枚悬停播放键（`.cover-play`）的影：0 8px 24px 35% 黑。
 func CoverPlay(e ui.Element) ui.Element {
 	return e.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.35))

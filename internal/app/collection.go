@@ -122,6 +122,9 @@ type CollectionInfo struct {
 	// 动作），所以界面在画「删除」之前要先问这一位。
 	Default bool
 	Faved   bool
+	// PlayCount / FavCount 是总播放量和被收藏数；0 = 接口没给（合集 / 系列）。
+	PlayCount int64
+	FavCount  int64
 
 	Loaded bool
 }
@@ -424,6 +427,8 @@ func (a *App) fetchCollection(ref CollectionRef) (CollectionInfo, error) {
 		Private:    raw.Private,
 		Default:    raw.Default,
 		Faved:      raw.Faved,
+		PlayCount:  raw.PlayCount,
+		FavCount:   raw.FavCount,
 		Loaded:     true,
 	}, nil
 }
