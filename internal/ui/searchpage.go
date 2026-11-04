@@ -60,12 +60,8 @@ const userPathPrefix = "/user/"
 const searchQuery = "q"
 
 // searchIdle 是「还没输入搜索词」这一支：上游 `pages/search/index.tsx:16`。
-//
-// ⚠️ **提示指着顶栏那个框**：页内那个输入框 2026-10-22 拍板删了（见文件头），
-// 而这一页能搜的地方只剩顶栏——「在上面的搜索框里」指的是一个已经不存在的框。
 var searchIdle = emptyState{
 	Title: "暂无内容",
-	Hint:  "在顶栏的搜索框里输入歌名或 UP 主",
 	Icon:  iconEmptySearch,
 }
 
@@ -213,7 +209,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 		// 列表要吃掉剩下的高度，自己占 Grow(1)（见 list.go 的 View）。外面这一
 		// 层 Grow(1) 是给它留地方：直接摆在根上不给高度的话，它会按自己的行数
 		// 去要高度，一屏二十几行会把页面撑出去。
-		s.viewSearchResultsBody(c, cur, keyword)
+		s.viewSearchResultsBody(c, cur)
 	})
 }
 
@@ -276,7 +272,7 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 //
 // ⚠️ **加载的时候列表照画，不 return**：后台回来的结果是在列表的 `View` 里收的
 // （`adopt`），不画它这一页就永远停在「正在加载」。
-func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
+func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int) {
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()
 
@@ -289,7 +285,7 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 		}
 		errText := searchErrorText(pg.Err)
 		s.viewLoadError(c, "search:fail:"+strconv.Itoa(tab),
-			"搜索「"+keyword+"」", retryLabel, errors.New(errText), retry)
+			retryLabel, errors.New(errText), retry)
 
 		return
 	}

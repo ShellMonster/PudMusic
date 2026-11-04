@@ -329,10 +329,7 @@ func (s *Shell) pickLocalMusicDirs(c *ui.Context, st app.Settings, ro bool) {
 	t := c.Theme()
 	s.settingGroup(c, "音乐库", func() {
 		ui.Row(c).FillWidth().Gap(space.Px24).AlignItems(ui.Center).Children(func() {
-			ui.Column(c).Grow(1).Children(func() {
-				ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium)
-				ui.Text(c, "从这些文件夹里读取本地音乐").FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).Wrap()
-			})
+			ui.Text(c, "本地音乐目录").FontSize(scale.Font(c, scale.Size16)).FontWeight(weightMedium).Grow(1)
 			if settingsButton(c, "添加文件夹").Width(104).Disabled(ro).Clicked() {
 				s.pickPath("本地音乐目录", true, func(path string) {
 					s.applySetting("本地音乐目录", func(cur *app.Settings) {

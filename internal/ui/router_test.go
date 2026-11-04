@@ -178,12 +178,6 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 			if !tt.HasText(rt.Empty.Title) {
 				t.Errorf("没有画出 %s 的空状态 %q，文字有 %q", rt.Match, rt.Empty.Title, tt.Texts())
 			}
-			if rt.Empty.Hint == "" {
-				t.Fatalf("%s 没说「怎么才能不空」", rt.Match)
-			}
-			if !tt.HasText(rt.Empty.Title) {
-				t.Errorf("没有画出 %s 的「怎么才能不空」%q，文字有 %q", rt.Match, rt.Empty.Hint, tt.Texts())
-			}
 		})
 	}
 
@@ -206,6 +200,7 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 
 // TestEmptyStateCopyIsNotBlank 钉住「每一条空着的路由都要有一句说得清的
 // 交代」：表里任何一条漏了标题，那一页画出来就是一片白，而且没有测试会红。
+// Hint 允许为空——「怎么才能不空」只说在有下一步可指的时候。
 //
 // 已经有内容的路由（设置页）跳过——它画的是自己的页面，用不到空状态，
 // 这一条里给它塞一句空状态反而是留了一句没人会看到的话。
@@ -217,9 +212,6 @@ func TestEmptyStateCopyIsNotBlank(t *testing.T) {
 		}
 		if strings.TrimSpace(rt.Empty.Title) == "" {
 			t.Errorf("%s 没有空状态标题", rt.Match)
-		}
-		if strings.TrimSpace(rt.Empty.Hint) == "" {
-			t.Errorf("%s 没有说「怎么才能不空」", rt.Match)
 		}
 	}
 	// 兜底那条自己的页（notfound.go）不是空状态，单独确认它有自己的文案。

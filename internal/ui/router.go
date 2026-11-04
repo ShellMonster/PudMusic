@@ -100,7 +100,6 @@ var routes = []Route{
 	// 给他，于是永远不会去按那个本该在那儿的重试。
 	{Match: "/", Title: "推荐音乐", InMenu: true, Icon: iconMenuRecommend, ActiveIcon: iconMenuRecommendOn, Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
 		Icon:  iconEmptyMusic,
 	}},
 	// ⚠️ 这一条**已经有内容了**（follow.go：左边的分组 Tab + 右边一个虚拟网格 +
@@ -108,14 +107,13 @@ var routes = []Route{
 	// 「登录了、一格都没有、也没搜」那一支（`followEmpty`）读的就是它。
 	// 出处留着是因为它还是那一句出处——上游 `follow-list/index.tsx` 只把列表转给
 	// `components/virtual-grid-page-list`，空的时候是它的兜底 `暂无内容`
-	//（index.tsx:160），所以 Title 照抄；Hint 是我们写的。
+	//（index.tsx:160），所以 Title 照抄。
 	//
 	// ⚠️ **「还没登录」不是这一句**，是 follow.go 里的 `followNotLoggedIn`：没登录
 	// 时那个接口一律回 -101，而说成「还没关注任何人」的话用户登录完发现还是空的，
 	// 会以为是登录坏了。两句话必须分开（见 follow.go 文件头）。
 	{Match: followPath, Title: "我的关注", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuFollow, ActiveIcon: iconMenuFollowOn, Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 		Icon:  iconEmptyGroup,
 	}},
 	// ⚠️ 稍后再看和历史记录已经有自己的内容了（later.go / history.go），但这两
@@ -129,18 +127,15 @@ var routes = []Route{
 	// `pages/history/index.tsx:284`。
 	{Match: laterPath, Title: "稍后再看", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuLater, ActiveIcon: iconMenuLaterOn, Empty: emptyState{
 		Title: "暂无稍后再看内容",
-		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
 		Icon:  iconEmptyLater,
 	}},
 	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuHistory, ActiveIcon: iconMenuHistoryOn, Empty: emptyState{
 		Title: "暂无历史记录",
-		Hint:  "登录之后听过的歌会出现在这里",
 		Icon:  iconEmptyHistory,
 	}},
 	// 上游：`pages/local-music/index.tsx:263`。
 	{Match: "/local-music", Title: "本地音乐", InMenu: true, Icon: iconMenuLocal, ActiveIcon: iconMenuLocalOn, Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "用顶栏的「打开文件」把本地音乐加进来",
 		Icon:  iconEmptyDisk,
 	}},
 	// 「没有下载记录」，文案在 empty.go 的 noDownloads（上游出处也写在那儿）。
@@ -169,7 +164,6 @@ var routes = []Route{
 	// 是有的，抄那一处。
 	{Match: "/dynamic-feed", Title: "用户动态", Empty: emptyState{
 		Title: "暂无动态",
-		Hint:  "去「我的关注」关注几个 UP 主，他们的动态会出现在这里",
 		Icon:  iconEmptyFeed,
 	}},
 	// ⚠️ 同上：这一条也接上了 `builtPage`（upspace.go），下面这句是「动态」
@@ -178,7 +172,6 @@ var routes = []Route{
 	// 上游：`pages/user-profile/dynamic-list/index.tsx:80`。
 	{Match: "/user/{id}", Title: "UP 主空间", Empty: emptyState{
 		Title: "暂无动态",
-		Hint:  "回首页听歌，或者换一个 UP 主的空间看看",
 		Icon:  iconEmptyUser,
 	}},
 	// 收藏夹 / 合集 / 系列**现在有内容了**（collectionpage.go：头图区 +
@@ -194,7 +187,6 @@ var routes = []Route{
 	// title，所以落回共享默认的「暂无内容」。照抄。
 	{Match: "/empty", Title: "空状态", Empty: emptyState{
 		Title: "暂无内容",
-		Hint:  "随便切到别的页面——每一页空着的时候，插画位上那一枚都不一样",
 		// ⚠️ **这一页用上游那一张**（`iconEmptyDefault`），而别的页各有自己
 		// 的一枚。这一页整个的用处就是「让人看见空状态长什么样」，而上游
 		// 在这里画的也是这一枚 —— 换成别的就等于这一页说的不是它自己。

@@ -463,7 +463,7 @@ func TestTheEmptyStateRetryStaysOutlined(t *testing.T) {
 			// 直接画那个错误块：这一条量的是那一颗按钮，走页面反而要造一台
 			// 拉失败的假 B 站。
 			tt := mygoui.NewTester(func(c *mygoui.Context) {
-				s.viewLoadError(c, "flat:probe", "那一趟", "重试", errFlatProbe, func() {})
+				s.viewLoadError(c, "flat:probe", "重试", errFlatProbe, func() {})
 			}, 1200, 800)
 			tt.SetDark(dark)
 			tt.Frame()

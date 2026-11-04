@@ -2163,7 +2163,6 @@ var Items = []Item{
 			"TestTheShortcutsHandEditedIntoTheFileStillWork",
 			"TestTheSixCommandsCallTheirOwnThing",
 			"TestAShortcutRunsTheSameCommandWhicheverWayItArrives",
-			"TestTheShortcutPageSaysWhatTheTwoColumnsAreFor",
 			// 快退 / 快进那两条（`inAppOnlyShortcuts`）：键 → 分发 → seek，
 			// 以及没有歌 / 越过末尾时的钳制。
 			"TestTheSeekShortcutsMoveThePosition",

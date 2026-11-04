@@ -106,7 +106,6 @@ import (
 // 说的是两句话）。
 var commentsEmpty = emptyState{
 	Title: "这一首没有评论",
-	Hint:  "在播放条上放一首 B 站的歌，再点右上角的「评论」",
 	Icon:  iconEmptyMusic,
 }
 
@@ -583,7 +582,7 @@ func (s *Shell) viewCommentsContent(c *ui.Context, t *ui.Theme) {
 func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 	switch {
 	case s.app.CommentsErr() != nil:
-		s.viewLoadError(c, "comments:error", "这一首的评论", "重试",
+		s.viewLoadError(c, "comments:error", "重试",
 			s.app.CommentsErr(), func() {
 				// ⚠️ **这里只记意图**：发请求的是 `syncComments`（铁律三）。
 				p.wantRefresh = true
@@ -596,7 +595,6 @@ func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 	case s.app.CommentsNoComments():
 		s.viewEmpty(c, "page:comments:none", emptyState{
 			Title: "还没有人评论",
-			Hint:  "换一首试试，或者点右上角的「刷新」再问一次",
 			Icon:  iconEmptyMusic,
 		})
 	default:

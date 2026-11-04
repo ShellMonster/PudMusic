@@ -497,12 +497,10 @@ var noLyrics = emptyState{
 // 按钮摆在一起，用户分不清按的是哪个——按错了的那一块没反应，另一块还在
 // 转圈，看起来就像「点了没用」。
 //
-// ⚠️ **where 是「哪一趟请求」**，而 `err.Error()` 往往只说得清「失败了」说
-// 不清「哪一趟」：B 站返回 -101 和网络超时在界面上都是一句 `-101` 或者一句
-// `context deadline exceeded`，而用户要给开发者复现时需要的是「关注的人那一
-// 趟」还是「动态那一趟」。所以每一处调用方都要写清楚是哪一趟，界面上单独一行
-// 摆在错误上面——这是「出错在哪一步」在请求这一层的落法（页面那一层是 `viewCrash`）。
-func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err error, retry func()) {
+// ⚠️ **「哪一趟」说在按钮上，不单独再摆一行**：`retryLabel` 已经把那一趟
+// 的名字写清了（「重试加载关注的人」），而错误页的任务是「说清没拉出来 +
+// 给一条出路」，不是教用户复现——复现信息在重试按钮那一句里已经够。
+func (s *Shell) viewLoadError(c *ui.Context, key, retryLabel string, err error, retry func()) {
 	// 🔴 铁律二：和 viewEmpty 一样，每一帧开头装主题。
 	s.applyFrameTheme(c)
 
@@ -512,11 +510,6 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 		// 不是「本来就没有」。
 		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
 		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, scale.Size15)).TextColor(t.Text)
-		if where != "" {
-			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
-			// 而下面那行是原始错误。两者都别比标题更抢眼。
-			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-		}
 		ui.Text(c, err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(3)
 		if retry != nil && ui.Button(c, retryLabel).Clicked() {
 			retry()

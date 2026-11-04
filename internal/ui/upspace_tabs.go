@@ -140,7 +140,6 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 		s.viewSpaceFlat(c, sp, func() {
 			s.viewEmpty(c, "space:video:"+strconv.FormatInt(sp.mid, 10), emptyState{
 				Title: "暂无投稿",
-				Hint:  "他还没有投稿，或者换一个 UP 主看看",
 			})
 		})
 		return
@@ -226,7 +225,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	// 用户看到的是「他真的什么都没有」。
 	if !p.started && p.err != nil {
 		s.viewSpaceFlat(c, sp, func() {
-			s.viewLoadError(c, upLoadErrorKey(sp, tab), "这个 UP 主的"+upTabNames[tab], "重试加载"+upTabNames[tab], p.err, func() {
+			s.viewLoadError(c, upLoadErrorKey(sp, tab), "重试加载"+upTabNames[tab], p.err, func() {
 				p.err = nil
 				if ctx := p.begin(); ctx != nil {
 					go s.fetchUp(ctx, sp, tab, p.cursor, p.page, sp.mountGen)
@@ -500,9 +499,9 @@ func upTabEmpty(tab int, counts app.DropCounts) emptyState {
 	}
 	switch tab {
 	case upTabCollection:
-		return emptyState{Title: "暂无收藏夹", Hint: "他还没有公开收藏夹"}
+		return emptyState{Title: "暂无收藏夹"}
 	case upTabSeries:
-		return emptyState{Title: "暂无合集", Hint: "他还没有建合集或者系列"}
+		return emptyState{Title: "暂无合集"}
 	}
 	// 「动态」那一格读路由表（`router.go` 里那一条）：出处和上游的对应记在
 	// 那儿，不在这儿抄一遍。

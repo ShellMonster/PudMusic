@@ -352,8 +352,8 @@ func TestBothLibraryPagesDrawTheirOwnContent(t *testing.T) {
 // 名字带 `TheLibraryPages` 是因为主干上已经有一个同名的（`localmusic_test.go`
 // 的那一条，测的是本地音乐那一页）。
 //
-// 两句都要在：第一句说这里为什么空，第二句给一个**能做的下一步**。这一页尤其
-// 需要第二句——用户常常是筛完了才空的，他要的是「怎么才能不空」。
+// 标题要在：第一句说这里为什么空。第二句（怎么才能不空）只在「有下一步可指」
+// 时才写——这一页空着时用户多半是在看筛选结果，标题自己就把「为什么空」说清了。
 //
 // 文案是**从 `routes` 表里那一条拿的**（出处标在那儿），所以这里断言的也是那一
 // 条：另抄一份就多一个会对不上的来源，而对不上时用户看不出任何异样。
@@ -364,12 +364,12 @@ func TestTheLibraryPagesEmptyStateSaysWhyAndHow(t *testing.T) {
 			tt, _ := libraryShell(t, newLibFake(t), path)
 
 			e := lookup(path).Empty
-			if e.Title == "" || e.Hint == "" {
+			if e.Title == "" {
 				t.Fatalf("routes 表里 %s 那一条的空状态不完整：%+v", path, e)
 			}
 			waitFrames(t, tt, "把空状态画出来", func() bool { return tt.HasText(e.Title) })
 			if !tt.HasText(e.Title) {
-				t.Errorf("%s 空着的时候没说「怎么才能不空」，文字有 %q", path, tt.Texts())
+				t.Errorf("%s 空着的时候没说「这里为什么空」，文字有 %q", path, tt.Texts())
 			}
 		})
 	}

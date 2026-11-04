@@ -32,6 +32,7 @@ package ui
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
@@ -41,6 +42,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -83,7 +85,6 @@ func homeHeroRadius(t *ui.Theme) float32 { return t.Radius + 4 }
 
 func homeTilePalette(t *ui.Theme, tile struct {
 	tab      int
-	subtitle string
 	from, to ui.Color
 }) (from, to, text ui.Color) {
 	index := 0
@@ -109,13 +110,12 @@ func homeTilePalette(t *ui.Theme, tile struct {
 
 var homeTiles = [4]struct {
 	tab      int
-	subtitle string
 	from, to ui.Color
 }{
-	{homeHotTab, "本周最热", ui.RGBA(196, 82, 44, 1), ui.RGBA(150, 52, 40, 1)},
-	{homeOriginalTab, "原创音乐榜", ui.RGBA(112, 74, 150, 1), ui.RGBA(72, 56, 124, 1)},
-	{homeRecentTab, "继续你的音乐旅程", ui.RGBA(40, 116, 122, 1), ui.RGBA(34, 82, 104, 1)},
-	{0, "按口味为你挑选", ui.RGBA(170, 60, 92, 1), ui.RGBA(122, 44, 82, 1)},
+	{homeHotTab, ui.RGBA(196, 82, 44, 1), ui.RGBA(150, 52, 40, 1)},
+	{homeOriginalTab, ui.RGBA(112, 74, 150, 1), ui.RGBA(72, 56, 124, 1)},
+	{homeRecentTab, ui.RGBA(40, 116, 122, 1), ui.RGBA(34, 82, 104, 1)},
+	{0, ui.RGBA(170, 60, 92, 1), ui.RGBA(122, 44, 82, 1)},
 }
 
 // openTab 从总览进第 tab 档的列表页。
@@ -495,38 +495,64 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur
 	fade := float32(1)
 	if cur {
 		fade = 0
-		card = card.Focusable().Role(ui.RoleButton).Label(sh.Title).OnClick(func() { h.playNow(m) })
+		card = card.Role(ui.RoleButton).Label(sh.Title)
 	}
 	card = card.AnimatePose(ui.Pose{Fade: fade}, anim)
 	card = card.Background(ui.RGBA(28, 23, 20, 1))
+	if cur && card.Hovered() {
+		card = card.Border(1, t.Accent.Alpha(0.7))
+	}
 	card.Children(func() {
 		// 封面多是 16:9：按原比例贴右，不再拉满整条横幅（拉满会被放大裁掉大半，还糊）；
 		// 左边一段渐变把它融进深色底，文字落在深色底上。
 		cw := min(hgt*16/9, w*0.7)
-		ui.Box(c).Key("home:hero:img:"+m.ID).Size(cw, hgt).Attach(ui.AnchorTopRight, ui.AnchorTopRight).
+		img := ui.Box(c).Key("home:hero:img:"+m.ID).Size(cw, hgt).Attach(ui.AnchorTopRight, ui.AnchorTopRight)
+		if cur {
+			img = img.HandleInput(func(ev ui.InputEvent) bool {
+				if ev.Kind == ui.InputPointerDown && ev.Button == 0 && ev.Clicks <= 1 {
+					h.playNow(m)
+				}
+				return false
+			})
+		}
+		img.
 			Children(func() {
 				imgcache.ViewPlaceholderTitled(c, h.newGrid.cache, m.Cover, sh.Title, cw, hgt, homeHeroRadius(t), nil)
 				ui.Box(c).Key("home:hero:fade:"+m.ID).Size(cw*0.45, hgt).
 					Gradient(ui.RGBA(28, 23, 20, 1), ui.RGBA(28, 23, 20, 0), 90).
 					Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 			})
-		ui.Column(c).Key("home:hero:txt:"+m.ID).Size(max(w-cw*0.7, w*0.3), hgt).
+		textCol := ui.Column(c).Key("home:hero:txt:"+m.ID).Size(max(w-cw*0.7, w*0.3), hgt).
 			Padding(space.Px24, space.Px24, space.Px24, space.Px28).Gap(space.Px8).Justify(ui.Center).AlignItems(ui.Start).
-			Attach(ui.AnchorTopLeft, ui.AnchorTopLeft).Children(func() {
-			ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size12)).
-				TextColor(ink.Ensure(t.Accent, ui.RGBA(28, 23, 20, 1), ink.TextContrast))
-			ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).
-				TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(2).Ellipsis("…")
-			if sh.Owner != "" {
-				ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size14)).
-					TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(1).Ellipsis("…")
-			}
-			ui.Row(c).Key("home:hero:play:"+m.ID).Gap(space.Px6).Padding(space.Px8, space.Px16, space.Px8, space.Px12).
-				Radius(18).Background(t.Accent).AlignItems(ui.Center).Children(func() {
-				ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.AccentText)
-				ui.Text(c, "立即播放").FontSize(scale.Font(c, scale.Size13)).TextColor(t.AccentText)
+			Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
+		if cur {
+			textCol = textCol.Selectable().CopyData(func([]ui.SelectedText) transfer.Data {
+				parts := []string{sh.Title}
+				if sh.Owner != "" {
+					parts = append(parts, sh.Owner)
+				}
+				return transfer.TextData(strings.Join(parts, "\n"))
 			})
-		})
+		}
+		textCol.Children(func() { h.viewHeroText(c, m.ID, sh, t) })
+	})
+}
+
+func (h *homePage) viewHeroText(c *ui.Context, id string, sh list.Shown, t *ui.Theme) {
+	ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).
+		TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(2).Ellipsis("…")
+	if sh.Owner != "" {
+		ui.Text(c, sh.Owner).FontSize(scale.Font(c, scale.Size14)).
+			TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(1).Ellipsis("…")
+	}
+	btn := ui.Row(c).Key("home:hero:play:"+id).Gap(space.Px6).Padding(space.Px8, space.Px16, space.Px8, space.Px12).
+		Radius(18).Background(t.Accent).AlignItems(ui.Center)
+	if btn.Hovered() {
+		btn = btn.Background(t.Accent.Mix(t.Text, 0.14))
+	}
+	btn.Children(func() {
+		ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.AccentText)
+		ui.Text(c, "立即播放").FontSize(scale.Font(c, scale.Size13)).TextColor(t.AccentText)
 	})
 }
 
@@ -546,6 +572,9 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 			b := ui.Column(c).Key("home:tile:"+name).Size(cw, homeTileH).Radius(homeTileRadius(t)).Clip().
 				Gradient(from, to, 135).Padding(space.Px12, space.Px16).Justify(ui.Center).Gap(space.Px4).
 				Focusable().Role(ui.RoleButton).Label(name).OnClick(func() { h.openTab(tile.tab) })
+			if b.Hovered() {
+				b = b.Border(1, tileText.Alpha(0.55))
+			}
 			b.Children(func() {
 				// 磁贴只需要榜单第一项；不要用 Items() 为一张插画复制整页分页列表。
 				iw := cw * 0.5
@@ -560,8 +589,6 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 				}
 
 				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).TextColor(tileText).MaxLines(1)
-				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size13)).
-					TextColor(tileText).MaxLines(1)
 			})
 		}
 	})

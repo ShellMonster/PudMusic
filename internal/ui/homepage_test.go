@@ -575,10 +575,11 @@ func TestTheMusicAndGuichuTabsAreNotTouched(t *testing.T) {
 // 所以 `Empty` 换了个地方活：首页自己在 `viewHome` 里画它。
 //
 // 逐个 Tab 走一遍（三个 Tab 一行歌都没有时画的是同一句，所以三档都该有），再验
-// **两句话都在**：标题说「这里为什么空」，提示说「怎么才能不空」。
+// 标题那句「这里为什么空」在——「怎么才能不空」那一句是**有下一步可指时才写**
+// （见 `emptyState.Hint`），没有就让它缺着。
 func TestTheHomePageStillSaysWhyItIsEmpty(t *testing.T) {
 	want := lookup(homePath).Empty
-	if strings.TrimSpace(want.Title) == "" || strings.TrimSpace(want.Hint) == "" {
+	if strings.TrimSpace(want.Title) == "" {
 		t.Fatalf("routes 表里 %s 的空状态自己就不全：%+v", homePath, want)
 	}
 
@@ -588,7 +589,7 @@ func TestTheHomePageStillSaysWhyItIsEmpty(t *testing.T) {
 		if !shows(tt, want.Title) {
 			t.Errorf("「%s」上没有画出 %q，文字有 %q", name, want.Title, tt.Texts())
 		}
-		if !shows(tt, want.Title) {
+		if want.Hint != "" && !shows(tt, want.Hint) {
 			t.Errorf("「%s」上没有画出「怎么才能不空」%q，文字有 %q", name, want.Hint, tt.Texts())
 		}
 		// Tab 那一排在空状态之上还看得见——不然用户连换一档都做不到。
