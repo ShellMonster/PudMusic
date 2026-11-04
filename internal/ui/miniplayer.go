@@ -873,13 +873,11 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 	ui.Row(c).Key("mini-ctl").FillWidth().Margin(space.Px8, space.None, space.None, space.None).Gap(space.Px4).AlignItems(ui.Center).
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
-			if pud.IconBtn(c, "mini-prev", "prev", "上一首", pud.IconOpts{}).
-				Disabled(!s.app.CanPrev()).Clicked() {
+			if pud.IconBtn(c, "mini-prev", "prev", "上一首", pud.IconOpts{Disabled: !s.app.CanPrev()}).Clicked() {
 				s.app.Prev()
 			}
 			s.viewMiniPlay(c, st)
-			if pud.IconBtn(c, "mini-next", "next", "下一首", pud.IconOpts{}).
-				Disabled(!s.app.CanNext()).Clicked() {
+			if pud.IconBtn(c, "mini-next", "next", "下一首", pud.IconOpts{Disabled: !s.app.CanNext()}).Clicked() {
 				s.app.Next()
 			}
 			ui.Spacer(c).Grow(1)

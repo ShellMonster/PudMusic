@@ -53,7 +53,7 @@ func TestTheDisabledIconKeysDoNotTurnAccent(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt, s := playbarTester(t, fullBarState(), 1200, 0, dark)
-			bg := rgb(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
+			bg := rgb(tok.Of(BuildTheme(s.app.SettingsSnapshot(), dark)).Side) // 原型播放条底是 --side
 
 			for _, label := range []string{"上一首", "下一首"} {
 				btn, ok := tt.Find(label)

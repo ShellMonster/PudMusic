@@ -77,7 +77,7 @@ func (s *Shell) toggleDarkLight(nowDark bool) {
 
 // viewNavBack 是后退键（原型 `.icon-btn` + `left`，没有历史时 35% 不透明）。
 func (s *Shell) viewNavBack(c *ui.Context, back func()) {
-	b := pud.IconBtn(c, "nav-back", "left", navBackLabel, pud.IconOpts{}).Disabled(!s.router.CanGoBack())
+	b := pud.IconBtn(c, "nav-back", "left", navBackLabel, pud.IconOpts{Disabled: !s.router.CanGoBack()})
 	if s.withTip(c, b, navBackLabel).Clicked() {
 		back()
 		s.router.Back()
@@ -86,7 +86,7 @@ func (s *Shell) viewNavBack(c *ui.Context, back func()) {
 
 // viewNavForward 是前进键。
 func (s *Shell) viewNavForward(c *ui.Context, back func()) {
-	b := pud.IconBtn(c, "nav-forward", "right", navForwardLabel, pud.IconOpts{}).Disabled(!s.router.CanGoForward())
+	b := pud.IconBtn(c, "nav-forward", "right", navForwardLabel, pud.IconOpts{Disabled: !s.router.CanGoForward()})
 	if s.withTip(c, b, navForwardLabel).Clicked() {
 		back()
 		s.router.Forward()

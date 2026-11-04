@@ -19,7 +19,7 @@ import (
 	"image/color"
 	"testing"
 
-	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -87,7 +87,7 @@ func TestTheChromeSharesOneBackground(t *testing.T) {
 			}{
 				{"侧栏", sideProbeX, sideProbeY, rgbaOf(s.sidebarBackground(th))},
 				{"内容区", contentProbeX, contentProbeY, rgbaOf(th.Background)},
-				{"播放条", playbarProbeX, playbarY, rgbaOf(th.Background)},
+				{"播放条", playbarProbeX, playbarY, rgbaOf(tok.Of(th).Side)}, // 原型 .bar 底是 --side
 			}
 			for _, p := range probes {
 				if got := probeColor(tt, p.x, p.y); got != p.want {
@@ -125,7 +125,7 @@ func TestTheChromeStillHasASeparationFromTheBackground(t *testing.T) {
 			// 侧栏右缘那条竖线：分隔线画在侧栏框的**内侧**（`Border` 的文档：
 			// 「draws a border of width DIPs inside the element's edges」），
 			// 所以它在 x = 侧栏宽 − 1 那一列，而它右边那一列已经是内容区了。
-			lineX := int(app.DefaultSideMenuWidth) - 1
+			lineX := int(tok.SideW) - 1 // 原型 --side-w 232
 			if line := probeColor(tt, lineX, sideProbeY); line == bg {
 				t.Errorf("侧栏右缘 x=%d 那一条是底色 %v——分隔线没了，"+
 					"浅色下侧栏和内容区会完全一样", lineX, line)

@@ -122,13 +122,11 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 	ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		s.viewPlayMode(c, st)
-		if pud.IconBtn(c, "pb-prev", "prev", "上一首", pud.IconOpts{Size: 22}).
-			Disabled(!s.app.CanPrev()).Clicked() {
+		if pud.IconBtn(c, "pb-prev", "prev", "上一首", pud.IconOpts{Size: 22, Disabled: !s.app.CanPrev()}).Clicked() {
 			s.app.Prev()
 		}
 		s.viewPlayKey(c, st)
-		if pud.IconBtn(c, "pb-next", "next", "下一首", pud.IconOpts{Size: 22}).
-			Disabled(!s.app.CanNext()).Clicked() {
+		if pud.IconBtn(c, "pb-next", "next", "下一首", pud.IconOpts{Size: 22, Disabled: !s.app.CanNext()}).Clicked() {
 			s.app.Next()
 		}
 		s.viewSleep(c, st)

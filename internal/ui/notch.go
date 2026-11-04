@@ -733,13 +733,11 @@ func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float3
 		})
 		ink := tok.Full.Text
 		ui.Row(c).Key("notch-ctl").Shrink(0).Children(func() {
-			if pud.IconBtn(c, "notch-prev", "prev", "上一首", pud.IconOpts{Color: ink}).
-				Disabled(!s.app.CanPrev()).Clicked() {
+			if pud.IconBtn(c, "notch-prev", "prev", "上一首", pud.IconOpts{Color: ink, Disabled: !s.app.CanPrev()}).Clicked() {
 				s.app.Prev()
 			}
 			s.viewNotchPlay(c, st, ink)
-			if pud.IconBtn(c, "notch-next", "next", "下一首", pud.IconOpts{Color: ink}).
-				Disabled(!s.app.CanNext()).Clicked() {
+			if pud.IconBtn(c, "notch-next", "next", "下一首", pud.IconOpts{Color: ink, Disabled: !s.app.CanNext()}).Clicked() {
 				s.app.Next()
 			}
 		})
