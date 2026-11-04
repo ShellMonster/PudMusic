@@ -57,24 +57,24 @@ func TestCmdKOpensThePalette(t *testing.T) {
 // TestPaletteEntriesFilterByNameIDAndShortcut 验搜词收窄：敲命令名、命令 id、
 // 快捷键都能找到对应的那一条。
 func TestPaletteEntriesFilterByNameIDAndShortcut(t *testing.T) {
-	if got := len(paletteEntries("")); got != len(commandSpecs)+countMenuRoutes() {
+	if got := len(paletteEntries(nil, "")); got != len(commandSpecs)+countMenuRoutes()-3+2 {
 		t.Fatalf("不敲词时是 %d 条，want 命令 %d + 页面 %d", got, len(commandSpecs), countMenuRoutes())
 	}
 	// 按中文名搜。
-	if got := paletteEntries("暂停"); len(got) != 1 || got[0].id != "togglePlay" {
+	if got := paletteEntries(nil, "暂停"); len(got) != 1 || got[0].id != "togglePlay" {
 		t.Errorf("搜「暂停」得到 %v，want 只有 togglePlay", got)
 	}
 	// 按命令 id 搜（大小写、空白都不认）。
-	if got := paletteEntries("cycle play mode"); len(got) != 1 || got[0].id != "cyclePlayMode" {
+	if got := paletteEntries(nil, "cycle play mode"); len(got) != 1 || got[0].id != "cyclePlayMode" {
 		t.Errorf("搜「cycle play mode」得到 %v，want 只有 cyclePlayMode", got)
 	}
 	// 按快捷键搜：⌘P → 播放/暂停。
-	got := paletteEntries("CommandOrControl+P")
+	got := paletteEntries(nil, "CommandOrControl+P")
 	if len(got) != 1 || got[0].id != "togglePlay" {
 		t.Errorf("搜「CommandOrControl+P」得到 %v，want 只有 togglePlay", got)
 	}
 	// 搜不到的说一句，不是空着。
-	if got := paletteEntries("不存在的命令"); len(got) != 0 {
+	if got := paletteEntries(nil, "不存在的命令"); len(got) != 0 {
 		t.Errorf("搜「不存在的命令」居然还有 %v", got)
 	}
 }
@@ -100,9 +100,11 @@ func TestPaletteArrowsAndEnterRunThePickedCommand(t *testing.T) {
 	var fired []string
 	s.onShortcut = func(id string) { fired = append(fired, id) }
 	s.paletteOpen = true
+	// 原型的列表是「前往」在前、「操作」在后；这里敲「暂停」把列表收成只有播放/暂停一条。
+	s.paletteQuery = "暂停"
 	tt.Frame()
 
-	// 没选中直接回车 → 第一条（commandSpecs 的第一条是 togglePlay）。
+	// 没选中直接回车 → 第一条。
 	tt.Key(0, mygoui.KeyEnter)
 	tt.Frame()
 	if len(fired) != 1 || fired[0] != "togglePlay" {
@@ -112,15 +114,16 @@ func TestPaletteArrowsAndEnterRunThePickedCommand(t *testing.T) {
 		t.Fatal("跑完一条面板还开着")
 	}
 
-	// 再开，↓ 武装到第一条、再 ↓ 到第二条，回车 → prev。
+	// 再开，列表收成「上一首 / 下一首」，↓ 武装到第一条、再 ↓ 到第二条，回车 → next。
 	s.toggleCommandPalette()
+	s.paletteQuery = "一首"
 	tt.Frame()
 	tt.Key(0, mygoui.KeyDown)
 	tt.Key(0, mygoui.KeyDown)
 	tt.Key(0, mygoui.KeyEnter)
 	tt.Frame()
-	if len(fired) != 2 || fired[1] != "prev" {
-		t.Fatalf("↓ 两次回车跑的是 %v，want 第二次是 prev", fired)
+	if len(fired) != 2 || fired[1] != "next" {
+		t.Fatalf("↓ 两次回车跑的是 %v，want 第二次是 next", fired)
 	}
 }
 

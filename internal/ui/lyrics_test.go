@@ -116,11 +116,10 @@ func lyricsOfNWithTranslation(n int) string {
 // （`internal/app/app.go` 的 `live := a.wantPlay || a.playing`），位置就定住了。
 func lyricShell(t *testing.T, opts ...shellOpt) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t, opts...)
+	s, tt := newLyricHostShell(t, opts...)
 	s.app.SetWake(s.wake.invalidate)
 	openATrack(t, s)
 	s.app.Pause()
-	s.navigate(miniPlayerPath)
 	tt.Frame()
 	return s, tt
 }

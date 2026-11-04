@@ -136,7 +136,7 @@ func cand(id, title string) lyrics.Candidate {
 // 「敲完字等 500ms」用 `advance` 是一行。
 func lyricSearchShell(t *testing.T, srcs ...lyrics.Source) (*Shell, *mygoui.Tester) {
 	t.Helper()
-	s, tt := newShell(t)
+	s, tt := newLyricHostShell(t)
 	s.clock = newFakeClock(now)
 	s.app.SetWake(s.wake.invalidate)
 	// 缓存挂在真的临时目录上：采用那一下要真的写盘，这一票才验得到「写进缓存」。
@@ -145,7 +145,6 @@ func lyricSearchShell(t *testing.T, srcs ...lyrics.Source) (*Shell, *mygoui.Test
 	s.app.MountLyricSources(srcs...)
 	openATrack(t, s)
 	s.app.Pause()
-	s.navigate(miniPlayerPath)
 	tt.Frame()
 	// 收掉那个 500ms 防抖的钟（理由同 librarypage_test.go 里的那一处）。
 	t.Cleanup(func() {

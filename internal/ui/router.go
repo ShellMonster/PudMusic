@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -208,9 +210,6 @@ var routes = []Route{
 		// 在这里画的也是这一枚 —— 换成别的就等于这一页说的不是它自己。
 		Icon: iconEmptyDefault,
 	}},
-	// 迷你播放器（nowplaying.go）：没歌时是上游的「暂无播放内容」，有歌时是歌名 +
-	// 歌词区。所以**不填 Empty**：填了就是一句没人会看到的话。
-	{Match: "/mini-player", Title: "迷你播放器"},
 	// 扫码登录。**不加 InMenu**：它不是侧栏菜单项，是从顶栏的登录
 	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
 	// 加进菜单的话用户每次想登录都要先在侧栏里找一圈。
@@ -321,7 +320,12 @@ func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
 	s.pageBuilds++
 	s.guardAt("页面「"+rt.Title+"」", func(c *ui.Context) {
 		r.Title(rt.Title)
-		s.pageBody(c, r, rt)
+		// 原型 `page-in`：换页时新页从下 8 淡入（360ms）。Key 用路由模式，所以只在**换页**时播，
+		// 同一页里换参数（搜索词、收藏夹 id）不重播；「减少动态效果」时框架只做淡入。
+		ui.Column(c).Key("page-in:" + rt.Match).Grow(1).FillWidth().
+			Transition(motion.PageIn).Children(func() {
+			s.pageBody(c, r, rt)
+		})
 	})(c)
 }
 
@@ -345,9 +349,6 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case searchPath:
 		// 搜索页有搜索框，两个空状态从 URL 上的 q 分得出来（searchpage.go）。
 		return s.viewSearch
-	case miniPlayerPath:
-		// 正在放什么 + 它的歌词（nowplaying.go）。
-		return s.viewNowPlaying
 	case downloadListPath:
 		// 下载记录（downloadlist.go）：表格 + 三段进度 + 五种操作 + 确认弹窗。
 		//

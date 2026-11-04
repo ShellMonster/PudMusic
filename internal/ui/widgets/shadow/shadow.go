@@ -78,17 +78,6 @@ func TailwindLG(e ui.Element) ui.Element {
 		Shadow(0, 4, 6, -4, ui.RGBA(0, 0, 0, tailwindBlack10))
 }
 
-// TailwindXLBlack30 是上游的 `shadow-xl shadow-black/30`——**回顶按钮那一枚**
-// （上游 `components/scroll-container/index.tsx:82`）。
-//
-// ⚠️ **`shadow-black/30` 把两层的颜色都换成 30% 黑**，不是只换一层，也不是
-// 「用默认色再叠一层 30% 黑」。上游那一枚之所以比别处浓，是因为它是一枚**浮在
-// 内容上面**的按钮，底下那一层影就是它和内容之间的分界。
-func TailwindXLBlack30(e ui.Element) ui.Element {
-	return e.Shadow(0, 20, 25, -5, ui.RGBA(0, 0, 0, 0.3)).
-		Shadow(0, 8, 10, -6, ui.RGBA(0, 0, 0, 0.3))
-}
-
 // Tailwind2XL 是上游的 `shadow-2xl`：`0 25px 50px -12px rgb(0 0 0/0.25)`。
 //
 // ⚠️ **只有一层，而且颜色是 25% 黑**（不是 10%）。网格卡片右下角那个主色圆播放钮
@@ -211,7 +200,7 @@ func Sheet(e ui.Element, t *ui.Theme) ui.Element {
 //
 //   - `TailwindSM`（`shadow-sm`）：上游没有一处用它。
 //   - `TailwindXL`（`shadow-xl`）：上游只有回顶按钮那一枚用它，而那一枚是
-//     `shadow-black/30`（`TailwindXLBlack30`，还在）。
+//     `shadow-black/30`（回顶按钮现在走 `shadow.Pop`，这一档也删了）。
 //   - `HeroLarge`（`shadow="lg"`）：上游的分集那个 Popover 是这一档，但我们
 //     那一块用的是自己挑的一档更淡的影（`Sheet`）——毛玻璃底下还有一层模糊的
 //     封面影，再压一圈 30 像素的影就糊了。

@@ -19,6 +19,7 @@ import (
 	"context"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -223,7 +224,7 @@ func runHeight(img *image.RGBA, area image.Rectangle, lo, hi, x0, x1 int) int {
 // ⚠️ **容忍两像素**：字形墨迹的左边距（1~2 像素）随字体而异，而那一族要抓的
 // 是 4~12 像素的差（横向页边距原来是 16 / 20 / 24 / 28 四种）。
 func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
-	sideW := app.DefaultSideMenuWidth
+	sideW := float64(tok.SideW) // 侧栏固定 232
 	area := contentArea(sideW)
 	// ⚠️ **期望值写的是字面的 16，不是 `pagePadX`**：用被测的同一个常量算期望值
 	// 的话，把 `pagePadX` 改成 20 这一条照样绿——「取 16」这个决定就没有护栏

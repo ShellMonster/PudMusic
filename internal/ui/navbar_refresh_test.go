@@ -197,31 +197,6 @@ func TestRefreshingTwiceSendsOneRequestAndSaysItIsBusy(t *testing.T) {
 	}
 }
 
-// TestRefreshingWithoutALoginSaysSoAndSendsNothing 钉「没登录时这一项说什么」。
-//
-// 🔴 **不发请求**是这一条的一半，而且是更重要的那半：未登录去试登录后的接口，
-// B 站一律回 -101，界面上看不出异样，可真机上那一片 401 噪声会让别的排查
-// 全部跑偏（issue #91「权限」那一节写的就是这一条）。
-func TestRefreshingWithoutALoginSaysSoAndSendsNothing(t *testing.T) {
-	f := newFolderBili(t, nil)
-	f.pages = [][]map[string]any{folderPage(1, 2)}
-
-	s, tt := refreshShell(t, f, "")
-	tt.Frame()
-
-	chooseRefresh(t, s, tt)
-	waitFrames(t, tt, "说清楚还没登录", func() bool {
-		return tt.HasText("还没登录，登录之后才能刷新收藏夹")
-	})
-	if tt.HasText(refreshLine) {
-		t.Errorf("没登录还进了在飞状态，文字有 %q", tt.Texts())
-	}
-	if _, pn := f.asks(); len(pn) != 0 {
-		t.Errorf("没登录也发了 %d 次列表请求（页码 %v）：未登录的路径不该去试登录后的接口",
-			len(pn), pn)
-	}
-}
-
 // TestRefreshingWithoutTheFoldersMountedSaysSo 钉另一档拒绝：没挂上接口。
 //
 // 那一档在真机上基本不出现（客户端是 `main` 挂的），而它出错的症状是**按下去

@@ -73,7 +73,6 @@ func TestSpecEmptyStates(t *testing.T) {
 					t.Fatalf("挂下载：%v", err)
 				}
 			}},
-		{"没有歌词", noLyrics, miniPlayerPath, miniPlayerPath, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.what, func(t *testing.T) {
@@ -158,7 +157,6 @@ func TestTheFourSpecStatesAreAllReachable(t *testing.T) {
 		{"没有收藏夹", "/collection/{id}"},
 		{"没有搜索结果", searchPath},
 		{"没有下载记录", "/download-list"},
-		{"没有歌词", miniPlayerPath},
 	} {
 		if s.builtPage(lookup(c.path)) != nil {
 			continue

@@ -216,7 +216,7 @@ func TestTheDownloadTableIsUnchanged(t *testing.T) {
 	// ⚠️ **表格的左右两缘**：左边 252（文件列内容的起点）、右边 1168（内容区
 	// 的右缘）。左边那一列是「吃剩下的」那一个（四个定宽列之外它自己撑满），
 	// 右边是内容区那条边——两个都不看字体。
-	const tableLeft = 252.0
+	const tableLeft = 264.0 // 侧栏 232 + 页边距 + 8
 	const tableRight = 1168.0
 
 	// 「状态」那一列的内容左缘：774（状态文字是**左对齐**的，所以它是按列的
@@ -290,8 +290,8 @@ func TestTheDownloadTableIsUnchanged(t *testing.T) {
 		text string
 		x, y float32
 	}{
-		{"歌 甲", tableLeft, 210},
-		{"歌 乙", tableLeft, 270},
+		{"歌 甲", tableLeft, 206}, // 顶栏 60（原 64）
+		{"歌 乙", tableLeft, 266},
 	} {
 		r, ok := tt.Find(c.text)
 		if !ok {

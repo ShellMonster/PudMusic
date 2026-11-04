@@ -33,12 +33,16 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -52,13 +56,13 @@ const (
 
 	// paletteWidth 是面板的宽。命令名最长也就「显示/隐藏迷你播放器」十个字，
 	// 480 摆得开、在 900 的最小窗口上也不顶边。
-	paletteWidth = 480
+	paletteWidth = 600
 	// paletteTop 是面板顶边离窗口顶边多远：命令面板的惯例位置是「顶上
 	// 约 1/6 处」（VS Code / Raycast 都在那一带），Px96（96 DIP）在 560
 	// 高的最小窗口上正好是那个比例——值在 space 那张表上，这里不另写。
 	paletteTop = space.Px96
 	// paletteListMaxH 是命令列表的高度上限，超了滚。
-	paletteListMaxH = 320
+	paletteListMaxH = 360
 
 	// paletteEnterFadeKey / paletteEnterRiseKey 是进场动画的两个通道（常量
 	// 字符串，理由同 queueSlideKey）。
@@ -87,39 +91,54 @@ type paletteEntry struct {
 	// keys 是搜的时候也比对的字：命令的 id 和快捷键。用户敲 "toggleplay"
 	// 或者 "⌘P" 都该找得到那一条。
 	keys string
+	// group 是分组名（原型 `PAL_ACTIONS` 的 `g`：「前往」「操作」），icon 是行首 16 号的图标名，
+	// run 非空时选中就执行它（不走 nav / id）。
+	group, icon string
+	run         func(*Shell)
 }
 
-// paletteEntries 是这一帧面板上可摆的条目，按框里的词过滤过。
-//
-// ⚠️ **比对的是小写 + 去空白**：用户敲 "toggle play"、"TOGGLEPLAY" 都
-// 是同一条意图；中文名原样比（`strings.Contains` 对中文本来就是逐字）。
-func paletteEntries(query string) []paletteEntry {
-	var all []paletteEntry
+func paletteEntries(s *Shell, query string) []paletteEntry {
+	var nav, ops []paletteEntry
+	loggedIn := s != nil && s.app.LoggedIn()
+	for _, r := range routes {
+		if !r.InMenu || (r.HideInMenuWhenLoggedOut && !loggedIn) {
+			continue
+		}
+		nav = append(nav, paletteEntry{
+			label: r.Title, voice: "去" + r.Title, nav: r.Match,
+			keys:  "去" + r.Title + " " + r.Title + " " + r.Match,
+			group: "前往", icon: strings.TrimSuffix(strings.TrimPrefix(r.Icon, "Pud/"), ".svg"),
+		})
+	}
+	// 原型：登录后多一条「用户动态」，没登录多一条「扫码登录」。
+	if loggedIn {
+		nav = append(nav, paletteEntry{label: "用户动态", voice: "去用户动态", nav: dynamicFeedPath,
+			keys: "用户动态 动态 " + dynamicFeedPath, group: "前往", icon: "bell"})
+	} else {
+		nav = append(nav, paletteEntry{label: "扫码登录", voice: "去扫码登录", nav: loginPath,
+			keys: "扫码登录 登录 " + loginPath, group: "前往", icon: "user"})
+	}
 	for _, c := range commandSpecs {
 		keys := c.id + " " + c.name
 		if _, it, ok := findShortcutInDefaults(c.id); ok && it.Shortcut != "" {
 			keys += " " + it.Shortcut + " " + formatAccel(accelerator(it.Shortcut))
 		}
-		all = append(all, paletteEntry{
-			label: c.name,
-			voice: "命令：" + c.name,
-			id:    c.id,
-			keys:  keys,
+		ops = append(ops, paletteEntry{
+			label: c.name, voice: "命令：" + c.name, id: c.id, keys: keys,
+			group: "操作", icon: paletteCommandIcon(c.id),
 		})
 	}
-	for _, r := range routes {
-		if !r.InMenu {
-			continue
-		}
-		all = append(all, paletteEntry{
-			label: "去" + r.Title,
-			voice: "去" + r.Title,
-			nav:   r.Match,
-			// 用户敲的是「去设置」，而 keys 里也要有「去」——否则搜「去」
-			// 一个字都搜不到页面类，只有命令类会剩下。
-			keys: "去" + r.Title + " " + r.Title + " " + r.Match,
-		})
+	dark := s != nil && s.theme.base != nil && s.theme.base.Dark
+	themeLabel, themeIcon := "切换到深色主题", "moon"
+	if dark {
+		themeLabel, themeIcon = "切换到浅色主题", "sun"
 	}
+	ops = append(ops, paletteEntry{
+		label: themeLabel, voice: "命令：" + themeLabel, keys: "主题 深色 浅色 theme",
+		group: "操作", icon: themeIcon,
+		run: func(s *Shell) { s.toggleDarkLight(dark) },
+	})
+	all := append(nav, ops...)
 	q := strings.ToLower(strings.TrimSpace(query))
 	if q == "" {
 		return all
@@ -133,6 +152,31 @@ func paletteEntries(query string) []paletteEntry {
 		}
 	}
 	return out
+}
+
+// paletteCommandIcon 是命令类条目行首的图标（取原型 `PAL_ACTIONS` 里同类动作的图标）。
+func paletteCommandIcon(id string) string {
+	switch id {
+	case "togglePlay":
+		return "play"
+	case "prev":
+		return "prev"
+	case "next":
+		return "next"
+	case "toggleMiniMode", "toggleNotchMode", "toggleMainWindow":
+		return "mini"
+	case "toggleQueueDrawer":
+		return "queue"
+	case "favoriteCurrent":
+		return "star"
+	case "cyclePlayMode":
+		return "repeat"
+	case "volumeUp", "volumeDown":
+		return "vol"
+	case "commandPalette":
+		return "cmd"
+	}
+	return "play"
 }
 
 // findShortcutInDefaults 按 id 查默认的应用内键。面板把默认键写进可搜的
@@ -161,104 +205,79 @@ func (s *Shell) toggleCommandPalette() {
 	s.paletteOpen = !s.paletteOpen
 }
 
-// runPaletteEntry 跑面板里选中的那一条。跑完收面板——命令面板的语义是
-// 「发一条命令就退场」，跑完还开着的话用户要再多按一次 Esc。
 func (s *Shell) runPaletteEntry(e paletteEntry) {
 	s.paletteOpen = false
-	if e.nav != "" {
+	switch {
+	case e.run != nil:
+		e.run(s)
+	case e.nav != "":
 		s.navigate(e.nav)
-		return
+	default:
+		s.onShortcut(e.id)
 	}
-	s.onShortcut(e.id)
 }
 
-// viewCommandPalette 画命令面板。没开就一个字都不建。
-//
-// ⚠️ 排在满屏之后、Toast 之前（`viewMain` 里调）：它是模态的，要盖住整页，
-// 而 Toast（右下角那句提示）要在最上面。
 func (s *Shell) viewCommandPalette(c *ui.Context) {
 	if !s.paletteOpen {
-		// 面板没了：下一回它再出现的时候，那一下又是「进场」（理由同
-		// `viewSuggest` 里那一支）。
 		s.paletteShown = false
 		return
 	}
-	t := c.Theme()
 	_, winH := c.Size()
-
-	justOpened := !s.paletteShown
+	winW, _ := c.Size()
 	s.paletteShown = true
 
 	ui.Overlay(c, func() {
-		// ⚠️ **蒙版是模态的**（理由同 `queue_drawer.go` 那一段）：焦点关进
-		// 面板、底下那一页点不动、底下的快捷键让路。半透明的那一层底让
-		// 「底下还有一页」看得见——命令面板是叠上去的一小块，不是另一页。
+		// 原型 `dialog::backdrop`：50% 黑的遮罩，面板离顶 12vh、水平居中。
 		back := ui.Row(c).Key("palette-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Background(ui.RGBA(0, 0, 0, scrim.Modal)).
-			// ⚠️ **水平居中靠 Row 的主轴**，不是靠绝对定位的百分比 + 负边距
-			//（那套在这个布局里没有「负边距把面板拉回中线」的语义——布局按
-			// inset 摆，LeftPercent 只是左沿）。`Justify(Center)` 让面板中线
-			// 落在窗口中线（VS Code 那一档的位置）。
+			Background(ui.RGBA(0, 0, 0, scrim.Dialog)).
 			Justify(ui.Center).
-			Modal()
+			Modal().Transition(motion.ScrimIn)
 		back.Children(func() {
-			panel := popupPanelCard(s, t, ui.Column(c).Key("command-palette").
-				Width(paletteWidth).
-				// 离顶 96 DIP、横向由 Row 居中（见上面 Justify）。
-				Margin(paletteTop, space.None, space.None, space.None))
+			p := tok.Of(c.Theme())
+			w := min(paletteWidth, winW-32)
+			panel := shadow.Pop(ui.Column(c).Key("command-palette").Width(w).
+				Margin(winH*0.12, space.None, space.None, space.None).
+				Background(p.Surface).Border(1, p.Line).Radius(tok.R12).
+				Transition(motion.PopIn), c.Theme())
 			panel.Role(ui.RoleDialog).Label(paletteLabel)
 
-			// 进场：淡入 + 升上来 10 DIP（和联想面板同一段，理由见那里）。
-			if justOpened {
-				panel.Jump(paletteEnterFadeKey, 0)
-				panel.Jump(paletteEnterRiseKey, suggestEnterRise)
-			}
-			fade := panel.AnimateTo(paletteEnterFadeKey, 1, paletteEnterAnim)
-			rise := panel.AnimateTo(paletteEnterRiseKey, 0, paletteEnterAnim)
-			panel = panel.Opacity(fade).Margin(paletteTop+rise, space.None, space.None, space.None)
-
-			entries := paletteEntries(s.paletteQuery)
-
-			// 🔴 **选中态每帧校验**：词变了列表就换，`sel` 指的下标可能越界，
-			// 越了就放回「还没选中」——回车跑第一条（见下面 Enter 那一支）。
+			entries := paletteEntries(s, s.paletteQuery)
 			if s.paletteSel >= len(entries) {
 				s.paletteSel = -1
 			}
-
 			panel.Children(func() {
 				s.viewPaletteInput(c, entries)
-				s.viewPaletteList(c, t, entries, winH)
+				s.viewPaletteList(c, entries, winH)
 			})
 		})
 
-		// 关面板的两条路：点底下那一层、按 Esc。理由同 `viewQueueDrawer`
-		// 里那一段（用 `back.Clicked()` 不用 `panel.PressedOutside()`）。
-		//
-		// ⚠️ **Esc 走 OverlayShortcut，不走输入框的 OnTextKey**：输入框的
-		// `OnTextKey` 在它自己不收这个键的时候才轮到（`TextInputBase` 对 Esc
-		// 默认是清字，见 `navbar_search.go` 的文件头）——所以输入框那一支
-		// 先问「面板开着没有」，开着就吃掉这次 Esc 关面板；而焦点不在输入框
-		// 上（比如用户点了一行）时，这一支兜底。
 		if back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
 			s.paletteOpen = false
 		}
 	})
 }
 
-// viewPaletteInput 是面板顶上那个输入框。
-//
-// ⚠️ **开面板的那一帧把焦点按在它身上**：打开面板就是为了敲字，焦点不
-// 在框上的话用户要先点一下才能敲——「按 ⌘K 再点一下框」就是把一个键
-// 变成两下。
+// viewPaletteInput 是面板顶上的输入行（原型 `.pal-input`：内边距 16/20、缝 12、放大镜 18 text-3、
+// 输入 16 号，底下一条 `line`）。键盘：↑↓ 选、回车执行、Esc 关。
 func (s *Shell) viewPaletteInput(c *ui.Context, entries []paletteEntry) {
+	p := tok.Of(c.Theme())
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px12).
+		Padding(space.Px16, space.Px20).
+		Draw(func(pp *ui.Painter, r ui.Rect) {
+			pp.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, p.Line, 0)
+		}).Children(func() {
+		ui.Icon(c, pud.Icon("search")).FontSize(tok.Icon).TextColor(p.Text3).Shrink(0)
+		s.viewPaletteField(c, entries)
+	})
+}
+
+func (s *Shell) viewPaletteField(c *ui.Context, entries []paletteEntry) {
 	field := ui.TextInputBase(c, &s.paletteQuery).
 		Label(paletteInputLabel).Placeholder("输入命令或页面名").
-		FillWidth().Padding(space.Px8, space.Px8)
+		Grow(1).FontSize(scale.Font(c, scale.Size16))
 	field.Focus()
 	field.OnTextKey(func(k ui.TextKey) bool {
-		// Esc 收面板：开着就吃掉这一次（字留着——用户只是想关，不是想删
-		// 刚敲的那几个字；真删字的工具是 Backspace）。
 		if k.Key == ui.KeyEscape {
 			if !s.paletteOpen {
 				return false
@@ -266,8 +285,6 @@ func (s *Shell) viewPaletteInput(c *ui.Context, entries []paletteEntry) {
 			s.paletteOpen = false
 			return true
 		}
-		// 🔴 **带修饰键的方向键/回车还给输入框**（理由同 `navbar_search.go`
-		// 那一支：`Shift+↓` 是扩选，`Cmd+↓` 是光标到末尾）。
 		if k.Mods != 0 {
 			return false
 		}
@@ -283,7 +300,6 @@ func (s *Shell) viewPaletteInput(c *ui.Context, entries []paletteEntry) {
 			if n == 0 {
 				return false
 			}
-			// 没选中时 ↑ 从底下最后一条开始（和联想面板同一个惯例）。
 			if s.paletteSel < 0 {
 				s.paletteSel = n - 1
 			} else {
@@ -294,8 +310,6 @@ func (s *Shell) viewPaletteInput(c *ui.Context, entries []paletteEntry) {
 			if n == 0 {
 				return true // 面板是模态的，回车不许漏给底下那一页
 			}
-			// 没选中任何一条就默认第一条——「敲了词按回车」的语义是「跑
-			// 最像的那一条」（Spotlight / VS Code 都是第一条）。
 			sel := s.paletteSel
 			if sel < 0 || sel >= n {
 				sel = 0
@@ -305,64 +319,63 @@ func (s *Shell) viewPaletteInput(c *ui.Context, entries []paletteEntry) {
 		}
 		return false
 	})
-	// ⚠️ **敲字就把键盘选中清掉**：词变了那一摊条目要换，留着那个高亮
-	// 会指着一条已经不在列表里的命令（理由同 `navbar_search.go` 的
-	// `field.Changed()` 那一支）。
 	if field.Changed() {
 		s.paletteSel = -1
 	}
 }
 
-// viewPaletteList 是输入框下面那一列命令。
-//
-// ⚠️ **能滚**：12 条命令 + 7 条页面在小窗口上可能超 `paletteListMaxH`，
-// 和联想面板同一条规矩（`navbar_search.go` 的 suggestScroll）。
-func (s *Shell) viewPaletteList(c *ui.Context, t *ui.Theme, entries []paletteEntry, winH float32) {
+// viewPaletteList 是命令列表（原型 `.pal-list`：最高 360、内边距 8、分组小标题 12 号 text-3）。
+func (s *Shell) viewPaletteList(c *ui.Context, entries []paletteEntry, winH float32) {
+	p := tok.Of(c.Theme())
 	maxH := float32(paletteListMaxH)
-	if winH > 0 && maxH > winH-paletteTop-160 {
-		// 面板底下还要留输入框和边距：列表不许把面板顶出窗口底。
-		maxH = winH - paletteTop - 160
+	if winH > 0 && maxH > winH-winH*0.12-120 {
+		maxH = winH - winH*0.12 - 120
 	}
 	scroll := ui.Scroll(c).Key("palette-list").FillWidth().MaxHeight(maxH).
 		TrackScroll(&s.paletteScroll)
 	scroll.Children(func() {
-		if len(entries) == 0 {
-			ui.Text(c, paletteEmptyNote).FontSize(scale.Font(c, scale.Size13)).
-				TextColor(t.TextMuted).Padding(space.Px8, space.Px8)
-			return
-		}
-		ui.Column(c).FillWidth().Gap(space.Px2).Children(func() {
+		ui.Column(c).FillWidth().Padding(space.Px8).Children(func() {
+			if len(entries) == 0 {
+				ui.Text(c, paletteEmptyNote).FontSize(scale.Font(c, scale.Size14)).
+					TextColor(p.Text2).TextAlign(ui.Center).FillWidth().Padding(space.Px24)
+				return
+			}
+			last := ""
 			for i, e := range entries {
-				s.viewPaletteRow(c, t, e, i)
+				if e.group != last {
+					last = e.group
+					ui.Text(c, e.group).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
+						Padding(space.Px8, space.Px12, space.Px4, space.Px12)
+				}
+				s.viewPaletteRow(c, e, i)
 			}
 		})
 	})
 }
 
-// viewPaletteRow 是列表里的一行。
-//
-// ⚠️ **选中底和悬停底是同一片**（理由同 `viewSuggestTerm`）：选中态不是
-// 新颜色，用户从「指针扫过会亮」已经知道这一片亮是「这一条是焦点」。
-func (s *Shell) viewPaletteRow(c *ui.Context, t *ui.Theme, e paletteEntry, idx int) {
+// viewPaletteRow 是一行（原型 `.pal-item`：内边距 10/12、缝 12、圆角 8、图标 16 text-2，右边 kbd；
+// 选中行 `accent-soft` 底 + 图标 accent-text）。
+func (s *Shell) viewPaletteRow(c *ui.Context, e paletteEntry, idx int) {
+	p := tok.Of(c.Theme())
 	entry := e
-	row := ui.ButtonBase(c).Label(entry.voice).
-		FillWidth().Radius(t.Radius).
-		Padding(space.Px8, space.Px8).AlignItems(ui.Center)
+	row := ui.ButtonBase(c).Key("pal:"+strconv.Itoa(idx)).Label(entry.voice).
+		FillWidth().Radius(tok.R8).Padding(space.Px10, space.Px12).Gap(space.Px12).AlignItems(ui.Center)
 	picked := s.paletteSel == idx
-	if row.Hovered() || picked {
-		row = row.Background(t.SurfaceHover)
-	}
-	if picked {
+	iconCol := p.Text2
+	switch {
+	case picked:
+		row = row.Background(p.AccentSoft)
+		iconCol = p.AccentText
 		row.ScrollIntoView()
+	case row.Hovered():
+		row = row.Background(p.Hover)
 	}
 	row.Children(func() {
+		ui.Icon(c, pud.Icon(entry.icon)).FontSize(tok.IconSm).TextColor(iconCol).Shrink(0)
 		ui.Text(c, entry.label).FontSize(scale.Font(c, scale.Size14)).Grow(1).MaxLines(1).Ellipsis("…")
-		// 命令类的右边摆它现在的键：「这条命令对应哪个键」是面板上用户
-		// 最常问的问题，顺手答了省得再去设置页翻。
 		if entry.id != "" {
 			if _, it, ok := findShortcutInDefaults(entry.id); ok && it.Shortcut != "" {
-				ui.Text(c, formatAccel(accelerator(it.Shortcut))).
-					FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+				pud.Kbd(c, formatAccel(accelerator(it.Shortcut)))
 			}
 		}
 	})

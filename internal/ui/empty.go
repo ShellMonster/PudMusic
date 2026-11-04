@@ -523,3 +523,10 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 		}
 	})
 }
+
+// nothingPlaying 是迷你播放器窗口里「没歌」那一页说的话（原来住在 `nowplaying.go`，那个主窗口里的
+// 「正在播放」页已按原型删除；迷你窗口还在用这句，见 `miniplayer.go`）。
+var nothingPlaying = emptyState{
+	Title: "暂无播放内容",
+	Hint:  "在主窗口里点「打开文件」，这边就会显示正在放什么",
+}
