@@ -81,11 +81,13 @@ jobs:
           go generate ./internal/platform/ ./internal/licensing/
           git diff --exit-code -- resources
 
-      - name: Build and upload draft release assets
+      - name: Build release assets
         run: |
           go tool mygo build \
-            -platform darwin/arm64,darwin/amd64,windows/amd64,windows/arm64 \
-            -upload
+            -platform darwin/arm64,darwin/amd64,windows/amd64,windows/arm64
+
+      - name: Rename assets to platform-friendly names
+        run: scripts/rename-release-assets.sh darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
 
       - name: Verify release assets
         run: scripts/verify-release-assets.sh
@@ -93,10 +95,50 @@ jobs:
       - name: Generate release notes
         run: scripts/generate-release-notes.sh '${{ steps.release.outputs.tag }}' release-notes.md
 
-      - name: Update draft release notes
+      - name: Upload assets to draft release
         env:
           TAG: ${{ steps.release.outputs.tag }}
-        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md --draft
+        run: |
+          set -euo pipefail
+          assets=()
+          for d in build/darwin-arm64 build/darwin-amd64 build/windows-amd64 build/windows-arm64; do
+            while IFS= read -r f; do
+              assets+=("$f")
+            done < <(find "$d" -maxdepth 1 -type f \
+              \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*-setup-*.exe' -o -name 'update-*.json' -o -name 'install.sh' -o -name 'install.ps1' \) -print | sort)
+          done
+          # SHA256SUMS 在 build/ 顶层
+          [ -f build/SHA256SUMS ] && assets+=("build/SHA256SUMS")
+          if [ ${#assets[@]} -eq 0 ]; then
+            echo "no assets found" >&2; exit 1
+          fi
+          # 已存在且已发布的 release 不动：那是发出去过的东西，重传等于撤版。
+          is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null || echo '')"
+          if [ "$is_draft" = "false" ]; then
+            echo "Release $TAG is already published; refusing to re-upload." >&2
+            exit 1
+          elif [ "$is_draft" = "true" ]; then
+            # 草稿：清掉上次留下的资产再重传，保证只有品牌名这一套。
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' \
+              | while read -r n; do gh release delete-asset "$TAG" "$n" --repo "$GITHUB_REPOSITORY" --yes; done
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${assets[@]}"
+          else
+            # release 不存在：建草稿并挂资产。
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$TAG" "${assets[@]}"
+          fi
+
+      - name: Update draft release notes (drafts only)
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft 2>/dev/null || echo '')"
+          if [[ "$is_draft" == "true" ]]; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file release-notes.md
+          elif [[ "$is_draft" == "false" ]]; then
+            echo "Release $TAG is already published; skipping notes edit to avoid re-draft."
+          else
+            echo "Could not determine draft state of $TAG; skipping."
+          fi
 
       - name: Summarize release
         run: |
