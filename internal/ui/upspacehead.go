@@ -21,19 +21,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 头部尺寸（原型 CSS）。
-const (
-	// upBandH 是头图带高（`.up-band` 168）。
-	upBandH float32 = 168
-	// upFaceS 是头像（含 4 像素 bg 色环）的外径：原型 `avatar(…,112)` + `border: 4px solid var(--bg)`，
-	// `box-sizing: border-box`，所以环算在 112 里面，图是 104。
-	upFaceS float32 = 112
-	// upFaceRing 是头像外那圈色环的宽（`.up-head .avatar` 的 4px border）。
-	upFaceRing float32 = 4
-	// upHeadLift 是头部往上压住头图带多少（`margin-top:-48px`）。
-	upHeadLift float32 = 48
-)
-
 // upPadFor 是这一帧 UP 空间页左右的页边距（40 / 32 / 16）。
 func (s *Shell) upPadFor(c *ui.Context) float32 {
 	return winPad(windowW(c))
@@ -68,13 +55,13 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 
 	switch {
 	case h.Loading && !h.Loaded:
-		ui.Row(c).Key(key).Height(upBandH + upHeadLift + 80).FillWidth().Center().Children(func() {
+		ui.Row(c).Key(key).Height(upBannerH + 48 + 80).FillWidth().Center().Children(func() {
 			ui.Spinner(c).Label("正在打开这个 UP 主的空间")
 		})
 		return
 
 	case h.Err != "" && !h.Loaded:
-		ui.Column(c).Key(key).Height(upBandH + upHeadLift + 80).FillWidth().Center().Gap(space.Px10).
+		ui.Column(c).Key(key).Height(upBannerH + 48 + 80).FillWidth().Center().Gap(space.Px10).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, scale.Size16)).TextColor(pl.Text)
 			ui.Text(c, h.Err).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text2).MaxLines(3)
@@ -89,17 +76,28 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 	tint := s.tintBackground(c, h.User.Face, tok.TintUpBand)
 	ui.Column(c).Key(key).FillWidth().Children(func() {
 		// ① 头图带。
-		ui.Box(c).Key("space-band").FillWidth().Height(upBandH).Background(tint).Clip().
-			Draw(func(pp *ui.Painter, r ui.Rect) { paintGrooves(pp, r) })
+		// UP 主自己设了头图就画它（原型的假数据没有头图，是取色带；真实数据比假数据多这一样，
+		// 用户看得到的内容不丢）；没设的走原型的取色带。唱片纹两种情况都叠在上面。
+		band := ui.Box(c).Key("space-band").FillWidth().Height(upBannerH).Background(tint).Clip()
+		if h.User.Banner != "" {
+			band = band.Label(spaceBannerLabel)
+		}
+		band.Draw(func(pp *ui.Painter, r ui.Rect) { paintGrooves(pp, r) }).Children(func() {
+			if h.User.Banner != "" {
+				s.spaceFill(c, h.User.Banner, s.spaceContentWidth(c), upBannerH)
+			}
+		})
 
 		// ② 头部：往上压 48，放不下就换行（原型 `flex-wrap: wrap`，缝 24，底对齐）。
 		ui.Row(c).Key("space-head-info").FillWidth().AlignItems(ui.End).Gap(space.Px24).Wrap().
-			Padding(space.None, pad, space.None, pad).Margin(-upHeadLift, space.None, space.None, space.None).
+			Padding(space.None, pad, space.None, pad).Margin(-48, space.None, space.None, space.None).
 			Children(func() {
-				ring := upFaceS + 2*upFaceRing
-				ui.Box(c).Size(ring, ring).Radius(ring / 2).Background(pl.Bg).AlignItems(ui.Center).Justify(ui.Center).
-					Shrink(0).Children(func() {
-					pud.Avatar(c, h.User.Name, upFaceS, faceTint(sp.mid), s.upFaceDraw(h.User.Face))
+				outer := float32(upAvatarS)
+				inner := outer - 2*upAvatarRing
+				// 无障碍名字沿用头像地址（`spaceAvatar` 的老口径，无头测试靠它量头像的盒子）。
+				ui.Box(c).Size(outer, outer).Radius(outer / 2).Background(pl.Bg).AlignItems(ui.Center).Justify(ui.Center).
+					Shrink(0).Label(h.User.Face).Children(func() {
+					pud.Avatar(c, h.User.Name, inner, faceTint(sp.mid), s.upFaceDraw(h.User.Face))
 				})
 
 				// 名字 + LV，签名。
@@ -112,6 +110,13 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 								pud.Badge(c, "LV"+strconv.Itoa(h.User.Level), false)
 							}
 						})
+						// 认证说明（`official.title`）：原型没有，真实数据有，小字 text-3 放在签名下面。
+						defer func() {
+							if h.User.Official != "" && !h.Relation.Blocked() {
+								ui.Text(c, h.User.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).
+									SingleLine().Label(h.User.Official).Margin(space.Px4, space.None, space.None, space.None)
+							}
+						}()
 						if h.Relation.Blocked() {
 							ui.Text(c, "你把他拉黑了，他的内容在这儿看不到").FontSize(scale.Font(c, scale.Size14)).
 								TextColor(pl.Err).Margin(space.Px4, space.None, space.None, space.None)
@@ -191,7 +196,8 @@ func (s *Shell) viewSpaceActions(c *ui.Context, sp *upSpace, h app.SpaceHeader) 
 
 	ui.Row(c).Key("space-actions").Gap(space.Px8).AlignItems(ui.Center).Shrink(0).
 		Padding(space.None, space.None, space.Px12, space.None).Children(func() {
-		if !isSelf {
+		// 拉黑了不画关注键：按下去发出去的是取关（旧的拉黑分支只留头像和名字，同一个理由）。
+		if !isSelf && !h.Relation.Blocked() {
 			switch h.Follow(account.SelfMid, account.SelfMid != 0) {
 			case app.FollowDone:
 				// 关注是写接口：开后台，`UpSpace.Follow` 自己会叫醒界面。

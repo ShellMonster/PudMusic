@@ -93,16 +93,15 @@ const upSeriesPageSize = 20
 // 所以这里的头像比上游小（112 对 140）：上游那个头像整个骑在照片上，我们的
 // 头像有一半压在横幅上、一半落在页面底色上。
 const (
-	// upHeaderH 是头图区一共多高。
-	upHeaderH = 216
-	// upBannerH 是横幅那一条的高。
-	upBannerH = 132
-	// upAvatarS 是头像边长（外面再套一圈 3px 的页面底色环）。
+	// upBannerH 是头图带高（原型 `.up-band` 168）。
+	upBannerH = 168
+	// upAvatarS 是头像（含 4 像素 bg 色环）的外径：原型 `avatar(…,112)` + `border: 4px solid var(--bg)`，
+	// `box-sizing: border-box`，所以环算在 112 里面。
 	upAvatarS = 112
 	// upAvatarRing 是头像外那圈底色环的宽。
-	upAvatarRing = 3
-	// upAvatarTop 是头像（含环）上沿离头图区上沿的距离：压住横幅下沿 44。
-	upAvatarTop = upBannerH - 44
+	upAvatarRing = 4
+	// upAvatarTop 是头像上沿离头图带上沿的距离：头部往上压住头图带 48（`margin-top: -48px`）。
+	upAvatarTop = upBannerH - 48
 	// upPad 是 Tab 那一条的左右内边距（内容区那一圈 `p-4`）。
 	upPad = space.Px16
 	// upPadX 是头图区的左右内边距（上游 `px-8` = 32）。

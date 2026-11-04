@@ -241,8 +241,8 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring boo
 
 			// ② 正文（14 号，行高 1.7，上 8 下 16）。
 			//
-			// ⚠️ **投稿型动态的正文与稿件卡里的简介是同一句话时，正文不画**（见 `dynBodyRepeatsCard`）。
-			hasBody := d.Text != "" && !dynBodyRepeatsCard(d)
+			// 原型的嵌入卡没有简介行，所以投稿型动态用简介顶上的正文（`bili` 层的约定）照画一次。
+			hasBody := d.Text != ""
 			if hasBody {
 				ui.Text(c, d.Text).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Post).MaxLines(8).
 					Margin(space.Px8, space.None, space.Px16, space.None)
@@ -545,18 +545,15 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *app.DynamicVideoItem, author 
 				ui.Text(c, author.Name).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text2).
 					SingleLine().Ellipsis("…")
 			}
-			meta := ""
-			if v.Play != "" {
-				meta = v.Play + " 播放"
-			}
-			if v.Duration != "" {
-				if meta != "" {
-					meta += "  "
-				}
-				meta += v.Duration
-			}
-			if meta != "" {
-				typo.Mono(ui.Text(c, meta)).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).SingleLine()
+			// 原型 `.embed-stats`：读数和时长各是一段（等宽 12 号 text-3，缝 10）。
+			if v.Play != "" || v.Duration != "" {
+				ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).Children(func() {
+					for _, txt := range []string{playText(v.Play), v.Duration} {
+						if txt != "" {
+							typo.Mono(ui.Text(c, txt)).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).SingleLine()
+						}
+					}
+				})
 			}
 		})
 		if pud.RoundButton(c, "dynv-play:"+v.Bvid, pud.Primary, pud.Std, "play", "播放 "+v.Title).Clicked() {
@@ -626,4 +623,12 @@ func parseDurationText(s string) time.Duration {
 		total = total*60 + n
 	}
 	return time.Duration(total) * time.Second
+}
+
+// playText 是嵌入卡上的播放读数：有数才写「N 播放」。
+func playText(play string) string {
+	if play == "" {
+		return ""
+	}
+	return play + " 播放"
 }

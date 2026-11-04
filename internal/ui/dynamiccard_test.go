@@ -408,7 +408,7 @@ func TestLateFailedLikeDoesNotRevertTheCurrentAccount(t *testing.T) {
 	setLike(item, 12, false)
 	s, tt, a := dynamicCardShell(t, b, item)
 
-	if err := tt.Click("赞 12"); err != nil {
+	if err := tt.Click("点赞 12"); err != nil {
 		t.Fatal(err)
 	}
 	<-started
@@ -436,16 +436,16 @@ func TestLikingADynamicReallyReachesBili(t *testing.T) {
 
 	_, tt, _ := dynamicCardShell(t, b, item)
 
-	if !tt.HasText("赞 12") {
+	if !tt.HasText("点赞 12") {
 		t.Fatalf("画面上没有「赞 12」，文字有 %q", tt.Texts())
 	}
-	if err := tt.Click("赞 12"); err != nil {
+	if err := tt.Click("点赞 12"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 
 	// 还没等 B 站回话，界面已经变了。
-	if !tt.HasText("赞 13") {
+	if !tt.HasText("点赞 13") {
 		t.Errorf("按了之后赞数没变，文字有 %q", tt.Texts())
 	}
 	waitFor(t, "点赞请求到了 B 站", func() bool { return len(thumbs()) == 1 })
@@ -463,11 +463,11 @@ func TestUnlikingTakesTheCountBackDown(t *testing.T) {
 
 	_, tt, _ := dynamicCardShell(t, b, item)
 
-	if err := tt.Click("赞 12"); err != nil {
+	if err := tt.Click("点赞 12"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if !tt.HasText("赞 11") {
+	if !tt.HasText("点赞 11") {
 		t.Errorf("取消赞之后数字没减，文字有 %q", tt.Texts())
 	}
 	waitFor(t, "取消赞的请求到了 B 站", func() bool { return len(thumbs()) == 1 })
@@ -487,10 +487,10 @@ func TestAFailedLikeGoesBackToWhatItWas(t *testing.T) {
 
 	_, tt, _ := dynamicCardShell(t, b, item)
 
-	if err := tt.Click("赞 12"); err != nil {
+	if err := tt.Click("点赞 12"); err != nil {
 		t.Fatal(err)
 	}
-	waitFrames(t, tt, "赞失败之后撤回去", func() bool { return tt.HasText("赞 12") })
+	waitFrames(t, tt, "赞失败之后撤回去", func() bool { return tt.HasText("点赞 12") })
 	if !tt.HasText("赞不了") {
 		t.Errorf("失败了却一句话不说，文字有 %q", tt.Texts())
 	}

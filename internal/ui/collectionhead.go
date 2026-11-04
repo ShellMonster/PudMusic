@@ -43,18 +43,23 @@ const collectionCoverSide float32 = 232
 // 定，见 `Hue.Color`），所以混出来的色相对、明暗稳。还没取到、封面没有颜色或是空地址
 // 时就是 bg 本色（没有色块，和原型里 `tint` 缺省灰的效果接近）。
 func (s *Shell) tintBackground(c *ui.Context, cover string, mix float32) ui.Color {
+	return s.tintBackgroundOr(c, cover, mix, tintNeutral)
+}
+
+// tintNeutral 是取不到封面色时的底（原型 `tint` 缺省的 `#4a4d55`）。
+var tintNeutral = ui.Hex("#4a4d55")
+
+// tintBackgroundOr 同上，取不到色（没有封面 / 还没下回来 / 黑白封面）时用 fallback 当 tint。
+func (s *Shell) tintBackgroundOr(c *ui.Context, cover string, mix float32, fallback ui.Color) ui.Color {
 	t := c.Theme()
 	bg := tok.Of(t).Bg
-	if cover == "" {
-		return bg
-	}
-	hue, sat := s.tint.sync(cover, s.wake.invalidate)
-	if sat <= 0 {
-		return bg
-	}
-	col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(t.Dark))
-	if !ok {
-		return bg
+	col := fallback
+	if cover != "" {
+		if hue, sat := s.tint.sync(cover, s.wake.invalidate); sat > 0 {
+			if hc, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(t.Dark)); ok {
+				col = hc
+			}
+		}
 	}
 	return bg.Mix(col, mix)
 }
@@ -82,7 +87,12 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	pl := tok.Of(t)
 	info := s.app.Collection(p.ref)
 	cover := s.collectionHeaderCover(p.ref, info)
-	bg := s.tintBackground(c, cover, tok.TintCollection)
+	fallbackTint := tintNeutral
+	if info.Default && cover == "" {
+		// 「我喜欢」那张主色底 + 心的封面，头部底色用原型的 `#8a3b2b`。
+		fallbackTint = ui.Hex("#8a3b2b")
+	}
+	bg := s.tintBackgroundOr(c, cover, tok.TintCollection, fallbackTint)
 
 	// ⚠️ **色块不画在这一行上**：这一行在列表的第 0 行里，被列表的边界裁在页边距里面；
 	// 通栏的底色由页根的 `Draw` 在列表**外面**铺（`paintCollectionBand`），这里只记
