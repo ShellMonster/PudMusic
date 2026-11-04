@@ -133,8 +133,8 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 			t.Errorf("点了 %q，画面上没有这一页的空状态 %q，文字有 %q", rt.Title, rt.Empty.Title, tt.Texts())
 		}
 	}
-	if menu != 7 {
-		t.Errorf("侧栏上有 %d 项，want 7", menu)
+	if menu != 8 {
+		t.Errorf("侧栏上有 %d 项，want 8", menu)
 	}
 }
 

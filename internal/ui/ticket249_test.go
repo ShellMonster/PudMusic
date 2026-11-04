@@ -95,51 +95,6 @@ func drawerShell(t *testing.T, preset app.Accent, dark bool) *harness {
 	return h
 }
 
-// TestTheTopBarIconKeysTurnAccentOnHover 钉住顶栏那四枚「悬停时图形变主色」。
-//
-// 四枚是「打开文件」「迷你」「动态」「登录」（已登录时是「退出登录」）。
-//
-// ⚠️ **判据是「画面上有没有主色像素」**：没悬停时一个都不许有，悬停之后必须有
-// （图形 18 见方 / 16 见方，核心像素是实打实的主色）。
-//
-// ⚠️ **两套都要跑**：`ink.AccentOn` 浅色下是主色压深的那一档（默认主色下算出来
-// 是 #9e502b），深色下就是主色本身——两个不同的数，只跑一套的话另一半的算法
-// 没被验过。
-func TestTheTopBarIconKeysTurnAccentOnHover(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := navBarShell(t, app.DefaultAccent, dark)
-			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
-
-			for _, label := range []string{"打开文件", "迷你", "动态"} {
-				btn, ok := tt.Find(label)
-				if !ok || btn.W == 0 {
-					t.Fatalf("顶栏上找不到 %q，文字有 %q", label, tt.Texts())
-				}
-				// 指针先离开：那时候画面上一个主色像素都不该有。
-				tt.Move(600, 400)
-				tt.Frame()
-				if n := nearPixels(tt.Image(), btn, want); n != 0 {
-					t.Errorf("%s 没悬停的时候画面上已经有 %d 个主色像素——"+
-						"它平时是前景色的（上游是 `text-inherit`）", label, n)
-				}
-				// 指针落到这一枚上。
-				tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
-				tt.Frame()
-				if n := nearPixels(tt.Image(), btn, want); n < 4 {
-					t.Errorf("%s 悬停之后画面上只有 %d 个主色像素（want ≥ 4）——"+
-						"图形没有变主色（上游是 `hover:text-primary`：图形本身换色，"+
-						"不只是底下多一层淡底）", label, n)
-				}
-			}
-		})
-	}
-}
-
 // TestTheQueueDrawerHeaderKeysTurnAccentOnHover 钉住队列抽屉头那两枚。
 //
 // 「定位当前播放」和「清空」。理由和顶栏那四枚一样：**打开这个抽屉的那一枚**
@@ -379,50 +334,6 @@ func TestTheNewMusicPagerTurnsAccentOnHover(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestTheTopBarKeysKeepTheirTipsAndNames 钉住「提示文案和点击行为一个字没改」。
-//
-// 这一票把顶栏那四枚换成了另一档配方（`iconButton` → `iconKey`）——**换控件
-// 最容易丢的就是提示和名字**：提示是用户唯一能问出「这一枚是干什么的」的地方，
-// 而无障碍名字是读屏唯一能念出来的。
-//
-// 判据两样：
-//
-//   - **提示**：指针落到那一枚上，那句话要**一字不差**地出现在画面上；
-//   - **点击**：按了它，那件事还得发生（「动态」换页、「登录」进登录页）。
-//
-// ⚠️ **「打开文件」和「迷你」不按**：前一个会弹**真的系统文件框**（无头环境里
-// 那是个真窗口，还可能把人拦在桌前），后一个要事件循环才有窗（`ensureMiniWindow`
-// 走的是 `mygo.App.WhenReady`）。这两枚的「点了还是原来那件事」由**提示文案**
-// 加上代码里那一句 `Clicked()` 兜着——换的是按钮的配方，不是那一行。
-func TestTheTopBarKeysKeepTheirTipsAndNames(t *testing.T) {
-	s, tt := navBarShell(t, app.DefaultAccent, false)
-
-	for _, want := range []struct{ key, tip string }{
-		{"迷你", "迷你播放器"},
-		{"动态", "动态"},
-	} {
-		btn, ok := tt.Find(want.key)
-		if !ok || btn.W == 0 {
-			t.Fatalf("顶栏上找不到 %q，文字有 %q", want.key, tt.Texts())
-		}
-		tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
-		tt.Frame()
-		if !tt.HasText(want.tip) {
-			t.Errorf("%s 的提示不是 %q（画面上的字：%q）", want.key, want.tip, tt.Texts())
-		}
-	}
-
-	// 点击：换页那两枚。
-	if err := tt.Click("动态"); err != nil {
-		t.Fatalf("点不了「动态」：%v", err)
-	}
-	tt.Frame()
-	if got := s.router.Path(); got != dynamicFeedPath {
-		t.Errorf("按了「动态」之后的路由是 %q，want %q", got, dynamicFeedPath)
-	}
-
 }
 
 // TestTheFullPlayerRowKeepsItsOwnRecipe 钉住**满屏播放器那一行没被这一票改到**。

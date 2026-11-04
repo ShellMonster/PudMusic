@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"testing"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -20,77 +21,6 @@ import (
 // 走的是框架的 `ui.TextInput`——**有 1px 描边，聚焦时描边变主色**。
 //
 // **同一个动作两种反应**：所以这一票不是「给顶栏加一圈环」，是「照那一档来」。
-
-// TestTheTopBarSearchBoxFocusesLikeTheOtherSearchBox 钉验收第 2 条：
-// 顶栏那个搜索框的焦点指示**和同应用另一个搜索框是同一档**。
-//
-// 判据是**画面上的像素**：两枚都聚焦，量各自描边那一像素——**同一个动作
-// （把焦点放进搜索框）必须是同一种反应**。
-//
-// ⚠️ **「另一个搜索框」量的是框架的 `ui.TextInput`**：收藏夹 / 本地音乐那枚
-// 可展开的搜索（`searchbutton.go`）和歌词搜索框（`lyricssearch.go`）都是它，
-// 而框架给它画焦点环的口径是 `inputBorder`（`mygo@v0.7.3/ui/form.go:274-282`）：
-// **有焦点 → `t.Accent`**。
-//
-// ⚠️ **深浅两套都量**：描边那一档跟着主题走，而浅色下主色和底色的差比深色下小。
-func TestTheTopBarSearchBoxFocusesLikeTheOtherSearchBox(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := newShell(t, systemIsDark(dark))
-			tt.SetFocused(true)
-			tt.Move(900, 500)
-			tt.Frame()
-			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-
-			// ① 顶栏那一枚：点进去（点完把指针挪开，免得量到的是悬停那一档）。
-			if err := tt.Click(searchLabel); err != nil {
-				t.Fatalf("点不到搜索框：%v", err)
-			}
-			tt.Move(900, 500)
-			tt.Frame()
-			r, ok := tt.Find(searchLabel)
-			if !ok {
-				t.Fatalf("顶栏上没有搜索框，文字有 %q", tt.Texts())
-			}
-			mid := int(r.Y + r.H/2)
-			// 描边在框里那个采样点的左边一像素（框架的 `Border` 是「盒子里那条线」）。
-			borderX := int(r.X) - (searchPadX + iconMd + searchGap) - 1
-			got := tt.Image().RGBAAt(clampX(tt.Image(), borderX), mid)
-
-			// ② 框架那一枚：同一个主题、同一个控件。
-			//
-			// ⚠️ **摆在离左边 20 的地方**：描边是「盒子里那条线」，而输入框自己的
-			// 盒子从 20 开始——量 x=19 量到的是框外的留白。
-			var text string
-			other := ui.NewTester(func(c *ui.Context) {
-				c.SetTheme(th)
-				ui.Row(c).Padding(20, 20).Children(func() {
-					ui.TextInput(c, &text).Label("别的搜索框").Width(240).Height(searchHeight).
-						AutoFocus()
-				})
-			}, 600, 200)
-			other.Frame()
-			other.Frame()
-			otherGot := other.Image().RGBAAt(20, 20+int(searchHeight)/2)
-
-			// 两枚的描边得是**同一个颜色**：都是主色。
-			if d := maxDiff(got, rgb(th.Accent)); d > 10 {
-				t.Errorf("顶栏那个搜索框聚焦时的描边是 %v，want 主色 %v（差 %d）", got, th.Accent, d)
-			}
-			if d := maxDiff(otherGot, rgb(th.Accent)); d > 10 {
-				t.Errorf("框架那一枚输入框聚焦时的描边是 %v，want 主色 %v（差 %d）", otherGot, th.Accent, d)
-			}
-			if d := maxDiff(got, otherGot); d > 10 {
-				t.Errorf("顶栏那个搜索框的描边 %v 和框架那一枚 %v 不是同一个颜色（差 %d）——"+
-					"同一个动作两种反应", got, otherGot, d)
-			}
-		})
-	}
-}
 
 // TestTheTopBarSearchBoxHasAVisibleFocusRing 钉验收第 1 条：**聚焦时有一圈看得见
 // 的指示**（浅色主题也要看得见）。
@@ -118,15 +48,15 @@ func TestTheTopBarSearchBoxHasAVisibleFocusRing(t *testing.T) {
 				t.Fatalf("顶栏上没有搜索框，文字有 %q", tt.Texts())
 			}
 			mid := int(r.Y + r.H/2)
-			borderX := clampX(tt.Image(), int(r.X)-(searchPadX+iconMd+searchGap)-1)
+			borderX := clampX(tt.Image(), int(r.X)-(searchPadX+int(tok.IconSm)+searchGap)-1)
 
 			// ① 静止那一档：描边是主题的描边色（半透明，压在框里那层底上）。
 			//
 			// ⚠️ **底色要合成两层**：框里那层灰自己也是半透明的（20% 的灰压在
 			// 顶栏底色上），描边压的是**合成之后**的那一层。
 			idle := tt.Image().RGBAAt(borderX, mid)
-			fill := over(searchFieldBg(th, false), th.Background)
-			wantIdle := overRGBA(th.Border, fill)
+			// 原型 `.search-box`：静止时描边透明，露出里面的 surface-2 底。
+			wantIdle := rgb(tok.Of(th).Surface2)
 			if d := maxDiff(idle, wantIdle); d > 8 {
 				t.Errorf("静止时搜索框的描边是 %v，want %v（主题的描边色压在底色上）", idle, wantIdle)
 			}
@@ -138,8 +68,9 @@ func TestTheTopBarSearchBoxHasAVisibleFocusRing(t *testing.T) {
 			tt.Move(900, 500)
 			tt.Frame()
 			focused := tt.Image().RGBAAt(borderX, mid)
-			if d := maxDiff(focused, rgb(th.Accent)); d > 10 {
-				t.Errorf("聚焦时搜索框的描边是 %v，want 主色 %v（差 %d）", focused, th.Accent, d)
+			// 原型：聚焦时描边 `line-strong`、底换 `surface`。
+			if d := maxDiff(focused, rgb(tok.Of(th).LineStrong)); d > 10 {
+				t.Errorf("聚焦时搜索框的描边是 %v，want line-strong %v（差 %d）", focused, tok.Of(th).LineStrong, d)
 			}
 			// ③ 两档要**分得开**：不然这一圈线就白画了。
 			if d := maxDiff(focused, idle); d < 8 {

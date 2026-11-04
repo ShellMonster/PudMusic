@@ -9,6 +9,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/testproc"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -177,7 +178,7 @@ func TestSettingsPageSaysSoWhenAChangeCannotBeStored(t *testing.T) {
 	b := newTestShell(t, onApp(a))
 	tt := b.tt
 	tt.Frame()
-	openAppearance(t, tt)
+	openAppearance(t, tt, b.s)
 
 	// ⚠️ 皮肤页的卡是滚动的：「深色」那一张默认在窗口底边之外（见
 	// `appearanceRect` 的注释），裸 `tt.Click` 会点在窗外。
@@ -220,7 +221,7 @@ func TestSettingsPageRefusesToWriteAFileFromANewerVersion(t *testing.T) {
 	tt.Frame()
 	// 皮肤页上先验只读横幅 + 「浅色」改不动；再回设置页点「直接退出」——
 	// 只读是整份文件的性质，两页都验一遍才算「每一项都改不了」。
-	openAppearance(t, tt)
+	openAppearance(t, tt, s)
 	if !tt.HasText("设置只读") {
 		t.Errorf("皮肤页上没有说清为什么改不了，文字有 %q", tt.Texts())
 	}
@@ -294,7 +295,7 @@ func pageChildRoundTrip(t *testing.T) {
 	tt.Frame()
 
 	if mode == "write" {
-		openAppearance(t, tt)
+		openAppearance(t, tt, s)
 		if r := appearanceRect(t, tt, s, "深色"); true {
 			tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 			tt.Frame()
@@ -391,9 +392,13 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 // 一个死数」——`MaxWidth` 是上限，可视区多窄它就多窄，最小窗口（900 - 侧栏
 // 200 = 700）上照抄一个固定 900 会把右边推出去。
 func TestTheSettingsContentIsCappedAndCentered(t *testing.T) {
-	const sideW = int(app.DefaultSideMenuWidth) // 默认侧栏宽
 
 	for _, winW := range []int{1200, 1400, 1000} {
+		// 侧栏固定 232，窗口宽 ≤ 1024 时收起成 72。
+		sideW := int(tok.SideW)
+		if float32(winW) <= tok.AutoCollapseBelow {
+			sideW = int(tok.SideCollapsedW)
+		}
 		tt, sh, _, _ := shellOnSettings(t, app.DefaultSettings(""), at(winW, 800))
 		homeFrame(tt)
 

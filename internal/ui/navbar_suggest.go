@@ -36,12 +36,15 @@
 package ui
 
 import (
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -255,49 +258,56 @@ func (s *Shell) suggestSearching() bool {
 	return !s.terms.pendingSince.IsZero()
 }
 
-// viewSuggestHeading 画一档的标题行：一枚小图标 + 标题字，右边可选再摆点东西
-// （历史那一档摆「清空全部」）。三档共用，于是三行长得一样——两栏是平级的，
-// 谁也不比谁大：图标 `iconSm`、次要色；标题 14/400（上游历史标题是 `text-sm`，
-// **不许加粗**，靠字号和下面那排内容分开，不靠字重）。
-//
-// 2026-11 重设计照参考图给每一档加的图标：历史是一只钟、联想是一枚放大镜、
-// 「大家在听」是一个音符。
-func viewSuggestHeading(c *ui.Context, key, name, title string, trailing func()) {
-	t := c.Theme()
-	ui.Row(c).Key(key).FillWidth().Gap(space.Px8).AlignItems(ui.Center).
-		Padding(suggestHeadingPadTop, suggestHeadingPadRight, suggestHeadingPadBottom, suggestHeadingPadLeft).
+// viewSuggestHeading 是面板里一段的小标题（原型 `.suggest h4`：12 / 500 / text-3，
+// 外边距 4/8/8/8），右边可挂一个操作。
+func viewSuggestHeading(c *ui.Context, key, title string, trailing func()) {
+	p := tok.Of(c.Theme())
+	ui.Row(c).Key(key).FillWidth().AlignItems(ui.Center).
+		Padding(space.Px4, space.Px8, space.Px8, space.Px8).
 		Children(func() {
-			ui.Icon(c, icon(name)).FontSize(iconSm).TextColor(t.TextMuted)
-			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).Grow(1)
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size12)).FontWeight(500).
+				TextColor(p.Text3).SingleLine().Grow(1)
 			if trailing != nil {
 				trailing()
 			}
 		})
 }
 
-// viewSuggestTerms 画浮层里那一档「搜索联想」。
-//
-// ⚠️ **一个都没有、也没失败，就不摆**（调用方也判一次）：那一档空着的时候浮层上
-// 只有历史那一档，而历史那一档永远在——「联想这一栏空着」和「这一趟没拉到」在
-// 画面上必须分得开（`suggestFailedNote` 的注释）。
-//
-// ⚠️ **拉回来的那一刻不摆任何「正在找…」**：用户是在一个字一个字地打，联想是
-// 一闪一闪补上来的，中间摆一句「正在搜…」比不给还吵——他自己知道在等什么。
-// idx 是这一档在 `nav.items` 里的起始下标（历史在前、联想在后、「大家在听」最后），
-// `viewSuggestTerm` 拿它逐条递增后比 `nav.sel`。
+// viewSuggestSubmitRow 是输入了字之后的第一行（原型：放大镜 + 「搜索「xxx」」 + ↵ 键帽）。
+// 它不进上下键的候选序列：回车本来就是提交输入框里的字。
+func (s *Shell) viewSuggestSubmitRow(c *ui.Context) {
+	kw := strings.TrimSpace(s.searchKeyword)
+	if kw == "" {
+		return
+	}
+	p := tok.Of(c.Theme())
+	label := "搜索「" + kw + "」"
+	row := ui.ButtonBase(c).Key("suggest-submit").Label(label).FillWidth().Radius(tok.R8).
+		Padding(space.Px8).Gap(space.Px12).AlignItems(ui.Center)
+	if row.Hovered() {
+		row = row.Background(p.Hover)
+	}
+	row.Children(func() {
+		ui.Icon(c, pud.Icon("search")).FontSize(tok.IconSm).TextColor(p.Text)
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).Grow(1).MaxLines(1).Ellipsis("…")
+		pud.Kbd(c, "↵")
+	})
+	if row.Clicked() {
+		s.submitSearch(kw)
+	}
+}
+
+// viewSuggestTerms 是联想词那一段。
 func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool, idx *int) {
 	if len(items) == 0 && !failed {
 		return
 	}
-	t := c.Theme()
-	ui.Column(c).Key(suggestTermsKey).FillWidth().Gap(space.Px2).Children(func() {
-		viewSuggestHeading(c, suggestTermsHeadingKey, iconSearch, suggestTermsHeading, nil)
+	p := tok.Of(c.Theme())
+	ui.Column(c).Key(suggestTermsKey).FillWidth().Children(func() {
+		viewSuggestHeading(c, suggestTermsHeadingKey, suggestTermsHeading, nil)
 		if len(items) == 0 {
-			// 失败：这一档说一句自己的话（理由见 suggestFailedNote）。
-			//
-			// ⚠️ **淡灰、12 号**：它是一句说明，不是警报。变红会让「联想词没取到」
-			// 看着像出了大事，而它多半只是这一趟没回来。
-			ui.Text(c, suggestFailedNote).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+			ui.Text(c, suggestFailedNote).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
+				Padding(space.None, space.Px8, space.Px8, space.Px8)
 			return
 		}
 		for _, term := range items {
@@ -307,76 +317,69 @@ func (s *Shell) viewSuggestTerms(c *ui.Context, items []string, failed bool, idx
 	})
 }
 
-// viewSuggestHot 画框里还没敲字时的「大家在听」那一档：热榜前几首的歌名，点一个就搜。
+// viewSuggestHot 是「热门搜索」一段：序号（等宽 13，前三名 accent-text）+ 词。
+// 原型右边的「N 首」是假数据，B 站热搜没有这个数，不画。
 func (s *Shell) viewSuggestHot(c *ui.Context, titles []string, idx *int) {
-	ui.Column(c).Key(suggestHotKey).FillWidth().Gap(space.Px2).Children(func() {
-		viewSuggestHeading(c, suggestHotHeadingKey, iconEmptyMusic, suggestHotHeading, nil)
-		for _, title := range titles {
-			s.viewSuggestTerm(c, title, *idx)
+	ui.Column(c).Key(suggestHotKey).FillWidth().Children(func() {
+		viewSuggestHeading(c, suggestHotHeadingKey, suggestHotHeading, nil)
+		for rank, title := range titles {
+			s.viewSuggestHotRow(c, title, *idx, rank)
 			*idx++
 		}
 	})
 }
 
-// viewSuggestTerm 是浮层里的一条联想词：整行都是它。
-//
-// ⚠️ **不能是 chip**：chip 是历史那一档的形状，而两栏长得一样的话「哪个是我搜过
-// 的、哪个是 B 站给的」这件事就没有答案了（规格第二条）。所以这里是**一整行**、
-// 左对齐、没有边框、悬停才显出底色——和那排带边框、带 × 的 chip 一眼能分开。
-//
-// 每一行左边一枚放大镜（2026-11 重设计照参考图）：它是「这是一个可以去搜的词」
-// 的图形提示，和顶栏那枚是同一个图标、次要色。
-//
-// ⚠️ **命中的那几个字染主色**（`suggestHitColor`）：十行全是同一种灰，用户得逐行
-// 读完才知道哪条对得上自己敲的那几个字。
-//
-// Label 不只是给测试用的：读屏软件念出来的是这一条词，而正文（Children 里那个
-// Text）不念。
-func (s *Shell) viewSuggestTerm(c *ui.Context, term string, idx int) {
-	t := c.Theme()
-	row := ui.ButtonBase(c).Label(term).
-		FillWidth().Radius(t.Radius).
-		Padding(suggestTermPadY, suggestTermPadX).
-		Gap(space.Px8).AlignItems(ui.Center)
-	// 两种「亮起来」：
-	//   - 悬停（指针扫过去）——原来就有；
-	//   - 键盘选中（方向键刚挪到这一条，`navPicked(idx)`）——和悬停同一片底。
-	//
-	// 同一片 `SurfaceHover`：选中态不是新颜色，用户从「指针扫过会亮」已经知道
-	// 这一片亮是「这一条是焦点」。方向键挪到这一条时 `reveal` 把它滚到看得见。
-	//
-	// ⚠️ **按下标比、不是按词**：历史和联想里可能有同名的词（「周杰伦」在历史里
-	// 是一条、在联想里也是一条），按词比两条一起亮——屏上两个区块各亮一条，
-	// 用户看不出哪一条才是「这一条」。
+// suggestRow 是联想行的壳（原型 `.sug-row`：内边距 8、缝 12、圆角 8，悬停 / 选中 `hover` 底）。
+func (s *Shell) suggestRow(c *ui.Context, term string, idx int) ui.Element {
+	p := tok.Of(c.Theme())
+	row := ui.ButtonBase(c).Label(term).FillWidth().Radius(tok.R8).
+		Padding(space.Px8).Gap(space.Px12).AlignItems(ui.Center)
 	picked := s.navPicked(idx)
 	if row.Hovered() || picked {
-		row = row.Background(t.SurfaceHover)
+		row = row.Background(p.Hover)
 	}
 	if picked && s.nav.reveal {
 		row.ScrollIntoView()
 	}
+	return row
+}
+
+func (s *Shell) viewSuggestHotRow(c *ui.Context, title string, idx, rank int) {
+	p := tok.Of(c.Theme())
+	row := s.suggestRow(c, title, idx)
 	row.Children(func() {
-		ui.Icon(c, icon(iconSearch)).FontSize(iconSm).TextColor(t.TextMuted)
-		// ⚠️ **三段：前缀 / 命中段 / 后缀**。命中段是**自己算的**（拿用户已经
-		// 敲的词在 `term` 里找）——B 站回包里的 `name` 带 `<em>` 标签，而**服务层
-		// 取的是干净的 `term`**（那个判断是对的：拿带标签的 `name` 去搜，等于把
-		// `<em>` 当关键词发出去，真会搜错）。
+		col := p.Text3
+		if rank < 3 {
+			col = p.AccentText
+		}
+		typo.Mono(ui.Text(c, strconv.Itoa(rank+1))).FontSize(scale.Font(c, scale.Size13)).
+			TextColor(col).Width(20).Shrink(0).TextAlign(ui.Center)
+		ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).Grow(1).MaxLines(1).Ellipsis("…")
+	})
+	if row.Clicked() {
+		s.searchKeyword = title
+		s.submitSearch(title)
+	}
+}
+
+// viewSuggestTerm 是一条联想词：放大镜 + 词（命中的字 accent-text）。
+func (s *Shell) viewSuggestTerm(c *ui.Context, term string, idx int) {
+	p := tok.Of(c.Theme())
+	row := s.suggestRow(c, term, idx)
+	row.Children(func() {
+		ui.Icon(c, pud.Icon("search")).FontSize(tok.IconSm).TextColor(p.Text3)
 		pre, hit, post := splitSuggestion(s.searchKeyword, term)
+		size := scale.Font(c, scale.Size14)
 		if hit == "" {
-			// 找不到命中段（用户敲的词这一条里没有）：整行一个颜色，和原来一样。
-			ui.Text(c, term).FontSize(scale.Font(c, scale.Size13)).Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Text(c, term).FontSize(size).Grow(1).MaxLines(1).Ellipsis("…")
 			return
 		}
 		ui.Row(c).Grow(1).Children(func() {
-			ui.Text(c, pre).FontSize(scale.Font(c, scale.Size13)).Shrink(0)
-			ui.Text(c, hit).FontSize(scale.Font(c, scale.Size13)).Shrink(0).TextColor(suggestHitColor(t))
-			ui.Text(c, post).FontSize(scale.Font(c, scale.Size13)).Grow(1).MaxLines(1).Ellipsis("…")
+			ui.Text(c, pre).FontSize(size).Shrink(0)
+			ui.Text(c, hit).FontSize(size).Shrink(0).TextColor(suggestHitColor(c.Theme()))
+			ui.Text(c, post).FontSize(size).Grow(1).MaxLines(1).Ellipsis("…")
 		})
 	})
-
-	// ⚠️ **先把词填回框里**（和历史那一条同一件事，见 `viewHistoryChip` 的注释）：
-	// 不填的话用户点完之后框里还是原来敲的半截字，而页面那边搜的是这一条——
-	// 按返回再回来会看到那个错的词。
 	if row.Clicked() {
 		s.searchKeyword = term
 		s.submitSearch(term)
@@ -435,5 +438,5 @@ func splitSuggestion(typed, term string) (pre, hit, post string) {
 // 旧口径是上游写死的粉 `#F54180`（`src/app.css` 的 `.suggest_high_light`），浅色下
 // 还得压暗一档才过 AA——一个不随主题走的颜色，用户换了主色它还是粉的，已废。
 func suggestHitColor(t *ui.Theme) ui.Color {
-	return ink.AccentOn(t)
+	return tok.Of(t).AccentText
 }

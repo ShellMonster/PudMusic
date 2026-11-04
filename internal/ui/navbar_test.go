@@ -220,7 +220,7 @@ func TestTheTopBarDoesNotReserveRoomForTheWindowControls(t *testing.T) {
 // 这是「整条都是拖动区」真正会出事的地方：命中链上最内层带输入标志的元素才是
 // 目标（`ui/input.go:302`），拖动区做得不对，按钮就按不动了。
 func TestNavBarControlsStillWorkInsideTheDragArea(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 	tt.SetFocused(true)
 
 	if err := tt.Click(navBackLabel); err != nil {
@@ -565,57 +565,44 @@ func TestAnEmptySearchGoesBackToTheIdleState(t *testing.T) {
 //
 // ⚠️ **顺序仍然是 Biu 的顺序**：藏掉的那几项不改变其余各项的相对次序。
 func TestAvatarMenuHasBiuSixItems(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mid  string
-		want []string
-	}{
-		{
-			name: "未登录",
-			mid:  "",
-			want: []string{"登录", "设置", "刷新数据", "问题反馈"},
-		},
-		{
-			name: "已登录",
-			mid:  "2",
-			want: []string{"个人资料", "设置", "刷新数据", "问题反馈", "退出登录"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			var (
-				s  *Shell
-				tt *mygoui.Tester
-			)
-			if tc.mid == "" {
-				s, tt = newShell(t)
-			} else {
-				s, tt = newLoggedInShell(t, tc.mid)
-			}
-			tt.SetFocused(true)
+	// 原型：登录后下拉是「听歌统计 / 设置 / 退出登录」，外加我们保留的「刷新数据」；
+	// 未登录时顶栏右边是一枚「登录」键，不是头像，也就没有下拉。
+	s, tt := newLoggedInShell(t, "2")
+	tt.SetFocused(true)
+	openAvatarMenu(t, tt)
+	want := []string{"听歌统计", "设置", "刷新数据", "退出登录"}
+	items := s.avatarMenuItemsNow()
+	if len(items) != len(want) {
+		t.Fatalf("头像下拉有 %d 项，want %d 项 %q", len(items), len(want), want)
+	}
+	for i, w := range want {
+		if items[i].label != w {
+			t.Errorf("第 %d 项是 %q，want %q", i+1, items[i].label, w)
+		}
+	}
+	// ⚠️ **而且它不是系统菜单**。
+	if m := tt.Menu(); len(m) != 0 {
+		t.Errorf("头像点开之后弹的是系统菜单 %q——要的是自绘浮层", m)
+	}
+}
 
-			openAvatarMenu(t, tt)
-			got := avatarMenuLabels(tt)
-			if len(got) != len(tc.want) {
-				t.Fatalf("头像下拉有 %d 项 %q，want %d 项 %q", len(got), got, len(tc.want), tc.want)
-			}
-			for i, w := range tc.want {
-				if got[i] != w {
-					t.Errorf("第 %d 项是 %q，want %q（整个是 %q）", i+1, got[i], w, got)
-				}
-			}
-			// ⚠️ **而且它不是系统菜单**：系统菜单是系统外观，跟设计规范不搭，
-			// 而换掉它就是这一票要办的事。
-			if m := tt.Menu(); len(m) != 0 {
-				t.Errorf("头像点开之后弹的是系统菜单 %q——这一票要的是自绘浮层", m)
-			}
-			_ = s
-		})
+// TestTheGuestTopBarHasALoginButtonInsteadOfAnAvatar 验未登录时顶栏右边是主色「登录」键，
+// 点了进扫码登录页（原型 `renderTop` 的 `go-login`）。
+func TestTheGuestTopBarHasALoginButtonInsteadOfAnAvatar(t *testing.T) {
+	s, tt := newShell(t)
+	tt.SetFocused(true)
+	if err := tt.Click("登录"); err != nil {
+		t.Fatalf("顶栏上点不到「登录」：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+	if got := s.router.Path(); got != loginPath {
+		t.Errorf("点了「登录」之后在 %q，want %q", got, loginPath)
 	}
 }
 
 // TestAvatarMenuGoesToItsRoute 验菜单项接到了对应的路由。
 func TestAvatarMenuGoesToItsRoute(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "2")
 	tt.SetFocused(true)
 
 	openAvatarMenu(t, tt)
@@ -623,69 +610,10 @@ func TestAvatarMenuGoesToItsRoute(t *testing.T) {
 	if got := s.router.Path(); got != settingsPath {
 		t.Errorf("选了「设置」之后在 %q，want %q", got, settingsPath)
 	}
-
-	// 「登录」接的是扫码登录页。
 	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, s, tt, "登录")
-	if got := s.router.Path(); got != loginPath {
-		t.Errorf("选了「登录」之后在 %q，want %q", got, loginPath)
-	}
-}
-
-// TestAvatarMenuProfileUsesTheLoggedInMid 验「个人资料」认的是登录态里那个 mid。
-//
-// 这一条钉的是「登录态的来源只有 app」：头像这一层不存第二份，mid 一律现去问
-// `app.Session()`。存两份的后果是退登之后头像还显示着上一个人的样子，而界面上
-// 没有任何一个地方会提示「没退干净」。
-func TestAvatarMenuProfileUsesTheLoggedInMid(t *testing.T) {
-	s, tt := newLoggedInShell(t, "2")
-	tt.SetFocused(true)
-
-	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, s, tt, "个人资料")
-	if got := s.router.Path(); got != "/user/2" {
-		t.Errorf("选了「个人资料」之后在 %q，want /user/2", got)
-	}
-}
-
-// TestAvatarMenuWithoutALoginSaysSo 验没登录时**画出来的那些项**说清楚，
-// 而不是带用户走进 404。
-//
-// ⚠️ **Biu 那两条是按登录态隐藏掉的，我们现在也照它隐藏**（票 #260，上游
-// `user/index.tsx:88-158` 的 `hidden` 那一栏）：「个人资料」和「退出登录」
-// 在没登录时**压根不画**，于是它们不会「说一句」——它们不在那儿。
-//
-// ⚠️ **而「刷新数据」两项都在**：它没登录也说得出「还没登录，登录之后才能
-// 刷新收藏夹」（那一句在应用层说的，见 `app/favorites_refresh.go`）。
-func TestAvatarMenuWithoutALoginSaysSo(t *testing.T) {
-	s, tt := newShell(t)
-	tt.SetFocused(true)
-
-	// ⚠️ **先钉住「那两项不画」**：这是这一票改的那件事。
-	openAvatarMenu(t, tt)
-	for _, hidden := range []string{"个人资料", "退出登录"} {
-		for _, label := range avatarMenuLabels(tt) {
-			if label == hidden {
-				t.Errorf("没登录时头像下拉里画着%q——上游那两项是按登录态藏起来的", hidden)
-			}
-		}
-	}
-
-	for _, item := range []string{"刷新数据"} {
-		s.clearToasts()
-		// ⚠️ **不要再 `openAvatarMenu` 一次**：浮层已经开着，而那一句是**再点
-		// 一下头像**——于是它把浮层关掉了，后面那一下就点了个空处。
-		clickAvatarMenuItem(t, s, tt, item)
-		if got := toastTexts(s.visibleToasts()); len(got) != 1 {
-			t.Fatalf("选了 %q 之后有 %d 条提示 %q，want 1 条", item, len(got), got)
-		}
-		if got := s.router.Path(); got != "/" {
-			t.Errorf("选了 %q 之后却切到了 %q", item, got)
-		}
-		// ⚠️ **而且没有弹确认框**：没登录就没有可退的。
-		if tt.HasText("确认退出登录？") {
-			t.Errorf("没登录时选了 %q 也弹了确认框", item)
-		}
+	clickAvatarMenuItem(t, s, tt, "听歌统计")
+	if got := s.router.Path(); got != statsPath {
+		t.Errorf("选了「听歌统计」之后在 %q，want %q", got, statsPath)
 	}
 }
 
@@ -717,25 +645,13 @@ func TestAvatarMenuLogoutActuallyLogsOut(t *testing.T) {
 	}
 }
 
-// TestAvatarMenuOpensTheIssuePage 验「问题反馈」把地址交给系统。
-func TestAvatarMenuOpensTheIssuePage(t *testing.T) {
-	s, tt := newShell(t)
-	tt.SetFocused(true)
-
-	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, s, tt, "问题反馈")
-	if got := tt.OpenedURLs(); len(got) != 1 || got[0] != feedbackURL {
-		t.Errorf("「问题反馈」打开的是 %q，want [%s]", got, feedbackURL)
-	}
-}
-
 // TestDynamicDotPollsEveryFiveMinutes 用**假时钟**验那 5 分钟的节奏。
 //
 // ⚠️ 这里不能 `time.Sleep` 等真的 5 分钟——SPEC 的 Testing Decisions 把假时钟
 // 列成每一阶段都要留下的回归证据之一。假表在 navbar_feed.go 的
 // `feedPoller.now` 上换。
 func TestDynamicDotPollsEveryFiveMinutes(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 	tt.SetFocused(true)
 
 	clock := fakeClockOn(s, fakeClockStart)
@@ -834,7 +750,7 @@ func TestTheRedDotIsArmedWhileTheWindowIsUp(t *testing.T) {
 
 // TestDynamicDotShowsAndClears 验有更新时红点出来，点进去就清掉。
 func TestDynamicDotShowsAndClears(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "7")
 	tt.SetFocused(true)
 
 	fakeClockOn(s, fakeClockStart)
@@ -1320,15 +1236,15 @@ func TestTheTopBarKeepsItsOtherEntries(t *testing.T) {
 // ⚠️ **侧栏那一条要认得出是侧栏的**：整窗上「设置」这两个字可能出现在好几个
 // 地方，所以这里断的是**位置**——侧栏那一列在左边 200 像素之内。
 func TestTheSettingsIsStillReachableFromTheSidebarAndTheAvatar(t *testing.T) {
-	_, tt := newShell(t)
+	_, tt := newLoggedInShell(t, "7")
 	tt.SetFocused(true)
 
 	r, ok := tt.Find("设置")
 	if !ok {
 		t.Fatalf("画面上找不到「设置」，文字有 %q——设置进不去了", tt.Texts())
 	}
-	if r.X >= 200 {
-		t.Errorf("那个「设置」在 x=%.0f，不在侧栏那一列（200 宽）里——"+
+	if r.X >= 232 {
+		t.Errorf("那个「设置」在 x=%.0f，不在侧栏那一列（232 宽）里——"+
 			"顶栏那一枚拿掉之后，侧栏那一条得还在", r.X)
 	}
 
@@ -1375,7 +1291,7 @@ func TestTheSettingsIsStillReachableFromTheSidebarAndTheAvatar(t *testing.T) {
 func TestTheNavArrowsAreBiuSizedAndUnbordered(t *testing.T) {
 	// 上游那一枚的尺寸：**写死**，不拿常量当判据（常量一改断言跟着改，等于没
 	// 断言）。32×40 是逐像素量出来的，见上面那段。
-	const wantW, wantH = 32, 40
+	const wantW, wantH = 36, 36
 
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -1391,7 +1307,7 @@ func TestTheNavArrowsAreBiuSizedAndUnbordered(t *testing.T) {
 					t.Fatalf("顶栏上没有 %q，文字有 %q", label, tt.Texts())
 				}
 				if r.W != wantW || r.H != wantH {
-					t.Errorf("%q 那一枚是 %.0f×%.0f，want %d×%d（上游那枚是 32×40，"+
+					t.Errorf("%q 那一枚是 %.0f×%.0f，want %d×%d（原型 `.icon-btn` 36×36，"+
 						"无描边）", label, r.W, r.H, wantW, wantH)
 				}
 				// 最左边那一列 vs 紧挨着里面那一列。

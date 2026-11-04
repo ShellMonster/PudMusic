@@ -11,12 +11,12 @@ import (
 // 一整块搬来的（深浅模式 + 强调色 + 封面取色 + 字体 + 背景清晰度；主题方案、
 // 自定义颜色、圆角 2026-11 随「深夜唱片行」删掉，见 DESIGN.md §0′）。
 
-// openAppearance 从顶栏那枚 palette 图标进皮肤页。走的是用户真的走的那条路。
-func openAppearance(t *testing.T, tt *mygoui.Tester) {
+// openAppearance 进皮肤页。顶栏上的皮肤入口按原型删掉了（T6 会把这一页并进设置的
+// 「外观」Tab），这里直接导航。
+func openAppearance(t *testing.T, tt *mygoui.Tester, s *Shell) {
 	t.Helper()
-	if err := tt.Click("皮肤"); err != nil {
-		t.Fatalf("顶栏上点不到「皮肤」：%v，文字有 %q", err, tt.Texts())
-	}
+	s.navigate(appearancePath)
+	tt.Frame()
 	settlePage(t, tt, "深浅模式") // 等切页动画停，皮肤页认「深浅模式」那一组
 	if !tt.HasText("深浅模式") {
 		t.Fatalf("切到皮肤页了但没画出内容，文字有 %q", tt.Texts())
@@ -29,7 +29,7 @@ func shellOnAppearance(t *testing.T, s app.Settings, opts ...shellOpt) (*mygoui.
 	b := newTestShell(t, append([]shellOpt{withSettings(s)}, opts...)...)
 	tt := b.tt
 	tt.Frame()
-	openAppearance(t, tt)
+	openAppearance(t, tt, b.s)
 	return tt, b.s, b.a, b.settingsPath
 }
 
@@ -40,14 +40,6 @@ func TestTheAppearancePageHasTheWholeThemeBlock(t *testing.T) {
 		if !tt.HasText(want) {
 			t.Errorf("皮肤页上没有 %q，文字有 %q", want, tt.Texts())
 		}
-	}
-}
-
-// TestTheAppearanceButtonIsInTheNavbar 验顶栏那枚 palette 键在、能按。
-func TestTheAppearanceButtonIsInTheNavbar(t *testing.T) {
-	_, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	if got := s.router.Path(); got != appearancePath {
-		t.Fatalf("按顶栏那一枚之后路由是 %q，want %q", got, appearancePath)
 	}
 }
 

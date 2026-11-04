@@ -35,23 +35,6 @@ func TestTheLoggedInTopBarHasNoStandaloneLogoutButton(t *testing.T) {
 	}
 }
 
-// TestTheGuestTopBarHasNoSeparateLoginKey 钉住「**未登录**时顶栏右端只有头像，没有
-// 另一枚二维码登录键」。
-//
-// 用户 2026-10-25：「右上角登录的直接就那个 icon 就行，不需要旁边的扫码」。登录入口
-// 是头像下拉里那一项「登录」（照上游）。
-func TestTheGuestTopBarHasNoSeparateLoginKey(t *testing.T) {
-	_, tt := newShell(t)
-	tt.Frame()
-
-	if _, ok := tt.Find("登录"); ok {
-		t.Errorf("没登录时顶栏上还有一枚独立的「登录」键，文字有 %q", tt.Texts())
-	}
-	if _, ok := tt.Find(avatarLabel); !ok {
-		t.Errorf("顶栏上没有头像，文字有 %q", tt.Texts())
-	}
-}
-
 // TestTheAvatarHitAreaCoversTheCircleItDraws 钉住「头像那一格的**命中区**
 // 装得下它画出来的那一枚圆」。
 //
