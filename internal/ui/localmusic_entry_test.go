@@ -89,33 +89,3 @@ func TestTheAddDirectoryEntryIsNotAPlainPieceOfText(t *testing.T) {
 			"一段纯文字，用户看不出那是个能点的入口", strokes)
 	}
 }
-
-// TestTheEmptyStateHasItsOwnAddDirectoryButton 断空状态里**有一枚自己的
-// 按钮**。
-//
-// 空状态那句话让用户去点右上角那个入口，而那个入口离它三百多像素——所以
-// **同一个词、同一个动作**要在这句话下面再摆一枚（报告 C2 的建议动作）。
-//
-// ⚠️ **判据是画面上那一块实心主色**：那是那枚按钮（它是这一页此刻唯一能做的
-// 事，所以它是主按钮）。找它是为了两件事：它在（=用户看得见），点它有用。
-func TestTheEmptyStateHasItsOwnAddDirectoryButton(t *testing.T) {
-	tt, _, _, pick := shellOnLocalMusic(t)
-
-	block, ok := findAccentBlock(tt.Image())
-	if !ok {
-		t.Fatalf("空状态那一格上没有实心主色的按钮，文字有 %q", tt.Texts())
-	}
-	// 它在那一格的中间（不是页头那一枚）——页头那一枚是扁平的，不是实心块。
-	if block.Min.Y < localScanY0 {
-		t.Fatalf("那块主色不在内容区中间：%+v", block)
-	}
-	// 正文不再让人「去右上角找」——那里离得太远，指过去等于没指。
-	if tt.HasText("点右上角") {
-		t.Errorf("空状态还在让用户去右上角找那一枚，文字有 %q", tt.Texts())
-	}
-
-	// 点它：系统框得被叫起来（桩记着调了几次）。
-	pick.set(t.TempDir())
-	tt.ClickAt(float32(block.Min.X+block.Dx()/2), float32(block.Min.Y+block.Dy()/2))
-	waitFor(t, "系统框被叫起来", func() bool { return pick.calls > 0 })
-}

@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/download"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -122,90 +121,6 @@ func statusOf(r download.Snapshot, t *ui.Theme) statusCell {
 	}
 }
 
-// viewStatus 画「状态」那一格：三段。
-//
-// 上游 `progress.tsx:38-65` 是一个 `flex flex-col` 的两层：上面进度条，下面一
-// 个 `justify-between` 的行，左边状态文字、右边百分比。这里的结构照它，所以
-// 「三段」在一列里是竖着摞的，不是横着排的。
-func (d *downloadsPage) viewStatus(c *ui.Context, r download.Snapshot) {
-	cell := statusOf(r, c.Theme())
-
-	// 上游的 waiting / completed 两支没有条也没有百分比：一个只有一句话的
-	// 居中块。这里让它**顶格靠左**：一列里所有格子左对齐，「等待中」和
-	// 「下载完成」才在同一处，读起来是一列而不是两列。
-	//
-	// ⚠️ **「完成」那一支前面还有一枚对勾**（上游 `progress.tsx:17-25`）：
-	// 一枚绿勾 +「下载完成」，两样都是成功色。
-	//
-	// ⚠️ **那枚对勾用主题里那一个成功色，那几个字用「当字色」的那一档**
-	// （票 #241 / 报告 F-22）：图标是**图形**（3:1 即可），字是**正文**（4.5:1），
-	// 而上游那个 `#17c964` 当字色只有 2.19:1。理由见 `internal/ui/semantic.go`。
-	if cell.done {
-		ui.Row(c).Gap(dlDoneGap).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, icon(iconChecked)).FontSize(dlDoneIconSize).TextColor(c.Theme().Success)
-			ui.Text(c, cell.text).FontSize(scale.Font(c, scale.Size13)).TextColor(cell.c).MaxLines(2)
-		})
-		return
-	}
-	if !cell.showBar {
-		ui.Text(c, cell.text).FontSize(scale.Font(c, scale.Size13)).TextColor(cell.c).MaxLines(2)
-		return
-	}
-
-	// ⚠️ **出错那一支是另一套排法**（票 #241 / 报告 F-19）：错误原因**独占一行、
-	// 整宽**，而百分比上到条那一行去。
-	//
-	// 原来错误原因和百分比**并排**（「这一条流有多…」那一截就是这么没的）：状态列
-	// 150 宽，扣掉单元格左右各 10 的内边距是 130；再扣掉百分比那一档 40 和中间
-	// 那道 8 的缝，错误原因只剩 **82**——12px 下每行六个字，「服务器不肯说这一条
-	// 流有多长」这 13 个字折两行还多两个字，于是画面上只剩「这一条流有多…」。
-	// **截掉的是信息本身**，而这一句是用户唯一能知道「哪儿坏了」的地方。
-	//
-	// 现在这一句拿整宽（130）：12px 下每行十个字，13 个字折成两行（十 + 三），
-	// 整句都在。
-	if cell.danger {
-		ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
-			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				// 条在这一行里**让出百分比那一档**（`Grow(1)` 而不是 `FillWidth`）：
-				// 两样挤在一行，条就短一截，而短的那一截是「下载到哪儿了」。
-				statusBar(c, cell.bar, c.Theme().Danger).Grow(1)
-				if cell.showPct {
-					dlPercent(c, r)
-				}
-			})
-			// 三行是留给更长的原因的兜底：这一句**通常**两行就够（13 个字），
-			// 而省略号只在它真的超过三行时才出现。
-			ui.Text(c, cell.text).FillWidth().FontSize(scale.Font(c, scale.Size12)).TextColor(cell.c).
-				MaxLines(3).Ellipsis("…")
-		})
-		return
-	}
-
-	ui.Column(c).FillWidth().Gap(space.Px4).Children(func() {
-		statusBar(c, cell.bar, ui.Hex(dlBarColor)).FillWidth()
-		ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-			// ⚠️ **12 和省略号都照原样**（这一支是「下载中 / 下载暂停 / 交织中」
-			// 那几句短的，省略号实际上不出现）——这一票只动**出错**那一支的排法，
-			// 不顺手改这里的字号。
-			ui.Text(c, cell.text).Grow(1).FontSize(scale.Font(c, scale.Size12)).TextColor(cell.c).
-				MaxLines(2).Ellipsis("…")
-			if cell.showPct {
-				dlPercent(c, r)
-			}
-		})
-	})
-}
-
-// dlPercent 是状态列里那个百分比。
-//
-// 定宽 + 靠右：Biu 用的是 tabular-nums 那一列，不定宽的话 9% 和 100% 两帧之间
-// 整个右边会跳一下。
-func dlPercent(c *ui.Context, r download.Snapshot) ui.Element {
-	return ui.Text(c, strconv.Itoa(r.Percent)+"%").Width(dlPctW).
-		TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(c.Theme().TextMuted).
-		MaxLines(1)
-}
-
 // dlPctW 是百分比那一段的宽度。
 //
 // 40 是按「100%」在 12px 下约 26 加一点余量挑的，而它是从**状态列**里扣的
@@ -236,29 +151,6 @@ const (
 // ⚠️ 深浅两套是**同一个值**：这一条是「这一格是蓝的」而不是「这一格比底色
 // 亮一点」，深色下它照样是 `#3b82f6`。
 const dlBarColor = "#3b82f6"
-
-// statusBar 画一条进度条，填充色是给定的那一个。
-//
-// ⚠️ MyGo 的 `Progress` 把填充色**写死**成建它那一刻主题的 Accent
-// （mygo/ui/widgets.go 的 `coreProgress` 里 `p.Fill(…, t.Accent, …)`），元素
-// 上没有换色的方法。所以「这一条要涂蓝 / 涂红」只能在这里临时把主题的 Accent
-// 换成那个颜色建这一条控件，**建完立刻换回来**。
-//
-// 后半句是这一段能安全存在的前提：`SetTheme` 只影响**它之后创建**的控件
-// （铁律二，见 theme.go），所以这一条之后的任何东西都还是原来的颜色。忘了
-// 换回来，那一帧剩下的整个页面就都是蓝的了——而那种错不报错、不崩溃。
-//
-// ⚠️ **宽度由调用方给**（`FillWidth()` / `Grow(1)`）：出错那一支的条要和百分比
-// 并排（`Grow(1)` 让出那一档），别的分支的条是整宽的——所以这里不写死。
-func statusBar(c *ui.Context, value float64, color ui.Color) ui.Element {
-	orig := c.Theme()
-	themed := *orig
-	themed.Accent = color
-	c.SetTheme(&themed)
-	e := ui.Progress(c, value)
-	c.SetTheme(orig)
-	return e
-}
 
 // fileSize 把字节数写成大小。0（还没探到长度）是上游那个 `-`。
 //

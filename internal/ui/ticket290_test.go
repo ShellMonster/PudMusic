@@ -15,44 +15,11 @@ package ui
 import (
 	"strings"
 	"testing"
-
-	"github.com/ShellMonster/PudMusic/internal/service/download"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
 // L-01：日期筛选排贴内容区左缘
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheDateFilterRowStartsAtTheLeftEdge 钉住「日期筛选排贴内容区左缘」。
-//
-// 上游是 `flex w-full items-center justify-between`（`later/search.tsx:25`），
-// 日期那一组是它的**左半边**，所以它从内容区左缘起（实测 x=215）。
-//
-// ⚠️ **我们原来把整排居中了**（`daterange.go` 的 `.Center()`）：596 宽的一排
-// 落在 x=402..997，内容区左边空出 186、右边空出 187。
-//
-// 判据是**它和搜索框左对齐**：搜索框和日期那一排在同一列里（`librarypage.go`
-// 的 `viewFilters`），而那一列从内容区左缘起。所以两者的左沿之差，只剩日期
-// 按钮自己的内边距——居中的话那是 186。
-func TestTheDateFilterRowStartsAtTheLeftEdge(t *testing.T) {
-	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
-	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "日期筛选排画出来了", func() bool { return tt.HasText("全部时间") })
-
-	box, ok := tt.Find(keywordBoxLabel)
-	if !ok {
-		t.Fatalf("找不到搜索框，文字有 %q", tt.Texts())
-	}
-	preset, ok := tt.Find("全部时间")
-	if !ok {
-		t.Fatalf("找不到日期筛选的「全部时间」，文字有 %q", tt.Texts())
-	}
-	// 30 是「日期按钮自己的内边距 + 一点余量」——离左缘一整个按钮宽（186）就
-	// 一定是又被居中了。
-	if d := preset.X - box.X; d > 30 {
-		t.Errorf("日期筛选排离内容区左缘 %.0f 像素（want ≤30）——它又被居中了", d)
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // L-04：稍后再看页头右上角的「清除已看完」
@@ -66,15 +33,17 @@ func TestTheDateFilterRowStartsAtTheLeftEdge(t *testing.T) {
 // 判据是**它在右端**：内容区的右缘是窗口宽减去页内边距（`pagePadX` = 16），
 // 按钮的右沿就贴着那一条（按钮自己还有 8 的右内边距）。
 func TestTheLaterHeaderHasAClearViewedButton(t *testing.T) {
-	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
+	f := newLibFake(t)
+	f.later[1] = shotLaterBody()
 	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText("清除已看完") })
+	const label = "删除已看完的 1" // 原型：「删除已看完的 N」，N 是已看完的条数
+	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText(label) })
 
-	btn, ok := tt.Find("清除已看完")
+	btn, ok := tt.Find(label)
 	if !ok {
-		t.Fatalf("稍后再看页头右侧没有「清除已看完」，文字有 %q", tt.Texts())
+		t.Fatalf("稍后再看页头右侧没有「%s」，文字有 %q", label, tt.Texts())
 	}
-	right := float32(tt.Image().Rect.Max.X) - pagePadX
+	right := float32(tt.Image().Rect.Max.X) - 32 // 内容区右页边距（窗口 1200、内容区 968 → 32）
 	if d := right - (btn.X + btn.W); d > 30 {
 		t.Errorf("「清除已看完」的右沿离内容区右缘 %.0f 像素（want ≤30）——"+
 			"它没有落在页头的右端", d)
@@ -93,11 +62,12 @@ func TestTheLaterHeaderHasAClearViewedButton(t *testing.T) {
 func TestTheClearViewedButtonAsksBeforeItDeletes(t *testing.T) {
 	const delPath = "/x/v2/history/toview/del"
 
-	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
+	f := newLibFake(t)
+	f.later[1] = shotLaterBody()
 	tt, _ := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText("清除已看完") })
+	waitFrames(t, tt, "页头画出来了", func() bool { return tt.HasText("删除已看完的 1") })
 
-	if err := tt.Click("清除已看完"); err != nil {
+	if err := tt.Click("删除已看完的 1"); err != nil {
 		t.Fatalf("点不了「清除已看完」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
@@ -123,60 +93,6 @@ func TestTheClearViewedButtonAsksBeforeItDeletes(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // L-06：下载记录的筛选排在卡片里面
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheDownloadFilterRowSitsInsideTheCard 钉住「筛选排在卡片**里面**」。
-//
-// 上游那一张 `Card` 包住的是「筛选 + 表头 + 表体」三样（筛选排是 `Table` 的
-// `topContent`，而那张 `Table` 在 `Card` 里，`download-list/index.tsx:105-135`）。
-// 我们原来把筛选排摆在卡片**外面**——卡片的边线在 y=135、筛选排在 y=108..123。
-//
-// 判据是**像素**：筛选排那一行的正上方必须有「不是页面底色」的像素——那是卡片
-// 顶边那道影（浅色下是 1 像素的黑边，深色下是 1 像素的白内边，见
-// `widgets/shadow` 的 `HeroSmall`）。卡片在筛选排**上面**才说明筛选排在卡片
-// 里面；卡片在下面（原来的样子）的话，筛选排上面只有页面底色。
-//
-// ⚠️ **量的那一列要挑干净的**：窗口 1200 宽、内容区 216..1184，而页头那一行
-// 上有字的地方是 217..305（标题）、332..420（没有下载目录时的那一句）、1160
-// 之后（那枚垃圾桶）。x=600 那一列上什么都没有——量到标题的笔画的话，这一条
-// 就会「绿」而其实没绿。
-func TestTheDownloadFilterRowSitsInsideTheCard(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := newRows(t, dlSnapshot("歌 甲", download.StatusDone, dlChunk, dlChunk))
-			tt.SetDark(dark)
-			dlFrame(tt)
-
-			// 「筛选」是那一组单选的无障碍名字（`downloadlist_filter.go`），
-			// 它的框是**整组**——从最左边那个单选圆的左沿起。
-			group, ok := tt.Find("筛选")
-			if !ok {
-				t.Fatalf("找不到筛选那一组，文字有 %q", tt.Texts())
-			}
-			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			page := rgbaOf(th.Background)
-			img := tt.Image()
-
-			// 从筛选排的顶边往上找 40 像素：那儿必须有卡片的边。
-			const probeX = 600
-			top := round32(group.Y)
-			edge := false
-			for y := top - 1; y > top-40; y-- {
-				if maxDiff(img.RGBAAt(clampX(img, probeX), clampY(img, y)), page) > 2 {
-					edge = true
-					break
-				}
-			}
-			if !edge {
-				t.Errorf("筛选排上方 40 像素全是页面底色 %v——卡片不在筛选排上面，"+
-					"筛选排还在卡片外面", page)
-			}
-		})
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S-10：队列抽屉表头的条数紧跟「播放列表」

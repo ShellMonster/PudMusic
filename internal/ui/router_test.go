@@ -198,11 +198,12 @@ func TestEveryRouteHasItsOwnPage(t *testing.T) {
 		if s.router.Path() != "/根本没有这一页" {
 			t.Fatalf("没停在不存在的路径上（在 %q）", s.router.Path())
 		}
-		if !tt.HasText("没有「/根本没有这一页」这一页") {
-			t.Errorf("404 没有说清楚是哪条路径不存在，文字有 %q", tt.Texts())
+		// 原型的 404：「这一页走丢了」+ 一枚「回到推荐音乐」（没有路径、没有倒计时）。
+		if !tt.HasText("这一页走丢了") {
+			t.Errorf("404 没有画出「这一页走丢了」，文字有 %q", tt.Texts())
 		}
-		if !tt.HasText("秒后回到主页...") {
-			t.Errorf("404 没有说要回首页，文字有 %q", tt.Texts())
+		if !tt.HasText("回到推荐音乐") {
+			t.Errorf("404 没有「回到推荐音乐」，文字有 %q", tt.Texts())
 		}
 	})
 }
@@ -292,7 +293,7 @@ func TestUnknownRouteShowsThe404Page(t *testing.T) {
 	if !tt.HasText("页面不存在") {
 		t.Errorf("没有落到 404 页，文字有 %q", tt.Texts())
 	}
-	if !tt.HasText("没有「/根本没有这一页」这一页") {
+	if !tt.HasText("这一页走丢了") {
 		t.Errorf("404 没有说清楚，文字有 %q", tt.Texts())
 	}
 }

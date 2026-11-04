@@ -188,50 +188,44 @@ func TestTheBackToTopButtonHasAShadow(t *testing.T) {
 		})
 	}
 }
-
-// TestTheDownloadTableHasAShadow 钉住**下载表**外面那张卡的影。
-//
-// 上游是 `<Card radius="md" shadow="sm">`（`pages/download-list/index.tsx:105`）。
-//
-// ⚠️ **卡片要有一张底**：上游那张卡是 `bg-content1` + 影，而影是**盒子外面**那一圈
-// ——没有底的话那一圈影画在一块透明的东西上，画面上只是「一圈淡淡的灰」。
-func TestTheDownloadTableHasAShadow(t *testing.T) {
+func TestTheDownloadRowsAreSeparatedByALine(t *testing.T) {
+	// 原型 `.drow { border-bottom: 1px solid var(--line) }`：下载记录没有卡片，也没有影，
+	// 行与行之间靠一条实色 `line` 分层——深浅两套都一样（`TestTheDownloadTableHasAShadow`
+	// 钉的旧设计「卡片 + 影」随 DESIGN.md §0′.T7 移除，深色那条 Skip 也在这里按新判据改写）。
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
+		want := mygoui.Hex("#E0E1E3")
 		if dark {
 			name = "深色"
+			want = mygoui.Hex("#26282D")
 		}
 		t.Run(name, func(t *testing.T) {
-			if dark {
-				// 「深夜唱片行」深色 --bg 是 #0E0F11，HeroUI 那一档 20%~22% 的黑影压上去
-				// 一个色阶都量不出来；原型这一处没有影（靠 --line 描边分层），由 T7（下载页）
-				// 重做时换掉这一条。浅色那一档照旧钉着。
-				t.Skip("深色下原型不用影分层，见上面的注释")
+			s, tt := newShell(t, systemIsDark(dark))
+			s.downloads.rowsFn = func() []download.Snapshot {
+				return []download.Snapshot{dlSnapshot("第一首", download.StatusDone, 100, 100)}
 			}
-			rows := []download.Snapshot{dlSnapshot("第一首", download.StatusDone, 100, 100)}
-			s, _ := newRows(t, rows...)
-			tt := newTestShell(t, at(shadowW, shadowH), systemIsDark(dark),
-				withView(func(sh *Shell) func(*mygoui.Context) {
-					return func(c *mygoui.Context) {
-						sh.wake.set(c)
-						sh.applyFrameTheme(c)
-						uiBox(c).FillWidth().FillHeight().
-							Background(c.Theme().Background).
-							Padding(60, 60, 60, 60).Children(func() {
-							sh.downloads.sync(sh.downloads.rowsFn())
-							sh.downloads.viewTable(c, sh)
-						})
-					}
-				})).tt
-			tt.Frame()
-
+			s.navigate(downloadListPath)
+			for i := 0; i < 5; i++ {
+				tt.Frame()
+			}
+			r, ok := tt.Find("第一首")
+			if !ok {
+				t.Fatalf("没画出第一行，文字有 %q", tt.Texts())
+			}
+			// 行高 48 + 上下各 12 = 72，分隔线在行的最后 1 像素；在标题下面 80 像素内、
+			// 一条横穿整行的线上扫一遍。
 			img := tt.Image()
-			// 卡片是 Grow(1) 的，占满留白之后那一块——左缘就在留白的边上。
-			assertShadow(t, img,
-				mygoui.Rect{X: 50, Y: 200, W: 10, H: 20},
-				mygoui.Rect{X: 20, Y: 200, W: 10, H: 20},
-				map[bool]int{false: 2, true: 1}[dark], "下载表那张卡")
-			_ = s
+			x := int(r.X) + 20
+			found := false
+			for y := int(r.Y); y < int(r.Y)+80; y++ {
+				if img.RGBAAt(x, y) == rgb(want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("标题下面没有 line 色（%v）的分隔线", want)
+			}
 		})
 	}
 }

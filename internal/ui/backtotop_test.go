@@ -40,15 +40,7 @@ func TestTheLocalMusicPageHasABackToTop(t *testing.T) {
 		libSong(t, root, "第 "+strconv.Itoa(i+1)+" 首.mp3")
 	}
 	tt, _, _, _ := shellOnLocalMusic(t, root)
-
-	// 默认是**表格**那一档（`localStyleTable` = 0，见 `localmusic.go`）。
-	checkBackToTop(t, tt, "表格")
-
-	// 切到**歌曲**那一档：再走一遍。
-	if err := tt.Click(localStyles[localStyleSong]); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
+	// 原型样式之后只有一档（曲目行列表；表格那一档随旧设计删了）。
 	checkBackToTop(t, tt, "歌曲")
 }
 
@@ -129,58 +121,6 @@ func TestTheFollowPageHasABackToTop(t *testing.T) {
 		tt.Scroll(followScrollX, followScrollY, 0, 800)
 		return tt.HasText(backTopLabel)
 	})
-}
-
-// TestTheTableRowHeightsAreWhatTheOffsetsAssume 钉住那两张表格的行高，就是回顶
-// 按钮换算像素时用的那两个数。
-//
-// ⚠️ **它们是换算出来的，不是量出来的**：`ui.Table` 的行是它**内部那个滚动容器**
-// 滚的，而那个容器的像素偏移框架没露出来（`TrackScroll` 挂在表格那一格上挂不到
-// 它），所以那两页的「滚过了多少」只能从「顶上那一行是第几行」换算。
-//
-// 换了行高（改了封面的大小、改了操作那一列的字号）而忘了改这两个数，按钮就会早
-// 一点或晚一点出现——那正是「400 像素」这个数被悄悄改掉的样子。
-//
-// ⚠️ **留 1 像素的余量**：行高是浮点排版的结果（那一行里最高的是操作那一列的
-// 键，而键的高度是字号的行高倍数），逐位相等不是「对」的证据。
-func TestTheTableRowHeightsAreWhatTheOffsetsAssume(t *testing.T) {
-	// 下载记录那一页：行高 = 封面 + 表格那一行的上下内边距。
-	rows := make([]download.Snapshot, 0, 6)
-	for i := range 6 {
-		rows = append(rows, dlSnapshot("第 "+strconv.Itoa(i+1)+" 首", download.StatusDone, 100, 100))
-	}
-	_, tt := newRows(t, rows...)
-	a, ok := tt.Find("第 1 首")
-	if !ok {
-		t.Fatalf("画面上找不到第一行，文字有 %q", tt.Texts())
-	}
-	b, ok := tt.Find("第 2 首")
-	if !ok {
-		t.Fatalf("画面上找不到第二行，文字有 %q", tt.Texts())
-	}
-	if got := b.Y - a.Y; got < dlRowPx-1 || got > dlRowPx+1 {
-		t.Errorf("下载记录那一页的行距是 %v，回顶按钮换算用的是 %v——差了就说明那两页的"+
-			"「滚过了多少」算错了", got, dlRowPx)
-	}
-
-	// 本地音乐那一页：行高 = 操作那一列的键 + 表格那一行的上下内边距。
-	root := t.TempDir()
-	for i := range 6 {
-		libSong(t, root, "第 "+strconv.Itoa(i+1)+" 首.mp3")
-	}
-	ttLocal, _, _, _ := shellOnLocalMusic(t, root)
-	la, ok := ttLocal.Find("第 1 首")
-	if !ok {
-		t.Fatalf("画面上找不到第一行，文字有 %q", ttLocal.Texts())
-	}
-	lb, ok := ttLocal.Find("第 2 首")
-	if !ok {
-		t.Fatalf("画面上找不到第二行，文字有 %q", ttLocal.Texts())
-	}
-	if got := lb.Y - la.Y; got < localTableRowPx-1 || got > localTableRowPx+1 {
-		t.Errorf("本地音乐那一页的行距是 %v，回顶按钮换算用的是 %v——差了就说明那一页的"+
-			"「滚过了多少」算错了", got, localTableRowPx)
-	}
 }
 
 // TestTheSettingsPageHasABackToTop 钉住**设置**有那一枚。

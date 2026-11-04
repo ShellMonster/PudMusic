@@ -29,8 +29,11 @@
 package ui
 
 import (
+	"strconv"
+
 	"context"
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -242,34 +245,39 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 	}
 
 	p := &s.laterPage
-	now := s.clock.Now()
 
-	ui.Column(c).Key("page:"+laterPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
-		Children(func() {
-			s.viewLaterHeader(c)
-
-			// 换查询的位置在**画列表之前**：Reload 会把已加载的行清掉，放在后面
-			// 的话这一帧画的是清掉之前的样子，用户会先看到一屏旧的、再变成空、
-			// 再变成新的。筛选和搜索框为什么分两行，见 `viewFilters`。
-			if p.viewFilters(c, now) || p.keywordChanged(now, p.submitted) {
-				p.apply()
+	s.pudPage(c, "page:"+laterPath, func(winW, listW float32) {
+		rows := p.rows.Rows()
+		done := 0
+		for _, m := range rows {
+			if libraryDone(m) {
+				done++
 			}
-
-			// 表头**只在列表 / 紧凑两档**摆：网格里一格是一首歌，表头上那几列
-			// 和格子对不上号（理由见 `rowheader.go` 文件头）。
-			//
-			// ⚠️ **摆法（列表 / 紧凑 / 网格）在 `syncLibraryPage` 那一层装**：它每一帧
-			// 都要跟着设置里那个「数据显示样式」换，而满屏开着的时候这一页不画
-			// （票 #161）——不挪的话，用户在满屏里改完设置回来，这一页还是旧的那一档。
-			// 两个时间列放不放得下由 `laterTimeCols` 说，行那一处读的是同一个
-			// 判据（见 drawLaterRow）。
-			viewLibraryHeader(c, p.rows, func(mt listMetrics, key string) list.HeaderSpec {
-				pubDate, addTime := laterTimeCols(p.rows)
-				return laterHeaderSpec(mt, key, pubDate, addTime)
-			}, laterHeaderKey)
-			p.rows.View(c)
-			s.noteScrollbar(p.rows.Hot())
+		}
+		pud.PageHead(c, "Watch later", "稍后再看", "先存下来，等有空的时候再听。", winW, func() {
+			if len(rows) == 0 {
+				return
+			}
+			if pud.Button(c, "later:play-all", pud.Primary, pud.Std, "播放全部", "play").Clicked() {
+				p.rows.playFrom(0)
+			}
+			// ⚠️ **按下不直接清**：那是一次不可恢复的批量删除（B 站那边没有撤销），
+			// 所以先弹一道确认（`viewLaterClearConfirm`）。
+			if pud.Button(c, "later:clean", pud.Ghost, pud.Std, "删除已看完的 "+strconv.Itoa(done), "check").
+				Disabled(done == 0).Clicked() {
+				s.laterClearOpen = true
+			}
 		})
+
+		// 换查询不在这里（原型这一页没有筛选条，条件永远是「不筛」）：Reload 由
+		// `syncLibraryPage` 那一层和删除 / 清除之后的重拉负责。
+		ui.Box(c).Height(space.Px8)
+		if !p.rows.isGrid() {
+			pud.TrackHead(c, p.rows.width)
+		}
+		p.rows.View(c)
+		s.noteScrollbar(p.rows.Hot())
+	})
 
 	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里放它
 	// 的话面板会跟着页面走位（和下载记录那一页同一件事，见 `downloadlist.go`）。
@@ -372,71 +380,12 @@ func (s *Shell) syncLater(c *ui.Context) {
 // （上游那一行是 `truncate`），这一行由 48 的封面撑着。折行的话整张列表的行高就
 // 跟着歌名长短跳，一屏能看几首歌会变来变去。
 func (s *Shell) drawLaterRow(c *ui.Context, r ui.ListRow) ui.Element {
-	t := c.Theme()
-	rows := s.laterPage.rows
-	m := rows.Rows()[r.Index]
-	playing := rows.isPlaying(m)
-	// 紧凑档只是这一行的几处尺寸变矮（设置里的「数据显示样式」）。
-	mt := metricsOf(rows.Layout())
-	face := libraryRowFace(t, playing)
-
-	// ⚠️ **hover 要在 Children 之前问**（同 `widgets/list/card.go` 里那一处）：它报的
-	// 是这一帧指针在不在这一行上，而封面上那圈反馈要等 Children 才建得出来。
-	//
-	// ⚠️ **行高定死**（`mt.height`）：歌名只占一行（上游那一行是 `truncate`），
-	// 这一行由 48 的封面撑着——写死是为了让这个数**保证**是它，而不是「碰巧量出来
-	// 是它」（理由同 `widgets/list/card.go` 的文件头）。
-	row := ui.Row(c).Key("later-row:"+m.ID).AlignSelf(ui.Stretch).Gap(mt.gap).
-		Padding(mt.padY, mt.padX).Height(mt.height)
-	onRow := row.Hovered()
-
-	// 选中那一行：盖掉框架那一块实心主色底，键盘走到它上面时给它一圈焦点环
-	//（理由见 `widgets/list/selection.go`）。
-	//
-	// ⚠️ **环的条件是「列表有键盘焦点」且「上一次输入是键盘」**：鼠标点过之后
-	// 方向键挪了游标，那一行也得有指示（框架那个 `focusVisible` 方向键不会设回来）。
-	row = list.SelectedRow(row, t, r.Selected(), onRow,
-		rows.keys.On() && list.Focused(c, &rows.state))
-
-	return row.Children(func() {
-		viewLibraryRowHead(c, r, m, rows, s.images, mt, face, onRow,
-			func() { rows.playFrom(r.Index) })
-
-		// ⚠️ **播放量是记好的那一份**（`rows.countText`）：现算的话每帧每行一次
-		// 字符串格式化（票 #313）。
-		ui.Text(c, rows.countText.At(r.Index, m.View, playCountText)).Width(mt.count).
-			TextAlign(ui.End).
-			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-		// 两个时间列放不放得下由 `laterTimeCols` 说（表头那一处读的是同一个
-		// 判据）：窄窗口先收「投稿时间」，连基线都放不下时再收「加入时间」。
-		pubDate, addTime := laterTimeCols(rows)
-		if addTime {
-			ui.Text(c, dayText(m.ViewedAt)).Width(mt.date).TextAlign(ui.End).
-				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-		}
-		// 投稿时间：上游这一页画的就是 `pubdate`（本文件头第一条）。
-		//
-		// ⚠️ **它和「加入时间」不是同一个时间**：筛选器筛的是 `add_at`，
-		// 而「哪首是哪天发的」问的是 `pubdate`。
-		if pubDate {
-			ui.Text(c, list.PubTimeText(m.PubTime, s.now())).Width(mt.pubDate).
-				TextAlign(ui.End).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-		}
-		// ⚠️ **时长是记好的那一份**（`rows.durText`）：理由同上面那一处。
-		ui.Text(c, rows.durText.At(r.Index, m.Duration, clockText)).Width(mt.clock).
-			TextAlign(ui.End).
-			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-
-		// 行尾那枚「⋯」。点开的是**这一行的菜单**，和右键同一份（`rows.menu`
-		// 就是右键那一条挂上去的那个函数）。
-		//
-		// ⚠️ **表头照它留了同样宽的空位**（`widgets/list` 的 `Header` 末尾那一个），
-		// 两边一样宽表头和行才对得上。
-		ui.Box(c).Width(list.OperationColWidth).Children(func() {
-			// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同上面那两处。
-			list.Operation(c, rows.opText.At(r.Index, m.Title, list.OperationLabel), face.title,
-				func(m *ui.Menu) { rows.menu(m, r.Index) })
-		})
+	return s.drawLibraryPudRow(c, r, s.laterPage.rows, libraryRowSpec{
+		key:     "later-row:",
+		colText: laterColText,
+		remove: func(i int) {
+			s.laterPage.rows.Remove(i, s.app.LibraryOf().RemoveLater)
+		},
 	})
 }
 

@@ -23,6 +23,8 @@ type Shown struct {
 	Owner string
 	// Live 是「这是现场版」。
 	Live bool
+	// Extra 是从标题方括号里挪出来的歌手 / 专辑名（没有就是空）。
+	Extra string
 }
 
 // ShowOf 清洗一首歌的显示字。
@@ -35,7 +37,7 @@ func ShowOf(m Music) Shown {
 	case c.Extra != "":
 		owner = c.Extra
 	}
-	return Shown{Title: c.Title, Owner: owner, Live: c.Live}
+	return Shown{Title: c.Title, Owner: owner, Live: c.Live, Extra: c.Extra}
 }
 
 // liveTagRadius 是「现场」小标签的圆角：刻意不跟主题圆角走（标签是个小胶囊，

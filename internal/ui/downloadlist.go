@@ -46,17 +46,13 @@
 package ui
 
 import (
-	"fmt"
-	"log"
-	"runtime/debug"
-
 	"github.com/ShellMonster/PudMusic/internal/service/download"
-	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -67,102 +63,16 @@ import (
 // 理由）。
 const downloadListPath = "/download-list"
 
-// 五个列的次序。`downloadColumns` 和 `viewCell` 的 switch 都对着这几个数。
-const (
-	colFile = iota
-	colStatus
-	colSize
-	colTime
-	colOps
-)
-
-// 列宽。Biu 的 `TableColumn` 给的是 350 / 自适应 / 120 / 120 / 120，这里照那个
-// 意思取：文件那一列吃掉剩下的，其余四列定住，免得窗口一拖数字就跳。
-//
-// # 四个定宽是按**最窄那一档窗口**倒着算出来的，不是按 1200 那档挑的
-//
-// 这一页最难看的尺寸是窗口自己定的最窄那一档（`WindowOptions.MinWidth: 900`）：
-// 减去侧栏（约 200）和页面内边距，表格只剩约 660。而 MyGo 的 `ui.Table` 把没给
-// `Width` 的列当「吃剩下的」，四个定宽吃掉多少，文件那一列就只剩多少——
-// 定宽合计 560 时它只剩 100，而封面就占掉 48，剩下的歌名**一行放得下两个字**。
-// 那一版这里写的注释还说「再宽一点就摆不下封面 + 歌名」，而实测摆不下的是歌名
-// 本身：四行普通歌名全被折成两行、尾巴全是「…」。那是错的。
-//
-// 所以四个数是照着 660 那一条倒着配的，每一列各自的下限写在下面（单元格左右
-// 各留 10 的内边距算进去了，MyGo 的 `t.Space(2.5)`）：
-//
-//	状态     150 = 进度条 ~84 + 缝 8 + 百分比 40 + 内边距 20（少一列就先砍它）
-//	大小      76 = 「120.0 MB」在 12px 下约 52 + 内边距 20
-//	时间      88 = 「2023-11-15」在 12px 下约 66 + 内边距 20
-//	操作      90 = 两颗 32 的图标键 + 缝 6 + 内边距 20（同时最多亮两颗）
-//	合计     404 → 900 那一档文件列剩 256，装得下封面 + 歌名 + 徽章
-//
-// ⚠️ 再窄就不够了：**文件那一列另有一个下限**（`dlFileMin`），而 MyGo 的
-// `clampWidth` 只认 `TableColumn.MinWidth`（`mygo/ui/table.go`）。低于那个下限
-// 时表格横向滚动（上游那边是 `overflow-x-auto`，同一件事）——滚一下能看见歌名，
-// 永远看不见的是操作按钮那半屏。侧栏拖到最宽（`SideMenuWidth` 的上限）时就是
-// 这条路；所以取舍是「宁可滚，不把歌名压成两个字」。
-const (
-	dlStatusW = 150
-	dlSizeW   = 76
-	dlTimeW   = 88
-	// dlOpsW 是操作列的宽：两颗 `iconHit`（32）的图标键 + 缝 6 + 单元格内边距 20。
-	//
-	// ⚠️ **它跟着 `iconHit` 走**：图标键的点击区从 28 长到 32（上游那一档）之后
-	// 这一列要 90 而不是 84——**列宽不跟着长的话，这一列比它的内容窄 6 像素**
-	// （画面上看不出来：按钮在单元格里居中，多出来的那一截没有被裁掉，
-	// 但**账对不上**）。
-	dlOpsW = 90
-)
-
-// dlFileMin 是「文件」那一列的下限。
-//
-// 200 是这么来的：封面 48 + 缝 8 + 单元格内边距 20 = 76，剩下的 124 留给歌名
-// ——14px 下八个多汉字，也就是「歌名很长很长很长的一…」这种程度，而不是两个字。
-//
-// 歌名那一块下面还有一行音质徽章（「无损 FLAC」在 11px 下约 55），124 也装得下。
-const dlFileMin = 200
-
-// dlOpW 是操作列里每个图标键的边长。
-//
-// 它是 `iconHit`（14 的图标 + 每边 9）——这一列的操作现在是图标键（上游
-// `actions.tsx:164-175` 就是 `isIconOnly` 的 `AsyncButton`），不再有「两个汉字
-// 加内边距 56、再窄就画成『暂…』」那笔账。
-const dlOpW = iconHit
-
-// dlCover 是封面边长。Biu 那一行是 48（`index.tsx:164` 的 width/height）。
-const dlCover = 48
-
-// downloadColumns 是那五列。
-//
-// ⚠️ **ID 用列名**（`TableColumn.ID` 空着时 `id()` 回落成 Title）：MyGo 的
-// Table 按列的身份记状态——用户拖过的列宽、点过的排序都挂在列上（
-// `ListState.Columns`）。这里没开 `Sortable`，所以不会有排序状态，可列的身份
-// 还是要给稳的：改一次列名等于把用户拖好的列宽扔掉。
-var downloadColumns = []ui.TableColumn{
-	{Title: "文件", MinWidth: dlFileMin},
-	{Title: "状态", Width: dlStatusW},
-	{Title: "大小", Width: dlSizeW, Align: ui.Center},
-	{Title: "下载时间", Width: dlTimeW, Align: ui.Center},
-	{Title: "操作", Width: dlOpsW, Align: ui.Center},
-}
-
 // downloadsPage 是下载记录页自己那一摊状态。建一次，每一帧调 view。
 //
 // 和 widgets/list 的 `List` 同一个道理：**建一次存着**：`ui.ListState` 记着滚动
 // 位置，新建的等于每帧跳回顶上（`ui.ListState` 的注释：「Give each List a
 // ListState of its own」）。
 type downloadsPage struct {
-	// state 是那张表格的状态：滚动位置、行身份、无障碍名字。
-	state ui.ListState
-	// rowKeys 记着每一行的身份（**预先装箱好的那一份**）。
-	//
-	// ⚠️ 装箱那一步是要分配的（`runtime.convTstring`），现算的话每帧每行一次
-	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头）：
-	// 筛选一变、下载记录多一条少一条——身份对不上就重算，不用记得重建。
-	rowKeys rowkey.Memo[string, any]
+	// scroll 是整页那个滚动区的状态（回顶按钮读它的 Y）。
+	scroll ui.ScrollState
 
-	// filter 是那一排「全部 / 音频 / 视频」现在选的是哪一档。见 downloadFilter。
+	// filter 是那一排「全部 / 下载中 / 已完成 / 失败」现在选的是哪一档。见 downloadFilter。
 	//
 	// ⚠️ 它长在这个对象上，而 `Shell.downloads` 是建一次、跨路由不换的
 	// （`Shell.New`）——所以「切走再切回来，选中的还是原来那一档」是白捡的，
@@ -196,22 +106,6 @@ type downloadsPage struct {
 	// 所以这里收的是一个函数：生产环境接 `app.DownloadSnapshots`（`Shell.New`），
 	// 测试接一份给定的快照（`TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone`）。
 	rowsFn func() []download.Snapshot
-
-	// failed 是画崩了的格子（按「行 id + 列号」记），下一帧不重试。理由和
-	// `widgets/list` 的 failed 一样：MyGo 的事件循环没有 recover（页级那道在
-	// `Shell.page`，兜的是整页），不记的话这一格每帧崩一次，日志被刷爆、
-	// 帧率拖垮——比画不出来糟得多。
-	//
-	// ⚠️ **键是 `dlCellKey`（一个结构体），不是字符串**：这个键**每一格每一帧**
-	// 都要算一次，而它算出来只用来查这一张表、查完就扔——原先那一句
-	// `fmt.Sprintf("%s#%d", …)` 于是每格每帧多一次分配 ＋ 一次格式化
-	// （一屏八行 × 五列 = 四十次；票 #633）。结构体键**零分配**。
-	//
-	// ⚠️ **它必须是「行 id + 列号」，不能改成行下标**：行会重排（用户在上面删掉
-	// 一条，下面的行往上挪），按下标记的话，用户删掉一行之后，崩过的那一格就
-	// 记到**别的行**上了——而界面上只是「有一格写着画不出来」，错位看不出来。
-	// （`TestTheBrokenCellFollowsItsRowWhenTheRowsMove` 钉的就是这一条。）
-	failed map[dlCellKey]bool
 
 	// ask 是「你确定吗」那一弹窗，非 nil 时开着。见 downloadlist_ops.go。
 	ask *confirmAsk
@@ -252,67 +146,96 @@ func (d *downloadsPage) sync(all []download.Snapshot) {
 //
 // ⚠️ 它**什么都不碰**：不发请求、不动队列、不写设置。数据早就在内存里了
 // （`app.DownloadSnapshots` 就是队列快照），所以这一档换一次就是切一个切片。
-// 判据是 `download.Snapshot.Video`——不是 `ID` 的 `|video` 后缀、也不是
-// `Dest` 的扩展名（那两条的理由写在 `Snapshot.Video` 上）。
+// 判据是状态（`downloadFilter.matches`）。
 func filterDownloads(all []download.Snapshot, f downloadFilter) []download.Snapshot {
-	// 「全部」和任何认不出的档位都**原样返回**：队列快照本身就是这一档要的那一份，
-	// 一个字节都不用复制。认不出就当不筛——宁可多画几行，也不要给用户一个空表格
-	// 外加一句「这一档没有记录」，而他刚才点的根本不是那一档。
-	if f != dlFilterAudio && f != dlFilterVideo {
+	if f == dlFilterAll || f < 0 || int(f) >= dlFilterCount {
 		return all
 	}
-	want := f == dlFilterVideo
 	out := make([]download.Snapshot, 0, len(all))
 	for _, r := range all {
-		if r.Video == want {
+		if f.matches(r) {
 			out = append(out, r)
 		}
 	}
 	return out
 }
 
-// viewDownloadList 画下载记录页。
+// viewDownloadList 画下载记录页（原型 `PAGES.downloads`）。
 //
-// 🔴 铁律二：页面 view 的头一件正事就是装主题，而且必须在最开头——SetTheme 只
-// 影响它之后创建的控件。不装的话 MyGo 在帧开头重置好的跟随系统那份就是这一帧
-// 真正用的那份，用户选了深色也只在这一帧是对的。
+// 🔴 铁律二：页面 view 的头一件正事就是装主题，而且必须在最开头——SetTheme 只影响它之后
+// 创建的控件。
 func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	s.applyFrameTheme(c)
-
 	d := s.downloads
 
-	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+downloadListPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px12).
-		AlignItems(ui.Stretch).Children(func() {
-		d.viewToolbar(c, s)
+	dir := s.app.DownloadDir()
+	var content func()
+	s.pudPage(c, "page:"+downloadListPath, func(winW, listW float32) {
+		scroll := ui.Scroll(c).Key("downloads:scroll").Grow(1).TrackScroll(&d.scroll)
+		d.trackScrollbar(s, scroll)
+		scroll.Children(func() {
+			ui.Column(c).FillWidth().AlignItems(ui.Stretch).Padding(space.None, space.None, space.PageBottom, space.None).
+				Children(func() {
+					p := tok.Of(c.Theme())
+					pud.PageHeadFn(c, "Downloads", "下载记录", winW, func() {
+						// 导语：「保存到 <路径>」，路径是一枚等宽链接，点了去设置里改。
+						ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).
+							Margin(space.Px8, space.None, space.None, space.None).Children(func() {
+							if dir == "" {
+								if d.tipWith(c, flatLink(c, "还没有下载目录"), "去设置里选一个下载目录").Clicked() {
+									s.goToDownloadDirSetting()
+								}
+								return
+							}
+							ui.Text(c, "保存到").FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2)
+							link := ui.ButtonBase(c).Key("downloads:dir").Label("保存到 " + dir)
+							fg := p.Text2
+							if link.Hovered() {
+								fg = p.Text
+							}
+							link.Children(func() {
+								typo.Mono(ui.Text(c, dir)).FontSize(scale.Font(c, scale.Size14)).TextColor(fg).
+									SingleLine().Ellipsis("…")
+							})
+							if link.Clicked() {
+								s.goToDownloadDirSetting()
+							}
+						})
+					}, func() {
+						if len(d.all) == 0 {
+							return
+						}
+						if dir != "" && pud.Button(c, "downloads:open-dir", pud.Ghost, pud.Std, "打开文件夹", "folder").Clicked() {
+							d.openDownloadDir(dir, s)
+						}
+						if pud.Button(c, "downloads:clear", pud.Quiet, pud.Std, "清空全部", "trash").Clicked() {
+							d.askClear(s)
+						}
+					})
 
-		// ⚠️ **整个队列都是空的时候**：没有筛选排，也没有卡片。那一格是**这一页**
-		// 的空状态（「怎么才能不空」，见 `downloadsEmptyState`）——而筛选排在队列
-		// 空的时候只能筛出一个空列表，在它前面加一句「这排开关什么也筛不出来」
-		// 是白占一行。
-		//
-		// ⚠️ **队列不空、但筛完这一档是空的时候，筛选排仍然要摆**（它在卡片
-		// 里面，见 `viewTable`）：用户得能换回「全部」去。
-		if len(d.all) == 0 {
-			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
-			return
-		}
-		d.viewTable(c, s)
+					d.viewFilter(c)
+					ui.Box(c).Height(space.Px16)
+					if len(d.rows) == 0 {
+						pudEmptyState(c, s.downloadsEmptyState(d))
+						return
+					}
+					for _, r := range d.rows {
+						d.viewRow(c, s, r, listW, winW)
+					}
+				})
+		})
 	})
+	_ = content
 
-	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里
-	// 放它的话面板会跟着页面走位。
+	// 弹窗画在页面外面：它盖的是整个窗口，一个 `Grow(1)` 的页面列里放它的话面板会跟着页面走位。
 	d.viewConfirm(c, s)
 
-	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
-	// `BackToTop`）。
-	//
-	// ⚠️ **这一页的表格自己滚**，而它内部那个滚动容器的像素偏移**拿不到**
-	//（`ui.Table` 没把它露出来），所以这里的「滚过了多少」是从**顶上那一行是第
-	// 几行**换算的（`dlRowPx` 是这一行的高：封面 48 + 表格那一行的上下内边距
-	// 6+6）。
-	list.BackToTop(c, d.tableOffset(), d.scrollTop)
+	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的 `BackToTop`）。
+	list.BackToTop(c, d.scroll.Y, d.scrollTop)
 }
+
+// pudEmptyState 把一个 `emptyState`（标题 / 说明 / 图标 / 可选动作）画成原型的空状态。
+func pudEmptyState(c *ui.Context, e emptyState) { emptyContent(c, e) }
 
 // syncDownloads 是下载记录这一页每帧的副作用：取一次队列快照、按当前那一档筛出
 // 这一帧要画的那些行。
@@ -320,37 +243,16 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 // ⚠️ **它原来在 `viewDownloadList` 的最开头**，而这一页在满屏开着的时候不画
 // （票 #161）——不挪的话，用户在满屏里看频谱的那几分钟里，下载队列的变化
 // 一直看不见（而下载是**后台**在跑的事，满屏期间照样在下载）。
-//
-// ⚠️ **筛的是上一帧选中的那一档**：这一档是筛选那一排的按钮写的，而它在画的
-// 时候才写；这一句原来也在那一排之前，所以读到的值一模一样。
 func (s *Shell) syncDownloads(c *ui.Context) {
 	d := s.downloads
 	d.sync(d.rowsFn())
 }
 
-// dlRowPx 是下载记录那一行的高：封面 `dlCover`（48）+ `ui.Table` 给每一行的上下
-// 内边距（6+6）。
-//
-// ⚠️ **它只用来把「顶上那一行是第几行」换算成像素**（回顶按钮的阈值是 400 像素）。
-// 改了 `dlCover` 就要跟着改它——差几像素的话按钮早一点或晚一点出现。
-const dlRowPx = dlCover + 12
-
-// tableOffset 是这一屏滚过了多少像素。
-//
-// ⚠️ **它是换算出来的**（见 `dlRowPx`）：这一页的表格自己滚，而它内部那个滚动
-// 容器的像素偏移拿不到。
-func (d *downloadsPage) tableOffset() float32 {
-	first, _ := d.state.Visible()
-	return float32(first) * dlRowPx
-}
-
 // scrollTop 回到顶上。
-//
-// ⚠️ **回的是表格自己的行锚点**（`ListState.ScrollTo`）：这一页滚的是表格内部的
-// 那个列表，别处没有第二份位置要归零。
-func (d *downloadsPage) scrollTop() {
-	d.state.ScrollTo(0, ui.Start)
-}
+func (d *downloadsPage) scrollTop() { d.scroll.Y = 0 }
+
+// trackScrollbar 把滚动条的悬停转告给壳（主题下一帧据此换深一档）。
+func (d *downloadsPage) trackScrollbar(s *Shell, e ui.Element) { s.trackScrollbar(e) }
 
 // downloadsEmptyState 是这一页空着的时候说的那两句话。
 //
@@ -376,239 +278,4 @@ func (s *Shell) downloadsEmptyState(d *downloadsPage) emptyState {
 		return e
 	}
 	return lookup(downloadListPath).Empty
-}
-
-// viewTable 画那张表格。
-//
-// 🔴 铁律四：这一行是这张表存在的理由。`Key` 每一帧都重装，装的是 `Task.ID`
-// 而不是序号——不装的话行的身份是「父 ID + 兄弟序号」，上面少一行、下面所有行
-// 的身份就整体错配一格（widgets/list 的 `TestInsertingARowAtTheHead…` 量的是
-// 同一件事的另一半：选中项会变成旁边那一首）。
-//
-// 这一张表上它落成的是**滚动锚点**：用户滚到下面、在上面删掉一条，屏幕上
-// 还是那几首歌。`TestDeletingARowAboveKeepsTheTopRowWhereItIs` 钉的就是它。
-func (d *downloadsPage) viewTable(c *ui.Context, s *Shell) {
-	t := c.Theme()
-	// Label 是这一行给无障碍和「打字选中」用的名字。
-	d.state.Label = func(i int) string {
-		if i < 0 || i >= len(d.rows) {
-			return ""
-		}
-		return d.rows[i].Title
-	}
-	d.state.Key = func(i int) any {
-		if i < 0 || i >= len(d.rows) {
-			// 不该发生（表格是按 len(d.rows) 建的）。给一个类型撞不上的值，
-			// 比返回下标安全：返回下标会让它看起来像「行 0」。
-			return dlRowKey{}
-		}
-		// ⚠️ **身份是预先装箱好的那一份**（`d.rowKeys`）：理由见那个字段的注释。
-		return d.rowKeys.At(i, d.rows[i].ID, rowkey.Identity)
-	}
-
-	// 表格外面那一张**卡片底**：上游是 `Card radius="md" shadow="sm"` 包着
-	// `CardBody`（`download-list/index.tsx:104-107`），表格本身 `removeWrapper`。
-	// 没有它的话整张表直接铺在页面底色上，一眼就是「裸表格」——验收项点名的
-	// 就是这一层。
-	//
-	// ⚠️ **筛选排在卡片里面**（上游 `download-list/index.tsx:113-135`：筛选排是
-	// `Table` 的 `topContent`，而那张 `Table` 在 `Card` 里——所以它必然在卡片
-	// 里面）。原来筛选排摆在卡片**外面**：卡片的边线在 y=135、筛选排在
-	// y=108..123，两样是分开的；而上游卡片包住的是「筛选 + 表头 + 表体」三样。
-	//
-	// ⚠️ **底色取 `t.Background`**（上游 HeroUI 的 `bg-content1`）：`content1` 是
-	// **#FFFFFF（浅）/ #18181b（深）**——正好是我们 `t.Background` 的两个值。
-	// 于是**深色下这张卡和页面底色几乎同色，靠那圈影分层**（DESIGN.md §四：
-	// 「不要用『比背景亮一级』的板」——`t.Surface` 在深色下是 #27272a，正是那个
-	// 「亮一级」的板）；**浅色下它也不是一块灰**，是白的（上游那张卡就是白的）。
-	//
-	// ⚠️ **那一圈影是 #179 那一票的**（上游那张 `Card` 的 `shadow="sm"` =
-	// `--heroui-box-shadow-small`）：HeroUI 那一档**深浅两套值不一样**——深色那套
-	// 多一层 1 像素的**白色内**阴影（深底上外面那一圈 20% 的黑只差一两个色阶，
-	// 那道白边才是真正把卡和底色分开的）。值在 `internal/ui/widgets/shadow`
-	// （那里是唯一一份）。
-	//
-	// ⚠️ **底色是 #172 那一票定的**（`t.Background`），影是 #179 的——两件事分开。
-	card := shadow.HeroSmall(ui.Column(c).Grow(1).FillWidth().Radius(s.cardRadius(t)).
-		Background(s.cardBackground(t)).Padding(t.Space(4)), t)
-	card.Children(func() {
-		// ⚠️ **筛选排在卡片里面**（理由见上面那段）：原来它在卡片外面，于是
-		// 「全部 / 音频 / 视频」那一排和它下面那张卡看着是两块不相干的东西。
-		//
-		// ⚠️ **队列整个是空的时候这一排不摆**（那一支在 `viewDownloadList` 里就
-		// 走空状态了，压根到不了这里）。
-		d.viewFilter(c)
-
-		// 筛完了这一档什么都没有：空状态**在卡片里面**（上游的 `emptyContent`
-		// 也在表格里，而表格在卡片里）。
-		//
-		// ⚠️ **不用表格自己的空行**：那一行只有一句「暂无内容」，说不了「怎么
-		// 才能不空」。
-		if len(d.rows) == 0 {
-			s.viewEmpty(c, "downloads:empty", s.downloadsEmptyState(d))
-			return
-		}
-		e := ui.Table(c, &d.state, downloadColumns, len(d.rows), func(row, col int) {
-			d.viewCell(c, s, row, col)
-		}).Grow(1)
-		s.trackScrollbar(e)
-	})
-}
-
-// dlRowKey 是「下标越界」时给的行身份。一个歌不可能撞上的类型。
-type dlRowKey struct{}
-
-// dlCellKey 是「下载记录页的那一格」的身份。
-//
-// # 它是「行 id + 列号」，而**不是**字符串
-//
-// 🔴 **这个键每一格每一帧都要算一次**，算出来只用来查 `d.failed` 那一张表
-// （记着「哪一格画崩了」）、查完就扔——所以它**必须是不分配的**。
-//
-// 原先那一句 `fmt.Sprintf("%s#%d", rowID, col)` 每格每帧多一次分配 ＋ 一次
-// 格式化：一屏八行 × 五列 = **四十次**（票 #633 量的那个数）。
-// **map 的键不必是字符串**——一个可比较的结构体键查表是零分配的。
-//
-// # 为什么两个维度都得在
-//
-// 只认行 id 的话，崩了一格会把**整行**都废掉（用户看到的是整行写「画不出来」）；
-// 只认列号的话，**每一行**的那一列都一起废掉（用户看到的是整列）。
-//
-// # ⚠️ **行 id 那一维不许换成行下标**
-//
-// 行会重排：用户在上面删掉一条，下面的行往上挪一格。而「崩过的那一格」那个
-// 记录**必须跟着那一行走**——它是「行 id + 列号」，不是「第几行」。
-//
-// 按下标记的话：崩的是**歌 甲**（第 0 行）的第 0 列，用户删掉歌 甲 之后，**歌 乙**
-// 挪到第 0 行——于是那个记录记到了**歌 乙**头上，歌 乙的文件那一格也变成
-// 「画不出来」，而真正崩过的歌 甲 已经不在屏幕上了。
-//
-// **症状是静默的**：界面上只是「有一格写着画不出来」，用户不会知道那记的是
-// 另一首歌。`TestTheBrokenCellFollowsItsRowWhenTheRowsMove` 钉的就是这一条。
-type dlCellKey struct {
-	// rowID 是那一行的身份（`download.Snapshot.ID`）。
-	//
-	// ⚠️ **它是行 id，不是行下标**：理由见上面那一段。
-	rowID string
-	// col 是列号（`colFile` / `colStatus` / …）。
-	col int
-}
-
-// cellKey 算「这一格」的身份。
-//
-// ⚠️ **它必须是零分配的**（这一格每一帧都要算一次，而算出来只用来查一张表），
-// 所以这里不拼字符串——见 `dlCellKey` 的注释。
-func (d *downloadsPage) cellKey(r download.Snapshot, col int) dlCellKey {
-	return dlCellKey{rowID: r.ID, col: col}
-}
-
-// viewCell 画一格，外包一层 panic 兜底。
-//
-// 🔴 **这一格自己兜住自己**：页级那道 Guard（`Shell.page`）兜的是**整页**——
-// 一格画崩了要是冒到页级，用户看到的就是整个下载记录页变成一张错误页，而出错
-// 的地方只是一格封面。所以崩了只废掉那一格：那一格写「画不出来」，别的格子
-// 照画，整页照常。
-//
-// ⚠️ **越界也是「这一格画不出来」**：这一格的身份是「行 id + 列号」，而越界的
-// 时候没有行 id 可用——所以直接画占位，不记 `failed`（没有 id 可记）。这里
-// **不许崩**：崩了就是整页变成错误页，那正是这一格要防的那件事（表格是按
-// `len(d.rows)` 建的，所以这一支不该走到；`d.state.Key` / `d.state.Label`
-// 那两处也各自判了一次，理由一样）。
-func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
-	if row < 0 || row >= len(d.rows) {
-		dlBrokenCellText(c)
-		return
-	}
-	key := d.cellKey(d.rows[row], col)
-	if d.failed[key] {
-		dlBrokenCellText(c)
-		return
-	}
-	defer func() {
-		if rec := recover(); rec != nil {
-			if d.failed == nil {
-				d.failed = map[dlCellKey]bool{}
-			}
-			d.failed[key] = true
-			log.Printf("pudmusic: 下载记录的一格画崩了（%s）：%v\n%s", dlCellLabel(key), rec, debug.Stack())
-			// 🔴 **崩了要再要一帧**：recover 接住的是 build pass **中间**，那一格
-			// 剩下的部分没建（封面那一格是个空盒子），画出来是半张。下一帧那一格
-			// 才画得出「画不出来」——而界面是**按需绘制**的：没人要帧，那一格就
-			// 一直空着，用户看到的是一个空框而不是「画不出来」。
-			//
-			// ⚠️ **下一帧不会自己来**：MyGo 一帧只跑一遍 view（除非这一帧里有
-			// 事件改了状态，见 mygo 的 `runtime.go` 那个 pass 循环），所以光靠
-			// 「下一遍会从头重建」是不够的——得有人要那一帧。和 `Shell.onPanic`
-			// 补 Invalidate 是同一个道理（那一处是整页版，这一处是格子版）。
-			s.wake.invalidate()
-		}
-	}()
-	d.drawCell(c, s, row, col)
-}
-
-// dlCellLabel 把一个格子的身份写成给人看的那一句。
-//
-// ⚠️ **它只用在日志里**（崩了的那一格报出来是哪一格），而日志**不是每帧**写
-// 的——所以这里拼字符串不心疼（`fmt.Sprintf` 一次是分配，而它一天也不写几次）。
-//
-// ⚠️ **它不许反过来当键用**：键是 `dlCellKey` 那个结构体（见它的注释）。
-func dlCellLabel(k dlCellKey) string {
-	return fmt.Sprintf("%s#%d", k.rowID, k.col)
-}
-
-// dlBrokenCellText 是「这一格画不出来」那一行字。
-//
-// 单独立一个：崩过的那一格和下标越界的那一格画的是同一句话（见 `viewCell`）。
-func dlBrokenCellText(c *ui.Context) {
-	ui.Text(c, "画不出来").FontSize(scale.Font(c, scale.Size11)).TextColor(c.Theme().TextMuted)
-}
-
-// drawCell 是真的画一格。
-func (d *downloadsPage) drawCell(c *ui.Context, s *Shell, row, col int) {
-	t := c.Theme()
-	r := d.rows[row]
-	switch col {
-	case colFile:
-		ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).FillWidth().Children(func() {
-			// 四态（没有地址 / 载入中 / 就绪 / 失败）由 imgcache.View 画，
-			// 这里不重复它的判断。
-			imgcache.ViewTitled(c, s.images, r.Cover, r.Title, dlCover, dlCover)
-			ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-				// 歌名那一行是**一个可点的块**：点它去浏览器里打开这一首的 B 站
-				// 页面，指针压上去时右边长出外链图标。出处是上游
-				// `download-list/index.tsx:166-178`——`group` 那一行
-				// `cursor-pointer hover:underline`，图标从 `w-0` 长到 `w-[16px]`。
-				//
-				// ⚠️ **图标不占位时是 width 0，展开时才加宽**（上游就是靠这个
-				// 让歌名不因为图标而变窄）；我们干脆**只在 hover 那一帧画它**，
-				// 一样的视觉，还少一个「宽度为 0 的图形」。
-				title := ui.Row(c).FillWidth().Gap(space.Px4).AlignItems(ui.Center).
-					OnClick(func() { d.openBiliPage(r, s) })
-				onTitle := title.Hovered()
-				title.Children(func() {
-					ui.Text(c, r.Title).FontSize(scale.Font(c, scale.Size14)).MaxLines(2).Ellipsis("…").Grow(1)
-					if onTitle {
-						ui.Icon(c, icon(iconExternal)).FontSize(16).TextColor(t.TextMuted).
-							Label(dlOpenBiliLabel)
-					}
-				})
-				// 音质徽章，照上游 `index.tsx:179-183` 的 `Chip`。空串不画。
-				if r.Label != "" {
-					ui.Text(c, r.Label).FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).MaxLines(1)
-				}
-			})
-		})
-	case colStatus:
-		d.viewStatus(c, r)
-	case colSize:
-		// 上游是 `item.totalBytes ? filesize(item.totalBytes) : "-"`，只写
-		// 总大小（`index.tsx:190`）。已下了多少在状态那一列的进度条上。
-		ui.Text(c, fileSize(r.Total)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-	case colTime:
-		// `formatMillisecond` 是 `moment(s).format("YYYY-MM-DD")`
-		// （biu/src/common/utils/time.ts:20），没有时刻也没有「几天前」。
-		ui.Text(c, addedOn(r.AddedAt)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(1)
-	case colOps:
-		d.viewOps(c, s, r)
-	}
 }

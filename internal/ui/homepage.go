@@ -221,8 +221,8 @@ func homeLayoutFor(win float32) homeLayout {
 // homeGreetSize / homeHeroSize 是问候语和「今日一张」标题的字号。原型是随视口宽度渐变的：
 // 问候语 `clamp(36px, 4vw, 56px)`（`.greet .h-page`），主视觉标题 `clamp(40px, 5vw, 72px)`
 // （`.hero-title`）。所以 1200 的窗口里分别是 48 和 60。
-func homeGreetSize(win float32) float32 { return min(max(win*0.04, 36), 56) }
-func homeHeroSize(win float32) float32  { return min(max(win*0.05, 40), 72) }
+func homeGreetSize(win float32) float32 { return scale.Fluid(36, 4, 56, win) }
+func homeHeroSize(win float32) float32  { return scale.Fluid(40, 5, 72, win) }
 
 // homeMaxW 是页面最宽（原型 `.page { max-width: 1280px }`）。
 const homeMaxW = 1280

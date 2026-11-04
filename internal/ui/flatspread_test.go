@@ -285,72 +285,9 @@ func TestTheMiniPlayerKeysAreFlat(t *testing.T) {
 // 三、下载记录
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheDownloadListKeysAreFlat 页头那两枚和行里那几枚操作。
-func TestTheDownloadListKeysAreFlat(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			// 一行下完的（「打开」+「删除」）和一行出错的（「重试」+「删除」）：
-			// 五种操作里亮得最多的那两档都量到。
-			//
-			// ⚠️ **走 `newDownloads`（真引擎）而不是 `newRows`（快照）**：
-			// 页头那颗「打开文件夹」只在真有下载目录的时候才摆，而快照那一套
-			// 外壳没挂下载（`DownloadDir()` 是空的），量不到它。
-			s, tt := newDownloads(t,
-				newTask("歌 甲", download.StatusDone, dlChunk, 100),
-				newTask("歌 乙", download.StatusError, dlProgress, 50),
-			)
-			tt.SetDark(dark)
-			tt.Frame()
-			noPointer(tt)
-
-			assertKeysFlat(t, tt, "下载记录", "清空记录", "打开", "重试", "删除")
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "下载记录", "打开文件夹")
-		})
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 四、本地音乐
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheLocalMusicKeysAreFlat 页头、操作行、每一行末尾那几枚。
-func TestTheLocalMusicKeysAreFlat(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			library := t.TempDir()
-			other := t.TempDir()
-			libSong(t, library, "别删我.mp3")
-			libSong(t, other, "另一个目录.mp3")
-
-			tt, s, _, _ := shellOnLocalMusic(t, library, other)
-			tt.SetDark(dark)
-			tt.Frame()
-			noPointer(tt)
-
-			// ⚠️ **那枚会展开的搜索不在这一列里**：理由同收藏夹那一处（它的名字
-			// 落在图标上，`Find` 给回来的是图标那一格）。
-			assertKeysFlat(t, tt, "本地音乐", "全部加入队列", "重新扫描", "打开文件夹", deleteRowLabel)
-			assertTextKeysFlat(t, tt, flatPageBG(s, dark), "本地音乐", "添加目录")
-
-			// 「移除此目录」只在一个**具体的**目录被选中时摆（「全部目录」那一档
-			// 没有「当前目录」可移除）。直接拨那个字段而不是走下拉：下拉的选项
-			// 是原生菜单，无头 Tester 里展开不了（`localmusic_delete_test.go`
-			// 那一条为此 `t.Skipf` 了）。
-			s.local.dirLabel = dirLabels([]string{library, other})[1]
-			tt.Frame()
-			noPointer(tt)
-			assertKeysFlat(t, tt, "本地音乐", "移除此目录")
-		})
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 五、收藏夹

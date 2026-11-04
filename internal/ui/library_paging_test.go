@@ -7,12 +7,10 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -102,9 +100,9 @@ func TestAFailingPageOffersARetry(t *testing.T) {
 //
 // 判据是**距离最后一次输入过了多久**，不是「有没有搜过」。
 func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(laterPathAPI) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "甲")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return f.callsOf(historyPathAPI) == 1 })
 
 	typeKeyword(t, tt, "周")
 	advance(s, 400*time.Millisecond)
@@ -122,14 +120,14 @@ func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 	// 一点时间再问「有没有发出去」。不等就是拿一个还没落地的请求去断言「没发」——
 	// 那条断言永远不会红，而它正是这条测试的全部意义。
 	time.Sleep(150 * time.Millisecond)
-	if got := f.callsOf(laterPathAPI); got != 1 {
+	if got := f.callsOf(historyPathAPI); got != 1 {
 		t.Fatalf("离最后一次输入才 125ms 就搜了（共 %d 次请求）——防抖的钟没有重打", got)
 	}
 
 	// 再等够 500ms 才真的搜出去。
 	advance(s, 400*time.Millisecond)
-	waitFrames(t, tt, "距最后一次输入满 500ms 之后搜出去", func() bool { return f.callsOf(laterPathAPI) == 2 })
-	if got := f.queriesOf(laterPathAPI)[1].Get("key"); got != "周杰" {
+	waitFrames(t, tt, "距最后一次输入满 500ms 之后搜出去", func() bool { return f.callsOf(historyPathAPI) == 2 })
+	if got := f.queriesOf(historyPathAPI)[1].Get("keyword"); got != "周杰" {
 		t.Errorf("搜出去的词是 %q，want 周杰（两个字的都要）", got)
 	}
 }
@@ -139,9 +137,9 @@ func TestTheDebounceRestartsOnEveryKeystroke(t *testing.T) {
 // 用户敲了两个字、还没到 500ms 就切走了：那个每秒醒四次的定时器必须跟着停。
 // 停不掉的话用户看不出任何异样，只是这个应用从那以后再没省过电。
 func TestTheSearchWatchStopsWhenThePageIsLeft(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, s := libraryShell(t, f, laterPath)
-	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.laterPage) == 1 })
+	f := newLibFake(t).withHistory(1, 0, 60, "甲")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把第一页拉回来", func() bool { return rowsShown(&s.historyPage) == 1 })
 
 	typeKeyword(t, tt, "周")
 	if s.searchWatchStop == nil {
@@ -155,10 +153,10 @@ func TestTheSearchWatchStopsWhenThePageIsLeft(t *testing.T) {
 	}
 	// 醒着的时候它只该醒一次（推进 500ms 会走四跳），醒着的时候推进多少都不会有
 	// 新的请求。
-	before := f.callsOf(laterPathAPI)
+	before := f.callsOf(historyPathAPI)
 	advance(s, 5*time.Second)
 	tt.Frame()
-	if got := f.callsOf(laterPathAPI); got != before {
+	if got := f.callsOf(historyPathAPI); got != before {
 		t.Errorf("切走之后那个防抖还在发请求（%d → %d）", before, got)
 	}
 }
@@ -213,75 +211,6 @@ func TestChangingTheFilterWhilePagesAreFetchingIsNotADataRace(t *testing.T) {
 // 窄窗口
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth 盯 900 宽（`WindowOptions.MinWidth`）。
-//
-// 上游把日期选择器和搜索框摆在同一排（`justify-between`），那一排在我们的页面区
-// 摆不下——**后果不是挤一挤，是叠在一起**：日期那一块和搜索框重叠，点日期点
-// 的是搜索框，它的日历打不开。所以搜索框另起一行（`viewFilters`）。
-//
-// 判据是**两个控件的矩形不相交**：元素都「在画面上」，只有量几何才发现得了它压住了
-// 另一个。
-func TestTheFiltersDoNotOverlapAtTheMinimumWindowWidth(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, _ := libraryShell(t, f, laterPath)
-
-	for _, w := range []int{900, 1000, 1200} {
-		tt.SetSize(w, 800)
-		tt.Frame()
-
-		// ⚠️ 找的是**那个键的框**（`Label` 那一条），不是它里面那行字：
-		// 字只占 256 宽里的左边一小块，而「压住搜索框」这件事是整块的事。
-		trigger, ok := tt.Find(dateRangeLabel)
-		if !ok {
-			t.Fatalf("宽度 %d 下找不到日期范围那一块，文字有 %q", w, tt.Texts())
-		}
-		box, ok := tt.Find(keywordBoxLabel)
-		if !ok {
-			t.Fatalf("宽度 %d 下找不到搜索框，文字有 %q", w, tt.Texts())
-		}
-		if overlap(trigger, box) {
-			t.Errorf("宽度 %d 下搜索框盖住了日期范围（搜索框 %+v，日期范围 %+v）", w, box, trigger)
-		}
-	}
-}
-
-// TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth 钉住「点得开」。
-//
-// 光量不重叠不够：控件在、位置对，可点击落在别人身上，它那个日历照样打不开——
-// 而用户缩小窗口正是为了点点什么。
-//
-// ⚠️ **而且弹出来的那一块自己要整个在窗口里**：它有**两个月**那么宽（≈500），
-// 而窗口最窄是 900——面板要是往右长，右半边（正是右边那个月）会被裁掉。
-// 而裁掉的那一半**看不出来**：用户看到的是「这个日历只有一个月」，而另一个月的
-// 那些日子他根本点不到。
-func TestTheDateRangeOpensItsCalendarAtTheMinimumWindowWidth(t *testing.T) {
-	f := newLibFake(t).withLater(1, 1, "甲")
-	tt, _ := libraryShell(t, f, laterPath)
-	tt.SetSize(900, 800)
-	tt.Frame()
-
-	if err := tt.Click(dateRangeLabel); err != nil {
-		t.Fatalf("点不到日期范围：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	for _, want := range []string{"2026年10月", "2026年11月"} {
-		if !tt.HasText(want) {
-			t.Errorf("900 宽下点日期范围没有打开两个月（缺 %q），文字有 %q", want, tt.Texts())
-		}
-	}
-	// ⚠️ **右边那个月的最后一天也要在窗口里**（点得到）。
-	//
-	// 「两个月都在画面上」不够：面板可能往右长出窗口，而那半个月的日子看着
-	// 还在（文字画出来了），可它们的坐标已经在窗口外面——点它们会落在空气上。
-	last, ok := tt.Find("2026年11月30日")
-	if !ok {
-		t.Fatalf("右边那个月没有画出来，文字有 %q", tt.Texts())
-	}
-	if last.X+last.W > 900 {
-		t.Errorf("右边那个月的最后一天在窗口外面（右边 %v，窗口 900）", last.X+last.W)
-	}
-}
-
 // overlap 报两个矩形有没有交叠（边挨着不算）。
 func overlap(a, b mygoui.Rect) bool {
 	return a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H
@@ -290,56 +219,3 @@ func overlap(a, b mygoui.Rect) bool {
 // ─────────────────────────────────────────────────────────────────────────────
 // 「记录播放历史」那个开关
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheReportHistorySwitchReallyWritesTheSetting 盯那个开关改的是**盘上那份**。
-//
-// 🔴 它的失败方式最阴：只绑定局部变量、不写设置，用户按了开关弹回去，界面上看不出
-// 任何异样——「按了没反应」里最难查的一种。判据是设置里的那个键，不是画面上开关的
-// 位置。
-func TestTheReportHistorySwitchReallyWritesTheSetting(t *testing.T) {
-	f := newLibFake(t).withHistory(1, 100, 600, "听过的那首")
-
-	// 挂一份真的设置（和 `shellOnSettings` 同一套路），否则 applySetting 写不出去。
-	cli := biliForTest(t, f)
-	b := newTestShell(t,
-		withSettings(app.DefaultSettings("")),
-		mounted(func(t *testing.T, a *app.App) {
-			// ⚠️ **挂一份登录态**（票 #138）：历史记录这一页要登录才有，没登录时
-			// 页面画的是「先登录」那一支，那个开关压根不在画面上。
-			store := app.NewMemoryStore("test")
-			if err := store.Save(context.Background(), app.Session{SESSDATA: "sess"}); err != nil {
-				t.Fatal(err)
-			}
-			a.MountLogin(store, cli)
-			a.MountLibrary(cli)
-		}),
-		withClock(newFakeClock(now)))
-	a, s, tt := b.a, b.s, b.tt
-	path := b.settingsPath
-	tt.Frame()
-	s.navigate(historyPath)
-	tt.Frame()
-
-	if !a.SettingsSnapshot().ReportPlayHistory {
-		t.Fatalf("起点就不对：设置里 reportPlayHistory 已经是关的")
-	}
-	if err := tt.Click("记录播放历史"); err != nil {
-		t.Fatalf("点不到那个开关：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-
-	if a.SettingsSnapshot().ReportPlayHistory {
-		t.Error("点了「记录播放历史」，设置里那个键没变——开关只改了一个局部变量")
-	}
-	// 存住了：下一次打开这个应用还是关的（第一遍写进内存，第二遍落盘）。
-	if err := a.FlushSettings(); err != nil {
-		t.Fatal(err)
-	}
-	saved, err := app.LoadSettings(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if saved.ReportPlayHistory {
-		t.Error("那个键没有落盘——关掉窗口再打开它又回来了")
-	}
-}

@@ -180,7 +180,7 @@ func toViewPageOf(d *toViewListData) ToViewPage {
 			Aid: it.Aid, Bvid: it.Bvid, Cid: it.Cid,
 			Title: decodeEntities(it.Title), Pic: normalizeImageURL(it.Pic),
 			OwnerName: decodeEntities(it.Owner.Name), OwnerMid: it.Owner.Mid,
-			Duration: seconds(it.Duration), Progress: seconds(it.Progress),
+			Duration: seconds(it.Duration), Progress: laterProgress(it.Progress, it.Duration),
 			PubDate: unixSeconds(it.Pubdate), AddAt: unixSeconds(it.AddAt),
 			View: it.Stat.View, IsPGC: it.IsPGC,
 		})
@@ -224,6 +224,15 @@ func (c *Client) postLater(ctx context.Context, path string, form url.Values) er
 
 // seconds 把 B 站的秒数换成一个时长。B 站的 duration 有时是 -1（未知），
 // 负值原样保留会画成 "-1s"，所以夹到 0——界面层「没有就不画那一列」。
+// laterProgress 是稍后再看的「看到哪儿」。B 站给 -1 表示**已经看完**：折成「看到了片尾」
+// （等于总时长），界面才分得出「已看完」和「还没看」。
+func laterProgress(progress, duration int64) time.Duration {
+	if progress < 0 {
+		return seconds(duration)
+	}
+	return seconds(progress)
+}
+
 func seconds(v int64) time.Duration {
 	if v <= 0 {
 		return 0

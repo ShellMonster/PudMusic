@@ -1,6 +1,8 @@
 package pud
 
 import (
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
@@ -24,15 +26,19 @@ const (
 	colAct   = 96
 	colGap   = 16
 	rowPadX  = 12
-	// HideAlbumBelow 是去掉「专辑」那一列的内容区宽度。
+	// HideAlbumBelow 是去掉「专辑」那一列的内容区宽度（含页边距）。原型那条媒体查询是
+	// 窗口 < 1180、减掉侧栏 232 就是内容区 < 948；`trackCols` 收到的是列表宽（已去掉
+	// 左右页边距，最宽那档各 40），所以拿 `w + 2*pageMargin` 和它比。
 	HideAlbumBelow = 948
+	pageMargin     = 40
 )
 
-// AlbumMode 是「专辑」那一列怎么定：默认（自动）按列表宽度判，调用方也可以直接说画不画。
+// AlbumMode 是「专辑」那一列怎么定：默认（自动）按窗口宽和列表宽判，调用方也可以直接说画不画。
 //
-// 原型那条媒体查询看的是**窗口**宽（≤ 1180 去掉专辑列），而自动档拿的是**列表**宽——列表
-// 比内容区窄一圈页边距，默认 1200 的窗口里列表是 888，会被自动档误判成「太窄」。页面知道
-// 窗口宽，所以用 `AlbumShown` / `AlbumHidden` 自己说了算。
+// 原型那条媒体查询看的是**窗口**宽（≤ 1180 去掉专辑列）。自动档用两个依据：页面外壳每帧按窗口宽
+// 设一次的 `SetAlbumHidden`，加上列表自己的宽（侧栏被拖宽、窗口没到断点但列表窄时，`w` 加页边距
+// 小于 `HideAlbumBelow` 也去掉）。页面自己知道窗口宽、又不走外壳的（首页），用 `AlbumShown` /
+// `AlbumHidden` 自己说了算。
 type AlbumMode int
 
 const (
@@ -41,13 +47,20 @@ const (
 	AlbumHidden
 )
 
+// albumHidden 是「窗口宽 ≤ 1180，去掉专辑列」（原型 `@media (max-width: 1180px)`），
+// 只给 `AlbumAuto` 用。页面外壳每帧按窗口宽设一次（`SetAlbumHidden`）。
+var albumHidden atomic.Bool
+
+// SetAlbumHidden 设「窗口宽 ≤ 1180」这一档（见 `albumHidden`）。
+func SetAlbumHidden(on bool) { albumHidden.Store(on) }
+
 // trackCols 是这一宽度下三列弹性列的宽：标题、专辑（0 = 不画）、UP 主。
 func trackCols(w float32) (main, album, owner float32) {
 	return trackColsMode(w, AlbumAuto)
 }
 
 func trackColsMode(w float32, mode AlbumMode) (main, album, owner float32) {
-	hide := w > 0 && w < HideAlbumBelow
+	hide := (w > 0 && w+2*pageMargin < HideAlbumBelow) || albumHidden.Load()
 	switch mode {
 	case AlbumShown:
 		hide = false
@@ -129,6 +142,15 @@ type Track struct {
 	Compact bool
 	// AlbumCol 是「专辑」那一列画不画（默认按列表宽度自动判，见 `AlbumMode`）。
 	AlbumCol AlbumMode
+	// Highlight 是要在歌名里标成主色加粗的搜索词（空 = 不标；大小写不敏感，只标第一处）。
+	Highlight string
+	// Dim 把整行压成次要色（失效的条目）。
+	Dim bool
+	// RowWire 在行元素建好、读悬停之前调一次：调用方在这里给行挂右键菜单、
+	// 输入处理这类行级接线，返回挂好的行。nil = 不挂。
+	RowWire func(row ui.Element) ui.Element
+	// Menu 是「⋯」点开的菜单（也就是右键菜单那一份）。nil 时「⋯」只报 `More` 事件。
+	Menu func(m *ui.Menu)
 }
 
 // TrackEvents 是这一帧在这一行上发生的事。
@@ -152,6 +174,9 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 	}
 	row := ui.Row(c).Key(key).Width(w).Height(h).Radius(tok.R8).PaddingX(space.Px12).
 		Gap(space.Px16).AlignItems(ui.Center)
+	if t.RowWire != nil {
+		row = t.RowWire(row)
+	}
 	hot := row.Hovered()
 	ev.Hovered = hot
 	switch {
@@ -192,7 +217,11 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				if t.Playing {
 					name = p.AccentText
 				}
-				text(c, t.Title, scale.Size14, name).FontWeight(500).SingleLine().Ellipsis("…")
+				if t.Dim && !t.Playing {
+					name = p.Text2
+				}
+				titleText(c, t.Title, t.Highlight, name, p.AccentText).FontSize(scale.Font(c, scale.Size14)).
+					FontWeight(500).SingleLine().Ellipsis("…")
 				ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 					if t.Quality != "" {
 						Badge(c, t.Quality, t.Quality == "HI-RES")
@@ -247,7 +276,11 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				ev.Like = IconBtn(c, key+":like", ic, label, IconOpts{Row: true, On: t.Liked}).Clicked()
 			}
 			if hot {
-				ev.More = IconBtn(c, key+":more", "more", "更多操作："+t.Title, IconOpts{Row: true}).Clicked()
+				more := IconBtn(c, key+":more", "more", "更多操作："+t.Title, IconOpts{Row: true})
+				if t.Menu != nil {
+					more = more.Menu(t.Menu)
+				}
+				ev.More = more.Clicked()
 			}
 		})
 	})
@@ -285,6 +318,27 @@ func EqBars(c *ui.Context, key string, moving bool) ui.Element {
 		}
 	})
 	return box
+}
+
+// titleText 是歌名那一行字；hl 非空且命中时把命中的那一段标成 mark 色、700 粗。
+func titleText(c *ui.Context, s, hl string, color, mark ui.Color) ui.Element {
+	if hl == "" {
+		return ui.Text(c, s).TextColor(color)
+	}
+	ls, lh := strings.ToLower(s), strings.ToLower(hl)
+	if len(ls) != len(s) || len(lh) != len(hl) {
+		return ui.Text(c, s).TextColor(color)
+	}
+	i := strings.Index(ls, lh)
+	if i < 0 {
+		return ui.Text(c, s).TextColor(color)
+	}
+	j := i + len(hl)
+	return ui.RichText(c,
+		ui.Span{Text: s[:i], Color: color},
+		ui.Span{Text: s[i:j], Color: mark, Weight: 700},
+		ui.Span{Text: s[j:], Color: color},
+	)
 }
 
 func abs32(v float32) float32 {

@@ -40,10 +40,10 @@ func TestTrackColumnsFillTheRow(t *testing.T) {
 			t.Errorf("列表宽 %.0f：各列加起来 %.1f", w, sum)
 		}
 	}
-	if _, album, _ := trackCols(900); album != 0 {
-		t.Errorf("内容区 900（< %d）还画着专辑列", HideAlbumBelow)
+	if _, album, _ := trackCols(800); album != 0 {
+		t.Errorf("列表宽 800 + 页边距（< %d）还画着专辑列", HideAlbumBelow)
 	}
 	if _, album, _ := trackCols(1020); album == 0 {
-		t.Error("内容区 1020 却没有专辑列")
+		t.Error("列表宽 1020 却没有专辑列")
 	}
 }

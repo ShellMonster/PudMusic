@@ -226,6 +226,9 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 			return
 		}
 	}
+	if acts.MenuExtra != nil {
+		acts.MenuExtra(menu, song)
+	}
 }
 
 // doAction 是菜单项被选中之后做的事。i 是这一项的下标，song 是它那一首。

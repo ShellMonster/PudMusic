@@ -127,6 +127,13 @@ type Music struct {
 	// 时那一格空着（比如收藏夹里一条没给 fav_time 的音轨）。
 	PubTime time.Time
 
+	// Fans / Level 是 UP 主卡上的粉丝数和等级（只有搜索「用户」那一档有）。
+	Fans  int64
+	Level int
+	// Pair 是和这一行并排的第二张 UP 主卡（原型的 UP 主结果是两列）：用户那一档在
+	// 装行时两个一组打包，行数减半，行身份仍是第一个人的 ID。
+	Pair *Music
+
 	// Progress 是「看到哪儿」，只有最近播放填；大于 0 且有时长时，标题下面画一条细进度条。
 	Progress time.Duration
 
@@ -155,6 +162,9 @@ type Columns struct {
 	// PubTimeTitle 是时间那一列的表头字。空串是「投稿时间」——收藏夹那一页
 	// 写的是「收藏时间」，因为它画的是 `fav_time`（见 `Music.PubTime`）。
 	PubTimeTitle string
+	// Text 给了就是曲目行里「专辑」那一列的字（稍后再看的进度、本地音乐的格式……），
+	// 优先于 PubTime。
+	Text func(m Music) string
 	// Now 是判「几天前」用的「现在」。nil 是墙钟。
 	//
 	// ⚠️ **传一个读外壳时钟的闭包，别传 `s.clock.Now` 这个值**：测试是在
@@ -319,6 +329,9 @@ type List struct {
 	// 把整个进程带走（本包自己 recover 住，见 viewRow）。不记的话这一行
 	// 每帧崩一次，日志被刷爆、帧率拖垮——比画不出来糟得多。
 	failed map[string]bool
+
+	// pud 报行和表头是不是画原型样式（见 `SetPudRows`）。
+	pud bool
 
 	// keys 记「上一次输入是键盘还是指针」（理由见 `selection.go` 的 KeyboardMode）。
 	//

@@ -48,10 +48,10 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -314,6 +314,15 @@ type localPage struct {
 	// 什么也不做。
 	noteScrollbar func(bool)
 
+	// contentW 报内容区有多宽（由 Shell 接上；页头据此决定标题字号和页边距）。
+	contentW func(c *ui.Context) float32
+
+	// dirOpen 是目录筛选下拉此刻是不是展开的。
+	dirOpen bool
+
+	// texts 是每一行「专辑」那一列的字（格式 · 大小），按 `Music.ID` 记；每帧重建。
+	texts map[string]string
+
 	// style 是当前展示样式，下标对着 localStyles。
 	style int
 	// dirLabel 是目录筛选里选中那一档的**显示名**（不是路径，见 dirLabels）。
@@ -381,14 +390,20 @@ const maxLocalWakes = 4
 func newLocalPage(a *app.App, cache *imgcache.Cache, acts list.Actions,
 	notify func(string, notice.Tone), pickDir func() (string, error), displayView func() list.View) *localPage {
 	p := &localPage{
-		app: a, cache: cache, acts: acts, notify: notify, pickDir: pickDir,
+		app: a, cache: cache, notify: notify, pickDir: pickDir,
 		displayView: displayView,
 		sel:         -1, dirLabel: allDirs,
 	}
 	// 这一份建一次、记着自己的滚动位置（见 struct 上那段）。它内部是一对控件
 	//（列表 / 紧凑 / 网格），摆法由设置决定，见文件头那一段。
+	// 原型的本地行菜单：标准项之后是「在访达里显示」和「删除文件（移到废纸篓）」。
+	acts.MenuExtra = p.rowMenuExtra
+	p.acts = acts
 	p.cards = list.NewSwitchView(cache, acts)
 	p.cards.SetEmpty("") // 空状态由这一页自己说，见 viewEmpty
+	// 曲目行用原型样式；「专辑」那一列写「格式 · 大小」，没有播放量（文件没有播放量）。
+	p.cards.SetPudRows(true)
+	p.cards.SetColumns(list.Columns{Text: func(m list.Music) string { return p.texts[m.ID] }})
 	// 外面包一层 recover：view 里 panic 会一路穿出 Cocoa 事件循环把整个
 	// 进程带走。建的时候包一次就够（每帧包一次是白花开闭包）。
 	p.paint = p.view
@@ -490,14 +505,45 @@ func (p *localPage) view(c *ui.Context) {
 	p.sel = indexOfTrackID(p.rows, p.selID)
 	p.lastSel = p.sel
 
-	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:"+localMusicPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px10).
-		Children(func() {
-			p.viewHead(c)
-			p.viewToolbar(c, st)
-			p.viewWarnings(c, t, st)
+	// 页面外壳：原型 `.page`（居中、最宽 1280、边距 40 / 32 / 16，断点按窗口宽）。
+	winW, _ := c.Size()
+	cw := winW - tok.SideW
+	if p.contentW != nil {
+		if w := p.contentW(c); w > 0 {
+			cw = w
+		}
+	}
+	pad := space.PageHorizontalForWindow(winW)
+	pud.SetAlbumHidden(winW <= 1180)
+	inner := min(cw, float32(pudPageMaxW))
+	ui.Column(c).Key("page:" + localMusicPath).Grow(1).AlignItems(ui.Center).Children(func() {
+		ui.Column(c).Grow(1).Width(inner).Padding(space.PageTop, pad, space.None, pad).
+			AlignItems(ui.Stretch).Children(func() {
+			// 页头、拖入区、工具条、表头都画在列表的滚动区里（`list.Lead`）：原型整页一起
+			// 滚，不然 800 高的窗口里只剩三行歌。一首都没有时没有列表，直接画。
+			top := func(c *ui.Context) {
+				p.viewHead(c, winW, st)
+				p.viewDropZone(c, st)
+				p.viewToolbar(c, st)
+				p.viewWarnings(c, t, st)
+			}
+			if len(p.rows) == 0 {
+				p.cards.SetLead(nil)
+				top(c)
+			} else {
+				p.cards.SetLead(&list.Lead{
+					Label:  "本地音乐",
+					Height: func() float32 { return 400 },
+					Draw: func(c *ui.Context) {
+						top(c)
+						ui.Box(c).Height(space.Px8)
+						p.cards.Header(c, "localmusic:header")
+					},
+				})
+			}
 			p.viewBody(c, t, st)
 		})
+	})
 
 	// 两道确认画在内容**之后**：它们是 overlay，位置不影响浮在最上面，
 	// 但放最后能保证这一帧的内容已经建完了。
@@ -510,11 +556,7 @@ func (p *localPage) view(c *ui.Context) {
 	// ⚠️ **这一页有两档**：卡片那一档（列表 / 紧凑 / 网格）走的是
 	// `ScrollOffset`（行高定死，算得准）；表格那一档自己滚，而它内部那个滚动
 	// 容器的像素偏移拿不到，所以那一档按行换算（见 `localTableOffset`）。
-	if p.style == localStyleTable {
-		list.BackToTop(c, p.localTableOffset(), p.localTableTop)
-	} else {
-		list.BackToTop(c, p.cards.ScrollOffset(), p.cardsTop)
-	}
+	list.BackToTop(c, p.cards.ScrollOffset(), p.cardsTop)
 }
 
 // syncLocalMusic 是本地音乐这一页每帧的副作用：登记唤醒句柄、把根目录对齐到
@@ -534,100 +576,81 @@ func (s *Shell) syncLocalMusic(c *ui.Context) {
 // localTableRowPad 是 `ui.Table` 给每一行的上下内边距（6+6，行高 44 里占 12）。
 const localTableRowPad = space.Px6
 
-// localTableRowPx 是本地音乐那一档表格里一行的高：操作那一列那枚键（`iconHit`
-// = 32）+ `ui.Table` 给每一行的上下内边距（6+6）。
-//
-// ⚠️ **它只用来把「顶上那一行是第几行」换算成像素**（回顶按钮的阈值是 400
-// 像素）。这一页的表格自己滚，而它内部那个滚动容器的像素偏移拿不到。
-//
-// ⚠️ **它是量出来的那一个数**（`TestTheTableRowHeightsAreWhatTheOffsetsAssume`
-// 钉着）：那一行的高由最高的格子决定（操作那一列的键），改了那一列的字号就得
-// 跟着改它。图标键的点击区从 28 长到 32（上游那一档，G39）之后，它从 40 变成
-// 44——**回顶按钮的换算也跟着变**，不改的话「滚过了多少」算错，回顶会早几行
-// 或者晚几行才出现。
-const localTableRowPx = 44
-
-// localTableOffset 是表格那一档滚过了多少像素。
-func (p *localPage) localTableOffset() float32 {
-	first, _ := p.table.Visible()
-	return float32(first) * localTableRowPx
-}
-
-// localTableTop 表格那一档回到顶上。
-func (p *localPage) localTableTop() { p.table.ScrollTo(0, ui.Start) }
-
-// cardsTop 卡片那一档回到顶上。
+// cardsTop 把列表滚回顶上（回顶按钮用）。
 func (p *localPage) cardsTop() { p.cards.ScrollTo(0, ui.Start) }
 
-// viewHead 是标题那一行：标题、展示样式切换、添加目录。
-func (p *localPage) viewHead(c *ui.Context) {
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Children(func() {
-		typo.Display(ui.Text(c, "本地音乐"), scale.Font(c, scale.PageTitle))
-
-		// 展示样式切换。⚠️ 用 `ui.Segmented` 而不是三个按钮：三档互斥、
-		// 当前位置一眼可见，三个按钮的话用户得靠猜哪个是按下去的。
-		ui.Segmented(c, &p.style, localStyles[:]...)
-
-		ui.Spacer(c)
-		// ⚠️ **它旁边那一枚文件夹加的图标**：上游那一枚是「图标 + 文字」的
-		// flat 键（`local-music/index.tsx:189`），而 `flat.Button` 只接管文字
-		// ——图标一直没画（那一票要的是「把描边和常驻底去掉」，不是重画按钮）。
-		//
-		// 于是它在画面上就是**一行小字**，而空状态那句话让用户去点它：按提示
-		// 找过去，扫到右上角只看见一行说明文字，**很可能以为那不是能点的**
-		//（报告 C2：用户于是以为要去顶栏找「打开文件」，而那是另一件事）。
-		//
-		// 所以这里把上游那一枚图标补上——**同一个词、同一个动作**，而它一眼就
-		// 看得出是个入口。
-		//
-		// ⚠️ **它仍然是扁平的**（无描边、无常驻底）：那是全应用次级按钮的
-		// 规矩（`flatbutton.go` 的文件头），`flatspread_test.go` 逐页钉着。
-		// 「看得见」靠的是那枚图标和空状态里那枚实心主色按钮，不是给它描一圈边。
-		addDir := flatButton(c, "")
-		addDir.Children(func() {
-			ui.Icon(c, icon(iconFolderAdd)).FontSize(14)
-			ui.Text(c, "添加目录")
-		})
-		if addDir.Clicked() {
+// viewHead 是页头（原型 `PAGES.local`）：Eyebrow「Local files」+ 48 宋体标题 + 导语（文件数和
+// 支持的格式）+ 右边「播放全部」「添加目录」。展示样式的切换、表格那一档在 DESIGN.md §0′.T7
+// 里随旧设计删了（设置里的「数据显示样式」照旧管列表 / 紧凑 / 网格）。
+func (p *localPage) viewHead(c *ui.Context, winW float32, st app.LocalMusicState) {
+	lede := strconv.Itoa(len(p.rows)) + " 个文件 · 支持 " + localFormatsText()
+	pud.PageHead(c, "Local files", "本地音乐", lede, winW, func() {
+		if pud.Button(c, "local:play-all", pud.Primary, pud.Std, "播放全部", "play").
+			Disabled(len(p.rows) == 0).Clicked() {
+			p.playAll()
+		}
+		if pud.Button(c, "local:add-dir", pud.Ghost, pud.Std, "添加目录", "open").Clicked() {
 			p.addDirectory()
 		}
 	})
 }
 
-// viewToolbar 是操作那一行。
+// localFormatsText 是导语里的「支持 FLAC、MP3……」：扫描白名单里能放的那些（去掉 .wma、
+// 把 .aif / .aifc 并进 AIFF）。
+func localFormatsText() string {
+	return "FLAC、MP3、WAV、AIFF、AAC、M4A、OGG"
+}
+
+// viewDropZone 是拖入区（原型 `.drop`）：1 像素虚线框、圆角 12、内边距 24、离上 24；左边
+// 48 的圆形图标位，中间两行字（16 号 / 13 号次要色），右边「选择文件夹」。
+//
+// ⚠️ **拖动悬停时的高亮（`.drop.over`）做不出来**：窗口级的文件拖入（`handleFileDrop`）只在
+// 松手时回调，框架没有「拖着文件悬停在某个元素上」的事件。
+func (p *localPage) viewDropZone(c *ui.Context, _ app.LocalMusicState) {
+	t := tok.Of(c.Theme())
+	ui.Row(c).Key("local:drop").FillWidth().AlignItems(ui.Center).Gap(space.Px20).Padding(space.Px24).
+		Margin(space.Px24, space.None, space.None, space.None).
+		Draw(func(pp *ui.Painter, r ui.Rect) { pp.StrokeDashed(r, t.LineStrong, tok.R12, 1) }).
+		Children(func() {
+			ui.Box(c).Size(48, 48).Radius(24).Background(t.Surface2).Shrink(0).
+				AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+				ui.Icon(c, pud.Icon("import")).FontSize(22).TextColor(t.Text2)
+			})
+			ui.Column(c).Grow(1).Shrink(1).Gap(space.Px2).Children(func() {
+				ui.Text(c, "把音频文件拖到这里").FontSize(scale.Font(c, scale.Size16)).FontWeight(700).TextColor(t.Text)
+				ui.Text(c, "也可以直接拖到程序坞图标上，或者在访达里双击音频文件打开。").
+					FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text2)
+			})
+			if pud.Button(c, "local:pick", pud.Ghost, pud.Std, "选择文件夹", "folder").Clicked() {
+				p.addDirectory()
+			}
+		})
+}
+
+// viewToolbar 是拖入区下面那一行：目录筛选、移除目录、重新扫描。原型没有这一行，但目录
+// 管理（只有这里能移除一个目录）不能随它消失，所以只留这三样、摆成原型的 `.toolbar`。
 func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Children(func() {
-		if len(p.rows) > 0 {
-			// 「播放全部」用主按钮：Biu 那一页上它就是 primary
-			//（`local-music.ts:212` 的 `color="primary"`）。
-			ui.PrimaryButton(c, "播放全部").OnClick(p.playAll)
-			// 照上游那一枚 `IconButton`（`local-music/index.tsx:208`，tooltip
-			// 「添加到播放列表」）：图标键 + 悬停说出它做什么。
-			if p.tipWith(c, flatIconButton(c, iconEnqueue, "全部加入队列", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "全部加入队列").Clicked() {
-				p.queueAll()
+	if len(st.Roots) == 0 {
+		return
+	}
+	pudToolbar(c, "local:toolbar", func() {
+		labels := dirLabels(st.Roots)
+		cur := 0
+		for i, l := range labels {
+			if l == p.dirLabel {
+				cur = i
 			}
 		}
-
+		if pudSelectBox(c, "local:dir", &p.dirOpen, labels, &cur) {
+			p.dirLabel = labels[cur]
+		}
 		ui.Spacer(c)
-
-		// 搜标题：上游是 `SearchButton`——收起时一枚放大镜，点开才是一个 240 的
-		// 输入框（`local-music/index.tsx:236`）。我们这一排放不下 240，展开的
-		// 上限沿用原来那个输入框的 180。
-		expandableSearch(c, p.tip, &p.searchBox, &p.search, searchLocalLabel, 64, 180,
-			p.justShown(), "")
-		ui.Select(c, &p.dirLabel, dirLabels(st.Roots)).Width(180)
-		// 移除此目录 / 重新扫描：上游是两枚 `IconButton`（`local-music/index.tsx:238,244`，
-		// tooltip「刷新」「移除当前目录」）。悬停提示说的就是名字——图标键没有
-		// 可见的字，提示是它唯一说得出自己做什么的地方。
 		if p.currentRoot(st.Roots) != "" {
-			if p.tipWith(c, flatIconButton(c, iconDeleteBin5, "移除此目录", iconMd).
-				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "移除此目录").Clicked() {
+			if p.tipWith(c, pud.IconBtn(c, "local:rm-dir", "x", "移除此目录", pud.IconOpts{}), "移除此目录").Clicked() {
 				p.askRemoveDir()
 			}
 		}
-		if p.tipWith(c, flatIconButton(c, iconRefresh, "重新扫描", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "重新扫描").Clicked() {
+		if p.tipWith(c, pud.IconBtn(c, "local:rescan", "refresh", "重新扫描", pud.IconOpts{}), "重新扫描").Clicked() {
 			p.app.RescanLocalMusic()
 		}
 	})
@@ -669,8 +692,6 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		drawEmpty(c, "local:loading", loadingState("正在扫描…"), emptyPagePad)
 	case len(p.rows) == 0:
 		p.viewEmpty(c, st)
-	case p.style == localStyleTable:
-		p.viewTable(c, t)
 	default:
 		// 🔴 设置里的「数据显示样式」在这一帧生效（`displaymode.go` 里
 		// `displayView` 的注释写了为什么每帧都要调）。这一页的卡片控件是**一对**，
@@ -682,7 +703,7 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		//
 		// 表格那一档走的是上面那个 `case`（`ui.Table` 自带表头，`localColumns`），所以
 		// 走不到这里来。
-		p.cards.Header(c, "localmusic:header")
+		p.cards.SetPudRows(true)
 		p.cards.View(c)
 		if p.noteScrollbar != nil {
 			p.noteScrollbar(p.cards.Hot())
@@ -773,247 +794,11 @@ func indexOfTrackID(rows []localmusic.Track, id string) int {
 	return -1
 }
 
-// viewTable 是表格那一档。
-func (p *localPage) viewTable(c *ui.Context, t *ui.Theme) {
-	// 🔴 铁律四：Key 和 Label 每一帧都重装，装的是 ID（不是序号）。
-	//
-	// 为什么这一页特别需要：往目录里加一个文件夹，列表前面就多出一整段，
-	// 后面所有行的下标全部错位。不按 ID 装的话，选中项会跳到旁边那一首。
-	// ⚠️ **身份是预先装箱好的那一份**（`p.rowKeys`）：理由见那个字段的注释。
-	p.table.Key = func(i int) any { return p.rowKeys.At(i, p.rows[i].ID, rowkey.Identity) }
-	p.table.Label = func(i int) string { return p.rows[i].Title }
-	p.table.Selected = &p.sel
-	// 装一份**永远是空的**选择集：框架于是不再给选中的行铺实心主色底（票 #197，
-	// 理由见 `tableSel` 那一段）。
-	p.table.Selection = &p.tableSel
-	// ⚠️ **先清空它**：框架点一行时会往里面放那一份（`f.choose`），放着不管下一帧
-	// 就又画上实心主色底了。
-	p.tableSel.Clear()
-
-	// 🔴 **键盘交接**（票 #245 的 E4）：
-	//
-	//   - **↑ 在顶上一行时**把焦点交回侧栏（否则键盘用户被留在内容区里）。
-	//   - **登记这一页的方向键目标**：侧栏按 ↓ 走进来，走的是这一张表格。
-	//
-	// ⚠️ **这一页的表格是默认那一档**（`localStyles` 那段：「表格是默认那一档」，
-	// 因为它是 Biu 那一页的本体）——所以它没登记的话，**侧栏按 ↓ 在这一页上什么
-	// 也不发生**。
-	if p.focusSide != nil {
-		p.keys.SetUpAtTop(p.focusSide)
-	}
-	if p.focusSink != nil {
-		p.focusSink(localTableFocus{&p.table.Handle, &p.sel})
-	}
-
-	// 外面这一层是「表格的那一块」：`PointerPosition` 拿它判指针在不在表里
-	//（见 tableBox 的注释）。它自己什么也不画，尺寸跟着里面的表格走。
-	box := ui.Column(c).Grow(1).FillWidth()
-	// ⚠️ **绑身份，不是留元素**：这一层每一帧都是新元素，而元素不能存进应用
-	// 状态（见 `tableBox` 的注释）。
-	box.Bind(&p.tableBox)
-	box.Children(func() {
-		table := ui.Table(c, &p.table, localColumns, len(p.rows), func(row, col int) {
-			p.viewCell(c, t, row, col)
-		}).
-			Grow(1).FillWidth().
-			OnSubmit(func() { p.playRow(p.sel) }).
-			// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
-			// 理由见 `widgets/list/selection.go` 的 KeyboardMode）。
-			//
-			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、双击
-			// 播放都还在。
-			HandleInput(p.keys.Input)
-		table.Bind(&p.tableEl)
-		// 焦点环画不画：**键盘在管**而且**表格有焦点**。
-		//
-		// ⚠️ **表格有焦点是第二半**：方向键挪的是表格的游标，焦点不在表格上时按
-		// 方向键挪不动它（挪的是别的东西），那一行也就不是「键盘走到的那一行」。
-		//
-		// ⚠️ **要在表格建好之后才算**：句柄是建表格的时候绑的（`mygo/ui/list.go` 的
-		// buildList），之前问「表格有没有焦点」问的是上一帧那个元素。
-		p.showCursorRing = p.keys.On() && list.Focused(c, &p.table)
-		// 游标那一行的**焦点环**。
-		//
-		// ⚠️ **画在表格自己的空间里**：格子四周那圈内边距（`mygo/ui/table.go` 的
-		// `Padding(Space(1.5), Space(2.5))`）是**行元素**的地盘——画在格子里会被
-		// 裁掉，而框架把主色刷在行元素上（那一块实心主色底票 #197 去掉了）。
-		table.DrawOver(func(cp *ui.Painter, r ui.Rect) {
-			p.drawCursorRing(c, cp, r, t)
-		})
-		if p.noteScrollbar != nil {
-			p.noteScrollbar(scrollbar.Hot(table))
-		}
-	})
-}
-
-// drawCursorRing 给**游标那一行**画一圈焦点环。
-//
-// # 为什么自己画
-//
-// 框架给表格的游标那一行也画圈环（`mygo/ui/list.go`：多选时「键挪到的那一行」），
-// 但它认的是框架那个 `focusVisible`——**指针按一下会把它清掉，方向键不会设回来**
-// （理由见 `widgets/list/selection.go` 的 KeyboardMode）。于是「点一行 → 按 Down」
-// 那一路上，框架那一圈不画，而表格的游标在画面上就一个标记都没有了。
-//
-// # 那圈环画在哪
-//
-// **游标那一行的整行**：行元素是框架的（画不到），但**序号那一格的盒子是我们的**，
-// 而它撑满那一格（`viewRowNumber`）——所以按它算出那一行的位置，再往外扩到整行
-// 的宽（表格的宽减掉两边的内边距）。
-//
-// # 什么时候画
-//
-// **键盘在管的时候**：指针点过之后那一行什么标记都没有（上游点一行不改变它的样子），
-// 但**再按方向键走位时环要回来**。
-func (p *localPage) drawCursorRing(c *ui.Context, cp *ui.Painter, r ui.Rect, t *ui.Theme) {
-	if !p.showCursorRing {
-		return
-	}
-	// ⚠️ **这两个是这一遍的那两个元素**：`c.Resolve` 换回来的正是**建它们的那
-	// 一遍**里的那一个（句柄只记身份，元素每遍都是新的——换不回来就是「这一遍
-	// 没有它」，于是不画）。
-	cellEl, tableEl := c.Resolve(p.cursorCell), c.Resolve(p.tableEl)
-	if !cellEl.Valid() || !tableEl.Valid() {
-		return
-	}
-	cell, table := cellEl.Bounds(), tableEl.Bounds()
-	// 框架给每一格左右留的内边距（`mygo/ui/table.go` 的 `Padding(Space(1.5),
-	// Space(2.5))`）：行是那些格子的地盘，环要贴着行的边。
-	padX := t.Space(2.5)
-	// 表格的盒子在它**父元素**的空间里（`DrawOver` 给的 `r`），而盒子的
-	// `Bounds()` 是**窗口**坐标——两者的差就是「相对表格左上角的位置」。
-	rect := ui.Rect{
-		X: r.X + cell.X - table.X - padX,
-		Y: r.Y + cell.Y - table.Y - localTableRowPad,
-		W: table.W - 2*padX,
-		H: localTableRowPx,
-	}
-	// 往里收 3 像素，和框架画行焦点环时同一个数（`mygo/ui/list.go`）。
-	cp.FocusRing(ui.Rect{X: rect.X + 3, Y: rect.Y + 3, W: rect.W - 6, H: rect.H - 6},
-		[4]float32{0, 0, 0, 0})
-}
-
-// viewCell 画表格的一个格子。
-func (p *localPage) viewCell(c *ui.Context, t *ui.Theme, row, col int) {
-	tr := p.rows[row]
-	switch col {
-	case 0:
-		p.viewRowNumber(c, t, row)
-	case 1:
-		ui.Text(c, tr.Title).SingleLine()
-	case 2:
-		ui.Text(c, fileSize(tr.Size)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-	case 3:
-		// 放不了的格式用警示色，而不是省略号或者别的字样：Biu 那一格画的是
-		// `data.format?.toUpperCase() || "-"`（`item.tsx:71`），我们多给一层
-		// 颜色，说的是同一件事（「列出来了，但这一格有毛病」）。
-		e := ui.Text(c, strings.ToUpper(strings.TrimPrefix(tr.Format, "."))).FontSize(scale.Font(c, scale.Size12))
-		if tr.Playable() {
-			e.TextColor(t.TextMuted)
-		} else {
-			e.TextColor(warningText(t))
-		}
-	case 4:
-		ui.Text(c, durText(tr.Duration)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-	case 5:
-		ui.Text(c, createdText(tr.Created)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-	case 6:
-		p.viewRowOps(c, tr)
-	}
-}
-
 // localPlayIconLabel 是行 hover 时那一枚播放图标的无障碍名字。
 //
 // 它只在 hover 的那一行画出来，所以它同时是测试认「这一下 hover 生效了没有」
 // 的凭据：画面上一共有几个这个名字，就是有几行正被指着。
 const localPlayIconLabel = "播放这首"
-
-// viewRowNumber 是表格序号那一格：平时是序号，指针压在这一行上时换成播放图标。
-//
-// 出处是上游 `local-music/item.tsx:57-64`：`group-hover:hidden` 藏序号、
-// `hidden group-hover:inline` 亮 `RiPlayFill`（16）。那一行是双击播放的，所以
-// 这个图标是「这里点得动」的提示，不是另一颗按钮——**不给它点击处理**：
-// 单击选行、双击播放这件事由表格自己做（`OnSubmit`）。
-//
-// ⚠️ **`ui.Table` 没有「这一行 hover 了」的回调**（`cell` 只给行列号），所以
-// 这里拿**上一帧的布局**自己判：表格在不在指针下面（`tableBox`），以及指针在
-// 序号这一格的纵向范围里（`PointerPosition` 给的 y 不受横向位置影响——它在
-// 指针压着别的列时照样算得出相对坐标）。
-//
-// 那个盒子是**固定尺寸**的：换图标不改变行高与列宽，否则指针一上去整行都跳。
-func (p *localPage) viewRowNumber(c *ui.Context, t *ui.Theme, row int) ui.Element {
-	h := float32(localTableRowPx - 2*localTableRowPad)
-	cell := ui.Row(c).FillWidth().Height(h).Center().Justify(ui.Center)
-	// ⚠️ **游标那一行的盒子要留着**：焦点环按它算出那一行的位置（理由见
-	// `drawCursorRing`）。它是**撑满那一格**的（`FillWidth` + `Height`），所以它的
-	// 盒子就是那一行的位置。
-	//
-	// ⚠️ **留的是身份不是元素**（见 `cursorCell` 的注释）：游标不在画面上时这一
-	// 格不建，句柄换不回这一遍的元素，于是焦点环不画——和从前「每帧清空」是
-	// 同一个结果。
-	if row == p.sel {
-		cell.Bind(&p.cursorCell)
-	}
-	onRow := p.tableRowHovered(c, cell)
-	cell.Children(func() {
-		if onRow {
-			ui.Icon(c, icon(iconPlayFill)).FontSize(16).TextColor(t.Text).Label(localPlayIconLabel)
-			return
-		}
-		ui.Text(c, strconv.Itoa(row+1)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-	})
-	return cell
-}
-
-// tableRowHovered 报这一格的纵向位置是不是压在指针下面。
-//
-// 判据分两半：**指针在表格里**（否则页面左边、侧栏里同一条横线上的那一格也会
-// 亮）和**指针在这一格的高度之内**。两样读的都是上一帧的盒子——即时模式里
-// 布局是这一帧开头量完的，`Bounds` / `PointerPosition` 给的正是它。
-func (p *localPage) tableRowHovered(c *ui.Context, cell ui.Element) bool {
-	// ⚠️ **指针位置只有元素问得到**，而元素不能存进应用状态（见 `tableBox`）：
-	// 所以存的是身份，用的时候 `c.Resolve` 换回**这一遍**的那一个。
-	box := c.Resolve(p.tableBox)
-	if !box.Valid() {
-		return false
-	}
-	if _, _, over := box.PointerPosition(); !over {
-		return false
-	}
-	_, y, _ := cell.PointerPosition()
-	// ⚠️ **判据要算上那一行的上下内边距**：格子（内容区）只有 32 高，而那一行是
-	// 44 高（上下各 6 是 `ui.Table` 给每一行的内边距）——指针压在那 6 像素上也算
-	// 「压在这一行」。只按 32 算的话，行的上/下各 6 像素是死区，图标会在指针
-	// 上下移动时闪一下（上游的 `group-hover` 是**整行**都亮的）。
-	return y >= -localTableRowPad && y < cell.Bounds().H+localTableRowPad
-}
-
-// viewRowOps 是表格每一行最后那一格的两个按钮。
-//
-// ⚠️ **正在放的那一首不给「删除」**：照 Biu 上游
-// （`local-music.ts:57` 的 `items = isPlaying ? menus.filter(m => m.key !== "delete")`）。
-// 删掉正在放着的那个文件，播放器这一路会一直播到它自己结束（文件句柄还在），
-// 用户看到的是「歌还在放，但列表里没了，再按下一首就报错」——一个说不清的状态。
-// 不给这个按钮，好过给一个按下去会变成那个状态的按钮。
-func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
-	// 两个图标键。上游那一格是一枚「⋯」菜单（`operation.tsx:38`）；我们这里是
-	// 两个直接点得到的动作——一行的操作一共就两件，藏进菜单多一次点击。
-	//
-	// ⚠️ 删除那一颗的红色靠 `TextColor`：图标继承祖先的文字色，而 `flat` 那个
-	// 配方不给颜色——不给的话它和打开文件夹那枚一样是灰的，「这一下是不可撤销的」
-	// 那层意思就没了。
-	if p.tipWith(c, flatIconButton(c, iconFolder, "打开文件夹", iconSm).
-		Size(iconHit, iconHit).Padding(space.None, space.Px9), "在访达里显示").Clicked() {
-		mygo.Shell.ShowItemInFolder(tr.Path)
-	}
-	if !p.isPlaying(tr) {
-		if p.tipWith(c, flatIconButton(c, iconDeleteBin5, deleteRowLabel, iconSm).
-			Size(iconHit, iconHit).Padding(space.None, space.Px9).
-			TextColor(c.Theme().Danger), deleteRowLabel).Clicked() {
-			p.askTrack, p.askOpen = tr, true
-		}
-	}
-}
 
 // cardsOf 把 rows 转成卡片控件要的形状。
 //
@@ -1022,7 +807,9 @@ func (p *localPage) viewRowOps(c *ui.Context, tr localmusic.Track) {
 // 格本来是空的，正好用来放一句用户需要知道的话。
 func (p *localPage) cardsOf() []list.Music {
 	p.songs = p.songs[:0]
+	p.texts = make(map[string]string, len(p.rows))
 	for _, tr := range p.rows {
+		p.texts[tr.ID] = strings.ToUpper(strings.TrimPrefix(tr.Format, ".")) + " · " + fileSize(tr.Size)
 		m := list.Music{
 			ID:       tr.ID,
 			Title:    tr.Title,
@@ -1038,4 +825,22 @@ func (p *localPage) cardsOf() []list.Music {
 		p.songs = append(p.songs, m)
 	}
 	return p.songs
+}
+
+// rowMenuExtra 是本地音乐行菜单里标准项之后的两项（原型 `row:…:local` 的「在访达里显示」
+// 「删除文件」）。正在放的那一首不给删除（和旧表格那一行同一个规矩）。
+func (p *localPage) rowMenuExtra(m *ui.Menu, song list.Music) {
+	idx := indexOfTrackID(p.rows, song.ID)
+	if idx < 0 {
+		return
+	}
+	tr := p.rows[idx]
+	m.Separator()
+	if m.Item("在访达里显示").Chosen() {
+		mygo.Shell.ShowItemInFolder(tr.Path)
+		return
+	}
+	if !p.isPlaying(tr) && m.Item(deleteRowLabel).Chosen() {
+		p.askTrack, p.askOpen = tr, true
+	}
 }

@@ -10,11 +10,9 @@
 package ui
 
 import (
-	"strconv"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -37,14 +35,6 @@ const (
 // 这一段跑在主线程的 view 里，所以改这些字段不违反铁律一；后台那一跳只调
 // wakeHandle.invalidate，不碰它们（见 clock.go 顶上那条硬规矩）。
 func (s *Shell) syncRoute() {
-	// 到点了就回首页。**必须在这一帧的主线程上做**：`ui.Router.Push` 不是线程
-	// 安全的（ui/router.go 的注释就写着只能从主线程改状态），后台那一跳因此
-	// 只负责叫醒界面，跳页这件事留给这儿。
-	if !s.notFoundAt.IsZero() && s.clock.Now().Sub(s.notFoundAt) >= notFoundRedirect {
-		s.disarmNotFound()
-		s.navigate("/")
-	}
-
 	path := s.router.Path()
 	if path == s.shownPath {
 		return
@@ -53,11 +43,7 @@ func (s *Shell) syncRoute() {
 	// 换页了这一拍把浮层一起收掉（票：评论抽屉换页不收）。收在这里的理由同
 	// 上面那段注释——**换页不止 navigate 一条道**，而这里是唯一都过的那一处。
 	s.closeOverlaysForNav()
-	if lookup(path) == notFound {
-		s.armNotFound()
-	} else {
-		s.disarmNotFound()
-	}
+	// 原型的 404 没有倒计时、也不自动跳走（DESIGN.md §0′.T7）：只有一枚「回到推荐音乐」。
 }
 
 // closeOverlaysForNav 换页的时候把浮在页面上的那几层收掉。
@@ -138,25 +124,6 @@ func (s *Shell) closeOverlaysForNav() {
 	s.fullLyric.fontOpen = false
 }
 
-// armNotFound 记下进 404 的那一刻，起那个每秒一跳的倒计时。
-//
-// 先收旧的：404 → 另一个 404（`/没有这条` → `/也没有这条`）也算换页，会走到
-// 这里来。少了这一行，上一次那个每秒一跳的定时器就没人收了，它会一直醒到
-// 窗口关掉。
-//
-// 那一跳回调是 `s.wake.invalidate`——只叫醒，不改任何状态。要真等到 3 秒、
-// 要算还剩几秒，都是下一帧的 syncRoute / viewNotFound 在主线程上拿时钟现算。
-func (s *Shell) armNotFound() {
-	// ⚠️ 关掉之后不许再装（理由见 navbar_feed.go 里 `s.feed.arm` 那一句）：这一句
-	// 是「画到 404 那一页」就会到的，而 `Close` 收掉的是**一个**已经装上的定时器。
-	if s.closed {
-		return
-	}
-	s.disarmNotFound()
-	s.notFoundAt = s.clock.Now()
-	s.notFoundStop = s.clock.EveryFunc(notFoundTick, s.wake.invalidate)
-}
-
 // disarmNotFound 收掉倒计时。离开 404、或者到点跳首页时调。
 func (s *Shell) disarmNotFound() {
 	if s.notFoundStop != nil {
@@ -164,26 +131,6 @@ func (s *Shell) disarmNotFound() {
 		s.notFoundStop = nil
 	}
 	s.notFoundAt = time.Time{}
-}
-
-// notFoundLeft 是倒计时上还剩几秒，从 3 数到 0。
-//
-// 按经过的时间现算，不记着「已经减了几次」：真时钟上那一跳和这一帧之间差几毫秒
-// 是随机的，记次数会出现「数字写着 2、实际只剩 0.4 秒」。
-func (s *Shell) notFoundLeft() int {
-	left := notFoundRedirect - s.clock.Now().Sub(s.notFoundAt)
-	if left <= 0 {
-		return 0
-	}
-	// 向上取整：刚进来 0.1 秒就该写着 3，而不是 2。
-	n := int(left / time.Second)
-	if left%time.Second != 0 {
-		n++
-	}
-	if n > int(notFoundRedirect/time.Second) {
-		n = int(notFoundRedirect / time.Second)
-	}
-	return n
 }
 
 // viewNotFound 是 404 页。
@@ -207,23 +154,14 @@ func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	// 和其它页面 view 一样，头一件正事是装主题（铁律二，见 viewEmpty）。
 	s.applyFrameTheme(c)
 
-	t := c.Theme()
-	ui.Column(c).Key("page:not-found").Grow(1).Center().Gap(space.Px8).Padding(space.Px20, space.Px28).
-		Children(func() {
-			ui.Text(c, "404").FontSize(scale.Font(c, scale.Size28)).Bold().TextColor(t.TextMuted)
-			// ⚠️ **限宽**：路径是用户敲进来的，长度不封顶——不限宽的话一条长
-			// 路径会把这一行撑出窗口，而 404 这一页上又没有别的东西能提示
-			// 「刚才敲的那一长串是个地址」。
-			ui.Text(c, "没有「"+path+"」这一页").FontSize(scale.Font(c, scale.Size16)).MaxWidth(520)
-			ui.Text(c, notFoundCountdown(s.notFoundLeft())).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-			if ui.PrimaryButton(c, "回到主页").Clicked() {
-				s.disarmNotFound()
+	// 原型 `PAGES.notfound`：搜索插画 + 「这一页走丢了」+ 「链接可能已经失效，或者这一页还没有内容。」
+	// + 主色按钮「回到推荐音乐」。没有倒计时、不自动跳走；路径也不画（原型没有）。
+	_ = path
+	s.pudPage(c, "page:not-found", func(_, _ float32) {
+		pud.Empty(c, pud.ArtSearch, "这一页走丢了", "链接可能已经失效，或者这一页还没有内容。", func() {
+			if pud.Button(c, "notfound:home", pud.Primary, pud.Std, "回到推荐音乐", "").Clicked() {
 				s.navigate("/")
 			}
 		})
-}
-
-// notFoundCountdown 是倒计时那一行。字面照上游 a6c48e1 抄的，只是把数换成参数。
-func notFoundCountdown(left int) string {
-	return strconv.Itoa(left) + " 秒后回到主页..."
+	})
 }

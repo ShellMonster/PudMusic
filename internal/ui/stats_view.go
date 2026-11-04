@@ -1,21 +1,14 @@
-// 听歌统计页的画法。
+// 听歌统计页的画法（原型 `PAGES.stats`，DESIGN.md §0′.T7）。
 //
-// # 三件事的分工
+// 页面从上到下：页头（Listening / 听歌统计 / 最近 7 天）、`stat-strip` 四个大数字、两栏
+// （每天收听的柱状图 | 最常听的歌手）、「本周单曲循环」曲目行。原型只有最近 7 天，所以日 / 周 /
+// 月 / 全部那排 Tab 和 Top 表格随旧设计删了（底层 `ListeningStats` 数据和 `statsPeriod*`
+// 聚合仍在）。
 //
-//	这一页**进页面时**拿一次快照（`statsPageState.refresh`），然后自己留着。
-//	这一页**每一帧**只画它留着的那一份。
-//	Top 歌 / Top 艺人**画在 `ui.Table` 里**——那是**虚拟列表**（框架的
-//	`buildList` 只建看得见的那几行），所以「全部」那一档的几千行也不卡。
-//
-// # 「全部」那一档为什么不画柱状图
-//
-// ⚠️ **那一档的天数可能上千**——而柱状图要一根一根地画。上千根柱子既挤在
-// 一起读不出来，又把每一帧的构建量拉上去。
-//
-// ⇒ 那一档画的是 Top 歌（虚拟表格，几千行也不卡）。
+// ⚠️ **原型里的「一天里的收听时段」热力图这一版没做**：应用只按天落盘（`StatsDayStat`），没有
+// 按小时的数据，凭空画一张是编数；第四个大数字「最常收听的时段」换成「连续听歌 N 天」。
 //
 // 🔴 铁律二：本文件里的 view **不许**调 `SetTheme`。
-
 package ui
 
 import (
@@ -23,43 +16,40 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/chart"
 )
 
-// 柱状图那几样的尺寸。
+// statsDays 是页面看的那一段：最近 7 天（含今天）。
+const statsDays = 7
+
+// statsTopLimit 是最常听的歌手 / 单曲循环各取多少行（原型是 5）。
+const statsTopLimit = 5
+
+// 图表的几样尺寸（原型 `.chart-svg`：viewBox 640×220、柱宽 48、圆角 4、高 240）。
 const (
-	// statsChartHeight 是柱状图画多高（像素）。
-	statsChartHeight = 160
-	// statsBandInner / statsBandOuter 是**一根柱子那一格**的内边距和外边距
-	//（占那一格步长的比例，不是像素）。
-	//
-	// ⚠️ **它们不在 `space` 那张表里**：那张表管的是像素间距，而这两个是
-	// **比例**——`chart.Band.Padding(inner, outer)` 要的就是比例。
-	statsBandInner = 0.3
-	statsBandOuter = 0.15
+	statsChartW   = 640
+	statsChartH   = 220
+	statsBarW     = 48
+	statsBarR     = 4
+	statsChartBox = 240
+	statsAxisW    = 40
 )
 
-// statsTopLimit 是 Top 歌 / Top 艺人各取多少首。
-//
-// ⚠️ **「全部」那一档也只取这么多**：Top 榜本来就是「最前面的那些」，而把
-// 几千行都摆出来没有意义。
-const statsTopLimit = 100
-
-// statsColumns 是 Top 歌 / Top 艺人那两张表的列。
-//
-// ⚠️ **宽度照本地音乐那一档的表格**（见 localmusic.go 的 `localColumns`）：
-// 名次那一格窄、标题吃掉剩下的、时长那一格定死（不然上下两行的时长会左右
-// 跳）。
-var statsColumns = []ui.TableColumn{
-	{Title: "#", ID: "rank", Width: 44, Align: ui.Center},
-	{Title: "名称", ID: "name", MinWidth: 160},
-	{Title: "时长", ID: "time", Width: 110, Align: ui.End},
-	{Title: "次数", ID: "plays", Width: 84, Align: ui.End},
+// statsLast7 是「最近 7 天」那一段（含今天）。
+func statsLast7(now time.Time, data app.ListeningStats) statsRange {
+	start := now.AddDate(0, 0, -(statsDays - 1))
+	return statsRange{
+		From: start.Format("2006-01-02"), To: now.Format("2006-01-02"),
+		Label: "最近 7 天", Days: statsDayPoints(start, now, data),
+	}
 }
 
 // viewStats 是这一页的入口。
@@ -68,232 +58,323 @@ func (s *Shell) viewStats(c *ui.Context, _ *ui.Route) {
 	s.applyFrameTheme(c)
 
 	st := &s.statsPage
-	// ⚠️ **快照在进页面时拿一次**：不是每帧拿。每一帧拿一份要把 O(n) 的
-	// 拷贝乘上帧数——「全部」那一档尤其明显。
+	// ⚠️ **快照在进页面时拿一次**：不是每帧拿（O(n) 的拷贝乘帧数）。
 	if !st.loaded {
 		st.refresh(s.app)
 		st.loaded = true
 	}
-
 	now := s.now()
-	rng := statsRangeOf(st.tab, now, st.data)
+	rng := statsLast7(now, st.data)
 
-	// ⚠️ **整页滚起来**：这一页的内容比一屏高（四枚磁贴 + 柱状图 + 两张表），
-	// 而不滚的话底下那一张表**永远看不到**——用户以为这个应用没有 Top 艺人。
-	//
-	// ⚠️ **滚动位置记在页面状态里**（`statsPageState.scroll`）：新建一个等于
-	// 每帧回到顶上，而那一帧是要重建整棵树的。
-	scroll := ui.Scroll(c).Key("stats-scroll").Grow(1).TrackScroll(&st.scroll)
-	scroll.Children(func() {
-		ui.Column(c).FillWidth().Padding(space.None, pagePadX).Gap(space.Px16).
-			Children(func() {
-				// 页头：标题。
-				typo.Display(ui.Text(c, "听歌统计"), scale.Font(c, scale.PageTitle))
-
-				// 四档。
-				mainTabs(c, &st.tabIndex, tabMD, statsTabNames...).AlignSelf(ui.Start)
-
-				if !st.have {
-					// 空状态：这一页**自己**画（不是路由表里那一句）。
-					//
-					// ⚠️ **理由和 `follow.go` 那一处一样**：这一页是内容页，而空状态
-					// 说的是「为什么空、怎么才能不空」——那一句得跟这一页的上下文
-					// 在一起。
-					s.viewStatsEmpty(c)
-					return
-				}
-
-				// 四枚磁贴。
-				s.viewStatsTiles(c, st, rng, now)
-
-				// 柱状图。
-				//
-				// ⚠️ **它看的是「最近 14 天」，不跟着那一档走**（理由见
-				// `statsChartDays`）：柱状图是看**趋势**的，而「日」那一档只有一天——
-				// 画一根柱子不叫图。
-				s.viewStatsChart(c, statsChartRange(now, st.data))
-
-				// Top 歌。
-				s.viewStatsTopTracks(c, st, rng)
-
-				// Top 艺人。
-				s.viewStatsTopArtists(c, st, rng)
-			})
-	})
-	s.trackScrollbar(scroll)
-}
-
-// syncStats 是这一页的每帧副作用。
-//
-// ⚠️ **它只有一件事：需要的时候重新拿一次快照**。
-//
-// ⚠️ **为什么不是「每帧都拿」**：那一拿是 O(n) 的拷贝（地图 + 歌 + 艺人），
-// 而这一页停留的时候可能有好几分钟——每帧拷一遍是白花的。
-//
-// 🔴 **它不在 `viewStats` 里**：满屏播放器开着的时候那一页压根不画，而它的
-// 每帧副作用**照跑**（见 underlay.go 顶上那一段）——所以用户从满屏退回来，
-// 看到的还是最新的数。
-func (s *Shell) syncStats(c *ui.Context) {
-	st := &s.statsPage
-	// ⚠️ **换档就重新拿**：四档的数字必须对得上档。
-	if st.tabIndex != int(st.tab) {
-		st.setTab(statsTab(st.tabIndex))
-		st.refresh(s.app)
-		st.loaded = true
-		return
-	}
-	// 🔴 **「切走再切回来」那一次的重新拿在 `navigate` 里**（见 router.go 的
-	// `navigate` 那一段）——因为这一页的副作用是**按当前路由分派**的，它自己
-	// 看不到「用户走了又回来」。
-	//
-	// ⚠️ **这里只管换档**：换档要重新算一遍（那一档是另一段区间）。
-	if st.tabIndex != int(st.tab) {
-		st.setTab(statsTab(st.tabIndex))
-		st.refresh(s.app)
-		st.loaded = true
-	}
-}
-
-// viewStatsEmpty 是「还没有听歌记录」那一块。
-func (s *Shell) viewStatsEmpty(c *ui.Context) {
-	ui.Column(c).FillWidth().Padding(space.Px48, space.None).AlignItems(ui.Center).Gap(space.Px8).
-		Children(func() {
-			ui.Text(c, "还没有听歌记录").FontSize(scale.Font(c, scale.SectionTitle))
-			ui.Text(c, "听几首歌，这里就会有你的听歌时长、最爱听的歌和最爱听的 UP 主").
-				FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
-		})
-}
-
-// statsTile 是那四枚磁贴的一枚。
-type statsTile struct {
-	// Label 是上面那一句小字（「今日收听」）。
-	Label string
-	// Value 是下面那个大数字。
-	Value string
-	// Unit 是大数字右边的那个单位（「首」「天」）。
-	//
-	// ⚠️ **它挂在数字右边，不另起一行**：另起一行的话，四枚磁贴的高度
-	// 就差了（有的两行、有的三行），而那一排的下沿会参差不齐。
-	Unit string
-	// Hint 是大数字底下那一行小字（「1 小时 20 分钟」）。
-	Hint string
-}
-
-// viewStatsTiles 是那四枚统计磁贴。
-func (s *Shell) viewStatsTiles(c *ui.Context, st *statsPageState, rng statsRange, now time.Time) {
-	t := c.Theme()
-	ms := st.data.DayRangeMs(rng.From, rng.To)
-	plays := st.data.DayRangePlays(rng.From, rng.To)
-	completed := st.data.DayRangeCompleted(rng.From, rng.To)
-	streak := st.data.Streak(now)
-
-	tiles := []statsTile{
-		// ⚠️ **单位是「小时」**：那个大数字是小时（"0.5"），而底下那一行是
-		// 它的另一种说法（"30 分钟"）——**单位不挂在数字旁边的话，用户得
-		// 自己猜那个 0.5 是多少**。
-		{Label: rng.Label + "收听", Value: statsHoursText(ms), Unit: "小时", Hint: statsDurationText(ms)},
-		{Label: rng.Label + "起播", Value: fmt.Sprintf("%d", plays), Unit: "首", Hint: "从第一首到最后一首"},
-		{Label: rng.Label + "听完", Value: fmt.Sprintf("%d", completed), Unit: "首", Hint: "听到一半以上"},
-		{Label: "连续", Value: fmt.Sprintf("%d", streak), Unit: "天", Hint: "一天没断"},
-	}
-
-	// ⚠️ **四枚磁贴一样高**：每一枚都有三行（标签 / 大数字 / 说明），而
-	// 少了说明的那几枚会矮一截——那一排的下沿就参差不齐了。
-	ui.Row(c).Key("stats-tiles").FillWidth().Gap(space.Px12).AlignItems(ui.Stretch).Children(func() {
-		for _, tile := range tiles {
-			ui.Column(c).Key("stats-tile:"+tile.Label).Grow(1).Gap(space.Px2).
-				Padding(space.Px12, space.Px16).Radius(s.cardRadius(t)).
-				Background(s.cardBackground(t)).Border(1, t.Border).Children(func() {
-				ui.Text(c, tile.Label).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-				// ⚠️ **数字和单位在一行**：单位挂在数字右边（不是另起一行），
-				// 而下面那一行留给说明。
-				// ⚠️ **`ui.End`（不是基线对齐）**：框架没有基线对齐这一档
-				// （`ui.Align` 只有 Start / Center / End / Stretch），
-				// 而这一行里那个大数字（24 号）和单位（14 号）——
-				// 底边齐比基线齐差得少，而差的那一点用户看不出来。
-				ui.Row(c).Gap(space.Px4).AlignItems(ui.End).Children(func() {
-					ui.Text(c, tile.Value).FontSize(scale.Font(c, scale.Size24)).FontWeight(weightMedium)
-					ui.Text(c, tile.Unit).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
-				})
-				ui.Text(c, tile.Hint).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-			})
-		}
-	})
-}
-
-// viewStatsChart 是那张柱状图。
-//
-// ⚠️ **它用 `mygo/ui/chart`**——那是框架自带的原生图表（**全仓第一次用**）。
-// 零新增依赖。
-func (s *Shell) viewStatsChart(c *ui.Context, rng statsRange) {
-	t := c.Theme()
-	labels := make([]string, len(rng.Days))
-	values := make([]float64, len(rng.Days))
-	maxMs := int64(0)
-	for i, d := range rng.Days {
-		labels[i] = d.Label
-		values[i] = float64(d.Ms)
-		if d.Ms > maxMs {
-			maxMs = d.Ms
-		}
-	}
-	if maxMs <= 0 {
-		return
-	}
-
-	ui.Column(c).Key("stats-chart").FillWidth().Gap(space.Px8).Children(func() {
-		// ⚠️ **标题里带单位**（"分钟"）：左边那一栏写的是分钟，而那一栏
-		// 只有数字没有单位——用户得从标题才知道那是多少分钟。
-		ui.Text(c, "每天的听歌时长（最近 14 天，单位：分钟）").FontSize(scale.Font(c, scale.Size16))
-		ui.Column(c).Key("stats-chart-card").FillWidth().
-			Padding(space.Px12, space.Px16).Radius(s.cardRadius(t)).
-			Background(s.cardBackground(t)).Border(1, t.Border).Children(func() {
-			// ⚠️ **这两个数不是布局间距**：它们是 `chart.Band.Padding(inner,
-			// outer)`——**一根柱子那一格的内边距和外边距**（占那一格步长的比例）。
-			//
-			// ⇒ 所以它们**不在 `space` 那张表里**（那张表管的是像素，而这两个
-			// 是比例）。而 `widgets/space` 那道护栏扫的是「`.Padding(` 的实参
-			// 是裸数字」——所以这里用具名常量，让护栏看得见这两个数的名字
-			// （而不是两个光秃秃的数字）。
-			x := chart.NewBand(labels...).Padding(statsBandInner, statsBandOuter)
-			y := chart.NewLinear(0, float64(maxMs)).Nice(4)
-			chart.Plot(c, chart.Axes{
-				// ⚠️ **左边那一栏写的是「分钟」，不是毫秒**：毫秒是六位数
-				// （"5000000"），那一栏窄，而那串数字用户读不出来它是多长。
-				// 分钟是「30」「60」——一眼看得懂。
-				Left:   y.Ticks(4),
-				Bottom: x.Ticks(),
-				Label: func(side chart.Side, tick chart.Tick) {
-					if side == chart.Left {
-						ui.Text(c, statsMinutesText(tick.Value)).NoWrap()
+	s.pudPage(c, "page:"+statsPath, func(winW, listW float32) {
+		// ⚠️ **整页滚起来，滚动位置记在页面状态里**（`statsPageState.scroll`）。
+		scroll := ui.Scroll(c).Key("stats-scroll").Grow(1).TrackScroll(&st.scroll)
+		scroll.Children(func() {
+			ui.Column(c).FillWidth().AlignItems(ui.Stretch).Padding(space.None, space.None, space.PageBottom, space.None).
+				Children(func() {
+					pud.PageHead(c, "Listening", "听歌统计", "最近 7 天 · 只统计在本机的收听", winW, nil)
+					if !st.have {
+						pud.Empty(c, pud.ArtPlain, "还没有听歌记录",
+							"听几首歌，这里就会有你的听歌时长、最常听的歌手和单曲循环。", nil)
 						return
 					}
-					ui.Text(c, tick.Label).NoWrap()
-				},
-			}, func(area ui.Element) {
-				for i, v := range values {
-					if v <= 0 {
-						continue
-					}
-					chart.Rect(c, x.Band(i), y.Span(0, v)).Background(t.Accent).Radius(3)
-				}
-			}).Height(statsChartHeight).Gap(space.Px8)
+					s.viewStatStrip(c, st, rng, now, winW)
+					s.viewStatsTwoCol(c, st, rng, winW, listW)
+					s.viewStatsLoop(c, st, rng, listW)
+				})
 		})
+		s.trackScrollbar(scroll)
 	})
 }
 
-// statsMinutesText 是柱状图左边那一栏的刻度字（分钟）。
-//
-// ⚠️ **不足一分钟写「0」**：那一栏是刻度，而 0 就是「没有」——而「0 分钟」
-// 三个字在那一栏里太宽了。
-func statsMinutesText(ms float64) string {
-	minutes := int64(ms / float64(time.Minute/time.Millisecond))
-	return strconv.FormatInt(minutes, 10)
+// syncStats 是这一页的每帧副作用：现在没有要同步的东西（日 / 周 / 月 / 全部那排 Tab 删了），
+// 快照在进页面时拿一次、切走再切回来时由 `navigate` 重拿。留着这个入口是因为满屏播放器开着时
+// 路由按它分派每页的副作用（见 underlay.go）。
+func (s *Shell) syncStats(c *ui.Context) {}
+
+// statStripCell 是 `stat-strip` 的一格：大数字（可带小单位）和下面一句说明。
+type statStripCell struct {
+	// parts 是大数字：数字和单位交替（"12" "小时" "40" "分"）；奇数位是单位。
+	parts []string
+	cap   string
 }
 
-// statsTrackRow 是 Top 歌那一行要画的东西。
+// statUniqueSongs 是这一段里听过多少首不同的歌。
+func statUniqueSongs(data app.ListeningStats, from, to string) int {
+	seen := map[string]bool{}
+	for day, d := range data.Days {
+		if day < from || day > to {
+			continue
+		}
+		for key := range d.Tracks {
+			seen[key] = true
+		}
+	}
+	return len(seen)
+}
+
+// statNewArtists 是这一段里第一次听到的 UP 主有几位（歌的 `FirstHeard` 落在这一段里）。
+func statNewArtists(data app.ListeningStats, from, to string) int {
+	seen := map[int64]bool{}
+	for _, t := range data.Tracks {
+		if t.ArtistMid == 0 || t.FirstHeard < from || t.FirstHeard > to {
+			continue
+		}
+		seen[t.ArtistMid] = true
+	}
+	return len(seen)
+}
+
+// statHM 把毫秒拆成「N 小时 M 分」的大数字（不足一小时只有分）。
+func statHM(ms int64) []string {
+	total := time.Duration(ms) * time.Millisecond
+	h := int(total / time.Hour)
+	m := int((total % time.Hour) / time.Minute)
+	if h == 0 {
+		return []string{strconv.Itoa(m), "分"}
+	}
+	return []string{strconv.Itoa(h), "小时", strconv.Itoa(m), "分"}
+}
+
+// statWeekDelta 是「比上周多 / 少 X」那半句（上周没有记录就没有这半句）。
+func statWeekDelta(cur, prev int64) string {
+	if prev <= 0 {
+		return ""
+	}
+	d := cur - prev
+	switch {
+	case d > 0:
+		return " · 比上周多 " + statsDurationText(d)
+	case d < 0:
+		return " · 比上周少 " + statsDurationText(-d)
+	}
+	return " · 和上周一样"
+}
+
+// viewStatStrip 是原型 `.stat-strip`：上下各一条 line，四格等宽，格内 24 / 24 / 24 / 0，第二格起
+// 左边一条 line 加 24 的左内边距；窄内容区变 2×2。
+func (s *Shell) viewStatStrip(c *ui.Context, st *statsPageState, rng statsRange, now time.Time, winW float32) { // winW 是窗口宽
+	p := tok.Of(c.Theme())
+	prevStart := now.AddDate(0, 0, -(2*statsDays - 1))
+	prevEnd := now.AddDate(0, 0, -statsDays)
+	cur := st.data.DayRangeMs(rng.From, rng.To)
+	prev := st.data.DayRangeMs(prevStart.Format("2006-01-02"), prevEnd.Format("2006-01-02"))
+	cells := []statStripCell{
+		{statHM(cur), "收听总时长" + statWeekDelta(cur, prev)},
+		{[]string{strconv.Itoa(statUniqueSongs(st.data, rng.From, rng.To)), "首"}, "播放过的歌曲"},
+		{[]string{strconv.Itoa(statNewArtists(st.data, rng.From, rng.To)), "位"}, "新认识的歌手"},
+		{[]string{strconv.Itoa(st.data.Streak(now)), "天"}, "连续听歌"},
+	}
+	// 大数字按窗口宽流动（`clamp(32, 3.6vw, 48)`）；格数按窗口宽：≤1024 两列、≤760 一列。
+	size := scale.BigNumFluid(winW)
+	perRow := 4
+	switch {
+	case winW <= 760:
+		perRow = 1
+	case winW <= 1024:
+		perRow = 2
+	}
+	line := func(pp *ui.Painter, r ui.Rect, top, bottom bool) {
+		if top {
+			pp.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: 1}, p.Line, 0)
+		}
+		if bottom {
+			pp.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, p.Line, 0)
+		}
+	}
+	ui.Column(c).Key("stats-strip").FillWidth().Margin(space.Px32, space.None, space.None, space.None).
+		Children(func() {
+			for start := 0; start < len(cells); start += perRow {
+				end := min(start+perRow, len(cells))
+				first := start == 0
+				ui.Row(c).FillWidth().AlignItems(ui.Stretch).
+					Draw(func(pp *ui.Painter, r ui.Rect) { line(pp, r, first, true) }).
+					Children(func() {
+						for i := start; i < end; i++ {
+							cell := cells[i]
+							leftEdge := i == start
+							padL := float32(24)
+							if leftEdge {
+								padL = 0
+							}
+							ui.Column(c).Key("stats-cell:"+strconv.Itoa(i)).Grow(1).Basis(0).Gap(space.Px2).
+								Padding(space.Px24, space.Px24, space.Px24, padL).
+								Draw(func(pp *ui.Painter, r ui.Rect) {
+									if !leftEdge {
+										pp.Fill(ui.Rect{X: r.X, Y: r.Y, W: 1, H: r.H}, p.Line, 0)
+									}
+								}).Children(func() {
+								ui.Row(c).AlignItems(ui.End).Children(func() {
+									for k, part := range cell.parts {
+										if k%2 == 0 {
+											typo.Display(ui.Text(c, part), scale.Font(c, size)).SingleLine()
+											continue
+										}
+										ui.Text(c, part).FontSize(scale.Font(c, size*0.45)).FontWeight(500).
+											TextColor(p.Text2).Margin(space.None, space.None, space.None, space.Px4).SingleLine()
+									}
+								})
+								ui.Text(c, cell.cap).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text2).
+									LineHeight(leading.Body)
+							})
+						}
+					})
+			}
+		})
+}
+
+// viewStatsTwoCol 是两栏：左 1.4fr 每天收听，右 1fr 最常听的歌手，缝 48，上 48；窄内容区叠成一栏。
+func (s *Shell) viewStatsTwoCol(c *ui.Context, st *statsPageState, rng statsRange, winW, listW float32) {
+	stack := winW <= 1180 // 原型 `@media (max-width: 1180px)`，按窗口宽
+	artists := st.statsPeriodArtists(rng)
+	if len(artists) > statsTopLimit {
+		artists = artists[:statsTopLimit]
+	}
+	leftW, rightW := listW, listW
+	if !stack {
+		leftW = (listW - space.Px48) * 1.4 / 2.4
+		rightW = listW - space.Px48 - leftW
+	}
+	body := func() {
+		ui.Column(c).Key("stats-chart").Width(leftW).Shrink(0).Children(func() {
+			pud.SecHead(c, "stats:chart-head", "每天收听", "单位：分钟", "")
+			s.viewStatsBars(c, rng, leftW)
+		})
+		ui.Column(c).Key("stats-artists").Width(rightW).Shrink(0).Children(func() {
+			pud.SecHead(c, "stats:artists-head", "最常听的歌手", "", "")
+			s.viewStatsArtistBars(c, artists)
+		})
+	}
+	if stack {
+		ui.Column(c).FillWidth().Gap(space.Px48).Margin(space.Px48, space.None, space.None, space.None).Children(body)
+		return
+	}
+	ui.Row(c).FillWidth().Gap(space.Px48).AlignItems(ui.Start).
+		Margin(space.Px48, space.None, space.None, space.None).Children(body)
+}
+
+// statsWeekdayLabel 是柱子下面的字（原型：周四…周一、最后一根「今天」）。
+func statsWeekdayLabel(d time.Time, today bool) string {
+	if today {
+		return "今天"
+	}
+	return [...]string{"周日", "周一", "周二", "周三", "周四", "周五", "周六"}[d.Weekday()]
+}
+
+// viewStatsBars 是「每天收听」柱状图（原型 `.chart-svg`）：640×220 的 viewBox 等比缩到容器宽、
+// 高 240，水平居中；四条横向参考线（line）、7 根柱（今天主色、其余 line-strong，圆角 4）、柱上写
+// 分钟数（text-2）、柱下写星期（text-3），都是 11 号等宽。
+func (s *Shell) viewStatsBars(c *ui.Context, rng statsRange, w float32) {
+	p := tok.Of(c.Theme())
+	n := len(rng.Days)
+	if n == 0 {
+		return
+	}
+	mins := make([]float64, n)
+	maxMin := 0.0
+	for i, d := range rng.Days {
+		mins[i] = float64(d.Ms) / float64(time.Minute/time.Millisecond)
+		if mins[i] > maxMin {
+			maxMin = mins[i]
+		}
+	}
+	// 纵轴上限：原型是固定的 200（参考线 0 / 60 / 120 / 180）；数据超过 200 时按 20 取整往上放。
+	top := float64(int(maxMin/20+0.999)) * 20
+	if top < 200 {
+		top = 200
+	}
+	scaleX := w / statsChartW
+	if sy := float32(statsChartBox) / statsChartH; sy < scaleX {
+		scaleX = sy
+	}
+	offX := (w - statsChartW*scaleX) / 2
+	offY := (statsChartBox - statsChartH*scaleX) / 2 // 原型 SVG 默认 xMidYMid meet：垂直居中
+	gap := (float32(statsChartW) - statsAxisW - statsBarW*float32(n)) / float32(n-1)
+	fs := scale.Font(c, 11*scaleX)
+	box := ui.Box(c).Key("stats-bars").Width(w).Height(statsChartBox).Label("最近 7 天每天收听分钟数")
+	box = box.Draw(func(pp *ui.Painter, r ui.Rect) {
+		for v := 0.0; v <= top; v += 60 {
+			y := r.Y + offY + (statsChartH-24-float32(v/top)*(statsChartH-40))*scaleX
+			pp.Fill(ui.Rect{X: r.X + offX + statsAxisW*scaleX, Y: y, W: (statsChartW - statsAxisW) * scaleX, H: 1}, p.Line, 0)
+		}
+		for i := range mins {
+			h := float32(mins[i]/top) * (statsChartH - 40)
+			x := statsAxisW + float32(i)*(statsBarW+gap)
+			col := p.LineStrong
+			if i == n-1 {
+				col = p.Accent
+			}
+			pp.Fill(ui.Rect{X: r.X + offX + x*scaleX, Y: r.Y + offY + (statsChartH-24-h)*scaleX, W: statsBarW * scaleX, H: h * scaleX}, col, statsBarR*scaleX)
+		}
+	})
+	box.Children(func() {
+		label := func(txt string, cx, cy float32, col ui.Color, alignRight bool) {
+			t := typo.Mono(ui.Text(c, txt)).FontSize(fs).TextColor(col).SingleLine().Absolute()
+			if alignRight {
+				t.Right(w - (offX + cx*scaleX)).Top((cy - 6) * scaleX)
+				return
+			}
+			t.Left(offX + cx*scaleX - 20).Width(40).TextAlign(ui.Center).Top(offY + (cy-6)*scaleX)
+		}
+		for v := 0.0; v <= top; v += 60 {
+			y := statsChartH - 24 - float32(v/top)*(statsChartH-40)
+			label(strconv.Itoa(int(v)), statsAxisW-8, y, p.Text3, true)
+		}
+		for i, d := range rng.Days {
+			x := statsAxisW + float32(i)*(statsBarW+gap) + statsBarW/2
+			t, _ := time.ParseInLocation("2006-01-02", d.Key, time.Local)
+			label(statsWeekdayLabel(t, i == n-1), x, statsChartH-6, p.Text3, false)
+			if mins[i] > 0 {
+				h := float32(mins[i]/top) * (statsChartH - 40)
+				label(strconv.Itoa(int(mins[i]+0.5)), x, statsChartH-32-h, p.Text2, false)
+			}
+		}
+	})
+}
+
+// viewStatsArtistBars 是「最常听的歌手」（原型 `.bar-row`：24 | 120 | 1fr | 72，缝 12，上下 8；
+// 名次 12 号等宽 text-3，名字单行省略，轨道高 8 圆角 4 surface-2，条是 text-2、第一名主色，右边
+// 12 号等宽 text-3 的分钟数）。
+func (s *Shell) viewStatsArtistBars(c *ui.Context, rows []statsArtistRow) {
+	p := tok.Of(c.Theme())
+	if len(rows) == 0 {
+		ui.Text(c, "这一段时间还没有听过歌").FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2)
+		return
+	}
+	maxMs := rows[0].Ms
+	for i, r := range rows {
+		frac := float32(0)
+		if maxMs > 0 {
+			frac = float32(r.Ms) / float32(maxMs)
+		}
+		fill := p.Text2
+		if i == 0 {
+			fill = p.Accent
+		}
+		ui.Row(c).Key("stats-artist:"+strconv.FormatInt(r.Mid, 10)).FillWidth().Gap(space.Px12).
+			Padding(space.Px8, space.None).AlignItems(ui.Center).Children(func() {
+			typo.Mono(ui.Text(c, strconv.Itoa(i+1))).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
+				Width(24).Shrink(0)
+			ui.Text(c, r.Name).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text).Width(120).Shrink(0).
+				SingleLine().Ellipsis("…")
+			ui.Box(c).Grow(1).Basis(0).Height(8).Draw(func(pp *ui.Painter, rc ui.Rect) {
+				pp.Fill(rc, p.Surface2, 4)
+				pp.Fill(ui.Rect{X: rc.X, Y: rc.Y, W: rc.W * frac, H: rc.H}, fill, 4)
+			})
+			typo.Mono(ui.Text(c, statsMinutesText(float64(r.Ms))+" 分钟")).FontSize(scale.Font(c, scale.Size12)).
+				TextColor(p.Text3).Width(72).Shrink(0).TextAlign(ui.End).SingleLine()
+		})
+	}
+}
+
+// statsMinutesText 是分钟数的字（毫秒 → 整分钟）。
+func statsMinutesText(ms float64) string {
+	return strconv.FormatInt(int64(ms/float64(time.Minute/time.Millisecond)+0.5), 10)
+}
+
+// statsTrackRow 是单曲循环那一行要画的东西。
 type statsTrackRow struct {
-	// Key 是这一首的聚合键（行身份用它，见下面那条注释）。
+	// Key 是这一首的聚合键（行身份用它）。
 	Key string
 	// Title 是歌名。
 	Title string
@@ -305,7 +386,7 @@ type statsTrackRow struct {
 	Plays int64
 }
 
-// statsArtistRow 是 Top 艺人那一行要画的东西。
+// statsArtistRow 是「最常听的歌手」那一行要画的东西。
 type statsArtistRow struct {
 	// Mid 是 UP 主的编号（行身份用它）。
 	Mid int64
@@ -317,135 +398,29 @@ type statsArtistRow struct {
 	Plays int64
 }
 
-// viewStatsTopTracks 是 Top 歌那一块。
-func (s *Shell) viewStatsTopTracks(c *ui.Context, st *statsPageState, rng statsRange) {
-	t := c.Theme()
+// viewStatsLoop 是「本周单曲循环」：曲目表头 + 最多 5 行，「专辑」那一列写「本机播放 N 次」，
+// 时长一列写这一首听了多久（B 站没给每首的总时长，这里用实际听的时长）。
+func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange, listW float32) {
 	rows := st.statsPeriodRows(rng)
-
-	ui.Column(c).Key("stats-top-tracks").FillWidth().Gap(space.Px8).Children(func() {
-		ui.Text(c, "最爱听的歌").FontSize(scale.Font(c, scale.Size16))
+	if len(rows) > statsTopLimit {
+		rows = rows[:statsTopLimit]
+	}
+	ui.Column(c).Key("stats-loop").FillWidth().Margin(space.Px48, space.None, space.None, space.None).Children(func() {
+		pud.SecHead(c, "stats:loop-head", "本周单曲循环", "", "")
 		if len(rows) == 0 {
-			ui.Text(c, "这一段时间还没有听过歌").FontSize(scale.Font(c, scale.Size14)).
-				TextColor(t.TextMuted)
+			ui.Text(c, "这一段时间还没有听过歌").FontSize(scale.Font(c, scale.Size14)).TextColor(tok.Of(c.Theme()).Text2)
 			return
 		}
-		s.viewStatsTrackTable(c, st, rows)
+		pud.TrackHead(c, listW)
+		for i, r := range rows {
+			pud.TrackRow(c, "stats-track:"+r.Key, pud.Track{
+				Index: strconv.Itoa(i + 1), Title: r.Title, Owner: r.Subtitle,
+				Album:    fmt.Sprintf("本机播放 %d 次", r.Plays),
+				Duration: clockText(time.Duration(r.Ms) * time.Millisecond),
+				Cover: func(c *ui.Context, w, h float32) {
+					imgcache.ViewTitled(c, s.images, "", r.Title, w, h)
+				},
+			}, listW)
+		}
 	})
-}
-
-// viewStatsTrackTable 是 Top 歌那张表。
-//
-// ⚠️ **`ui.Table` 是虚拟列表**：框架的 `buildList` 只建看得见的那几行，所以
-// 「全部」那一档的几千行也不卡。
-func (s *Shell) viewStatsTrackTable(c *ui.Context, st *statsPageState, rows []statsTrackRow) {
-	t := c.Theme()
-	// 🔴 **行身份是那一首的聚合键**，不是序号（铁律四）。
-	st.trackTable.Key = func(i int) any {
-		if i >= 0 && i < len(rows) {
-			return "stats-track:" + rows[i].Key
-		}
-		return "stats-track-out"
-	}
-	st.trackTable.Label = func(i int) string {
-		if i >= 0 && i < len(rows) {
-			return rows[i].Title
-		}
-		return ""
-	}
-	st.trackTable.Selected = &st.trackSel
-
-	// 🔴 **登记焦点**（`focus.go` 的 `registerContentFocus`）：这一页**自己
-	// 画了列表**（`ui.Table`），而侧栏按 ↓ 要能进内容区。
-	//
-	// ⚠️ **Top 歌先登记、Top 艺人后登记**——后登记的那个赢（`focus.go` 顶上
-	// 那一段），而 Top 艺人是这一页最后画的那一个。
-	s.registerContentFocus(list.HandleFocus(&st.trackTable.Handle))
-
-	// ⚠️ **表在卡片里**：这一页上面是四张卡片（磁贴）和一张卡片（柱状图），
-	// 而表格如果光着摆，这一页就有**两种语言**（圆角的卡片 + 无框的表格）。
-	ui.Column(c).FillWidth().Padding(space.None, space.Px8, space.Px8, space.None).
-		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
-		Children(func() {
-			ui.Table(c, &st.trackTable, statsColumns, len(rows), func(row, col int) {
-				if row < 0 || row >= len(rows) {
-					return
-				}
-				r := rows[row]
-				switch statsColumns[col].ID {
-				case "rank":
-					ui.Text(c, itoa(row+1)).TextColor(t.TextMuted)
-				case "name":
-					ui.Column(c).FillWidth().Children(func() {
-						ui.Text(c, r.Title).SingleLine()
-						if r.Subtitle != "" {
-							ui.Text(c, r.Subtitle).FontSize(scale.Font(c, scale.Size12)).
-								TextColor(t.TextMuted).SingleLine()
-						}
-					})
-				case "time":
-					ui.Text(c, statsTableDurationText(r.Ms))
-				case "plays":
-					ui.Text(c, itoa(int(r.Plays)))
-				}
-			})
-		})
-}
-
-// viewStatsTopArtists 是 Top 艺人那一块。
-func (s *Shell) viewStatsTopArtists(c *ui.Context, st *statsPageState, rng statsRange) {
-	t := c.Theme()
-	rows := st.statsPeriodArtists(rng)
-
-	ui.Column(c).Key("stats-top-artists").FillWidth().Gap(space.Px8).Children(func() {
-		ui.Text(c, "最爱听的 UP 主").FontSize(scale.Font(c, scale.Size16))
-		if len(rows) == 0 {
-			ui.Text(c, "这一段时间还没有听过 B 站的歌（本地音乐不计入这里）").
-				FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
-			return
-		}
-		s.viewStatsArtistTable(c, st, rows)
-	})
-}
-
-// viewStatsArtistTable 是 Top 艺人那张表。
-func (s *Shell) viewStatsArtistTable(c *ui.Context, st *statsPageState, rows []statsArtistRow) {
-	t := c.Theme()
-	st.artistTable.Key = func(i int) any {
-		if i >= 0 && i < len(rows) {
-			return "stats-artist:" + strconv.FormatInt(rows[i].Mid, 10)
-		}
-		return "stats-artist-out"
-	}
-	st.artistTable.Label = func(i int) string {
-		if i >= 0 && i < len(rows) {
-			return rows[i].Name
-		}
-		return ""
-	}
-	st.artistTable.Selected = &st.artistSel
-
-	// 🔴 **后登记的赢**：所以这一枚是这一页的焦点目标（理由见上面那一处）。
-	s.registerContentFocus(list.HandleFocus(&st.artistTable.Handle))
-
-	// ⚠️ **表在卡片里**：理由同上面那一张。
-	ui.Column(c).FillWidth().Padding(space.None, space.Px8, space.Px8, space.None).
-		Radius(s.cardRadius(t)).Background(s.cardBackground(t)).Border(1, t.Border).
-		Children(func() {
-			ui.Table(c, &st.artistTable, statsColumns, len(rows), func(row, col int) {
-				if row < 0 || row >= len(rows) {
-					return
-				}
-				r := rows[row]
-				switch statsColumns[col].ID {
-				case "rank":
-					ui.Text(c, itoa(row+1)).TextColor(t.TextMuted)
-				case "name":
-					ui.Text(c, r.Name).SingleLine()
-				case "time":
-					ui.Text(c, statsTableDurationText(r.Ms))
-				case "plays":
-					ui.Text(c, itoa(int(r.Plays)))
-				}
-			})
-		})
 }

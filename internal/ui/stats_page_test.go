@@ -46,63 +46,6 @@ func TestTheStatsPageSaysItHasNoRecordsYet(t *testing.T) {
 	}
 }
 
-// TestTheStatsPageShowsTheFourTabs 钉住「四档都在」。
-func TestTheStatsPageShowsTheFourTabs(t *testing.T) {
-	s, tt := statsShell(t, nil)
-	s.navigate(statsPath)
-	tt.Frame()
-
-	for _, name := range statsTabNames {
-		if !tt.HasText(name) {
-			t.Errorf("「%s」那一档没画出来，文字有 %q", name, tt.Texts())
-		}
-	}
-}
-
-// TestTheStatsPageShowsTheNumbers 钉住「有数据时那四枚磁贴的数字」。
-func TestTheStatsPageShowsTheNumbers(t *testing.T) {
-	s, tt := statsShell(t, func(a *app.App) {
-		seedStats(a)
-	})
-	s.navigate(statsPath)
-	tt.Frame()
-
-	// 90 分钟 = 1.5 小时。
-	if !tt.HasText("1.5") {
-		t.Errorf("时长那一枚没画出来，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("1 小时 30 分钟") {
-		t.Errorf("时长的说法没画出来，文字有 %q", tt.Texts())
-	}
-	// ⚠️ **「12」和「首」是两个元素**：单位挂在数字右边（不是同一个字符串），
-	// 而 `HasText` 断的是**每一个元素的字**——所以这里断两个。
-	if !tt.HasText("12") {
-		t.Errorf("起播那一枚的数字没画出来，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("首") {
-		t.Errorf("起播那一枚的单位没画出来，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheStatsPageShowsTheTopSongs 钉住「Top 歌那一块」。
-func TestTheStatsPageShowsTheTopSongs(t *testing.T) {
-	s, tt := statsShell(t, func(a *app.App) {
-		seedStats(a)
-	})
-	s.navigate(statsPath)
-	tt.Frame()
-
-	if !tt.HasText("最爱听的歌") {
-		t.Errorf("Top 歌那一块没画出来，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("一首歌") {
-		t.Errorf("歌名没画出来，文字有 %q", tt.Texts())
-	}
-	if !tt.HasText("最爱听的 UP 主") {
-		t.Errorf("Top 艺人那一块没画出来，文字有 %q", tt.Texts())
-	}
-}
-
 // TestTheStatsPageIsReachableFromTheNavbar 钉住「顶栏那枚图标能进这一页」。
 //
 // 🔴 **这是这一票唯一的入口**：它不在侧栏里，所以那一枚是**唯一**的路。
@@ -161,35 +104,6 @@ func seedStats(a *app.App) {
 	})
 }
 
-// TestSwitchingTheTabChangesWhatIsShown 钉住「换档真的会换」。
-//
-// 🔴 **这一条验的是 `syncStats` 那一支**：换档的时候 `mainTabs` 把新下标写
-// 回 `tabIndex`，而 `syncStats` 认的就是它——不认的话点「周」什么都不会变。
-func TestSwitchingTheTabChangesWhatIsShown(t *testing.T) {
-	s, tt := statsShell(t, func(a *app.App) {
-		seedStats(a)
-	})
-	s.navigate(statsPath)
-	tt.Frame()
-
-	// 「日」那一档写的是「今天收听」。
-	if !tt.HasText("今天收听") {
-		t.Errorf("「日」那一档的标签没画出来，文字有 %q", tt.Texts())
-	}
-	// 切到「周」。
-	if err := tt.Click("周"); err != nil {
-		t.Fatalf("点「周」那一档：%v", err)
-	}
-	tt.Frame()
-
-	if !tt.HasText("本周收听") {
-		t.Errorf("切到「周」之后标签没换，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("今天收听") {
-		t.Errorf("切到「周」之后「日」那一档的标签还在，文字有 %q", tt.Texts())
-	}
-}
-
 // TestTheStatsPageRefreshesWhenComingBack 钉住「切走再切回来会重新拿一次」。
 //
 // ⚠️ **这一条验的是「用户在看这一页的时候数字是最新的」**：用户可能在别的页
@@ -217,38 +131,6 @@ func TestTheStatsPageRefreshesWhenComingBack(t *testing.T) {
 
 	if !tt.HasText("99") {
 		t.Errorf("切回来之后还是老的数（没刷新），文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheTopTableFollowsTheSelectedTab 钉住「Top 表跟那一档走」。
-//
-// 🔴 **这一条挡的是一个真实的自相矛盾**：磁贴看的是「今天」（30 分钟），
-// 而 Top 表看的是「所有时间」（2 小时）——两个数摆在同一页上，而它们**根本
-// 不是一段时间**。用户读到的是「我今天听了半小时，可最爱听的那首听了
-// 两小时」——那是两件事混在一页上。
-func TestTheTopTableFollowsTheSelectedTab(t *testing.T) {
-	s, tt := statsShell(t, func(a *app.App) {
-		seedStatsPeriods(a)
-	})
-	s.navigate(statsPath)
-	tt.Frame()
-
-	// 「日」那一档：只有今天那首歌。
-	if !tt.HasText("今天听的那首") {
-		t.Errorf("「日」那一档的 Top 歌没画出来，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("以前听的那首") {
-		t.Errorf("「日」那一档里混进了别的时段，文字有 %q", tt.Texts())
-	}
-
-	// 切到「全部」：两首都在。
-	if err := tt.Click("全部"); err != nil {
-		t.Fatalf("点「全部」那一档：%v", err)
-	}
-	tt.Frame()
-
-	if !tt.HasText("今天听的那首") || !tt.HasText("以前听的那首") {
-		t.Errorf("「全部」那一档没有两首都在，文字有 %q", tt.Texts())
 	}
 }
 

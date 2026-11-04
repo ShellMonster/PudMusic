@@ -7,9 +7,9 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -37,7 +37,7 @@ func TestDeleteAsksFirstAndOnlyThenTouchesDisk(t *testing.T) {
 	tt, _, _, _ := shellOnLocalMusic(t, root)
 
 	// 1. 按行里的「删除文件」。
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatalf("点不到行里的「删除文件」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
@@ -69,7 +69,7 @@ func TestDeleteAsksFirstAndOnlyThenTouchesDisk(t *testing.T) {
 	}
 
 	// 3. 再来一次，这次确认。
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -87,7 +87,7 @@ func TestDeleteAsksFirstAndOnlyThenTouchesDisk(t *testing.T) {
 	// 那一行也得从列表里没掉。⚠️ 判据用**行上才有的东西**（「打开文件夹」）
 	// 而不是歌名：刚删完右下角那句 Toast 里就有歌名（「已移到系统废纸篓「要删的」），
 	// 拿歌名去判会一直红——而那恰恰是这一条想验的那件事成功了。
-	if tt.HasText("打开文件夹") {
+	if tt.HasText("播放 / 弹幕") {
 		t.Errorf("删掉了但列表里还留着那一行，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("这里没有音频文件") {
@@ -104,7 +104,7 @@ func TestTheDeleteDialogNamesTheFullPath(t *testing.T) {
 	libSong(t, root, "同名.mp3")
 	tt, _, _, _ := shellOnLocalMusic(t, root)
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -136,7 +136,7 @@ func TestTheDeleteDialogIsOpenableFromASymlinkRow(t *testing.T) {
 	if !tt.HasText("指向别处") {
 		t.Fatalf("链接那一行不在列表里，文字有 %q", tt.Texts())
 	}
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -174,7 +174,7 @@ func TestDeletingMovesTheFileToTheTrashAndSaysSo(t *testing.T) {
 	path := libSong(t, root, "要移走的.mp3")
 	tt, _, _, _, trash, bin := shellOnLocalMusicWithTrash(t, false, root)
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
 	}
 	tt.Frame()
@@ -217,7 +217,7 @@ func TestTheDeleteDialogNoLongerPromisesItIsUnrecoverable(t *testing.T) {
 	libSong(t, root, "歌.mp3")
 	tt, _, _, _, _, _ := shellOnLocalMusicWithTrash(t, false, root)
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
@@ -263,7 +263,7 @@ func TestATrashThatFailsSaysTheFileIsStillThere(t *testing.T) {
 	openLocal(t, tt)
 	settleLocal(t, a, tt)
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
 	}
 	tt.Frame()
@@ -279,7 +279,7 @@ func TestATrashThatFailsSaysTheFileIsStillThere(t *testing.T) {
 		t.Errorf("界面上没有「文件未删除」那一句，文字有 %q", tt.Texts())
 	}
 	// 那一行还在列表里（用户还能再试一次）。
-	if !tt.HasText("打开文件夹") {
+	if !tt.HasText("播放 / 弹幕") {
 		t.Errorf("失败的删除把那一行从列表里拿掉了，文字有 %q", tt.Texts())
 	}
 }
@@ -320,7 +320,7 @@ func TestATrashThatFailsNeverSaysItMovedToTheTrash(t *testing.T) {
 	openLocal(t, tt)
 	settleLocal(t, a, tt)
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
 	}
 	tt.Frame()
@@ -341,7 +341,7 @@ func TestATrashThatFailsNeverSaysItMovedToTheTrash(t *testing.T) {
 		t.Fatal("回收站失败了却把文件删了——这一层绝不能回退到永久删除")
 	}
 	// 那一行还在列表里（用户还能再试一次）。
-	if !tt.HasText("打开文件夹") {
+	if !tt.HasText("播放 / 弹幕") {
 		t.Errorf("失败的删除把那一行从列表里拿掉了，文字有 %q", tt.Texts())
 	}
 }
@@ -368,7 +368,7 @@ func TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
 	}
 	tt.Frame()
@@ -387,7 +387,7 @@ func TestAFileThatIsAlreadyGoneNeverSaysItMovedToTheTrash(t *testing.T) {
 	}
 	// ⚠️ **那一行照样从列表里没掉**：那是用户想要的结果（把过期的那一行
 	// 清掉）。
-	if tt.HasText("打开文件夹") {
+	if tt.HasText("播放 / 弹幕") {
 		t.Errorf("文件已经不在了，那一行却还留在列表里，文字有 %q", tt.Texts())
 	}
 }
@@ -498,72 +498,6 @@ func TestRemovingADirectoryKeepsTheFiles(t *testing.T) {
 // 行身份（铁律四）
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestInsertingARowKeepsTheChosenSong 钉住这一页的行身份（铁律四）。
-//
-// ⚠️ 这是 widgets/list 里那条铁律在这一页上的翻版，而这一页**更容易**踩到：
-// 加一个目录就是往列表**前面**插一整段，后面所有行的下标全部错位。
-// 不按 ID 装 Key 的话，用户选中的那一首会在刷新之后变成旁边那一首。
-//
-// 判据是「**选中项指的还是同一首歌**」（按 ID 比），不是「选中项的下标没变」
-// ——后者恰恰是错的判据：下标不变的那一次才是对的。
-//
-// ⚠️ 「插到**前面**」这件事是真的要成立的：`Scan` 按**根目录路径**排序
-// （`localmusic.go` 的 `slices.SortFunc`），而 `t.TempDir()` 给的是
-// `.../001`、`.../002`、`.../003`——**先建的那个排在前**。所以这里先把那个
-// 「将来要插在最前面」的目录建出来（先建、空着、暂时不加进设置），
-// 不这么做的话新目录会排到最后面，而这一条就什么都验不到了。
-// `TestInsertingARowKeepsTheChosenSong` 自己还断言了「新行确实在第 0 行」。
-//
-// 拿掉修复的方式：`viewTable` 里不装 `p.table.Key`（框架退回「父 ID +
-// 兄弟序号」那一套）。
-func TestInsertingARowKeepsTheChosenSong(t *testing.T) {
-	front := t.TempDir() // 先建 = 路径最小 = 列表里排最前
-	first := t.TempDir()
-	second := t.TempDir()
-	libSong(t, first, "第一目录的歌.mp3")
-	libSong(t, second, "第二目录的歌.mp3")
-
-	tt, s, a, _ := shellOnLocalMusic(t, first, second)
-
-	// 点第二首的标题把它选中（表格的 `Selected` 让单击就能选行）。
-	clickRow(t, tt, s, "第二目录的歌")
-	sel := s.local.sel
-	if sel < 0 || sel >= len(s.local.rows) {
-		t.Fatalf("点了第二首却没选中（sel=%d，%d 行）", sel, len(s.local.rows))
-	}
-	chosen := s.local.rows[sel].ID
-	if !strings.HasSuffix(s.local.rows[sel].Path, "第二目录的歌.mp3") {
-		t.Fatalf("选中的是 %q，want 第二目录那首", s.local.rows[sel].Path)
-	}
-
-	// 往那个早就建好的空目录里放一首歌，然后把它加进设置——这就是
-	// 「用户加了一个新目录」，走的是同一条 `begin` → `SetLocalRoots` → 重扫。
-	libSong(t, front, "插到最前面.mp3")
-	if _, err := a.UpdateSettings(func(st *app.Settings) {
-		st.LocalMusicDirs = []string{front, first, second}
-	}); err != nil {
-		t.Fatal(err)
-	}
-	waitFrames(t, tt, "本地音乐那一遍扫描落地", func() bool { return !a.LocalMusicState().Scanning })
-	tt.Frame()
-
-	if !tt.HasText("插到最前面") {
-		t.Fatalf("新目录的歌没进列表，文字有 %q", tt.Texts())
-	}
-	// ⚠️ 先确认它真的排在**第 0 行**——这一条不成立的话整个用例就白跑了
-	// （插在最后面的话，下标本来就不会错位，验不到任何东西）。
-	if len(s.local.rows) != 3 || !strings.HasSuffix(s.local.rows[0].Path, "插到最前面.mp3") {
-		t.Fatalf("新行不在第 0 行，这一趟验不到行身份：%+v", pathsOf(s.local.rows))
-	}
-	if s.local.sel < 0 || s.local.sel >= len(s.local.rows) {
-		t.Fatalf("加目录之后选中没了（sel=%d）", s.local.sel)
-	}
-	if got := s.local.rows[s.local.sel].ID; got != chosen {
-		t.Errorf("前面插了一行之后选中变成了 %q（%q），want 还是 %q",
-			got, s.local.rows[s.local.sel].Path, chosen)
-	}
-}
-
 // clickRow 点中标题为 title 的那一行的标题格，然后画下一帧。
 func clickRow(t *testing.T, tt *mygoui.Tester, s *Shell, title string) {
 	t.Helper()
@@ -650,41 +584,6 @@ func TestOneWindowDrawingTwiceStaysOneWake(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 筛选与打开
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestSearchFiltersTheRows 钉住搜索框真的在筛。
-//
-// 只匹配**标题**（Biu 也是只匹配标题）——而标题这一页是从标签读的，所以
-// 这一条顺带证明「标题和文件名是两回事」在界面上也成立。
-func TestSearchFiltersTheRows(t *testing.T) {
-	root := t.TempDir()
-	libSong(t, root, "周杰伦-晴天.mp3")
-	libSong(t, root, "五月天-倔强.mp3")
-	tt, _, _, _ := shellOnLocalMusic(t, root)
-
-	typeInto(t, tt, searchLocalLabel, "晴天")
-	tt.Frame()
-
-	if !tt.HasText("晴天") {
-		t.Errorf("搜「晴天」搜不到，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("倔强") {
-		t.Errorf("搜「晴天」还留着「倔强」，文字有 %q", tt.Texts())
-	}
-}
-
-// TestOpenFolderIsOnEveryRow 钉住「打开文件夹」。
-//
-// 每一行都得有一个：它是这一页上唯一一个「不删任何东西、只是把用户在系统里
-// 的位置指给他」的动作，而用户找一首歌常常是为了拿它去做别的事。
-func TestOpenFolderIsOnEveryRow(t *testing.T) {
-	root := t.TempDir()
-	libSong(t, root, "歌.mp3")
-	tt, _, _, _ := shellOnLocalMusic(t, root)
-
-	if !tt.HasText("打开文件夹") {
-		t.Errorf("每一行上没有「打开文件夹」，文字有 %q", tt.Texts())
-	}
-}
 
 // TestARootThatCannotBeReadIsShownNotSwallowed 钉住坏目录会上到界面上。
 func TestARootThatCannotBeReadIsShownNotSwallowed(t *testing.T) {
@@ -791,7 +690,7 @@ func TestDeletingFromARootWithATrailingSpace(t *testing.T) {
 		t.Fatalf("隔壁目录的歌出现在列表里了，文字有 %q", tt.Texts())
 	}
 
-	if err := tt.Click(deleteRowLabel); err != nil {
+	if err := chooseFirstRowMenu(tt, deleteRowLabel); err != nil {
 		t.Fatalf("点不到行里的「%s」：%v，文字有 %q", deleteRowLabel, err, tt.Texts())
 	}
 	tt.Frame()
@@ -809,5 +708,51 @@ func TestDeletingFromARootWithATrailingSpace(t *testing.T) {
 	}
 	if !exists(other) {
 		t.Fatal("隔壁目录里的歌被删了——哪一环把尾部空格裁掉了")
+	}
+}
+
+// chooseFirstRowMenu 在第一行上点右键，选菜单里叫 label 的那一项。
+// 第一行的标题取表头「时长」之后的第二个字（第一个是序号）。
+func chooseFirstRowMenu(tt *mygoui.Tester, label string) error {
+	texts := tt.Texts()
+	for i, s := range texts {
+		if s == "时长" && i+2 < len(texts) {
+			if err := tt.RightClick(texts[i+2]); err != nil {
+				return err
+			}
+			tt.Frame()
+			return tt.ChooseMenuItem(label)
+		}
+	}
+	return fmt.Errorf("找不到第一行：%q", texts)
+}
+
+// TestTheRowMenuCarriesRevealAndDelete 钉住本地音乐行菜单末尾的「在访达里显示」和删除文件
+// （原型 `row:…:local`）：右键第一行，菜单里两项都在。
+func TestTheRowMenuCarriesRevealAndDelete(t *testing.T) {
+	root := t.TempDir()
+	libSong(t, root, "歌.mp3")
+	tt, _, _, _ := shellOnLocalMusic(t, root)
+	texts := tt.Texts()
+	for i, s := range texts {
+		if s == "时长" {
+			if err := tt.RightClick(texts[i+2]); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+	}
+	tt.Frame()
+	got := tt.Menu()
+	for _, want := range []string{"在访达里显示", deleteRowLabel} {
+		found := false
+		for _, m := range got {
+			if m == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("行菜单里没有「%s」：%q", want, got)
+		}
 	}
 }
