@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -132,97 +133,28 @@ func volumeSlider(c *ui.Context, value *float64, lo, hi float64) ui.Element {
 		Width(volSliderW).Height(volSliderH)
 }
 
-// viewVolumeButton 是播放条上那一枚音量图标，和它悬停时浮出来的那根竖滑块。
-//
-// 见文件头：图标能按（静音 / 取消静音）、悬停浮出竖滑块、滚轮 ±0.05。
+// viewVolumeButton 是右列最后两样：静音键 + 96 宽的行内音量滑块（原型 `.vol`）。
+// 静音键的图形：静音 / 音量为 0 画 `mute`，小音量画 `vol-low`，其余画 `vol`。
 func (s *Shell) viewVolumeButton(c *ui.Context, st app.State) {
-	t := c.Theme()
-	// 静音是它自己的一格（`st.Muted`），而「音量是 0」在听感上也是没声——
-	// 那一枚键说的是「按下去会怎样」，所以两样都得算进去。
 	muted := st.Muted || st.Volume <= 0
-
-	// 画的是哪一档看音量本身（Biu 的 music-volume 三档同一个做法），
-	// 静音是它自己的一格（`st.Muted`）。
-	//
-	// ⚠️ **图标只能从 `volumeIcon` 出去**：哪一档配哪一张由那个函数独家说了算
-	// （`icons_test.go` 的 `TestTheStateIconsOnlyReachTheScreenThroughTheirFunction`
-	// 盯着这一条）。
-	name := volumeIcon(st.Volume, st.Muted)
-	label := "静音"
-	if muted {
-		label = "取消静音"
+	name, label := "vol", "静音"
+	switch {
+	case muted:
+		name, label = "mute", "取消静音"
+	case st.Volume <= 0.5:
+		name = "vol-low"
 	}
-
-	// ⚠️ **这一枚刻意不加 `Tooltip`**：框架的提示浮在元素**上方**，而音量浮层
-	// （竖滑块）也浮在上方——两者叠在一起，提示被浮层盖掉一半（实测：浮层底下
-	// 露着一个黑边的小角，写着「点」）。
-	//
-	// 上游也没有：它那一枚的 `aria-label` 就是「静音 / 取消静音」，而悬停出来
-	// 的那个 Tooltip **是竖滑块本身**。所以「按一下会静音」这件事靠的是
-	// **图标本身**（静音了它换成静音那张）加上这一枚的无障碍名字。
-	btn := iconKey(c, name, label, iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).
-		TextColor(t.TextMuted)
-
-	// 悬停就浮出那根竖滑块——**但要停一会儿**（上游那个 Tooltip 的 `delay={300}`）。
-	//
-	// ⚠️ **这一下延迟是用框架自己的动画做的**，不是另起一套状态机：
-	// `Animate` 的文档写着「keeps frames coming while it moves」，所以指针停在
-	// 图标上的时候，那 300 毫秒是**框架自己一帧一帧要走完**的——不用谁去叫醒界面。
-	//
-	// ⚠️ **动画的键必须每一帧都问**（哪怕这一帧不在图标上）：框架的 `Animate` 在
-	// **第一次**请求某个键时直接返回目标值（`mygo/ui/motion.go:316` 的
-	// `if made { return target }`），而不问的那一帧就是「第一次」——于是第一次悬停
-	// 立刻就是 1，延迟等于没有。
-	//
-	// ⚠️ **滚轮不等这 300 毫秒**：用户是在调音量，他得立刻看见调到了多少
-	// （上游的 `onWheel` 也是立刻 `setIsTooltipOpen(true)`）。
-	hoverTarget := float32(0)
-	if btn.Hovered() {
-		hoverTarget = 1
-	}
-	if btn.Animate(volHoverKey, hoverTarget, volHoverDelay) >= 1 {
-		s.volOpen = true
-	}
-
-	// 浮层**自己**收掉：指针既不在图标上、也不在浮层里，隔过一段宽限之后。
-	//
-	// 🔴 **这一段必须排一个「到点叫醒界面」的钟**（评审指出来的）：原来它只读
-	// `s.clock.Now()`，于是「指针离开了」这件事**只在那一帧**被算一次——而
-	// **不播放的时候没有任何东西在要帧**，浮层于是永远留在画面上，遮住内容区
-	//（症状：把鼠标移开，浮层还在那儿）。
-	//
-	// ⚠️ **浮层那一条的悬停是上一帧的**：浮层在**覆盖层**里建，而覆盖层是主树
-	// **之后**才建的——这一帧里它还没建出来，问不到它的悬停。
-	s.syncVolIdle(btn.Hovered(), s.volPanelHovered)
-
-	// 滚轮：±0.05（上游 `onWheel`）。
-	//
-	// ⚠️ **它吃掉了这个滚轮事件**（返回 true）：不吃掉的话，滚轮会继续往下传给
-	// 页面上的滚动容器——在播放条上滚滚轮居然把整页滚了，那是另一个 bug。
-	btn.HandleInput(func(ev ui.InputEvent) bool {
-		if ev.Kind != ui.InputScroll {
-			return false
-		}
-		delta := volWheelStep
-		if ev.DY > 0 {
-			delta = -volWheelStep
-		}
-		s.setVolume(s.app.Snapshot().Volume + delta)
-		// 滚轮也把浮层唤出来（上游 `setIsTooltipOpen(true)`）——用户是在调音量，
-		// 他得看见调到了多少。
-		s.volOpen = true
-		return true
-	})
-
-	if btn.Clicked() {
+	if s.withTip(c, pud.IconBtn(c, "pb-mute", name, label, pud.IconOpts{}), label).Clicked() {
 		s.toggleMute()
 	}
-
-	// 浮层本体。
-	ui.Popover(c, btn, &s.volOpen, func() {
-		s.guardAt("音量浮层", func(c *ui.Context) { s.viewVolumePanel(c, st) })(c)
-	})
+	vol := st.Volume
+	if st.Muted {
+		vol = 0
+	}
+	sl := selfSlider(c, &vol, 0, 1, knobHoverLook).Label("音量").Width(96).Height(16).Shrink(0)
+	if sl.Changed() {
+		s.setVolume(vol)
+	}
 }
 
 // viewVolumePanel 是音量浮层里的东西：一根竖滑块，底下是百分比。

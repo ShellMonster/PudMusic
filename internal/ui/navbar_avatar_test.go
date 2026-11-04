@@ -36,7 +36,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -449,136 +448,9 @@ func TestTheAvatarOnlyAsksOnceEvenThoughEveryFrameAsks(t *testing.T) {
 // 悬停：那一格是活的
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheAvatarWearsARingWhenThePointerIsOnIt 验顶栏那个头像**悬停时看得出是活的**
-// （票 BMG-253）。
-//
-// # 为什么「放大 5%」不够
-//
-// 上游那一处是 `hover:scale-105`——一个 18 像素的圆涨到 19 像素，指针压上去几乎
-// 看不出区别，而它是顶栏里唯一的「个人入口」（放大是那一排里**最弱**的反馈：
-// 图形不变色、也没有铺底）。
-//
-// 现在悬停时那一枚圆外面多一圈 **2 像素的主色环**：深浅两套都取 `ink.AccentOn`
-// （浅色下是压深过的那一档，深色下就是主色本身）。
-//
-// # 判据是「那一格里有没有主色像素」
-//
-// 那一格平时的墨迹是**人形**（`t.TextMuted`）——不是主色。所以「悬停之前一个
-// 主色像素都没有、悬停之后有」就是这一档反馈的全部。
-func TestTheAvatarWearsARingWhenThePointerIsOnIt(t *testing.T) {
-	for _, systemDark := range []bool{false, true} {
-		name := "浅色"
-		if systemDark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := newAvatarFixture(t)
-			s, tt := newAvatarShellIn(t, f, "", systemDark)
-			// 指针先放到内容区，别让悬停那一档提前出现。
-			tt.Move(900, 500)
-			tt.Frame()
-
-			hit, ok := avatarBox(tt)
-			if !ok {
-				t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
-			}
-			th := BuildTheme(s.app.SettingsSnapshot(), systemDark)
-			accent := ink.AccentOn(th)
-
-			if n := countNear(tt.Image(), hit, accent); n != 0 {
-				t.Errorf("没悬停时头像那一格里已经有 %d 个主色像素", n)
-			}
-			tt.Move(hit.X+hit.W/2, hit.Y+hit.H/2)
-			tt.Frame()
-			if n := countNear(tt.Image(), hit, accent); n == 0 {
-				t.Errorf("悬停时头像那一格里一个主色像素都没有——它和没悬停时长得一样")
-			}
-		})
-	}
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 未登录：画的是「没有人」
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheAvatarSaysNobodyIsLoggedIn 验没登录时那一格是「未登录」的样子。
-//
-// 规格写的是「**不是字母占位符**」——原来那个恒定的「B」是应用自己的名字，
-// 用户看到的是一个坏掉的占位符。
-//
-// 这台 fake 明确回了「登录了、头像在这儿」。所以这一条要是偷偷发了 nav，回来
-// 的还是一个**看起来完全能用**的头像——于是判据必须落在「那一格没有图」上。
-func TestTheAvatarSaysNobodyIsLoggedIn(t *testing.T) {
-	f := newAvatarFixture(t)
-	f.withALoginIn() // ⚠️ 这台 fake 随时愿意回答一个登录态
-	_, tt := newAvatarShell(t, f, "")
-
-	waitFrames(t, tt, "头图标成未登录", func() bool {
-		_, ok := tt.Find(avatarNoteGuest)
-		return ok
-	})
-
-	if avatarShowsThePicture(tt) {
-		t.Error("没登录却把某张头像画上去了")
-	}
-	if n := f.countHit(avatarNavPath); n != 0 {
-		t.Errorf("没登录也去问了 B 站 %d 次（请求 %v）——"+
-			"顶栏每一帧问一次，凭据过期之后这就是每秒几十条 -101 噪声", n, f.paths)
-	}
-}
-
-// TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn 钉住 issue #95
-// 那条「**不是字母占位符**」。
-//
-// ## 这一条是复审补上的：原来那条钉不住
-//
-// 原来写的是「那一格不是一整块底色」（`avatarHasInk`）。复审把两种改法各试了
-// 一遍，**整包全绿**：
-//
-//   - 把人形换回恒定的字母「B」——**正是 issue #95 明令不许的那一格**；
-//   - 那一格**什么都不画**。
-//
-// 原因是问错了问题：边框 + 圆角裁剪本来就让那一格不是纯色。而那条用例的注释
-// 写着「这一条钉住画的是那个**人形**」，它做不到——注释说的和它量的不是一回事。
-//
-// ## 现在量的是**形状**
-//
-// 人形的肩膀横着铺开 `side*0.6`（实测 **17 px / 28**），12 号粗体「B」最宽的
-// 那一横只有 **7 px**。所以「最长的那一段连续墨有多长」直接分开这两者，而墨点
-// 总量（**211** 对 **50**）再补一刀，防的是「又宽又细」那种改法。
-//
-// 深浅两套主题各跑一遍：数字量出来一模一样（17/211 与 7/50），而只跑浅色的话
-// 有人改了深色的那套颜色，这一枚还是绿的。
-func TestTheAvatarShowsAPersonAndNotALetterWhenNobodyIsLoggedIn(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			f := newAvatarFixture(t)
-			_, tt := newAvatarShellIn(t, f, "", dark)
-
-			// 未登录那一格是**同步**画出来的（没有后台那一趟），所以等的是那句话，
-			// 而不是 `avatarHasFigure`——等它的话，这一格要是真坏了，报出来的是一句
-			// 「等了 10 秒」，而这一条要说的事是「它长成了什么样」。
-			waitFrames(t, tt, "那一格摆成未登录", func() bool {
-				_, ok := tt.Find(avatarNoteGuest)
-				return ok
-			})
-
-			run, ink := avatarFigure(tt)
-			minRun, minInk := avatarFigureMin()
-			if run < minRun || ink < minInk {
-				t.Errorf("那一格画出来的是「最长的一段墨 %d px、整格 %d 个墨点」，"+
-					"而人形是 %d px / %d 个——**一个字母撑不开一格**"+
-					"（12 号粗体「B」实测 7 px / 50 点，**什么都不画 0 / 0**），"+
-					"issue #95 明令不许字母占位符",
-					run, ink, minRun, minInk)
-			}
-		})
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 图没下来

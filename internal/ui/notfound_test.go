@@ -346,7 +346,7 @@ func TestEveryPageViewIsGuarded(t *testing.T) {
 //   - `rateOpen`（倍速菜单）：同上，框架 Popover。
 //   - `sleepOpen` / `volOpen` / `errDetailOpen`（播放条上同款的 Popover）。
 //   - `searchSuggest`（搜索联想，`PopoverBase`）/ `avatarMenuOpen` /
-//     `dynMenuOpen` / `favPanelOpen`（同款 PopoverBase）。
+//     `dynMenuOpen`（同款 PopoverBase）。
 //   - `full.partsOpen`（满屏的分集面板）与 `lyric` / `fullLyric` 各自的
 //     `offsetOpen` / `fontOpen`（歌词区右下角那两个 `PopoverBase`）。
 //
@@ -380,7 +380,7 @@ func TestEveryPageViewIsGuarded(t *testing.T) {
 // 是没焦点的，少这一句点了也白点）。
 //
 // ⚠️ **其余几枚是「置位就够了」**：`sleepOpen` / `volOpen` / `errDetailOpen` /
-// `avatarMenuOpen` / `dynMenuOpen` / `favPanelOpen` / `queueClearOpen` /
+// `avatarMenuOpen` / `dynMenuOpen` / `queueClearOpen` /
 // `full.partsOpen` / `lyric` 与 `fullLyric` 的 `offsetOpen`/`fontOpen`——
 // 它们都是「点了开、不点不收」的普通标志（`volOpen` 有个闲置宽限，但下一帧
 // 断言时远没到点），没有 `partOpen`/`searchSuggest` 那种每帧收回的分支。
@@ -399,7 +399,6 @@ func openAllOverlays(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	s.errDetailOpen = true
 	s.avatarMenuOpen = true
 	s.dynMenuOpen = true
-	s.favPanelOpen = true
 	s.full.partsOpen = true
 	s.lyric.offsetOpen = true
 	s.lyric.fontOpen = true
@@ -424,7 +423,6 @@ func overlaysStillOpen(s *Shell) map[string]bool {
 		"错误详情":    s.errDetailOpen,
 		"头像下拉":    s.avatarMenuOpen,
 		"动态卡片菜单":  s.dynMenuOpen,
-		"收藏夹浮层":   s.favPanelOpen,
 		"满屏分集面板":  s.full.partsOpen,
 		"歌词字号浮层":  s.lyric.fontOpen,
 		"歌词偏移浮层":  s.lyric.offsetOpen,

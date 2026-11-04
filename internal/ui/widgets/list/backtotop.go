@@ -15,9 +15,9 @@ package list
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -28,33 +28,19 @@ const backTopPx = 400
 
 // 回顶按钮摆在哪儿。Biu 是 `fixed right-10 bottom-[120px]`：右边 40（`right-10`
 // 是 2.5rem），离底 120（躲开播放条）。我们照抄这两个数。
+// 原型 `.btt`：离右 32、离内容区底 24（内容区底就是播放条上沿，播放条 84），44×44 的圆，
+// surface 底、1 像素 line-strong 描边、正文色 18 的 `up` 图标、`--shadow-pop`；悬停 surface-2；进场 PopIn。
 const (
-	backTopRight  = 40
-	backTopBottom = 120
-	// backTopRadius 是按钮的圆角：Biu 的 `radius="full"` 是药丸形，圆角给到
-	// 比按钮高度大就等于它。
-	backTopRadius = 999
+	backTopRight  = 32
+	backTopBottom = tok.BarH + 24
 
-	// backTopSize 是那一枚的点击区边长，backTopGlyph 是里面那个箭头的边长。
-	//
-	// 上游是 `<Button isIconOnly radius="full"><RiArrowUpSLine size={20}/></Button>`
-	// ——`size` 默认那一档是 40，图标 20，每边留 10。
-	backTopSize  = 40
-	backTopGlyph = 20
+	backTopSize  = 44
+	backTopGlyph = 18
 )
 
-// BackToTopIcon 是回顶那一枚里的向上箭头（上游 `RiArrowUpLine`），也是**这份
-// 资源的唯一出处**。
-//
-// ⚠️ **界面层登记的那个名字直接取它**（`internal/ui/icons.go` 的
-// `iconToTop = list.BackToTopIcon`）。两处各写一遍文件名的话，改一边不会有任何
-// 编译错误——而画面上就出现两种「回到顶部」，谁也看不出来是哪一次改错的。
-// 这个包在界面层**下面**（见 `iconset` 文件头），所以常量只能住在这里、界面层
-// 过来取，不能反过来。
-const BackToTopIcon = "Arrows/arrow-up-line.svg"
+// BackToTopIcon 是回顶按钮的图标文件（原型 `up`）。
+const BackToTopIcon = "Pud/up.svg"
 
-// backToTopIcon 是上面那个名字解析出来的图（`iconset` 按名字缓存，同一个名字
-// 永远是同一个指针）。
 var backToTopIcon = iconset.Must(BackToTopIcon)
 
 // BackToTop 画「回到顶部」那一枚：滚过 400 像素才出现。
@@ -73,37 +59,23 @@ func BackToTop(c *ui.Context, offset float32, top func()) {
 	if offset <= backTopPx {
 		return
 	}
-	t := c.Theme()
-	// Overlay 把按钮浮在整窗之上（不占布局），Biu 的 `fixed` 就是这个意思。
-	// Radius 给一个大数就是 Biu 的 `radius="full"`（药丸形）。
+	p := tok.Of(c.Theme())
 	ui.Overlay(c, func() {
-		//
-		// 一枚圆形图标键：`flat` 的配方（无描边）+ `radius="full"`（上游那一枚
-		// 就是 `rounded-full`），里面是 `RiArrowUpLine`。`Label` 仍是「返回顶部」
-		// ——图标对辅助技术是不可见的，而它同时也是无头 Tester 认得这一枚的
-		// 唯一凭据。
-		//
-		// ⚠️ **底色和阴影留着**（上游自己也有 `bg-default/50` + `shadow-xl`）：
-		// 这一枚浮在列表内容**上面**，去掉底之后箭头会压在某一行歌名上，读不清
-		// 也看不出那儿有个按钮。`flat` 去掉的是「常驻的控件底色 + 一圈描边」，
-		// 不是「浮层不能有自己的底」。
-		btn := flat.IconButton(c, backToTopIcon, "返回顶部", backTopGlyph).
-			Padding(space.None, space.None).Size(backTopSize, backTopSize).TextColor(t.Text)
-		if btn.Absolute().
-			Right(backTopRight).Bottom(backTopBottom).
-			Radius(backTopRadius).Background(t.SurfaceHover).
-			Clicked() {
+		btn := ui.ButtonBase(c).Key("back-to-top").Label("返回顶部").
+			Size(backTopSize, backTopSize).Radius(backTopSize/2).
+			AlignItems(ui.Center).Justify(ui.Center).
+			Border(1, p.LineStrong).Transition(motion.PopIn)
+		bg := p.Surface
+		if btn.Hovered() {
+			bg = p.Surface2
+		}
+		btn = btn.Background(bg).Absolute().Right(backTopRight).Bottom(backTopBottom)
+		btn.Children(func() {
+			ui.Icon(c, backToTopIcon).FontSize(backTopGlyph).TextColor(p.Text)
+		})
+		btn = shadow.Pop(btn, c.Theme())
+		if btn.Clicked() {
 			top()
 		}
-		// ⚠️ **影子在 `Clicked()` 之后装**：那一圈影是**外面**的（`Shadow` 只画在
-		// 盒子外面），而 `Absolute` 那一支是这一格的位置——两件事互不相干，装的
-		// 先后也一样。放在后面只是因为读的时候「先摆位置，再加影」顺一点。
-		//
-		// 数值照上游 `shadow-xl shadow-black/30`（`components/scroll-container/
-		// index.tsx:82`）：**30% 黑**、两档（`0 20px 25px -5px` 与
-		// `0 8px 10px -6px`）。原来这里是 `0 2 6 0 18%`——那是我们自己的一档，
-		// 比上游淡得多，而这一枚是**浮在内容上面**的按钮：它和底下那一行歌名之间
-		// 就靠这圈影分界，影太淡时它看着像印在歌名上的一个箭头。
-		shadow.TailwindXLBlack30(btn)
 	})
 }

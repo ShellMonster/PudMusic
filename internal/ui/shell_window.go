@@ -403,7 +403,7 @@ func WindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		MinHeight: 560,
 		// 整条顶栏可拖窗口，控件叠在它上面。
 		TitleBarStyle:        mygo.TitleBarHidden,
-		TrafficLightPosition: &mygo.Point{X: 14, Y: 18},
+		TrafficLightPosition: &mygo.Point{X: 18, Y: 18},
 		// 窗口停在用户上次关掉它的地方。
 		StateKey: "main",
 		// 窗口里是 MyGo 自己画的界面，不是网页。

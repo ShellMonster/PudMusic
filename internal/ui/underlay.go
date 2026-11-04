@@ -204,7 +204,6 @@ var pageSyncs = map[string]func(*Shell, *ui.Context){
 	homePath:         (*Shell).syncHome,
 	settingsPath:     (*Shell).syncSettings,
 	searchPath:       (*Shell).syncSearch,
-	miniPlayerPath:   (*Shell).syncNowPlaying,
 	downloadListPath: (*Shell).syncDownloads,
 	loginPath:        (*Shell).syncLogin,
 	collectionMatch:  (*Shell).syncCollection,

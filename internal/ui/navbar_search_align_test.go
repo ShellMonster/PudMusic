@@ -66,7 +66,7 @@ func TestSuggestPanelAlignsWithTheSearchCapsule(t *testing.T) {
 func TestSuggestPanelKeepsAFloorInANarrowWindow(t *testing.T) {
 	f := newBiliFixture(t, 1)
 	f.setSuggestTerms("周杰", "周杰伦")
-	s, tt := newSuggestShell(t, f, at(900, 560))
+	s, tt := newSuggestShell(t, f, at(700, 560))
 	tt.Frame()
 
 	typeInSearch(t, tt, "周杰")

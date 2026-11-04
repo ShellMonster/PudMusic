@@ -80,7 +80,6 @@ func (s *Shell) syncRoute() {
 //   - `searchSuggest`（搜索联想面板，`PopoverBase`）；
 //   - `avatarMenuOpen`（头像下拉，`PopoverBase`）；
 //   - `dynMenuOpen`（动态卡片「⋯」菜单，`PopoverBase`）；
-//   - `favPanelOpen`（折叠侧栏的收藏夹浮层，`PopoverBase`）；
 //   - `full.partsOpen`（满屏播放器里的分集面板）；
 //   - `lyric.offsetOpen` / `lyric.fontOpen`（播放条歌词区右下角的两个浮层，
 //     `PopoverBase`）；
@@ -132,7 +131,6 @@ func (s *Shell) closeOverlaysForNav() {
 	s.searchSuggest = false
 	s.avatarMenuOpen = false
 	s.dynMenuOpen = false
-	s.favPanelOpen = false
 	s.full.partsOpen = false
 	s.lyric.offsetOpen = false
 	s.lyric.fontOpen = false

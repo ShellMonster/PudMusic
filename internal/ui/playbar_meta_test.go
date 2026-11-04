@@ -106,7 +106,7 @@ func TestThePlayBarHasFavoriteAndDownload(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "一首歌", Artist: "某个 UP 主", ArtistMid: 1,
 	}, 1000)
-	for _, want := range []string{"收藏", "下载"} {
+	for _, want := range []string{"收藏", "下载当前歌曲"} {
 		if !tt.HasText(want) {
 			t.Errorf("播放条上没有「%s」：%q", want, tt.Texts())
 		}
@@ -118,7 +118,7 @@ func TestThePlayBarHasFavoriteAndDownload(t *testing.T) {
 // 给一个空的播放条摆两个点不动的键，用户会以为它们坏了。
 func TestNoFavoriteOrDownloadWithoutATrack(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{}, 1000)
-	for _, unwanted := range []string{"收藏", "下载"} {
+	for _, unwanted := range []string{"收藏", "下载当前歌曲"} {
 		if tt.HasText(unwanted) {
 			t.Errorf("还没有歌，播放条上却有「%s」：%q", unwanted, tt.Texts())
 		}
@@ -150,7 +150,7 @@ func TestTheMetaKeysDrawTheirOwnGlyphs(t *testing.T) {
 	}, 900)
 
 	seen := map[string]string{}
-	for _, label := range []string{"收藏", "下载"} {
+	for _, label := range []string{"收藏", "下载当前歌曲"} {
 		ink := glyphIn(tt, label)
 		if ink == "" {
 			t.Fatalf("播放条上 %q 那一块没画东西：%q", label, tt.Texts())
@@ -318,10 +318,15 @@ func TestTheOwnerSitsUnderTheTitle(t *testing.T) {
 // 摆着的——那就是「画着一个按了没反应的东西」。说一句比按了没反应好解释。
 func TestThePlayBarButtonsSaySoWhenNothingIsPlaying(t *testing.T) {
 	tt, s := metaBarTester(t, app.State{HasTrack: true, Title: "一首歌"}, 1000)
-	for _, label := range []string{"收藏", "下载"} {
-		if err := tt.Click(label); err != nil {
-			t.Fatalf("点不动 %q：%v（画面：%q）", label, err, tt.Texts())
-		}
+	if err := tt.Click("收藏"); err != nil {
+		t.Fatalf("点不动「收藏」：%v（画面：%q）", err, tt.Texts())
+	}
+	// 下载键点开一层「下载音频 / 下载视频」弹层（原型 `dl`），选一项才真的下。
+	if err := tt.Click("下载当前歌曲"); err != nil {
+		t.Fatalf("点不动「下载当前歌曲」：%v（画面：%q）", err, tt.Texts())
+	}
+	if err := tt.Click("下载音频"); err != nil {
+		t.Fatalf("点不动「下载音频」：%v（画面：%q）", err, tt.Texts())
 	}
 	// 按了之后要有一句话（Toast）。断的是 `Shell.toasts` 而不是画面上的字：
 	// 这一趟只画了播放条，而 Toast 是 `viewMain` 最后那一层——真去量画面的话

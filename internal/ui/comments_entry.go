@@ -106,8 +106,7 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 	//
 	// 🔴 **内边距回到纯图标键那一档（每边 7）**：角标不占布局（它 `Attach` 在
 	// 图形盒子的右上角），所以这一枚的宽和没有数字时**一模一样**——32。
-	btn := flat.Button(c, "").Label(commentsKeyLabel(count)).
-		Height(iconHitMd).Padding(space.None, space.Px7)
+	btn := pbKey(c, commentsKeyLabel(count))
 	btn.Children(func() {
 		// ⚠️ **结构是共享的那一份**（`countKeyIcon`）：一个 18×18 的图形盒子，
 		// 缺口块挂在盒子的右上角。缺口 / 字号 / 挂点在 `playbar_counts.go`。

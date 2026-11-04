@@ -227,8 +227,10 @@ func TestLoginFromTheTopBarGoesHome(t *testing.T) {
 	tt, s := loginFlowTester(t, a, homePath)
 	tt.Frame()
 
-	openAvatarMenu(t, tt)
-	clickAvatarMenuItem(t, s, tt, "登录")
+	// 原型：未登录时顶栏右边是一枚主色「登录」键，点它去扫码登录页。
+	if err := tt.Click("登录"); err != nil {
+		t.Fatalf("顶栏上点不到「登录」：%v", err)
+	}
 	tt.Frame()
 	if got := s.router.Path(); got != loginPath {
 		t.Fatalf("点了登录之后停在 %q，want %q", got, loginPath)

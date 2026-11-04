@@ -75,14 +75,6 @@ func shotLoggedOut(t *testing.T, dir, name string, dark, hover bool) {
 	waitFrames(t, tt, "「还没登录」那一支画出来了", func() bool {
 		return tt.HasText("还没登录")
 	})
-	if hover {
-		r, ok := tt.Find(loggedOutHint(3))
-		if !ok {
-			t.Fatalf("侧栏上没有那句提示，文字有 %q", tt.Texts())
-		}
-		tt.Move(r.X+r.W/2, r.Y+r.H/2)
-		tt.Frame()
-	}
 	file := "110-侧栏-登录后可见"
 	if hover {
 		file = "111-侧栏-登录后可见-悬停"

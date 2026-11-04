@@ -272,19 +272,6 @@ var realDataLedger = []realDataPage{
 		Want: []string{"真数据一首"},
 	},
 	{
-		Route: miniPlayerPath, Title: "迷你播放器",
-		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
-			s, tt := newShell(t)
-			// 这一页的内容不是 B 站给的，是**正在放的那一首**（歌词那一块另有
-			// 缺口，票 #20/#21，那一页不许靠歌词撑）。
-			openATrack(t, s)
-			s.navigate(miniPlayerPath)
-			realDataWait(t, tt, "在放的那一首画出来了", func() bool { return tt.HasText("stereo16") })
-			return s, tt
-		},
-		Want: []string{"stereo16"},
-	},
-	{
 		Route: loginPath, Title: "扫码登录",
 		Open: func(t *testing.T) (*Shell, *mygoui.Tester) {
 			s, tt := newShell(t)

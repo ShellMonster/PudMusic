@@ -9,7 +9,7 @@ func TestTheGuestFavoritesEmptyStateOffersTheNextStep(t *testing.T) {
 	s, tt := b.s, b.tt
 	tt.Frame()
 
-	if _, ok := tt.Find("登录后能看到收藏夹"); !ok {
+	if _, ok := tt.Find("登录后能看到收藏夹。"); !ok {
 		t.Fatalf("侧栏上没有空状态那一句，文字有 %q", tt.Texts())
 	}
 	if err := tt.Click("去登录"); err != nil {

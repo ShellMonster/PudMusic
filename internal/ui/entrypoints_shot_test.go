@@ -80,25 +80,6 @@ func TestRenderEntryPointShots(t *testing.T) {
 				save(t, dir, "04-侧栏-收藏夹-空-"+name+".png", tt)
 			}
 
-			// 05 侧栏（折叠态）：**收藏夹还在**——一枚图标，点开是一层浮层
-			//（报告 C4）。
-			{
-				st := app.DefaultSettings("")
-				st.SideMenuCollapsed = true
-				s, tt := newShell(t, withSettings(st))
-				tt.SetDark(dark)
-				s.navigate("/")
-				for range 3 {
-					tt.Frame()
-				}
-				if err := tt.Click(favCollapsedName); err != nil {
-					t.Fatalf("点「收藏夹」那一枚：%v", err)
-				}
-				for range 3 {
-					tt.Frame()
-				}
-				save(t, dir, "05-侧栏-折叠-收藏夹浮层-"+name+".png", tt)
-			}
 		})
 	}
 }

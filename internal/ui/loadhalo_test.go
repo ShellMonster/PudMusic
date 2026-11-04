@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -52,27 +53,15 @@ func haloTester(t *testing.T, st app.State, dark bool) (*Shell, *mygoui.Tester) 
 	return b.s, tt
 }
 
-// keyAccent 是播放键那一枚**实心圆**的颜色（也就是强调色）。
-//
-// ⚠️ **从画面上取，而不是从主题里拼**：那一枚圆自己就是强调色，而光圈
-// 也是强调色——从画面上取，两边就一定是同一个颜色。
-func keyAccent(t *testing.T, tt *mygoui.Tester, key mygoui.Rect) color.RGBA {
+// keyAccent 是光圈的颜色：主题的强调色（原型的播放键是正文色底，不再是主色实心圆，
+// 所以不能再从键上取）。
+func keyAccent(t *testing.T, s *Shell) color.RGBA {
 	t.Helper()
-	img := tt.Image()
-	counts := map[color.RGBA]int{}
-	for y := int(key.Y); y < int(key.Y+key.H); y++ {
-		for x := int(key.X); x < int(key.X+key.W); x++ {
-			c := img.RGBAAt(x, y)
-			counts[c]++
-		}
+	th := s.theme.base
+	if th == nil {
+		th = BuildTheme(app.DefaultSettings(""), false)
 	}
-	best, bestN := color.RGBA{}, -1
-	for c, n := range counts {
-		if n > bestN {
-			best, bestN = c, n
-		}
-	}
-	return best
+	return rgb(tok.Of(th).Accent)
 }
 
 // haloPixels 是画面上**属于那一圈光**的那些像素：强调色、而且在播放键那个
@@ -92,7 +81,7 @@ func haloPixels(t *testing.T, s *Shell, tt *mygoui.Tester) []float64 {
 		t.Fatalf("画面上找不到播放键，文字有 %q", tt.Texts())
 	}
 	cx, cy := float64(key.X+key.W/2), float64(key.Y+key.H/2)
-	accent := keyAccent(t, tt, key)
+	accent := keyAccent(t, s)
 	img := tt.Image()
 	b := img.Bounds()
 	var angles []float64
@@ -104,8 +93,8 @@ func haloPixels(t *testing.T, s *Shell, tt *mygoui.Tester) []float64 {
 			dx, dy := float64(x)-cx, float64(y)-cy
 			r := math.Hypot(dx, dy)
 			// 光圈的那一圈（见 loadhalo.go 的 loadHaloRadius）。
-			lo := float64(loadHaloRadius(iconHitPlay) - loadHaloWidth(iconHitPlay)/2)
-			hi := lo + float64(loadHaloWidth(iconHitPlay)) + 1
+			lo := float64(loadHaloRadius(tok.PlayBtn) - loadHaloWidth(tok.PlayBtn)/2)
+			hi := lo + float64(loadHaloWidth(tok.PlayBtn)) + 1
 			if r < lo || r > hi {
 				continue
 			}
@@ -158,8 +147,8 @@ func TestThePlayKeyIsStillPlayWhileLoading(t *testing.T) {
 	if !ok {
 		t.Fatalf("取流的时候播放键不叫「暂停」了，文字有 %q——它被换成别的东西了", tt.Texts())
 	}
-	if key.W != iconHitPlay || key.H != iconHitPlay {
-		t.Errorf("播放键是 %v，want %d×%d", key, iconHitPlay, iconHitPlay)
+	if key.W != tok.PlayBtn || key.H != tok.PlayBtn {
+		t.Errorf("播放键是 %v，want %.0f×%.0f", key, tok.PlayBtn, tok.PlayBtn)
 	}
 }
 
@@ -344,7 +333,7 @@ func fullHaloAngle(t *testing.T, s *Shell, tt *mygoui.Tester) float64 {
 		t.Fatalf("满屏上找不到播放键，文字有 %q", tt.Texts())
 	}
 	cx, cy := float64(key.X+key.W/2), float64(key.Y+key.H/2)
-	accent := keyAccent(t, tt, key)
+	accent := keyAccent(t, s)
 	img := tt.Image()
 	b := img.Bounds()
 	var angles []float64

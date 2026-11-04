@@ -19,6 +19,7 @@ import (
 	"context"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -225,7 +226,7 @@ func runHeight(img *image.RGBA, area image.Rectangle, lo, hi, x0, x1 int) int {
 // ⚠️ **首页不在这一张表里**：首页按原型重做了，页边距是 40 / 32 / 16 三档（原型 `.page` 的
 // `padding: 8px 40px`），由 `homepage_test.go` 的 `TestTheHomePageUsesThePrototypePageMargins` 钉。
 func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
-	sideW := app.DefaultSideMenuWidth
+	sideW := float64(tok.SideW) // 侧栏固定 232
 	area := contentArea(sideW)
 	// ⚠️ **期望值写的是字面的 16，不是 `pagePadX`**：用被测的同一个常量算期望值
 	// 的话，把 `pagePadX` 改成 20 这一条照样绿——「取 16」这个决定就没有护栏

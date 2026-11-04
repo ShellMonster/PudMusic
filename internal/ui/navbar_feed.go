@@ -65,7 +65,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -429,53 +430,27 @@ func (s *Shell) askCatchUp(done func(id string, err error)) {
 func (s *Shell) viewDynamicDot(c *ui.Context) {
 	s.syncFeedDot()
 
-	// Biu 只在登录后摆这一格（`navbar/index.tsx:38` 的 `{Boolean(user?.isLogin) && ...}`）。
-	// 这里**没按登录态隐藏**——理由是**这一格自己的**：红点这一格不点它也只是一次
-	// 轮询，没登录时轮回来的是 0，红点自然不亮；藏掉它省不掉那一趟请求，只会让
-	// 顶栏右边少一格。
-	//
-	// ⚠️ **它和头像下拉那几项不是同一个理由了**（票 #260）：头像下拉改成照上游
-	// 那样**按登录态隐藏**了（已登录没有「登录」，未登录没有「个人资料」「退出
-	// 登录」，见 `navbar_avatar.go` 的文件头），而这一格**仍然一直都在**。
-	// 那个取舍是这一格自己定的，不是跟着下拉一起定的。
-	//
-	// 代价说清楚：登录之后这一格还在，而 Biu 那时候已经把它藏了。
-	ui.Row(c).Key("nav-feed").Gap(space.Px4).AlignItems(ui.Start).Children(func() {
-		ui.Column(c).Key("nav-feed-btn").Children(func() {
-			// 上游那一枚是 user-feed 的 `Tooltip closeDelay={0}`
-			// （`navbar/user-feed/index.tsx:50`）：菜单那一档，指针一走就收。
-			//
-			// ⚠️ **走 `iconKey`（悬停时图形变主色）**，不是 `iconButton`（票 #249）：
-			// 顶栏这一排和播放条上是同一个「图标键」，配方得是同一档。
-			if s.withMenuTip(c, iconKey(c, iconFeed, "动态", iconMd, false).
-				Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "动态").Clicked() {
-				// Biu 的 handleOpen：清掉红点，再去看动态。
-				s.feed.clear()
-				// ⚠️ **还要把「看到哪儿了」记下来**：只清本地那个数的话，下一轮
-				// 又问回同一个数，点过五分钟那个点又冒出来（上游就是那样）。
-				//
-				// 而「看到哪儿了」是**一条动态的 id**（B 站的 update_baseline 要的
-				// 是那个，不是什么时间戳）——它从「此刻最新那条动态」那儿来。
-				//
-				// ⚠️ **只有那一页已经开着的时候才要现拉一次**：那一页开着的时候它
-				// 自己不会刷新（它只在第一次进去时拉第一页），于是「看过基准」停在
-				// 旧的那一条 → B 站一直说「还有新的」→ **那个点每五分钟回来一次**
-				//（票面「点了不该马上又冒出来」）。
-				//
-				// 而那一页**还没开过**的时候不用管：点过去它自己会拉第一页，而那一页
-				// 的 update_baseline 就是基准（见 dynamicfeed.go 的 adoptFeed）。
-				if s.dynamicFeedOf().started {
-					s.feed.catchUp()
-				}
-				s.navigate(dynamicFeedPath)
+	// 原型：登录后才有这一枚铃铛（`S.loggedIn ?`）。
+	if !s.app.LoggedIn() {
+		return
+	}
+	ui.Column(c).Key("nav-feed-btn").Children(func() {
+		// 上游那一枚是 user-feed 的 `Tooltip closeDelay={0}`：菜单那一档，指针一走就收。
+		if s.withMenuTip(c, pud.IconBtn(c, "nav-feed-icon", "bell", "动态", pud.IconOpts{On: s.router.Path() == dynamicFeedPath}), "动态").Clicked() {
+			// Biu 的 handleOpen：清掉红点，再去看动态。
+			s.feed.clear()
+			// ⚠️ **还要把「看到哪儿了」记下来**：只清本地那个数的话，下一轮又问回同一个数，
+			// 点过五分钟那个点又冒出来。而那一页已经开着时它自己不会刷新，所以现拉一次；
+			// 没开过的话点过去它自己会拉第一页，那一页的 update_baseline 就是基准。
+			if s.dynamicFeedOf().started {
+				s.feed.catchUp()
 			}
-			// ⚠️ **这里读的是 `s.feed.count`，不是刚进来时记下的那一份**：这一帧
-			// 里上面那一句可能刚把它清掉，而手里那份是清之前的——于是「点一下就
-			// 清掉」要等到下一帧才生效（画面上那个点会闪一下）。
-			if s.feed.count > 0 {
-				s.viewDynamicDotMark(c, s.feed.count)
-			}
-		})
+			s.navigate(dynamicFeedPath)
+		}
+		// ⚠️ **这里读的是 `s.feed.count`，不是刚进来时记下的那一份**：上面那一句可能刚把它清掉。
+		if s.feed.count > 0 {
+			s.viewDynamicDotMark(c, s.feed.count)
+		}
 	})
 }
 
@@ -492,32 +467,10 @@ func (s *Shell) viewDynamicDot(c *ui.Context) {
 // 那是「旁边有个小圆点」，不是「右上角有个点」：用户看不见，而这一票要的就是
 // 「一眼能看见」。
 func (s *Shell) viewDynamicDotMark(c *ui.Context, count int) {
-	t := c.Theme()
-	ui.Box(c).Key("nav-feed-dot").
-		// 落在按钮的右上角（`Attach` 把这个点的中心摆在父盒子的那个角上）。
-		Attach(ui.AnchorTopRight, ui.AnchorCenter).
-		// ⚠️ **必须 PassThrough**：这个点画在按钮**上面**，而 MyGo 的命中链是
-		// 「最上面那个元素 + 它的祖先」（`mygo/ui/input.go` 的 appendHitChain），
-		// **兄弟不参与**——于是这个点那 8×8 底下的按钮收不到指针事件，
-		// 「动态」那一枚的右上角变成死区（点那个看得见的红点没反应）。
-		//
-		// ⚠️ **指针停在它上面时按钮也不亮**（同一个理由）：它吃掉了 hover。
-		PassThrough().
-		// 上游那 `translate-x-1/3 -translate-y-1/3` 的结果：中心往角里挪六分之一。
-		// ⚠️ **MyGo 的正负号和 CSS 的 inset 一样**：`Right(1.33)` 是往**左**挪，
-		// `Top(1.33)` 是往**下**挪——两样加起来就是「往角里」。
-		Right(dynamicDotNudge).Top(dynamicDotNudge).
-		Size(dynamicDotSize, dynamicDotSize).
-		Radius(dynamicDotSize / 2).
-		// 颜色是**主题里那一个 warning**（`t.Warning`）：上游那一枚是 HeroUI 的
-		// `color="warning"`，而规矩是「图形色（图标、圆点、描边）用主题里那一个
-		// 原值」——见 semantic.go 那三条规矩的第 3 条。
-		//
-		// ⚠️ **它不是每个方案都是 #f5a524**：经典那一档就是上游那个数，而主题
-		// 方案（暖纸 / 暮光 / 柔雾）各有自己的那一档（暖纸的浅色下是深棕
-		// #9a5b06）。那是整个应用的配色，不是这一枚点自己发明的。
-		Background(t.Warning).
-		// 画面上是一个点（Biu 的 `isDot`），给无障碍和测试留一句话：
-		// 有几条。Label 不画在屏幕上，但读屏软件和 `Tester.HasText` 都认它。
+	// 原型：7×7 的主色点，离按钮上沿 8、右沿 9。`PassThrough` 不能省：点画在按钮上面，
+	// 不穿透的话它底下那一块按钮收不到指针（死区）。
+	ui.Box(c).Key("nav-feed-dot").Absolute().Top(8).Right(9).
+		PassThrough().Size(7, 7).Radius(3.5).
+		Background(tok.Of(c.Theme()).Accent).
 		Label(fmt.Sprintf("%d 条新动态", count))
 }

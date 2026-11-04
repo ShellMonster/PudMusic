@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -107,9 +108,9 @@ func TestTheSidebarRunsFromTheTopOfTheWindow(t *testing.T) {
 			}
 			// ③ 它在侧栏的**右缘**，不在别处：侧栏宽（`DefaultSideMenuWidth`）的
 			// 最后一列（线本身），或者侧栏底色和内容区底色不同时的下一列。
-			if want := int(app.DefaultSideMenuWidth); divider != want-1 && divider != want {
+			if want := int(tok.SideW); divider != want-1 && divider != want {
 				t.Errorf("侧栏右缘那条线在 x=%d，want %d（侧栏宽 %v）",
-					divider, want, app.DefaultSideMenuWidth)
+					divider, want, tok.SideW)
 			}
 		})
 	}
@@ -212,7 +213,7 @@ func TestTheTopBarKeepsItsButtonsInsideTheWindow(t *testing.T) {
 	tt := b.tt
 	tt.Frame()
 
-	for _, what := range []string{"打开文件", "迷你", "动态", avatarLabel} {
+	for _, what := range []string{"命令面板（⌘K）", "迷你", "登录"} {
 		r, ok := tt.Find(what)
 		if !ok {
 			t.Fatalf("顶栏上找不到 %q，文字有 %q", what, tt.Texts())

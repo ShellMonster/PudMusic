@@ -17,6 +17,7 @@ package ui
 import (
 	"testing"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -85,8 +86,10 @@ func rowSelected(t *testing.T, tt *ui.Tester, term string, hover ui.Color) bool 
 func TestSuggestArrowKeysWalkThePanel(t *testing.T) {
 	s, tt := keysFixture(t)
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	soft := accentSoft(th)
-	hover := th.SurfaceHover
+	soft := tok.Of(th).AccentSoft
+	// 原型 `.sug-row.active`：`hover` 底（半透明，压在面板 `surface` 上）。
+	panelBg := tok.Of(th).Surface
+	hover := ui.RGB(over(tok.Of(th).Hover, panelBg).R, over(tok.Of(th).Hover, panelBg).G, over(tok.Of(th).Hover, panelBg).B)
 
 	// ① 还没按：一条都没选。
 	if chipSelected(t, tt, "林俊杰", soft) {
@@ -168,7 +171,7 @@ func TestSuggestEnterWithoutAPickSearchesTheTypedWord(t *testing.T) {
 func TestSuggestTypingClearsThePick(t *testing.T) {
 	s, tt := keysFixture(t)
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	soft := accentSoft(th)
+	soft := tok.Of(th).AccentSoft
 
 	keyNavDown(tt) // 选中第一条「林俊杰」
 	if !chipSelected(t, tt, "林俊杰", soft) {

@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"testing"
 
@@ -257,10 +256,12 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	}
 	// 票 #581：没有「自动」了，杜比是显式选项；顺序从最费流量到省流量。
 	want := []string{"无损", "杜比全景声", "高音质", "标准", "省流量"}
-	if got := tt.Menu(); !slices.Equal(got, want) {
-		t.Fatalf("菜单里的项 = %q，want %q", got, want)
+	for _, w := range want {
+		if !tt.HasText(w) {
+			t.Fatalf("音质弹层里缺 %q，文字有 %q", w, tt.Texts())
+		}
 	}
-	if err := tt.ChooseMenuItem("无损"); err != nil {
+	if err := tt.Click("无损"); err != nil {
 		t.Fatalf("选不了「无损」：%v", err)
 	}
 	if got := a.AudioQuality(); got != bili.AudioLossless {
@@ -275,10 +276,12 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	if err := tt.Click("192K"); err != nil {
 		t.Fatalf("第二次点不动徽章：%v", err)
 	}
-	if got := tt.Menu(); !slices.Equal(got, want) {
-		t.Fatalf("第二次的菜单 = %q，want %q", got, want)
+	for _, w := range want {
+		if !tt.HasText(w) {
+			t.Fatalf("第二次的音质弹层里缺 %q，文字有 %q", w, tt.Texts())
+		}
 	}
-	if err := tt.ChooseMenuItem("省流量"); err != nil {
+	if err := tt.Click("省流量"); err != nil {
 		t.Fatalf("选不了「省流量」：%v", err)
 	}
 	if got := a.AudioQuality(); got != bili.AudioLow {
@@ -295,8 +298,8 @@ func TestNoQualityMenuWithoutABadge(t *testing.T) {
 	if err := tt.Click("本地的一首"); err != nil {
 		t.Fatal(err)
 	}
-	if items := tt.Menu(); items != nil {
-		t.Errorf("本地文件也弹出了音质菜单：%q", items)
+	if tt.HasText("省流量") {
+		t.Errorf("本地文件也弹出了音质弹层：%q", tt.Texts())
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -243,7 +244,12 @@ func sideSceneSettings(side float64) app.Settings {
 //
 // ⚠️ **上限跟着字号缩放走**（`settingsContentMaxWAt`）：这里算的是**这一帧**的
 // 宽度，所以字号那一档也得算进去（`scale` 是系统的文本缩放，1 = 不缩放）。
-func settingsContentRight(winW int, side float64, scale float32) float32 {
+func settingsContentRight(winW int, _ float64, scale float32) float32 {
+	// 侧栏固定 232（窗口宽 ≤ 1024 时收起成 72），设置里不再有可拖的宽度。
+	side := float64(tok.SideW)
+	if float32(winW) <= tok.AutoCollapseBelow {
+		side = float64(tok.SideCollapsedW)
+	}
 	avail := float32(winW) - float32(side)
 	block := settingsContentMaxW * scale
 	if avail < block {

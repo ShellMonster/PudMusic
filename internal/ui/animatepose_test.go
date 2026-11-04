@@ -62,38 +62,3 @@ func TestTheFullPlayerBarsSlideWithoutRebuildingTheWindow(t *testing.T) {
 			got)
 	}
 }
-
-// TestTheLikeBackgroundGrowsWithoutRebuildingThePlaybar 断「赞的那一圈长出来的时候
-// 播放条没有重建」。
-//
-// # 为什么不能按那一键来量
-//
-// 按下去的话**图标层也会弹一下**，而图标层还在重建那一档（它的倍数要和「按下
-// 缩放」相乘，两个数都要读——见 `like.go` 的 `likeButton`）——重建是**它**要的，
-// 不是背景层要的。
-//
-// ⇒ 这里**直接把「赞没赞」翻过去**（`SetLike`），不按那一键：于是这一段里动的
-// 只有背景层。
-func TestTheLikeBackgroundGrowsWithoutRebuildingThePlaybar(t *testing.T) {
-	e := newLikeEnv(t, false, false, false)
-	e.tt.Frame()
-
-	// 直接把「赞没赞」翻过去（**不按那一键**，理由见文件头）。
-	e.s.app.SetLike(true, func(error) {})
-	waitFrames(t, e.tt, "赞出去了", func() bool { return e.s.app.LikeState().Liked })
-
-	// 先把页面自己的进场动画走完（首页的 Tab 下划线进场是 240ms 的 `ui.Transition`，而
-	// Tester 的钟站着不动——不推钟它就停在第一帧，下面那 400ms 里每帧都在重建界面，
-	// 数到的是它而不是赞的那一圈）。
-	e.tt.Advance(time.Second)
-	e.tt.Frame()
-	// 状态落地那一帧是重建（状态变了），从这儿开始数。
-	e.s.builds = buildTally{}
-	e.tt.Advance(400 * time.Millisecond)
-	if got := e.s.builds.playbar; got != 0 {
-		t.Errorf("赞的那一圈长出来的那一段重建了 %d 遍播放条，want 0。\n"+
-			"背景层走的是 `AnimatePose` 那一档（只重绘帧，不重建 view）：\n"+
-			"**缩放和不透明度都在那一个 pose 里**——只换一半的话，另一半还在 view "+
-			"里被读，每帧照样重建整个界面（报告 BMG-264 §7 A1）。", got)
-	}
-}

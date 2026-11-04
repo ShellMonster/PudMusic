@@ -473,6 +473,9 @@ type Shell struct {
 	// sleepOpen 是睡眠定时那个浮层开着没有。只由 view 在主线程上读写，
 	// 见 playbar_sleep.go。
 	sleepOpen bool
+	// qualityOpen / dlOpen 是播放条右列「音质」「下载」两个弹层开没开（原型 `popHtml` 的
+	// `quality` / `dl`）。
+	qualityOpen, dlOpen bool
 
 	// spaceAt 是上一次空格触发播放/暂停的帧时刻，用来同一帧去重。
 	spaceAt time.Time
@@ -501,39 +504,9 @@ type Shell struct {
 
 	// 侧栏这一摊。**只由 view 在主线程上读写**，不跨 goroutine。
 	//
-	// sideWidth 是这一帧画出来的宽度：拖动中它跟着指针走（可能小于 160，
-	// 看上去就是折叠着的），没在拖时宽度走 MyGo 的动画，见 sidebar.go。
-	//
-	// sideDragFromX / sideDragFromWidth 是这次拖拽的起点：按下那一刻指针的
-	// 横坐标，和当时的宽度。每一次拖拽重新记，不跨拖拽沿用。
-	sideWidth         float64
-	sideDragging      bool
-	sideDragFromX     float32
-	sideDragFromWidth float64
-
-	// sideDrawnW 是**这一帧侧栏真正画出来的宽**（`viewSide` 里那个
-	// `AnimateTo`/`Jump` 的返回值——也就是**这一帧参与布局的那一档**）。
-	//
-	// 🔴 **它不是「目标宽」**（`sideTargetWidth`）：侧栏有 200ms 的过渡，
-	// 过渡期间画出来的是**中间值**；而内容区就架在它右边（`underlay.go`
-	// 那个 Row），所以「内容区有多宽」= 窗口宽 − **它这一帧画出来的那一档**。
-	//
-	// ⚠️ **为什么不能靠猜**（这是对抗性审查挖出来的一个真 bug）：
-	//
-	//   - 「上一次拖动的终点」是**陈旧的**——`commitSideWidth` 只写设置，
-	//     **不清 `s.sideWidth`**。于是「拖到 300 → 折叠」这一路，
-	//     `s.sideWidth` 停在 300、目标是 64，而**画面上画的是 64**。
-	//     拿陈旧值去算内容区 ⇒ 内容区算窄了 236 像素 ⇒ 横幅右边空出
-	//     236 像素的一条空白带（**不报错、不崩溃**，画面上只是「没铺满」）。
-	//   - 「拖动中那一档可能比目标小」也不是「内容区还占着旧的宽」——
-	//     **实测内容区每一帧都跟着重排**（`underlay.go` 那个 Row 是
-	//     flex 布局，侧栏一改宽，兄弟那一列立刻重排）。实测拖动时
-	//     横幅那一格的宽**逐帧**跟着画面上的侧栏宽走，一像素不差。
-	//
-	// ⇒ 所以这一格是**记下来的事实**，不是推出来的估计。
-	//
-	// ⚠️ **它是 0 = 这一帧侧栏压根没画**（比如侧栏那一支被替掉了，见
-	// `sideBody`）——那时候退回「目标宽」（见 `sideDrawnWidth`）。
+	// sideDrawnW 是**这一帧侧栏真正画出来的宽**（232 / 72，`viewSide` 记下）：内容区
+	// 就架在它右边，「内容区有多宽」= 窗口宽 − 它。0 = 这一帧侧栏压根没画（侧栏那一支
+	// 被替掉了，见 `sideBody`），那时退回设置里的目标宽（`sideDrawnWidth`）。
 	sideDrawnW float32
 
 	// sideLists 是两组收藏夹各自的列表状态。拖拽排序靠它，
@@ -545,12 +518,6 @@ type Shell struct {
 	// （票 #313）。**它自己知道「数据换了」**（见 `rowkey.Memo` 的文件头），
 	// 所以拖完排序、换收藏夹都不用记得重建。
 	sideRowKeys [favGroups]rowkey.Memo[int64, any]
-
-	// favPanelOpen 是**折叠态**那枚「收藏夹」图标点开之后的那层浮层开没开。
-	//
-	// ⚠️ 它只属于折叠态：展开态的收藏夹本来就在侧栏里，不需要浮层（见
-	// sidebar_favorites.go 的 viewFavoritesCollapsed）。
-	favPanelOpen bool
 
 	// 播放列表抽屉这一摊。**同样只由 view 在主线程上读写**。
 	//

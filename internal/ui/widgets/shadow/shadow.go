@@ -78,43 +78,12 @@ func TailwindLG(e ui.Element) ui.Element {
 		Shadow(0, 4, 6, -4, ui.RGBA(0, 0, 0, tailwindBlack10))
 }
 
-// TailwindXLBlack30 是上游的 `shadow-xl shadow-black/30`——**回顶按钮那一枚**
-// （上游 `components/scroll-container/index.tsx:82`）。
-//
-// ⚠️ **`shadow-black/30` 把两层的颜色都换成 30% 黑**，不是只换一层，也不是
-// 「用默认色再叠一层 30% 黑」。上游那一枚之所以比别处浓，是因为它是一枚**浮在
-// 内容上面**的按钮，底下那一层影就是它和内容之间的分界。
-func TailwindXLBlack30(e ui.Element) ui.Element {
-	return e.Shadow(0, 20, 25, -5, ui.RGBA(0, 0, 0, 0.3)).
-		Shadow(0, 8, 10, -6, ui.RGBA(0, 0, 0, 0.3))
-}
-
 // Tailwind2XL 是上游的 `shadow-2xl`：`0 25px 50px -12px rgb(0 0 0/0.25)`。
 //
 // ⚠️ **只有一层，而且颜色是 25% 黑**（不是 10%）。网格卡片右下角那个主色圆播放钮
 // 带的就是这一档（上游 `components/music-card/index.tsx:51`）。
 func Tailwind2XL(e ui.Element) ui.Element {
 	return e.Shadow(0, 25, 50, -12, ui.RGBA(0, 0, 0, tailwindBlack25))
-}
-
-// PlayBar 是播放条那一整套影：**外层那个 div 的 Tailwind `shadow-2xl` +
-// 里面那张 Card 的 HeroUI `shadow="sm"`**。
-//
-// 上游那两层落在**同一个矩形**上（`layout/index.tsx:48` 那个 div 是
-// `h-[88px] w-full`，里面 `playbar/index.tsx:24` 那张 Card 是 `h-full` 铺满它），
-// 所以这里一层元素上就够。
-//
-// ⚠️ **加进去的先后看不出差别**（别拿它当保证）：MyGo 是「先画所有**外**影 →
-// 再画底 → 最后画**内**影」（`mygo/ui/paint.go:246-262`），所以那道 1 像素的
-// **内白边永远画在 `shadow-2xl` 之上**——两层反过来加，逐行像素**一个都不差**
-// （实测过）。这里按上游的叠放次序写（Card 压着外层 div），只是为了看着像上游
-// 那个结构，**不是**它对不对的原因。
-//
-// ⚠️ **两层是上游那个结构，不是两套随便挑的**：外层那档朝下洒 25、模糊 50，
-// 于是它**在播放条下方**（窗口外，看不见），真正落在内容区那一侧的是 Card
-// 自己那档 `shadow="sm"`（深色下 1 像素内白边，浅色下 1 像素外黑边）。
-func PlayBar(e ui.Element, t *ui.Theme) ui.Element {
-	return HeroSmall(Tailwind2XL(e), t)
 }
 
 // HeroSmall 是 HeroUI 的 `shadow="sm"`（`--heroui-box-shadow-small`）。
@@ -243,7 +212,7 @@ func Sheet(e ui.Element, t *ui.Theme) ui.Element {
 //
 //   - `TailwindSM`（`shadow-sm`）：上游没有一处用它。
 //   - `TailwindXL`（`shadow-xl`）：上游只有回顶按钮那一枚用它，而那一枚是
-//     `shadow-black/30`（`TailwindXLBlack30`，还在）。
+//     `shadow-black/30`（回顶按钮现在走 `shadow.Pop`，这一档也删了）。
 //   - `HeroLarge`（`shadow="lg"`）：上游的分集那个 Popover 是这一档，但我们
 //     那一块用的是自己挑的一档更淡的影（`Sheet`）——毛玻璃底下还有一层模糊的
 //     封面影，再压一圈 30 像素的影就糊了。

@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+
 	"github.com/egoist/mygo/ui"
 )
 
@@ -13,7 +15,7 @@ import (
 // `user/:id`、`settings`、`download-list`、`dynamic-feed`、`local-music`、
 // `search`、`empty`），加上独立窗口的 `mini-player` 共 13 条；我们另加了第 14 条
 // `/login`（上游把登录挂在头像下拉里，我们给它一条路由）和第 15 条 `/stats`
-// （听歌统计，从顶栏右上角那枚图标进，不进侧栏）。兜底的 `*`（404）
+// （听歌统计，原型把它放进侧栏，在「设置」之前）。兜底的 `*`（404）
 // **不在 `routes` 表里**——它是 `notFound` 那一个单独的值，因为 404 不是一条能
 // Match 的模式（见 `viewRoutes`）。
 //
@@ -73,7 +75,7 @@ type Route struct {
 	Icon, ActiveIcon string
 }
 
-// routes 是那 15 条。**InMenu 的七条**（听歌统计不进侧栏），顺序就是侧栏菜单
+// routes 是那些路由。**InMenu 的八条**（含听歌统计），顺序就是侧栏菜单
 // 从上到下的顺序：前六条
 // 照 Biu 的 SD-04（推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
 // 下载记录），第七条「设置」是我们自己多摆的（Biu 那边设置只从头像下拉进）。
@@ -98,7 +100,7 @@ var routes = []Route{
 	// 一个重试，见 empty.go 那段「为什么它不能是 viewEmpty 的一个空状态」）。
 	// 两件事在界面上必须是两句话——用户读到「暂无内容」会以为 B 站没有推荐
 	// 给他，于是永远不会去按那个本该在那儿的重试。
-	{Match: "/", Title: "推荐音乐", InMenu: true, Icon: iconMenuRecommend, ActiveIcon: iconMenuRecommendOn, Empty: emptyState{
+	{Match: "/", Title: "推荐音乐", InMenu: true, Icon: pudDisc, ActiveIcon: pudDisc, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "先在顶栏「打开文件」放几首进来，或者搜一首歌",
 		Icon:  iconEmptyMusic,
@@ -113,7 +115,7 @@ var routes = []Route{
 	// ⚠️ **「还没登录」不是这一句**，是 follow.go 里的 `followNotLoggedIn`：没登录
 	// 时那个接口一律回 -101，而说成「还没关注任何人」的话用户登录完发现还是空的，
 	// 会以为是登录坏了。两句话必须分开（见 follow.go 文件头）。
-	{Match: followPath, Title: "我的关注", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuFollow, ActiveIcon: iconMenuFollowOn, Empty: emptyState{
+	{Match: followPath, Title: "我的关注", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: pudUsers, ActiveIcon: pudUsers, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "登录之后点「关注」关注的 UP 主会出现在这里",
 		Icon:  iconEmptyGroup,
@@ -127,24 +129,32 @@ var routes = []Route{
 	//
 	// 上游：稍后再看 `pages/later/index.tsx:236`，历史记录
 	// `pages/history/index.tsx:284`。
-	{Match: laterPath, Title: "稍后再看", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuLater, ActiveIcon: iconMenuLaterOn, Empty: emptyState{
+	{Match: laterPath, Title: "稍后再看", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: pudLater, ActiveIcon: pudLater, Empty: emptyState{
 		Title: "暂无稍后再看内容",
 		Hint:  "登录之后在歌上点「稍后再看」，加进来的会出现在这里",
 		Icon:  iconEmptyLater,
 	}},
-	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: iconMenuHistory, ActiveIcon: iconMenuHistoryOn, Empty: emptyState{
+	{Match: historyPath, Title: "历史记录", InMenu: true, RequiresLogin: true, HideInMenuWhenLoggedOut: true, Icon: pudHistory, ActiveIcon: pudHistory, Empty: emptyState{
 		Title: "暂无历史记录",
 		Hint:  "登录之后听过的歌会出现在这里",
 		Icon:  iconEmptyHistory,
 	}},
 	// 上游：`pages/local-music/index.tsx:263`。
-	{Match: "/local-music", Title: "本地音乐", InMenu: true, Icon: iconMenuLocal, ActiveIcon: iconMenuLocalOn, Empty: emptyState{
+	{Match: "/local-music", Title: "本地音乐", InMenu: true, Icon: pudFolder, ActiveIcon: pudFolder, Empty: emptyState{
 		Title: "暂无内容",
 		Hint:  "用顶栏的「打开文件」把本地音乐加进来",
 		Icon:  iconEmptyDisk,
 	}},
 	// 「没有下载记录」，文案在 empty.go 的 noDownloads（上游出处也写在那儿）。
-	{Match: "/download-list", Title: "下载记录", InMenu: true, Icon: iconMenuDownload, ActiveIcon: iconMenuDownloadOn, Empty: noDownloads},
+	{Match: "/download-list", Title: "下载记录", InMenu: true, Icon: pudDownload, ActiveIcon: pudDownload, Empty: noDownloads},
+	// 听歌统计：原型把它放进侧栏（设置之前），顶栏上的统计图标没有了。
+	//
+	// ⚠️ **它不登录也能用**：统计是「本机一份」的东西，而侧栏那三个要
+	// 登录的入口是「跟着账号走」的。
+	//
+	// ⚠️ **它有内容**（stats_page.go），所以**不填 Empty**：空状态是这一页
+	// **自己里面**画的（见 stats_view.go 的 `viewStatsEmpty`）。
+	{Match: statsPath, Title: "听歌统计", InMenu: true, Icon: pudStats, ActiveIcon: pudStats},
 	// 设置页在上游不是一张内容页，是一长串表单，**没有空状态可抄**——而这一页
 	// 也不是空页面：settings_page.go 已经把设置页本身接进 builtPage 了（主题、
 	// 圆角、窗口关闭三项）。所以这一条**不填 Empty**：填了就是一句没人会看到的
@@ -155,7 +165,7 @@ var routes = []Route{
 	//
 	// 另外 Biu 把设置放在头像下拉里（N-08），这里先挂侧栏底部，等头像那块
 	// 做出来再挪回去。
-	{Match: "/settings", Title: "设置", InMenu: true, Icon: iconMenuSettings, ActiveIcon: iconMenuSettingsOn},
+	{Match: "/settings", Title: "设置", InMenu: true, Icon: pudSettings, ActiveIcon: pudSettings},
 	// 搜索页有搜索框和两个空状态（searchpage.go），所以**不填 Empty**：填了就是
 	// 一句没人会看到的话，那一页根本走不到空状态那一支。
 	{Match: "/search", Title: "搜索"},
@@ -200,23 +210,10 @@ var routes = []Route{
 		// 在这里画的也是这一枚 —— 换成别的就等于这一页说的不是它自己。
 		Icon: iconEmptyDefault,
 	}},
-	// 迷你播放器（nowplaying.go）：没歌时是上游的「暂无播放内容」，有歌时是歌名 +
-	// 歌词区。所以**不填 Empty**：填了就是一句没人会看到的话。
-	{Match: "/mini-player", Title: "迷你播放器"},
 	// 扫码登录。**不加 InMenu**：它不是侧栏菜单项，是从顶栏的登录
 	// 按钮进出来的（跟 Biu 把登录挂在头像下拉里是一回事）。
 	// 加进菜单的话用户每次想登录都要先在侧栏里找一圈。
 	{Match: "/login", Title: "扫码登录"},
-	// 听歌统计。**不加 InMenu**：它从顶栏右上角那枚图标进（见 navbar.go），
-	// 不进侧栏。
-	//
-	// ⚠️ **它不登录也能用**：统计是「本机一份」的东西，而侧栏那三个要
-	// 登录的入口是「跟着账号走」的。
-	//
-	// ⚠️ **它有内容**（stats_page.go），所以**不填 Empty**：填了就是一句
-	// 没人会看到的话。空状态是这一页**自己里面**画的（见 stats_view.go 的
-	// `viewStatsEmpty`）。
-	{Match: statsPath, Title: "听歌统计"},
 	// ⚠️ **皮肤页不进侧栏**（用户拍板：顶栏那枚 palette 图标就是它的入口，
 	// 侧栏不重复——和「设置」当初从顶栏拿掉同一条纪律：同一动作两个入口
 	// 会不一致）。它有内容（appearance.go），不填 Empty。
@@ -323,7 +320,12 @@ func (s *Shell) page(c *ui.Context, r *ui.Route, rt Route) {
 	s.pageBuilds++
 	s.guardAt("页面「"+rt.Title+"」", func(c *ui.Context) {
 		r.Title(rt.Title)
-		s.pageBody(c, r, rt)
+		// 原型 `page-in`：换页时新页从下 8 淡入（360ms）。Key 用路由模式，所以只在**换页**时播，
+		// 同一页里换参数（搜索词、收藏夹 id）不重播；「减少动态效果」时框架只做淡入。
+		ui.Column(c).Key("page-in:" + rt.Match).Grow(1).FillWidth().
+			Transition(motion.PageIn).Children(func() {
+			s.pageBody(c, r, rt)
+		})
 	})(c)
 }
 
@@ -347,9 +349,6 @@ func (s *Shell) builtPage(rt Route) func(*ui.Context, *ui.Route) {
 	case searchPath:
 		// 搜索页有搜索框，两个空状态从 URL 上的 q 分得出来（searchpage.go）。
 		return s.viewSearch
-	case miniPlayerPath:
-		// 正在放什么 + 它的歌词（nowplaying.go）。
-		return s.viewNowPlaying
 	case downloadListPath:
 		// 下载记录（downloadlist.go）：表格 + 三段进度 + 五种操作 + 确认弹窗。
 		//

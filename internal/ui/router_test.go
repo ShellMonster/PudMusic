@@ -57,13 +57,13 @@ func settleText(t *testing.T, tt *mygoui.Tester, want string) {
 func TestFourteenRoutes(t *testing.T) {
 	// ⚠️ **第 15 条是听歌统计**（`/stats`）、第 16 条是皮肤页（`/appearance`）：
 	// 两条都从顶栏图标进，不进侧栏。
-	if got := len(routes) + 1; got != 17 {
-		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 17（我们的 16 条 + 兜底 1 条）", got, len(routes))
+	if got := len(routes) + 1; got != 16 {
+		t.Fatalf("路由一共 %d 条（表里 %d 条 + 兜底 1 条），want 16（我们的 15 条 + 兜底 1 条）", got, len(routes))
 	}
 	want := []string{
 		"/", "/follow", "/later", "/history", "/local-music", "/download-list",
 		"/settings", "/search", "/dynamic-feed", "/user/{id}", "/collection/{id}",
-		"/empty", "/mini-player", "/login", "/stats", "/appearance",
+		"/empty", "/login", "/stats", "/appearance",
 	}
 	for _, w := range want {
 		if got := lookup(w).Match; got != w {
@@ -85,7 +85,7 @@ func TestFourteenRoutes(t *testing.T) {
 // TestParamRoutesMatch 验带参数的路由：/collection/123 要能认出收藏夹那一条。
 func TestParamRoutesMatch(t *testing.T) {
 	for _, p := range []string{"/user/123", "/collection/456", "/collection/a-b_c"} {
-		if got := lookup(p).Title; got != routes[9].Title && got != routes[10].Title {
+		if got := lookup(p).Title; got != "UP 主空间" && got != "收藏夹 / 合集 / 系列" {
 			t.Errorf("lookup(%q) 认出的是 %q", p, got)
 		}
 	}
@@ -133,8 +133,8 @@ func TestMenuItemsAllSwitch(t *testing.T) {
 			t.Errorf("点了 %q，画面上没有这一页的空状态 %q，文字有 %q", rt.Title, rt.Empty.Title, tt.Texts())
 		}
 	}
-	if menu != 7 {
-		t.Errorf("侧栏上有 %d 项，want 7", menu)
+	if menu != 8 {
+		t.Errorf("侧栏上有 %d 项，want 8", menu)
 	}
 }
 
@@ -438,12 +438,6 @@ func TestRenderShots(t *testing.T) {
 	s.clock.(*fakeClock).Advance(time.Second)
 	tt.Frame()
 	save(t, dir, "17-404后自动回首页.png", tt)
-
-	// 歌词那一支：先打开一首真的歌，再进迷你播放器（nowplaying.go）。
-	openATrack(t, s)
-	s.navigate("/mini-player")
-	tt.Frame()
-	save(t, dir, "19-迷你播放器-没有歌词.png", tt)
 
 	// 深色下同一批页面——顺带看一眼页面 view 装没装主题。
 	tt.SetDark(true)

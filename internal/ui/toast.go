@@ -39,12 +39,16 @@ package ui
 
 import (
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -429,104 +433,52 @@ func (s *Shell) toastEnterAt(id uint64, now time.Time) time.Time {
 	return now
 }
 
-// viewToasts 把提示浮在右下角、播放条上面。
-//
-// 用 Overlay 铺一层铺满窗口的空容器，而不是在主布局里塞一段留白——提示不该
-// 把底下的内容顶开。
+// viewToasts 画右下……不，画**底部居中**的提示（原型 `.toasts`：水平居中、离播放条上沿 16，
+// 多条竖排缝 8）。每一条是反色胶囊（见 `viewToast`）。
 func (s *Shell) viewToasts(c *ui.Context) {
 	list := s.visibleToasts()
 	if len(list) == 0 {
 		return
 	}
-	t := c.Theme()
-
 	ui.Overlay(c, func() {
-		// Key 要写在构造之前：同一帧里这个浮层只建一次，key 用来在下一帧
-		// 认出是它。
 		ui.Column(c).Key("toasts").
 			Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Justify(ui.End).AlignItems(ui.End).Gap(toastGap).
-			// 底边留出播放条的高度（90），右边留 8（上游那一档是 4~8）。
-			// Padding 的四个参数是上、右、下、左，别把 90 写成了右边距。
-			Padding(space.None, toastRight, playbarClearance, space.None).
-			// 空的地方让鼠标穿过去，不然会挡住底下侧栏和播放条的点击。
+			Justify(ui.End).AlignItems(ui.Center).Gap(space.Px8).
+			Padding(space.None, space.None, tok.BarH+space.Px16, space.None).
 			PassThrough().
 			Children(func() {
 				for _, item := range list {
-					s.viewToast(c, item, t)
+					s.viewToast(c, item)
 				}
 			})
 	})
 }
 
-// viewToast 一条提示的样子。
-//
-// ⚠️ 卡片底色用**语义色**（`toastColors`），**不要用 Theme.Inverse**：
-// 主题没设它的时候它是零值，等于 Background —— 白底白卡片，元素排版排得好好的，
-// 屏幕上什么也看不见（头less Tester 只查元素框，查不到这个坑）。
-//
-// 🔴 **卡片本身也 `PassThrough`**——和外面那个铺满窗口的容器一样（见 viewToasts）。
-// 一条提示**一个控件都没有**：它不可点、不可关、也不带任何动作。挡在它底下的东西
-// 却是实打实的可点控件，而提示在右下角、抬过播放条之后正好压住页面右下角那一块
-// （设置页「快捷键」那一页最后那行的 × 就在那儿）。
-//
-// 症状是「刚改完一个设置，右下角弹出一句提示，两秒之内那个 × 点不动」——而提示
-// 两秒后自己没了，于是这件事看起来像是那个 × 偶尔失灵，最容易被当成界面坏了。
-//
-// 框架那一边也是同一个做法：它自己的 tooltip 也是 `Absolute().PassThrough()`
-// （`mygo/ui/tooltip.go:80`）——同样的话，同样没有控件可点。
-func (s *Shell) viewToast(c *ui.Context, t toast, theme *ui.Theme) {
-	bg, fg := toastColors(t.tone, theme)
+// toastIcon 是一条提示前面那枚 16 的图标（原型 `toast(msg, icon)`）：成功打勾，其余是「i」。
+func toastIcon(tone notice.Tone) string {
+	if tone == notice.Success {
+		return "check"
+	}
+	return "info"
+}
 
-	card := ui.Column(c).Width(toastWidth).Radius(toastRadius).PassThrough().
-		Background(bg).Padding(toastPad).
-		Children(func() {
-			ui.Text(c, t.text).FontSize(scale.Font(c, scale.ToastFont)).
-				FontWeight(weightMedium).TextColor(fg).PassThrough()
-		})
-
-	// ⚠️ **悬停宽限**：指针压在这一条上时它不收走（见 `expire`）。
-	//
-	// 卡片是 **PassThrough** 的（不挡底下的点击），所以它拿不到悬停事件——只能
-	// **按位置**判：`PointerPosition` 给的是指针相对这一条的位置和「在不在上面」。
-	//
-	// ⚠️ **必须在建元素的这一帧问**：框架的元素句柄**跨帧就作废**
-	// （`mygo/ui/frame.go` 的 `expired`），帧外问会 panic。
-	_, _, over := card.PointerPosition()
+// viewToast 是一条提示（原型 `.toast`）：**反色胶囊**——正文色底、页面底色字，13 号 500，
+// 内边距 10/16、缝 8、`--shadow-pop`、进场 `motion.ToastIn`（8 下滑 + 淡入）。
+// 语气只换前面那枚图标，不再换底色（原型没有语义色底）。
+func (s *Shell) viewToast(c *ui.Context, t toast) {
+	p := tok.Of(c.Theme())
+	e := ui.Row(c).Key("toast:"+strconv.FormatUint(t.id, 10)).
+		Padding(space.Px10, space.Px16).Gap(space.Px8).AlignItems(ui.Center).
+		Radius(tok.Pill / 2).Background(p.Text).Transition(motion.ToastIn).Shrink(0)
+	e = shadow.Pop(e, c.Theme())
+	e.Children(func() {
+		ui.Icon(c, pud.Icon(toastIcon(t.tone))).FontSize(tok.IconSm).TextColor(p.Bg).PassThrough()
+		ui.Text(c, t.text).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).FixedLineHeight(20.15).
+			TextColor(p.Bg).SingleLine().PassThrough()
+	})
+	// 指针停在上面时先不收（`expire` 里读这一位）。
+	_, _, over := e.PointerPosition()
 	s.setToastHovered(t.id, over)
-
-	// 入场：250ms 的一段（DESIGN.md「动效」）。淡入 + 从右边滑进来。
-	//
-	// ⚠️ **淡入和位移错开**（位移先走、淡入后到）：两段进度分开算，
-	// 理由见 `toastFadeDelay`。
-	//
-	// ⚠️ **卡片是「画」上去的，位置是「排」上去的**：滑动用的是 `Translate`
-	// （视觉上的位移），而**布局不动**——于是「离右边 8、抬过底部 90」这一档
-	// 在动画的每一帧都是真的（量元素框量到的是布局框）。
-	move, fade := s.toastEnterProgress(c, t)
-	if fade < 1 {
-		card = card.Opacity(fade)
-	}
-	if move < 1 {
-		card = card.Translate((1-move)*toastEnterShift, 0)
-	}
-	// ⚠️ **这一段换不了 `AnimatePose`**（票 #276 查过）。
-	//
-	// 表面上它是满屏那两条的同一种形状（淡出 + 位移，都能进一个 pose）——但**淡入
-	// 和位移是错开的**（位移先走、淡入后到，两段进度分开算，见 `toastFadeDelay`），
-	// 而**一个 pose 的五个通道共用一条 `Animation`**（一条曲线、一个延迟）。
-	// ⇒ 错开的那一段表达不出来。
-	//
-	// 而只把淡入换成 pose、位移留在 `Translate` 又是**白换**：位移那一条还在
-	// view 里被读，每帧照样重建整棵界面（判据：换完之后那个动画值还会不会被
-	// view 读——会读就白换）。
-	//
-	// ⚠️ **顺带记一条**：这一段之所以要 `c.AnimationFrame()`（重建那一档）而不
-	// 是 `p.AnimationFrame()`（只重绘），正是因为这两个属性是**建的时候**写死在
-	// 节点上的（见下面那一段注释）——**而 pose 那条路恰好没有这个毛病**：
-	// pose 的值是在 commit 里采的、在只重绘的那些帧里也会重新算
-	// （`mygo/ui/pose.go` 的 `repose`）。所以哪天这一段能拆成一条时间线，
-	// pose 就是它的答案。
 }
 
 // toastColors 是这一档语义的底色和压在这个底色上的字色。
@@ -564,58 +516,3 @@ var toastOnSemantic = ui.RGB(24, 24, 27)
 
 // toastOnDanger 是压在危险红上的字色：白。
 var toastOnDanger = ui.RGB(255, 255, 255)
-
-// toastEnterProgress 是这一条入场走到哪儿了：**位移**和**淡入分开**算。
-//
-// 返回的两个数都是 0~1：move 是位移走到哪儿了，fade 是透明度走到哪儿了。
-//
-// ⚠️ **两个不是同一条线**：位移先走、淡入后到（理由见 `toastFadeDelay`）。
-// 合成一条线的话，位移到位时透明度早就满了——那一帧看起来是「啪地出现」。
-//
-// ⚠️ **「减少动态效果」时直接到终点**（DESIGN.md §五）：系统开着那个偏好时
-// 一点都不动——所以这一档返回 1，而且**不请求下一帧**（请求了就是白画）。
-func (s *Shell) toastEnterProgress(c *ui.Context, t toast) (move, fade float32) {
-	if c.Preferences().ReduceMotion {
-		return 1, 1
-	}
-	now := c.Now()
-	age := now.Sub(s.toastEnterAt(t.id, now))
-	if age <= 0 {
-		age = 0
-	}
-	if age >= toastEnterTime {
-		return 1, 1
-	}
-	// 动画还没走完：这一帧画完还要再画一帧。
-	//
-	// ⚠️ **少了这一句，提示会停在半路**：即时模式是按需绘制，没有人在这个
-	// 时候要帧，动画就停在那儿——而那一帧是「刚出现」（几乎全透明），于是
-	// 提示看上去一直没出来。
-	//
-	// ⚠️ **这一句不能改成 `p.AnimationFrame()`**（票 #392 的那一批里，别处都
-	// 改了，就这一处没改——**理由不是「忘了」，是它要的东西不同**）：局部重绘
-	// （`mygo/ui/runtime.go` 的 `repaintFrame`）**只重画、不重建**，于是
-	// **元素身上的属性不会变**——而这一条提示的入场是**节点自己的两个属性**
-	// （`Opacity(fade)` 和 `Translate`，见 `viewToast`）：它们是**建的时候**
-	// 写死在节点上的，局部重绘那一帧不会重新写一遍，于是提示会**停在它被
-	// 重建那一次的位置上**（淡入到一半就停住，位移也停住）。
-	//
-	// 而**画的那一层**（`Painter`）没有「不透明度」这个入口——`p.Transform`
-	// 只影响 `Draw` 回调自己画的东西，而这张卡片的底色和字都是框架画的。
-	// 要让这一段走局部重绘，就得把整张卡片改成我们自己画（底色 + 字），那
-	// 一条路会丢掉字重和读屏软件读到的文字——不值。
-	//
-	// 而它**也不值得**改：这一句是**每条提示 250ms**（约十五帧），省下来的
-	// 是十五次整窗重建。
-	c.AnimationFrame()
-	p := float32(age) / float32(toastEnterTime)
-	// 位移：全程 250ms，走统一曲线。
-	move = motion.Unified(p)
-	// 淡入：晚 `toastFadeDelay` 开始，但**和位移同时结束**（总时长不变）。
-	q := (p - toastFadeDelay) / (1 - toastFadeDelay)
-	if q < 0 {
-		q = 0
-	}
-	fade = motion.Unified(q)
-	return move, fade
-}

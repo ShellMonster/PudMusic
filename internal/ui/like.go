@@ -58,7 +58,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -774,8 +773,7 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, liked bool, count int64) ui.Element {
 	// ⚠️ **按钮的宽是 32**（图形 18 + 两侧各 7 的内边距）——角标不占布局，
 	// 所以**带不带数字都一样宽**，和改之前**一个字节都不差**。
-	b := flat.Button(c, "").Label(label).
-		Height(iconHitMd).Padding(space.None, space.Px7).TextColor(color)
+	b := pbKey(c, label)
 	hasCount := playbarCountText(count) != ""
 
 	// 长按三连：这一帧的按住喂进赞键**自己那一份**状态机。
@@ -817,7 +815,7 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		// 背景层（先建 → 画在下面）
 		bg := ui.Box(c).Attach(ui.AnchorCenter, ui.AnchorCenter).
 			Size(bgW, bgH).Radius(bgW/2).
-			Background(c.Theme().Accent.Alpha(likeBgAlpha)).Translate(dx, 0)
+			Background(ui.Color{}).Translate(dx, 0)
 		// ⚠️ **缩放和不透明度合成一个 pose**（原来是两条通道）：
 		//
 		//	缩放管「多大」   不透明度管「多实」
@@ -844,9 +842,7 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 
 		// 图标层（后建 → 画在上面）
 		ic := ui.Icon(c, icon(name)).FontSize(iconMd).Attach(ui.AnchorCenter, ui.AnchorCenter)
-		if col, ok := flat.IconAccentOnHover(c, false, b.Hovered()); ok {
-			ic = ic.TextColor(col)
-		}
+		ic = ic.TextColor(pbIconColor(c, b.Hovered(), liked))
 		// ⚠️ **两个缩放要相乘**：框架的 `Scale` 本来就是「在已有变换之后再缩」
 		// （`mygo/ui/transform.go` 的 `e.transform.Then(Scaling(x, y))`），两次
 		// `Scale` 也就是乘在一起的——这里自己乘一次，是为了让「乘的是哪两个」在

@@ -209,31 +209,6 @@ func TestTheAuthorAvatarGrowsOnHover(t *testing.T) {
 	assertGrew(t, before, after, wantZoom, "作者栏那个头像")
 }
 
-// TestTheNavbarAvatarGrowsOnHover 钉住 **顶栏那个头像**放大到 105%。
-//
-// 上游是 `<Avatar ... className="mr-4 cursor-pointer transition-transform
-// hover:scale-105" />`（`layout/navbar/user/index.tsx:178`）。
-func TestTheNavbarAvatarGrowsOnHover(t *testing.T) {
-	_, tt := newShell(t)
-	tt.Frame()
-
-	before, ok := tt.Find(avatarLabel)
-	if !ok {
-		t.Fatalf("画面上找不到顶栏那个头像，文字有 %q", tt.Texts())
-	}
-
-	tt.Move(before.X+before.W/2, before.Y+before.H/2)
-	tt.Frame()
-	tt.Advance(motion.HoverZoomTime)
-	tt.Frame()
-
-	after, ok := tt.Find(avatarLabel)
-	if !ok {
-		t.Fatalf("指针移上去之后顶栏那个头像不见了，文字有 %q", tt.Texts())
-	}
-	assertGrew(t, before, after, wantZoom, "顶栏那个头像")
-}
-
 // TestTheHoverZoomCurveIsNotTheUpstreamOne 钉住「我们这条曲线**不是**上游那条」。
 //
 // ⚠️ **这一条是修一句说谎的注释**：DESIGN.md §五 与 `hoverzoom.go` 的注释曾写着

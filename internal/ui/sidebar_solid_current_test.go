@@ -31,15 +31,11 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
-	mygoui "github.com/egoist/mygo/ui"
 )
 
-// TestTheSelectedSidebarRowIsSolid 断**选中那一行是实心主色底**。
-//
-// ⚠️ **深浅两套都要断**：实心底这一档的字色在深浅两套里是**反的**（浅色白字、
-// 深色近黑字），而底色两边都是主色。
-func TestTheSelectedSidebarRowIsSolid(t *testing.T) {
+// TestTheSelectedSidebarRowIsSurface2 断选中那一行是 `surface-2` 淡底（原型
+// `.fav-item[aria-current]`），没选中的那一行不是。深浅两套都断。
+func TestTheSelectedSidebarRowIsSurface2(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -60,87 +56,16 @@ func TestTheSelectedSidebarRowIsSolid(t *testing.T) {
 			}
 			theme := BuildTheme(app.DefaultSettings(""), dark)
 
-			// 底色：就是主色本身。
-			curPx := bandPixels(tt.Image(), cur)
-			got := modeOf(curPx)
-			if !nearRGBA(got, rgbaOf(theme.Accent), 3) {
-				t.Errorf("选中那一行的底色是 %v，want %v（实心主色底）", got, theme.Accent)
+			want := rgbaOf(tok.Of(theme).Surface2)
+			got := modeOf(bandPixels(tt.Image(), cur))
+			if !nearRGBA(got, want, 3) {
+				t.Errorf("选中那一行的底色是 %v，want %v（surface-2）", got, want)
 			}
-			// 旁边那一格**不该**也是主色底（不然「当前在哪」又没信号了）。
+			// 旁边那一格**不该**也是这个底（不然「当前在哪」没信号）。
 			sibPx := modeOf(bandPixels(tt.Image(), sib))
-			if nearRGBA(sibPx, rgbaOf(theme.Accent), 3) {
-				t.Errorf("没选中那一行也是主色底 %v——那就没有「当前」这一说了", sibPx)
+			if nearRGBA(sibPx, want, 3) {
+				t.Errorf("没选中那一行也是 surface-2 底 %v——那就没有「当前」这一说了", sibPx)
 			}
 		})
-	}
-}
-
-// TestTheSelectedSidebarRowTextIsReadable 断**字压得住那个底**。
-//
-// ⚠️ **判据是对比度，不是「等于某个数」**：主色是用户可设的，写死一个数的话
-// 用户换主色就失效了。
-//
-// ⚠️ **次要字（「N 首」）也算**：它在实心主色底上压 `t.TextMuted` 只有
-// 1.02:1 ~ 1.34:1——完全读不出来。
-func TestTheSelectedSidebarRowTextIsReadable(t *testing.T) {
-	for _, preset := range []app.Accent{
-		app.AccentIndigo, app.AccentCinnabar,
-		app.AccentAmber, app.AccentPine,
-		app.AccentPine, app.AccentCinnabar,
-		app.AccentIndigo, app.AccentIndigo,
-	} {
-		for _, dark := range []bool{false, true} {
-			shade := "浅色"
-			if dark {
-				shade = "深色"
-			}
-			st := app.DefaultSettings("")
-			st.Accent = preset
-			th := BuildTheme(st, dark)
-			for _, c := range []struct {
-				what string
-				from mygoui.Color
-			}{
-				{"收藏夹名（主色上的字）", flatSolidCurrentText(th)},
-				{"N 首（次要字，按那层底重算）", flatSolidCurrentMutedText(th)},
-			} {
-				if r := ink.Ratio(c.from, th.Accent); r < 4.5 {
-					t.Errorf("%s / %s：%v 压主色底 %v 只有 %.2f:1（< 4.5）",
-						preset, shade, c.from, th.Accent, r)
-				}
-			}
-		}
-	}
-}
-
-// TestTheSelectedSidebarRowStandsOutFromTheSidebar 断**选中那一行和侧栏底色
-// 分得开**。
-//
-// ⚠️ **这一条是这一票的**：「当前在哪」是这一列里唯一的方向标，而它和旁边
-// 那一格的对比度只有 1.09:1（暖纸浅色）——用户看不出当前选的是哪一个。
-//
-// 判据取 **≥ 1.3:1**：实心主色底对侧栏底是 4.34:1 ~ 6.72:1，而淡底那一档是
-// 1.09:1 ~ 1.29:1 —— 1.3 是把两档分开的那个线。
-func TestTheSelectedSidebarRowStandsOutFromTheSidebar(t *testing.T) {
-	for _, preset := range []app.Accent{
-		app.AccentIndigo, app.AccentCinnabar,
-		app.AccentAmber, app.AccentPine,
-		app.AccentPine, app.AccentCinnabar,
-		app.AccentIndigo, app.AccentIndigo,
-	} {
-		for _, dark := range []bool{false, true} {
-			shade := "浅色"
-			if dark {
-				shade = "深色"
-			}
-			st := app.DefaultSettings("")
-			st.Accent = preset
-			th := BuildTheme(st, dark)
-			sidebar := tok.Of(th).Side
-			if r := ink.Ratio(th.Accent, sidebar); r < 1.3 {
-				t.Errorf("%s / %s：选中那一行的底（主色 %v）压侧栏底 %v 只有 %.2f:1（< 1.3）",
-					preset, shade, th.Accent, sidebar, r)
-			}
-		}
 	}
 }

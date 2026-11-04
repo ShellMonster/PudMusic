@@ -523,13 +523,13 @@ func TestThePlayBarDrawsAnIconForEveryAction(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := playBarTester(t, fullBarState(), 1200, dark)
-			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "加歌"} {
+			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "歌词"} {
 				assertGlyphPainted(t, tt, label)
 			}
 			// 赞 / 收藏在左边**第三段**（见 viewTrackActions），下载在右边
 			// 那一组（见 viewPlayBarRight）——**两处都要 `HasTrack` 才画**，
 			// fullBarState 带了。
-			for _, label := range []string{"收藏", "下载"} {
+			for _, label := range []string{"收藏", "下载当前歌曲"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})
@@ -604,7 +604,7 @@ func TestTheNavBarDrawsAnIconForEveryAction(t *testing.T) {
 			// 头像下拉里都有同一个动作，三个入口会不一致。设置还在不在、够不够
 			// 得着，由 `navbar_test.go` 的 `TestTheTopBarHasNoSettingsKey` 和
 			// 侧栏那一条（`sidebar_test.go`）管。
-			for _, label := range []string{"后退", "前进", "打开文件", "动态"} {
+			for _, label := range []string{"后退", "前进", "命令面板（⌘K）", "迷你"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})

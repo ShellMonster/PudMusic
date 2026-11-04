@@ -1800,7 +1800,7 @@ func TestTheSpaceAvatarIs112AndTheHeaderPads32(t *testing.T) {
 	}
 
 	// 头像压在 132 高的横幅下沿：环的上沿在 88，头像再进去 3。
-	if av.Y-64 != upAvatarTop+upAvatarRing {
+	if av.Y-navMinHeight != upAvatarTop+upAvatarRing {
 		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want %d", av.Y, av.Y-64, upAvatarTop+upAvatarRing)
 	}
 

@@ -63,11 +63,13 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -102,7 +104,7 @@ const (
 	//
 	// ⚠️ **改这个数要连着下面那一堆比例一起看**：人形剪影的每一块都是它的分数
 	// 倍（`avatarPerson`）。
-	avatarSize = 40
+	avatarSize = 32
 
 	// avatarHit 是头像那一格（菜单按钮）的**命中区**边长。
 	//
@@ -116,7 +118,7 @@ const (
 	// ⚠️ **上游那一格是 32**（`as="button"` 的 Avatar 命中区就是它那个盒子，
 	// 而它画出来的环在盒子外面——上游自己那儿就有一圈点不到）。我们照抄 40
 	// 的**可见**尺寸，就得自己把命中区补上。
-	avatarHit = 48
+	avatarHit = 36
 
 	// avatarLabel 是头像那个**可点的方块**的无障碍名字，也是测试点得到它的
 	// 凭据——无头 Tester 的 `Find` 找的是「显示着这个字或者标着这个名字」的
@@ -152,7 +154,7 @@ const (
 	// 变的只有**浮层锚在哪儿**：它锚在头像那一格的右下角，而那一格从 32 宽
 	// 变成 48 宽——面板的**右沿**跟着右移（面板是 `AnchorBottomEnd`），而
 	// 左沿跟着窗口右边走。
-	avatarMenuW = 160
+	avatarMenuW = 200
 
 	// avatarMenuRowH 是每一项多高。
 	//
@@ -215,32 +217,13 @@ type avatarMenuItem struct {
 // （`avatarMenuItemsNow`）——`onlyLoggedIn` / `onlyGuest` 那一格就是上游的
 // `hidden` 那一栏（票 #260）。
 var avatarMenuItems = []avatarMenuItem{
-	// ⚠️ **登录完回首页**（票 #277）：这一项是**泛入口**（从头像下拉进来的），
-	// 所以去处是首页——用户 2026-10-25 原话「登录成功后应该提示并且回到首页」。
-	{label: "登录", icon: iconLoginCircle, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin(homePath) }},
-	{label: "个人资料", icon: iconProfile, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) { s.goProfile() }},
-	{label: "设置", icon: iconSettings, run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
-	{label: "刷新数据", icon: iconRefresh, run: func(s *Shell, _ *ui.Context) {
-		// 真的是重新拉一次侧栏那些收藏夹（`app/favorites_refresh.go`）。
-		// 之前这一项只弹一句「还没有数据可刷新」，而接口是有的——用户改了收藏夹
-		// 切回来看不到，说的却是「这里没有数据」。
-		//
-		// ⚠️ **这里只发起，不等**：网络那一趟在后台，而这一项的菜单**选完就关**，
-		// 没有任何地方可以转圈。进行中状态是侧栏那一行「正在刷新收藏夹…」
-		//（见 sidebar_favorites.go），跑完的那句话走 `reportFavoritesRefresh`。
-		//
-		// 已经有一趟在飞时应用层会挡下来，并把「正在刷新收藏夹…」说给用户听——
-		// 连点两下只发一次请求，而第二下不至于毫无动静。
+	{label: "登录", icon: pudUser, onlyGuest: true, run: func(s *Shell, _ *ui.Context) { s.goLogin(homePath) }},
+	{label: "听歌统计", icon: pudStats, run: func(s *Shell, _ *ui.Context) { s.navigate(statsPath) }},
+	{label: "设置", icon: pudSettings, run: func(s *Shell, _ *ui.Context) { s.navigate(settingsPath) }},
+	{label: "刷新数据", icon: pudRefresh, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) {
 		s.app.RefreshFavorites()
 	}},
-	{label: "问题反馈", icon: iconFeedback, end: iconExternal, run: func(s *Shell, c *ui.Context) {
-		// 走 `Shell.openFeedback`：它把地址交给系统（`Context.OpenURL`），
-		// **而且记一笔**（`lastFeedbackURL`）——无头 Tester 里 `OpenURL` 走不了
-		// 事件循环，于是「点得动」这件事除了「这一项在」之外一句都验不到。
-		// 理由见 shell_mount.go 的 `openFeedback`。
-		s.openFeedback(c)
-	}},
-	{label: "退出登录", icon: iconLogoutCircle, danger: true, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) {
+	{label: "退出登录", icon: pudLogout, danger: true, onlyLoggedIn: true, run: func(s *Shell, _ *ui.Context) {
 		s.askLogout()
 	}},
 }
@@ -511,88 +494,62 @@ const (
 // ⚠️ **顶栏另外那几枚图标键的命中区还是 32**（`iconHitMd`）——这一票只动
 // 头像这一格。
 func (s *Shell) viewAvatar(c *ui.Context) {
+	// 原型 `renderTop`：未登录是一枚主色小号「登录」按钮，已登录才是头像。
+	if !s.app.LoggedIn() && !s.avatarMenuOpen {
+		ui.Column(c).Key("avatar").Children(func() {
+			if pud.Button(c, "nav-login", pud.Primary, pud.Sm, "登录", "user").Label(avatarLabel).Clicked() {
+				s.goLogin(homePath)
+			}
+		})
+		return
+	}
 	// Key 挂在外面这一格上：里面那一枚是**按钮**，而 Key 挂在「创建时处理过
 	// 输入」的控件上会 panic（`ui/element.go:658`）。
-	ui.Column(c).Key("avatar").Children(func() {
-		hit := ui.ButtonBase(c).Size(avatarHit, avatarHit).Padding(space.None).
+	ui.Column(c).Key("avatar").Margin(space.None, space.None, space.None, space.Px4).Children(func() {
+		hit := ui.ButtonBase(c).Size(avatarHit, avatarHit).Padding(space.None).Radius(avatarHit / 2).
 			Label(avatarLabel)
-		// ⚠️ **指针移上去时那个圆头像放大 5%**：上游顶栏那一枚是
-		// `<Avatar ... className="mr-4 cursor-pointer transition-transform
-		// hover:scale-105" />`（`layout/navbar/user/index.tsx:178`）。放大的是
-		// **整个圆**（上游那个类加在 Avatar 上），不是里面那张图。
-		//
-		// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）。
+		// 原型 `.top-me`：悬停 2 像素 `line-strong` 环，展开 / 聚焦时 2 像素 `accent` 环。
 		on := hit.Hovered()
-		hit = motion.HoverZoom(hit, "avatar-zoom", on)
-		// 🔴 **悬停时头像外面多一圈主色的环**（票 BMG-253）：放大 5% 是这一排里
-		// **最弱**的反馈——一个小圆涨到 19 像素，指针压上去几乎看不出区别，而
-		// 这一格是顶栏里唯一的「个人入口」。
-		hit = avatarHoverRing(c, hit, on, float32(avatarSize))
+		hit = avatarRing(c, hit, on, s.avatarMenuOpen, float32(avatarSize))
 		hit.Children(func() {
-			// 那一枚圆：**裁成圆的**（里面的图要按圆裁），外面留一圈 1 像素的描边。
-			face := ui.Box(c).Size(avatarSize, avatarSize).
-				Radius(avatarSize/2).Clip().Border(1, c.Theme().Border)
+			// 那一枚圆：**裁成圆的**（里面的图要按圆裁）。
+			face := ui.Box(c).Size(avatarSize, avatarSize).Radius(avatarSize / 2).Clip()
 			face.Children(func() { s.viewAvatarFace(c) })
 		})
-		// 点它开 / 关那一层浮层。
-		//
-		// ⚠️ **按下这一枚会把键盘焦点给它**（框架的规矩：指针按下的那条链上
-		// 第一个可聚焦的元素拿到焦点，见 `mygo/ui/input.go` 的 setFocus）——
-		// 而键盘那一半正是靠这个焦点（见 `viewAvatarMenuKeys`）。
 		if hit.Clicked() {
 			s.avatarMenuOpen = !s.avatarMenuOpen
-			// ⚠️ **打开的时候从「什么也没选中」开始**：上游 HeroUI 打开下拉时
-			// 不高亮任何一项。而「一打开就亮着第一项」的话，回车直接进扫码
-			// 登录页——那一下用户根本不是想登录。
+			// ⚠️ **打开的时候从「什么也没选中」开始**：「一打开就亮着第一项」的话，回车
+			// 直接触发第一项。
 			s.avatarMenuIndex = -1
-			// ⚠️ **指针停在第几项也要清掉**：留着上一次那一份的话，浮层刚
-			// 打开时指针明明停在一项上，却因为「和上一帧一样」而不亮。
+			// ⚠️ **指针停在第几项也要清掉**：留着上一次那一份的话，浮层刚打开时指针明明
+			// 停在一项上，却因为「和上一帧一样」而不亮。
 			s.avatarMenuHover = -1
 		}
-		// ⚠️ **键盘那一半排在浮层前面**：方向键改的是「当前是第几项」，而浮层
-		// 里那几行是照着那个下标画亮底的——键盘在前、浮层在后的话，按下 ↓ 的
-		// 那一帧亮底就跟着走了（反过来则要等到下一帧，而下一帧不一定有）。
+		// ⚠️ **键盘那一半排在浮层前面**：方向键改的是「当前是第几项」，而浮层里那几行
+		// 是照着那个下标画亮底的。
 		s.viewAvatarMenuKeys(c, hit)
 		s.viewAvatarMenu(c, hit)
 		s.viewAvatarLogoutConfirm(c)
 	})
 }
 
-// avatarHoverRing 是头像那一枚圆外面那圈**悬停时的主色环**（票 BMG-253）。
-//
-// # 为什么是画在图**上面**的一圈，而不是改外面那一圈描边
-//
-// 头像那一格本来有一圈 1 像素的描边（`t.Border`，见 `viewAvatar`），而**图是
-// 40×40、正好盖满那一格**——描边被图压在底下，改它的颜色在**有图的时候**一个
-// 像素都看不见（而那正是常态：登录之后一直有图）。
-//
-// # 为什么不用「铺一层淡底」
-//
-// 那一格的命中区是方的（顶栏那一格 48），而画出来的是一枚圆：铺出来的淡底要么
-// 是一块**方块**（方的，和圆头像不搭），要么是一圈 7 像素宽的晕（太宽，抢戏）。
-//
-// 一圈 2 像素的主色环贴着头像的外沿，是「这一格是活的」最省事也最清楚的一档。
-//
-// ⚠️ **深浅两套都取 `ink.AccentOn`**：亮绿压白底只有 1.9:1，直接用等于看不见
-// （浅色下那一档是压深到 ≥4.5:1 的，深色下就是主色本身）。
-//
-// side 是**那一枚圆的多大**（顶栏那个是 `avatarSize`，收藏夹头图区那个是 24）。
-func avatarHoverRing(c *ui.Context, e ui.Element, on bool, side float32) ui.Element {
-	if !on {
+// avatarRing 画头像外面那圈环（原型 `.top-me`）：悬停 `line-strong`，展开时 `accent`，
+// 都是 2 像素，贴着头像那枚圆的外沿。side 是那一枚圆多大。
+func avatarRing(c *ui.Context, e ui.Element, hover, open bool, side float32) ui.Element {
+	p := tok.Of(c.Theme())
+	var col ui.Color
+	switch {
+	case open:
+		col = p.Accent
+	case hover:
+		col = p.LineStrong
+	default:
 		return e
 	}
-	ring := ink.AccentOn(c.Theme())
 	const width = float32(2)
-	// 环的**内沿**正好贴着头像那一枚圆的外沿：描边画在那个圆的**外边** width
-	// 那一圈上。
 	d := side + 2*width
-	return e.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		p.Stroke(ui.Rect{
-			X: r.X + (r.W-d)/2,
-			Y: r.Y + (r.H-d)/2,
-			W: d,
-			H: d,
-		}, ring, d/2, width)
+	return e.DrawOver(func(pp *ui.Painter, r ui.Rect) {
+		pp.Stroke(ui.Rect{X: r.X + (r.W-d)/2, Y: r.Y + (r.H-d)/2, W: d, H: d}, col, d/2, width)
 	})
 }
 
@@ -606,48 +563,37 @@ func (s *Shell) viewAvatarMenu(c *ui.Context, anchor ui.Element) {
 	if !s.avatarMenuOpen {
 		return
 	}
-	t := c.Theme()
-	// 🔴 **面板的身份必须钉死**（`c.Key`）：框架给元素的身份是「父的身份 +
-	// 兄弟序号」（`mygo/ui/context.go` 的 `newElement`），而**浮层里的兄弟会
-	// 多会少**——头像那一枚的悬停提示进进出出浮层就是一样。
-	//
-	// 面板的身份一变，**里面那几项的身份也跟着变**（它们是「面板的身份 +
-	// 自己的 key」）。而按下和抬起之间**隔着帧**：按下记在旧身份上，抬起
-	// 之后那一项已经是新身份了——于是**那一下点空**（菜单还开着、什么都没
-	// 发生）。实测 40 次里有 5~6 次。
-	//
-	// ⚠️ **这一条不是这一票引入的**（HEAD 上也有），但它让这一票的验收跑不
-	// 稳（头像放大之后那一枚的悬停提示更容易进浮层），所以顺手钉死。
 	c.Key("avatar-menu-panel")
 	ui.PopoverBase(c, anchor, &s.avatarMenuOpen, func(panel ui.Element) {
-		// ⚠️ **锚在头像的右下角**：头像在顶栏最右端，面板要是左对齐就有
-		// 一半挂在窗口外面（上游 HeroUI 那个下拉是靠 shift 摆回来的，我们
-		// 直接锚在右端）。
-		//
-		// ⚠️ **面板和锚点之间留一道缝**（上游那个浮层也留 4，见框架的
-		// `stylePanel`）：贴着头像的下拉看着像头像长出了一块。
-		popupPanelCard(s, t, panel.
+		// 原型 `.pop`：surface 底、line 描边、圆角 12、`--shadow-pop`、内边距 8；
+		// 在头像下面 8、右沿和头像对齐。
+		p := tok.Of(c.Theme())
+		shadow.Pop(panel.
 			AttachTo(anchor, ui.AnchorBottomEnd, ui.AnchorTopEnd).
-			Margin(t.Space(1), space.None, space.None, space.None).
-			Width(avatarMenuW).
-			Padding(space.Px4).
-			// 面板自己有个名字：读屏软件念得出「用户菜单」。
-			Label(avatarMenuLabel)).
+			Margin(space.Px8, space.None, space.None, space.None).
+			MinWidth(avatarMenuW).Padding(space.Px8).Radius(tok.R12).
+			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn).
+			Label(avatarMenuLabel), c.Theme()).
 			Children(func() {
+				s.viewAvatarMenuHead(c)
 				s.viewAvatarMenuItems(c)
 			})
 	})
 }
 
-// avatarMenuMark 是菜单里那一项的「图标 + 名字」两个元素。
-//
-// ⚠️ **留着它们是为了在「当前是第几项」定下来之后再铺底和字色**：悬停是在建
-// 那一行的时候才发现的，而底色和字色都要按「当前是第几项」算——先铺后问的
-// 话，鼠标移过去的那一帧会有两项都亮着，而危险色的字压在淡底上会掉到 4.5:1
-// 以下。
-type avatarMenuMark struct {
-	icon ui.Element
-	text ui.Element
+// viewAvatarMenuHead 是下拉最上面那一块（原型 `me` 的头部：状态 + 说明，下面一条分隔线）。
+// 原型的名字 / 「Hi-Res 可用」是假数据；本仓库拿得到的真数据只有登录态和 UID。
+func (s *Shell) viewAvatarMenuHead(c *ui.Context) {
+	p := tok.Of(c.Theme())
+	title, sub := "未登录", "登录后能看到收藏夹和动态"
+	if s.app.LoggedIn() {
+		title, sub = "已登录", "UID "+s.app.Session().DedeUserID
+	}
+	ui.Column(c).FillWidth().Padding(space.Px8, space.Px10).Children(func() {
+		ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).SingleLine()
+		ui.Text(c, sub).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).SingleLine()
+	})
+	pud.PopSep(c)
 }
 
 // viewAvatarMenuItems 是浮层里那几项。
@@ -671,84 +617,30 @@ type avatarMenuMark struct {
 // `selectParts.Item`：`item.Hovered() && p != *s.pointer`——指针不动，方向键
 // 说了算）。
 func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
-	t := c.Theme()
-	panelBG := s.cardBackground(t)
-	// ⚠️ **下标是「这一帧画出来的那几项」的序号**，不是 `avatarMenuItems` 里
-	// 那个静态表的序号——两者的编号在登录态不对时**不是一回事**（未登录时
-	// 「个人资料」是静态表里的第 2 项，而画面上它是第 4 项）。
+	p := tok.Of(c.Theme())
 	items := s.avatarMenuItemsNow()
 	rows := make([]ui.Element, 0, len(items))
-	marks := make([]avatarMenuMark, 0, len(items))
 	hovered := -1
 	for i, item := range items {
-		row := ui.ButtonBase(c).Key("avatar-menu:"+item.label).
-			FillWidth().Height(avatarMenuRowH).
-			Padding(space.None, space.Px12).Gap(space.Px8).
-			Justify(ui.Start).Radius(t.Radius)
+		// 原型 `item()`：`.pop-opt`，只有文字（没有图标），危险项 err 色。
+		row := pud.PopItem(c, "avatar-menu:"+item.label, item.label, item.danger)
 		if row.Hovered() {
 			hovered = i
 		}
-		var ic, tx ui.Element
-		row.Children(func() {
-			ic = ui.Icon(c, icon(item.icon)).FontSize(avatarMenuIconSize)
-			tx = ui.Text(c, item.label).FontSize(scale.Font(c, scale.Size14)).Grow(1)
-			if item.end != "" {
-				ui.Icon(c, icon(item.end)).FontSize(avatarMenuIconSize).TextColor(t.TextMuted)
-			}
-		})
 		if row.Clicked() {
 			s.runAvatarMenuItem(c, item)
 		}
 		rows = append(rows, row)
-		marks = append(marks, avatarMenuMark{icon: ic, text: tx})
 	}
-	// ⚠️ **指针移到新的一项上时，当前项跟着它走；指针不动的时候，键盘说了算**。
 	if hovered >= 0 && hovered != s.avatarMenuHover {
 		s.avatarMenuIndex = hovered
 	}
 	s.avatarMenuHover = hovered
-
-	// 当前那一项：底是强调色的淡底（规范 §2 的 `accentSoft`），而**字要按
-	// 这层底现算**（仓库的规矩：「底换了，字按这层底现算」，见 `flatbutton.go`
-	// 的 `flatCurrentText`）。
-	//
-	// ⚠️ **底和字都在这一轮建完之后才定**：悬停是在建这一行的时候才发现的，
-	// 而「当前是第几项」要到那一刻才知道——边建边问边铺的话，鼠标移过去的
-	// 那一帧会有两项都亮着（上一项还带着上一帧的亮底）。
 	for i := range rows {
-		current := i == s.avatarMenuIndex
-		bg := panelBG
-		if current {
-			bg = accentSoft(t)
-			rows[i] = rows[i].Background(bg)
+		if i == s.avatarMenuIndex {
+			rows[i].Background(p.Hover)
 		}
-		col := avatarMenuTextColor(t, items[i], bg, current)
-		marks[i].icon = marks[i].icon.TextColor(col)
-		marks[i].text = marks[i].text.TextColor(col)
 	}
-}
-
-// avatarMenuTextColor 是那一项的字色。
-//
-// bg 是这一行**实际的底色**，current 是「它是不是当前那一项」。
-//
-// ⚠️ **危险色当字色要压深那一档**（`dangerText`）：主题给的 `t.Danger` 在浅色
-// 下只有 4.14:1，达不到正文的 4.5:1（DESIGN.md §四 那张表）。上游那一项是
-// `text-danger`，而我们这一档是仓库自己的规矩（票 #241 / 报告 F-22）。
-//
-// ⚠️ **当前那一项的危险字要按那层底现算**（仓库的规矩：「底换了，字按这层底
-// 现算」，见 `flatbutton.go` 的 `flatCurrentText`）：同一个危险字压在**面板底**
-// 上是 4.97~5.75:1，而压在当前项那层 `accentSoft` 淡底上只有 **4.34~4.45:1**
-// ——差一点点到不了 4.5。而那一档正是「键盘走到退出登录」或者「鼠标悬停它」
-// 的那一瞬。
-func avatarMenuTextColor(t *ui.Theme, item avatarMenuItem, bg ui.Color, current bool) ui.Color {
-	if !item.danger {
-		return t.Text
-	}
-	if current {
-		return ink.Ensure(t.Danger, bg, 4.5)
-	}
-	return dangerText(t)
 }
 
 // viewAvatarMenuKeys 是那一层浮层的**键盘那一半**：上下走、回车选中。
@@ -963,4 +855,10 @@ func avatarPerson(c *ui.Context, side float32, ink ui.Color) {
 	ui.Box(c).Size(head, head).Radius(head / 2).Background(ink)
 	ui.Box(c).Size(side*shoulder, side*torso).Radius(side*0.15).
 		Margin(side*gap, space.None, space.None, space.None).Background(ink)
+}
+
+// avatarHoverRing 是别处（收藏夹头图区的作者头像）用的悬停环：同顶栏头像，
+// 只画悬停那一档。
+func avatarHoverRing(c *ui.Context, e ui.Element, on bool, side float32) ui.Element {
+	return avatarRing(c, e, on, false, side)
 }

@@ -62,15 +62,15 @@ func TestThePlayBarUsesTheBiuTypeScale(t *testing.T) {
 				size float32
 				what string
 			}{
-				{text: "一首歌", size: 16, what: "歌名"},
-				{text: "某个 UP 主", size: 14, what: "UP 名"},
+				{text: "一首歌", size: 14, what: "歌名"},
+				{text: "某个 UP 主", size: 12, what: "UP 名"},
 				// ⚠️ **位置是 0 的时候写 `-:--`**（票 #222 / 报告 §4.2）：上游
 				// 那个读数是 `currentTime ? formatDuration(currentTime) : "-:--"`
 				//（`components/music-play-progress/index.tsx:27`），而我们原来
 				// 写的是 `0:00`——那是「这一秒零」，不是「还没读到一个位置」。
-				{text: "-:--", size: 14, what: "当前时间"},
-				{text: "1:40", size: 14, what: "总时长"},
-				{text: "1x", size: 16, what: "倍速"},
+				{text: "-:--", size: 11, what: "当前时间"},
+				{text: "1:40", size: 11, what: "总时长"},
+				{text: "1×", size: 12, what: "倍速"},
 			} {
 				r, ok := tt.Find(want.text)
 				if !ok {
@@ -80,7 +80,7 @@ func TestThePlayBarUsesTheBiuTypeScale(t *testing.T) {
 				got := r.H / textBoxPerSize
 				if math.Abs(float64(got-want.size)) > 0.8 {
 					t.Errorf("播放条上的%s是 %.1fpx，want %.0f——"+
-						"上游那一档是歌名 16 / UP 名 14 / 时间 14 / 倍速 16",
+						"原型那一档是歌名 14 / UP 名 12 / 时间 11 / 倍速 12",
 						want.what, got, want.size)
 				}
 			}
@@ -152,17 +152,19 @@ func TestThePlayBarTitleIsNotBold(t *testing.T) {
 			for _, c := range chain {
 				switch c.name {
 				case "Bold":
-					t.Error("playbar.go 的歌名调了 Bold()——歌名是 16/400，" +
-						"层次靠大小不靠重量（上游的 `text-base` 被 Preflight 重置成 inherit）")
+					t.Error("playbar.go 的歌名调了 Bold()——原型是 FontWeight(600)")
 				case "FontWeight":
-					t.Error("playbar.go 的歌名调了 FontWeight(...)——歌名是 16/400")
+					// 原型 `.np-text strong { font-weight: 600 }`。
+					if len(c.call.Args) == 1 && goformat(fset, c.call.Args[0]) != "600" {
+						t.Errorf("playbar.go 的歌名字重是 %s，want 600", goformat(fset, c.call.Args[0]))
+					}
 				case "FontSize":
 					// ⚠️ **认刻度表里的那个名**（`scale.Size16`），不认裸数字：
 					// 字号的出处是 `widgets/scale` 那张表（票 #238），
 					// 代码里写的是 `scale.Size16`——只认裸数字的话，
 					// 这个判据会**静默地永远不成立**。
-					if len(c.call.Args) == 1 && !mentionsIdent(c.call.Args[0], "Size16") {
-						t.Errorf("playbar.go 的歌名是 %s，want 16",
+					if len(c.call.Args) == 1 && !mentionsIdent(c.call.Args[0], "Size14") {
+						t.Errorf("playbar.go 的歌名是 %s，want 14",
 							goformat(fset, c.call.Args[0]))
 					}
 				}
@@ -287,47 +289,6 @@ func titleInk(t *testing.T, bold bool) int {
 		t.Fatalf("连对照的那一行都画不出来：%q", tt.Texts())
 	}
 	return inkPixels(tt.Image(), r, bg)
-}
-
-// TestTheCoverHoverArrowIsBigEnough 钉封面 hover 时那枚箭头是 **32**。
-//
-// ⚠️ **判据是画面上那枚箭头的墨迹，不是代码里的字号**：图标是 SVG，框的大小是
-// 摆出来的，而「画出来多大」才是用户看见的。
-//
-// ⚠️ **量的是「主色像素」，不是「亮像素」**（票 #220）：那一枚箭头**改成主色了**
-// （上游是 `text-primary`），而主色绿在三个通道上都不到 180——用「亮」当判据的话，
-// 主色的箭头一个都数不到。
-//
-// ⚠️ **量的是「那一块里的主色像素」**：悬停时封面盖上一层 50% 的黑，而箭头是主色
-// ——这一块里只有箭头是主色。（封面的占位框自己有一圈亮边，所以那一块要**往里
-// 缩 8 像素**再量。）
-//
-// 32 的那枚箭头有 60 个像素（16 宽 × 10 高）；20 的那枚只有 22 个（10 × 6）——
-// 门槛放在 40，两头都离得开。
-func TestTheCoverHoverArrowIsBigEnough(t *testing.T) {
-	tt, s := playbarTester(t, barState(), 1200, 0, false)
-	cover, ok := tt.Find("当前封面")
-	if !ok {
-		t.Fatalf("播放条上找不到封面，画面上的字：%q", tt.Texts())
-	}
-	// 指针停在封面上：那一层浮层是**悬停才画**的。
-	tt.Move(cover.X+cover.W/2, cover.Y+cover.H/2)
-	tt.Frame()
-
-	inner := mygoui.Rect{
-		X: cover.X + 8, Y: cover.Y + 8,
-		W: cover.W - 16, H: cover.H - 16,
-	}
-	accent := themeColor(BuildTheme(s.app.SettingsSnapshot(), false).Accent)
-	n, w, h := colorExtent(tt.Image(), inner, accent)
-	if n == 0 {
-		t.Fatalf("悬停之后封面正中一块主色像素都没有——那一层浮层（和它那枚箭头）没画出来")
-	}
-	const wantPixels = 40
-	if n < wantPixels {
-		t.Errorf("封面 hover 的箭头只有 %d 个亮像素（%.0f×%.0f），want ≥ %d——"+
-			"它太小了（上游那一枚是 32，原来是 20）", n, w, h, wantPixels)
-	}
 }
 
 // TestTheSkipKeysDrawBiggerGlyphs 钉「上一首 / 下一首」是 **32/22**。

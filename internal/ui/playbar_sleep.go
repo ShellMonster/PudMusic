@@ -7,58 +7,11 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/egoist/mygo/ui"
 )
 
 const sleepMenuW = 140
 
 func sleepActive(st app.State) bool { return !st.SleepAt.IsZero() || st.SleepAfterTrack }
-
-func (s *Shell) viewSleep(c *ui.Context, st app.State) {
-	btn := iconKey(c, iconSleep, "睡眠定时", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7)
-	if sleepActive(st) {
-		btn = flatSolid(c, btn)
-	}
-	if btn.Clicked() {
-		s.sleepOpen = !s.sleepOpen
-	}
-	ui.Popover(c, btn, &s.sleepOpen, func() {
-		s.guardAt("睡眠定时菜单", s.viewSleepMenu)(c)
-	})
-}
-
-func (s *Shell) viewSleepMenu(c *ui.Context) {
-	st := s.app.Snapshot()
-	t := c.Theme()
-	ui.Column(c).Key("playbar:sleep").Label("睡眠定时菜单").
-		Padding(space.Px12, space.Px8).Gap(space.Px2).Width(sleepMenuW).Children(func() {
-		if sleepActive(st) {
-			ui.Text(c, sleepRemaining(st)).TextColor(t.TextMuted).FontSize(scale.Font(c, scale.RateMenuFont))
-		}
-		item := func(label string, on bool, do func()) {
-			b := flatButton(c, label).Width(sleepMenuW - 16).Radius(t.Radius).
-				FontSize(scale.Font(c, scale.RateMenuFont)).Label("睡眠定时 " + label)
-			if on {
-				b = flatSolid(c, b)
-			}
-			if b.Clicked() {
-				s.sleepOpen = false
-				do()
-			}
-		}
-		for _, d := range app.SleepTimerSteps {
-			d := d
-			item(fmt.Sprintf("%d 分钟后停", int(d/time.Minute)), false, func() { s.app.SetSleepTimer(d) })
-		}
-		item("放完这一首就停", st.SleepAfterTrack, s.app.SleepAfterTrack)
-		if sleepActive(st) {
-			item("关闭定时", false, s.app.CancelSleepTimer)
-		}
-	})
-}
 
 func sleepRemaining(st app.State) string {
 	if st.SleepAfterTrack {

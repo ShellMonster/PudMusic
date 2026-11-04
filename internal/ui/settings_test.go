@@ -30,11 +30,11 @@ import (
 //
 // ⚠️ **x 贴在最左边的页边距里，不是内容区中间**：票 #166 把设置页的行标题和
 // 说明放大、行距拉松之后，原来的 (700,430) 正好落在「主题」那一排按钮上——
-// 读到的是按钮的浅灰底（{244 244 245}），不是窗口底色。x=214 落在页边距
-// （侧栏 200 到内容左缘 216~228 之间）里，哪一页都不会在那里画东西。
+// 读到的是按钮的浅灰底（{244 244 245}），不是窗口底色。x=65 在菜单行（宽 47、左右各 12）右边的空隙里，y=470 在导航和收藏夹小标题之间
+// （展开和收起两档侧栏都是空底）里，哪一页都不会在那里画东西。
 const (
-	sampleX = 214
-	sampleY = 430
+	sampleX = 65
+	sampleY = 470
 )
 
 // shellWithSettings 造一个「真 App + 盘上真有那份设置 + 真 Shell」，返回设置
@@ -207,7 +207,7 @@ func TestShellSaysSoWhenSettingsAreBroken(t *testing.T) {
 	// 断的是**侧栏那个品牌字**：它是整扇窗最外层的骨架，画不出来的话整个界面
 	// 都不成立。（原来这里断的是 "Biu"，而画面上早就只有现在这个显示名了——`HasText`
 	// 是子串匹配，那一句一直是在靠巧合过的。）
-	if !tt.HasText("布丁音乐") {
+	if !tt.HasText("推荐音乐") {
 		t.Errorf("提示之外界面没画出来，文字有 %q", tt.Texts())
 	}
 
@@ -375,7 +375,7 @@ func TestUserCanSwitchTheThemeFromTheInterface(t *testing.T) {
 	// 系统是深色，起点是「跟随系统」。
 	tt, sh, a, path := shellWithSettings(t, app.ThemeModeSystem, true)
 	assertBackground(t, tt, wantBackground(t, a, true), "起点：跟随系统，系统是深色")
-	openAppearance(t, tt)
+	openAppearance(t, tt, sh)
 
 	clickTheme(t, tt, sh, "浅色")
 	if got := a.SettingsSnapshot().ThemeMode; got != app.ThemeModeLight {
@@ -433,7 +433,7 @@ func TestThemeSwitchSaysWhyItCannotSwitch(t *testing.T) {
 	b := newTestShell(t, onApp(a), at(900, 600), systemIsDark(false))
 	tt := b.tt
 	tt.Frame()
-	openAppearance(t, tt)
+	openAppearance(t, tt, b.s)
 
 	if !tt.HasText("设置只读") {
 		t.Errorf("界面上没有说清为什么切不了，文字有 %q", tt.Texts())

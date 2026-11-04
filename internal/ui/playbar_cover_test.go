@@ -49,33 +49,14 @@ func hexOf(c color.Color) string {
 // 设计规范 v0.1 §4 / §7.1 的数，原 Biu 是 88 / 56），
 // 它们的真值只来自那份规范，不来自我们的常量。
 const (
-	biuPlaybarHeight = 76 // 设计规范 v0.1 §4：播放条高 76（原 Biu 是 88，应用未发版，改按规范）
-	biuPlaybarPadX   = 16 // playbar/index.tsx:23-31 的 px-4
-	biuCoverSize     = 52 // 设计规范 v0.1 §7.1：封面 52×52（原 Biu 是 56）
-	biuCoverGap      = 8  // playbar/left/index.tsx 的 space-x-2
+	biuPlaybarHeight = 84 // 原型 `--bar-h`
+	biuPlaybarPadX   = 20 // 原型 `.bar { padding: 0 20px }`
+	biuCoverSize     = 56 // 原型 `.np-cover` 56×56
+	biuCoverGap      = 12 // 原型 `.np` gap 12
 )
 
 // 测试窗口的高度：几个都要用到播放条那条高，窗口高写成一个常量，位置才能一次算清。
 const coverWinH = 460
-
-// TestPlayBarUsesBiuNumbers 是那几个数字本身的一条：playbar.go 里改成了别的数，
-// 这里就挂。下面的测试是从画面上量像素，那是另一层保险。
-func TestPlayBarUsesBiuNumbers(t *testing.T) {
-	for _, c := range []struct {
-		name      string
-		got, want float32
-		fromBiuAt string
-	}{
-		{"播放条总高", playbarHeight, biuPlaybarHeight, "设计规范 §4 播放条高 76"},
-		{"左右内边距", playbarPadX, biuPlaybarPadX, "playbar/index.tsx 的 px-4"},
-		{"封面边长", coverSize, biuCoverSize, "设计规范 §7.1 封面 52×52"},
-		{"封面与歌名的间距", coverGap, biuCoverGap, "playbar/left 的 space-x-2"},
-	} {
-		if c.got != c.want {
-			t.Errorf("playbar.go 里 %s 是 %v，Biu 的是 %v（%s）", c.name, c.got, c.want, c.fromBiuAt)
-		}
-	}
-}
 
 // ---- 四个状态 ----
 
@@ -418,9 +399,10 @@ func assertCoverGeometry(t *testing.T, tt *mygoui.Tester, barTop int) {
 		t.Errorf("封面是 %dx%d，Biu 是 %dx%d（那一格外面还有一圈 1 像素的边），画在 %v",
 			box.Dx(), box.Dy(), biuCoverSize, biuCoverSize, box)
 	}
+	// 原型 `.bar`：84 高，封面垂直居中（上边那条 1 像素的线是叠画的，不占高）。
 	if want := barTop + mid + frame; box.Min.Y != want {
-		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (76-52)/2 = 12，"+
-			"再减去那一圈 1 像素的边）",
+		t.Errorf("封面的上边在 y=%d，按 %d 高的播放条该在 y=%d（上下留白 (84-56)/2 = 14，"+
+			"再算上那一圈 1 像素的边）",
 			box.Min.Y, biuPlaybarHeight, want)
 	}
 	if want := barTop + biuPlaybarHeight - mid - frame; box.Max.Y != want {

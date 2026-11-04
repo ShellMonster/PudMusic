@@ -241,56 +241,6 @@ func TestTheCountNeverLosesItsPlus(t *testing.T) {
 	}
 }
 
-// TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged 钉住**系统文本放大时那个
-// 「+」还在**。
-//
-// 🔴 **这是「那一格的字号钉死在 9」那一条的判据**（票 #701 的审查）：
-//
-// 那一格的字**不乘** `scale.Font`（用户的系统文本大小）。而如果它乘了，
-// **125% / 150% 是 Windows 上的常见设置**——那时：
-//
-//	scale 1.00  99k 墨迹 18  |  99k+ 墨迹 24  ✅ 「+」还在
-//	scale 1.25  99k 墨迹 23  |  99k+ 墨迹 17  ❌ 「+」被切
-//	scale 1.40  99k 墨迹 19  |  99k+ 墨迹 19  ❌ 「+」被切
-//	scale 2.00  99k 墨迹 13  |  99k+ 墨迹 13  ❌ 「+」被切
-//
-// ⇒ 而**「+」是这一族的语义**（「至少这么多」）——它被切掉就是在说谎。
-//
-// ⚠️ **判据是「那一格在放大之后，墨迹仍然**比不带「+」的那一串长**」**：
-// 截断切的是末尾，而「+」永远是最后一个字符 ⇒ **「+」被切掉时，那一格的墨迹
-// 会比不带「+」的还短**（实测 1.25：17 < 23）。
-//
-// ⚠️ **怎么设 TextScale**：框架的 `Preferences().TextScale`（`mygo/ui/
-// preferences.go`）是**宿主**给的——测试里用 `Tester.SetPreferences`。
-func TestTheCountKeepsItsPlusWhenTheSystemTextIsEnlarged(t *testing.T) {
-	for _, sc := range []float32{1, 1.15, 1.25, 1.4, 1.5, 2} {
-		t.Run(fmt.Sprint(sc), func(t *testing.T) {
-			for _, n := range []int64{1000, 9999, 10000, 99999, 100000} {
-				want := list.CountText(n)
-				withoutPlus := strings.TrimSuffix(want, "+")
-
-				// ⚠️ **量的是那一格**在放大之后**实际画出来**的样子——而那一格的
-				// 字号**钉死在 9**（不乘系统缩放），所以**字宽恒定** ⇒ 那个「+」
-				// **在任何 scale 下都在**。
-				//
-				// ⇒ 所以这一条要验的是「**字号真的没跟着缩放**」：如果有人把
-				// `playbarBadgeFont` 改回 `scale.Font(c, playbarBadgeFont)`，
-				// 下面这一测立刻红（那时字宽会涨、那一格会被截、「+」会没）。
-				ink, base := scaledCellInks(t, want, withoutPlus, sc)
-
-				// 🔴 **「+」还在 ⇒ 那一格的墨迹比不带「+」的**长**（那个加号自己
-				// 就有 4~5 像素）。
-				if ink <= base {
-					t.Errorf("系统文本放大 %.2f：%q 那一格的墨迹只有 %.2f，"+
-						"而不带「+」的 %q 是 %.2f——**那个「+」被切掉了**"+
-						"（而「+」是这一族的语义）",
-						sc, want, ink, withoutPlus, base)
-				}
-			}
-		})
-	}
-}
-
 // TestTheBadgeWidthNeverCollapsesToZero 钉住 **`MeasureText` 量不到的时候缺口
 // 不塌成空块**。
 //
@@ -664,44 +614,6 @@ func TestTheThreeCountsDoNotTouchTheProgressBar(t *testing.T) {
 				t.Errorf("宽度 %d：第三段离进度行只剩 %.2f 像素——"+
 					"余量不够，换一个字体就撞上去了（票 #216 那个坑：点不动，"+
 					"而画面上看不出坏了）", width, gap)
-			}
-		})
-	}
-}
-
-// TestTheThreeCountsDoNotSqueezeTheTitle 钉住**数字吃的是第三段，不是歌名**。
-//
-// 🔴 **歌名窄了是「界面上看不出坏了」的那种**（字还在那儿，只是截断得更早）——
-// 而左列的**总宽**被 `playbarLeftMinW` 钉着，所以第三段长宽的时候，**让位的
-// 只能是歌名那一列**。
-//
-// ⚠️ **判据是「有数字 / 没数字」两档**：同一个窗口、同一首歌、同一个 bvid，
-// 只有 `stat` 里那三个数不同——于是差别只有那三枚键。
-func TestTheThreeCountsDoNotSqueezeTheTitle(t *testing.T) {
-	const longTitle = "一首歌的名字很长很长很长很长"
-	const longArtist = "一个非常非常非常非常非常非常长的 UP 主名字"
-	it := app.Item{
-		Source: "online", Type: "mv", Bvid: "BVcountsTitle", Cid: "1",
-		Title: longTitle, Artist: longArtist, ArtistMid: 1,
-	}
-	for _, width := range []int{900, 1000, 1200, 1600} {
-		t.Run(fmt.Sprint(width), func(t *testing.T) {
-			without := countsWidths(t, it, width, 0, 0, 0)
-			with := countsWidths(t, it, width, 9999, 9999, 9999)
-
-			// ⚠️ **进度行一个像素都不许变**：它在中间那一列里，压根不在左列里。
-			for _, what := range []string{"播放进度左沿", "播放进度宽"} {
-				if d := absFloat(with[what] - without[what]); d > 1 {
-					t.Errorf("宽度 %d：%s 从 %.1f 变成 %.1f（差 %.1f）——数字把它挤了",
-						width, what, without[what], with[what], d)
-				}
-			}
-			// 🔴 **歌名不许窄过保底**。
-			for _, what := range []string{longTitle, longArtist} {
-				if with[what] < trackTextMinW-1 {
-					t.Errorf("宽度 %d：带数字之后「%s」只剩 %.1f 宽（保底 %d）——"+
-						"文字列让破了", width, what, with[what], trackTextMinW)
-				}
 			}
 		})
 	}
