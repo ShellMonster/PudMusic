@@ -508,7 +508,10 @@ func TestALongFavoriteNameDoesNotMakeTheRowTaller(t *testing.T) {
 		{ID: 2, Title: longName, Mid: 42, Type: 2},
 		{ID: 3, Title: "第三首", Mid: 42, Type: 2},
 	})
-	tt.Frame()
+	// 虚拟列表的行高要多画几帧才量全（第一帧后面的行还没测，高度是估的 / 0）。
+	for range 4 {
+		tt.Frame()
+	}
 
 	first, ok := tt.Find("短名字")
 	if !ok {
