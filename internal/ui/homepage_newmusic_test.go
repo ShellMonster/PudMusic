@@ -734,12 +734,12 @@ func TestRenderPopTabShots(t *testing.T) {
 	}
 
 	// 三个主题方案各看一眼（暖纸 / 暮光 / 柔雾）。经典是默认外观，浅色那张就是它。
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetWarmPaper, app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	for _, preset := range []app.Accent{
+		app.AccentCinnabar, app.AccentAmber, app.AccentPine,
 	} {
 		t.Run(string(preset), func(t *testing.T) {
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = preset
 			st.ThemeMode = app.ThemeModeLight
 			b := newTestShell(t, withSettings(st))
 			s, tt := b.s, b.tt

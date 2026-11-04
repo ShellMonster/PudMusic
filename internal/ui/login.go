@@ -38,6 +38,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -168,7 +169,7 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(space.None, space.Px20).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
 			// 页标题留在卡片外面、页面最顶上：整个应用每一页的标题都是这个位置和字号
 			// （`TestEveryPageTitleIsTheSameSizeOnScreen` / `TestPagesStartAtTheTop` 钉着）。
-			ui.Text(c, "扫码登录").FontSize(scale.Font(c, scale.PageTitle))
+			typo.Display(ui.Text(c, "扫码登录"), scale.Font(c, scale.PageTitle))
 			ui.Column(c).Key("login-card").Width(loginCardW).Padding(space.Px32, space.Px24).Gap(space.Px12).
 				AlignItems(ui.Center).Background(s.cardBackground(t)).Radius(s.cardRadius(t)).
 				Border(1, t.Border).Children(func() {

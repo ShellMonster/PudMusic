@@ -116,6 +116,18 @@ const VendoredGoMP3LicenseSource = "internal/service/audio/mp3dec/gomp3/LICENSE"
 const GoJPEGLicenseRelPath = "resources/licenses/go-image-jpeg-LICENSE.txt"
 const GoJPEGLicenseSource = "internal/ui/widgets/imgcache/internal/jpegrows/LICENSE"
 
+// FontLicenseRelPath 是随包宋体（Noto Serif SC Bold 子集，「深夜唱片行」的标题
+// 字体）那一份 SIL Open Font License 1.1 原文，随包发出去。
+//
+// 字体和图标一样是编进二进制的**资源**（`internal/ui/widgets/typo` 用
+// `//go:embed` 嵌进去），`go list -deps` 看不见它；OFL 第 2 条要求随字体一起
+// 发出许可原文和版权声明，所以它排进 `AssetLicenseRelPaths`。源头是仓库里和
+// 字体放在一起的那一份（`FontLicenseSource`），发出去的是它的逐字副本。
+const FontLicenseRelPath = "resources/licenses/noto-serif-sc-OFL.txt"
+
+// FontLicenseSource 是上面那一份的源头：google/fonts 的 `ofl/notoserifsc/OFL.txt`。
+const FontLicenseSource = "internal/ui/widgets/typo/fonts/OFL.txt"
+
 // AssetLicenseRelPaths 是**不是构建依赖、但同样要随包发出去**的许可证原文。
 //
 // 每一份都得排进 `gen-notices` 的输出列表，否则 prune 会把它删掉——而删掉一个
@@ -125,6 +137,7 @@ var AssetLicenseRelPaths = []string{
 	IconLicenseRelPath,
 	VendoredGoMP3LicenseRelPath,
 	GoJPEGLicenseRelPath,
+	FontLicenseRelPath,
 }
 
 // AssetLicenseSources 是「随包发出去的那一份是从哪儿抄来的」。
@@ -140,6 +153,7 @@ var AssetLicenseRelPaths = []string{
 var AssetLicenseSources = map[string]string{
 	VendoredGoMP3LicenseRelPath: VendoredGoMP3LicenseSource,
 	GoJPEGLicenseRelPath:        GoJPEGLicenseSource,
+	FontLicenseRelPath:          FontLicenseSource,
 }
 
 // VendoredCodeLicenseRelPaths 是**vendor 进仓库的第三方代码**那几份许可证原文。
@@ -198,9 +212,14 @@ const noticesHeader = `# BiuGo 第三方许可清单
 # ── 不是 Go 模块的那几样 ─────────────────────────────────────────────────────
 #
 # 上面那张表只列**编进可执行文件的 Go 模块**（go list -deps 数得出来的那些）。
-# 这个目录里还有四份**不是模块**的，同样随包发出去：
+# 这个目录里还有五份**不是模块**的，同样随包发出去：
 #
 # go-image-jpeg-LICENSE.txt Go image/jpeg 的 MCU 行存储改版（BSD-3-Clause）。
+#
+# noto-serif-sc-OFL.txt     标题字体（Noto Serif SC Bold 的 GB2312 子集，
+#                          SIL Open Font License 1.1）。字体是 //go:embed 编进
+#                          二进制的资源，go list -deps 看不见它；OFL 要求随字体
+#                          一起发出这份原文。子集只裁了字符，没改字形。
 #
 # BIU-LICENSE.txt          Biu 本体（PolyForm Noncommercial 1.0.0）。Biu 不是构建
 #                          依赖，它是这个项目的**上游**；PolyForm 的 Notices 一节

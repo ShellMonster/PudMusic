@@ -26,6 +26,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/chart"
 )
@@ -87,7 +88,7 @@ func (s *Shell) viewStats(c *ui.Context, _ *ui.Route) {
 		ui.Column(c).FillWidth().Padding(space.None, pagePadX).Gap(space.Px16).
 			Children(func() {
 				// 页头：标题。
-				ui.Text(c, "听歌统计").FontSize(scale.Font(c, scale.PageTitle))
+				typo.Display(ui.Text(c, "听歌统计"), scale.Font(c, scale.PageTitle))
 
 				// 四档。
 				mainTabs(c, &st.tabIndex, tabMD, statsTabNames...).AlignSelf(ui.Start)
@@ -157,7 +158,7 @@ func (s *Shell) syncStats(c *ui.Context) {
 func (s *Shell) viewStatsEmpty(c *ui.Context) {
 	ui.Column(c).FillWidth().Padding(space.Px48, space.None).AlignItems(ui.Center).Gap(space.Px8).
 		Children(func() {
-			ui.Text(c, "还没有听歌记录").FontSize(scale.Font(c, scale.Size18))
+			ui.Text(c, "还没有听歌记录").FontSize(scale.Font(c, scale.SectionTitle))
 			ui.Text(c, "听几首歌，这里就会有你的听歌时长、最爱听的歌和最爱听的 UP 主").
 				FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
 		})

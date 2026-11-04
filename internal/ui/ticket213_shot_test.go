@@ -46,10 +46,10 @@ func followPaneShotFixture(t *testing.T) *uiExplore {
 }
 
 // followPaneShotShell 造一个停在「我的关注」那一页的壳。
-func followPaneShotShell(t *testing.T, dark bool, preset app.ThemePreset) (*Shell, *mygoui.Tester) {
+func followPaneShotShell(t *testing.T, dark bool, preset app.Accent) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	st := app.DefaultSettings("")
-	st.ThemePreset = preset
+	st.Accent = preset
 	b := followPaneShotFixture(t)
 	s, tt, _ := newSpaceShell(t, b, true, "77",
 		systemIsDark(dark), withSettings(st),
@@ -90,18 +90,18 @@ func TestRenderFollowPaneShots(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// 01 经典（Biu 绿）：整页 + 收起那一格。
 			{
-				_, tt := followPaneShotShell(t, dark, app.ThemePresetClassic)
+				_, tt := followPaneShotShell(t, dark, app.AccentIndigo)
 				save(t, dir, "01-页面-经典-"+name+".png", tt)
 			}
 			// 02 暖纸（默认方案）：下拉摆开的那一屏——底色、高亮、圆角都从方案来。
 			{
-				_, tt := followPaneShotShell(t, dark, app.ThemePresetWarmPaper)
+				_, tt := followPaneShotShell(t, dark, app.AccentCinnabar)
 				openFollowGroupSelectForShot(t, tt)
 				save(t, dir, "02-下拉摆开-暖纸-"+name+".png", tt)
 			}
 			// 03 暮光·琥珀：另一套色相（暖纸和暮光的底色差得最远）。
 			{
-				_, tt := followPaneShotShell(t, dark, app.ThemePresetDuskAmber)
+				_, tt := followPaneShotShell(t, dark, app.AccentAmber)
 				openFollowGroupSelectForShot(t, tt)
 				save(t, dir, "03-下拉摆开-暮光-"+name+".png", tt)
 			}
@@ -110,7 +110,7 @@ func TestRenderFollowPaneShots(t *testing.T) {
 			// ⚠️ **高亮那一档是实心主色底**（`flatSolid`，和设置页下拉同一个出口），
 			// 所以这一张要看得见那一层。
 			{
-				_, tt := followPaneShotShell(t, dark, app.ThemePresetWarmPaper)
+				_, tt := followPaneShotShell(t, dark, app.AccentCinnabar)
 				openFollowGroupSelectForShot(t, tt)
 				r, ok := tt.Find("特别关注(1)")
 				if !ok {
@@ -137,7 +137,7 @@ func TestRenderFollowPaneShots(t *testing.T) {
 				uiFollowList(b, 1, []any{uiFollowUser(11, "第一个 UP")})
 				uiFollowSearch(b, "", nil)
 				st := app.DefaultSettings("")
-				st.ThemePreset = app.ThemePresetWarmPaper
+				st.Accent = app.AccentCinnabar
 				s, tt, _ := newSpaceShell(t, b, true, "77",
 					systemIsDark(dark), withSettings(st),
 					withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
@@ -155,7 +155,7 @@ func TestRenderFollowPaneShots(t *testing.T) {
 				uiFollowList(b, 1, []any{uiFollowUser(11, "第一个 UP")})
 				uiFollowSearch(b, "", nil)
 				st := app.DefaultSettings("")
-				st.ThemePreset = app.ThemePresetWarmPaper
+				st.Accent = app.AccentCinnabar
 				s, tt, _ := newSpaceShell(t, b, true, "77",
 					systemIsDark(dark), withSettings(st),
 					withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))
@@ -173,7 +173,7 @@ func TestRenderFollowPaneShots(t *testing.T) {
 				uiFollowList(b, 0, []any{})
 				uiFollowSearch(b, "", nil)
 				st := app.DefaultSettings("")
-				st.ThemePreset = app.ThemePresetWarmPaper
+				st.Accent = app.AccentCinnabar
 				s, tt, _ := newSpaceShell(t, b, true, "77",
 					systemIsDark(dark), withSettings(st),
 					withPrefs(mygoui.Preferences{ReduceMotion: true, TextScale: 1}))

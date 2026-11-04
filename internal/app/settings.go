@@ -31,8 +31,6 @@ const SettingsFileName = "settings.json"
 const (
 	// DefaultFontFamily 是应用的默认字体。
 	DefaultFontFamily = "system-ui"
-	// DefaultPrimaryColor 是应用的默认主色。
-	DefaultPrimaryColor = "#1ed760"
 	// DefaultBorderRadius 是应用的默认圆角。
 	DefaultBorderRadius = 8.0
 	// MaxBorderRadius 是圆角的上限。
@@ -84,49 +82,41 @@ func ClampSideMenuWidth(v float64) float64 {
 	return v
 }
 
-// 主题档位。
+// 主题档位：深色 / 浅色 / 跟随系统三档（「深夜唱片行」§0′，2026-11 用户拍板）。
+//
+// 旧版本还有一档 `schedule`（定时）：读到它时 `normalize` 静默回落到 `system`
+// （`pickEnum` 认不出的值一律给默认），不报错。
 type ThemeMode string
 
 const (
 	ThemeModeSystem ThemeMode = "system"
 	ThemeModeLight  ThemeMode = "light"
 	ThemeModeDark   ThemeMode = "dark"
-	// ThemeModeSchedule 晚上（19:00 到次日 07:00）用深色，白天用浅色。
-	ThemeModeSchedule ThemeMode = "schedule"
 )
 
-// ThemePreset 是主题方案：一套整体配色（底色、文字色、强调色和圆角，浅色深色
-// 各一份）。暖纸 / 暮光 / 柔雾来自设计规范 v0.1 §2；青瓷 / 墨宣 / 紫檀 / 靛夜
-// 是 2026-10-26 本仓库**原创**补的四套（补上冷色和水墨/紫/蓝几个色相，对比度
-// 按 WCAG 现算过）——数值不取自任何现成的公开色板。
+// Accent 是强调色：「深夜唱片行」只有一套主题，强调色四选一
+// （原型 `index.html` 115–120 行，深浅各一组值，见 `internal/ui/widgets/tok`）。
 //
-// 旧外观没有这一格，默认方案仍是暖纸。
-
-// 套了方案之后，方案的底色、文字、强调色、圆角**压过**设置里的 `primaryColor` /
-// `backgroundColor` / `borderRadius`；用户在设置页改那三项时界面层会先把方案清成
-// 经典，免得「改了没反应」。
-type ThemePreset string
+// # 老设置怎么读
+//
+// 旧版本的 `themePreset`（暖纸 / 暮光 / 柔雾 / 青瓷 / 墨宣 / 紫檀 / 靛夜 / 经典）、
+// `primaryColor`（自定义主色）、`backgroundColor`（自定义底色）三个键**已经删了**：
+// `encoding/json` 对不认识的键是忽略的，所以老文件照常解析，那三格读进来就丢掉，
+// 外观落到默认的朱砂。缺键、空串、不认识的值也都落到朱砂（`normalize`）。
+type Accent string
 
 const (
-	ThemePresetWarmPaper   ThemePreset = "warm-paper"
-	ThemePresetDuskAmber   ThemePreset = "dusk-amber"
-	ThemePresetSoftPeach   ThemePreset = "soft-peach"
-	ThemePresetCeladon     ThemePreset = "celadon"      // 青瓷
-	ThemePresetInkPaper    ThemePreset = "ink-paper"    // 墨宣
-	ThemePresetSandalwood  ThemePreset = "sandalwood"   // 紫檀
-	ThemePresetIndigoNight ThemePreset = "indigo-night" // 靛夜
-	ThemePresetClassic     ThemePreset = "classic"
+	AccentCinnabar Accent = "cinnabar" // 朱砂（默认）
+	AccentIndigo   Accent = "indigo"   // 靛青
+	AccentPine     Accent = "pine"     // 松绿
+	AccentAmber    Accent = "amber"    // 琥珀
 )
 
-// DefaultThemePreset 是新设置的默认方案。
-//
-// 它是**生产默认**：应用还没发版，没有需要保住的旧外观，所以默认一律是暖纸
-// （缺键、空串、不认识的值都落到这里，见 `pickEnum`）。
-//
-// 「经典」这个**用户选项**照旧保留（设置页方案卡里有它，摆在最后一行末尾），它自己那套配色有
-// 专门的用例盯着（`internal/ui/themepreset_test.go` 及那几处按方案各跑一遍的
-// 截图用例）。而「生产默认是暖纸」由本包里的测试盯着（`themepreset_test.go`）。
-var DefaultThemePreset = ThemePresetWarmPaper
+// DefaultAccent 是新设置和认不出的值落到的强调色。
+const DefaultAccent = AccentCinnabar
+
+// Accents 是全部强调色，按设置页里的顺序。
+var Accents = []Accent{AccentCinnabar, AccentIndigo, AccentPine, AccentAmber}
 
 // 音质档位。默认是有损的高品质档（音乐库 320K / 投稿 192K），无损/杜比是显式选项——
 // 拿不到时由取流那层自动退到最高有损，不报错。
@@ -319,14 +309,12 @@ type Settings struct {
 	FontFamily               string                   `json:"fontFamily"`
 	BorderRadius             float64                  `json:"borderRadius"`
 	DownloadPath             string                   `json:"downloadPath"`
-	PrimaryColor             string                   `json:"primaryColor"`
-	BackgroundColor          string                   `json:"backgroundColor"`
 	AudioQuality             AudioQuality             `json:"audioQuality"`
 	HiddenMenuKeys           []string                 `json:"hiddenMenuKeys"`
 	DisplayMode              DisplayMode              `json:"displayMode"`
 	FFmpegPath               string                   `json:"ffmpegPath"`
 	ThemeMode                ThemeMode                `json:"themeMode"`
-	ThemePreset              ThemePreset              `json:"themePreset"`
+	Accent                   Accent                   `json:"accent"`
 	PageTransition           PageTransition           `json:"pageTransition"`
 	ShowSearchHistory        bool                     `json:"showSearchHistory"`
 	ProxySettings            ProxySettings            `json:"proxySettings"`
@@ -560,14 +548,12 @@ func DefaultSettings(downloadPath string) Settings {
 		FontFamily:        DefaultFontFamily,
 		BorderRadius:      DefaultBorderRadius,
 		DownloadPath:      downloadPath,
-		PrimaryColor:      DefaultPrimaryColor,
-		BackgroundColor:   "",
 		AudioQuality:      AudioQualityHigh,
 		HiddenMenuKeys:    []string{},
 		DisplayMode:       DisplayModeList,
 		FFmpegPath:        "",
 		ThemeMode:         ThemeModeSystem,
-		ThemePreset:       DefaultThemePreset,
+		Accent:            DefaultAccent,
 		PageTransition:    PageTransitionNone,
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
@@ -688,12 +674,10 @@ func (s *Settings) normalize() {
 		s.SideMenuWidth = ClampSideMenuWidth(s.SideMenuWidth)
 	}
 
+	// 旧的 `schedule`（定时）档认不出，落到跟随系统。
 	s.ThemeMode = pickEnum(s.ThemeMode, ThemeModeSystem,
-		ThemeModeSystem, ThemeModeLight, ThemeModeDark, ThemeModeSchedule)
-	s.ThemePreset = pickEnum(s.ThemePreset, DefaultThemePreset,
-		ThemePresetWarmPaper, ThemePresetDuskAmber, ThemePresetSoftPeach,
-		ThemePresetCeladon, ThemePresetInkPaper, ThemePresetSandalwood,
-		ThemePresetIndigoNight, ThemePresetClassic)
+		ThemeModeSystem, ThemeModeLight, ThemeModeDark)
+	s.Accent = pickEnum(s.Accent, DefaultAccent, Accents...)
 	// 认不出的值归一成默认的有损档；无损和杜比拿不到时由取流层退档。
 	s.AudioQuality = pickEnum(s.AudioQuality, AudioQualityHigh,
 		AudioQualityLossless, AudioQualityDolby, AudioQualityHigh,
@@ -709,16 +693,6 @@ func (s *Settings) normalize() {
 	s.PlayMode = pickEnum(s.PlayMode, DefaultPlayMode, PlayModes...)
 	s.ProxySettings.Type = pickEnum(s.ProxySettings.Type, ProxyNone,
 		ProxyNone, ProxyHTTP, ProxyHTTPS, ProxySOCKS4, ProxySOCKS5)
-
-	if s.PrimaryColor == "" {
-		s.PrimaryColor = DefaultPrimaryColor
-	}
-	if !hexColor.MatchString(s.PrimaryColor) {
-		s.PrimaryColor = DefaultPrimaryColor
-	}
-	if s.BackgroundColor != "" && !hexColor.MatchString(s.BackgroundColor) {
-		s.BackgroundColor = ""
-	}
 
 	if s.HiddenMenuKeys == nil {
 		s.HiddenMenuKeys = []string{}

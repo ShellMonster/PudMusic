@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -170,7 +171,7 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 		Children(func() {
 			// 页头：标题在左，「记录播放历史」在右（上游是 `justify-between`）。
 			ui.Row(c).FillWidth().Center().Children(func() {
-				ui.Text(c, "历史记录").FontSize(scale.Font(c, scale.PageTitle)).Grow(1)
+				typo.Display(ui.Text(c, "历史记录"), scale.Font(c, scale.PageTitle)).Grow(1)
 				s.viewReportHistory(c, st.ReportPlayHistory, ro)
 			})
 

@@ -29,7 +29,10 @@ const (
 	// ⚠️ **用这个常量，不要写字面量**：七页各写各的数，过两个月又漂开——而
 	// 「从首页点到本地音乐，内容区左右各退 4 像素」这件事在界面上看不出来，
 	// 只有逐页量才量得出来。
-	pagePadX = space.PageHorizontal
+	//
+	// 2026-11：新页面用 `space.PageHorizontal(内容区宽)`（40 / 32 / 16 三档）；
+	// 这一个数留给还没改版的页面。
+	pagePadX = space.PageHorizontalLegacy
 
 	// weightMedium 是 500 那一档字重（上游的 `font-medium`，用了 26 处）。
 	//

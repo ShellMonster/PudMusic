@@ -41,7 +41,7 @@ func TestRenderHomeTabTransitionShots(t *testing.T) {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
 
-	for _, preset := range []app.ThemePreset{app.ThemePresetWarmPaper, app.ThemePresetClassic} {
+	for _, preset := range []app.Accent{app.AccentCinnabar, app.AccentIndigo} {
 		for _, dark := range []bool{false, true} {
 			name := string(preset)
 			if dark {
@@ -51,7 +51,7 @@ func TestRenderHomeTabTransitionShots(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				st := app.DefaultSettings("")
-				st.ThemePreset = preset
+				st.Accent = preset
 				s, tt := newShell(t, withSettings(st), systemIsDark(dark))
 				s.home.SetSongs(fullSongs())
 				homeFrame(tt)

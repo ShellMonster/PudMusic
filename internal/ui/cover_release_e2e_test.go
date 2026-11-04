@@ -219,7 +219,8 @@ func TestScrollingPastManyCoversReleasesTheOldOnes(t *testing.T) {
 	if cy < 0 || cy >= img.Bounds().Dy() || x1 <= x0 {
 		t.Fatalf("取样行 %d 不在画面上（行盒子是 %+v）", cy, rect)
 	}
-	skeleton := rgbaOf(theme.Text.Alpha(shimmer.BaseAlpha))
+	skelBase, _ := shimmer.Colors(theme)
+	skeleton := rgbaOf(skelBase)
 	covers, skeletons := 0, 0
 	for x := x0; x <= x1; x++ {
 		got := img.RGBAAt(x, cy)

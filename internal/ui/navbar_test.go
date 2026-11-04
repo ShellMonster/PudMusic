@@ -1249,9 +1249,9 @@ func TestThePageStillShowsItsOwnTitle(t *testing.T) {
 		}},
 	}
 
-	// 一行标题的高度上限。24px 的字实测约 28 高（见上面那一段），
-	// 而整块内容区是几百高——60 把这两者分得很开。
-	const titleLineMaxH = 60
+	// 一行标题的高度上限。「深夜唱片行」的页标题是 48 宋体，实测约 69 高，
+	// 而整块内容区是几百高——120 仍把这两者分得很开。
+	const titleLineMaxH = 120
 
 	for _, p := range pages {
 		t.Run(p.title, func(t *testing.T) {

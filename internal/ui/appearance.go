@@ -1,5 +1,7 @@
-// 皮肤页（/appearance）：主题方案 + 主题模式 + 颜色 + 封面取色 + 字体 + 圆角 +
-// 背景清晰度，一页办完「这个应用长什么样」的全部选择。
+// 皮肤页（/appearance）：深浅模式 + 强调色 + 封面取色 + 字体 + 背景清晰度。
+//
+// ⚠️ 2026-11「深夜唱片行」：主题方案、自定义颜色、圆角三组已删（DESIGN.md §0′）；
+// 这一页将由 T6 并进设置页的「外观」Tab。
 //
 // # 它和设置页的关系
 //
@@ -8,8 +10,8 @@
 // 顶栏那枚 palette 图标是它的唯一入口（`viewNav` 里 `nav-appearance` 那一枚）；
 // **侧栏不摆**（用户拍板：顶栏图标就是入口，侧栏不重复）。
 //
-// 控件全部复用设置页那几个 picker（`pickThemePreset` / `pickTheme` / `pickColors` /
-// `pickSwitch` / `pickFont` / `pickRadius` / `pickBackdropClarity`），它们写的还是
+// 控件复用设置页那几个 picker（`pickTheme` / `pickAccent` / `pickSwitch` /
+// `pickFont` / `pickBackdropClarity`），它们写的还是
 // 同一份 `app.Settings`——两处读到和写出的都是同一份，不会不一致。
 //
 // # 为什么不是浮层
@@ -29,6 +31,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -55,31 +58,27 @@ func (s *Shell) viewAppearance(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().MaxWidth(s.settingsContentMaxWAt(c)).
 				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
-				ui.Text(c, "皮肤").FontSize(scale.Font(c, scale.PageTitle))
+				typo.Display(ui.Text(c, "皮肤"), scale.Font(c, scale.PageTitle))
 
 				if ro {
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
 						FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
 				}
 
-				s.settingGroup(c, "主题方案", func() {
-					s.pickThemePresetShelf(c, st, ro)
-				})
-				s.settingGroup(c, "主题", func() {
+				s.settingGroup(c, "深浅模式", func() {
 					s.pickThemeModeShelf(c, st, ro)
 				})
-				s.settingGroup(c, "颜色", func() {
-					s.pickColors(c, st, ro)
-				})
+				if !st.CoverAccent {
+					s.settingGroup(c, "强调色", func() {
+						s.pickAccent(c, st, ro)
+					})
+				}
 				s.settingGroup(c, "封面取色", func() {
 					s.pickSwitch(c, "封面取色", "封面取色", st.CoverAccent, ro,
 						func(cur *app.Settings, on bool) { cur.CoverAccent = on })
 				})
 				s.settingGroup(c, "字体", func() {
 					s.pickFont(c, st, ro)
-				})
-				s.settingGroup(c, "圆角", func() {
-					s.pickRadius(c, st, ro)
 				})
 				s.settingGroup(c, "背景清晰度", func() {
 					s.pickBackdropClarity(c, st, ro)

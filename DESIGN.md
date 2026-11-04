@@ -21,6 +21,141 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 
 ---
 
+## 零′、深夜唱片行（2026-11，覆盖全文）
+
+**本节和下面各节冲突时，以本节为准。** 界面按原型 `PudMusic-全新原型设计/` 1:1 重做；原型和
+旧文档冲突时以原型为准。原型不在仓库里（里面是真实专辑图，不许进仓库），数值已经抄进这里和代码。
+
+### 用户拍板的决定（不要重提）
+
+1. **只有一套主题「深夜唱片行」**，分深色、浅色两份。暖纸 / 暮光 / 柔雾 / 青瓷 / 墨宣 / 紫檀 /
+   靛夜 / 经典八套方案、自定义主色、自定义底色、「定时」档**全部删除**（代码、设置项、预览卡）。
+   外观页的「主题方案」卡片不做。
+2. 强调色四选一：**朱砂（默认）/ 靛青 / 松绿 / 琥珀**，外加「封面取色」开关；深浅模式三档：深色 /
+   浅色 / 跟随系统。设置字段 `accent`（`cinnabar|indigo|pine|amber`）；旧的 `themePreset` /
+   `primaryColor` / `backgroundColor` 键读进来直接丢掉（JSON 忽略未知键），`schedule` 落到 `system`。
+3. 标题用**宋体 700**（随包思源宋体 Bold 子集，OFL）；页标题 48。
+4. 页面结构、文案、交互全按原型。Toast 是反色胶囊、搜索框 440×38 胶囊、图标键 36、播放键 44。
+5. 现有功能里原型没有的**界面入口**删掉，service / app 层能力和数据保留；原型有、现在没有的界面
+   接真实数据；原型里的假数据用最接近的真实数据取法并在报告里说明。
+6. 不开 Issue、不 push、不碰远端。
+
+### 代码入口（后续各票照这个用）
+
+| 要什么 | 用什么 | 在哪 |
+| --- | --- | --- |
+| 颜色 | `tok.Of(c.Theme())` → `Palette`（`Bg/Side/Surface/Surface2/Hover/Press/Line/LineStrong/Text/Text2/Text3/Accent/AccentInk/AccentText/AccentSoft/Focus/Ok/Warn/Err/Desk`） | `widgets/tok` |
+| 全屏播放器固定暗色 | `tok.Full`（不随深浅变） | `widgets/tok` |
+| 封面取色混合比例 | `tok.TintHero 0.22 / TintCollection 0.26 / TintUpBand 0.34 / TintVideoThumb 0.40` | `widgets/tok` |
+| 圆角 | `tok.R4 / R8 / R12 / Pill` | `widgets/tok/size.go` |
+| 外壳与组件尺寸 | `tok.SideW 232 / SideCollapsedW 72 / TopH 60 / BarH 84 / IconHit 36 / PlayBtn 44 / SearchW×H 440×38 / BtnH 40 / BtnSmH 32 / ChipH 30 / RowH 60 …` | `widgets/tok/size.go` |
+| 字号 | `scale.Size11…Size64`、`scale.PageTitle 48 / SectionTitle 24 / HeroTitle 64 / Subhead 20`、`PageTitleFor(w)` / `HeroTitleFor(w)`（内容区 < 1024 降一档） | `widgets/scale` |
+| 字体 | `typo.Display(e, size)` 宋体 700、`typo.Mono(e)`、`typo.Num(e)`（tnum）、`typo.Eyebrow(c, s)` | `widgets/typo` |
+| 间距 | `space.Px40 / Px64`、`SectionGap 48 / SectionHeadGap 20 / PageBottom 64 / GridGap 24 / PageTop 8`、`PageHorizontal(contentW)` = 40 / 32 / 16、`GridGapFor(w)` | `widgets/space` |
+| 阴影 | `shadow.Pop`（`--shadow-pop`）、`shadow.CoverPlay`；`--shadow-cover`（大封面）数值：深色 `0 24 48 rgba(0,0,0,.5)`、浅色 `0 20 40 rgba(20,22,26,.22)`，T2 / T3 用到时在 `widgets/shadow` 加回（现在没有调用点，死档会让 `TestEveryShadowTierHasACallSite` 红） | `widgets/shadow` |
+| 动效 | `motion.EaseOut / EaseIn / Fast 160 / Med 240 / Slow 360`，过渡 `Fade / PopIn / ToastIn / ScrimIn / PageIn / FullIn / DrawerIn(w)`，`motion.Reduced(c)` | `widgets/motion/record.go` |
+| 图标 | `icon(pudHeart)` 等 `pud*` 常量；`pud.Icon("heart")` | `iconset/icons/Pud`、`icons.go` |
+| 公共组件 | `pud.Button / RoundButton / IconBtn / Chip / Kbd / Badge / PageHead / SecHead / Tabs / TrackHead / TrackRow / EqBars / CoverCard / ColCard / VideoCard / UCard / Avatar / GridCols / Empty / EmptyArt / LoginPrompt / Skeleton / Switch / SelectBox / MiniSearch / PopPanel / PopOpt / PopItem / Scrim / DrawerPanel / DrawerHead / DialogPanel / DialogBody / DialogFoot / Toast` | `widgets/pud` |
+
+组件陈列（深浅各一张，对照原型）：`internal/ui/components_shot_test.go`，
+`BIU_SHOT_DIR=… go test ./internal/ui/ -run TestRenderComponentShowcase`。
+
+### 颜色令牌（深 / 浅）
+
+| 令牌 | 深色 | 浅色 | 用在哪 |
+| --- | --- | --- | --- |
+| `desk` | #050506 | #D9DBDE | 只给全屏播放器固定暗色参考 |
+| `bg` | #0E0F11 | #F6F6F5 | 内容区底色 |
+| `side` | #121315 | #EEEFEF | 侧栏、播放条 |
+| `surface` | #17181B | #FFFFFF | 抽屉、弹层、设置卡、对话框 |
+| `surface-2` | #1E2024 | #E9EAEB | 搜索框、Chip、输入框、封面占位、控件层（`ui.Theme.Surface`） |
+| `hover` / `press` | 白 5% / 8% | 黑 4.5% / 8% | 悬停、按下压色（半透明） |
+| `line` / `line-strong` | #26282D / #34373D | #E0E1E3 / #CFD1D4 | 分隔线 / 幽灵按钮、输入框、轨道描边 |
+| `text` / `text-2` / `text-3` | #ECEBE8 / #A6A8AE / #7F828A | #141518 / #50535A / #6A6D74 | 正文 / 次要 / 第三级 |
+| `ok` / `warn` / `err` | #5BC287 / #F2B04A / #F0716B | #2E7D4F / #9A5B06 / #C93B3B | 语义色（落地值，浅色小字也过 4.5:1） |
+
+强调色（`accent` / `accent-ink` 主色底上字 / `accent-text` 主色当字 / `focus`；`accent-soft` = 主色 14%（浅色 10%）合到 bg）：
+
+| | 深色 | 浅色 |
+| --- | --- | --- |
+| 朱砂（默认） | #FF5D3D / #1A0905 / #FF7A5E / #FFB3A3 | #D2391B / #FFF / #B8300F / #D2391B |
+| 靛青 | #7F9CFF / #0A0F24 / #9DB3FF / #C3D0FF | #3451C9 / #FFF / #2D47B3 / #3451C9 |
+| 松绿 | #4CC58E / #04170E / #6CD6A5 / #B4ECD2 | #167A4D / #FFF / #126B43 / #167A4D |
+| 琥珀 | #F0B43C / #1D1302 / #F5C463 / #F8DCA0 | #8F5D00 / #FFF / #7F5300 / #8F5D00 |
+
+⚠️ 主色**只当底色用**（浅色朱砂压在 bg 上 4.47:1）；当字色用 `AccentText`（封面取色时从底色现推到 ≥ 4.5:1）。
+`ui.Theme` 映射：`Background=bg`、`Surface=surface-2`、`Border=line`、`Text/TextMuted=text/text-2`、
+`Accent=accent`、`AccentText=accent-ink`、`Focus=focus`、`Inverse=text`（Toast 反色）、`Radius=8`、`Scrollbar=line-strong`。
+
+### 其他令牌
+
+- **字号**：11 Eyebrow / kbd（等宽 600，字距 0.2em，大写）· 12 · 13 · 14 正文 · 16 · 20 Subhead · 24 Section ·
+  28 歌词当前句 · 32 Title · 48 Display（页标题）· 64 Hero；10 只给音质角标。**15 / 18 / 30 退役**。
+  20 号及以上标题宋体 700。宋体子集字符范围：GB2312 全部 + ASCII + 常用标点 / 全角（约 3.2MB），子集之外的字由系统补字。
+- **字体**：展开 `PudMusic Serif`（随包）；正文系统默认；等宽 macOS SF Mono（没有就 Menlo）、Windows Consolas。
+- **圆角**：4 小封面 / kbd / 角标 · 8 控件 / 列表行 / 封面 · 12 卡片 / 抽屉 / 弹层 / 对话框 · 胶囊。
+- **间距**：以 4 / 8 为格；页边距 40 / 32 / 16（内容区 ≥ 1180 / ≥ 760 / 更窄）；分区间 48；分区头到内容 20；网格 24（< 760 为 16）；页底 64。
+- **外壳**：侧栏 232（收起 72，内容宽 < 1024 自动收起）· 顶栏 60 · 播放条 84。
+- **动效**：`ease-out = cubic-bezier(.2,.8,.2,1)`、`ease-in = (.4,0,1,1)`；160 / 240 / 360ms。系统「减少动态效果」：
+  `Transition` / `Animate` 由框架处理（原地淡入淡出 / 直接到终点），自绘循环动画（eq-bars、骨架屏）问 `motion.Reduced`。
+
+### §九 里被推翻的条目（怎么改）
+
+- **「页面切换动画不做」→ 做**：页面进场 `motion.PageIn`（从下 8 淡入，360ms）。实现归 T1（外壳 / 路由）。
+- **「小浮层不加进出场」→ 加**：弹层 / 对话框 `PopIn`（240ms）、Toast `ToastIn`、抽屉 `DrawerIn` + 遮罩 `ScrimIn`；
+  原型里抽屉、弹层、对话框、Toast 都有进出场，一律按此。「只有联想面板例外」那条作废。
+- **「侧栏选中项是实心主色底」→ 淡底 + 左侧竖条**：选中项 `surface-2` 底 + 正文色 600 字 + 图标 `accent-text`，
+  左边一条 3 宽、上下各缩 10 的 `accent` 竖条（圆角 2）；悬停 `hover` 底。归 T1。
+- **「页标题 24 / 400、不加粗」→ 48 / 宋体 700**（窄内容区 32）；`TestPageTitlesAreNotBold` 换成
+  `TestPageTitlesAreDisplayBold`。
+- **「Toast 深色用比底略亮的 Surface」→ 反色胶囊**：`Inverse = text`、`InverseText = bg`，圆角胶囊，`--shadow-pop`。
+- **「搜索框 480×36」→ 440×38 胶囊；「图标键 32」→ 36（列表行内 32）；「播放键 48」→ 44；「侧栏 220 / 64」→ 232 / 72；
+  「播放条 76」→ 84**。
+- **「全局圆角可调」→ 固定 4 / 8 / 12 / 胶囊**：设置里的 `borderRadius` 不再进主题，圆角滑块已从外观页删除。
+- **「主色 Biu 绿 #1ed760」→ 朱砂等四种**；语义色不再用上游 HeroUI 那三个（`#f31260` 等），用上表的 ok / warn / err。
+- **分隔线**：不再是「深色 15% 白叠出」「浅色 #dbdbdb」，是实色 `line`；侧栏右缘线也是实色 `line`。
+- **滑块轨道**：未走的一段 `line-strong`；悬停时填充由正文色换主色。
+- **骨架屏**：surface-2 底 + `hover` 光带（`shimmer.Colors`）。
+- **图标**：整套换成原型的 24×24 描边图标（stroke 1.7、圆头圆角）；原型没有对应图标的仍是 Remix。
+
+### 已知取舍（T0 留下的）
+
+- 原型 `.icon-btn.on` 给路径填 22% 淡色，框架的图标是单色遮罩，做不出半透明填充：心 / 星 / 赞「开着」用填满的 `*-on` 版本。
+- `widgets/pud` 是新建的公共包，旧的 `flat`、`tabs.go`、`switch.go`、`toast.go`、`popup.go`、`confirmmodal.go`、
+  `widgets/list/card.go` 等**未逐个改成原型样式**——它们随各票重做页面时换成 `pud` 里的对应组件（T0 只就地改了
+  颜色令牌、阴影、骨架屏、滑块轨道、弹窗面板底 / 圆角）。
+- 登录图标保留 Remix 二维码（原型的 `user` 和 `logout` 在 18px 下分不开）；音量「小」一档由 `vol` 派生（`vol-low`）。
+
+### §0′.T1 外壳
+
+（待 T1 填写）
+
+### §0′.T2 首页
+
+（待 T2 填写）
+
+### §0′.T3 收藏夹/UP/关注/动态
+
+（待 T3 填写）
+
+### §0′.T4 全屏播放器与抽屉
+
+（待 T4 填写）
+
+### §0′.T5 迷你与刘海
+
+（待 T5 填写）
+
+### §0′.T6 设置/登录/对话框
+
+（待 T6 填写）
+
+### §0′.T7 列表页
+
+（待 T7 填写）
+
+---
+
 ## 零、设计规范 v0.1 覆盖项（2026-10-24，应用未发版时定的）
 
 下面这几处**压过**本文件后面照上游 Biu 写的数。后文没改的地方仍以上游为准；
@@ -249,24 +384,32 @@ typography:
 # ⚠️ **`13` 是承认的一档**（报告 F-18 选的路子是「承认它」而不是「把 61 处
 # 13 归到 12 或 14」——后者会把副题和正文压成一样大，层次就没了）。
 size_scale:
-  Size10: 10   # 歌词面板里那个数值（上游 text-[10px] font-bold）
-  Size11: 11   # 极次要的读数（图标旁那一行小字）
-  Size12: 12   # 次要信息（上游 text-xs）
-  Size13: 13   # 副题（比正文的 14 小一档）
-  Size14: 14   # 正文 / 说明（上游 text-sm）
-  Size15: 15   # 空状态 / 弹窗的标题
-  Size16: 16   # 列表 / 网格 / 队列的歌名（上游 text-base）
-  Size18: 18   # 队列抽屉的标题（上游 h3 = text-lg）
-  Size20: 20   # 设置页的分组标题（上游 h2 = text-xl）
-  Size24: 24   # 页标题（上游 h1 = text-2xl）
-  Size28: 28   # 404 那一页的大字
-  Size30: 30   # 合集 / 收藏夹头图区的大标题（上游 text-3xl）
+  Size10: 10   # 音质角标 HI-RES / SQ（等宽 700）
+  Size11: 11   # Eyebrow、kbd、热力图坐标（等宽 600，字距 0.2em）
+  Size12: 12   # Caption：歌手名、时间、统计说明
+  Size13: 13   # Small：副题、时长、小号按钮
+  Size14: 14   # Body：正文、歌名、导航项
+  Size16: 16   # Lead：Tab、导语、UP 卡名字
+  Size20: 20   # Subhead：品牌字、设置分组标题（宋体 700）
+  Size24: 24   # Section：分区 / 抽屉 / 对话框 / 空状态标题（宋体 700）
+  Size28: 28   # 全屏歌词当前句
+  Size32: 32   # Title：UP 主名、榜单序号、窄窗页标题（宋体 700）
+  Size48: 48   # Display：页标题（宋体 700）
+  Size64: 64   # Hero：「今日一张」、收藏夹标题（宋体 700）
 spacing:
   unit: 4
-  page_horizontal: 16        # px-4；行内再加 8，视觉对齐在 24
-  page_vertical: 0           # 上游没有 py
+  page_horizontal_legacy: 16 # 还没改版的页面（pagePadX）
+  page_horizontal_wide: 40   # 内容区 ≥ 1180
+  page_horizontal_medium: 32 # 内容区 ≥ 760
+  page_horizontal_narrow: 16 # 内容区 < 760
+  page_vertical: 0           # 旧口径（上游没有 py）
+  page_top: 8                # .page 顶部
+  page_bottom: 64            # .page 底部
+  section_gap: 48            # .sec
+  section_head_gap: 20       # .sec-head 到内容
+  grid_gap: 24               # .card-grid（内容区 < 760 时 16）
   list_gap: 16
-  settings_group_gap: 24
+  settings_group_gap: 24     # 原型 40，T6 改
 radius:
   default: 8
   max: 24                    # 设置里可调

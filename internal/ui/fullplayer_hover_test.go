@@ -127,7 +127,7 @@ func inkDistance(a, b color.RGBA) int {
 // 深绿压深底 1.31:1，等于看不见）这是一大截。理由写在
 // `widgets/flat` 的 `IconButtonAccentOnBase` 上面。
 func TestTheFullPlayerRowKeysAreVisibleOnHover(t *testing.T) {
-	for _, preset := range []app.ThemePreset{app.ThemePresetWarmPaper, app.ThemePresetDuskAmber} {
+	for _, preset := range []app.Accent{app.AccentCinnabar, app.AccentAmber} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
 			if dark {
@@ -135,7 +135,7 @@ func TestTheFullPlayerRowKeysAreVisibleOnHover(t *testing.T) {
 			}
 			t.Run(string(preset)+"-"+shade, func(t *testing.T) {
 				st := app.DefaultSettings("")
-				st.ThemePreset = preset
+				st.Accent = preset
 				st.ThemeMode = app.ThemeModeLight
 				if dark {
 					st.ThemeMode = app.ThemeModeDark
@@ -210,7 +210,7 @@ func TestTheFullPlayerRowKeysAreVisibleOnHover(t *testing.T) {
 // ——量不出轨道有几像素粗。经典那一套的 `t.Border` 是不透明的，才量得出来。
 func TestTheFullPlayerProgressBarIsNotAccentUntilHover(t *testing.T) {
 	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetClassic
+	st.Accent = app.AccentIndigo
 	st.ThemeMode = app.ThemeModeLight
 
 	tt := fullProgressTester(t, st, app.State{HasTrack: true, Duration: 60, Position: 30}, 0.5)
@@ -288,7 +288,7 @@ func TestTheFullPlayerProgressBarIsNotAccentUntilHover(t *testing.T) {
 // 恒过。
 func TestTheDisabledProgressBarIsNotAccent(t *testing.T) {
 	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetClassic
+	st.Accent = app.AccentIndigo
 	st.ThemeMode = app.ThemeModeLight
 
 	// 时长 0 → 那一根是禁用的；进度强行停在 50%（见上面那段注释）。
@@ -326,7 +326,7 @@ func TestRenderFullPlayerRowShots(t *testing.T) {
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
-	for _, preset := range []app.ThemePreset{app.ThemePresetWarmPaper, app.ThemePresetClassic} {
+	for _, preset := range []app.Accent{app.AccentCinnabar, app.AccentIndigo} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
 			if dark {
@@ -334,7 +334,7 @@ func TestRenderFullPlayerRowShots(t *testing.T) {
 			}
 			t.Run(string(preset)+"-"+shade, func(t *testing.T) {
 				st := app.DefaultSettings("")
-				st.ThemePreset = preset
+				st.Accent = preset
 				st.ThemeMode = app.ThemeModeLight
 				if dark {
 					st.ThemeMode = app.ThemeModeDark

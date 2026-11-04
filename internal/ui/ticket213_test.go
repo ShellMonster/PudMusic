@@ -69,7 +69,7 @@ func uiFollowTagsOrdered(b *uiExplore, tags []followTagSpec) {
 // 的那一处同形）。
 func followPaneSettings() app.Settings {
 	st := app.DefaultSettings("")
-	st.ThemePreset = app.ThemePresetWarmPaper
+	st.Accent = app.AccentCinnabar
 	return st
 }
 

@@ -1256,12 +1256,15 @@ var buiMenuIcons = []struct {
 	title      string
 	line, fill string
 }{
-	{"推荐音乐", "Media/disc-line.svg", "Media/disc-fill.svg"},
-	{"我的关注", "User & Faces/user-follow-line.svg", "User & Faces/user-follow-fill.svg"},
-	{"稍后再看", "Business/calendar-schedule-line.svg", "Business/calendar-schedule-fill.svg"},
-	{"历史记录", "System/history-line.svg", "System/history-fill.svg"},
-	{"本地音乐", "Document/folder-music-line.svg", "Document/folder-music-fill.svg"},
-	{"下载记录", "Document/file-download-line.svg", "Document/file-download-fill.svg"},
+	// 2026-11「深夜唱片行」：照原型 `app.js` 的 `NAV`（disc / users / later /
+	// history / folder / download），选中项不换实心图形，只把图标染成
+	// accent-text（原型 `.nav-item[aria-current] .od-icon`），所以两枚是同一张。
+	{"推荐音乐", "Pud/disc.svg", "Pud/disc.svg"},
+	{"我的关注", "Pud/users.svg", "Pud/users.svg"},
+	{"稍后再看", "Pud/later.svg", "Pud/later.svg"},
+	{"历史记录", "Pud/history.svg", "Pud/history.svg"},
+	{"本地音乐", "Pud/folder.svg", "Pud/folder.svg"},
+	{"下载记录", "Pud/download.svg", "Pud/download.svg"},
 }
 
 // TestTheSideMenuIconsMatchBiu 钉住「每一项配哪两枚图标」。

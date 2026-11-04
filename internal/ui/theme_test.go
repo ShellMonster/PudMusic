@@ -3,7 +3,6 @@ package ui
 import (
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -212,113 +211,112 @@ func TestApplyThemeEveryFrameSurvives(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 主色、背景色、圆角
+// 「深夜唱片行」：令牌、强调色、圆角
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestRadiusIsClamped 验圆角夹在 0~24。
-func TestRadiusIsClamped(t *testing.T) {
-	cases := []struct{ in, want float32 }{
-		{-5, 0},
-		{0, 0},
-		{8, 8},
-		{24, 24},
-		{999, 24},
+// themeWithAccent 是「主色是任意一个颜色」那一档主题：封面取色开着时主色就是
+// 封面推出来的任意色，这里直接把 hex 铺上去（和 `buildTheme` 封面那一支同一个
+// `applyAccent`），给那些「随便哪个主色都要读得出来」的对比度用例用。
+func themeWithAccent(s app.Settings, hex string, dark bool) *mygoui.Theme {
+	th := BuildTheme(s, dark)
+	applyAccent(th, mygoui.Hex(hex))
+	th.Focus = th.Accent
+	return th
+}
+
+// TestTheThemeIsTheMidnightRecordPalette 验主题的每一档都来自原型 `index.html`
+// 69–112 行（深浅两份），而不是框架默认值。
+func TestTheThemeIsTheMidnightRecordPalette(t *testing.T) {
+	for _, c := range []struct {
+		dark                                    bool
+		bg, surface2, line, text, text2, inv    string
+		accent, accentInk, focus, err, ok, warn string
+	}{
+		{false, "#F6F6F5", "#E9EAEB", "#E0E1E3", "#141518", "#50535A", "#141518",
+			"#D2391B", "#FFFFFF", "#D2391B", "#C93B3B", "#2E7D4F", "#9A5B06"},
+		{true, "#0E0F11", "#1E2024", "#26282D", "#ECEBE8", "#A6A8AE", "#ECEBE8",
+			"#FF5D3D", "#1A0905", "#FFB3A3", "#F0716B", "#5BC287", "#F2B04A"},
+	} {
+		th := BuildTheme(app.DefaultSettings(""), c.dark)
+		for _, f := range []struct {
+			what      string
+			got, want mygoui.Color
+		}{
+			{"Background", th.Background, mygoui.Hex(c.bg)},
+			{"Surface", th.Surface, mygoui.Hex(c.surface2)},
+			{"Border", th.Border, mygoui.Hex(c.line)},
+			{"Text", th.Text, mygoui.Hex(c.text)},
+			{"TextMuted", th.TextMuted, mygoui.Hex(c.text2)},
+			{"Inverse", th.Inverse, mygoui.Hex(c.inv)},
+			{"InverseText", th.InverseText, mygoui.Hex(c.bg)},
+			{"Accent", th.Accent, mygoui.Hex(c.accent)},
+			{"AccentText", th.AccentText, mygoui.Hex(c.accentInk)},
+			{"Focus", th.Focus, mygoui.Hex(c.focus)},
+			{"Danger", th.Danger, mygoui.Hex(c.err)},
+			{"Success", th.Success, mygoui.Hex(c.ok)},
+			{"Warning", th.Warning, mygoui.Hex(c.warn)},
+		} {
+			if f.got != f.want {
+				t.Errorf("深色=%v：%s 是 %v，want %v", c.dark, f.what, f.got, f.want)
+			}
+		}
+		if th.Radius != 8 {
+			t.Errorf("深色=%v：Radius 是 %v，want 8（--r-8）", c.dark, th.Radius)
+		}
 	}
-	for _, c := range cases {
+}
+
+// TestTheAccentSettingPicksTheAccentGroup 验四种强调色各自铺到整组强调色上，
+// 深浅两份是原型给的两组值。
+func TestTheAccentSettingPicksTheAccentGroup(t *testing.T) {
+	want := map[app.Accent][2]string{ // [浅色, 深色]
+		app.AccentCinnabar: {"#D2391B", "#FF5D3D"},
+		app.AccentIndigo:   {"#3451C9", "#7F9CFF"},
+		app.AccentPine:     {"#167A4D", "#4CC58E"},
+		app.AccentAmber:    {"#8F5D00", "#F0B43C"},
+	}
+	for _, a := range app.Accents {
 		s := app.DefaultSettings("")
-		s.BorderRadius = float64(c.in)
-		if got := BuildTheme(s, false).Radius; got != c.want {
-			t.Errorf("圆角 %v 夹成了 %v，want %v", c.in, got, c.want)
+		s.Accent = a
+		for i, dark := range []bool{false, true} {
+			th := BuildTheme(s, dark)
+			if got := th.Accent; got != mygoui.Hex(want[a][i]) {
+				t.Errorf("%s 深色=%v：Accent 是 %v，want %s", a, dark, got, want[a][i])
+			}
+			// 浅色四种都配白字、深色四种都配深字（原型 --accent-ink）。
+			if dark == (luminanceOf(th.AccentText) > 128) {
+				t.Errorf("%s 深色=%v：主色上的字是 %v", a, dark, th.AccentText)
+			}
+			if th.AccentHover == th.Accent {
+				t.Errorf("%s 深色=%v：AccentHover 没从主色推出来", a, dark)
+			}
 		}
 	}
 }
 
-// TestPrimaryColorDrivesTheAccentGroup 验主色真的铺到了整组强调色上。
-func TestPrimaryColorDrivesTheAccentGroup(t *testing.T) {
-	s := app.DefaultSettings("")
-	s.PrimaryColor = "#1ed760" // Biu 的绿
-
-	light := BuildTheme(s, false)
-	dark := BuildTheme(s, true)
-
-	defaults := map[string]*mygoui.Theme{
-		"浅色": mygoui.LightTheme(),
-		"深色": mygoui.DarkTheme(),
-	}
-	for name, th := range map[string]*mygoui.Theme{"浅色": light, "深色": dark} {
-		if th.Accent.R != 0x1e || th.Accent.G != 0xd7 || th.Accent.B != 0x60 {
-			t.Errorf("%s主色没铺上 Accent：%+v", name, th.Accent)
-		}
-		// hover/pressed 必须是从主色推出来的，不是框架默认值留着。
-		if th.AccentHover == defaults[name].AccentHover {
-			t.Errorf("%s的 hover 色还是框架默认的", name)
-		}
-		// 绿底上白字看不清，MyGo 的做法是反过来用深色字。
-		if th.AccentText.R != 24 || th.AccentText.G != 24 || th.AccentText.B != 27 {
-			t.Errorf("%s主色上的字是 %+v，亮色主色上该用深色字", name, th.AccentText)
-		}
-	}
-	// 深色底上 hover 往亮走，浅色底上往暗走——反了就是按下时反而变淡。
-	if light.AccentHover.R >= light.Accent.R {
-		t.Error("浅色主题上 hover 该比主色暗")
-	}
-	if dark.AccentHover.R <= dark.Accent.R {
-		t.Error("深色主题上 hover 该比主色亮")
-	}
-}
-
-// TestBackgroundColorIsUsed 验自定义背景色。
-func TestBackgroundColorIsUsed(t *testing.T) {
-	s := app.DefaultSettings("")
-	if got := BuildTheme(s, false).Background; got != mygoui.LightTheme().Background {
-		t.Error("背景色留空时该用主题默认的")
-	}
-
-	s.BackgroundColor = "#101014"
-	if got := BuildTheme(s, false).Background; got.R != 0x10 || got.G != 0x10 || got.B != 0x14 {
-		t.Errorf("自定义背景色没生效：%+v", got)
-	}
-}
-
-// TestBadColorsFallBackInsteadOfPanicking 验坏颜色不炸进程。
-//
-// `ui.Hex` 对非法输入直接 panic（ui/color.go:33-38）。颜色串是设置文件里的
-// 用户输入，为了画错的颜色把进程带走不划算。
-func TestBadColorsFallBackInsteadOfPanicking(t *testing.T) {
-	for _, bad := range []string{"红色", "#zzz", "#12345", "#", "", "#1234567"} {
+// TestTheBorderRadiusSettingNoLongerShapesTheTheme 验设置里的圆角不再进主题：
+// 原型的圆角是固定的 4 / 8 / 12 / 胶囊（§0′）。
+func TestTheBorderRadiusSettingNoLongerShapesTheTheme(t *testing.T) {
+	for _, r := range []float64{0, 4, 16, 24} {
 		s := app.DefaultSettings("")
-		s.PrimaryColor = bad
-		s.BackgroundColor = bad
-		th := BuildTheme(s, false) // 之前会 panic 的地方
-		if th.Accent.A == 0 || th.Background.A == 0 {
-			t.Errorf("坏颜色 %q 让主题变得全透明了", bad)
+		s.BorderRadius = r
+		if got := BuildTheme(s, false).Radius; got != 8 {
+			t.Errorf("borderRadius=%v：主题圆角是 %v，want 8", r, got)
 		}
 	}
 }
 
-// TestInverseIsExplicitInDarkMode 验深色下 Inverse 显式给了。
-//
-// 留零的话 MyGo 的 inverse() 会退回「fill=Text、text=Background」——
-// 深色下就是一张白底卡片，tooltip 和 toast 在深色界面里闪一下。
-func TestInverseIsExplicitInDarkMode(t *testing.T) {
-	dark := BuildTheme(app.DefaultSettings(""), true)
-	if dark.Inverse == mygoui.Transparent || dark.InverseText == mygoui.Transparent {
-		t.Fatalf("深色下 Inverse/InverseText 留零了：%v / %v", dark.Inverse, dark.InverseText)
-	}
-	// 深色下的 tooltip 不该比背景还亮太多——那是一张白卡片。
-	if luminanceOf(dark.Inverse) <= luminanceOf(dark.Background) {
-		t.Error("深色下 tooltip 的底色比背景还暗，会看不见")
-	}
-	if luminanceOf(dark.Inverse) > 200 {
-		t.Errorf("深色下 tooltip 底色亮到 %v，是一张白卡片", luminanceOf(dark.Inverse))
-	}
-
-	light := BuildTheme(app.DefaultSettings(""), false)
-	if light.Inverse == mygoui.Transparent || light.InverseText == mygoui.Transparent {
-		t.Error("浅色下 Inverse/InverseText 留零了")
-	}
-	if luminanceOf(light.Inverse) >= luminanceOf(light.Background) {
-		t.Error("浅色下 tooltip 应该是深色卡片")
+// TestInverseIsTheReversedPill 验 Toast / 提示是反色胶囊（§0′ 冲突 7 按原型）：
+// 深色下浅底深字、浅色下深底浅字，而且必须显式给（留零的话框架会自己推一份）。
+func TestInverseIsTheReversedPill(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		th := BuildTheme(app.DefaultSettings(""), dark)
+		if th.Inverse == mygoui.Transparent || th.InverseText == mygoui.Transparent {
+			t.Fatalf("深色=%v：Inverse/InverseText 留零了", dark)
+		}
+		if th.Inverse != th.Text || th.InverseText != th.Background {
+			t.Errorf("深色=%v：Toast 是 %v 底 %v 字，want 正文色底、页面底色字", dark, th.Inverse, th.InverseText)
+		}
 	}
 }
 
@@ -336,8 +334,7 @@ func luminanceOf(c mygoui.Color) float32 {
 // 这条再往下一层：读渲染结果的像素。
 func TestThemeReachesThePixels(t *testing.T) {
 	s := app.DefaultSettings("")
-	s.ThemePreset = app.ThemePresetClassic
-	s.BackgroundColor = "#336699"
+	s.ThemeMode = app.ThemeModeDark
 
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		ApplyTheme(c, s, c.Theme().Dark)
@@ -349,7 +346,7 @@ func TestThemeReachesThePixels(t *testing.T) {
 	// tt.Image() 给的是 color.RGBA（8 位/通道、预乘 alpha），
 	// mygoui.Color 是 0~255 + 0~1 的 alpha，两边换一下再比。
 	got := tt.Image().RGBAAt(2, 2)
-	want := mygoui.Hex("#336699")
+	want := mygoui.Hex("#0E0F11") // 深色 --bg
 	if got.R != want.R || got.G != want.G || got.B != want.B || got.A != want.A {
 		t.Errorf("画面左上角是 %v，want %v（主题没有走到像素）", got, want)
 	}
@@ -458,21 +455,6 @@ func TestShellFramesCarryTheTheme(t *testing.T) {
 	tt.Frame()
 	if !got.dark {
 		t.Error("错误页没有带上设置里的深色主题")
-	}
-}
-
-// TestTheScheduleModeIsDarkAtNightAndLightByDay 验「定时」档：晚上深色、白天浅色，不看系统。
-func TestTheScheduleModeIsDarkAtNightAndLightByDay(t *testing.T) {
-	defer func(f func() time.Time) { themeNow = f }(themeNow)
-	st := app.DefaultSettings("")
-	st.ThemeMode = app.ThemeModeSchedule
-	for hour, want := range map[int]bool{0: true, 6: true, 7: false, 12: false, 18: false, 19: true, 23: true} {
-		themeNow = func() time.Time { return time.Date(2026, 1, 1, hour, 30, 0, 0, time.Local) }
-		for _, sys := range []bool{false, true} {
-			if got := effectiveDark(st, sys); got != want {
-				t.Errorf("%d 点（系统深色=%v）：深色=%v，want %v", hour, sys, got, want)
-			}
-		}
 	}
 }
 

@@ -41,6 +41,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -248,7 +249,8 @@ func flatSolidCurrentText(t *ui.Theme) ui.Color {
 // 同一支色上的一档深浅，真正的层级信号是**字号**（14 对 12）。要更明显的
 // 次要层级就得牺牲对比度，两者只能取一头。
 func flatSolidCurrentMutedText(t *ui.Theme) ui.Color {
-	return t.AccentText.Mix(t.Accent, 0.08)
+	// 浅色朱砂底上白字本身只有 4.84:1，再往底色推 8% 会掉到 4.30:1——压回 4.5。
+	return ink.Ensure(t.AccentText.Mix(t.Accent, 0.08), t.Accent, ink.TextContrast)
 }
 
 // flatSolidCurrentFeel 是实心主色底那一档的**悬停 / 按下**反馈：**换主色自己的

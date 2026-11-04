@@ -31,6 +31,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -448,7 +449,7 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().MaxWidth(s.settingsContentMaxWAt(c)).
 				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
-				ui.Text(c, "设置").FontSize(scale.Font(c, scale.PageTitle))
+				typo.Display(ui.Text(c, "设置"), scale.Font(c, scale.PageTitle))
 
 				if ro {
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").
@@ -906,39 +907,6 @@ func (s *Shell) pickSelected(c *ui.Context, b ui.Element, ro bool) ui.Element {
 		return b.Background(c.Theme().Surface).TextColor(flatCurrentText(c.Theme(), false))
 	}
 	return flatSolid(c, b)
-}
-
-// presetRowColumns 是「主题方案」那一格一行摆几张卡。方案现在有八套，折成
-// 两行四张——一行摆八张的话每张只剩 38 宽，缩略图和名字都摆不下。
-const presetRowColumns = 4
-
-// pickThemePreset 是主题方案那几档（暖纸 / 暮光 / 柔雾 / 青瓷 / 墨宣 / 紫檀 /
-// 靛夜 / 经典）。
-//
-// 每行四张预览卡（`settings_preset_card.go`），不是分段控件：方案是一整套配色，
-// 要让人看见长什么样再选。选中的方案压过「颜色」和「圆角」两行（见
-// `app.ThemePreset`）；那两行一改，方案会被清回「经典」，见
-// `settings_tab_general.go` 里各处 `ThemePreset = Classic`。
-func (s *Shell) pickThemePreset(c *ui.Context, st app.Settings, ro bool) {
-	w := s.settingsControlFitW(c, scale.Font(c, settingsControlW))
-	// 每行四张平分控件列：卡宽 = (列宽 - 三道缝) / 4。定宽而不是 Grow：Grow 的
-	// 卡宽跟着内容走，缩略图是 FillWidth，于是卡宽窄不一。行距和卡距同是一道
-	// 8 的缝；最后一行摆不满就摆几张（左对齐）。
-	cardW := (w - float32(presetRowColumns-1)*space.Px8) / presetRowColumns
-	col := ui.Column(c).Key("setting:themePreset").Label("主题方案").Gap(space.Px8).Width(w)
-	col.Children(func() {
-		for start := 0; start < len(themePresets); start += presetRowColumns {
-			end := min(start+presetRowColumns, len(themePresets))
-			ui.Row(c).FillWidth().Gap(space.Px8).Children(func() {
-				for _, p := range themePresets[start:end] {
-					if s.presetCard(c, p.preset, p.label, cardW, p.preset == st.ThemePreset, ro).Clicked() {
-						pick := p.preset
-						s.applySetting("主题方案", func(cur *app.Settings) { cur.ThemePreset = pick })
-					}
-				}
-			})
-		}
-	})
 }
 
 // pickCloseWindow 是窗口关闭那两档。照 Biu 用的是横排单选（RadioGroup

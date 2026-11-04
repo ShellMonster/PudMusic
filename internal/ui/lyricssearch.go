@@ -427,7 +427,7 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 	case len(st.Candidates) == 0:
 		ui.Column(c).Key(lyricSearchBodyKey).Grow(1).Center().Gap(space.Px6).Padding(space.Px24).
 			Children(func() {
-				ui.Text(c, lyricSearchEmpty).FontSize(scale.Font(c, scale.Size15)).TextColor(t.Text)
+				ui.Text(c, lyricSearchEmpty).FontSize(scale.Font(c, scale.Size16)).TextColor(t.Text)
 				ui.Text(c, lyricNoHitsHint).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			})
 

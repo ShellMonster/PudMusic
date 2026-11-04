@@ -28,6 +28,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -69,7 +70,7 @@ func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
 	dir := s.app.DownloadDir()
 
 	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "下载记录").FontSize(scale.Font(c, scale.PageTitle))
+		typo.Display(ui.Text(c, "下载记录"), scale.Font(c, scale.PageTitle))
 
 		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
 		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白

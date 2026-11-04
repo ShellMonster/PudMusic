@@ -83,32 +83,25 @@ func (s *Shell) reportSettingsError() {
 	s.addToast("设置："+strings.TrimPrefix(err.Error(), "app: "), notice.Danger)
 }
 
-// themePresets 是主题方案那几档（含显式的「经典」，放最后），顺序就是画面上
-// 从左到右、从上到下的顺序。暖纸/暮光/柔雾的名字照设计规范 v0.1；青瓷/墨宣/
-// 紫檀/靛夜是本仓库原创档（2026-10-26 补的冷色/水墨/紫/蓝四个色相）。
-var themePresets = []struct {
-	preset app.ThemePreset
+// accentOptions 是强调色那四档（朱砂 / 靛青 / 松绿 / 琥珀），顺序就是画面上从左到右。
+var accentOptions = []struct {
+	accent app.Accent
 	label  string
 }{
-	{app.ThemePresetWarmPaper, "暖纸"},
-	{app.ThemePresetDuskAmber, "暮光"},
-	{app.ThemePresetSoftPeach, "柔雾"},
-	{app.ThemePresetCeladon, "青瓷"},
-	{app.ThemePresetInkPaper, "墨宣"},
-	{app.ThemePresetSandalwood, "紫檀"},
-	{app.ThemePresetIndigoNight, "靛夜"},
-	{app.ThemePresetClassic, "经典"},
+	{app.AccentCinnabar, "朱砂"},
+	{app.AccentIndigo, "靛青"},
+	{app.AccentPine, "松绿"},
+	{app.AccentAmber, "琥珀"},
 }
 
-// themeModes 是四档主题，顺序就是从左到右的顺序。设置页那一排按钮用。
+// themeModes 是三档深浅（跟随系统 / 浅色 / 深色），顺序就是从左到右的顺序。
 //
 // ⚠️ **每一档都带一枚图标**（上游那一排是「图标 + 文字」，`system-settings.tsx:
 // 105-153`：跟随系统 `RiComputerLine`、浅色 `RiSunLine`、深色 `RiMoonLine`，
 // 都是 `size={18}`）。图标名是 `icons.go` 里的常量——「跟随系统」那一枚是
 // 票 #297 新加的资源（`Device/computer-line.svg`），照上游 RemixIcon 的目录
 // 放进去，许可证那一份没变（还是 Remix Icon License，见 `internal/licensing`）。
-// 「定时」是 #534 加的第四档（19:00~次日 07:00 用深色），用的是那批资源里的
-// `System/time-line.svg`（`iconClock`）。
+// 「定时」档 2026-11 随「深夜唱片行」删掉（DESIGN.md §0′）。
 var themeModes = []struct {
 	mode  app.ThemeMode
 	label string
@@ -117,5 +110,4 @@ var themeModes = []struct {
 	{app.ThemeModeSystem, "跟随系统", iconComputer},
 	{app.ThemeModeLight, "浅色", iconSun},
 	{app.ThemeModeDark, "深色", iconMoon},
-	{app.ThemeModeSchedule, "定时", iconClock},
 }

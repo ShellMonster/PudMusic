@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -43,7 +44,7 @@ import (
 func TestTheFrameThemeIsNotRebuiltEveryFrame(t *testing.T) {
 	s := &Shell{}
 	settings := app.DefaultSettings("")
-	settings.ThemePreset = app.ThemePresetClassic
+	settings.Accent = app.AccentIndigo
 	prefs := mygoui.Preferences{}
 
 	// 第一帧：建一份出来。
@@ -51,9 +52,8 @@ func TestTheFrameThemeIsNotRebuiltEveryFrame(t *testing.T) {
 	if first == nil {
 		t.Fatal("主题没建出来")
 	}
-	if first.Accent != mygoui.Hex(app.DefaultPrimaryColor) {
-		t.Errorf("主题的主色是 %v，want %v（设置里的主色没铺上去）",
-			first.Accent, mygoui.Hex(app.DefaultPrimaryColor))
+	if want := tok.AccentColor("indigo", false); first.Accent != want {
+		t.Errorf("主题的主色是 %v，want %v（设置里的强调色没铺上去）", first.Accent, want)
 	}
 
 	// 稳态：每帧零分配。
@@ -85,7 +85,7 @@ func TestTheFrameThemeIsNotRebuiltEveryFrame(t *testing.T) {
 func TestTheThemeFollowsTheSettingsTheMomentTheyChange(t *testing.T) {
 	var got themeProbe
 	classic := app.DefaultSettings("")
-	classic.ThemePreset = app.ThemePresetClassic
+	classic.Accent = app.AccentIndigo
 	b := newTestShell(t, withSettings(classic),
 		withView(func(s *Shell) func(*mygoui.Context) {
 			return func(c *mygoui.Context) {
@@ -95,21 +95,20 @@ func TestTheThemeFollowsTheSettingsTheMomentTheyChange(t *testing.T) {
 		}))
 
 	b.tt.Frame()
-	if got.accent != mygoui.Hex(app.DefaultPrimaryColor) {
-		t.Fatalf("起点就不对：主色是 %v，want %v", got.accent, mygoui.Hex(app.DefaultPrimaryColor))
+	if want := tok.AccentColor("indigo", false); got.accent != want {
+		t.Fatalf("起点就不对：主色是 %v，want %v", got.accent, want)
 	}
 
-	// 用户在设置里挑了一个别的主色。
+	// 用户在设置里挑了一个别的强调色。
 	if _, err := b.a.UpdateSettings(func(s *app.Settings) {
-		s.PrimaryColor = "#ff0000"
+		s.Accent = app.AccentPine
 	}); err != nil {
 		t.Fatal(err)
 	}
 	b.tt.Frame()
-	if got.accent != mygoui.Hex("#ff0000") {
-		t.Errorf("改了主色之后下一帧还是 %v，want %v——\n"+
-			"缓存没被设置变更作废（界面上会停在旧的主色，而那不报错）",
-			got.accent, mygoui.Hex("#ff0000"))
+	if want := tok.AccentColor("pine", false); got.accent != want {
+		t.Errorf("改了强调色之后下一帧还是 %v，want %v——\n"+
+			"缓存没被设置变更作废（界面上会停在旧的主色，而那不报错）", got.accent, want)
 	}
 
 	// 档位也改：浅色 → 深色。
@@ -123,16 +122,6 @@ func TestTheThemeFollowsTheSettingsTheMomentTheyChange(t *testing.T) {
 		t.Error("改了主题档位之后下一帧还是浅色——缓存没被设置变更作废")
 	}
 
-	// 底色也改：用户挑了底色，那一份也得跟着重算（分隔线是叠在底色上的）。
-	if _, err := b.a.UpdateSettings(func(s *app.Settings) {
-		s.BackgroundColor = "#101014"
-	}); err != nil {
-		t.Fatal(err)
-	}
-	b.tt.Frame()
-	if got.bg != mygoui.Hex("#101014") {
-		t.Errorf("改了底色之后下一帧的底色还是 %v，want %v", got.bg, mygoui.Hex("#101014"))
-	}
 }
 
 // TestTheThemeIsNotRebuiltWhenTheViewRunsTwiceInAFrame 钉住「一帧跑两遍 view 时不重算」。

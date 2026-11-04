@@ -59,6 +59,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -537,7 +538,7 @@ func (f *followPage) scrollTop() {
 func (s *Shell) viewFollowHeader(c *ui.Context, f *followPage) {
 	t := c.Theme()
 	ui.Row(c).Key("follow:page-title").FillWidth().AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "我的关注").FontSize(scale.Font(c, scale.PageTitle))
+		typo.Display(ui.Text(c, "我的关注"), scale.Font(c, scale.PageTitle))
 		// 总数是淡一档的数字徽章，跟在标题后面（上游 `index.tsx:224` 的
 		// `allCount ? \`（${allCount}）\` : ""`）。
 		if f.total > 0 {

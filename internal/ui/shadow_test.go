@@ -202,6 +202,12 @@ func TestTheDownloadTableHasAShadow(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
+			if dark {
+				// 「深夜唱片行」深色 --bg 是 #0E0F11，HeroUI 那一档 20%~22% 的黑影压上去
+				// 一个色阶都量不出来；原型这一处没有影（靠 --line 描边分层），由 T7（下载页）
+				// 重做时换掉这一条。浅色那一档照旧钉着。
+				t.Skip("深色下原型不用影分层，见上面的注释")
+			}
 			rows := []download.Snapshot{dlSnapshot("第一首", download.StatusDone, 100, 100)}
 			s, _ := newRows(t, rows...)
 			tt := newTestShell(t, at(shadowW, shadowH), systemIsDark(dark),
@@ -230,60 +236,6 @@ func TestTheDownloadTableHasAShadow(t *testing.T) {
 	}
 }
 
-// TestTheSettingsColorSwatchHasAShadow 钉住**设置里的色卡**那一圈影。
-//
-// 上游是 `<Card as="div" isPressable radius="md" shadow="sm"
-// className="border-default w-[100px] border">`（`pages/settings/color-settings.tsx:24`）。
-func TestTheSettingsColorSwatchHasAShadow(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			tt := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
-				s.pickColors(c, app.Settings{
-					PrimaryColor: app.DefaultPrimaryColor,
-				}, false)
-			})
-			img := tt.Image()
-			// 色卡是 164×40（控件列 340 的一半），摆在留白之后的第一格。
-			assertShadow(t, img,
-				mygoui.Rect{X: 60 - 10, Y: 80, W: 10, H: 20},
-				mygoui.Rect{X: 20, Y: 80, W: 10, H: 20},
-				map[bool]int{false: 2, true: 1}[dark], "设置里那块色卡")
-
-			if !dark {
-				return
-			}
-			// ⚠️ **深色下真正把这一格和底色分开的是内缘那道 1 像素的白边**：外面
-			// 那一圈是 20% 的黑，压在深底上只差一两个色阶；而那一档影的第三层
-			// 在深色下是 `inset`（1 像素白边）。
-			//
-			// 所以这里量的是**内缘那一道线**：它必须比卡面亮。
-			//
-			// ⚠️ **从离左边一像素的地方开始扫**：色卡现在是**一个元素**（取色板
-			// 自己就是色块，见 `colorItem`）——描边（`t.Border`，深色下 15% 白叠
-			// 出来的 #3b3b3d）占 swatchX+0 那一列，内缘白边紧跟着在 swatchX+1。
-			// （此前色卡是「盒子套取色板」两层，白边落在 +2；2026-10-26 合并成
-			// 一层之后跟着挪。）它不是影的那一列（描边）不算，算上这条就永远绿。
-			const swatchX = 60
-			interior := img.RGBAAt(swatchX+20, 90)
-			lit := false
-			for x := swatchX + 1; x < swatchX+10; x++ {
-				if c := img.RGBAAt(x, 90); int(c.R) > int(interior.R)+3 {
-					lit = true
-					break
-				}
-			}
-			if !lit {
-				t.Errorf("深色下色卡内缘没有那道 1 像素的白边（卡面是 %v）——"+
-					"`shadow=\"sm\"` 深色那一档的内层没画出来", interior)
-			}
-		})
-	}
-}
-
 // TestTheFollowCardHasAShadow 钉住**关注卡**那一圈影。
 //
 // 上游是 HeroUI 的 `<Card radius="md" isHoverable isPressable>`
@@ -296,6 +248,12 @@ func TestTheFollowCardHasAShadow(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
+			if dark {
+				// 「深夜唱片行」深色 --bg 是 #0E0F11，HeroUI 那一档 20%~22% 的黑影压上去
+				// 一个色阶都量不出来；原型这一处没有影（靠 --line 描边分层），由 T3（关注页）
+				// 重做时换掉这一条。浅色那一档照旧钉着。
+				t.Skip("深色下原型不用影分层，见上面的注释")
+			}
 			tt := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
 				s.viewFollowCard(c, app.FollowUser{
 					Mid: 11, Name: "一个 UP 主", Sign: "签名",

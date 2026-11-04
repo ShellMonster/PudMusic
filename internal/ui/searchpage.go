@@ -32,6 +32,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -184,10 +185,10 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
 		// 24 / 400。
 		//
 		// ⚠️ **字重不许写**：页标题的字重由框架的默认档（400）给，写上
-		// `FontWeight(400)` 也会被 `TestPageTitlesAreNotBold` 拦下——那一条钉的
+		// `FontWeight(400)` 也会被 `TestPageTitlesSetNoWeightOfTheirOwn` 拦下——那一条钉的
 		// 是「拿 `scale.PageTitle` 当字号的那一句里不许出现字重」，
 		// `DESIGN.md` §二「页标题 24 / 400」靠的是**不调** `.Bold()`。
-		ui.Textf(c, "搜索【%s】的结果", keyword).FontSize(scale.Font(c, scale.PageTitle))
+		typo.Display(ui.Textf(c, "搜索【%s】的结果", keyword), scale.Font(c, scale.PageTitle))
 
 		// 🔴 **两排 Tabs 都要在 `current` 之前画**：它们都是建到的时候才写
 		// `st.tab` / `st.sorts[cur]`（`mygo/ui/base.go` 的 `tabsParts.Tab` 的

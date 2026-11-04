@@ -31,15 +31,15 @@ import (
 )
 
 // nameLinkShotSettings 是这一族用的设置：方案可换，其余照默认。
-func nameLinkShotSettings(preset app.ThemePreset) app.Settings {
+func nameLinkShotSettings(preset app.Accent) app.Settings {
 	st := app.DefaultSettings("")
-	st.ThemePreset = preset
+	st.Accent = preset
 	return st
 }
 
 // nameLinkDynamicShell 造一个停在 UP 空间「动态」那一页的壳，**指针停在作者名
 // 上面**（要看的就是悬停那一下）。
-func nameLinkDynamicShell(t *testing.T, dark bool, preset app.ThemePreset) (*mygoui.Tester, *Shell) {
+func nameLinkDynamicShell(t *testing.T, dark bool, preset app.Accent) (*mygoui.Tester, *Shell) {
 	t.Helper()
 	b := newUIExplore(t)
 	uiSpaceData(b, "Biu 的用户", 0, 123456)
@@ -67,7 +67,7 @@ func nameLinkDynamicShell(t *testing.T, dark bool, preset app.ThemePreset) (*myg
 }
 
 // nameLinkPlaybarShell 造一个只画播放条的外壳，**指针停在 UP 名上面**。
-func nameLinkPlaybarShell(t *testing.T, dark bool, preset app.ThemePreset) (*mygoui.Tester, *Shell) {
+func nameLinkPlaybarShell(t *testing.T, dark bool, preset app.Accent) (*mygoui.Tester, *Shell) {
 	t.Helper()
 	b := newTestShell(t, at(1200, coverWinH), systemIsDark(dark),
 		withSettings(nameLinkShotSettings(preset)),
@@ -105,22 +105,22 @@ func TestRenderNameLinkShots(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			// 01 动态条目上的作者名（暖纸）：**用户点名的那一处**。
 			{
-				tt, _ := nameLinkDynamicShell(t, dark, app.ThemePresetWarmPaper)
+				tt, _ := nameLinkDynamicShell(t, dark, app.AccentCinnabar)
 				save(t, dir, "90-动态条目-作者名悬停-暖纸-"+name+".png", tt)
 			}
 			// 02 同一处（暮光·琥珀）：另一套色相——下划线跟着主色走。
 			{
-				tt, _ := nameLinkDynamicShell(t, dark, app.ThemePresetDuskAmber)
+				tt, _ := nameLinkDynamicShell(t, dark, app.AccentAmber)
 				save(t, dir, "91-动态条目-作者名悬停-暮光-"+name+".png", tt)
 			}
 			// 03 播放条上的 UP 名（暖纸）。
 			{
-				tt, _ := nameLinkPlaybarShell(t, dark, app.ThemePresetWarmPaper)
+				tt, _ := nameLinkPlaybarShell(t, dark, app.AccentCinnabar)
 				save(t, dir, "92-播放条-UP名悬停-暖纸-"+name+".png", tt)
 			}
 			// 04 同一处（暮光·琥珀）。
 			{
-				tt, _ := nameLinkPlaybarShell(t, dark, app.ThemePresetDuskAmber)
+				tt, _ := nameLinkPlaybarShell(t, dark, app.AccentAmber)
 				save(t, dir, "93-播放条-UP名悬停-暮光-"+name+".png", tt)
 			}
 		})

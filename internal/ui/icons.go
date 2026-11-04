@@ -68,36 +68,36 @@ const (
 	// `RiFolderMusicLine` → `Document/folder-music-line.svg`、
 	// `RiFileDownloadLine` → `Document/file-download-line.svg`。
 	// 「设置」是我们自己多摆的那一项（上游设置在头像下拉里），配的是设置那一枚。
-	iconMenuRecommend   = "Media/disc-line.svg"                 // 推荐音乐
-	iconMenuRecommendOn = "Media/disc-fill.svg"                 // 推荐音乐（选中）
-	iconMenuFollow      = "User & Faces/user-follow-line.svg"   // 我的关注
-	iconMenuFollowOn    = "User & Faces/user-follow-fill.svg"   // 我的关注（选中）
-	iconMenuLater       = "Business/calendar-schedule-line.svg" // 稍后再看
-	iconMenuLaterOn     = "Business/calendar-schedule-fill.svg" // 稍后再看（选中）
-	iconMenuHistory     = "System/history-line.svg"             // 历史记录
-	iconMenuHistoryOn   = "System/history-fill.svg"             // 历史记录（选中）
-	iconMenuLocal       = "Document/folder-music-line.svg"      // 本地音乐
-	iconMenuLocalOn     = "Document/folder-music-fill.svg"      // 本地音乐（选中）
-	iconMenuDownload    = "Document/file-download-line.svg"     // 下载记录
-	iconMenuDownloadOn  = "Document/file-download-fill.svg"     // 下载记录（选中）
-	iconMenuSettings    = "System/settings-3-line.svg"          // 设置
-	iconMenuSettingsOn  = "System/settings-3-fill.svg"          // 设置（选中）
+	iconMenuRecommend   = "Pud/disc.svg"     // 推荐音乐
+	iconMenuRecommendOn = "Pud/disc.svg"     // 推荐音乐（选中）
+	iconMenuFollow      = "Pud/users.svg"    // 我的关注
+	iconMenuFollowOn    = "Pud/users.svg"    // 我的关注（选中）
+	iconMenuLater       = "Pud/later.svg"    // 稍后再看
+	iconMenuLaterOn     = "Pud/later.svg"    // 稍后再看（选中）
+	iconMenuHistory     = "Pud/history.svg"  // 历史记录
+	iconMenuHistoryOn   = "Pud/history.svg"  // 历史记录（选中）
+	iconMenuLocal       = "Pud/folder.svg"   // 本地音乐
+	iconMenuLocalOn     = "Pud/folder.svg"   // 本地音乐（选中）
+	iconMenuDownload    = "Pud/download.svg" // 下载记录
+	iconMenuDownloadOn  = "Pud/download.svg" // 下载记录（选中）
+	iconMenuSettings    = "Pud/settings.svg" // 设置
+	iconMenuSettingsOn  = "Pud/settings.svg" // 设置（选中）
 
 	// ── 播放条 ──
-	iconPlay       = "Media/play-circle-fill.svg"   // 播放
-	iconPause      = "Media/pause-circle-fill.svg"  // 暂停
-	iconPrev       = "Media/skip-back-fill.svg"     // 上一首
-	iconNext       = "Media/skip-forward-fill.svg"  // 下一首
-	iconStar       = "System/star-line.svg"         // 收藏（还没收藏）
-	iconStarFilled = "System/star-fill.svg"         // 收藏（已经收藏）
-	iconDownload   = "System/download-2-fill.svg"   // 下载
-	iconVolumeUp   = "Media/volume-up-line.svg"     // 音量：响
-	iconVolumeMid  = "Media/volume-down-line.svg"   // 音量：小
-	iconVolumeMute = "Media/volume-mute-line.svg"   // 音量：静音
-	iconEnqueue    = "Media/play-list-add-line.svg" // 加歌
-	iconFullscreen = "Arrows/arrow-up-s-line.svg"   // 封面上的「放大」
-	iconLike       = "System/thumb-up-line.svg"     // 赞（还没赞）
-	iconLikeFilled = "System/thumb-up-fill.svg"     // 赞（已经赞了）
+	iconPlay       = "Media/play-circle-fill.svg"  // 播放
+	iconPause      = "Media/pause-circle-fill.svg" // 暂停
+	iconPrev       = "Pud/prev.svg"                // 上一首
+	iconNext       = "Pud/next.svg"                // 下一首
+	iconStar       = "Pud/star.svg"                // 收藏（还没收藏）
+	iconStarFilled = "Pud/star-on.svg"             // 收藏（已经收藏）
+	iconDownload   = "Pud/download.svg"            // 下载
+	iconVolumeUp   = "Pud/vol.svg"                 // 音量：响
+	iconVolumeMid  = "Pud/vol-low.svg"             // 音量：小
+	iconVolumeMute = "Pud/mute.svg"                // 音量：静音
+	iconEnqueue    = "Pud/next1.svg"               // 加歌
+	iconFullscreen = "Pud/expand.svg"              // 封面上的「放大」
+	iconLike       = "Pud/thumb.svg"               // 赞（还没赞）
+	iconLikeFilled = "Pud/thumb-on.svg"            // 赞（已经赞了）
 
 	// iconPageList 是播放条上那个**分集抽屉**的入口。
 	//
@@ -109,25 +109,25 @@ const (
 	// index.tsx:10-13`），和分集这一枚**不是同一个图形**——两个按钮一个开队列、
 	// 一个开分集，用同一张图的话用户分不出哪个是哪个。改之前我们两个都用了这张
 	// `Editor/list-radio.svg`，那是一个**看得见的错**（不是「静默」的那一种）。
-	iconPageList = "Editor/list-radio.svg"
+	iconPageList = "Pud/parts.svg"
 
 	// ── 播放模式四档 ──
 	// 逐个照 Biu 的 `getPlayModeList`（`src/common/constants/audio.tsx:27-48`）：
 	// 顺序 order-play、列表循环 repeat-2、随机 shuffle、单曲 repeat-one。
-	iconModeOrder  = "Media/order-play-line.svg"
-	iconModeLoop   = "Media/repeat-2-line.svg"
-	iconModeRandom = "Media/shuffle-line.svg"
-	iconModeOne    = "Media/repeat-one-line.svg"
+	iconModeOrder  = "Pud/order.svg"
+	iconModeLoop   = "Pud/repeat.svg"
+	iconModeRandom = "Pud/shuffle.svg"
+	iconModeOne    = "Pud/repeat1.svg"
 
 	// ── 顶栏 ──
 	// ⚠️ 后退 / 前进 **故意不在这一列**：那两个是框架的 `ui.BackButton` /
 	// `ui.ForwardButton`，它带着右键的「去过那些页」列表，而要读历史得用
 	// `Router` 的私有字段（见 navbar.go 的 viewNavBack）。
-	iconSettings = "System/settings-3-line.svg"    // 设置
-	iconFolder   = "Document/folder-open-line.svg" // 打开文件
-	iconSearch   = "System/search-line.svg"        // 搜索
-	iconClose    = "System/close-line.svg"         // 清空
-	iconFeed     = "User & Faces/team-line.svg"    // 动态
+	iconSettings = "Pud/settings.svg" // 设置
+	iconFolder   = "Pud/folder.svg"   // 打开文件
+	iconSearch   = "Pud/search.svg"   // 搜索
+	iconClose    = "Pud/x.svg"        // 清空
+	iconFeed     = "Pud/bell.svg"     // 动态
 
 	// ── UP 空间头图区（票 #268）──
 	//
@@ -169,8 +169,8 @@ const (
 	// ⚠️ **这两张图是这一票引进来的**（之前 `iconset` 里没有它们）：
 	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Device/qr-code-line.svg`、
 	// `gh api repos/Remix-Design/RemixIcon/contents/icons/System/logout-circle-r-line.svg`。
-	iconLogin  = "Device/qr-code-line.svg"         // 登录（扫码）
-	iconLogout = "System/logout-circle-r-line.svg" // 退出登录
+	iconLogin  = "Device/qr-code-line.svg" // 登录（扫码；原型的 user 和 logout 在 18px 下分不开，留 Remix）
+	iconLogout = "Pud/logout.svg"          // 退出登录
 
 	// iconLoginCircle / iconLogoutCircle 是上游原来那**一对**（圆圈里一支箭头，
 	// 一个朝右一个朝左）。顶栏上那两枚**不用**它们——理由在上面那一段——但
@@ -209,23 +209,23 @@ const (
 	//
 	// ⚠️ **这张图是这一票引进来的**（之前 `iconset` 里没有它）：
 	// `gh api repos/Remix-Design/RemixIcon/contents/icons/Media/play-list-line.svg`。
-	iconQueue = "Media/play-list-line.svg" // 播放列表（抽屉的开关）
+	iconQueue = "Pud/queue.svg" // 播放列表（抽屉的开关）
 
 	// ── 队列抽屉头 ──
 	// 逐字照 Biu 的 `components/music-playlist-drawer/index.tsx:137-141`：
 	// `RiFocus3Line`（定位当前播放）/ `RiDeleteBinLine`（清空播放列表）。
-	iconLocate = "Design/focus-3-line.svg"    // 定位当前播放
-	iconDelete = "System/delete-bin-line.svg" // 清空队列
+	iconLocate = "Design/focus-3-line.svg" // 定位当前播放
+	iconDelete = "Pud/trash.svg"           // 清空队列
 
 	// iconPlayFill 是队列行悬停时封面上的那一枚播放三角，逐字照上游
 	// `music-playlist-drawer/list-item.tsx` 的 `<RiPlayFill size={20}/>`。
 	//
 	// ⚠️ **不是播放条那一枚** `play-circle-fill`：那一枚带着一圈圆底，缩到 20
 	// 像素再压在 35% 的黑色蒙层上会糊成一团；上游这里用的就是一枚光三角。
-	iconPlayFill = "Media/play-fill.svg"
+	iconPlayFill = "Pud/play.svg"
 	// iconPauseFill 是主播放键在「正在放」时画的那一枚暂停（两道竖条）。
 	// 设计规范 §5：主播放键是实心强调色圆形，里面是实心的 `play.fill` / `pause.fill`。
-	iconPauseFill = "Media/pause-fill.svg"
+	iconPauseFill = "Pud/pause.svg"
 
 	// ⚠️ **头像那一格故意不在这一列。** #115（真实头像与未登录形态）把它整个
 	// 重做成了三档——真图 / 出问题的人形 / 等着的人形——而那个人形是
@@ -261,7 +261,7 @@ const (
 	iconEmptyUser     = "User & Faces/user-line.svg"           // UP 主空间：一个人
 	iconEmptyLyrics   = "Media/mic-line.svg"                   // 歌词：一只麦克风
 	iconEmptyLogin    = "User & Faces/account-circle-line.svg" // 没登录：一个头像位
-	iconEmptySearch   = "System/search-line.svg"               // 搜索：一只放大镜
+	iconEmptySearch   = "Pud/search.svg"                       // 搜索：一只放大镜
 	iconEmptyFeed     = "User & Faces/team-line.svg"           // 动态：一群人在说话
 	iconEmptyDownload = "System/download-2-fill.svg"           // 下载记录：一只下箭头
 
@@ -316,55 +316,55 @@ const (
 	//
 	// 线框那版（`more-2-line`）的三个点是 24 见方里半径 1.5 的圆——画成 16 像素
 	// 就是**三个 2 像素的斑点**，和旁边那个 12 像素的时长数字一样重。
-	iconMore       = iconset.MoreVertical                  // 每一行的操作（⋮，实心那一版）
-	iconMoreFilled = "System/more-fill.svg"                // 操作（实心，横着的另一版）
-	iconMoreLine   = "System/more-2-line.svg"              // 操作（线框那一版：备着，不摆）
-	iconViewGrid   = "Design/layout-grid-line.svg"         // 网格档
-	iconViewList   = "Editor/list-check-2.svg"             // 列表档
-	iconGrid       = "Design/grid-line.svg"                // 网格
-	iconFolderAdd  = "Document/folder-add-line.svg"        // 新建收藏夹
-	iconEdit       = "Design/edit-line.svg"                // 编辑
-	iconEditBox    = "Design/edit-box-line.svg"            // 编辑（框起来那一版）
-	iconCalendar   = "Business/calendar-line.svg"          // 日期 / 日期范围
-	iconExpand     = "Arrows/expand-diagonal-line.svg"     // 放大
-	iconShrinkBack = "Arrows/expand-diagonal-2-line.svg"   // 还原
-	iconPiP        = "Media/picture-in-picture-2-line.svg" // 画中画
-	iconPalette    = "Design/palette-line.svg"             // 皮肤（主题方案）
-	iconRefresh    = "System/refresh-line.svg"             // 刷新
-	iconExternal   = "Arrows/arrow-right-up-line.svg"      // 外链（在 B 站打开）
-	iconEye        = "System/eye-line.svg"                 // 显示
-	iconEyeOff     = "System/eye-off-line.svg"             // 隐藏
-	iconWarning    = "System/error-warning-line.svg"       // 感叹号 / 警告
-	iconQuestion   = "System/question-line.svg"            // 问号（帮助）
-	iconImport     = "System/import-line.svg"              // 导入
-	iconExport     = "System/export-line.svg"              // 导出
+	iconMore       = iconset.MoreVertical                // 每一行的操作（⋮，实心那一版）
+	iconMoreFilled = "Pud/more.svg"                      // 操作（实心，横着的另一版）
+	iconMoreLine   = "System/more-2-line.svg"            // 操作（线框那一版：备着，不摆）
+	iconViewGrid   = "Design/layout-grid-line.svg"       // 网格档
+	iconViewList   = "Editor/list-check-2.svg"           // 列表档
+	iconGrid       = "Design/grid-line.svg"              // 网格
+	iconFolderAdd  = "Document/folder-add-line.svg"      // 新建收藏夹
+	iconEdit       = "Design/edit-line.svg"              // 编辑
+	iconEditBox    = "Design/edit-box-line.svg"          // 编辑（框起来那一版）
+	iconCalendar   = "Pud/calendar.svg"                  // 日期 / 日期范围
+	iconExpand     = "Pud/expand.svg"                    // 放大
+	iconShrinkBack = "Arrows/expand-diagonal-2-line.svg" // 还原
+	iconPiP        = "Pud/mini.svg"                      // 画中画
+	iconPalette    = "Pud/palette.svg"                   // 皮肤（主题方案）
+	iconRefresh    = "Pud/refresh.svg"                   // 刷新
+	iconExternal   = "Pud/open.svg"                      // 外链（在 B 站打开）
+	iconEye        = "System/eye-line.svg"               // 显示
+	iconEyeOff     = "System/eye-off-line.svg"           // 隐藏
+	iconWarning    = "System/error-warning-line.svg"     // 感叹号 / 警告
+	iconQuestion   = "System/question-line.svg"          // 问号（帮助）
+	iconImport     = "Pud/import.svg"                    // 导入
+	iconExport     = "System/export-line.svg"            // 导出
 	// iconAdd 既是「关注」也是「新建收藏夹」那枚加号——上游两处用的是同一个
 	// `RiAddLine`（`music-list-item` 和 `side/collection`），而 `icons.go` 一个
 	// 文件一个名字，所以只留一个。
-	iconAdd        = "System/add-line.svg"      // 加（关注 / 新建收藏夹）
-	iconFollowDone = "System/check-line.svg"    // 已关注
-	iconMoon       = "Weather/moon-line.svg"    // 深色
-	iconSun        = "Weather/sun-line.svg"     // 浅色
+	iconAdd        = "Pud/plus.svg"             // 加（关注 / 新建收藏夹）
+	iconFollowDone = "Pud/check.svg"            // 已关注
+	iconMoon       = "Pud/moon.svg"             // 深色
+	iconSun        = "Pud/sun.svg"              // 浅色
 	iconComputer   = "Device/computer-line.svg" // 跟随系统（一台显示器）
 	// iconClock 是「定时」那一档的钟。它和 `iconEmptyLater`（稍后再看）共用同一张
 	// SVG（`System/time-line.svg`）——一个文件一个名字的规矩下，各用途给各自的
 	// 名字：别在主题那排写 `iconEmptyLater`，那个名字说的是另一件事。
-	iconClock      = "System/time-line.svg"          // 定时主题：一个钟
-	iconDisk       = "Device/hard-drive-2-line.svg"  // 磁盘
-	iconDeleteBin5 = "System/delete-bin-5-line.svg"  // 删除（另一版）
-	iconBookmark   = "Business/bookmark-line.svg"    // 书签
-	iconInbox      = "Business/inbox-line.svg"       // 收件箱
-	iconChart      = "Business/bar-chart-2-line.svg" // 统计
+	iconClock      = "System/time-line.svg"         // 定时主题：一个钟
+	iconDisk       = "Device/hard-drive-2-line.svg" // 磁盘
+	iconDeleteBin5 = "Pud/trash.svg"                // 删除（另一版）
+	iconBookmark   = "Business/bookmark-line.svg"   // 书签
+	iconInbox      = "Business/inbox-line.svg"      // 收件箱
+	iconChart      = "Pud/stats.svg"                // 统计
 
 	// ── 导航、方向、展开收起 ────────────────────────────────────────────
-	iconPrevEpisode   = "Arrows/arrow-left-line.svg"       // 上一集
-	iconNextEpisode   = "Arrows/arrow-right-line.svg"      // 下一集
-	iconGoBack        = "Arrows/arrow-go-back-line.svg"    // 后退
-	iconGoForward     = "Arrows/arrow-go-forward-line.svg" // 前进
-	iconSideCollapse  = "Arrows/arrow-left-s-line.svg"     // 侧栏收起
-	iconSideExpand    = "Arrows/arrow-right-s-line.svg"    // 侧栏展开
-	iconChevronDown   = "Arrows/arrow-down-s-line.svg"     // 向下展开
-	iconChevronUp     = "Arrows/arrow-up-s-line.svg"       // 向上收起
+	iconPrevEpisode   = "Pud/left.svg"                     // 上一集
+	iconNextEpisode   = "Pud/right.svg"                    // 下一集
+	iconGoBack        = "Pud/left.svg"                     // 后退
+	iconGoForward     = "Pud/right.svg"                    // 前进
+	iconSideCollapse  = "Pud/left.svg"                     // 侧栏收起
+	iconSideExpand    = "Pud/right.svg"                    // 侧栏展开
+	iconChevronDown   = "Pud/down.svg"                     // 向下展开
+	iconChevronUp     = "Pud/up.svg"                       // 向上收起
 	iconDropDown      = "Arrows/arrow-drop-down-line.svg"  // 下拉
 	iconDropUp        = "Arrows/arrow-drop-up-line.svg"    // 上拉
 	iconDownloadArrow = "Arrows/arrow-right-down-line.svg" // 下载（带箭头那一版）
@@ -373,20 +373,20 @@ const (
 	iconToTop          = list.BackToTopIcon                // 回到顶部
 	iconToTopLeft      = "Arrows/arrow-left-up-line.svg"   // 左上
 	iconToBottomLeft   = "Arrows/arrow-left-down-line.svg" // 左下
-	iconDrag           = "Arrows/drag-move-2-line.svg"     // 拖动
+	iconDrag           = "Pud/grip.svg"                    // 拖动
 	iconFullscreenLine = "Media/fullscreen-line.svg"       // 全屏
 
 	// ── 文件、媒体、其余 ────────────────────────────────────────────────
-	iconImageAdd      = "Media/image-add-line.svg"              // 添加封面
-	iconVideo         = "Media/video-line.svg"                  // 视频
+	iconImageAdd      = "Pud/image.svg"                         // 添加封面
+	iconVideo         = "Pud/video.svg"                         // 视频
 	iconHeadphone     = "Media/headphone-line.svg"              // 耳机
 	iconMovie         = "Media/movie-line.svg"                  // 影片
 	iconSleep         = "Weather/moon-line.svg"                 // 睡眠定时
-	iconEqualizer     = "Media/equalizer-line.svg"              // 正在放（跳动的波形）
+	iconEqualizer     = "Pud/eq.svg"                            // 正在放（跳动的波形）
 	iconStop          = "Media/stop-circle-line.svg"            // 停止
-	iconBell          = "Media/notification-line.svg"           // 通知
+	iconBell          = "Pud/bell.svg"                          // 通知
 	iconFileMusic     = "Document/file-music-line.svg"          // 音乐文件
-	iconFileList      = "Document/file-list-2-line.svg"         // 文件清单
+	iconFileList      = "Pud/menu.svg"                          // 文件清单
 	iconFileAdd       = "Document/file-add-line.svg"            // 添加文件
 	iconFileSheet     = "Document/file-excel-2-line.svg"        // 清单表
 	iconDraft         = "Document/draft-line.svg"               // 草稿
@@ -397,7 +397,7 @@ const (
 	iconUnchecked     = "System/checkbox-blank-circle-line.svg" // 未选
 	iconZoomIn        = "System/zoom-in-line.svg"               // 放大
 	iconZoomOut       = "System/zoom-out-line.svg"              // 缩小
-	iconInfo          = "System/information-line.svg"           // 信息
+	iconInfo          = "Pud/info.svg"                          // 信息
 	iconCloseFilled   = "System/close-circle-fill.svg"          // 关闭（实心）
 	iconTip           = "Others/lightbulb-line.svg"             // 提示
 	iconUser          = "User & Faces/user-line.svg"            // 用户
@@ -412,6 +412,87 @@ const (
 // ⚠️ **数表，别数注释**：视觉调研记的是上游用了「约 105 个 remixicon」，而我们
 // 这一票补到与它相当（`TestTheIconSetIsNotSlimmerThanBiu` 钉的就是「不小于 105
 // 个**文件**」这一位）。注释里曾经写着 26，那是补之前的数。
+// 「深夜唱片行」原型图标（DESIGN.md §0′）：原型 `app.js` 的 `ICONS`，24×24 描边
+// SVG（stroke 1.7、圆头圆角、`currentColor`），由 T0 逐个生成进
+// `iconset/icons/Pud/`。`*-on` 是「已选中」那一版（心 / 星 / 赞把形状填满，原型
+// `.heart-on .od-icon path { fill: currentColor }`）。
+//
+// 新写的界面一律用这一组：`icon(pudHeart)`。上面那些按用途起名的常量里，原型
+// 有对应图形的已经指到这一组（例如 `iconPrev` → `Pud/prev.svg`），原型没有的
+// 仍是 Remix。
+const (
+	pudBell      = "Pud/bell.svg"
+	pudCalendar  = "Pud/calendar.svg"
+	pudCheck     = "Pud/check.svg"
+	pudCmd       = "Pud/cmd.svg"
+	pudComment   = "Pud/comment.svg"
+	pudCopy      = "Pud/copy.svg"
+	pudDanmaku   = "Pud/danmaku.svg"
+	pudDisc      = "Pud/disc.svg"
+	pudDown      = "Pud/down.svg"
+	pudDownload  = "Pud/download.svg"
+	pudEq        = "Pud/eq.svg"
+	pudExpand    = "Pud/expand.svg"
+	pudFolder    = "Pud/folder.svg"
+	pudGlobe     = "Pud/globe.svg"
+	pudGrip      = "Pud/grip.svg"
+	pudHeart     = "Pud/heart.svg"
+	pudHeartOn   = "Pud/heart-on.svg"
+	pudHistory   = "Pud/history.svg"
+	pudImage     = "Pud/image.svg"
+	pudImport    = "Pud/import.svg"
+	pudInfo      = "Pud/info.svg"
+	pudKeyboard  = "Pud/keyboard.svg"
+	pudLater     = "Pud/later.svg"
+	pudLeft      = "Pud/left.svg"
+	pudLink      = "Pud/link.svg"
+	pudLock      = "Pud/lock.svg"
+	pudLogout    = "Pud/logout.svg"
+	pudLyrics    = "Pud/lyrics.svg"
+	pudMenu      = "Pud/menu.svg"
+	pudMini      = "Pud/mini.svg"
+	pudMinus     = "Pud/minus.svg"
+	pudMoon      = "Pud/moon.svg"
+	pudMore      = "Pud/more.svg"
+	pudMute      = "Pud/mute.svg"
+	pudNext      = "Pud/next.svg"
+	pudNext1     = "Pud/next1.svg"
+	pudOpen      = "Pud/open.svg"
+	pudOrder     = "Pud/order.svg"
+	pudPalette   = "Pud/palette.svg"
+	pudParts     = "Pud/parts.svg"
+	pudPause     = "Pud/pause.svg"
+	pudPlay      = "Pud/play.svg"
+	pudPlus      = "Pud/plus.svg"
+	pudPrev      = "Pud/prev.svg"
+	pudQueue     = "Pud/queue.svg"
+	pudRefresh   = "Pud/refresh.svg"
+	pudRepeat    = "Pud/repeat.svg"
+	pudRepeat1   = "Pud/repeat1.svg"
+	pudRight     = "Pud/right.svg"
+	pudSearch    = "Pud/search.svg"
+	pudSelect    = "Pud/select.svg"
+	pudSettings  = "Pud/settings.svg"
+	pudShuffle   = "Pud/shuffle.svg"
+	pudSort      = "Pud/sort.svg"
+	pudStar      = "Pud/star.svg"
+	pudStarOn    = "Pud/star-on.svg"
+	pudStats     = "Pud/stats.svg"
+	pudSun       = "Pud/sun.svg"
+	pudThumb     = "Pud/thumb.svg"
+	pudThumbOn   = "Pud/thumb-on.svg"
+	pudTranslate = "Pud/translate.svg"
+	pudTrash     = "Pud/trash.svg"
+	pudUp        = "Pud/up.svg"
+	pudUser      = "Pud/user.svg"
+	pudUsers     = "Pud/users.svg"
+	pudVideo     = "Pud/video.svg"
+	pudVol       = "Pud/vol.svg"
+	// pudVolLow 是 vol 去掉外面那一道弧（原型只有 vol / mute 两档，音量小那一档由 T0 从 vol 派生）。
+	pudVolLow = "Pud/vol-low.svg"
+	pudX      = "Pud/x.svg"
+)
+
 var iconNames = []string{
 	// 侧栏菜单
 	iconMenuRecommend, iconMenuRecommendOn,
@@ -475,6 +556,9 @@ var iconNames = []string{
 
 	// 歌词右下角那三枚旋钮
 	iconLyricFontSize, iconLyricOffset, iconLyricSearch,
+
+	// 原型图标（Pud/）
+	pudBell, pudCalendar, pudCheck, pudCmd, pudComment, pudCopy, pudDanmaku, pudDisc, pudDown, pudDownload, pudEq, pudExpand, pudFolder, pudGlobe, pudGrip, pudHeart, pudHeartOn, pudHistory, pudImage, pudImport, pudInfo, pudKeyboard, pudLater, pudLeft, pudLink, pudLock, pudLogout, pudLyrics, pudMenu, pudMini, pudMinus, pudMoon, pudMore, pudMute, pudNext, pudNext1, pudOpen, pudOrder, pudPalette, pudParts, pudPause, pudPlay, pudPlus, pudPrev, pudQueue, pudRefresh, pudRepeat, pudRepeat1, pudRight, pudSearch, pudSelect, pudSettings, pudShuffle, pudSort, pudStar, pudStarOn, pudStats, pudSun, pudThumb, pudThumbOn, pudTranslate, pudTrash, pudUp, pudUser, pudUsers, pudVideo, pudVol, pudVolLow, pudX,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。

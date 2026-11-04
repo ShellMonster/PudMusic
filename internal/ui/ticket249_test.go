@@ -59,10 +59,10 @@ import (
 //
 // ⚠️ **只画顶栏**：整窗里「登录」这两个字在别处也有（侧栏那一行），而
 // `Tester.Find` 认的是**先画的那个**——画整窗的话量到的是别处那一枚。
-func navBarShell(t *testing.T, preset app.ThemePreset, dark bool) (*Shell, *mygoui.Tester) {
+func navBarShell(t *testing.T, preset app.Accent, dark bool) (*Shell, *mygoui.Tester) {
 	t.Helper()
 	st := app.DefaultSettings("")
-	st.ThemePreset = preset
+	st.Accent = preset
 	b := newTestShell(t, withSettings(st), systemIsDark(dark), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
 			s.wake.set(c)
@@ -80,10 +80,10 @@ func navBarShell(t *testing.T, preset app.ThemePreset, dark bool) (*Shell, *mygo
 //
 // 深浅两套由 `systemIsDark` 决定——主色当字色那一档（`ink.AccentOn`）深浅两个
 // 不同的数，所以这一族必须两套都跑。
-func drawerShell(t *testing.T, preset app.ThemePreset, dark bool) *harness {
+func drawerShell(t *testing.T, preset app.Accent, dark bool) *harness {
 	t.Helper()
 	st := app.DefaultSettings("")
-	st.ThemePreset = preset
+	st.Accent = preset
 	b := newTestShell(t, withSettings(st), at(winW, winH), systemIsDark(dark))
 	h := &harness{app: b.a, tt: b.tt, s: b.s}
 	second := app.Item{
@@ -112,7 +112,7 @@ func TestTheTopBarIconKeysTurnAccentOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			s, tt := navBarShell(t, app.DefaultThemePreset, dark)
+			s, tt := navBarShell(t, app.DefaultAccent, dark)
 			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
 
 			for _, label := range []string{"打开文件", "迷你", "动态"} {
@@ -152,7 +152,7 @@ func TestTheQueueDrawerHeaderKeysTurnAccentOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			h := drawerShell(t, app.DefaultThemePreset, dark)
+			h := drawerShell(t, app.DefaultAccent, dark)
 			s, tt := h.s, h.tt
 			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
 
@@ -189,7 +189,7 @@ func TestTheQueueDrawerHeaderKeysTurnAccentOnHover(t *testing.T) {
 // ⚠️ **旧名字不许再出现**：它一屏 N 枚，而「看起来名字改对了」和「名字还在」在
 // 画面上长得一模一样——所以这里把旧名字也钉住。
 func TestTheQueueRowOperationKeyIsNamedAfterItsSong(t *testing.T) {
-	h := drawerShell(t, app.DefaultThemePreset, false)
+	h := drawerShell(t, app.DefaultAccent, false)
 
 	label := list.OperationLabel("队列里的第二首")
 	if _, ok := h.tt.Find(label); !ok {
@@ -227,7 +227,7 @@ func TestTheQueueRowOperationKeyIsNamedAfterItsSong(t *testing.T) {
 // ⚠️ **先确认按歌名找到的真是行**（高 64）：不是行的话下面那条量到的就是别的
 // 东西——**宁可当场红，也不要一条永远绿的断言**。
 func TestTheQueueRowOperationKeyIsThirtyTwoSquare(t *testing.T) {
-	h := drawerShell(t, app.DefaultThemePreset, false)
+	h := drawerShell(t, app.DefaultAccent, false)
 
 	op, ok := h.tt.Find(list.OperationLabel("队列里的第二首"))
 	if !ok || op.W == 0 {
@@ -284,7 +284,7 @@ func TestTheQueueRowOperationKeyTurnsAccentOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			h := drawerShell(t, app.DefaultThemePreset, dark)
+			h := drawerShell(t, app.DefaultAccent, dark)
 			s, tt := h.s, h.tt
 			th := BuildTheme(s.app.SettingsSnapshot(), dark)
 			want := ink.AccentOn(th)
@@ -299,19 +299,24 @@ func TestTheQueueRowOperationKeyTurnsAccentOnHover(t *testing.T) {
 			tt.Move(100, 100)
 			tt.Frame()
 			before := nearestPixel(tt.Image(), op, want)
+			// 「像不像正文色」用同一把尺子从正文色那一头量：取最接近正文色的那个像素。
+			// （深色 --bg #0E0F11 很黑，最接近主色的那个像素是一块灰的抗锯齿边，拿它
+			// 和正文色比说明不了图形是不是正文色。）
+			beforeText := nearestPixel(tt.Image(), op, th.Text)
 			// 指针落到它上面。
 			tt.Move(op.X+op.W/2, op.Y+op.H/2)
 			tt.Frame()
 			after := nearestPixel(tt.Image(), op, want)
+			afterText := nearestPixel(tt.Image(), op, th.Text)
 
 			if colorDist(after, target) >= colorDist(before, target) {
 				t.Errorf("「⋯」悬停之后离主色 %v 反倒更远了（%v → %v）——"+
 					"图形没有变主色，指针落在它上面和落在整行上分不出来",
 					target, before, after)
 			}
-			if colorDist(after, textc) <= colorDist(before, textc) {
+			if colorDist(afterText, textc) <= colorDist(beforeText, textc) {
 				t.Errorf("「⋯」悬停之后离正文色 %v 反而更近了（%v → %v）——"+
-					"图形还是正文色的，没有换成主色", textc, before, after)
+					"图形还是正文色的，没有换成主色", textc, beforeText, afterText)
 			}
 		})
 	}
@@ -392,7 +397,7 @@ func TestTheNewMusicPagerTurnsAccentOnHover(t *testing.T) {
 // 走的是 `mygo.App.WhenReady`）。这两枚的「点了还是原来那件事」由**提示文案**
 // 加上代码里那一句 `Clicked()` 兜着——换的是按钮的配方，不是那一行。
 func TestTheTopBarKeysKeepTheirTipsAndNames(t *testing.T) {
-	s, tt := navBarShell(t, app.DefaultThemePreset, false)
+	s, tt := navBarShell(t, app.DefaultAccent, false)
 
 	for _, want := range []struct{ key, tip string }{
 		{"迷你", "迷你播放器"},

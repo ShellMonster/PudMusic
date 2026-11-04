@@ -9,8 +9,6 @@ package ui
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -221,28 +219,6 @@ func (s *Shell) pickDisplayMode(c *ui.Context, st app.Settings, ro bool) {
 		})
 }
 
-// pickRadius 是全局圆角：一个滑块加一个 px 读数。
-//
-// 拖动时每一帧都是一次改动，落盘在后台合并成一次（`writeDebounce`，见
-// internal/app/settings.go），不是一帧写一遍盘。读数显示的是这一帧拖到的值，
-// 不是设置里还存着的旧值——慢一帧的话读数会一直追不上手指。
-func (s *Shell) pickRadius(c *ui.Context, st app.Settings, ro bool) {
-	v := st.BorderRadius
-	// 套了方案时，滑块显示方案真在用的圆角，而不是被压过的设置值。
-	if st.ThemePreset != app.ThemePresetClassic {
-		v = float64(c.Theme().Radius)
-	}
-	ui.Row(c).Key("setting:borderRadius").Width(s.settingsControlFitW(c, settingsControlW)).
-		Gap(space.Px12).
-		AlignItems(ui.Center).Children(func() {
-		sl := ui.Slider(c, &v, 0, app.MaxBorderRadius).Grow(1).Label("全局圆角").Disabled(ro)
-		if sl.Changed() {
-			s.applySetting("圆角", func(cur *app.Settings) { cur.BorderRadius, cur.ThemePreset = v, app.ThemePresetClassic })
-		}
-		ui.Textf(c, "%.0fpx", v).FontSize(scale.Font(c, scale.Size12)).Width(radiusReadoutW)
-	})
-}
-
 // pickAudioQuality 是音质那个下拉。
 func (s *Shell) pickAudioQuality(c *ui.Context, st app.Settings, ro bool) {
 	items := make([]enumItem[app.AudioQuality], len(audioQualities))
@@ -369,126 +345,6 @@ var pathField = func(c *ui.Context, path, label string, ro bool) {
 //
 // 上游是 100：它那一行的格子也就是它自己的宽度，而**色块是纯色**——宽一点
 // 不损失任何信息（颜色还是那个颜色），换来的是这一行和上面几行一样齐。
-const (
-	colorItemGap    = space.Px12
-	colorItemHeight = 40
-)
-
-// colorItemWidth 是**一块**色卡多宽：那一格 340 宽，中间 12 的缝。
-const colorItemWidth = (settingsControlW - colorItemGap) / 2
-
-// pickColors 是背景色和主色那两块。照 Biu 的 `ColorSettings`：两块并排。
-//
-// ⚠️ **两块是并排铺满控件列那一格的**（各占一半，中间 12 的缝），不是上游那个
-// 100 宽各自一块：这一行里只有它们，不铺满的话这一行的右边缘就比上面那几行
-// 短一截（UI 报告 §4 的 F-04）。
-//
-// ⚠️ **宽度走 `settingsControlFitW`**：色卡是定宽的两块，窄窗口那一档不钳的话
-// 会和下拉一样溢出分组卡片。
-//
-// ⚠️ **两列顶对齐**（`AlignItems(ui.Start)`）：这一行的 Row 默认把子项**垂直
-// 居中**，而「用默认」只出现在自定义过的那块底下——只有一块有它的时候，另一块
-// 整列被居中得往下挪（2026-10-26 用户截图实测挪了 14 像素，两块色卡一高一低）。
-// 顶对齐之后色卡永远齐着，多出来的「用默认」只在底下多占一行。
-//
-// 背景色的默认值是**空串**，意思是「跟着主题走」。Biu 那一格在值为空时显示的是
-// 当前主题的背景色（`pickerValue = isHex(value) ? value : backgroundColor`），
-// 点开挑色才写进去——照抄。标签行上另加一个「用默认」，Biu 没有那个出口：挑过一
-// 次之后就再也回不到「跟着主题走」，而那正是多数人想要的常态。
-func (s *Shell) pickColors(c *ui.Context, st app.Settings, ro bool) {
-	// 「当前主题的背景色」就是这一帧真在画的那份——ApplyTheme 在 view 最开头
-	// 已经装好了，所以 `c.Theme()` 读到的就是它，不用再拼一遍。
-	dark := c.Theme().Dark
-	ui.Row(c).Key("setting:colors").Width(s.settingsControlFitW(c, settingsControlW)).
-		Gap(colorItemGap).AlignItems(ui.Start).Children(func() {
-		bg := pick(st.BackgroundColor != "", st.BackgroundColor, themeBackground(dark))
-		// 套了方案时，色块要显示**方案真在画的色**，不是设置里那两个已被压过的值——
-		// 否则暖纸底上摆着一块白、一块 Biu 绿，用户以为那就是当前配色。
-		if st.ThemePreset != app.ThemePresetClassic {
-			bg = toHex(c.Theme().Background)
-		}
-		s.colorItem(c, "背景", bg, ro, st.BackgroundColor != "", func(col string) {
-			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = col, app.ThemePresetClassic })
-		}, func() {
-			s.applySetting("背景色", func(cur *app.Settings) { cur.BackgroundColor, cur.ThemePreset = "", app.ThemePresetClassic })
-		})
-
-		primary := pick(st.PrimaryColor != app.DefaultPrimaryColor,
-			st.PrimaryColor, app.DefaultPrimaryColor)
-		if st.ThemePreset != app.ThemePresetClassic {
-			primary = toHex(c.Theme().Accent)
-		}
-		s.colorItem(c, "主色", primary, ro, st.PrimaryColor != app.DefaultPrimaryColor,
-			func(col string) {
-				s.applySetting("主色", func(cur *app.Settings) { cur.PrimaryColor, cur.ThemePreset = col, app.ThemePresetClassic })
-			}, func() {
-				s.applySetting("主色", func(cur *app.Settings) {
-					cur.PrimaryColor, cur.ThemePreset = app.DefaultPrimaryColor, app.ThemePresetClassic
-				})
-			})
-	})
-}
-
-// colorItem 是一块颜色：一个**全出血的色块** + 底下一行「标签 / 用默认」。
-//
-// # 色块就是取色板本身
-//
-// 画它的是 `ui.ColorWell`：点它在自己的下面摆出 AppKit 那样的取色板（色相方块 +
-// 亮度条 + 不透明度 + 手写 hex + 常用色），Esc 或者点外面关掉，`.Changed()` 报
-// 新颜色。但框架的 ColorWell 自带一层「输入框」的壳——`t.Surface` 底、1px 描边、
-// 中间一颗 36×20 的小色块（`mygo/ui/colorpicker.go` 的 `coreColorWell`）——
-// 此前把套在一张色卡里面，那层壳把色卡的底色整个盖住，画面上是**两个输入框、
-// 每个中间一小块颜色**，看不出是色卡（2026-10-26 用户原话：「一堆省略号看不出
-// 是啥」那一张截图的下半截）。
-//
-// 现在反过来：**链 `.Background(col)` 把壳的底色换成这个颜色本身**，色块
-// 从头到脚都是它，中间那颗小色块同色相融（不透明色看不出来；半透明色的中间
-// 会露出取色板的棋盘格，正好当「这一格带透明度」的提示）。
-//
-// ⚠️ **允许写 `#rgb` / `#rgba` 的问题**：取色板允许写 3/4 位 hex，而设置那边的
-// normalize 只认 6 位和 8 位（`internal/app/settings.go` 的 hexColor）——所以
-// 写进去之前统一补齐成 6 位，不补的话用户挑了个 `#f00`，落盘时被 normalize
-// 悄悄换回默认色，而界面上还亮着他刚挑的那个颜色。
-//
-// # 「用默认」和标签同一行
-//
-// 两列的结构因此**永远一样**（色块 + 一行字），不管哪块自定义过、哪块没有——
-// 「用默认」单独占一行的话，只有一块出现它，两列就不一样高（这一行的 Row 又
-// 是居中对齐的，色卡会一高一低）。那一行左边是标签（12 / 次要色），右边是
-// 「用默认」（11 / 次要色），只在**自定义过**且**不只读**时出现。
-func (s *Shell) colorItem(c *ui.Context, label, hex string, ro, overridden bool, set func(string), reset func()) {
-	t := c.Theme()
-	col := colorOfHex(hex)
-	ui.Column(c).Grow(1).MaxWidth(colorItemWidth).Gap(space.Px4).Children(func() {
-		// ⚠️ **那一圈影是上游给的**：Biu 那一格是一张 HeroUI 的卡（描边 +
-		// `shadow="sm"`）。HeroUI 的 `shadow="sm"` 深浅两套值不一样（见
-		// `widgets/shadow` 的文件头）：浅色那套是 1 像素的**外**黑边，深色那套
-		// 是 1 像素的**内**白边——深底上黑边看不见，那道白边就是这张卡和底下
-		// 那一页之间的分界。
-		well := ui.ColorWell(c, &col).FillWidth().Height(colorItemHeight).
-			Background(col).Radius(t.Radius).Border(1, t.Border)
-		well = shadow.HeroSmall(well, t)
-		well = shadow.HeroInnerRim(well, t)
-		well.Label(label).Disabled(ro)
-		if well.Changed() {
-			set(toHex(col))
-		}
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-			if overridden && !ro {
-				// ⚠️ **按钮的垂直内边距收成 0**：它和标签同行，行高由最高那个孩子
-				// 决定——留着 flatButton 默认那 6×2 的垂直内边距，这一行会比另一块
-				// 色卡的标签行高出一截，行内的标签被居中得往下挪，两块色卡的标签
-				// 基线就错开了（实测 5 像素）。收成 0 之后按钮的盒子和标签一样高，
-				// 两行同高、基线齐。
-				if flatButton(c, "用默认").FontSize(scale.Font(c, scale.Size11)).
-					Padding(space.None, space.Px10).TextColor(t.TextMuted).Clicked() {
-					reset()
-				}
-			}
-		})
-	})
-}
 
 // colorOfHex 把设置里那个字符串变成一个颜色，认不出就退回不透明的黑。
 //
@@ -500,14 +356,6 @@ func colorOfHex(s string) ui.Color {
 		return col
 	}
 	return ui.Color{A: 255}
-}
-
-// themeBackground 是深浅两档各自默认的背景色。
-func themeBackground(dark bool) string {
-	if dark {
-		return "#18181b"
-	}
-	return "#ffffff"
 }
 
 // toHex 把一个颜色写成设置里存的那个串。

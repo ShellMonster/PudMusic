@@ -289,6 +289,9 @@ func TestTheGapBetweenTheTitleAndTheOwnerName(t *testing.T) {
 //
 // 实测（深浅两套一样）：18 那一档的墨迹是 分集 19×18、收藏 22×21、赞 22×20；
 // 14 那一档是 16×16、18×17、18×17。门槛定在 19：两头都离得开。
+//
+// 2026-11 换成原型的描边图标（24 的格子里留了边）：18 那一档墨迹 18×16 / 18×18，
+// 14 那一档约 13×12——门槛改成 16，仍把两档分开。
 func TestTheThreeLeftKeysUseTheUpstreamIconSize(t *testing.T) {
 	tt, _ := leftBarTester(t, multiPages(), 1200)
 
@@ -297,9 +300,9 @@ func TestTheThreeLeftKeysUseTheUpstreamIconSize(t *testing.T) {
 		if g.ink == "" {
 			t.Fatalf("%q 那一块没画东西：%q", label, tt.Texts())
 		}
-		if big := max32(g.box.W, g.box.H); big < 19 {
+		if big := max32(g.box.W, g.box.H); big < 16 {
 			t.Errorf("%q 的图形是 %.0fx%.0f——上游那一枚是 18"+
-				"（实测 18 那一档是 19~22，14 那一档是 16~18）",
+				"（原型描边图标实测 18 那一档是 16~18，14 那一档约 12~13）",
 				label, g.box.W, g.box.H)
 		}
 	}

@@ -721,7 +721,7 @@ func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float3
 				imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, 60, 60)
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
-				ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size15)).FontWeight(700).SingleLine()
+				ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).SingleLine()
 				if st.Loading {
 					ui.Text(c, "正在缓冲…").FontSize(scale.Font(c, scale.Size13)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
 				} else if st.Artist != "" {

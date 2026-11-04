@@ -51,7 +51,7 @@ func TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T) {
 	// 那才是用户看见的那一版界面；而**经典**是另一个用户选项，它有自己那套
 	// 配色（`themepreset_test.go` 盯着），挤缓存这件事与配色无关，但「占位那一档」
 	// 的颜色跟着主题走，所以两套都跑（票面点名要「至少再验一套非经典的」）。
-	for _, preset := range []app.ThemePreset{app.ThemePresetClassic, app.ThemePresetWarmPaper} {
+	for _, preset := range []app.Accent{app.AccentIndigo, app.AccentCinnabar} {
 		t.Run(string(preset), func(t *testing.T) {
 			openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t, preset)
 		})
@@ -60,7 +60,7 @@ func TestOpeningTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T) {
 
 // openingTheQueueDrawerDoesNotMakeTheListCoversFlash 是上面那条的本体（按主题
 // 方案各跑一遍）。
-func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app.ThemePreset) {
+func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app.Accent) {
 	body := coverJPEG(t, 1920, 1080)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(body)
@@ -87,7 +87,7 @@ func openingTheQueueDrawerDoesNotMakeTheListCoversFlash(t *testing.T, preset app
 	// 主题方案：**挂一份带方案名的设置**（设置要先挂上，`UpdateSettings` 才
 	// 有地方落——「app: 还没有挂上设置，先调 MountSettings」）。
 	st := app.DefaultSettings("")
-	st.ThemePreset = preset
+	st.Accent = preset
 	s, tt := newShell(t, withSettings(st))
 	s.home.SetSongs(songs)
 	// 切到「流行」那一档：新歌速递那一块网格只在这一档上（上游也是这么摆的）。

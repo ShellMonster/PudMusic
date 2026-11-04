@@ -700,7 +700,7 @@ func (s *Shell) viewCommentsHeader(c *ui.Context, it app.Item) {
 			// ⇒ 标题**不 `Grow`**（它自己按自然宽摆，超出那一格就省略号），
 			// 角标紧跟在它后面。
 			ui.Row(c).Grow(1).MinWidth(0).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, it.Title).FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text).
+				ui.Text(c, it.Title).FontSize(scale.Font(c, scale.Size20)).TextColor(t.Text).
 					MaxLines(1).Ellipsis("…")
 				s.viewCommentsScopeBadge(c, it)
 			})

@@ -36,8 +36,8 @@ const textBoxPerSize = 1.1767
 
 // titleSizes 是**页标题**用的那几个字号：字重**一个字都不许写**。
 //
-// ⚠️ **页标题只有两个字号**：页标题 24（`scale.PageTitle`）、空状态那一页的
-// 页面名 20（`scale.EmptyPageTitle`）。
+// ⚠️ **页标题只有两个字号**：页标题 48（`scale.PageTitle`，宋体 700 走
+// `typo.Display`）、空状态那一页的页面名 20（`scale.EmptyPageTitle`）。
 //
 // 此前这一条只钉了第一个——于是搜索页、收藏夹页、迷你播放器那几处的粗体一路漏到
 // 了今天（UI 报告 §2 的 F-07：21 处 `.Bold()` 不在刻度上）。**这条测试的覆盖面
@@ -104,19 +104,72 @@ func (sp stmtSpans) innermost(offset int) int {
 	return best
 }
 
-// TestPageTitlesAreNotBold 钉住「标题的字重是 400」。
+// TestPageTitlesAreDisplayBold 钉住「深夜唱片行」的页标题口径（DESIGN.md §0′，
+// 2026-11 用户拍板）：**48 号、宋体 700**，一律走 `typo.Display`。
 //
-// 上游的 `h1` 只写了 `text-2xl`，字重被 Tailwind 的 Preflight 重置成 inherit，
-// 也就是正文那一档——**不是加粗**（DESIGN.md 的 `typography.page_title`）。
-// 我们此前八处页标题全是 `.Bold()`（20/700），层次靠重量不靠字号。
+// 两条判据，都是 AST：
 //
-// 判据是 AST：凡是拿**标题那几个字号**当字号的那一句，里面不许出现 `Bold()` 或
-// `FontWeight(...)`。字号的精确值由 `TestEveryPageTitleUsesTheSharedSize` 钉。
+//  1. 用**页标题字号**（`scale.PageTitle`）的那一句，必须是 `typo.Display(…)`
+//     ——宋体和 700 都是它设的，别处各写各的就会漂；
+//  2. 用页标题那几个字号的那一句里**不许再写** `Bold()` / `FontWeight(...)`：
+//     字重由 `Display` 定，多写一处就是两处会各自漂开的地方。
 //
-// ⚠️ **字重不许写，连 `FontWeight(400)` 也不许**：标题的层次靠字号拉开，
-// 不靠重量——把 400 写出来只是多一处会漂的地方（它和「不写」画出来一样，
-// 但两处写法会各自漂开）。
-func TestPageTitlesAreNotBold(t *testing.T) {
+// （旧口径「页标题 24/400、不加粗」随上游 Biu 那一套一起作废。）
+func TestPageTitlesAreDisplayBold(t *testing.T) {
+	fset := token.NewFileSet()
+	matches, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range matches {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("解析 %s 失败：%v", name, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			stmt, ok := n.(ast.Stmt)
+			if !ok {
+				return true
+			}
+			if _, isExpr := stmt.(*ast.ExprStmt); !isExpr {
+				if _, isAssign := stmt.(*ast.AssignStmt); !isAssign {
+					return true
+				}
+			}
+			usesPage, inDisplay := false, false
+			ast.Inspect(stmt, func(m ast.Node) bool {
+				c, ok := m.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				switch callName(c) {
+				case "Display":
+					if len(c.Args) == 2 && mentionsIdent(c.Args[1], "PageTitle") {
+						usesPage, inDisplay = true, true
+					}
+				case "FontSize":
+					if len(c.Args) == 1 && mentionsIdent(c.Args[0], "PageTitle") {
+						usesPage = true
+					}
+				}
+				return true
+			})
+			if usesPage && !inDisplay {
+				where := fset.Position(stmt.Pos())
+				t.Errorf("%s:%d 用了页标题字号但没走 `typo.Display`——页标题是 48 宋体 700",
+					where.Filename, where.Line)
+			}
+			return true
+		})
+	}
+}
+
+// TestPageTitlesSetNoWeightOfTheirOwn 是上面那条的第 2 条判据：页标题那几个字号的
+// 那一句里不许再写 `Bold()` / `FontWeight(...)`（字重归 `typo.Display`）。
+func TestPageTitlesSetNoWeightOfTheirOwn(t *testing.T) {
 	fset := token.NewFileSet()
 	matches, err := filepath.Glob("*.go")
 	if err != nil {
@@ -166,8 +219,8 @@ func TestPageTitlesAreNotBold(t *testing.T) {
 			})
 			if hasTitle {
 				where := fset.Position(stmt.Pos())
-				t.Errorf("%s:%d 的标题调了 %s——标题是 400，字重被上游的"+
-					" Preflight 重置成 inherit，不是加粗", where.Filename, where.Line, heavy)
+				t.Errorf("%s:%d 的页标题自己写了 %s——字重由 typo.Display 定（宋体 700），"+
+					"别再写第二处", where.Filename, where.Line, heavy)
 			}
 			return true
 		})
@@ -195,6 +248,15 @@ var boldOnScale = []struct {
 		file: "collectionpage.go", mark: "CollectionTitle", count: 1,
 		why: "收藏夹 / 合集 / 系列那一页头图区的大标题：上游 `text-3xl`（30）就是粗体" +
 			"（pagerhythm.go 里写着为什么）",
+	},
+	{
+		file: "widgets/pud/button.go", mark: "Mono", count: 1,
+		why: "音质角标 HI-RES / SQ：原型 `.badge` 是 10 号等宽 700（DESIGN.md §0′）",
+	},
+	{
+		file: "widgets/typo/typo.go", mark: "DisplayFamily", count: 1,
+		why: "「深夜唱片行」的展示字体入口 `typo.Display`：20 号及以上的标题一律宋体 700" +
+			"（DESIGN.md §0′）。粗体只在这一处设，各页调它",
 	},
 	{
 		file: "sidebar.go", mark: "BrandName", count: 1,
@@ -584,9 +646,9 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 			}
 			b.s.navigate(appearancePath)
 			b.tt.Frame()
-			grpRect, grpOK := b.tt.Find("主题方案")
+			grpRect, grpOK := b.tt.Find("深浅模式")
 			if !grpOK {
-				t.Fatalf("皮肤页上找不到分组标题「主题方案」，文字有 %q", b.tt.Texts())
+				t.Fatalf("皮肤页上找不到分组标题「深浅模式」，文字有 %q", b.tt.Texts())
 			}
 
 			// 两个盒子都是文本本身的高（分组标题与卡片之间是 Gap，不在盒内）。
@@ -597,7 +659,7 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 				r    mygoui.Rect
 			}{
 				{"数据显示样式", 16, "行标题", rowRect},
-				{"主题方案", 20, "分组标题", grpRect},
+				{"深浅模式", 20, "分组标题", grpRect},
 			} {
 				got := m.r.H / textBoxPerSize
 				if math.Abs(float64(got-m.size)) > 0.8 {
@@ -833,9 +895,11 @@ func TestPagesStartAtTheTop(t *testing.T) {
 			if !ok {
 				t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
 			}
-			if top := lo - navMinHeight; top > 8 {
+			// 页标题是 48 宋体：字形上方那段行内留白随字号放大（24 号时实测 ≤ 8，
+			// 48 号时 14），判据按字号同比放到 16——它钉的仍是「页面根没有上内边距」。
+			if top := lo - navMinHeight; top > 16 {
 				t.Errorf("%s 的第一段墨从顶栏下缘往下 %d 像素开始——页面根不许有"+
-					"上内边距（上游只有 `px-4`、没有 `py`），want ≤ 8", page.name, top)
+					"上内边距（上游只有 `px-4`、没有 `py`），want ≤ 16", page.name, top)
 			}
 		})
 	}

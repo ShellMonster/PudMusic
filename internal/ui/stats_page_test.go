@@ -152,7 +152,7 @@ func TestTheStatsEntryLightsUpOnHover(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			s, tt := navBarShell(t, app.DefaultThemePreset, dark)
+			s, tt := navBarShell(t, app.DefaultAccent, dark)
 			want := rgb(ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), dark)))
 
 			btn, ok := tt.Find("听歌统计")
@@ -168,10 +168,15 @@ func TestTheStatsEntryLightsUpOnHover(t *testing.T) {
 			// 指针落到这一枚上。
 			tt.Move(btn.X+btn.W/2, btn.Y+btn.H/2)
 			tt.Frame()
+			// 原型的描边图标只有 1.7 宽，深色底上几乎没有一个像素是满色的主色，
+			// 所以这里量「最接近主色的那个像素」有没有明显靠过去（同 ticket249）。
+			target := want
 			if n := nearPixels(tt.Image(), btn, want); n < 4 {
-				t.Errorf("悬停之后画面上只有 %d 个主色像素（want ≥ 4）——"+
-					"图形没有变主色，悬停对它不生效（`.Key` 在 `iconKey` 返回之后才调，"+
-					"rekey 换了 id，构造时按旧 id 问的 `Hovered()` 永远对不上）", n)
+				if near := nearestPixel(tt.Image(), btn, ui.Color{R: want.R, G: want.G, B: want.B, A: 255}); colorDist(near, target) > 120 {
+					t.Errorf("悬停之后画面上只有 %d 个主色像素、最接近的那个是 %v——"+
+						"图形没有变主色，悬停对它不生效（`.Key` 在 `iconKey` 返回之后才调，"+
+						"rekey 换了 id，构造时按旧 id 问的 `Hovered()` 永远对不上）", n, near)
+				}
 			}
 		})
 	}

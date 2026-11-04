@@ -220,7 +220,8 @@ func coverPixelShowsTheImage(t *testing.T, s *Shell, tt *mygoui.Tester) {
 
 	// ⚠️ **判据从 `imgcache` 那一档的配方现算**，不要在这里再抄一个数：
 	// 上一版就是抄了一份 `0.5`，配方一改它静默地不再成立（永远为绿）。
-	skeleton := rgbaOf(theme.Text.Alpha(shimmer.BaseAlpha))
+	skelBase, _ := shimmer.Colors(theme)
+	skeleton := rgbaOf(skelBase)
 	if near(got, skeleton) {
 		t.Errorf("那一格画的是骨架屏（取样点 (%d,%d) 的颜色 %v 和骨架屏 %v 一样）——\n"+
 			"状态说「有图」，画面上却是占位", x, y, got, skeleton)

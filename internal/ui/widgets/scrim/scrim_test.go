@@ -34,13 +34,16 @@ func TestTheScrimValuesAreLocked(t *testing.T) {
 		"Media": 0.55, "Cover": 0.50, "Modal": 0.40, "Overlay": 0.35, "OnScrim": 0.92,
 		// 角标那一块底（视频封面右下角那个时长角标，上游 `bg-black/70`）。
 		"Badge": 0.70,
+		// 「深夜唱片行」原型的三档。
+		"Drawer": 0.32, "Dialog": 0.50, "VideoChip": 0.66,
 		// UP 空间头图区那两档（浅色 / 深色各一对）。
 		"HeaderLight": 0.30, "HeaderDark": 0.50,
 		"HeaderTextLight": 0.40, "HeaderTextDark": 0.15,
 	}
 	got := map[string]float64{
 		"Media": Media, "Cover": Cover, "Modal": Modal, "Overlay": Overlay, "OnScrim": OnScrim,
-		"Badge":       Badge,
+		"Badge":  Badge,
+		"Drawer": Drawer, "Dialog": Dialog, "VideoChip": VideoChip,
 		"HeaderLight": HeaderLight, "HeaderDark": HeaderDark,
 		"HeaderTextLight": HeaderTextLight, "HeaderTextDark": HeaderTextDark,
 	}

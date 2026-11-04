@@ -681,7 +681,7 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 				// （`fullForeground`），而不是主题的 Text / TextMuted——用主题
 				// 那两档的话，在浅色封面铺满的屏上这两行会糊进去。字号仍然是
 				// 15 / 12，和别处一样。
-				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size15)).TextColor(on)
+				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(on)
 			})
 		})
 
@@ -956,7 +956,7 @@ func (s *Shell) viewFullTopBar(c *ui.Context, st app.State, hidden bool) {
 		// 量不出 400 还是 700，能钉住的只有代码里那一个调用）。
 		//
 		// ⚠️ **别拿它当「页标题不写字重」那一档的样板**：页标题（`scale.PageTitle`）
-		// 那一档一个字重都不写（`TestPageTitlesAreNotBold` 钉着），这里是**歌名**
+		// 那一档一个字重都不写（`TestPageTitlesSetNoWeightOfTheirOwn` 钉着），这里是**歌名**
 		// 那一档，两者的判据不是同一条。
 		ui.Text(c, tclean.Clean(st.Title).Title).FontSize(scale.Font(c, scale.PlayerTitle)).FontWeight(400).TextColor(on).MaxWidth(fullTitleMaxWidth(c)).SingleLine()
 

@@ -863,7 +863,7 @@ func (s *Shell) spaceFollowButton(c *ui.Context, following bool) ui.Element {
 // 算蒙版，字色跟着主题走，方案换一套整套跟着换。
 func spaceStat(c *ui.Context, label, value string) {
 	ui.Column(c).Key("space-stat:" + label).Gap(space.Px2).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, value).FontSize(scale.Font(c, scale.Size18)).FontWeight(weightMedium)
+		ui.Text(c, value).FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
 		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted)
 	})
 }

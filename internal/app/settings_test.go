@@ -59,7 +59,7 @@ func TestSettingsSurviveARestart(t *testing.T) {
 	if _, err := st.Update(func(s *app.Settings) {
 		s.ThemeMode = app.ThemeModeDark
 		s.BorderRadius = 16
-		s.PrimaryColor = "#ff8800"
+		s.Accent = app.AccentPine
 		s.LocalMusicDirs = []string{"/music/a", "/music/b"}
 	}); err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestSettingsSurviveARestart(t *testing.T) {
 	t.Cleanup(func() { again.Close() })
 
 	got := again.Snapshot()
-	if got.ThemeMode != app.ThemeModeDark || got.BorderRadius != 16 || got.PrimaryColor != "#ff8800" {
+	if got.ThemeMode != app.ThemeModeDark || got.BorderRadius != 16 || got.Accent != app.AccentPine {
 		t.Errorf("重启后拿到的是 %+v", got)
 	}
 	if len(got.LocalMusicDirs) != 2 || got.LocalMusicDirs[0] != "/music/a" {
@@ -187,11 +187,9 @@ func TestNormalizeClampsBadValues(t *testing.T) {
 	if s.CloseWindowOption != app.CloseWindowHide || s.ProxySettings.Type != app.ProxyNone {
 		t.Errorf("枚举没退回默认：%q / %q", s.CloseWindowOption, s.ProxySettings.Type)
 	}
-	if s.PrimaryColor != app.DefaultPrimaryColor {
-		t.Errorf("坏颜色没退回默认：%q", s.PrimaryColor)
-	}
-	if s.BackgroundColor != "" {
-		t.Errorf("坏背景色该退回空（用主题默认）：%q", s.BackgroundColor)
+	// 已删掉的 primaryColor / backgroundColor 两个键带着坏值也不能让解析失败。
+	if s.Accent != app.DefaultAccent {
+		t.Errorf("没有 accent 键时没落到默认强调色：%q", s.Accent)
 	}
 	if s.FontFamily != app.DefaultFontFamily || s.SideMenuWidth <= 0 {
 		t.Errorf("空/负值没兜住：%q / %v", s.FontFamily, s.SideMenuWidth)

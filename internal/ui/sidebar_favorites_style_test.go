@@ -16,6 +16,7 @@ package ui
 // ⚠️ **一个字都不许打真 B 站接口**：全部是内存夹具 + 无头渲染。
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"image"
 	"image/color"
 	"math"
@@ -198,9 +199,9 @@ func TestTheFavoritesAreaHasRoomAboveIt(t *testing.T) {
 // ⚠️ **四个方案 × 深浅两套都要过**：方案换了，字色和底色一起换——而它们的对
 // 比度不是同一个数（实测最低的是经典浅色 4.83:1，暖纸浅色 5.00:1）。
 func TestTheFavoritesTextIsReadableOnTheSidebar(t *testing.T) {
-	for _, preset := range []app.ThemePreset{
-		app.ThemePresetClassic, app.ThemePresetWarmPaper,
-		app.ThemePresetDuskAmber, app.ThemePresetSoftPeach,
+	for _, preset := range []app.Accent{
+		app.AccentIndigo, app.AccentCinnabar,
+		app.AccentAmber, app.AccentPine,
 	} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
@@ -208,12 +209,9 @@ func TestTheFavoritesTextIsReadableOnTheSidebar(t *testing.T) {
 				shade = "深色"
 			}
 			st := app.DefaultSettings("")
-			st.ThemePreset = preset
+			st.Accent = preset
 			th := BuildTheme(st, dark)
-			sidebar := th.Background
-			if sk, _, ok := presetSkinFor(preset, dark); ok {
-				sidebar = ui.Hex(sk.sidebar)
-			}
+			sidebar := tok.Of(th).Side
 			for _, c := range []struct {
 				what string
 				from ui.Color

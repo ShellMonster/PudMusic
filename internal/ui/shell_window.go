@@ -17,6 +17,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/media"
 	"github.com/ShellMonster/PudMusic/internal/platform"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -275,6 +276,12 @@ func Run(a *app.App, sess *media.Session) error {
 	// 当一个没有窗口的僵尸进程。
 	if !platform.Lock() {
 		return nil
+	}
+
+	// 随包宋体（「深夜唱片行」的标题字体）在建任何窗口之前注册：第一帧的页标题
+	// 就要用它。注册失败不拦启动——标题退回系统字体，记一笔。
+	if err := typo.Register(); err != nil {
+		log.Printf("pudmusic: 标题字体注册失败，标题退回系统字体：%v", err)
 	}
 
 	s := New(a)

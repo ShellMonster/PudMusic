@@ -1,5 +1,5 @@
-// 主题：把设置里的四件事（跟随系统/浅色/深色、主色、背景色、圆角）
-// 变成 MyGo 每一帧真正用的那份主题。
+// 主题：把设置里的深浅档、强调色、封面取色变成 MyGo 每一帧真正用的那份
+// 「深夜唱片行」主题（颜色令牌在 `widgets/tok`，见 DESIGN.md §0′）。
 //
 // 🔴 铁律：Apply 必须在**每个窗口的每一帧开头**调一次。
 //
@@ -17,11 +17,11 @@ package ui
 import (
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -51,15 +51,10 @@ func ApplyTheme(c *ui.Context, s app.Settings, systemDark bool) {
 type themeKey struct {
 	// mode 是设置里的那一档（跟随系统 / 浅色 / 深色）。
 	mode app.ThemeMode
-	// radius 是设置里的圆角。
-	radius float64
 	// font 是设置里的字体（空串或系统默认 = 不设）。
 	font string
-	// preset 是主题方案（空 = 经典）。
-	preset app.ThemePreset
-	// primary / background 是设置里的主色和底色（十六进制串）。
-	primary    string
-	background string
+	// accent 是设置里的强调色（朱砂 / 靛青 / 松绿 / 琥珀）。
+	accent app.Accent
 	// coverHue / coverSat 是封面取色那一对（只在 coverAccent 开着时有值）。
 	coverHue, coverSat float64
 	// dark 是这份主题**实际要的那一档深浅**（见 `effectiveDark`）。
@@ -88,14 +83,6 @@ func coverSatOf(s app.Settings) float64 {
 	return 0
 }
 
-var themeNow = time.Now
-
-// 「定时」档：这个钟点之后用深色，早上这个钟点起用浅色。
-const (
-	scheduleDarkFrom  = 19
-	scheduleLightFrom = 7
-)
-
 // effectiveDark 是这份设置实际要的那一档深浅。
 //
 // 档位是浅色/深色时由档位说了算；「跟随系统」时才看系统。
@@ -108,9 +95,6 @@ func effectiveDark(s app.Settings, systemDark bool) bool {
 		return false
 	case app.ThemeModeDark:
 		return true
-	case app.ThemeModeSchedule:
-		h := themeNow().Hour()
-		return h >= scheduleDarkFrom || h < scheduleLightFrom
 	}
 	return systemDark
 }
@@ -154,17 +138,14 @@ type themeCache struct {
 // 三样都在键里。
 func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	key := themeKey{
-		mode:       s.ThemeMode,
-		preset:     s.ThemePreset,
-		radius:     s.BorderRadius,
-		font:       s.FontFamily,
-		primary:    s.PrimaryColor,
-		background: s.BackgroundColor,
-		coverHue:   coverHueOf(s),
-		coverSat:   coverSatOf(s),
-		dark:       effectiveDark(s, systemDark),
-		contrast:   p.HighContrast,
-		textScale:  p.TextScale,
+		mode:      s.ThemeMode,
+		font:      s.FontFamily,
+		accent:    s.Accent,
+		coverHue:  coverHueOf(s),
+		coverSat:  coverSatOf(s),
+		dark:      effectiveDark(s, systemDark),
+		contrast:  p.HighContrast,
+		textScale: p.TextScale,
 	}
 	if !c.valid || c.key != key {
 		base := buildTheme(s, systemDark, p)
@@ -172,7 +153,7 @@ func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.T
 		hot := *base
 		hot.Scrollbar = scrollbarHot(&hot)
 		// 卡片那三个值跟主题一起算（理由见 `themeCache.card`）。
-		c.card = cardPaletteOf(base, s.ThemePreset)
+		c.card = cardPaletteOf(base)
 		c.key, c.base, c.hotTheme, c.valid = key, base, &hot, true
 	}
 	return c.base
@@ -235,7 +216,6 @@ func (s *Shell) applyFrameTheme(c *ui.Context) {
 		t = s.theme.hot()
 	}
 	c.SetTheme(t)
-	s.publishCard(t)
 }
 
 // BuildTheme 按设置拼出这一帧要用的主题。
@@ -251,83 +231,28 @@ func BuildTheme(s app.Settings, systemDark bool) *ui.Theme {
 	return buildTheme(s, systemDark, ui.Preferences{})
 }
 
-// 上游那三个语义色（DESIGN.md §四「颜色与状态」）。
-//
-// ⚠️ **深浅两套是同一个值**：上游 HeroUI 的 `danger` / `warning` / `success`
-// 本身就不分深浅，这里也不分——之前那三档是框架自己的默认（浅色 #dc2626 /
-// #d97706 / #16a34a，深色 #ef4444 / #f59e0b / #22c55e），红橙绿都是另一套色相。
-//
-// ⚠️ **`success` 和主色是两回事**：主色是 Biu 的绿 `#1ed760`（用户能在设置里
-// 换），`success` 是 HeroUI 那个绿 `#17c964`（写死的）。两个挨得很近，但用户
-// 换主色的时候不该把「下载完成」那一档一起换了。
-//
-// ⚠️ **这三个色当字色用时，浅色下的对比度是「上游那一档自带的代价」**——
-// 按 WCAG 相对亮度算（对着各自主题的页面底色）：
-//
-//	                改之前        改之后（上游）
-//	成功 success   浅 3.30:1  →  浅 2.19:1 ；深 7.78:1 → 深 8.08:1
-//	警告 warning   浅 3.19:1  →  浅 2.04:1 ；深 8.25:1 → 深 8.68:1
-//	危险 danger    浅 4.83:1  →  浅 4.14:1 ；深 4.71:1 → 深 4.27:1
-//
-// 也就是说：**浅色下三个都降了（成功和警告降得最狠），深色下成功和警告升了，
-// 危险降了一点点**。这是上游 HeroUI 那三个色相自己的性质（上游也是拿它们当
-// 字色用），不是实现走样——DESIGN.md §四 指定的就是这一档。
-//
-// ⚠️ **别拿「对比度不够」当理由把色值改回去**：改回去就是「自己发明了一个
-// 上游没有的配色」，那一条是 #163 的整张对照表在盯着的。
-//
-// ✅ **当字色用时另取一档**（票 #241 / 报告 F-22）：**色相不变，只压深**到
-// ≥4.5:1——和主色那一档（`widgets/ink` 的 `AccentOn`）是同一个路数。那一档在
-// `internal/ui/semantic.go`（`dangerText` / `warningText` / `successText`），
-// 而**主题里这三个值一个字节都没动**（`semantic_test.go` 盯着它们）。
-// ⚠️ **当底色**（确认键、Toast）不走那一档——那一档要的是「底上的前景色」。
-const (
-	semanticDanger  = "#f31260"
-	semanticWarning = "#f5a524"
-	semanticSuccess = "#17c964"
-)
-
-// 分隔线（上游 HeroUI 的 `divider`）。
-//
-// ⚠️ **深色那档是叠出来的**：`rgba(255,255,255,0.15)`——15% 白叠在**当前的底色**
-// 上。底色是默认的 `#18181b` 时叠出来是 `#3b3b3d`（DESIGN.md 注释里写的「约
-// #3a3a3b」是同一个数的口头值）。
-//
-// ⚠️ **不能写成实色**：用户自己挑了底色之后，那道线要叠在**那个**底色上——
-// 写死就是「按默认底色算的线压在用户挑的底上」。
-//
-// ⚠️ 框架默认那一份是 `#d9d9de`（浅）/ `#3f3f46`（深），两个都不是上游的值：
-// 深色那个是**实色**（比 15% 白亮得多），浅色那个差两个通道。
-const (
-	// dividerLight 是浅色下的分隔线：#dbdbdb。
-	dividerLight = "#dbdbdb"
-	// dividerDarkAlpha 是深色下那道线的浓度：15% 白。
-	dividerDarkAlpha = 0.15
-)
-
-// dividerColor 是当前这份主题的分隔线颜色。
-func dividerColor(t *ui.Theme) ui.Color {
-	if t.Dark {
-		return t.Background.Mix(ui.RGB(255, 255, 255), dividerDarkAlpha)
-	}
-	return ui.Hex(dividerLight)
-}
-
 // buildTheme 是 BuildTheme 加桌面偏好。
+//
+// ## 从哪儿来
+//
+// 从 `ui.LightTheme()` / `ui.DarkTheme()` 起步（MyGo 新加的字段跟着框架的默认值走），
+// 再把「深夜唱片行」的令牌（`tok.Base`）逐项盖上去：
+//
+//	Background = bg            Surface = surface-2（控件那一层：搜索框、Chip、输入框）
+//	SurfaceHover / Pressed = surface-2 叠 hover / press
+//	Border = line              Text / TextMuted = text / text-2
+//	Accent = accent            AccentText = accent-ink（主色底上的字）
+//	AccentHover = accent 往 text 推 12%（原型 `color-mix(accent 88%, text)`）
+//	Focus = focus              Danger / Warning / Success = err / warn / ok
+//	Inverse = text、InverseText = bg（Toast 反色胶囊，§0′ 冲突 7 按原型）
+//	Radius = 8                 Scrollbar = line-strong
+//
+// 设置里的 `borderRadius` 不再进主题：原型的圆角是固定的 4 / 8 / 12 / 胶囊。
 //
 // ## 只跟框架 `Theme.follow` 的两样，不跟主色
 //
-// MyGo 的默认主题在每帧开头会 `t.follow(rt.preferences())`
-// （`mygo/ui/runtime.go:464`），里面三件事：系统主色、高对比度、字号缩放。
-// 我们从 `LightTheme()` / `DarkTheme()` 起步，那一层就绕开了——所以高对比度
-// 和字号缩放得自己接上。
-//
-// 🔴 **系统主色那一件不能接**（票面明写）。用户要的是 Biu 的绿，主色由她自己
-// 在设置里挑；框架那一步会把系统的主色铺上来，用户在系统里换个强调色，我们的
-// 按钮跟着变色——那不是我们的配色体系。
-//
-// 高对比度那几行照 `mygo/ui/preferences.go:69-74` 逐条来（Border / TextMuted /
-// Focus / Scrollbar），字号缩放照 `:75-77`（`t.FontSize *= TextScale`）。
+// 高对比度和字号缩放照 `mygo/ui/preferences.go` 接上；🔴 **系统主色那一件不接**：
+// 强调色由用户在四种里挑，不跟系统的强调色走。
 func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 	// ⚠️ **深浅由 `effectiveDark` 判**（档位压过系统）——而缓存的键也用它
 	// （见 `themeKey`），两边必须一致。
@@ -340,66 +265,42 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 		t = ui.LightTheme()
 	}
 
-	t.Radius = radiusOf(s.BorderRadius)
-	// 🔴 字体和圆角一样是**每帧**从设置里读的，所以它在这里装一次就够，别的地方
-	// 不用再管。
-	//
-	// ⚠️ **「系统默认」这一档必须一个字节都不改**。`t.Font` 的零值是「系统自己的
-	// 字体」（`ui/theme.go` 里 LightTheme/DarkTheme 都不设它），而设置里默认是
-	// `"system-ui"`——那**是另一个字符串**：设上去之后 MyGo 按这个名字去解析字体，
-	// 解析到的那一族和「不设」不一定同一个，于是**全应用的字宽都变了**。
-	//
-	// 实测：把 `t.Font = s.FontFamily` 无条件设上，`internal/ui` 的
-	// `TestDragAACToEnd` 在 `-race` 下三次里红两次——播放条上「暂停」那个按钮的位置
-	// 变了，`tt.Click("暂停")` 点了个空气（`playbar_aac_test.go:113`）。
-	//
-	// 「用户选了系统默认」本来就该等于「什么都没变」，所以这里判一下再设。
+	// ⚠️ **「系统默认」这一档必须一个字节都不改**：`t.Font` 的零值是「系统自己的
+	// 字体」，而设置里默认是 `"system-ui"`——那是另一个字符串，设上去之后全应用的
+	// 字宽都会变（`TestDragAACToEnd` 实测踩过）。
 	if s.FontFamily != "" && s.FontFamily != app.DefaultFontFamily {
 		t.Font = s.FontFamily
 	}
-	if c, ok := parseHexColor(s.BackgroundColor); ok {
-		t.Background = c
-		// 用户改了底色，**控件那一层要跟着走**：不跟的话白底上的按钮还是
-		// 浅灰、深底上的还是深灰，两个主题的「层次」在自定义底色上就断了。
-		applyBackground(t)
-	}
-	// 分隔线：上游 HeroUI 的 `divider`（深色 15% 白叠出、浅色 #dbdbdb）。
-	//
-	// ⚠️ **放在底色之后**：深色那档是叠在**当前底色**上的，用户挑了底色，
-	// 那道线要跟着重算。
-	t.Border = dividerColor(t)
-	if c, ok := parseHexColor(s.PrimaryColor); ok {
-		applyAccent(t, c)
-	}
 
-	// 语义色换成上游那三档（DESIGN.md §四）。深浅两套同一个值。
-	t.Danger = ui.Hex(semanticDanger)
-	t.Warning = ui.Hex(semanticWarning)
-	t.Success = ui.Hex(semanticSuccess)
+	pal := tok.Base(dark, string(s.Accent))
+	t.Background = pal.Bg
+	t.Surface = pal.Surface2
+	t.SurfaceHover = composite(pal.Surface2, pal.Hover)
+	t.SurfacePressed = composite(pal.Surface2, pal.Press)
+	t.Border = pal.Line
+	t.Text, t.TextMuted = pal.Text, pal.Text2
+	t.Danger, t.Warning, t.Success = pal.Err, pal.Warn, pal.Ok
+	t.Radius = radiusMd
+	t.Scrollbar = pal.LineStrong
 
-	// 主题方案盖在最后：选了方案就压过上面的底色 / 主色 / 圆角；经典不动。
-	// ⚠️ 放在 Inverse 之前——Inverse 取的是 Text / Background / Surface，要取方案的。
-	applyPreset(t, s.ThemePreset)
+	applyAccent(t, pal.Accent)
+	t.AccentText = pal.AccentInk
+	t.Focus = pal.Focus
 
-	// 封面取色盖在方案之后：开着且取到了颜色，主色换成封面的色相（亮度按深浅定）。
+	// 封面取色盖在强调色之后：开着且取到了颜色，主色换成封面的色相（亮度按深浅定），
+	// 底上字按亮度挑黑白（`applyAccent`），焦点环跟着主色走。
 	if s.CoverAccent && s.CoverSat > 0 {
 		if c, ok := parseHexColor(covertint.Hue{H: s.CoverHue, S: s.CoverSat}.Color(dark)); ok {
 			applyAccent(t, c)
+			t.Focus = c
 		}
 	}
 
-	// 🔴 Inverse / InverseText 留零的话，MyGo 的 inverse() 会退回
-	// 「fill=Text、text=Background」——深色下就是**一张白底卡片**，
-	// tooltip 和 toast 直接在深色界面里闪一下。默认值不是我们要的，
-	// 所以显式给：深色下用比背景略亮的 Surface，浅色下用深色卡片。
-	if dark {
-		t.Inverse, t.InverseText = t.Surface, t.Text
-	} else {
-		t.Inverse, t.InverseText = t.Text, t.Background
-	}
+	// Toast / 提示是反色胶囊（原型 `.toast { background: var(--text); color: var(--bg) }`）。
+	// 🔴 必须显式给：留零的话 MyGo 会自己推一份。
+	t.Inverse, t.InverseText = pal.Text, pal.Bg
 
 	// 高对比度（系统「增加对比度」）：照 MyGo `Theme.follow` 那四行。
-	// ⚠️ 放在主色和底色之后：它调的是**最终**的 Border / TextMuted。
 	if p.HighContrast {
 		t.Border = t.Border.Mix(t.Text, 0.45)
 		t.TextMuted = t.TextMuted.Mix(t.Text, 0.4)
@@ -407,16 +308,13 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 		t.Scrollbar = t.Scrollbar.Alpha(1.6)
 	}
 
-	// 字号缩放（Windows / GNOME 的「文本大小」）：框架那一步就是乘主题字号。
-	//
-	// ⚠️ 只影响**没显式设 FontSize** 的文字——显式字号是固定 DIP，框架不会
-	// 替你乘。我们页面里显式字号走的是 `widgets/scale` 的 `scale.Font`，那一处
-	// 乘的是同一个比例。
+	// 字号缩放（Windows / GNOME 的「文本大小」）：只影响没显式设字号的文字；显式
+	// 字号走 `widgets/scale` 的 `scale.Font`，乘的是同一个比例。
 	if p.TextScale > 0 && p.TextScale != 1 {
 		t.FontSize *= p.TextScale
 	}
 
-	// 滚动条宽度照上游 `--os-size: 10px`（`biu/src/app.css:56`）。框架默认 6。
+	// 滚动条宽度照上游 `--os-size: 10px`。框架默认 6。
 	t.ScrollbarWidth = scrollbarWidth
 	return t
 }
@@ -428,82 +326,10 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 // ——所以由界面层在**每帧开头**按上一帧量到的悬停状态选这一档（见
 // `scrollbar.go` 与 `Shell.applyFrameTheme`）。
 //
-// 做法是把同一份颜色的不透明度提上去（而不是换成另一个灰）：深色下本来就
-// 是白色半透明，提不透明度只会更亮/更实，和上游「深一级」是同一个方向。
+// 「深夜唱片行」的滚动条是不透明的 `--line-strong`，提不透明度不起作用，所以
+// 悬停那一档往次要字色推一半：深色下更亮、浅色下更深，都是「更显眼」。
 func scrollbarHot(t *ui.Theme) ui.Color {
-	return t.Scrollbar.Alpha(1.6)
-}
-
-// applyBackground 按用户挑的底色重推控件那一层：Surface 三档。
-//
-// ## 比例是从框架那两套默认值反推的
-//
-// 浅色默认底色 `#ffffff` → Surface `#f4f4f5`（往黑 4.3%）、Hover `#e9e9ec`
-// （8.6%）、Pressed `#dddde1`（13.7%）。
-// 深色默认 `#18181b` → Surface `#27272a`（往白 6.5%）、Hover `#323236`
-// （11.3%）、Pressed `#3c3c41`（15.6%）。
-//
-// 于是这三档在**默认底色上**推出来的值和框架那套几乎逐字节相同（差 1 个通道
-// 的地方是 `Mix` 的舍入），换个底色就整体跟着平移——「控件比底色亮/暗多少」
-// 这件事不随底色变。
-//
-// ⚠️ **描边不在这儿**：分隔线是上游的 `divider`（深色 15% 白叠出、浅色
-// #dbdbdb），它自己有一套规矩，见 `dividerColor`。
-//
-// ⚠️ `Text` / `TextMuted` **不跟着推**：那是票面范围之外（只说「控件的底色和
-// 描边」），而且正文色的对比度是用户挑底色时自己要看的事。主色当字色的那一档
-// 倒是会跟着算——它每次都是从**当前底色**现推的（`widgets/ink`）。
-func applyBackground(t *ui.Theme) {
-	black := ui.Color{A: 255}
-	white := ui.Color{R: 255, G: 255, B: 255, A: 255}
-	mix := white
-	if !t.Dark {
-		mix = black
-	}
-	surface, hover, pressed := surfaceStepLight, hoverStepLight, pressedStepLight
-	if t.Dark {
-		surface, hover, pressed = surfaceStepDark, hoverStepDark, pressedStepDark
-	}
-	t.Surface = t.Background.Mix(mix, surface)
-	t.SurfaceHover = t.Background.Mix(mix, hover)
-	t.SurfacePressed = t.Background.Mix(mix, pressed)
-}
-
-// 控件那三档的比例（浅色往黑推、深色往白推；推的量是 `applyBackground` 里那
-// 一份）。
-//
-// ⚠️ **别在别处另抄一份**：卡片那一档的悬停要从**卡片自己的底**出发推同样
-// 的一档（`themepreset.go` 的 `cardHoverBackground`），推的量就是这里的
-// `surfaceStep`——写死颜色、或者另抄一个看起来差不多的数，两处就会对不上，
-// 而对不上的症状是「悬停那一档比别处的悬停深一点/浅一点」，没人查得出原因。
-const (
-	// surfaceStep 是「控件那一层」的比例：浅色 4.3%、深色 6.5%。
-	//
-	// ⚠️ **这一档就是上游 `content1 → content2` 的差**（浅色 zinc-0 → zinc-100、
-	// 深色 zinc-900 → zinc-800，见 `themepreset.go` 的 `cardHoverBackground`）。
-	surfaceStepLight float32 = 0.043
-	surfaceStepDark  float32 = 0.065
-	// hoverStep 是「悬停那一档」的比例：浅色 8.6%、深色 11.3%。
-	hoverStepLight float32 = 0.086
-	hoverStepDark  float32 = 0.113
-	// pressedStep 是「按下那一档」的比例：浅色 13.7%、深色 15.6%。
-	pressedStepLight float32 = 0.137
-	pressedStepDark  float32 = 0.156
-)
-
-// radiusOf 是全局圆角，夹在 0~24。
-//
-// 上限 24 是 Biu 设置页滑块的右端点，也是圆角再大控件就开始变形的点。
-// 上限在这里兜一道，不只靠设置文件那边夹——BuildTheme 也被测试和将来的
-// 预览直接调用，那边给的是手搓的结构体。
-func radiusOf(v float64) float32 {
-	switch {
-	case v <= 0:
-		return 0
-	case v >= app.MaxBorderRadius:
-		return float32(app.MaxBorderRadius)
-	}
-	return float32(v)
+	return t.Scrollbar.Mix(t.TextMuted, 0.5)
 }
 
 // applyAccent 把主色铺到整份主题的强调色那一组上。

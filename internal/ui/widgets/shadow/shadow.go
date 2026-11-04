@@ -159,24 +159,6 @@ func HeroMedium(e ui.Element, t *ui.Theme) ui.Element {
 		Shadow(0, 0, 1, 0, ui.RGBA(0, 0, 0, 0.3))
 }
 
-// HeroInnerRim 是 HeroUI 那一档的**内**那一层：深色下是 1 像素的**白边**
-// （`inset 0 0 1px 0 rgb(255 255 255/0.15)`）。
-//
-// ⚠️ **浅色那一档没有这一层可加**：它的第三层是 1 像素的**外**黑边
-// （`0 0 1px 0 rgb(0 0 0/0.3)`）——落在盒子**外面**，不会被谁盖住，所以浅色下
-// 这个函数什么也不做。
-//
-// ⚠️ **什么时候用这个**：那一档的影要落在**一个被别的控件铺满的盒子**上时——
-// 外面那一圈看得见，而**内**那一层会被铺在上面的那个控件整个盖住，于是深色下
-// 那道白边（深底上唯一看得见的那一层）就没了。设置里那块色卡就是这一种：那个
-// 取色板控件（`ui.ColorWell`）铺满了整格。
-func HeroInnerRim(e ui.Element, t *ui.Theme) ui.Element {
-	if !t.Dark {
-		return e
-	}
-	return e.InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.15))
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 我们自己挑的那几档面板影
 //
@@ -189,21 +171,31 @@ func HeroInnerRim(e ui.Element, t *ui.Theme) ui.Element {
 // 不改**（画面必须和改之前逐像素相同）。「和上游对齐」是另一票的事。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Popover 是**浮层面板**那一圈影：下拉、联想、日期面板、旋钮浮层。
+// Pop 是「深夜唱片行」的 `--shadow-pop`（原型 index.html 89 / 111 行）：弹层、
+// 抽屉、对话框、Toast、批量操作条、回到顶部、搜索联想——**所有浮起来的面板**
+// 都是这一档。
 //
-// 浅色 18% 黑、深色 35% 黑（`ui.Color{A: 46}` / `{A: 90}`）。
+//	深色  0 24px 64px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4)
+//	浅色  0 24px 64px rgba(20,22,26,.18), 0 2px 8px rgba(20,22,26,.08)
 //
-// 浅色那一档是框架 `stylePanel` 的数（`mygo/ui/widgets.go:626`：18% 黑，
-// 模糊 20）——我们自拼的那些浮层照它来，两边挨着的时候才一样重。
-//
-// ⚠️ **深色那一档要更浓**：同一个 18% 压在 `#18181b` 上看不出边界，面板和底下
-// 的内容糊成一片。
-func Popover(e ui.Element, t *ui.Theme) ui.Element {
+// 用法：`panel = shadow.Pop(panel, t)`，放在底色、圆角之后。
+func Pop(e ui.Element, t *ui.Theme) ui.Element {
 	if t.Dark {
-		return e.Shadow(0, 6, 20, 0, ui.Color{A: 90})
+		return e.Shadow(0, 24, 64, 0, ui.RGBA(0, 0, 0, 0.55)).
+			Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.4))
 	}
-	return e.Shadow(0, 6, 20, 0, ui.Color{A: 46})
+	return e.Shadow(0, 24, 64, 0, ui.RGBA(20, 22, 26, 0.18)).
+		Shadow(0, 2, 8, 0, ui.RGBA(20, 22, 26, 0.08))
 }
+
+// CoverPlay 是卡片封面上那枚悬停播放键（`.cover-play`）的影：0 8px 24px 35% 黑。
+func CoverPlay(e ui.Element) ui.Element {
+	return e.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.35))
+}
+
+// Popover 是**浮层面板**那一圈影：下拉、联想、日期面板、旋钮浮层。
+// 2026-11 起就是 `Pop`（§0′：原型的弹层都是 `--shadow-pop`）。
+func Popover(e ui.Element, t *ui.Theme) ui.Element { return Pop(e, t) }
 
 // Tooltip 是**提示**那一圈影：2 像素下移、8 像素模糊、20% 黑。
 //
@@ -213,13 +205,9 @@ func Tooltip(e ui.Element, t *ui.Theme) ui.Element {
 	return e.Shadow(0, 2, 8, 0, ui.RGBA(0, 0, 0, 0.2))
 }
 
-// Modal 是**确认框**那一圈影：10 像素下移、30 像素模糊、30% 黑。
-//
-// 深浅同值：这一块底下压着 40% 的黑幕（`confirmmodal.go` 的 backdrop），幕本身
-// 已经把周围压暗了，面板这一圈影只需要把面板从幕上「抬起来」。
-func Modal(e ui.Element, t *ui.Theme) ui.Element {
-	return e.Shadow(0, 10, 30, 0, ui.RGBA(0, 0, 0, 0.3))
-}
+// Modal 是**确认框 / 卡片浮层**那一圈影。2026-11 起就是 `Pop`（原型 `dialog.dlg`
+// 用的是 `--shadow-pop`）。
+func Modal(e ui.Element, t *ui.Theme) ui.Element { return Pop(e, t) }
 
 // Sheet 是**贴在背景上的那一块面板**（满屏播放器里那个分集面板）那一圈影。
 //

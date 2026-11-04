@@ -35,13 +35,13 @@ func repoRoot(t *testing.T) string {
 func TestTheSizeScaleValuesAreLocked(t *testing.T) {
 	want := map[string]int{
 		"Size10": 10, "Size11": 11, "Size12": 12, "Size13": 13,
-		"Size14": 14, "Size15": 15, "Size16": 16, "Size18": 18,
-		"Size20": 20, "Size24": 24, "Size28": 28, "Size30": 30,
+		"Size14": 14, "Size16": 16, "Size20": 20, "Size24": 24,
+		"Size28": 28, "Size32": 32, "Size48": 48, "Size64": 64,
 	}
 	got := map[string]int{
 		"Size10": Size10, "Size11": Size11, "Size12": Size12, "Size13": Size13,
-		"Size14": Size14, "Size15": Size15, "Size16": Size16, "Size18": Size18,
-		"Size20": Size20, "Size24": Size24, "Size28": Size28, "Size30": Size30,
+		"Size14": Size14, "Size16": Size16, "Size20": Size20, "Size24": Size24,
+		"Size28": Size28, "Size32": Size32, "Size48": Size48, "Size64": Size64,
 	}
 	for name, w := range want {
 		g, ok := got[name]
@@ -62,15 +62,17 @@ func TestTheSizeScaleValuesAreLocked(t *testing.T) {
 // 有人把 `PageTitle` 指向 `Size14`，画面上歌名的层次就没了，而这一条会红。
 func TestTheRoleAliasesPointAtTheRightSize(t *testing.T) {
 	want := map[string]int{
-		"PageTitle": 24, "CollectionTitle": 30, "NotFoundTitle": 28,
+		"PageTitle": 48, "SectionTitle": 24, "HeroTitle": 64, "Subhead": 20,
+		"CollectionTitle": 32, "NotFoundTitle": 28,
 		"NewMusicTitle": 24, "BrandName": 24, "ListTitle": 16, "ListOwner": 14,
-		"CollectionCopy": 14, "LyricsTranslation": 14, "EmptyTitle": 15,
+		"CollectionCopy": 14, "LyricsTranslation": 14, "EmptyTitle": 24,
 		"EmptyHint": 12, "EmptyPageTitle": 20, "LyricValue": 10,
 		"HeaderFont": 14, "ToastFont": 14, "FavPanelItem": 14,
 		"RateMenuFont": 12, "VolPercentFont": 12,
 	}
 	got := map[string]int{
-		"PageTitle": PageTitle, "CollectionTitle": CollectionTitle,
+		"PageTitle": PageTitle, "SectionTitle": SectionTitle,
+		"HeroTitle": HeroTitle, "Subhead": Subhead, "CollectionTitle": CollectionTitle,
 		"NotFoundTitle": NotFoundTitle, "NewMusicTitle": NewMusicTitle,
 		"BrandName": BrandName, "ListTitle": ListTitle, "ListOwner": ListOwner,
 		"CollectionCopy": CollectionCopy, "LyricsTranslation": LyricsTranslation,
@@ -92,6 +94,24 @@ func TestTheRoleAliasesPointAtTheRightSize(t *testing.T) {
 	}
 }
 
+// TestTitlesStepDownInANarrowContentArea：内容区窄于 1024 时页标题 48 → 32、
+// Hero 64 → 48（design-tokens.html 3.1）；宽度未知（0）时按宽的那一档。
+func TestTitlesStepDownInANarrowContentArea(t *testing.T) {
+	for _, c := range []struct {
+		w          float32
+		page, hero float32
+	}{
+		{0, 48, 64}, {1400, 48, 64}, {1024, 48, 64}, {1023, 32, 48}, {700, 32, 48},
+	} {
+		if got := PageTitleFor(c.w); got != c.page {
+			t.Errorf("内容区 %.0f：页标题 %v，want %v", c.w, got, c.page)
+		}
+		if got := HeroTitleFor(c.w); got != c.hero {
+			t.Errorf("内容区 %.0f：Hero %v，want %v", c.w, got, c.hero)
+		}
+	}
+}
+
 // TestTheSizeScaleMatchesTheDesignScale 把表里的每一档和 DESIGN.md §二
 // 的「字号刻度」那张表逐条对上。
 //
@@ -104,8 +124,8 @@ func TestTheSizeScaleMatchesTheDesignScale(t *testing.T) {
 	tokens := parseDesignSizeScale(t, repoRoot(t))
 	got := map[string]int{
 		"Size10": Size10, "Size11": Size11, "Size12": Size12, "Size13": Size13,
-		"Size14": Size14, "Size15": Size15, "Size16": Size16, "Size18": Size18,
-		"Size20": Size20, "Size24": Size24, "Size28": Size28, "Size30": Size30,
+		"Size14": Size14, "Size16": Size16, "Size20": Size20, "Size24": Size24,
+		"Size28": Size28, "Size32": Size32, "Size48": Size48, "Size64": Size64,
 	}
 	for name, g := range got {
 		w, ok := tokens[name]

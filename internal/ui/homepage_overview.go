@@ -604,7 +604,7 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 						})
 				}
 
-				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).TextColor(tileText).MaxLines(1)
+				ui.Text(c, name).FontSize(scale.Font(c, scale.Size20)).TextColor(tileText).MaxLines(1)
 				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size13)).
 					TextColor(tileText).MaxLines(1)
 			})

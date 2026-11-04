@@ -138,35 +138,6 @@ func TestTextScaleEnlargesText(t *testing.T) {
 	}
 }
 
-// TestACustomBackgroundCarriesTheControls 验「用户改底色，控件的底色和描边跟着走」。
-//
-// 不跟的话，白底上的按钮还是浅灰、深底上的还是深灰——两个主题的「层次」在自定义
-// 底色上就断了。判据同时看结构体和画面：结构体对了而没画上去，用户一样看不见。
-func TestACustomBackgroundCarriesTheControls(t *testing.T) {
-	s := app.DefaultSettings("")
-	s.BackgroundColor = "#101014"
-	th := BuildTheme(s, false)
-	def := ui.LightTheme()
-	if th.Surface == def.Surface {
-		t.Errorf("自定义底色之后 Surface 还是默认的 %v", th.Surface)
-	}
-	if th.Border == def.Border {
-		t.Errorf("自定义底色之后 Border 还是默认的 %v", th.Border)
-	}
-
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		ApplyTheme(c, s, false)
-		ui.Button(c, "按钮").Width(80)
-	}, 200, 100)
-	tt.Frame()
-	// 按钮的左上角往里去一点：那个点是它的底色（避开 1px 描边和圆角）。
-	got := tt.Image().RGBAAt(10, 20)
-	want := th.Surface
-	if got.R != want.R || got.G != want.G || got.B != want.B {
-		t.Errorf("画面上按钮的底色是 %v，want 跟着背景推出来的 %v", got, want)
-	}
-}
-
 // TestTheDisabledThemeButtonsStayReadable 是禁用态那一条的像素判据。
 //
 // 只读设置页里那三个主题按钮被框架整个乘 50% 不透明度。原来深色下选中那一档的

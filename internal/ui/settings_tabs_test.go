@@ -3,12 +3,11 @@ package ui
 import (
 	"image"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
@@ -160,64 +159,18 @@ func renderedIn(t *testing.T, label, family string) inkShot {
 	return inkShot{img: rt.Image(), at: r}
 }
 
-// TestPickingAColorChangesTheWholeTheme 验颜色是真的落到主题上。
-//
-// 读的是 `BuildTheme` 出来的强调色和背景色，和设置里的十六进制串两样都查：串对了
-// 而主题没跟着变，界面上一根线都不会换颜色。
-func TestPickingAColorChangesTheWholeTheme(t *testing.T) {
+// TestPickingAnAccentChangesTheWholeTheme 验点一枚强调色，设置和整份主题一起换。
+func TestPickingAnAccentChangesTheWholeTheme(t *testing.T) {
 	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-
-	// 取色板是点色块之后在下面摆出来的，点里面的常用色。
-	openColorPicker(t, tt, s, "主色")
-	if err := tt.Click("Red"); err != nil {
-		t.Fatalf("取色板里点不到红色：%v", err)
+	if err := tt.Click("松绿"); err != nil {
+		t.Fatalf("点不到「松绿」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
-
-	want := "#ef4444"
-	if got := s.app.SettingsSnapshot().PrimaryColor; got != want {
-		t.Errorf("设置里的主色是 %q，want %q", got, want)
+	if got := s.app.SettingsSnapshot().Accent; got != app.AccentPine {
+		t.Errorf("设置里的强调色是 %q，want pine", got)
 	}
-	if got := BuildTheme(s.app.SettingsSnapshot(), false).Accent; got.R != 0xef || got.G != 0x44 || got.B != 0x44 {
-		t.Errorf("这一帧主题的强调色是 %+v，want #ef4444", got)
-	}
-}
-
-// TestTheColorItemGoesBackToFollowingTheTheme 验「用默认」能把值放回空串。
-//
-// 背景色的默认值是**空串**，意思是「跟着主题走」。Biu 那一格挑过一次之后就再也
-// 回不到这个状态，而那正是多数人想要的常态——所以这里多给了那个出口。
-func TestTheColorItemGoesBackToFollowingTheTheme(t *testing.T) {
-	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-
-	if got := s.app.SettingsSnapshot().BackgroundColor; got != "" {
-		t.Fatalf("起点背景色不是空串，是 %q", got)
-	}
-	if tt.HasText("用默认") {
-		t.Error("没改过的时候不该摆「用默认」——那一格没有可退回的东西")
-	}
-
-	openColorPicker(t, tt, s, "背景")
-	if err := tt.Click("Blue"); err != nil {
-		t.Fatalf("取色板里点不到蓝色：%v", err)
-	}
-	tt.Frame()
-	if got := s.app.SettingsSnapshot().BackgroundColor; got != "#3b82f6" {
-		t.Fatalf("挑完之后背景色是 %q", got)
-	}
-	// 取色板是盖在页面上的一层，不先关掉就点「用默认」——点到的会是板子上那一格颜色。
-	tt.Key(0, mygoui.KeyEscape)
-	tt.Frame()
-
-	if err := tt.Click("用默认"); err != nil {
-		t.Fatalf("点不到「用默认」：%v，文字有 %q", err, tt.Texts())
-	}
-	tt.Frame()
-	if got := s.app.SettingsSnapshot().BackgroundColor; got != "" {
-		t.Errorf("退回之后背景色是 %q，want 空串（跟着主题走）", got)
-	}
-	if c := BuildTheme(s.app.SettingsSnapshot(), false).Background; c.R != 0xff || c.G != 0xff {
-		t.Errorf("退回之后主题的背景色是 %+v，want 浅色默认的白", c)
+	if got, want := BuildTheme(s.app.SettingsSnapshot(), false).Accent, tok.AccentColor("pine", false); got != want {
+		t.Errorf("这一帧主题的强调色是 %v，want %v", got, want)
 	}
 }
 
@@ -354,66 +307,6 @@ func TestTheProxyPasswordOnlyShowsWhereItMeansSomething(t *testing.T) {
 			t.Errorf("类型是 %q 时连用户名那一格都没画", p)
 		}
 		s.keys.Close()
-	}
-}
-
-// TestTheColorPickerKeepsTheTransparency 验取色板调出来的**透明度存得住**。
-//
-// ⚠️ 这一条是被一条真 bug 逼出来的：`toHex` 只写 RGB，取色板上那条 **Opacity** 滑块
-// 拖出来的 alpha 被**悄悄丢掉**——界面上是半透明的，存下去是全不透明，下一帧跳回去。
-//
-// 拖法照审阅给的复现：点滑块中点 → 推几帧 → 看存下来的值。
-func TestTheColorPickerKeepsTheTransparency(t *testing.T) {
-	tt, s, _, _ := shellOnAppearance(t, app.DefaultSettings(""))
-	openColorPicker(t, tt, s, "主色")
-	if err := tt.Click("Red"); err != nil {
-		t.Fatalf("取色板里点不到红色：%v", err)
-	}
-	tt.Frame()
-	if got := s.app.SettingsSnapshot().PrimaryColor; got != "#ef4444" {
-		t.Fatalf("先选个不透明的，存下来是 %q，want #ef4444", got)
-	}
-
-	// 拖 Opacity 滑块到中间。不透明 → 大约一半。
-	dragSliderTo(t, tt, "Opacity", 0.5)
-	tt.Frame()
-
-	got := s.app.SettingsSnapshot().PrimaryColor
-	if len(got) != 9 || !strings.HasPrefix(got, "#ef4444") {
-		t.Fatalf("拖了透明度之后存下来的是 %q，want #ef4444xx（8 位，带 alpha）", got)
-	}
-	alpha, err := strconv.ParseUint(got[7:9], 16, 8)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if alpha < 100 || alpha > 155 {
-		t.Errorf("透明度是 %d（0x%02x），want 大约 128（滑块拖到中间）", alpha, alpha)
-	}
-	if a := BuildTheme(s.app.SettingsSnapshot(), false).Accent.A; a != uint8(alpha) {
-		t.Errorf("主题的强调色 alpha 是 %d，存的是 %d", a, alpha)
-	}
-}
-
-// dragSliderTo 把一条滑块拖到它自己的几分之几（0..1）。
-//
-// ⚠️ 必须在 `Advance` 之后再 `Frame`：MyGo 的动画状态挂在控件的节点上，而无头 Tester
-// 的钟**只有 `Advance(d)` 才走**。不推进钟的话「按住 → 移动 → 松手」三步会落在同
-// 一次 settle 里，看不出拖没拖动。
-func dragSliderTo(t *testing.T, tt *mygoui.Tester, label string, frac float32) {
-	t.Helper()
-	r, ok := tt.Find(label)
-	if !ok {
-		t.Fatalf("找不到滑块「%s」，文字有 %q", label, tt.Texts())
-	}
-	x := r.X + r.W*frac
-	y := r.Y + r.H/2
-	tt.Press(x, y)
-	tt.Advance(16 * time.Millisecond)
-	tt.Frame()
-	tt.Release(x, y)
-	for range 3 {
-		tt.Advance(50 * time.Millisecond)
-		tt.Frame()
 	}
 }
 
@@ -570,16 +463,6 @@ func openFontMenu(t *testing.T, tt *mygoui.Tester, s *Shell) {
 	if len(options) < 2 || !tt.HasText(options[1].label) {
 		t.Fatalf("字体面板没有摆开，文字有 %q", tt.Texts())
 	}
-}
-
-// openColorPicker 摆开某一块颜色的取色板（皮肤页上——「颜色」那组搬过去了）。
-func openColorPicker(t *testing.T, tt *mygoui.Tester, s *Shell, label string) {
-	t.Helper()
-	// ⚠️ **先滚进可视区再点**：那一组在货架大卡下面，直接 `tt.Click` 会因为
-	// 那一格在屏幕外而拒绝点（`targetCenter` 的窗口边界检查）。
-	r := appearanceRect(t, tt, s, label)
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-	tt.Frame()
 }
 
 // openSelect 摆开一个下拉。靠 Label 找：下拉自己摆的字是选中的那一个，改了会变。

@@ -284,13 +284,14 @@ func TestTheDownloadTableIsUnchanged(t *testing.T) {
 		}
 	}
 
-	// 两个歌名的位置：第一行 (252, 173)、第二行 (252, 233)（行高 60）。
+	// 两个歌名的位置：第一行 (252, 210)、第二行 (252, 270)（行高 60）。
+	// 2026-11：页标题换成 48 宋体（§0′），整张表往下挪了 37（原来 173 / 233）。
 	for _, c := range []struct {
 		text string
 		x, y float32
 	}{
-		{"歌 甲", tableLeft, 173},
-		{"歌 乙", tableLeft, 233},
+		{"歌 甲", tableLeft, 210},
+		{"歌 乙", tableLeft, 270},
 	} {
 		r, ok := tt.Find(c.text)
 		if !ok {

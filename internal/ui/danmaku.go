@@ -105,7 +105,7 @@ const (
 	// danmakuFontSize 是字号（报告 §3.3）：18 DIP。
 	//
 	// ⚠️ **走 `scale.Font`**：系统文本大小要跟着变（票 #139 的规矩）。
-	danmakuFontSize = scale.Size18
+	danmakuFontSize = scale.Size20
 
 	// danmakuAlpha 是统一乘上的透明度（报告 §3.3）：0.85。
 	//

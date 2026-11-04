@@ -1,9 +1,10 @@
-// 这一组验**票 #172**：语义色、深色层次、分隔线（DESIGN.md §四「颜色与状态」）。
+// 这一组验语义色、卡片层次、分隔线。2026-11 起数值以「深夜唱片行」为准
+// （DESIGN.md §0′、`widgets/tok`）：语义色和分隔线深浅各一份。
 //
 // # 三件事，三组判据
 //
-//  1. **三个语义色和上游一致**——危险 `#f31260`、警告 `#f5a524`、成功
-//     `#17c964`，深浅两套**同一个值**（上游那三档本身不分深浅）。
+//  1. **三个语义色是令牌表那三档**——design-tokens.html 表 2-1 的落地值
+//     （浅色小字也过 4.5:1），深浅各一份。
 //  2. **深色下卡片和背景几乎同色，靠影分层**；**浅色下卡片不是灰块**
 //     （上游 HeroUI 的 `bg-content1` 是 #FFFFFF / #18181b，正好是我们
 //     `t.Background` 的两个值）。
@@ -27,29 +28,30 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// 上游那三个语义色和那道分隔线（DESIGN.md §四）。
+// 令牌表里那三个语义色和那道分隔线（[浅色, 深色]）。
 //
-// ⚠️ **写死在这里，而不是从主题里取**：这一组要断的就是「和上游一致」，
+// ⚠️ **写死在这里，而不是从主题里取**：这一组要断的就是「和令牌表一致」，
 // 从主题里取就变成自己跟自己比了。
-const (
-	upstreamDanger  = "#f31260"
-	upstreamWarning = "#f5a524"
-	upstreamSuccess = "#17c964"
-	// upstreamDividerLight 是浅色下的分隔线。
-	upstreamDividerLight = "#dbdbdb"
-	// upstreamDividerDarkA 是深色下那道线的浓度：15% 白。
-	upstreamDividerDarkA = 0.15
+var (
+	tokenDanger  = [2]string{"#C93B3B", "#F0716B"}
+	tokenWarning = [2]string{"#9A5B06", "#F2B04A"}
+	tokenSuccess = [2]string{"#2E7D4F", "#5BC287"}
+	tokenLine    = [2]string{"#E0E1E3", "#26282D"}
 )
+
+func shadeIdx(dark bool) int {
+	if dark {
+		return 1
+	}
+	return 0
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ① 三个语义色
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheSemanticColorsMatchUpstream 断主题里那三个语义色就是上游那三个值。
-//
-// ⚠️ **深浅两套是同一个值**：上游 HeroUI 的 `danger` / `warning` / `success`
-// 本身不分深浅。改成一深一浅就是「自己发明了一个上游没有的配色」。
-func TestTheSemanticColorsMatchUpstream(t *testing.T) {
+// TestTheSemanticColorsMatchTheTokens 断主题里那三个语义色就是令牌表那三档。
+func TestTheSemanticColorsMatchTheTokens(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -62,12 +64,12 @@ func TestTheSemanticColorsMatchUpstream(t *testing.T) {
 				got  mygoui.Color
 				want string
 			}{
-				{"danger", th.Danger, upstreamDanger},
-				{"warning", th.Warning, upstreamWarning},
-				{"success", th.Success, upstreamSuccess},
+				{"danger", th.Danger, tokenDanger[shadeIdx(dark)]},
+				{"warning", th.Warning, tokenWarning[shadeIdx(dark)]},
+				{"success", th.Success, tokenSuccess[shadeIdx(dark)]},
 			} {
 				if c.got != mygoui.Hex(c.want) {
-					t.Errorf("%s 是 %v，want %s（上游的色相）", c.what, c.got, c.want)
+					t.Errorf("%s 是 %v，want %s（令牌表）", c.what, c.got, c.want)
 				}
 			}
 		})
@@ -106,9 +108,9 @@ func TestTheSemanticColorsReachThePixels(t *testing.T) {
 				label string
 				want  string
 			}{
-				{"色-危险", upstreamDanger},
-				{"色-警告", upstreamWarning},
-				{"色-成功", upstreamSuccess},
+				{"色-危险", tokenDanger[shadeIdx(dark)]},
+				{"色-警告", tokenWarning[shadeIdx(dark)]},
+				{"色-成功", tokenSuccess[shadeIdx(dark)]},
 			} {
 				r, ok := tt.Find(s.label)
 				if !ok {
@@ -127,35 +129,13 @@ func TestTheSemanticColorsReachThePixels(t *testing.T) {
 // ② 分隔线
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheDividerMatchesUpstream 断分隔线那一个值和上游一致。
-//
-// 浅色：#dbdbdb（上游 `divider_light`，写死的）。
-//
-// 深色：**15% 白叠在当前的底色上**（上游 `divider_dark` =
-// `rgba(255,255,255,0.15)`）。底色是默认的 `#18181b` 时叠出来是 `#3b3b3d`
-// ——**不是**一个写死的数：用户自己挑了底色之后，那道线要跟着**那个**底色重算。
-// 写死就是「按默认底色算的线压在用户挑的底上」。
-func TestTheDividerMatchesUpstream(t *testing.T) {
-	light := BuildTheme(app.DefaultSettings(""), false)
-	if want := mygoui.Hex(upstreamDividerLight); light.Border != want {
-		t.Errorf("浅色下的分隔线是 %v，want %v（上游的 divider_light）", light.Border, want)
-	}
-
-	dark := BuildTheme(app.DefaultSettings(""), true)
-	// 15% 白叠在默认底色 #18181b 上：24 + (255-24)×0.15 = 58.65 → 59（0x3b），
-	// 蓝通道 27 + (255-27)×0.15 = 61.2 → 61（0x3d）。
-	if want := mygoui.RGB(59, 59, 61); dark.Border != want {
-		t.Errorf("深色下的分隔线是 %v，want %v（15%% 白叠在 #18181b 上）", dark.Border, want)
-	}
-
-	// 挑一个别的底色：分隔线必须跟着重算，而不是还守着默认底色那个数。
-	custom := app.DefaultSettings("")
-	custom.BackgroundColor = "#202024"
-	custom.ThemeMode = app.ThemeModeDark
-	cd := BuildTheme(custom, true)
-	want := mygoui.RGB(32, 32, 36).Mix(mygoui.RGB(255, 255, 255), upstreamDividerDarkA)
-	if cd.Border != want {
-		t.Errorf("换了底色之后分隔线是 %v，want %v（15%% 白叠在新底色上）", cd.Border, want)
+// TestTheDividerMatchesTheTokens 断分隔线就是 `--line`（浅 #E0E1E3 / 深 #26282D）。
+func TestTheDividerMatchesTheTokens(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		th := BuildTheme(app.DefaultSettings(""), dark)
+		if want := mygoui.Hex(tokenLine[shadeIdx(dark)]); th.Border != want {
+			t.Errorf("深色=%v：分隔线是 %v，want %v（--line）", dark, th.Border, want)
+		}
 	}
 }
 

@@ -1448,7 +1448,7 @@ func TestTheFollowSentinelRowHasNoHoverSlab(t *testing.T) {
 // 所以头像左边那一块除了底色什么也没有——而头像的**圆**在那一列上，圆外的那
 // 一圈还是卡片的底。
 func TestTheFollowCardSitsOnItsOwnBackground(t *testing.T) {
-	for _, preset := range []app.ThemePreset{app.ThemePresetClassic, app.ThemePresetWarmPaper} {
+	for _, preset := range []app.Accent{app.AccentIndigo, app.AccentCinnabar} {
 		for _, dark := range []bool{false, true} {
 			shade := "浅色"
 			if dark {
@@ -1456,7 +1456,7 @@ func TestTheFollowCardSitsOnItsOwnBackground(t *testing.T) {
 			}
 			t.Run(string(preset)+"-"+shade, func(t *testing.T) {
 				st := app.DefaultSettings("")
-				st.ThemePreset = preset
+				st.Accent = preset
 				st.ThemeMode = app.ThemeModeLight
 				if dark {
 					st.ThemeMode = app.ThemeModeDark
