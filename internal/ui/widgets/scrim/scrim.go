@@ -73,6 +73,10 @@ const (
 	// 角标在浅色封面上读不出来。
 	Badge = 0.70
 
+	// VideoBadge 是满屏封面右下角「看视频」胶囊那一块底（原型 `.vbadge { background:
+	// rgba(0,0,0,.66) }`）：66% 的黑，压在任意封面上读得出里面的白字。
+	VideoBadge = 0.66
+
 	// ── 「深夜唱片行」§0′ 原型的三档（`index.css` 的 `.scrim` / `dialog::backdrop` /
 	// `.vstat` `.vdur`） ──
 	//

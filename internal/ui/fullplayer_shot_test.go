@@ -246,3 +246,27 @@ func TestRenderFullPlayerVideoShots(t *testing.T) {
 	settleFull(t, tt)
 	save(t, dir, "dark-full-cinema.png", tt)
 }
+
+// TestRenderFullPlayerOnlineShot 出「在线投稿」那一档的满屏：赞 / 喜欢 / 音质角标 / 弹幕数。
+func TestRenderFullPlayerOnlineShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{true, false} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := onlineTester(t, nil, false)
+			tt.SetDark(dark)
+			s.app.SetDanmakuForTest([]app.DanmakuItem{{ID: "1", TimeMS: 0, Mode: 1, FontSize: 25, Color: 0xFFFFFF, Text: "前方高能"}})
+			s.app.PutLyrics(fullShotLRC, fullShotTrans)
+			s.openFullPlayer()
+			waitFrames(t, tt, "满屏开出来了", func() bool { return tt.HasText("NOW PLAYING · 1 / 1") })
+			settleFull(t, tt)
+			save(t, dir, name+"-full-online.png", tt)
+		})
+	}
+}

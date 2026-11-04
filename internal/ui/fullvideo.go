@@ -84,7 +84,7 @@ func (s *Shell) drawVideo(p *ui.Painter, r ui.Rect, radius float32) {
 func (s *Shell) viewVideoBadge(c *ui.Context) {
 	b := ui.ButtonBase(c).Key(fullVideoBadgeKey).Label("看视频").
 		Absolute().Right(12).Bottom(12).Height(32).PaddingX(space.Px12).Gap(space.Px6).
-		AlignItems(ui.Center).Radius(16).Background(ui.RGBA(0, 0, 0, 0.66)).Cursor(ui.CursorPointer)
+		AlignItems(ui.Center).Radius(16).Background(ui.RGBA(0, 0, 0, scrim.VideoBadge)).Cursor(ui.CursorPointer)
 	b.Children(func() {
 		white := ui.RGB(255, 255, 255)
 		ui.Icon(c, pud.Icon("video")).FontSize(14).TextColor(white)

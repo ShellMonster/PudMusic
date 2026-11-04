@@ -762,7 +762,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			})
 			// 操作：正在放的那一行是三根跳动的柱（右边空 12），别的行是上移 + 移除（32 的键）。
 			if state == queueRowCurrent {
-				ui.Row(c).Margin(0, space.Px12, 0, 0).Label("正在播放 " + row.item.Title).Children(func() {
+				ui.Row(c).Margin(space.None, space.Px12, space.None, space.None).Label("正在播放 " + row.item.Title).Children(func() {
 					pud.EqBars(c, "queue:eq", s.queuePlaying)
 				})
 				return
@@ -789,9 +789,10 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 				s.addToast("放不了这一首："+err.Error(), notice.Danger)
 			}
 		}
-		// 右键菜单挂在**行本体**上：MyGo 取的是最里层那个带菜单的元素。
-		rowEl.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
 	})
+	// 右键菜单挂在**整行**（含上面的分段标签）上：MyGo 取的是最里层那个带菜单的元素，整行这一层足够里面，
+	// 而在分段标签上按右键也出同一份菜单（行的无障碍名 / 测试按歌名找到的是整行的中心）。
+	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
 }
 
 // queueUpLabel / queueRemoveLabel 是两枚行内键的无障碍名字（原型 `上移 {歌名}`、

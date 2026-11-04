@@ -62,7 +62,7 @@ func openQueueWithOneSong(t *testing.T, a *app.App, s *Shell, tt *ui.Tester) {
 		t.Fatalf("点不了播放列表：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
-	if !tt.HasText("定位当前播放") {
+	if !tt.HasText("清空播放列表") {
 		t.Fatalf("抽屉没开（文字：%q）", tt.Texts())
 	}
 	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面

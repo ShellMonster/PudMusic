@@ -41,6 +41,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/plugins/glass"
@@ -406,7 +407,7 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 			s.viewFullTop(c, app.State{}, fullGeo{})
 			ui.Column(c).Key("full-empty").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
-				Center().Gap(6).Children(func() {
+				Center().Gap(space.Px6).Children(func() {
 				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(tok.Full.Text)
 			})
 		})

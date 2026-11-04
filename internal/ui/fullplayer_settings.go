@@ -103,7 +103,7 @@ func (s *Shell) viewFullPrefsContent(c *ui.Context) {
 		})
 	}
 	swatches := func(key, title string, list []fullSwatch, cur string, tint ui.Color, save func(*app.FullPlayerPrefs, string)) {
-		ui.Row(c).Key(key+":swatches").Gap(space.Px8).Padding(0, space.Px10, space.Px8, space.Px10).
+		ui.Row(c).Key(key+":swatches").Gap(space.Px8).Padding(space.None, space.Px10, space.Px8, space.Px10).
 			Role(ui.RoleRadioGroup).Label(title).Children(func() {
 			for _, sw := range list {
 				sw := sw

@@ -329,7 +329,7 @@ func (s *Shell) viewLyricSearchDialog(c *ui.Context) {
 
 			// 关键词框 + 「开始搜索」（原型 `.pick-new`：缝 8、上面空 12；输入框高 36、圆角 8、
 			// line-strong 描边、surface-2 底、内边距 12）。
-			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Margin(space.Px12, 0, 0, 0).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Margin(space.Px12, space.None, space.None, space.None).Children(func() {
 				box := ui.TextInputBase(c, &l.draft).Grow(1).Height(36).PaddingX(space.Px12).
 					Radius(tok.R8).Background(p.Surface2).Border(1, p.LineStrong).
 					TextColor(p.Text).FontSize(scale.Font(c, scale.Size14)).
@@ -348,7 +348,7 @@ func (s *Shell) viewLyricSearchDialog(c *ui.Context) {
 			// 源 chip（网易云 / LrcLib）。原型没有这一排（它的歌词源是假的）；真有两个源，
 			// 用户多半就是为了换个源才来搜的，所以保留，样子用 chip。
 			if len(srcs) > 1 {
-				ui.Row(c).Gap(space.Px8).Margin(space.Px12, 0, 0, 0).Children(func() {
+				ui.Row(c).Gap(space.Px8).Margin(space.Px12, space.None, space.None, space.None).Children(func() {
 					prev := l.tab
 					for i, name := range lyricSourceNames(srcs) {
 						if pud.Chip(c, "lyrics:src:"+strconv.Itoa(i), name, "", l.tab == i).Clicked() {
@@ -367,7 +367,7 @@ func (s *Shell) viewLyricSearchDialog(c *ui.Context) {
 			pv := s.app.LyricPreview()
 			l.preview = pv.Open
 			half := (w - 48 - 16) / 2
-			ui.Row(c).FillWidth().Gap(space.Px16).Margin(space.Px16, 0, 0, 0).AlignItems(ui.Start).Children(func() {
+			ui.Row(c).FillWidth().Gap(space.Px16).Margin(space.Px16, space.None, space.None, space.None).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).Key("lyrics:left").Width(half).Shrink(0).Gap(space.Px4).Children(func() {
 					s.viewLyricCandidates(c, srcs, st)
 				})

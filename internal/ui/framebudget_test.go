@@ -631,9 +631,15 @@ func budgetScreens() []budgetScreen {
 			//  本票 BMG-224 省掉框架 DragOver 那一次分配，基线 39，上限 43；
 			//  票 #721 填上那份每帧缓存，基线 39 → 39 次 / 464 → 560 字节，
 			//  上限 43 → 45，字节 11300 → 800。）
+			//
+			// ⚠️ **上限 45 → 66、字节 800 → 1500（「深夜唱片行」§0′.T4）**：抽屉按原型重做之后每一行多了
+			// 拖动把手、40 的封面盒、上移 / 移除两枚 36 的图标键（旧版是一枚「⋯」），一屏十来行每行约 +2 次
+			// 分配，头上多了「清空播放列表」文字键和 `DrawerSub`：基线 38 → 59 次 / 536 → 1296 字节。
+			// **真多画了那么多东西**（不是「每帧现算」那一族）；上限按新基线留一成多的余量，「每行多格式化
+			// 一个字段」那十来次仍然会超。
 			budget: frameBudget{
-				allocs: 45,
-				bytes:  800,
+				allocs: 66,
+				bytes:  1500,
 				floor:  20,
 			},
 			setup: func(t *testing.T, s *Shell, _ *mygoui.Tester) {
@@ -1189,9 +1195,12 @@ func budgetScreens() []budgetScreen {
 			// 是 117 次，而上限是 29 ⇒ 红 ✓），所以**下限降了不影响这一档的
 			// 判据能力**：那类回归撞的是**上限**，不是下限。
 			name: "评论页",
+			// 上限 29 → 38、字节 900 → 1400（「深夜唱片行」§0′.T4）：抽屉头（宋体标题 + 条数 + 两枚图标键）、
+			// 头下面的 `DrawerSub` + 两枚 chip、「只看提到歌名」开关行、底下的评论输入条都是**新摆的元素**，
+			// 每帧基线 22 → 32 次 / 592 → 1184 字节。上限按新基线留一成多的余量。
 			budget: frameBudget{
-				allocs: 29,
-				bytes:  900,
+				allocs: 38,
+				bytes:  1400,
 				floor:  11,
 			},
 			setup: func(t *testing.T, s *Shell, _ *mygoui.Tester) {
@@ -1271,9 +1280,10 @@ func budgetScreens() []budgetScreen {
 			// ⚠️ **它不替代上面那一档**：两档盯的**不是同一件事**（关着的那一档
 			// 盯「别把每帧重排正文加回来」）。
 			name: "评论页·筛选开着",
+			// 上限同「评论页」那一档（抽屉改版，见那一档的说明；基线 32 次 / 1168 字节）。
 			budget: frameBudget{
-				allocs: 29,
-				bytes:  900,
+				allocs: 38,
+				bytes:  1400,
 				floor:  11,
 			},
 			setup: func(t *testing.T, s *Shell, _ *mygoui.Tester) {

@@ -909,7 +909,7 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 				s.viewCommentBodyEl(c, p, cm, commentBodyLines)
 
 				// 脚：时间 · 赞（原型 `.c-foot`：12 号 text-3，缝 16）。
-				ui.Row(c).Gap(space.Px16).AlignItems(ui.Center).Margin(space.Px4, 0, 0, 0).Children(func() {
+				ui.Row(c).Gap(space.Px16).AlignItems(ui.Center).Margin(space.Px4, space.None, space.None, space.None).Children(func() {
 					if cm.TimeDesc != "" {
 						ui.Text(c, cm.TimeDesc).FontSize(scale.Font(c, scale.Size12)).
 							TextColor(pal.Text3).MaxLines(1)
@@ -942,7 +942,7 @@ func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentR
 	cm := row.cm
 	ui.Column(c).Key(row.elemKey).AlignSelf(ui.Stretch).Children(func() {
 		ui.Column(c).FillWidth().Padding(space.Px8, space.Px12).
-			Margin(0, space.Px12, space.Px4, space.Px12+commentAvatar+space.Px12).
+			Margin(space.None, space.Px12, space.Px4, space.Px12+commentAvatar+space.Px12).
 			Radius(tok.R8).Background(pal.Surface2).Gap(space.Px4).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
 				// 楼中楼的昵称同样可以拖选复制（理由同 `viewCommentRow` 那一处）。
@@ -1018,7 +1018,7 @@ func (s *Shell) viewCommentReplies(c *ui.Context, p *commentsPage, row commentRo
 	}
 	open := p.expanded[row.cm.Rpid]
 	b := ui.ButtonBase(c).Key(commentRepliesKey).Label(row.replyText).Gap(space.Px4).AlignItems(ui.Center).
-		AlignSelf(ui.Start).Margin(space.Px6, 0, 0, 0)
+		AlignSelf(ui.Start).Margin(space.Px6, space.None, space.None, space.None)
 	b.Children(func() {
 		ui.Text(c, row.replyText).FontSize(scale.Font(c, scale.Size12)).TextColor(pal.AccentText).MaxLines(1)
 		name := "down"

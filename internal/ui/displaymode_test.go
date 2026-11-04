@@ -273,8 +273,8 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 				settleDrawer(t, s, tt)
 				return tt, s
 			},
-			why:     "它不是一页，是播放时拉出来的一个抽屉；而且它的**行高定死在 64**（Biu 的 RowHeight）——「定位当前播放」是 `targetIndex*64`，改了行高那个按钮每次都停在差几像素的地方",
-			witness: "队列是空的",
+			why:     "它不是一页，是播放时拉出来的一个抽屉；行高是原型 `.qrow` 的 56（40 的封面 + 上下各 8），不随「显示密度」变",
+			witness: "暂无播放内容",
 		},
 		{
 			what: "用户动态",

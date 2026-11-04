@@ -41,7 +41,7 @@ func (s *Shell) viewFullTop(c *ui.Context, st app.State, g fullGeo) {
 	label := s.full.txt.nowPlaying(idx, n)
 	ui.Row(c).Key("full-top").
 		Absolute().Left(0).Right(0).Top(0).Height(max(tb.Height, fullTopH)).
-		Padding(16, fullTopPadX, 16, tb.Left+fullTopPadX).Gap(space.Px8).AlignItems(ui.Center).DragWindow().
+		Padding(space.Px16, fullTopPadX, space.Px16, tb.Left+fullTopPadX).Gap(space.Px8).AlignItems(ui.Center).DragWindow().
 		Children(func() {
 			if pud.IconBtn(c, "full:close", "down", "收起满屏播放器", pud.IconOpts{Color: p.Text, HoverColor: p.Text}).Clicked() {
 				s.closeFullPlayer()
@@ -216,7 +216,7 @@ func (s *Shell) viewFullStats(c *ui.Context, p tok.Palette) {
 	if n == 0 {
 		return
 	}
-	ui.Row(c).Key("full-stats").Margin(space.Px8, 0, 0, 0).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("full-stats").Margin(space.Px8, space.None, space.None, space.None).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 		ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, pud.Icon("danmaku")).FontSize(12).TextColor(p.Text3)
 			fullMono(c, playCountText(int64(n)), scale.Size12, 400, 0, p.Text3)

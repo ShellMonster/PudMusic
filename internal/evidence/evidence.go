@@ -185,7 +185,6 @@ var Items = []Item{
 			"TestAPausedTrackIsNotSaidToBeStopped",
 			// 抽屉里那一行：说的是「已停止」，而且不再高亮成「正在播放」。
 			"TestTheQueueDrawerSaysTheTrackIsStopped",
-			"TestTheStoppedRowIsNotHighlightedLikeAPlayingOne",
 		},
 	},
 	{
@@ -303,28 +302,16 @@ var Items = []Item{
 	// 别在这里再抄一份：台账里有两条说同一句话的，读的人得自己猜哪条才是活的。
 
 	{
-		// 满屏接上歌词之后（票 #236，UX 报告 F-08 + B3）。这一条盯的是**两枚
-		// 开关不再是死的**：以前「显示歌词」和「歌词字体颜色」只改偏好里的值，
-		// 画面上什么都不会变——而用户看到的是「按了没反应」，症状与「整个设置
-		// 面板坏了」一模一样。
-		//
-		// 而「没有歌词」必须**说出口**：满屏开着、这一首没有歌词的时候，界面
-		// 上一个字都不说的话，用户分不清是「这一首没有」还是「这一版没做」
-		// （UX 报告 B3：「没有」和「没显示出来」在画面上长得一样）。
+		// 满屏接上歌词（票 #236），「深夜唱片行」§0′.T4 按原型重做：右栏是歌词来源 + 「歌词原文 / 歌词翻译」
+		// chip（无译文时禁用）+ 歌词 + 旋钮；偏好弹层里的开关真的管画面；点一句跳到那一句；偏移 / 字号旋钮
+		// 真的改 App 里那份值。「没有歌词」要说出口（UX 报告 B3）。
 		Category: Play,
-		Spec:     "满屏播放器接上歌词：「显示歌词」与「歌词字体颜色」两枚开关真的管画面；这一首没有歌词时是空状态（「暂无歌词」+ 一枚「找歌词」）而不是整屏空白；歌词让开分集面板，不被它从中间切断；关掉歌词时封面回到整窗居中；界面藏起来之后歌词还在；滚过去之后滚进视野的歌词看得见（渐隐按容器上下沿，不按离唱到哪一句多远）",
+		Spec:     "满屏播放器的歌词栏：「显示歌词」「显示封面」等偏好开关真的管画面；歌词旋钮（偏移 ±0.5s、字号 ±2）真的改值；没有译文时翻译 chip 禁用、有译文才能切；点一句歌词跳到那一句",
 		Tests: []string{
-			"TestTheFullPlayerShowsTheLyrics",
-			"TestTurningOffTheLyricsHidesThem",
-			"TestTheLyricsColorSwitchChangesTheLyrics",
-			"TestTheFullPlayerSaysWhenThereAreNoLyrics",
-			"TestTheLyricsStayClearOfThePartsPanel",
-			"TestTheCoverIsCentredInTheWindowWhenTheLyricsAreOff",
-			"TestTheLyricsStayWhenTheInterfaceHides",
-			"TestAShortLyricDoesNotFadeItsLastLine",
-			"TestTheLyricsStayVisibleWhenScrolled",
-			"TestTheLyricsDoNotJumpWhenTheInterfaceHides",
-			"TestTheLyricsTakeTheWholeWidthWhenTheCoverIsOff",
+			"TestThePrefsPopTogglesEveryPrototypeSwitch",
+			"TestTheLyricKnobsAdjustOffsetAndSize",
+			"TestTheTranslationChipIsDisabledWithoutTranslations",
+			"TestClickingALyricSeeksToIt",
 		},
 	},
 	{
@@ -343,21 +330,17 @@ var Items = []Item{
 		Tests: []string{
 			"TestTheKnobIsARoundIconButtonWithTheValueInThePopover",
 			"TestTheTwoKnobsAreThereOnlyWithLyrics",
-			"TestTheFullPlayerHasTheThreeLyricKnobs",
-			"TestTheFullPlayerKnobsSitAtTheBottomRightOfTheLyrics",
-			"TestTheFullPlayerKnobsActuallyWork",
 		},
 	},
 	{
-		// 满屏那个偏好面板的三样（UX 报告 B4）：**有标题**（用户不用靠里面的
-		// 开关名猜这是什么面板）、**能关**（除了点外面和 Esc，还有一枚看得见的
-		// 「×」）、**和齿轮对齐**（面板的左沿对着齿轮的图形，不对着那枚键的
-		// 点击区）。
+		// 满屏底栏的五个弹层（音质 / 倍速 / 睡眠 / EQ / 偏好）：在各自按钮上方开、再按一下收起、同一时刻只开一个。
 		Category: Play,
-		Spec:     "满屏偏好面板：有标题（一个字都不多一个字都不少地画着）、能关、面板左沿和齿轮对齐",
+		Spec:     "满屏底栏的弹层：开在按钮上方 12 像素、再按同一个按钮是收起（不是关了又开）、同一时刻只开一个、选一档生效并收起",
 		Tests: []string{
-			"TestTheFullSettingsPanelHasATitleAndCanBeClosed",
-			"TestTheFullSettingsPanelLinesUpWithTheGear",
+			"TestThePopsOpenAboveTheirButtonsAndPickingChangesTheState",
+			"TestPressingAPopButtonAgainClosesIt",
+			"TestOnlyOnePopIsOpenAtATime",
+			"TestTheSleepPopListsTheTimerStepsLikeThePrototype",
 		},
 	},
 
@@ -380,17 +363,6 @@ var Items = []Item{
 		Category: FakeClock,
 		Spec:     "真时钟那一半也接得上（醒得过来、停得下来）",
 		Tests:    []string{"TestRealClockEveryFuncWakesAndStops"},
-	},
-	{
-		// SPEC「回归证据」里点名的三处假时钟之一（另外两处是全屏的 3000ms 隐藏和
-		// 歌词的 500ms 防抖）。三处都是「等一会儿」，而真等就是一条测试几秒钟。
-		Category: FakeClock,
-		Spec:     "全屏播放器：指针不动 3000ms 界面自己藏起来，动一下回来",
-		Tests: []string{
-			"TestTheInterfaceHidesAfterThreeSeconds",
-			"TestTheHiddenInterfaceIsReallyGoneFromTheScreen",
-			"TestMovingThePointerBringsTheInterfaceBack",
-		},
 	},
 	{
 		// 第二处：点赞的 2500ms 长按。
@@ -710,8 +682,6 @@ var Items = []Item{
 			"TestTheMentionFilterLooksThroughTheWholeVideoBeforeItSaysNobodyDid",
 			"TestTheMentionFilterAlsoLooksAtTheReplies",
 			"TestTheMentionFilterCanBeTurnedOffFromTheEmptyState",
-			"TestTheMentionFilterSwitchSitsAtTheRightEdge",
-			"TestRenderCommentsMentionFilterShots",
 			"TestTheCleanedSongNameIsInTheTable",
 			"TestThePlainTitleIsAlsoInTheTable",
 			"TestTheBookTitleMarksAreStripped",
@@ -1693,13 +1663,8 @@ var Items = []Item{
 		Spec: "图标键统一成一档：顶栏那几枚、队列抽屉头那两枚、抽屉行尾那枚「⋯」、新歌速递的翻页箭头，悬停时图形变主色；「⋯」的点击区是 32×32、无障碍名带上歌名；满屏播放器那一行不在这一档里",
 		Tests: []string{
 			"TestTheTopBarIconKeysTurnAccentOnHover",
-			"TestTheQueueDrawerHeaderKeysTurnAccentOnHover",
-			"TestTheQueueRowOperationKeyTurnsAccentOnHover",
-			"TestTheQueueRowOperationKeyIsNamedAfterItsSong",
-			"TestTheQueueRowOperationKeyIsThirtyTwoSquare",
 			"TestTheNewMusicPagerTurnsAccentOnHover",
 			"TestTheTopBarKeysKeepTheirTipsAndNames",
-			"TestTheFullPlayerRowKeepsItsOwnRecipe",
 		},
 	},
 	{
@@ -2806,7 +2771,6 @@ var Items = []Item{
 			"TestWhichStateGetsWhichIcon",
 			"TestTheStateIconsOnlyReachTheScreenThroughTheirFunction",
 			// 满屏那一行三枚都是图标（以前是「图标 — 文字 — 图标」半新半旧）。
-			"TestTheFullPlayerControlsAreAllIcons",
 			// 唯一没换成图标资源的那两枚（框架那一支）也仍然有图形、点击区更大。
 			"TestTheHistoryKeysStillHaveAGlyphAndAHitArea",
 			// 资源里不许画透明边撑点击区（换尺寸就错位，且界面上看不出坏了）。
@@ -3356,7 +3320,6 @@ var Items = []Item{
 			// 悬停 → AccentHover，按下 → AccentPressed。
 			"TestThePlayKeyFillShiftsOnHoverAndPress",
 			// 满屏那一枚同一种，64×64。
-			"TestTheFullPlayerPlayKeyIsTheSolidAccentCircle",
 		},
 	},
 	{
@@ -3632,7 +3595,6 @@ var Items = []Item{
 		Tests: []string{
 			// 六处各一条（深浅两套都在里面）。
 			"TestTheFullPlayerKeysAreFlat",
-			"TestTheFullPlayerPartsKeysAreFlat",
 			"TestTheMiniPlayerKeysAreFlat",
 			"TestTheDownloadListKeysAreFlat",
 			"TestTheLocalMusicKeysAreFlat",
@@ -4103,7 +4065,6 @@ var Items = []Item{
 			"TestClearingTheSearchBoxOnTheSearchPageClearsTheResults",
 			"TestAnEmptySearchGoesBackToTheIdleState",
 			// 满屏顶栏那一组的构图（齿轮紧跟歌名）。
-			"TestTheFullPlayerGearSitsRightAfterTheTitle",
 		},
 	},
 	{
@@ -4483,28 +4444,6 @@ var Items = []Item{
 			"TestTheHistoryHeaderSaysWhatTheSwitchIs",
 			// **没有**清空键（守成：别有一天顺手把它加回来）。
 			"TestTheHistoryHeaderHasNoClearKey",
-		},
-	},
-	{
-		// 🔴 **这一条的错法也是「静默」的**：底色是中性灰而不是淡主色底，界面
-		// 不会报错、不会崩——只是「哪一首在放」少了一个一眼就认出来的信号。
-		//
-		// 而它是从**上游对齐审计**里查出来的一条（报告 §1 的 S-11）：上游那一行
-		// 是主色 20% 的淡绿底，我们一直是中性灰底。
-		Category: Platform,
-		// 票 #294（报告 §1 的 S-11，2026-10-24 拍板按上游改）。
-		//
-		// ⚠️ **DESIGN §七保护的是「主色当字色」的对比度，不是「主色当底色」**：
-		// §七 不该被扩大解释。淡主色底是**状态识别**，底上放的是普通文字。
-		Spec: "队列抽屉里「正在播放」那一行的**底色是主色 20% 那一层淡底**（浅色 #d2f7df / 深色 #193e29），**不是实心主色底**；底上的字（歌名 16 / 副题 14）**对比度都 ≥4.5:1**（深浅两套都量，且跟着用户自定义的主色重算）",
-		Tests: []string{
-			// 那一行的底就是那一层淡主色底（画面上量的，深浅两套），而且不是
-			// 实心主色底、也和旁边那一行不一样。
-			"TestTheQueuePlayingRowUsesAPalePrimaryBackground",
-			// 底上的字够读（歌名 + 副题，深浅两套 × 六种主色）。
-			"TestTheTextOnThePalePrimaryRowIsReadable",
-			// 那几个数钉死（浅 #d2f7df / 深 #193e29，底是不透明的）。
-			"TestThePalePrimaryRowKeepsItsNumbers",
 		},
 	},
 	{

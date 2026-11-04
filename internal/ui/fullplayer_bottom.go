@@ -17,7 +17,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
@@ -200,7 +199,7 @@ func (s *Shell) viewFullControls(c *ui.Context, st app.State, g fullGeo) {
 			s.viewFullRate(c, st)
 			s.viewFullDanmakuToggle(c)
 		})
-		ui.Row(c).Key("full-ctrl-mid").Width(fullCtrlCenterW).Shrink(0).Gap(24).AlignItems(ui.Center).Justify(ui.Center).
+		ui.Row(c).Key("full-ctrl-mid").Width(fullCtrlCenterW).Shrink(0).Gap(space.Px24).AlignItems(ui.Center).Justify(ui.Center).
 			Children(func() {
 				s.viewFullTransport(c, st)
 			})
@@ -438,7 +437,6 @@ func (s *Shell) fullPop(c *ui.Context, which int, anchor ui.Element, key string,
 		*flag = !was
 	}
 	ui.PopoverBase(c, anchor, flag, func(panel ui.Element) {
-		p := tok.OfFull(c.Theme())
 		at, self := ui.AnchorTopStart, ui.AnchorBottomStart
 		if alignEnd {
 			at, self = ui.AnchorTopEnd, ui.AnchorBottomEnd
@@ -447,10 +445,7 @@ func (s *Shell) fullPop(c *ui.Context, which int, anchor ui.Element, key string,
 		if wide {
 			minW = 300
 		}
-		panel = panel.Key(key).AttachTo(anchor, at, self).Margin(0, 0, space.Px12, 0).
-			MinWidth(minW).Padding(space.Px8).Radius(tok.R12).
-			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn).Label(key)
-		shadow.Pop(panel, c.Theme())
+		pud.PopStyle(c, panel, key, minW).AttachTo(anchor, at, self).Margin(space.None, space.None, space.Px12, space.None)
 		ui.Column(c).Children(content)
 	})
 }

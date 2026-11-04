@@ -41,9 +41,9 @@ func TestEveryHandMadePopupHasAShadow(t *testing.T) {
 		handMade := strings.Contains(text, ".Popup(func(") ||
 			strings.Contains(text, "PopoverBase(c,")
 		if handMade && !strings.Contains(text, "popupPanel(") &&
-			!strings.Contains(text, "popupPanelCard(") {
+			!strings.Contains(text, "popupPanelCard(") && !strings.Contains(text, "pud.PopStyle(") {
 			t.Errorf("%s 自己拼了一个浮层面板，却没有走 `popupPanel` / `popupPanelCard`——"+
-				"漏掉的那件是阴影（框架的 `stylePanel` 有）", name)
+				"漏掉的那件是阴影（框架的 `stylePanel` 有；「深夜唱片行」的出口还有 `pud.PopStyle`）", name)
 		}
 	}
 }

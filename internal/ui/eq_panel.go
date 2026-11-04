@@ -272,7 +272,7 @@ func (s *Shell) deleteEQPreset(name string) {
 const (
 	// fullEQBandW / fullEQBandGap / fullEQSliderH 是满屏里每一段的宽、缝和滑杆高。
 	fullEQBandW   = 28
-	fullEQBandGap = 8
+	fullEQBandGap = space.Px8
 	fullEQSliderH = 110
 )
 
@@ -311,7 +311,7 @@ func (s *Shell) fullEQContent(c *ui.Context) {
 	}
 	pud.PopHeading(c, "均衡器 · "+curName)
 
-	ui.Box(c).FillWidth().Padding(0, space.Px8, space.Px8, space.Px8).Children(func() {
+	ui.Box(c).FillWidth().Padding(space.None, space.Px8, space.Px8, space.Px8).Children(func() {
 		sel := pud.SelectBox(c, "full:eq:select", curName, 0).FillWidth()
 		if sel.Clicked() {
 			s.full.eqSel = !s.full.eqSel
@@ -342,8 +342,8 @@ func (s *Shell) fullEQContent(c *ui.Context) {
 			})
 		}
 	})
-	ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Padding(0, space.Px8, 0, space.Px8).
-		Margin(space.Px8, 0, 0, 0).Children(func() {
+	ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Padding(space.None, space.Px8, space.None, space.Px8).
+		Margin(space.Px8, space.None, space.None, space.None).Children(func() {
 		ui.TextInputBase(c, &s.settings.eqName).Label("均衡器预设名称").Placeholder("另存为预设…").
 			Grow(1).Height(36).PaddingX(space.Px12).Radius(tok.R8).Background(p.Surface2).Border(1, p.LineStrong).
 			TextColor(p.Text).FontSize(scale.Font(c, scale.Size13))
