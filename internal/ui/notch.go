@@ -600,7 +600,7 @@ func (s *Shell) viewNotchWings(c *ui.Context, st app.State, shown float32) {
 	n := &s.notchSt
 	sz := n.h0 - 12
 	ui.Row(c).Absolute().Top(0).Left(0).Right(0).Height(n.h0).
-		PaddingX(7).AlignItems(ui.Center).Opacity(shown).
+		PaddingX(space.Px7).AlignItems(ui.Center).Opacity(shown).
 		Children(func() {
 			cov := ui.Box(c).Size(sz, sz).Radius(sz * 0.28).Clip()
 			if st.CoverURL == "" {
@@ -653,7 +653,7 @@ func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
 	}
 	n := &s.notchSt
 	row := ui.Row(c).Absolute().Top(n.h0+2).Left(left).Width(notchHelloW).
-		Padding(6, 14, 14, 20).Gap(12).AlignItems(ui.Center).
+		Padding(space.Px6, space.Px14, space.Px14, space.Px20).Gap(space.Px12).AlignItems(ui.Center).
 		Opacity(max(0, shown*1.4-0.4))
 	row.Translate(0, (1-shown)*-8)
 	row.Children(func() {
@@ -661,11 +661,11 @@ func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
 		if !n.real {
 			title, hint = "屏幕顶部也能控制播放", "指针移到顶部中央，即可暂停、切歌"
 		}
-		ui.Column(c).Grow(1).MinWidth(0).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px2).Children(func() {
 			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).SingleLine()
 			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size12)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
 		})
-		b := ui.ButtonBase(c.Key("notch-keep")).Padding(6, 14).Radius(999).
+		b := ui.ButtonBase(c.Key("notch-keep")).Padding(space.Px6, space.Px14).Radius(999).
 			Background(c.Theme().Accent).FocusRing(false).Label("开启刘海播放器")
 		b.Children(func() {
 			ui.Text(c, "开启").FontSize(scale.Font(c, scale.Size13)).FontWeight(600)
@@ -683,16 +683,16 @@ func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 	}
 	n := &s.notchSt
 	ui.Row(c).Absolute().Top(n.h0+4).Left(left).Width(notchIdleW).
-		Padding(10, 20, 14, 20).Gap(12).AlignItems(ui.Center).
+		Padding(space.Px10, space.Px20, space.Px14, space.Px20).Gap(space.Px12).AlignItems(ui.Center).
 		Opacity(max(0, open*1.4-0.4)).Children(func() {
 		ui.Box(c).Size(36, 36).Radius(10).Background(c.Theme().Accent).Center().Children(func() {
 			ui.Icon(c, icon(iconPlay)).Size(18, 18).TextColor(ui.RGB(255, 255, 255))
 		})
-		ui.Column(c).Grow(1).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
 			ui.Text(c, appName).FontSize(scale.Font(c, scale.Size14)).FontWeight(700)
 			ui.Text(c, "未在播放").FontSize(scale.Font(c, scale.Size12)).TextColor(ui.RGBA(255, 255, 255, 0.5))
 		})
-		b := ui.ButtonBase(c.Key("notch-open")).Padding(6, 14).Radius(999).
+		b := ui.ButtonBase(c.Key("notch-open")).Padding(space.Px6, space.Px14).Radius(999).
 			Background(ui.RGBA(255, 255, 255, 0.14)).FocusRing(false).Label("打开")
 		b.Children(func() {
 			ui.Text(c, "打开").FontSize(scale.Font(c, scale.Size13)).FontWeight(600)
@@ -707,12 +707,12 @@ func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float32) {
 	n := &s.notchSt
 	col := ui.Column(c).Absolute().Top(n.h0+6).Left(left).Width(notchOpenW).
-		Padding(8, 22, 16, 22).Gap(12).
+		Padding(space.Px8, space.Px22, space.Px16, space.Px22).Gap(space.Px12).
 		Opacity(max(0, open*1.4-0.4))
 	col.Translate(0, (1-open)*-10)
 	col.Children(func() {
 		// 上行：封面 + 歌名/歌手 + 频谱。
-		ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px14).AlignItems(ui.Center).Children(func() {
 			cov := ui.Box(c).Size(60, 60).Radius(12).Clip()
 			if st.CoverURL == "" {
 				cov.Background(ui.RGBA(255, 255, 255, 0.12))
@@ -720,7 +720,7 @@ func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float3
 			cov.Children(func() {
 				imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, 60, 60)
 			})
-			ui.Column(c).Grow(1).MinWidth(0).Gap(4).Children(func() {
+			ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
 				ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size15)).FontWeight(700).SingleLine()
 				if st.Loading {
 					ui.Text(c, "正在缓冲…").FontSize(scale.Font(c, scale.Size13)).TextColor(ui.RGBA(255, 255, 255, 0.55)).SingleLine()
@@ -731,7 +731,7 @@ func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float3
 			s.viewNotchLevels(c, st, 26, 22, 5)
 		})
 		// 中行：进度。
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size11)).
 				FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.5)).Width(30)
 			s.viewNotchProgress(c, st)
@@ -739,8 +739,8 @@ func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float3
 				FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.5)).Width(34).TextAlign(ui.End)
 		})
 		// 下行：控制键。
-		ui.Box(c).Margin(-6, 0, 0, 0).Children(func() {
-			ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Box(c).Margin(-6, space.None, space.None, space.None).Children(func() {
+			ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).Children(func() {
 				if flatIconButton(c, iconPrev, "上一首", 18).
 					Key("notch-prev").Size(28, 28).Padding(space.None, space.Px5).
 					Disabled(!s.app.CanPrev()).Clicked() {
