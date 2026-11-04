@@ -30,7 +30,6 @@ package ui
 import (
 	"image"
 	"image/color"
-	"net/http"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -156,36 +155,8 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 			// 下拉了**：下拉里「当前值」是淡底（`enumSelect` 的口径），不是导航列
 			// 上那种「当前在哪」的实心主色信标，所以它不再归这一条管。
 
-			t.Run("动态页作者栏", func(t *testing.T) {
-				b := newUIExplore(t)
-				uiSpaceData(b, "我自己", 0, 1)
-				b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
-					uiExploreJSON(w, 0, map[string]any{"items": []any{}, "has_more": false})
-				})
-				b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
-					uiExploreJSON(w, 0, map[string]any{"total": 1, "list": []any{
-						map[string]any{"mid": 11, "uname": "第一个 UP", "face": "https://f/1.jpg"},
-					}})
-				})
-				s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(dark))
-				s.navigate(dynamicFeedPath)
-				tt.Frame()
-				f := s.dynamicFeedOf()
-				waitFrames(t, tt, "关注的人到了", func() bool { return len(f.authors) >= 1 })
-				tt.Frame()
-
-				cur, ok := tt.Find("全部")
-				if !ok {
-					t.Fatalf("作者栏没有「全部」那一行，文字有 %q", tt.Texts())
-				}
-				sib, ok := tt.Find("第一个 UP")
-				if !ok {
-					t.Fatalf("作者栏没有那个人，文字有 %q", tt.Texts())
-				}
-				theme := BuildTheme(app.DefaultSettings(""), dark)
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "动态页作者栏",
-					flatSolidCurrentText(theme)}, tt.Image(), dark)
-			})
+			// 动态页的作者栏已经换成顶上那排 chip（原型 `.filter-rail`）：选中的 chip 是「正文色底 +
+			// bg 色字」的反色，不是侧栏那种实心主色信标，所以它不再归这一条管。
 
 			t.Run("侧栏收藏夹", func(t *testing.T) {
 				s, _, tt, _ := favShell(t, 2, 0, systemIsDark(dark))

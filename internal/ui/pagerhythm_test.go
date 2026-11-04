@@ -273,6 +273,14 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 	// 那一排「播放全部」都在左缘上。
 	t.Run("收藏夹", func(t *testing.T) {
 		_, _, tt := collectionShellOpts(t, nil, "", "12345", mediaOf(1, "歌 一"))
+		// 头部是通栏取色底（原型 `margin: 0 -40px`），从内容区左缘就有墨；页边距看的是它下面
+		// 那一排操作条：「播放全部」键贴着页边距（窗口宽 1200 → 40）。
+		play, ok := tt.Find("播放全部")
+		if !ok {
+			t.Fatalf("找不到「播放全部」，文字有 %q", tt.Texts())
+		}
+		want := want - wantPad + int(winPad(float32(tt.Image().Bounds().Dx())))
+		area := image.Rect(area.Min.X, int(play.Y)-12, area.Max.X, int(play.Y+play.H)+12)
 		got := leftmostInk(tt.Image(), area)
 		if got < 0 {
 			t.Fatalf("这一页上一点墨都没有，文字有 %q", tt.Texts())
@@ -849,10 +857,13 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 	for _, page := range []struct {
 		name string
 		path string
+		// said / action 是这一页没登录时说的话和给的那一步：关注页是原型的 `loginPrompt`，
+		// 另外两页还是旧的「还没登录 / 去登录」（T7 改版时再换）。
+		said, action string
 	}{
-		{name: "我的关注", path: followPath},
-		{name: "稍后再看", path: laterPath},
-		{name: "历史记录", path: historyPath},
+		{name: "我的关注", path: followPath, said: "登录后查看关注", action: "扫码登录"},
+		{name: "稍后再看", path: laterPath, said: "还没登录", action: "去登录"},
+		{name: "历史记录", path: historyPath, said: "还没登录", action: "去登录"},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			// ⚠️ **B 站客户端要挂着、但不登录**：没挂上的时候页面画的是「还没接上
@@ -864,11 +875,11 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 			tt.Frame()
 			tt.Frame()
 
-			if !tt.HasText("还没登录") {
-				t.Errorf("%s 没登录时没说「还没登录」，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText(page.said) {
+				t.Errorf("%s 没登录时没说「%s」，文字有 %q", page.name, page.said, tt.Texts())
 			}
-			if !tt.HasText("去登录") {
-				t.Errorf("%s 没登录时没给「去登录」那一步，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText(page.action) {
+				t.Errorf("%s 没登录时没给「%s」那一步，文字有 %q", page.name, page.action, tt.Texts())
 			}
 			// 空列表那一句**不许**出现：用户要的是「先登录」，不是「这里没有」。
 			if empty := lookup(page.path).Empty.Title; tt.HasText(empty) {

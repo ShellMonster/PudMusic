@@ -149,7 +149,7 @@ func TestTheErrorReasonIsNotCutOff(t *testing.T) {
 // ⚠️ **量的是面板而不是标题那行字**：`Find(标题)` 给的是**面板**（面板是标题的
 // 父，父先被遍历）。
 func TestTheConfirmPanelIsWideEnough(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345",
+	_, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "1", "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	openBatchConfirm(t, tt, "批量删除")

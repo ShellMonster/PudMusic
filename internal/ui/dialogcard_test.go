@@ -28,7 +28,7 @@ func TestDialogCardIsTheSurfaceToken(t *testing.T) {
 // TestEnterDoesNotConfirmADangerDialog：删除类弹窗一出来，直接按回车**不会**删
 // （设计规范 §7.19：默认焦点在安全选项上，不得默认聚焦确认键）。
 func TestEnterDoesNotConfirmADangerDialog(t *testing.T) {
-	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	b, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "1", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	openBatchConfirm(t, tt, "批量删除")
 	wantText(t, tt, "确认删除选中的 2 首吗？")

@@ -43,7 +43,7 @@ import (
 // 里，默认方案换成暖纸（Danger 是它自己的 #C93B3B）之后图标没变、钉的字面值
 // 过期了——跟着主题断言，换方案这案件就不会再发。
 func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345",
+	_, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "1", "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	openBatchConfirm(t, tt, "批量删除")
@@ -79,7 +79,7 @@ func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
 // 判据：**那个标题在 `Texts()` 里出现两次**——一次是面板的无障碍名字，一次是
 // 那个标题字本身（原生那一份也是这样：它也是 `Label` + 一个同名文字）。
 func TestTheConfirmDialogHasANameInTheAccessibilityTree(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345",
+	_, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "1", "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	openBatchConfirm(t, tt, "批量删除")
@@ -112,7 +112,7 @@ func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
 	warning := color.RGBA{R: th.Warning.R, G: th.Warning.G, B: th.Warning.B, A: th.Warning.A}
 
 	t.Run("危险", func(t *testing.T) {
-		_, s, tt := collectionShell(t, "12345",
+		_, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "1", "12345",
 			mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 		waitSongs(t, tt, s, 3)
 		openBatchConfirm(t, tt, "批量删除")
@@ -205,7 +205,7 @@ func TestTheConfirmBodyIsTextSmall(t *testing.T) {
 // ⚠️ **和上游不一样是故意的**：上游要的是「不显眼」，我们要的是「看得出是个键，
 // 而且和旁边那颗实心主键分得开」。
 func TestTheCancelButtonKeepsItsShell(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345",
+	_, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "1", "12345",
 		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	openBatchConfirm(t, tt, "批量删除")

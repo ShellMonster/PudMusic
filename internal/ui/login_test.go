@@ -689,9 +689,9 @@ func TestTheNotLoggedInScreenHasItsOwnIllustration(t *testing.T) {
 			}))
 			s.navigate(followPath)
 			waitFrames(t, tt, "「还没登录」那一支画出来了", func() bool {
-				return tt.HasText("还没登录")
+				return tt.HasText("登录后查看关注")
 			})
-			if n := paintedInBand(t, tt, "还没登录"); n < 20 {
+			if n := paintedInBand(t, tt, "登录后查看关注"); n < 20 {
 				t.Errorf("「还没登录」那一屏的插画那一带只画了 %d 个像素（want ≥ 20）——"+
 					"它和别页的空状态长得不一样（别的页都有一枚图标）", n)
 			}

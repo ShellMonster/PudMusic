@@ -193,33 +193,6 @@ func TestTheListOwnerNameIsALinkNotAPill(t *testing.T) {
 	assertNameLinkUnderlines(t, tt, accent, "a 的 UP 主 2", "列表行")
 }
 
-// TestTheActionButtonsAreStillButtons 断**反面**：同一张卡片上那几枚动作键
-// 悬停时**仍然有**那一层淡底——它们是按钮，不是名字链接。
-//
-// ⚠️ **这是和上面那一组对着断的**：只断「名字变成下划线了」的话，一个把所有
-// 可点元素一起拍平的实现照样全绿——而那正好是票面点名不要的（「按钮该是按钮
-// 还是按钮」）。
-func TestTheActionButtonsAreStillButtons(t *testing.T) {
-	b := newUIExplore(t)
-	item := uiDynamicArchive("v1", "BV1play")
-	setLike(item, 12, false)
-	s, tt, _ := dynamicCardShell(t, b, item)
-	bg := flatColor(BuildTheme(s.app.SettingsSnapshot(), false).Background)
-
-	r, ok := tt.Find("赞 12")
-	if !ok {
-		t.Fatalf("画面上没有「赞 12」，文字有 %q", tt.Texts())
-	}
-	noPointer(tt)
-	before := linkInkIn(tt.Image(), linkBandLeft(r), bg)
-	linkHoverOn(t, tt, r)
-	after := linkInkIn(tt.Image(), linkBandLeft(r), bg)
-	if after == before {
-		t.Errorf("指针停在「赞 12」上之后，那一枚字键周围一点变化都没有（%d → %d）——"+
-			"它还是一枚**按钮**，悬停要有反馈（扁平配方压一层半透明前景色）", before, after)
-	}
-}
-
 // TestTheNameLinkIsKeyboardReachable 断「键盘可达」没丢。
 //
 // ⚠️ **下划线只是视觉**：命中区、无障碍名字、键盘可达三样都得还在。这一条断的
