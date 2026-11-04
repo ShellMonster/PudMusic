@@ -197,6 +197,11 @@ func TestLoginFromTheDynamicPageComesBackToTheDynamicPage(t *testing.T) {
 	tt.Frame()
 
 	// 动态页没登录是原型的 `loginPrompt('动态')`：页头 + 「扫码登录」，登录完回动态页。
+	// 900×600 的窗口里虚线框被播放条压住一截，键在折叠线下面：先把页面滚上去（用户也得这么做）。
+	tt.Scroll(450, 300, 0, 400)
+	for range 3 {
+		tt.Frame()
+	}
 	if err := tt.Click("扫码登录"); err != nil {
 		t.Fatalf("动态页上点不到「扫码登录」：%v，文字有 %q", err, tt.Texts())
 	}

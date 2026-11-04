@@ -512,14 +512,15 @@ func TestTheDynamicFeedMatchesThePrototypeLayout(t *testing.T) {
 	}
 
 	// ④ 两条动态之间那条下边框：扫两行之间，找一行贯穿卡片整宽的线。
-	second, ok := tt.Find("投稿 BV1xx")
+	_, ok = tt.Find("投稿 BV1xx")
 	if !ok {
 		t.Fatalf("画面上找不到第二条动态，文字有 %q", tt.Texts())
 	}
-	// `.feed` 最宽 760，下边框就铺这 760。
+	// `.feed` 最宽 760，下边框就铺这 760。边框是第一条自己的下边（两条之间没有缝，第二条的上沿就是它的
+	// 下沿），所以扫到第一条的下沿那一行为止（含）。
 	ref := img.RGBAAt(int(card.X)+4, int(card.Y)+4)
 	if _, ok := fullWidthRule(img, int(card.X), int(card.X)+feedMaxW,
-		int(card.Y), int(second.Y), ref); !ok {
+		int(card.Y), int(card.Y+card.H)+1, ref); !ok {
 		t.Errorf("两条动态之间没有贯穿 760 宽的一条下边框（`.post` 的 border-bottom 没画）")
 	}
 }

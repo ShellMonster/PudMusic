@@ -1800,9 +1800,9 @@ func TestTheSpaceAvatarIs112AndTheHeaderUsesThePagePadding(t *testing.T) {
 		t.Fatalf("画面上找不到「LV4」，文字有 %q", tt.Texts())
 	}
 
-	// 头像压在 168 高的头图带下沿：头部往上压 48，所以头像（含环）上沿在页面顶往下 120。
-	if av.Y-64 != upAvatarTop {
-		t.Errorf("头像上沿在 %.1f（页面顶 64 往下 %.1f），want %d", av.Y, av.Y-64, upAvatarTop)
+	// 头像压在 168 高的头图带下沿：头部往上压 48，所以头像（含环）上沿在页面顶（顶栏 60 之下）往下 120。
+	if av.Y-navMinHeight != upAvatarTop {
+		t.Errorf("头像上沿在 %.1f（页面顶 %d 往下 %.1f），want %d", av.Y, navMinHeight, av.Y-navMinHeight, upAvatarTop)
 	}
 }
 

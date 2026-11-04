@@ -21,7 +21,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
@@ -143,14 +142,8 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 	}
 	top := hero[0]
 
-	// 背景：封面取色按 22% 混进底色。
-	tint := ui.RGB(0x33, 0x33, 0x33)
-	if hue, sat := s.tint.sync(imgcache.FormatURLProtocol(top.Cover), s.wake.invalidate); sat > 0 {
-		if col, ok := parseHexColor(covertint.Hue{H: hue, S: sat}.Color(c.Theme().Dark)); ok {
-			tint = col
-		}
-	}
-	bg := p.Bg.Mix(tint, tok.TintHero)
+	// 背景：封面取色按 22% 混进底色；取不到色时用 #333（和收藏夹头部同一个混色入口）。
+	bg := s.tintBackgroundOr(c, imgcache.FormatURLProtocol(top.Cover), tok.TintHero, ui.RGB(0x33, 0x33, 0x33))
 
 	box := ui.Row(c).Key("home:hero").FillWidth().Radius(tok.R12).Background(bg).Clip().
 		Padding(pad).Gap(gap).AlignItems(ui.Center)

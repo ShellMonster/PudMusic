@@ -3474,9 +3474,6 @@ var Items = []Item{
 			// 六处各一条（深浅两套都在里面）。
 			"TestTheFullPlayerKeysAreFlat",
 			"TestTheMiniPlayerKeysAreFlat",
-			"TestTheCollectionKeysAreFlat",
-			"TestTheDownloadListKeysAreFlat",
-			"TestTheLocalMusicKeysAreFlat",
 			"TestTheDynamicCardKeysAreFlat",
 			// 反面：该保留描边的那一批。
 			"TestTheDialogButtonsStayOutlined",
@@ -3506,8 +3503,6 @@ var Items = []Item{
 		Tests: []string{
 			"TestTheDynamicAuthorNameIsALinkNotAPill",
 			"TestThePlaybarOwnerNameIsALinkNotAPill",
-			"TestTheActionButtonsAreStillButtons",
-			"TestTheListOwnerNameIsALinkNotAPill",
 			"TestTheNameLinkIsKeyboardReachable",
 			"TestTheUnderlineColorFollowsTheTheme",
 		},
@@ -4761,8 +4756,6 @@ var Items = []Item{
 		Tests: []string{
 			"TestTheCoverLoadingFillIsVisibleOnALightPage",
 			"TestTheCoverLoadingCellShimmers",
-			"TestTheAuthorPaneSaysItIsLoading",
-			"TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing",
 			"TestTheCollectionHeaderDoesNotClaimZeroMedia",
 			"TestTheCollectionOwnerRowKeepsItsSlot",
 			"TestTheShimmerFlagIsTheWindowsOwnFlag",

@@ -251,7 +251,7 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 	// 稍后再看 / 历史记录 / 本地音乐 / 下载记录 / 搜索 / 统计 已按 §0′ 改版：页边距按窗口宽（1200 → 40），
 	// 由 `TestThePrototypePagesShareTheWindowBasedMargin` 管；首页由 `homepage_test.go` 管。
 	// 这一张表里只剩收藏夹：它的头部是通栏取色底，页边距要看头部下面的操作条（T3 已按窗口宽 1200 → 40 改完）。
-	// 关注 / 动态页在 `TestThePrototypePagesShareTheWindowBasedMargin`。
+	// 动态页在 `TestTheDynamicFeedMatchesThePrototypeLayout`，UP 空间在 `TestTheSpaceAvatarIs112AndTheHeaderUsesThePagePadding`。
 
 	// 收藏夹那一页**要等容器拉回来**：头图区第一帧是「正在加载…」，那一帧画面上
 	// 最靠左的是居中的那一格（不是内容区的左缘）。等它加载完，头图区和下面
@@ -1434,7 +1434,7 @@ func TestTheCollectionHeaderStaysInsideTheCoverOnOneLine(t *testing.T) {
 }
 
 // TestThePrototypePagesShareTheWindowBasedMargin 钉住按原型改版的列表页（稍后再看 / 历史 / 本地 / 下载 /
-// 搜索 / 统计 / 我的关注 / 用户动态；收藏夹和 UP 空间的页边距见各自的测试）：左右页边距按**窗口宽**（`.page` 的 40 / 32 / 16，默认 1200 → 40），标题是同一档
+// 搜索 / 统计；收藏夹、UP 空间、关注、动态的页边距见各自的测试）：左右页边距按**窗口宽**（`.page` 的 40 / 32 / 16，默认 1200 → 40），标题是同一档
 // （`clamp(32, 3.4vw, 48)` → 1200 时 40.8）——六页的墨迹左缘一致、标题墨迹高度一致。
 func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
 	sideW := float64(tok.SideW) // 侧栏固定 232
@@ -1451,9 +1451,6 @@ func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
 		{name: "本地音乐", path: localMusicPath},
 		{name: "下载记录", path: downloadListPath},
 		{name: "搜索", path: searchPath + "?q=%E5%A4%9C%E7%A9%BA"},
-		// T3：没登录时关注 / 动态页是页头 + 「登录后查看…」，页头和页边距与登录后同一套。
-		{name: "我的关注", path: followPath},
-		{name: "用户动态", path: dynamicFeedPath},
 	} {
 		b := newTestShell(t, page.opts...)
 		s, tt := b.s, b.tt
@@ -1478,5 +1475,28 @@ func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
 				t.Errorf("「%s」标题墨迹 %d 行，「%s」是 %d 行——同一个 `.h-page` 字号", name, h, other, oh)
 			}
 		}
+	}
+}
+
+// TestTheFollowPageUsesTheWindowBasedMargin 钉住登录后的「我的关注」页：左右页边距按窗口宽（`.page` 的
+// 40 / 32 / 16，默认 1200 → 40），页头标题是 `.h-page` 同一档字号（1200 → 40.8，和别的列表页一致）。
+// 没登录的那一支在 `TestThePagesThatNeedLoginSaySo` 里管。
+func TestTheFollowPageUsesTheWindowBasedMargin(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{-10: "特别关注", 0: "默认分组"})
+	uiFollowList(b, 2, []any{uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP")})
+	uiFollowSearch(b, "", nil)
+	s, tt, _ := newSpaceShell(t, b, true, "77")
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	waitFrames(t, tt, "关注的人到了", func() bool { return len(f.users) == 2 && f.tagStarted })
+	tt.Frame()
+
+	sideW := float64(tok.SideW)
+	want := int(sideW) + int(space.PageHorizontalForWindow(float32(tt.Image().Bounds().Dx())))
+	got := leftmostInk(tt.Image(), contentArea(sideW))
+	if got < want-2 || got > want+2 {
+		t.Errorf("关注页的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 40）", got, want, int(sideW))
 	}
 }
