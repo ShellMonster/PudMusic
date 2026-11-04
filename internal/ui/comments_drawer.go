@@ -48,7 +48,10 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -89,80 +92,52 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 		return
 	}
 	t := c.Theme()
+	p := tok.Of(t)
 	ui.Overlay(c, func() {
-		// ⚠️ **底边留出底下那一条的高度**（理由同 `queue_drawer.go`）：这一层
-		// 是吃点击的，不留出播放条那一截，播放条就**整个被它盖住**——抽屉
-		// 开着时按播放、上一首、下一首都按不动。
-		//
-		// 满屏开着的时候底下那一条是满屏的底栏（108 高），不是播放条——让出的
-		// 高度要跟着它。
+		// 底边留出播放条（原型 `.scrim` / `.drawer` 的 `bottom: var(--bar-h)`；播放条高度只认 `playbarHeight` 一处）；满屏开着时铺到底。
 		bottomInset := float32(playbarHeight)
 		if s.full.open {
 			bottomInset = 0
 		}
+		winW, _ := c.Size()
+		width := min(float32(commentsDrawerWidth), winW)
+
+		// 遮罩可见的那一层（32% 黑，淡入；退场往透明走），理由同 `viewQueueDrawer`。
+		fade := float32(0)
+		if s.commentsPhase == drawerOut {
+			fade = 1
+		}
+		ui.Box(c).Key("comments-scrim").Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset).
+			Background(ui.RGBA(0, 0, 0, scrim.Drawer)).PassThrough().Transition(motion.ScrimIn).
+			AnimatePose(ui.Pose{Fade: fade}, queueSlideOutAnim)
+
 		back := ui.Row(c).Key("comments-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset)
-		// ⚠️ **面板跟着蒙版让出底下那条**（理由见文件头《面板让出底下的播放
-		// 条》）：面板的 `Bottom` 是相对于**蒙版**的，`Bottom(0)` 时它的下缘 =
-		// 蒙版底 = 窗口底 − bottomInset——底下那条播放条照旧露在面板下面，
-		// 看得见也点得着。
 		if s.commentsPhase == drawerOut {
-			// ⚠️ **退场那 200ms 里，这片蒙版不吃点击**（理由同 `queue_drawer.go`）：
-			// 它是**透明**的，用户看不见它，而它盖住整页——看不见的东西吃点击，
-			// 就是「点不动」。
+			// 退场那 220ms 里，这片透明蒙版不吃点击（看不见的东西吃点击就是「点不动」）。
 			back = back.PassThrough()
 		} else {
-			// ⚠️ **开着的时候它是模态**：Modal 把焦点关进抽屉、外面那些快捷键
-			// 让路，而底下那一页在它开着的时候点不动。
 			back = back.Modal()
 		}
 		back.Children(func() {
-			// ⚠️ **面板底色取 `cardBackground`**（理由同 `queue_drawer.go`）：设计
-			// 规范把卡片、弹层的底统一到这一个出口；深色下「靠底色差分层」不够，
-			// 靠的是**左边那道影 + 左缘那条线**。
-			//
-			// ⚠️ **面板是绝对定位的**：进出场要动的是**布局位置**，而 flex 那一套
-			// 摆不出「从右边滑进来」——绝对定位按 **inset** 摆，那才是「从窗口
-			// 右边挪进来」能用的那一套（理由同 `queue_drawer.go`）。
 			panel := shadow.Pop(ui.Column(c).Key("comments-drawer").
-				Absolute().Top(0).Bottom(0).Width(commentsDrawerWidth).
-				Background(s.cardBackground(t)).BorderStartWidth(1).BorderColor(t.Border), t)
-			// ⚠️ **面板在退场时照旧接点击**：它还在屏幕上（滑出去那一段看得见），
-			// 而「看不见的东西吃点击」才是坏的（那是底下那片蒙版）。
-			//
-			// ⚠️ **别用 `Disabled` 关它**：框架把禁用画成**半透明**，那会让面板
-			// 一边滑一边淡——变成「淡出」而不是「滑出」了。
+				Absolute().Top(0).Bottom(0).Width(width).
+				Background(p.Surface).BorderStartWidth(1).BorderColor(p.Line), t)
 			panel.Role(ui.RoleDialog).Label("评论").
 				Children(func() {
 					s.viewCommentsDrawerBody(c, t)
 				})
 
-			// ---- 进出场 ----
-			//
-			// 动的是面板的**右边距**：0 = 贴住窗口右沿（到位了），
-			// -commentsDrawerWidth = 整个面板在窗口外面（还没进来）。
-			//
-			// ⚠️ **动的是布局位置，不是 transform**（DESIGN.md §五：「动画不要用
-			// transform 动大子树……要动就动**布局位置**」）。软件渲染回退时
-			// transform 会让整棵子树逐像素重绘。
-			//
-			// ⚠️ **第一次建要 Jump 一下**：框架的规矩是「一个值从它的第一个目标
-			// 开始」，所以不先 Jump 的话面板会**直接出现在**右沿上，没有滑入。
 			if justIn {
-				panel.Jump(commentsSlideKey, -commentsDrawerWidth)
+				panel.Jump(commentsSlideKey, -width)
 			}
-			// 目标：开着就贴住右沿（0），关着就整个在窗口外面。
 			target := float32(0)
 			if s.commentsPhase == drawerOut {
-				target = -commentsDrawerWidth
+				target = -width
 			}
-			slide := panel.AnimateTo(commentsSlideKey, target, queueSlideAnim)
+			slide := panel.AnimateTo(commentsSlideKey, target, drawerSlide(target))
 			panel = panel.Right(slide)
 
-			// 到位了 / 滑到头了：换一段。
-			//
-			// ⚠️ **用 Settled 不用 Arrived**（理由同 `queue_drawer.go`）：退场这一段
-			// 要的是「滑到头了就把面板拆掉」。
 			if panel.Settled(commentsSlideKey) {
 				switch s.commentsPhase {
 				case drawerIn:
@@ -173,14 +148,6 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 			}
 		})
 
-		// 关抽屉的两条路：点底下那一层、按 Esc。少一条的表现是「我明明点了外面，
-		// 它还在」，另一条少的是「按了 Esc 什么都没发生」。
-		//
-		// ⚠️ 用 `back.Clicked()`，**不要用 `panel.PressedOutside()`**（理由见
-		// 文件头）。
-		//
-		// ⚠️ **这里是「=false」不是「= !commentsOpen」**：关的动作是幂等的——
-		// 退场那 200ms 里用户再点一次外面，不该把抽屉又打开。
 		if back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
 			s.commentsOpen = false
 		}

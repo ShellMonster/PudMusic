@@ -82,6 +82,9 @@ package ui
 
 import (
 	"fmt"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"strconv"
 	"strings"
 
@@ -119,13 +122,13 @@ var commentsSortLabels = []string{"最热", "最新"}
 // 这一页的几个尺寸。
 const (
 	// commentAvatar 是主评论那一枚头像的边长。
-	commentAvatar = 32
+	commentAvatar = 36
 	// commentReplyAvatar 是楼中楼那一枚头像的边长（比主评论小一号）。
 	commentReplyAvatar = 24
 	// commentEmote 是正文里一枚表情占位符的边长。
 	commentEmote = 18
 	// commentBodyLines 是主评论正文最多几行（超出的截断加省略号）。
-	commentBodyLines = 6
+	commentBodyLines = 3
 	// commentReplyBodyLines 是楼中楼正文最多几行。
 	commentReplyBodyLines = 4
 	// commentBodyUnlimited 是「**不限行数**」那一种表达方式（票 #706）。
@@ -348,6 +351,8 @@ type commentRow struct {
 	likeText string
 	// replyText 是回复数那几个字（「共52条回复」）；空串 = 这一条没有楼中楼。
 	replyText string
+	// lastReply 是「这是一条评论的最后一条楼中楼」：底下那条线画在它下面（原型整条评论一格，一条线）。
+	lastReply bool
 }
 
 // commentRowKey 算一行的身份。
@@ -482,14 +487,7 @@ func (s *Shell) viewCommentsContent(c *ui.Context, t *ui.Theme) {
 	p := &s.comments
 	it, has := s.pageInput().Current, s.pageInput().HasCurrent
 
-	// 🔴 **高亮那一份配色一帧算一次**（票 #684）：筛选开着才算，关着时是零值
-	// （`commentBodyOf` 见它是零值就不跑匹配、不带底色）。
-	//
-	// ⚠️ **它必须在 `applyFrameTheme` 之后算**：`ink.Ensure` 按当前主题的主色
-	// 和底色现算。
-	//
-	// ⚠️ **主题没变、开关没变就复用**：那一趟是二十步二分，而主题只在设置变了
-	// 的时候才变（`themeCache` 那一层）。
+	// 🔴 **高亮那一份配色一帧算一次**（票 #684）：筛选开着才算，关着时是零值。
 	on := p.mentionOnly && !p.names.Empty()
 	if on != p.markOn || c.Theme() != p.markTheme {
 		p.markOn, p.markTheme = on, c.Theme()
@@ -500,79 +498,63 @@ func (s *Shell) viewCommentsContent(c *ui.Context, t *ui.Theme) {
 		}
 	}
 
-	// 🔴 **本地文件不摆入口**（`CommentsWorthAsking`）：它在 B 站上没有对应
-	// 的对象，而问一个认不出来的 oid 的症状是「静默拿到空列表」——于是界面上会摆
-	// 一个永远空着的评论页。
+	// 头永远摆（原型 `.drawer-head`：「评论」+ 条数 + 刷新 + 关闭）。
+	s.viewCommentsHeader(c, it)
+
+	// 🔴 **本地文件不摆入口**（`CommentsWorthAsking`）：它在 B 站上没有对应的对象，而问一个认不出来的
+	// oid 的症状是「静默拿到空列表」。原型：本地文件说「这一首没有评论 / 本地文件没有评论区」。
 	if !has || !s.app.CommentsWorthAsking() {
-		s.viewEmpty(c, "comments:empty", commentsEmpty)
+		ui.Column(c).Key("comments:empty").Grow(1).FillWidth().Center().Children(func() {
+			pud.Empty(c, pud.ArtPlain, "这一首没有评论", "本地文件没有评论区。", nil)
+		})
 		return
 	}
 
-	ui.Column(c).Key("comments:content").Grow(1).FillWidth().
-		Padding(space.None, pagePadX).Children(func() {
-		// 页头**永远摆**：它就是「这些评论是谁的评论」那一块（文件头）。
-		// 列表空着的时候它也得在——不然用户看到的是一片白，而不是「这一首
-		// 的评论还没拉回来」。
-		s.viewCommentsHeader(c, it)
+	s.viewCommentsTools(c, p)
 
-		if len(p.rows) == 0 {
+	if len(p.rows) == 0 {
+		ui.Column(c).Key("comments:content").Grow(1).FillWidth().Children(func() {
 			s.viewCommentsBody(c, p)
+		})
+		s.viewCommentsComposer(c)
+		return
+	}
+
+	// 🔴 **行身份必须稳定且唯一**（铁律四）：行会随楼中楼展开而变长，而 `Key` 认的是**这一条评论**
+	// （rpid），不是行号。
+	p.state.Key = func(i int) any {
+		if i < 0 || i >= len(p.rows) {
+			return nil
+		}
+		return p.rows[i].key
+	}
+	// 🔴 **行级一道 Guard**（铁律二）：一页几十行，坏一行不该把整页变成错误页。它是建一次、每一行都用
+	// （`guard.Wrap` 建出来是两个闭包，每帧每行现建就是每帧几十次分配）；行号由回调写进 `rowIdx`。
+	rowIdx := 0
+	guarded := guard.Wrap(func(c *ui.Context) {
+		if rowIdx >= len(p.rows) {
+			s.viewCommentsSentinel(c, p)
 			return
 		}
+		s.viewCommentRow(c, p, p.rows[rowIdx])
+	}, func(rec any) { s.onPanicAt("评论那一行", rec) })
+	// 行与行之间没有缝：每一条自己带 16 的上下内边距和底下一条线（原型 `.comment`）。
+	lst := ui.List(c, &p.state, len(p.rows)+1).
+		Grow(1).FillWidth().
+		Rows(func(r ui.ListRow) {
+			rowIdx = r.Index
+			guarded(r.Context)
+		})
+	s.trackScrollbar(lst)
 
-		// 🔴 **行身份必须稳定且唯一**（铁律四）：行会随楼中楼展开而变长，
-		// 而 `Key` 认的是**这一条评论**（rpid），不是行号。
-		p.state.Key = func(i int) any {
-			if i < 0 || i >= len(p.rows) {
-				return nil
-			}
-			return p.rows[i].key
-		}
-		// 🔴 **行级一道 Guard**（铁律二）：一页几十行，坏一行不该把整页变成
-		// 错误页。
-		//
-		// ⚠️ **它是建一次、每一行都用它**（不是在回调里现建）：`guard.Wrap`
-		// 建出来的是**两个闭包**，而在每帧每一行的回调里现建一遍就是**每帧
-		// 几十次分配**（一屏十来行 × 两个）——理由同 `framebudget_test.go`
-		// 盯着的「每帧现算」那族坏处（票 #313 / #339 就是修那个的）。
-		// ⚠️ **行号是「回调里写进去」的**：那个 Guard 是**建一次**的（见上面
-		// 那段），而它要画的是**当前这一行**——所以行号由回调写进这个变量，
-		// Guard 从那儿读。框架的 `Rows` 回调是**同步**调的（一行调一次），
-		// 所以这个变量在 Guard 跑的时候准得很。
-		rowIdx := 0
-		guarded := guard.Wrap(func(c *ui.Context) {
-			if rowIdx >= len(p.rows) {
-				s.viewCommentsSentinel(c, p)
-				return
-			}
-			s.viewCommentRow(c, p, p.rows[rowIdx])
-		}, func(rec any) { s.onPanicAt("评论那一行", rec) })
-		lst := ui.List(c, &p.state, len(p.rows)+1).
-			Grow(1).FillWidth().
-			// ⚠️ **行间距由列表给**：行与行之间 12（`space.Px12`）。
-			GapY(space.Px12).
-			Rows(func(r ui.ListRow) {
-				rowIdx = r.Index
-				guarded(r.Context)
-			})
-		s.trackScrollbar(lst)
+	// 🔴 **登记焦点**（`focus.go` 的 `registerContentFocus`）：这一页自己画列表，所以登记也得自己写一遍。
+	s.registerContentFocus(list.HandleFocus(&p.state.Handle))
 
-		// 🔴 **登记焦点**（`focus.go` 的 `registerContentFocus`）：这一页**自己
-		// 画列表**（不是 `widgets/list` 那个包建的），所以**登记也得自己写
-		// 一遍**——漏一遍的症状是「侧栏按 ↓ 进不去这一页的内容区」，而用户
-		// 只以为这个应用有时候键盘不好使（见 `focus_test.go` 的
-		// `TestEveryPageThatDrawsItsOwnListRegistersIt`）。
-		//
-		// ⚠️ **它是裸的 `ui.List`**（行是自己画的），所以焦点句柄是框架的
-		// `ui.ListState.Handle`——跟 `dynamicfeed.go` 那一档同一个写法。
-		s.registerContentFocus(list.HandleFocus(&p.state.Handle))
-
-		// 量这一帧的容器宽，**下一帧**用（`Bounds` 报的是上一帧的盒子）。
-		// 正文排版按它算宽度——而排版是**按宽度折行**的，宽度不对就折错位置。
-		if bw := lst.Bounds().W; bw > 0 {
-			p.listW = bw
-		}
-	})
+	// 量这一帧的容器宽，**下一帧**用（`Bounds` 报的是上一帧的盒子）：正文排版按它算宽度。
+	if bw := lst.Bounds().W; bw > 0 {
+		p.listW = bw
+	}
+	s.viewCommentsComposer(c)
 }
 
 // viewCommentsBody 是「一条评论都还没有」时画的那一块。
@@ -600,7 +582,15 @@ func (s *Shell) viewCommentsBody(c *ui.Context, p *commentsPage) {
 			Icon:  iconEmptyMusic,
 		})
 	default:
-		s.viewEmpty(c, "page:comments:loading", loadingState("正在拉评论…"))
+		// 原型：四块 72 高的骨架（`.sk`，间隔 12，外面内边距 12）。
+		winW, _ := c.Size()
+		w := min(float32(commentsDrawerWidth), winW) - 24
+		ui.Column(c).Key("page:comments:loading").Label("正在拉评论…").Padding(space.Px12).Gap(space.Px12).
+			Children(func() {
+				for i := range 4 {
+					pud.Skeleton(c, "comments:sk:"+strconv.Itoa(i), w, 72, 0)
+				}
+			})
 	}
 }
 
@@ -676,108 +666,153 @@ func (s *Shell) viewCommentsNoMention(c *ui.Context, p *commentsPage) {
 	})
 }
 
-// viewCommentsHeader 是页头：**这一首是什么 + 这些评论是谁的评论**，
-// 右边是排序两档和一枚「刷新」。
+// viewCommentsHeader 是抽屉的头和头下面那一行（原型 `.drawer-head` / `.drawer-sub`）：
+//
+//	评论 12,590        [刷新] [×]        24 号宋体「评论」+ 16 号等宽条数（text-3）
+//	这首歌的评论 · 歌名            [最热][最新]
+//
+// 🔴 **刷新只记意图**（铁律三）：真正发请求的是 `syncComments`。
+// 🔴 **「这首歌的评论」/「这个视频的评论」不许合并**（研究票 #537 §4：两种条目的评论语义不同）。
 func (s *Shell) viewCommentsHeader(c *ui.Context, it app.Item) {
 	t := c.Theme()
+	pal := tok.Of(t)
 	p := &s.comments
 
-	ui.Column(c).Key("comments:header").FillWidth().Gap(space.Px6).
-		Padding(space.Px12, space.None, space.Px8).Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
-			// 左：标题 + 那一枚角标。
-			//
-			// ⚠️ **角标不许省**（文件头）：它是「这些评论是谁的评论」那句话
-			// 唯一的落点，而角标跟标题挨着，用户一眼就分得清。
-			//
-			// 🔴 **角标必须真的「挨着」标题**（视觉审查量出来的）：标题那一格
-			// 之前是 `Grow(1)`，于是**角标被推到了那一行的最右端**——在
-			// 1400 宽的窗口上它离标题九百多像素，而那一行的右边摆着排序档
-			// 和刷新键，于是角标**看着像是给排序那一组贴的标签**（「这些评论
-			// 是最热的这一档？」）。用户一眼分不清「这是这首歌的评论」还是
-			// 「这是这个视频的评论」，而那正是这一票最要紧的一件事。
-			//
-			// ⇒ 标题**不 `Grow`**（它自己按自然宽摆，超出那一格就省略号），
-			// 角标紧跟在它后面。
-			ui.Row(c).Grow(1).MinWidth(0).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, it.Title).FontSize(scale.Font(c, scale.Size20)).TextColor(t.Text).
-					MaxLines(1).Ellipsis("…")
-				s.viewCommentsScopeBadge(c, it)
-			})
-
-			// 右：排序两档 + 一枚「刷新」。
-			//
-			// ⚠️ **排序是次级排序**：用框架那个下划线的 `ui.Tabs`，不是主 Tab
-			// 那一套轨道 + 滑块（票 #138：主 Tab 和次级排序不是同一个样子）。
-			ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-				ui.Tabs(c, &p.sortIdx, commentsSortLabels...)
-				// 🔴 **刷新只记意图**（铁律三）：真正发请求的是 `syncComments`。
-				if s.withTip(c, iconKey(c, iconRefresh, "刷新评论", iconMd, false).
-					Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-					"刷新评论").Clicked() {
-					p.wantRefresh = true
-				}
-			})
-		})
-
-		// 第二行：作者 / UP 名 + 总条数 + 那一枚「只看提到歌名的」。
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px12).Children(func() {
-			ui.Text(c, commentsAuthorLine(it)).FontSize(scale.Font(c, scale.Size13)).
-				TextColor(t.TextMuted).MaxLines(1).Ellipsis("…").Grow(1)
-			// ⚠️ **筛选开着的时候这一行换一句话**：摆「共 N 条」而列表里只
-			// 有筛选后的那几条，用户会以为另外那些评论不见了。
-			switch {
-			case p.mentionOnly && p.hits > 0:
-				ui.Text(c, strconv.Itoa(p.hits)+" 条提到这首歌").
-					FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).MaxLines(1)
-			case s.app.CommentsAllCount() > 0:
-				// ⚠️ **一条都没命中时还是摆总数**：那一档空状态里已经说了
-				// 「这个视频的 N 条评论里没有提到这首歌」，而这里摆的是同一个
-				// 数（两处说的是同一件事）。
-				n := s.app.CommentsAllCount()
-				ui.Text(c, "共 "+strconv.FormatInt(n, 10)+" 条").FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).MaxLines(1)
+	ui.Row(c).Key("comments:head").FillWidth().Padding(space.Px20, space.Px16, space.Px12, space.Px24).
+		Gap(space.Px8).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Grow(1).MinWidth(0).Gap(space.Px8).AlignItems(ui.Baseline).Children(func() {
+			typo.Display(ui.Text(c, "评论"), scale.Font(c, scale.SectionTitle)).SingleLine()
+			if n := s.commentsTotal(); n > 0 {
+				typo.Mono(ui.Text(c, thousands(n))).FontSize(scale.Font(c, scale.Size16)).
+					TextColor(pal.Text3).SingleLine()
 			}
-			s.viewCommentsMentionSwitch(c, p)
+		})
+		if s.withTip(c, pud.IconBtn(c, "comments:refresh", "refresh", "刷新评论", pud.IconOpts{}), "刷新评论").Clicked() {
+			p.wantRefresh = true
+		}
+		if s.withTip(c, pud.IconBtn(c, "comments:close", "x", "关闭评论", pud.IconOpts{}), "关闭评论").Clicked() {
+			s.commentsOpen = false
+		}
+	})
+
+	pud.DrawerSub(c, func() {
+		ui.Text(c, commentsScopeLine(it)).FontSize(scale.Font(c, scale.Size12)).TextColor(pal.Text2).
+			SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+		ui.Row(c).Gap(space.Px4).Shrink(0).Children(func() {
+			for i, label := range commentsSortLabels {
+				chip := pud.Chip(c, "comments:sort:"+strconv.Itoa(i), label, "", p.sortIdx == i).
+					Height(26).Radius(13)
+				if chip.Clicked() {
+					p.sortIdx = i
+				}
+			}
 		})
 	})
 }
 
-// viewCommentsMentionSwitch 是页头那一枚「只看提到歌名的」开关（票 #574）。
-//
-// 🔴 **默认是关的**（`commentsPage.mentionOnly` 的零值）：这一页默认摆的是
-// 这一首的**全部**评论——筛选是用户自己挑出来的窄视图。
-//
-// ⚠️ **开关自己一个字都没有**（它是 `springSwitch`），所以旁边的字是给它
-// 兜着的；而它自己的 `Label` 是给屏幕阅读器和无头 Tester 用的（框架那一颗
-// 开关没有可见文字）。
-//
-// ⚠️ **左边是字、右边是开关**：跟设置页和满屏偏好面板上那些开关是同一副
-// 样子（`fullSwitchRow`：「左边标题，右边开关」）——同一个控件只有一种样子。
-//
-// ⚠️ **这一枚不许加 Key**：开关的旋钮是**动画**出来的（`switch.go` 顶上那一
-// 段），而动画记在节点的键上——每帧换一个新节点，动画每帧从头开始。
-func (s *Shell) viewCommentsMentionSwitch(c *ui.Context, p *commentsPage) {
-	t := c.Theme()
-	// ⚠️ **这一首没有名字就没法筛**：那时候按下去只会把评论全筛掉，而界面
-	// 上说不清为什么（空表不筛，见 `songname.Table.Empty`）。
-	noName := p.names.Empty()
-	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "只看提到歌名的评论").FontSize(scale.Font(c, scale.Size12)).
-			TextColor(t.TextMuted).MaxLines(1)
-		// ⚠️ **开关是在这个回调里建的**：框架把建出来的元素挂到**当前正在
-		// 建的那一格**上（`ui.SwitchBase` 自己会挂），而这一格是上面那个
-		// Row——在外面建的话它就成了外层那一列的孩子。
-		sw := springSwitch(c, &p.mentionOnly).Label("开关：只看提到歌名的评论")
-		if noName {
-			sw = sw.Disabled(true)
-			// ⚠️ **按灰的时候要说清为什么**（`withTip`）：一个按不动的开关，
-			// 不说理由的话用户只以为这个应用有时候控件会坏。
-			// 而 `withTip` 返回的就是锚点本身（提示挂在它身上），所以返回值
-			// 可以丢——元素已经在树里了。
-			s.withTip(c, sw, "这一首没有名字，没法按歌名筛")
+// commentsTotal 是头上那个条数：评论页那一趟带回来的总数优先，没有就用稿件详情里的评论数。
+// 0 = 拿不到 = 不显示（不是「零条评论」）。
+func (s *Shell) commentsTotal() int64 {
+	if n := s.app.CommentsAllCount(); n > 0 {
+		return n
+	}
+	return s.app.CommentCount()
+}
+
+// thousands 把 12590 写成「12,590」（原型 `fullNum`）。
+func thousands(n int64) string {
+	neg := n < 0
+	if neg {
+		n = -n
+	}
+	digits := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	if neg {
+		b.WriteByte('-')
+	}
+	for i, r := range digits {
+		if i > 0 && (len(digits)-i)%3 == 0 {
+			b.WriteByte(',')
 		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// commentsScopeLine 是头下面左边那句：「这首歌的评论 · 歌名」/「这个视频的评论 · 标题」。
+func commentsScopeLine(it app.Item) string {
+	scope := "评论"
+	switch it.Type {
+	case "audio":
+		scope = "这首歌的评论"
+	case "mv":
+		scope = "这个视频的评论"
+	}
+	return scope + " · " + it.Title
+}
+
+// viewCommentsTools 是「只看提到歌名的评论」那一行（原型 `.c-tools`：开关缩到 0.8、13 号 text-2，
+// 内边距 8 / 24 / 12，底下一条线）。
+//
+// 🔴 **默认是关的**（`commentsPage.mentionOnly` 的零值）。**这一首没有名字就没法筛**：开关禁用，
+// 提示说清为什么（空表不筛，见 `songname.Table.Empty`）。
+func (s *Shell) viewCommentsTools(c *ui.Context, p *commentsPage) {
+	pal := tok.Of(c.Theme())
+	noName := p.names.Empty()
+	ui.Row(c).Key("comments:tools").FillWidth().Padding(space.Px8, space.Px24, space.Px12, space.Px24).
+		Gap(space.Px8).AlignItems(ui.Center).
+		Draw(func(pp *ui.Painter, r ui.Rect) {
+			pp.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, pal.Line, 0)
+		}).Children(func() {
+		// 原型 `.c-tools .switch { transform: scale(.8); transform-origin: left center }`：占位 44×26，
+		// 画出来缩到 80%，贴左边。
+		sw := ui.Box(c).Size(tok.SwitchW, tok.SwitchH).Shrink(0).
+			AnimatePose(ui.Pose{X: -tok.SwitchW * 0.2 / 2, Scale: 0.8}, ui.Animation{})
+		sw.Children(func() {
+			pud.Switch(c, "comments:mention", &p.mentionOnly, "开关：只看提到歌名的评论")
+		})
+		ui.Text(c, "只看提到歌名的评论").FontSize(scale.Font(c, scale.Size13)).TextColor(pal.Text2).SingleLine()
+		if noName {
+			p.mentionOnly = false
+		}
+		// ⚠️ **筛选开着的时候右边多一句命中数**：评论列表里只剩筛选后的那几条，不说一声的话用户会以为
+		// 别的评论不见了（原型没有这一句——它的筛选是假的；这一句是真功能留下的）。
+		if p.mentionOnly && p.hits > 0 {
+			ui.Spacer(c)
+			ui.Text(c, strconv.Itoa(p.hits)+" 条提到这首歌").FontSize(scale.Font(c, scale.Size12)).
+				TextColor(pal.Text3).SingleLine()
+		}
+	})
+}
+
+// viewCommentsComposer 是底下那一条（原型 `.composer`：内边距 12 / 16 / 16、上沿一条线）：
+// 登录了是「说点什么…」输入框 + 「发送」，没登录是一句话 + 「去登录」。
+//
+// ⚠️ **发评论属于 B 站写接口，这个应用没有接**（票 #573 的纪律：这一页不发任何写接口）：输入框和
+// 「发送」画出来（和原型同一个样子）但禁用，提示说清楚——一个按下去什么都不发生的发送键比一个
+// 说明白的禁用键更坏。
+func (s *Shell) viewCommentsComposer(c *ui.Context) {
+	pal := tok.Of(c.Theme())
+	ui.Row(c).Key("comments:composer").FillWidth().Padding(space.Px12, space.Px16, space.Px16, space.Px16).
+		Gap(space.Px8).AlignItems(ui.Center).Shrink(0).
+		Draw(func(pp *ui.Painter, r ui.Rect) {
+			pp.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: 1}, pal.Line, 0)
+		}).Children(func() {
+		if !s.app.LoggedIn() {
+			ui.Text(c, "登录后才能发表评论").FontSize(scale.Font(c, scale.Size13)).TextColor(pal.Text2).
+				SingleLine().Grow(1)
+			if pud.Button(c, "comments:login", pud.Primary, pud.Sm, "去登录", "").Clicked() {
+				s.commentsOpen = false
+				s.goLogin("")
+			}
+			return
+		}
+		ui.Box(c).Key("comments:input").Grow(1).Height(40).Radius(20).Background(pal.Surface2).
+			Border(1, pal.LineStrong).PaddingX(space.Px16).AlignItems(ui.Center).Opacity(0.5).Children(func() {
+			ui.Text(c, "说点什么…").FontSize(scale.Font(c, scale.Size14)).TextColor(pal.Text3).SingleLine()
+		})
+		send := pud.Button(c, "comments:send", pud.Primary, pud.Sm, "发送", "").Disabled(true)
+		s.withTip(c, send, "发表评论还没接上（B 站的写接口），先到 B 站里发")
 	})
 }
 
@@ -828,8 +863,13 @@ func (s *Shell) viewCommentsScopeBadge(c *ui.Context, it app.Item) {
 }
 
 // viewCommentRow 画一条评论（主评论或者楼中楼）。
+//
+// 主评论（原型 `.comment`）：`36px 1fr` 两列、缝 12、内边距 16 / 12、底下一条线；头像是圆的，
+// 名字 13 号粗，正文 14 号，脚上是「时间  赞  」，再往下是「N 条回复 ⌄」（accent-text）。
+// 有楼中楼展开时，线挪到最后一条回复的下面（原型 `.comment` 是整条评论一格，回复在格子里）。
 func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 	t := c.Theme()
+	pal := tok.Of(t)
 	cm := row.cm
 
 	if row.reply {
@@ -837,104 +877,89 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 		return
 	}
 
-	ui.Row(c).Key(row.elemKey).
-		AlignSelf(ui.Stretch).AlignItems(ui.Start).Gap(commentBodyGap).
-		Padding(space.Px4, space.None).Children(func() {
-		// 头像：B 站的评论头像是圆的。
-		imgcache.ViewRadius(c, s.pageImages(), commentImageURL(cm.Avatar),
-			commentAvatar, commentAvatar, commentAvatar/2)
+	open := p.expanded[cm.Rpid] && row.replyText != ""
+	ui.Column(c).Key(row.elemKey).AlignSelf(ui.Stretch).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(space.Px12).Padding(space.Px16, space.Px12).Children(func() {
+			// 头像：B 站的评论头像是圆的，36。
+			imgcache.ViewRadius(c, s.pageImages(), commentImageURL(cm.Avatar),
+				commentAvatar, commentAvatar, commentAvatar/2)
 
-		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px6).Children(func() {
-			// 第一行：昵称 + 等级 + 徽章 + 时间。
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
-				// 🔴 **昵称可以拖选复制**（票 #685）：用户经常要把「谁说的」复制
-				// 出去（去搜这个人、去举报、发给别人）。原先这一页一个字都选不
-				// 中——拖选之后按 Cmd+C，剪贴板是空的。
-				//
-				// ⚠️ **只加在昵称这一格上，不给整个 `Row` 加 `Selectable`**：这一
-				// 行里还有带底色的等级 / 「UP 主」/「官方认证」三枚徽章和右边那句
-				// 时间，容器级选择会把它们一起拖进复制的字里（变成
-				// 「昵称\nUP 主\n3天前」那样）。用户要的是那个名字。
-				//
-				// ⚠️ **正文那一格后来也做上了**（票 #702）：它现在是框架的
-				// `ui.RichText` + `Selectable`（理由见 `comments_body.go` 的
-				// 文件头）——所以正文也能拖选复制了。
-				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text).
-					MaxLines(1).Ellipsis("…").Selectable()
-				// ⚠️ **徽章是「一段带底色的字」，不是一个盒子套一段字**：
-				// 后者要多一个闭包（= 一次分配），而这一行每一帧都要重建一次
-				// ——一屏十来行就是十来次（理由同 `framebudget_test.go` 盯着的
-				// 「每帧现算」那族坏处）。
-				if row.levelText != "" {
-					ui.Text(c, row.levelText).FontSize(scale.Font(c, scale.Size11)).
-						TextColor(t.TextMuted).MaxLines(1).
-						Background(t.Surface).Radius(space.Px2).
-						Padding(space.Px2, space.Px4)
-				}
-				// 🔴 **「UP 主」只按 `IsUpper`**（`mid == upper.mid`）——
-				// **不是** `reply_control.up_reply`（那个是「UP 主回复过这一条」，
-				// 实测拿它当判据会给几十条普通用户的评论挂上 UP 主标记）。
-				if cm.IsUpper {
-					s.viewCommentBadge(c, "UP 主", t.Accent, t.AccentText)
-				}
-				// 官方认证：`member.official_verify.type`（-1 = 没有）。
-				if cm.OfficialType >= 0 {
-					s.viewCommentOfficial(c, cm)
-				}
-				ui.Spacer(c)
-				if cm.TimeDesc != "" {
-					ui.Text(c, cm.TimeDesc).FontSize(scale.Font(c, scale.Size12)).
-						TextColor(t.TextMuted).MaxLines(1)
-				}
-			})
+			ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
+				// 第一行：昵称（13 号粗）+ 等级 + 徽章。
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
+					// 🔴 **昵称可以拖选复制**（票 #685）；⚠️ 只加在昵称这一格上，不给整个 `Row` 加。
+					ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size13)).FontWeight(700).
+						TextColor(pal.Text).MaxLines(1).Ellipsis("…").Selectable()
+					if row.levelText != "" {
+						ui.Text(c, row.levelText).FontSize(scale.Font(c, scale.Size11)).
+							TextColor(pal.Text3).MaxLines(1).
+							Background(pal.Surface2).Radius(space.Px2).
+							Padding(space.Px2, space.Px4)
+					}
+					// 🔴 **「UP 主」只按 `IsUpper`**（`mid == upper.mid`），不是 `reply_control.up_reply`。
+					if cm.IsUpper {
+						s.viewCommentBadge(c, "UP 主", pal.Accent, pal.AccentInk)
+					}
+					if cm.OfficialType >= 0 {
+						s.viewCommentOfficial(c, cm)
+					}
+				})
 
-			// 正文（表情占位符换成了图）。
-			s.viewCommentBodyEl(c, p, cm, commentBodyLines)
+				// 正文（表情占位符换成了图）。
+				s.viewCommentBodyEl(c, p, cm, commentBodyLines)
 
-			// 第三行：点赞数 + 回复数。
-			ui.Row(c).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
-				s.viewCommentLike(c, row.likeText)
+				// 脚：时间 · 赞（原型 `.c-foot`：12 号 text-3，缝 16）。
+				ui.Row(c).Gap(space.Px16).AlignItems(ui.Center).Margin(space.Px4, 0, 0, 0).Children(func() {
+					if cm.TimeDesc != "" {
+						ui.Text(c, cm.TimeDesc).FontSize(scale.Font(c, scale.Size12)).
+							TextColor(pal.Text3).MaxLines(1)
+					}
+					s.viewCommentLike(c, row.likeText)
+				})
 				s.viewCommentReplies(c, p, row)
 			})
 		})
+		if !open {
+			s.viewCommentRule(c)
+		}
 	})
 }
 
-// viewCommentReplyRow 画一条楼中楼。
-//
-// ⚠️ **它是只读的**：这一页**不发任何写接口**（票 #573 的纪律），所以楼中楼
-// 摆的是「看」，不是「回」。
-//
-// ⚠️ **缩进 12**（`space.Px12`）：楼中楼比主评论往里让一格，于是「它是回复
-// 哪一条」一眼看得出（而头像本身小一号，24 而不是 32）。
-func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentRow) {
-	t := c.Theme()
-	cm := row.cm
+// viewCommentRule 是一条评论底下那一条线（原型 `.comment { border-bottom: 1px solid var(--line) }`），
+// 左右各让 12（线落在内边距之内）。
+func (s *Shell) viewCommentRule(c *ui.Context) {
+	ui.Box(c).FillWidth().Height(1).Background(tok.Of(c.Theme()).Line).MarginX(space.Px12)
+}
 
-	ui.Row(c).Key(row.elemKey).
-		AlignSelf(ui.Stretch).AlignItems(ui.Start).Gap(space.Px8).
-		MarginX(space.Px12).Children(func() {
-		imgcache.ViewRadius(c, s.pageImages(), commentImageURL(cm.Avatar),
-			commentReplyAvatar, commentReplyAvatar, commentReplyAvatar/2)
-		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {
+// viewCommentReplyRow 画一条楼中楼（原型 `.replies`：surface-2 底、圆角 8、内边距 8 / 12，名字
+// 12 号 text-2，正文 13 号）。
+//
+// ⚠️ **它是只读的**：这一页**不发任何写接口**（票 #573 的纪律），所以楼中楼摆的是「看」，不是「回」。
+// ⚠️ 原型把一条评论的几条回复装在**同一个**盒子里；这里每条回复是列表里独立的一行（行要能各自
+// 虚拟化），所以每条回复一个 surface-2 的盒子，左边让开头像那一列（36 + 12）。
+func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentRow) {
+	pal := tok.Of(c.Theme())
+	cm := row.cm
+	ui.Column(c).Key(row.elemKey).AlignSelf(ui.Stretch).Children(func() {
+		ui.Column(c).FillWidth().Padding(space.Px8, space.Px12).
+			Margin(0, space.Px12, space.Px4, space.Px12+commentAvatar+space.Px12).
+			Radius(tok.R8).Background(pal.Surface2).Gap(space.Px4).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
 				// 楼中楼的昵称同样可以拖选复制（理由同 `viewCommentRow` 那一处）。
-				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text).
-					MaxLines(1).Ellipsis("…").Selectable()
+				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size12)).FontWeight(700).
+					TextColor(pal.Text2).MaxLines(1).Ellipsis("…").Selectable()
 				if cm.IsUpper {
-					s.viewCommentBadge(c, "UP 主", t.Accent, t.AccentText)
+					s.viewCommentBadge(c, "UP 主", pal.Accent, pal.AccentInk)
 				}
 				if cm.OfficialType >= 0 {
 					s.viewCommentOfficial(c, cm)
-				}
-				ui.Spacer(c)
-				if cm.TimeDesc != "" {
-					ui.Text(c, cm.TimeDesc).FontSize(scale.Font(c, scale.Size11)).
-						TextColor(t.TextMuted).MaxLines(1)
 				}
 			})
 			s.viewCommentBodyEl(c, p, cm, commentReplyBodyLines)
 		})
+		if row.lastReply {
+			s.viewCommentRule(c)
+		}
 	})
 }
 
@@ -968,35 +993,41 @@ func (s *Shell) viewCommentOfficial(c *ui.Context, cm bili.Comment) {
 		Background(t.Surface).Radius(space.Px2).Padding(space.Px2, space.Px4), tip)
 }
 
-// viewCommentLike 是点赞数。
+// viewCommentLike 是点赞数（原型 `.c-foot button`：14 的拇指 + 等宽数字，text-3）。
 //
-// ⚠️ **图标走 `likeIcon`，不直接摆 `iconLike`**：状态图标只有那四个函数是
-// 出口（`icons_test.go` 的
-// `TestTheStateIconsOnlyReachTheScreenThroughTheirFunction` 盯着这条）——
-// 绕过去的话，「哪一档配哪一张」那张表就管不到画面上。
-// 而这一页**是只读的**（赞一条评论要打写接口，这一票不打），所以恒是
-// **没赞过**那一档（空心）。
+// ⚠️ **图标走 `likeIcon`，不直接摆 `iconLike`**：状态图标只有那四个函数是出口
+// （`TestTheStateIconsOnlyReachTheScreenThroughTheirFunction` 盯着这条）。而这一页**是只读的**
+// （赞一条评论要打写接口），所以恒是**没赞过**那一档（空心）。
 func (s *Shell) viewCommentLike(c *ui.Context, likeText string) {
-	t := c.Theme()
+	pal := tok.Of(c.Theme())
 	ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
-		ui.Icon(c, icon(likeIcon(false))).FontSize(14).TextColor(t.TextMuted)
-		ui.Text(c, likeText).FontSize(scale.Font(c, scale.Size12)).
-			TextColor(t.TextMuted).MaxLines(1)
+		ui.Icon(c, icon(likeIcon(false))).FontSize(14).TextColor(pal.Text3)
+		typo.Mono(ui.Text(c, likeText)).FontSize(scale.Font(c, scale.Size12)).
+			TextColor(pal.Text3).MaxLines(1)
 	})
 }
 
-// viewCommentReplies 是那一枚「共 N 条回复」——**点它展开楼中楼**。
+// viewCommentReplies 是那一枚「N 条回复 ⌄」——**点它展开楼中楼**（原型 `.c-more`：12 号 accent-text，
+// 后面一枚 12 的 chevron）。
 //
-// ⚠️ **点它只改界面状态**（`p.expanded`）：**不发请求**（铁律三）。真正去问
-// 楼中楼的是 `syncComments`（它下一帧建行时调 `CommentReplies`，那一句自己
-// 会把请求递到后台）。
+// ⚠️ **点它只改界面状态**（`p.expanded`）：**不发请求**（铁律三）。真正去问楼中楼的是 `syncComments`。
 func (s *Shell) viewCommentReplies(c *ui.Context, p *commentsPage, row commentRow) {
-	t := c.Theme()
+	pal := tok.Of(c.Theme())
 	if row.replyText == "" {
 		return
 	}
 	open := p.expanded[row.cm.Rpid]
-	if commentTextButton(c, row.replyText, scale.Font(c, scale.Size12), t.TextMuted).Clicked() {
+	b := ui.ButtonBase(c).Key(commentRepliesKey).Label(row.replyText).Gap(space.Px4).AlignItems(ui.Center).
+		AlignSelf(ui.Start).Margin(space.Px6, 0, 0, 0)
+	b.Children(func() {
+		ui.Text(c, row.replyText).FontSize(scale.Font(c, scale.Size12)).TextColor(pal.AccentText).MaxLines(1)
+		name := "down"
+		if open {
+			name = "up"
+		}
+		ui.Icon(c, pud.Icon(name)).FontSize(12).TextColor(pal.AccentText)
+	})
+	if b.Clicked() {
 		if p.expanded == nil {
 			p.expanded = map[int64]bool{}
 		}
@@ -1004,6 +1035,9 @@ func (s *Shell) viewCommentReplies(c *ui.Context, p *commentsPage, row commentRo
 		p.expRev++
 	}
 }
+
+// commentRepliesKey 是每条评论里那枚「N 条回复」的身份（常量；外壳已带着稳定的行 key）。
+const commentRepliesKey = "comment-replies"
 
 // commentTextButton 是「一句话按钮」：一块可点的小字（回复数、失败重试）。
 //
@@ -1323,6 +1357,10 @@ func (p *commentsPage) rebuildRows(cm []bili.Comment, replies func(int64) []bili
 			}
 			seen[key] = true
 			rows = append(rows, newCommentRow(r, true, c.Rpid))
+			rows[len(rows)-1].lastReply = true
+			if n := len(rows); n >= 2 && rows[n-2].reply {
+				rows[n-2].lastReply = false
+			}
 		}
 	}
 	p.rows = rows

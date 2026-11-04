@@ -275,10 +275,10 @@ func TestTheCommentsDrawerIsWiderThanTheQueueDrawer(t *testing.T) {
 	// 量**：内容区右沿 − 内容区左沿 = 内容宽，而内容宽 = 面板宽 − 2×内边距。
 	//
 	// ⇒ 判据落在「**面板宽**」上：内容宽 + 2×内边距 = 面板宽。
-	const pad = float32(pagePadX)
-	contentR, ok := tt.Find("刷新评论")
+	const pad = float32(16) // `.drawer-head` 右内边距
+	contentR, ok := tt.Find("关闭评论")
 	if !ok {
-		t.Fatalf("画面上找不到「刷新评论」那一枚，文字有 %q", tt.Texts())
+		t.Fatalf("画面上找不到「关闭评论」那一枚，文字有 %q", tt.Texts())
 	}
 	// 「刷新评论」是页头右端那一枚——它的右沿就是内容区的右沿（外加它自己的
 	// 内边距，`space.Px7`）。
@@ -397,8 +397,8 @@ func TestTheCommentsDrawerSlidesInFromTheRight(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	_, tt := newCommentsShell(t, b, mvItem(), 1400, 900)
 
-	// 抽屉页头那一行（「这个视频的评论」那个角标）——它在抽屉的内容列里。
-	r, ok := tt.Find("这个视频的评论")
+	// 抽屉页头右上角那枚关闭键——它在抽屉的内容列里。
+	r, ok := tt.Find("关闭评论")
 	if !ok {
 		t.Fatalf("抽屉开着，画面上却找不到评论页头那一行")
 	}

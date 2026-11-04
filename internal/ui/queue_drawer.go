@@ -309,7 +309,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		// `.drawer { bottom: var(--bar-h) }`）：这一层是吃点击的，不留出播放条那一截，播放条就
 		// **整个被它盖住**——抽屉开着时按播放、上一首、下一首都按不动。满屏开着的时候播放条
 		// 被满屏盖着，抽屉直接铺到底（原型：满屏开着时 scrim / drawer 的 bottom 归 0）。
-		bottomInset := float32(tok.BarH)
+		bottomInset := float32(playbarHeight)
 		if s.full.open {
 			bottomInset = 0
 		}

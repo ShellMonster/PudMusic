@@ -169,3 +169,27 @@ func TestRenderDrawerShots(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderCommentsDrawerShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{true, false} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := newCommentBili(t, "reply-main.json")
+			_, tt := newCommentsShell(t, b, mvItem(), fullWinW, fullWinH, systemIsDark(dark))
+			commentsWait(t, tt, "表情图下来了", func() bool { return magentaPixels(tt) > 0 })
+			save(t, dir, name+"-comments.png", tt)
+			if err := tt.Click("共52条回复"); err == nil {
+				tt.Frame()
+				settleFull(t, tt)
+				save(t, dir, name+"-comments-replies.png", tt)
+			}
+		})
+	}
+}

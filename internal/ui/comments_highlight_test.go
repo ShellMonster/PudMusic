@@ -16,6 +16,7 @@ package ui
 
 import (
 	"encoding/json"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"image"
 	"image/color"
 	"image/draw"
@@ -77,10 +78,21 @@ func commentShotDiffColor(a, b color.RGBA) int {
 // ⚠️ **容差 8**：底色是实心填的（圆角那几处有抗锯齿），而抗锯齿的边缘像素是
 // 底色和行底色的混合——数得进来只会让判据更宽，不会让「根本没画」蒙混过关。
 func washPixelsIn(tt *mygoui.Tester, dark bool, r image.Rectangle) int {
+	return washPixelsOver(tt, dark, r, false)
+}
+
+// washPixelsOver 同 `washPixelsIn`，reply 为真时底是楼中楼那个盒子的底（`surface-2`），
+// 否则是抽屉的底（`surface`）。
+func washPixelsOver(tt *mygoui.Tester, dark bool, r image.Rectangle, reply bool) int {
 	img := tt.Image()
 	r = r.Intersect(img.Bounds())
 	th := BuildTheme(app.DefaultSettings(""), dark)
-	wantColor := th.Accent.Alpha(commentMarkAlpha).Over(th.Background)
+	pal := tok.Of(th)
+	base := pal.Surface
+	if reply {
+		base = pal.Surface2
+	}
+	wantColor := th.Accent.Alpha(commentMarkAlpha).Over(base)
 	want := color.RGBA{R: wantColor.R, G: wantColor.G, B: wantColor.B, A: wantColor.A}
 	n := 0
 	for y := r.Min.Y; y < r.Max.Y; y++ {
@@ -152,7 +164,7 @@ func TestTheMentionedSongNameIsHighlightedInTheCommentBody(t *testing.T) {
 				t.Fatalf("点不了那枚开关：%v（文字：%q）", err, tt.Texts())
 			}
 			commentsWait(t, tt, "筛选关掉了", func() bool {
-				return tt.HasText("共 388 条")
+				return !tt.HasText("1 条提到这首歌") && tt.HasText("388")
 			})
 			off2 := commentShotCopy(tt)
 			if n := commentShotDiff(off, off2, rect); n != 0 {
@@ -191,7 +203,7 @@ func TestTheReplyMentionIsHighlightedToo(t *testing.T) {
 		t.Fatalf("画面上找不到那条楼中楼，文字有 %q", tt.Texts())
 	}
 	rect := image.Rect(int(r.X), int(r.Y), int(r.X+r.W), int(r.Y+r.H))
-	if n := washPixelsIn(tt, false, rect); n != 0 {
+	if n := washPixelsOver(tt, false, rect, true); n != 0 {
 		t.Fatalf("筛选还没开，楼中楼里就有 %d 个主色底像素", n)
 	}
 	off := commentShotCopy(tt)
@@ -206,7 +218,7 @@ func TestTheReplyMentionIsHighlightedToo(t *testing.T) {
 	if n := commentShotDiff(off, on, rect); n == 0 {
 		t.Errorf("开关打开前后楼中楼正文那一块一模一样——楼中楼没高亮")
 	}
-	if n := washPixelsIn(tt, false, rect); n == 0 {
+	if n := washPixelsOver(tt, false, rect, true); n == 0 {
 		t.Errorf("筛选开着，楼中楼正文里一个主色底像素都没有——它没高亮")
 	}
 }
@@ -243,10 +255,9 @@ func commentFixtureReplyMentions(t *testing.T, replyBody string) []byte {
 //
 // 🔴 **WCAG 正文 AA 的 4.5:1**（刻度见 `widgets/ink` 的 `TextContrast`）。
 //
-// ⚠️ **两个底都要过**：正文画在列表行里，而那一行**悬停的时候底色换成
-// `t.SurfaceHover`**（`mygo/ui/list.go`）——高亮那层淡底压在上面，合出来的
-// 颜色比压在页面底色上更暗（浅色）/ 更亮（深色）。只按页面底色算的话，指针
-// 一停上去这一段的字就可能掉到 4.5 以下。
+// ⚠️ **两个底都要过**：评论正文画在抽屉的底（`surface`）上，楼中楼的正文画在回复盒子的底
+// （`surface-2`，原型 `.replies`）上——高亮那层淡底压在两者上合出来的颜色不同，只按一个算的话另一
+// 处的字就可能掉到 4.5 以下。
 //
 // ⚠️ **主色是用户可设的**：换几个色相都不同的主色再算一遍——写死一个绿的话，
 // 用户挑了别的色这一条就会红。
@@ -276,8 +287,8 @@ func TestTheHighlightInkStaysReadableOnItsOwnWash(t *testing.T) {
 					what string
 					bg   mygoui.Color
 				}{
-					{"页面底色", theme.Background},
-					{"行悬停底", theme.SurfaceHover},
+					{"抽屉底", tok.Of(theme).Surface},
+					{"楼中楼底", tok.Of(theme).Surface2},
 				} {
 					bg := mark.Bg.Over(opaqueBackground(c.bg))
 					if r := ink.Ratio(mark.Ink, bg); r < ink.TextContrast {
