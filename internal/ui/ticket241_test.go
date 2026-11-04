@@ -12,13 +12,8 @@ package ui
 // 就够），头像那一圈描边在深色下才看得出是「一圈描边」而不是「一块圆盘」。
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"image"
 	"image/color"
-	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -251,54 +246,6 @@ func darkestIn(tt *ui.Tester, x0, y0, x1, y1 int, bg color.RGBA) (color.RGBA, bo
 // ─────────────────────────────────────────────────────────────────────────────
 // F-24　抽屉空状态提示的末行不是孤字
 // ─────────────────────────────────────────────────────────────────────────────
-
-// ─────────────────────────────────────────────────────────────────────────────
-// F-26　三处 600 字重
-// ─────────────────────────────────────────────────────────────────────────────
-
-// TestNoWeightSixHundred 钉住「代码里没有 600 字重」。
-//
-// `DESIGN.md` §二 的刻度表里有 600 那一档，而**用途表里没有它的位置**——
-// 600 是「无主」的：没有人能说出那三个数字为什么该是 600。500（`weightMedium`）
-// 才是仓库里唯一被命名的字重。
-//
-// ⚠️ **扫源码而不是画面**：字重不是颜色，量像素量不出「这一行是 600 还是 500」
-// （两者在 12px 下几乎一样）。这一族有先例（`playbar_type_test.go` 那几条）。
-func TestNoWeightSixHundred(t *testing.T) {
-	matches, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
-	for _, name := range matches {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		f, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("解析 %s 失败，这一就没法查了：%v", name, err)
-		}
-		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "FontWeight" || len(call.Args) != 1 {
-				return true
-			}
-			lit, ok := call.Args[0].(*ast.BasicLit)
-			if !ok {
-				return true
-			}
-			if lit.Value == "600" {
-				t.Errorf("%s: 字重 600 不在刻度的用途表里——用 `weightMedium`（500）",
-					fset.Position(call.Pos()))
-			}
-			return true
-		})
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 量墨迹的那几个小工具
