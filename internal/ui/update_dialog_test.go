@@ -211,9 +211,9 @@ func TestCheckingFindsANewVersionAndTheRowSaysSo(t *testing.T) {
 	if !f.tt.HasText("查看更新内容") {
 		t.Errorf("按钮没变成「查看更新内容」，文字有 %q", f.tt.Texts())
 	}
-	// 照 Biu 那一版（`release-note-modal/index.tsx`）：标题带那个 ✨。
+	// 原型 `openUpdate` 的标题是「有新版本更新」（不带 ✨）。
 	f.openDialog(t)
-	if !f.tt.HasText("✨ 有新版本更新") {
+	if !f.tt.HasText("有新版本更新") {
 		t.Errorf("弹窗的标题不是 Biu 那一个，文字有 %q", f.tt.Texts())
 	}
 }
@@ -418,7 +418,7 @@ func TestTheDialogCannotGoAwayWhileTheUpdateIsDownloading(t *testing.T) {
 	if !f.s.update.wanted {
 		t.Error("按 Esc 把下载中的弹窗关掉了")
 	}
-	if !f.tt.HasText("✨ 有新版本更新") {
+	if !f.tt.HasText("有新版本更新") {
 		t.Errorf("下载中弹窗不见了，文字有 %q", f.tt.Texts())
 	}
 	// 「正在下载」那一档的按钮是**关着**的：Biu 是 `isLoading={…}`，同一个意思。
@@ -439,7 +439,7 @@ func TestTheDialogCanBeDismissedWhenNothingIsDownloading(t *testing.T) {
 	if f.s.update.wanted {
 		t.Error("Esc 没关掉弹窗")
 	}
-	if f.tt.HasText("✨ 有新版本更新") {
+	if f.tt.HasText("有新版本更新") {
 		t.Errorf("弹窗还在画面上，文字有 %q", f.tt.Texts())
 	}
 	// 关掉之后那一版还记着：再按一次就又出来了。

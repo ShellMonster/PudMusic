@@ -73,7 +73,7 @@ func shotLoggedOut(t *testing.T, dir, name string, dark, hover bool) {
 	s, tt := b.s, b.tt
 	s.navigate(followPath)
 	waitFrames(t, tt, "「还没登录」那一支画出来了", func() bool {
-		return tt.HasText("还没登录")
+		return tt.HasText("登录后查看我的关注")
 	})
 	if hover {
 		r, ok := tt.Find(loggedOutHint(3))
@@ -118,7 +118,7 @@ func shotNeedsLogin(t *testing.T, dir, name string, dark bool) {
 	s, tt := b.s, b.tt
 	s.navigate(followPath)
 	waitFrames(t, tt, "「还没登录」那一支画出来了", func() bool {
-		return tt.HasText("还没登录")
+		return tt.HasText("登录后查看我的关注")
 	})
 	save(t, dir, fmt.Sprintf("113-未登录屏-专属图标-%s.png", name), tt)
 	b.Close()

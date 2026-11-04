@@ -24,9 +24,8 @@
 package ui
 
 import (
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -67,40 +66,29 @@ var recentEmpty = emptyState{
 	Icon:  iconEmptyHistory,
 }
 
-// viewNeedsLogin 画「这一页要登录才有内容」那一支。
-//
-// ⚠️ **它不是空状态那一套**：标题是**页标题那个字号**（`scale.PageTitle`，24）
-// 和字重（400，不加粗），下面跟着一句提示和一枚「去登录」——而空状态是 15px
-// 的一行标题加一句 12px 的提示、居中带一枚插画。形状不同就是另一支
-// （`emptyicon_test.go` 的 allowlist 上有它）。
-//
-// ⚠️ **插画位是补上的**（票 #242，UX 报告 §3-F 的 F1）：这一支原来**光秃秃**
-// 三行字，而应用里**每一个别的空状态都有一枚图标**——而这一屏恰恰是用户第一次
-// 打开应用最常撞到的那一屏。图标走的是空状态那一个出口（`emptyArt`），所以
-// 尺寸、颜色和位置和别页一模一样。
-//
-// ⚠️ **它不发任何请求**：这一支画出来的时候，那一页的接口一个都不该发。
-func (s *Shell) viewNeedsLogin(c *ui.Context, key string, e emptyState) {
-	// 🔴 铁律二：页面 view 的头一件正事就是装主题（见 theme.go）。
-	s.applyFrameTheme(c)
+// loginPromptWhat 是各处「登录后查看…」那句里的「…」（原型 `loginPrompt(what)`）。键是各页给
+// `viewNeedsLogin` 的稳定 key。
+var loginPromptWhat = map[string]string{
+	"page:" + laterPath:   "稍后再看",
+	"page:" + historyPath: "历史记录",
+	"page:" + followPath:  "我的关注",
+	"home:recent:login":   "最近播放",
+}
 
-	ui.Column(c).Key(key).Grow(1).Center().Gap(space.Px8).Padding(space.Px24).Children(func() {
-		// 一枚插画，和别页的空状态同一副样子（理由见上面那段注释）。
-		emptyArt(c, e.Icon)
-		typo.Display(ui.Text(c, e.Title), scale.Font(c, scale.SectionTitle))
-		// 给一个能立刻做完的事：这一页在没登录之前永远是这个样子，而
-		// `/login` 就是扫码登录那一页（router.go 的 routes 表里那一条）。
-		//
-		// ⚠️ **走 `goLogin`，不走 `navigate`**（票 #277）：`goLogin` 会记下
-		// 「登录成功了该去哪」，而 `navigate` 不记——那样的话，这一页进去的
-		// 登录会用上一个入口留下的那个去处（用户可能刚从动态页那边进过一次
-		// 登录，落到动态页去）。
-		//
-		// ⚠️ **去处是首页**：用户 2026-10-25 原话「登录成功后应该提示并且
-		// 回到首页」。而这一页的入口在侧栏上，登录完回到首页之后，侧栏里
-		// 那三行（我的关注 / 稍后再看 / 历史记录）就摆出来了——用户想看哪
-		// 一页再点哪一页。
-		if ui.PrimaryButton(c, "去登录").Clicked() {
+// viewNeedsLogin 画「登录后查看」：原型 `loginPrompt`，也就是 T0 的 `pud.LoginPrompt`（虚线框 + 锁的
+// 插画 + 「登录后查看{what}」+ 主色「扫码登录」键）。点登录键去登录页，登录完回首页。
+//
+// e 是各页原来给的空状态文案（保留签名，免得别的页同时改）；这里只用 key 查出 what。
+func (s *Shell) viewNeedsLogin(c *ui.Context, key string, _ emptyState) {
+	s.applyFrameTheme(c)
+	what := loginPromptWhat[key]
+	if what == "" {
+		what = "这些内容"
+	}
+	winW, _ := c.Size()
+	padX := space.PageHorizontal(winW - s.sideDrawnWidth(s.app.SettingsSnapshot()))
+	ui.Column(c).Key(key).Grow(1).FillWidth().Padding(space.None, padX).Children(func() {
+		if pud.LoginPrompt(c, key+":prompt", what) {
 			s.goLogin(homePath)
 		}
 	})

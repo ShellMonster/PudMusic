@@ -868,11 +868,11 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 			tt.Frame()
 			tt.Frame()
 
-			if !tt.HasText("还没登录") {
-				t.Errorf("%s 没登录时没说「还没登录」，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText("登录后查看" + page.name) {
+				t.Errorf("%s 没登录时没说「登录后查看%s」，文字有 %q", page.name, page.name, tt.Texts())
 			}
-			if !tt.HasText("去登录") {
-				t.Errorf("%s 没登录时没给「去登录」那一步，文字有 %q", page.name, tt.Texts())
+			if !tt.HasText("扫码登录") {
+				t.Errorf("%s 没登录时没给「扫码登录」那一步，文字有 %q", page.name, tt.Texts())
 			}
 			// 空列表那一句**不许**出现：用户要的是「先登录」，不是「这里没有」。
 			if empty := lookup(page.path).Empty.Title; tt.HasText(empty) {

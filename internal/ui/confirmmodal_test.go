@@ -14,6 +14,7 @@ package ui
 // 三角形」（或者什么都没有）。
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"image/color"
 	"testing"
 
@@ -21,50 +22,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	"github.com/egoist/mygo/ui"
 )
-
-// TestTheConfirmDialogHasAToneColoredWarningIcon 钉住「标题左边有一枚按类型
-// 变色的警告图标」。
-//
-// ⚠️ **这一条就是「不是系统原生那个」的判据**：MyGo 的 `ui.AlertDialog`
-// （原生那一份）**一个图标都没有**——它的面板是「标题 + 正文 + 两颗按钮」，
-// 而上游那个 `components/confirm-modal` 的标题行是
-// `<RiErrorWarningLine color={colorMap[type]} />` + 标题。
-//
-// 判据是**那块区域里有几块接近目标色的像素**：图标是 SVG，笔画之间是空的，
-// 所以不能指望整块都是色的——要找的是**笔画**。
-//
-// ⚠️ **找的是「面板」不是「标题那行字」**：面板自己带着标题（`Label`），
-// 而面板是标题那行字的**父**——父先被遍历，所以 `Find(标题)` 给的是**面板**
-// 那个框（`Texts()` 里那一次「面板的名字」在「标题字」前面）。
-// 图标在面板的左上角：面板的内边距 `t.Space(5)` 之后的第一样东西。
-//
-// ⚠️ **量的是当前方案给的 Danger，不是上游那个字面值**：这里钉的是「图标跟着
-// 类型走」，不是「图标是某一个红」。曾经的写法把上游经典的 #f31260 钉死在这
-// 里，默认方案换成暖纸（Danger 是它自己的 #C93B3B）之后图标没变、钉的字面值
-// 过期了——跟着主题断言，换方案这案件就不会再发。
-func TestTheConfirmDialogHasAToneColoredWarningIcon(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345",
-		mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
-	waitSongs(t, tt, s, 3)
-	openBatchConfirm(t, tt, "批量删除")
-
-	panel, ok := tt.Find("确认删除选中的 2 首吗？")
-	if !ok {
-		t.Fatalf("确认框没画出来（找不到标题），文字有 %q", tt.Texts())
-	}
-	// 面板的内边距（`coreModal` 那一套：`t.Space(5)`）。
-	th := BuildTheme(app.DefaultSettings(""), false)
-	pad := th.Space(5)
-	danger := color.RGBA{R: th.Danger.R, G: th.Danger.G, B: th.Danger.B, A: th.Danger.A}
-	icon := ui.Rect{
-		X: panel.X + pad, Y: panel.Y + pad,
-		W: confirmIconSize, H: confirmIconSize,
-	}
-	if n := countTonePixels(t, tt, icon, danger); n < 3 {
-		t.Errorf("标题左边只有 %d 块接近 %v 的像素，want ≥3——那枚警告图标不在（或者不是红的）",
-			n, th.Danger)
-	}
-}
 
 // TestTheConfirmDialogHasANameInTheAccessibilityTree 钉住「那个框在无障碍树里
 // **有名字**」。
@@ -105,11 +62,12 @@ func TestTheConfirmDialogHasANameInTheAccessibilityTree(t *testing.T) {
 // ⚠️ **取的是按钮左边那一小块，不是中心**：按钮上写着字，而中心正落在字上
 // （主色按钮上的字是白的）——量中心量到的是**字**，不是底。
 func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
-	// 危险 / 警告两档量的是**当前方案**的语义色（和上面那枚图标同一条口径）：
-	// 默认方案是暖纸，Danger / Warning 是它自己的那两个值。
+	// 原型的确认键一律是 `.btn-danger`（`var(--err)` 底 + 白字，index.html 288 行）：危险和警告两档
+	// 都是 err 底；普通（非破坏性）那一档是主色键。
 	th := BuildTheme(app.DefaultSettings(""), false)
-	danger := color.RGBA{R: th.Danger.R, G: th.Danger.G, B: th.Danger.B, A: th.Danger.A}
-	warning := color.RGBA{R: th.Warning.R, G: th.Warning.G, B: th.Warning.B, A: th.Warning.A}
+	pal := tok.Of(th)
+	danger := color.RGBA{R: pal.Err.R, G: pal.Err.G, B: pal.Err.B, A: pal.Err.A}
+	warning := danger
 
 	t.Run("危险", func(t *testing.T) {
 		_, s, tt := collectionShell(t, "12345",
@@ -137,7 +95,7 @@ func TestTheConfirmButtonTakesTheToneColor(t *testing.T) {
 			t.Fatal(err)
 		}
 		// 主色那一档跟着当前方案走（默认是暖纸的主色）。
-		accent := th.Accent
+		accent := pal.Accent
 		assertConfirmButton(t, tt, "确认移除", color.RGBA{
 			R: accent.R, G: accent.G, B: accent.B, A: accent.A,
 		})
@@ -180,10 +138,10 @@ func TestTheConfirmBodyIsTextSmall(t *testing.T) {
 	if !ok {
 		t.Fatalf("弹窗上没有那颗「取消」，文字有 %q", tt.Texts())
 	}
-	// 「取消」是框架的默认字号 13，正文要的是 14。
-	want := cancel.H * 14 / 13
+	// 「取消」是 pud.Button 的 14 号字（原型 `.btn` 14），正文也是 14（`.dlg-body p` 继承 body 14）。
+	want := cancel.H
 	if r.H < want-0.05 || r.H > want+0.05 {
-		t.Errorf("正文的行高是 %v，want %v（「取消」%v × 14/13）——它不是 text-sm",
+		t.Errorf("正文的行高是 %v，want %v（「取消」%v，同为 14）——它不是 text-sm",
 			r.H, want, cancel.H)
 	}
 }

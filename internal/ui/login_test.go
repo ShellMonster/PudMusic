@@ -189,8 +189,8 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 			name:   "等扫码",
 			sticky: 86101,
 			want:   app.LoginWaiting,
-			say:    "请用 bilibili 手机客户端扫码",
-			absent: "已扫码",
+			say:    "正在等待扫码…",
+			absent: "已扫码，等待确认",
 		},
 		{
 			// 服务器一直说「扫了没确认」——用户在手机上还没点确认之前
@@ -198,8 +198,8 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 			name:   "已扫待确认",
 			sticky: 86090,
 			want:   app.LoginScanned,
-			say:    "已扫码，请在手机上确认",
-			absent: "请用 bilibili 手机客户端扫码",
+			say:    "已扫码，等待确认…",
+			absent: "正在等待扫码…",
 		},
 		{
 			// 过期是终态，循环自己会停，队列给一次就够。
@@ -208,7 +208,7 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 			scans:  []int{86038},
 			want:   app.LoginExpired,
 			say:    "过期",
-			absent: "请用 bilibili 手机客户端扫码",
+			absent: "正在等待扫码…",
 		},
 	}
 	for _, c := range cases {
@@ -240,10 +240,9 @@ func TestLoginPageShowsTheThreeStatesEachWithItsOwnWords(t *testing.T) {
 	}
 }
 
-// TestLoginPageOffersRefreshOnlyWhenExpired 验按钮跟着状态换。
-//
-// 「刷新」在二维码还有效时摆着（哪怕灰掉）只会让用户以为扫码失败了。
-func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
+// TestLoginPageOffersRefreshWhileAQRCodeIsShown 验「刷新二维码」按钮：原型里它是常驻的幽灵键
+// （`PAGES.login` 的 `qr-refresh`），二维码有效、已扫码、过期都在；过期时再多一句原因。
+func TestLoginPageOffersRefreshWhileAQRCodeIsShown(t *testing.T) {
 	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
 	tt, _ := loginTester(t, a)
@@ -252,8 +251,8 @@ func TestLoginPageOffersRefreshOnlyWhenExpired(t *testing.T) {
 	a.BeginLogin()
 	waitQRCode(t, a)
 	tt.Frame()
-	if strings.Contains(screenText(tt), "刷新二维码") {
-		t.Error("二维码还有效时就摆出了「刷新二维码」")
+	if !strings.Contains(screenText(tt), "刷新二维码") {
+		t.Error("二维码有效时没有「刷新二维码」键（原型里它常驻）")
 	}
 
 	b2 := newUIBili(t, 86038, 86038)
@@ -299,7 +298,7 @@ func TestExpiredQRCodeCanBeRefreshedFromTheUI(t *testing.T) {
 	_ = s
 }
 
-// TestCancelStopsTheQRCodeFromTheUI 验取消。
+// TestCancelStopsTheQRCodeFromTheUI 验「暂不登录」（原型的取消）：停掉这一轮登录。
 func TestCancelStopsTheQRCodeFromTheUI(t *testing.T) {
 	b := newUIBili(t, 86101)
 	a := newLoginApp(t, b)
@@ -310,13 +309,13 @@ func TestCancelStopsTheQRCodeFromTheUI(t *testing.T) {
 	waitQRCode(t, a)
 	tt.Frame()
 
-	if err := tt.Click("取消"); err != nil {
+	if err := tt.Click("暂不登录"); err != nil {
 		t.Fatal(err)
 	}
 	tt.Frame()
 
 	if p := a.LoginState().Phase; p != app.LoginIdle {
-		t.Errorf("点了取消之后状态是 %v，want LoginIdle", p)
+		t.Errorf("点了「暂不登录」之后状态是 %v，want LoginIdle", p)
 	}
 	if words := screenText(tt); !strings.Contains(words, "开始扫码登录") {
 		t.Errorf("取消之后没有回到「开始扫码登录」。\n画面上的字是：\n%s", words)
@@ -434,6 +433,25 @@ func TestQRCodeReachesThePixels(t *testing.T) {
 	// 画了一半——任何一种都会在这里露出来。
 	code := a.LoginState().QR
 	total := code.Size() + 2*4 // 含留白
+	// 原型的二维码卡是 240×240 的白底（内边距 16），二维码图画在卡里正中：最长的那条白线是整张
+	// 卡，图自己的边长是 `qrDisplaySize`——把左上角和边长换成图本身的。
+	if side != loginQRSide {
+		t.Errorf("白底卡是 %d 宽，want %d（原型 `.qr`）", side, loginQRSide)
+	}
+	bw := qrDisplaySize(code)
+	// 图在卡里的位置按「深色像素的左上角」量（它是第一个深色模块，离图的左上角正好 4 个模块的留白），
+	// 不假设居中取整的方式。
+	minX, minY := side, side
+	// 只扫卡片里面（去掉 16 的内边距）：卡片四角是圆角，角上露出来的是页面底色，不是模块。
+	for y := y0 + loginQRPad; y < y0+side-loginQRPad; y++ {
+		for x := x0 + loginQRPad; x < x0+side-loginQRPad; x++ {
+			if p := img.RGBAAt(x, y); p.R < 100 && p.G < 100 && p.B < 100 {
+				minX, minY = min(minX, x-x0), min(minY, y-y0)
+			}
+		}
+	}
+	module := bw / total
+	x0, y0, side = x0+minX-4*module, y0+minY-4*module, bw
 	per := float64(side) / float64(total)
 	if per != float64(int(per)) {
 		t.Fatalf("一个模块占了 %.3f 个像素，不是整数——扫不出来", per)
@@ -689,9 +707,9 @@ func TestTheNotLoggedInScreenHasItsOwnIllustration(t *testing.T) {
 			}))
 			s.navigate(followPath)
 			waitFrames(t, tt, "「还没登录」那一支画出来了", func() bool {
-				return tt.HasText("还没登录")
+				return tt.HasText("登录后查看我的关注")
 			})
-			if n := paintedInBand(t, tt, "还没登录"); n < 20 {
+			if n := paintedInBand(t, tt, "登录后查看我的关注"); n < 20 {
 				t.Errorf("「还没登录」那一屏的插画那一带只画了 %d 个像素（want ≥ 20）——"+
 					"它和别页的空状态长得不一样（别的页都有一枚图标）", n)
 			}

@@ -67,10 +67,13 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -182,7 +185,6 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	if !*open {
 		return confirmStillOpen
 	}
-	t := c.Theme()
 	pressed := ""
 
 	// 🔴 **用 `ui.DialogBase` 而不是 `ui.Modal`**——因为**面板得有个名字**。
@@ -216,55 +218,20 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	// 走下拉里那一项），于是它更容易撞上。
 	c.Key("confirm-backdrop:" + spec.title)
 	m := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
-		w, h := c.Size()
-		backdrop.Background(ui.RGBA(0, 0, 0, scrim.Modal))
-		// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Modal`）：值只写一处
-		// （DESIGN.md §四·五，票 #239 把这一处收进去了）。
-		// 底色和圆角是方案里的 `surface1` / `radiusLg`（`dialogCard`），经典不变。
-		card := dialogCard(t)
-		panel = shadow.Modal(panel.Padding(t.Space(5)).Gap(t.Space(3)).Radius(card.radius).
-			Background(card.bg).
-			MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)),
-			t).
-			// 🔴 **这三样是「读屏软件报得出这个框是什么」**：角色、名字、描述。
-			// ⚠️ `Description` 对**不是输入框**的元素不会另外画一行字
-			// （`mygo/ui/form.go` 的 `fieldText`：`e.field == nil` 就原样返回），
-			// 所以这里只是给面板挂上那句描述，画面上不多东西。
-			Role(ui.RoleAlertDialog).
+		protoDialogPanel(c, backdrop, panel, tok.DialogW).Role(ui.RoleAlertDialog).
 			Label(spec.title).
 			Description(spec.body)
 
-		ui.Column(c).Key("confirm:" + spec.title).
-			// ⚠️ **下限和上限都在**（理由见 `confirmMinW` 那段）：只有上限的话
-			// 短标题那一类弹窗会缩成 228 宽的一条。
-			MinWidth(confirmMinW).MaxWidth(confirmMaxW).Gap(confirmGap).
-			Children(func() {
-				// 标题那一行：按类型变色的警告图标 + 标题。
-				//
-				// ⚠️ 图标和标题**同一行**（上游的 `flex items-center gap-1`，
-				// gap-1 = 4）。
-				ui.Row(c).Gap(space.Px4).AlignItems(ui.Center).Children(func() {
-					ui.Icon(c, icon(iconWarning)).FontSize(confirmIconSize).
-						TextColor(confirmIconColor(t, spec.tone))
-					// ⚠️ **字重不写**（400）：弹窗标题是 16/400（DESIGN.md §二）。
-					ui.Text(c, spec.title).FontSize(scale.Font(c, scale.Size16))
-				})
-				if spec.body != "" {
-					// 正文是 `text-sm`（14），颜色是上游那个 `text-zinc-500`
-					// ——而 `t.TextMuted` 浅色下正是 `#71717a`，逐字相同。
-					ui.Text(c, spec.body).FontSize(scale.Font(c, scale.Size14)).
-						TextColor(t.TextMuted).Wrap()
-				}
-				if spec.detail != "" {
-					ui.Text(c, spec.detail).FontSize(scale.Font(c, scale.Size12)).
-						TextColor(t.TextMuted).Wrap()
-				}
-			})
-		// 按钮行。⚠️ **它是面板的直接子元素**（不是 Column 里的第三行）：
-		// 塞进 Column 的话这一行的宽度是 Column 的宽度，按钮靠右对齐也就跟着
-		// 面板走——那倒是想要的；可 `AlignSelf(End)` 才能让这一行**自己**贴右。
-		ui.Row(c).AlignSelf(ui.End).Gap(space.Px8).Children(func() {
-			if cancelButton(c, spec).Clicked() {
+		ui.Column(c).Key("confirm:" + spec.title).FillWidth().Children(func() {
+			pud.DialogBody(c, spec.title, spec.body)
+			if spec.detail != "" {
+				ui.Text(c, spec.detail).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(c.Theme()).Text3).Wrap().
+					Padding(space.None, space.Px24, space.Px16, space.Px24)
+			}
+		})
+		// 按钮行是面板的直接子元素（不套进上面那个 Column：套进去命中区域和面板对不上，看得见、点不动）。
+		pud.DialogFoot(c, func() {
+			if pud.Button(c, "confirm-cancel:"+spec.title, pud.Ghost, pud.Std, spec.cancel, "").Clicked() {
 				pressed = spec.cancel
 			}
 			if confirmButton(c, spec).Clicked() {
@@ -273,10 +240,6 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 		})
 	})
 
-	// 点外面 / 按 Esc：`ui.DialogBase` 已经把 `*open` 关掉了，而那一次**不算确认**。
-	//
-	// ⚠️ **它算「取消」而不是「还开着」**：调用方要在这一档清掉自己那份状态
-	// （不然下一帧它又弹一次）。
 	if m.Dismissed() {
 		return confirmCancelled
 	}
@@ -294,94 +257,15 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	return confirmCancelled
 }
 
-// confirmButton 是那颗「确认」键。
-//
-// 上游是 `<Button color={type}>`（`index.tsx:79`），也就是**实心、颜色按类型**。
-// 三档分别对到：
-//
-//	primary → `ui.PrimaryButton`（主色实心，悬停 / 按下是主色自己的两档）
-//	danger  → 红底白字（`dialogOnDanger` 那个白：白压在 `#f31260` 上是 4.1:1）
-//	warning → 橙底深色字（见 `confirmOnWarning` 的注释）
-//
-// ⚠️ **为什么 danger / warning 用 `flatButton` 而不是 `ui.Button`**：
-// `ui.Button` 的默认底色是 `t.Surface` 加一圈 1px 描边，而 `styleButton` 的
-// 悬停那一层只在「底色还是它自己的默认底色」时才生效（`b.bg != base` 就
-// 直接 return）——所以改过底色的按钮**没有悬停反馈**。`flatButton` 的反馈是
-// 画上去的一层淡色（`widgets/flat` 的 `feel`），改过底色照样有。
-//
-// 而描边那一圈：上游的实心按钮没有描边，`flatButton` 正好也没有。
-//
-// 🔴 **无障碍名字是「确认 + 那个词」，不是那个词本身**（`Label`）。
-//
-// 理由不是「好读」：**同一个画面里会有两颗都叫「删除」的键**——下载记录那一页
-// 每一行有一颗「删除」，弹窗上又有一颗「删除」。而这一颗是**会动用户的东西**
-// 的那一下，读屏软件念出来两个「删除」时用户分不出自己按的是哪一颗。
-//
-// ⚠️ **别写「不可逆」**：这一层服务的是**所有**确认框，而其中有些是可恢复的
-// （票 #558 之后本地音乐那一下是「移到系统废纸篓」，用户找得回来）——
-// 写死「不可逆」就是**注释说谎**。
-//
-// 上游没有这一层（HeroUI 的按钮没有单独的无障碍名字，名字就是可见的字），
-// 而上游那一页上弹窗和行里的键**不同时在场**（弹窗是模态，底下的键看不见也
-// 摸不着）。我们这边一样——所以这一层是**我们加的**，加的理由是「两个同名
-// 的动作」，不是「上游有」。
+// confirmButton 是确认键。原型的确认键一律是 `.btn-danger`（err 底 + 白字，index.html 288 行）；
+// 这里主色调的确认（非破坏性）仍是主色键，警告和危险都是 err 底。无障碍名字是「确认」+ 字，
+// 和取消区分开。
 func confirmButton(c *ui.Context, spec confirmSpec) ui.Element {
-	t := c.Theme()
-	name := "确认" + spec.confirm
-	switch spec.tone {
-	case toneDanger:
-		return flatButton(c, spec.confirm).Label(name).
-			Background(t.Danger).TextColor(readableOn(t.Danger, dialogOnDanger))
-	case toneWarning:
-		return flatButton(c, spec.confirm).Label(name).
-			Background(t.Warning).TextColor(readableOn(t.Warning, confirmOnWarning))
+	kind := pud.Danger
+	if spec.tone == tonePrimary {
+		kind = pud.Primary
 	}
-	return ui.PrimaryButton(c, spec.confirm).Label(name)
-}
-
-// cancelButton 是那颗「取消」键。
-//
-// 🔴 **它带壳（常驻底 + 描边），不是扁的**——这一条是**仓库自己的**契约
-// （票 #141「铺开扁平按钮」），不是上游的。
-//
-// 上游那个弹窗的取消键是 HeroUI 的 `variant="light"`：透明底、无描边。而 #141
-// 那一票把页面上**一批**药丸拍平的时候，**明确留下了对话框这一批**
-// （`internal/ui/flatspread_test.go` 的 `TestTheDialogButtonsStayOutlined` 钉着
-// 那一件）——理由是「主次分明的地方，去掉描边就没了主次」。
-//
-// ⚠️ **#176 把两处系统原生 `ui.AlertDialog` 换成自绘模态的时候，把这一件一起
-// 丢了**：系统原生那一份的取消键是 `coreButton`
-// （`mygo@v0.6.3/ui/feedback.go:201`），也就是 `t.Surface` 的常驻底 + 一圈
-// `t.Border`——**带壳**。换成自绘之后它变成了 `flatButton`，那一层底和那一圈
-// 描边就都没了（票 #228）。
-//
-// # 🔴 它和确认键的层级**不是靠颜色分的**
-//
-// 确认键那一档是危险红 / 警告橙 / 普通主色（上游的 `color={type}`），而**取消键
-// 不在那三档里**——把它也涂成主色，两颗键就分不出主次了（票 #228 明确点名
-// 「别把它也涂成主色」）。它靠的是「壳」：一颗带壳的中性键摆在一颗实心主键旁边。
-//
-// ⚠️ **别改回 `flatButton`**：`flatspread_test.go` 的
-// `TestTheDialogButtonsStayOutlined` 会红（它量的是「字上面那几行和背景是不是
-// 同一个颜色」）。仓库里别处那些「取消」（`covermodal.go` / `folderedit.go` /
-// `folderselect.go` / `login.go`）用的都是 `ui.Button`——这一处跟它们一样。
-func cancelButton(c *ui.Context, spec confirmSpec) ui.Element {
-	return ui.Button(c, spec.cancel)
-}
-
-// confirmIconColor 是警告图标的颜色。
-//
-// ⚠️ **primary 那一档是文字色**：上游的 `colorMap` 里没有 "primary" 这一项
-// （`index.tsx:11-14` 的类型就写着 `Exclude<ConfirmModalType, "primary">`），
-// `colorMap[type]` 是 undefined，图标于是继承文字色。这里照它。
-func confirmIconColor(t *ui.Theme, tone confirmTone) ui.Color {
-	switch tone {
-	case toneWarning:
-		return t.Warning
-	case toneDanger:
-		return t.Danger
-	}
-	return t.Text
+	return pud.Button(c, "confirm-ok:"+spec.title, kind, pud.Std, spec.confirm, "").Label("确认" + spec.confirm)
 }
 
 // dialogPanel 是弹窗面板的统一外观：遮罩、内边距、圆角、底色、阴影。
@@ -398,4 +282,17 @@ func dialogPanel(c *ui.Context, backdrop, panel ui.Element, label string) {
 		Background(card.bg).
 		MaxWidth(w-t.Space(10)).MaxHeight(h-t.Space(10)), t).
 		Role(ui.RoleDialog).Label(label)
+}
+
+// protoDialogPanel 给 `ui.DialogBase` 的底幕和面板上原型 `dialog.dlg` 的样子：底幕 50% 黑
+// （`dialog.dlg::backdrop`）；面板宽 min(w, 窗口 − 32)、surface 底、1px line 描边、圆角 12、
+// `--shadow-pop`，进场 `pop-in`（`motion.PopIn`）。面板自己没有内边距——内边距在 `.dlg-body` /
+// `.dlg-foot`（`pud.DialogBody` / `pud.DialogFoot`）里。w 是 `.dlg` 的宽：确认框 440、`.sheet` 480。
+func protoDialogPanel(c *ui.Context, backdrop, panel ui.Element, w float32) ui.Element {
+	t := c.Theme()
+	p := tok.Of(t)
+	winW, winH := c.Size()
+	backdrop.Background(ui.RGBA(0, 0, 0, scrim.Dialog))
+	return shadow.Pop(panel.Width(min(w, winW-32)).MaxHeight(winH-64).Radius(tok.R12).
+		Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn), t)
 }

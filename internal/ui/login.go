@@ -31,13 +31,16 @@ package ui
 import (
 	"image"
 	"image/color"
+	"strconv"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
@@ -46,7 +49,7 @@ import (
 //
 // 真正的整数是 `qrDisplaySize` 算出来的那个——**必须是整模块**，
 // 原因见那个函数的注释。
-const qrSide = 200
+const qrSide = loginQRSide - 2*loginQRPad
 
 // loginPath 是登录页那条路由，和 routes 表里登记的是同一个字符串。
 const loginPath = "/login"
@@ -151,74 +154,145 @@ func (s *Shell) finishLogin() {
 	s.addToast("登录成功", notice.Success)
 }
 
-// viewLogin 画扫码登录那一页。
+// viewLogin 是登录页：原型 `PAGES.login`（app.js 788 行）+ CSS（index.html 534–544 行）。
 //
-// 整个函数**只读状态、只发命令**：不碰网络、不读文件系统。
-// 所有异步的事都在 `app.Account` 里（见 account.go）。
-//
-// 外面套一层 Scroll：窗口矮的时候（尤其是缩到最小高度）内容会比这一页高。
-// 不套的话最后那排按钮会掉到播放条底下去——界面上还看得见，但**点不到**。
+// 整页居中（`.login`：上下 48、左右 24），中间一张 `.login-card`：左边 240×240 的二维码卡（白底、
+// 内边距 16、圆角 12；已扫码时盖一层 86% 的黑罩 + 对勾 + 「已扫码」），右边 Eyebrow `Sign in` +
+// 40 号宋体「扫码登录」+ 一句说明 + 三个步骤 + 按钮 + 一行状态，两列隔 48，右列最宽 320。
 func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
-	t := c.Theme()
 	st := s.app.LoginState()
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		// 设计规范 §7.11：内容收在一张居中的卡片里（`surface1`、`radiusLg`、1px 描边），
-		// 四种状态都在这张卡里变，卡的位置不动。
-		ui.Column(c).Key("page:"+loginPath).Grow(1).Padding(space.None, space.Px20).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
-			// 页标题留在卡片外面、页面最顶上：整个应用每一页的标题都是这个位置和字号
-			// （`TestEveryPageTitleIsTheSameSizeOnScreen` / `TestPagesStartAtTheTop` 钉着）。
-			typo.Display(ui.Text(c, "扫码登录"), scale.Font(c, scale.PageTitle))
-			ui.Column(c).Key("login-card").Width(loginCardW).Padding(space.Px32, space.Px24).Gap(space.Px12).
-				AlignItems(ui.Center).Background(s.cardBackground(t)).Radius(s.cardRadius(t)).
-				Border(1, t.Border).Children(func() {
-				s.viewLoginBody(c, t, st)
+		ui.Column(c).Key("page:"+loginPath).Grow(1).FillWidth().Padding(space.Px48, space.Px24).
+			Justify(ui.Center).AlignItems(ui.Center).Transition(motion.PageIn).Children(func() {
+			ui.Row(c).Key("login-card").Gap(space.Px48).AlignItems(ui.Center).Children(func() {
+				s.viewLoginQR(c, st)
+				s.viewLoginText(c, st)
 			})
 		})
 	})
 	s.trackScrollbar(loginScroll)
 }
 
-// loginCardW 是登录卡片的宽（规范 §7.11）。
-const loginCardW = 420
+const (
+	// loginQRSide / loginQRPad 是 `.qr`：240×240、内边距 16（二维码本身画在 208 的框里）。
+	loginQRSide = 240
+	loginQRPad  = 16
+	// loginTextW 是右列的最大宽（`minmax(0, 320px)`）。
+	loginTextW = 320
+)
 
-// viewLoginBody 是登录卡片里的内容：说明、二维码 / 状态、按钮。
-func (s *Shell) viewLoginBody(c *ui.Context, t *ui.Theme, st app.LoginState) {
-	switch {
-	case !st.Busy() && st.QR == nil:
-		// 一开始（还没点）或已经取消：给一个开始的地方。
-		// 不放二维码是因为还没有——凭空画一张占位图会让人以为
-		// 「点了没反应」。
-		ui.Text(c, "用 bilibili 手机客户端扫一扫就能登进来").
-			FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
-
-	case st.Phase == app.LoginExpired:
-		s.qrImage(c, st.QR, true)
-		ui.Text(c, "二维码已过期").FontSize(scale.Font(c, scale.Size14)).TextColor(t.Text)
-
-	default:
-		// 这一支（等扫码 / 已扫待确认）**永远不盖灰**。
-		//
-		// 写成 `st.Phase != LoginScanned` 的话，等扫码这一态也被盖上了——
-		// 盖完的码手机扫不出来（实测 45% 压暗之后相当一部分 App 直接放弃），
-		// 用户看到的却是一张「正常」的二维码。
-		s.qrImage(c, st.QR, false)
-		ui.Text(c, st.Hint).FontSize(scale.Font(c, scale.Size14)).TextColor(qrHintColor(t, st.Phase))
+// loginStep 是登录进行到第几步（原型 `S.login.step`）：0 等扫码，1 已扫码等确认，2 成功。
+func loginStep(st app.LoginState) int {
+	switch st.Phase {
+	case app.LoginScanned:
+		return 1
+	case app.LoginDone:
+		return 2
 	}
-
-	s.qrActions(c, st)
-	s.viewAccountFooter(c, t, st)
+	return 0
 }
 
-// syncLogin 是登录页每帧的副作用。**这一页没有**。
-//
-// 理由：这一页只读状态、只发命令（见文件头那段话），所有异步的事都在
-// `app.Account` 里，而那一边是**自己叫醒界面**的——二维码回来了界面自己会
-// 醒，不需要这一页每帧去收什么。
-//
-// ⚠️ **它在 `pageSyncs` 表里是个空函数**，不是漏了：那张表和 `builtPage` 是
-// 同一件事的两面（见 underlay.go 的注释），加新页的人照着表就知道该往哪儿加。
+// viewLoginQR 是左边的二维码卡。没有二维码（还没开始 / 失败）时只有白底的空卡。
+func (s *Shell) viewLoginQR(c *ui.Context, st app.LoginState) {
+	card := ui.Box(c).Key("login-qr").Width(loginQRSide).Height(loginQRSide).Shrink(0).
+		Padding(loginQRPad).Radius(tok.R12).Background(ui.RGB(255, 255, 255)).
+		Justify(ui.Center).AlignItems(ui.Center).Label("登录二维码")
+	card.Children(func() {
+		s.qrImage(c, st.QR, st.Phase == app.LoginExpired)
+		if st.Phase == app.LoginScanned || st.Phase == app.LoginDone {
+			// `.qr-mask`：盖满整张卡、圆角 12、rgba(14,15,17,.86)；对勾 40 + 「已扫码」+ 13 号提示，居中，缝 8。
+			// 已经登录（再进登录页）时同一块罩子写「已登录」、不写那句提示。
+			title, hint := "已扫码", "请在手机上确认登录"
+			if st.Phase == app.LoginDone {
+				title, hint = "已登录", ""
+			}
+			ui.Column(c).Key("login-qr-mask").Absolute().Left(0).Top(0).Right(0).Bottom(0).
+				Radius(tok.R12).Background(ui.RGBA(14, 15, 17, 0.86)).Padding(space.Px24).Gap(space.Px8).
+				Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+				fg := ui.Hex("#ecebe8")
+				ui.Icon(c, pud.Icon("check")).FontSize(40).TextColor(fg)
+				ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).TextColor(fg)
+				if hint != "" {
+					ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).TextColor(ui.Hex("#b6b5b2"))
+				}
+			})
+		}
+	})
+}
+
+// viewLoginText 是右边那一列：标题、说明、三个步骤、按钮、状态。
+func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState) {
+	p := tok.Of(c.Theme())
+	step := loginStep(st)
+	ui.Column(c).Key("login-text").Width(loginTextW).Shrink(1).Children(func() {
+		typo.Eyebrow(c, "Sign in")
+		typo.Display(ui.Text(c, "扫码登录"), scale.Font(c, scale.Size40)).Margin(space.Px8, space.None, space.None, space.None)
+		ui.Text(c, "继续你的音乐旅程：登录后同步收藏夹、关注和历史记录，并解锁 Hi-Res 无损音质。").
+			FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().
+			Margin(space.Px8, space.None, space.None, space.None)
+
+		// `.steps`：上下各 24、步骤之间 12。
+		ui.Column(c).Key("login-steps").Gap(space.Px12).Margin(space.Px24, space.None, space.Px24, space.None).Children(func() {
+			for i, label := range []string{"打开手机上的 B 站 App", "扫描左侧二维码", "在手机上确认登录"} {
+				s.loginStepRow(c, p, i+1, label, i == 0 || step >= i)
+			}
+		})
+
+		ui.Row(c).Key("qr-actions").Gap(space.Px12).AlignItems(ui.Center).Children(func() { s.qrActions(c, st) })
+		ui.Text(c, loginStatusLine(st)).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).Wrap().
+			Margin(space.Px24, space.None, space.None, space.None)
+		s.viewAccountFooter(c, st)
+	})
+}
+
+// loginStepRow 是一个步骤（`.steps li`）：22 的圆圈里写序号（等宽 12），缝 12；做完的圆圈填主色、
+// 字变正文色。
+func (s *Shell) loginStepRow(c *ui.Context, p tok.Palette, n int, label string, done bool) {
+	ui.Row(c).Key("login-step:" + label).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+		circle := ui.Row(c).Width(22).Height(22).Radius(11).Shrink(0).Justify(ui.Center).AlignItems(ui.Center)
+		fg := p.Text2
+		if done {
+			circle = circle.Background(p.Accent).Border(1, p.Accent)
+			fg = p.AccentInk
+		} else {
+			circle = circle.Border(1, p.LineStrong)
+		}
+		circle.Children(func() {
+			typo.Mono(ui.Text(c, strconv.Itoa(n))).FontSize(scale.Font(c, scale.Size12)).TextColor(fg)
+		})
+		txt := p.Text2
+		if done {
+			txt = p.Text
+		}
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(txt).Wrap().Shrink(1)
+	})
+}
+
+// loginStatusLine 是最底下那行 12 号的状态（原型 `aria-live` 那一句）。
+func loginStatusLine(st app.LoginState) string {
+	switch st.Phase {
+	case app.LoginScanned:
+		return "已扫码，等待确认…"
+	case app.LoginDone:
+		// 原型第 3 步的「登录成功，正在同步…」是一闪而过的：登录成功时页面马上换到去向页并弹「登录成功」，
+		// 这一行只会在已登录时再进登录页才看到，所以写现状。
+		return "已登录，可以换一个账号。"
+	case app.LoginExpired:
+		return "二维码已过期，点「刷新二维码」重新获取。"
+	case app.LoginFailed:
+		if st.Err != "" {
+			return "登录没成功：" + st.Err
+		}
+		return "登录没成功，点「重试」再来一次。"
+	case app.LoginIdle:
+		return "点「开始扫码登录」获取二维码。"
+	}
+	return "正在等待扫码…"
+}
+
+// syncLogin 是登录页的每帧副作用。现在是空的：状态都在 `app.Account` 里，界面每帧读一份拷贝。
 func (s *Shell) syncLogin(c *ui.Context) {}
 
 // qrImage 把二维码画出来。
@@ -310,72 +384,62 @@ func qrDisplaySize(code *bili.Code) int {
 	return total * module
 }
 
-// qrActions 是那一排按钮。
+// qrActions 是按钮行（原型：幽灵键「刷新二维码」+ 安静键「暂不登录」）。
 //
-// 按钮**跟着状态换**，而不是把所有按钮都摆出来再灰掉几个：
-// 「刷新」在二维码还有效时点是没有意义的（换了也白换），
-// 摆在那里只会让用户以为扫码失败了。
+// 开始前是主色「开始扫码登录」（原型进页就自动取码，这里要用户点一下才联网）；失败后是主色「重试」；
+// 其余阶段都是「刷新二维码」。「暂不登录」取消这一轮登录并回到上一页。
 func (s *Shell) qrActions(c *ui.Context, st app.LoginState) {
-	t := c.Theme()
-	ui.Row(c).Key("qr-actions").Gap(space.Px10).Children(func() {
-		switch st.Phase {
-		case app.LoginIdle:
-			if ui.PrimaryButton(c, "开始扫码登录").Clicked() {
-				s.clearToasts()
-				s.app.BeginLogin()
-			}
-		case app.LoginWaiting:
-			if ui.Button(c, "取消").Clicked() {
-				s.app.CancelLogin()
-			}
-		case app.LoginScanned:
-			ui.Text(c, "别关掉这一页").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-			if ui.Button(c, "取消").Clicked() {
-				s.app.CancelLogin()
-			}
-		case app.LoginExpired:
-			if ui.PrimaryButton(c, "刷新二维码").Clicked() {
-				s.clearToasts()
-				s.app.RefreshLoginCode()
-			}
-		case app.LoginDone:
-			if ui.PrimaryButton(c, "去首页").Clicked() {
-				s.navigate("/")
-			}
-			if ui.Button(c, "换一个账号").Clicked() {
-				s.logoutAndStartOver()
-			}
-		case app.LoginFailed:
-			if ui.PrimaryButton(c, "重试").Clicked() {
-				s.clearToasts()
-				s.app.BeginLogin()
-			}
+	switch st.Phase {
+	case app.LoginIdle:
+		if pud.Button(c, "login-begin", pud.Primary, pud.Std, "开始扫码登录", "").Clicked() {
+			s.clearToasts()
+			s.app.BeginLogin()
 		}
-	})
+	case app.LoginFailed:
+		if pud.Button(c, "login-retry", pud.Primary, pud.Std, "重试", "refresh").Clicked() {
+			s.clearToasts()
+			s.app.BeginLogin()
+		}
+	case app.LoginDone:
+		if pud.Button(c, "login-home", pud.Primary, pud.Std, "去首页", "").Clicked() {
+			s.navigate("/")
+		}
+		if pud.Button(c, "login-switch", pud.Ghost, pud.Std, "换一个账号", "").Clicked() {
+			s.logoutAndStartOver()
+		}
+		return
+	default:
+		if pud.Button(c, "login-refresh", pud.Ghost, pud.Std, "刷新二维码", "refresh").Clicked() {
+			s.clearToasts()
+			s.app.RefreshLoginCode()
+		}
+	}
+	if pud.Button(c, "login-skip", pud.Quiet, pud.Std, "暂不登录", "").Clicked() {
+		s.app.CancelLogin()
+		if s.router.Path() == loginPath {
+			s.router.Back()
+		}
+	}
 }
 
-// viewAccountFooter 画底下那一行「现在的状态」。
-//
-// 已登录时给一个退登按钮——退登是验收项（「主动退出登录能清干净凭据」），
-// 藏进设置页等于没有。
-func (s *Shell) viewAccountFooter(c *ui.Context, t *ui.Theme, st app.LoginState) {
+// viewAccountFooter 是已登录时多出来的一行：UID + 凭据后端提示 + 退出登录。
+func (s *Shell) viewAccountFooter(c *ui.Context, st app.LoginState) {
 	if !st.LoggedIn {
 		return
 	}
+	p := tok.Of(c.Theme())
 	sess := s.app.Session()
-	ui.Row(c).Key("account-footer").Gap(space.Px10).AlignItems(ui.Center).Children(func() {
+	ui.Row(c).Key("account-footer").Gap(space.Px12).AlignItems(ui.Center).
+		Margin(space.Px16, space.None, space.None, space.None).Children(func() {
+		who := "已登录"
 		if uid := sess.DedeUserID; uid != "" {
-			ui.Text(c, "已登录（UID "+uid+"）").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-		} else {
-			ui.Text(c, "已登录").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+			who = "已登录（UID " + uid + "）"
 		}
-		// 登录态存不存得住，一眼就该看见：后端不可用时用户必须在这里
-		// 知道「关掉应用就白登了」，而不是重启之后才发现。
-		if backend := s.app.CredentialBackendName(); backend == "none" {
-			ui.Text(c, "凭据后端不可用，登录态关掉应用就没了").
-				FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+		ui.Text(c, who).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3)
+		if s.app.CredentialBackendName() == "none" {
+			ui.Text(c, "凭据后端不可用，登录态关掉应用就没了").FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3)
 		}
-		if ui.Button(c, "退出登录").Clicked() {
+		if pud.Button(c, "login-logout", pud.Quiet, pud.Sm, "退出登录", "").Clicked() {
 			s.logoutAndStartOver()
 		}
 	})
@@ -390,21 +454,4 @@ func (s *Shell) logoutAndStartOver() {
 		s.addToast("退出登录："+err.Error(), notice.Danger)
 	}
 	s.clearToasts()
-}
-
-// qrHintColor 给「已扫待确认」换一个更醒目的颜色。
-//
-// 这一条不是审美选择：那是**唯一需要用户去手机上操作**的状态，
-// 混在「请扫码」和「已失效」之间，用户最容易忽略的就是它。
-func qrHintColor(t *ui.Theme, phase app.LoginPhase) ui.Color {
-	switch phase {
-	case app.LoginScanned:
-		// 主色当**字**：浅色下换成与底色 ≥4.5:1 的变体（理由见
-		// `widgets/ink`）。这句话是唯一要用户去手机上操作的那一句，读不出来
-		// 等于没说。
-		return ink.AccentOn(t)
-	case app.LoginExpired, app.LoginFailed:
-		return t.Text
-	}
-	return t.TextMuted
 }

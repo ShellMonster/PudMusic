@@ -222,8 +222,8 @@ func TestNotLoggedInSaysSoAndSendsNothing(t *testing.T) {
 	tt.Frame()
 	tt.Frame()
 
-	if !showsText(tt, followNotLoggedIn.Title) {
-		t.Errorf("没登录时该说「%s」，文字有 %q", followNotLoggedIn.Title, tt.Texts())
+	if !showsText(tt, "登录后查看我的关注") {
+		t.Errorf("没登录时该说「登录后查看我的关注」，文字有 %q", tt.Texts())
 	}
 	// ⚠️ **不能是「没关注任何人」那一句**：用户登录完发现还是空的，会以为是
 	// 登录坏了。
