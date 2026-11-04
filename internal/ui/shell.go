@@ -1208,10 +1208,6 @@ type Shell struct {
 	//（`every` 给的）。刘海窗关掉时调它（`attachNotchWindow` 的 OnClosed）。
 	notchPollStop func()
 
-	// notchMu 守 `notch` 里那两个 tap 那边写、主线程读的字段
-	//（`lastPointer`/`hasPointer`/`pointerIn`）。
-	notchMu sync.Mutex
-
 	// main 是「我是被主窗口开出来的那个」这条边，只在迷你窗口那一侧有值。
 	// 见 `attachMiniWindow`。
 	main *Shell

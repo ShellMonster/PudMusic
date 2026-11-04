@@ -11,9 +11,9 @@ package ui
 // 另一套，形状照抄它（注册全在 init 主线程上、选择子缓存）。
 
 import (
+	"fmt"
 	"runtime"
 	"sync"
-	"unsafe"
 
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
@@ -219,6 +219,29 @@ func raiseAboveMenuBar(handle uintptr) {
 	}
 }
 
+// notchWindowLevel 把 NSWindow 当前那一层读回来（`level`）。E2E 靠这个
+// 断「窗级真的压过菜单栏」——自动化协议的 `windows` 结果里没有 level，
+// 只能走原生那半层问。
+func notchWindowLevel(handle uintptr) int {
+	if handle == 0 {
+		return 0
+	}
+	return notchSendInt(notchID(handle), "level")
+}
+
+// notchLevelTitle 把窗级编进标题里：`windows` 那条结果带 title 不带
+// level，这是自动化能把窗级问出来的通道。`notchConfigure` 配完就把
+// 「布丁音乐刘海 level:27」这样的名字写回去；`internal/e2e/notch_test.go`
+// 那边照着解析，没解析到就按没配上算。
+func notchLevelTitle(w *mygo.Window) {
+	if w == nil {
+		return
+	}
+	if lv := notchWindowLevel(w.NativeHandle()); lv > 0 {
+		w.SetTitle(fmt.Sprintf("%s level:%d", w.Title(), lv))
+	}
+}
+
 // notchSurfaceView 找 MyGo 画原生 UI 的那个 view（MyGoSurfaceView）。
 func notchSurfaceView(v notchID) notchID {
 	if v == 0 {
@@ -268,8 +291,11 @@ func watchPointer(fn func()) (stop func(), ok bool) {
 	events := notchID(notchClass("NSEvent"))
 	global := objc.NewBlock(func(_ objc.Block, _ objc.ID) { fn() })
 	local := objc.NewBlock(func(_ objc.Block, ev objc.ID) objc.ID { fn(); return ev })
-	g := notchSend(events, "addGlobalMonitorForEventsMatchingMask:handler:", uintptr(mask), uintptr(unsafe.Pointer(&global)))
-	l := notchSend(events, "addLocalMonitorForEventsMatchingMask:handler:", uintptr(mask), uintptr(unsafe.Pointer(&local)))
+	// ⚠️ block 本身就是一个 id（它指向堆上那份 block 对象）——拿它的
+	// **值**当参数，不是它的地址：`&global` 递过去，AppKit 会对着一个
+	// Go 栈地址发消息，当场段错误（评审抓的就是这一条）。
+	g := notchSend(events, "addGlobalMonitorForEventsMatchingMask:handler:", uintptr(mask), uintptr(global))
+	l := notchSend(events, "addLocalMonitorForEventsMatchingMask:handler:", uintptr(mask), uintptr(local))
 	notchSend(g, "retain")
 	notchSend(l, "retain")
 	return func() {
@@ -299,6 +325,8 @@ func notchConfigure(w *mygo.Window) {
 	nw, nh := w.Size()
 	raiseAboveMenuBar(win)
 	pinToTop(win, float64(nw), float64(nh))
+	// 把读回来的窗级写进标题，E2E 走 `windows` 那条通道就能核到它。
+	notchLevelTitle(w)
 }
 
 // notchReposition 把窗重新贴回屏顶正中（显示器变了之后调）。
