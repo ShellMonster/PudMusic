@@ -65,11 +65,7 @@ func TestRenderLoginShots(t *testing.T) {
 // （变主色 + 下划线），而平时它就是一行淡灰。
 func shotLoggedOut(t *testing.T, dir, name string, dark, hover bool) {
 	t.Helper()
-	// 该 shot 验证的是侧栏里的登录提示；使用展开态保留提示文字，
-	// 产品默认仍按 cobalt 原型使用 88px compact rail。
-	st := app.DefaultSettings("")
-	st.SideMenuCollapsed = false
-	b := newTestShell(t, systemIsDark(dark), withSettings(st), mounted(func(_ *testing.T, a *app.App) {
+	b := newTestShell(t, systemIsDark(dark), mounted(func(_ *testing.T, a *app.App) {
 		cli := bili.NewClient(bili.Options{})
 		a.MountLogin(app.NewMemoryStore("test"), cli)
 		a.MountExplore(cli)

@@ -58,7 +58,7 @@ func TestRenderTicket455Shots(t *testing.T) {
 				st := newSearchStub(6, 6)
 				s, tt := newSearchPage(t, "周杰伦", st, withSettings(set), systemIsDark(dark))
 				settleText(t, tt, "第 1 页 第 1 首")
-				if err := tt.Click("UP主"); err != nil {
+				if err := tt.Click("用户"); err != nil {
 					t.Fatalf("点不到「用户」那个 Tab：%v", err)
 				}
 				waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -77,7 +77,7 @@ func TestRenderTicket455Shots(t *testing.T) {
 				sCard, ttCard := newSearchPage(t, "周杰伦", stCard,
 					withSettings(setCard), systemIsDark(dark))
 				settleText(t, ttCard, "第 1 页 第 1 首")
-				if err := ttCard.Click("UP主"); err != nil {
+				if err := ttCard.Click("用户"); err != nil {
 					t.Fatalf("点不到「用户」那个 Tab：%v", err)
 				}
 				waitFrames(t, ttCard, "用户那一页进来", loadedTo(sCard, searchTabUser, 1))

@@ -772,9 +772,8 @@ func collectionRefOfPath(path, query string) app.CollectionRef {
 
 // 头图区那几个尺寸。照 Biu 的 `header/index.tsx`：封面 200×168（不是方的）。
 const (
-	// 收藏夹详情原型使用 220x220 方形封面，左侧与内容列对齐。
-	collectionCoverW = 220
-	collectionCoverH = 220
+	collectionCoverW = 200
+	collectionCoverH = 168
 
 	// collectionHeadGap 是那三行字之间的行距：`space-y-4` = **16**
 	// （上游同一个文件 :53-113）。
@@ -888,14 +887,16 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	// `TestTheTintCacheIsKeyedByTheURL` 钉着），所以换地址天然换色、切回来也
 	// 命得中原来那一条。
 	cover := s.collectionHeaderCover(p.ref, info)
+	hue, sat := s.tint.sync(cover, s.wake.invalidate)
+	glow := collectionGlow(t, hue, sat)
 
 	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
 	//
 	// 设计稿 docs/design-mockups/collection_header.png：头图区是一块带封面主色光晕的
 	// 横幅——从封面色（浅色 18% / 深色 28%）自上而下淡到透明。取不到色（封面空、
 	// 还没下回来、灰得没颜色）时没有光晕，画面和以前一样。
-	ui.Row(c).Key("collection-header").Gap(space.Px28).Padding(space.Px12, space.None, space.Px12).
-		Radius(0).
+	ui.Row(c).Key("collection-header").Gap(space.Px16).Padding(space.Px20, space.Px20, space.Px20).
+		Radius(t.Radius * 2).LinearGradient(glow).
 		Children(func() {
 			// ① 封面。
 			//

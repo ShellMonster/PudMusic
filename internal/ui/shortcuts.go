@@ -126,9 +126,6 @@ func defaultShortcutSettings() shortcutSettings {
 // 迷你播放器用 ⇧⌘M（`Switch to MiniPlayer###M#shift`），照它。
 var shiftedShortcuts = []struct{ id, key string }{
 	{"toggleMiniMode", "M"},
-	// ⌘N 在 macOS 上是「新建窗口」（框架「文件」栏 `RoleNew` 那一档），
-	// 让开：⇧⌘N。
-	{"toggleNotchMode", "N"},
 	// ⚠️ **「显示/隐藏主窗口」要多按一个 ⇧**：⌘H 是 macOS 的「隐藏本应用」
 	//（框架「应用」栏里「隐藏」那一项带的键，`mygo/menu.go:723`），
 	// ⌘W 又是「关闭窗口」（文件栏的 `RoleClose`）——两个裸的候选键都
@@ -158,16 +155,15 @@ var inAppOnlyShortcuts = []struct{ id, key string }{
 // ⇒ 我们这边统一成「迷你」，而且**菜单项和设置页用同一个名字**
 // （同一个功能两个名字，用户会以为是两件事）。
 var defaultShortcutNames = map[string]string{
-	"togglePlay":      "播放/暂停",
-	"prev":            "上一首",
-	"next":            "下一首",
-	"volumeUp":        "音量加",
-	"volumeDown":      "音量减",
-	"toggleMiniMode":  "显示/隐藏迷你播放器",
-	"toggleNotchMode": "显示/隐藏刘海",
-	"seekBack":        "快退 5 秒",
-	"seekForward":     "快进 5 秒",
-	"commandPalette":  "命令面板",
+	"togglePlay":     "播放/暂停",
+	"prev":           "上一首",
+	"next":           "下一首",
+	"volumeUp":       "音量加",
+	"volumeDown":     "音量减",
+	"toggleMiniMode": "显示/隐藏迷你播放器",
+	"seekBack":       "快退 5 秒",
+	"seekForward":    "快进 5 秒",
+	"commandPalette": "命令面板",
 	// ⚠️ **「收藏当前歌曲」**：菜单那一项叫「添加到收藏夹…」是因为它开的是
 	// 一个弹窗（`menu.go` 的注释）；这里是命令的名字，说的是「这条命令做
 	// 什么」——和设置页同一栏里其它命令的口径一致（动词开头）。

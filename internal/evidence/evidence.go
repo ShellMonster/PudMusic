@@ -3607,7 +3607,7 @@ var Items = []Item{
 			"TestEverySideMenuEntryHasAnIcon",
 			"TestTheSelectedSideMenuEntryDrawsTheFilledIcon",
 			"TestTheSideMenuRowsAreFortyHigh",
-			"TestTheCollapsedSideMenuItemUsesPrototypePillAndLabel",
+			"TestTheCollapsedSideMenuItemIsAFortySquareIconCell",
 			"TestTheBrandIsALogoAndTheAppName",
 			// 路由表里那两枚图标逐条照上游的源码（表里写的是上游的字面文件名）。
 			"TestTheSideMenuIconsMatchBiu",

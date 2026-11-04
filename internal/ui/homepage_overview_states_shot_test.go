@@ -12,6 +12,7 @@ package ui
 // 高度变了下面那些行会跳一下）。
 
 import (
+	"net/http"
 	"os"
 	"testing"
 )
@@ -24,17 +25,45 @@ func TestRenderOverviewStateShots(t *testing.T) {
 	}
 	startOnOverview(t)
 
-	// 新总览不再把网络状态替换成三套不同的空白/骨架布局；首屏始终保留
-	// 原型的稳定结构，异步数据只填充卡片内容。因此状态截图统一验证首屏契约。
-	_, tt, _ := newHomeShell(t, homeDiscoverFake(t))
-	waitFrames(t, tt, "首页原型首屏", func() bool {
-		return showsText(tt, "今晚，") && showsText(tt, "慢一点") && showsText(tt, "听。") &&
-			showsText(tt, "接着听") &&
-			showsText(tt, "本周热榜") &&
-			showsText(tt, "新歌速递")
+	// ① 拉失败：三摊都失败。
+	fail := homeDiscoverFake(t)
+	fail.on(uiHomeNewMusic, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, -403, nil)
 	})
+	fail.on(uiHomeNewBanner, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, -403, nil)
+	})
+	fail.on(uiHomeToplistPeriods, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, -403, nil)
+	})
+	_, tt, _ := newHomeShell(t, fail)
+	waitFrames(t, tt, "拉失败了", func() bool { return showsText(tt, overviewFailText) })
 	homeFrame(tt)
-	save(t, dir, "160-首页总览-首屏.png", tt)
-	save(t, dir, "161-首页总览-接着听.png", tt)
-	save(t, dir, "162-首页总览-热榜与新歌.png", tt)
+	save(t, dir, "160-首页总览-拉失败.png", tt)
+
+	// ② 还在拉：三摊都不回来（骨架那一档）。
+	loading := blockedHomeShell(t)
+	waitFrames(t, loading.tt, "总览在拉", func() bool {
+		return showsText(loading.tt, loadingBoardText) && showsText(loading.tt, loadingNewMusicText)
+	})
+	homeFrame(loading.tt)
+	save(t, dir, "161-首页总览-还在拉.png", loading.tt)
+
+	// ③ 真的没有：拉回来了，但是空的。
+	empty := homeDiscoverFake(t)
+	empty.on(uiHomeNewMusic, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": []map[string]any{}})
+	})
+	empty.on(uiHomeNewBanner, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": []map[string]any{}})
+	})
+	empty.on(uiHomeToplistMusic, func(w http.ResponseWriter, _ *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"list": []map[string]any{}})
+	})
+	_, tt2, _ := newHomeShell(t, empty)
+	waitFrames(t, tt2, "空的那几摊都回来了", func() bool {
+		return showsText(tt2, overviewEmptyText)
+	})
+	homeFrame(tt2)
+	save(t, dir, "162-首页总览-没有内容.png", tt2)
 }

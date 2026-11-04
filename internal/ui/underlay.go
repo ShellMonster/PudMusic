@@ -36,7 +36,6 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -62,10 +61,7 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 		return
 	}
 
-	// Cobalt shell uses an inset canvas: the page background remains visible
-	// around the rail and main surface, while the playback bar stays outside
-	// this inset region and keeps its existing full-width behavior.
-	root := ui.Column(c).Fill().Background(c.Theme().Background)
+	root := ui.Column(c).Fill()
 	// 空格 = 播放/暂停（见 shortcut_dispatch.go 的 spaceTogglesPlay）。
 	//
 	// ⚠️ **登记在这一层根上，而不是只登记在窗口上**：点过一个按钮之后焦点就留在
@@ -95,7 +91,7 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 		// 时底层那一层压根不画）——不归零的话，内容区会拿**上一帧**的侧栏
 		// 宽去算，而那一帧的侧栏和这一帧的不是同一件事。
 		s.sideDrawnW = 0
-		ui.Row(c).Grow(1).Padding(space.Px12).Gap(space.Px12).Children(func() {
+		ui.Row(c).Grow(1).Children(func() {
 			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
 			// 表现是整个窗口空一大块，连报错的地方都没有。
 			s.guardAt("侧栏", s.sideBody)(c)
@@ -115,8 +111,7 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 			// 外面（`TestTheCollectionOpsRowStillFitsAtTheMinWindow` 量的就是
 			// 那个）。钉成 0 之后，这一列拿到的是「窗口宽 − 侧栏宽」那个数，
 			// 顶栏在它里面自己收缩（搜索框先让位）。
-			ui.Column(c).Grow(1).AlignSelf(ui.Stretch).MinWidth(0).
-				Background(c.Theme().Background).Radius(24).Clip().Children(func() {
+			ui.Column(c).Grow(1).AlignSelf(ui.Stretch).MinWidth(0).Children(func() {
 				// 顶栏同样外面包一层 Guard（铁律三）：它坏了坏掉的是整条顶栏，
 				// 用户连窗口都拖不动了，而出错的地方不在页面上。
 				s.guardAt("顶栏", s.navBody)(c)

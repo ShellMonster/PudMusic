@@ -278,9 +278,7 @@ func bannerSpaceShell(t *testing.T, pics *bannerPicServer, bannerPath string) (*
 	b.on("/x/relation/modify", func(w http.ResponseWriter, r *http.Request) {
 		uiExploreJSON(w, 0, nil)
 	})
-	st := app.DefaultSettings("")
-	st.SideMenuCollapsed = false
-	s, tt, _ := newSpaceShell(t, b, true, "77", withSettings(st))
+	s, tt, _ := newSpaceShell(t, b, true, "77", withSettings(app.DefaultSettings("")))
 	installBannerImages(t, s, pics)
 	openSpace(t, s, tt, 42)
 	return s, tt

@@ -227,7 +227,7 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 		AlignItems(ui.Center).Children(func() {
 		ui.Tabs(c, &st.sorts[tab], searchSortLabels(tab)...)
 
-		if tab == searchTabUser || tab == searchTabFavorite {
+		if tab == searchTabUser {
 			return
 		}
 		// 「全部播放」：Biu 的 `AsyncButton`（`video-list/search-header.tsx:55`），
@@ -277,10 +277,6 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 // ⚠️ **加载的时候列表照画，不 return**：后台回来的结果是在列表的 `View` 里收的
 // （`adopt`），不画它这一页就永远停在「正在加载」。
 func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
-	if tab == searchTabFavorite {
-		s.viewEmpty(c, "search:favorites", emptyState{Title: "暂无收藏夹结果", Hint: "收藏夹搜索即将支持", Icon: iconEmptySearch})
-		return
-	}
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()
 

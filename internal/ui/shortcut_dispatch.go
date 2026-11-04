@@ -153,8 +153,6 @@ func (s *Shell) runShortcut(id string) {
 		s.seekBy(shortcutSeekStep)
 	case "toggleMiniMode":
 		s.toggleMiniPlayer()
-	case "toggleNotchMode":
-		s.toggleNotchPlayer()
 	case "commandPalette":
 		s.toggleCommandPalette()
 	case "favoriteCurrent":

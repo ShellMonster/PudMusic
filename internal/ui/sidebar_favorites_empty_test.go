@@ -108,9 +108,7 @@ func TestTheEmptyFavoritesLineIsIndentedLikeItsGroup(t *testing.T) {
 // 而框架的按钮把内容**居中**，于是「我创建的」那组右边多一个「+」，标题
 // 就往左挪 22 像素。同一个侧栏里两个标题不在一条竖线上。
 func TestBothFavoriteGroupTitlesStartAtTheSamePlace(t *testing.T) {
-	st := app.DefaultSettings("")
-	st.SideMenuCollapsed = false
-	_, tt := newShell(t, withSettings(st))
+	_, tt := newShell(t, withSettings(app.DefaultSettings("")))
 	tt.Frame()
 
 	created, ok1 := tt.Find("我创建的")
@@ -131,9 +129,7 @@ func TestBothFavoriteGroupTitlesStartAtTheSamePlace(t *testing.T) {
 // 的时候说它，是在替 B 站回答一个我们没问过的问题——而用户读到的是
 // 「我没有收藏夹」。
 func TestTheSidebarDoesNotSayThereAreNoFavoritesBeforeAnythingWasFetched(t *testing.T) {
-	st := app.DefaultSettings("")
-	st.SideMenuCollapsed = false
-	_, tt := newShell(t, withSettings(st))
+	_, tt := newShell(t, withSettings(app.DefaultSettings("")))
 	tt.Frame()
 
 	if tt.HasText("还没有收藏夹") {

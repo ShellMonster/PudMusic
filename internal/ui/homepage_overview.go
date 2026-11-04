@@ -188,112 +188,18 @@ func (h *homePage) viewOverview(c *ui.Context, s *Shell) {
 	scroll := ui.Scroll(c).Key("home:overview").Grow(1).TrackScroll(&h.ovScroll)
 	scroll.Children(func() {
 		col := ui.Column(c).Key("home:overview:body").FillWidth().Gap(space.Px28).
-			Padding(space.Px48, scrollbar.HotZone, space.Px24, space.None)
+			Padding(space.Px4, scrollbar.HotZone, space.Px24, space.None)
 		col.Children(func() {
-			// Prototype order: greeting and mood filters lead the page.
-			ui.Text(c, "TUE · 11.03 · 晚上 9:41").FontSize(scale.Font(c, scale.Size12)).
-				FontWeight(weightMedium).TextColor(t.TextMuted)
-			ui.Row(c).Gap(space.None).Children(func() {
-				ui.Text(c, "今晚，").FontSize(scale.Font(c, scale.Size40)).
-					FontWeight(weightMedium).TextColor(t.Text)
-				ui.Text(c, "慢一点").FontSize(scale.Font(c, scale.Size40)).
-					FontWeight(weightMedium).TextColor(t.Accent)
-				ui.Text(c, "听。").FontSize(scale.Font(c, scale.Size40)).
-					FontWeight(weightMedium).TextColor(t.Text)
-			})
-			ui.Row(c).Gap(space.Px8).Children(func() {
-				for i, label := range []string{"全部", "深夜", "通勤", "专注", "运动", "现场", "翻唱"} {
-					b := ui.ButtonBase(c).Label("按心情筛选："+label).Padding(space.Px12, space.Px12).
-						Radius(20).Background(t.Surface).Border(1, t.Border)
-					if i == 0 {
-						b = b.Background(t.Text).TextColor(ink.Ensure(t.Surface, t.Text, ink.TextContrast))
-					}
-					b.Children(func() { ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)) })
-				}
-			})
-
-			ui.Row(c).Gap(space.Px12).Children(func() {
-				ui.Column(c).Grow(1).Gap(space.Px12).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "接着听").FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
-						ui.Spacer(c)
-						ui.Text(c, "历史记录").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Accent)
-					})
-					ui.Row(c).Gap(space.Px12).Children(func() {
-						for i, title := range []string{"雨天电台 2.0｜深夜慢歌", "写代码专用 · Lo-Fi", "夏夜录音棚 Live 合集"} {
-							card := ui.Column(c).Grow(1).Gap(space.Px8).Padding(space.Px12).
-								Radius(24).Background(t.Surface).Border(1, t.Border)
-							card.Children(func() {
-								homeOverviewCover(c, t, i, 56)
-								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium).MaxLines(1).Ellipsis("…")
-								ui.Text(c, []string{"臻声 FM · 剩 38 分钟", "我的收藏夹 · 剩 2 小时", "夏夜录音棚 · 剩 12 分钟"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-								ui.Box(c).Height(4).Width(float32(40 + i*24)).Radius(2).Background(t.Accent)
-							})
-						}
-					})
-				})
-			})
-
-			ui.Row(c).Gap(space.Px28).Children(func() {
-				ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "本周热榜").FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
-						ui.Spacer(c)
-						ui.Text(c, "每周一 10:00 更新").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-					})
-					for i, title := range []string{"晚风告白（现场版）", "海岸线 · 钢琴独奏", "月台", "给十七岁的信"} {
-						ui.Row(c).Key("home:overview:rank:"+strconv.Itoa(i)).Gap(space.Px12).Padding(space.Px8, space.None).
-							Border(1, t.Border).Children(func() {
-							ui.Text(c, "0"+strconv.Itoa(i+1)).FontSize(scale.Font(c, scale.Size28)).TextColor(t.Accent)
-							ui.Column(c).Grow(1).Children(func() {
-								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
-								ui.Text(c, "夏夜录音棚 · 386万次播放").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-							})
-							ui.Text(c, "▶").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-						})
-					}
-				})
-				ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
-					ui.Row(c).AlignItems(ui.Center).Children(func() {
-						ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size20)).FontWeight(weightMedium)
-						ui.Spacer(c)
-						ui.Text(c, "全部").FontSize(scale.Font(c, scale.Size13)).TextColor(t.Accent)
-					})
-					ui.Row(c).Gap(space.Px12).Children(func() {
-						for i, title := range []string{"夏末备忘录", "北纬三十度", "慢车"} {
-							ui.Column(c).Grow(1).Gap(space.Px6).Children(func() {
-								homeOverviewCover(c, t, i, 140)
-								ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(weightMedium)
-								ui.Text(c, []string{"纸飞机乐队", "低频观测站", "南山南北"}[i]).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-							})
-						}
-					})
-				})
-			})
+			h.viewHero(c, w)
+			h.viewTiles(c, w)
+			h.viewNewRow(c, w, ww)
+			h.viewMiniBoards(c, w)
 		})
 		if bw := col.Bounds().W; bw > 0 {
 			h.ovWidth = bw
 		}
 	})
 	_, _ = t, s
-}
-
-func homeOverviewPlaceholder(t *ui.Theme, index int) ui.Color {
-	colors := []ui.Color{t.Accent, t.Accent.Mix(t.Text, 0.2), t.Accent.Mix(t.Surface, 0.35)}
-	return colors[index%len(colors)]
-}
-
-// homeOverviewCover keeps the prototype's geometric cover language visible even
-// when a fixture has no remote artwork to render.
-func homeOverviewCover(c *ui.Context, t *ui.Theme, index int, height float32) {
-	base := homeOverviewPlaceholder(t, index)
-	accent := []ui.Color{ui.RGBA(255, 208, 64, 1), ui.RGBA(255, 108, 78, 1), ui.RGBA(241, 157, 197, 1)}[index%3]
-	ui.Box(c).Height(height).FillWidth().Radius(16).Clip().Background(base).Children(func() {
-		ui.Box(c).Absolute().Right(-height*0.18).Bottom(-height*0.28).
-			Size(height*0.78, height*0.78).Radius(height).Background(accent)
-		ui.Box(c).Absolute().Left(-height*0.18).Top(-height*0.24).
-			Size(height*0.64, height*0.64).Radius(height).Background(t.Surface.Alpha(0.82))
-	})
 }
 
 // cellW 是 n 列、缝为 gap 时一格的宽。

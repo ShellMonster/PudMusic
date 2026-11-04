@@ -81,14 +81,9 @@ const (
 	// 所以折叠 / 展开时图标不会左右跳。
 	sideIconCell = 40
 
-	// prototypeRailIconW/H 是 cobalt 原型 rail 中的选中胶囊尺寸。
-	prototypeRailIconW = 48
-	prototypeRailIconH = 36
-	prototypeRailItemW = 72
-
 	// sideBrandLogo 是左上角那个 logo 的边长。上游
 	// `<LogoIcon className="h-10 w-10" />`（`biu/src/layout/side/logo/index.tsx`）。
-	sideBrandLogo = 48
+	sideBrandLogo = 40
 )
 
 // viewSide 是左侧栏。
@@ -176,7 +171,6 @@ func (s *Shell) viewSide(c *ui.Context) {
 	// 去掉它，侧栏和内容区在浅色下会**完全一样**（两个都是 `#ffffff`），
 	// 于是「统一底色」就变成了「抹掉层次」，那正是这一票要避开的反面。
 	side.Width(w).AlignSelf(ui.Stretch).Background(s.sidebarBackground(c.Theme())).
-		Radius(24).Clip().
 		BorderWidth(0, sideDividerW, 0, 0).
 		BorderColor(c.Theme().Border.Alpha(sideDividerA)).
 		Children(func() {
@@ -406,11 +400,6 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 		row = row.Padding(s.sideBrandTopPad(), space.None, space.Px12, space.None).Justify(ui.Center)
 	}
 	row.Children(func() {
-		if collapsed {
-			ui.Image(c, brandLogo()).Fit(ui.Contain).Size(sideBrandLogo, sideBrandLogo).
-				Radius(c.Theme().Radius)
-			return
-		}
 		// ⚠️ **不摆 logo 了**（人 2026-10-26：「左上角的不需要用 icon 了，
 		// 就用名称就行」）。
 		//
@@ -671,22 +660,19 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 	}
 
 	if collapsed {
-		// 原型 rail 每项是 72 宽的纵向入口：48×36 胶囊、4px 间距、12px 标签。
-		// 外层保留稳定 key/点击链，拖动和键盘焦点仍由现有 Shell seam 管理。
-		item := ui.Column(c).Width(prototypeRailItemW).Padding(space.Px6, space.None, space.Px6, space.None).
-			Gap(space.Px4).AlignItems(ui.Center).Label(rt.Title).Children(func() {
-			// The outer rail item owns the accessible name; the icon cell is
-			// decorative so the visible label is announced only once.
-			cell := flatIconCellButton(c, name, "", sideIconSize, prototypeRailIconH).
-				Width(prototypeRailIconW).Height(prototypeRailIconH)
-			if selected {
-				cell = flatSolidCurrent(c, cell)
-				cell = flatSolidCurrentFeel(c, cell)
-			}
-			ui.Text(c, rt.Title).FontSize(scale.Font(c, scale.Size12)).
-				TextColor(c.Theme().TextMuted).SingleLine().NoWrap()
-		})
+		// `AlignSelf(ui.Center)`：格子是 40 宽，而侧栏折叠后是 72——不居中的话
+		// 它会贴在左边沿上（上游那一格也是居中的：Avatar 在 `justify-center`
+		// 的按钮里）。
+		item := flatIconCellButton(c, name, rt.Title, sideIconSize, sideIconCell).
+			AlignSelf(ui.Center)
 		s.sideItemTip(c, item, rt.Title)
+		if selected {
+			// 🔴 **实心主色底**（票：用户要「深底色 + 白字」）：淡底那一档
+			// 和侧栏底色的对比度只有 1.09:1 ~ 1.29:1——**几乎分不出来**，
+			// 而折叠态侧栏里这一枚图标是「当前在哪」**唯一**的指示。
+			item = flatSolidCurrent(c, item)
+			item = flatSolidCurrentFeel(c, item)
+		}
 		return item
 	}
 	item := flatIconLabelButton(c, name, rt.Title, sideIconSize, sideIconCell)
@@ -725,9 +711,7 @@ func (s *Shell) sideMenuItem(c *ui.Context, rt Route, selected, collapsed bool) 
 // 一列扫的，晚 500ms 收会压在下一项上。
 func (s *Shell) sideItemTip(c *ui.Context, anchor ui.Element, text string) {
 	s.tipAt(c, anchor, text, tipMenu, func(panel, anchor ui.Element, t *ui.Theme) {
-		// 72px item is centered in the 88px rail; add the remaining 8px plus
-		// the 6px optical gap so the tooltip starts at the rail's outer edge.
-		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(space.Px12)
+		panel.AttachTo(anchor, ui.AnchorRight, ui.AnchorLeft).MarginStart(space.Px6)
 	}, true)
 }
 

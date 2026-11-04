@@ -63,9 +63,8 @@ const (
 // 放在这一层而不是界面层，是因为 normalize 也要用：设置文件是用户能直接编辑的，
 // 一个 `sideMenuWidth: 99999` 不该一路穿到画界面的那一行。
 const (
-	// Cobalt 原型 rail：宽 88，菜单使用图标胶囊和中文标签。
-	// 展开态仍可拖拽 180 到 300，保留原有可调整壳层行为。
-	CollapsedSideMenuWidth = 88.0
+	// 设计规范 v0.1 §4：展开 220（可拖 180 到 300），折叠 64 仅图标。
+	CollapsedSideMenuWidth = 64.0
 	MinSideMenuWidth       = 180.0
 	MaxSideMenuWidth       = 300.0
 	DefaultSideMenuWidth   = 220.0
@@ -386,18 +385,6 @@ type Settings struct {
 	// 这一格使用指针，区分「未设置」和「用户关闭」。缺少字段时由 normalize 填入默认值。
 	MiniLyricsCurtain *bool `json:"miniLyricsCurtain"`
 
-	// NotchPlayer 是「刘海窗」那个开关：指针探进屏幕刘海区时展开一张播放卡。
-	// **默认开**（装上是给用 MacBook 的人的——没有刘海的机器上它就是「贴
-	// 菜单栏的一条」，不碍事）。
-	//
-	// ⚠️ **用指针**，同 `MiniLyricsCurtain`：「没设过」和「用户关了」要分
-	// 得开——默认是开。
-	NotchPlayer *bool `json:"notchPlayer"`
-
-	// NotchPlayerGreeted 记「刘海窗已经问候过一次」：它默认关着的用户
-	// 第一次放歌时会从刘海里长出来一句引导，只长一次。
-	NotchPlayerGreeted bool `json:"notchPlayerGreeted"`
-
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
 
@@ -520,14 +507,6 @@ func (s Settings) EQGains() [10]float64 {
 //
 // ⚠️ 正常路径上 `normalize()` 已经把 nil 填成默认了（见 `Settings.normalize`），
 // 而这里再兜一次是因为**零值 `Settings{}`** 也可能出现（界面上手工拼的那几处）。
-// NotchPlayerOn 报「刘海窗」那一格是开是关。默认开（nil = 没设过 = 开）。
-func (s Settings) NotchPlayerOn() bool {
-	if s.NotchPlayer == nil {
-		return true
-	}
-	return *s.NotchPlayer
-}
-
 func (s Settings) MiniLyricsCurtainOn() bool {
 	if s.MiniLyricsCurtain == nil {
 		return DefaultMiniLyricsCurtain
@@ -573,7 +552,7 @@ func DefaultSettings(downloadPath string) Settings {
 		PageTransition:    PageTransitionNone,
 		ShowSearchHistory: true,
 		ProxySettings:     ProxySettings{Type: ProxyNone},
-		SideMenuCollapsed: true,
+		SideMenuCollapsed: false,
 		SideMenuWidth:     DefaultSideMenuWidth,
 		SideMenuCollectionOrder: SideMenuCollectionOrder{
 			Created:   []int64{},
