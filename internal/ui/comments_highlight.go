@@ -35,6 +35,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"unicode/utf8"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/songname"
@@ -71,17 +72,14 @@ type commentMark struct {
 // ——每条各算一遍是白花的。
 func commentMarkOf(t *ui.Theme) commentMark {
 	wash := t.Accent.Alpha(commentMarkAlpha)
-	// 这层淡底合到两个可能的底板上的样子：页面底色，和列表行悬停那一档。
-	base := opaqueBackground(t.Background)
-	bg := wash.Over(base)
-	if t.SurfaceHover.A == 255 {
-		// ⚠️ **取对比度更低的那个**：字色要同时在这两个底上读得出来，而
-		// `Ensure` 只保证对**给定的那个底**达标——按宽的那个算，严的那个就
-		// 会差一截（同 `ink.SemanticOn` 挑 `SurfaceHover` 的理由）。
-		hover := wash.Over(t.SurfaceHover)
-		if ink.Ratio(t.Accent, hover) < ink.Ratio(t.Accent, bg) {
-			bg = hover
-		}
+	// 这层淡底合到两个可能的底板上的样子：抽屉的底（`surface`，评论本体）和楼中楼那个盒子的底
+	// （`surface-2`，原型 `.replies`）。
+	pal := tok.Of(t)
+	bg := wash.Over(opaqueBackground(pal.Surface))
+	// ⚠️ **取对比度更低的那个**：字色要同时在这两个底上读得出来，而 `Ensure` 只保证对**给定的那个底**
+	// 达标——按宽的那个算，严的那个就会差一截。
+	if alt := wash.Over(opaqueBackground(pal.Surface2)); ink.Ratio(t.Accent, alt) < ink.Ratio(t.Accent, bg) {
+		bg = alt
 	}
 	return commentMark{
 		Bg:     wash,

@@ -34,9 +34,6 @@
 package ui
 
 import (
-	"math"
-
-	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -51,83 +48,19 @@ const spectrumDefaultColor = "#666"
 
 // spectrumBarRadius 是每根柱子的圆角（DIP）。
 //
-// 上游（`audio-waveform/index.tsx`）：`ctx.roundRect(x, y, barWidth, barHeight, 2)`。
-// 框架的 `Painter.Fill` 收的也是圆角半径（DIP），对得上。
+// 原型 `.spectrum rect { rx: 1 }`；框架的 `Painter.Fill` 收的也是圆角半径（DIP），对得上。
 //
 // ⚠️ **底排那 2 像素的柱子比这个半径还矮**：框架渲染的时候会把圆角缩到能放下的
 // 尺寸（`scene.FitRadii`），所以画出来是两头圆的小墩子，而不是一个畸形的形状。
-const spectrumBarRadius = 2
+const spectrumBarRadius = 1
+
+// spectrumRestH 是柱子最矮的高度（原型暂停时 `target = 3`）。
+const spectrumRestH = 3
 
 // spectrumBarRatio 是柱宽占一格的比例。
 //
-// 上游（`audio-waveform/index.tsx`）：
-//
-//	barGap = computedBarWidth * 0.2
-//	barWidth = computedBarWidth - barGap
-//
-// 也就是**柱宽八成、缝两成**。
-const spectrumBarRatio = 0.8
-
-// fullSpectrumWidth 是频谱那一块多宽。
-//
-// Biu（`index.tsx:189`）：`Math.min(640, Math.max(400, Math.round(windowWidth * 0.5)))`。
-func fullSpectrumWidth(c *ui.Context) float32 {
-	winW, _ := c.Size()
-	w := float32(math.Round(float64(winW * 0.5)))
-	return min(max(w, fullSpectrumMinW), fullSpectrumMaxW)
-}
-
-// fullBarCount 是画几根条。
-//
-// Biu（`index.tsx:190`）：`Math.max(48, Math.min(128, Math.round(width / 7.5)))`。
-func fullBarCount(width float32) int {
-	n := int(math.Round(float64(width / fullSpectrumBarPx)))
-	return min(max(n, fullSpectrumBarsLo), fullSpectrumBarsHi)
-}
-
-// viewFullSpectrum 画频谱。**没开就一个字都不建**。
-//
-// 「默认关着」是 Biu 的 `defaultSettings.showSpectrum: false`，用户得在偏好面板里
-// 自己开（`viewFullSettings`）。关着的时候这里连那个区域都不占——不是在画一片黑。
-func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State, hidden bool) {
-	if !s.pagePrefs().ShowSpectrum {
-		return
-	}
-	winW, _ := c.Size()
-	w := fullSpectrumWidth(c)
-	h := float32(fullSpectrumHeight)
-	barCount := fullBarCount(w)
-	bars := s.app.SpectrumBars(barCount, h)
-	color := spectrumColorOf(s.pagePrefs().SpectrumColor)
-
-	// 这一帧画出来了：报一声「真的有人在看」。FFT 跟着这一声走——满屏关着、
-	// 偏好关着、或者窗口看不见的时候，这里根本执行不到，解码那边整条分析链
-	// 就停着。见 `App.SetSpectrumWanted`。
-	seen := s.presence.seen()
-	s.app.SetSpectrumWanted(st.Playing && seen)
-
-	// 频谱离底边多远跟着控制条走（Biu 的 `index.tsx:370`）：
-	// 界面露着的时候压在控制条上方 12，藏起来的时候退到离底 24。
-	bottom := float32(fullSpectrumEdge)
-	if !hidden {
-		bottom = fullControlsHeight + fullSpectrumGapY
-	}
-
-	area := ui.Box(c).Key("full-spectrum").
-		Absolute().Left((winW - w) / 2).Right((winW - w) / 2).
-		Bottom(bottom).Height(h).
-		Role(ui.RoleImage).Label("频谱")
-
-	area.Draw(func(p *ui.Painter, r ui.Rect) {
-		paintSpectrum(p, r, bars, color)
-		// 只在真的在放、而且**用户看得到这一扇窗**的时候要下一帧：暂停时条子
-		// 不动，一直要帧就是白烧 CPU（而全屏开着的时候这一层每个 pointer 移动
-		// 都在画）；窗口收在后台时同理（票 #156）。
-		if st.Playing && seen {
-			p.AnimationFrame()
-		}
-	})
-}
+// 原型 `viewBox 0 0 640 40` 里每格 10 宽、柱 7 宽（`x = i*10+1, width = 7`），也就是**柱宽七成、缝三成**。
+const spectrumBarRatio = 0.7
 
 // paintSpectrum 是频谱那一笔：N 根离散的柱，**从底部往上长**。
 //
@@ -151,14 +84,9 @@ func paintSpectrum(p *ui.Painter, r ui.Rect, bars []float32, color ui.Color) {
 	barW := cell * spectrumBarRatio
 	bottom := r.Y + r.H
 	for i, v := range bars {
-		// 一格的高度比例 × 这一格多高 = 这根柱子多高。
-		h := v * r.H
-		if h <= 0 {
-			// 没有谱的时候（没歌、或者还没解出来）这一格是 0：不画。
-			// 上游那边是 `analyser` 都没有就整块不画（`draw()` 头一句就
-			// `if (!analyser || !ctx) return`），所以这里也是「没有就不画」。
-			continue
-		}
+		// 一格的高度比例 × 这一格多高 = 这根柱子多高。原型里没有谱（暂停 / 还没解出来）时柱子
+		// 落到 3 像素的底排，而不是不画（`target = 3`）。
+		h := max(v*r.H, spectrumRestH)
 		p.Fill(ui.Rect{
 			X: r.X + float32(i)*cell,
 			Y: bottom - h,

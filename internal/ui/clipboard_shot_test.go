@@ -119,7 +119,8 @@ func copyShotShell(t *testing.T, st app.State, dark, full bool) (*Shell, *mygoui
 				s.wake.set(c)
 				s.applyFrameTheme(c)
 				if full {
-					s.viewFullCover(c, st, false, fullWindowRect(c), false)
+					w, h := c.Size()
+					s.viewFullCover(c, st, mygoui.Rect{X: (w - 360) / 2, Y: (h - 360) / 2, W: 360, H: 360}, app.VideoOff)
 					return
 				}
 				s.viewPlayBar(c, st)

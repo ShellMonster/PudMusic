@@ -297,6 +297,7 @@ func TestTheHaloStopsWhenTheWindowIsInvisible(t *testing.T) {
 			}
 		}))
 		tt := b.tt
+		tt.SetDark(true)
 		tt.Frame()
 		return b.s, tt
 	}

@@ -81,7 +81,7 @@ func TestRenderAnimatePoseShots(t *testing.T) {
 			})
 			b.s.openFullPlayer()
 			waitFrames(t, b.tt, "满屏开出来了", func() bool {
-				return b.tt.HasText("关闭全屏")
+				return b.tt.HasText("收起满屏播放器")
 			})
 			settleFull(t, b.tt)
 			save(t, dir, "276-满屏-亮着-"+tc.name+".png", b.tt)

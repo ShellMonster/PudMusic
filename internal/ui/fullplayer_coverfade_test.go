@@ -13,12 +13,8 @@ func TestTheFullCoverIsKeyedByItsURLAndFadesInAndOut(t *testing.T) {
 	if b := s.fullCoverKeyFor("https://c/b.jpg"); b == a {
 		t.Errorf("换了封面地址，键却没变：%v", b)
 	}
-	for name, m := range map[string]*struct{ opacity float32 }{
-		"进场": {fullCoverFade.Enter.Opacity}, "退场": {fullCoverFade.Exit.Opacity},
-	} {
-		if m.opacity != 0 {
-			t.Errorf("%s的透明度 = %v，want 0", name, m.opacity)
-		}
+	if fullCoverGhost.Opacity != 0 {
+		t.Errorf("进场起点 / 退场终点的透明度 = %v，want 0", fullCoverGhost.Opacity)
 	}
 	tr := s.fullCoverMatchFor("song-1")
 	if tr.Match == nil || tr.Enter == nil || tr.Exit == nil {

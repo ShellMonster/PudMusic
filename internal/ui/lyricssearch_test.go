@@ -205,7 +205,7 @@ func TestNoSourcesMeansTheSearchDialogNeverOpens(t *testing.T) {
 
 	openTheSearchDialog(t, tt)
 
-	if tt.HasText(lyricSearchHeading) {
+	if tt.HasText(lyricSearchBoxLabel) {
 		t.Fatalf("一个源都没挂，搜索弹窗还是开了：文字有 %q", tt.Texts())
 	}
 	if s.lyricSearch.open {
@@ -232,8 +232,8 @@ func TestTheSearchDialogListsBothSourcesAndStartsFromTheSongOnScreen(t *testing.
 	}
 	openTheSearchDialog(t, tt)
 
-	if !tt.HasText(lyricSearchHeading) {
-		t.Errorf("弹窗顶上没有 %q，文字有 %q", lyricSearchHeading, tt.Texts())
+	if !tt.HasText(lyricSearchBoxLabel) {
+		t.Errorf("弹窗顶上没有 %q，文字有 %q", lyricSearchBoxLabel, tt.Texts())
 	}
 	for _, name := range []string{"网易云", "LrcLib"} {
 		if !tt.HasText(name) {
@@ -313,17 +313,14 @@ func TestPreviewThenAdoptPutsTheLyricsOnScreen(t *testing.T) {
 	if netease.previewsOf() != 1 {
 		t.Errorf("预览发了 %d 次请求，want 1", netease.previewsOf())
 	}
-	// 译文那一个 Tab 在，因为这一条有译文。
-	if !tt.HasText(lyricPreviewTransTab) {
-		t.Errorf("有译文却没有 %q 那个 Tab，文字有 %q", lyricPreviewTransTab, tt.Texts())
-	}
+	// 原型的预览只有一栏（没有原文 / 翻译两个 Tab）；译文仍会随「采用」一起上去（见下面）。
 
 	// 采用 → 两个弹窗一起关，歌词上了屏幕。
 	if err := tt.Click(lyricPreviewAdopt); err != nil {
 		t.Fatalf("点不到 %q：%v（文字有 %q）", lyricPreviewAdopt, err, tt.Texts())
 	}
 	waitFrames(t, tt, "两个弹窗一起关掉", func() bool {
-		return !tt.HasText(lyricSearchHeading) && !tt.HasText("候选甲")
+		return !tt.HasText(lyricSearchBoxLabel) && !tt.HasText("候选甲")
 	})
 
 	rows := s.app.Lyrics().Rows

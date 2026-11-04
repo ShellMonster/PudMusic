@@ -23,6 +23,18 @@ func PopPanel(c *ui.Context, key string) ui.Element {
 	return shadow.Pop(e, c.Theme())
 }
 
+// PopStyle 给一块**别处建好的面板**（框架 `PopoverBase` 递进回调的那一块）上 `.pop` 的外观：surface 底、
+// 1 像素 line 描边、圆角 12、`--shadow-pop`、内边距 8、最小宽 minW、进场 `motion.PopIn`。位置（`AttachTo` /
+// `Margin`）由调用方接着链。key 必须稳定。
+//
+// `PopPanel` 自己建面板；需要 `PopoverBase` 管「点外面关 / Esc 关」的地方（全屏播放器底栏的弹层）走这个。
+func PopStyle(c *ui.Context, panel ui.Element, key string, minW float32) ui.Element {
+	p := pal(c)
+	e := panel.Key(key).MinWidth(minW).Padding(space.Px8).Radius(tok.R12).
+		Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn).Label(key)
+	return shadow.Pop(e, c.Theme())
+}
+
 // PopHeading 是弹层里的小标题（原型 `.pop h5`：12 号 text-3，左右 8、上 4 下 8）。
 func PopHeading(c *ui.Context, s string) ui.Element {
 	return text(c, s, scale.Size12, pal(c).Text3).FixedLineHeight(18.6).Margin(space.Px4, space.Px8, space.Px8, space.Px8)

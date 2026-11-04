@@ -39,11 +39,31 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
+// bezierY 是 cubic-bezier(x1, y1, x2, y2) 在时间进度 t（0..1）处的值（二分求解，和 CSS 一个算法）。
+//
+// ⚠️ 测试自己算一遍，不去读代码里的曲线对象：读它断的是「代码写的是这条曲线」，不是「画面上真的是
+// 这条曲线」。
+func bezierY(x1, y1, x2, y2, t float64) float64 {
+	at := func(a, b, s float64) float64 {
+		return 3*(1-s)*(1-s)*s*a + 3*(1-s)*s*s*b + s*s*s
+	}
+	lo, hi := 0.0, 1.0
+	for range 60 {
+		mid := (lo + hi) / 2
+		if at(x1, x2, mid) < t {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return at(y1, y2, (lo+hi)/2)
+}
+
 // drawerEdgeRow 是量抽屉左缘那一行（面板左边那道 1 像素边线所在的那一行）。
 //
 // ⚠️ **它在内容区里，不在顶栏也不在播放条上**：顶栏那一行有别的横线，
 // 播放条那一行有播放条自己的影——而这一行除了面板的边线什么都没有。
-const drawerEdgeRow = 120
+const drawerEdgeRow = 500
 
 // drawerEdgeX 是画面上抽屉面板左缘那一列的 x。
 //
@@ -128,19 +148,11 @@ func TestTheQueueDrawerSlidesInFromTheRight(t *testing.T) {
 
 // TestTheQueueDrawerSlidesInOnThatCurveInThatTime 断②：曲线和时长。
 //
-// ⚠️ **判据是「半程时面板走完了多少」**：那条曲线
-// `CubicBezier(0.16, 0.9, 0.21, 0.98)` 在 t=0.5 处的值是 **0.954460680**
-// （自己算的，不是抄来的），所以滑到一半时面板应该已经走完 **95.4%**——
-// 也就是离终点只剩 **17.5 个像素**。
+// 原型 `drawer-in var(--t-slow) var(--ease-out)`：360ms、`cubic-bezier(.2, .8, .2, 1)`，不回弹。
 //
-// 这一条同时把两样东西钉住了：
-//
-//	曲线	框架默认的 EaseOut 在 0.5 处是 0.875（差 30 个像素），
-//	      而「用弹簧」在 0.5 处根本没到——所以这条红了就说明用错了曲线
-//	时长	滑了 100ms 还没到，说明它比 200ms 长得多（框架的弹簧兜底是 500ms）
-//
-// ⚠️ **推 100ms 正好落在半程**：框架的钟按 60Hz 走，一帧 16.666666ms，
-// 第 6 帧落在 99.999996ms（差 4 纳秒）——所以量到的就是 t=0.5。
+// ⚠️ **判据是「半程时面板走完了多少」**：t=0.5（180ms）处那条曲线的值算出来（`bezierY`），面板
+// 离终点就剩 `400 × (1 − 值)`。再推到 400ms：它该到了——这一条断的是「不是弹簧」（弹簧那一支的
+// 兜底是 500ms）。
 func TestTheQueueDrawerSlidesInOnThatCurveInThatTime(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -152,31 +164,24 @@ func TestTheQueueDrawerSlidesInOnThatCurveInThatTime(t *testing.T) {
 			border := drawerBorder(s, dark)
 
 			tt.Frame()
-			tt.Advance(100 * time.Millisecond)
+			tt.Advance(180 * time.Millisecond)
 
 			x, ok := drawerEdgeX(tt.Image(), drawerEdgeRow, border)
 			if !ok {
-				t.Fatalf("滑了 100ms，面板左缘那道边线还不在画面上——它没在滑")
+				t.Fatalf("滑了 180ms，面板左缘那道边线还不在画面上——它没在滑")
 			}
-			// 期望位置：1200 - 384 × 0.954460680 = 833.487。
-			//
-			// ⚠️ **容差是 1.5 个像素**：面板的位置是浮点数，而画面上那道 1 像素的
-			// 边线画在整数列上——量出来的 x 只能是 833 或 834。
-			want := shotWinW - queueDrawerWidth*0.954460680
-			if math.Abs(float64(x)-want) > 1.5 {
-				t.Errorf("滑到一半时面板左缘在 x=%d，want %.2f（那条曲线在半程处是 95.4%%）。\n"+
-					"差 %.1f 个像素：多半是曲线用错了（框架默认的 EaseOut 在半程处是 87.5%%）",
-					x, want, math.Abs(float64(x)-want))
+			// ⚠️ `Advance(180ms)` 按整帧走（一帧 16.67ms，落在第 10 帧 = 166.7ms），所以按那一刻算。
+			want := shotWinW - queueDrawerWidth*bezierY(0.2, 0.8, 0.2, 1, 10*(1000.0/60)/360)
+			if math.Abs(float64(x)-want) > 2 {
+				t.Errorf("滑到一半时面板左缘在 x=%d，want %.2f（原型曲线 cubic-bezier(.2,.8,.2,1)，360ms）",
+					x, want)
 			}
 
-			// 再推 150ms：总共 250ms > 200ms，它该到了。
-			// ⚠️ **这一条断的是「不是弹簧」**：弹簧那一支的兜底是 500ms
-			//（`mygo/ui/motion.go` 的 defaultSpringDuration），250ms 走不到。
-			tt.Advance(150 * time.Millisecond)
+			tt.Advance(220 * time.Millisecond)
 			x, ok = drawerEdgeX(tt.Image(), drawerEdgeRow, border)
 			if !ok || x != shotWinW-queueDrawerWidth {
-				t.Errorf("滑了 250ms，面板左缘在 %d（画面上找得到：%v），want %d——"+
-					"它该在 200ms 走完", x, ok, shotWinW-queueDrawerWidth)
+				t.Errorf("滑了 400ms，面板左缘在 %d（画面上找得到：%v），want %d——它该在 360ms 走完",
+					x, ok, shotWinW-queueDrawerWidth)
 			}
 		})
 	}
@@ -197,7 +202,7 @@ func TestTheQueueDrawerDoesNotBounce(t *testing.T) {
 
 	tt.Frame()
 	last := shotWinW
-	for i := range 13 {
+	for i := range 24 {
 		// 每一趟正好画一帧（帧间隔 16.666666ms < 17ms，而时间只会越推越靠后）。
 		tt.Advance(17 * time.Millisecond)
 		x, ok := drawerEdgeX(tt.Image(), drawerEdgeRow, border)
@@ -406,19 +411,21 @@ func TestTheQueueDrawerSlidesOutOnThatCurveInThatTime(t *testing.T) {
 					x, ok, shotWinW-queueDrawerWidth)
 			}
 
-			// 滑了 100ms：退到那条曲线的半程处。
-			tt.Advance(100 * time.Millisecond)
+			// 滑了 110ms（220ms 的一半）：退到那条曲线的半程处。
+			tt.Advance(110 * time.Millisecond)
 			x, ok = drawerEdgeX(tt.Image(), drawerEdgeRow, border)
 			if !ok {
-				t.Fatalf("滑了 100ms，面板左缘那道边线还不在画面上——它没在滑")
+				t.Fatalf("滑了 110ms，面板左缘那道边线还不在画面上——它没在滑")
 			}
 			// 期望：1200 - 384 + 384 × 0.954460680 = 1182.487。
 			//
 			// ⚠️ **容差是 1.5 个像素**：面板的位置是浮点数，而画面上那道 1 像素的
 			// 边线画在整数列上。
-			want := shotWinW - queueDrawerWidth + queueDrawerWidth*0.954460680
-			if math.Abs(float64(x)-want) > 1.5 {
-				t.Errorf("退场滑到一半时面板左缘在 x=%d，want %.2f（那条曲线在半程处是 95.4%%）",
+			// 原型 `drawer-out 220ms var(--ease-in)`：`cubic-bezier(.4, 0, 1, 1)`。
+			// 同上：`Advance(110ms)` 落在第 6 帧 = 100ms。
+			want := shotWinW - queueDrawerWidth + queueDrawerWidth*bezierY(0.4, 0, 1, 1, 6*(1000.0/60)/220)
+			if math.Abs(float64(x)-want) > 2 {
+				t.Errorf("退场滑到一半时面板左缘在 x=%d，want %.2f（原型曲线 cubic-bezier(.4,0,1,1)，220ms）",
 					x, want)
 			}
 

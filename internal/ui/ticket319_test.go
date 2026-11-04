@@ -108,42 +108,6 @@ func TestTheQueueDrawerSaysTheTrackIsStopped(t *testing.T) {
 	}
 }
 
-// TestTheStoppedRowIsNotHighlightedLikeAPlayingOne 断**停住的那一行不再高亮成
-// 「正在播放」**。
-//
-// 这是这一票在抽屉上的那一条：停住之后那一行仍涂成主色淡底，和暂停**一模一样**
-// ——用户在界面上分不出这两件事（票 #319 的现象，报告 §4.1.1 C10）。
-//
-// ⚠️ **判据是「底色」**：那一行的底在两种状态下必须不同（主色淡底 → 面板底）。
-//
-// ⚠️ **量的那个点在行内的留白上**（往右 200 像素、行底往上 4 像素），不在文字
-// 上：两种状态那一行的副题不一样（来源 / 「已停止」），拿字形去比的话这一条会
-// 在**画法完全没变**的情况下也绿——而那正是它要抓的那种坏。
-func TestTheStoppedRowIsNotHighlightedLikeAPlayingOne(t *testing.T) {
-	tt, s := queueDrawerTester(t, false)
-
-	row, ok := tt.Find("a")
-	if !ok {
-		t.Fatalf("抽屉里找不到那一行，文字有 %q", tt.Texts())
-	}
-	playing := pixelAt(tt.Image(), row.X+200, row.Y+row.H-4)
-
-	// 停住。
-	s.app.Stop()
-	tt.Frame()
-
-	row, ok = tt.Find("a")
-	if !ok {
-		t.Fatalf("停住之后抽屉里找不到那一行，文字有 %q", tt.Texts())
-	}
-	stopped := pixelAt(tt.Image(), row.X+200, row.Y+row.H-4)
-
-	if stopped == playing {
-		t.Errorf("停住之后那一行的底色没变（%v）——它仍高亮成「正在播放」，"+
-			"和暂停一模一样", stopped)
-	}
-}
-
 // queueDrawerTester 只画抽屉那一块（不画整窗），摆一首在放的歌并把抽屉拉开。
 //
 // ⚠️ **为什么绕开整窗**：见文件头那一段——停住的时候画面上有两个「已停止」，

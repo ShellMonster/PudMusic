@@ -110,9 +110,9 @@ func TestTheLyricKnobShrinksWhenPressed(t *testing.T) {
 	openFull(t, tt)
 	settleFull(t, tt)
 
-	knob, ok := tt.Find(lyricFontKnobName)
+	knob, ok := tt.Find("歌词字号增大")
 	if !ok {
-		t.Fatalf("画面上找不到 %q，文字有 %q", lyricFontKnobName, tt.Texts())
+		t.Fatalf("画面上找不到 %q，文字有 %q", "歌词字号增大", tt.Texts())
 	}
 
 	// 指针落在那一枚上（悬停：底盘变深一点），但**不按**。
@@ -135,6 +135,6 @@ func TestTheLyricKnobShrinksWhenPressed(t *testing.T) {
 		}
 	}
 	if changed == 0 {
-		t.Errorf("按住 %q 之后画面上一个像素都没变——它该缩到 96%%（图形那一圈要变）", lyricFontKnobName)
+		t.Errorf("按住 %q 之后画面上一个像素都没变——它该缩到 96%%（图形那一圈要变）", "歌词字号增大")
 	}
 }

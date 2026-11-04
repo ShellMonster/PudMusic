@@ -64,7 +64,7 @@ func TestRenderTicket290Shots(t *testing.T) {
 			save(t, dir, "06-队列抽屉-整窗-"+name+".png", h.tt)
 			// 表头那一块放大：「播放列表(2)」连着，后头是两枚图标。
 			saveRect(t, dir, "07-队列抽屉-表头条数-"+name+".png", h.tt,
-				winW-queueDrawerWidth, 0, queueDrawerWidth, queueHeaderHeight)
+				winW-queueDrawerWidth, 0, queueDrawerWidth, 90)
 		})
 	}
 }

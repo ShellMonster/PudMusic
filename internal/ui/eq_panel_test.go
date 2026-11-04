@@ -147,27 +147,26 @@ func TestSwitchingBetweenEQPresets(t *testing.T) {
 	}
 }
 
-// TestTheFullPlayerEQEntryOpensTheSamePanel 验满屏播放器偏好面板里那枚
-// 「自定义」弹的是同一个滑杆面板（滑杆身份带 "full:" 前缀，见
-// eq_panel.go 文件头「键的分域」）。
-func TestTheFullPlayerEQEntryOpensTheSamePanel(t *testing.T) {
-	_, tt, _ := fullTester(t)
+// TestTheFullPlayerEQEntryOpensItsOwnPop 验满屏底栏右边那枚「均衡器」开出来的弹层：预设下拉 +
+// 十段竖滑杆（滑杆身份带 "full:" 前缀，见 eq_panel.go 文件头「键的分域」）。
+func TestTheFullPlayerEQEntryOpensItsOwnPop(t *testing.T) {
+	s, tt, _ := fullTester(t)
 	openFull(t, tt)
 	tt.Frame()
-	if err := tt.Click("全屏设置"); err != nil {
-		t.Fatalf("点不了偏好面板：%v（文字 %q）", err, tt.Texts())
+	if err := tt.Click("均衡器"); err != nil {
+		t.Fatalf("点不了均衡器：%v（文字 %q）", err, tt.Texts())
 	}
 	tt.Frame()
-	if err := tt.Click("自定义"); err != nil {
-		t.Fatalf("偏好面板里没有均衡器入口：%v（文字 %q）", err, tt.Texts())
+	settleFull(t, tt)
+	if !s.full.popEQ {
+		t.Fatalf("满屏里没弹出均衡器弹层，文字有 %q", tt.Texts())
 	}
-	tt.Frame()
-	if _, ok := tt.Find("均衡器面板"); !ok {
-		t.Fatalf("满屏里没弹出均衡器面板，文字有 %q", tt.Texts())
+	for _, want := range []string{"31Hz 频段", "16000Hz 频段"} {
+		if _, ok := tt.Find(want); !ok {
+			t.Errorf("均衡器弹层里找不到 %q，文字 %q", want, tt.Texts())
+		}
 	}
-	// 满屏那份滑杆的身份带 "full:" 前缀；找到的是按 Label 命名的那枚
-	//（"均衡器 31 Hz"）——key 只决定状态归属，Find 认的是 Label。
-	if _, ok := tt.Find("均衡器 31 Hz"); !ok {
-		t.Errorf("满屏里找不到第一段滑杆")
+	if !tt.HasText("恢复平直") {
+		t.Errorf("均衡器弹层里没有「恢复平直」：%q", tt.Texts())
 	}
 }

@@ -58,16 +58,19 @@ func sameTitles(got, want []string) bool {
 	return true
 }
 
-// queueRow 是抽屉里第 i 行（0 起）的框。
+// rowBody 是抽屉里**歌名为 title 的那一行**的中心带：歌名那一格的中心，上下各 ±20 之内都算在这一行里
+// （行高 56，歌名在行的竖直中间）。
 //
-// ⚠️ **只找第一行，其余的行按行高推**：播放条上正在放的那首也在画面上，
-// `Tester.Find` 拿到的是第一个匹配的——找「正在放的那首」会量到播放条上那一份
-// （它在屏幕下面，不在抽屉里）。行高是定死的 64（`queueRowHeight`，理由见
-// queue_drawer.go），所以推出来的框和真的一模一样。
-func queueRowBox(first mygoui.Rect, i int) mygoui.Rect {
-	r := first
-	r.Y = first.Y + float32(i)*queueRowHeight
-	return r
+// ⚠️ 行与行之间的高度不是等距的（「正在播放」「接下来」「已播放」那几句分段标签插在行上面），所以不能再
+// 按行高往下推，要一行一行找；找的歌名都得是**不在播放条上的那一首**（`Tester.Find` 给第一个匹配的，
+// 正在放的那首在播放条上也有一份）。
+func rowBody(t *testing.T, tt *mygoui.Tester, title string) mygoui.Rect {
+	t.Helper()
+	r, ok := tt.Find(title)
+	if !ok {
+		t.Fatalf("抽屉里找不到 %q，文字有 %q", title, tt.Texts())
+	}
+	return mygoui.Rect{X: r.X, Y: r.Y + r.H/2 - 20, W: r.W, H: 40}
 }
 
 // dragQueueRow 把抽屉里 from 那一行拖到 targetY 那个高度松手。
@@ -100,11 +103,8 @@ func TestTheQueueRowsCanBeDraggedToReorder(t *testing.T) {
 	enqueue(t, h, drawerSongs(t, "甲", "乙", "丙", "丁")...)
 	openDrawer(t, h)
 
-	first, ok := h.tt.Find("甲")
-	if !ok {
-		t.Fatalf("抽屉里找不到甲，文字有 %q", h.tt.Texts())
-	}
-	second := queueRowBox(first, 1)
+	first := rowBody(t, h.tt, "甲")
+	second := rowBody(t, h.tt, "乙")
 
 	// 落在第二行的**下半**：挪到第三行之前（第一行往下挪一格）。
 	dragQueueRow(t, h.tt, first, second.Y+second.H-4)
@@ -128,11 +128,8 @@ func TestTheReorderIsCommittedOnlyOnRelease(t *testing.T) {
 	openDrawer(t, h)
 
 	before := queueOrderTitles(h.app)
-	first, ok := h.tt.Find("甲")
-	if !ok {
-		t.Fatalf("抽屉里找不到甲，文字有 %q", h.tt.Texts())
-	}
-	second := queueRowBox(first, 1)
+	first := rowBody(t, h.tt, "甲")
+	second := rowBody(t, h.tt, "乙")
 
 	// 按下 + 拖过去，**还没松手**。
 	x := first.X + first.W/2
@@ -159,8 +156,8 @@ func TestTheReorderIsCommittedOnlyOnRelease(t *testing.T) {
 // TestTheReorderKeepsThePlayingSongInPlace 盯「**正在放的那首不错位**」
 // （Nuclear 的 currentIndex 三分支修正）。
 //
-// 现在在放的是**乙**（第二行），把它拖到最前面：队列变成 乙 甲 丙 丁，而指针
-// 还得指着乙（它的新下标是 0）。
+// 现在在放的是**乙**（第二行），把**丙**拖到乙上面：队列变成 甲 丙 乙 丁，而指针
+// 还得指着乙（它的新下标是 2）。
 //
 // 错了的症状是**静默**的：播放条上写着乙，抽屉里高亮的是甲，而响着的还是乙。
 func TestTheReorderKeepsThePlayingSongInPlace(t *testing.T) {
@@ -178,17 +175,13 @@ func TestTheReorderKeepsThePlayingSongInPlace(t *testing.T) {
 		t.Fatalf("现在在放的是 %q，want 乙", playing.Title)
 	}
 
-	first, ok := h.tt.Find("甲")
-	if !ok {
-		t.Fatalf("抽屉里找不到甲，文字有 %q", h.tt.Texts())
-	}
-	second := queueRowBox(first, 1)
-
-	// 把正在放的那首（乙）拖到最前面。
-	dragQueueRow(t, h.tt, second, first.Y+4)
+	// 把丙拖到乙（正在放的那首）的上半：挪到乙之前。
+	// ⚠️ 乙在播放条上也有一份，所以量丙（和乙的 Y 差）而不是找乙。
+	third := rowBody(t, h.tt, "丙")
+	dragQueueRow(t, h.tt, third, third.Y+third.H/2-(56+33+10))
 
 	got := queueOrderTitles(h.app)
-	want := []string{"乙", "甲", "丙", "丁"}
+	want := []string{"甲", "丙", "乙", "丁"}
 	if !sameTitles(got, want) {
 		t.Errorf("拖完队列是 %q，want %q", got, want)
 	}
@@ -197,7 +190,7 @@ func TestTheReorderKeepsThePlayingSongInPlace(t *testing.T) {
 		t.Errorf("重排之后正在放的是 %q，want 乙（正在放的那首不能错位）", now.Title)
 	}
 	// 抽屉里的当前行跟随队列当前下标，重排后仍对应正在放的乙。
-	if got := h.app.Queue().CurrentIndex(); got != 0 {
-		t.Errorf("重排之后当前项下标是 %d，want 0", got)
+	if got := h.app.Queue().CurrentIndex(); got != 2 {
+		t.Errorf("重排之后当前项下标是 %d，want 2", got)
 	}
 }

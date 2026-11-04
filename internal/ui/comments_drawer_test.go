@@ -257,7 +257,7 @@ func TestTheCommentsDrawerIsWiderThanTheQueueDrawer(t *testing.T) {
 	// 🔴 **画面那一层才是真的**：面板是绝对定位的，而它的左缘从画面上能量出来
 	// ——**内容那一块的左沿**就是内容区的左沿（正文那一格撑满内容区，所以它的
 	// 左沿 = 面板左缘 + 边框 + 内边距）。
-	if commentsDrawerWidth <= queueDrawerWidth {
+	if commentsDrawerWidth < queueDrawerWidth {
 		t.Errorf("评论抽屉宽 %d，队列抽屉宽 %d——评论抽屉**不许比队列抽屉窄**"+
 			"（正文会折成五六行，每行二十来个字）", commentsDrawerWidth, queueDrawerWidth)
 	}
@@ -275,10 +275,10 @@ func TestTheCommentsDrawerIsWiderThanTheQueueDrawer(t *testing.T) {
 	// 量**：内容区右沿 − 内容区左沿 = 内容宽，而内容宽 = 面板宽 − 2×内边距。
 	//
 	// ⇒ 判据落在「**面板宽**」上：内容宽 + 2×内边距 = 面板宽。
-	const pad = float32(pagePadX)
-	contentR, ok := tt.Find("刷新评论")
+	const pad = float32(16) // `.drawer-head` 右内边距
+	contentR, ok := tt.Find("关闭评论")
 	if !ok {
-		t.Fatalf("画面上找不到「刷新评论」那一枚，文字有 %q", tt.Texts())
+		t.Fatalf("画面上找不到「关闭评论」那一枚，文字有 %q", tt.Texts())
 	}
 	// 「刷新评论」是页头右端那一枚——它的右沿就是内容区的右沿（外加它自己的
 	// 内边距，`space.Px7`）。
@@ -315,9 +315,8 @@ func TestTheCommentsKeyIsNotShownForALocalFileInTheDrawer(t *testing.T) {
 // 🔴 **满屏开着的时候主窗口整个被盖住了**，所以播放条上那一枚在满屏里**点不到**
 // ——这一枚是满屏里唯一的入口。
 //
-// ⚠️ **它点开的时候先把满屏收掉**：抽屉是浮在**主窗口**上面的一层，而满屏是
-// **压在主窗口上面**的另一层——不收掉的话抽屉会开在满屏底下（那一层不透明，
-// 抽屉一格都看不见，而用户按了「评论」什么反应都没有）。
+// ⚠️ **它点开的时候不收满屏**（原型：满屏开着时 scrim / drawer 的 z-index 抬到 55 / 56，
+// 直接开在满屏上面）：抽屉由满屏那一支自己建，后建的浮层在上。
 func TestTheFullPlayerCommentsKeyOpensTheDrawer(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	cli := bili.NewClient(bili.Options{Transport: b.Server.Client().Transport})
@@ -355,31 +354,26 @@ func TestTheFullPlayerCommentsKeyOpensTheDrawer(t *testing.T) {
 	if !s.commentsOpen {
 		t.Fatal("点了满屏里的「评论」键，抽屉没开")
 	}
-	if s.full.open {
-		t.Error("点了满屏里的「评论」键，满屏没收掉——抽屉会开在满屏底下")
+	if !s.full.open {
+		t.Error("点了满屏里的「评论」键，满屏被收掉了——原型里抽屉开在满屏上面")
 	}
 	waitFrames(t, tt, "评论画出来了", func() bool {
 		return tt.HasText("大圆镜科普")
 	})
 }
 
-// TestTheFullPlayerCommentsKeyHasNoCount 断「满屏那一枚**不带数字**」。
+// TestTheFullPlayerCommentsKeyHasNoCountUntilItIsKnown 断「拿不到评论数的时候满屏那一枚不画数字」。
 //
-// 🔴 **用户明确要求了**：满屏底栏是**居中的 flex**，任何一枚变宽播放键就离开
-// 窗口的竖直中轴了——而「三键落在中轴上」正是满屏底栏那条设计。
-//
-// ⚠️ **判据是「画面上没有那个数」**：播放条那一枚**照旧带**（票 #682），而这一
-// 枚不带。
-func TestTheFullPlayerCommentsKeyHasNoCount(t *testing.T) {
+// 「深夜唱片行」起满屏顶栏的评论键带角标（原型 `.cnt`），所以数字拿到了就画；🔴 **0 = 拿不到 =
+// 不显示**，不是「零条评论」（理由见 `viewCommentsButton`）：这一档没有那个数，名字里就是
+// 「评论」两个字，一字不多，键照旧能点。
+func TestTheFullPlayerCommentsKeyHasNoCountUntilItIsKnown(t *testing.T) {
 	tt, _ := commentsFullTester(t, mvItem())
 	if _, ok := tt.Find("评论"); !ok {
 		t.Errorf("满屏播放器里找不到「评论」键，文字有 %q", tt.Texts())
 	}
-	// ⚠️ **不带数字**：名字里不许有数字（`Find` 是全等匹配，所以「评论」找得到
-	// 就说明名字里没有别的东西）。
 	if _, ok := tt.Find("评论 1286"); ok {
-		t.Error("满屏那一枚「评论」键的名字里带数字了——满屏底栏是居中的 flex，" +
-			"带数字会让播放键离开竖直中轴")
+		t.Error("没拿到评论数的时候名字里带了数字")
 	}
 }
 
@@ -403,8 +397,8 @@ func TestTheCommentsDrawerSlidesInFromTheRight(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	_, tt := newCommentsShell(t, b, mvItem(), 1400, 900)
 
-	// 抽屉页头那一行（「这个视频的评论」那个角标）——它在抽屉的内容列里。
-	r, ok := tt.Find("这个视频的评论")
+	// 抽屉页头右上角那枚关闭键——它在抽屉的内容列里。
+	r, ok := tt.Find("关闭评论")
 	if !ok {
 		t.Fatalf("抽屉开着，画面上却找不到评论页头那一行")
 	}

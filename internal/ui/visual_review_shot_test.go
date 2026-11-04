@@ -96,17 +96,11 @@ func TestRenderNewUIShots(t *testing.T) {
 		s, tt := onlineTester(t, nil, false)
 		s.openFullPlayer()
 		tt.Frame()
-		s.full.settings = true
-		tt.Frame()
-		r, ok := tt.Find("自定义")
-		if !ok {
-			t.Fatalf("满屏偏好里没有「自定义」，文字有 %q", tt.Texts())
-		}
-		tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+		s.full.popEQ = true
 		tt.Frame()
 		tt.Advance(300 * time.Millisecond)
 		tt.Frame()
 		save(t, dir, "eq-panel-fullplayer.png", tt)
-		dumpGeom(t, tt, "均衡器面板", "均衡器 31 Hz", "均衡器 16000 Hz")
+		dumpGeom(t, tt, "full-pop-eq", "31Hz 频段", "16000Hz 频段")
 	})
 }

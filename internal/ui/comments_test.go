@@ -579,20 +579,13 @@ func TestTheCommentsHeaderSaysWhoseCommentsTheseAre(t *testing.T) {
 			b := newCommentBili(t, "reply-main.json")
 			_, tt := newCommentsShell(t, b, tc.it, 1200, 900)
 
-			if !tt.HasText(tc.want) {
-				t.Errorf("页头没有「%s」——用户分不清自己在读谁的评论，文字有 %q",
-					tc.want, tt.Texts())
+			// 原型 `.drawer-sub`：「这首歌的评论 · 歌名」一整句（两种条目两种说法，不许合并）。
+			if want := tc.want + " · " + tc.it.Title; !tt.HasText(want) {
+				t.Errorf("页头没有「%s」——用户分不清自己在读谁的评论，文字有 %q", want, tt.Texts())
 			}
-			if tt.HasText(tc.notWant) {
+			if tt.HasText(tc.notWant + " · " + tc.it.Title) {
 				t.Errorf("页头把「%s」也摆上了——那是另一种条目的说法，"+
 					"两句话同时在，用户分不清，文字有 %q", tc.notWant, tt.Texts())
-			}
-			// 歌名 / 视频标题 + UP 名 / 作者名也得在（页头不是只有那一句话）。
-			if !tt.HasText(tc.it.Title) {
-				t.Errorf("页头没有这一首的名字 %q，文字有 %q", tc.it.Title, tt.Texts())
-			}
-			if !tt.HasText(tc.it.Artist) {
-				t.Errorf("页头没有 %q，文字有 %q", tc.it.Artist, tt.Texts())
 			}
 		})
 	}

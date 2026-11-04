@@ -571,6 +571,13 @@ type Shell struct {
 	// 换了」——原料就是歌名，歌名变了就重算，调用方一处都不用记得重建。
 	// 列表那一档早就是这么记的（`widgets/list` 的 `opText`）。
 	queueRowOps rowkey.Memo[string, string]
+	// queueRowRm 记着每一行「从播放列表移除 {歌名}」那枚键的无障碍名（现拼是每帧每行一次分配）。
+	queueRowRm rowkey.Memo[string, string]
+	// queueCurrent / queuePlaying / queueDur 是这一帧「当前行是第几行、在不在响、多长」，
+	// 由列表那一支写、每一行读（行是闭包里画的，多捕获一个变量每帧就多十几个字节）。
+	queueCurrent int
+	queuePlaying bool
+	queueDur     time.Duration
 	// queueDrags 记着每一行那个**拖动值**（拖拽重排用的）。
 	//
 	// ⚠️ **它记的是指针**：框架把拖动值装进 `any`，装指针不分配——而每一行
@@ -602,6 +609,9 @@ type Shell struct {
 	// 播放」要的是一段动画：ListState.ScrollTo 是一跳到位（`mygo/ui/list.go`
 	// 的 ScrollTo），ScrollState.ScrollTo 才带 Animation。
 	queueScroll ui.ScrollState
+	// queueCountN / queueCountStr 是抽屉头下面那一行「N 首」记好的那一份（现拼是每帧一次分配）。
+	queueCountN   int
+	queueCountStr string
 
 	// queueRows 是这一帧去重之后要画的那几行（连同它们在队列里的下标）。
 	// queueList.Key 每帧都要读它，所以它和 rows 数得对上（见 queue_drawer.go）。

@@ -97,29 +97,3 @@ func TestTheClearViewedButtonAsksBeforeItDeletes(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // S-10：队列抽屉表头的条数紧跟「播放列表」
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheQueueCountSitsNextToTheTitle 钉住「条数紧跟标题」。
-//
-// 上游是 `<h3>播放列表<span …>({n})</span></h3>`（`music-playlist-drawer/index.tsx:131-133`），
-// 条数在标题**里面**、紧贴标题之后。我们原来把条数做成了标题旁边一个独立的
-// Text，而标题那一格 `.Grow(1)`——于是它被推到面板最右（实测 x=1090..1106），
-// 离标题 192 px，紧挨着「定位 / 清空」两枚图标。
-//
-// 判据：**条数和「定位当前播放」那枚图标之间要有一大段空白**。原来它们之间
-// 只有 35 像素（1090 → 1125）。
-func TestTheQueueCountSitsNextToTheTitle(t *testing.T) {
-	h := queueDrawerWithTwoRows(t)
-
-	count, ok := h.tt.Find("(2)")
-	if !ok {
-		t.Fatalf("抽屉表头没有那个条数，文字有 %q", h.tt.Texts())
-	}
-	locate, ok := h.tt.Find("定位当前播放")
-	if !ok {
-		t.Fatalf("抽屉表头没有「定位当前播放」，文字有 %q", h.tt.Texts())
-	}
-	if d := locate.X - (count.X + count.W); d < 100 {
-		t.Errorf("条数离「定位当前播放」只有 %.0f 像素（want ≥100）——"+
-			"它又被推到面板最右去了", d)
-	}
-}

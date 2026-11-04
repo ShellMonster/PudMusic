@@ -115,8 +115,8 @@ func TestEachSpectrumBarUsesItsOwnValue(t *testing.T) {
 	const n = 20
 	bars := make([]float32, n)
 	for i := range bars {
-		// 高度给成整数像素（2~21），免得「差半个像素」那一档混进来。
-		bars[i] = float32(i+2) / spectrumTestH
+		// 高度给成整数像素（3~22），免得「差半个像素」那一档混进来（原型柱子最矮 3 像素）。
+		bars[i] = float32(i+3) / spectrumTestH
 	}
 	tt := spectrumTester(t, bars)
 	img := tt.Image()
@@ -134,32 +134,26 @@ func TestEachSpectrumBarUsesItsOwnValue(t *testing.T) {
 	}
 }
 
-// TestTheSpectrumKeepsTheTwoPixelBaseRow 断「静的时候底下那条 2 像素的排还在」。
+// TestTheSpectrumKeepsTheThreePixelBaseRow 断「没有谱的时候柱子落到 3 像素的底排，而不是不画」。
 //
-// 上游（`index.tsx:104`）：`barHeight = Math.max((value / 255) * height, 2)`。
-// 那个「至少 2 像素」是 `spectrum.Bars` 算的（`BaseDip`），而这一层画的时候
-// 要**照着那个比例画**，不能自己再算一遍（算错一处就是 1 像素，而 1 像素看着
-// 就是「没有底排」）。
-func TestTheSpectrumKeepsTheTwoPixelBaseRow(t *testing.T) {
+// 原型 `loopSpectrum`：暂停 / 没声音时 `target = 3`，每根柱子是一个 3 像素的小墩子；
+// 所以值为 0（或不足 3 像素）的格子也要画出那一道底排。
+func TestTheSpectrumKeepsTheThreePixelBaseRow(t *testing.T) {
 	const n = 20
-	// 静的时候每一格都是那个底排比例（2 像素 / 40 像素高）。
-	bars := make([]float32, n)
-	for i := range bars {
-		bars[i] = 2.0 / spectrumTestH
-	}
+	bars := make([]float32, n) // 全是 0：没有谱
 	tt := spectrumTester(t, bars)
 	img := tt.Image()
 
 	cell := float32(spectrumTestW) / n
 	x := int(spectrumTestX + cell*spectrumBarRatio/2)
 	top := spectrumTopAt(img, x, spectrumTestY, spectrumTestY+spectrumTestH)
-	want := spectrumTestY + spectrumTestH - 2
+	want := spectrumTestY + spectrumTestH - 3
 	if top != want {
-		t.Errorf("底排的顶在第 %d 行，want %d（那一条是 2 像素）", top, want)
+		t.Errorf("底排的顶在第 %d 行，want %d（那一条是 3 像素）", top, want)
 	}
-	// 底排上面那一行必须是空的：底排就是 2 像素，不是 3 像素也不是一整条。
+	// 底排上面那一行必须是空的：底排就是 3 像素。
 	if isSpectrumColor(img.RGBAAt(x, want-1)) {
-		t.Errorf("底排上面第 %d 行也有颜色——底排不止 2 像素", want-1)
+		t.Errorf("底排上面第 %d 行也有颜色——底排不止 3 像素", want-1)
 	}
 }
 

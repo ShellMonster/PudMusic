@@ -20,6 +20,8 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/ShellMonster/PudMusic/internal/service/video"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -28,17 +30,11 @@ import (
 const (
 	fullVideoKey       = "full:video"
 	fullVideoBadgeKey  = "full:video:badge"
-	fullVideoCloseKey  = "full:video:close"
-	fullTheaterKey     = "full:theater"
 	fullVideoInKey     = "full:video:in-window"
 	fullVideoScreenKey = "full:video:screen"
 
-	fullVideoBadgeSize = 40
-	fullVideoEdge      = 10
-	fullVideoRadius    = 8
-	// 影院里字幕离底边的距离：控制条露着时让开它，藏起来时贴近底边。
-	fullKaraokeLift       = 24
-	fullKaraokeLiftHidden = 56
+	fullVideoEdge   = 10
+	fullVideoRadius = 8
 	// 画面停下后再要多久的帧（等拖动进度之后解码器追上来）。
 	videoIdleFrames = time.Second
 
@@ -83,15 +79,16 @@ func (s *Shell) drawVideo(p *ui.Painter, r ui.Rect, radius float32) {
 	}
 }
 
-// viewVideoBadge 是封面右下角的播放角标。
+// viewVideoBadge 是封面右下角的「看视频」胶囊（原型 `.vbadge`：右 12 下 12、高 32、左右 12、
+// 黑 66% 底、白字 12 号 600、14 的视频图标，缝 6）。
 func (s *Shell) viewVideoBadge(c *ui.Context) {
-	b := ui.Box(c).Key(fullVideoBadgeKey).Role(ui.RoleButton).Label("看视频").
-		Absolute().Right(fullVideoEdge).Bottom(fullVideoEdge).
-		Size(fullVideoBadgeSize, fullVideoBadgeSize).
-		Radius(fullVideoBadgeSize / 2).Background(ui.RGBA(0, 0, 0, scrim.Media)).
-		Center().Cursor(ui.CursorPointer)
+	b := ui.ButtonBase(c).Key(fullVideoBadgeKey).Label("看视频").
+		Absolute().Right(12).Bottom(12).Height(32).PaddingX(space.Px12).Gap(space.Px6).
+		AlignItems(ui.Center).Radius(16).Background(ui.RGBA(0, 0, 0, scrim.VideoBadge)).Cursor(ui.CursorPointer)
 	b.Children(func() {
-		ui.Icon(c, icon(transportIcon(false))).FontSize(24).TextColor(ui.RGBA(255, 255, 255, 0.95))
+		white := ui.RGB(255, 255, 255)
+		ui.Icon(c, pud.Icon("video")).FontSize(14).TextColor(white)
+		ui.Text(c, "看视频").FontSize(scale.Font(c, scale.Size12)).FontWeight(600).TextColor(white).SingleLine()
 	})
 	if b.Clicked() {
 		s.app.StartVideo()
@@ -99,8 +96,12 @@ func (s *Shell) viewVideoBadge(c *ui.Context) {
 }
 
 // viewVideoWindow 是封面位置上的视频小窗，w×h 是它的框。
-func (s *Shell) viewVideoWindow(c *ui.Context, phase app.VideoPhase, w, h float32) {
-	box := ui.Box(c).Key(fullVideoKey).Role(ui.RoleButton).Label("视频，点击全屏").
+func (s *Shell) viewVideoWindow(c *ui.Context, phase app.VideoPhase, w, h float32, big bool) {
+	label := "视频，点击全屏"
+	if big {
+		label = "视频，点击退出全屏"
+	}
+	box := ui.Box(c).Key(fullVideoKey).Role(ui.RoleButton).Label(label).
 		Absolute().Left(0).Top(0).Size(w, h).Cursor(ui.CursorPointer)
 	box.Draw(func(p *ui.Painter, r ui.Rect) {
 		s.drawVideo(p, r, fullVideoRadius)
@@ -113,10 +114,12 @@ func (s *Shell) viewVideoWindow(c *ui.Context, phase app.VideoPhase, w, h float3
 		}
 	})
 	if box.Clicked() {
-		s.full.theater = true
+		s.full.theater = !big
+		if !s.full.theater {
+			s.setScreenFull(false)
+		}
 	}
-	s.viewVideoClose(c)
-	s.viewVideoModeKeys(c, false, fullVideoEdge, fullVideoEdge, 0)
+	s.viewVideoModeKeys(c, big, fullVideoEdge, fullVideoEdge, 0)
 }
 
 // viewVideoModeKeys 是「两种全屏」那一对键，**图标不同、名字不同**：
@@ -175,45 +178,6 @@ func (s *Shell) setScreenFull(v bool) {
 	}
 	s.videoMadeFull = v
 	s.win.SetFullScreen(v)
-}
-
-func (s *Shell) viewVideoClose(c *ui.Context) {
-	b := ui.Box(c).Key(fullVideoCloseKey).Role(ui.RoleButton).Label("关闭视频").
-		Absolute().Right(fullVideoEdge).Top(fullVideoEdge).Size(28, 28).
-		Radius(14).Background(ui.RGBA(0, 0, 0, scrim.Media)).Center().Cursor(ui.CursorPointer)
-	b.Children(func() {
-		ui.Icon(c, icon(iconClose)).FontSize(16).TextColor(ui.RGBA(255, 255, 255, 0.95))
-	})
-	if b.Clicked() {
-		s.app.StopVideo()
-	}
-}
-
-// viewFullTheater 是铺满整窗的视频，字幕在底下。点一下回小窗。
-func (s *Shell) viewFullTheater(c *ui.Context, hidden bool) {
-	snap := s.app.Lyrics()
-	winW, winH := c.Size()
-	lift := float32(fullKaraokeLift + fullControlsHeight)
-	if hidden {
-		lift = fullKaraokeLiftHidden
-	}
-	box := ui.Box(c).Key(fullTheaterKey).Role(ui.RoleButton).Label("视频，点击退出全屏").
-		Absolute().Left(0).Top(0).Right(0).Bottom(0)
-	if hidden {
-		box = box.Cursor(ui.CursorNone)
-	}
-	box.Draw(func(p *ui.Painter, r ui.Rect) {
-		s.drawVideo(p, r, 0)
-		band := ui.Rect{X: r.X, Y: r.Y + r.H - 320, W: r.W, H: 320}
-		p.FillGradient(band, ui.LinearGradient{From: ui.RGBA(0, 0, 0, 0), To: ui.RGBA(0, 0, 0, 0.6), Angle: 180}, 0)
-		paintKaraoke(p, ui.Rect{X: 0, Y: winH - lift - 110, W: winW, H: 110}, snap.Rows, snap.OffsetMS,
-			s.app.Snapshot().Position)
-	})
-	if box.Clicked() {
-		s.full.theater = false
-		s.setScreenFull(false)
-	}
-	s.viewVideoModeKeys(c, true, 24, 0, 72)
 }
 
 // paintKaraoke 画两句：正在唱的那句边唱边从左往右扫亮，下一句淡着。

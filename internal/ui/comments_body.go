@@ -130,6 +130,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"strings"
 	"unicode/utf8"
 
@@ -552,8 +553,9 @@ func (s *Shell) viewCommentBodyEl(c *ui.Context, p *commentsPage, cm bili.Commen
 	// `expanded`** 排出来的，所以点完之后**下一帧**才换成展开的那一份。
 	// 而下一帧里 `MaxLines` 换了 ⇒ **框架的缓存键换了** ⇒ 那一格自然重排
 	// ——**不需要手工清缓存**。
+	// 原型 `.c-more { color: var(--accent-text) !important }`：「展开 / 收起」是 12 号 accent-text。
 	if flatLink(c, label).FontSize(scale.Font(c, scale.Size12)).
-		TextColor(c.Theme().TextMuted).AlignSelf(ui.Start).Clicked() {
+		TextColor(tok.Of(c.Theme()).AccentText).AlignSelf(ui.Start).Clicked() {
 		if p.bodiesExpanded == nil {
 			p.bodiesExpanded = map[int64]bool{}
 		}
