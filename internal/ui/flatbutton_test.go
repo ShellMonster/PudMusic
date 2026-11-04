@@ -400,6 +400,9 @@ func TestThePlayBarKeysAreFlatAndKeepTheirHover(t *testing.T) {
 				// 悬停：指针落到这一格的中心。
 				tt.Move(r.X+r.W/2, r.Y+r.H/2)
 				tt.Frame()
+				// 原型图标键的悬停底是 160ms 的渐变（motion.Fade），Tester 的钟不推就停在第一帧。
+				tt.Advance(300 * time.Millisecond)
+				tt.Frame()
 				idle := probeFill(img, r)
 				lit := probeFill(tt.Image(), r)
 				if d := maxDiff(lit, idle); d < 6 {
@@ -412,6 +415,8 @@ func TestThePlayBarKeysAreFlatAndKeepTheirHover(t *testing.T) {
 
 				// 挪走要真的挪回去：留下的一层底比没有更坏。
 				tt.Move(600, 20)
+				tt.Frame()
+				tt.Advance(300 * time.Millisecond) // 撤底同样是 160ms 渐变
 				tt.Frame()
 				if back := probeFill(tt.Image(), r); maxDiff(back, idle) > probeTolerance {
 					t.Errorf("%s 指针挪走之后还留着 %v（原来 %v）——那一层底没撤",
