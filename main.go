@@ -1,4 +1,4 @@
-// BiuGo 是用 MyGo 框架重写的 Biu 音乐播放器。
+// 布丁音乐是用 MyGo 框架重写的 Biu 音乐播放器。
 //
 // 界面是 MyGo 自己画的原生 UI（即时模式，没有 webview），音频在 Go 里解码。
 // 当前阶段：`internal/ui/router.go` 登记的 15 条路由里**已经有 14 条接上了真数据**
@@ -43,7 +43,7 @@ func main() {
 	tuneMemory()
 	// 日志先接上：接不上不挡启动，后续日志退回 stderr。
 	if _, err := platform.OpenLogFile(); err != nil {
-		log.Printf("biu: 接不上日志文件，这一次的日志只在 stderr 上：%v", err)
+		log.Printf("pudmusic: 接不上日志文件，这一次的日志只在 stderr 上：%v", err)
 	}
 
 	if _, err := bootstrap.Assemble(bootstrap.DefaultDependencies()); err != nil {

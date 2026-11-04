@@ -223,20 +223,20 @@ func (a *App) refreshFavoriteGroups(f *Favorites, c *collections, mid int64, ann
 			u.Items[FavoritesCreated] = createdFavorites(created, mid)
 			u.States[FavoritesCreated] = FavoriteState{Loaded: true}
 		} else {
-			log.Printf("biu: 刷新「我创建的」失败：%v", errCreated)
+			log.Printf("pudmusic: 刷新「我创建的」失败：%v", errCreated)
 			u.States[FavoritesCreated] = FavoriteState{Err: favErrText(FavoritesCreated, errCreated)}
 		}
 		if errCollected == nil {
 			u.Items[FavoritesCollected] = collectedFavorites(collected)
 			u.States[FavoritesCollected] = FavoriteState{Loaded: true}
 		} else {
-			log.Printf("biu: 刷新「我收藏的」失败：%v", errCollected)
+			log.Printf("pudmusic: 刷新「我收藏的」失败：%v", errCollected)
 			u.States[FavoritesCollected] = FavoriteState{Err: favErrText(FavoritesCollected, errCollected)}
 		}
 
 		if !f.Commit(gen, u) {
 			// 换人了：这一份是上一个账号的，丢掉（见 `Favorites.Commit`）。
-			log.Printf("biu: 这一趟收藏夹回来时账号已经换了（退登或者换账号），这次结果作废")
+			log.Printf("pudmusic: 这一趟收藏夹回来时账号已经换了（退登或者换账号），这次结果作废")
 			f.finishQuietly(gen)
 			return
 		}

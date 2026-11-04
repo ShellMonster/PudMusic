@@ -23,8 +23,8 @@ import (
 // coverCacheDir 是封面磁盘缓存的位置：**应用自己的缓存目录**下单独一个子目录。
 //
 // `mygo.PathCache` 是 `os.UserCacheDir()` 拼上应用名（macOS 上是
-// `~/Library/Caches/BiuGo`），系统认定的「这些都可以删」的地方——不是用户文件
-// 目录，也不在应用数据目录（`Biu MyGo`）里，所以清缓存不会碰到设置和历史。
+// `~/Library/Caches/布丁音乐`），系统认定的「这些都可以删」的地方——不是用户文件
+// 目录，也不在应用数据目录（`PudMusic`）里，所以清缓存不会碰到设置和历史。
 // 再套一层 `cover-images` 是为了不让别的东西混进这个「整目录都归缓存」的地方。
 //
 // ⚠️ **测试必须把它替成临时目录**（`newTestShell` 替了）：无头 Tester 里
@@ -36,7 +36,7 @@ import (
 var coverCacheDir = func() string {
 	dir, err := mygo.App.Path(mygo.PathCache)
 	if err != nil {
-		log.Printf("biu: 拿不到缓存目录，封面这次不落盘：%v", err)
+		log.Printf("pudmusic: 拿不到缓存目录，封面这次不落盘：%v", err)
 		return ""
 	}
 	return filepath.Join(dir, "cover-images")
@@ -68,11 +68,11 @@ func (s *Shell) viewLocalMusic(c *ui.Context, _ *ui.Route) {
 func (s *Shell) mountSearchHistory() {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，搜索历史这次关掉就没了：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，搜索历史这次关掉就没了：%v", err)
 		return
 	}
 	if err := s.hist.Close(); err != nil {
-		log.Printf("biu: 收尾内存里的搜索历史失败：%v", err)
+		log.Printf("pudmusic: 收尾内存里的搜索历史失败：%v", err)
 	}
 	s.hist = newSearchHistory(searchHistoryPath(dir))
 }
@@ -82,11 +82,11 @@ func (s *Shell) mountSearchHistory() {
 func (s *Shell) mountShortcuts() {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，快捷键这次关掉就没了：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，快捷键这次关掉就没了：%v", err)
 		return
 	}
 	if err := s.keys.Close(); err != nil {
-		log.Printf("biu: 收尾内存里的快捷键失败：%v", err)
+		log.Printf("pudmusic: 收尾内存里的快捷键失败：%v", err)
 	}
 	s.keys = newShortcutKeys(shortcutPath(dir))
 }

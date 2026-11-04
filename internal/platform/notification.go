@@ -216,7 +216,7 @@ func Notify(id, title, body string) error {
 				notifier.denied = true
 			}
 			notifier.mu.Unlock()
-			log.Printf("biu: 系统通知发不出去：%v", err)
+			log.Printf("pudmusic: 系统通知发不出去：%v", err)
 			reportFailure(title, body, err)
 		}
 	}()

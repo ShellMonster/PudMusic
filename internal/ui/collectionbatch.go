@@ -354,7 +354,7 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 	// 一件事（「先勾几首再删」是句假话——用户明明勾了）。
 	missing := len(p.picked) - len(medias)
 	if missing > 0 {
-		log.Printf("biu: 勾了 %d 首却只找齐 %d 条完整信息，%d 首会被跳过",
+		log.Printf("pudmusic: 勾了 %d 首却只找齐 %d 条完整信息，%d 首会被跳过",
 			len(p.picked), len(medias), missing)
 		s.addToast("有 "+strconv.Itoa(missing)+" 首查不到完整信息，这次先删其余的", notice.Warning)
 	}
@@ -372,7 +372,7 @@ func (s *Shell) startCollectionDelete(p *collectionPage) {
 	ref := p.ref
 	go func() {
 		if err := s.app.RemoveMedias(context.Background(), ref, medias); err != nil {
-			log.Printf("biu: 从收藏夹里删内容失败：%v", err)
+			log.Printf("pudmusic: 从收藏夹里删内容失败：%v", err)
 			s.addToast("删不掉："+bili.Friendly(err), notice.Danger)
 			s.wake.invalidate()
 		}

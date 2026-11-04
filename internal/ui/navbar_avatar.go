@@ -442,7 +442,7 @@ func (s *Shell) fetchAvatarFace(gen uint64) {
 	func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("biu: 拉用户信息崩了：%v\n%s", rec, debug.Stack())
+				log.Printf("pudmusic: 拉用户信息崩了：%v\n%s", rec, debug.Stack())
 				err = fmt.Errorf("拉用户信息的代码崩了：%v", rec)
 			}
 		}()

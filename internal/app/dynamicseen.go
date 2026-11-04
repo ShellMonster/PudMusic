@@ -106,7 +106,7 @@ func (a *App) CatchUpDynamicSeen(ctx context.Context) (string, error) {
 		//
 		// 不动它——宁可让那个点下次又亮，也不要记一个错的（错的会让「点进去真的
 		// 消失」那条落空）。
-		log.Printf("biu: 动态流这一页是空的，没有可记的更新基线")
+		log.Printf("pudmusic: 动态流这一页是空的，没有可记的更新基线")
 		return "", nil
 	}
 	if err := a.MarkDynamicSeenForAccount(account, pg.Baseline); err != nil {
@@ -127,7 +127,7 @@ func (a *App) CatchUpDynamicSeen(ctx context.Context) (string, error) {
 func (a *App) MarkDynamicSeen(dynID string) {
 	if err := a.MarkDynamicSeenForAccount(a.AccountSnapshot(), dynID); err != nil && err != ErrStaleGeneration {
 		// 存不住不是致命的：这一趟顶多让那个点下次又冒出来，而用户已经看过了。
-		log.Printf("biu: 记不住「动态看到哪儿了」：%v", err)
+		log.Printf("pudmusic: 记不住「动态看到哪儿了」：%v", err)
 	}
 }
 
@@ -186,7 +186,7 @@ func (a *App) MarkDynamicSeenForAccount(snapshot AccountSnapshot, dynID string) 
 	}
 	if err != nil {
 		// 存不住不是致命的：这一趟顶多让那个点下次又冒出来，而用户已经看过了。
-		log.Printf("biu: 记不住「动态看到哪儿了」：%v", err)
+		log.Printf("pudmusic: 记不住「动态看到哪儿了」：%v", err)
 	}
 	return err
 }

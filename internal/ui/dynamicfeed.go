@@ -363,7 +363,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 				Rows(func(r ui.ListRow) {
 					defer func() {
 						if rec := recover(); rec != nil {
-							log.Printf("biu: 作者栏那一行画崩了：%v\n%s", rec, debug.Stack())
+							log.Printf("pudmusic: 作者栏那一行画崩了：%v\n%s", rec, debug.Stack())
 						}
 					}()
 					s.viewAuthorRow(r.Context, f, r.Index)
@@ -580,7 +580,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 			Rows(func(r ui.ListRow) {
 				defer func() {
 					if rec := recover(); rec != nil {
-						log.Printf("biu: 动态那一行画崩了：%v\n%s", rec, debug.Stack())
+						log.Printf("pudmusic: 动态那一行画崩了：%v\n%s", rec, debug.Stack())
 					}
 				}()
 				if r.Index >= len(f.items) {
@@ -698,7 +698,7 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 	var r feedResult
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("biu: 拉动态流崩了：%v\n%s", rec, debug.Stack())
+			log.Printf("pudmusic: 拉动态流崩了：%v\n%s", rec, debug.Stack())
 			r.err = fmt.Errorf("拉动态的代码崩了：%v", rec)
 		}
 		// 🔴 铁律三：投递完**必须**唤醒。只投递不唤醒 = 界面停在旧帧。
@@ -739,11 +739,11 @@ func (s *Shell) fetchFeed(ctx context.Context, f *dynamicFeed, which int, cursor
 	// ⚠️ **丢掉的那几条要按类别分开写**（票 #344）：「形态不认识」和「读不懂」
 	// 是两回事，合在一起就看不出是 B 站换了形态还是我们读不懂。
 	if r.err == nil {
-		log.Printf("biu: 拉动态流：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
+		log.Printf("pudmusic: 拉动态流：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
 			r.sent, len(r.dyns)+len(r.authors), len(r.drops),
 			dropCountText(dropCountsOf(r.drops)), r.hasMore)
 		for _, why := range r.dropWhy {
-			log.Printf("biu: 拉动态流丢掉一条：%s", why)
+			log.Printf("pudmusic: 拉动态流丢掉一条：%s", why)
 		}
 	}
 }
@@ -774,7 +774,7 @@ func (s *Shell) adoptFeed(f *dynamicFeed) {
 		p.settle()
 		if r.err != nil {
 			p.err = r.err
-			log.Printf("biu: 动态流拉失败了：%v", r.err)
+			log.Printf("pudmusic: 动态流拉失败了：%v", r.err)
 			continue
 		}
 		// 🔴 铁律四：追加是**尾部**，不动已有行的位置，所以「正在看的那

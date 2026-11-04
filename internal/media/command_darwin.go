@@ -29,7 +29,7 @@ import (
 
 // commandClassName 是注册的那个类名。Objective-C 的类名空间是整个进程的，
 // 名字撞了 `RegisterClass` 会直接失败。
-const commandClassName = "BiuMediaCommandTarget"
+const commandClassName = "PudMediaCommandTarget"
 
 // commandSelector 是那个方法的选择子。七个命令共用它。
 const commandSelector = "handleRemoteCommand:"
@@ -140,7 +140,7 @@ func initCommandTarget() {
 	c, err := objc.RegisterClass(commandClassName, super, nil, nil,
 		[]objc.MethodDef{{Cmd: sel(commandSelector), Fn: commandImpl}})
 	if err != nil {
-		log.Printf("biu: 远程命令处理器注册不上，控制中心和锁屏上的按钮按了没反应：%v", err)
+		log.Printf("pudmusic: 远程命令处理器注册不上，控制中心和锁屏上的按钮按了没反应：%v", err)
 		return
 	}
 	commandTargetClass = c
@@ -168,7 +168,7 @@ func currentCommandHandler() func(Command, time.Duration) {
 	return handlerFn
 }
 
-// commandImpl 是 `-[BiuMediaCommandTarget handleRemoteCommand:]`。
+// commandImpl 是 `-[PudMediaCommandTarget handleRemoteCommand:]`。
 //
 // 返回值是 `MPRemoteCommandHandlerStatus`：0 是「收到了，接下了」。
 // 这里**必须立刻返回**：它在系统那条线程上跑。在里面等一个要走网络的
@@ -193,7 +193,7 @@ func commandImpl(_self id, _cmd objc.SEL, event id) int {
 		// 比回成功诚实：系统至少知道这个按钮此刻按了没用。
 		return statusNoActionableItem
 	}
-	log.Printf("biu: 系统媒体会话收到远程命令 %s", cmd)
+	log.Printf("pudmusic: 系统媒体会话收到远程命令 %s", cmd)
 	fn(cmd, at)
 	return statusSuccess
 }

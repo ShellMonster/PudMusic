@@ -1193,7 +1193,7 @@ func (c *Cache) decodeWorker() {
 					// 失败），而网络一次都没被试过。所以这一张从此刻起不再从盘
 					// 上读（`skipDisk`），下一次直接走网络。
 					if rmErr := c.disk.remove(c.diskName(j.e.sourceURL)); rmErr != nil {
-						log.Printf("biu: 删不掉磁盘缓存里那份坏封面（%s）：%v", j.e.url, rmErr)
+						log.Printf("pudmusic: 删不掉磁盘缓存里那份坏封面（%s）：%v", j.e.url, rmErr)
 					}
 					j.e.skipDiskFromNowOn()
 					if c.start(j.e) {

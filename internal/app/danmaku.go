@@ -493,7 +493,7 @@ func (a *App) saveDanmakuCache(seq int, key, bvid, cid string, items []bili.Danm
 		Items:     items,
 		FetchedAt: time.Now(),
 	}); err != nil {
-		log.Printf("biu: 弹幕缓存写不下去：%v", err)
+		log.Printf("pudmusic: 弹幕缓存写不下去：%v", err)
 	}
 	// 写完了就把这一条从表里拿掉：留着的话它会一直长（用户听过的每一集都留
 	// 一条）。
@@ -558,7 +558,7 @@ func (a *App) finishDanmaku(gen int, key string, err error) {
 	a.danmakuErr = err
 	a.danmakuMu.Unlock()
 
-	log.Printf("biu: 弹幕问不出来：%v", err)
+	log.Printf("pudmusic: 弹幕问不出来：%v", err)
 
 	// 🔴 铁律三：状态变了（哪怕是「失败了」）也要叫醒界面——否则界面上那句
 	// 「问不出弹幕」永远出不来。

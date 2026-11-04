@@ -260,7 +260,7 @@ func (s *Session) BindWindow(h uintptr) bool {
 		return true
 	}
 	if err := b.bindWindow(h); err != nil {
-		log.Printf("biu: 系统媒体会话没接上这个窗口（浮窗、锁屏、任务栏都没有）：%v", err)
+		log.Printf("pudmusic: 系统媒体会话没接上这个窗口（浮窗、锁屏、任务栏都没有）：%v", err)
 		return false
 	}
 	return true
@@ -310,7 +310,7 @@ func New(opts Options) *Session {
 	if err != nil {
 		// 系统那一半没起来不该拦住应用开窗：媒体会话是加分项，
 		// 界面、播放、队列都跟它无关。
-		log.Printf("biu: 系统媒体会话没起来，这一轮没有控制中心和锁屏控制：%v", err)
+		log.Printf("pudmusic: 系统媒体会话没起来，这一轮没有控制中心和锁屏控制：%v", err)
 		return newSession(nil)
 	}
 	return newSession(p)

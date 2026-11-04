@@ -52,7 +52,7 @@ func (s *Shell) installTray() {
 	menu := s.trayMenu()
 	tray, err := platform.NewTray(icon, template, menu)
 	if err != nil {
-		log.Printf("biu: 托盘图标建不出来，隐藏之后只能再启动一个应用唤回来：%v", err)
+		log.Printf("pudmusic: 托盘图标建不出来，隐藏之后只能再启动一个应用唤回来：%v", err)
 		return
 	}
 	s.tray = tray

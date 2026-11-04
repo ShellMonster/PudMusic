@@ -31,7 +31,7 @@ import (
 //
 // 起一个全局唯一的名字：Objective-C 的类名空间是**整个进程**的，重名的
 // 类会让 `RegisterClass` 直接失败。
-const artworkClassName = "BiuMediaItemArtwork"
+const artworkClassName = "PudMediaItemArtwork"
 
 // artworkSelector 是要实现的那个方法。
 const artworkSelector = "requestImageWithSize:completionHandler:"
@@ -47,7 +47,7 @@ var (
 func initArtworkClass() {
 	super := class("MPMediaItemArtwork")
 	if super == 0 {
-		log.Print("biu: 系统里没有 MPMediaItemArtwork，锁屏上没有封面")
+		log.Print("pudmusic: 系统里没有 MPMediaItemArtwork，锁屏上没有封面")
 		return
 	}
 	// RegisterClass 内部就是把 Go 函数变成 IMP（它自己 recover 了并把错误
@@ -55,7 +55,7 @@ func initArtworkClass() {
 	c, err := objc.RegisterClass(artworkClassName, super, nil, nil,
 		[]objc.MethodDef{{Cmd: sel(artworkSelector), Fn: artworkImpl}})
 	if err != nil {
-		log.Printf("biu: 封面子类注册不上，锁屏上没有封面：%v", err)
+		log.Printf("pudmusic: 封面子类注册不上，锁屏上没有封面：%v", err)
 		return
 	}
 	artworkClass = c
@@ -103,7 +103,7 @@ func imageOf(art objc.ID) id {
 	return images[art]
 }
 
-// artworkImpl 是 `-[BiuMediaItemArtwork requestImageWithSize:completionHandler:]`。
+// artworkImpl 是 `-[PudMediaItemArtwork requestImageWithSize:completionHandler:]`。
 //
 // 同步给图：数据早就下好了（下载在别处，见 mp_darwin.go），系统问的时候
 // 直接把 completion 叫掉。completion 的第二个参数（NSError）给 0。

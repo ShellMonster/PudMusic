@@ -332,7 +332,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 				// 两者不重复）。
 				defer func() {
 					if rec := recover(); rec != nil {
-						log.Printf("biu: UP 空间那一行画崩了（%s）：%v\n%s",
+						log.Printf("pudmusic: UP 空间那一行画崩了（%s）：%v\n%s",
 							upRowKey(sp, tab, r.Index-upLeadRows), rec, debug.Stack())
 					}
 				}()

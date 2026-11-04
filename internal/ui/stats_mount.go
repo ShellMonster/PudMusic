@@ -26,10 +26,10 @@ import (
 func MountListeningStats(a *app.App) {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，这次的听歌统计关掉就没了：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，这次的听歌统计关掉就没了：%v", err)
 		return
 	}
 	if err := a.MountListeningStats(app.StatsPath(dir)); err != nil {
-		log.Printf("biu: 挂听歌统计失败：%v", err)
+		log.Printf("pudmusic: 挂听歌统计失败：%v", err)
 	}
 }

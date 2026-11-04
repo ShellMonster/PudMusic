@@ -684,8 +684,8 @@ func TestTheLoadFailToastDoesNotShowOurInternalPrefix(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"第一页", errors.New("biu: 收藏夹暂时打不开"), "加载失败：收藏夹暂时打不开"},
-		{"后一页", errors.New("biu: 连不上 B 站"), "加载更多失败：连不上 B 站"},
+		{"第一页", errors.New("pudmusic: 收藏夹暂时打不开"), "加载失败：收藏夹暂时打不开"},
+		{"后一页", errors.New("pudmusic: 连不上 B 站"), "加载更多失败：连不上 B 站"},
 		{"没有前缀的照旧", errors.New("网络炸了"), "加载更多失败：网络炸了"},
 	} {
 		page := 2

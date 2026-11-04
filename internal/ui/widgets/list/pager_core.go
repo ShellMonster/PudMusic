@@ -230,7 +230,7 @@ func (p *Pager[T, Q]) snapshot() Q {
 func (p *Pager[T, Q]) fetchOne(ctx context.Context, page, loaded int, query Q) (result PagerPage[T], err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("biu: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
+			log.Printf("pudmusic: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
 			result, err = PagerPage[T]{}, fmt.Errorf("%w：%v", ErrPagerPanic, rec)
 		}
 	}()

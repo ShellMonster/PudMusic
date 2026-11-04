@@ -131,7 +131,7 @@ func (a *App) autoSearchLyrics(key, title string) {
 		for _, src := range srcs {
 			cands, err := src.Search(ctx, query)
 			if err != nil {
-				log.Printf("biu: 自动找歌词（%s）搜不到：%v", src.Name(), err)
+				log.Printf("pudmusic: 自动找歌词（%s）搜不到：%v", src.Name(), err)
 				failed++
 				continue
 			}

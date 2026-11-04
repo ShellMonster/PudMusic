@@ -648,7 +648,7 @@ func (a *App) LikeDynamicForAccount(snapshot AccountSnapshot, dynID string, like
 			err = ErrStaleGeneration
 		}
 		if err != nil {
-			log.Printf("biu: 给动态 %s 点赞失败：%v", dynID, err)
+			log.Printf("pudmusic: 给动态 %s 点赞失败：%v", dynID, err)
 		}
 		sayThumbDone(done, err)
 	}()

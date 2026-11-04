@@ -360,8 +360,9 @@ func (s *Shell) commitSideWidth() {
 // 旁边 `text-2xl` 粗体的应用名，整个块 `py-3 pr-3 pl-4`。
 //
 // ⚠️ **这里摆的是应用名，折叠按钮下面那一行早就不摆它了。** 2026-10 从
-// `Biu MyGo` 改名成 `BiuGo` 时只改了下面那行，于是展开的侧栏上方一个 18pt 的
-// 「Biu」、下面一个 11pt 的「BiuGo」，**同一栏里两个产品名**，而两行都是正常的
+// `Biu MyGo` 改名成「布丁音乐」（`PudMusic`）时只改了下面那行，于是展开的
+// 侧栏上方一个 18pt 的「Biu」、下面一个 11pt 的「布丁音乐」，**同一栏里两个
+// 产品名**，而两行都是正常的
 // Text，没有任何一处会报错。现在这一处是**唯一**一处写着应用名的地方，
 // `sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它。
 //

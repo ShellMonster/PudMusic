@@ -485,7 +485,7 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 func (a *App) saveLyrics(c *lyrics.Cache, key string, entry lyrics.Entry, wake func()) {
 	if c != nil {
 		if err := c.Save(key, entry); err != nil {
-			log.Printf("biu: 歌词缓存写不下去：%v", err)
+			log.Printf("pudmusic: 歌词缓存写不下去：%v", err)
 		}
 	}
 	if wake != nil {
@@ -530,7 +530,7 @@ func (a *App) flushLyrics() {
 		// 写失败只记日志不弹提示：歌词是从别的源拿的（见 `OpenLyricPreview`），
 		// 缓存写不下去不影响这一次听歌，而一个「歌词保存失败」的提示会让
 		// 用户以为歌词没找到。
-		log.Printf("biu: 歌词偏移/字号写不进缓存：%v", err)
+		log.Printf("pudmusic: 歌词偏移/字号写不进缓存：%v", err)
 	}
 }
 
@@ -626,7 +626,7 @@ func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cac
 			// ⚠️ **这一次往返在后台**：它不挡播放，歌已经在放了。
 			u, err := s.Client.SubtitleURLs(ctx, bvid, cid)
 			if err != nil {
-				log.Printf("biu: 问不出这一首的字幕地址：%v", err)
+				log.Printf("pudmusic: 问不出这一首的字幕地址：%v", err)
 				return false
 			}
 			urls = u
@@ -642,7 +642,7 @@ func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cac
 		// `.hdslb.com`）。所以带 `auth_key` 的那个才是能下的那一个。
 		lines, err := lyrics.FetchBiliSubtitle(ctx, s.Media, urls)
 		if err != nil {
-			log.Printf("biu: B 站那份歌词拉不到：%v", err)
+			log.Printf("pudmusic: B 站那份歌词拉不到：%v", err)
 			return false
 		}
 		lrc := lyrics.ToLRC(lines)

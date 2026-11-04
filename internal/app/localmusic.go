@@ -272,7 +272,7 @@ func (a *App) DeleteLocalTrack(id string) error {
 		// （界面说「已移到系统废纸篓」，而文件还在原处）。
 		//
 		// 日志留着，因为「文件从列表里消失」这件事本身值得知道。
-		log.Printf("biu: 本地音乐 %s 已经不在盘上了，把它从列表里拿掉", track.Path)
+		log.Printf("pudmusic: 本地音乐 %s 已经不在盘上了，把它从列表里拿掉", track.Path)
 	}
 	wakes := slices.Clone(lib.wakes)
 	lib.mu.Unlock()
@@ -451,7 +451,7 @@ func (l *localLibrary) launch(roots []string, prev map[string]localmusic.Meta, g
 		func() {
 			defer func() {
 				if rec := recover(); rec != nil {
-					log.Printf("biu: 扫本地音乐时崩了（多半是目录里有畸形文件）：%v\n%s",
+					log.Printf("pudmusic: 扫本地音乐时崩了（多半是目录里有畸形文件）：%v\n%s",
 						rec, debug.Stack())
 				}
 			}()
@@ -540,7 +540,7 @@ func (l *localLibrary) startWatching() {
 		stop, err := watch.Watch(ctx, dir, l.scan)
 		if err != nil {
 			// 一个目录盯不上（外接盘没插、被删了）不该让其余的不盯。
-			log.Printf("biu: 盯不住本地音乐目录 %s，只能手动刷新：%v", dir, err)
+			log.Printf("pudmusic: 盯不住本地音乐目录 %s，只能手动刷新：%v", dir, err)
 			continue
 		}
 		stops = append(stops, stop)

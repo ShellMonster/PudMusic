@@ -319,7 +319,7 @@ func (a *App) persistPlayback() {
 		// 存不住不算错（理由同 `rememberPlayMode`）：设置层自己有入口能看到
 		// 「这次改的设置存不住」（见 App.TakeSettingsError），在这儿拦一次只会
 		// 让「记住上次听到哪儿」这件事本身失败——那比不记住更糟。
-		a.logf("biu: 「上次听到哪儿」存不住：%v", err)
+		a.logf("pudmusic: 「上次听到哪儿」存不住：%v", err)
 	}
 }
 
@@ -459,7 +459,7 @@ func (a *App) RestorePlayback() error {
 		if err := a.openLocal(cur.Path, at, openRestore); err != nil {
 			return nil
 		}
-		a.logf("biu: 恢复了上次的队列（%d 首，当前是 %q，位置 %v，跳过 %d 条）",
+		a.logf("pudmusic: 恢复了上次的队列（%d 首，当前是 %q，位置 %v，跳过 %d 条）",
 			len(items), cur.Title, at, skipped)
 		return nil
 	}
@@ -467,10 +467,10 @@ func (a *App) RestorePlayback() error {
 	// 在线的那一首：要取流才能开。开不起来就安静地跳过（见 failOnline 里
 	// 「这一趟是恢复」那一处）。
 	if err := a.playOnlineFrom(cur, at, true); err != nil {
-		a.logf("biu: 恢复上次那一首取不了流：%q：%v", cur.Title, err)
+		a.logf("pudmusic: 恢复上次那一首取不了流：%q：%v", cur.Title, err)
 		return nil
 	}
-	a.logf("biu: 恢复了上次的队列（%d 首，当前是 %q，位置 %v，跳过 %d 条，正在取流）",
+	a.logf("pudmusic: 恢复了上次的队列（%d 首，当前是 %q，位置 %v，跳过 %d 条，正在取流）",
 		len(items), cur.Title, at, skipped)
 	return nil
 }

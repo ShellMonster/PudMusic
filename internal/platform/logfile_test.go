@@ -30,7 +30,7 @@ func TestTheLogFileActuallyReceivesWhatIsLogged(t *testing.T) {
 	if filepath.Base(path) != "main.log" {
 		t.Errorf("日志文件叫 %q，不是 main.log", filepath.Base(path))
 	}
-	log.Printf("biu: 这一行是给排障看的")
+	log.Printf("pudmusic: 这一行是给排障看的")
 	// ⚠️ **日志是同步写的**（标准 logger 直接写文件），所以这里不用等。
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -54,11 +54,11 @@ func TestTheLogFileIsAppendedTo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	log.Printf("biu: 第一段")
+	log.Printf("pudmusic: 第一段")
 	if _, err := OpenLogFileIn(dir); err != nil {
 		t.Fatal(err)
 	}
-	log.Printf("biu: 第二段")
+	log.Printf("pudmusic: 第二段")
 
 	b, err := os.ReadFile(path)
 	if err != nil {

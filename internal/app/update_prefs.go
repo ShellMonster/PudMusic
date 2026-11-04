@@ -170,6 +170,6 @@ func (p *updatePrefs) put(f updatePrefsFile) {
 		p.mu.Lock()
 		p.saveErr = err
 		p.mu.Unlock()
-		log.Printf("biu: 更新记录 %s 存不住：%v", path, err)
+		log.Printf("pudmusic: 更新记录 %s 存不住：%v", path, err)
 	}
 }

@@ -169,6 +169,11 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 		t.Fatalf("创建自动化 socket：%v", err)
 	}
 	binary := filepath.Join(socketDir, "biugo-e2e")
+	// ⚠️ **先把静音钉上再启动**：`settings_mount` 读的是启动那一刻的数据
+	// 目录——进程起来之后再写就来不及了。没有它的话 E2E 里的 FLAC 起播
+	// 那一下真的会响（`drawer_nav_test.go` 的 `startRealAppWithArgs`），
+	// 在办公机上就是一串「嘟嘟嘟」。
+	seedMutedSettings(t, filepath.Join(socketDir, "data"))
 	// ⚠️ **先种凭据再启动**：`fileStore` 读的是启动那一刻的数据目录——
 	// 进程起来之后再写就来不及了（它只在启动时 Load 一次）。
 	if seedSession {
@@ -218,6 +223,32 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 	conn := waitForAutomationSocket(t, socket, cmd, &stdout, &stderr)
 	client := &automationClient{conn: conn, enc: json.NewEncoder(conn), dec: bufio.NewReader(conn)}
 	return client, stop
+}
+
+// seedMutedSettings 往 E2E 那份数据目录里写一份 `settings.json`，把
+// `isMuted` 钉成 true——**让 E2E 起的那一份应用一启动就是静音**。
+//
+// 写整份信封的最小形状：`schemaVersion` + `appSettings.isMuted`，其余键
+// 让 `DefaultSettings` 补上。不写别的字段就是故意的——`MountSettings` 读到
+// 缺省键会回落到默认值，而这份文件的存在只改一件事：**没有声**。
+func seedMutedSettings(t *testing.T, dataDir string) {
+	t.Helper()
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		t.Fatalf("建 E2E 数据目录：%v", err)
+	}
+	settings := map[string]any{
+		"schemaVersion": 1,
+		"appSettings": map[string]any{
+			"isMuted": true,
+		},
+	}
+	blob, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("序列化 E2E 静音设置：%v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dataDir, "settings.json"), blob, 0o600); err != nil {
+		t.Fatalf("写 E2E 静音设置：%v", err)
+	}
 }
 
 // seedFakeSession 往 E2E 那份数据目录里写一份**假** `session.json`。

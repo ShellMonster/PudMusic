@@ -1446,7 +1446,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 			a.pending = Item{}
 			wake := a.wake
 			a.mu.Unlock()
-			a.logf("biu: 恢复上次那一首放不起来（安静跳过）：%q：%v", path, err)
+			a.logf("pudmusic: 恢复上次那一首放不起来（安静跳过）：%q：%v", path, err)
 			if wake != nil {
 				wake()
 			}
@@ -1986,7 +1986,7 @@ func (a *App) Close() {
 	}
 	if fullPlayerPrefs != nil {
 		if err := fullPlayerPrefs.Close(); err != nil {
-			log.Printf("biu: 退出时保存全屏播放器偏好失败：%v", err)
+			log.Printf("pudmusic: 退出时保存全屏播放器偏好失败：%v", err)
 		}
 	}
 	a.mu.Lock()

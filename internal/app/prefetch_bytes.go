@@ -105,7 +105,7 @@ func (a *App) startPrefetchBytes(ctx context.Context, s *Streaming, it Item, ref
 		OnFirstBytes: func(n int64) { firstAt.CompareAndSwap(0, 1) },
 		OnComplete: func(size int64) {
 			if a.markByteCacheComplete(it, qualityAtBuild, ref, size) {
-				a.logf("biu: 预取的那首下完了，缓存记上了：%q（%s）", it.Title, ref.Label)
+				a.logf("pudmusic: 预取的那首下完了，缓存记上了：%q（%s）", it.Title, ref.Label)
 			}
 		},
 	})

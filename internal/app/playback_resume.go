@@ -152,7 +152,7 @@ func (a *App) persistPlaybackResume(key string, pos time.Duration) {
 	if _, err := a.UpdateSettings(func(s *Settings) { s.PlaybackResume = resume }); err != nil {
 		// 存不住不算错（理由同 `persistPlayback`）：设置层自己有入口能看到
 		// 「这次改的设置存不住」，在这儿拦只会让「记住上次听到哪儿」本身失败。
-		a.logf("biu: 「断点续播」存不住：%v", err)
+		a.logf("pudmusic: 「断点续播」存不住：%v", err)
 	}
 }
 
@@ -216,7 +216,7 @@ func (a *App) ResumePlayback() error {
 	}
 	it, _ := a.queue.itemAt(idx)
 	a.queue.selectAt(idx)
-	a.logf("biu: 断点续播：接着放 %q（位置 %v）", it.Title, at)
+	a.logf("pudmusic: 断点续播：接着放 %q（位置 %v）", it.Title, at)
 
 	if it.IsLocal() {
 		// 本地文件：离线就能开。放不出来也安静（文件在、但这台机器解不开，
@@ -229,7 +229,7 @@ func (a *App) ResumePlayback() error {
 	// 在线的那一首：要取流才能开。`playOnlineFrom` 的 at/paused 语义正好
 	// 装得下「从哪儿开始」；**出声**这一半由 openResume / paused=false 那一档给。
 	if err := a.playOnlineFrom(it, at, false); err != nil {
-		a.logf("biu: 断点续播取不了流：%q：%v", it.Title, err)
+		a.logf("pudmusic: 断点续播取不了流：%q：%v", it.Title, err)
 	}
 	return nil
 }

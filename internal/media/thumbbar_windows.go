@@ -79,7 +79,7 @@ var taskbarButtonCreated = registerWindowMessage("TaskbarButtonCreated")
 
 // thumbbarSubclassID 是子类回调的编号。它在 `SetWindowSubclass` /
 // `RemoveWindowSubclass` / 回调三处之间必须对齐，乱填的话摘不掉。
-const thumbbarSubclassID = 0x42495500 // "BIU\x00"
+const thumbbarSubclassID = 0x50554400 // "PUD\x00"
 
 // thumbbarSubclassProcPtr 是那个 Go 函数在系统那边的函数指针。
 //

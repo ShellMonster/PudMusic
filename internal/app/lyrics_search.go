@@ -529,7 +529,7 @@ func lyricsErrText(src lyrics.Source, what string, err error) string {
 	case errors.Is(err, lyrics.ErrNoLyrics):
 		return src.Name() + " 未找到歌词内容（换一条候选，或者换个源）"
 	default:
-		log.Printf("biu: 歌词源请求失败：%v", err)
+		log.Printf("pudmusic: 歌词源请求失败：%v", err)
 		return src.Name() + " " + what + "：网络不通或者对方没理"
 	}
 }

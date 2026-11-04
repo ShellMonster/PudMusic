@@ -79,8 +79,8 @@ func TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking(t *testing.T) {
 //
 // ⚠️ 这两个名字是两件互不相干的事（AGENTS.md §5）：
 //
-//   - `Biu MyGo` 是**用户数据目录**的名字，钉死在老名字上是为了老用户升级之后
-//     设置、搜索历史、歌词缓存不丢（见 `datadir.go` 顶上那一节）。
+//   - `PudMusic` 是**用户数据目录**的名字，老用户的 `Biu MyGo` 会被迁过去，
+//     为了升级之后设置、搜索历史、歌词缓存不丢（见 `datadir.go` 顶上那一节）。
 //   - 下载目录是**新起**的，没有「老用户升级要保住什么」这个问题，跟着显示名走
 //     正好。
 //

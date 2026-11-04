@@ -348,7 +348,7 @@ func (a *App) MountStreaming(s Streaming) {
 	//
 	// ⚠️ **锁外面调**：它要读盘（扫目录）。
 	if n := a.byteCacheSnapshot().CleanOrphans(); n > 0 {
-		a.logf("biu: 清掉了 %d 个没用的音频缓存残留", n)
+		a.logf("pudmusic: 清掉了 %d 个没用的音频缓存残留", n)
 	}
 	// 🔴 **把旧键形状的那些份搬到新键下**（2026-11-02）：缓存键改了形状
 	// （mv 剔掉 sid），旧键下已经下完的那些份不能就这么丢了——丢一份用户就
@@ -357,7 +357,7 @@ func (a *App) MountStreaming(s Streaming) {
 	// ⚠️ **锁外面调，而且只在这一刻调**：那时还没有任何字节源在写盘，
 	// 改名不会和下载撞上。
 	if n := a.byteCacheSnapshot().Migrate(legacyByteCacheTrack); n > 0 {
-		a.logf("biu: 把 %d 份旧键形状的音频缓存搬到了新键下", n)
+		a.logf("pudmusic: 把 %d 份旧键形状的音频缓存搬到了新键下", n)
 	}
 	// 取流零件整个换掉了 → 备好的那一份地址也作废（它是在旧零件上备的）。
 	a.invalidatePrefetch()
@@ -446,7 +446,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 		// 字节那一层才是「**不会过期**的缓存」。
 		if byteCacheKeyReady(tr.item) {
 			if rec, ok := a.cachedAudio(tr.item, q); ok {
-				a.logf("biu: 换音质：这一档在盘上有缓存，直接播盘上的：%q（%s）",
+				a.logf("pudmusic: 换音质：这一档在盘上有缓存，直接播盘上的：%q（%s）",
 					tr.item.Title, rec.Tier)
 				a.restreamFromByteCache(tr, rec, q, pos, want, gen)
 				return
@@ -493,7 +493,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			cur := a.onlineGen
 			a.mu.Unlock()
 			p.Close()
-			a.logf("biu: 换音质的结果被作废了（已经不是这一条流了）：%q（来的代次 %d，现在的代次 %d）",
+			a.logf("pudmusic: 换音质的结果被作废了（已经不是这一条流了）：%q（来的代次 %d，现在的代次 %d）",
 				tr.item.Title, gen, cur)
 			return
 		}
@@ -503,7 +503,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			// 界面上是 A 档，声音是 B 档。
 			a.mu.Unlock()
 			p.Close()
-			a.logf("biu: 换音质的结果被作废了（用户又换了一档）：%q", tr.item.Title)
+			a.logf("pudmusic: 换音质的结果被作废了（用户又换了一档）：%q", tr.item.Title)
 			return
 		}
 		old := a.player
@@ -578,7 +578,7 @@ func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
 	a.cancelFinishersForCache(rec.Track, rec.Tier)
 	p, err := a.buildFromCachedBytes(a.byteCachePathFor(rec.Track, rec.Tier), nil)
 	if err != nil {
-		a.logf("biu: 换音质：盘上那份字节打不开（重新取流）：%q：%v", tr.item.Title, err)
+		a.logf("pudmusic: 换音质：盘上那份字节打不开（重新取流）：%q：%v", tr.item.Title, err)
 		a.dropBrokenByteCache(tr.item, q, rec.Tier)
 		a.restreamOnline(tr, q, pos, want, gen)
 		return
@@ -608,14 +608,14 @@ func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
 		cur := a.onlineGen
 		a.mu.Unlock()
 		p.Close()
-		a.logf("biu: 换音质的结果被作废了（已经不是这一条流了）：%q（来的代次 %d，现在的代次 %d）",
+		a.logf("pudmusic: 换音质的结果被作废了（已经不是这一条流了）：%q（来的代次 %d，现在的代次 %d）",
 			tr.item.Title, gen, cur)
 		return
 	}
 	if a.streaming == nil || a.streaming.Quality != q {
 		a.mu.Unlock()
 		p.Close()
-		a.logf("biu: 换音质的结果被作废了（用户又换了一档）：%q", tr.item.Title)
+		a.logf("pudmusic: 换音质的结果被作废了（用户又换了一档）：%q", tr.item.Title)
 		return
 	}
 	old := a.player
@@ -698,7 +698,7 @@ func (a *App) failQualitySwitch(gen int, q bili.AudioQuality, err error) {
 	a.mu.Unlock()
 	if stale {
 		// 被后来的选择取代了：这一次的结果没人要了，报出去只会误导。
-		a.logf("biu: 换音质的结果被作废了（用户又换档了）：%q：%v", it.Title, err)
+		a.logf("pudmusic: 换音质的结果被作废了（用户又换档了）：%q：%v", it.Title, err)
 		return
 	}
 	a.failOnline(gen, it, "换音质", err, "")
@@ -882,7 +882,7 @@ func (a *App) playOnlineFrom(it Item, at time.Duration, paused bool) error {
 	wake := a.wake
 	a.mu.Unlock()
 
-	a.logf("biu: 开始取流：%q（%s/%s bvid=%s cid=%s sid=%s）代次 %d",
+	a.logf("pudmusic: 开始取流：%q（%s/%s bvid=%s cid=%s sid=%s）代次 %d",
 		it.Title, it.Source, it.Type, it.Bvid, it.Cid, it.Sid, gen)
 	if wake != nil {
 		wake()
@@ -1064,7 +1064,7 @@ func (a *App) loadTimedOut(gen int, title, stage string) {
 	// 那一趟无关，所以传的是**闹钟自己认的那一代**。
 	a.abortPendingSourceFor(gen)
 
-	a.logf("biu: 取流超时：%q（代次 %d，%v 内这一段还没回，段=%s）",
+	a.logf("pudmusic: 取流超时：%q（代次 %d，%v 内这一段还没回，段=%s）",
 		title, gen, onlinePlayTimeout, stage)
 	// 🔴 **恢复那一趟：安静地跳过**（理由同 `failOnline` 里那一处）。启动时在
 	// 播放条上冒一句「取流超时了」，用户会以为是自己点的歌放不出来——他这一
@@ -1288,7 +1288,7 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 	// 问完再回来查（见下面 `withSource` 之后那一处）。
 	if useCache && byteCacheKeyReady(it) {
 		if rec, ok := a.cachedAudio(it, s.Quality); ok {
-			a.logf("biu: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, rec.Tier)
+			a.logf("pudmusic: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, rec.Tier)
 			// ⚠️ **位置和「别出声」要原样传下去**：这是「恢复上次听到哪儿」
 			// 那一趟（`playback_state.go`）——丢了它们，恢复出来的那一首
 			// 会**从头开始而且自己出声**（那是明确的产品规则，见
@@ -1329,7 +1329,7 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 			// 连第一段都没走完（取流零件没挂）：没什么可量的。
 			return
 		}
-		a.logf("biu: 取流分段耗时：%q（代次 %d）%s", it.Title, gen, run.timing.String())
+		a.logf("pudmusic: 取流分段耗时：%q（代次 %d）%s", it.Title, gen, run.timing.String())
 	}()
 	it, err := a.withSource(context.Background(), s, it)
 	if err != nil {
@@ -1377,7 +1377,7 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 	// 一次了，那一次没命中才走到这儿来。
 	if useCache && byteCacheKeyReady(it) {
 		if rec, ok := a.cachedAudio(it, s.Quality); ok {
-			a.logf("biu: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, rec.Tier)
+			a.logf("pudmusic: 这一首在盘上有缓存，直接播盘上的：%q（%s）", it.Title, rec.Tier)
 			a.playFromByteCache(it, gen, rec, at, paused, run)
 			return
 		}
@@ -1452,9 +1452,9 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 		// 没有，连一句为什么都没有」——用户完全看不出是自己按错了还是应用坏了。
 		// 现在日志里有一句说清是「代次变了，在途的这次作废了」。
 		if closed {
-			a.logf("biu: 在途的播放被作废了（应用退出了）：%q（代次 %d）", it.Title, gen)
+			a.logf("pudmusic: 在途的播放被作废了（应用退出了）：%q（代次 %d）", it.Title, gen)
 		} else {
-			a.logf("biu: 在途的播放被作废了（代次变了）：%q（来的代次 %d，现在的代次 %d）",
+			a.logf("pudmusic: 在途的播放被作废了（代次变了）：%q（来的代次 %d，现在的代次 %d）",
 				it.Title, gen, cur)
 		}
 		return
@@ -1610,7 +1610,7 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// 换了一首 → 落盘那一格该跟着变（见 playback_state.go）。
 	a.markPlaybackDirty()
 
-	a.logf("biu: 这一首放起来了：%q（代次 %d，%s）", it.Title, gen, ref.Label)
+	a.logf("pudmusic: 这一首放起来了：%q（代次 %d，%s）", it.Title, gen, ref.Label)
 
 	// 念出去（无障碍）：**「加载完成」**——在线流要跑一趟网络（取流 + 开解码器），
 	// 那一趟里界面上一句话都没有，而读屏软件用户既看不见播放条上转的那枚圈，
@@ -1704,7 +1704,7 @@ func (a *App) withSongInfo(ctx context.Context, s *Streaming, it Item) (Item, er
 	info, err := s.Client.SongInfo(ctx, it.Sid)
 	if err != nil {
 		// 吞掉，但留一行字：排障时「作者名怎么是空的」只有一个解释。
-		log.Printf("biu: 音乐库元信息问不到（不挡播放）：%v", err)
+		log.Printf("pudmusic: 音乐库元信息问不到（不挡播放）：%v", err)
 		return it, nil
 	}
 	if it.Title == "" {
@@ -1975,7 +1975,7 @@ func (a *App) buildFromRef(ctx context.Context, s *Streaming, it Item, gen int,
 			// 那时写下去的是「新档偏好 → 旧档字节」的映射，用户下次点新档
 			// 拿到的是旧档的字节（徽章还显示旧档，用户完全看不出来）。
 			if a.markByteCacheComplete(it, qualityAtBuild, ref, size) {
-				a.logf("biu: 这一首的字节下完了，缓存记上了：%q（%s）", it.Title, ref.Label)
+				a.logf("pudmusic: 这一首的字节下完了，缓存记上了：%q（%s）", it.Title, ref.Label)
 			}
 		},
 	})
@@ -2452,14 +2452,14 @@ func (a *App) checkPlayback() {
 	switch classifyOnlineError(err) {
 	case onlineErrIgnore:
 		// 切歌/退出带出来的，不是错。状态已经被 publishMedia 报成「不在放」了。
-		a.logf("biu: 播放停了（切歌/退出带出来的，不算错）：%v", err)
+		a.logf("pudmusic: 播放停了（切歌/退出带出来的，不算错）：%v", err)
 	case onlineErrReopen:
 		// 换到了另一条流：字节偏移接不上，但**播放位置**还在。
 		// 从那儿重开就是「换流后从原来的位置继续」。
 		if !a.playbackStillCurrent(p, tr, gen) {
 			return
 		}
-		a.logf("biu: 播放中途换了流，准备从原位置重开：%v", err)
+		a.logf("pudmusic: 播放中途换了流，准备从原位置重开：%v", err)
 		a.refreshOnlineNowFor(err, p, tr, gen)
 	default:
 		// 🔴 **「能不能重试」跟着这句话一起落**：字节源拉不动多半是网络或
@@ -2474,7 +2474,7 @@ func (a *App) checkPlayback() {
 			title = tr.item.Title
 			item = tr.item
 		}
-		a.logf("biu: 播放失败：%q（代次 %d）：%v", title, gen, err)
+		a.logf("pudmusic: 播放失败：%q（代次 %d）：%v", title, gen, err)
 		a.setPlaybackErrFor(p, tr, gen, item, bili.Friendly(err), bili.Recoverable(err))
 	}
 }
@@ -2546,10 +2546,10 @@ func (a *App) failOnline(gen int, it Item, branch string, err error, stage strin
 	a.mu.Unlock()
 	if stale || closed {
 		if closed {
-			a.logf("biu: 在途的播放被作废了（应用退出了）：%q（%s，代次 %d）：%v",
+			a.logf("pudmusic: 在途的播放被作废了（应用退出了）：%q（%s，代次 %d）：%v",
 				it.Title, branch, gen, err)
 		} else {
-			a.logf("biu: 在途的播放被作废了（代次变了）：%q（%s，来的代次 %d，现在的代次 %d）：%v",
+			a.logf("pudmusic: 在途的播放被作废了（代次变了）：%q（%s，来的代次 %d，现在的代次 %d）：%v",
 				it.Title, branch, gen, cur, err)
 		}
 		return
@@ -2563,11 +2563,11 @@ func (a *App) failOnline(gen int, it Item, branch string, err error, stage strin
 	// ⚠️ **它只罩住这一代次**：用户之后点的任何一首歌都是另一个代次，不会
 	// 被这一句「安静」顺带吞掉。
 	if restore {
-		a.logf("biu: 恢复上次的那一首放不起来（安静跳过）：%q（%s，代次 %d）：%v",
+		a.logf("pudmusic: 恢复上次的那一首放不起来（安静跳过）：%q（%s，代次 %d）：%v",
 			it.Title, branch, gen, err)
 		return
 	}
-	a.logf("biu: 播放失败：%q（%s，段=%s，代次 %d）：%v", it.Title, branch, stage, gen, err)
+	a.logf("pudmusic: 播放失败：%q（%s，段=%s，代次 %d）：%v", it.Title, branch, stage, gen, err)
 	// ⚠️ **`setErrText` 自己会叫醒界面**（它把新的话写进去之后才醒），所以这里
 	// 不要再叫一次——两次唤醒只是多一帧，而顺序写错会让界面先画出「转圈停了」
 	// 再画出那句话，中间那一帧是「既没有转圈也没有话」。
@@ -2689,14 +2689,14 @@ func (a *App) autoSkipDead(gen int, it Item, cause error) {
 	d := a.queue.Advance()
 	if d.Kind != AdvancePlay {
 		// 单曲循环（重放的还是这首死的）或者队列到底了：红字已经在屏上。
-		a.logf("biu: %q 放不起来（%v），没有下一首可跳（%v）", it.Title, cause, d.Kind)
+		a.logf("pudmusic: %q 放不起来（%v），没有下一首可跳（%v）", it.Title, cause, d.Kind)
 		return
 	}
 	if d.Item.Path == "" && !d.Item.isOnline() {
 		a.queue.UndoStep()
 		return
 	}
-	a.logf("biu: %q 放不起来（%v），自动换下一首 %q（连着第 %d 首）",
+	a.logf("pudmusic: %q 放不起来（%v），自动换下一首 %q（连着第 %d 首）",
 		it.Title, cause, d.Item.Title, streak)
 	// 念出去（无障碍）：歌没响就换了，读屏软件用户既没听见这一首失败、
 	// 也看不见队列换了人——一句话把两件事都说清。
@@ -2736,7 +2736,7 @@ func (a *App) giveUpSkipping(streak int, last Item, cause error) {
 			p.Seek(0)
 		}
 	}
-	a.logf("biu: 连着 %d 首都放不起来，停下来了（最后一首 %q：%v）", streak, last.Title, cause)
+	a.logf("pudmusic: 连着 %d 首都放不起来，停下来了（最后一首 %q：%v）", streak, last.Title, cause)
 	// 红字是 `failOnline` 写的（最后一首的那句错），它没人清，就停在屏上。
 	if sounding {
 		a.announce(fmt.Sprintf("「%s」放不起来；刚才那一首还在放，没有动它", last.Title))
@@ -2777,7 +2777,7 @@ func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack,
 	if tr.reopening {
 		it := tr.item
 		a.mu.Unlock()
-		a.logf("biu: 换流重开被作废了（这一首已经重开过一次）：%q：%v", it.Title, cause)
+		a.logf("pudmusic: 换流重开被作废了（这一首已经重开过一次）：%q：%v", it.Title, cause)
 		a.setErrTextDetailFor(gen, it, "这条流接不上了",
 			"这条流换了两次，接不上刚才播放的位置了。换一首放，或者点「重试」再取一次流。", false)
 		return

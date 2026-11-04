@@ -182,7 +182,7 @@ func FetchBiliSubtitle(ctx context.Context, client *http.Client, urls []string) 
 		if err == nil {
 			return lines, nil
 		}
-		log.Printf("biu: 那份字幕拉不到（%s）：%v", u, err)
+		log.Printf("pudmusic: 那份字幕拉不到（%s）：%v", u, err)
 	}
 	if len(tried) == 0 {
 		return nil, ErrNoSubtitle

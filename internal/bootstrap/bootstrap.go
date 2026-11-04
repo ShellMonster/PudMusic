@@ -94,7 +94,7 @@ func Assemble(d Dependencies) (*app.App, error) {
 	}
 	if d.PinUserDataDir != nil {
 		if err := d.PinUserDataDir(); err != nil {
-			d.Logf("biu: 钉不住应用数据目录，这次的设置可能存不住：%v", err)
+			d.Logf("pudmusic: 钉不住应用数据目录，这次的设置可能存不住：%v", err)
 		}
 	}
 	a := d.NewApp()
@@ -104,7 +104,7 @@ func Assemble(d Dependencies) (*app.App, error) {
 
 	if d.MountSettings != nil {
 		if err := d.MountSettings(a); err != nil {
-			d.Logf("biu: 拿不到应用数据目录，这次的设置存不住：%v", err)
+			d.Logf("pudmusic: 拿不到应用数据目录，这次的设置存不住：%v", err)
 		}
 	}
 	if d.MountFullPlayerPrefs != nil {
@@ -153,12 +153,12 @@ func Assemble(d Dependencies) (*app.App, error) {
 	}
 	if d.MountUpdates != nil {
 		if err := d.MountUpdates(a); err != nil {
-			d.Logf("biu: 挂自动更新失败：%v", err)
+			d.Logf("pudmusic: 挂自动更新失败：%v", err)
 		}
 	}
 	if d.MountDownloads != nil {
 		if err := d.MountDownloads(a); err != nil {
-			d.Logf("biu: 挂下载失败，这次的下载功能用不了：%v", err)
+			d.Logf("pudmusic: 挂下载失败，这次的下载功能用不了：%v", err)
 		}
 	}
 	if d.MountNotifications != nil {

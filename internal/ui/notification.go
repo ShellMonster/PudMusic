@@ -464,7 +464,7 @@ func (s *Shell) onNotificationClicked(id string) {
 	default:
 		// 不认识的 ID：什么都不做。**别猜**——猜错的话用户点一条通知却到了一个
 		// 无关的页面上，而界面上看不出任何异样。
-		log.Printf("biu: 点了一条认不出的通知：%q", id)
+		log.Printf("pudmusic: 点了一条认不出的通知：%q", id)
 		return
 	}
 	s.mainShell().openWindow()
@@ -760,7 +760,7 @@ func notifyDownloadDone(taskID, title string) {
 // ⚠️ **而「记住，不再反复请求」是平台层的事**（见 `platform.Notify`）：
 // 这一层只管把这一次说清楚。
 func notifyFallback(title, body string, err error) {
-	log.Printf("biu: 系统通知用不了，改用应用内提示（%s）：%v", title, err)
+	log.Printf("pudmusic: 系统通知用不了，改用应用内提示（%s）：%v", title, err)
 	// 这一句由**主窗口那个外壳**弹（提示卡片是逐窗口的，见 `toast.go`）——
 	// 迷你播放器画的是「正在放什么」，它没有放提示卡片的地方。
 	//

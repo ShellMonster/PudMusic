@@ -47,7 +47,7 @@ func MountSettings(a *app.App) error {
 		// 丢了的症状是「重启之后回到空队列」，用户只会觉得「这应用记不住东西」。
 		a.SavePlayback()
 		if err := a.FlushSettings(); err != nil {
-			log.Printf("biu: 退出时保存设置失败：%v", err)
+			log.Printf("pudmusic: 退出时保存设置失败：%v", err)
 		}
 	})
 
@@ -62,7 +62,7 @@ func MountSettings(a *app.App) error {
 	path := app.SettingsPath(dir)
 	if err := a.MountSettings(path); err != nil {
 		// 界面上也会弹一条给用户看；日志是给排障用的。
-		log.Printf("biu: 读设置 %s 有问题，先按默认值用着：%v", path, err)
+		log.Printf("pudmusic: 读设置 %s 有问题，先按默认值用着：%v", path, err)
 	}
 	return nil
 }

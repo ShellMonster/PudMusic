@@ -17,15 +17,10 @@
 //
 // # 「慢」和「等人」是两件事
 //
-// ⚠️ **读凭据那一段可能是「等人」而不是「慢」**：macOS 会在应用
-// **还没有窗口**的时候弹一个系统框（钥匙串解锁要密码；旧版本留在钥匙串里
-// 的那一项要搬过来时也要钥匙串点头），用户要点一下才继续。那一段的时长
-// **是用户点的**，不是我们慢——所以它**单独一栏**，不跟别的段混在一起说。
-//
-// ⚠️ **2026-10-25 之后 macOS 不再读钥匙串**：凭据落到用户数据目录下的
-// `credentials/session.json`（见 `credentials_file_darwin.go`）。
-// 所以「等人」现在**只在升级后的第一次启动**出现——那一次要把旧版留在
-// 钥匙串里的登录态搬过来。之后钥匙串彻底不参与了。
+// ⚠️ **读凭据那一段可能是「等人」而不是「慢」**：凭据后端在应用
+// **还没有窗口**的时候可能要等系统（加密存储解锁、授权框点头），
+// 那一段的时长**是用户点的**，不是我们慢——所以它**单独一栏**，
+// 不跟别的段混在一起说。
 //
 // # 它只写日志，不进界面
 //
@@ -89,14 +84,14 @@ type StartupTiming struct {
 	// （= 取流更早），而那一段问的就是「用户看到窗口的时候，
 	// 取流是不是已经在走了」。
 	FetchBeforeFrame bool
-	// Keychain 是「挂登录那一段花了多久」——**它可能是「等人」**。
+	// Keychain 是「挂登录（读凭据）那一段花了多久」——**它可能是「等人」**。
 	//
 	// ⚠️ **它单独一栏**：见文件头那一节。
 	//
-	// ⚠️ **名字是历史名**：2026-10-25 之前这一段读的是 macOS 钥匙串，
-	// 现在读的是凭据文件（macOS 是 `credentials/session.json`，
-	// Windows 是 DPAPI 文件）。名字留着不改，是因为它是**诊断输出的格式**——
-	// 改了名，以前那些诊断文件里的这一栏就认不出来了。
+	// ⚠️ **名字是历史遗留**：现在这一段读的是凭据文件（macOS 是
+	// `credentials/session.json`，Windows 是 DPAPI 文件）。名字不改，
+	// 是因为它是**诊断输出的格式**——改了名，以前那些诊断文件里的
+	// 这一栏就认不出来了。
 	Keychain time.Duration
 	// KeychainWaited 说「读凭据那一段慢到不像自动的」（多半是等过人）。
 	//
@@ -183,7 +178,7 @@ func (a *App) NoteFirstFrame() {
 			a.starting = false
 		}
 		a.mu.Unlock()
-		startupLog("biu: 冷启动分段耗时：%s", a.StartupTiming().String())
+		startupLog("pudmusic: 冷启动分段耗时：%s", a.StartupTiming().String())
 	})
 }
 
@@ -213,11 +208,11 @@ func (a *App) NoteFetchStart() {
 	// ⚠️ **只补这一次**（`first`）：这一栏说的是**冷启动**，
 	// 而冷启动只有一次。
 	if first && logged && !frame.IsZero() {
-		startupLog("biu: 冷启动：首帧之后才开始取流，中间隔了 %v", now.Sub(frame))
+		startupLog("pudmusic: 冷启动：首帧之后才开始取流，中间隔了 %v", now.Sub(frame))
 	}
 }
 
-// NoteKeychainRead 记「挂登录（读凭据）那一段花了多久」。
+// NoteKeychainRead 记「挂登录（读凭据）那一段花了多久」。名字是历史遗留。
 //
 // 调用点：`internal/app/account.go` 的 `App.MountLogin`。
 //

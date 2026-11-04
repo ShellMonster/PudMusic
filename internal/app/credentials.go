@@ -1,8 +1,9 @@
 // 凭据的存储接口、注入边界和脱敏边界。
 //
-// 这一阶段**只有接口和纯逻辑，没有平台后端**（macOS Keychain / Windows DPAPI
-// 是阶段 3 的 B14）。接口定错一次，后面扫码登录、续期、退出、多窗口同步、
-// 诊断导出全都要跟着返工，所以宁可现在把边界写死。
+// 平台后端按系统分文件：`credentials_file_darwin.go`（macOS 明文文件）、
+// `credentials_dpapi_windows.go`（Windows DPAPI）、`credentials_other.go`
+// （其他平台 ErrUnavailable）。接口定错一次，后面扫码登录、续期、退出、
+// 多窗口同步、诊断导出全都要跟着返工，所以边界写死在这里。
 //
 // # 为什么要单独立一层（Codex M8）
 //
@@ -27,7 +28,8 @@
 //	                   该提示用户、该考虑让用户手动重登，但不该当成「已退登」。
 //	ErrCorrupt         存的东西坏了/解不开。该提示并**按退登处理**——解不开的
 //	                   凭据不能当没登录继续用，也不能无限重试。
-//	ErrUnavailable     这个平台还没有可用后端（阶段 3 之前就是这个状态）。
+//	ErrUnavailable     这个平台没有可用后端（macOS / Windows 以外的平台
+//	                   就是这个状态，见 credentials_other.go）。
 //
 // 三个都用 errors.Is 判。带路径、带原因的具体错误一律 wrap 上，
 // 不要用 == 判，也不要重新造一个同义的错误。
@@ -226,7 +228,8 @@ func (s Session) Secrets() []string {
 	return out
 }
 
-// Store 是凭据的落地后端。阶段 3 实现 macOS Keychain / Windows DPAPI。
+// Store 是凭据的落地后端：macOS 是明文文件、Windows 是 DPAPI，
+// 其他平台返回 ErrUnavailable（见 credentials_other.go）。
 //
 // 实现必须守住的三条：
 //
@@ -252,7 +255,7 @@ type Store interface {
 // MemoryStore 是内存后端，给测试和「还没接平台后端」时用。
 //
 // ⚠️ **它不是安全的**：进程退出凭据就没了，dump 内存能拿到。
-// 生产代码不许用，只在阶段 3 落地前让整条链路能跑起来。
+// 生产代码不许用，只在平台后端落地前让整条链路能跑起来。
 type MemoryStore struct {
 	mu   sync.Mutex
 	name string

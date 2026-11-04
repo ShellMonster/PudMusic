@@ -37,7 +37,7 @@ import (
 // ⚠️ **`LoggedIn` 和 `App.LoggedIn()` 不是同一件事**，这两个字段说的是两个
 // 判据，缺一不可：
 //
-//   - `App.LoggedIn()`：钥匙串里**有** SESSDATA。那是「本地认为自己登录了」。
+//   - `App.LoggedIn()`：凭据里**有** SESSDATA。那是「本地认为自己登录了」。
 //   - 这里的 `LoggedIn`：B 站**认**这个会话（`nav` 的 `isLogin`）。那是
 //     「远端还认」。
 //

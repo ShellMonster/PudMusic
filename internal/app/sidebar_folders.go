@@ -189,7 +189,7 @@ func (a *App) deleteCreatedFolder(id int64, title string, done func(text string,
 	}
 	go func() {
 		if err := c.refs.Client.DeleteFolder(context.Background(), id); err != nil {
-			log.Printf("biu: 删收藏夹 %d 失败：%v", id, err)
+			log.Printf("pudmusic: 删收藏夹 %d 失败：%v", id, err)
 			sayFolderDone(done, "删不掉这个收藏夹："+bili.Friendly(err), false, notice.Danger)
 			a.wakeUI()
 			return
@@ -258,7 +258,7 @@ func (a *App) UnfavoriteFolder(f Favorite, done func(string, notice.Tone)) {
 		// ⚠️ 侧栏「我收藏的」那一组只收收藏夹（见 `collectedFavorites` 的注释），
 		// 所以类型写死收藏夹——那一行本来就是从 `fav/folder/collected/list` 来的。
 		if err := c.refs.Client.UnfavoriteCollection(context.Background(), f.ID, bili.CollectionFavorite); err != nil {
-			log.Printf("biu: 取消收藏收藏夹 %d 失败：%v", f.ID, err)
+			log.Printf("pudmusic: 取消收藏收藏夹 %d 失败：%v", f.ID, err)
 			sayFolder(done, "取消不了收藏："+bili.Friendly(err), notice.Danger)
 			a.wakeUI()
 			return
@@ -282,7 +282,7 @@ func (a *App) forgetFavorite(g FavoriteGroup, id int64) {
 	if _, err := a.UpdateSettings(func(s *Settings) {
 		s.SideMenuCollectionOrder = s.SideMenuCollectionOrder.setList(g, a.FavoritesOf().IDs(g))
 	}); err != nil {
-		log.Printf("biu: 侧栏顺序里去掉收藏夹 %d 失败：%v", id, err)
+		log.Printf("pudmusic: 侧栏顺序里去掉收藏夹 %d 失败：%v", id, err)
 	}
 }
 

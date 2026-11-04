@@ -16,7 +16,7 @@ func configuredMaxBytes() int64 {
 	}
 	mb, err := strconv.ParseInt(value, 10, 64)
 	if err != nil || mb < 1 || mb > 4096 {
-		log.Printf("biu: BIU_IMAGE_CACHE_MB 应为 1..4096 的整数（MiB），使用默认值 %d", DefaultMaxBytes>>20)
+		log.Printf("pudmusic: BIU_IMAGE_CACHE_MB 应为 1..4096 的整数（MiB），使用默认值 %d", DefaultMaxBytes>>20)
 		return DefaultMaxBytes
 	}
 	return mb << 20

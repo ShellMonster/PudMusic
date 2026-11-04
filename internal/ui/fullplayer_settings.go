@@ -92,7 +92,7 @@ const colorSwatchRadius = 16
 func MountFullPlayerPrefs(a *app.App) {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，全屏播放器的偏好这次关掉就没了：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，全屏播放器的偏好这次关掉就没了：%v", err)
 		dir = ""
 	}
 	a.MountFullPlayerPrefs(app.FullPlayerPrefsPath(dir))

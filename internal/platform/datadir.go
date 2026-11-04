@@ -1,82 +1,90 @@
-// 应用数据目录：显示名改了，**目录名不改**。
+// 应用数据目录：从 `Biu MyGo` **自动迁移**到 `PudMusic`。
 //
 // ## 这件事为什么存在
 //
-// 应用 2026-10 从 `Biu MyGo` 改名成 `BiuGo`。而 MyGo 的 `PathUserData` 是
-// `os.UserConfigDir()` **拼上应用名**（`mygo@v0.6.3/paths.go:90-93`）：
+// 应用 2026-10 从 `Biu MyGo` 改名成 `BiuGo`，后来又定名「布丁音乐」
+// （`PudMusic`）。而 MyGo 的 `PathUserData` 是 `os.UserConfigDir()`
+// **拼上应用名**（`mygo@v0.6.3/paths.go:90-93`）：
 //
 //	case PathUserData:
 //	    dir, err := os.UserConfigDir()
 //	    return filepath.Join(dir, App.Name()), true, err
 //
-// 所以照着那个默认值走，改名之后数据目录会从
+// 所以数据目录的名字从来就不跟着显示名走——它由这个文件钉住。之前的选择是
+// 「钉死在 `Biu MyGo` 上、不迁移」：项目没发过版，老目录只装在维护者本机和
+// 少数内测机上，而搬目录的失败模式（搬一半、搬丢了）是静默的。代价是 Finder
+// 里那个目录和应用名从此对不上，用户翻自己的数据时找不到「布丁音乐」。
 //
-//	~/Library/Application Support/Biu MyGo
+// 现在名字定下来了，**值得把这个不一致一次性收掉**：让老目录跟着搬到
+// `PudMusic`，新装的也直接落在 `PudMusic`。设置、搜索历史、快捷键、歌词缓存、
+// 下载记录、界面状态、单实例锁和登录态（`credentials/session.json`）全在那个
+// 目录里——**整体 `os.Rename`，一个字节都不挑**，搬过去的东西和用户离开它时
+// 一模一样。
 //
-// 变成
+// ## 怎么迁
 //
-//	~/Library/Application Support/BiuGo
+// 每次启动时按三个分支走一遍（顺序不能乱）：
 //
-// 而老目录还在原地没人读——**设置、搜索历史、快捷键、歌词缓存、下载记录、
-// 界面状态全都在那儿**。用户看到的症状是「升级之后我的东西全没了」，而那一行
-// 里没有一个字写着「你的东西被搬走了」：老数据一个字节没坏，只是这个版本不再
-// 去那个目录找了。窗口位置（`WindowOptions.StateKey` 落在同一个目录）、
-// 单实例锁（`single_instance.go` 的 `lockStatePath`）和框架自己的窗口状态恢复
-// 也都在这里，一起丢。
+//  1. **旧目录在、新目录不在** → `os.Rename` 把旧的整个搬过去，然后钉到新
+//     路径。`os.Rename` 是**同分区原子**的：要么整个过去、要么原地不动，
+//     不存在「搬了一半」的中间态——这正是当初「什么时候该搬」那一条里定下的
+//     核心思路。
+//  2. **新旧都在** → 不动旧目录，直接用新目录。这可能是「迁过一次之后又有
+//     东西写回了旧目录」，也可能是用户手动放的——无论哪种，**旧的那份留着**，
+//     不替用户做主去删或合并。
+//  3. **旧的不在** → 全新安装，直接用新目录。
 //
-// ## 选的是「不迁移」，不是「迁移」
+// ## 失败不静默
 //
-// 两条路都能让老用户的数据不丢，这里选了改动最小的那条：**把目录名钉死在旧名字
-// 上**，不搬一次、也不在每次启动时去判断新旧目录谁是谁。理由有三条。
+// `os.Rename` 会败的那几种（跨设备、权限不够、目录被占）落到用户身上绝不能是
+// 「设置安静地回到出厂」——所以 rename 败了**退回旧目录**：照样钉、照样开，
+// 但 `PinUserDataDir` 把错误**返回**给 bootstrap 记日志（「钉不住」那条），
+// 而不是吞掉。下回启动旧目录还在、新目录还没被建出来，自然再试一次。
 //
-//  1. **搬目录是那种「错了就静默丢数据」的活。** 跨设备、配额满、目录只读、
-//     搬一半断电——任何一种落到用户身上都是「数据分成两半」，而两半**都不完整**。
-//     钉名字则**一个字节都不动**，老用户连一次启动的差别都感觉不到。
-//  2. **本项目还没有对外发过版。** 老目录里装的是维护者本机和少数内测机的数据，
-//     没有「成千上万个用户要迁」这件事要扛。真的发过版之后再迁，那时才有值得
-//     写迁移链、值得处理「新旧目录同时存在」的规模。
-//  3. **目录名和应用名从此不一致，这本身是好事**：目录名不再跟着显示名走，
-//     **下一次改名也不会再丢一次数据**。这是一次性的不一致，换来的是一个不会
-//     重复犯的错。
-//
-// 代价是明面上的：在 Finder 里那个目录叫 `Biu MyGo`，应用叫 BiuGo。
-// `SnapshotReadme`（`internal/app/upgrade.go`）里教用户敲的那条路径因此仍然是
-// `…/Application Support/Biu MyGo`——**那是给用户回滚用的，必须继续指向真实
-// 存在的那个目录**。
-//
-// ## 什么时候该搬
-//
-// 哪天真要搬（发过版之后、攒了一批真实用户），做法是：把这个 `SetPath` 换成
-// 「旧目录不在且新目录也不在时把旧的 `os.Rename` 过去」，并且**保留一个版本**
-// 的回退——搬失败要落回旧目录并报出来，不是静默地用空目录开起来。
-// 那个 bug 已经在 `internal/app` 里犯过一次（`migrate.go`），别再犯第二次。
+// 那个 bug——「迁失败之后用空目录开起来，用户以为数据丢了」——已经在
+// `internal/app` 里犯过一次（`migrate.go`），别再犯第二次。
 package platform
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 
 	"github.com/egoist/mygo"
 )
 
-// LegacyUserDataDirName 是应用数据目录的名字，**故意和显示名不一样**。
+// LegacyUserDataDirName 是应用数据目录的名字。
 //
-// 显示名是 `BiuGo`（`mygo.json` 的 `name`），这里还是老名字——理由见本文件顶上
-// 那一节，一句话就是：跟着显示名走，老用户升级之后设置、搜索历史、快捷键、
-// 歌词缓存、下载记录和界面状态会一起「消失」。
+// 显示名是「布丁音乐」（`mygo.json` 的 `name`），目录名跟着它收成了
+// `PudMusic`——理由见本文件顶上那一节：名字定下来之后，值得让 Finder 里
+// 那个目录和应用对得上。
 //
-// ⚠️ **不要「顺手」把它改成和应用名一致。** 那一下的代价是全体老用户的数据
-// 消失，而症状是静默的：没有报错，只是界面回到出厂设置。
+// ⚠️ 它是老用户数据的**落点**：改名必须走 `PinUserDataDir` 里那条
+// 「旧目录 `os.Rename` 过来」的路，不能只改这个常量——那一下的代价是全体
+// 老用户的设置、搜索历史、快捷键、歌词缓存、下载记录和登录态一起「消失」，
+// 而症状是静默的：没有报错，只是界面回到出厂设置。
 //
-// 同时它也是**唯一**不该跟着改名走的东西：登录态就落在这个目录里
-// （`credentials/session.json`，见 `internal/app/credentials_file_darwin.go`），
-// 目录一改，登录态跟着「消失」——症状同样是静默的：老用户升级之后掉登录。
+// 登录态也落在这个目录里（`credentials/session.json`，见
+// `internal/app/credentials_file_darwin.go`），目录一换、登录态跟着「消失」
+// ——症状同样是静默的：老用户升级之后掉登录。
 //
 // （旧版把登录态放在 macOS 钥匙串里，服务名 `com.biu-go.biu-mygo.login`。
 // 那个服务名现在只用于**一次性迁移**，但同样不能改——改了迁移就读不到旧的那份，
 // 表现还是「升级之后掉登录」。）
-const LegacyUserDataDirName = "Biu MyGo"
+const LegacyUserDataDirName = "PudMusic"
+
+// oldUserDataDirName 是迁移前的那个目录名。
+//
+// 只在这一个地方出现：`PinUserDataDir` 拿它去找老用户留下的目录。找得到且
+// 新目录还没在，就把旧的整个 `os.Rename` 到 `LegacyUserDataDirName`——
+// 它是**迁移的源头**，不是「还可以选的一个名字」。
+const oldUserDataDirName = "Biu MyGo"
+
+// renameFunc 是迁移用的那一下 rename。单测里换掉它来模拟「rename 必败」
+// （跨设备、权限不够、目录被占）——那种坏法没法用临时目录稳定地造出来。
+var renameFunc = os.Rename
 
 // PinUserDataDir 把应用数据目录钉在 `LegacyUserDataDirName` 上（见本文件顶上）。
 //
@@ -119,6 +127,27 @@ func PinUserDataDir() error {
 		return fmt.Errorf("拿不到用户配置目录：%w", err)
 	}
 	dir := filepath.Join(base, LegacyUserDataDirName)
+	legacy := filepath.Join(base, oldUserDataDirName)
+
+	// 旧目录在、新目录不在 → 把旧的整个 rename 过来。`os.Rename` 是同分区
+	// 原子的，要么整个过去、要么原地不动，没有「搬一半」的中间态。
+	// 新旧都在时不动旧的：可能是迁过一次之后又有东西写回去，也可能是用户
+	// 自己放的——旧的那份留着，不替用户做主。
+	if _, err := os.Stat(legacy); err == nil {
+		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+			if err := renameFunc(legacy, dir); err != nil {
+				// 迁失败（跨设备、权限不够、目录被占）→ **退回旧目录**：
+				// 钉到旧的上、照常开，但把错误**报出去**——让 bootstrap
+				// 记一条「钉不住」的日志，而不是吞掉之后用空目录开起来
+				// （`internal/app/migrate.go` 犯过那个错，别再犯）。
+				mygo.App.SetPath(mygo.PathUserData, legacy)
+				return fmt.Errorf("应用数据目录迁移失败（%s → %s），退回旧目录：%w",
+					legacy, dir, err)
+			}
+			log.Printf("pudmusic: 应用数据目录已从 %s 迁到 %s", legacy, dir)
+		}
+	}
+
 	// `Path()` 在有覆盖值时是**直接返回、不建目录**的（`paths.go:57-60`），所以
 	// 全新安装时这个目录还不存在，得自己建。不建的话第一次写设置就会失败，
 	// 而失败又被当成「目录拿不到」，界面提示的是另一件事。

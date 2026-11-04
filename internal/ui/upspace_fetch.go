@@ -71,7 +71,7 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 	var r upResult
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("biu: 拉 UP 空间的「%s」崩了：%v\n%s", upTabNames[tab], rec, debug.Stack())
+			log.Printf("pudmusic: 拉 UP 空间的「%s」崩了：%v\n%s", upTabNames[tab], rec, debug.Stack())
 			r.err = fmt.Errorf("拉 %s 的代码崩了：%v", upTabNames[tab], rec)
 		}
 		// 🔴 铁律三：投递完**必须**唤醒。只投递不唤醒 = 界面停在旧帧
@@ -109,11 +109,11 @@ func (s *Shell) fetchUp(ctx context.Context, sp *upSpace, tab int, cursor string
 	// ⚠️ **丢掉的那几条要按类别分开写**（票 #344）：「形态不认识」和「读不懂」
 	// 是两回事，合在一起就看不出是 B 站换了形态还是我们读不懂。
 	if r.err == nil {
-		log.Printf("biu: 拉 UP 空间的「%s」：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
+		log.Printf("pudmusic: 拉 UP 空间的「%s」：B 站发了 %d 条，留下 %d 条，丢掉 %d 条（%s），还有下一页=%v",
 			upTabNames[tab], r.sent, len(r.dyns)+len(r.cols), len(r.drops),
 			dropCountText(dropCountsOf(r.drops)), r.hasMore)
 		for _, why := range r.dropWhy {
-			log.Printf("biu: 拉 UP 空间的「%s」丢掉一条：%s", upTabNames[tab], why)
+			log.Printf("pudmusic: 拉 UP 空间的「%s」丢掉一条：%s", upTabNames[tab], why)
 		}
 	}
 }
@@ -138,7 +138,7 @@ func (s *Shell) adoptUp(sp *upSpace) {
 		p.settle()
 		if r.err != nil {
 			p.err = r.err
-			log.Printf("biu: UP 空间的「%s」拉失败了：%v", upTabNames[r.tab], r.err)
+			log.Printf("pudmusic: UP 空间的「%s」拉失败了：%v", upTabNames[r.tab], r.err)
 			continue
 		}
 		// 🔴 铁律四：追加是**尾部**（重查才是头部），尾部追加不动已有行的

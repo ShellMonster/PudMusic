@@ -204,12 +204,12 @@ func (a *Account) setState(st LoginState) {
 
 // MountLogin 把登录挂到 App 上，并把凭据装进网络层。
 //
-// 必须在开窗口**之前**调：它要读盘（钥匙串 / DPAPI），那是阻塞 IO，
+// 必须在开窗口**之前**调：它要读凭据文件（macOS 明文 / Windows DPAPI），那是阻塞 IO，
 // 在界面线程上读的表现是开窗时卡一下。
 //
 // 读回来的是 ErrNotLoggedIn 就当作「没登录过」——那是正常起点。
 // 读不出来（后端坏了、凭据解不开）则记下来但**不阻止应用启动**：
-// 一个钥匙串出问题的应用起不来，比一个要重新登录一次的应用糟得多。
+// 一个凭据后端出问题的应用起不来，比一个要重新登录一次的应用糟得多。
 func (a *App) MountLogin(store Store, cli *bili.Client) {
 	acc := newAccount(store, cli)
 	acc.wake = a.wakeLocked()
@@ -222,14 +222,14 @@ func (a *App) MountLogin(store Store, cli *bili.Client) {
 	acc.onAccountChanged = a.onAccountChanged
 	a.account = acc
 
-	// 🔴 **钥匙串那一段单独计时**（票 #478）：它可能是「**等人**」而不是
-	// 「慢」——macOS 会在应用还没有窗口的时候弹一个系统授权框，用户要点
-	// 一下才继续。那一段的时长是**用户点的**，不跟别的段混在一起说。
-	keychainStart := time.Now()
+	// 🔴 **读凭据那一段单独计时**（票 #478）：它可能是「**等人**」而不是
+	// 「慢」——凭据后端在应用还没有窗口的时候可能要等系统（见
+	// `startup.go` 文件头）。那一段的时长是**用户点的**，不跟别的段混在一起说。
+	readStart := time.Now()
 	err := acc.restore(cli)
-	a.NoteKeychainRead(time.Since(keychainStart))
+	a.NoteKeychainRead(time.Since(readStart))
 	if err != nil {
-		log.Printf("biu: 读不回登录态，先按没登录处理：%v", err)
+		log.Printf("pudmusic: 读不回登录态，先按没登录处理：%v", err)
 	}
 }
 
@@ -505,7 +505,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	case errors.Is(err, ErrStaleGeneration):
 		// 用户在这中间退了登。**什么都不写**，安静收工——
 		// 这正是要防的那件事：已经退掉的账号被在途的结果写回来。
-		log.Printf("biu: 扫码结果回来时登录态已经变了（多半是退登），这次结果作废")
+		log.Printf("pudmusic: 扫码结果回来时登录态已经变了（多半是退登），这次结果作废")
 		a.hint(id, LoginIdle, "已取消登录")
 	case StoreUnavailable(err):
 		// 登录**是真的**（B 站认了、cookie 也拿到了），只是存不下来。
@@ -513,7 +513,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 		// 报「保存登录态失败」会让用户觉得刚才那一下白扫了——于是他再扫一次，
 		// 还是同样的结果。正确的做法是让他登进去用着，同时**明说**存不住：
 		// 界面上那一行「凭据后端不可用，登录态关掉应用就没了」就是干这个的。
-		log.Printf("biu: 这次登录没能存下来，先只在内存里用着：%v", err)
+		log.Printf("pudmusic: 这次登录没能存下来，先只在内存里用着：%v", err)
 		a.mgr.Adopt(sess)
 		a.notifyAccountChanged(prev, sess)
 		a.setStateFor(id, LoginState{
@@ -554,7 +554,7 @@ func (a *Account) notifyAccountChanged(prev, next Session) {
 	if !accountChanged(prev, next) {
 		return
 	}
-	log.Printf("biu: 登录态换人了（uid %s → %s）", prev.DedeUserID, next.DedeUserID)
+	log.Printf("pudmusic: 登录态换人了（uid %s → %s）", prev.DedeUserID, next.DedeUserID)
 	a.mu.Lock()
 	fn := a.onAccountChanged
 	a.mu.Unlock()
@@ -648,7 +648,7 @@ func (a *Account) logout() error {
 		cancel()
 	}
 
-	// 然后清 jar：Manager.Logout 可能失败（钥匙串锁了），
+	// 然后清 jar：Manager.Logout 可能失败（后端解不开、写不了），
 	// 但**内存里的 cookie 无论如何都得清掉**——
 	// 宁可不彻底，也不能让用户退不出去。
 	_ = a.cli.SeedCookies(nil)
@@ -711,7 +711,7 @@ func (a *Account) note(id uint64, text string) {
 // fail 记一次失败。
 func (a *Account) fail(id uint64, reason string) {
 	reason = strings.TrimPrefix(reason, "bili: ")
-	log.Printf("biu: 登录失败：%s", reason)
+	log.Printf("pudmusic: 登录失败：%s", reason)
 	a.setStateFor(id, LoginState{Phase: LoginFailed, Err: reason, Hint: reason})
 }
 

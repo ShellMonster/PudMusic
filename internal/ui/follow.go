@@ -1048,7 +1048,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i, cols int)
 				f.failed = map[int64]bool{}
 			}
 			f.failed[u.Mid] = true
-			log.Printf("biu: 关注页那张卡画崩了（%d）：%v\n%s", u.Mid, rec, debug.Stack())
+			log.Printf("pudmusic: 关注页那张卡画崩了（%d）：%v\n%s", u.Mid, rec, debug.Stack())
 		}
 	}()
 	s.viewFollowCard(c, u, f.keys.selectedCell(i, cols), f.keys.ring(c))
@@ -1348,7 +1348,7 @@ func (s *Shell) fetchFollowTags(ctx context.Context, f *followPage) {
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("biu: 拉关注分组崩了：%v\n%s", rec, debug.Stack())
+			log.Printf("pudmusic: 拉关注分组崩了：%v\n%s", rec, debug.Stack())
 			r.err = fmt.Errorf("拉关注分组的代码崩了：%v", rec)
 		}
 		// 🔴 铁律三：投递完**必须**唤醒。只投递不唤醒 = 界面停在旧帧。
@@ -1384,7 +1384,7 @@ func (s *Shell) fetchFollowUsers(ctx context.Context, f *followPage, gen uint64,
 	var r followResult
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("biu: 拉关注的人崩了：%v\n%s", rec, debug.Stack())
+			log.Printf("pudmusic: 拉关注的人崩了：%v\n%s", rec, debug.Stack())
 			r.err = fmt.Errorf("拉关注的人的代码崩了：%v", rec)
 		}
 		f.boxMu.Lock()
@@ -1470,7 +1470,7 @@ func (s *Shell) adoptFollow(f *followPage) {
 			// 取关回来了。**成功才把那一格拿掉**；失败就让它留在原地，并说一句
 			// 为什么——画面上卡片消失、而 B 站那边其实没取关，是最坏的那种假象。
 			if r.err != nil {
-				log.Printf("biu: 取消关注失败了：%v", r.err)
+				log.Printf("pudmusic: 取消关注失败了：%v", r.err)
 				s.addToast("取关没成功："+r.err.Error(), notice.Danger)
 				continue
 			}
@@ -1481,7 +1481,7 @@ func (s *Shell) adoptFollow(f *followPage) {
 			f.tagLoading = false
 			if r.err != nil {
 				f.tagErr = r.err
-				log.Printf("biu: 拉关注分组失败了：%v", r.err)
+				log.Printf("pudmusic: 拉关注分组失败了：%v", r.err)
 				continue
 			}
 			f.tags, f.tagStarted, f.tagErr = r.tags, true, nil
@@ -1496,7 +1496,7 @@ func (s *Shell) adoptFollow(f *followPage) {
 		f.pager.settle()
 		if r.err != nil {
 			f.pager.err = r.err
-			log.Printf("biu: 拉关注的人失败了：%v", r.err)
+			log.Printf("pudmusic: 拉关注的人失败了：%v", r.err)
 			continue
 		}
 		// 🔴 铁律四：追加是**尾部**，不动已有格的位置，所以「正在看的那张卡」

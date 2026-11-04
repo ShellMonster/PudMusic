@@ -1,11 +1,10 @@
 package platform
 
 import (
-	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 
 	"github.com/egoist/mygo"
@@ -44,70 +43,38 @@ func fakeUserConfigDir(t *testing.T) string {
 // 要在**钉之前**看一眼那个默认值长什么样。
 func unpin() { mygo.App.SetPath(mygo.PathUserData, "") }
 
-// TestTheDataDirectoryNameIsNotTheDisplayName 钉住「显示名改了，目录名没跟着改」。
+// TestTheDataDirectoryNameTracksTheDisplayName 钉住「目录名跟着应用定名走」。
 //
-// 这一条是这个包里**最贵**的一条不变式：目录名一旦跟上显示名，老用户升级之后
-// 设置、搜索历史、快捷键、歌词缓存、下载记录和界面状态会一起「消失」——
-// 数据一个字节没坏，只是没人再去那个目录找。症状是静默的，没有任何一处报错。
-//
-// 所以这里读的是 `mygo.json` 里的**显示名**，断言它和目录名**不一样**：不是断言
-// 「目录名是某个字面量」（那会在下次改名时无声地一起变），而是断言「这两件事从此
-// 各走各的」。有人哪天把它们统一了，这条立刻红，而且红得正是时候。
-func TestTheDataDirectoryNameIsNotTheDisplayName(t *testing.T) {
-	name := appDisplayName(t)
-	if name == LegacyUserDataDirName {
-		t.Fatalf("mygo.json 里的应用名还是 %q——显示名和用户数据目录同名，"+
-			"老用户升级之后数据目录会整个搬走（见本文件顶上那一节）", name)
-	}
-	// ⚠️ **不断言显示名的字面量**：显示名是可以改的（2026-10 改过一次，
-	// 2026-10-26 又改成「布丁音乐」），而这条断的是**「显示名与目录名各走各的」**
-	// 那个不变式——上面那句「显示名 == 目录名」才是它要抓的坏法。
-	// 拿某个具体名字来断（「必须叫 BiuGo」）是**把显示名焊死在测试里**：
-	// 改一次名就红一次，红完还得回来改测试——而那时人会开始想「是不是这条不许改」。
-	if strings.Contains(name, "Biu My Go") {
-		t.Errorf("mygo.json 里的应用名是 %q，和用户数据目录同名了——"+
-			"老用户升级之后数据目录会整个搬走", name)
+// 数据目录名是 `PudMusic`，和应用定名（`PudMusic`）一致——这是**迁过来之后**
+// 的样子：老用户的 `Biu MyGo` 被 `os.Rename` 搬过来，新装的也直接落在这里。
+// 目录里装的是设置、搜索历史、快捷键、歌词缓存、下载记录和登录态——**名字
+// 本身不许「顺手」再改**，下一次要改就得再走一次 `os.Rename` 迁移，理由和
+// 做法见 `datadir.go` 顶上那一节。
+func TestTheDataDirectoryNameTracksTheDisplayName(t *testing.T) {
+	if LegacyUserDataDirName != "PudMusic" {
+		t.Errorf("应用数据目录名是 %q，want PudMusic——目录名不跟着定名走，"+
+			"老用户升级之后 Finder 里找不到「布丁音乐」那一摞数据", LegacyUserDataDirName)
 	}
 }
 
-// TestTheDataDirectoryIsNotMovedOntoTheDisplayName 钉住「钉住的那一步真的推翻了默认值」。
+// TestAnOldUsersDirectoryIsMigratedOntoTheNewName 验收项：旧目录被整个搬到新名字上。
 //
-// 这条不比对字面量，只比对**行为**：框架本来会算出来的那个目录（跟着显示名走的
-// `…/BiuGo`）和实际用的那个（`…/Biu MyGo`）必须是两个不同的目录，老目录原地
-// 不动、跟着显示名走的那个压根没被建出来。这样下次再改名时它照样成立
-// （而 `TestTheDataDirectoryNameIsNotTheDisplayName` 管的是「显示名不许退回去」）。
-//
-// ⚠️ 这里得先 `SetName`：**`go test` 里 `mygo.App.Name()` 拿不到打包时的应用名**
-// （`packageInfo()` 读的是 app bundle 的 Info.plist，测试二进制没有），它退回的是
-// 测试二进制的文件名。不手动设上，`App.Path` 算出来的默认目录就压根不是
-// 「跟着显示名走的那个」，而这条测试要断的那件事就整个落空、还会绿。
-func TestTheDataDirectoryIsNotMovedOntoTheDisplayName(t *testing.T) {
+// 老用户的样子：`…/Biu MyGo` 还在、`…/PudMusic` 还没有。这一版开起来之后，
+// 旧目录必须**原地消失**、内容**整个**出现在 `…/PudMusic` 里——`os.Rename`
+// 是同分区原子的，要么整个过去、要么原地不动，没有「搬一半」的中间态。
+// 搬过去之后数据目录钉在新的那个上。
+func TestAnOldUsersDirectoryIsMigratedOntoTheNewName(t *testing.T) {
 	base := fakeUserConfigDir(t)
-	display := appDisplayName(t)
-	// 还原成打包时的样子：应用名 = mygo.json 里那个。
-	mygo.App.SetName(display)
-	t.Cleanup(func() { mygo.App.SetName("") })
+	legacy := filepath.Join(base, oldUserDataDirName)
+	dir := filepath.Join(base, LegacyUserDataDirName)
 
-	legacy := filepath.Join(base, LegacyUserDataDirName)
+	// 老用户升级前的样子：旧目录里有一份设置。
+	want := `{"schemaVersion":1,"appSettings":{"volume":42}}`
 	if err := os.MkdirAll(legacy, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	// 老用户留下的一件东西。不放的话下面那条「没搬东西」断的是个空目录，
-	// 搬不搬都绿。
-	marker := filepath.Join(legacy, "settings.json")
-	if err := os.WriteFile(marker, []byte(`{"schemaVersion":1}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(legacy, "settings.json"), []byte(want), 0o644); err != nil {
 		t.Fatal(err)
-	}
-
-	unpin()
-	defaultDir, err := mygo.App.Path(mygo.PathUserData)
-	if err != nil {
-		t.Fatalf("问框架要默认的数据目录：%v", err)
-	}
-	if want := filepath.Join(base, display); defaultDir != want {
-		t.Fatalf("框架的默认数据目录是 %q，want %q——"+
-			"「默认跟着应用名走」这个前提不成立了，`PinUserDataDir` 存在的理由也就没了",
-			defaultDir, want)
 	}
 
 	if err := PinUserDataDir(); err != nil {
@@ -117,39 +84,32 @@ func TestTheDataDirectoryIsNotMovedOntoTheDisplayName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("问钉住之后的数据目录：%v", err)
 	}
-	if got != legacy {
-		t.Errorf("数据目录是 %q，want %q（老目录要原地不动）", got, legacy)
+	if got != dir {
+		t.Errorf("数据目录是 %q，want %q（旧目录要整个迁到新名字上）", got, dir)
 	}
-	// 关键的一条：跟着显示名走的那个目录里**一个文件都不该有**。搬过去了就说明
-	// 哪天有人把「不迁移」改成了「迁移」，而搬目录这件事的失败模式是静默的。
-	//
-	// 断的是「里面有没有东西」而不是「目录在不在」：上面那次 `App.Path` 自己就
-	// 会把默认目录建出来（框架的正常行为），所以那个目录多半**是**存在的——
-	// 存在不等于搬了东西。
-	if entries, err := os.ReadDir(defaultDir); err == nil {
-		if len(entries) != 0 {
-			t.Errorf("%s 里有 %d 个东西——这一版不该搬任何东西过去", defaultDir, len(entries))
-		}
+	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("旧目录 %q 迁完之后还在（err=%v）", legacy, err)
 	}
-	// 老用户那件东西也要还在原地（上面那条断的是「没往新目录搬」，这条断的是
-	// 「没把老的搬空」——两件事凑一起才是「数据没丢」）。
-	if _, err := os.Stat(marker); err != nil {
-		t.Errorf("老目录里的 settings.json 不在了：%v", err)
+	body, err := os.ReadFile(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatalf("新目录里读不到 settings.json：%v", err)
+	}
+	if string(body) != want {
+		t.Errorf("settings.json 的内容变成了 %q，want %q", body, want)
 	}
 }
 
-// TestEverythingInTheOldDirectoryIsStillThere 验收项：改名之后老用户的数据还在。
-//
-// 这条不验「目录名对不对」（上一条已经钉了），只验**用户真正在意的后果**：
-// 老目录里那些文件，改名之后**一个都还在原地、还读得到、内容没变**。
+// TestTheMigrationLeavesEverythingInTheOldDirectoryInPlace 验收项：迁过来的
+// 东西一个不少、内容不变。
 //
 // 挑的这些是应用真放在用户数据目录里的东西（文件名抄自各自那一份源码）：
 // 设置（`app.SettingsFileName`）、搜索历史（`search-history.json`）、快捷键
 // （`shortcuts.json`）、歌词缓存目录（`lyrics/`）、升级快照（`data-snapshots/`）。
-// 少一样，这一票就只是「目录没被改名」而不是「数据没丢」。
-func TestEverythingInTheOldDirectoryIsStillThere(t *testing.T) {
+// 少一样，这一票就只是「目录被改了名」而不是「数据没丢」。
+func TestTheMigrationLeavesEverythingInTheOldDirectoryInPlace(t *testing.T) {
 	base := fakeUserConfigDir(t)
-	legacy := filepath.Join(base, LegacyUserDataDirName)
+	legacy := filepath.Join(base, oldUserDataDirName)
+	dir := filepath.Join(base, LegacyUserDataDirName)
 
 	// 一个老用户升级前的样子。内容随便写，但**要各不相同**——只断「文件在」
 	// 的话，一份被清空或串了内容的目录照样能过。
@@ -173,22 +133,115 @@ func TestEverythingInTheOldDirectoryIsStillThere(t *testing.T) {
 	if err := PinUserDataDir(); err != nil {
 		t.Fatalf("钉数据目录：%v", err)
 	}
-	dir, err := mygo.App.Path(mygo.PathUserData)
-	if err != nil {
-		t.Fatalf("问数据目录：%v", err)
-	}
-	if dir != legacy {
-		t.Fatalf("数据目录是 %q，want %q", dir, legacy)
+	if got, err := mygo.App.Path(mygo.PathUserData); err != nil || got != dir {
+		t.Fatalf("数据目录是 %q（err=%v），want %q", got, err, dir)
 	}
 	for rel, body := range want {
 		got, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
 		if err != nil {
-			t.Errorf("读不到 %s：%v——改名之后老用户的数据「消失」就是这个样子", rel, err)
+			t.Errorf("迁完之后在新目录里读不到 %s：%v", rel, err)
 			continue
 		}
 		if string(got) != body {
 			t.Errorf("%s 的内容变成了 %q，want %q", rel, got, body)
 		}
+	}
+}
+
+// TestBothDirectoriesExistKeepsBothAndUsesTheNewOne 钉住「新旧都在」那一支。
+//
+// 可能是迁过一次之后又有东西写回了旧目录，也可能是用户手动放的——无论哪种，
+// **旧的那份留着不动**，数据目录直接用新的那个。不替用户做主去删或合并：
+// 那种「帮你收拾一下」的代码错起来是静默的。
+func TestBothDirectoriesExistKeepsBothAndUsesTheNewOne(t *testing.T) {
+	base := fakeUserConfigDir(t)
+	legacy := filepath.Join(base, oldUserDataDirName)
+	dir := filepath.Join(base, LegacyUserDataDirName)
+
+	for _, d := range []string{legacy, dir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldMarker := filepath.Join(legacy, "settings.json")
+	newMarker := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(oldMarker, []byte(`{"old":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newMarker, []byte(`{"new":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := PinUserDataDir(); err != nil {
+		t.Fatalf("钉数据目录：%v", err)
+	}
+	got, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		t.Fatalf("问数据目录：%v", err)
+	}
+	if got != dir {
+		t.Errorf("数据目录是 %q，want %q（新旧都在时用新的）", got, dir)
+	}
+	// 旧的那份留着：不删、不合并、不提示。
+	if _, err := os.Stat(oldMarker); err != nil {
+		t.Errorf("旧目录里的 settings.json 被动了：%v", err)
+	}
+	body, err := os.ReadFile(newMarker)
+	if err != nil || string(body) != `{"new":true}` {
+		t.Errorf("新目录里的 settings.json 被旧目录里的串了：%q（err=%v）", body, err)
+	}
+}
+
+// TestTheMigrationFallsBackToTheOldDirectoryWhenRenameFails 钉住失败路径。
+//
+// `os.Rename` 会败（跨设备、权限不够、目录被占）。败了**不能**用空的新目录
+// 开起来——那一下的代价是「设置安静地回到出厂」，用户以为数据丢了
+// （`internal/app/migrate.go` 犯过那个错）。所以败了**退回旧目录**：照样钉、
+// 照样开，但把错误**返回**给 bootstrap 记日志。
+//
+// 触发 rename 失败的方式：把旧目录放进**另一个**文件系统根下的目录里——
+// `t.TempDir()` 在同一个分区上 rename 不过去，所以这里把「旧目录」建在
+// 一个**不同的**父目录下，再让 `os.Rename` 跨不过去。同一分区上这个测试
+// 只能断「rename 之后的行为对不对」，断不了「rename 本身会不会败」——
+// 所以这里直接用一个**不存在的目标父目录**让 rename 必败（目标父目录不在，
+// rename 返回 ENOENT），这是不挑平台的败法。
+func TestTheMigrationFallsBackToTheOldDirectoryWhenRenameFails(t *testing.T) {
+	base := fakeUserConfigDir(t)
+	legacy := filepath.Join(base, oldUserDataDirName)
+	dir := filepath.Join(base, LegacyUserDataDirName)
+
+	// 让 rename 必败：换掉 `renameFunc`。跨设备（EXDEV）那种坏法没法用
+	// 临时目录稳定地造出来——`t.TempDir()` 给的都在同一个分区上。
+	t.Cleanup(func() { renameFunc = os.Rename })
+	renameFunc = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath,
+			Err: errors.New("cross-device link")}
+	}
+
+	if err := os.MkdirAll(legacy, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(legacy, "settings.json")
+	if err := os.WriteFile(marker, []byte(`{"schemaVersion":1}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := PinUserDataDir()
+	if err == nil {
+		t.Fatal("rename 必败时 PinUserDataDir 应该把错误报出来，不该吞掉")
+	}
+	got, gerr := mygo.App.Path(mygo.PathUserData)
+	if gerr != nil {
+		t.Fatalf("问退回之后的数据目录：%v", gerr)
+	}
+	if got != legacy {
+		t.Errorf("rename 失败之后数据目录是 %q，want 退回旧目录 %q", got, legacy)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("旧目录里的 settings.json 不在了：%v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("新目录 %q 被建出来了（err=%v）——失败路径不该留下半成品", dir, err)
 	}
 }
 
@@ -217,27 +270,4 @@ func TestAFreshInstallGetsThatDirectoryCreated(t *testing.T) {
 	if err := os.WriteFile(probe, []byte("x"), 0o644); err != nil {
 		t.Errorf("新建的目录写不进去：%v", err)
 	}
-}
-
-// appDisplayName 读 `mygo.json` 里的应用名（显示名）。
-//
-// ⚠️ **不调 `mygo.App.Name()`**：那个函数在没有打包应用时退回**可执行文件名**
-// （`mygo@v0.6.3/app.go:275-287`），在 `go test` 里那就是测试二进制的名字，
-// 拿它去比较等于什么都没比。这里要的是**界面上写着的那个名字**，所以直接读文件。
-func appDisplayName(t *testing.T) string {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join(repoRoot(t), "mygo.json"))
-	if err != nil {
-		t.Fatalf("读不到 mygo.json：%v", err)
-	}
-	var cfg struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal(b, &cfg); err != nil {
-		t.Fatalf("解 mygo.json：%v", err)
-	}
-	if cfg.Name == "" {
-		t.Fatalf("mygo.json 里的 \"name\" 是空的")
-	}
-	return cfg.Name
 }

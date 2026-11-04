@@ -419,7 +419,7 @@ func (p *localPage) tipWith(c *ui.Context, e ui.Element, text string) ui.Element
 //
 // ⚠️ 这里**不换错误页**：坏的是这一个控件，窗口上别的东西照常用。
 func (p *localPage) onPanic(rec any) {
-	log.Printf("biu: 本地音乐页画崩了：%v\n%s", rec, debug.Stack())
+	log.Printf("pudmusic: 本地音乐页画崩了：%v\n%s", rec, debug.Stack())
 	p.invalidate()
 }
 

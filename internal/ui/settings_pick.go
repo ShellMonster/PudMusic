@@ -51,7 +51,7 @@ func (s *Shell) pickPath(what string, dir bool, apply func(string)) {
 	go func() {
 		path, err := picker.pick(parent, dir, title, message)
 		if err != nil {
-			log.Printf("biu: 选%s失败：%v", what, err)
+			log.Printf("pudmusic: 选%s失败：%v", what, err)
 		}
 		if path == "" {
 			return // 用户取消：什么都不改，也什么都不说

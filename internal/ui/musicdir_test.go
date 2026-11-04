@@ -52,6 +52,6 @@ func dropTempMusicDir(dir string) {
 // 下载目录的测试都会在**用户的磁盘上**留下一个文件夹（那正是这一条要挡的
 // 事）。所以这一条是**退出码非零**，跟 `diskguard_test.go` 那道护栏一个待遇。
 func reportTempMusicDirFailure(err error) {
-	fmt.Fprintf(os.Stderr, "biu: 这一包的测试拿不到临时的「音乐」目录，"+
+	fmt.Fprintf(os.Stderr, "pudmusic: 这一包的测试拿不到临时的「音乐」目录，"+
 		"跑下去会在用户自己的 ~/Music 里留下文件夹，所以一条都不跑：%v\n", err)
 }

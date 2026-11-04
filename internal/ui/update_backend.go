@@ -110,7 +110,7 @@ func (mygoUpdaterBackend) Relaunch() { mygo.App.Relaunch() }
 func MountUpdates(a *app.App) error {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，这次不记得上次查过更新：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，这次不记得上次查过更新：%v", err)
 	}
 	a.MountUpdates(mygoUpdaterBackend{}, app.UpdatePrefsPath(dir))
 	return nil

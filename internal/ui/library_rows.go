@@ -370,7 +370,7 @@ func (p *pagedRows) TakeFocus() {
 // 要下一帧是必须的：recover 接住的是 build pass 中间，那一帧剩下的部分没建，画出
 // 来是半张。**这里不换错误页**：坏的是这一个控件，页面上别的东西照常用。
 func (p *pagedRows) onPanic(rec any) {
-	log.Printf("biu: 分页行列表画崩了：%v\n%s", rec, debug.Stack())
+	log.Printf("pudmusic: 分页行列表画崩了：%v\n%s", rec, debug.Stack())
 	p.pager.Invalidate()
 }
 

@@ -171,13 +171,13 @@ func (h *homePage) tabFetcher(tab int) list.Fetcher {
 		if err != nil {
 			// ⚠️ **翻成人话在落地的那一刻**，不在每一帧画的时候（理由见
 			// `homeFailureOf`）：翻完的错是给界面看的，原始的错进日志。
-			log.Printf("biu: 首页第 %d 档第 %d 页拉失败：%v", tab, page, err)
+			log.Printf("pudmusic: 首页第 %d 档第 %d 页拉失败：%v", tab, page, err)
 			return list.Page{}, homeFailureOf(err)
 		}
 		if dropped > 0 {
 			// 不画在界面上（用户看见的是一屏正常的歌），但要留下一条：用户说
 			// 「怎么少了几首」的时候，日志里有这一行，而界面上一个字都没有。
-			log.Printf("biu: 首页第 %d 档第 %d 页有 %d 条画不出来（没有身份，或者和前面那条重了）",
+			log.Printf("pudmusic: 首页第 %d 档第 %d 页有 %d 条画不出来（没有身份，或者和前面那条重了）",
 				tab, page, dropped)
 		}
 		// ⚠️ **「还有没有」不由这一层说**：B 站这两个接口都不给「还有没有」这一
@@ -216,7 +216,7 @@ func (h *homePage) adopt() {
 		if r.dropped > 0 {
 			// 不画在界面上（用户看见的是一屏正常的歌），但要留下一条：用户说
 			// 「怎么少了几首」的时候，日志里有这一行，而界面上一个字都没有。
-			log.Printf("biu: 新歌速递有 %d 条画不出来（没有身份，或者和前面那条重了）",
+			log.Printf("pudmusic: 新歌速递有 %d 条画不出来（没有身份，或者和前面那条重了）",
 				r.dropped)
 		}
 		h.newGrid.SetSongs(r.songs)

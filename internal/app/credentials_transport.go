@@ -163,7 +163,7 @@ func (l *RequestLogger) Log(method, rawURL string) {
 	if l.secrets != nil {
 		secrets = l.secrets()
 	}
-	line := "biu: " + method + " " + NewRedactor(secrets...).URL(rawURL) + "\n"
+	line := "pudmusic: " + method + " " + NewRedactor(secrets...).URL(rawURL) + "\n"
 
 	l.mu.Lock()
 	defer l.mu.Unlock()

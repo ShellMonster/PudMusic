@@ -530,7 +530,7 @@ func (d *downloadsPage) viewCell(c *ui.Context, s *Shell, row, col int) {
 				d.failed = map[dlCellKey]bool{}
 			}
 			d.failed[key] = true
-			log.Printf("biu: 下载记录的一格画崩了（%s）：%v\n%s", dlCellLabel(key), rec, debug.Stack())
+			log.Printf("pudmusic: 下载记录的一格画崩了（%s）：%v\n%s", dlCellLabel(key), rec, debug.Stack())
 			// 🔴 **崩了要再要一帧**：recover 接住的是 build pass **中间**，那一格
 			// 剩下的部分没建（封面那一格是个空盒子），画出来是半张。下一帧那一格
 			// 才画得出「画不出来」——而界面是**按需绘制**的：没人要帧，那一格就

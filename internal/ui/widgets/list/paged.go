@@ -585,7 +585,7 @@ func (p *PagedList) View(c *ui.Context) { p.draw(c) }
 // ⚠️ 这里**不换错误页**：坏的是这一个控件，页面上别的东西照常用。这和行级
 // `List.guarded` 是同一个取舍（「几千行里坏一行」好过「整页变成错误页」）。
 func (p *PagedList) onPanic(rec any) {
-	log.Printf("biu: 分页列表画崩了：%v\n%s", rec, debug.Stack())
+	log.Printf("pudmusic: 分页列表画崩了：%v\n%s", rec, debug.Stack())
 	p.invalidate()
 }
 
@@ -746,7 +746,7 @@ func (p *PagedList) apply(r pageResult) {
 		// 解了锁，但**不再自动重试**：不然就是自己打自己（见 blocked）。
 		p.err = r.err
 		p.blocked = true
-		log.Printf("biu: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
+		log.Printf("pudmusic: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
 		// ⚠️ **说一声是可选的**（见 SetFailureNotice）：页面自己有一整块失败态的
 		// 页把它关掉——同一件事说两遍是噪音，而这一句还带着原始的错。
 		//
@@ -903,7 +903,7 @@ var errFetcherPanic = ErrPagerPanic
 // 看的**——用户不知道「biu」是什么，读到的是一句看起来像内部日志的话。这一族
 // 提示在所有分页列表上都用，所以前缀在这里一次剥干净。
 func loadFailToast(page int, err error) string {
-	msg := strings.TrimSpace(strings.TrimPrefix(err.Error(), "biu: "))
+	msg := strings.TrimSpace(strings.TrimPrefix(err.Error(), "pudmusic: "))
 	if msg == "" {
 		// 空串（理论上不会有）也要给一句人话，别让「加载失败：」后面空着。
 		msg = "出了点问题"
@@ -926,7 +926,7 @@ func loadFailToast(page int, err error) string {
 func (p *PagedList) fetchOne(ctx context.Context, page int) (pg Page, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			log.Printf("biu: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
+			log.Printf("pudmusic: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
 			pg, err = Page{}, fmt.Errorf("%w：%v", errFetcherPanic, rec)
 		}
 	}()

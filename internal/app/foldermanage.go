@@ -138,7 +138,7 @@ func (a *App) LoadCreatedFolders(rid int64) {
 	go func() {
 		list, err := a.fetchCreatedFolders(c, rid)
 		if err != nil {
-			log.Printf("biu: 拉收藏夹列表失败：%v", err)
+			log.Printf("pudmusic: 拉收藏夹列表失败：%v", err)
 			c.folderResult.add(FolderResult{Text: errTextFolder(err)})
 			a.wakeUI()
 			return
@@ -181,7 +181,7 @@ func (a *App) fetchCreatedFolders(c *collections, rid int64) ([]bili.CreatedFold
 //
 // 单独一个哨兵错误：界面拿它判「该提示登录」而不是「该提示网络错误」，
 // 而这句话的措辞以后还会改。
-var errNotLoggedInForFolders = errors.New("biu: 还没登录，拉不了自己的收藏夹")
+var errNotLoggedInForFolders = errors.New("pudmusic: 还没登录，拉不了自己的收藏夹")
 
 // errTextFolder 把这一层会冒出来的错误翻成一句人话。
 func errTextFolder(err error) string {
@@ -234,7 +234,7 @@ func (a *App) submitFolder(id int64, draft bili.FolderDraft) {
 			info, err = c.refs.Client.EditFolder(context.Background(), id, draft)
 		}
 		if err != nil {
-			log.Printf("biu: 改收藏夹 %d 失败：%v", id, err)
+			log.Printf("pudmusic: 改收藏夹 %d 失败：%v", id, err)
 			c.folderResult.add(FolderResult{OK: false, Text: folderFailText(id, err)})
 			a.wakeUI()
 			return
@@ -282,7 +282,7 @@ func (a *App) UploadCover(dataURL string) {
 	go func() {
 		url, err := c.refs.Client.UploadCover(context.Background(), dataURL)
 		if err != nil {
-			log.Printf("biu: 上传封面失败：%v", err)
+			log.Printf("pudmusic: 上传封面失败：%v", err)
 			c.folderResult.add(FolderResult{OK: false, Text: "封面传不上去：" + bili.Friendly(err)})
 			a.wakeUI()
 			return
@@ -342,7 +342,7 @@ func (a *App) DealFolderMedias(rid int64, contentType int, add, del []int64) {
 	}
 	go func() {
 		if err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, add, del); err != nil {
-			log.Printf("biu: 改收藏夹 %d 的内容失败：%v", rid, err)
+			log.Printf("pudmusic: 改收藏夹 %d 的内容失败：%v", rid, err)
 			c.folderResult.add(FolderResult{OK: false, Text: "改不了收藏夹：" + bili.Friendly(err)})
 			a.wakeUI()
 			return
@@ -422,7 +422,7 @@ func (a *App) LoadFolder(id int64) {
 	go func() {
 		raw, err := c.refs.Client.CollectionInfo(context.Background(), id, bili.CollectionFavorite)
 		if err != nil {
-			log.Printf("biu: 拉收藏夹 %d 的信息失败：%v", id, err)
+			log.Printf("pudmusic: 拉收藏夹 %d 的信息失败：%v", id, err)
 			c.folderResult.add(FolderResult{OK: false, Text: "打不开这个收藏夹：" + bili.Friendly(err)})
 			a.wakeUI()
 			return

@@ -17,7 +17,7 @@
 | 名字 | 现在的值 | 能不能改 |
 |---|---|---|
 | 显示名（`mygo.json` 的 `name`） | 2026-10 从 `Biu MyGo` 改成 `BiuGo`，2026-10-26 又改成 `布丁音乐` | 能改（就是改应用名） |
-| bundle id（`mygo.json` 的 `identifier`） | `io.github.shellmonster.biu` | **不能**——bundle id 变了会影响 macOS 的隐私授权 |
+| bundle id（`mygo.json` 的 `identifier`） | `io.github.shellmonster.pudmusic` | **不能**——bundle id 变了会影响 macOS 的隐私授权 |
 | 钥匙串服务名 | `com.biu-go.biu-mygo.login` | **不动**（登录态已经不在钥匙串里了，见下） |
 | 用户数据目录名 | `Biu MyGo` | **不动**——见《用户数据目录》 |
 

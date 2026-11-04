@@ -41,11 +41,11 @@ const debugLogEnv = "BIU_DEBUG_HTTP"
 func MountLogin(a *app.App) *bili.Client {
 	dir, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
-		log.Printf("biu: 拿不到应用数据目录，这次的登录态存不住：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，这次的登录态存不住：%v", err)
 	}
 	store, err := app.NewSystemStore(dir)
 	if err != nil {
-		log.Printf("biu: 没有可用的凭据后端，登录态只在内存里：%v", err)
+		log.Printf("pudmusic: 没有可用的凭据后端，登录态只在内存里：%v", err)
 	}
 
 	cli := bili.NewClient(bili.Options{
@@ -133,7 +133,7 @@ func debugRequestLogger(dir string, a *app.App) func(method, rawURL string) {
 	// 万一哪天脱敏被改坏了，600 至少让别的用户读不到。
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		log.Printf("biu: 开不了请求日志 %s：%v", path, err)
+		log.Printf("pudmusic: 开不了请求日志 %s：%v", path, err)
 		return nil
 	}
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) { _ = f.Close() })

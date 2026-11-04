@@ -278,7 +278,7 @@ func (p *feedPoller) drain() {
 		if u.caughtUp {
 			p.catchingUp = false
 			if u.err != nil {
-				log.Printf("biu: 追动态失败了：%v", u.err)
+				log.Printf("pudmusic: 追动态失败了：%v", u.err)
 				continue
 			}
 			// ⚠️ **用户追上了**：那个点不该亮。
@@ -299,7 +299,7 @@ func (p *feedPoller) drain() {
 			// ⚠️ **失败不改 count**：一次网络抖动不该把用户已经看见的点弄掉。
 			// （上游是 `onError` 就 `setUpdateCount(0)`——那是「问不到就当没有」，
 			// 于是断网时那个点会闪一下又没了，而用户明明还有没看的动态。）
-			log.Printf("biu: 问「有没有新动态」失败了：%v", u.err)
+			log.Printf("pudmusic: 问「有没有新动态」失败了：%v", u.err)
 			continue
 		}
 		p.count = max(u.count, 0)
@@ -391,7 +391,7 @@ func (s *Shell) askNewDynamics(done func(count int, err error)) {
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("biu: 问「有没有新动态」崩了：%v\n%s", rec, debug.Stack())
+				log.Printf("pudmusic: 问「有没有新动态」崩了：%v\n%s", rec, debug.Stack())
 				done(0, fmt.Errorf("问新动态的代码崩了：%v", rec))
 			}
 		}()
@@ -416,7 +416,7 @@ func (s *Shell) askCatchUp(done func(id string, err error)) {
 	go func() {
 		defer func() {
 			if rec := recover(); rec != nil {
-				log.Printf("biu: 追动态崩了：%v\n%s", rec, debug.Stack())
+				log.Printf("pudmusic: 追动态崩了：%v\n%s", rec, debug.Stack())
 				done("", fmt.Errorf("追动态的代码崩了：%v", rec))
 			}
 		}()

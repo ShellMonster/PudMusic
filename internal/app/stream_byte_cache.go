@@ -294,7 +294,7 @@ func (a *App) markByteCacheComplete(it Item, q bili.AudioQuality, ref *bili.Stre
 		SubtitleBvid: it.SubtitleBvid,
 		SubtitleCid:  it.SubtitleCid,
 	}); err != nil {
-		a.logf("biu: 字节下完了但缓存记录写不上（下次要重下这一首）：%q：%v", it.Title, err)
+		a.logf("pudmusic: 字节下完了但缓存记录写不上（下次要重下这一首）：%q：%v", it.Title, err)
 		return false
 	}
 	return true
@@ -392,7 +392,7 @@ func (a *App) playFromByteCache(it Item, gen int, rec streamaudio.Bytes, at time
 		//
 		// ⚠️ **先把这一份删掉**：不删的话下一次还是命中它，
 		// 而那就是一个死循环（见上面的注释）。
-		a.logf("biu: 盘上那份字节打不开（当它没有，重新取流）：%q：%v", it.Title, err)
+		a.logf("pudmusic: 盘上那份字节打不开（当它没有，重新取流）：%q：%v", it.Title, err)
 		a.dropBrokenByteCache(it, a.currentQuality(), rec.Tier)
 		a.runOnlineWithoutCache(it, gen, at, paused)
 		return

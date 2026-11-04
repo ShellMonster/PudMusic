@@ -27,7 +27,7 @@ func (a *App) MountListeningStats(path string) error {
 	tr := newListeningTracker()
 	if err := store.loadInto(tr); err != nil {
 		// 只有「来自更新的版本」值得说一声——那意味着这一版的统计是只读的。
-		log.Printf("biu: 这份听歌统计来自更新的版本，这次只读：%v", err)
+		log.Printf("pudmusic: 这份听歌统计来自更新的版本，这次只读：%v", err)
 	}
 	a.mu.Lock()
 	a.stats = store
@@ -122,7 +122,7 @@ func (a *App) FlushListeningStats() {
 		return
 	}
 	if err := store.save(store.Tracker()); err != nil {
-		log.Printf("biu: 退出时保存听歌统计失败：%v", err)
+		log.Printf("pudmusic: 退出时保存听歌统计失败：%v", err)
 	}
 	// 🔴 **关掉它**：之后不再落盘。
 	//

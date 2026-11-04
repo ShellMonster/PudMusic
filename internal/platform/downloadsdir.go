@@ -30,8 +30,8 @@ import (
 
 // DownloadsDirName 是下载目录在「音乐」目录下的子目录名。
 //
-// ⚠️ **用显示名 `BiuGo`，不要用 `LegacyUserDataDirName`（`Biu MyGo`）**：那是
-// **用户数据目录**的名字，它钉死在老名字上是为了老用户升级不丢数据（理由见
+// ⚠️ **用显示名 `BiuGo`，不要用 `LegacyUserDataDirName`（`PudMusic`）**：那是
+// **用户数据目录**的名字，老用户的 `Biu MyGo` 会被迁过去（理由和做法见
 // `datadir.go` 顶上那一节）。那是**另一件事**：下载目录是新起的，没有「老用户
 // 升级要保住什么」这个问题，跟着显示名走正好。
 //

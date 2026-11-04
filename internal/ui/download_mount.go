@@ -35,7 +35,7 @@ func MountDownloads(a *app.App) error {
 	// 这一次写失败就是用户重下一次。`App.Close` 也会写一次，是第二道。
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		if err := a.SaveDownloads(); err != nil {
-			log.Printf("biu: 退出时保存下载队列失败：%v", err)
+			log.Printf("pudmusic: 退出时保存下载队列失败：%v", err)
 		}
 	})
 
@@ -44,7 +44,7 @@ func MountDownloads(a *app.App) error {
 		// 不返回错：拿不到目录只是**存不住队列**，下载本身还能用
 		// （这一次的歌照样下得完，只是下次开应用接不上）。挡在这里反而
 		// 让整个下载功能用不了。
-		log.Printf("biu: 拿不到应用数据目录，下载队列这次存不住：%v", err)
+		log.Printf("pudmusic: 拿不到应用数据目录，下载队列这次存不住：%v", err)
 		return a.MountDownloads(app.Downloads{Media: media, FallbackDir: downloadsDir()})
 	}
 
@@ -84,7 +84,7 @@ func MountDownloads(a *app.App) error {
 func downloadsDir() string {
 	dir, err := platform.DefaultDownloadsDir()
 	if err != nil {
-		log.Printf("biu: 拿不到默认下载目录，下载没地方落：%v", err)
+		log.Printf("pudmusic: 拿不到默认下载目录，下载没地方落：%v", err)
 		return ""
 	}
 	return dir

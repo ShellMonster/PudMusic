@@ -96,7 +96,7 @@ func (mygoDirWatch) Watch(ctx context.Context, dir string, onChange func()) (fun
 				// io.EOF 是「目录没了、这个 watch 正常结束」，不是故障。
 				// 别的错才值得记——而且只在不是我们主动停掉的时候记。
 				if err != io.EOF && life.Err() == nil {
-					log.Printf("biu: 盯本地音乐目录 %s 时停了：%v", dir, err)
+					log.Printf("pudmusic: 盯本地音乐目录 %s 时停了：%v", dir, err)
 				}
 				return
 			}

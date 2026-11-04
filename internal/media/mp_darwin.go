@@ -163,7 +163,7 @@ func (p *mpSession) push(n NowPlaying, art id) {
 	// 所以这里宁可这一次什么也不写（下一次 publish 自然会补上），也不要写坏。
 	if !onObjCThreadNow() {
 		warnPushOffThread.Do(func() {
-			log.Printf("biu: 系统媒体会话有一次写入不在它自己那条线程上，已拒掉（" +
+			log.Printf("pudmusic: 系统媒体会话有一次写入不在它自己那条线程上，已拒掉（" +
 				"否则会出现「进度不动但按钮显示在放」）。这是本票的 bug，请记下来。")
 		})
 		return
@@ -308,7 +308,7 @@ func (p *mpSession) fetchArtwork(url string) {
 		p.mu.Unlock()
 		// 一张封面取不到不是错误状态，只是这一首在锁屏上没有图。
 		// 记一条就完事——用户看得到歌名和进度。
-		log.Printf("biu: 锁屏上的封面没取到（%s）：%v", url, err)
+		log.Printf("pudmusic: 锁屏上的封面没取到（%s）：%v", url, err)
 		return
 	}
 
@@ -320,7 +320,7 @@ func (p *mpSession) fetchArtwork(url string) {
 			p.fetching = ""
 		}
 		p.mu.Unlock()
-		log.Printf("biu: 锁屏上的封面取到了但解不开（%s，%d 字节）", url, len(b))
+		log.Printf("pudmusic: 锁屏上的封面取到了但解不开（%s，%d 字节）", url, len(b))
 		return
 	}
 
@@ -397,7 +397,7 @@ func (p *mpSession) addTargetsOnObjCThread() {
 	for _, t := range commandTargets {
 		cmd := commandIfPresent(t.selector)
 		if cmd == 0 {
-			log.Printf("biu: 命令中心上没有 %s，控制中心上那一个键按了不会有用", t.selector)
+			log.Printf("pudmusic: 命令中心上没有 %s，控制中心上那一个键按了不会有用", t.selector)
 			continue
 		}
 		// `addTarget:action:` **不 retain target**，所以那个 target 实例

@@ -333,7 +333,7 @@ func (r *playReporter) sync(it Item, dur, pos time.Duration, playing, finished b
 
 	// 1. 这一轮归谁记。账号变了就地作废，**连结束都不发**（文件头「二」）。
 	if cur != nil && (mid == "" || cur.mid != mid) {
-		log.Printf("biu: 账号变了，在放的这一轮播放记录作废（%s → %s）", cur.mid, mid)
+		log.Printf("pudmusic: 账号变了，在放的这一轮播放记录作废（%s → %s）", cur.mid, mid)
 		// 🔴 而且**这一首从此不再开新一轮**（见 `orphan` 那一段）：
 		// 它是上一个账号开始听的，进度不能记到刚登上的这个账号名下。
 		r.orphan = cur.bvid
@@ -417,7 +417,7 @@ func (r *playReporter) startLocked(it Item, mid string, pos, dur time.Duration) 
 	if err != nil {
 		// 造不出会话 id 就这一首不记。造不出来几乎只可能是系统的随机源坏了，
 		// 而那本来就不该让用户看见一句话。
-		log.Printf("biu: 造不出播放记录的会话 id，这一首不记：%v", err)
+		log.Printf("pudmusic: 造不出播放记录的会话 id，这一首不记：%v", err)
 		return
 	}
 	r.gen++
@@ -516,7 +516,7 @@ func (r *playReporter) pushLocked(m reportMsg) {
 	case r.out <- m:
 		r.queued++
 	default:
-		log.Printf("biu: 播放记录队列满了，丢掉一条「%s」", m.action)
+		log.Printf("pudmusic: 播放记录队列满了，丢掉一条「%s」", m.action)
 	}
 }
 
@@ -633,7 +633,7 @@ func (r *playReporter) deliver(m reportMsg, curGen uint64, curAid int64) (uint64
 		// 不记——记 `skip` 是为了别每 50 ms 再问一次（那是一秒二十次）。
 		aid, err := r.cli.ArchiveID(ctx, m.bvid)
 		if err != nil {
-			log.Printf("biu: 问不到这一首的稿件 id，播放记录不记：%v", err)
+			log.Printf("pudmusic: 问不到这一首的稿件 id，播放记录不记：%v", err)
 			r.markSkipped(m.bvid)
 			return curGen, curAid
 		}
@@ -657,7 +657,7 @@ func (r *playReporter) deliver(m reportMsg, curGen uint64, curAid int64) (uint64
 			// 靠心跳也能把这一条建出来）。记一笔「这一首别记了」的话，
 			// 用户等这一轮结束再放同一首，就再也报不上了——一次网络抖动
 			// 换来「这一首今天不记了」。
-			log.Printf("biu: 播放记录开不了头：%v", err)
+			log.Printf("pudmusic: 播放记录开不了头：%v", err)
 			return curGen, curAid
 		}
 		// 开完头紧接着补一条 PlayStart：「开始播」这件事 B 站那边是记在
@@ -691,7 +691,7 @@ func (r *playReporter) sendBeat(ctx context.Context, aid int64, m reportMsg, act
 	if err != nil {
 		// ⚠️ **只记日志，不上报、不重试、不打断播放**（文件头「三」）。
 		// 用户在地铁里不该为一条上报失败看见任何东西。
-		log.Printf("biu: 播放记录发不出去（%s）：%v", act, err)
+		log.Printf("pudmusic: 播放记录发不出去（%s）：%v", act, err)
 	}
 }
 

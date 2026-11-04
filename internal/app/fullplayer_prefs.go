@@ -315,7 +315,7 @@ func (p *fullPlayerPrefsStore) write(path string, next FullPlayerPrefs) error {
 		}
 	}
 	if err != nil {
-		log.Printf("biu: 全屏播放器偏好 %s 存不住：%v", path, err)
+		log.Printf("pudmusic: 全屏播放器偏好 %s 存不住：%v", path, err)
 	}
 	return err
 }

@@ -266,16 +266,16 @@ const jpegQuality = 90
 // 造出来之后就再也拿不回来了（见包注释）。
 func decodeCover(data []byte) (*image.RGBA, error) {
 	if len(data) == 0 {
-		return nil, errors.New("biu: 没读到那个文件")
+		return nil, errors.New("pudmusic: 没读到那个文件")
 	}
 	if len(data) > maxCoverBytes {
-		return nil, errors.New("biu: 图片太大，要小于等于 5MB")
+		return nil, errors.New("pudmusic: 图片太大，要小于等于 5MB")
 	}
 	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		// ⚠️ 说是「只支持 jpeg 或 png」而不是把 err 拼上去：Go 的解码器报错
 		// 是英文的（"image: unknown format"），而用户看到的是一句自己看得懂的话。
-		return nil, errors.New("biu: 只支持 jpeg 或 png 格式的图片")
+		return nil, errors.New("pudmusic: 只支持 jpeg 或 png 格式的图片")
 	}
 	// 统一成 RGBA：下面缩放那一步要按通道取值，而不同格式的
 	// `image.Image` 取颜色的快慢差几十倍，逐像素拷贝一次反而更快也更简单。
@@ -297,11 +297,11 @@ func decodeCover(data []byte) (*image.RGBA, error) {
 // （1 = 普通屏，2 = 绝大多数笔记本，3 = 少数高分屏）。
 func cropToDataURL(src *image.RGBA, b cropBox, dpr float32) (string, error) {
 	if src == nil {
-		return "", errors.New("biu: 没有图可以裁")
+		return "", errors.New("pudmusic: 没有图可以裁")
 	}
 	iw, ih := int32(src.Bounds().Dx()), int32(src.Bounds().Dy())
 	if iw <= 0 || ih <= 0 {
-		return "", errors.New("biu: 那张图是空的")
+		return "", errors.New("pudmusic: 那张图是空的")
 	}
 	dpr = min(max(dpr, 1), 3)
 
@@ -321,7 +321,7 @@ func cropToDataURL(src *image.RGBA, b cropBox, dpr float32) (string, error) {
 	sw = min(sw, iw-sx)
 	sh = min(sh, ih-sy)
 	if sw < 1 || sh < 1 {
-		return "", errors.New("biu: 裁剪框太小了")
+		return "", errors.New("pudmusic: 裁剪框太小了")
 	}
 
 	dw := max(int(math.Round(float64(sw)*float64(dpr))), 1)

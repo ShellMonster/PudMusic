@@ -365,9 +365,9 @@ func (a *App) runPrefetch(gen int, ctx context.Context, it Item) {
 	a.prefetchMu.Unlock()
 
 	if src != nil {
-		a.logf("biu: 下一首的流地址和字节都备上了：%q（%s）", resolved.Title, ref.Label)
+		a.logf("pudmusic: 下一首的流地址和字节都备上了：%q（%s）", resolved.Title, ref.Label)
 	} else {
-		a.logf("biu: 下一首的流地址备好了：%q（%s）", resolved.Title, ref.Label)
+		a.logf("pudmusic: 下一首的流地址备好了：%q（%s）", resolved.Title, ref.Label)
 	}
 }
 
@@ -395,7 +395,7 @@ func (a *App) prefetchFailed(gen int, it Item, err error) {
 	}
 	a.prefetchMu.Unlock()
 
-	a.logf("biu: 下一首的流地址备不出来（安静退回真播那一趟）：%q：%v", it.Title, err)
+	a.logf("pudmusic: 下一首的流地址备不出来（安静退回真播那一趟）：%q：%v", it.Title, err)
 }
 
 // peekPreparedNext 把「备好的那一份」的**值**摸出来，不消费——预取层的

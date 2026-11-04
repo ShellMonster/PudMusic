@@ -595,7 +595,7 @@ const defaultEmpty = "这里还没有歌"
 
 // footerFailed 是末尾那一行在 failed 里用的键。它和歌的 ID（用户数据，bvid 或
 // 完整路径）不是一个来源，所以带一个前缀。
-const footerFailed = "biu:footer"
+const footerFailed = "pudmusic:footer"
 
 // emptyText 是这一帧该说的那句空状态，空串是「什么都不说」。
 func (l *List) emptyText() string {

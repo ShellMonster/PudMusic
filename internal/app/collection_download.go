@@ -113,7 +113,7 @@ func (a *App) EnqueueDownload(ctx context.Context, folder CollectionRef, medias 
 	if len(medias) == 0 {
 		return nil
 	}
-	log.Printf("biu: 收藏夹 %s 要下载 %d 条", folder.Key(), len(medias))
+	log.Printf("pudmusic: 收藏夹 %s 要下载 %d 条", folder.Key(), len(medias))
 
 	var added, missed int
 	var firstErr error

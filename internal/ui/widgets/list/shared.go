@@ -30,7 +30,7 @@ func warnDuplicateIDs(songs []Music) {
 	seen := make(map[string]struct{}, len(songs))
 	for _, m := range songs {
 		if _, dup := seen[m.ID]; dup {
-			log.Printf("biu: 列表里有几行用了同一个 ID（%q），它们的选中状态会串在一起", m.ID)
+			log.Printf("pudmusic: 列表里有几行用了同一个 ID（%q），它们的选中状态会串在一起", m.ID)
 		}
 		seen[m.ID] = struct{}{}
 	}
@@ -62,7 +62,7 @@ func guardFailed(failed *map[string]bool, what, id string, draw func()) {
 				*failed = map[string]bool{}
 			}
 			(*failed)[id] = true
-			log.Printf("biu: %s画崩了（%s）：%v\n%s", what, id, rec, debug.Stack())
+			log.Printf("pudmusic: %s画崩了（%s）：%v\n%s", what, id, rec, debug.Stack())
 		}
 	}()
 	draw()

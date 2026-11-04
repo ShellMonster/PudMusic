@@ -66,7 +66,7 @@ func (a *App) StartWarmUp() {
 		if err := cli.WarmWBIKey(ctx); err != nil {
 			// ⚠️ **失败不算错**：签名密钥取不到时，签名接口会自己再取一次
 			//（`wbiKey` 的重取路径）。这里只留一句日志，**不许**让用户看见。
-			startupLog("biu: 预热签名密钥没成功（不影响播放，签名接口会自己再取一次）：%v", err)
+			startupLog("pudmusic: 预热签名密钥没成功（不影响播放，签名接口会自己再取一次）：%v", err)
 		}
 	}()
 }

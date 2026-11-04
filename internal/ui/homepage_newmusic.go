@@ -227,7 +227,7 @@ type newMusicGrid struct {
 func newNewMusic(cache *imgcache.Cache, acts list.Actions, wake func()) *newMusicGrid {
 	g := &newMusicGrid{cache: cache, acts: acts}
 	g.draw = guard.Wrap(g.view, func(rec any) {
-		log.Printf("biu: 新歌速递画崩了：%v\n%s", rec, debug.Stack())
+		log.Printf("pudmusic: 新歌速递画崩了：%v\n%s", rec, debug.Stack())
 		if wake != nil {
 			wake()
 		}

@@ -36,7 +36,7 @@ import (
 func MountMedia(a *app.App) *media.Session {
 	sess := media.New(media.Options{})
 	if !sess.Available() {
-		log.Print("biu: 这一轮没有系统媒体会话，控制中心和锁屏上看不到歌")
+		log.Print("pudmusic: 这一轮没有系统媒体会话，控制中心和锁屏上看不到歌")
 		return sess
 	}
 	a.SetMediaSink(sess.Publish)

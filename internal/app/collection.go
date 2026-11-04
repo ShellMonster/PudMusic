@@ -251,7 +251,7 @@ type CollectionNotice struct {
 // 播放还没接上」会以为是播放坏了。
 // ⚠️ **后半句是给用户看的**（收藏失败时它就是失败原因），不许说「接口」
 // （票 #242，UX 报告 §3-F 的 F2）。
-var errCollectionsMissing = errors.New("biu: 收藏夹暂时打不开")
+var errCollectionsMissing = errors.New("pudmusic: 收藏夹暂时打不开")
 
 // collections 是 App 挂着的歌单这一摊。
 type collections struct {
@@ -364,7 +364,7 @@ func (a *App) LoadCollection(ref CollectionRef) {
 	go func() {
 		info, err := a.fetchCollection(ref)
 		if err != nil {
-			log.Printf("biu: 拉 %s 的信息失败：%v", ref.Key(), err)
+			log.Printf("pudmusic: 拉 %s 的信息失败：%v", ref.Key(), err)
 			c.notice.add(ref, collectionLoadFailText(ref.Type, err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
@@ -460,7 +460,7 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 			err = c.refs.Client.UnfavoriteCollection(ctx, ref.ID, ref.Type)
 		}
 		if err != nil {
-			log.Printf("biu: 收藏夹 %s 收藏状态改成 %v 失败：%v", ref.Key(), fav, err)
+			log.Printf("pudmusic: 收藏夹 %s 收藏状态改成 %v 失败：%v", ref.Key(), fav, err)
 			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
@@ -474,7 +474,7 @@ func (a *App) SetFavorite(ref CollectionRef, fav bool) {
 
 		info, err := a.fetchCollection(ref)
 		if err != nil {
-			log.Printf("biu: 收藏之后刷新收藏夹 %s 的信息失败：%v", ref.Key(), err)
+			log.Printf("pudmusic: 收藏之后刷新收藏夹 %s 的信息失败：%v", ref.Key(), err)
 			c.notice.add(ref, favoriteFailText(fav, err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
@@ -554,7 +554,7 @@ func (a *App) ClearInvalidMedias(ref CollectionRef) {
 	}
 	go func() {
 		if err := c.refs.Client.CleanInvalidResources(context.Background(), ref.ID, ref.Type); err != nil {
-			log.Printf("biu: 清收藏夹 %s 的失效内容失败：%v", ref.Key(), err)
+			log.Printf("pudmusic: 清收藏夹 %s 的失效内容失败：%v", ref.Key(), err)
 			c.notice.add(ref, "清不掉失效内容："+bili.Friendly(err), NoticePlain, notice.Danger)
 			a.wakeUI()
 			return
@@ -622,7 +622,7 @@ func (a *App) ResolveFavoriteID(it Item, done func(Item, error)) {
 	go func() {
 		aid, err := c.refs.Client.ArchiveID(context.Background(), it.Bvid)
 		if err != nil {
-			log.Printf("biu: 问 %s 的稿件 id 失败：%v", it.Bvid, err)
+			log.Printf("pudmusic: 问 %s 的稿件 id 失败：%v", it.Bvid, err)
 			likeDone(done, it, err)
 			return
 		}
@@ -644,7 +644,7 @@ func likeDone(done func(Item, error), it Item, err error) {
 // **可能**的：没装下载服务的那一次启动、以及测试。所以它留着，界面也照它把
 // 按钮按成不可用——不能因为「正常路径不会走到」就删掉那条判断。
 // ⚠️ **后半句会原样弹到用户面前**（票 #242，UX 报告 §3-F 的 F2）。
-var errDownloaderMissing = errors.New("biu: 下载服务暂时用不了")
+var errDownloaderMissing = errors.New("pudmusic: 下载服务暂时用不了")
 
 // DownloaderMissing 报这个错是不是「下载服务还没接上」。
 func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMissing) }
@@ -747,7 +747,7 @@ func (a *App) rememberSeasonMeta(ref CollectionRef, meta *bili.CollectionInfo) {
 // ⚠️ **它是给用户看的一句话**，所以不说「接口」、不说「还没实现」（票 #242，
 // UX 报告 §3-F 的 F2）：用户不知道应用里哪一块还没接上。说清「在这个合集里
 // 暂时只能靠翻和滚」，那是他照着能做的下一步。
-var errCollectionSearchUnsupported = errors.New("biu: 合集和系列里还不能按歌名找，翻一翻吧")
+var errCollectionSearchUnsupported = errors.New("pudmusic: 合集和系列里还不能按歌名找，翻一翻吧")
 
 // collectionOwnerMid 是这一页要用的「创建者 mid」，**没有就当场问一次**。
 //
@@ -768,7 +768,7 @@ func (a *App) collectionOwnerMid(ref CollectionRef) int64 {
 	}
 	info, err := a.fetchCollection(ref)
 	if err != nil {
-		log.Printf("biu: 问容器 %s 的创建者失败（合集接口先按 mid=0 发一次）：%v", ref.Key(), err)
+		log.Printf("pudmusic: 问容器 %s 的创建者失败（合集接口先按 mid=0 发一次）：%v", ref.Key(), err)
 		return 0
 	}
 	if c := a.collectionsSnapshot(); c != nil {

@@ -138,13 +138,13 @@ func (s *Shell) syncGlobalShortcuts() {
 		// 不登记那一半是有代价的（这个键在别的应用里不响了），所以要**说给用户
 		// 听**，见下面那一句提示。两条默认的键本来差一个 ⌥，所以正常用户看不到它。
 		if containsShortcut(cur.Shortcuts, it.Shortcut) {
-			log.Printf("biu: 全局快捷键 %q（%s）和应用内那一条是同一个键，全局这一份没登记",
+			log.Printf("pudmusic: 全局快捷键 %q（%s）和应用内那一条是同一个键，全局这一份没登记",
 				acc, it.Name)
 			skipped = append(skipped, it.Name+"（和应用内那条重了）")
 			continue
 		}
 		if err := s.hotkeys.register(acc, func() { s.onShortcut(it.ID) }); err != nil {
-			log.Printf("biu: 全局快捷键 %q（%s）注册不上：%v", acc, it.Name, err)
+			log.Printf("pudmusic: 全局快捷键 %q（%s）注册不上：%v", acc, it.Name, err)
 			skipped = append(skipped, it.Name+"（多半是别的应用先占了）")
 		}
 	}

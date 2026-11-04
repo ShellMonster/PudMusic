@@ -243,7 +243,7 @@ func (p *windowsPlatform) bindWindow(hwnd uintptr) error {
 	p.mu.Unlock()
 	thumb, err := newThumbbar(hwnd, on)
 	if err != nil {
-		log.Printf("biu: 任务栏缩略图上没有按钮（浮窗和锁屏照常）：%v", err)
+		log.Printf("pudmusic: 任务栏缩略图上没有按钮（浮窗和锁屏照常）：%v", err)
 	} else {
 		p.mu.Lock()
 		p.thumb = thumb
@@ -314,7 +314,7 @@ func (p *windowsPlatform) ensureEvents() {
 		p.mu.Lock()
 		p.eventsUp = false
 		p.mu.Unlock()
-		log.Printf("biu: 浮窗上的播放键装不上（HRESULT %#08x）", uint32(hr))
+		log.Printf("pudmusic: 浮窗上的播放键装不上（HRESULT %#08x）", uint32(hr))
 		return
 	}
 
@@ -563,6 +563,6 @@ var logOnce = func() func(string, ...any) {
 			return
 		}
 		seen[msg] = true
-		log.Printf("biu: "+msg, args...)
+		log.Printf("pudmusic: "+msg, args...)
 	}
 }()

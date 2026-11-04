@@ -111,7 +111,7 @@ type leadKey struct{}
 //
 // ⚠️ **它和歌 / 哨兵的 ID（用户数据，bvid 或完整路径）不是一个来源**，所以带一个
 // 前缀——撞上了的话「崩过的那一块」会把某一首歌也一起短路掉。
-const leadFailed = "biu:lead"
+const leadFailed = "pudmusic:lead"
 
 // leadInput 是页内头部那一格的输入回调：**按下交给 `Lead.OnClick`，双击再交给
 // `Lead.OnDoubleClick`**。
