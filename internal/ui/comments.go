@@ -881,7 +881,7 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 	ui.Column(c).Key(row.elemKey).AlignSelf(ui.Stretch).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Start).Gap(space.Px12).Padding(space.Px16, space.Px12).Children(func() {
 			// 头像：B 站的评论头像是圆的，36。
-			imgcache.ViewRadius(c, s.pageImages(), commentImageURL(cm.Avatar),
+			imgcache.ViewFlat(c, s.pageImages(), commentImageURL(cm.Avatar),
 				commentAvatar, commentAvatar, commentAvatar/2)
 
 			ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px4).Children(func() {

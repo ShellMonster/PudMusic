@@ -391,3 +391,21 @@ func min32(a, b float32) float32 {
 	}
 	return b
 }
+
+// ViewFlat 是 `View` 去掉「有图那一档描的 1 像素 `t.Border`」的版本。
+//
+// 「深夜唱片行」里全屏播放器的大封面、抽屉里 40 的小封面都是**没有描边**的（原型 `.full-cover`、
+// `.t-cover` 只有圆角和 surface 底）；`View` 那圈边是票 #244 为「近黑的封面在深色底上看不见」加的，
+// 在原型里由 surface-2 的占位底和封面本身的明暗承担。没有地址 / 正在加载 / 拉失败三档照旧走
+// `View` 那一套（它们有自己的占位）。
+func ViewFlat(c *ui.Context, cache *Cache, url string, w, h, radius float32) ui.Element {
+	return ui.Box(c).Size(w, h).Radius(radius).Clip().Children(func() {
+		if url != "" {
+			if st := cache.GetSized(url, w, h); st.Ready() {
+				ui.Image(c, st.Bitmap).Fit(ui.Cover).Size(w, h).Radius(radius)
+				return
+			}
+		}
+		drawCover(c, cache, url, w, h, radius, placeholderIcon, Shape{})
+	})
+}

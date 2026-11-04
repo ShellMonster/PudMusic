@@ -222,3 +222,27 @@ func TestRenderLyricSearchShots(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderFullPlayerVideoShots 出视频小窗和影院模式的图（用 `fullvideo_test.go` 那套内存解码夹具）。
+func TestRenderFullPlayerVideoShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	s, tt := videoTester(t)
+	tt.SetDark(true)
+	settleFull(t, tt)
+	save(t, dir, "dark-full-videobadge.png", tt)
+	if err := tt.Click("看视频"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "第一帧到了", func() bool { return s.vv.bm != nil })
+	settleFull(t, tt)
+	save(t, dir, "dark-full-videowindow.png", tt)
+	if err := tt.Click("视频，点击全屏"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	settleFull(t, tt)
+	save(t, dir, "dark-full-cinema.png", tt)
+}

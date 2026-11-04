@@ -752,7 +752,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			// 封面 40、圆角 4、`surface-2` 占位底。
 			ui.Box(c).Size(queueCoverSize, queueCoverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
-				imgcache.ViewRadius(c, s.images, row.item.Cover, queueCoverSize, queueCoverSize, tok.R4)
+				imgcache.ViewFlat(c, s.images, row.item.Cover, queueCoverSize, queueCoverSize, tok.R4)
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 				ui.Text(c, tclean.Clean(row.item.Title).Title).FontSize(scale.Font(c, scale.Size13)).

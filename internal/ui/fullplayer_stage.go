@@ -99,7 +99,7 @@ func (s *Shell) viewFullCover(c *ui.Context, st app.State, r ui.Rect, phase app.
 			return
 		}
 		id := coverIdentity(s, st)
-		cover := imgcache.View(c, s.pageImages(), st.CoverURL, r.W, r.H).
+		cover := imgcache.ViewFlat(c, s.pageImages(), st.CoverURL, r.W, r.H, tok.R8).
 			Label("当前封面").Key(s.fullCoverKeyFor(st.CoverURL))
 		cover.Transition(s.fullCoverMatchFor(id))
 		if s.app.VideoAvailable() {
