@@ -615,12 +615,13 @@ func (h *homePage) viewFolders(c *ui.Context, s *Shell, inner float32, cols int,
 			folders = append(folders, homeFolder{g, f})
 		}
 	}
+	// 一个收藏夹都没有就整块不画：原型里这一块永远有卡片，只剩一个标题的空块比没有更怪；
+	// 侧栏已经在说「还没有收藏夹」了，这里不再说第二遍。
+	if len(folders) == 0 {
+		return
+	}
 	h.section(c, func() {
 		pud.SecHead(c, "home:folders:more", "你的收藏夹", "", "")
-		if len(folders) == 0 {
-			pud.Empty(c, pud.ArtPlain, "还没有收藏夹", "在 B 站新建收藏夹后，会出现在这里。", nil)
-			return
-		}
 		ui.Column(c).FillWidth().Gap(gap).Children(func() {
 			for start := 0; start < len(folders); start += cols {
 				end := min(start+cols, len(folders))

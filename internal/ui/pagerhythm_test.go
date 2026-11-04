@@ -222,6 +222,8 @@ func runHeight(img *image.RGBA, area image.Rectangle, lo, hi, x0, x1 int) int {
 //
 // ⚠️ **容忍两像素**：字形墨迹的左边距（1~2 像素）随字体而异，而那一族要抓的
 // 是 4~12 像素的差（横向页边距原来是 16 / 20 / 24 / 28 四种）。
+// ⚠️ **首页不在这一张表里**：首页按原型重做了，页边距是 40 / 32 / 16 三档（原型 `.page` 的
+// `padding: 8px 40px`），由 `homepage_test.go` 的 `TestTheHomePageUsesThePrototypePageMargins` 钉。
 func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 	sideW := app.DefaultSideMenuWidth
 	area := contentArea(sideW)
@@ -244,7 +246,6 @@ func TestEveryPageHasTheSameHorizontalMargin(t *testing.T) {
 		path string
 		opts []shellOpt
 	}{
-		{name: "首页", path: homePath},
 		{name: "稍后再看", path: laterPath, opts: libraryPageOpts(t)},
 		{name: "历史记录", path: historyPath, opts: libraryPageOpts(t)},
 		{name: "本地音乐", path: localMusicPath},

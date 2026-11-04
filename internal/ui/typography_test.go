@@ -868,6 +868,8 @@ func TestTheMediumWeightIsDrawnHeavierThanNormal(t *testing.T) {
 //
 // 判据是画面：内容区里**第一段墨**从顶栏下缘往下多远。上边距收成 0 之后，那
 // 只有字形自己的上沿留白（2~5 像素）；留 16 或 20 的话，这一段会明显低下去。
+// ⚠️ **首页不在这一张表里**：原型首页顶上是 `padding-top: 8` + 问候区的 `padding-top: 24`，
+// 由 `homepage_test.go` 的 `TestTheHomePageUsesThePrototypePageMargins` 钉。
 func TestPagesStartAtTheTop(t *testing.T) {
 	sideW := app.DefaultSideMenuWidth
 	area := contentArea(sideW)
@@ -876,7 +878,6 @@ func TestPagesStartAtTheTop(t *testing.T) {
 		path string
 		opts []shellOpt
 	}{
-		{name: "首页", path: homePath},
 		{name: "稍后再看", path: laterPath, opts: libraryPageOpts(t)},
 		{name: "历史记录", path: historyPath, opts: libraryPageOpts(t)},
 		{name: "本地音乐", path: localMusicPath},

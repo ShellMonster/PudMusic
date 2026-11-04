@@ -33,6 +33,9 @@ func resumeShellOnLocal(t *testing.T, positionMs int64) (*mygoui.Tester, *app.Ap
 	}
 	st.PlaybackResume = app.PlaybackResume{TrackKey: "local:" + flacPath, PositionMs: positionMs}
 	sh := newTestShell(t, withSettings(st))
+	// 停在一个干净的页面上：首页的「本周已听 0:00」会和播放条的读数撞字。
+	sh.s.navigate("/empty")
+	sh.tt.Frame()
 	return sh.tt, sh.a
 }
 

@@ -327,3 +327,63 @@ func TestTheSmallTextHelpers(t *testing.T) {
 		}
 	}
 }
+
+// TestACardThatCannotBePlayedSaysSoInsteadOfDoingNothing 盯「放不了的歌点了要说一声」：榜上有些
+// 条目没有稿件（`Type` 是 mv 而 `Bvid` 是空串），按下去不能没反应，也不能把它塞进队列。
+func TestACardThatCannotBePlayedSaysSoInsteadOfDoingNothing(t *testing.T) {
+	b := newTestShell(t, at(homeW, 1600))
+	s, tt := b.s, b.tt
+	daily := homeSongsOf("推荐", 3)
+	daily[0].Item = app.Item{Source: app.SourceOnline, Type: "mv", Title: daily[0].Title}
+	// 本地文件总是放得了的（走开文件那一路），拿它当「放得了」的那一首。
+	daily[1].Item = app.LocalItem(flacPath(t))
+	chart := homeSongsOf("榜上", 3)
+	for i := range chart {
+		chart[i].Cover, chart[i].Item.Bvid = "x", "BV1chart"+strconv.Itoa(i) // 让「今日一张」从榜里选，不和卡片抢字
+	}
+	s.home.SetSongs(daily, chart, nil, nil)
+	var played [][]app.Item
+	s.home.acts.Play = func(items []app.Item) { played = append(played, items) }
+	homeFrame(tt)
+
+	// 点封面：封面那枚按钮的无障碍名字就是歌名（卡片标题那行字不是按钮）。
+	if err := tt.Click("推荐 1"); err != nil {
+		t.Fatalf("点不到第一张卡：%v，文字有 %q", err, tt.Texts())
+	}
+	homeFrame(tt)
+	if len(played) != 1 || len(played[0]) != 1 || !played[0][0].IsLocal() {
+		t.Fatalf("点第一张（放不了）之后换进队列的是 %+v，want 只有往后第一首放得了的那一首", played)
+	}
+}
+
+// TestTheHomePageUsesThePrototypePageMargins 钉首页的页边距（原型 `.page { padding: 8px 40px 64px }`
+// 和两条媒体查询）：窗口 > 1024 是 40，> 760 是 32，再窄 16；顶上是页顶 8 + 问候区 24。
+//
+// 数是**窗口宽**判的（媒体查询看视口），不是内容区——见 `homeLayoutFor`。
+func TestTheHomePageUsesThePrototypePageMargins(t *testing.T) {
+	for win, want := range map[float32]float32{1600: 40, 1200: 40, 1025: 40, 1024: 32, 800: 32, 761: 32, 760: 16, 600: 16} {
+		if got := homeLayoutFor(win).pad; got != want {
+			t.Errorf("窗口 %v 的页边距 = %v，want %v", win, got, want)
+		}
+	}
+
+	// 画面上：1200 的窗口里，最靠左的墨（Eyebrow / 标题的左缘）在侧栏右边 40。
+	b := newTestShell(t, at(1200, 800))
+	b.s.home.SetSongs(homeSongsOf("推荐", 6), homeSongsOf("榜上", 20), nil, nil)
+	for range 3 {
+		b.tt.Frame()
+	}
+	sideW := app.DefaultSideMenuWidth
+	area := contentArea(sideW)
+	if got, want := leftmostInk(b.tt.Image(), area), int(sideW)+40; got < want-2 || got > want+2 {
+		t.Errorf("首页的内容从 x=%d 开始，want %d（侧栏 %d + 页边距 40）", got, want, int(sideW))
+	}
+	// 顶上：页顶 8 + 问候区 24 = 32，再加 Eyebrow 字形自己的上沿留白（几像素）。
+	lo, _, ok := firstBand(b.tt.Image(), area)
+	if !ok {
+		t.Fatalf("首页顶上一点墨都没有，文字有 %q", b.tt.Texts())
+	}
+	if top := lo - navMinHeight; top < 28 || top > 42 {
+		t.Errorf("首页的第一段墨从顶栏下缘往下 %d 像素开始，want 32 附近（页顶 8 + 问候区 24）", top)
+	}
+}
