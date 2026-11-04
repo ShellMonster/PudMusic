@@ -262,8 +262,8 @@ func TestPickingACoverOpensTheCropDialog(t *testing.T) {
 	openCropDialog(t, s, tt)
 
 	wantText(t, tt, "裁剪封面")
-	wantText(t, tt, "上传")
-	wantText(t, tt, "取消")
+	wantText(t, tt, "确定")
+	wantText(t, tt, "返回")
 
 	// ⚠️ 初始框是 10/10/80/80，而图是 4:3 —— H 会被按 16:9 掰小
 	// （见 fitCrop）。这里钉的是「宽还是 80、左上还是 10」。

@@ -195,7 +195,9 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 	modal := ui.DialogBase(c, &crop.open, func(backdrop, panel ui.Element) {
 		dlgPanel(c, backdrop, panel, "裁剪封面", dlgW)
 		dlgBody(c, "裁剪封面", "拖动图片调整位置，滑块调整大小。方框内就是封面的样子。", func() {
-			s.viewCropStage(c, crop)
+			// 原型 `.crop-stage { margin: 16px auto 12px }`：裁剪台在面板里居中，离说明 16、离脚 12。
+			ui.Row(c).FillWidth().Justify(ui.Center).Margin(space.Px16, space.None, space.Px12, space.None).
+				Children(func() { s.viewCropStage(c, crop) })
 		})
 		dlgFoot(c, nil, func() {
 			if pud.Button(c, "crop:cancel", pud.Ghost, pud.Std, "返回", "").Disabled(crop.uploading).Clicked() {

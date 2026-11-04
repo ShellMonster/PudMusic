@@ -9,6 +9,7 @@ package ui
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -40,6 +41,20 @@ func TestRenderFolderDialogShots(t *testing.T) {
 			tt.Move(5, 5)
 			settleFrame(tt)
 			save(t, dir, name+"-dialog-pick.png", tt)
+		})
+		t.Run(name+"-crop", func(t *testing.T) {
+			f := newFolderBili(t, nil)
+			s, tt := folderShellDark(t, f, dark)
+			s.pickImage = stubPicker(t, pickerPath(t, 800, 600))
+			openCropDialog(t, s, tt)
+			tt.Move(5, 5)
+			for range 40 {
+				if !tt.FramePending() {
+					break
+				}
+				tt.Advance(16 * time.Millisecond)
+			}
+			save(t, dir, name+"-dialog-crop.png", tt)
 		})
 		t.Run(name+"-edit", func(t *testing.T) {
 			f := newFolderBili(t, nil)
