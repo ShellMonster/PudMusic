@@ -18,9 +18,11 @@ package ui
 import (
 	"context"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	mygoui "github.com/egoist/mygo/ui"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -440,117 +442,100 @@ func mentionsTitle(call *ast.CallExpr, title string) bool {
 }
 
 // TestEveryPageTitleIsTheSameSizeOnScreen 钉住「页标题字号是同一个数」的另一半：
-// **画面上那几行字一样大**。
+// **画面上那几行字，和同一个字串按 `scale.PageTitleFluid(1200)` 单独画出来的一样大**。
 //
-// # 判据是墨迹的宽度，不是高度
+// # 判据是墨迹的宽和高，对着一份「同字串、同字号」的参照比
 //
-// 墨迹的**高度**差得太小：24px 的汉字墨迹 22~23 行，20px 的 18~19 行——而同一
-// 个字号的不同字（稍 / 本 / 下 / 搜）自己就差一行（笔画多的字满一些），所以高度
-// 这一层只能当粗筛。
+// 旧办法拿一页反推常数再比别的页，前提是「不同字串的首尾字边距相同」，这在宋体 700 下不成立
+// （实测同一字号下「本地音乐」墨迹宽 173、「下载记录」161）。现在每页标题各自在隔离视图里用
+// `typo.Display` 按 40.8 画一份参照（同一字串，字形差异自己抵消），页面里量到的墨迹必须和它
+// 差不多：宽 ±2、高 ±1。字号差到 48 或 32，宽差 ≥ 20、高差 ≥ 7，不会漏。
 //
-// 墨迹的**宽度**准得多：一行 n 个字占的宽度是 `(n-1)×字号 + 最后一个字的墨迹
-// 宽 − 第一个字的边距`，后头那两项在同一套字体里是**同一个数**——所以拿基准页
-// 反推那个常数，别的页字号差多少就看得出来。
+// ⚠️ **为什么不用 `Find`**：页标题和路由容器重名，`Find` 给回来的是整个路由容器。
+// 所以用每页 Eyebrow（`pud.PageHead` 的第一个参数，页面独有）定位标题行，只在它下面
+// 一个标题行高的范围里量：新页面的内容区里有空状态插画、工具条，「第一段有墨的行」会把它们接起来。
 //
-// ⚠️ **为什么不用 `Find`**：页标题和路由容器重名（路由容器的无障碍名字就是页
-// 名），`Find("稍后再看")` 给回来的是整个路由容器——那一行字自己的盒子拿不到。
-//
-// ⚠️ **为什么先分「带」再分「段」**：一页顶上第一段有墨的行就是标题那一行（下面
-// 那些内容之间都隔着空行），而标题行里可能还摆着别的东西（本地音乐那一页的
-// 展示样式切换、下载记录那一页的路径）——所以**行**给出「哪一段」，**列**上被
-// 空隙分开的那一段才是标题自己（空隙的门槛是 8 像素：相邻两字之间只有 2~3
-// 像素，而字和下一个东西之间差十几像素）。
-//
-// 精确的那个数由 `TestEveryPageTitleUsesTheSharedSize`（AST）钉住。
+// 精确的字号由 `TestEveryPageTitleUsesTheSharedSize`（AST）钉住。
 func TestEveryPageTitleIsTheSameSizeOnScreen(t *testing.T) {
-	// 深浅两套都量（票 #166 的验收）：深色下字形和底色挨得近，量出来的墨迹
-	// 边界可能不同——只出浅色的话，「深色下标题是不是同一个数」没人管。
+	want := scale.PageTitleFluid(testWinW)
+	// 深浅两套都量：深色下字形和底色挨得近，量出来的墨迹边界可能不同。
 	for _, dark := range []bool{false, true} {
 		theme := "浅色"
 		if dark {
 			theme = "深色"
 		}
 		t.Run(theme, func(t *testing.T) {
-			area := contentArea(app.DefaultSideMenuWidth)
-			// 基准页：本地音乐那一页（它的标题是四个字，最容易量准）。
-			const ref = "扫码登录"
-			type measured struct {
-				span   int // 墨迹从头一个字到尾一个字的宽度
-				chars  int
-				height int // 墨迹占了几行
-			}
-			got := map[string]measured{}
+			area := contentArea(float64(tok.SideW)) // 侧栏宽按原型的 232
 			for _, page := range []struct {
-				name  string
-				path  string
-				chars int
-				opts  []shellOpt
+				title   string
+				eyebrow string // 标题上面那一行 Eyebrow，用来定位标题行
+				path    string
+				opts    []shellOpt
 			}{
-				// 设置页和登录页也在这一族里：它们的页标题同样是 `scale.PageTitle`
-				// （票 #166——「所有页面的大标题 24/400」）。
+				{title: "本地音乐", eyebrow: "Local files", path: localMusicPath},
+				{title: "稍后再看", eyebrow: "Watch later", path: laterPath, opts: blockedBiliOpts(t, true)},
+				{title: "历史记录", eyebrow: "History", path: historyPath, opts: blockedBiliOpts(t, true)},
+				{title: "下载记录", eyebrow: "Downloads", path: downloadListPath},
+				{title: "听歌统计", eyebrow: "Listening", path: statsPath},
+				{title: "我的关注", eyebrow: "Following", path: followPath, opts: blockedBiliOpts(t, true)},
 			} {
+				refSpan, refHeight := titleInkOf(t, page.title, want, dark)
+
 				b := newTestShell(t, append(page.opts, systemIsDark(dark))...)
 				s, tt := b.s, b.tt
 				s.navigate(page.path)
 				tt.Frame()
 
+				eb, found := tt.Find(strings.ToUpper(page.eyebrow))
+				if !found || eb.H <= 0 {
+					t.Fatalf("%s：找不到 Eyebrow「%s」，文字有 %q", page.title, page.eyebrow, tt.Texts())
+				}
 				img := tt.Image()
-				lo, hi, ok := firstBand(img, area)
+				// 只罩住标题那一行：再往下是导语（本地音乐页 y≈187 起），左端的字会和标题接成一段。
+				titleArea := image.Rect(area.Min.X, int(eb.Y+eb.H), area.Max.X, int(eb.Y+eb.H)+int(1.55*want))
+				lo, hi, ok := firstBand(img, titleArea)
 				if !ok {
-					t.Fatalf("%s：内容区顶上一点墨都没有，文字有 %q", page.name, tt.Texts())
+					t.Fatalf("%s：Eyebrow 下面一点墨都没有，文字有 %q", page.title, tt.Texts())
 				}
-				// 标题那一行最高也就几十行墨。设置页的分组现在是铺满宽度的卡片（底色和页面不同），
-				// 它们紧跟在标题下面，会把「第一段墨迹」接成一整条——所以只取头 40 行。
-				x0, x1, ok := firstRun(inkColumns(img, area, lo, hi))
+				x0, x1, ok := firstRun(inkColumns(img, titleArea, lo, hi))
 				if !ok {
-					t.Fatalf("%s：标题那一行里没有墨，文字有 %q", page.name, tt.Texts())
+					t.Fatalf("%s：标题那一行里没有墨，文字有 %q", page.title, tt.Texts())
 				}
-				got[page.name] = measured{
-					span:   x1 - x0 + 1,
-					chars:  page.chars,
-					height: runHeight(img, area, lo, hi, x0, x1),
-				}
-			}
-
-			// 基准页的墨迹宽度折算成字号：`3×字号 + 常数`。
-			refm := got[ref]
-			const want = 24
-			k := refm.span - (refm.chars-1)*want
-			heights := map[string]int{}
-			for name, m := range got {
-				heights[name] = m.height
-			}
-			for name, m := range got {
-				if m.chars < 3 {
-					// ⚠️ **两个字的那一页量不准**：墨迹宽度里那个「常数」是**这一页
-					// 的字自己的**（最后一个字的墨迹宽 − 第一个字的边距），除以 (n-1)
-					// 之后那一页的误差就是常数本身（一两个字的时候是 ±1~2 像素，折算
-					// 到字号上就是 2 像素）。它由下面那条「墨迹高度一样」的粗筛管着，
-					// 而精确的那一半由 AST 那一条钉住。
-					continue
-				}
-				size := float64(m.span-k) / float64(m.chars-1)
-				if size < want-1 || size > want+1 {
-					t.Errorf("%s：「%s」的标题折算出来是 %.1fpx（墨迹宽 %d，%d 个字），"+
-						"want %d（±1）——页标题的字号必须是同一个数",
-						theme, name, size, m.span, m.chars, want)
-				}
-			}
-
-			// 粗筛：各页的标题墨迹高度一样（容忍一行——同一个字号的不同字自己就差一行）。
-			for name, h := range heights {
-				for other, oh := range heights {
-					if name == other {
-						continue
-					}
-					if oh != h && oh != h+1 && oh != h-1 {
-						t.Errorf("%s：「%s」的标题墨迹 %d 行，「%s」是 %d 行——页标题的"+
-							"字号必须是同一个数", theme, name, h, other, oh)
-					}
+				span := x1 - x0 + 1
+				height := runHeight(img, titleArea, lo, hi, x0, x1)
+				if abs(span-refSpan) > 2 || abs(height-refHeight) > 1 {
+					t.Errorf("%s：「%s」的标题墨迹宽 %d 高 %d，按 %.1fpx 单独画出来是宽 %d 高 %d"+
+						"——页标题的字号必须是同一个数", theme, page.title, span, height, want, refSpan, refHeight)
 				}
 			}
 		})
 	}
+}
+
+// titleInkOf 在一个隔离视图里按 size 画一行 `typo.Display` 的标题（和 `pud.PageHead` 同一个调法），
+// 量它墨迹的宽和高。
+func titleInkOf(t *testing.T, title string, size float32, dark bool) (span, height int) {
+	t.Helper()
+	b := newTestShell(t, systemIsDark(dark), withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.applyFrameTheme(c)
+			mygoui.Column(c).Padding(space.Px40, space.Px40, space.None, space.Px40).Children(func() {
+				typo.Display(mygoui.Text(c, title), scale.Font(c, size)).LineHeight(leading.PageTitle)
+			})
+		}
+	}))
+	b.tt.Frame()
+	img := b.tt.Image()
+	area := image.Rect(0, 0, testWinW, testWinH)
+	lo, hi, ok := firstBand(img, area)
+	if !ok {
+		t.Fatalf("参照「%s」一点墨都没有", title)
+	}
+	x0, x1, ok := firstRun(inkColumns(img, area, lo, hi))
+	if !ok {
+		t.Fatalf("参照「%s」标题行里没有墨", title)
+	}
+	return x1 - x0 + 1, runHeight(img, area, lo, hi, x0, x1)
 }
 
 // blockedBiliOpts 是一台**永远不回**的假 B 站：除了 nav 以外，所有请求都卡住。
