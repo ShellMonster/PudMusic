@@ -7,7 +7,6 @@ package ui
 
 import (
 	"os"
-	"reflect"
 	"testing"
 	"time"
 
@@ -28,21 +27,13 @@ func t1BarState() app.State {
 }
 
 // t1Shell 造一个整窗外壳：和 `Shell.viewMain` 同一条画法，但播放状态用合成的 st。
-// withoutLogin 让 t1Shell 不装登录态（占位选项，t1Guest 认它）。
-func withoutLogin() shellOpt { return func(*shellSpec) {} }
-
-// t1Guest 判断这次是不是要游客外壳：选项里带了 withoutLogin 的那个函数。
-func t1Guest(opts []shellOpt) bool {
-	want := reflect.ValueOf(withoutLogin()).Pointer()
-	for _, o := range opts {
-		if reflect.ValueOf(o).Pointer() == want {
-			return true
-		}
-	}
-	return false
+func t1Shell(t *testing.T, dark bool, st app.State, opts ...shellOpt) *testShell {
+	t.Helper()
+	return t1ShellAs(t, dark, st, true, opts...)
 }
 
-func t1Shell(t *testing.T, dark bool, st app.State, opts ...shellOpt) *testShell {
+// t1ShellAs 同 t1Shell，loggedIn 为假时不装登录态（游客）。
+func t1ShellAs(t *testing.T, dark bool, st app.State, loggedIn bool, opts ...shellOpt) *testShell {
 	t.Helper()
 	all := append([]shellOpt{
 		systemIsDark(dark),
@@ -58,7 +49,7 @@ func t1Shell(t *testing.T, dark bool, st app.State, opts ...shellOpt) *testShell
 			}
 		}),
 	}, opts...)
-	if !t1Guest(opts) {
+	if loggedIn {
 		all = append(all, loggedInWith("42"))
 	}
 	b := newTestShell(t, all...)
@@ -137,7 +128,7 @@ func TestRenderT1ShellShots(t *testing.T) {
 			}
 			// 未登录：侧栏少三项、顶栏是「登录」键。
 			{
-				b := t1Shell(t, dark, t1BarState(), withoutLogin())
+				b := t1ShellAs(t, dark, t1BarState(), false)
 				b.s.navigate(followPath)
 				homeFrame(b.tt)
 				save(t, dir, name+"-loggedout-follow.png", b.tt)

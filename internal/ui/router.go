@@ -15,7 +15,7 @@ import (
 // `user/:id`、`settings`、`download-list`、`dynamic-feed`、`local-music`、
 // `search`、`empty`），加上独立窗口的 `mini-player` 共 13 条；我们另加了第 14 条
 // `/login`（上游把登录挂在头像下拉里，我们给它一条路由）和第 15 条 `/stats`
-// （听歌统计，从顶栏右上角那枚图标进，不进侧栏）。兜底的 `*`（404）
+// （听歌统计，原型把它放进侧栏，在「设置」之前）。兜底的 `*`（404）
 // **不在 `routes` 表里**——它是 `notFound` 那一个单独的值，因为 404 不是一条能
 // Match 的模式（见 `viewRoutes`）。
 //
@@ -75,7 +75,7 @@ type Route struct {
 	Icon, ActiveIcon string
 }
 
-// routes 是那 15 条。**InMenu 的七条**（听歌统计不进侧栏），顺序就是侧栏菜单
+// routes 是那些路由。**InMenu 的八条**（含听歌统计），顺序就是侧栏菜单
 // 从上到下的顺序：前六条
 // 照 Biu 的 SD-04（推荐音乐 / 我的关注 / 稍后再看 / 历史记录 / 本地音乐 /
 // 下载记录），第七条「设置」是我们自己多摆的（Biu 那边设置只从头像下拉进）。
