@@ -379,10 +379,10 @@ func TestTheMiniCurtainUsesTheScreenItIsOn(t *testing.T) {
 	displays := miniTestDisplays()
 	// 窗停在两块屏的同一个高度（都靠近工作区底边）。
 	//
-	// ⚠️ **Y=890**：卡片底到副屏工作区底边还剩 1200 − 974 − 10 − 12 = 204 ⇒
-	// 放得下（200 是下限）；而主屏的底边在 1055，974 离它只剩 59 ⇒ 按主屏
-	// 算放不下——「算的是哪块屏」这一下分得出。
-	cur := mygo.Rectangle{X: -2400, Y: 890, Width: miniWidth, Height: miniHeight}
+	// ⚠️ **Y=800**：卡片底（800 + 194 = 994）到副屏工作区底边还剩
+	// 1200 − 994 − 12 = 194 ⇒ 放得下（140 是下限）；而主屏的底边在 1055，994 离它
+	// 只剩 49 ⇒ 按主屏算放不下——「算的是哪块屏」这一下分得出。
+	cur := mygo.Rectangle{X: -2400, Y: 800, Width: miniWidth, Height: miniHeight}
 
 	// ⚠️ **用的是生产那一档用的那个函数**（`miniWindowOf.WorkArea` 调的就是
 	// 它），而不是另写一份——这样「生产那一步算错了」这一种回归会被这一条
@@ -392,8 +392,8 @@ func TestTheMiniCurtainUsesTheScreenItIsOn(t *testing.T) {
 		t.Fatalf("生产那一档算出来的工作区是 %+v，want %+v（副屏那一块）",
 			work, displays[1].WorkArea)
 	}
-	// 按副屏那块工作区算：卡片底（890+84=974）到工作区底边还剩
-	// 1200 − 974 − 10 − 12 = 204 ⇒ 放得下（200 是下限）。
+	// 按副屏那块工作区算：卡片底（800+194=994）到工作区底边还剩
+	// 1200 − 994 − 12 = 194 ⇒ 放得下（140 是下限）。
 	h := miniCurtainHeight(work, cur)
 	if h < miniCurtainMinH {
 		t.Errorf("按副屏的工作区算卷帘高度是 %d，want >= %d（那儿放得下）",
@@ -422,11 +422,11 @@ func TestTheMiniWindowFitsTheNewWorkAreaWhenTheDisplayShrinks(t *testing.T) {
 	fake := newFakeMiniWindow()
 	// 窗展开着（84 + 缝 + 400 = 494 高），停在工作区顶上那 12。
 	fake.x, fake.y = 0, miniMargin
-	fake.height = miniHeight + miniCurtainGap + miniCurtainH
+	fake.height = miniHeight + miniCurtainH
 	s.attachMiniWindowTo(fake)
 	s.miniCurtain.open = true
 	s.miniCurtain.target = miniCurtainH
-	s.miniCurtain.setHeight = miniHeight + miniCurtainGap + miniCurtainH
+	s.miniCurtain.setHeight = miniHeight + miniCurtainH
 
 	// 那块屏的工作区变成 200 高（改了分辨率）。
 	next := mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 200}
@@ -463,13 +463,13 @@ func TestTheMiniCurtainRetargetsFromTheCardBottom(t *testing.T) {
 		s, _ := newMiniShell(t, nil)
 		fake := newFakeMiniWindow()
 		fake.x, fake.y = 0, miniMargin
-		fake.height = miniHeight + miniCurtainGap + miniCurtainH
+		fake.height = miniHeight + miniCurtainH
 		next := mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: workHeight}
 		fake.work = next
 		s.attachMiniWindowTo(fake)
 		s.miniCurtain.open = true
 		s.miniCurtain.target = miniCurtainH
-		s.miniCurtain.setHeight = miniHeight + miniCurtainGap + miniCurtainH
+		s.miniCurtain.setHeight = miniHeight + miniCurtainH
 		s.miniDisplays = func() []mygo.Display {
 			return []mygo.Display{{ID: 1, Primary: true, Bounds: next, WorkArea: next}}
 		}

@@ -193,7 +193,7 @@ func TestTheMiniCurtainLeavesACollapsedHeightInTheWindowState(t *testing.T) {
 	if !s.miniCurtain.open {
 		t.Fatalf("起点就不对：卷帘没有展开，文字有 %q", tt.Texts())
 	}
-	if got, want := fake.height, miniHeight+miniCurtainGap+miniCurtainH; got != want {
+	if got, want := fake.height, miniHeight+miniCurtainH; got != want {
 		t.Fatalf("展开之后窗高是 %d，want %d：这一条要断的是「展开着关窗」那一半",
 			got, want)
 	}

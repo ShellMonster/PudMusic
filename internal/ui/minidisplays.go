@@ -32,7 +32,6 @@
 package ui
 
 import (
-	"math"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -553,33 +552,13 @@ func (s *Shell) miniOnWindowResized() {
 	}
 }
 
-// miniCurtainBoardHeight 是 `miniCurtainWinHeight` 的**反函数**：拿窗高反解
-// 板高（`miniOnWindowResized` 钉弹簧用）。
-//
-// 🔴 **缝渐出之后它是两段，不是一个常数**：`miniCurtainWinHeight` 那一侧
-// 窗高 = 84 + 缝 + 板高，而**缝 = min(miniCurtainGap, 板高取整)**——
-//
-//   - 板比缝还高（`h − miniHeight ≥ 2×miniCurtainGap`）：缝是满的，
-//     `b = h − miniHeight − miniCurtainGap`；
-//   - 板比缝矮（`h − miniHeight < 2×miniCurtainGap`）：缝跟着板缩，
-//     `h − miniHeight = b + round(b) ≈ 2b`，`b = round((h − miniHeight)/2)`。
-//
-// 拿常数缝反解（`h − miniHeight − miniCurtainGap`）的话，用户把窗缘拖到
-// 「板 < 10px」那一档（窗高 84~94）时 board 反解成 0 或负——松手后
-// `holdAt(0)` 把窗拽回 84，而不是从用户拖到的高度接着走（P1 审查抓到
-// 的那条）。
-//
-// ⚠️ **取整是 `int(x+0.5)`（round），跟 `miniCurtainWinHeight` 同一把尺**
-// ——正解反解用的舍入不一样的话，同一扇窗高会反解出隔壁那一档的板高。
+// miniCurtainBoardHeight 由窗高反解卷帘那一块有多高（`miniCurtainWinHeight` 的逆）：
+// 窗高 = 194 + 卷帘高，所以卷帘高 = 窗高 − 194。用户拖窗缘时拿它把弹簧钉在
+// 用户拖到的高度上（`miniOnWindowResized`）。
 func miniCurtainBoardHeight(winH int) float64 {
 	r := winH - miniHeight
 	if r <= 0 {
 		return 0
 	}
-	// 板比缝矮那一段：h − 84 = b + round(b)，两段的分界在 r = 2×gap
-	//（b = gap 那一格正好落在「缝刚满」上，两段公式给出同一个数）。
-	if r < 2*miniCurtainGap {
-		return math.Floor(float64(r)/2 + 0.5)
-	}
-	return float64(r - miniCurtainGap)
+	return float64(r)
 }

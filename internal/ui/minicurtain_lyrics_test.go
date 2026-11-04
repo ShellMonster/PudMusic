@@ -23,12 +23,12 @@ import (
 	"testing"
 )
 
-// miniCurtainBoardTop 是**歌词板的顶边**在窗里的 y（卡片 84 + 那条缝 10）。
-const miniCurtainBoardTop = miniHeight + miniCurtainGap
+// miniCurtainBoardTop 是**歌词板的顶边**在窗里的 y（卡片收起时的 194，卷帘就紧贴在它下面）。
+const miniCurtainBoardTop = miniHeight
 
-// miniCurtainBoardMid 是**歌词区的中线**在窗里的 y（歌词板高 400，歌词区
-// 占满整板——说明句和菜单钮是绝对定位的，不占它的高）。
-const miniCurtainBoardMid = float32(miniCurtainBoardTop) + float32(miniCurtainH)/2
+// miniCurtainBoardMid 是**歌词区的中线**在窗里的 y（卷帘高 220：顶上 1 像素分隔线，
+// 其余 219 是歌词区）。
+const miniCurtainBoardMid = float32(miniCurtainBoardTop) + 1 + float32(miniCurtainH-1)/2
 
 // TestTheMiniCurtainLyricsCentresTheCurrentLine 盯「当前句在歌词区正中」。
 //
