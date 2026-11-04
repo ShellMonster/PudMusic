@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 )
 
 // seenDynID 是假 B 站那儿的「此刻最新那条动态」的 id。
@@ -87,7 +88,7 @@ func (l *feedBaselineLog) all() []string {
 // `translate-x-1/3 -translate-y-1/3` 的结果，见 navbar_feed.go 的
 // dynamicDotNudge）。
 func TestTheRedDotSitsOnTheTopRightOfTheIcon(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "42")
 	tt.SetFocused(true)
 	fakeClockOn(s, fakeClockStart)
 	// 假问：同步回话，说有 3 条没看过的。
@@ -103,25 +104,22 @@ func TestTheRedDotSitsOnTheTopRightOfTheIcon(t *testing.T) {
 		t.Fatalf("那个点没画出来，文字有 %q", tt.Texts())
 	}
 
-	wantX := icon.X + icon.W - dynamicDotNudge
-	wantY := icon.Y + dynamicDotNudge
+	// 原型 `.dot`：7×7，离按钮上沿 8、右沿 9，所以中心在 (右沿 - 9 - 3.5, 上沿 + 8 + 3.5)。
+	wantX := icon.X + icon.W - 9 - 3.5
+	wantY := icon.Y + 8 + 3.5
 	gotX := dot.X + dot.W/2
 	gotY := dot.Y + dot.H/2
-	if absF32(gotX-wantX) > 2 || absF32(gotY-wantY) > 2 {
-		t.Errorf("那个点的中心在 (%.1f, %.1f)，want (%.1f, %.1f)"+
-			"（图标右上角往里 %.1f）",
-			gotX, gotY, wantX, wantY, dynamicDotNudge)
+	if absF32(gotX-wantX) > 1 || absF32(gotY-wantY) > 1 {
+		t.Errorf("那个点的中心在 (%.1f, %.1f)，want (%.1f, %.1f)（原型：离上沿 8、右沿 9，7×7）",
+			gotX, gotY, wantX, wantY)
 	}
 
 	// ⚠️ **还要看它真的画上去了**：位置对而没画（被盖住、画在窗口外），
-	// 用户看见的还是「没有点」。
-	//
-	// 颜色是**主题里那一个 warning**（规矩见 semantic.go 第 3 条：图形色用
-	// 主题的原值）——经典那一档是上游的 #f5a524，主题方案各有自己的一档。
-	want := BuildTheme(s.app.SettingsSnapshot(), false).Warning
+	// 用户看见的还是「没有点」。原型的点是主色（`--accent`）。
+	want := tok.Of(BuildTheme(s.app.SettingsSnapshot(), false)).Accent
 	got := tt.Image().RGBAAt(int(gotX), int(gotY))
 	if wantA := (color.RGBA{R: want.R, G: want.G, B: want.B, A: 0xff}); got != wantA {
-		t.Errorf("那个点的中心那个像素是 %v，want %v（主题里那一个 warning）", got, wantA)
+		t.Errorf("那个点的中心那个像素是 %v，want %v（主色）", got, wantA)
 	}
 }
 
@@ -134,7 +132,7 @@ func TestTheRedDotSitsOnTheTopRightOfTheIcon(t *testing.T) {
 //
 // 治法是给那个点一句 `PassThrough()`（指针穿过去，落到按钮上）。
 func TestTheRedDotDoesNotSwallowTheClicks(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "42")
 	tt.SetFocused(true)
 	fakeClockOn(s, fakeClockStart)
 	s.feed.ask = func(done func(int, error)) { done(3, nil) }
@@ -347,7 +345,7 @@ func TestNothingIsAskedWhenNobodyIsLoggedIn(t *testing.T) {
 // （它说的是「用户还没看的时候」的数）——它要是被当真，点就又亮了，而用户明明
 // 已经看过了。
 func TestAnAnswerThatComesBackAfterReadingIsIgnored(t *testing.T) {
-	s, tt := newShell(t)
+	s, tt := newLoggedInShell(t, "42")
 	tt.SetFocused(true)
 	fakeClockOn(s, fakeClockStart)
 

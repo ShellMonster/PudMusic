@@ -1042,10 +1042,10 @@ func TestTheTopBarIsBiuHeight(t *testing.T) {
 		t.Fatalf("顶栏上没有头像，文字有 %q", tt.Texts())
 	}
 	// 无头 Tester 里 `c.TitleBar()` 是零（`ui/headless.go:46` 那张表默认没填），
-	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。64 是量出来的，见 navMinHeight。
-	const want = 64
+	// 所以这一帧顶栏画的就是 `navMinHeight` 本身。60 是原型的 `--top-h`。
+	const want = 60
 	if navMinHeight != want {
-		t.Errorf("navMinHeight 是 %d，want %d（Biu 的 h-16）", navMinHeight, want)
+		t.Errorf("navMinHeight 是 %d，want %d（原型 --top-h）", navMinHeight, want)
 	}
 	for _, e := range []struct {
 		what string
@@ -1220,10 +1220,16 @@ func TestTheTopBarHasNoSettingsKey(t *testing.T) {
 // 事；这一条只保证这一票没有顺手把别的也拿掉。
 func TestTheTopBarKeepsItsOtherEntries(t *testing.T) {
 	tt := navBarTester(t, false)
-	for _, label := range []string{"打开文件", "迷你", "动态", avatarLabel} {
+	// 原型没有「打开文件」；铃铛「动态」只在登录后出现，未登录的顶栏上不该有。
+	for _, label := range []string{"命令面板（⌘K）", "迷你", avatarLabel} {
 		if _, ok := tt.Find(label); !ok {
 			t.Errorf("顶栏上找不到 %q（顶栏上的字：%q）——这一票只该拿掉「设置」"+
 				"那一枚，别的入口没动", label, tt.Texts())
+		}
+	}
+	for _, gone := range []string{"打开文件", "动态"} {
+		if _, ok := tt.Find(gone); ok {
+			t.Errorf("未登录的顶栏上不该有 %q（原型：打开文件已删，铃铛登录后才有）", gone)
 		}
 	}
 }

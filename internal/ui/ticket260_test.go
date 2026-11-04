@@ -10,7 +10,11 @@ package ui
 //
 // ⚠️ **判据都在画面上**：顶栏右端那一块到底摆了什么、头像画出来的那一枚圆
 // 有多大——这些是用户看见的东西，而状态字段只用来定位，不当判据。
-import "testing"
+import (
+	"testing"
+
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+)
 
 // TestTheLoggedInTopBarHasNoStandaloneLogoutButton 钉住「登录之后顶栏上没有
 // 独立的「退出」按钮」。
@@ -69,14 +73,14 @@ func TestTheOtherTopBarKeysKeptTheirHitArea(t *testing.T) {
 	_, tt := newShell(t)
 	tt.Frame()
 
-	for _, label := range []string{"打开文件", "迷你"} {
+	for _, label := range []string{"迷你"} {
 		r, ok := tt.Find(label)
 		if !ok {
 			t.Fatalf("顶栏上找不到 %q，文字有 %q", label, tt.Texts())
 		}
-		if r.W != iconHitMd || r.H != iconHitMd {
-			t.Errorf("%q 那一格的命中区是 %v，want %d×%d——这一票只动头像那一格",
-				label, r, iconHitMd, iconHitMd)
+		if r.W != tok.IconHit || r.H != tok.IconHit {
+			t.Errorf("%q 那一格的命中区是 %v，want %v×%v——这一票只动头像那一格",
+				label, r, tok.IconHit, tok.IconHit)
 		}
 	}
 }
