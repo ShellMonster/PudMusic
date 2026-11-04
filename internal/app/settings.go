@@ -340,7 +340,6 @@ type Settings struct {
 	AudioQuality             AudioQuality             `json:"audioQuality"`
 	HiddenMenuKeys           []string                 `json:"hiddenMenuKeys"`
 	DisplayMode              DisplayMode              `json:"displayMode"`
-	FFmpegPath               string                   `json:"ffmpegPath"`
 	ThemeMode                ThemeMode                `json:"themeMode"`
 	Accent                   Accent                   `json:"accent"`
 	PageTransition           PageTransition           `json:"pageTransition"`
@@ -580,7 +579,6 @@ func DefaultSettings(downloadPath string) Settings {
 		AudioQuality:      AudioQualityHigh,
 		HiddenMenuKeys:    []string{},
 		DisplayMode:       DisplayModeList,
-		FFmpegPath:        "",
 		ThemeMode:         ThemeModeSystem,
 		Accent:            DefaultAccent,
 		PageTransition:    PageTransitionNone,

@@ -188,6 +188,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/download"
 	"github.com/ShellMonster/PudMusic/internal/ui/songname"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -844,7 +845,7 @@ func budgetScreens() []budgetScreen {
 					// 开关自己不装主题（它在设置页那一行里，主题由 `viewMain` 装），
 					// 隔离出来画就得自己装上，否则量的是框架默认那套主题。
 					s.applyFrameTheme(c)
-					springSwitch(c, &budgetSwitchOn)
+					pud.Switch(c, "budget-switch", &budgetSwitchOn, "开关")
 				}
 			},
 		},

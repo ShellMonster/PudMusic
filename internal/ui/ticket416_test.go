@@ -69,54 +69,6 @@ func uiDynamicWithFace(id, text, face string) map[string]any {
 	return m
 }
 
-// spaceTabTrack 扫出 UP 空间那一排 Tab 的**灰底轨道**（上下两条边）。
-//
-// ⚠️ **扫的是「投稿」那一列**：这一页的「动态」有两个（顶栏那枚按钮 + Tab 那一个），
-// 而选中的那一块（动态）是**第一块**——滑块压在它底下，那一列扫不出轨道色。拿
-// 第二块（「投稿」）那一列就躲开它了：轨道色在轨道的上下各 4 像素（`tabs.go` 的
-// `mainTabs`：轨道 `p-1` + 滑块 `h-8`）。
-//
-// ⚠️ **扫的是「围着标签那一段连续」的轨道色**，不是「这一列上所有轨道色的行」：
-// 动态卡片里那个视频块也是 `t.Surface`（经典主题下和轨道色同一个值），它要是
-// 也被算进去，轨道下边就会量到那个块的底边去。
-//
-// ⚠️ **这一组量的时候选中的是「动态」那一块**：滑块在第一块底下，选中第二块的话
-// 那一列扫到的是滑块（页面底色），量不出轨道。
-//
-// 返回的是轨道的**上下边**（不是左右）：左右那一头带着圆角，扫不准，而这一组
-// 判据要的是「Tab 那一条的底边在哪儿」。
-func spaceTabTrack(t *testing.T, tt *mygoui.Tester, th *mygoui.Theme) (top, bottom float32) {
-	t.Helper()
-	img := tt.Image()
-	track := rgbaOf(trackColor(th))
-	label, ok := tt.Find(upTabNames[1]) // 「投稿」
-	if !ok || label.W <= 0 {
-		t.Fatalf("画面上找不到 Tab「%s」，文字有 %q", upTabNames[1], tt.Texts())
-	}
-	cx := int(label.X + label.W/2)
-	// 上边：从标签那行字**上面**那一行往上，连续的轨道色。
-	lo := -1
-	for y := int(label.Y) - 1; y >= 0; y-- {
-		if img.RGBAAt(cx, y) != track {
-			break
-		}
-		lo = y
-	}
-	// 下边：从标签那行字**下面**那一行往下，连续的轨道色。
-	hi := -1
-	for y := int(label.Y+label.H) + 1; y < img.Bounds().Dy(); y++ {
-		if img.RGBAAt(cx, y) != track {
-			break
-		}
-		hi = y
-	}
-	if lo < 0 || hi < 0 {
-		t.Fatalf("「%s」那一列的轨道色不连成一段（%d..%d）——灰底轨道没画出来"+
-			"（文字有 %q）", upTabNames[1], lo, hi, tt.Texts())
-	}
-	return float32(lo), float32(hi + 1)
-}
-
 // dynamicCardBox 是那一条动态**卡片**的盒子。
 //
 // ⚠️ **量的是「行」那个盒子**：列表给每一行挂了一个无障碍名字（就是这一条动态的

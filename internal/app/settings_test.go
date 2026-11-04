@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -149,6 +150,46 @@ func TestFileFromANewerVersionIsReadOnly(t *testing.T) {
 	}
 	if string(raw) != future {
 		t.Errorf("文件被改了：\n%s", raw)
+	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 已删除的 ffmpegPath
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestTheRemovedFFmpegPathKeyIsDroppedOnLoadAndNeverWrittenBack 钉「ffmpegPath」这个死设置
+// 已经从 Settings 里删掉：旧文件里带着它也能正常读（别的键不受影响），下一次写回时它不再出现。
+func TestTheRemovedFFmpegPathKeyIsDroppedOnLoadAndNeverWrittenBack(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	write(t, path, `{"schemaVersion": 1, "appSettings": {
+	  "ffmpegPath": "/usr/local/bin/ffmpeg",
+	  "themeMode": "dark"
+	}}`)
+
+	s, err := app.LoadSettings(path)
+	if err != nil {
+		t.Fatalf("带着 ffmpegPath 的旧文件读不进来：%v", err)
+	}
+	if s.ThemeMode != app.ThemeModeDark {
+		t.Errorf("旧文件里的其他键被连带丢了：themeMode=%q", s.ThemeMode)
+	}
+
+	st, err := app.OpenSettingsStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Update(func(s *app.Settings) { s.FontFamily = "system-ui" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "ffmpegPath") {
+		t.Errorf("写回的文件里还有 ffmpegPath：\n%s", raw)
 	}
 }
 
