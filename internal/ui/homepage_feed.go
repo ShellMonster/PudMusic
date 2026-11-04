@@ -182,6 +182,19 @@ func (h *homePage) adopt() {
 	}
 }
 
+// available 报首页能不能去拉东西：B 站客户端挂上了才行。没挂上时一个请求都不会发，所以也不会
+// 有「正在拉」——页面直接说「没有」，而不是对着一块永远不会来的内容转骨架。
+func (h *homePage) available() bool {
+	return h.loads.mounted != nil && h.loads.mounted()
+}
+
+// waiting 报某一摊是不是还在等：能拉、而且还没拉回来（没拉过、或者正在拉）。
+// 外面塞进来的那一批（`SetSongs`）算拉过。
+func (h *homePage) waiting(k homeKind) bool {
+	st := &h.feed.sec[k]
+	return h.available() && (!st.started || st.loading)
+}
+
 // pull 把此刻该拉的几摊拉起来。每帧都跑一遍：已经拉过 / 正在拉的直接返回。
 //
 // 每日推荐和本周最热一进首页就拉（问候区的数字、「今日一张」都要它们）；新歌速递等用户

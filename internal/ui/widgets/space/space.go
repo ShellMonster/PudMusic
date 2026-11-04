@@ -148,6 +148,9 @@ const (
 	//
 	// SectionGap 是分区之间：48。
 	SectionGap = Px48
+
+	// ChartColGap 是首页榜单两列之间的缝：48（原型 `.chart { column-gap: 48px }`）。
+	ChartColGap = Px48
 	// SectionHeadGap 是分区标题到内容：20。
 	SectionHeadGap = Px20
 	// PageBottom 是页面底部留白：64。

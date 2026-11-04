@@ -23,6 +23,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/covertint"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -37,50 +38,87 @@ import (
 // heroTrackCount 是主视觉上摆几首曲目（原型 `heroIds = ['t1', 't2']`）。
 const heroTrackCount = 2
 
+// heroPlayable 报一条能当「今日一张」的候选：有封面、放得了。
+func heroPlayable(m list.Music) bool { return m.Cover != "" && m.Item.Bvid != "" }
+
 // heroPick 从 songs 里按日期选出「今日一张」和后面那一首（最多 heroTrackCount 首）。
 //
 // 候选是有封面、放得了的条目；一个都没有就退回全部。同一天选到的永远是同一首。
+//
+// ⚠️ 不拷候选：`list.Music` 是个大结构，拷一遍二十行就是几十 KB，而首页每帧都问它——
+// 数一遍候选、再走到第 idx 个就够了（调用方还会把结果记一份，见 `heroSongs`）。
 func heroPick(songs []list.Music, day time.Time) []list.Music {
-	cands := make([]list.Music, 0, len(songs))
+	n := 0
 	for _, m := range songs {
-		if m.Cover != "" && m.Item.Bvid != "" {
-			cands = append(cands, m)
+		if heroPlayable(m) {
+			n++
 		}
 	}
-	if len(cands) == 0 {
-		cands = songs
+	all := n == 0
+	if all {
+		n = len(songs)
 	}
-	if len(cands) == 0 {
+	if n == 0 {
 		return nil
 	}
 	y, mo, d := day.Date()
-	idx := (y*372 + int(mo)*31 + d) % len(cands)
-	out := []list.Music{cands[idx]}
-	if len(cands) > 1 && heroTrackCount > 1 {
-		out = append(out, cands[(idx+1)%len(cands)])
+	idx := (y*372 + int(mo)*31 + d) % n
+	at := func(i int) list.Music {
+		for _, m := range songs {
+			if all || heroPlayable(m) {
+				if i == 0 {
+					return m
+				}
+				i--
+			}
+		}
+		return list.Music{}
+	}
+	out := []list.Music{at(idx)}
+	if n > 1 && heroTrackCount > 1 {
+		out = append(out, at((idx+1)%n))
 	}
 	return out
 }
 
-// heroSongs 是此刻主视觉上的曲目：热榜优先，没有就用每日推荐。
-func (h *homePage) heroSongs() []list.Music {
-	src := h.feed.sec[homeChart].songs
-	if len(src) == 0 {
-		src = h.feed.sec[homeDaily].songs
-	}
-	return heroPick(src, h.day)
+// heroKey 是「今日一张」那一选的依据：哪一天、从哪一摊选、那一摊的头一首和条数。三样都没变，
+// 选出来的就是同一首，不用每帧再选。
+type heroKey struct {
+	day   int
+	chart bool
+	n     int
+	first string
 }
 
-// heroMetrics 是这一内容区宽度下的主视觉尺寸（原型 `.hero` 的三档）：
+// heroSongs 是此刻主视觉上的曲目：热榜优先，没有就用每日推荐。选出来的记一份，依据没变
+// 就直接给。
+func (h *homePage) heroSongs() []list.Music {
+	src, chart := h.feed.sec[homeChart].songs, true
+	if len(src) == 0 {
+		src, chart = h.feed.sec[homeDaily].songs, false
+	}
+	y, mo, d := h.day.Date()
+	k := heroKey{day: y*10000 + int(mo)*100 + d, chart: chart, n: len(src)}
+	if len(src) > 0 {
+		k.first = src[0].ID
+	}
+	if h.heroOK && h.heroFor == k {
+		return h.hero
+	}
+	h.hero, h.heroFor, h.heroOK = heroPick(src, h.day), k, true
+	return h.hero
+}
+
+// heroMetrics 是这一窗口宽度下的主视觉尺寸（原型 `.hero` 的三档，媒体查询看窗口宽）：
 //
-//	≥ 948  封面 320、缝 48、内边距 32
-//	≥ 760  封面 200、缝 32、内边距 24
-//	更窄   上下叠放，封面最宽 220，内边距 24
-func heroMetrics(contentW float32) (coverW, gap, pad float32, stacked bool) {
+//	> 1024  封面 320、缝 48、内边距 32
+//	> 760   封面 200、缝 32、内边距 24
+//	更窄    上下叠放，封面最宽 220，内边距 24
+func heroMetrics(win float32) (coverW, gap, pad float32, stacked bool) {
 	switch {
-	case contentW >= 948:
+	case win > 1024:
 		return 320, 48, 32, false
-	case contentW >= 760:
+	case win > 760:
 		return 200, 32, 24, false
 	}
 	return 220, 24, 24, true
@@ -93,12 +131,11 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 	if cw <= 0 {
 		cw = inner
 	}
-	coverW, gap, pad, stacked := heroMetrics(cw)
+	coverW, gap, pad, stacked := heroMetrics(h.win)
 
 	if len(hero) == 0 {
 		// 还在拉：摆一块和成品一样高的骨架，免得拉到之后整页往下跳。
-		ch, dh := &h.feed.sec[homeChart], &h.feed.sec[homeDaily]
-		if ch.loading || dh.loading || !ch.started || !dh.started {
+		if h.waiting(homeChart) || h.waiting(homeDaily) {
 			pud.Skeleton(c, "home:hero:sk", inner, coverW+2*pad, tok.R12).
 				Margin(space.Px32, space.None, space.None, space.None)
 		}
@@ -132,10 +169,13 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 		ui.Column(c).Grow(1).Shrink(1).Children(func() {
 			typo.Eyebrow(c, "今日一张 · Album of the day")
 			name := title.Clean(top.Title).Title
-			typo.Display(ui.Text(c, name), scale.Font(c, scale.HeroTitleFor(cw))).MaxLines(2).
-				Margin(space.Px12, space.None, space.Px8, space.None)
+			// 原型 `.hero-title { line-height: 1.05; margin: 12px 0 8px }`（补回行高见 `typo.DisplayNatural`）。
+			hs := scale.Font(c, homeHeroSize(h.win))
+			trim := typo.DisplayTrim(hs, 1.05)
+			typo.Display(ui.Text(c, name), hs).LetterSpacing(hs*0.02).MaxLines(2).
+				Margin(space.Px12-trim, space.None, space.Px8-trim, space.None)
 			if top.Owner != "" {
-				ui.Text(c, top.Owner).FontSize(scale.Font(c, scale.Size16)).TextColor(p.Text2).SingleLine().Ellipsis("…")
+				ui.Text(c, top.Owner).FontSize(scale.Font(c, scale.Size16)).LineHeight(leading.Body).TextColor(p.Text2).SingleLine().Ellipsis("…")
 			}
 			// 曲目。
 			ui.Column(c).FillWidth().MaxWidth(520).Gap(space.Px2).
@@ -166,13 +206,13 @@ func (h *homePage) viewHeroTrack(c *ui.Context, s *Shell, hero []list.Music, i i
 		b = b.Background(p.Hover)
 	}
 	b.Children(func() {
-		typo.Mono(ui.Text(c, fmt.Sprintf("%02d", i+1))).FontSize(scale.Font(c, scale.Size12)).
+		typo.Mono(ui.Text(c, fmt.Sprintf("%02d", i+1))).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).
 			TextColor(p.Text3).Width(28).SingleLine()
 		fg := p.Text
 		if h.isCur(m) {
 			fg = p.AccentText
 		}
-		ui.Text(c, title.Clean(m.Title).Title).FontSize(scale.Font(c, scale.Size14)).TextColor(fg).
+		ui.Text(c, title.Clean(m.Title).Title).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(fg).
 			SingleLine().Ellipsis("…").Grow(1).Shrink(1)
 		var meta []string
 		if t := homePlays(m.View); t != "" {
@@ -182,7 +222,7 @@ func (h *homePage) viewHeroTrack(c *ui.Context, s *Shell, hero []list.Music, i i
 			meta = append(meta, t)
 		}
 		if len(meta) > 0 {
-			typo.Mono(ui.Text(c, strings.Join(meta, " · "))).FontSize(scale.Font(c, scale.Size12)).
+			typo.Mono(ui.Text(c, strings.Join(meta, " · "))).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).
 				TextColor(p.Text3).SingleLine().Shrink(0)
 		}
 	})

@@ -161,7 +161,6 @@ type pageCase struct {
 // ⚠️ 这张表是本票的覆盖面清单，少一行就是那一页没接。哪些页**故意不在**里，
 // 理由写在 `displayPagesMissAndWhy`。
 var displayPages = []pageCase{
-	{name: "首页", open: openHomeForDisplay},
 	{name: "搜索结果", open: openSearchForDisplay},
 	{name: "收藏夹", open: openCollectionForDisplay},
 	{name: "UP 空间的投稿", open: openUpSpaceForDisplay, nudge: func(t *testing.T, tt *mygoui.Tester) {
@@ -316,22 +315,17 @@ func TestThePagesThatDeliberatelyDoNotFollowIt(t *testing.T) {
 			witness: "下载记录",
 		},
 		{
-			what: "首页的新歌速递",
+			what: "首页",
 			open: func(t *testing.T) (*mygoui.Tester, *Shell) {
 				s, tt := newShell(t)
-				s.home.SetSongs(homeSongs{new: homeSongsOf("新歌", 12)})
-				s.home.tab = homePopTab
+				s.home.SetSongs(homeSongsOf("推荐", 8), homeSongsOf("榜上", 20), homeSongsOf("新歌", 12), nil)
 				for range 3 {
 					tt.Frame()
 				}
-				// ⚠️ **推钟**：切 Tab 有过渡（票 #368），而 Tester 的钟站着不动——
-				// 不推钟的话这一屏停在过渡的第一帧上（内容还在淡入），而这一档
-				// 量的正是新歌速递那一块的几何。
-				settleHome(tt)
 				return tt, s
 			},
-			why:     "它是首页顶部的一块**横向推荐位**，两行是定死的（上游 `colCount * 2`），列数按窗口宽分档，翻页是两枚图标箭头——它有自己的几何，跟「一屏能看到更多歌」没关系",
-			witness: "新歌",
+			why:     "它是**精选页**：每日推荐是 6 张卡片、榜单是大序号榜行、新歌是曲目行，各有原型定死的摆法（`PAGES.home`），不是「一页歌」——跟「一屏能看到更多歌」没关系",
+			witness: "每日推荐",
 		},
 	} {
 		t.Run(c.what, func(t *testing.T) {
@@ -371,23 +365,6 @@ func wideEnough(tt *mygoui.Tester) {
 	for range 3 {
 		tt.Frame()
 	}
-}
-
-// openHomeForDisplay 打开首页（三个 Tab 的第一档）。
-func openHomeForDisplay(t *testing.T) (*Shell, *mygoui.Tester, [3]string) {
-	t.Helper()
-	song := func(i int) list.Music {
-		return list.Music{ID: displayTitles[i], Title: displayTitles[i], Duration: 100}
-	}
-	s, tt := newHome(t, homeSongs{
-		tabs: [homeTabCount][]list.Music{
-			{song(0), song(1), song(2)},
-			homeSongsOf(homeTabs[1], 3), homeSongsOf(homeTabs[2], 3),
-		},
-	})
-	mountDisplay(t, s.app)
-	wideEnough(tt)
-	return s, tt, displayTitles
 }
 
 // openSearchForDisplay 打开搜索结果（歌曲那一档）。

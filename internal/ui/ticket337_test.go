@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
 
 // seedThreeSongs 用三个不同路径的本地音频填队列，并确认旧歌确实在播。
@@ -184,64 +183,6 @@ func TestTheUpSpacePlayAllReplacesTheQueue(t *testing.T) {
 	if idx := a.Queue().CurrentIndex(); idx != 1 {
 		t.Errorf("当前项 = %d，want 1（两首都放不起来：#551 的自动跳过绕完一圈停在这一批的最后一首）", idx)
 	}
-}
-
-// 四档真实菜单从同样的三首旧歌出发；除立即播放外，另外三档必须保持既有行为。
-func TestTheFourRowQueueActions(t *testing.T) {
-	for _, action := range []string{"立即播放", "从这一首往后听", "下一首播放", "添加到队列"} {
-		t.Run(action, func(t *testing.T) {
-			b := newTestShell(t, withSettings(app.DefaultSettings("")))
-			old := seedThreeSongs(t, b.a)
-			songs := localSongs(t, 3)
-			b.s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: songs}})
-			homeFrame(b.tt)
-			if err := b.tt.RightClick(songs[1].Title); err != nil {
-				t.Fatal(err)
-			}
-			if err := b.tt.ChooseMenuItem(action); err != nil {
-				t.Fatal(err)
-			}
-			switch action {
-			case "立即播放":
-				// 队列变成四首：旧的三首 + 新点的那首（追加到队尾），正在放的是第四首。
-				assertQueueAndPlaying(t, b.a, queuePlus(old, songs[1].Item), 3)
-			case "从这一首往后听":
-				// 换成从这一首到本页末尾那一段（两首），正在放的是第一首。
-				assertQueueAndPlaying(t, b.a, []app.Item{songs[1].Item, songs[2].Item}, 0)
-			case "下一首播放":
-				// 插在**正在放的那首后面**（第一首之后），队列还是四首，当前项不动。
-				assertQueueAndPlaying(t, b.a, []app.Item{old[0], songs[1].Item, old[1], old[2]}, 0)
-			case "添加到队列":
-				// 加到**队尾**，不打断：队列四首，当前项还是第一首。
-				assertQueueAndPlaying(t, b.a, queuePlus(old, songs[1].Item), 0)
-			}
-		})
-	}
-}
-
-func TestSingleSongCardsPreserveTheQueue(t *testing.T) {
-	t.Run("新歌速递", func(t *testing.T) {
-		b := newTestShell(t, withSettings(app.DefaultSettings("")))
-		old := seedThreeSongs(t, b.a)
-		songs := localSongs(t, 3)
-		_, tt := newGridTester(t, list.AppActions(b.a, b.s.addToast), songs, 800, 900)
-		if err := tt.Click(songs[1].Title); err != nil {
-			t.Fatal(err)
-		}
-		assertQueueAndPlaying(t, b.a, queuePlus(old, songs[1].Item), 3)
-	})
-	t.Run("动态视频", func(t *testing.T) {
-		// ⚠️ **取流要另挂**：`dynamicCardShell` 那个假 B 站不伺服取流与音频
-		// （分 P 列表那一条它返回的是数组，读不懂）。
-		_, tt, a := dynamicCardShell(t, newUIExplore(t), uiDynamicArchive("v1", "BV1play"))
-		mountQueueStreaming(t, a)
-		old := seedThreeSongs(t, a)
-		if err := tt.Click("投稿 BV1play"); err != nil {
-			t.Fatal(err)
-		}
-		song := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BV1play", Title: "投稿 BV1play"}
-		assertQueueAndPlaying(t, a, queuePlus(old, song), 3)
-	})
 }
 
 func TestLibraryPlayNowPreservesTheQueue(t *testing.T) {

@@ -322,65 +322,6 @@ func TestTheQueueRowOperationKeyTurnsAccentOnHover(t *testing.T) {
 	}
 }
 
-// TestTheNewMusicPagerTurnsAccentOnHover 钉住新歌速递那两枚翻页箭头。
-//
-// 翻页是这一块**唯一的交互**，而原来那一档只有 8% 的淡底、图形不换色——用户最
-// 需要在这里知道「还有下一页」的时候看不出来。
-//
-// ⚠️ **到头那一枚是禁用的**：禁用的键**不许**用主色告诉用户「这里点得动」
-// （票 #217 的评审查出来过同款的一条）。所以这里断两件事：
-//
-//   - 能翻的那一枚悬停变主色；
-//   - **禁用**的那一枚悬停**不变**主色（禁用的状态必须从 `iconKey` 的 `disabled`
-//     那一栏给——链上的 `.Disabled(...)` 是返回之后才设上的，问早了）。
-func TestTheNewMusicPagerTurnsAccentOnHover(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			th := mygoui.LightTheme()
-			if dark {
-				th = mygoui.DarkTheme()
-			}
-			th.Accent = mygoui.Hex("#1ed760")
-			want := rgb(ink.AccentOn(th))
-
-			g := newNewMusic(homeTestCache(t), list.Actions{}, func() {})
-			g.SetSongs(homeSongsOf("新歌", 20))
-			tt := mygoui.NewTester(func(c *mygoui.Context) {
-				c.SetTheme(th)
-				g.View(c)
-			}, 800, 900)
-			homeFrame(tt)
-
-			// 「下一页」能翻（20 首歌分了几页），「上一页」在第一页上是禁用的。
-			next, ok := tt.Find("下一页")
-			if !ok || next.W == 0 {
-				t.Fatalf("画面上找不到「下一页」，文字有 %q", tt.Texts())
-			}
-			tt.Move(next.X+next.W/2, next.Y+next.H/2)
-			tt.Frame()
-			if n := nearPixels(tt.Image(), next, want); n < 4 {
-				t.Errorf("「下一页」悬停之后画面上只有 %d 个主色像素（want ≥ 4）——"+
-					"箭头没有变主色（翻页是这一块唯一的交互）", n)
-			}
-
-			prev, ok := tt.Find("上一页")
-			if !ok || prev.W == 0 {
-				t.Fatalf("画面上找不到「上一页」，文字有 %q", tt.Texts())
-			}
-			tt.Move(prev.X+prev.W/2, prev.Y+prev.H/2)
-			tt.Frame()
-			if n := nearPixels(tt.Image(), prev, want); n != 0 {
-				t.Errorf("禁用着的「上一页」悬停之后画面上有 %d 个主色像素——"+
-					"一枚禁用的键用主色告诉用户「这里点得动」", n)
-			}
-		})
-	}
-}
-
 // TestTheTopBarKeysKeepTheirTipsAndNames 钉住「提示文案和点击行为一个字没改」。
 //
 // 这一票把顶栏那四枚换成了另一档配方（`iconButton` → `iconKey`）——**换控件

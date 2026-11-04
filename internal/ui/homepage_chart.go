@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -28,17 +29,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
-
-// homeChartColGap 是榜单两列之间的缝（原型 `.chart { column-gap: 48px }`）。
-const homeChartColGap = 48
-
-// homeChartCols 是榜单排几列：内容区够宽（≥ 948，和卡片网格同一条线）排两列，否则一列。
-func homeChartCols(contentW float32) int {
-	if contentW >= pud.HideAlbumBelow {
-		return 2
-	}
-	return 1
-}
 
 // viewChart 画「榜单」这一档。
 func (h *homePage) viewChart(c *ui.Context, s *Shell, inner float32) {
@@ -53,16 +43,12 @@ func (h *homePage) viewChart(c *ui.Context, s *Shell, inner float32) {
 		}
 		switch {
 		case len(songs) > 0:
-			cw := h.contentW
-			if cw <= 0 {
-				cw = inner
-			}
-			cols := homeChartCols(cw)
-			colW := (inner - float32(cols-1)*homeChartColGap) / float32(cols)
+			cols := homeLayoutFor(h.win).chartCols
+			colW := (inner - float32(cols-1)*space.ChartColGap) / float32(cols)
 			ui.Column(c).FillWidth().Children(func() {
 				for start := 0; start < len(songs); start += cols {
 					end := min(start+cols, len(songs))
-					ui.Row(c).Key("home:chart:line:" + songs[start].ID).Gap(homeChartColGap).Children(func() {
+					ui.Row(c).Key("home:chart:line:" + songs[start].ID).Gap(space.ChartColGap).Children(func() {
 						for i := start; i < end; i++ {
 							h.viewChartRow(c, s, songs, i, colW)
 						}
@@ -71,7 +57,7 @@ func (h *homePage) viewChart(c *ui.Context, s *Shell, inner float32) {
 			})
 		case sec.err != nil:
 			h.sectionError(c, "home:chart:retry", sec.err, func() { h.retry(homeChart) })
-		case sec.started && !sec.loading:
+		case !h.waiting(homeChart):
 			pud.Empty(c, pud.ArtPlain, "榜单暂时是空的", "B 站这一期还没有给出榜单，过一会儿再来看看。", nil)
 		default:
 			for i := 0; i < 6; i++ {
@@ -101,7 +87,7 @@ func (h *homePage) viewChartRow(c *ui.Context, s *Shell, songs []list.Music, i i
 			numColor = p.AccentText
 		}
 		ui.Box(c).Width(56).Shrink(0).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-			typo.Display(ui.Text(c, strconv.Itoa(i+1)), scale.Font(c, scale.Size32)).TextColor(numColor).SingleLine()
+			typo.Display(ui.Text(c, strconv.Itoa(i+1)), scale.Font(c, scale.Size32)).LineHeight(leading.Numeral).TextColor(numColor).SingleLine()
 		})
 		ui.Box(c).Size(56, 56).Radius(tok.R4).Background(p.Surface2).Clip().Shrink(0).Children(func() {
 			h.coverOf(m.Cover)(c, 56, 56)
@@ -111,10 +97,10 @@ func (h *homePage) viewChartRow(c *ui.Context, s *Shell, songs []list.Music, i i
 			if h.isCur(m) {
 				fg = p.AccentText
 			}
-			ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).TextColor(fg).
+			ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).FontWeight(600).TextColor(fg).
 				SingleLine().Ellipsis("…")
 			if sub := homeCardSub(m); sub != "" {
-				ui.Text(c, sub).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text2).SingleLine().Ellipsis("…")
+				ui.Text(c, sub).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(p.Text2).SingleLine().Ellipsis("…")
 			}
 		})
 		h.viewTrend(c, m.ID)
@@ -148,7 +134,7 @@ func (h *homePage) viewTrend(c *ui.Context, id string) {
 	if up {
 		col = p.Ok
 	}
-	typo.Mono(ui.Text(c, text)).FontSize(scale.Font(c, scale.Size12)).TextColor(col).SingleLine().Shrink(0)
+	typo.Mono(ui.Text(c, text)).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(col).SingleLine().Shrink(0)
 }
 
 // viewNew 画「新歌」这一档：新歌速递的曲目行。
@@ -158,7 +144,8 @@ func (h *homePage) viewNew(c *ui.Context, s *Shell, inner float32) {
 		pud.SecHead(c, "home:new:head", "新歌速递", "B 站音乐站最近上架", "")
 		switch {
 		case len(sec.songs) > 0:
-			pud.TrackHead(c, inner)
+			album := homeLayoutFor(h.win).album
+			pud.TrackHeadMode(c, inner, album)
 			now := c.Now()
 			for i, m := range sec.songs {
 				ev := pud.TrackRow(c, "home:new:"+m.ID, pud.Track{
@@ -171,6 +158,7 @@ func (h *homePage) viewNew(c *ui.Context, s *Shell, inner float32) {
 					Cover:    h.coverOf(m.Cover),
 					Playing:  h.isCur(m),
 					Paused:   !h.playing,
+					AlbumCol: album,
 				}, inner)
 				if ev.Play {
 					h.playFrom(s, sec.songs, i)
@@ -178,7 +166,7 @@ func (h *homePage) viewNew(c *ui.Context, s *Shell, inner float32) {
 			}
 		case sec.err != nil:
 			h.sectionError(c, "home:new:retry", sec.err, func() { h.retry(homeNew) })
-		case sec.started && !sec.loading:
+		case !h.waiting(homeNew):
 			pud.Empty(c, pud.ArtPlain, "还没有新歌", "B 站最近没有新上架的歌，过一会儿再来看看。", nil)
 		default:
 			for i := 0; i < 8; i++ {

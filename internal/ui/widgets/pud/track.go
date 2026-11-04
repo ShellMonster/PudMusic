@@ -28,9 +28,32 @@ const (
 	HideAlbumBelow = 948
 )
 
+// AlbumMode 是「专辑」那一列怎么定：默认（自动）按列表宽度判，调用方也可以直接说画不画。
+//
+// 原型那条媒体查询看的是**窗口**宽（≤ 1180 去掉专辑列），而自动档拿的是**列表**宽——列表
+// 比内容区窄一圈页边距，默认 1200 的窗口里列表是 888，会被自动档误判成「太窄」。页面知道
+// 窗口宽，所以用 `AlbumShown` / `AlbumHidden` 自己说了算。
+type AlbumMode int
+
+const (
+	AlbumAuto AlbumMode = iota
+	AlbumShown
+	AlbumHidden
+)
+
 // trackCols 是这一宽度下三列弹性列的宽：标题、专辑（0 = 不画）、UP 主。
 func trackCols(w float32) (main, album, owner float32) {
+	return trackColsMode(w, AlbumAuto)
+}
+
+func trackColsMode(w float32, mode AlbumMode) (main, album, owner float32) {
 	hide := w > 0 && w < HideAlbumBelow
+	switch mode {
+	case AlbumShown:
+		hide = false
+	case AlbumHidden:
+		hide = true
+	}
 	n := float32(7)
 	if hide {
 		n = 6
@@ -47,9 +70,12 @@ func trackCols(w float32) (main, album, owner float32) {
 
 // TrackHead 是曲目列表的表头（原型 `.tl-head`）：高 40、12 号 text-3、底下一条 line、
 // 离第一行 4。w 是列表宽（就是内容区减页边距）。
-func TrackHead(c *ui.Context, w float32) {
+func TrackHead(c *ui.Context, w float32) { TrackHeadMode(c, w, AlbumAuto) }
+
+// TrackHeadMode 是 TrackHead 加上「专辑列画不画」由调用方说了算（见 `AlbumMode`）。
+func TrackHeadMode(c *ui.Context, w float32, mode AlbumMode) {
 	p := pal(c)
-	main, album, owner := trackCols(w)
+	main, album, owner := trackColsMode(w, mode)
 	ui.Row(c).Width(w).Height(40).PaddingX(space.Px12).Gap(space.Px16).AlignItems(ui.Center).
 		Margin(space.None, space.None, space.Px4, space.None).
 		Draw(func(pp *ui.Painter, r ui.Rect) {
@@ -101,6 +127,8 @@ type Track struct {
 	Removable bool
 	// Compact 是紧凑档：行高 44、不画封面（原型 `.tlist.compact`）。
 	Compact bool
+	// AlbumCol 是「专辑」那一列画不画（默认按列表宽度自动判，见 `AlbumMode`）。
+	AlbumCol AlbumMode
 }
 
 // TrackEvents 是这一帧在这一行上发生的事。
@@ -117,7 +145,7 @@ type TrackEvents struct {
 // 悬停才出现。正在播放且没悬停时序号位置是 eq-bars。
 func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 	p := pal(c)
-	main, album, owner := trackCols(w)
+	main, album, owner := trackColsMode(w, t.AlbumCol)
 	h := tok.RowH
 	if t.Compact {
 		h = tok.RowCompactH

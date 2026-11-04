@@ -27,59 +27,10 @@
 package ui
 
 import (
-	"os"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 )
-
-// TestRenderTicket313Shots 把这一票动过的那三处各存一张 PNG，深浅各一套。
-func TestRenderTicket313Shots(t *testing.T) {
-	dir := os.Getenv("BIU_SHOT_DIR")
-	if dir == "" {
-		t.Skip("设 BIU_SHOT_DIR 才会存图")
-	}
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			saveTicket313Home(t, dir, dark, name)
-			saveTicket313Drawer(t, dir, dark, name)
-			saveTicket313Later(t, dir, dark, name)
-		})
-	}
-}
-
-// saveTicket313Home 出首页那一屏：几行歌，每行都带时长和播放量。
-func saveTicket313Home(t *testing.T, dir string, dark bool, name string) {
-	t.Helper()
-	b := newTestShell(t, systemIsDark(dark), withSettings(app.DefaultSettings("")))
-	s, tt := b.s, b.tt
-
-	// ⚠️ **每一行都要带时长和播放量**：不然那两列是空的，而「空的那一列」验不出
-	// 「记好的那一份有没有记错」。
-	songs := []list.Music{
-		{ID: "a", Title: "第一首", Owner: "UP 一", Duration: 3*time.Minute + 7*time.Second, View: 12345},
-		{ID: "b", Title: "第二首", Owner: "UP 二", Duration: 1*time.Hour + 2*time.Minute + 3*time.Second, View: 1234567},
-		{ID: "c", Title: "第三首", Owner: "UP 三", Duration: 45 * time.Second, View: 999},
-		{ID: "d", Title: "第四首", Owner: "UP 四", Duration: 0, View: 0},
-	}
-	s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: songs}})
-
-	waitFor(t, "首页那几行画出来了", func() bool {
-		tt.Frame()
-		return tt.HasText("第一首")
-	})
-	homeFrame(tt)
-	save(t, dir, "01-首页列表-"+name+".png", tt)
-	// 右边那几列放大：时长、播放量、行尾那枚「⋯」都在那儿。
-	saveRect(t, dir, "02-首页列表-右边几列放大-"+name+".png", tt, 700, 150, 500, 220)
-	b.Close()
-}
 
 // saveTicket313Drawer 出队列抽屉开着的那一屏。
 func saveTicket313Drawer(t *testing.T, dir string, dark bool, name string) {

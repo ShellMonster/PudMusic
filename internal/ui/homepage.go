@@ -35,6 +35,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -87,6 +88,14 @@ type homePage struct {
 	// week / weekAt 是「本周已听」的缓存：统计快照是整份值拷贝，不该每帧取一次。
 	week   time.Duration
 	weekAt time.Time
+
+	// win 是窗口宽（这一帧的）：原型的媒体查询看的是窗口，不是内容区，见 `homeLayoutFor`。
+	win float32
+
+	// hero / heroFor / heroOK 是「今日一张」选出来的那一份和它的依据（见 `heroSongs`）。
+	hero    []list.Music
+	heroFor heroKey
+	heroOK  bool
 
 	// day 是这一帧的时刻（「今日一张」按它选，问候语按它定）。
 	day time.Time
@@ -151,7 +160,9 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 	if cw <= 0 {
 		cw = float32(ww) - tok.SideW
 	}
-	pad := space.PageHorizontal(cw)
+	h.win = float32(ww)
+	lay := homeLayoutFor(h.win)
+	pad := lay.pad
 	// 原型 `.page { max-width: 1280px }`：窗口再宽，内容也停在 1280（含左右页边距）。
 	bodyW := cw
 	if bodyW > homeMaxW {
@@ -178,6 +189,41 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 	})
 }
 
+// homeLayout 是首页随窗口宽度换挡的几个数。
+//
+// ⚠️ **原型的媒体查询看的是窗口宽度（视口），不是内容区**：窗口 ≤ 1280 卡片 5 列、≤ 1180 4 列
+// 且去掉曲目行的「专辑」列、榜单一列、≤ 1024 页边距 32（同时侧栏收起）、≤ 760 卡片 2 列
+// 页边距 16。`space.PageHorizontal` / `pud.GridCols` 拿的是内容区宽度，换算时把侧栏的 232
+// 当成恒定，在 1024 以下侧栏收到 72 之后会差一档，所以首页自己按窗口宽判。
+type homeLayout struct {
+	pad       float32
+	cols      int
+	chartCols int
+	album     pud.AlbumMode
+}
+
+func homeLayoutFor(win float32) homeLayout {
+	l := homeLayout{pad: space.Px40, cols: 6, chartCols: 2, album: pud.AlbumShown}
+	switch {
+	case win > 1280:
+	case win > 1180:
+		l.cols = 5
+	case win > 1024:
+		l.cols, l.chartCols, l.album = 4, 1, pud.AlbumHidden
+	case win > 760:
+		l.cols, l.chartCols, l.album, l.pad = 4, 1, pud.AlbumHidden, space.Px32
+	default:
+		l.cols, l.chartCols, l.album, l.pad = 2, 1, pud.AlbumHidden, space.Px16
+	}
+	return l
+}
+
+// homeGreetSize / homeHeroSize 是问候语和「今日一张」标题的字号。原型是随视口宽度渐变的：
+// 问候语 `clamp(36px, 4vw, 56px)`（`.greet .h-page`），主视觉标题 `clamp(40px, 5vw, 72px)`
+// （`.hero-title`）。所以 1200 的窗口里分别是 48 和 60。
+func homeGreetSize(win float32) float32 { return min(max(win*0.04, 36), 56) }
+func homeHeroSize(win float32) float32  { return min(max(win*0.05, 40), 72) }
+
 // homeMaxW 是页面最宽（原型 `.page { max-width: 1280px }`）。
 const homeMaxW = 1280
 
@@ -190,7 +236,7 @@ func (h *homePage) viewBody(c *ui.Context, s *Shell, inner float32, in pageInput
 	// 上说自己的状态。
 	none := len(daily.songs) == 0 && len(chart.songs) == 0
 	switch {
-	case none && (daily.err != nil || !daily.started) && chart.err != nil && daily.err != nil:
+	case none && chart.err != nil && daily.err != nil:
 		h.viewGreet(c, s, inner, in, 0)
 		pud.Empty(c, pud.ArtPlain, "推荐暂时加载不出来", daily.err.Error(), func() {
 			if pud.Button(c, "home:retry", pud.Primary, pud.Std, "重试", "refresh").Clicked() {
@@ -274,36 +320,40 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 	p := tok.Of(c.Theme())
 	now := c.Now()
 	greeting := homeGreeting(now)
-	if in.Account.SelfMid != 0 && h.feed.name != "" {
+	if selfMidOf(h.loads) != 0 && h.feed.name != "" {
 		greeting += "，" + h.feed.name
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.End).Justify(ui.SpaceBetween).Gap(space.Px24).
 		Padding(space.Px24, space.None, space.None, space.None).Children(func() {
 		ui.Column(c).Grow(1).Shrink(1).Children(func() {
 			typo.Eyebrow(c, homeDateText(now))
-			typo.Display(ui.Text(c, greeting), scale.Font(c, scale.PageTitleFor(inner))).
-				Margin(space.Px8, space.None, space.None, space.None)
+			// 原型 `.h-page { line-height: 1.15; margin: 8px 0 0 }`：框架压不下宋体的自然行高，
+			// 用负外边距把多出来的那截补回去（见 `typo.DisplayNatural`）。
+			gs := scale.Font(c, homeGreetSize(h.win))
+			trim := typo.DisplayTrim(gs, 1.15)
+			typo.Display(ui.Text(c, greeting), gs).LetterSpacing(gs*0.01).
+				Margin(space.Px8-trim, space.None, -trim, space.None)
 		})
 		ui.Column(c).Shrink(0).AlignItems(ui.End).Children(func() {
 			metaLine := func(pre, num, post string) {
-				ui.Row(c).AlignItems(ui.Baseline).Children(func() {
-					ui.Text(c, pre).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).SingleLine()
-					typo.Mono(ui.Text(c, num)).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).SingleLine()
+				// 数字前后的空格是字间距，行首行尾的空白框架会吃掉，所以用 Gap 摆 4。
+				ui.Row(c).AlignItems(ui.Baseline).Gap(space.Px4).Children(func() {
+					ui.Text(c, pre).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text2).SingleLine()
+					typo.Mono(ui.Text(c, num)).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text2).SingleLine()
 					if post != "" {
-						ui.Text(c, post).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).SingleLine()
+						ui.Text(c, post).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text2).SingleLine()
 					}
 				})
 			}
 			if picked > 0 {
-				metaLine("今天为你挑了 ", fmt.Sprint(picked), " 首")
+				metaLine("今天为你挑了", fmt.Sprint(picked), "首")
 			}
-			metaLine("本周已听 ", homeClock(h.week), "")
+			metaLine("本周已听", homeClock(h.week), "")
 			st := in.Playback
 			if in.HasCurrent && !st.Playing && st.Position > 0 && st.Err == "" && st.Title != "" {
 				name := title.Clean(st.Title).Title
-				label := "继续播放「" + name + "」 " + clockText(st.Position)
 				ui.Box(c).Margin(space.Px8, space.None, space.None, space.None).Children(func() {
-					if pud.Button(c, "home:resume", pud.Ghost, pud.Sm, label, "play").Clicked() {
+					if pud.ButtonMono(c, "home:resume", pud.Ghost, pud.Sm, "继续播放「"+name+"」", clockText(st.Position), "play").Clicked() {
 						s.app.Toggle()
 					}
 				})
@@ -357,7 +407,7 @@ func cellW(w float32, n int, gap float32) float32 { return pud.CellWidth(w, n, g
 // homePlays 是播放量的字（"12.3万"）；零值（这一项没有播放量）是空串。
 func homePlays(n int64) string { return list.PlayCountText(n) }
 
-// homeDaysAgo 是新歌速递那一列的字：「3 天前上传」。上架日期缺失时说「最近上传」。
+// homeDaysAgo 是新歌速递那一列的字：「3 天前 上传」（原型 `daysAgo(t.pub) + ' 上传'`，中间有空格）。上架日期缺失时说「最近上传」。
 func homeDaysAgo(t, now time.Time) string {
 	if t.IsZero() {
 		return "最近上传"
@@ -369,11 +419,11 @@ func homeDaysAgo(t, now time.Time) string {
 	d := int(b.Sub(a) / (24 * time.Hour))
 	switch {
 	case d <= 0:
-		return "今天上传"
+		return "今天 上传"
 	case d == 1:
-		return "昨天上传"
+		return "昨天 上传"
 	}
-	return fmt.Sprintf("%d 天前上传", d)
+	return fmt.Sprintf("%d 天前 上传", d)
 }
 
 // homeCardSub 给卡片副题用：「歌手 · 12.3万 播放」，缺哪样就少说哪样。
@@ -392,8 +442,12 @@ func homeCardSub(m list.Music) string {
 
 // viewRec 画「推荐」这一档：每日推荐、最近播放、你的收藏夹。
 func (h *homePage) viewRec(c *ui.Context, s *Shell, inner float32) {
-	gap := space.GridGapFor(inner)
-	cols := pud.GridCols(inner)
+	lay := homeLayoutFor(h.win)
+	gap := float32(space.GridGap)
+	if h.win <= 760 {
+		gap = space.Px16
+	}
+	cols := lay.cols
 	cw := cellW(inner, cols, gap)
 
 	daily := &h.feed.sec[homeDaily]
@@ -411,7 +465,7 @@ func (h *homePage) viewRec(c *ui.Context, s *Shell, inner float32) {
 			h.cardGrid(c, "daily", songs, cols, cw, gap, s)
 		case daily.err != nil:
 			h.sectionError(c, "home:daily:retry", daily.err, func() { h.retry(homeDaily) })
-		case daily.started && !daily.loading:
+		case !h.waiting(homeDaily):
 			pud.Empty(c, pud.ArtPlain, "今天还没有推荐", "B 站暂时没有给出推荐，过一会儿再来看看。", nil)
 		default:
 			h.skeletonGrid(c, "daily", cols, cw, gap)
@@ -438,7 +492,7 @@ func (h *homePage) viewRec(c *ui.Context, s *Shell, inner float32) {
 			h.rail(c, rs, inner, s)
 		case recent.err != nil && loggedIn:
 			h.sectionError(c, "home:recent:retry", recent.err, func() { h.retry(homeRecent) })
-		case loggedIn && (recent.loading || !recent.started):
+		case loggedIn && h.waiting(homeRecent):
 			h.skeletonRail(c, inner)
 		default:
 			pud.Empty(c, pud.ArtClock, "还没有最近播放", "放过的歌会出现在这里。", nil)
@@ -504,7 +558,11 @@ const homeRailCardW = 176
 
 // rail 画最近播放那一排横向滑动的卡片（原型 `.rail-wrap .od-rail`：缝 20）。
 func (h *homePage) rail(c *ui.Context, songs []list.Music, inner float32, s *Shell) {
-	ui.ScrollHorizontal(c).Key("home:rail").FillWidth().Gap(space.Px20).Padding(space.None, space.None, space.Px8, space.None).
+	// 原型 `.rail-wrap { margin-inline: -40px }` + `.od-rail { --od-rail-pad: 40px }`：rail 往两边
+	// 各探出一个页边距，卡片一直滑到窗口边缘，起点仍和页内容左对齐（里面再垫回一个页边距）。
+	pad := homeLayoutFor(h.win).pad
+	ui.ScrollHorizontal(c).Key("home:rail").Width(inner+2*pad).Gap(space.Px20).
+		Margin(space.None, -pad, space.None, -pad).Padding(space.None, pad, space.Px8, pad).
 		Children(func() {
 			for i, m := range songs {
 				ev := pud.CoverCard(c, "home:recent:card:"+m.ID, title.Clean(m.Title).Title,
@@ -528,6 +586,19 @@ func (h *homePage) skeletonRail(c *ui.Context, inner float32) {
 			})
 		}
 	})
+}
+
+// homeFolderSub 是收藏夹卡的副题（原型 `colCard`）：「收藏夹 · 9 首」，B 站的合集 / 系列写
+// 「合集 · N 首」「系列 · N 首」。数是 B 站上次统计的，不是实时的。
+func homeFolderSub(f app.Favorite) string {
+	kind := "收藏夹"
+	switch f.Type {
+	case 21:
+		kind = "合集"
+	case 31:
+		kind = "系列"
+	}
+	return kind + " · " + favCountText(f)
 }
 
 // homeFolder 是「你的收藏夹」里的一张卡：收藏夹本身 + 它在哪一组。
@@ -559,7 +630,7 @@ func (h *homePage) viewFolders(c *ui.Context, s *Shell, inner float32, cols int,
 						if hf.f.Cover != "" {
 							cover = h.coverOf(imgcache.CoverURL(hf.f.Cover, imgcache.ParamsCover))
 						}
-						if pud.ColCard(c, "home:"+favRowKey(hf.g, hf.f.ID), hf.f.Title, favCountText(hf.f), cw, cover) {
+						if pud.ColCard(c, "home:"+favRowKey(hf.g, hf.f.ID), hf.f.Title, homeFolderSub(hf.f), cw, cover) {
 							s.navigate(collectionPathOf(hf.f))
 						}
 					}

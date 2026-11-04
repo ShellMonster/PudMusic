@@ -23,8 +23,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
-	mygoui "github.com/egoist/mygo/ui"
 )
 
 // TestThePlayBarShowsTheRecognizedSongName 断「播放条上写的是**认出来的歌
@@ -138,66 +136,4 @@ func TestThePlayBarFallsBackToTheRawTitle(t *testing.T) {
 		t.Errorf("认不出的时候播放条上写的是 %q，want 原标题 %q"+
 			"（宁可显示脏标题，也不显示空白）", tt.Texts(), raw)
 	}
-}
-
-// TestTheListRowShowsTheRecognizedSongName 断「**列表里那一行**也是认出来的
-// 歌名」。
-//
-// ⚠️ **同一个歌名在两处显示成两个名字**是那种「界面上看不出坏了」的错——用户
-// 点的和放出来的不一样。
-//
-// 🔴 **判据是「那一行**画出来**的字」**（`Find` 找**完全相同**的那一句），而
-// 不是「画面上有没有那几个字」**——**无障碍名字**里用的是**原标题**（那一行
-// 右端的「操作」按钮带着它），而那是**故意**的：屏幕阅读器要念的是这一首的
-// **身份**，不是显示用的歌名。
-//
-// ⚠️ **不用像素比色**（理由见文件头）。
-func TestTheListRowShowsTheRecognizedSongName(t *testing.T) {
-	const raw = "【4K修复】周杰伦 - 晴天 官方MV 1080P 高音质"
-	tt := listRowTester(t, raw)
-
-	// ⚠️ **找的是**画出来的那一行字**：它必须是认出来的那个歌名。
-	box, ok := tt.Find("晴天")
-	if !ok {
-		t.Fatalf("列表里那一行没有认出来的歌名「晴天」，文字有 %q", tt.Texts())
-	}
-	if box.W <= 0 || box.H <= 0 {
-		t.Errorf("「晴天」那个盒子是 %.1fx%.1f——它没画出来", box.W, box.H)
-	}
-	// ⚠️ **那一行**画出来**的**不该是原标题。
-	//
-	// 🔴 **判据是**几何**（宽度），不是「画面上有没有那几个字」**：那一行的
-	// **无障碍名字**里用的是**原标题**（右端那个「操作」按钮带着它），而那是
-	// **故意**的——屏幕阅读器要念的是这一首的**身份**，不是显示用的歌名。
-	//
-	// ⚠️ **原标题那一行是 27 个字**，而「晴天」只有 2 个 ⇒ 宽度差一个数量级
-	// ⇒ 量宽度就能分辨画的是哪一个（而 `Find` 分不出：两者都是「文字」。
-	//
-	// ⚠️ **不用像素比色**（理由见文件头）。
-	const titleWidthMax = 80
-	if box.W > titleWidthMax {
-		t.Errorf("「晴天」那个盒子是 %.1f 宽——那不是认出来的那个歌名"+
-			"（原标题那一行会是这么宽）", box.W)
-	}
-}
-
-// listRowTester 造一个**只画首页**的外壳，首页那一页摆一行给定标题的歌。
-//
-// ⚠️ **它摆的是 `list.ShowOf` 那一档**（`widgets/list/titleline.go`）——而那一
-// 档和播放条用的是**同一份**清洗判据（`widgets/title`）。
-func listRowTester(t *testing.T, raw string) *mygoui.Tester {
-	t.Helper()
-	var b *testShell
-	b = newTestShell(t, at(1200, 900), withView(func(s *Shell) func(*mygoui.Context) {
-		s.home.SetSongs(homeSongs{tabs: [homeTabCount][]list.Music{0: {{
-			ID: "1", Title: raw, Owner: "某个 UP 主",
-		}}}})
-		return func(c *mygoui.Context) {
-			s.wake.set(c)
-			s.viewHome(c, nil)
-		}
-	}))
-	tt := b.tt
-	tt.Frame()
-	return tt
 }
