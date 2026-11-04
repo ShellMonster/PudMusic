@@ -80,7 +80,7 @@ func (s *Shell) viewStats(c *ui.Context, _ *ui.Route) {
 					}
 					s.viewStatStrip(c, st, rng, now, winW)
 					s.viewStatsTwoCol(c, st, rng, winW, listW)
-					s.viewStatsLoop(c, st, rng, listW)
+					s.viewStatsLoop(c, st, rng, winW, listW)
 				})
 		})
 		s.trackScrollbar(scroll)
@@ -400,7 +400,7 @@ type statsArtistRow struct {
 
 // viewStatsLoop 是「本周单曲循环」：曲目表头 + 最多 5 行，「专辑」那一列写「本机播放 N 次」，
 // 时长一列写这一首听了多久（B 站没给每首的总时长，这里用实际听的时长）。
-func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange, listW float32) {
+func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange, winW, listW float32) {
 	rows := st.statsPeriodRows(rng)
 	if len(rows) > statsTopLimit {
 		rows = rows[:statsTopLimit]
@@ -411,10 +411,10 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 			ui.Text(c, "这一段时间还没有听过歌").FontSize(scale.Font(c, scale.Size14)).TextColor(tok.Of(c.Theme()).Text2)
 			return
 		}
-		pud.TrackHead(c, listW)
+		pud.TrackHeadMode(c, listW, pud.AlbumModeFor(winW))
 		for i, r := range rows {
 			pud.TrackRow(c, "stats-track:"+r.Key, pud.Track{
-				Index: strconv.Itoa(i + 1), Title: r.Title, Owner: r.Subtitle,
+				Index: strconv.Itoa(i + 1), Title: r.Title, Owner: r.Subtitle, AlbumCol: pud.AlbumModeFor(winW),
 				Album:    fmt.Sprintf("本机播放 %d 次", r.Plays),
 				Duration: clockText(time.Duration(r.Ms) * time.Millisecond),
 				Cover: func(c *ui.Context, w, h float32) {

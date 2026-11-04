@@ -11,7 +11,7 @@
 // # 固定暗色
 //
 // 深浅主题下它都是同一套暗色（`tok.Full`）：底是 `#0B0B0C` 和封面取色按 30% 混出来的色，
-// 上面叠一层 50% 的模糊封面。里面的 `pud` 组件靠 `pud.SetFull(true)` 取暗色那一档令牌
+// 上面叠一层 50% 的模糊封面。里面的 `pud` 组件靠 `pud.WithFull` 取暗色那一档令牌
 // （原型 `.full` 把 `--text` / `--surface` / `--line` 等整套变量改写了）。
 //
 // # 位置自己算
@@ -339,43 +339,43 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 	prefs := s.pagePrefs()
 	g := s.fullGeometry(c, prefs.ShowCover || videoOn, videoOn && !s.full.theater)
 
-	pud.SetFull(true)
-	ui.Overlay(c, func() {
-		// 背景先摆：它是整窗的一层，后面那些控件都压在它上面。
-		s.viewFullBackdrop(c, st.CoverURL)
+	pud.WithFull(func() {
+		ui.Overlay(c, func() {
+			// 背景先摆：它是整窗的一层，后面那些控件都压在它上面。
+			s.viewFullBackdrop(c, st.CoverURL)
 
-		// 铺满整窗的那一层：吃掉底下那一层的点击。
-		root := ui.Box(c).Key("full-root").
-			Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Modal().Role(ui.RoleDialog).Label("满屏播放器").Transition(fullEnter)
-		root.Children(func() {
-			s.viewFullTop(c, st, g)
-			cinema := s.full.theater && videoOn
-			if cinema {
-				s.viewFullCinema(c, st, g, phase)
-			} else {
-				s.viewFullLeft(c, st, g, phase, prefs)
-			}
-			s.viewFullBottom(c, st, g)
-			// 🔴 右栏排在底栏**之后**（后建的在上）：旋钮行和歌词下沿落在底栏的地盘里
-			// （1200×800 时旋钮行 y=646，底栏从 591 起，频谱 / 章节名 / 进度那几行是透明的
-			// 盒子），排在前面的话旋钮点不到。
-			if !cinema && !g.narrow && prefs.ShowLyrics {
-				s.viewFullRight(c, st, g)
+			// 铺满整窗的那一层：吃掉底下那一层的点击。
+			root := ui.Box(c).Key("full-root").
+				Absolute().Left(0).Top(0).Right(0).Bottom(0).
+				Modal().Role(ui.RoleDialog).Label("满屏播放器").Transition(fullEnter)
+			root.Children(func() {
+				s.viewFullTop(c, st, g)
+				cinema := s.full.theater && videoOn
+				if cinema {
+					s.viewFullCinema(c, st, g, phase)
+				} else {
+					s.viewFullLeft(c, st, g, phase, prefs)
+				}
+				s.viewFullBottom(c, st, g)
+				// 🔴 右栏排在底栏**之后**（后建的在上）：旋钮行和歌词下沿落在底栏的地盘里
+				// （1200×800 时旋钮行 y=646，底栏从 591 起，频谱 / 章节名 / 进度那几行是透明的
+				// 盒子），排在前面的话旋钮点不到。
+				if !cinema && !g.narrow && prefs.ShowLyrics {
+					s.viewFullRight(c, st, g)
+				}
+			})
+			if root.OverlayShortcut(0, ui.KeyEscape) {
+				switch {
+				case s.fullScreen && s.videoMadeFull:
+					s.setScreenFull(false)
+				case s.full.theater:
+					s.full.theater = false
+				default:
+					s.closeFullPlayer()
+				}
 			}
 		})
-		if root.OverlayShortcut(0, ui.KeyEscape) {
-			switch {
-			case s.fullScreen && s.videoMadeFull:
-				s.setScreenFull(false)
-			case s.full.theater:
-				s.full.theater = false
-			default:
-				s.closeFullPlayer()
-			}
-		}
 	})
-	pud.SetFull(false)
 
 	// 弹幕：压在封面（或视频）上。🔴 它必须走 `ui.Overlay`，而且建在满屏那一层**之后**
 	// （后建的浮层在上）。
@@ -397,25 +397,25 @@ var fullNothing = emptyState{
 // viewFullEmpty 是「满屏开着、此刻没有歌」的那一屏：背景 + 收起键 + 一句话。
 // 换歌的那几百毫秒正好会走到这里，所以收起键和抽屉都留着。
 func (s *Shell) viewFullEmpty(c *ui.Context) {
-	pud.SetFull(true)
-	ui.Overlay(c, func() {
-		s.viewFullBackdrop(c, "")
-		root := ui.Box(c).Key("full-root").
-			Absolute().Left(0).Top(0).Right(0).Bottom(0).
-			Modal().Role(ui.RoleDialog).Label("满屏播放器")
-		root.Children(func() {
-			s.viewFullTop(c, app.State{}, fullGeo{})
-			ui.Column(c).Key("full-empty").
+	pud.WithFull(func() {
+		ui.Overlay(c, func() {
+			s.viewFullBackdrop(c, "")
+			root := ui.Box(c).Key("full-root").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
-				Center().Gap(space.Px6).Children(func() {
-				ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(tok.Full.Text)
+				Modal().Role(ui.RoleDialog).Label("满屏播放器")
+			root.Children(func() {
+				s.viewFullTop(c, app.State{}, fullGeo{})
+				ui.Column(c).Key("full-empty").
+					Absolute().Left(0).Top(0).Right(0).Bottom(0).
+					Center().Gap(space.Px6).Children(func() {
+					ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(tok.Full.Text)
+				})
 			})
+			if root.OverlayShortcut(0, ui.KeyEscape) {
+				s.closeFullPlayer()
+			}
 		})
-		if root.OverlayShortcut(0, ui.KeyEscape) {
-			s.closeFullPlayer()
-		}
 	})
-	pud.SetFull(false)
 	// 换歌的那几百毫秒里 `HasTrack` 是 false，抽屉得跟着留着。
 	s.viewQueueDrawer(c)
 	s.guardAt("评论抽屉", s.viewCommentsDrawer)(c)

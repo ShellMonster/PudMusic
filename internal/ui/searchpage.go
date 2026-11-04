@@ -327,6 +327,8 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	// 这一处自己给规格而不用 `PagedList.Header`：「用户」那一档的行里时长那一列
 	// **没有字**（位置留着——行尾那枚「⋯」的位置跟着它走），理由见
 	// `searchHeaderSpec`。
+	winW, _ := c.Size()
+	t.list.SetAlbumMode(pud.AlbumModeFor(winW))
 	if v := t.list.Layout(); v != list.ViewCard && tab != searchTabUser {
 		ui.Box(c).Height(space.Px8)
 		t.list.Header(c, "search:header:"+strconv.Itoa(tab))

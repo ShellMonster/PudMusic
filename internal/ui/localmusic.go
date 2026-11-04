@@ -514,7 +514,7 @@ func (p *localPage) view(c *ui.Context) {
 		}
 	}
 	pad := space.PageHorizontalForWindow(winW)
-	pud.SetAlbumHidden(winW <= 1180)
+	p.cards.SetAlbumMode(pud.AlbumModeFor(winW))
 	inner := min(cw, float32(pudPageMaxW))
 	ui.Column(c).Key("page:" + localMusicPath).Grow(1).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Width(inner).Padding(space.PageTop, pad, space.None, pad).

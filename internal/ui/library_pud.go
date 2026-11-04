@@ -79,6 +79,7 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 	if w <= 0 {
 		w = 960
 	}
+	winW, _ := c.Size()
 
 	col := ui.Column(c).Key(sp.key + m.ID).AlignSelf(ui.Stretch)
 	col = list.SelectedRow(col, t, r.Selected(), col.Hovered(), rows.keys.On() && list.Focused(c, &rows.state))
@@ -107,6 +108,7 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 			Album:     sp.colText(s, m),
 			Playing:   rows.isPlaying(m),
 			Compact:   rows.Layout() == list.ViewCompact,
+			AlbumCol:  pud.AlbumModeFor(winW),
 			CanLike:   rows.acts.FavSelect != nil,
 			Removable: sp.remove != nil,
 			Dim:       !m.CanPlay,

@@ -38,6 +38,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -516,6 +517,8 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// ⚠️ 它**换不掉**多选接线（`attachSelection` 装的那一份挂在两份控件上，
 			// 见 `widgets/list/switch.go`），所以网格那一档点勾照样能批量删。
 			p.list.SetView(s.displayView())
+			winW, _ := c.Size()
+			p.list.SetAlbumMode(pud.AlbumModeFor(winW))
 			// ⚠️ **表头在页内头部里面**（票 #625）：它跟着头图区一起滚走。
 			// 它自己会判多选态要不要给勾选框让位置（`HeaderSpec` 的 Lead），
 			// 所以这一处不用管多选。

@@ -27,7 +27,6 @@ func (s *Shell) pudPage(c *ui.Context, key string, body func(winW, listW float32
 		cw = winW - tok.SideW
 	}
 	pad := space.PageHorizontalForWindow(winW)
-	pud.SetAlbumHidden(winW <= 1180)
 	inner := min(cw, pudPageMaxW)
 	ui.Column(c).Key(key).Grow(1).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Width(inner).Padding(space.PageTop, pad, space.None, pad).

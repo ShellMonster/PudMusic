@@ -43,6 +43,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
@@ -575,6 +576,8 @@ func (s *Shell) syncUpSpace(c *ui.Context) {
 			sp.videos.Reload()
 		}
 		sp.videos.SetView(s.pageDisplayView())
+		winW, _ := c.Size()
+		sp.videos.SetAlbumMode(pud.AlbumModeFor(winW))
 		sp.videos.Sync(c)
 	}
 

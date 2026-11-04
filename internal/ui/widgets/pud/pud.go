@@ -60,7 +60,7 @@ func text(c *ui.Context, s string, size float32, col ui.Color) ui.Element {
 	return ui.Text(c, s).FontSize(scale.Font(c, size)).TextColor(col).LineHeight(leading.Body)
 }
 
-// pal 是这一帧的令牌。全屏播放器里（`SetFull(true)`）取固定暗色那一套。
+// pal 是这一帧的令牌。全屏播放器里（`WithFull`）取固定暗色那一套。
 func pal(c *ui.Context) tok.Palette {
 	if fullMode {
 		return tok.OfFull(c.Theme())
@@ -69,14 +69,21 @@ func pal(c *ui.Context) tok.Palette {
 }
 
 // fullMode 为真时所有组件按全屏播放器的固定暗色画（原型 `.full` 改写了整套 CSS 变量）。
-// 只在主线程建树时读写：全屏那一支建树前置真、建完置假（`SetFull`）。
+// 只在主线程建树时读写，且只由 `WithFull` 改。
 var fullMode bool
 
-// SetFull 开 / 关「全屏播放器里」那一档配色。成对调用：
+// WithFull 在 fn 里按全屏播放器的固定暗色那一档画，fn 结束（包括 panic 被外层 Guard 接住）
+// 时用 defer 摆回进来之前的值。
 //
-//	pud.SetFull(true)
-//	defer pud.SetFull(false)
-func SetFull(on bool) { fullMode = on }
+// 以前是成对的 `SetFull(true)` / `SetFull(false)`：夹着的回调一旦 panic，false 摆不回去，
+// 别的页面会按全屏的暗色画，只能靠每帧开头复位兜底。`defer` 把「摆回去」绑在作用域上，
+// 不再需要任何一处兜底。
+func WithFull(fn func()) {
+	prev := fullMode
+	fullMode = true
+	defer func() { fullMode = prev }()
+	fn()
+}
 
 // Full 报现在是不是在全屏播放器的那一档配色里。
 func Full() bool { return fullMode }

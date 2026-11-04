@@ -45,6 +45,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -332,6 +333,9 @@ type List struct {
 
 	// pud 报行和表头是不是画原型样式（见 `SetPudRows`）。
 	pud bool
+
+	// albumMode 是「专辑」那一列画不画（原型 `@media (max-width: 1180px)` 按窗口宽，见 `SetAlbumMode`）。
+	albumMode pud.AlbumMode
 
 	// insetX 是列表左右的内边距（页边距）；页内头部用负外边距抵回去，仍然通栏。见 `SetInsetX`。
 	insetX float32

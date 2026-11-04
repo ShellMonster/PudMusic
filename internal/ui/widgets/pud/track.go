@@ -2,7 +2,6 @@ package pud
 
 import (
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
@@ -34,12 +33,11 @@ const (
 	pageMargin     = 40
 )
 
-// AlbumMode 是「专辑」那一列怎么定：默认（自动）按窗口宽和列表宽判，调用方也可以直接说画不画。
+// AlbumMode 是「专辑」那一列怎么定：默认（自动）按列表宽判，调用方也可以直接说画不画。
 //
-// 原型那条媒体查询看的是**窗口**宽（≤ 1180 去掉专辑列）。自动档用两个依据：页面外壳每帧按窗口宽
-// 设一次的 `SetAlbumHidden`，加上列表自己的宽（侧栏被拖宽、窗口没到断点但列表窄时，`w` 加页边距
-// 小于 `HideAlbumBelow` 也去掉）。页面自己知道窗口宽、又不走外壳的（首页），用 `AlbumShown` /
-// `AlbumHidden` 自己说了算。
+// 原型那条媒体查询看的是**窗口**宽（≤ 1180 去掉专辑列），调用方用 `AlbumModeFor(winW)` 显式传进来。
+// 自动档只看列表自己的宽（侧栏被拖宽、窗口没到断点但列表窄时，`w` 加页边距小于 `HideAlbumBelow`
+// 也去掉）。首页这类自己知道窗口宽的页面，用 `AlbumShown` / `AlbumHidden` 说了算。
 type AlbumMode int
 
 const (
@@ -48,12 +46,17 @@ const (
 	AlbumHidden
 )
 
-// albumHidden 是「窗口宽 ≤ 1180，去掉专辑列」（原型 `@media (max-width: 1180px)`），
-// 只给 `AlbumAuto` 用。页面外壳每帧按窗口宽设一次（`SetAlbumHidden`）。
-var albumHidden atomic.Bool
+// AlbumHiddenAtWindow 是原型 `@media (max-width: 1180px)`：窗口宽 ≤ 它就去掉专辑列。
+const AlbumHiddenAtWindow = 1180
 
-// SetAlbumHidden 设「窗口宽 ≤ 1180」这一档（见 `albumHidden`）。
-func SetAlbumHidden(on bool) { albumHidden.Store(on) }
+// AlbumModeFor 按窗口宽（原型的视口）给出专辑列的模式：≤ 1180 是 `AlbumHidden`，
+// 否则 `AlbumAuto`（再看列表自己的宽）。页面把它传给列表 / 表头 / 行，不再有包级开关。
+func AlbumModeFor(winW float32) AlbumMode {
+	if winW <= AlbumHiddenAtWindow {
+		return AlbumHidden
+	}
+	return AlbumAuto
+}
 
 // trackCols 是这一宽度下三列弹性列的宽：标题、专辑（0 = 不画）、UP 主。
 func trackCols(w float32) (main, album, owner float32) {
@@ -61,7 +64,7 @@ func trackCols(w float32) (main, album, owner float32) {
 }
 
 func trackColsMode(w float32, mode AlbumMode) (main, album, owner float32) {
-	hide := (w > 0 && w+2*pageMargin < HideAlbumBelow) || albumHidden.Load()
+	hide := (w > 0 && w+2*pageMargin < HideAlbumBelow)
 	switch mode {
 	case AlbumShown:
 		hide = false

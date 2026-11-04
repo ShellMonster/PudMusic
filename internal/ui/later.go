@@ -273,7 +273,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 		// `syncLibraryPage` 那一层和删除 / 清除之后的重拉负责。
 		ui.Box(c).Height(space.Px8)
 		if !p.rows.isGrid() {
-			pud.TrackHead(c, p.rows.width)
+			pud.TrackHeadMode(c, p.rows.width, pud.AlbumModeFor(winW))
 		}
 		p.rows.View(c)
 		s.noteScrollbar(p.rows.Hot())

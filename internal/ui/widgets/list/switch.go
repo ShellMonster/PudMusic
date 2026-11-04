@@ -20,6 +20,7 @@ package list
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -72,6 +73,9 @@ func (s *SwitchView) SetColumns(c Columns) { s.list.SetColumns(c) }
 
 // SetPudRows 见 `List.SetPudRows`。
 func (s *SwitchView) SetPudRows(on bool) { s.list.SetPudRows(on) }
+
+// SetAlbumMode 见 `List.SetAlbumMode`。
+func (s *SwitchView) SetAlbumMode(m pud.AlbumMode) { s.list.SetAlbumMode(m) }
 
 // SetInsetX 见 `List.SetInsetX`，两份都装。
 func (s *SwitchView) SetInsetX(x float32) {

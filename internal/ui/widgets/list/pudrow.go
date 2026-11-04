@@ -36,12 +36,16 @@ func (l *List) usesPudRow() bool { return l.pud }
 // 默认关：没改版的页面保持旧行，改版的页面在建列表时打开它。
 func (l *List) SetPudRows(on bool) { l.pud = on }
 
+// SetAlbumMode 说「专辑」那一列画不画。页面每帧用 `pud.AlbumModeFor(窗口宽)` 传进来；
+// 行和表头读同一个值才对得齐。零值是 `pud.AlbumAuto`（只看列表自己的宽）。
+func (l *List) SetAlbumMode(m pud.AlbumMode) { l.albumMode = m }
+
 // PudHeader 画这个列表的原型表头。
 func (l *List) PudHeader(c *ui.Context) {
 	if l.view == ViewCard {
 		return
 	}
-	pud.TrackHead(c, l.RowWidth())
+	pud.TrackHeadMode(c, l.RowWidth(), l.albumMode)
 }
 
 // viewPudRow 画一行（`viewCard` / `viewCompactCard` 在非多选态都走这里）。
@@ -67,6 +71,7 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		Duration:  l.durText.At(i, m.Duration, formatDuration),
 		Playing:   playing,
 		Compact:   l.view == ViewCompact,
+		AlbumCol:  l.albumMode,
 		Highlight: l.hl,
 		Dim:       m.Item.Invalid,
 		CanLike:   !user && l.acts.FavSelect != nil,

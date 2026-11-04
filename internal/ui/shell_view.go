@@ -17,7 +17,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/ui/guard"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shimmer"
 	"github.com/egoist/mygo/ui"
 )
@@ -198,9 +197,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。
 	s.applyFrameTheme(c)
-	// `pud.SetFull` 是包级开关，满屏那一支用 true / false 成对夹住自己；那一支里 panic 的话 false
-	// 摆不回去，别的页面会按全屏的固定暗色画。每帧开头复位一次兜底。
-	pud.SetFull(false)
 	// 封面缓存要知道「新的一帧开始了」——挤缓存时**画面上正画着**的那几张
 	// 不许挤（票 #358：开队列抽屉时中间那一列的封面来回闪）。
 	//
