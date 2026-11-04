@@ -73,6 +73,12 @@ func (s *SwitchView) SetColumns(c Columns) { s.list.SetColumns(c) }
 // SetPudRows 见 `List.SetPudRows`。
 func (s *SwitchView) SetPudRows(on bool) { s.list.SetPudRows(on) }
 
+// SetInsetX 见 `List.SetInsetX`，两份都装。
+func (s *SwitchView) SetInsetX(x float32) {
+	s.list.SetInsetX(x)
+	s.grid.SetInsetX(x)
+}
+
 // SetSongs 换掉这份歌。**两份控件都换**（见文件头）。
 func (s *SwitchView) SetSongs(songs []Music) {
 	s.list.SetSongs(songs)

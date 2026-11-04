@@ -662,12 +662,16 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 		// 哪一档看到的页头，选中的就该是那一档里看得见的第一首。
 		OnClick: func() { p.list.SelectFirst() },
 		Draw: func(c *ui.Context) {
-			ui.Column(c).FillWidth().Gap(space.Px12).Children(func() {
+			// 三块之间没有统一的缝：原型 `.col-head` 紧接 `.col-actions`（自带上 24 下 8），
+			// 表头所在的 `.tlist` 另有 `margin-top: 8px`。
+			ui.Column(c).FillWidth().Children(func() {
 				s.viewCollectionHeader(c, p)
 				s.viewCollectionOps(c, p)
 				// ⚠️ **表头在最后**：它是「下面那些歌叫什么列」，所以它在
 				// 头图区和操作条的**下面**——和它原先在列表外面的位置一样。
-				p.list.Header(c, "collection:header")
+				ui.Column(c).FillWidth().Margin(space.Px8, space.None, space.None, space.None).Children(func() {
+					p.list.Header(c, "collection:header")
+				})
 			})
 		},
 	})

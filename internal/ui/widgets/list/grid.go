@@ -236,6 +236,9 @@ type Grid struct {
 	// 行号整体挪了一格（见 lead.go）。
 	lead *Lead
 
+	// insetX 是网格左右的内边距（页边距）；页内头部用负外边距抵回去。见 `SetInsetX`。
+	insetX float32
+
 	// scroll 是这个网格把滚动位置写回来的那个句柄，为 nil 时不写。理由同
 	// `List.scroll`：MyGo 的列表不往外说自己滚到哪儿了（回顶按钮和三重保障都要它）。
 	scroll *ui.ScrollState
@@ -381,6 +384,9 @@ func (g *Grid) SetFooterLabel(name string) { g.footerLabel = name }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (g *Grid) SetLead(lead *Lead) { g.lead = lead }
+
+// SetInsetX 见 `List.SetInsetX`。
+func (g *Grid) SetInsetX(x float32) { g.insetX = x }
 
 // SetScroll 让这个网格把滚动位置写进 s（每帧写一次）。理由见那个字段的注释。
 //
@@ -580,7 +586,7 @@ func (g *Grid) View(c *ui.Context) {
 
 	e := ui.List(c, &g.state, g.rows()).
 		Grow(1).
-		FillWidth().
+		FillWidth().PaddingX(g.insetX).
 		// 🔴 **听一听输入**：方向键挪游标、回车放歌，外加知道「键盘在管还是
 		// 指针在管」（焦点环靠它，理由见 `selection.go`）。
 		//
@@ -625,7 +631,8 @@ func (g *Grid) View(c *ui.Context) {
 	//（`ui/api_gen.go` 里 Bounds 的注释原话），所以窗口改宽之后列数晚一帧换
 	//——和 Biu 那边 ResizeObserver 改 state 再重画是同一个节奏。
 	if bw := e.Bounds().W; bw > 0 {
-		g.width = bw
+		// 量到的是带内边距的外盒；断点和格宽要的是内容宽。
+		g.width = max(bw-2*g.insetX, 1)
 	}
 
 	// 量滚动条的悬停（理由同 `List.View` 末尾那一行）。
@@ -947,7 +954,8 @@ func (g *Grid) viewLead(c *ui.Context) {
 		// ⚠️ **双击那一手和列表那一档是同一份接线**（票 #685）：网格里同样有
 		// 可选中复制的页内头部（`SetLead` 两份都装），所以「列内双击」在那里
 		// 也会被文字选择接走——理由和 `List.viewLead` 那一处一字不差。
-		ui.Column(c).FillWidth().Background(c.Theme().Background).HandleInput(g.leadInput).Children(func() {
+		ui.Column(c).AlignSelf(ui.Stretch).Margin(space.None, -g.insetX, space.None, -g.insetX).
+			Background(c.Theme().Background).HandleInput(g.leadInput).Children(func() {
 			g.lead.Draw(c)
 		})
 	})

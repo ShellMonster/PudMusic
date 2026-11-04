@@ -333,6 +333,9 @@ type List struct {
 	// pud 报行和表头是不是画原型样式（见 `SetPudRows`）。
 	pud bool
 
+	// insetX 是列表左右的内边距（页边距）；页内头部用负外边距抵回去，仍然通栏。见 `SetInsetX`。
+	insetX float32
+
 	// keys 记「上一次输入是键盘还是指针」（理由见 `selection.go` 的 KeyboardMode）。
 	//
 	// ⚠️ **焦点环靠它**：框架那个 `focusVisible` 只被 Tab 设回来，方向键不会——
@@ -411,6 +414,10 @@ func (l *List) SetFooterLabel(s string) { l.footerLabel = s }
 //
 // ⚠️ 只能由界面线程调，同 SetSongs。
 func (l *List) SetLead(lead *Lead) { l.lead = lead }
+
+// SetInsetX 给列表左右各留 x 像素（原型 `.page` 的页边距）。页内头部（`SetLead`）不受它影响，
+// 仍然铺满整个宽度。0 = 不留（默认）。
+func (l *List) SetInsetX(x float32) { l.insetX = x }
 
 // SetEmpty 换掉「没有歌时说的那句话」。
 //
@@ -817,7 +824,7 @@ func (l *List) View(c *ui.Context) {
 
 	list := ui.List(c, &l.state, l.rows()).
 		Grow(1).
-		FillWidth().
+		FillWidth().PaddingX(l.insetX).
 		// ⚠️ **听一听输入**：两件事——知道「上一次是键盘还是指针」（焦点环靠它，
 		// 理由见 `selection.go` 的 KeyboardMode），以及 ⌘C 复制选中那一行的歌名
 		// （票 #685，理由见 `copy_title.go` 的文件头）。
@@ -876,7 +883,8 @@ func (l *List) View(c *ui.Context) {
 	// 是**上一帧**量好的盒子，所以窄窗口的头一帧还是照全画——和网格换列数
 	// 同一个节奏，见 `Grid.width`。
 	if bw := list.Bounds().W; bw > 0 {
-		l.width = bw
+		// 量到的是带内边距的外盒；行宽要的是内容宽。
+		l.width = max(bw-2*l.insetX, 1)
 	}
 
 	// 量滚动条的悬停。界面层下一帧据此把主题的滚动条色换深一档（`Hot` 的
@@ -976,7 +984,8 @@ func (l *List) viewLead(c *ui.Context) {
 		// ⚠️ **它不抢文字选择**：`inputFn` 会让 `prepareSelectable` 在**祖先**
 		// 那一层停下（`mygo/ui/textselection.go`），而可选中那一列在这层**里
 		// 面**——从字往上走先撞到那一列，作用域照样是它。
-		ui.Column(c).FillWidth().Background(c.Theme().Background).HandleInput(l.leadInput).Children(func() {
+		ui.Column(c).AlignSelf(ui.Stretch).Margin(space.None, -l.insetX, space.None, -l.insetX).
+			Background(c.Theme().Background).HandleInput(l.leadInput).Children(func() {
 			l.lead.Draw(c)
 			// ⚠️ **判据是「没有歌」**：框架那一支判的是「列表没有行」，而
 			// 装了页内头部之后行数 ≥ 1——所以这里要自己判「没有**歌**」。

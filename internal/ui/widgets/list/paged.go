@@ -375,6 +375,9 @@ func (p *PagedList) SetView(v View) { p.surf.SetView(v) }
 // SetPudRows 见 `List.SetPudRows`。
 func (p *PagedList) SetPudRows(on bool) { p.surf.List().SetPudRows(on) }
 
+// SetInsetX 见 `List.SetInsetX`。
+func (p *PagedList) SetInsetX(x float32) { p.surf.SetInsetX(x) }
+
 // SetColumns 换这一页多画哪两列（播放量 / 时间）。理由和行、表头那一份
 // 都在 `Columns` 上（行和表头读同一份，别只装一边）。
 //

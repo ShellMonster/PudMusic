@@ -199,6 +199,9 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	}
 	// ⚠️ **外面这一层 Column 是必需的**（理由见 `viewSpaceList`：滚动容器直接当别的
 	// 容器的下一层时，里面文字的盒子量出来是 0×0）。
+	// 页边距（原型 `.page` 的 40 / 32 / 16）给列表自己的左右内边距，和另外三张 Tab 一样；
+	// 页内头部（头图带）因此要用负外边距抵回去，仍然通栏（同 `viewUpLead`）。
+	sp.videos.SetInsetX(s.upPadFor(c))
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		sp.videos.View(c)
 	})

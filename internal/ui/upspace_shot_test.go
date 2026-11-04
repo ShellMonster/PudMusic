@@ -35,6 +35,8 @@ func TestRenderUpSpaceShots(t *testing.T) {
 			if dark {
 				st.ThemeMode = app.ThemeModeDark
 			}
+			// 参考图 `ref/*-user-works.png` 是卡片档（原型 `videoList` 按显示设置分卡片 / 列表）。
+			st.DisplayMode = app.DisplayModeCard
 			b := newUIExplore(t)
 			png := func(path string, a, c color.RGBA) {
 				b.on(path, func(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +87,8 @@ func TestRenderUpSpaceShots(t *testing.T) {
 			s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(dark), withSettings(st))
 			openSpace(t, s, tt, 42)
 			sp := s.upSpaces[42]
+			// `openSpace` 为动态用例默认切到「动态」；这张图要的是原型默认的「投稿」。
+			sp.tab = upTabVideo
 			waitFrames(t, tt, "投稿加载完", func() bool { return sp.videos.Paged().Loaded > 0 })
 			waitFrames(t, tt, "图下完", func() bool {
 				return s.images.Get(b.URL+"/shot/face.png").Ready() && s.images.Get(b.URL+"/shot/cover.png").Ready()
