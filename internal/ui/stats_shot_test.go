@@ -45,6 +45,11 @@ func TestRenderStatsShots(t *testing.T) {
 			// 02 **有数据**：四枚磁贴 + 柱状图 + Top 歌 + Top 艺人。
 			full := statsShotShell(t, dark, seedShotStats)
 			save(t, dir, "02-统计页-有数据-"+theme+".png", full)
+			mode := "light"
+			if dark {
+				mode = "dark"
+			}
+			save(t, dir, mode+"-stats.png", full)
 		})
 	}
 }
@@ -99,7 +104,7 @@ func seedShotStats(a *app.App) {
 	a.SeedListeningStatsForTest(app.ListeningStats{
 		Days: days,
 		Tracks: map[string]*app.StatsTrackStat{
-			"mv:BV1|c1":             {Ms: 7_200_000, Plays: 34, Title: "夜曲", Artist: "林俊杰", ArtistMid: 1001},
+			"mv:BV1|c1":             {Ms: 7_200_000, Plays: 34, Title: "夜曲", Artist: "林俊杰", ArtistMid: 1001, FirstHeard: time.Now().AddDate(0, 0, -2).Format("2006-01-02")},
 			"mv:BV2|c2":             {Ms: 5_400_000, Plays: 26, Title: "晴天", Artist: "周杰伦", ArtistMid: 1002},
 			"mv:BV3|c3":             {Ms: 3_100_000, Plays: 19, Title: "起风了", Artist: "买辣椒也用券", ArtistMid: 1003},
 			"local:/music/song.mp3": {Ms: 2_400_000, Plays: 14, Title: "本地的一首歌", Local: true},
