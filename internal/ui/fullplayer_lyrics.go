@@ -1,102 +1,114 @@
-// 满屏播放器里的歌词：右边那一列。
+// 全屏播放器的右栏：歌词来源 + 原文 / 翻译 chip、歌词、旋钮（原型 `.full-right`、
+// `.ly-head`、`.lyrics`、`.knobs`，CSS 679–694 行、879–887 行）。
 //
 // # 「歌词区本体」是共用的一份
 //
-// 逐行高亮、放大 1.5 倍、译文叠在原词下面、上下渐隐、正在唱的那一句滚到中间
-// ——那些都在 `lyrics.go` 的 `viewLyricLines`，**迷你播放器那一页和满屏这一屏
-// 共用同一份代码**。
+// 逐行高亮、滚到中间、译文叠在原词下面都在 `lyrics.go` 的 `viewLyricLines`，迷你播放器那一页
+// 和这里共用；差别是画法（`lyricStyle`）：宋体、当前句放大 1.18、非当前句 38%（悬停 70%）、
+// 可点（点一句跳到那一句）。
 //
-// 两处差的是**画法**（`lyricStyle`）：字色与渐隐盖到的颜色。满屏这一屏压在
-// **糊过的封面**上，主题的正文色（浅色主题下是黑的）压在上面会糊进去——
-// 所以满屏用的是自己的前景色（白 92% / 黑 92%，跟着底走，见 `fullForeground`）。
-//
-// # 这一屏与迷你播放器那一页的差别
-//
-//	字色     满屏自己的前景色；用户在偏好里挑了「歌词字体颜色」就用挑的那个
-//	渐隐     **不盖那两条遮罩**：遮罩是盖一层底色，而满屏的底是糊过的封面——
-//	         盖出来的是背景上一个看得见的方块。改走**上游那条遮罩的语义**
-//	         （行在容器的上下沿附近时淡出，滑到中间时是全亮的），只是**逐行**
-//	         算（框架没有遮罩那一层）——背景一个像素都不动。
-//	对齐     **跟着上游**：封面开着的时候**左对齐**（上游 `centered={!showCover}`，
-//	         那些句子的左沿咬在内容盒的左沿上），封面关掉的时候居中。
-//	留白     内容盒上下各 96（上游 `py-24`）、左右各 48（上游 `px-12`）
-//	空状态   「暂无歌词」+ 一个「找歌词」的键
-//	旋钮     **右下角浮着三枚**（字号 / 偏移 / 找歌词），和上游一样
-//
-// # 右下角那三枚旋钮挂在**内容盒**上
-//
-// 上游那三枚是 `absolute right-6 bottom-6`（`components/lyrics/index.tsx:381`），
-// 而那个 `right-6` 是相对**歌词内容盒**（`px-12 py-24` 去掉内边距之后的那一块）
-// 算的：1200×800 的窗口上内容盒是 648..1152，于是三枚的**右沿是 1128**、
-// **底沿是 680**。
-//
-// ⚠️ **挂在壳上算出来的是 1176**（差那一份 48 的左右留白）——框架的绝对定位是
-// 相对**父节点的 padding box**（`mygo/ui/layout.go:1170` 的 `layoutAbsolute`），
-// 而 padding box 是**含内边距**的那一层。所以这一屏多了一个 `fullLyricsContentKey`
-// 那一块：内边距在壳上，旋钮挂在内容盒上。
+// ⚠️ **随包宋体只有 Bold 一档**（`typo`），所以非当前句也是粗的；原型里非当前句是常规字重。
 //
 // # 自己那一份歌词状态
 //
-// 满屏用的是 `s.fullLyric`，不是 `s.lyric`（迷你播放器那一页那一份）：两处画
-// 的是同一首歌，可**滚到了哪儿是各人各眼的事**——迷你播放器那一页停在用户上次
-// 看到的那一句，满屏跟着歌往前走。共用一份的话，两处会互相把对方的滚动位置
-// 拽回去（症状是「在满屏里翻歌词，翻一下就被拽回中间」）。
-//
-// 那一列旋钮的浮层状态也跟着分家（`s.fullLyric.fontOpen` / `offsetOpen`），
-// 理由同上：两个窗口各记各的。
+// 满屏用的是 `s.fullLyric`，不是 `s.lyric`（迷你播放器那一页那一份）：两处画的是同一首歌，
+// 可**滚到了哪儿是各人各眼的事**——共用一份的话两处会互相把对方的滚动位置拽回去。
 package ui
 
 import (
+	"strconv"
+	"time"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
 const (
-	// fullLyricsBoxKey 是右边那一列的壳（铁律四）。
+	// fullLyricsBoxKey 是歌词那一块的壳（铁律四）。
 	fullLyricsBoxKey = "full:lyrics:box"
-	// fullLyricsContentKey 是壳里**内容那一块**的键（铁律四）。
-	//
-	// ⚠️ **它和壳分开，是因为右下角那三枚旋钮要挂在内容那一块上**：上游那个
-	// `right-6` 是相对内容盒算的，挂在壳上会差那一份左右留白（见文件头）。
-	fullLyricsContentKey = "full:lyrics:content"
 	// fullLyricsAreaKey 是歌词区那一块的键（铁律四）。
 	fullLyricsAreaKey = "full:lyrics:area"
-	// fullLyricsEmptyKey 是「暂无歌词」那一块的键（铁律四）。
+	// fullLyricsEmptyKey 是「暂无歌词」那一块的键。
 	fullLyricsEmptyKey = "full:lyrics:empty"
-	// fullLyricsLoadingKey 是「歌词还在路上」那一块的键。
-	//
-	// ⚠️ **和空状态那个键分开**：同一个键上换内容，读屏软件读到的是同一句话；
-	// 而这两档说的是两件事（「在等」和「没有」）。
+	// fullLyricsLoadingKey 是「歌词还在路上」那一块的键（和空状态分开：说的是两件事）。
 	fullLyricsLoadingKey = "full:lyrics:loading"
 
-	// fullLyricsPadY 是歌词那一列**上下**的留白。
-	//
-	// ⚠️ **96 是上游的 `py-24`**（`full-screen-player/index.tsx:357`：歌词容器
-	// `px-12 py-24`）。它管的是内容盒的上下沿：800 高的窗口上内容盒是 96..704。
-	//
-	// ⚠️ **正在唱的那一句落在 411，不在窗口的正中（400）**——**这一条以前写的是
-	// 「落在窗口的正中」，那是错的**（2026-10-25 出图逐张对时量出来的）：内容盒的
-	// **顶上 22px 让给了那句「歌词来自搜索」**（它在滚动容器**外面**，见
-	// `viewLyricOrigin`），于是滚动容器是 118..704、中线 411；而上游没有那一句，
-	// 中线就是 400。**这 11px 的差是「我们多了一句说明」带来的**，不是算错了。
-	// 想跟上游一样落在正中，就得把那一句挪出内容盒的竖向流（另议）。
-	//
-	// 左右那一份是 `fullStagePadX`（48，上游的 `px-12`），两处共用一个数。
-	fullLyricsPadY = space.Px96
+	// fullLyricActiveScale 是当前句的放大倍数（原型 `.ly.cur { transform: scale(1.18) }`）。
+	fullLyricActiveScale = 1.18
+	// fullLyricBaseAdd 是歌词字号的差：App 里歌词字号默认 20，原型默认 24（`S.lySize`，当前句
+	// 24 × 1.18 ≈ 28），所以画的时候 +4；A− / A+ 照常 ±2，范围是原型的 18–34（App 字号 14–30）。
+	fullLyricBaseAdd = 4
+	// fullLyricFontMin / Max 是 A− / A+ 的范围（App 字号；原型 `Math.max(18, …)` / `Math.min(34, …)`）。
+	fullLyricFontMin = 14
+	fullLyricFontMax = 30
+	// fullLyricPadY 是每一句上下的内边距（原型 `.ly { padding: 10px 0 }`）。
+	fullLyricPadY = 10
+	// fullLyricOffsetStepMS 是偏移的步长：原型是 0.5 秒。
+	fullLyricOffsetStepMS = 500
+	// fullLyricFontStep 是 A− / A+ 每按一下改的字号（App 字号，原型是 ±2）。
+	fullLyricFontStep = 2
 )
 
-// viewFullLyrics 画满屏那一屏的歌词（右边那一列）。
-//
-// area 是这一列在窗口里的框（见 `viewFullStage`）。
-//
-// hidden 是界面藏起来没有：藏起来的时候**不画那三枚旋钮**——它们是**控件**
-// （上游是 `showControls={isUiVisible}`），而歌词是**内容**（上游的歌词容器不
-// 跟着藏）。
-func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden bool) {
+// viewFullRight 画右栏：歌词来源那一行、歌词、旋钮。
+func (s *Shell) viewFullRight(c *ui.Context, st app.State, g fullGeo) {
 	snap := s.app.Lyrics()
+	s.viewFullLyHead(c, snap, g)
+	s.viewFullLyrics(c, st, snap, g)
+	s.viewFullKnobs(c, snap, g)
+}
+
+// viewFullLyHead 是歌词来源说明 + 「歌词原文 / 歌词翻译」chip（原型 `.ly-head`）。
+//
+// ⚠️ 歌词里没有任何一句带译文时 chip 照画但禁用（框架的 `Disabled`），不是藏起来——
+// 用户得知道这个功能在、只是这一首没有。
+func (s *Shell) viewFullLyHead(c *ui.Context, snap app.LyricsSnapshot, g fullGeo) {
+	p := tok.OfFull(c.Theme())
+	r := g.lyHead
+	ui.Row(c).Key("full:ly-head").Absolute().Left(r.X).Top(r.Y).Width(r.W).Height(r.H).
+		Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+		note := lyricOriginText(snap.Origin)
+		if note == "" {
+			note = "歌词"
+		}
+		ui.Box(c).Grow(1).Children(func() {
+			fullMono(c, note, scale.Size12, 400, 12*0.1, p.Text3)
+		})
+		has := lyricsHaveTranslation(snap.Rows)
+		label := "歌词原文"
+		if s.full.lyTrans && has {
+			label = "歌词翻译"
+		}
+		chip := pud.Chip(c, "full:ly-trans", label, "translate", s.full.lyTrans && has).
+			Height(26).Radius(13)
+		// 原型：高 26、surface 8% 白底；选中 = 纸白底深字（`.ly-head .chip[aria-pressed]`）。
+		if !has {
+			chip = chip.Disabled(true)
+		}
+		if chip.Clicked() {
+			s.full.lyTrans = !s.full.lyTrans
+		}
+	})
+}
+
+// lyricsHaveTranslation 报这份歌词里有没有哪一句带译文。
+func lyricsHaveTranslation(rows []lyrics.Row) bool {
+	for _, r := range rows {
+		if r.Translation != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// viewFullLyrics 画歌词本体（或者「歌词还在路上」/「暂无歌词」）。
+func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnapshot, g fullGeo) {
 	lv := &s.fullLyric
 	// 🔴 认换歌在这一帧的最开头，早于任何一句决定（理由同 lyrics.go 那一处）。
 	lv.onSong(snap.Key)
@@ -106,160 +118,186 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, area ui.Rect, hidden
 		// 没有歌词：说清楚「没有」，而不是留一块空白（UX 报告 B3）。
 		lv.forget()
 	}
-
-	// ⚠️ **分栏只看「显示封面」那一个开关**（上游 `centered={!showCover}`）：
-	// 封面开着的时候歌词是**左对齐**的一列（那些句子的左沿咬在内容盒的左沿上），
-	// 封面关掉的时候歌词占满整窗，于是居中。
-	centered := !s.pagePrefs().ShowCover
-
-	// ⚠️ **说明句用满屏自己的第二档色**（`fullForeground` 的那个 dim），不用主题的
-	// 次要色：这一屏压在糊过的封面上，主题的次要色在浅色封面上会糊进去。
-	_, dim := s.fullForeground(c)
-
-	ui.Box(c).Key(fullLyricsBoxKey).
-		Absolute().Left(area.X).Top(area.Y).Width(area.W).Height(area.H).
-		Padding(fullLyricsPadY, fullStagePadX).
-		Children(func() {
-			// 内容盒：上游的 `px-12 py-24` 去掉内边距之后的那一块。
-			//
-			// ⚠️ **名字挂在这块上，不挂在外壳上**：读屏软件念得出「满屏歌词」，
-			// 而无头 Tester 也靠它量这一列的框——量的是**字画到哪儿**（内容盒），
-			// 不是外壳（含留白）到哪儿。歌词的淡出也是按内容盒算的（上游那条
-			// 遮罩是按**容器**算的），两者必须是同一块。
-			ui.Box(c).Key(fullLyricsContentKey).Grow(1).FillWidth().
-				Label("满屏歌词").
-				Children(func() {
-					if active < 0 {
-						// 空状态 / 加载中：没有滚动容器，旋钮列就挂在内容盒上（位置一样）。
-						//
-						// ⚠️ **两档要分开**（2026-10-27）：换歌之后歌词要先读盘、
-						// 等字幕、必要时自动找一次——那段时间里原先直接画「暂无
-						// 歌词」，用户读到的是结论而不是过程。
-						if snap.Loading {
-							s.viewFullLyricsLoading(c)
-						} else {
-							s.viewFullLyricsEmpty(c)
-						}
-						if !hidden {
-							s.viewFullLyricKnobs(c, snap, lv)
-						}
-						return
-					}
-					s.viewLyricLines(c, lv, snap, active, lyricStyle{
-						color:  s.fullLyricColor(c),
-						muted:  dim,
-						area:   fullLyricsAreaKey,
-						ns:     lyricNSFull,
-						center: centered,
-						// ⚠️ **0**：上游的行没有左右内边距，于是左对齐的那些句子
-						// 左沿就咬在内容盒的左沿上（1200 宽的窗口上是 x=648）。
-						padX: fullLyricBarPad(centered),
-						bar:  !centered,
-						mask: true,
-						// ⚠️ **旋钮列画在滚动容器里面**（理由见 `lyricStyle.overlay`）：
-						// 挂在外面（滚动容器的兄弟）的话，滚轮落在它身上——包括两枚
-						// 之间的缝——就滚不动歌词了。
-						overlay: func(c *ui.Context) {
-							if !hidden {
-								s.viewFullLyricKnobs(c, snap, lv)
-							}
-						},
-					})
-				})
+	r := g.lyrics
+	box := ui.Column(c).Key(fullLyricsBoxKey).
+		Absolute().Left(r.X).Top(r.Y).Width(r.W).Height(r.H).Label("满屏歌词")
+	box.Children(func() {
+		if active < 0 {
+			// ⚠️ **两档要分开**：换歌之后歌词要先读盘、等字幕、必要时自动找一次——那段时间里
+			// 画「暂无歌词」是结论而不是过程。
+			if snap.Loading {
+				s.viewFullLyricsLoading(c)
+			} else {
+				s.viewFullLyricsEmpty(c)
+			}
+			return
+		}
+		fg := s.fullLyricColor()
+		lv.anim = &fullLyricScrollAnim
+		big := snap
+		big.FontSize += fullLyricBaseAdd
+		s.viewLyricLines(c, lv, big, active, lyricStyle{
+			color:        fg,
+			muted:        tok.Full.Text3,
+			area:         fullLyricsAreaKey,
+			ns:           lyricNSFull,
+			mask:         true,
+			face:         fullLyricFace,
+			padY:         fullLyricPadY,
+			gap:          -1,
+			lineMul:      1.5,
+			activeScale:  fullLyricActiveScale,
+			idleAlpha:    0.38,
+			hoverAlpha:   0.70,
+			hideOrigin:   true,
+			hideTrans:    !s.full.lyTrans,
+			transRatio:   0.6,
+			transGap:     2,
+			transWeight:  400,
+			maskAlpha:    fullLyricMask,
+			presenceAnim: &fullLyricPresenceAnim,
+			pick:         s.fullLyricPick,
 		})
-
+	})
 	if active < 0 {
 		return
 	}
-	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上一帧
-	// 量到的（理由同 lyrics.go 里那一处）。
-	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize, s.snapScroll)
+	// ⚠️ 放在整棵树建完之后：它要用容器和正在唱那一句的框，而那两个是上一帧量到的。
+	lv.centre(c, active, lyricShapeOf(snap.Rows), snap.FontSize+fullLyricBaseAdd, s.snapScroll)
 }
 
-// viewFullLyricKnobs 画满屏那一屏右下角浮着的那三枚旋钮。
+// fullLyricFace 是歌词这一行用的字体和字重：原型 `.ly` 是宋体、常规字重，当前句 700
+// （`.ly.cur { font-weight: 700 }`）。
 //
-// ⚠️ **它们是控件，界面藏起来的时候不画**（上游 `showControls={isUiVisible}`）：
-// 指针不动三秒之后整屏的控件都收走，而歌词留着（歌词是内容）。
-//
-// ⚠️ **前景色给满屏那一档**：这一列压在糊过的封面上，主题的字色在浅色主题下是
-// 黑的（压在那块灰底上只有 3.8:1，读不出来）。那枚图标是这一档，那层圆底是
-// 它的 20%（上游 `bg-foreground/20`）。
-//
-// ⚠️ **三枚都画**（上游 `index.tsx:380-398` 那一层在没歌词时也摆）：字号和偏移
-// 改的是**存下来的那个值**，下一首歌有歌词时就按新的画了——它们无处可附，可
-// 它们也不是死的。
-func (s *Shell) viewFullLyricKnobs(c *ui.Context, snap app.LyricsSnapshot, lv *lyricsView) {
-	on, _ := s.fullForeground(c)
-	s.viewLyricKnobColumnWith(c, snap, true, lv, lyricKnobFull, on)
+// ⚠️ **字体的取值只在这一处**：随包宋体目前只有 Bold 一档，非当前句也只能是粗的；Regular 子集
+// 一到，把下面 `active == false` 那一支的字体换成 Regular 的族名就行，别处不用动。
+func fullLyricFace(active bool) (family string, weight int) {
+	_ = typo.Register()
+	if active {
+		return typo.DisplayFamily, 700
+	}
+	return typo.DisplayFamily, 400
 }
 
-// viewFullLyricsEmpty 是「这一首没有歌词」那一句。
-//
-// ⚠️ **它不走 `viewEmpty`**：那一处用的是主题的正文色与次要色，而满屏这一屏
-// 压在**糊过的封面**上——浅色主题下主题的正文色是黑的，压在浅色封面上会糊
-// 进去。满屏这一屏的字色是 `fullForeground` 那一档（白 92% / 黑 92%，跟着底走）。
-//
-// ⚠️ **它画在内容盒里**（壳 → 内容盒 → 这一块），所以它居中的那个点是内容盒的
-// 中心（1200 宽的窗口上是 900）——上游那个「暂无歌词」也是居中在内容盒里的。
-//
-// # 这里**不再摆**一枚「找歌词」
-//
-// 「怎么才能不空」那一句必须兑现得了——找歌词的入口**有**，就是右下角那一列
-// 旋钮里的「找歌词」（按下去开的就是歌词搜索弹窗，`lyricssearch.go`，那个弹窗
-// 画在满屏**上面**，见 `shell_view.go` 里 `viewMain` 的次序）。
-//
-// ⚠️ **两个一模一样的「找歌词」摆在同一屏上是噪音**（评审抓到的那一条）：中间
-// 一个、右下角一个，用户会以为是两个不同的动作。上游那一屏只有一个入口
-// （右下角那一枚），而主窗口「正在播放」那一页也是同一个样子（那一列旋钮是它
-// 唯一的入口）——所以这里跟上游、跟自己那一页都一致。
+// fullLyricMask 是歌词每一行的不透明度随位置的变化（原型 `mask-image: linear-gradient(transparent,
+// #000 18%, #000 82%, transparent)`）：上下各 18% 线性淡出。
+func fullLyricMask(rel float32) float32 {
+	switch {
+	case rel <= 0 || rel >= 1:
+		return 0
+	case rel < 0.18:
+		return rel / 0.18
+	case rel > 0.82:
+		return (1 - rel) / 0.18
+	}
+	return 1
+}
+
+// fullLyricScrollAnim 是滚到中间那一下：原型 `transform 600ms cubic-bezier(.25, 1.2, .4, 1)`
+// （带一点回弹）。
+var fullLyricScrollAnim = ui.Animation{Duration: 600 * time.Millisecond, Ease: ui.CubicBezier(0.25, 1.2, 0.4, 1)}
+
+// fullLyricPresenceAnim 是当前句放大 / 变亮的过渡：原型颜色 `--t-med`、缩放 `--t-slow`，
+// 都是 ease-out；一个过渡只有一个时长，取慢的那一档。
+var fullLyricPresenceAnim = ui.Animation{Duration: motion.Slow, Ease: motion.EaseOut}
+
+// fullLyricPick 是点了某一句：跳到那一句开头（原型 `seek-line`）。
+func (s *Shell) fullLyricPick(row lyrics.Row) {
+	snap := s.app.Lyrics()
+	s.app.SeekTo(row.At - lyricNow(0, snap.OffsetMS))
+}
+
+// viewFullLyricsEmpty 是「这一首没有歌词」那一句。找歌词的入口是下面旋钮行里的放大镜。
 func (s *Shell) viewFullLyricsEmpty(c *ui.Context) {
-	on, dim := s.fullForeground(c)
-	ui.Box(c).Key(fullLyricsEmptyKey).
-		Grow(1).FillWidth().Center().Gap(emptyGap).
-		Children(func() {
-			ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(dim)
-			ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(on)
-		})
+	ui.Box(c).Key(fullLyricsEmptyKey).Grow(1).FillWidth().Center().Gap(emptyGap).Children(func() {
+		ui.Icon(c, icon(noLyrics.Icon)).FontSize(emptyIconSize).TextColor(tok.Full.Text3)
+		ui.Text(c, noLyrics.Title).FontSize(scale.Font(c, scale.EmptyTitle)).TextColor(tok.Full.Text)
+	})
 }
 
-// viewFullLyricsLoading 是「这一首的歌词还在路上」。
-//
-// ⚠️ **它和空状态的区别只在有没有那句话**：两档都在内容盒正中，而加载中
-// **只有一枚转圈**（空状态是一枚插画 + 两行字）。摆插画的话用户会把「还没好」
-// 读成「没有」（这条规矩见 `empty.go` 的 `emptyState.Loading`）。
-//
-// ⚠️ **转圈的颜色要跟着满屏那一档走**（`fullForeground` 的 `on`）：这一屏压在
-// 糊过的封面上，主题那一档的转圈在浅色封面上会糊进去。所以这里不用
-// `drawLoading`（它取的是主题的次要色），而是自己摆一枚 `ui.Spinner` 并给色。
+// viewFullLyricsLoading 是「这一首的歌词还在路上」：只有一枚转圈，不摆插画（摆了用户会把
+// 「还没好」读成「没有」）。
 func (s *Shell) viewFullLyricsLoading(c *ui.Context) {
-	on, _ := s.fullForeground(c)
-	ui.Box(c).Key(fullLyricsLoadingKey).
-		Grow(1).FillWidth().Center().
-		Children(func() {
-			// ⚠️ **Label 是这一枚的无障碍名字**（框架的转圈没有可见的字）。
-			ui.Spinner(c).Size(loadingSpinnerSize, loadingSpinnerSize).
-				TextColor(on).Label(lyricsLoadingText)
-		})
+	ui.Box(c).Key(fullLyricsLoadingKey).Grow(1).FillWidth().Center().Children(func() {
+		ui.Spinner(c).Size(loadingSpinnerSize, loadingSpinnerSize).
+			TextColor(tok.Full.Text).Label(lyricsLoadingText)
+	})
 }
 
-// fullLyricColor 是满屏歌词的字色。
-//
-// 用户在偏好里挑了「歌词字体颜色」就用挑的那个——那是那个开关存在的意义
-// （它以前是个死控件，见票 #236）；没挑就用满屏自己的前景色。
-func (s *Shell) fullLyricColor(c *ui.Context) ui.Color {
-	on, _ := s.fullForeground(c)
+// fullLyricColor 是满屏歌词的字色：用户在偏好里挑了就用挑的那个，没挑是纸白 `#ECEBE8`。
+func (s *Shell) fullLyricColor() ui.Color {
 	if hex := s.pagePrefs().LyricsColor; hex != "" {
 		if col, ok := parseHexColor(hex); ok {
 			return col
 		}
 	}
-	return on
+	return tok.Full.Text
 }
 
-// fullLyricBarPad 给左对齐的歌词让出竖线那一列（居中时不需要）。
-func fullLyricBarPad(centered bool) float32 {
-	if centered {
-		return 0
+// viewFullKnobs 是歌词下面那一行旋钮（原型 `.knobs`）：偏移 −  数值  +，字号 A− A+，找歌词。
+//
+// 偏移显示的是**延后的量**（原型 `S.lyOff`）：「−」= 歌词提前 0.5 秒，「+」= 延后 0.5 秒。
+// App 里的偏移是反的（正数 = 同一播放位置落在更后一句 = 歌词更早），所以这里取反。
+func (s *Shell) viewFullKnobs(c *ui.Context, snap app.LyricsSnapshot, g fullGeo) {
+	p := tok.OfFull(c.Theme())
+	r := g.knobs
+	ui.Row(c).Key("full:knobs").Absolute().Left(r.X).Top(r.Y).Width(r.W).Height(r.H).
+		Gap(space.Px8).AlignItems(ui.Center).Label("歌词旋钮").Children(func() {
+		if fullKnob(c, "full:ly-off", "歌词提前 0.5 秒", "−", "").Clicked() {
+			s.app.SetLyricsOffset(snap.OffsetMS + fullLyricOffsetStepMS)
+		}
+		fullMono(c, s.full.txt.offsetText(snap.OffsetMS), scale.Size12, 500, 0, p.Text3).
+			MinWidth(44).TextAlign(ui.Center)
+		if fullKnob(c, "full:ly-on", "歌词延后 0.5 秒", "+", "").Clicked() {
+			s.app.SetLyricsOffset(snap.OffsetMS - fullLyricOffsetStepMS)
+		}
+		ui.Box(c).Width(12).Shrink(0)
+		if fullKnob(c, "full:ly-small", "歌词字号减小", "A−", "").Clicked() {
+			s.app.SetLyricsFontSize(max(snap.FontSize-fullLyricFontStep, fullLyricFontMin))
+		}
+		if fullKnob(c, "full:ly-big", "歌词字号增大", "A+", "").Clicked() {
+			s.app.SetLyricsFontSize(min(snap.FontSize+fullLyricFontStep, fullLyricFontMax))
+		}
+		ui.Box(c).Width(12).Shrink(0)
+		if fullKnob(c, "full:ly-find", "找歌词", "", "search").Clicked() {
+			s.openLyricSearch()
+		}
+	})
+}
+
+// fullOffsetText 是偏移的读数：`+0.5s` / `−0.5s` / `0.0s`（延后为正）。
+func fullOffsetText(ms int) string {
+	v := float64(-ms) / 1000
+	switch {
+	case v > 0:
+		return "+" + fmtSeconds(v)
+	case v < 0:
+		return "−" + fmtSeconds(-v)
 	}
-	return 8
+	return "0.0s"
+}
+
+func fmtSeconds(v float64) string {
+	n := int(v*10 + 0.5)
+	return strconv.Itoa(n/10) + "." + strconv.Itoa(n%10) + "s"
+}
+
+// fullKnob 是一枚旋钮（原型 `.knob`）：32 的圆、surface 8% 白底、悬停 16%，里面是 12 号等宽 600 的字
+// 或 16 的图标。
+func fullKnob(c *ui.Context, key, label, txt, icon string) ui.Element {
+	b := ui.ButtonBase(c).Key(key).Label(label).Size(32, 32).Radius(16).Shrink(0).
+		AlignItems(ui.Center).Justify(ui.Center)
+	bg := ui.RGBA(255, 255, 255, 0.08)
+	if b.Hovered() {
+		bg = ui.RGBA(255, 255, 255, 0.16)
+	}
+	b = b.Background(bg).Transition(motion.Fade)
+	b.Children(func() {
+		if icon != "" {
+			ui.Icon(c, pud.Icon(icon)).FontSize(16).TextColor(tok.Full.Text)
+			return
+		}
+		fullMono(c, txt, scale.Size12, 600, 0, tok.Full.Text)
+	})
+	return b
 }

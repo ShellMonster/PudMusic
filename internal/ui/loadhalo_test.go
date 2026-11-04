@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -308,6 +309,7 @@ func TestTheHaloStopsWhenTheWindowIsInvisible(t *testing.T) {
 			}
 		}))
 		tt := b.tt
+		tt.SetDark(true)
 		tt.Frame()
 		return b.s, tt
 	}
@@ -344,7 +346,10 @@ func fullHaloAngle(t *testing.T, s *Shell, tt *mygoui.Tester) float64 {
 		t.Fatalf("满屏上找不到播放键，文字有 %q", tt.Texts())
 	}
 	cx, cy := float64(key.X+key.W/2), float64(key.Y+key.H/2)
-	accent := keyAccent(t, tt, key)
+	// 满屏的播放键是纸白底（原型 `.full-ctrl .play-btn`），不再是主色圆，所以光圈的颜色不能再从键上
+	// 取——光圈画的是主题主色（这一组测试一律深色、默认朱砂）。
+	ac := tok.AccentColor("cinnabar", true)
+	accent := color.RGBA{R: ac.R, G: ac.G, B: ac.B, A: 255}
 	img := tt.Image()
 	b := img.Bounds()
 	var angles []float64

@@ -24,15 +24,15 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// 满屏播放器封面那一块在 1200×800 的窗里的位置（报告 §3.2）。
+// 满屏播放器封面那一块在 1200×800 的窗里的位置（「深夜唱片行」§0′.T4：440 见方，x=128，y=104）。
 //
 // ⚠️ **这些数是写死的字面量**，不去用 `fullplayer.go` 里的同名常量——
 // 布局和期望都用它的话，常量一改两边一起跟着变，测试就发现不了了。
 const (
-	danmakuCoverX = 192
-	danmakuCoverY = 265
-	danmakuCoverW = 360
-	danmakuCoverH = 270
+	danmakuCoverX = 128
+	danmakuCoverY = 104
+	danmakuCoverW = 440
+	danmakuCoverH = 440
 )
 
 // danmakuRed 是测试里弹幕用的颜色：纯红。
@@ -427,10 +427,11 @@ func TestTheDanmakuCanBeTurnedOff(t *testing.T) {
 func TestTheFullPlayerSettingsHasTheDanmakuSwitch(t *testing.T) {
 	_, tt, _ := fullTester(t)
 	openFull(t, tt)
-	if err := tt.Click("全屏设置"); err != nil {
-		t.Fatalf("点不了偏好面板：%v（文字：%q）", err, tt.Texts())
+	if err := tt.Click("满屏播放器偏好"); err != nil {
+		t.Fatalf("点不了偏好弹层：%v（文字：%q）", err, tt.Texts())
 	}
 	tt.Frame()
+	settleFull(t, tt)
 	if !tt.HasText("显示弹幕") {
 		t.Fatalf("偏好面板里没有「显示弹幕」那一格，文字有 %q", tt.Texts())
 	}
@@ -575,11 +576,11 @@ func TestALongDanmakuStaysUntilItHasLeftTheCover(t *testing.T) {
 			"它已经整个走出去了？", left, right, danmakuCoverX, danmakuCoverX+danmakuCoverW)
 	}
 
-	// 第 19 秒：它整个出界了 ⇒ 不该再看得到。
-	env.st.Position = 59 * time.Second
+	// 第 23 秒：它整个出界了（封面 440 + 字宽，÷ 60 像素/秒，字号跟着封面宽走，约 22 秒）⇒ 不该再看得到。
+	env.st.Position = 63 * time.Second
 	env.tt.Frame()
 	if l, _ := redSpan(env.tt, danmakuArea(), 0); l >= 0 {
-		t.Errorf("第 19 秒时长弹幕还在画面上（最左的红像素在 x=%d）——"+
+		t.Errorf("第 23 秒时长弹幕还在画面上（最左的红像素在 x=%d）——"+
 			"它早就整个走出封面了", l)
 	}
 }

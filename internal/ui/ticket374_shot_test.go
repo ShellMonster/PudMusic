@@ -72,11 +72,11 @@ func TestRenderTicket374Shots(t *testing.T) {
 // 所以这里等的是**某一格明显高过底排**（底排是 2/40 = 0.05）。
 func waitSpectrumData(t *testing.T, s *Shell, tt *mygoui.Tester) {
 	t.Helper()
-	const floor = 2.0 / fullSpectrumHeight
+	const floor = 2.0 / fullSpectrumH
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		tt.Frame()
-		if bars := s.app.SpectrumBars(48, float32(fullSpectrumHeight)); tallest(bars) > floor+0.05 {
+		if bars := s.app.SpectrumBars(48, float32(fullSpectrumH)); tallest(bars) > floor+0.05 {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)

@@ -315,9 +315,8 @@ func TestTheCommentsKeyIsNotShownForALocalFileInTheDrawer(t *testing.T) {
 // 🔴 **满屏开着的时候主窗口整个被盖住了**，所以播放条上那一枚在满屏里**点不到**
 // ——这一枚是满屏里唯一的入口。
 //
-// ⚠️ **它点开的时候先把满屏收掉**：抽屉是浮在**主窗口**上面的一层，而满屏是
-// **压在主窗口上面**的另一层——不收掉的话抽屉会开在满屏底下（那一层不透明，
-// 抽屉一格都看不见，而用户按了「评论」什么反应都没有）。
+// ⚠️ **它点开的时候不收满屏**（原型：满屏开着时 scrim / drawer 的 z-index 抬到 55 / 56，
+// 直接开在满屏上面）：抽屉由满屏那一支自己建，后建的浮层在上。
 func TestTheFullPlayerCommentsKeyOpensTheDrawer(t *testing.T) {
 	b := newCommentBili(t, "reply-main.json")
 	cli := bili.NewClient(bili.Options{Transport: b.Server.Client().Transport})
@@ -355,31 +354,26 @@ func TestTheFullPlayerCommentsKeyOpensTheDrawer(t *testing.T) {
 	if !s.commentsOpen {
 		t.Fatal("点了满屏里的「评论」键，抽屉没开")
 	}
-	if s.full.open {
-		t.Error("点了满屏里的「评论」键，满屏没收掉——抽屉会开在满屏底下")
+	if !s.full.open {
+		t.Error("点了满屏里的「评论」键，满屏被收掉了——原型里抽屉开在满屏上面")
 	}
 	waitFrames(t, tt, "评论画出来了", func() bool {
 		return tt.HasText("大圆镜科普")
 	})
 }
 
-// TestTheFullPlayerCommentsKeyHasNoCount 断「满屏那一枚**不带数字**」。
+// TestTheFullPlayerCommentsKeyHasNoCountUntilItIsKnown 断「拿不到评论数的时候满屏那一枚不画数字」。
 //
-// 🔴 **用户明确要求了**：满屏底栏是**居中的 flex**，任何一枚变宽播放键就离开
-// 窗口的竖直中轴了——而「三键落在中轴上」正是满屏底栏那条设计。
-//
-// ⚠️ **判据是「画面上没有那个数」**：播放条那一枚**照旧带**（票 #682），而这一
-// 枚不带。
-func TestTheFullPlayerCommentsKeyHasNoCount(t *testing.T) {
+// 「深夜唱片行」起满屏顶栏的评论键带角标（原型 `.cnt`），所以数字拿到了就画；🔴 **0 = 拿不到 =
+// 不显示**，不是「零条评论」（理由见 `viewCommentsButton`）：这一档没有那个数，名字里就是
+// 「评论」两个字，一字不多，键照旧能点。
+func TestTheFullPlayerCommentsKeyHasNoCountUntilItIsKnown(t *testing.T) {
 	tt, _ := commentsFullTester(t, mvItem())
 	if _, ok := tt.Find("评论"); !ok {
 		t.Errorf("满屏播放器里找不到「评论」键，文字有 %q", tt.Texts())
 	}
-	// ⚠️ **不带数字**：名字里不许有数字（`Find` 是全等匹配，所以「评论」找得到
-	// 就说明名字里没有别的东西）。
 	if _, ok := tt.Find("评论 1286"); ok {
-		t.Error("满屏那一枚「评论」键的名字里带数字了——满屏底栏是居中的 flex，" +
-			"带数字会让播放键离开竖直中轴")
+		t.Error("没拿到评论数的时候名字里带了数字")
 	}
 }
 

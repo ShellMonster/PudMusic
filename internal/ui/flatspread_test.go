@@ -199,43 +199,12 @@ func TestTheFullPlayerKeysAreFlat(t *testing.T) {
 			openFull(t, tt)
 			noPointer(tt)
 
-			assertKeysFlat(t, tt, "满屏播放器", "关闭全屏", "全屏设置")
+			assertKeysFlat(t, tt, "满屏播放器", "收起满屏播放器", "打开播放列表")
 			// 「框里没描边、没底色」还不够：**图形本身要被画出来**。这两枚是白的
 			// （`fullOnColor`），压在一个压暗过的封面上——底要是把它吃掉，框内
 			// 框外照样同色（那是一枚透明的空键），所以得单独断那枚图形。
-			assertGlyphPainted(t, tt, "关闭全屏")
-			assertGlyphPainted(t, tt, "全屏设置")
-		})
-	}
-}
-
-// TestTheFullPlayerPartsKeysAreFlat 分集把手和「收起分集」。
-//
-// 单独一条：那两枚要真的有多 P 的稿子才会摆出来（`multiPages`），而
-// `fullTester` 用的是本地文件（只有一「集」）。
-func TestTheFullPlayerPartsKeysAreFlat(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := onlineTester(t, multiPages(), false)
-			tt.SetDark(dark)
-			s.openFullPlayer()
-			waitFrames(t, tt, "分集问回来了", func() bool { return len(s.app.Parts()) == 3 })
-			noPointer(tt)
-
-			assertKeysFlat(t, tt, "满屏播放器", "显示分集列表")
-			assertGlyphPainted(t, tt, "显示分集列表")
-
-			if err := tt.Click("显示分集列表"); err != nil {
-				t.Fatalf("点不了分集把手：%v（文字：%q）", err, tt.Texts())
-			}
-			tt.Frame()
-			noPointer(tt)
-			assertKeysFlat(t, tt, "分集面板", "收起分集")
-			assertGlyphPainted(t, tt, "收起分集")
+			assertGlyphPainted(t, tt, "收起满屏播放器")
+			assertGlyphPainted(t, tt, "打开播放列表")
 		})
 	}
 }

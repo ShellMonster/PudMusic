@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/color"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -184,7 +185,7 @@ func TestACoverHoldPastTheRingSwallowsItsClick(t *testing.T) {
 			e.tt.Release(pt[0], pt[1])
 			e.tt.Frame()
 
-			if e.s.full.open || e.tt.HasText("关闭全屏") {
+			if e.s.full.open || e.tt.HasText("收起满屏播放器") {
 				t.Errorf("封面按住 %d 毫秒松手，全屏播放器自己开出来了 —— "+
 					"环一出来就算长按，补发的那一次 click 没吞掉", ms)
 			}
@@ -198,7 +199,7 @@ func TestACoverHoldPastTheRingSwallowsItsClick(t *testing.T) {
 				t.Error("松手之后「这一按算长按」还留着 —— 它会吃掉下一次点击")
 			}
 			e.tt.ClickAt(pt[0], pt[1])
-			if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+			if !e.s.full.open || !e.tt.HasText("收起满屏播放器") {
 				t.Error("中途松手之后第一次点封面没开全屏 —— 吞标记用掉之后还在吞")
 			}
 		})
@@ -232,7 +233,7 @@ func TestACoverHoldReleasedOffTheCoverKeepsTheNextKeyPress(t *testing.T) {
 	e.tt.Release(5, 5)
 	e.tt.Frame()
 
-	if e.s.full.open || e.tt.HasText("关闭全屏") {
+	if e.s.full.open || e.tt.HasText("收起满屏播放器") {
 		t.Fatal("松手落在封面外，全屏却开了")
 	}
 
@@ -240,7 +241,7 @@ func TestACoverHoldReleasedOffTheCoverKeepsTheNextKeyPress(t *testing.T) {
 	e.tt.Key(0, mygoui.KeyEnter)
 	e.tt.Frame()
 
-	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+	if !e.s.full.open || !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("封面外松手之后按回车，全屏没开 —— 那一次长按的「松手已过」没到期，"+
 			"把键盘的第一次激活吞掉了（文字有 %q）", e.tt.Texts())
 	}
@@ -297,14 +298,14 @@ func TestACoverTripleReleasedOffTheCoverKeepsTheNextKeyPress(t *testing.T) {
 	e.tt.Release(5, 5)
 	e.tt.Frame()
 
-	if e.s.full.open || e.tt.HasText("关闭全屏") {
+	if e.s.full.open || e.tt.HasText("收起满屏播放器") {
 		t.Fatal("三连之后移出封面松手，全屏却开了")
 	}
 
 	e.tt.Key(0, mygoui.KeyEnter)
 	e.tt.Frame()
 
-	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+	if !e.s.full.open || !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("三连之后封面外松手，再按回车全屏没开 —— `swallow` 那个尾巴没到期，"+
 			"把键盘的第一次激活吞掉了（文字有 %q）", e.tt.Texts())
 	}
@@ -323,7 +324,7 @@ func TestAQuickReleaseOnTheCoverStillOpensTheFullScreen(t *testing.T) {
 	e.tt.Release(pt[0], pt[1])
 	e.tt.Frame()
 
-	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+	if !e.s.full.open || !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("封面按住 %d 毫秒松手，全屏没开 —— 短按被长按那一套误伤了",
 			biuLikeRingDelayMS-1)
 	}
@@ -335,7 +336,7 @@ func TestAQuickReleaseOnTheCoverStillOpensTheFullScreen(t *testing.T) {
 // 三连 + 一次多余的赞；我们这边长按目标是封面，于是漏了它 = **凭空弹出全屏
 // 播放器**——进度环刚转满，界面就换成满屏那一屏，而用户以为自己只是赞了一下。
 //
-// 这一条量的是**画面**：松手之后「关闭全屏」那个键必须不在。
+// 这一条量的是**画面**：松手之后「收起满屏播放器」那个键必须不在。
 func TestALongPressNeverOpensTheFullScreen(t *testing.T) {
 	e := newLikeEnv(t, false, false, false)
 	holdCover(t, e)
@@ -345,7 +346,7 @@ func TestALongPressNeverOpensTheFullScreen(t *testing.T) {
 	e.tt.Frame()
 
 	waitFrames(t, e.tt, "三连发出去了", func() bool { return e.f.triplePostCount() > 0 })
-	if e.tt.HasText("关闭全屏") {
+	if e.tt.HasText("收起满屏播放器") {
 		t.Error("长按三连完，全屏播放器自己弹出来了 —— 补发的那一次 click 没吞掉")
 	}
 	if e.s.full.open {
@@ -354,7 +355,7 @@ func TestALongPressNeverOpensTheFullScreen(t *testing.T) {
 	// 而**下一次**普通点击必须照旧开全屏：吞标记是一次性的，
 	// 一直吞下去的话封面就再也点不开了。
 	e.tt.ClickAt(coverPoint(t, e.tt))
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("吞标记把后面那一次正常点击也吞了，文字有 %q", e.tt.Texts())
 	}
 }
@@ -368,7 +369,7 @@ func TestAShortPressStillOpensTheFullScreen(t *testing.T) {
 	x, y := coverPoint(t, e.tt)
 
 	e.tt.ClickAt(x, y)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("点一下封面全屏没开，文字有 %q", e.tt.Texts())
 	}
 }
@@ -401,7 +402,7 @@ func TestTheLongPressIsOffOnceTheSongIsLiked(t *testing.T) {
 	pt := coverPoint2(t, e.tt)
 	e.tt.Release(pt[0], pt[1])
 	e.tt.Frame()
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("禁用长按把普通点击也禁用了 —— 封面照旧该开全屏，文字有 %q", e.tt.Texts())
 	}
 }
@@ -428,15 +429,14 @@ func TestTheLongPressIsOffUntilTheServerAnswers(t *testing.T) {
 
 // TestTheFullScreenCoverTakesTheLongPressToo 钉住「接进播放条**与**全屏播放器」。
 //
-// 满屏上那一张是**另一个元素**（BMG-34 的共享元素转场让它有自己的框），所以
-// 「两边都接上了」不是把同一个函数调两次就成立——满屏那张外面套了一层新的 Box，
-// 长按要落在**它**上面。
+// 「深夜唱片行」起满屏上长按三连的目标是**点赞键**（原型 `data-hold`），不再是满屏那张封面
+// （`fullCoverRect` 现在返回点赞键的框，测试名沿用旧的）。
 func TestTheFullScreenCoverTakesTheLongPressToo(t *testing.T) {
 	e := newLikeEnv(t, false, false, true)
 
 	r := coverAt(t, e.tt)
 	e.tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Fatalf("满屏没开，文字有 %q", e.tt.Texts())
 	}
 	e.tt.Frame()
@@ -462,7 +462,7 @@ func TestTheFullScreenCoverHoldPastTheRingStaysPut(t *testing.T) {
 
 	r := coverAt(t, e.tt)
 	e.tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Fatalf("满屏没开，文字有 %q", e.tt.Texts())
 	}
 	e.tt.Frame()
@@ -474,7 +474,7 @@ func TestTheFullScreenCoverHoldPastTheRingStaysPut(t *testing.T) {
 	e.tt.Release(pt[0], pt[1])
 	e.tt.Frame()
 
-	if !e.s.full.open || !e.tt.HasText("关闭全屏") {
+	if !e.s.full.open || !e.tt.HasText("收起满屏播放器") {
 		t.Error("满屏封面上按住 700 毫秒松手，满屏却关掉了")
 	}
 	if got := e.f.triplePostCount(); got != 0 {
@@ -494,7 +494,7 @@ func TestTheFullScreenCoverHoldPastTheRingStaysPut(t *testing.T) {
 	closeFull(t, e)
 	again := coverAt(t, e.tt)
 	e.tt.ClickAt(again.X+again.W/2, again.Y+again.H/2)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Error("满屏封面中途松手之后，第一次点播放条封面没开全屏（要点第二下）—— " +
 			"那一按的吞标记没人消费，一路活到了这里")
 	}
@@ -513,7 +513,7 @@ func openFullAndTriple(t *testing.T, e *likeEnv) mygoui.Rect {
 	t.Helper()
 	row := coverAt(t, e.tt)
 	e.tt.ClickAt(row.X+row.W/2, row.Y+row.H/2)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Fatalf("满屏没开，文字有 %q", e.tt.Texts())
 	}
 	e.tt.Frame()
@@ -536,7 +536,7 @@ func closeFull(t *testing.T, e *likeEnv) {
 	t.Helper()
 	e.tt.Key(0, mygoui.KeyEscape)
 	e.tt.Frame()
-	if e.tt.HasText("关闭全屏") {
+	if e.tt.HasText("收起满屏播放器") {
 		t.Fatal("Esc 没关掉满屏")
 	}
 	advanceLike(e, 2*time.Second)
@@ -571,7 +571,7 @@ func TestTheFullScreenTripleDoesNotEatTheNextClickOnThePlaybar(t *testing.T) {
 	// 用户接下来的第一次点击：必须**一次**就开全屏。
 	again := coverAt(t, e.tt)
 	e.tt.ClickAt(again.X+again.W/2, again.Y+again.H/2)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Errorf("满屏三连之后第一次点封面没开全屏（要点第二下）—— " +
 			"补发 click 的标记没人消费，它一路活到了这里")
 	}
@@ -602,7 +602,7 @@ func TestATripleLeftHoldingDoesNotStrandTheFlag(t *testing.T) {
 
 	again := coverAt(t, e.tt)
 	e.tt.ClickAt(again.X+again.W/2, again.Y+again.H/2)
-	if !e.tt.HasText("关闭全屏") {
+	if !e.tt.HasText("收起满屏播放器") {
 		t.Error("三连之后没被消费的那个标记，把用户接下来第一次点封面吃掉了")
 	}
 }
@@ -687,34 +687,17 @@ func samePixel(a, b color.RGBA) bool {
 	return d(a.R, b.R) <= slack && d(a.G, b.G) <= slack && d(a.B, b.B) <= slack
 }
 
-// fullCoverRect 是满屏上那张封面在画面上的框。
-//
-// 它是共享元素转场的**终点**：宽 `min(宽*0.7, 高*0.48)` 夹在 260~520（上游那个
-// 式子），高是宽的 0.75。找元素不行——满屏上那个「当前封面」和播放条上那个同名，
-// 而播放条这时候压根没建。
-//
-// ⚠️ **位置是我们自己的摆法**（票 #236）：歌词开着的时候满屏分两栏，封面在**左边
-// 那一栏**里居中（右边那一栏让给歌词，见 `viewFullStage`），竖直方向居中在顶栏
-// 与底栏之间那一段（底下那一段留给频谱）。三个数写死在这儿——布局和期望都用
-// 生产代码那个常量的话，常量一改两边一起变，测试就发现不了了。
+// 「深夜唱片行」起满屏上的长按三连在**点赞键**上（原型 `data-hold`），不在封面上；这个帮手的名字
+// 沿用旧的，返回的是那一枚键的框（名字是「赞（长按三连）」，带赞数时前面多一个数字）。
 func fullCoverRect(t *testing.T, tt *mygoui.Tester) mygoui.Rect {
 	t.Helper()
-	winW, winH := float32(likeWinW), float32(likeWinH)
-	w := min(winW*0.7, winH*0.48)
-	w = min(max(w, 260), 520)
-	h := w * 0.75
-	const (
-		coverColRatio = 0.42 // 左边那一栏占窗口宽的几成
-		topBarH       = 64   // 顶上那一条的高
-		controlsH     = 92   // 底下那一条的高
-		spectrumBand  = 52   // 频谱那一条（40 + 12 的缝）
-	)
-	colW := winW * coverColRatio
-	top := float32(topBarH)
-	bottom := winH - float32(controlsH) - float32(spectrumBand)
-	return mygoui.Rect{
-		X: (colW - w) / 2,
-		Y: top + (bottom-top-h)/2,
-		W: w, H: h,
+	for _, name := range tt.Texts() {
+		if strings.HasPrefix(name, "赞") && strings.HasSuffix(name, "（长按三连）") {
+			if r, ok := tt.Find(name); ok {
+				return r
+			}
+		}
 	}
+	t.Fatalf("满屏上找不到点赞键，文字有 %q", tt.Texts())
+	return mygoui.Rect{}
 }

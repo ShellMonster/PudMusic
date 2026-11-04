@@ -98,7 +98,7 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 		// 高度要跟着它。
 		bottomInset := float32(playbarHeight)
 		if s.full.open {
-			bottomInset = fullControlsHeight
+			bottomInset = 0
 		}
 		back := ui.Row(c).Key("comments-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset)

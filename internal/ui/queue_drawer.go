@@ -317,7 +317,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		// 上面那十几像素会被蒙版盖住、点一下就变成「关抽屉」。
 		bottomInset := float32(playbarHeight)
 		if s.full.open {
-			bottomInset = fullControlsHeight
+			bottomInset = 0
 		}
 		back := ui.Row(c).Key("queue-backdrop").
 			Absolute().Left(0).Top(0).Right(0).Bottom(bottomInset)

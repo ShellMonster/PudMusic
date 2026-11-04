@@ -26,6 +26,8 @@
 package pud
 
 import (
+	"sync"
+
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
@@ -34,7 +36,18 @@ import (
 
 // Icon 取一枚原型图标（`iconset/icons/Pud/<name>.svg`，名字照原型 `ICONS` 的键：
 // "play"、"heart"、"more"……）。
-func Icon(name string) *ui.SVG { return iconset.Must("Pud/" + name + ".svg") }
+func Icon(name string) *ui.SVG {
+	if v, ok := iconCache.Load(name); ok {
+		return v.(*ui.SVG)
+	}
+	svg := iconset.Must("Pud/" + name + ".svg")
+	iconCache.Store(name, svg)
+	return svg
+}
+
+// iconCache 按名字缓存解析好的图标：`Icon` 每帧每枚键调一次，每次现拼路径字符串就是每帧多
+// 十几次分配（满屏的每帧分配预算盯着这一处）。
+var iconCache sync.Map
 
 // glyph 画一枚图标：size 边长，col 颜色。
 func glyph(c *ui.Context, name string, size float32, col ui.Color) ui.Element {
@@ -46,8 +59,26 @@ func text(c *ui.Context, s string, size float32, col ui.Color) ui.Element {
 	return ui.Text(c, s).FontSize(scale.Font(c, size)).TextColor(col)
 }
 
-// pal 是这一帧的令牌。
-func pal(c *ui.Context) tok.Palette { return tok.Of(c.Theme()) }
+// pal 是这一帧的令牌。全屏播放器里（`SetFull(true)`）取固定暗色那一套。
+func pal(c *ui.Context) tok.Palette {
+	if fullMode {
+		return tok.OfFull(c.Theme())
+	}
+	return tok.Of(c.Theme())
+}
+
+// fullMode 为真时所有组件按全屏播放器的固定暗色画（原型 `.full` 改写了整套 CSS 变量）。
+// 只在主线程建树时读写：全屏那一支建树前置真、建完置假（`SetFull`）。
+var fullMode bool
+
+// SetFull 开 / 关「全屏播放器里」那一档配色。成对调用：
+//
+//	pud.SetFull(true)
+//	defer pud.SetFull(false)
+func SetFull(on bool) { fullMode = on }
+
+// Full 报现在是不是在全屏播放器的那一档配色里。
+func Full() bool { return fullMode }
 
 // Cover 是「在这个方框里画一张封面」：调用方用 imgcache 那套画图，组件只给框。
 // 传 nil 就只画 surface-2 的占位底（原型 `.cover` 的 background）。

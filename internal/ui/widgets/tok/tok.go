@@ -215,6 +215,31 @@ func Of(t *ui.Theme) Palette {
 	return p
 }
 
+// OfFull 是全屏播放器**里面**的整套令牌：不随深浅变（原型 `.full` 把 `--text` /
+// `--surface` / `--line` / `--hover` 等变量整套改成暗色），强调色换成**深色那一档**
+// （浅色主题的 `#D2391B` 压在暗底上读不出来）。封面取色出来的非四色主色保持原样。
+//
+// 全屏里的 `pud` 组件靠它取色（见 `pud.SetFull`）。
+func OfFull(t *ui.Theme) Palette {
+	p := Of(t)
+	for name, a := range lightAccents {
+		if a.accent == t.Accent {
+			d := darkAccents[name]
+			p.Accent, p.AccentInk, p.AccentText, p.Focus = d.accent, d.ink, d.text, d.focus
+			break
+		}
+	}
+	p.Dark = true
+	p.Desk, p.Bg, p.Side = Full.Base, Full.Base, darkBase.Side
+	p.Surface, p.Surface2 = Full.Surface, Full.Surface2
+	p.Hover, p.Press = Full.Hover, ui.RGBA(255, 255, 255, 0.10)
+	p.Line, p.LineStrong = Full.Line, Full.LineStrong
+	p.Text, p.Text2, p.Text3 = Full.Text, Full.Text2, Full.Text3
+	p.Ok, p.Warn, p.Err = darkBase.Ok, darkBase.Warn, darkBase.Err
+	p.AccentSoft = p.Bg.Mix(p.Accent, 0.14)
+	return p
+}
+
 // Full 是全屏播放器的固定暗色（design-tokens.html 表 2-5）：深浅两套主题下
 // 全屏播放器都是暗底，这几档**不随主题变**。
 var Full = struct {

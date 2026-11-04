@@ -242,11 +242,11 @@ func Sheet(e ui.Element, t *ui.Theme) ui.Element {
 // 上游是哪些值），不是代码里有几档可调。
 // ─────────────────────────────────────────────────────────────────────────────
 
-// FullCover 是满屏播放器那张封面底下的影：一层大而深的落影（偏移 24、模糊 48、
-// 收 8、50% 黑），让封面从糊过的背景里「浮」起来。
+// FullCover 是满屏播放器那张封面底下的影：原型 `.full-cover { box-shadow: 0 32px 80px
+// rgba(0,0,0,.6) }`（偏移 32、模糊 80、不收、60% 黑），让封面从糊过的背景里「浮」起来。
 //
 // 设计稿 docs/design-mockups/fullplayer.png。背景是压暗过的封面，所以影要比
 // 页内卡片重得多才看得见；只有一层，不叠内影。
 func FullCover(e ui.Element) ui.Element {
-	return e.Shadow(0, 24, 48, -8, ui.RGBA(0, 0, 0, 0.5))
+	return e.Shadow(0, 32, 80, 0, ui.RGBA(0, 0, 0, 0.6))
 }

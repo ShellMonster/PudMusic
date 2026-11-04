@@ -285,6 +285,36 @@ type lyricStyle struct {
 	mask bool
 	// bar 是正在唱那一句左边的强调色竖线（设计规范 v0.1 §7.5），只在左对齐时画。
 	bar bool
+	// face 非 nil 时由它给这一行用的字体和字重（全屏播放器：原型 `.ly { font-family:
+	// var(--font-display) }`，当前句 700、其余常规）。字体的取值集中在
+	// `fullLyricFace`（`fullplayer_lyrics.go`），Regular 子集一到只改那一处。
+	face func(active bool) (family string, weight int)
+	// padY / gap 非 0 时覆盖行的上下内边距和行间距（原型 `.ly { padding: 10px 0 }`，没有行间距，
+	// 所以 gap 用负数表示「0」）。
+	padY, gap float32
+	// lineMul 非 0 时覆盖行高倍数（原型 `.ly { line-height: 1.5 }`）。
+	lineMul float32
+	// transRatio 非 0 时是译文字号占原文的比例（原型 `.ly small { font-size: .6em }`），
+	// transGap 是译文离原文的缝（`margin-top: 2px`），transWeight 是译文字重（400）。
+	transRatio, transGap float32
+	transWeight          int
+	// maskAlpha 非 nil 时取代默认的「按上游遮罩算每一行的不透明度」（全屏播放器：原型
+	// `mask-image: linear-gradient(transparent, #000 18%, #000 82%, transparent)`）。
+	maskAlpha func(rel float32) float32
+	// scrollAnim 非 nil 时是滚到中间那一下的动画（原型 `transform 600ms cubic-bezier(.25, 1.2, .4, 1)`）。
+	scrollAnim *ui.Animation
+	// presenceAnim 非 nil 时是「当前句」放大 / 变亮的过渡（原型 `color var(--t-med), transform var(--t-slow)`）。
+	presenceAnim *ui.Animation
+	// activeScale 非 0 时覆盖正在唱那句的放大倍数（全屏播放器 1.18；默认 1.5）。
+	activeScale float32
+	// idleAlpha 非 0 时是非当前句的不透明度（全屏 38%），hoverAlpha 是悬停时的（70%）。
+	idleAlpha, hoverAlpha float32
+	// hideOrigin 不画顶上那一句「歌词来自…」（全屏把它放在右栏的头里）。
+	hideOrigin bool
+	// hideTrans 不画译文（全屏的「歌词原文 / 歌词翻译」切换）。
+	hideTrans bool
+	// pick 非 nil 时每一句可点（点一句跳到那一句），悬停时淡入到 hoverAlpha。
+	pick func(row lyrics.Row)
 	// overlay 是画在**滚动容器里面**的那一层（满屏那一屏右下角那三枚旋钮）。
 	//
 	// ⚠️ **它必须在滚动容器里面，不能是它的兄弟**：框架认「滚轮滚哪一层」是
@@ -429,6 +459,10 @@ type lyricsView struct {
 
 	// pend 是「量不到、再要一帧」连着问了几次（见 lyricMeasureFrames）。
 	pend int
+	// anim 非零时取代默认的滚动动画（全屏播放器用原型的 600ms 回弹曲线）。
+	anim *ui.Animation
+	// settle 是量到框之后还要再对几次目标（几何没稳）。
+	settle int
 
 	// offsetOpen / fontOpen 是右下角那两个浮层开着没有。只由 view 在主线程上
 	// 读写，所以不需要锁（同 rateOpen、drawerOpen）。
@@ -451,6 +485,14 @@ func (lv *lyricsView) onSong(key string) {
 	lv.scroll.X, lv.scroll.Y = 0, 0
 }
 
+// scrollAnim 是滚到中间那一下用的动画。
+func (lv *lyricsView) scrollAnim() ui.Animation {
+	if lv.anim != nil {
+		return *lv.anim
+	}
+	return lyricScrollAnim
+}
+
 // forget 把量到的几何擦掉。**没有歌词的时候每帧都调**（幂等）。
 //
 // 留着它们的话，下一首歌的头一帧会拿上一首的框去算目标，而那正是「切歌要清掉
@@ -460,7 +502,7 @@ func (lv *lyricsView) forget() {
 	lv.box, lv.line = ui.Rect{}, ui.Rect{}
 	// `active: noLyric`（-1）永远不等于任何一次真的瞄过的依据，于是新的一首歌
 	// 一画出来就会重新对一次目标。
-	lv.aim, lv.aiming, lv.pend = lyricAim{active: noLyric}, false, 0
+	lv.aim, lv.aiming, lv.pend, lv.settle = lyricAim{active: noLyric}, false, 0, 0
 }
 
 // centerPad 是内容上下那一份留白：半个歌词区减去正在唱那一句的一半高。
@@ -508,6 +550,12 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 		}
 		return
 	}
+	// 刚量到框的头几帧几何还没稳（居中留白是按上一帧的框算的，要两三帧才到位），那几帧
+	// 算出来的 `off` 是错的：再对几次，免得停在差一截的位置上（满屏歌词在 520 高的区里
+	// 头一句落在偏下 58 像素的地方）。
+	if lv.pend > 0 {
+		lv.settle = lyricMeasureFrames
+	}
 	lv.pend = 0
 
 	// 这一句离容器顶边多远（上一帧量到的），减去它该待的位置（容器高减去它自己
@@ -536,6 +584,10 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 		// 这一支修两件都慢一帧的事：`ScrollTo` 拿**上一帧**的 `MaxY` 夹目标
 		// （`mygo/ui/scroll.go:130`），刚换歌那一刻内容还没撑开，夹出来的目标会
 		// 短一截；那份居中留白也是按上一帧的框算的。
+
+	case lv.settle > 0:
+		lv.settle--
+		lv.aiming = false
 
 	case aim != lv.aim:
 		// 依据变了：换了一句、拖了字号、换了歌词源、或者改了窗口大小。
@@ -572,7 +624,7 @@ func (lv *lyricsView) centre(c *ui.Context, active int, content uint32, fontSize
 	}
 
 	lv.aim = aim
-	lv.scroll.ScrollTo(0, lv.scroll.Y+off, lyricScrollAnim)
+	lv.scroll.ScrollTo(0, lv.scroll.Y+off, lv.scrollAnim())
 }
 
 // lyricNow 是「唱到哪一句了」的时刻：播放位置加上用户调过的偏移。
@@ -665,7 +717,9 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 	ui.Column(c).Key(st.area).Grow(1).FillWidth().AlignItems(ui.Center).
 		Children(func() {
 			// 这一份歌词是**自动来的**还是**搜来的**：一句说明（见 lyricOriginText）。
-			s.viewLyricOrigin(c, snap, st)
+			if !st.hideOrigin {
+				s.viewLyricOrigin(c, snap, st)
+			}
 			// 上游那一条 `max-w-4xl` + 居中（`index.tsx:352-355`）：歌词不贴着
 			// 窗口边，中间空出一段。
 			scroll := ui.Scroll(c).Grow(1).FillWidth().MaxWidth(lyricsMaxWidth).
@@ -704,7 +758,11 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 				// 而满屏那一屏的歌词**跟着上游**（封面开着时左对齐、关掉时居中）。
 				// 居中的是**每一行**（不是那一列）：正在唱的那一句放大 1.5 倍，
 				// 它在中间那一条上。
-				content := ui.Column(c).Gap(lyricsLineGap).
+				gap := float32(lyricsLineGap)
+				if st.gap != 0 {
+					gap = max(st.gap, 0)
+				}
+				content := ui.Column(c).Gap(gap).
 					Padding(pad, st.padX, pad, st.padX).
 					AlignItems(ui.Start)
 				if st.center {
@@ -795,9 +853,13 @@ func (s *Shell) viewLyricOrigin(c *ui.Context, snap app.LyricsSnapshot, st lyric
 //
 // st 是这一屏的画法（字色、行键前缀、居中还是左对齐），见 `lyricStyle`。
 func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
+	padY := float32(lyricsLinePadY)
+	if st.padY > 0 {
+		padY = st.padY
+	}
 	line := ui.Column(c).
 		Key(lyricLineKey{ns: st.ns, at: row.At, i: i}).
-		Padding(lyricsLinePadY, st.padX)
+		Padding(padY, st.padX)
 	// ⚠️ **这一行不铺满**：铺满了那一行就永远是整列那么宽——**框**里除了那一句
 	// 字还有别的东西（浮在上面的旋钮…），量「这一行有多亮」就量到了它们。
 	// 内容那一列用 `AlignItems(ui.Start)`（左对齐）或 `AlignItems(ui.Center)`
@@ -836,15 +898,29 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 		//
 		// 顺带：歌词的不透明度还有个底 `lyricsIdleOpacity`，不是 0→1 的斜坡；
 		// 真要换得算 `Fade = 1 - lerp(idle, active, presence)`。
-		presence = line.AnimateTo(lyricPresenceKey, target, lyricLineAnim)
+		anim := lyricLineAnim
+		if st.presenceAnim != nil {
+			anim = *st.presenceAnim
+		}
+		presence = line.AnimateTo(lyricPresenceKey, target, anim)
 	}
 
 	// 字号和透明度按 presence 插值。**字重不插**：上游的 `transition-all` 对
 	// font-weight 也是离散的（字重没有中间值），类一换就跳过去；这里照它，
 	// 用 `active` 直接取端点，而不是拿 presence 去四舍五入。
-	size := fontSize * (1 + (lyricsActiveScale-1)*presence)
-	opacity := float32(lyricsIdleOpacity) +
-		(lyricsActiveOpacity-lyricsIdleOpacity)*presence
+	activeScale := float32(lyricsActiveScale)
+	if st.activeScale > 0 {
+		activeScale = st.activeScale
+	}
+	idle := float32(lyricsIdleOpacity)
+	if st.idleAlpha > 0 {
+		idle = st.idleAlpha
+		if st.pick != nil && line.Hovered() {
+			idle = st.hoverAlpha
+		}
+	}
+	size := fontSize * (1 + (activeScale-1)*presence)
+	opacity := idle + (lyricsActiveOpacity-idle)*presence
 	weight := lyricsIdleWeight
 	if i == active {
 		weight = lyricsActiveWeight
@@ -855,7 +931,11 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	// ⚠️ **读的是上一帧的位置**（`Bounds()` 就是上一帧的）：淡出跟着「这一行现在
 	// 在容器的哪儿」走——行滑到边缘时被淡掉，滑到中间时全亮。
 	if st.mask {
-		opacity *= lyricMaskAlpha(lyricRelPos(lv.box, line.Bounds()))
+		mask := lyricMaskAlpha
+		if st.maskAlpha != nil {
+			mask = st.maskAlpha
+		}
+		opacity *= mask(lyricRelPos(lv.box, line.Bounds()))
 	}
 	if st.bar && presence > 0 {
 		acc := c.Theme().Accent.Alpha(presence)
@@ -863,22 +943,39 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 			p.Fill(ui.Rect{X: r.X, Y: r.Y + lyricsLinePadY, W: lyricBarW, H: r.H - 2*lyricsLinePadY}, acc, 1.5)
 		})
 	}
-	return line.Opacity(opacity).Children(func() {
-		ui.Text(c, row.Text).
+	line = line.Opacity(opacity).Children(func() {
+		txt := ui.Text(c, row.Text).
 			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(leading.Lyrics).
 			TextColor(st.color)
-			// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
-			// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
-			// 译文之间的缝会突然比别处大一倍。
-		if row.Translation != "" {
-			ui.Text(c, row.Translation).
+		if st.face != nil {
+			family, w := st.face(i == active)
+			txt = txt.Font(family).FontWeight(w)
+		}
+		if st.lineMul > 0 {
+			txt = txt.FixedLineHeight(scale.Font(c, size) * st.lineMul)
+		}
+		// 译文不是每行都有（`lyrics.Rows` 里 Translation 为空的那种，见那个
+		// 类型的注释），空的时候一个字都不画——留一个空行的话，上下两行
+		// 译文之间的缝会突然比别处大一倍。
+		if row.Translation != "" && !st.hideTrans {
+			tr := ui.Text(c, row.Translation).
 				Margin(lyricsTranslationGap, space.None, space.None, space.None).
 				FontSize(scale.Font(c, scale.LyricsTranslation)).
 				FixedLineHeight(lyricsTranslationLineHeight).
 				Opacity(lyricsTranslationOpacity).
 				TextColor(st.color)
+			if st.transRatio > 0 {
+				ts := scale.Font(c, size) * st.transRatio
+				tr = tr.Margin(st.transGap, space.None, space.None, space.None).
+					FontSize(ts).FixedLineHeight(ts * st.lineMul).FontWeight(st.transWeight)
+			}
 		}
 	})
+	// 点一句跳到那一句（全屏播放器）。
+	if st.pick != nil && line.Clicked() {
+		st.pick(row)
+	}
+	return line
 }
 
 // paintLyricFade 在歌词区上下各盖一条渐隐遮罩。

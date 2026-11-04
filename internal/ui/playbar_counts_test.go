@@ -605,10 +605,13 @@ func TestTheThreeCountsAreInTheHoverTips(t *testing.T) {
 // 数字**，而提示句里说清它。
 func TestTheFullPlayerCommentsTipSaysTheSameThing(t *testing.T) {
 	tt, _ := countsFullTester(t, mvItem(), 2468)
-	key, ok := tt.Find("评论")
-	if !ok {
-		t.Fatalf("满屏播放器里找不到「评论」键，文字有 %q", tt.Texts())
-	}
+	// 满屏顶栏的评论键带角标（原型 `.cnt`），数字一回来名字就是「评论 2k+」。
+	label := countKeyLabel("评论", 2468)
+	waitFrames(t, tt, "评论数回来了", func() bool {
+		_, ok := tt.Find(label)
+		return ok
+	})
+	key, _ := tt.Find(label)
 	tt.Move(key.X+key.W/2, key.Y+key.H/2)
 	tt.Frame()
 	// 🔴 **完整数字**：那一档在画面上是「2k+」，而提示里给的是「2468」。

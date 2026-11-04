@@ -119,6 +119,9 @@ type IconOpts struct {
 	Size float32
 	// Color 覆盖平时的图形色；零值 = text-2。
 	Color ui.Color
+	// HoverColor 覆盖悬停时的图形色；零值 = 悬停换 text（原型 `.icon-btn:hover { color: var(--text) }`，
+	// 全屏播放器里 `.full-ctrl .icon-btn { color: #d8d7d4 }` 之上悬停仍然是 `#ecebe8`）。
+	HoverColor ui.Color
 }
 
 // IconBtn 是一枚只有图标的键（原型 `.icon-btn`）：圆角 8 的方块，平时次要色，
@@ -142,7 +145,10 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 	hot := b.Hovered() && !b.IsDisabled()
 	if hot {
 		b = b.Background(p.Hover)
-		if o.Color.A == 0 {
+		switch {
+		case o.HoverColor.A != 0:
+			fg = o.HoverColor
+		case o.Color.A == 0:
 			fg = p.Text
 		}
 	}

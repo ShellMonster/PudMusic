@@ -33,8 +33,10 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -260,4 +262,126 @@ func (s *Shell) deleteEQPreset(name string) {
 			cur.EQCustomName = ""
 		}
 	})
+}
+
+// ---- 满屏播放器里的均衡器弹层（原型 `popHtml('eq')`）----
+//
+// 标题「均衡器 · 预设名」、预设下拉、十段竖滑杆（28 宽、缝 8、高 110，底下是频率）、「另存为
+// 预设…」输入框 + 保存、删除当前预设、恢复平直。设置页那份面板（`eqPanelContent`）不动。
+
+const (
+	// fullEQBandW / fullEQBandGap / fullEQSliderH 是满屏里每一段的宽、缝和滑杆高。
+	fullEQBandW   = 28
+	fullEQBandGap = 8
+	fullEQSliderH = 110
+)
+
+// fullEQItem 是预设下拉里的一项。
+type fullEQItem struct{ value, label string }
+
+// fullEQItems 是预设名单：内置预设 + 「自定义」+ 用户存的每一套。
+func fullEQItems(st app.Settings) []fullEQItem {
+	items := make([]fullEQItem, 0, len(audio.EQPresets)+len(st.EQCustomPresets)+1)
+	for _, p := range audio.EQPresets {
+		items = append(items, fullEQItem{p.ID, p.Name})
+	}
+	items = append(items, fullEQItem{eqCustomValue, "自定义"})
+	for _, p := range st.EQCustomPresets {
+		items = append(items, fullEQItem{eqCustomPresetValue(p.Name), p.Name})
+	}
+	return items
+}
+
+// viewFullEQ 是底栏右边那枚均衡器键 + 弹层。
+func (s *Shell) viewFullEQ(c *ui.Context) {
+	b := pud.IconBtn(c, "full:eq", "eq", "均衡器", pud.IconOpts{Color: fullCtrlColor})
+	s.fullPop(c, popEQ, b, "full-pop-eq", true, true, func() { s.fullEQContent(c) })
+}
+
+func (s *Shell) fullEQContent(c *ui.Context) {
+	p := tok.OfFull(c.Theme())
+	st := s.app.SettingsSnapshot()
+	items := fullEQItems(st)
+	cur := eqCurrentSelectValue(st)
+	curName := "自定义"
+	for _, it := range items {
+		if it.value == cur {
+			curName = it.label
+		}
+	}
+	pud.PopHeading(c, "均衡器 · "+curName)
+
+	ui.Box(c).FillWidth().Padding(0, space.Px8, space.Px8, space.Px8).Children(func() {
+		sel := pud.SelectBox(c, "full:eq:select", curName, 0).FillWidth()
+		if sel.Clicked() {
+			s.full.eqSel = !s.full.eqSel
+		}
+	})
+	if s.full.eqSel {
+		for _, it := range items {
+			if pud.PopOpt(c, "full:eq:opt:"+it.value, it.label, "", it.value == cur).Clicked() {
+				s.full.eqSel = false
+				s.applyEQSelect(st, it.value)
+			}
+		}
+		return
+	}
+
+	gains := st.EQGains()
+	ui.Row(c).Key("full:eq:bands").Gap(fullEQBandGap).Padding(space.Px12, space.Px8, space.Px4, space.Px8).Children(func() {
+		for i := range gains {
+			band := i
+			ui.Column(c).Width(fullEQBandW).AlignItems(ui.Center).Gap(space.Px6).Children(func() {
+				v := gains[band]
+				sl := fullEQSlider(c, "full:eq:band:"+strconv.Itoa(band), &v).
+					Label(strconv.FormatFloat(audio.EQBands[band], 'f', -1, 64) + "Hz 频段")
+				if sl.Changed() {
+					s.applyEQBand(band, v)
+				}
+				fullMono(c, eqBandLabels[band], scale.Size11, 400, 0, p.Text3)
+			})
+		}
+	})
+	ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Padding(0, space.Px8, 0, space.Px8).
+		Margin(space.Px8, 0, 0, 0).Children(func() {
+		ui.TextInputBase(c, &s.settings.eqName).Label("均衡器预设名称").Placeholder("另存为预设…").
+			Grow(1).Height(36).PaddingX(space.Px12).Radius(tok.R8).Background(p.Surface2).Border(1, p.LineStrong).
+			TextColor(p.Text).FontSize(scale.Font(c, scale.Size13))
+		name := strings.TrimSpace(s.settings.eqName)
+		full := len(st.EQCustomPresets) >= audio.EQMaxCustomPresets && !eqHasCustomPreset(st, name)
+		if pud.Button(c, "full:eq:save", pud.Ghost, pud.Sm, "保存", "").Disabled(name == "" || full).Clicked() {
+			s.saveEQPreset(st)
+		}
+	})
+	if st.EQCustomName != "" && eqHasCustomPreset(st, st.EQCustomName) {
+		if pud.PopItem(c, "full:eq:del", "删除均衡器预设「"+st.EQCustomName+"」", true).Clicked() {
+			s.deleteEQPreset(st.EQCustomName)
+		}
+	}
+	if pud.PopItem(c, "full:eq:reset", "恢复平直", false).Clicked() {
+		s.applySetting("均衡器", func(cur *app.Settings) {
+			cur.EQCustomOn = false
+			cur.EQPreset = audio.EQPresets[0].ID
+			cur.EQCustomName = ""
+		})
+	}
+}
+
+// fullEQSlider 是满屏弹层里的一段竖滑杆：轨道 4 宽（`line-strong`），已填的一段和圆钮是主色。
+func fullEQSlider(c *ui.Context, key string, v *float64) ui.Element {
+	p := tok.OfFull(c.Theme())
+	thumb := float32(16)
+	s := ui.SliderBase(c.Key(key), v, audio.EQGainMin, audio.EQGainMax).
+		Label(key).Step(audio.EQGainStep).Vertical().
+		Size(16, fullEQSliderH).PaddingY(thumb / 2)
+	s.Draw(func(pp *ui.Painter, r ui.Rect) {
+		track := ui.Rect{X: r.X + (r.W-4)/2, Y: r.Y + thumb/2, W: 4, H: r.H - thumb}
+		pp.Fill(track, p.LineStrong, 2)
+		at := float32((*v - audio.EQGainMin) / (audio.EQGainMax - audio.EQGainMin))
+		at = max(0, min(1, at))
+		cy := track.Y + track.H*(1-at)
+		pp.Fill(ui.Rect{X: track.X, Y: cy, W: 4, H: track.Y + track.H - cy}, p.Accent, 2)
+		pp.Fill(ui.Rect{X: r.X + (r.W-thumb)/2, Y: cy - thumb/2, W: thumb, H: thumb}, p.Accent, thumb/2)
+	})
+	return s
 }

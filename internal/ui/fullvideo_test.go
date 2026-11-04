@@ -80,8 +80,10 @@ func TestClickingTheBadgeOpensAVideoWindowThatEntersAndLeavesTheTheater(t *testi
 	if !ok {
 		t.Fatalf("没进影院，文字有 %q", tt.Texts())
 	}
-	if tr.W < fullWinW-1 || tr.H < fullWinH-1 {
-		t.Errorf("影院只有 %.0f×%.0f，应当铺满整窗", tr.W, tr.H)
+	// 原型 `.cinema`：视频 16:9、高度撑满中间那一块（顶栏下沿到底栏上沿，再让出 16 + 40 的卡拉 OK 行）。
+	// 1200×800：800 − 68 − 209 − 56 = 467，宽 830。
+	if tr.W < 829 || tr.W > 831 || tr.H < 466 || tr.H > 468 {
+		t.Errorf("影院 %.0f×%.0f，want 830×467（原型 .cinema）", tr.W, tr.H)
 	}
 	if err := tt.Click("视频，点击退出全屏"); err != nil {
 		t.Fatal(err)
