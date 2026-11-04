@@ -227,13 +227,13 @@ func TestRenderCommentsMentionFilterShots(t *testing.T) {
 	}
 }
 
-// TestRenderCommentsDrawerCoversPlayBarShot 出「抽屉面板盖住底下的播放条」那一张：
-// 面板下缘贴着窗口底，底下那条播放条在面板自己那一段（最右 400）里**看不见**。
+// TestRenderCommentsDrawerLeavesPlayBarShot 出「抽屉面板让出底下的播放条」那一张：
+// 面板下缘停在播放条上沿，底下那条播放条在最右 400 那一截里**照旧看得见**。
 //
-// 🔴 **这是「盖住播放器」那一票的画面材料**：要审的是**最右那一条 400 宽里**——
-// 面板把播放条遮到窗口底了，还是那 76 高的播放条还露在外面。裁的是**右下角**
-// 那一块（面板下缘 + 播放条那一截的交界处）。
-func TestRenderCommentsDrawerCoversPlayBarShot(t *testing.T) {
+// 🔴 **这是「让出播放器」那一票的画面材料**：要审的是**最右那一条 400 宽里**——
+// 面板是停在播放条上沿了，还是把那一截遮掉了。裁的是**右下角**那一块
+// （面板下缘 + 播放条那一截的交界处）。
+func TestRenderCommentsDrawerLeavesPlayBarShot(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
@@ -249,7 +249,7 @@ func TestRenderCommentsDrawerCoversPlayBarShot(t *testing.T) {
 
 			// 裁右下角：窗口右沿 1400、下沿 900，裁 460×200 那块
 			// （面板宽 400，含左缘 60 余量；高 200 含面板下缘和播放条交界）。
-			saveRect(t, dir, fmt.Sprintf("26-评论抽屉-盖住播放条-%s.png", name), tt,
+			saveRect(t, dir, fmt.Sprintf("26-评论抽屉-让出播放条-%s.png", name), tt,
 				940, 700, 460, 200)
 			// 整页一张作对照（那一截在最右下，整页里看得见它和播放条的关系）。
 			save(t, dir, fmt.Sprintf("27-评论抽屉-整页-%s.png", name), tt)
