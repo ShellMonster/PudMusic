@@ -76,7 +76,7 @@ func (s *Shell) Close() {
 	// `CloseSettings` 可以重复调（内部先 LoadAndDelete），所以窗口关了之后
 	// 进程再退、再调一次都不会出错。
 	if err := s.app.CloseSettings(); err != nil {
-		log.Printf("biu: 关窗时保存设置失败：%v", err)
+		log.Printf("pudmusic: 关窗时保存设置失败：%v", err)
 	}
 	// 搜索历史与快捷键那两样在 `closePerWindow` 里收了（它们是逐窗口的）。
 }
@@ -300,7 +300,7 @@ func Run(a *app.App, sess *media.Session) error {
 	// language.go 的 `resolveLanguageNow`。
 	resolveLanguageNow()
 	// 菜单、退出、第二个实例、deep link 全在这里装。必须在 Run 之前，
-	// 否则启动命令行里的 biu:// 会在回调装好之前就被交付掉。
+	// 否则启动命令行里的 pudmusic:// 会在回调装好之前就被交付掉。
 	s.installLifecycle()
 
 	// 「上次听到哪儿」恢复：队列、当前项和播放位置都从上次退出时的那份恢复，
@@ -316,7 +316,7 @@ func Run(a *app.App, sess *media.Session) error {
 	//
 	// 失败不挡启动：恢复不出来就照常开一个空队列的应用。
 	if err := a.RestorePlayback(); err != nil {
-		log.Printf("biu: 恢复上次播放的状态失败：%v", err)
+		log.Printf("pudmusic: 恢复上次播放的状态失败：%v", err)
 	}
 	// 启动时只恢复队列、当前歌曲和播放进度，保持暂停。
 	// 用户点击播放后才进入正常的断点续播流程，避免打开应用时自动出声。
@@ -331,13 +331,17 @@ func Run(a *app.App, sess *media.Session) error {
 		// 把交付排在所有 WhenReady 回调之后（`mygo/app.go:266`），所以正好。
 		if err := platform.RegisterScheme(); err != nil {
 			// macOS 上没打包成 bundle 就必然登记不上，这是预期的，不是启动失败。
-			log.Printf("biu: 登记 %s:// 失败，从别的程序点这个链接不一定唤得起本应用：%v",
+			log.Printf("pudmusic: 登记 %s:// 失败，从别的程序点这个链接不一定唤得起本应用：%v",
 				platform.URLScheme, err)
 		}
 		// 托盘也在这儿建：框架建托盘要过事件循环（NewTray 在没 ready 时 panic）。
 		// 托盘要在开窗口**之前**建：用户从托盘点「显示/隐藏」时窗口已经在那里，
 		// 顺序反了的话头几秒点托盘是没有反应的。
 		s.installTray()
+		// Dock icon 右键菜单（macOS）/ 任务栏跳转列表（Windows）也在这儿装，
+		// 理由同上：`App.Dock.SetMenu` / `App.JumpList.SetTasks` 都有 `needsApp`，
+		// 而它们管的「不打开窗口也能控制播放」要在第一帧就能用。
+		s.installDockUI()
 		s.syncAutoStart()
 		// 全局快捷键也在这儿登记，理由和上面两件一样：`mygo.GlobalShortcut.Register`
 		// 头上有 `needsApp`，应用没 ready 时调它直接 panic（`modules.go:550`）。

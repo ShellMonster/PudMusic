@@ -1179,6 +1179,18 @@ type Shell struct {
 	// ⚠️ **它是用来「比一遍再改」的**（见 refreshTrayMenu）。
 	trayState trayState
 
+	// dockMenuRef 是 macOS Dock icon 右键那一份菜单（**只有 macOS 有**）。
+	// **只建一次**（`installDockMenu`），留着是为了运行期刷可用态——见
+	// `refreshDockMenu`。
+	//
+	// ⚠️ Windows 那半边不在这儿：JumpList 是「设一次就不管」的清单
+	//（`installJumpList`），不用留引用。
+	dockMenuRef *mygo.Menu
+
+	// dockState 是 Dock 菜单上「三项能不能点」在**上一次刷新时**的样子。
+	// ⚠️ **它是三态的**（没刷过 / 没歌 / 有歌），理由见 refreshDockMenu。
+	dockState dockState
+
 	// media 是系统媒体会话，由 main 那边 MountMedia 递过来（见 media_mount.go）。
 	//
 	// ⚠️ 可以是 nil：那一次 `media.New` 没装上（`Available()` 是 false）。
@@ -1457,7 +1469,7 @@ func (s *Shell) visibleFlag() *atomic.Bool {
 //
 // ⚠️ **只有这一处写着它**：窗口标题（`WindowOptions`）和侧栏左上角那个品牌字
 // （`sidebar.go` 的 `viewSideBrand`）写的是同一个名字——2026-10 从 `Biu MyGo`
-// 改名成 `BiuGo` 时分头改了两处，漏了一处，于是同一栏里两个产品名
+// 改名成「布丁音乐」（`PudMusic`）时分头改了两处，漏了一处，于是同一栏里两个产品名
 // （`sidebar_test.go` 的 `TestTheSidebarShowsTheAppNameExactlyOnce` 钉住它）。
 //
 // ⚠️ **这和 bundle id、钥匙串服务名、用户数据目录名是四件互不相干的事**

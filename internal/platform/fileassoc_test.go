@@ -175,7 +175,7 @@ func TestMygoJSONExtensionsCarryNoDot(t *testing.T) {
 //
 // ⚠️ 这一条看着像废话，而它防的是一件真会发生的错：`mygo.json` 是一份手改
 // 的 JSON，加字段的时候很容易整段重写——而 `urlSchemes` 没了的症状是
-// **「点 biu:// 链接唤不起应用」**，那和这一票的文件关联毫无关系，评审时
+// **「点 pudmusic:// 链接唤不起应用」**，那和这一票的文件关联毫无关系，评审时
 // 会被算成「别的地方坏了」。
 func TestMygoJSONStillDeclaresTheURLScheme(t *testing.T) {
 	c := readMygoFileAssocConfig(t)

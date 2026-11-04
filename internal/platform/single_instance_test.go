@@ -21,7 +21,7 @@ import (
 // TestRouteFromURL 验 deep link 到路由的那一步。
 //
 // 这是「第二个实例唤起已有实例并跳转路由」的后半段：前半段（锁、转交命令行、
-// 投递 OnOpenURL）全在框架里，这里只管「`biu://user/123` 到底该翻成哪一条」。
+// 投递 OnOpenURL）全在框架里，这里只管「`pudmusic://user/123` 到底该翻成哪一条」。
 func TestRouteFromURL(t *testing.T) {
 	cases := []struct {
 		raw  string
@@ -29,17 +29,17 @@ func TestRouteFromURL(t *testing.T) {
 		ok   bool
 	}{
 		// 本应用的 scheme
-		{"biu://settings", "/settings", true},
-		{"biu://user/123", "/user/123", true},
-		{"biu:///local-music", "/local-music", true},
-		{"biu://", "/", true},
-		{"BIU://Settings", "/Settings", true}, // scheme 大小写不敏感，路径不是
-		{"biu://settings?from=tray", "/settings", true},
+		{"pudmusic://settings", "/settings", true},
+		{"pudmusic://user/123", "/user/123", true},
+		{"pudmusic:///local-music", "/local-music", true},
+		{"pudmusic://", "/", true},
+		{"PUDMUSIC://Settings", "/Settings", true}, // scheme 大小写不敏感，路径不是
+		{"pudmusic://settings?from=tray", "/settings", true},
 
 		// 不是本应用的：同一进程里可能还处理着别的东西交给 OnOpenURL 的 URL，
 		// 不认得就不能当成自己的路由。
 		{"https://example.com/settings", "", false},
-		{"biugo://settings", "", false},
+		{"biu://settings", "", false}, // 上游的 scheme，我们不接
 		{"/settings", "", false},
 		{"://", "", false},
 	}
@@ -51,9 +51,47 @@ func TestRouteFromURL(t *testing.T) {
 	}
 }
 
+// TestCommandFromURL 验「`pudmusic://cmd/…` 翻成命令 id」那一支。
+//
+// 它和路由**不是一回事**：路由翻的是「去那一页」，命令翻的是「做一件事」
+// （Windows JumpList 起的 task 只能丢 URL 进来，见 `installJumpList`）。
+func TestCommandFromURL(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want string
+		ok   bool
+	}{
+		// 命令 URL → 命令 id（kebab-case 翻成 camelCase）
+		{"pudmusic://cmd/toggle-play", "togglePlay", true},
+		{"pudmusic://cmd/prev", "prev", true},
+		{"pudmusic://cmd/next", "next", true},
+		// 大小写：host 不分大小写，path 原样
+		{"PUDMUSIC://cmd/PREV", "PREV", true},
+		{"pudmusic://CMD/next", "next", true},
+
+		// 不是命令 URL：让 RouteFromURL 接着处理
+		{"pudmusic://settings", "", false},
+		{"pudmusic://cmd", "", false},     // cmd 后面没东西
+		{"pudmusic://cmd/", "", false},    // 只有一个斜杠
+		{"pudmusic://cmd/a/b", "", false}, // 多级 path：「设置页里的子命令」暂不支
+		{"pudmusic://other/toggle-play", "", false},
+
+		// 别的 scheme 一律不认
+		{"biu://cmd/toggle-play", "", false},
+		{"https://example.com/cmd/x", "", false},
+		{"cmd/toggle-play", "", false},
+	}
+	for _, c := range cases {
+		got, ok := CommandFromURL(c.raw)
+		if ok != c.ok || got != c.want {
+			t.Errorf("CommandFromURL(%q) = %q, %v；want %q, %v", c.raw, got, ok, c.want, c.ok)
+		}
+	}
+}
+
 // TestURLSchemeIsDeclaredInMygoJSON 钉住一件只在打包之后才暴露的事。
 //
-// macOS 上 `biu://` 要靠 bundle 的 Info.plist 声明了才会被系统转交（框架的
+// macOS 上 `pudmusic://` 要靠 bundle 的 Info.plist 声明了才会被系统转交（框架的
 // RegisterURLScheme 在 bundle 没声明时直接报错，`mygo/internal/darwin/deeplink.go`）。
 // 那份 Info.plist 是 `mygo build` 从 mygo.json 的 urlSchemes 生成的——字段漏了，
 // 代码这边一切正常，`go run` 也正常，只有装了包之后「点链接唤不起应用」。
@@ -375,7 +413,7 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 }
 
 // TestLockSurvivorKeepsForwarding 钉住「同时启动之后，活下来的那个还能不能收
-// biu://」。
+// pudmusic://」。
 //
 // 这条比「最多一个拿到锁」要紧一格。框架那把锁在同时启动时会先 `os.Remove`
 // 掉对方刚建出来的 socket 文件——于是两个进程虽然只有一个活下来，**活下来的那个

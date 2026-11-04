@@ -6,7 +6,7 @@
 // 把这些做完了，还顺手处理了「崩溃之后留下一个没人应答的 socket」。
 //
 // 这一层做两件事：把上面那套包成调用方不需要记调用顺序的接口，以及把
-// `biu://…` 翻成应用自己的路由（翻路由这件事框架不管，只有我们懂「/settings」
+// `pudmusic://…` 翻成应用自己的路由（翻路由这件事框架不管，只有我们懂「/settings」
 // 在本应用里是哪一页）。
 package platform
 
@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/egoist/mygo"
 )
@@ -25,12 +26,12 @@ import (
 // URLScheme 是本应用自己的 URL scheme。
 //
 // 它只干一件事：让第二个实例告诉第一个实例「该显示哪一页」。macOS 上点
-// `biu://settings` 由系统直接转给已经跑着的那个应用（根本不会起第二个进程），
+// `pudmusic://settings` 由系统直接转给已经跑着的那个应用（根本不会起第二个进程），
 // Windows / Linux 上这条 URL 跟着命令行走，由单实例锁转交（见 Lock）。
 //
-// 取 `biu` 是图短、好手输，撞上别的应用的概率低。真撞上了系统会让用户选，
-// 默认处理器由 RegisterScheme 决定。
-const URLScheme = "biu"
+// 取 `pudmusic` 是应用对外名字（`mygo.json` 的 `slug`、App Store 那一栏）——
+// 用户看到这个 scheme 知道是本应用，跟上游 Biu 的 `biu://` 也错开。
+const URLScheme = "pudmusic"
 
 // Lock 拿单实例锁。返回 true 表示「我是第一个实例，该继续跑」。
 //
@@ -42,7 +43,7 @@ const URLScheme = "biu"
 //
 // ## 两把锁的分工，以及为什么是这个顺序
 //
-// 框架那把锁（`mygo/single_instance.go`）管的是「第二个实例把 biu:// 递过来」。
+// 框架那把锁（`mygo/single_instance.go`）管的是「第二个实例把 pudmusic:// 递过来」。
 // 但它**挡不住两个实例真正同时启动**：谁都还没建好 socket，两个进程 Dial 都失败；
 // 接着两个都 `os.Remove(path)`——后到的把先到的刚建出来的 socket 文件删了；然后
 // 两个 `net.Listen(path)` 都成功（路径已经空出来，inode 不同），两个都返回 true。
@@ -75,7 +76,7 @@ func Lock() bool {
 
 		// 二、别人占着：等它的 socket 建好。
 		if lockIsReady() {
-			// 连上去，把命令行（含 biu://）递过去，返回值必然是 false。
+			// 连上去，把命令行（含 pudmusic://）递过去，返回值必然是 false。
 			mygo.App.RequestSingleInstanceLock()
 			return false
 		}
@@ -98,10 +99,10 @@ func Lock() bool {
 			// flock 被人拿着）。那个进程活着，它会把命令行接过去；它要是死了，内核锁
 			// 也放回去了，下一轮就能抢到。
 			//
-			// 那句调用还留着：能递到就把命令行（含 biu://）递过去，递不到也只是
+			// 那句调用还留着：能递到就把命令行（含 pudmusic://）递过去，递不到也只是
 			// 白问一次——返回的是不是「第一个」在这里已经不重要了。
 			mygo.App.RequestSingleInstanceLock()
-			log.Printf("biu: 等了 %v 没等到第一个实例就绪，按「有别人在」处理（内核锁在别人手上）", lockReadyWait)
+			log.Printf("pudmusic: 等了 %v 没等到第一个实例就绪，按「有别人在」处理（内核锁在别人手上）", lockReadyWait)
 			return false
 		}
 		time.Sleep(lockPollEvery)
@@ -154,9 +155,9 @@ func lockStatePath(name string) string {
 	// Linux 的 /tmp 是所有用户共用的。Windows 上没有 uid（Getuid 恒为 -1），
 	// 那边的临时目录本来就是每个用户一份。
 	if uid := os.Getuid(); uid >= 0 {
-		name = "biu-mygo-" + strconv.Itoa(uid) + "." + name
+		name = "pudmusic-" + strconv.Itoa(uid) + "." + name
 	} else {
-		name = "biu-mygo." + name
+		name = "pudmusic." + name
 	}
 	return filepath.Join(os.TempDir(), name)
 }
@@ -240,21 +241,21 @@ func readReadyFile() (pid int, ready bool) {
 	return pid, ready
 }
 
-// RegisterScheme 注册 URLScheme，让 `biu://…` 找得到这个应用。
+// RegisterScheme 注册 URLScheme，让 `pudmusic://…` 找得到这个应用。
 //
 // 必须在 mygo.App.Run() 之后、启动参数被交付之前调：界面层把它放在
 // WhenReady 里，而 MyGo 的 handleReady 把那次交付排在所有 WhenReady 回调
-// **之后**，所以启动命令行里的 `biu://` 一定认得出来。
+// **之后**，所以启动命令行里的 `pudmusic://` 一定认得出来。
 //
 // macOS 上只有打包成 bundle 并且在 `mygo.json` 的 `urlSchemes` 里声明了这个
 // scheme 才注册得上，`go run` 和测试里必然报错——那是预期的，不是启动失败，
 // 调用方记一条日志继续走就行。
 func RegisterScheme() error { return mygo.App.RegisterURLScheme(URLScheme) }
 
-// RouteFromURL 把一个 `biu://…` URL 翻成应用里的路由。
+// RouteFromURL 把一个 `pudmusic://…` URL 翻成应用里的路由。
 //
-// 路由横跨 host 和 path：`biu://settings` → `/settings`，
-// `biu://user/123` → `/user/123`，光秃秃一个 `biu://` → `/`。
+// 路由横跨 host 和 path：`pudmusic://settings` → `/settings`，
+// `pudmusic://user/123` → `/user/123`，光秃秃一个 `pudmusic://` → `/`。
 //
 // 不是本应用的 scheme 一律不认（返回 false）。这条不是安全边界——URL 是任何人
 // 都能构造的，认识不认识都得由界面的路由表说话（见 `ui.Shell.navigate`），
@@ -265,4 +266,54 @@ func RouteFromURL(raw string) (string, bool) {
 		return "", false
 	}
 	return "/" + strings.Trim(u.Host+u.Path, "/"), true
+}
+
+// commandURLHost 是「这条 URL 不是路由、是一条命令」的 host 前缀。
+//
+// `pudmusic://` 下面默认翻成路由（`pudmusic://settings` → `/settings`），但 Windows 的
+// JumpList 起的「任务」只能丢一个 URL 进来，它要的不是「跳一页」是「做一件事」
+// （播放/暂停、上一首、下一首）——所以借 host 这一段把两边分开：
+//
+//	pudmusic://settings         → 路由（RouteFromURL）
+//	pudmusic://cmd/toggle-play  → 命令（CommandFromURL，由界面层翻成 runShortcut 的 id）
+//
+// ⚠️ **是 host 而不是 path**：`url.Parse("pudmusic://cmd/x")` 把 `cmd` 放在 Host
+// 里、把 `x` 放在 Path 里，所以判 Host 最干净；改放 path 的话
+// `pudmusic://settings/cmd/x` 这种就得想清楚「到底是设置页还是命令」。
+const commandURLHost = "cmd"
+
+// CommandFromURL 把一个 `pudmusic://cmd/…` URL 翻成命令 id（`togglePlay`、`prev`、
+// `next` 这些）。不是命令 URL 一律返回 false，由调用方决定要不要继续当路由试。
+//
+// ⚠️ **只负责「这条 URL 是命令」，不负责「这条命令存在」**：id 写错了翻出来也
+// 是个陌生 id，由 `runShortcut` 的 default 那一支什么都不做。两边职责分开。
+func CommandFromURL(raw string) (string, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Scheme, URLScheme) {
+		return "", false
+	}
+	if !strings.EqualFold(u.Host, commandURLHost) {
+		return "", false
+	}
+	id := strings.TrimPrefix(strings.Trim(u.Path, "/"), "/")
+	if id == "" || strings.Contains(id, "/") {
+		return "", false
+	}
+	// URL 是 kebab-case 的（`pudmusic://cmd/toggle-play`），命令 id 是 camelCase 的
+	// （`togglePlay`）。翻的时候把 `-x` 折成 `X`；认不出来的让 runShortcut 走
+	// default 那一支什么都不做——跟设置里手写一条不认识的命令一样的宽容。
+	var b strings.Builder
+	upper := false
+	for _, r := range id {
+		if r == '-' {
+			upper = true
+			continue
+		}
+		if upper {
+			r = unicode.ToUpper(r)
+			upper = false
+		}
+		b.WriteRune(r)
+	}
+	return b.String(), true
 }

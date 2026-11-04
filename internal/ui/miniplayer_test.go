@@ -681,7 +681,7 @@ func TestTheMiniShortcutDoesNotOpenASecondMiniWindow(t *testing.T) {
 	}
 }
 
-// TestADeepLinkMakesRoomForTheMainWindow 盯「迷你开着时来 biu:// 链接」。
+// TestADeepLinkMakesRoomForTheMainWindow 盯「迷你开着时来 pudmusic:// 链接」。
 //
 // ⚠️ `navigate` 改的是**主窗口**那一侧的路由（路由表是主窗口的），而主窗口在迷你期
 // 间是收着的。不让开的话，按一个链接的结果是「窗口弹出来了，还是迷你那一扇，页面上

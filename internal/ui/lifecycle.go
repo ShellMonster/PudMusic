@@ -78,7 +78,7 @@ func (s *Shell) installLifecycle() {
 		}
 	})
 
-	// 第二个实例来了。它转交过来的命令行里要是有 biu://…，框架自己会投给
+	// 第二个实例来了。它转交过来的命令行里要是有 pudmusic://…，框架自己会投给
 	// OnOpenURL（`mygo/deeplink.go` 的 deliverArgs，由 single_instance.go 的
 	// acceptSecondInstances 调），这里只负责把窗口叫回来：用户明明是在唤起这个
 	// 应用，结果窗口还藏在那儿，是最容易被当成「点了没反应」的一种情况。
@@ -97,11 +97,20 @@ func (s *Shell) installLifecycle() {
 		s.openWindow()
 	})
 
-	// biu://… 到了就跳到它指的那一页。
+	// pudmusic://… 到了分两路：
+	//
+	//   - `pudmusic://cmd/…` 是 Windows JumpList 起的「做一件事」
+	//     （`installJumpList` 把 task 的 Args 设成这些 URL，单实例锁转交给
+	//     我们），翻成命令 id 走 `s.onShortcut`；
+	//   - 其他 `pudmusic://…` 是「跳一页」。
 	//
 	// ⚠️ **迷你开着的时候由 `handleDeepLink` 先把它关掉**，理由在那边。
 	// `openWindow` 排在这一步之后：迷你已经被让开了，它叫回来的才是主窗口。
 	mygo.App.OnOpenURL(func(u string) {
+		if id, ok := platform.CommandFromURL(u); ok {
+			s.onShortcut(id)
+			return
+		}
 		route, ok := platform.RouteFromURL(u)
 		if !ok {
 			return
@@ -131,7 +140,7 @@ func (s *Shell) installLifecycle() {
 	s.installOpenFile()
 }
 
-// handleDeepLink 是「biu://… 指到了 route」那一半：让开迷你，跳到那一页。
+// handleDeepLink 是「pudmusic://… 指到了 route」那一半：让开迷你，跳到那一页。
 //
 // ⚠️ **先让开迷你**。`navigate` 改的是**主窗口**那一侧的路由（路由表是主窗口的），
 // 而主窗口在迷你期间是收着的。不让开的话，按一个链接的结果是「窗口弹出来了，还是
@@ -226,7 +235,7 @@ func (s *Shell) syncAutoStart() {
 		return
 	}
 	if err := s.autostart.set(true); err != nil {
-		log.Printf("biu: 设置里开着开机自启，系统里却没开，注册失败：%v", err)
+		log.Printf("pudmusic: 设置里开着开机自启，系统里却没开，注册失败：%v", err)
 	}
 }
 

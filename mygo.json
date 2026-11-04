@@ -4,7 +4,7 @@
   "identifier": "io.github.shellmonster.biu",
   "version": "0.2.2",
   "out": "build",
-  "urlSchemes": ["biu"],
+  "urlSchemes": ["pudmusic"],
   "fileAssociations": [
     {
       "ext": ["mp3", "flac", "wav", "m4a", "aac", "ogg", "aiff", "aif", "aifc"],

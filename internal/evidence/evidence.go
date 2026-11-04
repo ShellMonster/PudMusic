@@ -1651,7 +1651,7 @@ var Items = []Item{
 			"TestTheMiniWindowRegistersTheInAppShortcuts",
 			"TestTheMiniWindowUsesTheUsersShortcuts",
 			"TestTheMiniShortcutDoesNotOpenASecondMiniWindow",
-			// 迷你开着时来 biu:// 链接：先让开迷你再跳路由（路由表是主窗口的）。
+			// 迷你开着时来 pudmusic:// 链接：先让开迷你再跳路由（路由表是主窗口的）。
 			"TestADeepLinkMakesRoomForTheMainWindow",
 			// 关掉迷你只关一扇窗（收尾走共用那一段而不是 `Shell.Close`）。
 			"TestTheMiniShellTeardownIsTheSharedOne",

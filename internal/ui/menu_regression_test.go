@@ -147,6 +147,30 @@ func TestTheTrayPlaybackItemsAreDisabledWithoutATrack(t *testing.T) {
 	}
 }
 
+// TestTheDockPlaybackItemsAreDisabledWithoutATrack 断**没歌的时候 Dock 菜单那
+// 三项是禁用的**。
+//
+// ⚠️ **为什么这一条要紧**：和应用菜单「歌曲」栏、状态栏那三项是**同一条
+// 规矩**——没歌的时候给「点了没反应」的键，比不给更糟。Dock 菜单跟它们
+// 对齐，而不是各搞一套。
+func TestTheDockPlaybackItemsAreDisabledWithoutATrack(t *testing.T) {
+	b := newTestShell(t)
+	s := b.s
+	s.dockMenuRef = s.buildDockMenu() // 同 installDockMenu 建的那一份
+	s.refreshDockMenu(s.app.Snapshot())
+
+	for _, id := range []string{"togglePlay", "prev", "next"} {
+		it := s.dockMenuRef.ItemByID(dockMenuIDPrefix + id)
+		if it == nil {
+			t.Errorf("Dock 菜单里没有命令 %q 那一项", id)
+			continue
+		}
+		if it.IsEnabled() {
+			t.Errorf("没有歌的时候 Dock 菜单 %q 那一项还是能点的：按了什么也不会发生", id)
+		}
+	}
+}
+
 // TestTheLikeItemUsesTheSameJudgeAsTheInterface 断**「赞」和界面用同一套判据**。
 //
 // ⚠️ **为什么这一条要紧**：菜单原来用「有没有歌」判，而界面上用的是

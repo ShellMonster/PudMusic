@@ -324,8 +324,8 @@ func (s *Shell) reportOpenFileFailure(path string, err error) {
 // （扩展名过滤 + `os.Stat` + `IsRegular`）。**凡是它会交的，跳过**；
 // **凡是它不会交的，我们自己看一眼**。
 //
-// ⚠️ **只认「像文件路径的」参数**：命令行里还有别的（`biu://…`、各种开关），
-// 而一个 `biu://settings` 交给 `checkOpenFile` 会得到「读不了它」——那是一句
+// ⚠️ **只认「像文件路径的」参数**：命令行里还有别的（`pudmusic://…`、各种开关），
+// 而一个 `pudmusic://settings` 交给 `checkOpenFile` 会得到「读不了它」——那是一句
 // **用户根本没做过的错**。所以先按「是不是一个我们该管的路径」筛一遍
 // （`looksLikeAudioPath`）。
 //
@@ -371,7 +371,7 @@ func launchFileCandidates(args []string, workingDir string) []string {
 
 // launchArgPath 把命令行里的一个参数翻成本地路径。
 //
-// 第二个返回值是「这个参数是一个我们该看的路径吗」——`biu://settings` 那种
+// 第二个返回值是「这个参数是一个我们该看的路径吗」——`pudmusic://settings` 那种
 // **别的 scheme** 返回 false。
 //
 // ⚠️ **`file://` URL 要翻成路径**：框架的 `fileArgs` 有这一段
@@ -402,7 +402,7 @@ func launchArgPath(raw string, workingDir string) (string, bool) {
 		// ⚠️ **Windows 的盘符**：scheme 只有一个字母时**当作路径**
 		//（框架的 `urlArgs` 有同一份判断，`deeplink.go:87`）。
 		if u.Scheme != "file" && len(u.Scheme) > 1 {
-			// 别的 scheme（`biu://…`）：框架自己会投给 `OnOpenURL`，而我们要
+			// 别的 scheme（`pudmusic://…`）：框架自己会投给 `OnOpenURL`，而我们要
 			// 说的是「文件放不了」——**不是**这一件事。
 			return "", false
 		}

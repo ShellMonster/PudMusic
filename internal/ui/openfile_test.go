@@ -745,15 +745,15 @@ func TestTheLaunchArgKeepsTheWindowsDriveLetter(t *testing.T) {
 		// Windows 资源管理器交给我们的那两种写法。
 		{`C:\歌.flac`, `C:\歌.flac`},
 		{`C:/歌.flac`, `C:/歌.flac`},
-		// ⚠️ **别的 scheme 仍然不认**：`biu://` 那一档是链接，不是文件。
-		{`biu://settings`, ``},
+		// ⚠️ **别的 scheme 仍然不认**：`pudmusic://` 那一档是链接，不是文件。
+		{`pudmusic://settings`, ``},
 	}
 	for _, c := range cases {
 		got, ok := launchArgPath(c.raw, "")
 		if c.want == "" {
 			if ok {
 				t.Errorf("launchArgPath(%q) 认成了一个路径（%q）——"+
-					"`biu://` 那一档是链接，对它说「文件放不了」是对着"+
+					"`pudmusic://` 那一档是链接，对它说「文件放不了」是对着"+
 					"一件用户没做的事报错", c.raw, got)
 			}
 			continue
