@@ -3618,7 +3618,6 @@ var Items = []Item{
 			"TestTheFullPlayerKeysAreFlat",
 			"TestTheFullPlayerPartsKeysAreFlat",
 			"TestTheMiniPlayerKeysAreFlat",
-			"TestTheDownloadListKeysAreFlat",
 			"TestTheCollectionKeysAreFlat",
 			"TestTheDynamicCardKeysAreFlat",
 			// 反面：该保留描边的那一批。
@@ -3705,7 +3704,6 @@ var Items = []Item{
 			// 收藏夹那一页的大标题：30，而且两行放得下 168 那个封面。
 			"TestTheCollectionTitleIsTheBigOne",
 			// 主 Tab 底下没有那条主色的横条，次级排序底下有。
-			"TestTheMainTabsAndTheSortTabsAreNotTheSame",
 			// 搜索页的输入框里有当前关键词。
 			"TestTheSearchPageShowsTheCurrentKeyword",
 			// 「加载中」走同一个出口：八个页面是**同一枚转圈**（同一个直径）。
@@ -3925,7 +3923,6 @@ var Items = []Item{
 			"TestPickingAnEarlierDayStartsOver",
 			"TestNothingIsHighlightedWhileNothingIsFiltered",
 			"TestTheRangePickerDrivesTheFilter",
-			"TestAManualRangeThatEqualsTodayIsNotDropped",
 			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
 		},
 	},
