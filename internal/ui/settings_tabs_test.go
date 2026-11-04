@@ -364,7 +364,8 @@ func renderedIn(t *testing.T, label, family string) inkShot {
 	t.Helper()
 	rt := mygoui.NewTester(func(c *mygoui.Context) {
 		ui.Column(c).Padding(fontPreviewPad).Children(func() {
-			ui.Text(c, label).Font(family).FontSize(16)
+			// 文字色要和列表里那一行一样（--text）：抗锯齿边缘像素在"<200 算墨迹"的阈值上会随颜色不同而判得不一样。
+			ui.Text(c, label).Font(family).FontSize(16).TextColor(tok.Of(BuildTheme(app.DefaultSettings(""), false)).Text)
 		})
 	}, 600, 80)
 	rt.Frame()
