@@ -53,13 +53,10 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -125,19 +122,6 @@ var followBreakpoints = []followBreakpoint{
 
 // followMinCols 是最窄那一档的列数，也是宽度还没量出来时用的那个。
 const followMinCols = 5
-
-// followColumnsFor 是容器有 w 那么宽时排几列（关注页专用）。
-//
-// ⚠️ **和 `list.GridColumnsFor` 是两张表，别混**：歌卡和人像卡的密度不同
-// （理由见 `followBreakpoints`）。
-func followColumnsFor(w float32) int {
-	for _, b := range followBreakpoints {
-		if w >= b.width {
-			return b.cols
-		}
-	}
-	return followMinCols
-}
 
 // followRowGap 是**行与行之间**的缝。上游是 `virtual-grid-page-list` 的
 // `ROW_GAP = 16`（`src/components/virtual-grid-page-list/index.tsx:22`）。
@@ -452,11 +436,11 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 		return
 	}
 
-	ui.Column(c).Key("page:"+followPath).Grow(1).Padding(space.None, pagePadX).Gap(space.Px8).
+	w := s.spaceContentWidth(c)
+	ui.Column(c).Key("page:"+followPath).Grow(1).Padding(space.None, space.PageHorizontal(w)).
 		Children(func() {
-			s.viewFollowHeader(c, f)
-			s.viewFollowSearch(c, f)
-			s.viewFollowGrid(c, f)
+			pud.PageHead(c, "Following", "我的关注", "", w, nil)
+			s.viewFollowSplit(c, f)
 		})
 
 	// 「回到顶部」那一枚。滚过 400 像素才出现（上游的数，见 `widgets/list` 的
@@ -526,151 +510,6 @@ func (f *followPage) scrollTop() {
 	f.state.ScrollTo(0, ui.Start)
 }
 
-// viewFollowHeader 是页头那一行：左边标题 + 关注总数，右边分组下拉。
-//
-// 上游 `follow-list/index.tsx:206` 的 `<h1>` 在这一页是「全部关注 / 分组名 /
-// 我的关注」，而**我们页头一直写「我的关注」**——「现在在哪一组」是右上角那个
-// 下拉自己的事（它的触发器写着当前那一格的名字），不是页头的事。上游那一支
-// 在「停在某一组」和「停在全部」之间换名字，而我们这一页的名字本来就不换。
-//
-// 布局照 `later.go` 的 `viewLaterHeader`：标题在左、右边一枚控件，`Spacer`
-// 吃掉中间的空白。
-func (s *Shell) viewFollowHeader(c *ui.Context, f *followPage) {
-	t := c.Theme()
-	ui.Row(c).Key("follow:page-title").FillWidth().AlignItems(ui.Center).Children(func() {
-		typo.Display(ui.Text(c, "我的关注"), scale.Font(c, scale.PageTitle))
-		// 总数是淡一档的数字徽章，跟在标题后面（上游 `index.tsx:224` 的
-		// `allCount ? \`（${allCount}）\` : ""`）。
-		if f.total > 0 {
-			ui.Text(c, strconv.Itoa(f.total)).FontSize(scale.Font(c, scale.Size14)).
-				TextColor(t.TextMuted).Padding(space.Px2, space.Px6)
-		}
-
-		ui.Spacer(c)
-
-		s.viewFollowGroupSelect(c, f, t)
-	})
-}
-
-// viewFollowGroupSelect 是右上角那个「全部关注 ▾」下拉。
-//
-// # 为什么是它替掉左边那一栏
-//
-// 原来左边 200 宽 × 全高的一栏只干「选组」一件事（票 #367），而分组是用户自己
-// 建的，想看有哪些分组是一个主动动作——所以它降为页头里的一枚下拉，内容区
-// 一行顶到窗口右缘。网易云那张参考图里「分组」也收在页头，不是一栏。
-//
-// # 收起那一格写的是**当前那一格**的名字
-//
-// 停在「全部关注」写「全部关注」，停在某一组写那一组的名字（上游
-// `index.tsx:206` 的 `<h1>` 同一个口径），而**不是**这一页的名字——这一页的
-// 名字是左边那个 24 号的「我的关注」。两件事在页头上是两个字。
-//
-// # 弹层里的三态和原来左栏是同一套
-//
-// 「分组还在拉」/「分组没拉出来（可重试）」/「还没有分组」——那三句话在左栏
-// 时是三行字，收成下拉之后是弹层里的三条。一句都不能少：B 站返回空数组和
-// 「我们没拉到」在界面上是两件事。
-//
-// # 分组项的画法照 `enumSelect`（settings_enum.go）
-//
-// 高亮那一档是 `flatSolid`（实心主色底），当前值那一档是淡底——同一个出口，
-// 和设置页的下拉一个样。唯一不同的是「全部关注(N)」和第一个分组之间加一道
-// 分界（票 #367 那条线的同一个理由：一个是全集，一个是用户自己建的组）。
-func (s *Shell) viewFollowGroupSelect(c *ui.Context, f *followPage, t *ui.Theme) {
-	// 收起那一格写的字：当前那一格的名字，和上游 index.tsx:206 的 `<h1>`
-	// 同一个口径（`followPaneTitle` 复用）。
-	//
-	// ⚠️ **下拉的值绑 `f.tab` 本体**：`SelectBase` 选中那一项时是把值写进绑定的
-	// 字段，绑到一个暂存格的话暂存格要在这一帧开头回填成 `f.tab`——而 `choose()`
-	// 在输入处理里写暂存格、回填在视图构建里跑，顺序反过来就把用户那一选抹掉了。
-	// 绑本体则 `Changed()` 只在真的换了的时候才响，换组要做的几件事（放掉搜索词、
-	// 换代、清行）都由 `applyFollowTab` 收着。
-	sel := ui.SelectBase(c, &f.tab)
-	trigger := sel.Trigger.Height(followGroupSelectH).MinWidth(followGroupSelectMinW).
-		Radius(t.Radius).Background(t.Surface).Border(1, t.Border).
-		Padding(space.None, space.Px10).AlignItems(ui.Center).Gap(space.Px6)
-	trigger.Label("选择关注分组")
-	trigger.Children(func() {
-		ui.Text(c, followPaneTitle(f)).FontSize(scale.Font(c, scale.Size14)).
-			SingleLine().Grow(1)
-		ui.Icon(c, chevronIcon()).TextColor(t.TextMuted)
-	})
-
-	sel.Popup(func(panel ui.Element) {
-		popupPanel(t, panel.Grow(1).MaxWidth(280).Padding(space.Px4)).Children(func() {
-			// ⚠️ **三态先判**：分组还在拉 / 拉失败了 / 还没有分组——和原来左栏
-			// 那三句话是同一套，收成下拉之后一样都不能少。
-			switch {
-			case !f.tagStarted && f.tagErr != nil:
-				ui.Text(c, "分组没拉出来").FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.Text).PaddingX(space.Px8)
-				ui.Text(c, f.tagErr.Error()).FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).PaddingX(space.Px8).MaxLines(2).Ellipsis("…")
-				if flatButton(c, "重试拉分组").FontSize(scale.Font(c, scale.Size12)).
-					Padding(space.Px4, space.Px8).Justify(ui.Start).Clicked() {
-					f.tagErr, f.tagLoading = nil, true
-					go s.fetchFollowTags(context.Background(), f)
-				}
-				return
-			case !f.tagStarted:
-				ui.Text(c, "正在加载分组…").FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).PaddingX(space.Px8)
-				return
-			}
-			// 「全部关注(N)」是第一项；它和分组之间有一道分界（票 #367 那条线
-			// 的同一个理由：一个是全集，一个是用户自己建的组）。
-			s.viewFollowGroupItem(c, f, sel, followTabAll,
-				fmt.Sprintf("全部关注%s", countSuffix(f.total)), t)
-			if len(f.tags) > 0 {
-				ui.Divider(c).Background(t.Border).MarginY(space.Px4)
-			}
-			for _, tg := range f.tags {
-				name := tg.Name + countSuffix(tg.Count)
-				if name == "" {
-					name = "这一组"
-				}
-				s.viewFollowGroupItem(c, f, sel, followTagTab(tg.ID), name, t)
-			}
-			if len(f.tags) == 0 {
-				// 🔴 **「一个分组都没有」要有一句话**：什么都不摆的话弹层里只有
-				// 一项「全部关注」，用户以为整个下拉没拉出来（而它确实拉出来了，
-				// 只是 B 站那会儿返回空数组）。
-				ui.Text(c, "还没有分组").FontSize(scale.Font(c, scale.Size12)).
-					TextColor(t.TextMuted).PaddingX(space.Px8).PaddingY(space.Px4)
-			}
-		})
-	})
-
-	// ⚠️ **`Changed()` 必须放在 `sel.Popup` 之后**（`input.go` 的注释：「先配好
-	// 控件再问响应」）：`Changed()` 内部会 `applyInputs()`——那一趟里跑的是弹层里
-	// 那些 `Item` 的 `choose()`，而 Item 的输入回调是 `Popup` 这一段里注册上去的。
-	// 放在 `Popup` 之前查的话，`applyInputs` 跑的时候这一帧的 Item 还没建出来，
-	// `choose()` 落到下一帧（`f.tab` 那时已被写进新值），`Changed()` 自己报 false
-	// ——`applyFollowTab` 永远不进，分组看着切了、底下那格还是上一组的人。
-	if trigger.Changed() {
-		s.applyFollowTab(f)
-	}
-}
-
-// viewFollowGroupItem 是弹层里的一项。
-//
-// 高亮（指针 / 键盘游标在这一项）走 `flatSolid`（实心主色底），当前值那一档
-// 是淡底——和 `enumSelect` 里那两项同一个出口（settings_enum.go:64-76）。
-func (s *Shell) viewFollowGroupItem(c *ui.Context, f *followPage, sel ui.SelectParts[string],
-	tab, label string, t *ui.Theme) {
-	opt := sel.Item(tab).Padding(space.Px6, space.Px10).Radius(t.Radius)
-	switch {
-	case opt.Highlighted():
-		opt = flatSolid(c, opt)
-	case tab == f.tab:
-		opt = opt.Background(t.Surface)
-	}
-	opt.Children(func() {
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).SingleLine().Grow(1)
-	})
-}
-
 // followPaneTitle 是下拉收起那一格写的名字：当前停在哪一格。
 //
 // ⚠️ **每一档都说得出是哪一档**：分组没拉到 / 拉失败了 / 停在「全部关注」/
@@ -723,43 +562,6 @@ func (s *Shell) applyFollowTab(f *followPage) {
 	}
 	f.gen++
 	f.resetUsers()
-}
-
-// viewFollowSearch 是「全部关注」那一格顶上那个搜索框。
-//
-// ⚠️ **只在「全部关注」那一格画**，照上游（`index.tsx:280` 的
-// `activeTab === "all" &&`）：B 站的搜索接口搜的是「我关注的人」的全集，
-// 搜不出「某一组里的谁」——摆一个在那儿，用户搜一个人搜不到，而这个人就在
-// 眼前这一组里。
-//
-// **回车才搜，不防抖**：上游就是 `onKeyDown Enter → onSearchSubmit`
-// （`index.tsx:298-300`），没有 `useDebounceFn`（那是 later / history 两页的
-// 做法）。所以这里也不加——加了就和上游不是一回事了，而多一个 500ms 的钟要
-// 有人去停它。
-func (s *Shell) viewFollowSearch(c *ui.Context, f *followPage) {
-	if f.tab != followTabAll {
-		return
-	}
-	t := c.Theme()
-	ui.Row(c).Key("follow-search").FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
-		// ⚠️ Label 不能省：它不只是给测试用的——没有它读屏软件读不出这是一个搜
-		// 关注对象的输入框（占位文字不是标签），无头 Tester 也只认 label / text。
-		box := ui.TextInput(c, &f.draft).Grow(1).MaxWidth(keywordBoxWidth).
-			Label(followSearchLabel).Placeholder(followSearchLabel)
-		if box.Submitted() {
-			s.searchFollow(f, strings.TrimSpace(f.draft))
-		}
-		// ⚠️ **清空按钮只在真的搜着的时候才在**：Biu 那个 `isClearable` 在框是空的
-		// 时候也画一颗，画出来按下去什么也没发生。
-		if f.applied != "" {
-			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
-				MaxLines(1).Ellipsis("…")
-			if ui.Button(c, "清空搜索").FontSize(scale.Font(c, scale.Size12)).Clicked() {
-				f.draft = ""
-				s.searchFollow(f, "")
-			}
-		}
-	})
 }
 
 // searchFollow 把生效的词换掉，从第 1 页重来。
@@ -998,35 +800,21 @@ func followIndexOfMid(users []app.FollowUser, mid int64) int {
 // Cocoa 事件循环把整个进程带走。按行兜的话一行有六格，一张坏头像要带走五张
 // 好的（理由同 `widgets/list/grid.go` 的 `viewRow`）。
 func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
-	t := c.Theme()
 	first := i * cols
 	if first >= len(f.users) {
 		s.viewFollowSentinel(c, f)
 		return
 	}
-	// ⚠️ **Stretch**：格子要撑满这一行的高，卡的留白才跟着这一行算而不是自己
-	// 缩成 0（理由同 `list.Grid.viewRow`）。
-	grid := ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(list.GridGap)
-	// 🔴 **这一行是布局，所以它自己刷底色**（理由见 `list.LayoutRow`）：框架给
-	// 「指针压着的那一行」铺一层 `t.SurfaceHover`，而这一行是**一排卡**、比卡宽——
-	// 卡右边空出来的那一块会整块变成悬停底（实测 522×233 的 `#e9e9ec`），而那里
-	// 什么都没有。悬停反馈是**卡**的事（卡自己刷**卡片那一档**的悬停，见
-	// `viewFollowCard`）。
-	//
-	// ⚠️ **缝的底色取卡片那一档，不是页面底色**：`LayoutRow` 默认刷
-	// `t.Background`，而卡片的底是 `cardBackground`（方案的 `surface1`）——
-	// 两档不一样的时候，缝就是一道道比卡片更深的「沟」（用户报的怪色）。
-	// 卡片靠圆角和影分出边界，不需要缝再深一档。
-	grid = list.LayoutRow(grid, t, s.cardBackground(t))
-	grid.Children(func() {
+	gap := followCardGap
+	cell := pud.CellWidth(max(f.width, 0), cols, gap)
+	ui.Row(c).Key("follow-row:" + followKeyOf(f.users[first].Mid)).Gap(gap).AlignItems(ui.Start).Children(func() {
 		for k := range cols {
 			j := first + k
 			if j >= len(f.users) {
-				// 最后一行不满：剩下的格子空着（CSS grid 也是这么摆的，空格子
-				// 不占位也不画边框）。
+				// 最后一行不满：剩下的格子空着。
 				return
 			}
-			s.viewFollowCardGuarded(c, f, j, cols)
+			s.viewFollowCardGuarded(c, f, j, cols, cell)
 		}
 	})
 }
@@ -1036,11 +824,11 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 // ⚠️ **`cols` 是这一帧正在摆的列数**（`viewFollowRow` 传下来的），不是上一帧的
 // `f.cols`——换列数那一帧格子已经按新列数摆了，而 `f.cols` 要等这一段画完才换
 // （`keepFollowAnchor` 要先拿旧列数算锚点），拿旧的去算「游标在第几格」会落错行。
-func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i, cols int) {
+func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i, cols int, cell float32) {
 	u := f.users[i]
 	if f.failed[u.Mid] {
 		ui.Text(c, "这一格画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
-			Padding(followCardPad).MaxLines(1)
+			MaxLines(1)
 		return
 	}
 	defer func() {
@@ -1052,183 +840,7 @@ func (s *Shell) viewFollowCardGuarded(c *ui.Context, f *followPage, i, cols int)
 			log.Printf("pudmusic: 关注页那张卡画崩了（%d）：%v\n%s", u.Mid, rec, debug.Stack())
 		}
 	}()
-	s.viewFollowCard(c, u, f.keys.selectedCell(i, cols), f.keys.ring(c))
-}
-
-// viewFollowCard 画一张卡。
-//
-// 结构照 Biu 的 `follow-list/user-card.tsx`：头像一块，下面昵称，再下面签名
-// （一行）。**整张卡点一下 = 跳进那个 UP 的空间**（上游 `onPress`
-// 就是 `navigate(/user/${u.mid})`）。
-//
-// ⚠️ **认证那一块画成一行字而不是头像右下角那枚闪电**：上游那一枚是
-// `RiVerifiedFill`，而我们的图标资源里**没有那一枚**（这一票补的是界面上一处一处
-// 用得上的那一批，不是一个分类整个搬进来）。`official_verify.desc` 我们已经解出来
-// 了（`bili/follow.go`），摆一行字是最诚实的画法。
-//
-// # 为什么是「瘦卡」而不是上游那张大卡
-//
-// 上游 HeroUI 的卡是 `h-32 w-32` 头像 + `p-4` 留白 + `text-lg` 名字 +
-// `line-clamp-2` 签名，一张卡又宽又高。用户 2026-11-03 参考网易云关注页拍板：
-// 头像 96、留白 12、名字 16、签名只留一行——要的是那种清爽瘦卡。
-func (s *Shell) viewFollowCard(c *ui.Context, u app.FollowUser, selected, ring bool) {
-	t := c.Theme()
-	name := u.Name
-	if name == "" {
-		// 没有昵称就画一个占位，不是空串：空昵称在卡上是**一块什么都没有**，
-		// 而这一帧用户正等着知道这是谁（理由同 `spaceName`）。
-		name = "这个 UP 主"
-	}
-
-	// ⚠️ **格子的底色跟着这一格自己**（不是 `ui.List` 那一行的选中底）——行是
-	// 布局，用户认的是「我点的是这张卡」。
-	//
-	// ⚠️ **`Clip()` 是操作条藏起来的前提**：那一条平时停在卡片下沿之外 64 点
-	// （见 `followActionBarBottom` / `Rise`），不裁的话它会画到下面那张卡上。
-	//
-	// ⚠️ **底色 + 那一圈影是上游那张 `Card` 的两样东西**（上游
-	// `pages/follow-list/user-card.tsx:60` 那一枚是 HeroUI 的 `<Card radius="md"
-	// isHoverable isPressable>`）：HeroUI 的 Card 底色是 `bg-content1`，而它的
-	// `shadow` **默认就是 `md`**（`@heroui/theme` 的 card 主题
-	// `defaultVariants.shadow = "md"`），所以上游那些没写 `shadow=` 的卡片带的是
-	// 那一档。
-	//
-	// # 底色取**卡片那一档**（`cardBackground`），不是页面底色
-	//
-	// 原来这里取的是 `t.Background`——**和页面底色同一个底**，于是整片 UP 主看着
-	// 是**一整块**，只靠那圈很淡的影撑着（浅色下那圈影几乎看不见）。用户说的
-	// 「现在是整个的卡片连着的」就是这一档。
-	//
-	// 卡片那一档（方案里的 `surface1`；经典是控件那一层）是**这个仓库里卡片那一族
-	// 已经在用的一档**——动态卡片、登录页那一块、弹窗面板、头像菜单都是它
-	// （`themepreset.go` 的 `cardBackground`）。这一张卡原来没用它，于是它和
-	// 那一族长得不一样。
-	//
-	// 圆角也跟着那一族走（`cardRadius`）：经典是主题圆角的 1.5 倍（默认 8 → 12），
-	// 方案是 `radiusLg`——**12 正好是上游 HeroUI `radius="md"` 的值**。
-	//
-	// # 留白和格子之间的缝，对着上游核过（一个数都没改）
-	//
-	//   - 卡里那圈留白 **16**（上游 `CardBody` 的 `p-4`，见 `followCardPad`）；
-	//   - **列与列之间**的缝 **16**（上游 `virtual-grid-page-list` 的
-	//     `gap: ${ROW_GAP}px`，走的是 `list.GridGap`——首页和这一页共用那一份）。
-	//
-	// ⚠️ **上游那一个 `ROW_GAP` 同时当地面上两个角色**：上面这一条是**列间距**，
-	// 而**行间距**是同一个数、但走的是另一个出口（`estimateSize` 加
-	// `height: size - ROW_GAP`）。我们这边**行间距**是 `followRowGap`（列表的
-	// `GapY`），别把它当成「格子之间的缝」。
-	cardBg := s.cardBackground(t)
-	card := ui.Column(c).Grow(1).Radius(s.cardRadius(t)).AlignSelf(ui.Stretch).Clip().
-		AlignItems(ui.Center).Gap(space.Px6).Padding(followCardPad).
-		Background(cardBg).
-		// 🔴 **字色钉回正文色，是无条件的**（理由见 dynamiccard.go 的
-		// viewDynamicCard 根上那一段）：框架在指针点一下时就把行标成选中并带
-		// 一层白字，昵称没写死颜色，不钉的话点一下就变白字。
-		TextColor(t.Text).
-		OnClick(func() { s.navigate(upPathOf(u.Mid)) })
-	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
-	//（理由见 `widgets/list/selection.go`）。
-	//
-	// ⚠️ **环落在「格」上而不是「行」上**：这一页是网格，而用户认的是「我选的是
-	// 这张卡」（理由同上面那句「格子的底色跟着这一格自己」）。
-	card = list.SelectedRow(card, t, selected, card.Hovered(), ring)
-	// ⚠️ **卡片自己的底要盖过「选中」那一层**：那一层刷的是**页面底色**
-	//（`rowCover`），而这张卡的常态底是**卡片那一档**——让那一层赢的话，选中的
-	// 那张卡就变成「页面底上的一个洞」，用户看到的是「点一下这张卡就变了」。
-	// 所以先把框架那一层盖掉，再把卡片自己的底刷回去。
-	card = card.Background(cardBg)
-	card = shadow.HeroMedium(card, t)
-	if card.Hovered() {
-		// ⚠️ **悬停那一档从卡片自己的底出发**（`cardHoverBackground`），不是跳到
-		// 控件那一层去——那样常态和悬停不在同一条色阶上。
-		card = card.Background(s.cardHoverBackground(t))
-	}
-
-	// 🔴 **每帧都问一次**（理由见 `followActionBarKey`）：指针在卡上时目标是 1，
-	// 不在时是 0；框架在这 300 毫秒里自己一帧一帧推。
-	shown := float32(0)
-	if card.Hovered() {
-		shown = 1
-	}
-	// 缓动走**全应用那条统一曲线**（`motion.Unified`），不是上游那个
-	// `ease-in-out`：手册⓪ 说「不要使用或批判地看待类 ease-in 曲线…我的建议
-	// 是只使用 ease-out」，而这一条是**点击触发**的过渡（指针移上去操作条升
-	// 起来），正是手册反对 ease-in 的那一种（理由见 DESIGN.md §五）。
-	shown = card.AnimateWith(followActionBarKey, shown, followActionBarTime, motion.Unified)
-
-	card.Children(func() {
-		// 头像。上游是 `rounded-full`，所以是圆的（`spaceAvatar` 画的也是圆的，
-		// 而且它四态齐全、还带 Label——无头 Tester 量得到）。
-		//
-		// ⚠️ **占位圆用页面底色**：卡片那一档在经典里也是 `t.Surface`，而
-		// `spaceAvatar` 的占位圆正是那一档——两者同一个底，那个圆就整个不见了
-		//（卡片看着是空的）。
-		//
-		// 用**页面底色**（卡片底下那一层）：卡片是盖在页面底上的，占位圆用底下
-		// 那一层的色 = 卡片上开了一个洞。而它**和悬停那一档也差得开**（悬停是
-		// 卡片底再往文字色推一档，比页面底暗），所以指针压上去的时候那个洞
-		// 不会跟着卡片一起变没。
-		s.spaceAvatarWith(c, u.Face, followCardSide, false, t.Background)
-		// 名字 16、签名 14。
-		//
-		// ⚠️ **上游是 `text-lg`（18），但我们取的是 `Size16`**：用户 2026-11-03
-		// 参考网易云关注页拍板——瘦卡的字号跟着瘦。
-		ui.Text(c, name).FontSize(scale.Font(c, scale.Size16)).MaxLines(1).Ellipsis("…")
-		if u.Official != "" {
-			ui.Text(c, u.Official).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
-				MaxLines(1).Ellipsis("…")
-		}
-		// ⚠️ **签名空的时候整块不画**：Biu 那一格是空的，我们这里留一个 6 的
-		// 间距 + 一段空白，看起来像卡少了一截（理由同 `list.Grid` 里时长那一列）。
-		if u.Sign != "" {
-			// ⚠️ **上游是 `line-clamp-2`，但我们取的是 MaxLines(1)**：用户 2026-11-03
-			// 参考网易云关注页拍板——瘦卡的签名只留一行。
-			ui.Text(c, u.Sign).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Signature).TextColor(t.TextMuted).
-				TextAlign(ui.Center).MaxLines(1).Ellipsis("…")
-		}
-		s.viewFollowActions(c, u, shown)
-	})
-}
-
-// viewFollowActions 是卡片底下那条 hover 才升上来的操作条。
-//
-// 位置照上游 `user-card.tsx:89`：`absolute bottom-4 left-1/2 -translate-x-1/2`
-// 加 `translate-y-20`，hover 时 `translate-y-0`。我们不用 transform（DESIGN
-// §5：「动画不要用 transform 动大子树」），改成直接动 `Bottom`——动的只是这一条
-// 自己的布局位置。
-//
-// ⚠️ **这里只摆「取消关注」**：上游那一格还有「设置分组」，而设置分组要先
-// 选一个组、再走 `/x/relation/tags/addUsers`——那条写接口和选组的弹层都不在
-// 这一页现有的四个 GET 里（见 `bili/follow.go` 的文件头）。按下去什么都不会
-// 发生的按钮，比少这一枚更糟。
-func (s *Shell) viewFollowActions(c *ui.Context, u app.FollowUser, shown float32) {
-	t := c.Theme()
-	bottom := followActionBarBottom - (1-shown)*followActionBarRise
-
-	// 完全藏起来时连指针也别吃：`Invisible` 保留布局、不画、不吃指针，
-	// 而且无头 Tester 也找不到它——「没 hover 时画面上没有这条」才断言得了。
-	layer := ui.Column(c).Absolute().Left(0).Right(0).Bottom(bottom).
-		AlignItems(ui.Center)
-	if shown <= 0.001 {
-		layer = layer.Invisible()
-	}
-	layer.Children(func() {
-		// ⚠️ **那一圈影是上游的 `shadow-lg`**（`follow-list/user-card.tsx:89`
-		// 那一枚浮层上的 `shadow-lg`）：`0 10px 15px -3px rgb(0 0 0/0.1)` 与
-		// `0 4px 6px -4px rgb(0 0 0/0.1)`，**两层**。
-		//
-		// 原来这里是框架浮层那一档（`0 6 20 0` + 我们自己的浓度）——那是**面板**
-		// 的影（`popup.go` 那个出口），而这一条是**浮在卡片上面的一条药丸**，它
-		// 底下压着的是头像和名字。影淡了它就贴着卡片，而不是浮在上面。
-		bar := shadow.TailwindLG(ui.Row(c).Gap(space.Px2).Padding(space.Px4, space.Px8).Radius(followActionPillRadius).
-			Background(s.cardBackground(t)).Border(1, t.Border))
-		bar.Children(func() {
-			if flatButton(c, "取消关注").FontSize(scale.Font(c, scale.Size13)).
-				TextColor(dangerText(t)).Clicked() {
-				s.unfollowFromFollowCard(u)
-			}
-		})
-	})
+	s.viewFollowCard(c, u, cell)
 }
 
 // unfollowFromFollowCard 是操作条上按了「取消关注」。

@@ -236,36 +236,34 @@ func TestTheDownloadTableHasAShadow(t *testing.T) {
 	}
 }
 
-// TestTheFollowCardHasAShadow 钉住**关注卡**那一圈影。
+// TestTheFollowCardIsLayeredByItsBorderNotAShadow 钉住**关注卡**的分层方式。
 //
-// 上游是 HeroUI 的 `<Card radius="md" isHoverable isPressable>`
-// （`pages/follow-list/user-card.tsx:60`）——HeroUI 的 Card **默认就是
-// `shadow="md"`**（`@heroui/theme` 的 card 主题 `defaultVariants.shadow = "md"`）。
-func TestTheFollowCardHasAShadow(t *testing.T) {
+// 「深夜唱片行」（原型 `.ucard`）靠 1 像素 `--line` 描边分层，卡外面没有影：旧设计（上游
+// HeroUI 的 `shadow="md"`）在新的深色 `--bg #0E0F11` 上一个色阶都量不出来，所以判据换成
+// 「卡的左缘那一像素是 line 色、卡外面紧挨着的一圈和页面底色一模一样（没有影）」。
+func TestTheFollowCardIsLayeredByItsBorderNotAShadow(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			if dark {
-				// 「深夜唱片行」深色 --bg 是 #0E0F11，HeroUI 那一档 20%~22% 的黑影压上去
-				// 一个色阶都量不出来；原型这一处没有影（靠 --line 描边分层），由 T3（关注页）
-				// 重做时换掉这一条。浅色那一档照旧钉着。
-				t.Skip("深色下原型不用影分层，见上面的注释")
-			}
 			tt := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
 				s.viewFollowCard(c, app.FollowUser{
 					Mid: 11, Name: "一个 UP 主", Sign: "签名",
 					Face: "https://f/author-11.jpg",
-				}, false, false)
+				}, shadowW-2*shadowPad)
 			})
 			img := tt.Image()
-			// 卡片是 Grow(1) 的，占满留白之后那一块。
-			assertShadow(t, img,
-				mygoui.Rect{X: 60 - 10, Y: 200, W: 10, H: 20},
-				mygoui.Rect{X: 20, Y: 200, W: 10, H: 20},
-				2, "关注卡")
+			edge := img.RGBAAt(shadowPad, 100)
+			outside := img.RGBAAt(shadowPad-6, 100)
+			bg := img.RGBAAt(20, 20)
+			if outside != bg {
+				t.Errorf("关注卡外面紧挨着的一圈是 %v，页面底色是 %v——卡外面不该有影", outside, bg)
+			}
+			if edge == bg {
+				t.Errorf("关注卡左缘 %v 和页面底色一样——描边没画出来", edge)
+			}
 		})
 	}
 }
