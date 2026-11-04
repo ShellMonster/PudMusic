@@ -741,7 +741,6 @@ func suggestPanelMaxH(winH float32) float32 {
 }
 
 // clearHistoryTip 是「清除全部」那句提示（票 BMG-253）。
-//
 const clearHistoryTip = "清空搜索历史"
 
 // viewSuggestHeader 是浮层顶上那一行：一只钟 +「历史搜索」，右边是「清空全部」。

@@ -194,8 +194,8 @@ func TestTheTooltipGoesWithItsAnchor(t *testing.T) {
 // ⚠️ **判据数的是「这两枚的提示各自在不在」**：播放条上别的提示（收藏、播放
 // 列表、加歌……）不在这一次挪动的范围里，不参与数。
 func TestThePlayBarShowsOneTooltipAtATime(t *testing.T) {
-	const modeTip = "循环：循环播放（点一下换，右键看全部）"
-	const downloadTip = "把正在放的这首下载到本地"
+	const modeTip = "循环播放"
+	const queueTip = "打开播放列表"
 
 	st := app.State{HasTrack: true, Title: "一首歌", Artist: "某个 UP 主",
 		Volume: 0.8, Rate: 1, Source: "online", PlayMode: app.PlayModeLoop}
@@ -214,16 +214,16 @@ func TestThePlayBarShowsOneTooltipAtATime(t *testing.T) {
 		t.Fatalf("播放模式那一枚的提示没出来（文字有 %q）", tt.Texts())
 	}
 
-	// 挪到「下载」上。
-	r, ok := tt.Find("下载")
+	// 挪到「播放列表」上。
+	r, ok := tt.Find("播放列表")
 	if !ok {
-		t.Fatalf("播放条上找不到「下载」那一枚，文字有 %q", tt.Texts())
+		t.Fatalf("播放条上找不到「播放列表」那一枚，文字有 %q", tt.Texts())
 	}
 	tt.Move(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
 
 	n := 0
-	for _, tip := range []string{modeTip, downloadTip} {
+	for _, tip := range []string{modeTip, queueTip} {
 		if tt.HasText(tip) {
 			n++
 		}
@@ -236,7 +236,7 @@ func TestThePlayBarShowsOneTooltipAtATime(t *testing.T) {
 		t.Errorf("「播放模式」那一枚的提示还挂在屏幕上（文字有 %q）——"+
 			"指针落到另一枚上时，上一枚该立刻走", tt.Texts())
 	}
-	if !tt.HasText(downloadTip) {
-		t.Errorf("指针停到「下载」上，它那一枚的提示没出来（文字有 %q）", tt.Texts())
+	if !tt.HasText(queueTip) {
+		t.Errorf("指针停到「播放列表」上，它那一枚的提示没出来（文字有 %q）", tt.Texts())
 	}
 }

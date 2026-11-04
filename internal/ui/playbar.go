@@ -473,7 +473,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		s.viewSleep(c, st)
 
 		if s.withTip(c, iconKey(c, iconEnqueue, "加歌", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "加歌").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
 			s.pickAndEnqueue()
 		}
 	})
@@ -991,7 +991,7 @@ func favTooltip(faved bool) string {
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 	if s.withTip(c, iconKey(c, iconDownload, "下载", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "下载这一首").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，下载不了", notice.Warning)

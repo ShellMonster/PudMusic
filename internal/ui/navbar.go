@@ -144,7 +144,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 「只有淡底、图形不变色」那一档——同一个「图标键」在应用里有两套配方，
 		// 用户从播放条挪到顶栏会觉得「这一枚不亮」。
 		if s.withTip(c, iconKey(c, iconFolder, "打开文件", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "打开文件").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
 			s.pickAndEnqueue()
 		}
 		//
@@ -189,8 +189,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// `comments_entry.go` 的 `c.Key(commentsButtonKey)`。
 		c.Key("nav-stats")
 		if s.withTip(c, iconKey(c, iconChart, "听歌统计", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-			"听歌统计").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
 			s.navigate(statsPath)
 		}
 		// ⚠️ **皮肤那一枚在「听歌统计」和「迷你」之间**：它是**外观**的动作，
@@ -204,8 +203,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 的 `act` 按 Key 找元素。
 		c.Key("nav-appearance")
 		if s.withTip(c, iconKey(c, iconPalette, "皮肤", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-			"皮肤").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
 			s.navigate(appearancePath)
 		}
 		if s.withTip(c, iconKey(c, iconPiP, "迷你", iconMd, false).

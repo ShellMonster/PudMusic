@@ -185,16 +185,17 @@ func TestTheNavBarTooltipsDoNotStackWhileTabbing(t *testing.T) {
 	tt.SetFocused(true)
 	tt.Frame()
 
-	// 顶栏那两枚带提示的图标键。
-	const openTip = "打开本地音频文件"
-	const pipTip = "缩成 320×84 的小窗贴边悬浮，音乐不停"
+	// 顶栏上文字独一无二的两枚提示：「返回发现总览」（首页那一枚后退键）和
+	// 「迷你播放器」。其余几枚图标键的提示和按钮名同词之后就不再挂了。
+	const backTip = "返回发现总览"
+	const pipTip = "迷你播放器"
 
 	for i := range 10 {
 		tt.Key(0, ui.KeyTab)
 		tt.Frame()
 		n := 0
 		for _, s := range tt.Texts() {
-			if s == openTip || s == pipTip {
+			if s == backTip || s == pipTip {
 				n++
 			}
 		}

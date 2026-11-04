@@ -395,8 +395,7 @@ func TestTheTopBarKeysKeepTheirTipsAndNames(t *testing.T) {
 	s, tt := navBarShell(t, app.DefaultThemePreset, false)
 
 	for _, want := range []struct{ key, tip string }{
-		{"打开文件", "打开本地音频文件"},
-		{"迷你", "缩成 320×84 的小窗贴边悬浮，音乐不停"},
+		{"迷你", "迷你播放器"},
 		{"动态", "动态"},
 	} {
 		btn, ok := tt.Find(want.key)

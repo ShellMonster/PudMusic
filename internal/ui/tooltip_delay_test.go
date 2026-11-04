@@ -128,16 +128,16 @@ func TestTheNavBarTooltipFollowsTheDefaultTiming(t *testing.T) {
 	tt.SetFocused(true)
 	tt.Frame()
 
-	hoverOn(t, tt, "打开文件")
-	if !tt.HasText("打开本地音频文件") {
-		t.Fatalf("顶栏「打开文件」的提示没有立刻出来（默认 0ms），文字有 %q", tt.Texts())
+	hoverOn(t, tt, "迷你")
+	if !tt.HasText("迷你播放器") {
+		t.Fatalf("顶栏「迷你」的提示没有立刻出来（默认 0ms），文字有 %q", tt.Texts())
 	}
 
 	tt.Move(1, 1)
 	tt.Frame()
 	tt.Advance(501 * time.Millisecond)
 	tt.Frame()
-	if tt.HasText("打开本地音频文件") {
+	if tt.HasText("迷你播放器") {
 		t.Errorf("顶栏提示在指针离开 501ms 后还挂着——它没走 tipDefault 的 500ms 收")
 	}
 }
