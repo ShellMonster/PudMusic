@@ -430,7 +430,7 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
 	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).
-		Padding(space.None, space.PageHorizontal(s.spaceContentWidth(c))).
+		Padding(space.None, winPad(windowW(c))).
 		Draw(func(pp *ui.Painter, r ui.Rect) { s.paintCollectionBand(pp, r, p) }).Children(func() {
 		// 🔴 **头图区、操作条、表头都在列表的滚动区里**（票 #625）：它们是
 		// **列表的第 0 行**（页内头部，`list.Lead`），跟着内容一起滚走。

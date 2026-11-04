@@ -25,7 +25,8 @@ import (
 const (
 	// upBandH 是头图带高（`.up-band` 168）。
 	upBandH float32 = 168
-	// upFaceS 是头像边长（`avatar(…,112)`），外面再套 4 像素 bg 色环。
+	// upFaceS 是头像（含 4 像素 bg 色环）的外径：原型 `avatar(…,112)` + `border: 4px solid var(--bg)`，
+	// `box-sizing: border-box`，所以环算在 112 里面，图是 104。
 	upFaceS float32 = 112
 	// upFaceRing 是头像外那圈色环的宽（`.up-head .avatar` 的 4px border）。
 	upFaceRing float32 = 4
@@ -35,7 +36,7 @@ const (
 
 // upPadFor 是这一帧 UP 空间页左右的页边距（40 / 32 / 16）。
 func (s *Shell) upPadFor(c *ui.Context) float32 {
-	return space.PageHorizontal(s.spaceContentWidth(c))
+	return winPad(windowW(c))
 }
 
 // paintGrooves 画唱片纹：圆心在 (85% 宽, 140% 高)，半径 40 起每 14 一圈到 900，

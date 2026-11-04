@@ -88,9 +88,9 @@ func feedEndNote(c *ui.Context) {
 // viewLoggedOutPage 是需要登录的页面的未登录样子（原型 `loginPrompt`）：页头 + 虚线框的
 // 「登录后查看…」。back 是登录完回哪一页（`goLogin` 记下它，票 #277）。
 func (s *Shell) viewLoggedOutPage(c *ui.Context, key, eyebrow, title, lede, what, back string) {
-	w := s.spaceContentWidth(c)
-	ui.Column(c).Key(key).Grow(1).Padding(space.None, space.PageHorizontal(w)).Children(func() {
-		pud.PageHead(c, eyebrow, title, lede, w, nil)
+	w := windowW(c)
+	ui.Column(c).Key(key).Grow(1).Padding(space.None, winPad(w)).Children(func() {
+		pud.PageHeadSized(c, eyebrow, title, lede, pageTitleSize(w), nil)
 		if pud.LoginPrompt(c, key+":login", what) {
 			s.goLogin(back)
 		}

@@ -210,7 +210,7 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 	p := sp.pagerOf(tab)
 	if tab == upTabCollection || tab == upTabSeries {
-		sp.perRow[tab] = pud.GridCols(s.spaceContentWidth(c) - 2*s.upPadFor(c))
+		sp.perRow[tab] = winGridCols(windowW(c))
 	}
 
 	// ① 首屏那一拉，必须在**画之前**发出去。
@@ -570,9 +570,9 @@ func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 	}
 	// 收藏夹 / 合集：一行一块卡片（原型 `.card-grid` 的一行，格间距 24 / 16）。
 	w := s.spaceContentWidth(c)
-	pad := space.PageHorizontal(w)
+	pad := s.upPadFor(c)
 	per := max(sp.perRow[tab], 1)
-	gap := space.GridGapFor(w)
+	gap := winGridGap(windowW(c))
 	cell := pud.CellWidth(w-2*pad, per, gap)
 	first := i * per
 	items := sp.cols[tab][first:min(first+per, len(sp.cols[tab]))]

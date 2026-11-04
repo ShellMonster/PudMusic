@@ -215,7 +215,7 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 
 	f := s.dynamicFeedOf()
 
-	w := s.spaceContentWidth(c)
+	w := windowW(c)
 	if !s.app.LoggedIn() {
 		// 没登录不假装有内容：作者列的是「我关注的人」，没有登录态就没有这个列表。
 		// 「登录完回这一页」是票 #277 点名的那个例外（别的入口回首页）。
@@ -224,8 +224,8 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 		return
 	}
 	ui.Column(c).Key("page:"+dynamicFeedPath).Grow(1).FillHeight().
-		Padding(space.None, space.PageHorizontal(w)).Children(func() {
-		pud.PageHead(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", w, nil)
+		Padding(space.None, winPad(w)).Children(func() {
+		pud.PageHeadSized(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", pageTitleSize(w), nil)
 		s.viewFeedFilter(c, f)
 		ui.Column(c).Key("feed-items").Grow(1).FillHeight().Children(func() {
 			s.viewFeedItems(c, f)

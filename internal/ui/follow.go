@@ -436,10 +436,10 @@ func (s *Shell) viewFollow(c *ui.Context, _ *ui.Route) {
 		return
 	}
 
-	w := s.spaceContentWidth(c)
-	ui.Column(c).Key("page:"+followPath).Grow(1).Padding(space.None, space.PageHorizontal(w)).
+	w := windowW(c)
+	ui.Column(c).Key("page:"+followPath).Grow(1).Padding(space.None, winPad(w)).
 		Children(func() {
-			pud.PageHead(c, "Following", "我的关注", "", w, nil)
+			pud.PageHeadSized(c, "Following", "我的关注", "", pageTitleSize(w), nil)
 			s.viewFollowSplit(c, f)
 		})
 

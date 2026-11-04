@@ -24,24 +24,30 @@ const (
 	followCardGap float32 = 16
 )
 
-// followColumnsFor 是右边那一格有 w 宽时卡片排几列：原型固定两列，窄到两张卡放不下
-// （每张至少 280）才退成一列。
-func followColumnsFor(w float32) int {
-	if w > 0 && w < 2*280+followCardGap {
-		return 1
-	}
-	return 2
-}
+// followColumnsFor 是卡片排几列：原型 `--od-cols:2` 是行内样式，任何窗口宽都是两列。
+func followColumnsFor(w float32) int { return 2 }
 
 // viewFollowSplit 是页头下面那一整块：左分组栏，右工具条 + 网格。
 func (s *Shell) viewFollowSplit(c *ui.Context, f *followPage) {
-	ui.Row(c).Key("follow:split").Grow(1).Gap(space.Px40).AlignItems(ui.Start).
-		Margin(space.Px24, space.None, space.None, space.None).Children(func() {
-		s.viewFollowGroups(c, f)
+	right := func() {
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).FillHeight().Children(func() {
 			s.viewFollowToolbar(c, f)
 			s.viewFollowGrid(c, f)
 		})
+	}
+	// 窗口 ≤ 1024：`.split` 变单列（缝 24），分组栏变成一排横着的按钮、没有「分组」小标题和分隔线。
+	if windowW(c) <= 1024 {
+		ui.Column(c).Key("follow:split").Grow(1).Gap(space.Px24).
+			Margin(space.Px24, space.None, space.None, space.None).Children(func() {
+			s.viewFollowGroups(c, f)
+			right()
+		})
+		return
+	}
+	ui.Row(c).Key("follow:split").Grow(1).Gap(space.Px40).AlignItems(ui.Start).
+		Margin(space.Px24, space.None, space.None, space.None).Children(func() {
+		s.viewFollowGroups(c, f)
+		right()
 	})
 }
 
@@ -53,13 +59,25 @@ func (s *Shell) viewFollowSplit(c *ui.Context, f *followPage) {
 // 是两件事。
 func (s *Shell) viewFollowGroups(c *ui.Context, f *followPage) {
 	pl := tok.Of(c.Theme())
-	ui.Column(c).Key("follow:groups").Width(followGroupW).Shrink(0).Gap(space.Px2).Children(func() {
-		ui.Text(c, "分组").FontSize(scale.Font(c, scale.Size12)).FontWeight(500).TextColor(pl.Text3).
-			Padding(space.None, space.Px12, space.Px8, space.Px12)
+	narrow := windowW(c) <= 1024
+	var box ui.Element
+	if narrow {
+		box = ui.Row(c).Key("follow:groups").FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center)
+	} else {
+		box = ui.Column(c).Key("follow:groups").Width(followGroupW).Shrink(0).Gap(space.Px2)
+	}
+	box.Children(func() {
+		if !narrow {
+			ui.Text(c, "分组").FontSize(scale.Font(c, scale.Size12)).FontWeight(500).TextColor(pl.Text3).
+				Padding(space.None, space.Px12, space.Px8, space.Px12)
+		}
 		item := func(tab, label string, n int) {
 			on := f.tab == tab
-			b := ui.ButtonBase(c).Key("follow:group:"+tab).Label(label).FillWidth().
+			b := ui.ButtonBase(c).Key("follow:group:"+tab).Label(label).
 				Padding(space.Px8, space.Px12).Radius(tok.R8).AlignItems(ui.Center).Gap(space.Px8)
+			if !narrow {
+				b = b.FillWidth()
+			}
 			fg := pl.Text2
 			switch {
 			case on:
@@ -99,7 +117,9 @@ func (s *Shell) viewFollowGroups(c *ui.Context, f *followPage) {
 			note("正在加载分组…")
 			return
 		}
-		ui.Box(c).FillWidth().Height(1).Background(pl.Line).Margin(space.Px8, space.Px12, space.Px8, space.Px12)
+		if !narrow {
+			ui.Box(c).FillWidth().Height(1).Background(pl.Line).Margin(space.Px8, space.Px12, space.Px8, space.Px12)
+		}
 		for _, tg := range f.tags {
 			name := tg.Name
 			if name == "" {

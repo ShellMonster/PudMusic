@@ -88,8 +88,13 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	// 通栏的底色由页根的 `Draw` 在列表**外面**铺（`paintCollectionBand`），这里只记
 	// 颜色和高度（上一帧量到的）；这一行自己也刷同一色，盖住列表里那层页面底色。
 	p.bandBG = bg
+	// 窗口 ≤ 760（`.col-head { padding: 24px 16px }`、单列、封面最宽 220）：上下 24、封面 220。
+	padY, coverSide := float32(space.Px40), collectionCoverSide
+	if windowW(c) <= 760 {
+		padY, coverSide = space.Px24, 220
+	}
 	row := ui.Row(c).Key("collection-header").FillWidth().AlignItems(ui.End).Gap(space.Px40).
-		Padding(space.Px40, space.None, space.Px40, space.None).Wrap().Background(bg)
+		Padding(padY, space.None, padY, space.None).Wrap().Background(bg)
 	defer func() {
 		if h := row.Bounds().H; h > 0 {
 			p.bandH = h
@@ -97,28 +102,28 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	}()
 	row.Children(func() {
 		// ① 封面。元信息没回来时画骨架（空地址在 imgcache 里是「本来就没有」，含义相反）。
-		box := ui.Box(c).Size(collectionCoverSide, collectionCoverSide).Radius(tok.R8).Clip().
+		box := ui.Box(c).Size(coverSide, coverSide).Radius(tok.R8).Clip().
 			Background(pl.Surface2).Shrink(0)
 		box = shadow.Cover(box, t)
 		box.Children(func() {
 			switch {
 			case !info.Loaded:
-				imgcache.Loading(c, collectionCoverSide, collectionCoverSide, imgcache.Shape{})
+				imgcache.Loading(c, coverSide, coverSide, imgcache.Shape{})
 			case cover == "" && info.Default:
 				// 默认收藏夹没有封面时是主色底 + 心（原型「我喜欢」）。
-				ui.Box(c).Size(collectionCoverSide, collectionCoverSide).Background(pl.Accent).
+				ui.Box(c).Size(coverSide, coverSide).Background(pl.Accent).
 					AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 					ui.Icon(c, pud.Icon("heart")).FontSize(72).TextColor(pl.AccentInk)
 				})
 			default:
-				imgcache.ViewRadius(c, s.images, cover, collectionCoverSide, collectionCoverSide, 0)
+				imgcache.ViewRadius(c, s.images, cover, coverSide, coverSide, 0)
 			}
 		})
 
 		// ② 文字列：Eyebrow / 标题 / 元信息 / 简介。整列可选中复制（票 #685）。
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(240).AlignItems(ui.Start).Selectable().Children(func() {
 			typo.Eyebrow(c, collectionEyebrow(p.ref.Type, info))
-			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), scale.Font(c, collectionTitleSize(c))).
+			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), scale.Font(c, colTitleSize(windowW(c)))).
 				LineHeight(leading.Display).TextColor(pl.Text).MaxLines(2).Ellipsis("…").
 				Margin(space.Px12, space.None, space.Px12, space.None)
 
@@ -131,13 +136,6 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			}
 		})
 	})
-}
-
-// collectionTitleSize 是头部大标题的字号：原型 `font-size: clamp(36px, 4.4vw, 64px)`，
-// vw 是窗口宽（不是内容区宽）。
-func collectionTitleSize(c *ui.Context) float32 {
-	w, _ := c.Size()
-	return min(max(36, 0.044*w), 64)
 }
 
 // collectionEyebrow 是标题上面那行小字：「收藏夹 · 私密」。

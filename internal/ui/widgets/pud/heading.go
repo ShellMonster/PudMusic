@@ -21,6 +21,12 @@ const ledeMaxW = 560
 //		pud.Button(c, "import", pud.Ghost, pud.Std, "导入", "import")
 //	})
 func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, actions func()) {
+	PageHeadSized(c, eyebrow, title, lede, scale.PageTitleFor(contentW), actions)
+}
+
+// PageHeadSized 是 PageHead 直接给标题字号（已经按原型 `clamp(32px, 3.4vw, 48px)` 用窗口宽算好，
+// 还没乘系统缩放）的那一版。
+func PageHeadSized(c *ui.Context, eyebrow, title, lede string, titleSize float32, actions func()) {
 	p := pal(c)
 	ui.Row(c).FillWidth().AlignItems(ui.End).Gap(space.Px24).Padding(space.Px24, space.None, space.Px8, space.None).
 		Children(func() {
@@ -28,7 +34,7 @@ func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, acti
 				if eyebrow != "" {
 					typo.Eyebrow(c, eyebrow)
 				}
-				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFor(contentW)))
+				t := typo.Display(ui.Text(c, title), scale.Font(c, titleSize))
 				if eyebrow != "" {
 					t.Margin(space.Px8, space.None, space.None, space.None)
 				}
