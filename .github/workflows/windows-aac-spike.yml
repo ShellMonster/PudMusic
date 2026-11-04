@@ -71,10 +71,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       # 这一步在 macOS 上**根本不存在**：那一半的代码有 `//go:build windows`，
       # 在 macOS 上连编译都不进。所以「能不能编过」这件事只能在这里问。

@@ -38,11 +38,18 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Select screenshot suites
         id: select

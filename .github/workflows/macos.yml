@@ -17,10 +17,10 @@ permissions:
   contents: read
 
 jobs:
-  macos:
-    name: Build and validate macOS app
+  verify:
+    name: Format and module check
     runs-on: macos-15-intel
-    timeout-minutes: 45
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
@@ -28,11 +28,18 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       - name: Verify formatting and modules
         shell: bash
@@ -61,14 +68,112 @@ jobs:
           fi
           go mod verify
 
-      - name: Run Go checks
+      - name: Verify generated resources
         shell: bash
         run: |
           set -euo pipefail
-          go build -trimpath -p 4 ./...
-          go vet -trimpath -p 4 ./...
+          go generate ./internal/platform/ ./internal/licensing/
+          git diff --exit-code -- resources
+
+  build:
+    name: Build all packages
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Build
+        run: go build -trimpath -p 4 ./...
+
+  vet:
+    name: Vet all packages
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Vet
+        run: go vet -trimpath -p 4 ./...
+
+  test:
+    name: Test non-UI packages
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Test
+        run: |
+          set -euo pipefail
           go test -p 4 $(go list ./... | grep -v '/internal/ui$')
           go test ./internal/licensing/
+
+  e2e:
+    name: MyGo native UI E2E
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Run MyGo native UI E2E
         shell: bash
@@ -97,12 +202,27 @@ jobs:
             -run 'TestMyGoAutomationDrivesNativeUIAndCapturesIt|TestTheApplicationMenu|TestTheStatsPage|TestTheListProgressBarIsAProgressIndicatorWithAName' \
             -count=1 -timeout 300s
 
-      - name: Verify generated resources
-        shell: bash
-        run: |
-          set -euo pipefail
-          go generate ./internal/platform/ ./internal/licensing/
-          git diff --exit-code -- resources
+  artifacts:
+    name: Build unsigned macOS artifacts
+    runs-on: macos-15-intel
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Cache Go toolchain
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/go
+          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Build unsigned macOS artifacts
         shell: bash
