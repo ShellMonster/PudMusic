@@ -495,7 +495,6 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur
 	fade := float32(1)
 	if cur {
 		fade = 0
-		card = card.Role(ui.RoleButton).Label(sh.Title)
 	}
 	card = card.AnimatePose(ui.Pose{Fade: fade}, anim)
 	card = card.Background(ui.RGBA(28, 23, 20, 1))
@@ -526,16 +525,29 @@ func (h *homePage) viewHeroCard(c *ui.Context, m list.Music, w, hgt float32, cur
 			Padding(space.Px24, space.Px24, space.Px24, space.Px28).Gap(space.Px8).Justify(ui.Center).AlignItems(ui.Start).
 			Attach(ui.AnchorTopLeft, ui.AnchorTopLeft)
 		if cur {
-			textCol = textCol.Selectable().CopyData(func([]ui.SelectedText) transfer.Data {
-				parts := []string{sh.Title}
-				if sh.Owner != "" {
-					parts = append(parts, sh.Owner)
+			textCol = textCol.HandleInput(func(ev ui.InputEvent) bool {
+				if ev.Kind == ui.InputPointerDown && ev.Button == 0 && ev.Clicks <= 1 {
+					h.playNow(m)
 				}
-				return transfer.TextData(strings.Join(parts, "\n"))
+				return false
 			})
+			textCol.Children(func() {
+				ui.Box(c).FillWidth().Selectable().CopyData(func([]ui.SelectedText) transfer.Data {
+					return transfer.TextData(heroCopyText(sh))
+				}).Children(func() { h.viewHeroText(c, m.ID, sh, t) })
+			})
+			return
 		}
 		textCol.Children(func() { h.viewHeroText(c, m.ID, sh, t) })
 	})
+}
+
+func heroCopyText(sh list.Shown) string {
+	parts := []string{sh.Title}
+	if sh.Owner != "" {
+		parts = append(parts, sh.Owner)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func (h *homePage) viewHeroText(c *ui.Context, id string, sh list.Shown, t *ui.Theme) {

@@ -174,6 +174,8 @@ type statsTile struct {
 	// ⚠️ **它挂在数字右边，不另起一行**：另起一行的话，四枚磁贴的高度
 	// 就差了（有的两行、有的三行），而那一排的下沿会参差不齐。
 	Unit string
+	// Hint 是大数字底下那一行小字（「1 小时 20 分钟」）。
+	Hint string
 }
 
 // viewStatsTiles 是那四枚统计磁贴。
@@ -185,23 +187,25 @@ func (s *Shell) viewStatsTiles(c *ui.Context, st *statsPageState, rng statsRange
 	streak := st.data.Streak(now)
 
 	tiles := []statsTile{
-		// ⚠️ **单位是「小时」**：那个大数字是小时（"0.5"）——**单位不挂在
-		// 数字旁边的话，用户得自己猜那个 0.5 是多少**。
-		{Label: rng.Label + "收听", Value: statsHoursText(ms), Unit: "小时"},
-		{Label: rng.Label + "起播", Value: fmt.Sprintf("%d", plays), Unit: "首"},
-		{Label: rng.Label + "听完", Value: fmt.Sprintf("%d", completed), Unit: "首"},
-		{Label: "连续", Value: fmt.Sprintf("%d", streak), Unit: "天"},
+		// ⚠️ **单位是「小时」**：那个大数字是小时（"0.5"），而底下那一行是
+		// 它的另一种说法（"30 分钟"）——**单位不挂在数字旁边的话，用户得
+		// 自己猜那个 0.5 是多少**。
+		{Label: rng.Label + "收听", Value: statsHoursText(ms), Unit: "小时", Hint: statsDurationText(ms)},
+		{Label: rng.Label + "起播", Value: fmt.Sprintf("%d", plays), Unit: "首", Hint: "从第一首到最后一首"},
+		{Label: rng.Label + "听完", Value: fmt.Sprintf("%d", completed), Unit: "首", Hint: "听到一半以上"},
+		{Label: "连续", Value: fmt.Sprintf("%d", streak), Unit: "天", Hint: "一天没断"},
 	}
 
-	// ⚠️ **四枚磁贴一样高**：每一枚都是两行（标签 / 大数字）——哪一枚
-	// 少一行都会矮一截，那一排的下沿就参差不齐了。
+	// ⚠️ **四枚磁贴一样高**：每一枚都有三行（标签 / 大数字 / 说明），而
+	// 少了说明的那几枚会矮一截——那一排的下沿就参差不齐了。
 	ui.Row(c).Key("stats-tiles").FillWidth().Gap(space.Px12).AlignItems(ui.Stretch).Children(func() {
 		for _, tile := range tiles {
 			ui.Column(c).Key("stats-tile:"+tile.Label).Grow(1).Gap(space.Px2).
 				Padding(space.Px12, space.Px16).Radius(s.cardRadius(t)).
 				Background(s.cardBackground(t)).Border(1, t.Border).Children(func() {
 				ui.Text(c, tile.Label).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-				// ⚠️ **数字和单位在一行**：单位挂在数字右边（不是另起一行）。
+				// ⚠️ **数字和单位在一行**：单位挂在数字右边（不是另起一行），
+				// 而下面那一行留给说明。
 				// ⚠️ **`ui.End`（不是基线对齐）**：框架没有基线对齐这一档
 				// （`ui.Align` 只有 Start / Center / End / Stretch），
 				// 而这一行里那个大数字（24 号）和单位（14 号）——
@@ -210,6 +214,7 @@ func (s *Shell) viewStatsTiles(c *ui.Context, st *statsPageState, rng statsRange
 					ui.Text(c, tile.Value).FontSize(scale.Font(c, scale.Size24)).FontWeight(weightMedium)
 					ui.Text(c, tile.Unit).FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted)
 				})
+				ui.Text(c, tile.Hint).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 			})
 		}
 	})

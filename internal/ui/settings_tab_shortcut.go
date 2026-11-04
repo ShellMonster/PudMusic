@@ -47,6 +47,19 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 			ui.Text(c, "快捷键只读：这份文件来自更新的版本，这一版一个字都不会写回去。").
 				FontSize(scale.Font(c, scale.Size12)).TextColor(dangerText(t))
 		}
+		// 这一页两列分别管两件事，写出来，不然用户会以为「全局」那一列只是应用内
+		// 那一列的备份。挂掉的时候另有提示（syncGlobalShortcuts 弹的那一句），
+		// 写在这一页的是常态。
+		//
+		// ⚠️ 「切换mini/完整模式」那一条要在括号里说清楚：它切的是**两个窗口**
+		// （主窗口收起来 + 开一个小窗），所以从别的应用按它同样有用——而别的几条
+		// 应用内快捷键（下一首、暂停）不行，它们只是往这个进程的状态里写一笔，
+		// 界面上看不出变化。理由见 `shortcut_dispatch.go` 里 `toggleMiniPlayer` 的注释。
+		ui.Text(c, "应用内那一列：窗口在前台时按它就有用。全局那一列：切到别的"+
+			"应用时按它也有用（底下那个开关关掉就一个都不登记；「切换mini/完整模式」"+
+			"那一条切的是窗口，所以别的应用在前台时它也管用）。焦点在搜索框这类"+
+			"输入框里时快捷键让路，打的字照常进去。").
+			FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
 
 		s.settingGroup(c, "快捷键设置", func() {
 			// 三列的表头。Biu 的 `grid grid-cols-[1fr_200px_200px]`（`:102`），

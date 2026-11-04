@@ -98,7 +98,7 @@ const homeTabCount = 6
 // 那一份混着大量非音乐视频。
 var homeTabs = [homeTabCount]string{"为你推荐", "鬼畜", "流行", "热榜", "原创榜", "最近播放"}
 
-// homeTabNouns 是各档在「正在加载 X」「重试加载 X」里的名词。
+// homeTabNouns 是各档在「正在加载 X」「重试加载 X」「没拉出来的是：X」里的名词。
 //
 // 和 Tab 上的字分开：「为你推荐」那一档的这几句一直说「音乐推荐」（它拉的是音乐分区
 // 推荐），而「热榜推荐」「最近播放推荐」读不通，榜和历史直接说它们自己。
@@ -588,7 +588,7 @@ func (h *homePage) viewTabBody(c *ui.Context, s *Shell, tab int) {
 		// 那一块是**这一屏的内容**（上游 `index.tsx:295`），它不因为下面那一档
 		// 没拉到就消失。
 		h.withPopTop(c, tab, func() {
-			s.viewLoadError(c, "home:fail:"+homeTabs[tab], "重试加载"+homeTabNouns[tab],
+			s.viewLoadError(c, "home:fail:"+homeTabs[tab], homeTabNouns[tab], "重试加载"+homeTabNouns[tab],
 				pg.Err, func() { h.retryTab(tab) })
 		})
 	case pg.Loading && pg.Loaded == 0:

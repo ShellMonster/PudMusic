@@ -933,9 +933,9 @@ func likeBgAlphaTarget(liked bool) float32 {
 func likeStarTooltip(liked, askFailed bool) string {
 	switch {
 	case askFailed:
-		return "暂时问不出赞没赞（长按三连先关着，赞还是能点）"
+		return "暂时问不出赞没赞"
 	case liked:
-		return "已经赞过了（取消赞；长按三连要在没赞过的歌上用）"
+		return "取消点赞"
 	}
-	return "给这一首点赞（长按这一键或封面 2.5 秒一键三连）"
+	return "点赞（长按三连）"
 }

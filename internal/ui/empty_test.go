@@ -382,9 +382,8 @@ var actionCues = []string{
 
 // TestEmptyStateCopySaysWhyAndHow 验每一条文案都把两件事说清了。
 //
-// 「这里为什么空」是上游那一句，「怎么才能不空」是我们加的第二句——它只在
-// 「有下一步可指」时才写：没有下一步的页让标题自己说话。写了的那句必须
-// 给用户一个**能做的下一步**（见 actionCues）。
+// 「这里为什么空」是上游那一句，「怎么才能不空」是我们加的第二句，而且第二句
+// 必须给用户一个**能做的下一步**（见 actionCues）。
 func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
 	s, _ := newShell(t)
 	check := func(what string, e emptyState) {
@@ -393,6 +392,7 @@ func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
 			t.Errorf("%s 没说「这里为什么空」", what)
 		}
 		if strings.TrimSpace(e.Hint) == "" {
+			t.Errorf("%s 没说「怎么才能不空」", what)
 			return
 		}
 		if e.Title == e.Hint {

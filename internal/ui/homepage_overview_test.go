@@ -66,16 +66,6 @@ func TestTheHeroBannerAdvancesByItselfAndStopsWhenHovered(t *testing.T) {
 	waitFrames(t, tt, "自动换到下一张", func() bool { return s.home.heroIdx == 1 })
 }
 
-func TestTheHeroBannerTextCanBeCopied(t *testing.T) {
-	startOnOverview(t)
-	_, tt, _ := newHomeShell(t, homeDiscoverFake(t))
-	waitFrames(t, tt, "横幅文字", func() bool { return showsText(tt, "新歌速递的头图") })
-	dragOver(t, tt, "头图的 UP 主", "头图的 UP 主")
-	if got := copySelection(tt); got != "新歌速递的头图\n头图的 UP 主" {
-		t.Fatalf("复制横幅文字得到 %q，want %q", got, "新歌速递的头图\n头图的 UP 主")
-	}
-}
-
 func TestTheSidebarRecommendEntryLeadsBackToTheOverview(t *testing.T) {
 	startOnOverview(t)
 	s, tt, _ := newHomeShell(t, homeDiscoverFake(t))

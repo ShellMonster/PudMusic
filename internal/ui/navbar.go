@@ -144,7 +144,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		// 「只有淡底、图形不变色」那一档——同一个「图标键」在应用里有两套配方，
 		// 用户从播放条挪到顶栏会觉得「这一枚不亮」。
 		if s.withTip(c, iconKey(c, iconFolder, "打开文件", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "打开本地音频文件").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "打开文件").Clicked() {
 			s.pickAndEnqueue()
 		}
 		//
@@ -190,7 +190,7 @@ func (s *Shell) viewNav(c *ui.Context) {
 		c.Key("nav-stats")
 		if s.withTip(c, iconKey(c, iconChart, "听歌统计", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-			"看看听了多久、最爱听哪几首").Clicked() {
+			"听歌统计").Clicked() {
 			s.navigate(statsPath)
 		}
 		// ⚠️ **皮肤那一枚在「听歌统计」和「迷你」之间**：它是**外观**的动作，
@@ -205,12 +205,12 @@ func (s *Shell) viewNav(c *ui.Context) {
 		c.Key("nav-appearance")
 		if s.withTip(c, iconKey(c, iconPalette, "皮肤", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-			"换主题方案、深浅模式和颜色").Clicked() {
+			"皮肤").Clicked() {
 			s.navigate(appearancePath)
 		}
 		if s.withTip(c, iconKey(c, iconPiP, "迷你", iconMd, false).
 			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-			"缩成 320×84 的小窗贴边悬浮，音乐不停").Clicked() {
+			"迷你播放器").Clicked() {
 			s.toggleMiniPlayer()
 		}
 		// ⚠️ **这里原来还有一枚「设置」，票 #289 拿掉了**（报告 C-02）。

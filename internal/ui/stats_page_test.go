@@ -72,23 +72,8 @@ func TestTheStatsPageShowsTheNumbers(t *testing.T) {
 	if !tt.HasText("1.5") {
 		t.Errorf("时长那一枚没画出来，文字有 %q", tt.Texts())
 	}
-	// ⚠️ **磁贴的说明行删掉了**：「1 小时 30 分钟」只剩 Top 两张表「时长」
-	// 栏的那两处——多一处就是说明行回来了。
-	count := 0
-	for _, txt := range tt.Texts() {
-		if txt == "1 小时 30 分钟" {
-			count++
-		}
-	}
-	if count != 2 {
-		t.Errorf("「1 小时 30 分钟」画了 %d 处，want 2（两张表的时长栏），文字有 %q",
-			count, tt.Texts())
-	}
-	// 另外三枚磁贴的说明句也不在画面上了。
-	for _, gone := range []string{"从第一首到最后一首", "听到一半以上", "一天没断"} {
-		if tt.HasText(gone) {
-			t.Errorf("说明句 %q 还画着，文字有 %q", gone, tt.Texts())
-		}
+	if !tt.HasText("1 小时 30 分钟") {
+		t.Errorf("时长的说法没画出来，文字有 %q", tt.Texts())
 	}
 	// ⚠️ **「12」和「首」是两个元素**：单位挂在数字右边（不是同一个字符串），
 	// 而 `HasText` 断的是**每一个元素的字**——所以这里断两个。

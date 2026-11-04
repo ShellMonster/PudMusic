@@ -314,7 +314,7 @@ func (s *Shell) viewAuthorPane(c *ui.Context, f *dynamicFeed) {
 		// 切走再切回来也不会重拉（`want()` 因为 `err != nil` 一直挡着）。
 		auth := &f.auth
 		if !auth.started && auth.err != nil {
-			s.viewLoadError(c, "feed-err:authors", "重试加载关注的人", auth.err, func() {
+			s.viewLoadError(c, "feed-err:authors", "关注的人", "重试加载关注的人", auth.err, func() {
 				auth.err = nil
 				if ctx := auth.begin(); ctx != nil {
 					go s.fetchFeed(ctx, f, feedAuthors, auth.cursor, auth.page)
@@ -500,7 +500,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// `err` 非 nil，切走再切回来也不会重拉，用户看到的是「关注的人
 	// 真的什么都没发」。
 	if !f.started && feed.err != nil {
-		s.viewLoadError(c, "feed-err:items", "重试加载动态", feed.err, func() {
+		s.viewLoadError(c, "feed-err:items", "动态列表", "重试加载动态", feed.err, func() {
 			feed.err = nil
 			if ctx := feed.begin(); ctx != nil {
 				go s.fetchFeed(ctx, f, feedItems, feed.cursor, feed.page)

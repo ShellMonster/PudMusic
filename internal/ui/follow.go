@@ -739,6 +739,7 @@ func (s *Shell) viewFollowSearch(c *ui.Context, f *followPage) {
 	if f.tab != followTabAll {
 		return
 	}
+	t := c.Theme()
 	ui.Row(c).Key("follow-search").FillWidth().Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 		// ⚠️ Label 不能省：它不只是给测试用的——没有它读屏软件读不出这是一个搜
 		// 关注对象的输入框（占位文字不是标签），无头 Tester 也只认 label / text。
@@ -750,6 +751,8 @@ func (s *Shell) viewFollowSearch(c *ui.Context, f *followPage) {
 		// ⚠️ **清空按钮只在真的搜着的时候才在**：Biu 那个 `isClearable` 在框是空的
 		// 时候也画一颗，画出来按下去什么也没发生。
 		if f.applied != "" {
+			ui.Text(c, "正在搜「"+f.applied+"」").FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
+				MaxLines(1).Ellipsis("…")
 			if ui.Button(c, "清空搜索").FontSize(scale.Font(c, scale.Size12)).Clicked() {
 				f.draft = ""
 				s.searchFollow(f, "")
@@ -777,7 +780,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	// 人」——一句话都不提失败，而 `started` 仍是 false、`err` 非 nil，切走再切回来
 	// 也不会重拉，用户看到的是「我真的一个 UP 主都没关注」。
 	if !f.pager.started && f.pager.err != nil {
-		s.viewLoadError(c, "follow-err:users", "重试加载关注的人", f.pager.err, func() {
+		s.viewLoadError(c, "follow-err:users", "关注的 UP 主", "重试加载关注的人", f.pager.err, func() {
 			f.pager.err = nil
 			if ctx := f.pager.begin(); ctx != nil {
 				go s.fetchFollowUsers(ctx, f, f.gen, f.tab, f.applied, f.pager.page, len(f.users), f.tabTotal())

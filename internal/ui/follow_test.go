@@ -820,6 +820,7 @@ func TestEveryEmptySentenceOnThisPageSaysWhyAndHow(t *testing.T) {
 			t.Errorf("%s 没说「这里为什么空」", what)
 		}
 		if strings.TrimSpace(e.Hint) == "" {
+			t.Errorf("%s 没说「怎么才能不空」", what)
 			continue
 		}
 		if e.Title == e.Hint {

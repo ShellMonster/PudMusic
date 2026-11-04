@@ -473,7 +473,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 		s.viewSleep(c, st)
 
 		if s.withTip(c, iconKey(c, iconEnqueue, "加歌", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "把本地文件加到队列末尾").Clicked() {
+			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "加歌").Clicked() {
 			s.pickAndEnqueue()
 		}
 	})
@@ -972,9 +972,9 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 // 由 `countKeyTip` 补上。
 func favTooltip(faved bool) string {
 	if faved {
-		return "这一首已经收藏过了（点一下看收在哪一格）"
+		return "已收藏，点一下看收在哪"
 	}
-	return "把这一首放进收藏夹"
+	return "收藏这一首"
 }
 
 // viewDownloadButton 是「下载」那个键，摆在右边那一组（`viewPlayBarRight`）。
@@ -991,7 +991,7 @@ func favTooltip(faved bool) string {
 // 唯一的痕迹。
 func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
 	if s.withTip(c, iconKey(c, iconDownload, "下载", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "把正在放的这首下载到本地").Clicked() {
+		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "下载这一首").Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {
 			s.addToast("这一首还没有取回来，下载不了", notice.Warning)
@@ -1048,7 +1048,7 @@ func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
 	// 无损 → 歌名 48.1 / 徽章 21.9；杜比 → 歌名 48.1 / 徽章 21.9。
 	s.withTip(c, ui.Text(c, bili.ChipLabel(st.Quality)).
 		FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).Shrink(0),
-		"音质："+st.Quality+"（点一下换）").
+		"音质："+st.Quality).
 		Menu(func(m *ui.Menu) {
 			for _, q := range qualityChoices {
 				// `Checked` 是「当前选的是这一档」。选的和给的要能分开看：
@@ -1484,7 +1484,7 @@ func (s *Shell) viewPlayModeOn(c *ui.Context, st app.State, base flat.Base) {
 	// 悬停那句话仍然报的是**当前这一档**。
 	btn := s.withTip(c, iconKeyOnBase(c, playModeIcon(st.PlayMode), "播放模式", iconMd, false, base).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-		st.PlayMode.Label()+"："+st.PlayMode.Desc()+"（点一下换，右键看全部）")
+		st.PlayMode.Desc())
 
 	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边
 	// 的 `PlayMode.Next`，照 Biu 的 `getPlayModeList` 次序，两边按几下能转回

@@ -742,9 +742,7 @@ func suggestPanelMaxH(winH float32) float32 {
 
 // clearHistoryTip 是「清除全部」那句提示（票 BMG-253）。
 //
-// ⚠️ **它要说清两件事**：删掉的是什么、能不能撤。删历史**没有撤销**——
-// B 站那边没有这一条路，用户自己删掉的那一条再也搜不回来。
-const clearHistoryTip = "清空全部搜索历史，删掉之后不能撤销"
+const clearHistoryTip = "清空搜索历史"
 
 // viewSuggestHeader 是浮层顶上那一行：一只钟 +「历史搜索」，右边是「清空全部」。
 //
