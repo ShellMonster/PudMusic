@@ -104,8 +104,9 @@ package ui
 // 只剩 2 次余量（`framebudget_test.go`）。
 //
 // 画在键自己的 `Draw` 里就没有这个代价：**不取流的时候那一档的分配一个
-// 都不涨**（回调是取流的时候才挂上去的）。光圈自己的代价是**一个绘制回调**
-// （一次分配），见 `loadhalo_test.go` 的
+// 都不涨**（回调是取流的时候才挂上去的）。光圈自己的代价是**每帧 2 次分配**：
+// `Draw` 的闭包 1 次，加框架（`repaint.go` 的 `Painter.draw`）给自绘元素登记局部重绘
+// 的 1 次。见 `loadhalo_test.go` 的
 // `TestTheHaloCostsAlmostNothingPerFrame`——它量的是「带光圈减不带光圈」
 // 的差，第三行那句话删掉之后这个差就是干净的光圈自己的。
 //

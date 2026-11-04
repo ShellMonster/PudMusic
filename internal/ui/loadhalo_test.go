@@ -241,6 +241,9 @@ func TestNoHaloAfterLoadingEnds(t *testing.T) {
 	}
 }
 
+// haloAllocsPerFrame 是光圈自己每帧的分配次数：Draw 的闭包 1 次 + 框架的局部重绘登记 1 次。
+const haloAllocsPerFrame = 2
+
 // TestTheHaloCostsAlmostNothingPerFrame 断**光圈自己的每帧代价**。
 //
 // ⚠️ **量的是「差」**：取流那一档（**带**光圈）减去取流那一档（**不带**
@@ -268,9 +271,22 @@ func TestTheHaloCostsAlmostNothingPerFrame(t *testing.T) {
 	with := measure(false)
 	t.Logf("取流那一档：不带光圈每帧 %.0f 次 / %.0f 字节；带光圈每帧 %.0f 次 / %.0f 字节",
 		without.allocs, without.bytes, with.allocs, with.bytes)
-	// 光圈自己的那一份：**一个绘制回调**（一次分配）。
-	if d := with.allocs - without.allocs; d > 2 {
-		t.Errorf("光圈自己每帧多了 %.0f 次分配，want ≤ 2（它只是键自己的一个绘制回调）", d)
+	// 光圈自己的那一份是 **2 次分配**，不是 1 次（用 `-memprofile -memprofilerate=1` 数出来的）：
+	//
+	//  1. `withLoadHalo` 里 `b.Draw(func…)` 那个闭包（捕获 radius / width / start / visible），
+	//     每帧建一次；
+	//  2. MyGo 的 `repaint.go`（`Painter.draw`）给每个带 `Draw` 回调的元素登记一条
+	//     `paintPart`，并复制 `under` / `holes` 两个切片，供局部重绘用。这一笔是框架对
+	//     **任何**自绘元素收的，不是光圈代码分配的。
+	//
+	// ⚠️ **按整数次比较**：`measureFrames` 给的是 100 帧的均值（float64），后台线程偶尔
+	// 多分一次就是 2.01，`d > 2` 会被零头碰红。分配次数本身是整数，所以先四舍五入到
+	// 每帧整数次，再和 2 比。门槛没有放宽。
+	withN, withoutN := int(math.Round(with.allocs)), int(math.Round(without.allocs))
+	if d := withN - withoutN; d > haloAllocsPerFrame {
+		t.Errorf("光圈自己每帧多了 %d 次分配（带 %d，不带 %d），want ≤ %d"+
+			"（1 次是 Draw 的闭包，1 次是框架给自绘元素登记局部重绘）",
+			d, withN, withoutN, haloAllocsPerFrame)
 	}
 	if d := with.bytes - without.bytes; d > 300 {
 		t.Errorf("光圈自己每帧多了 %.0f 字节，want ≤ 300", d)
