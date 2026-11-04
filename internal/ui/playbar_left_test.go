@@ -67,7 +67,7 @@ func leftBarTester(t *testing.T, pages []any, width int) (*mygoui.Tester, *Shell
 //	① 封面在歌名**左边**（上游那一行的第一个孩子）
 //	② 三枚键在文字列**右边**——不是下面
 //	③ 三枚键在**同一条水平线上**（横排；竖排的话垂直中心会差 32）
-//	④ 次序是 分集 → 收藏 → 赞（上游 `left/index.tsx:86/89/90`）
+//	④ 次序是 赞 → 收藏 → 评论（原型 `renderBar` 的 `.np-keys`；分集键已挪到右列）
 func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 	tt, _ := leftBarTester(t, multiPages(), 1200)
 
@@ -80,7 +80,7 @@ func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 		t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 	}
 	// 三枚键。⚠️ **「赞」那一枚要真的挂上 App 才摆得出来**（`viewLikeStar`）。
-	keys := []string{"分集", "收藏", "赞"}
+	keys := []string{"赞", "收藏"}
 	boxes := make([]mygoui.Rect, 0, len(keys))
 	for _, k := range keys {
 		r, ok := tt.Find(k)
@@ -126,11 +126,11 @@ func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 		}
 	}
 
-	// ④ 次序：分集 → 收藏 → 赞。
+	// ④ 次序：赞 → 收藏。评论键只在 B 站曲目上摆，这个测试的空 App 摆不出来，所以这里不断它。
 	for i := 1; i < len(boxes); i++ {
 		if boxes[i].X <= boxes[i-1].X {
 			t.Errorf("%q 在 x=%.1f，而 %q 那一枚在 x=%.1f——"+
-				"次序不对（上游是 分集 → 收藏 → 赞）",
+				"次序不对（原型是 赞 → 收藏 → 评论）",
 				keys[i], boxes[i].X, keys[i-1], boxes[i-1].X)
 		}
 	}
@@ -259,7 +259,7 @@ func TestTheQualityChipIsShortEnoughToSitNextToTheTitle(t *testing.T) {
 
 // TestTheGapBetweenTheTitleAndTheOwnerName 盯第二行和歌名之间的空隙。
 //
-// 上游是 `space-y-1`（`playbar/left/index.tsx:46`）= **4**。
+// 原型 `.np-text` 里歌名和 UP 名是上下两个块，没有 gap（0）；上游 Biu 的 `space-y-1` 已不适用。
 //
 // ⚠️ **量的是「框到框」**：歌名那一行的框底到 UP 名那一行的框顶。
 // 我们的文本盒是字体的 ascent+descent（**框里没有额外的行距**），所以框到框
@@ -277,10 +277,10 @@ func TestTheGapBetweenTheTitleAndTheOwnerName(t *testing.T) {
 		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
 	}
 	got := owner.Y - (title.Y + title.H)
-	const want = 4 // 上游的 space-y-1
+	const want = 0 // 原型 `.np-text`：strong 和 .link 是上下两个块，中间没有 gap
 	if widthGap(got-want) > 1 {
 		t.Errorf("歌名那一行的框底到 UP 名那一行的框顶是 %.1f，want %d——"+
-			"上游那一列是 `space-y-1`（4）", got, want)
+			"原型的 `.np-text` 没有行间缝", got, want)
 	}
 }
 

@@ -509,9 +509,10 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 	// 那一档，又不把角标省下的宽度还回去。
 	// 原型 `.np-keys`：三枚键缝 2；分集键挪到了右列。
 	ui.Row(c).Gap(space.Px2).AlignItems(ui.Center).Shrink(0).Children(func() {
-		s.viewFavButton(c, st)
+		// 原型 `.np-keys` 的次序：赞 → 收藏 → 评论。
 		s.viewLikeStar(c, st)
-		// 🔴 **「评论」是第四枚**（票 #573）：它是「当前这一首」的附属页的
+		s.viewFavButton(c, st)
+		// 🔴 **「评论」是第三枚**（票 #573）：它是「当前这一首」的附属页的
 		// 入口，而这一段摆的**全是关于当前这一首的**（分集 / 收藏 / 赞）。
 		//
 		// ⚠️ **本地文件不摆**（`viewCommentsButton`）：一个点不动的键比不摆

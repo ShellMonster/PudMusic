@@ -37,6 +37,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -61,23 +62,26 @@ func TestThePlayBarUsesTheBiuTypeScale(t *testing.T) {
 				text string
 				size float32
 				what string
+				// per 是盒高 / 字号。歌名和 UP 名按原型 body 的 1.55 行高排（leading.Body），
+				// 其余是字体自然行高 textBoxPerSize。字号本身仍然逐个钉死。
+				per float32
 			}{
-				{text: "一首歌", size: 14, what: "歌名"},
-				{text: "某个 UP 主", size: 12, what: "UP 名"},
+				{text: "一首歌", size: 14, what: "歌名", per: 1.55},
+				{text: "某个 UP 主", size: 12, what: "UP 名", per: 1.55},
 				// ⚠️ **位置是 0 的时候写 `-:--`**（票 #222 / 报告 §4.2）：上游
 				// 那个读数是 `currentTime ? formatDuration(currentTime) : "-:--"`
 				//（`components/music-play-progress/index.tsx:27`），而我们原来
 				// 写的是 `0:00`——那是「这一秒零」，不是「还没读到一个位置」。
-				{text: "-:--", size: 11, what: "当前时间"},
-				{text: "1:40", size: 11, what: "总时长"},
-				{text: "1×", size: 12, what: "倍速"},
+				{text: "-:--", size: 11, what: "当前时间", per: textBoxPerSize},
+				{text: "1:40", size: 11, what: "总时长", per: textBoxPerSize},
+				{text: "1×", size: 12, what: "倍速", per: textBoxPerSize},
 			} {
 				r, ok := tt.Find(want.text)
 				if !ok {
 					t.Fatalf("播放条上找不到%s「%s」，画面上的字：%q",
 						want.what, want.text, tt.Texts())
 				}
-				got := r.H / textBoxPerSize
+				got := r.H / want.per
 				if math.Abs(float64(got-want.size)) > 0.8 {
 					t.Errorf("播放条上的%s是 %.1fpx，want %.0f——"+
 						"原型那一档是歌名 14 / UP 名 12 / 时间 11 / 倍速 12",
@@ -318,9 +322,9 @@ func TestTheSkipKeysDrawBiggerGlyphs(t *testing.T) {
 				if !ok {
 					t.Fatalf("播放条上找不到「%s」，画面上的字：%q", label, tt.Texts())
 				}
-				if r.W != 32 || r.H != 32 {
-					t.Errorf("「%s」的点击区是 %.1f×%.1f，want 32×32——"+
-						"上游的图标键恒是 `w-[2rem] h-[2rem]`", label, r.W, r.H)
+				if r.W != tok.IconHit || r.H != tok.IconHit {
+					t.Errorf("「%s」的点击区是 %.1f×%.1f，want %v×%v——"+
+						"原型的 `.icon-btn` 恒是 36", label, r.W, r.H, tok.IconHit, tok.IconHit)
 				}
 				n, w, h := inkExtent2(tt.Image(), r, bg)
 				const wantPixels = 70
@@ -358,9 +362,9 @@ func TestTheRightGroupDoesNotTakeWidthFromTheMiddleColumn(t *testing.T) {
 
 	with := rightGroupWidth(t, withTrack)
 	without := rightGroupWidth(t, withoutTrack)
-	if diff := with - without; math.Abs(float64(diff-40)) > 0.5 {
-		t.Errorf("有歌时右边那一组是 %.1f，没歌时是 %.1f（差 %.1f），want 差 40——"+
-			"「下载」那一枚是有歌时才摆的（32 的键加一道 8 的缝）",
+	if diff := with - without; math.Abs(float64(diff-80)) > 0.5 {
+		t.Errorf("有歌时右边那一组是 %.1f，没歌时是 %.1f（差 %.1f），want 差 80——"+
+			"「下载」和「歌词」两枚是有歌时才摆的（各 36 的键加一道 4 的缝）",
 			with, without, diff)
 	}
 
@@ -375,13 +379,14 @@ func TestTheRightGroupDoesNotTakeWidthFromTheMiddleColumn(t *testing.T) {
 // rightGroupWidth 量播放条右边那一组有多宽（第一枚的左缘到最后一枚的右缘）。
 func rightGroupWidth(t *testing.T, tt *mygoui.Tester) float32 {
 	t.Helper()
-	first, ok := tt.Find("播放模式")
+	// 原型的右列：倍速、（分集、下载、歌词）、队列、静音、音量；最左是倍速，最右是音量滑块。
+	first, ok := tt.Find("播放速率")
 	if !ok {
-		t.Fatalf("播放条上找不到「播放模式」，画面上的字：%q", tt.Texts())
+		t.Fatalf("播放条上找不到「播放速率」，画面上的字：%q", tt.Texts())
 	}
-	last, ok := tt.Find("加歌")
+	last, ok := tt.Find("音量")
 	if !ok {
-		t.Fatalf("播放条上找不到「加歌」，画面上的字：%q", tt.Texts())
+		t.Fatalf("播放条上找不到「音量」，画面上的字：%q", tt.Texts())
 	}
 	return last.X + last.W - first.X
 }

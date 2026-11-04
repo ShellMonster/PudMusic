@@ -158,34 +158,35 @@ func TestTheErrorDoesNotSqueezeTheTitle(t *testing.T) {
 	}
 }
 
-// TestTheTitleAndBadgeShareOneLine 盯徽章不把歌名顶到下一行去。
+// TestTheTitleAndBadgeShareOneLine 盯徽章不压歌名、不折行。
+//
+// 原型把音质角标（`.q-badge`）放在播放条右列的最左，不再跟在歌名后面：它在歌名右边，
+// 垂直居中，高 24，字是全大写的 `HI-RES`。名字沿用旧的，台账里登记的就是它。
 func TestTheTitleAndBadgeShareOneLine(t *testing.T) {
 	tt := qualityBarTester(t, app.State{
 		HasTrack: true,
 		Title:    "一首歌",
 		Quality:  "无损 FLAC",
-	})
+	}, 1200)
 
 	title, ok := tt.Find("一首歌")
 	if !ok {
 		t.Fatalf("歌名不在画面上：%q", tt.Texts())
 	}
-	// ⚠️ **画面上的是短版**（票 #219，理由见 `TestQualityBadgeShowsForAnOnlineTrack`）。
-	badge, ok := tt.Find(bili.ChipLabel("无损 FLAC"))
+	badge, ok := tt.Find("HI-RES")
 	if !ok {
-		t.Fatalf("徽章不在画面上：%q", tt.Texts())
+		t.Fatalf("徽章不在画面上（原型是全大写的 HI-RES）：%q", tt.Texts())
 	}
-	// 并排：徽章的左边在歌名右边之后，两者在同一行（垂直方向有重叠）。
 	if badge.X < title.X+title.W {
 		t.Errorf("徽章 {%.1f,%.1f} 压在歌名 {%.1f,%.1f %.1fx%.1f} 上面了",
 			badge.X, badge.Y, title.X, title.Y, title.W, title.H)
 	}
-	if badge.Y >= title.Y+title.H || badge.Y+badge.H <= title.Y {
-		t.Errorf("徽章 {%.1f,%.1f %.1fx%.1f} 和歌名 {%.1f,%.1f %.1fx%.1f} 不在同一行",
-			badge.X, badge.Y, badge.W, badge.H, title.X, title.Y, title.W, title.H)
+	// 垂直居中：徽章的中线在播放条正中。
+	if mid := badge.Y + badge.H/2; mid < float32(playbarHeight)/2-2 || mid > float32(playbarHeight)/2+2 {
+		t.Errorf("徽章的垂直中线在 %.1f，want 播放条正中 %.1f", mid, float32(playbarHeight)/2)
 	}
-	if badge.H > playbarHeight/2 {
-		t.Errorf("徽章 %.1f 高，折行了（播放条才 %d 高）", badge.H, playbarHeight)
+	if badge.H > 24 {
+		t.Errorf("徽章 %.1f 高，原型是 24（折行了？）", badge.H)
 	}
 }
 
