@@ -188,6 +188,18 @@ func Pop(e ui.Element, t *ui.Theme) ui.Element {
 		Shadow(0, 2, 8, 0, ui.RGBA(20, 22, 26, 0.08))
 }
 
+// LargeCover 是「深夜唱片行」的 `--shadow-cover`（原型 index.html 89 / 112 行，
+// `.cover.lg`）：「今日一张」那张大封面。
+//
+//	深色  0 24px 48px rgba(0,0,0,.5)
+//	浅色  0 20px 40px rgba(20,22,26,.22)
+func LargeCover(e ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return e.Shadow(0, 24, 48, 0, ui.RGBA(0, 0, 0, 0.5))
+	}
+	return e.Shadow(0, 20, 40, 0, ui.RGBA(20, 22, 26, 0.22))
+}
+
 // CoverPlay 是卡片封面上那枚悬停播放键（`.cover-play`）的影：0 8px 24px 35% 黑。
 func CoverPlay(e ui.Element) ui.Element {
 	return e.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.35))

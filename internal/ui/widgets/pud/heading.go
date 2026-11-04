@@ -46,7 +46,18 @@ func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, acti
 // 对齐、缝 16，下面离内容 20（`space.SectionHeadGap`）。more 为空就不画「更多」；
 // 返回「更多」被点了没有。key 给「更多」那一枚。
 func SecHead(c *ui.Context, key, title, note, more string) (moreClicked bool) {
+	return SecHeadIcon(c, key, title, note, more, "right")
+}
+
+// SecHeadIcon 是 SecHead 的「更多」换图标版：原型首页「播放全部」前面是 14 的播放图标，
+// 「全部」后面是右箭头。icon 是原型图标名，画在字的右边（"right"）；要画在左边传
+// 带 "<" 前缀的名字，例如 "<play"。
+func SecHeadIcon(c *ui.Context, key, title, note, more, icon string) (moreClicked bool) {
 	p := pal(c)
+	left := len(icon) > 0 && icon[0] == '<'
+	if left {
+		icon = icon[1:]
+	}
 	ui.Row(c).FillWidth().AlignItems(ui.Baseline).Gap(space.Px16).Margin(space.None, space.None, space.SectionHeadGap, space.None).
 		Children(func() {
 			typo.Display(ui.Text(c, title), scale.Font(c, scale.SectionTitle)).SingleLine()
@@ -61,8 +72,13 @@ func SecHead(c *ui.Context, key, title, note, more string) (moreClicked bool) {
 					fg = p.Text
 				}
 				b.Children(func() {
+					if left && icon != "" {
+						glyph(c, icon, 14, fg)
+					}
 					text(c, more, scale.Size13, fg).SingleLine()
-					glyph(c, "right", 14, fg)
+					if !left && icon != "" {
+						glyph(c, icon, 14, fg)
+					}
 				})
 				moreClicked = b.Clicked()
 			}
