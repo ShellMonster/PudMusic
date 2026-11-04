@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 )
 
 // syntheticCoverPNG 画一张合成封面：深红底、一团亮红（像人像的脸）、几道斜线。
@@ -190,6 +191,34 @@ func TestRenderCommentsDrawerShots(t *testing.T) {
 				settleFull(t, tt)
 				save(t, dir, name+"-comments-replies.png", tt)
 			}
+		})
+	}
+}
+
+func TestRenderLyricSearchShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{true, false} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			netease := neteaseSource(cand("1", "渺小"), cand("2", "渺小（Live）"), cand("3", "渺小 - 钢琴版"))
+			netease.previewDoc = lyrics.Doc{LRC: fullShotLRC}
+			s, tt := lyricSearchShell(t, netease, lrclibSource())
+			tt.SetDark(dark)
+			openTheSearchDialog(t, tt)
+			waitFrames(t, tt, "候选回来了", func() bool { return tt.HasText("渺小（Live）") })
+			save(t, dir, name+"-lyricsearch.png", tt)
+			if err := tt.Click("渺小（Live）"); err != nil {
+				t.Fatal(err)
+			}
+			waitFrames(t, tt, "预览回来了", func() bool { return s.app.LyricPreview().Adoptable })
+			settleFull(t, tt)
+			save(t, dir, name+"-lyricsearch-picked.png", tt)
 		})
 	}
 }
