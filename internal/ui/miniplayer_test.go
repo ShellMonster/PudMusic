@@ -54,8 +54,8 @@ func TestTheMiniWindowIsAtThePrototypeNumbers(t *testing.T) {
 	if !opts.Transparent {
 		t.Error("窗口不是透明的：Biu 那边 transparent: true，圆角那一圈要透出桌面去")
 	}
-	// 🔴 **毛玻璃**（2026-11 改版）：两张板（卡片 / 歌词板）的底是**半透明**
-	// 的（`miniPanelAlpha`），而糊桌面那一下走窗级 `NSVisualEffectView`——
+	// 🔴 **毛玻璃**：窗口仍开着窗级材质（两张板的底现在是不透明的 surface，`miniPanelAlpha` = 1），
+	// 糊桌面那一下走窗级 `NSVisualEffectView`——
 	// 整窗一个材质（`VibrancyPopover`，popover 那一档的磨砂），两块板共用
 	// 它（`glass.Material` 那种元素级的只糊**窗内**内容，糊不到桌面）。
 	//
@@ -202,11 +202,8 @@ func TestTheMiniCardCoversTheWindow(t *testing.T) {
 
 	img := snapshot(tt)
 	surface := tok.Of(BuildTheme(s.app.SettingsSnapshot(), false)).Surface
-	// ⚠️ **底是半透明的**（`miniPanelAlpha`，2026-11 改版）：这扇窗开了毛玻璃
-	// （`Vibrancy`），卡片的底压到 0.88——而无头 Tester 的帧缓冲是一张**不透
-	// 明的白纸**（见上面那段注释），于是画出来的像素是**源色盖白纸那份混合**
-	// （渲染器在 sRGB 里混，亮度上仍是「Surface 那一档」）——判据是「落在
-	// Surface 亮度那一档里」，而不是逐通道逐色阶对死。
+	// ⚠️ **底是不透明的 surface**（原型 `.mini`，`miniPanelAlpha` = 1，T8）。判据仍是
+	// 「落在 Surface 亮度那一档里」，而不是逐通道逐色阶对死。
 	wantLum := 0.299*float64(surface.R) + 0.587*float64(surface.G) + 0.114*float64(surface.B)
 	inCardBand := func(got color.RGBA) bool {
 		d := 0.299*float64(got.R) + 0.587*float64(got.G) + 0.114*float64(got.B) - wantLum
