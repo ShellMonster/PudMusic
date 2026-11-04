@@ -26,7 +26,7 @@ func (l *List) RowWidth() float32 {
 }
 
 // usesPudRow 报这个列表此刻画不画原型那种行（多选态走旧行）。
-func (l *List) usesPudRow() bool { return l.pud && l.sel2.On == nil }
+func (l *List) usesPudRow() bool { return l.pud }
 
 // SetPudRows 让这个列表的行和表头改用原型样式（`pud.TrackRow` / `pud.TrackHead`）。
 // 默认关：没改版的页面保持旧行，改版的页面在建列表时打开它。
@@ -80,6 +80,11 @@ func (l *List) viewPudRow(r ui.ListRow) {
 	if user {
 		tr.Duration = ""
 	}
+	if l.sel2.On != nil {
+		// 批量选择态（收藏夹的多选）：序号格换成勾选框，勾上的整行 accent-soft 底。
+		tr.Multi, tr.Checked = true, l.sel2.On(i)
+		tr.Selected = tr.Checked
+	}
 	tr.RowWire = func(row ui.Element) ui.Element {
 		row = row.ContextMenu(func(mn *ui.Menu) { l.buildMenu(mn, i) }).HandleInput(w.input)
 		return SelectedRow(row, t, r.Selected(), row.Hovered(), l.keys.On() && Focused(c, &l.state))
@@ -87,6 +92,8 @@ func (l *List) viewPudRow(r ui.ListRow) {
 
 	ev := pud.TrackRow(c, "row:"+m.ID, tr, l.RowWidth())
 	switch {
+	case ev.Check && l.sel2.Toggle != nil:
+		l.sel2.Toggle(i)
 	case ev.Play:
 		l.rowPlay(i)
 	case ev.Like && l.acts.FavSelect != nil:

@@ -9,6 +9,7 @@ package ui
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 // TestRenderCollectionPageShots 把收藏夹页存成 PNG（深 / 浅 × 普通 / 多选）。
@@ -42,6 +43,27 @@ func TestRenderCollectionPageShots(t *testing.T) {
 			})
 			settleFrame(tt)
 			save(t, dir, name+"-collection.png", tt)
+
+			// 多选：开多选、勾两首，批量条贴在页底。
+			s.toggleCollectionMulti(s.collection)
+			settleFrame(tt)
+			for _, id := range []string{"1", "2"} {
+				if m, ok := s.collection.list.List().At(0); ok && id == "1" {
+					s.collection.picked[m.ID] = true
+				}
+			}
+			if m, ok := s.collection.list.List().At(1); ok {
+				s.collection.picked[m.ID] = true
+			}
+			settleFrame(tt)
+			// 行底色有 160ms 的淡入：推测试钟让它走完，再出图。
+			for range 40 {
+				if !tt.FramePending() {
+					break
+				}
+				tt.Advance(16 * time.Millisecond)
+			}
+			save(t, dir, name+"-collection-multi.png", tt)
 		})
 	}
 }
