@@ -10,7 +10,6 @@ package ui
 
 import (
 	"strconv"
-	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
