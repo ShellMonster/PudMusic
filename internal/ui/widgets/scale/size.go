@@ -77,6 +77,17 @@ const (
 	Subhead = Size20
 )
 
+// PageTitleForWindow 是原型 `.h-page { font-size: clamp(32px, 3.4vw, 48px) }`（index.html 268 行）：
+// 窗口宽的 3.4%，夹在 32 和 48 之间——1200 宽的窗口里是 40.8，1412 以上才是 48。
+// `PageTitleFor` 是按内容区宽降一档的近似（design-tokens.html 3.1 的「桌面落法」），两者在窗口
+// 宽 1024–1412 之间差几个像素；要和原型 1:1 的页面用这一个。
+func PageTitleForWindow(winW float32) float32 {
+	if winW <= 0 {
+		return PageTitle
+	}
+	return min(max(winW*0.034, Size32), PageTitle)
+}
+
 // NarrowContent 是标题降档的分界：内容区宽度小于它时，48 → 32、64 → 48
 // （design-tokens.html 3.1：原型 `clamp(32px, 3.4vw, 48px)` 的桌面落法）。
 const NarrowContent = 1024

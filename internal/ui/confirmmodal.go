@@ -67,6 +67,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -186,6 +187,8 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 		return confirmStillOpen
 	}
 	pressed := ""
+	// 主题在进 `ui.DialogBase` 之前取（回调是在叠加层那一遍里调的，那时 c.Theme() 不一定还是装好的那份）。
+	t := c.Theme()
 
 	// 🔴 **用 `ui.DialogBase` 而不是 `ui.Modal`**——因为**面板得有个名字**。
 	//
@@ -218,14 +221,14 @@ func confirmModal(c *ui.Context, open *bool, spec confirmSpec) confirmOutcome {
 	// 走下拉里那一项），于是它更容易撞上。
 	c.Key("confirm-backdrop:" + spec.title)
 	m := ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
-		protoDialogPanel(c, backdrop, panel, tok.DialogW).Role(ui.RoleAlertDialog).
+		protoDialogPanel(c, t, backdrop, panel, tok.DialogW).Role(ui.RoleAlertDialog).
 			Label(spec.title).
 			Description(spec.body)
 
 		ui.Column(c).Key("confirm:" + spec.title).FillWidth().Children(func() {
 			pud.DialogBody(c, spec.title, spec.body)
 			if spec.detail != "" {
-				ui.Text(c, spec.detail).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(c.Theme()).Text3).Wrap().
+				ui.Text(c, spec.detail).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Text3).Wrap().
 					Padding(space.None, space.Px24, space.Px16, space.Px24)
 			}
 		})
@@ -288,8 +291,7 @@ func dialogPanel(c *ui.Context, backdrop, panel ui.Element, label string) {
 // （`dialog.dlg::backdrop`）；面板宽 min(w, 窗口 − 32)、surface 底、1px line 描边、圆角 12、
 // `--shadow-pop`，进场 `pop-in`（`motion.PopIn`）。面板自己没有内边距——内边距在 `.dlg-body` /
 // `.dlg-foot`（`pud.DialogBody` / `pud.DialogFoot`）里。w 是 `.dlg` 的宽：确认框 440、`.sheet` 480。
-func protoDialogPanel(c *ui.Context, backdrop, panel ui.Element, w float32) ui.Element {
-	t := c.Theme()
+func protoDialogPanel(c *ui.Context, t *ui.Theme, backdrop, panel ui.Element, w float32) ui.Element {
 	p := tok.Of(t)
 	winW, winH := c.Size()
 	backdrop.Background(ui.RGBA(0, 0, 0, scrim.Dialog))

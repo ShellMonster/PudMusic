@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -156,7 +157,8 @@ func (s *Shell) updateOpen(st app.UpdateState) bool {
 
 // drawUpdateDialog 画弹窗本身。
 func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
-	p := tok.Of(c.Theme())
+	c0 := c.Theme()
+	p := tok.Of(c0)
 
 	// `open` 是这一帧的副本：`ui.DialogBase` 会把被关掉的那一份就地置 false（理由见 `confirmModal`）。
 	open := s.update.wanted
@@ -164,15 +166,15 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 	m := ui.DialogBase(c, &open, func(backdrop, panel ui.Element) {
 		// 原型 `openUpdate`：`dialog.dlg.sheet`（480 宽）里一个 `.dlg-body`（标题 24 宋体、更新日志、
 		// 进度行 `.upd-foot`）和一个 `.dlg-foot`（左幽灵键「以后再说 / 后台下载 / 稍后」，右主色键）。
-		protoDialogPanel(c, backdrop, panel, updateDialogWidth).Role(ui.RoleDialog).Label(updateDialogTitle)
+		protoDialogPanel(c, c0, backdrop, panel, updateDialogWidth).Role(ui.RoleDialog).Label(updateDialogTitle)
 
 		ui.Column(c).Key("dialog:update").FillWidth().Padding(space.Px24).Children(func() {
-			typo.Display(ui.Text(c, updateDialogTitle), scale.Font(c, scale.SectionTitle))
+			typo.Display(ui.Text(c, updateDialogTitle), scale.Font(c, scale.SectionTitle)).LineHeight(leading.Body)
 			ui.Column(c).Gap(space.Px8).Margin(space.Px8, space.None, space.None, space.None).Children(func() {
 				s.updateVersionLine(c, st)
 				s.updateNotes(c, st)
 				if st.FellBack {
-					ui.Text(c, updateFellBack).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).Wrap()
+					ui.Text(c, updateFellBack).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).Wrap()
 				}
 				s.updateProgress(c, p, st)
 			})
@@ -198,16 +200,16 @@ func (s *Shell) drawUpdateDialog(c *ui.Context, st app.UpdateState) {
 // 下载完（Ready）只有一句「安装包已下载完成」；失败的原因（err 色）也在这一行。
 func (s *Shell) updateProgress(c *ui.Context, p tok.Palette, st app.UpdateState) {
 	mono := func(txt string) ui.Element {
-		return typo.Mono(ui.Text(c, txt)).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).SingleLine()
+		return typo.Mono(ui.Text(c, txt)).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).SingleLine()
 	}
 	switch {
 	case st.Phase == app.UpdateFailed && st.Err != "":
-		ui.Text(c, st.Err).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(c.Theme()).Err).Wrap().Selectable()
+		ui.Text(c, st.Err).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Err).Wrap().Selectable()
 	case st.Phase == app.UpdateReady:
 		ui.Row(c).Key("update-ready").Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 			mono(updateReadyText)
 		})
-		ui.Text(c, updateReadyNote).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).Wrap()
+		ui.Text(c, updateReadyNote).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).Wrap()
 	case st.Phase == app.UpdateDownloading:
 		ui.Row(c).Key("update-prog").FillWidth().Gap(space.Px12).AlignItems(ui.Center).Children(func() {
 			mono(updateSpeed(st.Speed))
@@ -249,7 +251,7 @@ func (s *Shell) updateNotes(c *ui.Context, st app.UpdateState) {
 	// 里那个三元）。不 trim 的话那一份会渲染成一个空白的滚动区，用户看见的是
 	// 一块什么都没有的框，而不是「暂无更新日志」这一句能回答他的话。
 	if strings.TrimSpace(st.Notes) == "" {
-		ui.Text(c, updateNoNotes).FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
+		ui.Text(c, updateNoNotes).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(c.Theme().TextMuted).
 			TextAlign(ui.Center).FillWidth().Padding(space.None, space.None, space.Px8, space.None)
 		return
 	}

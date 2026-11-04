@@ -6,6 +6,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -16,11 +17,7 @@ import (
 // enableGlobalLabel 是开关的标题。
 const enableGlobalLabel = "启用全局快捷键"
 
-// 表的三列：命令吃剩下的，两个键列定宽（`.keys td` 左右 20）。
-const (
-	keysAppColW    = 240
-	keysGlobalColW = 140
-)
+// 表的三列：原型是 `table`（自动列宽），三列大致等分（实测 224 / 216 / 217），`.keys td` 左右 20。
 
 // settingsShortcuts 是快捷键那一页。
 func (s *Shell) settingsShortcuts(c *ui.Context) {
@@ -48,11 +45,12 @@ func (s *Shell) settingsShortcuts(c *ui.Context) {
 			// 表头（`.keys th`：12 号 500 text-3，上 12 下 4、左右 20）。
 			ui.Row(c).Key("keys-head").FillWidth().Padding(space.Px12, setRowPadX, space.Px4, setRowPadX).Children(func() {
 				head := func(s string) ui.Element {
-					return ui.Text(c, s).FontSize(scale.Font(c, scale.Size12)).FontWeight(500).TextColor(p.Text3).SingleLine()
+					return ui.Text(c, s).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).FontWeight(500).TextColor(p.Text3).SingleLine()
 				}
-				head("命令").Grow(1)
-				head("应用内快捷键").Width(keysAppColW)
-				ui.Row(c).Width(keysGlobalColW).Justify(ui.End).Children(func() { head("全局快捷键") })
+				head("命令").Grow(1).Shrink(1).MinWidth(0)
+				// 原型的 `th` 里「应用内快捷键」是右对齐的、下面的键却是左对齐（行内 `text-align:right`），照样。
+				ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.End).Children(func() { head("应用内快捷键") })
+				ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.End).Children(func() { head("全局快捷键") })
 			})
 
 			// 焦点那一截在循环**之外**按，见 `keepRecordingFocus` 的注释。
@@ -85,19 +83,19 @@ func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcut
 		ui.Box(c).Key("shortcut-div:" + in.ID).FillWidth().Height(1).Background(p.Line)
 	}
 	ui.Row(c).Key("shortcut:"+in.ID).FillWidth().Padding(space.Px14, setRowPadX).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text).Grow(1)
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text).Grow(1).Shrink(1).MinWidth(0)
 
 		inSlot := shortcutSlot{id: in.ID}
 		globalSlot := shortcutSlot{global: true, id: in.ID}
 		other, bad := conflictOf(all.Shortcuts, in.ID, in.Shortcut)
-		ui.Row(c).Width(keysAppColW).Children(func() {
+		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 			if inCell := s.recorderCell(c, in, inSlot, conflictText(other, bad), ro); inCell.Valid() {
 				rec = inCell
 			}
 		})
 
 		other, bad = conflictOf(all.GlobalShortcuts, global.ID, global.Shortcut)
-		ui.Row(c).Width(keysGlobalColW).Justify(ui.End).Children(func() {
+		ui.Row(c).Grow(1).Shrink(1).MinWidth(0).Justify(ui.End).Children(func() {
 			s.recorderCell(c, global, globalSlot, conflictText(other, bad), ro)
 		})
 	})
@@ -110,7 +108,7 @@ func (s *Shell) recorderCell(c *ui.Context, item shortcutItem, slot shortcutSlot
 	ui.Column(c).Gap(space.Px2).Children(func() {
 		rec = s.shortcutRecorder(c, item, slot, conflict, ro)
 		if conflict != "" {
-			ui.Text(c, conflict).FontSize(scale.Font(c, scale.Size11)).TextColor(tok.Of(c.Theme()).Err)
+			ui.Text(c, conflict).FontSize(scale.Font(c, scale.Size11)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Err)
 		}
 	})
 	return rec

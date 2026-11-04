@@ -21,6 +21,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
@@ -107,12 +108,6 @@ var settingsTabs = []struct{ label, icon string }{
 	{"关于", "info"},
 }
 
-// settingsContentW 是内容区这一帧的宽（窗口宽 − 侧栏），页边距和标题降档都按它。
-func (s *Shell) settingsContentW(c *ui.Context, st app.Settings) float32 {
-	winW, _ := c.Size()
-	return winW - s.sideDrawnWidth(st)
-}
-
 // viewSettings 是设置页本身。
 //
 // ⚠️ 外面这一层是 `Scroll`，里面那一层 `Column` 必须 `FillWidth()`：Scroll 不约束子元素的
@@ -121,16 +116,17 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 	p := tok.Of(c.Theme())
 	st := s.app.SettingsSnapshot()
 	ro := s.app.SettingsReadOnly()
-	contentW := s.settingsContentW(c, st)
-	padX := space.PageHorizontal(contentW)
+	// 页边距和标题字号按**窗口宽**走（原型的媒体查询和 `clamp(32px, 3.4vw, 48px)` 都是视口宽）。
+	winW, _ := c.Size()
+	padX := space.PageHorizontalForWindow(winW)
 
 	scroll := ui.Scroll(c).Key("settings-scroll").Grow(1).TrackScroll(&s.settings.scroll)
 	scroll.Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Column(c).FillWidth().MaxWidth(pageMaxW).
-				Padding(space.PageTop, padX, space.PageBottom, padX).
+				Padding(space.PageTop, padX, space.PageBottomForWindow(winW), padX).
 				Transition(motion.PageIn).Children(func() {
-				pud.PageHead(c, "Preferences", "设置", "", contentW, nil)
+				pud.PageHeadAt(c, "Preferences", "设置", "", scale.PageTitleForWindow(winW), nil)
 
 				if ro {
 					// 设置来自更新的版本时一个字都不许写回去：控件全关，并说清为什么。
@@ -139,9 +135,16 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 						Margin(space.Px8, space.None, space.None, space.None)
 				}
 
-				ui.Row(c).Key("set-layout").FillWidth().Gap(setLayoutGap).AlignItems(ui.Start).
-					Margin(space.Px24, space.None, space.None, space.None).Children(func() {
-					s.settingsNav(c, p)
+				// 原型 `.set-layout`：两列（180 + 缝 48）；窗口 ≤ 1024 时一列、缝 24，分类导航横排（gap 8）。
+				stacked := winW <= 1024
+				var layout ui.Element
+				if stacked {
+					layout = ui.Column(c).Key("set-layout").FillWidth().Gap(space.Px24)
+				} else {
+					layout = ui.Row(c).Key("set-layout").FillWidth().Gap(setLayoutGap).AlignItems(ui.Start)
+				}
+				layout.Margin(space.Px24, space.None, space.None, space.None).Children(func() {
+					s.settingsNav(c, p, stacked)
 					ui.Column(c).Key("set-body").Grow(1).Shrink(1).MinWidth(0).Children(func() {
 						switch s.settings.tab {
 						case settingsTabGeneral:
@@ -171,12 +174,18 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 
 // settingsNav 是左边的分类导航（`.set-nav`）：宽 180、项间缝 2；每项上下 10 左右 12、
 // 圆角 8、次要色字、图标 16 隔 10；悬停 hover 底 + 正文色；当前项 surface-2 底 + 正文色 600。
-func (s *Shell) settingsNav(c *ui.Context, p tok.Palette) {
-	ui.Column(c).Key("set-nav").Width(setNavW).Shrink(0).Gap(space.Px2).Children(func() {
+func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
+	var nav ui.Element
+	if stacked {
+		nav = ui.Row(c).Key("set-nav").Gap(space.Px8)
+	} else {
+		nav = ui.Column(c).Key("set-nav").Width(setNavW).Shrink(0).Gap(space.Px2)
+	}
+	nav.Children(func() {
 		for i, tb := range settingsTabs {
 			on := s.settings.tab == i
 			b := ui.ButtonBase(c).Key("set-tab:"+tb.label).Label(tb.label).FillWidth().
-				Padding(space.Px10, space.Px12).Gap(space.Px10).AlignItems(ui.Center).Radius(tok.R8)
+				Padding(space.Px10, space.Px12).Gap(space.Px10).AlignItems(ui.Center).Justify(ui.Start).Radius(tok.R8)
 			fg := p.Text2
 			switch {
 			case on:
@@ -185,9 +194,12 @@ func (s *Shell) settingsNav(c *ui.Context, p tok.Palette) {
 				b, fg = b.Background(p.Hover), p.Text
 			}
 			b = b.Transition(motion.Fade)
+			if !stacked {
+				b = b.FillWidth()
+			}
 			b.Children(func() {
 				ui.Icon(c, pud.Icon(tb.icon)).FontSize(tok.IconSm).TextColor(fg)
-				t := ui.Text(c, tb.label).FontSize(scale.Font(c, scale.Size14)).TextColor(fg).SingleLine()
+				t := ui.Text(c, tb.label).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(fg).SingleLine()
 				if on {
 					t.FontWeight(600)
 				}

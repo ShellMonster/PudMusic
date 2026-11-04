@@ -11,6 +11,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
@@ -129,7 +130,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 				if focused {
 					t.TextColor(p.AccentText)
 				}
-				typo.Mono(ui.Text(c, s.downloadDirShown(st))).FontSize(scale.Font(c, scale.Size13)).
+				typo.Mono(ui.Text(c, s.downloadDirShown(st))).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).
 					TextColor(p.Text2).Wrap()
 			}, func() {
 				if pud.ButtonDisabled(c, "set-pick-dir", pud.Ghost, pud.Sm, "更改", "", ro).Clicked() {

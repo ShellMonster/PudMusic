@@ -182,6 +182,35 @@ func formatAccel(a accelerator) string {
 	return strings.Join(parts, "+")
 }
 
+// keycapText 是录制键（原型 `.kbd-rec`）里写的字：macOS 上是原型的写法——修饰键按 ⌃⌥⇧⌘ 的
+// 顺序紧挨着、不加加号（「⌥⌘P」「⌘←」），键名在最后；其他平台是「Ctrl+Alt+P」。
+// 命令面板等别处仍用 `formatAccel`（带加号）。
+func keycapText(a accelerator) string {
+	if a == "" {
+		return ""
+	}
+	if runtime.GOOS != "darwin" {
+		return formatAccel(a)
+	}
+	var ctrl, alt, shift, cmd bool
+	key := ""
+	for _, p := range strings.Split(string(a), "+") {
+		switch p {
+		case accelCmd, accelCmdRaw:
+			cmd = true
+		case accelCtrl:
+			ctrl = true
+		case accelAlt:
+			alt = true
+		case accelShift:
+			shift = true
+		default:
+			key = formatAccel(accelerator(p))
+		}
+	}
+	return pick(ctrl, "⌃", "") + pick(alt, "⌥", "") + pick(shift, "⇧", "") + pick(cmd, "⌘", "") + key
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 // 录制控件
@@ -222,7 +251,7 @@ func (s *Shell) shortcutRecorder(c *ui.Context, item shortcutItem, slot shortcut
 	// 等宽 12/500；录制中描边 accent、字 accent-text、底 accent-soft；没设键时字 text-3。
 	// 录制中不管有没有键都写「按下新的快捷键…」（原型 `rec ? '按下新的快捷键…'`）。
 	border, bg, fg := p.LineStrong, p.Surface2, p.Text
-	text := formatAccel(accelerator(item.Shortcut))
+	text := keycapText(accelerator(item.Shortcut))
 	switch {
 	case recording:
 		border, bg, fg = p.Accent, p.AccentSoft, p.AccentText

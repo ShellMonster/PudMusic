@@ -36,6 +36,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -164,7 +165,10 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 
 	loginScroll := ui.Scroll(c).Key("login-scroll").Grow(1)
 	loginScroll.Children(func() {
-		ui.Column(c).Key("page:"+loginPath).Grow(1).FillWidth().Padding(space.Px48, space.Px24).
+		// 整页垂直居中（`.login { min-height: 100%; display: grid; place-items: center }`）：滚动容器不给子元素
+		// 定高，所以最小高度自己算——窗口高减顶栏、减播放条。
+		_, winH := c.Size()
+		ui.Column(c).Key("page:"+loginPath).FillWidth().MinHeight(winH-navMinHeight-playbarHeight).Padding(space.Px48, space.Px24).
 			Justify(ui.Center).AlignItems(ui.Center).Transition(motion.PageIn).Children(func() {
 			ui.Row(c).Key("login-card").Gap(space.Px48).AlignItems(ui.Center).Children(func() {
 				s.viewLoginQR(c, st)
@@ -213,9 +217,9 @@ func (s *Shell) viewLoginQR(c *ui.Context, st app.LoginState) {
 				Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 				fg := ui.Hex("#ecebe8")
 				ui.Icon(c, pud.Icon("check")).FontSize(40).TextColor(fg)
-				ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(700).TextColor(fg)
+				ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).FontWeight(700).TextColor(fg)
 				if hint != "" {
-					ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).TextColor(ui.Hex("#b6b5b2"))
+					ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(ui.Hex("#b6b5b2"))
 				}
 			})
 		}
@@ -228,7 +232,7 @@ func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState) {
 	step := loginStep(st)
 	ui.Column(c).Key("login-text").Width(loginTextW).Shrink(1).Children(func() {
 		typo.Eyebrow(c, "Sign in")
-		typo.Display(ui.Text(c, "扫码登录"), scale.Font(c, scale.Size40)).Margin(space.Px8, space.None, space.None, space.None)
+		typo.Display(ui.Text(c, "扫码登录"), scale.Font(c, scale.Size40)).LineHeight(leading.Body).Margin(space.Px8, space.None, space.None, space.None)
 		ui.Text(c, "继续你的音乐旅程：登录后同步收藏夹、关注和历史记录，并解锁 Hi-Res 无损音质。").
 			FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().
 			Margin(space.Px8, space.None, space.None, space.None)
@@ -241,7 +245,7 @@ func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState) {
 		})
 
 		ui.Row(c).Key("qr-actions").Gap(space.Px12).AlignItems(ui.Center).Children(func() { s.qrActions(c, st) })
-		ui.Text(c, loginStatusLine(st)).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).Wrap().
+		ui.Text(c, loginStatusLine(st)).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).Wrap().
 			Margin(space.Px24, space.None, space.None, space.None)
 		s.viewAccountFooter(c, st)
 	})
@@ -260,13 +264,13 @@ func (s *Shell) loginStepRow(c *ui.Context, p tok.Palette, n int, label string, 
 			circle = circle.Border(1, p.LineStrong)
 		}
 		circle.Children(func() {
-			typo.Mono(ui.Text(c, strconv.Itoa(n))).FontSize(scale.Font(c, scale.Size12)).TextColor(fg)
+			typo.Mono(ui.Text(c, strconv.Itoa(n))).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(fg)
 		})
 		txt := p.Text2
 		if done {
 			txt = p.Text
 		}
-		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).TextColor(txt).Wrap().Shrink(1)
+		ui.Text(c, label).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(txt).Wrap().Shrink(1)
 	})
 }
 
@@ -435,9 +439,9 @@ func (s *Shell) viewAccountFooter(c *ui.Context, st app.LoginState) {
 		if uid := sess.DedeUserID; uid != "" {
 			who = "已登录（UID " + uid + "）"
 		}
-		ui.Text(c, who).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3)
+		ui.Text(c, who).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3)
 		if s.app.CredentialBackendName() == "none" {
-			ui.Text(c, "凭据后端不可用，登录态关掉应用就没了").FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3)
+			ui.Text(c, "凭据后端不可用，登录态关掉应用就没了").FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3)
 		}
 		if pud.Button(c, "login-logout", pud.Quiet, pud.Sm, "退出登录", "").Clicked() {
 			s.logoutAndStartOver()

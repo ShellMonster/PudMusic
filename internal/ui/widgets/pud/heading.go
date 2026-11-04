@@ -1,6 +1,7 @@
 package pud
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -21,6 +22,12 @@ const ledeMaxW = 560
 //		pud.Button(c, "import", pud.Ghost, pud.Std, "导入", "import")
 //	})
 func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, actions func()) {
+	PageHeadAt(c, eyebrow, title, lede, scale.PageTitleFor(contentW), actions)
+}
+
+// PageHeadAt 是 PageHead 加「标题字号自己给」：要和原型 `.h-page` 的 `clamp(32px, 3.4vw, 48px)`
+// 1:1 的页面传 `scale.PageTitleForWindow(窗口宽)`。标题行高 1.15（`.h-page`），导语行高 1.55（正文）。
+func PageHeadAt(c *ui.Context, eyebrow, title, lede string, titleSize float32, actions func()) {
 	p := pal(c)
 	ui.Row(c).FillWidth().AlignItems(ui.End).Gap(space.Px24).Padding(space.Px24, space.None, space.Px8, space.None).
 		Children(func() {
@@ -28,12 +35,12 @@ func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, acti
 				if eyebrow != "" {
 					typo.Eyebrow(c, eyebrow)
 				}
-				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFor(contentW)))
+				t := typo.Display(ui.Text(c, title), scale.Font(c, titleSize)).LineHeight(leading.PageTitle)
 				if eyebrow != "" {
 					t.Margin(space.Px8, space.None, space.None, space.None)
 				}
 				if lede != "" {
-					text(c, lede, scale.Size14, p.Text2).MaxWidth(ledeMaxW).Margin(space.Px8, space.None, space.None, space.None)
+					text(c, lede, scale.Size14, p.Text2).LineHeight(leading.Body).MaxWidth(ledeMaxW).Margin(space.Px8, space.None, space.None, space.None)
 				}
 			})
 			if actions != nil {

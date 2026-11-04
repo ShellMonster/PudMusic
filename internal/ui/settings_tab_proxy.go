@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -155,7 +156,7 @@ func (s *Shell) proxyFormCard(c *ui.Context, ro bool) {
 			ui.Row(c).Key("px-up").FillWidth().Gap(space.Px16).AlignItems(ui.Start).Children(func() {
 				ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 					s.field(c, "px-user", "代理用户名", "", func() { s.fieldInput(c, p, &f.user, "", false, false, ro) })
-					ui.Text(c, "没有就留空").FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
+					ui.Text(c, "没有就留空").FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).
 						Margin(space.Px6, space.None, space.None, space.None)
 				})
 				ui.Column(c).Width(140).Shrink(0).Children(func() {
@@ -170,7 +171,7 @@ func (s *Shell) proxyFormCard(c *ui.Context, ro bool) {
 					s.saveProxy()
 				}
 				if result != "" {
-					ui.Text(c, result).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).Wrap().Grow(1)
+					ui.Text(c, result).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).Wrap().Grow(1)
 				}
 			})
 		})
@@ -182,14 +183,14 @@ func (s *Shell) field(c *ui.Context, key, label, errText string, ctrl func(), ma
 	p := tok.Of(c.Theme())
 	ui.Column(c).Key("field:" + key).FillWidth().Gap(space.Px6).Children(func() {
 		ui.Row(c).Gap(space.Px4).Children(func() {
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(p.Text)
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).FontWeight(500).TextColor(p.Text)
 			if len(mark) > 0 && mark[0] {
-				ui.Text(c, "*").FontSize(scale.Font(c, scale.Size13)).TextColor(tok.Of(c.Theme()).Err)
+				ui.Text(c, "*").FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Err)
 			}
 		})
 		ctrl()
 		if errText != "" {
-			ui.Text(c, errText).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(c.Theme()).Err)
+			ui.Text(c, errText).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Err)
 		}
 	})
 }
@@ -200,7 +201,7 @@ func (s *Shell) field(c *ui.Context, key, label, errText string, ctrl func(), ma
 // ⚠️ 不许给输入框加 Key（Key 只能挂在创建时没有处理输入的控件上）；外面那一格有 Key 就够了。
 func (s *Shell) fieldInput(c *ui.Context, p tok.Palette, v *string, placeholder string, password, invalid, ro bool) {
 	in := ui.TextInput(c, v).FillWidth().Height(40).Padding(space.None, space.Px12).Radius(tok.R8).
-		Background(p.Surface2).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text).
+		Background(p.Surface2).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text).
 		Placeholder(placeholder).Disabled(ro).Label(placeholder + "输入框")
 	if password {
 		in = in.Password()

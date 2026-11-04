@@ -390,15 +390,15 @@ func TestTogglingAutoStartGoesThroughTheSystem(t *testing.T) {
 	}
 }
 
-// TestTheSettingsPageUsesThePageHead 钉住设置页的页头走 `pud.PageHead`（原型 `.page-head`：
-// Eyebrow `Preferences` + 宋体标题「设置」，标题字号 `scale.PageTitleFor(内容区宽)`）。
+// TestTheSettingsPageUsesThePageHead 钉住设置页的页头走 `pud.PageHeadAt`（原型 `.page-head`：
+// Eyebrow `Preferences` + 宋体标题「设置」，标题字号 `scale.PageTitleForWindow(窗口宽)`，原型的 clamp(32px, 3.4vw, 48px)）。
 func TestTheSettingsPageUsesThePageHead(t *testing.T) {
 	src, err := os.ReadFile("settings_page.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), `pud.PageHead(c, "Preferences", "设置",`) {
-		t.Error("settings_page.go 没有用 `pud.PageHead(c, \"Preferences\", \"设置\", …)` 画页头")
+	if !strings.Contains(string(src), `pud.PageHeadAt(c, "Preferences", "设置",`) {
+		t.Error("settings_page.go 没有用 `pud.PageHeadAt(c, \"Preferences\", \"设置\", …)` 画页头")
 	}
 	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
 	if !tt.HasText("PREFERENCES") && !tt.HasText("Preferences") {

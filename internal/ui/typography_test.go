@@ -13,6 +13,7 @@ package ui
 // 真的画得比 400 粗」由下面那条墨量测试单独证明。
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -644,7 +645,8 @@ func TestTheSettingsPageUsesTheTypographicScale(t *testing.T) {
 				if !ok {
 					t.Fatalf("设置页上找不到%s「%s」，文字有 %q", m.what, m.text, b.tt.Texts())
 				}
-				got := r.H / textBoxPerSize
+				// 行高是原型正文的 1.55（`leading.Body`），文字盒高 = 字号 × 1.55。
+				got := r.H / leading.Body
 				if math.Abs(float64(got-m.size)) > 0.8 {
 					t.Errorf("%s「%s」折算出来是 %.1fpx，want %.0f——原型的刻度是 20 / 14 / 13",
 						m.what, m.text, got, m.size)

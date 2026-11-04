@@ -15,6 +15,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -40,11 +41,11 @@ func (s *Shell) settingsAbout(c *ui.Context, st app.Settings, ro bool) {
 			ui.Row(c).Key("about-head").FillWidth().Padding(space.Px32).Gap(space.Px24).AlignItems(ui.Center).Children(func() {
 				aboutRecordMark(c, p, aboutMarkSize)
 				ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
-					typo.Display(ui.Text(c, appName+" PudMusic"), scale.Font(c, scale.Subhead))
+					typo.Display(ui.Text(c, appName+" PudMusic"), scale.Font(c, scale.Subhead)).LineHeight(leading.Body)
 					ui.Text(c, "为 macOS 与 Windows 打造的原生桌面播放器 · Go + MyGo").
 						FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().
 						Margin(space.Px4, space.None, space.None, space.None)
-					typo.Mono(ui.Text(c, s.aboutVersionLine(us))).FontSize(scale.Font(c, scale.Size12)).
+					typo.Mono(ui.Text(c, s.aboutVersionLine(us))).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).
 						TextColor(p.Text3).Wrap().Margin(space.Px4, space.None, space.None, space.None)
 				})
 				s.aboutUpdateButton(c, us)

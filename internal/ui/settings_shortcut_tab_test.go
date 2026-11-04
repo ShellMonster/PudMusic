@@ -46,8 +46,8 @@ func TestRecordingAShortcutStoresIt(t *testing.T) {
 		t.Errorf("录成 %q，want CommandOrControl+K", got)
 	}
 	// 画面上摆的是符号（mac 上 ⌘），不是那一串英文——Biu 也是这么画的。
-	if mac := macSymbols(); mac && !tt.HasText("⌘+K") {
-		t.Errorf("画出来的不是 ⌘+K，文字有 %q", tt.Texts())
+	if mac := macSymbols(); mac && !tt.HasText("⌘K") {
+		t.Errorf("画出来的不是 ⌘K，文字有 %q", tt.Texts())
 	}
 	// 两列互不相干。
 	if got := s.keys.snapshot().GlobalShortcuts[0].Shortcut; got != "CommandOrControl+Alt+P" {
@@ -78,8 +78,8 @@ func TestEscapeWhileRecordingBlursAndRecordsNothing(t *testing.T) {
 	if tt.HasText(recordingHint) {
 		t.Error("按了 Esc 之后那一格还摆着「按下新的快捷键」")
 	}
-	// 收起之后那一格照常显示它现在的键（照 Biu：录的时候字也不变）。
-	if !tt.HasText(pick(macSymbols(), "⌘+P", "Ctrl+P")) {
+	// 收起之后那一格照常显示它现在的键（原型：录的时候写「按下新的快捷键…」，收起后换回键）。
+	if !tt.HasText(pick(macSymbols(), "⌘P", "Ctrl+P")) {
 		t.Errorf("Esc 之后那一格没有照常显示它现在的键，文字有 %q", tt.Texts())
 	}
 	if got := s.keys.snapshot().Shortcuts[0].Shortcut; got != "CommandOrControl+P" {
@@ -272,7 +272,7 @@ func TestEveryRecorderCellActuallyDrawsItsKey(t *testing.T) {
 		{cur.GlobalShortcuts, "全局"},
 	} {
 		for _, it := range group.items {
-			text := formatAccel(accelerator(it.Shortcut))
+			text := keycapText(accelerator(it.Shortcut))
 			// ⚠️ **先滚进来再量**：这一页在 Scroll 里，底下的几行在窗口
 			// 底边之外——框还在（Find 找得到），但那一帧根本没画，量到的
 			// 就是「一个字都没有」的假红（理由见 settingRect）。
@@ -425,7 +425,7 @@ func TestEveryRecorderCellIsA32TallBoxWithItsKeyCentered(t *testing.T) {
 				continue // 没设键的那一格显示「未设置」
 			}
 			// 键就是格子里的那段等宽字（默认值里两列的键各不相同，按键名找得到唯一一处）。
-			k, ok := tt.Find(formatAccel(accelerator(item.Shortcut)))
+			k, ok := tt.Find(keycapText(accelerator(item.Shortcut)))
 			if !ok {
 				t.Errorf("「%s%s」那一格里找不到键 %q", col.label, item.Name, item.Shortcut)
 				continue

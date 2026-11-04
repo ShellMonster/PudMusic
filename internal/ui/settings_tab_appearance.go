@@ -9,6 +9,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -177,7 +178,7 @@ func (s *Shell) themeCard(c *ui.Context, label string, mode app.ThemeMode, selec
 					ui.Box(c).Key("tp-bar:" + label).FillWidth().Height(20).Background(bar)
 				})
 			})
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(p.Text).SingleLine().
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).FontWeight(500).TextColor(p.Text).SingleLine().
 				Padding(space.Px10, space.Px4, space.Px4, space.Px4)
 		})
 	})
@@ -216,7 +217,7 @@ func (s *Shell) dispCard(c *ui.Context, p tok.Palette, label string, mode app.Di
 					}
 				}
 			})
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(p.Text).SingleLine().
+			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).FontWeight(500).TextColor(p.Text).SingleLine().
 				Padding(space.Px8, space.None, space.None, space.None)
 		})
 	})

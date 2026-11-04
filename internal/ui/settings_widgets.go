@@ -15,6 +15,7 @@ import (
 	"fmt"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -44,7 +45,7 @@ func (s *Shell) setGroup(c *ui.Context, key, title string, body func()) {
 	ui.Column(c).Key("set-group:"+key).FillWidth().MaxWidth(setGroupMaxW).
 		Margin(space.None, space.None, setGroupGap, space.None).Children(func() {
 		if title != "" {
-			typo.Display(ui.Text(c, title), scale.Font(c, scale.Subhead)).
+			typo.Display(ui.Text(c, title), scale.Font(c, scale.Subhead)).LineHeight(leading.Body).
 				Margin(space.None, space.None, space.Px12, space.None)
 		}
 		body()
@@ -86,9 +87,9 @@ func (cd *setCard) row(key, title, help string, ctrl func()) {
 	ui.Row(c).Key("set-row:"+key).FillWidth().MinHeight(setRowMinH).
 		Padding(setRowPadY, setRowPadX).Gap(space.Px16).AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).Shrink(1).Gap(space.Px16).Children(func() {
-			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(500).TextColor(p.Text)
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).FontWeight(500).TextColor(p.Text)
 			if help != "" {
-				ui.Text(c, help).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text2).Wrap()
+				ui.Text(c, help).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(p.Text2).Wrap()
 			}
 		})
 		if ctrl != nil {
@@ -122,11 +123,11 @@ func (cd *setCard) rowFocus(key string, focused bool, left func(), ctrl func()) 
 
 // rowTitle / rowHelp 是 `rowEl` 左边两样的标准画法。
 func rowTitle(c *ui.Context, title string) ui.Element {
-	return ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(500).TextColor(tok.Of(c.Theme()).Text)
+	return ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).FontWeight(500).TextColor(tok.Of(c.Theme()).Text)
 }
 
 func rowHelp(c *ui.Context, help string) ui.Element {
-	return ui.Text(c, help).FontSize(scale.Font(c, scale.Size13)).TextColor(tok.Of(c.Theme()).Text2).Wrap()
+	return ui.Text(c, help).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(tok.Of(c.Theme()).Text2).Wrap()
 }
 
 // switchRow 是「标题 + 说明 + 开关」一行。写成功才说「开了它会怎样」（`saySwitchHint`）。
@@ -186,7 +187,7 @@ func dropSelectW[T comparable](c *ui.Context, key string, value *T, items []enum
 	}
 	tr = tr.Border(1, border).Transition(motion.Fade)
 	tr.Children(func() {
-		t := ui.Text(c, labelOf(*value)).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text).SingleLine()
+		t := ui.Text(c, labelOf(*value)).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(p.Text).SingleLine()
 		if fill {
 			t.Grow(1)
 		}
@@ -204,7 +205,7 @@ func dropSelectW[T comparable](c *ui.Context, key string, value *T, items []enum
 					opt = opt.Background(p.Hover)
 				}
 				opt.Children(func() {
-					t := ui.Text(c, it.label).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text).SingleLine().Grow(1)
+					t := ui.Text(c, it.label).FontSize(scale.Font(c, scale.Size13)).LineHeight(leading.Body).TextColor(p.Text).SingleLine().Grow(1)
 					if checked {
 						t.TextColor(p.AccentText).FontWeight(600)
 						ui.Icon(c, pud.Icon("check")).FontSize(14).TextColor(p.AccentText)
