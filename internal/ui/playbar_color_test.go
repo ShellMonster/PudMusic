@@ -416,8 +416,9 @@ func TestThePlaylistKeyAndThePartKeyAreDifferentGlyphs(t *testing.T) {
 	// 表里写的是**上游的字面文件名**（和 `buiIcons` 那张表同一个规矩）：
 	// 改了常量而不改这一行，立刻红；要改这一行，得对着 Biu 源码看一眼。
 	for _, c := range []struct{ what, upstream, got string }{
-		{"播放列表", "Media/play-list-line.svg", iconQueue},
-		{"分集", "Editor/list-radio.svg", iconPageList},
+		// 2026-11：原型 `ICONS` 的 queue / parts（两个不同的图形）。
+		{"播放列表", "Pud/queue.svg", iconQueue},
+		{"分集", "Pud/parts.svg", iconPageList},
 	} {
 		if c.got != c.upstream {
 			t.Errorf("「%s」该画的是 %s（照 Biu 的源码），生产代码给的是 %s",

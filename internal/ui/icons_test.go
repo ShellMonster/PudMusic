@@ -258,22 +258,24 @@ var buiIcons = []struct {
 	{"播放中（该画暂停）", "Media/pause-circle-fill.svg", transportIcon(true)},
 	{"停着（该画播放）", "Media/play-circle-fill.svg", transportIcon(false)},
 
+	// 2026-11 起赞 / 收藏 / 播放模式用原型 `ICONS`（thumb / star / order / repeat /
+	// shuffle / repeat1；`-on` 是填满的那一版）。原注释保留上游出处作对照。
 	// Biu `components/music-thumb/index.tsx`：
 	//   isThumb ? <RiThumbUpFill className="text-primary"/> : <RiThumbUpLine size={18}/>
-	{"赞过了", "System/thumb-up-fill.svg", likeIcon(true)},
-	{"还没赞", "System/thumb-up-line.svg", likeIcon(false)},
+	{"赞过了", "Pud/thumb-on.svg", likeIcon(true)},
+	{"还没赞", "Pud/thumb.svg", likeIcon(false)},
 
 	// Biu `components/music-fav-button`（`playbar/left`）：收藏了画实心，没收藏画空心。
-	{"收藏过了", "System/star-fill.svg", favIcon(true)},
-	{"还没收藏", "System/star-line.svg", favIcon(false)},
+	{"收藏过了", "Pud/star-on.svg", favIcon(true)},
+	{"还没收藏", "Pud/star.svg", favIcon(false)},
 
 	// Biu `src/common/constants/audio.tsx:27-48` 的 `getPlayModeList`：
 	//   顺序 <RiOrderPlayLine/>  列表循环 <RiRepeat2Line/>
 	//   随机 <RiShuffleLine/>    单曲     <RiRepeatOneLine/>
-	{"顺序播放", "Media/order-play-line.svg", playModeIcon(app.PlayModeSequence)},
-	{"列表循环", "Media/repeat-2-line.svg", playModeIcon(app.PlayModeLoop)},
-	{"随机", "Media/shuffle-line.svg", playModeIcon(app.PlayModeRandom)},
-	{"单曲循环", "Media/repeat-one-line.svg", playModeIcon(app.PlayModeSingle)},
+	{"顺序播放", "Pud/order.svg", playModeIcon(app.PlayModeSequence)},
+	{"列表循环", "Pud/repeat.svg", playModeIcon(app.PlayModeLoop)},
+	{"随机", "Pud/shuffle.svg", playModeIcon(app.PlayModeRandom)},
+	{"单曲循环", "Pud/repeat1.svg", playModeIcon(app.PlayModeSingle)},
 }
 
 // TestWhichStateGetsWhichIcon 钉住「哪个状态配哪一张图标」。
