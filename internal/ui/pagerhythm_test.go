@@ -580,6 +580,7 @@ func blockedBiliOpts(t *testing.T, loggedIn bool) []shellOpt {
 			a.MountLibrary(cli)
 			a.MountExplore(cli)
 			a.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
+			a.MountSearch(cli) // 搜索页没挂服务会直接报错，而不是停在加载态
 		}),
 	}
 }
@@ -620,7 +621,8 @@ func TestEveryLoadingStateIsDrawnTheSameWay(t *testing.T) {
 		{name: "历史记录", loading: "正在加载…", path: historyPath, rows: true},
 		{name: "我的关注", loading: "正在加载关注的人…", path: followPath, rows: true},
 		{name: "用户动态", loading: "正在加载动态…", path: dynamicFeedPath, rows: true},
-		{name: "UP 主空间", loading: "正在加载动态…", path: "/user/77", rows: true},
+		// UP 主空间默认打开「投稿」Tab，列表骨架的名字是通用的「正在加载…」。
+		{name: "UP 主空间", loading: "正在加载…", path: "/user/77", rows: true},
 	} {
 		t.Run(page.name, func(t *testing.T) {
 			b := newTestShell(t, blockedBiliOpts(t, true)...)
