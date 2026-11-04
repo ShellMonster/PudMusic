@@ -26,6 +26,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -165,6 +166,12 @@ const PlayingMark = hover.PlayingMark
 // rowHeight 是这一档的行高。**列表这两档的行高是定死的**（见文件头），所以
 // 「滚过了多少像素」能从「顶上那一行是第几行」算出来（见 `List.ScrollOffset`）。
 func (l *List) rowHeight() float32 {
+	if l.usesPudRow() {
+		if l.view == ViewCompact {
+			return tok.RowCompactH
+		}
+		return tok.RowH
+	}
 	if l.view == ViewCompact {
 		return compactRowHeight
 	}
@@ -259,6 +266,10 @@ func rowColors(t *ui.Theme, playing, invalid bool) (title, owner ui.Color) {
 // 字」也就没有意义了；留着它的话，选中的行在浅色下会变成白底上的白字——直接
 // 看不见。
 func (l *List) viewCard(r ui.ListRow) {
+	if l.usesPudRow() {
+		l.viewPudRow(r)
+		return
+	}
 	if l.view == ViewCompact {
 		l.viewCompactCard(r)
 		return

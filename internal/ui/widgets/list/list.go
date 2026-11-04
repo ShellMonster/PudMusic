@@ -155,6 +155,9 @@ type Columns struct {
 	// PubTimeTitle 是时间那一列的表头字。空串是「投稿时间」——收藏夹那一页
 	// 写的是「收藏时间」，因为它画的是 `fav_time`（见 `Music.PubTime`）。
 	PubTimeTitle string
+	// Text 给了就是曲目行里「专辑」那一列的字（稍后再看的进度、本地音乐的格式……），
+	// 优先于 PubTime。
+	Text func(m Music) string
 	// Now 是判「几天前」用的「现在」。nil 是墙钟。
 	//
 	// ⚠️ **传一个读外壳时钟的闭包，别传 `s.clock.Now` 这个值**：测试是在
@@ -319,6 +322,9 @@ type List struct {
 	// 把整个进程带走（本包自己 recover 住，见 viewRow）。不记的话这一行
 	// 每帧崩一次，日志被刷爆、帧率拖垮——比画不出来糟得多。
 	failed map[string]bool
+
+	// pud 报行和表头是不是画原型样式（见 `SetPudRows`）。
+	pud bool
 
 	// keys 记「上一次输入是键盘还是指针」（理由见 `selection.go` 的 KeyboardMode）。
 	//
