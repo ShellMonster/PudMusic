@@ -171,7 +171,7 @@ func drawEmpty(c *ui.Context, key string, e emptyState, pad float32) {
 // `viewLibraryMissing`（插画 / 页面名 / 那一页的空文案 / 「没接上接口」的原因）。
 // 那三样各自是 `emptyArt` / 一句自定义 / `emptyCopy`，而字号和主次色只有这一份。
 //
-// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, scale.Size15))` / `FontSize(scale.Font(c, scale.Size12))`
+// ⚠️ **写新的一处空状态时也要走这几个函数**，别把 `FontSize(scale.Font(c, scale.Size16))` / `FontSize(scale.Font(c, scale.Size12))`
 // 抄一遍过去：抄一遍就会漂开（改一次字号只改一处，另一处不动），而界面上看不出来。
 func emptyContent(c *ui.Context, e emptyState) {
 	emptyArt(c, e.Icon)
@@ -511,7 +511,7 @@ func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err 
 		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
 		// 不是「本来就没有」。
 		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
-		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, scale.Size15)).TextColor(t.Text)
+		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, scale.Size16)).TextColor(t.Text)
 		if where != "" {
 			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
 			// 而下面那行是原始错误。两者都别比标题更抢眼。

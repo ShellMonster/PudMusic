@@ -40,6 +40,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -284,7 +285,7 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 // ⚠️ **它一直摆着**（上游也是）：队列空的时候按它不报错，只是没什么可清。
 func (s *Shell) viewLaterHeader(c *ui.Context) {
 	ui.Row(c).Key("later:page-title").FillWidth().AlignItems(ui.Center).Children(func() {
-		ui.Text(c, "稍后再看").FontSize(scale.Font(c, scale.PageTitle))
+		typo.Display(ui.Text(c, "稍后再看"), scale.Font(c, scale.PageTitle))
 
 		// 上游是 `justify-between`：标题在左、按钮在右。中间的空白是 `Spacer`
 		// 吃掉的。

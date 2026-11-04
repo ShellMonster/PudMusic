@@ -330,14 +330,14 @@ func TestEveryPageTitleUsesTheSharedSize(t *testing.T) {
 	titles := []string{"稍后再看", "历史记录", "本地音乐", "下载记录", "搜索", "设置", "扫码登录"}
 	for _, title := range titles {
 		if !titleUsesSharedSize(t, title) {
-			t.Errorf("页标题 %q 没有用 `FontSize(scale.PageTitle)`——页标题的字号必须"+
+			t.Errorf("页标题 %q 没有用 `typo.Display(…, scale.Font(c, scale.PageTitle))`——页标题的字号必须"+
 				"是同一个数（scale.PageTitle = %d）", title, scale.PageTitle)
 		}
 	}
-	// 那个数本身也钉住：24（上游 `h1` 的 `text-2xl`，见 pagerhythm.go 顶上那段）。
-	if scale.PageTitle != 24 {
-		t.Errorf("scale.PageTitle = %d，want 24——上游那一套里页标题取的是 `text-2xl`"+
-			"（24，DESIGN.md 的 `typography.page_title`）", scale.PageTitle)
+	// 那个数本身也钉住：48（「深夜唱片行」§0′，原型 `.h-page` 的上限）。
+	if scale.PageTitle != 48 {
+		t.Errorf("scale.PageTitle = %d，want 48——「深夜唱片行」的页标题是 48 宋体 700"+
+			"（DESIGN.md §0′）", scale.PageTitle)
 	}
 }
 
@@ -386,6 +386,12 @@ func titleUsesSharedSize(t *testing.T, title string) bool {
 					// 词）。
 					if mentionsTitle(call, title) {
 						hasTitle = true
+					}
+				case "Display":
+					// `typo.Display(ui.Text(c, …), scale.Font(c, scale.PageTitle))`：
+					// 「深夜唱片行」的页标题是宋体 700，字号是 Display 的第二个实参。
+					if len(call.Args) == 2 && mentionsIdent(call.Args[1], "PageTitle") {
+						hasShared = true
 					}
 				case "FontSize":
 					if len(call.Args) == 1 {
@@ -889,8 +895,9 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 //  3. 标题 / 简介 / 类型和条数 / 创建者四块**左缘对齐**，相邻两块之间 **16**
 //     （票 #175 的验收：14/14/14、竖距 16）。
 func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
-	if scale.CollectionTitle != 30 {
-		t.Errorf("scale.CollectionTitle = %d，want 30（上游 `text-3xl`）", scale.CollectionTitle)
+	// 30 那一档退役（§0′），先归到相邻的 32；T3 按原型换成 HeroTitle（64）。
+	if scale.CollectionTitle != 32 {
+		t.Errorf("scale.CollectionTitle = %d，want 32（30 退役后的相邻档）", scale.CollectionTitle)
 	}
 	// 一个长到要折两行的名字。
 	long := "这是一个很长很长很长很长很长很长很长很长很长很长的收藏夹名字"

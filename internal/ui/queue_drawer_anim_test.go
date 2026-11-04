@@ -56,8 +56,12 @@ const drawerEdgeRow = 120
 // 第一个撞上边线颜色的那一列就是面板的左缘，不会撞上影。
 //
 // ⚠️ **面板整个在窗口外面的时候扫不到**（返回 ok=false）——那正是「还没滑进来」。
+//
+// ⚠️ **只扫抽屉落得到的那一段**（窗口右沿往左一个抽屉宽）：侧栏右缘那道线和
+// 抽屉边线是同一个实色 `--line`（「深夜唱片行」§0′），扫满整行会撞上侧栏那一道。
 func drawerEdgeX(img *image.RGBA, row int, border color.RGBA) (int, bool) {
-	for x := img.Rect.Max.X - 1; x >= img.Rect.Min.X; x-- {
+	minX := max(img.Rect.Min.X, img.Rect.Max.X-int(queueDrawerWidth)-2)
+	for x := img.Rect.Max.X - 1; x >= minX; x-- {
 		if img.RGBAAt(x, row) == border {
 			return x, true
 		}

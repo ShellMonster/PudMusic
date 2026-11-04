@@ -23,7 +23,8 @@
 //	Px6  = 6  （1½ 格）   Px8  = 8  （2 格）    Px10 = 10 （2½ 格）
 //	Px12 = 12 （3 格）    Px16 = 16 （4 格）    Px20 = 20 （5 格）
 //	Px24 = 24 （6 格）    Px28 = 28 （7 格）    Px32 = 32 （8 格）
-//	Px48 = 48 （12 格）   Px96 = 96 （24 格）
+//	Px40 = 40 （10 格）   Px48 = 48 （12 格）   Px64 = 64 （16 格）
+//	Px96 = 96 （24 格）
 //
 // ⚠️ **名字里直写像素值是有意的**：这一版是**机械替换**（四百多处），
 // 「6 → Px6」在 diff 里一眼就能核对；而「6 → Md」得回表里查一趟才知道是几。
@@ -49,15 +50,15 @@
 // 下面五个别名是 DESIGN.md `spacing` 一节里的那几个数，**值必须和那里一样**
 // （`space_test.go` 里那条测试盯着，它直接读仓库根的 DESIGN.md）：
 //
-//	Unit             = 4   spacing.unit
-//	PageHorizontal   = 16  spacing.page_horizontal
-//	PageVertical     = 0   spacing.page_vertical
+//	Unit                 = 4   spacing.unit
+//	PageHorizontalLegacy = 16  spacing.page_horizontal_legacy
+//	PageVertical         = 0   spacing.page_vertical
 //	ListGap          = 16  spacing.list_gap
 //	SettingsGroupGap = 24  spacing.settings_group_gap
 //
 // ⚠️ **别名是「角色名」，刻度名是「值名」**：一个值在表里有两个名字。
 // **角色成立的地方留一个角色常量，它的值从别名来**——比如页面那一层的横向
-// 内边距是 `pagePadX = space.PageHorizontal`（`internal/ui/pagerhythm.go`），
+// 内边距是 `pagePadX = space.PageHorizontalLegacy`（`internal/ui/pagerhythm.go`），
 // 设置分组间距是 `settingsGroupGap = space.SettingsGroupGap`。
 // 别处直接用刻度名（网格格间距用 `space.Px16`）。
 // 别名不产生第二份值——它们就是刻度名的另一个写法。
@@ -103,9 +104,12 @@ const (
 	Px28 = 28
 	// Px32 是 32 像素（八格）。
 	Px32 = 32
-	// Px48 是 48 像素（十二格）——满屏播放器底部那一排的左右内边距是这一档
-	//（上游的 `px-12`）。
+	// Px40 是 40 像素（十格）——标准页边距、设置分组间距、收藏夹头部内边距。
+	Px40 = 40
+	// Px48 是 48 像素（十二格）——分区之间、主视觉里封面与文字之间。
 	Px48 = 48
+	// Px64 是 64 像素（十六格）——页面底部留白、全屏播放器两栏之间。
+	Px64 = 64
 	// Px96 是 96 像素（二十四格）——满屏播放器歌词那一列的上下内边距是这一档
 	//（上游的 `py-24`，1.5rem = 24px 而 Tailwind 的 24 = 6rem = 96px）。
 	Px96 = 96
@@ -124,9 +128,9 @@ const (
 	// （高 88），上游的 `toastOffset` 就是 90（DESIGN.md §三「Toast | 距底 90」）。
 	Px90 = 90
 
-	// PageHorizontal 是内容区左右内边距：16 像素
-	//（DESIGN.md `spacing.page_horizontal`）。
-	PageHorizontal = Px16
+	// PageHorizontalLegacy 是改版前七页共用的页边距 16（`internal/ui` 的
+	// `pagePadX`）。T1–T7 重做页面时换成 `PageHorizontal(内容区宽)`。
+	PageHorizontalLegacy = Px16
 	// PageVertical 是内容区上下内边距：0 像素
 	//（DESIGN.md `spacing.page_vertical`；上游没有 py）。
 	PageVertical = None
@@ -134,6 +138,51 @@ const (
 	//（DESIGN.md `spacing.list_gap`）。
 	ListGap = Px16
 	// SettingsGroupGap 是设置页分组之间的间距：24 像素
-	//（DESIGN.md `spacing.settings_group_gap`）。
+	//（DESIGN.md `spacing.settings_group_gap`；原型是 40，T6 改）。
 	SettingsGroupGap = Px24
+
+	// 「深夜唱片行」的版式间距（DESIGN.md §0′，原型 `.sec` / `.sec-head` /
+	// `.page` / `.card-grid`）。
+	//
+	// SectionGap 是分区之间：48。
+	SectionGap = Px48
+	// SectionHeadGap 是分区标题到内容：20。
+	SectionHeadGap = Px20
+	// PageBottom 是页面底部留白：64。
+	PageBottom = Px64
+	// GridGap 是卡片网格的格间距：24（内容区 < 760 时 16，见 `GridGapFor`）。
+	GridGap = Px24
+	// PageTop 是页面顶部留白：8（原型 `.page { padding: 8px 40px 64px }`）。
+	PageTop = Px8
 )
+
+// 页边距随内容区宽度的三档（原型 `.page` 的 40 和两条媒体查询）。
+const (
+	// WideContent 及以上用 40。
+	WideContent = 1180
+	// MediumContent 及以上用 32；再窄用 16。
+	MediumContent = 760
+)
+
+// PageHorizontal 是内容区宽 contentW 时页面左右的内边距：≥1180 为 40，≥760 为 32，
+// 否则 16。contentW 是**内容区**（侧栏右边那一整块）的宽，不是窗口宽。
+//
+//	pad := space.PageHorizontal(s.contentW)
+//	ui.Column(c).Padding(space.PageTop, pad, space.PageBottom, pad)
+func PageHorizontal(contentW float32) float32 {
+	switch {
+	case contentW >= WideContent:
+		return Px40
+	case contentW >= MediumContent:
+		return Px32
+	}
+	return Px16
+}
+
+// GridGapFor 是卡片网格在这一宽度下的格间距：< 760 时 16，否则 24。
+func GridGapFor(contentW float32) float32 {
+	if contentW > 0 && contentW < MediumContent {
+		return Px16
+	}
+	return GridGap
+}

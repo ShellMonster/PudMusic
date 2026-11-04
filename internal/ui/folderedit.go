@@ -108,7 +108,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 
 	modal := ui.Modal(c, &e.open, func() {
 		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
-		ui.Text(c, e.heading()).FontSize(scale.Font(c, scale.Size15))
+		ui.Text(c, e.heading()).FontSize(scale.Font(c, scale.Size16))
 		s.viewCoverPicker(c, e)
 
 		// 名称。⚠️ `Placeholder` 和 `Label` 不同时给：`Label` 是给读屏软件

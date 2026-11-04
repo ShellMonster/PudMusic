@@ -4135,7 +4135,7 @@ var Items = []Item{
 			// 不是页标题，而票 #169 的 `TestTheFullPlayerTitleIsNotBold` 钉的
 			// 就是「满屏那一句**要写** `.FontWeight(400)`」——加进去会把那一处判红。
 			// 那一处由上一条（全局白名单）盖着。
-			"TestPageTitlesAreNotBold",
+			"TestPageTitlesAreDisplayBold",
 		},
 	},
 	{

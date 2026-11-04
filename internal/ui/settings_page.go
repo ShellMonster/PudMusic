@@ -31,6 +31,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -448,7 +449,7 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			ui.Column(c).FillWidth().MaxWidth(s.settingsContentMaxWAt(c)).
 				Padding(space.None, settingsContentPad, settingsContentPad, settingsContentPad).
 				Gap(settingsGroupGap).Children(func() {
-				ui.Text(c, "设置").FontSize(scale.Font(c, scale.PageTitle))
+				typo.Display(ui.Text(c, "设置"), scale.Font(c, scale.PageTitle))
 
 				if ro {
 					ui.Text(c, "设置只读：这份设置来自更新的版本，这一版一个字都不会写回去。").

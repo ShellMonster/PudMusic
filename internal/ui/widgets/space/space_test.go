@@ -91,7 +91,9 @@ func TestTheScaleValuesAreLocked(t *testing.T) {
 		"Px24": 24,
 		"Px28": 28,
 		"Px32": 32,
+		"Px40": 40,
 		"Px48": 48,
+		"Px64": 64,
 		// 碎步（不在刻度上）。
 		"Px1":  1,
 		"Px3":  3,
@@ -103,7 +105,7 @@ func TestTheScaleValuesAreLocked(t *testing.T) {
 	got := map[string]int{
 		"None": None, "Px2": Px2, "Px4": Px4, "Px6": Px6, "Px8": Px8,
 		"Px10": Px10, "Px12": Px12, "Px16": Px16, "Px20": Px20,
-		"Px24": Px24, "Px28": Px28, "Px32": Px32, "Px48": Px48,
+		"Px24": Px24, "Px28": Px28, "Px32": Px32, "Px40": Px40, "Px48": Px48, "Px64": Px64,
 		"Px1": Px1, "Px3": Px3, "Px5": Px5, "Px7": Px7, "Px9": Px9,
 		"Px90": Px90,
 	}
@@ -131,11 +133,19 @@ func TestTheScaleValuesAreLocked(t *testing.T) {
 func TestTheTableMatchesTheDesignTokens(t *testing.T) {
 	tokens := parseDesignSpacing(t, repoRoot(t))
 	alias := map[string]int{
-		"unit":               Unit,
-		"page_horizontal":    PageHorizontal,
-		"page_vertical":      PageVertical,
-		"list_gap":           ListGap,
-		"settings_group_gap": SettingsGroupGap,
+		"unit":                   Unit,
+		"page_horizontal_legacy": PageHorizontalLegacy,
+		"page_horizontal_wide":   int(PageHorizontal(WideContent)),
+		"page_horizontal_medium": int(PageHorizontal(MediumContent)),
+		"page_horizontal_narrow": int(PageHorizontal(MediumContent - 1)),
+		"page_vertical":          PageVertical,
+		"page_top":               PageTop,
+		"page_bottom":            PageBottom,
+		"section_gap":            SectionGap,
+		"section_head_gap":       SectionHeadGap,
+		"grid_gap":               GridGap,
+		"list_gap":               ListGap,
+		"settings_group_gap":     SettingsGroupGap,
 	}
 	for name, want := range alias {
 		got, ok := tokens[name]
@@ -152,6 +162,20 @@ func TestTheTableMatchesTheDesignTokens(t *testing.T) {
 		if _, ok := alias[name]; !ok {
 			t.Errorf("DESIGN.md 的 spacing.%s = %d，表里没有对应的名字", name, v)
 		}
+	}
+}
+
+// TestPageHorizontalHasThreeSteps：页边距按内容区宽 ≥1180 / ≥760 / 更窄分 40 / 32 / 16。
+func TestPageHorizontalHasThreeSteps(t *testing.T) {
+	for _, c := range []struct{ w, want float32 }{
+		{1400, 40}, {1180, 40}, {1179, 32}, {760, 32}, {759, 16}, {0, 16},
+	} {
+		if got := PageHorizontal(c.w); got != c.want {
+			t.Errorf("内容区 %.0f：页边距 %v，want %v", c.w, got, c.want)
+		}
+	}
+	if GridGapFor(700) != 16 || GridGapFor(1200) != 24 {
+		t.Errorf("网格格间距：窄 %v / 宽 %v，want 16 / 24", GridGapFor(700), GridGapFor(1200))
 	}
 }
 

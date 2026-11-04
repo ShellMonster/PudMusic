@@ -249,24 +249,32 @@ typography:
 # ⚠️ **`13` 是承认的一档**（报告 F-18 选的路子是「承认它」而不是「把 61 处
 # 13 归到 12 或 14」——后者会把副题和正文压成一样大，层次就没了）。
 size_scale:
-  Size10: 10   # 歌词面板里那个数值（上游 text-[10px] font-bold）
-  Size11: 11   # 极次要的读数（图标旁那一行小字）
-  Size12: 12   # 次要信息（上游 text-xs）
-  Size13: 13   # 副题（比正文的 14 小一档）
-  Size14: 14   # 正文 / 说明（上游 text-sm）
-  Size15: 15   # 空状态 / 弹窗的标题
-  Size16: 16   # 列表 / 网格 / 队列的歌名（上游 text-base）
-  Size18: 18   # 队列抽屉的标题（上游 h3 = text-lg）
-  Size20: 20   # 设置页的分组标题（上游 h2 = text-xl）
-  Size24: 24   # 页标题（上游 h1 = text-2xl）
-  Size28: 28   # 404 那一页的大字
-  Size30: 30   # 合集 / 收藏夹头图区的大标题（上游 text-3xl）
+  Size10: 10   # 音质角标 HI-RES / SQ（等宽 700）
+  Size11: 11   # Eyebrow、kbd、热力图坐标（等宽 600，字距 0.2em）
+  Size12: 12   # Caption：歌手名、时间、统计说明
+  Size13: 13   # Small：副题、时长、小号按钮
+  Size14: 14   # Body：正文、歌名、导航项
+  Size16: 16   # Lead：Tab、导语、UP 卡名字
+  Size20: 20   # Subhead：品牌字、设置分组标题（宋体 700）
+  Size24: 24   # Section：分区 / 抽屉 / 对话框 / 空状态标题（宋体 700）
+  Size28: 28   # 全屏歌词当前句
+  Size32: 32   # Title：UP 主名、榜单序号、窄窗页标题（宋体 700）
+  Size48: 48   # Display：页标题（宋体 700）
+  Size64: 64   # Hero：「今日一张」、收藏夹标题（宋体 700）
 spacing:
   unit: 4
-  page_horizontal: 16        # px-4；行内再加 8，视觉对齐在 24
-  page_vertical: 0           # 上游没有 py
+  page_horizontal_legacy: 16 # 还没改版的页面（pagePadX）
+  page_horizontal_wide: 40   # 内容区 ≥ 1180
+  page_horizontal_medium: 32 # 内容区 ≥ 760
+  page_horizontal_narrow: 16 # 内容区 < 760
+  page_vertical: 0           # 旧口径（上游没有 py）
+  page_top: 8                # .page 顶部
+  page_bottom: 64            # .page 底部
+  section_gap: 48            # .sec
+  section_head_gap: 20       # .sec-head 到内容
+  grid_gap: 24               # .card-grid（内容区 < 760 时 16）
   list_gap: 16
-  settings_group_gap: 24
+  settings_group_gap: 24     # 原型 40，T6 改
 radius:
   default: 8
   max: 24                    # 设置里可调

@@ -511,7 +511,9 @@ func rowHasFocusRing(t *testing.T, tt *mygoui.Tester, th *ui.Theme, title string
 	if !ok {
 		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
 	}
-	got := tt.Image().RGBAAt(int(r.X+r.W/2), int(r.Y))
+	// 取行上沿往下 1 像素：环宽 2，而上沿那一行压着表格的行分隔线——「深夜唱片行」
+	// 的 `--line` 是实色，会把环在那一行上整个盖住（旧方案的线是半透明的才透得出来）。
+	got := tt.Image().RGBAAt(int(r.X+r.W/2), int(r.Y)+1)
 	want := focusRingOn(th)
 	d := func(a, b uint8) int {
 		if a > b {

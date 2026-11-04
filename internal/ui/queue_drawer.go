@@ -511,7 +511,7 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		// 紧挨着「定位 / 清空」两枚图标）。这里把两样摆进**同一格**：基线对齐
 		// （上游那是同一行文字里的一个 span，基线本来就齐），字号还是 18 / 14。
 		ui.Row(c).AlignItems(ui.Baseline).Gap(space.None).Children(func() {
-			ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.Size18)).TextColor(t.Text)
+			ui.Text(c, "播放列表").FontSize(scale.Font(c, scale.SectionTitle)).TextColor(t.Text)
 			if len(rows) == 0 {
 				return
 			}

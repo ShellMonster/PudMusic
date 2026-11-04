@@ -210,8 +210,9 @@ func queueDrawerWithTwoRows(t *testing.T) *harness {
 //   - 行歌名：`ListState.Label` 也用的是这一行的歌名，而标签节点的框是**整行**
 //     （实测 383×64），量到的是行高，不是字高。
 //
-// 所以这两条解析 `queue_drawer.go`：画标题那一句必须是 18 且**没有**
-// `Bold()` / `FontWeight(...)`；画行歌名那一句必须是 16。字重本来也画不出盒子的
+// 所以这两条解析 `queue_drawer.go`：画标题那一句必须是 `scale.SectionTitle`
+// （「深夜唱片行」§0′：18 那一档退役，抽屉标题是 24，原型 `.drawer-head h2`；
+// 宋体 700 由 T4 套上）；画行歌名那一句必须是 16。字重本来也画不出盒子的
 // 差别——这正是 `typography_test.go` 里设置页行标题那一条的做法。
 func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
 	h := queueDrawerWithTwoRows(t)
@@ -267,10 +268,10 @@ func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
 				}
 			case "FontSize":
 				if len(call.Args) == 1 {
-					// ⚠️ **认刻度表里的那个名**（`scale.Size18` /
+					// ⚠️ **认刻度表里的那个名**（`scale.SectionTitle` /
 					// `scale.Size16`），不认裸数字：字号的出处是
 					// `widgets/scale` 那张表（票 #238）。
-					has18 = has18 || mentionsIdent(call.Args[0], "Size18")
+					has18 = has18 || mentionsIdent(call.Args[0], "SectionTitle")
 					has16 = has16 || mentionsIdent(call.Args[0], "Size16")
 				}
 			case "Bold":
@@ -290,12 +291,10 @@ func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
 		return true
 	})
 	if !header18 {
-		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, \"播放列表\")` 和 `FontSize(…18…)`" +
-			"——队列抽屉标题必须是 18/400")
+		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, \"播放列表\")` 和 `FontSize(…SectionTitle…)`" +
+			"——队列抽屉标题是分区那一档（24）")
 	}
-	if headerHeavy != "" {
-		t.Errorf("队列抽屉标题用了 %s——上游的 h3 是 400，不是加粗", headerHeavy)
-	}
+	_ = headerHeavy
 	if !row16 {
 		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, …Title…)` 和 `FontSize(…16…)`" +
 			"——队列行的歌名必须是 16（DESIGN.md 的列表歌名那一档）")

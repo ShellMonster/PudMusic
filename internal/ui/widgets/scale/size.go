@@ -10,27 +10,14 @@
 // 跟 `widgets/space`（间距）、`widgets/ink`（颜色）、`widgets/shadow`（阴影）
 // 同一个路数。
 //
-// # 刻度分两族
+// # 刻度（「深夜唱片行」§0′，2026-11）
 //
-// **正文刻度**（8 档）：12 / 13 / 14 / 16 / 18 / 20 / 24。
+// **正文段**：11 / 12 / 13 / 14 / 16（系统字体；11 是等宽的 Eyebrow / kbd）。
+// **展示段**：20 / 24 / 32 / 48 / 64（宋体 700，走 `widgets/typo` 的 `Display`）。
+// **角色专属**：10（音质角标）、28（全屏歌词当前句）。
 //
-// 这一族是**通用的**：任何一处正文、副题、标题都从这一族里取。
-// `13` 是 DESIGN.md 承认的一档（票 #238 / 报告 F-18 选的路子是
-// 「**承认它**」而不是「把 61 处 13 归到 12 或 14」——后者会把副题和正文
-// 压成一样大，层次就没了）。
-//
-// **角色专属档**（10 / 11 / 15 / 28 / 30）：每一档**只有一个用途**，
-// 不是通用档：
-//
-//	10 —— 歌词面板里那个数值（上游 `text-[10px] font-bold`）
-//	11 —— 极次要的读数（图标旁边那一行小字：8px、日期格、倍速读数）
-//	15 —— 空状态 / 弹窗的标题（空状态那一行、404 说明、裁剪标题）
-//	28 —— 404 那一页的大字
-//	30 —— 合集 / 收藏夹头图区的大标题（上游 `text-3xl`）
-//
-// ⚠️ **别拿它们当通用档用**：一个「标题」用了 15、另一个用了 16，
-// 差的那 1 像素在画面上看不出来，但它正是「一套体系」被破坏的样子
-// （报告 F-18 的原话）。**新写一处文字，先问它属于哪一族。**
+// 15 / 18 / 30 三档已退役：引用迁到相邻档（15 → 16、18 → 20 或分区标题 24、
+// 30 → 32），见 DESIGN.md §0′。
 //
 // # 为什么表里也放这些「不在刻度上」的档
 //
@@ -57,21 +44,56 @@ const (
 	Size13 = 13
 	// Size14 是正文 / 说明（上游 `text-sm`）。
 	Size14 = 14
-	// Size15 是空状态 / 弹窗的标题。
-	Size15 = 15
 	// Size16 是列表 / 网格 / 队列的歌名（上游 `text-base`）。
 	Size16 = 16
-	// Size18 是队列抽屉的标题（上游 `h3` = `text-lg`）。
-	Size18 = 18
-	// Size20 是设置页的分组标题（上游 `h2` = `text-xl`）。
+	// Size20 是 Subhead：品牌字、设置分组标题、历史日期头（宋体 700）。
 	Size20 = 20
-	// Size24 是页标题（上游 `h1` = `text-2xl`）。
+	// Size24 是 Section：分区标题、抽屉 / 对话框标题、空状态标题（宋体 700）。
 	Size24 = 24
-	// Size28 是 404 那一页的大字。
+	// Size28 是全屏歌词的当前句（原型 24 × 1.18）。
 	Size28 = 28
-	// Size30 是合集 / 收藏夹头图区的大标题（上游 `text-3xl`）。
-	Size30 = 30
+	// Size32 是 Title：UP 主名、榜单序号大字、窄窗下的页标题 / 统计大数字（宋体 700）。
+	Size32 = 32
+	// Size48 是 Display：页标题、问候语、统计大数字（宋体 700）。
+	Size48 = 48
+	// Size64 是 Hero：「今日一张」专辑名、收藏夹 / 合集标题（宋体 700）。
+	Size64 = 64
 )
+
+// 「深夜唱片行」的标题角色（DESIGN.md §0′，原型 `.h-page` / `.h-sec` / `.hero-title`）。
+//
+// 20 号及以上的标题一律用宋体 700：`typo.Display(ui.Text(c, s), scale.Font(c, scale.PageTitle))`。
+// 内容区窄于 1024 时页标题和 Hero 降一档，用 `PageTitleFor` / `HeroTitleFor`。
+const (
+	// PageTitle 是页标题：48、宋体 700（`TestPageTitlesAreDisplayBold` 钉着）。
+	PageTitle = Size48
+	// SectionTitle 是分区头 / 抽屉 / 对话框 / 空状态标题：24、宋体 700。
+	SectionTitle = Size24
+	// HeroTitle 是封面级大字：64、宋体 700。
+	HeroTitle = Size64
+	// Subhead 是品牌字、设置分组标题、历史日期头：20、宋体 700。
+	Subhead = Size20
+)
+
+// NarrowContent 是标题降档的分界：内容区宽度小于它时，48 → 32、64 → 48
+// （design-tokens.html 3.1：原型 `clamp(32px, 3.4vw, 48px)` 的桌面落法）。
+const NarrowContent = 1024
+
+// PageTitleFor 是这一宽度的内容区里页标题该用的字号（还没乘系统缩放）。
+func PageTitleFor(contentW float32) float32 {
+	if contentW > 0 && contentW < NarrowContent {
+		return Size32
+	}
+	return PageTitle
+}
+
+// HeroTitleFor 是这一宽度的内容区里 Hero 标题该用的字号（还没乘系统缩放）。
+func HeroTitleFor(contentW float32) float32 {
+	if contentW > 0 && contentW < NarrowContent {
+		return Size48
+	}
+	return HeroTitle
+}
 
 // 角色别名：同一个档位在不同语境里有不同的名字。
 //
@@ -79,17 +101,9 @@ const (
 // 角色成立的地方用它（`scale.PageTitle = scale.PageTitle`），
 // 讲的是「这一处要哪一档」而不是「这一处是几」。
 const (
-	// PageTitle 是页标题（上游 `h1` = `text-2xl` = 24），字重被 Preflight
-	// 重置为 inherit，也就是 400——**不是加粗**。
-	//
-	// ⚠️ 因此页标题那一句**不调 `.Bold()`**：标题的层次靠字号拉开，不靠重量
-	// （`TestPageTitlesAreNotBold` 钉着这一条）。
-	//
-	// ⚠️ **收藏夹那一页的大标题不走这个数**：它是 30（上游 `text-3xl`），
-	// 见 `CollectionTitle`——那一页有头图，标题是头图的一部分，不是页标题。
-	PageTitle = Size24
-	// CollectionTitle 是合集 / 收藏夹头图区的大标题（上游 `text-3xl`）。
-	CollectionTitle = Size30
+	// CollectionTitle 是合集 / 收藏夹头图区的大标题。30 那一档退役后先归到
+	// 相邻的 32；T3 按原型换成 `HeroTitle`（64）。
+	CollectionTitle = Size32
 	// NotFoundTitle 是 404 那一页的大字：它是那一页上最大的一个字。
 	NotFoundTitle = Size28
 	// NewMusicTitle 是「新歌速递」那一行标题的字号。
@@ -122,7 +136,10 @@ const (
 	//
 	// ⚠️ **「正在加载」那一档不用这个数**（票 #178）：那一档画的是一枚转圈，
 	// 没有字。改之前那一档是一行同样大小的淡字，而它现在是一个图形。
-	EmptyTitle = Size15
+	//
+	// 15 那一档退役（§0′）：原型的空状态标题是 24 宋体（`SectionTitle`），由
+	// `emptyTitle` 套上 `typo.Display`。
+	EmptyTitle = SectionTitle
 	// EmptyHint 是空状态第二句「怎么才能不空」的字号。
 	EmptyHint = Size12
 	// EmptyPageTitle 是上面那一页**页面名**的字号。

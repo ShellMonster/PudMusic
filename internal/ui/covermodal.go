@@ -194,7 +194,7 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 	modal := ui.DialogBase(c, &crop.open, func(backdrop, panel ui.Element) {
 		dialogPanel(c, backdrop, panel, "裁剪封面")
 		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
-		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, scale.Size15))
+		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, scale.Size16))
 		s.viewCropStage(c, crop)
 		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
 			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {
