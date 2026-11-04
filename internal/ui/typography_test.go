@@ -228,126 +228,45 @@ func TestPageTitlesSetNoWeightOfTheirOwn(t *testing.T) {
 	}
 }
 
-// boldOnScale 是**唯一**允许粗的那几处。
+// prototypeWeights 是原型（`index.html` 的 `font-weight`、`app.js` 的行内样式）里实际出现的字重。
 //
-// DESIGN.md §二 的字重刻度里，每一条用途都标了字重（页标题 400、设置行标题
-// 500、正文 400……），粗体只有下面这几处：表里写着的三处（品牌字、收藏夹那一页
-// 头图区的大标题、404 那个数字），上游原样抄下来的两处（歌词浮层里那两个读数
-// ——`text-[10px] font-bold`），还有一处上游的 `font-extrabold`（正在唱的那一行
-// 歌词，800）。
-//
-// 每一条都写着**为什么它可以是粗的**——刻度上没写的事不许悄悄留着。
-var boldOnScale = []struct {
-	file string
-	// mark 是认出它的那一句：文件里提到它的那一句才算这一处。
-	mark string
-	// count 是这一处有几处（歌词浮层那两个读数是两处）。
-	count int
-	why   string
-}{
-	{
-		file: "collectionpage.go", mark: "CollectionTitle", count: 1,
-		why: "收藏夹 / 合集 / 系列那一页头图区的大标题：上游 `text-3xl`（30）就是粗体" +
-			"（pagerhythm.go 里写着为什么）",
-	},
-	{
-		file: "widgets/pud/button.go", mark: "Mono", count: 1,
-		why: "音质角标 HI-RES / SQ：原型 `.badge` 是 10 号等宽 700（DESIGN.md §0′）",
-	},
-	{
-		file: "widgets/typo/typo.go", mark: "DisplayFamily", count: 1,
-		why: "「深夜唱片行」的展示字体入口 `typo.Display`：20 号及以上的标题一律宋体 700" +
-			"（DESIGN.md §0′）。粗体只在这一处设，各页调它",
-	},
-	{
-		file: "sidebar.go", mark: "BrandName", count: 1,
-		why: "品牌字（应用名）：DESIGN.md §二「品牌字 24 / 粗体 / 主色」",
-	},
-	{
-		file: "notfound.go", mark: "404", count: 1,
-		why: "404 那个数字：它是那一页上最大的一个字",
-	},
-	{
-		file: "lyrics_knobs.go", mark: "LyricValue", count: 2,
-		why: "歌词浮层里那两个读数：上游那两个 control 是 `text-[10px] font-bold`",
-	},
-	{
-		file: "lyrics.go", mark: "lyricsActiveWeight", count: 1,
-		why: "正在唱的那一行歌词：上游是 `font-extrabold`（800）——它要靠重量" +
-			"从别的行里跳出来（那一行的字号还是 1.5 倍，光靠字号不够）",
-	},
-}
+// 原型共用到 400 / 500 / 600 / 700 四档，没有 800。旧护栏把 600 当「无主」、把 700 限在七处白名单里，
+// 和原型广泛使用 600 / 700 冲突，已经取消（DESIGN.md §0′）。
+var prototypeWeights = map[int]bool{400: true, 500: true, 600: true, 700: true}
 
-// TestOnlyTheScaleIsBold 钉住「粗体只出现在刻度写明的那几处」。
+// TestOnlyThePrototypeWeightsAreWritten 钉住「代码里写的字重都在原型的那四档里」。
 //
-// 此前代码里有 **21 处 `.Bold()`**（= 700），其中约 20 处落在「按 DESIGN 应该是
-// 400/500」的位置上——页面标题、分组标题、弹窗标题、空状态标题、列表里的名字
-// 全是 700（UI 报告 §2 的 F-07）。
+// 取代了 `TestNoWeightSixHundred`（禁 600）和 `TestOnlyTheScaleIsBold`（700 只许出现在白名单的七处）。
+// 这两条钉的是旧刻度，和原型冲突：原型的 `.badge`、`.btn`、`.h-page` 等大量用 600 / 700。
 //
-// # 判据是 AST，扫 `internal/ui` 下**每一个**非测试文件（**递归**——`widgets/`、
-// `guard/` 那些子包也在内）
+// # 判据是 AST，扫 `internal/ui` 下每一个非测试文件（递归）
 //
-// 找的是四样东西，**少一样就有一类粗体漏出去**：
+//	B. `FontWeight(<字面量>)`，字面量不在 {400, 500, 600, 700}
+//	C. 调用点：字面量传给一个名字带 `weight` 的参数，不在那四档
+//	D. 本包里声明、名字带 `weight` 的常量 / 变量，字面量不在那四档
 //
-//	A. `.Bold()`
-//	B. `FontWeight(<字面量>)` 且字面量 ≥ 700
-//	C. **调用点**：字面量 ≥ 700 传给一个名字带 `weight` 的参数
-//	   （更新弹窗那一行「当前版本 x → y」原来就是 13/700：字面量在**调用点**，
-//	   `FontWeight(weight)` 那一处只看得到一个变量——评审抓过这一条）
-//	D. 本包里声明成 ≥ 700、名字带 `weight` 的**常量**
-//	   （正在唱的那一行歌词是 800：`FontWeight(weight)` 那里是个**局部变量**，
-//	   看得见的只有那个常量）
-//
-// ⚠️ **B 只认字面量是不够的**：C 和 D 补的正是「字面量不在 `FontWeight` 旁边」
-// 的那两类。少一条就有一类粗体漏出去——而粗体漏出去在画面上是**静默**的
-// （字重差一档不会让任何测试红，只是「看着不精致」）。
-//
-// ⚠️ **这张表是「白名单」，不是「黑名单」**：新增一处粗体要往表里加一条并写清
-// 理由——这样「为什么这一处可以粗」不会随着时间烂掉（注释说谎比没有注释更坏）。
-func TestOnlyTheScaleIsBold(t *testing.T) {
+// `.Bold()` 是 700，在集合里，所以放行。⚠️ 扫的字重数量为 0 说明判据没扫到东西，直接红。
+func TestOnlyThePrototypeWeightsAreWritten(t *testing.T) {
 	fset := token.NewFileSet()
 	pkgs, err := loadPackages(fset, ".")
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	counts := make([]int, len(boldOnScale))
+	seen := map[int]int{}
 	for _, pkg := range pkgs {
-		for i, f := range pkg.files {
-			sp := collectStmts(fset, f)
-			for _, site := range heavySites(fset, f, pkg) {
-				pos := fset.Position(site.pos)
-				// 最里层的那一句 = 范围最小的那一句。
-				best := sp.innermost(pos.Offset)
-				hit := -1
-				if best >= 0 {
-					for j, a := range boldOnScale {
-						if a.file != pkg.paths[i] {
-							continue
-						}
-						if mentionsMark(sp.stmts[best], a.mark) {
-							hit = j
-							break
-						}
-					}
+		for _, f := range pkg.files {
+			for _, site := range weightSites(f, pkg) {
+				seen[site.value]++
+				if !prototypeWeights[site.value] {
+					t.Errorf("%s: %s——原型只用 400 / 500 / 600 / 700（DESIGN.md §0′）",
+						fset.Position(site.pos), site.what)
 				}
-				if hit < 0 {
-					t.Errorf("%s:%d %s——粗体只出现在刻度写明的那几处"+
-						"（DESIGN.md §二；UI 报告 §2 的 F-07）",
-						pos.Filename, pos.Line, site.what)
-					continue
-				}
-				counts[hit]++
 			}
 		}
 	}
-
-	// 表里的每一处都还要在（别留下写空了却还占着位的条目）。
-	for i, a := range boldOnScale {
-		if counts[i] != a.count {
-			t.Errorf("%s 里刻度写明的粗体有 %d 处，want %d——%s",
-				a.file, counts[i], a.count, a.why)
-		}
+	// 判据自己得扫得到东西：500 是设置行标题的字重，每一版都在用。
+	if seen[500] == 0 {
+		t.Fatalf("一处 500 都没扫到（扫到的字重 %v）——判据没有扫到字重写法，等于没钉", seen)
 	}
 }
 
@@ -455,56 +374,49 @@ func paramNames(ft *ast.FuncType) []string {
 	return out
 }
 
-// heavySite 是「一处可能是粗体」的地方。
-type heavySite struct {
-	// pos 是它在那一句里的位置。
+// weightSite 是「一处写了字重」的地方。
+type weightSite struct {
+	// pos 是它的位置。
 	pos token.Pos
+	// value 是字面量写的字重。
+	value int
 	// what 是它是什么（写进报错里的那句话）。
 	what string
 }
 
-// heavySites 找出这个文件里所有「可能是粗体（700 / 800）」的地方。
-//
-// 判据的四样见 `TestOnlyTheScaleIsBold` 的注释（A / B / C / D）。
-func heavySites(fset *token.FileSet, f *ast.File, pkg *pkgFacts) []heavySite {
-	var out []heavySite
+// weightSites 找出这个文件里所有写了字重字面量的地方（判据的三样见
+// `TestOnlyThePrototypeWeightsAreWritten`）。
+func weightSites(f *ast.File, pkg *pkgFacts) []weightSite {
+	var out []weightSite
+	intLit := func(e ast.Expr) (int, string, bool) {
+		lit, ok := e.(*ast.BasicLit)
+		if !ok || lit.Kind != token.INT {
+			return 0, "", false
+		}
+		n, err := strconv.Atoi(lit.Value)
+		return n, lit.Value, err == nil
+	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		switch v := n.(type) {
 		case *ast.CallExpr:
-			// A：`.Bold()`
-			if callName(v) == "Bold" {
-				out = append(out, heavySite{pos: v.Pos(), what: "调了 `.Bold()`"})
-				return true
-			}
-			// B：`FontWeight(<字面量 ≥ 700>)`
+			// B：`FontWeight(<字面量>)`
 			if callName(v) == "FontWeight" && len(v.Args) == 1 {
-				if lit, ok := v.Args[0].(*ast.BasicLit); ok && lit.Kind == token.INT {
-					if n, err := strconv.Atoi(lit.Value); err == nil && n >= 700 {
-						out = append(out, heavySite{pos: v.Pos(),
-							what: "把字重调成了 " + lit.Value})
-					}
+				if n, raw, ok := intLit(v.Args[0]); ok {
+					out = append(out, weightSite{pos: v.Pos(), value: n, what: "把字重调成了 " + raw})
 				}
 			}
-			// C：**调用点**——字面量 ≥ 700 传给一个名字带 weight 的参数
+			// C：调用点——字面量传给一个名字带 weight 的参数
 			if args, params := pkg.calleeParams(v); args != nil {
 				for i, a := range args {
-					lit, ok := a.(*ast.BasicLit)
-					if !ok || lit.Kind != token.INT {
+					n, raw, ok := intLit(a)
+					if !ok || i >= len(params) || !strings.Contains(strings.ToLower(params[i]), "weight") {
 						continue
 					}
-					n, err := strconv.Atoi(lit.Value)
-					if err != nil || n < 700 || i >= len(params) {
-						continue
-					}
-					if !strings.Contains(strings.ToLower(params[i]), "weight") {
-						continue
-					}
-					out = append(out, heavySite{pos: v.Pos(),
-						what: "把 " + lit.Value + " 传给了一个字重参数"})
+					out = append(out, weightSite{pos: v.Pos(), value: n, what: "把 " + raw + " 传给了一个字重参数"})
 				}
 			}
 		case *ast.GenDecl:
-			// D：本包里声明成 ≥ 700、名字带 weight 的常量
+			// D：名字带 weight 的常量 / 变量
 			if v.Tok != token.CONST && v.Tok != token.VAR {
 				return true
 			}
@@ -513,79 +425,17 @@ func heavySites(fset *token.FileSet, f *ast.File, pkg *pkgFacts) []heavySite {
 				if !ok || len(vs.Values) != 1 || len(vs.Names) != 1 {
 					continue
 				}
-				lit, ok := vs.Values[0].(*ast.BasicLit)
-				if !ok || lit.Kind != token.INT {
+				n, raw, ok := intLit(vs.Values[0])
+				if !ok || !strings.Contains(strings.ToLower(vs.Names[0].Name), "weight") {
 					continue
 				}
-				n, err := strconv.Atoi(lit.Value)
-				if err != nil || n < 700 {
-					continue
-				}
-				if !strings.Contains(strings.ToLower(vs.Names[0].Name), "weight") {
-					continue
-				}
-				out = append(out, heavySite{pos: vs.Pos(),
-					what: "声明了字重常量 " + vs.Names[0].Name + " = " + lit.Value})
+				out = append(out, weightSite{pos: vs.Pos(), value: n,
+					what: "声明了字重常量 " + vs.Names[0].Name + " = " + raw})
 			}
 		}
 		return true
 	})
 	return out
-}
-
-// isHeavyWeight 报这一次调用是不是「把字重调到 700」。
-func isHeavyWeight(call *ast.CallExpr) bool {
-	switch callName(call) {
-	case "Bold":
-		return true
-	case "FontWeight":
-		return len(call.Args) == 1 && mentionsFloat(call.Args[0], 700)
-	}
-	return false
-}
-
-// mentionsMark 报这一句里有没有那个标识符（或是那个字符串字面量）。
-//
-// ⚠️ **字符串字面量也算**：404 那个数字是 `ui.Text(c, "404")`——它没有名字，
-// 只有那句话本身。
-func mentionsMark(stmt ast.Node, mark string) bool {
-	found := false
-	ast.Inspect(stmt, func(n ast.Node) bool {
-		switch v := n.(type) {
-		case *ast.Ident:
-			if v.Name == mark {
-				found = true
-			}
-		case *ast.SelectorExpr:
-			// ⚠️ **包名限定的写法也算**（`scale.CollectionTitle`）：字号的
-			// 出处是 `widgets/scale` 那张表（票 #238），代码里写的是
-			// `scale.CollectionTitle`——那是一个 `*ast.SelectorExpr`。
-			// 只认 `*ast.Ident` 的话这个判据会**静默地永远不成立**。
-			if v.Sel.Name == mark {
-				found = true
-			}
-		case *ast.BasicLit:
-			if v.Kind == token.STRING && strings.Trim(v.Value, `"`) == mark {
-				found = true
-			}
-		}
-		return true
-	})
-	return found
-}
-
-// mentionsFloat 报这个表达式里有没有那个数字（`scale.Font(c, 16)` 的 16）。
-func mentionsFloat(e ast.Expr, v float64) bool {
-	found := false
-	ast.Inspect(e, func(n ast.Node) bool {
-		if lit, ok := n.(*ast.BasicLit); ok && lit.Kind == token.INT {
-			if got, err := strconv.Atoi(lit.Value); err == nil && float64(got) == v {
-				found = true
-			}
-		}
-		return true
-	})
-	return found
 }
 
 // mentionsIdent 报这个表达式里有没有那个标识符（往调用里找一层，

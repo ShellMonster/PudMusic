@@ -88,7 +88,7 @@ const (
 	lyricsIdleOpacity   = 0.6
 	lyricsActiveOpacity = 1.0
 	lyricsIdleWeight    = 400 // font-normal
-	lyricsActiveWeight  = 800 // font-extrabold
+	lyricsActiveWeight  = 700 // 原型 `.ly.cur { font-weight: 700 }`
 
 	lyricsLineGap        = space.Px8  // `space-y-2`：0.5rem
 	lyricsLinePadY       = space.Px8  // `py-2`：0.5rem

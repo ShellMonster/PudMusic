@@ -3845,8 +3845,6 @@ var Items = []Item{
 			// 曲线和弹簧的值不许漂（唯一出处就是那一个包）。
 			"TestTheUnifiedCurveIsTheOneWeCopied",
 			"TestTheTabSlideIsASpring",
-			// 滑块走的是弹簧：100ms 时只走到约一半（定时长曲线那时已经 78%）。
-			"TestTheTabSliderFollowsTheSpring",
 			// 淡入与位移错开：同一时刻量到的两个进度，淡入那个明显更小。
 		},
 	},
@@ -3922,17 +3920,13 @@ var Items = []Item{
 		// 关闭」那两行会跟着字号变宽（它们的字要放得下），那一列的左边缘于是有
 		// 两条线——这不是回归，是那一行字要放得下（见 `settings_page.go` 的
 		// `settingsControlW` 与 DESIGN.md §三）。
-		Spec: "**粗体只出现在刻度写明的那几处**（页标题 / 分组标题 / 弹窗标题 / 空状态标题 / 列表里的名字一律 400；粗体只剩品牌字、收藏夹头图区那个大标题、404 那个数字、歌词浮层里那两个读数，和正在唱的那一行歌词——上游的 `font-extrabold`）",
+		Spec: "**代码里写的字重都在原型用到的四档里**（400 / 500 / 600 / 700，原型 `index.html` 与 `app.js` 实际出现的就是这四档；没有 800）；页标题等宋体 700 走 `typo.Display`",
 		Tests: []string{
 			// 控件列的左边缘是一条线（每一个控件都从同一条线上开始）。
 			// 那一列里的控件填满那一格（色卡两块、预览三张、下拉本身）。
-			// 粗体只在刻度写明的那几处（AST：**递归扫整个 internal/ui**，找四样
-			// 东西——`.Bold()`、`FontWeight(字面量 ≥ 700)`、**字面量 ≥ 700 传给
-			// 一个字重参数**（调用点）、**字重常量 ≥ 700**）。
-			// ⚠️ 后两样是评审补上的：更新弹窗那一行 13/700 的字面量在**调用点**，
-			// 而正在唱的那一行歌词 800 藏在**常量**里——只认 `FontWeight(700)`
-			// 的那条判据这两处一个都看不见。
-			"TestOnlyTheScaleIsBold",
+			// 字重只写原型的四档（AST：递归扫整个 internal/ui，认三种写法——
+			// `FontWeight(字面量)`、字面量传给字重参数的调用点、名字带 weight 的常量）。
+			"TestOnlyThePrototypeWeightsAreWritten",
 			// **页标题**那几个字号的字重是 400（AST：`pageTitleSize` 与
 			// `emptyPageTitle`）。
 			// ⚠️ **播放器那一页的歌名（`playerTitleSize`）不在这条里**：那是**歌名**
