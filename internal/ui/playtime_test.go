@@ -134,10 +134,10 @@ func TestTheSearchVideoTabShowsThePlayCountAndTheUploadTime(t *testing.T) {
 		return pageOf(s, searchTabSong).Loaded == 1
 	})
 
-	for _, want := range []string{"播放量", "投稿时间"} {
-		if !uiShows(tt, want) {
-			t.Errorf("搜索页的表头上没有「%s」，文字有 %q", want, tt.Texts())
-		}
+	// 原型的曲目表头是固定的「# / 标题 / 专辑 / UP 主 / 播放 / 弹幕 / 时长」，播放量和
+	// 时间落在「播放 / 弹幕」和第三列（专辑那一列的位置）里。
+	if !uiShows(tt, "播放 / 弹幕") {
+		t.Errorf("搜索页的表头上没有「播放 / 弹幕」，文字有 %q", tt.Texts())
 	}
 	if !uiShows(tt, list.PlayCountText(123_400)) {
 		t.Errorf("行里没有播放量 %q：%q", list.PlayCountText(123_400), tt.Texts())

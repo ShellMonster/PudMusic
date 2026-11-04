@@ -25,13 +25,16 @@ const (
 	colAct   = 96
 	colGap   = 16
 	rowPadX  = 12
-	// HideAlbumBelow 是去掉「专辑」那一列的内容区宽度。
+	// HideAlbumBelow 是去掉「专辑」那一列的内容区宽度（含页边距）。原型那条媒体查询是
+	// 窗口 < 1180、减掉侧栏 232 就是内容区 < 948；`trackCols` 收到的是列表宽（已去掉
+	// 左右页边距，最宽那档各 40），所以拿 `w + 2*pageMargin` 和它比。
 	HideAlbumBelow = 948
+	pageMargin     = 40
 )
 
 // trackCols 是这一宽度下三列弹性列的宽：标题、专辑（0 = 不画）、UP 主。
 func trackCols(w float32) (main, album, owner float32) {
-	hide := w > 0 && w < HideAlbumBelow
+	hide := w > 0 && w+2*pageMargin < HideAlbumBelow
 	n := float32(7)
 	if hide {
 		n = 6

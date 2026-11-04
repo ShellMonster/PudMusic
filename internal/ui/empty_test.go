@@ -202,11 +202,11 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 	//
 	// ⚠️ **两支在屏上靠页头区分**：searchIdle 和 noSearchResults 的 Title 同是
 	// 「暂无内容」、图标同是一枚，而 Hint 默认不画（`empty.go` 那条政策）——
-	// 用户看见的差别是页头那一句（「搜索」对「搜索【周杰伦】的结果」）。拿
+	// 用户看见的差别是页头那一句（「搜索」对「「周杰伦」」）。拿
 	// Title 断「还没输入就说了那一支」是同义反复，它红了很久就是从这里红的。
 	s.navigate(searchPath)
 	tt.Frame()
-	resultsHeader := "搜索【周杰伦】的结果"
+	resultsHeader := "「周杰伦」"
 	if !tt.HasText(searchIdle.Title) {
 		t.Fatalf("没输入时没画「去输入」那一支，文字有 %q", tt.Texts())
 	}
@@ -236,9 +236,7 @@ func TestSearchingShowsTheNoResultsState(t *testing.T) {
 	// 结果页头先出来（带着搜索词），底下的空状态才画——后者那一句和 idle 的
 	// 是同一个字，settle 等它没有意义，等的是页头。
 	settleText(t, tt, resultsHeader)
-	if !tt.HasText(noSearchResults.Title) {
-		t.Errorf("搜完没有画出「没有搜索结果」，文字有 %q", tt.Texts())
-	}
+	settleText(t, tt, "没有找到相关歌曲")
 }
 
 // TestEmptyStateIsPaintedNotBlank 验「不是空白」这句话本身。

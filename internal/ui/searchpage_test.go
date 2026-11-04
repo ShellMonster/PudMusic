@@ -242,7 +242,7 @@ func TestPlayAllReplacesTheQueueWithSearchResults(t *testing.T) {
 	mountQueueStreaming(t, s.app)
 	settleText(t, tt, stubTitle(1, 0))
 	seedThreeSongs(t, s.app)
-	if err := tt.Click("全部播放"); err != nil {
+	if err := tt.Click("播放全部"); err != nil {
 		t.Fatal(err)
 	}
 	want, _ := playAllItems(st.rows(searchTabSong, 1))
@@ -254,10 +254,10 @@ func TestPlayAllReplacesTheQueueWithSearchResults(t *testing.T) {
 // 让按，用户点完什么反应都没有，还以为搜索坏了。
 func TestPlayAllIsDisabledWhenThereIsNothingToPlay(t *testing.T) {
 	s, tt := newSearchPage(t, "不存在的歌", newSearchStub(24, 0))
-	settleText(t, tt, noSearchResults.Title)
+	settleText(t, tt, "没有找到相关歌曲")
 
-	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("画面上连「全部播放」都没有：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("播放全部"); err != nil {
+		t.Fatalf("画面上连「播放全部」都没有：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
 	tt.Frame()
@@ -423,7 +423,7 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	}
 
 	// 切到「用户」：换成**它自己那一套**五档（`user-list/search-header.tsx:12-18`）。
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP 主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -439,7 +439,7 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 		t.Errorf("用户 Tab 上还留着视频那一档的排序，文字有 %q", tt.Texts())
 	}
 	// 用户不是歌，没有「全部播放」。
-	if tt.HasText("全部播放") {
+	if tt.HasText("播放全部") {
 		t.Errorf("用户 Tab 上还有「全部播放」，文字有 %q", tt.Texts())
 	}
 }
@@ -461,7 +461,7 @@ func TestEachSortStaysItsOwn(t *testing.T) {
 		return len(c) >= 2 && c[len(c)-1].sort == 2
 	})
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP 主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -584,7 +584,7 @@ func TestAMenuOnAUserGoesToTheirSpace(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP 主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v，文字有 %q", err, tt.Texts())
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -609,7 +609,7 @@ func TestAddingAUserToTheQueueSaysWhyNot(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click("UP 主"); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
@@ -657,10 +657,14 @@ func TestTheSearchPageHasOneTitleAndNoSecondSearchBox(t *testing.T) {
 			"（DESIGN.md §十.1），改词回顶栏")
 	}
 
-	// ② 内容区顶上第一行就是那句结果标题。
-	title, ok := tt.Find("搜索【周杰伦】的结果")
-	if !ok {
+	// ② 内容区顶上第一行是页头的 Eyebrow「搜索结果」（原型 `.page-head`），紧接着是
+	// 那句「「周杰伦」」标题。
+	if _, ok := tt.Find("「周杰伦」"); !ok {
 		t.Fatalf("没有那句结果标题，文字有 %q", tt.Texts())
+	}
+	title, ok := tt.Find("搜索结果")
+	if !ok {
+		t.Fatalf("没有页头的 Eyebrow，文字有 %q", tt.Texts())
 	}
 	area := contentArea(app.DefaultSideMenuWidth)
 	lo, hi, ok := firstBand(tt.Image(), area)
@@ -739,8 +743,8 @@ func TestStaleResponseDoesNotReachPlayAll(t *testing.T) {
 	}
 
 	mountQueueStreaming(t, s.app)
-	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("播放全部"); err != nil {
+		t.Fatalf("点不到「播放全部」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
 	tt.Frame()
@@ -769,7 +773,7 @@ func TestNoClientSaysSoInsteadOfPretending(t *testing.T) {
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
 
 	settleText(t, tt, errSearchNotMounted.Error())
-	if tt.HasText(noSearchResults.Title) {
+	if tt.HasText("没有找到相关歌曲") {
 		t.Errorf("拉不到却画成「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 	// 而用户得有一条路能重来：失败那一格自带「重试搜索」。

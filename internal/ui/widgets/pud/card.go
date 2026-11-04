@@ -215,6 +215,8 @@ type UpCard struct {
 	Tint      ui.Color
 	Face      Cover
 	Following bool
+	// HideFollow 不画关注键（拿不到关注状态、也没有关注接口的场合，如搜索结果）。
+	HideFollow bool
 }
 
 // UpCardEvents 是 UP 主卡上这一帧发生的事。
@@ -249,6 +251,9 @@ func UCard(c *ui.Context, key string, u UpCard, w float32) (ev UpCardEvents) {
 					SingleLine().Margin(space.Px2, space.None, space.None, space.None)
 			}
 		})
+		if u.HideFollow {
+			return
+		}
 		kind, label := Primary, "关注"
 		if u.Following {
 			kind, label = Ghost, "已关注"

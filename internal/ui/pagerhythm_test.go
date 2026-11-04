@@ -1317,7 +1317,7 @@ func TestRenderPageRhythmShots(t *testing.T) {
 			st.install(s)
 			s.navigate(searchPath + "?" + searchQuery + "=" + "周杰伦")
 			waitFrames(t, tt, "搜索结果出来了", func() bool {
-				return tt.HasText("搜索【周杰伦】的结果")
+				return tt.HasText("「周杰伦」")
 			})
 			tt.Move(1180, 300)
 			homeFrame(tt)

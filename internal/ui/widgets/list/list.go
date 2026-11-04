@@ -127,6 +127,13 @@ type Music struct {
 	// 时那一格空着（比如收藏夹里一条没给 fav_time 的音轨）。
 	PubTime time.Time
 
+	// Fans / Level 是 UP 主卡上的粉丝数和等级（只有搜索「用户」那一档有）。
+	Fans  int64
+	Level int
+	// Pair 是和这一行并排的第二张 UP 主卡（原型的 UP 主结果是两列）：用户那一档在
+	// 装行时两个一组打包，行数减半，行身份仍是第一个人的 ID。
+	Pair *Music
+
 	// Progress 是「看到哪儿」，只有最近播放填；大于 0 且有时长时，标题下面画一条细进度条。
 	Progress time.Duration
 

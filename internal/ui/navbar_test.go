@@ -425,7 +425,7 @@ func TestSubmittingSearchCarriesTheWordToThePage(t *testing.T) {
 	// 页面上画的是「搜了没有结果」那一支，不是「还没输入」那一支——
 	// 后者的正文写着「在上面的搜索框里输入歌名或 UP 主」，正是这条要防的。
 	// 结果是异步回来的，那一句比提交晚几帧才画出来（理由见 settleText）。
-	settleText(t, tt, "搜索【周杰伦】的结果")
+	settleText(t, tt, "「周杰伦」")
 	if tt.HasText("在上面的搜索框里输入歌名或 UP 主") {
 		t.Errorf("页面上还是「请输入搜索词」那一支，文字有 %q", tt.Texts())
 	}
@@ -497,7 +497,7 @@ func TestTheFilledSearchBoxReplacesItsWordWhenYouType(t *testing.T) {
 // 「清空」，这一场搜索就没了」。
 //
 // 页内那个输入框删掉之后（票 #234），「清空」只剩这一个入口。清完框而下面还是
-// 「搜索【周杰伦】的结果」和一屏结果——那正是 F-01 要消掉的那种「框和结果对不上」。
+// 「「周杰伦」」和一屏结果——那正是 F-01 要消掉的那种「框和结果对不上」。
 func TestClearingTheSearchBoxOnTheSearchPageClearsTheResults(t *testing.T) {
 	s, tt := newShell(t)
 	tt.SetFocused(true)

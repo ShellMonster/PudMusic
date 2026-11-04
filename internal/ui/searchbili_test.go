@@ -608,8 +608,8 @@ func TestASearchResultActuallyStartsPlaying(t *testing.T) {
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
 	settleText(t, tt, "只有 bvid 的结果") // 剥掉 <em> 之后的标题，见 bili 的 stripHTML
 
-	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("播放全部"); err != nil {
+		t.Fatalf("点不到「播放全部」：%v，文字有 %q", err, tt.Texts())
 	}
 
 	// 等它真的出声。
@@ -655,8 +655,8 @@ func TestASearchResultSaysWhyWhenThePartCannotBeAsked(t *testing.T) {
 
 	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("周杰伦"))
 	settleText(t, tt, "只有 bvid 的结果")
-	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("播放全部"); err != nil {
+		t.Fatalf("点不到「播放全部」：%v，文字有 %q", err, tt.Texts())
 	}
 
 	// 播放条上要说明白是「问不出这一集」，而不是一句看不懂的「取不到流」。
@@ -710,7 +710,7 @@ func TestTheSearchFailureSaysSomethingTheUserCanUnderstand(t *testing.T) {
 		t.Errorf("失败那一格把内部那一句原样摆出来了，文字有 %q", tt.Texts())
 	}
 	// 而它不是「没有结果」。
-	if tt.HasText(noSearchResults.Title) {
+	if tt.HasText("没有找到相关歌曲") {
 		t.Errorf("拉不到却画成「没有结果」那一格，文字有 %q", tt.Texts())
 	}
 }
@@ -753,8 +753,8 @@ func TestStaleResponseDoesNotReachPlayAllOnTheRealPath(t *testing.T) {
 	// ⚠️ **挂的是手里这一台夹具**（`f.client()` 就是页面正在用的那个客户端），
 	// 不是另起一台——生产环境取流和搜索用的是同一个客户端（见 `main.go` 那段注释）。
 	s.app.MountStreaming(app.Streaming{Client: f.client(), Media: f.Client(), TempDir: t.TempDir()})
-	if err := tt.Click("全部播放"); err != nil {
-		t.Fatalf("点不到「全部播放」：%v，文字有 %q", err, tt.Texts())
+	if err := tt.Click("播放全部"); err != nil {
+		t.Fatalf("点不到「播放全部」：%v，文字有 %q", err, tt.Texts())
 	}
 	tt.Frame()
 	tt.Frame()

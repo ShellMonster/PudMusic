@@ -70,50 +70,9 @@ func TestTheMiniVolumeSliderSaysWhatItIs(t *testing.T) {
 // B6：「全部播放」两处画法统一
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestThePlayAllButtonIsTheSameOnBothPages 钉住「『全部播放』在两个页面上是
-// 同一枚」。
-//
-// # 同一个动作，两个页面
-//
-// 搜索结果页有「全部播放」，此前**首页没有**——用户在搜索页能按、在首页找不到，
-// 会以为是两个不同的功能（UX 报告 §2 的 B6）。
-//
-// # 判据是**两枚按钮的盒子一样**
-//
-// 同一个字、同一颗实心主色、同一枚控件 ⇒ 两处的盒子一模一样。而「一个页面有、
-// 另一个没有」这件事本身也由这一条断掉：少一个就量不成一对。
-//
-// ⚠️ **不判语义**：队列语义由票 #337 的行为测试钉住，这一票只统一画法。
-func TestThePlayAllButtonIsTheSameOnBothPages(t *testing.T) {
-	// 首页：摆三首歌，那一枚按钮才是可按的。
-	home := newTestShell(t, withSettings(app.DefaultSettings("")))
-	home.s.home.SetSongs(homeSongs{
-		tabs: [homeTabCount][]list.Music{0: playableSongsOf("a", 3)},
-	})
-	homeFrame(home.tt)
-	homeBtn, ok := home.tt.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("首页上没有 %q 那一枚，文字有 %q", playAllLabel, home.tt.Texts())
-	}
-
-	// 搜索结果页：同一个动作，那一枚按钮在排序那一排右边。
-	st := newSearchStub(10, 20)
-	_, searchTT := newSearchPage(t, "周杰伦", st)
-	waitFor(t, "搜索结果出来了", func() bool {
-		searchTT.Frame()
-		return searchTT.HasText(playAllLabel)
-	})
-	searchBtn, ok := searchTT.Find(playAllLabel)
-	if !ok {
-		t.Fatalf("搜索页上没有 %q 那一枚，文字有 %q", playAllLabel, searchTT.Texts())
-	}
-
-	if homeBtn.W != searchBtn.W || homeBtn.H != searchBtn.H {
-		t.Errorf("两处的 %q 不是同一枚：首页是 %v，搜索页是 %v——"+
-			"同一个动作在两个页面上长得不一样，用户会以为是两个功能",
-			playAllLabel, homeBtn, searchBtn)
-	}
-}
+// （原 TestThePlayAllButtonIsTheSameOnBothPages：钉的是旧设计里「两页的播放全部是同一枚」。
+// DESIGN.md §0′.T7：搜索页的按钮是原型的 Primary Sm「播放全部」（高 32），首页是 SecHead
+// 里的文字「更多」那一档，两处本来就不是同一枚，这一条随旧设计移除。）
 
 // ─────────────────────────────────────────────────────────────────────────────
 // B6 的另一半：两枚按钮按下去做的是同一件事
@@ -139,7 +98,7 @@ func TestThePlayAllButtonReplacesQueueOnBothPages(t *testing.T) {
 		mountQueueStreaming(t, search.app)
 		settleText(t, tt, stubTitle(1, 0))
 		seedThreeSongs(t, search.app)
-		if err := tt.Click(playAllLabel); err != nil {
+		if err := tt.Click("播放全部"); err != nil {
 			t.Fatal(err)
 		}
 		want, _ := playAllItems(st.rows(searchTabSong, 1))

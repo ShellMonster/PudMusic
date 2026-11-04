@@ -30,9 +30,8 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -92,15 +91,13 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 
 	keyword := strings.TrimSpace(r.Query(searchQuery))
 
-	// ⚠️ **横向那一格用 `pagePadX`**（七页共用一个数，见 pagerhythm.go）。
-	ui.Column(c).Key("page:/search").Grow(1).Padding(space.None, pagePadX).Gap(searchHeaderGap).
-		AlignItems(ui.Stretch).Children(func() {
+	s.pudPage(c, "page:/search", func(contentW, listW float32) {
 		if keyword == "" {
 			// 还没输入：上游 `pages/search/index.tsx:16` 的那一支。
 			s.viewEmpty(c, "search:idle", searchIdle)
 			return
 		}
-		s.viewSearchResults(c, keyword)
+		s.viewSearchResults(c, keyword, contentW)
 	})
 }
 
@@ -174,76 +171,82 @@ func (s *Shell) announceSearchResults(tab int) {
 	s.announce("找到 " + strconv.Itoa(n) + " 个结果")
 }
 
-// viewSearchResults 是搜了词之后的那一块：标题 + 三个 Tab + 排序行 + 结果。
-// 摆的顺序照上游（`pages/search/index.tsx:23-58`）。
-func (s *Shell) viewSearchResults(c *ui.Context, keyword string) {
+// searchTabLabels 是三个 Tab 上写的字（原型：歌曲 / 视频 / UP 主）。
+var searchTabLabels = [searchTabCount]string{"歌曲", "视频", "UP 主"}
+
+// searchTabCountText 是 Tab 上那个数：只有这一档已经拉过才有（另外两档没打开过，
+// 为一个数字去多发两趟请求不值）。B 站给了总数就用总数，否则用已拿到的行数。
+func (s *Shell) searchTabCountText(tab int) string {
+	t := &s.search.lists[tab]
+	pg := t.list.Paged()
+	if pg.Loaded == 0 && !pg.Loading && pg.Err == nil && t.kw == "" {
+		return ""
+	}
+	if pg.Loading && pg.Loaded == 0 {
+		return ""
+	}
+	n := t.searchTotal()
+	if n == 0 {
+		n = pg.Loaded
+		if tab == searchTabUser {
+			// 用户那一档的行是两个一组，行数不是人数。
+			n = 0
+			for _, m := range t.list.Items() {
+				n++
+				if m.Pair != nil {
+					n++
+				}
+			}
+		}
+	}
+	return strconv.Itoa(n)
+}
+
+// viewSearchResults 是搜了词之后的那一块：页头 +（歌曲 / 视频 / UP 主）Tab + 工具条 + 结果。
+// 摆的顺序照原型 `PAGES.search`。
+func (s *Shell) viewSearchResults(c *ui.Context, keyword string, contentW float32) {
 	st := &s.search
 
-	ui.Column(c).Key("search:results").Grow(1).Gap(searchHeaderGap).
-		AlignItems(ui.Stretch).Children(func() {
-		// 这一句是这一页的**页标题**（上游的 `<h1>`，`pages/search/index.tsx:23`）：
-		// 24 / 400。
-		//
-		// ⚠️ **字重不许写**：页标题的字重由框架的默认档（400）给，写上
-		// `FontWeight(400)` 也会被 `TestPageTitlesSetNoWeightOfTheirOwn` 拦下——那一条钉的
-		// 是「拿 `scale.PageTitle` 当字号的那一句里不许出现字重」，
-		// `DESIGN.md` §二「页标题 24 / 400」靠的是**不调** `.Bold()`。
-		typo.Display(ui.Textf(c, "搜索【%s】的结果", keyword), scale.Font(c, scale.PageTitle))
+	ui.Column(c).Key("search:results").Grow(1).AlignItems(ui.Stretch).Children(func() {
+		pud.PageHead(c, "搜索结果", "「"+keyword+"」", "", contentW, nil)
 
-		// 🔴 **两排 Tabs 都要在 `current` 之前画**：它们都是建到的时候才写
-		// `st.tab` / `st.sorts[cur]`（`mygo/ui/base.go` 的 `tabsParts.Tab` 的
-		// `choose`：写指针 + 把这一帧标记为重建）。顺序反过来的表现是：用户点了
-		// 「最多播放」，这一帧的 `current` 读到的还是旧排序，这一帧画的还是旧
-		// 顺序，要到**下一帧**才重置回第 1 页——屏幕上就是「按了排序，画面先抖
-		// 一下才换」，而中间那一帧还滚回了顶上，用户刚滚到的位置没了。
-		//
-		// ⚠️ **这一排是主 Tab（轨道 + 滑块那一种）**，下面 `viewSearchToolbar`
-		// 里那一排排序是次级的（框架那一条下划线）——两排不是同一个样子
-		//（票 #138）。
-		//
-		// ⚠️ `AlignSelf(ui.Start)`：外面这个 Column 是 `AlignItems(Stretch)`，
-		// 不拦一下的话轨道会被拉成整个内容区的宽，而上游那一条是**包着字的**
-		//（`inline-flex`）。其余三处父容器本来就是 Start，不用这一句。
-		mainTabs(c, &st.tab, tabMD, searchTabNames[:]...).AlignSelf(ui.Start)
+		// 🔴 **Tab 要在 `current` 之前画**：它是建到的时候才写 `st.tab`（理由见 `mygo/ui` 的
+		// `tabsParts.Tab`）；顺序反过来的表现是点了 Tab 画面先抖一下才换。
+		ui.Column(c).FillWidth().Margin(space.Px32, space.None, space.None, space.None).Children(func() {
+			tabs := make([]pud.Tab, searchTabCount)
+			for i := range tabs {
+				tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
+			}
+			pud.Tabs(c, "search:tabs", &st.tab, tabs)
+		})
 		cur := st.tab
 		s.viewSearchToolbar(c, cur)
 
 		// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
 		st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]})
 
-		// 列表要吃掉剩下的高度，自己占 Grow(1)（见 list.go 的 View）。外面这一
-		// 层 Grow(1) 是给它留地方：直接摆在根上不给高度的话，它会按自己的行数
-		// 去要高度，一屏二十几行会把页面撑出去。
 		s.viewSearchResultsBody(c, cur, keyword)
 	})
 }
 
-// viewSearchToolbar 是 Tab 下面那一行：左边排序，右边「全部播放」。排序是**每个
-// Tab 自己一套**（`st.sorts` 按 Tab 分格）。用户的 Tab 没有「全部播放」——用户不是
-// 歌，播不了（上游的用户页也只有排序，见 `user-list/search-header.tsx`）。
+// viewSearchToolbar 是 Tab 下面那一行：排序图标 + 排序下拉，右边「播放全部」。排序是**每个
+// Tab 自己一套**（`st.sorts` 按 Tab 分格）。UP 主那一档没有「播放全部」——用户不是歌。
 func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 	st := &s.search
 
-	ui.Row(c).Key("search:toolbar:" + strconv.Itoa(tab)).FillWidth().Gap(space.Px12).
-		AlignItems(ui.Center).Children(func() {
-		ui.Tabs(c, &st.sorts[tab], searchSortLabels(tab)...)
-
+	pudToolbar(c, "search:toolbar:"+strconv.Itoa(tab), func() {
+		pudSortIcon(c)
+		pudSelectBox(c, "search:sort:"+strconv.Itoa(tab), &st.sortOpen, searchSortLabels(tab), &st.sorts[tab])
 		if tab == searchTabUser {
 			return
 		}
-		// 「全部播放」：Biu 的 `AsyncButton`（`video-list/search-header.tsx:55`），
-		// 它禁用的条件是 `initialLoading || list.length === 0`——正在装第一页
-		// 或者一首都没有时不让按。
-		//
-		// ⚠️ **这一枚和首页那一枚是同一枚**（`playAllButton`，票 #244 / UX 报告
-		// §2 的 B6）：同一个动作在两个页面上各有一枚入口，此前**只有搜索页有**——
-		// 用户在一个页面能按、在另一个页面找不到，会以为是两个不同的功能。
-		//
-		// ⚠️ **位置和首页不一样是跟上游一致**：上游搜索页那一行右边还有一个
-		// 「仅音乐分区」的开关（`justify-between` 把它们推到两头），我们没有那个
-		// 开关，所以这一枚留在排序 Tab 右边（票 #288 只点了首页那一行）。
+		ui.Spacer(c)
+		// 禁用的条件是上游的：正在装第一页或者一首都没有（`search-header.tsx:55`）。
+		// 和首页那一枚走同一个出口（`playAllSongs`，票 #244）。
 		pg := st.lists[tab].list.Paged()
-		if playAllButton(c, pg.Loading || pg.Loaded == 0).Clicked() {
+		b := pud.Button(c, "search:play-all", pud.Primary, pud.Sm, "播放全部", "play").
+			Disabled(pg.Loading || pg.Loaded == 0)
+		if b.Clicked() {
 			s.searchPlayAll(&st.lists[tab])
 		}
 	})
@@ -296,23 +299,37 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	}
 
 	if pg.Loaded == 0 && !pg.Loading {
-		s.viewEmpty(c, "search:no-results:"+strconv.Itoa(tab), noSearchResults)
+		title, body := "没有找到相关歌曲", "换个关键词试试，比如歌手名、专辑名或 UP 主名。"
+		switch tab {
+		case searchTabVideo:
+			title = "没有找到相关视频"
+		case searchTabUser:
+			title, body = "没有找到相关 UP 主", "试试搜索 UP 主的完整昵称。"
+		}
+		pudEmpty(c, "search:no-results:"+strconv.Itoa(tab), pud.ArtSearch, title, body, func() {
+			if pud.Button(c, "search:clear", pud.Ghost, pud.Std, "清空搜索", "").Clicked() {
+				s.navigate(searchPath)
+			}
+		})
 		return
 	}
 	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
 	// 每帧都要调）。三个 Tab 各调各的：三份列表各记着自己停在哪，切 Tab 不重置。
-	t.list.SetView(s.pageDisplayView())
+	if tab == searchTabUser {
+		// 用户那一档永远是两列卡片，不跟「数据显示样式」走。
+		t.list.SetView(list.ViewList)
+	} else {
+		t.list.SetView(s.pageDisplayView())
+	}
 	// ⚠️ **表头在列表外面**（`rowheader.go` 文件头）：它是 `View` 的兄弟，所以列表往
 	// 下滚它不动，宽屏下滚到右边列名也还在。
 	//
 	// 这一处自己给规格而不用 `PagedList.Header`：「用户」那一档的行里时长那一列
 	// **没有字**（位置留着——行尾那枚「⋯」的位置跟着它走），理由见
 	// `searchHeaderSpec`。
-	if v := t.list.Layout(); v != list.ViewCard {
-		// 列定义**问列表要**（`init` 里装的就是 `searchColumns`）：表头和行
-		// 读同一份，只改一处时不会一边多一列、一边少一列。
-		list.Header(c, searchHeaderSpec(tab, v, t.list.List().Columns(),
-			t.list.List().HasSelection(), "search:header:"+strconv.Itoa(tab)))
+	if v := t.list.Layout(); v != list.ViewCard && tab != searchTabUser {
+		ui.Box(c).Height(space.Px8)
+		t.list.Header(c, "search:header:"+strconv.Itoa(tab))
 	}
 	t.list.View(c)
 	s.noteScrollbar(t.list.Hot())

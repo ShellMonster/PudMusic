@@ -86,6 +86,9 @@ type searchState struct {
 	// tab 是当前选中的 Tab（`ui.Tabs` 直接写它）。
 	tab int
 
+	// sortOpen 是排序下拉此刻是不是展开的（一次只会展开一个）。
+	sortOpen bool
+
 	// sorts 是每个 Tab 各自的排序下标。
 	//
 	// ⚠️ **一个 Tab 一格**，不是一个全局值：Biu 的两个列表各有一份排序状态
@@ -166,6 +169,7 @@ func (st *searchState) init(s *Shell) {
 		// 播放量 / 投稿时间：歌曲和视频两档有，用户那一档两样都没有（见
 		// `searchColumns`）。**装在这里而不是每一帧**：一档 Tab 的列不会变。
 		st.lists[i].list.SetColumns(searchColumns(i, s))
+		st.lists[i].list.SetPudRows(true)
 	}
 }
 
@@ -194,6 +198,9 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 		return list.Page{}, err
 	}
 	songs := searchItemsOf(pg.Items)
+	if tab == searchTabUser {
+		songs = packUserPairs(songs)
+	}
 	t.mu.Lock()
 	if gen == t.gen {
 		t.loaded = append(t.loaded, songs...)
@@ -240,7 +247,23 @@ func searchItemsOf(items []app.SearchItem) []list.Music {
 		out = append(out, list.Music{
 			ID: item.ID, Title: item.Title, Cover: item.Cover, Owner: item.Owner,
 			Duration: item.Duration, View: item.View, PubTime: item.PubTime, Item: item.Item,
+			Fans: item.Fans, Level: item.Level,
 		})
+	}
+	return out
+}
+
+// packUserPairs 把「用户」那一档的结果两个一组打包成行（原型的 UP 主结果是两列卡片）：
+// 第一个人是这一行，第二个挂在 `Pair` 上。行身份仍是第一个人的 ID（稳定且唯一）。
+func packUserPairs(users []list.Music) []list.Music {
+	out := make([]list.Music, 0, (len(users)+1)/2)
+	for i := 0; i < len(users); i += 2 {
+		row := users[i]
+		if i+1 < len(users) {
+			second := users[i+1]
+			row.Pair = &second
+		}
+		out = append(out, row)
 	}
 	return out
 }

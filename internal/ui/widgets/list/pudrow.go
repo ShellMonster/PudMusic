@@ -8,8 +8,12 @@
 package list
 
 import (
+	"strconv"
+
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -45,8 +49,12 @@ func (l *List) viewPudRow(r ui.ListRow) {
 	c, i := r.Context, r.Index-leadRows(l.lead)
 	t := c.Theme()
 	m := l.songs[i]
+	if isUserItem(m) {
+		l.viewPudUserRow(r, i)
+		return
+	}
 	playing := l.isPlaying(m)
-	user := isUserItem(m)
+	user := false
 	sh := ShowOf(m)
 	w := l.wiringAt(i)
 
@@ -95,3 +103,41 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		l.acts.OpenOwner(m.Item.ArtistMid, m.Owner)
 	}
 }
+
+// viewPudUserRow 画「用户」那一档的一行：一到两张 UP 主卡（原型 `.od-grid` 两列、缝 16），
+// 点卡 = 进他的空间（和旧行的双击 / 菜单「播放」同一个出口）。没有关注键：搜索结果
+// 拿不到关注状态，应用也没有关注的写接口。
+func (l *List) viewPudUserRow(r ui.ListRow, i int) {
+	c := r.Context
+	m := l.songs[i]
+	const gap = 16
+	cw := (l.RowWidth() - gap) / 2
+	card := func(m Music) {
+		u := pud.UpCard{
+			Name:       m.Title,
+			Sign:       m.Owner,
+			HideFollow: true,
+			Face: func(c *ui.Context, w, h float32) {
+				imgcache.ViewTitled(c, l.cache, m.Cover, m.Title, w, h)
+			},
+		}
+		if m.Fans > 0 {
+			u.Stats = PlayCountText(m.Fans) + " 粉丝"
+		}
+		if m.Level > 0 {
+			u.Level = itoa(m.Level)
+		}
+		if pud.UCard(c, "ucard:"+m.ID, u, cw).Open && l.acts.Play != nil {
+			l.acts.Play([]app.Item{m.Item})
+		}
+	}
+	ui.Row(c).AlignSelf(ui.Stretch).Gap(gap).Margin(space.None, space.None, space.Px16, space.None).
+		Children(func() {
+			card(m)
+			if m.Pair != nil {
+				card(*m.Pair)
+			}
+		})
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }

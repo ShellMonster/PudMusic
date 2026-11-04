@@ -125,7 +125,7 @@ func TestClickingTheOwnerNameInASearchResultGoesIntoThatSpace(t *testing.T) {
 	st := newSearchStub(2, 4)
 	s, tt := newSearchPage(t, "周杰伦", st)
 	waitFrames(t, tt, "结果出来了", func() bool {
-		return tt.HasText("搜索【周杰伦】的结果")
+		return tt.HasText("「周杰伦」")
 	})
 	waitFrames(t, tt, "第一页进来了", func() bool { return loadedTo(s, searchTabSong, 1)() })
 
