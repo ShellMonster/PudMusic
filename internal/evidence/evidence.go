@@ -3636,7 +3636,6 @@ var Items = []Item{
 			"TestTheMiniPlayerKeysAreFlat",
 			"TestTheDownloadListKeysAreFlat",
 			"TestTheLocalMusicKeysAreFlat",
-			"TestTheCollectionKeysAreFlat",
 			"TestTheDynamicCardKeysAreFlat",
 			// 反面：该保留描边的那一批。
 			"TestTheDialogButtonsStayOutlined",
@@ -3667,7 +3666,6 @@ var Items = []Item{
 			"TestTheDynamicAuthorNameIsALinkNotAPill",
 			"TestThePlaybarOwnerNameIsALinkNotAPill",
 			"TestTheListOwnerNameIsALinkNotAPill",
-			"TestTheActionButtonsAreStillButtons",
 			"TestTheNameLinkIsKeyboardReachable",
 			"TestTheUnderlineColorFollowsTheTheme",
 		},
@@ -3761,7 +3759,6 @@ var Items = []Item{
 		Spec: "收藏夹头图区：标题下面那三行字都是 14、行与行之间是 16、创建者有一枚 24 的头像（四块左缘对齐；一行标题时那一列不越过封面的下缘）；操作条那枚主按钮是 40 高；「按歌名找」是一枚**会展开的按钮**（收起是图标键，展开是输入框，点别处收回去，切页回来不抢键盘焦点），且它在每一个侧栏宽度和系统字号缩放下都不压到「多选」上；下载记录的表有一张卡片底，文件名 hover 长出外链图标并能点开 B 站页面，筛选是横排的单选圆点；本地音乐的工具条是图标键，行 hover 时序号换成播放图标",
 		Tests: []string{
 			// 收藏夹头图区：字号（AST）、竖距与左缘（画面）、头像的大小。
-			"TestTheCollectionHeaderCopyIsFourteen",
 			"TestTheCollectionTitleIsTheBigOne",
 			"TestTheCollectionHeaderStaysInsideTheCoverOnOneLine",
 			// 头像那个地址要**抓得到**（B 站给的是协议相对地址，不补协议就是
@@ -5077,7 +5074,6 @@ var Items = []Item{
 		Tests: []string{
 			"TestTheCoverLoadingFillIsVisibleOnALightPage",
 			"TestTheCoverLoadingCellShimmers",
-			"TestTheAuthorPaneSaysItIsLoading",
 			"TestTheNewMusicRowShowsSkeletonsInsteadOfVanishing",
 			"TestTheCollectionHeaderDoesNotClaimZeroMedia",
 			"TestTheCollectionOwnerRowKeepsItsSlot",

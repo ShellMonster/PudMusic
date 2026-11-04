@@ -36,7 +36,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -880,58 +879,6 @@ func (s *Shell) collectionHeaderCover(ref app.CollectionRef, info app.Collection
 
 // collectionOwnerLoadingText 是创建者那一行骨架的无障碍名字。
 const collectionOwnerLoadingText = "正在加载收藏夹信息"
-
-// viewCollectionOwnerAvatar 是创建者那一枚圆头像（`collectionOwnerAvatarSize`）。
-//
-// 地址空着、还没下回来、或者下失败时画一块圆占位——**头像这一格不消失**：
-// 它是「创建者」那一行的开头，消失之后那一行只剩一个名字，左边凭空空出一格；
-// 而占位的大小和真头像一样，换上来的时候那一行不会动。
-//
-// 🔴 **有地址的三态交给 `imgcache`**（2026-10-27）：这一格原先只判 `Ready()`，
-// 其余三种画的是同一块 `Surface` 圆——而它下面的底就是 `Surface`，于是那一格
-// 在加载中看着**什么都没画**（一块和底同色的圆）。现在加载中带扫光、失败带
-// 描边框和人形，和「他压根没设头像」分得开。
-//
-// 🔴 **它是一枚按钮**（票 BMG-253）：这一行原先整个都点不动——用户看到「某某
-// 创建的」却进不去他的空间。悬停时外面多一圈主色的环（和顶栏那个头像同一套，
-// 见 `avatarHoverRing`），所以它**看起来也是能点的**。
-//
-// ⚠️ **没有编号时它不是按钮**：那一页压根没给创建者的编号，而点它只能跳到一个
-// 空路径（理由同 `list.OwnerName` 那一段：把入口画成能点的、点下去却到不了
-// 地方，比不画更坏）。
-func (s *Shell) viewCollectionOwnerAvatar(c *ui.Context, face string, mid int64) {
-	t := c.Theme()
-	side := float32(collectionOwnerAvatarSize)
-	// 那一枚圆（占位 / 真图都在里面）。
-	//
-	// ⚠️ **名字只挂一处**：可点的那一格把名字挂在**按钮**上（下面），里面这一
-	// 格就不挂——两处都挂的话辅助技术会念两遍，而画面上只有一枚圆。
-	draw := func(label string) {
-		ui.Box(c).Size(side, side).Radius(side / 2).Clip().
-			Background(t.Surface).Label(label).Children(func() {
-			if face == "" {
-				return
-			}
-			imgcache.States(c, s.images, face, side, side, side/2, imgcache.AvatarShape())
-		})
-	}
-	if mid <= 0 {
-		draw(collectionOwnerAvatarLabel)
-		return
-	}
-	hit := ui.ButtonBase(c).Size(side, side).Padding(space.None).
-		Label(collectionOwnerAvatarLabel).
-		// ⚠️ **角色是「按钮」**：框架的 `ui.ButtonBase` **不给角色**（只有
-		// `ui.Button` 给），而这一枚是这一票新加的按钮——辅助技术得念得出它是
-		// 一个按得动的东西。
-		Role(ui.RoleButton)
-	// ⚠️ hover 要在 Children **之前**问（理由同顶栏那个头像）。
-	hit = avatarHoverRing(c, hit, hit.Hovered(), side)
-	hit.Children(func() { draw("") })
-	if hit.Clicked() {
-		s.openOwnerSpace(mid)
-	}
-}
 
 // collectionTitleText 是头图区那个大标题。
 //

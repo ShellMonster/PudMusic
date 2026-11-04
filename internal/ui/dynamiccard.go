@@ -157,44 +157,6 @@ func likeFailText(like bool, err error) string {
 	return "取消不了赞：" + err.Error()
 }
 
-// viewCollectionRow 画一张收藏夹 / 合集卡片。**整行可点**，跳到那个的内容页。
-//
-// ⚠️ **封面在指针移上去的时候放大 5%**：上游 UP 空间那两张 Tab（收藏夹 / 合集）
-// 摆的是一格一格的封面卡（`user-profile/grid-card/index.tsx:26` 的
-// `group-hover:scale-105` + `transition-transform duration-300`）。放大的是
-// **框里那张图**，框不动——框要是自己长大，它就会压到旁边的标题上。
-func (s *Shell) viewCollectionRow(c *ui.Context, col app.SpaceCollection, selected, ring bool) {
-	t := c.Theme()
-	box := ui.Row(c).Grow(1).Gap(space.Px12).Padding(space.Px12).AlignItems(ui.Center).
-		Margin(space.None, space.None, space.Px8, space.None).
-		Background(s.cardBackground(t)).Radius(s.cardRadius(t)).Border(1, t.Border).
-		// 🔴 **字色钉回正文色，是无条件的**（理由见 viewDynamicCard 根上那一段）：
-		// 框架在指针点一下时就把行标成选中并带上一层白字，标题没写死颜色，
-		// 不钉的话点一下就变白字。
-		TextColor(t.Text).
-		Key("coll:" + strconv.FormatInt(col.ID, 10))
-	// ⚠️ hover 要在 Children **之前**问（理由同 `widgets/list` 的 grid.go）：
-	// 它报的是这一帧指针在不在这一行上，而封面是在 Children 里画的。
-	on := box.Hovered()
-	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
-	//（理由见 `widgets/list/selection.go`）。
-	//
-	// ⚠️ **必须盖**：框架给选中的行铺一整块实心主色底（`mygo/ui/table.go` 的
-	// `node.Selected`），而票 #197 拍板去掉它——那一层在库里改不动。
-	box = list.SelectedRow(box, t, selected, on, ring)
-	if box.Clicked() {
-		s.navigate(collectionPath(col.ID))
-	}
-	box.Children(func() {
-		s.spaceThumbZoom(c, col.Cover, 72, 72,
-			"coll-zoom:"+strconv.FormatInt(col.ID, 10), on)
-		ui.Column(c).Grow(1).Gap(space.Px2).Children(func() {
-			ui.Text(c, col.Title).FontSize(scale.Font(c, scale.Size16)).MaxLines(2).Ellipsis("…")
-			ui.Text(c, fmt.Sprintf("%d 首", col.Count)).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-		})
-	})
-}
-
 // viewDynamicCard 画一条动态卡片。
 //
 // 三种类型画在同一张卡上：**头像 + 昵称 + 时间 → 正文 → 内容**。
@@ -218,7 +180,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring boo
 	//（理由见 `widgets/list/selection.go`）。`hovered` 传 false：悬停底已经被盖掉了。
 	card = list.SelectedRow(card, t, selected, false, ring)
 	card.Children(func() {
-		pud.Avatar(c, d.Author.Name, 44, ui.Color{}, s.upFaceDraw(d.Author.Face))
+		pud.Avatar(c, d.Author.Name, 44, faceTint(d.Author.Mid), s.upFaceDraw(d.Author.Face))
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 			// ① 头一行：名字（链接，600）+ 「时间 · 发布了音乐」（12 号 text-3）。
 			ui.Row(c).Wrap().AlignItems(ui.Baseline).Gap(space.Px12).Children(func() {
