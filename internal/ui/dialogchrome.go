@@ -32,7 +32,7 @@ func dlgPanel(c *ui.Context, backdrop, panel ui.Element, label string, w float32
 	e := panel.Padding(space.None).Gap(space.None).Radius(tok.R12).
 		Background(pl.Surface).Border(1, pl.Line).Width(min(w, ww-32)).MaxHeight(hh - 64).
 		Transition(motion.PopIn)
-	shadow.Pop(e, t).Role(ui.RoleDialog).Label(label)
+	shadow.Pop(e, t).Role(ui.RoleDialog).Label(label + "（对话框）")
 }
 
 // dlgBody 是对话框正文那一块：内边距 24；标题 24 号宋体，下面空 8 放说明（次要色 14 号），

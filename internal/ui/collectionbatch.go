@@ -80,6 +80,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 		if pud.Button(c, "batch:queue", pud.Ghost, pud.Sm, "加入队列", "queue").Disabled(none).Clicked() {
 			s.enqueueCollectionPicked(p)
 		}
+		// 下载服务没挂上时键是灰的，悬停说清为什么（和从前一样）。
 		dl := pud.Button(c, "batch:dl", pud.Ghost, pud.Sm, "批量下载", "download").Disabled(none || !s.app.DownloaderMounted())
 		if !s.app.DownloaderMounted() {
 			dl = s.withTip(c, dl, "这个应用没把下载服务挂上")

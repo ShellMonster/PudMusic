@@ -82,7 +82,7 @@ func TestTheSelectDialogSelectsSeveralAndAll(t *testing.T) {
 	settleFrame(tt)
 	waitFolders(t, tt, s, 4)
 
-	wantText(t, tt, "还没有收藏在任何收藏夹里")
+	wantText(t, tt, "已选 0 个收藏夹")
 	wantText(t, tt, "收藏夹 1")
 
 	// 点第一行。
@@ -129,7 +129,7 @@ func TestTheSelectDialogSubmitIsAsync(t *testing.T) {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
-	if err := tt.Click("确认"); err != nil {
+	if err := tt.Click("确定"); err != nil {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
@@ -199,7 +199,7 @@ func TestTheSelectDialogSendsOnlyTheDifference(t *testing.T) {
 	settleFrame(tt)
 	wantText(t, tt, "已选 1 个收藏夹")
 
-	if err := tt.Click("确认"); err != nil {
+	if err := tt.Click("确定"); err != nil {
 		t.Fatal(err)
 	}
 	waitFrames(t, tt, "提交结果回来", func() bool { return len(f.deals()) == 1 })

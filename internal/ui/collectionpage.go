@@ -776,10 +776,10 @@ func collectionRefOfPath(path, query string) app.CollectionRef {
 
 // ── 头图区 ─────────────────────────────────────────────────────────────────
 
-// 头图区那几个尺寸。照 Biu 的 `header/index.tsx`：封面 200×168（不是方的）。
+// 头图区封面尺寸：原型 `.cover.lg` 232 见方。
 const (
-	collectionCoverW = 200
-	collectionCoverH = 168
+	collectionCoverW = 232
+	collectionCoverH = 232
 
 	// collectionHeadGap 是那三行字之间的行距：`space-y-4` = **16**
 	// （上游同一个文件 :53-113）。
@@ -1091,7 +1091,7 @@ const collectionSortMinW = 83.2
 //
 // ⚠️ **Label 不能省**：它不只是给测试用的——没有它读屏软件读不出这是一个搜
 // 歌名的控件（占位文字不是标签），无头 Tester 也只认 label / text。
-const collectionSearchLabel = "搜索歌名"
+const collectionSearchLabel = collectionSearchLabelText
 
 // collectionSearchUnsupportedTip 是合集 / 系列页那枚**按不动**的放大镜为什么按不动。
 //

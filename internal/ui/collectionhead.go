@@ -286,7 +286,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 		s.viewCollectionMore(c, p)
 
 		// 右边：排序 + 搜索（原型 `.list-tools`，margin-left:auto）。
-		ui.Row(c).Grow(1).Justify(ui.End).AlignItems(ui.Center).Gap(space.Px12).Children(func() {
+		ui.Row(c).Grow(1).Shrink(0).Justify(ui.End).AlignItems(ui.Center).Gap(space.Px12).Children(func() {
 			if collectionSortSupported(p.ref.Type) {
 				s.viewCollectionSort(c, p)
 			}

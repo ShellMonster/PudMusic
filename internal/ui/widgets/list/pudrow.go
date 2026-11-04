@@ -67,6 +67,10 @@ func (l *List) viewPudRow(r ui.ListRow) {
 			imgcache.ViewTitled(c, l.cache, m.Cover, m.Title, cw, ch)
 		},
 	}
+	if m.Item.Invalid {
+		// 失效的条目：歌名压成次要色（`Dim`），歌名下面一枚「已失效」角标（和旧行的 `InvalidTag` 同一句）。
+		tr.Quality = "已失效"
+	}
 	cols := l.Columns()
 	switch {
 	case cols.Text != nil:

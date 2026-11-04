@@ -185,7 +185,7 @@ func TestTheSeasonStarSendsTheSeasonID(t *testing.T) {
 
 	// ⚠️ **那一句带的是「视频合集」**（不是「收藏夹」）：用户点的是合集，页面上也
 	// 写着「视频合集」——写「收藏这个收藏夹」是在说另一件事。
-	if err := tt.Click("收藏这个视频合集"); err != nil {
+	if err := tt.Click("收藏"); err != nil {
 		t.Fatalf("点不了星标：%v（画面上的字：%q）", err, tt.Texts())
 	}
 	waitFrames(t, tt, "合集收藏请求发出去", func() bool {
@@ -286,7 +286,8 @@ func TestTheSeasonPageHeaderIsFilledIn(t *testing.T) {
 			tt.Frame()
 
 			wantText(t, tt, c.title)
-			wantText(t, tt, c.kind+" • "+strconv.Itoa(c.count)+" 条视频")
+			wantText(t, tt, c.kind) // Eyebrow（原型 `.eyebrow`）
+			wantText(t, tt, strconv.Itoa(c.count)+" 首")
 			// 骨架那一句不该还挂着（那是「还没拉到」那一档）。
 			dontWantText(t, tt, "正在加载收藏夹信息")
 
@@ -321,7 +322,10 @@ func TestTheSeriesPageHasNoStarButton(t *testing.T) {
 			waitSongs(t, tt, s, 1)
 			tt.Frame()
 
-			has := tt.HasText("收藏这个收藏夹") || tt.HasText("取消收藏")
+			// ⚠️ `HasText` 是子串匹配（「我收藏的」「收藏夹」都含「收藏」），要全等就用 `Find`。
+			_, onFav := tt.Find("收藏")
+			_, onFaved := tt.Find("已收藏")
+			has := onFav || onFaved
 			if has != c.wantStar {
 				t.Errorf("%s页的星标：在=%v，want %v", c.name, has, c.wantStar)
 			}

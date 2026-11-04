@@ -9,6 +9,7 @@ package ui
 import (
 	"context"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -84,7 +85,8 @@ func TestPickingARowRemembersTheSongNotItsNumber(t *testing.T) {
 // 断言分三段：一首都还没加载出来时不是全选；勾满三首是全选；**勾了两首加一个
 // 已经不在列表里的 id**（数量凑够了）也不是全选。
 func TestSelectAllIsStrictLengthEquality(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	// 头部比从前高（232 封面 + 上下 40），三行歌在默认窗口里放不下：窗口摆高一点。
+	_, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	enterMulti(t, tt)
 
@@ -99,7 +101,7 @@ func TestSelectAllIsStrictLengthEquality(t *testing.T) {
 		}
 		settleFrame(tt)
 	}
-	wantText(t, tt, "已选 2 首")
+	wantChosen(t, tt, 2)
 	if p.allSelected() {
 		t.Error("勾了两首（共三首）就说全选了——全选必须是全部勾上")
 	}
@@ -119,7 +121,7 @@ func TestSelectAllIsStrictLengthEquality(t *testing.T) {
 	if !p.allSelected() {
 		t.Errorf("三首都勾上了却不是全选：%v", p.picked)
 	}
-	wantText(t, tt, "已选 3 首")
+	wantChosen(t, tt, 3)
 }
 
 // TestSelectAllOnAnEmptyFolderIsNotSelected 一个收藏夹里的歌一条都没加载出来时，
@@ -174,7 +176,7 @@ func TestLeavingMultiModeClearsThePicks(t *testing.T) {
 // `components/confirm-modal`），而**遮罩照样吃掉点在外面那一下**——不会
 // 「穿过去」按到下面的按钮上（那才是「误删一整批」那一类错的来源）。
 func TestDeletingAsksFirst(t *testing.T) {
-	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	b, s, tt := collectionShellAs(t, "1", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	enterMulti(t, tt)
 	for _, title := range []string{"歌 一", "歌 二"} {
@@ -237,7 +239,7 @@ func TestDeletingAsksFirst(t *testing.T) {
 // 用户看着删除成功、刷新之后那两首还在，而界面上从头到尾没有一句话说过
 // 「有两首没删掉」。那种「少做了一半还说做完了」比报错难查得多。
 func TestDeletingSaysWhenItCannotFindAllOfThem(t *testing.T) {
-	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	b, s, tt := collectionShellAs(t, "1", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 	enterMulti(t, tt)
 	for _, title := range []string{"歌 一", "歌 二"} {
@@ -293,22 +295,17 @@ func TestEscapeCancelsTheDelete(t *testing.T) {
 
 // TestDeletingWithNothingPickedSaysSo 一条都没勾就点删除：说一句，不发请求。
 func TestDeletingWithNothingPickedSaysSo(t *testing.T) {
-	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
+	b, s, tt := collectionShellAs(t, "1", "12345", mediaOf(1, "歌 一"))
 	waitSongs(t, tt, s, 1)
 	enterMulti(t, tt)
 
-	if err := tt.Click("批量删除"); err != nil {
-		t.Fatal(err)
-	}
+	// 原型：什么都没勾时「批量删除」是灰的（`disabled`），点它不会开确认框。
+	_ = tt.Click("批量删除")
 	settleFrame(tt)
-	if err := tt.Click("删除"); err != nil {
-		t.Fatal(err)
-	}
-	settleFrame(tt)
+	dontWantText(t, tt, "确认删除选中的 0 首吗？")
 	if n := len(b.removedBatches()); n != 0 {
 		t.Errorf("没勾任何东西还是发了 %d 次删除请求", n)
 	}
-	wantText(t, tt, "先勾几首再删")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,7 +320,7 @@ func TestDeletingWithNothingPickedSaysSo(t *testing.T) {
 // 测试和「这一次启动没装下载服务」那两条路）。挂上了的那一条是
 // `TestTheDownloadInterfaceIsWiredOnceImplemented`。
 func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
-	_, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	_, s, tt := collectionShellAs(t, "1", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
 	waitSongs(t, tt, s, 2)
 	enterMulti(t, tt)
 	if err := tt.Click("选择 歌 一"); err != nil {
@@ -344,7 +341,7 @@ func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
 
 	// ⋯ 菜单里的「下载全部音频」能点（那是菜单项，禁不住），
 	// 而它**也要先问一次**——下载会占磁盘和带宽，按错一次就是几百兆白下。
-	if err := tt.Click("更多操作"); err != nil {
+	if err := tt.Click("下载全部"); err != nil {
 		t.Fatal(err)
 	}
 	settleFrame(tt)
@@ -368,7 +365,8 @@ func TestDownloadingSaysItIsNotWiredYet(t *testing.T) {
 // 生产上挂的是 App 自己（`MountCollections` 传 `Downloader: a`），这里用桩是
 // 为了验「这一页确实把东西交出去了」，而桩不碰盘也不发网络。
 func TestTheDownloadInterfaceIsWiredOnceImplemented(t *testing.T) {
-	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
+	// 头部比从前高（232 封面 + 上下 40），三行歌在默认窗口里放不下：窗口摆高一点。
+	b, s, tt := collectionShellOpts(t, []shellOpt{at(1200, 1200)}, "", "12345", mediaOf(1, "歌 一"), mediaOf(2, "歌 二"), mediaOf(3, "歌 三"))
 	waitSongs(t, tt, s, 3)
 
 	d := &recordingDownloader{}
@@ -440,7 +438,11 @@ func collectionShellNoFrame(t *testing.T, id string, medias ...map[string]any) (
 	b.setMedias(medias...)
 	s, tt := newShell(t)
 	s.app.SetWake(s.wake.invalidate)
-	s.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
+	cli := collectionClient(t, b)
+	s.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
+	// 登录成容器的创建者（mid 1）：「批量删除」只对自己的收藏夹摆。
+	s.app.MountLogin(app.NewMemoryStore("collection-test"), cli)
+	s.app.TestOnlyAdoptLogin("1")
 	s.navigate("/collection/" + id)
 	return b, s, tt
 }
@@ -457,8 +459,9 @@ func TestTheStarToggles(t *testing.T) {
 	b, s, tt := collectionShell(t, "12345", mediaOf(1, "歌 一"))
 	waitSongs(t, tt, s, 1)
 
-	if err := tt.Click("收藏这个收藏夹"); err != nil {
-		t.Fatalf("点星标：%v", err)
+	// 原型：幽灵键「收藏」（点了变「已收藏」）。
+	if err := tt.Click("收藏"); err != nil {
+		t.Fatalf("点收藏键：%v", err)
 	}
 	waitFor(t, "收藏请求到了 B 站", b.isFaved)
 	// ⚠️ **这里用的是真正的 500 毫秒**（界面上没有把 Settle 调小）。故意的：
@@ -513,4 +516,13 @@ func newEmptyFolderClient(t *testing.T) *bili.Client {
 	b := newCollectionBili(t)
 	b.setMedias()
 	return collectionClient(t, b)
+}
+
+// wantChosen 断批量条上写着「已选 N 首」。原型 `<strong>已选 <span class="mono">N</span> 首</strong>`
+// 里 N 是等宽的单独一段，所以是「已选」「N」「首」三枚字。
+func wantChosen(t *testing.T, tt *ui.Tester, n int) {
+	t.Helper()
+	wantText(t, tt, "已选")
+	wantText(t, tt, strconv.Itoa(n))
+	wantText(t, tt, "首")
 }

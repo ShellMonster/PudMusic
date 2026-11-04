@@ -232,8 +232,8 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 			if ui.Checkbox(c, &all, "全选").Label("全选").Disabled(f.submitting).Changed() {
 				f.toggleAll(!f.allSelected())
 			}
-			ui.Text(c, selectListHint(f)).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Of(t).Text3).
-				SingleLine().Ellipsis("…")
+			ui.Text(c, "已选 "+strconv.Itoa(len(f.picked))+" 个收藏夹").FontSize(scale.Font(c, scale.Size12)).
+				TextColor(tok.Of(t).Text3).SingleLine().Ellipsis("…")
 		}, func() {
 			if pud.Button(c, "folderpick:cancel", pud.Ghost, pud.Std, "取消", "").Disabled(f.submitting).Clicked() {
 				s.closeFolderSelect()

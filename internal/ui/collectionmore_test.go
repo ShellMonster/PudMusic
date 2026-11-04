@@ -24,7 +24,7 @@ var favRef = app.CollectionRef{ID: 12345, Type: bili.CollectionFavorite}
 // openMore 打开 ⋯ 菜单。
 func openMore(t *testing.T, tt *ui.Tester) {
 	t.Helper()
-	if err := tt.Click("更多操作"); err != nil {
+	if err := tt.Click("更多"); err != nil {
 		t.Fatalf("打开 ⋯ 菜单：%v", err)
 	}
 	settleFrame(tt)
