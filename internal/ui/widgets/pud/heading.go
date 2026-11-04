@@ -1,6 +1,7 @@
 package pud
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -21,19 +22,32 @@ const ledeMaxW = 560
 //		pud.Button(c, "import", pud.Ghost, pud.Std, "导入", "import")
 //	})
 func PageHead(c *ui.Context, eyebrow, title, lede string, contentW float32, actions func()) {
-	p := pal(c)
+	var ledeFn func()
+	if lede != "" {
+		p := pal(c)
+		ledeFn = func() {
+			text(c, lede, scale.Size14, p.Text2).LineHeight(leading.Body).MaxWidth(ledeMaxW).Margin(space.Px8, space.None, space.None, space.None)
+		}
+	}
+	PageHeadFn(c, eyebrow, title, contentW, ledeFn, actions)
+}
+
+// PageHeadFn 是 `PageHead` 的一般形式：导语由调用方画（里面要放链接、等宽数字之类）。
+// ledeFn 里的内容会摆在标题下面；上边距 8 由调用方自己给。
+func PageHeadFn(c *ui.Context, eyebrow, title string, contentW float32, ledeFn, actions func()) {
 	ui.Row(c).FillWidth().AlignItems(ui.End).Gap(space.Px24).Padding(space.Px24, space.None, space.Px8, space.None).
 		Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).Children(func() {
 				if eyebrow != "" {
 					typo.Eyebrow(c, eyebrow)
 				}
-				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFor(contentW)))
+				// 原型 `.h-page { line-height: 1.15 }`。
+				t := typo.Display(ui.Text(c, title), scale.Font(c, scale.PageTitleFor(contentW))).LineHeight(leading.DisplayTitle)
 				if eyebrow != "" {
 					t.Margin(space.Px8, space.None, space.None, space.None)
 				}
-				if lede != "" {
-					text(c, lede, scale.Size14, p.Text2).MaxWidth(ledeMaxW).Margin(space.Px8, space.None, space.None, space.None)
+				if ledeFn != nil {
+					ledeFn()
 				}
 			})
 			if actions != nil {

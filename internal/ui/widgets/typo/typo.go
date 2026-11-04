@@ -29,6 +29,7 @@ package typo
 
 import (
 	_ "embed"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"runtime"
 	"strings"
 	"sync"
@@ -109,6 +110,6 @@ const (
 // 页头那一行的位置是按 11 排的）。
 func Eyebrow(c *ui.Context, text string) ui.Element {
 	return Mono(ui.Text(c, strings.ToUpper(text))).
-		FontSize(EyebrowSize).FontWeight(600).LetterSpacing(EyebrowTracking).
+		FontSize(EyebrowSize).FontWeight(600).LetterSpacing(EyebrowTracking).LineHeight(leading.Body).
 		TextColor(tok.Of(c.Theme()).Text3).SingleLine()
 }

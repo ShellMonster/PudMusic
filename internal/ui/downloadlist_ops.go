@@ -25,10 +25,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
@@ -38,8 +34,8 @@ const (
 	opPause  = "暂停"
 	opResume = "继续"
 	opRetry  = "重试"
-	opDelete = "删除"
-	opOpen   = "打开"
+	opDelete = "删除记录"
+	opOpen   = "在访达里显示"
 )
 
 // opIcons 是每一颗操作按钮画哪一张图。
@@ -58,121 +54,11 @@ var opIcons = map[string]string{
 	opDelete: iconDeleteBin5,
 }
 
-// viewToolbar 是页头那一行：标题 + 打开下载目录 + 清空记录。
-//
-// 上游是 `<h1>下载记录</h1>` 加右边一个写着下载路径的按钮（`index.tsx:99-103`）。
-//
-// ⚠️ **路径不在按钮上**：上游那样写，路径一长按钮就被截成半句话，用户看到
-// "/Users/daoz…" 得先猜一下点下去会发生什么。这里路径单独立一段（超长打
-// 省略号），按钮只说它做的那件事——两边说的都是同一件事，而这个更好读。
-func (d *downloadsPage) viewToolbar(c *ui.Context, s *Shell) {
-	t := c.Theme()
-	dir := s.app.DownloadDir()
-
-	ui.Row(c).FillWidth().Gap(space.Px10).AlignItems(ui.Center).Children(func() {
-		typo.Display(ui.Text(c, "下载记录"), scale.Font(c, scale.PageTitle))
-
-		// 路径。空串是「还没有下载目录」（设置里没选、系统目录也没拿到，
-		// 见 `app.Downloads.FallbackDir`）——那时候要说出来，不能画一段空白
-		// 让用户以为按钮坏了。
-		//
-		// ⚠️ **没有目录时那一句是能点的**（报告 C1）：这句话说的是「下载这件事
-		// 现在做不了」，而它就挂在页标题旁边——用户读完还是得自己去找设置页
-		// 里那一项（设置页有四个 Tab，而「下载目录」在「常规设置」那一格的
-		// 第三段，界面上一个字都没说它在哪儿）。所以它是一枚按钮：点了直接
-		// 跳到那一项上（见 goToDownloadDirSetting）。
-		//
-		// ⚠️ **它是一行链接字而不是一行灰字**：灰字在画面上就是一句说明，
-		// 用户不会想到它点得动；链接悬停时长下划线、指针变手型，而提示
-		// （tooltip）说得出按下去会发生什么。用 `flatLink` 不用扁平按钮，
-		// 是和侧栏「还有 N 个入口，登录后可见」、收藏夹那句「去登录」
-		// 同一套「可点文字」的语言——三处一种悬停相。
-		if dir == "" {
-			if d.tipWith(c, flatLink(c, "还没有下载目录"), "去设置里选一个下载目录").
-				Clicked() {
-				s.goToDownloadDirSetting()
-			}
-			// ⚠️ **补一个空隙**：有路径时那一段是 `Grow(1)` 的（它把页头剩下的
-			// 地方吃掉，右边那枚垃圾桶才落在最右边）。这一支没有那一段——不补
-			// 空隙的话，垃圾桶会紧跟在按钮后面，整页头的布局就变了。
-			ui.Spacer(c)
-		} else {
-			// 超长被截掉的时候完整路径在 tooltip 里：用户不必去设置页才看得到它
-			// 落在哪儿。
-			d.tipWith(c, ui.Text(c, dir).Grow(1).FontSize(scale.Font(c, scale.Size12)).
-				LineHeight(leading.Copy).TextColor(t.TextMuted).MaxLines(1).
-				Ellipsis("…"), dir)
-		}
-
-		// ⚠️ 没有目录时不摆这个按钮：按下去是打不开的。一个只会说「不行」的
-		// 按钮不如不摆（和搜索页那一格「用户」不摆「全部播放」是同一个取舍）。
-		if dir != "" && flatButton(c, "打开文件夹").Width(dlOpenDirW).Clicked() {
-			d.openDownloadDir(dir, s)
-		}
-		// ⚠️ 灰不灰看的是**整个队列**（`d.all`），不是筛完屏幕上那几行：
-		// 这一颗清的是整个队列，而在「视频」那一档筛出空来的时候它还摆得动，
-		// 就该还能按——否则用户看着一排有记录的表格之外的地方，想清却没得清。
-		//
-		// 上游是表格右上角一个 `isIconOnly` 的垃圾桶（`index.tsx:128-132`），
-		// 我们把它留在页头——表格那一块是共用的（widgets/list），页头才是这一页
-		// 自己的地方。
-		//
-		// ⚠️ **队列整个是空的时候它是灰的**（`Disabled`）：一条记录都没有时按它
-		// 什么都不会发生，而一颗亮着的按钮按下去没反应是最难解释的那种
-		// （`TestClearingIsGreyWhenThereIsNothingToClear` 钉的就是这一条）。
-		if d.tipWith(c, flatIconButton(c, iconDeleteBin5, "清空记录", iconMd).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7).
-			Disabled(len(d.all) == 0), "清空记录").Clicked() {
-			d.askClear(s)
-		}
-	})
-}
-
 // dlOpenDirW 是页头「打开文件夹」那个文字键的宽度。
 //
 // 清空记录不再有宽度：它是一枚图标键（`iconHitMd`），宽由图标和它自己的内边距
 // 撑出来——写死一个宽度只会和旁边那个框对不上。
 const dlOpenDirW = 96
-
-// viewOps 是「操作」那一列。
-//
-// 哪一个亮着见文件头那张表。这里不判断「点了会怎样」——判断在 `download.Manager`
-// 那一侧（`Status.CanPause` / `CanResume` 就在状态类型上），这里只判断**摆不摆**
-// 这颗按钮。摆一颗按了没反应的按钮比不摆更糟。
-//
-// ⚠️ **「重试」还要问一次「这一次失败可以再问吗」**（`Snapshot.CanRetry`）：
-// 它和播放条上那枚是同一个判据（票 #346）。
-func (d *downloadsPage) viewOps(c *ui.Context, s *Shell, r download.Snapshot) {
-	ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
-		// 打开文件所在文件夹：只在真的下完、文件已经在盘上的时候摆
-		// （上游 `index.tsx:153-173` 的 `show: data.status === "completed"`）。
-		// 半成品和失败的那两支不摆——`Dest` 上要么是空的，要么是一个 `.part`，
-		// 在访达里指着它只会让用户以为那就是那首歌。
-		if r.Status == download.StatusDone {
-			d.opButton(c, opOpen, func() { d.revealFile(r, s) })
-		}
-		if r.Status.CanPause() {
-			d.opButton(c, opPause, func() { d.pause(r, s) })
-		}
-		if r.Status == download.StatusPaused {
-			d.opButton(c, opResume, func() { d.resume(r, s) })
-		}
-		if r.Status == download.StatusError && r.CanRetry {
-			d.opButton(c, opRetry, func() { d.resume(r, s) })
-		}
-		d.opButton(c, opDelete, func() { d.askDeleteOne(r, s) })
-	})
-}
-
-// opButton 是操作列里的一颗按钮。按钮一多就宽过列宽，所以列宽是按**最多同时亮
-// 的那几颗**挑的（完成时是「打开」+「删除」，出错的行是「重试」+「删除」，
-// 最多两颗，见 `dlOpsW`）。
-func (d *downloadsPage) opButton(c *ui.Context, label string, fn func()) {
-	if d.tipWith(c, flatIconButton(c, opIcons[label], label, iconSm).
-		Size(dlOpW, dlOpW).Padding(space.None, space.Px7), label).Clicked() {
-		fn()
-	}
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 五种操作
@@ -220,7 +106,7 @@ func (d *downloadsPage) askDeleteOne(r download.Snapshot, s *Shell) {
 	d.ask = &confirmAsk{
 		title: "确认删除吗？",
 		body:  body,
-		ok:    opDelete,
+		ok:    "删除",
 		doIt:  func() { d.deleteOne(r, s) },
 		open:  true,
 	}

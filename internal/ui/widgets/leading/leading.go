@@ -26,6 +26,12 @@
 package leading
 
 const (
+	// Body 是原型 `body { line-height: 1.55 }`：Eyebrow、页头导语这些原型里继承正文行高的字。
+	Body = 1.55
+
+	// DisplayTitle 是原型 `.h-page { line-height: 1.15 }`：页标题（宋体 48）的行高倍数。
+	DisplayTitle = 1.15
+
 	// Owner 是 UP 名 / 副题那一行的行高倍数。**1**——上游那一行是
 	// `leading-none`（`music-list-item/index.tsx` 的副题）。
 	//

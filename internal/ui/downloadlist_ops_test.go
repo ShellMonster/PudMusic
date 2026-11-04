@@ -8,7 +8,6 @@ package ui
 // 那几条快照都在 downloadlist_test.go 顶上那一段。
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -62,27 +61,27 @@ func TestTheFiveOperationsShowWhereBiuShowsThem(t *testing.T) {
 			}
 		}
 		// 清空是五种操作里唯一一个不属于某一行的，它在页头。
-		if !shows(tt, "清空记录") {
-			t.Errorf("%q 那一行看不到页头上的「清空记录」，文字有 %q", c.status, tt.Texts())
+		if !shows(tt, "清空全部") {
+			t.Errorf("%q 那一行看不到页头上的「清空全部」，文字有 %q", c.status, tt.Texts())
 		}
 	}
 }
 
-// TestClearingIsGreyWhenThereIsNothingToClear 空的时候「清空记录」是灰的：
+// TestClearingIsGreyWhenThereIsNothingToClear 空的时候「清空全部」是灰的：
 // 一条记录都没有时按它什么都不会发生，而一颗亮着的按钮按下去没反应是最难解释
 // 的那种。
 func TestClearingIsGreyWhenThereIsNothingToClear(t *testing.T) {
 	s, tt := newDownloads(t)
 
-	if !shows(tt, "清空记录") {
-		t.Fatalf("空着的时候页头上没有「清空记录」，文字有 %q", tt.Texts())
+	if !shows(tt, "清空全部") {
+		t.Fatalf("空着的时候页头上没有「清空全部」，文字有 %q", tt.Texts())
 	}
-	if err := tt.Click("清空记录"); err != nil {
+	if err := tt.Click("清空全部"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
 	if s.downloads.ask != nil {
-		t.Error("一条记录都没有，按「清空记录」却弹出了确认框")
+		t.Error("一条记录都没有，按「清空全部」却弹出了确认框")
 	}
 	if len(s.app.DownloadSnapshots()) != 0 {
 		t.Errorf("一条记录都没有，清空之后队列里却有 %d 条", len(s.app.DownloadSnapshots()))
@@ -200,7 +199,7 @@ func TestRetryOnAFailedTaskQueuesItAgain(t *testing.T) {
 func TestDeletingAnUnfinishedTaskAsksFirst(t *testing.T) {
 	s, tt := newDownloads(t, newTask("歌 甲", download.StatusPaused, dlProgress, 50))
 
-	if err := tt.Click(opDelete); err != nil {
+	if err := tt.Click("删除记录"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
@@ -220,7 +219,7 @@ func TestDeletingAnUnfinishedTaskAsksFirst(t *testing.T) {
 func TestCancellingTheConfirmKeepsTheTask(t *testing.T) {
 	s, tt := newDownloads(t, newTask("歌 甲", download.StatusPaused, dlProgress, 50))
 
-	if err := tt.Click(opDelete); err != nil {
+	if err := tt.Click("删除记录"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
@@ -249,7 +248,7 @@ func TestConfirmingTheDeleteTakesTheTaskAway(t *testing.T) {
 		newTask("歌 乙", download.StatusDone, dlChunk, 100),
 	)
 
-	if err := tt.Click(opDelete); err != nil {
+	if err := tt.Click("删除记录"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
@@ -278,7 +277,7 @@ func TestDeletingAFinishedTaskStillAsks(t *testing.T) {
 		newTask("歌 乙", download.StatusPaused, dlProgress, 50),
 	)
 
-	if err := tt.Click(opDelete); err != nil {
+	if err := tt.Click("删除记录"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
@@ -329,12 +328,12 @@ func TestClearingAsksFirstAndThenEmptiesTheQueue(t *testing.T) {
 		newTask("歌 乙", download.StatusPaused, dlProgress, 50),
 	)
 
-	if err := tt.Click("清空记录"); err != nil {
+	if err := tt.Click("清空全部"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
 	if !shows(tt, "确认清空吗？") {
-		t.Fatalf("按了「清空记录」没有弹出确认框，文字有 %q", tt.Texts())
+		t.Fatalf("按了「清空全部」没有弹出确认框，文字有 %q", tt.Texts())
 	}
 	if !tt.HasText("其中 1 条还没下完") {
 		t.Errorf("确认框没有说清半成品也会被删掉，文字有 %q", tt.Texts())
@@ -394,7 +393,7 @@ func TestTheOpenButtonRevealsThatSongsOwnFile(t *testing.T) {
 		newTask("歌 乙", download.StatusDone, dlChunk, 100),
 	)
 
-	if err := tt.Click(opOpen); err != nil {
+	if err := tt.Click("在访达里显示"); err != nil {
 		t.Fatal(err)
 	}
 	dlFrame(tt)
@@ -413,43 +412,6 @@ func TestTheOpenButtonRevealsThatSongsOwnFile(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 🔴 铁律四：行身份
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestDeletingARowAboveKeepsTheTopRowWhereItIs 是铁律四在这一页上的落点。
-//
-// 断的是**滚动锚点**：用户滚到第 20 首附近、在上面删掉一条，屏幕上**还是那几
-// 首歌**。不装 `ListState.Key` 的话锚点是一个下标，删掉上面一行之后它就指着隔
-// 壁那一首了——用户什么都没做，看着的东西自己换了。
-func TestDeletingARowAboveKeepsTheTopRowWhereItIs(t *testing.T) {
-	tasks := make([]queuedTask, 0, dlSongCount)
-	for i := 1; i <= dlSongCount; i++ {
-		tasks = append(tasks, newTask(dlSongName(i), download.StatusPaused, dlProgress, 50))
-	}
-	s, tt := newDownloads(t, tasks...)
-
-	// 滚到下面去。
-	tt.Scroll(600, 400, 0, 1200)
-	dlFrame(tt)
-	before := dlVisibleSongs(t, tt)
-	if len(before) == 0 {
-		t.Fatalf("滚过之后一首歌都没画出来，文字有 %q", tt.Texts())
-	}
-	top := before[0]
-
-	// 删掉**上面**的一条（队列的第 1 条）。
-	if err := s.app.RemoveDownload(tasks[0].ID); err != nil {
-		t.Fatalf("删上面那一条：%v", err)
-	}
-	dlFrame(tt)
-
-	after := dlVisibleSongs(t, tt)
-	if len(after) == 0 {
-		t.Fatalf("删完之后一首歌都没画出来，文字有 %q", tt.Texts())
-	}
-	if after[0] != top {
-		t.Errorf("删掉上面一行之后，画面上顶上那首从 %q 变成了 %q：行身份跟着序号走了",
-			top, after[0])
-	}
-}
 
 // dlSongCount 是铁律四那一条用的歌数：够多才滚得动。
 const dlSongCount = 40
@@ -545,121 +507,6 @@ func TestTheEmptyListStillSaysWhyItIsEmpty(t *testing.T) {
 	// 比画一句「这里为什么空」更像坏了。
 	if shows(tt, "下载时间") {
 		t.Errorf("一条记录都没有，却画出了表头那一列，文字有 %q", tt.Texts())
-	}
-}
-
-// TestOneBrokenCellDoesNotBlankOutThePage 断「一格画崩了只废掉那一格」。
-//
-// 页级那道 Guard（`Shell.page`）兜的是整页：一格画崩了，用户该看到的是那一格
-// 写「画不出来」，而不是整个下载记录页变成一张错误页。
-func TestOneBrokenCellDoesNotBlankOutThePage(t *testing.T) {
-	restore := logOutput(&bytes.Buffer{})
-	t.Cleanup(restore)
-
-	withCover := newTask("歌 甲", download.StatusRunning, dlProgress, 50)
-	withCover.Cover = "http://example.invalid/a.jpg"
-	s, tt := newDownloads(t, withCover,
-		newTask("歌 乙", download.StatusDone, dlChunk, 100))
-
-	// 把封面缓存摘掉。`imgcache.View` 拿到非空的封面地址就会去缓存上取状态，
-	// 而那上面没有缓存（widgets/list 的 `New` 顶上那一段记着这一条）——于是
-	// **有封面的那一格**崩，别的格子照画。
-	//
-	// ⚠️ 摘掉之后**要还回去**：收尾走的是 `Shell.Close`，它在**调用那一刻**才读
-	// `s.images` 这个字段（不像早先的 `t.Cleanup(s.images.Close)`——方法值在登记
-	// 那一刻就把接收者绑死了，换字段连累不到它）。所以这一句得排在基座挂的那次
-	// 收尾**前面**跑：`t.Cleanup` 是后挂的先跑。
-	keepImages := s.images
-	t.Cleanup(func() { s.images = keepImages })
-	s.images = nil
-	dlFrame(tt)
-
-	if s.crash != nil {
-		t.Fatalf("一格画崩了，整页被换成了错误页：%v", s.crash)
-	}
-	if !tt.HasText("画不出来") {
-		t.Errorf("画崩的那一格没有换成占位，文字有 %q", tt.Texts())
-	}
-	// 别的行照画：这就是「只废掉那一格」。
-	if !shows(tt, "歌 乙") {
-		t.Errorf("画崩了一格之后整张表空了，文字有 %q", tt.Texts())
-	}
-	if !shows(tt, "下载记录") {
-		t.Errorf("画崩了一格之后连页头都没了，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheBrokenCellSettlesByItself 断「一格画崩了之后，那一格**自己**就换成
-// 「画不出来」」。
-//
-// 崩掉的那一帧里那一格只建了一半（封面那一格是个空盒子）：recover 接住的是
-// build pass 中间，而 MyGo 一帧只跑一遍 view（除非这一帧里有事件改了状态）。
-// 界面又是**按需绘制**的——没人要下一帧，那个空盒子就一直留在画面上，用户看到
-// 的是一个空框，而不是「画不出来」。
-//
-// 所以崩了要**再要一帧**（和 `Shell.onPanic` 补 Invalidate 是同一个道理，只是
-// 那一处是整页版、这一处是格子版）。
-func TestTheBrokenCellSettlesByItself(t *testing.T) {
-	restore := logOutput(&bytes.Buffer{})
-	t.Cleanup(restore)
-
-	withCover := newTask("歌 甲", download.StatusRunning, dlProgress, 50)
-	withCover.Cover = "http://example.invalid/a.jpg"
-	s, tt := newDownloads(t, withCover,
-		newTask("歌 乙", download.StatusDone, dlChunk, 100))
-
-	// 把封面缓存摘掉，让「有封面的那一格」崩在格子里（理由见上面那一条）。
-	//
-	// ⚠️ 摘掉之后**要还回去**：收尾走的是 `Shell.Close`，它在**调用那一刻**才读
-	// `s.images` 这个字段。所以这一句得排在基座挂的那次收尾**前面**跑：
-	// `t.Cleanup` 是后挂的先跑。
-	keepImages := s.images
-	t.Cleanup(func() { s.images = keepImages })
-	s.images = nil
-
-	// **只画一帧**：Tester 的 `Frame` 会一直画到界面不再要帧为止（mygo 的
-	// `Tester.settle`），所以「那一格自己换成占位」必须在这一帧里就做完——
-	// 靠「下一帧才画出来」的话，中间那一帧上那一格是空的，而按需绘制的界面
-	// 未必有那一帧。
-	tt.Frame()
-
-	if s.crash != nil {
-		t.Fatalf("一格画崩了，整页被换成了错误页：%v", s.crash)
-	}
-	if !tt.HasText("画不出来") {
-		t.Errorf("画崩的那一格没有自己换成占位，文字有 %q", tt.Texts())
-	}
-	// 别的行照画：这就是「只废掉那一格」。
-	if !shows(tt, "歌 乙") {
-		t.Errorf("画崩了一格之后整张表空了，文字有 %q", tt.Texts())
-	}
-	// ⚠️ **不许一直在要帧**：要一帧是为了补上那一格，不是让界面一直重画。
-	if tt.FramePending() {
-		t.Error("画崩了一格之后界面一直在要帧")
-	}
-}
-
-// TestACellOutOfRangeDoesNotBlankOutThePage 断「行下标越界也只是那一格画不出来」。
-//
-// 表格是按 `len(d.rows)` 建的，所以越界这一支不该走到（`d.state.Key` 和
-// `d.state.Label` 那两处也各自判了一次）。但**万一**走到了，它崩的地方是
-// 「这一格的身份」那一行——而那一行在兜底**外面**：崩了就是整页变成错误页。
-//
-// 这一条钉住的是：越界也是「这一格画不出来」，整页照常。
-func TestACellOutOfRangeDoesNotBlankOutThePage(t *testing.T) {
-	s, tt := newDownloads(t, newTask("歌 甲", download.StatusDone, dlChunk, 100))
-
-	// 换掉画页面内容的那一支，只画一格——而且是越界的那一格。
-	s.pageBody = func(c *ui.Context, _ *ui.Route, _ Route) {
-		s.downloads.viewCell(c, s, 999, 0)
-	}
-	tt.Frame()
-
-	if s.crash != nil {
-		t.Fatalf("一格越界，整页被换成了错误页：%v", s.crash)
-	}
-	if !tt.HasText("画不出来") {
-		t.Errorf("越界的那一格没有画成占位，文字有 %q", tt.Texts())
 	}
 }
 

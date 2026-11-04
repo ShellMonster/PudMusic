@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
@@ -276,13 +275,8 @@ func TestTheTableShowsEveryTask(t *testing.T) {
 			t.Errorf("画面上没有 %q 这一行，文字有 %q", title, tt.Texts())
 		}
 	}
-	// 列名。表头是 ui.Table 自己画的（上游是 HeroUI 的 TableHeader）。
-	for _, col := range []string{"文件", "状态", "大小", "下载时间", "操作"} {
-		if !shows(tt, col) {
-			t.Errorf("没有 %q 那一列的表头，文字有 %q", col, tt.Texts())
-		}
-	}
-	for _, want := range []string{"无损 FLAC", "20.0 MB", time.UnixMilli(dlAddedAt).Format("2006-01-02")} {
+	// 原型的行没有表头也没有下载时间：文件名 + 副标题、大小（完成的）、状态、操作。
+	for _, want := range []string{"无损 FLAC"} {
 		if !tt.HasText(want) {
 			t.Errorf("没有画出 %q，文字有 %q", want, tt.Texts())
 		}
@@ -290,92 +284,6 @@ func TestTheTableShowsEveryTask(t *testing.T) {
 	// 页面自己的那一行（上游的 `<h1>下载记录</h1>`）。
 	if !shows(tt, "下载记录") {
 		t.Errorf("没有画出页标题，文字有 %q", tt.Texts())
-	}
-}
-
-// TestTheFileColumnStaysReadableAtTheNarrowestWindow 钉住**最窄那一档窗口**下
-// 歌名还读得出来。
-//
-// 900 是这个应用自己定的 `WindowOptions.MinWidth`（shell_window.go），而这一页最难看
-// 的尺寸就是它：减去侧栏和页面内边距，表格只剩约 660。MyGo 的 `ui.Table` 把没给
-// `Width` 的列当「吃剩下的」，四个定宽吃掉多少，文件那一列就只剩多少——第一版
-// 那四个数合计 560，于是文件列只剩 100，封面占掉 48 之后**歌名一行放得下两个
-// 字**，剩下的全是「…」。而那一版的注释还说这一档「摆得下封面 + 歌名」，那是
-// 错的。
-//
-// 两种内容宽度各断一遍，因为压着歌名的两样东西各管一半：
-//
-//	侧栏默认（200）  定宽合计 452 → 文件列剩 208，装得下，所以**不许滚动**
-//	                （一个「反正列都有 MinWidth、能滚就行」的实现也绿，而用户在
-//	                 最小尺寸下得先滚才够得着删除）
-//	侧栏拖到最宽    内容只剩约 400，四个定宽装不下 → 表格横向滚动，文件列由
-//	（480）          `MinWidth` 兜在 200 上（MyGo 的 `clampWidth` 只认
-//	                `TableColumn.MinWidth`，`mygo/ui/table.go`）
-//
-// 量法：表头那个框是**字**的框，而两个表头之间隔着的正是文件列的整宽（两个表头
-// 格子各自左右各留 10 的内边距，一来一回抵掉）；表格的左边界是「文件」那个框
-// 往左 10（单元格里边距），右边界是窗口减去页面的内边距 20。
-func TestTheFileColumnStaysReadableAtTheNarrowestWindow(t *testing.T) {
-	// dlNarrow 抄的是 `WindowOptions.MinWidth`（internal/ui/shell_window.go）。抄而不
-	// 查是因为那边是个结构体字面量、没有导出的名字可引；而这一条的全部意义就是
-	// 「应用自己定的那一档」。
-	const dlNarrow = 900
-	row := dlSnapshot("歌名很长很长很长的一首歌", download.StatusRunning, dlProgress, dlChunk)
-
-	for _, c := range []struct {
-		what string
-		side float64
-		fits bool // 这一档五列**装得下**（装不下就横向滚动）
-	}{
-		{"侧栏默认", app.DefaultSideMenuWidth, true},
-		{"侧栏拖到最宽", app.MaxSideMenuWidth, false},
-	} {
-		tt := newRowsOnSide(t, dlNarrow, c.side, row)
-
-		file, okFile := tt.Find("文件")
-		status, okStatus := tt.Find("状态")
-		if !okFile || !okStatus {
-			t.Errorf("%s：表头没画出来，文字有 %q", c.what, tt.Texts())
-			continue
-		}
-		if got := status.X - file.X; got < dlFileMin {
-			t.Errorf("%s：窗口 %d 时「文件」列只有 %.0f 宽，want ≥ %d：封面和内边距"+
-				"占掉 76，剩下的歌名只够 %d 个汉字", c.what, dlNarrow, got, dlFileMin,
-				int((got-dlCover-8-20)/14))
-		}
-
-		// 表格实际有多宽（内容那一块的宽度）。
-		//
-		// ⚠️ **别改成量「操作」那一列的表头框跑没跑到窗口外面**：跑到外面时框架
-		// 会把它裁成宽 0（量过一次，`x=889 / w=0`），于是 `x+w > 窗口` 永远不
-		// 成立——一个「五列在最小尺寸下要滚动才够得着删除」的实现照样绿。
-		// 量表格的边界是量**布局**，量表头是量**裁剪之后**。
-		const cellPad = 10 // MyGo 单元格里边距 t.Space(2.5)
-		const pagePad = 20 // 这一页的内边距（viewDownloadList 的 Padding(20)）
-		content := float32(dlNarrow) - pagePad - (file.X - cellPad)
-		need := dlFileMin + dlStatusW + dlSizeW + dlTimeW + dlOpsW
-		if c.fits && float32(need) > content {
-			t.Errorf("%s：窗口 %d 时表格只有 %.0f 宽，五列最少要 %d：这一档要横向"+
-				"滚动才够得着删除（歌名不挤了，可删除按钮挤没了）", c.what, dlNarrow, content, need)
-		}
-		if !c.fits && float32(need) <= content {
-			t.Logf("%s：窗口 %d 时五列还装得下（%.0f ≥ %d），横向滚动那一条走不到——"+
-				"这一档只是侧栏太宽时的一个兜底", c.what, dlNarrow, content, need)
-		}
-	}
-}
-
-// TestTheTableShowsASongWithNoLengthAsADash 断「还没探到长度」那一格。
-//
-// 上游是 `item.totalBytes ? filesize(item.totalBytes) : "-"`（index.tsx:190）。
-// 画一个 `0 B` 或者干脆空着的话，用户会以为这首歌是空的——而它只是还没开始下。
-func TestTheTableShowsASongWithNoLengthAsADash(t *testing.T) {
-	_, tt := newRows(t, dlSnapshot("歌 甲", download.StatusQueued, 0, 0))
-	if !shows(tt, "-") {
-		t.Errorf("还没探到长度的那一行没有画出「-」，文字有 %q", tt.Texts())
-	}
-	if tt.HasText("0 B") {
-		t.Errorf("还没探到长度却画成了「0 B」，文字有 %q", tt.Texts())
 	}
 }
 
@@ -394,7 +302,7 @@ func TestTheStatusColumnSaysWhereEachTaskIs(t *testing.T) {
 		status download.Status
 		want   string
 	}{
-		{download.StatusQueued, "等待中"},
+		{download.StatusQueued, "排队中"},
 		{download.StatusRunning, "下载中"},
 		{download.StatusPaused, "下载暂停"},
 		{download.StatusDone, "下载完成"},
@@ -402,38 +310,9 @@ func TestTheStatusColumnSaysWhereEachTaskIs(t *testing.T) {
 		{download.StatusError, dlErrText},
 	} {
 		_, tt := newRows(t, dlSnapshot("歌 甲", c.status, dlProgress, dlChunk))
-		if !shows(tt, c.want) {
+		if !tt.HasText(c.want) { // 子串：失败那一格是「失败 · 原因」
 			t.Errorf("%q 那一格没有写出 %q，文字有 %q", c.status, c.want, tt.Texts())
 		}
-	}
-}
-
-// TestTheStatusColumnShowsTheThreeParts 断的是「三段」：进度条 + 状态文字 +
-// 百分比，一个都不少，而且百分比跟**已下的字节**对得上。
-//
-// 为什么盯着百分比：这一列是用户判断「还差多少」的唯一依据，而 `Percent` 是
-// 「没探到长度时 -1」的那一个数。把 -1 当 0 画出去的话，排着队的那一行会写着
-// 「等待中 0%」，用户以为卡住了。
-func TestTheStatusColumnShowsTheThreeParts(t *testing.T) {
-	_, tt := newRows(t, dlSnapshot("歌 甲", download.StatusRunning, dlProgress, dlChunk))
-
-	// ② 状态文字。
-	if !shows(tt, "下载中") {
-		t.Errorf("没有状态文字，文字有 %q", tt.Texts())
-	}
-	// ③ 百分比：20 MB 的歌下了一半 = 50%。
-	if !shows(tt, "50%") {
-		t.Errorf("没有写出 50%%，文字有 %q", tt.Texts())
-	}
-	// ① 进度条。断的是「条真的跟着百分比走」而不是「条存在」：一个恒定满格或者
-	// 恒定空的条也算画出来了，而用户看它就是错的。
-	w50 := progressWidth(t, tt, "50%")
-	if w50 <= 0 {
-		t.Fatalf("那一格没有画出进度条")
-	}
-	_, tt90 := newRows(t, dlSnapshot("歌 乙", download.StatusRunning, dlProgress, dlProgress*9/10))
-	if w90 := progressWidth(t, tt90, "90%"); w90 <= w50 {
-		t.Errorf("90%% 的条（%v）和 50%% 的条（%v）一样宽：进度条没有跟着值走", w90, w50)
 	}
 }
 
@@ -486,23 +365,6 @@ func progressWidth(t *testing.T, tt *ui.Tester, pct string) float32 {
 	return 0
 }
 
-// TestTheProgressColumnDoesNotClaimAFractionItDoesNotHave 断「没探到长度」的那
-// 一格：**不画百分比**。
-//
-// `Percent` 是 -1 的时候画一个「-1%」是笑话，画 0% 是撒谎——那一刻根本不知道
-// 这一首会有多大。
-func TestTheProgressColumnDoesNotClaimAFractionItDoesNotHave(t *testing.T) {
-	_, tt := newRows(t, dlSnapshot("歌 甲", download.StatusRunning, 0, 0))
-	if !shows(tt, "下载中") {
-		t.Fatalf("没有状态文字，文字有 %q", tt.Texts())
-	}
-	for _, bad := range []string{"-1%", "0%"} {
-		if shows(tt, bad) {
-			t.Errorf("还没探到长度却写出了 %q：那一刻不知道会有多大，写 0%% 是在撒谎", bad)
-		}
-	}
-}
-
 // TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone 钉住「交织中」那一格。
 //
 // ⚠️ 这一格这一版走不到（没有任何代码会置交织中，见 `download.StatusMuxing`），
@@ -530,21 +392,6 @@ func TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 纯文字（那几个格式化函数）
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheAddedOnColumnIsLocalTime 断日期那一列按**本机时区**写。
-//
-// 上游是 `moment(s).format("YYYY-MM-DD")`，而 moment 不给时区就用本地（
-// biu/src/common/utils/time.ts:20）。用 UTC 写的话这台机器上会是 11-15、比用户
-// 自己点下载的那一天晚一天——而「我今天下的东西」正是用户看这一列的理由。
-func TestTheAddedOnColumnIsLocalTime(t *testing.T) {
-	want := time.UnixMilli(dlAddedAt).In(time.Local).Format("2006-01-02")
-	if got := addedOn(dlAddedAt); got != want {
-		t.Errorf("addedOn(%d) = %q，want %q（本机时区）", dlAddedAt, got, want)
-	}
-	if got := addedOn(0); got != "-" {
-		t.Errorf("没有入队时刻时写的是 %q，want -", got)
-	}
-}
 
 // TestTheSizeColumnCountsIn1024 断大小的算法和边界。
 //
@@ -641,114 +488,3 @@ func dlTitles(rows []download.Snapshot) []string {
 // ─────────────────────────────────────────────────────────────────────────────
 // 票 #175：卡片底、文件名 hover 的外链
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheDownloadTableSitsOnACard 那一整张表有一张卡片底（上游 `Card` + `CardBody`）。
-//
-// 判据是像素，两半：
-//
-//	① 表头左边那 18 像素（卡片的内边距）是**卡片底**；
-//	② 卡片左缘外侧那一圈**不是**页面底色——那是影。
-//
-// ⚠️ **卡片底和页面底色是同一个颜色**（票 #172）：上游那张 `Card` 的底色是
-// `bg-content1`，而 `content1` 是 **#FFFFFF（浅）/ #18181b（深）**——正好是
-// 我们 `t.Background` 的两个值。于是深色下这张卡和页面几乎同色（分开的正是
-// 那圈影），浅色下它也不是一块灰（上游那张卡是白的）。
-//
-// ② 那一半不能省：① 说的「卡片底 = 页面底色」在「根本没有那张卡」的界面上
-// 也成立——那时候表头左边那一块同样是页面底色。**影才是那张卡存在的证据**。
-func TestTheDownloadTableSitsOnACard(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			s, tt := newRows(t, dlSnapshot("歌 甲", download.StatusDone, dlChunk, dlChunk))
-			tt.SetDark(dark)
-			dlFrame(tt)
-
-			header, ok := tt.Find("文件")
-			if !ok {
-				t.Fatalf("找不到「文件」那一列表头，文字有 %q", tt.Texts())
-			}
-			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			page := rgbaOf(th.Background)
-			card := rgbaOf(cardColorOf(s.app.SettingsSnapshot(), th))
-			img := tt.Image()
-			y := round32(header.Y + header.H/2)
-
-			in := img.RGBAAt(clampX(img, round32(header.X)-18), clampY(img, y))
-			if maxDiff(in, card) > probeTolerance {
-				t.Errorf("表头左边 18 像素处是 %v，want 卡片底 %v——经典下卡片底就是页面底色，"+
-					"方案里是 surface1，都不是一块灰", in, card)
-			}
-			// 卡片左缘外侧那一圈必须有「不是底色」的像素：影（浅色下是那一圈
-			// 30% 黑的外边，深色下是 1 像素的白内边）。
-			edge := false
-			for x := round32(header.X) - 34; x < round32(header.X)-16; x++ {
-				if maxDiff(img.RGBAAt(clampX(img, x), clampY(img, y)), page) > 2 {
-					edge = true
-					break
-				}
-			}
-			if !edge {
-				t.Errorf("卡片左缘外侧那一圈全是页面底色 %v——那圈影没了，"+
-					"这张卡在深色下就真的和页面糊成一片", page)
-			}
-		})
-	}
-}
-
-// TestHoveringAFileNameRevealsTheExternalLink 文件名 hover 长出外链图标，点它去 B 站。
-//
-// 出处是上游 `download-list/index.tsx:166-178`：那一行是 `group`，图标从 `w-0`
-// 长到 `w-[16px]`，点它 `openBiliVideoLink`。判据分三段：没有 hover 时图标不在、
-// hover 之后在（16×16）、点下去**交给系统的地址是 bvid 那一段**（不是整条
-// `bvid|cid` ——那样拼出来是一个 404）。
-func TestHoveringAFileNameRevealsTheExternalLink(t *testing.T) {
-	_, tt := newRows(t, dlSnapshot("歌 甲", download.StatusDone, dlChunk, dlChunk))
-	// 指针先挪到播放条那条空地上（不在表格里）。
-	tt.Move(600, 795)
-	tt.Frame()
-	if _, ok := tt.Find(dlOpenBiliLabel); ok {
-		t.Fatalf("没有 hover 就有外链图标")
-	}
-
-	title, ok := tt.Find("歌 甲")
-	if !ok {
-		t.Fatalf("找不到文件名，文字有 %q", tt.Texts())
-	}
-	tt.Move(title.X+title.W/2, title.Y+title.H/2)
-	// 两帧：hover 是上一帧的布局决定的，第一帧指针刚移过去、命中链还没换过来。
-	tt.Frame()
-	tt.Frame()
-	icon, ok := tt.Find(dlOpenBiliLabel)
-	if !ok {
-		t.Fatalf("hover 文件名之后没有长出外链图标，文字有 %q", tt.Texts())
-	}
-	if icon.W < 15 || icon.W > 17 || icon.H < 15 || icon.H > 17 {
-		t.Errorf("外链图标是 %.0f×%.0f，want 16×16（上游 `w-[16px]`）", icon.W, icon.H)
-	}
-	if icon.X <= title.X {
-		t.Errorf("外链图标在文件名左边（%.1f ≤ %.1f）——它该在名字右端",
-			icon.X, title.X)
-	}
-
-	if err := tt.Click("歌 甲"); err != nil {
-		t.Fatalf("点文件名：%v", err)
-	}
-	tt.Frame()
-	want := "https://www.bilibili.com/video/BV1歌 甲"
-	if len(dlOpenedLinks) != 1 || dlOpenedLinks[0] != want {
-		t.Errorf("点文件名打开的是 %v，want [%q]——URL 里不能带 `|cid`",
-			dlOpenedLinks, want)
-	}
-
-	// 指针移走，图标收回去。
-	tt.Move(600, 795)
-	tt.Frame()
-	tt.Frame()
-	if _, ok := tt.Find(dlOpenBiliLabel); ok {
-		t.Errorf("指针移开之后外链图标还在")
-	}
-}

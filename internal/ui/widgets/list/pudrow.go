@@ -110,7 +110,7 @@ func (l *List) viewPudRow(r ui.ListRow) {
 func (l *List) viewPudUserRow(r ui.ListRow, i int) {
 	c := r.Context
 	m := l.songs[i]
-	const gap = 16
+	const gap = space.Px16
 	cw := (l.RowWidth() - gap) / 2
 	card := func(m Music) {
 		u := pud.UpCard{

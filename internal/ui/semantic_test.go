@@ -24,7 +24,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/service/download"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -170,87 +169,6 @@ func TestTheDividerReachesThePixels(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // ③ 深色层次：卡片靠影，浅色卡片不是灰块
 // ─────────────────────────────────────────────────────────────────────────────
-
-// TestTheCardIsThePageColor 断**下载记录那张卡**的底色。
-//
-// 上游那张是 HeroUI 的 `Card`（`download-list/index.tsx:105`），底色是
-// `bg-content1`——#FFFFFF（浅）/ #18181b（深），正好是我们 `t.Background` 的
-// 两个值。于是：
-//
-//   - **深色下它和页面底色几乎同色**，层次靠那一圈影（影是 #179 那一票的，
-//     判据在 `shadow_test.go` 里）；
-//   - **浅色下它是白的**，不是一块灰。
-//
-// 判据是**两个像素比**：卡里那一块和卡外那一块（页面底色）必须**一样**。
-// 只断「卡里那一块是不是某个数」的话，卡和页面底色一起变的时候测不出来。
-//
-// ⚠️ **还要断「它不是 `t.Surface`」**：深色下 `t.Surface` 是 #27272a，正是
-// DESIGN.md §四说的那个「比背景亮一级的板」；浅色下它是 #f4f4f5，那正是
-// 「一块灰」。两条合起来才是「底色换成上游那一档了」。
-func TestTheCardIsThePageColor(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			tt := downloadCardScene(t, dark)
-			// 表格在那张卡里面——表头在，就说明那张卡画出来了（否则下面那些
-			// 「卡里那一块」量到的是页面底色，判据会白过）。
-			if _, ok := tt.Find("文件"); !ok {
-				t.Fatalf("画面上找不到那张卡里的表头，文字有 %q", tt.Texts())
-			}
-			img := tt.Image()
-			// 卡在留白之后：x ∈ [60, 540]、y ∈ [60, 340]。表格只占顶上那一段，
-			// 再下面那一块是**卡自己的底**。
-			inside := img.RGBAAt(300, 250)
-			outside := img.RGBAAt(30, 250)
-			st := app.DefaultSettings("")
-			if want := rgb(cardColorOf(st, BuildTheme(st, dark))); inside != want {
-				t.Errorf("卡里那一块是 %v，want 卡片底 %v（经典 = 页面底色，方案 = surface1）", inside, want)
-			}
-			_ = outside
-			// 它不是「亮一级的那块板」，也不是一块灰。
-			surface := rgb(BuildTheme(app.DefaultSettings(""), dark).Surface)
-			if inside == surface {
-				t.Errorf("卡里那一块是 %v（`t.Surface`）——那正是「比背景亮一级的板」",
-					inside)
-			}
-			// 浅色下那张卡是白的，不是一块灰。
-			if !dark && inside == rgb(mygoui.Hex("#f4f4f5")) {
-				t.Errorf("浅色下那张卡是 %v——那是一块灰块，上游那张卡是白的", inside)
-			}
-		})
-	}
-}
-
-// downloadCardScene 画一张下载记录那张卡，四周留白，返回它的 Tester。
-//
-// ⚠️ **不能直接用 `newRows`**：那一条走的是 `ui.NewTester`（**没有深浅那一档**），
-// 于是深色那一套量出来的是浅色的图。深浅两套的差别恰恰是这一票要验的东西。
-func downloadCardScene(t *testing.T, dark bool) *mygoui.Tester {
-	t.Helper()
-	rows := []download.Snapshot{dlSnapshot("第一首", download.StatusDone, 100, 100)}
-	b := newTestShell(t, at(shadowW, shadowH), systemIsDark(dark),
-		withView(func(sh *Shell) func(*mygoui.Context) {
-			return func(c *mygoui.Context) {
-				sh.wake.set(c)
-				// ⚠️ **主题要自己装**：只画这一块的那一支不走 `Shell.View`，
-				// 而 MyGo 每帧开头会把主题重置成跟随系统那一份（铁律二）。
-				sh.applyFrameTheme(c)
-				uiBox(c).FillWidth().FillHeight().
-					Background(c.Theme().Background).
-					Padding(60, 60, 60, 60).Children(func() {
-					sh.downloads.sync(sh.downloads.rowsFn())
-					sh.downloads.viewTable(c, sh)
-				})
-			}
-		}))
-	b.s.downloads.rowsFn = func() []download.Snapshot { return rows }
-	b.tt.Frame()
-	b.tt.Frame()
-	return b.tt
-}
 
 // uiRow 是 `ui.Row` 的本地别名——这一组到处在用。
 func uiRow(c *mygoui.Context) mygoui.Element { return mygoui.Row(c) }

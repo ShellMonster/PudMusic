@@ -239,3 +239,24 @@ func DropButton(c *ui.Context, key, label, icon string) ui.Element {
 	})
 	return b
 }
+
+// ChipCount 是带计数的 Chip（原型 `.chip` 里「标签 + <span class="mono">N</span>」）：计数是
+// 12 号等宽，和标签隔 6（`.chip` 的 gap）；颜色跟着 Chip 走。
+func ChipCount(c *ui.Context, key, label, count string, pressed bool) ui.Element {
+	p := pal(c)
+	b := ui.ButtonBase(c).Key(key).Label(label).Height(tok.ChipH).PaddingX(space.Px12).Radius(tok.ChipH / 2).
+		Gap(space.Px6).AlignItems(ui.Center).Shrink(0)
+	bg, fg := p.Surface2, p.Text2
+	switch {
+	case pressed:
+		bg, fg = p.Text, p.Bg
+	case b.Hovered():
+		bg, fg = p.Press, p.Text
+	}
+	b = b.Background(bg).Transition(motion.Fade)
+	b.Children(func() {
+		text(c, label, scale.Size13, fg).SingleLine()
+		typo.Mono(ui.Text(c, count)).FontSize(scale.Font(c, scale.Size13)).TextColor(fg).SingleLine()
+	})
+	return b
+}
