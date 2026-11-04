@@ -19,27 +19,22 @@ import (
 	"testing"
 )
 
-// TestTheUserRowMenuIsNotGreyedOut 盯用户那一行的菜单项还是能按的。
+// TestTheUserRowMenuIsNotGreyedOut 盯用户那一行（现在是一张卡）不再带歌的右键菜单。
 func TestTheUserRowMenuIsNotGreyedOut(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click(searchTabLabels[searchTabUser]); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
-	if err := tt.RightClick("第 1 页 第 2 首"); err != nil {
-		t.Fatalf("右键点不到那一行：%v", err)
-	}
-	// ⚠️ **菜单项要在点之前数**：点完菜单就关了，而 `tt.Menu()` 读的是
-	// **当前开着的那一份**。
+	// UP 主结果现在是原型的两列卡片（`pud.UCard`），没有「播放 / 不是投稿」那一份歌的右键菜单；
+	// 右键点它也不能弹出歌的菜单（点一下卡 = 进他的空间，见 `TestClickingAUserCardGoesToTheirSpace`）。
+	_ = tt.RightClick("打开 第 1 页 第 2 首 的空间")
 	for _, item := range tt.Menu() {
-		if strings.Contains(item, "不是投稿") {
-			t.Errorf("用户那一行的菜单末尾多了一句对他毫无意义的话：%q", item)
+		if strings.Contains(item, "不是投稿") || item == "播放" {
+			t.Errorf("用户卡的右键菜单里有一句歌的菜单项：%q", item)
 		}
-	}
-	if err := tt.ChooseMenuItem("播放"); err != nil {
-		t.Fatalf("用户那一行的「播放」被按成灰的了：%v", err)
 	}
 }

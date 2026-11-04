@@ -115,7 +115,13 @@ func (d *downloadsPage) viewStatusPud(c *ui.Context, r download.Snapshot) {
 			return
 		}
 		ui.Row(c).Shrink(1).Gap(space.Px4).Children(func() {
-			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(col).SingleLine().Ellipsis("…").Shrink(1)
+			t := ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(col).Shrink(1)
+			if r.Status == download.StatusError && r.Err != "" {
+				// 失败那一格带着原因：整句要看得见（票 #241 F-19），110 宽的状态列里折行、不截成省略号。
+				t.MaxLines(3)
+			} else {
+				t.SingleLine().Ellipsis("…")
+			}
 			if mono != "" {
 				typo.Mono(ui.Text(c, "· "+mono)).FontSize(scale.Font(c, scale.Size12)).TextColor(col).SingleLine()
 			}

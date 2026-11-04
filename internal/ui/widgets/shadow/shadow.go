@@ -86,27 +86,6 @@ func Tailwind2XL(e ui.Element) ui.Element {
 	return e.Shadow(0, 25, 50, -12, ui.RGBA(0, 0, 0, tailwindBlack25))
 }
 
-// HeroSmall 是 HeroUI 的 `shadow="sm"`（`--heroui-box-shadow-small`）。
-//
-// 浅色：`0 0 5px 0 rgb(0 0 0/0.02), 0 2px 10px 0 rgb(0 0 0/0.06),
-// 0 0 1px 0 rgb(0 0 0/0.3)`。
-// 深色：`0 0 5px 0 rgb(0 0 0/0.05), 0 2px 10px 0 rgb(0 0 0/0.2),
-// inset 0 0 1px 0 rgb(255 255 255/0.15)`。
-//
-// ⚠️ **深浅两套的第三层不一样**：浅色那层是 1 像素的**外**黑边（把卡片和底色
-// 分开），深色那层是 1 像素的**内**白边（深底上黑边看不见，白边才看得出边界）。
-// 抄成一样的话深色下那张卡片就是「糊在底上的一块」。
-func HeroSmall(e ui.Element, t *ui.Theme) ui.Element {
-	if t.Dark {
-		return e.Shadow(0, 0, 5, 0, ui.RGBA(0, 0, 0, 0.05)).
-			Shadow(0, 2, 10, 0, ui.RGBA(0, 0, 0, 0.2)).
-			InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.15))
-	}
-	return e.Shadow(0, 0, 5, 0, ui.RGBA(0, 0, 0, 0.02)).
-		Shadow(0, 2, 10, 0, ui.RGBA(0, 0, 0, 0.06)).
-		Shadow(0, 0, 1, 0, ui.RGBA(0, 0, 0, 0.3))
-}
-
 // HeroMedium 是 HeroUI 的 `shadow="md"`（`--heroui-box-shadow-medium`）。
 //
 // 浅色：`0 0 15px 0 rgb(0 0 0/0.03), 0 2px 30px 0 rgb(0 0 0/0.08),

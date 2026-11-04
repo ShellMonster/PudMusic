@@ -14,6 +14,7 @@ package ui
 // 三角形」（或者什么都没有）。
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"image/color"
 	"testing"
@@ -138,11 +139,13 @@ func TestTheConfirmBodyIsTextSmall(t *testing.T) {
 	if !ok {
 		t.Fatalf("弹窗上没有那颗「取消」，文字有 %q", tt.Texts())
 	}
-	// 「取消」是 pud.Button 的 14 号字（原型 `.btn` 14），正文也是 14（`.dlg-body p` 继承 body 14）。
-	want := cancel.H
+	// 「取消」是 pud.Button 的 14 号字（原型 `.btn` 14，行高取字体自己的，量出来 `cancel.H`）；正文也是 14，
+	// 但它继承 body 的行高 1.55（原型 `.dlg-body p` 不写行高，`body { line-height: 1.55 }`），所以框高是
+	// 14 × 1.55 = 21.7。字号是 14 的判据于是是「框高 = 14 × leading.Body」，而不是和按钮的框一样高。
+	want := float32(14 * leading.Body)
 	if r.H < want-0.05 || r.H > want+0.05 {
-		t.Errorf("正文的行高是 %v，want %v（「取消」%v，同为 14）——它不是 text-sm",
-			r.H, want, cancel.H)
+		t.Errorf("正文的行高是 %v，want %v（14 号字 × 正文行高 %v；「取消」框高 %v）——它不是 14 号的正文",
+			r.H, want, leading.Body, cancel.H)
 	}
 }
 

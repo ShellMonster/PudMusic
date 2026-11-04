@@ -221,10 +221,16 @@ func TestTheSearchWatchStopsWhileTheFullPlayerIsOpen(t *testing.T) {
 	f := newLibFake(t).withLater(1, 3, "甲", "乙", "丙")
 	tt, s := libraryShell(t, f, laterPath)
 
-	// 敲一个字，让那个 500ms 的防抖钟挂上（假时钟不走，所以它一直挂着）。
-	typeKeyword(t, tt, "周")
+	// 让那个 500ms 的防抖钟挂上（假时钟不走，所以它一直挂着）。原型的稍后再看页没有关键词框了
+	// （DESIGN.md §0′.T7），所以不再靠「敲一个字」，直接把「敲下去、还没发出去」的起点置上——
+	// 这一条要量的是满屏开着时钟被收掉，不是输入框。
+	s.laterPage.pendingSince = s.clock.Now()
+	tt.Frame()
 	if s.laterPage.pendingSince.IsZero() {
 		t.Fatal("起点就不对：那个防抖钟没挂上")
+	}
+	if s.searchWatchStop == nil {
+		t.Fatal("起点就不对：防抖钟挂着，但那个 125ms 的钟没醒着")
 	}
 
 	// 满屏要有一首歌在放才开得出来。

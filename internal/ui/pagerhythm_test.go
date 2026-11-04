@@ -1446,7 +1446,7 @@ func TestTheCollectionHeaderStaysInsideTheCoverOnOneLine(t *testing.T) {
 // 搜索 / 统计）：左右页边距按**窗口宽**（`.page` 的 40 / 32 / 16，默认 1200 → 40），标题是同一档
 // （`clamp(32, 3.4vw, 48)` → 1200 时 40.8）——六页的墨迹左缘一致、标题墨迹高度一致。
 func TestThePrototypePagesShareTheWindowBasedMargin(t *testing.T) {
-	sideW := app.DefaultSideMenuWidth
+	sideW := float64(tok.SideW) // 侧栏固定 232
 	area := contentArea(sideW)
 	want := int(sideW) + 40
 	heights := map[string]int{}

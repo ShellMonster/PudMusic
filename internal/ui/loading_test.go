@@ -118,7 +118,7 @@ func TestEveryFirstScreenIsACenteredSpinner(t *testing.T) {
 	}
 }
 
-// TestTheLoadingStateIsNotTheEmptyState 钉住「加载中和空状态是两档，不混」。
+// TestTheLoadingStateIsNotTheEmptyState 钉住（搜索页的空状态是原型 `PAGES.search` 那一句「没有找到相关歌曲」，T7）「加载中和空状态是两档，不混」。
 //
 // # 判据是画面：同一页上，两档长得不一样
 //
@@ -142,8 +142,8 @@ func TestTheLoadingStateIsNotTheEmptyState(t *testing.T) {
 	if !ok {
 		t.Fatalf("没有那枚转圈，文字有 %q", tt.Texts())
 	}
-	if tt.HasText("暂无内容") {
-		t.Errorf("还在加载就说「暂无内容」——那是把「还没好」说成「没有」，文字有 %q", tt.Texts())
+	if tt.HasText("没有找到相关歌曲") {
+		t.Errorf("还在加载就说「没有找到相关歌曲」——那是把「还没好」说成「没有」，文字有 %q", tt.Texts())
 	}
 	// 转圈不是一行字：15px 那一档的行高是 17.67，而它是 32 的一方块。
 	if loading.H <= 0 || loading.H > skeletonRows*skeletonRowH {
@@ -154,11 +154,11 @@ func TestTheLoadingStateIsNotTheEmptyState(t *testing.T) {
 	// 放行，让它变成「没有结果」。
 	st.release("周杰伦", 1)
 	waitFrames(t, tt, "结果回来了（没有结果那一支）", func() bool {
-		return tt.HasText("暂无内容")
+		return tt.HasText("没有找到相关歌曲")
 	})
-	empty, ok := tt.Find("暂无内容")
+	empty, ok := tt.Find("没有找到相关歌曲")
 	if !ok {
-		t.Fatalf("没有说「暂无内容」，文字有 %q", tt.Texts())
+		t.Fatalf("没有说「没有找到相关歌曲」，文字有 %q", tt.Texts())
 	}
 	if _, ok := tt.Find("正在加载…"); ok {
 		t.Error("结果回来了还转着——加载中和空状态混成了一档")
@@ -166,7 +166,7 @@ func TestTheLoadingStateIsNotTheEmptyState(t *testing.T) {
 	// 横向：两档都在这一块的正中。
 	lc, ec := loading.X+loading.W/2, empty.X+empty.W/2
 	if math.Abs(float64(lc-ec)) > 2 {
-		t.Errorf("转圈居中在 %.1f，「暂无内容」居中在 %.1f——"+
+		t.Errorf("转圈居中在 %.1f，「没有找到相关歌曲」居中在 %.1f——"+
 			"「居中」是这一块的性质，两档得在同一个位置上", lc, ec)
 	}
 }

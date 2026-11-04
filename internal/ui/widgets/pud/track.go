@@ -5,6 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -196,7 +197,8 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				b.Children(func() { glyph(c, "play", tok.IconSm, p.Text) })
 				ev.Play = b.Clicked()
 			case t.Playing:
-				EqBars(c, key+":eq", !t.Paused)
+				// 标签带歌名：读屏软件和无头 Tester 都靠它认「这一行正在放」（同 `hover.PlayingLabel`）。
+				EqBars(c, key+":eq", !t.Paused).Label(hover.PlayingLabel(t.Title))
 			default:
 				typo.Mono(ui.Text(c, t.Index)).FontSize(scale.Font(c, scale.Size13)).
 					TextColor(p.Text3).SingleLine()
@@ -297,11 +299,16 @@ func EqBars(c *ui.Context, key string, moving bool) ui.Element {
 	p := pal(c)
 	still := !moving || motion.Reduced(c)
 	box := ui.Box(c).Key(key).Size(3*3+2*2, 14).Shrink(0)
-	var phase float32
+	// 相位在**画的时候**算、走局部重绘，窗口看不见时不再要帧（和跳动波形同一套，`hover.Cycle`）。
+	var cycle func(*ui.Painter) float32
 	if !still {
-		phase = box.Loop("eq", eqPeriod, ui.Linear)
+		cycle = hover.Cycle(box, eqPeriod)
 	}
 	box.Draw(func(pp *ui.Painter, r ui.Rect) {
+		var phase float32
+		if cycle != nil {
+			phase = cycle(pp)
+		}
 		for i := 0; i < 3; i++ {
 			frac := float32(0.4)
 			if !still {

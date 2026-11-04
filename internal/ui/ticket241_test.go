@@ -50,11 +50,13 @@ import (
 // ⚠️ **改之前这一条是红的**：那一版末行是「这一条流有多…」，右端那八列只有基线
 // 上那两个点。
 func TestTheErrorReasonIsNotCutOff(t *testing.T) {
+	// 「深夜唱片行」的失败那一格写「失败 · 原因」（一段字，T7）；原因整句在里面。
+	errCell := "失败 · " + dlErrText
 	_, tt := newRows(t, dlSnapshot("歌 甲", download.StatusError, dlProgress, dlChunk))
-	if !shows(tt, dlErrText) {
+	if !shows(tt, errCell) {
 		t.Fatalf("那一格没有画出错误原因，文字有 %q", tt.Texts())
 	}
-	rows := inkTailRows(t, tt, dlErrText, rgb(BuildTheme(app.DefaultSettings(""), false).Background))
+	rows := inkTailRows(t, tt, errCell, rgb(BuildTheme(app.DefaultSettings(""), false).Background))
 	if rows < 4 {
 		t.Errorf("错误原因末行最右那八列只有 %d 行墨——那是省略号（基线上三个点），"+
 			"说明这句话被截断了", rows)

@@ -568,14 +568,7 @@ func TestRedrawingAfterCloseDoesNotRearmAnyTimer(t *testing.T) {
 			arm:   func(_ *testing.T, _ *Shell, tt *mygoui.Tester) { tt.Frame() }, // 首帧就装
 			armed: func(s *Shell) bool { return s.feed.stop != nil },
 		},
-		{
-			name: "404 那个每一秒一跳的",
-			arm: func(_ *testing.T, s *Shell, tt *mygoui.Tester) {
-				s.navigate("/没有这条")
-				tt.Frame()
-			},
-			armed: func(s *Shell) bool { return s.notFoundStop != nil },
-		},
+		// 404 那个每秒一跳的倒计时随旧设计移除了（原型的 404 不倒计时、不自动跳走，DESIGN.md §0′.T7）。
 		{
 			name: "搜索防抖那个每 125ms 一跳的",
 			arm: func(_ *testing.T, s *Shell, tt *mygoui.Tester) {

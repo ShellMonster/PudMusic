@@ -114,51 +114,44 @@ func TestTheSearchPageKeepsTheResultsWhenALaterPageFails(t *testing.T) {
 	}
 }
 
-// TestTheUserRowSaysGoToHisSpaceInsteadOfPlay 钉住验收第 3、4 条：搜索页「用户」
-// 那一档的封面，**图形、提示文案、无障碍名三样说的是同一件事**（进他的 UP 空间）。
+// TestTheUserRowSaysGoToHisSpaceInsteadOfPlay 钉住验收第 3、4 条：搜索页「UP 主」那一档，
+// **无障碍名说的是「进他的空间」，不说放歌**。
 //
-// 原来那一圈反馈是：图形 = 播放三角、提示 = 「从这一首往后听」、无障碍名 = 「<昵称>
-// 从这一首往后听」——**三样都在说放歌**，而用户按下去做的是跳到那个 UP 主的主页
-// （上游 `user-card.tsx:51` 的 `navigate("/user/" + mid)`）。
-//
-// ⚠️ **「从这一首往后听」那一套不许再出现**：它是无障碍名和提示的**同一句话**，
-// 所以断言「找不到那一句」就等于断言图形、提示、无障碍名三样都换了。
+// 「深夜唱片行」之后 UP 主结果是原型的两列卡片（`pud.UCard`，DESIGN.md §0′.T7）：整张卡是一枚按钮，
+// 无障碍名「打开 <昵称> 的空间」，按下去进他的 UP 空间。原来封面上「图形 / 提示 / 无障碍名」那一圈
+// 反馈（`hover.ProfileLabel`）随旧的行样式移除了；这里改钉新的卡：它叫「打开 … 的空间」，
+// 不叫「播放 …」，而歌那一档的曲目行仍是「播放 <歌名>」那一套、不叫「打开 … 的空间」。
 func TestTheUserRowSaysGoToHisSpaceInsteadOfPlay(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
-		t.Fatalf("点不到「用户」那个 Tab：%v", err)
+	if err := tt.Click(searchTabLabels[searchTabUser]); err != nil {
+		t.Fatalf("点不到「UP 主」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
 	title := "第 1 页 第 1 首"
-	hoverShellRow(t, tt, title)
-
 	// ① 无障碍名说的是「进他的 UP 空间」。
-	if _, ok := tt.Find(hover.ProfileLabel(title)); !ok {
-		t.Errorf("用户那一行的封面没有「进他的 UP 空间」那个名字，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("打开 " + title + " 的空间"); !ok {
+		t.Errorf("用户那张卡没有「打开 … 的空间」那个名字，文字有 %q", tt.Texts())
 	}
-	// ② 「播放」那一套（歌的封面反馈）不许再出现。
-	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
-		t.Errorf("用户那一行的封面上还是歌那一套反馈（播放），文字有 %q", tt.Texts())
+	// ② 「播放」那一套（歌的反馈）不许再出现。
+	for _, bad := range []string{"播放 " + title, hover.PlayLabel(title)} {
+		if _, ok := tt.Find(bad); ok {
+			t.Errorf("用户那张卡上还是歌那一套反馈（%q），文字有 %q", bad, tt.Texts())
+		}
 	}
-	// ③ **歌那一档的身份不许被这一票改**：同样的封面，歌还是「播放」那一套。
-	//
-	// ⚠️ 这一条是验收第 5 条（「列表行和网格卡片的『播放』图形没被这一票改」）：
-	// 那一档的封面是**同一个控件**画出来的，两边一起改的话这一票就把「播放/暂停
-	// 那套图形」也顺手改了——那是另一件事（要改另开票）。
+	// ③ **歌那一档的身份不许被这一票改**：曲目行悬停出来的还是「播放 <歌名>」。
 	if err := tt.Click("歌曲"); err != nil {
 		t.Fatalf("点不到「歌曲」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "歌曲那一页进来", loadedTo(s, searchTabSong, 1))
 	hoverShellRow(t, tt, title)
-	if _, ok := tt.Find(hover.PlayLabel(title)); !ok {
-		t.Errorf("歌曲那一行的封面上没有「播放」那一套了——这一票不该动它，文字有 %q",
-			tt.Texts())
+	if _, ok := tt.Find("播放 " + title); !ok {
+		t.Errorf("歌曲那一行悬停后没有「播放」那一套了，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find(hover.ProfileLabel(title)); ok {
-		t.Errorf("歌曲那一行的封面上却摆着「进他的 UP 空间」那一套，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("打开 " + title + " 的空间"); ok {
+		t.Errorf("歌曲那一行却摆着「打开 … 的空间」那一套，文字有 %q", tt.Texts())
 	}
 }
 
@@ -178,22 +171,20 @@ func TestTheUserCardSaysGoToHisSpaceInsteadOfPlay(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", st, withSettings(set))
 	settleText(t, tt, "第 1 页 第 1 首")
 
-	if err := tt.Click("用户"); err != nil {
+	if err := tt.Click(searchTabLabels[searchTabUser]); err != nil {
 		t.Fatalf("点不到「用户」那个 Tab：%v", err)
 	}
 	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
 
-	// ⚠️ **用第二格**：网格那一档里，框架给**每一行**（不是每一格）标了那一行
-	// 第一首歌名（`ui.List` 的 `ListState.Label`），于是 `tt.Find(第一首)` 给回的是
-	// **整行**那个盒子，指针落在整行的边上、没落在任何一格上。第二格给回的是它
-	// 自己那一小块（歌名），指针正落在那一格上。
+	// 「数据显示样式」是歌曲列表的事；UP 主那一档（原型两列卡片）在列表 / 网格 / 紧凑三档下是同一张卡，
+	// 无障碍名同样是「打开 … 的空间」，不是「播放 …」。
 	title := "第 1 页 第 2 首"
-	hoverShellRow(t, tt, title)
-
-	if _, ok := tt.Find(hover.ProfileLabel(title)); !ok {
-		t.Errorf("网格那一档的用户格子没有「进他的 UP 空间」那个名字，文字有 %q", tt.Texts())
+	if _, ok := tt.Find("打开 " + title + " 的空间"); !ok {
+		t.Errorf("网格那一档的用户卡没有「打开 … 的空间」那个名字，文字有 %q", tt.Texts())
 	}
-	if _, ok := tt.Find(hover.PlayLabel(title)); ok {
-		t.Errorf("网格那一档的用户格子上还是歌那一套反馈（播放），文字有 %q", tt.Texts())
+	for _, bad := range []string{"播放 " + title, hover.PlayLabel(title)} {
+		if _, ok := tt.Find(bad); ok {
+			t.Errorf("网格那一档的用户卡上还是歌那一套反馈（%q），文字有 %q", bad, tt.Texts())
+		}
 	}
 }

@@ -947,6 +947,21 @@ type waveStateKey struct{}
 // 而相位是钟算的，所以它在画的时候算。两者分开之后，`st` 这个指针是从建
 // 的那一刻起就**指着同一份**的（`ui.Local` 按 key 认元素，元素在，那一份就在）。
 func wavePhase(p *ui.Painter, st *waveState, visible bool) float32 {
+	return cyclePhase(p, st, visible, wavePeriod)
+}
+
+// Cycle 让一个元素按 period 一轮地循环动画，返回「画的时候问此刻相位（0~1）」的函数。
+// 它走的是跳动波形同一套办法（`wavePhase`）：局部重绘、窗口看不见时不再要帧、Tester 的钟不走
+// 就不要第二帧——`pud.EqBars`（原型的 eq-bars）用它，免得和波形各写一套「看不见时停帧」。
+//
+// 要在**建的时候**调（它查 `ui.Local`、认下逐窗口的可见开关）；返回的函数在 `Draw` 里调。
+func Cycle(box ui.Element, period time.Duration) func(p *ui.Painter) float32 {
+	st := ui.Local(box, waveStateKey{}, func() waveState { return waveState{} })
+	visible := frameVisible
+	return func(p *ui.Painter) float32 { return cyclePhase(p, st, visible.Load(), period) }
+}
+
+func cyclePhase(p *ui.Painter, st *waveState, visible bool, period time.Duration) float32 {
 	now := p.Now()
 	if !st.started {
 		// 第一次看见这一格：相位的零点就是此刻。
@@ -969,7 +984,7 @@ func wavePhase(p *ui.Painter, st *waveState, visible bool) float32 {
 			p.AnimationFrame()
 		}
 	}
-	return float32(now.Sub(st.start)%wavePeriod) / float32(wavePeriod)
+	return float32(now.Sub(st.start)%period) / float32(period)
 }
 
 // waveHeight 是某一根竖条此刻多高。
