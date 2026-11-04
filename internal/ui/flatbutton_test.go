@@ -388,7 +388,7 @@ func TestThePlayBarKeysAreFlatAndKeepTheirHover(t *testing.T) {
 			tt.Move(600, 20) // 播放条之外，窗口顶上那条空地
 			tt.Frame()
 
-			for _, what := range []string{"播放模式", "播放速率", "加歌"} {
+			for _, what := range []string{"播放模式", "播放速率"} {
 				r, ok := tt.Find(what)
 				if !ok {
 					t.Fatalf("播放条上找不到 %q，文字有 %q", what, tt.Texts())

@@ -472,6 +472,9 @@ type Shell struct {
 	// sleepOpen 是睡眠定时那个浮层开着没有。只由 view 在主线程上读写，
 	// 见 playbar_sleep.go。
 	sleepOpen bool
+	// qualityOpen / dlOpen 是播放条右列「音质」「下载」两个弹层开没开（原型 `popHtml` 的
+	// `quality` / `dl`）。
+	qualityOpen, dlOpen bool
 
 	// spaceAt 是上一次空格触发播放/暂停的帧时刻，用来同一帧去重。
 	spaceAt time.Time

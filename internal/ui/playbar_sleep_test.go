@@ -8,10 +8,10 @@ func TestTheSleepMenuSetsAndClearsTheTimer(t *testing.T) {
 	if err := tt.Click("睡眠定时"); err != nil {
 		t.Fatalf("点不开睡眠定时：%v（画面：%q）", err, tt.Texts())
 	}
-	if !tt.HasText("30 分钟后停") || !tt.HasText("放完这一首就停") {
+	if !tt.HasText("30 分钟后暂停") || !tt.HasText("放完这一首就暂停") {
 		t.Fatalf("浮层缺档位：%q", tt.Texts())
 	}
-	if err := tt.Click("30 分钟后停"); err != nil {
+	if err := tt.Click("30 分钟后暂停"); err != nil {
 		t.Fatal(err)
 	}
 	if a.Snapshot().SleepAt.IsZero() || s.sleepOpen {

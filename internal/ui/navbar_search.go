@@ -88,7 +88,7 @@ const (
 	// 这个数只在窄窗胶囊被 `MinWidth(0)` 压到几十像素时垫底——再跟着缩，里面
 	// 那排折行的 chip 就摆不开了。旧口径「面板固定 360、比框宽」（Biu 的
 	// `w-[360px]`，同文件 :101）已废。
-	suggestWidth = 360
+	suggestWidth = 380
 
 	// suggestPanelLabel 是建议面板本体的无障碍名字。
 	//

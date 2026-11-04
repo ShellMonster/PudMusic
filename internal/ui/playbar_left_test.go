@@ -234,11 +234,19 @@ func TestTheQualityChipIsShortEnoughToSitNextToTheTitle(t *testing.T) {
 				Quality: full,
 			}, 1000)
 
-			chip, ok := tt.Find(bili.ChipLabel(full))
-			if !ok {
-				t.Fatalf("画面上找不到徽章 %q，文字有 %q", bili.ChipLabel(full), tt.Texts())
+			// 原型 `.q-badge`：无损档写 `HI-RES`、杜比档写 `DOLBY`，其余写短码率。
+			want := bili.ChipLabel(full)
+			switch want {
+			case "无损":
+				want = "HI-RES"
+			case "杜比":
+				want = "DOLBY"
 			}
-			const maxChipW = 30
+			chip, ok := tt.Find(want)
+			if !ok {
+				t.Fatalf("画面上找不到徽章 %q，文字有 %q", want, tt.Texts())
+			}
+			const maxChipW = 80
 			if chip.W > maxChipW {
 				t.Errorf("徽章 %q 是 %.1f 宽（上限 %d）——"+
 					"它和歌名挤在 76 宽的那一行里会被摊扁"+

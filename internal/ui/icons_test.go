@@ -523,13 +523,13 @@ func TestThePlayBarDrawsAnIconForEveryAction(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := playBarTester(t, fullBarState(), 1200, dark)
-			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "加歌"} {
+			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "歌词"} {
 				assertGlyphPainted(t, tt, label)
 			}
 			// 赞 / 收藏在左边**第三段**（见 viewTrackActions），下载在右边
 			// 那一组（见 viewPlayBarRight）——**两处都要 `HasTrack` 才画**，
 			// fullBarState 带了。
-			for _, label := range []string{"收藏", "下载"} {
+			for _, label := range []string{"收藏", "下载当前歌曲"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})

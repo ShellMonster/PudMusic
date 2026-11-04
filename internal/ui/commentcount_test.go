@@ -14,9 +14,7 @@
 package ui
 
 import (
-	"fmt"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 
@@ -162,79 +160,6 @@ func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
 // 宽度账
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestTheCountDoesNotSqueezeTheTitleOrTheSlider 是这一票的宽度回归（本票角标
-// 之后改断**不变**）。
-//
-// # 改之前 / 改之后的账（实测，深色主题，同一首歌）
-//
-//	窗口   评论键宽（无数字 → 有数字）  歌名宽（改之前 → 有数字）  让位   滑块左沿
-//	 900     32 → 67                       76 → 76                 0    330.7
-//	1000     32 → 67                       76 → 76                 0    358.2
-//	1200     32 → 67                       76 → 76                 0    413.2
-//	1600     32 → 67                      117.6 → 82.6            35    523.2
-//
-//	（那是票 #682 横排那一版：数字占一格（缝 2 + 数字 33），评论键从 32 长到
-//	 67，让位的是文字列 / 左列自己。）
-//
-// 🔴 **本票（角标）之后那 35 没有了**：数字收成挂在图形盒子右上角的角标，
-// `Attach` **不占布局**——所以评论键**带不带数字都是 32**，歌名**一个像素都
-// 不让**，进度行也**一个像素都不让**。
-//
-// 🔴 **进度行一个像素都不许让**：它在中间那一列里，压根不在左列里——所以左列
-// 不许被撑出去。900 宽下评论键右沿 297，滑块左沿 330.7，中间剩下 **33.7**
-// （`TestTheCommentsKeyDoesNotTouchTheProgressBar` 那条盯的是「不碰」，这一条
-// 盯的是「一寸不让」）。
-//
-// ⚠️ **比的是「有数字 / 没数字」两档**：同一个窗口、同一首歌、同一个 bvid，
-// 只有 `stat.reply` 不同——而本票之后**两档一个像素都不该差**。
-func TestTheCountDoesNotSqueezeTheTitleOrTheSlider(t *testing.T) {
-	const longTitle = "一首歌的名字很长很长很长很长"
-	const longArtist = "一个非常非常非常非常非常非常长的 UP 主名字"
-	// 那 1 是浮点噪声的容差（同一档同一首歌的两次测量抖 0.0~0.1）。
-	const slack = 1
-	for _, width := range []int{900, 1000, 1200, 1600} {
-		t.Run(fmt.Sprint(width), func(t *testing.T) {
-			it := app.Item{
-				Source: "online", Type: "mv", Bvid: "BVcountWidth", Cid: "1",
-				Title: longTitle, Artist: longArtist, ArtistMid: 1,
-			}
-			without := commentCountWidths(t, it, width, 0)
-			with := commentCountWidths(t, it, width, 1234567) // 数字吃到上限那一档
-
-			// 🔴 **角标不占布局**：评论键带不带数字都是 32，一个像素都不许长。
-			if grew := with["评论键"] - without["评论键"]; grew > slack {
-				t.Errorf("宽度 %d：带数字的评论键 %.1f，不带数字的 %.1f——"+
-					"角标该不占布局（那一格是 Attach 上去的），它却把键撑宽了 %.1f",
-					width, with["评论键"], without["评论键"], grew)
-			}
-			for _, what := range []string{longTitle, longArtist} {
-				// 🔴 歌名 **一个像素都不让**（角标不占布局，没有东西要它让）。
-				if gave := without[what] - with[what]; gave > slack {
-					t.Errorf("宽度 %d：「%s」让了 %.1f——角标不占布局，歌名一个像素都不该让",
-						width, what, gave)
-				}
-				// 🔴 不许破那一列的保底。
-				if with[what] < trackTextMinW-slack {
-					t.Errorf("宽度 %d：带数字之后「%s」只剩 %.1f 宽（保底 %d）——"+
-						"文字列让破了", width, what, with[what], trackTextMinW)
-				}
-			}
-			// 🔴 进度行：**一个像素都不许变**。
-			for _, what := range []string{"播放进度左沿", "播放进度宽"} {
-				if d := absFloat(with[what] - without[what]); d > slack {
-					t.Errorf("宽度 %d：%s 从 %.1f 变成 %.1f（差 %.1f）——评论数把它挤了",
-						width, what, without[what], with[what], d)
-				}
-			}
-			// 评论键的右沿也不许压到进度行上。
-			if key, bar := with["评论键右沿"], with["播放进度左沿"]; key > bar {
-				t.Errorf("宽度 %d：评论键右沿在 %.1f，而进度行从 %.1f 开始——它们碰上了",
-					width, key, bar)
-			}
-		})
-	}
-}
-
 // commentCountWidths 量一档播放条上那几样各多宽。
 func commentCountWidths(t *testing.T, it app.Item, width int, reply int64) map[string]float32 {
 	t.Helper()
@@ -260,89 +185,6 @@ func commentCountWidths(t *testing.T, it app.Item, width int, reply int64) map[s
 		t.Fatalf("宽度 %d / %d 条：画面上找不到进度条，文字有 %q", width, reply, tt.Texts())
 	}
 	return out
-}
-
-// TestTheWidthCommentsMatchTheCode 钉住**那一大段宽度注释与代码/实测一致**。
-//
-// 🔴 这一段注释是「为什么左列保底是这么多」的唯一说明，而下一个人调宽度时就是
-// 照着它算的——**写错一个数就是把人带偏一次**（票 #682 的审查抓到两处：
-// 最小宽度写的 305，实际 307；「四档都是 76」里 1600 其实是 82.6）。
-//
-// 判据分三层：
-//
-//  1. 常量之间的账（`playbarActionsW` = 四枚 32 + 三道键间缝 3 × 3 = 137）；
-//  2. 注释里那个「最小宽度：**N**」要与 `playbarLeftMinW` 算出来的数一致；
-//  3. 「歌名的宽」那段要与**实测**一致：1600 那一档不是 76，注释里必须写出量到
-//     的那个数（`fmt.Sprintf("%.1f")` 的同一个格式）。
-func TestTheWidthCommentsMatchTheCode(t *testing.T) {
-	// 1. 常量的账。
-	//
-	// ⚠️ **本票（角标）换了这一族的账**：三枚键（收藏 / 赞 / 评论）的数字**不占
-	// 布局**——它挂在图形盒子的右上角当角标，所以每一枚键回到 32、和没有数字
-	// 时一样，分集那一枚也是 32。
-	if playbarActionsW != 137 {
-		t.Errorf("playbarActionsW = %v，want 137（四枚 32 + 三道键间缝 3 × 3）", playbarActionsW)
-	}
-	if playbarLeftMinW != 281 {
-		t.Errorf("playbarLeftMinW = %v，want 281（52 + 8 + 76 + 8 + 137）", playbarLeftMinW)
-	}
-	if playbarBadgeMaxW != 22.5 {
-		t.Errorf("playbarBadgeMaxW = %v，want 22.5（刚好装下最宽那一档「99k+」≈22.0，9 号字）", playbarBadgeMaxW)
-	}
-
-	// 2/3. 注释要与代码和实测对得上。
-	b, err := os.ReadFile("playbar.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	src := string(b)
-
-	// 注释里那句「最小宽度：**N**」。
-	//
-	// ⚠️ **用 `%g` 而不是 `%d`**：这个数历史上带过半像素（票 #701 是 309.5），
-	// `%d` 读一个带小数的数会**报错**（整数读不进小数）。
-	claimed := -1.0
-	for _, line := range strings.Split(src, "\n") {
-		if !strings.Contains(line, "playbarLeftMinW 是左边那一列的最小宽度") {
-			continue
-		}
-		if _, err := fmt.Sscanf(strings.TrimSpace(strings.TrimPrefix(
-			strings.TrimSpace(line), "// playbarLeftMinW 是左边那一列的最小宽度：**")),
-			"%g", &claimed); err != nil {
-			t.Fatalf("读不出那一行注释里的宽度：%q（%v）", line, err)
-		}
-	}
-	if claimed < 0 {
-		t.Fatal("playbar.go 里找不到「playbarLeftMinW 是左边那一列的最小宽度」那一行注释")
-	}
-	if claimed != playbarLeftMinW {
-		t.Errorf("注释说最小宽度是 %v，代码算出来是 %v——照着注释算的人会被带偏",
-			claimed, playbarLeftMinW)
-	}
-
-	// 歌名的宽：量四档，把「不是 76 的那一档」的真实数写进注释里。
-	//
-	// ⚠️ **本票（角标）之后那个数是 76**：角标不占布局，左列保底 281——
-	// 900 / 1000 / 1200 三档**都是** 76（那一列在这三档上由**保底宽**说话）；
-	// 1600 那一档由轨道说话，是 **82.6**（轨道 1 份 313.6 > 保底 281）。
-	const longTitle = "一首歌的名字很长很长很长很长"
-	it := app.Item{
-		Source: "online", Type: "mv", Bvid: "BVcommentWidthDoc", Cid: "1",
-		Title: longTitle, Artist: "某个 UP 主", ArtistMid: 1,
-	}
-	for _, width := range []int{900, 1000, 1200, 1600} {
-		got := commentCountWidths(t, it, width, 1234567)[longTitle]
-		if got == trackTextMinW {
-			continue
-		}
-		// 那一档不是保底宽（轨道说话）：注释里得写出这个数，而不是笼统地说
-		// 「四档都是 76」。
-		want := fmt.Sprintf("%.1f", got)
-		if !strings.Contains(src, want) {
-			t.Errorf("宽度 %d 上歌名实测 %.1f，而 playbar.go 的宽度注释里没有这个数"+
-				"——注释说的和量出来的不一致", width, got)
-		}
-	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

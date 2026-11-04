@@ -45,8 +45,8 @@ func rateBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App, *Shell) {
 // TestRateButtonShowsTheCurrentRate 盯按钮上的字就是当前倍率。
 func TestRateButtonShowsTheCurrentRate(t *testing.T) {
 	tt, a, _ := rateBarTester(t, 760)
-	if !tt.HasText("1x") {
-		t.Fatalf("默认是原速，按钮上却不是「1x」：%q", tt.Texts())
+	if !tt.HasText("1×") {
+		t.Fatalf("默认是原速，按钮上却不是「1×」：%q", tt.Texts())
 	}
 
 	for _, r := range []float64{0.5, 0.75, 1.25, 1.5, 1.75, 2} {
@@ -60,7 +60,7 @@ func TestRateButtonShowsTheCurrentRate(t *testing.T) {
 
 // TestRateIsReadEveryFrame 盯读数是**每帧现读**的，不是按下时记下来的。
 //
-// 这一条钉的是「换歌之后不会回到 1x」：倍率是用户的一个设置（记在 App 上），
+// 这一条钉的是「换歌之后不会回到 1×」：倍率是用户的一个设置（记在 App 上），
 // 新歌开好时套上去（见 `app.App.Open`）。界面上要是把按下那一刻的值缓存住，
 // 换歌之后按钮回到 1x 而声音是 1.5 倍——界面上唯一能看见倍速的地方说错了话。
 //
@@ -78,27 +78,27 @@ func TestRateIsReadEveryFrame(t *testing.T) {
 	tt := b.tt
 
 	tt.Frame()
-	if !tt.HasText("1x") {
-		t.Fatalf("一开始就没有「1x」：%q", tt.Texts())
+	if !tt.HasText("1×") {
+		t.Fatalf("一开始就没有「1×」：%q", tt.Texts())
 	}
 
 	st.Rate = 1.75
 	tt.Frame()
-	if !tt.HasText("1.75x") {
+	if !tt.HasText("1.75×") {
 		t.Fatalf("倍率没跟上：%q", tt.Texts())
 	}
 
 	// 换歌那一帧：歌名、时长全变了，倍率不变。
 	st.Title, st.Duration = "换了一首", 3*60*1000*1000*1000
 	tt.Frame()
-	if !tt.HasText("1.75x") {
+	if !tt.HasText("1.75×") {
 		t.Errorf("换歌之后倍率按钮回到别的值了：%q", tt.Texts())
 	}
 
 	st.Rate = 1
 	tt.Frame()
-	if !tt.HasText("1x") {
-		t.Errorf("切回原速之后按钮上不是「1x」：%q", tt.Texts())
+	if !tt.HasText("1×") {
+		t.Errorf("切回原速之后按钮上不是「1×」：%q", tt.Texts())
 	}
 }
 
@@ -188,7 +188,7 @@ func TestTheRateButtonDoesNotSquashTheTitle(t *testing.T) {
 				t.Errorf("宽度 %d：歌名（y=%.1f 高 %.1f）被 %d 高的播放条裁了",
 					width, title.Y, title.H, playbarHeight)
 			}
-			if !tt.HasText("1x") {
+			if !tt.HasText("1×") {
 				t.Errorf("宽度 %d：倍率按钮不见了：%q", width, tt.Texts())
 			}
 		})
@@ -197,15 +197,15 @@ func TestTheRateButtonDoesNotSquashTheTitle(t *testing.T) {
 
 // TestRateMenuLabelsAreNotTruncated 盯浮层里那七行**看全了**。
 //
-// 这条是被一张截图逮到的：浮层里的按钮宽 56 时，「0.75x」和「1.75x」被截成
+// 这条是被一张截图逮到的：浮层里的按钮宽 56 时，「0.75×」和「1.75×」被截成
 // 「0.…」「1.…」——而界面上所有已有的断言**都是绿的**。因为无头 Tester 读的是
-// 控件的**文本**（`HasText("0.75x")` 照样成立），被截的只是画出来的那几个字。
+// 控件的**文本**（`HasText("0.75×")` 照样成立），被截的只是画出来的那几个字。
 // 换句话说：界面上唯一能看见倍速的地方少了一大半信息，却没有任何一条测试会红。
 //
 // 断法是量**画出来**的宽度：每一行的字占多宽，和同一串字在一根不设限的行里的
 // 自然宽度比。少了就是被截了。
 //
-// ⚠️ 喂的倍率是 1.1（不在七档里），好让锚点上那个按钮写着「1.1x」，和浮层里的
+// ⚠️ 喂的倍率是 1.1（不在七档里），好让锚点上那个按钮写着「1.1×」，和浮层里的
 // 七行**一个都不撞名**。撞了名的话 `Find` 拿到的是先画的那个（锚点），量到的
 // 是锚点的宽度——永远是 64，永远不红。
 func TestRateMenuLabelsAreNotTruncated(t *testing.T) {
@@ -282,8 +282,8 @@ func TestRateLabelMatchesBiu(t *testing.T) {
 		in   float64
 		want string
 	}{
-		{0.5, "0.5x"}, {0.75, "0.75x"}, {1, "1x"},
-		{1.25, "1.25x"}, {1.5, "1.5x"}, {1.75, "1.75x"}, {2, "2x"},
+		{0.5, "0.5×"}, {0.75, "0.75×"}, {1, "1×"},
+		{1.25, "1.25×"}, {1.5, "1.5×"}, {1.75, "1.75×"}, {2, "2×"},
 	} {
 		if got := rateLabel(c.in); got != c.want {
 			t.Errorf("rateLabel(%v) = %q，要的是 %q", c.in, got, c.want)

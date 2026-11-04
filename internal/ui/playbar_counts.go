@@ -71,6 +71,8 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -330,101 +332,39 @@ func badgeTextWidth(measured float32) float32 {
 	return measured
 }
 
-// `dx` 是缺口块这一帧的**水平平移**——它和图形同抖。赞键长按三连的时候
-// 图形盒子里那两层（底色 + 拇指）在抖（`likeShakeDX`），缺口块不吃同一个
-// 平移的话，按住 2.5s 全程是「图标在抖、缺口原地不动」——缺口漂离图标
-// （对抗性审查查出的一笔）。⇒ 抖动的那一条调用方把自己的 `dx` 传进来，
-// 不抖的调用方（收藏 / 评论 / 测试脚手架）传 0。
-func countBadge(c *ui.Context, n int64, bg ui.Color, dx float32) {
+// countBadge 是图标键右上角的计数（原型 `.cnt`）：等宽 10 号 600、字距 -0.02em、次要色，
+// 底是播放条的 `side` 色，内边距 2/4、圆角 6，离键上沿 1、右沿 -4（超出键 4）。
+//
+// 它挂在键里 18×18 的图形盒子上（盒子在 36×36 的键里居中，盒子右上角在键的 (27, 9)），
+// 所以相对盒子右上角是「往右 13、往上 8」。dx 是长按三连时图标的抖动偏移，计数跟着抖。
+func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 	t := playbarCountText(n)
 	if t == "" {
-		// ⚠️ **没有数字时这一格不画**：缺口块连建都不建（占一个绝对定位的孩子是
-		// 小事，但「没有数」和「零个赞」是两件事——见 `TestTheThreeCountsNeverShowZero`）。
 		return
 	}
-	// 🔴 **缺口块的宽按字量出来，不靠盒子的 fitWidth**：`Attach` 里框架按
-	// 父盒子的 padding box（18×18）给绝对定位元素的**可用宽**，fit 型盒子被
-	// 夹成 18 ——字再宽盒子也只有 18，「99k+」就漏出去了。所以这里先用
-	// `MeasureText` 量出那一串字的宽、**显式钉成盒子的宽**（量不准时退回
-	// 上限那一档 `playbarBadgeMaxW`）。字宽 + 左 `badgeNotchPadL` + 右
-	// `badgeNotchPadR` 的余量 = 缺口块宽（左宽右窄：咬进图形的那一边留
-	// 一圈看得见的底色缝，理由见常量注释）。
-	textW, _ := c.MeasureText(0, ui.Span{Text: t, Size: playbarBadgeFont})
-	textW = badgeTextWidth(textW)
-	notchW := textW + badgeNotchPadL + badgeNotchPadR
-	if notchW < badgeNotchMinW {
-		notchW = badgeNotchMinW
-	}
-	ui.Box(c).Key("count-badge-notch").Size(notchW, badgeNotchMinH).
-		// 🔴 **缺口块的上沿越过图形上沿 `badgeNotchOut`，左缘只收进图形右缘
-		// `badgeNotchBite`**——`Attach` 的 `Top(…)` 往**下**挪、`Right(…)` 往
-		// **左**挪（`navbar_feed.go` 记着同一笔：MyGo 的 inset 正负号和 CSS
-		// 一样），所以「往外探」要传**负数**：`Right(-(notchW - bite))` 把块的
-		// 右缘推出图形右缘 notchW − bite 像素，左缘就正好收在图形里 6 像素
-		// ——咬的是右上角那一小块，不是包着整个图形（理由见 `badgeNotchBite`）。
+	p := tok.Of(c.Theme())
+	ui.Box(c).Key("count-badge-notch").
 		Attach(ui.AnchorTopRight, ui.AnchorTopRight).
-		Top(-badgeNotchOut).Right(-(notchW-badgeNotchBite)).
-		// 🔴 **和图形同抖**：赞键长按三连的时候图形盒子里那两层在 `dx` 上抖，
-		// 缺口块不吃同一个平移就是「图标在抖、缺口原地不动」——按住 2.5s
-		// 全程缺口漂离图标。不抖的调用方传 0，这一条就是恒等变换。
-		Translate(dx, 0).
-		// ⚠️ **四个角全圆**：左下那一口是咬进图形的，其余三角探在外面（见
-		// `badgeNotchR`）。
-		Radius(badgeNotchR).
-		Background(bg).
-		// 字在缺口里，左边留 `badgeNotchPadL`、右边留 `badgeNotchPadR`
-		// （CSS 序：上 右 下 左）——咬进图形的那一边是 8：数字起笔和图形
-		// 残笔之间要有一眼能看到的底色缝（视觉审查打回的那一笔：3 像素的
-		// 缝放大看是「字身几乎顶在笔画上」）。
-		Padding(space.None, badgeNotchPadR, space.None, badgeNotchPadL).Center().
-		// 🔴 **不吃指针**：它是「图形右上角挖出来的一个缺口」，不是一枚键——
-		// 底下的按钮照点，悬停照常。
+		Top(-8).Right(-13).Translate(dx, 0).
+		Radius(6).Background(p.Side).Padding(space.Px2, space.Px4).
 		PassThrough().
 		Children(func() {
-			ui.Text(c, t).FontSize(playbarBadgeFont).
-				TextColor(c.Theme().TextMuted).
-				// 🔴 **MinWidth 钉成字宽**：盒子的宽已经按字钉死了，但文字自身
-				// 的可用宽还是按「父盒子可用宽」走——不钉的话框架按缺口的
-				// 可用宽（≈ 字宽 + padding 那一份）给，字会被夹成截断。
-				// 钉成 `textW`，一格都不截——「+」结构上丢不了（理由见文件头）。
-				MinWidth(textW).MaxWidth(textW).
-				SingleLine()
+			typo.Mono(ui.Text(c, t)).FontSize(10).FontWeight(600).LetterSpacing(-0.2).
+				TextColor(p.Text2).SingleLine()
 		})
 }
 
-// countKeyIcon 是「图形盒子 + 缺口角标」那一枚里的**图形那一块**（收藏 / 评论共用）。
-//
-// # 🔴 结构：一个 18×18 的盒子，图形在盒子里，缺口块挂在盒子右上角
-//
-// 改之前图形是「行里的一个 18 宽的孩子」，数字是它右边的一格。现在图形回到
-// **和没有数字时一模一样的形状**：18×18 的盒子（`iconMd`），而缺口块**不占布局**
-// ——所以这一枚键的宽是 32，**带不带数字都一样**。
-//
-// ⚠️ **盒子是给缺口块当锚的**：`Attach` 相对**父元素的 padding box**——所以缺口
-// 块要挂在**一个正好 18 宽**的盒子上，它的右上角才是图形的右上角（挂在按钮上
-// 会多出 7 的内边距，缺口就挖到按钮角上去了）。
-//
-// ⚠️ **悬停变主色**（`flat.IconAccentOnHover`）：和相邻几枚一样（上游
-// `hover:text-primary`）——而 `flat.Button` 只会铺一层淡底，图形自己不换色的话
-// 悬停反馈就只剩那层淡底。
-//
-// ⚠️ **按下缩放**（`flat.PressScale`）：纯图标键才缩，而这一枚是「图标 + 缺口
-// 角标」——图形缩、缺口不缩（缺口缩了会跟着抖，读数不该动）。
-//
-// ⚠️ **`bg` 顺着传**：缺口色 = 按钮底下那块底（理由见 `countBadge`），调用方
-// 在播放条那一列里现算（`coverWash(t.Background)`）。
+// countKeyIcon 是计数键里的图形盒子（18×18，图形居中）+ 右上角的计数。
+// on 是「开着」（收藏了 / 赞了）：图形 accent-text；平时次要色，悬停正文色。
 func countKeyIcon(c *ui.Context, iconName string, hovered, pressed bool, n int64, bg ui.Color) {
+	countKeyIconOn(c, iconName, hovered, pressed, false, n, bg)
+}
+
+func countKeyIconOn(c *ui.Context, iconName string, hovered, pressed, on bool, n int64, bg ui.Color) {
 	ui.Box(c).Size(iconMd, iconMd).Children(func() {
-		// 图形在盒子的正中（`Attach` 是相对盒子的 padding box 居中）。
 		ic := ui.Icon(c, icon(iconName)).FontSize(iconMd).
-			Attach(ui.AnchorCenter, ui.AnchorCenter)
-		if col, ok := flat.IconAccentOnHover(c, false, hovered); ok {
-			ic = ic.TextColor(col)
-		}
+			Attach(ui.AnchorCenter, ui.AnchorCenter).TextColor(pbIconColor(c, hovered, on))
 		flat.PressScale(ic, pressed, false)
-		// 🔴 **缺口块挂在盒子右上角**——它是绝对定位的，不占布局，而它的父盒子
-		// 是 18×18，于是右上角正好是图形的右上角。**dx 传 0**：收藏 / 评论没有
-		// 长按抖动（那是赞键独有的三连），缺口块不用跟着谁动。
 		countBadge(c, n, bg, 0)
 	})
 }

@@ -82,8 +82,8 @@ func dragTo(t *testing.T, tt *mygoui.Tester, to float64) {
 // TestWindowShowsPlayBar 是验收项 1：起得来，画面上有播放条。
 func TestWindowShowsPlayBar(t *testing.T) {
 	h := newHarness(t)
-	if !h.tt.HasText("布丁音乐") {
-		t.Errorf("标题不在，文字有 %q", h.tt.Texts())
+	if !h.tt.HasText("推荐音乐") {
+		t.Errorf("侧栏不在，文字有 %q", h.tt.Texts())
 	}
 	if !h.tt.HasText("还没有打开文件") {
 		t.Errorf("没歌时的提示不在，文字有 %q", h.tt.Texts())
@@ -262,28 +262,25 @@ func TestRenderPlayBarShots(t *testing.T) {
 	save(t, dir, "05-error.png", h.tt)
 }
 
-// TestVolumeSliderDrivesTheApp 盯浮层里那根竖滑块真的在调音量。
-//
-// ⚠️ **它现在要先打开浮层**：音量收成了一枚图标，那根滑块在悬停浮出来的浮层里
-// （上游 `music-volume` 那个做法）。悬停 → 浮层出来 → 滑块在画面上 → 按它。
+// TestVolumeSliderDrivesTheApp 盯播放条右边那根行内音量滑块（原型 `.vol`，96 宽）真的在调音量。
 func TestVolumeSliderDrivesTheApp(t *testing.T) {
 	h := newHarness(t)
 	h.open(t)
 
-	hoverVolumeKey(t, h.tt)
-
 	bar, ok := h.tt.Find("音量")
 	if !ok {
-		t.Fatalf("浮层里找不到那根音量滑块，文字有 %q", h.tt.Texts())
+		t.Fatalf("播放条上找不到那根音量滑块，文字有 %q", h.tt.Texts())
 	}
-	// 竖滑块：按在**底下**就是 0（框架的竖直映射是 `1-(y-cy)/ch`，见
-	// `mygo/ui/value_input.go:207`）。
-	h.tt.Press(bar.X+bar.W/2, bar.Y+bar.H-2)
-	h.tt.Release(bar.X+bar.W/2, bar.Y+bar.H-2)
+	if bar.W != 96 {
+		t.Errorf("音量滑块宽 %.0f，原型 `.vol` 是 96", bar.W)
+	}
+	// 横滑块：按在最左边就是 0。
+	h.tt.Press(bar.X+1, bar.Y+bar.H/2)
+	h.tt.Release(bar.X+1, bar.Y+bar.H/2)
 	h.tt.Frame()
 
-	if got := h.app.Snapshot().Volume; got > 0.3 {
-		t.Errorf("把音量条拉到最下，音量却是 %v", got)
+	if got := h.app.Snapshot().Volume; got > 0.1 {
+		t.Errorf("把音量条拉到最左，音量却是 %v", got)
 	}
 }
 
@@ -299,22 +296,15 @@ func TestVolumeSliderDrivesTheApp(t *testing.T) {
 // ⚠️ **「加歌」不算在内**：它是本应用多出来的一枚（上游把选本地音乐放在侧栏菜单
 // 里），摆在最后一格。把它也算进次序的话，这条就在给一个上游没有的东西定规矩。
 func TestThePlayBarRightRowFollowsBiuOrder(t *testing.T) {
-	// 有歌时才全：Biu 那一行是 `{Boolean(playId) && … && <MusicDownloadButton />}`
-	// （`playbar/right/index.tsx:15`），没歌的时候不摆下载。
-	want := []string{"播放模式", "下载", "播放列表", "播放速率"}
+	// 原型 `renderBar` 右列的次序：音质角标 → 倍速 → （分集）→ 下载 → 歌词 → 队列 → 静音 → 音量。
+	// 「加歌」「音量浮层」原型里没有，已删。
+	want := []string{"音质：320K", "播放速率", "下载当前歌曲", "歌词", "播放列表"}
 
 	tt, _ := metaBarTester(t, fullBarState(), 1200)
 
-	// 音量那一枚**自己找**：它的无障碍名字跟着静音状态变（见 volumeKeyOnTheBar）。
-	vol, ok := volumeKeyOnTheBar(tt)
-	if !ok {
-		t.Fatalf("播放条右边那一组里没有音量那一枚，文字有 %q", tt.Texts())
-	}
-
-	// 次序：模式 → 下载 → 队列 → 音量 → 倍速。
 	ordered := []mygoui.Rect{}
 	names := []string{}
-	for _, label := range want[:3] {
+	for _, label := range want {
 		r, ok := tt.Find(label)
 		if !ok {
 			t.Fatalf("播放条右边那一组里没有 %q，文字有 %q", label, tt.Texts())
@@ -325,30 +315,18 @@ func TestThePlayBarRightRowFollowsBiuOrder(t *testing.T) {
 		ordered = append(ordered, r)
 		names = append(names, label)
 	}
-	ordered = append(ordered, vol)
-	names = append(names, "音量")
-	rate, ok := tt.Find("播放速率")
+	vol, ok := volumeKeyOnTheBar(tt)
 	if !ok {
-		t.Fatalf("播放条右边那一组里没有 %q，文字有 %q", "播放速率", tt.Texts())
+		t.Fatalf("播放条右边那一组里没有静音键，文字有 %q", tt.Texts())
 	}
-	ordered = append(ordered, rate)
-	names = append(names, "播放速率")
+	ordered = append(ordered, vol)
+	names = append(names, "静音")
 
 	for i := 1; i < len(ordered); i++ {
 		if ordered[i].X <= ordered[i-1].X {
-			t.Errorf("%q（x=%.1f）排在 %q（x=%.1f）**前面**了——"+
-				"次序要和 Biu 一致：%v", names[i], ordered[i].X, names[i-1],
-				ordered[i-1].X, names)
+			t.Errorf("%q（x=%.1f）排在 %q（x=%.1f）**前面**了——次序要和原型一致：%v",
+				names[i], ordered[i].X, names[i-1], ordered[i-1].X, names)
 		}
-	}
-
-	// 加歌在最后：它在整组里最靠右。
-	enq, ok := tt.Find("加歌")
-	if !ok {
-		t.Fatalf("播放条上没有「加歌」，文字有 %q", tt.Texts())
-	}
-	if enq.X <= rate.X {
-		t.Errorf("「加歌」（x=%.1f）不在最后——它在「播放速率」（x=%.1f）前面", enq.X, rate.X)
 	}
 }
 

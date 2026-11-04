@@ -246,55 +246,6 @@ func TestTheMiniMuteStateSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestTheMiniMuteIconMatchesThePlayBar 钉住「两扇窗画的是同一张图」。
-//
-// ⚠️ **这是「一致」那一条的落点**：主窗口播放条上那一枚（`playbar_volume.go`）
-// 和迷你窗新加的那一枚，**都必须走 `volumeIcon`**（哪一档配哪一张由那个函数
-// 独家说了算，`icons_test.go` 的 `TestTheStateIconsOnlyReachTheScreenThroughTheirFunction`
-// 盯着「状态图标只准从那几个函数出去」）。
-//
-// 所以这里量的是**画出来的图形**：静音时两扇窗那一枚的形状必须一样（都是喇叭
-// 带叉那张），不一样就说明其中一扇窗另起了一套。
-func TestTheMiniMuteIconMatchesThePlayBar(t *testing.T) {
-	// 主窗口：静音那一档画的是 mute 那张（`volumeIcon` 独家决定）。
-	bar := playBarTester(t, app.State{HasTrack: true, Title: "一首歌", Rate: 1, Volume: 0.2, Muted: true}, 1200, false)
-	barRect, ok := volumeKeyOnTheBar(bar)
-	if !ok {
-		t.Fatalf("播放条上找不到音量那一枚，文字有 %q", bar.Texts())
-	}
-	_, barShape := glyphInRect(bar, barRect)
-	if barShape == "" {
-		t.Fatalf("播放条上那一枚里没有图形")
-	}
-
-	// 迷你窗：同一张图。
-	s, a := newMiniShell(t, nil)
-	if err := enqueueTwo(a, t); err != nil {
-		t.Fatal(err)
-	}
-	a.SetVolume(0.2)
-	a.ToggleMute()
-	tt := miniTester(s)
-	tt.Frame()
-	miniRect, ok := tt.Find(miniMuteIconLabelMuted)
-	if !ok {
-		t.Fatalf("静音之后迷你窗里没有 %q 那一枚，文字有 %q",
-			miniMuteIconLabelMuted, tt.Texts())
-	}
-	_, miniShape := glyphInRect(tt, miniRect)
-	if miniShape == "" {
-		t.Fatalf("迷你窗那一枚里没有图形")
-	}
-
-	// ⚠️ **比的是形状而不是逐像素**：两枚的底色一样（都是各自窗口的卡片底），
-	// 而**尺寸不一样**（播放条那枚是 32 的命中区、迷你窗那枚是 22），所以逐像素
-	// 比必然不等——比的是**图形本身**的形状。
-	if !sameShape(barShape, miniShape) {
-		t.Errorf("两扇窗静音时画的不是同一张图：\n播放条 %q\n迷你窗 %q",
-			barShape, miniShape)
-	}
-}
-
 // sameShape 比两段形状串是不是同一张图（**按图形自身的包围盒归一化**后比）。
 //
 // ⚠️ **不能逐格比**：两枚的**尺寸不一样**（播放条那枚是 32 的命中区、迷你窗

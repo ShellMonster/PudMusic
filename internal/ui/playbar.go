@@ -11,13 +11,14 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -45,9 +46,9 @@ import (
 // 那一行**（和 UP 名并排），于是它们和「歌名/UP 名」是**上下**的关系；上游是
 // **左右**的关系（见 `viewTrackActions`）。
 const (
-	playbarHeight = 76
-	playbarPadX   = space.Px16
-	coverSize     = 52
+	playbarHeight = 84
+	playbarPadX   = space.Px20
+	coverSize     = 56
 	coverGap      = space.Px8
 
 	// coverRadius 是播放条上那张封面（和它悬停时那层黑罩）的圆角：**6**。
@@ -59,7 +60,7 @@ const (
 	// ⚠️ **它不是全局那个 `radius.default: 8`**：那是个**令牌**，用户在设置页
 	// 能调它（`app.Settings.BorderRadius` → `t.Radius`），改了它整个界面跟着变。
 	// 所以**只有这一处封面**用 6（票 #220 / 报告 §3.3、§3.4）。
-	coverRadius = 6
+	coverRadius = 4
 
 	// trackRowGap 是歌名下面那几行之间的缝（UP 名 / 出错那一句）。
 	//
@@ -196,289 +197,6 @@ const (
 	playbarLeftMinW = coverSize + coverGap + trackTextMinW + coverGap + playbarActionsW
 )
 
-// viewPlayBar 是底部那条播放条：封面、歌名、上一首/播放/下一首、可拖的进度条、
-// 右边那一组控件。
-//
-// 一行摆完，横着分三块，和 Biu 的 playbar/left|center|right 一一对应：
-// 左边封面加歌名，中间控制在上进度在下，右边是那一组。
-//
-// 🔴 **底色取 `Background`（和内容区同一个来源），靠一条阴影和侧栏分开**。
-//
-// Biu 的播放条是 `bg-background`（`layout/playbar/index.tsx:26` 的 `Card`），
-// 底色和内容区一样，分界靠的是那**两道**影：外层 div 的 `shadow-2xl`
-// （`layout/index.tsx:48`）+ 里面那张 Card 的 `shadow="sm"`
-// （`layout/playbar/index.tsx:24`）——**深色下真正把那条线画出来的是后者**
-// （1 像素内白边）。我们原来取 `Surface`：**浅色下只差一档，
-// 深色下差一整级**（`#27272a` / `#18181b`），于是深色下界面裂成三条带
-// （票 #127 的头一条）。三处统一之后层次没丢：上面那条线在。
-//
-// ⚠️ **卡片和弹窗现在也取 `Background` 了**（票 #172）：上游那张 `Card` 走
-// `bg-content1`、那一枚 `Drawer` 走 `bg-background`，两处都等于页面底色，
-// **浮起来靠的是那圈影**（`widgets/shadow` 里 HeroUI 那几档）。所以「靠底色
-// 亮一档来分层」这一句已经作废——别再照着它去找「亮一级的板」。
-//
-// 🔴 **宽度账**（2026-10 票 #216 之后量的，票 #573 又重量了一遍，深浅两套
-// 一样）：
-//
-//	窗口   播放条可用   轨道 1/3/1（左边/中间/右边）   中列内容区   进度行   滑块   左边那一列
-//	 900       868        173.6 / 520.8 / 173.6            472.8     354.6  238.6  281（撑出 107.4）
-//	1000       968        193.6 / 580.8 / 193.6            532.8     399.6  283.6  281（撑出 87.4）
-//	1200      1168        233.6 / 700.8 / 233.6            652.8     489.6  373.6  281（撑出 47.4）
-//	1600      1568        313.6 / 940.8 / 313.6            892.8     669.6  553.6    313.6
-//
-//	（可用 = 窗口 - 左右各 16 的内边距；**三列按 1:3:1 分**，这是上游那张
-//	 `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]` 的数——轨道宽度
-//	 只按比例走，内容更宽也不把轨道撑开。中列内容区 = 中列 - 左右各 24 的
-//	 内边距（上游 center 的 `px-6`）；进度行 = 内容区的 **3/4**（上游的 `w-3/4`）；
-//	 滑块 = 进度行 - 两个 48 的读数 - 两道 10 的缝。）
-//
-//	⚠️ **「左边那一列」那一栏是 `max(轨道 1 份, 保底宽 281)`**：窗口够宽
-//	 （≥ 1540）时是轨道说话，更窄的时候是**保底宽**说话——那一列于是
-//	 **撑出轨道**，伸进中间那一列（上游也是这么溢的：它那一列的内容最少 184，
-//	 而 1 份在 900 宽下只有 173.6）。
-//
-//	🔴 **三键落在窗口的竖直中轴上**（实测 760/900/1200/1600 四档，偏差 0.0）：
-//	 它在中间那一列里居中，而**左右两列等宽**（1:3:1 的头一份和尾一份一样）
-//	 ——那才是那一列对称于窗口的原因。
-//
-//	⚠️ **左边那一列的保底宽是 281，不是轨道宽**（本票角标之后）：它的内容最少
-//	 要 281（封面 52 + 缝 8 + 文字列 76 + 缝 8 + **分集 32 + 三枚带角标的键
-//	 3 × 32 + 三道键间缝 3 × 3**，见 `playbarLeftMinW`）。
-//
-//	⚠️ **「撑出来的那一截」离滑块还有 33.7**（900 宽下实测：左列右端 297.0，
-//	 滑块左沿 330.70）——**进度行照样碰不到它**。而那一枚「评论」键的**图形**
-//	 （18 × 18）在 y=28..46，而读数那一行在 y=48.8..65.2——**上下也不碰**
-//	 （量出来的，不是算出来的：见 `comments_test.go` 的
-//	 `TestTheCommentsKeyDoesNotTouchTheProgressBar`）。
-//
-//	⚠️ **右边那一组是 243.2**（不是票 #127 那时的 362）：音量收成一枚图标之后，
-//	 常驻的那根 120 像素横滑块没有了（见 `viewPlayBarRight`）；图标键的点击区
-//	 从 28 长到 32（上游那一档，G39）之后又加了 19.7——**五枚键各多 4**；
-//	 票 #173 又把倍速那一枚的字从 13/14 放到 16（上游的 `text-[16px]`），
-//	 它自己又宽了 2.5。
-//
-//	⚠️ **这张表的前提是「有歌」**，而有两样东西会改它：
-//
-//	 1. **「下载」那一枚只在有歌、且不是本地文件时摆**（`viewPlayBarRight` 的
-//		`st.HasTrack && st.Source != app.SourceLocal`）。没有歌时右边那一组是
-//		203.2（少一枚 32 的键加一道 8 的缝）——**表里是「有歌」的那一档**。
-//		⚠️ **它不再影响中间那一列**：右边那一组是绝对定位
-//		贴住右沿的（见 `viewPlayBarRight`），不占那 1 份轨道。
-//	 2. **「倍速」那一枚贴字宽**（上游的 `min-w-fit`），所以它随当前倍率变：
-//		「1x」是 43.2，「1.25x」是 65.8——**表里是 1x 的那一档**。同样地，它
-//		只改右边那一组的宽，**不再改中间那一列**。
-//
-//	🔴 **左边那一块里面怎么分（票 #219 之后）**：左边那一列的**宽一个像素都
-//	没变**（票 #219 之后是 240，票 #573 之后是 272，票 #701 之后是 309.5，
-//	本票角标之后是 **281**——`playbarLeftMinW` 那一段），变的是它里面那
-//	三段：
-//
-//		封面 52 │ 缝 8 │ 文字列（歌名 + UP 名）│ 缝 8 │ 那一排键
-//
-//	 ⚠️ **票 #135 说过「不改左侧那一块的布局」，这一票改的就是它**——报告 §2.8
-//	 说上游那边是三段（封面 │ 歌名·UP名 │ 三枚键），而我们那三枚键挤在歌名
-//	 下面那一行。
-//
-//	 **歌名因此窄了很多**：改之前文字列那一段是 180（第二行摆着 UP 名和三枚
-//	 键），改之后是 76——**键从歌名下面那一行搬到了同一段**（上游就是这
-//	 么摆的，报告 §2.8）。900~1200 宽上歌名从 146（九个多字）掉到 **43.8**
-//	 （两个多字，还要让出音质徽章和一道 6 的缝）；1280 上也是 43.8（那一列
-//	 由保底宽说话，见上面那张宽度账）；1600 上是 108.6（轨道说话：左列
-//	 313.6 里文字列分到 108.6，歌名再扣掉音质徽章和一道 6 的缝）。
-//
-//	 ⚠️ **票 #573 之后这些数没有变**：保底宽涨的那 32 **正好是「评论」那一枚
-//	 自己的盒子**——所以**文字列那一段的宽原封不动**（量出来的，见下面那张
-//	 「让位」表）。
-//
-//	 🔴 **本票（角标）之后不分档了**：三枚键的数字是挂在图形盒子右上角
-//	 外侧的角标，`Attach` **不占布局**——所以**带不带数字，左列都是 281、
-//	 文字列都保底 76**。票 #701 那两档（带数 308 / 不带数 272 + 歌名 112）
-//	 整个没有了。
-//
-//	 **和上游比的是「歌名的宽」，不是「那一段的宽」**：上游那一段（1200 宽下
-//	 65.6）里**也有 chip**——它的「无损」/「杜比」是 10 号字（≈ 20 宽），
-//	 所以上游的歌名是 **≈ 39.6**，我们的是 **42**（192K 那一档）/ 48.1
-//	 （无损 / 杜比）——**同一量级**。
-//
-//	 **上游名和它对齐**（上游 `items-start` + 一个普通 `span`）：改之前我们
-//	 那是 `flatButton(...).Grow(1)`，而框架的按钮内容**默认居中**——那句话
-//	 飘到了中间（实测 x=219，而歌名在 x=80）。
-//
-//	 ⚠️ **歌名会被截掉**是设计好的（`MaxLines(1)` + 省略号），不是坏了。
-func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
-	// 记一笔「播放条建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
-	s.builds.playbar++
-	t := c.Theme()
-
-	// ⚠️ **那道影是上游的两层**（外层 div 的 `shadow-2xl` + Card 自己的
-	// `shadow="sm"`），值都在 `internal/ui/widgets/shadow` 里（DESIGN.md §四·五：
-	// 调用处不许现调 `Shadow(...)`）。
-	//
-	// **底色和内容区是同一个**（上游 `playbar/index.tsx:26` 的 `bg-background`），
-	// 所以影是这一条唯一的分界——去掉它播放条会和内容区糊成一片（浅色下尤其
-	// 明显：两边都是 `#ffffff`）。
-	bar := shadow.PlayBar(ui.Column(c).Key("playbar").Height(playbarHeight).
-		PaddingX(playbarPadX).Background(s.coverWash(t, t.Background)), t)
-	bar.Children(func() {
-		// 🔴 **三列按 1:3:1 分**（上游 `playbar/index.tsx:26` 的
-		// `grid-cols-[minmax(0,1fr)_minmax(0,3fr)_minmax(0,1fr)]`）。
-		//
-		// 框架的 `ui.Fr` 就是 CSS 的 `minmax(0, <f>fr)`：**轨道宽度只按比例
-		// 走，内容更宽也不把它撑开**（`mygo/ui/grid.go` 的 `sizeTracks`）——
-		// 和上游那个 `minmax(0,…)` 是一个意思。
-		//
-		// ⚠️ **左右两列等宽，是「三键落在窗口竖直中轴上」的前提**：三键在
-		// 中间那一列里居中，而那一列要对称于窗口，左右两列就得等宽（外层
-		// 左右各 16 的内边距也是对称的）。**这一条不是排版偏好，是算出来的**：
-		// 两列不等宽的时候，中间那列的中心就偏了，三键跟着偏。
-		//
-		// ⚠️ **这里为什么是 Grid 而不是 Row**：Row 里三块各 `Grow(1)` 分的是
-		// 「剩下的空间」，而**剩下多少取决于左右两块自己的内容有多宽**——左边
-		// 那一块（封面 + 歌名 + UP 名 + 那一排键）最少要 281，右边那一组是
-		// 定宽的 243.2，于是中间那列分到的永远不是三份里的一份。Grid 的
-		// `Fr` 轨道不看内容（见上面那段），这才是上游那个比例。
-		ui.Grid(c).Fill().ColumnTracks(ui.Fr(1), ui.Fr(3), ui.Fr(1)).
-			RowTracks(ui.Fixed(playbarHeight)).Children(func() {
-			// 左：**三段**——封面 │ 歌名·UP名 │ 分集·收藏·赞（上游
-			// `playbar/left/index.tsx:29-93`）。段与段之间 8（coverGap，
-			// 那一行的 `space-x-2`）。
-			//
-			// ⚠️ **三枚键在第三段，不在歌名下面**（改之前在那儿）：上游那一段
-			// 是 `<div className="flex items-center">`——flex 默认方向是 row，
-			// 所以它们是**横着并排的一行**，不是竖排（报告 §2.8 点名了这一条，
-			// 而报告的第一版把它写成了竖排）。
-			ui.Row(c).Gap(coverGap).AlignItems(ui.Center).
-				MinWidth(playbarLeftMinW).Children(func() {
-				s.viewCover(c, st)
-				s.viewTrackText(c, st, t)
-				s.viewTrackActions(c, st)
-			})
-
-			// 中：控制在上、进度在下。Biu 的 playbar/center 就是一个 flex-col。
-			//
-			// 🔴 **`AlignItems(ui.Center)` 是这一票的主体**：三键和进度行
-			// 都在这一列里横向居中，于是三键落在窗口的竖直中轴上（上游
-			// `center/index.tsx:12` 的 `items-center`）。原来这一列没有它，
-			// 三键靠左，而进度条铺满整列——**两者的中轴互相对不上**。
-			//
-			// `Justify(ui.Center)` 是竖直居中（上游的 `justify-center`）。
-			//
-			// 🔴 **`PassThrough()`：这一列不接指针**——它那一个框会让
-			// **左列撑出来的那一截点不动**。
-			//
-			// 原因是命中测试取**最上面**那个含点的元素
-			// （`mygo/ui/input.go:145` 从 hits 列表末尾往前找），而这一列是
-			// 左列的**后一个兄弟**、先画后画，于是它那整个框（900 宽下从
-			// x=189.6 起）把左列溢出来的那一截盖住了：**收藏、赞、音质徽章
-			// 这些在左列右端的键点了没反应**，而**界面上看不出坏了**（它们
-			// 好好地画在那儿）。窗口宽小于约 1175 时都这样（那是「这一列的
-			// 左沿越过左列右端」的那个临界宽度）。
-			//
-			// `flagPassThrough` 只跳过**它自己**的命中框，**子节点照旧登记**
-			//（`mygo/ui/runtime.go:1046`）——所以三键和进度条照旧能点、能拖，
-			// 而这一列那一大片空白不再挡着左列。
-			ui.Column(c).Gap(space.Px2).AlignItems(ui.Center).Justify(ui.Center).
-				PaddingX(playbarCenterPadX).PassThrough().Children(func() {
-				s.viewTransport(c, st)
-				s.viewProgress(c, st)
-			})
-
-			s.viewPlayBarRight(c, st)
-		})
-	})
-}
-
-// viewPlayBarRight 是播放条右边那一组。**次序照 Biu 的 `playbar/right`**：
-// 模式 / 下载 / 队列 / 音量 / 倍速（`layout/playbar/right/index.tsx:14-18`）。
-//
-// ⚠️ **那一行还多一个「加歌」，是本应用自己的**：Biu 的右边没有它——上游把
-// 「选一个本地音乐」放在侧栏菜单的「本地音乐」那一项里，而我们的
-// `pickAndEnqueue` 是一条独立的路（播放条和顶栏「打开文件」共用它）。
-// 摆在**最后一格**：前五格的次序是肌肉记忆，加东西不该插在中间。
-//
-// ⚠️ **「下载」是从左边第二行搬过来的，不是新加的一枚**：Biu 的播放条左边
-// 只有分集 / 收藏 / 赞三枚（`playbar/left/index.tsx:86-90`），下载在右边
-// （`playbar/right/index.tsx:15`）。两处各摆一枚就是「同一个动作两个入口」，
-// 而它们会不一致——左边那枚走 `downloadLater` 补 cid，右边这枚也一样，
-// 但用户看到的是两枚一样的图标，那是在问「哪一个是真的」。
-//
-// 键与键之间的缝是 8（`space-x-2`，`playbar/right/index.tsx:13`），不是外面
-// 那一行的 12：这一行最挤，8 是上游量出来摆得下五枚的那一档。
-//
-// 🔴 **这一组现在是 243.2 宽**（六个键 + 五道 8 的缝）：模式 32、下载 32、队列 32、
-// 音量 32、倍速 43.2（贴字宽）、加歌 32。票 #127 那时它是 362——多出来的是那根
-// **常驻的 120 像素横滑块**加一道缝，票 #135 把它收成了图标；票 #173 又把倍速
-// 那一枚的字放到 16（上游的 `text-[16px]`），它自己宽了 2.5。
-//
-// ⚠️ **「下载」那一枚是有歌、且不是本地文件时才摆的**（下面那个
-// `if st.HasTrack && st.Source != app.SourceLocal`）——所以「243.2」是**有歌且
-// 是 B 站那一首**的那一档；没有歌（或者放的是本地文件）时这一组是 203.2。
-func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
-	// 🔴 **这一组是绝对定位，贴着播放条内容区的右沿**（上游
-	// `playbar/right/index.tsx:13` 的 `justify-end`）。
-	//
-	// ⚠️ **为什么不能就让它待在第三列里**：那一列是 **1 份**（三列里的），
-	// 而这一组是**定宽**的 243.2——900 宽下 1 份只有 173.6。框架给格子里
-	// 那一块的宽度是它**自己的内容宽**（于是比轨道宽），不靠右的话它从轨道
-	// 的左沿开始排，**最后那枚「加歌」键会跑到窗口外面去**（实测它在
-	// x=921.6，而窗口只有 900）。而靠右也不行：格子里那一块一旦比轨道宽，
-	// 框架的横向排布就没有余量可分（溢出时一律靠左排），内容还是往右溢。
-	//
-	// 所以这一组干脆**脱出那一列**，直接贴住内容区的右沿（`Right(0)`）——
-	// 窗口多宽它都在最右边，和上游一样；它比第三列宽出来的那一截**伸进
-	// 中间那一列**（上游那边也是这么溢的：它那一组是 203.2，1 份在 900 宽
-	// 下是 173.6），而中间那列左右各 24 的内边距（上游的 `px-6`）就是留给
-	// 它的缓冲。
-	ui.Row(c).Key("playbar-right").Gap(playbarRightGap).AlignItems(ui.Center).
-		Absolute().Right(0).Top(0).Bottom(0).Children(func() {
-		// 播放模式。**原来它摆在进度那一行的最右边**，而上游摆在右边这一组
-		// 的头一个（`playbar/right/index.tsx:14`）。搬回来之后中间那一列还
-		// 腾出 42（一个 32 的键加一道 10 的缝），而右边这一组多花同样的数。
-		s.viewPlayMode(c, st)
-
-		// 下载。**没有歌时不摆，本地文件也不摆**——Biu 那一支的条件是
-		// `{Boolean(playId) && getPlayItem()?.source !== "local" && …}`
-		// （`playbar/right/index.tsx:15`）。
-		//
-		// 🔴 **本地文件不摆**（票 #222 / 报告 §3.12）：本地文件在 B 站上压根
-		// 没有 cid 可下，按下去只会得到一句「这一首下不了」——给一个按了只会
-		// 报错的键不如不摆。**这一条以前判不出来**：`app.State` 里没有来源
-		// 那一栏（`Item.Source` 在队列那一层），现在有了（见 `State.Source`）。
-		if st.HasTrack && st.Source != app.SourceLocal {
-			s.viewDownloadButton(c, st)
-		}
-
-		// 播放列表抽屉的开关（原来在顶栏，见 navbar.go）。上游它就在右边这一组
-		// 的第三个（`playbar/right/index.tsx:16`），而顶栏那一枚是当初右边摆不下
-		// 时挪过去的——现在右边腾得开，两处只能留一个，留两个就会不一致。
-		if s.withTip(c, iconKey(c, iconQueue, "播放列表", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), drawerTip(s.drawerOpen)).Clicked() {
-			s.drawerOpen = !s.drawerOpen
-		}
-
-		// 音量收成**一枚图标 + 悬停浮出的竖滑块**（上游 `music-volume` 那个做法），
-		// 见 playbar_volume.go。
-		//
-		// ⚠️ **常驻的那根 120 像素横滑块没有了**：它抢的是进度条该有的空间——
-		// 那一档右边这一组是 362 宽，而窗口下限是 900。收成图标之后右边这组窄了
-		// 118.8（362 → 243.2）。
-		//
-		// ⚠️ **它现在不再影响中间那一列**（票 #216 之后）：右边这一组是绝对
-		// 定位贴右沿的，不占那 1 份轨道，中间那一列的宽度只由窗口宽度决定。
-		s.viewVolumeButton(c, st)
-
-		// 倍速紧挨着音量：两个都是「听感」旋钮（上游也是挨着的）。
-		s.viewRate(c, st)
-
-		s.viewSleep(c, st)
-
-		if s.withTip(c, iconKey(c, iconEnqueue, "加歌", iconMd, false).
-			Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
-			s.pickAndEnqueue()
-		}
-	})
-}
-
 // drawerTip 是播放列表开关悬停时那句话：这个键是**开关**，所以说的话得说清
 // 按下去会开还是会关——不然用户得先按一下才知道自己按的是什么。
 //
@@ -555,7 +273,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 	}
 
 	// 🔴 **缝是 4**（上游那一列的 `space-y-1`）——理由和量法见 `trackRowGap`。
-	ui.Column(c).Grow(1).Gap(trackRowGap).Children(func() {
+	ui.Column(c).Grow(1).MinWidth(0).Gap(space.None).Children(func() {
 		ui.Row(c).Gap(space.Px6).AlignItems(ui.Center).Children(func() {
 			// ⚠️ **一行，截断**——照 Biu：`left/index.tsx` 的歌名是
 			// `min-w-0 flex-1 truncate`。以前这里不设 MaxLines，窗口一窄它就换行、
@@ -583,7 +301,7 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 			// 文件」：在线条目也可能没有稿件身份（既没有 bvid 也没有 sid），
 			// 那时候没有页面可跳——上游那边拼出来的是
 			// `bilibili.com/video/undefined`，那是个 404。
-			name := ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).
+			name := ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).
 				TextColor(textColor(t, st.HasTrack)).
 				MaxLines(1).Ellipsis("…")
 			if titleClickable(st) {
@@ -598,7 +316,6 @@ func (s *Shell) viewTrackText(c *ui.Context, st app.State, t *ui.Theme) {
 					name = name.Underline()
 				}
 			}
-			s.viewQualityBadge(c, st, t)
 		})
 		// UP 名（点它进他的空间）。**没有歌不摆**（票 #219 之前是
 		// `viewTrackMeta` 第一行就 return）。
@@ -790,8 +507,8 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 	// 间距上——没有这道缝，三枚带数的键视觉上糊成一串（视觉审查实测：
 	// 「星2k+ 拇9k+ 泡1k+」看着像一整条字）。3 是「看得出是两枚键」的最小
 	// 那一档，又不把角标省下的宽度还回去。
-	ui.Row(c).Gap(playbarActionsGap).AlignItems(ui.Center).Children(func() {
-		s.viewPartButton(c, st)
+	// 原型 `.np-keys`：三枚键缝 2；分集键挪到了右列。
+	ui.Row(c).Gap(space.Px2).AlignItems(ui.Center).Shrink(0).Children(func() {
 		s.viewFavButton(c, st)
 		s.viewLikeStar(c, st)
 		// 🔴 **「评论」是第四枚**（票 #573）：它是「当前这一首」的附属页的
@@ -863,7 +580,7 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	if mid <= 0 {
 		// 没有编号时是**普通文字**：它在那一列里本来就是左对齐的（列是
 		// `AlignItems` 默认的 Stretch，文字从左沿起）。
-		ui.Text(c, name).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size14)).
+		ui.Text(c, name).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
@@ -880,7 +597,7 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
 	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
 	if s.withTip(c, flatLink(c, name).Grow(1).MinWidth(artistMinW).
-		FontSize(scale.Font(c, scale.Size14)).TextColor(t.TextMuted).
+		FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).
 		MaxLines(1).Ellipsis("…"), list.OwnerTipText(name)).Clicked() {
 		s.navigate(upPathPrefix + strconv.FormatInt(mid, 10))
 	}
@@ -937,23 +654,12 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	//
 	// 🔴 **内边距回到纯图标键那一档（每边 7）**：角标不占布局，所以这一枚的宽
 	// 和没有数字时**一模一样**——32。
-	btn := flat.Button(c, "").Label(countKeyLabel("收藏", count)).
-		Height(iconHitMd).Padding(space.None, space.Px7)
+	// 原型 `.icon-btn.on` + `.cnt`：36 的键，收藏了图形 accent-text，右上角是计数。
+	btn := pbKey(c, countKeyLabel("收藏", count))
 	btn.Children(func() {
-		// ⚠️ **缺口色 = 按钮底下那块底**：播放条那一列的底是
-		// `coverWash(t.Background)`（和这一列自己同一个来源）。
-		countKeyIcon(c, favIcon(faved), btn.Hovered(), btn.Pressed(), count,
+		countKeyIconOn(c, favIcon(faved), btn.Hovered(), btn.Pressed(), faved, count,
 			s.coverWash(c.Theme(), c.Theme().Background))
 	})
-	if faved {
-		// ⚠️ **只在这一支设颜色**：没收藏的那一支一个字都不改，好让「默认那个颜色」
-		// 继续由按钮自己决定（图标从祖先的文字色继承，按钮给的就是它）。
-		//
-		// 和「正在播放」同一个规矩：主色当前景色时浅色下要一个与底色
-		// ≥4.5:1 的变体（理由见 `widgets/ink`）——图标也是前景，1.9:1 的绿
-		// 压在白底上同样看不出是「已收藏」。
-		btn = btn.TextColor(ink.AccentOn(c.Theme()))
-	}
 	btn = s.withTip(c, btn, countKeyTip("收藏", count, favTooltip(faved)))
 	if btn.Clicked() {
 		it, ok := s.app.PlayingItem()
@@ -975,97 +681,6 @@ func favTooltip(faved bool) string {
 		return "已收藏，点一下看收在哪"
 	}
 	return "收藏这一首"
-}
-
-// viewDownloadButton 是「下载」那个键，摆在右边那一组（`viewPlayBarRight`）。
-//
-// ⚠️ **走 `downloadLater`（后台补 cid），不走 `app.Download`**：队列里那一份
-// 是从列表翻出来的，而 B 站的几个列表接口都不给 cid（搜索结果、历史、动态都
-// 是），下载按分 P 存文件。缺 cid 时 `Download` 会**如实拒绝**而不是下错一集
-// ——可播放条上这一格是「把正在放的这首存下来」，用户要的是那首，补出来的
-// 第一集不是。理由和 `dynamiccard.go` 的「下载音频」是同一条。
-//
-// ⚠️ **尺寸跟右边那一组其余几枚一样（`iconMd` / `iconHitMd`）**：这一格原来
-// 摆在左边第二行，是一排 `iconSm` 小键里的一枚；搬过来之后它要是小一号，
-// 五枚键在一条线上会看出参差——而参差正是「这一枚是从别处搬来的」在画面上
-// 唯一的痕迹。
-func (s *Shell) viewDownloadButton(c *ui.Context, st app.State) {
-	if s.withTip(c, iconKey(c, iconDownload, "下载", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7), "").Clicked() {
-		it, ok := s.app.PlayingItem()
-		if !ok {
-			s.addToast("这一首还没有取回来，下载不了", notice.Warning)
-			return
-		}
-		s.downloadLater(it, false, "下载音频")
-	}
-}
-
-// viewQualityBadge 是歌名右边那个音质徽章（「Hi-Res 无损」/「192K」）。
-//
-// 它同时是**换音质的入口**：点一下开菜单，几档里选一档。
-//
-// 为什么是徽章而不是另摆一个控件：播放条只有 76 高，左右两边（进度条、音量、
-// 加歌）都已经占满了，而「我在放的是哪一档」这件事用户本来就在看这行字。
-// 另摆一个下拉框就是把播放条挤坏——上一票为了塞下徽章把歌名挤成竖条，
-// 那次结构性的破坏就是从这个方向来的。
-//
-// 本地文件不画：那是文件格式（FLAC / AAC），不是「音质」——
-// 拿格式凑一个徽章会让「无损」这两个字在两个意思之间飘。
-//
-// ⚠️ **换流之后它会变**，所以它必须每帧从 `State` 现读，不能缓存。
-// B 站换流拿回来的可能是降级过的那一档：无声地降级会让人以为自己还在听无损。
-func (s *Shell) viewQualityBadge(c *ui.Context, st app.State, t *ui.Theme) {
-	if st.Quality == "" {
-		return
-	}
-	// 🔴 **显示的是**短版**（`bili.ChipLabel`），全称留在悬停提示里**（票 #219）。
-	//
-	// 这一列（歌名 + UP 名）**摆满时只有 76 宽**（左边那一列的保底宽 281 减去
-	// 封面 52、两道 8 的缝和那一排键 137），而全称（「无损 FLAC」52.7、「杜比
-	// 全景声」54.7、「Hi-Res 无损」60.6）**和歌名挤在一行放不下**：框架在装不下
-	// 时按**基宽的比例**分摊那份 shortfall，于是**徽章自己被摊扁**——实测「杜比
-	// 全景声」只剩 13.8（读出来**一个字**），而它同时是「换音质」的入口，**点击
-	// 区只剩 14 像素**。
-	//
-	// ⚠️ **本票（角标）之后这一列不再分两档**：数字不占布局——那一排键**带不带
-	// 数字都是 137**（四枚 32 + 三道 3 的缝），所以这一列**恒是 76**（票 #701 时
-	// 「评论键还没有数字 → 111」那一档整个没有了）。
-	//
-	// 短版（无损 / 杜比 / 192K）就是**上游那一枚 chip 的形状**
-	// （`playbar/left/index.tsx:50-56` 的「无损」/「杜比」），而全称在提示里
-	// （「音质：杜比全景声（点一下换）」）——那一行才是「B 站给了什么」的完整
-	// 说法。
-	//
-	// 🔴 **`Shrink(0)`：这一枚不许被挤窄**（框架的 `flex-shrink: 0`）。它是
-	// **控件**（点它换音质），挤窄它就是「点不准」和「读不出来」；而歌名是
-	// **可截断的标签**（`MaxLines(1)` + 省略号），挤窄它只是截得更早。
-	//
-	// ⚠️ **今天这几档 chip 的最小内容宽就够保住它**（它们的字不换行）——这一行
-	// 是把那个优先级**写死**：将来某一档的 chip 变长了，挤的应该是歌名。
-	//
-	// 收短之后各是几宽（1200 宽、多 P、实测）：192K → 歌名 42.0 / 徽章 28.0；
-	// 无损 → 歌名 48.1 / 徽章 21.9；杜比 → 歌名 48.1 / 徽章 21.9。
-	s.withTip(c, ui.Text(c, bili.ChipLabel(st.Quality)).
-		FontSize(scale.Font(c, scale.Size11)).TextColor(t.TextMuted).Shrink(0),
-		"音质："+st.Quality).
-		Menu(func(m *ui.Menu) {
-			for _, q := range qualityChoices {
-				// `Checked` 是「当前选的是这一档」。选的和给的要能分开看：
-				// 降档发生的时候，用户要能看见自己选的和系统给的不是同一档。
-				if m.Item(q.Label()).
-					Checked(app.BiliToPref(q) == st.QualityPref).
-					Chosen() {
-					// 🔴 **点的就是当前这一档时什么都不做**：换档要重新取流，
-					// 为一个听不出区别的点击打一次网络往返是白费；下面的降档
-					// 提示也只在真的换了档的时候说。
-					if app.BiliToPref(q) != st.QualityPref {
-						s.app.SetAudioQuality(q)
-						qualitySwitchToast(s, q)
-					}
-				}
-			}
-		})
 }
 
 // qualitySwitchToast 在用户**切到无损 / 杜比**的那一下说一句降档规矩（票 #581）。
@@ -1100,88 +715,6 @@ var qualityChoices = []bili.AudioQuality{
 	bili.AudioHigh,
 	bili.AudioMedium,
 	bili.AudioLow,
-}
-
-// viewTransport 是上一首、播放/暂停、下一首。
-//
-// 🔴 **次序是「上一首 · 播放 · 下一首」**：上游的 `MusicPlayControl` 就是
-// `RiSkipBackFill` / `RiPlayCircleFill` / `RiSkipForwardFill`
-// （`components/music-play-control/index.tsx:16-18`），而**我们自己的**满屏播放器
-// （`fullplayer.go`）和迷你播放器（`miniplayer.go`）也是这个次序。
-//
-// 改之前这里是「上一首 · 下一首 · 播放」——唯独播放条这处没照做。后果是**用户从
-// 全屏退回播放条时，肌肉记忆里「中间是播放」的位置按下去是下一首**。
-//
-// ⚠️ **「上一首」「下一首」两个按钮的本体是共用的**（`viewPrevButton` /
-// `viewNextButton`，满屏播放器那边也在用）——所以它们长到 22 的时候，满屏底下
-// 那一排也跟着长（上游那两处是同一个 `MusicPlayControl` 组件，同一个数）。
-//
-// ⚠️ **三个都是只有图标的按钮**（Biu 的 `MusicPlayControl` 就是上面那三个）。
-// 文字版是三个汉字各占 88 宽——中间那一列 276 宽全被这三个键占满，而进度条
-// 那一行是从它这儿借的富余（见 viewProgress）。换成图标之后那一行只有
-// **160** 宽（上一首 32 + 24 + 播放 48 + 24 + 下一首 32），歌名那边宽出来的
-// 就是「加得下东西」的那一段。
-//
-// 🔴 **三键之间的空隙是 24**（上游 `music-play-control/index.tsx:19` 的
-// `space-x-6`），原来只有 12：那时候三枚键挤成一堆，中间那枚——**用户真正
-// 要按的那一枚**——左右只各留 12 的空。
-//
-// 无障碍名字一个字没少（「上一首」「播放」「暂停」「下一首」），所以读屏软件
-// 念出来和原来一字一样——变的是**画出来的**，不是**念出来的**。
-func (s *Shell) viewTransport(c *ui.Context, st app.State) {
-	ui.Row(c).Gap(transportGap).AlignItems(ui.Center).Children(func() {
-		s.viewPrevButton(c)
-
-		// 🔴 **出错时这一枚变成红色的「出错了」**（票：左下角出错那三行太碎）。
-		//
-		// 错误文案从那一列里搬走之后，「出错了」这个信号就得长在**出问题的那个
-		// 东西**上——而那就是播放键。
-		//
-		// ⚠️ **它不直接重试**（理由见下面那一段）：能做的事在「详情」面板里。
-		if st.Err != "" {
-			// 🔴 **那一枚只做一件事：打开「详情」面板**（完整那一句 + 能做的事）。
-			//
-			// ⚠️ **它不直接重试**：能做的事有**两件**（重试 / 在 B 站里听它），
-			// 而**两个都摆在播放条上放不下**——那一列只有 75.7 像素宽（实测），
-			// 一句 26 个字的话上屏只剩十来个。所以它们一起在面板里（见
-			// `viewErrorDetail`）。
-			//
-			// ⚠️ **点它不重试**：两件事在一枚上（点一下既开面板又重试）的话，
-			// 用户想「看看为什么」的时候把歌重放了一遍——那是它没打算做的事。
-			s.viewErrorPlayKey(c, st)
-			s.viewNextButton(c)
-			return
-		}
-
-		// 🔴 **取流期间这一枚仍然是播放/暂停**（票 #282 的评审）：正在取流的
-		// 那一首**还没放起来**，而**上一首还在放**——把它换成一枚转圈，用户就
-		// 按不了暂停了（迷你窗和满屏播放器里还有，播放条上没有了）。
-		//
-		// 「正在取流」的那枚转圈在**第三行**（`viewTrackLoading`），不在这里。
-		//
-		// 🔴 **取流的时候它外面多绕一圈光**（票 #271）：那是**加**上去的，
-		// 不是替掉这一枚——按钮照旧是播放 / 暂停、照样按得下、提示照旧。
-		if st.Playing {
-			b := iconButtonPlay(c, iconPauseFill, "暂停", iconHitPlay, iconPlayBtn, false)
-			// ⚠️ **光圈只在这一枚不是灰的时候画**：框架对禁用的控件整个乘
-			// 0.5 不透明度（理由见 loadhalo.go）。
-			b = s.withLoadHalo(c, b, st, iconHitPlay, true)
-			if b.Clicked() {
-				s.app.Toggle()
-			}
-		} else {
-			// ⚠️ **禁不启用由这里给**（`iconButtonPlay` 的 `disabled`）：那一枚的
-			// 颜色是**建元素时**定的，「悬停变主色」要在**禁用之后**才问——问早了
-			// 一枚禁用的键会用主色告诉用户「这里点得动」（理由见那个函数）。
-			b := iconButtonPlay(c, iconPlayFill, "播放", iconHitPlay, iconPlayBtn, !st.HasTrack)
-			b = s.withLoadHalo(c, b, st, iconHitPlay, st.HasTrack)
-			if b.Clicked() {
-				s.app.Toggle()
-			}
-		}
-
-		s.viewNextButton(c)
-	})
 }
 
 // errPlayKeyLabel 是**出错那一档的播放键**在**不可重试**那一档的无障碍名字
@@ -1386,9 +919,10 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 			//
 			// PassThrough：浮层这一层和里面那个图标都不接点击。
 			ui.Row(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Radius(coverRadius).
-				PassThrough().Center().Background(ui.RGBA(0, 0, 0, scrim.Cover)).Children(func() {
-				ui.Icon(c, icon(iconFullscreen)).FontSize(32).
-					TextColor(c.Theme().Accent).
+				PassThrough().Center().Background(ui.RGBA(0, 0, 0, scrim.Media)).Children(func() {
+				// 原型 `.np-cover .expand`：rgba(0,0,0,.55) 底、白色 20 的展开图标。
+				ui.Icon(c, pud.Icon("expand")).FontSize(20).
+					TextColor(ui.RGB(255, 255, 255)).
 					PassThrough()
 			})
 		}
@@ -1584,9 +1118,10 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 	known := st.Duration > 0
 	chs := st.Chapters
 
-	ui.Row(c).Gap(space.Px10).AlignItems(ui.Center).WidthPercent(75).Children(func() {
-		ui.Text(c, clockOrDash(st.Position)).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
-			MinWidth(48).MaxLines(1)
+	ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).FillWidth().MaxWidth(560).Children(func() {
+		// 原型 `.seek .mono`：44 宽、等宽 11 号、text-3、居中。
+		typo.Mono(ui.Text(c, clockOrDash(st.Position))).FontSize(scale.Size11).TextColor(tok.Of(c.Theme()).Text3).
+			Width(44).TextAlign(ui.Center).MaxLines(1).Shrink(0)
 
 		// ⚠️ **`live` 只在「在放」时给**：暂停时位置不动，每帧重画同一个位置
 		// 是纯浪费——而它会一直要下一帧，窗口就停不下来（`progress_live_test.go`
@@ -1606,7 +1141,8 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		sl := playbarProgressSliderLive(c, &s.scrub, 0, 1, live).Grow(1).Label("播放进度").Disabled(!known)
 		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
 		// 那半个宽 8，点比 4 像素的轨道粗 3——票 #585）。
-		sl = withChapterDots(sl, chs, st.Duration, 8, 7, c.Theme().Background)
+		// 原型 `.chap`：宽 4、高 10、`side` 色（在轨道上切出一道口）。
+		sl = withChapterDots(sl, chs, st.Duration, 8, 7, tok.Of(c.Theme()).Side)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
 		//
 		// Dragging() 报的是「这个控件正在拖一个值 / 正在被拖动」（Drag 与
@@ -1630,8 +1166,8 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 		}
 
 		total := clockOrDash(st.Duration)
-		ui.Text(c, total).FontSize(scale.Font(c, scale.Size14)).TextColor(c.Theme().TextMuted).
-			MinWidth(48).MaxLines(1)
+		typo.Mono(ui.Text(c, total)).FontSize(scale.Size11).TextColor(tok.Of(c.Theme()).Text3).
+			Width(44).TextAlign(ui.Center).MaxLines(1).Shrink(0)
 	})
 }
 

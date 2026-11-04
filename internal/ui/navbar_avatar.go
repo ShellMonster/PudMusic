@@ -154,7 +154,7 @@ const (
 	// 变的只有**浮层锚在哪儿**：它锚在头像那一格的右下角，而那一格从 32 宽
 	// 变成 48 宽——面板的**右沿**跟着右移（面板是 `AnchorBottomEnd`），而
 	// 左沿跟着窗口右边走。
-	avatarMenuW = 240
+	avatarMenuW = 200
 
 	// avatarMenuRowH 是每一项多高。
 	//
@@ -571,7 +571,7 @@ func (s *Shell) viewAvatarMenu(c *ui.Context, anchor ui.Element) {
 		shadow.Pop(panel.
 			AttachTo(anchor, ui.AnchorBottomEnd, ui.AnchorTopEnd).
 			Margin(space.Px8, space.None, space.None, space.None).
-			Width(avatarMenuW).Padding(space.Px8).Radius(tok.R12).
+			MinWidth(avatarMenuW).Padding(space.Px8).Radius(tok.R12).
 			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn).
 			Label(avatarMenuLabel), c.Theme()).
 			Children(func() {
@@ -622,21 +622,11 @@ func (s *Shell) viewAvatarMenuItems(c *ui.Context) {
 	rows := make([]ui.Element, 0, len(items))
 	hovered := -1
 	for i, item := range items {
-		// 原型 `.pop-opt`：内边距 8/10、圆角 8、13 号；危险项 err 色。
-		row := ui.ButtonBase(c).Key("avatar-menu:"+item.label).Label(item.label).
-			FillWidth().Padding(space.Px8, space.Px10).Gap(space.Px12).
-			AlignItems(ui.Center).Radius(tok.R8)
+		// 原型 `item()`：`.pop-opt`，只有文字（没有图标），危险项 err 色。
+		row := pud.PopItem(c, "avatar-menu:"+item.label, item.label, item.danger)
 		if row.Hovered() {
 			hovered = i
 		}
-		row.Children(func() {
-			fg := p.Text
-			if item.danger {
-				fg = p.Err
-			}
-			ui.Icon(c, icon(item.icon)).FontSize(tok.Icon).TextColor(p.Text2)
-			ui.Text(c, item.label).FontSize(scale.Font(c, scale.Size13)).TextColor(fg).Grow(1).SingleLine()
-		})
 		if row.Clicked() {
 			s.runAvatarMenuItem(c, item)
 		}

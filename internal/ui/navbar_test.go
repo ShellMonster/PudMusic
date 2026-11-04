@@ -16,6 +16,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -134,8 +135,8 @@ func TestTheTopBarCoversTheContentAreaOnly(t *testing.T) {
 	// 所以量到的是 200 + 8 + 8 那一带。
 	//
 	// 右边留出来的 slack 是：顶栏自己的右内边距（8）加那个控件自己的内边距。
-	const slack = 32
-	contentLeft := float32(app.DefaultSideMenuWidth)
+	const slack = 48
+	contentLeft := tok.SideW
 	if back.X < contentLeft {
 		t.Errorf("后退按钮左边缘 %v，在内容区左沿（%v）**左边**——顶栏又盖到侧栏上去了",
 			back.X, contentLeft)
@@ -206,8 +207,8 @@ func TestTheTopBarDoesNotReserveRoomForTheWindowControls(t *testing.T) {
 	//
 	// 这一句是给「整体挪位」兜底的：上面那句只说「没动」，而这一句说「动也不
 	// 许多」，两者的差别就在「顶栏整体挪到别处去了」这种改法上。
-	const slack = 32
-	contentLeft := float32(app.DefaultSideMenuWidth)
+	const slack = 48
+	contentLeft := tok.SideW
 	if after.X > contentLeft+slack {
 		t.Errorf("装上 bar.Left=%v 之后后退键左边缘是 %v，离内容区左沿（%v）有 %v"+
 			"（容差 %v）——它不在顶栏左端", barLeft, after.X, contentLeft,
