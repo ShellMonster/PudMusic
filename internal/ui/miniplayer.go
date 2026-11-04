@@ -71,7 +71,7 @@ const (
 	miniTopH     = 16 + miniInfoH + 16
 	miniInfoH    = 24 + 20 + 8 + 36
 	miniSeekH    = 16
-	miniSeekPadB = 12
+	miniSeekPadB = space.Px12
 
 	// miniCover 是封面边长（`.mini-cover` 72，圆角 8）。
 	miniCover = 72
@@ -802,7 +802,7 @@ func (s *Shell) viewMiniNotice(c *ui.Context, text string, fg ui.Color) {
 // （11 号等宽、字距 0.14em、text-3），右边回到主窗口的图标键（16 号图标）。
 // 内边距 8 / 8 / 0 / 16，整行 44 高。
 func (s *Shell) viewMiniDragBar(c *ui.Context, p tok.Palette) {
-	ui.Row(c).Key("mini-drag").FillWidth().Padding(8, 8, 0, 16).AlignItems(ui.Center).
+	ui.Row(c).Key("mini-drag").FillWidth().Padding(space.Px8, space.Px8, space.None, space.Px16).AlignItems(ui.Center).
 		Children(func() {
 			typo.Mono(ui.Text(c, "PUDMUSIC · MINI")).FontSize(11).LetterSpacing(11 * 0.14).
 				TextColor(p.Text3).SingleLine()
@@ -825,7 +825,7 @@ func (s *Shell) viewMiniDragBar(c *ui.Context, p tok.Palette) {
 // （`st.Playing` 分支），歌从没有变成有的时候整列换一遍——没有 key 的话这些换位
 // 会让后面每个控件的状态整体错配一格。
 func (s *Shell) viewMiniTop(c *ui.Context, st app.State, p tok.Palette, curtainOn bool) {
-	ui.Row(c).Key("mini-top").FillWidth().Padding(16).Gap(16).AlignItems(ui.Center).
+	ui.Row(c).Key("mini-top").FillWidth().Padding(space.Px16).Gap(space.Px16).AlignItems(ui.Center).
 		Children(func() {
 			s.viewMiniCover(c, st, p)
 			ui.Column(c).Key("mini-info").Grow(1).MinWidth(0).Children(func() {
@@ -836,8 +836,8 @@ func (s *Shell) viewMiniTop(c *ui.Context, st app.State, p tok.Palette, curtainO
 					title = nothingPlaying.Title
 					col = p.Text2
 				}
-				// 原型 `<strong>` 15 号；系统字体里 600 与 700 是同一档。
-				ui.Text(c, title).Key("mini-title").FontSize(scale.Font(c, 15)).FontWeight(miniTitleWeight).
+				// 原型 `<strong>` 15 号（15 已从刻度退役，取最近的 14）；系统字体里 600 与 700 是同一档。
+				ui.Text(c, title).Key("mini-title").FontSize(scale.Font(c, scale.Size14)).FontWeight(miniTitleWeight).
 					FixedLineHeight(24).MaxLines(1).Ellipsis("…").TextColor(col)
 				ui.Text(c, st.Artist).Key("mini-artist").FontSize(scale.Font(c, scale.Size12)).
 					FixedLineHeight(20).MaxLines(1).Ellipsis("…").TextColor(p.Text2)
@@ -871,7 +871,7 @@ func (s *Shell) viewMiniCover(c *ui.Context, st app.State, p tok.Palette) {
 // viewMiniControls 是控制行（原型 `.mini-ctl`）：上边距 8、间距 4，上一首 / 播放 /
 // 下一首，空隙，喜欢、歌词。
 func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, curtainOn bool) {
-	ui.Row(c).Key("mini-ctl").FillWidth().Margin(8, 0, 0, 0).Gap(4).AlignItems(ui.Center).
+	ui.Row(c).Key("mini-ctl").FillWidth().Margin(space.Px8, space.None, space.None, space.None).Gap(space.Px4).AlignItems(ui.Center).
 		Children(func() {
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
 			if pud.IconBtn(c, "mini-prev", "prev", "上一首", pud.IconOpts{}).
@@ -955,7 +955,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 func (s *Shell) viewMiniSeek(c *ui.Context, st app.State, p tok.Palette) {
 	known := st.Duration > 0
 	chs := st.Chapters
-	ui.Row(c).Key("mini-seek").FillWidth().Padding(0, 16, miniSeekPadB, 16).Gap(12).AlignItems(ui.Center).
+	ui.Row(c).Key("mini-seek").FillWidth().Padding(space.None, space.Px16, space.Px12, space.Px16).Gap(space.Px12).AlignItems(ui.Center).
 		Children(func() {
 			typo.Mono(ui.Text(c, miniClock(st.Position))).Key("mini-cur").FontSize(11).
 				TextColor(p.Text3).Width(miniTimeW).TextAlign(ui.Center).SingleLine()

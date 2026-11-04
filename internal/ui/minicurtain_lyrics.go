@@ -29,6 +29,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
@@ -102,7 +103,7 @@ func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, ac
 // （原型 `.ly` 的 `transition: color var(--t-med), transform var(--t-slow)`）。
 func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, row lyrics.Row, p tok.Palette) ui.Element {
 	line := ui.Column(c).Key(lyricLineKey{ns: miniCurtainNS, at: row.At, i: i}).
-		Padding(miniCurtainLinePadY, 0)
+		Padding(miniCurtainLinePadY, space.None)
 	target := float32(0)
 	if i == active {
 		target = 1

@@ -52,9 +52,9 @@ const (
 	notchIdleW  = 330 // 无歌时那张卡的宽
 	notchHelloW = 340 // 引导那条的宽
 
-	notchWingCover = 20 // 两翼封面边长（原型 `.notch-min img`）
-	notchWingPad   = 12 // 两翼离边的内边距
-	notchCardCover = 56 // 展开卡封面（原型 `.notch-card img`）
+	notchWingCover = 20         // 两翼封面边长（原型 `.notch-min img`）
+	notchWingPad   = space.Px12 // 两翼离边的内边距
+	notchCardCover = 56         // 展开卡封面（原型 `.notch-card img`）
 
 	notchHoverOpenDelay = 300 * time.Millisecond // 指针停够多久才展开
 	notchHoverExitDelay = 350 * time.Millisecond // 走开多久才收起
@@ -611,7 +611,7 @@ func (s *Shell) viewNotchWings(c *ui.Context, st app.State, shown float32) {
 	}
 	n := &s.notchSt
 	ui.Row(c).Key("notch-min").Absolute().Top(0).Left(0).Right(0).Height(n.h0).
-		PaddingX(notchWingPad).AlignItems(ui.Center).Opacity(shown).
+		PaddingX(space.Px12).AlignItems(ui.Center).Opacity(shown).
 		Children(func() {
 			cov := ui.Box(c).Size(notchWingCover, notchWingCover).Radius(tok.R4).Clip().Shrink(0)
 			if st.CoverURL == "" {
@@ -705,7 +705,7 @@ func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float32) {
 	n := &s.notchSt
 	row := ui.Row(c).Key("notch-card").Absolute().Top(n.h0).Left(left).Width(notchOpenW).
-		Padding(4, 16, 16, 16).Gap(12).AlignItems(ui.Center).
+		Padding(space.Px4, space.Px16, space.Px16, space.Px16).Gap(space.Px12).AlignItems(ui.Center).
 		Opacity(max(0, open*1.4-0.4))
 	row.Translate(0, (1-open)*-10)
 	row.Children(func() {

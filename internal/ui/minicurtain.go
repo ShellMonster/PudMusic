@@ -127,7 +127,7 @@ const (
 	miniCurtainLineH = 24
 
 	// miniCurtainLinePadY 是每一句上下各留的内边距（原型 `.curtain .ly { padding: 6px 0 }`）。
-	miniCurtainLinePadY = 6
+	miniCurtainLinePadY = space.Px6
 
 	// miniCurtainPadX 是卷帘里歌词那一列左右的内边距（原型 `.lyrics-inner` 的 20）。
 	miniCurtainPadX = space.Px20
