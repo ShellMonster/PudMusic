@@ -186,7 +186,7 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 				// 工具条（原型 `.toolbar`：离 Tab 24，排序图标 16 + 下拉，缝 12）。
 				// 「播放全部」已经是头部那一排的「播放投稿」。
 				ui.Row(c).Key("upspace:toolbar").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
-					Padding(space.Px24, s.upPadFor(c), space.Px8, s.upPadFor(c)).Children(func() {
+					Padding(space.Px24, s.upPadFor(c), space.Px16, s.upPadFor(c)).Children(func() {
 					ui.Icon(c, pud.Icon("sort")).FontSize(16).TextColor(tok.Of(c.Theme()).Text3)
 					if toolbarSortSelect(c, &sp.videoSort, []int{0, 1, 2}, func(i int) string { return upVideoSorts[i].label }, 112) {
 						sp.videoOrder.Store(upVideoSorts[sp.videoSort].order)

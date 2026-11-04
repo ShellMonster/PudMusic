@@ -483,8 +483,11 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 			pud.SkeletonRow(c, "feed:sk2", 0)
 		})
 	default:
+		// 原型：居中的静音小键「继续往下滚，加载更多动态」，点一下也能拉下一页。
 		ui.Row(c).Key("feed-sentinel").FillWidth().Justify(ui.Center).Padding(space.Px24, space.None).Children(func() {
-			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3)
+			if pud.Button(c, "feed:more", pud.Quiet, pud.Sm, hint, "").Clicked() && retry != nil {
+				retry()
+			}
 		})
 	}
 }

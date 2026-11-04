@@ -530,19 +530,15 @@ func (s *Shell) viewDynamicVideo(c *ui.Context, v *app.DynamicVideoItem, author 
 	// surface 底、line 描边。整块可点：放这一首并立即播，保留原队列（票 #337 / #608）。
 	box := ui.Row(c).Key("dynv:"+v.Bvid).FillWidth().AlignItems(ui.Center).Gap(space.Px16).
 		Padding(space.Px12).Radius(tok.R12).Background(pl.Surface).Border(1, pl.Line)
-	hot := box.Hovered()
 	if box.Clicked() {
 		s.listActions().PlayNow(dynVideoItem(v, author))
-	}
-	if hot {
-		box = box.Border(1, pl.LineStrong)
 	}
 	box.Children(func() {
 		ui.Box(c).Size(72, 72).Radius(tok.R8).Clip().Background(pl.Surface2).Shrink(0).Children(func() {
 			s.spaceThumb(c, v.Cover, 72, 72)
 		})
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
-			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size16)).FontWeight(600).
+			ui.Text(c, tclean.Clean(v.Title).Title).FontSize(scale.Font(c, scale.Size16)).FontWeight(700).
 				TextColor(pl.Text).SingleLine().Ellipsis("…")
 			if author.Name != "" {
 				ui.Text(c, author.Name).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text2).

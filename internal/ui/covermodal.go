@@ -38,10 +38,11 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrim"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -192,21 +193,16 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 		return
 	}
 	modal := ui.DialogBase(c, &crop.open, func(backdrop, panel ui.Element) {
-		dialogPanel(c, backdrop, panel, "裁剪封面")
-		// ⚠️ **字重不写**（400）：弹窗标题是 400（DESIGN.md §二）。
-		ui.Text(c, "裁剪封面").FontSize(scale.Font(c, scale.Size16))
-		s.viewCropStage(c, crop)
-		ui.Row(c).Gap(space.Px8).Justify(ui.End).Children(func() {
-			if ui.Button(c, "取消").Disabled(crop.uploading).Clicked() {
+		dlgPanel(c, backdrop, panel, "裁剪封面", dlgW)
+		dlgBody(c, "裁剪封面", "拖动图片调整位置，滑块调整大小。方框内就是封面的样子。", func() {
+			s.viewCropStage(c, crop)
+		})
+		dlgFoot(c, nil, func() {
+			if pud.Button(c, "crop:cancel", pud.Ghost, pud.Std, "返回", "").Disabled(crop.uploading).Clicked() {
 				s.closeCrop(crop)
 			}
-			// ⚠️ **上传中那一档是「转起来 + 灰下去」**（票 #178）：原来只是把字
-			// 换成「上传中…」，而 Biu 那个 `<AsyncButton isLoading>` 画的是一枚
-			// **转圈**的按钮——「在忙」这件事只靠字说，没有一个能一眼看出来的
-			// 样子。共用的那一档见 `loading.go` 的 `busyPrimaryButton`。
-			if crop.uploading {
-				busyPrimaryButton(c, uploadLabel(true))
-			} else if ui.PrimaryButton(c, uploadLabel(false)).Clicked() {
+			// 上传中是「转起来 + 灰下去」（票 #178）。
+			if dlgPrimary(c, "crop:ok", uploadLabel(crop.uploading), crop.uploading, false) {
 				s.uploadCrop(crop)
 			}
 		})
@@ -224,7 +220,7 @@ func uploadLabel(busy bool) string {
 	if busy {
 		return "上传中…"
 	}
-	return "上传"
+	return "确定"
 }
 
 // viewCropStage 是裁剪台：图 + 框 + 四角把手。
@@ -369,27 +365,35 @@ const (
 // 点它开文件框。**外面这一格是 Button 而不是 Image**：Image 只是一张图，
 // 它上面的点击要自己接，而 Button 免费给到悬停、按下和键盘焦点。
 func (s *Shell) viewCoverPicker(c *ui.Context, e *folderEdit) {
-	t := c.Theme()
+	pl := tok.Of(c.Theme())
 
-	btn := ui.Button(c, "").Width(coverPreviewW).Height(coverPreviewH).
-		Radius(t.Radius).Background(t.SurfaceHover).Border(1, t.Border).
+	// 原型 `.cover-pick`：128 见方、圆角 8、1 像素虚线 line-strong、surface-2 底；没有图时
+	// 图标（24）+「点击上传图片」（12 号次要色）。
+	btn := ui.ButtonBase(c).Key("folderedit:cover").Label("点击上传图片作为封面").
+		Size(coverPickSide, coverPickSide).Radius(tok.R8).Clip().Background(pl.Surface2).
+		Gap(space.Px4).AlignItems(ui.Center).Justify(ui.Center).
 		Disabled(e.submitting || e.crop.uploading)
+	if e.cover == "" {
+		btn = btn.Draw(func(pp *ui.Painter, r ui.Rect) { pp.StrokeDashed(r, pl.LineStrong, tok.R8, 1) })
+	}
 	btn.Children(func() {
 		if e.cover != "" {
-			// 已经传上去的封面走 imgcache：它就是一张网络图片，和头图区
-			// 那张走的是同一条路（同一个缓存、同一套唤醒）。
-			imgcache.View(c, s.images, e.cover, coverPreviewW, coverPreviewH)
+			// 已经传上去的封面走 imgcache（和头图区那张同一个缓存、同一套唤醒）。
+			imgcache.View(c, s.images, e.cover, coverPickSide, coverPickSide)
 			return
 		}
-		ui.Text(c, "点击上传图片").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+		ui.Column(c).AlignItems(ui.Center).Gap(space.Px4).Children(func() {
+			ui.Icon(c, pud.Icon("image")).FontSize(24).TextColor(pl.Text2)
+			ui.Text(c, "点击上传图片").FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text2).SingleLine()
+		})
 	})
 	if btn.Clicked() {
 		s.pickCover()
 	}
-
-	ui.Text(c, coverHint).FontSize(scale.Font(c, scale.Size11)).LineHeight(leading.Hint).
-		TextColor(t.TextMuted).MaxLines(1)
 }
+
+// coverPickSide 是编辑弹窗里封面格的边长（原型 `.cover-pick` 128）。
+const coverPickSide float32 = 128
 
 // folderEditing 报此刻有没有收藏夹编辑弹窗开着。
 func (s *Shell) folderEditing() bool { return s.folderEdit != nil && s.folderEdit.open }

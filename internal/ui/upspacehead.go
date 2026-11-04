@@ -98,7 +98,7 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 				ring := upFaceS + 2*upFaceRing
 				ui.Box(c).Size(ring, ring).Radius(ring / 2).Background(pl.Bg).AlignItems(ui.Center).Justify(ui.Center).
 					Shrink(0).Children(func() {
-					pud.Avatar(c, h.User.Name, upFaceS, tintAvatarColor(pl, tint), s.upFaceDraw(h.User.Face))
+					pud.Avatar(c, h.User.Name, upFaceS, faceTint(sp.mid), s.upFaceDraw(h.User.Face))
 				})
 
 				// 名字 + LV，签名。
@@ -124,11 +124,6 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 				s.viewSpaceActions(c, sp, h)
 			})
 	})
-}
-
-// tintAvatarColor 是没头像时头像底色：取色块的同色相、深一点（原型 `avatar()` 用 UP 的 tint）。
-func tintAvatarColor(pl tok.Palette, tint ui.Color) ui.Color {
-	return pl.Bg.Mix(tint, 1).Mix(ui.RGB(40, 44, 60), 0.35)
 }
 
 // viewSpaceStats 是「粉丝 / 关注 / 获赞」三栏（原型 `.stats`：缝 32；数字等宽 20 / 600，
