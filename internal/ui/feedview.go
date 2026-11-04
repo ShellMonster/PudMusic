@@ -89,12 +89,16 @@ func feedEndNote(c *ui.Context) {
 // 「登录后查看…」。back 是登录完回哪一页（`goLogin` 记下它，票 #277）。
 func (s *Shell) viewLoggedOutPage(c *ui.Context, key, eyebrow, title, lede, what, back string) {
 	w := windowW(c)
-	ui.Column(c).Key(key).Grow(1).Padding(space.None, winPad(w)).Children(func() {
-		pud.PageHeadSized(c, eyebrow, title, lede, pageTitleSize(w), nil)
-		if pud.LoginPrompt(c, key+":login", what) {
-			s.goLogin(back)
-		}
+	// 窗口矮的时候「扫码登录」会落到播放条下面：页面要能滚（原型的 `.page` 就是滚动容器）。
+	scroll := ui.Scroll(c).Key(key).Grow(1).FillHeight().Children(func() {
+		ui.Column(c).FillWidth().Padding(space.None, winPad(w), space.Px64, winPad(w)).Children(func() {
+			pud.PageHeadSized(c, eyebrow, title, lede, pageTitleSize(w), nil)
+			if pud.LoginPrompt(c, key+":login", what) {
+				s.goLogin(back)
+			}
+		})
 	})
+	s.trackScrollbar(scroll)
 }
 
 // feedMoreAuthors 在作者那一拉有下一页时自动接着拉：chip 横排没有滚动可以「滚到底」，

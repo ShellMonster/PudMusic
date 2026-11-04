@@ -883,34 +883,28 @@ func TestThePagesThatNeedLoginSaySo(t *testing.T) {
 	}
 }
 
-// TestTheCollectionTitleIsTheBigOne 钉住「收藏夹页大标题 30」和它下面那三行的
-// 排法。
+// TestTheCollectionTitleIsTheBigOne 钉住收藏夹页大标题和它周围几行的排法（原型 `.col-title` 等）。
 //
-// # 三件事
-//
-//  1. **那个数是 30**（上游 `text-3xl`），而页标题是 24——两处不是同一个数。
-//  2. **两行标题也照常排**：30px 的名字真的会折成两行，这时头图区那一列会比
-//     封面（168）高——上游的 `space-y-4` 也是这个结果，头图区的高度由最高的
-//     那一列说了算。**不要**为了把这一列压回 168 去动竖距。
-//  3. 标题 / 简介 / 类型和条数 / 创建者四块**左缘对齐**，相邻两块之间 **16**
-//     （票 #175 的验收：14/14/14、竖距 16）。
+//  1. 字号是 `clamp(36px, 4.4vw, 64px)`（窗口宽，1200 时 52.8），`colTitleSize` 就是它。
+//  2. 两行标题也照常排：名字真的会折成两行，文字列比封面矮 / 高都由内容说了算。
+//  3. Eyebrow / 标题 / 元信息 / 简介**左缘对齐**，自上而下依次排下来（标题上下各 12、简介上 12）。
 func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
-	// 30 那一档退役（§0′），先归到相邻的 32；T3 按原型换成 HeroTitle（64）。
-	if scale.CollectionTitle != 32 {
-		t.Errorf("scale.CollectionTitle = %d，want 32（30 退役后的相邻档）", scale.CollectionTitle)
+	for _, c := range []struct{ w, want float32 }{{500, 36}, {818, 36}, {1200, 52.8}, {1500, 64}, {2400, 64}} {
+		if got := colTitleSize(c.w); absF(got-c.want) > 0.05 {
+			t.Errorf("窗口 %v 宽时标题 %v，want %v（clamp(36, 4.4vw, 64)）", c.w, got, c.want)
+		}
 	}
 	// 一个长到要折两行的名字。
 	long := "这是一个很长很长很长很长很长很长很长很长很长很长的收藏夹名字"
 	_, s, tt := collectionShellWithTitle(t, long)
 	_ = s
 
-	// 先确认那个名字**真的折成了两行**（否则下面的竖距验的是一行）——
-	// 30px 的一行是 35.3 高，两行是 70.6。
+	// 先确认那个名字**真的折成了两行**（否则下面的竖距验的是一行）。
 	title, ok := tt.Find(long)
 	if !ok {
 		t.Fatalf("头图区里找不到那个大标题，文字有 %q", tt.Texts())
 	}
-	if title.H < 60 {
+	if title.H < 100 {
 		t.Fatalf("那个名字没有折成两行（高 %.1f）——下面那几条就成了一句空话", title.H)
 	}
 
@@ -920,9 +914,8 @@ func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 	}
 	blocks := []block{{"标题", title}}
 	for _, item := range []struct{ what, key string }{
+		{"元信息", "1 首"},
 		{"简介", "早上听"},
-		{"类型和条数", "公开收藏夹 • 1 条视频"},
-		{"创建者头像", collectionOwnerAvatarLabel},
 	} {
 		r, ok := tt.Find(item.key)
 		if !ok {
@@ -930,23 +923,28 @@ func TestTheCollectionTitleIsTheBigOne(t *testing.T) {
 		}
 		blocks = append(blocks, block{item.what, r})
 	}
-
-	// 四块的左缘是同一条线。创建者那一块量的是**头像**（昵称在头像右边 8+24）。
+	// 作者链接是元信息那一行的第一段：和标题左缘对齐。
+	if r, ok := tt.Find("UP 小明"); ok {
+		blocks = append(blocks, block{"作者", r})
+	}
 	for _, b := range blocks[1:] {
+		// 元信息那一行（作者之后的各段）有 8 的左外边距，只比作者那一段。
+		if b.what == "元信息" {
+			continue
+		}
 		if d := b.box.X - blocks[0].box.X; d < -1 || d > 1 {
-			t.Errorf("%s的左缘是 %.1f，标题是 %.1f（差 %.1f）——头图区这四块要左对齐",
+			t.Errorf("%s的左缘是 %.1f，标题是 %.1f（差 %.1f）——头图区文字列要左对齐",
 				b.what, b.box.X, blocks[0].box.X, d)
 		}
 	}
-	// 相邻两块之间是 16（`collectionHeadGap`）。
-	if collectionHeadGap != 16 {
-		t.Errorf("collectionHeadGap = %d，want 16（上游 `space-y-4`）", collectionHeadGap)
-	}
+	// 自上而下：标题 → 元信息 → 简介，竖着不重叠。
 	for i := 1; i < len(blocks); i++ {
-		gap := blocks[i].box.Y - (blocks[i-1].box.Y + blocks[i-1].box.H)
-		if gap < 15 || gap > 17 {
-			t.Errorf("%s和%s之间的竖距是 %.1f，want 16（±1）——头图区那三行字之间"+
-				"是 `space-y-4`", blocks[i-1].what, blocks[i].what, gap)
+		if blocks[i].what == "作者" {
+			continue
+		}
+		if blocks[i].box.Y < blocks[0].box.Y+blocks[0].box.H-1 && blocks[i].what != "标题" {
+			t.Errorf("%s（y=%.1f）压到了标题（%.1f..%.1f）上", blocks[i].what,
+				blocks[i].box.Y, blocks[0].box.Y, blocks[0].box.Y+blocks[0].box.H)
 		}
 	}
 }
@@ -1437,25 +1435,6 @@ func mentionsKey(e ast.Expr, key string) bool {
 		return true
 	})
 	return found
-}
-
-// TestTheCollectionHeaderCopyIsFourteen 钉住头图区那三行小字是 **14**。
-//
-// # 判据是 AST
-//
-// 像素那一层量的是「墨迹有多高」，而字号和墨迹之间隔着一个随字体而异的系数
-// （同 `TestEveryPageTitleUsesTheSharedSize` 的理由）。票面给的是三个 14
-// （简介 / 类型和条数 / 创建者），精确的那个数只能由代码里的调用钉住。
-func TestTheCollectionHeaderCopyIsFourteen(t *testing.T) {
-	if scale.CollectionCopy != 14 {
-		t.Errorf("scale.CollectionCopy = %d，want 14（上游 `text-sm`）", scale.CollectionCopy)
-	}
-	for _, key := range []string{"info.Intro", "collectionHeaderKindText()", "info.OwnerName"} {
-		if !textUsesFontSize(t, "collectionpage.go", key, "CollectionCopy") {
-			t.Errorf("头图区的 %q 没有用 `FontSize(scale.Font(c, scale.CollectionCopy))`"+
-				"——那三行小字必须是 14", key)
-		}
-	}
 }
 
 // ⚠️ **第三行那个锚点 2026-10-27 换了名字**：原先那一句直接调

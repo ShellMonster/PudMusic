@@ -128,8 +128,35 @@ func TestTheDynamicAuthorNameIsALinkNotAPill(t *testing.T) {
 	b := newUIExplore(t)
 	s, tt, _ := dynamicCardShell(t, b, uiDynamic("v1", "正文"))
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	accent := flatColor(ink.AccentOn(th))
-	assertNameLinkUnderlines(t, tt, accent, "作者v1", "动态条目")
+	// 原型的作者名是 600 的正文色链接（`.post-head .link`）：悬停时底下长出一道 1 像素的线
+	// （`.link:hover { background-size: 100% 1px }`，颜色是当前字色），所以这里量的是
+	// 「悬停前后名字那一格里变了的像素」而不是主色像素。
+	r, ok := tt.Find("作者v1")
+	if !ok {
+		t.Fatalf("动态条目上找不到 %q，文字有 %q", "作者v1", tt.Texts())
+	}
+	noPointer(tt)
+	before := tt.Image()
+	snap := make([]color.RGBA, 0, int(r.W*r.H))
+	for y := int(r.Y); y < int(r.Y+r.H)+3; y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			snap = append(snap, before.RGBAAt(x, y))
+		}
+	}
+	linkHoverOn(t, tt, r)
+	after := tt.Image()
+	changed, i := 0, 0
+	for y := int(r.Y); y < int(r.Y+r.H)+3; y++ {
+		for x := int(r.X); x < int(r.X+r.W); x++ {
+			if after.RGBAAt(x, y) != snap[i] {
+				changed++
+			}
+			i++
+		}
+	}
+	if changed == 0 {
+		t.Errorf("动态条目：指针停在 %q 上之后画面一个像素都没变——那个名字没有悬停反馈", "作者v1")
+	}
 	assertNoCapsule(t, tt, flatColor(th.Background), "作者v1", "动态条目")
 }
 

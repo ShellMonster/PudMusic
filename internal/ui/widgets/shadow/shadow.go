@@ -138,27 +138,6 @@ func HeroSmall(e ui.Element, t *ui.Theme) ui.Element {
 		Shadow(0, 0, 1, 0, ui.RGBA(0, 0, 0, 0.3))
 }
 
-// HeroMedium 是 HeroUI 的 `shadow="md"`（`--heroui-box-shadow-medium`）。
-//
-// 浅色：`0 0 15px 0 rgb(0 0 0/0.03), 0 2px 30px 0 rgb(0 0 0/0.08),
-// 0 0 1px 0 rgb(0 0 0/0.3)`。
-// 深色：`0 0 15px 0 rgb(0 0 0/0.06), 0 2px 30px 0 rgb(0 0 0/0.22),
-// inset 0 0 1px 0 rgb(255 255 255/0.15)`。
-//
-// ⚠️ HeroUI 的 `Card` **默认就是这一档**（`@heroui/theme` 的 card 主题
-// `defaultVariants.shadow = "md"`），所以上游那些没写 `shadow=` 的卡片
-// （关注卡、队列抽屉）带的是它。
-func HeroMedium(e ui.Element, t *ui.Theme) ui.Element {
-	if t.Dark {
-		return e.Shadow(0, 0, 15, 0, ui.RGBA(0, 0, 0, 0.06)).
-			Shadow(0, 2, 30, 0, ui.RGBA(0, 0, 0, 0.22)).
-			InsetShadow(0, 0, 1, 0, ui.RGBA(255, 255, 255, 0.15))
-	}
-	return e.Shadow(0, 0, 15, 0, ui.RGBA(0, 0, 0, 0.03)).
-		Shadow(0, 2, 30, 0, ui.RGBA(0, 0, 0, 0.08)).
-		Shadow(0, 0, 1, 0, ui.RGBA(0, 0, 0, 0.3))
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // 我们自己挑的那几档面板影
 //

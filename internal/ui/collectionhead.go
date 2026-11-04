@@ -77,7 +77,10 @@ func (s *Shell) upFaceDraw(url string) pud.Cover {
 		return nil
 	}
 	return func(c *ui.Context, w, h float32) {
-		imgcache.States(c, s.pageImages(), url, w, h, w/2, imgcache.AvatarShape())
+		// 无障碍名字沿用头像地址（`spaceAvatar` 的老口径，无头测试靠它量头像的盒子）。
+		ui.Box(c).Size(w, h).Label(url).Children(func() {
+			imgcache.States(c, s.pageImages(), url, w, h, w/2, imgcache.AvatarShape())
+		})
 	}
 }
 
@@ -171,7 +174,10 @@ func (s *Shell) viewCollectionMeta(c *ui.Context, p *collectionPage, info app.Co
 	ui.Row(c).Wrap().AlignItems(ui.Center).Gap(space.Px8).Selectable().Children(func() {
 		// 作者：元信息没回来时一道骨架，数据到了不跳高。
 		if !info.Loaded {
-			skeleton.Block(c, "collection-owner:skel", 96, 14, 4)
+			// 作者那一行没回来时留位（骨架同高），数据到了版面不跳；名字挂在外面那一行上。
+			ui.Row(c).Key("collection-owner:skel").Label(collectionOwnerLoadingText).Children(func() {
+				skeleton.Block(c, "collection-owner:skel:n", 96, 14, 4)
+			})
 			return
 		}
 		if info.OwnerName != "" {

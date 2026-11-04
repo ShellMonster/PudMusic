@@ -570,7 +570,8 @@ func TestTheSelectedRowCopyWithdrawsAnEarlierCoverClaim(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到第二首，文字有 %q", tt.Texts())
 	}
-	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	// 行正中央是 UP 主那一列（一枚进空间的链接），点歌名那一列才是「点这一行」。
+	tt.ClickAt(r.X+130, r.Y+r.H/2)
 	tt.Frame()
 
 	// 「封面那一趟已经取了号」——它还在后台编 PNG。

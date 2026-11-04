@@ -813,7 +813,8 @@ func TestTheBatchOpsStillWorkInEveryView(t *testing.T) {
 					tt.Frame()
 				}
 			}
-			if !tt.HasText("已选 2 首") {
+			// 批量条上「已选 N 首」是三段字（N 是单独的一段等宽字）。
+			if !tt.HasText("已选") || !tt.HasText("2") {
 				t.Errorf("%s 那一档下逐首勾完显示的是 %q，want「已选 2 首」",
 					m, tt.Texts())
 			}

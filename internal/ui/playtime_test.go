@@ -52,12 +52,13 @@ func collectionMediaWithNumbers(id int, title string, play, favAge, pubAge int) 
 // 一个和标题对不上的时间。
 func TestTheCollectionPageShowsThePlayCountAndTheCollectionTime(t *testing.T) {
 	m := collectionMediaWithNumbers(1, "有数的歌", 123_400, 3, 100)
-	_, s, tt := collectionShellOpts(t, []shellOpt{withClock(newFakeClock(playtimeNow))},
+	// 窗口摆宽一点：列表窄于 948 时「专辑」那一列（时间写在里面）被隐掉，原型 ≤1180 的口径。
+	_, s, tt := collectionShellOpts(t, []shellOpt{withClock(newFakeClock(playtimeNow)), at(1500, 900)},
 		"", "77", m)
 	waitSongs(t, tt, s, 1)
 
-	// 表头：两列都在，时间那列叫「收藏时间」。
-	for _, want := range []string{"播放量", "收藏时间"} {
+	// 表头（原型 `.tl-head`）：「播放 / 弹幕」和「专辑」——时间（这一页是收藏时间）写在「专辑」那一列里。
+	for _, want := range []string{"播放 / 弹幕", "专辑"} {
 		if !uiShows(tt, want) {
 			t.Errorf("收藏夹的表头上没有「%s」，文字有 %q", want, tt.Texts())
 		}
