@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"image"
 	"image/color"
 	"math"
@@ -185,7 +186,6 @@ func TestTheIconButtonsAreTransparentAndUnbordered(t *testing.T) {
 			// 头像下拉里都有同一个动作），而**框架那一支后退/前进不是图标键**——
 			// 它们是 `ui.Button`，有自己的底色和（原来那圈）描边，不归这一条管。
 			for _, what := range []struct{ label, where string }{
-				{"打开文件", "顶栏"},
 				// 它原来是文字键（「迷你」两个字），票 #134 的第七单元接上了
 				// `iconPiP`——现在它也走这一条探针。
 				{"迷你", "顶栏"},
@@ -221,7 +221,7 @@ const (
 // ⚠️ **4，不是 8**：菜单行的描边在 x=0、按钮通栏，所以 4 那一列既在按钮之内、又能
 // 吃到上下那两条横描边。而「Biu」那个品牌字、下面收藏夹那一句空状态都是
 // `Padding(…, 8, …)` 从第 8 像素起头的——扫 8 会扫到它们身上去。
-const sideScanX = 4
+const sideScanX = 16 // 原型 .side-scroll 左右各缩进 12，.nav-item 内边距 12：16 在行内、图标之前
 
 // sideScans 扫侧栏那一列，返回「和底色不一样」的那些段。
 //
@@ -643,29 +643,11 @@ func wcagLum(c color.RGBA) float64 {
 	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
 }
 
-// TestTheCurrentRowIsASolidBlock 钉住选中态。
+// TestTheCurrentRowIsASolidBlock 钉住侧栏菜单的选中态（原型 `.nav-item[aria-current]`）：
+// `surface-2` 的块，左边一根 3px 的主色条。名字沿用旧的，台账里登记的就是它。
 //
-// 上一条断的是「平时没有底」，这一条断的是「选中那一格有底」。
-//
-// 🔴 **这一档从「淡底」改成「实心主色底」**（票：用户要「深底色 + 白字」）：
-// 淡底（`accentSoft`）和侧栏底色的对比度只有 **1.09:1 ~ 1.29:1**（实测）——
-// **几乎分不出来**，而「当前在哪」是侧栏里唯一的方向标。
-//
-// 判据是**和侧栏底色的通道差**：
-//
-//   - 0        → 选中态根本没画，用户看不出自己在哪一页
-//   - < 100    → 还是太淡，看不出当前在哪一页
-//   - ≥ 100    → 一块实心主色底（对的形状）
-//
-// ⚠️ **探针还是侧栏那一列**（和上一条同一个），不是 `Tester.Find`：「本地音乐」在
-// 内容区还有一个同名页标题，`Find` 给回来的是那个 (92, 7)——第一版就栽在这儿，
-// 它对着内容区的白底去量侧栏，怎么量都不会红。侧栏那一列只认「和侧栏底色不同的
-// 那一段」，而这一页里这样的段**只有一段**：选中的那一行。
+// 探针还是侧栏那一列：这一页里和侧栏底色不同的段只有一段，就是选中的那一行。
 func TestTheCurrentRowIsASolidBlock(t *testing.T) {
-	// 🔴 **下限从 64 提到 100**：淡底那一档和侧栏底色只差 30~39 个通道，而实心
-	// 主色底差着 100+（实测暖纸浅色 4.34:1、深色 6.38:1）。100 是把两档分开的
-	// 那条线——它拦得住「改回淡底」，也拦得住「什么底都没画」。
-	const wantMin = 100
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
 		if dark {
@@ -680,22 +662,24 @@ func TestTheCurrentRowIsASolidBlock(t *testing.T) {
 			tt.Frame()
 
 			img := tt.Image()
-			bg, runs := sideScans(img)
+			_, runs := sideScans(img)
 			if len(runs) != 1 {
 				t.Fatalf("侧栏那一列上有 %d 段和底色不同的像素（%v）——应该只有选中的"+
 					"那一行这一段。多出来的段是描边，常驻底色也会多出好几段",
 					len(runs), runs)
 			}
-			// 取这一段**中间**那一块：两头是圆角和抗锯齿，颜色偏淡，取到它们就
-			// 把差距量小了。
+			p := tok.Of(BuildTheme(s.app.SettingsSnapshot(), dark))
 			r := runs[0]
 			y0 := r.y0 + (r.y1-r.y0)/4 + 1
 			y1 := r.y1 - (r.y1-r.y0)/4 - 1
 			lit := probeBand(img, sideScanX, y0, sideScanX, y1)
-			d := maxDiff(lit, bg)
-			if d < wantMin {
-				t.Errorf("选中的那一行和侧栏底色只差 %d（< %d，%v 对 %v）——"+
-					"看不出当前在哪一页（这一档是实心主色底）", d, wantMin, lit, bg)
+			if want := rgbaOf(p.Surface2); maxDiff(lit, want) > 3 {
+				t.Errorf("选中的那一行底色是 %v，want %v（原型 surface-2）", lit, want)
+			}
+			// 左边那根 3px 主色条：行从 x=12 起（.side-scroll 的内边距），条在行内最左。
+			bar := probeBand(img, 13, y0, 13, y1)
+			if want := rgbaOf(p.Accent); maxDiff(bar, want) > 3 {
+				t.Errorf("选中那一行左边的主色条在 x=13 处是 %v，want %v", bar, want)
 			}
 		})
 	}

@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -56,54 +57,27 @@ type currentSpot struct {
 	ink mygoui.Color
 }
 
-// assertCurrentIsFlat 断「当前那一格是 `flatSolidCurrent` 那一档」（**实心主色底**）。
+// assertCurrentIsFlat 断「当前那一格」是原型的选中态：`surface-2` 底（原型 `.fav-item[aria-current]`），
+// 字读得出来，旁边那一格不是这个底。
 //
-// ⚠️ **三个判据缺一不可**：
-//
-//   - 「底色就是实心主色」——这一档就该是实心底（票：用户要「深底色 + 白字」）；
-//   - 「字色是主色上读得出来的那一档」——底换了字没换，浅色下就是一行主色底上的
-//     深色字（读不出来），深色下则是主色底上的白字（也读不出来）；
-//   - 「旁边那一格**不是**主色底」——不然「当前在哪」就没有信号了。
-//
-// 🔴 **这一条从「淡底」改成「实心底」**（票：用户要「深底色 + 白字」）：淡底
-// （`accentSoft`）和侧栏底色的对比度只有 **1.09:1 ~ 1.29:1**（实测）——**几乎
-// 分不出来**，而「当前在哪」是这一列里唯一的方向标。
+// 旧版断的是"实心主色底 + 白字"，那是被原型取代的设计；原型靠 `surface-2` 的浅灰/深灰块加
+// 左侧 3px 主色条标出当前（主色条由侧栏那条测试单独量）。
 func assertCurrentIsFlat(t *testing.T, sp currentSpot, img *image.RGBA, dark bool) {
 	t.Helper()
-	curPx := bandPixels(img, sp.cur)
-	cur := modeOf(curPx)
+	cur := modeOf(bandPixels(img, sp.cur))
 	sib := modeOf(bandPixels(img, sp.sib))
-	// 字是抗锯齿画的：那一块里离底色最远的那一个像素就是它（`farthestFrom`
-	// 那个共用工具）。
 	ink := farthestFrom(img, sp.cur, cur)
 	t.Logf("%s：当前那一格 底 %v 字 %v，旁边那一格 底 %v", sp.name, cur, ink, sib)
 
-	theme := BuildTheme(app.DefaultSettings(""), dark)
-
-	// 判据一：**底色就是实心主色**。
-	//
-	// ⚠️ **容差是 3**：这一档是不透明的一个数，屏幕上的数就是它。
-	want := theme.Accent
-	if !nearRGBA(cur, rgbaOf(want), 3) {
-		t.Errorf("%s：当前那一格的底色是 %v，want %v（实心主色底）", sp.name, cur, want)
+	want := rgbaOf(tok.Of(BuildTheme(app.DefaultSettings(""), dark)).Surface2)
+	if !nearRGBA(cur, want, 3) {
+		t.Errorf("%s：当前那一格的底色是 %v，want %v（原型 surface-2）", sp.name, cur, want)
 	}
-
-	// 判据二：**字色是那一档该有的**。
-	//
-	// ⚠️ **容差是 24**：字是抗锯齿画的，一个像素 rarely 是纯字色——13px 的汉字
-	// 笔画只有一两个像素宽，量到的那个「最远离底色的像素」是字色和底色的混合。
-	// 24 是从实测来的（实测差 0~12），而两档字色之间差着几十个通道（正文色
-	// #18181b 与主色压深那一档差 90+），所以这个容差拦得住「字色换了」。
-	if !nearRGBA(ink, rgbaOf(sp.ink), 24) {
-		t.Errorf("%s：当前那一格的字色是 %v，want %v", sp.name, ink, sp.ink)
+	if got := wcagContrast(cur, ink); got < 4.5 {
+		t.Errorf("%s：当前那一格的字对底只有 %.2f:1（< 4.5:1）", sp.name, got)
 	}
-
-	// 判据三：**旁边那一格不是主色底**。
-	//
-	// ⚠️ **这一条是「当前在哪」这个信号的前提**：两格都是主色底的话，等于没有
-	// 选中态（实测旁边那一格的底是侧栏底 / 页面底）。
-	if nearRGBA(sib, rgbaOf(want), 3) {
-		t.Errorf("%s：旁边那一格也是主色底 %v——那就没有「当前」这一说了", sp.name, sib)
+	if nearRGBA(sib, want, 3) {
+		t.Errorf("%s：旁边那一格也是选中底 %v——那就没有「当前」这一说了", sp.name, sib)
 	}
 }
 
@@ -172,8 +146,7 @@ func TestTheCurrentItemIsFlatEverywhere(t *testing.T) {
 					t.Fatalf("侧栏没有「我建的 2」那一行，文字有 %q", tt.Texts())
 				}
 				theme := BuildTheme(app.DefaultSettings(""), dark)
-				assertCurrentIsFlat(t, currentSpot{cur, sib, "侧栏收藏夹",
-					flatSolidCurrentText(theme)}, tt.Image(), dark)
+				assertCurrentIsFlat(t, currentSpot{cur, sib, "侧栏收藏夹", tok.Of(theme).Text}, tt.Image(), dark)
 			})
 		})
 	}
