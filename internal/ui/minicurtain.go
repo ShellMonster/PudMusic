@@ -13,11 +13,11 @@
 //     （`MiniWindowOptions` 的 `Transparent: true`），而透明的那一块
 //     **照样吃点击**——窗比内容高 20 像素，底下那个应用的按钮就点不到
 //     那 20 像素。⇒ 窗口高度 = 194 + 卷帘高度，**每一帧都跟着动画走**。
-//  2. **收起时的尺寸要落盘成 84**。`StateKey: "mini-player"` 会把**宽高
+//  2. **收起时的尺寸要落盘成 194**。`StateKey: "mini-player"` 会把**宽高
 //     也记进去**（`mygo/window_state.go:196` 的 `captureState`），而抓状态
 //     是在关窗那一刻（`closeState()`）。⇒ 收起 / 关窗 / 退出三条路都要先
 //     把窗高改回 194 再关，否则下次开出来是个 380×414 的透明大窗。
-//  3. **卷帘不能长出工作区**。窗被用户拖到屏幕下半部时，往下长 236 会出屏
+//  3. **卷帘不能长出工作区**。窗被用户拖到屏幕下半部时，往下长 220 会出屏
 //     ⇒ 高度按**那扇窗所在显示器的工作区**夹住（`WorkArea`）。
 //
 // # 主触发是「点一下」，不是「移上去」
@@ -37,7 +37,7 @@
 //
 //   - 点封面**什么也不发生**（不报错、不弹一下、不改高度）——那档里这一整套
 //     代码压根不该被触发；
-//   - 展开着的时候把开关关掉 ⇒ **立刻收起**（迷你窗回到 320×84）。
+//   - 展开着的时候把开关关掉 ⇒ **立刻收起**（迷你窗回到 380×194）。
 //
 // 「立刻收起」怎么做到：设置改完之后 `App.UpdateSettings` → `a.invalidate()`
 // **挨个叫醒每个窗口**（铁律三），迷你窗下一帧读到的设置已经是关的 ⇒ 收起。
@@ -121,6 +121,10 @@ const (
 
 	// miniCurtainActiveScale 是当前句的放大倍数（原型 `.curtain .ly.cur`）。
 	miniCurtainActiveScale = 1.08
+
+	// miniCurtainLineH 是每一句的行高（原型里 `.ly` 的行高 1.5 × 16 = 24；加上下各 6
+	// 的内边距，句与句之间正好隔 36）。
+	miniCurtainLineH = 24
 
 	// miniCurtainLinePadY 是每一句上下各留的内边距（原型 `.curtain .ly { padding: 6px 0 }`）。
 	miniCurtainLinePadY = 6
@@ -215,7 +219,7 @@ type miniCurtainFocusState struct {
 //   - height 是**这一帧画出来多高**（弹簧算出来的那个值）；
 //   - target 是**这一帧窗该有多高**（动画到位之后 = 展开高）。
 //
-// 把 open 当 height 用的话，收起动画的第一帧窗就一下子缩回 84——而那一帧
+// 把 open 当 height 用的话，收起动画的第一帧窗就一下子缩回 194——而那一帧
 // 卷帘还画着 80 高，**窗比内容矮**（卷帘的下半截被裁掉）；把 height 当
 // open 用的话，动画走一半时再点一次封面会「再展开一次」而不是收起。
 type miniCurtainState struct {
@@ -230,7 +234,7 @@ type miniCurtainState struct {
 	// 只发生在 `p` 上，而 `height` 永远 ≤ 目标（见 `minicurtain_spring.go`）。
 	height float32
 
-	// target 是**窗该有多高**（= 84 + 卷帘高）。它在点开之前算好
+	// target 是**窗该有多高**（= 194 + 卷帘高）。它在点开之前算好
 	// （点开那一刻就要知道能长多高），在收起期间保持不变。
 	target int
 
@@ -258,13 +262,13 @@ type miniCurtainState struct {
 	// 🔴 **它管的是拉锯**：动画期每一帧 `miniCurtainSyncHeight` 都
 	// `SetSize(want)`——而迷你窗**故意可缩放**（`MiniWindowOptions` 不给
 	// `DisableResize`，拖宽拖高是位置记忆那一半的前提）。用户在动画期拖
-	// 窗缘：原生把高改成 200 → 下一帧弹簧把它拽回「84 + 比例 × 全开」→
+	// 窗缘：原生把高改成 200 → 下一帧弹簧把它拽回「194 + 比例 × 全开」→
 	// 原生 `windowDidResize:` 又报一次 → 再拽回去…… 60Hz 的拉锯，窗高
 	// 在两个值之间抖。
 	//
 	// ⇒ 「报上来的高度 ≠ 我们最近 `SetSize` 的那个」⇒ 那是用户拖的：
 	// 这一帧起**暂停对窗写 `SetSize`**，并把弹簧**钉在用户拖到的高度上**
-	// （`holdAt`）——松手之后从那儿接着走，不是从半路「跳回 84 再展开」。
+	// （`holdAt`）——松手之后从那儿接着走，不是从半路「跳回 194 再展开」。
 	//
 	// ⚠️ **它是「最近一次外因 resize 的时刻」**：`zero` = 没在抢。而「松手」
 	// 按「外因 resize 静默了 `miniCurtainResizeQuiet`」判（框架没有现成的
@@ -307,18 +311,18 @@ func miniCurtainEnabled(st app.Settings) bool {
 // 窗现在的位置（**只有 X/Y 用得上**，见下面那一段）。
 //
 // ⚠️ **只有往下这一边会不够**：卷帘是往**下**长的，而窗的左右两边它一个
-// 像素都不占（宽度还是 320）。
+// 像素都不占（宽度还是 380）。
 //
 // ⚠️ **不够就不展开**（返回 0）：透明窗多出来的那一块照样吃点击，而一条
 // 只有几十像素高的卷帘既读不出歌词又挡着底下的应用——那比不展开更坏。
 //
 // 🔴 **量的是「卡片底下」到工作区底边，不是「窗底下」**：
 //
-// 迷你窗是**上下两段**（`viewMini`）：上面那 84 高是卡片（那个
+// 迷你窗是**上下两段**（`viewMini`）：上面那 194 高是卡片（那个
 // `Height(miniHeight)` 的 Row），卷帘挂在它**下面**。⇒ 卷帘能长多高，量
 // 的是**卡片底下**到工作区底边还剩多少。
 //
-// ⚠️ **为什么不能拿窗现在的高度去量**：窗展开着的时候高度是「84 + 卷帘
+// ⚠️ **为什么不能拿窗现在的高度去量**：窗展开着的时候高度是「194 + 卷帘
 // 高」——拿那个底边去量，量到的是「卷帘自己已经占掉的那一块」⇒ 目标高度
 // 一级一级往下掉（屏幕上显示高度一变，卷帘就越缩越短，最后缩成 0）。而
 // 「那块屏改了分辨率」正是最容易触发它的那一下（票 #555）。
@@ -328,8 +332,8 @@ func miniCurtainHeight(work mygo.Rectangle, win mygo.Rectangle) int {
 	}
 	// 卡片底到工作区底边还剩多少（底下留一道 12 的边距）。
 	//
-	// ⚠️ **卡片永远是 84 高**（`miniHeight`）：用户可以把窗往高里拖（迷你窗
-	// 故意没给 `DisableResize`），而卡片那一段是钉死 84 的——多出来的那一块
+	// ⚠️ **卡片永远是 194 高**（`miniHeight`）：用户可以把窗往高里拖（迷你窗
+	// 故意没给 `DisableResize`），而卡片那一段是钉死 194 的——多出来的那一块
 	// 是面板自己的底（不透明，不吃点击的那种空，见 `viewMini`）。
 	down := work.Y + work.Height - (win.Y + miniHeight) - miniCurtainMargin
 	if down < miniCurtainMinH {
@@ -648,7 +652,7 @@ func (s *Shell) miniCurtainWorkAreaOf(w miniWindow) mygo.Rectangle {
 	return w.WorkArea()
 }
 
-// miniCurtainCollapse 收起卷帘：窗高回到 84。
+// miniCurtainCollapse 收起卷帘：窗高回到 194。
 //
 // **幂等**（收着的时候再调一次什么也不做）。
 func (s *Shell) miniCurtainCollapse(now time.Time) {
@@ -658,15 +662,15 @@ func (s *Shell) miniCurtainCollapse(now time.Time) {
 	// 而那时候卷帘已经收着了，用户根本没在用它。
 	s.miniCurtainWantsKey = false
 	if !s.miniCurtain.open && s.miniCurtain.height <= 0 {
-		// 已经收着了。⚠️ **但窗高还是得钉回 84**：上一次收起的动画中途窗被
+		// 已经收着了。⚠️ **但窗高还是得钉回 194**：上一次收起的动画中途窗被
 		// 拖走了、或者展开到一半窗被关掉，收起这一句没走完——窗就留在一个
-		// 高于 84 的状态，而 `StateKey` 会把那个高度记下来。
+		// 高于 194 的状态，而 `StateKey` 会把那个高度记下来。
 		s.miniCurtainSetHeight(miniHeight)
 		return
 	}
 	s.miniCurtain.open = false
 	// ⚠️ **弹簧朝 0 走**（票 #307）：收起是**过阻尼**的（ζ = 1.1）⇒ 一路
-	// 收回 84，中间**没有过冲**（而「不弹」是票面点名要的）。
+	// 收回 194，中间**没有过冲**（而「不弹」是票面点名要的）。
 	//
 	// ⚠️ **弹簧的 `p` 还在 1**（它是从那儿往 0 走的）——而画出来的高度
 	// 一路上都在缩，窗也跟着缩 ⇒ **每一帧窗高 == 内容高**。
@@ -702,7 +706,7 @@ func (s *Shell) miniCurtainCollapseNow() {
 	// ⚠️ **下一次点开会重算**（`miniCurtainToggle` 里那句 `target = h`）。
 	s.miniCurtain.target = 0
 	// ⚠️ **弹簧也要归零**：只把 `height` 归零的话，下一帧那个弹簧会从 1
-	// 往 0 走——窗于是**先弹回 320 再缩到 84**，那几百毫秒里窗比内容高
+	// 往 0 走——窗于是**先弹回 414 再缩到 194**，那几百毫秒里窗比内容高
 	// （透明的那一块在吃点击），而票面要的是「**立刻收起**」。
 	s.miniCurtain.spring.reset()
 	s.miniCurtainSetHeight(miniHeight)
@@ -710,7 +714,7 @@ func (s *Shell) miniCurtainCollapseNow() {
 
 // miniCurtainSetHeight 把这一扇窗的高度改成 h（**宽度不动**）。
 //
-// ⚠️ **宽度取窗现在那个宽**，不写死 320：用户可以把窗往宽拖（迷你窗故意
+// ⚠️ **宽度取窗现在那个宽**，不写死 380：用户可以把窗往宽拖（迷你窗故意
 // 没有 `DisableResize`，理由见 `MiniWindowOptions`），而卷帘是**贴在窗的
 // 下面**的——窗多宽卷帘就多宽。
 //
@@ -734,11 +738,11 @@ func (s *Shell) miniCurtainSetHeight(h int) {
 // ⚠️ **它为什么存在**：卷帘要改的是**窗的原生尺寸**，而无头 Tester 里**没有
 // 真窗口**（`mygo.NewWindow` 在应用没 ready 时直接 panic，
 // `mygo/window.go:382`）。于是「关窗之前把窗高改回 194 ⇒ `StateKey` 落盘的
-// 是 320×84」这条**在无头那一档量不到**。
+// 是 380×194」这条**在无头那一档量不到**。
 //
 // ⇒ 抽这一层接口，生产实现是 `*mygo.Window`，而测试实现是一个**假窗**
 // （记住最后一次 `SetSize`，能手动触发 `OnClose`）。这样「关窗钩子有没有把
-// 高度改回 84」就变成**可测的**——而**删掉那个钩子，这条用例必须红**。
+// 高度改回 194」就变成**可测的**——而**删掉那个钩子，这条用例必须红**。
 //
 // ⚠️ **别把 `s.win` 的类型整个换掉**：`s.win` 在十几处被当 `*mygo.Window`
 // 用（`platform.RestoreFromBackground(s.win)` 那一类），换类型会波及一大片
@@ -861,7 +865,7 @@ func (s *Shell) miniCurtainTargetHeight() int {
 	return miniHeight + h
 }
 
-// miniCurtainFullHeight 报卷帘**全开**时有多高（像素，**不含**那 84）。
+// miniCurtainFullHeight 报卷帘**全开**时有多高（像素，**不含**那 194）。
 //
 // ⚠️ **它跟「开着还是收着」是两件事**（票 #307 的坑）：收起的那一下
 // `s.miniCurtain.open` **立刻**就变成 false 了（那是「用户的意图」），而
@@ -890,7 +894,7 @@ func (s *Shell) miniCurtainFullHeight() int {
 }
 
 // miniCurtainSyncHeight 把卷帘高度那个**弹簧**推一帧，并把窗口高度改成
-// 「84 + 这一帧的卷帘高」。
+// 「194 + 这一帧的卷帘高」。
 //
 // ⚠️ **它每帧都要调**（`viewMini` 开头那一支），因为两样东西都在动：
 // 弹簧在动，而**窗口高度必须跟着它动**——这一扇窗是透明的，而透明的那
@@ -962,11 +966,11 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	//
 	// ⚠️ **它返回的是「画出来的高度」**（0~1），不是弹簧内部那个 `p`——
 	// 过冲被翻成「回弹时略微缩回去一点」（镜像），所以这个值**永远 ≤ 1**
-	// ⇒ **窗高永远 ≤ 84 + 卷帘高**（文件头第 1 条那条坑不会回来）。
+	// ⇒ **窗高永远 ≤ 194 + 卷帘高**（文件头第 1 条那条坑不会回来）。
 	//
 	// ⚠️ **「立刻收起」那一下已经把弹簧钉到 0 了**（`miniCurtainCollapseNow`
 	// 里 `spring.p = 0` / `spring.v = 0` / `moving = false`）——所以这里推
-	// 出来的是 0，而**窗于是这一帧就已经是 84**，不会「先弹回 320 再缩」。
+	// 出来的是 0，而**窗于是这一帧就已经是 194**，不会「先弹回 414 再缩」。
 	//
 	// ⚠️ **目标高度（像素）先算出来**：弹簧走的是**相对量**（0~1），而窗高
 	// 是**像素**——所以「这一帧该多高」= 比例 × 目标像素高。
@@ -975,7 +979,7 @@ func (s *Shell) miniCurtainSyncHeight(c *ui.Context) {
 	// ⚠️ **全开高跟「开着还是收着」无关**（票 #307 的坑）：收起的那一下
 	// `open` **立刻**就变成 false 了，而**卷帘还要再花几百毫秒才缩回 0**。
 	// ⇒ 基数是 `miniCurtainFullHeight`（**不**是 `miniCurtainTargetHeight`
-	// ——后者在收着的时候是 84，拿它当基数，收起就变成「一帧消失」）。
+	// ——后者在收着的时候是 194，拿它当基数，收起就变成「一帧消失」）。
 	//
 	// ⚠️ **比例是 0 的时候不必问原生**（`miniCurtainFullHeight` 会问）：
 	// 比例 0 ⇒ 高度 0 ⇒ 与基数无关。

@@ -35,6 +35,8 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/platform"
@@ -132,7 +134,7 @@ const (
 //	min==max（钉死大小）             IsMaximized=true    ← 也钉不住
 //
 // ⚠️ 最后一行的结论**与具体数值无关**（那一轮量的是当时那扇窗的尺寸，票 #357
-// 之后窗是 320×84）：钉死大小就是「不可缩放」，而不可缩放的窗口 `isZoomed`
+// 之后窗是 380×194）：钉死大小就是「不可缩放」，而不可缩放的窗口 `isZoomed`
 // 恒为真——机制一样，结论一样。
 //
 // 另外两条试过也没用：`w.Unmaximize()` 对不可缩放的窗口是空操作；建完再
@@ -192,7 +194,7 @@ func MiniWindowOptions(view func(*ui.Context)) mygo.WindowOptions {
 		// ⚠️ **这里故意不给 `DisableResize`，而 Biu 那边是 `resizable: false`
 		// ——照抄它会让「拖到哪就记到哪」整个失效。** 机制见函数上面那一段。
 		//
-		// 「不能缩」改用 **MinWidth/MinHeight** 保证：用户永远缩不到比 320×84
+		// 「不能缩」改用 **MinWidth/MinHeight** 保证：用户永远缩不到比 380×194
 		// 更小，那三行控件也就永远不会被裁掉。能往大拖——那没有后果，右边那一列
 		// 是 `Grow(1)`，宽出来的部分全给歌名。
 		MinWidth:  miniWidth,
@@ -473,8 +475,8 @@ func (s *Shell) attachMiniWindow(w *mygo.Window) {
 // attachMiniWindowTo 把迷你窗口接到它的外壳上。
 //
 // ⚠️ **它接的是 `miniWindow` 那一层，而不是 `*mygo.Window`**：于是无头那一档
-// 能用一个**假窗**走**同一条生产路径**——而「关窗之前把窗高改回 84 ⇒
-// `StateKey` 落盘的是 320×84」这一条**量得到**（真窗那一档读的是原生那一
+// 能用一个**假窗**走**同一条生产路径**——而「关窗之前把窗高改回 194 ⇒
+// `StateKey` 落盘的是 380×194」这一条**量得到**（真窗那一档读的是原生那一
 // 边的 bounds，见 `minicurtain.go` 里 `miniWindow` 那一段）。
 //
 // ⚠️ **假窗没有原生那一侧**：那几样（把 `s.win` 指过去、登记唤醒句柄、接可见
@@ -484,7 +486,7 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 	native := w.Native()
 	s.win = native
 	// ⚠️ **这一层接口也给迷你窗备着**：卷帘要改的是**原生尺寸**，而无头
-	// Tester 里没有真窗口——「关窗之前把高度改回 84 ⇒ 落盘的是 320×84」
+	// Tester 里没有真窗口——「关窗之前把高度改回 194 ⇒ 落盘的是 380×194」
 	// 这一条要靠它才**测得到**（理由见 `minicurtain.go` 里 `miniWindow`
 	// 那一段）。
 	s.miniWin = w
@@ -622,8 +624,8 @@ func (s *Shell) attachMiniWindowTo(w miniWindow) {
 //
 // 🔴 **它为什么单独拆出来、而且接的是 `miniWindow` 而不是 `*mygo.Window`**：
 // 无头 Tester 里**没有真窗口**（`mygo.NewWindow` 在应用没 ready 时直接
-// panic，`mygo/window.go:382`），而「关窗之前把窗高改回 84 ⇒ `StateKey` 落盘
-// 的是 320×84」这一条**在真窗那一档量不到**（`captureState` 读的是原生那一
+// panic，`mygo/window.go:382`），而「关窗之前把窗高改回 194 ⇒ `StateKey` 落盘
+// 的是 380×194」这一条**在真窗那一档量不到**（`captureState` 读的是原生那一
 // 边的 bounds）。
 //
 // ⇒ 抽出这一层接口，测试用一个**假窗**走**同一条生产路径**（这个函数本身），
@@ -637,8 +639,8 @@ func (s *Shell) attachMiniWindowLifecycle(w miniWindow) {
 	//
 	// 理由是 `StateKey`：**宽高也记在里面**（`mygo/window_state.go:196` 的
 	// `captureState`），而抓状态是在关窗那一刻（`closeState()`，`window.go`
-	// 的 `destroy` 先调它）。⇒ 展开着的时候直接关窗，落盘的就是「84 + 卷帘
-	// 高」，下次开出来是个 320×(84+236) 的透明大窗——而**那一块透明的地方照样
+	// 的 `destroy` 先调它）。⇒ 展开着的时候直接关窗，落盘的就是「194 + 卷帘
+	// 高」，下次开出来是个 380×(194+220) 的透明大窗——而**那一块透明的地方照样
 	// 吃点击**（这一扇窗是 `Transparent: true`）。
 	//
 	// ⚠️ **钩的是 `OnClose` 而不是 `OnClosed`**：`OnClosed` 跑的时候原生那一边
@@ -676,7 +678,7 @@ func (s *Shell) attachMiniWindowLifecycle(w miniWindow) {
 func (s *Shell) releaseMini() {
 	// 🔴 **收尾之前把卷帘收掉**（票 #536）：这一扇窗要关了，而
 	// `StateKey` 会在关窗那一刻记下**宽高**——展开着关窗的话，落盘的就是
-	// 「84 + 卷帘高」，下次开出来是个透明大窗。
+	// 「194 + 卷帘高」，下次开出来是个透明大窗。
 	//
 	// ⚠️ **这一句在 `closePerWindow` 之前**：那一句会把 `s.win` 置成 nil
 	// （`Shell.Close` 里 `s.win = nil`），而改窗口尺寸要那扇窗还在。
@@ -782,7 +784,7 @@ func (s *Shell) miniNotice() (text string, tone notice.Tone, ok bool) {
 // ⚠️ **底色是外层那张卡片画的**（`viewMini` 里按语义色换掉 `t.Surface`），
 // 而这一段只画那句话——所以它不需要自己的底，也不会盖掉圆角。
 func (s *Shell) viewMiniNotice(c *ui.Context, text string, fg ui.Color) {
-	// ⚠️ **三行封顶**：这一扇只有 84 高（减去上下 12 的内边距还剩 60，
+	// ⚠️ **三行封顶**：这一扇只有 194 高（减去上下 12 的内边距还剩 60，
 	// 而 12 号字一行约 16）——最多三行半。而那一句话最长的一档是
 	// 「这个格式我们放不了（支持 .mp3 .flac .wav …）」，四行放不下。
 	//
@@ -955,7 +957,7 @@ func (s *Shell) viewMiniSeek(c *ui.Context, st app.State, p tok.Palette) {
 	chs := st.Chapters
 	ui.Row(c).Key("mini-seek").FillWidth().Padding(0, 16, miniSeekPadB, 16).Gap(12).AlignItems(ui.Center).
 		Children(func() {
-			typo.Mono(ui.Text(c, clockOrDash(st.Position))).Key("mini-cur").FontSize(11).
+			typo.Mono(ui.Text(c, miniClock(st.Position))).Key("mini-cur").FontSize(11).
 				TextColor(p.Text3).Width(miniTimeW).TextAlign(ui.Center).SingleLine()
 			// key 装在 `c` 上：滑块的状态是建出来那一刻就初始化的。
 			sl := selfSlider(c.Key("mini-progress"), &s.miniScrub, 0, 1, knobHoverLook).Grow(1).
@@ -977,4 +979,13 @@ func (s *Shell) viewMiniSeek(c *ui.Context, st app.State, p tok.Palette) {
 			typo.Mono(ui.Text(c, clockOrDash(st.Duration))).Key("mini-total").FontSize(11).
 				TextColor(p.Text3).Width(miniTimeW).TextAlign(ui.Center).SingleLine()
 		})
+}
+
+// miniClock 是进度行左端的当前位置：开头是 `0:00`（原型 `fmt(S.pos)`），不是播放条上
+// 那个「没歌」的 `-:--`——位置为零时歌是有的，只是还没开始走。
+func miniClock(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	return clock(d)
 }

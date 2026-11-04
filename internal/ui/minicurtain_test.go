@@ -596,44 +596,57 @@ func TestTheMiniCurtainIsClampedToTheWorkArea(t *testing.T) {
 // 工具
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestRenderMiniCurtainShots 把迷你播放器的**卷帘**存成 PNG，留给人眼对照。
+// TestRenderMiniCurtainShots 把迷你播放器存成 PNG，留给人眼对照原型参考图
+// （`ref/{dark,light}-mini.png`、`ref/{dark,light}-mini-curtain.png`）。
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderMiniCurtainShots
 //
-// ⚠️ **两张都要出**：收起那一版（320×84）和展开那一版（320×494）——而
-// **卷帘那一版才是这一票要看的那一版**（布局 / 间距 / 层级 / 密度 / 对齐，
-// AGENTS.md §1《UI 票的验收必须有一次「视觉审查」》）。
-//
-// ⚠️ **深浅两套都要**：深色下那一列和右边那块的层次差别更明显，而浅色下
-// 封面的圆角和卡片底几乎同色（DESIGN.md §八）。
+// 出四张：深 / 浅 × 收起（380×194）/ 展开卷帘（380×414）。**展开那一张才是这一票要看
+// 的**（布局 / 间距 / 层级 / 密度 / 对齐，AGENTS.md 的视觉审查）。数据全是合成的：
+// 本地测试音频的文件名当歌名、纯色封面、手写的几句 LRC。
 func TestRenderMiniCurtainShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {
 		t.Skip("设 BIU_SHOT_DIR 才会存图")
 	}
-	s, a := miniCurtainShell(t)
-	if err := enqueueTwo(a, t); err != nil {
-		t.Fatal(err)
+	for _, dark := range []bool{true, false} {
+		theme := "light"
+		if dark {
+			theme = "dark"
+		}
+		t.Run(theme, func(t *testing.T) {
+			s, a := miniCurtainShell(t)
+			if err := enqueueTwoWithCover(a, t); err != nil {
+				t.Fatal(err)
+			}
+			a.Toggle() // 暂停：画面上那个键写着「播放」
+			a.PutLyricsFrom("", "[00:00.00]（前奏）\n[00:04.00]路灯把影子拉得很长\n"+
+				"[00:09.00]我把没说完的话留在站台\n[00:14.00]晚风经过旧的唱片行\n"+
+				"[00:19.00]有一首歌刚好在放\n[00:24.00]我们都没有出声\n", "")
+			if dark {
+				if _, err := a.UpdateSettings(func(st *app.Settings) { st.ThemeMode = app.ThemeModeDark }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tt := miniCurtainTester(s)
+			waitFor(t, "封面画上来了", func() bool {
+				tt.Frame()
+				return !miniCoverBox(tt).Empty()
+			})
+			saveCrop(t, dir, theme+"-mini.png", tt, 0, miniHeight)
+
+			clickCurtainCover(t, tt)
+			// 推钟到弹簧停稳（这一组的歌词不是「第一句」，所以不用 `settleCurtain`）。
+			for range 120 {
+				tt.Advance(time.Second / 60)
+				tt.Frame()
+				if s.miniCurtain.open && !s.miniCurtain.spring.moving {
+					break
+				}
+			}
+			save(t, dir, theme+"-mini-curtain.png", tt)
+		})
 	}
-	a.Toggle() // 暂停：画面上那个键写着「播放」
-	a.PutLyricsFrom("", "[00:00.00]第一句\n[00:05.00]第二句\n[00:10.00]第三句\n", "")
-	tt := miniCurtainTester(s)
-	tt.Frame()
-
-	// 收起那一版。
-	save(t, dir, "mini-curtain-01-light-collapsed.png", tt)
-
-	// 展开那一版。
-	clickCurtainCover(t, tt)
-	settleCurtain(t, tt, s, true)
-	save(t, dir, "mini-curtain-02-light-expanded.png", tt)
-
-	// 深色。
-	if _, err := a.UpdateSettings(func(st *app.Settings) { st.ThemeMode = app.ThemeModeDark }); err != nil {
-		t.Fatal(err)
-	}
-	tt.Frame()
-	save(t, dir, "mini-curtain-03-dark-expanded.png", tt)
 }
 
 // clickCurtainCover 点一下封面那一列（展开 / 收起的触发器）。

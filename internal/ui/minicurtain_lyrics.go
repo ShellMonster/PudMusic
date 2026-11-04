@@ -27,7 +27,6 @@ package ui
 import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
@@ -123,7 +122,7 @@ func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, row lyrics.Row, p 
 	size := miniCurtainFontSize * (1 + (miniCurtainActiveScale-1)*presence)
 	return line.Children(func() {
 		t := ui.Text(c, row.Text).FontSize(scale.Font(c, size)).
-			LineHeight(leading.Lyrics).TextColor(col)
+			FixedLineHeight(miniCurtainLineH).TextColor(col)
 		if i == active {
 			t.FontWeight(miniCurtainActiveWeight)
 		}
