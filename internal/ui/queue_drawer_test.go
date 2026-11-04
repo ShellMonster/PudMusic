@@ -1,9 +1,7 @@
 package ui
 
 import (
-	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"image"
 	"image/color"
@@ -14,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -56,7 +53,7 @@ func localSong(t *testing.T, dir, name string) app.Item {
 //
 // 这里写死一份是故意的：那句话是**给人看的**，改文案就该顺手改这里，而不是
 // 让测试跟着代码走、什么文案都判「在」。
-const queueEmptyHint = "队列是空的"
+const queueEmptyHint = "暂无播放内容"
 
 // writeCopy 把 FLAC 素材复制成 dir/name 这个文件，返回完整路径。dir 不存在就建。
 func writeCopy(t *testing.T, dir, name string) string {
@@ -101,19 +98,13 @@ func putCurrent(t *testing.T, a *app.App, n int) {
 
 // countRows 数抽屉里画着几行。
 //
-// 数的是**每一行尾那颗操作键的 `Label`**（「「歌名」的操作」，票 #249 之后）。
-// 它原来数的是屏幕上那个「⋯」字符——而那一颗后来换成了真图标（上游
-// `RiMore2Line`），画面上不再有那个字符。数字形的话换图标之后会数成 0 行，而
-// **「0 行」在这几条里全都不会自己报警**（判据都是 `want 2`，于是红的是它们，
-// 可症状是「整张列表空了」而不是「那一颗换了画法」）。
-//
-// ⚠️ **数的是后缀，不是全等**：名字里带的是**歌名**，而歌名是每行不一样的，
-// 所以只能按后缀数。真按全等数的话，得先把每一行的歌名都列出来——而歌名恰恰
-// 是这一族断言里会改的东西。
+// 数的是**每一行右端那枚键的无障碍名**：非当前行是「上移 {歌名}」，当前行是跳动柱的
+// 「正在播放 {歌名}」（原型 `.qrow`）。按前缀数，不按全等：歌名每行不一样。
 func countRows(h *harness) int {
 	n := 0
 	for _, x := range h.tt.Texts() {
-		if strings.HasSuffix(x, "」的操作") {
+		// 非当前行各有一枚「上移 {歌名}」，当前行是一枚「正在播放 {歌名}」的跳动柱。
+		if strings.HasPrefix(x, "上移 ") || strings.HasPrefix(x, "正在播放 ") {
 			n++
 		}
 	}
@@ -147,9 +138,9 @@ func TestQueueDrawerOpensFromThePlaybar(t *testing.T) {
 	}
 	openDrawer(t, h)
 
-	// 空队列：两个键不摆（Biu 的 `Boolean(pureList?.length) && …`），摆一句空状态。
-	if h.tt.HasText("定位当前播放") {
-		t.Error("队列是空的还摆着「定位当前播放」")
+	// 空队列：「清空播放列表」禁用（原型 `S.queue.length ? '' : 'disabled'`）、摆一句空状态。
+	if r, ok := h.tt.Find("清空播放列表"); !ok || r.W == 0 {
+		t.Error("队列是空的，「清空播放列表」不见了（原型里它是禁用的，不是藏起来）")
 	}
 	if !h.tt.HasText(queueEmptyHint) {
 		t.Errorf("空的抽屉没有那句话，文字有 %q", h.tt.Texts())
@@ -188,33 +179,18 @@ func queueDrawerWithTwoRows(t *testing.T) *harness {
 	return h
 }
 
-// TestTheQueueDrawerUsesTheUpstreamTypeScale 钉住队列抽屉那三档字号（票 #177）。
+// TestTheQueueDrawerUsesThePrototypeTypeScale 钉住队列抽屉的字号（原型 `.drawer-head h2` /
+// `.drawer-sub` / `.qrow strong` / `.qrow small`）：
 //
-// 上游 `music-playlist-drawer/index.tsx:131-133` 与 `list-item.tsx:68-80`：
+//	标题「播放列表」  24 宋体 700
+//	条数「2 首」      12 等宽（`.drawer-sub`）
+//	行的歌名 / 副题   13 / 12
 //
-//	标题「播放列表」  18 / 400（`h3` = `text-lg`，Preflight 重置了字重）
-//	条数「(2)」       14（`text-sm`）
-//	行的歌名 / 副题   16 / 14（`text-base` / `text-sm`）
-//
-// 改之前是 15/700、12、15/12：标题小一号还重两档，副题比列表行的 UP 名还小一档。
-//
-// # 判据：能靠画面量的都走画面
-//
-// 条数和副题在画面上都只有一处，量的是文字盒高（字号 × `textBoxPerSize`，和
-// `typography_test.go` 同一把尺子）。
-//
-// ⚠️ **两个标题量不了，只能钉代码**：
-//
-//   - 「播放列表」：`Tester.Find` 拿到的是播放条上那个开抽屉的图标键（Label 也
-//     是「播放列表」，而且在树里排得更前），量到的是 32×32 的点击区。
-//   - 行歌名：`ListState.Label` 也用的是这一行的歌名，而标签节点的框是**整行**
-//     （实测 383×64），量到的是行高，不是字高。
-//
-// 所以这两条解析 `queue_drawer.go`：画标题那一句必须是 `scale.SectionTitle`
-// （「深夜唱片行」§0′：18 那一档退役，抽屉标题是 24，原型 `.drawer-head h2`；
-// 宋体 700 由 T4 套上）；画行歌名那一句必须是 16。字重本来也画不出盒子的
-// 差别——这正是 `typography_test.go` 里设置页行标题那一条的做法。
-func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
+// 能靠画面量的走画面（文字盒高 = 字号 × `textBoxPerSize`，和 `typography_test.go` 同一把尺子）：
+// 条数 12、行副题 12。标题和行歌名在画面上量不出（标题和播放条上那枚键同名；行歌名和那一行的无障碍
+// 名同名），只能钉代码：画标题那一句必须是 `scale.SectionTitle`（`pud.DrawerHead`），画行歌名那一句
+// 必须是 `scale.Size13`。
+func TestTheQueueDrawerUsesThePrototypeTypeScale(t *testing.T) {
 	h := queueDrawerWithTwoRows(t)
 
 	for _, want := range []struct {
@@ -222,190 +198,30 @@ func TestTheQueueDrawerUsesTheUpstreamTypeScale(t *testing.T) {
 		size float64
 		what string
 	}{
-		{text: "(2)", size: 14, what: "条数"},
-		{text: "B 站音乐", size: 14, what: "行副题"},
+		{text: "B 站音乐", size: 12, what: "行副题"},
 	} {
 		r, ok := h.tt.Find(want.text)
 		if !ok {
 			t.Fatalf("抽屉里找不到%s「%s」，文字有 %q", want.what, want.text, h.tt.Texts())
 		}
 		if got := float64(r.H) / textBoxPerSize; math.Abs(got-want.size) > 0.8 {
-			t.Errorf("队列抽屉的%s「%s」折算出来是 %.1fpx，want %.0f"+
-				"（上游 18/14/16/14 那一套刻度）",
-				want.what, want.text, got, want.size)
+			t.Errorf("队列抽屉的%s「%s」折算出来是 %.1fpx，want %.0f", want.what, want.text, got, want.size)
 		}
 	}
 
-	fset := token.NewFileSet()
-	f, err := parser.ParseFile(fset, "queue_drawer.go", nil, 0)
+	src, err := os.ReadFile("queue_drawer.go")
 	if err != nil {
-		t.Fatalf("解析 queue_drawer.go 失败：%v", err)
+		t.Fatal(err)
 	}
-	header18, headerHeavy, row16 := false, "", false
-	ast.Inspect(f, func(n ast.Node) bool {
-		stmt, ok := n.(*ast.ExprStmt)
-		if !ok {
-			return true
-		}
-		header, rowTitle := false, false
-		has18, has16 := false, false
-		heavy := ""
-		ast.Inspect(stmt, func(m ast.Node) bool {
-			call, ok := m.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			switch callName(call) {
-			case "Text":
-				if len(call.Args) != 2 {
-					break
-				}
-				if mentionsString(call.Args[1], "播放列表") {
-					header = true
-				}
-				if sel, ok := call.Args[1].(*ast.SelectorExpr); ok && sel.Sel.Name == "Title" {
-					rowTitle = true
-				}
-			case "FontSize":
-				if len(call.Args) == 1 {
-					// ⚠️ **认刻度表里的那个名**（`scale.SectionTitle` /
-					// `scale.Size16`），不认裸数字：字号的出处是
-					// `widgets/scale` 那张表（票 #238）。
-					has18 = has18 || mentionsIdent(call.Args[0], "SectionTitle")
-					has16 = has16 || mentionsIdent(call.Args[0], "Size16")
-				}
-			case "Bold":
-				heavy = "Bold()"
-			case "FontWeight":
-				heavy = "FontWeight(...)"
-			}
-			return true
-		})
-		if header && has18 {
-			header18 = true
-			headerHeavy = heavy
-		}
-		if rowTitle && has16 {
-			row16 = true
-		}
-		return true
-	})
-	if !header18 {
-		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, \"播放列表\")` 和 `FontSize(…SectionTitle…)`" +
-			"——队列抽屉标题是分区那一档（24）")
+	if !strings.Contains(string(src), "FontSize(scale.Font(c, scale.Size13)).\n\t\t\t\t\tFontWeight(500)") {
+		t.Error("queue_drawer.go 里行歌名不是 13 / 500（原型 `.qrow strong`）")
 	}
-	_ = headerHeavy
-	if !row16 {
-		t.Error("queue_drawer.go 里没有一句同时写着 `Text(c, …Title…)` 和 `FontSize(…16…)`" +
-			"——队列行的歌名必须是 16（DESIGN.md 的列表歌名那一档）")
+	pudSrc, err := os.ReadFile("widgets/pud/overlay.go")
+	if err != nil {
+		t.Fatal(err)
 	}
-}
-
-// TestTheHoveredQueueRowShowsAPlayIcon 钉住「行 hover 的播放三角是 20 的图标」
-// （票 #177）。
-//
-// 上游 `list-item.tsx:48-52` 在封面上盖一层 `bg-[rgba(0,0,0,0.35)]`，中间是
-// `<RiPlayFill size={20}/>`。我们原来画的是「▶」14 号字：字形跟着系统字体走，
-// 同一个意思在两台机器上是两个不同的宽高。
-//
-// # 判据
-//
-//  1. 画面上**不再有「▶」这个字**——图标对 `Tester.Texts()` 是不可见的，所以
-//     「`▶` 还在」就说明那还是一个字。
-//  2. 蒙层真的盖上了（封面中心那一块明显变暗），而且中心 32×32 里出现了**近白
-//     的像素**——那是压在蒙层上的白三角；蒙层下面的底色和封面的占位图标都到不了
-//     这个亮度。这些像素还得落在封面中心附近，高宽都有几像素（20 的图标里三角
-//     本身约 10×13）。
-//
-// 两步都要：只量「近白像素」的话，浅色主题下封面自己的浅色底就能凑出来，
-// 删掉整个悬停层这条也会绿。
-//
-// 量的是没在放的那一行：正在放的那行不浮三角（见 `viewQueueCover`）。
-func TestTheHoveredQueueRowShowsAPlayIcon(t *testing.T) {
-	h := queueDrawerWithTwoRows(t)
-
-	// ⚠️ 这个 `Find` 拿到的是**整行**（`ListState.Label` 也是这一行的歌名，
-	// 而标签节点的框是行框：实测 383×64）。所以行内的位置要用行高和内边距算：
-	// 行左边 + 8 是封面左沿，行中心就是封面中心（封面 48 竖着铺满 64-16）。
-	row, ok := h.tt.Find("队列里的第二首")
-	if !ok {
-		t.Fatalf("抽屉里找不到第二行，文字有 %q", h.tt.Texts())
-	}
-	coverLeft := row.X + queuePadX
-	cy := row.Y + row.H/2
-	cx := coverLeft + queueCoverSize/2
-
-	idle := snapshot(h.tt)
-	h.tt.Move(cx, cy)
-	h.tt.Frame()
-
-	if h.tt.HasText("▶") {
-		t.Errorf("悬停之后画面上还有「▶」这个字，文字有 %q——三角应该是一枚图标", h.tt.Texts())
-	}
-
-	hovered := snapshot(h.tt)
-	// 封面中心这一块：**先确认蒙层真的盖上了**。不先确认的话，下面「近白像素」
-	// 在浅色主题里拿封面自己的浅色底就能凑出来——删掉整个悬停层这条也会绿。
-	// 蒙层是 35% 黑，浅色底下这一块至少要暗三成。
-	const half = 16
-	darkened := 0
-	for y := int(cy) - half; y <= int(cy)+half; y++ {
-		for x := int(cx) - half; x <= int(cx)+half; x++ {
-			if glyphLuma(idle.RGBAAt(clampX(idle, x), clampY(idle, y)))-
-				glyphLuma(hovered.RGBAAt(clampX(hovered, x), clampY(hovered, y))) > 30 {
-				darkened++
-			}
-		}
-	}
-	if want := (2*half + 1) * (2*half + 1) / 2; darkened < want {
-		t.Fatalf("悬停在封面 %.0f,%.0f 上之后只有 %d 个像素变暗（want ≥ %d）——"+
-			"那层 35%% 黑的悬停蒙层没画出来，后面量到的「白三角」就不作数",
-			cx, cy, darkened, want)
-	}
-
-	// 蒙层是 35% 黑：盖上去之后整张封面都暗下来，只有那枚白三角是亮的。
-	// **只扫封面中心 32×32**：封面的圆角（Radius 6）在四个角上切掉了蒙层，
-	// 露出底下那层浅色底——在浅色主题下那几个角也是「近白」，按整块扫会把
-	// 它们算进三角的墨里。
-	var minX, minY, maxX, maxY = 1 << 30, 1 << 30, -1, -1
-	for y := int(cy) - half; y <= int(cy)+half; y++ {
-		for x := int(cx) - half; x <= int(cx)+half; x++ {
-			// 白三角是 92% 白压在蒙层上，两套主题下亮度都在 235 上下；
-			// 蒙层下面的底色（浅色 166 / 深色 20 上下）和封面的占位图标
-			// （`TextMuted`）都到不了 220。
-			if glyphLuma(hovered.RGBAAt(clampX(hovered, x), clampY(hovered, y))) < 220 {
-				continue
-			}
-			if x < minX {
-				minX = x
-			}
-			if y < minY {
-				minY = y
-			}
-			if x > maxX {
-				maxX = x
-			}
-			if y > maxY {
-				maxY = y
-			}
-		}
-	}
-	if maxX < minX || maxY < minY {
-		t.Fatalf("悬停在封面 %.0f,%.0f 上之后，封面中心没有一块白色的三角——播放图标没画出来",
-			cx, cy)
-	}
-	gw, gh := maxX-minX+1, maxY-minY+1
-	if gw < 5 || gh < 6 {
-		t.Errorf("三角的墨只有 %d×%d，太小了——它该是一枚 20 的图标（三角本身约 10×13）", gw, gh)
-	}
-	// 三角的墨应该落在封面中心附近（play-fill 的三角在图标框里偏右一个像素多）。
-	if dx := float32(minX+maxX)/2 - cx; math.Abs(float64(dx)) > 4 {
-		t.Errorf("三角的墨中心横向偏了 %.1f 像素（封面中心 %.1f，墨中心 %.1f）",
-			dx, cx, float32(minX+maxX)/2)
-	}
-	if dy := float32(minY+maxY)/2 - cy; math.Abs(float64(dy)) > 4 {
-		t.Errorf("三角的墨中心纵向偏了 %.1f 像素（封面中心 %.1f，墨中心 %.1f）",
-			dy, cy, float32(minY+maxY)/2)
+	if !strings.Contains(string(pudSrc), "typo.Display(ui.Text(c, title), scale.Font(c, scale.SectionTitle))") {
+		t.Error("pud.DrawerHead 的标题不是宋体 24")
 	}
 }
 
@@ -439,7 +255,7 @@ func TestQueueDrawerLeavesThePlaybarUsable(t *testing.T) {
 		h.tt.Frame()
 		return h.app.Snapshot().Title == "b"
 	})
-	if !h.tt.HasText("定位当前播放") {
+	if !h.tt.HasText("清空播放列表") {
 		t.Error("点了一下播放条，抽屉跟着关了")
 	}
 }
@@ -458,29 +274,6 @@ func TestQueueDrawerTakesLocalSongsFromTheirPath(t *testing.T) {
 
 	if got := countRows(h); got != 2 {
 		t.Errorf("两个同名文件在抽屉里合成了一行（画着 %d 行），want 2（本地项的键是完整路径）", got)
-	}
-}
-
-// TestQueueDrawerRowIsSixtyFourTall 钉住行高 64。
-//
-// 「定位当前播放」滚到的是 `targetIndex * 64`，行高不是 64 的话那个乘法算出来
-// 的就不是这一行的顶边——而这里量到的**是行元素自己的框**（那一行还带着
-// ListState.Label 给的无障碍名字，`Tester.Find` 按字找回来就是它）。
-func TestQueueDrawerRowIsSixtyFourTall(t *testing.T) {
-	h := newHarness(t)
-	h.app.Queue().Append(onlineSong("BV1", "第一首"), onlineSong("BV2", "第二首"))
-	h.tt.Frame()
-	openDrawer(t, h)
-
-	r, ok := h.tt.Find("第二首")
-	if !ok {
-		t.Fatalf("画面上找不到第二首，文字有 %q", h.tt.Texts())
-	}
-	if r.H != 64 {
-		t.Errorf("一行高 %v，want 64", r.H)
-	}
-	if r.W != 319 {
-		t.Errorf("一行宽 %v，want 319（抽屉 320 减去左边那一线）", r.W)
 	}
 }
 
@@ -573,122 +366,6 @@ func findRow(h *harness, title string) (mygoui.Rect, bool) {
 // 改成 76，写死的那个数于是比真的底边**高了 12**——落在那一条带子上的行
 // 会被当成「不在抽屉里」。
 const drawerBottom = winH - playbarHeight
-
-// TestLocateCurrentGlidesToTheCurrentSong 是验收里「定位当前播放能平滑滚过去」。
-//
-// 断的是三件事，一件一件都拿掉就会红：
-//
-//	点之前那一行在画面外 → 队列够长、定位真的会滚
-//	点完钟没走还在画面外 → **不是一跳到位**（ListState.ScrollTo 就是一跳，
-//	                  换成它这条立刻红）
-//	Advance 够久之后在画面上 → 真的滚过去了
-func TestLocateCurrentGlidesToTheCurrentSong(t *testing.T) {
-	const target = 30
-	h := newHarness(t)
-	// 真的放得出来的 40 首（在线条目在这个壳里没挂取流，`PlayAt` 会打不开——那
-	// 「定位」就变成「定位一首放不出来的歌」了）。
-	//
-	// ⚠️ **文件名和 Title 故意不一样**：播放条上的歌名是从**路径**推出来的（文件名
-	// 去掉后缀），抽屉里那一行画的是 `Item.Title`。写成不一样的一份，`Find(歌名)`
-	// 就只会撞上抽屉里那一行——主布局先于浮层排版，不这样它先找到的是播放条上那
-	// 几个字（判据在 findRow 的注释里）。
-	items := make([]app.Item, 40)
-	for i := range items {
-		p := writeCopy(t, t.TempDir(), fmt.Sprintf("%02d.flac", i))
-		items[i] = app.Item{Source: "local", Path: p, Title: fmt.Sprintf("第%02d首", i)}
-	}
-	if err := h.app.Enqueue(items...); err != nil {
-		t.Fatal(err)
-	}
-	// 真的跳到第 30 首去放它（不是只挪下标）：「定位」要滚过去的是**在放**的那一首。
-	if err := h.app.PlayAt(target); err != nil {
-		t.Fatal(err)
-	}
-	// 播放条上的歌名是从**路径**推出来的，所以这里是文件名的后缀（"30"），
-	// 不是抽屉里那一行的「第30首」——上面刻意让两者不一样。
-	waitFor(t, "第30首开始播", func() bool {
-		h.tt.Frame()
-		return h.app.Snapshot().Title == "30"
-	})
-	h.tt.Frame()
-	openDrawer(t, h)
-
-	if _, visible := findRow(h, "第30首"); visible {
-		t.Fatal("没定位那一行就在画面上了，测不出滚动")
-	}
-	if err := h.tt.Click("定位当前播放"); err != nil {
-		t.Fatalf("点不了「定位当前播放」：%v", err)
-	}
-	h.tt.Frame()
-
-	if _, visible := findRow(h, "第30首"); visible {
-		t.Error("一点就跳到位了，那不是平滑滚过去（用了 ListState.ScrollTo？）")
-	}
-	// 推进 1 秒：滚动是 `ui.Smooth`（默认弹簧 500ms），1 秒足够它落定。
-	// **别推进 2 秒**：Advance 期间每一帧都要把整个窗口重画一遍，带 `-race` 时
-	// 一帧不便宜（实测这条用例 2 秒是 20.7s、1 秒是一半）。
-	h.tt.Advance(time.Second)
-	r, visible := findRow(h, "第30首")
-	if !visible {
-		t.Fatalf("Advance 之后还是滚不过去，文字：%q", h.tt.Texts())
-	}
-	// 滚到的是**第 30 行自己的顶边**，不是别的行的：40 行 × 64 = 2560，视口
-	// 372-53 = 319，MaxY 是 2241，30×64 = 1920 没被钳。列表视口的顶在 y=53，
-	// 所以这一行的顶边就该落在 53 上。
-	//
-	// 差得越远说明算的不是 `targetIndex*行高`：**行高和目标偏移用的是同一个数**
-	// （见 queue_drawer.go 的 locateCurrent）。两个数分家的时候，滚过去的是
-	// 另一首——这一行会变成那个 0×0 的节点，上面那句 `visible` 就把它挡下来了。
-	if r.Y > 56 {
-		t.Errorf("那一行停在 y=%v，want ≈53（滚到的是第 30 行的顶边）", r.Y)
-	}
-}
-
-// TestLocateCurrentSaysSoWhenThereIsNothingToLocate 两种「滚不了」都要说话
-// （Biu 的两个 addToast）：默默不动的话，用户分不清是按钮坏了还是自己记错了。
-func TestLocateCurrentSaysSoWhenThereIsNothingToLocate(t *testing.T) {
-	t.Run("没在放", func(t *testing.T) {
-		h := newHarness(t)
-		h.app.Queue().Append(onlineSong("BV1", "第一首")) // 放进去了，还没开始放
-		h.tt.Frame()
-		openDrawer(t, h)
-
-		if err := h.tt.Click("定位当前播放"); err != nil {
-			t.Fatal(err)
-		}
-		h.tt.Frame()
-		if !h.tt.HasText("当前没有正在播放的歌曲") {
-			t.Errorf("没在放的时候一句话也没有，文字：%q", h.tt.Texts())
-		}
-	})
-
-	t.Run("这一首认不出来", func(t *testing.T) {
-		h := newHarness(t)
-		// 真的有歌在放（判据的第一半），队列的当前项挪到一个**什么来源都没有**的
-		// 占位项上（Identity 是空串，定位无从谈起）。
-		//
-		// 这个组合界面上走不到（放不出来的项 `step` 会退回去），这里是为了钉住
-		// 那句「认不出来」不是死代码：真走到了，说的必须是这一句而不是「没有正在
-		// 播放的歌曲」——有歌在放着呢。
-		dir := t.TempDir()
-		enqueue(t, h, localSong(t, dir, "甲.flac"))
-		h.app.Queue().Append(app.Item{Title: "还没接来源的一项"})
-		h.app.Queue().Move(1)
-		if got := h.app.Queue().CurrentIndex(); got != 1 {
-			t.Fatalf("测试自己没摆好：当前项是第 %d 首", got)
-		}
-		h.tt.Frame()
-		openDrawer(t, h)
-
-		if err := h.tt.Click("定位当前播放"); err != nil {
-			t.Fatal(err)
-		}
-		h.tt.Frame()
-		if !h.tt.HasText("认不出来") {
-			t.Errorf("认不出的那一首没有说话，文字：%q", h.tt.Texts())
-		}
-	})
-}
 
 // TestQueueRowMenuOffersFiveItemsForAnOnlineSong 前五项是 Biu
 // `music-playlist-drawer/menu.tsx` 的 `getMenus` 那一套，一项不多一项不少。
@@ -857,8 +534,10 @@ func TestDeletingAQueuedCopyRemovesEveryCopyOut(t *testing.T) {
 	if got := countRows(h); got != 3 {
 		t.Fatalf("抽屉里画着 %d 行，want 3（队列项逐行展示）", got)
 	}
-	// 右键甲 那一行要用坐标：甲 正在放，同一个字在播放条上也有。
-	h.tt.RightClickAt(500, 85)
+	// 右键甲 那一行要用坐标：甲 正在放，同一个字在播放条上也有。第 0 行的中心 = 乙 那一行的中心
+	// 往上推：乙 → 第 1 行一个行高 56，第 1 行上面有「接下来」那句标签（约 33），再到第 0 行。
+	yi := rowBody(t, h.tt, "乙")
+	h.tt.RightClickAt(yi.X+60, yi.Y+yi.H/2-56-89)
 	// ⚠️ **判据是「菜单开出来了」而不是「几项」**：票 #685 之后末尾多了一项
 	// （「复制歌名」），项数不再是 5——所以这里认「里面有没有『从列表删除』」，
 	// 那才是这一条接下来要按的那一项。
@@ -941,7 +620,7 @@ func TestQueueDrawerClearEmptiesItAndStops(t *testing.T) {
 	enqueue(t, h, copiesOf(t, 2)...)
 	openDrawer(t, h)
 
-	if err := h.tt.Click("清空"); err != nil {
+	if err := h.tt.Click("清空播放列表"); err != nil {
 		t.Fatalf("点不了「清空」：%v", err)
 	}
 	h.tt.Frame()
@@ -979,7 +658,7 @@ func TestQueueDrawerListsEveryQueuedItem(t *testing.T) {
 		t.Errorf("抽屉里画着 %d 行，want 5（队列里的每一项都展示）", got)
 	}
 	// 顶上那个计数对应可见队列行数。
-	if !h.tt.HasText("(5)") {
+	if !h.tt.HasText("5 首") {
 		t.Errorf("顶上写的不是队列数量 (5)，文字有 %q", h.tt.Texts())
 	}
 }
@@ -1010,7 +689,7 @@ func TestQueueDrawerShowsEachEpisodeOfOneVideo(t *testing.T) {
 			t.Errorf("抽屉里没有 %q，文字有 %q", want, h.tt.Texts())
 		}
 	}
-	if !h.tt.HasText("(2)") {
+	if !h.tt.HasText("2 首") {
 		t.Errorf("顶上写的不是 (2)，文字有 %q", h.tt.Texts())
 	}
 }

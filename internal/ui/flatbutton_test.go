@@ -719,14 +719,15 @@ func TestTheQueueHeaderKeysAreIconButtonsWithNames(t *testing.T) {
 	// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在窗口外面，
 	// 按名字找「清空」会找不到（它在窗口外）。
 	settleDrawer(t, s, tt)
-	for _, name := range []string{"定位当前播放", "清空"} {
+	for _, name := range []string{"关闭播放列表", "清空播放列表"} {
 		r, ok := tt.Find(name)
 		if !ok {
 			t.Fatalf("抽屉头上找不到 %q，文字有 %q", name, tt.Texts())
 		}
-		if r.W > iconHit {
-			t.Errorf("%q 那一格是 %.0f 宽——图标键的点击区是 %d，说明画的还是两个汉字",
-				name, r.W, iconHit)
+		// 「关闭」是图标键（36 的点击区）；「清空播放列表」是原型的 `btn-quiet btn-sm` 文字键，不量宽。
+		if name == "关闭播放列表" && r.W > 36 {
+			t.Errorf("%q 那一格是 %.0f 宽——图标键的点击区是 36，说明画的还是两个汉字",
+				name, r.W)
 		}
 	}
 	// 还能点：换控件最容易把事件弄丢，而那也不报错。
@@ -734,7 +735,7 @@ func TestTheQueueHeaderKeysAreIconButtonsWithNames(t *testing.T) {
 	// ⚠️ **「清空」要先问一次**（票 #454）：点它弹的是那道确认框，队列要等
 	// 「确认清空」按下去才真的清空——所以这一条要连着点两步（那一道确认框长什么样，
 	// 见 `ticket454_test.go` 的 `TestClearingTheQueueAsksFirst`）。
-	if err := tt.Click("清空"); err != nil {
+	if err := tt.Click("清空播放列表"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.Click("确认清空"); err != nil {

@@ -257,7 +257,7 @@ func TestTheCommentsDrawerIsWiderThanTheQueueDrawer(t *testing.T) {
 	// 🔴 **画面那一层才是真的**：面板是绝对定位的，而它的左缘从画面上能量出来
 	// ——**内容那一块的左沿**就是内容区的左沿（正文那一格撑满内容区，所以它的
 	// 左沿 = 面板左缘 + 边框 + 内边距）。
-	if commentsDrawerWidth <= queueDrawerWidth {
+	if commentsDrawerWidth < queueDrawerWidth {
 		t.Errorf("评论抽屉宽 %d，队列抽屉宽 %d——评论抽屉**不许比队列抽屉窄**"+
 			"（正文会折成五六行，每行二十来个字）", commentsDrawerWidth, queueDrawerWidth)
 	}

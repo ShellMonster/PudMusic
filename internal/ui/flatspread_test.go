@@ -488,26 +488,12 @@ func TestTheTwoRulesAreDrawnAsOnePixelLines(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s, tt := newShell(t)
 			tt.SetDark(dark)
-			// 队列抽屉。
-			s.drawerOpen = true
-			// ⚠️ **要让抽屉滑到位**：Tester 的钟站着不动，不推它的话面板还在
-			// 窗口外面（它从右边滑进来），量到的是空的右半边。
-			settleDrawer(t, s, tt)
-			img := tt.Image()
-			// ⚠️ **找的是合成到屏幕上的那一色**：分割线画的是 `t.Border`，而方案
-			// 的 Border 是**半透明**的（alpha = borderA）——落在面板上的是它和
-			// 面板底混出来的颜色。拿未合成的 RGB 去扫，一行都对不上（它连 alpha
-			// 都不一样）：经典那套边框不透明，所以当年侥幸绿。
-			// 两个面板的底不一样：队列抽屉走 `cardBackground`（方案的 surface1），
-			// 分集浮层走框架 `stylePanel` 给的主题底色（`t.Background`）。
+			// 队列抽屉那一条线（`DrawerSub` 底下的 1 像素 `line`）随「深夜唱片行」重做的抽屉一起
+			// 换成 `pud.DrawerSub` 画的，位置不再是 `queueHeaderHeight`，由 `components_shot_test.go`
+			// 和 T4 的抽屉出图盯着；这一条只留分集抽屉那一半。
 			th := BuildTheme(s.app.SettingsSnapshot(), dark)
-			onCard := flatColor(s.cardBackground(th).Mix(
-				mygoui.RGB(th.Border.R, th.Border.G, th.Border.B), float32(th.Border.A)/255))
 			onPopover := flatColor(th.Background.Mix(
 				mygoui.RGB(th.Border.R, th.Border.G, th.Border.B), float32(th.Border.A)/255))
-			x0 := img.Rect.Max.X - queueDrawerWidth
-			assertRuleAt(t, img, onCard, "队列抽屉", x0, img.Rect.Max.X-1,
-				queueHeaderHeight-2, queueHeaderHeight+2, queueDrawerWidth-8)
 
 			// 分集抽屉：要一首有多 P 的，否则那一列摆不出来（`partsDrawer`
 			// 只在 `PartsWorthAsking` 的时候画）。

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -121,6 +122,50 @@ func TestRenderFullPlayerShots(t *testing.T) {
 			b.s.drawerOpen = false
 			b.tt.Frame()
 			settleFull(t, b.tt)
+		})
+	}
+}
+
+// drawerShotShell 造一个主窗口（首页）+ 九首歌的队列，正在放第 0 首，暂停。
+func drawerShotShell(t *testing.T, dark bool, srvURL string) *testShell {
+	t.Helper()
+	b := newTestShell(t, at(fullWinW, fullWinH), systemIsDark(dark),
+		withClock(newFakeClock(time.Unix(1_700_000_000, 0))))
+	titles := []string{"渺小", "你就不要想起我", "说到爱", "言不由衷", "小情歌", "寓言", "富士山下", "爱人错过", "浴室"}
+	artists := []string{"田馥甄", "田馥甄", "蔡健雅", "徐佳莹", "苏打绿", "王菲", "陈奕迅", "告五人", "deca joins"}
+	for i, ti := range titles {
+		it := app.LocalItem(flacPath(t))
+		it.Title, it.Artist = ti, artists[i]
+		it.Cover = srvURL + "/cover" + strconv.Itoa(i%3) + ".png"
+		if err := b.a.Enqueue(it); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitFrames(t, b.tt, "歌开起来了", func() bool { return b.a.Snapshot().HasTrack })
+	b.a.Pause()
+	b.tt.Frame()
+	return b
+}
+
+func TestRenderDrawerShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	body := syntheticCoverPNG(t, 200, 200)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write(body) }))
+	defer srv.Close()
+	for _, dark := range []bool{true, false} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			b := drawerShotShell(t, dark, srv.URL)
+			b.s.drawerOpen = true
+			b.tt.Frame()
+			settleFull(t, b.tt)
+			save(t, dir, name+"-queue.png", b.tt)
 		})
 	}
 }

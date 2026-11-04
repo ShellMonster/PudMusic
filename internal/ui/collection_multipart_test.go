@@ -128,7 +128,7 @@ func TestWritingBackTheCidDoesNotSplitTheDrawerRow(t *testing.T) {
 	if got := len(s.queueRows); got != 1 {
 		t.Errorf("抽屉里画着 %d 行，want 1（补 cid 之后那一行还是同一行）：%+v", got, s.queueRows)
 	}
-	if !tt.HasText("(1)") {
-		t.Errorf("抽屉顶上写的不是 (1)，文字有 %q", tt.Texts())
+	if !tt.HasText("1 首") {
+		t.Errorf("抽屉顶上写的不是「1 首」，文字有 %q", tt.Texts())
 	}
 }

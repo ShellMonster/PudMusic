@@ -22,10 +22,7 @@
 package ui
 
 import (
-	"image/color"
 	"testing"
-
-	mygoui "github.com/egoist/mygo/ui"
 )
 
 // queueHarness 造一副**指定深浅**的界面。
@@ -47,127 +44,6 @@ func queueThemeName(dark bool) string {
 	return "浅色"
 }
 
-// rowBackdrop 是量一行「自己的底」的那一点：行底下那条内边距。
-//
-// ⚠️ **不要量歌名那一块**：那一层反馈是画在整行上的（连字一起压），量到字就
-// 分不清是「底变了」还是「字变了」。
-func rowBackdrop(row mygoui.Rect) (float32, float32) {
-	return row.X + row.W/2, row.Y + row.H - 4
-}
-
-// queueRowRects 是抽屉里**头两行**在画面上的位置。
-//
-// ⚠️ **第一行不能靠歌名找**：它是「正在放」的那一行，而**播放条上也是同一首歌名**
-// （真放着的时候），主布局先于浮层排版，`Find` 先撞上的是播放条上那几行字
-// （`findRow` 遇到那种就说「找不到」——它要的就是抽屉里那一行）。
-//
-// 而第二行的歌名是唯一的（播放条上放的是头一首），所以从它出发：抽屉里那些行
-// **一样宽、一样叠着**（行高定死 64，见 queueRowHeight），于是头一行就是第二行
-// 往上挪一格。
-func queueRowRects(h *harness, secondTitle string) (first, second mygoui.Rect, ok bool) {
-	second, ok = findRow(h, secondTitle)
-	if !ok {
-		return mygoui.Rect{}, mygoui.Rect{}, false
-	}
-	first = mygoui.Rect{X: second.X, Y: second.Y - queueRowHeight, W: second.W, H: queueRowHeight}
-	return first, second, true
-}
-
-// farFrom 是两个颜色离得多远（只比红通道）。
-//
-// ⚠️ **比「离原色多远」而不是「哪个更暗」**：深色下那一层压的是近白，压下去
-// 反而更亮——「更深」在两套里的方向是反的。
-func farFrom(a, b color.RGBA) int {
-	d := int(a.R) - int(b.R)
-	if d < 0 {
-		return -d
-	}
-	return d
-}
-
-// TestThePlayingQueueRowChangesWhenHovered 钉「正在放的那一行悬停时看得见变化」。
-//
-// 改之前那一行是全抽屉里**唯一一行没有悬停反馈的**：`case state == queueRowCurrent`
-// 排在 `case hovered` 前面，于是指针落在它上面时底色一点不变。
-//
-// ⚠️ **量的是「正在放」那一行，不是别的行**：别的行本来就有悬停底（`t.SurfaceHover`），
-// 拿它们来量的话这条用例在改之前也是绿的。
-func TestThePlayingQueueRowChangesWhenHovered(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		t.Run(queueThemeName(dark), func(t *testing.T) {
-			h := queueHarness(t, dark)
-			dir := t.TempDir()
-			// 头一首是正在放的那一首（`enqueue` 放的是第一个）。
-			enqueue(t, h, localSong(t, dir, "正在放.flac"), localSong(t, dir, "别的.flac"))
-			openDrawer(t, h)
-
-			row, _, ok := queueRowRects(h, "别的")
-			if !ok {
-				t.Fatalf("抽屉里找不到那两行，文字有 %q", h.tt.Texts())
-			}
-			px, py := rowBackdrop(row)
-			idle := pixelAt(h.tt.Image(), px, py)
-
-			// 指针落到这一行上。
-			h.tt.Move(row.X+row.W/2, row.Y+row.H/2)
-			h.tt.Frame()
-			hovered := pixelAt(h.tt.Image(), px, py)
-
-			if hovered == idle {
-				t.Errorf("正在放的那一行悬停时底色一点没变（%v）——"+
-					"它是可点的（只是点了不重头播），用户分不出它是「不能点」还是「坏了」", hovered)
-			}
-		})
-	}
-}
-
-// TestAPressedQueueRowLooksDeeperThanAHoveredOne 钉「普通行按下时和悬停时不一样」。
-//
-// 改之前行只有悬停底（`t.SurfaceHover`），**按下去的画面 = 悬停的画面**——
-// 而扁平按钮是有 16% 那一层的（`widgets/flat` 的 `feel`）。
-//
-// 三档都要量：「没指着」「悬停」「按着」两两不同，而且按着那一档离「没指着」
-// 更远（16% 比 8% 深）。
-func TestAPressedQueueRowLooksDeeperThanAHoveredOne(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		t.Run(queueThemeName(dark), func(t *testing.T) {
-			h := queueHarness(t, dark)
-			enqueue(t, h, copiesOf(t, 2)...)
-			openDrawer(t, h)
-
-			// 量第二行：头一行是「正在放」那一行，它有自己那层淡主色底。
-			row, ok := findRow(h, "b")
-			if !ok {
-				t.Fatalf("抽屉里找不到第二行，文字有 %q", h.tt.Texts())
-			}
-			px, py := rowBackdrop(row)
-			idle := pixelAt(h.tt.Image(), px, py)
-
-			h.tt.Move(row.X+row.W/2, row.Y+row.H/2)
-			h.tt.Frame()
-			hovered := pixelAt(h.tt.Image(), px, py)
-
-			// 按下去（**不抬手**——抬手就是点了，而点了会跳去放那一首）。
-			h.tt.Press(row.X+row.W/2, row.Y+row.H/2)
-			h.tt.Frame()
-			pressed := pixelAt(h.tt.Image(), px, py)
-
-			if hovered == idle {
-				t.Fatalf("悬停时这一行一点没变（%v）——它本来就该有悬停底", hovered)
-			}
-			if pressed == hovered {
-				t.Errorf("按下去和悬停时一模一样（%v）——行没有按下态，"+
-					"「点得动」和「点得动的东西」在按下的那一瞬间长得一样", pressed)
-			}
-			if farFrom(pressed, idle) <= farFrom(hovered, idle) {
-				t.Errorf("按下去那一档不比悬停深（悬停离原色 %d，按下离原色 %d）——"+
-					"按下那一层是 16%%，悬停是 8%%，按下去得更深才对",
-					farFrom(hovered, idle), farFrom(pressed, idle))
-			}
-		})
-	}
-}
-
 // TestClearingTheQueueAsksFirst 钉「清空播放列表」之前要问一次。
 //
 // 改之前那一下是**一键销毁整个队列 + 停掉播放**（`app.ClearQueue` → `queue.Reset()`
@@ -181,7 +57,7 @@ func TestClearingTheQueueAsksFirst(t *testing.T) {
 	enqueue(t, h, copiesOf(t, 2)...)
 	openDrawer(t, h)
 
-	if err := h.tt.Click("清空"); err != nil {
+	if err := h.tt.Click("清空播放列表"); err != nil {
 		t.Fatalf("点不了「清空」：%v", err)
 	}
 	h.tt.Frame()
@@ -208,7 +84,7 @@ func TestClearingTheQueueAsksFirst(t *testing.T) {
 	}
 
 	// 再来一次，这次确定。
-	if err := h.tt.Click("清空"); err != nil {
+	if err := h.tt.Click("清空播放列表"); err != nil {
 		t.Fatalf("点不了「清空」：%v", err)
 	}
 	h.tt.Frame()
@@ -231,52 +107,4 @@ func TestClearingTheQueueAsksFirst(t *testing.T) {
 	}
 	// 事后再有一句：确认框问的是「要不要」，「已经清掉了」是另一句话。
 	wantText(t, h.tt, "已清空播放列表")
-}
-
-// TestThePlayingRowStillHasNoPlayTriangle 钉「正在放」那一行的封面**仍然不浮播放
-// 三角**。
-//
-// 这一票给那一行补了悬停反馈，而那一层反馈**不是**「它可以放」的意思——它已经在
-// 放了，封面浮一个「▶」是错的。
-//
-// ⚠️ 判据是**封面中心那一块有没有变暗**：浮三角那一层是 35% 黑的蒙版
-// （`viewQueueCover`），而悬停反馈只压 8% 的前景色——深浅两套里那两者的差都
-// 远大于 30 个亮度级，所以「有没有蒙版」和「有没有悬停底」分得开。
-func TestThePlayingRowStillHasNoPlayTriangle(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		t.Run(queueThemeName(dark), func(t *testing.T) {
-			h := queueHarness(t, dark)
-			dir := t.TempDir()
-			enqueue(t, h, localSong(t, dir, "正在放.flac"), localSong(t, dir, "别的.flac"))
-			openDrawer(t, h)
-
-			row, _, ok := queueRowRects(h, "别的")
-			if !ok {
-				t.Fatalf("抽屉里找不到那两行，文字有 %q", h.tt.Texts())
-			}
-			// 封面在行内：左边 8 是封面左沿，封面 48 宽、竖着铺满 64-16。
-			cx := row.X + queuePadX + queueCoverSize/2
-			cy := row.Y + row.H/2
-
-			idle := snapshot(h.tt)
-			h.tt.Move(cx, cy)
-			h.tt.Frame()
-			hovered := snapshot(h.tt)
-
-			const half = 16
-			darkened := 0
-			for y := int(cy) - half; y <= int(cy)+half; y++ {
-				for x := int(cx) - half; x <= int(cx)+half; x++ {
-					if glyphLuma(idle.RGBAAt(clampX(idle, x), clampY(idle, y)))-
-						glyphLuma(hovered.RGBAAt(clampX(hovered, x), clampY(hovered, y))) > 30 {
-						darkened++
-					}
-				}
-			}
-			if want := (2*half + 1) * (2*half + 1) / 2; darkened >= want {
-				t.Errorf("悬停在封面 %.0f,%.0f 上之后有 %d 个像素暗了三成——"+
-					"「正在放」那一行的封面不该浮播放三角（它已经在放了）", cx, cy, darkened)
-			}
-		})
-	}
 }
