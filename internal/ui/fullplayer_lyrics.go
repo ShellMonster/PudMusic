@@ -169,8 +169,8 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnaps
 // fullLyricFace 是歌词这一行用的字体和字重：原型 `.ly` 是宋体、常规字重，当前句 700
 // （`.ly.cur { font-weight: 700 }`）。
 //
-// ⚠️ **字体的取值只在这一处**：随包宋体目前只有 Bold 一档，非当前句也只能是粗的；Regular 子集
-// 一到，把下面 `active == false` 那一支的字体换成 Regular 的族名就行，别处不用动。
+// ⚠️ **字体的取值只在这一处**：随包宋体有 Regular（400）和 Bold（700）两档，同一个族名，
+// 框架按字重挑；非当前句 400 就是宋体常规，当前句 700。
 func fullLyricFace(active bool) (family string, weight int) {
 	_ = typo.Register()
 	if active {

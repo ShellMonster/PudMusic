@@ -19,7 +19,7 @@
 #
 # go-image-jpeg-LICENSE.txt Go image/jpeg 的 MCU 行存储改版（BSD-3-Clause）。
 #
-# noto-serif-sc-OFL.txt     标题字体（Noto Serif SC Bold 的 GB2312 子集，
+# noto-serif-sc-OFL.txt     标题字体（Noto Serif SC Bold / Regular 的 GB2312 子集，
 #                          SIL Open Font License 1.1）。字体是 //go:embed 编进
 #                          二进制的资源，go list -deps 看不见它；OFL 要求随字体
 #                          一起发出这份原文。子集只裁了字符，没改字形。
