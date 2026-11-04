@@ -100,11 +100,6 @@ type homePage struct {
 	// day 是这一帧的时刻（「今日一张」按它选，问候语按它定）。
 	day time.Time
 
-	// overview 恒为真，只为让顶栏那枚返回键（`navbar.go` 的 `viewHomeBack`）保持「没有上一档
-	// 可退」的灰态：旧首页有「发现总览 / 榜单」两档页内切换，现在只有一页。顶栏改版（T1）
-	// 把那枚键换成通用的前进后退之后，这个字段和 `backToOverview` 一起删。
-	overview bool
-
 	// cur / hasCur / playing 是这一帧「正在放的那一首」（从 `Shell.pageInput` 采的）。
 	cur     app.Item
 	hasCur  bool
@@ -114,11 +109,8 @@ type homePage struct {
 // newHomePage 建首页这一摊状态。cache 是封面缓存，acts 是操作；wake 保留给接口兼容
 // （取数的唤醒走 `homeLoads.wake`）。
 func newHomePage(cache *imgcache.Cache, acts list.Actions, _ func()) *homePage {
-	return &homePage{acts: acts, cache: cache, overview: true}
+	return &homePage{acts: acts, cache: cache}
 }
-
-// backToOverview 是旧首页「回发现总览」的入口，现在没有那一档，什么都不做（见 `overview`）。
-func (h *homePage) backToOverview() {}
 
 // SetSongs 换掉首页的歌（测试和还没接上的环境用）。三摊一起换，并记为「拉过、没有错」。
 //

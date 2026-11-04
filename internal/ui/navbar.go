@@ -76,37 +76,11 @@ func (s *Shell) toggleDarkLight(nowDark bool) {
 }
 
 // viewNavBack 是后退键（原型 `.icon-btn` + `left`，没有历史时 35% 不透明）。
-//
-// 首页上没有历史时，它退回「发现总览」那一层（首页自己的二级状态，见 `viewHomeBack`）。
 func (s *Shell) viewNavBack(c *ui.Context, back func()) {
-	if s.router.Path() == homePath && !s.router.CanGoBack() {
-		s.viewHomeBack(c, back)
-		return
-	}
 	b := pud.IconBtn(c, "nav-back", "left", navBackLabel, pud.IconOpts{}).Disabled(!s.router.CanGoBack())
 	if s.withTip(c, b, navBackLabel).Clicked() {
 		back()
 		s.router.Back()
-	}
-}
-
-// 首页「返回发现总览」那一枚的提示。
-const (
-	navHomeBackTip     = "返回发现总览"
-	navHomeBackTipDone = "已经在发现总览"
-)
-
-// viewHomeBack 是首页上的后退键：不能再退时灰掉，能退时回到「发现总览」。
-func (s *Shell) viewHomeBack(c *ui.Context, back func()) {
-	canGo := s.home != nil && !s.home.overview
-	tip := navHomeBackTip
-	if !canGo {
-		tip = navHomeBackTipDone
-	}
-	b := pud.IconBtn(c, "nav-home-back", "left", navBackLabel, pud.IconOpts{}).Disabled(!canGo)
-	if s.withTip(c, b, tip).Clicked() {
-		back()
-		s.backToHomeOverview()
 	}
 }
 

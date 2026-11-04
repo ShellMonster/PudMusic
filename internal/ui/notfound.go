@@ -1,36 +1,18 @@
-// 404 页：路径谁都不匹配时的那一页（Biu 的 P-30）。
+// 404 页：路径谁都不匹配时的那一页（原型 `PAGES.notfound`）。
 //
-// Biu 的 `src/pages/not-found/index.tsx` 就是一个 `<Empty />` 加一个从 3 数到
-// 0 的倒计时（`useState(3)` + 每秒 `useInterval(…, 1000)` 减 1），到 0 跳 `/`。
-// 我们这一页比上游多两样：**说清楚是哪条路径不存在**（上游只知道「没匹配上」），
-// 和**一枚立刻能按的「回到主页」**（上游只有那个倒计时，见 viewNotFound）。
-//
-// 倒计时那一行的文案用上游删掉之前那一版（a6c48e1）的 `{count} 秒后回到主页...`：
-// 三个是 ASCII 的点，不是 `…`，别顺手改成省略号。
+// 搜索插画、一句说明和一枚「回到推荐音乐」。没有倒计时，也不自动跳走。
 package ui
 
 import (
-	"time"
-
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/egoist/mygo/ui"
 )
 
-const (
-	// notFoundRedirect 是 404 页停多久就自己回首页。上游是 3 秒。
-	notFoundRedirect = 3 * time.Second
-	// notFoundTick 是倒计时每一跳的间隔，也就是上游那个每秒减 1 的
-	// `useInterval(…, 1000)`。每一跳都要叫醒界面，否则数字会卡在 3 不动。
-	notFoundTick = time.Second
-)
-
-// syncRoute 是「换页了」这件事唯一的收口：那个倒计时由它驱动，换页要一起收掉
-// 的浮层也由它收（`closeOverlaysForNav`）。
+// syncRoute 是「换页了」这件事唯一的收口：换页要一起收掉的浮层由它收（`closeOverlaysForNav`）。
 //
 // **收在这里而不是 navigate**：后退/前进按钮（viewNav 里那对 BackButton /
 // ForwardButton）走的是 Router 自己的历史，不经过 navigate。漏了这一处，
-// 「404 页 3 秒后跳首页」就会在用户已经退回别的页之后照样把他拽回首页；
-// 而评论抽屉、队列抽屉、分集浮层、倍速菜单就会在换页之后还悬在画面上。
+// 评论抽屉、队列抽屉、分集浮层、倍速菜单就会在换页之后还悬在画面上。
 //
 // 这一段跑在主线程的 view 里，所以改这些字段不违反铁律一；后台那一跳只调
 // wakeHandle.invalidate，不碰它们（见 clock.go 顶上那条硬规矩）。
@@ -124,32 +106,7 @@ func (s *Shell) closeOverlaysForNav() {
 	s.fullLyric.fontOpen = false
 }
 
-// disarmNotFound 收掉倒计时。离开 404、或者到点跳首页时调。
-func (s *Shell) disarmNotFound() {
-	if s.notFoundStop != nil {
-		s.notFoundStop()
-		s.notFoundStop = nil
-	}
-	s.notFoundAt = time.Time{}
-}
-
-// viewNotFound 是 404 页。
-//
-// 四样：哪一页不存在（就是刚才敲进去的那个路径）、上游那句空状态、还剩几秒
-// 回首页、以及**一枚立刻能按的「回到主页」**。第一行是这里唯一非上游的字：上游
-// 那一页只知道「没匹配上」，不知道用户敲的是什么，404 不说清楚是哪一条就不成立。
-//
-// # 为什么多一枚按钮（票 #242，UX 报告 §3-A 的 A4）
-//
-// 原来这一页**只有一条出路**：等 3 秒自动跳首页。而 404 一般是**用户点错了链接**
-// ——他多半想去别的页，不是主页。于是那个倒计时把他**丢到主页**，他刚才想找的
-// 东西没了；而如果那个钟没推进（框架的钟在某些路径下站着不动），他就**永远停
-// 在这一页**——页面上又没有按钮可以自救。
-//
-// 现在倒计时照旧走（上游那个行为不改），但**多一条立刻能走的路**。
-//
-// ⚠️ **按下去要先把倒计时收掉**：不收的话，那一秒恰好跨过 3 秒的话，倒计时会
-// 在用户已经回首页之后**再把他拽一次**（虽然拽去的还是首页，但那是第二次跳转）。
+// viewNotFound 是 404 页：原型只有一枚主色按钮「回到推荐音乐」，路径不画。
 func (s *Shell) viewNotFound(c *ui.Context, path string) {
 	// 和其它页面 view 一样，头一件正事是装主题（铁律二，见 viewEmpty）。
 	s.applyFrameTheme(c)

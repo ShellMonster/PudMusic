@@ -552,10 +552,10 @@ func writeTempSettings(t *testing.T, st app.Settings) string {
 // 早先 `Close` 里那个「`closed` 就 return」也是半截修法：它让第二次 `Close` 收不掉关掉
 // 之后新装的那些。
 //
-// ⚠️ **三个各测各的**，因为它们互相拆台：离开 404 会 disarm 倒计时，切离列表页会让
-// `syncSearchWatch` 判定「不用醒」而 disarm 防抖钟——所以没法让三个同时装着再一起查。
+// ⚠️ **两个各测各的**，因为它们互相拆台：切离列表页会让 `syncSearchWatch` 判定「不用醒」
+// 而 disarm 防抖钟——所以没法让两个同时装着再一起查。
 //
-// 判据是那三个字段本身（`feed.stop` / `notFoundStop` / `searchWatchStop`）——它们就是
+// 判据是那两个字段本身（`feed.stop` / `searchWatchStop`）——它们就是
 // 「有没有装上」的那一位，不是在外面猜。
 func TestRedrawingAfterCloseDoesNotRearmAnyTimer(t *testing.T) {
 	for _, c := range []struct {
@@ -568,7 +568,6 @@ func TestRedrawingAfterCloseDoesNotRearmAnyTimer(t *testing.T) {
 			arm:   func(_ *testing.T, _ *Shell, tt *mygoui.Tester) { tt.Frame() }, // 首帧就装
 			armed: func(s *Shell) bool { return s.feed.stop != nil },
 		},
-		// 404 那个每秒一跳的倒计时随旧设计移除了（原型的 404 不倒计时、不自动跳走，DESIGN.md §0′.T7）。
 		{
 			name: "搜索防抖那个每 125ms 一跳的",
 			arm: func(_ *testing.T, s *Shell, tt *mygoui.Tester) {

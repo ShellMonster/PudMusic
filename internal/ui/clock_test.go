@@ -77,8 +77,7 @@ func TestFakeClockStopEndsIt(t *testing.T) {
 
 // TestFakeClockStopTwiceIsHarmless 验重复 stop 不炸。
 //
-// disarmNotFound 会在离开 404 时调一次、到点跳首页时再调一次；真实时钟那边
-// 是 `sync.Once`，这里也得扛得住。
+// 关窗收尾和正常停表都会各调一次 stop；真实时钟那边是 `sync.Once`，这里也得扛得住。
 func TestFakeClockStopTwiceIsHarmless(t *testing.T) {
 	c := newFakeClock(time.Unix(2026, 0))
 	stop := c.EveryFunc(time.Second, func() {})

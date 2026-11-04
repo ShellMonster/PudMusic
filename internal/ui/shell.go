@@ -184,12 +184,6 @@ type Shell struct {
 	// 同样是因为即时模式：滚动位置和展开的集合都得跨帧活着。
 	comments commentsPage
 
-	// notFoundAt 是进 404 的那一刻，notFoundStop 是那个每秒一跳的倒计时。
-	// 两者都只由主线程读写（syncRoute 在主线程），后台那一跳只调
-	// wakeHandle.invalidate，所以不违反铁律一、也没有竞态。
-	notFoundAt   time.Time
-	notFoundStop func()
-
 	// hotword 是搜索框那个轮换热词占位的跨帧状态（轮到第几个、这一轮从几时
 	// 算起、那个每 5 秒一跳的定时器），见 navbar_hotword.go。和上面两个一样，
 	// 定时器回调只调 wakeHandle.invalidate，其余只由主线程读写。

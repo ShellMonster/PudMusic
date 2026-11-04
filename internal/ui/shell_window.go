@@ -110,10 +110,9 @@ func (s *Shell) closePerWindow() {
 		s.searchWatchStop()
 		s.searchWatchStop = nil
 	}
-	s.feed.disarm()    // 红点，每五分钟一跳（navbar_feed.go）
-	s.disarmNotFound() // 404 倒计时，每一秒一跳（notfound.go）
-	s.disarmVolIdle()  // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
-	s.stopHotword()    // 热词轮换，每五秒一跳（navbar_hotword.go）
+	s.feed.disarm()   // 红点，每五分钟一跳（navbar_feed.go）
+	s.disarmVolIdle() // 音量浮层那个到点叫醒界面的钟（playbar_volume.go）
+	s.stopHotword()   // 热词轮换，每五秒一跳（navbar_hotword.go）
 
 	// 🔴 摘掉这一条唤醒句柄（铁律三那个逐窗口的列表）。摘掉之后调它是 no-op，
 	// 而不摘不致命——但「进迷你 / 退出迷你」来回十次之后那个列表就有十条，

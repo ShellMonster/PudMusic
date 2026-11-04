@@ -185,9 +185,9 @@ func TestTheNavBarTooltipsDoNotStackWhileTabbing(t *testing.T) {
 	tt.SetFocused(true)
 	tt.Frame()
 
-	// 顶栏上文字独一无二的两枚提示：「返回发现总览」（首页那一枚后退键）和
-	// 「迷你播放器」。其余几枚图标键的提示和按钮名同词之后就不再挂了。
-	const backTip = "返回发现总览"
+	// 顶栏上文字独一无二的两枚提示：「命令面板」（按钮名是「命令面板（⌘K）」，提示是前半句）和
+	// 「迷你播放器」（按钮名是「迷你」）。其余几枚图标键的提示和按钮名同词之后就不再挂了。
+	const backTip = "命令面板"
 	const pipTip = "迷你播放器"
 
 	for i := range 10 {
