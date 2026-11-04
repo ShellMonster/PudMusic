@@ -85,6 +85,7 @@ func homeHeroRadius(t *ui.Theme) float32 { return t.Radius + 4 }
 
 func homeTilePalette(t *ui.Theme, tile struct {
 	tab      int
+	subtitle string
 	from, to ui.Color
 }) (from, to, text ui.Color) {
 	index := 0
@@ -110,12 +111,13 @@ func homeTilePalette(t *ui.Theme, tile struct {
 
 var homeTiles = [4]struct {
 	tab      int
+	subtitle string
 	from, to ui.Color
 }{
-	{homeHotTab, ui.RGBA(196, 82, 44, 1), ui.RGBA(150, 52, 40, 1)},
-	{homeOriginalTab, ui.RGBA(112, 74, 150, 1), ui.RGBA(72, 56, 124, 1)},
-	{homeRecentTab, ui.RGBA(40, 116, 122, 1), ui.RGBA(34, 82, 104, 1)},
-	{0, ui.RGBA(170, 60, 92, 1), ui.RGBA(122, 44, 82, 1)},
+	{homeHotTab, "本周最热", ui.RGBA(196, 82, 44, 1), ui.RGBA(150, 52, 40, 1)},
+	{homeOriginalTab, "原创音乐榜", ui.RGBA(112, 74, 150, 1), ui.RGBA(72, 56, 124, 1)},
+	{homeRecentTab, "继续你的音乐旅程", ui.RGBA(40, 116, 122, 1), ui.RGBA(34, 82, 104, 1)},
+	{0, "按口味为你挑选", ui.RGBA(170, 60, 92, 1), ui.RGBA(122, 44, 82, 1)},
 }
 
 // openTab 从总览进第 tab 档的列表页。
@@ -551,6 +553,8 @@ func heroCopyText(sh list.Shown) string {
 }
 
 func (h *homePage) viewHeroText(c *ui.Context, id string, sh list.Shown, t *ui.Theme) {
+	ui.Text(c, "新歌速递").FontSize(scale.Font(c, scale.Size12)).
+		TextColor(ink.Ensure(t.Accent, ui.RGBA(28, 23, 20, 1), ink.TextContrast))
 	ui.Text(c, sh.Title).FontSize(scale.Font(c, scale.Size24)).
 		TextColor(ink.Ensure(ui.RGBA(255, 255, 255, 1), ui.RGBA(28, 23, 20, 1), ink.TextContrast)).MaxLines(2).Ellipsis("…")
 	if sh.Owner != "" {
@@ -601,6 +605,8 @@ func (h *homePage) viewTiles(c *ui.Context, w float32) {
 				}
 
 				ui.Text(c, name).FontSize(scale.Font(c, scale.Size18)).TextColor(tileText).MaxLines(1)
+				ui.Text(c, tile.subtitle).FontSize(scale.Font(c, scale.Size13)).
+					TextColor(tileText).MaxLines(1)
 			})
 		}
 	})
