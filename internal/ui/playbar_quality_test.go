@@ -71,16 +71,16 @@ func TestQualityBadgeFollowsTheRefresh(t *testing.T) {
 	tt := b.tt
 
 	tt.Frame()
-	if !tt.HasText("192K") {
+	if !tt.HasText("高音质") {
 		t.Fatalf("一开始的徽章没画出来：%q", tt.Texts())
 	}
 
 	st.Quality = "128K"
 	tt.Frame()
-	if tt.HasText("192K") {
+	if tt.HasText("高音质") {
 		t.Errorf("换流之后还在显示旧徽章：%q", tt.Texts())
 	}
-	if !tt.HasText("128K") {
+	if !tt.HasText("标准") {
 		t.Errorf("新徽章没画出来：%q", tt.Texts())
 	}
 }
@@ -101,7 +101,7 @@ func TestNoQualityBadgeForALocalFile(t *testing.T) {
 // TestNoQualityBadgeWhenThereIsNoTrack 盯没歌时不画。
 func TestNoQualityBadgeWhenThereIsNoTrack(t *testing.T) {
 	tt := qualityBarTester(t, app.State{})
-	if tt.HasText("192K") {
+	if tt.HasText("高音质") {
 		t.Errorf("还没有歌就画出了徽章：%q", tt.Texts())
 	}
 }
@@ -252,7 +252,7 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 	tt := b.tt
 	tt.Frame()
 
-	if err := tt.Click("192K"); err != nil {
+	if err := tt.Click("高音质"); err != nil {
 		t.Fatalf("点不动徽章：%v（画面上的字：%q）", err, tt.Texts())
 	}
 	// 票 #581：没有「自动」了，杜比是显式选项；顺序从最费流量到省流量。
@@ -274,7 +274,7 @@ func TestTheBadgeMenuSwitchesQuality(t *testing.T) {
 
 	// 菜单不是一次性的：换完一档之后还能接着换。菜单里勾中的那一项由这一帧
 	// 的状态说了算，所以它得是现读的——缓存住的话勾永远停在换之前那一档。
-	if err := tt.Click("192K"); err != nil {
+	if err := tt.Click("高音质"); err != nil {
 		t.Fatalf("第二次点不动徽章：%v", err)
 	}
 	for _, w := range want {

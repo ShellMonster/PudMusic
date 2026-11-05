@@ -1162,7 +1162,10 @@ func TestTheCommentsKeyDoesNotTouchTheProgressBar(t *testing.T) {
 		//（图形 y=28..46）。
 		tt.Move(key.X+key.W/2, key.Y+key.H/2)
 		tt.Frame()
-		if !tt.HasText("看这一首的评论") {
+		// ⚠️ **断「多出来一份」而不是「有」**：按钮的无障碍名就叫「评论」
+		// （`commentsKeyLabel`），悬停提示也是这两个字——所以悬停成不成立，
+		// 看的是「评论」出现了**两份**（键一份、提示一份），不是出现了。
+		if n := countText(tt, "评论"); n < 2 {
 			t.Errorf("宽度 %d：指针停在「评论」键的正中心上（%.1f, %.1f）却没有那句话——"+
 				"它被进度那一行的命中框盖住了（点下去也就没反应，而界面上看不出坏了）",
 				width, key.X+key.W/2, key.Y+key.H/2)

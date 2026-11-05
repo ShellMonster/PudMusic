@@ -82,7 +82,6 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 	winW, _ := c.Size()
 
 	col := ui.Column(c).Key(sp.key + m.ID).AlignSelf(ui.Stretch)
-	col = list.SelectedRow(col, t, r.Selected(), col.Hovered(), rows.keys.On() && list.Focused(c, &rows.state))
 	return col.Children(func() {
 		index := i + 1
 		if sp.byDay {
@@ -92,6 +91,10 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 				for j := i; j < len(all) && sameDay(all[j].ViewedAt, m.ViewedAt); j++ {
 					n++
 				}
+				// ⚠️ **组头画在选中行外面**：它属于「这一天」这一组，不属于
+				// 「这一首」——塞进选中的那一列的话，指针移到组里第一首上时
+				// hover 底色会连「今天」两个字一起盖住（原型 `.day-head` 和
+				// `.trow` 也是两个独立元素）。
 				s.viewDayHead(c, dayLabel(m.ViewedAt, s.clock.Now()), n, i == 0)
 			}
 			index = 1
@@ -117,7 +120,15 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 				imgcache.ViewTitled(c, s.images, m.Cover, m.Title, cw, ch)
 			},
 		}
-		ev := pud.TrackRow(c, sp.key+"t:"+m.ID, tr, w)
+		// ⚠️ 选中态只包**曲目行这一格**（`SelectedRow` 的 hover / 选中底都
+		// 落在这一格上），不包上面的组头——组头跟着第一首走，但不是第一首
+		// 的一部分。
+		track := ui.Column(c).AlignSelf(ui.Stretch)
+		track = list.SelectedRow(track, t, r.Selected(), track.Hovered(), rows.keys.On() && list.Focused(c, &rows.state))
+		var ev pud.TrackEvents
+		track.Children(func() {
+			ev = pud.TrackRow(c, sp.key+"t:"+m.ID, tr, w)
+		})
 		switch {
 		case ev.Play:
 			rows.playFrom(i)

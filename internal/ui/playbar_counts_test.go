@@ -806,7 +806,7 @@ func TestTheThreeCountsShowUpAndTheKeysStillWork(t *testing.T) {
 	}
 	tt.Move(like.X+like.W/2, like.Y+like.H/2)
 	tt.Frame()
-	if !tt.HasText("点赞") {
+	if !tt.HasText("长按一键三连") {
 		t.Errorf("指针停在赞键上却没有那句话（文字有 %q）——"+
 			"它被进度那一行的命中框盖住了（点下去也就没反应，而界面上看不出坏了）",
 			tt.Texts())

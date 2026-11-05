@@ -933,5 +933,5 @@ func likeStarTooltip(liked, askFailed bool) string {
 	case liked:
 		return "取消点赞"
 	}
-	return "点赞（长按三连）"
+	return "长按一键三连"
 }

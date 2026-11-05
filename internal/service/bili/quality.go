@@ -231,6 +231,15 @@ func ChipLabel(full string) string {
 		return "无损"
 	case strings.HasPrefix(full, "杜比"):
 		return "杜比"
+	case full == "192K":
+		// 有损三档和设置页那一档说同样的话（`AudioQuality.String`：
+		// 高音质 / 标准 / 省流量）。数字档位留给悬停提示和取流日志——
+		// 徽章那一行太窄，「192K」四个字符又宽又挤不出类别信息。
+		return "高音质"
+	case full == "128K":
+		return "标准"
+	case full == "64K":
+		return "省流量"
 	case strings.HasPrefix(full, "未知"):
 		return "未知"
 	}

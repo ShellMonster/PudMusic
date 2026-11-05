@@ -138,7 +138,7 @@ func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
 	if got := commentsKeyLabel(0); got != "评论" {
 		t.Errorf("commentsKeyLabel(0) = %q，want 「评论」——名字里不该多一个 0", got)
 	}
-	if got := commentsKeyTip(0); got != "看这一首的评论" {
+	if got := commentsKeyTip(0); got != "评论" {
 		t.Errorf("commentsKeyTip(0) = %q，want 不带数字的那一句", got)
 	}
 	// 非 0 那一档要真的带上数字（不然上面两条可以靠「永远不带」蒙混过关）。

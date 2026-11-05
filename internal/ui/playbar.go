@@ -668,6 +668,10 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 			s.addToast("这一首还没有取回来，收藏不了", notice.Warning)
 			return
 		}
+		// ⚠️ **先把满屏收掉**（和评论抽屉同一桩事，票 #706）：收藏夹弹窗是
+		// 浮在**主窗口**上面的一层，而满屏是压在主窗口上面的另一层——不收
+		// 掉的话，弹窗开在满屏底下，用户必须先把满屏关掉才看得见它。
+		s.closeFullPlayer()
 		s.openFolderSelect(it)
 	}
 }
@@ -679,9 +683,9 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 // 由 `countKeyTip` 补上。
 func favTooltip(faved bool) string {
 	if faved {
-		return "已收藏，点一下看收在哪"
+		return "已收藏"
 	}
-	return "收藏这一首"
+	return "收藏"
 }
 
 // qualitySwitchToast 在用户**切到无损 / 杜比**的那一下说一句降档规矩（票 #581）。

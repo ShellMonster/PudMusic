@@ -71,7 +71,7 @@ func commentsKeyLabel(count int64) string {
 }
 
 func commentsKeyTip(count int64) string {
-	return countKeyTip("评论", count, "看这一首的评论")
+	return countKeyTip("评论", count, "评论")
 }
 
 // viewCommentsButton 是播放条上那一枚「评论」键（票 #573，票 #682 起带数字）。
@@ -157,7 +157,7 @@ func (s *Shell) viewFullCommentsButton(c *ui.Context, st app.State, base flat.Ba
 	c.Key("full:comments")
 	if s.withTip(c, iconKeyOnBase(c, iconComments, "评论", iconMd, false, base).
 		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-		countKeyTip("评论", s.app.CommentCount(), "看这一首的评论")).Clicked() {
+		countKeyTip("评论", s.app.CommentCount(), "评论")).Clicked() {
 		// ⚠️ **先把满屏收掉**（票 #706）：抽屉是浮在**主窗口**上面的一层，而
 		// 满屏是**压在主窗口上面**的另一层——不收掉的话，抽屉会开在满屏底下
 		// （那一层不透明，抽屉一格都看不见，而用户按了「评论」什么反应都没有）。
