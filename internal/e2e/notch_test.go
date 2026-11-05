@@ -165,13 +165,13 @@ func TestTheNotchWindow(t *testing.T) {
 			}
 		}
 	}
-	// 宽是窗的尺寸 528（468 + 两侧余量 60）。
-	if math.Abs(w-528) > 1 {
-		t.Errorf("刘海窗的宽是 %.0f，want 528", w)
+	// 窗宽是当前项目 DESIGN.md §0′.T5 定的展开卡 380 + 两侧余量 60。
+	if math.Abs(w-440) > 1 {
+		t.Errorf("刘海窗的宽是 %.0f，want 440", w)
 	}
-	// 高是窗的尺寸 240。⚠️ 收合时**窗高不变**——变的是画出来的形状
+	// 高是当前项目 DESIGN.md §0′.T5 定的 168。⚠️ 收合时**窗高不变**——变的是画出来的形状
 	//（`notchTarget`），而 bounds 量的是窗不是形状。
-	if math.Abs(h-240) > 1 {
-		t.Errorf("刘海窗的高是 %.0f，want 240", h)
+	if math.Abs(h-168) > 1 {
+		t.Errorf("刘海窗的高是 %.0f，want 168", h)
 	}
 }
