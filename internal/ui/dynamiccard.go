@@ -172,14 +172,33 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring boo
 	// ⚠️ **底色刷成页面底色、字色钉回正文色**：框架给「指针压着 / 点过的那一行」铺主色底和
 	// 白字（`mygo/ui/list.go` 的 styleFn / `Selected`），底盖掉、字钉回，卡片自己的悬停反馈
 	// （名字、赞、播放键各自有）不受影响。
-	card := ui.Row(c).Key("dyn:"+d.ID).Grow(1).MaxWidth(feedMaxW).AlignItems(ui.Start).Gap(space.Px16).
-		Padding(space.Px24, space.None, space.Px24, space.None).
-		Background(pl.Bg).TextColor(pl.Text).
-		BorderWidth(0, 0, 1, 0).BorderColor(pl.Line)
+	//
+	// ⚠️ **先包一层通栏的页面底色**（`FillWidth`）：卡片限宽 760（`feedMaxW`），
+	// 宽窗口时卡片两侧会露出**这一行**的底——而指针压在这一行上时框架给它铺
+	// `SurfaceHover`，两侧就漏出两条灰边（滚动时上下过行，灰边跟着滚）。通栏
+	// 底色把它盖回去，卡片自己限宽居中。
+	card := ui.Row(c).Key("dyn:" + d.ID).FillWidth().Justify(ui.Center).
+		Background(pl.Bg).Children(func() {
+		ui.Row(c).Grow(1).MaxWidth(feedMaxW).AlignItems(ui.Start).Gap(space.Px16).
+			Padding(space.Px24, space.None, space.Px24, space.None).
+			Background(pl.Bg).TextColor(pl.Text).
+			BorderWidth(0, 0, 1, 0).BorderColor(pl.Line).
+			Children(func() {
+				s.viewDynamicCardBody(c, d)
+			})
+	})
 	// 选中那一层：盖掉框架那块实心主色底，键盘走到它上面时给它一圈焦点环
 	//（理由见 `widgets/list/selection.go`）。`hovered` 传 false：悬停底已经被盖掉了。
 	card = list.SelectedRow(card, t, selected, false, ring)
-	card.Children(func() {
+}
+
+// viewDynamicCardBody 是卡片里那两列（头像 + 内容列）。
+//
+// 它和 `viewDynamicCard` 拆开是因为卡片外面那层通栏底色归 `viewDynamicCard`
+// 管，而里面头像到赞那一摊是这张卡片自己的排版。
+func (s *Shell) viewDynamicCardBody(c *ui.Context, d app.Dynamic) {
+	pl := tok.Of(c.Theme())
+	{
 		pud.Avatar(c, d.Author.Name, 44, faceTint(d.Author.Mid), s.upFaceDraw(d.Author.Face))
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 			// ① 头一行：名字（链接，600）+ 「时间 · 发布了音乐」（12 号 text-3）。
@@ -227,7 +246,7 @@ func (s *Shell) viewDynamicCard(c *ui.Context, d app.Dynamic, selected, ring boo
 			// ④ 脚：赞、⋯（原型 `.post-foot`：缝 24，上 12，text-3 13 号）。
 			s.viewDynamicActions(c, d)
 		})
-	})
+	}
 }
 
 // feedMaxW 是动态流的最宽（原型 `.feed { max-width: 760px }`）。

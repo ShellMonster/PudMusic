@@ -518,8 +518,12 @@ func TestTheDynamicFeedMatchesThePrototypeLayout(t *testing.T) {
 	}
 	// `.feed` 最宽 760，下边框就铺这 760。边框是第一条自己的下边（两条之间没有缝，第二条的上沿就是它的
 	// 下沿），所以扫到第一条的下沿那一行为止（含）。
+	//
+	// ⚠️ **卡片在行里居中**：行比 760 宽时，卡片左缘不是行左缘而是行中心
+	// 往回退一半（`Justify(ui.Center)`），下边框从那里起铺 760。
 	ref := img.RGBAAt(int(card.X)+4, int(card.Y)+4)
-	if _, ok := fullWidthRule(img, int(card.X), int(card.X)+feedMaxW,
+	cardLeft := card.X + max(0, (card.W-feedMaxW)/2)
+	if _, ok := fullWidthRule(img, int(cardLeft), int(cardLeft)+feedMaxW,
 		int(card.Y), int(card.Y+card.H)+1, ref); !ok {
 		t.Errorf("两条动态之间没有贯穿 760 宽的一条下边框（`.post` 的 border-bottom 没画）")
 	}

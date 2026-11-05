@@ -101,7 +101,7 @@ const defaultMaxInflight = 6
 // decodeQueuePerWorker bounds compressed image bytes waiting for a decoder.
 // Each queued job owns its input []byte, so an oversized queue can raise RSS
 // even though the decoded bitmap cache itself stays within its byte budget.
-const decodeQueuePerWorker = 2
+const decodeQueuePerWorker = 4
 
 // maxImageBytes 是一张图能有多大。封面图床给的最大的也就几百 KB，
 // 超了说明拿到的不是图。

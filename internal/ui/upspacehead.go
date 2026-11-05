@@ -99,18 +99,27 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 			Children(func() {
 				outer := float32(upAvatarS)
 				inner := outer - 2*upAvatarRing
+				// ⚠️ **头像顶对齐**（`AlignSelf(Start)`）：它必须钉在「压头图
+				// 带 48」那个位置上。底对齐的话，简介那一列一高，整个 row
+				// 变高，头像跟着被顶上去——压带深度随简介长度变。
 				// 无障碍名字沿用头像地址（`spaceAvatar` 的老口径，无头测试靠它量头像的盒子）。
 				ui.Box(c).Size(outer, outer).Radius(outer / 2).Background(pl.Bg).AlignItems(ui.Center).Justify(ui.Center).
+					AlignSelf(ui.Start).
 					Shrink(0).Label(h.User.Face).Children(func() {
 					pud.Avatar(c, h.User.Name, inner, faceTint(sp.mid), s.upFaceDraw(h.User.Face))
 				})
 
 				// 名字 + LV，签名。
-				// ⚠️ **上内边距 16 把文字顶推过头图带的下沿**（原型 `.up-head` 里
-				// 这一列和头像底对齐时，32 的名字本来就探回带里约 6px——对齐
-				// 之后用户读到的是「文字骑在带子上」。多往下推 16，名字的
-				// 整个字形落在带子下面，只有头像压线）。
-				ui.Column(c).Grow(1).Shrink(1).MinWidth(240).Padding(space.Px16, space.None, space.Px8, space.None).
+				// ⚠️ **这一列顶对齐、不跟头像底对齐**（`AlignSelf(Start)` +
+				// 上边距把名字顶到头图带下沿之下）：和头像底对齐的话，
+				// 简介几行就把 32 的名字往上顶几行——长简介的 UP 主名字
+				// 整个骑在带子上。顶对齐之后名字永远在带子下面，签名再长
+				// 也只是往下长。
+				//
+				// 外边距 56 = 头图带在 row 里占的 48（`Margin(-48)` 探回去的
+				// 那一截）+ 带下沿往下 8（`upTextTop`）。
+				ui.Column(c).Grow(1).Shrink(1).MinWidth(240).AlignSelf(ui.Start).
+					Margin(space.Px48+space.Px8, space.None, space.None, space.None).
 					Children(func() {
 						ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 							typo.Display(ui.Text(c, spaceName(h.User)), scale.Font(c, scale.Size32)).
