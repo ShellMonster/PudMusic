@@ -252,3 +252,19 @@ func TestTheBackdropIsRedrawnExactlyWhenItShouldBe(t *testing.T) {
 		t.Error("改了画布的高度，却说不用重画")
 	}
 }
+
+func TestClearingTheBackdropDropsRetainedCanvasState(t *testing.T) {
+	var f fullPlayer
+	f.bg = mygoui.NewCanvas(320, 180)
+	f.bgURL = "http://example.test/cover.png"
+	f.bgBitmap = &mygoui.Bitmap{}
+	f.bgW, f.bgH, f.bgSigma = 320, 180, 8
+	f.bgDirty = true
+
+	f.clearBackdrop()
+
+	if f.bg != nil || f.bgBitmap != nil || f.bgURL != "" ||
+		f.bgW != 0 || f.bgH != 0 || f.bgSigma != 0 || f.bgDirty {
+		t.Fatalf("清理背景后仍保留画布状态：%+v", f)
+	}
+}

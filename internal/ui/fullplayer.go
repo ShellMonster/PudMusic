@@ -460,6 +460,8 @@ func (s *Shell) viewFullBackdrop(c *ui.Context, url string) {
 		Children(func() {
 			if s.pagePrefs().ShowBlurredBackground {
 				s.viewFullBackdropCanvas(c, url)
+			} else {
+				s.full.clearBackdrop()
 			}
 		})
 }
@@ -494,9 +496,26 @@ func (f *fullPlayer) backdropChanged(url string, bm *ui.Bitmap, w, h int, sigma 
 	return f.bgURL != url || f.bgBitmap != bm || f.bgW != w || f.bgH != h || f.bgSigma != sigma
 }
 
+// clearBackdrop drops the retained canvas and bitmap references as soon as the
+// blurred layer is no longer needed. mygo's renderer can then discard the
+// canvas texture when the scene no longer references it, instead of waiting for
+// a later full-player reset or a renderer sweep.
+func (f *fullPlayer) clearBackdrop() {
+	f.bg = nil
+	f.bgW, f.bgH = 0, 0
+	f.bgURL = ""
+	f.bgBitmap = nil
+	f.bgSigma = 0
+	f.bgDirty = false
+}
+
 // viewFullBackdropCanvas 是背景那一层：封面糊过一次画进一张画布，之后每一帧只是把那张
 // 画布放大铺上去（毛玻璃每帧重渲在软件渲染上要多花 80~140 毫秒）。
 func (s *Shell) viewFullBackdropCanvas(c *ui.Context, url string) {
+	if url == "" {
+		s.full.clearBackdrop()
+		return
+	}
 	winW, winH := c.Size()
 	clarity := s.app.SettingsSnapshot().BackdropClarity
 	div := float32(clarity.CanvasDivisor())
