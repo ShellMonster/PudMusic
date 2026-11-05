@@ -227,7 +227,7 @@ type UpCardEvents struct{ Open, Follow bool }
 // 是主色「关注」）。内边距 16、圆角 12、line 描边；悬停描边换 line-strong、底换 surface。
 func UCard(c *ui.Context, key string, u UpCard, w float32) (ev UpCardEvents) {
 	p := pal(c)
-	card := ui.ButtonBase(c).Key(key).Label("打开 " + u.Name + " 的空间").Width(w).Padding(space.Px16).
+	card := ui.ButtonBase(c).Key(key).Label("打开 " + u.Name + " 的空间").Width(w).Shrink(0).Padding(space.Px16).
 		Gap(space.Px16).AlignItems(ui.Center).Radius(tok.R12)
 	border, bg := p.Line, ui.Color{}
 	if card.Hovered() {
