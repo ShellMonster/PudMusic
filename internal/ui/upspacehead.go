@@ -101,7 +101,11 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 				})
 
 				// 名字 + LV，签名。
-				ui.Column(c).Grow(1).Shrink(1).MinWidth(240).Padding(space.None, space.None, space.Px8, space.None).
+				// ⚠️ **上内边距 16 把文字顶推过头图带的下沿**（原型 `.up-head` 里
+				// 这一列和头像底对齐时，32 的名字本来就探回带里约 6px——对齐
+				// 之后用户读到的是「文字骑在带子上」。多往下推 16，名字的
+				// 整个字形落在带子下面，只有头像压线）。
+				ui.Column(c).Grow(1).Shrink(1).MinWidth(240).Padding(space.Px16, space.None, space.Px8, space.None).
 					Children(func() {
 						ui.Row(c).Gap(space.Px8).AlignItems(ui.Center).Children(func() {
 							typo.Display(ui.Text(c, spaceName(h.User)), scale.Font(c, scale.Size32)).
