@@ -36,6 +36,13 @@ func videoTesterQN(t *testing.T) (*Shell, *mygoui.Tester, *[]bili.VideoQuality) 
 			return b[from:min(to, int64(len(b)))], nil
 		}}, pos), nil
 	})
+	// onlineTester waits on App.Snapshot, while openFullPlayer reads the page seam
+	// captured by the last frame. Advance until that frame-local snapshot sees the
+	// track too, otherwise the helper can return to the homepage without opening
+	// the full player when both updates land between frames.
+	waitFrames(t, tt, "页面看到在线那首开始播", func() bool {
+		return s.pageInput().Playback.HasTrack
+	})
 	s.openFullPlayer()
 	tt.Frame()
 	return s, tt, &qns
