@@ -553,7 +553,11 @@ func upTabEmpty(tab int, counts app.DropCounts) emptyState {
 func (s *Shell) viewUpSentinel(c *ui.Context, sp *upSpace, tab int) {
 	t := c.Theme()
 	p := sp.pagerOf(tab)
-	ui.Row(c).Key("space-sentinel").Center().Gap(space.Px8).Padding(space.Px12).Children(func() {
+	// ⚠️ 盖回页面底色（理由同 `list.LayoutRow`）：这一行是翻页哨兵，不是一条
+	// 列表项——框架的行悬停底铺上来时，转圈和「加载失败」会骑在一块灰底上。
+	row := ui.Row(c).Key("space-sentinel").Center().Gap(space.Px8).Padding(space.Px12)
+	row = list.LayoutRow(row, t)
+	row.Children(func() {
 		switch {
 		case p.err != nil:
 			ui.Text(c, "加载失败："+p.err.Error()).FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)

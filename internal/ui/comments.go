@@ -1059,14 +1059,18 @@ func (s *Shell) viewCommentsSentinel(c *ui.Context, p *commentsPage) {
 	t := c.Theme()
 	switch {
 	case s.app.CommentsErr() != nil:
-		ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8).Children(func() {
+		row := ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8)
+		row = list.LayoutRow(row, t)
+		row.Children(func() {
 			if commentTextButton(c, "加载失败，点此重试", scale.Font(c, scale.Size13), t.Text).Clicked() {
 				p.wantRefresh = true
 			}
 		})
 	case s.app.CommentsLoading():
 		// 🔴 **「正在拉」要有样子**（验收项）：一枚转着的圈 + 一句话。
-		ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8).Children(func() {
+		row := ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8)
+		row = list.LayoutRow(row, t)
+		row.Children(func() {
 			ui.Spinner(c).Label("正在拉")
 			ui.Text(c, "正在拉…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
 		})

@@ -777,7 +777,12 @@ func (p *pagedRows) markFailed(id string) {
 // viewFooter 画末尾那一行：转圈，或者失败了让人点重试。
 func (p *pagedRows) viewFooter(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8).
+	// ⚠️ 盖回页面底色（理由同 `list.LayoutRow`）：这一行是翻页哨兵，不是一条
+	// 列表项——框架的行悬停底铺上来时，转圈和「加载失败」那一句会骑在一块
+	// 灰底上，和上面的内容行是两种样子。
+	row := ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(space.Px8).Padding(space.Px8)
+	row = list.LayoutRow(row, t)
+	row.
 		Children(func() {
 			if p.pager.Status().Blocked {
 				// 行里的重试（不是错误页上那颗主按钮）：扁平配方，悬停才有一层淡底。

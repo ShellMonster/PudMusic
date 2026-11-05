@@ -32,6 +32,7 @@ import (
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -487,23 +488,33 @@ func (s *Shell) viewFeedSentinel(c *ui.Context, p *upPager, hint, retryLabel str
 	pl := tok.Of(c.Theme())
 	// 原型三种尾部：加载中是两条骨架；失败是「加载失败，点此重试」加一枚幽灵小键；
 	// 还有下一页是淡字「继续往下滚，加载更多动态」。
+	//
+	// ⚠️ 三支都盖回页面底色（理由同 `list.LayoutRow`）：这一行是翻页哨兵，
+	// 不是一条列表项——框架的行悬停底铺上来时，骨架条和「加载失败」会骑在
+	// 一块灰底上。
 	switch {
 	case p.err != nil:
-		ui.Column(c).Key("feed-sentinel").FillWidth().AlignItems(ui.Center).Gap(space.Px8).
-			Padding(space.Px24, space.None).Children(func() {
+		row := ui.Column(c).Key("feed-sentinel").FillWidth().AlignItems(ui.Center).Gap(space.Px8).
+			Padding(space.Px24, space.None)
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
 			ui.Text(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size14)).TextColor(pl.Text2).SingleLine()
 			if retry != nil && pud.Button(c, "feed:retry", pud.Ghost, pud.Sm, retryLabel, "refresh").Clicked() {
 				retry()
 			}
 		})
 	case p.loading:
-		ui.Column(c).Key("feed-sentinel").FillWidth().Padding(space.Px16, space.None).Label("正在加载").Children(func() {
+		row := ui.Column(c).Key("feed-sentinel").FillWidth().Padding(space.Px16, space.None).Label("正在加载")
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
 			pud.SkeletonRow(c, "feed:sk1", 0)
 			pud.SkeletonRow(c, "feed:sk2", 0)
 		})
 	default:
 		// 原型：居中的静音小键「继续往下滚，加载更多动态」，点一下也能拉下一页。
-		ui.Row(c).Key("feed-sentinel").FillWidth().Justify(ui.Center).Padding(space.Px24, space.None).Children(func() {
+		row := ui.Row(c).Key("feed-sentinel").FillWidth().Justify(ui.Center).Padding(space.Px24, space.None)
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
 			if pud.Button(c, "feed:more", pud.Quiet, pud.Sm, hint, "").Clicked() && retry != nil {
 				retry()
 			}
