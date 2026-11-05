@@ -374,7 +374,7 @@ func (m *Manager) destToLand(id string) string {
 // 「那个文件夹还没建」。
 //
 // ⚠️ **它建在真的要落盘的那一刻**，不是开应用的时候。默认落点是「音乐」目录下
-// 的应用子目录（`~/Music/BiuGo`），而开应用就把那个文件夹建出来的话，
+// 的应用子目录（`~/Music/PudMusic`），而开应用就把那个文件夹建出来的话，
 // **光是打开应用就会在用户的磁盘上留下一个文件夹**——测试里也一样（那不是
 // 临时的目录，是用户自己的）。
 func ensureDir(dest string) error {
@@ -458,7 +458,7 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 	}
 
 	// ⚠️ **落盘的目录要先建**：默认落点是「音乐」目录下的应用子目录
-	// （`~/Music/BiuGo`），它**不一定已经存在**——而目录不存在时
+	// （`~/Music/PudMusic`），它**不一定已经存在**——而目录不存在时
 	// `os.OpenFile` 报的是「no such file or directory」，用户看到的是一句他
 	// 看不懂的话，实际原因只是「那个文件夹还没建」。
 	if err := ensureDir(part); err != nil {

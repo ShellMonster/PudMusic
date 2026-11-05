@@ -253,6 +253,9 @@ func (s *Shell) applySettingOK(what string, fn func(*app.Settings)) bool {
 	}
 	// 设置变了，菜单上的勾选态要跟着变（菜单是系统画的，不在窗口的画面里）。
 	s.refreshMenuChecked(s.app.Snapshot())
+	// 刘海播放器是设置驱动的独立窗口：设置页改完后要立即显示 / 隐藏，
+	// 不能等下一次菜单动作才让窗口看到新值。
+	s.syncNotchPlayer()
 	return true
 }
 

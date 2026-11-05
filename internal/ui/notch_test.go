@@ -65,16 +65,22 @@ func TestNotchPlayerOpensAndClosesTheShell(t *testing.T) {
 }
 
 func TestToggleNotchPlayerFromTheNotchSide(t *testing.T) {
-	main := newTestShell(t).s
+	main := newTestShell(t, withSettings(app.Settings{NotchPlayer: boolPtr(true)})).s
 	n := main.newNotchShell()
 	t.Cleanup(n.closePerWindow)
 	n.toggleNotchPlayer()
-	if main.notch != nil {
-		t.Fatal("从刘海那侧按「切刘海」不该又开一个")
+	if main.notch == nil {
+		t.Fatal("切换刘海播放器不该销毁刘海外壳")
+	}
+	if main.notchEnabled() {
+		t.Fatal("从刘海那侧切换后设置还开着")
 	}
 	main.toggleNotchPlayer()
 	if main.notch == nil {
 		t.Fatal("主窗口那边没把刘海开回来")
+	}
+	if !main.notchEnabled() {
+		t.Fatal("主窗口那边切换后设置没打开")
 	}
 }
 
@@ -83,7 +89,7 @@ func TestNotchGreetOnlyOnce(t *testing.T) {
 	if err := enqueueTwo(n.app, t); err != nil {
 		t.Fatal(err)
 	}
-	// 第一次放歌：问候一次，记下「问候过了」。
+	// 第一次打开引导：问候一次，记下「问候过了」。
 	n.notchGreet()
 	if !n.notchSt.hello {
 		t.Fatal("第一首歌没问候")
@@ -126,5 +132,27 @@ func TestNotchKeepTurnsItOn(t *testing.T) {
 	}
 	if !n.app.SettingsSnapshot().NotchPlayerOn() {
 		t.Fatal("keep 没把开关拨到开")
+	}
+}
+
+func TestNotchGreetingWaitsForPlayback(t *testing.T) {
+	n, _ := newNotchShell(t)
+	n.notchGreet()
+	if n.notchSt.hello {
+		t.Fatal("没有歌曲时不该显示刘海引导")
+	}
+	if n.app.SettingsSnapshot().NotchPlayerGreeted {
+		t.Fatal("没有歌曲时不该记为已经问候")
+	}
+	if err := enqueueTwo(n.app, t); err != nil {
+		t.Fatal(err)
+	}
+	n.notchGreet()
+	if !n.notchSt.hello {
+		t.Fatal("开始播放后没有显示刘海引导")
+	}
+	w, h := n.notchTarget()
+	if w != notchHelloW || h != n.notchSt.h0+58 {
+		t.Fatalf("播放后的引导尺寸是 %v×%v，want %v×%v", w, h, notchHelloW, n.notchSt.h0+58)
 	}
 }

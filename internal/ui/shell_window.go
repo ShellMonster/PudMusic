@@ -381,6 +381,12 @@ func Run(a *app.App, sess *media.Session) error {
 		// 所以关掉应用之后不会有下一次查询在后台跑着。
 		a.StartAutoChecks()
 		s.openWindow()
+		// 刘海播放器是 macOS 的第三扇窗：启动时就把它建好，按设置决定
+		// 显示或隐藏。不能等菜单动作才建，否则默认开启的用户启动后看不到
+		// 刘海形状，设置页开关也没有已存在的窗口可以同步。
+		if notchSupported() {
+			s.openNotchPlayer()
+		}
 	})
 	return mygo.App.Run()
 }

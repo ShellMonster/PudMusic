@@ -71,8 +71,8 @@ type Downloads struct {
 	// 进程的当前工作目录里。对一个双击图标启动的 macOS 应用来说那是
 	// `/`，用户不会在那儿找歌，而在 Finder 里也看不见。
 	//
-	// 真机上它是**「音乐」目录下的应用子目录**（macOS `~/Music/BiuGo`，
-	// Windows `C:\Users\<用户名>\Music\BiuGo`）——见
+	// 真机上它是**「音乐」目录下的应用子目录**（macOS `~/Music/PudMusic`，
+	// Windows `C:\Users\<用户名>\Music\PudMusic`）——见
 	// `platform.DefaultDownloadsDir` 和 `ui.downloadsDir`。系统下载目录
 	// （`~/Downloads`）是**旧**落点：那儿是浏览器和安装包的地方，歌和那些东西
 	// 混在一起，用户找不到。

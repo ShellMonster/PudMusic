@@ -51,10 +51,10 @@ import (
 // ⚠️ **而 `App.Name()` 在「源码直接编出来的二进制」上不是「布丁音乐」**：
 // 框架的 `Name()`（`mygo/app.go:316`）先看 `packageInfo()`（那要**bundle**或
 // `mygo build` 注入的 ldflags），拿不到就**回落到可执行文件的名字**——
-// 而 E2E 编出来的那个叫 `biugo-e2e`。
+// 而 E2E 编出来的那个叫 `pudmusic-e2e`。
 //
 // ⇒ 所以这里**从窗口标题反推**：真机上第一栏写着「布丁音乐」，而 E2E 里写着
-// 「biugo-e2e」——**两个都要能用**，所以不写死，取窗口标题。
+// 「pudmusic-e2e」——**两个都要能用**，所以不写死，取窗口标题。
 
 // TestTheApplicationMenu 断**应用菜单在真窗口上装上了，而且点了真的做事**。
 //
@@ -171,7 +171,7 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 		cancel()
 		t.Fatalf("创建自动化 socket：%v", err)
 	}
-	binary := filepath.Join(socketDir, "biugo-e2e")
+	binary := filepath.Join(socketDir, "pudmusic-e2e")
 	// ⚠️ **先把静音钉上再启动**：`settings_mount` 读的是启动那一刻的数据
 	// 目录——进程起来之后再写就来不及了。没有它的话 E2E 里的 FLAC 起播
 	// 那一下真的会响（`drawer_nav_test.go` 的 `startRealAppWithArgs`），
@@ -294,9 +294,9 @@ func seedFakeSession(t *testing.T, dataDir string) {
 // `App.Name()`，而窗口标题用的也是它）——所以从这里就能拿到那一栏的名字，
 // **不用写死「布丁音乐」**。
 //
-// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `biugo-e2e`，而框架的
+// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `pudmusic-e2e`，而框架的
 // `App.Name()`（`mygo/app.go:316`）在拿不到 bundle 信息时**回落到可执行文件
-// 的名字**——所以 E2E 里第一栏写着的是「biugo-e2e」，真机上才是「布丁音乐」。
+// 的名字**——所以 E2E 里第一栏写着的是「pudmusic-e2e」，真机上才是「布丁音乐」。
 func windowTitle(t *testing.T, client *automationClient, window int) string {
 	t.Helper()
 	var windows struct {

@@ -74,25 +74,10 @@ func TestTheDefaultDownloadDirectoryIsNotCreatedJustForLooking(t *testing.T) {
 	}
 }
 
-// TestTheDownloadDirectoryIsNamedAfterTheAppNotAfterTheLegacyUserDataDirectory
-// 断下载目录的子目录名是**显示名**，不是用户数据目录那个老名字。
-//
-// ⚠️ 这两个名字是两件互不相干的事（AGENTS.md §5）：
-//
-//   - `PudMusic` 是**用户数据目录**的名字，老用户的 `Biu MyGo` 会被迁过去，
-//     为了升级之后设置、搜索历史、歌词缓存不丢（见 `datadir.go` 顶上那一节）。
-//   - 下载目录是**新起**的，没有「老用户升级要保住什么」这个问题，跟着显示名走
-//     正好。
-//
-// 把它们混起来的后果是：下载目录跟着「老名字」走，而应用叫 BiuGo——用户在
-// Finder 里找「BiuGo」找不到那一摞歌。
-func TestTheDownloadDirectoryIsNamedAfterTheAppNotAfterTheLegacyUserDataDirectory(t *testing.T) {
-	if DownloadsDirName == LegacyUserDataDirName {
-		t.Errorf("下载目录用了用户数据目录的名字 %q——那是「老数据在哪儿」，"+
-			"跟「新下载落哪儿」是两件事", DownloadsDirName)
-	}
-	if DownloadsDirName != "BiuGo" {
-		t.Errorf("下载目录的子目录名是 %q，want 显示名 BiuGo", DownloadsDirName)
+// TestTheDownloadDirectoryUsesTheProductFolder 断下载目录固定使用产品目录名。
+func TestTheDownloadDirectoryUsesTheProductFolder(t *testing.T) {
+	if DownloadsDirName != "PudMusic" {
+		t.Errorf("下载目录的子目录名是 %q，want PudMusic", DownloadsDirName)
 	}
 }
 

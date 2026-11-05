@@ -225,17 +225,18 @@ func TestTheCountNeverLosesItsPlus(t *testing.T) {
 			// 一个字符** —— 所以「+」**总是第一个被切掉的**（10 号字那一版实测：
 			// 「99k+」上限 24 → 墨迹 20.00；上限 21 → 墨迹 14.00，比不带「+」的
 			// 「99k」（18.52）**还短**）。
-			ink := isolatedInkWidth(t, want, playbarBadgeMaxW)
 			var full float32
 			mygoui.NewTester(func(c *mygoui.Context) {
 				full, _ = c.MeasureText(0, mygoui.Span{
 					Text: want, Size: scale.Font(c, playbarBadgeFont)})
 			}, 300, 60).Frame()
+			// 角标缺口现在按内容自适应宽度，不再受旧的 22.5 固定上限约束。
+			ink := isolatedInkWidth(t, want, full+20)
 			if full-ink > 2 {
 				t.Errorf("数 %d（%q）被截了：同一个上限（%.1f）下那一串字的墨迹只有 %.2f，"+
 					"而字宽是 %.2f——差的那一截是末尾那个「+」"+
 					"（那个「+」是这一族的语义）",
-					n, want, playbarBadgeMaxW, ink, full)
+					n, want, full+20, ink, full)
 			}
 		})
 	}
@@ -344,6 +345,9 @@ func countForText(s string) int64 {
 	}
 	if strings.Contains(body, "亿") {
 		return head * 100_000_000
+	}
+	if strings.Contains(body, "万") {
+		return head * 10_000
 	}
 	if strings.Contains(body, "k") {
 		return head * 1000

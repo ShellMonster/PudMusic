@@ -644,7 +644,7 @@ func readQueueFile(t *testing.T, path string) string {
 // 下载目录**没选过时**落的是默认落点，选过之后是用户选的那个。
 //
 // ⚠️ **默认落点是什么不是这一层的事**：真机上它是「音乐」目录下的应用子目录
-// （`~/Music/BiuGo`），那是界面层算出来递进来的（`Downloads.FallbackDir`，见
+// （`~/Music/PudMusic`），那是界面层算出来递进来的（`Downloads.FallbackDir`，见
 // `platform.DefaultDownloadsDir`）。这一层只管**优先级**：设置里的那个说了算，
 // 没设置才是兜底。
 //

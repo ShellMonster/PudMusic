@@ -165,11 +165,11 @@ func TestTheNotchWindow(t *testing.T) {
 			}
 		}
 	}
-	// 宽是窗的尺寸 528（468 + 两侧余量 60）。
+	// 窗宽是展开卡 468 + 两侧余量 60，与 mygo-cloudmusic 的刘海规格一致。
 	if math.Abs(w-528) > 1 {
 		t.Errorf("刘海窗的宽是 %.0f，want 528", w)
 	}
-	// 高是窗的尺寸 240。⚠️ 收合时**窗高不变**——变的是画出来的形状
+	// 高是展开深度 178 加刘海和余量后的 240。⚠️ 收合时**窗高不变**——变的是画出来的形状
 	//（`notchTarget`），而 bounds 量的是窗不是形状。
 	if math.Abs(h-240) > 1 {
 		t.Errorf("刘海窗的高是 %.0f，want 240", h)

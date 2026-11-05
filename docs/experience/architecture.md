@@ -96,7 +96,7 @@ internal/platform/cmd/, internal/licensing/cmd/   → 生成用的命令行，�
 ```sh
 BIU_IMAGE_CACHE_MB=32 go run .
 # 已安装的 macOS 应用先退出，再从终端启动：
-BIU_IMAGE_CACHE_MB=32 /Applications/BiuGo.app/Contents/MacOS/BiuGo
+BIU_IMAGE_CACHE_MB=32 /Applications/PudMusic.app/Contents/MacOS/PudMusic
 ```
 
 ### 内存未命中时先读磁盘缓存

@@ -148,7 +148,7 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 **这两条都是预期的，不是应用坏了**：
 
 - macOS：右键点图标 → **打开** → 在弹窗里再点一次「打开」；或者命令行
-  `xattr -dr com.apple.quarantine "/Applications/BiuGo.app"`。之后这台机器不会再拦。
+  `xattr -dr com.apple.quarantine "/Applications/PudMusic.app"`。之后这台机器不会再拦。
 - Windows：点 **更多信息** → **仍要运行**。
 
 要彻底消除它们需要 Apple 开发者计划的 Developer ID 并走公证流程，以及一张代码签名证书

@@ -66,8 +66,8 @@ func MountDownloads(a *app.App) error {
 // 原来是系统下载目录（macOS 上是 `~/Downloads`）——那儿是浏览器和安装包的地方，
 // 歌和一堆 `.dmg` 混在一起，用户在自己的下载目录里翻不到刚下的那几首。
 // 同类音乐软件都不往那儿扔（网易云、QQ 音乐、Spotify 都是「音乐目录 +
-// 以应用命名的子目录」），所以这里也那么放：macOS 是 `~/Music/BiuGo`，
-// Windows 是 `C:\Users\<用户名>\Music\BiuGo`（理由与那两个平台的窄口子见
+// 以应用命名的子目录」），所以这里也那么放：macOS 是 `~/Music/PudMusic`，
+// Windows 是 `C:\Users\<用户名>\Music\PudMusic`（理由与那两个平台的窄口子见
 // `platform/downloadsdir.go` 顶上那一节）。
 //
 // ⚠️ **这一层只查路径，不建目录**：目录是**真的要落盘的那一刻**才建的

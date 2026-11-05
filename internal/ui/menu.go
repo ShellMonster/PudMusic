@@ -125,10 +125,10 @@ func appMenu(s *Shell) *mygo.Menu {
 		// 文件的名字**——于是：
 		//
 		//   - 从 `mygo build` 打出来的包：名字是 `mygo.json` 里的「布丁音乐」 ✓
-		//   - **源码直接 `go build` 出来的**：名字是「biugo」/「biugo-e2e」 ✗
+		//   - **源码直接 `go build` 出来的**：名字是「pudmusic」/「pudmusic-e2e」 ✗
 		//
 		// ⇒ 而**界面上那一律叫「布丁音乐」**（`appName`），窗口标题也是它。
-		// 菜单栏第一栏写着「biugo」而窗口标题写着「布丁音乐」——**同一个应用两个
+		// 菜单栏第一栏写着「pudmusic」而窗口标题写着「布丁音乐」——**同一个应用两个
 		// 名字**，而 macOS 上左上角第一个菜单**永远**是应用名，用户会以为装错了
 		// 什么东西。
 		//
@@ -507,8 +507,9 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	sidebar := !sidebarCollapsed
 	// 迷你窗开着 = 勾上了「显示/隐藏迷你播放器」。
 	mini := s.mini != nil
-	// 刘海窗开着 = 勾上了「显示/隐藏刘海」。
-	notch := s.notch != nil
+	// 刘海播放器开着 = 勾上了设置里的开关。刘海外壳启动后常驻，
+	// 所以不能用 `s.notch != nil` 判断启用状态。
+	notch := s.app.NotchPlayerEnabled()
 	// 「歌曲」那一栏：有歌才有那几项。
 	hasTrack := st.HasTrack
 	// ⚠️ **「赞」和「显示评论」各有各的判据**（理由见下面改的那几行）：

@@ -650,7 +650,7 @@ func notifyUpdateAvailable(a *app.App, version string) {
 			releaseUpdateReminder(a, version)
 			return
 		}
-		sendNotification(notifyUpdateID(version), "有更新了", "BiuGo "+version+" 可更新")
+		sendNotification(notifyUpdateID(version), "有更新了", "布丁音乐 "+version+" 可更新")
 	})
 }
 

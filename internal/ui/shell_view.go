@@ -217,6 +217,9 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 歌」「UP 主的 mid」都在这一份快照里，而 `Snapshot()` **会分配**（章节
 	// 切片 + B 站链接字符串）——取两份就是白花一次。
 	st := s.app.Snapshot()
+	// 刘海引导跟随 cloud 的时机：第一次真正开始播放时出现，而不是 App
+	// 刚打开、还没有歌曲时就主动弹出。
+	s.observeNotchPlayback(st)
 	// 菜单里那些勾选态和可用态要跟着状态变（播放模式、显示模式、侧栏折叠、
 	// 迷你窗开着没有、当前有没有歌）。菜单是系统画的、不在窗口的画面里，
 	// 状态变了它不会自己变——见 refreshMenuChecked。

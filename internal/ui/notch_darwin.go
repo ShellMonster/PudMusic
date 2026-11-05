@@ -22,6 +22,8 @@ import (
 
 type notchID = objc.ID
 
+func notchSupported() bool { return true }
+
 type notchNSPoint struct{ X, Y float64 }
 type notchNSSize struct{ W, H float64 }
 type notchNSRect struct {
