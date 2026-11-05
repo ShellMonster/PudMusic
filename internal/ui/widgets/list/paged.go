@@ -1016,21 +1016,25 @@ func (p *PagedList) stop() {
 // items.length + 1 : items.length`）。把它藏起来的话「滚到底」就永远触发不了。
 func (p *PagedList) footerView(c *ui.Context) {
 	t := c.Theme()
-	ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(rowGap).Padding(cardPadY, cardPadX).
-		Children(func() {
-			if p.blocked {
-				// 这是**行里的一句重试**，不是错误页上那颗主按钮：它跟着列表
-				// 最后一行出现，用扁平配方（无常驻底、无描边），悬停才有一层淡底。
-				if flat.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
-					p.pager.Retry()
-				}
-				return
+	// ⚠️ 盖回页面底色（理由同 `LayoutRow`）：这一行是翻页哨兵，不是一条
+	// 列表项——框架的行悬停底铺上来时，转圈和「加载失败」会骑在一块
+	// 灰底上（网格那一档同型，见 `grid.go` 的 `viewFooterRow`）。
+	row := ui.Row(c).AlignSelf(ui.Stretch).Center().Gap(rowGap).Padding(cardPadY, cardPadX)
+	row = LayoutRow(row, t)
+	row.Children(func() {
+		if p.blocked {
+			// 这是**行里的一句重试**，不是错误页上那颗主按钮：它跟着列表
+			// 最后一行出现，用扁平配方（无常驻底、无描边），悬停才有一层淡底。
+			if flat.Button(c, "加载失败，点此重试").FontSize(scale.Font(c, scale.Size13)).Clicked() {
+				p.pager.Retry()
 			}
-			if p.loading {
-				ui.Spinner(c).Label(footerLabel)
-				ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
-			}
-		})
+			return
+		}
+		if p.loading {
+			ui.Spinner(c).Label(footerLabel)
+			ui.Text(c, "正在加载…").FontSize(scale.Font(c, scale.Size13)).TextColor(t.TextMuted)
+		}
+	})
 }
 
 // viewBackToTop 画回顶按钮：滚过 400 像素才出现。

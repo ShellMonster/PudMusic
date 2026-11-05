@@ -937,7 +937,15 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	guardFailed(&g.failedRow, "网格行", m.ID, func() {
 		// ⚠️ Stretch：格子要撑满这一行的高，选中那一格的底色才是一整块，
 		// 而不是只有歌名那一小块。
-		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(g.gap()).Children(func() {
+		//
+		// ⚠️ **这是布局行，不是一个可悬停的条目**（和 `pudrow.go` 的
+		// `viewPudUserRow`、`follow.go` 的卡片行同一个形状）：一行 cols 张卡，
+		// 卡片自己的 hover 由格子的封面反馈担。框架给指针所在行铺
+		// `SurfaceHover`——不盖回页面底色的话，格子之间那道缝、以及行两侧
+		// 没排满时的空白都漏出一条灰底。
+		row := ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(g.gap())
+		row = LayoutRow(row, c.Theme())
+		row.Children(func() {
 			for k := range cols {
 				i := first + k
 				// 越过最后一格，或者这一格是「歌画完了、又没装哨兵」的那一格：
@@ -1009,7 +1017,12 @@ func (g *Grid) leadInput(ev ui.InputEvent) bool { return leadInput(g.lead, ev) }
 // 网格里的话，「转圈」会跟着列数在屏幕上左右跳——拖一次窗口边就换一个位置，而它
 // 是「这里正在加载」唯一的视觉标记。钉在左边至少是不动的。
 func (g *Grid) viewFooterRow(c *ui.Context, cols int, cell float32) {
-	ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(g.gap()).Children(func() {
+	// ⚠️ 盖回页面底色（理由同 `LayoutRow`）：哨兵独占的这一行是布局，不是
+	// 条目——指针压在它上面时框架的行悬停底会铺满整行，转圈和「加载失败」
+	// 就骑在一块灰底上。
+	row := ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(g.gap())
+	row = LayoutRow(row, c.Theme())
+	row.Children(func() {
 		for k := range cols {
 			if k > 0 {
 				return
