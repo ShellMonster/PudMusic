@@ -236,9 +236,17 @@ func Badge(c *ui.Context, label string, hires bool) ui.Element {
 	if hires {
 		border, fg = p.Accent.Alpha(0.5), p.AccentText
 	}
-	return typo.Mono(ui.Text(c, label)).FontSize(10).FontWeight(700).LetterSpacing(0.4).
-		TextColor(fg).Border(1, border).Radius(tok.R4).PaddingX(space.Px6).Height(tok.BadgeH).
-		SingleLine().Shrink(0)
+	// ⚠️ **字居中靠包一层盒子**，不靠 Text 的行高：Text 的内容块在自己的盒子
+	// 里是顶对齐的——18 高的徽章放 10 号字（行高 ≈ 15.5），上面留白比下面多，
+	// 视觉上字就贴顶（用户截图实测：上 5px / 下 1px）。原型 `.badge` 是
+	// inline-flex + align-items:center，所以这里把描边/圆角/高度挂在外面的
+	// Box 上、字在盒子里居中，而不是往 Text 上想办法。
+	return ui.Box(c).Height(tok.BadgeH).PaddingX(space.Px6).Border(1, border).Radius(tok.R4).
+		AlignItems(ui.Center).Justify(ui.Center).Shrink(0).
+		Children(func() {
+			typo.Mono(ui.Text(c, label)).FontSize(10).FontWeight(700).LetterSpacing(0.4).
+				TextColor(fg).SingleLine()
+		})
 }
 
 // DropButton 是带下拉箭头的小幽灵键（原型 `.btn.btn-ghost.btn-sm` 里放「图标 + 文字 + down」，
