@@ -15,10 +15,14 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 
 ## 界面预览
 
-### 搜索、内容列表与播放条
+### 首页与播放条（浅色 / 深色）
 
 <p align="center">
-  <img src="docs/screenshots/readme/search-and-player.png" alt="布丁音乐搜索结果、侧栏与播放条" width="900">
+  <img src="docs/screenshots/readme/home-light.png" alt="布丁音乐浅色主题首页、侧栏与播放条" width="900">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/readme/home-dark.png" alt="布丁音乐深色主题首页、侧栏与播放条" width="900">
 </p>
 
 ### 迷你播放器
