@@ -296,8 +296,24 @@ func loginStatusLine(st app.LoginState) string {
 	return "正在等待扫码…"
 }
 
-// syncLogin 是登录页的每帧副作用。现在是空的：状态都在 `app.Account` 里，界面每帧读一份拷贝。
-func (s *Shell) syncLogin(c *ui.Context) {}
+// syncLogin 是登录页的每帧副作用。
+//
+// 登录页第一次出现时直接开始申请二维码。用跨帧标记只触发一次，避免每帧
+// 重新申请并取消上一轮轮询；用户主动刷新、重试或取消后也不会被下一帧偷偷
+// 重新启动。
+func (s *Shell) syncLogin(c *ui.Context) {
+	if s.loginAutoDisabled {
+		return
+	}
+	if s.loginAutoStarted {
+		return
+	}
+	s.loginAutoStarted = true
+	if s.app.LoginState().Phase == app.LoginIdle {
+		s.clearToasts()
+		s.app.BeginLogin()
+	}
+}
 
 // qrImage 把二维码画出来。
 //
@@ -390,11 +406,13 @@ func qrDisplaySize(code *bili.Code) int {
 
 // qrActions 是按钮行（原型：幽灵键「刷新二维码」+ 安静键「暂不登录」）。
 //
-// 开始前是主色「开始扫码登录」（原型进页就自动取码，这里要用户点一下才联网）；失败后是主色「重试」；
+// 失败后是主色「重试」；
 // 其余阶段都是「刷新二维码」。「暂不登录」取消这一轮登录并回到上一页。
 func (s *Shell) qrActions(c *ui.Context, st app.LoginState) {
 	switch st.Phase {
 	case app.LoginIdle:
+		// syncLogin 会在首次进入页面时自动开始；这一帧仍处于 idle 时保留
+		// 同一个入口作为网络启动失败后的手动兜底。
 		if pud.Button(c, "login-begin", pud.Primary, pud.Std, "开始扫码登录", "").Clicked() {
 			s.clearToasts()
 			s.app.BeginLogin()

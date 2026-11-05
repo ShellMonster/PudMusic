@@ -152,6 +152,8 @@ func loginTester(t *testing.T, a *app.App) (*mygoui.Tester, *Shell) {
 
 		}
 	}))
+	// 旧测试显式调用 BeginLogin，保持它们对轮询时序的控制。
+	b.s.loginAutoDisabled = true
 	return b.tt, b.s
 }
 
@@ -165,6 +167,21 @@ func waitQRCode(t *testing.T, a *app.App) {
 func waitLogin(t *testing.T, a *app.App, want app.LoginPhase) {
 	t.Helper()
 	waitFor(t, fmt.Sprintf("登录相位到 %v", want), func() bool { return a.LoginState().Phase == want })
+}
+
+func TestLoginPageStartsQRCodeAutomatically(t *testing.T) {
+	b := newUIBili(t, 86101)
+	a := newLoginApp(t, b)
+	tt, s := loginTester(t, a)
+	s.loginAutoDisabled = false
+	s.loginAutoStarted = false
+
+	// 登录页首次绘制时应自动开始申请二维码，不需要点击按钮。
+	tt.Frame()
+	waitQRCode(t, a)
+	if phase := a.LoginState().Phase; phase != app.LoginWaiting {
+		t.Fatalf("自动申请二维码后相位是 %v，want LoginWaiting", phase)
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

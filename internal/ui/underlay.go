@@ -166,6 +166,9 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 	s.syncLoginSuccess()
 
 	// 当前这一页自己那一份。
+	if s.router.Path() != loginPath {
+		s.loginAutoStarted = false
+	}
 	s.syncCurrentPage(c)
 
 	// 评论抽屉自己那一份（票 #706）。

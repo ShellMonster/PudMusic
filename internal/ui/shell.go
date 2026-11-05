@@ -1083,6 +1083,13 @@ type Shell struct {
 	// **只由界面线程读写**（就在那一层里）。
 	lastLoginPhase app.LoginPhase
 
+	// loginAutoStarted 记住当前这次进入登录页是否已经自动申请过二维码。
+	// 登录页的某些测试外壳会每帧重新 Push 同一路由，不能只靠 pageJustShown
+	// 判断，否则会每帧取消并重启登录轮询。
+	loginAutoStarted bool
+	// loginAutoDisabled 仅供无头测试控制显式登录时序。
+	loginAutoDisabled bool
+
 	// quitting 是「已经进了退出流程」，只由 OnBeforeQuit 置位（主线程）。
 	//
 	// 存在的理由是退出流程本身要靠关窗口走完：框架的 prepareQuit 遍历窗口

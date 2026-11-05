@@ -43,6 +43,8 @@ func loginFlowTester(t *testing.T, a *app.App, start string, opts ...shellOpt) (
 		}
 	}))
 	b := newTestShell(t, all...)
+	// 登录成功测试由 loginSucceeds 显式启动轮询。
+	b.s.loginAutoDisabled = true
 	return b.tt, b.s
 }
 
