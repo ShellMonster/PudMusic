@@ -75,15 +75,18 @@ func TestTheStatsPage(t *testing.T) {
 	// 的话，按完它立刻就成立——于是「有没有真的换页」根本验不到。
 	//
 	// ⚠️ **「还没有听歌记录」是这一页独有的**：第一次运行（还没听过歌）时
-	// 画的就是它（见 stats_view.go 的 `viewStatsEmpty`）。
+	// 画的就是它（见 stats_view.go 的空态分支）。
 	if !waitForTree(t, client, window, "还没有听歌记录", 20*time.Second) {
 		t.Fatalf("按了那一项之后没有进统计页：\n%s", treeDump(t, client, window))
 	}
-	// 四档都在。
-	for _, tab := range []string{"日", "周", "月", "全部"} {
-		if !treeHasLabel(t, client, window, tab) {
-			t.Errorf("统计页上没有 %q 那一档：\n%s", tab, treeDump(t, client, window))
-		}
+	// ⚠️ **页头那行小字也是这一页独有的**：「最近 7 天 · 只统计在本机的收听」
+	// 只在统计页的 `PageHead` 里画（stats_view.go），空态也有它——它到了说明
+	// 那一页的骨架真的画出来了。
+	//
+	// （日 / 周 / 月 / 全部那排 Tab 随统计页改版删了——原型只留最近 7 天，
+	// 见 stats_view.go 顶上那段。）
+	if !treeHasLabel(t, client, window, "最近 7 天 · 只统计在本机的收听") {
+		t.Errorf("统计页上没有页头小字：\n%s", treeDump(t, client, window))
 	}
 }
 
