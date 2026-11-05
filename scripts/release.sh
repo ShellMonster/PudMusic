@@ -94,13 +94,15 @@ PY
   fi
 }
 
-# changelog_section <版本>：打印 CHANGELOG.md 里 `## <版本>` 那一段。
+# md_section <版本> <文件>：打印那份 md 里 `## <版本>` 那一段。
 #
 # ⚠️ 这段 awk 是 `mygo/internal/update.ReleaseNotes` 的翻版，一个字一处都对上：
 # 标题认 `## 0.1.0` 与 Keep a Changelog 的 `## [0.1.0] - 2026-10-19` 两种写法，
 # 到下一个 `## ` 停。**两份实现必须一起对**——这里放宽了而 MyGo 没放宽，就会出现
 # 「脚本说没问题、build 说没有这一段」。
-changelog_section() {
+#
+# CHANGELOG.md 和 RELEASE-NOTES.md 用同一条规则取段——两份都是 `## <版本>` 起头。
+md_section() {
   awk -v want="$1" '
     /^## / {
       if (in_) exit
@@ -111,7 +113,7 @@ changelog_section() {
       next
     }
     in_ { print }
-  ' CHANGELOG.md
+  ' "$2"
 }
 
 # ================================================================ 1 前置检查
@@ -186,13 +188,17 @@ esac
 
 gh auth status >/dev/null 2>&1 || die "gh 没登录，跑一次 gh auth login。"
 
-# 1.3 CHANGELOG 里有这一版。**三处版本号要对上**：mygo.json 的 version、
-# CHANGELOG.md 的段落、待推的 git 标签。
-[ -f CHANGELOG.md ] || die "没有 CHANGELOG.md。MyGo 从它的 \`## <版本>\` 段落取更新日志，
-  文件不在时应用弹窗里的更新日志是空的。"
-notes="$(changelog_section "$version")"
-[ -n "$notes" ] || die "CHANGELOG.md 里没有 \`## $version\` 那一段（MyGo 取更新日志的格式）。
-  空段落和没有段落对应用是一回事：弹窗里一片空白。"
+# 1.3 两份说明都要齐：CHANGELOG 是给开发者的账（GitHub Release 说明从它取，
+# 见 generate-release-notes.sh），RELEASE-NOTES 是给用户的信（应用内更新弹窗
+# 从它取——mygo.json 的 updates.changelog 指着它，build 时写进 update 清单）。
+# 三处版本号要对上：mygo.json 的 version、两份 md 的 `## <版本>` 段、待推的 git 标签。
+[ -f CHANGELOG.md ] || die "没有 CHANGELOG.md。那是给开发者的版本账，发版节奏靠它核版本号。"
+[ -f RELEASE-NOTES.md ] || die "没有 RELEASE-NOTES.md。应用内更新弹窗的说明取它的 \`## <版本>\` 段。"
+[ -n "$(md_section "$version" CHANGELOG.md)" ] \
+  || die "CHANGELOG.md 里没有 \`## $version\` 那一段。先记一笔开发者账再发版。"
+notes="$(md_section "$version" RELEASE-NOTES.md)"
+[ -n "$notes" ] || die "RELEASE-NOTES.md 里没有 \`## $version\` 那一段。应用内更新弹窗
+  展示的就是它，发出去之前先写一段给用户的更新说明。"
 
 # 1.4 标签。**已经发过的版本不要重发**：装出去的老版本会以为有更新，清单里的
 # 签名和文件却还是上一次那套。已经推到远端且**指向 HEAD** 的标签放行——那是上
