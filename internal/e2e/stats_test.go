@@ -44,38 +44,40 @@ func TestTheStatsPage(t *testing.T) {
 	defer stop()
 	window := firstContentWindow(t, client)
 
-	// 那一枚图标在顶栏上。
+	// 入口在**侧栏**那一项上（`side-item:/stats`）。
 	//
-	// ⚠️ **它按「无障碍名」找**（"听歌统计"）：那枚图标的画面上只有一个图形，
-	// 而它的 `Label` 是给读屏软件和 automation 用的（见 navbar.go 那一段）。
+	// ⚠️ **顶栏那一枚已经没了**：顶栏改版（`navbar.go`）把「听歌统计」图标删了，
+	// 入口挪进侧栏（`router.go` 的 `InMenu: true`，见 `sideMenuItem` 的
+	// `side-item:` + `rt.Match`）。侧栏那一项的无障碍名同样是「听歌统计」
+	// （`Label(rt.Title)`），所以「找得到那一枚」这一步不用换字。
 	if !waitForTree(t, client, window, "听歌统计", 20*time.Second) {
-		t.Fatalf("顶栏上没有「听歌统计」那一枚：\n%s", treeDump(t, client, window))
+		t.Fatalf("侧栏上没有「听歌统计」那一项：\n%s", treeDump(t, client, window))
 	}
 
 	// 按它。
 	//
 	// ⚠️ **按 Key 按，不是按无障碍名按**：automation 的 `act` 只认 Key 或
-	// id（见框架的 `plugins/automation/protocol.go`）。那一枚图标的 Key 是
-	// "nav-stats"（见 navbar.go 那一处）。
+	// id（见框架的 `plugins/automation/protocol.go`）。侧栏那一项的 Key 是
+	// `side-item:/stats`（`sideMenuItem`：`"side-item:" + rt.Match`）。
 	err := automationCall(client, 300, "act", map[string]any{
 		"window": window,
-		"key":    "nav-stats",
+		"key":    "side-item:/stats",
 		"action": "press",
 	}, nil)
 	if err != nil {
-		t.Fatalf("按顶栏那枚「听歌统计」：%v", err)
+		t.Fatalf("按侧栏那项「听歌统计」：%v", err)
 	}
 
 	// 那一页画出来了。
 	//
-	// ⚠️ **等的是「那一页自己的东西」而不是「听歌统计」这四个字**——顶栏那一枚
-	// 图标的**无障碍名**也是「听歌统计」，而它**在每一页都在**。用那四个字当
-	// 判据的话，按完图标它立刻就成立——于是「有没有真的换页」根本验不到。
+	// ⚠️ **等的是「那一页自己的东西」而不是「听歌统计」这四个字**——侧栏那一项
+	// 的**无障碍名**也是「听歌统计」，而它**在每一页都在**。用那四个字当判据
+	// 的话，按完它立刻就成立——于是「有没有真的换页」根本验不到。
 	//
 	// ⚠️ **「还没有听歌记录」是这一页独有的**：第一次运行（还没听过歌）时
 	// 画的就是它（见 stats_view.go 的 `viewStatsEmpty`）。
 	if !waitForTree(t, client, window, "还没有听歌记录", 20*time.Second) {
-		t.Fatalf("按了那一枚之后没有进统计页：\n%s", treeDump(t, client, window))
+		t.Fatalf("按了那一项之后没有进统计页：\n%s", treeDump(t, client, window))
 	}
 	// 四档都在。
 	for _, tab := range []string{"日", "周", "月", "全部"} {
@@ -85,17 +87,19 @@ func TestTheStatsPage(t *testing.T) {
 	}
 }
 
-// TestTheStatsEntryHovers 断**真窗口里指针落到那一枚上，悬停反馈真的生效**。
+// TestTheStatsEntryHovers 断**真窗口里指针落到侧栏那一项上，悬停反馈真的生效**。
 //
 // # 它修的是什么
 //
-// 那一枚原来把 `.Key("nav-stats")` 链在 `iconKey(...)` **返回之后**——
+// 顶栏那一枚原来把 `.Key("nav-stats")` 链在 `iconKey(...)` **返回之后**——
 // `Element.Key` 是**事后 rekey**（换元素 id），而悬停反馈在**构造时**就按旧
-// 位置 id 去对命中链，于是真窗口里指针落上去既不换主色、也没有悬停淡底。
-// 修法是把 Key 提前到构造之前（`c.Key`，见 navbar.go 那一段）。
+// 位置 id 去对命中链，于是真窗口里指针落上去既不换主色、也没有淡底。顶栏改版
+// 之后那一枚挪进了**侧栏**（`side-item:/stats`），悬停是 `sideMenuItem` 自己
+// 那一套（`b.Hovered()` → `p.Hover` 淡底 + `p.Text` 字色），同一份「落上去要变」
+// 的验收仍然适用。
 //
 // 界面层那一族（`TestTheStatsEntryLightsUpOnHover`）断的是像素（主色），而**真
-// 窗口里**这一条走 automation：先按 `key:"nav-stats"` 在 tree 里读出那一枚的
+// 窗口里**这一条走 automation：先按 `key:"side-item:/stats"` 在 tree 里读出那一项的
 // bounds，用 `input` 发 `pointerMove` 到它的中心，再 `capture` 前后两张 PNG
 // 比对那一块——悬停生效的话那一块必然变（图形变主色、底下多一层淡底）。
 //
@@ -113,9 +117,9 @@ func TestTheStatsEntryHovers(t *testing.T) {
 	defer stop()
 	window := firstContentWindow(t, client)
 
-	// 那一枚在顶栏上，按 Key 找到它并读出 bounds。
+	// 那一项在侧栏上，按 Key 找到它并读出 bounds。
 	if !waitForTree(t, client, window, "听歌统计", 20*time.Second) {
-		t.Fatalf("顶栏上没有「听歌统计」那一枚：\n%s", treeDump(t, client, window))
+		t.Fatalf("侧栏上没有「听歌统计」那一项：\n%s", treeDump(t, client, window))
 	}
 	type node struct {
 		Key    any `json:"key"`
@@ -131,13 +135,13 @@ func TestTheStatsEntryHovers(t *testing.T) {
 	}
 	var box *node
 	for i := range tree.Nodes {
-		if tree.Nodes[i].Key == "nav-stats" {
+		if tree.Nodes[i].Key == "side-item:/stats" {
 			box = &tree.Nodes[i]
 			break
 		}
 	}
 	if box == nil || box.Bounds.Width == 0 {
-		t.Fatalf("元素树里没有 key=nav-stats 的那一枚：\n%s", treeDump(t, client, window))
+		t.Fatalf("元素树里没有 key=side-item:/stats 的那一项：\n%s", treeDump(t, client, window))
 	}
 
 	// ⚠️ **坐标是两个口径**：树的 `bounds` 是**内容区 DIP**，`capture` 的 PNG
@@ -242,8 +246,8 @@ func TestTheStatsEntryHovers(t *testing.T) {
 		}
 	}
 	if changed == 0 {
-		t.Errorf("指针落到 nav-stats（bounds %.0f,%.0f %.0fx%.0f）上之后，那一块一个像素都没变——"+
-			"悬停反馈没生效（`.Key` 在构造之后才调，rekey 换了 id，`Hovered()` 对不上）",
+		t.Errorf("指针落到 side-item:/stats（bounds %.0f,%.0f %.0fx%.0f）上之后，那一块一个像素都没变——"+
+			"悬停反馈没生效",
 			box.Bounds.X, box.Bounds.Y, box.Bounds.Width, box.Bounds.Height)
 	}
 }

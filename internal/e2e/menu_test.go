@@ -116,7 +116,10 @@ func TestTheApplicationMenu(t *testing.T) {
 		if err != nil {
 			t.Fatalf("点「设置…」：%v", err)
 		}
-		if !waitForTree(t, client, window, "常规设置", 20*time.Second) {
+		// ⚠️ **判据是「默认音质」**：设置页改版之后整页拆成 `set-tab:常规/外观/…`
+		// 那一排，「常规设置」这四个字不再出现。「默认音质」是常规 Tab 里第一组
+		// 「播放」的第一行，只在设置页有。
+		if !waitForTree(t, client, window, "默认音质", 20*time.Second) {
 			t.Fatalf("点了「设置…」之后窗口里没有出现设置页的内容：\n%s", treeDump(t, client, window))
 		}
 	})
