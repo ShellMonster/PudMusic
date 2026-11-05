@@ -119,9 +119,8 @@ func (t *avatarPicTransport) RoundTrip(r *http.Request) (*http.Response, error) 
 //
 // # ⚠️ 为什么是「不变」而不是「只多一次」
 //
-// 两处的显示尺寸不同（关注卡 128 见方、空间页 112），而「按显示尺寸」那一档是
-// **长边吸档**的：128 和 112 **吸到同一档**（256），于是两处要的是**同一个
-// key**——那张脸从头到尾**只下一次**。
+// 两处的显示尺寸不同（关注卡 56 见方 → 64 档、空间页 128 档），各自一个 key，
+// 进空间时多下一次；之后来回切不许再多。
 //
 // 而**改坏实现的时候**（服务层在关注列表那一族拼了 160×160 的裁剪参数）：关注页
 // 要的是 `…@160w_160h_1c_1s.webp`、空间页要的是 `…@256w_256h_1c.webp`——**两个
@@ -172,15 +171,14 @@ func TestTheSameFaceIsNotDownloadedAgainWhenSwitchingPages(t *testing.T) {
 
 	before := pics.faceHits()
 
-	// ② 进他的空间：112 和 128 吸到**同一档**，所以**不该**多下一次。
+	// ② 进他的空间：关注卡的头像是原型的 56 见方（吸到 64 档），空间页的是 128 档——
+	// 显示尺寸不同，要的就是两个不同的 key，所以这里恰好多下一次（128 档那张）。
 	s.navigate(upPathOf(42))
 	settleFrames(t, tt)
 
 	afterSpace := pics.faceHits()
-	if afterSpace != before {
-		t.Errorf("从关注页进空间，那张脸被下了 %d 次（切之前 %d 次）——"+
-			"两处的显示尺寸（128 / 112）吸到**同一档**，要的是**同一个 key**，"+
-			"该只下一次（%v）",
+	if afterSpace-before != 1 {
+		t.Errorf("从关注页进空间，那张脸被下了 %d 次（切之前 %d 次），want 恰好 1 次（128 档）（%v）",
 			afterSpace-before, before, pics.seen())
 	}
 
