@@ -81,6 +81,8 @@ type dynamicFeed struct {
 	filterMid int64
 	// authors 是左边已经拿到的关注的人。
 	authors []app.FollowAuthor
+	// authorsExpanded controls the compact two-row author filter.
+	authorsExpanded bool
 
 	// state 是右边那一栏的列表状态，authState 是左边的。**不能共用**：
 	// MyGo 会在「同一个 ListState 被两个 List 显示」时 panic。
@@ -226,8 +228,6 @@ func (s *Shell) viewDynamicFeed(c *ui.Context, _ *ui.Route) {
 	ui.Column(c).Key("page:" + dynamicFeedPath).Grow(1).FillHeight().AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Grow(1).FillHeight().Width(s.pageBodyW(c)).
 			Padding(space.PageTop, space.PageHorizontalForWindow(w), space.None, space.PageHorizontalForWindow(w)).Children(func() {
-			pud.PageHead(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", w, nil)
-			s.viewFeedFilter(c, f)
 			ui.Column(c).Key("feed-items").Grow(1).FillHeight().Children(func() {
 				s.viewFeedItems(c, f)
 			})
@@ -287,6 +287,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// `err` 非 nil，切走再切回来也不会重拉，用户看到的是「关注的人
 	// 真的什么都没发」。
 	if !f.started && feed.err != nil {
+		s.viewFeedHeader(c, f)
 		s.viewLoadError(c, "feed-err:items", "动态列表", "重试加载动态", feed.err, func() {
 			feed.err = nil
 			if ctx := feed.begin(); ctx != nil {
@@ -298,6 +299,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	if !f.started && feed.loading {
 		// 一条都都没有：第一页在途。
 		s.applyFrameTheme(c)
+		s.viewFeedHeader(c, f)
 		drawPostSkeletons(c, "feed:loading", "正在加载动态…")
 		return
 	}
@@ -308,6 +310,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// 永远不再加载。
 	keepLooking := f.started && feed.hasMore
 	if len(items) == 0 && !keepLooking {
+		s.viewFeedHeader(c, f)
 		if f.filterMid != 0 {
 			// 原型：筛了某位 UP 主却一条都没有。
 			s.viewEmpty(c, "feed:filtered", emptyState{
@@ -327,7 +330,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// **它占了行高**，所以「还在不在画面里」这件事才问得出来（Biu 的
 	// `count = hasMore ? items.length + 1 : items.length`）。
 	sentinel := f.started && (feed.hasMore || feed.err != nil)
-	rows := len(items)
+	const headerRows = 1
+	rows := headerRows + len(items)
 	if sentinel {
 		rows++
 	}
@@ -342,6 +346,10 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 	// 而刷新时新动态会插到**前面**——拿序号当身份的话，用户盯着的那一条
 	// 会整个换成旁边那一条，而界面上看不出任何异样。
 	st.Key = func(i int) any {
+		if i == 0 {
+			return "feed:header"
+		}
+		i -= headerRows
 		if i >= len(items) {
 			return upSentinelKey{}
 		}
@@ -349,6 +357,10 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		return f.itemRowKeys.At(i, items[i].ID, rowkey.Identity)
 	}
 	st.Label = func(i int) string {
+		if i == 0 {
+			return "用户动态"
+		}
+		i -= headerRows
 		if i >= len(items) {
 			return "加载更多动态"
 		}
@@ -386,7 +398,12 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 						log.Printf("pudmusic: 动态那一行画崩了：%v\n%s", rec, debug.Stack())
 					}
 				}()
-				if r.Index >= len(items) {
+				if r.Index == 0 {
+					s.viewFeedHeader(r.Context, f)
+					return
+				}
+				itemIndex := r.Index - headerRows
+				if itemIndex >= len(items) {
 					if endRow {
 						feedEndNote(r.Context)
 						return
@@ -399,8 +416,8 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 					})
 					return
 				}
-				s.viewDynamicCard(r.Context, items[r.Index],
-					f.keys.selected(r.Index), f.keys.ring(r.Context))
+				s.viewDynamicCard(r.Context, items[itemIndex],
+					f.keys.selected(itemIndex+headerRows), f.keys.ring(r.Context))
 			})
 		// 原型 `.post` 自己带上下 24 和底线，行间不再留缝。
 		s.trackScrollbar(dynList)

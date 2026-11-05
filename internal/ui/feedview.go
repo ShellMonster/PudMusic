@@ -16,6 +16,12 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func (s *Shell) viewFeedHeader(c *ui.Context, f *dynamicFeed) {
+	w := windowW(c)
+	pud.PageHead(c, "Feed", "用户动态", "关注的 UP 主最近分享了什么。", w, nil)
+	s.viewFeedFilter(c, f)
+}
+
 // feedChipLimit 是 chip 横排最多画几位 UP 主：横排会自动一页页往后拉，但不无限拉。
 const feedChipLimit = 40
 
@@ -37,20 +43,53 @@ func (f *dynamicFeed) visible() []app.Dynamic {
 // 「全部」加每位关注的 UP 主（chip 左内边距 4，带 22 的头像）；选中的反色。
 // 数据是「我关注的人」（作者那一拉），没拉到时只有「全部」。
 func (s *Shell) viewFeedFilter(c *ui.Context, f *dynamicFeed) {
-	ui.Row(c).Key("feed:filter").FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center).
-		Margin(space.Px24, space.None, space.None, space.None).Children(func() {
-		if pud.Chip(c, "feed:chip:all", "全部", "", f.filterMid == 0).Clicked() {
-			f.filterMid = 0
+	ui.Column(c).Key("feed:filter").FillWidth().
+		Margin(space.Px24, space.None, space.None, space.None).Gap(space.Px8).Children(func() {
+		authors := f.authors
+		if len(authors) > feedChipLimit {
+			authors = authors[:feedChipLimit]
 		}
-		for i, a := range f.authors {
-			if i >= feedChipLimit {
-				break
-			}
-			if s.feedAuthorChip(c, a, f.filterMid == a.Mid).Clicked() {
-				f.filterMid = a.Mid
-			}
+		if !f.authorsExpanded && len(authors) > 12 {
+			s.viewFeedAuthorRow(c, f, authors[:6], true)
+			remaining := len(authors) - 12
+			ui.Row(c).Key("feed:authors-row:second").FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center).
+				Children(func() {
+					for _, a := range authors[6:12] {
+						if s.feedAuthorChip(c, a, f.filterMid == a.Mid).Clicked() {
+							f.filterMid = a.Mid
+						}
+					}
+					if pud.Chip(c, "feed:authors-expand", "+"+strconv.Itoa(remaining), "", false).Clicked() {
+						f.authorsExpanded = true
+					}
+				})
+			return
+		}
+		s.viewFeedAuthorRow(c, f, authors, true)
+		if f.authorsExpanded && len(authors) > 12 {
+			ui.Row(c).Key("feed:authors-collapse").FillWidth().Justify(ui.End).Children(func() {
+				if pud.Chip(c, "feed:authors-collapse", "收起", "", false).Clicked() {
+					f.authorsExpanded = false
+				}
+			})
 		}
 	})
+}
+
+func (s *Shell) viewFeedAuthorRow(c *ui.Context, f *dynamicFeed, authors []app.FollowAuthor, includeAll bool) {
+	ui.Row(c).Key("feed:authors-row:" + strconv.FormatBool(includeAll)).FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center).
+		Children(func() {
+			if includeAll {
+				if pud.Chip(c, "feed:chip:all", "全部", "", f.filterMid == 0).Clicked() {
+					f.filterMid = 0
+				}
+			}
+			for _, a := range authors {
+				if s.feedAuthorChip(c, a, f.filterMid == a.Mid).Clicked() {
+					f.filterMid = a.Mid
+				}
+			}
+		})
 }
 
 // feedAuthorChip 是带头像的 chip（原型 `style="padding-left:4px"` + `avatar(k, 22)`）。
