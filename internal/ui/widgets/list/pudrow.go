@@ -142,13 +142,18 @@ func (l *List) viewPudUserRow(r ui.ListRow, i int) {
 			l.acts.Play([]app.Item{m.Item})
 		}
 	}
-	ui.Row(c).AlignSelf(ui.Stretch).Gap(gap).Margin(space.None, space.None, space.Px16, space.None).
-		Children(func() {
-			card(m)
-			if m.Pair != nil {
-				card(*m.Pair)
-			}
-		})
+	// ⚠️ **这是布局行，不是一个可悬停的条目**（和 `follow.go` 的卡片行同一个
+	// 形状）：一行一到两张 UCard，卡片自己的 hover 由 UCard 担。MyGo 的 List 会
+	// 给指针所在行铺 `SurfaceHover`——不盖回页面底色的话，两张卡片之间和左右
+	// 两侧都漏出一条灰底。
+	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(gap).Margin(space.None, space.None, space.Px16, space.None)
+	row = LayoutRow(row, c.Theme())
+	row.Children(func() {
+		card(m)
+		if m.Pair != nil {
+			card(*m.Pair)
+		}
+	})
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

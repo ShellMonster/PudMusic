@@ -587,8 +587,14 @@ func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 	cell := pud.CellWidth(w-2*pad, per, gap)
 	first := i * per
 	items := sp.cols[tab][first:min(first+per, len(sp.cols[tab]))]
-	ui.Row(c).Key("space-coll-row:"+strconv.Itoa(first)).Gap(gap).AlignItems(ui.Start).
-		Padding(space.Px24, space.None, space.None, space.None).Children(func() {
+	// ⚠️ **这是布局行，不是一个可悬停的条目**（和关注页卡片行、搜索 UP 主行
+	// 同一个形状）：一行几张 ColCard，卡片自己的 hover 由 ColCard 担。MyGo 的
+	// List 给指针所在行铺 `SurfaceHover`——不盖回页面底色的话，卡片之间和
+	// 行两侧都漏出一条灰底。
+	row := ui.Row(c).Key("space-coll-row:"+strconv.Itoa(first)).Gap(gap).AlignItems(ui.Start).
+		Padding(space.Px24, space.None, space.None, space.None)
+	row = list.LayoutRow(row, c.Theme())
+	row.Children(func() {
 		for _, col := range items {
 			sub := "收藏夹"
 			if tab == upTabSeries {

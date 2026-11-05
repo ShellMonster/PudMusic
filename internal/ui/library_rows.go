@@ -646,7 +646,11 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 
 	// 哨兵**独占一行**时（`len(p.rows)` 正好是列数的整数倍）：这一行里没有歌。
 	if first >= len(p.rows) {
-		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+		// ⚠️ 盖回页面底色（理由同下面那一支）：这一行里没有歌，框架照旧给它
+		// 铺行悬停底，哨兵那一格的四周就漏出一块灰。
+		row := ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap)
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
 			ui.Box(c).Grow(1).AlignSelf(ui.Start).Children(func() { p.viewFooter(c) })
 		})
 		return
@@ -664,7 +668,13 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 	guard.Wrap(func(c *ui.Context) {
 		// ⚠️ Stretch：格子要撑满这一行的高，选中那一格的底色才是一整块
 		//（`widgets/list/grid.go` 的 viewRow 里同一句）。
-		ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap).Children(func() {
+		// ⚠️ **这是布局行，不是一个可悬停的条目**（和 `follow.go` / `pudrow.go`
+		// 的卡片行同一个形状）：格子的选中 / 悬停由各格自己担，MyGo 的 List 给
+		// 指针所在行铺的 `SurfaceHover` 要从格子之间的缝和行两侧漏出来——
+		// 盖回页面底色，只留格子自己的反馈。
+		row := ui.Grid(c).AlignSelf(ui.Stretch).Columns(cols).Gap(gridGap)
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
 			for k := range cols {
 				i := first + k
 				// 越过最后一格，或者这一格是「行画完了、又没装哨兵」的那一格：空着。
