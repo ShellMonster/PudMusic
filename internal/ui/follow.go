@@ -810,7 +810,11 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 	}
 	gap := followCardGap
 	cell := pud.CellWidth(max(f.width, 0), cols, gap)
-	ui.Row(c).Key("follow-row:" + followKeyOf(f.users[first].Mid)).Gap(gap).AlignItems(ui.Start).Children(func() {
+	// Stretch cards to the tallest item in the row. Follow users can have
+	// different sign/verification text, but the prototype keeps each row's
+	// cards on one baseline instead of letting neighboring cards end at
+	// different heights.
+	ui.Row(c).Key("follow-row:" + followKeyOf(f.users[first].Mid)).Gap(gap).AlignItems(ui.Stretch).Children(func() {
 		for k := range cols {
 			j := first + k
 			if j >= len(f.users) {
