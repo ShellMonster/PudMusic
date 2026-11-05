@@ -28,7 +28,7 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 ### 迷你播放器
 
 <p align="center">
-  <img src="docs/screenshots/readme/mini-player.png" alt="布丁音乐迷你播放器" width="640">
+  <img src="docs/screenshots/readme/mini-player.png" alt="布丁音乐迷你播放器" width="380">
 </p>
 
 截图来自当前版本的实际应用界面。展示内容仅用于说明界面，不代表推荐或授权任何具体音乐内容。
