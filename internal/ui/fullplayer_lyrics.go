@@ -147,6 +147,7 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnaps
 			gap:          -1,
 			lineMul:      1.5,
 			activeScale:  fullLyricActiveScale,
+			tracking:     -0.01,
 			idleAlpha:    0.38,
 			hoverAlpha:   0.70,
 			hideOrigin:   true,

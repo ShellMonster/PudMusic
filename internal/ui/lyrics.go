@@ -289,6 +289,8 @@ type lyricStyle struct {
 	// var(--font-display) }`，当前句 700、其余常规）。字体的取值集中在
 	// `fullLyricFace`（`fullplayer_lyrics.go`），Regular 子集一到只改那一处。
 	face func(active bool) (family string, weight int)
+	// tracking 是歌词字距相对字号的比例；满屏播放器按原型的 -0.01em 收紧。
+	tracking float32
 	// padY / gap 非 0 时覆盖行的上下内边距和行间距（原型 `.ly { padding: 10px 0 }`，没有行间距，
 	// 所以 gap 用负数表示「0」）。
 	padY, gap float32
@@ -947,6 +949,9 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 		txt := ui.Text(c, row.Text).
 			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(leading.Lyrics).
 			TextColor(st.color)
+		if st.tracking != 0 {
+			txt = txt.LetterSpacing(scale.Font(c, size) * st.tracking)
+		}
 		if st.face != nil {
 			family, w := st.face(i == active)
 			txt = txt.Font(family).FontWeight(w)
@@ -964,6 +969,9 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 				FixedLineHeight(lyricsTranslationLineHeight).
 				Opacity(lyricsTranslationOpacity).
 				TextColor(st.color)
+			if st.tracking != 0 {
+				tr = tr.LetterSpacing(scale.Font(c, size) * st.tracking)
+			}
 			if st.transRatio > 0 {
 				ts := scale.Font(c, size) * st.transRatio
 				tr = tr.Margin(st.transGap, space.None, space.None, space.None).
