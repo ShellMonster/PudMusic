@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"log"
 	"runtime/debug"
 	"strconv"
@@ -207,6 +208,11 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		sp.videos.View(c)
 	})
+	// 投稿这一张的滚动条悬停也要转告给壳（`PagedList` 的容器在包里面，页面
+	// 拿不到那个 `ui.Element`，走 `noteScrollbar` 这一路和收藏夹页、历史
+	// 页同一条）——少了它，指针压在投稿列表的滚动条上时它不换深一档，
+	// 和另外三张 Tab 是两种反馈。
+	s.noteScrollbar(sp.videos.Hot())
 }
 
 // viewSpaceList 画「动态 / 收藏夹 / 合集」这三张之一。
@@ -591,10 +597,42 @@ func (s *Shell) viewUpRow(c *ui.Context, sp *upSpace, tab, i int) {
 			sub += " · " + strconv.Itoa(col.Count) + " 首"
 			if pud.ColCard(c, "coll:"+strconv.Itoa(col.Type)+":"+strconv.FormatInt(col.ID, 10),
 				col.Title, sub, cell, s.collCoverDraw(col.Cover)) {
-				s.navigate(collectionPath(col.ID))
+				s.navigate(upCollectionPath(col))
 			}
 		}
 	})
+}
+
+// upCollectionPath 是 UP 空间里一张收藏夹 / 合集卡片点进去的那条地址。
+//
+// 🔴 **类型必须写进 URL**（和侧栏 `collectionPathOf` 同一条拼法）：合集和
+// 系列不是收藏夹，只写 `/collection/{id}` 会被
+// `ParseCollectionType` 当成收藏夹——点进去一整页是空的，而界面上
+// 看起来和「这个合集真的是空的」一模一样。
+//
+// ⚠️ **UP 空间接口给的 `Type` 是它自己的一套编号**（`space.go`：1 收藏夹 /
+// 2 合集 / 3 系列），和 `/collection` 页面 URL 上那一套（`collection.go`：
+// 11 收藏夹 / 21 视频合集 / 31 视频系列）**不是一回事**——直接透传的话
+// `ParseCollectionType` 全认不出来，又落回收藏夹。这里要做一次翻译。
+//
+// ⚠️ **收藏夹（11）那一档 URL 上不写 `?type=`**：那是默认值，Biu 的地址
+// 也不带（`/collection/{id}`）——理由同 `collectionPathOf`。
+func upCollectionPath(col app.SpaceCollection) string {
+	var t bili.CollectionType
+	switch col.Type {
+	case 1: // 收藏夹（space.go collectionTypeFav）
+		t = bili.CollectionFavorite
+	case 2: // 合集（space.go collectionTypeSeason）
+		t = bili.CollectionAlbum
+	case 3: // 系列（space.go collectionTypeSeries）
+		t = bili.CollectionSeries
+	default:
+		return collectionPath(col.ID)
+	}
+	if t == bili.CollectionFavorite {
+		return collectionPath(col.ID)
+	}
+	return collectionPath(col.ID) + "?" + collectionTypeQuery + "=" + strconv.Itoa(int(t))
 }
 
 // upLoadErrorKey 是「这一张 Tab 第一页就拉失败」那一支的 key。

@@ -1708,6 +1708,30 @@ func TestACollectionKeyCarriesItsType(t *testing.T) {
 	}
 }
 
+// TestUpCollectionPathCarriesThePageType 钉住「点进去的那条地址带上类型」。
+//
+// UP 空间接口给的 `Type` 是它自己的一套（1 收藏夹 / 2 合集 / 3 系列），而
+// `/collection` 页面 URL 上的是另一套（11 / 21 / 31）。不透传、只写
+// `/collection/{id}` 的话合集会被当收藏夹打开——一整页空白，和「这个合集
+// 真的是空的」长得一模一样。
+func TestUpCollectionPathCarriesThePageType(t *testing.T) {
+	for _, tc := range []struct {
+		typ  int
+		want string
+	}{
+		{1, "/collection/100"},         // 收藏夹：URL 不带 type（默认值）
+		{2, "/collection/100?type=21"}, // 合集 → 视频合集
+		{3, "/collection/100?type=31"}, // 系列 → 视频系列
+		{0, "/collection/100"},         // 认不出的按收藏夹
+		{99, "/collection/100"},        // 认不出的按收藏夹
+	} {
+		got := upCollectionPath(app.SpaceCollection{ID: 100, Type: tc.typ})
+		if got != tc.want {
+			t.Errorf("upCollectionPath(Type=%d) = %q，want %q", tc.typ, got, tc.want)
+		}
+	}
+}
+
 // TestEveryRowHasALabelAndACollectionRowGoesToItsPage 钉住两样小事：
 // 每一行都给无障碍留了名字；收藏夹那一行点了会跳。
 func TestEveryRowHasALabelAndACollectionRowGoesToItsPage(t *testing.T) {
