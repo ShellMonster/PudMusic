@@ -8,6 +8,8 @@
 package ui
 
 import (
+	"runtime"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
@@ -114,8 +116,16 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 						cur.CloseWindowOption = app.CloseWindowHide
 					}
 				})
-			cd.switchRow("notch", "开启刘海播放器", "指针移到屏幕顶部中央，即可暂停、切歌（仅 macOS）", st.NotchPlayerOn(),
-				func(cur *app.Settings, on bool) { v := on; cur.NotchPlayer = &v })
+			if runtime.GOOS == "darwin" {
+				cd.switchRow("notch", "开启刘海播放器", "指针移到屏幕顶部中央，即可暂停、切歌", st.NotchPlayerOn(),
+					func(cur *app.Settings, on bool) { v := on; cur.NotchPlayer = &v })
+				cd.switchRow("notchActivity", "播放时显示实时活动", "在刘海两侧显示封面和频谱，可能遮挡旁边的菜单栏图标",
+					st.NotchActivityOn(),
+					func(cur *app.Settings, on bool) { v := on; cur.NotchActivity = &v })
+				cd.switchRow("notchVirtual", "在无刘海的屏幕上常驻显示", "关闭时，将鼠标移到屏幕顶部中央即可唤出",
+					st.NotchVirtualOn(),
+					func(cur *app.Settings, on bool) { v := on; cur.NotchVirtual = &v })
+			}
 			cd.switchRow("updateRemind", updateNotificationTitle, "有新版本时弹出更新日志", st.UpdateNotificationEnabled(),
 				func(cur *app.Settings, on bool) { v := on; cur.UpdateNotification = &v })
 		})

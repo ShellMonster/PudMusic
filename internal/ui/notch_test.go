@@ -135,14 +135,24 @@ func TestNotchKeepTurnsItOn(t *testing.T) {
 	}
 }
 
-func TestNotchGreetingWorksWithoutATrack(t *testing.T) {
+func TestNotchGreetingWaitsForPlayback(t *testing.T) {
 	n, _ := newNotchShell(t)
 	n.notchGreet()
+	if n.notchSt.hello {
+		t.Fatal("没有歌曲时不该显示刘海引导")
+	}
+	if n.app.SettingsSnapshot().NotchPlayerGreeted {
+		t.Fatal("没有歌曲时不该记为已经问候")
+	}
+	if err := enqueueTwo(n.app, t); err != nil {
+		t.Fatal(err)
+	}
+	n.notchGreet()
 	if !n.notchSt.hello {
-		t.Fatal("没有歌曲时没有显示刘海引导")
+		t.Fatal("开始播放后没有显示刘海引导")
 	}
 	w, h := n.notchTarget()
 	if w != notchHelloW || h != n.notchSt.h0+58 {
-		t.Fatalf("没有歌曲时引导尺寸是 %v×%v，want %v×%v", w, h, notchHelloW, n.notchSt.h0+58)
+		t.Fatalf("播放后的引导尺寸是 %v×%v，want %v×%v", w, h, notchHelloW, n.notchSt.h0+58)
 	}
 }

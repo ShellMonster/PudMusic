@@ -23,7 +23,7 @@
 //     右翼频谱条——boring.notch 的 live-activity 那一档，一直在、不占桌面。
 //   - `notchExpanded`：指针探进触发区停够 300ms 后展开的播放卡。
 //   - `notchIdle`：没歌时展开成「未在播放 + 打开应用」。
-//   - `notchHello`：第一次打开应用时的引导（「刘海里也能控制播放 + 开启」）。
+//   - `notchHello`：第一次开始播放时的引导（「刘海里也能控制播放 + 开启」）。
 package ui
 
 import (
@@ -40,15 +40,15 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 刘海窗的窗尺寸（固定，不变）：展开卡宽 380 + 两侧余量，高 168（刘海高 ~38
-// + 展开深度 80 + 余量）。窗尺寸由 `pinToTop` 一次钉在屏顶正中，之后
+// 刘海窗的窗尺寸（固定，不变）：展开卡宽 468 + 两侧余量，高 240（刘海高 ~38
+// + 展开深度 178 + 余量）。窗尺寸由 `pinToTop` 一次钉在屏顶正中，之后
 // 不再动——动的是画出来的形状。
 const (
 	notchWinW = notchOpenW + 60
-	notchWinH = 168
+	notchWinH = 240
 
-	notchOpenW  = 380 // 展开卡的宽（原型 `#notch:hover { width: 380px }`）
-	notchOpenH  = 80  // 展开比刘海多出来的深度（原型 112 − 32）
+	notchOpenW  = 468 // 展开卡的宽（参考 mygo-cloudmusic 的刘海播放器）
+	notchOpenH  = 178 // 展开比刘海多出来的深度
 	notchIdleW  = 330 // 无歌时那张卡的宽
 	notchHelloW = 340 // 引导那条的宽
 
@@ -80,7 +80,7 @@ type notchShell struct {
 	// `poll` 再决定开不开）。
 	open bool
 
-	// hello 是「正在引导」（第一次放歌时从刘海里长出来那句提示）。
+	// hello 是「正在引导」（第一次开始播放时从刘海里长出来那句提示）。
 	hello bool
 
 	// passing 是「窗此刻吃点击吗」——不吃时点击穿透到桌面。
@@ -221,9 +221,11 @@ func (s *Shell) ensureNotchWindow() {
 		n.notchSetEnabled(n.notchEnabled())
 		n.watchNotch()
 		n.notchPoll()
-		// 第一次打开应用时在刘海里给出一次开启提示；用户点「开启」
-		// 后继续使用同一扇窗口，不再重复打扰。
-		n.notchGreet()
+		// 如果应用是带着一首正在播放的歌启动，按 cloud 的时机补一次引导；
+		// 普通启动不主动打扰用户，等真正开始播放时由主窗口状态边沿触发。
+		if s.app.Snapshot().Playing {
+			n.notchGreet()
+		}
 	})
 }
 
@@ -372,9 +374,11 @@ func (s *Shell) notchTarget() (w, h float32) {
 		return notchIdleW, n.h0 + 72
 	case n.open:
 		return notchOpenW, n.h0 + notchOpenH
-	case n.hello && st.HasTrack:
-		return notchHelloW, n.h0 + 58
-	case st.HasTrack && s.notchEnabled() && st.Playing:
+	case !n.real && !s.app.SettingsSnapshot().NotchVirtualOn() &&
+		!n.open && !n.hello:
+		return 0, 0
+	case st.HasTrack && s.notchEnabled() &&
+		s.app.SettingsSnapshot().NotchActivityOn() && st.Playing:
 		// 两翼：刘海宽 + 两边各一只翅膀（封面 + 频谱），不挡菜单栏文字。
 		return n.w0 + 2*(notchWingPad+notchWingCover), n.h0
 	default:
@@ -456,14 +460,32 @@ func (s *Shell) notchPollAgain(inside bool) {
 	})
 }
 
-// ---- 引导（第一次打开应用）----
+// ---- 引导（第一次开始播放）----
 
-// notchGreet 是「第一次打开应用时，从刘海里长出来那句提示」。
+// observeNotchPlayback 观察播放状态的上升沿，给关闭状态的刘海播放器一次引导。
+func (s *Shell) observeNotchPlayback(st app.State) {
+	if s.notch == nil {
+		return
+	}
+	n := &s.notch.notchSt
+	if st.Playing && !n.playing && !s.notch.notchEnabled() {
+		// ready 回调可能还没把真窗接上：留给 ensureNotchWindow 在窗口
+		// 建好后用当前播放状态补一次引导。
+		if s.notch.win != nil {
+			s.notch.notchGreet()
+		}
+	}
+	n.playing = st.Playing
+}
+
+// notchGreet 是「第一次开始播放时，从刘海里长出来那句提示」。
 //
 // `NotchPlayerGreeted` 记过一次后不再重复出现。
 func (s *Shell) notchGreet() {
 	n := &s.notchSt
-	if s.app.SettingsSnapshot().NotchPlayerGreeted {
+	st := s.app.Snapshot()
+	if !st.HasTrack || !st.Playing || s.notchEnabled() ||
+		s.app.SettingsSnapshot().NotchPlayerGreeted {
 		return
 	}
 	s.app.UpdateSettings(func(set *app.Settings) { set.NotchPlayerGreeted = true })

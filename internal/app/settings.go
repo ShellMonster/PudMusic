@@ -400,14 +400,21 @@ type Settings struct {
 	MiniLyricsCurtain *bool `json:"miniLyricsCurtain"`
 
 	// NotchPlayer 是「刘海窗」那个开关：指针探进屏幕刘海区时展开一张播放卡。
-	// **默认开**（装上是给用 MacBook 的人的——没有刘海的机器上它就是「贴
-	// 菜单栏的一条」，不碍事）。
+	// **默认关**：第一次开始播放时由刘海里的引导询问用户是否开启。
 	//
 	// ⚠️ **用指针**，同 `MiniLyricsCurtain`：「没设过」和「用户关了」要分
-	// 得开——默认是开。
+	// 得开——默认是关。
 	NotchPlayer *bool `json:"notchPlayer"`
 
-	// NotchPlayerGreeted 记「刘海窗已经问候过一次」：第一次打开应用时会从
+	// NotchActivity 控制播放时是否在刘海两侧显示封面和频谱。
+	// nil = 默认开启，兼容没有这两个新字段的旧设置文件。
+	NotchActivity *bool `json:"notchActivity"`
+
+	// NotchVirtual 控制没有真实刘海的屏幕上是否常驻显示。
+	// nil = 默认关闭，打开后鼠标仍可移到屏幕顶部中央唤出。
+	NotchVirtual *bool `json:"notchVirtual"`
+
+	// NotchPlayerGreeted 记「刘海窗已经问候过一次」：第一次开始播放时会从
 	// 刘海里长出来一句引导，只长一次。
 	NotchPlayerGreeted bool `json:"notchPlayerGreeted"`
 
@@ -533,12 +540,25 @@ func (s Settings) EQGains() [10]float64 {
 //
 // ⚠️ 正常路径上 `normalize()` 已经把 nil 填成默认了（见 `Settings.normalize`），
 // 而这里再兜一次是因为**零值 `Settings{}`** 也可能出现（界面上手工拼的那几处）。
-// NotchPlayerOn 报「刘海窗」那一格是开是关。默认开（nil = 没设过 = 开）。
+// NotchPlayerOn 报「刘海窗」那一格是开是关。默认关（nil = 没设过 = 关）。
 func (s Settings) NotchPlayerOn() bool {
 	if s.NotchPlayer == nil {
-		return true
+		return false
 	}
 	return *s.NotchPlayer
+}
+
+// NotchActivityOn 报「播放时显示实时活动」是否开启。旧设置缺少该字段时默认开。
+func (s Settings) NotchActivityOn() bool {
+	if s.NotchActivity == nil {
+		return true
+	}
+	return *s.NotchActivity
+}
+
+// NotchVirtualOn 报「无刘海屏常驻显示」是否开启。旧设置缺少该字段时默认关。
+func (s Settings) NotchVirtualOn() bool {
+	return s.NotchVirtual != nil && *s.NotchVirtual
 }
 
 func (s Settings) MiniLyricsCurtainOn() bool {
@@ -569,6 +589,8 @@ func DefaultSettings(downloadPath string) Settings {
 	// 「迷你播放器点封面展开歌词卷帘」那一格同样是**指针**（理由见那个字段的
 	// 注释），而它**默认是开的**（票 #536）。
 	curtain := DefaultMiniLyricsCurtain
+	notchActivity := true
+	notchVirtual := false
 	return Settings{
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
@@ -611,6 +633,8 @@ func DefaultSettings(downloadPath string) Settings {
 		// 有人改了 `*s.MiniLyricsCurtain` 就把全局的默认值改了（和上面那个
 		// `vol` 同一路数）。
 		MiniLyricsCurtain: &curtain,
+		NotchActivity:     &notchActivity,
+		NotchVirtual:      &notchVirtual,
 
 		// 「上次听到哪儿」那一格：默认是空的（= 没有上次听到哪儿）。
 		//
