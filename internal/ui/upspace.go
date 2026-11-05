@@ -286,6 +286,14 @@ type upResult struct {
 //
 // 按 mid 存着（Shell.upSpaces）：从动态流点进一个 UP、切走、再点回来，
 // 那一页还是热的，头图不用重新拉一遍。
+//
+// ⚠️ **总量封顶**：一张 `upSpace` 拖着一个 `list.PagedList`（投稿）+ 三份
+// 动态/收藏夹行（`dynItems` / `cols`）+ 三个列表状态。用户顺着动态一路点
+// 几十个 UP 进去时，不封顶就会一直堆——A 进 B 回 A 秒开是这张缓存给的，
+// 但「看过的每个 UP 都留在内存里」不是它该做的事。`upSpaceCacheCap` 个
+// 之后把**最久没被点到**的那一个丢回去（`upSpacesLRU` 记访问序，命中挪到
+// 尾巴）。封面图不在这里——`s.images` 是全局一份带 LRU 的缓存
+// （`imgcache.lru`），丢的是页面自己的列表和翻页状态。
 func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	if s.upSpaces == nil {
 		s.upSpaces = map[int64]*upSpace{}
@@ -295,8 +303,10 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 		if sp.mountGen != mountGen {
 			sp.resetForMount(mountGen, s.app.UpSpaceOf(mid))
 		}
+		s.touchUpSpace(mid)
 		return sp
 	}
+	s.evictUpSpaces()
 	sp := &upSpace{mid: mid, mountGen: mountGen, header: s.app.UpSpaceOf(mid), notify: s.addToast}
 	sp.videoOrder.Store(upVideoSorts[0].order)
 	// 拉页器的闭包捕获 mid（不是 sp）：换 UP 主就是换一份 sp，这个闭包里
@@ -314,7 +324,52 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 	sp.videos.SetColumns(list.Columns{PlayCount: true, PubTime: true, Now: s.now})
 	// 行和表头画原型样式（`pud.TrackRow` / `pud.TrackHead`）。
 	s.upSpaces[mid] = sp
+	s.upSpacesLRU = append(s.upSpacesLRU, mid)
 	return sp
+}
+
+// upSpaceCacheCap 是 UP 空间页状态缓存的上限。够「A 进 B 回 A」来回切，
+// 又不会让一路点下去的几十张空间页一直占着内存。
+const upSpaceCacheCap = 8
+
+// touchUpSpace 把 mid 挪到 LRU 尾巴（最近用过）。只由界面线程调
+// （`upSpaceFor`），所以 `s.upSpacesLRU` 不需要锁。
+func (s *Shell) touchUpSpace(mid int64) {
+	for i, m := range s.upSpacesLRU {
+		if m == mid {
+			s.upSpacesLRU = append(s.upSpacesLRU[:i], s.upSpacesLRU[i+1:]...)
+			break
+		}
+	}
+	s.upSpacesLRU = append(s.upSpacesLRU, mid)
+}
+
+// evictUpSpaces 在容量满的时候把最久没用的空间页丢掉。
+//
+// ⚠️ **`stop` 而不是 `resetForMount`**：`resetForMount` 是把**同一个对象**
+// 清成「从没加载过」给它新主人用；而淘汰是把整页扔掉，得停掉它在途的
+// 拉页（`dyn/fav/ser.stop`），不然那一趟拉完往 `box` 里投，下一次同一
+// mid 进来还会吃到过期结果。`videos` 是 PagedList，`Reset` 停掉它在途的
+// 那一页并清行。
+func (s *Shell) evictUpSpaces() {
+	for len(s.upSpacesLRU) > 0 && len(s.upSpaces) >= upSpaceCacheCap {
+		old := s.upSpacesLRU[0]
+		s.upSpacesLRU = s.upSpacesLRU[1:]
+		sp, ok := s.upSpaces[old]
+		if !ok {
+			continue
+		}
+		sp.dyn.stop()
+		sp.fav.stop()
+		sp.ser.stop()
+		sp.videos.Reset()
+		// 把还在路上的结果信箱清掉：这一页被丢了，后台那一趟回来投的东西
+		// 没有人收。不锁的话界面线程在读、后台在投是数据竞争。
+		sp.boxMu.Lock()
+		sp.box = nil
+		sp.boxMu.Unlock()
+		delete(s.upSpaces, old)
+	}
 }
 
 // pagerOf 是第 tab 张 Tab 的闸门。

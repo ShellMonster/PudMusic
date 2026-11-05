@@ -1049,6 +1049,9 @@ type Shell struct {
 	// 界面状态是主线程单点写入的（铁律一），后台那一条线只往 upSpace.box
 	// 那个**带锁的信箱**里投，不碰这张表。
 	upSpaces map[int64]*upSpace
+	// upSpacesLRU 是 upSpaces 的访问序（最旧的在前），给 upSpaceCacheCap
+	// 封顶用。和 upSpaces 同一线程规则：只由 view 读写。
+	upSpacesLRU []int64
 
 	// feedPage 是「用户动态」那一页的状态（见 dynamicfeed.go）。只有一个，
 	// 因为这一页没有参数。
