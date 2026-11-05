@@ -330,7 +330,7 @@ func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 	}
 	p := tok.Of(c.Theme())
 	textW, _ := c.MeasureText(0, ui.Span{Text: t, Size: playbarBadgeFont, Weight: 600})
-	badgeW := max(textW+space.Px4, float32(badgeNotchMinW))
+	badgeW := max(badgeTextWidth(textW)+space.Px4, float32(badgeNotchMinW))
 	ui.Box(c).Key("count-badge-notch").
 		Attach(ui.AnchorTopRight, ui.AnchorTopLeft).
 		Top(-10).Right(2).Translate(dx, 0).
