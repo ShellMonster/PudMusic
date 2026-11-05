@@ -507,8 +507,9 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	sidebar := !sidebarCollapsed
 	// 迷你窗开着 = 勾上了「显示/隐藏迷你播放器」。
 	mini := s.mini != nil
-	// 刘海窗开着 = 勾上了「显示/隐藏刘海」。
-	notch := s.notch != nil
+	// 刘海播放器开着 = 勾上了设置里的开关。刘海外壳启动后常驻，
+	// 所以不能用 `s.notch != nil` 判断启用状态。
+	notch := s.app.NotchPlayerEnabled()
 	// 「歌曲」那一栏：有歌才有那几项。
 	hasTrack := st.HasTrack
 	// ⚠️ **「赞」和「显示评论」各有各的判据**（理由见下面改的那几行）：

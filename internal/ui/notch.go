@@ -23,7 +23,7 @@
 //     右翼频谱条——boring.notch 的 live-activity 那一档，一直在、不占桌面。
 //   - `notchExpanded`：指针探进触发区停够 300ms 后展开的播放卡。
 //   - `notchIdle`：没歌时展开成「未在播放 + 打开应用」。
-//   - `notchHello`：第一次放歌时的引导（「刘海里也能控制播放 + 开启」）。
+//   - `notchHello`：第一次打开应用时的引导（「刘海里也能控制播放 + 开启」）。
 package ui
 
 import (
@@ -221,6 +221,9 @@ func (s *Shell) ensureNotchWindow() {
 		n.notchSetEnabled(n.notchEnabled())
 		n.watchNotch()
 		n.notchPoll()
+		// 第一次打开应用时在刘海里给出一次开启提示；用户点「开启」
+		// 后继续使用同一扇窗口，不再重复打扰。
+		n.notchGreet()
 	})
 }
 
@@ -304,6 +307,22 @@ func (s *Shell) notchSetEnabled(on bool) {
 	s.watchNotch()
 }
 
+// syncNotchPlayer 把设置里的开关同步到刘海窗口。
+//
+// 刘海外壳在 macOS 启动时就会创建；设置页和菜单只改设置，实际的
+// ShowInactive / Hide 统一从这里落到窗口，避免入口之间各做一半。
+func (s *Shell) syncNotchPlayer() {
+	if !notchSupported() {
+		return
+	}
+	if s.notch == nil {
+		// 生产启动会先建刘海外壳；无头测试和 ready 之前的设置帧
+		// 没有可同步的窗口，留给启动 / 菜单入口创建即可。
+		return
+	}
+	s.notch.notchSetEnabled(s.notchEnabled())
+}
+
 // watchNotch 按「刘海亮着没有」挂上/摘掉指针监听——刘海关着的时候，
 // 指针动一下就把应用叫醒一次是白花钱。
 func (s *Shell) watchNotch() {
@@ -347,6 +366,8 @@ func (s *Shell) notchTarget() (w, h float32) {
 	n := &s.notchSt
 	st := s.app.Snapshot()
 	switch {
+	case n.hello:
+		return notchHelloW, n.h0 + 58
 	case n.open && !st.HasTrack:
 		return notchIdleW, n.h0 + 72
 	case n.open:
@@ -435,15 +456,14 @@ func (s *Shell) notchPollAgain(inside bool) {
 	})
 }
 
-// ---- 引导（第一次放歌）----
+// ---- 引导（第一次打开应用）----
 
-// notchGreet 是「第一次放歌的时候，从刘海里长出来那句提示」。
+// notchGreet 是「第一次打开应用时，从刘海里长出来那句提示」。
 //
-// ⚠️ **默认不开**的用户才走这条：已经开着的不会再被问候一次
-// （`NotchPlayerGreeted` 记过一次）。
+// `NotchPlayerGreeted` 记过一次后不再重复出现。
 func (s *Shell) notchGreet() {
 	n := &s.notchSt
-	if s.notchEnabled() || s.app.SettingsSnapshot().NotchPlayerGreeted {
+	if s.app.SettingsSnapshot().NotchPlayerGreeted {
 		return
 	}
 	s.app.UpdateSettings(func(set *app.Settings) { set.NotchPlayerGreeted = true })
@@ -504,11 +524,14 @@ func (s *Shell) toggleNotchPlayer() {
 		s.main.toggleNotchPlayer()
 		return
 	}
-	if s.notch != nil {
-		s.closeNotchPlayer()
+	on := !s.notchEnabled()
+	if _, err := s.app.UpdateSettings(func(set *app.Settings) {
+		set.NotchPlayer = boolPtr(on)
+	}); err != nil {
 		return
 	}
-	s.openNotchPlayer()
+	s.syncNotchPlayer()
+	s.refreshMenuChecked(s.app.Snapshot())
 }
 
 // ---- 绘制 ----
@@ -553,6 +576,10 @@ func (s *Shell) viewNotch(c *ui.Context) {
 		body := ui.Box(c).Absolute().Top(0).Left(cx-w/2).Size(w, h).
 			Radius(0, 0, foot, foot).Clip().TextColor(ui.RGB(255, 255, 255))
 		body.Children(func() {
+			if n.hello {
+				s.viewNotchHello(c, hello, (w-notchHelloW)/2)
+				return
+			}
 			if !st.HasTrack {
 				s.viewNotchIdle(c, open, (w-notchIdleW)/2)
 				return

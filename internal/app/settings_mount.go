@@ -188,6 +188,18 @@ func (a *App) MenuDisplayState() (mode DisplayMode, sidebarCollapsed bool) {
 	return DisplayModeList, false
 }
 
+// NotchPlayerEnabled 只回刘海播放器这一枚开关。
+//
+// 菜单每帧刷新勾选态，不能为这一枚布尔值复制整份 Settings；和
+// MenuDisplayState 一样，没挂设置时直接给默认值，保持稳态零分配。
+func (a *App) NotchPlayerEnabled() bool {
+	settingsReads.Add(1)
+	if slot := a.settingsSlot(); slot != nil && slot.store != nil {
+		return slot.store.Snapshot().NotchPlayerOn()
+	}
+	return true
+}
+
 // CoverAccentEnabled 只回「封面取色」那一枚开关。
 //
 // ⚠️ **为什么单独一个窄接口**：和 `MenuDisplayState` 同一路数（理由见它那段

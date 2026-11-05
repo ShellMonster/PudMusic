@@ -9,6 +9,7 @@ import "github.com/egoist/mygo"
 
 type notchNSPoint struct{ X, Y float64 }
 
+func notchSupported() bool               { return false }
 func notchSize() (w, h float64, ok bool) { return 0, 0, false }
 func menuBarHeight() float64             { return 0 }
 func notchConfigure(w *mygo.Window)      {}
