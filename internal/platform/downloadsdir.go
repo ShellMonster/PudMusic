@@ -30,22 +30,20 @@ import (
 
 // DownloadsDirName 是下载目录在「音乐」目录下的子目录名。
 //
-// ⚠️ **用显示名 `BiuGo`，不要用 `LegacyUserDataDirName`（`PudMusic`）**：那是
-// **用户数据目录**的名字，老用户的 `Biu MyGo` 会被迁过去（理由和做法见
-// `datadir.go` 顶上那一节）。那是**另一件事**：下载目录是新起的，没有「老用户
-// 升级要保住什么」这个问题，跟着显示名走正好。
+// 它和用户数据目录、应用显示名是不同概念；这里固定使用产品标识
+// `PudMusic`，避免应用显示名变化时下载路径跟着变化。
 //
 // ⚠️ 也别把它跟 bundle id、钥匙串服务名混起来——那三件各不相干
 // （AGENTS.md §5）。这一件是第四件：**新下载落哪儿**。
-const DownloadsDirName = "BiuGo"
+const DownloadsDirName = "PudMusic"
 
 // DefaultDownloadsDir 返回默认下载目录的路径：**音乐**目录下的应用子目录。
 //
 // # 各平台上它是哪一条路径
 //
-//	macOS    ~/Music/BiuGo
-//	Windows  C:\Users\<用户名>\Music\BiuGo
-//	Linux    $XDG_MUSIC_DIR/BiuGo（退回 ~/Music/BiuGo）
+//	macOS    ~/Music/PudMusic
+//	Windows  C:\Users\<用户名>\Music\PudMusic
+//	Linux    $XDG_MUSIC_DIR/PudMusic（退回 ~/Music/PudMusic）
 //
 // ⚠️ **Windows 上那条路径是「英文名的 Music」，不是「音乐」**：框架的
 // `PathMusic` 只把一张写死的英文名表拼在家目录下面（`mygo@v0.6.3/paths.go`
@@ -56,7 +54,7 @@ const DownloadsDirName = "BiuGo"
 // ⚠️ **macOS 上也是拼出来的 `~/Music`，不查用户改过位置的「音乐」文件夹**：
 // macOS 允许在「系统设置 → 通用 → 储存空间 → 位置」里把「音乐」挪走，而框架
 // 不走 `NSFileManager` 的 `URLForDirectory:`——那种用户的歌会落在一个新造的
-// `~/Music/BiuGo` 里，访达里它不是「音乐」那一栏。票面点名的是
+// `~/Music/PudMusic` 里，访达里它不是「音乐」那一栏。票面点名的是
 // `mygo.App.Path(mygo.PathMusic)`，所以这就是这一条路的窄口子：**要在这两个
 // 平台上做对，得改走系统的已知文件夹 API**（那是另一票的事）。
 //

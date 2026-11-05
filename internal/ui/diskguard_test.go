@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	// 这一包的「音乐」目录指到临时目录上（理由见 `musicdir_test.go`）：默认
-	// 下载目录是用户自己的 `~/Music/BiuGo`，而这一包里任何一条测试碰了它就是
+	// 下载目录是用户自己的 `~/Music/PudMusic`，而这一包里任何一条测试碰了它就是
 	// 在用户的磁盘上留下一个文件夹。
 	music, err := useTempMusicDir()
 	if err != nil {

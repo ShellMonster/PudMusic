@@ -18,7 +18,7 @@
 //
 // ⚠️ **不去动 Biu 的那个目录**：`~/Library/Logs/Biu/` 是**上游那个 Electron
 // 应用**的日志（`main.log` 里全是 "Checking for update"）。我们写自己的目录
-// （`~/Library/Logs/BiuGo/`），不去覆盖别人的文件——票 #282 里提到的那个路径
+// （`~/Library/Logs/PudMusic/`），不去覆盖别人的文件——票 #282 里提到的那个路径
 // 是看错了地方。
 //
 // # 大小

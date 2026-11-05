@@ -1,5 +1,5 @@
 ---
-name: BiuGo 视觉与交互规范
+name: PudMusic 视觉与交互规范
 version: 1
 source: wood3n/biu（上游）
 conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
@@ -1882,7 +1882,7 @@ HeroUI `<Drawer>`**。
 ### 侧栏
 - 六个入口：18px 线框图标，选中换实心；展开态与折叠态都是 40×40 图标格。
 - 折叠态悬停给全名。
-- 左上角：40×40 logo + 24px 主色粗体「BiuGo」；**macOS 非全屏时那一块上边
+- 左上角：40×40 logo + 24px 主色粗体「布丁音乐」；**macOS 非全屏时那一块上边
   多留 32**（上游的 `pt-8`，给红黄绿让开）。
 - 行高 40，不是 28。
 - **图标键的命中区 32**（上游 HeroUI 的 `isIconOnly` 恒是 `w-[2rem] h-[2rem]`）——
