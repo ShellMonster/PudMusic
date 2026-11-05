@@ -191,7 +191,7 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 			textW, _ := c.MeasureText(0, ui.Span{Text: o.Count, Size: 9, Weight: 600})
 			ui.Box(c).Width(textW+space.Px4).Height(13).Background(p.Side).
 				Padding(space.Px1, space.Px2).Radius(tok.R6).
-				Absolute().Top(-3).Right(-3).Children(func() {
+				Absolute().Top(-3).Right(1).Children(func() {
 				typo.Mono(ui.Text(c, o.Count)).FontSize(9).FontWeight(600).
 					TextColor(p.Text2).SingleLine()
 			})
