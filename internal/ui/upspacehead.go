@@ -55,13 +55,18 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 
 	switch {
 	case h.Loading && !h.Loaded:
-		ui.Row(c).Key(key).Height(upBannerH + 48 + 80).FillWidth().Center().Children(func() {
+		// ⚠️ **占位高度要和加载完之后那一版一样**（`upBannerH` + 头像探出
+		// 头图带下沿那一截 `upAvatarS - 48`）：占位高了，数据落地那一瞬
+		// 整个页面往上抽一段——Tab 条和内容看着像自己跳了一下。
+		ui.Row(c).Key(key).Height(upBannerH + upAvatarS - 48).FillWidth().Center().Children(func() {
 			ui.Spinner(c).Label("正在打开这个 UP 主的空间")
 		})
 		return
 
 	case h.Err != "" && !h.Loaded:
-		ui.Column(c).Key(key).Height(upBannerH + 48 + 80).FillWidth().Center().Gap(space.Px10).
+		// ⚠️ **高度和正常头部同一份**（理由同上一支）：失败页比正常页高的话，
+		// 「再试一次」按下去、加载中的占位和最后的数据页是三个不同的高度。
+		ui.Column(c).Key(key).Height(upBannerH + upAvatarS - 48).FillWidth().Center().Gap(space.Px10).
 			AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "打不开这个 UP 主的空间").FontSize(scale.Font(c, scale.Size16)).TextColor(pl.Text)
 			ui.Text(c, h.Err).FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text2).MaxLines(3)
