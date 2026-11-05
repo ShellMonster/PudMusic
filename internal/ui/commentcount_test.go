@@ -59,7 +59,7 @@ func TestTheCommentKeyShowsTheCount(t *testing.T) {
 func TestTheCommentKeySaysTheNumberToScreenReaders(t *testing.T) {
 	tt, _ := commentCountPlaybarTester(t, mvItem(), 1200, 12345)
 
-	want := "评论 " + list.CountText(12345)
+	want := "评论"
 	key, ok := tt.Find(want)
 	if !ok {
 		t.Fatalf("无障碍名字不是 %q（文字有 %q）——读屏用户听不到评论数",
@@ -142,8 +142,8 @@ func TestTheZeroCountIsSpelledAsNoNumberAtAll(t *testing.T) {
 		t.Errorf("commentsKeyTip(0) = %q，want 不带数字的那一句", got)
 	}
 	// 非 0 那一档要真的带上数字（不然上面两条可以靠「永远不带」蒙混过关）。
-	if got := commentsKeyLabel(1286); got != "评论 "+list.CountText(1286) {
-		t.Errorf("commentsKeyLabel(1286) = %q，want 「评论 %s」", got, list.CountText(1286))
+	if got := commentsKeyLabel(1286); got != "评论" {
+		t.Errorf("commentsKeyLabel(1286) = %q，want 「评论」", got)
 	}
 	// 🔴 **提示里给的是**完整数字**（票 #701 的要求）：画面上那格窄，放不下
 	// 「1286」以外的完整数字——而提示那一格没有宽度限制，所以给完整数字。

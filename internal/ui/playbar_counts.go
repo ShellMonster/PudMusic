@@ -1,26 +1,20 @@
 // 播放条左边第三段那三枚键（赞 / 收藏 / 评论）各自的**读数**（票 #701 起带数，
-// 随后收成角标，本票起收成**缺口嵌字**）。
+// 随后收成右上角小角标）。
 //
 // # 这一族和「播放量那一列」是两件事
 //
 // 播放量那一列折成「1.2万」（`list.PlayCountText`）——它地方宽，要的是「约数」。
-// 这一族折成「1k+ / 10k+ / 99k+ / 1亿+」（`list.CountText`）——它嵌在图标的
-// 右上角缺口里当**角标**，地方一点也不宽。
+// 这一族折成短档位（`list.CountText`），放在图标右上角当**角标**，地方一点也不宽。
 //
-// # 本票的形状：**网易云式缺口，不是外挂角标**
+// # 本票的形状：**按钮右上角的小角标**
 //
 // 上一版（PR #736）的角标贴在图形右上**外侧**：`Attach(AnchorTopRight,
 // AnchorTopLeft)`，图标本体完整、数字整个悬在外面。
 //
-// 现在改成**网易云式**：图形的右上角**被挖掉一块**（露出底色），数字**嵌进那个
-// 缺口里**——视觉上数字坐在图形右上角的凹陷处，而不是叠加在外侧。
+// 角标贴在图形盒子的右上外侧，图标本体保持完整，数字用播放条底色的小圆角块
+// 承托。角标宽度随数字内容计算，不依赖文本节点的隐式宽度。
 //
-// 「挖空」用**盖**实现，不抠矢量字形：在图形盒子的右上角盖一块**播放条底色**
-// 的圆角块（`badgeNotch`），缺口把那一角的字形笔画整个盖住（视觉上图标缺了一
-// 角），数字居中画在这块底色上。缺口块随数字自适应宽——窄档缺口小、最宽档
-// 「99k+」（≈22.0）也容得下，**「+」不靠任何截断兜底**。
-//
-// 缺口块和数字都是**绝对定位**的，不占布局——
+// 角标和数字都是**绝对定位**的，不占布局——
 // 于是那一枚键的宽仍是 **32**（图形 18 + 两侧各 7），和没有数字时一模一样。
 //
 // # 🔴 缺口块的颜色 = 按钮底下那一块底
@@ -205,19 +199,11 @@ const (
 // 「1.2万」，宽度差着一截。
 func playbarCountText(n int64) string { return list.CountText(n) }
 
-// countKeyLabel 是「图形 + 角标」那一枚键的**无障碍名字**。
+// countKeyLabel 是「图形 + 角标」那一枚键的无障碍名字。
 //
-// 🔴 **数字不许只靠画面传达**（读屏软件看不见它）：拿到数的时候名字里带上它。
-//
-// ⚠️ **没有数字时名字就是那两个字**（一字不多）：拿不到数（离线 / 还没回来 /
-// 本地文件）的时候画面上也没有数字——那时候多说一句「赞 0」是在撒谎。
-//
-// ⚠️ **它必须是「图形 + 角标」那一枚的名字，而不是那个数字自己**：这一枚键的
-// **身份是图形**（图标对辅助技术不可见，`mygo/ui/svg.go`），而数字是读数。
-func countKeyLabel(name string, n int64) string {
-	if t := playbarCountText(n); t != "" {
-		return name + " " + t
-	}
+// 角标是独立的视觉读数，按钮本身只保留动作名称，避免读屏和悬停入口被折算数字
+// 撑长成一串不可扫描的标签。
+func countKeyLabel(name string, _ int64) string {
 	return name
 }
 
@@ -343,13 +329,16 @@ func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 		return
 	}
 	p := tok.Of(c.Theme())
+	textW, _ := c.MeasureText(0, ui.Span{Text: t, Size: playbarBadgeFont, Weight: 600})
+	badgeW := max(textW+space.Px4, float32(badgeNotchMinW))
 	ui.Box(c).Key("count-badge-notch").
-		Attach(ui.AnchorTopRight, ui.AnchorTopRight).
-		Top(-8).Right(-13).Translate(dx, 0).
-		Radius(tok.R6).Background(p.Side).Padding(space.Px2, space.Px4).
+		Attach(ui.AnchorTopRight, ui.AnchorTopLeft).
+		Top(-10).Right(-2).Translate(dx, 0).
+		Width(badgeW).Height(12).
+		Radius(tok.R6).Background(p.Side).Padding(space.Px1, space.Px2).
 		PassThrough().
 		Children(func() {
-			typo.Mono(ui.Text(c, t)).FontSize(10).FontWeight(600).LetterSpacing(-0.2).
+			typo.Mono(ui.Text(c, t)).FontSize(8).FontWeight(600).LetterSpacing(-0.2).
 				TextColor(p.Text2).SingleLine()
 		})
 }
