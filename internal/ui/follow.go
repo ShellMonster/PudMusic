@@ -814,7 +814,12 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 	// different sign/verification text, but the prototype keeps each row's
 	// cards on one baseline instead of letting neighboring cards end at
 	// different heights.
-	ui.Row(c).Key("follow-row:" + followKeyOf(f.users[first].Mid)).Gap(gap).AlignItems(ui.Stretch).Children(func() {
+	row := ui.Row(c).Key("follow-row:" + followKeyOf(f.users[first].Mid)).Gap(gap).AlignItems(ui.Stretch)
+	// 这是布局行，不是一个可悬停的条目。MyGo 的 List 会给指针所在行铺
+	// SurfaceHover；如果不先盖回页面底色，鼠标移到卡片右侧空白时会出现
+	// 一整块灰色背景（截图中的问题）。卡片自己的 hover 反馈仍由 UCard 负责。
+	row = list.LayoutRow(row, c.Theme())
+	row.Children(func() {
 		for k := range cols {
 			j := first + k
 			if j >= len(f.users) {
