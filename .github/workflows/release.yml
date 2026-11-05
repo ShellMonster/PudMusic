@@ -110,14 +110,17 @@ jobs:
           # `install.sh` / `install.ps1` 每个平台目录里都有一份、内容相同——
           # 只留第一份，同名再传第二个会被 GitHub 挡下（ReleaseAsset.name already
           # exists，--clobber 也救不回来）。
-          declare -A _seen=()
           _deduped=()
+          _names=""
           for f in "${assets[@]}"; do
             b="$(basename "$f")"
-            if [[ -z "${_seen[$b]:-}" ]]; then
-              _seen[$b]=1
-              _deduped+=("$f")
-            fi
+            case "|${_names}|" in
+              *"|${b}|"*) ;;
+              *)
+                _names="${_names}|${b}"
+                _deduped+=("$f")
+                ;;
+            esac
           done
           assets=("${_deduped[@]}")
           # SHA256SUMS 在 build/ 顶层
