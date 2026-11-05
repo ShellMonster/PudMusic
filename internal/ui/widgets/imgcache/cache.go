@@ -98,6 +98,11 @@ const visibleFrames = 4
 // 的，歌单一次几十张全放出去会被拒。
 const defaultMaxInflight = 6
 
+// decodeQueuePerWorker bounds compressed image bytes waiting for a decoder.
+// Each queued job owns its input []byte, so an oversized queue can raise RSS
+// even though the decoded bitmap cache itself stays within its byte budget.
+const decodeQueuePerWorker = 2
+
 // maxImageBytes 是一张图能有多大。封面图床给的最大的也就几百 KB，
 // 超了说明拿到的不是图。
 const maxImageBytes = 8 << 20
@@ -346,7 +351,7 @@ func New(opts Options) *Cache {
 		client:       opts.Client,
 		ua:           opts.UserAgent,
 		lru:          newLRU(opts.MaxBytes),
-		decodeCh:     make(chan job, opts.Decoders*4),
+		decodeCh:     make(chan job, opts.Decoders*decodeQueuePerWorker),
 		inflight:     make(chan struct{}, opts.MaxInflight),
 		clock:        opts.Clock,
 		retryBase:    opts.RetryBase,
