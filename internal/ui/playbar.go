@@ -509,9 +509,10 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 	// 那一档，又不把角标省下的宽度还回去。
 	// 原型 `.np-keys`：三枚键缝 2；分集键挪到了右列。
 	ui.Row(c).Gap(space.Px2).AlignItems(ui.Center).Shrink(0).Children(func() {
-		s.viewFavButton(c, st)
+		// 原型 `.np-keys` 的次序：赞 → 收藏 → 评论。
 		s.viewLikeStar(c, st)
-		// 🔴 **「评论」是第四枚**（票 #573）：它是「当前这一首」的附属页的
+		s.viewFavButton(c, st)
+		// 🔴 **「评论」是第三枚**（票 #573）：它是「当前这一首」的附属页的
 		// 入口，而这一段摆的**全是关于当前这一首的**（分集 / 收藏 / 赞）。
 		//
 		// ⚠️ **本地文件不摆**（`viewCommentsButton`）：一个点不动的键比不摆
@@ -1014,19 +1015,18 @@ func (s *Shell) viewNextButtonOn(c *ui.Context, base flat.Base) {
 // 时借中间那一列的富余（票 #104）；上游本来就在右边这一组。
 //
 // # 满屏播放器那一行用的是**另一个入口**
-//
-// `viewPlayModeOn` 是同一枚键，**按给定的底**算悬停反馈：满屏那一行坐着的是压暗
-// 过的封面，而按页面白底算出来的那一档主色压在那上面等于看不见（票 #248）。
 func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
-	s.viewPlayModeOn(c, st, flat.ThemeBase)
-}
-
-func (s *Shell) viewPlayModeOn(c *ui.Context, st app.State, base flat.Base) {
-	// 四档各配一个图标（Biu 的 `getPlayModeList`，逐个照它的 `icon` 那一项），
-	// 悬停那句话仍然报的是**当前这一档**。
-	btn := s.withTip(c, iconKeyOnBase(c, playModeIcon(st.PlayMode), "播放模式", iconMd, false, base).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
-		st.PlayMode.Desc())
+	// 原型 `MODES`：order / repeat / repeat1 / shuffle 四个图标，36 见方的 `.icon-btn`，
+	// 非顺序档 `aria-pressed`（accent-text）。
+	name := map[app.PlayMode]string{
+		app.PlayModeSequence: "order", app.PlayModeLoop: "repeat",
+		app.PlayModeSingle: "repeat1", app.PlayModeRandom: "shuffle",
+	}[st.PlayMode]
+	if name == "" { // 状态里还没有播放模式（刚启动 / 没歌）：按顺序播放画，别拿空名字去找图标
+		name = "order"
+	}
+	btn := s.withTip(c, pud.IconBtn(c, "pb-mode", name, "播放模式",
+		pud.IconOpts{On: st.PlayMode != app.PlayModeSequence}), st.PlayMode.Desc())
 
 	// 按一下换到下一档。档序（顺序 → 循环 → 随机 → 单曲 → 回顺序）是 App 那边
 	// 的 `PlayMode.Next`，照 Biu 的 `getPlayModeList` 次序，两边按几下能转回

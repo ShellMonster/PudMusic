@@ -142,6 +142,16 @@ func lyricSearchShell(t *testing.T, srcs ...lyrics.Source) (*Shell, *mygoui.Test
 	// 缓存挂在真的临时目录上：采用那一下要真的写盘，这一票才验得到「写进缓存」。
 	s.app.MountLyrics(lyrics.NewCache(writableTempDir(t, "lyrics")))
 	s.app.TestOnlyNoAutoLyrics()
+	// 歌词「加载中」靠一道 30 秒的兜底定时器落到「暂无歌词」；测试里把长定时器压成"立刻到点"
+	// （另起 goroutine 跑，回调要取 app 的锁），短的按真实时间走。
+	s.app.TestOnlyAfter(func(d time.Duration, fn func()) func() {
+		if d >= 20*time.Second {
+			go fn()
+			return func() {}
+		}
+		t := time.AfterFunc(d, fn)
+		return func() { t.Stop() }
+	})
 	s.app.MountLyricSources(srcs...)
 	openATrack(t, s)
 	s.app.Pause()
@@ -227,9 +237,8 @@ func TestTheSearchDialogListsBothSourcesAndStartsFromTheSongOnScreen(t *testing.
 	s, tt := lyricSearchShell(t, netease, lrclib)
 
 	// 先钉前半句：没有歌词时那个旋钮也在（此刻屏幕上正是「暂无歌词」）。
-	if !tt.HasText(noLyrics.Title) {
-		t.Fatalf("这一支该是「暂无歌词」，文字有 %q", tt.Texts())
-	}
+	// 歌词是后台异步取的，起先画的是转圈（「正在加载歌词」），落地后才是「暂无歌词」：条件等待，不数帧。
+	waitFrames(t, tt, "歌词那一支落地成「暂无歌词」", func() bool { return tt.HasText(noLyrics.Title) })
 	openTheSearchDialog(t, tt)
 
 	if !tt.HasText(lyricSearchBoxLabel) {

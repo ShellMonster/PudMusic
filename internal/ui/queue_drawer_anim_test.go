@@ -296,16 +296,15 @@ func TestTheSmallOverlaysHaveNoEnterOrExitAnimation(t *testing.T) {
 	// **共用的那个外观出口**（`popupPanel`），不是联想面板本身。联想面板的动画
 	// 在 `navbar_search.go`（它自己那一层），所以这里断不到它。
 	files := []string{
-		"confirmmodal.go",    // 确认框
-		"popup.go",           // 浮层面板的**外观**出口（旋钮面板、下拉也走它）
-		"menu.go",            // 应用菜单
-		"covermodal.go",      // 封面大图
-		"folderedit.go",      // 新建 / 改收藏夹
-		"folderselect.go",    // 选收藏夹
-		"folderpick.go",      // 选文件夹
-		"daterangepicker.go", // 日期区间
-		"loginprompt.go",     // 登录提示
-		"partdrawer.go",      // 分集抽屉（满屏之外那个向上的浮层）
+		"confirmmodal.go", // 确认框
+		"popup.go",        // 浮层面板的**外观**出口（旋钮面板、下拉也走它）
+		"menu.go",         // 应用菜单
+		"covermodal.go",   // 封面大图
+		"folderedit.go",   // 新建 / 改收藏夹
+		"folderselect.go", // 选收藏夹
+		"folderpick.go",   // 选文件夹
+		"loginprompt.go",  // 登录提示
+		"partdrawer.go",   // 分集抽屉（满屏之外那个向上的浮层）
 	}
 	for _, name := range files {
 		for _, call := range animationCallsInFile(t, name) {

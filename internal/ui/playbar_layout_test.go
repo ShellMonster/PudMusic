@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -151,7 +152,7 @@ func TestTheTransportKeysArePrevPlayNext(t *testing.T) {
 // `max(track, playbarLeftMinW)` 就是这两档的分界。
 func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 	st := barState()
-	st.Title = "一首歌的名字很长很长很长很长很长很长很长"
+	st.Title = "一首歌的名字很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长"
 
 	for _, width := range []int{1280, 1400} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
@@ -173,7 +174,7 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 			// 名字就是「评论」），但别把这里写死成只认那两个字——用
 			// `findCommentsKey` 找，带不带数字都认得出来。
 			segLo, segHi := float32(1e9), float32(-1e9)
-			for _, k := range []string{"分集", "收藏", "赞"} {
+			for _, k := range []string{"收藏", "赞"} {
 				r, ok := tt.Find(k)
 				if !ok {
 					continue
@@ -190,18 +191,13 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 			}
 
 			got := title.W
-			// ⚠️ **左列的宽是「轨道宽」和「保底宽」里大的那个**：轨道是 1/5
-			// （上游的 `minmax(0,1fr)`），而**内容最少要 `playbarLeftMinW`**
-			// （票 #682 之后是 307：三枚 32 + 评论那一枚 67）——窗口不够宽的
-			// 时候是保底宽说话，那一列**撑出轨道**（上游那边也是这么溢的）。
-			//
-			// ⚠️ **1280 那一档就是撑出轨道的那一档**（轨道 249.6 < 保底 307）。
-			track := float32(width-playbarPadX*2) / 5
-			leftW := max32(track, playbarLeftMinW)
-			want := leftW - coverSize - 2*coverGap - (segHi - segLo)
+			// 原型 `.bar`：三列 `1fr 1.3fr 1fr`，缝 24，左右内边距 20；左列里是
+			// 封面 56 │ 缝 12 │ 歌名·UP 名 │ 缝 12 │ 赞·收藏·评论。
+			track := (float32(width) - playbarPadX*2 - 2*24) / 3.3
+			want := track - coverSize - 2*12 - (segHi - segLo)
 			if absFloat(got-want) > 1 {
 				t.Errorf("歌名那一列只有 %.1f 宽，而它该是 %.1f——"+
-					"左边那一列是五份里的一份（上游的 1:3:1），"+
+					"左边那一列是 1fr / 1.3fr / 1fr 里的第一份（原型 .bar），"+
 					"而它里面是三段（封面 │ 歌名·UP名 │ 那一排键）", got, want)
 			}
 		})
@@ -275,9 +271,10 @@ func TestTheRightGroupHugsTheRightEdge(t *testing.T) {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			tt, _ := playbarTester(t, barState(), width, 0, false)
 
-			last, ok := tt.Find("加歌")
+			// 原型的右列最右是音量滑块（没有「加歌」）。
+			last, ok := tt.Find("音量")
 			if !ok {
-				t.Fatalf("宽度 %d：画面上找不到「加歌」那一枚，文字有 %q", width, tt.Texts())
+				t.Fatalf("宽度 %d：画面上找不到「音量」那一枚，文字有 %q", width, tt.Texts())
 			}
 
 			wantX := float32(width - playbarPadX)
@@ -301,7 +298,8 @@ func playKeyEdge(tt *mygoui.Tester, btn mygoui.Rect) color.RGBA {
 	return tt.Image().RGBAAt(round32(btn.X)+2, round32(btn.Y)+int(btn.H)/2)
 }
 
-// TestThePlayKeyIsBigEnoughToHit 断主播放键的尺寸（设计规范 v0.1 §5：44×44 的实心圆）。
+// TestThePlayKeyIsBigEnoughToHit 断主播放键的尺寸（原型 `.play-btn`：44×44，正文色底的实心圆，
+// 图形是页面底色）。
 //
 // ⚠️ **量的是画面上那一片圆，不是常量**，也不写 `iconHitPlay`（写成常量的话，
 // 把常量改回 48 这一条照样绿——「44」得由测试里的字面数钉住）。
@@ -309,8 +307,8 @@ func playKeyEdge(tt *mygoui.Tester, btn mygoui.Rect) color.RGBA {
 // 判据：
 //
 //  1. 盒子 44×44，比上一首大（只断盒子的话，一枚 44 的空盒子也算过）。
-//  2. 🔴 **圆本身够大**（强调色那一片外接框 ≥ 42）——盒子对而圆画小了，前一条抓不到。
-//  3. 🔴 **图形落在圆中间**（AccentText 色那一片的中心在圆心 ±3 内；播放三角的
+//  2. 🔴 **圆本身够大**（正文色那一片外接框 ≥ 42）——盒子对而圆画小了，前一条抓不到。
+//  3. 🔴 **图形落在圆中间**（页面底色那一片的中心在圆心 ±3 内；播放三角的
 //     字形自己偏右约 1.5，所以不要求死居中）。
 func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 	st := barState()
@@ -323,9 +321,9 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到「暂停」，文字有 %q", tt.Texts())
 	}
-	const wantBox = 36
+	const wantBox = 44
 	if d := absFloat(play.W-wantBox) + absFloat(play.H-wantBox); d > 2 {
-		t.Errorf("播放键的盒子是 %.1fx%.1f，规范是 36×36", play.W, play.H)
+		t.Errorf("播放键的盒子是 %.1fx%.1f，原型是 44×44", play.W, play.H)
 	}
 	prev, ok := tt.Find("上一首")
 	if !ok {
@@ -336,7 +334,8 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 	}
 
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	accent, on := rgb(th.Accent), rgb(th.AccentText)
+	pal := tok.Of(th)
+	accent, on := rgb(pal.Text), rgb(pal.Bg)
 	img := tt.Image()
 	var dx0, dx1, gx0, gx1, gy0, gy1 = 1 << 30, -1, 1 << 30, -1, 1 << 30, -1
 	for y := int(play.Y); y < int(play.Y+play.H); y++ {
@@ -349,11 +348,11 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 			}
 		}
 	}
-	if dx1 < 0 || dx1-dx0+1 < 34 {
-		t.Fatalf("播放键上的圆只有 %d 宽（%d..%d）——规范是直径 36 的实心强调色圆", dx1-dx0+1, dx0, dx1)
+	if dx1 < 0 || dx1-dx0+1 < 42 {
+		t.Fatalf("播放键上的圆只有 %d 宽（%d..%d）——原型是直径 44 的正文色实心圆", dx1-dx0+1, dx0, dx1)
 	}
 	if gx1 < 0 {
-		t.Fatalf("播放键的圆里没有画出图形（找不到 AccentText 色 %v）", on)
+		t.Fatalf("播放键的圆里没有画出图形（找不到页面底色 %v）", on)
 	}
 	cx, cy := play.X+play.W/2, play.Y+play.H/2
 	if d := absFloat(float32(gx0+gx1)/2-cx) + absFloat(float32(gy0+gy1)/2-cy); d > 4 {
@@ -361,7 +360,8 @@ func TestThePlayKeyIsBigEnoughToHit(t *testing.T) {
 	}
 }
 
-// TestThePlayKeyIsASolidAccentCircle 断主播放键是**实心强调色圆**，图形是 AccentText。
+// TestThePlayKeyIsASolidAccentCircle 断主播放键是**实心圆**：原型 `.play-btn` 的底是
+// `--text`（正文色），图形是 `--bg`。名字沿用旧的，台账里登记的就是它。
 //
 // ⚠️ **这条替换了原来的 `TestThePlayKeyHasNoSolidBackground`**——那条钉的是上游
 // Biu 的形状（无底、前景色图形）。应用没发版，产品定了新视觉（设计规范 §5），
@@ -395,10 +395,11 @@ func TestThePlayKeyIsASolidAccentCircle(t *testing.T) {
 					t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
 				}
 				th := BuildTheme(s.app.SettingsSnapshot(), dark)
-				bg, accent, on := rgb(th.Background), rgb(th.Accent), rgb(th.AccentText)
+				pal := tok.Of(th)
+				bg, accent, on := rgb(th.Background), rgb(pal.Text), rgb(pal.Bg)
 
 				if got := playKeyEdge(tt, btn); !near(got, accent) {
-					t.Errorf("%q 的圆边缘是 %v，该是强调色 %v", label, got, accent)
+					t.Errorf("%q 的圆边缘是 %v，该是正文色 %v（原型 .play-btn）", label, got, accent)
 				}
 				x0, y0 := round32(btn.X), round32(btn.Y)
 				x1, y1 := x0+int(btn.W)-1, y0+int(btn.H)-1
@@ -691,19 +692,11 @@ func TestRenderPlayBarRedoShots(t *testing.T) {
 			save(t, dir, fmt.Sprintf("70-播放条-%d-%s.png", width, name), tt)
 		}
 
-		// 音量浮层开着：一根竖滑块 + 底下的百分比。
-		//
-		// ⚠️ **这一张把播放条摆在窗口底下**（真窗口里它就在那儿）：浮层是从
-		// 播放条**往上**弹的，摆在顶上就被窗口裁掉半张。
-		tt, _ := bottomBarTester(t, barState(), 1200, 320, dark)
-		hoverVolumeKey(t, tt)
-		save(t, dir, "72-播放条-音量浮层-"+name+".png", tt)
-
 		// 封面悬停：那一层黑罩和它正中那枚箭头（票 #173 把它放到 32）。
 		//
 		// ⚠️ **必须悬停才有**：那一层是 `wrap.Hovered()` 才画的，而箭头是**白色
 		// 92%** 压在 50% 的黑罩上——不悬停就只剩一块空的封面。
-		tt, _ = playbarTester(t, barState(), 1200, playbarHeight, dark)
+		tt, _ := playbarTester(t, barState(), 1200, playbarHeight, dark)
 		cover, ok := tt.Find("当前封面")
 		if !ok {
 			t.Fatalf("画面上找不到封面，文字有 %q", tt.Texts())
@@ -788,21 +781,4 @@ func bottomBarTester(t *testing.T, st app.State, width, height int, dark bool) (
 	tt := b.tt
 	tt.Frame()
 	return tt, b.s
-}
-
-// hoverVolumeKey 把指针停在音量图标上，等那 300 毫秒过去（浮层是悬停**一会儿**
-// 才出来的，上游那个 Tooltip 的 `delay={300}`）。
-//
-// ⚠️ **必须推钟**：无头 Tester 的钟站着不动（只有 `Advance` 能推它），而那
-// 300 毫秒是框架的**动画**在走——不推钟它永远走不完，于是浮层永远不出来。
-// 这一条是「用 `tt.Advance(d)` 配 `tt.FramePending()`」那个写法（CLAUDE.md §2）。
-func hoverVolumeKey(t *testing.T, tt *mygoui.Tester) {
-	t.Helper()
-	icon, ok := volumeKeyOnTheBar(tt)
-	if !ok {
-		t.Fatalf("播放条上找不到音量那一枚，文字有 %q", tt.Texts())
-	}
-	tt.Move(icon.X+icon.W/2, icon.Y+icon.H/2)
-	tt.Advance(volHoverDelay)
-	tt.Frame()
 }

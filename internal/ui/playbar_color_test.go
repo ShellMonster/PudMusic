@@ -53,7 +53,7 @@ func TestTheDisabledIconKeysDoNotTurnAccent(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt, s := playbarTester(t, fullBarState(), 1200, 0, dark)
-			bg := rgb(BuildTheme(s.app.SettingsSnapshot(), dark).Background)
+			bg := rgb(tok.Of(BuildTheme(s.app.SettingsSnapshot(), dark)).Side) // 原型播放条底是 --side
 
 			for _, label := range []string{"上一首", "下一首"} {
 				btn, ok := tt.Find(label)
@@ -370,11 +370,6 @@ func TestRenderPlayBarColorShots(t *testing.T) {
 		s.rateOpen = true
 		tt.Frame()
 		save(t, dir, "A3-播放条-倍速浮层-"+name+".png", tt)
-
-		// A4：音量浮层——32×160 的竖滑块、16 的旋钮、12 号字的百分比。
-		tt, _ = bottomBarTester(t, fullBarState(), 1200, 360, dark)
-		hoverVolumeKey(t, tt)
-		save(t, dir, "A4-播放条-音量浮层-"+name+".png", tt)
 
 		// A5：图标键悬停——图形变主色（不是只多一层淡底）。
 		tt, _ = bottomBarTester(t, fullBarState(), 1200, 360, dark)

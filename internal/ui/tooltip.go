@@ -15,7 +15,7 @@
 //	            新建收藏夹那几处显式是 0（`menu-item.tsx:78` 等）
 //
 // 所以这里自己写一份：默认 **0ms 出、500ms 收**，菜单那几处用 **0ms 收**，
-// 音量的 300ms 在 `playbar_volume.go` 的 `volHoverDelay`（那是一个自绘浮层，
+// 音量的 300ms 是 `tipDelayVolume`（原来那个自绘浮层已删除，
 // 不是 `Tooltip`）。外观和框架那一份逐项一样：反色底、反色字、一层阴影、
 // 摆在锚点上方居中。
 //
@@ -68,7 +68,7 @@ const (
 	// tipDelayNone 是 HeroUI `delay` 的默认值：指针一停就出提示。
 	tipDelayNone = time.Duration(0)
 	// tipDelayVolume 是音量那一处 `delay={300}`。播放条上的音量浮层用它
-	// （`playbar_volume.go` 的 volHoverDelay），这里留着同一个数给别的提示用。
+	// （已删除），这里留着同一个数给别的提示用。
 	tipDelayVolume = 300 * time.Millisecond
 	// tipDelayClose 是 HeroUI `closeDelay` 的默认值：离开之后停 500ms 再收。
 	tipDelayClose = 500 * time.Millisecond

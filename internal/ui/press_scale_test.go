@@ -20,6 +20,7 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"testing"
 	"time"
 
@@ -38,8 +39,12 @@ func glyphArea(t *testing.T, tt *mygoui.Tester, r mygoui.Rect, c [3]int) int {
 	t.Helper()
 	img := tt.Image()
 	n := 0
-	for y := int(r.Y); y < int(r.Y+r.H); y++ {
-		for x := int(r.X); x < int(r.X+r.W); x++ {
+	// 只量盒子中间：播放键是实心圆，圆缩小之后盒子四角会露出播放条底色，而它和图形色
+	// （页面底色）很接近，量整个盒子会把四角也算成图形。内缩 10px 后只剩圆心附近，
+	// 20px 的图形（缩到 94% 也只有 19px）完整落在里面。
+	const inset = 10
+	for y := int(r.Y) + inset; y < int(r.Y+r.H)-inset; y++ {
+		for x := int(r.X) + inset; x < int(r.X+r.W)-inset; x++ {
 			p := img.RGBAAt(x, y)
 			if absInt(int(p.R)-c[0]) <= 24 && absInt(int(p.G)-c[1]) <= 24 && absInt(int(p.B)-c[2]) <= 24 {
 				n++
@@ -74,10 +79,10 @@ func TestThePlayKeyShrinksWhenPressed(t *testing.T) {
 		t.Fatalf("画面上找不到「暂停」，文字有 %q", tt.Texts())
 	}
 	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	on := rgb(th.AccentText)
+	on := rgb(tok.Of(th).Bg) // 原型 .play-btn：正文色底的圆，图形是页面底色
 	before := glyphArea(t, tt, play, [3]int{int(on.R), int(on.G), int(on.B)})
 	if before == 0 {
-		t.Fatalf("播放键的圆里没有画出图形（找不到 AccentText 色 %v）", on)
+		t.Fatalf("播放键的圆里没有画出图形（找不到页面底色 %v）", on)
 	}
 
 	// 按住那一枚（**不松手**——`Pressed()` 为真）。

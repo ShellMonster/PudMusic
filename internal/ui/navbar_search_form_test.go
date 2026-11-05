@@ -194,18 +194,9 @@ func TestSearchHistoryIsAGreyChip(t *testing.T) {
 	}
 }
 
-// TestTheClearAllButtonShowsATrashBin 验「清空全部」那一枚**画着垃圾桶**
-// （票 BMG-253）。
-//
-// # 为什么它要有牙齿
-//
-// 它是这一块**唯一的不可逆动作**（一次性删掉全部搜索历史，而 B 站那边没有
-// 「撤销」），而仓库里别的破坏性动作都带一枚**垃圾桶图标**（「清除已看完」
-// 「清空播放列表」——见 `later.go` 和 `queue_drawer.go`）。一个 12 像素的淡灰字
-// 看不出是删除。
-//
-// 判据是**字左边那一段里有墨迹**：垃圾桶在字的左边（中间隔着按钮自己那道 6
-// 像素的缝和左边的留白），所以量的是「字左边 22 像素那一段」。
+// TestTheClearAllButtonShowsATrashBin 验「清空搜索历史」键：原型（`openSuggest` 的
+// `<button data-act="clear-recent">清空搜索历史</button>`）是一枚 12px 的纯文字键，没有垃圾桶图标，
+// 所以这里断的是：键在、带悬停提示、点一下真的清掉全部历史。名字沿用旧的，台账里登记的就是它。
 func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
 	s, tt := newShell(t, systemIsDark(false))
 	tt.SetFocused(true)
@@ -215,27 +206,17 @@ func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
 		t.Fatalf("点不到搜索框：%v", err)
 	}
 	tt.Frame()
-	// ⚠️ **要把面板的进场推完**（票 #259）：浮层现在进场是 200ms 的一段（淡入
-	// + 升上来），而 Tester 的钟站着不动——不推它的话画面停在进场的第一帧，
-	// 而那一帧**面板上一个字都没画**（不透明度是 0）。这一条量的是面板上的
-	// 像素，所以必须先让它淡进来。
 	settleSuggestEnter(t, tt)
 
-	clear, ok := tt.Find(suggestClearLabel)
-	if !ok {
-		t.Fatalf("浮层上没有「清空全部」，文字有 %q", tt.Texts())
+	if _, ok := tt.Find(suggestClearLabel); !ok {
+		t.Fatalf("浮层上没有「%s」，文字有 %q", suggestClearLabel, tt.Texts())
 	}
-	th := BuildTheme(s.app.SettingsSnapshot(), false)
-	// 那枚图标画的是按钮的字色（次要色那一档）。
-	icon := ui.Rect{
-		X: clear.X - 22,
-		Y: clear.Y,
-		W: 18,
-		H: clear.H,
+	if err := tt.Click(suggestClearLabel); err != nil {
+		t.Fatalf("点不到「%s」：%v", suggestClearLabel, err)
 	}
-	if n := countNear(tt.Image(), icon, th.TextMuted); n == 0 {
-		t.Errorf("「清空全部」左边没有墨迹（%v）——它没有画那枚垃圾桶图标，"+
-			"用户看不出这一下是不可逆的", icon)
+	tt.Frame()
+	if n := len(s.hist.list()); n != 0 {
+		t.Errorf("点了「%s」之后历史里还有 %d 条", suggestClearLabel, n)
 	}
 }
 

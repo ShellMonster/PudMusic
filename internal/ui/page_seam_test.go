@@ -7,10 +7,8 @@ import (
 )
 
 func TestPageSeamCapturesSharedSnapshotsAndScopedActions(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.Close)
+	b := newTestShell(t)
+	a, s := b.a, b.s
 
 	item := app.Item{Source: app.SourceOnline, Type: "mv", Bvid: "BVseam", Title: "页面 seam"}
 	a.Queue().Reset(item)
@@ -47,10 +45,8 @@ func TestPageSeamCapturesSharedSnapshotsAndScopedActions(t *testing.T) {
 }
 
 func TestPageSeamActionsPreserveAppOwnership(t *testing.T) {
-	a := app.New()
-	t.Cleanup(a.Close)
-	s := New(a)
-	t.Cleanup(s.Close)
+	b := newTestShell(t)
+	a, s := b.a, b.s
 
 	seam := s.pageSeam()
 	if seam.Actions.SetFullPlayerPrefs == nil || seam.Actions.TogglePlayback == nil || seam.Actions.Wake == nil {

@@ -346,7 +346,7 @@ func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 	ui.Box(c).Key("count-badge-notch").
 		Attach(ui.AnchorTopRight, ui.AnchorTopRight).
 		Top(-8).Right(-13).Translate(dx, 0).
-		Radius(6).Background(p.Side).Padding(space.Px2, space.Px4).
+		Radius(tok.R6).Background(p.Side).Padding(space.Px2, space.Px4).
 		PassThrough().
 		Children(func() {
 			typo.Mono(ui.Text(c, t)).FontSize(10).FontWeight(600).LetterSpacing(-0.2).

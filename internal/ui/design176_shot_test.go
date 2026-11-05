@@ -46,20 +46,6 @@ func TestRenderDesign176Shots(t *testing.T) {
 			tt.Frame()
 			save(t, dir, "96-确认框-危险-"+name+".png", tt)
 
-			// ── 双月日期选择器：两块并排 ────────────────────────────
-			lt, ls := libraryShell(t, newLibFake(t).withLater(1, 1, "甲"), laterPath)
-			waitFrames(t, lt, "把第一页拉回来", func() bool {
-				return rowsShown(ls.pageOf(laterPath)) > 0
-			})
-			lt.SetDark(dark)
-			if err := lt.Click(dateRangeLabel); err != nil {
-				t.Fatal(err)
-			}
-			lt.Frame()
-			lt.Move(1180, 770)
-			lt.Frame()
-			save(t, dir, "97-双月日期选择器-"+name+".png", lt)
-
 			// ── 下载状态：蓝条 + 绿勾 ────────────────────────────────
 			_, dt := newRows(t,
 				dlSnapshot("歌 甲", download.StatusRunning, dlProgress, dlChunk),

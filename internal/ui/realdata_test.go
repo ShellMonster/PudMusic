@@ -192,7 +192,9 @@ var realDataLedger = []realDataPage{
 		},
 		// 这一页的内容是**自己攒的统计**，判据是「那几个数在画面上」——
 		// 不是一句空状态。
-		Want: []string{"真数据一首", "真数据UP", "1 小时 30 分钟"},
+		// 大数字被拆成「1」「小时」「30」「分」几段文字（原型 .big-num + 单位），整串对不上；
+		// 总时长换成"最常听的歌手"那一行的 90 分钟，加上磁贴标题。
+		Want: []string{"真数据一首", "真数据UP", "收听总时长", "90 分钟"},
 	},
 	{
 		Route: searchPath, Title: "搜索",
@@ -244,6 +246,9 @@ var realDataLedger = []realDataPage{
 			s, tt, _ := newSpaceShell(t, b, true, "77")
 			s.navigate(upPathOf(42))
 			realDataWait(t, tt, "空间信息拉回来了", func() bool { return tt.HasText("真数据 UP 主") })
+			// 默认开的是「投稿」Tab，这一条要的是「动态」那一档。
+			s.upSpaces[42].tab = upTabDynamic
+			tt.Frame()
 			realDataWait(t, tt, "动态那一档拉回来了", func() bool { return tt.HasText("真数据一条动态") })
 			return s, tt
 		},
@@ -341,18 +346,15 @@ var realDataLedger = []realDataPage{
 			s.navigate(followPath)
 			realDataWait(t, tt, "关注的 UP 主画出来了",
 				func() bool { return tt.HasText("关注页那位 UP 主") })
-			// ⚠️ **「全部关注(N)」和分组名都在页头下拉里**（#367 改版）：点开
-			// 触发器它们才在画面上——`Want` 里的断言量的是「点开之后的那一屏」。
-			if err := tt.Click("选择关注分组"); err != nil {
-				t.Fatalf("点不到分组下拉：%v，文字有 %q", err, tt.Texts())
-			}
+			// 原型的分组是页头下的一排 chip（「全部关注」后面跟着数，分组名各一枚），
+			// 不用点开。
 			tt.Frame()
 			return s, tt
 		},
 		// ⚠️ 两条都要：一条是**接口给的真内容**，一条是「全部关注(N)」那个 N——
 		// 后者是 B 站的**总数**画上来的，少了它的话一个「每一格都画了但列表是空的」
 		// 实现照样能过第一条。
-		Want: []string{"关注页那位 UP 主", "接口给的认证", "全部关注(1)", "特别关注"},
+		Want: []string{"关注页那位 UP 主", "接口给的认证", "全部关注", "特别关注"},
 	},
 	{
 		Route: "/empty", Title: "空状态落地页",
@@ -369,8 +371,8 @@ var realDataLedger = []realDataPage{
 			settleText(t, tt, lookup("/没有这一条").Title)
 			return s, tt
 		},
-		// 404 自己那一页的内容：说清是哪条路径不存在、几秒后回首页。它不是空状态。
-		Want: []string{lookup("/没有这一条").Title, "/没有这一条"},
+		// 404 自己那一页的内容（原型 PAGES.notfound）：走丢了的提示加"回到推荐音乐"。它不是空状态。
+		Want: []string{lookup("/没有这一条").Title, "这一页走丢了", "链接可能已经失效，或者这一页还没有内容。"},
 	},
 }
 

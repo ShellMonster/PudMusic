@@ -194,6 +194,7 @@ func windowColumn(s *Shell) []*mygo.MenuItem {
 			Click: func(*mygo.MenuItem, *mygo.Window) {
 				s.onShortcut("toggleNotchMode")
 			},
+			Accelerator: s.menuAccelFor("toggleNotchMode"),
 		},
 		mygo.Separator(),
 		// 框架「窗口」栏自带的那三项。

@@ -47,6 +47,7 @@ package ui
 
 import (
 	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -194,7 +195,7 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 								fg = p.Text
 							}
 							link.Children(func() {
-								typo.Mono(ui.Text(c, dir)).FontSize(scale.Font(c, scale.Size14)).TextColor(fg).
+								typo.Mono(ui.Text(c, dir).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Copy)).TextColor(fg).
 									SingleLine().Ellipsis("…")
 							})
 							if link.Clicked() {

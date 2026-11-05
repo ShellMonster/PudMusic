@@ -143,7 +143,7 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 			s.viewCollectionMeta(c, p, info)
 
 			if info.Intro != "" {
-				ui.Text(c, info.Intro).FontSize(scale.Font(c, scale.Size14)).TextColor(pl.Text2).
+				ui.Text(c, info.Intro).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Copy).TextColor(pl.Text2).
 					MaxLines(2).Ellipsis("…").MaxWidth(560).
 					Margin(space.Px12, space.None, space.None, space.None)
 			}
@@ -185,10 +185,10 @@ func (s *Shell) viewCollectionMeta(c *ui.Context, p *collectionPage, info app.Co
 				info.OwnerMid, fs, 1.5, pl.Text2, s.ownerActions())
 		}
 		item := func(txt string) {
-			ui.Text(c, txt).FontSize(fs).TextColor(pl.Text2).SingleLine().Margin(space.None, space.None, space.None, space.Px8)
+			ui.Text(c, txt).FontSize(fs).LineHeight(leading.Copy).TextColor(pl.Text2).SingleLine().Margin(space.None, space.None, space.None, space.Px8)
 		}
 		mono := func(txt string) {
-			typo.Num(ui.Text(c, txt)).FontSize(fs).TextColor(pl.Text2).SingleLine().
+			typo.Num(ui.Text(c, txt)).FontSize(fs).LineHeight(leading.Copy).TextColor(pl.Text2).SingleLine().
 				Margin(space.None, space.None, space.None, space.Px8)
 		}
 		mono(strconv.Itoa(info.MediaCount) + " 首")

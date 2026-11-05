@@ -470,7 +470,7 @@ func (s *Shell) viewDynamicDotMark(c *ui.Context, count int) {
 	// 原型：7×7 的主色点，离按钮上沿 8、右沿 9。`PassThrough` 不能省：点画在按钮上面，
 	// 不穿透的话它底下那一块按钮收不到指针（死区）。
 	ui.Box(c).Key("nav-feed-dot").Absolute().Top(8).Right(9).
-		PassThrough().Size(7, 7).Radius(3.5).
+		PassThrough().Size(7, 7).Radius(tok.Pill).
 		Background(tok.Of(c.Theme()).Accent).
 		Label(fmt.Sprintf("%d 条新动态", count))
 }

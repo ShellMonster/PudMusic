@@ -29,6 +29,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -666,7 +667,9 @@ func TestTheGlyphsAreNotSwallowedByTheBackground(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			tt := playBarTester(t, fullBarState(), 1200, dark)
-			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "加歌", "收藏", "下载"} {
+			// 上一首 / 下一首在这个无播放器的壳里是禁用态（原型 35% 不透明），对比度本来就低，
+			// 不在这条的范围内；「加歌」键原型里没有，「下载」的名字是「下载当前歌曲」。
+			for _, label := range []string{"播放", "播放模式", "收藏", "下载当前歌曲"} {
 				s := scanGlyph(tt, label)
 				if s.ink == "" {
 					t.Fatalf("%q 那一块什么都没画：%q", label, tt.Texts())
@@ -720,18 +723,18 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		glyph float32 // 图标边长
 		hit   float32 // 点击区边长
 	}{
-		{"上一首", iconMd, iconHitMd},
-		{"下一首", iconMd, iconHitMd},
+		// 原型 `.icon-btn` 是 36，`.t-btns .icon-btn.lg` 的图形是 22。
+		{"上一首", 22, tok.IconHit},
+		{"下一首", 22, tok.IconHit},
 		// ⚠️ **「播放」不在这张表里**：它是**图形正好填满盒子**的那一枚例外
 		// （上游 `className="size-12 min-w-12"` + `RiPlayCircleFill size={48}`，
 		// 没有那 5 像素留白），所以「每边留白 ≥ 3」按**图标边长**算是 0——
 		// 它得按**画面上量到的那一枚图形**算（圆占画布 20/24，留白是 4）。
 		// 下面单独断它。
-		{"播放模式", iconMd, iconHitMd},
-		{"加歌", iconMd, iconHitMd},
+		{"播放模式", iconMd, tok.IconHit},
 		// 收藏：票 #219 之后跟着上游走（`RiStarFill/Line size={18}`），
 		// 它和右边那一组一样是 18 的图标 + 32 的点击区。
-		{"收藏", iconMd, iconHitMd},
+		{"收藏", iconMd, tok.IconHit},
 		// ⚠️ **「下载」不在这张表里了**（票 #222 / 报告 §3.12）：上游那一支的
 		// 条件是 `{Boolean(playId) && getPlayItem()?.source !== "local" && …}`
 		//（`playbar/right/index.tsx:15`）——**本地文件不摆**。而这一条放的是
@@ -813,7 +816,7 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 	//
 	// ⚠️ **写的是字面的 44，不是 `iconHitPlay`**：写成常量的话，把常量改回 48
 	// 这一条就照样绿，得由这一条钉住。
-	const wantPlayBox = 36
+	const wantPlayBox = 44 // 原型 .play-btn
 	if d := absF(play.W-wantPlayBox) + absF(play.H-wantPlayBox); d > 2 {
 		t.Errorf("播放键在画面上是 %.1fx%.1f，而规范的盒子是 %d×%d——"+
 			"布局没用上那个尺寸", play.W, play.H, wantPlayBox, wantPlayBox)

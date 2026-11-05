@@ -3170,15 +3170,8 @@ var Items = []Item{
 			// 音量轨道填的是**已经调上去的那一段**（0% 空、100% 满）。
 			// 浮层**自己**收掉（不播放的时候没有人要帧，所以那一段必须自己
 			// 排一个到点的唤醒）。
-			// 竖着那根旋钮**不许探出滑块的框**：它的中心要走**内容框**的算法，
-			// 和框架的竖直映射（`1-(y-st.cy)/st.ch`）同一个坐标系。
-			"TestTheVerticalKnobStaysInsideItsSlider",
 			// 键盘 Tab 过去的时候旋钮（和画在它上面的焦点圈）要画出来。
 			"TestTheProgressKnobShowsWithKeyboardFocus",
-			// 按住的时候旋钮底下要有一层**更深的**影子（票面原话）。
-			"TestTheKnobGetsDeeperWhileHeld",
-			// 音量浮层里那根滑块**不跟着百分比的字数横向漂**（它就在指针底下）。
-			"TestTheVolumeSliderDoesNotDriftWithThePercentText",
 			// 浮层底下那个百分比**和那根竖滑块居中对齐**（票 #485：数字看着偏左）。
 			// 字号放大时那个百分比**不许折行**（「100」换行「%」既难看又撑高浮层）。
 		},
@@ -3748,16 +3741,6 @@ var Items = []Item{
 			"TestTheConfirmBodyIsTextSmall",
 			"TestTheCancelButtonKeepsItsShell",
 			"TestTheConfirmDialogHasANameInTheAccessibilityTree",
-			// 双月日期选择器：两个月、一起翻、挑过的那天被高亮、点更早的一天
-			// 从头再挑、没在筛的时候什么都不亮、挑完真的换条件、**挑的那一段
-			// 恰好等于默认摆着的那一天时不会被静默丢掉**、最窄窗口下两块
-			// 都点得到。
-			"TestTheRangePickerShowsTwoMonths",
-			"TestTheTwoMonthsMoveTogether",
-			"TestThePickedDayIsHighlighted",
-			"TestPickingAnEarlierDayStartsOver",
-			"TestNothingIsHighlightedWhileNothingIsFiltered",
-			"TestTheRangePickerDrivesTheFilter",
 			// 下载状态：条是蓝的（且不是主色）、出错的是红的、完成的有一枚绿勾。
 		},
 	},

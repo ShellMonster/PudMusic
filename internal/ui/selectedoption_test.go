@@ -1,76 +1,36 @@
-// 「被选中的选项」在应用里只有一种画法（票 #239；审计 F-14）。
+// 「被选中的选项」的画法（原型版）。
 //
-// # 改之前是三样
+// 旧口径（票 #239）是"实心主色底 + AccentText 字"一种画法，被原型取代。原型里按控件分三种：
 //
-// 设置页那些**选项**（主题三档、窗口关闭两档、下拉项）选中的时候，各画各的：
+//	主题卡 / 显示样式卡   `.theme-card[aria-checked]`：2px 主色描边（没选中是 line，悬停 line-strong）
+//	下拉 / 弹层的选项     `.pop-opt`：悬停 `hover` 底；选中是 accent-text 600 字加右边的对勾
+//	窗口关闭              已经是开关（`关闭窗口时留在菜单栏`），不再是两档选项
 //
-//	设置页的档位按钮	淡主色底 + 正文色（`flatCurrent`，和左栏「当前在哪」同一套）
-//	下拉项的高亮	实心主色底 + `t.AccentText`
-//	主 Tab		透明底 + 正文色（选中由滑块说）
-//
-// 用户在设置页里点两下就能看出「这两个不是一伙的」——而它们问的是同一个问题：
-// 「这一项被选中了没有」。
-//
-// # 现在只有一样：实心主色底 + `t.AccentText` 字
-//
-// 这就是 `flatSolid`（`internal/ui/flatbutton.go`），也是上游的画法：HeroUI 的
-// `Radio` 选中项是 `bg-primary` 实心底 + `text-primary-foreground`，Biu 的
-// 倍速浮层是 `color="primary" variant="solid"`。
-//
-// ⚠️ **主 Tab 不在这一族里**：它是**导航**（切的是「在哪一页」），而这些是**选项**
-// （选的是「哪一个值」）。主 Tab 的选中由**滑块**说——上游 HeroUI 的
-// `Tabs variant="solid"` 就是灰轨 + 滑块，改成实心主色块是偏离上游，而一排 Tab
-// 里飘一块绿比滑块响得多（见 `tabs.go` 的文件头）。
-//
-// # 判据是**画面上那两格**
-//
-// 底取**众数**（那一格里绝大多数像素是底，字只占少数），字取**离底最远**的那一个
-// （抗锯齿画出来的那串过渡色里最远的那一头就是字本身）。
-//
-// ⚠️ **深浅两套都要跑，而且造壳必须带 `systemIsDark(dark)`**：方案的主色
-// **深浅是两个值**（暖纸浅色 #A8552E、深色 #E58A5A）——壳还画着浅色、断言却拿
-// 深色的主题去比，「深色」那一档就永远红。经典那一档深浅同值，所以当年不带
-// 也绿——那不是对，是侥幸。`t.AccentText`（字）是按主色的亮度挑的黑或白。
+// 判据仍然是画面上的像素；深浅两套都跑，造壳带 `systemIsDark(dark)`。
 package ui
 
 import (
+	"image/color"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// assertSolidAccentOption 断「这一格是『被选中的选项』那一档」。
-//
-// ⚠️ **底和字都要断**：只断底的话，一块**别的**主色块（主色当底、字不是
-// `AccentText`）也过——而那样的话绿底上的字可能读不出来。
-func assertSolidAccentOption(t *testing.T, tt *mygoui.Tester, label string, theme *mygoui.Theme) {
+// cardEdge 取一张卡左边缘中点的颜色（描边画在元素内侧，第 1 像素就是描边）。
+func cardEdge(t *testing.T, tt *mygoui.Tester, label string) (mygoui.Rect, [4]uint8) {
 	t.Helper()
 	r, ok := tt.Find(label)
 	if !ok {
 		t.Fatalf("画面上找不到 %q，文字有 %q", label, tt.Texts())
 	}
-	img := tt.Image()
-	px := bandPixels(img, r)
-	if len(px) == 0 {
-		t.Fatalf("%q 那一格在画面上是空的", label)
-	}
-	bg := modeOf(px)
-	ink := farthestFrom(img, r, bg)
-	t.Logf("%q：底 %v 字 %v", label, bg, ink)
-
-	if !nearRGBA(bg, rgbaOf(theme.Accent), 3) {
-		t.Errorf("%q 那一格的底色是 %v，want %v（实心主色）", label, bg, theme.Accent)
-	}
-	if !nearRGBA(ink, rgbaOf(theme.AccentText), 24) {
-		t.Errorf("%q 那一格的字色是 %v，want %v（主色底上的字）", label, ink, theme.AccentText)
-	}
+	px := tt.Image().RGBAAt(int(r.X)+1, int(r.Y+r.H/2))
+	return r, [4]uint8{px.R, px.G, px.B, px.A}
 }
 
-// TestTheSelectedOptionLooksTheSameEverywhere 钉住「被选中的选项只有一种画法」。
-//
-// 三处：设置页主题三档里选中的那一档、窗口关闭两档里选中的那一档、下拉项的高亮。
-// 深浅两套都跑。
+// TestTheSelectedOptionLooksTheSameEverywhere 钉住原型里"被选中"的三种画法各自成立。
 func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		name := "浅色"
@@ -78,40 +38,31 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 			name = "深色"
 		}
 		t.Run(name, func(t *testing.T) {
-			// ① 主题三档：默认那一档是「跟随系统」（在皮肤页上——那一排搬过去了）。
-			t.Run("皮肤页的档位按钮", func(t *testing.T) {
+			// ① 主题卡：默认选中「跟随系统」，描边是主色；没选中的「深色」卡描边是 line。
+			t.Run("主题卡的描边", func(t *testing.T) {
 				tt, _, _, _ := shellOnAppearance(t, app.DefaultSettings(""), systemIsDark(dark))
-				theme := BuildTheme(app.DefaultSettings(""), dark)
-				assertSolidAccentOption(t, tt, "跟随系统", theme)
+				p := tok.Of(BuildTheme(app.DefaultSettings(""), dark))
+				tt.Move(600, 20) // 指针挪开：悬停会把描边换成 line-strong
+				tt.Frame()
+				tt.Advance(300 * time.Millisecond)
+				tt.Frame()
+				r, got := cardEdge(t, tt, "跟随系统")
+				want := rgbaOf(p.Accent)
+				if !nearRGBA(color.RGBA{got[0], got[1], got[2], got[3]}, want, 3) {
+					t.Errorf("选中的主题卡 %v 左边缘是 %v，want 主色描边 %v", r, got, want)
+				}
+				_, other := cardEdge(t, tt, "浅色")
+				if nearRGBA(color.RGBA{other[0], other[1], other[2], other[3]}, want, 3) {
+					t.Errorf("没选中的主题卡也是主色描边 %v——那就没有「选中」这一说了", other)
+				}
 			})
 
-			// ② 窗口关闭两档：默认那一档是「隐藏到托盘」。
+			// ② 下拉项：指针落在哪一项，哪一项换 hover 底、字是正文色。
 			//
-			// ⚠️ **要用 `settingRect` 把它滚进可视区**：设置页外面套了一层
-			// `Scroll`，这一项在第一屏之外，而 `tt.Find` 找到的东西**可能在
-			// 屏幕外**——那样量出来的是空的（第一版就这么写，量到 0 个像素）。
-			//
-			// ⚠️ **每一段都自己造一个外壳**：滚动是**往下**滚的，而「音质偏好」
-			// 那个下拉在「隐藏到托盘」**上面**——同一个外壳里滚不过去。
-			t.Run("窗口关闭那两档", func(t *testing.T) {
+			// ⚠️ 点的是 trigger 上画着的字（默认档「高品质」），不是它的无障碍名字。
+			t.Run("下拉项的悬停", func(t *testing.T) {
 				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
-				theme := BuildTheme(app.DefaultSettings(""), dark)
-				settingRect(t, tt, s, "隐藏到托盘")
-				assertSolidAccentOption(t, tt, "隐藏到托盘", theme)
-			})
-
-			// ③ 下拉项的高亮：指针落在哪一项，哪一项就是「实心主色底」。
-			//
-			// ⚠️ **高亮不是「当前值」**：当前值那一档是**淡底、没有主色**
-			// （`settings_enum.go` 的 `it.value == *value` 那一支）。所以这里
-			// 量的是**指针落上去**的那一项，不是「自动」那一项。
-			//
-			// ⚠️ **点的是 trigger 上画着的那个字**（默认档的「高品质」——票 #581
-			// 之后没有「自动」那一档了），不是它的无障碍名字（「选择音质偏好」）：
-			// 后者在画面上**不占地方**，按坐标点会点空。
-			t.Run("下拉项的高亮", func(t *testing.T) {
-				tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""), systemIsDark(dark))
-				theme := BuildTheme(app.DefaultSettings(""), dark)
+				p := tok.Of(BuildTheme(app.DefaultSettings(""), dark))
 				settingRect(t, tt, s, "高品质")
 				if err := tt.Click("高品质"); err != nil {
 					t.Fatalf("点不开「音质偏好」那个下拉：%v，文字有 %q", err, tt.Texts())
@@ -123,7 +74,17 @@ func TestTheSelectedOptionLooksTheSameEverywhere(t *testing.T) {
 				}
 				tt.Move(opt.X+opt.W/2, opt.Y+opt.H/2)
 				tt.Frame()
-				assertSolidAccentOption(t, tt, "无损", theme)
+				tt.Advance(300 * time.Millisecond) // hover 底是 160ms 渐变
+				tt.Frame()
+				img := tt.Image()
+				bg := modeOf(bandPixels(img, opt))
+				// hover 令牌是半透明的，画面上是它压在弹层底（surface）上的合成色。
+				if want := rgbaOf(p.Hover.Over(p.Surface)); !nearRGBA(bg, want, 4) {
+					t.Errorf("悬停的「无损」底色是 %v，want hover 底 %v", bg, want)
+				}
+				if ink := farthestFrom(img, opt, bg); !nearRGBA(ink, rgbaOf(p.Text), 24) {
+					t.Errorf("悬停的「无损」字色是 %v，want 正文色 %v", ink, p.Text)
+				}
 			})
 		})
 	}

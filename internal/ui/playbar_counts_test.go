@@ -690,10 +690,9 @@ func TestTheCountFoldIsUsedByAllThreeKeys(t *testing.T) {
 			t.Fatalf("「%s」键的名字不是 %q %q（文字有 %q）", name, name, want, tt.Texts())
 		}
 	}
-	// 三枚键**从左到右**：分集之后是**收藏 / 赞 / 评论**（上游那一段的次序，
-	// 见 `viewTrackActions` 的注释）。
+	// 三枚键**从左到右**：原型 `.np-keys` 的次序是**赞 / 收藏 / 评论**。
 	var prev float32 = -1
-	for _, name := range []string{"收藏", "赞", "评论"} {
+	for _, name := range []string{"赞", "收藏", "评论"} {
 		key, ok := tt.Find(name + " " + want)
 		if !ok {
 			t.Fatalf("画面上找不到 %q 那一枚键", name)

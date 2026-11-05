@@ -54,7 +54,8 @@ func TestTheLibraryRowsAreTheSameHeightNoMatterHowLongTheTitle(t *testing.T) {
 	}
 	_ = s
 	want := float32(60) // 原型 `.trow` 高 60（DESIGN.md §0′.T7）
-	if row.H != want {
+	// 布局是 float32，60 会算成 60.000015；0.01 远小于任何一次折行（≥ 一行字高）。
+	if row.H < want-0.01 || row.H > want+0.01 {
 		t.Errorf("稍后再看那一行高 %v，want %v（行高是定死的一个值）", row.H, want)
 	}
 

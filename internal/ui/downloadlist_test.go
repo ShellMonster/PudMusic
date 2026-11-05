@@ -110,6 +110,11 @@ func newDownloads(t *testing.T, tasks ...queuedTask) (*Shell, *ui.Tester) {
 	t.Helper()
 	dir := t.TempDir()
 	qfile := filepath.Join(dir, download.QueueFileName)
+	// 不传任务时 tasks 是 nil，会被序列化成 `"tasks": null`；加载器有意拒绝 null（缺 tasks 算坏文件），
+	// 所以空队列要写成 `[]`。
+	if tasks == nil {
+		tasks = []queuedTask{}
+	}
 	b, err := json.Marshal(struct {
 		Version int          `json:"version"`
 		Tasks   []queuedTask `json:"tasks"`

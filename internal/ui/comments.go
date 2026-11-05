@@ -701,7 +701,7 @@ func (s *Shell) viewCommentsHeader(c *ui.Context, it app.Item) {
 		ui.Row(c).Gap(space.Px4).Shrink(0).Children(func() {
 			for i, label := range commentsSortLabels {
 				chip := pud.Chip(c, "comments:sort:"+strconv.Itoa(i), label, "", p.sortIdx == i).
-					Height(26).Radius(13)
+					Height(26).Radius(tok.Pill)
 				if chip.Clicked() {
 					p.sortIdx = i
 				}
@@ -807,7 +807,7 @@ func (s *Shell) viewCommentsComposer(c *ui.Context) {
 			}
 			return
 		}
-		ui.Box(c).Key("comments:input").Grow(1).Height(40).Radius(20).Background(pal.Surface2).
+		ui.Box(c).Key("comments:input").Grow(1).Height(40).Radius(tok.Pill).Background(pal.Surface2).
 			Border(1, pal.LineStrong).PaddingX(space.Px16).AlignItems(ui.Center).Opacity(0.5).Children(func() {
 			ui.Text(c, "说点什么…").FontSize(scale.Font(c, scale.Size14)).TextColor(pal.Text3).SingleLine()
 		})

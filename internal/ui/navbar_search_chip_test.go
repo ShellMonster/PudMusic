@@ -16,7 +16,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 )
 
 // TestTheChipMatchingTheInputStandsOut 钉住「正在敲的那个词」那一档：
@@ -35,9 +35,10 @@ func TestTheChipMatchingTheInputStandsOut(t *testing.T) {
 			tt.Frame()
 
 			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			pal := tok.Of(th)
 			panel := rgb(th.Background)
-			soft := rgb(accentSoft(th))
-			accent := ink.AccentOn(th)
+			soft := rgb(pal.AccentSoft) // 原型：匹配输入的 chip 换 accent-soft 底
+			text := pal.Text            // 字是正文色（原型 .chip 悬停 / 选中同款）
 
 			// ① 一字不差：chip「周杰伦」换成高亮那一档。
 			typeInSearch(t, tt, "周杰伦")
@@ -60,16 +61,16 @@ func TestTheChipMatchingTheInputStandsOut(t *testing.T) {
 				t.Errorf("敲的词和历史一字不差时 chip 底是 %v，want %v（accentSoft）——"+
 					"「正在输入」那一档没亮", got, soft)
 			}
-			// 字染主色：label 那一格里要有主色墨迹。
-			if n := countNear(img, label, accent); n == 0 {
-				t.Errorf("敲的词和历史一字不差时 label 里没有主色（%v）墨迹——字没染", accent)
+			// 字换成正文色：label 那一格里要有正文色墨迹。
+			if n := countNear(img, label, text); n == 0 {
+				t.Errorf("敲的词和历史一字不差时 label 里没有正文色（%v）墨迹——字没换", text)
 			}
 			// 另一枚 chip 还是灰的。
 			other, ok := tt.Find("林俊杰")
 			if !ok {
 				t.Fatalf("浮层上没有另一条历史，文字有 %q", tt.Texts())
 			}
-			grey := rgb(historyChipBg(th))
+			grey := rgb(pal.Surface2) // 原型 .chip 底
 			if got := img.RGBAAt(clampX(img, int(other.X)-4), int(other.Y+other.H/2)); maxDiff(got, grey) > 3 {
 				t.Errorf("没敲中的 chip 底是 %v，want %v（灰）——高亮染过了头", got, grey)
 			}

@@ -145,7 +145,7 @@ func TestTheLogoSitsWhereUpstreamPutsIt(t *testing.T) {
 
 			// 墨迹的包围盒：logo 那一块（x < 62，y < 80）。
 			minX, minY, maxX, maxY := 9999, 9999, -1, -1
-			for y := 0; y < 80; y++ {
+			for y := 0; y < 110; y++ {
 				for x := 0; x < 62; x++ {
 					if maxDiff(img.RGBAAt(x, y), bg) <= 12 {
 						continue
@@ -154,17 +154,18 @@ func TestTheLogoSitsWhereUpstreamPutsIt(t *testing.T) {
 					maxX, maxY = max(maxX, x), max(maxY, y)
 				}
 			}
+			t.Logf("logo 墨迹 x=%d..%d y=%d..%d", minX, maxX, minY, maxY)
 			if maxX < 0 {
 				t.Fatalf("左上角那块没有图")
 			}
-			// 上游那一块墨在 y=36..66、x=19..52。留 2 像素的容差（抗锯齿那一圈
-			// 和图标的留白在不同平台上差一两个像素）。
-			if minY < 34 || maxY > 68 {
-				t.Errorf("logo 那一块墨在 y=%d..%d，want ≈ 36..66"+
-					"（上游 logo 盒 y=32..72）", minY, maxY)
+			// 原型 `.traffic` 高 44 + `.brand` 上内边距 16，标志 32×32 在约 41 高的文字列旁垂直居中，
+			// 盒子 y≈64.5..96.5、x=20..52，唱片外圈内缩 1px，所以墨迹约在 y=65..95、x=21..51。
+			// 留 2 像素的容差（抗锯齿那一圈在不同平台上差一两个像素）。
+			if minY < 63 || maxY > 98 {
+				t.Errorf("logo 那一块墨在 y=%d..%d，want ≈ 65..95（原型 .traffic 44 + .brand 上 16）", minY, maxY)
 			}
-			if minX < 17 || maxX > 54 {
-				t.Errorf("logo 那一块墨在 x=%d..%d，want ≈ 19..52", minX, maxX)
+			if minX < 19 || maxX > 53 {
+				t.Errorf("logo 那一块墨在 x=%d..%d，want ≈ 21..51（原型 .brand 左 20）", minX, maxX)
 			}
 		})
 	}

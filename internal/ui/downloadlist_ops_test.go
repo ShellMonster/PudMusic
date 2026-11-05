@@ -67,24 +67,22 @@ func TestTheFiveOperationsShowWhereBiuShowsThem(t *testing.T) {
 	}
 }
 
-// TestClearingIsGreyWhenThereIsNothingToClear 空的时候「清空全部」是灰的：
-// 一条记录都没有时按它什么都不会发生，而一颗亮着的按钮按下去没反应是最难解释
-// 的那种。
+// TestClearingIsGreyWhenThereIsNothingToClear 空的时候页头不摆「清空全部」。
+//
+// 原型 `PAGES.downloads`：`S.downloads.length ? <div class="actions">…清空全部…</div> : ”`，
+// 一条记录都没有时整排操作键都不画（比"灰着"更干脆：一颗按了没反应的键最难解释）。
+// 名字沿用旧的，台账里登记的就是它。
 func TestClearingIsGreyWhenThereIsNothingToClear(t *testing.T) {
 	s, tt := newDownloads(t)
 
-	if !shows(tt, "清空全部") {
-		t.Fatalf("空着的时候页头上没有「清空全部」，文字有 %q", tt.Texts())
+	if shows(tt, "清空全部") {
+		t.Errorf("空着的时候页头上不该摆「清空全部」（原型：没有记录就没有操作键），文字有 %q", tt.Texts())
 	}
-	if err := tt.Click("清空全部"); err != nil {
-		t.Fatal(err)
-	}
-	dlFrame(tt)
-	if s.downloads.ask != nil {
-		t.Error("一条记录都没有，按「清空全部」却弹出了确认框")
+	if shows(tt, "打开文件夹") {
+		t.Errorf("空着的时候页头上不该摆「打开文件夹」，文字有 %q", tt.Texts())
 	}
 	if len(s.app.DownloadSnapshots()) != 0 {
-		t.Errorf("一条记录都没有，清空之后队列里却有 %d 条", len(s.app.DownloadSnapshots()))
+		t.Errorf("空队列里却有 %d 条", len(s.app.DownloadSnapshots()))
 	}
 }
 

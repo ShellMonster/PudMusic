@@ -175,14 +175,6 @@ func (st *pudRangeState) rangeLabel() string {
 	return st.label
 }
 
-// setRange 把区间写进页面的筛选状态（和 `setPreset` 收尾的那几句同一个规矩）。
-func (f *dateFilter) setRange(from, to time.Time, on bool) {
-	f.on = on
-	f.from, f.to = from, to
-	f.pickingEnd, f.picked = false, false
-	f.seenTab, f.seenFrom, f.seenTo = f.tab, f.from, f.to
-}
-
 // viewPudRange 画「日历 + 当前范围 + 下箭头」那枚小幽灵键和它的弹层；返回这一帧筛选条件变了没。
 func (s *Shell) viewPudRange(c *ui.Context, key string, st *pudRangeState, f *dateFilter, now time.Time) (changed bool) {
 	b := pud.DropButton(c, key, st.rangeLabel(), "calendar")

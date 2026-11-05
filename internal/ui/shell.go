@@ -474,23 +474,6 @@ type Shell struct {
 	// spaceAt 是上一次空格触发播放/暂停的帧时刻，用来同一帧去重。
 	spaceAt time.Time
 
-	// 音量浮层那一摊。**只由 view 在主线程上读写**，见 playbar_volume.go。
-	//
-	// volOpen 是那个浮层开着没有（悬停图标就开，指针走远了就收）。
-	volOpen bool
-	// volIdleSince 是「指针既不在图标上、也不在浮层里」的那一刻。零值表示此刻
-	// 指针还在其中之一上面。
-	volIdleSince time.Time
-	// volPanelHovered 是**上一帧**指针在不在浮层里。
-	//
-	// ⚠️ **只能记上一帧的**：浮层在**覆盖层**里建，而覆盖层是主树**之后**才建的
-	// ——主树里问不到「浮层这一帧的悬停」。
-	volPanelHovered bool
-	// volIdleStop 是那个「到点叫醒界面」的钟（见 `armVolIdle`）。
-	//
-	// ⚠️ **没有它浮层永远不会自己收掉**：不播放的时候没有任何东西在要帧，
-	// 「指针离开了」只在那一帧被算一次，浮层于是永远留在画面上。
-	volIdleStop func()
 	//
 	// ⚠️ **这里没有「静音之前的音量」了**：静音是应用层自己的一格
 	// （`app.App.ToggleMute`），而音量是要落盘的（票 #311）。以前这一份记在

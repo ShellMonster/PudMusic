@@ -105,6 +105,14 @@ func (a *App) TestOnlyNoAutoLyrics() {
 	a.mu.Unlock()
 }
 
+// TestOnlyAfter 换掉应用的定时器（只给测试用）：ui 测试推不动应用层的真实定时器，
+// 比如歌词「加载中」那道 30 秒的兜底，靠它把时间压成"立刻到点"。
+func (a *App) TestOnlyAfter(f func(d time.Duration, fn func()) func()) {
+	a.mu.Lock()
+	a.after = f
+	a.mu.Unlock()
+}
+
 // autoSearchLyrics 在后台自动找一份歌词装上。key 是这一首的缓存键，title 是歌名。
 func (a *App) autoSearchLyrics(key, title string) {
 	query := cleanLyricTitle(title)

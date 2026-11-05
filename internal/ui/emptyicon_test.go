@@ -87,7 +87,8 @@ func TestTheIllustrationIsActuallyPainted(t *testing.T) {
 	for _, p := range []struct {
 		what, path, title string
 	}{
-		{"推荐音乐", "/", lookup("/").Empty.Title},
+		// 首页的空状态由 homepage.go 用 pud.Empty 画，文案在那里，不在路由表里。
+		{"推荐音乐", "/", "今天还没有推荐"},
 		{"稍后再看", laterPath, lookup(laterPath).Empty.Title},
 		{"历史记录", historyPath, lookup(historyPath).Empty.Title},
 		// ⚠️ **下载记录页画的是「没有下载目录」那一支**：这一组的外壳没挂下载
@@ -314,6 +315,10 @@ func TestTheSharedDrawingEntryIsTheOnlyOne(t *testing.T) {
 		// TextMuted（浅色主题下是黑的，压在浅色封面上会糊进去）。
 		// 见 fullplayer_lyrics.go 那一处的注释。
 		"viewFullLyricsEmpty": true,
+		// 迷你卷帘的"暂无歌词"（原型 `.mini-curtain` 的空档）：整块区域里居中的一行 13px
+		// text-3 小字，没有图标、没有提示语，不是整页空状态；共享入口 `emptyCopy` 画的是
+		// 15px 标题加第二句，形状不同。见 minicurtain.go 那一处的注释。
+		"viewMiniCurtainEmpty": true,
 	}
 
 	matches, err := filepath.Glob("*.go")

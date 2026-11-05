@@ -358,8 +358,8 @@ func TestTheRecorderCellStillGetsAKeyThatIsARegisteredShortcut(t *testing.T) {
 func TestTheGlobalShortcutsStepAsideWhileRecording(t *testing.T) {
 	s, tt, hot, _ := shellOnShortcutPage(t)
 	s.syncGlobalShortcuts()
-	if len(hot.registered) != 10 {
-		t.Fatalf("开录之前登记了 %d 条，want 10 条（%q）", len(hot.registered), hot.registered)
+	if len(hot.registered) != 11 {
+		t.Fatalf("开录之前登记了 %d 条，want 11 条（%q）", len(hot.registered), hot.registered)
 	}
 
 	// 点中一个录制格（还没按任何键）。
@@ -375,8 +375,8 @@ func TestTheGlobalShortcutsStepAsideWhileRecording(t *testing.T) {
 	// 按 Esc 退出录制：它们要回来。
 	tt.Key(0, mygoui.KeyEscape)
 	tt.Frame()
-	if len(hot.registered) != 10 {
-		t.Errorf("退出录制之后系统上是 %q，want 10 条", hot.registered)
+	if len(hot.registered) != 11 {
+		t.Errorf("退出录制之后系统上是 %q，want 11 条", hot.registered)
 	}
 }
 
@@ -483,8 +483,8 @@ func TestTwoSpellingsOfTheSameKeyAreNotBothRegistered(t *testing.T) {
 		t.Errorf("Cmd+P 和应用内的 CommandOrControl+P 是同一个键，两套机制都登记了：%q", hot.registered)
 	}
 	// 而另外九条一个都不能少——防的是「认成同一个」把不相干的键也一起吞掉。
-	if len(hot.registered) != 9 {
-		t.Errorf("登记了 %d 条，want 9 条：%q", len(hot.registered), hot.registered)
+	if len(hot.registered) != 10 {
+		t.Errorf("登记了 %d 条，want 10 条：%q", len(hot.registered), hot.registered)
 	}
 	// 而 CommandOrControl+P 与 Ctrl+P 在 mac 上**不是**同一个键（前者 Super、
 	// 后者 Ctrl），不能被错当成同一个。
@@ -639,8 +639,8 @@ func TestTurningGlobalShortcutsOffUnregistersThem(t *testing.T) {
 	}
 	// 再打开要重新登记上：全撤全建而不是逐条改（见 syncGlobalShortcuts 的注释）。
 	clickGlobalToggle(t, tt, s)
-	if len(hot.registered) != 10 {
-		t.Errorf("再打开之后登记了 %d 条，want 10 条", len(hot.registered))
+	if len(hot.registered) != 11 {
+		t.Errorf("再打开之后登记了 %d 条，want 11 条", len(hot.registered))
 	}
 }
 
@@ -744,8 +744,8 @@ func TestOneGlobalShortcutThatCannotRegisterDoesNotTakeTheRestDown(t *testing.T)
 	if hot.has("CommandOrControl+Alt+P") {
 		t.Error("失败的那一条居然登记上了")
 	}
-	if len(hot.registered) != 9 {
-		t.Errorf("失败一条之后只登记了 %d 条，want 9 条：注册失败把后面的也带走了", len(hot.registered))
+	if len(hot.registered) != 10 {
+		t.Errorf("失败一条之后只登记了 %d 条，want 10 条：注册失败把后面的也带走了", len(hot.registered))
 	}
 	tt.Frame() // 提示是浮层上的字，得先画一帧才看得见
 	if !hasToastContaining(tt, "播放/暂停") {
@@ -776,8 +776,8 @@ func TestEveryGlobalShortcutThatFailsStillLetsTheOthersRun(t *testing.T) {
 			s, _, hot, _ := shellWithHotkeys(t)
 			hot.failFor[fail] = true
 			s.syncGlobalShortcuts()
-			if len(hot.registered) != 9 {
-				t.Errorf("%s 失败之后登记了 %d 条，want 9 条", fail, len(hot.registered))
+			if len(hot.registered) != 10 {
+				t.Errorf("%s 失败之后登记了 %d 条，want 10 条", fail, len(hot.registered))
 			}
 		})
 	}
@@ -813,8 +813,8 @@ func TestSyncingTwiceLeavesNoDuplicate(t *testing.T) {
 	s.syncGlobalShortcuts()
 	s.syncGlobalShortcuts()
 
-	if len(hot.registered) != 10 {
-		t.Errorf("同步两次之后登记着 %d 条，want 10 条", len(hot.registered))
+	if len(hot.registered) != 11 {
+		t.Errorf("同步两次之后登记着 %d 条，want 11 条", len(hot.registered))
 	}
 }
 
@@ -854,7 +854,8 @@ func TestTheShortcutPageSaysWhatTheTwoColumnsAreFor(t *testing.T) {
 // `settingRect` 那一段）。
 func clickGlobalToggle(t *testing.T, tt *mygoui.Tester, s *Shell) {
 	t.Helper()
-	clickSetting(t, tt, s, enableGlobalLabel)
+	// 原型的开关是独立控件，标签是「开关：…」；点同名的文字行点不到它。
+	clickSetting(t, tt, s, "开关："+enableGlobalLabel)
 }
 
 // hasToastContaining 报画面上有没有一句含 want 的提示。

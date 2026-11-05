@@ -133,6 +133,9 @@ type IconOpts struct {
 	// HoverColor 覆盖悬停时的图形色；零值 = 悬停换 text（原型 `.icon-btn:hover { color: var(--text) }`，
 	// 全屏播放器里 `.full-ctrl .icon-btn { color: #d8d7d4 }` 之上悬停仍然是 `#ecebe8`）。
 	HoverColor ui.Color
+	// Disabled 是禁用。⚠️ 必须在这里传，不能在返回之后链 `.Disabled(...)`：悬停底和悬停色是
+	// 构建时按 `IsDisabled()` 判的，返回之后再禁用，禁用的键悬停时照样亮。
+	Disabled bool
 }
 
 // IconBtn 是一枚只有图标的键（原型 `.icon-btn`）：圆角 8 的方块，平时次要色，
@@ -149,6 +152,9 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 	}
 	b := ui.ButtonBase(c).Key(key).Label(label).Size(hit, hit).Radius(tok.R8).
 		AlignItems(ui.Center).Justify(ui.Center).Shrink(0)
+	if o.Disabled {
+		b = b.Disabled(true)
+	}
 	fg := p.Text2
 	if o.Color.A != 0 {
 		fg = o.Color
@@ -183,7 +189,7 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 		if o.Count != "" {
 			// `.cnt`：top 1 / right -4，侧栏底、次要色、600 10 等宽、2/4 内边距、圆角 6。
 			typo.Mono(ui.Text(c, o.Count)).FontSize(10).FontWeight(600).TextColor(p.Text2).
-				Background(p.Side).Padding(space.Px2, space.Px4).Radius(6).SingleLine().
+				Background(p.Side).Padding(space.Px2, space.Px4).Radius(tok.R6).SingleLine().
 				Absolute().Top(1).Right(-4)
 		}
 	})

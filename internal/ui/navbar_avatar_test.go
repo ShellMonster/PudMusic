@@ -517,10 +517,8 @@ func TestAFaceThatComesBackForTheWrongAccountNeverLands(t *testing.T) {
 		t.Fatalf("退登失败：%v", err)
 	}
 	// 退登之后画一帧：`avatarSync` 看到登录态没了，收回未登录，代次也 +1。
-	waitFrames(t, tt, "收回未登录", func() bool {
-		_, ok := tt.Find(avatarNoteGuest)
-		return ok
-	})
+	// 原型：未登录的顶栏是一枚主色「登录」按钮（没有头像圆，也没有「未登录」字样）。
+	waitFrames(t, tt, "收回未登录", func() bool { return tt.HasText("登录") })
 
 	// 那一趟带着**上一个账号**的结果回来。`staleGen` 是退登前那一代的代次。
 	s.fetchAvatarFace(staleAvatarGen(t, s))
@@ -529,7 +527,7 @@ func TestAFaceThatComesBackForTheWrongAccountNeverLands(t *testing.T) {
 	if avatarShowsThePicture(tt) {
 		t.Error("一个作废的结果把上一个账号的头像画回来了——退登之后顶栏上还有一个人的脸")
 	}
-	if _, ok := tt.Find(avatarNoteGuest); !ok {
+	if !tt.HasText("登录") {
 		t.Error("一个作废的结果把那一格改成了别的样子，文字有：", tt.Texts())
 	}
 }

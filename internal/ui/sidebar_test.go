@@ -271,8 +271,10 @@ func TestDroppingOnARowPutsTheDraggedOneRightAboveIt(t *testing.T) {
 			t.Fatalf("侧栏上没有第 %d 条，文字有 %q", n, tt.Texts())
 		}
 		// 落在最后一条的**下半边**：MyGo 的落点这时是「列表的行数」。
+		// Find 给的是名字那一行字的框（高 20）；原型的行是名字 + 「N 首」两行，整行 49 高、
+		// 上内边距 6，所以行的下半边在名字框顶往下 ≥ 19 处。取 32：在行里、又在「N 首」那行的上面。
 		dragFrom(tt, from.X+from.W/2, from.Y+from.H/2,
-			last.X+last.W/2, last.Y+last.H*0.9)
+			last.X+last.W/2, last.Y+32)
 
 		got := favTitles(a, app.FavoritesCreated)
 		if got[n-1] != "我建的 1" {
@@ -508,7 +510,10 @@ func TestALongFavoriteNameDoesNotMakeTheRowTaller(t *testing.T) {
 		{ID: 2, Title: longName, Mid: 42, Type: 2},
 		{ID: 3, Title: "第三首", Mid: 42, Type: 2},
 	})
-	tt.Frame()
+	// 虚拟列表的行高要多画几帧才量全（第一帧后面的行还没测，高度是估的 / 0）。
+	for range 4 {
+		tt.Frame()
+	}
 
 	first, ok := tt.Find("短名字")
 	if !ok {
