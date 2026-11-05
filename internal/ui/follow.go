@@ -658,7 +658,8 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	}
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见 `dynamicfeed.go`。
-	ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth().Children(func() {
+	grid := ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth()
+	grid.Children(func() {
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		// 网格是这一页里唯一的走位对象（分组栏已收成页头下拉，见票 #367 改版）。
 		//
@@ -693,11 +694,14 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			TrackScroll(&f.scroll).
 			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, cols) })
 		s.trackScrollbar(e)
-		// 量这一帧的容器宽，下一帧用。`Bounds` 报的是**上一帧**的盒子。
-		if bw := e.Bounds().W; bw > 0 {
-			f.width = bw
-		}
 	})
+	// 量外层网格容器，而不是 List 自己的内容盒子。List 的内容宽会受首行
+	// 卡片 intrinsic size 影响，拿它反过来算 cell 宽会形成反馈：首帧变窄后，
+	// 下一帧继续按窄宽摆卡，最终出现真实环境里卡片压成竖条、文字互相覆盖。
+	// 外层容器的宽度才是右侧布局实际分到的宽。
+	if bw := grid.Bounds().W; bw > 0 {
+		f.width = bw
+	}
 	f.cols, f.started = cols, true
 
 	// 滚到底就拉下一页；容器没填满也拉（首屏那一拉在 view 开头已经发过了）。
