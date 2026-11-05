@@ -58,13 +58,17 @@ func TestCountTextFoldsAtEveryBoundary(t *testing.T) {
 		{89999, "89k+"},
 		{99999, "99k+"},
 
-		// ≥ 100000：**封顶**「1亿+」。
-		{100000, "1亿+"},
-		{999999, "1亿+"},
-		{1000000, "1亿+"},
-		{10000000, "1亿+"},
+		// 100000 – 99999999：按万向下取整。
+		{100000, "10万+"},
+		{250000, "25万+"},
+		{999999, "99万+"},
+		{1000000, "100万+"},
+		{10000000, "1000万+"},
+		{99999999, "9999万+"},
+		// ≥ 100000000：按亿向下取整。
 		{100000000, "1亿+"},
-		{99999999999, "1亿+"},
+		{250000000, "2亿+"},
+		{99999999999, "999亿+"},
 	}
 	for _, c := range cases {
 		if got := CountText(c.n); got != c.want {
@@ -94,7 +98,7 @@ func TestCountTextFoldsAtEveryBoundary(t *testing.T) {
 // ⇒ 所以这一条**把那一档单独挑出来**：它不许被**低估**（那一档本来就是夸大的），
 // 但它**必须存在**（不能是空串——空串是「没有这个数」）。
 func TestCountTextNeverUnderstatesTheValue(t *testing.T) {
-	// 单位：k = 千、亿 = 一亿。
+	// 单位：k = 千、万 = 一万、亿 = 一亿。
 	//
 	// ⚠️ **「亿」这个单位必须认出来**：不认的话「1亿+」的下界会算成 1，
 	// 而那一档就**永远验不到**——那是一个覆盖盲点（这一条的第一版就踩过）。
@@ -102,6 +106,8 @@ func TestCountTextNeverUnderstatesTheValue(t *testing.T) {
 		switch {
 		case strings.Contains(s, "亿"):
 			return 100_000_000
+		case strings.Contains(s, "万"):
+			return 10_000
 		case len(s) >= 2 && s[len(s)-2] == 'k':
 			return 1_000
 		}
@@ -126,6 +132,8 @@ func TestCountTextNeverUnderstatesTheValue(t *testing.T) {
 	// 所以「不许低估」那一条**不适用**于它——但它**必须画得出**。
 	for _, n := range []int64{
 		1, 9, 99, 999, 1000, 1234, 9999, 10000, 12345, 99999,
+		100000, 250000, 999999, 1000000, 10000000, 99999999,
+		100000000, 250000000, 99999999999,
 	} {
 		got := CountText(n)
 		if got == "" {
@@ -185,22 +193,28 @@ func TestCountTextIsNotThePlayCountFold(t *testing.T) {
 // 折法漏了一档。
 func TestCountTextNeverGetsWiderThanTheCap(t *testing.T) {
 	allowed := map[string]bool{
-		"":     true, // 没有这个数
-		"1k+":  true,
-		"2k+":  true,
-		"3k+":  true,
-		"4k+":  true,
-		"5k+":  true,
-		"6k+":  true,
-		"7k+":  true,
-		"8k+":  true,
-		"9k+":  true,
-		"10k+": true,
-		"19k+": true,
-		"20k+": true,
-		"89k+": true,
-		"99k+": true,
-		"1亿+":  true,
+		"":       true, // 没有这个数
+		"1k+":    true,
+		"2k+":    true,
+		"3k+":    true,
+		"4k+":    true,
+		"5k+":    true,
+		"6k+":    true,
+		"7k+":    true,
+		"8k+":    true,
+		"9k+":    true,
+		"10k+":   true,
+		"19k+":   true,
+		"20k+":   true,
+		"89k+":   true,
+		"99k+":   true,
+		"10万+":   true,
+		"25万+":   true,
+		"99万+":   true,
+		"100万+":  true,
+		"1000万+": true,
+		"1亿+":    true,
+		"2亿+":    true,
 	}
 	// 纯数字那一档（1 – 999）：没有 `+`。
 	for n := int64(1); n <= 999; n++ {
@@ -215,7 +229,7 @@ func TestCountTextNeverGetsWiderThanTheCap(t *testing.T) {
 		}
 	}
 	// 折出来的那几档，字符串必须是集合里的那一个。
-	for _, n := range []int64{1000, 9999, 10000, 99999, 100000, 999999, 100000000} {
+	for _, n := range []int64{1000, 9999, 10000, 99999, 100000, 250000, 999999, 1000000, 10000000, 100000000, 250000000} {
 		got := CountText(n)
 		if !allowed[got] {
 			t.Errorf("CountText(%d) = %q，不在允许的那几个字里", n, got)
