@@ -41,8 +41,9 @@
 **出处**：`scripts/release.sh` 的五步（+ 它顶上那段「真正干活的还是 MyGo 自带的 CLI」）
 
 ```sh
-scripts/release.sh                 # 四个首发目标
+scripts/release.sh                 # 六个首发目标（macOS ×2、Windows ×2、Linux ×2）
 scripts/release.sh darwin/arm64    # 只发一个
+scripts/release.sh linux/amd64     # 只发 Linux x86_64
 ```
 
 脚本做的是 MyGo 的 CLI **不做、而漏了不会报错**的那几件。五个步骤：

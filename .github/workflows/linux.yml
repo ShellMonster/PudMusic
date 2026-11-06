@@ -1,0 +1,125 @@
+name: Linux CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: linux-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build unsigned Linux artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Run acceptance checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build -trimpath -p 4 ./...
+          go vet -trimpath -p 4 ./...
+          go test -p 4 $(go list ./... | grep -v '/internal/ui$')
+          go test ./internal/licensing/
+          go generate ./internal/platform/ ./internal/licensing/
+          git diff --exit-code -- resources
+
+      - name: Build unsigned Linux artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset MYGO_UPDATER_PRIVATE_KEY
+          go tool mygo build -platform linux/amd64,linux/arm64
+
+      - name: Validate Linux artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          for target in linux-amd64 linux-arm64; do
+            dir="build/$target"
+            test -d "$dir" || { echo "missing $dir"; exit 1; }
+            # 原生 UI：不拉 WebKitGTK。这是 mygo.json 的 linux.webview=false
+            # 该换来的产物事实——少了它就是配置没生效。
+            test -f "$dir/pudmusic" || { echo "$target: missing executable"; exit 1; }
+            test -f "$dir/pudmusic.desktop" || { echo "$target: missing desktop entry"; exit 1; }
+            test -f "$dir/install.sh" || { echo "$target: missing install.sh"; exit 1; }
+            tar -tzf "$dir"/*-linux-*.tar.gz >/dev/null
+            deps="$(ar p "$dir"/*.deb control.tar.gz 2>/dev/null | tar -xzOf - ./control 2>/dev/null | grep '^Depends:' || true)"
+            echo "$target deb Depends: $deps"
+            case "$deps" in
+              *webkit*) echo "$target deb still depends on WebKitGTK: $deps"; exit 1 ;;
+            esac
+            case "$deps" in
+              *ayatana*|*appindicator*) ;;
+              *) echo "$target deb lacks the tray dependency (ayatana-appindicator): $deps"; exit 1 ;;
+            esac
+          done
+          echo "Linux artifacts look right"
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-artifacts
+          path: |
+            build/linux-amd64
+            build/linux-arm64
+          retention-days: 14
+          if-no-files-found: error
+
+  e2e:
+    name: Linux lifecycle E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Install a virtual display and the GTK tray library
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgtk-3-0t64 libayatana-appindicator3-1 dbus-x11
+
+      - name: Run Linux lifecycle E2E under Xvfb
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 三条一起跑（一条命令、一次编译）：
+          #   起得来（窗口画得出来）、第二个实例递完命令行自己退出、
+          #   菜单里「退出」真的让进程退出来。
+          #
+          # ⚠️ dbus-x11 + dbus-run-session：托盘是 AppIndicator，要走
+          # session bus；没有它 `installTray` 只是建不出来（记一行日志、
+          # 应用继续跑），而「窗口收进托盘之后怎么回来」这条就没人验。
+          xvfb-run -a dbus-run-session -- \
+            env BIU_RUN_MYGO_E2E=1 \
+            go test -tags e2e ./internal/e2e \
+              -run 'TestLinuxLifecycle' \
+              -count=1 -timeout 300s

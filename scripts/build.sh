@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # 打发行包。
 #
-#   scripts/build.sh                 # macOS dmg + Windows NSIS 安装包（默认）
+#   scripts/build.sh                 # macOS dmg + Windows NSIS 安装包 + Linux tar.gz/deb（默认）
 #   scripts/build.sh darwin/arm64    # 只打一个目标
 #   scripts/build.sh windows/amd64
+#   scripts/build.sh linux/amd64
 #
 # 真正干活的是 MyGo 自带的 CLI（`go tool mygo build`，`go.mod` 里的 tool 指令）。
 # 这个脚本只做三件它不做的事：把目标列全、缺工具时说得清楚、打完把产物列出来。
@@ -11,10 +12,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# 首发只支持两个平台（Plan §5.1 第 2 条：Linux 首发不做）。
 ALL_TARGETS=(
-  darwin/arm64
   darwin/amd64
+  darwin/arm64
+  linux/amd64
+  linux/arm64
   windows/amd64
   windows/arm64
 )
@@ -86,7 +88,7 @@ for d in build/*/; do
   # ⚠️ 用 `du -sh` 不用 `du -h`：给目录传 `du -h` 在这台 macOS 上会输出**多行**
   # （目录加它下面的每一项），`$( )` 全收进来之后 printf 只给第一行补空格，
   # 后面的几行就顶到行首去了——产物列表看起来像坏掉了。
-  find "$d" -maxdepth 1 \( -name '*.dmg' -o -name '*-setup-*.exe' -o -name '*.app' \) -print 2>/dev/null |
+  find "$d" -maxdepth 1 \( -name '*.dmg' -o -name '*-setup-*.exe' -o -name '*.app' -o -name '*.deb' -o -name '*-linux-*.tar.gz' -o -name 'PKGBUILD' \) -print 2>/dev/null |
     while IFS= read -r f; do
       printf '    %-40s %6s\n' "$(basename "$f")" "$(du -sh "$f" | cut -f1)"
     done
@@ -106,4 +108,6 @@ cat <<'EOF'
   - Windows 的安装包**没有签名**：SmartScreen 会警告「Windows 已保护你的电脑」。
   - Windows 版**暂时解不了 AAC / M4A / M4S**（B 站的有损音质就是这一档）。
     这是一条待决的路线选择，不是没排期；见 README 与 Plan §6.1。
+  - Linux 首发是**最小可发行**：tar.gz + deb + PKGBUILD，没有登录态、
+    AAC/M4A、视频和 MPRIS（留在后续票，见 README《当前边界》）。
 EOF

@@ -84,10 +84,10 @@ jobs:
       - name: Build release assets
         run: |
           go tool mygo build \
-            -platform darwin/arm64,darwin/amd64,windows/amd64,windows/arm64
+            -platform darwin/arm64,darwin/amd64,linux/amd64,linux/arm64,windows/amd64,windows/arm64
 
       - name: Rename assets to platform-friendly names
-        run: scripts/rename-release-assets.sh darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
+        run: scripts/rename-release-assets.sh darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
 
       - name: Verify release assets
         run: scripts/verify-release-assets.sh
@@ -101,11 +101,11 @@ jobs:
         run: |
           set -euo pipefail
           assets=()
-          for d in build/darwin-arm64 build/darwin-amd64 build/windows-amd64 build/windows-arm64; do
+          for d in build/darwin-arm64 build/darwin-amd64 build/linux-amd64 build/linux-arm64 build/windows-amd64 build/windows-arm64; do
             while IFS= read -r f; do
               assets+=("$f")
             done < <(find "$d" -maxdepth 1 -type f \
-              \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*-setup-*.exe' -o -name 'update-*.json' -o -name 'install.sh' -o -name 'install.ps1' \) -print | sort)
+              \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*.deb' -o -name '*-setup-*.exe' -o -name 'update-*.json' -o -name 'install.sh' -o -name 'install.ps1' -o -name 'PKGBUILD' \) -print | sort)
           done
           # `install.sh` / `install.ps1` 每个平台目录里都有一份、内容相同——
           # 只留第一份，同名再传第二个会被 GitHub 挡下（ReleaseAsset.name already

@@ -106,8 +106,10 @@ fi
   printf '| macOS | Intel | `PudMusic-%s-Intel_macOS.dmg` |\n' "$version"
   printf '| Windows | x86_64 | `PudMusic-setup-%s-Windows_x86_64.exe` |\n' "$version"
   printf '| Windows | ARM64 | `PudMusic-setup-%s-Windows_ARM64.exe` |\n' "$version"
+  printf '| Linux | x86_64 | `PudMusic-%s-Linux_x86_64.deb`（Debian/Ubuntu）或 `install.sh`（其余发行版，装入 `~/.local`） |\n' "$version"
+  printf '| Linux | ARM64 | `PudMusic-%s-Linux_ARM64.deb`（Debian/Ubuntu）或 `install.sh`（其余发行版，装入 `~/.local`） |\n' "$version"
   printf '\n'
-  printf '安装包未进行 Apple 公证或 Windows 代码签名。\n'
+  printf '安装包未进行 Apple 公证或 Windows 代码签名；Linux 版是最小可发行（无登录态、AAC/M4A、视频与 MPRIS）。\n'
   printf '\n## 校验\n\n'
   printf '下载后请通过文件大小、GitHub Assets 和项目发布信息核对来源。\n'
 } > "$out"

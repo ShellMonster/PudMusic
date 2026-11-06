@@ -126,7 +126,7 @@
 | 3 | 「封面内存缓存」 | `BIU_IMAGE_CACHE_MB` 的档位与取舍、96 → 32 MiB 堆峰值实测、解码路径 | `docs/experience/architecture.md` §《封面缓存与内存预算》（README 只留一行指向） | — |
 | 4 | 「已知边界 → 音频格式」 | WMA / AIFF / ALAC / Windows AAC 未验 / 杜比 id / FLAC 在哪个平台走哪条路 | **表格本体保留在 `README.md`**；背景 `docs/experience/audio-stack.md` §《解不了 / 没验过的几处》《支持哪些格式》 | ✅ |
 | 5 | 「已知边界 → 登录」 | 登录态为什么不在钥匙串、权限被放宽会自愈、换机要重新扫码 | **表格本体保留在 `README.md`**；背景 `docs/experience/data-and-credentials.md` §《登录态》 | ✅ |
-| 6 | 「已知边界 → 平台」 | 首发只有 macOS/Windows、Windows 媒体浮窗没封面、页面切换动画照抄「没有」、不上架 MAS | **表格本体保留在 `README.md`**；背景 `docs/experience/upstream-biu.md` §《我们和上游刻意不同的地方》 | ✅ |
+| 6 | 「已知边界 → 平台」 | Linux 只到最小可发行（无登录态/AAC/视频/MPRIS）、Windows 媒体浮窗没封面、页面切换动画照抄「没有」、不上架 MAS | **表格本体保留在 `README.md`**；背景 `docs/experience/upstream-biu.md` §《我们和上游刻意不同的地方》 | ✅ |
 | 7 | 「已知边界 → 音频质量之外的行为」 | 音乐 MV 播不了、变速倍率落盘、改倍率约 1 秒才听得出来 | **表格本体保留在 `README.md`**；背景 `docs/experience/audio-stack.md` §《音频之外的几条已知边界》 | ✅ |
 | 8 | 「已知边界 → 差异说明」 | 为什么这一版没有毛玻璃、验收口径不是逐像素 | **保留在 `README.md`**；背景 `docs/experience/upstream-biu.md` §《我们和上游刻意不同的地方》 | ✅ |
 | 9 | 「许可」 | 许可清单是三道会红的断言、为什么不读 `go.mod`、三份不在 `go list -deps` 里的东西、purego 是 Apache-2.0 / go-mp3 是 MIT | **声明保留在 `README.md`《许可》**；背景 `docs/experience/startup-and-artifacts.md` §《许可清单是三道会红的断言》 | ✅ |

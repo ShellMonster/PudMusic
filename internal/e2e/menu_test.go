@@ -133,6 +133,17 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 	return startRealAppWith(t, false)
 }
 
+// appHandle 是「起过的那份真应用」的句柄——二进制路径和数据目录，
+// 第二个实例测试要拿它俩才能起「同一个应用」的另一个进程。
+//
+// ⚠️ **为什么挂在包级而不是返回值**：`startRealApp` 的三处既有调用方只收
+// `(client, stop)`，改签名要跟着改一圈——而这一组里只有 Linux 那一族
+// 还要问「起在哪儿了」。
+var appHandle struct {
+	binary  string
+	dataDir string
+}
+
 // startRealAppWith 是 `startRealApp` 的内里，`seedSession` 说要不要先往
 // E2E 那份数据目录里塞一份**假**登录态。
 //
@@ -225,6 +236,8 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 
 	conn := waitForAutomationSocket(t, socket, cmd, &stdout, &stderr)
 	client := &automationClient{conn: conn, enc: json.NewEncoder(conn), dec: bufio.NewReader(conn)}
+	appHandle.binary = binary
+	appHandle.dataDir = filepath.Join(socketDir, "data")
 	return client, stop
 }
 
