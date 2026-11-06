@@ -105,6 +105,10 @@ func TestWindowsLifecycle(t *testing.T) {
 		if err := automationCall(client, 300, "windows", nil, &windows); err != nil {
 			t.Fatalf("第二个实例退出之后第一个实例不应跟着退：%v", err)
 		}
+		// ⚠️ **先断「命令行真进了第一实例的 `handleLaunchArgs`」再断「那句
+		// toast 画出来了」**：`handoff.args` 那条 e2e 探针只反映「回调被调
+		// 到没有」——它不把断点藏在「界面没画」和「handoff 没递到」之间。
+		waitForHandoffArgs(t, flac)
 		// 而那个 `.flac` 真的被第一实例放起来了——这一句才是「命令行
 		// handoff 到了」的判据：它从 `deliverArgs` → `OnOpenFile` →
 		// `handleOpenFile` 那条路走，任何一环断了这句 toast 都不会出现。

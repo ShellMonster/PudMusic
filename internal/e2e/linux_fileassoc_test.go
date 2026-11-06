@@ -77,6 +77,9 @@ func TestLinuxFileAssociations(t *testing.T) {
 			t.Fatal(err)
 		}
 		handOverFile(t, client, window, m4a)
+		// ⚠️ **先断「命令行进了第一实例」再断「那句话画出来了」**：
+		// `handoff.args` 那条探针分清「handoff 断了」和「toast 没画出来」。
+		waitForHandoffArgs(t, m4a)
 		// ⚠️ **判据是「那句话画在画面里」**：它从 `fileNotice` 那一份读，
 		// 而那份在主窗口和迷你窗**各画一遍**——等它出现就行。
 		//
@@ -102,6 +105,7 @@ func TestLinuxFileAssociations(t *testing.T) {
 			t.Fatal(err)
 		}
 		handOverFile(t, client, window, flac)
+		waitForHandoffArgs(t, flac)
 		// ⚠️ **判据是「正在放」那句 toast**：收下并起播成功时
 		// `handleOpenFile` 写它（`internal/ui/openfile.go`）。它是一条
 		// toast——主窗口上画。

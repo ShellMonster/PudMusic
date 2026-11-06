@@ -79,6 +79,9 @@ func TestWindowsFileAssociations(t *testing.T) {
 			t.Fatal(err)
 		}
 		handOverFile(t, client, window, m4a)
+		// ⚠️ **先断「命令行进了第一实例」再断「那句话画出来了」**：
+		// `handoff.args` 那条探针分清「handoff 断了」和「toast 没画出来」。
+		waitForHandoffArgs(t, m4a)
 		// ⚠️ **判据是「正在放」那句 toast**：收下并起播成功时
 		// `handleOpenFile` 写它。这一句出现的意思是：
 		// `fileArgs` 没投它（m4a 不在 mygo.json）→ `handleLaunchArgs`
@@ -108,6 +111,7 @@ func TestWindowsFileAssociations(t *testing.T) {
 			t.Fatal(err)
 		}
 		handOverFile(t, client, window, flac)
+		waitForHandoffArgs(t, flac)
 		if !waitForTreeNudged(t, client, window, "正在放", 20*time.Second) {
 			t.Fatalf("双击 .flac 之后窗口里没有「正在放」：\n%s", treeDump(t, client, window))
 		}
@@ -122,6 +126,7 @@ func TestWindowsFileAssociations(t *testing.T) {
 			t.Fatal(err)
 		}
 		handOverFile(t, client, window, wma)
+		waitForHandoffArgs(t, wma)
 		if !waitForTreeNudged(t, client, window, "这个格式我们放不了", 20*time.Second) {
 			t.Fatalf("双击 .wma 之后窗口里没有那句「放不了」：\n%s", treeDump(t, client, window))
 		}

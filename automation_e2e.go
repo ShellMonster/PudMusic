@@ -84,7 +84,17 @@ func handleTrayHook(conn net.Conn) {
 	}
 	fields := strings.Fields(line)
 	reply := "bad\n"
-	if len(fields) == 2 {
+	if len(fields) == 1 && fields[0] == "handoff.args" {
+		// 「第二个实例转交的命令行到没到」那条探针（`ui.E2ELaunchArgs`，
+		// 由 `handleLaunchArgs` 记）：回一行空格分隔的 args，空则回 "-"。
+		// 它就是分不清「handoff 断了」和「toast 没画出来」时那唯一的一眼。
+		args := ui.E2ELaunchArgs()
+		if len(args) == 0 {
+			reply = "-\n"
+		} else {
+			reply = strings.Join(args, " ") + "\n"
+		}
+	} else if len(fields) == 2 {
 		switch fields[0] {
 		case "tray.enabled":
 			present, enabled := ui.E2ETrayItemEnabled(fields[1])

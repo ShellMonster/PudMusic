@@ -328,10 +328,40 @@ func handOverFile(t *testing.T, client *automationClient, window int, path strin
 	defer cancel()
 	cmd := exec.CommandContext(ctx, appHandle.binary, path)
 	cmd.Env = append(os.Environ(), "BIU_E2E_DATA_DIR="+appHandle.dataDir)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		t.Fatalf("第二个实例转交 %s 没有自己退出：%v\nstderr:\n%s", path, err, stderr.String())
+		t.Fatalf("第二个实例转交 %s 没有自己退出：%v\nstdout:\n%s\nstderr:\n%s",
+			path, err, stdout.String(), stderr.String())
+	}
+}
+
+// waitForHandoffArgs 断言「第二个实例转交过去的命令行**真的进了**第一实例
+// 的 `handleLaunchArgs`」。
+//
+// ⚠️ **这条断的是 handoff 本身，不是界面上画没画出来**：`tree` 里的那句
+// 提示依赖渲染，而这一条问的是第一实例的 e2e 钩子（`automation_e2e.go`
+// 的 `handoff.args`）——它只反映「回调被调到没有」。分不开这两段的时
+// 候，「窗口里没那句话」分不清是 handoff 没递到、还是递到了但 toast /
+// fileNotice 没画出来。
+func waitForHandoffArgs(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var last string
+	for {
+		got := trayHookCall(t, "handoff.args")
+		last = got
+		for _, arg := range strings.Fields(got) {
+			if arg == want {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("第二个实例转交的命令行没进第一实例（handoff.args 报 %q，等 %q）："+
+				"转交通道在第一个实例那边就断了", last, want)
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
