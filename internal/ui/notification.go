@@ -455,10 +455,16 @@ func (s *Shell) onNotificationClicked(id string) {
 	case strings.HasPrefix(id, notifyDownloadPrefix):
 		s.mainShell().handleDeepLink(downloadListPath)
 	case strings.HasPrefix(id, notifyUpdatePrefix):
-		// 更新那一条去设置页的「关于应用」那一段——而那里有个弹窗。
+		// 更新那一条去设置页的「关于」Tab——而那里有个弹窗。
 		//
 		// ⚠️ **弹窗是逐窗口一份的**（`s.update.wanted`，见 `shell.go`），所以
 		// 打开它的是**主窗口那个外壳**。
+		//
+		// ⚠️ **得把 Tab 也切过去**：更新弹窗是「关于」Tab 自己画的
+		//（`settingsAbout` 末尾的 `viewUpdateDialog`），只导航到设置页、停在
+		// 别的 Tab 上的话 `wanted` 是置上了而弹窗那一帧不画——用户点了通知却
+		// 什么都没看见。
+		s.mainShell().settings.tab = settingsTabAbout
 		s.mainShell().openUpdateDialog()
 		s.mainShell().handleDeepLink(settingsPath)
 	default:

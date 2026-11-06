@@ -126,7 +126,7 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 					st.NotchVirtualOn(),
 					func(cur *app.Settings, on bool) { v := on; cur.NotchVirtual = &v })
 			}
-			cd.switchRow("updateRemind", updateNotificationTitle, "有新版本时弹出更新日志", st.UpdateNotificationEnabled(),
+			cd.switchRow("updateRemind", updateNotificationTitle, "有新版本时提醒你", st.UpdateNotificationEnabled(),
 				func(cur *app.Settings, on bool) { v := on; cur.UpdateNotification = &v })
 		})
 	})

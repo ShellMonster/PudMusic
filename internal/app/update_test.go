@@ -244,6 +244,29 @@ func TestABackgroundCheckLeavesANoticeInsteadOfOpeningAnything(t *testing.T) {
 	}
 }
 
+// 后台**每小时**查一次，而同一个新版本会被查到很多次（用户一直不装它就
+// 一直查得到）：「发现新版本 X」那句提示**每小时弹一遍**比不弹更糟——
+// 用户没离开应用，也没按任何键，屏幕右下角却每小时闪同一句。
+//
+// 🔴 这是票 #559「不重复刷通知」在**应用内提示**这一条的对应面：系统通知
+// 那一边由 `claimUpdateNotification` 记，而留给界面的那一句（`notice`）是
+// 另一条路——它没有被记过，于是每个小时都被重写、被取走、被弹出来。
+func TestTwoBackgroundChecksDoNotRepeatTheSameVersionToast(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	// 后台查了两次同一个版本（用户一直不装它，而检查每小时一次）。
+	f.checkAndWait(t, false)
+	if n, _ := f.app.TakeUpdateNotice(); n != "发现新版本 0.2.0" {
+		t.Fatalf("第一次后台检查留的提示是 %q", n)
+	}
+	f.checkAndWait(t, false)
+
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
+		t.Errorf("同一个版本又留了一遍提示 %q —— "+
+			"而用户每小时都会在右下角看到同一句「发现新版本 0.2.0」", n)
+	}
+}
+
 // 后台查失败：不弹提示（用户没按任何键，突然冒一句红字只会让人以为应用坏了）。
 func TestABackgroundCheckThatFailsKeepsQuiet(t *testing.T) {
 	f := newUpdFixture(t, "0.1.0", nil)

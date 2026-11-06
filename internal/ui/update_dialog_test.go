@@ -673,6 +673,74 @@ func TestABackgroundCheckShowsAToastInsteadOfOpeningTheDialog(t *testing.T) {
 	}
 }
 
+// 设置页上「更新提醒」那一格的副标题，说的是**它实际会做的事**：有新版本时
+// 提醒你（系统通知 / 应用内提示），而不是「弹出更新日志」——更新日志弹窗
+// 只在用户自己开（或主动检查发现新版本）时才出现，把那一格说成「弹出更新
+// 日志」会骗用户以为拨开它之后每次查更新都会有一个弹窗盖上来。
+func TestTheUpdateReminderRowSaysWhatItActuallyDoes(t *testing.T) {
+	tt, _, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	if !tt.HasText("有新版本时提醒你") {
+		t.Errorf("「更新提醒」那一格的说明没有说实话，文字有 %q", tt.Texts())
+	}
+	if tt.HasText("有新版本时弹出更新日志") {
+		t.Errorf("「更新提醒」被说成了「弹出更新日志」——而那一格管的是提醒，"+
+			"更新日志弹窗只在用户自己开的时候才出现，文字有 %q", tt.Texts())
+	}
+}
+
+// 后台每小时查一次，同一个新版本会被查到很多次：界面上那句「发现新版本 X」
+// **只弹一次**，不是每小时闪一遍同一句。
+//
+// 🔴 这是票 #559「不重复刷通知」在应用内提示这一条的对应面：系统通知那一边
+// 由界面层的 `notifiedVersions` + 应用层的 `claimUpdateNotification` 管，
+// 而 Toast 是另一条路——应用层记着「这个版本已经摆过一句了」。
+func TestTwoBackgroundChecksShowOnlyOneToastForTheSameVersion(t *testing.T) {
+	f := newUpdFixture(t, &app.UpdateRelease{Version: "0.2.0"})
+
+	// 后台查了两次同一个版本（用户一直不装它，而检查每小时一次）。
+	for i := 0; i < 2; i++ {
+		stop := f.a.StartAutoChecks()
+		waitFor(t, "后台查到了新版本", func() bool { return f.a.UpdateSnapshot().Available() })
+		stop()
+	}
+	f.tt.Frame()
+
+	found := 0
+	for _, text := range f.tt.Texts() {
+		if text == "发现新版本 0.2.0" {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Errorf("同一个版本在界面上弹了 %d 句「发现新版本 0.2.0」，want 1 句 —— "+
+			"而用户每小时都会在右下角看到同一句", found)
+	}
+}
+
+// 换了版本：该再弹一次（用户要看的正是「哪一个版本」）。
+func TestANewVersionFoundByABackgroundCheckShowsAnotherToast(t *testing.T) {
+	f := newUpdFixture(t, &app.UpdateRelease{Version: "0.2.0"})
+
+	stop := f.a.StartAutoChecks()
+	waitFor(t, "后台第一次查到了新版本", func() bool { return f.a.UpdateSnapshot().Latest == "0.2.0" })
+	stop()
+	f.tt.Frame()
+
+	// 出了新版本：改掉假后端答的版本号，再查一次。
+	f.be.mu.Lock()
+	f.be.rel = &app.UpdateRelease{Version: "0.3.0"}
+	f.be.mu.Unlock()
+	stop = f.a.StartAutoChecks()
+	waitFor(t, "后台第二次查到了新版本", func() bool { return f.a.UpdateSnapshot().Latest == "0.3.0" })
+	stop()
+	f.tt.Frame()
+
+	if !f.tt.HasText("发现新版本 0.3.0") {
+		t.Errorf("出了新版本却没有那句提示，文字有 %q", f.tt.Texts())
+	}
+}
+
 // 弹窗里的 view 外面包着 `ui.Guard`，和顶栏、侧栏、播放列表抽屉是同一个写法。
 //
 // ⚠️ 这一条**故意没有**再写一个「往弹窗里塞一个 panic」的测试。试过，代价太大：
