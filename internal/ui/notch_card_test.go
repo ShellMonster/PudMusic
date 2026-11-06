@@ -15,7 +15,8 @@ package ui
 //   - 没歌时仍是 idle 那张卡，不是播放器布局。
 
 import (
-	"strings"
+	"context"
+	"net/http"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -304,54 +305,84 @@ func notchToastTexts(s *Shell) []string {
 	return out
 }
 
-// TestNotchLikeFailureToastsOnTheMainWindow 钉「刘海里赞失败」那句提示
-// **落在主窗口**（画 toast 的那一扇），不是落在刘海那个外壳上——刘海窗
-// 压根不画 toast（`viewToasts` 只在主窗那一支调），写进它自己的 `toasts`
-// 等于那句「赞不了」永远没有画面（对抗评审：静默失败）。
+// TestNotchHeartReportsOnTheMainShell 钉「刘海里那枚心形按下去说的是什么」。
 //
-// 路由规则和迷你窗同一条（`filenotice.go` 顶上那一节）：`addToast` 在
-// 刘海外壳上被调到时，要转去 `s.main` 那一份。
-func TestNotchLikeFailureToastsOnTheMainWindow(t *testing.T) {
-	f := newBiliFixture(t, 1)
-	f.onLike(false, false, false)
-
+// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
+// 点赞——喜欢歌单原型把「赞」从播放器上去掉了。
+//
+// 这条顺带钉「提示落在画 toast 的那一扇」：没放歌时心形按下去说的是
+// 「这一首还没有取回来」，那句要走 `s.main` 那份 toasts——刘海窗自己压根
+// 不画 toast（`viewToasts` 只在主窗那一支调）。
+func TestNotchHeartReportsOnTheMainShell(t *testing.T) {
 	n, main := newNotchShell(t)
-	// 在线那首放进共享 App（刘海外壳和主窗共用同一个 App）。
-	n.app.MountStreaming(app.Streaming{
-		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
-	})
-	if err := n.app.Enqueue(likeItem()); err != nil {
-		t.Fatalf("把在线的那首放进队列：%v", err)
-	}
-	waitFor(t, "在线那首开始播", func() bool { return n.app.Snapshot().HasTrack })
-	// 「赞没赞」那一问是界面每帧调 `LikeState` 触发的——这里没有帧，手动问
-	// 一次再等到回来（`LikeAsked` 才是真回来的那个标记）。
-	n.app.LikeState()
-	waitFor(t, "赞没赞问回来了", func() bool { return n.app.LikeAsked() })
 
-	// 赞那一趟换成失败：B 站回「没登录」，`SetLike` 的 done 拿到 err。
-	f.failLike()
-
+	// ⚠️ **没放歌**：心形按下去说的是「这一首还没有取回来」，而那句话必须
+	// 落在主窗口的 toasts 上，不是刘海外壳自己的（它那一扇不画 toast）。
 	n.likeCurrent()
-	waitFor(t, "赞失败那一趟跑完了", func() bool {
-		return len(notchToastTexts(main)) > 0 || len(notchToastTexts(n)) > 0
-	})
 
 	if got := notchToastTexts(n); len(got) != 0 {
-		t.Fatalf("「赞不了」写进了刘海外壳自己的 toasts %q：它那一扇不画 toast，这句话永远没有画面", got)
+		t.Fatalf("提示写进了刘海外壳自己的 toasts %q：它那一扇不画 toast，这句话永远没有画面", got)
 	}
 	got := notchToastTexts(main)
 	if len(got) == 0 {
-		t.Fatal("「赞不了」没有落到主窗口的 toasts 上：用户按了赞、什么提示都没看见")
+		t.Fatal("提示没有落到主窗口的 toasts 上：用户按了心形、什么提示都没看见")
 	}
-	found := false
-	for _, text := range got {
-		if strings.HasPrefix(text, "赞不了") {
-			found = true
-		}
+}
+
+// TestNotchHeartRunsTheLikeBindingFlowOnTheMainShell 钉「刘海点心形走的是
+// **喜欢歌单绑定流程**，且弹窗开在**主壳**上」。
+//
+// 🔴 **`viewFolderDialogs` 只在主窗口那一支调**：刘海外壳自己那份
+// `likeBind` / `folderSelect` 永远没人画——弹窗写到副壳上等于开了一个
+// 看不见的窗（和 toast 写进副壳同一种静默失败）。这条盯的是
+// `main.likeBind` 真的摆出来了（没绑定 → 三选一），而不是绕回旧多选框
+// （`folderSelect`）——那一条正是本票拦的「播放器心形绕过绑定流程」。
+func TestNotchHeartRunsTheLikeBindingFlowOnTheMainShell(t *testing.T) {
+	// ⚠️ **fixture 先于 `newNotchShell` 建**：`t.Cleanup` 是 LIFO——fixture
+	// 晚于主壳建的话，测试收尾时服务器先关、Shell 后关，挂在它上面的
+	// 后台往返全被「connection refused」。
+	f := newBiliFixture(t, 1)
+	fb := newFolderBili(t, nil)
+	n, main := newNotchShell(t)
+
+	// 挂歌单 + 放一首在线的歌（心形要 `PlayingItem` + `CollectionsMounted`；
+	// 在线播要 `MountStreaming`——不然 `Enqueue` 回「在线播放暂时用不了」）。
+	main.app.MountStreaming(app.Streaming{
+		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
+	})
+	// ⚠️ **绑定流程要登录态**：`LoadCreatedFolders` 要 `SelfMid`（问「我创建
+	// 了哪些收藏夹」），没登录它直接回「还没登录」——三选一就开不出来。
+	cli := fixtureClient(t, fb)
+	store := app.NewMemoryStore("test")
+	if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: "7"}); err != nil {
+		t.Fatal(err)
 	}
-	if !found {
-		t.Fatalf("主窗口的 toasts 里没有「赞不了」那句：%q", got)
+	main.app.MountLogin(store, cli)
+	if err := cli.SeedCookies([]*http.Cookie{{Name: "DedeUserID", Value: "7", Path: "/"}}); err != nil {
+		t.Fatal(err)
+	}
+	main.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
+	// ⚠️ **`Sid` 必须带上**：`favTarget` 认的是它（avid）——不带的话
+	// `likeItem` 先去后台问 bvid → avid，那一趟还要等，而这条盯的
+	// 是「弹窗开在哪个壳上」，不是解析那一路。
+	if err := main.app.Enqueue(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1probe", Cid: "1", Sid: "999",
+		Title: "刘海里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
+	}); err != nil {
+		t.Fatalf("把在线的那首放进队列：%v", err)
+	}
+	waitFor(t, "在线那首开始播", func() bool { return main.app.Snapshot().HasTrack })
+
+	n.likeCurrent()
+
+	if main.likeBind == nil || !main.likeBind.open {
+		t.Fatalf("刘海点心形之后主壳的绑定三选一没开（likeBind = %+v）", main.likeBind)
+	}
+	if main.folderSelect != nil {
+		t.Error("刘海点心形直接弹了收藏夹多选框：它绕过了绑定流程")
+	}
+	if n.likeBind != nil || n.folderSelect != nil {
+		t.Error("弹窗写进了刘海外壳自己那一份：那一扇不画它，用户永远看不见")
 	}
 }
 

@@ -96,7 +96,7 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 	}
 	ui.Box(c).Key(danmakuLayerKey).
 		Absolute().Left(area.X).Top(area.Y).Size(area.W, area.H).
-		// ⚠️ **不吃指针**：这一层压在封面上面，而封面要接长按三连和点开满屏
+		// ⚠️ **不吃指针**：这一层压在封面上面，而封面要接点开满屏
 		// （见 `viewFullCover`）。吃了指针的话，用户点封面会点不动。
 		PassThrough().
 		// ⚠️ **弹幕是装饰**：读屏软件不该念它（报告 §4）。

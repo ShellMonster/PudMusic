@@ -247,7 +247,7 @@ func TestRenderFullPlayerVideoShots(t *testing.T) {
 	save(t, dir, "dark-full-cinema.png", tt)
 }
 
-// TestRenderFullPlayerOnlineShot 出「在线投稿」那一档的满屏：赞 / 喜欢 / 音质角标 / 弹幕数。
+// TestRenderFullPlayerOnlineShot 出「在线投稿」那一档的满屏：喜欢 / 音质角标 / 弹幕数。
 func TestRenderFullPlayerOnlineShot(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")
 	if dir == "" {

@@ -26,26 +26,18 @@ func min32(a, b float32) float32 {
 
 // 这一族盯播放条左边那一块的**结构**（票 #219，报告 §2.8 / §2.9 / §2.10 / §3.6）。
 //
-// 上游是**三段**：
+// 三段：
 //
-//	封面 │ 歌名·UP名（文字列）│ 分集·收藏·赞（横着并排的一行）
+//	封面 │ 歌名·UP名（文字列）│ 评论（横着并排的一行）
 //
-// 改之前我们把三枚键摆在**歌名下面那一行**（和 UP 名并排），于是「歌名/UP 名」
-// 和「三枚键」是**上下**的关系，而上游是**左右**的关系。
-//
-// 这一族盯四件事：
-//
-//	三段真的横着摆（三枚键在歌名**右边**，不是下面）
-//	UP 名**左对齐**（和歌名同一个左沿）
-//	第二行和歌名之间的空隙是上游那个（`space-y-1` = 4）
-//	三枚键的图标是 **18**（上游播放条上全部图标键都是 18）
+// 喜欢歌单原型把「赞」「收藏」两枚键连同数量角标一起去掉了——这一段只剩
+// 「评论」一枚（「分集」挪在右列）。
 
 // leftBarTester 造一个**真的挂上假 B 站**的播放条外壳（多 P 的那一档）。
 //
-// ⚠️ **必须挂真的 App**：三枚键里有两枚是**逐帧问 App** 才摆的——分集那一枚
-// 看「这一首有几集」（`viewPartButton`），赞那一枚看「这一首能不能赞」
-// （`viewLikeStar`）。只喂一份 State 的那个 tester（`playbarTester`）背后是
-// 一个空的 App，那三枚键摆不出来。
+// ⚠️ **必须挂真的 App**：评论那一枚是**逐帧问 App** 才摆的
+// （`viewCommentsButton` 要 `CommentsWorthAsking()`）——只喂一份 State 的那个
+// tester（`playbarTester`）背后是一个空的 App，那一枚摆不出来。
 func leftBarTester(t *testing.T, pages []any, width int) (*mygoui.Tester, *Shell) {
 	t.Helper()
 	s, tt := onlineTester(t, pages, false, at(width, 560))
@@ -62,12 +54,11 @@ func leftBarTester(t *testing.T, pages []any, width int) (*mygoui.Tester, *Shell
 // 看不出坏了**——键还是那三枚、也还点得动，只是它们和「歌名/UP 名」是上下
 // 的关系，而上游是左右的。
 //
-// # 四条判据
+// # 三条判据
 //
 //	① 封面在歌名**左边**（上游那一行的第一个孩子）
-//	② 三枚键在文字列**右边**——不是下面
-//	③ 三枚键在**同一条水平线上**（横排；竖排的话垂直中心会差 32）
-//	④ 次序是 赞 → 收藏 → 评论（原型 `renderBar` 的 `.np-keys`；分集键已挪到右列）
+//	② 评论键在文字列**右边**——不是下面
+//	③ 评论键和文字列在**同一条水平线上**（横排；竖排的话垂直中心会差 32）
 func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 	tt, _ := leftBarTester(t, multiPages(), 1200)
 
@@ -79,15 +70,9 @@ func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 	}
-	// 三枚键。⚠️ **「赞」那一枚要真的挂上 App 才摆得出来**（`viewLikeStar`）。
-	keys := []string{"赞", "收藏"}
-	boxes := make([]mygoui.Rect, 0, len(keys))
-	for _, k := range keys {
-		r, ok := tt.Find(k)
-		if !ok {
-			t.Fatalf("画面上找不到 %q，文字有 %q", k, tt.Texts())
-		}
-		boxes = append(boxes, r)
+	key, ok := findCommentsKey(tt)
+	if !ok {
+		t.Fatalf("画面上找不到评论键，文字有 %q", tt.Texts())
 	}
 
 	// ① 封面在歌名左边。
@@ -96,7 +81,7 @@ func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 			"左边那一块的第一段是封面", cover.X, cover.X+cover.W, title.X)
 	}
 
-	// ② 三枚键在文字列右边。
+	// ② 评论键在文字列右边。
 	//
 	// ⚠️ **量的是「文字列的右沿」，不是歌名那一行的右沿**：歌名右边还有音质
 	// 徽章（28 宽 + 一道 6 的缝），而徽章是**跟着歌名**的。文字列的右沿要用
@@ -106,33 +91,19 @@ func TestTheLeftBlockIsThreeSegments(t *testing.T) {
 	if !ok {
 		t.Fatalf("画面上找不到 UP 名，文字有 %q", tt.Texts())
 	}
-	for i, k := range keys {
-		if boxes[i].X < owner.X+owner.W {
-			t.Errorf("%q 在 x=%.1f，而文字列的右沿在 %.1f——"+
-				"它在文字列**下面**（改之前那一行），而上游是**右边**",
-				k, boxes[i].X, owner.X+owner.W)
-		}
+	if key.X < owner.X+owner.W {
+		t.Errorf("评论键在 x=%.1f，而文字列的右沿在 %.1f——"+
+			"它在文字列**下面**（改之前那一行），而上游是**右边**",
+			key.X, owner.X+owner.W)
 	}
 
-	// ③ 三枚键在同一条水平线上（横排）。
-	for i := 1; i < len(boxes); i++ {
-		mid := boxes[i].Y + boxes[i].H/2
-		prev := boxes[i-1].Y + boxes[i-1].H/2
-		if widthGap(mid-prev) > 1 {
-			t.Errorf("%q 的垂直中心在 y=%.1f，而 %q 那一枚在 y=%.1f——"+
-				"它们不在同一条水平线上：那是**竖排**，而上游那一段是 "+
-				"`flex items-center`（横排）",
-				keys[i], mid, keys[i-1], prev)
-		}
-	}
-
-	// ④ 次序：赞 → 收藏。评论键只在 B 站曲目上摆，这个测试的空 App 摆不出来，所以这里不断它。
-	for i := 1; i < len(boxes); i++ {
-		if boxes[i].X <= boxes[i-1].X {
-			t.Errorf("%q 在 x=%.1f，而 %q 那一枚在 x=%.1f——"+
-				"次序不对（原型是 赞 → 收藏 → 评论）",
-				keys[i], boxes[i].X, keys[i-1], boxes[i-1].X)
-		}
+	// ③ 评论键和文字列在同一条水平线上（横排）。
+	midKey := key.Y + key.H/2
+	midOwner := owner.Y + owner.H/2
+	if widthGap(midKey-midOwner) > 20 {
+		t.Errorf("评论键的垂直中心在 y=%.1f，而文字列在 y=%.1f——"+
+			"它不在文字列那条水平线上（那是**竖排**，而上游那一段是 "+
+			"`flex items-center`（横排）", midKey, midOwner)
 	}
 }
 
@@ -284,59 +255,50 @@ func TestTheGapBetweenTheTitleAndTheOwnerName(t *testing.T) {
 	}
 }
 
-// TestTheThreeLeftKeysUseTheUpstreamIconSize 盯三枚键的图标是 **18**。
+// TestTheLeftKeysUseTheUpstreamIconSize 盯那一枚键的图标是 **18**。
 //
-// 🔴 **上游播放条上全部图标键都是 18**（票 #219，报告 §3.6）：赞是
-// `RiThumbUpFill/Line size={18}`、收藏是 `RiStarFill/Line size={18}`、分集是
-// `RiListRadio size={18}`。改之前我们那三枚是 **14**（`iconSm`）——小 4 像素。
+// 🔴 **上游播放条上全部图标键都是 18**（票 #219，报告 §3.6）。
 //
 // # 判据是画面上的墨迹
 //
-// ⚠️ **不能拿按钮框当判据**：那三枚的盒子恒是 32（`iconHitMd`），14 和 18
+// ⚠️ **不能拿按钮框当判据**：盒子恒是 32（`iconHitMd`），14 和 18
 // 装在同一个盒子里，框一点没变——变的是**图形**。
-//
-// 实测（深浅两套一样）：18 那一档的墨迹是 分集 19×18、收藏 22×21、赞 22×20；
-// 14 那一档是 16×16、18×17、18×17。门槛定在 19：两头都离得开。
 //
 // 2026-11 换成原型的描边图标（24 的格子里留了边）：18 那一档墨迹 18×16 / 18×18，
 // 14 那一档约 13×12——门槛改成 16，仍把两档分开。
-func TestTheThreeLeftKeysUseTheUpstreamIconSize(t *testing.T) {
+func TestTheLeftKeysUseTheUpstreamIconSize(t *testing.T) {
 	tt, _ := leftBarTester(t, multiPages(), 1200)
 
-	for _, label := range []string{"分集", "收藏", "赞"} {
-		g := scanGlyph(tt, label)
-		if g.ink == "" {
-			t.Fatalf("%q 那一块没画东西：%q", label, tt.Texts())
-		}
-		if big := max32(g.box.W, g.box.H); big < 16 {
-			t.Errorf("%q 的图形是 %.0fx%.0f——上游那一枚是 18"+
-				"（原型描边图标实测 18 那一档是 16~18，14 那一档约 12~13）",
-				label, g.box.W, g.box.H)
-		}
+	g := scanGlyph(tt, "评论")
+	if g.ink == "" {
+		t.Fatalf("评论键那一块没画东西：%q", tt.Texts())
+	}
+	if big := max32(g.box.W, g.box.H); big < 16 {
+		t.Errorf("评论键的图形是 %.0fx%.0f——上游那一枚是 18"+
+			"（原型描边图标实测 18 那一档是 16~18，14 那一档约 12~13）",
+			g.box.W, g.box.H)
 	}
 }
 
-// TestTheLeftKeysStayPutWhenThePartsKeyAppears 盯「分集那一枚不挪别的东西」。
+// TestTheLeftKeyStaysPutWhenThePartsKeyAppears 盯「分集那一枚不挪别的东西」。
 //
-// 分集那一枚是**逐帧问 App** 才摆的（单 P 的稿子不摆），而它在第三段里
-// **占着自己那一格**——所以它出现/消失的时候，收藏和赞**不许挪位置**。
+// 分集那一枚是**逐帧问 App** 才摆的（单 P 的稿子不摆）——它挪在右列之后，
+// 出现/消失的时候左列的评论键**不许挪位置**。
 //
-// ⚠️ **这一条量的是位置，不是宽度**：宽度变了不算坏（那一段本来就跟着内容
-// 宽窄），**位置变了**才是坏——键在用户眼前跳一下，而用户什么都没点。
-func TestTheLeftKeysStayPutWhenThePartsKeyAppears(t *testing.T) {
+// ⚠️ **这一条量的是位置，不是宽度**：**位置变了**才是坏——键在用户眼前跳
+// 一下，而用户什么都没点。
+func TestTheLeftKeyStaysPutWhenThePartsKeyAppears(t *testing.T) {
 	single, _ := leftBarTester(t, nil, 1200)
 	multi, _ := leftBarTester(t, multiPages(), 1200)
 
-	for _, label := range []string{"收藏", "赞"} {
-		a, okA := single.Find(label)
-		b, okB := multi.Find(label)
-		if !okA || !okB {
-			t.Fatalf("%q 在两档里有一档量不到（单 P %v / 多 P %v）", label, okA, okB)
-		}
-		if d := widthGap(a.X - b.X); d > 1 {
-			t.Errorf("%q 在单 P 那一档的 x=%.1f，多 P 那一档的 x=%.1f（差 %.1f）——"+
-				"分集那一枚出现/消失的时候它挪了位置（它该占自己那一格）",
-				label, a.X, b.X, d)
-		}
+	a, okA := findCommentsKey(single)
+	b, okB := findCommentsKey(multi)
+	if !okA || !okB {
+		t.Fatalf("评论键在两档里有一档量不到（单 P %v / 多 P %v）", okA, okB)
+	}
+	if d := widthGap(a.X - b.X); d > 1 {
+		t.Errorf("评论键在单 P 那一档的 x=%.1f，多 P 那一档的 x=%.1f（差 %.1f）——"+
+			"分集那一枚出现/消失的时候它挪了位置（它该占自己那一格）",
+			a.X, b.X, d)
 	}
 }

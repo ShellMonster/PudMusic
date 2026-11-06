@@ -1,4 +1,5 @@
-// 出图：动画换到 `AnimatePose` 那一档之后，这三处**画面上**长什么样（票 #276）。
+// 出图：动画换到 `AnimatePose` 那一档之后，这两处**画面上**长什么样（票 #276；
+// 原来还有「赞-已赞」那一张，赞键在喜欢歌单原型里去掉了，那一段随之删掉）。
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderAnimatePoseShots
 //
@@ -6,7 +7,6 @@
 //
 //	满屏-亮着    顶栏和底下那一条都在（淡入 + 滑回来之后的样子）
 //	满屏-藏了    同一屏，界面藏起来之后那两条**滑出窗口**、淡到没有
-//	赞-已赞      播放条上那个赞键，背景层长满的样子（主色很淡的一盘）
 //
 // # 为什么深浅两套、两个主题方案都要出
 //
@@ -92,32 +92,6 @@ func TestRenderAnimatePoseShots(t *testing.T) {
 			settleFull(t, b.tt)
 			save(t, dir, "276-满屏-藏了-"+tc.name+".png", b.tt)
 			b.Close()
-
-			// ---- 赞键：已赞（背景层长满）----
-			//
-			// ⚠️ **从「没赞」按到「已赞」**：那样背景层是真的**长出来**的
-			//（从「赞没赞」那一问回来之前就截图的话，那一圈还没开始长）。
-			e := newLikeEnv(t, false, false, false)
-			e.tt.SetDark(tc.dark)
-			e.tt.Frame()
-			if err := e.tt.Click("赞"); err != nil {
-				t.Fatalf("点不了赞键：%v（文字：%q）", err, e.tt.Texts())
-			}
-			e.tt.Frame()
-			// ⚠️ **要等「赞没赞」那一问回来**：那是**网络**（墙钟），推测试器的钟
-			// 推不动它——不等就截到的是「还没赞」的那一帧。
-			waitFrames(t, e.tt, "赞出去了", func() bool { return e.s.app.LikeState().Liked })
-			// ⚠️ **要推钟**：背景层晚 0.1s 才开始长，长 260ms——不推钟截到的是
-			//「还没长出来」的那一帧。
-			e.tt.Advance(600 * time.Millisecond)
-			e.tt.Frame()
-			btn, ok := e.tt.Find("已赞")
-			if !ok {
-				t.Fatalf("播放条上没有赞键，文字有 %q", e.tt.Texts())
-			}
-			x0 := int(btn.X) - 10
-			y0 := int(btn.Y) - 10
-			saveHaloCrop(t, dir, "276-赞键-已赞-"+tc.name+".png", e.tt, x0, y0, 52, 52)
 		})
 	}
 }

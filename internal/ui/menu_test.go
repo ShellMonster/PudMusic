@@ -366,7 +366,7 @@ func TestTheSongColumnItemsAreDisabledWithoutATrack(t *testing.T) {
 	s.menu = appMenu(s)
 	s.refreshMenuChecked(s.app.Snapshot())
 
-	for _, id := range []string{menuLikeID, menuFavoriteID, menuDownloadID, menuCommentsID, menuArtistSpaceID} {
+	for _, id := range []string{menuFavoriteID, menuDownloadID, menuCommentsID, menuArtistSpaceID} {
 		it := s.menu.ItemByID(id)
 		if it == nil {
 			t.Errorf("菜单里没有 %q 那一项", id)

@@ -432,25 +432,6 @@ type Shell struct {
 	// 所以这个数换页前后都只跳一下。
 	pageBuilds int
 
-	// like 是长按封面 2.5 秒一键三连那一摊，见 like.go。
-	// **同样只由 view 在主线程上读写**。
-	//
-	// ⚠️ 挂在壳上而不是每帧新建：即时模式下一帧一新建，「按了多久」每次都从
-	// 零开始，那 2.5 秒永远到不了。
-	//
-	// ⚠️ **播放条那张封面和满屏那张封面共用这一份**：开着满屏的时候播放条整个
-	// 不建（见 fullplayer.go 文件头），所以任一帧只有其中一个在喂它。
-	like likeGesture
-
-	// likeBtn 是播放条上那枚「赞」键自己的长按三连状态机（B 站式抖 + 2.5 秒
-	// 触发），见 like.go。
-	//
-	// ⚠️ **它和 `like` 必须是两份**：赞键和播放条封面**同帧常驻**，而 trackLike
-	// 对「这一帧没按住」的处理是把 held 清掉——共用的话按住哪一个都会被另一个
-	// 每帧归零，2.5 秒永远到不了。两份机器各喂各的，谁也不碍着谁。
-	// **同样只由 view 在主线程上读写**。
-	likeBtn likeGesture
-
 	// halo 是「正在取流」时绕着播放键转的那一圈光，见 loadhalo.go。
 	//
 	// ⚠️ **只有起点这一个字段**：角度是画的时候按钟算的，而起点得记着——
@@ -903,6 +884,18 @@ type Shell struct {
 
 	// folderSelect 是「把这一首放进哪些收藏夹」那个弹窗（folderselect.go）。
 	folderSelect *folderSelect
+
+	// likeBind 是「给喜欢找一个专属歌单」那个弹窗（likedbind.go）。
+	// likePending 是「正在替哪一首办绑定」——绑定三档走完都要把它放进
+	// 新绑的格子；从设置进来换绑定时它是 nil（只换绑定不收歌）。
+	likeBind    *likeBind
+	likePending *likePending
+
+	// resolveCallbacks 是「问 avid 那一趟」的回调表：key 是发出那一趟
+	// 领的号（`app.ResolveFavoriteID` 的返回），值是这一趟的 done。
+	// 结果从邮箱（`app.TakeFavoriteResolution`）回来时对号去跑——
+	// **只由界面线程读写**（`viewFolderDialogs` 的 flush 在那里取走它）。
+	resolveCallbacks map[uint64]func(app.Item, error)
 
 	// folderDelete 是侧栏收藏夹「删除」那个二次确认要跨帧活着的状态
 	// （sidebar_favorites.go）。

@@ -881,15 +881,16 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 				s.app.Next()
 			}
 			ui.Spacer(c).Grow(1)
-			// 喜欢：原型只在这首歌能点赞的时候画（`TR[t.id] ? … : ''`）。真数据取
-			// 「赞」（`App.Likeable` / `LikeState`），和播放条上那一枚同一条路。
+			// 喜欢：原型只在这首歌是 B 站投稿的时候画（`TR[t.id] ? … : ''`）。
+			// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
+			// 点赞，也不是收藏夹多选框；实心 / 空心认「进没进收藏夹」。
 			if st.HasTrack && s.app.Likeable() {
-				liked := s.app.LikeState().Liked
-				name, label := "heart", "赞"
-				if liked {
-					name, label = "heart-on", "已赞"
+				faved := s.app.LikeState().Favorited
+				name, label := "heart", "喜欢"
+				if faved {
+					name, label = "heart-on", "已喜欢"
 				}
-				if pud.IconBtn(c, "mini-like", name, label, pud.IconOpts{On: liked}).Clicked() {
+				if pud.IconBtn(c, "mini-like", name, label, pud.IconOpts{On: faved}).Clicked() {
 					s.likeCurrent()
 				}
 			}

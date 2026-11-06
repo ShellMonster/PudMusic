@@ -171,56 +171,6 @@ func TestTheDockPlaybackItemsAreDisabledWithoutATrack(t *testing.T) {
 	}
 }
 
-// TestTheLikeItemUsesTheSameJudgeAsTheInterface 断**「赞」和界面用同一套判据**。
-//
-// ⚠️ **为什么这一条要紧**：菜单原来用「有没有歌」判，而界面上用的是
-// `App.Likeable()`（`internal/ui/like.go` 的 `viewLikeStar` 第一句就是
-// `if !s.app.Likeable() { return }`——本地文件**根本不摆那个键**）。
-//
-// ⇒ 两套判据的后果：本地文件在菜单里点「赞」→ `App.SetLike` 回一句
-// 「这一首在 B 站上没法赞」→ **弹一个红色 Toast**。而界面上那一枚压根不存在。
-//
-// ⇒ 「按一个点了报错的键比没有那个键更糟」。
-//
-// 这一条断的是**菜单用的判据和界面是同一个函数**，而不是「某个状态下灰不灰」
-// ——后者要真的放一首歌进去（要网络）。
-func TestTheLikeItemUsesTheSameJudgeAsTheInterface(t *testing.T) {
-	b := newTestShell(t)
-	s := b.s
-	s.menu = appMenu(s)
-
-	// ⚠️ **这一条要断的是「本地文件」那一档**——那才是这个 bug 的实际场景：
-	// 本地文件**有歌**（`HasTrack` 为真），但它**在 B 站上压根没有投稿**
-	// ⇒ `Likeable()` 为假。
-	//
-	// ⚠️ **原来那一版是同义反复**：它第一句就 `if !b.a.Likeable() { t.Skip }`，
-	// 于是「没有歌」时跳过、「有歌」时又必须是 likeable 的 mv——两种情况下
-	// 断言 `it.IsEnabled() != s.app.Likeable()` 都是恒等式。**这个判据什么
-	// 都没验。**
-	if err := s.app.Enqueue(app.LocalItem(flacPath(t))); err != nil {
-		t.Fatalf("摆一个本地文件：%v", err)
-	}
-	if !s.app.Snapshot().HasTrack {
-		t.Fatal("本地文件摆进去之后没有歌：这一条要断的就是「有歌但不能赞」那一档")
-	}
-	if s.app.Likeable() {
-		t.Fatal("本地文件竟然能赞：这一条的前提不成立")
-	}
-
-	s.refreshMenuChecked(s.app.Snapshot())
-	it := s.menu.ItemByID(menuLikeID)
-	if it == nil {
-		t.Fatal("菜单里没有「赞」那一项")
-	}
-	// ⚠️ **本地文件时「赞」必须是禁用的**：界面上那枚压根不摆
-	//（`internal/ui/like.go` 的 `viewLikeStar` 第一句就是
-	// `if !s.app.Likeable() { return }`），而菜单上摆一个能点的，点了会弹一个
-	// 红色 Toast 说「这一首在 B 站上没法赞」。
-	if it.IsEnabled() {
-		t.Error("本地文件时「赞」那一项还是能点的：点了会弹一个红色错误")
-	}
-}
-
 // TestTheCommentsItemUsesTheSameJudgeAsTheInterface 断**「显示评论」和界面
 // 用同一套判据**。
 //
