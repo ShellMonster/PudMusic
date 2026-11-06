@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -248,4 +249,79 @@ func TestTheFollowSkeletonCoversTheFirstViewport(t *testing.T) {
 
 	followSkeletonFinds(t, tt, "关注占位:6")
 	followSkeletonFinds(t, tt, "关注占位:7")
+}
+
+// TestTheFollowSkeletonStaysInsideTheCardLane 钉住「骨架排不越出右边那一格」。
+//
+// # 曾经出错的行为
+//
+// 占位卡宽先拿**内容区**宽（窗口 − 侧栏）当容器算，那一数比右边那一格的
+// 真实宽（还要再减页边距、左分组栏和 40 的缝）大出好几百——第二列整张越
+// 出卡道被窗口截掉，而卡内头像/字条/按钮又是按虚胖的宽摆的，按钮占位和
+// 字条一路冲出卡片右缘（1200×800 截图：`light-follow-skeleton.png`）。
+//
+// # 判据是画面：第二列完整地落在卡道里，卡内的件也都在卡盒里
+func TestTheFollowSkeletonStaysInsideTheCardLane(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	release := followHoldGrid(t, b)
+
+	// 窗口就用截出毛病的那一个尺寸。
+	s, tt, _ := newSpaceShell(t, b, true, "77", at(1200, 800))
+	s.navigate(followPath)
+	tt.Frame()
+	f := s.followPageOf()
+	if !f.pager.loading {
+		t.Fatal("右边那一格没在拉")
+	}
+	tt.Frame()
+
+	first := followSkeletonFinds(t, tt, "关注占位:0")
+	second := followSkeletonFinds(t, tt, "关注占位:1")
+
+	// 第二列不许冲出窗口内容区（右边还得留页边距——不是贴着窗口右缘）。
+	const winW = 1200
+	if second.X+second.W > float32(winW) {
+		t.Errorf("第二列占位卡右边在 %.1f，窗口只有 %d——整张卡越出屏幕了",
+			second.X+second.W, winW)
+	}
+	if second.X+second.W > float32(winW)-space.PageHorizontalForWindow(float32(winW))+0.5 {
+		t.Errorf("第二列占位卡右边在 %.1f，页边距内的右界是 %.1f——卡越出了版面",
+			second.X+second.W, float32(winW)-space.PageHorizontalForWindow(float32(winW)))
+	}
+
+	// 卡内的件不许越过自己的卡盒：头像在左、按钮占位在右，字条在中间。
+	for _, idx := range []string{"0", "1"} {
+		card := followSkeletonFinds(t, tt, "关注占位:"+idx)
+		face := followSkeletonFinds(t, tt, "关注占位:"+idx+":头像")
+		btn := followSkeletonFinds(t, tt, "关注占位:"+idx+":按钮")
+		if face.X < card.X || face.X+face.W > card.X+card.W {
+			t.Errorf("占位 %s 的头像（%.1f~%.1f）越出了卡盒（%.1f~%.1f）",
+				idx, face.X, face.X+face.W, card.X, card.X+card.W)
+		}
+		if btn.X < card.X || btn.X+btn.W > card.X+card.W+0.5 {
+			t.Errorf("占位 %s 的按钮（%.1f~%.1f）越出了卡盒右缘 %.1f",
+				idx, btn.X, btn.X+btn.W, card.X+card.W)
+		}
+	}
+	if first.X+first.W > second.X {
+		t.Errorf("第一列（右边 %.1f）压进了第二列（左边 %.1f）", first.X+first.W, second.X)
+	}
+
+	// 骨架排的右缘要和真卡排的右缘**对得上**：放人进来，量真卡的第二列。
+	release <- []any{
+		uiFollowUser(11, "第一个 UP"), uiFollowUser(12, "第二个 UP"),
+		uiFollowUser(13, "第三个 UP"), uiFollowUser(14, "第四个 UP"),
+	}
+	waitFrames(t, tt, "人到了", func() bool { return len(f.users) == 4 })
+	tt.Frame()
+
+	real, ok := tt.Find("打开 第二个 UP 的空间")
+	if !ok {
+		t.Fatalf("第二列真卡没画出来，文字有 %q", tt.Texts())
+	}
+	if d := absF((real.X + real.W) - (second.X + second.W)); d > 0.5 {
+		t.Errorf("第二列真卡右缘在 %.1f，骨架在 %.1f——数据一到整列横着挪了",
+			real.X+real.W, second.X+second.W)
+	}
 }
