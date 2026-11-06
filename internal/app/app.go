@@ -724,6 +724,11 @@ type App struct {
 	likeErr    error
 	likeLoaded bool
 	likeWanted bool
+	// likeGen 是「第几次开始问这一首」的代次：`ensureLike` 发起一趟问先
+	// 领一个号，回来的结果拿号对——号已经变了说明这趟问之后**有人更新
+	// 过缓存**（写成功就地改答案：`setAskedLike` / `markAudioFavorited`），
+	// 旧问的那一句「问过时是空的」不许盖新答案。
+	likeGen uint64
 	// likeTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
 	// （`likeRetryAfter`）。成功之后用不上——`likeLoaded` 已经挡住了。
 	likeTriedAt time.Time

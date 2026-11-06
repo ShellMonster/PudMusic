@@ -186,13 +186,15 @@ func (a *App) ensureLike(it Item, key string) {
 	a.likeTriedAt = time.Now()
 	// 清掉上一次的失败原因：这一趟正在问，界面上那句「问不出赞没赞」就该撤了。
 	a.likeErr = nil
+	a.likeGen++
+	gen := a.likeGen
 	a.likeMu.Unlock()
 
 	// audio 那一条走 coll/resource/check：sid 本身就是它要的 rid，没有
 	// bvid → avid 那一趟可问。结果只有「收没收藏」一栏（relation 的 like
 	// 那一栏 B 站对 audio 不给——Biu 那边照样给的是 false）。
 	if it.Type == "audio" {
-		a.askAudioLike(it, key)
+		a.askAudioLike(it, key, gen)
 		return
 	}
 
@@ -205,7 +207,7 @@ func (a *App) ensureLike(it Item, key string) {
 	if fetch == nil {
 		s := a.streamingSnapshot()
 		if s == nil || s.Client == nil {
-			a.finishLike(key, bili.ArchiveRelation{}, errLikeUnavailable)
+			a.finishLike(key, gen, bili.ArchiveRelation{}, errLikeUnavailable)
 			return
 		}
 		fetch = s.Client.ArchiveRelation
@@ -213,10 +215,10 @@ func (a *App) ensureLike(it Item, key string) {
 	go func() {
 		rel, err := fetch(context.Background(), it.Bvid)
 		if err != nil {
-			a.finishLike(key, bili.ArchiveRelation{}, errors.New(bili.Friendly(err)))
+			a.finishLike(key, gen, bili.ArchiveRelation{}, errors.New(bili.Friendly(err)))
 			return
 		}
-		a.finishLike(key, rel, nil)
+		a.finishLike(key, gen, rel, nil)
 	}()
 }
 
@@ -225,19 +227,19 @@ func (a *App) ensureLike(it Item, key string) {
 // ⚠️ **`collCheck` 和 `likeFetch` 同一条规矩**：只由界面那一侧读写，测试里
 // 替成假函数；生产上永远是 nil（走收藏夹零件上的 `bili.Client.CollResourceCheck`
 // ——挂在 `MountCollections` 上的那一个，不是取流那个）。
-func (a *App) askAudioLike(it Item, key string) {
+func (a *App) askAudioLike(it Item, key string, gen uint64) {
 	rid, err := strconv.ParseInt(it.Sid, 10, 64)
 	if err != nil || rid <= 0 {
 		// sid 不是一个合法 id：这不是「问失败」，是「压根没有可问的身份」——
 		// 记成问过（关系是零值），不然它每 `likeRetryAfter` 都要空转一次。
-		a.finishLike(key, bili.ArchiveRelation{}, nil)
+		a.finishLike(key, gen, bili.ArchiveRelation{}, nil)
 		return
 	}
 	check := a.collCheck
 	if check == nil {
 		c := a.collectionsSnapshot()
 		if c == nil || c.refs.Client == nil {
-			a.finishLike(key, bili.ArchiveRelation{}, errLikeUnavailable)
+			a.finishLike(key, gen, bili.ArchiveRelation{}, errLikeUnavailable)
 			return
 		}
 		check = c.refs.Client.CollResourceCheck
@@ -245,17 +247,25 @@ func (a *App) askAudioLike(it Item, key string) {
 	go func() {
 		faved, err := check(context.Background(), rid, bili.MediaAudio)
 		if err != nil {
-			a.finishLike(key, bili.ArchiveRelation{}, errors.New(bili.Friendly(err)))
+			a.finishLike(key, gen, bili.ArchiveRelation{}, errors.New(bili.Friendly(err)))
 			return
 		}
-		a.finishLike(key, bili.ArchiveRelation{Favorited: faved}, nil)
+		a.finishLike(key, gen, bili.ArchiveRelation{Favorited: faved}, nil)
 	}()
 }
 
 // finishLike 记下一次问赞藏的结果并叫醒界面。
-func (a *App) finishLike(key string, rel bili.ArchiveRelation, err error) {
+//
+// gen 是发出这一趟时领的代次号：回来之后号已经对不上，说明这趟问发出的
+// 那一刻之后**写操作自己改过答案**（`setAskedLike` / `markAudioFavorited`
+// 都换代次）——旧答案不许盖新答案。这和「键对不上就丢」是同一条规矩的
+// 另一半：键管「换歌」，代次管「同一首、问过之后又写过」。
+//
+// gen == 0 是写操作自己记的（`TripleLike` 那次三连）：它不是一趟「问」，
+// 答案是最新的，无条件落账。
+func (a *App) finishLike(key string, gen uint64, rel bili.ArchiveRelation, err error) {
 	a.likeMu.Lock()
-	if a.likeKey == key {
+	if a.likeKey == key && (gen == 0 || a.likeGen == gen) {
 		a.like, a.likeErr = rel, err
 		a.likeLoaded, a.likeWanted = err == nil, false
 	}
@@ -354,6 +364,11 @@ func (a *App) markAudioFavorited(rid int64) {
 	if a.likeKey == key {
 		a.like.Favorited = true
 		a.likeLoaded = true
+		a.likeWanted = false
+		// 换代次：写成功这一刻起，之前发出去还没回来的「收没收藏」那
+		// 一趟已经是旧答案——它回来时键还是这首，拿键拦不住，得拿代次
+		// 拦（见 `finishLike`）。不然它会把这颗刚点亮的心抹回去。
+		a.likeGen++
 	}
 	a.likeMu.Unlock()
 	if wake := a.currentWake(); wake != nil {
@@ -367,6 +382,8 @@ func (a *App) setAskedLike(key string, liked bool) {
 	if a.likeKey == key {
 		a.like.Liked = liked
 		a.likeLoaded = true
+		a.likeWanted = false
+		a.likeGen++
 	}
 	a.likeMu.Unlock()
 	if wake := a.currentWake(); wake != nil {
@@ -427,7 +444,7 @@ func (a *App) TripleLike(done func(bili.TripleResult, error)) {
 			return
 		}
 		// 三样全按 B 站的答案记（收藏那一栏也记，见上面那段）。
-		a.finishLike(likeKey(it), bili.ArchiveRelation{Liked: res.Liked, Favorited: res.Favorited}, nil)
+		a.finishLike(likeKey(it), 0, bili.ArchiveRelation{Liked: res.Liked, Favorited: res.Favorited}, nil)
 		if done != nil {
 			done(res, nil)
 		}

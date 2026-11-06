@@ -611,3 +611,42 @@ func TestLikeStateForAudioBelongsToItsOwnSid(t *testing.T) {
 		t.Error("第二首还没收过，心形却是第一首那一趟给的实心——缓存不认歌")
 	}
 }
+
+// TestAStaleAudioCheckCannotUnfillTheHeart 钉「写成功之后、早发出的那一趟
+// 收藏态检查才回来」这个时序：LikeState 触发 coll-resource-check 的瞬间
+// 用户就点了喜欢，`FavoriteIntoBound` 先一步把 Favorited 标实——随后才回
+// 来的 check 说的是「收之前问过时的答案（没收）」，不许把它当成「问过
+// 之后还是没收」把实心抹掉。曾经出过这病：心形在写成功的下一帧又变回
+// 空心，直到换歌重进才亮。
+func TestAStaleAudioCheckCannotUnfillTheHeart(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+
+	// 卡住那一趟「收没收藏」——它回来得比写成功晚。
+	release := make(chan struct{})
+	a.collCheck = func(context.Context, int64, int) (bool, error) {
+		<-release
+		return false, nil // 问过那一刻它确实还没收
+	}
+	a.LikeState() // 发出 check，卡住
+
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitLikedResult(t, a, 2*time.Second)
+	if !a.LikeState().Favorited {
+		t.Fatal("收进绑定歌单那一趟成了，心形却是空心——markAudioFavorited 没生效")
+	}
+
+	close(release) // 放走卡住的那一趟 check
+	waitLike(t, "迟到的 check 落完账", func() bool {
+		a.likeMu.Lock()
+		defer a.likeMu.Unlock()
+		return !a.likeWanted && a.likeLoaded
+	})
+
+	if !a.LikeState().Favorited {
+		t.Error("写成功之后才回来的收藏态检查把心形改回了空心——旧答案盖了新答案")
+	}
+}

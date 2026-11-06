@@ -320,13 +320,17 @@ func TestEachLikedResultCarriesItsRequest(t *testing.T) {
 	})
 	close(gate)
 
+	// ⚠️ **回来不保证按发出顺序**：两趟 deal 卡在同一个闸门上，放走
+	// 之后谁先跑完说不准（goroutine 调度）。这一条钉的是「每条结果
+	// 带着自己那一趟的身份」，顺序本身不是要验的东西。
 	first := waitLikedResult(t, a, 2*time.Second)
 	second := waitLikedResult(t, a, 2*time.Second)
 	if first.Token == 0 || second.Token == 0 || first.Token == second.Token {
 		t.Fatalf("两条结果的 token = %d / %d，want 各领一个号", first.Token, second.Token)
 	}
-	if first.Rid != 77 || second.Rid != 78 {
-		t.Errorf("两条结果的 rid = %d / %d，want 77 / 78", first.Rid, second.Rid)
+	got := map[int64]bool{first.Rid: true, second.Rid: true}
+	if !got[77] || !got[78] {
+		t.Errorf("两条结果的 rid = %d / %d，want 77 和 78 各一条", first.Rid, second.Rid)
 	}
 }
 
