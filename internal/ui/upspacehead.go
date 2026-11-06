@@ -15,6 +15,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
@@ -58,9 +59,7 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 		// ⚠️ **占位高度要和加载完之后那一版一样**（`upBannerH` + 头像探出
 		// 头图带下沿那一截 `upAvatarS - 48`）：占位高了，数据落地那一瞬
 		// 整个页面往上抽一段——Tab 条和内容看着像自己跳了一下。
-		ui.Row(c).Key(key).Height(upBannerH + upAvatarS - 48).FillWidth().Center().Children(func() {
-			ui.Spinner(c).Label("正在打开这个 UP 主的空间")
-		})
+		s.viewSpaceHeaderSkeleton(c, key, pad)
 		return
 
 	case h.Err != "" && !h.Loaded:
@@ -147,6 +146,23 @@ func (s *Shell) viewSpaceHeader(c *ui.Context, sp *upSpace, h app.SpaceHeader) {
 				s.viewSpaceStats(c, sp, h)
 				s.viewSpaceActions(c, sp, h)
 			})
+	})
+}
+
+func (s *Shell) viewSpaceHeaderSkeleton(c *ui.Context, key string, pad float32) {
+	height := upBannerH + upAvatarS - 48
+	ui.Column(c).Key(key).Height(float32(height)).FillWidth().Label("正在打开这个 UP 主的空间").Children(func() {
+		skeleton.Block(c, key+":band", upBannerH, upBannerH, 0).FillWidth()
+		ui.Row(c).FillWidth().Padding(space.None, pad, space.Px16, pad).Margin(-48, space.None, space.None, space.None).
+			AlignItems(ui.End).Gap(space.Px24).Children(func() {
+			skeleton.Block(c, key+":avatar", upAvatarS, upAvatarS, upAvatarS/2)
+			ui.Column(c).Grow(1).Gap(space.Px8).Children(func() {
+				skeleton.Block(c, key+":name", 220, 28, tok.R4)
+				skeleton.Block(c, key+":sign", 280, 14, tok.R4)
+				skeleton.Block(c, key+":stats", 220, 12, tok.R4)
+			})
+			skeleton.Block(c, key+":action", 72, tok.BtnSmH, tok.Pill)
+		})
 	})
 }
 

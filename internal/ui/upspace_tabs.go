@@ -11,6 +11,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
@@ -262,7 +263,13 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		// 一条都还没有：第一页在途。这一句就是它全部的内容。
 		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**，理由同 `follow.go`
 		// 那一处（票 #138）。
-		s.viewSpaceFlat(c, sp, func() { s.viewLoading(c, upEmptyKey(sp, tab), "正在加载"+upTabNames[tab]+"…") })
+		s.viewSpaceFlat(c, sp, func() {
+			if tab == upTabCollection || tab == upTabSeries {
+				s.viewSpaceGridSkeleton(c, sp, tab)
+				return
+			}
+			s.viewLoading(c, upEmptyKey(sp, tab), "正在加载"+upTabNames[tab]+"…")
+		})
 		return
 	}
 	// 🔴 **「一行都没有」也分两种**：
@@ -397,6 +404,29 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 			}
 		}
 	}
+}
+
+func (s *Shell) viewSpaceGridSkeleton(c *ui.Context, sp *upSpace, tab int) {
+	w := s.spaceContentWidth(c)
+	pad := s.upPadFor(c)
+	per := max(sp.perRow[tab], 1)
+	gap := space.GridGapForWindow(windowW(c))
+	cell := pud.CellWidth(w-2*pad, per, gap)
+	ui.Column(c).FillWidth().Label("正在加载"+upTabNames[tab]+"…").Padding(space.Px24, pad, space.None, pad).
+		Children(func() {
+			for row := 0; row < 3; row++ {
+				ui.Row(c).FillWidth().Gap(gap).Children(func() {
+					for col := 0; col < per; col++ {
+						key := fmt.Sprintf("space:%d:sk:%d:%d", tab, row, col)
+						ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px8).Children(func() {
+							skeleton.Block(c, key+":cover", cell, 140, tok.R8)
+							skeleton.Block(c, key+":title", cell*0.7, 14, tok.R4)
+							skeleton.Block(c, key+":meta", cell*0.45, 12, tok.R4)
+						})
+					}
+				})
+			}
+		})
 }
 
 // upSentinelKey 是末尾那一行的身份。**不用字符串**：行的 key 全是 B 站的

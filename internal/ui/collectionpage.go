@@ -40,7 +40,9 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -262,7 +264,13 @@ func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	})
 	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 	// 13px 淡灰缩在列表左上角，而这一页的「没有收藏夹」是居中 15pt 两行。
-	l.SetEmptyView(loadingCell("正在加载…"))
+	l.SetEmptyView(func(c *ui.Context) {
+		if l.Layout() == list.ViewCard {
+			collectionGridSkeleton(c)
+			return
+		}
+		loadingCell("正在加载…")(c)
+	})
 	// 播放量 + 时间两列：这一页两个数都有（`bili.Media.View` / `FavTime` /
 	// `PubTime`）。时间那一列的**表头字和取哪个时间随容器类型变**——两处走
 	// `collectionTimeTitle` / `collectionTimeOf` 这一对，别只改一边。
@@ -274,6 +282,24 @@ func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	})
 	// 行和表头画原型样式（`pud.TrackRow` / `pud.TrackHead`，多选态序号格换成勾选框）。
 	return l
+}
+
+func collectionGridSkeleton(c *ui.Context) {
+	cols := list.GridColumnsFor(float32(windowW(c)))
+	gap := space.GridGapForWindow(float32(windowW(c)))
+	ui.Column(c).FillWidth().Label("正在加载…").Children(func() {
+		for row := 0; row < 4; row++ {
+			ui.Row(c).FillWidth().Gap(gap).Children(func() {
+				for col := 0; col < cols; col++ {
+					ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px8).Children(func() {
+						skeleton.Block(c, "collection:sk:"+strconv.Itoa(row)+":"+strconv.Itoa(col)+":cover", 0, 140, tok.R8).FillWidth()
+						skeleton.Block(c, "collection:sk:"+strconv.Itoa(row)+":"+strconv.Itoa(col)+":title", 120, 14, tok.R4)
+						skeleton.Block(c, "collection:sk:"+strconv.Itoa(row)+":"+strconv.Itoa(col)+":meta", 84, 12, tok.R4)
+					})
+				}
+			})
+		}
+	})
 }
 
 // collectionActions 是这一页列表的操作，比通用那一份多换了「下载」那一项。

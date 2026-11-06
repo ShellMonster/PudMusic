@@ -25,9 +25,11 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -40,7 +42,9 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -523,7 +527,45 @@ func (p *pagedRows) viewEmptyState(c *ui.Context, t *ui.Theme) {
 	if e == nil {
 		return
 	}
+	if e.Skeleton {
+		p.drawSkeleton(c, e.Title)
+		return
+	}
 	drawEmpty(c, "", *e, emptyRowPad)
+}
+
+// drawSkeleton keeps the first page in the selected display mode while data is
+// in flight. A grid must not flash eight list rows before becoming cards.
+func (p *pagedRows) drawSkeleton(c *ui.Context, label string) {
+	switch p.layout {
+	case list.ViewCard:
+		w := p.width
+		if w <= 0 {
+			w, _ = c.Size()
+		}
+		cols := list.GridColumnsFor(w)
+		cell := list.CellWidth(w, cols)
+		ui.Column(c).FillWidth().Label(label).Children(func() {
+			for row := 0; row < 4; row++ {
+				ui.Grid(c).FillWidth().Columns(cols).Gap(gridGap).Children(func() {
+					for col := 0; col < cols; col++ {
+						key := fmt.Sprintf("library:sk:%d:%d", row, col)
+						ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px8).Children(func() {
+							skeleton.Block(c, key+":cover", cell, 140, tok.R8)
+							skeleton.Block(c, key+":title", cell*0.72, 14, tok.R4)
+							skeleton.Block(c, key+":meta", cell*0.46, 12, tok.R4)
+						})
+					}
+				})
+			}
+		})
+	default:
+		ui.Column(c).FillWidth().Label(label).Children(func() {
+			for i := 0; i < 8; i++ {
+				skeleton.Row(c, "library:sk:"+strconv.Itoa(i), skeletonRowH)
+			}
+		})
+	}
 }
 
 // drawList 画那个虚拟列表（列表和紧凑两档）。
