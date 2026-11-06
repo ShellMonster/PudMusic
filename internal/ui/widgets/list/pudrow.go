@@ -143,16 +143,21 @@ func (l *List) viewPudUserRow(r ui.ListRow, i int) {
 		}
 	}
 	// ⚠️ **这是布局行，不是一个可悬停的条目**（和 `follow.go` 的卡片行同一个
-	// 形状）：一行一到两张 UCard，卡片自己的 hover 由 UCard 担。MyGo 的 List 会
-	// 给指针所在行铺 `SurfaceHover`——不盖回页面底色的话，两张卡片之间和左右
-	// 两侧都漏出一条灰底。
-	row := ui.Row(c).AlignSelf(ui.Stretch).Gap(gap).Margin(space.None, space.None, space.Px16, space.None)
+	// 形状）：一行一到两张 UCard，卡片自己的 hover 由 UCard 担。外层用 padding
+	// 留行间距，不用 margin——List 的悬停底会铺到 margin 里，正好形成截图中那条
+	// 灰色横带。内层拉伸两张卡，让同一行的卡片底边对齐，即使一张只有昵称、另一张
+	// 有两行简介。
+	row := ui.Column(c).AlignSelf(ui.Stretch).
+		Padding(space.None, space.None, space.Px16, space.None)
 	row = LayoutRow(row, c.Theme())
 	row.Children(func() {
-		card(m)
-		if m.Pair != nil {
-			card(*m.Pair)
-		}
+		cards := ui.Row(c).AlignSelf(ui.Stretch).AlignItems(ui.Stretch).Gap(gap)
+		cards.Children(func() {
+			card(m)
+			if m.Pair != nil {
+				card(*m.Pair)
+			}
+		})
 	})
 }
 

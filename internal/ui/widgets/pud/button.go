@@ -138,6 +138,15 @@ type IconOpts struct {
 	Disabled bool
 }
 
+const countBadgeFallbackTextW = 20
+
+func countBadgeWidth(measured float32) float32 {
+	if measured <= 0 {
+		measured = countBadgeFallbackTextW
+	}
+	return measured + space.Px4
+}
+
 // IconBtn 是一枚只有图标的键（原型 `.icon-btn`）：圆角 8 的方块，平时次要色，
 // 悬停 hover 底 + 正文色，按下图形缩到 0.92，禁用 35% 不透明。label 是无障碍名字。
 func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
@@ -187,10 +196,14 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 		}
 		g.AnimatePose(ui.Pose{Scale: pressed}, ui.Animation{Duration: motion.Fast, Ease: motion.EaseOut})
 		if o.Count != "" {
-			// `.cnt`：top 1 / right -4，侧栏底、次要色、600 10 等宽、2/4 内边距、圆角 6。
-			typo.Mono(ui.Text(c, o.Count)).FontSize(10).FontWeight(600).TextColor(p.Text2).
-				Background(p.Side).Padding(space.Px2, space.Px4).Radius(tok.R6).SingleLine().
-				Absolute().Top(1).Right(-4)
+			// `.cnt`：按钮右上角的小角标，次要色、600 等宽、紧凑内边距、圆角 6。
+			textW, _ := c.MeasureText(0, ui.Span{Text: o.Count, Size: 9, Weight: 600})
+			ui.Box(c).Width(countBadgeWidth(textW)).Height(13).Background(p.Side).
+				Padding(space.Px1, space.Px2).Radius(tok.R6).
+				Absolute().Top(-3).Right(1).Children(func() {
+				typo.Mono(ui.Text(c, o.Count)).FontSize(9).FontWeight(600).
+					TextColor(p.Text2).SingleLine()
+			})
 		}
 	})
 	return b
