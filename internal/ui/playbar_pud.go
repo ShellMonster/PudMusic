@@ -30,7 +30,26 @@ import (
 // pbKey 是播放条上一枚 36×36 的图标键壳（原型 `.icon-btn`）：圆角 8，悬停 `hover` 底。
 // 里面的图形由调用方画。key 必须稳定。
 func pbKey(c *ui.Context, label string) ui.Element {
-	b := ui.ButtonBase(c).Label(label).Size(tok.IconHit, tok.IconHit).Radius(tok.R8).
+	return pbKeyH(c, label, tok.IconHit)
+}
+
+// pbCountKey 是「图形 + 数字」那一枚键的壳（方案 A）：**宽 36、高随数字**——
+// 有数字时高 50（`playbarCountKeyH`，图形在上、数字收在下面），没有数字还是
+// 36 的那一枚。宽不变，点击区不许长。
+//
+// 🔴 **只能建一次**：`ButtonBase` 一调就挂到树上——先建 `pbKey` 再改建成这一档
+// 会留下一个 36 高、同名的**废按钮**（还占着命中），所以「多高」必须在建之前
+// 定下来，不能建完再换。
+func pbCountKey(c *ui.Context, label string, hasCount bool) ui.Element {
+	if hasCount {
+		return pbKeyH(c, label, playbarCountKeyH)
+	}
+	return pbKey(c, label)
+}
+
+// pbKeyH 是 pbKey 的可调高版本。外面的壳、悬停淡底、圆角、过渡都只有这一份。
+func pbKeyH(c *ui.Context, label string, h float32) ui.Element {
+	b := ui.ButtonBase(c).Label(label).Size(tok.IconHit, h).Radius(tok.R8).
 		AlignItems(ui.Center).Justify(ui.Center).Shrink(0)
 	if b.Hovered() && !b.IsDisabled() {
 		b = b.Background(tok.Of(c.Theme()).Hover)

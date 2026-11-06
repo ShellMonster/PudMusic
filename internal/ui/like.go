@@ -58,6 +58,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -734,15 +735,15 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 // likeButton 是赞键那一枚按钮：底下那一圈背景，上面是拇指图形。
 // 它同时是长按三连的目标：这一帧的按住喂进 `s.likeBtn`，抖动也是这一帧算的。
 //
-// # 🔴 「图形 + 数字」的结构（票 #701）
+// # 🔴 「图形 + 数字」的结构（票 #701，本票起方案 A）
 //
-// 这一枚现在带一个读数（获赞数），而那个数是挂在**图形盒子右上角**的角标
-// （本票起：网易云式），不是图形右边的一格——所以它的**内容**是：
+// 这一枚现在带一个读数（获赞数），而那个数收在**图形正下方**的一行小字里
+// （方案 A「垂直收束」），不是图形右上角的一枚角标——所以它的**内容**是：
 //
-//	[ 32 × 32 的按钮 ]：正中一个 18×18 的图形盒子，角标挂在盒子的右上角
+//	[ 36 × 50 的按钮 ]：上是一个 18×18 的图形盒子，下是那一行数字
 //
-// ⚠️ **图形那一块是 18 × 18，按钮比它大**：按钮的宽是 32（图形 18 + 两侧各 7，
-// 和没有数字时**一模一样**——角标不占布局）。
+// ⚠️ **图形那一块是 18 × 18，按钮比它高**：有数字时键加高（`pbCountKey`，
+// 36 × 50），宽**一个字节都不差**——数字收在键内、占键的高。
 //
 // ⚠️ **所以两层挂在「图形盒子」上**：绝对定位是相对**父元素的 padding box**，
 // 而图形盒子是按钮里那个 18×18 的孩子——于是 `Attach(AnchorCenter,
@@ -771,10 +772,11 @@ func (s *Shell) viewLikeStar(c *ui.Context, st app.State) {
 // 一个动作，按下去的时候让它**涨一点**，比缩下去更像「按到了」（手册 ⓪ ①：
 // 「如果是放大，一般 1.04 就够了」）。
 func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, liked bool, count int64) ui.Element {
-	// ⚠️ **按钮的宽是 32**（图形 18 + 两侧各 7 的内边距）——角标不占布局，
-	// 所以**带不带数字都一样宽**，和改之前**一个字节都不差**。
-	b := pbKey(c, label)
-	hasCount := playbarCountText(count) != ""
+	// ⚠️ **有数字时键加高**（方案 A：宽 36、高 50）——数字收在图形下面、占
+	// 键内的高度；**没有数字还是 36 的那一枚**，宽一个字节都不差。
+	// 「多高」在建壳之前定下来：`pbKey` / `pbCountKey` 一调就挂树，建完再换
+	// 会留下一个同名的废按钮。
+	b := pbCountKey(c, label, playbarCountText(count) != "")
 
 	// 长按三连：这一帧的按住喂进赞键**自己那一份**状态机。
 	//
@@ -798,18 +800,11 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 
 	// 🔴 **图形那一块**（和「背景层 + 图标层」那两层是同一块地方）。
 	//
-	// ⚠️ **锚盒子是 18 × 18**（`iconMd`）：角标挂在**图形**的右上角，而那一圈
-	// 底色也要以图形为中心——所以两层都挂在**一个正好 18 宽的盒子**上。
+	// ⚠️ **锚盒子是 18 × 18**（`iconMd`）：两层都挂在**一个正好 18 宽的
+	// 盒子**上——那一圈底色以图形为中心，数字排在盒子下面（`countLine`）。
 	//
-	// 🔴 **底色的形状不再分两档**：改之前带数字时是「18 × 32 的胶囊」（怕压住
-	// 右边那一格数字）。角标不占布局了，所以那一圈回到 **32 × 32 的圆**——
-	// 和没有数字时**一模一样**。
-	//
-	// ⚠️ **而那一圈不会盖住角标**：角标挂在图形盒子的**右上角**（盒子坐标
-	// x≈9..18、y≈0..9 那一小角），而那一圈的右上半径离它还有一段——满大时
-	// 圆的边缘在那一角之下（实测那一小角在圆的 14° 那一带，圆的边缘离它
-	// 还有约 4 像素）。真压上是「角标往右下挪多了」的事——那时挪的是
-	// `countBadge` 里那个 `Attach` 的锚/偏移，不是这一圈。
+	// 🔴 **底色的形状**：32 × 32 的圆，和没有数字时**一模一样**——数字在
+	// 键的下半区，那一圈只管图形那一带。
 	bgW, bgH := float32(iconHitMd), float32(iconHitMd)
 	drawIcon := func(c *ui.Context) {
 		// 背景层（先建 → 画在下面）
@@ -853,28 +848,18 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 	}
 
 	b.Children(func() {
-		// 🔴 **图形盒子是 18 × 18**：两层（底色 + 拇指）挂在它上面，角标挂在
-		// 它的右上角——三样都以**同一个盒子**为锚。
+		// 🔴 **竖着排**（方案 A）：图形盒子在上、数字在下——和另外两枚走同一
+		// 份排版（`countKeyIconOn`），只不过这一枚的图形那一层是自己拼的
+		// （底色 + 拇指两层绝对定位）。
 		//
-		// ⚠️ **盒子本身在流里**（绝对定位的孩子不占宽）：按钮的宽还是
-		// 18 + 7 + 7 = 32，和没有数字时**一个字节都不差**。
-		ui.Box(c).Size(iconMd, iconMd).Children(func() {
-			drawIcon(c)
-			// 🔴 **缺口角标**（票 #701 起带数、本票起收成网易云式缺口）：获赞数。
-			//
-			// ⚠️ **走共享的那一份**（`countBadge`）：缺口块 / 挂点 / 字号 / 颜色
-			// **只有一处**——赞键自己拼图形盒子（那两层是绝对定位的，有自己的锚
-			// 结构），但角标不许另写一份。
-			//
-			// ⚠️ **缺口色 = 按钮底下那块底**：播放条那一列的底是
-			// `coverWash(t.Background)`（和播放条自己同一个来源，`playbar.go`）。
-			//
-			// 🔴 **`dx` 传图形自己那一份抖**（不是 0）：长按三连的时候底下那两层
-			// 在 `dx` 上抖，缺口块不吃同一个平移就是「图标在抖、缺口原地不动」
-			// ——按住 2.5s 全程缺口漂离图标（对抗性审查查出的一笔）。
-			if hasCount {
-				countBadge(c, count, s.coverWash(c.Theme(), c.Theme().Background), dx)
-			}
+		// ⚠️ **数字走共享的那一份**（`countLine`）：字号 / 颜色 / 「排在图形
+		// 下面」只有一处——赞键的图形自己拼，但数字不许另写一份。
+		ui.Column(c).Gap(space.Px2).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+			// 🔴 **图形盒子是 18 × 18**：两层（底色 + 拇指）挂在它上面。
+			ui.Box(c).Size(iconMd, iconMd).Children(func() {
+				drawIcon(c)
+			})
+			countLine(c, count)
 		})
 	})
 	return b
