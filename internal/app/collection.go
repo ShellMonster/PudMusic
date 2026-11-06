@@ -269,6 +269,8 @@ type collections struct {
 	folderResult  folderResult
 	coverURL      coverURL
 	folderDraft   folderDraft
+	// likedResult 是「喜欢歌单绑定」那一摊的结果出口（likedfolder.go）。
+	likedResult likedResult
 }
 
 // MountCollections 把歌单内容页要用的零件挂上。**在开窗口之前调**。

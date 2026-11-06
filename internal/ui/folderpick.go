@@ -114,6 +114,10 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 func (s *Shell) listActions() list.Actions {
 	acts := list.AppActions(s.app, s.addToast)
 	acts.FavSelect = s.openFolderSelect
+	// ⚠️ **「喜欢」心是另一条路**（`Liked`）：进绑定歌单、没绑过先问一次。
+	// 右键菜单的「收藏」照旧走 `FavSelect` 那个多选框——两条路的区别见
+	// `likedbind.go` 的文件头。
+	acts.Liked = s.likeItem
 	// 🔴 **复制走 `s.copyText`，不是 `s.wake.writeClipboard`**（票 #685 的对抗性
 	// 审查）：后者**不取号**，于是在途的封面那一趟（后台编 PNG，慢）跑完时问
 	// `isLatest(gen)` 仍然是 true，它会照写——用户最后按的「复制歌名」被一张旧

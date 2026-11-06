@@ -40,6 +40,11 @@ type folderFixture struct {
 	// createTitle 是 add 接口回的新收藏夹名字（默认照请求里的 title 回，
 	// 测试可以改成「B 站改过的名字」来验侧栏用的是接口那一份）。
 	createTitle string
+	// dealCode / dealMsg 让 resource/deal 回一个业务错误（0 = 成功）。
+	// 「绑定的歌单已经没了」（-400）和「服务器坏了」（-500）是两种错，
+	// 喜欢那一摊要分得清它们。
+	dealCode int
+	dealMsg  string
 }
 
 func newFolderFixture(t *testing.T) *folderFixture {
@@ -80,6 +85,10 @@ func newFolderFixture(t *testing.T) *folderFixture {
 			_ = r.ParseForm()
 			f.added = append(f.added, r.PostForm.Get("add_media_ids"))
 			f.deleted = append(f.deleted, r.PostForm.Get("del_media_ids"))
+			if f.dealCode != 0 {
+				writeCollectionJSON(t, w, f.dealCode, f.dealMsg, nil)
+				return
+			}
 			writeCollectionJSON(t, w, 0, "0", nil)
 		default:
 			http.NotFound(w, r)
@@ -120,6 +129,14 @@ func (f *folderFixture) deals() (added, deleted []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.added...), append([]string(nil), f.deleted...)
+}
+
+// failDeal 让下一次起 resource/deal 都回这个业务错误（造「绑定的歌单没了」
+// 和「网络坏了」两种失败）。
+func (f *folderFixture) failDeal(code int, msg string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dealCode, f.dealMsg = code, msg
 }
 
 // folderApp 装一个指向这台假 B 站的 App。

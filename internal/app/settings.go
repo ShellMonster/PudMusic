@@ -499,6 +499,14 @@ type Settings struct {
 
 	// DynamicSeen 是「动态红点看到哪儿了」。
 	DynamicSeen DynamicSeen `json:"dynamicSeen"`
+
+	// LikedFolder 是「喜欢默认放进哪个收藏夹」那份绑定（likedfolder.go）。
+	//
+	// 它和 `SideMenuCollectionOrder` 是同一种东西：B 站那边没有对应字段，
+	// 只能存本地，而它必须落盘——不然每次启动都被问一遍「绑定哪个歌单」。
+	// `ID == 0` 表示没绑。加可选键不涨 SchemaVersion（先例见
+	// `PlaybackResume`）。
+	LikedFolder LikedFolder `json:"likedFolder"`
 }
 
 // knownSettingsKeys 是 Settings 里我们自己认识的键，从结构体标签反射出来。

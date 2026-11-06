@@ -904,6 +904,12 @@ type Shell struct {
 	// folderSelect 是「把这一首放进哪些收藏夹」那个弹窗（folderselect.go）。
 	folderSelect *folderSelect
 
+	// likeBind 是「给喜欢找一个专属歌单」那个弹窗（likedbind.go）。
+	// likePending 是「正在替哪一首办绑定」——绑定三档走完都要把它放进
+	// 新绑的格子；从设置进来换绑定时它是 nil（只换绑定不收歌）。
+	likeBind    *likeBind
+	likePending *likePending
+
 	// folderDelete 是侧栏收藏夹「删除」那个二次确认要跨帧活着的状态
 	// （sidebar_favorites.go）。
 	//

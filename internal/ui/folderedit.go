@@ -318,7 +318,37 @@ func (s *Shell) flushFolderResults() {
 		return
 	}
 	sel := s.folderSelect
+	lb := s.likeBind
 	switch {
+	case lb != nil && lb.submitting && lb.step == likeBindCreate:
+		// 「新建喜欢歌单」那一档：建成之后**绑上它**，有 pending 的那一首
+		// 再收进新绑的格子（那一趟的结果走 `TakeLikedResult`，不是这里）。
+		//
+		// ⚠️ **失败要留着弹窗**（同下面 e.submitting 那一支）：名字还敲在
+		// 界面上，关掉等于让他从头敲一遍。
+		lb.submitting = false
+		if !res.OK {
+			s.addToast(res.Text, folderResultTone(false))
+			break
+		}
+		// 绑定的名字用**接口回回来的那个**（B 站会改名字，见
+		// `submitFolder` 里 Upsert 那段注释）。侧栏这一份是刚 Upsert
+		// 进去的，按 id 查回来。
+		title, private := lb.name, !lb.public
+		for _, f := range s.app.SideFavorites(app.FavoritesCreated) {
+			if f.ID == res.Folder {
+				title = f.Title
+				break
+			}
+		}
+		s.app.BindLikedFolder(app.LikedFolder{ID: res.Folder, Title: title, Private: private})
+		if s.likePending != nil {
+			lb.submitting = true
+			s.app.FavoriteIntoBound(lb.rid, lb.contentType)
+			break
+		}
+		s.closeLikeBind()
+		s.addToast("已创建并绑定「"+title+"」", notice.Success)
 	case sel != nil && sel.submitting:
 		// ⚠️ **成功才关弹窗，失败留着**：失败的时候勾还在界面上，重试一下就行；
 		// 关掉等于让用户从头勾一遍。

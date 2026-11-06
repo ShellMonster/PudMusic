@@ -87,6 +87,17 @@ type Actions struct {
 	// 入口——那一份在 `internal/ui/folderselect.go`。
 	FavSelect func(item app.Item)
 
+	// Liked 是行上那颗「喜欢」心做的事（`pud.TrackRow` 的 `ev.Like`）。
+	//
+	// ⚠️ **和 `FavSelect` 是两条路**：喜欢进**绑定的**那个收藏夹
+	// （没绑过先问一次，见 `internal/ui/likedbind.go`）；收藏弹
+	// 「放进哪些收藏夹」的多选框。两条路最后都落在 `resource/deal`，
+	// 区别只在放进哪一个格子。
+	//
+	// 为 nil 时行上的心退回到 `FavSelect` 那一条（`pudrow.go` 里的兜底）：
+	// 没接「喜欢」那一摊的地方（测试里随手拼的 Actions）照旧能用。
+	Liked func(item app.Item)
+
 	// Download 把这一首排进下载队列。
 	//
 	// ⚠️ **缺 cid 的条目按不动，这是真的「下不了」而不是「还没接」**：下载按

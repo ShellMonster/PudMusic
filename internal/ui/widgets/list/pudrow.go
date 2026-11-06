@@ -108,8 +108,15 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		l.sel2.Toggle(i)
 	case ev.Play:
 		l.rowPlay(i)
-	case ev.Like && l.acts.FavSelect != nil:
-		l.acts.FavSelect(m.Item)
+	case ev.Like && (l.acts.Liked != nil || l.acts.FavSelect != nil):
+		// ⚠️ **喜欢是 `Liked` 那一条**（绑定歌单），`FavSelect` 是兜底
+		// （没接喜欢那一摊的地方照旧开多选框）。见 `actions.go` 里
+		// `Liked` 的注释。
+		if l.acts.Liked != nil {
+			l.acts.Liked(m.Item)
+		} else {
+			l.acts.FavSelect(m.Item)
+		}
 	case ev.Owner && l.acts.OpenOwner != nil && m.Item.ArtistMid > 0:
 		l.acts.OpenOwner(m.Item.ArtistMid, m.Owner)
 	}
