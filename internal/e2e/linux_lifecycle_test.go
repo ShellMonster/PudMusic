@@ -14,17 +14,31 @@ package e2e
 //     里画得出界面（元素树里有东西）。
 //  2. **单实例挡得住第二个**：起第二个进程，它该自己退出（命令行转交），
 //     而第一个还活着。
-//  3. **退得干净**：菜单里「布丁音乐 → 退出」那一项真的让进程退出来。
+//  3. **退得干净**：托盘菜单里「退出程序」那一项真的让进程退出来。
 //
-// ⚠️ **「托盘右键退出」这一档在 Linux 上验不了**：托盘是 AppIndicator
-// （StatusNotifierItem），菜单是**面板进程画的**（GNOME 的 shell-extension），
-// 不在我们自己的窗口里——automation 的 `menu` 方法按窗口的菜单栏找
-// （`linux.TestActivateMenuItem`，只走 `w.menubar`），够不到它。能验的那
-// 一半是「应用菜单里那条退出」，它和托盘那条 `退出程序` 都落在
-// `mygo.App.Quit()` 上（`internal/ui/tray.go:120` 和 `menu.go` 的
-// `RoleQuit`）。**托盘那半在票上留着**：见 README《当前边界》。
+// # 退出那一档验的是哪条路
 //
-// ⚠️ **CI 上怎么跑**：`ubuntu-latest` + Xvfb + `libgtk-3-0t64` +
+// ⚠️ **Linux 窗口上没有菜单栏**：`installMenu`（`internal/ui/menu.go`）
+// 只在 macOS 上装——Windows / Linux 上框架默认一栏菜单都没有，多一条
+// 反而是 Biu 没有的窗口布局。所以**不存在**「窗口菜单 → 退出」这条路，
+// automation 的 `menu` 方法（`linux.TestActivateMenuItem`，只走
+// `w.menubar`）在 Linux 上必报 "no menu bar"。
+//
+// 真正的退出入口是**托盘右键菜单的「退出程序」**（`internal/ui/tray.go`
+// 的 `trayQuitID`，落在 `App.Quit()`）。而那份菜单是 AppIndicator
+// （StatusNotifierItem）协议交给**面板进程**画的——Xvfb 下没有真面板，
+// automation 够不到它。
+//
+// ⇒ 所以这一档走 **E2E 钩子**（`automation_e2e.go` 的 serveTrayHook +
+// `internal/ui/e2e_hook.go` 的 `E2EActivateTrayItem`）：在真进程里、
+// 主线程上，激活托盘菜单里 `tray.quit` 那一项——和用户在面板上点它是
+// **同一个 Click、同一条 `App.Quit()`**。
+//
+// ⚠️ **验不到的那一半**：「面板真的把菜单画出来了、点得到」在 Xvfb
+// 里没有面板可验，那一半不在这份测试里（也不在任何测试里——别把它
+// 当成已覆盖）。验到的是：菜单项存在、能点、点了进程真退。
+//
+// ⚠️ **CI 上怎么跑**：`ubuntu-24.04` + Xvfb + `libgtk-3-0t64` +
 // `libayatana-appindicator3-1`（见 `.github/workflows/linux.yml`）。
 // 本机 macOS 上它会在 `GOOS != "linux"` 那一行 skip。
 //
@@ -36,11 +50,14 @@ package e2e
 // （Linux 下可以是 Xvfb）。
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -104,25 +121,51 @@ func TestLinuxLifecycle(t *testing.T) {
 		}
 	})
 
-	t.Run("菜单里的退出真的让进程退出来", func(t *testing.T) {
-		window := firstContentWindow(t, client)
-		// Linux 的菜单栏在窗口上，`menu` 方法按标签找项
-		// （`linux.TestActivateMenuItem`）。第一栏是应用菜单，名字是应用名
-		// （`windowTitle` 拿到的就是那一栏的名字）。
-		err := automationCall(client, 400, "menu", map[string]any{
-			"window": window,
-			"path":   []string{windowTitle(t, client, window), "退出"},
-		}, nil)
-		if err != nil {
-			t.Fatalf("点「%s → 退出」：%v", windowTitle(t, client, window), err)
+	t.Run("托盘菜单的退出项真的让进程退出来", func(t *testing.T) {
+		// 先断「菜单里真有这一项、它能点」——把「没这项」和「点了没退」
+		// 分开，不然挂了分不清是菜单形状坏了还是退出路径坏了。
+		switch got := trayHookCall(t, "tray.enabled tray.quit"); got {
+		case "enabled":
+		case "missing":
+			t.Fatal("托盘菜单里没有 tray.quit：托盘建不出来或菜单里没有退出项")
+		default:
+			t.Fatalf("tray.quit 是 %q（want enabled）：退出项该是能点的", got)
 		}
-		// ⚠️ **判据是进程真的退**：`RoleQuit` 走 `App.Quit()`——OnBeforeQuit、
-		// 关窗口、OnWillQuit 存设置，然后 `App.Run()` 返回、进程退出。
-		// `automationCall` 成功只说明「菜单项点了」，不说明进程退了。
+		// 激活它——和用户在面板上点「退出程序」是同一个 Click、同一条
+		// `App.Quit()`（OnBeforeQuit → 关窗口 → OnWillQuit 存设置 → 进程退）。
+		if got := trayHookCall(t, "tray.click tray.quit"); got != "ok" {
+			t.Fatalf("点托盘退出项：%q（want ok）", got)
+		}
+		// ⚠️ **判据是进程真的退**：`tray.click` 回了 "ok" 只说明「这项
+		// 激活了」，不说明进程退了。
 		if !waitForProcessGone(t, client, 20*time.Second) {
-			t.Fatal("点了「退出」之后进程还活着（automation socket 还在应答）")
+			t.Fatal("点了托盘「退出程序」之后进程还活着（automation socket 还在应答）")
 		}
 	})
+}
+
+// trayHookCall 往 E2E 钩子 socket（`$MYGO_AUTOMATION.tray`，见
+// `automation_e2e.go` 的 serveTrayHook）发一行命令，拿一行回答。
+//
+// ⚠️ **socket 路径就是 automation socket 加 ".tray"**：`startRealApp` 把
+// automation socket 存在 `appHandle.automationSocket`，两边规则一致。
+func trayHookCall(t *testing.T, command string) string {
+	t.Helper()
+	sock := appHandle.automationSocket + ".tray"
+	conn, err := net.DialTimeout("unix", sock, 5*time.Second)
+	if err != nil {
+		t.Fatalf("连托盘钩子 socket %s：%v", sock, err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte(command + "\n")); err != nil {
+		t.Fatalf("发 %q：%v", command, err)
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("读 %q 的回答：%v", command, err)
+	}
+	return strings.TrimSpace(line)
 }
 
 // waitForProcessGone 等 automation socket **不再应答**——进程退出去之后

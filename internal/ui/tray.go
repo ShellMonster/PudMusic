@@ -120,11 +120,20 @@ func (s *Shell) trayMenu() *mygo.Menu {
 		{ID: trayQuitID, Label: "退出程序", Click: func(*mygo.MenuItem, *mygo.Window) {
 			// 走 App.Quit 而不是直接退：退出流程要经过 OnBeforeQuit → 挨个关窗口
 			// → OnWillQuit 存设置。绕过它，用户刚改的设置就没了。
-			mygo.App.Quit()
+			quitFunc()
 		}},
 	}
 	return mygo.NewMenu(items)
 }
+
+// quitFunc 是「退出程序」那一项落的退出入口。
+//
+// ⚠️ **为什么是变量**：Linux 上它是唯一的图形化退出入口（窗口没有菜单栏），
+// 而 AppIndicator 的菜单由面板进程画、自动化点不到——能钉住的就是「这项
+// Click 落在 App.Quit 上」。测试把它换成假的来断调用本身（
+// `tray_test.go` 的 TestTheTrayQuitItemQuitsTheApp）；真机上它就是
+// `mygo.App.Quit`。
+var quitFunc = mygo.App.Quit
 
 // refreshTrayMenu 刷状态栏菜单上那些会变的东西。
 //

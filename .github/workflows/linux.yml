@@ -19,7 +19,7 @@ permissions:
 jobs:
   build:
     name: Build unsigned Linux artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
 
     steps:
@@ -88,7 +88,7 @@ jobs:
 
   e2e:
     name: Linux lifecycle E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -113,7 +113,8 @@ jobs:
           set -euo pipefail
           # 三条一起跑（一条命令、一次编译）：
           #   起得来（窗口画得出来）、第二个实例递完命令行自己退出、
-          #   菜单里「退出」真的让进程退出来。
+          #   托盘菜单的「退出程序」真的让进程退出来（走 E2E 钩子——
+          #   Xvfb 下没有面板画 AppIndicator 菜单，窗口上也没有菜单栏）。
           #
           # ⚠️ dbus-x11 + dbus-run-session：托盘是 AppIndicator，要走
           # session bus；没有它 `installTray` 只是建不出来（记一行日志、

@@ -146,3 +146,40 @@ func TestTheTrayMenuKeepsEveryItemBiuHas(t *testing.T) {
 		}
 	}
 }
+
+// TestTheTrayQuitItemQuitsTheApp 断「退出程序」那一项点了走 `App.Quit()`。
+//
+// ⚠️ **为什么单独断这一条**：Linux 上窗口没有菜单栏（`installMenu` 只装
+// macOS），托盘右键菜单的「退出程序」是**唯一**的图形化退出入口——而
+// AppIndicator 的菜单由面板进程画，Xvfb 下 automation 点不到它（见
+// `internal/e2e/linux_lifecycle_test.go` 的文件头）。能验的就是「菜单里
+// 有这一项、它的 Click 真的落在 `App.Quit()`」——后者走 OnBeforeQuit →
+// 关窗口 → OnWillQuit 存设置那一整条，绕过它设置就丢。
+//
+// ⚠️ **不真调 `mygo.App.Quit()`**：测试进程没有事件循环，真调会把整个
+// 测试 binary 拉进退出流程。所以退出入口走包级变量 `quitFunc`，这一档
+// 把它换成假的、断言「Click 调到它了」——真机上它是 `mygo.App.Quit`。
+func TestTheTrayQuitItemQuitsTheApp(t *testing.T) {
+	b := newTestShell(t)
+	m := b.s.trayMenu()
+	it := m.ItemByID(trayQuitID)
+	if it == nil {
+		t.Fatal("状态栏菜单里没有「退出程序」那一项")
+	}
+	if !it.IsEnabled() {
+		t.Error("「退出程序」那一项是灰的：它得能点")
+	}
+	if it.Click == nil {
+		t.Fatal("「退出程序」那一项没有 Click：点了什么也不会发生")
+	}
+
+	called := 0
+	old := quitFunc
+	quitFunc = func() { called++ }
+	defer func() { quitFunc = old }()
+
+	it.Click(it, nil)
+	if called != 1 {
+		t.Errorf("点「退出程序」调了 %d 次退出入口，want 1 次（它该落在 App.Quit 上）", called)
+	}
+}

@@ -54,8 +54,15 @@ for platform in "${targets[@]}"; do
   target="${platform//\//-}"
   label="$(platform_label "$platform")"
   dir="$out/$target"
-  # ⚠️ 更新归档归 update-* 一族（排资产列表后面），安装包用品牌名 PudMusic。
-  archive="$dir/update-$target.tar.gz"
+  # ⚠️ 更新归档的名字**分平台**：macOS / Windows 的 tar.gz 被
+  # `rename-release-assets.sh` 归成 `update-<target>.tar.gz`（排资产列表
+  # 后面），而 **Linux 的 tar.gz 不改名**——它是 `install.sh` 在同目录找的
+  # `$slug-$version-$target.tar.gz` 和 `PKGBUILD` 的 `source`（见
+  # rename 脚本里那段注释）。清单 `update-<target>.json` 两边同名。
+  case "$platform" in
+    linux/*) archive="$dir/$slug-$version-$target.tar.gz" ;;
+    *)       archive="$dir/update-$target.tar.gz" ;;
+  esac
   manifest="$dir/update-$target.json"
   [ -d "$dir" ] || { printf '缺少产物目录：%s\n' "$dir" >&2; exit 1; }
   [ -f "$archive" ] || { printf '%s 缺少更新归档：%s\n' "$target" "$archive" >&2; exit 1; }
@@ -89,11 +96,10 @@ PY
       [ -f "$package" ] || { printf '%s 缺少 Windows 安装包：%s\n' "$target" "$package" >&2; exit 1; }
       ;;
     linux/*)
-      # ⚠️ **deb 和「update-* 归档」是两份，都要在**：mygo 的 linux tar.gz
-      # 已经被 `rename-release-assets.sh` 归成 `update-<target>.tar.gz`
-      # （它同时是更新归档和 install.sh 要的 ARCHIVE，同一份文件），所以
-      # 这里验的是「`.deb` + `update-*.tar.gz`」——不是「`.deb` + 品牌名
-      # tar.gz」。
+      # ⚠️ **deb 和原名 tar.gz 是两份，都要在**：`.deb` 在上面验，
+      # tar.gz（`$slug-$version-$target.tar.gz`）在前面 archive 那一档
+      # 已经验过——它同时是更新归档、install.sh 的 ARCHIVE 和 PKGBUILD
+      # 的 source，所以**不能**改名（见 rename 脚本里那段注释）。
       package="$dir/PudMusic-$version-$label.deb"
       [ -f "$package" ] || { printf '%s 缺少 Debian 安装包：%s\n' "$target" "$package" >&2; exit 1; }
       ;;

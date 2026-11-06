@@ -140,8 +140,9 @@ func startRealApp(t *testing.T) (*automationClient, func()) {
 // `(client, stop)`，改签名要跟着改一圈——而这一组里只有 Linux 那一族
 // 还要问「起在哪儿了」。
 var appHandle struct {
-	binary  string
-	dataDir string
+	binary           string
+	dataDir          string
+	automationSocket string
 }
 
 // startRealAppWith 是 `startRealApp` 的内里，`seedSession` 说要不要先往
@@ -238,6 +239,7 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 	client := &automationClient{conn: conn, enc: json.NewEncoder(conn), dec: bufio.NewReader(conn)}
 	appHandle.binary = binary
 	appHandle.dataDir = filepath.Join(socketDir, "data")
+	appHandle.automationSocket = socket
 	return client, stop
 }
 
