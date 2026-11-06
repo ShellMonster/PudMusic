@@ -169,6 +169,109 @@ func TestTheDockPlaybackItemsAreDisabledWithoutATrack(t *testing.T) {
 			t.Errorf("没有歌的时候 Dock 菜单 %q 那一项还是能点的：按了什么也不会发生", id)
 		}
 	}
+	if it := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "like"); it == nil {
+		t.Error("Dock 菜单里没有「喜欢歌曲」")
+	} else if it.IsEnabled() {
+		t.Error("没有歌的时候「喜欢歌曲」还是能点的")
+	}
+}
+
+// TestTheDockPlayItemSaysPauseWhilePlayingAndPlayWhilePaused 断 Dock 菜单上的
+// 第一项跟着实际播放状态变文案。
+func TestTheDockPlayItemSaysPauseWhilePlayingAndPlayWhilePaused(t *testing.T) {
+	b := newTestShell(t)
+	s := b.s
+	s.dockMenuRef = s.buildDockMenu()
+
+	s.refreshDockMenu(app.State{
+		HasTrack: true,
+		Playing:  true,
+		PlayMode: app.PlayModeRandom,
+	})
+	toggle := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "togglePlay")
+	if toggle == nil {
+		t.Fatal("Dock 菜单里没有播放项")
+	}
+	if toggle.Label != "暂停" {
+		t.Errorf("播放中的 Dock 菜单项是 %q，want %q", toggle.Label, "暂停")
+	}
+	if !toggle.IsEnabled() {
+		t.Error("播放中的播放项被禁用了")
+	}
+	random := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "playMode." + string(app.PlayModeRandom))
+	if random == nil || !random.IsChecked() {
+		t.Error("播放模式为随机时，随机播放没有被选中")
+	}
+
+	s.refreshDockMenu(app.State{
+		HasTrack: true,
+		Playing:  false,
+		PlayMode: app.PlayModeSequence,
+	})
+	if got := toggle.Label; got != "播放" {
+		t.Errorf("暂停中的 Dock 菜单项是 %q，want %q", got, "播放")
+	}
+	sequence := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "playMode." + string(app.PlayModeSequence))
+	if sequence == nil || !sequence.IsChecked() {
+		t.Error("播放模式为顺序时，顺序播放没有被选中")
+	}
+	if random.IsChecked() {
+		t.Error("切到顺序播放后，随机播放仍然被选中")
+	}
+}
+
+// TestTheDockMenuHasLikeAndPlayModeActions 断 Dock 菜单里有喜欢歌曲和播放模式
+// 子菜单，并且播放模式是四个互斥选项。
+func TestTheDockMenuHasLikeAndPlayModeActions(t *testing.T) {
+	b := newTestShell(t)
+	m := b.s.buildDockMenu()
+
+	like := m.ItemByID(dockMenuIDPrefix + "like")
+	if like == nil || like.Label != "喜欢歌曲" {
+		t.Fatalf("Dock 菜单里没有「喜欢歌曲」项")
+	}
+	mode := m.ItemByID(dockMenuIDPrefix + "playMode")
+	if mode == nil || mode.Label != "播放模式" {
+		t.Fatalf("Dock 菜单里没有「播放模式」子菜单")
+	}
+	if len(mode.Submenu) != len(app.PlayModes) {
+		t.Fatalf("播放模式子菜单有 %d 项，want %d", len(mode.Submenu), len(app.PlayModes))
+	}
+	for i, want := range app.PlayModes {
+		got := mode.Submenu[i]
+		if got.Type != mygo.MenuItemRadio {
+			t.Errorf("播放模式第 %d 项类型是 %v，want radio", i, got.Type)
+		}
+		if got.Label != want.Desc() {
+			t.Errorf("播放模式第 %d 项是 %q，want %q", i, got.Label, want.Desc())
+		}
+	}
+}
+
+// TestTheDockPlaybackItemsRunTheCommand 断 Dock 菜单里的播放控制仍走统一命令入口。
+func TestTheDockPlaybackItemsRunTheCommand(t *testing.T) {
+	b := newTestShell(t)
+	s := b.s
+	m := s.buildDockMenu()
+	var fired []string
+	s.onShortcut = func(id string) { fired = append(fired, id) }
+
+	for _, id := range []string{"togglePlay", "prev", "next"} {
+		it := m.ItemByID(dockMenuIDPrefix + id)
+		if it == nil {
+			t.Fatalf("Dock 菜单里没有命令 %q", id)
+		}
+		it.Click(it, nil)
+	}
+	want := []string{"togglePlay", "prev", "next"}
+	if len(fired) != len(want) {
+		t.Fatalf("点了三项，命令入口被调了 %d 次（%v），want %d 次", len(fired), fired, len(want))
+	}
+	for i := range want {
+		if fired[i] != want[i] {
+			t.Errorf("第 %d 次是 %q，want %q", i+1, fired[i], want[i])
+		}
+	}
 }
 
 // TestTheCommentsItemUsesTheSameJudgeAsTheInterface 断**「显示评论」和界面

@@ -490,6 +490,7 @@ func (s *Shell) menuAccelFor(id string) string {
 // ⚠️ **快照是外面传进来的**（`viewMain` 取的那一份）：`Snapshot()` **会分配**
 // （章节切片 + B 站链接字符串），而这一帧已经取过一次了——再取一份就是白花。
 func (s *Shell) refreshMenuChecked(st app.State) {
+	s.refreshDockMenuFromState(st)
 	if s.menu == nil {
 		return
 	}

@@ -875,10 +875,12 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 			// 能不能按看的是队列，和播放条上那两个键是同一个判据（`viewStepButtons`）。
 			if pud.IconBtn(c, "mini-prev", "prev", "上一首", pud.IconOpts{Disabled: !s.app.CanPrev()}).Clicked() {
 				s.app.Prev()
+				s.refreshDockMenuFromApp()
 			}
 			s.viewMiniPlay(c, st)
 			if pud.IconBtn(c, "mini-next", "next", "下一首", pud.IconOpts{Disabled: !s.app.CanNext()}).Clicked() {
 				s.app.Next()
+				s.refreshDockMenuFromApp()
 			}
 			ui.Spacer(c).Grow(1)
 			// 喜欢：原型只在这首歌是 B 站投稿的时候画（`TR[t.id] ? … : ''`）。
@@ -937,6 +939,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	b = s.withLoadHalo(c, b, st, miniPlayBtn, st.HasTrack)
 	if b.Clicked() {
 		s.app.Toggle()
+		s.refreshDockMenuFromApp()
 	}
 }
 

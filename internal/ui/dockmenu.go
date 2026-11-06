@@ -60,11 +60,11 @@ func (s *Shell) installDockUI() {
 // 错开——`Menu.ItemByID` 是按整棵树找的，撞了 id 会改错那一项）。
 const dockMenuIDPrefix = "dock.cmd."
 
-// installDockMenu 给 macOS 的 Dock icon 装一份三项菜单。
+// installDockMenu 给 macOS 的 Dock icon 装一份播放控制菜单。
 //
 // ⚠️ **这一份菜单只建一次**——`App.Dock.SetMenu` 是「换掉整份菜单」
-// （`mygo/app.go:569`），运行期不能往里塞东西也不能往外拿。所以「能不能点」
-// 由 `refreshDockMenu` 跟着 `HasTrack` 刷 `SetEnabled` 来改，**不重建**。
+// （`mygo/app.go:569`），运行期不能往里塞东西也不能往外拿。所以动态文案、
+// 勾选态和可用态都由 `refreshDockMenu` 修改，**不重建**。
 func (s *Shell) installDockMenu() {
 	menu := s.buildDockMenu()
 	mygo.App.Dock.SetMenu(menu)
@@ -76,13 +76,77 @@ func (s *Shell) installDockMenu() {
 // 那一步把它递给 `App.Dock.SetMenu`；拆开是方便测试直接拿着它查 id。
 func (s *Shell) buildDockMenu() *mygo.Menu {
 	return mygo.NewMenu([]*mygo.MenuItem{
-		{ID: dockMenuIDPrefix + "togglePlay", Label: commandName("togglePlay"),
+		{ID: dockMenuIDPrefix + "togglePlay", Label: "播放",
 			Click: func(*mygo.MenuItem, *mygo.Window) { s.onShortcut("togglePlay") }},
 		{ID: dockMenuIDPrefix + "prev", Label: commandName("prev"),
 			Click: func(*mygo.MenuItem, *mygo.Window) { s.onShortcut("prev") }},
 		{ID: dockMenuIDPrefix + "next", Label: commandName("next"),
 			Click: func(*mygo.MenuItem, *mygo.Window) { s.onShortcut("next") }},
+		mygo.Separator(),
+		{ID: dockMenuIDPrefix + "like", Label: "喜欢歌曲",
+			Click: func(*mygo.MenuItem, *mygo.Window) { s.dockLikeCurrent() }},
+		mygo.Separator(),
+		{ID: dockMenuIDPrefix + "playMode", Label: "播放模式", Submenu: dockPlayModeItems(s)},
 	})
+}
+
+// dockPlayModeItems 是 Dock 菜单里的互斥播放模式。
+//
+// 播放模式在 App 里是四档互斥状态，所以这里用一个子菜单承载四个 radio
+// 项，而不是把「循环」和「随机」做成两个独立开关。点击后立刻刷新，菜单
+// 的勾选态跟真实状态保持一致。
+func dockPlayModeItems(s *Shell) []*mygo.MenuItem {
+	items := make([]*mygo.MenuItem, 0, len(app.PlayModes))
+	for _, m := range app.PlayModes {
+		mode := m
+		items = append(items, &mygo.MenuItem{
+			ID:      dockMenuIDPrefix + "playMode." + string(mode),
+			Label:   mode.Desc(),
+			Type:    mygo.MenuItemRadio,
+			Checked: s.app != nil && s.app.PlayMode() == mode,
+			Click: func(*mygo.MenuItem, *mygo.Window) {
+				if s.app == nil {
+					return
+				}
+				// 点已经选中的档位不应重置随机洗牌袋和历史栈。
+				if s.app.PlayMode() != mode {
+					s.app.SetPlayMode(mode)
+				}
+				s.refreshDockMenu(s.app.Snapshot())
+			},
+		})
+	}
+	return items
+}
+
+// dockLikeCurrent 是 Dock 菜单里的「喜欢歌曲」入口。
+//
+// Dock 菜单可以在主窗口隐藏、迷你播放器显示时被打开。喜欢流程的绑定弹窗
+// 只能由主窗口绘制，所以先收掉迷你播放器并恢复主窗口，再把动作交给
+// `likeCurrent`；否则弹窗状态会写入不可见的窗口。
+func (s *Shell) dockLikeCurrent() {
+	main := s.mainShell()
+	if main.mini != nil {
+		main.dropMini()
+	}
+	main.restoreMainWindow()
+	main.likeCurrent()
+}
+
+// refreshDockMenuFromState 把任意窗口收到的播放状态刷新到主窗口那份 Dock 菜单。
+//
+// 迷你播放器和刘海窗口共享 App 状态，但没有自己的 Dock 菜单引用；所有刷新都
+// 必须落到主壳。
+func (s *Shell) refreshDockMenuFromState(st app.State) {
+	s.mainShell().refreshDockMenu(st)
+}
+
+// refreshDockMenuFromApp 从共享 App 状态刷新 Dock 菜单。
+func (s *Shell) refreshDockMenuFromApp() {
+	if s.app == nil {
+		return
+	}
+	s.refreshDockMenuFromState(s.app.Snapshot())
 }
 
 // installJumpList 给 Windows 的任务栏跳转列表装三个 task。
@@ -109,42 +173,58 @@ func (s *Shell) installJumpList() {
 	}
 }
 
-// refreshDockMenu 刷 Dock 菜单上那三项的可用态。
+// refreshDockMenu 刷 Dock 菜单上会变化的文案、勾选态和可用态。
 //
 // ⚠️ **比一遍再改**：`SetEnabled` 每次都要往主线程投一个任务（同
 // `refreshTrayMenu` 的理由），而刷新是每帧调一次的——不比一遍就是每帧三次
 // 无谓的跨线程往返。
-//
-// ⚠️ **「从来没刷过」要单独认**：`dockHasTrack` 的零值是 false，跟「没歌」
-// 是同一个值——第一次进来时如果不区分「是 false 因为没刷过」和「是 false
-// 因为没歌」，那一趟就会原样 return，菜单上的三项**永远停在初始的可用态**
-// （默认是亮的）——`TestTheDockPlaybackItemsAreDisabledWithoutATrack` 就是
-// 来抓这个的。所以 `dockState` 是个三态：没刷过 / 没歌 / 有歌。
 func (s *Shell) refreshDockMenu(st app.State) {
 	if s.dockMenuRef == nil {
 		return
 	}
-	cur := dockStateNoTrack
-	if st.HasTrack {
-		cur = dockStateHasTrack
+	likeable := false
+	if s.app != nil {
+		likeable = s.app.Likeable()
+	}
+	cur := dockMenuState{
+		initialized: true,
+		hasTrack:    st.HasTrack,
+		playing:     st.Playing,
+		playMode:    st.PlayMode,
+		likeable:    likeable,
 	}
 	if s.dockState == cur {
 		return
 	}
 	s.dockState = cur
+
+	playLabel := "播放"
+	if st.HasTrack && st.Playing {
+		playLabel = "暂停"
+	}
+	if it := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "togglePlay"); it != nil {
+		it.SetLabel(playLabel)
+	}
 	for _, id := range []string{"togglePlay", "prev", "next"} {
 		if it := s.dockMenuRef.ItemByID(dockMenuIDPrefix + id); it != nil {
 			it.SetEnabled(st.HasTrack)
 		}
 	}
+	if it := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "like"); it != nil {
+		it.SetEnabled(likeable)
+	}
+	for _, mode := range app.PlayModes {
+		if it := s.dockMenuRef.ItemByID(dockMenuIDPrefix + "playMode." + string(mode)); it != nil {
+			it.SetChecked(mode == st.PlayMode)
+		}
+	}
 }
 
-// dockState 是 Dock 菜单上「三项能不能点」在**上一次刷新时**的样子。
-// 三态：没刷过（默认）/ 没歌 / 有歌——理由见 `refreshDockMenu` 顶上那段。
-type dockState int
-
-const (
-	dockStateNeverRefreshed dockState = iota
-	dockStateNoTrack
-	dockStateHasTrack
-)
+// dockMenuState 是 Dock 菜单上会变化的状态在**上一次刷新时**的样子。
+type dockMenuState struct {
+	initialized bool
+	hasTrack    bool
+	playing     bool
+	playMode    app.PlayMode
+	likeable    bool
+}
