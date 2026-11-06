@@ -125,7 +125,7 @@ func appMenu(s *Shell) *mygo.Menu {
 		// 文件的名字**——于是：
 		//
 		//   - 从 `mygo build` 打出来的包：名字是 `mygo.json` 里的「布丁音乐」 ✓
-		//   - **源码直接 `go build` 出来的**：名字是「pudmusic」/「pudmusic-e2e」 ✗
+		//   - **源码直接 `go build` 出来的**：名字是「pudmusic」/「biugo-e2e」 ✗
 		//
 		// ⇒ 而**界面上那一律叫「布丁音乐」**（`appName`），窗口标题也是它。
 		// 菜单栏第一栏写着「pudmusic」而窗口标题写着「布丁音乐」——**同一个应用两个

@@ -40,6 +40,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -236,8 +237,23 @@ var extLedger = []struct {
 	{Ext: ".mp3", Judged: true},
 	{Ext: ".flac", Judged: true},
 	{Ext: ".wav", Judged: true},
-	{Ext: ".m4a", Judged: true},
-	{Ext: ".aac", Judged: true},
+	// ⚠️ **AAC/M4A 按平台分**：macOS 的 AudioToolbox、Windows 的 Media
+	// Foundation 都解得了它们，而 **Linux 上没有 AAC 解码器**
+	//（`extaf` 只在 darwin、`mfadec` 只在 windows）。Linux 上 `Playable`
+	// 说「能放」的话，界面会给一行标「可放」、按下去报「不支持」——
+	// 那正是本表要钉死的那种谎言。所以这两行的 `Judged` 跟着
+	// `runtime.GOOS` 走：本机是 Linux 时是 false（且欠条写明是平台
+	// 缺口，不是「测试坏了」），本机是 darwin/windows 时是 true。
+	{
+		Ext:    ".m4a",
+		Judged: runtime.GOOS != "linux",
+		Debt:   aacLedgerDebt,
+	},
+	{
+		Ext:    ".aac",
+		Judged: runtime.GOOS != "linux",
+		Debt:   aacLedgerDebt,
+	},
 	{Ext: ".ogg", Judged: true},
 	{Ext: ".aiff", Judged: true},
 	{Ext: ".aif", Judged: true},
@@ -249,6 +265,16 @@ var extLedger = []struct {
 		Debt: "PLAN §5.4（拍板「待定」，不计入排期）：Windows 上的 WMA 解码没做",
 	},
 }
+
+// aacLedgerDebt 是 `.m4a` / `.aac` 在 **Linux** 那一张欠条：那台机器上
+// 没有 AAC 解码器，是平台能力缺口，不是文件坏了。
+//
+// ⚠️ **只在 Linux 上才算欠着**：darwin / windows 上 `Judged` 是 true，
+// 那一行根本不进「放不了」那一档（`r.Judged || r.Debt == ""` 就跳过），
+// 这张欠条不会被念出来。而 Linux 上它会被念出来——那句人话由
+// `TestAnUnplayableFormatIsNamedAsSuch` 钉。
+const aacLedgerDebt = "Linux 最小可发行（见 mygo.json linux 段）：" +
+	"Linux 上没有 AAC 解码器，.m4a/.aac 在那台机器上放不出声"
 
 func TestEveryListedExtensionIsToldApartFromThePlayableOnes(t *testing.T) {
 	onLedger := map[string]bool{}

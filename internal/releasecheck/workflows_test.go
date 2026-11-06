@@ -37,21 +37,71 @@ func TestWindowsAACSpikeDoesNotCacheTheToolchain(t *testing.T) {
 //     哪一条，那一格就是「写了测试没人跑」；
 //  2. 不设 `BIU_RUN_MYGO_E2E=1` 的话，那些测试全会 skip——工作流绿着，
 //     而「Windows 上有 E2E」是个谎。
+//
+// ⚠️ **两条断言都必须落在「真正执行的那一行」上，不是落在注释里**：
+// 这个工作流的文件头注释里本来就有 `TestWindowsLifecycle` 和
+// `BIU_RUN_MYGO_E2E` 字样——在整个文件上 `strings.Contains`，把 `go test`
+// 命令整段删掉、或者把 env 写成 `= "0"`，测试照绿（CodeAnt 在 PR #773
+// 上点的就是这两条）。所以这里按行找 PowerShell 的赋值与 `go test` 的
+// `-run` 参数，而不是找「这个字符串出现过」。
 func TestWindowsE2EWorkflowRunsTheWindowsTests(t *testing.T) {
 	src := readRepoFile(t, ".github/workflows/windows-e2e.yml")
 	if strings.Contains(src, "runner.tool_cache") {
 		t.Error("windows-e2e.yml 又出现了 runner.tool_cache 路径——缓存 tool_cache 会让 setup-go 撞 EEXIST")
 	}
-	if !strings.Contains(src, "BIU_RUN_MYGO_E2E") {
-		t.Error("windows-e2e.yml 没设 BIU_RUN_MYGO_E2E——E2E 测试全会 skip")
+	// env 必须真的被赋成 "1"：PowerShell 的写法是 `$env:NAME = "1"`。
+	// `strings.Contains(src, "BIU_RUN_MYGO_E2E")` 连注释里的字样都认，
+	// 写成 `= "0"` 或者 `= ""` 也照绿（静默 skip）。
+	if !strings.Contains(src, `$env:BIU_RUN_MYGO_E2E = "1"`) {
+		t.Error(`windows-e2e.yml 没有把 $env:BIU_RUN_MYGO_E2E 赋成 "1"——` +
+			"E2E 测试全会 skip（找不到那一行赋值，或值不是 \"1\"）")
+	}
+	// `-run` 参数必须在 **go test 命令**里：注释里点名了不算数。
+	// 工作流的 run 块是 PowerShell 续行（行尾反引号）拼出来的一条命令——
+	// `go test` 和 `-run` 分在两行。所以先把续行**接回来**，再在接好的
+	// 整条命令里找 `-run`。
+	var commands []string
+	var cur strings.Builder
+	for _, line := range strings.Split(src, "\n") {
+		trimmed := strings.TrimRight(line, " \t")
+		if strings.HasSuffix(trimmed, "`") {
+			cur.WriteString(strings.TrimSuffix(trimmed, "`"))
+			continue
+		}
+		cur.WriteString(trimmed)
+		commands = append(commands, cur.String())
+		cur.Reset()
+	}
+	runLine := ""
+	for _, cmd := range commands {
+		if strings.Contains(cmd, "go test") {
+			runLine += cmd + "\n"
+		}
+	}
+	if runLine == "" {
+		t.Fatal("windows-e2e.yml 里没有一行 `go test ... -run`——" +
+			"Windows E2E 一条都没在跑（注释里写了测试名不算）")
 	}
 	for _, test := range []string{
 		"TestWindowsLifecycle",
 		"TestWindowsFileAssociations",
 	} {
-		if !strings.Contains(src, test) {
-			t.Errorf("windows-e2e.yml 没跑 %s", test)
+		if !strings.Contains(runLine, test) {
+			t.Errorf("windows-e2e.yml 的 go test -run 没有跑 %s：\n%s", test, runLine)
 		}
+	}
+}
+
+// TestWindowsE2EWorkflowWatchesTheServicePackage 钉住 `paths` 触发器里
+// 有 `internal/service/**`——解码器（mfadec / flacdec / mp3dec）和本地
+// 扫描白名单（localmusic）都在那个包里，改了它们却不触发 Windows E2E
+// 的话，「动了放歌那一层、Windows 一格没跑」正是 CodeAnt 在 PR #773
+// 上点的那一条。
+func TestWindowsE2EWorkflowWatchesTheServicePackage(t *testing.T) {
+	src := readRepoFile(t, ".github/workflows/windows-e2e.yml")
+	if !strings.Contains(src, `"internal/service/**"`) {
+		t.Error("windows-e2e.yml 的 paths 里没有 internal/service/**——" +
+			"改解码层不会触发 Windows E2E")
 	}
 }
 

@@ -57,6 +57,17 @@ func TestLinuxFileAssociations(t *testing.T) {
 		t.Skip("这一族只在 Linux 上跑：验的是 Linux 的文件关联")
 	}
 
+	// ⚠️ **文件由「第二个实例」转交，不是冷启动参数**：冷启动那一段
+	// `handleLaunchArgs` 跑在应用 ready、**窗口还没建出来**的时候——那句
+	// 提示的寿命是 5 秒（`fileNoticeLifetime`），而 Xvfb 下 GTK 初始化
+	// 加上字体加载把第一帧拖过那五秒是常事，树里就永远查不到那句话。
+	// 真实场景里用户双击文件时应用多半**已经在跑**（命令行经单实例锁
+	// 转交，走 `OnSecondInstance` → `handleLaunchArgs`）——那条路上窗口
+	// 已经在了，提示一定画进帧里。
+	client, stop := startRealApp(t)
+	defer stop()
+	window := firstContentWindow(t, client)
+
 	t.Run("一个不支持的 AAC 文件有一句人话", func(t *testing.T) {
 		// 造一个假的 .m4a——`checkOpenFile` 只看「在不在 + 是不是普通
 		// 文件 + 扩展名认不认」，**不真解**（解不开那一档是
@@ -65,9 +76,7 @@ func TestLinuxFileAssociations(t *testing.T) {
 		if err := os.WriteFile(m4a, []byte("not really aac"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		client, stop := startRealAppWithArgs(t, false, m4a)
-		defer stop()
-		window := firstContentWindow(t, client)
+		handOverFile(t, m4a)
 		// ⚠️ **判据是「那句话画在画面里」**：它从 `fileNotice` 那一份读，
 		// 而那份在主窗口和迷你窗**各画一遍**——等它出现就行。
 		//
@@ -92,9 +101,7 @@ func TestLinuxFileAssociations(t *testing.T) {
 		if err := os.WriteFile(flac, b, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		client, stop := startRealAppWithArgs(t, false, flac)
-		defer stop()
-		window := firstContentWindow(t, client)
+		handOverFile(t, flac)
 		// ⚠️ **判据是「正在放」那句 toast**：收下并起播成功时
 		// `handleOpenFile` 写它（`internal/ui/openfile.go`）。它是一条
 		// toast——主窗口上画。

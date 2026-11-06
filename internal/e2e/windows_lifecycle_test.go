@@ -34,6 +34,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -60,13 +61,34 @@ func TestWindowsLifecycle(t *testing.T) {
 	})
 
 	t.Run("第二个实例递命令行后自己退出", func(t *testing.T) {
+		// ⚠️ **第二实例必须带着一个文件参数起**：不带参数的转交只验了
+		// 「第二个进程自己退了」，**没验命令行真的到了第一实例**——
+		// 那半截断了的话（`OnSecondInstance` 没把 args 交给
+		// `handleLaunchArgs` / `deliverArgs`），症状是「双击一个文件，
+		// 应用亮了一下但什么都没放」，而这一族照绿（CodeAnt 在
+		// PR #773 上点的就是这一条）。
+		//
+		// 用一个 **.flac**：它在 `packageFileExtensions` 里，框架的
+		// `deliverArgs` 会把它投给 `OnOpenFile`，第一实例窗口里该出现
+		// 「正在放」。用真素材（`EnqueueAndPlayNow` 真的会解它）。
+		src := filepath.Join(repoRoot(t),
+			"internal", "service", "audio", "flacdec", "testdata", "stereo16.flac")
+		flac := filepath.Join(t.TempDir(), "递过去.flac")
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("读不到测试素材 %s：%v", src, err)
+		}
+		if err := os.WriteFile(flac, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
 		binary := appHandle.binary
 		if binary == "" {
 			t.Fatal("startRealApp 没记下二进制路径（appHandle.binary 是空的）")
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, binary)
+		cmd := exec.CommandContext(ctx, binary, flac)
 		cmd.Env = append(os.Environ(), "BIU_E2E_DATA_DIR="+appHandle.dataDir)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
@@ -82,6 +104,14 @@ func TestWindowsLifecycle(t *testing.T) {
 		}
 		if err := automationCall(client, 300, "windows", nil, &windows); err != nil {
 			t.Fatalf("第二个实例退出之后第一个实例不应跟着退：%v", err)
+		}
+		// 而那个 `.flac` 真的被第一实例放起来了——这一句才是「命令行
+		// handoff 到了」的判据：它从 `deliverArgs` → `OnOpenFile` →
+		// `handleOpenFile` 那条路走，任何一环断了这句 toast 都不会出现。
+		window := firstContentWindow(t, client)
+		if !waitForTree(t, client, window, "正在放", 20*time.Second) {
+			t.Fatalf("第二个实例递过来的 .flac 没有放起来：\n%s",
+				treeDump(t, client, window))
 		}
 	})
 

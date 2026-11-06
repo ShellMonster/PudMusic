@@ -51,10 +51,10 @@ import (
 // ⚠️ **而 `App.Name()` 在「源码直接编出来的二进制」上不是「布丁音乐」**：
 // 框架的 `Name()`（`mygo/app.go:316`）先看 `packageInfo()`（那要**bundle**或
 // `mygo build` 注入的 ldflags），拿不到就**回落到可执行文件的名字**——
-// 而 E2E 编出来的那个叫 `pudmusic-e2e`。
+// 而 E2E 编出来的那个叫 `biugo-e2e`。
 //
 // ⇒ 所以这里**从窗口标题反推**：真机上第一栏写着「布丁音乐」，而 E2E 里写着
-// 「pudmusic-e2e」——**两个都要能用**，所以不写死，取窗口标题。
+// 「biugo-e2e」——**两个都要能用**，所以不写死，取窗口标题。
 
 // TestTheApplicationMenu 断**应用菜单在真窗口上装上了，而且点了真的做事**。
 //
@@ -183,7 +183,13 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 		cancel()
 		t.Fatalf("创建自动化 socket：%v", err)
 	}
-	binary := filepath.Join(socketDir, "pudmusic-e2e")
+	// ⚠️ **二进制名要跨平台**：Windows 上 `exec.Command` 只认 `.exe` 结尾的
+	// 文件（「executable file not found in %PATH%」），macOS / Linux 上有没有
+	// 后缀都行。所以名字里按 GOOS 拼后缀，两个平台跑同一份代码。
+	binary := filepath.Join(socketDir, "biugo-e2e")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	// ⚠️ **先把静音钉上再启动**：`settings_mount` 读的是启动那一刻的数据
 	// 目录——进程起来之后再写就来不及了。没有它的话 E2E 里的 FLAC 起播
 	// 那一下真的会响（`drawer_nav_test.go` 的 `startRealAppWithArgs`），
@@ -219,6 +225,15 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 		cancel()
 		os.RemoveAll(socketDir)
 		t.Fatalf("构建真应用（带 e2e 标签）：%v\nstdout:\n%s\nstderr:\n%s", err, buildOut.String(), buildErr.String())
+	}
+	// ⚠️ **先断「编出来的东西在、是文件」再启动**：`exec.Cmd.Start` 报
+	// 「executable file not found」的时候分不清是「根本没编出来」还是
+	// 「名字拼错了」（Windows 上少 `.exe` 就是那个症状）。把「文件在」断
+	// 在这一句，挂掉的时候知道是哪一半坏的。
+	if info, err := os.Stat(binary); err != nil || !info.Mode().IsRegular() {
+		cancel()
+		os.RemoveAll(socketDir)
+		t.Fatalf("真应用二进制不在 %s（stat err=%v）：build 没产出到预期位置", binary, err)
 	}
 
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -277,6 +292,37 @@ func seedMutedSettings(t *testing.T, dataDir string) {
 	}
 }
 
+// handOverFile 模拟「应用已经在跑的时候，系统又起了一个进程把一个文件
+// 递给它」：起第二个进程（同一份二进制、同一份数据目录），它抢不到单
+// 实例锁，把命令行转交给第一个实例之后自己退出——第一个实例里的
+// `OnSecondInstance` → `handleLaunchArgs` 接住那个路径。
+//
+// ⚠️ **为什么文件关联那一族走这条路而不是冷启动参数**：冷启动那一段
+// `handleLaunchArgs` 跑在应用 ready、**窗口还没建出来**的时候——那句
+// 提示的寿命是 5 秒（`fileNoticeLifetime`），而虚拟显示下窗口建出来、
+// 第一帧画出来常常拖过那五秒，树里就永远查不到那句话。而**窗口已经
+// 在的时候**转交，提示一定画进帧里。
+//
+// ⚠️ **dataDir 必须照 `appHandle.dataDir` 那一份**：锁 socket 按
+// `App.Name()`（"biugo-e2e"）派生，和数据目录无关；但第二进程起的时候
+// 会读 `settings.json`——给它同一份数据目录才是「同一个应用起第二个
+// 进程」的形状（`linux_lifecycle_test.go` 那一档同一个做法）。
+func handOverFile(t *testing.T, path string) {
+	t.Helper()
+	if appHandle.binary == "" {
+		t.Fatal("startRealApp 没记下二进制路径（appHandle.binary 是空的）：handOverFile 要在 startRealApp 之后调")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, appHandle.binary, path)
+	cmd.Env = append(os.Environ(), "BIU_E2E_DATA_DIR="+appHandle.dataDir)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("第二个实例转交 %s 没有自己退出：%v\nstderr:\n%s", path, err, stderr.String())
+	}
+}
+
 // seedFakeSession 往 E2E 那份数据目录里写一份**假** `session.json`。
 //
 // ⚠️ **只让 `fileStore.Load` 当「已登录」**：判据是 `SESSDATA` 在不在
@@ -317,9 +363,9 @@ func seedFakeSession(t *testing.T, dataDir string) {
 // `App.Name()`，而窗口标题用的也是它）——所以从这里就能拿到那一栏的名字，
 // **不用写死「布丁音乐」**。
 //
-// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `pudmusic-e2e`，而框架的
+// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `biugo-e2e`，而框架的
 // `App.Name()`（`mygo/app.go:316`）在拿不到 bundle 信息时**回落到可执行文件
-// 的名字**——所以 E2E 里第一栏写着的是「pudmusic-e2e」，真机上才是「布丁音乐」。
+// 的名字**——所以 E2E 里第一栏写着的是「biugo-e2e」，真机上才是「布丁音乐」。
 func windowTitle(t *testing.T, client *automationClient, window int) string {
 	t.Helper()
 	var windows struct {

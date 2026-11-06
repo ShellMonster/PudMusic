@@ -26,6 +26,10 @@ on:
       - "internal/e2e/**"
       - "internal/ui/**"
       - "internal/platform/**"
+      # 解码器在这里：AAC/M4A（mfadec）、FLAC（flacdec）、MP3（mp3dec）、
+      # 本地扫描白名单（localmusic）…… 改它们不改 paths 的话，「动了
+      # 解码层却没人跑 Windows E2E」正是 CodeAnt 在 PR #773 上点的那条。
+      - "internal/service/**"
       - "automation_e2e.go"
       - "main.go"
       - "mygo.json"
@@ -38,6 +42,7 @@ on:
       - "internal/e2e/**"
       - "internal/ui/**"
       - "internal/platform/**"
+      - "internal/service/**"
       - "automation_e2e.go"
       - "main.go"
       - "mygo.json"

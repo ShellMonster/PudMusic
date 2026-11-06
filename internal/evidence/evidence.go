@@ -4529,6 +4529,11 @@ var Items = []Item{
 			"TestMygoJSONKeepsAACOutOfTheLinuxDesktopEntry",
 			"TestMacOSInfoPlistKeepsTheFullAssociation",
 			"TestWindowsInstallerIncludeRegistersAAC",
+			// 安装宏是结构化的（断言落在 customInstall 块里，不靠全文
+			// Contains），卸载对称删、而且两个宏末尾都重发一次
+			// SHChangeNotify（框架那一次发在 customInstall 之前）。
+			"TestWindowsInstallerIncludeUnregistersAAC",
+			"TestWindowsInstallerIncludeNotifiesAfterWriting",
 			"TestLinuxDropsAACFromTheAssociation",
 			"TestTheOtherPlatformsKeepAAC",
 			"TestMygoJSONExtensionsCarryNoDot",

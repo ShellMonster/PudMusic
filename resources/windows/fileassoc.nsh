@@ -28,9 +28,12 @@
 ; （identifier `io.github.shellmonster.biu` 清洗之后），于是「打开方式」
 ; 菜单里的条目和框架自己登记的那些格式**长得一样**。
 ;
-; ⚠️ **SHChangeNotify 不用这里发**：框架在自己那一份关联写完之后就发了
-; 一次（`nsisAssociations` 末尾），那一条在这两个宏**之前**跑——资源
-; 管理器那时已经收到通知了。
+; ⚠️ **SHChangeNotify 必须在两个宏的末尾自己再发一次**：框架那一份
+;（`nsisAssociations`）末尾发的通知跑在 `customInstall` **之前**
+;（`installerScript` 里是 `register + install`），我们这两个扩展名的
+; 写入发生在 Explorer 已经收过通知**之后**——不重发一次的话，资源管理器
+; 的「打开方式」要到下一次刷新才认得 m4a / aac（CodeAnt 在 PR #773
+; 上点的就是这一条）。卸载时对称删，也要对称通知。
 ;
 ; ⚠️ **「以管理员身份运行」那一档不用管**：框架的 `RequestExecutionLevel`
 ; 是 `user`，HKCU 本来就是当前用户的 hive——写 HKLM 反而会失败。
@@ -50,9 +53,12 @@
 !macro customInstall
   !insertmacro pudmusicRegisterAACExt "m4a"
   !insertmacro pudmusicRegisterAACExt "aac"
+  ; 框架那一次 SHChangeNotify 发在 customInstall 之前——见文件头。
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
 
 !macro customUnInstall
   !insertmacro pudmusicUnregisterAACExt "m4a"
   !insertmacro pudmusicUnregisterAACExt "aac"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend

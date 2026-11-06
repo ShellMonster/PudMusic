@@ -293,13 +293,10 @@ func TestMacOSInfoPlistKeepsTheFullAssociation(t *testing.T) {
 	}
 }
 
-// TestWindowsInstallerIncludeRegistersAAC 钉住 Windows 安装包通过
-// `windows.installerInclude` 补回 m4a / aac 的注册表关联。
-//
-// ⚠️ **只钉「这个文件存在、而且里面写着那两个扩展名」**：NSIS 脚本对不对
-// 只能在打了安装包的 Windows 上验（见 `scripts/build.sh`），这里钉的是
-// 「配置还指着它、它还没被删」。
-func TestWindowsInstallerIncludeRegistersAAC(t *testing.T) {
+// readNSISInclude 读 `mygo.json` 的 `windows.installerInclude` 指着的那份
+// NSIS 脚本。
+func readNSISInclude(t *testing.T) string {
+	t.Helper()
 	c := readMygoFileAssocConfig(t)
 	if c.Windows.InstallerInclude == "" {
 		t.Fatal("mygo.json 里没有 windows.installerInclude：Windows 安装包" +
@@ -310,11 +307,103 @@ func TestWindowsInstallerIncludeRegistersAAC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读不到 %s：%v", c.Windows.InstallerInclude, err)
 	}
-	text := string(b)
+	return string(b)
+}
+
+// nsisMacroBody 从 NSIS 脚本里取出 `!macro <name>` 那一块的正文
+// （`!macro name` 那一行之后、`!macroend` 那一行之前）。
+//
+// ⚠️ **必须按宏块切，不能在整个文件上 `strings.Contains`**：`customInstall`
+// 和 `customUnInstall` 写的是**同两个扩展名**——在整个文件上找 `.m4a`，
+// `customInstall` 整段丢了也照样命中（卸载那段里有它），那是「装了不写、
+// 测试照绿」的假阳性（CodeAnt 在 PR #773 上点的就是这一条）。
+func nsisMacroBody(t *testing.T, script, name string) string {
+	t.Helper()
+	start := "!macro " + name
+	i := strings.Index(script, start)
+	if i < 0 {
+		t.Fatalf("脚本里没有 %q 宏", start)
+	}
+	rest := script[i+len(start):]
+	j := strings.Index(rest, "!macroend")
+	if j < 0 {
+		t.Fatalf("%q 宏没有 !macroend", name)
+	}
+	return rest[:j]
+}
+
+// TestWindowsInstallerIncludeRegistersAAC 钉住 Windows 安装包通过
+// `windows.installerInclude` 的 **`customInstall`** 补回 m4a / aac 的注册表
+// 关联。
+//
+// ⚠️ **断言落在 `customInstall` 那个宏块里面**：在整个文件上 `Contains`
+// 的话，`customUnInstall` 那一段里的 `.m4a` 就够把「安装没写」遮成绿的
+// （见 `nsisMacroBody` 的注释）。
+func TestWindowsInstallerIncludeRegistersAAC(t *testing.T) {
+	script := readNSISInclude(t)
+	body := nsisMacroBody(t, script, "customInstall")
+	// 实际的 WriteRegStr 在 `pudmusicRegisterAACExt` 里——`customInstall`
+	// 只 `!insertmacro` 它。两半都钉：宏体里有那一条写入、外层调了它。
+	regBody := nsisMacroBody(t, script, "pudmusicRegisterAACExt")
+	if !strings.Contains(regBody, "WriteRegStr") {
+		t.Fatal("pudmusicRegisterAACExt 宏里没有 WriteRegStr：它根本就没写注册表")
+	}
 	for _, ext := range []string{"m4a", "aac"} {
-		if !strings.Contains(text, `"`+ext+`"`) && !strings.Contains(text, "."+ext) {
-			t.Errorf("%s 里没有 %q：Windows 安装包不会登记那个扩展名",
-				c.Windows.InstallerInclude, ext)
+		want := `!insertmacro pudmusicRegisterAACExt "` + ext + `"`
+		if !strings.Contains(body, want) {
+			t.Errorf("customInstall 宏里没有 %q：Windows 安装包不会登记那个"+
+				"扩展名", want)
+		}
+	}
+}
+
+// TestWindowsInstallerIncludeUnregistersAAC 钉住 `customUnInstall` 对称地把
+// m4a / aac 的注册表项**删掉**——卸载不能只装不卸。
+func TestWindowsInstallerIncludeUnregistersAAC(t *testing.T) {
+	script := readNSISInclude(t)
+	body := nsisMacroBody(t, script, "customUnInstall")
+	unregBody := nsisMacroBody(t, script, "pudmusicUnregisterAACExt")
+	if !strings.Contains(unregBody, "DeleteReg") {
+		t.Fatal("pudmusicUnregisterAACExt 宏里没有 DeleteReg：它根本就没删注册表")
+	}
+	for _, ext := range []string{"m4a", "aac"} {
+		want := `!insertmacro pudmusicUnregisterAACExt "` + ext + `"`
+		if !strings.Contains(body, want) {
+			t.Errorf("customUnInstall 宏里没有 %q", want)
+		}
+	}
+}
+
+// TestWindowsInstallerIncludeNotifiesAfterWriting 钉住 **`SHChangeNotify`
+// 发在注册表写入之后**。
+//
+// ⚠️ 框架自己那一份关联（`nsisAssociations`）末尾会发一次
+// `SHChangeNotify`，而 `customInstall` 宏插在它**之后**跑（mygo
+// `nsis.go` 的 `installerScript`：`register + install`）——我们的 m4a/aac
+// 写入发生在 Explorer 已经收过通知**之后**，不重发一次的话，资源管理器
+// 的「打开方式」要到下一次刷新才认得这两个格式（CodeAnt 在 PR #773 上
+// 点的就是这一条）。所以两个宏的**末尾**都必须自己再发一次。
+//
+// ⚠️ **断言落在「宏内最后一次注册表改动之后」**：`customInstall` 里写的是
+// `!insertmacro`（真正的 WriteRegStr 在内层宏里），所以「最后一次改动」
+// 按 `!insertmacro` 和 `WriteRegStr`/`DeleteReg` 两个一起算。
+func TestWindowsInstallerIncludeNotifiesAfterWriting(t *testing.T) {
+	const notify = "SHChangeNotify"
+	for _, macro := range []string{"customInstall", "customUnInstall"} {
+		body := nsisMacroBody(t, readNSISInclude(t), macro)
+		lastWrite := strings.LastIndex(body, "WriteRegStr")
+		lastDelete := strings.LastIndex(body, "DeleteReg")
+		lastInsert := strings.LastIndex(body, "!insertmacro pudmusic")
+		lastMutation := max(max(lastWrite, lastDelete), lastInsert)
+		notifyAt := strings.Index(body, notify)
+		if notifyAt < 0 {
+			t.Errorf("%s 宏里没有 %s：框架那一次发在它之前，我们自己要再发一次",
+				macro, notify)
+			continue
+		}
+		if notifyAt < lastMutation {
+			t.Errorf("%s 宏里 %s 发在写注册表**之前**：Explorer 收不到这次改动",
+				macro, notify)
 		}
 	}
 }

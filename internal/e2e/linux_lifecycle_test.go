@@ -89,7 +89,7 @@ func TestLinuxLifecycle(t *testing.T) {
 		// 回去——它把命令行递给第一个实例之后**自己退出**（`internal/platform`
 		// 的 `Lock` 返回 false 的那一支）。
 		//
-		// ⚠️ **不能拿 `pudmusic-e2e` 那份 fixture 再起**：那一份的数据目录
+		// ⚠️ **不能拿 `biugo-e2e` 那份 fixture 再起**：那一份的数据目录
 		// 是 `startRealApp` 塞在 socketDir 里的，这里照同一份 env 再起一个，
 		// 正是「同一把锁」的场景。
 		// 第二个实例用**同一份已编好的二进制、同一份数据目录**——那才是
