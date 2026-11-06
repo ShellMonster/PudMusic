@@ -84,7 +84,7 @@ func (s *Shell) buildDockMenu() *mygo.Menu {
 			Click: func(*mygo.MenuItem, *mygo.Window) { s.onShortcut("next") }},
 		mygo.Separator(),
 		{ID: dockMenuIDPrefix + "like", Label: "喜欢歌曲",
-			Click: func(*mygo.MenuItem, *mygo.Window) { s.likeCurrent() }},
+			Click: func(*mygo.MenuItem, *mygo.Window) { s.dockLikeCurrent() }},
 		mygo.Separator(),
 		{ID: dockMenuIDPrefix + "playMode", Label: "播放模式", Submenu: dockPlayModeItems(s)},
 	})
@@ -108,12 +108,45 @@ func dockPlayModeItems(s *Shell) []*mygo.MenuItem {
 				if s.app == nil {
 					return
 				}
-				s.app.SetPlayMode(mode)
+				// 点已经选中的档位不应重置随机洗牌袋和历史栈。
+				if s.app.PlayMode() != mode {
+					s.app.SetPlayMode(mode)
+				}
 				s.refreshDockMenu(s.app.Snapshot())
 			},
 		})
 	}
 	return items
+}
+
+// dockLikeCurrent 是 Dock 菜单里的「喜欢歌曲」入口。
+//
+// Dock 菜单可以在主窗口隐藏、迷你播放器显示时被打开。喜欢流程的绑定弹窗
+// 只能由主窗口绘制，所以先收掉迷你播放器并恢复主窗口，再把动作交给
+// `likeCurrent`；否则弹窗状态会写入不可见的窗口。
+func (s *Shell) dockLikeCurrent() {
+	main := s.mainShell()
+	if main.mini != nil {
+		main.dropMini()
+	}
+	main.restoreMainWindow()
+	main.likeCurrent()
+}
+
+// refreshDockMenuFromState 把任意窗口收到的播放状态刷新到主窗口那份 Dock 菜单。
+//
+// 迷你播放器和刘海窗口共享 App 状态，但没有自己的 Dock 菜单引用；所有刷新都
+// 必须落到主壳。
+func (s *Shell) refreshDockMenuFromState(st app.State) {
+	s.mainShell().refreshDockMenu(st)
+}
+
+// refreshDockMenuFromApp 从共享 App 状态刷新 Dock 菜单。
+func (s *Shell) refreshDockMenuFromApp() {
+	if s.app == nil {
+		return
+	}
+	s.refreshDockMenuFromState(s.app.Snapshot())
 }
 
 // installJumpList 给 Windows 的任务栏跳转列表装三个 task。

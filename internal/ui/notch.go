@@ -1036,11 +1036,13 @@ func (s *Shell) viewNotchCardTransport(c *ui.Context, st app.State) {
 		if pud.IconBtn(c, "notch-prev", "prev", "上一首", pud.IconOpts{
 			Color: ink, Size: 22, Disabled: !s.app.CanPrev()}).Clicked() {
 			s.app.Prev()
+			s.refreshDockMenuFromApp()
 		}
 		s.viewNotchPlay(c, st, ink)
 		if pud.IconBtn(c, "notch-next", "next", "下一首", pud.IconOpts{
 			Color: ink, Size: 22, Disabled: !s.app.CanNext()}).Clicked() {
 			s.app.Next()
+			s.refreshDockMenuFromApp()
 		}
 		if pud.IconBtn(c, "notch-loop", "repeat", "循环播放", pud.IconOpts{
 			Color: ink, Size: 18, On: st.PlayMode == app.PlayModeLoop || st.PlayMode == app.PlayModeSingle}).Clicked() {
@@ -1088,5 +1090,6 @@ func (s *Shell) viewNotchPlay(c *ui.Context, st app.State, ink ui.Color) {
 	b = s.withLoadHalo(c, b, st, tok.IconHit, st.HasTrack)
 	if b.Clicked() {
 		s.app.Toggle()
+		s.refreshDockMenuFromApp()
 	}
 }

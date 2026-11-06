@@ -231,9 +231,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// 状态栏菜单上「正在播放」那一行是**会变的**（换歌、没歌了）——而托盘那
 	// 份菜单只建一次，所以得运行期刷（见 refreshTrayMenu）。
 	s.refreshTrayMenu(st)
-	// macOS Dock 菜单上那三项的可用态跟着「有没有歌」走，也是只建一次所以
-	// 运行期刷——见 refreshDockMenu。
-	s.refreshDockMenu(st)
 	s.reportSettingsError()
 	// 收「那个 500ms 防抖的钟要不要醒着」。**每帧一次**，所以用户切走时它一定
 	// 会跟着停（见 syncSearchWatch）。
