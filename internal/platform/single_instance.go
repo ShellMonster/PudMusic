@@ -76,28 +76,17 @@ func Lock() bool {
 
 		// 二、别人占着：等它的 socket 建好。
 		if lockIsReady() {
-			// 连上去，把命令行（含 pudmusic://）递过去。框架在「Dial 不通」
-			// 时会 `os.Remove` 掉 socket 文件、自己 `Listen` 并返回 true——
-			// 可那是对「socket 是崩溃留下的」的判断；ready 文件说主人活着
-			// 时，真正的形状多半是「第一次拨号撞上它还没 Accept / 还没建
-			// 完」。
+			// 连上去，把命令行（含 pudmusic://）递过去，然后退出。
 			//
-			// 🔴 **这时候绝不能把 true 当成「我是第一个」**：起来就是两个
-			// 应用，而 Windows 上 SMTC 的 `add_ButtonPressed` 还会让第二
-			// 实例在 `bindWindow` 里 `0xc0000005`（真机 E2E 的栈就是这么
-			// 来的）。所以先再转一圈——等它把 socket 真的建出来再问一遍；
-			// 两轮都答不上才按「socket 可能真坏了」退出（框架已经把陈旧
-			// socket 删了，下一轮 `lockExclusive` 也抢不到，它自己会让
-			// 下一位当第一个）。
-			for round := 0; round < 2; round++ {
-				if !mygo.App.RequestSingleInstanceLock() {
-					return false
-				}
-				if round == 0 {
-					time.Sleep(lockPollEvery)
-				}
-			}
-			log.Printf("pudmusic: 第一个实例的 socket 两次都没应答，按「有别人在」退出（不抢答第一个）")
+			// 🔴 **只调一次**：ready 文件已经说主人在了，这一趟 dial 成功的
+			// 话框架会把 args 交过去、返回 false。就算它偶尔返回 true
+			// （第一次拨号撞上 socket 还没建完），这里也**绝不能当成「我是
+			// 第一个」**——`lockExclusive` 已经判过内核锁在别人手上，我们
+			// 起来就只能是第二个。再调一次的话框架已经把它认为陈旧的
+			// socket 删掉、这一轮直接 `Listen` 成功，于是两个应用一起起来
+			// ——而 Windows 上 SMTC 的 `add_ButtonPressed` 会让那个多出来
+			// 的实例在 `bindWindow` 里崩掉。宁可白递一次，也不抢答第一个。
+			mygo.App.RequestSingleInstanceLock()
 			return false
 		}
 
