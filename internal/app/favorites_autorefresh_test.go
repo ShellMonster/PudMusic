@@ -54,7 +54,9 @@ func (h *favHits) count() int {
 func onFavList(t *testing.T, f *biliFixture, hits *favHits, list []map[string]any, fail bool) {
 	t.Helper()
 	f.on(favListPath, func(w http.ResponseWriter, r *http.Request) {
-		hits.add()
+		if hits != nil {
+			hits.add()
+		}
 		if fail {
 			writeFixtureJSON(t, w, -500, "服务器开小差了", nil)
 			return

@@ -616,6 +616,17 @@ type App struct {
 	// 接缝，挂在生产二进制里没有害（只是多一个永远为 nil 的字段）。
 	hookBetweenAdoptStateAndSave func()
 
+	// hookBeforeLyricsLoad 是**测试专用**的替掉入口：后台读歌词缓存的
+	// goroutine 在 `c.Load` 之前调它。生产里永远是 nil。
+	//
+	// 为什么需要它：断言「换歌那一刻读到的是默认值」时，测试要的是
+	// 「恢复还没发生」的那个中间态——而后台读盘是内存级的快，慢机器上
+	// 它在 `setLyricTrack` 返回与 `a.Lyrics()` 之间就落完了，断言变成
+	// 一次竞态（Linux CI 上 `TestSwitchingSongsResetsTheOffsetBefore
+	// RestoringIt` 实测红成 `{OffsetMS:2000}`，即恢复已完成的快照）。
+	// 用这个钩子把 `Load` 挂到测试手上，断言做完再放行。
+	hookBeforeLyricsLoad func(key string)
+
 	// after 排一个「过 d 之后再跑 fn」的定时器，返回停掉它的函数。New 装成真的。
 	//
 	// 做成字段是为了让**等待**测得到：真等 500ms 的测试要么慢，要么靠

@@ -75,13 +75,20 @@ func TestSwitchingSongsResetsTheOffsetBeforeRestoringIt(t *testing.T) {
 		t.Fatalf("甲的偏移是 %d，want -1500", got)
 	}
 
-	// 换歌。读盘是异步的，所以换完歌这一刻读到的应该是**默认值**，
-	// 而不是甲留下的 -1500。
+	// 换歌。读盘是**后台异步**的——慢机器上它可能在换歌返回与下一次
+	// `Lyrics()` 之间就落完，让「读到默认值」这一格变成竞态（Linux CI
+	// 实测红成 `{OffsetMS:2000}`，即恢复已完成的快照）。所以把 `Load`
+	// 挂到测试手上：断言做完中间态之后才放行。
+	release := make(chan struct{})
+	a.hookBeforeLyricsLoad = func(key string) { <-release }
+	t.Cleanup(func() { a.hookBeforeLyricsLoad = nil })
+
 	a.setLyricTrack(onlineSong("BV2", "2"))
 	if got := a.Lyrics(); got.OffsetMS != 0 || got.FontSize != DefaultLyricsFontSize {
 		t.Errorf("换歌那一刻读到的是 %+v，want 偏移 0、字号 %v——"+
 			"带着上一首的值换歌，用户会以为新歌的词对不上", got, DefaultLyricsFontSize)
 	}
+	close(release) // 放行那一趟后台读盘
 
 	// 然后才恢复成这一首自己的值。
 	waitLyrics(t, 2*time.Second, "乙的歌词读回来", func() bool {

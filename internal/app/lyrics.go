@@ -333,6 +333,15 @@ func (a *App) loadLyrics(key string, gen int) {
 	}
 
 	go func() {
+		// 测试钩子：把「后台开始读盘」这一步挂到测试手上——断言
+		// 「换歌那一刻是默认值」的那条测试要的是**恢复还没发生**的中间
+		// 态，而读盘是内存/磁盘级的快，慢机器上它可能在断言前就落完。
+		// 不挡的话那个断言就是一次竞态（Linux CI 上实测红过：
+		// `TestSwitchingSongsResetsTheOffsetBeforeRestoringIt` 读到
+		// `{OffsetMS:2000}` 而不是 0）。生产上它是 nil。
+		if hook := a.hookBeforeLyricsLoad; hook != nil {
+			hook(key)
+		}
 		entry, ok := c.Load(key, title, artist)
 		rows := lyrics.Rows(entry.Lyrics, entry.TLyrics)
 
