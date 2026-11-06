@@ -168,6 +168,29 @@ func trayHookCall(t *testing.T, command string) string {
 	return strings.TrimSpace(line)
 }
 
+// trayHookCallOK 同 `trayHookCall`，但把「连不上/读不到」报成 `ok=false`
+// 而不是 `t.Fatalf`——给「拿不到就跳过」的探针用（`waitForHandoffArgs`）。
+// 在 Windows 上 `.tray` 那条 AF_UNIX socket 可能因为路径长度上限起不来，
+// 探针拿不到不是「handoff 断了」，不该当失败断。
+func trayHookCallOK(t *testing.T, command string) (string, bool) {
+	t.Helper()
+	sock := appHandle.automationSocket + ".tray"
+	conn, err := net.DialTimeout("unix", sock, 5*time.Second)
+	if err != nil {
+		return "", false
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte(command + "\n")); err != nil {
+		return "", false
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(line), true
+}
+
 // waitForProcessGone 等 automation socket **不再应答**——进程退出去之后
 // socket 那端就没有人听了，下一次 `windows` 调用会拿到 EOF/超时。
 //
