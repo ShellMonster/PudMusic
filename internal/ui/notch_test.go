@@ -218,6 +218,35 @@ func TestNotchPollingKeepsOneScheduledTimer(t *testing.T) {
 	}
 }
 
+// TestNotchWindowCloseProceedsWhenTheAppIsQuitting 钉「应用退出时刘海窗不许
+// 再把关窗拦回去」那条。
+//
+// 根因是「quitting 记在哪一份外壳上」：`installLifecycle` 的 `OnBeforeQuit`
+// 只把**主窗口**那个外壳的 `quitting` 置上，而框架的 `prepareQuit` 紧接着会
+// 遍历**所有**窗口挨个 close——刘海窗也在其中。它自己的 `quitting` 那一刻
+// 还是 false，于是 OnClose 照 `PreventDefault`，把整次退出拦掉：⌘Q / 菜单
+// 退出 / SIGTERM 触发的 MyGo quit 全都退不掉，只能 SIGKILL。
+//
+// 这里按真实顺序重演：`OnBeforeQuit` 置的是主壳那一份，随后由刘海这侧的
+// 关窗判据去答「该放行吗」。
+func TestNotchWindowCloseProceedsWhenTheAppIsQuitting(t *testing.T) {
+	n, main := newNotchShell(t)
+
+	// 用户按 ⌘Q / 菜单退出 / SIGTERM：框架先跑 OnBeforeQuit（置主壳），
+	// 再挨个关窗口。
+	main.quitting = true
+	if !n.notchCloseProceeds() {
+		t.Fatal("应用已在退出流程，刘海窗还把关窗拦回去：prepareQuit 会被它取消")
+	}
+
+	// 反面：不在退出流程时刘海窗照拦（⌘W / Esc 不许真的关掉它，理由见
+	// attachNotchWindow 里 OnClose 那段）。
+	main.quitting = false
+	if n.notchCloseProceeds() {
+		t.Fatal("没在退出流程时刘海窗放行关窗：⌘W 会把它真的关掉，再也收不到指针事件")
+	}
+}
+
 // notchPollTestClock 是真时钟行为的假钟：EveryFunc 走 fakeClock 那一套
 // （Advance 到点**同步跑**回调），多记一份「现在还活着几条 ticker」。
 type notchPollTestClock struct {

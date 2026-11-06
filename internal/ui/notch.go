@@ -252,7 +252,7 @@ func (s *Shell) attachNotchWindow(w *mygo.Window) {
 	// 刘海窗不让 ⌘W / Esc 真的关掉：关了就收不到指针事件了。想关掉走
 	// 菜单「显示/隐藏刘海」或设置开关。
 	w.OnClose(func(e *mygo.CloseEvent) {
-		if !s.quitting {
+		if !s.notchCloseProceeds() {
 			e.PreventDefault()
 		}
 	})
@@ -275,6 +275,20 @@ func (s *Shell) attachNotchWindow(w *mygo.Window) {
 	s.notchSt.active = mygo.App.IsActive()
 	mygo.App.OnDidBecomeActive(func() { s.notchSt.active = true; s.notchPoll() })
 	mygo.App.OnDidResignActive(func() { s.notchSt.active = false })
+}
+
+// notchCloseProceeds 报「这一刻刘海窗的关该放行吗」。
+//
+// ⚠️ **quitting 记的是主窗口那一份**（`installLifecycle` 的 `OnBeforeQuit`
+// 装在主壳上），而退出流程本身要靠框架挨个关窗口走完——刘海窗也在那一列里。
+// 拿自己那份 `quitting`（永远是 false）去拦，⌘Q / 菜单退出 / SIGTERM 触发的
+// quit 全都会被它拦掉：窗口关不掉，进程退不出，只能 SIGKILL（同 `Attach`
+// 里 `planWindowClose` 那条「退出途中不能让设置拦路」的规矩）。
+func (s *Shell) notchCloseProceeds() bool {
+	if s.main != nil {
+		return s.main.quitting
+	}
+	return s.quitting
 }
 
 // releaseNotch 收掉刘海窗自己占着的（逐窗口那一摊），不收应用。
