@@ -17,10 +17,12 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
@@ -354,7 +356,10 @@ func (s *Shell) viewStatsArtistBars(c *ui.Context, rows []statsArtistRow) {
 			fill = p.Accent
 		}
 		ui.Row(c).Key("stats-artist:"+strconv.FormatInt(r.Mid, 10)).FillWidth().Gap(space.Px12).
-			Padding(space.Px8, space.None).AlignItems(ui.Center).Children(func() {
+			// ⚠️ **右边留一条滚动条的热区**：行尾那列「N 分钟」右对齐到内容右缘，
+			// 而 overlay 滚动条就画在那一条竖带上（`scrollbar.HotZone`：轨道 10 +
+			// 左边 6）——零内边距的话，指针一压上去分钟数就被盖住。
+			Padding(space.Px8, scrollbar.HotZone, space.Px8, space.None).AlignItems(ui.Center).Children(func() {
 			typo.Mono(ui.Text(c, strconv.Itoa(i+1))).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
 				Width(24).Shrink(0)
 			ui.Text(c, r.Name).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text).Width(120).Shrink(0).
@@ -415,7 +420,8 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 		}
 		pud.TrackHeadMode(c, listW, pud.AlbumModeFor(winW))
 		for i, r := range rows {
-			pud.TrackRow(c, "stats-track:"+r.Key, pud.Track{
+			r := r
+			ev := pud.TrackRow(c, "stats-track:"+r.Key, pud.Track{
 				Index: strconv.Itoa(i + 1), Title: r.Title, Owner: r.Subtitle, AlbumCol: pud.AlbumModeFor(winW),
 				Album:    fmt.Sprintf("本机播放 %d 次", r.Plays),
 				Duration: clockText(time.Duration(r.Ms) * time.Millisecond),
@@ -423,6 +429,20 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 					imgcache.ViewTitled(c, s.images, "", r.Title, w, h)
 				},
 			}, listW)
+			if ev.Play {
+				// ⚠️ **走和其他列表同一条路**（`AppActions.PlayNow` →
+				// `EnqueueAndPlayNow`）：统计行底下没有 `app.Item`，按下去要
+				// 先把聚合键拆回一项（`ItemOfStatsKey`）；拆不出来 /
+				// 放不了都说一句，不按了没反应。
+				acts := s.listActions()
+				item, err := app.ItemOfStatsKey(r.Key, st.data.Tracks[r.Key])
+				switch {
+				case err != nil:
+					acts.Notify("放不了这一首："+err.Error(), notice.Danger)
+				case acts.PlayNow != nil:
+					acts.PlayNow(item)
+				}
+			}
 		}
 	})
 }
