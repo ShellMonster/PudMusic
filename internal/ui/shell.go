@@ -1247,6 +1247,15 @@ type Shell struct {
 	// （和播放条那一对同一个用途，见上面 scrubPressX）。
 	miniPressX   float32
 	miniPressPos time.Duration
+	// notchScrub / notchHeld 是**刘海窗那条**进度条自己的一份。它和
+	// `miniScrub` 同一个理由（见上面那段）：刘海是另一个外壳，两个窗
+	// 的拖动天然各记各的；会串的 `ScrubStart`/`ScrubEnd` 那一半靠这对
+	// 标记守住。
+	notchScrub float64
+	notchHeld  bool
+	// notchPressX / notchPressPos 是刘海进度条按下去那一帧的记账。
+	notchPressX   float32
+	notchPressPos time.Duration
 	// builds 记着「各个界面一共建了几遍」。**给测试看的**（见 builds.go 与
 	// framebudget_test.go）：「一帧建两遍」是静默的坏处——画面上看着没差，
 	// 而帧成本翻倍。

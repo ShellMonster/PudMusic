@@ -49,29 +49,56 @@ func (a *App) SpectrumBars(barCount int, heightDip float32) []float32 {
 	return a.player.Bars(a.player.AudibleFrame(), barCount, heightDip, dst)
 }
 
-// SetSpectrumWanted 记「界面这一帧真的在画频谱」，没人在画就把 FFT 停掉。
+// SpectrumSource 是「谁在画频谱」的一个来源：满屏播放器、刘海播放器各
+// 是一格，位掩码的**第 src 位**就是它那一票。
+type SpectrumSource int
+
+const (
+	// SpectrumFull 是满屏播放器那条频谱。
+	SpectrumFull SpectrumSource = iota
+	// SpectrumNotch 是刘海展开卡上那五根柱。
+	SpectrumNotch
+)
+
+// SetSpectrumWantedFor 记「这个来源这一帧真的在画频谱」：src 那一位置 1
+// 是「要」、清 0 是「不要」，**所有来源都不要**才把 FFT 停掉。
 //
-// # 为什么有这个
+// # 为什么按来源记账
 //
-// 「用户开没开频谱」（`FullPlayerPrefs.ShowSpectrum`）只是**资格**——开着的时候
-// 满屏播放器不展示、窗口最小化、切到迷你窗的时候，FFT 还在解码 goroutine 上每
-// ~10ms 跑一整窗。而「满屏开着」这个事实只住在界面层（`s.full.open`），App 自己
-// 不知道。所以由画的那一侧每帧报一声「我在画」，真没人在画就把整条分析链停掉。
+// 「界面在画频谱」这个事实按**窗**分：满屏外壳和刘海外壳是两个 Shell、
+// 各自每帧报自己那一份。共用一个原子位的话，两窗各写各的、谁后写谁赢
+// ——满屏在画、刘海暂停，刘海那一句 `false` 就把 FFT 关了；反过来全屏
+// 不可见时它每帧的 `false` 又会把刘海要的 FFT 关掉。
 //
-// 判定在画的那一侧做（`fullplayer_spectrum.go`）：那里顺手就有「偏好开着没有、
-// 窗口看得见没有」两个数。App 只负责把「有没有人要」翻译成「FFT 跑不跑」。
+// 判定「在不在画」在画的那一侧做（`fullplayer_spectrum.go` /
+// `notch.go`）：那里顺手就有「偏好开着没有、窗口看得见没有、在放没有」
+// 三个数。App 只负责把「有没有人要」翻译成「FFT 跑不跑」。
 //
 // 可以从任意 goroutine 调：本身只动一个原子位和一把短锁。
-func (a *App) SetSpectrumWanted(wanted bool) {
-	if !a.spectrumWanted.CompareAndSwap(!wanted, wanted) {
-		return
+func (a *App) SetSpectrumWantedFor(src SpectrumSource, wanted bool) {
+	bit := int32(1) << uint(src)
+	for {
+		old := a.spectrumWanted.Load()
+		next := old
+		if wanted {
+			next |= bit
+		} else {
+			next &^= bit
+		}
+		if next == old || a.spectrumWanted.CompareAndSwap(old, next) {
+			if next == old {
+				return
+			}
+			break
+		}
 	}
+	any := a.spectrumWanted.Load() != 0
 	a.mu.Lock()
 	p := a.player
 	show := a.fullPlayerPrefsValueLocked().ShowSpectrum
 	a.mu.Unlock()
 	if p != nil {
-		p.SetSpectrumEnabled(wanted && show)
+		p.SetSpectrumEnabled(any && show)
 	}
 }
 
@@ -79,7 +106,7 @@ func (a *App) SetSpectrumWanted(wanted bool) {
 // 须持 a.mu。偏好改了、换新播放器了、界面说有人/没人画了，都归这里统一判。
 func (a *App) syncSpectrumLocked(p *audio.Player) {
 	if p != nil {
-		p.SetSpectrumEnabled(a.spectrumWanted.Load() && a.fullPlayerPrefsValueLocked().ShowSpectrum)
+		p.SetSpectrumEnabled(a.spectrumWanted.Load() != 0 && a.fullPlayerPrefsValueLocked().ShowSpectrum)
 	}
 }
 

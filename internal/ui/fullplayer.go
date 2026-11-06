@@ -425,7 +425,7 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 func (s *Shell) closeFullPlayer() {
 	s.full = fullPlayer{}
 	// 没人画频谱了：告诉 App 把 FFT 停掉（它自己不知道满屏关没关）。
-	s.app.SetSpectrumWanted(false)
+	s.app.SetSpectrumWantedFor(app.SpectrumFull, false)
 }
 
 // openFullPlayer 开全屏播放器。

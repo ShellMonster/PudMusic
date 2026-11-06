@@ -72,7 +72,15 @@ func TestRenderNotchShots(t *testing.T) {
 			save(t, dir, theme+"-notch-collapsed-playing.png", tt)
 
 			n.notchSt.open = true
-			n.app.Toggle() // 再停：展开态和参考图一致（暂停）
+			// 播放中的展开卡：频谱柱跳着（它一直在走，不等「停」，推几帧就拍）。
+			tt.Frame()
+			for range 30 {
+				tt.Advance(time.Second / 60)
+				tt.Frame()
+			}
+			save(t, dir, theme+"-notch-playing.png", tt)
+
+			n.app.Toggle() // 再停：展开态暂停那一档也出一张（频谱收起来）。
 			tt.Frame()
 			settleNotch(t, tt)
 			save(t, dir, theme+"-notch.png", tt)

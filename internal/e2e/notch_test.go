@@ -169,10 +169,10 @@ func TestTheNotchWindow(t *testing.T) {
 	if math.Abs(w-528) > 1 {
 		t.Errorf("刘海窗的宽是 %.0f，want 528", w)
 	}
-	// 高是展开深度 178 加刘海和余量后的 240。⚠️ 收合时**窗高不变**——变的是画出来的形状
+	// 高是展开卡深 210 加刘海和余量后的 280。⚠️ 收合时**窗高不变**——变的是画出来的形状
 	//（`notchTarget`），而 bounds 量的是窗不是形状。
-	if math.Abs(h-240) > 1 {
-		t.Errorf("刘海窗的高是 %.0f，want 240", h)
+	if math.Abs(h-280) > 1 {
+		t.Errorf("刘海窗的高是 %.0f，want 280", h)
 	}
 
 	// 刘海轮询必须在单个可停止的调度器里运行。连续让真实应用处理

@@ -672,9 +672,11 @@ type App struct {
 	// specBars 是频谱条那一行的高度（0~1），每一帧复用同一块。
 	// 频谱是**每帧**要画的（条子每帧都在动），所以这里绝不能每帧新建。
 	specBars []float32
-	// spectrumWanted 记「界面此刻真的在画频谱」——满屏那一层开着、用户那一档
-	// 也开着、窗口也看得见。FFT 一路跟着它走，没人在看就整条停掉。
-	spectrumWanted atomic.Bool
+	// spectrumWanted 记「界面此刻真的在画频谱」——按**来源**记账的位掩码
+	//（满屏、刘海各是一格），任一格报「在画」FFT 就跑。
+	// 不是单个位：满屏和刘海是两个外壳、各自每帧报自己那一份，单个位
+	// 会被两个来源互相覆盖——谁后写谁赢，FFT 在两扇窗之间来回开关。
+	spectrumWanted atomic.Int32
 	// parts 是当前这首的分集列表，partsBvid 是它属于哪一个稿件。见 fullplayer.go。
 	partsMu     sync.Mutex
 	parts       []bili.VideoPart

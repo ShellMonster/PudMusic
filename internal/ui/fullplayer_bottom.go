@@ -64,14 +64,14 @@ func (s *Shell) viewFullSpectrum(c *ui.Context, st app.State) {
 		Role(ui.RoleImage).Label("频谱")
 	if !s.pagePrefs().ShowSpectrum {
 		// 没人看频谱：告诉 App 把 FFT 停掉。
-		s.app.SetSpectrumWanted(false)
+		s.app.SetSpectrumWantedFor(app.SpectrumFull, false)
 		return
 	}
 	bars := s.app.SpectrumBars(fullSpectrumBars, fullSpectrumH)
 	color := s.fullSpectrumColor()
 	// 这一帧画出来了：报一声「真的有人在看」。FFT 跟着这一声走。
 	seen := s.presence.seen()
-	s.app.SetSpectrumWanted(st.Playing && seen)
+	s.app.SetSpectrumWantedFor(app.SpectrumFull, st.Playing && seen)
 	area.Draw(func(p *ui.Painter, r ui.Rect) {
 		paintSpectrum(p, r, bars, color)
 		// 只在真的在放、而且用户看得到这一扇窗的时候要下一帧（票 #156）。
