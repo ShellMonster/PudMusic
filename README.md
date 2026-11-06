@@ -78,9 +78,9 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 |---|---|---|
 | macOS | arm64 / amd64 | 支持 |
 | Windows | amd64 / arm64 | 支持 |
-| Linux | — | 当前不提供发行版本 |
+| Linux | amd64 / arm64 | 最小可发行 |
 
-macOS 当前提供 DMG 安装包，首次打开未公证的应用时可能需要在系统提示中确认打开。Windows 当前提供 amd64 和 arm64 安装包，安装包未进行代码签名，系统可能显示 SmartScreen 提示。
+macOS 当前提供 DMG 安装包，首次打开未公证的应用时可能需要在系统提示中确认打开。Windows 当前提供 amd64 和 arm64 安装包，安装包未进行代码签名，系统可能显示 SmartScreen 提示。Linux 提供 Debian/Ubuntu 的 `.deb` 包与通用 `.tar.gz` 自装包（含 `install.sh`，装入 `~/.local`），Arch 用户可用随包 `PKGBUILD` 自行 `makepkg -si`。
 
 ## 当前边界
 
@@ -91,6 +91,7 @@ macOS 当前提供 DMG 安装包，首次打开未公证的应用时可能需要
 - B 站音乐 MV 以视频为主，当前播放器面向音频播放。
 - 杜比音轨不能手动选择；不同平台的系统解码能力也不同。
 - Windows 的 AAC/有损在线音频路径依赖 Media Foundation，部分场景的实际播放表现可能与 macOS 不同。
+- Linux 首发是**最小可发行**：登录态（扫码登录）、AAC/M4A 解码、视频播放和 MPRIS 媒体控制还没接（各留后续票）。托盘图标走 AppIndicator——桌面不带 `libayatana-appindicator3` 的发行版上它建不出来（应用照跑，记一行日志），这一档没有系统级回归覆盖（见 `.github/workflows/linux.yml` 的 E2E 注释）。
 - macOS 和 Windows 的系统媒体控件能力不同，例如 Windows 媒体浮窗当前不显示封面。
 - 当前不提供 Mac App Store 版本。
 
@@ -100,7 +101,7 @@ macOS 当前提供 DMG 安装包，首次打开未公证的应用时可能需要
 |---|---|
 | 主要语言 | Go |
 | 桌面 UI | [MyGo](https://github.com/egoist/mygo) 原生即时模式 UI |
-| 应用打包 | MyGo CLI、macOS DMG、Windows NSIS 安装包 |
+| 应用打包 | MyGo CLI、macOS DMG、Windows NSIS 安装包、Linux tar.gz/deb/PKGBUILD |
 | 音频链路 | Go 解码器、macOS AudioToolbox、Windows Media Foundation |
 | 平台集成 | 文件关联、URL Scheme、单实例、托盘/菜单栏、开机自启、系统媒体会话 |
 | 在线内容 | B 站公开内容与扫码登录后的可用接口 |
@@ -125,6 +126,7 @@ macOS 当前提供 DMG 安装包，首次打开未公证的应用时可能需要
 
 - macOS：DMG
 - Windows：amd64 或 arm64 安装包
+- Linux：Debian/Ubuntu 用 `.deb`；其余发行版用 `.tar.gz`（`sh install.sh` 装入 `~/.local`）；Arch 用 `PKGBUILD`（`makepkg -si`）。
 
 ### 从源码运行
 
@@ -148,7 +150,11 @@ go test ./...
 scripts/build.sh
 ```
 
-构建 Windows 安装包需要安装 NSIS。应用使用 MyGo CLI 进行跨平台打包。
+构建 Windows 安装包需要安装 NSIS。应用使用 MyGo CLI 进行跨平台打包。Linux 目标在 Linux 上直接打，在任何宿主上交叉打也可以（MyGo 不用 cgo）：
+
+```sh
+scripts/build.sh linux/amd64 linux/arm64
+```
 
 ## 项目来源与致谢
 

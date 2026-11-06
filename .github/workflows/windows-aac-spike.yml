@@ -71,12 +71,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Cache Go toolchain
-        uses: actions/cache@v4
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
-
+      # ⚠️ 这里**不许**再加「Cache Go toolchain」那种把 hostedtoolcache 下
+      # 的 go 目录存进 actions/cache 的步骤：缓存命中时 tar 把它还原成
+      # 符号链接（C:\hostedtoolcache → D:\hostedtoolcache），随后 setup-go
+      # 往同一位置写链接直接撞 EEXIST，go.mod 指定的版本装不上，spike
+      # 根本没机会跑（PR #769 那次红）。Go module / build 缓存由 setup-go
+      # 自带的 `cache: true` 负责，它不碰托管工具目录。
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

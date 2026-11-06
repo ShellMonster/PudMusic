@@ -3,8 +3,12 @@
 package main
 
 import (
+	"bufio"
+	"net"
 	"os"
+	"strings"
 
+	"github.com/ShellMonster/PudMusic/internal/ui"
 	"github.com/egoist/mygo"
 	_ "github.com/egoist/mygo/plugins/automation"
 )
@@ -35,4 +39,69 @@ func init() {
 		return
 	}
 	mygo.App.SetPath(mygo.PathUserData, dir)
+	go serveTrayHook()
+}
+
+// serveTrayHook 是 E2E 的「点托盘菜单项」通道。
+//
+// ⚠️ **为什么要这条缝**：Linux 上托盘菜单由面板进程画（AppIndicator /
+// StatusNotifierItem），Xvfb 下没有真面板——automation 的 `menu` 方法只
+// 认窗口的菜单栏，够不到它。这条 socket 让 `internal/e2e` 的测试在**进程
+// 外**点那一项，走的仍是菜单项自己的 `Click`（`ui.E2EActivateTrayItem`）。
+//
+// ⚠️ **协议是一行一个命令**：
+//
+//	tray.enabled <id>   → 回 "enabled" / "disabled" / "missing"
+//	tray.click <id>     → 回 "ok"（激活了）或 "missing"（菜单/项不在）
+//
+// socket 放在 automation socket 旁边（`$MYGO_AUTOMATION.tray`）——那一条
+// 已经在临时目录里，生命周期跟着 E2E 走。
+func serveTrayHook() {
+	auto := os.Getenv("MYGO_AUTOMATION")
+	if auto == "" {
+		return
+	}
+	sock := auto + ".tray"
+	os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		return
+	}
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		go handleTrayHook(conn)
+	}
+}
+
+func handleTrayHook(conn net.Conn) {
+	defer conn.Close()
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return
+	}
+	fields := strings.Fields(line)
+	reply := "bad\n"
+	if len(fields) == 2 {
+		switch fields[0] {
+		case "tray.enabled":
+			present, enabled := ui.E2ETrayItemEnabled(fields[1])
+			if !present {
+				reply = "missing\n"
+			} else if enabled {
+				reply = "enabled\n"
+			} else {
+				reply = "disabled\n"
+			}
+		case "tray.click":
+			if ui.E2EActivateTrayItem(fields[1]) {
+				reply = "ok\n"
+			} else {
+				reply = "missing\n"
+			}
+		}
+	}
+	conn.Write([]byte(reply))
 }

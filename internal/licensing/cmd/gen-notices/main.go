@@ -24,11 +24,12 @@ import (
 
 // genTargets 是要核一遍的构建目标。
 //
-// 只列首发支持的两个平台（Plan §5.1 第 2 条：Linux 首发不做）。加平台就往这里
-// 加一条——`licensing_test.go` 的门照同样的清单核，两边要一起改。
+// 加平台就往这里加一条——`licenses_test.go` 的门照同样的清单核，两边要一起改。
 var genTargets = []struct{ GOOS, GOARCH string }{
 	{"darwin", "arm64"},
 	{"darwin", "amd64"},
+	{"linux", "amd64"},
+	{"linux", "arm64"},
 	{"windows", "amd64"},
 	{"windows", "arm64"},
 }

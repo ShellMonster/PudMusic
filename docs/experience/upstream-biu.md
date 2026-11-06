@@ -134,9 +134,11 @@ Windows 的 SMTC 浮窗有歌名、艺人、进度条和播放键，但**没有�
 MyGo 不实现 App Sandbox，也不管理文件选择的 powerbox。要上架得自己补 sandbox + 文件
 选择授权。
 
-### 首发只有 macOS 和 Windows
+### Linux 是最小可发行
 
-Linux 不首发。
+Linux 首发**进来了**，但只到「最小可发行」这一档：`.tar.gz` + `.deb` +
+`PKGBUILD`，登录态（扫码登录）、AAC/M4A 解码、视频和 MPRIS 都没接——
+各留后续票，见 `README.md`《当前边界》。
 
 ### 只有扫码登录
 

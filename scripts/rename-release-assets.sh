@@ -6,6 +6,8 @@
 #
 #   darwin/arm64   → Apple-Silicon_macOS
 #   darwin/amd64   → Intel_macOS
+#   linux/amd64    → Linux_x86_64
+#   linux/arm64    → Linux_ARM64
 #   windows/amd64  → Windows_x86_64
 #   windows/arm64  → Windows_ARM64
 #
@@ -27,6 +29,8 @@ platform_label() {
   case "$1" in
     darwin/arm64)  echo "Apple-Silicon_macOS" ;;
     darwin/amd64)  echo "Intel_macOS" ;;
+    linux/amd64)   echo "Linux_x86_64" ;;
+    linux/arm64)   echo "Linux_ARM64" ;;
     windows/amd64) echo "Windows_x86_64" ;;
     windows/arm64) echo "Windows_ARM64" ;;
     *) echo "" ;;
@@ -63,17 +67,34 @@ for platform in "$@"; do
   dir="build/$target"
   [ -d "$dir" ] || continue
 
-  # tar.gz 更新归档：清单的 url 指着它。旧名是
-  # `<slug>-<version>-<target>.tar.gz`，新名是 `update-<target>.tar.gz`。
-  # 名字归到 update-* 一族是为了让安装包（PudMusic-*.dmg / PudMusic-setup-*.exe）
-  # 在 GitHub 资产列表里排在最前——网页按文件名字典序排，小写 u 永远在大写 P 之后。
+  # tar.gz 更新归档：清单的 url 指着它。macOS / Windows 把它归到
+  # `update-<target>.tar.gz` 一族是为了让安装包（PudMusic-*.dmg /
+  # PudMusic-setup-*.exe）在 GitHub 资产列表里排在最前——网页按文件名
+  # 字典序排，小写 u 永远在大写 P 之后。
+  #
+  # ⚠️ **Linux 的 tar.gz 不改名**：它是**同一份文件的两个身份**——更新
+  # 归档，也是 `install.sh` 在同目录找的 `$name-$version-$target.tar.gz`
+  # 和 `PKGBUILD` 的 `source` 里写的那份。改成 update-* 的话：
+  #
+  #   - `sh install.sh` 在同目录找不到 `pudmusic-<ver>-linux-<arch>.tar.gz`，
+  #     「下载 install.sh + tar.gz」那条安装路径断；
+  #   - `makepkg` 按 `source` 找 `pudmusic-<ver>-linux-<arch>.tar.gz`，断。
+  #
+  # ⇒ Linux 这一支**跳过** tar.gz 改名：清单的 url 本来（mygo 写它时）就
+  # 指着 `pudmusic-<ver>-linux-<arch>.tar.gz`，不动它就对。排序让位给
+  # 安装路径能走通。
   version="$(python3 -c 'import json;print(json.load(open("mygo.json"))["version"])')"
   slug="$(python3 -c 'import json;print(json.load(open("mygo.json"))["slug"])')"
   archive_old="$dir/$slug-$version-$target.tar.gz"
   archive_new="$dir/update-$target.tar.gz"
-  if [ -f "$archive_old" ]; then
+  if [[ "$platform" != linux/* ]] && [ -f "$archive_old" ]; then
     mv "$archive_old" "$archive_new"
-    rewrite_manifest "$dir/update-$target.json" "$(basename "$archive_old")" "$(basename "$archive_new")"
+    # ⚠️ **未签名的构建没有 update manifest**（`MYGO_UPDATER_PRIVATE_KEY`
+    # 没设时 mygo 只打 tar.gz、不打 update-*.json）——manifest 在才改 url，
+    # 不在就只改名。CI 那一轮永远有 manifest；本地 probe 那一档没有。
+    if [ -f "$dir/update-$target.json" ]; then
+      rewrite_manifest "$dir/update-$target.json" "$(basename "$archive_old")" "$(basename "$archive_new")"
+    fi
   fi
 
   # delta 差分包：清单 deltas[].url 指着它。同样归 update-* 一族排后。
@@ -81,7 +102,9 @@ for platform in "$@"; do
     [ -f "$d" ] || continue
     new="$(dirname "$d")/$(basename "$d" | sed -e "s/^${slug}-/update-delta-/" -e "s/-${target}\.delta$/-${label}.delta/")"
     mv "$d" "$new"
-    rewrite_manifest "$dir/update-$target.json" "$(basename "$d")" "$(basename "$new")"
+    if [ -f "$dir/update-$target.json" ]; then
+      rewrite_manifest "$dir/update-$target.json" "$(basename "$d")" "$(basename "$new")"
+    fi
   done
 
   # 安装包 / 压缩包：清单不指它们，纯改名。
@@ -98,6 +121,15 @@ for platform in "$@"; do
       for f in "$dir"/pudmusic-setup-*-"$arch".exe; do
         [ -f "$f" ] || continue
         mv "$f" "$(dirname "$f")/PudMusic-setup-$version-$label.exe"
+      done
+      ;;
+    linux/*)
+      # ⚠️ **只改 .deb**：tar.gz 在上面**故意没动**（见那段注释——mygo 的
+      # linux tar.gz 是更新归档和 install.sh/PKGBUILD 入口的同一份，得留着
+      # `pudmusic-<ver>-linux-<arch>.tar.gz` 这个原名）。
+      for f in "$dir"/"$slug"_"$version"_"$arch".deb; do
+        [ -f "$f" ] || continue
+        mv "$f" "$(dirname "$f")/PudMusic-$version-$label.deb"
       done
       ;;
   esac

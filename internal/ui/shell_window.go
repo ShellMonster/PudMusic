@@ -284,6 +284,9 @@ func Run(a *app.App, sess *media.Session) error {
 
 	s := New(a)
 	s.media = sess
+	// e2e 钩子的登记位（`e2e_hook.go`，只在 `-tags e2e` 下真的记）：Linux 的
+	// 托盘退出自动化走它，非 e2e 构建里是一句空操作。
+	e2eRegisterShell(s)
 	// 主窗口那个外壳登记一下（见 notification.go 的 `mainShellRef`）：系统通知
 	// 的那一句提示得由它弹——迷你播放器画的是「正在放什么」，而通知指向的是
 	// 主窗里的下载记录页。
