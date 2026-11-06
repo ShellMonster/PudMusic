@@ -194,6 +194,24 @@ func faceTint(mid int64) ui.Color {
 	return palette[mid%int64(len(palette))]
 }
 
+// followCardLaneWidth 是右边那一格（工具条 + 卡网格）实际有多宽：页面体
+// （`pageBodyW`）减掉左右页边距，再减掉左分组栏和两栏之间那道缝。窄窗口
+// （≤1024）分栏收成单列，右格就是「页面体 − 左右页边距」。
+//
+// ⚠️ **它是算出来的，不是量的**：骨架画出来的时候网格容器还没被 `Bounds()`
+// 量到（要下一帧），等它量到骨架已经不在了——所以和 `pageBodyW` 一样按
+// 「内容区 − 固定的那几项」算，首帧就对。量出来的 `f.width`（上一帧的网格
+// 容器）优先级仍高于它：窗口拖宽拖到一半时它是真值。
+func (s *Shell) followCardLaneWidth(c *ui.Context) float32 {
+	winW := windowW(c)
+	pad := space.PageHorizontalForWindow(winW)
+	lane := s.pageBodyW(c) - 2*pad
+	if winW > 1024 {
+		lane -= followGroupW + space.Px40
+	}
+	return lane
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 骨架屏：首屏还在拉的时候，先把「两列关注卡」摆成灰块
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,7 +244,7 @@ func followSkeletonCard(c *ui.Context, idx string, w float32) {
 		Border(1, p.Line).
 		Children(func() {
 			skeleton.Block(c, key+":av", 56, 56, 28).Label(followSkeletonLabel(idx, "头像"))
-			ui.Column(c).Grow(1).Shrink(1).Gap(space.Px6).Children(func() {
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(space.Px6).Children(func() {
 				// ⚠️ **字条宽按真卡的份数给，不按卡宽比例**：真卡上「名字 16 /
 				// 签名 13 / 认证 12」是三行不同长的字，骨架用三根不同长的条
 				// 模拟；拿卡宽乘比例的话窄卡里字条会比真字短一截、宽卡里长一截。
@@ -240,7 +258,7 @@ func followSkeletonCard(c *ui.Context, idx string, w float32) {
 			// （三个 13px 字 + 左右 14 内边距 ≈ 66）。Shrink(0) 不许它被压：
 			// 窄卡里中间那一列已经 `Shrink(1)` 会让路，按钮永远贴在右缘
 			//（真卡上它也是 `Shrink(0)`，同一档）。
-			skeleton.Block(c, key+":btn", 66, tok.BtnSmH, tok.Pill).Label(followSkeletonLabel(idx, "按钮"))
+			skeleton.Block(c, key+":btn", 66, tok.BtnSmH, tok.Pill).Shrink(0).Label(followSkeletonLabel(idx, "按钮"))
 		})
 }
 
@@ -258,18 +276,19 @@ func followSkeletonCard(c *ui.Context, idx string, w float32) {
 func (s *Shell) viewFollowSkeleton(c *ui.Context, f *followPage) {
 	w := f.width
 	if w <= 0 {
-		w, _ = c.Size()
+		// 头一帧还没量出网格容器，按「内容区 − 页边距 − 分组栏 − 缝」算
+		//（`followCardLaneWidth`）——**不能拿内容区宽直接当容器**：它比右格
+		// 多出页边距 + 分组栏 + 缝共三百多像素，两列算出来的 cell 就虚胖，
+		// 第二列整张越出卡道（按钮占位也跟着冲出卡片右缘）。
+		w = s.followCardLaneWidth(c)
 	}
 	cols := followColumnsFor(w)
-	// ⚠️ **占位卡宽按「这一格的可用宽」算**：拿窗口宽当容器宽会把格算得比
-	// 容器还宽（首帧 `f.width` 还没量出来，那一帧 `cell` 宽 692 > 容器
-	// 848/2），卡从右缘溢出去。`f.width` 是上一帧量的，没量到就按窗口的
-	// 内容区宽（窗口 − 侧栏）先顶着——宁可算窄一格，不许溢出。
-	contW := w
-	if contW > 0 {
-		if cw := s.spaceContentWidth(c); cw > 0 && contW > cw {
-			contW = cw
-		}
+	// ⚠️ **占位卡宽按「右边那一格的宽」算，不许拿内容区宽凑**：上一帧量到
+	// 的 `f.width` 是真值；估算值不许大过它（拖宽窗口的半路，`f.width` 还
+	// 停在旧值，算出来的 lane 会比它宽——那一帧宁可窄，不溢出）。
+	contW := s.followCardLaneWidth(c)
+	if w > 0 && w < contW {
+		contW = w
 	}
 	cell := pud.CellWidth(max(contW, 0), cols, followCardGap)
 	ui.Column(c).Key("follow:skeleton").Label("正在加载关注的人…").FillWidth().
