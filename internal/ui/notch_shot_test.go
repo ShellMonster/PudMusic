@@ -71,8 +71,21 @@ func TestRenderNotchShots(t *testing.T) {
 			}
 			save(t, dir, theme+"-notch-collapsed-playing.png", tt)
 
+			// 先在暂停态把展开弹簧收稳再开播：直接开播就拍的话，形状还在
+			// 520ms 弹簧的中间（bounce 0.28 还带过冲），卡片透明度/位移落在
+			// 半路——每张图的高度都不一样，对照参考图就是在量一个随机相位。
+			n.app.Toggle() // 先停：eq 柱和频谱都不要帧了，弹簧才收得稳。
 			n.notchSt.open = true
-			n.app.Toggle() // 再停：展开态和参考图一致（暂停）
+			tt.Frame()
+			settleNotch(t, tt)
+			n.app.Toggle() // 再放：展开卡的频谱柱跳起来（它一直在走，推几帧就拍）。
+			for range 30 {
+				tt.Advance(time.Second / 60)
+				tt.Frame()
+			}
+			save(t, dir, theme+"-notch-playing.png", tt)
+
+			n.app.Toggle() // 再停：展开态暂停那一档也出一张（频谱收起来）。
 			tt.Frame()
 			settleNotch(t, tt)
 			save(t, dir, theme+"-notch.png", tt)

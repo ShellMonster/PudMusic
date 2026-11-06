@@ -47,6 +47,13 @@ func (f *biliFixture) failTriple() {
 	f.tripleBody = `{"code":-101,"message":"账号未登录","ttl":1}`
 }
 
+// failLike 把赞那一趟换成失败（没登录）——`SetLike` 的 done 会拿到 err。
+func (f *biliFixture) failLike() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.likeFail = true
+}
+
 // gate 卡住某一条路径的响应，直到 release 那条路径。
 //
 // ⚠️ 用的是 `gates` 那张表（原来只用来卡搜索的），键是路径而不是关键词——
@@ -87,6 +94,7 @@ func (f *biliFixture) serveArchiveLike(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	f.mu.Lock()
 	f.likePosts++
+	fail := f.likeFail
 	// 🔴 收的是 **`like`**，不是 `up`：这是 web 端 `/x/web-interface/archive/like`
 	// 的真形状（`bilibili-API-collect` 的 `docs/video/action.md`「点赞视频（web端）」
 	// 参数表只有 like）。照真接口造 fixture 是这个仓库的纪律——照着我们自己发错的
@@ -99,6 +107,10 @@ func (f *biliFixture) serveArchiveLike(w http.ResponseWriter, r *http.Request) {
 		f.lastLikeForm[k] = append([]string(nil), v...)
 	}
 	f.mu.Unlock()
+	if fail {
+		_, _ = w.Write([]byte(`{"code":-101,"message":"账号未登录","ttl":1}`))
+		return
+	}
 	_, _ = w.Write([]byte(`{"code":0,"message":"0","ttl":1}`))
 }
 

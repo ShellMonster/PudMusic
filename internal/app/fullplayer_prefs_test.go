@@ -690,7 +690,7 @@ func TestTheSpectrumPreferenceControlsTheCurrentPlayer(t *testing.T) {
 	}
 	// FFT 的开关还看「有没有人在画」——界面那一侧每一帧报一次。这里测的是
 	// 偏好那一半，直接把「我在画」报上，不然这一条测的是两件事。
-	a.SetSpectrumWanted(true)
+	a.SetSpectrumWantedFor(SpectrumFull, true)
 	// ⚠️ **这里等的是「真的开出一个音频设备再走起来」**：`waitFor` 那 2 秒是给
 	// 「后台一定会做完」的小事留的（见它的注释），而这一条要过一遍系统音频
 	// 输出——CI 那台 macOS runner 上偶尔要更久（2026-10-30 飘红过一次）。
