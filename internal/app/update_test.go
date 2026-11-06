@@ -267,6 +267,44 @@ func TestTwoBackgroundChecksDoNotRepeatTheSameVersionToast(t *testing.T) {
 	}
 }
 
+// 用户自己按「检查更新」查到了 V1、弹窗自己开了、他看完关掉了——那这一次
+// 已经**提醒过了**：下一个小时的后台检查再查到同一个 V1，不该再在右下角
+// 弹一句「发现新版本 V1」。他刚在弹窗里看过 V1 的更新日志，右下角再来一
+// 句同一件事就是又吵了他一次。
+//
+// 🔴 这是 2026-11-06 评审抓出来的边界：「同一个版本只说一次」当时只记了
+// **后台那一条**，而「用户自己查」那一支是 `if user`——它弹的是窗不是
+// Toast，于是 `toastedVersion` 没被记下，用户关掉弹窗之后，下一小时的后
+// 台检查照样把那句 Toast 又弹了出来。
+//
+// ⚠️ 而**换了版本要再弹**：0.2.0 看过之后，后台查到 0.3.0 是另一件事。
+func TestAVersionTheUserAlreadySawStaysQuietOnLaterBackgroundChecks(t *testing.T) {
+	f := newUpdFixture(t, "0.1.0", &UpdateRelease{Version: "0.2.0"})
+
+	// 用户自己按的：查到了 V1，弹窗开（提示那一支刻意留白，弹窗就是提醒）。
+	f.checkAndWait(t, true)
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
+		t.Fatalf("用户自己查的那一次留了提示 %q —— 弹窗本身就是那句提醒", n)
+	}
+
+	// 他看完关掉了（DismissUpdate 只把相位退回 Idle），之后下一个小时的
+	// 后台检查又查到了**同一个** V1。
+	f.app.DismissUpdate()
+	f.checkAndWait(t, false)
+
+	if n, _ := f.app.TakeUpdateNotice(); n != "" {
+		t.Errorf("用户已经在弹窗里看过 %q，后台检查又弹了一遍同一句提示——"+
+			"而他关掉弹窗就是因为不用再提醒了", n)
+	}
+
+	// 出了新版本：该再弹一次（用户要看的正是「哪一个版本」）。
+	f.be.setRel(&UpdateRelease{Version: "0.3.0"})
+	f.checkAndWait(t, false)
+	if n, _ := f.app.TakeUpdateNotice(); n != "发现新版本 0.3.0" {
+		t.Errorf("出新版本了却没有那句提示，拿到的是 %q", n)
+	}
+}
+
 // 后台查失败：不弹提示（用户没按任何键，突然冒一句红字只会让人以为应用坏了）。
 func TestABackgroundCheckThatFailsKeepsQuiet(t *testing.T) {
 	f := newUpdFixture(t, "0.1.0", nil)

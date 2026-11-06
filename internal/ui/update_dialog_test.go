@@ -718,6 +718,48 @@ func TestTwoBackgroundChecksShowOnlyOneToastForTheSameVersion(t *testing.T) {
 	}
 }
 
+// 用户自己按「检查更新」查到了 V1：弹窗开了，他看完按「以后再说」关掉了。
+// 那这一次已经**提醒过了**——下一个小时的后台检查又查到**同一个** V1 时，
+// 右下角不该再弹一句「发现新版本 V1」：他刚在弹窗里看过它的更新日志。
+//
+// 🔴 这是 2026-11-06 评审抓出来的边界：「同一个版本只说一次」原本只记了
+// **后台那一条**，而「用户自己查」那一支弹的是窗不是 Toast，于是关掉弹窗
+// 之后下一个小时的后台检查照样把那句 Toast 又弹了出来——用户等于被同一
+// 件事吵了两次，而且第二次恰好是在他明说「以后再说」之后。
+func TestABackgroundCheckStaysQuietAfterTheUserSawTheDialog(t *testing.T) {
+	f := newUpdFixture(t, &app.UpdateRelease{Version: "0.2.0"})
+
+	// 用户自己按的：查到了 V1，弹窗自己开了。
+	f.checkUpdate(t)
+	if !f.s.update.wanted {
+		t.Fatal("用户自己查到新版本后弹窗没有打开")
+	}
+	// 他看完了，按「以后再说」把弹窗关上。
+	if err := f.tt.Click("以后再说"); err != nil {
+		t.Fatalf("弹窗上点不到「以后再说」：%v，文字有 %q", err, f.tt.Texts())
+	}
+	f.tt.Frame()
+	if f.s.update.wanted {
+		t.Fatal("「以后再说」没把弹窗关上")
+	}
+
+	// 下一个小时的后台检查又查到了同一个 V1。
+	before := f.be.checksDone()
+	stop := f.a.StartAutoChecks()
+	waitFor(t, "后台又查了一次", func() bool { return f.be.checksDone() > before })
+	waitFor(t, "后台那一次落地了", func() bool { return f.a.UpdateSnapshot().Available() })
+	stop()
+	f.tt.Frame()
+
+	if f.tt.HasText("发现新版本 0.2.0") {
+		t.Errorf("用户已经在弹窗里看过 0.2.0，后台检查又弹了一遍同一句提示，"+
+			"文字有 %q", f.tt.Texts())
+	}
+	if f.s.update.wanted {
+		t.Error("后台检查把弹窗又打开了")
+	}
+}
+
 // 换了版本：该再弹一次（用户要看的正是「哪一个版本」）。
 func TestANewVersionFoundByABackgroundCheckShowsAnotherToast(t *testing.T) {
 	f := newUpdFixture(t, &app.UpdateRelease{Version: "0.2.0"})
