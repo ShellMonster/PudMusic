@@ -44,9 +44,9 @@
 // 身份就都变了，而**动画通道是存在身份里的**——于是新来的那枚键会**继承**上一
 // 枚留下的通道（画面上是「另一枚键莫名其妙缩着」）。
 //
-// 播放条左边那一段就是这种地方：「分集」键是逐帧问出来的（单 P 的稿子不摆），
-// 于是「收藏 / 赞」的兄弟序号会变。**那一段的三枚键都用 `Context.Key` 钉了
-// 身份**（见 `internal/ui/playbar.go`）。别的地方兄弟是不变的，就不用管。
+// 播放条上「分集」那一枚就是这种地方：它是逐帧问出来的（单 P 的稿子不摆），
+// 一出现，同一段后面几枚的兄弟序号就都变——**所以它用 `Context.Key` 钉了
+// 身份**（见 `internal/ui/playbar_keys.go`）。别的地方兄弟是不变的，就不用管。
 package flat
 
 import (
@@ -103,8 +103,9 @@ func PressScaleValue(e ui.Element, pressed, grow bool) float32 {
 		}
 	}
 	// ⚠️ **这一档换不了 `AnimatePose`**（票 #276 查过）：它的返回值是**被读**的
-	// ——调用方拿它去乘（`like.go` 的图标层把这一档和「弹出来」那一档相乘），
-	// 而 pose 的当前值**没有公开的读法**（`mygo/ui/pose.go`）。判据只有一条：
+	// ——调用方拿它去乘（已删的 `like.go` 的赞键图标层把这一档和「弹出来」
+	// 那一档相乘），而 pose 的当前值**没有公开的读法**（`mygo/ui/pose.go`）。
+	// 判据只有一条：
 	// **换完之后那个动画值还会不会被 view 读**——会读就还是每帧重建，就白换。
 	return e.AnimateWith(pressKey, target, pressTime, motion.Unified)
 }
@@ -115,9 +116,9 @@ func PressScaleValue(e ui.Element, pressed, grow bool) float32 {
 //
 // ⚠️ **跟别的缩放要相乘**：框架的 `Scale` 是「在已有变换**之后**再缩」
 // （`mygo/ui/transform.go`：`e.transform = e.transform.Then(Scaling(x, y))`），
-// 所以两次 `Scale` 本身就是乘在一起的——但要跟别的一档相乘时（比如赞键那种
-// 「按下 + 弹跳」），用 `PressScaleValue` 拿到倍数，**自己乘完再 `Scale` 一次**：
-// 那样只有一份变换，读者一眼看得出乘的是哪两个。
+// 所以两次 `Scale` 本身就是乘在一起的——但要跟别的一档相乘时（比如原来赞键
+// 那种「按下 + 弹跳」），用 `PressScaleValue` 拿到倍数，**自己乘完再
+// `Scale` 一次**：那样只有一份变换，读者一眼看得出乘的是哪两个。
 func PressScale(e ui.Element, pressed, grow bool) ui.Element {
 	v := PressScaleValue(e, pressed, grow)
 	return e.Scale(v, v)
