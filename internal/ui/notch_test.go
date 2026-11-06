@@ -218,6 +218,72 @@ func TestNotchPollingKeepsOneScheduledTimer(t *testing.T) {
 	}
 }
 
+// TestNotchByeHideStopsPollingEntirely 钉「引导收掉后那一档藏窗，轮询是
+// 整摊停的」：不光 ticker 停了，`pollAt`/`pollEvery` 也得清——不然
+// `viewNotch` 会拿一条死了的 ticker 留下的欠账当到点，白跑一次
+// `notchPoll`（曾经这里只 `stopNotchTicker`，和其它停法不一致）。
+//
+// 这一档 `win` 本来是非空才进的；但「停的完整不完整」跟窗在不在无关，
+// 无头外壳（`win == nil`）同样该清干净。
+func TestNotchByeHideStopsPollingEntirely(t *testing.T) {
+	n, _ := newNotchShell(t)
+	fc := newFakeClock(time.Unix(1767225600, 0))
+	tc := &notchPollTestClock{fakeClock: fc}
+	n.clock = tc
+
+	// 引导结束：hello 已收、开关还关着，正排着一条 ticker（悬停那一档
+	// 常见：引导里 `notchPoll` 排了 33ms 或 100ms 的 ticker）。
+	n.notchSt.active = true
+	n.notchPollAgain(true)
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("收窗前还排着 %d 条 ticker，want 1", got)
+	}
+
+	n.notchHideAfterBye()
+	if got := tc.activeTimers(); got != 0 {
+		t.Fatalf("收窗后还有 %d 条 ticker，want 0", got)
+	}
+	if !n.notchSt.pollAt.IsZero() || n.notchSt.pollEvery != 0 {
+		t.Fatalf("收窗后轮询时刻没清：pollAt=%v pollEvery=%v",
+			n.notchSt.pollAt, n.notchSt.pollEvery)
+	}
+	// 推钟到原来的下一跳之后：那条欠账不该再被认成到点。
+	fc.Advance(time.Second)
+	if n.notchPollTick() {
+		t.Fatal("整摊停了之后还被叫醒：pollAt 没清，死了的 ticker 留了欠账")
+	}
+}
+
+// TestNotchByeHideSkippedWhenGreetingRevives 钉延迟那一档的反例：跑它的
+// 时候引导复活了（指针又进来重新问候）或开关已经开了，就不许藏窗、不许
+// 停轮询。
+func TestNotchByeHideSkippedWhenGreetingRevives(t *testing.T) {
+	n, _ := newNotchShell(t)
+	tc := &notchPollTestClock{fakeClock: newFakeClock(time.Unix(1767225600, 0))}
+	n.clock = tc
+	n.notchSt.active = true
+	n.notchPollAgain(true)
+
+	// 那一秒钟里用户又把指针放回刘海，重新问候了：藏窗取消。
+	n.notchSt.hello = true
+	n.notchHideAfterBye()
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("引导复活后 ticker 被停了：active=%d, want 1", got)
+	}
+
+	// 引导没落回来，但用户在那一秒里把开关拨到开了：也不许藏。
+	n.notchSt.hello = false
+	if _, err := n.app.UpdateSettings(func(set *app.Settings) {
+		set.NotchPlayer = boolPtr(true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n.notchHideAfterBye()
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("开关开着时 ticker 被停了：active=%d, want 1", got)
+	}
+}
+
 // TestNotchWindowCloseProceedsWhenTheAppIsQuitting 钉「应用退出时刘海窗不许
 // 再把关窗拦回去」那条。
 //

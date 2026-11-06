@@ -503,7 +503,8 @@ func (s *Shell) notchPollAgain(inside bool) {
 
 // stopNotchPolling 把排着的那条 ticker 停掉。「不排了」的那一帧
 // （`notchPollAgain` 里 `d == 0`）、刘海藏起来（`notchSetEnabled(false)`）、
-// 窗口关了（`releaseNotch`）都走这里。可重复调。
+// 引导收完藏窗（`notchHideAfterBye`）、窗口关了（`releaseNotch`）都走这里。
+// 可重复调。
 func (s *Shell) stopNotchPolling() {
 	s.stopNotchTicker()
 	n := &s.notchSt
@@ -617,13 +618,26 @@ func (s *Shell) notchBye() {
 		s.win.SetIgnoreMouseEvents(true)
 	}
 	// 一秒钟之后再 Hide：让「收进去」那一下先画完。
-	time.AfterFunc(time.Second, func() {
-		if !n.hello && !s.notchEnabled() && s.win != nil {
-			s.stopNotchTicker()
-			s.win.Hide()
-			s.watchNotch()
-		}
-	})
+	time.AfterFunc(time.Second, s.notchHideAfterBye)
+}
+
+// notchHideAfterBye 是引导收掉一秒钟之后那一档：引导没复活、开关也还
+// 关着，就把轮询整摊停掉、窗藏掉、指针监听摘掉。
+//
+// ⚠️ 轮询的停要和 `releaseNotch`/`notchSetEnabled(false)` 那两档一样是
+// 整套 `stopNotchPolling`——ticker 停掉之外 `pollAt`/`pollEvery` 也要清。
+// 只 `stopNotchTicker` 的话那两格还留着「下一跳」的时刻，`viewNotch` 会
+// 拿一条已经死了的欠账当到点，白跑一次 `notchPoll`。
+func (s *Shell) notchHideAfterBye() {
+	n := &s.notchSt
+	if n.hello || s.notchEnabled() {
+		return
+	}
+	s.stopNotchPolling()
+	if s.win != nil {
+		s.win.Hide()
+	}
+	s.watchNotch()
 }
 
 // notchKeep 是引导上那个「开启」键：把开关拨到开。
