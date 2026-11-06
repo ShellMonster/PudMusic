@@ -118,6 +118,18 @@ type biliFixture struct {
 	favoritedIn   []int64
 	favoriteCalls []url.Values
 
+	// likedPlaylist 那一票要的几格（见 likedplaylistfixture_test.go 的文件头）。
+	//
+	// createdList 是「我创建的收藏夹」那一次翻页回的整份 list（选择已有歌单
+	// 和绑定歌单都从它挑）。folderAdd 记下每一次「新建收藏夹」的表单，
+	// folderAddErr 让它回一个业务错误（造「新建被拒」）。dealErr 让
+	// resource/deal 回一个业务错误（造「绑定的那一格不见了」，喜欢那条路
+	// 看见它就退回原收藏夹选择）。
+	createdList  []map[string]any
+	folderAddLog []url.Values
+	folderAddErr int
+	dealErr      int
+
 	// 点赞那三个接口的答案（见 like_test.go 的 onLike）。
 	//
 	// relLiked/relFaved 是「赞没赞、收藏没收藏」那一问的答案；
@@ -202,6 +214,45 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"id": 200, "title": "第二格", "media_count": 0, "attr": 0},
 			}}})
 
+	case r.URL.Path == "/x/v3/fav/folder/created/list":
+		// 「我创建的收藏夹」的**分页**接口（选择已有歌单拉的就是它，和
+		// `list-all` 那一趟是两条路——`list-all` 给收藏那一趟挑默认格，
+		// `created/list` 给弹窗画整张列表，带 `fav_state` 和 `has_more`）。
+		f.mu.Lock()
+		list := f.createdList
+		f.mu.Unlock()
+		if list == nil {
+			list = []map[string]any{
+				{"id": fixtureFolderID, "title": fixtureFolderTitle, "media_count": 1,
+					"attr": 0, "fav_state": 0},
+				{"id": 200, "title": "第二格", "media_count": 0,
+					"attr": 0, "fav_state": 0},
+			}
+		}
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{
+				"count": len(list), "has_more": false, "list": list,
+			}})
+
+	case r.URL.Path == "/x/v3/fav/folder/add":
+		// 新建一个收藏夹（喜欢歌单「创建新的」那一步）。
+		_ = r.ParseForm()
+		f.mu.Lock()
+		f.folderAddLog = append(f.folderAddLog, r.PostForm)
+		addErr := f.folderAddErr
+		f.mu.Unlock()
+		if addErr != 0 {
+			_, _ = w.Write([]byte(`{"code":` + strconv.Itoa(addErr) +
+				`,"message":"拒绝","ttl":1}`))
+			return
+		}
+		title := r.PostForm.Get("title")
+		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1,
+			"data": map[string]any{
+				"id": 300, "title": title, "attr": 0, "media_count": 0,
+				"fav_state": 0,
+			}})
+
 	case r.URL.Path == "/x/v3/fav/resource/ids":
 		// 收的是**收藏夹 id**、返回的是**那一格里的内容**（上游
 		// `fav-resource.ts:127-152`）。每一项是一个对象 `{id, type}`。
@@ -216,7 +267,13 @@ func (f *biliFixture) serve(w http.ResponseWriter, r *http.Request) {
 		_ = r.ParseForm()
 		f.mu.Lock()
 		f.favoriteCalls = append(f.favoriteCalls, r.PostForm)
+		dealErr := f.dealErr
 		f.mu.Unlock()
+		if dealErr != 0 {
+			_, _ = w.Write([]byte(`{"code":` + strconv.Itoa(dealErr) +
+				`,"message":"收藏夹不存在","ttl":1}`))
+			return
+		}
 		writeBiliJSON(w, map[string]any{"code": 0, "message": "0", "ttl": 1})
 
 	case r.URL.Path == "/x/web-interface/archive/relation":

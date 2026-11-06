@@ -271,6 +271,21 @@ type SideMenuCollectionOrder struct {
 	Collected []int64 `json:"collected"`
 }
 
+// LikedPlaylist 是「喜欢歌单」绑定的那一格收藏夹。
+//
+// 只存**身份**（收藏夹 id）和**用户认的那一行**（标题）——「私密 / 公开」
+// 那一栏不存：它是 B 站那边的属性，每次从接口拉（`created/list` 的 `attr`），
+// 落盘一份会发霉。标题存下来是因为侧栏 / 设置页要在「还没拉到列表」时也
+// 能念出它绑的是哪一格。
+//
+// ⚠️ **FolderID 是收藏夹 id，不是 avid**：「喜欢」那一趟写进 `deal` 的
+// `add_media_ids` 收的就是它。绑的时候界面把这个 id 记住；用的时候
+// `FavoriteSong` 的 `FavTarget.FolderID` 就是它。
+type LikedPlaylist struct {
+	FolderID int64  `json:"folderId"`
+	Title    string `json:"title"`
+}
+
 // list 报 g 这一组存下的顺序。
 func (o SideMenuCollectionOrder) list(g FavoriteGroup) []int64 {
 	if g == FavoritesCollected {
@@ -417,6 +432,20 @@ type Settings struct {
 	// NotchPlayerGreeted 记「刘海窗已经问候过一次」：第一次开始播放时会从
 	// 刘海里长出来一句引导，只长一次。
 	NotchPlayerGreeted bool `json:"notchPlayerGreeted"`
+
+	// LikedPlaylist 是「喜欢歌单」绑定的那一格收藏夹。**nil = 还没绑定**——
+	// 「没绑过」和「解绑了」在这一格里是一回事（都是 nil）：用户上一次选了
+	// 「暂时不用」，下一次点喜欢照样要问一次「创建 / 选择已有 / 暂时不用」。
+	//
+	// ⚠️ **用指针**：这是「有没有绑过」的事实，而零值结构表达不了「没设过」
+	// （零值 `LikedPlaylist{}` 的 FolderID 是 0，和「没绑」长得一样）。指针
+	// 把「这格不存在」（老设置文件）和「用户特意解绑了」分开——两者读回来都
+	// 是 nil，行为一致，而「绑的是 id 0 那格」永远不被误当成「绑过了」。
+	//
+	// 绑定丢失（收藏夹在 B 站被删 / deal 回错）时退回原收藏夹选择，**不写回**
+	// 这一格——那一格可能又回来了（比如只是临时拉不到），而用户的绑定不该
+	// 因为一次失败的写被抹掉。
+	LikedPlaylist *LikedPlaylist `json:"likedPlaylist"`
 
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
