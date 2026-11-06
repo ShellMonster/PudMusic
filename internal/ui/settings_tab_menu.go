@@ -258,6 +258,12 @@ func (s *Shell) openLikedPickFromSettings() {
 		s.addToast("收藏夹现在打不开", notice.Warning)
 		return
 	}
+	// ⚠️ **`likePending` 必须清掉**：它可能还留着上一次「绑定后喜欢」普通
+	// 失败时的那一首（`flushLikedResults` 的失败分支不清它）。不清的话，
+	// `viewLikeBindPick` 会按「有歌要收」画（「绑定并加入」而不是「绑定」），
+	// 提交时还会拿 `b.rid == 0` 去发一趟注定失败的 deal——设置页换绑本身
+	// 不收任何一首歌。
+	s.likePending = nil
 	b := &likeBind{open: true, name: "我的喜欢"}
 	s.likeBind = b
 	s.openLikePick(b)

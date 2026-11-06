@@ -319,3 +319,50 @@ func TestSettingsShowsAndChangesTheBinding(t *testing.T) {
 		t.Errorf("设置里换绑定不该发 deal（发了 %d 次）", len(ds))
 	}
 }
+
+// TestSettingsChangeIgnoresALeftoverPending 钉「上一次喜欢失败留下的
+// `likePending` 不会让设置页换绑变成收歌」。
+//
+// 🔴 **残留路径**：「绑定后喜欢」那一趟普通失败（断网）时
+// `flushLikedResults` 只发提示、不清 `likePending`——它是给「绑定失效 →
+// 回多选框」那一支留的。不清的话，设置页「更换」进来时 `viewLikeBindPick`
+// 按「有歌要收」画（「绑定并加入」而不是「绑定」），提交时拿 `b.rid == 0`
+// 去发一趟注定失败的 deal——用户只是改个绑定，却收了一句「收藏不了」。
+func TestSettingsChangeIgnoresALeftoverPending(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.pages = [][]map[string]any{folderPage(11, 2)}
+	s, tt := likedPageShellAt(t, f, 1200, 1300)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	// 模拟「绑定后喜欢普通失败」留下的 pending（真实路径是
+	// `likeItemResolved` 的 bound 分支 + `flushLikedResults` 的失败支）。
+	s.likePending = &likePending{item: app.Item{Source: "online", Title: "卡着的那一首"}, rid: 77, typ: 12}
+
+	s.goToSettingsTab(settingsTabMenu)
+	settleFrame(tt)
+	if err := tt.Click("更换"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "收藏夹列表拉回来", func() bool {
+		return s.likeBind != nil && len(s.likeBind.list) == 2
+	})
+
+	if s.likePending != nil {
+		t.Fatal("设置页换绑该清掉残留的 likePending")
+	}
+	if tt.HasText("绑定并加入") {
+		t.Error("设置页换绑画成了「绑定并加入」：残留 pending 让它以为有歌要收")
+	}
+	if err := tt.Click("收藏夹 12"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+	if err := tt.Click("绑定"); err != nil {
+		t.Fatalf("没有「绑定」按钮（文字 %q）", tt.Texts())
+	}
+	settleFrame(tt)
+
+	if ds := f.deals(); len(ds) != 0 {
+		t.Errorf("设置里换绑定不该发 deal（发了 %d 次）", len(ds))
+	}
+}
