@@ -308,14 +308,14 @@ func notchToastTexts(s *Shell) []string {
 // 心形是**喜欢歌单绑定入口**（`favoriteCurrent` → 「把这一首放进哪些收藏夹」
 // 那个弹窗），不是 B 站点赞——喜欢歌单原型把「赞」从播放器上去掉了。
 //
-// 这条顺带钉「提示落在画 toast 的那一扇」：`openFolderSelect` 没挂歌单时
-// 只会说一句「收藏夹现在打不开」，那句要走 `s.main` 那份 toasts——刘海窗
-// 自己压根不画 toast（`viewToasts` 只在主窗那一支调）。
+// 这条顺带钉「提示落在画 toast 的那一扇」：没放歌时心形按下去说的是
+// 「这一首还没有取回来」，那句要走 `s.main` 那份 toasts——刘海窗自己压根
+// 不画 toast（`viewToasts` 只在主窗那一支调）。
 func TestNotchHeartOpensTheFolderSelect(t *testing.T) {
 	n, main := newNotchShell(t)
 
-	// ⚠️ **没挂歌单那一摊**：心形按下去说的是「收藏夹现在打不开」，而那句话
-	// 必须落在主窗口的 toasts 上，不是刘海外壳自己的（它那一扇不画 toast）。
+	// ⚠️ **没放歌**：心形按下去说的是「这一首还没有取回来」，而那句话必须
+	// 落在主窗口的 toasts 上，不是刘海外壳自己的（它那一扇不画 toast）。
 	n.favoriteCurrent()
 
 	if got := notchToastTexts(n); len(got) != 0 {
@@ -324,6 +324,45 @@ func TestNotchHeartOpensTheFolderSelect(t *testing.T) {
 	got := notchToastTexts(main)
 	if len(got) == 0 {
 		t.Fatal("提示没有落到主窗口的 toasts 上：用户按了心形、什么提示都没看见")
+	}
+}
+
+// TestNotchHeartOpensTheFolderSelectOnTheMainShell 钉「刘海点心形，弹窗开在
+// **主壳**上」。
+//
+// 🔴 **`viewFolderDialogs` 只在主窗口那一支调**：刘海外壳自己那份
+// `folderSelect` 永远没人画——弹窗写到副壳上等于开了一个看不见的窗（和
+// toast 写进副壳同一种静默失败）。这条盯的是 `main.folderSelect` 真的
+// 摆出来了，而刘海外壳自己那一份是空的。
+func TestNotchHeartOpensTheFolderSelectOnTheMainShell(t *testing.T) {
+	n, main := newNotchShell(t)
+
+	// 挂歌单 + 放一首在线的歌（心形的弹窗要 `PlayingItem` + `CollectionsMounted`；
+	// 在线播要 `MountStreaming`——不然 `Enqueue` 回「在线播放暂时用不了」）。
+	f := newBiliFixture(t, 1)
+	main.app.MountStreaming(app.Streaming{
+		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
+	})
+	b := newCollectionBili(t)
+	main.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
+	// ⚠️ **`Sid` 必须带上**：`favTarget` 认的是它（avid）——不带的话
+	// `openFolderSelect` 先去后台问 bvid → avid，那一趟还要等，而这条盯的
+	// 是「弹窗开在哪个壳上」，不是解析那一路。
+	if err := main.app.Enqueue(app.Item{
+		Source: "online", Type: "mv", Bvid: "BV1probe", Cid: "1", Sid: "999",
+		Title: "刘海里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
+	}); err != nil {
+		t.Fatalf("把在线的那首放进队列：%v", err)
+	}
+	waitFor(t, "在线那首开始播", func() bool { return main.app.Snapshot().HasTrack })
+
+	n.favoriteCurrent()
+
+	if main.folderSelect == nil || !main.folderSelect.open {
+		t.Fatal("刘海点心形之后主壳的收藏夹弹窗没开")
+	}
+	if n.folderSelect != nil {
+		t.Error("弹窗写进了刘海外壳自己的 folderSelect：那一扇不画它，用户永远看不见")
 	}
 }
 

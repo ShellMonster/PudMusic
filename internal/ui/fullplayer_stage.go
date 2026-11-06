@@ -266,6 +266,10 @@ func (s *Shell) viewFullHeart(c *ui.Context) {
 			s.addToast("这一首还没有取回来，收藏不了", notice.Warning)
 			return
 		}
+		// ⚠️ **先把满屏收掉**（和评论抽屉同一桩事，票 #706）：收藏夹弹窗
+		// 排在 `viewFullPlayer` **之前**建（shell_view.go），满屏盖在它上面
+		// ——不收掉的话，弹窗开在满屏底下，用户必须先把满屏关掉才看得见它。
+		s.closeFullPlayer()
 		s.openFolderSelect(it)
 	}
 }

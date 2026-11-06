@@ -121,6 +121,9 @@ func TestTheFullPlayerHasNoThumbButKeepsTheHeart(t *testing.T) {
 // TestTheFullPlayerHeartOpensTheFolderSelect 断「喜欢」心形点下去开的是
 // 「把这一首放进哪些收藏夹」那个弹窗（喜欢歌单的绑定入口），而不是发一趟
 // B 站点赞。
+//
+// 🔴 **满屏要收掉**：收藏夹弹窗排在 `viewFullPlayer` **之前**建，满屏盖在
+// 它上面——不收掉的话弹窗开在满屏底下（票 #706 的坑，评论抽屉同一道闸）。
 func TestTheFullPlayerHeartOpensTheFolderSelect(t *testing.T) {
 	env := favEnv(t)
 	s, tt := env.s, env.tt
@@ -129,6 +132,9 @@ func TestTheFullPlayerHeartOpensTheFolderSelect(t *testing.T) {
 
 	if err := tt.Click("喜欢"); err != nil {
 		t.Fatalf("点「喜欢」：%v（文字有 %q）", err, tt.Texts())
+	}
+	if s.full.open {
+		t.Error("点心形之后满屏还开着：收藏夹弹窗会被它压在底下")
 	}
 	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("添加到收藏夹") })
 	if got := env.f.likePostsCount(); got != 0 {

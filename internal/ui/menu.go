@@ -647,6 +647,11 @@ func (s *Shell) openPage(path string) {
 // ⚠️ **提示要落在画 toast 的那一扇上**：`viewToasts` 只在主窗口那一支调——
 // 迷你窗和刘海窗都不画 toast。从它们那两扇上点心形时，`s` 是那个副壳，
 // 直接 `s.addToast` 会把那句话写进一扇永远不画它的窗（静默失败）。
+//
+// ⚠️ **弹窗要开在画它的那一扇上**：`viewFolderDialogs` 只在主窗口那一支
+// 调——从副壳调 `s.openFolderSelect` 会把 `folderSelect` 写进副壳自己那
+// 一份，那一扇永远不画它：用户按了心形、弹窗开了一个看不见的（同一种
+// 静默失败）。所以下面走的是 `toastShell`（有主壳时是主壳）那一份。
 func (s *Shell) favoriteCurrent() {
 	it, ok := s.app.PlayingItem()
 	toastShell := s
@@ -657,7 +662,13 @@ func (s *Shell) favoriteCurrent() {
 		toastShell.addToast("这一首还没有取回来，收藏不了", notice.Warning)
 		return
 	}
-	s.openFolderSelect(it)
+	// ⚠️ **主窗的满屏要收掉**：弹窗开在主壳上（`viewFolderDialogs`），而满屏
+	// 排在它**之后**建、盖在它上面——满屏开着时这个弹窗用户看不见（同
+	// `viewFullHeart` 里那一道，票 #706 的坑）。
+	if toastShell.full.open {
+		toastShell.closeFullPlayer()
+	}
+	toastShell.openFolderSelect(it)
 }
 
 // downloadCurrent 是菜单里「下载当前歌曲」那一项做的事。
