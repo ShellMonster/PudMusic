@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PudMusic prototype · notch & update</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111214;
+      --surface: #191a1e;
+      --surface-2: #24262b;
+      --line: #34363d;
+      --text: #f1f0ed;
+      --muted: #a9a9ad;
+      --muted-2: #777980;
+      --accent: #f26a43;
+      --accent-soft: #42261d;
+      --danger: #ff625d;
+      --shadow: 0 24px 80px rgba(0, 0, 0, .42);
+      --serif: "Songti SC", "STSong", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 50% -12%, #30343d 0, transparent 34%),
+        linear-gradient(180deg, #101114 0%, #17181b 100%);
+      color: var(--text);
+      font: 14px/1.55 var(--sans);
+    }
+    button { font: inherit; color: inherit; }
+    .wrap { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 42px 0 64px; }
+    .eyebrow { color: var(--muted-2); font: 11px/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    h1, h2, p { margin: 0; }
+    h1 { margin-top: 10px; font: 700 clamp(32px, 4vw, 48px)/1.08 var(--serif); letter-spacing: -.03em; }
+    .intro { margin-top: 14px; max-width: 680px; color: var(--muted); }
+    .tabs { display: flex; gap: 8px; margin: 34px 0 24px; }
+    .tab, .state-btn {
+      border: 1px solid var(--line); background: var(--surface); border-radius: 9px;
+      padding: 9px 13px; cursor: pointer; transition: .18s ease;
+    }
+    .tab:hover, .state-btn:hover { border-color: #686b74; }
+    .tab.active, .state-btn.active { border-color: var(--accent); background: var(--accent-soft); color: #ffb19a; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .statebar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .stage {
+      min-height: 520px; display: grid; place-items: center; overflow: hidden;
+      border: 1px solid var(--line); border-radius: 16px; background:
+        linear-gradient(135deg, rgba(91, 143, 208, .35), transparent 32%),
+        linear-gradient(315deg, rgba(238, 180, 102, .22), transparent 28%),
+        #d5dde6; position: relative;
+    }
+    .stage::after {
+      content: ""; position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(0,0,0,.12));
+      pointer-events: none;
+    }
+    .screen {
+      width: min(860px, 92%); height: 390px; border-radius: 22px;
+      background: linear-gradient(180deg, rgba(250,250,250,.94), rgba(238,239,240,.96));
+      box-shadow: var(--shadow); position: relative; overflow: hidden;
+    }
+    .screen-search { position: absolute; left: 48px; right: 48px; bottom: 52px; height: 50px; border-radius: 28px; background: #e7e8ea; color: #85878d; display: flex; align-items: center; padding: 0 30px; font-size: 17px; }
+    .screen-search::before { content: "⌕"; margin-right: 12px; font-size: 26px; }
+    .notch {
+      position: absolute; left: 50%; top: 0; transform: translateX(-50%);
+      width: 468px; max-width: 72%; background: #000; color: var(--text);
+      border-radius: 0 0 24px 24px; overflow: hidden; z-index: 2;
+      transition: height .28s ease, width .28s ease;
+    }
+    .notch.collapsed { width: 190px; height: 38px; border-radius: 0 0 16px 16px; }
+    .notch.greeting { width: 340px; height: 96px; }
+    .notch.idle { width: 330px; height: 104px; }
+    .notch.expanded { height: 210px; }
+    .notch-top { height: 38px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; }
+    .cover-sm, .cover-lg { background: linear-gradient(145deg, #9b6d4c, #35231c 58%, #a97954); }
+    .cover-sm { width: 20px; height: 20px; border-radius: 4px; }
+    .eq { display: flex; align-items: end; gap: 4px; height: 20px; }
+    .eq i { display: block; width: 4px; border-radius: 2px; background: var(--accent); }
+    .eq i:nth-child(1) { height: 10px; } .eq i:nth-child(2) { height: 17px; } .eq i:nth-child(3) { height: 7px; }
+    .card-body { height: 172px; padding: 4px 16px 16px; display: flex; align-items: center; gap: 12px; }
+    .cover-lg { width: 56px; height: 56px; border-radius: 8px; flex: 0 0 auto; box-shadow: inset 0 0 0 1px rgba(255,255,255,.34); }
+    .track-info { min-width: 0; flex: 1; }
+    .track-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; font-size: 15px; }
+    .track-sub { margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #a6a8ae; font: 12px var(--mono); }
+    .controls { display: flex; gap: 3px; flex: 0 0 auto; }
+    .icon { width: 36px; height: 36px; display: grid; place-items: center; border: 0; background: transparent; font-size: 21px; cursor: pointer; }
+    .idle-body, .greeting-body { height: 66px; padding: 8px 16px 16px; display: flex; align-items: center; gap: 12px; }
+    .idle-copy, .greeting-copy { flex: 1; }
+    .idle-copy strong, .greeting-copy strong { display: block; font-weight: 600; }
+    .idle-copy span, .greeting-copy span { color: #a6a8ae; font-size: 12px; }
+    .text-button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+    .update-wrap { display: grid; grid-template-columns: 260px 1fr; gap: 24px; align-items: start; }
+    .update-copy { padding: 24px 0; }
+    .update-copy h2 { margin: 10px 0; font: 700 28px/1.15 var(--serif); }
+    .update-copy p { color: var(--muted); }
+    .dialog {
+      width: min(480px, 100%); border: 1px solid var(--line); border-radius: 12px;
+      background: var(--surface); box-shadow: var(--shadow); overflow: hidden;
+    }
+    .dialog-body { padding: 24px; }
+    .dialog h3 { font: 400 23px/1.2 var(--serif); }
+    .version { margin-top: 9px; color: var(--muted); font-size: 13px; }
+    .version b { color: var(--accent); font-weight: 500; }
+    .notes { margin-top: 18px; max-height: 184px; overflow: hidden; color: #d1d1d0; }
+    .notes p { margin: 0 0 8px; }
+    .progress { margin-top: 18px; }
+    .progress-line { display: flex; align-items: center; gap: 10px; color: var(--muted); font: 12px var(--mono); }
+    .bar { height: 6px; flex: 1; border-radius: 5px; background: #33353b; overflow: hidden; }
+    .bar i { display: block; width: 42%; height: 100%; background: var(--accent); }
+    .ready, .error { margin-top: 18px; font-size: 13px; }
+    .ready { color: var(--muted); } .error { color: var(--danger); }
+    .dialog-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 15px 24px 20px; border-top: 1px solid #2d2f34; }
+    .ghost, .primary { border: 0; border-radius: 8px; padding: 9px 13px; cursor: pointer; }
+    .ghost { background: transparent; color: var(--muted); }
+    .primary { background: var(--accent); color: #1b110d; font-weight: 600; }
+    .status-note { margin-top: 16px; color: var(--muted-2); font-size: 12px; }
+    @media (max-width: 760px) {
+      .wrap { width: min(100% - 28px, 600px); padding-top: 28px; }
+      .update-wrap { grid-template-columns: 1fr; }
+      .stage { min-height: 420px; }
+      .screen { height: 330px; }
+      .notch { transform: translateX(-50%) scale(.86); transform-origin: top center; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="eyebrow">PudMusic · throwaway prototype</div>
+    <h1>刘海播放 & 更新提示</h1>
+    <p class="intro">原型只验证布局、状态和提示时机。所有按钮都在内存中切换，不连接真实播放、网络或安装流程。</p>
+
+    <nav class="tabs" aria-label="原型区域">
+      <button class="tab active" data-tab="notch-panel">刘海播放</button>
+      <button class="tab" data-tab="update-panel">更新提示</button>
+    </nav>
+
+    <section class="panel active" id="notch-panel">
+      <div class="statebar" aria-label="刘海状态">
+        <button class="state-btn active" data-notch="expanded">播放中</button>
+        <button class="state-btn" data-notch="collapsed">收起</button>
+        <button class="state-btn" data-notch="idle">未在播放</button>
+        <button class="state-btn" data-notch="greeting">首次引导</button>
+      </div>
+      <div class="stage">
+        <div class="screen">
+          <div class="notch expanded" id="notch">
+            <div class="notch-top"><span class="cover-sm"></span><span class="eq"><i></i><i></i><i></i></span></div>
+            <div class="card-body" id="notch-body">
+              <span class="cover-lg"></span>
+              <div class="track-info">
+                <div class="track-title">云朵《我的楼兰》百万豪装录音棚大制作</div>
+                <div class="track-sub">JLRS-LeoFM · 2:39</div>
+              </div>
+              <div class="controls"><button class="icon" aria-label="上一首">◀</button><button class="icon" aria-label="暂停">Ⅱ</button><button class="icon" aria-label="下一首">▶</button></div>
+            </div>
+          </div>
+          <div class="screen-search">搜索</div>
+        </div>
+      </div>
+      <p class="status-note" id="notch-note">播放态：主体内容在展开卡完整高度内垂直居中，歌名预留右侧控制区并自动省略。</p>
+    </section>
+
+    <section class="panel" id="update-panel">
+      <div class="statebar" aria-label="更新状态">
+        <button class="state-btn active" data-update="available">发现新版本</button>
+        <button class="state-btn" data-update="downloading">下载中</button>
+        <button class="state-btn" data-update="ready">下载完成</button>
+        <button class="state-btn" data-update="failed">下载失败</button>
+      </div>
+      <div class="update-wrap">
+        <div class="update-copy">
+          <div class="eyebrow">Settings · About</div>
+          <h2>更新提示</h2>
+          <p>自动检查不直接盖住播放器。前台用 Toast 提醒，后台用系统通知；用户点击后再看更新日志。</p>
+        </div>
+        <div class="dialog" id="dialog">
+          <div class="dialog-body">
+            <h3>有新版本更新</h3>
+            <div class="version">当前版本 1.0.1 <span>→</span> <b>1.0.2</b></div>
+            <div class="notes">
+              <p>修复刘海播放器展开后的内容布局。</p>
+              <p>优化更新检查提示，避免同一版本重复提醒。</p>
+              <p>改进下载失败后的重试反馈。</p>
+            </div>
+            <div class="progress" hidden><div class="progress-line"><span>2.4 MB/s</span><span class="bar"><i></i></span><span>34.20 / 78 MB</span></div></div>
+            <div class="ready" hidden>安装包已下载完成<br>新版本已经装好，退出后重新打开就是它</div>
+            <div class="error" hidden>下载失败：签名校验没有通过，请重试。</div>
+          </div>
+          <div class="dialog-foot">
+            <button class="ghost" id="later">以后再说</button>
+            <button class="primary" id="primary">下载更新</button>
+          </div>
+        </div>
+      </div>
+      <p class="status-note" id="update-note">发现更新：手动检查时打开弹窗；后台检查只提醒，不打断当前播放。</p>
+    </section>
+  </main>
+  <script>
+    const notch = document.querySelector('#notch');
+    const notchBody = document.querySelector('#notch-body');
+    const notchNote = document.querySelector('#notch-note');
+    const notchText = {
+      expanded: '播放态：主体内容在展开卡完整高度内垂直居中，歌名预留右侧控制区并自动省略。',
+      collapsed: '收起态：只保留刘海和两翼，窗口本身仍存在，但形状以外的点击穿透。',
+      idle: '空闲态：缩短卡片高度，只保留“未在播放”和“打开应用”，不撑满播放态高度。',
+      greeting: '引导态：第一次播放时出现一次，按钮用于开启刘海播放器，之后不重复打扰。'
+    };
+    document.querySelectorAll('[data-notch]').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-notch]').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.notch;
+      notch.className = `notch ${mode}`;
+      notchBody.innerHTML = mode === 'idle'
+        ? '<div class="idle-body"><div class="idle-copy"><strong>布丁音乐</strong><span>未在播放</span></div><button class="text-button">打开</button></div>'
+        : mode === 'greeting'
+          ? '<div class="greeting-body"><div class="greeting-copy"><strong>刘海里也能控制播放</strong><span>指针移到这里即可暂停、切歌</span></div><button class="text-button">开启</button></div>'
+          : '<div class="card-body"><span class="cover-lg"></span><div class="track-info"><div class="track-title">云朵《我的楼兰》百万豪装录音棚大制作</div><div class="track-sub">JLRS-LeoFM · 2:39</div></div><div class="controls"><button class="icon">◀</button><button class="icon">Ⅱ</button><button class="icon">▶</button></div></div>';
+      notchNote.textContent = notchText[mode];
+    }));
+
+    const updateState = {
+      available: { primary: '下载更新', later: '以后再说', note: '发现更新：手动检查时打开弹窗；后台检查只提醒，不打断当前播放。' },
+      downloading: { primary: '正在下载', later: '后台下载', note: '下载中：进度固定在弹窗底部，允许收起弹窗但不取消下载。' },
+      ready: { primary: '退出并安装', later: '稍后', note: '下载完成：明确告诉用户安装包已准备好，退出后重新打开即可。' },
+      failed: { primary: '重试下载', later: '知道了', note: '失败：保留错误原因，提供明确的重试出口。' }
+    };
+    document.querySelectorAll('[data-update]').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('[data-update]').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.update, s = updateState[mode];
+      document.querySelector('#primary').textContent = s.primary;
+      document.querySelector('#later').textContent = s.later;
+      document.querySelector('#update-note').textContent = s.note;
+      document.querySelector('.progress').hidden = mode !== 'downloading';
+      document.querySelector('.ready').hidden = mode !== 'ready';
+      document.querySelector('.error').hidden = mode !== 'failed';
+    }));
+    document.querySelectorAll('.tab').forEach(btn => btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+      document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelector('#' + btn.dataset.tab).classList.add('active');
+    }));
+  </script>
+</body>
+</html>
