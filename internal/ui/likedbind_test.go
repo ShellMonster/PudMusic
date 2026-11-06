@@ -277,7 +277,7 @@ func TestGoneBoundFolderFallsBackToSelect(t *testing.T) {
 }
 
 // TestSettingsShowsAndChangesTheBinding 设置页「菜单」Tab 能看绑定、能
-// 更换、能解绑。
+// 更换。
 func TestSettingsShowsAndChangesTheBinding(t *testing.T) {
 	f := newFolderBili(t, nil)
 	f.pages = [][]map[string]any{folderPage(11, 2)}
@@ -317,6 +317,34 @@ func TestSettingsShowsAndChangesTheBinding(t *testing.T) {
 	// 从设置里换绑定**不**收任何一首歌——那一下只是改设置。
 	if ds := f.deals(); len(ds) != 0 {
 		t.Errorf("设置里换绑定不该发 deal（发了 %d 次）", len(ds))
+	}
+}
+
+// TestSettingsUnbindReallyUnbinds 钉「设置页那颗「解绑」真的解绑」——
+// 上面那条只验了「更换」，解绑那一颗要单独点一遍：点完设置里的绑定
+// 就没了，行里那句「喜欢的歌曲会自动加入」跟着回到「还没绑」的样子。
+func TestSettingsUnbindReallyUnbinds(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShellAt(t, f, 1200, 1300)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢", Private: true})
+
+	s.goToSettingsTab(settingsTabMenu)
+	settleFrame(tt)
+
+	if err := tt.Click("解绑"); err != nil {
+		t.Fatalf("设置里没有「解绑」可点（文字 %q）", tt.Texts())
+	}
+	settleFrame(tt)
+
+	if _, ok := s.app.LikedFolder(); ok {
+		t.Error("点了「解绑」还说绑着")
+	}
+	if tt.HasText("我的喜欢") {
+		t.Error("解绑之后行里还留着旧绑定的名字")
+	}
+	// 解绑不发任何请求——它只是改本地设置。
+	if ds := f.deals(); len(ds) != 0 {
+		t.Errorf("解绑不该发 deal（发了 %d 次）", len(ds))
 	}
 }
 
@@ -549,5 +577,118 @@ func TestUnbindIgnoresTheLateMissing(t *testing.T) {
 
 	if s.folderSelect == nil {
 		t.Error("迟到的旧结果把多选框弄没了")
+	}
+}
+
+// TestAStaleMissingDoesNotOpenThePickerForTheWrongSong 钉「多首快速
+// 喜欢时，先发出的那一条 Missing 回来不许拿**最新** pending 的那一首
+// 去开多选框」。
+//
+// 🔴 复现的那条路：歌 A（rid 77）喜欢那一趟还在飞，用户又点了歌 B
+// （rid 78）——`likePending` 被整份换成 B。这时 B 站才回 A 那一趟
+// 「那一格不存在」（-400）。不校验 token/rid 的话，`flushLikedResults`
+// 会拿 B 的 pending 去开多选框——用户看到的是「歌 A 的判决、歌 B 的
+// 选择框」。
+func TestAStaleMissingDoesNotOpenThePickerForTheWrongSong(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShell(t, f)
+	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 42, Title: "我的喜欢"}})
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	// 歌 A（rid 77）那一趟还在飞：pending 存的是它的 token。
+	f.gateDeals()
+	defer f.ungateDeals()
+	likeRowHeart(t, tt, "歌 一")
+	waitFrames(t, tt, "歌 A 那一趟写出去", func() bool {
+		return f.dealArrivals() == 1
+	})
+	if s.likePending == nil || s.likePending.rid != 77 {
+		t.Fatalf("歌 A 的 pending = %+v，want rid 77", s.likePending)
+	}
+
+	// 用户又点了歌 B：pending 被整份换掉（`likeItemResolved` 的职责，
+	// 另一支测试钉）。这里直接摆「歌 B 已经顶上来了」的状态——
+	// rid 不一样，token 也不一样。
+	s.likePending = &likePending{item: app.Item{Source: "online", Title: "歌 二"}, rid: 78, typ: 12, token: 9999}
+
+	// 歌 A 那一趟这时才回「那一格不存在」。它的 token / rid 都是
+	// 歌 A 那一趟的（77），和此刻 pending（78 / 9999）对不上。
+	f.failDeals(-400, "收藏夹不存在")
+	f.ungateDeals()
+	settleFrame(tt)
+
+	// 歌 A 的旧 Missing **不许**拿歌 B 的 pending 去开多选框——
+	// 多选框一出来用户会以为是在替歌 A 选，提交就把歌 B 收进去。
+	if s.folderSelect != nil {
+		t.Error("歌 A 的旧 Missing 拿歌 B 的 pending 开了多选框")
+	}
+	if tt.HasText("绑定的歌单已经不在了") {
+		t.Error("歌 A 的旧 Missing 发出了「绑定失效」提示——它不属于此刻的 pending")
+	}
+	// 歌 B 的 pending 还在（歌 B 自己的结果还没回来）。
+	if s.likePending == nil || s.likePending.rid != 78 {
+		t.Errorf("pending = %+v，want 歌 B（rid 78）还在", s.likePending)
+	}
+}
+
+// TestLikeBindPickFailureOffersARetry 钉「pick 档拉收藏夹失败后给
+// 用户可观察的失败态 + 重试」，不许永远停在「正在拉收藏夹…」。
+//
+// 🔴 `LoadCreatedFolders` 失败时把结果送进 `FolderOpListLoad`——
+// 不送到正在等列表的弹窗的话，弹窗那一帧还是「正在拉」，而请求已经
+// 失败了：用户盯着一个永远转不完的「正在拉」。
+func TestLikeBindPickFailureOffersARetry(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.failTheList()
+	s, tt := likedPageShellAt(t, f, 1200, 1300)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	// 从设置页进 pick 档（不收歌那条路）。
+	s.goToSettingsTab(settingsTabMenu)
+	settleFrame(tt)
+	if err := tt.Click("更换"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "列表拉失败回来", func() bool {
+		return s.likeBind != nil && s.likeBind.loadErr != ""
+	})
+	settleFrame(tt)
+
+	if tt.HasText("正在拉收藏夹") {
+		t.Error("拉失败了还停在「正在拉收藏夹…」")
+	}
+	if !tt.HasText("重试") {
+		t.Errorf("没有「重试」可点（文字 %q）", tt.Texts())
+	}
+}
+
+// TestLikeBindCreateIgnoresAFolderEditResult 钉「喜欢绑定的 create 档
+// 在等结果时，一条普通的「改收藏夹」结果不许被当成『建好了』」。
+//
+// 🔴 `TakeFolderResult` 是三种弹窗共用的出口：只按「谁在等」分派的
+// 话，likeBind create 档 submitting 时先到的一条 edit 结果会被它取走，
+// 拿结果里的 `Folder` id 去绑定——用户只是在改另一个收藏夹，绑定却
+// 被换掉了。
+func TestLikeBindCreateIgnoresAFolderEditResult(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShell(t, f)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "旧的"})
+
+	// 摆出「create 档在提交中」的状态：pending 在（喜欢那一首还没收
+	// 进去），likeBind 在 create 档、submitting 立着。走界面点击的话
+	// 「创建新的」那一档要先把弹窗开到三选一——那是另一条路（建 +
+	// 绑 + 收全走完）；这里要的是「在等结果的中间态」。
+	s.likePending = &likePending{item: app.Item{Source: "online", Title: "歌 一"}, rid: 77, typ: 12, token: 7}
+	s.likeBind = &likeBind{open: true, step: likeBindCreate, name: "我的喜欢", submitting: true}
+
+	// 这时后台回来一条**普通编辑**结果（另一个弹窗的提交）：它不该
+	// 被 likeBind 当成「建好了」——不能拿它的 id 去绑定。
+	s.dispatchFolderResult(app.FolderResult{
+		Op: app.FolderOpEdit, OK: true, Text: "收藏夹改好了", Folder: 999,
+	})
+	settleFrame(tt)
+
+	if bound, _ := s.app.LikedFolder(); bound.ID != 42 {
+		t.Errorf("一条 edit 结果把绑定换成了 %d，want 42", bound.ID)
 	}
 }

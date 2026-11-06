@@ -54,11 +54,22 @@ type LikedFolder struct {
 type likedResult struct {
 	mu     sync.Mutex
 	nextID uint64
-	unread []LikedResult
+	// nextToken 是「第几趟写请求」的流水号：`FavoriteIntoBound` 发出去
+	// 一趟就先取一个号，回来的结果带着它——界面拿它认「这条结果
+	// 是替哪一首收歌那一趟回的」，不是「最新那条 pending」。
+	nextToken uint64
+	unread    []LikedResult
 	// dropped 是「到达时绑定已经换了/没了」丢掉的结果。取结果那一侧在
 	// `TakeLikedResult` 里做校验（见它的注释）；这份只给同包测试观察
 	// 「旧结果确实被丢了」，不往界面去。
 	dropped []LikedResult
+}
+
+func (r *likedResult) token() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextToken++
+	return r.nextToken
 }
 
 func (r *likedResult) add(res LikedResult) {
@@ -83,6 +94,17 @@ func (r *likedResult) take() (LikedResult, bool) {
 // LikedResult 是「收进绑定歌单」那一趟的回执。
 type LikedResult struct {
 	ID uint64
+	// Token 是「这是第几趟写请求的回执」：`FavoriteIntoBound` 发出去
+	// 之前先领一个号，同一趟回来的结果带同一个号。界面拿它把回执
+	// 对回发出那一趟的 pending——多首快速喜欢、旧结果乱序回来时，
+	// 不能用「最新那条 pending」去处理一条早发出的回执。
+	Token uint64
+	// Rid / Type 是发出那一趟时替哪一首收歌（rid + 内容类型，同
+	// `favTarget` 那一对）。`flushLikedResults` 拿它对回 pending：
+	// 对不上的结果属于另一首（或已经清掉的 pending），不许拿它去
+	// 解绑 / 开多选框。
+	Rid  int64
+	Type int
 	// Folder 是发出那一趟写请求时绑定的那份歌单 id。换绑之后才回来的
 	// 结果是旧绑定的回执——`TakeLikedResult` 拿它对照**此刻**的绑定，
 	// 对不上就丢，不让一条旧结果去拆新绑定（见 `TakeLikedResult` 注释）。
@@ -152,7 +174,8 @@ func (a *App) UnbindLikedFolder() {
 }
 
 // FavoriteIntoBound 把这一条收进**绑定的**那个收藏夹。**立刻返回**，结果走
-// `TakeLikedResult`。
+// `TakeLikedResult`；返回值是这一趟的 token——调用方把它存进 pending，
+// 回来的结果才能对上号（见 `LikedResult.Token`）。
 //
 // rid / contentType 是这一条在 B 站那边的身份（和选择弹窗用的同一对，
 // 见 `favTarget`）——调用方负责先把稿件 id 问出来，这一层不做 bvid → avid
@@ -168,17 +191,24 @@ func (a *App) UnbindLikedFolder() {
 //
 // ⚠️ **普通失败不清绑定**：断网时回 `OK=false, Missing=false`，绑定留着，
 // 用户重试就好——一次断网就把用户配好的歌单弄丢是最坏的那一种。
-func (a *App) FavoriteIntoBound(rid int64, contentType int) {
+func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
 	c := a.collectionsSnapshot()
 	if c == nil {
-		return
+		return 0
 	}
 	bound, ok := a.LikedFolder()
 	if !ok {
-		c.likedResult.add(LikedResult{Missing: true})
+		c.likedResult.add(LikedResult{
+			Token:   c.likedResult.token(),
+			Rid:     rid,
+			Type:    contentType,
+			Missing: true,
+		})
 		a.wakeUI()
-		return
+		return 0
 	}
+
+	token := c.likedResult.token()
 
 	// 第一层判据：列表拉过了、里面没有它。`FavoriteState.Loaded` 正是
 	// 「拉过、且拉到了」——失败的那一份 Loaded 也是 true（`Commit` 不清
@@ -193,12 +223,15 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) {
 		}
 		if !alive {
 			c.likedResult.add(LikedResult{
+				Token:   token,
+				Rid:     rid,
+				Type:    contentType,
 				Folder:  bound.ID,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
 			a.wakeUI()
-			return
+			return token
 		}
 	}
 
@@ -206,20 +239,30 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) {
 		err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, []int64{bound.ID}, nil)
 		switch {
 		case err == nil:
-			c.likedResult.add(LikedResult{Folder: bound.ID, OK: true, Text: "已加入「" + bound.Title + "」"})
+			c.likedResult.add(LikedResult{
+				Token: token, Rid: rid, Type: contentType,
+				Folder: bound.ID, OK: true, Text: "已加入「" + bound.Title + "」",
+			})
 		case likedFolderGone(err):
 			log.Printf("pudmusic: 绑定的收藏夹 %d 已经没了：%v", bound.ID, err)
 			c.likedResult.add(LikedResult{
+				Token:   token,
+				Rid:     rid,
+				Type:    contentType,
 				Folder:  bound.ID,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
 		default:
 			log.Printf("pudmusic: 收进绑定歌单 %d 失败：%v", bound.ID, err)
-			c.likedResult.add(LikedResult{Folder: bound.ID, Text: "收藏不了：" + bili.Friendly(err)})
+			c.likedResult.add(LikedResult{
+				Token: token, Rid: rid, Type: contentType,
+				Folder: bound.ID, Text: "收藏不了：" + bili.Friendly(err),
+			})
 		}
 		a.wakeUI()
 	}()
+	return token
 }
 
 // likedFolderGone 判这个错是不是「绑定的那一格已经没了」。
@@ -227,11 +270,22 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) {
 // B 站对不存在的收藏夹 deal 回的是 -400（参数错误）——它把「收藏夹 id 指
 // 着一个没有的东西」当成参数问题。
 //
-// ⚠️ **-400 是 deal 的通用参数错误**，不只「收藏夹不存在」一种：两个列表
-// 都空、rid 非法、内容已达上限等也回它（见 `DealFolderMedias` 的注释）。
-// rid 在调用方已经验过（>0），而「收藏夹上限」那一档在界面上同样值得回到
-// 多选框重选——所以这里把 -400 整个当「绑定的这一格装不下它」处理，不细
-// 分消息；真正难办的「网络坏了」走的是别的码（见下面那道 `errors.As`）。
+// ⚠️ **-400 是 deal 的通用参数错误**，不只「收藏夹不存在」一种：两个
+// 列表都空、rid 非法、内容已达上限等也回它（见 `DealFolderMedias` 的
+// 注释）。已知的几种分别怎么摊：
+//
+//   - **rid 非法**：在调用方已经挡掉（`favTarget` 只收 rid > 0 的；
+//     `DealFolderMedias` 自己又验一遍）——走到这里 rid 一定合法，
+//     所以 -400 落在「收藏夹那一侧出问题」上。
+//   - **add / del 两个列表都空**：`FavoriteIntoBound` 永远只发
+//     `add = [bound.ID]`——「两个都空」那一档在结构上走不到这里。
+//   - **收藏夹容量满了**：B 站同样回 -400。这一档**有意当成
+//     「绑定的这一格装不下它」**——界面同样是「解绑 + 回到多选框
+//     重选」，和普通「格子没了」是同一个出路，分开两种提示没有
+//     差别可以讲给用户听。
+//
+// 所以这里把 -400 整个当「绑定的这一格不能再要」处理，不细分消息；
+// 真正难办的「网络坏了」走的是别的码（见下面那道 `errors.As`）。
 // **只在写失败之后问它**：拿它去拦别的错（比如 -500）会把网络问题错判成
 // 绑定失效，那一次断网就把用户配好的歌单解绑了。
 func likedFolderGone(err error) bool {

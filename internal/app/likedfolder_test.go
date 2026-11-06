@@ -10,6 +10,7 @@
 package app
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -23,8 +24,13 @@ import (
 // 「绑定之后重启还在不在」这件事测不到。
 func likedApp(t *testing.T, f *folderFixture) *App {
 	t.Helper()
+	dir := t.TempDir()
 	a := folderApp(t, f)
-	if err := a.MountSettings(filepath.Join(t.TempDir(), SettingsFileName)); err != nil {
+	// ⚠️ **TempDir 要在 folderApp 之前建**：`t.Cleanup` 是后进先出，
+	// folderApp 里登记的 `a.Close` 排在这个 TempDir 的删除**之后**
+	// 才跑得对——先删目录再 Close，Close 那次 flush 会把设置写进一个
+	// 已经被删掉的目录。
+	if err := a.MountSettings(filepath.Join(dir, SettingsFileName)); err != nil {
 		t.Fatal(err)
 	}
 	return a
@@ -184,6 +190,28 @@ func TestFavoriteIntoBoundNetworkFailureKeepsTheBinding(t *testing.T) {
 	}
 }
 
+// TestLikedFolderGoneOnlyTreatsMinus400AsMissing 钉「-400 之外的业务错误
+// 都不许判成『绑定失效』」——「绑定没了」只在「B 站明说这一格不能再要」
+// （-400）那一种下落；一个随手挑的错误码把绑定解了，一次普通失败就把
+// 用户配好的歌单弄丢。
+func TestLikedFolderGoneOnlyTreatsMinus400AsMissing(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"不是 APIError", errors.New("EOF"), false},
+		{"-400（绑定的那一格不能再要）", &bili.APIError{Code: -400}, true},
+		{"-500（服务器坏了）", &bili.APIError{Code: -500}, false},
+		{"-101（没登录）", &bili.APIError{Code: -101}, false},
+	}
+	for _, tc := range cases {
+		if got := likedFolderGone(tc.err); got != tc.want {
+			t.Errorf("%s：likedFolderGone = %v，want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestStaleLikedMissingDoesNotReachTheUI 钉「换绑之后才回来的旧 Missing
 // 到不了界面」。
 //
@@ -273,6 +301,32 @@ func TestPendingLikesForTheSameBindingDoNotPolluteEachOther(t *testing.T) {
 	second := waitLikedResult(t, a, 2*time.Second)
 	if !first.OK || !second.OK {
 		t.Fatalf("两条结果 = %+v / %+v，want 都成功", first, second)
+	}
+}
+
+// TestEachLikedResultCarriesItsRequest 钉「每一条喜欢结果都带发出那一趟
+// 的身份（token + rid）」——界面拿它对回 pending 那一首，多首快速喜欢
+// 时不许拿「最新 pending」去处理一条早发出的回执。
+func TestEachLikedResultCarriesItsRequest(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	gate := f.gateDeals()
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.FavoriteIntoBound(78, bili.MediaAudio)
+	waitUntil(t, "两趟都发出去", 2*time.Second, func() bool {
+		return f.dealArrivals() == 2
+	})
+	close(gate)
+
+	first := waitLikedResult(t, a, 2*time.Second)
+	second := waitLikedResult(t, a, 2*time.Second)
+	if first.Token == 0 || second.Token == 0 || first.Token == second.Token {
+		t.Fatalf("两条结果的 token = %d / %d，want 各领一个号", first.Token, second.Token)
+	}
+	if first.Rid != 77 || second.Rid != 78 {
+		t.Errorf("两条结果的 rid = %d / %d，want 77 / 78", first.Rid, second.Rid)
 	}
 }
 

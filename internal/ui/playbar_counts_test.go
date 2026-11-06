@@ -627,7 +627,9 @@ func TestTheCountShowsUpAndTheKeyStillWorks(t *testing.T) {
 		t.Errorf("画面上没有评论数 %q（文字有 %q）", list.CountText(1286), tt.Texts())
 	}
 
-	// 🔴 **键照旧点得动**：指针停在评论键上，那句话要出来。
+	// 🔴 **键照旧点得动**：角标盖在右上角也不吃点击（`PassThrough`），
+	// 点下去开的是评论抽屉——只 Move 上去悬停的话，一个 no-op 的点击
+	// 处理器照样过得了这一句。
 	key, ok := tt.Find("评论")
 	if !ok {
 		t.Fatalf("画面上找不到评论键，文字有 %q", tt.Texts())
@@ -636,6 +638,13 @@ func TestTheCountShowsUpAndTheKeyStillWorks(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("整个稿件 1286") {
 		t.Errorf("指针停在评论键上却没有那句话（文字有 %q）", tt.Texts())
+	}
+	if err := tt.Click("评论"); err != nil {
+		t.Fatalf("评论键点不动：%v", err)
+	}
+	tt.Frame()
+	if !s.commentsOpen {
+		t.Error("点了评论键，评论抽屉没开")
 	}
 }
 

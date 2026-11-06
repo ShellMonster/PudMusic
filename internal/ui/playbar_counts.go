@@ -325,10 +325,16 @@ func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 	}
 	p := tok.Of(c.Theme())
 	textW, _ := c.MeasureText(0, ui.Span{Text: t, Size: playbarBadgeFont, Weight: 600})
-	badgeW := max(badgeTextWidth(textW)+space.Px4, float32(badgeNotchMinW))
+	// 🔴 缺口块宽 = 字宽 + 左右空隙（`badgeNotchPadL` + `badgeNotchPadR`）——
+	// 左 8 右 6 那笔账见上面常量的注释：左边是「咬进图形」那一边，要留
+	// 一眼能看到的底色缝；只给 2px 的话数字会顶在被咬的笔画上。
+	badgeW := max(badgeTextWidth(textW)+float32(badgeNotchPadL)+float32(badgeNotchPadR), float32(badgeNotchMinW))
 	ui.Box(c).Key("count-badge-notch").
+		// 缺口块的**右**上角钉在图形盒子的右上角之外：左缘收进图形
+		// 右缘 `badgeNotchBite`（6）——咬掉的是右上角那一小块，块的
+		// 主体往右探进空气里。
 		Attach(ui.AnchorTopRight, ui.AnchorTopLeft).
-		Top(-10).Right(2).Translate(dx, 0).
+		Top(-badgeNotchOut).Right(badgeNotchBite).Translate(dx, 0).
 		Width(badgeW).Height(12).
 		Radius(tok.R6).Background(p.Side).Padding(space.Px1, space.Px2).
 		PassThrough().

@@ -65,6 +65,10 @@ type likeBind struct {
 	// list / loaded 是「我创建的」那份列表（pick 档用）。
 	list   []bili.CreatedFolder
 	loaded bool
+	// loadErr 是 pick 档拉列表失败要说的那句（`FolderOpListLoad`
+	// 回来的结果）。非空时画「拉不到 + 重试」，不许永远停在
+	// 「正在拉收藏夹…」。
+	loadErr string
 	// picked 是挑中的那一个 id。
 	picked int64
 
@@ -87,11 +91,15 @@ type likeBind struct {
 // likePending 是「正在替哪一首办绑定」。
 //
 // ⚠️ **它只记这一首是谁**：rid 已经问出来（绑定三档走完要用它收歌），
-// Item 留着是为了「绑定失效要回到多选框」那一次还认得是哪一首。
+// Item 留着是为了「绑定失效要回到多选框」那一次还认得是哪一首；
+// token 是 `FavoriteIntoBound` 发出去那一趟领的号——回来的结果得拿它
+// 对号，多首快速喜欢 / 旧结果乱序时不能拿「最新一条 pending」去处理
+// 一条早发出的回执。
 type likePending struct {
-	item app.Item
-	rid  int64
-	typ  int
+	item  app.Item
+	rid   int64
+	typ   int
+	token uint64
 }
 
 // ── 入口 ─────────────────────────────────────────────────────────────────
@@ -162,8 +170,8 @@ func (s *Shell) likeCurrent() {
 // 递归在结构上就不成立（见 `askFavoriteIDThen` 文件头那段）。
 func (s *Shell) likeItemResolved(item app.Item, rid int64, typ int) {
 	if _, bound := s.app.LikedFolder(); bound {
-		s.likePending = &likePending{item: item, rid: rid, typ: typ}
-		s.app.FavoriteIntoBound(rid, typ)
+		s.likePending = &likePending{item: item, rid: rid, typ: typ,
+			token: s.app.FavoriteIntoBound(rid, typ)}
 		return
 	}
 	s.openLikeBind(&likePending{item: item, rid: rid, typ: typ})
@@ -217,6 +225,7 @@ func (s *Shell) openLikeBind(pending *likePending) {
 func (s *Shell) openLikePick(b *likeBind) {
 	b.step = likeBindPick
 	b.picked = 0
+	b.loadErr = ""
 	s.app.LoadCreatedFolders(0)
 }
 
@@ -295,6 +304,15 @@ func (s *Shell) viewLikeBindPick(c *ui.Context, b *likeBind, backdrop, panel ui.
 	dlgBody(c, title, "喜欢的歌曲会加入所选歌单。", func() {
 		pl := tok.Of(c.Theme())
 		switch {
+		case b.loadErr != "":
+			ui.Row(c).AlignItems(ui.Center).Gap(space.Px8).
+				Margin(space.Px16, space.None, space.None, space.None).Children(func() {
+				ui.Text(c, b.loadErr).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Err).Shrink(1)
+				if pud.Button(c, "likebind:retry", pud.Ghost, pud.Sm, "重试", "").Clicked() {
+					b.loadErr = ""
+					s.app.LoadCreatedFolders(0)
+				}
+			})
 		case !b.loaded && len(b.list) == 0:
 			ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3).
 				Margin(space.Px16, space.None, space.None, space.None)
@@ -463,7 +481,7 @@ func (s *Shell) submitLikePick(b *likeBind) {
 	s.app.BindLikedFolder(app.LikedFolder{ID: chosen.ID, Title: chosen.Title, Private: chosen.Private})
 	if s.likePending != nil {
 		b.submitting = true
-		s.app.FavoriteIntoBound(b.rid, b.contentType)
+		s.likePending.token = s.app.FavoriteIntoBound(b.rid, b.contentType)
 		return
 	}
 	s.closeLikeBind()
@@ -501,6 +519,12 @@ func (s *Shell) closeLikeBind() {
 // 三种结果：成了 → 一句话；普通失败 → 一句话 + 解除弹窗的「提交中」；
 // **绑定失效** → 解绑 + 回到收藏夹多选框（那一档和普通失败是两件事，
 // 见 `app/likedfolder.go` 的文件头）。
+//
+// 🔴 **结果必须对回发出那一趟的 pending**：多首快速喜欢时几条结果会
+// 排着队回来，而 `s.likePending` 只存**最新**那一首——拿「最新的
+// pending」去处理一条早发出的 Missing，会拿错的 item / rid 开多选框
+// （把歌 B 的结果当成歌 A 的判决）。所以每条结果带发出那一趟的
+// token + rid，**对不上就丢**，留给真正属于它的那次 flush 去处理。
 func (s *Shell) flushLikedResults() {
 	res, ok := s.app.TakeLikedResult()
 	if !ok {
@@ -512,9 +536,15 @@ func (s *Shell) flushLikedResults() {
 	}
 	switch {
 	case res.OK:
+		if !s.likedResultMatchesPending(res) {
+			return
+		}
 		s.addToast(res.Text, notice.Success)
 		s.closeLikeBind()
 	case res.Missing:
+		if !s.likedResultMatchesPending(res) {
+			return
+		}
 		// 绑定的那一格已经没了：解绑，回到多选框把这一首收进去。
 		s.app.UnbindLikedFolder()
 		s.addToast(res.Text, notice.Warning)
@@ -525,6 +555,28 @@ func (s *Shell) flushLikedResults() {
 		}
 		s.likeBind = nil
 	default:
+		// 普通失败也要对号：弹窗那一帧的「提交中」解除不解除看它，
+		// 但提示本身是逐条的、发到就是发到。
+		if !s.likedResultMatchesPending(res) {
+			return
+		}
 		s.addToast(res.Text, notice.Danger)
 	}
+}
+
+// likedResultMatchesPending 判这条回执是不是属于**此刻** pending 那一趟。
+//
+// 两个判据都要对上：token 是发出那一趟领的号（最快区分「哪一趟」），
+// rid 是替哪一首（token 为 0 的旧路径 / 没 pending 时靠它兜底）。
+// pending 为 nil（从设置进来换绑、或失败支刚清掉）时：token 对不上
+// 就丢——那条结果属于「上一首」或者「已经收场的 pending」。
+func (s *Shell) likedResultMatchesPending(res app.LikedResult) bool {
+	p := s.likePending
+	if p == nil {
+		return res.Token == 0
+	}
+	if res.Token != 0 && p.token != 0 {
+		return res.Token == p.token
+	}
+	return res.Rid == p.rid
 }

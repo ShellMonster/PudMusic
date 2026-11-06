@@ -364,13 +364,20 @@ var Items = []Item{
 		Spec:     "真时钟那一半也接得上（醒得过来、停得下来）",
 		Tests:    []string{"TestRealClockEveryFuncWakesAndStops"},
 	},
-	// （喜欢歌单原型把「赞」键和长按三连整个去掉了：原来钉在这里的
-	// 「2500ms 长按三连 / 500ms 起环」和「长按后吞 click」两条证据——
-	// `TestTheRingIsFullJustAsTheTripleGoesOut`、`TestLettingGoEarlyDoesNothing`、
-	// `TestALongPressNeverOpensTheFullScreen` 等——随用例一起删除；新的可观察
-	// 行为「长按不再发三连、松手开满屏」由 `playbar_like_remove_test.go` 的
-	// `TestLongPressingTheCoverDoesNotTriple` /
-	// `TestHalfLongPressingTheCoverStillOpensFullPlayer` 钉住，归在 UI 那一批。）
+	{
+		// 喜欢歌单原型把「赞」键和长按三连整个去掉了：原来钉在这里的
+		// 「2500ms 长按三连 / 500ms 起环」和「长按后吞 click」两条证据——
+		// `TestTheRingIsFullJustAsTheTripleGoesOut`、`TestLettingGoEarlyDoesNothing`、
+		// `TestALongPressNeverOpensTheFullScreen` 等——随用例一起删除；新的
+		// 可观察行为「长按不再发三连、松手照旧开满屏」由
+		// `playbar_like_remove_test.go` 这两条钉住（用测试时钟推进）。
+		Category: FakeClock,
+		Spec:     "长按封面不再发三连：B 站一趟都收不到，松手照旧开满屏",
+		Tests: []string{
+			"TestLongPressingTheCoverDoesNotTriple",
+			"TestHalfLongPressingTheCoverStillOpensFullPlayer",
+		},
+	},
 	{
 		// 封面的暂时失败（断网、超时、5xx、限流）按指数退避自己再要一次；
 		// 永久失败（404、解码不了）不再要第二遍。所有等待都在假钟上推进，
@@ -1308,6 +1315,7 @@ var Items = []Item{
 			"TestTheMiniPlayerMenuItemRunsTheCommand",
 			"TestTheCommandNamesAndTheSettingsPageAgree",
 			"TestTheDeveloperToolsOnlyShowInDevelopmentBuilds",
+			"TestTheMenuHasNoLikeItem",
 			"TestThePlayModeItemsAreStillRadiosAfterTheFix",
 			"TestTheMiniPlayerIsInTheWindowColumn",
 			"TestTheWindowColumnStillHasTheSystemItems",
