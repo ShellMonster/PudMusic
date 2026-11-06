@@ -474,7 +474,7 @@ func looksLikeHandedOverPath(path string, wasAbsolute bool) bool {
 // `go:linkname` 那条路在这个仓库里不合适），而**照抄错了的后果是「同一
 // 首歌进队列两次」**——那比「少说一句话」更坏。
 func frameworkWouldDeliver(path string) bool {
-	if !platform.IsAssociatedAudioExt(platform.AudioExtOf(path)) {
+	if !platform.IsFrameworkAudioExt(platform.AudioExtOf(path)) {
 		return false
 	}
 	info, err := os.Stat(path)

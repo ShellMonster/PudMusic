@@ -201,8 +201,16 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 	// **一件都不投**给 `OnOpenFile`（`mygo/deeplink.go:99`），而 `handleLaunchArgs`
 	// 又按「框架会交的我们不碰」把它跳过（`internal/ui/openfile.go`），症状是
 	// 「命令行给了文件、起来却什么都没放」。注进去之后，框架那一半照常投。
+	//
+	// ⚠️ **注的是「这一份」而不是全量**：`mygo.json` 的 `fileAssociations`
+	// 现在只留**全平台都放得起**的格式（Linux 上没有 AAC 解码器，桌面
+	// 环境不能登记 m4a/aac）；macOS / Windows 各自的 AAC 关联由
+	// `macos.infoPlist` 和 `windows.installerInclude` 补，不走这条
+	// ldflags——所以这里照抄 `fileAssociations` 那份，而不是
+	// `platform.AssociatedAudioExts`（那份在 darwin/windows 上有 m4a/aac，
+	// 注进去的话 E2E 里「双击一个 .m4a 框架投不投」和真机对不上）。
 	build := exec.Command("go", "build", "-tags", "e2e",
-		"-ldflags", "-X github.com/egoist/mygo.packageFileExtensions=mp3,flac,wav,m4a,aac,ogg,aiff,aif,aifc",
+		"-ldflags", "-X github.com/egoist/mygo.packageFileExtensions=mp3,flac,wav,ogg,aiff,aif,aifc",
 		"-o", binary, ".")
 	build.Dir = repoRoot(t)
 	build.Stdout = &buildOut

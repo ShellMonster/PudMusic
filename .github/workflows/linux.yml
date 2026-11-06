@@ -79,6 +79,13 @@ jobs:
             test -f "$dir/pudmusic.desktop" || { echo "$target: missing desktop entry"; exit 1; }
             test -f "$dir/install.sh" || { echo "$target: missing install.sh"; exit 1; }
             tar -tzf "$dir"/*-linux-*.tar.gz >/dev/null
+            # Linux 上没有 AAC 解码器：desktop entry 不得登记 m4a / aac。
+            # 这是「Linux 不登记放不了的格式」那份承诺在产物上的样子——
+            # mygo.json 的 fileAssociations 已裁掉，这里断的是「真打出来
+            # 的包里没有」，免得哪天配置又被加回去。
+            if grep -qiE 'm4a|aac' "$dir/pudmusic.desktop"; then
+              echo "$target desktop entry still registers AAC/M4A:"; cat "$dir/pudmusic.desktop"; exit 1
+            fi
             deps="$(ar p "$dir"/*.deb control.tar.gz 2>/dev/null | tar -xzOf - ./control 2>/dev/null | grep '^Depends:' || true)"
             echo "$target deb Depends: $deps"
             case "$deps" in
@@ -130,6 +137,7 @@ jobs:
           #   起得来（窗口画得出来）、第二个实例递完命令行自己退出、
           #   托盘菜单的「退出程序」真的让进程退出来（走 E2E 钩子——
           #   Xvfb 下没有面板画 AppIndicator 菜单，窗口上也没有菜单栏）。
+          #   外加文件关联那一族：.m4a 有一句「放不了」、.flac 真的放起来。
           #
           # ⚠️ dbus-x11 + dbus-run-session：托盘是 AppIndicator，要走
           # session bus；没有它 `installTray` 只是建不出来（记一行日志、
@@ -137,5 +145,5 @@ jobs:
           xvfb-run -a dbus-run-session -- \
             env BIU_RUN_MYGO_E2E=1 \
             go test -tags e2e ./internal/e2e \
-              -run 'TestLinuxLifecycle' \
+              -run 'TestLinuxLifecycle|TestLinuxFileAssociations' \
               -count=1 -timeout 300s

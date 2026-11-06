@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -23,13 +24,34 @@ import (
 // macOS 的 Info.plist……），而那些各有各的测试盯着（见
 // `internal/platform/datadir_test.go` 那一族）。
 type mygoFileAssocConfig struct {
-	Name             string `json:"name"`
-	URLSchemes       []string
+	Name       string `json:"name"`
+	URLSchemes []string
+	MacOS      struct {
+		InfoPlist map[string]any `json:"infoPlist"`
+	} `json:"macos"`
+	Windows struct {
+		InstallerInclude string `json:"installerInclude"`
+	} `json:"windows"`
 	FileAssociations []struct {
 		Ext  []string `json:"ext"`
 		Name string   `json:"name"`
 		Role string   `json:"role"`
 	} `json:"fileAssociations"`
+}
+
+// readMygoRaw 读仓库根上的 `mygo.json` 的原始字节。
+//
+// ⚠️ **有些字段要自己解**：NSIS include 的路径、InfoPlist 里那份
+// CFBundleDocumentTypes——框架生成的东西（desktop entry、注册表脚本、
+// Info.plist）是**把这份 JSON 原样翻过去**的，所以钉它就要读这份 JSON
+// 本身，而不是再过一遍 `mygoFileAssocConfig` 那个 struct。
+func readMygoRaw(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "mygo.json"))
+	if err != nil {
+		t.Fatalf("读不到 mygo.json：%v", err)
+	}
+	return b
 }
 
 // readMygoFileAssocConfig 读仓库根上的 `mygo.json`。
@@ -54,12 +76,64 @@ func readMygoFileAssocConfig(t *testing.T) mygoFileAssocConfig {
 // 放不了」——比「双击没反应」更坏，因为那一句在说他用的文件有问题。
 func TestTheAssociatedExtensionsAreThePlayableOnes(t *testing.T) {
 	want := []string{"mp3", "flac", "wav", "m4a", "aac", "ogg", "aiff", "aif", "aifc"}
+	if runtime.GOOS == "linux" {
+		// Linux 上没有 AAC 解码器（`extaf` 只在 darwin、`mfadec` 只在
+		// windows），登记了用户双击 .m4a 只会得到「这个格式我们放不了」。
+		want = slices.DeleteFunc(slices.Clone(want), func(ext string) bool {
+			return ext == "m4a" || ext == "aac"
+		})
+	}
 	got := slices.Clone(AssociatedAudioExts)
 	slices.Sort(got)
 	wantSorted := slices.Clone(want)
 	slices.Sort(wantSorted)
 	if !slices.Equal(got, wantSorted) {
 		t.Errorf("关联的扩展名是 %v，want %v", got, wantSorted)
+	}
+}
+
+// TestLinuxDropsAACFromTheAssociation 钉住「Linux 这一份里没有 m4a / aac」。
+//
+// ⚠️ **Linux 上没有 AAC 解码器**：`extaf`（AudioToolbox）只在 darwin 上
+// 有，`mfadec`（Media Foundation）只在 windows 上有——`open_other.go`
+// 在非 Windows 上返回 `ErrUnsupported`。把 `.m4a` / `.aac` 登记给 Linux
+// 桌面环境的话，`pudmusic.desktop` 的 `MimeType=` 会带着
+// `application/x-pudmusic-m4a`，系统把 `.m4a` 列入本应用的「打开方式」——
+// 用户双击得到的只有一句「这个格式我们放不了」。
+//
+// ⚠️ **这条断的是 `associatedAudioExtsForGOOS("linux")`**，不是当前
+// `AssociatedAudioExts`：本测试在 macOS / Windows 上也要能跑——它钉的是
+// 「另一台上那份长什么样」，而不是「本机这份对不对」。
+func TestLinuxDropsAACFromTheAssociation(t *testing.T) {
+	got := associatedAudioExtsForGOOS("linux")
+	for _, ext := range []string{"m4a", "aac"} {
+		if slices.Contains(got, ext) {
+			t.Errorf("Linux 的登记扩展名里还有 %q：那台机器上没有 AAC 解码器，"+
+				"登记了用户双击只会得到「放不了」", ext)
+		}
+	}
+	// 其余格式一个都不少——Linux 上它们都放得起。
+	for _, ext := range []string{"mp3", "flac", "wav", "ogg", "aiff", "aif", "aifc"} {
+		if !slices.Contains(got, ext) {
+			t.Errorf("Linux 的登记扩展名里少了 %q：那个格式 Linux 上放得起", ext)
+		}
+	}
+}
+
+// TestTheOtherPlatformsKeepAAC 钉住「macOS / Windows 的登记扩展名里
+// 留着 m4a / aac」。
+//
+// ⚠️ **和上面那一条是同一张表的两半**：只钉「Linux 少了」而不钉「别的
+// 平台没跟着少」的话，将来把 `associatedAudioExtsForGOOS` 改成「全平台都
+// 裁」时这条不会红——而那个症状是「macOS / Windows 上双击 .m4a 也没反应」。
+func TestTheOtherPlatformsKeepAAC(t *testing.T) {
+	for _, goos := range []string{"darwin", "windows"} {
+		got := associatedAudioExtsForGOOS(goos)
+		for _, ext := range []string{"m4a", "aac"} {
+			if !slices.Contains(got, ext) {
+				t.Errorf("%s 的登记扩展名里少了 %q：那台机器上有 AAC 解码器", goos, ext)
+			}
+		}
 	}
 }
 
@@ -120,13 +194,21 @@ func TestAudioExtOfTakesTheExtensionWithoutTheDot(t *testing.T) {
 	}
 }
 
-// TestMygoJSONDeclaresTheSameExtensions 钉住 `mygo.json` 和代码里那一份
-// **是同一份**。
+// TestMygoJSONDeclaresTheSharedExtensions 钉住 `mygo.json` 的
+// `fileAssociations` 里只剩**全平台都放得起**的格式。
 //
-// ⚠️ **这一条是这一组里最要紧的**：系统按 `mygo.json` 那一份登记扩展名，
-// 而界面按代码里那一份判收不收。两份对不上时，用户双击一个 `.mp3` 的
-// 症状是「应用起来了，什么也没发生」——**而界面上看不出任何异样**。
-func TestMygoJSONDeclaresTheSameExtensions(t *testing.T) {
+// ⚠️ **这一条是这一组里最要紧的**：mygo.json 的 fileAssociations 是
+// **一份三个平台共用**的——macOS 的 CFBundleDocumentTypes、Linux 的
+// desktop entry `MimeType=`、Windows 安装包的注册表 `Software\Classes`
+// 都从同一份生成。把 m4a / aac 留在里面的话，Linux 的 `.desktop` 会把
+// 它们列进 `MimeType=`，系统就把本应用放进 `.m4a` 的「打开方式」——而
+// Linux 上**没有 AAC 解码器**，用户双击得到的只有「这个格式我们放不了」。
+//
+// ⇒ 所以这份 JSON 里的扩展名**必须等于「全平台都放得起」那一份**
+// （`associatedAudioExtsForGOOS("linux")`，也就是最窄的那份）；AAC/M4A
+// 由 macOS 的 InfoPlist 和 Windows 的 installerInclude **各自补回**
+// （见下面两条）。
+func TestMygoJSONDeclaresTheSharedExtensions(t *testing.T) {
 	c := readMygoFileAssocConfig(t)
 	if len(c.FileAssociations) == 0 {
 		t.Fatal("mygo.json 里没有 fileAssociations：系统不知道本应用开哪些文件，" +
@@ -137,11 +219,103 @@ func TestMygoJSONDeclaresTheSameExtensions(t *testing.T) {
 		declared = append(declared, fa.Ext...)
 	}
 	slices.Sort(declared)
-	want := slices.Clone(AssociatedAudioExts)
+	want := associatedAudioExtsForGOOS("linux")
 	slices.Sort(want)
 	if !slices.Equal(declared, want) {
-		t.Errorf("mygo.json 登记的扩展名是 %v，代码里那一份是 %v——两份对不上时，"+
-			"双击一个文件会「什么也没发生」", declared, want)
+		t.Errorf("mygo.json 登记的扩展名是 %v，全平台都放得起的那一份是 %v——"+
+			"两份对不上时，Linux 的 desktop entry 会把放不了的格式登记给系统",
+			declared, want)
+	}
+}
+
+// TestMygoJSONKeepsAACOutOfTheLinuxDesktopEntry 单独钉住「Linux 不登记
+// m4a / aac」。
+//
+// ⚠️ 上一条断「一份不多不少」，这一条钉**那两个特定扩展名不在**：Linux
+// 的 `.desktop` 由这份 JSON 直接翻出来（mygo `build.go` 的
+// `writeLinuxDesktop`），MIME 类型跟着扩展名走——aAc / m4a 在里面的话
+// 桌面条目里就有 `application/x-pudmusic-m4a`，系统按它把 `.m4a` 交给
+// 本应用，而 Linux 上没有解码器。
+func TestMygoJSONKeepsAACOutOfTheLinuxDesktopEntry(t *testing.T) {
+	c := readMygoFileAssocConfig(t)
+	for _, fa := range c.FileAssociations {
+		for _, ext := range fa.Ext {
+			if ext == "m4a" || ext == "aac" {
+				t.Errorf("mygo.json 的 fileAssociations 里还有 %q：Linux 的"+
+					"desktop entry 会按它登记 %q，而 Linux 上没有 AAC 解码器",
+					ext, ext)
+			}
+		}
+	}
+}
+
+// TestMacOSInfoPlistKeepsTheFullAssociation 钉住 macOS 在
+// `macos.infoPlist.CFBundleDocumentTypes` 里补回了**完整的**扩展名
+// （含 m4a / aac）。
+//
+// ⚠️ **机制是「键替换」**：框架的 `bundle.go` 从 `fileAssociations` 生成
+// `CFBundleDocumentTypes` 之后，再拿 `macos.infoPlist` 的键**整个换掉**
+// 生成的那份（`d[k] = v // the app's own keys win`）——所以这份数组里
+// 必须是**全量**（含 m4a / aac），只写那两个的话 macOS 就只剩那两个格式。
+func TestMacOSInfoPlistKeepsTheFullAssociation(t *testing.T) {
+	c := readMygoFileAssocConfig(t)
+	raw, ok := c.MacOS.InfoPlist["CFBundleDocumentTypes"]
+	if !ok {
+		t.Fatal("macos.infoPlist 里没有 CFBundleDocumentTypes：mygo.json 移走" +
+			" m4a/aac 之后，macOS 就没有任何文件关联了")
+	}
+	docs, ok := raw.([]any)
+	if !ok || len(docs) == 0 {
+		t.Fatalf("CFBundleDocumentTypes 不是数组（%T）", raw)
+	}
+	var exts []string
+	for _, d := range docs {
+		m, ok := d.(map[string]any)
+		if !ok {
+			continue
+		}
+		list, ok := m["CFBundleTypeExtensions"].([]any)
+		if !ok {
+			continue
+		}
+		for _, e := range list {
+			if s, ok := e.(string); ok {
+				exts = append(exts, s)
+			}
+		}
+	}
+	slices.Sort(exts)
+	want := associatedAudioExtsForGOOS("darwin")
+	slices.Sort(want)
+	if !slices.Equal(exts, want) {
+		t.Errorf("macOS InfoPlist 里登记的扩展名是 %v，darwin 那一份是 %v",
+			exts, want)
+	}
+}
+
+// TestWindowsInstallerIncludeRegistersAAC 钉住 Windows 安装包通过
+// `windows.installerInclude` 补回 m4a / aac 的注册表关联。
+//
+// ⚠️ **只钉「这个文件存在、而且里面写着那两个扩展名」**：NSIS 脚本对不对
+// 只能在打了安装包的 Windows 上验（见 `scripts/build.sh`），这里钉的是
+// 「配置还指着它、它还没被删」。
+func TestWindowsInstallerIncludeRegistersAAC(t *testing.T) {
+	c := readMygoFileAssocConfig(t)
+	if c.Windows.InstallerInclude == "" {
+		t.Fatal("mygo.json 里没有 windows.installerInclude：Windows 安装包" +
+			"就没有任何 AAC/M4A 关联了")
+	}
+	path := filepath.Join("..", "..", c.Windows.InstallerInclude)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("读不到 %s：%v", c.Windows.InstallerInclude, err)
+	}
+	text := string(b)
+	for _, ext := range []string{"m4a", "aac"} {
+		if !strings.Contains(text, `"`+ext+`"`) && !strings.Contains(text, "."+ext) {
+			t.Errorf("%s 里没有 %q：Windows 安装包不会登记那个扩展名",
+				c.Windows.InstallerInclude, ext)
+		}
 	}
 }
 

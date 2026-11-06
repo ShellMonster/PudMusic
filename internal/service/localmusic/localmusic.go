@@ -92,18 +92,46 @@ var Extensions = []string{
 //     `tphakala/go-mp3`；真解一次的判据在
 //     `internal/service/audio/mp3_test.go`）
 //   - 裸 FLAC：`internal/service/audio/flacdec`
-//   - MP4 / AAC：系统解码器（macOS 的 AudioToolbox）
+//   - MP4 / AAC：系统解码器（macOS 的 AudioToolbox、Windows 的 Media
+//     Foundation——**Linux 上没有**，`mfadec` 在非 Windows 上返回
+//     `ErrUnsupported`，而 `extaf` 只在 darwin 上有）
 //   - AIFF / AIFC：`internal/service/audio/aiff.go`
 //   - Ogg Vorbis：`mygo/audio/vorbis`——那一行 blank import 在
 //     `internal/service/audio/player.go`，真解一次的判据在
 //     `internal/service/audio/vorbis_test.go`
 //   - WMA：什么也没有
 //
+// ⚠️ **Linux 上 `.m4a` / `.aac` 是 false**：那台机器上没有 AAC 解码器，
+// 「列进来了说可放、按下去报不支持」是界面上的谎言。所以这一份按 GOOS
+// 裁——不是另写一份（两份各记的代价是「加了一个格式，linux 那份忘了加」）。
+//
 // ⚠️ **列表里出现一个播不了的扩展名时，界面上必须说清楚**，不能让人以为
 // 文件坏了（PLAN §5.4 的原话：「不要含糊过去」）。
-var playableExts = map[string]bool{
-	".mp3": true, ".flac": true, ".wav": true, ".m4a": true,
-	".aac": true, ".ogg": true, ".aiff": true, ".aif": true, ".aifc": true,
+// runtimeGOOS 是构建目标平台。**可替换**：测试要在 macOS 上钉「Linux 那份
+// 里 `.m4a` 是放不了的」，就要让它绕开本机 GOOS。
+var runtimeGOOS = runtime.GOOS
+
+var playableExts = playableExtsForGOOS(runtimeGOOS)
+
+// aacPlayableExts 是**靠系统解码器**的那一档（MP4 / AAC）。
+//
+// 判据和 `internal/platform` 的 `aacExts` 是同一条：它们只在有系统
+// 解码器的平台（macOS 的 AudioToolbox、Windows 的 Media Foundation）
+// 上放得出声——Linux 上两边都没有。
+var aacPlayableExts = map[string]bool{".m4a": true, ".aac": true}
+
+// playableExtsForGOOS 报某个目标平台上「真的放得出声」的那一份。
+func playableExtsForGOOS(goos string) map[string]bool {
+	out := map[string]bool{
+		".mp3": true, ".flac": true, ".wav": true, ".m4a": true,
+		".aac": true, ".ogg": true, ".aiff": true, ".aif": true, ".aifc": true,
+	}
+	if goos == "linux" {
+		for ext := range aacPlayableExts {
+			out[ext] = false
+		}
+	}
+	return out
 }
 
 // Playable 报这个格式能不能播。界面上给每一行加不加「不支持这个格式」就看它。

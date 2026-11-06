@@ -7,7 +7,7 @@
   "urlSchemes": ["pudmusic"],
   "fileAssociations": [
     {
-      "ext": ["mp3", "flac", "wav", "m4a", "aac", "ogg", "aiff", "aif", "aifc"],
+      "ext": ["mp3", "flac", "wav", "ogg", "aiff", "aif", "aifc"],
       "name": "音频文件",
       "role": "Viewer"
     }
@@ -18,8 +18,19 @@
     "infoPlist": {
       "LSApplicationCategoryType": "public.app-category.music",
       "CFBundleDevelopmentRegion": "zh-Hans",
-      "CFBundleLocalizations": ["zh-Hans"]
+      "CFBundleLocalizations": ["zh-Hans"],
+      "CFBundleDocumentTypes": [
+        {
+          "CFBundleTypeName": "音频文件",
+          "CFBundleTypeRole": "Viewer",
+          "LSHandlerRank": "Default",
+          "CFBundleTypeExtensions": ["mp3", "flac", "wav", "m4a", "aac", "ogg", "aiff", "aif", "aifc"]
+        }
+      ]
     }
+  },
+  "windows": {
+    "installerInclude": "resources/windows/fileassoc.nsh"
   },
   "linux": {
     "webview": false,

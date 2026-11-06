@@ -1,0 +1,84 @@
+name: Windows E2E
+
+# 这一份是 Windows 平台的 E2E 通道：**真窗口上的启动 / 单实例 / 退出 /
+# 文件关联**。
+#
+# 为什么要专门一个工作流：Linux 那一族（`.github/workflows/linux.yml` 的
+# `e2e` job）只能跑 Linux——Windows 的托盘是 NotifyIcon、单实例锁是
+# `single_instance_windows.go` 那一把、AAC/M4A 关联是 `installerInclude`
+# 写的注册表，三样都不在 Linux 上。GitHub 的 `windows-2022` runner 有
+# 交互桌面，真窗口起得来。
+#
+# 它跑的是 `internal/e2e` 那一包里 `TestWindows*`：
+#
+#   - TestWindowsLifecycle —— 起得来、第二个实例递完命令行自己退出、
+#     托盘菜单「退出程序」真的让进程退出来（E2E 钩子）。
+#   - TestWindowsFileAssociations —— .m4a 真的放起来（fileassoc.nsh 补回
+#     的关联 + handleLaunchArgs 接住 fileArgs 不投的那一条）、.wma 有
+#     一句「这个格式我们放不了」。
+#
+# ⚠️ 它**不验**：资源管理器真的把 `.m4a` 关联给我们（那要装 NSIS 安装包）、
+# 高 DPI 下的布局、安装升级路径——三样都要在 PR 说明里列为已知边界。
+
+on:
+  pull_request:
+    paths:
+      - "internal/e2e/**"
+      - "internal/ui/**"
+      - "internal/platform/**"
+      - "automation_e2e.go"
+      - "main.go"
+      - "mygo.json"
+      - "resources/windows/**"
+      - ".github/workflows/windows-e2e.yml"
+  push:
+    branches:
+      - "work/**"
+    paths:
+      - "internal/e2e/**"
+      - "internal/ui/**"
+      - "internal/platform/**"
+      - "automation_e2e.go"
+      - "main.go"
+      - "mygo.json"
+      - "resources/windows/**"
+      - ".github/workflows/windows-e2e.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-e2e:
+    name: Windows 真机跑 E2E
+    runs-on: windows-2022
+    timeout-minutes: 25
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ⚠️ 不要加「Cache Go toolchain」那种把 hostedtoolcache 下的 go 目录
+      # 存进 actions/cache 的步骤：缓存命中时 tar 把它还原成符号链接，
+      # 随后 setup-go 往同一位置写链接直接撞 EEXIST（windows-aac-spike
+      # 在 PR #769 那次红的原因）。module / build 缓存由 setup-go 自带
+      # 的 `cache: true` 负责。
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Windows 这一半的代码有 `//go:build windows`，在 macOS 上连编译都
+      # 不进——所以「能不能编过」要在这里问。
+      - name: 编译与 vet（Windows 这一半）
+        run: |
+          go build ./...
+          go vet -tags e2e ./internal/e2e/
+
+      - name: 跑 Windows E2E
+        run: |
+          $env:BIU_RUN_MYGO_E2E = "1"
+          go test -tags e2e ./internal/e2e `
+            -run 'TestWindowsLifecycle|TestWindowsFileAssociations' `
+            -count=1 -timeout 300s -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

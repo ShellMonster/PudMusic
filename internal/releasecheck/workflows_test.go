@@ -28,6 +28,33 @@ func TestWindowsAACSpikeDoesNotCacheTheToolchain(t *testing.T) {
 	}
 }
 
+// TestWindowsE2EWorkflowRunsTheWindowsTests 钉住 Windows E2E 工作流真的跑
+// Windows 那一族测试，而且不再缓存 tool_cache（理由同上一条）。
+//
+// ⚠️ **要钉的两件事**：
+//
+//  1. 它跑 `TestWindowsLifecycle` / `TestWindowsFileAssociations`——少了
+//     哪一条，那一格就是「写了测试没人跑」；
+//  2. 不设 `BIU_RUN_MYGO_E2E=1` 的话，那些测试全会 skip——工作流绿着，
+//     而「Windows 上有 E2E」是个谎。
+func TestWindowsE2EWorkflowRunsTheWindowsTests(t *testing.T) {
+	src := readRepoFile(t, ".github/workflows/windows-e2e.yml")
+	if strings.Contains(src, "runner.tool_cache") {
+		t.Error("windows-e2e.yml 又出现了 runner.tool_cache 路径——缓存 tool_cache 会让 setup-go 撞 EEXIST")
+	}
+	if !strings.Contains(src, "BIU_RUN_MYGO_E2E") {
+		t.Error("windows-e2e.yml 没设 BIU_RUN_MYGO_E2E——E2E 测试全会 skip")
+	}
+	for _, test := range []string{
+		"TestWindowsLifecycle",
+		"TestWindowsFileAssociations",
+	} {
+		if !strings.Contains(src, test) {
+			t.Errorf("windows-e2e.yml 没跑 %s", test)
+		}
+	}
+}
+
 // TestLinuxCIExcludesUnsupportedPackages 钉住 Linux CI 的测试包筛选：
 // 最小可发行版本不实现 AAC/M4A（service/audio）、视频（service/video）、
 // 随包字体（ui/widgets/typo），这三个包的测试在 Ubuntu runner 上确定性

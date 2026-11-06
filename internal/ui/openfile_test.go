@@ -604,6 +604,35 @@ func TestTheLaunchArgsPickUpWhatTheFrameworkDrops(t *testing.T) {
 	}
 }
 
+// TestTheLaunchArgsPickUpAACOnEveryPlatform 钉住「`.m4a` / `.aac` 在命令行
+// 那一遍被认下来」。
+//
+// ⚠️ **这一条是 mygo.json 把 m4a/aac 移出 fileAssociations 之后最容易
+// 坏的那一环**：框架的 `fileArgs` 按 `packageFileExtensions`（= mygo.json
+// 那份交集）过滤——`.m4a` 不在里面，框架不投给 `OnOpenFile`。而**我们
+// 这一遍必须把它认下来**：macOS / Windows 上 `IsAssociatedAudioExt` 含
+// m4a，`checkOpenFile` 会收下并放它；Linux 上不含，`checkOpenFile` 会
+// 给「这个格式我们放不了」。两边都要文件**先被认下来**——认不下来就是
+// 「双击 .m4a，什么也没发生，连一句提示都没有」。
+//
+// ⚠️ **它钉的是 `launchFileCandidates`**（认不认），不是 `checkOpenFile`
+// （收不收）：后者平台相关，而前者在三个平台上**都必须收下**——收不收是
+// `IsAssociatedAudioExt` 的事，那一半由 `internal/platform` 的测试钉。
+func TestTheLaunchArgsPickUpAACOnEveryPlatform(t *testing.T) {
+	dir := t.TempDir()
+	for _, ext := range []string{"m4a", "aac"} {
+		p := filepath.Join(dir, "一首歌."+ext)
+		if err := os.WriteFile(p, []byte("fake"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got := launchFileCandidates([]string{p}, dir)
+		if !slices.Contains(got, p) {
+			t.Errorf(".%s 没被命令行那一遍认下来：框架按 mygo.json 不投它，"+
+				"我们也不认的话，双击它就什么都没发生", ext)
+		}
+	}
+}
+
 // TestTheCommandLineRejectionsAreVisible 钉住「命令行里被丢掉的那些，
 // 用户看得见」。
 //
