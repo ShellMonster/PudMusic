@@ -36,7 +36,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -157,8 +156,9 @@ func TestTheThreeCountsDisappearForALocalFile(t *testing.T) {
 // 🔴 **「+」是这一族的语义**（票面原话：「「+」恒表示「至少这么多」」）——
 // 把它截掉就变成了「正好 999」，那是**撒谎**。
 //
-// ⚠️ **判据是「每一档都装得下上限」**：数字格有 `MaxWidth(playbarBadgeMaxW)`
-// （22.5），而折法最宽的一档是「99k+」（9 号字实测 **≈22.0**）——**刚好装下**。
+// ⚠️ **判据是「每一档单独画出来，墨迹都不许比字宽窄」**：数字一整行随字长、
+// 不封顶，而**截断切的是末尾、而「+」永远是最后一个字符**——任何一档
+// 墨迹短一截，缺的就是那个「+」。
 //
 // ⇒ 所以这一条断的是**每一档**：**一个都不许截**。
 //
@@ -228,9 +228,10 @@ func TestTheCountNeverLosesItsPlus(t *testing.T) {
 			var full float32
 			mygoui.NewTester(func(c *mygoui.Context) {
 				full, _ = c.MeasureText(0, mygoui.Span{
-					Text: want, Size: scale.Font(c, playbarBadgeFont)})
+					Text: want, Size: playbarCountFont})
 			}, 300, 60).Frame()
-			// 角标缺口现在按内容自适应宽度，不再受旧的 22.5 固定上限约束。
+			// 数字一整行随字长、不封顶，单独画一遍同一串字（同样的字号、
+			// 一个比字宽还宽的上限）量它自己的墨迹——「+」还在不在。
 			ink := isolatedInkWidth(t, want, full+20)
 			if full-ink > 2 {
 				t.Errorf("数 %d（%q）被截了：同一个上限（%.1f）下那一串字的墨迹只有 %.2f，"+
@@ -240,119 +241,6 @@ func TestTheCountNeverLosesItsPlus(t *testing.T) {
 			}
 		})
 	}
-}
-
-// TestTheBadgeWidthNeverCollapsesToZero 钉住 **`MeasureText` 量不到的时候缺口
-// 不塌成空块**。
-//
-// 🔴 **对抗性审查查出的一笔**：字体后端还没就绪 / 量不到那一串时
-// `MeasureText` 回 0——不挡的话 `notchW` 只剩两侧 padding（14 ≥
-// `badgeNotchMinW`，连最小小宽那道兜底都救不回来），更糟的是 `Text` 的
-// `MinWidth(0).MaxWidth(0)` 会把**整串数字裁成零宽**——画面上剩一个空底色
-// 缺口，数字整个没了。
-//
-// ⚠️ **判据是 `badgeTextWidth` 那一支纯函数**：`MeasureText` 是 `*ui.Context`
-// 上的方法、mock 不掉，所以把「量出来的值 → 兜底后的值」抽了出来，这里
-// 0 / 负数 / 正常宽三档各喂一遍。
-func TestTheBadgeWidthNeverCollapsesToZero(t *testing.T) {
-	for _, c := range []struct {
-		name     string
-		measured float32
-		want     float32
-	}{
-		{"量不到（0）", 0, playbarBadgeMaxW},
-		{"量出负数（防御）", -3, playbarBadgeMaxW},
-		{"正常宽（1k+ ≈14）", 14.8, 14.8},
-		{"最宽档（99k+ ≈22）", 22.0, 22.0},
-	} {
-		if got := badgeTextWidth(c.measured); got != c.want {
-			t.Errorf("%s：badgeTextWidth(%.1f) = %.1f，want %.1f——"+
-				"量不到的时候没退回上限档，数字会被裁成零宽、剩一个空缺口",
-				c.name, c.measured, got, c.want)
-		}
-	}
-}
-
-// scaledCellInks 量「**界面上那一格**」在给定的系统文本缩放下，它自己的墨迹
-// 有多宽（带「+」的那一串，和不带「+」的那一串）。
-//
-// 🔴 **走的是生产代码**（`countBadge`）——这是这一条能成立的原因：
-// 自己画一遍的话，字号是测试里写的那个数，而**被测的那件事恰恰是「字号乘不乘
-// 系统缩放」**——自己画就等于把要验的东西当成了前提。
-//
-// ⚠️ **为什么要把「不带「+」的那一串」也量一遍**：那是**对照组**——
-// 截断切的是末尾，而「+」永远是最后一个字符 ⇒ **「+」被切掉时，那一格的墨迹
-// 会比不带「+」的还短**（实测 scale 1.25：17 < 23）。
-//
-// ⚠️ **单独画**：真实布局里那一格的左右**就是邻居的图形**，量墨迹会把邻居的
-// 字迹算进来——分不出哪一笔是那个「+」。⇒ 这里让那一格**单独占一行**。
-func scaledCellInks(t *testing.T, withPlus, withoutPlus string, scale float32) (float32, float32) {
-	t.Helper()
-	// 🔴 **带「+」的那一格走**生产代码**（`countBadge`）——这是这一条能成立的
-	// 原因：自己画一遍的话，字号是测试里写的那个数，而**被测的那件事恰恰是
-	// 「字号乘不乘系统缩放」**——自己画就等于把要验的东西当成了前提。
-	//
-	// ⚠️ **角标要挂在一个图形盒子上**（它在按钮里是 `Attach` 在 18×18 的盒子
-	// 上的）——裸建会把它的中心钉在整行的右上角，量到的不是它的墨迹。
-	tt := mygoui.NewTester(func(c *mygoui.Context) {
-		mygoui.Row(c).Children(func() {
-			// ⚠️ **缺口块会探出图形盒子的左界**（宽字那一档的缺口比 18 的盒子
-			// 还宽、往左长出去）——把盒子摆在行中间，探出去的那一截才不会被
-			// 窗口左缘裁掉、墨迹才量得全。
-			mygoui.Spacer(c).Grow(1)
-			mygoui.Box(c).Size(iconMd, iconMd).Children(func() {
-				countBadge(c, countForText(withPlus), c.Theme().Background, 0)
-			})
-			mygoui.Spacer(c).Grow(1)
-		})
-	}, 300, 60)
-	tt.SetPreferences(mygoui.Preferences{TextScale: scale})
-	tt.Frame()
-	with := inkWidthOf(t, tt, withPlus)
-
-	// ⚠️ **对照组是「同一串字去掉那个「+」」，而且它**不是折法的输出**——
-	// 折法那一档永远带「+」，所以**不能**喂给 `countBadge`（那样折出来还是
-	// 带「+」的字，量的是同一串，两边相等，判据就成了空话——第一版就这么写的，
-	// 变异测试立刻揭穿了它）。
-	//
-	// ⇒ 所以对照组**直接画那一串字**（**同样的字号、同样的上限**）——它测的是
-	// 「那个「+」自己占多少像素」。
-	tt2 := mygoui.NewTester(func(c *mygoui.Context) {
-		mygoui.Row(c).Children(func() {
-			mygoui.Text(c, withoutPlus).FontSize(playbarBadgeFont).
-				MaxWidth(playbarBadgeMaxW).MaxLines(1).Ellipsis("…")
-		})
-	}, 300, 60)
-	tt2.SetPreferences(mygoui.Preferences{TextScale: scale})
-	tt2.Frame()
-	without := inkWidthOf(t, tt2, withoutPlus)
-	return with, without
-}
-
-// countForText 把「一串字」换算成「能折出它的那一个数」。
-//
-// ⚠️ **它走的是折法自己的逆运算**：「99k+」⇒ 99000、「1亿+」⇒ 100000000。
-// 而**数字那一格画的是折出来的字**，所以要喂给 `countBadge` 的是**数**。
-func countForText(s string) int64 {
-	body := strings.TrimSuffix(s, "+")
-	var head int64
-	for _, r := range body {
-		if r >= '0' && r <= '9' {
-			head = head*10 + int64(r-'0')
-		} else {
-			break
-		}
-	}
-	if strings.Contains(body, "亿") {
-		return head * 100_000_000
-	}
-	if strings.Contains(body, "万") {
-		return head * 10_000
-	}
-	if strings.Contains(body, "k") {
-		return head * 1000
-	}
-	return head
 }
 
 // inkWidthOf 量画面上「某一串字」自己的墨迹有多宽。
@@ -418,61 +306,209 @@ func TestTheThreeCountsSayTheNumberToScreenReaders(t *testing.T) {
 	}
 }
 
-// TestTheThreeCountsSitInsideANotchOnTheIconsTopRight 钉住**数字嵌在图形右上角的缺口里**。
+// TestTheThreeCountsSitUnderTheIconInsideTheKey 钉住**数字落在图标正下方、整串收在键内**。
 //
-// 🔴 **这是本票的主体**：数字从「图形右上角外侧挂着的角标」挪成「嵌在图形
-// 右上角缺口里的读数」（网易云式）——它**不占布局**，缺口块钉在图形盒子的
-// 右上角、包住那个角往外探 `badgeNotchOut`，数字居中画在缺口里。
+// 🔴 **这是本票的主体**（方案 A「垂直收束」）：数字不再悬浮在图标右上角的
+// 缺口角标里——它挪到图标**正下方**，和图形**上下竖着收在同一枚键里**；
+// 键加高（36 → 50），图形在上、数字在下，水平方向都和键**同一条竖直中轴**。
 //
-// ⚠️ **判据是角标自身的 bounds 相对图形盒子 bounds 的位置**（视觉审查钉下的
-// 四条真值）：
+// ⚠️ **判据是数字那一格的 bounds 相对按钮 bounds 的位置**：
 //
-//	角标的左缘落在缺口左缘 + PadL 那一带        （嵌进缺口里，左右留缝）
-//	角标的左缘不许深过「咬的那一口」            （缺口只咬右上角，不是包住图形）
-//	角标的下缘明显在图形中线的上方             （坐在右上角，不是骑在正中）
-//	角标的右缘没越过图形右缘 + 最宽探出量      （缺口主体探在图形外的空气里）
+//	数字整串不许探出键的左右 / 上下边界      （收在键内，不再漂在图形外）
+//	数字的上缘必须低于键的上半区             （在图标**下方**，不是右上角）
+//	数字的水平中点与键的中点重合             （和图形同一根中轴，不是挂在角上）
+//	数字不许压在图标那一带上                 （图标在键的上半区，中点 y < 键中点）
 //
-// 反过来说：外侧角标那一版（角标左缘正好贴图形右缘起排、上下位置也低）、横排
-// 那一版（角标中心 y ≈ 图形中心 y）和「缺口包住整个图形」那一版（宽字档数字
-// 左缘跑到图形左半去了）都立刻红。
+// 反过来说：缺口角标那一版（数字上缘越过键的上沿、探出图形右缘）、横排那一版
+// （数字和图标同一条水平基线）都立刻红。
 //
-// ⚠️ **三枚都要断**：只断一枚的话，「收藏 / 评论走了缺口、赞还停在外侧角标」那
-// 一档照样绿——而那一档正是本票最容易漏的（赞键的图形那一块是绝对定位的两层，
-// 和另外两枚不是同一条路径）。
+// ⚠️ **三枚都要断**：只断一枚的话，「收藏 / 评论收束了、赞还停在缺口角标」那
+// 一档照样绿——而赞键的图形那一块是绝对定位的两层，和另外两枚不是同一条路径。
 //
-// ⚠️ **图形盒子怎么找**：角标的父元素是图形盒子（`ui.Box(iconMd × iconMd)`），
-// 而那一枚键的框是它再往外一层。Tester 不给父链——所以这里**用按钮的框**倒推：
-// 按钮的**中心**就是图形盒子的中心（带数字时图形在按钮正中），图形盒子的半边
-// 是 `iconMd/2`。
-func TestTheThreeCountsSitInsideANotchOnTheIconsTopRight(t *testing.T) {
+// ⚠️ **三枚键的数字折成同一串**（折法只有 4 档，「999+」那一档三枚全是）——
+// `Find` 只回第一枚，所以这里用**墨迹带**（`inkBandsOf`）把三处数字各自
+// 翻出来：一条带 ≈ 一处那串字，位置就是它挂在哪一枚键。
+func TestTheThreeCountsSitUnderTheIconInsideTheKey(t *testing.T) {
+	tt, _ := countsPlaybarTester(t, 1200, 9999, 9999, 9999)
+
+	want := list.CountText(9999)
+	cell, ok := tt.Find(want)
+	if !ok {
+		t.Fatalf("画面上没有数字 %q（文字有 %q）", want, tt.Texts())
+	}
+	bands := inkBandsOf(t, tt, want)
+	if len(bands) < 3 {
+		t.Fatalf("画面上 %q 的墨迹带只有 %d 条（%v）——三枚键该各有一条",
+			want, len(bands), bands)
+	}
+
+	// 数字那一行的高度带（拿第一枚的框当样板）：三枚键的数字同一行高。
+	countTop, countBottom := cell.Y, cell.Y+cell.H
+
+	for _, name := range []string{"赞", "收藏", "评论"} {
+		key, ok := tt.Find(name)
+		if !ok {
+			t.Fatalf("画面上找不到「%s」那一枚键（文字有 %q）", name, tt.Texts())
+		}
+		// 这一枚键里的数字带：水平落在键的左右边界之间的那一条。
+		var band *[2]float32
+		for i := range bands {
+			mid := (bands[i][0] + bands[i][1]) / 2
+			if mid >= key.X && mid <= key.X+key.W {
+				band = &bands[i]
+			}
+		}
+		if band == nil {
+			t.Errorf("「%s」键的框 [%.1f, %.1f] 里没有 %q 的墨迹带（全部带 %v）——"+
+				"数字没挂在键内",
+				name, key.X, key.X+key.W, want, bands)
+			continue
+		}
+		// 🔴 **整串收在键内**：数字带的左右不许探出键的左右边界。
+		if band[0] < key.X-0.5 || band[1] > key.X+key.W+0.5 {
+			t.Errorf("「%s」的数字探出了键的左右边界：带=[%.1f, %.1f] key=[%.1f, %.1f]——"+
+				"方案 A 要求数字整串收在键内，不再漂在图形外",
+				name, band[0], band[1], key.X, key.X+key.W)
+		}
+		// 🔴 **数字在图标**下方**：它那一行必须整行低于键的中点，且不收出键的
+		// 下沿。
+		if countTop < key.Y+key.H/2 {
+			t.Errorf("「%s」的数字不在键的下半区：countTop=%.1f keyY=%.1f keyH=%.1f——"+
+				"方案 A 要求数字落在图标**正下方**，而不是悬浮在右上角",
+				name, countTop, key.Y, key.H)
+		}
+		if countBottom > key.Y+key.H+0.5 {
+			t.Errorf("「%s」的数字探出了键的下沿：countBottom=%.1f keyBottom=%.1f",
+				name, countBottom, key.Y+key.H)
+		}
+		// 🔴 **同一根竖直中轴**：数字带的水平中点要和键的水平中点重合（±1 的
+		// 抗锯齿与字宽取整余量）——偏了就是「挂在角上」，不是「上下收束」。
+		if d := (band[0]+band[1])/2 - (key.X + key.W/2); d < -1.5 || d > 1.5 {
+			t.Errorf("「%s」的数字不在键的中轴上：带中点=%.1f keyCenterX=%.1f——"+
+				"方案 A 要求数字和图形共享同一根竖直中轴",
+				name, (band[0]+band[1])/2, key.X+key.W/2)
+		}
+	}
+}
+
+// TestTheCountedKeysGrowTallerNotWider 钉住**带数字的键加高、不加宽**。
+//
+// 🔴 **方案 A 的形状**：数字收进键内之后，那一枚键从 36 × 36 变成**加高**的一枚
+// （图形在上、数字在下），而**宽不变**——三枚键保持同高、同一根竖直中轴。
+// 宽一长，第三段就把歌名 / 进度条挤回去（那是横排那一版的病）。
+//
+// ⚠️ **判据是「带数的键比不带数的高、而宽一样」**：对照是右列那枚「播放列表」
+// 键——它和左段三枚同一份点击区（`tok.IconHit` = 36），而它不带数字。
+func TestTheCountedKeysGrowTallerNotWider(t *testing.T) {
 	tt, _ := countsPlaybarTester(t, 1200, 1286, 2468, 9999)
 
-	for _, c := range []struct {
-		name  string
-		count int64
-	}{
-		{"评论", 1286},
-		{"收藏", 2468},
-		{"赞", 9999},
-	} {
-		want := list.CountText(c.count)
-		badge, ok := tt.Find(want)
+	plain, ok := tt.Find("播放列表")
+	if !ok {
+		t.Fatalf("画面上找不到不带数字的对照键「播放列表」（文字有 %q）", tt.Texts())
+	}
+	for _, name := range []string{"赞", "收藏", "评论"} {
+		key, ok := tt.Find(name)
 		if !ok {
-			t.Fatalf("「%s」键上没有角标 %q（文字有 %q）", c.name, want, tt.Texts())
+			t.Fatalf("画面上找不到「%s」那一枚键（文字有 %q）", name, tt.Texts())
 		}
-		key, ok := tt.Find(c.name)
+		if key.H <= plain.H {
+			t.Errorf("「%s」带数字却没有加高：keyH=%.1f plainH=%.1f——"+
+				"方案 A 要求数字收进键内、键上下加高收束", name, key.H, plain.H)
+		}
+		if key.W > plain.W {
+			t.Errorf("「%s」带数字把键撑宽了：keyW=%.1f plainW=%.1f——"+
+				"数字只许占键内的高度，不许吃宽度", name, key.W, plain.W)
+		}
+	}
+}
+
+// TestTheThreeCountedKeysStillDoTheirJob 钉住**三枚键点下去照旧干原来的活**。
+//
+// 🔴 **键加高、内容变两层之后，点击区不许碎**：点那一枚键（含它下半区的数字
+// 那一带）必须照旧触发原来的动作——赞发 SetLike、收藏开收藏夹弹窗、评论开
+// 评论抽屉。
+//
+// ⚠️ **点的是键的**下半区**：方案 A 把数字摆在那——如果数字那一格自己登记了
+// 命中（忘了 PassThrough），点在下半区就落不到按钮上，动作不发。那是
+// 「画面上看不出坏了」的那种坏，必须真点。
+func TestTheThreeCountedKeysStillDoTheirJob(t *testing.T) {
+	f := newBiliFixture(t, 1)
+	f.setViewReply(1286)
+	f.setViewCounts(2468, 9999)
+
+	s, tt := newShell(t, at(1200, 900))
+	s.app.MountStreaming(app.Streaming{
+		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
+	})
+	// ⚠️ **挂上登录和收藏夹**：点「收藏」那一枚要真的把收藏夹弹窗开出来，
+	// 而不是只验证兜底那句 toast（`openFolderSelect` 没挂时说什么都打不开）。
+	s.app.MountLogin(app.NewMemoryStore("test"), f.client())
+	s.app.MountCollections(app.CollectionRefs{Client: f.client()})
+	if err := s.app.Enqueue(app.Item{
+		Source: "online", Type: "mv", Bvid: "BVcountsA", Cid: "1",
+		Title: "有三个数的那一首", Artist: "某个 UP 主",
+	}); err != nil {
+		t.Fatalf("把在线那首放进队列：%v", err)
+	}
+	waitFrames(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
+	waitFrames(t, tt, "三个数问回来了", func() bool {
+		c := s.app.ArchiveCounts()
+		return c.Reply == 1286 && c.Favorite == 2468 && c.Like == 9999
+	})
+	tt.Frame()
+
+	// 🔴 **点键的下半区**（数字那一带）：三枚都点，三枚的动作都要发。
+	//
+	// ⚠️ **评论**：点完 `commentsOpen` 要 true（评论抽屉开）。
+	// ⚠️ **收藏**：点完收藏夹弹窗要开（`folderSelect.open`）——bvid → avid 是
+	// 后台一趟（fixture 的 `/x/web-interface/view` 回 `aid`），等的是结果。
+	// ⚠️ **赞**：点完 `LikeState().Liked` 要翻成 true（`SetLike` 那一趟发出去了）。
+	clickLowerHalf := func(name string) {
+		t.Helper()
+		key, ok := tt.Find(name)
 		if !ok {
-			t.Fatalf("画面上找不到「%s」那一枚键（文字有 %q）", c.name, tt.Texts())
+			t.Fatalf("画面上找不到「%s」那一枚键（文字有 %q）", name, tt.Texts())
 		}
-		// 角标必须有真实尺寸，并且落在按钮的上半区；这能防止绝对定位文本
-		// 再次退化成零宽省略号或掉回按钮正文区域。
-		if badge.W <= 0 || badge.H <= 0 {
-			t.Errorf("「%s」的角标尺寸无效：%.1fx%.1f", c.name, badge.W, badge.H)
-		}
-		if badge.Y >= key.Y+key.H/2 {
-			t.Errorf("「%s」的角标没有落在按钮右上区域：badgeY=%.1f buttonY=%.1f buttonH=%.1f",
-				c.name, badge.Y, key.Y, key.H)
-		}
+		// 点下半区正中——数字那一带。
+		tt.ClickAt(key.X+key.W/2, key.Y+key.H*3/4)
+		tt.Frame()
+	}
+
+	clickLowerHalf("评论")
+	if !s.commentsOpen {
+		t.Error("点了评论键的下半区，评论抽屉没开——数字那一带把点击吃了")
+	}
+	// ⚠️ **抽屉是模态的**：开着的时候底下那一页点不动（`Modal()` 蒙版）——
+	// 点下一枚之前必须真的把它收掉（按 Esc），不是只把标志位翻回去。
+	tt.Key(0, mygoui.KeyEscape)
+	settleCommentsDrawer(t, s, tt)
+	if s.commentsOpen {
+		t.Fatal("按了 Esc 评论抽屉还开着")
+	}
+
+	clickLowerHalf("收藏")
+	waitFrames(t, tt, "收藏夹弹窗开出来了", func() bool {
+		return s.folderSelect != nil && s.folderSelect.open
+	})
+	if s.folderSelect == nil || !s.folderSelect.open {
+		t.Error("点了收藏键的下半区，收藏夹弹窗没开——数字那一带把点击吃了")
+	}
+	// ⚠️ **弹窗也是模态的**：收掉再点下一枚（同上面抽屉那一条）——
+	// 「取消」那一枚是它自己的关法（`closeFolderSelect`）。
+	if err := tt.Click("取消"); err != nil {
+		t.Fatalf("点不动收藏夹弹窗的「取消」（文字有 %q）", tt.Texts())
+	}
+	tt.Frame()
+	if s.folderSelect != nil {
+		t.Fatal("点了「取消」，收藏夹弹窗没收掉")
+	}
+
+	clickLowerHalf("赞")
+	waitFrames(t, tt, "赞发出去了", func() bool {
+		return s.app.LikeState().Liked
+	})
+	if !s.app.LikeState().Liked {
+		t.Error("点了赞键的下半区，赞没发出去——数字那一带把点击吃了")
 	}
 }
 
@@ -649,31 +685,94 @@ func TestTheCountFoldIsUsedByAllThreeKeys(t *testing.T) {
 	tt, _ := countsPlaybarTester(t, 1200, 1286, 1286, 1286)
 
 	want := list.CountText(1286)
-	// ⚠️ **`Tester.Find` 返回**第一个**匹配**：三枚键上的数字是**同一串字**，
-	// 所以这里不能靠 `Find` 把它们分辨开——而是靠**位置**：三枚键是并排的，
-	// 而**数字在每一枚键的右边**，所以后一枚必须在**前一枚的右边**。
-	//
-	// ⚠️ **这个判据断的是「数字挂在对应的键上」**：如果数字被画到了**别处**
-	// （比如三枚键共用一个数字），三枚键的位置还是那样——所以它还断不掉那一档。
-	// 断那一档的是上面那几条（各自画各自的那一格）。
-	for _, name := range []string{"赞", "收藏", "评论"} {
-		if _, ok := tt.Find(name + " " + want); !ok {
-			t.Fatalf("「%s」键的名字不是 %q %q（文字有 %q）", name, name, want, tt.Texts())
-		}
+	// ⚠️ **同一串字画了三遍，而 `Find` 只回第一枚**——「三枚键各自挂着
+	// 各自的数」靠位置断：量画面上那串字的**所有**墨迹带（`inkBandsOf`），
+	// 三枚键各要有一条落在自己左右边界之间。少一条就是「数字没挂在键里」，
+	// 或者「三枚键共用了同一处数字」。
+	bands := inkBandsOf(t, tt, want)
+	if len(bands) < 3 {
+		t.Fatalf("画面上 %q 的墨迹带只有 %d 条（%v）——三枚键该各有一条",
+			want, len(bands), bands)
 	}
-	// 三枚键**从左到右**：原型 `.np-keys` 的次序是**赞 / 收藏 / 评论**。
 	var prev float32 = -1
 	for _, name := range []string{"赞", "收藏", "评论"} {
-		key, ok := tt.Find(name + " " + want)
+		key, ok := tt.Find(name)
 		if !ok {
-			t.Fatalf("画面上找不到 %q 那一枚键", name)
+			t.Fatalf("画面上找不到 %q 那一枚键（文字有 %q）", name, tt.Texts())
 		}
 		if key.X < prev {
 			t.Errorf("「%s」键在 %.1f，而前一枚的右沿在 %.1f——次序反了",
 				name, key.X, prev)
 		}
 		prev = key.X + key.W
+		inside := false
+		for _, b := range bands {
+			if b[0] < key.X+key.W && b[1] > key.X {
+				inside = true
+			}
+		}
+		if !inside {
+			t.Errorf("「%s」键的框 [%.1f, %.1f] 里没有 %q 的墨迹带——"+
+				"数字没挂在对应的键里（墨迹带有 %v）", name, key.X, key.X+key.W, want, bands)
+		}
 	}
+}
+
+// inkBandsOf 把画面上「那一串字」的墨迹**按水平带**翻出来：回若干段
+// [左沿, 右沿]——同一段字里相邻字之间的缝 < 4 像素，而不同键之间隔着
+// 图形和缝，远大于它——所以**一条带 ≈ 一处那串字**。
+//
+// ⚠️ **只扫字身高度那一段**（拿第一个匹配的框当样板），不扫整窗：别的文字
+// （歌名、时间）的墨迹会混进来。而「赞 / 收藏 / 评论」三枚键上的数字**同一行
+// 高**，扫那一带就够——竖着相邻的墨迹（图标笔画）也在这个高度带下面。
+func inkBandsOf(t *testing.T, tt *mygoui.Tester, s string) [][2]float32 {
+	t.Helper()
+	cell, ok := tt.Find(s)
+	if !ok {
+		t.Fatalf("画面上找不到 %q（文字有 %q）", s, tt.Texts())
+	}
+	img := tt.Image()
+	// ⚠️ **底色取播放条之外的空气**（窗口右上角）：那一带没有内容。数字是
+	// 次要色，和任何一档底色都比 40 大。
+	base := img.RGBAAt(img.Rect.Max.X-5, 5)
+	var bands [][2]float32
+	y0, y1 := int(cell.Y), int(cell.Y+cell.H)
+	open, start := false, -1
+	for x := 0; x < img.Rect.Max.X; x++ {
+		ink := false
+		for y := y0; y < y1; y++ {
+			p := img.RGBAAt(x, y)
+			if absInt(int(p.R)-int(base.R))+absInt(int(p.G)-int(base.G))+
+				absInt(int(p.B)-int(base.B)) > 40 {
+				ink = true
+				break
+			}
+		}
+		switch {
+		case ink && !open:
+			open, start = true, x
+		case !ink && open:
+			// 字内缝 < 4：留一点「带还没断」的余量再合。
+			if x-start >= 1 {
+				bands = append(bands, [2]float32{float32(start), float32(x)})
+			}
+			open = false
+		}
+	}
+	if open {
+		bands = append(bands, [2]float32{float32(start), float32(img.Rect.Max.X)})
+	}
+	// ⚠️ **合并隔缝 < 4 的带**：一个字的两笔之间、相邻两个字之间都是 < 4
+	// 的缝，而键与键隔着一个图形——合在一起才是「一处那串字」。
+	var merged [][2]float32
+	for _, b := range bands {
+		if len(merged) > 0 && b[0]-merged[len(merged)-1][1] < 4 {
+			merged[len(merged)-1][1] = b[1]
+		} else {
+			merged = append(merged, b)
+		}
+	}
+	return merged
 }
 
 // isolatedInkWidth 量「一串字在给定上限下画出来，**它自己**的墨迹有多宽」。
@@ -685,7 +784,7 @@ func isolatedInkWidth(t *testing.T, s string, maxW float32) float32 {
 	t.Helper()
 	tt := mygoui.NewTester(func(c *mygoui.Context) {
 		mygoui.Row(c).Children(func() {
-			mygoui.Text(c, s).FontSize(scale.Font(c, playbarBadgeFont)).
+			mygoui.Text(c, s).FontSize(playbarCountFont).
 				MaxWidth(maxW).MaxLines(1).Ellipsis("…")
 		})
 	}, 300, 60)
