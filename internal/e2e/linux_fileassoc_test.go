@@ -76,14 +76,14 @@ func TestLinuxFileAssociations(t *testing.T) {
 		if err := os.WriteFile(m4a, []byte("not really aac"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		handOverFile(t, m4a)
+		handOverFile(t, client, window, m4a)
 		// ⚠️ **判据是「那句话画在画面里」**：它从 `fileNotice` 那一份读，
 		// 而那份在主窗口和迷你窗**各画一遍**——等它出现就行。
 		//
 		// 「这个格式我们放不了」是 `openFileRejectText` 对
 		// `openFileUnsupported` 写的那句；Linux 上 `.m4a` 不在
 		// `IsAssociatedAudioExt` 里，走到那一档。
-		if !waitForTree(t, client, window, "这个格式我们放不了", 20*time.Second) {
+		if !waitForTreeNudged(t, client, window, "这个格式我们放不了", 20*time.Second) {
 			t.Fatalf("双击 .m4a 之后窗口里没有那句「放不了」：\n%s", treeDump(t, client, window))
 		}
 	})
@@ -101,11 +101,11 @@ func TestLinuxFileAssociations(t *testing.T) {
 		if err := os.WriteFile(flac, b, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		handOverFile(t, flac)
+		handOverFile(t, client, window, flac)
 		// ⚠️ **判据是「正在放」那句 toast**：收下并起播成功时
 		// `handleOpenFile` 写它（`internal/ui/openfile.go`）。它是一条
 		// toast——主窗口上画。
-		if !waitForTree(t, client, window, "正在放", 20*time.Second) {
+		if !waitForTreeNudged(t, client, window, "正在放", 20*time.Second) {
 			t.Fatalf("双击 .flac 之后窗口里没有「正在放」：\n%s", treeDump(t, client, window))
 		}
 	})

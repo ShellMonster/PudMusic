@@ -307,7 +307,19 @@ func seedMutedSettings(t *testing.T, dataDir string) {
 // `App.Name()`（"biugo-e2e"）派生，和数据目录无关；但第二进程起的时候
 // 会读 `settings.json`——给它同一份数据目录才是「同一个应用起第二个
 // 进程」的形状（`linux_lifecycle_test.go` 那一档同一个做法）。
-func handOverFile(t *testing.T, path string) {
+//
+// ⚠️ **递完之后要等的话请用 `waitForTreeNudged` 而不是 `waitForTree`**：
+// 那句提示写了状态之后调的是 `s.repaint`（`wakeHandle.invalidateNow` →
+// `Services.Invalidate` → 平台 surface 的「要一帧」）。而**虚拟显示下窗
+// 口没有焦点**（Xvfb 里没有窗口管理器，macOS 上 E2E 的窗口也不抢焦点）
+// ——GTK 的 frame clock 和 macOS 的 display 通知在这种窗口上不会因为一
+// 次 queue_draw 就自己跑起来，那句提示就一直停在「状态写了、画面没画」
+// 上，症状和冷启动那一档一模一样。给它一个落在窗口里的 pointerMove：
+// 合成器收到输入会把这一帧排出来，下一帧 toast 就在树上。（这条是 CI
+// 上 TestLinuxFileAssociations 挂了整整 20 秒超时抓出来的：日志里
+// `handleOpenFile` 和 `addToastWith` 都跑了，而 `viewToasts` 一次都没
+// 画——差的只是「画一帧」。）
+func handOverFile(t *testing.T, client *automationClient, window int, path string) {
 	t.Helper()
 	if appHandle.binary == "" {
 		t.Fatal("startRealApp 没记下二进制路径（appHandle.binary 是空的）：handOverFile 要在 startRealApp 之后调")
@@ -321,6 +333,93 @@ func handOverFile(t *testing.T, path string) {
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("第二个实例转交 %s 没有自己退出：%v\nstderr:\n%s", path, err, stderr.String())
 	}
+}
+
+// waitForTreeNudged 同 `waitForTree`，但**每查一次之前先推一帧**，而且
+// 按**包含**匹配（不是全等）。
+//
+// ⚠️ **为什么 hand-off 那一组要用它而不是 `waitForTree`**：转交过来的
+// 文件写在 `fileNotice` / `toasts` 状态里之后靠 `s.repaint` 要一帧——
+// 而没焦点的窗口（Xvfb、真机 runner 上 unfocused 的 E2E 窗口）那一次
+// 「要一帧」常常不会真的画（见 `handOverFile` 顶上那段）。**只推一次**
+// 也不稳：第一实例的 `postMain` 是异步的，`cmd.Run()` 返回时那句提示
+// 可能还没写进状态——那一帧里照样没有。所以查一次推一次：总有一帧是
+// 「状态已写 + 画出来」同时成立的那帧。
+//
+// ⚠️ **为什么是「包含」而不是全等**：那句提示的完整文案是
+// 「『老歌.wma』这个格式我们放不了（支持 …）」「正在放《歌.flac》」——
+// **带文件名**，所以「这个格式我们放不了」「正在放」在全等下永远对不上。
+// （`waitForTree` 的全等是给「播放列表」「布丁音乐」那种完整标签用的。）
+func waitForTreeNudged(t *testing.T, client *automationClient, window int, label string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		nudgeFrame(t, client, window)
+		if treeHasText(t, client, window, label) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// nudgeFrame 给窗口一个落在正中间的 pointerMove——把「该画一帧」从
+// 「标记过」推成「真的画」。见 `handOverFile` 顶上那段。
+func nudgeFrame(t *testing.T, client *automationClient, window int) {
+	t.Helper()
+	var windows struct {
+		Windows []struct {
+			ID     int    `json:"id"`
+			Kind   string `json:"kind"`
+			Bounds struct {
+				X      int `json:"x"`
+				Y      int `json:"y"`
+				Width  int `json:"width"`
+				Height int `json:"height"`
+			} `json:"bounds"`
+		} `json:"windows"`
+	}
+	x, y := 400.0, 300.0
+	if err := automationCall(client, 900, "windows", nil, &windows); err == nil {
+		for _, w := range windows.Windows {
+			if w.ID == window {
+				x = float64(w.Bounds.Width) / 2
+				y = float64(w.Bounds.Height) / 2
+			}
+		}
+	}
+	// pointerMove 落在窗口正中：它不点任何东西（PassThrough 的 overlay
+	// 不吃它），只是让窗口的输入管线醒一次——醒的那一下会带一帧。
+	_ = automationCall(client, 901, "input", map[string]any{
+		"window": window,
+		"events": []map[string]any{{"type": "pointerMove", "x": x, "y": y}},
+	}, nil)
+}
+
+// treeHasText 报窗口的元素树里有没有**包含**那一段文本的节点。
+//
+// ⚠️ **和 `treeHasLabel` 的全等不同**：提示类文案带文件名/歌名
+// （「正在放《歌.flac》」「『老歌.wma』这个格式我们放不了」），断言写的是
+// 那句里不变的部分——所以这一份按 `strings.Contains` 判。
+func treeHasText(t *testing.T, client *automationClient, window int, text string) bool {
+	t.Helper()
+	var tree struct {
+		Nodes []struct {
+			Key   any    `json:"key"`
+			Label string `json:"label"`
+		} `json:"nodes"`
+	}
+	if err := automationCall(client, 202, "tree", map[string]any{"window": window}, &tree); err != nil {
+		return false
+	}
+	for _, n := range tree.Nodes {
+		if strings.Contains(n.Label, text) {
+			return true
+		}
+	}
+	return false
 }
 
 // seedFakeSession 往 E2E 那份数据目录里写一份**假** `session.json`。

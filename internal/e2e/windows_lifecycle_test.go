@@ -109,7 +109,11 @@ func TestWindowsLifecycle(t *testing.T) {
 		// handoff 到了」的判据：它从 `deliverArgs` → `OnOpenFile` →
 		// `handleOpenFile` 那条路走，任何一环断了这句 toast 都不会出现。
 		window := firstContentWindow(t, client)
-		if !waitForTree(t, client, window, "正在放", 20*time.Second) {
+		// ⚠️ **用 `waitForTreeNudged` 等**：那句 toast 的寿命只有五秒，
+		// 而没焦点的窗口（真机 runner 上的 E2E 窗口常是 unfocused）不会
+		// 因为 `Services.Invalidate` 就自己画——每一次查询之前先推一帧，
+		// 那句 toast 才有机会画进树里（见 `handOverFile` 顶上那一段）。
+		if !waitForTreeNudged(t, client, window, "正在放", 20*time.Second) {
 			t.Fatalf("第二个实例递过来的 .flac 没有放起来：\n%s",
 				treeDump(t, client, window))
 		}

@@ -78,13 +78,13 @@ func TestWindowsFileAssociations(t *testing.T) {
 		if err := os.WriteFile(m4a, b, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		handOverFile(t, m4a)
+		handOverFile(t, client, window, m4a)
 		// ⚠️ **判据是「正在放」那句 toast**：收下并起播成功时
 		// `handleOpenFile` 写它。这一句出现的意思是：
 		// `fileArgs` 没投它（m4a 不在 mygo.json）→ `handleLaunchArgs`
 		// 认下来 → `checkOpenFile` 走 `IsAssociatedAudioExt`（Windows
 		// 上有 m4a）→ `EnqueueAndPlayNow` 起播成功。
-		if !waitForTree(t, client, window, "正在放", 30*time.Second) {
+		if !waitForTreeNudged(t, client, window, "正在放", 30*time.Second) {
 			t.Fatalf("双击 .m4a 之后窗口里没有「正在放」：\n%s", treeDump(t, client, window))
 		}
 	})
@@ -107,8 +107,8 @@ func TestWindowsFileAssociations(t *testing.T) {
 		if err := os.WriteFile(flac, b, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		handOverFile(t, flac)
-		if !waitForTree(t, client, window, "正在放", 20*time.Second) {
+		handOverFile(t, client, window, flac)
+		if !waitForTreeNudged(t, client, window, "正在放", 20*time.Second) {
 			t.Fatalf("双击 .flac 之后窗口里没有「正在放」：\n%s", treeDump(t, client, window))
 		}
 	})
@@ -121,8 +121,8 @@ func TestWindowsFileAssociations(t *testing.T) {
 		if err := os.WriteFile(wma, []byte("ASF fake"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		handOverFile(t, wma)
-		if !waitForTree(t, client, window, "这个格式我们放不了", 20*time.Second) {
+		handOverFile(t, client, window, wma)
+		if !waitForTreeNudged(t, client, window, "这个格式我们放不了", 20*time.Second) {
 			t.Fatalf("双击 .wma 之后窗口里没有那句「放不了」：\n%s", treeDump(t, client, window))
 		}
 	})
