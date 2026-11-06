@@ -106,6 +106,7 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 			Index:     strconv.Itoa(index),
 			Title:     m.Title,
 			Owner:     m.Owner,
+			OwnerTip:  ownerTipForRow(rows, i, m),
 			Plays:     rows.countText.At(i, m.View, playCountText),
 			Duration:  rows.durText.At(i, m.Duration, clockText),
 			Album:     sp.colText(s, m),
@@ -142,13 +143,38 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 	})
 }
 
+// ownerTipForRow 是 UP 名那一枚的提示：**真接上了 `OpenOwner` 才有**——它同时是
+// 「这个名字是链接」的开关（`pud.Track.OwnerTip` 非空才画链接）。没接的页面
+// （统计页那份没有 `OpenOwner` 的接线）返回空，名字画成普通字，不装假链接。
+//
+// ⚠️ **还要那个人真的给得出**：B 站有的接口只给名字不给编号（`ArtistMid <= 0`），
+// 那种情况下点了也到不了他的空间——给提示就是撒谎。
+func ownerTipForRow(rows *pagedRows, i int, m libraryRow) string {
+	if rows.acts.OpenOwner == nil || m.Item.ArtistMid <= 0 {
+		return ""
+	}
+	return rows.ownerTip.At(i, m.Owner, list.OwnerTipText)
+}
+
 // viewDayHead 是历史记录的组头（原型 `.day-head`：上 32 下 8、左右 12，宋体 20 + 12 号等宽
 // 「N 首」，基线对齐、缝 12）。第一组紧贴表头之上的工具条，上边距照原型也是 32。
 func (s *Shell) viewDayHead(c *ui.Context, label string, n int, _ bool) {
-	p := tok.Of(c.Theme())
+	t := c.Theme()
+	p := tok.Of(t)
+	// 🔴 **底色和字色都要显式钉死**（不能继承）：这一行画在列表**行包装**的
+	// 内容里，而选中组里第一首时框架给那个包装铺 `Background(Accent) +
+	// TextColor(AccentText)`（`mygo/ui/list.go` 的 `w.Selected(on)`）。
+	// `SelectedRow` 只把底和字色拨回**曲目行那一格**，够不着上面的组头——
+	// 组头不盖回去的话，点第一首「今天」那一整条就变成实心主色底白字，
+	// 跟着选中走（而它属于「这一天」，不属于「这一首」）。
+	//
+	// ⚠️ **留白走 `Padding` 不走 `Margin`**：Margin 是这一行的**外**边——
+	// 行包装的底色会从缝里透出来（选中时就是上下两条主色带）。Padding 在
+	// 底色**里面**，不透明底盖满整条，原型那「上 32 下 8」的留白照常。
 	ui.Row(c).FillWidth().AlignItems(ui.Baseline).Gap(space.Px12).
-		Margin(space.Px32, space.None, space.Px8, space.None).PaddingX(space.Px12).Children(func() {
-		typo.Display(ui.Text(c, label), scale.Font(c, scale.Subhead)).SingleLine()
+		Background(t.Background).TextColor(p.Text).
+		Padding(space.Px32, space.Px12, space.Px8, space.Px12).Children(func() {
+		typo.Display(ui.Text(c, label), scale.Font(c, scale.Subhead)).TextColor(p.Text).SingleLine()
 		typo.Mono(ui.Text(c, strconv.Itoa(n)+" 首")).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(p.Text3).SingleLine()
 	})

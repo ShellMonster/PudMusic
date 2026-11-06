@@ -50,6 +50,52 @@ func TestTheHistoryIsGroupedByDay(t *testing.T) {
 	}
 }
 
+// TestTheDayHeadDoesNotWearTheSelectedRowsColor 钉住「点组里第一首时组头不变色」。
+//
+// 组头（「今天」「N 首」）属于**这一天**这一组，不属于「这一首」：第一首被选中时
+// 框架给那一行铺的 AccentText 白字**不许漏到组头上**——漏了的话「今天」两个字
+// 会在页面上变成选中字色（跟着歌曲选中走），而它和选中一点关系都没有。
+//
+// 判据是**组头那一块矩形里的像素**：选中第一首之后，那一块里不许出现选中行的
+// 字色（`AccentText`）和选中行的底色。只断「组头还在」断不出这条——字还在，
+// 只是颜色错了。
+func TestTheDayHeadDoesNotWearTheSelectedRowsColor(t *testing.T) {
+	f := newLibFake(t).withHistory(1, 754, 2700, "甲", "乙")
+	tt, _ := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把内容拉回来", func() bool { return tt.HasText("今天") })
+	tt.Frame()
+
+	head, ok := tt.Find("今天")
+	if !ok {
+		t.Fatalf("组头没画出来，文字有 %q", tt.Texts())
+	}
+	if err := tt.Click("甲"); err != nil {
+		t.Fatalf("点不到第一首：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Frame()
+
+	img := tt.Image()
+	// 🔴 **只数主色「红」像素**：选中字色是白（`AccentText` = 灰阶，组头自己的
+	// 正文 / 底也是灰阶，相减判不出来）；选中底色是主色红（R 明显 > G/B）。
+	// 判据是「组头里出现主色像素」——那一块本该全是中性灰。
+	red := 0
+	for y := int(head.Y); y < int(head.Y+head.H); y++ {
+		for x := int(head.X); x < int(head.X+head.W); x++ {
+			c := img.RGBAAt(x, y)
+			if int(c.R)-int(c.B) > 30 && int(c.R)-int(c.G) > 20 {
+				red++
+			}
+		}
+	}
+	if red != 0 {
+		t.Errorf("选中第一首后组头里有 %d 个主色像素——组头跟着选中走了", red)
+	}
+	// 守住判据本身：组头上确实画了字（不然上面那一圈是恒绿）。
+	if !tt.HasText("今天") {
+		t.Fatalf("断言跑完组头不见了，文字有 %q", tt.Texts())
+	}
+}
+
 // TestTheDateRangePopoverListsThePresets 钉住日期范围弹层：按钮上写「全部时间」，点开后是
 // 原型的五个预设加开始 / 结束两个输入框。
 func TestTheDateRangePopoverListsThePresets(t *testing.T) {
