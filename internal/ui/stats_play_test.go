@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	mygoui "github.com/egoist/mygo/ui"
@@ -151,5 +152,39 @@ func TestTheStatsArtistMinutesStayClearOfTheScrollbar(t *testing.T) {
 	if got, limit := r.X+r.W, edge-scrollbar.HotZone; got > limit {
 		t.Errorf("分钟数右缘 x=%.1f，压在滚动条带里（容器右缘 %.1f，热区 %d）——"+
 			"指针一悬停它就看不见", got, edge, scrollbar.HotZone)
+	}
+}
+
+// TestTheStatsLoopRowLightsUpWhileItsSongPlays 钉住「点了播放之后那一行要像
+// 别的列表一样亮起来」：行底下没有 `app.Item`，正在放的判据是把聚合键
+// 拆回一项再比 `Identity`——不标的话按了播放那一行什么变化都没有，
+// 像没按上。
+//
+// ⚠️ **判据是无障碍标签**（`hover.PlayingLabel`：「<歌名> 正在播放」）：
+// eq-bars 那几个像素读屏软件看不见，那一行能拿的标记就是它。
+func TestTheStatsLoopRowLightsUpWhileItsSongPlays(t *testing.T) {
+	b, tt := statsPlayShell(t, statsPlaySeed(t))
+	statsRowPlay(t, tt, "本地的一首")
+	waitFor(t, "本地那首放起来", func() bool { return b.s.app.Snapshot().Playing })
+	// ⚠️ **先把指针挪开**：悬停时序号位置是「播放 X」那枚键而不是
+	// eq-bars——eq-bars（和它的「正在播放」标签）只在**不悬停**时画。
+	tt.Move(2, 2)
+	tt.Frame()
+	waitFrames(t, tt, "那一行亮起来", func() bool {
+		return tt.HasText("本地的一首 " + hover.PlayingMark)
+	})
+}
+
+// TestTheBrokenStatsLoopRowNeverLooksPlaying 钉住另一半：认不出身份的那一行
+// **永远不该**被标成正在放——拆不出来就不是「在放」，亮起它等于说「正在放
+// 的是它」。
+func TestTheBrokenStatsLoopRowNeverLooksPlaying(t *testing.T) {
+	b, tt := statsPlayShell(t, statsPlaySeed(t))
+	statsRowPlay(t, tt, "本地的一首")
+	waitFor(t, "本地那首放起来", func() bool { return b.s.app.Snapshot().Playing })
+	tt.Move(2, 2)
+	tt.Frame()
+	if tt.HasText("坏掉的那条 " + hover.PlayingMark) {
+		t.Error("认不出身份的那一行被标成了正在放")
 	}
 }
