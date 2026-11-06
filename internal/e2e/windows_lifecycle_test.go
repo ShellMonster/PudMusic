@@ -1,0 +1,149 @@
+//go:build e2e
+
+package e2e
+
+// Windows 上的生命周期回归：启动、单实例、退出。
+//
+// # 为什么要有这一族
+//
+// Linux 那一族（`linux_lifecycle_test.go` 的 `TestLinuxLifecycle`）验的是
+// 「起得来 / 挡得住第二个 / 退得干净」——而 Windows 上有**自己的一份坑**：
+//
+//   - **退出入口不一样**：Windows 的托盘是通知区图标（NotifyIcon），菜单
+//     由系统画；窗口上**也没有**菜单栏（`installMenu` 只在 macOS 装）。
+//     所以「退出程序」那一条同样要走 E2E 钩子（`automation_e2e.go` 的
+//     `serveTrayHook` → `E2EActivateTrayItem`），和 Linux 一个道理。
+//   - **第二个实例**：Windows 上没有 Apple Event，第二个进程的命令行
+//     全靠单实例锁转交（`internal/platform/single_instance.go`）——
+//     这一条和 Linux 形状一样，但走的那把锁是 Windows 那一半
+//     （`single_instance_windows.go`）。
+//
+// ⚠️ **验不到的那一半**：「资源管理器真的把 `.m4a` 关联给我们」要装过
+// NSIS 安装包才成立——而那一半在 `windows_fileassoc_test.go` 里也只验到
+// 「命令行递进来应用放」。这里验的是**进程进出**：起得来、第二个退、
+// 点了退出真退。
+//
+// # 怎么跑
+//
+//	BIU_RUN_MYGO_E2E=1 go test -tags e2e ./internal/e2e/ -run TestWindowsLifecycle
+//
+// ⚠️ **要一个真窗口**：它开一个窗口并驱动它，所以本机得能开窗口。
+
+import (
+	"bytes"
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"testing"
+	"time"
+)
+
+// TestWindowsLifecycle 钉住 Windows 上「起得来 / 挡得住第二个 / 退得干净」。
+func TestWindowsLifecycle(t *testing.T) {
+	if os.Getenv("BIU_RUN_MYGO_E2E") != "1" {
+		t.Skip("设置 BIU_RUN_MYGO_E2E=1 才运行真窗口 E2E")
+	}
+	if runtime.GOOS != "windows" {
+		t.Skip("这一族只在 Windows 上跑：验的是 Windows 的启动/单实例/退出")
+	}
+
+	client, stop := startRealApp(t)
+	defer stop()
+
+	// ⚠️ **素材目录挂在父测试上**：Windows 不许删一个**正被打开**的文件，
+	// 而子测试末尾 app 还在播（`stop` 是父测试的 `defer`，要等全部子测试
+	// 跑完才杀进程）。`TempDir` 挂在父测试上之后 cleanup 在 `stop` 收掉
+	// 进程、内核放开句柄**之后**才跑；再配子测试末尾的 `playback.stop`
+	//（`App.ClearTrack` 当场放掉句柄），素材在退出前就已经不被占用了。
+	tmp := t.TempDir()
+
+	t.Run("内容窗口起得来", func(t *testing.T) {
+		window := firstContentWindow(t, client)
+		// 「布丁音乐」那一栏在每个路由页的顶栏上。
+		if !waitForTree(t, client, window, "布丁音乐", 20*time.Second) {
+			t.Fatalf("窗口里没有画出界面：\n%s", treeDump(t, client, window))
+		}
+	})
+
+	t.Run("第二个实例递命令行后自己退出", func(t *testing.T) {
+		// ⚠️ **第二实例必须带着一个文件参数起**：不带参数的转交只验了
+		// 「第二个进程自己退了」，**没验命令行真的到了第一实例**——
+		// 那半截断了的话（`OnSecondInstance` 没把 args 交给
+		// `handleLaunchArgs` / `deliverArgs`），症状是「双击一个文件，
+		// 应用亮了一下但什么都没放」，而这一族照绿（CodeAnt 在
+		// PR #773 上点的就是这一条）。
+		//
+		// 用一个 **.flac**：它在 `packageFileExtensions` 里，框架的
+		// `deliverArgs` 会把它投给 `OnOpenFile`，第一实例窗口里该出现
+		// 「正在放」。用真素材（`EnqueueAndPlayNow` 真的会解它）。
+		src := filepath.Join(repoRoot(t),
+			"internal", "service", "audio", "flacdec", "testdata", "stereo16.flac")
+		flac := filepath.Join(tmp, "递过去.flac")
+		b, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatalf("读不到测试素材 %s：%v", src, err)
+		}
+		if err := os.WriteFile(flac, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		binary := appHandle.binary
+		if binary == "" {
+			t.Fatal("startRealApp 没记下二进制路径（appHandle.binary 是空的）")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, binary, flac)
+		cmd.Env = append(os.Environ(), "BIU_E2E_DATA_DIR="+appHandle.dataDir)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("第二个实例没有自己退出：%v\nstderr:\n%s", err, stderr.String())
+		}
+		// 第一个实例还活着。
+		var windows struct {
+			Windows []struct {
+				ID   int    `json:"id"`
+				Kind string `json:"kind"`
+			} `json:"windows"`
+		}
+		if err := automationCall(client, 300, "windows", nil, &windows); err != nil {
+			t.Fatalf("第二个实例退出之后第一个实例不应跟着退：%v", err)
+		}
+		// ⚠️ **先断「命令行真进了第一实例的 `handleLaunchArgs`」再断「那句
+		// toast 画出来了」**：`handoff.args` 那条 e2e 探针只反映「回调被调
+		// 到没有」——它不把断点藏在「界面没画」和「handoff 没递到」之间。
+		waitForHandoffArgs(t, flac)
+		// 而那个 `.flac` 真的被第一实例放起来了——这一句才是「命令行
+		// handoff 到了」的判据：它从 `deliverArgs` → `OnOpenFile` →
+		// `handleOpenFile` 那条路走，任何一环断了这句 toast 都不会出现。
+		window := firstContentWindow(t, client)
+		// ⚠️ **用 `waitForTreeNudged` 等**：那句 toast 的寿命只有五秒，
+		// 而没焦点的窗口（真机 runner 上的 E2E 窗口常是 unfocused）不会
+		// 因为 `Services.Invalidate` 就自己画——每一次查询之前先推一帧，
+		// 那句 toast 才有机会画进树里（见 `handOverFile` 顶上那一段）。
+		if !waitForTreeNudged(t, client, window, "正在放", 20*time.Second) {
+			t.Fatalf("第二个实例递过来的 .flac 没有放起来：\n%s",
+				treeDump(t, client, window))
+		}
+		stopPlayback(t)
+	})
+
+	t.Run("托盘菜单的退出项真的让进程退出来", func(t *testing.T) {
+		switch got := trayHookCall(t, "tray.enabled tray.quit"); got {
+		case "enabled":
+		case "missing":
+			t.Fatal("托盘菜单里没有 tray.quit：托盘建不出来或菜单里没有退出项")
+		default:
+			t.Fatalf("tray.quit 是 %q（want enabled）：退出项该是能点的", got)
+		}
+		if got := trayHookCall(t, "tray.click tray.quit"); got != "ok" {
+			t.Fatalf("点托盘退出项：%q（want ok）", got)
+		}
+		if !waitForProcessGone(t, client, 20*time.Second) {
+			t.Fatal("点了托盘「退出程序」之后进程还活着（automation socket 还在应答）")
+		}
+	})
+}

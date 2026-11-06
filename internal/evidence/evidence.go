@@ -2213,6 +2213,9 @@ var Items = []Item{
 			"TestOnlyVideoAndAudioArePlayable",
 			"TestAnUnplayableFormatIsNamedAsSuch",
 			"TestWMAIsListedButNotPlayable",
+			// Linux 上没有 AAC 解码器：`.m4a` / `.aac` 在那台机器上必须说
+			// 「放不了」，而不是「可放」（Linux 最小可发行那一节）。
+			"TestAACIsPlayableOnlyWhereThereIsADecoder",
 			// 本地音乐这一边的**另一半**：上面那几条钉的是「表上写着的和
 			// 界面上说的一致」，这一条钉的是「表上写着可放的**真的放得出声**」。
 			//
@@ -4522,7 +4525,17 @@ var Items = []Item{
 			"TestAudioExtOfTakesTheExtensionWithoutTheDot",
 			// `mygo.json` 与代码里那一份**是同一份**，且扩展名不带点
 			//（带点会被 MyGo 的配置校验器拒绝，打包在读配置那一步就失败）。
-			"TestMygoJSONDeclaresTheSameExtensions",
+			"TestMygoJSONDeclaresTheSharedExtensions",
+			"TestMygoJSONKeepsAACOutOfTheLinuxDesktopEntry",
+			"TestMacOSInfoPlistKeepsTheFullAssociation",
+			"TestWindowsInstallerIncludeRegistersAAC",
+			// 安装宏是结构化的（断言落在 customInstall 块里，不靠全文
+			// Contains），卸载对称删、而且两个宏末尾都重发一次
+			// SHChangeNotify（框架那一次发在 customInstall 之前）。
+			"TestWindowsInstallerIncludeUnregistersAAC",
+			"TestWindowsInstallerIncludeNotifiesAfterWriting",
+			"TestLinuxDropsAACFromTheAssociation",
+			"TestTheOtherPlatformsKeepAAC",
 			"TestMygoJSONExtensionsCarryNoDot",
 			"TestMygoJSONStillDeclaresTheURLScheme",
 			// 框架按什么过滤命令行里的文件（照抄框架那三行）。
@@ -4558,6 +4571,7 @@ var Items = []Item{
 			// **我们自己在命令行这一侧认下来**，而用户看得见。
 			"TestTheFrameworkDropsThosePathsBeforeOnOpenFile",
 			"TestTheLaunchArgsPickUpWhatTheFrameworkDrops",
+			"TestTheLaunchArgsPickUpAACOnEveryPlatform",
 			"TestTheCommandLineRejectionsAreVisible",
 			"TestTheSecondInstanceArgsAreCheckedForTheOnesTheFrameworkDrops",
 			// 框架会交的那些我们不重复处理（重复了队列里两份同一首歌）。

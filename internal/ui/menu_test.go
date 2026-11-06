@@ -55,7 +55,7 @@ func TestTheMenuHasSevenColumns(t *testing.T) {
 // 拿不到 bundle 信息时**回落到可执行文件的名字**——
 //
 //   - `mygo build` 打出来的包：「布丁音乐」 ✓
-//   - **源码直接 `go build` 出来的**：「pudmusic」/「pudmusic-e2e」 ✗
+//   - **源码直接 `go build` 出来的**：「pudmusic」/「biugo-e2e」 ✗
 //
 // ⇒ 而**界面上和窗口标题一律是「布丁音乐」**（`appName`）。菜单栏第一栏写着
 // 另一个名字 ⇒ **同一个应用两个名字**，而 macOS 上左上角第一个菜单**永远**是

@@ -51,10 +51,10 @@ import (
 // ⚠️ **而 `App.Name()` 在「源码直接编出来的二进制」上不是「布丁音乐」**：
 // 框架的 `Name()`（`mygo/app.go:316`）先看 `packageInfo()`（那要**bundle**或
 // `mygo build` 注入的 ldflags），拿不到就**回落到可执行文件的名字**——
-// 而 E2E 编出来的那个叫 `pudmusic-e2e`。
+// 而 E2E 编出来的那个叫 `biugo-e2e`。
 //
 // ⇒ 所以这里**从窗口标题反推**：真机上第一栏写着「布丁音乐」，而 E2E 里写着
-// 「pudmusic-e2e」——**两个都要能用**，所以不写死，取窗口标题。
+// 「biugo-e2e」——**两个都要能用**，所以不写死，取窗口标题。
 
 // TestTheApplicationMenu 断**应用菜单在真窗口上装上了，而且点了真的做事**。
 //
@@ -183,7 +183,13 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 		cancel()
 		t.Fatalf("创建自动化 socket：%v", err)
 	}
-	binary := filepath.Join(socketDir, "pudmusic-e2e")
+	// ⚠️ **二进制名要跨平台**：Windows 上 `exec.Command` 只认 `.exe` 结尾的
+	// 文件（「executable file not found in %PATH%」），macOS / Linux 上有没有
+	// 后缀都行。所以名字里按 GOOS 拼后缀，两个平台跑同一份代码。
+	binary := filepath.Join(socketDir, "biugo-e2e")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+	}
 	// ⚠️ **先把静音钉上再启动**：`settings_mount` 读的是启动那一刻的数据
 	// 目录——进程起来之后再写就来不及了。没有它的话 E2E 里的 FLAC 起播
 	// 那一下真的会响（`drawer_nav_test.go` 的 `startRealAppWithArgs`），
@@ -201,8 +207,16 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 	// **一件都不投**给 `OnOpenFile`（`mygo/deeplink.go:99`），而 `handleLaunchArgs`
 	// 又按「框架会交的我们不碰」把它跳过（`internal/ui/openfile.go`），症状是
 	// 「命令行给了文件、起来却什么都没放」。注进去之后，框架那一半照常投。
+	//
+	// ⚠️ **注的是「这一份」而不是全量**：`mygo.json` 的 `fileAssociations`
+	// 现在只留**全平台都放得起**的格式（Linux 上没有 AAC 解码器，桌面
+	// 环境不能登记 m4a/aac）；macOS / Windows 各自的 AAC 关联由
+	// `macos.infoPlist` 和 `windows.installerInclude` 补，不走这条
+	// ldflags——所以这里照抄 `fileAssociations` 那份，而不是
+	// `platform.AssociatedAudioExts`（那份在 darwin/windows 上有 m4a/aac，
+	// 注进去的话 E2E 里「双击一个 .m4a 框架投不投」和真机对不上）。
 	build := exec.Command("go", "build", "-tags", "e2e",
-		"-ldflags", "-X github.com/egoist/mygo.packageFileExtensions=mp3,flac,wav,m4a,aac,ogg,aiff,aif,aifc",
+		"-ldflags", "-X github.com/egoist/mygo.packageFileExtensions=mp3,flac,wav,ogg,aiff,aif,aifc",
 		"-o", binary, ".")
 	build.Dir = repoRoot(t)
 	build.Stdout = &buildOut
@@ -211,6 +225,15 @@ func startRealAppWithArgs(t *testing.T, seedSession bool, args ...string) (*auto
 		cancel()
 		os.RemoveAll(socketDir)
 		t.Fatalf("构建真应用（带 e2e 标签）：%v\nstdout:\n%s\nstderr:\n%s", err, buildOut.String(), buildErr.String())
+	}
+	// ⚠️ **先断「编出来的东西在、是文件」再启动**：`exec.Cmd.Start` 报
+	// 「executable file not found」的时候分不清是「根本没编出来」还是
+	// 「名字拼错了」（Windows 上少 `.exe` 就是那个症状）。把「文件在」断
+	// 在这一句，挂掉的时候知道是哪一半坏的。
+	if info, err := os.Stat(binary); err != nil || !info.Mode().IsRegular() {
+		cancel()
+		os.RemoveAll(socketDir)
+		t.Fatalf("真应用二进制不在 %s（stat err=%v）：build 没产出到预期位置", binary, err)
 	}
 
 	cmd := exec.CommandContext(ctx, binary, args...)
@@ -269,6 +292,173 @@ func seedMutedSettings(t *testing.T, dataDir string) {
 	}
 }
 
+// handOverFile 模拟「应用已经在跑的时候，系统又起了一个进程把一个文件
+// 递给它」：起第二个进程（同一份二进制、同一份数据目录），它抢不到单
+// 实例锁，把命令行转交给第一个实例之后自己退出——第一个实例里的
+// `OnSecondInstance` → `handleLaunchArgs` 接住那个路径。
+//
+// ⚠️ **为什么文件关联那一族走这条路而不是冷启动参数**：冷启动那一段
+// `handleLaunchArgs` 跑在应用 ready、**窗口还没建出来**的时候——那句
+// 提示的寿命是 5 秒（`fileNoticeLifetime`），而虚拟显示下窗口建出来、
+// 第一帧画出来常常拖过那五秒，树里就永远查不到那句话。而**窗口已经
+// 在的时候**转交，提示一定画进帧里。
+//
+// ⚠️ **dataDir 必须照 `appHandle.dataDir` 那一份**：锁 socket 按
+// `App.Name()`（"biugo-e2e"）派生，和数据目录无关；但第二进程起的时候
+// 会读 `settings.json`——给它同一份数据目录才是「同一个应用起第二个
+// 进程」的形状（`linux_lifecycle_test.go` 那一档同一个做法）。
+//
+// ⚠️ **递完之后要等的话请用 `waitForTreeNudged` 而不是 `waitForTree`**：
+// 那句提示写了状态之后调的是 `s.repaint`（`wakeHandle.invalidateNow` →
+// `Services.Invalidate` → 平台 surface 的「要一帧」）。而**虚拟显示下窗
+// 口没有焦点**（Xvfb 里没有窗口管理器，macOS 上 E2E 的窗口也不抢焦点）
+// ——GTK 的 frame clock 和 macOS 的 display 通知在这种窗口上不会因为一
+// 次 queue_draw 就自己跑起来，那句提示就一直停在「状态写了、画面没画」
+// 上，症状和冷启动那一档一模一样。给它一个落在窗口里的 pointerMove：
+// 合成器收到输入会把这一帧排出来，下一帧 toast 就在树上。（这条是 CI
+// 上 TestLinuxFileAssociations 挂了整整 20 秒超时抓出来的：日志里
+// `handleOpenFile` 和 `addToastWith` 都跑了，而 `viewToasts` 一次都没
+// 画——差的只是「画一帧」。）
+func handOverFile(t *testing.T, client *automationClient, window int, path string) {
+	t.Helper()
+	if appHandle.binary == "" {
+		t.Fatal("startRealApp 没记下二进制路径（appHandle.binary 是空的）：handOverFile 要在 startRealApp 之后调")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, appHandle.binary, path)
+	cmd.Env = append(os.Environ(), "BIU_E2E_DATA_DIR="+appHandle.dataDir)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("第二个实例转交 %s 没有自己退出：%v\nstdout:\n%s\nstderr:\n%s",
+			path, err, stdout.String(), stderr.String())
+	}
+}
+
+// waitForHandoffArgs 断言「第二个实例转交过去的命令行**真的进了**第一实例
+// 的 `handleLaunchArgs`」。
+//
+// ⚠️ **这条断的是 handoff 本身，不是界面上画没画出来**：`tree` 里的那句
+// 提示依赖渲染，而这一条问的是第一实例的 e2e 钩子（`automation_e2e.go`
+// 的 `handoff.args`）——它只反映「回调被调到没有」。分不开这两段的时
+// 候，「窗口里没那句话」分不清是 handoff 没递到、还是递到了但 toast /
+// fileNotice 没画出来。
+func waitForHandoffArgs(t *testing.T, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	var last string
+	for {
+		got, ok := trayHookCallOK(t, "handoff.args")
+		if !ok {
+			// 托盘钩子 socket 在 Windows 上可能因为 AF_UNIX 路径长度
+			// 上限起不来——那时这条探针不可得，**只记**，不把它断成
+			// 「handoff 断了」：真正的判据还是下面那句 toast。
+			t.Logf("handoff.args 探针连不上（托盘钩子 socket 不在），跳过分段断言")
+			return
+		}
+		last = got
+		for _, arg := range strings.Fields(got) {
+			if arg == want {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("第二个实例转交的命令行没进第一实例（handoff.args 报 %q，等 %q）："+
+				"转交通道在第一个实例那边就断了", last, want)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// waitForTreeNudged 同 `waitForTree`，但**每查一次之前先推一帧**，而且
+// 按**包含**匹配（不是全等）。
+//
+// ⚠️ **为什么 hand-off 那一组要用它而不是 `waitForTree`**：转交过来的
+// 文件写在 `fileNotice` / `toasts` 状态里之后靠 `s.repaint` 要一帧——
+// 而没焦点的窗口（Xvfb、真机 runner 上 unfocused 的 E2E 窗口）那一次
+// 「要一帧」常常不会真的画（见 `handOverFile` 顶上那段）。**只推一次**
+// 也不稳：第一实例的 `postMain` 是异步的，`cmd.Run()` 返回时那句提示
+// 可能还没写进状态——那一帧里照样没有。所以查一次推一次：总有一帧是
+// 「状态已写 + 画出来」同时成立的那帧。
+//
+// ⚠️ **为什么是「包含」而不是全等**：那句提示的完整文案是
+// 「『老歌.wma』这个格式我们放不了（支持 …）」「正在放《歌.flac》」——
+// **带文件名**，所以「这个格式我们放不了」「正在放」在全等下永远对不上。
+// （`waitForTree` 的全等是给「播放列表」「布丁音乐」那种完整标签用的。）
+func waitForTreeNudged(t *testing.T, client *automationClient, window int, label string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		nudgeFrame(t, client, window)
+		if treeHasText(t, client, window, label) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// nudgeFrame 给窗口一个落在正中间的 pointerMove——把「该画一帧」从
+// 「标记过」推成「真的画」。见 `handOverFile` 顶上那段。
+func nudgeFrame(t *testing.T, client *automationClient, window int) {
+	t.Helper()
+	var windows struct {
+		Windows []struct {
+			ID     int    `json:"id"`
+			Kind   string `json:"kind"`
+			Bounds struct {
+				X      int `json:"x"`
+				Y      int `json:"y"`
+				Width  int `json:"width"`
+				Height int `json:"height"`
+			} `json:"bounds"`
+		} `json:"windows"`
+	}
+	x, y := 400.0, 300.0
+	if err := automationCall(client, 900, "windows", nil, &windows); err == nil {
+		for _, w := range windows.Windows {
+			if w.ID == window {
+				x = float64(w.Bounds.Width) / 2
+				y = float64(w.Bounds.Height) / 2
+			}
+		}
+	}
+	// pointerMove 落在窗口正中：它不点任何东西（PassThrough 的 overlay
+	// 不吃它），只是让窗口的输入管线醒一次——醒的那一下会带一帧。
+	_ = automationCall(client, 901, "input", map[string]any{
+		"window": window,
+		"events": []map[string]any{{"type": "pointerMove", "x": x, "y": y}},
+	}, nil)
+}
+
+// treeHasText 报窗口的元素树里有没有**包含**那一段文本的节点。
+//
+// ⚠️ **和 `treeHasLabel` 的全等不同**：提示类文案带文件名/歌名
+// （「正在放《歌.flac》」「『老歌.wma』这个格式我们放不了」），断言写的是
+// 那句里不变的部分——所以这一份按 `strings.Contains` 判。
+func treeHasText(t *testing.T, client *automationClient, window int, text string) bool {
+	t.Helper()
+	var tree struct {
+		Nodes []struct {
+			Key   any    `json:"key"`
+			Label string `json:"label"`
+		} `json:"nodes"`
+	}
+	if err := automationCall(client, 202, "tree", map[string]any{"window": window}, &tree); err != nil {
+		return false
+	}
+	for _, n := range tree.Nodes {
+		if strings.Contains(n.Label, text) {
+			return true
+		}
+	}
+	return false
+}
+
 // seedFakeSession 往 E2E 那份数据目录里写一份**假** `session.json`。
 //
 // ⚠️ **只让 `fileStore.Load` 当「已登录」**：判据是 `SESSDATA` 在不在
@@ -309,9 +499,9 @@ func seedFakeSession(t *testing.T, dataDir string) {
 // `App.Name()`，而窗口标题用的也是它）——所以从这里就能拿到那一栏的名字，
 // **不用写死「布丁音乐」**。
 //
-// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `pudmusic-e2e`，而框架的
+// ⚠️ **为什么不能写死**：源码直接编出来的那个二进制叫 `biugo-e2e`，而框架的
 // `App.Name()`（`mygo/app.go:316`）在拿不到 bundle 信息时**回落到可执行文件
-// 的名字**——所以 E2E 里第一栏写着的是「pudmusic-e2e」，真机上才是「布丁音乐」。
+// 的名字**——所以 E2E 里第一栏写着的是「biugo-e2e」，真机上才是「布丁音乐」。
 func windowTitle(t *testing.T, client *automationClient, window int) string {
 	t.Helper()
 	var windows struct {

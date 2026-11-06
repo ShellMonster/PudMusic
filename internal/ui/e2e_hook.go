@@ -89,3 +89,58 @@ func E2ETrayItemEnabled(id string) (present, enabled bool) {
 	})
 	return present, enabled
 }
+
+// ---- 第二实例 handoff 探针 ----
+//
+// 「第二个实例转交文件」那条路（`platform.Lock` → framework socket →
+// `acceptSecondInstances` → `OnSecondInstance` → `handleLaunchArgs` →
+// `deliverArgs`）曾经红过一整族 E2E 而**第一实例一个字都没说**——它是
+// 静默断的，断点在第二进程、framework 锁、还是我们这一半，界面上分不出来。
+// 这里留一条只给 e2e 的缝：`handleLaunchArgs` 每被调到一次，就把收到的
+// args 记下来；`handoff.args` 那条 tray-hook 命令把它读出去——测试就能断
+// 「命令行真的进了第一实例的回调」。
+var (
+	e2eHandoffMu   sync.Mutex
+	e2eHandoffArgs []string
+)
+
+// e2eNoteLaunchArgs 把一次 `handleLaunchArgs` 的调用记下来。生产代码里
+// 是 `handleLaunchArgs` 入口的第一行（那条路是「系统交给本应用的命令行」
+// 的最后一站）。
+func e2eNoteLaunchArgs(args []string) {
+	e2eHandoffMu.Lock()
+	e2eHandoffArgs = append([]string(nil), args...)
+	e2eHandoffMu.Unlock()
+}
+
+// E2ELaunchArgs 报最近一次 `handleLaunchArgs` 收到的 args（副本）。
+func E2ELaunchArgs() []string {
+	e2eHandoffMu.Lock()
+	defer e2eHandoffMu.Unlock()
+	return append([]string(nil), e2eHandoffArgs...)
+}
+
+// ---- 播放释放钩子 ----
+//
+// Windows 的 E2E 在子测试末尾要删 `t.TempDir()` 里的素材，而文件此刻正被
+// 播放器句柄占着——Windows 不许删一个打开着的文件（Linux/macOS 允许，所以
+// 这条缝只在 Windows 那一族里用到）。这里给 e2e 一条「把当前这首清掉」
+// 的命令：走 `App.ClearTrack` 那条正常入口（状态摘干净 + `p.Close()`），
+// 文件句柄随之释放，TempDir 才删得掉。
+
+// E2EStopPlayback 在主线程上把正在放的那一首清掉（同 `App.ClearTrack`：
+// 停掉播放、关掉解码器和文件句柄）。没有歌在放时是空操作。
+//
+// ⚠️ **走 `mygo.RunOnMain`**：和托盘点击同一条执行环境——`ClearTrack`
+// 会触发 `wake`/`publishMedia`，而这两件要在主线程上做。
+func E2EStopPlayback() {
+	e2eShellMu.Lock()
+	s := e2eShell
+	e2eShellMu.Unlock()
+	if s == nil || s.app == nil {
+		return
+	}
+	mygo.RunOnMain(func() {
+		s.app.ClearTrack()
+	})
+}

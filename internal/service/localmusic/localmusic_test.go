@@ -254,6 +254,38 @@ func TestWMAIsListedButNotPlayable(t *testing.T) {
 	}
 }
 
+// TestAACIsPlayableOnlyWhereThereIsADecoder 钉住「.m4a / .aac 只在有
+// 系统解码器的平台上说能播」。
+//
+// ⚠️ **Linux 上没有 AAC 解码器**：`extaf`（AudioToolbox）只在 darwin、
+// `mfadec`（Media Foundation）只在 windows——`open_other.go` 在非
+// Windows 上返回 `ErrUnsupported`。Linux 上 `.m4a` 说「能播」的话，
+// 界面上会给一行标「可放」、按下去报「不支持」——那是界面在骗人
+// （PLAN §5.4：「不要含糊过去」）。
+//
+// ⚠️ **它钉的是 `playableExtsForGOOS`**，不是 `Playable`：本测试在
+// macOS 上也要能跑——它钉的是「另一台上那份表长什么样」。
+func TestAACIsPlayableOnlyWhereThereIsADecoder(t *testing.T) {
+	for _, ext := range []string{".m4a", ".aac"} {
+		if playableExtsForGOOS("linux")[ext] {
+			t.Errorf("Linux 上 %q 被说成能播：那台机器上没有 AAC 解码器", ext)
+		}
+		for _, goos := range []string{"darwin", "windows"} {
+			if !playableExtsForGOOS(goos)[ext] {
+				t.Errorf("%s 上 %q 被说成放不了：那台机器上有系统 AAC 解码器", goos, ext)
+			}
+		}
+	}
+	// 其余格式在三个平台上都放得起。
+	for _, ext := range []string{".mp3", ".flac", ".wav", ".ogg", ".aiff", ".aif", ".aifc"} {
+		for _, goos := range []string{"linux", "darwin", "windows"} {
+			if !playableExtsForGOOS(goos)[ext] {
+				t.Errorf("%s 上 %q 被说成放不了：那个格式它放得起", goos, ext)
+			}
+		}
+	}
+}
+
 // TestDurationIsReadFromTheFile 钉住「时长从文件里读出来」。
 //
 // 这一条不能靠造出来的假文件验：时长在容器头里（moov/mvhd、FLAC 的

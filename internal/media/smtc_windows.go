@@ -22,6 +22,7 @@
 package media
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -191,10 +192,28 @@ func newPlatform(Options) (platform, error) {
 //
 // 由 `media.Session.BindWindow` 调（见 media.go），界面层在窗口建出来之后
 // 调一次。**幂等**：绑第二个窗口之前会把上一个的收掉。
-func (p *windowsPlatform) bindWindow(hwnd uintptr) error {
+func (p *windowsPlatform) bindWindow(hwnd uintptr) (err error) {
 	if hwnd == 0 {
 		return errPlatform("窗口句柄是 0")
 	}
+	// ⚠️ **绑定这一段里的 panic 必须降级成「没接上」**，不能穿透上去。
+	// `bindWindow` 跑在 UI 主线程上（`Shell.bindMedia`，`ensureWindow` 在
+	// `mainLoop.drain` 里），一个 panic 沿路没有别的 recover——直接带走
+	// 进程。而真机上 `add_ButtonPressed` 里那次 `Exception 0xc0000005`
+	// 经 `syscall.SyscallN` 就是一次 Go panic：不拦的话，SMTC 挂不上 =
+	// 整个应用起不来（Windows E2E：`TestWindowsFileAssociations` 和
+	// `TestWindowsLifecycle` 都拿不到内容窗口）。拦下来返回 error 之后
+	// `Session.BindWindow` 记一条日志、会话是个哑巴，**界面、播放、退出
+	// 照常**——这正是「初始化失败能继续启动」那一条要求的兜底。
+	defer func() {
+		if r := recover(); r != nil {
+			// 把已经到手的东西收干净，别把一个绑了一半的 SMTC 留在
+			// p.smtc 上（它可能一碰就又崩）。
+			p.unbind()
+			err = errPlatform(fmt.Sprintf("系统媒体会话接上窗口时崩溃（已拦住，会话这一轮是哑巴）：%v", r))
+		}
+	}()
+
 	p.unbind()
 
 	roInitialize()

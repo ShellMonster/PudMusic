@@ -76,7 +76,16 @@ func Lock() bool {
 
 		// 二、别人占着：等它的 socket 建好。
 		if lockIsReady() {
-			// 连上去，把命令行（含 pudmusic://）递过去，返回值必然是 false。
+			// 连上去，把命令行（含 pudmusic://）递过去，然后退出。
+			//
+			// 🔴 **只调一次**：ready 文件已经说主人在了，这一趟 dial 成功的
+			// 话框架会把 args 交过去、返回 false。就算它偶尔返回 true
+			// （第一次拨号撞上 socket 还没建完），这里也**绝不能当成「我是
+			// 第一个」**——`lockExclusive` 已经判过内核锁在别人手上，我们
+			// 起来就只能是第二个。再调一次的话框架已经把它认为陈旧的
+			// socket 删掉、这一轮直接 `Listen` 成功，于是两个应用一起起来
+			// ——而 Windows 上 SMTC 的 `add_ButtonPressed` 会让那个多出来
+			// 的实例在 `bindWindow` 里崩掉。宁可白递一次，也不抢答第一个。
 			mygo.App.RequestSingleInstanceLock()
 			return false
 		}

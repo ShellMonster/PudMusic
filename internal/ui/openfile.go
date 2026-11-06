@@ -335,6 +335,9 @@ func (s *Shell) reportOpenFileFailure(path string, err error) {
 // 真错说话**。所以这一档只对**扩展名像一个音频格式、只是我们放不了**的那些
 // 文件说（`.wma`、`.ape`……），其余的**一个字都不说**。
 func (s *Shell) handleLaunchArgs(args []string, workingDir string) {
+	// e2e 探针：记下「命令行进了第一实例的回调」这一事实（见
+	// `e2e_hook.go` 的 handoff 那一段——不带 e2e 标签时是一句空操作）。
+	e2eNoteLaunchArgs(args)
 	for _, p := range launchFileCandidates(args, workingDir) {
 		s.handleOpenFile(p)
 	}
@@ -474,7 +477,7 @@ func looksLikeHandedOverPath(path string, wasAbsolute bool) bool {
 // `go:linkname` 那条路在这个仓库里不合适），而**照抄错了的后果是「同一
 // 首歌进队列两次」**——那比「少说一句话」更坏。
 func frameworkWouldDeliver(path string) bool {
-	if !platform.IsAssociatedAudioExt(platform.AudioExtOf(path)) {
+	if !platform.IsFrameworkAudioExt(platform.AudioExtOf(path)) {
 		return false
 	}
 	info, err := os.Stat(path)

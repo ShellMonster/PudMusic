@@ -89,7 +89,7 @@ func TestLinuxLifecycle(t *testing.T) {
 		// 回去——它把命令行递给第一个实例之后**自己退出**（`internal/platform`
 		// 的 `Lock` 返回 false 的那一支）。
 		//
-		// ⚠️ **不能拿 `pudmusic-e2e` 那份 fixture 再起**：那一份的数据目录
+		// ⚠️ **不能拿 `biugo-e2e` 那份 fixture 再起**：那一份的数据目录
 		// 是 `startRealApp` 塞在 socketDir 里的，这里照同一份 env 再起一个，
 		// 正是「同一把锁」的场景。
 		// 第二个实例用**同一份已编好的二进制、同一份数据目录**——那才是
@@ -166,6 +166,47 @@ func trayHookCall(t *testing.T, command string) string {
 		t.Fatalf("读 %q 的回答：%v", command, err)
 	}
 	return strings.TrimSpace(line)
+}
+
+// trayHookCallOK 同 `trayHookCall`，但把「连不上/读不到」报成 `ok=false`
+// 而不是 `t.Fatalf`——给「拿不到就跳过」的探针用（`waitForHandoffArgs`）。
+// 在 Windows 上 `.tray` 那条 AF_UNIX socket 可能因为路径长度上限起不来，
+// 探针拿不到不是「handoff 断了」，不该当失败断。
+func trayHookCallOK(t *testing.T, command string) (string, bool) {
+	t.Helper()
+	sock := appHandle.automationSocket + ".tray"
+	conn, err := net.DialTimeout("unix", sock, 5*time.Second)
+	if err != nil {
+		return "", false
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	if _, err := conn.Write([]byte(command + "\n")); err != nil {
+		return "", false
+	}
+	line, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		return "", false
+	}
+	return strings.TrimSpace(line), true
+}
+
+// stopPlayback 让真应用把正在放的那一首**当场清掉**（`App.ClearTrack`），
+// 它持有的文件句柄随之放开。
+//
+// ⚠️ **Windows 必须有这一步**：`t.TempDir()` 里的素材正被播放器打开时，
+// Windows 不许删它（「being used by another process」）。子测试末尾先让
+// 应用把文件放开，cleanup 那一删才落得下去。Linux/macOS 上这句是空操作
+// 的成本（`ClearTrack` 照样跑，只是没人等着删文件）。
+//
+// ⚠️ **socket 起不来时不致命**：`.tray` 那条 AF_UNIX 在 Windows 上有路径
+// 长度上限——起不来的话靠 TempDir 挂在父测试那一层兜底（进程被 `stop`
+// 收掉之后内核自会放句柄）。
+func stopPlayback(t *testing.T) {
+	t.Helper()
+	if got, ok := trayHookCallOK(t, "playback.stop"); ok && got != "ok" {
+		t.Logf("playback.stop 回了 %q（want ok）", got)
+	}
 }
 
 // waitForProcessGone 等 automation socket **不再应答**——进程退出去之后

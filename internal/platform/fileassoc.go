@@ -40,15 +40,22 @@ package platform
 
 import (
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 )
 
-// AssociatedAudioExts 是本应用向系统登记的音频扩展名（**不带点**）。
+// runtimeGOOS 是构建目标平台。**可替换**：测试要把「另一台上那份长什么样」
+// 钉住——比如 macOS 上跑测试却要断「Linux 那份里没有 m4a」。
+var runtimeGOOS = runtime.GOOS
+
+// associatedAudioExtsAll 是**有解码器的全部**扩展名（**不带点**）。
 //
-// ⚠️ **这一份是「系统交给我们的文件」的入口白名单**，
-// 和 `internal/service/localmusic.Extensions`（扫描白名单）**不是同一份**：
-// 那一份里有 `.wma`，而我们放不了它（见包头那一节）。
+// ⚠️ **这一份是「全部平台合起来放得起的」**，而**不是某一平台上登记的**：
+// 登记的那一份在它之上还要按 GOOS 裁（见 `AssociatedAudioExts`）——Linux
+// 上没有 AAC 解码器（`internal/service/audio/mfadec` 在非 Windows 上
+// 返回 `ErrUnsupported`，而 `extaf` 只在 darwin 上有），所以 Linux 那份
+// 里没有 m4a / aac。
 //
 // 每一项都对着一个**真的解码器**：
 //
@@ -63,8 +70,72 @@ import (
 // Windows 上验过**（README「已知边界」一节写着这件事）。这里仍然登记它们，
 // 因为登记的是**格式**而验的是**平台**——真验出来不行的话，是要把这一项
 // 拿掉还是要把 Media Foundation 那条路修好，那是另一张票的裁决。
-var AssociatedAudioExts = []string{
+var associatedAudioExtsAll = []string{
 	"mp3", "flac", "wav", "m4a", "aac", "ogg", "aiff", "aif", "aifc",
+}
+
+// aacExts 是 **Linux 上没有解码器**的那一档（MP4 / AAC）。
+//
+// 判据和 `associatedAudioExtsAll` 里那一行对得上：MP4 / AAC 靠系统解码器
+// （macOS 的 AudioToolbox、Windows 的 Media Foundation），而 Linux 上
+// 两边都没有——`extaf` 只在 darwin 上有，`mfadec` 只在 windows 上有。
+var aacExts = map[string]bool{"m4a": true, "aac": true}
+
+// AssociatedAudioExts 是本应用向系统登记的音频扩展名（**不带点**）。
+//
+// ⚠️ **这一份是「系统交给我们的文件」的入口白名单**，
+// 和 `internal/service/localmusic.Extensions`（扫描白名单）**不是同一份**：
+// 那一份里有 `.wma`，而我们放不了它（见包头那一节）。
+//
+// ⚠️ **它按 GOOS 裁过**：Linux 上没有 AAC 解码器，于是 Linux 这一份里
+// 没有 m4a / aac——登记了的话，桌面环境把 `.m4a` 列入本应用的「打开方式」，
+// 用户双击得到的只有一句「这个格式我们放不了」。
+var AssociatedAudioExts = associatedAudioExtsForGOOS(runtimeGOOS)
+
+// associatedAudioExtsForGOOS 报某个目标平台上登记的那一份。
+//
+// ⚠️ **它和 `AssociatedAudioExts` 必须同源**：linux 上它就是裁掉 aac/m4a
+// 之后的同一份，而**不是另写一份**——两份各记一份的代价是「mygo.json
+// 加了一个格式，linux 那份忘了加」，而那个症状是「Linux 上双击新格式没
+// 反应」。
+func associatedAudioExtsForGOOS(goos string) []string {
+	if goos == "linux" {
+		out := make([]string, 0, len(associatedAudioExtsAll)-len(aacExts))
+		for _, ext := range associatedAudioExtsAll {
+			if aacExts[ext] {
+				continue
+			}
+			out = append(out, ext)
+		}
+		return out
+	}
+	return associatedAudioExtsAll
+}
+
+// FrameworkAudioExts 是**框架按它过滤命令行**的那一份——`mygo.json` 的
+// `fileAssociations`（mygo build 用 `-ldflags -X` 把它注进
+// `packageFileExtensions`，`mygo/deeplink.go` 的 `fileArgs` 按它过滤
+// 启动参数）。
+//
+// ⚠️ **它和 `AssociatedAudioExts` 不是同一份**：那一份按 GOOS 裁过
+// （darwin 上有 m4a/aac），而这一份是 `mygo.json` 那份**交集**——所有
+// 平台共用的那份（也就是 `associatedAudioExtsForGOOS("linux")`，最窄
+// 的那份）。macOS / Windows 的 AAC 关联由 `macos.infoPlist` 和
+// `windows.installerInclude` 补，**不经过** `fileArgs`——所以框架那一半
+// 在 Windows 上也不会把 `.m4a` 投给 `OnOpenFile`（由界面那半边接住，
+// 见 `internal/ui/openfile.go` 的 `handleLaunchArgs`）。
+//
+// ⚠️ **它只给「照抄框架判据」的那一处用**（`frameworkWouldDeliver`）：
+// 界面判收不收用的是 `AssociatedAudioExts`——`IsAssociatedAudioExt` 别换。
+var FrameworkAudioExts = associatedAudioExtsForGOOS("linux")
+
+// IsFrameworkAudioExt 报这个扩展名是不是**框架会投给 `OnOpenFile`**的那一档。
+//
+// ⚠️ **判据是 `FrameworkAudioExts`，不是 `AssociatedAudioExts`**：Windows
+// 上 `.m4a` 在后者里而不在前者里——框架不会投它（它由 `installerInclude`
+// 的注册表项唤起、在 `handleLaunchArgs` 那一遍被我们自己认下来）。
+func IsFrameworkAudioExt(ext string) bool {
+	return slices.Contains(FrameworkAudioExts, normalizeExt(ext))
 }
 
 // IsAssociatedAudioExt 报这个扩展名（**可以带点、可以不带**）是不是本应用
