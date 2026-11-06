@@ -13,13 +13,18 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 // 三个 Tab。顺序就是侧栏／页面上从左到右的顺序。
@@ -165,11 +170,37 @@ func (st *searchState) init(s *Shell) {
 		// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 		// 13px 淡灰缩在列表左上角，而这一页的「没有结果」是居中 15pt 两行——
 		// 等的那几秒里那行字和回来之后那一格对不上。
-		st.lists[i].list.SetEmptyView(loadingCell("正在加载…"))
+		if i == searchTabUser {
+			st.lists[i].list.SetEmptyView(searchUserSkeleton)
+		} else {
+			st.lists[i].list.SetEmptyView(loadingCell("正在加载…"))
+		}
 		// 播放量 / 投稿时间：歌曲和视频两档有，用户那一档两样都没有（见
 		// `searchColumns`）。**装在这里而不是每一帧**：一档 Tab 的列不会变。
 		st.lists[i].list.SetColumns(searchColumns(i, s))
 	}
+}
+
+func searchUserSkeleton(c *ui.Context) {
+	ui.Column(c).FillWidth().Label("正在加载用户…").Children(func() {
+		for row := 0; row < 4; row++ {
+			ui.Row(c).FillWidth().Gap(space.Px16).Padding(space.None, space.None, space.Px16, space.None).
+				Children(func() {
+					for col := 0; col < 2; col++ {
+						ui.Row(c).Grow(1).MinWidth(0).Padding(space.Px16).Gap(space.Px16).
+							AlignItems(ui.Center).Radius(12).Border(1, tok.Of(c.Theme()).Line).Children(func() {
+							skeleton.Block(c, fmt.Sprintf("search:user:sk:%d:%d:avatar", row, col), 56, 56, 28).
+								Label(fmt.Sprintf("搜索用户占位:%d:%d:头像", row, col))
+							ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px6).Children(func() {
+								skeleton.Block(c, fmt.Sprintf("search:user:sk:%d:%d:name", row, col), 120, 14, 4)
+								skeleton.Block(c, fmt.Sprintf("search:user:sk:%d:%d:sign", row, col), 170, 12, 4)
+								skeleton.Block(c, fmt.Sprintf("search:user:sk:%d:%d:meta", row, col), 100, 12, 4)
+							})
+						})
+					}
+				})
+		}
+	})
 }
 
 // searchFetcher 交给分页列表：每次都转手问 `searchState.fetch`，所以测试换掉
