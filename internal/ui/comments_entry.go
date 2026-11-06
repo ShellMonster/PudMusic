@@ -111,8 +111,7 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 	btn.Children(func() {
 		// ⚠️ **结构是共享的那一份**（`countKeyIcon`）：图形在上、数字在下，
 		// 数字收在键内。字号 / 颜色 / 排列在 `playbar_counts.go`。
-		countKeyIcon(c, iconComments, btn.Hovered(), btn.Pressed(), count,
-			s.coverWash(c.Theme(), c.Theme().Background))
+		countKeyIcon(c, iconComments, btn.Hovered(), btn.Pressed(), count)
 	})
 
 	if s.withTip(c, btn, commentsKeyTip(count)).Clicked() {

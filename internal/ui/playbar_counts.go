@@ -20,8 +20,8 @@
 //
 // 数字横排那一版的病是「带数的键比不带数的宽」——第三段把歌名 / 进度条挤回去
 // （票 #216 的坑：撑出轨道的那一截点不动）。本票数字在**竖直方向**收进键内，
-// 键的**宽不变**（还是 36 的点击区），变的是**高**（36 → 50，图形 18 + 数字
-// ~11 + 缝 3 + 上下各留一点）。
+// 键的**宽不变**（还是 36 的点击区，`tok.IconHit`），变的是**高**（36 → 50，
+// 图形 18 + 数字 ~14 + 缝 2 + 上下各一点余量）。
 //
 // # 三枚键的**共性**（所以这里有一份共享的配方）
 //
@@ -65,7 +65,7 @@ const (
 	playbarCountFont = 11
 
 	// playbarCountKeyH 是带数那一枚键的**高**（50）：图形 18 + 数字 ~14 +
-	// 缝 3 + 上下各 ~7 的余量。
+	// 缝 2 + 上下各 ~8 的余量。
 	//
 	// ⚠️ **它比点击区 36 高**：数字在键**里面**，所以键要吃得下「图形 + 数字」
 	// 两层。50 是三枚键同高的那一档（不带数的时候键还是 36 高——见
@@ -123,7 +123,11 @@ func countKeyTip(name string, n int64, tip string) string {
 //
 // ⚠️ **`SingleLine` 不省略**：数字一整行摆得下（最宽档 ≈22 < 36），结构上
 // 「+」截不掉。
-func countLine(c *ui.Context, n int64) {
+//
+// ⚠️ **`dx` 是跟着图标一起抖的水平偏移**：赞键长按三连那一抖，图标挪多远
+// 数字就挪多远——不然数字钉在原地、只有图形在晃，看着像「键上贴了两层
+// 各抖各的」。收藏 / 评论那两枚不抖，恒是 0。
+func countLine(c *ui.Context, n int64, dx float32) {
 	t := playbarCountText(n)
 	if t == "" {
 		return
@@ -131,7 +135,7 @@ func countLine(c *ui.Context, n int64) {
 	p := tok.Of(c.Theme())
 	typo.Mono(ui.Text(c, t)).FontSize(playbarCountFont).FontWeight(600).
 		LetterSpacing(-0.2).TextColor(p.Text3).SingleLine().
-		AlignSelf(ui.Center)
+		AlignSelf(ui.Center).Translate(dx, 0)
 }
 
 // countKeyIcon 是计数键里的图形盒子（18×18，图形居中）+ 它下面的数字。
@@ -139,11 +143,11 @@ func countLine(c *ui.Context, n int64) {
 //
 // ⚠️ **没有数字时还是 36 的一枚**：`countLine` 空串时一格都不画，列里只剩
 // 图形——按钮的高度由父列的 `AlignItems(Center)` 收在 36 那档。
-func countKeyIcon(c *ui.Context, iconName string, hovered, pressed bool, n int64, bg ui.Color) {
-	countKeyIconOn(c, iconName, hovered, pressed, false, n, bg)
+func countKeyIcon(c *ui.Context, iconName string, hovered, pressed bool, n int64) {
+	countKeyIconOn(c, iconName, hovered, pressed, false, n)
 }
 
-func countKeyIconOn(c *ui.Context, iconName string, hovered, pressed, on bool, n int64, bg ui.Color) {
+func countKeyIconOn(c *ui.Context, iconName string, hovered, pressed, on bool, n int64) {
 	// ⚠️ **竖着排**：图形在上、数字在下——`ui.Column` 把它们收在同一枚键的
 	// 中轴上，而不是数字漂到图形的角上。
 	ui.Column(c).Gap(space.Px2).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
@@ -152,6 +156,6 @@ func countKeyIconOn(c *ui.Context, iconName string, hovered, pressed, on bool, n
 				Attach(ui.AnchorCenter, ui.AnchorCenter).TextColor(pbIconColor(c, hovered, on))
 			flat.PressScale(ic, pressed, false)
 		})
-		countLine(c, n)
+		countLine(c, n, 0)
 	})
 }

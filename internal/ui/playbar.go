@@ -104,10 +104,12 @@ const (
 	// 的；760 是测试里的窄窗口，这一档是给它的。
 	artistMinW = 60
 
-	// playbarActionsW 是第三段那几枚键在**摆满**时有多宽：**128**。
+	// playbarActionsW 是第三段那几枚键在**摆满**时有多宽：**137**。
 	//
-	// 每一枚的盒子恒是 32（上游 HeroUI 的 `isIconOnly` 是 `w-[2rem] h-[2rem]`），
-	// 图形是 18（上游播放条上全部图标键都是 18，票 #219 / 报告 §3.6）。
+	// 每一枚在宽度账里按 32（`iconHitMd`，上游 HeroUI 的 `isIconOnly` 是
+	// `w-[2rem] h-[2rem]`——账面比渲染壳 `tok.IconHit` = 36 窄一点是保守留
+	// 量，保底只许偏小不许偏大），图形是 18（上游播放条上全部图标键都是
+	// 18，票 #219 / 报告 §3.6）。
 	//
 	// 🔴 **四枚**（票 #573）：分集 / 收藏 / 赞 / **评论**。「评论」那枚是
 	// **条件摆**的（本地文件不摆，见 `viewCommentsButton`），而这个数取的是
@@ -119,19 +121,18 @@ const (
 	// 排在图形正下方、占键的**高**（36 → 50），宽**一个字节都不差**。所以
 	// 每一枚键还是 32 的命中宽，**带不带数字都一样**：
 	//
-	//	32（分集）+ 3 × 36（带数的三枚）+ 3 道键间缝 × 3 = **137**
+	//	32（分集）+ 3 × 32（带数的三枚）+ 3 道键间缝 × 3 = **137**
 	//
 	// ⚠️ **键加高不吃宽度**：数字在竖直方向收进键内（`pbCountKey`，高 50），
 	// 宽不变——横排那一版的病（带数的键把歌名 / 进度条挤回去）不会再犯
 	// （票 #216 的坑：撑出轨道的那一截点不动）。
 	playbarActionsW = 4*iconHitMd + 3*playbarActionsGap
 
-	// playbarActionsGap 是第三段那几枚键**两两之间**的缝（3）。
+	// playbarActionsGap 是**宽度账**里给第三段那几枚键**两两之间**留的缝（3）。
 	//
-	// ⚠️ **数字收进键内之后，缝回到「看得出是两枚键」那一档**（3）：上一版
-	// 角标探出图形右缘、叠在这道缝上，没缝三枚带数的键糊成一串；本票数字
-	// 在键内，缝只负间距、不再负「别让角标糊成一串」。3 是原型 `.np-keys`
-	// 那一档。
+	// ⚠️ **它比实际渲染的缝（`space.Px2` = 2）宽**：保底宽往大留一点，900
+	// 宽那一档左列右沿才不至于擦到滑块——账面按最坏的算，实际缝取视觉审查
+	// 对照原型 `.np-keys` 的 2。
 	playbarActionsGap = space.Px3
 
 	// trackTextMinW 是**文字列**那一段（歌名 + UP 名）最少有多宽。
@@ -168,7 +169,7 @@ const (
 	// ⚠️ **票 #573 之后它是 272**（四枚纯图标键），**票 #682 之后是 307**
 	// （评论那一枚从 32 长到 67），**票 #701 之后是 309.5**（三枚键各带一个数、
 	// 数字横排占一格），**本票（方案 A）之后是 281**：数字收进键内、占键的
-	// **高**（36 → 50）而不占宽，三枚键各回到 32；三道键间缝 3 照旧——
+	// **高**（36 → 50）而不占宽，三枚键各回到 36；三道键间缝 3 照旧——
 	// 净让出 **28.5 给了进度条**。
 	//
 	// 🔴 **保底那一档上歌名回到 76**（票 #701 时是 101.9）：数字不吃左列的宽，
@@ -469,7 +470,7 @@ func (s *Shell) viewTrackStopped(c *ui.Context, st app.State, t *ui.Theme) {
 //	「评论」那一枚也在），900~1280 那一列由**保底宽 281** 说话，1600 那一列
 //	由**轨道 1 份**说话。）
 //
-// **让位的是 32 —— 就是这个键自己那一格**（`iconHitMd`），而**进度条和右边
+// **让位的是 32 —— 就是这个键自己那一格**（`tok.IconHit`），而**进度条和右边
 // 那一组一个像素都不让**（它们压根不在左列里：右边那一组是绝对定位贴右沿
 // 的，进度行在中间那一列里）。
 //
@@ -498,9 +499,10 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 		s.partOpen = false
 		return
 	}
-	// ⚠️ **键与键之间留 3 的缝**：三枚带数的键各自收在 36 宽里、缝 3——
-	// 「看得出是两枚键」的最小那一档（视觉审查实测对照原型 `.np-keys` 的
-	// 缝 2）。
+	// ⚠️ **键与键之间留 2 的缝**（`space.Px2`）：三枚带数的键各自收在 36 宽
+	// 里——「看得出是两枚键」的最小那一档（视觉审查实测对照原型 `.np-keys`
+	// 的缝 2）。⚠️ **宽度账里按 3 算**（`playbarActionsGap`）：保底宽往大
+	// 留一点，别让左列真到 900 宽时擦到滑块。
 	ui.Row(c).Gap(space.Px2).AlignItems(ui.Center).Shrink(0).Children(func() {
 		// 原型 `.np-keys` 的次序：赞 → 收藏 → 评论。
 		s.viewLikeStar(c, st)
@@ -651,8 +653,7 @@ func (s *Shell) viewFavButton(c *ui.Context, st app.State) {
 	// `pbKey` / `pbCountKey` 一调就挂树，建完再换会留下一个同名的废按钮。
 	btn := pbCountKey(c, countKeyLabel("收藏", count), playbarCountText(count) != "")
 	btn.Children(func() {
-		countKeyIconOn(c, favIcon(faved), btn.Hovered(), btn.Pressed(), faved, count,
-			s.coverWash(c.Theme(), c.Theme().Background))
+		countKeyIconOn(c, favIcon(faved), btn.Hovered(), btn.Pressed(), faved, count)
 	})
 	btn = s.withTip(c, btn, countKeyTip("收藏", count, favTooltip(faved)))
 	if btn.Clicked() {
@@ -964,7 +965,7 @@ func (s *Shell) viewCover(c *ui.Context, st app.State) {
 //
 // ⚠️ 原来是 88 宽的三个汉字按钮，而三个汉字在按钮里要 54——**44 就已经放不下**，
 // 按 64 画出来是「上...」「下...」，看着像坏了。图标化之后这件事不再存在：
-// 22 的图标 + 每边 5 的内边距，点击区 32（`iconHitMd`），比原来那个 88 窄近三倍
+// 22 的图标 + 每边 5 的内边距，点击区 32（`tok.IconHit`），比原来那个 88 窄近三倍
 // 还点得准（角上也点得到，见 `TestTheHitAreaIsBiggerThanTheGlyph`）。
 //
 // ⚠️ **图形是 22，不是 18**（票 #173 / G26）：上游那一排三枚是三个数——跳过那两枚

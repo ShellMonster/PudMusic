@@ -106,8 +106,8 @@ const (
 // 赞键长按那一档的抖：按住 500ms 之后开始，2500ms 触发那一停回到原位。
 // B 站长按赞键就是这一下高频的小碎抖——键上没有环，「还在按」全靠它说。
 const (
-	// likeShakeAmp 是抖的幅度（DIP）。18 的图标每边有 7 的空余，1.5 抖出去
-	// 不裁边；再小就在 32 见方的键上看不出「在抖」了。
+	// likeShakeAmp 是抖的幅度（DIP）。18 的图标在 36 见方的键里每边有 9 的
+	// 空余，1.5 抖出去不裁边；再小就晃不出「在抖」了。
 	likeShakeAmp = 1.5
 	// likeShakePeriod 是一个来回多久。90ms ≈ 每秒 11 个来回、22 次换向：
 	// 再慢像是在晃，再快糊成一团。
@@ -854,12 +854,16 @@ func (s *Shell) likeButton(c *ui.Context, name, label string, color ui.Color, li
 		//
 		// ⚠️ **数字走共享的那一份**（`countLine`）：字号 / 颜色 / 「排在图形
 		// 下面」只有一处——赞键的图形自己拼，但数字不许另写一份。
+		//
+		// 🔴 **数字跟着图标一起抖**（dx 接 `countLine` 的第三个参数）：长按
+		// 那一抖挪的是「这一枚键的内容」——图形晃、数字钉在原地就成了
+		// 「键上两层各抖各的」，不是「整枚键在抖」。
 		ui.Column(c).Gap(space.Px2).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			// 🔴 **图形盒子是 18 × 18**：两层（底色 + 拇指）挂在它上面。
 			ui.Box(c).Size(iconMd, iconMd).Children(func() {
 				drawIcon(c)
 			})
-			countLine(c, count)
+			countLine(c, count, dx)
 		})
 	})
 	return b
