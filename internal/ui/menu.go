@@ -653,11 +653,21 @@ func (s *Shell) openPage(path string) {
 //
 // ⚠️ **走 `App.SetLike`**（`internal/app/like.go`）——和播放条上那一枚键
 // 走的是同一条路（`like.go:727`）。
+//
+// ⚠️ **「赞不了」要落在画 toast 的那一扇上**：`viewToasts` 只在主窗口那一支
+// 调——迷你窗和刘海窗都不画 toast。从它们那两扇上点赞（迷你那条播放条、
+// 刘海展开卡上那枚 ♡）时，`s` 是那个副壳，直接 `s.addToast` 会把那句话
+// 写进一扇永远不画它的窗：用户按了赞、什么提示都没看见（静默失败）。
+// 所以失败提示路由到 `s.main` 那份 `toasts`。
 func (s *Shell) likeCurrent() {
 	rel := s.app.LikeState()
+	toastShell := s
+	if s.main != nil {
+		toastShell = s.main
+	}
 	s.app.SetLike(!rel.Liked, func(err error) {
 		if err != nil {
-			s.addToast("赞不了："+err.Error(), notice.Danger)
+			toastShell.addToast("赞不了："+err.Error(), notice.Danger)
 		}
 	})
 }

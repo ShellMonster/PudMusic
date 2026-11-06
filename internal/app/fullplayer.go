@@ -102,6 +102,15 @@ func (a *App) SetSpectrumWantedFor(src SpectrumSource, wanted bool) {
 	}
 }
 
+// SpectrumWantedFor 报「这个来源此刻有没有报『我在画』」。
+//
+// 界面那一层每帧照它画没画频谱报账，而「它这一帧还走没走到那句
+// `SetSpectrumWantedFor`」本身就是 bug 的高发区（卡收起来、歌没了、窗口
+// 失焦都让它不再被调）——测试拿这一位钉「没人画了位就是 0」。
+func (a *App) SpectrumWantedFor(src SpectrumSource) bool {
+	return a.spectrumWanted.Load()&(int32(1)<<uint(src)) != 0
+}
+
 // syncSpectrumLocked 把「FFT 现在该不该跑」重算一遍并推给手上的播放器。
 // 须持 a.mu。偏好改了、换新播放器了、界面说有人/没人画了，都归这里统一判。
 func (a *App) syncSpectrumLocked(p *audio.Player) {

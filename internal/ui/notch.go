@@ -48,18 +48,18 @@ const (
 	notchWinH = 280 // 刘海 ~38 + 展开卡深 210 + 余量（够最深的展开卡）
 
 	notchOpenW  = 468 // 展开卡的宽（参考 mygo-cloudmusic 的刘海播放器）
-	notchOpenH  = 210 // 展开比刘海多出来的深度（原型 `.notch.expanded { height: 210px }`）
+	notchOpenH  = 210 // 展开比刘海多出来的深度（参考卡展开档 210px，见 DESIGN.md「刘海播放器」）
 	notchIdleW  = 330 // 无歌时那张卡的宽
 	notchHelloW = 340 // 引导那条的宽
 
-	notchWingCover = 20         // 两翼封面边长（原型 `.notch-min img`）
+	notchWingCover = 20         // 两翼封面边长（收起时顶行那只 20 的封面）
 	notchWingPad   = space.Px12 // 两翼离边的内边距
-	notchCardCover = 56         // 展开卡封面（原型 `.notch-card img`）
+	notchCardCover = 56         // 展开卡封面（主行那张 56 的大图）
 
-	notchSpecBars  = 5  // 展开卡频谱的柱数（原型 `.playing-eq` 五根）
+	notchSpecBars  = 5  // 展开卡频谱的柱数（主行右端那五根）
 	notchSpecH     = 30 // 展开卡频谱那一格的高
 	notchProgressH = 20 // 进度行那一格的高（自绘滑块的命中区）
-	notchSeekTextW = 40 // 进度两端读数的宽（原型 `grid-template-columns: 34px 1fr 34px`，等宽 12 号）
+	notchSeekTextW = 40 // 进度两端读数的宽（已播 / 轨道 / 剩余三列 40·1fr·40，等宽 12 号）
 
 	notchHoverOpenDelay = 300 * time.Millisecond // 指针停够多久才展开
 	notchHoverExitDelay = 350 * time.Millisecond // 走开多久才收起
@@ -300,6 +300,9 @@ func (s *Shell) notchCloseProceeds() bool {
 func boolPtr(b bool) *bool { return &b }
 
 func (s *Shell) releaseNotch() {
+	// 🔴 把 `SpectrumNotch` 那一票收回来：窗没了之后再没有帧会跑到
+	// `viewNotch` 顶层那句清位，欠着的话 FFT 在没人看的情况下一直跑。
+	s.app.SetSpectrumWantedFor(app.SpectrumNotch, false)
 	s.stopNotchPolling()
 	s.closePerWindow()
 }
@@ -313,6 +316,11 @@ func (s *Shell) notchEnabled() bool {
 
 // notchSetEnabled 把刘海窗亮出来或者藏起来。
 func (s *Shell) notchSetEnabled(on bool) {
+	if !on {
+		// 「不画频谱」这一刻就把那一票收回来：藏窗 / 没建窗那几档之后
+		// 未必有一帧跑到 `viewNotch` 顶层那句清位（理由同 `releaseNotch`）。
+		s.app.SetSpectrumWantedFor(app.SpectrumNotch, false)
+	}
 	if s.win == nil {
 		return // 测试里没有真窗
 	}
@@ -683,6 +691,15 @@ func (s *Shell) viewNotch(c *ui.Context) {
 	st := s.app.Snapshot()
 	n := &s.notchSt
 
+	// 「刘海这一格在不在画频谱」在**这一帧的顶层**记账，不在
+	// `viewNotchSpectrum` 里：那一格只在「展开 + 有歌 + 正在放」时才会被建到，
+	// 把 `SetSpectrumWantedFor` 挂在它里面的话，收起 / 切歌 / 失焦这几档全都
+	// **不再走到它**——位一旦置上没人清，FFT 就一直跑（wanted 泄漏）。
+	// 汇总到顶层之后，「画」和「不画」走的是同一句：这一帧的四个条件
+	// （open && HasTrack && Playing && seen）只要倒一个，位当场清掉。
+	seen := s.presence.seen()
+	s.app.SetSpectrumWantedFor(app.SpectrumNotch, n.open && st.HasTrack && st.Playing && seen)
+
 	c.Root().Background(ui.Transparent)
 
 	tw, th := s.notchTarget()
@@ -699,7 +716,7 @@ func (s *Shell) viewNotch(c *ui.Context) {
 	}
 	open := stage.AnimateTo("open", opened, spring)
 	hello := stage.AnimateTo("hello", b2f(n.hello), spring)
-	// 收起时底角 16，展开 24（原型 `border-radius: 0 0 16px 16px` → `0 0 24px 24px`）。
+	// 收起时底角 16，展开 24。
 	foot := 16 + 8*open
 	flare := 6 + 8*open
 	cx := n.winW / 2
@@ -709,7 +726,7 @@ func (s *Shell) viewNotch(c *ui.Context) {
 			return
 		}
 		path := notchShape(r.X+cx, w, h, flare, foot)
-		// 原型的刘海没有阴影（`#notch` 只有黑底和圆角），所以这里也不画。
+		// 刘海只有黑底和圆角、没有阴影，所以这里也不画。
 		p.FillPath(path, ui.RGB(0, 0, 0))
 	})
 	stage.Children(func() {
@@ -725,8 +742,7 @@ func (s *Shell) viewNotch(c *ui.Context) {
 				return
 			}
 			// 顶上那一行（封面 + eq）**只在收起的时候画**：展开卡自带 56 的
-			// 大封面和频谱，顶上再挂一张 20 的小封面就是两张封面（原型
-			// `.notch.expanded .notch-top { display: none }`）。
+			// 大封面和频谱，顶上再挂一张 20 的小封面就是两张封面——展开时顶行收起来。
 			s.viewNotchWings(c, st, 1-open)
 			s.viewNotchHello(c, hello*(1-open), (w-notchHelloW)/2)
 			if open > 0.02 {
@@ -761,17 +777,17 @@ func b2f(b bool) float32 {
 	return 0
 }
 
-// 刘海里的颜色：刘海永远是黑的（原型 `#notch { background: #000; color: #ecebe8 }`），
+// 刘海里的颜色：刘海永远是黑的，
 // 不随深浅主题变，字色取全屏播放器那一组固定暗色（`tok.Full`，同一份 #ecebe8 / #a6a8ae）。
 //
-// 字重 600：原型的歌名是 `<strong>`（700），系统字体里两者同一档；字重用命名常量，
+// 字重 600（歌名那一栏的粗档；系统字体里 600 与 700 同一档）；字重用命名常量，
 // 理由同 `miniTitleWeight`。
 const notchTitleWeight = 600
 
-// viewNotchWings 是刘海的两翼（原型 `.notch-min`）：左翼 20×20 的封面（圆角 4），
+// viewNotchWings 是刘海的两翼：左翼 20×20 的封面（圆角 4），
 // 右翼是三根跳动的 eq 柱；两侧各留 12。**只在收起的时候画**（`shown = 1-open`）：
-// 展开卡自带 56 的大封面和频谱，顶上再挂一张 20 的就是两张封面（参考
-// 悬浮播放器原型 `.notch.expanded .notch-top { display: none }`）。
+// 展开卡自带 56 的大封面和频谱，顶上再挂一张 20 的就是两张封面——
+// 展开时这一行收起来（同上面 `viewNotch` 里那段）。
 func (s *Shell) viewNotchWings(c *ui.Context, st app.State, shown float32) {
 	if shown < 0.02 {
 		return
@@ -789,7 +805,7 @@ func (s *Shell) viewNotchWings(c *ui.Context, st app.State, shown float32) {
 				imgcache.ViewRadius(c, s.images, st.CoverURL, notchWingCover, notchWingCover, tok.R4)
 			})
 			ui.Spacer(c).Grow(1)
-			// eq 只在放的时候跳；暂停时是空的（原型 `S.playing ? '<i></i><i></i><i></i>' : ''`）。
+			// eq 只在放的时候跳；暂停时那一格是空的。
 			if st.Playing {
 				pud.EqBars(c, "notch-eq", true)
 			}
@@ -816,7 +832,7 @@ func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
 				TextColor(tok.Full.Text).SingleLine()
 			ui.Text(c, hint).FontSize(scale.Font(c, scale.Size12)).TextColor(tok.Full.Text2).SingleLine()
 		})
-		// 「开启」是主色胶囊（原型 `.btn-primary.btn-sm`：32 高、左右 14、13 号 600）。
+		// 「开启」是主色胶囊（32 高、左右 14、13 号 600）。
 		p := tok.Of(c.Theme())
 		b := ui.ButtonBase(c.Key("notch-keep")).Height(tok.BtnSmH).PaddingX(space.Px14).
 			Radius(tok.BtnSmH / 2).Background(p.Accent).AlignItems(ui.Center).Justify(ui.Center).
@@ -833,7 +849,7 @@ func (s *Shell) viewNotchHello(c *ui.Context, shown, left float32) {
 
 // viewNotchIdle 是「没歌」那张卡：「PudMusic / 未在播放」+「打开」。
 //
-// 原型的空闲态（没歌时）展开只有顶上那一行、没有卡片；这里多一张小卡是为了给「没歌也想
+// 参考卡的空闲态（没歌时）展开只有顶上那一行、没有卡片；这里多一张小卡是为了给「没歌也想
 // 回到应用」留一个入口——样式照展开卡的那一套（黑底、#ecebe8 / #a6a8ae、32 高的胶囊键）。
 func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 	if open < 0.02 {
@@ -865,8 +881,8 @@ func (s *Shell) viewNotchIdle(c *ui.Context, open, left float32) {
 	})
 }
 
-// viewNotchExpanded 是展开的那张完整播放卡（原型 `.playing-body`，参考
-// 悬浮播放器）：内边距 24 / 16 / 18，三行——
+// viewNotchExpanded 是展开的那张完整播放卡（规格见 DESIGN.md「刘海播放器」
+// 一节）：内边距 24 / 16 / 20 / 16，三行——
 //
 //   - **主行**：56 的封面（圆角 8）+ 歌名（17 号 600）/ 歌手（15 号
 //     `#a6a8ae`）+ 收藏（♡）+ 频谱（五根 `#ecebe8` 的柱，只在放的时候画）；
@@ -886,7 +902,7 @@ func (s *Shell) viewNotchExpanded(c *ui.Context, st app.State, open, left float3
 	})
 }
 
-// viewNotchCardMain 是主行（原型 `.playing-main`）：封面 / 歌名歌手 /
+// viewNotchCardMain 是主行：封面 / 歌名歌手 /
 // 收藏 + 频谱，垂直居中、缝 12。
 func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 	ui.Row(c).Key("notch-main").Gap(space.Px12).AlignItems(ui.Center).Children(func() {
@@ -909,7 +925,7 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 			}
 		})
 		// 收藏：和迷你窗同一枚「赞」（heart / heart-on），只在能赞的时候摆
-		// （原型 `.playing-actions` 的 ♡）。
+		//（主行右端那枚 ♡）。
 		if s.app.Likeable() {
 			liked := s.app.LikeState().Liked
 			name, label := "heart", "赞"
@@ -925,24 +941,20 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 	})
 }
 
-// viewNotchSpectrum 是主行右端那五根频谱柱（原型 `.playing-eq`：宽 4、
+// viewNotchSpectrum 是主行右端那五根频谱柱（宽 4、
 // 缝 3、高 30、`#ecebe8`）。**只在放的时候画**：暂停时那一格和两翼 eq
 // 一样收起来。
 //
-// 数据走 `App.SpectrumBars`（满屏播放器同一条链）；这一帧画了才报
-// `SetSpectrumWanted`，窗收着或暂停时 FFT 不白跑（同 `viewFullSpectrum`
-// 的规矩）。
+// 数据走 `App.SpectrumBars`（满屏播放器同一条链）；「要 FFT 没有」的记账
+// 在 `viewNotch` 顶层（那里四个条件齐了才置 `SpectrumNotch` 位），不在
+// 这一格——理由见那一帧顶上那段注释。
 func (s *Shell) viewNotchSpectrum(c *ui.Context, st app.State) {
-	// 「在不在画」按**来源**记账：刘海这一格报它自己那一份（`SpectrumNotch`），
-	// 和满屏那一格（`SpectrumFull`）互不覆盖——谁在画 FFT 就为谁跑
-	//（`App.SetSpectrumWantedFor` 那段注释）。
-	seen := s.presence.seen()
-	s.app.SetSpectrumWantedFor(app.SpectrumNotch, st.Playing && seen)
 	if !st.Playing {
 		return
 	}
 	bars := s.app.SpectrumBars(notchSpecBars, notchSpecH)
 	color := tok.Full.Text
+	seen := s.presence.seen()
 	ui.Box(c).Key("notch-spec").Size(notchSpecBars*4+4*3, notchSpecH).Shrink(0).
 		Role(ui.RoleImage).Label("频谱").
 		Draw(func(p *ui.Painter, r ui.Rect) {
@@ -953,7 +965,7 @@ func (s *Shell) viewNotchSpectrum(c *ui.Context, st app.State) {
 		})
 }
 
-// viewNotchCardSeek 是进度行（原型 `.progress-row`）：左端已播、中间轨道、
+// viewNotchCardSeek 是进度行：左端已播、中间轨道、
 // 右端**剩余**（`-m:ss`，不是总长）。
 //
 // 拖动和播放条 / 迷你窗同一个分工：按住时值归用户，松手才 seek
@@ -988,7 +1000,7 @@ func (s *Shell) viewNotchCardSeek(c *ui.Context, st app.State) {
 		case !s.notchHeld && known:
 			s.notchScrub = float64(st.Position) / float64(st.Duration)
 		}
-		// 右端是**剩余**（原型 `-1:13`），不是总长。
+		// 右端是**剩余**（`-m:ss`），不是总长。
 		typo.Mono(ui.Text(c, notchRemain(st.Position, st.Duration))).Key("notch-remain").
 			FontSize(scale.Size12).TextColor(tok.Full.Text2).
 			Width(notchSeekTextW).TextAlign(ui.Center).MaxLines(1).Shrink(0)
@@ -1008,16 +1020,18 @@ func notchRemain(pos, dur time.Duration) string {
 	return "-" + clock(rem)
 }
 
-// viewNotchCardTransport 是传输行（原型 `.transport`）：随机 / 上一首 /
+// viewNotchCardTransport 是传输行：随机 / 上一首 /
 // 播放 / 下一首 / 循环，居中、缝 28。两端的模式键**各管各的档**：
-// ⤨ 按下去就是随机档、⤻ 按下去就是循环档——不是一枚键挨个转（原型的
-// secondary × 2 就是两枚独立的键）。
+// ⤨ 按下去就是随机档、⤻ 按下去就是循环档——不是一枚键挨个转
+// （两端各是一枚独立的键）。**亮着的那枚再按一下回顺序档**：
+// 它们是开关不是单向门——单向门的话点了随机就永远回不去顺序（循环键
+// 只会把它拨去循环档）。
 func (s *Shell) viewNotchCardTransport(c *ui.Context, st app.State) {
 	ink := tok.Full.Text
 	ui.Row(c).Key("notch-ctl").FillWidth().Gap(space.Px28).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 		if pud.IconBtn(c, "notch-shuffle", "shuffle", "随机播放", pud.IconOpts{
 			Color: ink, Size: 18, On: st.PlayMode == app.PlayModeRandom}).Clicked() {
-			s.notchSetMode(app.PlayModeRandom)
+			s.notchSetMode(toggleMode(st.PlayMode, app.PlayModeRandom))
 		}
 		if pud.IconBtn(c, "notch-prev", "prev", "上一首", pud.IconOpts{
 			Color: ink, Size: 22, Disabled: !s.app.CanPrev()}).Clicked() {
@@ -1030,9 +1044,18 @@ func (s *Shell) viewNotchCardTransport(c *ui.Context, st app.State) {
 		}
 		if pud.IconBtn(c, "notch-loop", "repeat", "循环播放", pud.IconOpts{
 			Color: ink, Size: 18, On: st.PlayMode == app.PlayModeLoop || st.PlayMode == app.PlayModeSingle}).Clicked() {
-			s.notchSetMode(app.PlayModeLoop)
+			s.notchSetMode(toggleMode(st.PlayMode, app.PlayModeLoop))
 		}
 	})
+}
+
+// toggleMode 是「再点一下回顺序档」那一半：当前已经在 m 那一档就拨回
+// 顺序，不然拨去 m。
+func toggleMode(cur, m app.PlayMode) app.PlayMode {
+	if cur == m {
+		return app.PlayModeSequence
+	}
+	return m
 }
 
 // notchSetMode 把播放模式拨到那一档（模式键按下去做的事），菜单勾选态跟着变。
@@ -1042,8 +1065,8 @@ func (s *Shell) notchSetMode(m app.PlayMode) {
 }
 
 // viewNotchPlay 是展开卡上那一枚播放 / 暂停键：传输行里最醒目的那一枚
-// （图形 24，比旁边两枚 22、两端两枚 18 都大——原型 `.transport .pause`
-// 也是最大的一个），取流时外面绕那一圈光（票 #271）。
+// （图形 24，比旁边两枚 22、两端两枚 18 都大——传输行里最大的一个），
+// 取流时外面绕那一圈光（票 #271）。
 func (s *Shell) viewNotchPlay(c *ui.Context, st app.State, ink ui.Color) {
 	name := "play"
 	if st.Playing {

@@ -133,6 +133,8 @@ type biliFixture struct {
 	// 根因正是发错了字段名（B 站回 -400，用户看到「B 站拒绝了这次请求」）。
 	likePosts, triplePosts int
 	lastLike               string
+	// likeFail 为真时赞那一趟回「没登录」（`serveArchiveLike` 看这一格）。
+	likeFail bool
 	// lastLikeForm 是最近一次赞的**整份**表单：端到端用例要断「up 一定不在」，
 	// 只留 like 那一格的话，多出来的字段就看不见了。
 	lastLikeForm url.Values

@@ -57,10 +57,11 @@ const notchWinTitle = "布丁音乐刘海"
 
 // notchWinInfo 是 `windows` 里一扇窗要的那几个字段。
 type notchWinInfo struct {
-	ID     int    `json:"id"`
-	Title  string `json:"title"`
-	Kind   string `json:"kind"`
-	Bounds struct {
+	ID      int    `json:"id"`
+	Title   string `json:"title"`
+	Kind    string `json:"kind"`
+	Visible bool   `json:"visible"`
+	Bounds  struct {
 		X, Y, Width, Height float64
 	} `json:"bounds"`
 }
@@ -186,5 +187,80 @@ func TestTheNotchWindow(t *testing.T) {
 			t.Fatalf("刘海轮询期间第 %d 次 windows 请求失败：%v", i+1, err)
 		}
 		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 再从菜单把它收起来：走「显示/隐藏刘海」那一栏的关（`toggleNotchPlayer`
+	// → `notchSetEnabled(false)` → `win.Hide()`——刘海窗是收不掉的第三扇，
+	// 菜单关掉走的是隐藏不是销毁，见 `notch.go` 顶上那一段）。断的是**窗
+	// 真的看不见了**：`windows` 那一栏的 `visible` 是原生侧报回来的——只
+	// 断言「再点时窗还在」验不到它藏起来，「`visible` 掉下来」才是用户
+	// 看得见的收。收的同时轮询该停、指针监听该摘、频谱那一票该收
+	// （`notchSetEnabled(false)` 那一摊）。
+	err = automationCall(client, 640, "menu", map[string]any{
+		"window": main,
+		"path":   []string{"窗口", "显示/隐藏刘海"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("第二次点「显示/隐藏刘海」：%v", err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var windows struct {
+			Windows []notchWinInfo `json:"windows"`
+		}
+		_ = automationCall(client, 641, "windows", nil, &windows)
+		hidden := false
+		for _, w := range windows.Windows {
+			if strings.HasPrefix(w.Title, notchWinTitle) && w.ID == notch.ID {
+				if !w.Visible {
+					hidden = true
+				}
+			}
+		}
+		if hidden {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("「显示/隐藏刘海」关掉之后窗还可见：%+v", windows.Windows)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// 藏起来之后应用本身不能死（`notchSetEnabled(false)` 把轮询 / 指针
+	// 监听 / 频谱那一票收干净才算完——漏一个的话这一问会撞上失常的应用），
+	// 而且它还能被同一栏再开回来（开关是往返的，不是单向门）。
+	err = automationCall(client, 643, "menu", map[string]any{
+		"window": main,
+		"path":   []string{"窗口", "显示/隐藏刘海"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("第三次点「显示/隐藏刘海」：%v", err)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		var windows struct {
+			Windows []notchWinInfo `json:"windows"`
+		}
+		_ = automationCall(client, 644, "windows", nil, &windows)
+		back := false
+		for _, w := range windows.Windows {
+			if strings.HasPrefix(w.Title, notchWinTitle) && w.ID == notch.ID && w.Visible {
+				back = true
+			}
+		}
+		if back {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("再开一次之后刘海窗没回来：%+v", windows.Windows)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	var after struct {
+		Windows []notchWinInfo `json:"windows"`
+	}
+	if err := automationCall(client, 642, "windows", nil, &after); err != nil {
+		t.Fatalf("刘海窗关掉之后 automation 不应答了：%v", err)
 	}
 }
