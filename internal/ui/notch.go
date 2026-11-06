@@ -1059,8 +1059,19 @@ func toggleMode(cur, m app.PlayMode) app.PlayMode {
 }
 
 // notchSetMode 把播放模式拨到那一档（模式键按下去做的事），菜单勾选态跟着变。
+//
+// ⚠️ **刷菜单要往 `s.main` 那一扇转**：刘海外壳自己没有 `s.menu`
+// （应用菜单只有主窗那一份，`adoptShared` 不接它）——在自己这一份上刷，
+// 改的是一份没挂出去的菜单，用户看到的那份永远不更新。路由同
+// `toggleNotchPlayer`：凡是「改整进程一份的东西」都转去主窗外壳做。
+// `s.main` 为 nil 时（测试里手搓的零值外壳）退回自己这一份——
+// `refreshMenuChecked` 自身对 `menu == nil` 免疫。
 func (s *Shell) notchSetMode(m app.PlayMode) {
 	s.app.SetPlayMode(m)
+	if s.main != nil {
+		s.main.refreshMenuChecked(s.main.app.Snapshot())
+		return
+	}
 	s.refreshMenuChecked(s.app.Snapshot())
 }
 

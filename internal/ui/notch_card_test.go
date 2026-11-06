@@ -35,6 +35,22 @@ func newOpenNotch(t *testing.T) (*Shell, *mygoui.Tester) {
 	return n, tt
 }
 
+// newOpenNotchWithCover 是 `newOpenNotch` 加上一张封面：
+// 「两翼收没收」那一档要靠封面在画面上的位置量——没封面那一档等于
+// 「尺子根本没到」。走 `enqueueTwoWithCover` 的 gated 服务：封面在后台
+// 取的那一趟是**真的异步**，用它等「画上来了」而不是 `t.Skip`。
+func newOpenNotchWithCover(t *testing.T) (*Shell, *mygoui.Tester) {
+	t.Helper()
+	n, _ := newNotchShell(t)
+	if err := enqueueTwoWithCover(n.app, t); err != nil {
+		t.Fatal(err)
+	}
+	n.notchSt.open = true
+	tt := mygoui.NewTester(n.View, notchWinW, notchWinH)
+	n.repaint = tt.Frame
+	return n, tt
+}
+
 // TestNotchExpandedTargetIsThePlayingCard 钉展开时形状的高度：
 // 展开卡是刘海高 + 210（DESIGN.md「刘海播放器」）。
 func TestNotchExpandedTargetIsThePlayingCard(t *testing.T) {
@@ -342,16 +358,53 @@ func TestNotchLikeFailureToastsOnTheMainWindow(t *testing.T) {
 // TestNotchWingsHiddenWhenExpanded 钉展开时顶上那一行（两翼的小封面 + eq）
 // 不再画——参考卡里封面走 56 那张大图，顶上再挂一张 20 的就是两张封面。
 func TestNotchWingsHiddenWhenExpanded(t *testing.T) {
-	n, tt := newOpenNotch(t)
+	n, tt := newOpenNotchWithCover(t)
 	n.app.Toggle() // 暂停：频谱不收着会一直要帧，动画停不稳
+	// ⚠️ **展开这张卡上，封面那一格必须真的画出来**——它是「两翼收没收」
+	// 的尺子：封面只出现在两翼那一行和主行大图两处，扫不到它说明这一档
+	// 根本没到「有封面」的状态，后面的几何断言等于白量。
+	waitFrames(t, tt, "封面画上来了", func() bool {
+		return !miniCoverBox(tt).Empty()
+	})
 	settleNotch(t, tt)
-	// 封面图区域只该出现在 56 的大图那一块：收起时小封面贴着屏顶，
-	// 展开时大图在主行（顶边明显更深）。
 	box := miniCoverBox(tt)
 	if box.Empty() {
-		t.Skip("封面还没画上（素材取回是异步的），这一档量不了翼的行")
+		t.Fatal("settle 之后封面不见了：这一档量不了翼的行")
 	}
 	if box.Min.Y < int(n.notchSt.h0) {
 		t.Fatalf("展开后小封面还贴着屏顶（box=%v）：两翼那行没有收起来", box)
+	}
+}
+
+// TestNotchSetModeRefreshesTheMenuCheck 钉刘海的模式键切档之后，**应用菜单上
+// 那组单选的勾选跟着动**——菜单是系统画的、不会自己变（`refreshMenuChecked`），
+// 而刘海外壳自己没有 `s.menu`（菜单只有主窗那一份，`adoptShared` 不接它）：
+// 在刘海壳上直接刷会把勾选写到一份没挂出去的菜单上，用户看到的那份永远不更新。
+//
+// ⚠️ **所以要往 `s.main` 那一扇转**——和 `toggleNotchPlayer`（notch.go）同一条
+// 路由：凡是「改整进程一份的东西」，都从刘海外壳上转去主窗外壳做。
+func TestNotchSetModeRefreshesTheMenuCheck(t *testing.T) {
+	n, main := newNotchShell(t)
+	main.menu = appMenu(main)
+	main.refreshMenuChecked(main.app.Snapshot())
+
+	n.notchSetMode(app.PlayModeRandom)
+
+	if !menuItemChecked(main.menu, menuPlayModeIDPrefix+string(app.PlayModeRandom)) {
+		t.Error("刘海里切到随机之后，应用菜单上「随机」那一项没打钩")
+	}
+	if menuItemChecked(main.menu, menuPlayModeIDPrefix+string(app.PlayModeLoop)) {
+		t.Error("刘海里切到随机之后，应用菜单上「循环」那一项还打着钩")
+	}
+}
+
+// TestNotchSetModeWithoutMainDoesNotPanic 钉刘海外壳没有主窗那一半（`s.main`
+// 是 nil，比如测试里手搓出来的零值外壳）时切档不炸。
+func TestNotchSetModeWithoutMainDoesNotPanic(t *testing.T) {
+	n, _ := newNotchShell(t)
+	n.main = nil
+	n.notchSetMode(app.PlayModeRandom)
+	if got := n.app.Snapshot().PlayMode; got != app.PlayModeRandom {
+		t.Fatalf("PlayMode 是 %v，want random", got)
 	}
 }
