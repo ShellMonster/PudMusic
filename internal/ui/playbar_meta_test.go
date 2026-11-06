@@ -9,20 +9,21 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// 播放条上的 UP 名、收藏、下载（对照审计的 A23）。
+// 播放条上的 UP 名、下载（对照审计的 A23；「收藏」那一枚在喜欢歌单原型里
+// 去掉了，见 `playbar_like_remove_test.go`）。
 //
 // 这一组盯三件人眼能看见的事：
 //
 //	UP 名摆出来了，而且**点得动**（进的是那个 UP 主的空间，不是首页）
-//	收藏 / 下载两个键摆出来了，字没被截
+//	下载键摆出来了，图形和别的键认得出
 //	加了这些之后**歌名没有被挤没**——挤没了之后界面上看不出坏了（字还在那儿，
 //	只是一个字一行）
 
 // metaBarTester 只画播放条，State 从外面传进来（和 `qualityBarTester` 一样）。
 //
-// ⚠️ **它背后是一个空的 App**，所以第三段那三枚键里只有「收藏」在（分集要看
-// 这一首有几集，赞要看这一首能不能赞——两样都得问 App）。要量三枚都在的那一
-// 档，用 `playbar_left_test.go` 里的 `leftBarTester`。
+// ⚠️ **它背后是一个空的 App**，所以左列第三段（评论那一枚）一个不摆——评论
+// 键要看 `CommentsWorthAsking()`，那得问 App。要量有键在的那一档，用
+// `playbar_left_test.go` 里的 `leftBarTester`。
 //
 // 喂 State 而不是真开一首文件，是为了让「有没有 UP 名」「有没有编号」这些
 // 组合都能摆出来——真放的话本地文件压根没有 UP 名。
@@ -98,25 +99,28 @@ func TestAnOwnerWithoutAnIDIsStillShownButGoesNowhere(t *testing.T) {
 	}
 }
 
-// TestThePlayBarHasFavoriteAndDownload 盯那两个键摆出来了。
+// TestThePlayBarHasTheDownloadKey 盯下载键摆出来了。
 //
-// 收藏和下载的接线是 #88 接好的（`s.listActions()` 那一份），这里只管 UI：
-// 键不在，用户就永远不知道有这两件事。
-func TestThePlayBarHasFavoriteAndDownload(t *testing.T) {
+// 下载的接线是 #88 接好的（`s.listActions()` 那一份），这里只管 UI：
+// 键不在，用户就永远不知道有这件事。「收藏」那一枚在喜欢歌单原型里去掉了，
+// 不在播放条上了（`playbar_like_remove_test.go` 钉着）。
+func TestThePlayBarHasTheDownloadKey(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "一首歌", Artist: "某个 UP 主", ArtistMid: 1,
 	}, 1000)
-	for _, want := range []string{"收藏", "下载当前歌曲"} {
-		if !tt.HasText(want) {
-			t.Errorf("播放条上没有「%s」：%q", want, tt.Texts())
-		}
+	if !tt.HasText("下载当前歌曲") {
+		t.Errorf("播放条上没有「下载当前歌曲」：%q", tt.Texts())
+	}
+	// 「收藏」不许回来：播放条上的收藏入口已经去掉了。
+	if tt.HasText("收藏") {
+		t.Errorf("播放条上还摆着「收藏」：原型里这一枚已经去掉了，文字有 %q", tt.Texts())
 	}
 }
 
-// TestNoFavoriteOrDownloadWithoutATrack 盯没歌时那两格一格都不画。
+// TestNoDownloadKeyWithoutATrack 盯没歌时那一格不画。
 //
 // 给一个空的播放条摆两个点不动的键，用户会以为它们坏了。
-func TestNoFavoriteOrDownloadWithoutATrack(t *testing.T) {
+func TestNoDownloadKeyWithoutATrack(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{}, 1000)
 	for _, unwanted := range []string{"收藏", "下载当前歌曲"} {
 		if tt.HasText(unwanted) {
@@ -127,12 +131,15 @@ func TestNoFavoriteOrDownloadWithoutATrack(t *testing.T) {
 
 // TestTheMetaKeysDrawTheirOwnGlyphs 盯那两个键上画的是各自的图形。
 //
-// ⚠️ **「那两个键」是收藏和下载**：下载在播放条**右边**那一组（票 #127），
-// 收藏在左边**第三段**（票 #219）。
+// ⚠️ **「那两个键」是下载和 UP 名**：下载在播放条**右边**那一组（票 #127），
+// UP 名在左边文字列的第二行（票 #219）。「收藏」那一枚在喜欢歌单原型里去掉
+// 了，不再参与这条——它原来比的是「收藏 / 下载两枚图形两两不同」。
 //
 // ⚠️ **这一条是被图标化顶掉的，原来叫 `TestTheMetaLabelsAreNotTruncated`**：它量
 // 「收藏」「下载」那两个字有没有被截短，而**图标没有字可截**——图标版的对应
-// 问题是「两枚图标认不认得出」，所以判据换成了「两枚的图形两两不同」。
+// 问题是「两枚图标认不认得出」，所以判据换成了「两枚的图形两两不同」。收藏键
+// 走了之后，拿 UP 名顶上来（UP 名**有字有下划线**，那一块画的和下载的纯图形
+// 不同，也兜住了「下载键画没画东西」）。
 //
 // 为什么原来那条在图标化之后**变成恒真**、必须换掉而不是留着：它拿按钮框的
 // 宽（28）去比那两个词在**另一个按钮**里的自然宽度（约 26），而 28 > 26 恒成立
@@ -150,7 +157,7 @@ func TestTheMetaKeysDrawTheirOwnGlyphs(t *testing.T) {
 	}, 900)
 
 	seen := map[string]string{}
-	for _, label := range []string{"收藏", "下载当前歌曲"} {
+	for _, label := range []string{"一个名字很长的 UP 主名字", "下载当前歌曲"} {
 		ink := glyphIn(tt, label)
 		if ink == "" {
 			t.Fatalf("播放条上 %q 那一块没画东西：%q", label, tt.Texts())
@@ -183,9 +190,9 @@ const ownerNameMinW = 40
 
 // TestTheOwnerIsNeverSqueezedOutOfExistence 盯 UP 名不会被挤成 0 宽。
 //
-// 窗口窄的时候左边那一块只剩 110，而「收藏」「下载」两个键加两道缝要 112——
-// 不给 UP 名留一个下限的话它一个像素都分不到，而**界面上看不出坏了**：按钮和
-// 那两行字都还在，只有名字没了，用户看到的是「这一首没有 UP 主」。
+// 窗口窄的时候左边那一块余量很小，而右边那一组是**写死的**——不给 UP 名留
+// 一个下限的话它一个像素都分不到，而**界面上看不出坏了**：按钮和那两行字都
+// 还在，只有名字没了，用户看到的是「这一首没有 UP 主」。
 func TestTheOwnerIsNeverSqueezedOutOfExistence(t *testing.T) {
 	const owner = "一个非常非常非常非常非常非常长的 UP 主名字"
 	for _, width := range []int{760, 900, 1000, 1200, 1280} {
@@ -312,15 +319,12 @@ func TestTheOwnerSitsUnderTheTitle(t *testing.T) {
 	}
 }
 
-// TestThePlayBarButtonsSaySoWhenNothingIsPlaying 盯「按下去」有一句话。
+// TestTheDownloadKeySaysSoWhenNothingIsPlaying 盯「按下去」有一句话。
 //
-// 没歌时两个键一格都不画（见上一条），而**有歌、但那一首还没进队列**时它们是
+// 没歌时下载键一格都不画（见上一条），而**有歌、但那一首还没进队列**时它是
 // 摆着的——那就是「画着一个按了没反应的东西」。说一句比按了没反应好解释。
-func TestThePlayBarButtonsSaySoWhenNothingIsPlaying(t *testing.T) {
+func TestTheDownloadKeySaysSoWhenNothingIsPlaying(t *testing.T) {
 	tt, s := metaBarTester(t, app.State{HasTrack: true, Title: "一首歌"}, 1000)
-	if err := tt.Click("收藏"); err != nil {
-		t.Fatalf("点不动「收藏」：%v（画面：%q）", err, tt.Texts())
-	}
 	// 下载键点开一层「下载音频 / 下载视频」弹层（原型 `dl`），选一项才真的下。
 	if err := tt.Click("下载当前歌曲"); err != nil {
 		t.Fatalf("点不动「下载当前歌曲」：%v（画面：%q）", err, tt.Texts())
@@ -331,11 +335,7 @@ func TestThePlayBarButtonsSaySoWhenNothingIsPlaying(t *testing.T) {
 	// 按了之后要有一句话（Toast）。断的是 `Shell.toasts` 而不是画面上的字：
 	// 这一趟只画了播放条，而 Toast 是 `viewMain` 最后那一层——真去量画面的话
 	// 这一条会因为「没画到」而红，而它要验的不是绘制。
-	//
-	// 这一条不点破是哪一句：拿不到身份时两句都是对的答案（见两个按钮各自的
-	// 注释），而这一票要钉的是「有没有一句话」。
-	if got := s.visibleToasts(); len(got) < 2 {
-		t.Errorf("两个键按下去只说了 %d 句，want 2 句（%q）——"+
-			"一个画在那儿、按下去一声不吭的键比不摆更坏", len(got), toastTexts(got))
+	if got := s.visibleToasts(); len(got) == 0 {
+		t.Errorf("下载键按下去一句话都没说——一个画在那儿、按下去一声不吭的键比不摆更坏")
 	}
 }

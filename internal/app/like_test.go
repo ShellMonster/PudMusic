@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -462,4 +463,190 @@ func TestTheLikeIsAskedAgainAfterAFailure(t *testing.T) {
 
 	a.LikeState()
 	waitLike(t, "退避之后那一趟", func() bool { return n.Load() == 2 })
+}
+
+// TestAnOnlineAudioSongIsLikeable 钉住「在线 audio（音乐库条目）和在线 mv
+// 是同一档」：心形的判定只有一把尺——`favTarget` 认的「能不能收进收藏夹」，
+// 它认 `Source == "online"` + `Sid`（audio 用 sid 进 `resource/deal`，
+// `MediaAudio`）。`Type == "audio"` 的条目给的是 sid 不是 bvid，拿
+// `Type == "mv"` 当判据会把整个音乐库的心形判死——而那条路径在 deal 层
+// 明明收（`MediaAudio = 12`）。
+func TestAnOnlineAudioSongIsLikeable(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "1293494", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+
+	if !a.Likeable() {
+		t.Error("在线 audio 被判成不可喜欢了：音乐库条目进不了绑定流程")
+	}
+}
+
+// TestLikeableAndFavTargetAgreeOnTheSameSongs 钉「`favTarget`（ui/folderselect.go）
+// 认得出的那一首，`Likeable` 必须也认」——两边拿的是**同一个 Item 的两个切面**，
+// 一处松一处紧，「喜欢」心就成了「摆在那儿却点了说『还没有可以收藏的身份』」
+// 的死键。
+//
+// 🔴 **audio 是曾经劈叉的那一种**：`Likeable` 早先只认 `Type == "mv"`，而
+// `favTarget` 连 `Type == "audio"` 也认（`resource/deal` 收 `MediaAudio`）——
+// 于是音乐库那一首在满屏 / 迷你 / 刘海上**看得见心形**（`Likeable` 的画布），
+// 点下去却走不通——看得见、点不通。
+//
+// ⚠️ `favTarget` 在 ui 包里，这里直接比对它认的那条规则（`Source=="online"`
+// + `Sid` 可解析 + `Type` 落在 mv/audio）：`likeTarget` 和它必须是同一把尺。
+func TestLikeableAndFavTargetAgreeOnTheSameSongs(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	for _, it := range []Item{
+		{Source: "online", Type: "mv", Bvid: "BV1", Sid: "11"},
+		{Source: "online", Type: "audio", Sid: "22"},
+		{Source: "local", Type: "local", Path: "/tmp/x.flac"},
+		{Source: "online", Type: "mv", Bvid: "BV2"}, // 没 Sid：两边都先认不出
+	} {
+		// favTarget 那一半：Source=online + Sid 能解析成正数 + Type 是 mv/audio。
+		rid, err := parseFavRid(it)
+		favOK := it.Source == "online" && err == nil && rid > 0 &&
+			(it.Type == "mv" || it.Type == "audio")
+		// ⚠️ **不走播放那一路**：Append + selectAt 直接把这一首设为当前项，
+		// 不开流、不碰网络——这一条断的是**判定**，不是播放。
+		a.Queue().Append(it)
+		a.queue.selectAt(len(a.Queue().Items()) - 1)
+		if favOK && !a.Likeable() {
+			t.Errorf("favTarget 认得出 %+v，Likeable 却说不行：心形摆在那儿却点不通", it)
+		}
+	}
+}
+
+// parseFavRid 是 `favTarget` 里那一半的镜像：把 `Sid` 解析成 avid。
+// 它单独一个函数是为了让「解析规则漂了」只在一处改——`favTarget` 改判据
+// 时这里会跟着红。
+func parseFavRid(it Item) (int64, error) {
+	return strconv.ParseInt(it.Sid, 10, 64)
+}
+
+// TestLikeStateAsksCollResourceCheckForAudio 钉「在线 audio 的「收没收藏」走
+// `coll-resource-check`（sid / MediaAudio），不是按 mv 那条 relation 问——
+// relation 接口不收 auid，拿 bvid 当键的整个缓存对 audio 返回的永远是空关系，
+// 于是喜欢心形在加入绑定歌单之后还是空心。
+func TestLikeStateAsksCollResourceCheckForAudio(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	var askedRid atomic.Int64
+	var askedTyp atomic.Int64
+	a.collCheck = func(_ context.Context, rid int64, typ int) (bool, error) {
+		askedRid.Store(rid)
+		askedTyp.Store(int64(typ))
+		return true, nil
+	}
+
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "1293494", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+
+	a.LikeState()
+	waitLike(t, "coll-resource-check 那一趟回来了", a.LikeAsked)
+
+	if got := askedRid.Load(); got != 1293494 {
+		t.Errorf("coll-resource-check 问的 rid = %d，want 1293494（sid 本身）", got)
+	}
+	if got := askedTyp.Load(); got != int64(bili.MediaAudio) {
+		t.Errorf("coll-resource-check 问的 type = %d，want %d（audio）", got, bili.MediaAudio)
+	}
+	if !a.LikeState().Favorited {
+		t.Error("audio 已经收过，LikeState().Favorited 却是 false——心形会一直是空心")
+	}
+}
+
+// TestLikingAnAudioSongFillsTheHeart 钉「audio 收进绑定歌单成功之后，当前
+// 这一首的心形要变实心」——「问过了、没收过」和「问过之后收过」在界面上是
+// 两种长相，而写成功那一趟**自己知道答案**，不必再等一次 relation。
+func TestLikingAnAudioSongFillsTheHeart(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+	a.collCheck = func(context.Context, int64, int) (bool, error) { return false, nil }
+
+	a.LikeState()
+	waitLike(t, "问过收没收藏了", a.LikeAsked)
+	if a.LikeState().Favorited {
+		t.Fatal("没收过却显示收过")
+	}
+
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitLikedResult(t, a, 2*time.Second)
+
+	if !a.LikeState().Favorited {
+		t.Error("收进绑定歌单那一趟成了，心形还是空心——写成功的答案没记进关系缓存")
+	}
+}
+
+// TestLikeStateForAudioBelongsToItsOwnSid 钉「audio 的关系缓存属于它的
+// sid，换歌就作废」：缓存键不带类型 / 不带 sid 的话，上一首 audio 的关系会
+// 挂在下一首 audio 上（和 mv 换歌同一个病）。
+func TestLikeStateForAudioBelongsToItsOwnSid(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.collCheck = func(_ context.Context, rid int64, typ int) (bool, error) {
+		return rid == 111, nil // 只有第一首收过
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "111", Title: "第一首"})
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "222", Title: "第二首"})
+
+	a.queue.selectAt(0)
+	a.LikeState()
+	waitLike(t, "第一首问过了", a.LikeAsked)
+	if !a.LikeState().Favorited {
+		t.Fatal("第一首收过却显示没收过")
+	}
+
+	a.queue.selectAt(1)
+	a.LikeState()
+	waitLike(t, "第二首问过了", a.LikeAsked)
+	if a.LikeState().Favorited {
+		t.Error("第二首还没收过，心形却是第一首那一趟给的实心——缓存不认歌")
+	}
+}
+
+// TestAStaleAudioCheckCannotUnfillTheHeart 钉「写成功之后、早发出的那一趟
+// 收藏态检查才回来」这个时序：LikeState 触发 coll-resource-check 的瞬间
+// 用户就点了喜欢，`FavoriteIntoBound` 先一步把 Favorited 标实——随后才回
+// 来的 check 说的是「收之前问过时的答案（没收）」，不许把它当成「问过
+// 之后还是没收」把实心抹掉。曾经出过这病：心形在写成功的下一帧又变回
+// 空心，直到换歌重进才亮。
+func TestAStaleAudioCheckCannotUnfillTheHeart(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+
+	// 卡住那一趟「收没收藏」——它回来得比写成功晚。
+	release := make(chan struct{})
+	a.collCheck = func(context.Context, int64, int) (bool, error) {
+		<-release
+		return false, nil // 问过那一刻它确实还没收
+	}
+	a.LikeState() // 发出 check，卡住
+
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitLikedResult(t, a, 2*time.Second)
+	if !a.LikeState().Favorited {
+		t.Fatal("收进绑定歌单那一趟成了，心形却是空心——markAudioFavorited 没生效")
+	}
+
+	close(release) // 放走卡住的那一趟 check
+	waitLike(t, "迟到的 check 落完账", func() bool {
+		a.likeMu.Lock()
+		defer a.likeMu.Unlock()
+		return !a.likeWanted && a.likeLoaded
+	})
+
+	if !a.LikeState().Favorited {
+		t.Error("写成功之后才回来的收藏态检查把心形改回了空心——旧答案盖了新答案")
+	}
 }

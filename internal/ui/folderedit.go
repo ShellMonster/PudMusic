@@ -317,9 +317,68 @@ func (s *Shell) flushFolderResults() {
 	if !ok {
 		return
 	}
+	s.dispatchFolderResult(res)
+}
+
+// dispatchFolderResult 把取走的那一条结果分给此刻在等它的人。
+//
+// 单独一个函数：测试要直接喂一条「指定 Op」的结果进来（绕开「后台
+// 真的发了一条那种请求」那一半），见 `likedbind_test.go` 里
+// 「create 档不认 edit 结果」那一条。
+func (s *Shell) dispatchFolderResult(res app.FolderResult) {
+	e := s.folderEdit
 	sel := s.folderSelect
+	lb := s.likeBind
+	// 🔴 **按 `Op` 分派**：这个出口被四种操作共用（拉列表 / 新建·改 /
+	// 选择弹窗的 deal / 封面上传），只按「谁在等」会让先来的一条被错的
+	// 人取走——比如「新建喜欢歌单」那一档把一次普通编辑结果当成建好
+	// 了、拿它的 `Folder` id 去绑定。
+	//
+	// 先处理「不是给谁提交的回执」那几档：
+	switch res.Op {
+	case app.FolderOpListLoad:
+		// 拉「我创建的」失败：正在等列表的弹窗要收到一个可观察的
+		// 失败态（不许永远停在「正在拉收藏夹…」），不是只发一句 toast。
+		if sel != nil && !sel.loaded {
+			sel.loadErr = res.Text
+		}
+		if lb != nil && lb.step == likeBindPick && !lb.loaded {
+			lb.loadErr = res.Text
+		}
+		s.addToast(res.Text, notice.Danger)
+		return
+	}
 	switch {
-	case sel != nil && sel.submitting:
+	case lb != nil && lb.submitting && lb.step == likeBindCreate && res.Op == app.FolderOpCreate:
+		// 「新建喜欢歌单」那一档：建成之后**绑上它**，有 pending 的那一首
+		// 再收进新绑的格子（那一趟的结果走 `TakeLikedResult`，不是这里）。
+		//
+		// ⚠️ **失败要留着弹窗**（同下面 e.submitting 那一支）：名字还敲在
+		// 界面上，关掉等于让他从头敲一遍。
+		lb.submitting = false
+		if !res.OK {
+			s.addToast(res.Text, folderResultTone(false))
+			break
+		}
+		// 绑定的名字用**接口回回来的那个**（B 站会改名字，见
+		// `submitFolder` 里 Upsert 那段注释）。侧栏这一份是刚 Upsert
+		// 进去的，按 id 查回来。
+		title, private := lb.name, !lb.public
+		for _, f := range s.app.SideFavorites(app.FavoritesCreated) {
+			if f.ID == res.Folder {
+				title = f.Title
+				break
+			}
+		}
+		s.app.BindLikedFolder(app.LikedFolder{ID: res.Folder, Title: title, Private: private})
+		if s.likePending != nil {
+			lb.submitting = true
+			s.app.FavoriteIntoBound(lb.rid, lb.contentType)
+			break
+		}
+		s.closeLikeBind()
+		s.addToast("已创建并绑定「"+title+"」", notice.Success)
+	case sel != nil && sel.submitting && res.Op == app.FolderOpSelect:
 		// ⚠️ **成功才关弹窗，失败留着**：失败的时候勾还在界面上，重试一下就行；
 		// 关掉等于让用户从头勾一遍。
 		sel.submitting = false
@@ -327,12 +386,12 @@ func (s *Shell) flushFolderResults() {
 		if res.OK {
 			s.closeFolderSelect()
 		}
-	case e != nil && e.crop.uploading:
+	case e != nil && e.crop.uploading && res.Op == app.FolderOpCover:
 		// ⚠️ **失败也要解除**：只解除成功的话失败之后按钮永远转圈，弹窗再也
 		// 关不掉，而用户看到的是一句「上传失败」加一把转不停的按钮。
 		e.crop.uploading = false
 		s.addToast(res.Text, folderResultTone(res.OK))
-	case e != nil && e.submitting:
+	case e != nil && e.submitting && (res.Op == app.FolderOpCreate || res.Op == app.FolderOpEdit):
 		// ⚠️ **成功要关掉弹窗、失败要留着**：失败的时候用户填的东西还在界面上，
 		// 关掉等于让他从头敲一遍（而失败的原因——比如「没登录」——在弹窗里
 		// 根本看不见）。

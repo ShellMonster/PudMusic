@@ -269,6 +269,85 @@ type collections struct {
 	folderResult  folderResult
 	coverURL      coverURL
 	folderDraft   folderDraft
+	// likedResult 是「喜欢歌单绑定」那一摊的结果出口（likedfolder.go）。
+	likedResult likedResult
+	// favResolve 是 `ResolveFavoriteID`（bvid → avid 那一趟）的结果邮箱：
+	// 后台 worker 只许**入队**，应用结果的那一下由界面帧循环取走再跑
+	// （`TakeFavoriteResolution`）。回调直接改 UI 状态是一次数据竞争，
+	// 见 `FavoriteResolution` 的注释。
+	favResolve favResolve
+}
+
+// favResolve 是 `ResolveFavoriteID` 的结果邮箱（和 `likedResult` /
+// `folderResult` 同一个形状：**取走而不是读**）。
+type favResolve struct {
+	mu        sync.Mutex
+	nextToken uint64
+	unread    []FavoriteResolution
+}
+
+func (r *favResolve) token() uint64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.nextToken++
+	return r.nextToken
+}
+
+func (r *favResolve) add(res FavoriteResolution) {
+	r.mu.Lock()
+	r.unread = append(r.unread, res)
+	r.mu.Unlock()
+}
+
+func (r *favResolve) take() (FavoriteResolution, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.unread) == 0 {
+		return FavoriteResolution{}, false
+	}
+	res := r.unread[0]
+	r.unread = append(r.unread[:0:0], r.unread[1:]...)
+	return res, true
+}
+
+// FavoriteResolution 是「bvid → avid 那一趟」的回执。
+//
+// 🔴 **它的消费方是界面帧循环，不是回调本身**：`ResolveFavoriteID` 的 done
+// 改的是 UI-owned 状态（`ui.Shell` 的 likePending / likeBind / toasts，全
+// 是界面线程读写、不带锁的字段），而后台 worker 是在跑完 HTTP 的那条
+// goroutine 里——直接调它就是一次数据竞争。所以这一趟只许把结果**入队**，
+// `TakeFavoriteResolution` 由帧循环取走之后才轮到 done 跑。
+type FavoriteResolution struct {
+	// Token 是发出那一趟领的号：`ResolveFavoriteID` 返回它，调用方把它
+	// 和回调存在一起，取走结果时对号——多首在飞、旧结果乱序回来时，
+	// 不能拿「最新那次回调」去处理一条早发出的结果。
+	Token uint64
+	// Item 是补好 Sid 的那一首（失败时原样带回——它的 Bvid 还在）。
+	Item Item
+	// Err 是失败原因；nil 就是成了。
+	Err error
+}
+
+// TakeFavoriteResolution 取走邮箱里第一条解析结果。**取走而不是读**，
+// 理由同 `TakeLikedResult`：读而不取的话同一条会在每一帧都发一次。
+func (a *App) TakeFavoriteResolution() (FavoriteResolution, bool) {
+	c := a.collectionsSnapshot()
+	if c == nil {
+		return FavoriteResolution{}, false
+	}
+	return c.favResolve.take()
+}
+
+// PendingFavoriteResolutions 报邮箱里还压着几条。**给测试用**：界面那一侧
+// 要断言「后台那一趟只是入队、还没在帧里应用」时靠它。
+func (a *App) PendingFavoriteResolutions() int {
+	c := a.collectionsSnapshot()
+	if c == nil {
+		return 0
+	}
+	c.favResolve.mu.Lock()
+	defer c.favResolve.mu.Unlock()
+	return len(c.favResolve.unread)
 }
 
 // MountCollections 把歌单内容页要用的零件挂上。**在开窗口之前调**。
@@ -596,7 +675,8 @@ func (a *App) DownloadMedias(ctx context.Context, ref CollectionRef, medias []bi
 }
 
 // ResolveFavoriteID 给一个**只有 bvid** 的条目补上稿件 id（avid）。
-// **立刻返回**，补好之后走 done。
+// **立刻返回**，返回值是这一趟的号（token）——结果走邮箱
+// （`TakeFavoriteResolution`），不是直接调 done。
 //
 // # 为什么要有它
 //
@@ -608,35 +688,43 @@ func (a *App) DownloadMedias(ctx context.Context, ref CollectionRef, medias []bi
 // ⚠️ **bvid → avid 是一次网络往返**（`bili.ArchiveID`），而界面线程上一次都
 // 不许有——所以这里是后台，返回之后界面那边才去开弹窗。
 //
+// 🔴 **done 在界面线程上跑，不在后台这条 goroutine 里**：结果只入队，
+// 由帧循环取走后才轮到 done——它改的是 UI-owned 状态（likePending /
+// toasts），后台直接调它就是一次数据竞争。
+//
 // 已经有 avid（`it.Sid` 非空）的**原样交出去**：问一次是白跑一趟，而白跑的
-// 那一趟会让 B 站以为我们在刷。
-func (a *App) ResolveFavoriteID(it Item, done func(Item, error)) {
+// 那一趟会让 B 站以为我们在刷。**那一半保持同步**——它就在调用方那一帧
+// 上，没有后台一趟可等，进邮箱反而让结果迟一帧。
+func (a *App) ResolveFavoriteID(it Item, done func(Item, error)) uint64 {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		likeDone(done, it, errCollectionsMissing)
-		return
+		return 0
 	}
 	if it.Sid != "" {
 		likeDone(done, it, nil)
-		return
+		return 0
 	}
 	if it.Bvid == "" {
 		likeDone(done, it, errors.New("这一首还没有可以收藏的身份"))
-		return
+		return 0
 	}
+	token := c.favResolve.token()
 	go func() {
 		aid, err := c.refs.Client.ArchiveID(context.Background(), it.Bvid)
 		if err != nil {
 			log.Printf("pudmusic: 问 %s 的稿件 id 失败：%v", it.Bvid, err)
-			likeDone(done, it, err)
-			return
+		} else {
+			it.Sid = strconv.FormatInt(aid, 10)
 		}
-		it.Sid = strconv.FormatInt(aid, 10)
-		likeDone(done, it, nil)
+		c.favResolve.add(FavoriteResolution{Token: token, Item: it, Err: err})
+		a.wakeUI()
 	}()
+	return token
 }
 
-// likeDone 是那个结果回调。done 是 nil 的调用方什么都不用做。
+// likeDone 是同步那一半的结果回调（不进邮箱的那些）。done 是 nil 的
+// 调用方什么都不用做。
 func likeDone(done func(Item, error), it Item, err error) {
 	if done != nil {
 		done(it, err)

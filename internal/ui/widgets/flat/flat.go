@@ -309,11 +309,7 @@ func iconButtonAccent(c *ui.Context, svg *ui.SVG, label string, font float32, di
 // iconAccentOnHover 是「悬停时图形变主色」那一档字色（底色可传）。
 //
 // ⚠️ **不该染色时返回 ok=false**，调用方就**别设**颜色——那样图标接着继承按钮
-// 的字色（赞键那种「没赞是灰的、赞了是主色的」就是靠这一条）。
-//
-// 这条判断单独拿出来，是因为**图标键不止一种形状**：赞键那一枚是「图标 + 底下
-// 一圈背景」两层（见 `internal/ui/like.go`），它自己也要这一档主色——而「哪一档
-// 主色」只有这一个决定的地方。
+// 的字色（开了态是主色那一类键就是靠这一条）。
 func iconAccentOnHover(c *ui.Context, disabled, hovered bool, base Base) (ui.Color, bool) {
 	if disabled || !hovered {
 		return ui.Color{}, false

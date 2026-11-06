@@ -365,29 +365,17 @@ var Items = []Item{
 		Tests:    []string{"TestRealClockEveryFuncWakesAndStops"},
 	},
 	{
-		// 第二处：点赞的 2500ms 长按。
-		//
-		// ⚠️ **两个数都要钉**：2500（触发三连）和 500（开始画进度环）不是同一个，
-		// 而环画 2000ms 转满——500+2000 正好是 2500，所以「环转满」和「请求发出去」
-		// 是同一刻。只钉 2500 的话，把环的起点挪到 100ms 那条照样全绿，而用户看到
-		// 的是「按下去立刻开始转圈」。
+		// 喜欢歌单原型把「赞」键和长按三连整个去掉了：原来钉在这里的
+		// 「2500ms 长按三连 / 500ms 起环」和「长按后吞 click」两条证据——
+		// `TestTheRingIsFullJustAsTheTripleGoesOut`、`TestLettingGoEarlyDoesNothing`、
+		// `TestALongPressNeverOpensTheFullScreen` 等——随用例一起删除；新的
+		// 可观察行为「长按不再发三连、松手照旧开满屏」由
+		// `playbar_like_remove_test.go` 这两条钉住（用测试时钟推进）。
 		Category: FakeClock,
-		Spec:     "点赞：按住 2500ms 一键三连，500ms 起进度环；提前松手什么也不发生",
+		Spec:     "长按封面不再发三连：B 站一趟都收不到，松手照旧开满屏",
 		Tests: []string{
-			"TestTheRingIsFullJustAsTheTripleGoesOut",
-			"TestTheRingStartsAfterHalfASecond",
-			"TestLettingGoEarlyDoesNothing",
-		},
-	},
-	{
-		// 那一票的另一半是**手势**而不是时间：长按之后松手补发的那一次 click 必须
-		// 吞掉，否则用户什么都没点全屏却开了（Biu 那边漏了它是一次多余的赞）。
-		Category: FakeClock,
-		Spec:     "长按三连之后补发的那一次 click 被吞掉，而下一次普通点击照旧生效",
-		Tests: []string{
-			"TestALongPressNeverOpensTheFullScreen",
-			"TestAShortPressStillOpensTheFullScreen",
-			"TestTheLongPressIsOffOnceTheSongIsLiked",
+			"TestLongPressingTheCoverDoesNotTriple",
+			"TestHalfLongPressingTheCoverStillOpensFullPlayer",
 		},
 	},
 	{
@@ -1311,6 +1299,8 @@ var Items = []Item{
 		//     建的时候求值，就永远是启动那一刻的那首。
 		//  3. **「赞」「显示评论」的禁用判据用错**：菜单用「有没有歌」，而界面
 		//     上用 `Likeable()` / `CommentsWorthAsking()` —— 两套判据。
+		//     （喜欢歌单原型把菜单里的「赞」那一项去掉了，`TestTheLikeItemUsesTheSameJudgeAsTheInterface`
+		//     随之删除；「赞不在菜单里」由 `TestTheMenuHasNoLikeItem` 钉住。）
 		//  4. **命令表的「进不进菜单」标志和菜单实况脱节** ⇒ 四条命令的
 		//     加速键不跟着设置走 ⇒ 旧键被菜单吃掉 ⇒ 键「失灵」。
 		Spec: "菜单这一批修掉的毛病：⌘M 归系统所有（迷你播放器用 ⌘⇧M）、状态栏「正在播放」跟着歌走、「赞」「显示评论」和界面用同一套判据、菜单里每一条命令项的加速键都跟着设置走",
@@ -1319,13 +1309,13 @@ var Items = []Item{
 			"TestTheMenuDoesNotClaimCommandMForSomethingElse",
 			"TestTheNowPlayingLineFollowsTheCurrentSong",
 			"TestTheTrayPlaybackItemsAreDisabledWithoutATrack",
-			"TestTheLikeItemUsesTheSameJudgeAsTheInterface",
 			"TestTheCommentsItemUsesTheSameJudgeAsTheInterface",
 			"TestEveryCommandItemInTheMenuGetsItsShortcutRefreshed",
 			"TestTheMiniPlayerMenuItemCarriesItsShortcut",
 			"TestTheMiniPlayerMenuItemRunsTheCommand",
 			"TestTheCommandNamesAndTheSettingsPageAgree",
 			"TestTheDeveloperToolsOnlyShowInDevelopmentBuilds",
+			"TestTheMenuHasNoLikeItem",
 			"TestThePlayModeItemsAreStillRadiosAfterTheFix",
 			"TestTheMiniPlayerIsInTheWindowColumn",
 			"TestTheWindowColumnStillHasTheSystemItems",
@@ -2673,9 +2663,10 @@ var Items = []Item{
 			// 「不用瞄得准」的那一半：点击区比图形大，而且留出来的那一圈按得中。
 			"TestTheHitAreaIsBiggerThanTheGlyph",
 			"TestTheRoundKeyKeepsItsEdge",
-			// 状态变了图要跟着换：播放/暂停、赞没赞、播放模式四档各画各的。
+			// 状态变了图要跟着换：播放/暂停、播放模式四档各画各的。
+			// （赞键在喜欢歌单原型里去掉了，`TestTheLikeKeyDrawsItsOwnIcon`
+			// 随之删除。）
 			"TestThePlayAndPauseKeysSwapGlyphs",
-			"TestTheLikeKeyDrawsItsOwnIcon",
 			"TestEveryPlayModeHasItsIcon",
 			"TestEveryVolumeLevelHasItsIcon",
 			// 「**哪一档配哪一张**」——上面那几条断的是「两张不一样」，断不了
@@ -3205,7 +3196,11 @@ var Items = []Item{
 		Category: Platform,
 		// issue 219：播放条左边改成上游那**三段**——封面 │ 歌名·UP名 │
 		// 分集·收藏·赞（**横着并排**的一行）；UP 名**左对齐**；第二行与歌名
-		// 之间的空隙是上游那个（`space-y-1` = 4）；三枚键的图标是 **18**。
+		// 之间的空隙是上游那个（`space-y-1` = 4）；键的图标是 **18**。
+		//
+		// ⚠️ **喜欢歌单原型之后第三段只剩「评论」一枚**：「赞」「收藏」两枚键
+		// 连同数量角标一起去掉了（「分集」挪在右列）——这一条的形状跟着变成
+		// 「封面 │ 歌名·UP名 │ 评论」，键不挪位置那一条盯的是评论键。
 		//
 		// 🔴 **判据全是画面上的位置和尺寸**：改之前三枚键在**歌名下面那一行**，
 		// 而那也是一个「三枚键」的样子——键还是那三枚、也还点得动，**界面上
@@ -3214,21 +3209,20 @@ var Items = []Item{
 		// ⚠️ **UP 名那一格原来也是「看不出坏了」**：它是一块 `Grow(1)` 的按钮，
 		// 而框架的按钮内容**默认居中**——那句话飘到了那一段的中间（实测歌名在
 		// x=80、UP 名在 x=219），而上游是 `items-start` 的普通 `span`。
-		Spec: "播放条左边是三段：封面 │ 歌名·UP名 │ 分集·收藏·赞（横着并排的一行）；UP 名和歌名左对齐；第二行与歌名之间的空隙是 4；三枚键的图标是 18；音质徽章是短版（它挤在歌名右边，被摊扁就点不准了）",
+		Spec: "播放条左边是三段：封面 │ 歌名·UP名 │ 评论（喜欢歌单原型之后只剩这一枚；分集挪在右列）；UP 名和歌名左对齐；第二行与歌名之间的空隙是 4；键的图标是 18；音质徽章是短版（它挤在歌名右边，被摊扁就点不准了）",
 		Tests: []string{
-			// 三段横着摆（三枚键在文字列**右边**、在同一条水平线上、次序是
-			// 分集 → 收藏 → 赞）。
+			// 三段横着摆（评论键在文字列**右边**、在同一条水平线上）。
 			"TestTheLeftBlockIsThreeSegments",
 			// UP 名左对齐（和歌名同一个左沿）。
 			"TestTheOwnerNameIsLeftAlignedWithTheTitle",
 			// 第二行与歌名之间的空隙是 4（上游的 `space-y-1`）。
 			"TestTheGapBetweenTheTitleAndTheOwnerName",
-			// 三枚键的图标是 18（画面上的墨迹大小）。
-			"TestTheThreeLeftKeysUseTheUpstreamIconSize",
+			// 键的图标是 18（画面上的墨迹大小）。
+			"TestTheLeftKeysUseTheUpstreamIconSize",
 			// 音质徽章**够短**（它是控件：挤窄它就是「点不准」和「读不出来」）。
 			"TestTheQualityChipIsShortEnoughToSitNextToTheTitle",
-			// 分集那一枚出现/消失的时候，收藏和赞**不挪位置**。
-			"TestTheLeftKeysStayPutWhenThePartsKeyAppears",
+			// 分集那一枚出现/消失的时候，评论键**不挪位置**。
+			"TestTheLeftKeyStaysPutWhenThePartsKeyAppears",
 		},
 	},
 	{

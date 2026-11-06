@@ -194,6 +194,9 @@ type likeEnv struct {
 	tt *mygoui.Tester
 	fc *fakeClock
 	f  *biliFixture
+	// dealBili 是「收藏夹那一摊」挂的那一台（`folderBili`）。只在绑了
+	// 收藏夹的用例里非空——`favEnv` 填它，其它 likeEnv 是 nil。
+	dealBili *folderBili
 }
 
 // newLikeEnv 建一个**正在放 B 站 mv** 的界面，**假时钟**已经换上。
@@ -251,10 +254,12 @@ func playTheLikeSong(t *testing.T, f *biliFixture, width int, waitAsked bool) *l
 	}
 	waitFrames(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
 
-	// 赞没赞是**每一帧**问 App 要的，而问 App 会触发那一趟。等到问回来为止：
-	// 没问回来之前长按是关着的（likeArmed，见 like.go），用例在那一段量到的
-	// 东西没有意义。
+	// 赞没赞是**每一帧**问 App 要的，而问 App 会触发那一趟。等到问回来为止。
+	//
+	// ⚠️ **喜欢歌单那一票之后，播放条上没有谁每帧调 `LikeState` 了**（赞键
+	// 走了）：手动问一次把它发出去，再等它回来。
 	if waitAsked {
+		s.app.LikeState()
 		waitFrames(t, tt, "赞没赞问回来了", func() bool { return s.app.LikeAsked() })
 	} else if s.app.LikeAsked() {
 		t.Fatal("赞没赞问回来了 —— 这一条要的是「一直没问回来」那一段")
@@ -284,7 +289,7 @@ func playTheLikeSong(t *testing.T, f *biliFixture, width int, waitAsked bool) *l
 // 名字短的时候第二行只剩三个键，而那一行到底还剩多少宽度就量不到了。
 func likeItem() app.Item {
 	return app.Item{
-		Source: "online", Type: "mv", Bvid: likeBvid, Cid: "1",
+		Source: "online", Type: "mv", Bvid: likeBvid, Cid: "1", Sid: "90010",
 		Title: "要赞的那一首", Artist: "一个名字很长的 UP 主名字", ArtistMid: 12345,
 	}
 }

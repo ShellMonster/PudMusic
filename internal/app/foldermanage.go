@@ -71,6 +71,13 @@ func (f *folderChoices) put(rid int64, list []bili.CreatedFolder) {
 // 靠内容判重的话失败的那条和成功的那条长得一样。
 type FolderResult struct {
 	ID uint64
+	// Op 是「这是哪一种操作回来的结果」。`folderResult` 这一个出口
+	// 被四种操作共用（拉列表 / 新建·改 / 选择弹窗的 deal / 封面上传），
+	// 界面分派的时候**不能只按「谁在等」**——两个等结果的人同时在场
+	// 时，先来的一条会被错的人取走（「新建喜欢歌单」那一档就把一次
+	// 普通的编辑结果当成建好了，拿它的 `Folder` id 去绑定）。带 Op
+	// 之后，每种等法只认自己那一档的结果。
+	Op FolderOp
 	// OK 是成了没有。!OK 时 Text 是要说的那句人话。
 	OK bool
 	// Text 是要跟用户说的话（无论成败都要说：成了说「已保存」）。
@@ -78,6 +85,30 @@ type FolderResult struct {
 	// ID 是新建 / 改的是哪一个收藏夹。失败时是 0。
 	Folder int64
 }
+
+// FolderOp 是 `FolderResult` 出自哪一种操作。
+type FolderOp int
+
+const (
+	// FolderOpOther 是没细分的那几档（拉详情 / 别的后台结果）——它们
+	// 不送进哪个具体弹窗的「提交中」，按「谁在等」兜底分派。
+	FolderOpOther FolderOp = iota
+	// FolderOpListLoad 是 `LoadCreatedFolders` 拉列表失败回来的结果。
+	// 它和别的失败长得一样是 `OK=false`，但**要送到正在等列表的
+	// 弹窗**（选择弹窗 / 喜欢绑定的 pick 档），不然那个弹窗会永远
+	// 停在「正在拉收藏夹…」。
+	FolderOpListLoad
+	// FolderOpCreate 是「新建收藏夹」回来的结果。`Folder` 是新 id。
+	FolderOpCreate
+	// FolderOpEdit 是「改收藏夹」回来的结果。
+	FolderOpEdit
+	// FolderOpSelect 是选择弹窗那次 deal（放进哪些收藏夹）回来的
+	// 结果。
+	FolderOpSelect
+	// FolderOpCover 是封面上传失败回来的结果（成功不走这个出口，
+	// 走 `TakeCoverURL`）。
+	FolderOpCover
+)
 
 // folderResult 是三个弹窗共用的结果出口。
 type folderResult struct {
@@ -139,7 +170,7 @@ func (a *App) LoadCreatedFolders(rid int64) {
 		list, err := a.fetchCreatedFolders(c, rid)
 		if err != nil {
 			log.Printf("pudmusic: 拉收藏夹列表失败：%v", err)
-			c.folderResult.add(FolderResult{Text: errTextFolder(err)})
+			c.folderResult.add(FolderResult{Op: FolderOpListLoad, Text: errTextFolder(err)})
 			a.wakeUI()
 			return
 		}
@@ -235,7 +266,11 @@ func (a *App) submitFolder(id int64, draft bili.FolderDraft) {
 		}
 		if err != nil {
 			log.Printf("pudmusic: 改收藏夹 %d 失败：%v", id, err)
-			c.folderResult.add(FolderResult{OK: false, Text: folderFailText(id, err)})
+			op := FolderOpCreate
+			if id > 0 {
+				op = FolderOpEdit
+			}
+			c.folderResult.add(FolderResult{Op: op, OK: false, Text: folderFailText(id, err)})
 			a.wakeUI()
 			return
 		}
@@ -258,7 +293,11 @@ func (a *App) submitFolder(id int64, draft bili.FolderDraft) {
 		if id > 0 {
 			text = "收藏夹改好了"
 		}
-		c.folderResult.add(FolderResult{OK: true, Text: text, Folder: info.ID})
+		op := FolderOpCreate
+		if id > 0 {
+			op = FolderOpEdit
+		}
+		c.folderResult.add(FolderResult{Op: op, OK: true, Text: text, Folder: info.ID})
 		a.wakeUI()
 	}()
 }
@@ -283,7 +322,7 @@ func (a *App) UploadCover(dataURL string) {
 		url, err := c.refs.Client.UploadCover(context.Background(), dataURL)
 		if err != nil {
 			log.Printf("pudmusic: 上传封面失败：%v", err)
-			c.folderResult.add(FolderResult{OK: false, Text: "封面传不上去：" + bili.Friendly(err)})
+			c.folderResult.add(FolderResult{Op: FolderOpCover, OK: false, Text: "封面传不上去：" + bili.Friendly(err)})
 			a.wakeUI()
 			return
 		}
@@ -343,11 +382,11 @@ func (a *App) DealFolderMedias(rid int64, contentType int, add, del []int64) {
 	go func() {
 		if err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, add, del); err != nil {
 			log.Printf("pudmusic: 改收藏夹 %d 的内容失败：%v", rid, err)
-			c.folderResult.add(FolderResult{OK: false, Text: "改不了收藏夹：" + bili.Friendly(err)})
+			c.folderResult.add(FolderResult{Op: FolderOpSelect, OK: false, Text: "改不了收藏夹：" + bili.Friendly(err)})
 			a.wakeUI()
 			return
 		}
-		c.folderResult.add(FolderResult{OK: true, Text: dealDoneText(len(add), len(del))})
+		c.folderResult.add(FolderResult{Op: FolderOpSelect, OK: true, Text: dealDoneText(len(add), len(del))})
 		a.wakeUI()
 	}()
 }
@@ -423,7 +462,7 @@ func (a *App) LoadFolder(id int64) {
 		raw, err := c.refs.Client.CollectionInfo(context.Background(), id, bili.CollectionFavorite)
 		if err != nil {
 			log.Printf("pudmusic: 拉收藏夹 %d 的信息失败：%v", id, err)
-			c.folderResult.add(FolderResult{OK: false, Text: "打不开这个收藏夹：" + bili.Friendly(err)})
+			c.folderResult.add(FolderResult{Op: FolderOpOther, OK: false, Text: "打不开这个收藏夹：" + bili.Friendly(err)})
 			a.wakeUI()
 			return
 		}

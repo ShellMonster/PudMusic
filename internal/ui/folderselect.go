@@ -50,6 +50,9 @@ type folderSelect struct {
 	list []bili.CreatedFolder
 	// loaded 是翻完了没有。
 	loaded bool
+	// loadErr 是拉列表失败要说的那句（`FolderOpListLoad` 回来的结果）。
+	// 非空时画「拉不到 + 重试」，不许永远停在「正在拉收藏夹…」。
+	loadErr string
 	// picked 是勾上的那些收藏夹 id。
 	//
 	// ⚠️ **它是 map 不是切片**：勾选是「按一下翻一下」，而界面每一帧都要读它
@@ -146,7 +149,7 @@ func (s *Shell) askFavoriteIDThen(item app.Item) {
 		s.addToast("这一首还没有可以收藏的身份", notice.Warning)
 		return
 	}
-	s.app.ResolveFavoriteID(item, func(fixed app.Item, err error) {
+	s.resolveFavorite(item, func(fixed app.Item, err error) {
 		switch {
 		case err != nil:
 			s.addToast("收藏不了："+bili.Friendly(err), notice.Danger)
@@ -211,6 +214,15 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 		dlgBody(c, "添加到收藏夹", f.title, func() {
 			pl := tok.Of(t)
 			switch {
+			case f.loadErr != "":
+				ui.Row(c).AlignItems(ui.Center).Gap(space.Px8).
+					Margin(space.Px16, space.None, space.None, space.None).Children(func() {
+					ui.Text(c, f.loadErr).FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Err).Shrink(1)
+					if pud.Button(c, "folderpick:retry", pud.Ghost, pud.Sm, "重试", "").Clicked() {
+						f.loadErr = ""
+						s.app.LoadCreatedFolders(f.rid)
+					}
+				})
 			case !f.loaded && len(f.list) == 0:
 				ui.Text(c, "正在拉收藏夹…").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3).
 					Margin(space.Px16, space.None, space.None, space.None)

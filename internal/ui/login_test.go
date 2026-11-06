@@ -144,6 +144,13 @@ func loginTester(t *testing.T, a *app.App) (*mygoui.Tester, *Shell) {
 	t.Helper()
 	// 这一支是「停在登录页」：造 Tester 之前先 Push 好路由，于是 Tester 的第一帧
 	// 画的就是登录页，不用先画整窗再切过去。
+	//
+	// ⚠️ **`loginAutoDisabled` 必须在 `stubbed` 里设，不能在 newTestShell 返回之后**：
+	// `mygoui.NewTester` 自己就会画一帧（`coreNewTester` → `settle` → `runFrame`），
+	// 那一帧里 `syncLogin` 已经能自动 `BeginLogin` 一轮。等 helper 返回再设的话，
+	// 自动那一轮和测试手动 `BeginLogin` 的那一轮就挤在一起——先来的被取消、它
+	// 收尾的 `Lease.Discard` 把登录态代次涨掉，后来的 Commit 撞上 ErrStaleGeneration，
+	// 相位永远停在「已取消登录」。建在 Tester 之前设是**唯一**比那第一帧更早的点。
 	b := newTestShell(t, onApp(a), at(900, 600), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
 			ApplyTheme(c, app.DefaultSettings(""), c.Theme().Dark)
@@ -151,9 +158,10 @@ func loginTester(t *testing.T, a *app.App) (*mygoui.Tester, *Shell) {
 			s.View(c)
 
 		}
+	}), stubbed(func(t *testing.T, s *Shell) {
+		// 旧测试显式调用 BeginLogin，保持它们对轮询时序的控制。
+		s.loginAutoDisabled = true
 	}))
-	// 旧测试显式调用 BeginLogin，保持它们对轮询时序的控制。
-	b.s.loginAutoDisabled = true
 	return b.tt, b.s
 }
 
