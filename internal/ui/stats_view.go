@@ -20,6 +20,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
@@ -421,10 +422,17 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 		pud.TrackHeadMode(c, listW, pud.AlbumModeFor(winW))
 		for i, r := range rows {
 			r := r
+			acts := s.listActions()
 			ev := pud.TrackRow(c, "stats-track:"+r.Key, pud.Track{
 				Index: strconv.Itoa(i + 1), Title: r.Title, Owner: r.Subtitle, AlbumCol: pud.AlbumModeFor(winW),
 				Album:    fmt.Sprintf("本机播放 %d 次", r.Plays),
 				Duration: clockText(time.Duration(r.Ms) * time.Millisecond),
+				// ⚠️ **正在放的那一行要像别的列表一样亮起来**（eq-bars + 歌名
+				// 主色）：行底下没有 `app.Item`，先按 `ItemOfStatsKey` 把聚合键
+				// 拆回一项再交给 `IsPlaying` 判（判据是 `Item.Identity`，和
+				// 拆键同一份口径）。拆不出来的行不算在放——它连是哪一首都认
+				// 不出。不标的话按了播放那一行什么变化都没有，像没按上。
+				Playing: statsRowPlaying(acts, r.Key, st.data.Tracks[r.Key]),
 				Cover: func(c *ui.Context, w, h float32) {
 					imgcache.ViewTitled(c, s.images, "", r.Title, w, h)
 				},
@@ -434,7 +442,6 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 				// `EnqueueAndPlayNow`）：统计行底下没有 `app.Item`，按下去要
 				// 先把聚合键拆回一项（`ItemOfStatsKey`）；拆不出来 /
 				// 放不了都说一句，不按了没反应。
-				acts := s.listActions()
 				item, err := app.ItemOfStatsKey(r.Key, st.data.Tracks[r.Key])
 				switch {
 				case err != nil:
@@ -445,4 +452,23 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 			}
 		}
 	})
+}
+
+// statsRowPlaying 报「本周单曲循环」这一行是不是**正在放的那首**。
+//
+// 行底下没有 `app.Item`（它画的是统计快照），所以按 `ItemOfStatsKey` 把聚合
+// 键拆回一项再交给 `acts.IsPlaying` 判——和按下播放键时拆键是同一条路，
+// 判据自然是同一份口径（`Item.Identity`）。
+//
+// ⚠️ **拆不出来的行当「没在放」**：那种行连身份都认不出，亮起它等于说
+// 「正在放的是它」——那是另一种撒谎。
+func statsRowPlaying(acts list.Actions, key string, snap *app.StatsTrackStat) bool {
+	if acts.IsPlaying == nil {
+		return false
+	}
+	it, err := app.ItemOfStatsKey(key, snap)
+	if err != nil {
+		return false
+	}
+	return acts.IsPlaying(it)
 }
