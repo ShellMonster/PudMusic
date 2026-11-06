@@ -1162,9 +1162,9 @@ type Shell struct {
 	//（`installJumpList`），不用留引用。
 	dockMenuRef *mygo.Menu
 
-	// dockState 是 Dock 菜单上「三项能不能点」在**上一次刷新时**的样子。
-	// ⚠️ **它是三态的**（没刷过 / 没歌 / 有歌），理由见 refreshDockMenu。
-	dockState dockState
+	// dockState 是 Dock 菜单上那些会变的状态在**上一次刷新时**的样子。
+	// ⚠️ **它用来比一遍再改**，理由见 refreshDockMenu。
+	dockState dockMenuState
 
 	// media 是系统媒体会话，由 main 那边 MountMedia 递过来（见 media_mount.go）。
 	//
