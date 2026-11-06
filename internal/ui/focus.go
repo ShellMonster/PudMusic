@@ -67,6 +67,7 @@ var focusNotRegistered = map[string]string{
 	"queue_drawer.go":            "右下角的播放列表抽屉",
 	"partdrawer.go":              "「分 P」那个抽屉",
 	"folderselect.go":            "「放进哪些收藏夹」那个弹窗",
+	"likedbind.go":               "「给喜欢找一个专属歌单」那个弹窗",
 	"lyricssearch.go":            "歌词搜索那个弹窗",
 	"fullplayer.go":              "满屏播放器",
 	"settings_tab_appearance.go": "设置页「外观」Tab 里的字体列表：它是一组设置项，不是内容区的主列表（方向键走位走 Tab 键）",

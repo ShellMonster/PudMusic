@@ -346,6 +346,7 @@ func (s *Shell) pageJustShown() bool {
 // 「提交完了但按钮还在转」，而用户看到的就是「点了没反应」。
 func (s *Shell) viewFolderDialogs(c *ui.Context) {
 	s.flushFolderResults()
+	s.flushLikedResults()
 	s.flushCoverPick()
 	s.syncFolderDialogs()
 
@@ -357,6 +358,7 @@ func (s *Shell) viewFolderDialogs(c *ui.Context) {
 		s.viewCoverCrop(c, &e.crop)
 	}
 	s.viewFolderSelect(c)
+	s.viewLikeBind(c)
 	// 侧栏收藏夹的「删除」二次确认（sidebar_favorites.go）。同样排在这里：
 	// 它是模态的，要盖住整页，而侧栏是折叠的时候就不画东西的那一块。
 	s.viewFavoriteDelete(c)
@@ -369,5 +371,8 @@ func (s *Shell) viewFolderDialogs(c *ui.Context) {
 func (s *Shell) syncFolderDialogs() {
 	if f := s.folderSelect; f != nil {
 		s.syncFolderList(f)
+	}
+	if b := s.likeBind; b != nil && b.step == likeBindPick {
+		s.syncLikeBind(b)
 	}
 }

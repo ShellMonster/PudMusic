@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -32,6 +33,40 @@ func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
 	s.setGroup(c, "folders", "收藏夹显示", func() {
 		s.card(c, "folders", ro, func(cd *setCard) { s.pickFavoriteVisibility(cd, st) })
 	})
+	s.setGroup(c, "liked", "喜欢歌单", func() {
+		s.card(c, "liked", ro, func(cd *setCard) { s.pickLikedFolder(cd, st) })
+	})
+}
+
+// pickLikedFolder 是「喜欢默认放进哪个收藏夹」那一行：绑定状态 + 「更换」
+// /「解绑」。
+//
+// ⚠️ **更换开的是和第一次喜欢同一个弹窗的「挑已有歌单」档**（`likedbind.go`），
+// 只是那时候 `likePending` 是 nil——换绑定本身不收任何一首歌。
+func (s *Shell) pickLikedFolder(cd *setCard, st app.Settings) {
+	bound, ok := s.app.LikedFolder()
+	switch {
+	case !ok:
+		cd.row("liked", "喜欢歌单", "还没有绑定歌单——点行上的「喜欢」时会问一次", func() {
+			if pud.Button(cd.c, "set:liked:bind", pud.Ghost, pud.Sm, "去绑定", "").Clicked() && !cd.ro {
+				s.openLikedPickFromSettings()
+			}
+		})
+	default:
+		privacy := "公开"
+		if bound.Private {
+			privacy = "私密"
+		}
+		cd.row("liked", "喜欢歌单", bound.Title+" · "+privacy+" · 点「喜欢」时自动加入", func() {
+			c := cd.c
+			if pud.Button(c, "set:liked:change", pud.Ghost, pud.Sm, "更换", "").Clicked() && !cd.ro {
+				s.openLikedPickFromSettings()
+			}
+			if pud.Button(c, "set:liked:unbind", pud.Quiet, pud.Sm, "解绑", "").Clicked() && !cd.ro {
+				s.app.UnbindLikedFolder()
+			}
+		})
+	}
 }
 
 // pickMenuVisibility 是「哪些菜单项看得见」那一组开关：每个入口一行，只有标题。
@@ -213,4 +248,17 @@ func mergeHiddenMenuKeys(hidden, keys, visible []string) []string {
 		}
 	}
 	return slices.Compact(slices.Sorted(slices.Values(outside)))
+}
+
+// openLikedPickFromSettings 从设置页开「挑已有歌单」那一档（likePending
+// 为 nil：换绑定本身不收歌）。收藏夹那一摊没挂上时说一声，不悄没声地
+// 开一个永远拉不出列表的弹窗。
+func (s *Shell) openLikedPickFromSettings() {
+	if !s.app.CollectionsMounted() {
+		s.addToast("收藏夹现在打不开", notice.Warning)
+		return
+	}
+	b := &likeBind{open: true, name: "我的喜欢"}
+	s.likeBind = b
+	s.openLikePick(b)
 }
