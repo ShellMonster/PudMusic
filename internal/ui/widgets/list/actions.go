@@ -21,6 +21,13 @@ type Actions struct {
 	// Play 换成从这一首往后的一整段并开始播。给的是从这一首起的全部。
 	Play func(items []app.Item)
 
+	// PlaySource 把当前来源列表换进队列，并从 selected 那一首开始播。
+	//
+	// 它和 Play 的分界是：Play 只接从当前项往后的那一段；PlaySource 保留
+	// 来源列表的完整顺序，只移动当前播放位置。没有接上时，菜单播放动作回退到
+	// Play，保留独立列表测试和特殊页面的既有行为。
+	PlaySource func(songs []Music, selected int)
+
 	// PlayNow 把当前这一首加到队尾并立即播——菜单里那枚「立即播放」。
 	//
 	// # 和 Play 的分界在**队列里剩下什么**

@@ -146,6 +146,38 @@ func TestPlayingAllSaysHowManyWereSkipped(t *testing.T) {
 	})
 }
 
+// TestPlayingACollectionFromTheMenuReplacesAndFiltersInvalidEntries locks the
+// source-list menu behavior: the full loaded collection replaces the old queue,
+// while invalid rows stay out of the new queue.
+func TestPlayingACollectionFromTheMenuReplacesAndFiltersInvalidEntries(t *testing.T) {
+	medias := []map[string]any{
+		mediaOf(1, "正常的一首"),
+		invalidMediaOf(2, "失效的一首"),
+		mediaOf(3, "也正常的一首"),
+	}
+	_, s, tt := collectionShell(t, "12345", medias...)
+	waitSongs(t, tt, s, 3)
+	mountQueueStreaming(t, s.app)
+	seedThreeSongs(t, s.app)
+
+	if err := tt.RightClick("正常的一首"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "收藏夹来源列表替换完成", func() bool {
+		return s.app.Queue().Len() == 2
+	})
+	got := s.app.Queue().Items()
+	if len(got) != 2 || got[0].Bvid != "BV11" || got[1].Bvid != "BV13" {
+		t.Fatalf("切换后队列是 %+v，want BV11、BV13", got)
+	}
+	if !strings.Contains(strings.Join(tt.Texts(), "\n"), "有 1 首放不了") {
+		t.Errorf("没有提示过滤了失效条目：%q", tt.Texts())
+	}
+}
+
 // TestDoubleClickingAnInvalidRowDoesNotAskForAStream 钉住「双击」那一条路。
 //
 // 🔴 **这一条是审查补上的**（票 #624 的评审第 1 条）：双击 / 回车 / 点封面上的

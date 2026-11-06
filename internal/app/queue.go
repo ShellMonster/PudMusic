@@ -1807,6 +1807,58 @@ func (a *App) PlayFrom(items ...Item) error {
 	return nil
 }
 
+// ReplaceAndPlayAt replaces the queue with the source list and starts the selected item.
+//
+// The source list keeps its original order; selecting an item only moves the current
+// position inside the new queue. Invalid items are filtered, and a failed start restores
+// the previous queue and selection.
+func (a *App) ReplaceAndPlayAt(items []Item, selected int) error {
+	if selected < 0 || selected >= len(items) {
+		return fmt.Errorf("来源列表没有第 %d 首", selected+1)
+	}
+	if !CanQueue(items[selected]) {
+		return unplayableOf(UnplayableInvalid)
+	}
+
+	queueable, _ := filterQueueable(items)
+	start := -1
+	for i := range items {
+		if i == selected {
+			break
+		}
+		if CanQueue(items[i]) {
+			start++
+		}
+	}
+	if start < 0 {
+		start = 0
+	} else {
+		start++
+	}
+	if start >= len(queueable) {
+		return unplayableOf(UnplayableInvalid)
+	}
+
+	old := a.queue.Items()
+	cur, hadCur := a.queue.Current()
+	if _, ok := a.queue.Reset(queueable...); !ok {
+		return fmt.Errorf("无法切换播放列表")
+	}
+	item, ok := a.queue.selectAt(start)
+	if !ok {
+		return fmt.Errorf("来源列表没有第 %d 首", selected+1)
+	}
+	if err := a.play(item); err != nil {
+		if _, restored := a.queue.Reset(old...); restored && hadCur {
+			if j := indexOfItem(old, cur); j >= 0 {
+				a.queue.Move(j)
+			}
+		}
+		return err
+	}
+	return nil
+}
+
 // PlayAt 把当前项挪到队列里的第 i 首并放它。队列里没有这一项时返回错误。
 //
 // 这是抽屉里点一行的那条路：**不换队列**（那是 PlayFrom），只是跳过去。

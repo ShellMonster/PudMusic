@@ -249,6 +249,38 @@ func TestPlayAllReplacesTheQueueWithSearchResults(t *testing.T) {
 	assertQueueAndPlaying(t, s.app, want, 0)
 }
 
+// TestChoosingPlayFromSearchMenuReplacesTheWholeSearchList verifies the QQ-style
+// source switch: the context-menu "播放" action keeps the full loaded result list
+// and starts at the row the user chose.
+func TestChoosingPlayFromSearchMenuReplacesTheWholeSearchList(t *testing.T) {
+	st := newSearchStub(24, 24)
+	s, tt := newSearchPage(t, "周杰伦", st)
+	mountQueueStreaming(t, s.app)
+	settleText(t, tt, stubTitle(1, 0))
+	seedThreeSongs(t, s.app)
+
+	if err := tt.RightClick(stubTitle(1, 2)); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFrames(t, tt, "搜索结果替换进队列", func() bool {
+		return s.app.Queue().Len() == 24 && s.app.Queue().CurrentIndex() == 2
+	})
+	got := s.app.Queue().Items()
+	if len(got) != 24 {
+		t.Fatalf("切换后队列有 %d 首，want 24 首", len(got))
+	}
+	if got[0].Bvid != stubBvid(1, 0) || got[2].Bvid != stubBvid(1, 2) {
+		t.Fatalf("切换后队列没有保留完整搜索结果：首项=%q，第三项=%q", got[0].Bvid, got[2].Bvid)
+	}
+	if got := got[s.app.Queue().CurrentIndex()].Bvid; got != stubBvid(1, 2) {
+		t.Fatalf("当前播放是 %q，want %q", got, stubBvid(1, 2))
+	}
+}
+
 // TestPlayAllIsDisabledWhenThereIsNothingToPlay 盯那个按钮的禁用条件：Biu 是
 // `isDisabled={initialLoading || list.length === 0}`（同文件 :174）。一首都没有还
 // 让按，用户点完什么反应都没有，还以为搜索坏了。

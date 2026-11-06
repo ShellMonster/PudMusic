@@ -14,6 +14,7 @@
 package app_test
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -186,5 +187,62 @@ func TestEnqueueAndPlayNowPlaysTheQueuedCopyNotTheCallersCopy(t *testing.T) {
 	}
 	if got := a.Snapshot().Title; got == "列表上的标题" {
 		t.Errorf("播的是调用方递进来的简版（%q），应该是队列里那一份", got)
+	}
+}
+
+// TestReplaceAndPlayAtReplacesTheSourceQueueAndStartsAtTheSelectedSong locks the list-switch behavior:
+// the source list becomes the entire queue, while the clicked song becomes current.
+func TestReplaceAndPlayAtReplacesTheSourceQueueAndStartsAtTheSelectedSong(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 5)
+
+	if err := a.PlayFrom(items(paths[0], paths[1])...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "旧队列开始播", func() bool { return a.Snapshot().Title == "a" })
+
+	if err := a.ReplaceAndPlayAt(items(paths[2], paths[3], paths[4]), 1); err != nil {
+		t.Fatalf("ReplaceAndPlayAt()：%v", err)
+	}
+	waitFor(t, 2*time.Second, "来源列表的选中歌曲开始播", func() bool { return a.Snapshot().Title == "d" })
+
+	got := a.Queue().Items()
+	want := []string{paths[2], paths[3], paths[4]}
+	if len(got) != len(want) {
+		t.Fatalf("切换后队列有 %d 首，want %d", len(got), len(want))
+	}
+	for i, path := range want {
+		if got[i].Path != path {
+			t.Errorf("切换后队列第 %d 首是 %q，want %q", i+1, got[i].Path, path)
+		}
+	}
+	if got := a.Queue().CurrentIndex(); got != 1 {
+		t.Fatalf("当前项下标是 %d，want 1", got)
+	}
+	if got := a.Snapshot().Title; got != "d" {
+		t.Fatalf("当前播放是 %q，want d", got)
+	}
+}
+
+// TestReplaceAndPlayAtRestoresTheOldQueueWhenTheSelectedSongCannotStart locks
+// the failure boundary: a failed source switch must not discard the existing queue.
+func TestReplaceAndPlayAtRestoresTheOldQueueWhenTheSelectedSongCannotStart(t *testing.T) {
+	a := newApp(t)
+	paths := copies(t, 2)
+	if err := a.PlayFrom(items(paths...)...); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 2*time.Second, "旧队列开始播", func() bool { return a.Snapshot().Title == "a" })
+
+	missing := filepath.Join(t.TempDir(), "missing.flac")
+	if err := a.ReplaceAndPlayAt([]app.Item{app.LocalItem(missing), app.LocalItem(paths[1])}, 0); err == nil {
+		t.Fatal("不存在的来源歌曲竟然切换成功了")
+	}
+	got := a.Queue().Items()
+	if len(got) != 2 || got[0].Path != paths[0] || got[1].Path != paths[1] {
+		t.Fatalf("失败后队列变成 %+v，want 原来的两首", got)
+	}
+	if got := a.Queue().CurrentIndex(); got != 0 {
+		t.Fatalf("失败后当前项是 %d，want 0", got)
 	}
 }

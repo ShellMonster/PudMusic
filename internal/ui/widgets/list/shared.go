@@ -109,7 +109,7 @@ func playNow(songs []Music, acts Actions, i int) {
 //
 // 分两档，判据和那两处的菜单、封面反馈**是同一个**（`isUserItem`）：
 //
-//	歌     → `playNow`（放这一首，不换队列，票 #608）
+//	歌     → `playNow`（放这一首，不换队列）
 //	UP 主  → `Play`（进他的空间，`searchresults.go` 的 `openSearchUser`）
 //
 // ⚠️ **别把两档合成一个 `PlayNow`**：搜索页「用户」那一档的 `Play` 是**进空间**，

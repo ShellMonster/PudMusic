@@ -113,6 +113,7 @@ func readFileLimited(path string, limit int64) ([]byte, error) {
 // `list.Actions` 那几个字段。
 func (s *Shell) listActions() list.Actions {
 	acts := list.AppActions(s.app, s.addToast)
+	acts.PlaySource = s.playSourceSongs
 	acts.FavSelect = s.openFolderSelect
 	// 🔴 **复制走 `s.copyText`，不是 `s.wake.writeClipboard`**（票 #685 的对抗性
 	// 审查）：后者**不取号**，于是在途的封面那一趟（后台编 PNG，慢）跑完时问

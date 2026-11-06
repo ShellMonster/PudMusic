@@ -136,6 +136,28 @@ func (s *Shell) playAllSongs(songs []list.Music) {
 	s.addToast(msg, notice.Success)
 }
 
+// playSourceSongs 把来源列表完整换进队列，并从用户点击的那一首开始播。
+//
+// 选中项无效时不动旧队列；其余无效项会被过滤，并把过滤数量告诉用户。
+func (s *Shell) playSourceSongs(songs []list.Music, selected int) {
+	items, selectedIndex, skipped := playSourceItems(songs, selected)
+	if selectedIndex < 0 {
+		if selected >= 0 && selected < len(songs) {
+			s.addToast("这一首放不了（没有可播的稿件）", notice.Warning)
+		}
+		return
+	}
+	if err := s.app.ReplaceAndPlayAt(items, selectedIndex); err != nil {
+		s.addToast("放不了这一首："+err.Error(), notice.Danger)
+		return
+	}
+	msg := "已切换到 " + strconv.Itoa(len(items)) + " 首，开始播放《" + songs[selected].Title + "》"
+	if skipped > 0 {
+		msg += "（有 " + strconv.Itoa(skipped) + " 首放不了，没换进去）"
+	}
+	s.addToast(msg, notice.Success)
+}
+
 // playAllItems 把这一页的行变成队列要的条目：去重，**并去掉放不了的那些**。
 //
 // ⚠️ **去重是必须的**：B 站翻页会重叠，同一个 bvid 落进 loaded 两次就是同一个
@@ -162,4 +184,29 @@ func playAllItems(songs []list.Music) ([]app.Item, int) {
 		items = append(items, m.Item)
 	}
 	return items, skipped
+}
+
+func playSourceItems(songs []list.Music, selected int) ([]app.Item, int, int) {
+	items := make([]app.Item, 0, len(songs))
+	seen := make(map[string]int, len(songs))
+	selectedIndex := -1
+	skipped := 0
+	for i, m := range songs {
+		if existing, ok := seen[m.ID]; ok {
+			if i == selected {
+				selectedIndex = existing
+			}
+			continue
+		}
+		seen[m.ID] = len(items)
+		if !app.CanPlay(m.Item) {
+			skipped++
+			continue
+		}
+		if i == selected {
+			selectedIndex = len(items)
+		}
+		items = append(items, m.Item)
+	}
+	return items, selectedIndex, skipped
 }

@@ -20,11 +20,22 @@ import (
 // recorded 是记动作的桩：菜单项接的是什么操作，全记在这儿。
 type recorded struct {
 	played  [][]app.Item // 每次「从这一首往后听」收到的队列
+	sourced [][]Music    // 每次「播放」切换来源列表收到的完整列表
+	sourceI []int        // 每次「播放」切换来源列表收到的当前下标
 	nowed   []app.Item   // 每次「立即播放」收到的那一首
 	added   [][]app.Item // 每次「添加到队列」收到的
 	nexted  []app.Item   // 每次「下一首播放」收到的
 	opened  []app.Item   // 每次「在…打开」收到的
 	notices []string     // 说过的话
+}
+
+func (r *recorded) sourceActions() Actions {
+	acts := r.actions()
+	acts.PlaySource = func(songs []Music, selected int) {
+		r.sourced = append(r.sourced, append([]Music(nil), songs...))
+		r.sourceI = append(r.sourceI, selected)
+	}
+	return acts
 }
 
 func (r *recorded) actions() Actions {
@@ -131,6 +142,37 @@ func TestChoosingPlayQueuesThisSongAndTheRestAfterIt(t *testing.T) {
 		if got[i].Bvid != want {
 			t.Errorf("队列第 %d 首是 %q，want %q", i+1, got[i].Bvid, want)
 		}
+	}
+}
+
+func TestChoosingPlaySwitchesToTheWholeSourceList(t *testing.T) {
+	rec := &recorded{}
+	_, tt := newList(t, rec.sourceActions(), onlineSongs(5))
+
+	if err := tt.RightClick("在线的歌 C"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rec.sourced) != 1 {
+		t.Fatalf("收到 %d 次来源列表播放，want 1 次", len(rec.sourced))
+	}
+	if got := bvidOf(func() []app.Item {
+		items := make([]app.Item, len(rec.sourced[0]))
+		for i := range rec.sourced[0] {
+			items[i] = rec.sourced[0][i].Item
+		}
+		return items
+	}()); !slices.Equal(got, []string{"BV1", "BV2", "BV3", "BV4", "BV5"}) {
+		t.Errorf("切换来源列表收到 %v，want 完整列表", got)
+	}
+	if got := rec.sourceI[0]; got != 2 {
+		t.Errorf("当前下标是 %d，want 2", got)
+	}
+	if len(rec.played) != 0 {
+		t.Errorf("来源列表播放还走了旧的分段播放：%v", rec.played)
 	}
 }
 

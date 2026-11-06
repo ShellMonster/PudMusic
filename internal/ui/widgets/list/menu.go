@@ -200,7 +200,8 @@ func (l *List) buildMenu(menu *ui.Menu, i int) {
 // 网格复用它，不是「照着再写一份」——菜单项、顺序、「在 B 站打开」还是「在访达
 // 中显示」这些判断只在这一处，列表和网格不可能对不上。
 //
-// playFrom 是从这一首往后放队列，各视图自己接（列表按行，网格按格）。
+// playFrom 是没有接来源列表切换时的兼容回退：从这一首往后放队列。
+// 各视图自己接（列表按行，网格按格）。
 func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom func(int)) {
 	if i < 0 || i >= len(songs) {
 		return
@@ -222,7 +223,7 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 			if item.note {
 				return
 			}
-			doAction(item, i, song, acts, playFrom)
+			doAction(item, i, song, songs, acts, playFrom)
 			return
 		}
 	}
@@ -232,7 +233,7 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 }
 
 // doAction 是菜单项被选中之后做的事。i 是这一项的下标，song 是它那一首。
-func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)) {
+func doAction(item menuItem, i int, song Music, songs []Music, acts Actions, playFrom func(int)) {
 	switch item.key {
 	case "play-now":
 		// 「立即播放」= **放这一首**（票 #608 照上游的 `play()`）：队列里已经有
@@ -244,6 +245,10 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 		}
 		acts.PlayNow(song.Item)
 	case "play":
+		if acts.PlaySource != nil {
+			acts.PlaySource(songs, i)
+			return
+		}
 		playFrom(i)
 	case "play-next":
 		if acts.PlayNext == nil {
