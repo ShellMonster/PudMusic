@@ -1194,6 +1194,7 @@ type Shell struct {
 	// notchPollStop 是刘海窗那个「指针在不在刘海区」轮询的停掉动作
 	//（`every` 给的）。刘海窗关掉时调它（`attachNotchWindow` 的 OnClosed）。
 	notchPollStop func()
+	notchPollMu   sync.Mutex
 
 	// main 是「我是被主窗口开出来的那个」这条边，只在迷你窗口那一侧有值。
 	// 见 `attachMiniWindow`。

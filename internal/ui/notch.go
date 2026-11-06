@@ -95,8 +95,12 @@ type notchShell struct {
 	watched bool
 	unwatch func()
 
-	// polling 是「下一帧 poll 排上了没有」——自适应轮询的去抖。
-	polling bool
+	// pollAt / pollEvery 是界面上排着的下一次 poll：pollAt 是后台那条
+	// ticker 下一跳到点的时刻，pollEvery 是它的间隔。两格都只在界面线程
+	// 读写——后台回调按 clock.go 的规矩只调 `wake.invalidate()`，「到没
+	// 到点」由 `notchPollTick` 拿时钟现算。
+	pollAt    time.Time
+	pollEvery time.Duration
 
 	// active 是「应用是前台吗」：应用失焦时刘海收进屏顶——那时指针在它
 	// 上面的事没人看见，轮询可以放缓。
@@ -248,7 +252,7 @@ func (s *Shell) attachNotchWindow(w *mygo.Window) {
 	// 刘海窗不让 ⌘W / Esc 真的关掉：关了就收不到指针事件了。想关掉走
 	// 菜单「显示/隐藏刘海」或设置开关。
 	w.OnClose(func(e *mygo.CloseEvent) {
-		if !s.quitting {
+		if !s.notchCloseProceeds() {
 			e.PreventDefault()
 		}
 	})
@@ -273,10 +277,25 @@ func (s *Shell) attachNotchWindow(w *mygo.Window) {
 	mygo.App.OnDidResignActive(func() { s.notchSt.active = false })
 }
 
+// notchCloseProceeds 报「这一刻刘海窗的关该放行吗」。
+//
+// ⚠️ **quitting 记的是主窗口那一份**（`installLifecycle` 的 `OnBeforeQuit`
+// 装在主壳上），而退出流程本身要靠框架挨个关窗口走完——刘海窗也在那一列里。
+// 拿自己那份 `quitting`（永远是 false）去拦，⌘Q / 菜单退出 / SIGTERM 触发的
+// quit 全都会被它拦掉：窗口关不掉，进程退不出，只能 SIGKILL（同 `Attach`
+// 里 `planWindowClose` 那条「退出途中不能让设置拦路」的规矩）。
+func (s *Shell) notchCloseProceeds() bool {
+	if s.main != nil {
+		return s.main.quitting
+	}
+	return s.quitting
+}
+
 // releaseNotch 收掉刘海窗自己占着的（逐窗口那一摊），不收应用。
 func boolPtr(b bool) *bool { return &b }
 
 func (s *Shell) releaseNotch() {
+	s.stopNotchPolling()
 	s.closePerWindow()
 }
 
@@ -293,6 +312,9 @@ func (s *Shell) notchSetEnabled(on bool) {
 		return // 测试里没有真窗
 	}
 	if on == s.win.IsVisible() {
+		if !on {
+			s.stopNotchPolling()
+		}
 		s.wake.invalidate()
 		s.watchNotch()
 		return
@@ -305,6 +327,7 @@ func (s *Shell) notchSetEnabled(on bool) {
 		return
 	}
 	s.notchSt.open, s.notchSt.hello = false, false
+	s.stopNotchPolling()
 	s.win.Hide()
 	s.watchNotch()
 }
@@ -396,6 +419,7 @@ func (s *Shell) notchTarget() (w, h float32) {
 func (s *Shell) notchPoll() {
 	n := &s.notchSt
 	if !s.notchEnabled() && !n.hello {
+		s.stopNotchPolling()
 		return
 	}
 	pt := mygo.Screen.CursorScreenPoint()
@@ -441,6 +465,13 @@ func (s *Shell) notchPoll() {
 // notchPollAgain 再排一次 poll：指针在里面或开着的时候 33ms 一跳
 // （跟上动画）；应用活跃或监听没挂上的时候 100ms；不然下一次指针动
 // 会自己再进来。
+//
+// ⚠️ **整个刘海只活着一条 ticker**。1.0.1 的泄漏是回调里又 `EveryFunc`
+// 起新 ticker：旧的不停、新的又起，几条之后应用就被后台唤醒拖垮。这里
+// 反过来：重排先 `stopNotchPolling` 把旧 ticker 停掉，再装新的；后台回调
+// 只递 `wake.invalidate`，什么都不写——「是不是又该 poll 了」由
+// `notchPollTick` 在界面线程拿 `pollAt` 现算，所以「停掉」只是把
+// `pollAt` 清掉并 `stop()`，那一刻之后旧 ticker 再叫也画不出 poll。
 func (s *Shell) notchPollAgain(inside bool) {
 	n := &s.notchSt
 	var d time.Duration
@@ -450,14 +481,76 @@ func (s *Shell) notchPollAgain(inside bool) {
 	case n.active || !n.watched:
 		d = 100 * time.Millisecond
 	}
-	if d == 0 || n.polling {
+	if d == 0 {
+		s.stopNotchPolling()
 		return
 	}
-	n.polling = true
-	s.clock.EveryFunc(d, func() {
-		n.polling = false
-		s.notchPoll()
+	if n.pollEvery == d && s.notchPollingActive() {
+		// 间隔没变：**对齐相位不重排**。1.0.1 里 `polling` 闸顺带扛住了
+		// 「指针每动一下就把下一跳往后推 d」这个 bug——同间隔时别动
+		// `pollAt`（ticker 自己每 d 跳一次，到点由 `notchPollTick` 把
+		// `pollAt` 拨到下一跳）。
+		return
+	}
+	s.stopNotchPolling()
+	n.pollEvery = d
+	n.pollAt = s.clock.Now().Add(d)
+	stop := s.clock.EveryFunc(d, func() {
+		s.wake.invalidate()
 	})
+	s.setNotchPollStop(stop)
+}
+
+// stopNotchPolling 把排着的那条 ticker 停掉。「不排了」的那一帧
+// （`notchPollAgain` 里 `d == 0`）、刘海藏起来（`notchSetEnabled(false)`）、
+// 引导收完藏窗（`notchHideAfterBye`）、窗口关了（`releaseNotch`）都走这里。
+// 可重复调。
+func (s *Shell) stopNotchPolling() {
+	s.stopNotchTicker()
+	n := &s.notchSt
+	n.pollAt, n.pollEvery = time.Time{}, 0
+}
+
+func (s *Shell) stopNotchTicker() {
+	s.notchPollMu.Lock()
+	stop := s.notchPollStop
+	s.notchPollStop = nil
+	s.notchPollMu.Unlock()
+	if stop != nil {
+		stop()
+	}
+}
+
+func (s *Shell) setNotchPollStop(stop func()) {
+	s.notchPollMu.Lock()
+	s.notchPollStop = stop
+	s.notchPollMu.Unlock()
+}
+
+func (s *Shell) notchPollingActive() bool {
+	s.notchPollMu.Lock()
+	defer s.notchPollMu.Unlock()
+	return s.notchPollStop != nil
+}
+
+// notchPollTick 是「后台那条 ticker 刚叫过醒、界面这一帧是不是该再 poll
+// 一次」的判据。它把 `clock.go` 顶上那条规矩落到刘海上：定时器回调不许写
+// Shell 字段，所以「到没到点」不归回调管，归这一帧现算。
+//
+// 返回 true 时调用方（`viewNotch`）**先**把 `pollAt` 挪到下一跳再跑
+// `notchPoll`——`notchPoll` 自己尾部还会调 `notchPollAgain` 重排，先挪走
+// 「已过期」的旧时刻，重排才看得见「下一条还没排」。
+func (s *Shell) notchPollTick() bool {
+	n := &s.notchSt
+	if n.pollAt.IsZero() {
+		return false
+	}
+	now := s.clock.Now()
+	if now.Before(n.pollAt) {
+		return false
+	}
+	n.pollAt = now.Add(n.pollEvery)
+	return true
 }
 
 // ---- 引导（第一次开始播放）----
@@ -525,12 +618,26 @@ func (s *Shell) notchBye() {
 		s.win.SetIgnoreMouseEvents(true)
 	}
 	// 一秒钟之后再 Hide：让「收进去」那一下先画完。
-	time.AfterFunc(time.Second, func() {
-		if !n.hello && !s.notchEnabled() && s.win != nil {
-			s.win.Hide()
-			s.watchNotch()
-		}
-	})
+	time.AfterFunc(time.Second, s.notchHideAfterBye)
+}
+
+// notchHideAfterBye 是引导收掉一秒钟之后那一档：引导没复活、开关也还
+// 关着，就把轮询整摊停掉、窗藏掉、指针监听摘掉。
+//
+// ⚠️ 轮询的停要和 `releaseNotch`/`notchSetEnabled(false)` 那两档一样是
+// 整套 `stopNotchPolling`——ticker 停掉之外 `pollAt`/`pollEvery` 也要清。
+// 只 `stopNotchTicker` 的话那两格还留着「下一跳」的时刻，`viewNotch` 会
+// 拿一条已经死了的欠账当到点，白跑一次 `notchPoll`。
+func (s *Shell) notchHideAfterBye() {
+	n := &s.notchSt
+	if n.hello || s.notchEnabled() {
+		return
+	}
+	s.stopNotchPolling()
+	if s.win != nil {
+		s.win.Hide()
+	}
+	s.watchNotch()
 }
 
 // notchKeep 是引导上那个「开启」键：把开关拨到开。
@@ -562,6 +669,12 @@ func (s *Shell) toggleNotchPlayer() {
 func (s *Shell) viewNotch(c *ui.Context) {
 	s.applyFrameTheme(c)
 	s.images.BeginFrame(c.Now())
+	// 后台那条 ticker 叫醒了这一帧：把欠下的那次 poll 在主线程跑掉。
+	// 其余唤醒（指针动、播放状态变）由事件自己调 `notchPoll`，这里不重跑——
+	// 每帧都跑会变成「每画一帧读一次屏幕指针」的白花钱。
+	if s.notchPollTick() {
+		s.notchPoll()
+	}
 	st := s.app.Snapshot()
 	n := &s.notchSt
 
