@@ -1,6 +1,7 @@
 /build/
 /.mygo/
 mygo_windows_*.syso
+/prototype/
 
 # 本地研究材料、维护者计划与开发工具状态。
 _research/
