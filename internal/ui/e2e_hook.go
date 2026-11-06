@@ -119,3 +119,28 @@ func E2ELaunchArgs() []string {
 	defer e2eHandoffMu.Unlock()
 	return append([]string(nil), e2eHandoffArgs...)
 }
+
+// ---- 播放释放钩子 ----
+//
+// Windows 的 E2E 在子测试末尾要删 `t.TempDir()` 里的素材，而文件此刻正被
+// 播放器句柄占着——Windows 不许删一个打开着的文件（Linux/macOS 允许，所以
+// 这条缝只在 Windows 那一族里用到）。这里给 e2e 一条「把当前这首清掉」
+// 的命令：走 `App.ClearTrack` 那条正常入口（状态摘干净 + `p.Close()`），
+// 文件句柄随之释放，TempDir 才删得掉。
+
+// E2EStopPlayback 在主线程上把正在放的那一首清掉（同 `App.ClearTrack`：
+// 停掉播放、关掉解码器和文件句柄）。没有歌在放时是空操作。
+//
+// ⚠️ **走 `mygo.RunOnMain`**：和托盘点击同一条执行环境——`ClearTrack`
+// 会触发 `wake`/`publishMedia`，而这两件要在主线程上做。
+func E2EStopPlayback() {
+	e2eShellMu.Lock()
+	s := e2eShell
+	e2eShellMu.Unlock()
+	if s == nil || s.app == nil {
+		return
+	}
+	mygo.RunOnMain(func() {
+		s.app.ClearTrack()
+	})
+}

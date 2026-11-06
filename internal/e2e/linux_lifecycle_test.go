@@ -191,6 +191,24 @@ func trayHookCallOK(t *testing.T, command string) (string, bool) {
 	return strings.TrimSpace(line), true
 }
 
+// stopPlayback 让真应用把正在放的那一首**当场清掉**（`App.ClearTrack`），
+// 它持有的文件句柄随之放开。
+//
+// ⚠️ **Windows 必须有这一步**：`t.TempDir()` 里的素材正被播放器打开时，
+// Windows 不许删它（「being used by another process」）。子测试末尾先让
+// 应用把文件放开，cleanup 那一删才落得下去。Linux/macOS 上这句是空操作
+// 的成本（`ClearTrack` 照样跑，只是没人等着删文件）。
+//
+// ⚠️ **socket 起不来时不致命**：`.tray` 那条 AF_UNIX 在 Windows 上有路径
+// 长度上限——起不来的话靠 TempDir 挂在父测试那一层兜底（进程被 `stop`
+// 收掉之后内核自会放句柄）。
+func stopPlayback(t *testing.T) {
+	t.Helper()
+	if got, ok := trayHookCallOK(t, "playback.stop"); ok && got != "ok" {
+		t.Logf("playback.stop 回了 %q（want ok）", got)
+	}
+}
+
 // waitForProcessGone 等 automation socket **不再应答**——进程退出去之后
 // socket 那端就没有人听了，下一次 `windows` 调用会拿到 EOF/超时。
 //

@@ -52,6 +52,13 @@ func TestWindowsLifecycle(t *testing.T) {
 	client, stop := startRealApp(t)
 	defer stop()
 
+	// ⚠️ **素材目录挂在父测试上**：Windows 不许删一个**正被打开**的文件，
+	// 而子测试末尾 app 还在播（`stop` 是父测试的 `defer`，要等全部子测试
+	// 跑完才杀进程）。`TempDir` 挂在父测试上之后 cleanup 在 `stop` 收掉
+	// 进程、内核放开句柄**之后**才跑；再配子测试末尾的 `playback.stop`
+	//（`App.ClearTrack` 当场放掉句柄），素材在退出前就已经不被占用了。
+	tmp := t.TempDir()
+
 	t.Run("内容窗口起得来", func(t *testing.T) {
 		window := firstContentWindow(t, client)
 		// 「布丁音乐」那一栏在每个路由页的顶栏上。
@@ -73,7 +80,7 @@ func TestWindowsLifecycle(t *testing.T) {
 		// 「正在放」。用真素材（`EnqueueAndPlayNow` 真的会解它）。
 		src := filepath.Join(repoRoot(t),
 			"internal", "service", "audio", "flacdec", "testdata", "stereo16.flac")
-		flac := filepath.Join(t.TempDir(), "递过去.flac")
+		flac := filepath.Join(tmp, "递过去.flac")
 		b, err := os.ReadFile(src)
 		if err != nil {
 			t.Fatalf("读不到测试素材 %s：%v", src, err)
@@ -121,6 +128,7 @@ func TestWindowsLifecycle(t *testing.T) {
 			t.Fatalf("第二个实例递过来的 .flac 没有放起来：\n%s",
 				treeDump(t, client, window))
 		}
+		stopPlayback(t)
 	})
 
 	t.Run("托盘菜单的退出项真的让进程退出来", func(t *testing.T) {

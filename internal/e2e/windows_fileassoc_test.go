@@ -60,6 +60,14 @@ func TestWindowsFileAssociations(t *testing.T) {
 	// ⚠️ **文件由「第二个实例」转交，不是冷启动参数**：理由同
 	// `linux_fileassoc_test.go` 头上那一段——冷启动时窗口还没建出来，
 	// 那句提示的 5 秒寿命可能在第一帧之前就耗尽。
+	//
+	// ⚠️ **素材目录挂在父测试上**：Windows 不许删一个**正被打开**的文件，
+	// 而子测试末尾 app 还在播（`stop` 是父测试的 `defer`，要等全部子测试
+	// 跑完才杀进程）。把 `TempDir` 挂在**父测试**上之后，cleanup 在
+	// `stop` 收掉进程、内核放开句柄**之后**才跑；再配每个子测试末尾的
+	// `playback.stop`（让 `App.ClearTrack` 当场放掉句柄），子测试自己的
+	// 素材在退出前就已经不被占用了。
+	tmp := t.TempDir()
 	client, stop := startRealApp(t)
 	defer stop()
 	window := firstContentWindow(t, client)
@@ -70,7 +78,7 @@ func TestWindowsFileAssociations(t *testing.T) {
 		// 另一件事（Windows 上的 Media Foundation 解不了一个假 MP4）。
 		src := filepath.Join(repoRoot(t),
 			"internal", "service", "audio", "mfadec", "testdata", "aaclc-stereo.m4a")
-		m4a := filepath.Join(t.TempDir(), "歌.m4a")
+		m4a := filepath.Join(tmp, "歌.m4a")
 		b, err := os.ReadFile(src)
 		if err != nil {
 			t.Fatalf("读不到测试素材 %s：%v", src, err)
@@ -90,6 +98,7 @@ func TestWindowsFileAssociations(t *testing.T) {
 		if !waitForTreeNudged(t, client, window, "正在放", 30*time.Second) {
 			t.Fatalf("双击 .m4a 之后窗口里没有「正在放」：\n%s", treeDump(t, client, window))
 		}
+		stopPlayback(t)
 	})
 
 	t.Run("一个 FLAC 文件真的放起来", func(t *testing.T) {
@@ -102,7 +111,7 @@ func TestWindowsFileAssociations(t *testing.T) {
 		// 假文件会走 `reportOpenFileFailure`——那验的是另一件事。
 		src := filepath.Join(repoRoot(t),
 			"internal", "service", "audio", "flacdec", "testdata", "stereo16.flac")
-		flac := filepath.Join(t.TempDir(), "歌.flac")
+		flac := filepath.Join(tmp, "歌.flac")
 		b, err := os.ReadFile(src)
 		if err != nil {
 			t.Fatalf("读不到测试素材 %s：%v", src, err)
@@ -115,6 +124,7 @@ func TestWindowsFileAssociations(t *testing.T) {
 		if !waitForTreeNudged(t, client, window, "正在放", 20*time.Second) {
 			t.Fatalf("双击 .flac 之后窗口里没有「正在放」：\n%s", treeDump(t, client, window))
 		}
+		stopPlayback(t)
 	})
 
 	t.Run("一个 WMA 文件有一句人话", func(t *testing.T) {

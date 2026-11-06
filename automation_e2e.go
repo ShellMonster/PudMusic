@@ -94,6 +94,12 @@ func handleTrayHook(conn net.Conn) {
 		} else {
 			reply = strings.Join(args, " ") + "\n"
 		}
+	} else if len(fields) == 1 && fields[0] == "playback.stop" {
+		// 「把正在放的那一首停掉、文件句柄放掉」——Windows 上 E2E 的
+		// `t.TempDir()` 删不掉一个正被播放器占着的文件，子测试末尾要先让
+		// 应用把它放开（`ui.E2EStopPlayback` → `App.ClearTrack`）。
+		ui.E2EStopPlayback()
+		reply = "ok\n"
 	} else if len(fields) == 2 {
 		switch fields[0] {
 		case "tray.enabled":
