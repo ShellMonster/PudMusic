@@ -194,6 +194,9 @@ type likeEnv struct {
 	tt *mygoui.Tester
 	fc *fakeClock
 	f  *biliFixture
+	// dealBili 是「收藏夹那一摊」挂的那一台（`folderBili`）。只在绑了
+	// 收藏夹的用例里非空——`favEnv` 填它，其它 likeEnv 是 nil。
+	dealBili *folderBili
 }
 
 // newLikeEnv 建一个**正在放 B 站 mv** 的界面，**假时钟**已经换上。
@@ -286,7 +289,7 @@ func playTheLikeSong(t *testing.T, f *biliFixture, width int, waitAsked bool) *l
 // 名字短的时候第二行只剩三个键，而那一行到底还剩多少宽度就量不到了。
 func likeItem() app.Item {
 	return app.Item{
-		Source: "online", Type: "mv", Bvid: likeBvid, Cid: "1",
+		Source: "online", Type: "mv", Bvid: likeBvid, Cid: "1", Sid: "90010",
 		Title: "要赞的那一首", Artist: "一个名字很长的 UP 主名字", ArtistMid: 12345,
 	}
 }

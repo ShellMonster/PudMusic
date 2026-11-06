@@ -44,11 +44,42 @@ const likeRetryAfter = 15 * time.Second
 
 // Likeable 报「当前这一首能不能赞」。
 //
-// 判据是「这是一个 B 站的 mv」：**本地文件和音乐库条目一律不可赞**（B 站那三个接口
-// 一个都不收音乐库的 `sid`，见 `bili/like.go` 文件头）。界面上照它摆不摆星标。
+// 判据是「这是一首 B 站能收进收藏夹的歌」：**本地文件一律不可**（它没有
+// B 站身份），在线的 mv（avid / bvid）和在线 audio（音乐库 sid）都算——
+// `resource/deal` 两类都收（`MediaVideo` / `MediaAudio`），`favTarget` 认的
+// 也是这一对。界面上照它摆不摆那颗心。
+//
+// ⚠️ **audio 靠 `Sid` 不靠 `Bvid`**：音乐库条目给的是 sid 不是 bvid——拿
+// `Type == "mv"` 当判据会把整个音乐库的心形判死，而那条路径在 deal 层
+// 明明收（`MediaAudio = 12`）。`favTarget` 和这里必须是同一把尺：一处松
+// 一处紧，心就成了「摆在那儿却点了说『还没有可以收藏的身份』」的死键。
 func (a *App) Likeable() bool {
 	it, ok := a.CurrentItem()
-	return ok && it.isOnline() && it.Bvid != "" && it.Type == "mv"
+	if !ok || !it.isOnline() {
+		return false
+	}
+	return it.likeTarget() != 0
+}
+
+// likeTarget 是「这一首能不能走喜欢 / 收藏那一条路」的判定：返回它的
+// B 站身份类型码，0 是「不能」。它和 `favTarget`（`folderselect.go`）是
+// **同一把尺的两个切面**——这里只判「有没有一份够收藏的身份」，不真去
+// 解析 rid（`Sid` 串不一定是个数，那一半交给 favTarget）。
+//
+//	mv   → 有 Bvid 或 Sid 就行（avid 可以事后问出来，见 ResolveFavoriteID）
+//	audio → 要有 Sid（音乐库没有 avid 可问，sid 本身就是 deal 要的）
+func (it Item) likeTarget() int {
+	switch it.Type {
+	case "mv":
+		if it.Bvid != "" || it.Sid != "" {
+			return 1
+		}
+	case "audio":
+		if it.Sid != "" {
+			return 1
+		}
+	}
+	return 0
 }
 
 // LikeState 返回当前这一首的赞 / 藏状态，顺手把没问过的那一次问回来。

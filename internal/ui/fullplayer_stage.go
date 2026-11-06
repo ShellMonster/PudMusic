@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
@@ -248,10 +247,15 @@ func (s *Shell) viewFullStats(c *ui.Context, p tok.Palette) {
 }
 
 // viewFullHeart 是「喜欢」键（原型 `[data-act="like"]`，心形）：用户自己的
-// **喜欢歌单绑定入口**——点开「把这一首放进哪些收藏夹」那个弹窗。
+// **喜欢歌单绑定入口**——和列表行、迷你窗、刘海上那颗心是同一条绑定流程
+// （`likeCurrent` → `likeItem`），不是收藏夹多选框。
 //
 // ⚠️ **它不是 B 站的点赞**（喜欢歌单原型把「赞」从播放器上去掉了）：实心 /
 // 空心说的是「这一首进没进收藏夹」（`LikeState().Favorited`），标签是「喜欢」。
+//
+// ⚠️ **点它走 `likeCurrent`，不是 `openFolderSelect`**：那一半在
+// `likedbind.go`——它负责把弹窗路由回主壳、收掉满屏（满屏盖在弹窗上，
+// 票 #706 的坑），再进绑定三档。
 func (s *Shell) viewFullHeart(c *ui.Context) {
 	p := tok.OfFull(c.Theme())
 	faved := s.app.LikeState().Favorited
@@ -261,16 +265,7 @@ func (s *Shell) viewFullHeart(c *ui.Context) {
 	}
 	b := pud.IconBtn(c, "full:heart", ic, "喜欢", pud.IconOpts{On: faved, Color: p.Text2})
 	if s.withTip(c, b, favTooltip(faved)).Clicked() {
-		it, ok := s.app.PlayingItem()
-		if !ok {
-			s.addToast("这一首还没有取回来，收藏不了", notice.Warning)
-			return
-		}
-		// ⚠️ **先把满屏收掉**（和评论抽屉同一桩事，票 #706）：收藏夹弹窗
-		// 排在 `viewFullPlayer` **之前**建（shell_view.go），满屏盖在它上面
-		// ——不收掉的话，弹窗开在满屏底下，用户必须先把满屏关掉才看得见它。
-		s.closeFullPlayer()
-		s.openFolderSelect(it)
+		s.likeCurrent()
 	}
 }
 

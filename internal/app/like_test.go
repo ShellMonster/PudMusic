@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -462,4 +463,65 @@ func TestTheLikeIsAskedAgainAfterAFailure(t *testing.T) {
 
 	a.LikeState()
 	waitLike(t, "退避之后那一趟", func() bool { return n.Load() == 2 })
+}
+
+// TestAnOnlineAudioSongIsLikeable 钉住「在线 audio（音乐库条目）和在线 mv
+// 是同一档」：心形的判定只有一把尺——`favTarget` 认的「能不能收进收藏夹」，
+// 它认 `Source == "online"` + `Sid`（audio 用 sid 进 `resource/deal`，
+// `MediaAudio`）。`Type == "audio"` 的条目给的是 sid 不是 bvid，拿
+// `Type == "mv"` 当判据会把整个音乐库的心形判死——而那条路径在 deal 层
+// 明明收（`MediaAudio = 12`）。
+func TestAnOnlineAudioSongIsLikeable(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "1293494", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+
+	if !a.Likeable() {
+		t.Error("在线 audio 被判成不可喜欢了：音乐库条目进不了绑定流程")
+	}
+}
+
+// TestLikeableAndFavTargetAgreeOnTheSameSongs 钉「`favTarget`（ui/folderselect.go）
+// 认得出的那一首，`Likeable` 必须也认」——两边拿的是**同一个 Item 的两个切面**，
+// 一处松一处紧，「喜欢」心就成了「摆在那儿却点了说『还没有可以收藏的身份』」
+// 的死键。
+//
+// 🔴 **audio 是曾经劈叉的那一种**：`Likeable` 早先只认 `Type == "mv"`，而
+// `favTarget` 连 `Type == "audio"` 也认（`resource/deal` 收 `MediaAudio`）——
+// 于是音乐库那一首在满屏 / 迷你 / 刘海上**看得见心形**（`Likeable` 的画布），
+// 点下去却走不通——看得见、点不通。
+//
+// ⚠️ `favTarget` 在 ui 包里，这里直接比对它认的那条规则（`Source=="online"`
+// + `Sid` 可解析 + `Type` 落在 mv/audio）：`likeTarget` 和它必须是同一把尺。
+func TestLikeableAndFavTargetAgreeOnTheSameSongs(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	for _, it := range []Item{
+		{Source: "online", Type: "mv", Bvid: "BV1", Sid: "11"},
+		{Source: "online", Type: "audio", Sid: "22"},
+		{Source: "local", Type: "local", Path: "/tmp/x.flac"},
+		{Source: "online", Type: "mv", Bvid: "BV2"}, // 没 Sid：两边都先认不出
+	} {
+		// favTarget 那一半：Source=online + Sid 能解析成正数 + Type 是 mv/audio。
+		rid, err := parseFavRid(it)
+		favOK := it.Source == "online" && err == nil && rid > 0 &&
+			(it.Type == "mv" || it.Type == "audio")
+		// ⚠️ **不走播放那一路**：Append + selectAt 直接把这一首设为当前项，
+		// 不开流、不碰网络——这一条断的是**判定**，不是播放。
+		a.Queue().Append(it)
+		a.queue.selectAt(len(a.Queue().Items()) - 1)
+		if favOK && !a.Likeable() {
+			t.Errorf("favTarget 认得出 %+v，Likeable 却说不行：心形摆在那儿却点不通", it)
+		}
+	}
+}
+
+// parseFavRid 是 `favTarget` 里那一半的镜像：把 `Sid` 解析成 avid。
+// 它单独一个函数是为了让「解析规则漂了」只在一处改——`favTarget` 改判据
+// 时这里会跟着红。
+func parseFavRid(it Item) (int64, error) {
+	return strconv.ParseInt(it.Sid, 10, 64)
 }

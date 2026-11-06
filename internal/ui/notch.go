@@ -924,8 +924,8 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 				ui.Text(c, sub).FontSize(scale.Font(c, scale.Size15)).TextColor(tok.Full.Text2).SingleLine()
 			}
 		})
-		// 喜欢：和迷你窗同一枚心形（heart / heart-on）——喜欢歌单绑定入口，
-		// 不是 B 站点赞（主行右端那枚 ♡）。
+		// 喜欢：和迷你窗同一枚心形（heart / heart-on）——喜欢歌单绑定入口
+		// （`likeCurrent` → 绑定流程），不是 B 站点赞（主行右端那枚 ♡）。
 		if s.app.Likeable() {
 			faved := s.app.LikeState().Favorited
 			name, label := "heart", "喜欢"
@@ -934,7 +934,7 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 			}
 			if pud.IconBtn(c, "notch-like", name, label, pud.IconOpts{
 				Color: tok.Full.Text2, HoverColor: tok.Full.Text, On: faved}).Clicked() {
-				s.favoriteCurrent()
+				s.likeCurrent()
 			}
 		}
 		s.viewNotchSpectrum(c, st)

@@ -882,8 +882,8 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 			}
 			ui.Spacer(c).Grow(1)
 			// 喜欢：原型只在这首歌是 B 站投稿的时候画（`TR[t.id] ? … : ''`）。
-			// 心形是**喜欢歌单绑定入口**（`favoriteCurrent` → 「把这一首放进哪些
-			// 收藏夹」弹窗），不是 B 站点赞；实心 / 空心认「进没进收藏夹」。
+			// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
+			// 点赞，也不是收藏夹多选框；实心 / 空心认「进没进收藏夹」。
 			if st.HasTrack && s.app.Likeable() {
 				faved := s.app.LikeState().Favorited
 				name, label := "heart", "喜欢"
@@ -891,7 +891,7 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 					name, label = "heart-on", "已喜欢"
 				}
 				if pud.IconBtn(c, "mini-like", name, label, pud.IconOpts{On: faved}).Clicked() {
-					s.favoriteCurrent()
+					s.likeCurrent()
 				}
 			}
 			// 歌词：和点封面是同一个开关；卷帘展开时 accent-text（`aria-pressed`）。

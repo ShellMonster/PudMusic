@@ -320,6 +320,46 @@ func TestSettingsShowsAndChangesTheBinding(t *testing.T) {
 	}
 }
 
+// TestAStalePendingDoesNotPolluteTheNextLike 钉「上一次喜欢留下的
+// `likePending` 不会污染下一次喜欢」。
+//
+// 🔴 **残留路径**：「绑定后喜欢」那一趟普通失败（断网）时
+// `flushLikedResults` 的失败支只发提示、不清 `likePending`——它是给
+// 「绑定失效 → 回多选框」那一支留的。留着的 pending 里 `rid` 是**上一
+// 首**的稿件 id。下一次点心形时 `likeItemResolved` 必须**整份替换**它，
+// 不是「看到有 pending 就沿用」——沿用的话这一首会按上一首的 rid 收进
+// 绑定歌单，用户收了一句「已加入」、进去一看是别人。
+func TestAStalePendingDoesNotPolluteTheNextLike(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShell(t, f)
+	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 42, Title: "我的喜欢"}})
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	// 模拟「绑定后喜欢普通失败」留下的 pending：rid 是**上一首**的 999999，
+	// 不是现在这一首（`favTarget` 认出来的那个）。
+	// ⚠️ **故意挑一个和 fixture 里的 77 不一样的 rid**：撞号的话「发的是
+	// 新 rid」和「发的还是残留 rid」分不开。
+	s.likePending = &likePending{item: app.Item{Source: "online", Title: "上一首"}, rid: 999999, typ: 12}
+
+	likeRowHeart(t, tt, "歌 一")
+
+	waitFrames(t, tt, "写进绑定歌单那一趟回来", func() bool {
+		return len(f.deals()) == 1
+	})
+
+	ds := f.deals()
+	if got := ds[0].get("rid"); got == "999999" {
+		t.Fatalf("deal 的 rid = 999999：发的是**上一首**残留的稿件 id——" +
+			"pending 没被换掉，这一首替别人收进了绑定歌单")
+	}
+	if got := ds[0].get("rid"); got != "77" {
+		t.Errorf("deal 的 rid = %q，want 77（这一首自己的稿件 id）", got)
+	}
+	if got := ds[0].get("add_media_ids"); got != "42" {
+		t.Errorf("deal 的 add_media_ids = %q，want 42（绑定的那一格）", got)
+	}
+}
+
 // TestSettingsChangeIgnoresALeftoverPending 钉「上一次喜欢失败留下的
 // `likePending` 不会让设置页换绑变成收歌」。
 //

@@ -117,6 +117,45 @@ func (s *Shell) likeItem(item app.Item) {
 	s.askLikeIDThen(item)
 }
 
+// likeCurrent 是播放器上那颗「喜欢」心做的事：满屏、迷你窗、刘海上的
+// 同一枚心形都走它——和列表行上那颗心是**同一条绑定流程**
+// （`likeItem`），不是「添加到收藏夹」那个多选框（`favoriteCurrent`）。
+//
+// # 它和 `favoriteCurrent` 是两条路
+//
+//   - `likeCurrent`（这颗心）→ **喜欢歌单绑定流程**：未绑三选一、已绑
+//     直加、绑定失效回落多选框；
+//   - `favoriteCurrent`（菜单「添加到收藏夹…」/ 快捷键）→ **收藏夹多选框**。
+//
+// 早一版这颗心走的是 `favoriteCurrent`——播放器上的心按下去弹的是多选
+// 框，绑定流程压根进不来，「绑定一个专属歌单」这件事只有列表行办得到。
+// 那一版是本票要拦的病：同一颗心形在五个入口两种行为。
+//
+// ⚠️ **弹窗要落在主壳上**：`viewFolderDialogs` 只在主窗口那一支调——从
+// 迷你 / 刘海那一扇直接 `s.likeItem` 会把 `likeBind` 写进副壳自己那一份，
+// 那一扇永远不画它（静默失败）。所以下面路由到主壳（`s.main`，主壳自己
+// 调时 `s.main` 是 nil、落回 `s`），理由同 `favoriteCurrent` 那段。
+//
+// ⚠️ **提示也要落在画 toast 的那一扇上**（同 `favoriteCurrent`）：迷你窗
+// 和刘海窗都不画 toast，「还没有取回来」那句得写进主壳的 toasts。
+func (s *Shell) likeCurrent() {
+	target := s
+	if s.main != nil {
+		target = s.main
+	}
+	it, ok := s.app.PlayingItem()
+	if !ok {
+		target.addToast("这一首还没有取回来，收藏不了", notice.Warning)
+		return
+	}
+	// ⚠️ **主窗的满屏要收掉**：绑定弹窗排在 `viewFullPlayer` **之前**建，
+	// 满屏盖在它上面——满屏开着时这个弹窗用户看不见（票 #706 的坑）。
+	if target.full.open {
+		target.closeFullPlayer()
+	}
+	target.likeItem(it)
+}
+
 // likeItemResolved 是「身份已经有了」之后那一半：绑定了直接写，没绑先问。
 //
 // 单独一个函数和 `openFolderSelectNow` 同一条理由：回调里调的必须是它，

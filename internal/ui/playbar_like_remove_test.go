@@ -18,6 +18,9 @@
 package ui
 
 import (
+	"context"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,13 +29,24 @@ import (
 )
 
 // favEnv 是一台会答赞 / 收藏夹的假 B 站加上一个正在放在线歌的界面，
-// **歌单那一摊也挂着**（「喜欢」心形点了要开收藏夹弹窗，没挂只会说一句
+// **歌单那一摊也挂着**（「喜欢」心形点了要开绑定弹窗，没挂只会说一句
 // 「收藏夹现在打不开」）。
+//
+// ⚠️ **收藏夹走 `folderBili`**（答 `created/list` 和 `resource/deal`）：
+// `collectionBili` 那一台只管收藏夹**内容页**，没有 deal / created-list
+// 那两条路——绑定流程的写和拉都会落空成 404。
 func favEnv(t *testing.T) *likeEnv {
 	t.Helper()
 	env := newLikeEnv(t, false, false, false)
-	b := newCollectionBili(t)
-	env.s.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
+	// ⚠️ **绑定流程要设置**：`BindLikedFolder` 落盘在 `Settings.LikedFolder`，
+	// 不挂的话绑定写不进、心形永远停在「没绑过」那一档。
+	if err := env.s.app.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	fb := newFolderBili(t, nil)
+	cli := fixtureClient(t, fb)
+	env.s.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
+	env.dealBili = fb
 	env.tt.Frame()
 	return env
 }
@@ -118,13 +132,17 @@ func TestTheFullPlayerHasNoThumbButKeepsTheHeart(t *testing.T) {
 	}
 }
 
-// TestTheFullPlayerHeartOpensTheFolderSelect 断「喜欢」心形点下去开的是
-// 「把这一首放进哪些收藏夹」那个弹窗（喜欢歌单的绑定入口），而不是发一趟
-// B 站点赞。
+// TestTheFullPlayerHeartRunsTheLikeBindingFlow 断「喜欢」心形和列表行上
+// 那颗心走**同一条**喜欢歌单绑定流程：没绑过先问三选一，而不是直接弹
+// 「放进哪些收藏夹」的多选框（那一档是「暂时不用」和「绑定失效」才落的）。
 //
-// 🔴 **满屏要收掉**：收藏夹弹窗排在 `viewFullPlayer` **之前**建，满屏盖在
+// 🔴 **满屏要收掉**：绑定弹窗排在 `viewFullPlayer` **之前**建，满屏盖在
 // 它上面——不收掉的话弹窗开在满屏底下（票 #706 的坑，评论抽屉同一道闸）。
-func TestTheFullPlayerHeartOpensTheFolderSelect(t *testing.T) {
+//
+// 🔴 **断的是 likeBind，不是 folderSelect**：两条路开在同一个壳上，拿
+// `folderSelect != nil` 当判据的话，「绕回旧多选框」那一版照样绿——而
+// 那正是本票要拦的病（播放器心形绕过绑定流程）。
+func TestTheFullPlayerHeartRunsTheLikeBindingFlow(t *testing.T) {
 	env := favEnv(t)
 	s, tt := env.s, env.tt
 	s.openFullPlayer()
@@ -134,11 +152,113 @@ func TestTheFullPlayerHeartOpensTheFolderSelect(t *testing.T) {
 		t.Fatalf("点「喜欢」：%v（文字有 %q）", err, tt.Texts())
 	}
 	if s.full.open {
-		t.Error("点心形之后满屏还开着：收藏夹弹窗会被它压在底下")
+		t.Error("点心形之后满屏还开着：绑定弹窗会被它压在底下")
 	}
-	waitFrames(t, tt, "收藏夹选择弹窗开出来", func() bool { return tt.HasText("添加到收藏夹") })
+	waitFrames(t, tt, "绑定三选一开出来", func() bool { return s.likeBind != nil })
+	if s.folderSelect != nil {
+		t.Error("满屏心形直接弹了收藏夹多选框：它绕过了绑定流程")
+	}
+	if tt.HasText("添加到收藏夹") {
+		t.Error("画面上是「添加到收藏夹」那句：多选框开了，绑定流程没走")
+	}
 	if got := env.f.likePostsCount(); got != 0 {
 		t.Errorf("点「喜欢」发了 %d 趟点赞请求：心形是喜欢歌单入口，不是 B 站点赞", got)
+	}
+}
+
+// TestTheFullPlayerHeartGoesStraightIntoTheBoundFolder 断「已绑定」那一档：
+// 满屏心形点下去**不弹任何框**，直接把这一首写进绑定的那一格——和列表
+// 行上那颗心同一个行为（`TestLikeIntoBoundFolderWritesDirectly` 在列表那
+// 一侧钉的是同一件事）。
+func TestTheFullPlayerHeartGoesStraightIntoTheBoundFolder(t *testing.T) {
+	env := favEnv(t)
+	s, tt := env.s, env.tt
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+	s.openFullPlayer()
+	tt.Frame()
+
+	if err := tt.Click("喜欢"); err != nil {
+		t.Fatalf("点「喜欢」：%v（文字有 %q）", err, tt.Texts())
+	}
+	waitFrames(t, tt, "写进绑定歌单那一趟回来", func() bool {
+		return len(env.dealBili.deals()) == 1
+	})
+	ds := env.dealBili.deals()
+	if got := ds[0].get("add_media_ids"); got != "42" {
+		t.Errorf("deal 的 add_media_ids = %q，want 42（绑定的那一格）", got)
+	}
+	if s.folderSelect != nil || s.likeBind != nil {
+		t.Error("已绑定时心形不该弹任何框：它该直接写进绑定的那一格")
+	}
+}
+
+// miniLikeEnv 造一个迷你窗外壳 + 它的主壳，主壳上挂着「设置 + 歌单 +
+// 正在放的在线 mv」——迷你那枚心形要的全套。
+//
+// ⚠️ **弹窗画在主壳那一支**（`viewFolderDialogs` 只在主窗口那一支调），
+// 所以断言看的是 `main.likeBind` / `main.folderSelect`，不是迷你自己那
+// 一份——写到副壳上等于开了一个看不见的窗。
+func miniLikeEnv(t *testing.T) (*Shell, *Shell) {
+	t.Helper()
+	// ⚠️ **走 `main.newMiniShell` 那条生产路**：`NewMini` 自己不会把
+	// `mini.main` 接回主壳（那一半在 `newMiniShell` 里），直接 `NewMini`
+	// 的话弹窗路由不到主壳上（`s.main` 是 nil，`likeCurrent` 落回副壳）。
+	//
+	// ⚠️ **fixture 必须先于 `newTestShell` 建**：`newTestShell` 里那个
+	// `mounted` 闭包当场就跑（建 App 时），而 `t.Cleanup` 是 LIFO——
+	// fixture 晚一步建的话它的 `Close` 会排在 `Shell.Close` 前面跑，
+	// 测试还活着、服务器已经没了（「connection refused」就是它）。
+	f := newBiliFixture(t, 1)
+	fb := newFolderBili(t, nil)
+	cli := fixtureClient(t, fb)
+	var a *app.App
+	main := newTestShell(t, mounted(func(t *testing.T, ap *app.App) {
+		a = ap
+		if err := ap.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+			t.Fatal(err)
+		}
+		ap.MountStreaming(app.Streaming{
+			Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
+		})
+		store := app.NewMemoryStore("test")
+		if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: "7"}); err != nil {
+			t.Fatal(err)
+		}
+		ap.MountLogin(store, cli)
+		// MountLogin 的 restore 会拿 Session.Cookies（空的）重 Seed 一遍
+		// jar，把 `fixtureClient` 种的 DedeUserID 冲掉——再装回去。
+		if err := cli.SeedCookies([]*http.Cookie{{Name: "DedeUserID", Value: "7", Path: "/"}}); err != nil {
+			t.Fatal(err)
+		}
+		ap.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
+	})).s
+	s := main.newMiniShell()
+	t.Cleanup(s.closePerWindow)
+	if err := a.Enqueue(app.Item{
+		Source: "online", Type: "mv", Bvid: "BVmini", Cid: "1", Sid: "7",
+		Title: "迷你里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
+	}); err != nil {
+		t.Fatalf("把在线的那首放进队列：%v", err)
+	}
+	waitFor(t, "在线那首开始播", func() bool { return a.Snapshot().HasTrack })
+	return s, main
+}
+
+// TestTheMiniHeartRunsTheLikeBindingFlow 断迷你窗那枚心形走的是**绑定
+// 流程**（没绑过 → 主壳上的三选一），不是绕回旧多选框。
+func TestTheMiniHeartRunsTheLikeBindingFlow(t *testing.T) {
+	s, main := miniLikeEnv(t)
+
+	s.likeCurrent()
+
+	if main.likeBind == nil || !main.likeBind.open {
+		t.Fatalf("迷你心形之后主壳的绑定三选一没开（likeBind = %+v）", main.likeBind)
+	}
+	if main.folderSelect != nil {
+		t.Error("迷你心形直接弹了收藏夹多选框：它绕过了绑定流程")
+	}
+	if s.likeBind != nil || s.folderSelect != nil {
+		t.Error("弹窗写进了迷你外壳自己那一份：那一扇不画它，用户永远看不见")
 	}
 }
 

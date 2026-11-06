@@ -15,6 +15,8 @@ package ui
 //   - 没歌时仍是 idle 那张卡，不是播放器布局。
 
 import (
+	"context"
+	"net/http"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -303,20 +305,20 @@ func notchToastTexts(s *Shell) []string {
 	return out
 }
 
-// TestNotchHeartOpensTheFolderSelect 钉「刘海里那枚心形开的是收藏夹弹窗」。
+// TestNotchHeartReportsOnTheMainShell 钉「刘海里那枚心形按下去说的是什么」。
 //
-// 心形是**喜欢歌单绑定入口**（`favoriteCurrent` → 「把这一首放进哪些收藏夹」
-// 那个弹窗），不是 B 站点赞——喜欢歌单原型把「赞」从播放器上去掉了。
+// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
+// 点赞——喜欢歌单原型把「赞」从播放器上去掉了。
 //
 // 这条顺带钉「提示落在画 toast 的那一扇」：没放歌时心形按下去说的是
 // 「这一首还没有取回来」，那句要走 `s.main` 那份 toasts——刘海窗自己压根
 // 不画 toast（`viewToasts` 只在主窗那一支调）。
-func TestNotchHeartOpensTheFolderSelect(t *testing.T) {
+func TestNotchHeartReportsOnTheMainShell(t *testing.T) {
 	n, main := newNotchShell(t)
 
 	// ⚠️ **没放歌**：心形按下去说的是「这一首还没有取回来」，而那句话必须
 	// 落在主窗口的 toasts 上，不是刘海外壳自己的（它那一扇不画 toast）。
-	n.favoriteCurrent()
+	n.likeCurrent()
 
 	if got := notchToastTexts(n); len(got) != 0 {
 		t.Fatalf("提示写进了刘海外壳自己的 toasts %q：它那一扇不画 toast，这句话永远没有画面", got)
@@ -327,26 +329,41 @@ func TestNotchHeartOpensTheFolderSelect(t *testing.T) {
 	}
 }
 
-// TestNotchHeartOpensTheFolderSelectOnTheMainShell 钉「刘海点心形，弹窗开在
-// **主壳**上」。
+// TestNotchHeartRunsTheLikeBindingFlowOnTheMainShell 钉「刘海点心形走的是
+// **喜欢歌单绑定流程**，且弹窗开在**主壳**上」。
 //
 // 🔴 **`viewFolderDialogs` 只在主窗口那一支调**：刘海外壳自己那份
-// `folderSelect` 永远没人画——弹窗写到副壳上等于开了一个看不见的窗（和
-// toast 写进副壳同一种静默失败）。这条盯的是 `main.folderSelect` 真的
-// 摆出来了，而刘海外壳自己那一份是空的。
-func TestNotchHeartOpensTheFolderSelectOnTheMainShell(t *testing.T) {
+// `likeBind` / `folderSelect` 永远没人画——弹窗写到副壳上等于开了一个
+// 看不见的窗（和 toast 写进副壳同一种静默失败）。这条盯的是
+// `main.likeBind` 真的摆出来了（没绑定 → 三选一），而不是绕回旧多选框
+// （`folderSelect`）——那一条正是本票拦的「播放器心形绕过绑定流程」。
+func TestNotchHeartRunsTheLikeBindingFlowOnTheMainShell(t *testing.T) {
+	// ⚠️ **fixture 先于 `newNotchShell` 建**：`t.Cleanup` 是 LIFO——fixture
+	// 晚于主壳建的话，测试收尾时服务器先关、Shell 后关，挂在它上面的
+	// 后台往返全被「connection refused」。
+	f := newBiliFixture(t, 1)
+	fb := newFolderBili(t, nil)
 	n, main := newNotchShell(t)
 
-	// 挂歌单 + 放一首在线的歌（心形的弹窗要 `PlayingItem` + `CollectionsMounted`；
+	// 挂歌单 + 放一首在线的歌（心形要 `PlayingItem` + `CollectionsMounted`；
 	// 在线播要 `MountStreaming`——不然 `Enqueue` 回「在线播放暂时用不了」）。
-	f := newBiliFixture(t, 1)
 	main.app.MountStreaming(app.Streaming{
 		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
 	})
-	b := newCollectionBili(t)
-	main.app.MountCollections(app.CollectionRefs{Client: collectionClient(t, b), Settle: 0})
+	// ⚠️ **绑定流程要登录态**：`LoadCreatedFolders` 要 `SelfMid`（问「我创建
+	// 了哪些收藏夹」），没登录它直接回「还没登录」——三选一就开不出来。
+	cli := fixtureClient(t, fb)
+	store := app.NewMemoryStore("test")
+	if err := store.Save(context.Background(), app.Session{SESSDATA: "sess", DedeUserID: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	main.app.MountLogin(store, cli)
+	if err := cli.SeedCookies([]*http.Cookie{{Name: "DedeUserID", Value: "7", Path: "/"}}); err != nil {
+		t.Fatal(err)
+	}
+	main.app.MountCollections(app.CollectionRefs{Client: cli, Settle: 0})
 	// ⚠️ **`Sid` 必须带上**：`favTarget` 认的是它（avid）——不带的话
-	// `openFolderSelect` 先去后台问 bvid → avid，那一趟还要等，而这条盯的
+	// `likeItem` 先去后台问 bvid → avid，那一趟还要等，而这条盯的
 	// 是「弹窗开在哪个壳上」，不是解析那一路。
 	if err := main.app.Enqueue(app.Item{
 		Source: "online", Type: "mv", Bvid: "BV1probe", Cid: "1", Sid: "999",
@@ -356,13 +373,16 @@ func TestNotchHeartOpensTheFolderSelectOnTheMainShell(t *testing.T) {
 	}
 	waitFor(t, "在线那首开始播", func() bool { return main.app.Snapshot().HasTrack })
 
-	n.favoriteCurrent()
+	n.likeCurrent()
 
-	if main.folderSelect == nil || !main.folderSelect.open {
-		t.Fatal("刘海点心形之后主壳的收藏夹弹窗没开")
+	if main.likeBind == nil || !main.likeBind.open {
+		t.Fatalf("刘海点心形之后主壳的绑定三选一没开（likeBind = %+v）", main.likeBind)
 	}
-	if n.folderSelect != nil {
-		t.Error("弹窗写进了刘海外壳自己的 folderSelect：那一扇不画它，用户永远看不见")
+	if main.folderSelect != nil {
+		t.Error("刘海点心形直接弹了收藏夹多选框：它绕过了绑定流程")
+	}
+	if n.likeBind != nil || n.folderSelect != nil {
+		t.Error("弹窗写进了刘海外壳自己那一份：那一扇不画它，用户永远看不见")
 	}
 }
 

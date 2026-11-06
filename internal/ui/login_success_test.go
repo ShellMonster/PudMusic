@@ -42,9 +42,15 @@ func loginFlowTester(t *testing.T, a *app.App, start string, opts ...shellOpt) (
 			s.View(c)
 		}
 	}))
+	// ⚠️ **`loginAutoDisabled` 必须抢在 Tester 的第一帧之前**（理由同
+	// `loginTester`）：`mygoui.NewTester` 自己就画一帧，那一帧里的 `syncLogin`
+	// 会抢在手动 `BeginLogin` 之前自动开一轮扫码——两轮相挤，先来的那一轮收尾
+	// 把登录态代次涨掉，后来的 Commit 被判作废（「已取消登录」，相位再也到不了
+	// LoginDone）。`stubbed` 是基座给的「建好外壳、还没造 Tester」那一个点。
+	all = append(all, stubbed(func(t *testing.T, s *Shell) {
+		s.loginAutoDisabled = true
+	}))
 	b := newTestShell(t, all...)
-	// 登录成功测试由 loginSucceeds 显式启动轮询。
-	b.s.loginAutoDisabled = true
 	return b.tt, b.s
 }
 
