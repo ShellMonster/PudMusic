@@ -111,7 +111,18 @@ func (s *Shell) updateEntryButton(st app.UpdateState) (label string, onClick fun
 		// 下面那句话里。
 		return updateBtnCheck, nil, false
 	}
-	return updateBtnCheck, s.app.CheckUpdates, false
+	return updateBtnCheck, s.checkForUpdates, false
+}
+
+// checkForUpdates 记录这是用户主动发起的检查。
+//
+// 检查完成后由 `updateOpen` 判断结果：只有真的发现新版本才自动打开弹窗；
+// 已是最新或检查失败都只保留设置页上的结果提示。
+func (s *Shell) checkForUpdates() {
+	s.update.checkPending = true
+	s.update.checkObserved = false
+	s.update.checkBaseline = s.app.UpdateSnapshot().LastCheck
+	s.app.CheckUpdates()
 }
 
 // openUpdateDialog 只把弹窗打开，不去查。
