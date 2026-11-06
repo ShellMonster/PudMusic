@@ -435,6 +435,48 @@ func TestTheUpdateNotificationGoesToTheSettings(t *testing.T) {
 	}
 }
 
+// TestTheUpdateNotificationOpensTheSameDialogTheSettingsEntryOpens 钉住「点
+// 更新通知打开的弹窗，和设置页上『查看更新内容』打开的是同一个」。
+//
+// ⚠️ **断的是画面上的字，不是某个布尔**：路由和 `wanted` 由上一条钉住，
+// 这一条钉的是「那一帧真的画出了弹窗」——标题、版本号、更新日志、和那个
+// 「下载更新」按钮，与设置页上那条路打开的弹窗一字不差。
+func TestTheUpdateNotificationOpensTheSameDialogTheSettingsEntryOpens(t *testing.T) {
+	be := newFakeUpdate("0.1.0", &app.UpdateRelease{
+		Version: "1.2.3",
+		Notes:   "### 修好了\n\n- 播放列表不再乱序",
+	})
+	b := newTestShell(t,
+		withSettings(app.DefaultSettings("")),
+		mounted(func(_ *testing.T, a *app.App) {
+			a.MountUpdates(be, filepath.Join(t.TempDir(), "app-update.json"))
+		}))
+	tt := b.tt
+	s := b.s
+	a := b.a
+
+	// 后台已经查到了新版本（状态层里已经有这一版可看）。
+	stop := a.StartAutoChecks()
+	waitFor(t, "后台查到了新版本", func() bool { return a.UpdateSnapshot().Available() })
+	stop()
+	tt.Frame()
+
+	// 用户点了通知中心里那条「有更新了」。
+	s.onNotificationClicked(notifyUpdateID("1.2.3"))
+	tt.Frame()
+
+	if got := s.router.Path(); got != settingsPath {
+		t.Fatalf("点了更新通知之后停在 %q，want %q", got, settingsPath)
+	}
+	// 弹窗真的画出来了，和设置页上那条路打开的是同一份内容：
+	// 标题、新版本号、更新日志、以及那个主按钮。
+	for _, want := range []string{"有新版本更新", "1.2.3", "播放列表不再乱序", "下载更新"} {
+		if !tt.HasText(want) {
+			t.Errorf("点了更新通知打开的弹窗上没有 %q，文字有 %q", want, tt.Texts())
+		}
+	}
+}
+
 // TestAnUnknownNotificationGoesNowhere 钉住「不认识的 ID 不猜」。
 //
 // ⚠️ **猜错的话用户点一条通知却到了一个无关的页面上**——而界面上看不出任何
