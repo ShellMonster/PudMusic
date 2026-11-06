@@ -149,10 +149,37 @@ func (s *Shell) viewUpdateDialog(c *ui.Context, st app.UpdateState) {
 // Toast），因为一个音乐播放器开着窗突然被更新窗盖住是最招人烦的一种做法。
 func (s *Shell) updateOpen(st app.UpdateState) bool {
 	switch st.Phase {
-	case app.UpdateAvailable, app.UpdateDownloading, app.UpdateReady, app.UpdateFailed:
+	case app.UpdateChecking:
+		s.update.checkObserved = true
+		return false
+	case app.UpdateAvailable:
+		if s.update.checkPending {
+			s.update.checkPending = false
+			s.update.checkObserved = false
+			s.update.wanted = true
+		}
 		return s.update.wanted
+	case app.UpdateDownloading, app.UpdateReady:
+		return s.update.wanted
+	case app.UpdateFailed:
+		// 查失败和下载失败共用一个相位。只有已有版本可下载时才应该
+		// 保留弹窗；检查失败只在关于页显示原因。
+		if !st.Available() {
+			s.update.checkPending = false
+			s.update.checkObserved = false
+			s.update.wanted = false
+			return false
+		}
+		return s.update.wanted
+	default:
+		// 已是最新：结束本次主动检查，避免之后后台查到更新时误弹窗。
+		if s.update.checkPending && s.update.checkObserved {
+			s.update.checkPending = false
+			s.update.checkObserved = false
+			s.update.wanted = false
+		}
+		return false
 	}
-	return false
 }
 
 // drawUpdateDialog 画弹窗本身。

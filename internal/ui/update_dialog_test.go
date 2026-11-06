@@ -170,6 +170,12 @@ func (f *updFixture) checkUpdate(t *testing.T) {
 // openDialog 按「查看更新内容」，把弹窗打开。
 func (f *updFixture) openDialog(t *testing.T) {
 	t.Helper()
+	// 用户主动检查发现更新后，弹窗现在会自动打开；保留这个 helper 兼容
+	// 其余下载流程测试，避免它们重复点击设置页上的入口。
+	if f.s.update.wanted {
+		f.tt.Frame()
+		return
+	}
 	f.pressEntry(t, "查看更新内容")
 	f.tt.Frame()
 	if !f.s.update.wanted {
@@ -211,8 +217,12 @@ func TestCheckingFindsANewVersionAndTheRowSaysSo(t *testing.T) {
 	if !f.tt.HasText("查看更新内容") {
 		t.Errorf("按钮没变成「查看更新内容」，文字有 %q", f.tt.Texts())
 	}
+	// 用户点「检查更新」后，发现新版本的结果帧直接打开更新弹窗。
+	if !f.s.update.wanted {
+		t.Fatal("检查到新版本后没有自动打开更新弹窗")
+	}
 	// 原型 `openUpdate` 的标题是「有新版本更新」（不带 ✨）。
-	f.openDialog(t)
+	f.tt.Frame()
 	if !f.tt.HasText("有新版本更新") {
 		t.Errorf("弹窗的标题不是 Biu 那一个，文字有 %q", f.tt.Texts())
 	}
@@ -570,7 +580,7 @@ func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T
 	if f.tt.HasText("没能装上") {
 		t.Errorf("查失败被说成了「没能装上」，文字有 %q", f.tt.Texts())
 	}
-	if f.s.update.wanted {
+	if f.s.update.wanted || f.s.update.checkPending {
 		t.Error("查失败就自己把弹窗打开了")
 	}
 	// 按钮还是「检查更新」而且按得动：下一次按就是重试。

@@ -1005,6 +1005,11 @@ type Shell struct {
 	update struct {
 		// wanted 是「用户按了检查更新 / 有更新可看，弹窗该开」。
 		wanted bool
+		// checkPending 是用户主动检查后，等待结果决定是否自动打开弹窗。
+		checkPending bool
+		// checkObserved 记录检查已经进入后台执行，避免点击当帧的 Idle
+		// 结果把 pending 提前清掉。
+		checkObserved bool
 		// notes 是渲染更新日志的那份 markdown 选项。**建一次存着**：
 		// `markdown.Options` 里有一张图片缓存表（`images sync.Map`），每帧新建
 		// 等于每帧丢掉缓存，而更新日志是在下载中反复重画的那一块。
