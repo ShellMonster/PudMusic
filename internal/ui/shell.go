@@ -1010,6 +1010,9 @@ type Shell struct {
 		// checkObserved 记录检查已经进入后台执行，避免点击当帧的 Idle
 		// 结果把 pending 提前清掉。
 		checkObserved bool
+		// checkBaseline 是点击前的上次成功检查时间，用来识别检查在两帧
+		// 之间快速完成的情况。
+		checkBaseline time.Time
 		// notes 是渲染更新日志的那份 markdown 选项。**建一次存着**：
 		// `markdown.Options` 里有一张图片缓存表（`images sync.Map`），每帧新建
 		// 等于每帧丢掉缓存，而更新日志是在下载中反复重画的那一块。

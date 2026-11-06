@@ -164,16 +164,22 @@ func (s *Shell) updateOpen(st app.UpdateState) bool {
 	case app.UpdateFailed:
 		// 查失败和下载失败共用一个相位。只有已有版本可下载时才应该
 		// 保留弹窗；检查失败只在关于页显示原因。
-		if !st.Available() {
+		if s.update.checkPending {
+			// 检查失败时可能仍保留上一次的 Latest；它代表旧结果，
+			// 不能让这次失败继续等待自动弹窗。
 			s.update.checkPending = false
 			s.update.checkObserved = false
+			s.update.wanted = false
+		}
+		if !st.Available() {
 			s.update.wanted = false
 			return false
 		}
 		return s.update.wanted
 	default:
 		// 已是最新：结束本次主动检查，避免之后后台查到更新时误弹窗。
-		if s.update.checkPending && s.update.checkObserved {
+		if s.update.checkPending &&
+			(s.update.checkObserved || st.LastCheck.After(s.update.checkBaseline)) {
 			s.update.checkPending = false
 			s.update.checkObserved = false
 			s.update.wanted = false

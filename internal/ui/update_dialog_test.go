@@ -604,6 +604,23 @@ func TestAFailedCheckPutsTheReasonUnderTheButtonAndKeepsItPressable(t *testing.T
 	}
 }
 
+// 检查失败时不能沿用上一次的可用版本把弹窗再次打开。
+func TestAFailedManualCheckClearsPendingAutoOpen(t *testing.T) {
+	f := newUpdFixture(t, &app.UpdateRelease{Version: "0.2.0"})
+	f.checkUpdate(t)
+	if !f.s.update.wanted {
+		t.Fatal("第一次查到更新后弹窗没有自动打开")
+	}
+	f.a.DismissUpdate()
+	f.tt.Frame()
+
+	f.be.setErr(errors.New("temporary update source failure"))
+	f.checkUpdate(t)
+	if f.s.update.wanted || f.s.update.checkPending {
+		t.Fatal("检查失败后仍保留了自动打开更新弹窗的状态")
+	}
+}
+
 // 这个构建不能自动更新（开发构建 / 装在只读位置）：要有一句能照着做的话，
 // 而且按钮按下去什么也不发生。
 //

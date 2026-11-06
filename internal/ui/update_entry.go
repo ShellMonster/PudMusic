@@ -121,6 +121,7 @@ func (s *Shell) updateEntryButton(st app.UpdateState) (label string, onClick fun
 func (s *Shell) checkForUpdates() {
 	s.update.checkPending = true
 	s.update.checkObserved = false
+	s.update.checkBaseline = s.app.UpdateSnapshot().LastCheck
 	s.app.CheckUpdates()
 }
 
