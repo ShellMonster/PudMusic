@@ -55,6 +55,10 @@ type likedResult struct {
 	mu     sync.Mutex
 	nextID uint64
 	unread []LikedResult
+	// dropped 是「到达时绑定已经换了/没了」丢掉的结果。取结果那一侧在
+	// `TakeLikedResult` 里做校验（见它的注释）；这份只给同包测试观察
+	// 「旧结果确实被丢了」，不往界面去。
+	dropped []LikedResult
 }
 
 func (r *likedResult) add(res LikedResult) {
@@ -79,6 +83,10 @@ func (r *likedResult) take() (LikedResult, bool) {
 // LikedResult 是「收进绑定歌单」那一趟的回执。
 type LikedResult struct {
 	ID uint64
+	// Folder 是发出那一趟写请求时绑定的那份歌单 id。换绑之后才回来的
+	// 结果是旧绑定的回执——`TakeLikedResult` 拿它对照**此刻**的绑定，
+	// 对不上就丢，不让一条旧结果去拆新绑定（见 `TakeLikedResult` 注释）。
+	Folder int64
 	// OK 是成了没有。
 	OK bool
 	// Text 是要跟用户说的那句话（成了是「已加入『我的喜欢』」）。
@@ -92,12 +100,31 @@ type LikedResult struct {
 //
 // 界面在每一帧开头调一次（`flushLikedResults`）。**取走而不是读**，
 // 理由同 `TakeFolderResult`。
+//
+// ⚠️ **过期的结果在这里丢**：一趟写请求发出去之后绑定可能已经被换掉
+// （设置页换绑）或解掉（绑定失效回多选框）。这时候才回来的结果属于
+// **旧绑定**——界面的 Missing 分支会解绑此刻的绑定、弹回多选框，把一
+// 条旧回执当成新绑定的判决是最坏的那一种错；旧成功那句「已加入『旧
+// 的』」同样是错话。所以每条结果都带上「发请求时的绑定 id」，取走时
+// 和此刻的绑定对不上就丢（顺带记进 dropped，给同包测试观察）。
 func (a *App) TakeLikedResult() (LikedResult, bool) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return LikedResult{}, false
 	}
-	return c.likedResult.take()
+	current, _ := a.LikedFolder()
+	for {
+		res, ok := c.likedResult.take()
+		if !ok {
+			return LikedResult{}, false
+		}
+		if res.Folder == current.ID {
+			return res, true
+		}
+		c.likedResult.mu.Lock()
+		c.likedResult.dropped = append(c.likedResult.dropped, res)
+		c.likedResult.mu.Unlock()
+	}
 }
 
 // LikedFolder 读此刻的绑定。第二个返回值是「绑了没有」。
@@ -166,6 +193,7 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) {
 		}
 		if !alive {
 			c.likedResult.add(LikedResult{
+				Folder:  bound.ID,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
@@ -178,16 +206,17 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) {
 		err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, []int64{bound.ID}, nil)
 		switch {
 		case err == nil:
-			c.likedResult.add(LikedResult{OK: true, Text: "已加入「" + bound.Title + "」"})
+			c.likedResult.add(LikedResult{Folder: bound.ID, OK: true, Text: "已加入「" + bound.Title + "」"})
 		case likedFolderGone(err):
 			log.Printf("pudmusic: 绑定的收藏夹 %d 已经没了：%v", bound.ID, err)
 			c.likedResult.add(LikedResult{
+				Folder:  bound.ID,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
 		default:
 			log.Printf("pudmusic: 收进绑定歌单 %d 失败：%v", bound.ID, err)
-			c.likedResult.add(LikedResult{Text: "收藏不了：" + bili.Friendly(err)})
+			c.likedResult.add(LikedResult{Folder: bound.ID, Text: "收藏不了：" + bili.Friendly(err)})
 		}
 		a.wakeUI()
 	}()

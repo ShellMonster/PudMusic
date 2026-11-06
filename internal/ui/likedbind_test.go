@@ -406,3 +406,148 @@ func TestSettingsChangeIgnoresALeftoverPending(t *testing.T) {
 		t.Errorf("设置里换绑定不该发 deal（发了 %d 次）", len(ds))
 	}
 }
+
+// TestRebindKeepsTheNewBindingWhenTheOldMissingArrives 钉「换绑之后才
+// 回来的旧 Missing 不许拆掉新绑定」。
+//
+// 🔴 复现的那条路：喜欢写进绑定 42 那一趟还在飞，用户在设置里换绑到
+// 12；这时 B 站才回「42 不存在」。这条结果属于**旧绑定**——
+// `flushLikedResults` 不校验的话会解绑刚换好的 12、清掉绑定弹窗、还
+// 弹出一个没人要的多选框。
+func TestRebindKeepsTheNewBindingWhenTheOldMissingArrives(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.pages = [][]map[string]any{folderPage(11, 2)}
+	s, tt := likedPageShellAt(t, f, 1200, 1300)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "旧的"})
+
+	// 让 deal 那一趟卡在「发出去、还没回」。
+	f.gateDeals()
+	defer f.ungateDeals()
+
+	likeRowHeart(t, tt, "歌 一")
+	waitFrames(t, tt, "喜欢那一趟写出去", func() bool {
+		return f.dealArrivals() == 1
+	})
+	if s.likePending == nil {
+		t.Fatal("喜欢那一趟还在飞时 pending 该在")
+	}
+
+	// 去设置里换绑（不收歌：pending 会被设置页那条路清掉）。
+	s.goToSettingsTab(settingsTabMenu)
+	settleFrame(tt)
+	if err := tt.Click("更换"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "收藏夹列表拉回来", func() bool {
+		return s.likeBind != nil && len(s.likeBind.list) == 2
+	})
+	if err := tt.Click("收藏夹 12"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+	if err := tt.Click("绑定"); err != nil {
+		t.Fatalf("没有「绑定」按钮（文字 %q）", tt.Texts())
+	}
+	settleFrame(tt)
+	if bound, _ := s.app.LikedFolder(); bound.ID != 12 {
+		t.Fatalf("换绑后绑定 = %+v，want id 12", bound)
+	}
+
+	// 旧那一趟这时才回「那一格不存在」。
+	f.failDeals(-400, "收藏夹不存在")
+	f.ungateDeals()
+	settleFrame(tt)
+
+	if bound, ok := s.app.LikedFolder(); !ok || bound.ID != 12 {
+		t.Fatalf("旧结果把新绑定拆了：绑定 = %+v, %v，want id 12", bound, ok)
+	}
+	if s.folderSelect != nil {
+		t.Error("旧结果弹出了多选框——它不属于新绑定，不该走「绑定失效」那一支")
+	}
+	if tt.HasText("绑定的歌单已经不在了") {
+		t.Error("旧结果发出了「绑定失效」提示——新绑定的 12 明明还在")
+	}
+}
+
+// TestRebindSilencesTheOldSuccessToast 钉「换绑之后才回来的旧成功也不
+// 发提示」——那句「已加入『旧的』」对现在的绑定是错话，而成功结果没有
+// 要修的副作用，丢掉它没有代价。
+func TestRebindSilencesTheOldSuccessToast(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.pages = [][]map[string]any{folderPage(11, 2)}
+	s, tt := likedPageShellAt(t, f, 1200, 1300)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "旧的"})
+
+	f.gateDeals()
+	defer f.ungateDeals()
+
+	likeRowHeart(t, tt, "歌 一")
+	waitFrames(t, tt, "喜欢那一趟写出去", func() bool {
+		return f.dealArrivals() == 1
+	})
+
+	s.goToSettingsTab(settingsTabMenu)
+	settleFrame(tt)
+	if err := tt.Click("更换"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "收藏夹列表拉回来", func() bool {
+		return s.likeBind != nil && len(s.likeBind.list) == 2
+	})
+	if err := tt.Click("收藏夹 12"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+	if err := tt.Click("绑定"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+
+	f.ungateDeals()
+	settleFrame(tt)
+
+	if tt.HasText("已加入「旧的」") {
+		t.Error("换绑之后发出了旧绑定那句「已加入」提示")
+	}
+	if bound, _ := s.app.LikedFolder(); bound.ID != 12 {
+		t.Fatalf("绑定 = %+v，want id 12", bound)
+	}
+}
+
+// TestUnbindIgnoresTheLateMissing 钉「绑定失效 → 解绑回多选框」之后，
+// 再回来的旧结果不许把刚开的多选框弄乱：多选框要留着，提示也不能再来
+// 一遍。
+func TestUnbindIgnoresTheLateMissing(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShell(t, f)
+	s.app.SetFavorites(app.FavoritesCreated, []app.Favorite{{ID: 42, Title: "旧的"}})
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "旧的"})
+
+	f.gateDeals()
+	defer f.ungateDeals()
+	// 侧栏列表没标拉过 → 第一层判据不拦，走网络那一趟；让 B 站说 -400。
+	f.failDeals(-400, "收藏夹不存在")
+
+	likeRowHeart(t, tt, "歌 一")
+	waitFrames(t, tt, "喜欢那一趟写出去", func() bool {
+		return f.dealArrivals() == 1
+	})
+	f.ungateDeals()
+
+	// 失效 → 解绑 → 回多选框。
+	waitFrames(t, tt, "回到多选框", func() bool {
+		return s.folderSelect != nil
+	})
+	if _, ok := s.app.LikedFolder(); ok {
+		t.Fatal("绑定失效后该解绑")
+	}
+
+	// 再塞一条「旧绑定」的迟到结果（同一份绑定已经解了，它同样是旧
+	// 结果）：多选框不该被动、提示不该重发。
+	s.app.FavoriteIntoBound(77, 12)
+	settleFrame(tt)
+
+	if s.folderSelect == nil {
+		t.Error("迟到的旧结果把多选框弄没了")
+	}
+}

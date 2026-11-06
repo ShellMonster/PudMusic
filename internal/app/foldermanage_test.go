@@ -45,6 +45,13 @@ type folderFixture struct {
 	// 喜欢那一摊要分得清它们。
 	dealCode int
 	dealMsg  string
+	// dealGate 让 deal 那一趟卡在「已经收到、还没回」中间——造「请求发
+	// 出去了、结果还没回来」的中间态（换绑发生在这一窗口里）。
+	dealGate chan struct{}
+	// dealSeen 记 deal 到了几个请求（含还卡在闸门上的）。`added` 只记
+	// 已经进锁的那几趟，卡着的那一趟要等闸门放走才记得上，而测试要的
+	// 恰恰是「它已经发出去了」这个信号。
+	dealSeen int
 }
 
 func newFolderFixture(t *testing.T) *folderFixture {
@@ -83,8 +90,14 @@ func newFolderFixture(t *testing.T) *folderFixture {
 			writeCollectionJSON(t, w, 0, "0", map[string]any{"url": f.coverURL})
 		case "/x/v3/fav/resource/deal":
 			_ = r.ParseForm()
+			f.dealSeen++
 			f.added = append(f.added, r.PostForm.Get("add_media_ids"))
 			f.deleted = append(f.deleted, r.PostForm.Get("del_media_ids"))
+			if f.dealGate != nil {
+				f.mu.Unlock()
+				<-f.dealGate
+				f.mu.Lock()
+			}
 			if f.dealCode != 0 {
 				writeCollectionJSON(t, w, f.dealCode, f.dealMsg, nil)
 				return
@@ -137,6 +150,31 @@ func (f *folderFixture) failDeal(code int, msg string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.dealCode, f.dealMsg = code, msg
+}
+
+// gateDeals 卡住之后的每一趟 deal（已经收到、还没回）。
+func (f *folderFixture) gateDeals() chan struct{} {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dealGate = make(chan struct{})
+	return f.dealGate
+}
+
+// ungateDeals 放走卡住的 deal，并且不再卡新的。
+func (f *folderFixture) ungateDeals() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dealGate != nil {
+		close(f.dealGate)
+		f.dealGate = nil
+	}
+}
+
+// dealArrivals 是 deal 到过几个请求（含卡着的）。
+func (f *folderFixture) dealArrivals() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dealSeen
 }
 
 // folderApp 装一个指向这台假 B 站的 App。

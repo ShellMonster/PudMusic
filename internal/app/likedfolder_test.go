@@ -184,6 +184,129 @@ func TestFavoriteIntoBoundNetworkFailureKeepsTheBinding(t *testing.T) {
 	}
 }
 
+// TestStaleLikedMissingDoesNotReachTheUI 钉「换绑之后才回来的旧 Missing
+// 到不了界面」。
+//
+// 🔴 复现的那条路：喜欢写进 42 那一趟还在飞，用户换绑到 43；这时 B 站
+// 才回「42 不存在」（-400）。这条结果属于**旧绑定**——界面拿到 Missing
+// 会解绑 + 回多选框，不解的话新绑的 43 被一条旧结果拆掉，还弹出一个
+// 不该出现的多选框。
+func TestStaleLikedMissingDoesNotReachTheUI(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
+
+	gate := f.gateDeals()
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitUntil(t, "写那一趟发出去", 2*time.Second, func() bool {
+		return f.dealArrivals() == 1
+	})
+
+	// 请求在飞时换绑，并且让这一趟回「那一格不存在」。
+	a.BindLikedFolder(LikedFolder{ID: 43, Title: "新的"})
+	f.failDeal(-400, "收藏夹不存在")
+	close(gate)
+
+	waitUntil(t, "旧那一趟跑完", 2*time.Second, func() bool {
+		c := a.collectionsSnapshot()
+		c.likedResult.mu.Lock()
+		defer c.likedResult.mu.Unlock()
+		return len(c.likedResult.unread) > 0 || len(c.likedResult.dropped) > 0
+	})
+	if _, ok := a.TakeLikedResult(); ok {
+		t.Error("换绑之后才回来的旧结果不该交给界面")
+	}
+	if n := len(a.collectionsSnapshot().likedResult.dropped); n != 1 {
+		t.Errorf("dropped = %d，want 1（换绑后才回来的旧结果要被丢掉）", n)
+	}
+}
+
+// TestStaleLikedSuccessDoesNotReachTheUI 钉「换绑之后才回来的旧成功也
+// 到不了界面」——旧那一趟会带回一句「已加入『旧的』」，而绑定早换了，
+// 那句提示对新绑定是错话；更重要的是成功结果本身没有「要修的绑定」，
+// 丢掉它没有副作用。
+func TestStaleLikedSuccessDoesNotReachTheUI(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
+
+	gate := f.gateDeals()
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitUntil(t, "写那一趟发出去", 2*time.Second, func() bool {
+		return f.dealArrivals() == 1
+	})
+
+	a.BindLikedFolder(LikedFolder{ID: 43, Title: "新的"})
+	close(gate)
+
+	waitUntil(t, "旧那一趟跑完", 2*time.Second, func() bool {
+		c := a.collectionsSnapshot()
+		c.likedResult.mu.Lock()
+		defer c.likedResult.mu.Unlock()
+		return len(c.likedResult.unread) > 0 || len(c.likedResult.dropped) > 0
+	})
+	if _, ok := a.TakeLikedResult(); ok {
+		t.Error("换绑之后才回来的旧结果不该交给界面")
+	}
+	if n := len(a.collectionsSnapshot().likedResult.dropped); n != 1 {
+		t.Errorf("dropped = %d，want 1（旧成功同样是旧结果）", n)
+	}
+}
+
+// TestPendingLikesForTheSameBindingDoNotPolluteEachOther 钉「同一份绑定
+// 下并发的几趟互不污染」：绑定没变，先回来的失败不许把后回来的成功一
+// 起带走，两条都要到界面。
+func TestPendingLikesForTheSameBindingDoNotPolluteEachOther(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	gate := f.gateDeals()
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.FavoriteIntoBound(78, bili.MediaAudio)
+	waitUntil(t, "两趟都发出去", 2*time.Second, func() bool {
+		return f.dealArrivals() == 2
+	})
+	close(gate)
+
+	first := waitLikedResult(t, a, 2*time.Second)
+	second := waitLikedResult(t, a, 2*time.Second)
+	if !first.OK || !second.OK {
+		t.Fatalf("两条结果 = %+v / %+v，want 都成功", first, second)
+	}
+}
+
+// TestUnbindWhileARequestIsFlyingDropsItsResult 钉「解绑之后才回来的
+// 结果也到不了界面」——`Folder == 0`（没绑）时任何 pending 结果都属于
+// 已经不存在的绑定。
+func TestUnbindWhileARequestIsFlyingDropsItsResult(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
+
+	gate := f.gateDeals()
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitUntil(t, "写那一趟发出去", 2*time.Second, func() bool {
+		return f.dealArrivals() == 1
+	})
+
+	a.UnbindLikedFolder()
+	close(gate)
+
+	waitUntil(t, "旧那一趟跑完", 2*time.Second, func() bool {
+		c := a.collectionsSnapshot()
+		c.likedResult.mu.Lock()
+		defer c.likedResult.mu.Unlock()
+		return len(c.likedResult.unread) > 0 || len(c.likedResult.dropped) > 0
+	})
+	if _, ok := a.TakeLikedResult(); ok {
+		t.Error("解绑之后才回来的结果不该交给界面")
+	}
+	if n := len(a.collectionsSnapshot().likedResult.dropped); n != 1 {
+		t.Errorf("dropped = %d，want 1（解绑后回来的结果同样过期）", n)
+	}
+}
+
 // markFavoritesLoaded 把「我创建的」那一组标成「拉过、且拉到了」。测试用：
 // 绑定的失效判据里有一条是「列表拉过了、里面没有」。
 func markFavoritesLoaded(a *App) {

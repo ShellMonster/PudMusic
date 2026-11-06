@@ -64,6 +64,17 @@ type folderBili struct {
 	covers []string
 	// dealt 记下 deal 那一次的 add / del。
 	dealt []urlValues
+	// dealSeen 记 deal 到了几个请求（含还卡在闸门上的）。`dealt` 只记
+	// 已经进锁的那几趟；测试要验「请求已经发出去、结果还没回来」那一
+	// 窗口，得先看它到了没有。
+	dealSeen int
+	// dealCode / dealMsg 让 deal 回一个业务错误（0 = 成功）。「绑定
+	// 歌单没了」（-400）走它。
+	dealCode int
+	dealMsg  string
+	// dealGate 让 deal 那一趟卡在「已经收到、还没回」中间（在写接口
+	// gate 之前生效）。
+	dealGate chan struct{}
 	// failList 让 created/list 回一个业务错误（造「拉失败」那一种）。
 	failList bool
 	// collected 是 collected/list（「我收藏的」那一组）回的那几条。
@@ -119,6 +130,15 @@ func newFolderBili(t *testing.T, gate <-chan struct{}) *folderBili {
 			f.mu.Unlock()
 			if f.listGate != nil {
 				<-f.listGate
+			}
+		}
+		if r.URL.Path == "/x/v3/fav/resource/deal" {
+			f.mu.Lock()
+			f.dealSeen++
+			gate := f.dealGate
+			f.mu.Unlock()
+			if gate != nil {
+				<-gate
 			}
 		}
 		if f.gate != nil && isFolderWrite(r.URL.Path) {
@@ -177,6 +197,10 @@ func newFolderBili(t *testing.T, gate <-chan struct{}) *folderBili {
 		case "/x/v3/fav/resource/deal":
 			_ = r.ParseForm()
 			f.dealt = append(f.dealt, urlValues(r.PostForm))
+			if f.dealCode != 0 {
+				writeFolderJSON(w, f.dealCode, f.dealMsg, nil)
+				return
+			}
 			writeFolderJSON(w, 0, "0", nil)
 		default:
 			http.NotFound(w, r)
@@ -270,6 +294,38 @@ func (f *folderBili) deals() []urlValues {
 	f.lock()
 	defer f.unlock()
 	return append([]urlValues(nil), f.dealt...)
+}
+
+// failDeals 让之后的 deal 回这个业务错误（造「绑定歌单没了」那一种）。
+func (f *folderBili) failDeals(code int, msg string) {
+	f.lock()
+	defer f.unlock()
+	f.dealCode, f.dealMsg = code, msg
+}
+
+// gateDeals 卡住之后的每一趟 deal（已经收到、还没回），返回放走用的闸门。
+func (f *folderBili) gateDeals() chan struct{} {
+	f.lock()
+	defer f.unlock()
+	f.dealGate = make(chan struct{})
+	return f.dealGate
+}
+
+// ungateDeals 放走卡住的 deal，并且不再卡新的。
+func (f *folderBili) ungateDeals() {
+	f.lock()
+	defer f.unlock()
+	if f.dealGate != nil {
+		close(f.dealGate)
+		f.dealGate = nil
+	}
+}
+
+// dealArrivals 是 deal 到过几个请求（含卡着的）。
+func (f *folderBili) dealArrivals() int {
+	f.lock()
+	defer f.unlock()
+	return f.dealSeen
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
