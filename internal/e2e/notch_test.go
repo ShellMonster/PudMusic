@@ -174,4 +174,17 @@ func TestTheNotchWindow(t *testing.T) {
 	if math.Abs(h-240) > 1 {
 		t.Errorf("刘海窗的高是 %.0f，want 240", h)
 	}
+
+	// 刘海轮询必须在单个可停止的调度器里运行。连续让真实应用处理
+	// automation 请求，能抓住「每次 tick 又起一个永久 ticker」导致的
+	// 回调扇出：修复前应用会在这一段时间内逐渐失去响应。
+	for i := 0; i < 20; i++ {
+		var windows struct {
+			Windows []notchWinInfo `json:"windows"`
+		}
+		if err := automationCall(client, 620+i, "windows", nil, &windows); err != nil {
+			t.Fatalf("刘海轮询期间第 %d 次 windows 请求失败：%v", i+1, err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }

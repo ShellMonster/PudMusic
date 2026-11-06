@@ -156,3 +156,86 @@ func TestNotchGreetingWaitsForPlayback(t *testing.T) {
 		t.Fatalf("播放后的引导尺寸是 %v×%v，want %v×%v", w, h, notchHelloW, n.notchSt.h0+58)
 	}
 }
+
+func TestNotchPollingKeepsOneScheduledTimer(t *testing.T) {
+	n, _ := newNotchShell(t)
+	fc := newFakeClock(time.Unix(1767225600, 0))
+	tc := &notchPollTestClock{fakeClock: fc}
+	n.clock = tc
+	n.notchSt.active = true
+
+	// 指针在触发区里：33ms 那一档，装一条 ticker。
+	n.notchPollAgain(true)
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("首次轮询排了 %d 条 ticker，want 1", got)
+	}
+
+	// 指针还在：不是「再起一条」，是同一条在跳——重排不许扇出。
+	n.notchPollAgain(true)
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("悬停中重排后有 %d 条 ticker，want 1", got)
+	}
+
+	// ⚠️ 指针每动一下都进 `notchPollAgain`：同间隔时不许重置周期，不然
+	// 「指针离开 350ms」永远等不到——1.0.1 里 `polling` 闸顺带扛住了这条。
+	// 连着三次「指针还在」后推 33ms，该到点还是得到点。
+	n.notchPollAgain(true)
+	n.notchPollAgain(true)
+	n.notchPollAgain(true)
+
+	// 到点叫醒的是界面不是回调自己：推钟，tick 那一帧应该看见欠着一跳。
+	fc.Advance(33 * time.Millisecond)
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("ticker 到点唤醒后有 %d 条 ticker，want 1", got)
+	}
+	if !n.notchPollTick() {
+		t.Fatal("推了 33ms 之后这一帧没认出 ticker 到点")
+	}
+
+	// 场景变掉重排还是一条：失焦以后切 100ms 那档，旧的停新的起。
+	n.notchSt.active = false
+	n.notchPollAgain(false)
+	if got := tc.activeTimers(); got != 1 {
+		t.Fatalf("失焦重排后有 %d 条 ticker，want 1（旧的该停掉）", got)
+	}
+
+	// 设置关上、引导也收了：ticker 必须停，goroutine 不能挂着。
+	if _, err := n.app.UpdateSettings(func(set *app.Settings) {
+		set.NotchPlayer = boolPtr(false)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	n.notchSt.hello = false
+	n.stopNotchPolling()
+	if got := tc.activeTimers(); got != 0 {
+		t.Fatalf("停止轮询后还有 %d 条 ticker，want 0", got)
+	}
+
+	// 推钟也不该再有醒：旧 ticker 的回调再叫也要被无视。
+	fc.Advance(time.Second)
+	if n.notchPollTick() {
+		t.Fatal("停掉之后还被叫醒（旧 ticker 还在跳）")
+	}
+}
+
+// notchPollTestClock 是真时钟行为的假钟：EveryFunc 走 fakeClock 那一套
+// （Advance 到点**同步跑**回调），多记一份「现在还活着几条 ticker」。
+type notchPollTestClock struct {
+	*fakeClock
+	active int
+}
+
+func (c *notchPollTestClock) EveryFunc(d time.Duration, f func()) func() {
+	stop := c.fakeClock.EveryFunc(d, f)
+	c.active++
+	stopped := false
+	return func() {
+		if !stopped {
+			stopped = true
+			c.active--
+		}
+		stop()
+	}
+}
+
+func (c *notchPollTestClock) activeTimers() int { return c.active }
