@@ -347,6 +347,7 @@ func (s *Shell) pageJustShown() bool {
 func (s *Shell) viewFolderDialogs(c *ui.Context) {
 	s.flushFolderResults()
 	s.flushLikedResults()
+	s.flushFavoriteResolutions()
 	s.flushCoverPick()
 	s.syncFolderDialogs()
 

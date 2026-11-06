@@ -891,6 +891,12 @@ type Shell struct {
 	likeBind    *likeBind
 	likePending *likePending
 
+	// resolveCallbacks 是「问 avid 那一趟」的回调表：key 是发出那一趟
+	// 领的号（`app.ResolveFavoriteID` 的返回），值是这一趟的 done。
+	// 结果从邮箱（`app.TakeFavoriteResolution`）回来时对号去跑——
+	// **只由界面线程读写**（`viewFolderDialogs` 的 flush 在那里取走它）。
+	resolveCallbacks map[uint64]func(app.Item, error)
+
 	// folderDelete 是侧栏收藏夹「删除」那个二次确认要跨帧活着的状态
 	// （sidebar_favorites.go）。
 	//

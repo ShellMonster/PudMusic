@@ -125,6 +125,50 @@ func (s *Shell) likeItem(item app.Item) {
 	s.askLikeIDThen(item)
 }
 
+// resolveFavorite 是「问 avid」那一趟在界面这一层的样子：
+// 发出去（`app.ResolveFavoriteID`），把回调按**那一趟的号**存起来，
+// 等帧循环（`flushFavoriteResolutions`）取走结果时对号去跑。
+//
+// 🔴 **回调不许交给后台那条线程**：`app.ResolveFavoriteID` 的 done 改的是
+// UI-owned 状态（`s.likePending` / `s.likeBind` / `s.toasts`），后台直接调
+// 它就是一次数据竞争——所以结果只入队，应用结果由帧循环来做。token
+// 是 0 的那些（Sid 已有 / 没挂上 / Bvid 为空）是**同步**那一半：它们就在
+// 这一帧上，done 照旧交给 app 层当场跑（`likeDone`）。
+//
+// ⚠️ token 必须进 key：多首在飞、旧结果乱序回来时，「最新那次回调」
+// 不能拿去处理一条早发出的结果——和 `likePending.token` 是同一个理由。
+func (s *Shell) resolveFavorite(item app.Item, done func(app.Item, error)) {
+	token := s.app.ResolveFavoriteID(item, done)
+	if token == 0 {
+		return // 同步那一半已经跑完了
+	}
+	if s.resolveCallbacks == nil {
+		s.resolveCallbacks = map[uint64]func(app.Item, error){}
+	}
+	s.resolveCallbacks[token] = done
+}
+
+// flushFavoriteResolutions 取走解析结果邮箱里的那一条，对号去跑回调。
+//
+// 每帧开头调一次（在 `viewFolderDialogs` 里，和 `flushLikedResults` 并排）。
+//
+// ⚠️ **回调不存在的也照样取走**：token 对不上的那一条属于「已经收场的
+// pending」——留在邮箱里下一次还会被取出来、还是对不上（和
+// `likedResultMatchesPending` 的对号逻辑是同一个判据：认不出就丢）。
+func (s *Shell) flushFavoriteResolutions() {
+	for {
+		res, ok := s.app.TakeFavoriteResolution()
+		if !ok {
+			return
+		}
+		done := s.resolveCallbacks[res.Token]
+		delete(s.resolveCallbacks, res.Token)
+		if done != nil {
+			done(res.Item, res.Err)
+		}
+	}
+}
+
 // likeCurrent 是播放器上那颗「喜欢」心做的事：满屏、迷你窗、刘海上的
 // 同一枚心形都走它——和列表行上那颗心是**同一条绑定流程**
 // （`likeItem`），不是「添加到收藏夹」那个多选框（`favoriteCurrent`）。
@@ -188,7 +232,7 @@ func (s *Shell) askLikeIDThen(item app.Item) {
 		s.addToast("这一首还没有可以收藏的身份", notice.Warning)
 		return
 	}
-	s.app.ResolveFavoriteID(item, func(fixed app.Item, err error) {
+	s.resolveFavorite(item, func(fixed app.Item, err error) {
 		switch {
 		case err != nil:
 			s.addToast("收藏不了："+bili.Friendly(err), notice.Danger)

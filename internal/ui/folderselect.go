@@ -149,7 +149,7 @@ func (s *Shell) askFavoriteIDThen(item app.Item) {
 		s.addToast("这一首还没有可以收藏的身份", notice.Warning)
 		return
 	}
-	s.app.ResolveFavoriteID(item, func(fixed app.Item, err error) {
+	s.resolveFavorite(item, func(fixed app.Item, err error) {
 		switch {
 		case err != nil:
 			s.addToast("收藏不了："+bili.Friendly(err), notice.Danger)

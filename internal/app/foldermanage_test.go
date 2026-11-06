@@ -52,6 +52,10 @@ type folderFixture struct {
 	// 已经进锁的那几趟，卡着的那一趟要等闸门放走才记得上，而测试要的
 	// 恰恰是「它已经发出去了」这个信号。
 	dealSeen int
+	// viewCode / viewMsg 让 /x/web-interface/view（ResolveFavoriteID 问的
+	// 那一趟）回一个业务错误（0 = 成功，回 aid 999）。
+	viewCode int
+	viewMsg  string
 }
 
 func newFolderFixture(t *testing.T) *folderFixture {
@@ -88,6 +92,12 @@ func newFolderFixture(t *testing.T) *folderFixture {
 		case "/x/vu/web/cover/up":
 			_ = r.ParseForm()
 			writeCollectionJSON(t, w, 0, "0", map[string]any{"url": f.coverURL})
+		case "/x/web-interface/view":
+			if f.viewCode != 0 {
+				writeCollectionJSON(t, w, f.viewCode, f.viewMsg, nil)
+				return
+			}
+			writeCollectionJSON(t, w, 0, "0", map[string]any{"aid": 999})
 		case "/x/v3/fav/resource/deal":
 			_ = r.ParseForm()
 			f.dealSeen++

@@ -525,3 +525,89 @@ func TestLikeableAndFavTargetAgreeOnTheSameSongs(t *testing.T) {
 func parseFavRid(it Item) (int64, error) {
 	return strconv.ParseInt(it.Sid, 10, 64)
 }
+
+// TestLikeStateAsksCollResourceCheckForAudio 钉「在线 audio 的「收没收藏」走
+// `coll-resource-check`（sid / MediaAudio），不是按 mv 那条 relation 问——
+// relation 接口不收 auid，拿 bvid 当键的整个缓存对 audio 返回的永远是空关系，
+// 于是喜欢心形在加入绑定歌单之后还是空心。
+func TestLikeStateAsksCollResourceCheckForAudio(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	var askedRid atomic.Int64
+	var askedTyp atomic.Int64
+	a.collCheck = func(_ context.Context, rid int64, typ int) (bool, error) {
+		askedRid.Store(rid)
+		askedTyp.Store(int64(typ))
+		return true, nil
+	}
+
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "1293494", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+
+	a.LikeState()
+	waitLike(t, "coll-resource-check 那一趟回来了", a.LikeAsked)
+
+	if got := askedRid.Load(); got != 1293494 {
+		t.Errorf("coll-resource-check 问的 rid = %d，want 1293494（sid 本身）", got)
+	}
+	if got := askedTyp.Load(); got != int64(bili.MediaAudio) {
+		t.Errorf("coll-resource-check 问的 type = %d，want %d（audio）", got, bili.MediaAudio)
+	}
+	if !a.LikeState().Favorited {
+		t.Error("audio 已经收过，LikeState().Favorited 却是 false——心形会一直是空心")
+	}
+}
+
+// TestLikingAnAudioSongFillsTheHeart 钉「audio 收进绑定歌单成功之后，当前
+// 这一首的心形要变实心」——「问过了、没收过」和「问过之后收过」在界面上是
+// 两种长相，而写成功那一趟**自己知道答案**，不必再等一次 relation。
+func TestLikingAnAudioSongFillsTheHeart(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"})
+	a.queue.selectAt(0)
+	a.collCheck = func(context.Context, int64, int) (bool, error) { return false, nil }
+
+	a.LikeState()
+	waitLike(t, "问过收没收藏了", a.LikeAsked)
+	if a.LikeState().Favorited {
+		t.Fatal("没收过却显示收过")
+	}
+
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.FavoriteIntoBound(77, bili.MediaAudio)
+	waitLikedResult(t, a, 2*time.Second)
+
+	if !a.LikeState().Favorited {
+		t.Error("收进绑定歌单那一趟成了，心形还是空心——写成功的答案没记进关系缓存")
+	}
+}
+
+// TestLikeStateForAudioBelongsToItsOwnSid 钉「audio 的关系缓存属于它的
+// sid，换歌就作废」：缓存键不带类型 / 不带 sid 的话，上一首 audio 的关系会
+// 挂在下一首 audio 上（和 mv 换歌同一个病）。
+func TestLikeStateForAudioBelongsToItsOwnSid(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+
+	a.collCheck = func(_ context.Context, rid int64, typ int) (bool, error) {
+		return rid == 111, nil // 只有第一首收过
+	}
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "111", Title: "第一首"})
+	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "222", Title: "第二首"})
+
+	a.queue.selectAt(0)
+	a.LikeState()
+	waitLike(t, "第一首问过了", a.LikeAsked)
+	if !a.LikeState().Favorited {
+		t.Fatal("第一首收过却显示没收过")
+	}
+
+	a.queue.selectAt(1)
+	a.LikeState()
+	waitLike(t, "第二首问过了", a.LikeAsked)
+	if a.LikeState().Favorited {
+		t.Error("第二首还没收过，心形却是第一首那一趟给的实心——缓存不认歌")
+	}
+}

@@ -239,6 +239,12 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
 		err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, []int64{bound.ID}, nil)
 		switch {
 		case err == nil:
+			// 写成功了：**「收没收藏」的答案我们知道了**——当前正在播的
+			// 那首 audio 若就是这一条，把它的心形标实（`markAudioFavorited`
+			// 自己对号；对不上的话它什么也不做）。
+			if contentType == bili.MediaAudio {
+				a.markAudioFavorited(rid)
+			}
 			c.likedResult.add(LikedResult{
 				Token: token, Rid: rid, Type: contentType,
 				Folder: bound.ID, OK: true, Text: "已加入「" + bound.Title + "」",

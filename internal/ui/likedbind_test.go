@@ -12,7 +12,10 @@ import (
 	"context"
 	"net/http"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	mygoui "github.com/egoist/mygo/ui"
@@ -690,5 +693,79 @@ func TestLikeBindCreateIgnoresAFolderEditResult(t *testing.T) {
 
 	if bound, _ := s.app.LikedFolder(); bound.ID != 42 {
 		t.Errorf("一条 edit 结果把绑定换成了 %d，want 42", bound.ID)
+	}
+}
+
+// ── 解析结果走邮箱，不走后台线程直改 ─────────────────────────────────────
+
+// TestResolveResultAppliesInsideAFrame 钉「`ResolveFavoriteID` 的回调**不在
+// 后台那一趟的 goroutine 里跑**」。
+//
+// 🔴 它消费的是 UI-owned 状态（`s.likePending` / `s.likeBind` / `s.toasts`，
+// 全是界面线程读写、不带锁的）——后台那条线程直接调它就是一次数据竞争。
+// 所以那一趟只许把结果**入队**（`app.TakeFavoriteResolution`），应用结果的
+// 那一下由帧循环（`viewFolderDialogs` 里的 flush）来做——和
+// `TakeLikedResult` / `TakeFolderResult` 是同一个形状。
+func TestResolveResultAppliesInsideAFrame(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShell(t, f)
+
+	var ran atomic.Int32
+	// 只有 bvid 的那一首 → 走 askLikeIDThen → 后台问 avid。它的 done
+	// 直接记在**这个测试 goroutine** 的原子量上：如果 done 是在后台
+	// 那条线程跑的，这一帧还没画它就已经是 1 了——而邮箱那一路在
+	// `tt.Frame()` 之前它必须是 0。
+	s.resolveFavorite(app.Item{Source: "online", Type: "mv", Bvid: "BV177", Title: "歌 一"},
+		func(fixed app.Item, err error) { ran.Add(1) })
+
+	deadline := time.Now().Add(2 * time.Second)
+	for s.app.PendingFavoriteResolutions() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("解析那一趟没进邮箱（或根本没发）")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	if got := ran.Load(); got != 0 {
+		t.Fatalf("回调在后台线程里跑了 %d 次——它必须等帧里取走才跑", got)
+	}
+
+	settleFrame(tt) // 帧循环取走邮箱里那一条，回调这才跑
+	if got := ran.Load(); got != 1 {
+		t.Fatalf("帧里没跑回调（跑了 %d 次）", got)
+	}
+}
+
+// TestResolveSuccessOpensTheThreeChoices 钉「问出 avid 之后开的是绑定
+// 三选一」——成功那一条要带着补好的 Item 回到 `likeItemResolved`。
+func TestResolveSuccessOpensTheThreeChoices(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := likedPageShell(t, f)
+
+	// 没绑定 → 走完解析开三选一（不是弹「还没有可以收藏的身份」）。
+	s.likeItem(app.Item{Source: "online", Type: "mv", Bvid: "BV177", Title: "歌 一"})
+	waitFrames(t, tt, "三选一开出来", func() bool {
+		return s.likeBind != nil && s.likeBind.step == likeBindChoose
+	})
+	if s.likePending == nil || s.likePending.rid != 999 {
+		t.Fatalf("pending = %+v，want rid 999（fixture 的 view 回 aid 999）", s.likePending)
+	}
+}
+
+// TestResolveFailureShowsAToast 钉「解析失败那一条走 toast」——
+// 失败结果也要先进邮箱、帧里应用，不许在后台线程里 addToast。
+func TestResolveFailureShowsAToast(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.failViews(-500, "服务器坏了")
+	s, tt := likedPageShell(t, f)
+
+	s.likeItem(app.Item{Source: "online", Type: "mv", Bvid: "BV177", Title: "歌 一"})
+	waitFrames(t, tt, "失败那句说出来", func() bool {
+		return lastToast(s) != ""
+	})
+	if got := lastToast(s); got == "" || !strings.Contains(got, "收藏不了") {
+		t.Errorf("toast = %q，want 「收藏不了：…」", got)
+	}
+	if s.likeBind != nil {
+		t.Error("失败的那一趟还把三选一开出来了")
 	}
 }

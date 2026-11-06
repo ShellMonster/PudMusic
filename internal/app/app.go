@@ -712,14 +712,15 @@ type App struct {
 	// 假函数。
 	chaptersFetch func(context.Context, string, string) ([]bili.Chapter, error)
 
-	// like 是当前这一首的赞 / 藏状态，likeBvid 是它属于哪一个稿件。见 like.go。
+	// like 是当前这一首的赞 / 藏状态，likeKey 是它属于哪一首（`likeKey(it)`：
+	// mv 按 bvid、audio 按 sid）。见 like.go。
 	//
 	// ⚠️ **它自己的锁，不在 `a.mu` 里**：写它的是网络往返回来的那个 goroutine，
 	// 而 `a.mu` 是播放器那一摊的（`Snapshot` 每帧都要它）。把两者放一把锁里的话，
 	// 一次网络回调要去抢每帧都在拿的那把锁。
 	likeMu     sync.Mutex
 	like       bili.ArchiveRelation
-	likeBvid   string
+	likeKey    string
 	likeErr    error
 	likeLoaded bool
 	likeWanted bool
@@ -731,6 +732,12 @@ type App struct {
 	// 和 `partsFetch` 同一条规矩：**只由界面那一侧读写**（`ensureLike` 在那里就
 	// 把它取出来递给那个 goroutine，goroutine 不碰这个字段）。生产上永远是 nil。
 	likeFetch func(context.Context, string) (bili.ArchiveRelation, error)
+	// collCheck 是 audio 那一支问「收没收藏」的那一趟（`coll/resource/check`，
+	// rid = sid、type = MediaAudio）。nil = 走收藏夹零件上的 `bili.Client`。
+	//
+	// 和 `likeFetch` 同一条规矩：**只由界面那一侧读写**（`ensureLike` 在那里
+	// 把它取出来递给那个 goroutine）。生产上永远是 nil。
+	collCheck func(context.Context, int64, int) (bool, error)
 
 	// comments 是当前这一首的评论，commentsSlot 是它属于哪一个对象。见 comments.go。
 	//

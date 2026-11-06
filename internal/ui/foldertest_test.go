@@ -72,6 +72,10 @@ type folderBili struct {
 	// 歌单没了」（-400）走它。
 	dealCode int
 	dealMsg  string
+	// viewCode / viewMsg 让 /x/web-interface/view（解析 avid 那一趟）
+	// 回一个业务错误（0 = 成功，回 aid 999）。
+	viewCode int
+	viewMsg  string
 	// dealGate 让 deal 那一趟卡在「已经收到、还没回」中间（在写接口
 	// gate 之前生效）。
 	dealGate chan struct{}
@@ -168,6 +172,12 @@ func newFolderBili(t *testing.T, gate <-chan struct{}) *folderBili {
 			writeFolderJSON(w, 0, "0", map[string]any{
 				"count": len(f.collected), "list": f.collected,
 			})
+		case "/x/web-interface/view":
+			if f.viewCode != 0 {
+				writeFolderJSON(w, f.viewCode, f.viewMsg, nil)
+				return
+			}
+			writeFolderJSON(w, 0, "0", map[string]any{"aid": 999})
 		case "/x/v3/fav/resource/list":
 			writeFolderJSON(w, 0, "0", map[string]any{
 				"medias": []map[string]any{{
@@ -301,6 +311,14 @@ func (f *folderBili) failDeals(code int, msg string) {
 	f.lock()
 	defer f.unlock()
 	f.dealCode, f.dealMsg = code, msg
+}
+
+// failViews 让之后的 /x/web-interface/view（解析 avid 那一趟）回这个
+// 业务错误（造「解析失败」那一种）。
+func (f *folderBili) failViews(code int, msg string) {
+	f.lock()
+	defer f.unlock()
+	f.viewCode, f.viewMsg = code, msg
 }
 
 // gateDeals 卡住之后的每一趟 deal（已经收到、还没回），返回放走用的闸门。
