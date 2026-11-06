@@ -50,5 +50,20 @@ func TestRenderFollowShots(t *testing.T) {
 			homeFrame(tt)
 			save(t, dir, name+"-loggedout-follow.png", tt)
 		})
+		t.Run(name+"-skeleton", func(t *testing.T) {
+			b := newUIExplore(t)
+			uiFollowTags(b, map[int]any{1: "音乐人", 2: "电台"})
+			followHoldGrid(t, b)
+			s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(dark))
+			s.navigate(followPath)
+			tt.Frame()
+			f := s.followPageOf()
+			if !f.pager.loading {
+				t.Fatal("右边那一格没在拉——骨架屏出图量的是加载态")
+			}
+			tt.Frame()
+			homeFrame(tt)
+			save(t, dir, name+"-follow-skeleton.png", tt)
+		})
 	}
 }

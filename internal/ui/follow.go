@@ -595,10 +595,11 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		return
 	}
 	if !f.pager.started && f.pager.loading {
-		// ⚠️ **走 `viewLoading`（和「没有结果」同一个出口）**：这一格原来是一句
-		// 13pt 淡灰缩在左边，而「没关注任何人」是居中 15pt——用户等的那几秒里
-		// 那一行字和回来之后那一格对不上（票 #138）。
-		s.viewLoading(c, "follow:loading", "正在加载关注的人…")
+		// ⚠️ **画关注卡骨架，不走 `viewLoading`**：八行歌曲占位的形状和这一格
+		// （两列人像卡）差太远——回来那一帧行高、列宽一起跳，加上关注卡自己的
+		// 入场过渡就是「关注图标叠加 / 加载卡顿」那一票。骨架和真卡对齐之后，
+		// 数据回来只是「灰块换真人」，版面一步不挪（画法见 `followview.go`）。
+		s.viewFollowSkeleton(c, f)
 		return
 	}
 	// 🔴 **「一格都没有」也分几种**：见下面 `followEmpty`。合成一句的话，用户

@@ -6,12 +6,15 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
@@ -189,4 +192,96 @@ func faceTint(mid int64) ui.Color {
 		mid = -mid
 	}
 	return palette[mid%int64(len(palette))]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 骨架屏：首屏还在拉的时候，先把「两列关注卡」摆成灰块
+// ─────────────────────────────────────────────────────────────────────────────
+
+// followSkeletonLabel 是骨架占位件在无障碍树 / Tester 里的名字。
+//
+// ⚠️ **Label 而不是 Key**：Tester 的 `Find` 认的是「画着的字或挂着的名字」，
+// 不认 key；挂 Label 让「这一格里有什么」可以在测试里按名字量位置（头像在左、
+// 按钮在右、两列缝 16——见 `follow_skeleton_test.go`）。名字带序号，于是**同
+// 一格的两个状态（骨架/真卡）不会撞上**：数据回来时 Label 整个换掉。
+//
+// part 为空是整张卡，非空是卡上的某个件（「头像」/「按钮」）。
+func followSkeletonLabel(idx, part string) string {
+	if part == "" {
+		return "关注占位:" + idx
+	}
+	return "关注占位:" + idx + ":" + part
+}
+
+// followSkeletonCard 画一张关注卡的骨架（`.ucard` 的影）：56 圆头像 + 名字条
+// + 两行小字条 + 右侧一枚按钮大小的药丸占位。布局尺寸全部照 `pud.UCard`：
+// 16 内边距、16 缝、56 头像、`tok.BtnSmH` 高的按钮、1px `p.Line` 的边框
+// （真卡 `ButtonBase` 上那 1px 会让头像左缘比骨架外框的内边距再进 1——没有它
+// 数据回来那一帧所有件都横着挪 1 像素）。
+func followSkeletonCard(c *ui.Context, idx string, w float32) {
+	p := tok.Of(c.Theme())
+	key := "follow:skel:" + idx
+	ui.Row(c).Key(key).Label(followSkeletonLabel(idx, "")).Width(w).Shrink(1).MinWidth(0).
+		Padding(space.Px16).Gap(space.Px16).AlignItems(ui.Center).Radius(tok.R12).
+		Border(1, p.Line).
+		Children(func() {
+			skeleton.Block(c, key+":av", 56, 56, 28).Label(followSkeletonLabel(idx, "头像"))
+			ui.Column(c).Grow(1).Shrink(1).Gap(space.Px6).Children(func() {
+				// ⚠️ **字条宽按真卡的份数给，不按卡宽比例**：真卡上「名字 16 /
+				// 签名 13 / 认证 12」是三行不同长的字，骨架用三根不同长的条
+				// 模拟；拿卡宽乘比例的话窄卡里字条会比真字短一截、宽卡里长一截。
+				// `.Shrink(1)` 允许窄卡把它们压短——真卡的字也是 `Shrink(1)`
+				// 让位给按钮。
+				skeleton.Block(c, key+":n", 140, 14, tok.R4).Shrink(1)
+				skeleton.Block(c, key+":s", 200, 12, tok.R4).Shrink(1)
+				skeleton.Block(c, key+":o", 120, 12, tok.R4).Shrink(1)
+			})
+			// 按钮占位取「已关注」那一枚的 Sm 档（32 高），宽按那一枚的实测
+			// （三个 13px 字 + 左右 14 内边距 ≈ 66）。Shrink(0) 不许它被压：
+			// 窄卡里中间那一列已经 `Shrink(1)` 会让路，按钮永远贴在右缘
+			//（真卡上它也是 `Shrink(0)`，同一档）。
+			skeleton.Block(c, key+":btn", 66, tok.BtnSmH, tok.Pill).Label(followSkeletonLabel(idx, "按钮"))
+		})
+}
+
+// viewFollowSkeleton 是「右边那一格还在拉第一页」时画的：和真网格同一个形状
+// 的两列骨架（用户 2026-11-03 拍板「一行 5~6 个、差不多 4 行」——但列数断点
+// 归 `followColumnsFor` 管，骨架照它的列数摆，行数摆满一首屏）。
+//
+// ⚠️ **不用 `viewLoading`（八行歌曲占位）**：那一格的形状和真卡差太远——
+// 回来那一帧行高、列宽一起跳，加上关注卡自己的入场过渡就是「关注图标叠加 /
+// 加载卡顿」那一票的样子。骨架和真卡对齐之后，数据回来只是「灰块换真人」，
+// 版面一步不挪。
+//
+// ⚠️ **Label 挂在外层那一格上**（「正在加载关注的人…」）：读屏软件和 Tester
+// 靠它认出「这一格在拉」，和 `drawSkeletonRows` 那一档同一句话。
+func (s *Shell) viewFollowSkeleton(c *ui.Context, f *followPage) {
+	w := f.width
+	if w <= 0 {
+		w, _ = c.Size()
+	}
+	cols := followColumnsFor(w)
+	// ⚠️ **占位卡宽按「这一格的可用宽」算**：拿窗口宽当容器宽会把格算得比
+	// 容器还宽（首帧 `f.width` 还没量出来，那一帧 `cell` 宽 692 > 容器
+	// 848/2），卡从右缘溢出去。`f.width` 是上一帧量的，没量到就按窗口的
+	// 内容区宽（窗口 − 侧栏）先顶着——宁可算窄一格，不许溢出。
+	contW := w
+	if contW > 0 {
+		if cw := s.spaceContentWidth(c); cw > 0 && contW > cw {
+			contW = cw
+		}
+	}
+	cell := pud.CellWidth(max(contW, 0), cols, followCardGap)
+	ui.Column(c).Key("follow:skeleton").Label("正在加载关注的人…").FillWidth().
+		Gap(followRowGap).Children(func() {
+		for i := range 4 {
+			row := ui.Row(c).Key("follow:skel:row:" + strconv.Itoa(i)).FillWidth().Gap(space.Px16)
+			row = list.LayoutRow(row, c.Theme())
+			row.Children(func() {
+				for k := range cols {
+					followSkeletonCard(c, strconv.Itoa(i*cols+k), cell)
+				}
+			})
+		}
+	})
 }
