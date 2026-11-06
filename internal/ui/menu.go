@@ -365,12 +365,9 @@ func playModeItem(s *Shell) []*mygo.MenuItem {
 // 信这个应用了）。理由同 `comments_entry.go` 的文件头。
 func songColumn(s *Shell) []*mygo.MenuItem {
 	return []*mygo.MenuItem{
-		{ID: menuLikeID, Label: "赞", Click: func(*mygo.MenuItem, *mygo.Window) {
-			s.likeCurrent()
-		}},
-		// ⚠️ **「添加到收藏夹…」而不是「收藏当前歌曲」**：这一项开的是**一个
-		// 弹窗**（问「放到哪些收藏夹」），而用户读「收藏当前歌曲」会以为按一下
-		// 就收藏好了——按完发现弹出一个要选文件夹的窗，那就是「这个应用不听话」。
+		// ⚠️ **「添加到收藏夹…」而不是「喜欢当前歌曲」**：这一项开的是**一个
+		// 弹窗**（问「放到哪些收藏夹」），而用户读「喜欢当前歌曲」会以为按一下
+		// 就放进去了——按完发现弹出一个要选文件夹的窗，那就是「这个应用不听话」。
 		//
 		// 省略号是 macOS 的写法：**这一项开了一个窗**（对话框）。
 		{ID: menuFavoriteID, Label: "添加到收藏夹…", Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -512,9 +509,8 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	notch := s.app.NotchPlayerEnabled()
 	// 「歌曲」那一栏：有歌才有那几项。
 	hasTrack := st.HasTrack
-	// ⚠️ **「赞」和「显示评论」各有各的判据**（理由见下面改的那几行）：
-	// 「赞」要这一首在 B 站上**有投稿**，「显示评论」要它**有评论可问**。
-	likeable := s.app.Likeable()
+	// ⚠️ **「显示评论」有自己的判据**（理由见下面改的那几行）：它要这一首
+	// **有评论可问**。
 	commentsWorthAsking := s.app.CommentsWorthAsking()
 	// 「打开 UP 主空间」要 UP 主的 mid。
 	hasArtist := hasTrack && st.ArtistMid > 0
@@ -522,14 +518,14 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	cur := s.menuState
 	if cur.playMode == mode && cur.displayMode == display && cur.sidebar == sidebar &&
 		cur.mini == mini && cur.notch == notch && cur.hasTrack == hasTrack && cur.hasArtist == hasArtist &&
-		cur.likeable == likeable && cur.commentsWorthAsking == commentsWorthAsking {
+		cur.commentsWorthAsking == commentsWorthAsking {
 		// ⚠️ **一样就什么都不做**：每帧都往主线程投一次任务，是白花的钱。
 		return
 	}
 	s.menuState = menuState{
 		playMode: mode, displayMode: display, sidebar: sidebar,
 		mini: mini, notch: notch, hasTrack: hasTrack, hasArtist: hasArtist,
-		likeable: likeable, commentsWorthAsking: commentsWorthAsking,
+		commentsWorthAsking: commentsWorthAsking,
 	}
 
 	// 播放模式那一组。
@@ -559,21 +555,15 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 
 	// ⚠️ **「歌曲」那一栏的判据不是一个「有没有歌」**：每一项要什么，各有各的。
 	//
-	//   - 「赞」要 `Likeable()`——本地文件和音乐库条目**压根没有投稿**，
-	//     而 `App.SetLike` 会回一句「这一首在 B 站上没法赞」（红色 Toast）。
 	//   - 「显示评论」要 `CommentsWorthAsking()`——本地文件在 B 站上压根没有
 	//     对应的对象，问一个认不出来的 oid 的症状是「静默拿到空列表」。
 	//   - 「收藏」「下载」只要有歌就行。
 	//
-	// ⚠️ **界面上同一个功能用的是同一套判据**（`like.go` 的 `viewLikeStar`
-	// 第一句就 `if !s.app.Likeable() { return }`——本地文件**根本不摆那个键**；
-	// `comments_entry.go` 的 `viewCommentsButton` 用 `CommentsWorthAsking()`）。
-	// ⇒ 菜单和界面必须用同一套，否则「界面上没有这一枚、菜单里却有一个按了
-	// 报错」——而按一个点了报错的键比没有那个键更糟（用户按两次发现还是那样，
-	// 就不��信这个应用了）。
-	if it := s.menu.ItemByID(menuLikeID); it != nil {
-		it.SetEnabled(likeable)
-	}
+	// ⚠️ **界面上同一个功能用的是同一套判据**（`comments_entry.go` 的
+	// `viewCommentsButton` 用 `CommentsWorthAsking()`——本地文件**根本不摆
+	// 那个键**）。⇒ 菜单和界面必须用同一套，否则「界面上没有这一枚、菜单里
+	// 却有一个按了报错」——而按一个点了报错的键比没有那个键更糟（用户按两次
+	// 发现还是那样，就不再信这个应用了）。
 	if it := s.menu.ItemByID(menuCommentsID); it != nil {
 		it.SetEnabled(commentsWorthAsking)
 	}
@@ -631,8 +621,6 @@ type menuState struct {
 	notch       bool
 	hasTrack    bool
 	hasArtist   bool
-	// likeable 是「当前这一首能不能赞」（`App.Likeable`）。
-	likeable bool
 	// commentsWorthAsking 是「当前这一首有没有评论可问」（`App.CommentsWorthAsking`）。
 	commentsWorthAsking bool
 }
@@ -649,39 +637,24 @@ func (s *Shell) openPage(path string) {
 	s.restoreMainWindow()
 }
 
-// likeCurrent 是菜单里「赞」那一项做的事。
+// favoriteCurrent 是「喜欢」那条路：菜单「添加到收藏夹…」、迷你窗和刘海
+// 那枚心形都走它——开「把这一首放进哪些收藏夹」那个弹窗。
 //
-// ⚠️ **走 `App.SetLike`**（`internal/app/like.go`）——和播放条上那一枚键
-// 走的是同一条路（`like.go:727`）。
+// ⚠️ **开的是「放到哪些收藏夹」那个弹窗**，不是直接放进去——直接放要先把
+// 稿件 id 问出来，那要一轮网络往返且**静悄悄失败**（用户按了没反应，又不
+// 知道问的是谁）。
 //
-// ⚠️ **「赞不了」要落在画 toast 的那一扇上**：`viewToasts` 只在主窗口那一支
-// 调——迷你窗和刘海窗都不画 toast。从它们那两扇上点赞（迷你那条播放条、
-// 刘海展开卡上那枚 ♡）时，`s` 是那个副壳，直接 `s.addToast` 会把那句话
-// 写进一扇永远不画它的窗：用户按了赞、什么提示都没看见（静默失败）。
-// 所以失败提示路由到 `s.main` 那份 `toasts`。
-func (s *Shell) likeCurrent() {
-	rel := s.app.LikeState()
+// ⚠️ **提示要落在画 toast 的那一扇上**：`viewToasts` 只在主窗口那一支调——
+// 迷你窗和刘海窗都不画 toast。从它们那两扇上点心形时，`s` 是那个副壳，
+// 直接 `s.addToast` 会把那句话写进一扇永远不画它的窗（静默失败）。
+func (s *Shell) favoriteCurrent() {
+	it, ok := s.app.PlayingItem()
 	toastShell := s
 	if s.main != nil {
 		toastShell = s.main
 	}
-	s.app.SetLike(!rel.Liked, func(err error) {
-		if err != nil {
-			toastShell.addToast("赞不了："+err.Error(), notice.Danger)
-		}
-	})
-}
-
-// favoriteCurrent 是菜单里「收藏当前歌曲」那一项做的事。
-//
-// ⚠️ **开的是「放到哪些收藏夹」那个弹窗**，不是直接收藏——
-// 播放条上那一枚收藏键走的就是这条路（`playbar.go` 的 `viewFavButton`
-// → `openFolderSelect`），而直接收藏要先把稿件 id 问出来，那要一轮网络往返
-// 且**静悄悄失败**（用户按了收藏没反应，又不知道问的是谁）。
-func (s *Shell) favoriteCurrent() {
-	it, ok := s.app.PlayingItem()
 	if !ok {
-		s.addToast("这一首还没有取回来，收藏不了", notice.Warning)
+		toastShell.addToast("这一首还没有取回来，收藏不了", notice.Warning)
 		return
 	}
 	s.openFolderSelect(it)
@@ -756,8 +729,6 @@ const (
 	// menuDisplayModeIDPrefix 是「显示模式」那几项 id 的前缀。
 	menuDisplayModeIDPrefix = "displaymode."
 
-	// menuLikeID 是「赞」那一项。
-	menuLikeID = "song.like"
 	// menuFavoriteID 是「收藏当前歌曲」那一项。
 	menuFavoriteID = "song.favorite"
 	// menuDownloadID 是「下载当前歌曲」那一项。

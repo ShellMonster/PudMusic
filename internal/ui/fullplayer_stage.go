@@ -78,7 +78,8 @@ func (s *Shell) viewFullLeft(c *ui.Context, st app.State, g fullGeo, phase app.V
 // viewFullCover 是满屏那张封面——**和播放条上那一张是同一个元素**（共享元素转场）。
 //
 // 圆角 8、`0 32 80 .6` 的影、surface 6% 白的占位底；暂停时缩到 0.94。右键 / 菜单键开封面菜单
-// （复制歌曲信息 / 复制封面 / 一键三连 / 在 B 站打开）。有视频的投稿右下角叠「看视频」。
+// （复制歌曲信息 / 复制封面 / 在 B 站打开；「一键三连」跟着赞键一起去掉了）。
+// 有视频的投稿右下角叠「看视频」。
 func (s *Shell) viewFullCover(c *ui.Context, st app.State, r ui.Rect, phase app.VideoPhase) {
 	videoOn := phase == app.VideoLoading || phase == app.VideoOn
 	scaleTo := float32(1)
@@ -167,13 +168,13 @@ func coverIdentity(s *Shell, st app.State) string {
 // fullTitleSize 是歌名字号：`clamp(28px, 3vw, 40px)`。
 func fullTitleSize(winW float32) float32 { return min(max(winW*0.03, 28), 40) }
 
-// viewFullInfo 是封面下面那一块：宋体歌名、「歌手 · UP」、播放量和弹幕数，右边是赞和喜欢。
+// viewFullInfo 是封面下面那一块：宋体歌名、「歌手 · UP」、播放量和弹幕数，右边是「喜欢」心形。
 func (s *Shell) viewFullInfo(c *ui.Context, st app.State, g fullGeo, videoOn bool) {
 	p := tok.OfFull(c.Theme())
 	likeable := s.app.Likeable()
 	btns := float32(0)
 	if likeable {
-		btns += 2*tok.IconHit + 2*space.Px8
+		btns += tok.IconHit + space.Px8
 	}
 	if videoOn {
 		btns += tok.IconHit + space.Px8
@@ -190,7 +191,6 @@ func (s *Shell) viewFullInfo(c *ui.Context, st app.State, g fullGeo, videoOn boo
 		})
 		ui.Box(c).Grow(1)
 		if likeable {
-			s.viewFullThumb(c)
 			s.viewFullHeart(c)
 		}
 		if videoOn {
@@ -247,41 +247,11 @@ func (s *Shell) viewFullStats(c *ui.Context, p tok.Palette) {
 	})
 }
 
-// viewFullThumb 是点赞键（原型 `.icon-btn[data-act="thumb"]`）：右上角带赞数，**长按三连**。
+// viewFullHeart 是「喜欢」键（原型 `[data-act="like"]`，心形）：用户自己的
+// **喜欢歌单绑定入口**——点开「把这一首放进哪些收藏夹」那个弹窗。
 //
-// 状态机和进度环是播放条上封面用的那一份（`s.like`，满屏开着时播放条不建，互斥）。
-func (s *Shell) viewFullThumb(c *ui.Context) {
-	p := tok.OfFull(c.Theme())
-	rel := s.app.LikeState()
-	count := s.app.ArchiveCounts().Like
-	label := "赞"
-	if rel.Liked {
-		label = "已赞"
-	}
-	ic := "thumb"
-	if rel.Liked {
-		ic = "thumb-on"
-	}
-	var btn ui.Element
-	ui.Box(c).Key("full:thumb-wrap").Size(tok.IconHit, tok.IconHit).Shrink(0).Children(func() {
-		btn = pud.IconBtn(c, "full:thumb", ic, countKeyLabel(label, count)+"（长按三连）",
-			pud.IconOpts{On: rel.Liked, Count: playbarCountText(count), Color: p.Text2})
-		s.viewLikeRing(&s.like, c, btn.Pressed(), tok.R8)
-	})
-	btn = s.withTip(c, btn, countKeyTip("赞", count, likeStarTooltip(rel.Liked, s.app.LikeErr() != nil && !s.app.LikeAsked())))
-	if btn.Clicked() {
-		if s.like.swallowClick() {
-			return
-		}
-		s.app.SetLike(!rel.Liked, func(err error) {
-			if err != nil {
-				s.addToast("赞不了："+err.Error(), notice.Danger)
-			}
-		})
-	}
-}
-
-// viewFullHeart 是「喜欢」键（原型 `[data-act="like"]`，心形）：对应收藏——点开选收藏夹。
+// ⚠️ **它不是 B 站的点赞**（喜欢歌单原型把「赞」从播放器上去掉了）：实心 /
+// 空心说的是「这一首进没进收藏夹」（`LikeState().Favorited`），标签是「喜欢」。
 func (s *Shell) viewFullHeart(c *ui.Context) {
 	p := tok.OfFull(c.Theme())
 	faved := s.app.LikeState().Favorited
@@ -289,7 +259,7 @@ func (s *Shell) viewFullHeart(c *ui.Context) {
 	if faved {
 		ic = "heart-on"
 	}
-	b := pud.IconBtn(c, "full:heart", ic, "收藏", pud.IconOpts{On: faved, Color: p.Text2})
+	b := pud.IconBtn(c, "full:heart", ic, "喜欢", pud.IconOpts{On: faved, Color: p.Text2})
 	if s.withTip(c, b, favTooltip(faved)).Clicked() {
 		it, ok := s.app.PlayingItem()
 		if !ok {

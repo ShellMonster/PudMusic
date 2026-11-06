@@ -359,12 +359,9 @@ func (s *Shell) viewCoverMenu(c *ui.Context, st app.State) {
 	} else {
 		pud.PopText(c, copyNoCoverNote)
 	}
-	// 在线的歌才有「一键三连」和「在 B 站打开」（原型 `TR[t.id] ?` / `open-bili`）。
+	// 在线的歌才有「在 B 站打开」（原型 `TR[t.id] ?` / `open-bili`）。
+	// 「一键三连」跟着赞键一起去掉了（喜欢歌单原型里没有三连）。
 	if st.BiliURL != "" {
-		if s.app.Likeable() && pud.PopItem(c, "cover:triple", "一键三连", false).Clicked() {
-			s.coverMenuOpen = false
-			s.tripleNow()
-		}
 		if pud.PopItem(c, "cover:open-bili", "在 B 站打开", false).Clicked() {
 			s.coverMenuOpen = false
 			s.openExternalURL(st.BiliURL)

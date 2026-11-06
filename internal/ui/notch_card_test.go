@@ -15,7 +15,6 @@ package ui
 //   - 没歌时仍是 idle 那张卡，不是播放器布局。
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -304,54 +303,27 @@ func notchToastTexts(s *Shell) []string {
 	return out
 }
 
-// TestNotchLikeFailureToastsOnTheMainWindow 钉「刘海里赞失败」那句提示
-// **落在主窗口**（画 toast 的那一扇），不是落在刘海那个外壳上——刘海窗
-// 压根不画 toast（`viewToasts` 只在主窗那一支调），写进它自己的 `toasts`
-// 等于那句「赞不了」永远没有画面（对抗评审：静默失败）。
+// TestNotchHeartOpensTheFolderSelect 钉「刘海里那枚心形开的是收藏夹弹窗」。
 //
-// 路由规则和迷你窗同一条（`filenotice.go` 顶上那一节）：`addToast` 在
-// 刘海外壳上被调到时，要转去 `s.main` 那一份。
-func TestNotchLikeFailureToastsOnTheMainWindow(t *testing.T) {
-	f := newBiliFixture(t, 1)
-	f.onLike(false, false, false)
-
+// 心形是**喜欢歌单绑定入口**（`favoriteCurrent` → 「把这一首放进哪些收藏夹」
+// 那个弹窗），不是 B 站点赞——喜欢歌单原型把「赞」从播放器上去掉了。
+//
+// 这条顺带钉「提示落在画 toast 的那一扇」：`openFolderSelect` 没挂歌单时
+// 只会说一句「收藏夹现在打不开」，那句要走 `s.main` 那份 toasts——刘海窗
+// 自己压根不画 toast（`viewToasts` 只在主窗那一支调）。
+func TestNotchHeartOpensTheFolderSelect(t *testing.T) {
 	n, main := newNotchShell(t)
-	// 在线那首放进共享 App（刘海外壳和主窗共用同一个 App）。
-	n.app.MountStreaming(app.Streaming{
-		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
-	})
-	if err := n.app.Enqueue(likeItem()); err != nil {
-		t.Fatalf("把在线的那首放进队列：%v", err)
-	}
-	waitFor(t, "在线那首开始播", func() bool { return n.app.Snapshot().HasTrack })
-	// 「赞没赞」那一问是界面每帧调 `LikeState` 触发的——这里没有帧，手动问
-	// 一次再等到回来（`LikeAsked` 才是真回来的那个标记）。
-	n.app.LikeState()
-	waitFor(t, "赞没赞问回来了", func() bool { return n.app.LikeAsked() })
 
-	// 赞那一趟换成失败：B 站回「没登录」，`SetLike` 的 done 拿到 err。
-	f.failLike()
-
-	n.likeCurrent()
-	waitFor(t, "赞失败那一趟跑完了", func() bool {
-		return len(notchToastTexts(main)) > 0 || len(notchToastTexts(n)) > 0
-	})
+	// ⚠️ **没挂歌单那一摊**：心形按下去说的是「收藏夹现在打不开」，而那句话
+	// 必须落在主窗口的 toasts 上，不是刘海外壳自己的（它那一扇不画 toast）。
+	n.favoriteCurrent()
 
 	if got := notchToastTexts(n); len(got) != 0 {
-		t.Fatalf("「赞不了」写进了刘海外壳自己的 toasts %q：它那一扇不画 toast，这句话永远没有画面", got)
+		t.Fatalf("提示写进了刘海外壳自己的 toasts %q：它那一扇不画 toast，这句话永远没有画面", got)
 	}
 	got := notchToastTexts(main)
 	if len(got) == 0 {
-		t.Fatal("「赞不了」没有落到主窗口的 toasts 上：用户按了赞、什么提示都没看见")
-	}
-	found := false
-	for _, text := range got {
-		if strings.HasPrefix(text, "赞不了") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("主窗口的 toasts 里没有「赞不了」那句：%q", got)
+		t.Fatal("提示没有落到主窗口的 toasts 上：用户按了心形、什么提示都没看见")
 	}
 }
 

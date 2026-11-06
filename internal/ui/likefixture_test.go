@@ -251,10 +251,12 @@ func playTheLikeSong(t *testing.T, f *biliFixture, width int, waitAsked bool) *l
 	}
 	waitFrames(t, tt, "在线那首开始播", func() bool { return s.app.Snapshot().HasTrack })
 
-	// 赞没赞是**每一帧**问 App 要的，而问 App 会触发那一趟。等到问回来为止：
-	// 没问回来之前长按是关着的（likeArmed，见 like.go），用例在那一段量到的
-	// 东西没有意义。
+	// 赞没赞是**每一帧**问 App 要的，而问 App 会触发那一趟。等到问回来为止。
+	//
+	// ⚠️ **喜欢歌单那一票之后，播放条上没有谁每帧调 `LikeState` 了**（赞键
+	// 走了）：手动问一次把它发出去，再等它回来。
 	if waitAsked {
+		s.app.LikeState()
 		waitFrames(t, tt, "赞没赞问回来了", func() bool { return s.app.LikeAsked() })
 	} else if s.app.LikeAsked() {
 		t.Fatal("赞没赞问回来了 —— 这一条要的是「一直没问回来」那一段")

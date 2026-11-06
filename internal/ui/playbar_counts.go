@@ -1,5 +1,5 @@
-// 播放条左边第三段那三枚键（赞 / 收藏 / 评论）各自的**读数**（票 #701 起带数，
-// 随后收成右上角小角标）。
+// 播放条上「评论」那一枚键的**读数**（票 #701 起带数，随后收成右上角小角标；
+// 「赞」「收藏」两枚的读数在喜欢歌单原型里随键一起去掉了）。
 //
 // # 这一族和「播放量那一列」是两件事
 //
@@ -40,14 +40,13 @@
 // 右上角挖出来的一个缺口」，不是一枚键。`nav-feed` 那个红点（`navbar_feed.go`
 // 的 `viewDynamicDotMark`）是同一个形状、同一个理由。
 //
-// # 三枚键的**共性**（所以这里有一份共享的配方）
+// # 这一族的配方
 //
 //	图形 18（`iconMd`）在一个 18×18 的盒子里，缺口块挂在这个盒子的右上角
 //
 // 角标折出来的字是 `list.CountText`（那一族的折法只有这一处），而**约束**
 // （字号 / 颜色 / 缺口块的挂点与圆角 / PassThrough）在 `countBadge` 这一个
-// 函数里——**三枚键共用**（赞键的图形那一块是绝对定位的两层，它自己拼盒子，
-// 但**角标走同一份**）。
+// 函数里。
 //
 // # 🔴 「+」不许截：从「上限保险」换成「根本不设上限」
 //
@@ -254,12 +253,8 @@ func countKeyTip(name string, n int64, tip string) string {
 	return tip
 }
 
-// countBadge 是挂在**图形盒子右上角**的那枚**缺口角标**（三枚键共用）。
-//
-// ⚠️ **这一格的约束只有这一处**：收藏键和评论键走 `countKeyIcon`，而**赞键自己
-// 拼图形盒子**（它那两层背景 + 拇指是绝对定位的，见 `like.go` 的 `likeButton`）
-// ——但**角标走这里**，于是三枚键的「缺口块 / 挂点 / 字号 / 颜色 / PassThrough」
-// **只有一份**。
+// countBadge 是挂在**图形盒子右上角**的那枚**缺口角标**（评论键共用，
+// `comments_entry.go` 的 `countKeyIcon` 走这里）。
 //
 // # 🔴 形状：一块底色圆角块（缺口）+ 嵌在里头的数字
 //
@@ -318,11 +313,11 @@ func badgeTextWidth(measured float32) float32 {
 	return measured
 }
 
-// countBadge 是图标键右上角的计数（原型 `.cnt`）：等宽 10 号 600、字距 -0.02em、次要色，
-// 底是播放条的 `side` 色，内边距 2/4、圆角 6，离键上沿 1、右沿 -4（超出键 4）。
+// countBadge 是图标键右上角的计数（原型 `.cnt`）：等宽 8 号 600、次要色，
+// 底是播放条的 `side` 色，缺口块挂在图形盒子的右上角。
 //
-// 它挂在键里 18×18 的图形盒子上（盒子在 36×36 的键里居中，盒子右上角在键的 (27, 9)），
-// 所以相对盒子右上角是「往右 13、往上 8」。dx 是长按三连时图标的抖动偏移，计数跟着抖。
+// dx 是给调用方留的横向偏移（原来长按三连时图标的抖动跟着它走；三连去掉之后
+// 调用方都传 0）。
 func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 	t := playbarCountText(n)
 	if t == "" {
@@ -344,15 +339,11 @@ func countBadge(c *ui.Context, n int64, _ ui.Color, dx float32) {
 }
 
 // countKeyIcon 是计数键里的图形盒子（18×18，图形居中）+ 右上角的计数。
-// on 是「开着」（收藏了 / 赞了）：图形 accent-text；平时次要色，悬停正文色。
+// 平时次要色，悬停正文色。
 func countKeyIcon(c *ui.Context, iconName string, hovered, pressed bool, n int64, bg ui.Color) {
-	countKeyIconOn(c, iconName, hovered, pressed, false, n, bg)
-}
-
-func countKeyIconOn(c *ui.Context, iconName string, hovered, pressed, on bool, n int64, bg ui.Color) {
 	ui.Box(c).Size(iconMd, iconMd).Children(func() {
 		ic := ui.Icon(c, icon(iconName)).FontSize(iconMd).
-			Attach(ui.AnchorCenter, ui.AnchorCenter).TextColor(pbIconColor(c, hovered, on))
+			Attach(ui.AnchorCenter, ui.AnchorCenter).TextColor(pbIconColor(c, hovered, false))
 		flat.PressScale(ic, pressed, false)
 		countBadge(c, n, bg, 0)
 	})

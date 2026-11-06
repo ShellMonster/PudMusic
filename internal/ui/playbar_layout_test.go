@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -135,15 +136,13 @@ func TestTheTransportKeysArePrevPlayNext(t *testing.T) {
 //
 // 🔴 **票 #219 之后左边那一列是三段**（上游 `playbar/left/index.tsx:29`）：
 //
-//	封面 │ 缝 │ 歌名·UP名 │ 缝 │ 分集·收藏·赞
+//	封面 │ 缝 │ 歌名·UP名 │ 缝 │ 评论
 //
-// 所以歌名那一列要减掉**两道**缝（改之前只有一道——键在歌名下面那一行），
-// 还要减掉**第三段**（三枚键横着并排的那一段）。
+// 所以歌名那一列要减掉**两道**缝，还要减掉**第三段**。喜欢歌单原型把
+// 「赞」「收藏」两枚键去掉了——这一段只剩「评论」（本地文件时一枚都不摆）。
 //
-// ⚠️ **第三段的宽度是量出来的，不是写死的**：它是**跟着内容走的**（上游那一段
-// 也是 `flex`）——单 P 的稿子少一枚分集键，那一段就窄 32，而歌名那一列跟着
-// 宽 32。这个 tester 背后是一个空的 App，所以那一段里只有「收藏」和
-// 「评论」两枚（分集要真的 App，赞也是）。
+// ⚠️ **第三段的宽度是量出来的，不是写死的**：它是**跟着内容走的**。这个
+// tester 背后是一个空的 App（`CommentCount()` 是 0，名字就是「评论」）。
 //
 // ⚠️ **要歌名够长**：短歌名的框是它自己的自然宽，量的是字不是容器。
 // ⚠️ **两档都要量**（1280 / 1400）：1280 上左边那一列是**内容撑出来的**
@@ -163,38 +162,30 @@ func TestTheLeftColumnIsOneFifthOfTheBar(t *testing.T) {
 				t.Fatalf("画面上找不到歌名，文字有 %q", tt.Texts())
 			}
 
-			// 第三段有多宽：量画出来的那几枚键的跨度。
-			//
-			// ⚠️ **「评论」也在里面**（票 #573 之后第三段是四枚）：漏掉它的话
-			// 量出来的第三段比真的窄——而歌名那一列的宽是拿第三段的宽算的，
-			// 差出来的那一截全算到歌名头上。
-			//
-			// ⚠️ **它那一枚的名字可能带数字**（票 #682 起评论数进了名字）：这个
-			// 测试背后是一个**空的 App**（没有 bvid，于是 `CommentCount()` 是 0、
-			// 名字就是「评论」），但别把这里写死成只认那两个字——用
-			// `findCommentsKey` 找，带不带数字都认得出来。
+			// 第三段有多宽：量画出来的评论键（赞 / 收藏两枚已经去掉了）。
+			// 这个 tester 背后是一个**空的 App**（`CommentsWorthAsking()` 为假），
+			// 评论键是条件摆的——不摆时第三段宽 0，那一道缝也让给歌名。
 			segLo, segHi := float32(1e9), float32(-1e9)
-			for _, k := range []string{"收藏", "赞"} {
-				r, ok := tt.Find(k)
-				if !ok {
-					continue
-				}
-				segLo = min32(segLo, r.X)
-				segHi = max32(segHi, r.X+r.W)
-			}
 			if r, ok := findCommentsKey(tt); ok {
 				segLo = min32(segLo, r.X)
 				segHi = max32(segHi, r.X+r.W)
 			}
+			segW := segHi - segLo
 			if segHi < segLo {
-				t.Fatalf("第三段那几枚键一枚都量不到，文字有 %q", tt.Texts())
+				segW = 0 // 评论键条件摆：不摆时第三段宽 0
 			}
 
 			got := title.W
 			// 原型 `.bar`：三列 `1fr 1.3fr 1fr`，缝 24，左右内边距 20；左列里是
-			// 封面 56 │ 缝 12 │ 歌名·UP 名 │ 缝 12 │ 赞·收藏·评论。
+			// 封面 56 │ 缝 12 │ 歌名·UP 名（│ 缝 12 │ 评论——摆出来的时候，
+			// 缝跟着左列 Row 的 `space.Px12`）。
 			track := (float32(width) - playbarPadX*2 - 2*24) / 3.3
-			want := track - coverSize - 2*12 - (segHi - segLo)
+			// ⚠️ **左列 Row 的缝是「子元素个数 − 1」道**（`viewTrackActions`
+			// 不摆任何东西时左列只有两个孩子）：评论键不摆时歌名只让出一道缝。
+			want := track - coverSize - 12 - segW
+			if segW > 0 {
+				want -= 12 // 第三段摆出来的时候，它和歌名之间还有一道缝
+			}
 			if absFloat(got-want) > 1 {
 				t.Errorf("歌名那一列只有 %.1f 宽，而它该是 %.1f——"+
 					"左边那一列是 1fr / 1.3fr / 1fr 里的第一份（原型 .bar），"+
@@ -218,9 +209,8 @@ func absFloat(v float32) float32 {
 // 🔴 **这一条钉的是票 #216 踩到的一个坑**：中间那一列在 Grid 里是左列的
 // **后一个兄弟**，而框架的命中测试取**最上面**那个含点的元素
 // （`mygo/ui/input.go:145` 从 hits 列表末尾往前找），于是中间那一列那整个框
-// （900 宽下从 x=189.6 起）把左列撑出来的那一截盖住了——**收藏、赞、音质徽章
-// 这些在左列右端的键点了没反应**，而**界面上看不出坏了**（它们好好地画在
-// 那儿，一根汗毛都没少）。
+// （900 宽下从 x=189.6 起）把左列撑出来的那一截盖住了——**左列右端的键点了
+// 没反应**，而**界面上看不出坏了**（它们好好地画在那儿，一根汗毛都没少）。
 //
 // ⚠️ **临界宽度**：中间那一列的左沿 = 16 + (窗口 − 32) / 5，左列右端 =
 // 16 + 307（`playbarLeftMinW`，票 #682 之后），两者一碰就是窗口 ≈ 1583。所以
@@ -233,18 +223,21 @@ func absFloat(v float32) float32 {
 func TestTheLeftColumnKeysAreNotCoveredByTheMiddleColumn(t *testing.T) {
 	for _, width := range []int{900, 1000, 1100} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			// ⚠️ **空 App 摆不出评论键**（`CommentsWorthAsking()` 为假）——
+			// 左列右端那一格现在是歌名/UP 名，点它开 UP 主空间。断的是
+			// 「左列右端的命中没被中间那一列盖住」这件事本身。
 			tt, _ := playbarTester(t, barState(), width, 0, false)
 
-			fav, ok := tt.Find("收藏")
+			key, ok := tt.Find("某个 UP 主")
 			if !ok {
-				t.Fatalf("宽度 %d：画面上找不到「收藏」，文字有 %q", width, tt.Texts())
+				t.Fatalf("宽度 %d：画面上找不到 UP 名，文字有 %q", width, tt.Texts())
 			}
-			tt.Move(fav.X+fav.W/2, fav.Y+fav.H/2)
+			tt.Move(key.X+key.W/2, key.Y+key.H/2)
 			tt.Frame()
-			if !tt.HasText(favTooltip(false)) {
-				t.Errorf("宽度 %d：指针停在「收藏」上（x=%.1f..%.1f）却没有那句话——"+
+			if !tt.HasText(list.OwnerTipText("某个 UP 主")) {
+				t.Errorf("宽度 %d：指针停在 UP 名上（x=%.1f..%.1f）却没有那句话——"+
 					"它被中间那一列的命中框盖住了（那一片点了没反应，而界面上看不出坏了）",
-					width, fav.X, fav.X+fav.W)
+					width, key.X, key.X+key.W)
 			}
 		})
 	}

@@ -527,59 +527,12 @@ func TestThePlayBarDrawsAnIconForEveryAction(t *testing.T) {
 			for _, label := range []string{"上一首", "下一首", "播放", "播放模式", "歌词"} {
 				assertGlyphPainted(t, tt, label)
 			}
-			// 赞 / 收藏在左边**第三段**（见 viewTrackActions），下载在右边
-			// 那一组（见 viewPlayBarRight）——**两处都要 `HasTrack` 才画**，
-			// fullBarState 带了。
-			for _, label := range []string{"收藏", "下载当前歌曲"} {
+			// 「下载」在右边那一组（见 viewPlayBarRight）——要 `HasTrack` 才画，
+			// fullBarState 带了。（赞 / 收藏两枚跟着喜欢歌单原型去掉了。）
+			for _, label := range []string{"下载当前歌曲"} {
 				assertGlyphPainted(t, tt, label)
 			}
 		})
-	}
-}
-
-// TestTheLikeKeyDrawsItsOwnIcon 单独钉「赞」那一枚。
-//
-// ⚠️ **不能塞进上面那一条**：赞键要 `App.Likeable()`（本地文件和音乐库条目没有
-// 可赞的东西，`bili/like.go`），而喂一份 State 的那个 tester 背后是一个**空的
-// App**——摆不出这一枚。要真的摆出来就得挂上一台假 B 站并放一首在线的进去
-// （`newLikeEnv` 就是干这个的），所以它自己一条。
-func TestTheLikeKeyDrawsItsOwnIcon(t *testing.T) {
-	e := newLikeEnv(t, false, false, true)
-
-	outline := glyphShape(e.tt, "赞")
-	if outline == "" {
-		t.Fatalf("赞那一枚上没画东西：%q", e.tt.Texts())
-	}
-	// 赞过之后换另一张图标（空心 → 实心），所以两块图形必须不同。
-	if err := e.tt.Click("赞"); err != nil {
-		t.Fatalf("点不动赞：%v", err)
-	}
-	// ⚠️ **等的是「应用里那个状态」，画面要**再画一帧**才收进去。**
-	//
-	// 为什么不接着用 `waitFrames` 等画面：
-	//
-	//   - 那个 10 秒是**墙钟**，而它每一轮都在**画一帧**——画一帧是**整个窗口**
-	//     重画一遍，满载的机器上它可能就要好几秒（同一时刻别的测试的 goroutine
-	//     正在抢 CPU）。于是十秒的预算全花在重画上，条件还没来得及成立。
-	//   - 赞是**乐观**的（`App.SetLike`：点下去那一帧本地就改了），而那一趟写
-	//     失败会**改回去**（`rollbackLike`）。慢机器上那一趟写可能超时——于是
-	//     「亮过」的那一小段在**检查之前**就没了：等画面等的是一个**已经被回滚
-	//     掉**的状态，报出来的却是「赞没变亮」——症状离真因隔了三层。
-	//
-	// 这一条要等的东西本来就是**应用里的状态**（`waitFor` 正是等这个的，见
-	// shelltest_test.go 的「两种等法」），画面那一帧单独画。
-	e.tt.Frame()
-	waitFor(t, "赞变亮了", func() bool { return e.s.app.LikeState().Liked })
-	e.tt.Frame()
-	if _, ok := e.tt.Find("已赞"); !ok {
-		t.Fatalf("赞变亮了，界面上却还是「赞」：%q", e.tt.Texts())
-	}
-	filled := glyphShape(e.tt, "已赞")
-	if filled == "" {
-		t.Fatalf("已赞那一枚上没画东西：%q", e.tt.Texts())
-	}
-	if filled == outline {
-		t.Error("赞过之后**形状**和赞之前一模一样——空心/实心那两张图标没换")
 	}
 }
 
@@ -669,7 +622,7 @@ func TestTheGlyphsAreNotSwallowedByTheBackground(t *testing.T) {
 			tt := playBarTester(t, fullBarState(), 1200, dark)
 			// 上一首 / 下一首在这个无播放器的壳里是禁用态（原型 35% 不透明），对比度本来就低，
 			// 不在这条的范围内；「加歌」键原型里没有，「下载」的名字是「下载当前歌曲」。
-			for _, label := range []string{"播放", "播放模式", "收藏", "下载当前歌曲"} {
+			for _, label := range []string{"播放", "播放模式", "下载当前歌曲"} {
 				s := scanGlyph(tt, label)
 				if s.ink == "" {
 					t.Fatalf("%q 那一块什么都没画：%q", label, tt.Texts())
@@ -732,9 +685,6 @@ func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
 		// 它得按**画面上量到的那一枚图形**算（圆占画布 20/24，留白是 4）。
 		// 下面单独断它。
 		{"播放模式", iconMd, tok.IconHit},
-		// 收藏：票 #219 之后跟着上游走（`RiStarFill/Line size={18}`），
-		// 它和右边那一组一样是 18 的图标 + 32 的点击区。
-		{"收藏", iconMd, tok.IconHit},
 		// ⚠️ **「下载」不在这张表里了**（票 #222 / 报告 §3.12）：上游那一支的
 		// 条件是 `{Boolean(playId) && getPlayItem()?.source !== "local" && …}`
 		//（`playbar/right/index.tsx:15`）——**本地文件不摆**。而这一条放的是

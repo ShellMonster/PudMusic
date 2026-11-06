@@ -617,30 +617,11 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 	}
 }
 
-// TestThePartsKeySharesTheRowWithTheOtherKeys 钉「这个键和赞 / 收藏在**同一行**」。
+// TestThePartsKeySharesTheRowWithTheOtherKeys 钉「这个键和右列那一组在同一行」。
 //
-// ⚠️ **它原来叫 `TestThePartsKeySharesTheMetaRowWithTheOtherKeys`**——「歌名下面
-// 那一行」在票 #219 之后**没有了**：三枚键搬到了**第三段**（封面右边横着并排的
-// 那一行），歌名和 UP 名在它们**左边**那一列。
-//
-// 🔴 **这一条是给本票吃过的两次亏写的**：第一版写了一段 19 行的注释宣称分集键挂在
-// 中间那一列的第二行（`viewProgress`），而代码里那个键在歌名下面那一行——注释描述
-// 了一段不存在的代码，评审打回来的时候它还在那儿。注释和代码对不上，编译器不管，
-// 也没有任何一条测试管。
-//
-// 所以这里直接量**位置**：分集键的垂直中心要和赞 / 收藏**在同一条水平线上**
-// （差不超过 2 像素）。把键挪到中间那一列的第二行——那个位置上它挨的是进度条，
-// 不是这两个键——这一条立刻红。
-//
-// ⚠️ **这一段原来写的是「赞 / 收藏 / 下载那三个键」和「挨着播放模式」**：下载
-// 跟着上游搬到了播放条右边那一组（票 #127），而播放模式也搬过去了（它原本在
-// 进度那一行）——所以进度那一行现在只剩进度条。两处一起过期，而下面那个循环
-// 已经只列赞 / 收藏了（改循环的时候忘了改这段）。
-//
-// ⚠️ **别拿宽度当判据**：图标化之后两种摆位的代价几乎一样（都只让 UP 名让出 40 上下的
-// 宽度，歌名和进度条两档一模一样，见 `viewTrackActions` 那段注释），所以
-// `TestThePartsKeyCostsNothingElseOnThePlayBar` 分不出这两处——它量的是「不花掉别人
-// 的钱」，而这个键摆在哪儿都不是在花别人的钱。**位置要单独钉。**
+// ⚠️ **喜欢歌单原型之后**：赞 / 收藏两枚键去掉了，「分集」挪在右列
+// （`viewPlayBarRight`）——它和右列那几枚（下载 / 歌词 / 队列）在同一条
+// 水平线上，而不是左边那一列。
 func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
 	partsReady(t, s, tt, 3)
@@ -650,11 +631,7 @@ func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 		t.Fatalf("画面上找不到分集入口，文字有 %q", tt.Texts())
 	}
 	const sameLine = 2
-	// 赞 / 收藏都在**第三段**（封面右边横着并排的那一行）。**「下载」不在这一列
-	// 里**——票 #127 把它从左边那一段搬到了播放条右边那一组（照 Biu 的
-	// `playbar/right/index.tsx:15`），而那一行在播放条的正中，比这一行低半条
-	// 播放条，拿它当参照量出来的差永远是几十像素，那不是「分集键摆错行了」。
-	for _, other := range []string{"赞", "收藏"} {
+	for _, other := range []string{"下载当前歌曲", "歌词", "播放列表"} {
 		r, ok := tt.Find(other)
 		if !ok {
 			t.Fatalf("画面上找不到 %q，文字有 %q", other, tt.Texts())
@@ -663,8 +640,7 @@ func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 		otherMid := r.Y + r.H/2
 		if widthGap(mid-otherMid) > sameLine {
 			t.Errorf("分集那一格的垂直中心在 y=%.1f，而 %q 那一格在 y=%.1f（差 %.1f）——"+
-				"它们不在同一条水平线上：三枚键该是**横着并排**的一行"+
-				"（上游 `playbar/left/index.tsx:85` 的 `flex items-center`）",
+				"它们不在同一条水平线上：分集挪在右列那一组",
 				mid, other, otherMid, widthGap(mid-otherMid))
 		}
 	}
