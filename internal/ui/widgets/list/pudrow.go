@@ -60,7 +60,7 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		Title:     sh.Title,
 		Artist:    sh.Extra,
 		Owner:     m.Owner,
-		OwnerTip:  OwnerTipText(m.Owner),
+		OwnerTip:  ownerTip(l.acts, m),
 		Plays:     l.countText.At(i, m.View, PlayCountText),
 		Duration:  l.durText.At(i, m.Duration, formatDuration),
 		Playing:   playing,
@@ -113,6 +113,20 @@ func (l *List) viewPudRow(r ui.ListRow) {
 	case ev.Owner && l.acts.OpenOwner != nil && m.Item.ArtistMid > 0:
 		l.acts.OpenOwner(m.Item.ArtistMid, m.Owner)
 	}
+}
+
+// ownerTip 是 UP 名那一枚的提示：**真接上了 `OpenOwner` 才有**——它同时是
+// 「这个名字是链接」的开关（`pud.Track.OwnerTip` 非空才画链接）。没接的
+// 列表（比如只装着「看看统计」那一份空操作的）返回空，名字画成普通字，
+// 不装假链接。
+//
+// ⚠️ **还要那个人真的给得出**：B 站有的接口只给名字不给编号
+// （`ArtistMid <= 0`），那种情况下点了也到不了他的空间——给提示就是撒谎。
+func ownerTip(acts Actions, m Music) string {
+	if acts.OpenOwner == nil || m.Item.ArtistMid <= 0 {
+		return ""
+	}
+	return OwnerTipText(m.Owner)
 }
 
 // viewPudUserRow 画「用户」那一档的一行：一到两张 UP 主卡（原型 `.od-grid` 两列、缝 16），

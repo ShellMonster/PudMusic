@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
+	mygoui "github.com/egoist/mygo/ui"
 )
 
 // 这一组钉住「点列表行里的 UP 名进他的空间」那条路（票 #360）。
@@ -105,5 +107,83 @@ func TestClickingTheOwnerNameInACollectionRowGoesIntoThatSpace(t *testing.T) {
 	// 夹具里那条的 upper.mid 是 2（`mediaOf`）。
 	if got, want := s.router.Path(), upPathOf(2); got != want {
 		t.Errorf("点了 UP 名跳到了 %q，want %q", got, want)
+	}
+}
+
+// TestTheLibraryRowOwnerNameIsANameLink 钉住历史记录行里的 UP 名是**名字型链接**
+// （DESIGN.md「名字型链接」那一节）：一句话字，**没有胶囊 / 底色**，指针落上去
+// 底下长出一道主色下划线，而且它是一枚能拿键盘焦点的控件。
+//
+// 判据是**像素 + 键盘焦点**两样：只断「点完跳了」断不出样式——那一条只管导航
+// （上面那几条），而「长得像个按钮」这种错只在画面上。
+func TestTheLibraryRowOwnerNameIsANameLink(t *testing.T) {
+	f := newLibFake(t).withHistory(1, 754, 2700, "甲", "乙")
+	tt, s := libraryShell(t, f, historyPath)
+	waitFrames(t, tt, "把内容拉回来", func() bool { return rowsShown(&s.historyPage) == 2 })
+	tt.Frame()
+
+	th := BuildTheme(s.app.SettingsSnapshot(), false)
+	accent := ink.AccentOn(th)
+	box, ok := tt.Find("UP 乙")
+	if !ok {
+		t.Fatalf("找不到那一行的 UP 名，文字有 %q", tt.Texts())
+	}
+
+	// 没悬停：那一格里一个主色像素都没有（它是次要色的一句话字，不是胶囊）。
+	if n := countNear(tt.Image(), box, accent); n != 0 {
+		t.Errorf("没悬停时 UP 名那一格里已经有 %d 个主色像素——它长得像一枚胶囊", n)
+	}
+
+	// 悬停：底下长出一道主色下划线（`DecorationColor` 那一道）。
+	//
+	// ⚠️ **量的是名字那一带往下多 4 像素**：下划线画在基线下面，会落在
+	// `Find` 返回的字盒外一两像素，只量字盒会漏。
+	zone := box
+	zone.H += 4
+	tt.Move(box.X+box.W/2, box.Y+box.H/2)
+	tt.Frame()
+	if n := countNear(tt.Image(), zone, accent); n == 0 {
+		t.Errorf("悬停时 UP 名那一格里一个主色像素都没有——下划线没长出来")
+	}
+
+	// 它还是一枚控件：悬停之后指针换成手型（普通字是箭头）。这是「它是一枚
+	// 按钮」在界面上看得见的那一半——不是 `Text.OnClick` 那样的假链接。
+	if got := tt.Cursor(); got != mygoui.CursorPointer {
+		t.Errorf("悬停在 UP 名上光标还是默认箭头——它不是一枚真的控件")
+	}
+}
+
+// TestTheStatsLoopOwnerNameIsNotAFakeLink 钉住「统计页『本周单曲循环』里的名字不是链接」。
+//
+// 那一页的名字**没有接 `OpenOwner`**（它只是「你最常听的歌手」的一个名字）：
+// 把它画成链接就是**假链接**——悬停长下划线、能拿焦点，点下去却哪儿也不去。
+//
+// ⚠️ **判据分两半**：
+//
+//	**样子**：悬停时那一格里不许长出主色下划线（有的话它和真链接长得一样）；
+//	**行为**：点下去不许换页（原来那版点下去就呆在原地——因为根本没接）。
+func TestTheStatsLoopOwnerNameIsNotAFakeLink(t *testing.T) {
+	s, tt := statsShell(t, seedStats)
+	s.navigate(statsPath)
+	tt.Frame()
+
+	owner, ok := tt.Find("某个UP")
+	if !ok {
+		t.Fatalf("统计页上没有那个名字，文字有 %q", tt.Texts())
+	}
+	accent := ink.AccentOn(BuildTheme(s.app.SettingsSnapshot(), false))
+
+	tt.Move(owner.X+owner.W/2, owner.Y+owner.H/2)
+	tt.Frame()
+	if n := countNear(tt.Image(), owner, accent); n != 0 {
+		t.Errorf("悬停时统计页那个名字底下有 %d 个主色像素——它画成了假链接", n)
+	}
+
+	if err := tt.Click("某个UP"); err != nil {
+		t.Fatalf("点不到那个名字：%v", err)
+	}
+	tt.Frame()
+	if got := s.router.Path(); got != statsPath {
+		t.Errorf("点了统计页那个名字跳到了 %q——它接了个没人认的动作", got)
 	}
 }

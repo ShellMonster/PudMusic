@@ -4,7 +4,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/flat"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -123,7 +125,9 @@ type Track struct {
 	Index string
 	// Title / Artist 是歌名和歌手；Album 是专辑那一列（空 = 画「本地文件」那类调用方给的字）。
 	Title, Artist, Album string
-	// Owner 是 UP 主名；空 = 画一个淡色的「—」。OwnerTip 是悬停在它上面的提示（空 = 不挂）。
+	// Owner 是 UP 主名；空 = 画一个淡色的「—」。OwnerTip 是悬停在它上面的提示（空 = 不挂），
+	// 它同时是「这个名字是链接」的开关：**非空才画名字型链接**（悬停下划线、能拿焦点），
+	// 空时是普通字——给了提示却点不动就是假链接。
 	Owner, OwnerTip string
 	// Quality 是音质角标："HI-RES" 画主色那一版、"SQ" 画普通那一版、空不画。
 	Quality string
@@ -260,21 +264,31 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 		if album > 0 {
 			text(c, t.Album, scale.Size13, p.Text2).Width(album).SingleLine().Ellipsis("…")
 		}
-		// UP 主：一枚链接（悬停正文色）。
+		// UP 主：**接了动作才是一枚名字型链接**（`OwnerTip` 非空 = 点了进那个
+		// UP 的空间）；没接时是**普通字**——画成链接（悬停下划线、能拿焦点）
+		// 点下去却哪儿也不去，就是假链接（统计页「本周单曲循环」那个名字就是
+		// 没接的：它只是「最常听的歌手」的一个名字）。
 		ui.Column(c).Width(owner).AlignItems(ui.Start).Children(func() {
 			if t.Owner == "" {
 				text(c, "—", scale.Size13, p.Text3)
 				return
 			}
-			b := ui.ButtonBase(c).Key(key + ":owner")
-			if t.OwnerTip != "" {
-				b = b.Tooltip(t.OwnerTip)
+			if t.OwnerTip == "" {
+				text(c, t.Owner, scale.Size13, p.Text2).SingleLine().Ellipsis("…")
+				return
 			}
-			fg := p.Text2
-			if b.Hovered() {
-				fg = p.Text
-			}
-			b.Children(func() { text(c, t.Owner, scale.Size13, fg).SingleLine().Ellipsis("…") })
+			// 名字型链接（DESIGN.md「名字型链接」，票 #417）：一句话字、
+			// 没有胶囊，指针落上去底下长出一道主色下划线，字色还是次要色。
+			b := flat.Link(c, "").Key(key + ":owner").Tooltip(t.OwnerTip)
+			b.Children(func() {
+				name := text(c, t.Owner, scale.Size13, p.Text2).SingleLine().Ellipsis("…")
+				// ⚠️ **下划线画在字上**，不挂在按钮上：按钮那一层的 `Underline()`
+				// 传不到自己后来 `Children` 进来的字（`textStyle` 只往**建它时**的
+				// 孩子继承）。悬停是 `b.Hovered()` 在建这一帧问的。
+				if b.Hovered() {
+					name.Underline().DecorationColor(ink.AccentOn(c.Theme()))
+				}
+			})
 			ev.Owner = b.Clicked()
 		})
 		// 播放 / 弹幕。
