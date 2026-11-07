@@ -137,9 +137,13 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 		// ② 文字列：Eyebrow / 标题 / 元信息 / 简介。整列可选中复制（票 #685）。
 		ui.Column(c).Grow(1).Shrink(1).MinWidth(240).AlignItems(ui.Start).Selectable().Children(func() {
 			typo.Eyebrow(c, collectionEyebrow(p.ref.Type, info))
-			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), scale.Font(c, scale.CollectionTitleFluid(windowW(c)))).
+			// 原型 `.col-title { line-height: 1.1; margin: 12px 0 12px }`（index.html 397）：框架的行高压不到宋体
+			// 自然行高（1.437）以下，多出来的那截用负外边距补回（`typo.DisplayTrim`，同首页 / PageHead）。
+			ts := scale.Font(c, scale.CollectionTitleFluid(windowW(c)))
+			trim := typo.DisplayTrim(ts, leading.Display)
+			typo.Display(ui.Text(c, collectionTitleText(p.ref.Type, info)), ts).
 				LineHeight(leading.Display).TextColor(pl.Text).MaxLines(2).Ellipsis("…").
-				Margin(space.Px12, space.None, space.Px12, space.None)
+				Margin(space.Px12-trim, space.None, space.Px12-trim, space.None)
 
 			s.viewCollectionMeta(c, p, info)
 

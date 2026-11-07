@@ -109,7 +109,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 
 ### 其他令牌
 
-- **字号**：11 Eyebrow / kbd（等宽 600，字距 0.2em，大写）· 12 · 13 · 14 正文 · 16 · 20 Subhead · 24 Section ·
+- **字号**：11 Eyebrow（等宽 400——原型 `.eyebrow` 没写字重，继承 body 的 400；字距 0.2em，大写）/ kbd（等宽）· 12 · 13 · 14 正文 · 16 · 20 Subhead · 24 Section ·
   28 歌词当前句 · 32 Title · 48 Display（页标题）· 64 Hero；10 只给音质角标。**15 / 18 / 30 退役**。
   20 号及以上标题宋体 700。宋体子集字符范围：GB2312 全部 + ASCII + 常用标点 / 全角（约 3.2MB），子集之外的字由系统补字。
 - **字体**：展开 `PudMusic Serif`（随包）；正文系统默认；等宽 macOS SF Mono（没有就 Menlo）、Windows Consolas。
@@ -250,7 +250,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 - 头部：通栏取色底 = `bg` 混封面色 26%（`tok.TintCollection`；取不到色用原型缺省 `#4a4d55`，默认收藏夹无封面用
   `#8a3b2b`）；上下内边距 40（窗口 ≤760 为 24）、封面与文字隔 40、文字列底对齐；封面 232 见方、圆角 8、
   `shadow.Cover`（深 `0 24 48 rgba(0,0,0,.5)` / 浅 `0 20 40 rgba(20,22,26,.22)`）。
-- 文字列：Eyebrow（类型，私密加「 · 私密」）→ 标题（宋体 700，行高 1.1，上下各 12）→ 元信息（13 号 text-2，缝 8/16：
+- 文字列：Eyebrow（类型，私密加「 · 私密」）→ 标题（宋体 700，行高 1.1，上下各 12；行高压不到宋体自然高度，用 `typo.DisplayTrim` 负外边距补回）→ 元信息（13 号 text-2，缝 8/16：
   作者链接、N 首、总时长、播放量、被收藏数、仅自己可见）→ 简介（14 号 text-2，上 12，最宽 560）。
   元信息取法：总时长只在条目拉全时写；播放量 / 被收藏数来自 `folder/info` 的 `cnt_info`，合集 / 系列接口不给就不画。
 - 通栏色底就是头部这一行自己的底（左右内边距 40，≤760 为 16，原型 `.col-head { padding: 40px; margin: 0 -40px }`）。
@@ -262,7 +262,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 - 列表行 / 表头：`widgets/list` 的 `SetPudRows(true)`（`pud.TrackRow` / `pud.TrackHead`）；多选态序号格换成勾选框，
   勾上的行 `accent-soft` 底。
 - 批量条（`.batch`）：页底、上下各 16、内边距 12/16、缝 12、圆角 12、`surface` 底、`line-strong` 描边、`shadow.Pop`；
-  「已选 N 首」（14 / 600，N 等宽）→ 全选 → 加入队列 → 批量下载 → 批量删除（仅自己的收藏夹，err 色）→ 退出多选。
+  「已选 N 首」（14 / 600，N 等宽）→ 全选 → 加入队列 → 批量下载 → 批量删除（仅自己的收藏夹、默认收藏夹「我喜欢」除外，原型 `c.mine && !isLiked`，err 色）→ 退出多选。
 
 **UP 主空间**（`upspacehead.go`、`upspace.go`、`upspace_tabs.go`）
 

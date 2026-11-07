@@ -88,9 +88,10 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 		if dl.Clicked() {
 			s.askConfirm(p, confirmDownload, chosen, true)
 		}
-		// 🔴 **批量删除只对自己的收藏夹摆**（原型 `c.mine && !isLiked`；合集 / 系列也没有
-		// 「从这里删内容」这个动作，见票 #683）。批量下载按 bvid 走下载服务，和容器类型无关。
-		if p.ref.Type == bili.CollectionFavorite && s.collectionMine(info) {
+		// 🔴 **批量删除只对自己的收藏夹摆，默认收藏夹「我喜欢」除外**（原型 app.js 621
+		// `c.mine && !isLiked`；合集 / 系列也没有「从这里删内容」这个动作，见票 #683）。
+		// 批量下载按 bvid 走下载服务，和容器类型无关。
+		if p.ref.Type == bili.CollectionFavorite && s.collectionMine(info) && !info.Default {
 			del := pud.Button(c, "batch:del", pud.Ghost, pud.Sm, "批量删除", "trash").Disabled(none)
 			del = del.TextColor(pl.Err)
 			if del.Clicked() {

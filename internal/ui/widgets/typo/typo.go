@@ -134,14 +134,14 @@ const (
 	EyebrowTracking float32 = EyebrowSize * 0.2
 )
 
-// Eyebrow 是页头 / 主视觉上面那一行小标（原型 `.eyebrow`）：11 号等宽、600、
-// 全大写、字距 0.2em、第三级文字色。字距走框架的 `LetterSpacing`（每个字后面加
+// Eyebrow 是页头 / 主视觉上面那一行小标（原型 `.eyebrow`）：11 号等宽、400（原型 index.html 267
+// 没写字重，继承 body 的 400）、全大写、字距 0.2em、第三级文字色。字距走框架的 `LetterSpacing`（每个字后面加
 // 2.2 DIP），不用空格近似。
 //
 // 字号**不**乘系统缩放：它是装饰性小标，和图标一样跟着固定像素走（原型里它在
 // 页头那一行的位置是按 11 排的）。
 func Eyebrow(c *ui.Context, text string) ui.Element {
 	return Mono(ui.Text(c, strings.ToUpper(text))).
-		FontSize(EyebrowSize).FontWeight(600).LetterSpacing(EyebrowTracking).LineHeight(leading.Body).
+		FontSize(EyebrowSize).FontWeight(400).LetterSpacing(EyebrowTracking).LineHeight(leading.Body).
 		TextColor(tok.Of(c.Theme()).Text3).SingleLine()
 }
