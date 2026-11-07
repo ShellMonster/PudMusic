@@ -469,6 +469,15 @@ type Snapshot struct {
 	Percent int
 }
 
+// SnapshotList 是按队列 revision 缓存的一组只读快照。
+//
+// Rows 只允许读取，不能修改。Manager 会在 revision 变化后换一份新的底层切片，
+// 因此调用方可以在解锁后继续读这一份，而不会和下一次队列更新争用。
+type SnapshotList struct {
+	Revision uint64
+	Rows     []Snapshot
+}
+
 // SnapshotOf 把一项拷成给界面看的快照。**必须在持锁时调**。
 func SnapshotOf(t *Task) Snapshot {
 	s := Snapshot{

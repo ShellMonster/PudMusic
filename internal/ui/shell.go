@@ -1360,6 +1360,8 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir,
 		mygo.Shell.ShowItemInFolder, systemOpenLink)
+	s.downloads.snapshotListFn = a.DownloadSnapshotList
+	s.downloads.rowsFn = nil
 	s.downloads.tip = s.tip
 	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
 	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，

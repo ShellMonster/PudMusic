@@ -108,6 +108,13 @@ type downloadsPage struct {
 	// 测试接一份给定的快照（`TestTheMuxingCellSaysSoAndDoesNotClaimToBeDone`）。
 	rowsFn func() []download.Snapshot
 
+	// snapshotListFn 是生产环境按 revision 缓存的快照来源。测试可以继续替换
+	// rowsFn，保持原有的确定性接缝。
+	snapshotListFn      func() download.SnapshotList
+	snapshotRevision    uint64
+	lastSyncedFilter    downloadFilter
+	hasSnapshotRevision bool
+
 	// ask 是「你确定吗」那一弹窗，非 nil 时开着。见 downloadlist_ops.go。
 	ask *confirmAsk
 
@@ -246,7 +253,21 @@ func pudEmptyState(c *ui.Context, e emptyState) { emptyContent(c, e) }
 // 一直看不见（而下载是**后台**在跑的事，满屏期间照样在下载）。
 func (s *Shell) syncDownloads(c *ui.Context) {
 	d := s.downloads
-	d.sync(d.rowsFn())
+	if d.rowsFn != nil {
+		d.sync(d.rowsFn())
+		return
+	}
+	if d.snapshotListFn == nil {
+		d.sync(nil)
+		return
+	}
+	list := d.snapshotListFn()
+	if !d.hasSnapshotRevision || d.snapshotRevision != list.Revision || d.lastSyncedFilter != d.filter {
+		d.sync(list.Rows)
+		d.snapshotRevision = list.Revision
+		d.lastSyncedFilter = d.filter
+		d.hasSnapshotRevision = true
+	}
 }
 
 // scrollTop 回到顶上。
