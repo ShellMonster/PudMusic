@@ -85,7 +85,8 @@ func (s *Shell) upFaceDraw(url string) pud.Cover {
 	}
 }
 
-// viewCollectionHeader 是头部（封面 + 文字列）；通栏色块见 `paintCollectionBand`。
+// viewCollectionHeader 是头部（封面 + 文字列），通栏色块是这一行自己的底。
+// 它铺满调用方给的整宽（页内头部 / 页根都已经去掉页边距），左右内边距自己给。
 func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	t := c.Theme()
 	pl := tok.Of(t)
@@ -98,22 +99,17 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	}
 	bg := s.tintBackgroundOr(c, cover, tok.TintCollection, fallbackTint)
 
-	// ⚠️ **色块不画在这一行上**：这一行在列表的第 0 行里，被列表的边界裁在页边距里面；
-	// 通栏的底色由页根的 `Draw` 在列表**外面**铺（`paintCollectionBand`），这里只记
-	// 颜色和高度（上一帧量到的）；这一行自己也刷同一色，盖住列表里那层页面底色。
-	p.bandBG = bg
-	// 窗口 ≤ 760（`.col-head { padding: 24px 16px }`、单列、封面最宽 220）：上下 24、封面 220。
-	padY, coverSide := float32(space.Px40), collectionCoverSide
+	// 原型 `.col-head { padding: 40px; margin: 0 -40px }`（index.html 395）：通栏色块就是这一行自己的底，
+	// 左右内边距 40（窗口 ≤ 760 时 `padding: 24px 16px`）。这一行在页内头部里，页内头部用负外边距
+	// 抵掉列表的页边距、铺满整个列表宽（见 `collectionLead`），所以封面的 `--shadow-cover` 往左
+	// 有 40 的余地，不再被列表边界在页边距那条线上切出一道硬边。
+	// 窗口 ≤ 760（单列、封面最宽 220）：上下 24、左右 16、封面 220。
+	padY, padX, coverSide := float32(space.Px40), float32(space.Px40), collectionCoverSide
 	if windowW(c) <= 760 {
-		padY, coverSide = space.Px24, 220
+		padY, padX, coverSide = space.Px24, space.Px16, 220
 	}
 	row := ui.Row(c).Key("collection-header").FillWidth().AlignItems(ui.End).Gap(space.Px40).
-		Padding(padY, space.None, padY, space.None).Wrap().Background(bg)
-	defer func() {
-		if h := row.Bounds().H; h > 0 {
-			p.bandH = h
-		}
-	}()
+		Padding(padY, padX, padY, padX).Wrap().Background(bg)
 	row.Children(func() {
 		// ① 封面。元信息没回来时画骨架（空地址在 imgcache 里是「本来就没有」，含义相反）。
 		// 原型 `.cover` r-8（index.html 306）：圆角落在最内层（图 / 心 / 骨架各自带圆角）——
@@ -459,27 +455,3 @@ func (s *Shell) viewCollectionSearch(c *ui.Context, p *collectionPage) {
 func collectionBulkText(n int) string { return "已选 " + strconv.Itoa(n) + " 首" }
 
 var _ = strings.TrimSpace
-
-// paintCollectionBand 在页根上铺头部那块通栏底色（原型 `.col-head` 的 `margin: 0 -40px`）：
-// 从内容区左缘到右缘、从页顶往下 bandH 高，跟着列表滚走（`ScrollOffset` 是精确像素），
-// 并裁在页根矩形里，不会盖到顶栏上。
-func (s *Shell) paintCollectionBand(pp *ui.Painter, r ui.Rect, p *collectionPage) {
-	if p.bandH <= 0 || p.bandBG.A == 0 {
-		return
-	}
-	top := r.Y
-	if p.leadSet {
-		top -= p.list.ScrollOffset()
-	}
-	bottom := top + p.bandH
-	if top < r.Y {
-		top = r.Y
-	}
-	if bottom > r.Y+r.H {
-		bottom = r.Y + r.H
-	}
-	if bottom <= top {
-		return
-	}
-	pp.Fill(ui.Rect{X: r.X, Y: top, W: r.W, H: bottom - top}, p.bandBG, 0)
-}

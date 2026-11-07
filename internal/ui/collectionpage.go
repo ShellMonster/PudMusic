@@ -224,11 +224,6 @@ type collectionPage struct {
 
 	// confirm 是「要不要用户点一下确认」。
 	confirm confirmRequest
-
-	// bandBG / bandH 是头部通栏色块的颜色和高度（`viewCollectionHeader` 每帧记，
-	// 页根的 Draw 用；高度是上一帧量到的）。
-	bandBG ui.Color
-	bandH  float32
 }
 
 // newCollectionPage 建这一页的状态。
@@ -454,9 +449,15 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	// `pages/video-collection/favorites/index.tsx:436`）。
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
-	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).FillWidth().MaxWidth(space.PageMaxW).AlignSelf(ui.Center).
-		Padding(space.None, space.PageHorizontalForWindow(windowW(c))).
-		Draw(func(pp *ui.Painter, r ui.Rect) { s.paintCollectionBand(pp, r, p) }).Children(func() {
+	//
+	// ⚠️ **页边距不再是根的内边距**：列表按自己的边界裁剪，头部（列表第 0 行）里封面的
+	// `--shadow-cover` 往左伸出 40，根上留内边距的话列表的左缘就是页边距那条线，影子被切成
+	// 一道硬边（原型 `.col-head .cover` 的影不被裁）。所以页边距交给列表自己（`SetInsetX`，
+	// 页内头部用负外边距抵回去铺满，同 UP 空间），列表外面那几块（空状态时的头部 / 操作条 /
+	// 空状态、批量条）各自包一层 `padX`。
+	padX := space.PageHorizontalForWindow(windowW(c))
+	ui.Column(c).Key("page:collection:" + ref.Key()).Grow(1).FillWidth().MaxWidth(space.PageMaxW).
+		AlignSelf(ui.Center).Children(func() {
 		// 🔴 **头图区、操作条、表头都在列表的滚动区里**（票 #625）：它们是
 		// **列表的第 0 行**（页内头部，`list.Lead`），跟着内容一起滚走。
 		//
@@ -490,7 +491,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 列表里的那块留着的话两边都画一份。
 			s.clearCollectionLead(p)
 			s.viewCollectionHeader(c, p)
-			s.viewCollectionOps(c, p)
+			ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
+				s.viewCollectionOps(c, p)
+			})
 		}
 
 		// 容器拉回来了、里面一条都没有：画「没有收藏夹」那一句
@@ -502,7 +505,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 「暂无内容」。
 		switch empty {
 		case collectionEmptyNoFavorites:
-			s.viewEmpty(c, "collection:empty", noFavorites)
+			ui.Column(c).Grow(1).FillWidth().PaddingX(padX).Children(func() {
+				s.viewEmpty(c, "collection:empty", noFavorites)
+			})
 		case collectionEmptyNoResults:
 			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
 			//
@@ -513,7 +518,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 用的就是搜索页那一句（`searchpage.go` 的 `viewSearchResultsBody`）：
 			// 「暂无内容 / 换个词再搜一次，或者把关键词缩短一点」——同一件事，
 			// 同一句话。
-			s.viewEmpty(c, "collection:no-results", noSearchResults)
+			ui.Column(c).Grow(1).FillWidth().PaddingX(padX).Children(func() {
+				s.viewEmpty(c, "collection:no-results", noSearchResults)
+			})
 		default:
 			// ⚠️ **这一支是「列表自己画」**（`collectionEmptyNone` 和
 			// `collectionEmptyFailed` 两档都落这儿）。
@@ -550,10 +557,14 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			//
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
+			// 页边距给列表自己（见页根那段），页内头部照样铺满。
+			p.list.SetInsetX(padX)
 			p.list.View(c)
 			s.noteScrollbar(p.list.Hot())
 			if p.multi {
-				s.viewCollectionBatchBar(c, p)
+				ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
+					s.viewCollectionBatchBar(c, p)
+				})
 			}
 		}
 	})
@@ -693,12 +704,15 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 			// 三块之间没有统一的缝：原型 `.col-head` 紧接 `.col-actions`（自带上 24 下 8），
 			// 表头所在的 `.tlist` 另有 `margin-top: 8px`。
 			ui.Column(c).FillWidth().Children(func() {
+				// 头部铺满整个列表宽（页内头部抵掉了列表的页边距），操作条和表头回到页边距里。
 				s.viewCollectionHeader(c, p)
-				s.viewCollectionOps(c, p)
-				// ⚠️ **表头在最后**：它是「下面那些歌叫什么列」，所以它在
-				// 头图区和操作条的**下面**——和它原先在列表外面的位置一样。
-				ui.Column(c).FillWidth().Margin(space.Px8, space.None, space.None, space.None).Children(func() {
-					p.list.Header(c, "collection:header")
+				ui.Column(c).FillWidth().PaddingX(space.PageHorizontalForWindow(windowW(c))).Children(func() {
+					s.viewCollectionOps(c, p)
+					// ⚠️ **表头在最后**：它是「下面那些歌叫什么列」，所以它在
+					// 头图区和操作条的**下面**——和它原先在列表外面的位置一样。
+					ui.Column(c).FillWidth().Margin(space.Px8, space.None, space.None, space.None).Children(func() {
+						p.list.Header(c, "collection:header")
+					})
 				})
 			})
 		},
