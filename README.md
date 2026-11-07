@@ -6,11 +6,6 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 
 > 项目仍在持续开发中。功能、平台支持和安装包状态会随版本变化。
 
-**页面不是空壳**：应用里的 14 条路由有 13 条接上了真实内容，剩下的那一条是
-`/empty`（空状态落地页，按设计就该是空的）。哪一页有没有接上真数据由
-`internal/ui/realdata_test.go` 钉着，不是靠谁记得；而本文这一句里的那个 13 也由
-同一条测试回头核着——加了一页却忘了改这几处说明，`go test` 会当场红。
-
 [下载 Releases](https://github.com/ShellMonster/PudMusic/releases) · [报告问题](https://github.com/ShellMonster/PudMusic/issues)
 
 ## 界面预览
@@ -53,6 +48,9 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 - 使用稍后再看和历史记录。
 - 下载内容并查看下载记录。
 - 将本地音频文件拖入窗口导入音乐。
+- 听歌统计：最近 7 天收听时长、最常听的歌手和本周单曲循环。
+- 歌曲评论：右侧抽屉查看，不离开当前播放页。
+- 点赞同步到指定收藏夹，收藏多选放进多个歌单。
 
 ### 队列与播放器
 
@@ -60,7 +58,9 @@ PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建�
 - 拖动调整队列顺序。
 - 支持立即播放、下一首播放和添加到队列。
 - 全屏播放器和迷你播放器。
+- macOS 刘海播放器：收起是刘海两翼的封面与频谱，展开是完整播放卡。
 - 歌词显示。
+- 列表加载时显示与内容同形的骨架屏，不再是空白等待。
 
 ### 桌面集成
 
