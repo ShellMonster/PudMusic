@@ -617,6 +617,9 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	}).
 		// 滚动位置写进自己的句柄，「定位当前播放」改的就是它（ScrollTo 带动画）。
 		TrackScroll(&s.queueScroll).
+		// 抽屉正文内边距 8 / 12（原型 index.html:614 `.drawer-body { padding: 8px 12px }`）：
+		// 行的悬停底、拖动落点线收在这一圈里面，不铺到抽屉边。
+		PaddingY(space.Px8).PaddingX(space.Px12).
 		Grow(1).FillWidth()
 	s.trackScrollbar(e)
 

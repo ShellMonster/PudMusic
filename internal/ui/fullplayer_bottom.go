@@ -362,12 +362,16 @@ func (s *Shell) viewFullRate(c *ui.Context, st app.State) {
 	p := tok.OfFull(c.Theme())
 	b := ui.ButtonBase(c).Key("full:rate").Label("倍速").Size(48, tok.IconHit).Radius(tok.R8).Shrink(0).
 		AlignItems(ui.Center).Justify(ui.Center)
+	// 悬停 hover 底 + 字色提到正文色（原型 index.html:226
+	// `.icon-btn:hover { background: var(--hover); color: var(--text) }`），平时 #d8d7d4。
+	ink := fullCtrlColor
 	if b.Hovered() {
 		b = b.Background(p.Hover)
+		ink = p.Text
 	}
 	b = b.Transition(motion.Fade)
 	b.Children(func() {
-		fullMono(c, s.full.txt.rateText(st.Rate), scale.Size12, 400, 0, fullCtrlColor)
+		fullMono(c, s.full.txt.rateText(st.Rate), scale.Size12, 400, 0, ink)
 	})
 	s.fullPop(c, popRate, b, "full-pop-rate", false, false, func() {
 		pud.PopHeading(c, "倍速")
