@@ -17,32 +17,33 @@
 package ui
 
 import (
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
-// popupRadius 是浮层面板的圆角：**固定的 8**，不跟 `t.Radius` 走。
+// popupRadius 是浮层面板的圆角：**固定的 12**，不跟 `t.Radius` 走（原型 `.pop` 的
+// `border-radius: var(--r-12)`，index.html:588；`tok.R12`）。
 //
-// ⚠️ **8 来自 DESIGN.md 的 `radius.popover`，不是上游的 `rounded-medium`**：
-// HeroUI v2 里 `rounded-medium` 是 **12**（`rounded-small` 8、`rounded-large`
-// 14），`search/index.tsx:100` 的联想面板用的就是它。这一条按 DESIGN 的令牌
-// 走——它把浮层单列成 8，而且明确「不在这里的项不要自己发明」。
-//
-// 我们原来抄的是框架 `stylePanel` 的 `t.Radius+2`——默认 8 时是 10，比 DESIGN
-// 大 2；用户把全局圆角调到 24 时更是圆得不成样子。
-const popupRadius = 8
+// 浮层是浮在别的内容上面的一层，圆角跟着下面内容块走的话两层会「长在一起」。
+const popupRadius = tok.R12
 
-// popupPanel 给一个浮层面板上外观：圆角、底、描边、阴影。
+// popupPanel 给一个浮层面板上原型 `.pop` 的外观（index.html:587-589）：`surface` 底、
+// 1 像素 `line` 描边、圆角 12、最小宽 200、`--shadow-pop`、进场 `pop-in`（`motion.PopIn`）。
+// 和 `pud.PopPanel` / `pud.PopStyle` 同一套样子；这一处是给框架 `SelectBase` / `PopoverBase`
+// 递进来的面板用的（只有主题可用的地方）。
 //
-// 参数和框架 `stylePanel` 一样（没有 Margin/Padding：各处的间距不一样，调用方
-// 自己给）。**别在调用处再抄一遍这几个字段**——漏一个就是下一处「有一处无」。
+// 参数和框架 `stylePanel` 一样（没有 Padding：各处的间距不一样，调用方自己给）。
+// **别在调用处再抄一遍这几个字段**——漏一个就是下一处「有一处无」。
 //
-// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Popover`）：那一圈影的数不许写在
-// 调用处（DESIGN.md §四·五「值只写一处」），票 #239 把这一处收进去了。
+// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Popover`，2026-11 起就是 `shadow.Pop` 那一档
+// `--shadow-pop`）：那一圈影的数不许写在调用处（DESIGN.md §四·五「值只写一处」）。
 func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
+	p := tok.Of(t)
 	return shadow.Popover(
-		panel.Radius(popupRadius).
-			Background(t.Background).Border(1, t.Border),
+		panel.Radius(popupRadius).MinWidth(tok.PopMinW).
+			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn),
 		t)
 }
 
@@ -51,7 +52,7 @@ func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
 //
 // # 它和 `popupPanel` 是**两档料**，不是两个出口
 //
-//	浮层那一档（`popupPanel`）  底 = 页面底、圆角 8、影 = shadow.Popover
+//	浮层那一档（`popupPanel`）  原型 `.pop`：底 = surface、圆角 12、影 = shadow.Popover（= Pop）
 //	卡片那一档（这一档）        底 = surface1、圆角 radiusLg、影 = shadow.Modal
 //
 // 卡片那一档是**设计规范 §零** 定的：登录页那张卡、弹窗面板（`dialogPanel`）

@@ -4,7 +4,7 @@
 //	placement="bottom-right"   → 右下角
 //	toastOffset={90}           → 抬过底部 90px（播放条）
 //	maxVisibleToasts={3}       → 同时最多 3 条
-//	toastProps={{ timeout: 2000, color: "primary" }} → 2 秒、主色卡片
+//	toastProps={{ timeout: 2000, color: "primary" }} → 上游 2 秒；现按原型 2.6 秒（`toastLifetime`）
 //
 // 这里自己管，不用 MyGo 内置的那一套：框架的 `ui.Context` 上**有**
 // `AddToast` / `CloseToast`（`mygo/ui/api_gen.go:244` / `:289`，v0.4.8 起就是
@@ -110,10 +110,11 @@ const (
 	toastEnterShift = 16
 )
 
-// toastLifetime 是一条提示待多久。Biu 的 timeout 是 2000ms。
+// toastLifetime 是一条提示待多久：2.6 秒（原型 app.js:1315 `setTimeout(kill, 2600)`，
+// 值在 `pud.ToastLife`）。
 //
-// 它是 var 不是 const：测试要把它改短，不然每条都干等 2 秒。
-var toastLifetime = 2 * time.Second
+// 它是 var 不是 const：测试要把它改短，不然每条都干等 2.6 秒。
+var toastLifetime = pud.ToastLife
 
 // toastHoverPoll 是「指针压着它」的时候隔多久问一次。
 //
@@ -145,11 +146,11 @@ type toast struct {
 	//
 	// 🔴 **它是票面第 5 条「不丢事件」的落地**（票 #559）：系统通知发不出去
 	// （没打包 / 权限被拒 / 不支持）时降级成的那一句应用内提示，**用户多半不在
-	// 应用里**——而普通提示只待两秒（`toastLifetime`，照 Biu 的 timeout 2000），
+	// 应用里**——而普通提示只待 2.6 秒（`toastLifetime`，原型 app.js:1315），
 	// 于是他回来的时候那一句**早就没了**，而他不知道歌下完了。
 	//
 	// ⚠️ **它到期的那一刻 = 用户回来了**：那时它已经被人看见了，所以它可以按
-	// 正常的两秒走（见 `unstickToasts`）。
+	// 正常的 2.6 秒走（见 `unstickToasts`）。
 	//
 	// ⚠️ **它不能一直挂着**：那会变成一条永远收不掉的提示——所以「用户回来」
 	// 这一档必须有（见 `syncFocusTracker`）。
@@ -178,10 +179,10 @@ func (s *Shell) addToast(text string, tone notice.Tone) {
 
 // addToastFor 是 `addToast` 加一个「待多久」。
 //
-// ⚠️ **为什么有些话要待得久一点**：一条提示默认两秒（上游 Biu 的
-// `timeout: 2000`），而那两秒是给「用户正在看界面、按完一个键」准备的。
+// ⚠️ **为什么有些话要待得久一点**：一条提示默认 2.6 秒（原型 app.js:1315
+// 的 2600ms），而那 2.6 秒是给「用户正在看界面、按完一个键」准备的。
 // 但**系统交给我们的文件被拒**那一类不是用户按出来的——他双击了访达里的
-// 一个文件，然后**注意力已经回到别处了**（或者他正等着歌放起来）。两秒之后
+// 一个文件，然后**注意力已经回到别处了**（或者他正等着歌放起来）。2.6 秒之后
 // 那句话就没了，而「没看到」和「没有提示」在用户那里是同一件事。
 //
 // 那一类话走 `fileNoticeLifetime`（五秒，见 `openfile.go`）。
@@ -192,10 +193,10 @@ func (s *Shell) addToastFor(text string, tone notice.Tone, lifetime time.Duratio
 // addStickyToast 弹一条**不自己到期**的提示。
 //
 // 🔴 **它是票面第 5 条「不丢事件」的落地**（票 #559）：系统通知发不出去时降级
-// 成的那一句应用内提示，用户多半不在应用里——而普通提示只待两秒，于是他回来
+// 成的那一句应用内提示，用户多半不在应用里——而普通提示只待 2.6 秒，于是他回来
 // 的时候那一句早就没了，而**他不知道歌下完了**。
 //
-// ⚠️ **它到期的条件是「用户回来了」**：那时它已经被人看见，于是它按正常的两秒
+// ⚠️ **它到期的条件是「用户回来了」**：那时它已经被人看见，于是它按正常的 2.6 秒
 // 走（见 `unstickToasts`）。
 func (s *Shell) addStickyToast(text string, tone notice.Tone) {
 	s.addToastWith(text, tone, toastLifetime, true)
@@ -207,7 +208,7 @@ func (s *Shell) addStickyToast(text string, tone notice.Tone) {
 // 到期**——粘着的那一条等的是「用户回来」（见 `unstickToasts`），而不是时间。
 //
 // ⚠️ **两个参数各自解决一个静默故障**：少了 `lifetime`，「系统交给我们的文件被
-// 拒」那一类话两秒就没了（见 `addToastFor`）；少了 `sticky`，「系统通知发不出去
+// 拒」那一类话 2.6 秒就没了（见 `addToastFor`）；少了 `sticky`，「系统通知发不出去
 // 时的降级提示」在用户回来之前就没了（见 `addStickyToast`）。
 func (s *Shell) addToastWith(text string, tone notice.Tone, lifetime time.Duration, sticky bool) {
 	s.toastMu.Lock()
@@ -357,7 +358,7 @@ func (s *Shell) clearToasts() {
 // 🔴 **它由「用户回来了」那一档调**（见 `syncFocusTracker`）：粘着的那一条是
 // 系统通知发不出去时降级成的那一句（票面第 5 条「不丢事件」），而它一直摆着
 // 是为了**用户回来时看得见**——用户一回来它就已经被看见了，于是它可以按正常
-// 的两秒走（不然它会永远收不掉）。
+// 的 2.6 秒走（不然它会永远收不掉）。
 //
 // ⚠️ **到期时刻从「现在」起算**，不是从「它被加进来」起算：它粘着的那段时间
 // 里它一直摆着，而用户看见它的那一刻才是它「被读」的那一刻。
@@ -391,7 +392,7 @@ func (s *Shell) visibleToasts() []toast {
 	for _, t := range s.toasts {
 		// ⚠️ **粘着的那一条不按到期时刻收**：它等的是「用户回来」（见
 		// `unstickToasts`），而用户回来之前它必须**一直摆着**——普通提示只待
-		// 两秒，而用户离开应用可能好几分钟。
+		// 2.6 秒，而用户离开应用可能好几分钟。
 		if t.sticky {
 			kept = append(kept, t)
 			continue

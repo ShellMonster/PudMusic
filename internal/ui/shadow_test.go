@@ -262,35 +262,6 @@ func TestTheFollowCardIsLayeredByItsBorderNotAShadow(t *testing.T) {
 	}
 }
 
-// TestTheSpaceAvatarHasAShadow 钉住**UP 空间那个头像**那一圈影。
-//
-// 上游是 `shadow-lg`（`user-profile/space-info.tsx:89` 的
-// `h-[140px] w-[140px] flex-none shadow-lg`）——**两层**
-// （`0 10px 15px -3px` 与 `0 4px 6px -4px`）。
-//
-// ⚠️ **看的是头像底下那一块**：那一档影的纵向偏移是 +10，主体落在头像下面。
-func TestTheSpaceAvatarHasAShadow(t *testing.T) {
-	for _, dark := range []bool{false, true} {
-		name := "浅色"
-		if dark {
-			name = "深色"
-		}
-		t.Run(name, func(t *testing.T) {
-			// 两次渲染：一次带影、一次不带。别的什么都不差。
-			with := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
-				s.spaceAvatar(c, "https://f/face-42.jpg", upAvatarS, true)
-			}).Image()
-			without := shadowScene(t, dark, func(s *Shell, c *mygoui.Context) {
-				s.spaceAvatar(c, "https://f/face-42.jpg", upAvatarS, false)
-			}).Image()
-			// 头像在留白之后，140 见方；影落在它**下面**那一块。
-			assertShadowDarker(t, with, without,
-				mygoui.Rect{X: 80, Y: 60 + upAvatarS + 1, W: 100, H: 10},
-				"UP 空间那个头像")
-		})
-	}
-}
-
 // callsName 报这个语法树里有没有调过那个名字的函数。
 //
 // ⚠️ **认的是「被调用的名字」，不认是谁调的**——所以它**只许用在那个包内部**
@@ -404,7 +375,8 @@ func TestNoElementShadowIsWrittenAtTheCallSite(t *testing.T) {
 // 每一档都必须有调用点。**定义了没人用的档比没有档更坏**：下一个人会以为
 // 「这一档可以用」，照着它抄一遍，而它画出来的东西上游从来没有过。
 //
-// 票 #239 删掉了三档没有调用点的：`TailwindSM` / `TailwindXL` / `HeroLarge`。
+// 票 #239 删掉了三档没有调用点的：`TailwindSM` / `TailwindXL` / `HeroLarge`；`TailwindLG` 随 UP 空间
+// 头像去影（原型 `.up-head .avatar` 没有阴影）一起删了。
 //
 // 🔴 **调用点必须认得出是「这个包的调用」**（评审抓出来的 major）：只认「被调用
 // 的名字」的话，`ui.Popover`（框架的浮层）、`anchor.Tooltip`、`ui.Modal` 这些

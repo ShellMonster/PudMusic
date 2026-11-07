@@ -490,37 +490,23 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 🔴 **空的时候把列表里的那一块卸掉**：头图区在外面画了，而
 			// 列表里的那块留着的话两边都画一份。
 			s.clearCollectionLead(p)
-			s.viewCollectionHeader(c, p)
-			ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
-				s.viewCollectionOps(c, p)
+			// 空的时候头图区 + 操作条 + 空状态放进一个滚动区，整页一起滚（原型整页就是一个滚动
+			// 容器）。不滚的话窗口一矮，空状态那枚键就落到播放条底下点不到（1200×800 下
+			// 「去发现音乐」在 y≈780）。头部铺满滚动区（通栏色底 + 封面影子不被页边距切），
+			// 操作条和空状态各自包回页边距。
+			ui.Scroll(c).Key("collection:empty-scroll").Grow(1).FillWidth().Children(func() {
+				s.viewCollectionHeader(c, p)
+				ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
+					s.viewCollectionOps(c, p)
+					s.viewCollectionEmpty(c, p, info, empty)
+				})
 			})
 		}
 
-		// 容器拉回来了、里面一条都没有：画「没有收藏夹」那一句
-		//（`empty.go` 的 noFavorites，上游出处也在那儿）。
-		//
-		// ⚠️ 判据是 **MediaCount 为 0** 而不是「列表此刻一行都没有」：
-		// 后者在翻页加载的那一瞬间也为真，那样会让整页内容闪一下空状态
-		// ——用户点进收藏夹、列表转了两帧、中间整个内容区变成一句
-		// 「暂无内容」。
+		// 两种「拉回来了但是空的」已经画在上面的滚动区里；其余档由列表自己画。
 		switch empty {
-		case collectionEmptyNoFavorites:
-			ui.Column(c).Grow(1).FillWidth().PaddingX(padX).Children(func() {
-				s.viewEmpty(c, "collection:empty", noFavorites)
-			})
-		case collectionEmptyNoResults:
-			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
-			//
-			// ⚠️ 判据是「**词已经发出去了**」而不是「列表此刻一行都没有」：
-			// 换词的这一瞬间列表是空的（还在拉），那时候画「换个词再搜一次」
-			// 是骗人——用户刚敲完词。
-			//
-			// 用的就是搜索页那一句（`searchpage.go` 的 `viewSearchResultsBody`）：
-			// 「暂无内容 / 换个词再搜一次，或者把关键词缩短一点」——同一件事，
-			// 同一句话。
-			ui.Column(c).Grow(1).FillWidth().PaddingX(padX).Children(func() {
-				s.viewEmpty(c, "collection:no-results", noSearchResults)
-			})
+		case collectionEmptyNoFavorites, collectionEmptyNoResults:
+			// 已经画在上面那个滚动区里（`viewCollectionEmpty`）。
 		default:
 			// ⚠️ **这一支是「列表自己画」**（`collectionEmptyNone` 和
 			// `collectionEmptyFailed` 两档都落这儿）。
@@ -1158,6 +1144,40 @@ func (s *Shell) applyCollectionKeyword(p *collectionPage, kw string) bool {
 	}
 	p.keyword = kw
 	return true
+}
+
+// viewCollectionEmpty 画这一页「拉回来了、但是空的」那两种空状态。
+//
+// ⚠️ 判据是 **MediaCount 为 0** 而不是「列表此刻一行都没有」：后者在翻页加载的那一瞬间也为真，
+// 那样会让整页内容闪一下空状态。搜了没结果的判据是「**词已经发出去了**」（换词的这一瞬间列表
+// 是空的，那时候说「没有匹配」是骗人）——两者都在 `collectionEmpty` 里判。
+func (s *Shell) viewCollectionEmpty(c *ui.Context, p *collectionPage, info app.CollectionInfo, empty collectionEmptyKind) {
+	switch empty {
+	case collectionEmptyNoFavorites:
+		// 原型 app.js:638：普通收藏夹「还没有收藏在这个收藏夹里」，默认收藏夹（原型的「我喜欢」，
+		// 头部画红心的那一个）「这里还是空的」；都带「去发现音乐」回首页。
+		e := noFavorites
+		if info.Default {
+			e = noLikedYet
+		}
+		e.Action = &emptyAction{Label: "去发现音乐", Do: func() { s.navigate(homePath) }}
+		s.viewEmpty(c, "collection:empty", e)
+	case collectionEmptyNoResults:
+		// 原型 app.js:639：「列表里没有匹配的歌曲」+「没有和「词」匹配的歌曲。」+「清空搜索」。
+		e := noSearchResults
+		e.Hint = "没有和「" + p.keyword + "」匹配的歌曲。"
+		e.Action = &emptyAction{Label: "清空搜索", Do: func() { s.clearCollectionSearch(p) }}
+		s.viewEmpty(c, "collection:no-results", e)
+	}
+}
+
+// clearCollectionSearch 是空结果里「清空搜索」那一键（原型 app.js:639 `clear-col-filter`）：
+// 框里的字和生效的词一起清掉，立刻按空词重拉，不等防抖。
+func (s *Shell) clearCollectionSearch(p *collectionPage) {
+	p.draft, p.seenDraft = "", ""
+	if s.applyCollectionKeyword(p, "") {
+		s.reloadCollection(p)
+	}
 }
 
 // collectionSearching 报「收藏夹页那个 500ms 的钟要不要醒着」。

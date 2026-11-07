@@ -17,11 +17,9 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// 对话框宽度（原型 `dialog.dlg` 440、`dialog.sheet` 480，都不超过窗口宽 − 32）。
-const (
-	dlgW      float32 = 440
-	dlgSheetW float32 = 480
-)
+// dlgSheetW 是 `dialog.sheet` 的宽（原型 index.html:791 `min(480px, 100% − 32px)`）：加入收藏夹、
+// 新建 / 修改、裁剪封面都是它。440 的 `dialog.dlg`（确认框）在 `confirmmodal.go` 自己那一份。
+const dlgSheetW float32 = 480
 
 // dlgPanel 给 `ui.DialogBase` 回调里的遮罩和面板上外观。w 是面板宽，窄窗口自动缩到窗口宽 − 32。
 func dlgPanel(c *ui.Context, backdrop, panel ui.Element, label string, w float32) {
