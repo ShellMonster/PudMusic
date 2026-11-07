@@ -33,6 +33,7 @@ package ui
 
 import (
 	"strconv"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
@@ -191,14 +192,16 @@ func (s *Shell) fullGeometry(c *ui.Context, showCover, video bool) fullGeo {
 }
 
 // fullEnter 是满屏进场（原型 `full-in`：从下 24 淡入，360ms）。
-//
-// ⚠️ **只有进场，没有退场**：`motion.FullIn` 带着 Exit，而满屏是整层浮层一起拆掉的——退场时框架
-// 会把整棵子树留成「影子」继续画，影子里的滑块（`selfSliderLive` 的画法回调）会去问一个早已
-// 过期的元素，当场 panic。原型的 `full-out` 因此做不了；关掉就是直接没了。
 var fullEnter = ui.ElementTransition{
 	Duration: motion.Slow, Ease: motion.EaseOut,
 	Enter: &ui.Motion{Y: 24, Opacity: 0},
 }
+
+// fullExitPose 是满屏退场的目标姿态。它用 AnimatePose 保留整棵树，让进度条、
+// 频谱和弹幕在动画完成前继续拿到有效的元素。
+var fullExitPose = ui.Pose{Y: 24, Fade: 1}
+
+var fullExitAnim = ui.Animation{Duration: motion.Slow, Ease: motion.EaseIn}
 
 // fullBgBase 是背景的底：`color-mix(in srgb, tint 30%, #0b0b0c)`。取不到封面色时按原型的
 // 兜底 `#222`。关掉虚化背景并挑了颜色时就是那个颜色（原型 `!f.blur && f.bg`）。
@@ -234,10 +237,25 @@ func coverTransition(id string) ui.ElementTransition {
 	return ui.ElementTransition{Animation: &ui.Snappy, Match: coverMatch{id: id}}
 }
 
+type fullPhase uint8
+
+const (
+	fullGone fullPhase = iota
+	fullIn
+	fullShown
+	fullOut
+)
+
 // fullPlayer 是全屏播放器自己那一摊。**只由 view 在主线程上读写**（铁律一）。
 type fullPlayer struct {
 	// open 是它开着没有。
 	open bool
+	// phase 描述满屏的生命周期。退场期间仍保持 open，等动画完成后才拆树。
+	phase fullPhase
+	// exitBuilt 标记退场目标是否至少提交过一帧，避免 ReduceMotion 关闭前误拆。
+	exitBuilt bool
+	// exitReadyAt 防止同一 build pass 里重复建树时把退场动画提前收掉。
+	exitReadyAt time.Time
 	// theater 是影院模式（原型 `S.video === 2`）：视频居中、歌词变成一行卡拉 OK。
 	theater bool
 
@@ -313,6 +331,10 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 	if !s.full.open {
 		return
 	}
+	if s.full.phase == fullGone {
+		// 一些测试和旧入口直接写 open；把这种状态视为已经显示，保持兼容。
+		s.full.phase = fullShown
+	}
 	// 记一笔「满屏建了一遍」——给「一帧建了几遍」那条测试数（见 builds.go）。
 	s.builds.full++
 	// ⚠️ **每一帧先清掉封面那一块**：弹幕是画在它**上面**的，不清的话画在上一帧的位置。
@@ -341,39 +363,45 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 
 	pud.WithFull(func() {
 		ui.Overlay(c, func() {
-			// 背景先摆：它是整窗的一层，后面那些控件都压在它上面。
-			s.viewFullBackdrop(c, st.CoverURL)
-
-			// 铺满整窗的那一层：吃掉底下那一层的点击。
-			root := ui.Box(c).Key("full-root").
+			frame := ui.Box(c).Key("full-frame").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
-				Modal().Role(ui.RoleDialog).Label("满屏播放器").Transition(fullEnter)
-			root.Children(func() {
-				s.viewFullTop(c, st, g)
-				cinema := s.full.theater && videoOn
-				if cinema {
-					s.viewFullCinema(c, st, g, phase)
-				} else {
-					s.viewFullLeft(c, st, g, phase, prefs)
-				}
-				s.viewFullBottom(c, st, g)
-				// 🔴 右栏排在底栏**之后**（后建的在上）：旋钮行和歌词下沿落在底栏的地盘里
-				// （1200×800 时旋钮行 y=646，底栏从 591 起，频谱 / 章节名 / 进度那几行是透明的
-				// 盒子），排在前面的话旋钮点不到。
-				if !cinema && !g.narrow && prefs.ShowLyrics {
-					s.viewFullRight(c, st, g)
+				AnimatePose(s.fullPose(), fullExitAnim)
+			frame.Children(func() {
+				// 背景先摆：它是整窗的一层，后面那些控件都压在它上面。
+				s.viewFullBackdrop(c, st.CoverURL)
+
+				// 铺满整窗的那一层：吃掉底下那一层的点击。
+				root := ui.Box(c).Key("full-root").
+					Absolute().Left(0).Top(0).Right(0).Bottom(0).
+					Modal().Role(ui.RoleDialog).Label("满屏播放器").Transition(fullEnter)
+				root.Children(func() {
+					s.viewFullTop(c, st, g)
+					cinema := s.full.theater && videoOn
+					if cinema {
+						s.viewFullCinema(c, st, g, phase)
+					} else {
+						s.viewFullLeft(c, st, g, phase, prefs)
+					}
+					s.viewFullBottom(c, st, g)
+					// 🔴 右栏排在底栏**之后**（后建的在上）：旋钮行和歌词下沿落在底栏的地盘里
+					// （1200×800 时旋钮行 y=646，底栏从 591 起，频谱 / 章节名 / 进度那几行是透明的
+					// 盒子），排在前面的话旋钮点不到。
+					if !cinema && !g.narrow && prefs.ShowLyrics {
+						s.viewFullRight(c, st, g)
+					}
+				})
+				if root.OverlayShortcut(0, ui.KeyEscape) {
+					switch {
+					case s.fullScreen && s.videoMadeFull:
+						s.setScreenFull(false)
+					case s.full.theater:
+						s.full.theater = false
+					default:
+						s.closeFullPlayer()
+					}
 				}
 			})
-			if root.OverlayShortcut(0, ui.KeyEscape) {
-				switch {
-				case s.fullScreen && s.videoMadeFull:
-					s.setScreenFull(false)
-				case s.full.theater:
-					s.full.theater = false
-				default:
-					s.closeFullPlayer()
-				}
-			}
+			s.finishFullPlayerIfReady(c)
 		})
 	})
 
@@ -399,21 +427,27 @@ var fullNothing = emptyState{
 func (s *Shell) viewFullEmpty(c *ui.Context) {
 	pud.WithFull(func() {
 		ui.Overlay(c, func() {
-			s.viewFullBackdrop(c, "")
-			root := ui.Box(c).Key("full-root").
+			frame := ui.Box(c).Key("full-frame").
 				Absolute().Left(0).Top(0).Right(0).Bottom(0).
-				Modal().Role(ui.RoleDialog).Label("满屏播放器")
-			root.Children(func() {
-				s.viewFullTop(c, app.State{}, fullGeo{})
-				ui.Column(c).Key("full-empty").
+				AnimatePose(s.fullPose(), fullExitAnim)
+			frame.Children(func() {
+				s.viewFullBackdrop(c, "")
+				root := ui.Box(c).Key("full-root").
 					Absolute().Left(0).Top(0).Right(0).Bottom(0).
-					Center().Gap(space.Px6).Children(func() {
-					ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(tok.Full.Text)
+					Modal().Role(ui.RoleDialog).Label("满屏播放器").Transition(fullEnter)
+				root.Children(func() {
+					s.viewFullTop(c, app.State{}, fullGeo{})
+					ui.Column(c).Key("full-empty").
+						Absolute().Left(0).Top(0).Right(0).Bottom(0).
+						Center().Gap(space.Px6).Children(func() {
+						ui.Text(c, fullNothing.Title).FontSize(scale.Font(c, scale.Size16)).TextColor(tok.Full.Text)
+					})
 				})
+				if root.OverlayShortcut(0, ui.KeyEscape) {
+					s.closeFullPlayer()
+				}
 			})
-			if root.OverlayShortcut(0, ui.KeyEscape) {
-				s.closeFullPlayer()
-			}
+			s.finishFullPlayerIfReady(c)
 		})
 	})
 	// 换歌的那几百毫秒里 `HasTrack` 是 false，抽屉得跟着留着。
@@ -421,11 +455,49 @@ func (s *Shell) viewFullEmpty(c *ui.Context) {
 	s.guardAt("评论抽屉", s.viewCommentsDrawer)(c)
 }
 
-// closeFullPlayer 关掉全屏播放器，顺手把那一摊复位。
-func (s *Shell) closeFullPlayer() {
+// fullPose 是满屏外壳的退场姿态。
+func (s *Shell) fullPose() ui.Pose {
+	if s.full.phase == fullOut {
+		return fullExitPose
+	}
+	return ui.Pose{}
+}
+
+func (s *Shell) fullClosing() bool {
+	return s.full.open && s.full.phase == fullOut
+}
+
+// finishFullPlayerIfReady 在退场动画完成后拆掉满屏树。
+func (s *Shell) finishFullPlayerIfReady(c *ui.Context) {
+	if s.full.phase != fullOut {
+		return
+	}
+	if !s.full.exitBuilt {
+		s.full.exitBuilt = true
+		if !c.Preferences().ReduceMotion {
+			s.full.exitReadyAt = c.Now().Add(fullExitAnim.Duration)
+			c.After(fullExitAnim.Duration)
+			return
+		}
+	} else if !s.full.exitReadyAt.IsZero() && c.Now().Before(s.full.exitReadyAt) {
+		return
+	}
+	s.finishFullPlayer()
+}
+
+func (s *Shell) finishFullPlayer() {
 	s.full = fullPlayer{}
 	// 没人画频谱了：告诉 App 把 FFT 停掉（它自己不知道满屏关没关）。
 	s.app.SetSpectrumWantedFor(app.SpectrumFull, false)
+}
+
+// closeFullPlayer 开始全屏播放器的退场动画。
+func (s *Shell) closeFullPlayer() {
+	if !s.full.open || s.full.phase == fullOut {
+		return
+	}
+	s.full.phase = fullOut
+	s.full.exitBuilt = false
 }
 
 // openFullPlayer 开全屏播放器。
@@ -441,6 +513,8 @@ func (s *Shell) openFullPlayer() {
 		return
 	}
 	s.full.open = true
+	s.full.phase = fullIn
+	s.full.exitBuilt = false
 	// ⚠️ **播放条上那个分集抽屉也得收掉**：满屏开着的时候播放条根本不画，于是那个键不在、
 	// 浮层也不建，而 `partOpen` 还留着 true，退回普通窗口时这一列会自己弹出来。
 	s.partOpen = false

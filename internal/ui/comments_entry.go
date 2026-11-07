@@ -121,7 +121,7 @@ func (s *Shell) viewCommentsButton(c *ui.Context, st app.State) {
 		// ⚠️ **开抽屉，不是跳路由**（票 #706）：评论内容改成**右侧抽屉**了——
 		// 独立页会把整个窗口顶掉，而评论是「当前这一首的附属信息」，它是**叠在
 		// 底下那一页上面**的东西。
-		s.commentsOpen = true
+		s.openCommentsDrawer()
 	}
 }
 
@@ -167,6 +167,6 @@ func (s *Shell) viewFullCommentsButton(c *ui.Context, st app.State, base flat.Ba
 		// 后建的在上，而满屏那一层建得更晚（它在 `viewMain` 的最后），所以
 		// 满屏会盖住抽屉。
 		s.closeFullPlayer()
-		s.commentsOpen = true
+		s.openCommentsDrawer()
 	}
 }

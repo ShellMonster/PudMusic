@@ -322,6 +322,16 @@ func (a *App) DownloadSnapshots() []download.Snapshot {
 	return m.Snapshots()
 }
 
+// DownloadSnapshotList 返回按队列 revision 缓存的只读快照。
+// 记录页用它跳过没有变化的过滤和复制。
+func (a *App) DownloadSnapshotList() download.SnapshotList {
+	m := a.downloadsSnapshot()
+	if m == nil {
+		return download.SnapshotList{}
+	}
+	return m.SnapshotList()
+}
+
 // DownloadSnapshot 返回一项的快照。记录页点某一行做操作之后要立刻
 // 重画那一行，而重画读的还是队列 —— 别让它为了重画去遍历整个队列。
 func (a *App) DownloadSnapshot(id string) (download.Snapshot, bool) {

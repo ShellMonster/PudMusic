@@ -158,6 +158,9 @@ func (m *Manager) Restore(path string) error {
 		m.tasks[t.ID] = t
 		m.order = append(m.order, t.ID)
 	}
+	if len(m.order) > 0 {
+		m.touchLocked()
+	}
 	return nil
 }
 

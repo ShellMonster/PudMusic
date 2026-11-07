@@ -110,6 +110,35 @@ func TestThePlayBarCommentsKeyOpensTheDrawer(t *testing.T) {
 	}
 }
 
+// TestTheQueueAndCommentsDrawersAreMutuallyExclusive 钉住两个右侧抽屉的用户
+// 可观察状态：从一个抽屉打开另一个时，前一个收到关闭意图，避免双层模态蒙版。
+func TestTheQueueAndCommentsDrawersAreMutuallyExclusive(t *testing.T) {
+	b := newCommentBili(t, "reply-main.json")
+	s, tt := newCommentsShell(t, b, mvItem(), 1400, 900)
+
+	s.commentsOpen, s.commentsPhase = true, drawerShown
+	tt.Frame()
+	if err := tt.Click("播放列表"); err != nil {
+		t.Fatalf("评论抽屉打开时点不到播放列表：%v（文字：%q）", err, tt.Texts())
+	}
+	if !s.drawerOpen {
+		t.Fatal("打开播放列表后队列抽屉没有打开")
+	}
+	if s.commentsOpen {
+		t.Fatal("打开播放列表后评论抽屉仍有打开意图")
+	}
+
+	s.drawerOpen, s.drawerPhase = true, drawerShown
+	tt.Frame()
+	s.openCommentsDrawer()
+	if !s.commentsOpen {
+		t.Fatal("打开评论后评论抽屉没有打开")
+	}
+	if s.drawerOpen {
+		t.Fatal("打开评论后队列抽屉仍有打开意图")
+	}
+}
+
 // TestTheCommentsDrawerCanBeClosedWithEscape 断「Esc 能关抽屉」。
 //
 // 🔴 **少这一条的表现是「按了 Esc 什么都没发生」**——而用户看着一个模态的

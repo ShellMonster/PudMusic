@@ -202,8 +202,9 @@ func (s *Shell) likeCurrent() {
 	}
 	// ⚠️ **主窗的满屏要收掉**：绑定弹窗排在 `viewFullPlayer` **之前**建，
 	// 满屏盖在它上面——满屏开着时这个弹窗用户看不见（票 #706 的坑）。
+	// 这是弹窗交接，不走满屏的退场动画；必须在同一帧释放模态层。
 	if target.full.open {
-		target.closeFullPlayer()
+		target.finishFullPlayer()
 	}
 	target.likeItem(it)
 }

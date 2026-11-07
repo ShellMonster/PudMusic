@@ -407,7 +407,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		// ⚠️ **这里是「=false」不是「= !drawerOpen」**：关的动作是幂等的——
 		// 退场那 200ms 里用户再点一次外面，不该把抽屉又打开。
 		if back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
-			s.drawerOpen = false
+			s.closeQueueDrawer()
 		}
 	})
 
@@ -478,7 +478,7 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 			s.queueClearOpen = true
 		}
 		if s.withTip(c, pud.IconBtn(c, "queue:close", "x", "关闭播放列表", pud.IconOpts{}), "关闭播放列表").Clicked() {
-			s.drawerOpen = false
+			s.closeQueueDrawer()
 		}
 	})
 	pud.DrawerSub(c, func() {

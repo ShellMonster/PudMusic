@@ -86,8 +86,12 @@ func TestEscapeClosesTheFullPlayer(t *testing.T) {
 	openFullDirect(t, s, tt)
 	tt.Key(0, mygoui.KeyEscape)
 	tt.Frame()
+	if !s.full.open || s.full.phase != fullOut {
+		t.Fatalf("按 Esc 后应进入退场：open=%v phase=%v", s.full.open, s.full.phase)
+	}
+	settleFull(t, tt)
 	if s.full.open {
-		t.Error("按 Esc 之后满屏还开着")
+		t.Error("退场动画完成后满屏还开着")
 	}
 }
 
@@ -100,8 +104,47 @@ func TestTheCloseKeyClosesTheFullPlayer(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
+	if !s.full.open || s.full.phase != fullOut {
+		t.Fatalf("点收起后没有进入退场：open=%v phase=%v", s.full.open, s.full.phase)
+	}
+	settleFull(t, tt)
 	if s.full.open || s.full.popRate {
-		t.Errorf("没关干净：open=%v popRate=%v", s.full.open, s.full.popRate)
+		t.Errorf("退场完成后没关干净：open=%v popRate=%v", s.full.open, s.full.popRate)
+	}
+}
+
+// TestTheFullPlayerKeepsItsTreeUntilExitSettles 锁定退场期间依赖元素仍在树上，
+// 动画完成后才清理 full 状态。
+func TestTheFullPlayerKeepsItsTreeUntilExitSettles(t *testing.T) {
+	s, tt, _ := fullTester(t)
+	openFullDirect(t, s, tt)
+
+	s.closeFullPlayer()
+	tt.Frame()
+	if !s.full.open || s.full.phase != fullOut {
+		t.Fatalf("关闭后应保留满屏树：open=%v phase=%v", s.full.open, s.full.phase)
+	}
+	if _, ok := tt.Find("播放进度"); !ok {
+		t.Fatalf("退场期间进度条已经被拆掉：文字 %q", tt.Texts())
+	}
+
+	settleFull(t, tt)
+	if s.full.open || s.full.phase != fullGone {
+		t.Fatalf("退场完成后状态未清理：open=%v phase=%v", s.full.open, s.full.phase)
+	}
+}
+
+// TestTheFullPlayerExitHonoursReduceMotion 锁定系统要求减少动态效果时，关闭
+// 在提交退场那一帧直接完成。
+func TestTheFullPlayerExitHonoursReduceMotion(t *testing.T) {
+	s, tt, _ := fullTester(t)
+	openFullDirect(t, s, tt)
+	tt.SetPreferences(mygoui.Preferences{ReduceMotion: true, TextScale: 1})
+
+	s.closeFullPlayer()
+	tt.Frame()
+	if s.full.open || s.full.phase != fullGone {
+		t.Fatalf("减少动态效果时没有立即清理：open=%v phase=%v", s.full.open, s.full.phase)
 	}
 }
 

@@ -243,6 +243,7 @@ func (m *Manager) restoreDest(id, dest string) {
 	defer m.mu.Unlock()
 	if t := m.tasks[id]; t != nil {
 		t.Dest = dest
+		m.touchLocked()
 	}
 }
 
@@ -252,6 +253,7 @@ func (m *Manager) markMuxing(id string) {
 	t := m.tasks[id]
 	if t != nil {
 		t.Status = StatusMuxing
+		m.touchLocked()
 	}
 	wake := m.wake
 	m.mu.Unlock()
@@ -364,6 +366,7 @@ func (m *Manager) destToLand(id string) string {
 	}
 	dest := m.destFor(filepath.Dir(t.Dest), t)
 	t.Dest = dest
+	m.touchLocked()
 	return dest
 }
 
@@ -456,6 +459,7 @@ func (m *Manager) prepare(id string, src *Source, length int64) (string, error) 
 			part = partPath(t.Dest)
 		}
 	}
+	m.touchLocked()
 
 	// ⚠️ **落盘的目录要先建**：默认落点是「音乐」目录下的应用子目录
 	// （`~/Music/PudMusic`），它**不一定已经存在**——而目录不存在时
@@ -511,6 +515,7 @@ func (m *Manager) prepareCompanion(id string, src *Source, length int64) (string
 			t.Companion.Chunks = nil
 		}
 	}
+	m.touchLocked()
 
 	// 落盘名变了就删掉旧名字下的半成品——`prepare` 里那四步孤儿场景
 	// 在这儿一模一样地成立。

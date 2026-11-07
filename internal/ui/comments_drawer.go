@@ -149,15 +149,15 @@ func (s *Shell) viewCommentsDrawer(c *ui.Context) {
 		})
 
 		if back.Clicked() || back.OverlayShortcut(0, ui.KeyEscape) {
-			s.commentsOpen = false
+			s.closeCommentsDrawer()
 		}
 	})
 }
 
 // syncCommentsDrawerPhase 推一遍评论抽屉的阶段机，返回这一帧是不是「刚打开」。
 //
-// ⚠️ **它和队列抽屉那一支是同一套形状，但各推各的**（两处各有一份状态）：
-// 一个抽屉开着的时候另一个可以也开着——而它们的阶段是**各自的**。
+// ⚠️ **它和队列抽屉那一支是同一套形状，但各推各的**（两处各有一份阶段状态）：
+// 打开入口会先关闭另一个抽屉的用户意图，退场阶段仍由各自的状态机负责。
 //
 // ⚠️ **「关」是幂等的**：`commentsOpen = false` 连按几次都是「关」，而
 // `commentsOpen = !commentsOpen` 那样写在关的动作上就是「开」——退场那 200ms

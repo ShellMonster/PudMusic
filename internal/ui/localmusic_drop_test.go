@@ -71,6 +71,32 @@ func TestDroppingAnAudioFileAddsItsFolderAndShowsTheTrack(t *testing.T) {
 	})
 }
 
+// TestDroppingOnTheLocalDropZoneUsesMyGoElementTarget 钉住 MyGo 元素级拖放：
+// 松手时拖放区要消费文件，不再依赖窗口级兜底。悬停高亮由 MyGo 的
+// FileDragOver 状态驱动，Tester 只暴露一次性 DropFiles，不暴露中间悬停帧，
+// 所以这里验证可观察的消费结果。
+func TestDroppingOnTheLocalDropZoneUsesMyGoElementTarget(t *testing.T) {
+	tt, s, a, _ := shellOnLocalMusic(t)
+
+	label, ok := tt.Find("把音频文件拖到这里")
+	if !ok {
+		t.Fatal("找不到本地音乐拖放区")
+	}
+	x, y := label.X+label.W/2, label.Y+label.H/2
+
+	dir := t.TempDir()
+	path := libSong(t, dir, "元素级拖放.mp3")
+	if !tt.DropFiles(x, y, path) {
+		t.Fatal("MyGo 没有把拖放交给本地音乐元素")
+	}
+	if got := a.SettingsSnapshot().LocalMusicDirs; len(got) != 1 || got[0] != dir {
+		t.Fatalf("元素级拖放没有加入目录：%v", got)
+	}
+	if !hasToast(s, "已加入本地音乐") {
+		t.Errorf("元素级拖放没有提示已加入本地音乐，提示有 %q", dropToastTexts(s))
+	}
+}
+
 // TestDroppingTheSameFolderTwiceAddsItOnce 钉住一次拖放里的去重：同一个新
 // 目录下的两首歌只加一个根，而且不能把刚加的那个说成「已经在库里」。
 func TestDroppingTheSameFolderTwiceAddsItOnce(t *testing.T) {

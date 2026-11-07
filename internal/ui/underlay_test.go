@@ -79,16 +79,12 @@ func TestTheUnderlyingPageIsNotBuiltWhileTheFullPlayerIsOpen(t *testing.T) {
 	}
 }
 
-// TestBackgroundResultsStillLandWhileTheFullPlayerIsOpen 钉住「跳过绘制 ≠ 跳过
-// 逻辑」。
+// TestHiddenPageSyncResumesAfterTheFullPlayerCloses 钉住「满屏期间暂停隐藏页同步，
+// 关闭后的第一帧立即补上」。
 //
-// 这一条是这一票最容易做坏的地方：把底下那一页整个不建之后，它**每帧的副作用**
-// （收后台结果、起该起的那一拉）也跟着一起停了——症状是「关掉满屏之后那一页还
-// 停在打开那一刻的样子，要再等一趟才更新」。
-//
-// 判据是**这一页手上的数据**：满屏开着的时候数据源变了，这一页手上的那份也要
-// 跟着变——而这一页一个控件都没被建过。
-func TestBackgroundResultsStillLandWhileTheFullPlayerIsOpen(t *testing.T) {
+// 满屏覆盖整窗时，当前路由页的请求、分页和状态处理都不可见，应该暂停；退出后
+// 不能继续显示打开满屏前的旧数据。
+func TestHiddenPageSyncResumesAfterTheFullPlayerCloses(t *testing.T) {
 	s, tt, rows := underlayShell(t)
 
 	*rows = append(*rows, dlSnapshot("第一首", download.StatusRunning, dlProgress, dlChunk))
@@ -104,11 +100,17 @@ func TestBackgroundResultsStillLandWhileTheFullPlayerIsOpen(t *testing.T) {
 	// 满屏期间数据源变了。
 	*rows = append(*rows, dlSnapshot("第二首", download.StatusRunning, dlProgress, dlChunk))
 
-	// 这一帧里：副作用照跑（数据取到了），而页面一个控件都没建。
+	// 满屏期间：隐藏页的副作用也暂停，避免为不可见内容继续工作。
+	tt.Frame()
+	if got := len(s.downloads.rows); got != 1 {
+		t.Errorf("满屏期间隐藏页同步了 %d 条，want 保持 1 条", got)
+	}
+
+	// 关闭后的第一帧恢复同步。
+	s.closeFullPlayer()
 	tt.Frame()
 	if got := len(s.downloads.rows); got != 2 {
-		t.Errorf("满屏期间这一页的手上还是 %d 条，want 2——"+
-			"跳过绘制不能连带跳过每帧的副作用", got)
+		t.Errorf("关闭满屏后的第一帧仍是 %d 条，want 2", got)
 	}
 }
 
@@ -170,14 +172,18 @@ func TestEscapeReturnsFromTheFullPlayerAtOnce(t *testing.T) {
 	tt.Key(0, mygoui.KeyEscape)
 	tt.Frame()
 
-	if s.full.open {
-		t.Fatalf("按了 Esc 全屏还开着，文字有 %q", tt.Texts())
+	if !s.full.open || s.full.phase != fullOut {
+		t.Fatalf("按了 Esc 全屏没有进入退场：open=%v phase=%v，文字有 %q", s.full.open, s.full.phase, tt.Texts())
 	}
 	if !tt.HasText("第一首") {
 		t.Errorf("按了 Esc 之后的下一帧上，底下那一页还没画回来，文字有 %q", tt.Texts())
 	}
 	if s.pageBuilds <= before {
 		t.Error("按了 Esc 之后底下那一页没有被重新建过——它停在打开满屏之前的样子了")
+	}
+	settleFull(t, tt)
+	if s.full.open {
+		t.Error("退场动画完成后满屏还开着")
 	}
 }
 

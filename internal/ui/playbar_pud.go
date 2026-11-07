@@ -112,7 +112,7 @@ func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
 			s.viewLyricsKey(c, st)
 			if s.withTip(c, pud.IconBtn(c, "pb-queue", "queue", "播放列表", pud.IconOpts{On: s.drawerOpen}),
 				drawerTip(s.drawerOpen)).Clicked() {
-				s.drawerOpen = !s.drawerOpen
+				s.toggleQueueDrawer()
 			}
 			s.viewVolumeButton(c, st)
 		})

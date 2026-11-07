@@ -175,7 +175,7 @@ func (s *Shell) toggleSidebar() {
 // runningDownloads 是进行中（正在下 + 排队）的下载任务数，挂在「下载记录」右边。
 func (s *Shell) runningDownloads() int {
 	n := 0
-	for _, d := range s.app.DownloadSnapshots() {
+	for _, d := range s.app.DownloadSnapshotList().Rows {
 		if d.Status == download.StatusRunning || d.Status == download.StatusQueued {
 			n++
 		}

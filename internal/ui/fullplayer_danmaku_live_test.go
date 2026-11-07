@@ -388,16 +388,25 @@ func TestClosingTheFullPlayerStopsTheDanmakuFrames(t *testing.T) {
 	env.s.closeFullPlayer()
 	env.tt.Frame()
 
-	if redSeen(env.tt, danmakuArea()) {
-		t.Error("退出满屏之后画面上还有弹幕")
+	if !env.s.full.open || env.s.full.phase != fullOut {
+		t.Fatalf("关闭后应先进入退场：open=%v phase=%v", env.s.full.open, env.s.full.phase)
 	}
-	// ⚠️ **关满屏是 `s.full = fullPlayer{}`**：那一份状态整个换掉，所以计数
-	// 也归零。这里断的是「新那一份一次都没要过帧」。
+	// 退场期间树仍在，弹幕状态和绘制回调必须保持有效。
+	if !redSeen(env.tt, danmakuArea()) {
+		t.Error("退场第一帧就没有弹幕，依赖元素被提前拆掉了")
+	}
+	settleFull(t, env.tt)
+	if env.s.full.open {
+		t.Fatalf("退场动画完成后满屏还开着：phase=%v exitBuilt=%v pending=%v",
+			env.s.full.phase, env.s.full.exitBuilt, env.tt.FramePending())
+	}
+	// 退场完成后才清理 full 状态，所以计数也归零。这里断的是「新那一份一次
+	// 都没要过帧」。
 	if n := env.s.full.danmaku.requests; n != 0 {
-		t.Errorf("退出满屏之后还要了 %d 次下一帧——那一层已经不存在了", n)
+		t.Errorf("退场完成后还要了 %d 次下一帧——那一层已经不存在了", n)
 	}
 	if d := &env.s.full.danmaku; d.itemsByTime != nil || d.live != 0 || d.slots != nil {
-		t.Errorf("退出满屏之后弹幕状态没有复位：items=%d live=%d slots=%v",
+		t.Errorf("退场完成后弹幕状态没有复位：items=%d live=%d slots=%v",
 			len(d.itemsByTime), d.live, d.slots)
 	}
 }

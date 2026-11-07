@@ -698,7 +698,7 @@ func (s *Shell) openComments() {
 		return
 	}
 	s.closeFullPlayer()
-	s.commentsOpen = true
+	s.openCommentsDrawer()
 	s.wake.invalidate()
 }
 

@@ -29,7 +29,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -96,6 +95,11 @@ type homePage struct {
 	hero    []list.Music
 	heroFor heroKey
 	heroOK  bool
+	// cleanTitles 是首页这份 feed 的显示标题缓存。title.Clean 自己也有
+	// 全局缓存，但首页一帧会在 Hero、卡片和最近播放里多次问同一条；
+	// 这里按 feed revision 失效，避免每次都跨锁查全局表。
+	cleanTitleRevision uint64
+	cleanTitles        map[string]string
 
 	// day 是这一帧的时刻（「今日一张」按它选，问候语按它定）。
 	day time.Time
@@ -123,6 +127,7 @@ func (h *homePage) SetSongs(daily, chart, news, recent []list.Music) {
 	set(homeChart, chart)
 	set(homeNew, news)
 	set(homeRecent, recent)
+	h.feed.revision++
 }
 
 // viewHome 画首页。页面的那一道 recover 在 `Shell.page` 上（router.go）。
@@ -337,7 +342,7 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 			metaLine("本周已听", homeClock(h.week), "")
 			st := in.Playback
 			if in.HasCurrent && !st.Playing && st.Position > 0 && st.Err == "" && st.Title != "" {
-				name := title.Clean(st.Title).Title
+				name := h.cleanTitle(st.Title)
 				ui.Box(c).Margin(space.Px8, space.None, space.None, space.None).Children(func() {
 					if pud.ButtonMono(c, "home:resume", pud.Ghost, pud.Sm, "继续播放「"+name+"」", clockText(st.Position), "play").Clicked() {
 						s.app.Toggle()
@@ -414,14 +419,35 @@ func homeDaysAgo(t, now time.Time) string {
 
 // homeCardSub 给卡片副题用：「歌手 · 12.3万 播放」，缺哪样就少说哪样。
 func homeCardSub(m list.Music) string {
-	var parts []string
-	if m.Owner != "" {
-		parts = append(parts, m.Owner)
+	plays := homePlays(m.View)
+	switch {
+	case m.Owner != "" && plays != "":
+		return m.Owner + " · " + plays + " 播放"
+	case m.Owner != "":
+		return m.Owner
+	case plays != "":
+		return plays + " 播放"
+	default:
+		return ""
 	}
-	if t := homePlays(m.View); t != "" {
-		parts = append(parts, t+" 播放")
+}
+
+// cleanTitle 返回当前首页 feed 的显示歌名。feed revision 变化时整份失效，
+// 因为同一个 ID 可能被刷新成新的原标题。
+func (h *homePage) cleanTitle(raw string) string {
+	if h.cleanTitleRevision != h.feed.revision {
+		h.cleanTitleRevision = h.feed.revision
+		clear(h.cleanTitles)
 	}
-	return strings.Join(parts, " · ")
+	if h.cleanTitles == nil {
+		h.cleanTitles = make(map[string]string)
+	}
+	if got, ok := h.cleanTitles[raw]; ok {
+		return got
+	}
+	got := title.Clean(raw).Title
+	h.cleanTitles[raw] = got
+	return got
 }
 
 // ── 推荐 ───────────────────────────────────────────────────────────────────
@@ -513,7 +539,7 @@ func (h *homePage) cardGrid(c *ui.Context, kind string, songs []list.Music, cols
 			ui.Row(c).Key("home:" + kind + ":row:" + songs[start].ID).Gap(gap).Children(func() {
 				for i := start; i < end; i++ {
 					m := songs[i]
-					ev := pud.CoverCard(c, "home:"+kind+":card:"+m.ID, title.Clean(m.Title).Title,
+					ev := pud.CoverCard(c, "home:"+kind+":card:"+m.ID, h.cleanTitle(m.Title),
 						homeCardSub(m), cw, h.coverOf(m.Cover), h.isCur(m))
 					if ev.Open || ev.Play {
 						h.playFrom(s, songs, i)
@@ -551,7 +577,7 @@ func (h *homePage) rail(c *ui.Context, songs []list.Music, inner float32, s *She
 		Margin(space.None, -pad, space.None, -pad).Padding(space.None, pad, space.Px8, pad).
 		Children(func() {
 			for i, m := range songs {
-				ev := pud.CoverCard(c, "home:recent:card:"+m.ID, title.Clean(m.Title).Title,
+				ev := pud.CoverCard(c, "home:recent:card:"+m.ID, h.cleanTitle(m.Title),
 					m.Owner, homeRailCardW, h.coverOf(m.Cover), h.isCur(m))
 				if ev.Open || ev.Play {
 					h.playFrom(s, songs, i)

@@ -691,7 +691,7 @@ func (s *Shell) viewCommentsHeader(c *ui.Context, it app.Item) {
 			p.wantRefresh = true
 		}
 		if s.withTip(c, pud.IconBtn(c, "comments:close", "x", "关闭评论", pud.IconOpts{}), "关闭评论").Clicked() {
-			s.commentsOpen = false
+			s.closeCommentsDrawer()
 		}
 	})
 
@@ -802,7 +802,7 @@ func (s *Shell) viewCommentsComposer(c *ui.Context) {
 			ui.Text(c, "登录后才能发表评论").FontSize(scale.Font(c, scale.Size13)).TextColor(pal.Text2).
 				SingleLine().Grow(1)
 			if pud.Button(c, "comments:login", pud.Primary, pud.Sm, "去登录", "").Clicked() {
-				s.commentsOpen = false
+				s.closeCommentsDrawer()
 				s.goLogin("")
 			}
 			return

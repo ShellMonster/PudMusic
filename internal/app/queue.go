@@ -1968,6 +1968,10 @@ func indexOfItem(items []Item, it Item) int {
 //
 // 开失败时不动封面和艺人：歌没换，还在放上一首，它们也不该跟着换。
 func (a *App) play(item Item) error {
+	// 第一次从空闲进入播放时，让低频 timer 在一个正常播放节拍内开始工作；
+	// 换歌时 timer 已经按 live 状态保持 20Hz，不能每次装新播放器都立即 kick，
+	// 否则会在切歌同一拍提前预取下一首。
+	firstTrack := !a.hasTrack()
 	var err error
 	if item.isOnline() {
 		err = a.playOnline(item)
@@ -1979,6 +1983,9 @@ func (a *App) play(item Item) error {
 	}
 	a.setCover(item.Cover)
 	a.setArtist(item.Artist, item.ArtistMid)
+	if firstTrack {
+		a.kickTickAfter(tickInterval)
+	}
 	return nil
 }
 

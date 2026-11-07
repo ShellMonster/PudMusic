@@ -488,10 +488,10 @@ type Shell struct {
 	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
 	drawerPhase drawerPhase
 
-	// commentsOpen 是评论抽屉开没开（票 #706）。
+	// commentsOpen 是评论抽屉开没开的用户意图（票 #706）。
 	//
-	// ⚠️ **它和 `drawerOpen`（队列抽屉）是两件事，各有一份**：两个抽屉可以同时
-	// 开——而它们的阶段是**各自的**（`commentsPhase`）。
+	// ⚠️ **它和 `drawerOpen`（队列抽屉）各有一份阶段状态，但打开入口互斥**：
+	// 打开评论会关闭队列，打开队列会关闭评论；阶段机仍各自处理退场。
 	//
 	// ⚠️ **它不进设置**：抽屉是「我现在要看评论」这一下的事，关掉窗口就该是关着
 	// 的（理由同 `drawerOpen`）。
@@ -1360,6 +1360,8 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// Tester 里会 panic，测试建完外壳就换成记动作的桩；记录那一条接应用层。
 	s.downloads = newDownloadsPage(a.DownloadSnapshots, systemOpenDir,
 		mygo.Shell.ShowItemInFolder, systemOpenLink)
+	s.downloads.snapshotListFn = a.DownloadSnapshotList
+	s.downloads.rowsFn = nil
 	s.downloads.tip = s.tip
 	// 本地音乐页同理。⚠️ 传进去的唤醒是 `s.local.invalidate` 而不是
 	// `s.wake.invalidate`：后台扫完了要把**所有画过这一页的窗口**都叫醒，
@@ -1369,6 +1371,7 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	s.local.onDrop = s.handleFileDrop
 	s.local.contentW = s.spaceContentWidth
 	// 听歌统计那一页的状态。
 	//

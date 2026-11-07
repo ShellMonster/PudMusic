@@ -28,7 +28,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
@@ -87,6 +86,7 @@ type heroKey struct {
 	chart bool
 	n     int
 	first string
+	rev   uint64
 }
 
 // heroSongs 是此刻主视觉上的曲目：热榜优先，没有就用每日推荐。选出来的记一份，依据没变
@@ -97,7 +97,7 @@ func (h *homePage) heroSongs() []list.Music {
 		src, chart = h.feed.sec[homeDaily].songs, false
 	}
 	y, mo, d := h.day.Date()
-	k := heroKey{day: y*10000 + int(mo)*100 + d, chart: chart, n: len(src)}
+	k := heroKey{day: y*10000 + int(mo)*100 + d, chart: chart, n: len(src), rev: h.feed.revision}
 	if len(src) > 0 {
 		k.first = src[0].ID
 	}
@@ -161,7 +161,7 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 
 		ui.Column(c).Grow(1).Shrink(1).Children(func() {
 			typo.Eyebrow(c, "今日一张 · Album of the day")
-			name := title.Clean(top.Title).Title
+			name := h.cleanTitle(top.Title)
 			// 原型 `.hero-title { line-height: 1.05; margin: 12px 0 8px }`（补回行高见 `typo.DisplayNatural`）。
 			hs := scale.Font(c, scale.HeroTitleFluid(h.win))
 			trim := typo.DisplayTrim(hs, 1.05)
@@ -193,7 +193,8 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 // 缝 12、内边距 8、圆角 8，悬停 hover 底，正在放的歌名换 accent-text）。
 func (h *homePage) viewHeroTrack(c *ui.Context, s *Shell, hero []list.Music, i int, m list.Music) {
 	p := tok.Of(c.Theme())
-	b := ui.ButtonBase(c).Key("home:hero:track:" + m.ID).Label("播放 " + title.Clean(m.Title).Title).
+	name := h.cleanTitle(m.Title)
+	b := ui.ButtonBase(c).Key("home:hero:track:" + m.ID).Label("播放 " + name).
 		FillWidth().Padding(space.Px8).Radius(tok.R8).Gap(space.Px12).AlignItems(ui.Center)
 	if b.Hovered() {
 		b = b.Background(p.Hover)
@@ -205,7 +206,7 @@ func (h *homePage) viewHeroTrack(c *ui.Context, s *Shell, hero []list.Music, i i
 		if h.isCur(m) {
 			fg = p.AccentText
 		}
-		ui.Text(c, title.Clean(m.Title).Title).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(fg).
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(fg).
 			SingleLine().Ellipsis("…").Grow(1).Shrink(1)
 		var meta []string
 		if t := homePlays(m.View); t != "" {

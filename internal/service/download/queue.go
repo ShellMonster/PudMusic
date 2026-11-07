@@ -123,6 +123,12 @@ type Manager struct {
 	coverWG sync.WaitGroup
 
 	closed bool
+
+	// revision 在任何会影响 Snapshot 的状态变化后递增。snapshotCache 是
+	// 按 revision 建好的只读切片，供 UI 每帧读取，避免每帧重新遍历并复制整个队列。
+	revision              uint64
+	snapshotCache         []Snapshot
+	snapshotCacheRevision uint64
 }
 
 // New 建一个队列。**必须在开窗口之前调**（它会读盘）。
@@ -232,6 +238,7 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 			// ⚠️ **重新排上队就把上一轮那个判据扔掉**：这一轮会不会成功是另一件
 			// 事，而「该不该给「重试」键」是**这一轮失败之后**才判的。
 			t.noRetry = false
+			m.touchLocked()
 			snap = SnapshotOf(t)
 		}
 		m.mu.Unlock()
@@ -266,6 +273,7 @@ func (m *Manager) Enqueue(req AddRequest) (Snapshot, error) {
 	m.tasks[id] = t
 	t.Dest = m.destFor(req.Dir, t)
 	m.order = append(m.order, id)
+	m.touchLocked()
 	snap := SnapshotOf(t)
 	m.mu.Unlock()
 
@@ -288,6 +296,7 @@ func (m *Manager) Pause(id string) error {
 	// 状态先落成暂停：不落的话这一项在队列里还是 running，而暂停是
 	// **用户已经看到的意图**，它不该等到网络真的停下来才成立。
 	t.Status = StatusPaused
+	m.touchLocked()
 	cancel := m.cancels[id]
 	m.mu.Unlock()
 
@@ -314,6 +323,7 @@ func (m *Manager) Resume(id string) error {
 	t.Err = ""
 	// ⚠️ 同上：重新排上队就扔掉上一轮那个判据。
 	t.noRetry = false
+	m.touchLocked()
 	m.mu.Unlock()
 
 	m.kick()
@@ -348,6 +358,7 @@ func (m *Manager) Remove(id string) error {
 	delete(m.tasks, id)
 	m.order = drop(m.order, id)
 	dest := t.Dest
+	m.touchLocked()
 	m.mu.Unlock()
 
 	// 半成品删掉。已经下完的（真的那首歌）留着——用户删的是队列里这一
@@ -394,6 +405,7 @@ func (m *Manager) Clear() {
 	m.order = nil
 	m.cancels = map[string]context.CancelFunc{}
 	m.lastAt = map[string]time.Time{}
+	m.touchLocked()
 	m.mu.Unlock()
 
 	for i, d := range dests {
@@ -406,15 +418,31 @@ func (m *Manager) Clear() {
 
 // Snapshots 返回队列的一份拷贝，按入队顺序。改它不影响队列。
 func (m *Manager) Snapshots() []Snapshot {
+	list := m.SnapshotList()
+	if len(list.Rows) == 0 {
+		return nil
+	}
+	return append([]Snapshot(nil), list.Rows...)
+}
+
+// SnapshotList 返回按 revision 缓存的只读快照。
+//
+// Rows 由 Manager 持有，调用方只能读取。队列发生变化时 Manager 会换一份新的
+// 切片，所以这份返回值在解锁后仍然稳定。
+func (m *Manager) SnapshotList() SnapshotList {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]Snapshot, 0, len(m.order))
-	for _, id := range m.order {
-		if t := m.tasks[id]; t != nil {
-			out = append(out, SnapshotOf(t))
+	if m.snapshotCacheRevision != m.revision {
+		out := make([]Snapshot, 0, len(m.order))
+		for _, id := range m.order {
+			if t := m.tasks[id]; t != nil {
+				out = append(out, SnapshotOf(t))
+			}
 		}
+		m.snapshotCache = out
+		m.snapshotCacheRevision = m.revision
 	}
-	return out
+	return SnapshotList{Revision: m.revision, Rows: m.snapshotCache}
 }
 
 // Get 返回一项的快照。
@@ -482,10 +510,15 @@ func (m *Manager) Close(path string) error {
 func (m *Manager) pauseQueued() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	changed := false
 	for _, t := range m.tasks {
 		if t != nil && t.Status == StatusQueued {
 			t.Status = StatusPaused
+			changed = true
 		}
+	}
+	if changed {
+		m.touchLocked()
 	}
 }
 
@@ -558,6 +591,7 @@ func (m *Manager) runOne(id string) {
 		// （`persistable()` 对正在下的也是这么记的）。
 		if m.closed && t != nil && t.Status == StatusQueued {
 			t.Status = StatusPaused
+			m.touchLocked()
 		}
 		m.mu.Unlock()
 		return
@@ -567,6 +601,7 @@ func (m *Manager) runOne(id string) {
 	t.Err = ""
 	// ⚠️ 同上：这一轮重新开始了，上一轮那个判据就不作数了。
 	t.noRetry = false
+	m.touchLocked()
 	m.cancels[id] = cancel
 	wake := m.wake
 	m.mu.Unlock()
@@ -613,6 +648,7 @@ func (m *Manager) runOne(id string) {
 		case err == nil:
 			t.Status = StatusDone
 			t.Err = ""
+			m.touchLocked()
 			done = SnapshotOf(t)
 		case errors.Is(err, context.Canceled), errors.Is(err, ErrPaused):
 			// 暂停 / 应用退出：这不是失败，用户还要接着下。
@@ -623,6 +659,7 @@ func (m *Manager) runOne(id string) {
 			// 「交织中」，而按钮上的「继续」按下去也不动。
 			if t.Status.Running() {
 				t.Status = StatusPaused
+				m.touchLocked()
 			}
 		default:
 			t.Status = StatusError
@@ -632,6 +669,7 @@ func (m *Manager) runOne(id string) {
 			// 装进来）。风控失败的那一项**不给**「重试」——那枚键是立刻重新
 			// 取流，按下去就是再撞一次墙。
 			t.noRetry = !m.retryable(err)
+			m.touchLocked()
 			done = SnapshotOf(t)
 		}
 	}
@@ -666,6 +704,11 @@ func (m *Manager) retryable(err error) bool {
 		return true
 	}
 	return m.canRetry(err)
+}
+
+// touchLocked 标记 Snapshot 已经失效。调用方必须持有 m.mu。
+func (m *Manager) touchLocked() {
+	m.revision++
 }
 
 // waitIdle 等一个任务真的停下来（取消之后网络要断开、goroutine 要退出）。
@@ -771,6 +814,7 @@ func (m *Manager) finishChunk(id string, companion bool, i int) {
 	} else {
 		t.markChunk(i)
 	}
+	m.touchLocked()
 	m.mu.Unlock()
 	m.noteProgress(id)
 }
