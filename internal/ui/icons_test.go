@@ -172,7 +172,8 @@ func TestEveryPlayModeHasItsIcon(t *testing.T) {
 	}
 
 	// 画面上那一条：四档画出来的是四个不同的图形。
-	tt, a := modeBarTester(t, 1000)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a := modeBarTester(t, pbWideW)
 	fingerprints := map[string]app.PlayMode{}
 	for range app.PlayModes {
 		if err := tt.Click("播放模式"); err != nil {
@@ -663,7 +664,7 @@ func TestTheGlyphsAreNotSwallowedByTheBackground(t *testing.T) {
 // 测的，报出来的是「算出来的探针在按钮之外」——离真因隔了两层）。
 // 探针一定在图形之外，靠的是 (3) 说的那 3 像素。
 func TestTheHitAreaIsBiggerThanTheGlyph(t *testing.T) {
-	h := newHarness(t)
+	h := newWideHarness(t) // 静音 / 音量 / 模式只在窗口 > 1024 时摆
 	h.open(t)
 	h.app.Toggle() // 先停着：播放键在播的时候叫「暂停」
 	waitFrames(t, h.tt, "按钮变成播放", func() bool {

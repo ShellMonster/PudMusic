@@ -241,6 +241,10 @@ const (
 type lyricStyle struct {
 	// color 是歌词的字色。正在唱的那一句也是它，只是字号和不透明度不同。
 	color ui.Color
+	// activeColor 非零时是正在唱那一句的字色（按 presence 从 color 过渡过去，译文跟着原文走）。
+	// 全屏播放器给 `tok.Full.LyricCurrent` #fff（原型 index.html:865 `.ly.cur { color: #fff }`）；
+	// 迷你卷帘不设，当前句仍是 color。
+	activeColor ui.Color
 	// muted 是**说明性文字**的字色（那一句「歌词来自 B 站」）。
 	//
 	// ⚠️ **它不是 `color` 的淡版**：满屏那一屏的字色是满屏自己的前景色
@@ -289,8 +293,6 @@ type lyricStyle struct {
 	// var(--font-display) }`，当前句 700、其余常规）。字体的取值集中在
 	// `fullLyricFace`（`fullplayer_lyrics.go`），Regular 子集一到只改那一处。
 	face func(active bool) (family string, weight int)
-	// tracking 是歌词字距相对字号的比例；满屏播放器按原型的 -0.01em 收紧。
-	tracking float32
 	// padY / gap 非 0 时覆盖行的上下内边距和行间距（原型 `.ly { padding: 10px 0 }`，没有行间距，
 	// 所以 gap 用负数表示「0」）。
 	padY, gap float32
@@ -945,13 +947,14 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 			p.Fill(ui.Rect{X: r.X, Y: r.Y + lyricsLinePadY, W: lyricBarW, H: r.H - 2*lyricsLinePadY}, acc, 1.5)
 		})
 	}
+	ink := st.color
+	if st.activeColor.A != 0 {
+		ink = st.color.Mix(st.activeColor, presence)
+	}
 	line = line.Opacity(opacity).Children(func() {
 		txt := ui.Text(c, row.Text).
 			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(leading.Lyrics).
-			TextColor(st.color)
-		if st.tracking != 0 {
-			txt = txt.LetterSpacing(scale.Font(c, size) * st.tracking)
-		}
+			TextColor(ink)
 		if st.face != nil {
 			family, w := st.face(i == active)
 			txt = txt.Font(family).FontWeight(w)
@@ -968,10 +971,7 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 				FontSize(scale.Font(c, scale.LyricsTranslation)).
 				FixedLineHeight(lyricsTranslationLineHeight).
 				Opacity(lyricsTranslationOpacity).
-				TextColor(st.color)
-			if st.tracking != 0 {
-				tr = tr.LetterSpacing(scale.Font(c, size) * st.tracking)
-			}
+				TextColor(ink)
 			if st.transRatio > 0 {
 				ts := scale.Font(c, size) * st.transRatio
 				tr = tr.Margin(st.transGap, space.None, space.None, space.None).

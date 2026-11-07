@@ -174,18 +174,23 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 
 // settingsNav 是左边的分类导航（`.set-nav`）：宽 180、项间缝 2；每项上下 10 左右 12、
 // 圆角 8、次要色字、图标 16 隔 10；悬停 hover 底 + 正文色；当前项 surface-2 底 + 正文色 600。
+//
+// 窗口 ≤ 1024（stacked）时照原型 index.html:931-933：横排、能横向滚、项间缝 8、项内图标隔 8、
+// 每项按内容宽（不换行、不撑满）。
 func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
 	var nav ui.Element
+	iconGap := float32(space.Px10)
 	if stacked {
-		nav = ui.Row(c).Key("set-nav").Gap(space.Px8)
+		nav = ui.ScrollHorizontal(c).Key("set-nav").FillWidth().Gap(space.Px8)
+		iconGap = space.Px8
 	} else {
 		nav = ui.Column(c).Key("set-nav").Width(setNavW).Shrink(0).Gap(space.Px2)
 	}
 	nav.Children(func() {
 		for i, tb := range settingsTabs {
 			on := s.settings.tab == i
-			b := ui.ButtonBase(c).Key("set-tab:"+tb.label).Label(tb.label).FillWidth().
-				Padding(space.Px10, space.Px12).Gap(space.Px10).AlignItems(ui.Center).Justify(ui.Start).Radius(tok.R8)
+			b := ui.ButtonBase(c).Key("set-tab:"+tb.label).Label(tb.label).
+				Padding(space.Px10, space.Px12).Gap(iconGap).AlignItems(ui.Center).Justify(ui.Start).Radius(tok.R8)
 			fg := p.Text2
 			switch {
 			case on:
@@ -194,7 +199,9 @@ func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
 				b, fg = b.Background(p.Hover), p.Text
 			}
 			b = b.Transition(motion.Fade)
-			if !stacked {
+			if stacked {
+				b = b.Shrink(0)
+			} else {
 				b = b.FillWidth()
 			}
 			b.Children(func() {

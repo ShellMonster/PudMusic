@@ -170,6 +170,21 @@ func TestLeavingMultiModeClearsThePicks(t *testing.T) {
 // 批量删除（二次确认）
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TestTheLikedFolderOffersNoBatchDelete 锁住「默认收藏夹『我喜欢』的批量条上没有『批量删除』」
+// （原型 app.js 621 `c.mine && !isLiked`），而加入队列 / 批量下载照旧在。
+//
+// 曾经出错的行为：只判了「是自己的收藏夹」，默认收藏夹也摆出了红色的「批量删除」。
+func TestTheLikedFolderOffersNoBatchDelete(t *testing.T) {
+	b := newCollectionBili(t)
+	b.setMedias(mediaOf(1, "歌 一"), mediaOf(2, "歌 二"))
+	b.setAttr(0) // 第 1 位为 0 = B 站发下来的默认收藏夹
+	_, s, tt := collectionShellFrom(t, b, nil, "1", "12345")
+	waitSongs(t, tt, s, 2)
+	enterMulti(t, tt)
+	wantText(t, tt, "批量下载")
+	dontWantText(t, tt, "批量删除")
+}
+
 // TestDeletingAsksFirst 点「批量删除」不会直接删——确认框先问一次。
 //
 // ⚠️ 那个框现在是**应用自绘**的（票 #176 / G33，形状照上游的

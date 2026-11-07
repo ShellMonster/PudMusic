@@ -63,8 +63,8 @@ const (
 	// `suggest-history` 分开，于是两栏是两块而不是一栏。
 	suggestTermsKey = "suggest-terms"
 
-	// suggestHotHeading / suggestHotKey 是「大家在听」那一档的标题和键。
-	suggestHotHeading = "大家在听"
+	// suggestHotHeading / suggestHotKey 是「热门搜索」那一档的标题和键（原型 app.js:494）。
+	suggestHotHeading = "热门搜索"
 	suggestHotKey     = "suggest-hot"
 
 	// suggestFailedNote 是「这一趟没拉到」时那一档自己的一句话。
@@ -94,12 +94,6 @@ const (
 	suggestHeadingPadTop, suggestHeadingPadRight   = space.Px2, space.Px4
 	suggestHeadingPadBottom, suggestHeadingPadLeft = space.Px6, space.Px4
 	suggestTermsHeadingKey, suggestHotHeadingKey   = "suggest-terms-header", "suggest-hot-header"
-
-	// suggestTermsGap 是历史那一档和联想词那一档之间留的那一道空隙。
-	//
-	// ⚠️ **只在一档都没少的时候才有**：没有历史可摆时凭空留一道，浮层顶上就是一条
-	// 空边，看着像被切掉了一块。
-	suggestTermsGap = space.Px8
 
 	// suggestScrollKey 是面板里那个滚动容器的键（铁律四）。
 	suggestScrollKey = "suggest-scroll"

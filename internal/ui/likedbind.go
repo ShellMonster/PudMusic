@@ -387,7 +387,7 @@ func (s *Shell) viewLikeBindPick(c *ui.Context, b *likeBind, backdrop, panel ui.
 		if b.submitting {
 			confirm = "提交中…"
 		}
-		if pud.Button(c, "likebind:ok", pud.Primary, pud.Std, confirm, "").Disabled(b.picked <= 0 || b.submitting).Clicked() {
+		if pud.ButtonDisabled(c, "likebind:ok", pud.Primary, pud.Std, confirm, "", b.picked <= 0 || b.submitting).Clicked() {
 			s.submitLikePick(b)
 		}
 	})
@@ -411,7 +411,8 @@ func (s *Shell) viewLikeBindRow(c *ui.Context, b *likeBind, i int) {
 		ui.Box(c).Size(32, 32).Radius(tok.R4).Clip().Background(pl.Surface2).Shrink(0).
 			AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			if item.Cover != "" {
-				s.collCoverDraw(item.Cover)(c, 32, 32)
+				// 圆角 r-4 落在最内层的图上（GPU 只有最内层裁剪切圆角，见 `pud.Cover`）。
+				s.collCoverDraw(item.Cover)(c, 32, 32, tok.R4)
 			} else {
 				ui.Icon(c, pud.Icon("folder")).FontSize(16).TextColor(pl.Text3)
 			}
@@ -473,7 +474,7 @@ func (s *Shell) viewLikeBindCreate(c *ui.Context, b *likeBind, backdrop, panel u
 		})
 	})
 	dlgFoot(c, nil, func() {
-		if pud.Button(c, "likebind:create-cancel", pud.Ghost, pud.Std, "取消", "").Disabled(b.submitting).Clicked() {
+		if pud.ButtonDisabled(c, "likebind:create-cancel", pud.Ghost, pud.Std, "取消", "", b.submitting).Clicked() {
 			if s.likePending != nil {
 				b.step = likeBindChoose
 			} else {

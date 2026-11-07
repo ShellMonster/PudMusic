@@ -48,6 +48,14 @@ func newHarness(t *testing.T) *harness {
 	return &harness{app: b.a, tt: b.tt, s: b.s}
 }
 
+// newWideHarness 同 newHarness，但窗口宽 pbWideW：≤ 1024 时播放条按原型藏起模式、睡眠、
+// 倍速、分集、下载、静音和音量（playbar_narrow_test.go），要点这几枚的测试用它。
+func newWideHarness(t *testing.T) *harness {
+	t.Helper()
+	b := newTestShell(t, at(pbWideW, winH))
+	return &harness{app: b.a, tt: b.tt, s: b.s}
+}
+
 func (h *harness) open(t *testing.T) {
 	t.Helper()
 	if err := h.app.Open(flac(t)); err != nil {
@@ -81,7 +89,7 @@ func dragTo(t *testing.T, tt *mygoui.Tester, to float64) {
 
 // TestWindowShowsPlayBar 是验收项 1：起得来，画面上有播放条。
 func TestWindowShowsPlayBar(t *testing.T) {
-	h := newHarness(t)
+	h := newWideHarness(t) // 静音 / 音量 / 模式只在窗口 > 1024 时摆
 	if !h.tt.HasText("推荐音乐") {
 		t.Errorf("侧栏不在，文字有 %q", h.tt.Texts())
 	}
@@ -264,7 +272,7 @@ func TestRenderPlayBarShots(t *testing.T) {
 
 // TestVolumeSliderDrivesTheApp 盯播放条右边那根行内音量滑块（原型 `.vol`，96 宽）真的在调音量。
 func TestVolumeSliderDrivesTheApp(t *testing.T) {
-	h := newHarness(t)
+	h := newWideHarness(t) // 静音 / 音量 / 模式只在窗口 > 1024 时摆
 	h.open(t)
 
 	bar, ok := h.tt.Find("音量")

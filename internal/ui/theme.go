@@ -205,8 +205,19 @@ func (c *themeCache) hot() *ui.Theme { return c.hotTheme }
 // 缓存的是**值**（一份 `*ui.Theme`），不是「装不装」——铁律一那条「每帧开头
 // 都要装」照样成立：每帧还是调 `SetTheme`，只是装上去的是同一份。
 func (s *Shell) applyFrameTheme(c *ui.Context) {
+	s.applyFrameThemeMode(c, "")
+}
+
+// applyFrameThemeMode 是 `applyFrameTheme` 加一档「这扇窗的深浅固定」：
+// force 非空时用它替掉设置里的深浅档（主色、字号、取色照旧跟设置走）。
+// 只有刘海窗用（固定黑底，DESIGN §0′.T5）；那扇窗有自己的 `themeCache`，
+// 每帧键一样，不会跟主窗互相挤掉缓存。
+func (s *Shell) applyFrameThemeMode(c *ui.Context, force app.ThemeMode) {
 	systemDark := c.Theme().Dark
 	st := s.app.SettingsSnapshot()
+	if force != "" {
+		st.ThemeMode = force
+	}
 	if st.CoverAccent {
 		st.CoverHue, st.CoverSat = s.tint.sync(s.app.Snapshot().CoverURL, s.wake.invalidate)
 	}
@@ -350,12 +361,16 @@ func applyAccent(t *ui.Theme, a ui.Color) {
 	white := ui.Color{R: 255, G: 255, B: 255, A: 255}
 
 	t.Accent = a
+	// 主按钮悬停：主色 88% 混正文色（原型 index.html:283
+	// `color-mix(in srgb, var(--accent) 88%, var(--text))`），深浅一样，和 `pud.Button` 的 Primary
+	// 同一个算法——以前深色下是混白 20%，框架控件和 pud 主键悬停时两种颜色。
+	// ⚠️ 调用前 `t.Text` 必须已经是这一套的正文色（`BuildTheme` 先铺令牌再调这里）。
+	t.AccentHover = a.Mix(t.Text, 0.12)
 	if t.Dark {
-		// 深色底上主色偏暗，hover 要往亮走才对得出来。
-		t.AccentHover, t.AccentPressed = a.Mix(white, 0.2), a.Mix(black, 0.15)
+		t.AccentPressed = a.Mix(black, 0.15)
 		t.Selection, t.Focus = a.Alpha(0.4), a.Mix(white, 0.2).Alpha(0.6)
 	} else {
-		t.AccentHover, t.AccentPressed = a.Mix(black, 0.12), a.Mix(black, 0.25)
+		t.AccentPressed = a.Mix(black, 0.25)
 		t.Selection, t.Focus = a.Alpha(0.25), a.Alpha(0.55)
 	}
 

@@ -33,7 +33,7 @@ func toolbarSortSelect[T comparable](c *ui.Context, cur *T, opts []T, label func
 	})
 
 	sel.Popup(func(panel ui.Element) {
-		popupPanel(t, panel.Padding(space.Px8))
+		popupMenuPanel(t, panel.Padding(space.Px8))
 		for _, o := range opts {
 			item := sel.Item(o).Padding(space.Px8, space.Px10).Radius(tok.R8).Gap(space.Px16).AlignItems(ui.Center)
 			if item.Highlighted() {

@@ -44,7 +44,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/shadow"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -674,16 +673,14 @@ func spaceName(u app.User) string {
 
 // spaceAvatar 画头像。**没有头像画一个圆底色**，不是画一个「加载失败」。
 //
-// withShadow 说要不要带一圈 `shadow-lg`（Tailwind：`0 10px 15px -3px` 与
-// `0 4px 6px -4px`，都是 10% 黑）。**只有大号头像带**——上游给 UP 空间头像
-// 那一处写了 `shadow-lg`（`space-info.tsx:89`），列表里那些小头像没有；
-// 全都加上去的话，一排动态的作者头像会各带一圈影，看起来像浮在卡片上。
+// 不带影：原型 `.up-head .avatar` 只有 4 像素 `bg` 环、没有阴影（index.html:410）。以前照上游
+// `space-info.tsx:89` 给大号头像挂过 `shadow-lg`，已删。
 //
 // ⚠️ **占位圆是控件那一层**（`t.Surface`）：它画在**页面底**上，而那个底比
 // 页面底暗一档（浅色）/ 亮一档（深色）——占位的头像是一个「洞」。画在**卡片
 // 上**的头像要走 `spaceAvatarWith` 自己给占位色（理由见那里）。
-func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow bool) {
-	s.spaceAvatarZoom(c, face, side, withShadow, "", false)
+func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32) {
+	s.spaceAvatarZoom(c, face, side, "", false)
 }
 
 // spaceAvatarWith 是头像，**占位圆的颜色由调用方给**。
@@ -695,8 +692,8 @@ func (s *Shell) spaceAvatar(c *ui.Context, face string, side float32, withShadow
 // 给一个「和它所在的那个底差得开」的色就看得见了：关注卡给的是**页面底色**
 // （卡片底下那一层 = 卡片上开了一个洞），而页面底上的那些头像仍然是
 // `t.Surface`（那正是「页面底往文字色推一档」）。
-func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withShadow bool, placeholder ui.Color) {
-	s.spaceAvatarOn(c, face, side, withShadow, "", false, placeholder)
+func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, placeholder ui.Color) {
+	s.spaceAvatarOn(c, face, side, "", false, placeholder)
 }
 
 // spaceAvatarZoom 是 spaceAvatar 加一个「指针移上去放大」。
@@ -708,8 +705,8 @@ func (s *Shell) spaceAvatarWith(c *ui.Context, face string, side float32, withSh
 // ⚠️ **放大的是整个头像（那个圆），不是里面那张图**：上游那一处写的是
 // `hover:scale-105`，加在 `<Avatar>` 上（`dynamic-feed/user.tsx:46`），而 Avatar
 // 整个是圆的——所以圆自己长大 5%。图在框里放大是另一回事（那是封面那一处）。
-func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool) {
-	s.spaceAvatarOn(c, face, side, withShadow, zoomKey, on, c.Theme().Surface)
+func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, zoomKey string, on bool) {
+	s.spaceAvatarOn(c, face, side, zoomKey, on, c.Theme().Surface)
 }
 
 // spaceAvatarOn 是头像的画法本身：占位圆的颜色由调用方给。
@@ -726,11 +723,8 @@ func (s *Shell) spaceAvatarZoom(c *ui.Context, face string, side float32, withSh
 // ⚠️ **`placeholder` 仍然管「压根没有地址」那一档**：卡片上那些头像的占位圆
 // 必须和卡片底差得开（理由见 `spaceAvatarWith`），而那是**调用方**才知道的
 // 事（卡片底还是页面底）。所以空地址那一档由这里自己画。
-func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, withShadow bool, zoomKey string, on bool, placeholder ui.Color) {
+func (s *Shell) spaceAvatarOn(c *ui.Context, face string, side float32, zoomKey string, on bool, placeholder ui.Color) {
 	box := ui.Box(c).Size(side, side).Radius(side / 2).Clip().Label(face)
-	if withShadow {
-		box = shadow.TailwindLG(box)
-	}
 	if zoomKey != "" {
 		box = motion.HoverZoom(box, zoomKey, on)
 	}

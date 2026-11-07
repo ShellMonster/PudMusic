@@ -3,7 +3,8 @@ package ui
 import "testing"
 
 func TestTheSleepMenuSetsAndClearsTheTimer(t *testing.T) {
-	tt, a, s := rateBarTester(t, 900)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a, s := rateBarTester(t, pbWideW)
 
 	if err := tt.Click("睡眠定时"); err != nil {
 		t.Fatalf("点不开睡眠定时：%v（画面：%q）", err, tt.Texts())

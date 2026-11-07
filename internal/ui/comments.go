@@ -539,7 +539,10 @@ func (s *Shell) viewCommentsContent(c *ui.Context, t *ui.Theme) {
 		s.viewCommentRow(c, p, p.rows[rowIdx])
 	}, func(rec any) { s.onPanicAt("评论那一行", rec) })
 	// 行与行之间没有缝：每一条自己带 16 的上下内边距和底下一条线（原型 `.comment`）。
+	// 正文内边距 8 / 12（原型 index.html:614 `.drawer-body { padding: 8px 12px }`）：
+	// 每条底下那条线、楼中楼的盒子都收在这一圈里面，不铺到抽屉边。
 	lst := ui.List(c, &p.state, len(p.rows)+1).
+		PaddingY(space.Px8).PaddingX(space.Px12).
 		Grow(1).FillWidth().
 		Rows(func(r ui.ListRow) {
 			rowIdx = r.Index
@@ -811,7 +814,7 @@ func (s *Shell) viewCommentsComposer(c *ui.Context) {
 			Border(1, pal.LineStrong).PaddingX(space.Px16).AlignItems(ui.Center).Opacity(0.5).Children(func() {
 			ui.Text(c, "说点什么…").FontSize(scale.Font(c, scale.Size14)).TextColor(pal.Text3).SingleLine()
 		})
-		send := pud.Button(c, "comments:send", pud.Primary, pud.Sm, "发送", "").Disabled(true)
+		send := pud.ButtonDisabled(c, "comments:send", pud.Primary, pud.Sm, "发送", "", true)
 		s.withTip(c, send, "发表评论还没接上（B 站的写接口），先到 B 站里发")
 	})
 }
@@ -926,9 +929,10 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 }
 
 // viewCommentRule 是一条评论底下那一条线（原型 `.comment { border-bottom: 1px solid var(--line) }`），
-// 左右各让 12（线落在内边距之内）。
+// 和整条评论一样宽：左右那 12 是列表的正文内边距（`.drawer-body { padding: 8px 12px }`）给的，
+// 线自己不再让——`FillWidth` 叠 `MarginX` 会让整条线往右挪 12、探出抽屉右边。
 func (s *Shell) viewCommentRule(c *ui.Context) {
-	ui.Box(c).FillWidth().Height(1).Background(tok.Of(c.Theme()).Line).MarginX(space.Px12)
+	ui.Box(c).FillWidth().Height(1).Background(tok.Of(c.Theme()).Line)
 }
 
 // viewCommentReplyRow 画一条楼中楼（原型 `.replies`：surface-2 底、圆角 8、内边距 8 / 12，名字
@@ -941,7 +945,9 @@ func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentR
 	pal := tok.Of(c.Theme())
 	cm := row.cm
 	ui.Column(c).Key(row.elemKey).AlignSelf(ui.Stretch).Children(func() {
-		ui.Column(c).FillWidth().Padding(space.Px8, space.Px12).
+		// 拉伸（不是 `FillWidth`）：`FillWidth` 是整宽，再叠左右外边距就整块右移、探出抽屉右边；
+		// 拉伸才是「父宽减去两边外边距」（原型 `.replies` 落在 `.comment` 第二列里、右边让 12）。
+		ui.Column(c).AlignSelf(ui.Stretch).Padding(space.Px8, space.Px12).
 			Margin(space.None, space.Px12, space.Px4, space.Px12+commentAvatar+space.Px12).
 			Radius(tok.R8).Background(pal.Surface2).Gap(space.Px4).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {

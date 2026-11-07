@@ -17,7 +17,7 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// settleNotch 推钟到刘海的形状弹簧停稳：推钟 + 问 `FramePending`，不数帧。
+// settleNotch 推钟到刘海的形状动画停稳：推钟 + 问 `FramePending`，不数帧。
 func settleNotch(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
 	for range 240 {
@@ -42,14 +42,8 @@ func TestRenderNotchShots(t *testing.T) {
 			theme = "dark"
 		}
 		t.Run(theme, func(t *testing.T) {
-			n, _ := newNotchShell(t)
-			if dark {
-				if _, err := n.app.UpdateSettings(func(st *app.Settings) { st.ThemeMode = app.ThemeModeDark }); err != nil {
-					// 没挂设置盘的 App 上 `UpdateSettings` 会报错：这一档主题只影响主色，
-					// 浅色那张照出就行。
-					t.Logf("深色没设上（%v）", err)
-				}
-			}
+			// 起始设置里直接给深浅档：刘海不随主题，浅色那张必须和深色那张同一套配色。
+			n, _ := newNotchShellWith(t, app.Settings{ThemeMode: app.ThemeMode(theme)})
 			if err := enqueueTwoWithCover(n.app, t); err != nil {
 				t.Fatal(err)
 			}
@@ -71,10 +65,10 @@ func TestRenderNotchShots(t *testing.T) {
 			}
 			save(t, dir, theme+"-notch-collapsed-playing.png", tt)
 
-			// 先在暂停态把展开弹簧收稳再开播：直接开播就拍的话，形状还在
-			// 520ms 弹簧的中间（bounce 0.28 还带过冲），卡片透明度/位移落在
+			// 先在暂停态把展开动画收稳再开播：直接开播就拍的话，形状还在
+			// 240ms ease-out 的中间，卡片透明度/位移落在
 			// 半路——每张图的高度都不一样，对照参考图就是在量一个随机相位。
-			n.app.Toggle() // 先停：eq 柱和频谱都不要帧了，弹簧才收得稳。
+			n.app.Toggle() // 先停：eq 柱和频谱都不要帧了，形状动画才收得稳。
 			n.notchSt.open = true
 			tt.Frame()
 			settleNotch(t, tt)
@@ -92,13 +86,15 @@ func TestRenderNotchShots(t *testing.T) {
 		})
 	}
 
-	// 没歌：展开是那张「未在播放 + 打开」的小卡。
-	t.Run("idle", func(t *testing.T) {
-		n, _ := newNotchShell(t)
-		n.notchSt.open = true
-		tt := mygoui.NewTester(n.View, notchWinW, notchWinH)
-		n.repaint = tt.Frame
-		settleNotch(t, tt)
-		save(t, dir, "light-notch-idle.png", tt)
-	})
+	// 没歌：展开是那张「未在播放 + 打开」的小卡（深浅各一张：刘海不随主题，两张应当一样）。
+	for _, mode := range []app.ThemeMode{app.ThemeModeLight, app.ThemeModeDark} {
+		t.Run("idle-"+string(mode), func(t *testing.T) {
+			n, _ := newNotchShellWith(t, app.Settings{ThemeMode: mode})
+			n.notchSt.open = true
+			tt := mygoui.NewTester(n.View, notchWinW, notchWinH)
+			n.repaint = tt.Frame
+			settleNotch(t, tt)
+			save(t, dir, string(mode)+"-notch-idle.png", tt)
+		})
+	}
 }

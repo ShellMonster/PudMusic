@@ -88,7 +88,7 @@ func shotFollowCard(t *testing.T, dir, name string, dark bool) {
 	save(t, dir, "57-"+name+"-关注卡-操作条.png", tt)
 }
 
-// shotSpaceAvatar 存 UP 空间的头图区：头像外面那一圈 `shadow-lg`。
+// shotSpaceAvatar 存 UP 空间的头图区（头像只有 4 像素 bg 环、没有影，原型 `.up-head .avatar`）。
 func shotSpaceAvatar(t *testing.T, dir, name string, dark bool) {
 	t.Helper()
 	b := newUIExplore(t)

@@ -23,7 +23,14 @@ import (
 // `mygo.NewWindow` 会 panic——和 `newMiniShell` 同一个理由）。
 func newNotchShell(t *testing.T) (*Shell, *Shell) {
 	t.Helper()
-	sh := newTestShell(t, withSettings(app.Settings{NotchPlayer: boolPtr(false)}))
+	return newNotchShellWith(t, app.Settings{})
+}
+
+// newNotchShellWith 是 `newNotchShell` 换一份起始设置（刘海开关恒为关）。
+func newNotchShellWith(t *testing.T, st app.Settings) (*Shell, *Shell) {
+	t.Helper()
+	st.NotchPlayer = boolPtr(false)
+	sh := newTestShell(t, withSettings(st))
 	main := sh.s
 	n := main.newNotchShell()
 	t.Cleanup(n.closePerWindow)

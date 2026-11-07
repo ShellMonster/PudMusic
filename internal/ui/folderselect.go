@@ -247,7 +247,7 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 			ui.Text(c, "已选 "+strconv.Itoa(len(f.picked))+" 个收藏夹").FontSize(scale.Font(c, scale.Size12)).
 				TextColor(tok.Of(t).Text3).SingleLine().Ellipsis("…")
 		}, func() {
-			if pud.Button(c, "folderpick:cancel", pud.Ghost, pud.Std, "取消", "").Disabled(f.submitting).Clicked() {
+			if pud.ButtonDisabled(c, "folderpick:cancel", pud.Ghost, pud.Std, "取消", "", f.submitting).Clicked() {
 				s.closeFolderSelect()
 			}
 			// 提交中是「转起来 + 灰下去」（票 #178）。
@@ -310,7 +310,8 @@ func (s *Shell) viewFolderPickRow(c *ui.Context, f *folderSelect, i int) {
 		ui.Box(c).Size(32, 32).Radius(tok.R4).Clip().Background(pl.Surface2).Shrink(0).
 			AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			if item.Cover != "" {
-				s.collCoverDraw(item.Cover)(c, 32, 32)
+				// 圆角 r-4 落在最内层的图上（GPU 只有最内层裁剪切圆角，见 `pud.Cover`）。
+				s.collCoverDraw(item.Cover)(c, 32, 32, tok.R4)
 			} else {
 				ui.Icon(c, pud.Icon("folder")).FontSize(16).TextColor(pl.Text3)
 			}

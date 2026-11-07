@@ -224,11 +224,6 @@ type collectionPage struct {
 
 	// confirm 是「要不要用户点一下确认」。
 	confirm confirmRequest
-
-	// bandBG / bandH 是头部通栏色块的颜色和高度（`viewCollectionHeader` 每帧记，
-	// 页根的 Draw 用；高度是上一帧量到的）。
-	bandBG ui.Color
-	bandH  float32
 }
 
 // newCollectionPage 建这一页的状态。
@@ -454,9 +449,15 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 	// `pages/video-collection/favorites/index.tsx:436`）。
 	//
 	// 收到根上之后，这一页的每一样东西都从同一条左缘开始（票 #138）。
-	ui.Column(c).Key("page:collection:"+ref.Key()).Grow(1).FillWidth().MaxWidth(space.PageMaxW).AlignSelf(ui.Center).
-		Padding(space.None, space.PageHorizontalForWindow(windowW(c))).
-		Draw(func(pp *ui.Painter, r ui.Rect) { s.paintCollectionBand(pp, r, p) }).Children(func() {
+	//
+	// ⚠️ **页边距不再是根的内边距**：列表按自己的边界裁剪，头部（列表第 0 行）里封面的
+	// `--shadow-cover` 往左伸出 40，根上留内边距的话列表的左缘就是页边距那条线，影子被切成
+	// 一道硬边（原型 `.col-head .cover` 的影不被裁）。所以页边距交给列表自己（`SetInsetX`，
+	// 页内头部用负外边距抵回去铺满，同 UP 空间），列表外面那几块（空状态时的头部 / 操作条 /
+	// 空状态、批量条）各自包一层 `padX`。
+	padX := space.PageHorizontalForWindow(windowW(c))
+	ui.Column(c).Key("page:collection:" + ref.Key()).Grow(1).FillWidth().MaxWidth(space.PageMaxW).
+		AlignSelf(ui.Center).Children(func() {
 		// 🔴 **头图区、操作条、表头都在列表的滚动区里**（票 #625）：它们是
 		// **列表的第 0 行**（页内头部，`list.Lead`），跟着内容一起滚走。
 		//
@@ -489,31 +490,23 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 🔴 **空的时候把列表里的那一块卸掉**：头图区在外面画了，而
 			// 列表里的那块留着的话两边都画一份。
 			s.clearCollectionLead(p)
-			s.viewCollectionHeader(c, p)
-			s.viewCollectionOps(c, p)
+			// 空的时候头图区 + 操作条 + 空状态放进一个滚动区，整页一起滚（原型整页就是一个滚动
+			// 容器）。不滚的话窗口一矮，空状态那枚键就落到播放条底下点不到（1200×800 下
+			// 「去发现音乐」在 y≈780）。头部铺满滚动区（通栏色底 + 封面影子不被页边距切），
+			// 操作条和空状态各自包回页边距。
+			ui.Scroll(c).Key("collection:empty-scroll").Grow(1).FillWidth().Children(func() {
+				s.viewCollectionHeader(c, p)
+				ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
+					s.viewCollectionOps(c, p)
+					s.viewCollectionEmpty(c, p, info, empty)
+				})
+			})
 		}
 
-		// 容器拉回来了、里面一条都没有：画「没有收藏夹」那一句
-		//（`empty.go` 的 noFavorites，上游出处也在那儿）。
-		//
-		// ⚠️ 判据是 **MediaCount 为 0** 而不是「列表此刻一行都没有」：
-		// 后者在翻页加载的那一瞬间也为真，那样会让整页内容闪一下空状态
-		// ——用户点进收藏夹、列表转了两帧、中间整个内容区变成一句
-		// 「暂无内容」。
+		// 两种「拉回来了但是空的」已经画在上面的滚动区里；其余档由列表自己画。
 		switch empty {
-		case collectionEmptyNoFavorites:
-			s.viewEmpty(c, "collection:empty", noFavorites)
-		case collectionEmptyNoResults:
-			// 搜了，**一条都没有**：说清楚，而不是留一块空白。
-			//
-			// ⚠️ 判据是「**词已经发出去了**」而不是「列表此刻一行都没有」：
-			// 换词的这一瞬间列表是空的（还在拉），那时候画「换个词再搜一次」
-			// 是骗人——用户刚敲完词。
-			//
-			// 用的就是搜索页那一句（`searchpage.go` 的 `viewSearchResultsBody`）：
-			// 「暂无内容 / 换个词再搜一次，或者把关键词缩短一点」——同一件事，
-			// 同一句话。
-			s.viewEmpty(c, "collection:no-results", noSearchResults)
+		case collectionEmptyNoFavorites, collectionEmptyNoResults:
+			// 已经画在上面那个滚动区里（`viewCollectionEmpty`）。
 		default:
 			// ⚠️ **这一支是「列表自己画」**（`collectionEmptyNone` 和
 			// `collectionEmptyFailed` 两档都落这儿）。
@@ -550,10 +543,14 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			//
 			// 列表自己占了 Grow(1)（见 `list.List.View`），所以多选态下面那条
 			// 批量操作条自然被它顶到最下面。
+			// 页边距给列表自己（见页根那段），页内头部照样铺满。
+			p.list.SetInsetX(padX)
 			p.list.View(c)
 			s.noteScrollbar(p.list.Hot())
 			if p.multi {
-				s.viewCollectionBatchBar(c, p)
+				ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
+					s.viewCollectionBatchBar(c, p)
+				})
 			}
 		}
 	})
@@ -693,12 +690,15 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 			// 三块之间没有统一的缝：原型 `.col-head` 紧接 `.col-actions`（自带上 24 下 8），
 			// 表头所在的 `.tlist` 另有 `margin-top: 8px`。
 			ui.Column(c).FillWidth().Children(func() {
+				// 头部铺满整个列表宽（页内头部抵掉了列表的页边距），操作条和表头回到页边距里。
 				s.viewCollectionHeader(c, p)
-				s.viewCollectionOps(c, p)
-				// ⚠️ **表头在最后**：它是「下面那些歌叫什么列」，所以它在
-				// 头图区和操作条的**下面**——和它原先在列表外面的位置一样。
-				ui.Column(c).FillWidth().Margin(space.Px8, space.None, space.None, space.None).Children(func() {
-					p.list.Header(c, "collection:header")
+				ui.Column(c).FillWidth().PaddingX(space.PageHorizontalForWindow(windowW(c))).Children(func() {
+					s.viewCollectionOps(c, p)
+					// ⚠️ **表头在最后**：它是「下面那些歌叫什么列」，所以它在
+					// 头图区和操作条的**下面**——和它原先在列表外面的位置一样。
+					ui.Column(c).FillWidth().Margin(space.Px8, space.None, space.None, space.None).Children(func() {
+						p.list.Header(c, "collection:header")
+					})
 				})
 			})
 		},
@@ -1144,6 +1144,40 @@ func (s *Shell) applyCollectionKeyword(p *collectionPage, kw string) bool {
 	}
 	p.keyword = kw
 	return true
+}
+
+// viewCollectionEmpty 画这一页「拉回来了、但是空的」那两种空状态。
+//
+// ⚠️ 判据是 **MediaCount 为 0** 而不是「列表此刻一行都没有」：后者在翻页加载的那一瞬间也为真，
+// 那样会让整页内容闪一下空状态。搜了没结果的判据是「**词已经发出去了**」（换词的这一瞬间列表
+// 是空的，那时候说「没有匹配」是骗人）——两者都在 `collectionEmpty` 里判。
+func (s *Shell) viewCollectionEmpty(c *ui.Context, p *collectionPage, info app.CollectionInfo, empty collectionEmptyKind) {
+	switch empty {
+	case collectionEmptyNoFavorites:
+		// 原型 app.js:638：普通收藏夹「还没有收藏在这个收藏夹里」，默认收藏夹（原型的「我喜欢」，
+		// 头部画红心的那一个）「这里还是空的」；都带「去发现音乐」回首页。
+		e := noFavorites
+		if info.Default {
+			e = noLikedYet
+		}
+		e.Action = &emptyAction{Label: "去发现音乐", Do: func() { s.navigate(homePath) }}
+		s.viewEmpty(c, "collection:empty", e)
+	case collectionEmptyNoResults:
+		// 原型 app.js:639：「列表里没有匹配的歌曲」+「没有和「词」匹配的歌曲。」+「清空搜索」。
+		e := noSearchResults
+		e.Hint = "没有和「" + p.keyword + "」匹配的歌曲。"
+		e.Action = &emptyAction{Label: "清空搜索", Do: func() { s.clearCollectionSearch(p) }}
+		s.viewEmpty(c, "collection:no-results", e)
+	}
+}
+
+// clearCollectionSearch 是空结果里「清空搜索」那一键（原型 app.js:639 `clear-col-filter`）：
+// 框里的字和生效的词一起清掉，立刻按空词重拉，不等防抖。
+func (s *Shell) clearCollectionSearch(p *collectionPage) {
+	p.draft, p.seenDraft = "", ""
+	if s.applyCollectionKeyword(p, "") {
+		s.reloadCollection(p)
+	}
 }
 
 // collectionSearching 报「收藏夹页那个 500ms 的钟要不要醒着」。

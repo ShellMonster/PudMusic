@@ -470,10 +470,7 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 	p := tok.Of(t)
 	pud.DrawerHead(c, "播放列表", func() {
-		clear := pud.Button(c, "queue:clear", pud.Quiet, pud.Sm, "清空播放列表", "")
-		if len(rows) == 0 {
-			clear = clear.Disabled(true)
-		}
+		clear := pud.ButtonDisabled(c, "queue:clear", pud.Quiet, pud.Sm, "清空播放列表", "", len(rows) == 0)
 		if clear.Clicked() {
 			s.queueClearOpen = true
 		}
@@ -617,6 +614,9 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	}).
 		// 滚动位置写进自己的句柄，「定位当前播放」改的就是它（ScrollTo 带动画）。
 		TrackScroll(&s.queueScroll).
+		// 抽屉正文内边距 8 / 12（原型 index.html:614 `.drawer-body { padding: 8px 12px }`）：
+		// 行的悬停底、拖动落点线收在这一圈里面，不铺到抽屉边。
+		PaddingY(space.Px8).PaddingX(space.Px12).
 		Grow(1).FillWidth()
 	s.trackScrollbar(e)
 
@@ -769,10 +769,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			}
 			ui.Row(c).Shrink(0).Children(func() {
 				up := pud.IconBtn(c, "queue:up", "up", s.queueRowOps.At(row.at, row.item.Title, queueUpLabel),
-					pud.IconOpts{Row: true})
-				if at == 0 {
-					up = up.Disabled(true)
-				}
+					pud.IconOpts{Row: true, Disabled: at == 0})
 				if up.Clicked() && s.app.Queue().MoveAtBefore(row.at, row.at-1) {
 					s.wake.invalidate()
 				}

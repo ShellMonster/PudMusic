@@ -110,6 +110,10 @@ const (
 	// `Find` 找的是「显示着这个字或者标着这个名字」的元素。
 	searchLabel = "搜索"
 
+	// searchPlaceholder 是没有热词时框里的占位字（原型 app.js:465 `placeholder="搜索歌曲、视频、UP 主"`）。
+	// 无障碍名字仍是 `searchLabel`。
+	searchPlaceholder = "搜索歌曲、视频、UP 主"
+
 	// searchActionLabel 是那枚放大镜的无障碍名字。
 	//
 	// 🔴 **它不能也叫「搜索」**（票 BMG-253）：输入框自己就带那个名字，而
@@ -145,7 +149,7 @@ const (
 	iconCloseHit   = 26
 )
 
-// searchFieldBg 是搜索框这一刻的底色：静止 20%，指针压在上面或者有焦点时 30%。
+// searchFieldBg 是搜索框这一刻的底色：平时 `surface-2`，聚焦时 `surface`（原型 index.html:231-232）。
 //
 // 判据是**底色**，不是描边：上游那一条 `classNames.inputWrapper` 里只有
 // `hover:bg-…/30` 和 `group-data-[focus=true]:bg-…/30`，没有 border 那一项。
@@ -159,7 +163,7 @@ func searchFieldBg(t *ui.Theme, hot bool) ui.Color {
 }
 
 // searchFieldBorder 是搜索框的描边（原型 `.search-box`：平时透明，聚焦时 `line-strong`）。
-func searchFieldBorder(t *ui.Theme, focused, hovered bool) ui.Color {
+func searchFieldBorder(t *ui.Theme, focused bool) ui.Color {
 	if focused {
 		return tok.Of(t).LineStrong
 	}
@@ -206,7 +210,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		//
 		// ⚠️ 描边是**画在这一格的边沿上**（框架的 `Border` 是「盒子里那条线」，
 		// 不是盒外那一圈），所以这一格的内容往里让 1 像素——胶囊的形状不变。
-		Border(1, searchFieldBorder(t, false, false)).
+		Border(1, searchFieldBorder(t, false)).
 		Padding(space.None, searchPadX).Gap(searchGap).AlignItems(ui.Center)
 	row.Children(func() {
 		// 放大镜是**真按钮**：点它 = 拿框里的词去搜（票 BMG-253 / 报告第 4 条）。
@@ -229,7 +233,9 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 		// 挂上去直接 panic（`ui/element.go:658`）。外面这一格有 Key 就够了。
 		field := ui.TextInputBase(c, &s.searchKeyword).
-			Label(searchLabel).Placeholder(searchLabel).
+			Label(searchLabel).Placeholder(searchPlaceholder).
+			// 原型 index.html:236 `input::placeholder { color: var(--text-3) }`；框架默认是 TextMuted（text-2）。
+			PlaceholderColor(tok.Of(t).Text3).
 			Grow(1).Shrink(0)
 
 		// Esc 收浮层。浮层开着就吃掉这一次 Esc（字留着），浮层没开就还回
@@ -390,9 +396,9 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		// 一帧的焦点定下来之后——聚焦不换词，认的就是刚写过的 `s.searchFocused`。
 		s.syncHotwords(s.clock.Now())
 		// ⚠️ **占位词在这里换**（builder 事后调，和上面 `row.Background` 同一个
-		// 办法）：字段建的时候占位词还是「搜索」，这一帧该显示哪个词要等
-		// `syncHotwords` 推完才知道。等于「搜索」就不动了。
-		if ph := s.hotwordPlaceholder(); ph != searchLabel {
+		// 办法）：字段建的时候占位词是兜底那一句，这一帧该显示哪个词要等
+		// `syncHotwords` 推完才知道。等于兜底那一句就不动了。
+		if ph := s.hotwordPlaceholder(); ph != searchPlaceholder {
 			field.Placeholder(ph)
 		}
 
@@ -404,17 +410,13 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		s.viewSuggest(c, row)
 	})
 
-	// 指针压在框上、或者框拿着焦点：底色抬到 30%（上游那两条 `…/30`）。
-	// `s.searchFocused` 在 Children 里刚被这一帧的 `field.Focused()` 写过，
-	// 所以点下去的那一帧就是深的那一档，不用等下一帧。
-	//
-	// 🔴 **描边跟着一起换**（理由见 `searchFieldBorder`）：聚焦那一档是主色，
-	// 指针压上去那一档是 `t.Border` 压深——和框架的 `inputBorder` 同一个口径。
-	hovered := row.Hovered()
-	if s.searchFocused || hovered {
+	// 只有框拿着焦点才换 `surface` 底 + `line-strong` 描边（原型 index.html:232
+	// `.search-box:focus-within`）；悬停不换。`s.searchFocused` 在 Children 里刚被这一帧的
+	// `field.Focused()` 写过，所以点下去的那一帧就是聚焦那一档，不用等下一帧。
+	if s.searchFocused {
 		row.Background(searchFieldBg(t, true))
 	}
-	row.BorderColor(searchFieldBorder(t, s.searchFocused, hovered))
+	row.BorderColor(searchFieldBorder(t, s.searchFocused))
 }
 
 // viewSuggest 是搜索建议浮层。**两档都在这个面板里**：搜索历史 + 联想词。
@@ -455,7 +457,7 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 	// 摆一句自己的话（`suggestFailedNote`），而不是空着——空着的话「B 站没给
 	// 联想」和「这一趟没拉到」在画面上长得一模一样。
 	failed := state.Failed && len(terms) == 0
-	// 框里还没敲字：多一档「大家在听」（热榜前几首），免得面板空着。敲了字就是联想的天下。
+	// 框里还没敲字：多一档「热门搜索」（热榜前几首），免得面板空着。敲了字就是联想的天下。
 	var hot []string
 	if strings.TrimSpace(s.searchKeyword) == "" {
 		rec := s.app.RecommendOf()
@@ -556,10 +558,9 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 				TrackScroll(&s.terms.scroll)
 			suggestScroll.Children(func() {
 				// 历史在上、联想在下（Biu 的 topContent 在结果列表上面，见
-				// `search/index.tsx:121-146`）。中间那一道空隙是「这是两档」最直接的
-				// 一句提示：没有它时两栏连着排，看起来像一栏里混着两批词。
-				// idx 是这一条在 `nav.items` 里的下标——历史在前、联想在后、「大家
-				// 在听」最后，`navPicked` 拿它比 `nav.sel`。
+				// `search/index.tsx:121-146`）。
+				// idx 是这一条在 `nav.items` 里的下标——历史在前、联想在后、「热门
+				// 搜索」最后，`navPicked` 拿它比 `nav.sel`。
 				idx := 0
 				s.viewSuggestSubmitRow(c)
 				if showHistory {
@@ -571,16 +572,12 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 						}
 					})
 				}
+				// 段与段之间不另插空盒：历史那一排自带下 12，下一段标题自带上 4
+				// （原型 app.js:494 / index.html:239 `.suggest h4 { margin: 4px 8px 8px }`）。
 				if len(terms) > 0 || failed {
-					if showHistory {
-						ui.Box(c).FillWidth().Height(suggestTermsGap)
-					}
 					s.viewSuggestTerms(c, terms, failed, &idx)
 				}
 				if len(hot) > 0 && len(terms) == 0 && !failed {
-					if showHistory {
-						ui.Box(c).FillWidth().Height(suggestTermsGap)
-					}
 					s.viewSuggestHot(c, hot, &idx)
 				}
 			})
@@ -802,19 +799,26 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem, idx int) {
 	}
 
 	// 原型：`.chip`（高 30、胶囊、surface-2）里一个文字键 + 一个 20×20 的删除键（右内边距 4）。
+	// 文字键和删除键之间 6（原型 `.chip { gap: 6px }`，index.html:242）。
 	chip := ui.Row(c).Key("history:"+item.Value).Height(tok.ChipH).Radius(tok.ChipH/2).
-		Background(chipBg).Padding(space.None, space.Px4, space.None, space.None).
+		Padding(space.None, space.Px4, space.None, space.None).Gap(space.Px6).
 		AlignItems(ui.Center)
+	// 悬停整枚 chip：`press` 底 + 正文色（原型 index.html:243 `.chip:hover`），× 跟着字色走。
+	hovered := chip.Hovered()
+	if hovered && !lit {
+		chipBg = p.Press
+	}
+	chip = chip.Background(chipBg)
+	fg := p.Text2
+	if hovered || lit {
+		fg = p.Text
+	}
 	if s.navPicked(idx) && s.nav.reveal {
 		chip.ScrollIntoView()
 	}
 	chip.Children(func() {
-		labelBtn := ui.ButtonBase(c).Padding(space.None, space.Px4, space.None, space.Px12).
+		labelBtn := ui.ButtonBase(c).Padding(space.None, space.None, space.None, space.Px12).
 			Height(tok.ChipH).AlignItems(ui.Center)
-		fg := p.Text2
-		if labelBtn.Hovered() || lit {
-			fg = p.Text
-		}
 		labelBtn.Children(func() {
 			ui.Text(c, label).FontSize(scale.Font(c, scale.Size13)).TextColor(fg).SingleLine()
 		})
@@ -825,7 +829,7 @@ func (s *Shell) viewHistoryChip(c *ui.Context, item searchItem, idx int) {
 		del := ui.ButtonBase(c).Label("删除「"+label+"」").Size(20, 20).Radius(tok.Pill).
 			AlignItems(ui.Center).Justify(ui.Center)
 		del.Children(func() {
-			ui.Icon(c, pud.Icon("x")).FontSize(tok.IconXs).TextColor(p.Text3)
+			ui.Icon(c, pud.Icon("x")).FontSize(tok.IconXs).TextColor(fg)
 		})
 		if del.Clicked() {
 			s.hist.remove(item.Value)

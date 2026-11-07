@@ -167,17 +167,32 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 	loginScroll.Children(func() {
 		// 整页垂直居中（`.login { min-height: 100%; display: grid; place-items: center }`）：滚动容器不给子元素
 		// 定高，所以最小高度自己算——窗口高减顶栏、减播放条。
-		_, winH := c.Size()
+		winW, winH := c.Size()
+		// 原型 index.html:943-944：窗口 ≤ 1024 时 `.login-card` 变单列、居中、文字居中、缝 32；
+		// 宽窗口两栏、缝 48。
+		narrow := loginNarrow(winW)
 		ui.Column(c).Key("page:"+loginPath).FillWidth().MinHeight(winH-navMinHeight-playbarHeight).Padding(space.Px48, space.Px24).
 			Justify(ui.Center).AlignItems(ui.Center).Transition(motion.PageIn).Children(func() {
-			ui.Row(c).Key("login-card").Gap(space.Px48).AlignItems(ui.Center).Children(func() {
+			var card ui.Element
+			if narrow {
+				card = ui.Column(c).Key("login-card").Gap(space.Px32).AlignItems(ui.Center)
+			} else {
+				card = ui.Row(c).Key("login-card").Gap(space.Px48).AlignItems(ui.Center)
+			}
+			card.Children(func() {
 				s.viewLoginQR(c, st)
-				s.viewLoginText(c, st)
+				s.viewLoginText(c, st, narrow)
 			})
 		})
 	})
 	s.trackScrollbar(loginScroll)
 }
+
+// loginNarrowMax 是登录页改单列的窗口宽上限（原型 `@media (max-width: 1024px)`）。
+const loginNarrowMax = 1024
+
+// loginNarrow 报登录页这一帧是不是单列（窗口宽 ≤ 1024）。
+func loginNarrow(winW float32) bool { return winW > 0 && winW <= loginNarrowMax }
 
 const (
 	// loginQRSide / loginQRPad 是 `.qr`：240×240、内边距 16（二维码本身画在 208 的框里）。
@@ -226,35 +241,57 @@ func (s *Shell) viewLoginQR(c *ui.Context, st app.LoginState) {
 	})
 }
 
-// viewLoginText 是右边那一列：标题、说明、三个步骤、按钮、状态。
-func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState) {
+// viewLoginText 是右边那一列：标题、说明、三个步骤、按钮、状态。narrow（窗口 ≤ 1024）时整列
+// 居中、文字居中（原型 index.html:943-944 `.login-card { justify-items: center; text-align: center }`、
+// `.steps li { justify-content: center }`）。
+func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState, narrow bool) {
 	p := tok.Of(c.Theme())
 	step := loginStep(st)
-	ui.Column(c).Key("login-text").Width(loginTextW).Shrink(1).Children(func() {
+	col := ui.Column(c).Key("login-text").Width(loginTextW).Shrink(1)
+	align := ui.Start
+	if narrow {
+		col, align = col.AlignItems(ui.Center), ui.Center
+	}
+	col.Children(func() {
 		typo.Eyebrow(c, "Sign in")
-		typo.Display(ui.Text(c, "扫码登录"), scale.Font(c, scale.Size40)).LineHeight(leading.Body).Margin(space.Px8, space.None, space.None, space.None)
+		// 原型 `.h-page`（index.html:268）+ app.js:792 `font-size:40px`：行高 1.15（`leading.PageTitle`）、字距 .01em、上 8。
+		// 框架压不下宋体的自然行高，用 `typo.DisplayTrim` 的负外边距补回去（同 `pud.PageHead`）。
+		size := scale.Font(c, scale.Size40)
+		trim := typo.DisplayTrim(size, leading.PageTitle)
+		typo.Display(ui.Text(c, "扫码登录"), size).LineHeight(leading.PageTitle).LetterSpacing(size*0.01).
+			Margin(space.Px8-trim, space.None, -trim, space.None)
 		ui.Text(c, "继续你的音乐旅程：登录后同步收藏夹、关注和历史记录，并解锁 Hi-Res 无损音质。").
-			FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().
+			FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().FillWidth().TextAlign(align).
 			Margin(space.Px8, space.None, space.None, space.None)
 
 		// `.steps`：上下各 24、步骤之间 12。
-		ui.Column(c).Key("login-steps").Gap(space.Px12).Margin(space.Px24, space.None, space.Px24, space.None).Children(func() {
-			for i, label := range []string{"打开手机上的 B 站 App", "扫描左侧二维码", "在手机上确认登录"} {
-				s.loginStepRow(c, p, i+1, label, i == 0 || step >= i)
+		// 第二步写二维码在哪：单列时二维码在文字上面，写「上方」；两栏时在左边，写「左侧」。
+		scan := "扫描左侧二维码"
+		if narrow {
+			scan = "扫描上方二维码"
+		}
+		ui.Column(c).Key("login-steps").FillWidth().Gap(space.Px12).Margin(space.Px24, space.None, space.Px24, space.None).Children(func() {
+			for i, label := range []string{"打开手机上的 B 站 App", scan, "在手机上确认登录"} {
+				s.loginStepRow(c, p, i+1, label, i == 0 || step >= i, narrow)
 			}
 		})
 
 		ui.Row(c).Key("qr-actions").Gap(space.Px12).AlignItems(ui.Center).Children(func() { s.qrActions(c, st) })
 		ui.Text(c, loginStatusLine(st)).FontSize(scale.Font(c, scale.Size12)).LineHeight(leading.Body).TextColor(p.Text3).Wrap().
-			Margin(space.Px24, space.None, space.None, space.None)
+			FillWidth().TextAlign(align).Margin(space.Px24, space.None, space.None, space.None)
 		s.viewAccountFooter(c, st)
 	})
 }
 
 // loginStepRow 是一个步骤（`.steps li`）：22 的圆圈里写序号（等宽 12），缝 12；做完的圆圈填主色、
-// 字变正文色。
-func (s *Shell) loginStepRow(c *ui.Context, p tok.Palette, n int, label string, done bool) {
-	ui.Row(c).Key("login-step:" + label).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
+// 字变正文色。圆圈里的序号和步骤文字按基线对齐（原型 index.html:541 `align-items: baseline`）；
+// narrow 时整行居中。
+func (s *Shell) loginStepRow(c *ui.Context, p tok.Palette, n int, label string, done, narrow bool) {
+	row := ui.Row(c).Key("login-step:" + label).FillWidth().Gap(space.Px12).AlignItems(ui.Baseline)
+	if narrow {
+		row = row.Justify(ui.Center)
+	}
+	row.Children(func() {
 		circle := ui.Row(c).Width(22).Height(22).Radius(tok.Pill).Shrink(0).Justify(ui.Center).AlignItems(ui.Center)
 		fg := p.Text2
 		if done {
@@ -435,6 +472,10 @@ func (s *Shell) qrActions(c *ui.Context, st app.LoginState) {
 			s.clearToasts()
 			s.app.RefreshLoginCode()
 		}
+	}
+	// 原型 app.js:795：只有有地方可回（返回目标 / 历史）时才摆「暂不登录」，否则点了也没处去。
+	if !s.router.CanGoBack() {
+		return
 	}
 	if pud.Button(c, "login-skip", pud.Quiet, pud.Std, "暂不登录", "").Clicked() {
 		s.app.CancelLogin()

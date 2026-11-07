@@ -74,8 +74,6 @@ const (
 	fullBottomH = fullBottomPadTop + fullSpectrumH + fullBottomGap + fullChapH + fullBottomGap +
 		fullSeekH + fullBottomGap + fullPlayHit + fullBottomPadBottom
 
-	// fullColGap 是两栏之间的缝（`.full-main { gap: 64px }`）。
-	fullColGap = 64
 	// fullCoverMax 是封面最大边（`.full-left { max-width: 440px }`）。
 	fullCoverMax = 440
 	// fullLeftGap 是封面和歌名那一块之间的缝（`.full-left { gap: 24px }`）。
@@ -100,6 +98,15 @@ func fullPadX(winW float32) float32 {
 		return 40
 	}
 	return 80
+}
+
+// fullColGap 是两栏之间的缝：窗口 > 1180 是 64（原型 index.html:683 `.full-main { gap: 64px }`），
+// ≤ 1180 是 40（index.html:916 `@media (max-width: 1180px) { .full-main { gap: 40px } }`）。
+func fullColGap(winW float32) float32 {
+	if winW <= 1180 {
+		return 40
+	}
+	return 64
 }
 
 // fullNarrowBelow 是窗口宽 ≤ 它时右栏（歌词）整个不画，封面居中（原型 `max-width: 1024px`）。
@@ -132,14 +139,15 @@ func (s *Shell) fullGeometry(c *ui.Context, showCover, video bool) fullGeo {
 	g := fullGeo{winW: winW, winH: winH, padX: fullPadX(winW), narrow: winW <= fullNarrowBelow,
 		mainTop: fullTopH, mainBottom: winH - fullBottomH}
 	avail := winW - 2*g.padX
-	colW := (avail - fullColGap) / 2
+	gap := fullColGap(winW)
+	colW := (avail - gap) / 2
 	if g.narrow {
 		g.leftW = min(360, avail)
 		g.leftX = (winW - g.leftW) / 2
 	} else {
 		g.leftW = min(fullCoverMax, colW)
 		g.leftX = g.padX + colW - g.leftW
-		g.rightX, g.rightW = g.padX+colW+fullColGap, colW
+		g.rightX, g.rightW = g.padX+colW+gap, colW
 	}
 
 	// 左栏：封面边长不超过窗口高给的余量（原型在 800 高时刚好 440）。
@@ -201,7 +209,9 @@ var fullEnter = ui.ElementTransition{
 // 频谱和弹幕在动画完成前继续拿到有效的元素。
 var fullExitPose = ui.Pose{Y: 24, Fade: 1}
 
-var fullExitAnim = ui.Animation{Duration: motion.Slow, Ease: motion.EaseIn}
+// fullExitAnim 是退场曲线：240ms ease-in（原型 index.html:677
+// `.full.closing { animation: full-out 240ms var(--ease-in) forwards }`）。
+var fullExitAnim = ui.Animation{Duration: motion.Med, Ease: motion.EaseIn}
 
 // fullBgBase 是背景的底：`color-mix(in srgb, tint 30%, #0b0b0c)`。取不到封面色时按原型的
 // 兜底 `#222`。关掉虚化背景并挑了颜色时就是那个颜色（原型 `!f.blur && f.bg`）。

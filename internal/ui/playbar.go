@@ -994,10 +994,10 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 			}
 		}
 		sl := playbarProgressSliderLive(c, &s.scrub, 0, 1, live).Grow(1).Label("播放进度").Disabled(!known)
-		// 章节点画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
-		// 那半个宽 8，点比 4 像素的轨道粗 3——票 #585）。
-		// 原型 `.chap`：宽 4、高 10、`side` 色（在轨道上切出一道口）。
-		sl = withChapterDots(sl, chs, st.Duration, 8, 7, tok.Of(c.Theme()).Side)
+		// 章节标记画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
+		// 那半个宽 8）。原型 index.html:854 `.chap`：宽 4、高 10、圆角 1、`side` 色的竖条
+		// （在 4 高的轨道上切出一道 4 宽的口）。
+		sl = withChapterBars(sl, chs, st.Duration, 8, 4, 10, 1, tok.Of(c.Theme()).Side)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
 		//
 		// Dragging() 报的是「这个控件正在拖一个值 / 正在被拖动」（Drag 与

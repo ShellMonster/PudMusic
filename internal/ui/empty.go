@@ -383,22 +383,24 @@ const biliNotMounted = "这一页暂时加载不出来。"
 // viewPageEmptyWithReason 画「这一页平常空着的样子 + 这一次特别的原因」。
 //
 // 三页共用：稍后再看、历史记录、我的关注——它们在「B 站客户端没挂上」时画的都是
-// 这四样（插画 / 页面名 / 那一页在 `routes` 里的空文案 / 这一句原因）。
+// `pud.Empty`：插画 / 那一页在 `routes` 里的空文案（标题）/ 这一句原因（说明）。
 //
-// 走共享出口 `emptyArt` / `emptyCopy` 是这一票明确要的（七页共用一套绘制入口）。
-// 而「插画 + 文案 + 原因」这个**顺序**也是：插画说的是「这一页是什么」，最后那句
-// 说的是「这一次怎么了」——把原因摆在中间会让人以为它在解释插画。
+// 「插画 + 文案 + 原因」这个**顺序**是有意的：插画和标题说的是「这一页平常空着的样子」，
+// 最后那句说的是「这一次怎么了」。
 func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e emptyState) {
-	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, space.Px28).Children(func() {
-		emptyArt(c, e.Icon)
-		// ⚠️ **字重不写**（400）：这一句是「这一页叫什么」，页标题那一档是
-		// 400（DESIGN.md §二），层次靠字号拉开，不靠重量。
-		ui.Text(c, title).FontSize(scale.Font(c, scale.EmptyPageTitle))
-		if e.Title != "" {
-			emptyCopy(c, e)
-			ui.Text(c, biliNotMounted).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
-		}
+	// 原型 `.empty`（index.html:547-550）：160×120 插画 + 24 号宋体标题 + 说明，走 `pud.Empty`。
+	// 标题是那一页平常空着时那一句（从别的页面切过来的那条路按它认「切过去了」），说明换成
+	// 这一次特别的原因。
+	//
+	// ⚠️ **上面先画那一页的标准页头**（Eyebrow + 标题 + 导语，和未登录那一支同一个
+	// `viewHeadedPage`）：顶栏不再写页名，少了页头这一页在屏幕上就没有名字了
+	// （`TestThePageStillShowsItsOwnTitle`）；而且和未登录时页头落在同一个位置。
+	head, ok := loginPageHead[key]
+	if !ok {
+		head = pageHead{title: title}
+	}
+	s.viewHeadedPage(c, key, &head, func() {
+		pud.Empty(c, pudArtOf(e.Icon), e.Title, biliNotMounted, nil)
 	})
 }
 
@@ -430,28 +432,26 @@ const emptyRowPad = space.Px12
 // 「怎么才能不空」那一句必须给用户一个能做的下一步，见 emptyState.Hint 和
 // TestEmptyStateCopySaysWhyAndHow。
 
-// noFavorites 是「没有收藏夹」。
-//
-// 标题抄上游：`pages/video-collection/favorites/` 那两个文件一个字都没有，
-// 空的时候落到 `components/virtual-page-list` 的兜底（index.tsx:146）。
+// noFavorites 是「这个收藏夹里一首都没有」（原型 app.js:638 的普通收藏夹那一支）。
+// 收藏夹页给它挂「去发现音乐」键（回首页）。
 var noFavorites = emptyState{
-	Title: "暂无内容",
-	Hint:  "在歌上点星标，挑一个收藏夹存进去，就能在这里看到",
+	Title: "还没有收藏在这个收藏夹里",
+	Hint:  "在播放条上点「收藏」，选这个收藏夹就行。",
 	Icon:  iconEmptyFolder,
 }
 
-// noSearchResults 是「搜了，但没有结果」。
-//
-// ⚠️ 别和「还没输入搜索词」混成一条：上游那是**两个**分支，画出来都是同一个
-// `<Empty />`（所以标题一样），但接下来该做的事不一样——
-//   - 还没输入：`pages/search/index.tsx:16` 的分支，叫用户去输入；
-//   - 搜了没有：`pages/search/video-list/index.tsx:176` 的分支，叫用户换个词。
-//
-// 现在 `/search` 那一页处在第一个分支（它还没有搜索框，见 routes 表里那一条），
-// 所以路由表上填的不是这一条。这一条跟着搜索功能一起落地。
+// noLikedYet 是默认收藏夹（原型的「我喜欢」，头部画红心的那一个）空着时说的话（原型 app.js:638）。
+var noLikedYet = emptyState{
+	Title: "这里还是空的",
+	Hint:  "在任意歌曲上点红心，它就会出现在这里。",
+	Icon:  iconEmptyFolder,
+}
+
+// noSearchResults 是收藏夹里「搜了，但没有匹配的」（原型 app.js:639）。收藏夹页把说明换成带词的
+// 那一句、挂「清空搜索」键；搜索页另有自己的空状态（`searchpage.go`）。
 var noSearchResults = emptyState{
-	Title: "暂无内容",
-	Hint:  "换个词再搜一次，或者把关键词缩短一点",
+	Title: "列表里没有匹配的歌曲",
+	Hint:  "换个词再搜一次，或者清空搜索看全部。",
 	Icon:  iconEmptySearch,
 }
 
@@ -523,27 +523,28 @@ var noLyrics = emptyState{
 // ⚠️ **where 是「哪一趟请求」**，而 `err.Error()` 往往只说得清「失败了」说
 // 不清「哪一趟」：B 站返回 -101 和网络超时在界面上都是一句 `-101` 或者一句
 // `context deadline exceeded`，而用户要给开发者复现时需要的是「关注的人那一
-// 趟」还是「动态那一趟」。所以每一处调用方都要写清楚是哪一趟，界面上单独一行
-// 摆在错误上面——这是「出错在哪一步」在请求这一层的落法（页面那一层是 `viewCrash`）。
+// 趟」还是「动态那一趟」。所以每一处调用方都要写清楚是哪一趟，界面上写在说明的
+// 开头、错误原文前面——这是「出错在哪一步」在请求这一层的落法（页面那一层是 `viewCrash`）。
 func (s *Shell) viewLoadError(c *ui.Context, key, where, retryLabel string, err error, retry func()) {
 	// 🔴 铁律二：和 viewEmpty 一样，每一帧开头装主题。
 	s.applyFrameTheme(c)
 
-	t := c.Theme()
-	ui.Column(c).Key(key).Grow(1).Center().Gap(emptyGap).Padding(emptyPagePad, space.Px28).Children(func() {
-		// 插画用警告那一枚而**不是**空状态那一批：这一格说的是「没拉出来」，
-		// 不是「本来就没有」。
-		ui.Icon(c, icon(iconFailed)).FontSize(emptyIconSize).TextColor(t.Warning)
-		ui.Text(c, "这一块没拉出来").FontSize(scale.Font(c, scale.Size16)).TextColor(t.Text)
-		if where != "" {
-			// 主次和错误本身再分一档：这一行是给用户复现用的（说给开发者听），
-			// 而下面那行是原始错误。两者都别比标题更抢眼。
-			ui.Text(c, "没拉出来的是："+where).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted)
+	// 原型 `.empty` + 重试（index.html:547-550，DESIGN §0′.T2「出错 `pud.Empty` + 重试」）：插画、
+	// 24 号宋体标题、说明（哪一趟 + 原始错误）、幽灵「重试」键——和首页 `sectionError` 同一副样子。
+	body := err.Error()
+	if where != "" {
+		body = "没拉出来的是" + where + "：" + body
+	}
+	ui.Column(c).Key(key).Grow(1).FillWidth().Justify(ui.Center).Children(func() {
+		var action func()
+		if retry != nil {
+			action = func() {
+				if pud.Button(c, key+":retry", pud.Ghost, pud.Std, retryLabel, "refresh").Clicked() {
+					retry()
+				}
+			}
 		}
-		ui.Text(c, err.Error()).FontSize(scale.Font(c, scale.Size12)).TextColor(t.TextMuted).MaxLines(3)
-		if retry != nil && ui.Button(c, retryLabel).Clicked() {
-			retry()
-		}
+		pud.Empty(c, pud.ArtPlain, "这一块没拉出来", body, action)
 	})
 }
 

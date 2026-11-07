@@ -71,8 +71,9 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		Dim:       m.Item.Invalid,
 		CanLike:   !user && l.acts.FavSelect != nil,
 		Menu:      func(mn *ui.Menu) { l.buildMenu(mn, i) },
-		Cover: func(c *ui.Context, cw, ch float32) {
-			imgcache.ViewTitled(c, l.cache, m.Cover, m.Title, cw, ch)
+		// 圆角是 `pud.TrackRow` 传进来的 r-4（原型 `.t-cover`），落在最内层的图上。
+		Cover: func(c *ui.Context, cw, ch, radius float32) {
+			imgcache.ViewTitledRadius(c, l.cache, m.Cover, m.Title, cw, ch, radius)
 		},
 	}
 	if m.Item.Invalid {
@@ -149,8 +150,8 @@ func (l *List) viewPudUserRow(r ui.ListRow, i int) {
 			Name:       m.Title,
 			Sign:       m.Owner,
 			HideFollow: true,
-			Face: func(c *ui.Context, w, h float32) {
-				imgcache.ViewTitled(c, l.cache, m.Cover, m.Title, w, h)
+			Face: func(c *ui.Context, w, h, radius float32) {
+				imgcache.ViewTitledRadius(c, l.cache, m.Cover, m.Title, w, h, radius)
 			},
 		}
 		if m.Fans > 0 {

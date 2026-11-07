@@ -71,7 +71,7 @@ func TestEyebrowIsUppercaseMonoAndTracked(t *testing.T) {
 		ui.Column(c).Children(func() {
 			ui.Row(c).Children(func() { Eyebrow(c, "album of the day") })
 			ui.Row(c).Children(func() {
-				Mono(ui.Text(c, "ALBUM OF THE DAY! ")).FontSize(EyebrowSize).FontWeight(600).SingleLine()
+				Mono(ui.Text(c, "ALBUM OF THE DAY! ")).FontSize(EyebrowSize).FontWeight(400).SingleLine()
 			})
 		})
 	}, 600, 100)

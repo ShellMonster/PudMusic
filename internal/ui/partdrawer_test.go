@@ -448,7 +448,8 @@ func TestThePartsKeyDoesNotBreakThePlayBar(t *testing.T) {
 	const title = "一首歌的名字很长很长很长很长"
 	const owner = "一个非常非常非常非常非常非常长的 UP 主名字"
 
-	for _, width := range []int{900, 1000, 1200, 1280} {
+	// 分集键只在窗口 > 1024 时摆（原型 .hide-md，见 playbar_narrow_test.go）。
+	for _, width := range []int{1025, 1100, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			s, tt := onlineTester(t, multiPages(), false, at(width, 460))
 			partsReady(t, s, tt, 3)
@@ -562,7 +563,8 @@ func TestTheDrawerDoesNotComeBackOnItsOwn(t *testing.T) {
 // ⚠️ **两档必须是同一首歌**：用的是同一份 fixture 的同一首（bvid、标题、UP 名都
 // 一样），只有「B 站回几集」不同，差别只有那一个键。
 func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
-	for _, width := range []int{900, 1000, 1200} {
+	// 分集键只在窗口 > 1024 时摆（原型 .hide-md，见 playbar_narrow_test.go）。
+	for _, width := range []int{1025, 1100, 1200} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			without := playbarWidths(t, width, nil)
 			with := playbarWidths(t, width, multiPages())
@@ -623,7 +625,7 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 // （`viewPlayBarRight`）——它和右列那几枚（下载 / 歌词 / 队列）在同一条
 // 水平线上，而不是左边那一列。
 func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 460))
 	partsReady(t, s, tt, 3)
 
 	part, ok := tt.Find("分集")
@@ -649,7 +651,7 @@ func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 // TestThePartsPopoverIsOnlyAsTallAsItsContent 断分集弹层按内容收高（原型 `.pop`：内边距 8，
 // `h5` 加每集一个 36 高的 `pop-opt`），不是一块固定高的死面板。
 func TestThePartsPopoverIsOnlyAsTallAsItsContent(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 460))
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
 
@@ -669,7 +671,7 @@ func TestThePartsPopoverIsOnlyAsTallAsItsContent(t *testing.T) {
 // TestThePartsPopoverMatchesThePrototype 钉住分集弹层的行高和宽度：每一项 36 高
 // （`.pop-opt` 内边距 8 + 13 号字行高 1.55），面板最小宽 200（`.pop { min-width: 200px }`）。
 func TestThePartsPopoverMatchesThePrototype(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false, at(900, 560))
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 560))
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
 
@@ -809,3 +811,38 @@ func lenOf(pages []any) int {
 // 「正在放」那一行改成了**淡主色底**（票 #323），而淡底**不算**主色像素
 // （浅色下 #d2f7df 的绿 − 红 = 37）——那一处的判据换成了「底是不是那一层淡底」。
 const accentGreenGap = 60
+
+// TestThePartsKeyMatchesItsRowNeighbours 锁住：播放条上「分集」那一枚和同排的下载键是同一种
+// 图标键（原型 app.js:929 `.icon-btn`）——36 见方、同一条中线，悬停是 hover 底 + 正文色，不变主色。
+// 曾经出错的行为：它是旧的 `iconKey`（32 + 每边 7 内边距、悬停图形变主色），和同排对不齐。
+func TestThePartsKeyMatchesItsRowNeighbours(t *testing.T) {
+	// 分集键只在窗口 > 1024 时摆（原型 .hide-md，见 playbar_narrow_test.go）。
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 800))
+	partsReady(t, s, tt, 3)
+
+	part, ok := tt.Find("分集")
+	if !ok {
+		t.Fatalf("播放条上没有分集入口，文字有 %q", tt.Texts())
+	}
+	dl, ok := tt.Find("下载当前歌曲")
+	if !ok {
+		t.Fatalf("播放条上没有下载键，文字有 %q", tt.Texts())
+	}
+	if widthGap(part.W-36) > 0.5 || widthGap(part.H-36) > 0.5 {
+		t.Errorf("分集键 %.1f×%.1f，want 36×36（同排 .icon-btn）", part.W, part.H)
+	}
+	if widthGap((part.Y+part.H/2)-(dl.Y+dl.H/2)) > 0.5 {
+		t.Errorf("分集键中线 y=%.1f，下载键 y=%.1f：不在一条线上", part.Y+part.H/2, dl.Y+dl.H/2)
+	}
+
+	tt.Move(part.X+part.W/2, part.Y+part.H/2)
+	tt.Frame()
+	img := tt.Image()
+	for y := int(part.Y); y < int(part.Y+part.H); y++ {
+		for x := int(part.X); x < int(part.X+part.W); x++ {
+			if p := img.RGBAAt(x, y); int(p.R)-int(p.B) > 60 {
+				t.Fatalf("悬停时分集键 (%d,%d) 是主色像素 %v：悬停该换正文色，不是主色", x, y, p)
+			}
+		}
+	}
+}

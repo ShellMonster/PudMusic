@@ -58,16 +58,13 @@ func TestSearchFieldLooksLikeAnInput(t *testing.T) {
 				t.Errorf("搜索框底色 %v 和顶栏底色 %v 几乎一样——看不出这是一块输入区", got, bg)
 			}
 
-			// ② 悬停：底色抬到 30%，不是描边变色。
+			// ② 悬停：底色不变（原型 index.html:232 只有 `:focus-within` 才换 surface 底；
+			// 曾经悬停也换成聚焦那一档）。
 			tt.Move(float32(col), float32(mid))
 			tt.Frame()
 			got = tt.Image().RGBAAt(col, mid)
-			if maxDiff(got, hot) > 2 {
-				t.Errorf("悬停时搜索框底色是 %v，want %v（default-400/30）", got, hot)
-			}
-			if maxDiff(hot, idle) < 5 {
-				t.Errorf("悬停和静止的底色差不到 5 个通道（%v / %v）——用户看不出它是活的",
-					idle, hot)
+			if maxDiff(got, idle) > 2 {
+				t.Errorf("悬停时搜索框底色是 %v，want 静止那一档 %v（悬停不换底）", got, idle)
 			}
 
 			// ③ 焦点：同一档 30%。点完把指针挪开，免得量到的是悬停。

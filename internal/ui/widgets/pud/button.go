@@ -34,7 +34,10 @@ const (
 )
 
 // Button 是一枚胶囊按钮（原型 `.btn`）。icon 是原型图标名（"" 不画），画在字的
-// 左边、16 号、和字隔 8。返回按钮本身：调用方照常问 `.Clicked()`、链 `.Disabled(…)`。
+// 左边、16 号、和字隔 8。返回按钮本身：调用方照常问 `.Clicked()`。
+//
+// ⚠️ 要禁用就用 `ButtonDisabled` / `RoundButtonDisabled`，不要在返回之后链 `.Disabled(…)`：
+// 悬停底、按下缩放和禁用半透明都是建的时候定的，后链的禁用只拦得住点击，指针落上去照样亮。
 //
 //	if pud.Button(c, "play-all", pud.Primary, pud.Std, "播放全部", "play").Clicked() { … }
 func Button(c *ui.Context, key string, kind Kind, size Size, label, icon string) ui.Element {
@@ -47,9 +50,8 @@ func ButtonMono(c *ui.Context, key string, kind Kind, size Size, label, mono, ic
 	return button(c, key, kind, size, label, mono, icon, false, false)
 }
 
-// ButtonDisabled 是 Button 加「禁用」。禁用要在建的时候就告诉它，而不是返回之后再 `.Disabled(…)`：
-// 悬停底是建的时候按 `Hovered()` 铺的，返回之后再禁用就晚了——禁用的键指针落上去照样亮，
-// 等于告诉用户这里点得动（原型 `.btn:disabled { opacity:.45 }` 且 `:hover:not(:disabled)`）。
+// ButtonDisabled 是 Button 加「禁用」（原型 `.btn:disabled { opacity:.45 }` 且 `:hover:not(:disabled)`）：
+// disabled 时没有悬停底 / 悬停色 / 按下缩放，画出来 45% 不透明。
 func ButtonDisabled(c *ui.Context, key string, kind Kind, size Size, label, icon string, disabled bool) ui.Element {
 	return button(c, key, kind, size, label, "", icon, false, disabled)
 }
@@ -58,6 +60,11 @@ func ButtonDisabled(c *ui.Context, key string, kind Kind, size Size, label, icon
 // 无障碍名字。
 func RoundButton(c *ui.Context, key string, kind Kind, size Size, icon, label string) ui.Element {
 	return button(c, key, kind, size, label, "", icon, true, false)
+}
+
+// RoundButtonDisabled 是 RoundButton 加「禁用」（同 `ButtonDisabled`）。
+func RoundButtonDisabled(c *ui.Context, key string, kind Kind, size Size, icon, label string, disabled bool) ui.Element {
+	return button(c, key, kind, size, label, "", icon, true, disabled)
 }
 
 func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string, round, disabled bool) ui.Element {
@@ -76,7 +83,8 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon s
 	} else {
 		b = b.PaddingX(padX)
 	}
-	hot := b.Hovered() && !b.IsDisabled()
+	off := disabled
+	hot := b.Hovered() && !off
 	var bg, fg, border ui.Color
 	switch kind {
 	case Primary:
@@ -99,8 +107,13 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon s
 		bg, fg = p.Err, ui.RGB(255, 255, 255)
 	}
 	b = b.Background(bg).Border(1, border).TextColor(fg).Transition(motion.Fade)
+	if off {
+		// 原型 `.btn:disabled { opacity: .45 }`（index.html:289）。框架对禁用元素自己再乘 0.5
+		// （mygo ui/paint.go 的 `flagDisabled`），所以这里给 0.9：0.9 × 0.5 = 0.45。
+		b = b.Opacity(btnDisabledOpacity / frameworkDisabledOpacity)
+	}
 	scaleTo := float32(1)
-	if b.Pressed() && !b.IsDisabled() {
+	if b.Pressed() && !off {
 		scaleTo = 0.97
 	}
 	b = b.AnimatePose(ui.Pose{Scale: scaleTo}, ui.Animation{Duration: motion.Fast, Ease: motion.EaseOut})
@@ -124,7 +137,9 @@ type IconOpts struct {
 	Row bool
 	// On 是「开着」：图形换 accent-text（原型 `.icon-btn.on`）。
 	On bool
-	// Count 是右上角的计数角标（原型 `.cnt`，如 "1k+"）；空串不画。
+	// Count 是右上角的计数角标（原型 `.cnt`，如 "1k+"）；空串不画。平时是 side 底，全屏播放器
+	// （`WithFull`）里透明底（原型 app.js:1145 `.cnt` 内联 `background:transparent`），字挪到
+	// 图形外侧右上角——不然透明底的字压在图形线条上读不出来。
 	Count string
 	// Size 是图标边长；0 = 18。
 	Size float32
@@ -133,22 +148,32 @@ type IconOpts struct {
 	// HoverColor 覆盖悬停时的图形色；零值 = 悬停换 text（原型 `.icon-btn:hover { color: var(--text) }`，
 	// 全屏播放器里 `.full-ctrl .icon-btn { color: #d8d7d4 }` 之上悬停仍然是 `#ecebe8`）。
 	HoverColor ui.Color
-	// Disabled 是禁用。⚠️ 必须在这里传，不能在返回之后链 `.Disabled(...)`：悬停底和悬停色是
-	// 构建时按 `IsDisabled()` 判的，返回之后再禁用，禁用的键悬停时照样亮。
+	// Disabled 是禁用：没有悬停底 / 悬停色 / 按下缩放，画出来 35% 不透明。必须在这里传——
+	// 返回之后再链 `.Disabled(true)` 只拦得住点击，悬停底照样亮（悬停是建的时候定的）。
 	Disabled bool
 }
 
-const countBadgeFallbackTextW = 20
+// countBadgeFont 是 `.cnt` 的字号（index.html:740 `font: 600 10px/1`）。
+const countBadgeFont = 10
 
-func countBadgeWidth(measured float32) float32 {
-	if measured <= 0 {
-		measured = countBadgeFallbackTextW
-	}
-	return measured + space.Px4
-}
+// countBadgeHook 只给测试用：每画一枚计数角标，把图形和计数文字两个元素交出去量 Bounds。
+var countBadgeHook func(glyph, count ui.Element)
+
+// 禁用态的不透明度（原型 index.html:228 `.icon-btn:disabled { opacity: .35 }`、
+// index.html:289 `.btn:disabled { opacity: .45 }`）。
+//
+// ⚠️ 框架对带 `Disabled(true)` 的元素在绘制时**自己再乘 0.5**（mygo ui/paint.go 的
+// `flagDisabled` 那一支），所以组件自己给的是「目标 ÷ 0.5」，乘出来才是原型那个数。
+// 以前 IconBtn 直接给 0.35，实际成了 0.175，顶栏后退 / 前进禁用时几乎看不见。
+const (
+	iconBtnDisabledOpacity   = 0.35
+	btnDisabledOpacity       = 0.45
+	frameworkDisabledOpacity = 0.5
+)
 
 // IconBtn 是一枚只有图标的键（原型 `.icon-btn`）：圆角 8 的方块，平时次要色，
-// 悬停 hover 底 + 正文色，按下图形缩到 0.92，禁用 35% 不透明。label 是无障碍名字。
+// 悬停 hover 底 + 正文色，按下图形缩到 0.92，禁用 35% 不透明（index.html:228，
+// 换算见 `iconBtnDisabledOpacity`）。label 是无障碍名字。
 func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 	p := pal(c)
 	hit := tok.IconHit
@@ -168,7 +193,8 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 	if o.Color.A != 0 {
 		fg = o.Color
 	}
-	hot := b.Hovered() && !b.IsDisabled()
+	off := o.Disabled
+	hot := b.Hovered() && !off
 	if hot {
 		b = b.Background(p.Hover)
 		switch {
@@ -181,8 +207,8 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 	if o.On {
 		fg = p.AccentText
 	}
-	if b.IsDisabled() {
-		b = b.Opacity(0.35)
+	if off {
+		b = b.Opacity(iconBtnDisabledOpacity / frameworkDisabledOpacity)
 	}
 	b = b.Transition(motion.Fade)
 	b.Children(func() {
@@ -191,19 +217,40 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 		// 填满的那一版。
 		g := glyph(c, icon, size, fg)
 		pressed := float32(1)
-		if b.Pressed() && !b.IsDisabled() {
+		if b.Pressed() && !off {
 			pressed = 0.92
 		}
 		g.AnimatePose(ui.Pose{Scale: pressed}, ui.Animation{Duration: motion.Fast, Ease: motion.EaseOut})
 		if o.Count != "" {
-			// `.cnt`：按钮右上角的小角标，次要色、600 等宽、紧凑内边距、圆角 6。
-			textW, _ := c.MeasureText(0, ui.Span{Text: o.Count, Size: 9, Weight: 600})
-			ui.Box(c).Width(countBadgeWidth(textW)).Height(13).Background(p.Side).
-				Padding(space.Px1, space.Px2).Radius(tok.R6).
-				Absolute().Top(-3).Right(1).Children(func() {
-				typo.Mono(ui.Text(c, o.Count)).FontSize(9).FontWeight(600).
-					TextColor(p.Text2).SingleLine()
-			})
+			// `.cnt`（index.html:740）：右上角小角标，top 1、right -4、内边距 2/4、圆角 6、
+			// 600 10px/1 等宽 text-2，底色 side。
+			// 宽随字走（不先量字：量字用的是正文字体，等宽字体 + 「万」这类字更宽，按量出来的宽
+			// 会把「1.2万」截成「1.2…」）。
+			label := func() ui.Element {
+				return typo.Mono(ui.Text(c, o.Count)).FontSize(countBadgeFont).FixedLineHeight(countBadgeFont).
+					FontWeight(600).TextColor(p.Text2).SingleLine()
+			}
+			var t ui.Element
+			if fullMode {
+				// 全屏播放器里透明底（app.js:1145 内联 `background:transparent`——那里的底是封面
+				// 取色，一块 side 色的方块会很突兀）。没了底，原型那个位置（right -4、top 1）的字
+				// 就直接压在图形线条上，「1.2万」根本读不出来——所以字挪到图形**外侧右上角**：
+				// 底边落在图形顶边之上 1，左缘从图形中线往右 2 起。不从图形右缘起：「1.2万」宽 ~28，
+				// 从右缘起会伸到键外 17，正好顶到隔 8 的下一枚键的图形；从中线起只伸出 ~12。
+				// 键本身不加外边距，命中区还是 hit×hit，同排的键位置不变。
+				gTop := (hit - size) / 2
+				// 用 Bottom 定底边而不是 Top + 字号：「万」走 CJK 回退字体，行盒比 10 高（实测 14），
+				// 按字号推顶边的话底边照样压进图形。
+				ui.Box(c).Absolute().Left(hit/2 + space.Px2).Bottom(hit - gTop + space.Px1).
+					Children(func() { t = label() })
+			} else {
+				ui.Box(c).Height(countBadgeFont+2*space.Px2).Background(p.Side).
+					Padding(space.Px2, space.Px4).Radius(tok.R6).
+					Absolute().Top(space.Px1).Right(-space.Px4).Children(func() { t = label() })
+			}
+			if countBadgeHook != nil {
+				countBadgeHook(g, t)
+			}
 		}
 	})
 	return b
@@ -211,18 +258,35 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 
 // Chip 是一枚小胶囊（原型 `.chip`）：高 30、左右 12、surface-2 底、次要色 13 号；
 // 悬停正文色 + press 底；pressed（选中）时反色（正文色底、bg 色字）。icon 可空，12 号。
+//
+// ⚠️ 要禁用就用 `ChipDisabled`，不要在返回之后链 `.Disabled(…)`：悬停底是建的时候定的，
+// 后链的禁用只拦得住点击，指针落上去照样亮（同 `Button`）。
 func Chip(c *ui.Context, key, label, icon string, pressed bool) ui.Element {
+	return chip(c, key, label, icon, pressed, false)
+}
+
+// ChipDisabled 是 Chip 加「禁用」（同 `ButtonDisabled`）：disabled 时没有悬停底 / 悬停色，
+// 画出来 45% 不透明（原型 `.chip` 没写禁用样式，跟 `.btn:disabled` 的 .45）。
+func ChipDisabled(c *ui.Context, key, label, icon string, pressed, disabled bool) ui.Element {
+	return chip(c, key, label, icon, pressed, disabled)
+}
+
+func chip(c *ui.Context, key, label, icon string, pressed, disabled bool) ui.Element {
 	p := pal(c)
 	b := ui.ButtonBase(c).Key(key).Height(tok.ChipH).PaddingX(space.Px12).Radius(tok.ChipH / 2).
-		Gap(space.Px6).AlignItems(ui.Center).Shrink(0)
+		Gap(space.Px6).AlignItems(ui.Center).Shrink(0).Disabled(disabled)
 	bg, fg := p.Surface2, p.Text2
 	switch {
 	case pressed:
 		bg, fg = p.Text, p.Bg
-	case b.Hovered():
+	case b.Hovered() && !disabled:
 		bg, fg = p.Press, p.Text
 	}
 	b = b.Background(bg).Transition(motion.Fade)
+	if disabled {
+		// 框架对禁用元素自己再乘 0.5，换算见 `frameworkDisabledOpacity`：0.9 × 0.5 = 0.45。
+		b = b.Opacity(btnDisabledOpacity / frameworkDisabledOpacity)
+	}
 	b.Children(func() {
 		if icon != "" {
 			glyph(c, icon, tok.IconXs, fg)

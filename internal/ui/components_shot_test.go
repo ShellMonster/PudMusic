@@ -21,8 +21,8 @@ import (
 
 // synthCover 是合成封面：一块纯色，上面一道浅色对角块，足够看出「完整显示、不裁切」。
 func synthCover(base color.RGBA) pud.Cover {
-	return func(c *mygoui.Context, w, h float32) {
-		mygoui.Box(c).Size(w, h).Background(mygoui.RGB(base.R, base.G, base.B)).Draw(
+	return func(c *mygoui.Context, w, h, radius float32) {
+		mygoui.Box(c).Size(w, h).Radius(radius).Clip().Background(mygoui.RGB(base.R, base.G, base.B)).Draw(
 			func(p *mygoui.Painter, r mygoui.Rect) {
 				p.Fill(mygoui.Rect{X: r.X + r.W*0.2, Y: r.Y + r.H*0.2, W: r.W * 0.6, H: r.H * 0.6},
 					mygoui.RGBA(255, 255, 255, 0.18), 6)
@@ -61,7 +61,7 @@ func showcaseView(s *Shell, on *bool, tab *int, search *string) func(*mygoui.Con
 						pud.Button(c, "b6", pud.Ghost, pud.Sm, "已关注", "check")
 						pud.RoundButton(c, "b7", pud.Primary, pud.Std, "play", "播放")
 						pud.RoundButton(c, "b8", pud.Ghost, pud.Sm, "plus", "新建")
-						pud.Button(c, "b9", pud.Primary, pud.Std, "禁用", "").Disabled(true)
+						pud.ButtonDisabled(c, "b9", pud.Primary, pud.Std, "禁用", "", true)
 					})
 
 					showcaseSection(c, "ICON-BTN  36 · row 32 · .on · .cnt  /  CHIP  /  BADGE  /  KBD  /  SWITCH")

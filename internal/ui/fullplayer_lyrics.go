@@ -85,12 +85,10 @@ func (s *Shell) viewFullLyHead(c *ui.Context, snap app.LyricsSnapshot, g fullGeo
 		if s.full.lyTrans && has {
 			label = "歌词翻译"
 		}
-		chip := pud.Chip(c, "full:ly-trans", label, "translate", s.full.lyTrans && has).
-			Height(26).Radius(tok.Pill)
 		// 原型：高 26、surface 8% 白底；选中 = 纸白底深字（`.ly-head .chip[aria-pressed]`）。
-		if !has {
-			chip = chip.Disabled(true)
-		}
+		// 没有译文时禁用——在建的时候传，悬停才不会亮底。
+		chip := pud.ChipDisabled(c, "full:ly-trans", label, "translate", s.full.lyTrans && has, !has).
+			Height(26).Radius(tok.Pill)
 		if chip.Clicked() {
 			s.full.lyTrans = !s.full.lyTrans
 		}
@@ -132,12 +130,13 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnaps
 			}
 			return
 		}
-		fg := s.fullLyricColor()
+		fg, cur := s.fullLyricColors()
 		lv.anim = &fullLyricScrollAnim
 		big := snap
 		big.FontSize += fullLyricBaseAdd
 		s.viewLyricLines(c, lv, big, active, lyricStyle{
 			color:        fg,
+			activeColor:  cur,
 			muted:        tok.Full.Text3,
 			area:         fullLyricsAreaKey,
 			ns:           lyricNSFull,
@@ -147,7 +146,6 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnaps
 			gap:          -1,
 			lineMul:      1.5,
 			activeScale:  fullLyricActiveScale,
-			tracking:     -0.01,
 			idleAlpha:    0.38,
 			hoverAlpha:   0.70,
 			hideOrigin:   true,
@@ -225,14 +223,16 @@ func (s *Shell) viewFullLyricsLoading(c *ui.Context) {
 	})
 }
 
-// fullLyricColor 是满屏歌词的字色：用户在偏好里挑了就用挑的那个，没挑是纸白 `#ECEBE8`。
-func (s *Shell) fullLyricColor() ui.Color {
+// fullLyricColors 是歌词的字色和正在唱那一句的字色。默认 #ecebe8 / #fff（原型 index.html:864
+// `.ly { color: rgba(236,235,232,.38) }`、:865 `.ly.cur { color: #fff }`）；偏好里挑了歌词色时
+// 两者都是那个颜色（用户挑的色就是当前句的色）。
+func (s *Shell) fullLyricColors() (fg, cur ui.Color) {
 	if hex := s.pagePrefs().LyricsColor; hex != "" {
 		if col, ok := parseHexColor(hex); ok {
-			return col
+			return col, col
 		}
 	}
-	return tok.Full.Text
+	return tok.Full.Text, tok.Full.LyricCurrent
 }
 
 // viewFullKnobs 是歌词下面那一行旋钮（原型 `.knobs`）：偏移 −  数值  +，字号 A− A+，找歌词。

@@ -128,20 +128,22 @@ func snappedScrub(sl ui.Element, val float64, pressX float32, pressPos time.Dura
 	return float64(at) / float64(dur)
 }
 
-// withChapterDots 给**自绘那套滑块**（`selfSlider`：播放条、满屏）画章节点。
-//
-// pad 是旋钮留在轨道里的那半个宽（`selfSlider` 的取值映射
-// `r.X + knobW/2 + (r.W-knobW)*frac` 里那一份），和点落的位置用的是同一个映射
-// ——点落在哪、旋钮走到哪，两处必须是同一个算法。col 是「缺口」的颜色
-// （播放条给主题底色，满屏给那一行坐着的底）。
-func withChapterDots(sl ui.Element, chapters []app.Chapter, dur time.Duration, pad, d float32, col ui.Color) ui.Element {
+// withChapterBars 是主播放条那条进度的章节标记：竖条而不是圆点（原型 index.html:854
+// `.chap { width: 4px; height: 10px; border-radius: 1px; background: var(--side) }`）。
+// 跨在 4 高的轨道上，就是在轨道上切一道 4 宽的口。位置映射同 `withChapterDots`（pad 是
+// 旋钮留在轨道里的半个宽）。迷你窗 / 刘海仍走 `withChapterDotsCore` 的圆点，不受影响。
+func withChapterBars(sl ui.Element, chapters []app.Chapter, dur time.Duration, pad, w, h, radius float32, col ui.Color) ui.Element {
 	fracs := chapterDots(chapters, dur)
 	if fracs == nil {
 		return sl
 	}
 	return sl.DrawOver(func(p *ui.Painter, r ui.Rect) {
 		cy := r.Y + r.H/2
-		drawChapterDots(p, fracs, r.X+pad, r.W-2*pad, cy, d, col)
+		x0, dx := r.X+pad, r.W-2*pad
+		for _, f := range fracs {
+			x := x0 + dx*f
+			p.Fill(ui.Rect{X: x - w/2, Y: cy - h/2, W: w, H: h}, col, radius)
+		}
 	})
 }
 
