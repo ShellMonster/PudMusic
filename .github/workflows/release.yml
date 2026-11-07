@@ -19,10 +19,24 @@ permissions:
   contents: write
 
 jobs:
+  # ------------------------------------------------------------------
+  # build-<GOOS>：三个 job 并行——macOS / Windows / Linux 各打自己两个
+  # 架构的安装包和更新归档。MyGo 没有 cgo，任何平台都能从任何机器交叉；
+  # dmg / NSIS 需要 macOS，所以全部留在 macos runner 上，靠 job 并行抢
+  # 时间（原来 6 个平台串行 ~12 分钟 → 现在每组 ~4 分钟并行跑）。
+  #
+  # 产物经 actions/upload-artifact 交给最后的 publish job 统一挂到草稿
+  # Release。SHA256SUMS 和 Release 说明也都在 publish job 拼——那时候
+  # 全部资产齐了，名单才完整。
+  # ------------------------------------------------------------------
   release:
-    name: Build and publish ${{ github.ref_name }}
+    name: Build ${{ matrix.goos }} assets
     runs-on: macos-15-intel
-    timeout-minutes: 45
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [darwin, windows, linux]
     env:
       GH_TOKEN: ${{ github.token }}
       MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
@@ -72,22 +86,99 @@ jobs:
             exit 1
           }
 
+      # 发版前必查、且每个 job 都要各查一遍的项：版本号对得上 tag、生成物
+      # 没和源码脱节。build/vet/test 全量那套在合并 PR 的 CI 里已经跑过同一
+      # 个提交，这里不重复（省 ~3 分钟）；licensing 和 generated resources
+      # 是 PR CI 不查的发布专属项，留。
       - name: Run release checks
         run: |
-          go build -trimpath -p 4 ./...
-          go vet -trimpath -p 4 ./...
-          go test -p 4 $(go list ./... | grep -v '/internal/ui$')
           go test ./internal/licensing/
           go generate ./internal/platform/ ./internal/licensing/
           git diff --exit-code -- resources
 
-      - name: Build release assets
+      - name: Build ${{ matrix.goos }} release assets
         run: |
-          go tool mygo build \
-            -platform darwin/arm64,darwin/amd64,linux/amd64,linux/arm64,windows/amd64,windows/arm64
+          go tool mygo build -platform ${{ matrix.goos }}/amd64,${{ matrix.goos }}/arm64
 
-      - name: Rename assets to platform-friendly names
-        run: scripts/rename-release-assets.sh darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64 windows/arm64
+      - name: Rename ${{ matrix.goos }} assets to platform-friendly names
+        run: scripts/rename-release-assets.sh ${{ matrix.goos }}/amd64 ${{ matrix.goos }}/arm64
+
+      - name: Verify ${{ matrix.goos }} release assets
+        run: scripts/verify-release-assets.sh ${{ matrix.goos }}/amd64 ${{ matrix.goos }}/arm64
+
+      - name: Upload ${{ matrix.goos }} assets for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.goos }}
+          # `build/<goos>-*` 一次匹配两个架构目录：通配的公共前缀是
+          # `build/`，所以 artifact 里**保留 `<goos>-<arch>/` 这层目录名**，
+          # publish job 靠它把产物归位（写成 `build/<goos>-amd64/*` 会把
+          # 文件散到 artifact 根上）。
+          path: build/${{ matrix.goos }}-*
+          if-no-files-found: error
+          retention-days: 1
+
+  # ------------------------------------------------------------------
+  # publish：等三个 build job 都完，把六套产物拉下来，算出全量
+  # SHA256SUMS，写说明，一次性挂到草稿 Release。
+  # ------------------------------------------------------------------
+  publish:
+    name: Publish ${{ github.ref_name }}
+    needs: release
+    runs-on: macos-15-intel
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch ]]; then
+            tag="${{ inputs.tag }}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Download all platform assets
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-assets-*
+          path: build
+          merge-multiple: false
+
+      # artifact 展开成 build/release-assets-<goos>/<平台目录>/*，归位到
+      # build/<平台目录>/ 再统一验。
+      - name: Lay out assets and build SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          for goos in darwin windows linux; do
+            for arch in amd64 arm64; do
+              src="build/release-assets-${goos}/${goos}-${arch}"
+              dst="build/${goos}-${arch}"
+              [ -d "$src" ] || { echo "missing artifact dir $src" >&2; exit 1; }
+              mkdir -p "$dst"
+              mv "$src"/* "$dst"/
+            done
+          done
+          rm -rf build/release-assets-*
+          # SHA256SUMS 原来由 mygo build 在最后一把全量写——拆 job 之后没人
+          # 看得见全部文件，这里统一算：对每份发布资产 sha256 一份，写到
+          # build/SHA256SUMS（和用户拿到手核的那一份同名）。
+          (cd build && find . -mindepth 2 -maxdepth 2 -type f \
+            \( -name '*.tar.gz' -o -name '*.delta' -o -name '*.dmg' -o -name '*.deb' \
+               -o -name '*-setup-*.exe' -o -name 'install.sh' -o -name 'install.ps1' \
+               -o -name 'PKGBUILD' \) ! -name 'SHA256SUMS' -print0 \
+            | sort -z | xargs -0 shasum -a 256 | sed 's| \./|  |' > SHA256SUMS)
+          cat build/SHA256SUMS
 
       - name: Verify release assets
         run: scripts/verify-release-assets.sh
