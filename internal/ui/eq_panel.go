@@ -342,8 +342,9 @@ func (s *Shell) fullEQContent(c *ui.Context) {
 			})
 		}
 	})
+	// 原型 index.html:798 `.pick-new { display: flex; gap: 8px; margin-top: 12px }`。
 	ui.Row(c).FillWidth().Gap(space.Px8).AlignItems(ui.Center).Padding(space.None, space.Px8, space.None, space.Px8).
-		Margin(space.Px8, space.None, space.None, space.None).Children(func() {
+		Margin(space.Px12, space.None, space.None, space.None).Children(func() {
 		ui.TextInputBase(c, &s.settings.eqName).Label("均衡器预设名称").Placeholder("另存为预设…").
 			Grow(1).Height(36).PaddingX(space.Px12).Radius(tok.R8).Background(p.Surface2).Border(1, p.LineStrong).
 			TextColor(p.Text).FontSize(scale.Font(c, scale.Size13))
