@@ -1188,7 +1188,7 @@ var Items = []Item{
 		Spec: "满屏播放器开着的时候底下那一页一帧都不建；它的每帧副作用照跑；关掉满屏之后的第一帧就是当前状态",
 		Tests: []string{
 			"TestTheUnderlyingPageIsNotBuiltWhileTheFullPlayerIsOpen",
-			"TestBackgroundResultsStillLandWhileTheFullPlayerIsOpen",
+			"TestHiddenPageSyncResumesAfterTheFullPlayerCloses",
 			"TestTheFirstFrameAfterClosingTheFullPlayerShowsTheCurrentState",
 			"TestEscapeReturnsFromTheFullPlayerAtOnce",
 			// 「每一页的副作用都在那张表里」那一条：加了新页而忘了加它，那一页
