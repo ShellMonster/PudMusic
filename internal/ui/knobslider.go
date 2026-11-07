@@ -180,6 +180,23 @@ var knobHoverLook = sliderLook{
 	},
 }
 
+// knobMiniProgressLook 是刘海迷你播放器进度条的样式。
+//
+// 刘海窗口的进度条铺在深色卡片上，当前播放位置需要一直保持强调色才能
+// 被看见；悬停时仍然显示同一档颜色，并通过轨道加粗和旋钮提示可交互。
+// 主播放条继续使用 knobHoverLook 的前景色 / 强调色切换。
+var knobMiniProgressLook = sliderLook{
+	trackW:       knobHoverLook.trackW,
+	hotTrackW:    knobHoverLook.hotTrackW,
+	knobW:        knobHoverLook.knobW,
+	knobH:        knobHoverLook.knobH,
+	knobWhenIdle: knobHoverLook.knobWhenIdle,
+	face:         knobHoverLook.face,
+	fill: func(t *ui.Theme) (ui.Color, ui.Color, ui.Color) {
+		return t.Accent, t.Accent, t.Accent
+	},
+}
+
 // knobMiniVolumeLook 是**迷你播放器里那根音量滑块**的样子（票 #241 / 报告 F-21）。
 //
 // ⚠️ **它和框架那一颗唯一的不同是填充色**：框架的 `ui.Slider` 把填充色**写死**

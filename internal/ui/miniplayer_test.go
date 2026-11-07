@@ -866,6 +866,38 @@ func TestDraggingTheMiniProgressSeeksOnlyOnRelease(t *testing.T) {
 	}
 }
 
+// TestTheMiniProgressKeepsItsFilledPartVisibleWhenIdle 盯刘海窗口在不悬停时仍能看见
+// 当前播放位置；悬停只增加交互反馈，不应该决定进度是否可见。
+func TestTheMiniProgressKeepsItsFilledPartVisibleWhenIdle(t *testing.T) {
+	s, a := newMiniShell(t, nil)
+	requireTestAudio(t)
+	if err := enqueueTwo(a, t); err != nil {
+		t.Fatal(err)
+	}
+	a.Toggle() // 暂停，避免位置在取样期间继续变化。
+
+	tt := miniTester(s)
+	settleMini(t, tt, "时长读回来了", func() bool { return a.Snapshot().Duration > 0 })
+	a.ScrubEnd(0.4)
+	tt.Frame()
+	// viewMiniSeek 把播放器位置同步到滑块值发生在构造之后，下一帧才会用新值绘制。
+	tt.Frame()
+
+	bar := progressRect(t, tt)
+	spot := filledSpot(bar, 0.4)
+	accent := rgbaOf(BuildTheme(a.SettingsSnapshot(), false).Accent)
+	if n := nearPixels(tt.Image(), spot, accent); n == 0 {
+		t.Errorf("刘海进度条不悬停时填充段没有主色像素：当前播放位置几乎不可见（取样区 %v）", spot)
+	}
+
+	tt.Move(bar.X+bar.W/2, bar.Y+bar.H/2)
+	tt.Advance(300 * time.Millisecond)
+	tt.Frame()
+	if n := nearPixels(tt.Image(), spot, accent); n == 0 {
+		t.Errorf("刘海进度条悬停后填充段没有主色像素（取样区 %v）", spot)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 出图
 // ─────────────────────────────────────────────────────────────────────────────

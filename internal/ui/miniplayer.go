@@ -961,7 +961,7 @@ func (s *Shell) viewMiniSeek(c *ui.Context, st app.State, p tok.Palette) {
 			typo.Mono(ui.Text(c, miniClock(st.Position))).Key("mini-cur").FontSize(11).
 				TextColor(p.Text3).Width(miniTimeW).TextAlign(ui.Center).SingleLine()
 			// key 装在 `c` 上：滑块的状态是建出来那一刻就初始化的。
-			sl := selfSlider(c.Key("mini-progress"), &s.miniScrub, 0, 1, knobHoverLook).Grow(1).
+			sl := selfSlider(c.Key("mini-progress"), &s.miniScrub, 0, 1, knobMiniProgressLook).Grow(1).
 				Height(miniSeekH).Label("播放进度").Disabled(!known)
 			sl = withChapterDotsCore(sl, chs, st.Duration)
 			switch held := sl.Pressed(); {
