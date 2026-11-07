@@ -138,7 +138,8 @@ type IconOpts struct {
 	// On 是「开着」：图形换 accent-text（原型 `.icon-btn.on`）。
 	On bool
 	// Count 是右上角的计数角标（原型 `.cnt`，如 "1k+"）；空串不画。平时是 side 底，全屏播放器
-	// （`WithFull`）里透明底（原型 app.js:1145 `.cnt` 内联 `background:transparent`）。
+	// （`WithFull`）里透明底（原型 app.js:1145 `.cnt` 内联 `background:transparent`），字挪到
+	// 图形外侧右上角——不然透明底的字压在图形线条上读不出来。
 	Count string
 	// Size 是图标边长；0 = 18。
 	Size float32
@@ -154,6 +155,9 @@ type IconOpts struct {
 
 // countBadgeFont 是 `.cnt` 的字号（index.html:740 `font: 600 10px/1`）。
 const countBadgeFont = 10
+
+// countBadgeHook 只给测试用：每画一枚计数角标，把图形和计数文字两个元素交出去量 Bounds。
+var countBadgeHook func(glyph, count ui.Element)
 
 // 禁用态的不透明度（原型 index.html:228 `.icon-btn:disabled { opacity: .35 }`、
 // index.html:289 `.btn:disabled { opacity: .45 }`）。
@@ -219,20 +223,34 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 		g.AnimatePose(ui.Pose{Scale: pressed}, ui.Animation{Duration: motion.Fast, Ease: motion.EaseOut})
 		if o.Count != "" {
 			// `.cnt`（index.html:740）：右上角小角标，top 1、right -4、内边距 2/4、圆角 6、
-			// 600 10px/1 等宽 text-2。底色 side；全屏播放器里透明（app.js:1145 内联
-			// `background:transparent`——那里的底是封面取色，一块 side 色的方块会很突兀）。
+			// 600 10px/1 等宽 text-2，底色 side。
 			// 宽随字走（不先量字：量字用的是正文字体，等宽字体 + 「万」这类字更宽，按量出来的宽
 			// 会把「1.2万」截成「1.2…」）。
-			bg := p.Side
-			if fullMode {
-				bg = ui.Color{}
-			}
-			ui.Box(c).Height(countBadgeFont+2*space.Px2).Background(bg).
-				Padding(space.Px2, space.Px4).Radius(tok.R6).
-				Absolute().Top(space.Px1).Right(-space.Px4).Children(func() {
-				typo.Mono(ui.Text(c, o.Count)).FontSize(countBadgeFont).FixedLineHeight(countBadgeFont).
+			label := func() ui.Element {
+				return typo.Mono(ui.Text(c, o.Count)).FontSize(countBadgeFont).FixedLineHeight(countBadgeFont).
 					FontWeight(600).TextColor(p.Text2).SingleLine()
-			})
+			}
+			var t ui.Element
+			if fullMode {
+				// 全屏播放器里透明底（app.js:1145 内联 `background:transparent`——那里的底是封面
+				// 取色，一块 side 色的方块会很突兀）。没了底，原型那个位置（right -4、top 1）的字
+				// 就直接压在图形线条上，「1.2万」根本读不出来——所以字挪到图形**外侧右上角**：
+				// 底边落在图形顶边之上 1，左缘从图形中线往右 2 起。不从图形右缘起：「1.2万」宽 ~28，
+				// 从右缘起会伸到键外 17，正好顶到隔 8 的下一枚键的图形；从中线起只伸出 ~12。
+				// 键本身不加外边距，命中区还是 hit×hit，同排的键位置不变。
+				gTop := (hit - size) / 2
+				// 用 Bottom 定底边而不是 Top + 字号：「万」走 CJK 回退字体，行盒比 10 高（实测 14），
+				// 按字号推顶边的话底边照样压进图形。
+				ui.Box(c).Absolute().Left(hit/2 + space.Px2).Bottom(hit - gTop + space.Px1).
+					Children(func() { t = label() })
+			} else {
+				ui.Box(c).Height(countBadgeFont+2*space.Px2).Background(p.Side).
+					Padding(space.Px2, space.Px4).Radius(tok.R6).
+					Absolute().Top(space.Px1).Right(-space.Px4).Children(func() { t = label() })
+			}
+			if countBadgeHook != nil {
+				countBadgeHook(g, t)
+			}
 		}
 	})
 	return b

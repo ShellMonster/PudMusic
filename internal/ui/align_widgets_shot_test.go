@@ -45,7 +45,14 @@ func TestRenderAlignWidgetsShots(t *testing.T) {
 					// 全屏顶栏的评论键角标（透明底，app.js:1145）压在封面取色的底上，旁边是普通的（side 底）。
 					mygoui.Row(c).Gap(24).Padding(12).Background(mygoui.RGB(0x4a, 0x1c, 0x1e)).Radius(8).Children(func() {
 						pud.WithFull(func() {
-							pud.IconBtn(c, "cnt-full", "comment", "评论（全屏）", pud.IconOpts{Count: "1.2万"})
+							mygoui.Row(c).Gap(8).AlignItems(mygoui.Center).Children(func() {
+								pud.IconBtn(c, "cnt-full", "comment", "评论（全屏）", pud.IconOpts{Count: "1.2万"})
+								pud.IconBtn(c, "cnt-full-q", "queue", "队列（全屏）", pud.IconOpts{})
+							})
+							mygoui.Row(c).Gap(8).AlignItems(mygoui.Center).Children(func() {
+								pud.IconBtn(c, "cnt-full-999", "comment", "评论 999+（全屏）", pud.IconOpts{Count: "999+"})
+								pud.IconBtn(c, "cnt-full-q2", "queue", "队列 2（全屏）", pud.IconOpts{})
+							})
 						})
 						pud.IconBtn(c, "cnt-plain", "comment", "评论（普通）", pud.IconOpts{Count: "999+"})
 					})
