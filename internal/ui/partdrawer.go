@@ -34,7 +34,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -71,23 +70,16 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 
 	// 🔴 **身份钉死**：这一枚是**逐帧问出来**的（单 P 的稿子不摆），它一出现，
 	// 后面几枚的兄弟序号就都变了——而动画通道是存在身份里的（理由见
-	// `playbar_keys.go`）。
-	c.Key(partButtonKey)
-
+	// `playbar_keys.go`）。所以键固定是 `partButtonKey`。
+	//
 	// ⚠️ **图标不是装饰，是它唯一能被认出来的东西**：`ui.Icon` 对辅助技术是不可见
-	// 的（`mygo/ui/svg.go`），所以 `Label("分集")` 不许省——它既是无障碍名字，也是
+	// 的（`mygo/ui/svg.go`），所以名字「分集」不许省——它既是无障碍名字，也是
 	// 无头 Tester 认得这个按钮的唯一凭据（`Find` 按 label 找）。
 	//
-	// 🔴 **图标 18、点击区 32**（票 #219，报告 §3.6）：上游那一枚是
-	// `RiListRadio size={18}`（`layout/playbar/left/page-list.tsx:25`），而
-	// **播放条上全部图标键都是 18**。改之前是 14（`iconSm`）——比上游小 4 像素，
-	// 在 32 的盒子里每边留 9，看起来像「画糊了」。
-	//
-	// 尺寸照播放条上别的图标键：`iconMd` 的图标 + `iconHitMd` 的点击区
-	// + 每边 7 的内边距（那一圈留白就是 `TestTheHitAreaIsBiggerThanTheGlyph` 断的
-	// 「点击区比图形大」）。
-	btn := s.withTip(c, iconKey(c, iconPageList, "分集", iconMd, false).
-		Size(iconHitMd, iconHitMd).Padding(space.None, space.Px7),
+	// 样子和同排的下载 / 歌词 / 队列一致：`pud.IconBtn`（36 见方、图标 18、平时 text-2、
+	// 悬停 hover 底 + 正文色；原型 app.js:929 `<button class="icon-btn" data-pop="parts">`）。
+	// 原来是旧的 `iconKey`（32 + 每边 7 的内边距、悬停变主色），和左右两枚对不齐。
+	btn := s.withTip(c, pud.IconBtn(c, partButtonKey, "parts", "分集", pud.IconOpts{}),
 		partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
