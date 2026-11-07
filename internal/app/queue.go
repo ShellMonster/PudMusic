@@ -2160,6 +2160,7 @@ func (a *App) onTrackFinished() {
 		a.stopped = false
 		wake := a.wake
 		a.mu.Unlock()
+		a.kickTick()
 		if wake != nil {
 			wake()
 		}

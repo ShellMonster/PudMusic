@@ -169,6 +169,7 @@ func (a *App) Play() {
 	a.playing, a.wantPlay, a.stopped = true, true, false
 	wake := a.wake
 	a.mu.Unlock()
+	a.kickTick()
 	if wake != nil {
 		wake()
 	}
@@ -188,6 +189,7 @@ func (a *App) Pause() {
 	a.playing, a.wantPlay = false, false
 	wake := a.wake
 	a.mu.Unlock()
+	a.kickTick()
 	// 用户动了一下 → 落盘那一格该跟着变（见 playback_state.go）。
 	a.markPlaybackDirty()
 	if wake != nil {
@@ -215,6 +217,7 @@ func (a *App) Stop() {
 	a.setPositionLocked(0)
 	wake := a.wake
 	a.mu.Unlock()
+	a.kickTick()
 
 	// 用户动了一下 → 落盘那一格该跟着变（见 playback_state.go）。
 	//

@@ -37,6 +37,10 @@ func afterFunc(d time.Duration, fn func()) func() {
 // 又不至于把 CPU 烧在重绘上（Invalidate 会合并，一帧里叫多少次都只画一次）。
 const tickInterval = 50 * time.Millisecond
 
+// tickIdleInterval 是没有播放时的低频检查间隔。暂停或没有歌曲时，位置、淡出、
+// 播放记录和预取都没有工作可做，不需要保持 20Hz 的后台心跳。
+const tickIdleInterval = 500 * time.Millisecond
+
 // RateSteps 是倍率的档位（0.5 / 0.75 / 1 / 1.25 / 1.5 / 1.75 / 2）。
 //
 // 这是音频层那份的原样转发，界面层只认 app 这一份：界面画的每一行档位都必须
@@ -1063,9 +1067,10 @@ type App struct {
 	// mediaAt 是上一次跟系统说话的时刻。用来限住「多久校正一次进度」。
 	mediaAt time.Time
 
-	wake   func() // 界面层装：状态写完后叫它要一帧。装了就等于 `wakeAll`
-	done   chan struct{}
-	closed bool
+	wake     func() // 界面层装：状态写完后叫它要一帧。装了就等于 `wakeAll`
+	done     chan struct{}
+	tickKick chan struct{} // 播放状态变化时，让低频 timer 立即采样一次
+	closed   bool
 
 	// wakes 是**逐窗口**的那一份唤醒句柄，见 AddWake。
 	//
@@ -1119,6 +1124,7 @@ type wakeEntry struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
+		tickKick:    make(chan struct{}, 1),
 		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace),
 		finishers: map[string]*sourceFinisher{}}
 	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
@@ -1654,6 +1660,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 	if wake != nil {
 		wake()
 	}
+	a.kickTick()
 	return nil
 }
 
@@ -1696,6 +1703,7 @@ func (a *App) Toggle() {
 		a.stopped = false
 	}
 	a.mu.Unlock()
+	a.kickTick()
 	// 用户动了一下 → 落盘那一格该跟着变（见 playback_state.go）。
 	a.markPlaybackDirty()
 	// 锁屏上的播放/暂停按钮是跟着状态走的，这一句在 App/media.go 的说明里。
@@ -1853,6 +1861,7 @@ func (a *App) ScrubEnd(fraction float64) {
 	a.stopped = false
 	wake := a.wake
 	a.mu.Unlock()
+	a.kickTick()
 	// 用户拖了进度条 → 落盘那一格该跟着变（见 playback_state.go）。
 	//
 	// ⚠️ **这一格算「用户动了一下」**：它走的是那条「尽快写、但至少隔半秒」的
@@ -2088,7 +2097,7 @@ func (a *App) Close() {
 //
 // 空闲时（没有歌，或暂停）不唤醒，白刷的帧是白费的。
 func (a *App) tick() {
-	t := time.NewTicker(tickInterval)
+	t := time.NewTimer(tickIdleInterval)
 	defer t.Stop()
 	// shown 是**上一次叫醒界面时报出去的位置**，只属于这一个循环。
 	//
@@ -2105,6 +2114,9 @@ func (a *App) tick() {
 		select {
 		case <-a.done:
 			return
+		case <-a.tickKick:
+			resetTickTimer(t, 0)
+			continue
 		case <-t.C:
 			now := time.Now()
 			a.mu.Lock()
@@ -2305,6 +2317,37 @@ func (a *App) tick() {
 			// 放在锁外面调：它自己要拿 `a.mu`，而 `Player.Err()` 可能去碰
 			// 字节源。
 			a.checkPlayback()
+
+			a.mu.Lock()
+			live = a.wantPlay || a.playing
+			a.mu.Unlock()
+			resetTickTimer(t, chooseTickInterval(live))
 		}
+	}
+}
+
+func chooseTickInterval(live bool) time.Duration {
+	if live {
+		return tickInterval
+	}
+	return tickIdleInterval
+}
+
+func resetTickTimer(t *time.Timer, d time.Duration) {
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
+	t.Reset(d)
+}
+
+// kickTick 让低频 idle timer 立刻做一次内部采样。它不直接唤醒 UI，只负责避免
+// 从暂停切到播放后等完整个 idle interval 才更新位置。
+func (a *App) kickTick() {
+	select {
+	case a.tickKick <- struct{}{}:
+	default:
 	}
 }
