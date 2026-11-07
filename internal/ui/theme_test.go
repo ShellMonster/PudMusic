@@ -290,6 +290,11 @@ func TestTheAccentSettingPicksTheAccentGroup(t *testing.T) {
 			if th.AccentHover == th.Accent {
 				t.Errorf("%s 深色=%v：AccentHover 没从主色推出来", a, dark)
 			}
+			// 框架控件的主键悬停色和 pud.Button 的 Primary 一样：主色 88% 混正文色（原型
+			// index.html:283）。曾经出错的行为：深色下是主色混白 20%，两种主键悬停时颜色不同。
+			if want := th.Accent.Mix(th.Text, 0.12); th.AccentHover != want {
+				t.Errorf("%s 深色=%v：AccentHover 是 %v，want 主色混正文色 12%% = %v", a, dark, th.AccentHover, want)
+			}
 		}
 	}
 }

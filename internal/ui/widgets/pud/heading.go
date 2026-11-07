@@ -141,12 +141,7 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 							TextColor(p.Text3).SingleLine()
 					}
 					if on {
-						ui.Box(c).Key(key + ":bar").Absolute().Left(0).Right(0).Bottom(-1).Height(2).
-							Radius(tok.R2).Background(p.Accent).
-							Transition(ui.ElementTransition{
-								Duration: motion.Med, Ease: motion.EaseOut,
-								Enter: &ui.Motion{Scale: 0.3, Opacity: 0},
-							})
+						tabBar(c, key+":bar", p.Accent)
 					}
 				})
 				if b.Clicked() && !on {
@@ -156,4 +151,35 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 			}
 		})
 	return changed
+}
+
+// tabBarEnterScaleX 是选中下划线进场时的起始横向比例（原型 index.html:302
+// `@keyframes tab-in { from { transform: scaleX(.3); opacity: 0 } }`）。
+const tabBarEnterScaleX = 0.3
+
+type tabBarScaleKey struct{}
+
+// tabBar 画选中 Tab 下面那条 2 高的主色下划线，进场**只横向**从 30% 展开、同时淡入（240ms ease-out）。
+//
+// 框架的进场 `ui.Motion.Scale` 是横竖一起缩的（2 高的线会先变成 0.6 高再长回来），做不出原型的
+// `scaleX`；所以淡入交给 `Transition`，横向比例用 `AnimateTo` 自己推，再 `Scale(sx, 1)` 以中心为原点
+// 只缩横向。下划线换 Tab 时是新挂上的元素（在另一枚 Tab 里面），状态从头来，所以每次换 Tab 都重播。
+// 系统「减少动态效果」时 `AnimateTo` 直接到终点。
+func tabBar(c *ui.Context, key string, col ui.Color) ui.Element {
+	bar := ui.Box(c).Key(key).Absolute().Left(0).Right(0).Bottom(-1).Height(2).
+		Radius(tok.R2).Background(col).
+		Transition(ui.ElementTransition{
+			Duration: motion.Med, Ease: motion.EaseOut,
+			Enter: &ui.Motion{Opacity: 0},
+		})
+	fresh := ui.Local(bar, tabBarScaleKey{}, func() bool { return true })
+	if *fresh {
+		*fresh = false
+		bar.Jump(tabBarScaleKey{}, tabBarEnterScaleX)
+	}
+	sx := bar.AnimateTo(tabBarScaleKey{}, 1, ui.Animation{Duration: motion.Med, Ease: motion.EaseOut})
+	if sx != 1 {
+		bar = bar.Scale(sx, 1)
+	}
+	return bar
 }

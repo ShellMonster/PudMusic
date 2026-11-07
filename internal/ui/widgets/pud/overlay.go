@@ -35,9 +35,10 @@ func PopStyle(c *ui.Context, panel ui.Element, key string, minW float32) ui.Elem
 	return shadow.Pop(e, c.Theme())
 }
 
-// PopHeading 是弹层里的小标题（原型 `.pop h5`：12 号 text-3，左右 8、上 4 下 8）。
+// PopHeading 是弹层里的小标题（原型 `.pop h5`，index.html:591：12 号 text-3、字重 500，左右 8、上 4 下 8）。
 func PopHeading(c *ui.Context, s string) ui.Element {
-	return text(c, s, scale.Size12, pal(c).Text3).FixedLineHeight(18.6).Margin(space.Px4, space.Px8, space.Px8, space.Px8)
+	return text(c, s, scale.Size12, pal(c).Text3).FontWeight(500).FixedLineHeight(18.6).
+		Margin(space.Px4, space.Px8, space.Px8, space.Px8)
 }
 
 // PopSep 是弹层里的分隔线（原型 `.pop-sep`：1 像素 line，上下 6、左右 4）。
@@ -48,6 +49,7 @@ func PopSep(c *ui.Context) ui.Element {
 // PopOpt 是弹层里的一个单选项（原型 `.pop-opt` + `aria-checked`）：整行宽，内边距
 // 8/10、圆角 8、13 号；名字在上，note（12 号 text-3，如「FLAC 16bit」）在名字下面
 // 另起一行；悬停 hover 底；选中（checked）时名字 accent-text 600，右边一枚 14 的对勾。
+// 说明小字选中时**仍是 text-3**（原型 `.pop-opt small { color: var(--text-3) }`，index.html:595）。
 func PopOpt(c *ui.Context, key, label, note string, checked bool) ui.Element {
 	p := pal(c)
 	b := ui.ButtonBase(c).Key(key).Label(label).FillWidth().Padding(space.Px8, space.Px10).Gap(space.Px16).
@@ -64,10 +66,7 @@ func PopOpt(c *ui.Context, key, label, note string, checked bool) ui.Element {
 				t.TextColor(p.AccentText).FontWeight(600)
 			}
 			if note != "" {
-				note := text(c, note, scale.Size12, p.Text3).FixedLineHeight(18.6).SingleLine()
-				if checked {
-					note.TextColor(p.AccentText)
-				}
+				text(c, note, scale.Size12, p.Text3).FixedLineHeight(18.6).SingleLine()
 			}
 		})
 		if checked {
@@ -181,9 +180,10 @@ func DialogFoot(c *ui.Context, buttons func()) {
 		Children(buttons)
 }
 
-// ToastLife 是 Toast 默认停多久（原型 `toast()` 的 2.4 秒；带操作键的停久一点）。
+// ToastLife 是 Toast 默认停多久，ToastActionLife 是带操作键时停多久（原型 app.js:1315
+// `setTimeout(kill, action ? 5000 : 2600)`）。`internal/ui/toast.go` 的 `toastLifetime` 取前者。
 const (
-	ToastLife       = 2400 * time.Millisecond
+	ToastLife       = 2600 * time.Millisecond
 	ToastActionLife = 5 * time.Second
 )
 
