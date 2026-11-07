@@ -356,22 +356,27 @@ Tab 计数只在数得清时写、加入收藏夹没有「新建」输入行、�
 
 **刘海播放器**（`notch.go`）
 
-- 黑底（不随主题）、字色 `tok.Full.Text` #ecebe8 / `Text2` #a6a8ae、无阴影。收起：宽 = 刘海宽 + 2×（12 + 20），底角 16；展开：宽 468、
+- 黑底（不随主题）、字色 `tok.Full.Text` #ecebe8 / 次要 #a6a8ae（刘海自己的 `notchText2`；全屏的 `tok.Full.Text2` 是 #b6b5b2，
+  原型 `.full { --text-2 }`，两处不共用）、无阴影。**控件也不随主题**：刘海那一帧主题钉在深色档（`applyFrameThemeMode(c, ThemeModeDark)`），
+  pud 组件再夹在 `pud.WithFull` 里——浅色主题下图标键悬停底 / 开着色、进度条、主色全是深色那套（`TestNotchControlsKeepTheDarkPaletteUnderLightTheme`）。
+  展开 / 收起：宽高 240ms ease-out、不回弹（`motion.Med` + `motion.EaseOut`；原型 `.28s ease` / `#notch` 的 `var(--t-med) var(--ease-out)`）。收起：宽 = 刘海宽 + 2×（12 + 20），底角 16；展开：宽 468、
   深 210（原生窗口 528×280）、底角 24。展开卡按参考布局：主行 56 + 进度行 22 + 传输行，内边距 24 / 16 / 20 / 16、行距 14
   （本地 UI 原型 `prototype/` 不入库，数值即本节的规格）。
 - **顶上一行**（**只在收起时**）：左 20×20 封面（圆角 4）、右 `pud.EqBars`（放的时候才有）；两侧内边距 12。展开态不画
   （展开卡自带大封面 + 频谱，原型 `.notch.expanded .notch-top { display: none }`）。
 - **展开卡**（三行，内边距 24 / 16 / 20 / 16、行距 14）：
   - **主行**：封面 56（圆角 8）+ 歌名 16 号 600 / 歌手 15 号 `text-2`（缓冲时换「正在缓冲…」）+ 收藏（heart / heart-on，
-    只在 `Likeable` 时摆，和迷你窗同一枚「赞」）+ 频谱（5 根 `#ecebe8` 柱、`App.SpectrumBars`，**只在放的时候画**；
-    「在画」按 `SpectrumNotch` 那一格报 `SetSpectrumWantedFor`，和满屏那格互不覆盖）。
-  - **进度行**：已播（`0:00`）/ 轨道 / 剩余（`-m:ss`，读不到 `-:--`）三列 40 / 1fr / 40、缝 10；12 号等宽 `text-2`。
-    滑块是自绘 `knobHoverLook` 那根（轨道 4、旋钮悬停才出），拖动 / 章节吸附和播放条同一个分工。
+    只在 `Likeable` 时摆，和迷你窗同一枚「赞」；平时 #ecebe8）+ 频谱（5 根 `#ecebe8` 柱，柱宽 4、缝 3、圆角 3，`App.SpectrumBars`，**只在放的时候画**；
+    「在画」按 `SpectrumNotch` 那一格报 `SetSpectrumWantedFor`，和满屏那格互不覆盖）。收藏与频谱是一组、组内缝 14；整行缝 12。
+  - **进度行**：已播（`0:00`）/ 轨道 / 剩余（`-m:ss`，读不到 `-:--`）三列 40 / 1fr / 40、缝 10；12 号等宽 #a6a8ae。
+    滑块是刘海自己那根 `notchSeekSlider`（`notch_seek.go`）：轨道 4（悬停 6）、没走 #3a3a3e、走过 #ecebe8、悬停 / 按下换深色档主色、
+    旋钮悬停才出；拖动 / 章节吸附和播放条同一个分工。
   - **传输行**：随机（`shuffle`，`PlayMode == Random` 时亮）/ 上一首 / 播放（取流时绕光圈，同播放条）/ 下一首 /
-    循环（`repeat`，`Loop` 或 `Single` 档时亮），五枚图标键（两端 18、中间 24、两侧 22）、缝 28、居中。两端模式键
+    循环（`repeat`，`Loop` 或 `Single` 档时亮），五枚图标键（两端 18、中间 24、两侧 22）、缝 28、居中；中间三枚 #ecebe8，两端没开着时 #66676d（悬停 #ecebe8），开着 `accent-text`。两端模式键
     各管各的档：⤨ 没亮 → `SetPlayMode(Random)`、亮着 → 回 `Sequence`；⤻ 同理拨 `Loop` / 回 `Sequence`——再点一下
     回顺序档，不是单向门，也不是一枚键挨个转。
-- **空闲态**（没歌）：小卡「布丁音乐 / 未在播放」+「打开」，样式取同一套黑底配色（原型空闲态只有顶上一行，这里保留回到应用的入口）。
+- **空闲态**（没歌）：小卡「布丁音乐」14/600 + 「未在播放」12 #a6a8ae + 右端「打开」——透明底的主色文字键（14 号 `accent-text`），
+  左边没有图标块（原型 `.idle-body` / `.text-button`）。
 - **引导**（第一次开始播放且尚未开启刘海播放器）：同一套配色，「开启」是 32 高主色胶囊。
 - 字重只用命名常量 `miniTitleWeight` / `notchTitleWeight` / `miniCurtainActiveWeight`（600；系统字体里 600 与 700 同一档）。
 
