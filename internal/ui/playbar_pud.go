@@ -51,21 +51,35 @@ func pbIconColor(c *ui.Context, hovered, on bool) ui.Color {
 }
 
 // pbPopover 开一层播放条上的弹层（原型 `.pop`）：锚在按钮上，默认挂在按钮下面，放不下时框架
-// 会翻到上面；播放条在窗口最下面，所以实际总是在按钮上方 12。点外面 / Esc 自动关。
+// 会翻到上面；播放条在窗口最下面，所以实际总是在按钮上方 12。靠右的按钮（右缘离窗口右边
+// < 320）弹层右对齐，其余左对齐。点外面 / Esc 自动关。
 func (s *Shell) pbPopover(c *ui.Context, anchor ui.Element, open *bool, name string, body func()) {
 	if !*open {
 		return
 	}
 	c.Key("pb-pop:" + name)
+	// 原型 app.js:1017：按钮右缘离窗口右边不到 320 时弹层右对齐（贴按钮右缘），否则左对齐。
+	at, self := ui.AnchorBottomStart, ui.AnchorTopStart
+	if pbPopAlignEnd(anchor.Bounds(), windowW(c)) {
+		at, self = ui.AnchorBottomEnd, ui.AnchorTopEnd
+	}
 	ui.PopoverBase(c, anchor, open, func(panel ui.Element) {
 		p := tok.Of(c.Theme())
 		shadow.Pop(panel.
-			AttachTo(anchor, ui.AnchorBottomStart, ui.AnchorTopStart).
+			AttachTo(anchor, at, self).
 			Margin(space.Px12, space.None, space.None, space.None).
 			MinWidth(tok.PopMinW).Padding(space.Px8).Radius(tok.R12).
 			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn).
 			Label(name), c.Theme()).Children(body)
 	})
+}
+
+// pbPopEndGap 是「按钮右缘离窗口右边多近就改右对齐」的距离（原型 app.js:1017 `winRect.right - 320`）。
+const pbPopEndGap = 320
+
+// pbPopAlignEnd 报弹层要不要右对齐：按钮右缘落在窗口右边 320 以内。按钮还没量过（头一帧）时左对齐。
+func pbPopAlignEnd(btn ui.Rect, winW float32) bool {
+	return btn.W > 0 && btn.X+btn.W > winW-pbPopEndGap
 }
 
 // viewPlayBar 是整条播放条。
@@ -78,8 +92,18 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 		Background(p.Side).DrawOver(func(pp *ui.Painter, r ui.Rect) {
 		pp.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W, H: 1}, p.Line, 0)
 	})
+	// 原型 index.html:938-939：窗口 ≤ 1024 时三列改成 `minmax(0,1fr) auto minmax(0,auto)`、缝 16，
+	// 并藏起 `.hide-md` 那几枚（模式、睡眠、倍速、分集、下载、静音）和音量滑块（app.js:920-933）。
+	narrow := pbNarrow(windowW(c))
+	if narrow {
+		s.rateOpen, s.sleepOpen, s.dlOpen, s.partOpen = false, false, false, false
+	}
+	cols, gap := []ui.Track{ui.Fr(1), ui.Fr(1.3), ui.Fr(1)}, float32(space.Px24)
+	if narrow {
+		cols, gap = []ui.Track{ui.Fr(1), ui.Fixed(pbNarrowMidW), ui.FitContent()}, space.Px16
+	}
 	bar.Children(func() {
-		ui.Grid(c).Fill().ColumnTracks(ui.Fr(1), ui.Fr(1.3), ui.Fr(1)).GapX(space.Px24).
+		ui.Grid(c).Fill().ColumnTracks(cols...).GapX(gap).
 			RowTracks(ui.Fixed(tok.BarH)).Children(func() {
 			ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).MinWidth(0).Children(func() {
 				s.viewCover(c, st)
@@ -88,40 +112,64 @@ func (s *Shell) viewPlayBar(c *ui.Context, st app.State) {
 			})
 			ui.Column(c).Gap(space.Px4).AlignItems(ui.Center).Justify(ui.Center).
 				MinWidth(0).PassThrough().Children(func() {
-				s.viewTransport(c, st)
+				s.viewTransport(c, st, narrow)
 				s.viewProgress(c, st)
 			})
-			s.viewPlayBarRight(c, st)
+			s.viewPlayBarRight(c, st, narrow)
 		})
 	})
 }
 
+// pbNarrowMax 是播放条收窄的窗口宽上限（原型 `@media (max-width: 1024px)`，index.html:938-939）。
+const pbNarrowMax = 1024
+
+// pbNarrowMidW 是窄排中列的宽：原型那一列是 `auto`，量出来是 `.seek` 的固有宽
+// 44 + 12 + range 的默认固有宽 128 + 12 + 44 = 240（index.html:575-577）。框架的 FitContent
+// 会把进度条压到只剩几十像素，所以写成定宽。
+const pbNarrowMidW = 240
+
+// pbNarrow 报这一帧的播放条是不是窄排（窗口宽 ≤ 1024）。
+func pbNarrow(winW float32) bool { return winW > 0 && winW <= pbNarrowMax }
+
 // viewPlayBarRight 是右列：音质 / 倍速 / 分集 / 下载 / 歌词 / 队列 / 静音 / 音量，靠右、缝 4。
-func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State) {
-	// 右列靠右、内容比列宽时向左溢出（原型 `.bar-right { justify-content: flex-end }`
-	// 的效果，中间那一列因此始终在窗口正中）：绝对定位贴右。
-	ui.Row(c).Key("playbar-right").Gap(space.Px4).AlignItems(ui.Center).
-		Absolute().Right(0).Top(0).Bottom(0).
-		Children(func() {
-			s.viewQualityBadge(c, st, c.Theme())
+// 窄排（≤ 1024）只留音质、歌词、队列（原型 `.hide-md` / `.vol { display: none }`）。
+func (s *Shell) viewPlayBarRight(c *ui.Context, st app.State, narrow bool) {
+	row := ui.Row(c).Key("playbar-right").Gap(space.Px4).AlignItems(ui.Center)
+	if narrow {
+		// 窄排是 `auto` 那一列，正常排进网格（贴右）。
+		row = row.Justify(ui.End).MinWidth(0)
+	} else {
+		// 右列靠右、内容比列宽时向左溢出（原型 `.bar-right { justify-content: flex-end }`
+		// 的效果，中间那一列因此始终在窗口正中）：绝对定位贴右。
+		row = row.Absolute().Right(0).Top(0).Bottom(0)
+	}
+	row.Children(func() {
+		s.viewQualityBadge(c, st, c.Theme())
+		if !narrow {
 			s.viewRate(c, st)
 			s.viewPartButton(c, st)
 			if st.HasTrack && st.Source != app.SourceLocal {
 				s.viewDownloadButton(c, st)
 			}
-			s.viewLyricsKey(c, st)
-			if s.withTip(c, pud.IconBtn(c, "pb-queue", "queue", "播放列表", pud.IconOpts{On: s.drawerOpen}),
-				drawerTip(s.drawerOpen)).Clicked() {
-				s.toggleQueueDrawer()
-			}
+		}
+		s.viewLyricsKey(c, st)
+		if s.withTip(c, pud.IconBtn(c, "pb-queue", "queue", "播放列表", pud.IconOpts{On: s.drawerOpen}),
+			drawerTip(s.drawerOpen)).Clicked() {
+			s.toggleQueueDrawer()
+		}
+		if !narrow {
 			s.viewVolumeButton(c, st)
-		})
+		}
+	})
 }
 
 // viewTransport 是中列上面那一排：模式、上一首、播放键、下一首、睡眠定时（缝 12）。
-func (s *Shell) viewTransport(c *ui.Context, st app.State) {
+// 窄排（≤ 1024）不摆模式和睡眠定时（原型 app.js:920-924 `.hide-md`）。
+func (s *Shell) viewTransport(c *ui.Context, st app.State, narrow bool) {
 	ui.Row(c).Gap(space.Px12).AlignItems(ui.Center).Children(func() {
-		s.viewPlayMode(c, st)
+		if !narrow {
+			s.viewPlayMode(c, st)
+		}
 		if pud.IconBtn(c, "pb-prev", "prev", "上一首", pud.IconOpts{Size: 22, Disabled: !s.app.CanPrev()}).Clicked() {
 			s.app.Prev()
 		}
@@ -129,7 +177,9 @@ func (s *Shell) viewTransport(c *ui.Context, st app.State) {
 		if pud.IconBtn(c, "pb-next", "next", "下一首", pud.IconOpts{Size: 22, Disabled: !s.app.CanNext()}).Clicked() {
 			s.app.Next()
 		}
-		s.viewSleep(c, st)
+		if !narrow {
+			s.viewSleep(c, st)
+		}
 	})
 }
 
@@ -260,7 +310,8 @@ func (s *Shell) viewSleep(c *ui.Context, st app.State) {
 		for _, d := range app.SleepTimerSteps {
 			d := d
 			label := fmt.Sprintf("%d 分钟后暂停", int(d/time.Minute))
-			if pud.PopOpt(c, "pb-sleep:"+label, label, "", false).Label("睡眠定时 " + label).Clicked() {
+			// 原型 app.js:984：当前那一档打勾（`S.sleep.min === v`）。
+			if pud.PopOpt(c, "pb-sleep:"+label, label, "", st.SleepFor == d).Label("睡眠定时 " + label).Clicked() {
 				s.sleepOpen = false
 				s.app.SetSleepTimer(d)
 			}

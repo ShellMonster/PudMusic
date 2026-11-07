@@ -20,14 +20,14 @@ func (a *App) SetSleepTimer(d time.Duration) {
 	a.mu.Lock()
 	a.stopSleepLocked()
 	at := time.Now().Add(d)
-	a.sleepAt = at
+	a.sleepAt, a.sleepFor = at, d
 	a.sleepStop = a.after(d, func() {
 		a.mu.Lock()
 		if !a.sleepAt.Equal(at) {
 			a.mu.Unlock()
 			return
 		}
-		a.sleepAt, a.sleepStop = time.Time{}, nil
+		a.sleepAt, a.sleepFor, a.sleepStop = time.Time{}, 0, nil
 		a.mu.Unlock()
 		a.Pause()
 	})
@@ -65,7 +65,7 @@ func (a *App) stopSleepLocked() {
 	if a.sleepStop != nil {
 		a.sleepStop()
 	}
-	a.sleepAt, a.sleepStop, a.sleepAfterTrack = time.Time{}, nil, false
+	a.sleepAt, a.sleepFor, a.sleepStop, a.sleepAfterTrack = time.Time{}, 0, nil, false
 }
 
 // takeSleepAfterTrack 在一首放完时问一次：要不要在这儿停。要停就顺手清掉标志。

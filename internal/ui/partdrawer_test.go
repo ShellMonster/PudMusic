@@ -448,7 +448,8 @@ func TestThePartsKeyDoesNotBreakThePlayBar(t *testing.T) {
 	const title = "一首歌的名字很长很长很长很长"
 	const owner = "一个非常非常非常非常非常非常长的 UP 主名字"
 
-	for _, width := range []int{900, 1000, 1200, 1280} {
+	// 分集键只在窗口 > 1024 时摆（原型 .hide-md，见 playbar_narrow_test.go）。
+	for _, width := range []int{1025, 1100, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			s, tt := onlineTester(t, multiPages(), false, at(width, 460))
 			partsReady(t, s, tt, 3)
@@ -562,7 +563,8 @@ func TestTheDrawerDoesNotComeBackOnItsOwn(t *testing.T) {
 // ⚠️ **两档必须是同一首歌**：用的是同一份 fixture 的同一首（bvid、标题、UP 名都
 // 一样），只有「B 站回几集」不同，差别只有那一个键。
 func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
-	for _, width := range []int{900, 1000, 1200} {
+	// 分集键只在窗口 > 1024 时摆（原型 .hide-md，见 playbar_narrow_test.go）。
+	for _, width := range []int{1025, 1100, 1200} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			without := playbarWidths(t, width, nil)
 			with := playbarWidths(t, width, multiPages())
@@ -623,7 +625,7 @@ func TestThePartsKeyCostsNothingElseOnThePlayBar(t *testing.T) {
 // （`viewPlayBarRight`）——它和右列那几枚（下载 / 歌词 / 队列）在同一条
 // 水平线上，而不是左边那一列。
 func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 460))
 	partsReady(t, s, tt, 3)
 
 	part, ok := tt.Find("分集")
@@ -649,7 +651,7 @@ func TestThePartsKeySharesTheRowWithTheOtherKeys(t *testing.T) {
 // TestThePartsPopoverIsOnlyAsTallAsItsContent 断分集弹层按内容收高（原型 `.pop`：内边距 8，
 // `h5` 加每集一个 36 高的 `pop-opt`），不是一块固定高的死面板。
 func TestThePartsPopoverIsOnlyAsTallAsItsContent(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false, at(900, 460))
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 460))
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
 
@@ -669,7 +671,7 @@ func TestThePartsPopoverIsOnlyAsTallAsItsContent(t *testing.T) {
 // TestThePartsPopoverMatchesThePrototype 钉住分集弹层的行高和宽度：每一项 36 高
 // （`.pop-opt` 内边距 8 + 13 号字行高 1.55），面板最小宽 200（`.pop { min-width: 200px }`）。
 func TestThePartsPopoverMatchesThePrototype(t *testing.T) {
-	s, tt := onlineTester(t, multiPages(), false, at(900, 560))
+	s, tt := onlineTester(t, multiPages(), false, at(pbWideW, 560))
 	partsReady(t, s, tt, 3)
 	openPartsDrawer(t, tt)
 

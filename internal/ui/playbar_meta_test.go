@@ -107,7 +107,7 @@ func TestAnOwnerWithoutAnIDIsStillShownButGoesNowhere(t *testing.T) {
 func TestThePlayBarHasTheDownloadKey(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "一首歌", Artist: "某个 UP 主", ArtistMid: 1,
-	}, 1000)
+	}, pbWideW)
 	if !tt.HasText("下载当前歌曲") {
 		t.Errorf("播放条上没有「下载当前歌曲」：%q", tt.Texts())
 	}
@@ -154,7 +154,7 @@ func TestTheMetaKeysDrawTheirOwnGlyphs(t *testing.T) {
 	tt, _ := metaBarTester(t, app.State{
 		HasTrack: true, Title: "一首歌的名字很长很长很长很长",
 		Artist: "一个名字很长的 UP 主名字", ArtistMid: 12345,
-	}, 900)
+	}, pbWideW)
 
 	seen := map[string]string{}
 	for _, label := range []string{"一个名字很长的 UP 主名字", "下载当前歌曲"} {
@@ -324,7 +324,7 @@ func TestTheOwnerSitsUnderTheTitle(t *testing.T) {
 // 没歌时下载键一格都不画（见上一条），而**有歌、但那一首还没进队列**时它是
 // 摆着的——那就是「画着一个按了没反应的东西」。说一句比按了没反应好解释。
 func TestTheDownloadKeySaysSoWhenNothingIsPlaying(t *testing.T) {
-	tt, s := metaBarTester(t, app.State{HasTrack: true, Title: "一首歌"}, 1000)
+	tt, s := metaBarTester(t, app.State{HasTrack: true, Title: "一首歌"}, pbWideW)
 	// 下载键点开一层「下载音频 / 下载视频」弹层（原型 `dl`），选一项才真的下。
 	if err := tt.Click("下载当前歌曲"); err != nil {
 		t.Fatalf("点不动「下载当前歌曲」：%v（画面：%q）", err, tt.Texts())

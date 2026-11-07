@@ -264,10 +264,15 @@ func TestTheRightGroupHugsTheRightEdge(t *testing.T) {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			tt, _ := playbarTester(t, barState(), width, 0, false)
 
-			// 原型的右列最右是音量滑块（没有「加歌」）。
-			last, ok := tt.Find("音量")
+			// 原型的右列最右是音量滑块（没有「加歌」）；窗口 ≤ 1024 时音量和静音藏起来，
+			// 最右是队列键（原型 index.html:938-939）。
+			lastKey := "音量"
+			if pbNarrow(float32(width)) {
+				lastKey = "播放列表"
+			}
+			last, ok := tt.Find(lastKey)
 			if !ok {
-				t.Fatalf("宽度 %d：画面上找不到「音量」那一枚，文字有 %q", width, tt.Texts())
+				t.Fatalf("宽度 %d：画面上找不到「%s」那一枚，文字有 %q", width, lastKey, tt.Texts())
 			}
 
 			wantX := float32(width - playbarPadX)
@@ -591,7 +596,7 @@ func nearPixels(img *image.RGBA, box mygoui.Rect, want color.RGBA) int {
 //
 // 再点一下要**放回去**：放回去的是静音之前那个音量（80%），不是 50%。
 func TestClickingTheVolumeIconMutes(t *testing.T) {
-	h := newHarness(t)
+	h := newWideHarness(t) // 静音 / 音量 / 模式只在窗口 > 1024 时摆
 	h.open(t)
 
 	before := h.app.Snapshot().Volume
@@ -634,7 +639,7 @@ func TestClickingTheVolumeIconMutes(t *testing.T) {
 //
 // 而图标那一枚说的是「按下去会怎样」：静音的时候它是「取消静音」。
 func TestAMutedPlayerStillKeepsItsVolume(t *testing.T) {
-	h := newHarness(t)
+	h := newWideHarness(t) // 静音 / 音量 / 模式只在窗口 > 1024 时摆
 	h.open(t)
 
 	h.app.SetVolume(0.2)
