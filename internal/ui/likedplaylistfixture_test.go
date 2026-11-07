@@ -15,6 +15,8 @@
 package ui
 
 import (
+	"context"
+	"net/http"
 	"net/url"
 	"testing"
 
@@ -78,15 +80,36 @@ func newLikedBindShell(t *testing.T, f *biliFixture, boundID int64) (*Shell, *my
 	t.Helper()
 	st := app.DefaultSettings("")
 	if boundID != 0 {
-		st.LikedPlaylist = &app.LikedPlaylist{FolderID: boundID, Title: "绑定的那一格"}
+		// ⚠️ **种的是 `LikedFolder`，不是 `LikedPlaylist`**：`LikedFolder()`
+		//（`likedfolder.go`）读的是 `Settings.LikedFolder` 那一格——`LikedPlaylist`
+		// 是更早一版的字段，生产代码里已经没人读它（死字段），往那种等于
+		// 「设置里写了绑定、应用却按没绑跑」——症状正是弹窗照常弹三选一。
+		st.LikedFolder = app.LikedFolder{ID: boundID, Title: "绑定的那一格"}
 	}
 	b := newTestShell(t, at(likeWinW, likeWinH), withSettings(st))
 	s, tt := b.s, b.tt
-	s.app.MountLogin(app.NewMemoryStore("liked-bind"), f.client())
+	cli := f.client()
+	// ⚠️ **要种上登录态**：`LoadCreatedFolders` 用 `cli.SelfMid()` 判「登录
+	// 没有」，而 `SelfMid` 是从 `DedeUserID` cookie 里读的——`MountLogin`
+	// 挂一个**空** store 的话 restore 装不回 cookie，`SelfMid()` 是 0，
+	// 拉「我创建的收藏夹」那一趟会回「还没登录」。store 里的 Session 和
+	// jar 里的 cookie 缺一不可（`credentials.go` 的 `restore` 把 Session
+	// 翻成 cookie 装进 jar；`SeedCookies` 是测试里直接往 jar 塞的那个口子）。
+	store := app.NewMemoryStore("liked-bind")
+	if err := store.Save(context.Background(),
+		app.Session{SESSDATA: "sess", DedeUserID: "7"}); err != nil {
+		t.Fatal(err)
+	}
+	s.app.MountLogin(store, cli)
+	if err := cli.SeedCookies([]*http.Cookie{
+		{Name: "DedeUserID", Value: "7", Path: "/"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	s.app.MountStreaming(app.Streaming{
-		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
+		Client: cli, Media: f.Client(), TempDir: t.TempDir(),
 	})
-	s.app.MountCollections(app.CollectionRefs{Client: f.client()})
+	s.app.MountCollections(app.CollectionRefs{Client: cli})
 	if err := s.app.Enqueue(likeItem()); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}
