@@ -157,7 +157,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 - **禁用态**：`pud.Button` 画出来 45%、`pud.IconBtn` 35%（原型 index.html:289 / 228）。框架对 `Disabled(true)` 的元素绘制时再乘 0.5，所以组件自己给 0.9 / 0.7。
   禁用的键**没有悬停底 / 悬停色 / 按下缩放**（`:hover:not(:disabled)`）；禁用在建键时传（`pud.ButtonDisabled` / `pud.RoundButtonDisabled` 的 `disabled` 参数、`pud.IconOpts.Disabled`），**不要**在返回之后链 `.Disabled(true)`——那样只拦得住点击，悬停底照样亮。
 - **计数角标** `.cnt`：宽随字走（不先按正文字体量宽，否则「1.2万」会被截成「1.2…」）。
-- **弹层面板**：框架 `SelectBase` / `PopoverBase` 递进来的面板走 `popupPanel`（`popup.go`），和 `pud.PopPanel` 同一套 `.pop`：`surface` 底、`line` 描边、圆角 12、最小宽 200、`shadow.Pop`、进场 `PopIn`（原型 index.html:587-589）。
+- **弹层面板**：框架 `SelectBase` / `PopoverBase` 递进来的面板走 `popupPanel`（`popup.go`），和 `pud.PopPanel` 同一套 `.pop`：`surface` 底、`line` 描边、圆角 12、`shadow.Pop`、进场 `PopIn`（原型 index.html:587-589）；菜单 / 下拉（排序、工具条下拉、设置枚举）走 `popupMenuPanel`，多一条最小宽 200——歌词旋钮那种只装一条竖滑块的弹层不撑宽。
   `PopHeading` 12 号 text-3 **500**（`.pop h5`）；`PopOpt` 选中时只有名字变 `accent-text`，下面的说明小字仍是 text-3（`.pop-opt small`）。
 - **主按钮悬停色**：框架控件用的 `Theme.AccentHover` 和 `pud.Button` Primary 一样，深浅都是主色 88% 混正文色（index.html:283）。
 - **Tab 下划线进场**：只横向从 30% 展开 + 淡入 240ms（`scaleX(.3)`，index.html:302）；框架进场 `Motion.Scale` 横竖一起缩，所以横向比例用 `AnimateTo` 自己推。

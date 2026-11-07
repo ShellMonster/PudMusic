@@ -30,7 +30,9 @@ import (
 const popupRadius = tok.R12
 
 // popupPanel 给一个浮层面板上原型 `.pop` 的外观（index.html:587-589）：`surface` 底、
-// 1 像素 `line` 描边、圆角 12、最小宽 200、`--shadow-pop`、进场 `pop-in`（`motion.PopIn`）。
+// 1 像素 `line` 描边、圆角 12、`--shadow-pop`、进场 `pop-in`（`motion.PopIn`）。
+// **不带最小宽**：歌词旋钮那种只装一条竖滑块的小弹层要按内容收窄；菜单 / 下拉走
+// `popupMenuPanel`（多一条 `.pop { min-width: 200px }`）。
 // 和 `pud.PopPanel` / `pud.PopStyle` 同一套样子；这一处是给框架 `SelectBase` / `PopoverBase`
 // 递进来的面板用的（只有主题可用的地方）。
 //
@@ -42,9 +44,15 @@ const popupRadius = tok.R12
 func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
 	p := tok.Of(t)
 	return shadow.Popover(
-		panel.Radius(popupRadius).MinWidth(tok.PopMinW).
+		panel.Radius(popupRadius).
 			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn),
 		t)
+}
+
+// popupMenuPanel 是菜单 / 下拉那一类的 `popupPanel`：外观一样，再加原型 `.pop` 的最小宽 200
+// （排序下拉、工具条下拉、设置里的枚举下拉）。
+func popupMenuPanel(t *ui.Theme, panel ui.Element) ui.Element {
+	return popupPanel(t, panel.MinWidth(tok.PopMinW))
 }
 
 // popupPanelCard 给一个**卡片级**浮层面板上外观：底色 surface1、圆角 radiusLg、

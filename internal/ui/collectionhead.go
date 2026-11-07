@@ -406,7 +406,7 @@ func (s *Shell) viewCollectionSort(c *ui.Context, p *collectionPage) {
 	})
 
 	sel.Popup(func(panel ui.Element) {
-		popupPanel(t, panel.Padding(space.Px8))
+		popupMenuPanel(t, panel.Padding(space.Px8))
 		for _, sort := range bili.CollectionSorts {
 			item := sel.Item(sort).Padding(space.Px8, space.Px10).Radius(tok.R8).Gap(space.Px16).AlignItems(ui.Center)
 			if item.Highlighted() {
