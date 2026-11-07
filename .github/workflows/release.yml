@@ -125,10 +125,14 @@ jobs:
           go tool mygo build -platform ${{ matrix.platforms }}
 
       - name: Rename ${{ matrix.target }} assets to platform-friendly names
-        run: scripts/rename-release-assets.sh ${{ matrix.platforms }}
+        run: scripts/rename-release-assets.sh ${PLATFORMS//,/ }
+        env:
+          PLATFORMS: ${{ matrix.platforms }}
 
       - name: Verify ${{ matrix.target }} release assets
-        run: scripts/verify-release-assets.sh ${{ matrix.platforms }}
+        run: scripts/verify-release-assets.sh ${PLATFORMS//,/ }
+        env:
+          PLATFORMS: ${{ matrix.platforms }}
 
       - name: Upload ${{ matrix.target }} assets for the publish job
         uses: actions/upload-artifact@v4
