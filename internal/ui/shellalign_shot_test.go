@@ -47,3 +47,26 @@ func TestRenderShellAlignShots(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderShellAlignAvatarShots 存头像外环和头像菜单头部（40 头像 + 昵称 + UID）。
+func TestRenderShellAlignAvatarShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{true, false} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		f := newAvatarFixture(t)
+		f.withALoginIn()
+		_, tt := newAvatarShellIn(t, f, "2", dark)
+		waitFrames(t, tt, "头像图到了", func() bool { return avatarShowsThePicture(tt) })
+		openAvatarMenu(t, tt)
+		tt.Move(600, 400)
+		settleHome(tt)
+		homeFrame(tt)
+		save(t, dir, "shell-avatar-menu-"+name+".png", tt)
+	}
+}
