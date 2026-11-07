@@ -184,6 +184,10 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 			h.contentW = w
 		}
 	})
+
+	// 「回到顶部」那一枚（原型全局的 `.btt`，index.html 827 / app.js 1627：滚过 400 出现）。
+	// 首页滚的是整页这一个 `ui.Scroll`，位置就是 `h.scroll`（同设置页）。
+	list.BackToTop(c, h.scroll.Y, func() { h.scroll.Y = 0 })
 }
 
 // homeLayout 是首页随窗口宽度换挡的几个数。
