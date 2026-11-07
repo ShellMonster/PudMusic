@@ -392,11 +392,14 @@ func (s *Shell) viewPageEmptyWithReason(c *ui.Context, key, title string, e empt
 	// 标题是那一页平常空着时那一句（从别的页面切过来的那条路按它认「切过去了」），说明换成
 	// 这一次特别的原因。
 	//
-	// ⚠️ **页面名要画出来**（20 号，`scale.EmptyPageTitle`），不能只挂在无障碍名字上：这一支
-	// 不画 `PageHead`，顶栏也不再写页名——少了这一行，这一页在屏幕上就没有名字了
-	// （`TestThePageStillShowsItsOwnTitle`）。
-	ui.Column(c).Key(key).Grow(1).FillWidth().Justify(ui.Center).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, title).FontSize(scale.Font(c, scale.EmptyPageTitle)).SingleLine()
+	// ⚠️ **上面先画那一页的标准页头**（Eyebrow + 标题 + 导语，和未登录那一支同一个
+	// `viewHeadedPage`）：顶栏不再写页名，少了页头这一页在屏幕上就没有名字了
+	// （`TestThePageStillShowsItsOwnTitle`）；而且和未登录时页头落在同一个位置。
+	head, ok := loginPageHead[key]
+	if !ok {
+		head = pageHead{title: title}
+	}
+	s.viewHeadedPage(c, key, &head, func() {
 		pud.Empty(c, pudArtOf(e.Icon), e.Title, biliNotMounted, nil)
 	})
 }

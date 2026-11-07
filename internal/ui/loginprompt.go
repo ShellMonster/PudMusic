@@ -74,12 +74,17 @@ var loginPromptWhat = map[string]string{
 	"home:recent:login":   "最近播放",
 }
 
-// loginPageHead 是整页未登录时登录提示**上面**那个页头（原型 app.js:699 / 709：`later()` / `history()`
-// 未登录时是 `head() + loginPrompt(...)`，页头在前）。键同 `loginPromptWhat`；首页「最近播放」那一块
-// 不是整页，没有页头。
-var loginPageHead = map[string]struct{ eyebrow, title, lede string }{
+// pageHead 是一页的标准页头三样：Eyebrow、标题、导语（导语可空）。
+type pageHead struct{ eyebrow, title, lede string }
+
+// loginPageHead 是整页「不画正文」那几支（未登录的登录提示、B 站客户端没挂上的空状态）**上面**那个
+// 页头（原型 app.js:699 / 709：`later()` / `history()` 未登录时是 `head() + loginPrompt(...)`，页头在前）。
+// 三样和那一页平常的 `pud.PageHead` 一字不差。键是各页给 `viewNeedsLogin` /
+// `viewPageEmptyWithReason` 的稳定 key；首页「最近播放」那一块不是整页，没有页头。
+var loginPageHead = map[string]pageHead{
 	"page:" + laterPath:   {"Watch later", "稍后再看", "先存下来，等有空的时候再听。"},
 	"page:" + historyPath: {"History", "历史记录", ""},
+	"page:" + followPath:  {"Following", "我的关注", ""},
 }
 
 // viewNeedsLogin 画「登录后查看」：原型 `loginPrompt`，也就是 T0 的 `pud.LoginPrompt`（虚线框 + 锁的
@@ -93,24 +98,36 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, _ emptyState) {
 	if what == "" {
 		what = "这些内容"
 	}
+	head, isPage := loginPageHead[key]
+	var hp *pageHead
+	if isPage {
+		hp = &head
+	}
+	s.viewHeadedPage(c, key, hp, func() {
+		if pud.LoginPrompt(c, key+":prompt", what) {
+			s.goLogin(homePath)
+		}
+	})
+}
+
+// viewHeadedPage 是整页「标准页头 + 下面一块」的架子：原型 `.page { padding: 8px 40px 64px;
+// max-width: 1280px; margin: 0 auto }`——边距按窗口宽，内容最宽 1280（含边距）并居中；head 非空时
+// 先画 `pud.PageHead`（上边距 `space.PageTop`），再画 body。head 为空（首页里的一块）时不画页头、
+// 也不留上边距。未登录的登录提示和「B 站客户端没挂上」的空状态都走这里，两种状态的页头位置一样。
+func (s *Shell) viewHeadedPage(c *ui.Context, key string, head *pageHead, body func()) {
 	winW, _ := c.Size()
-	// 原型 `.page { padding: 8px 40px 64px; max-width: 1280px; margin: 0 auto }`：边距按窗口宽，
-	// 内容最宽 1280（含边距）并居中。
 	padX := space.PageHorizontalForWindow(winW)
 	inner := min(winW-s.sideDrawnWidth(s.app.SettingsSnapshot()), space.PageMaxW)
-	head, isPage := loginPageHead[key]
 	top := float32(space.None)
-	if isPage {
+	if head != nil {
 		top = space.PageTop
 	}
 	ui.Column(c).Key(key).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
 		ui.Column(c).Width(inner).Padding(top, padX, space.None, padX).Children(func() {
-			if isPage {
+			if head != nil {
 				pud.PageHead(c, head.eyebrow, head.title, head.lede, winW, nil)
 			}
-			if pud.LoginPrompt(c, key+":prompt", what) {
-				s.goLogin(homePath)
-			}
+			body()
 		})
 	})
 }

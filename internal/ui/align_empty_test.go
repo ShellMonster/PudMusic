@@ -140,3 +140,42 @@ func TestALoadErrorIsAnEmptyStateWithARetry(t *testing.T) {
 		t.Errorf("点了重试，重试函数跑了 %d 次，want 1", retried)
 	}
 }
+
+// TestTheUnmountedPageHeadSitsWhereTheLoggedOutOneDoes 锁住稍后再看 / 历史记录在「B 站客户端没挂上」
+// 时画的是那一页的标准页头（Eyebrow + 标题 + 导语），而且和未登录时的页头落在同一个位置。
+//
+// 曾经出错的行为：没挂上那一支只在空状态上面加了一行 20 号页面名，没有 Eyebrow 和导语，
+// 位置也和未登录那一支（`pud.PageHead`）不一样，两种状态切换时页名会跳。
+func TestTheUnmountedPageHeadSitsWhereTheLoggedOutOneDoes(t *testing.T) {
+	for _, pg := range []struct{ path, eyebrow, lede string }{
+		{laterPath, "WATCH LATER", "先存下来，等有空的时候再听。"},
+		{historyPath, "HISTORY", ""},
+	} {
+		t.Run(pg.path, func(t *testing.T) {
+			heads := map[string]mygoui.Rect{}
+			for _, mount := range []bool{false, true} {
+				opts := []shellOpt{}
+				state := "没挂上"
+				if mount {
+					state = "未登录"
+					f := newLibFake(t)
+					opts = append(opts, mounted(func(t *testing.T, a *app.App) { a.MountLibrary(biliForTest(t, f)) }))
+				}
+				b := newTestShell(t, opts...)
+				b.s.navigate(pg.path)
+				waitFrames(t, b.tt, state+"的页头", func() bool { return b.tt.HasText(pg.eyebrow) })
+				r, _ := b.tt.Find(pg.eyebrow)
+				heads[state] = r
+				if pg.lede != "" && !b.tt.HasText(pg.lede) {
+					t.Errorf("%s时没有页头导语「%s」，文字有 %q", state, pg.lede, b.tt.Texts())
+				}
+				if !mount && !b.tt.HasText(biliNotMounted) {
+					t.Errorf("没挂上时没有说原因，文字有 %q", b.tt.Texts())
+				}
+			}
+			if a, b := heads["没挂上"], heads["未登录"]; a.X != b.X || a.Y != b.Y {
+				t.Errorf("页头 Eyebrow 没挂上时在 %v，未登录时在 %v，应该同一个位置", a, b)
+			}
+		})
+	}
+}

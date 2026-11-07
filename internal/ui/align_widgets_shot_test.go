@@ -9,6 +9,7 @@ package ui
 import (
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +101,20 @@ func TestRenderAlignWidgetsShots(t *testing.T) {
 			b.tt.Frame()
 			b.tt.Frame()
 			save(t, dir, name+"-align-later-logged-out.png", b.tt)
+			b.s.navigate(historyPath)
+			b.tt.Frame()
+			b.tt.Frame()
+			save(t, dir, name+"-align-history-logged-out.png", b.tt)
+
+			// ⑤ 稍后再看 / 历史记录在 B 站客户端没挂上时（页头 + 空状态），和④对比页头位置。
+			u := newTestShell(t, systemIsDark(dark))
+			u.tt.SetDark(dark)
+			for _, pg := range []string{laterPath, historyPath} {
+				u.s.navigate(pg)
+				u.tt.Frame()
+				u.tt.Frame()
+				save(t, dir, name+"-align"+strings.ReplaceAll(pg, "/", "-")+"-unmounted.png", u.tt)
+			}
 		})
 	}
 }
