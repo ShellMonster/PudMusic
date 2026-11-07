@@ -92,15 +92,11 @@ func (s *Shell) viewFavoriteLabel(c *ui.Context, g app.FavoriteGroup, canNew boo
 		if g != app.FavoritesCreated || !canNew {
 			return
 		}
+		// 原型 `.side-label button`（index.html:180）没有悬停样式：一直是 text-3、无底。
 		b := ui.ButtonBase(c).Key("fav-new").Label("新建收藏夹").Size(24, 24).Radius(tok.R4).
 			AlignItems(ui.Center).Justify(ui.Center)
-		fg := p.Text3
-		if b.Hovered() {
-			b = b.Background(p.Hover)
-			fg = p.Text
-		}
-		b.Transition(motion.Fade).Children(func() {
-			ui.Icon(c, icon(pudPlus)).FontSize(14).TextColor(fg)
+		b.Children(func() {
+			ui.Icon(c, icon(pudPlus)).FontSize(14).TextColor(p.Text3)
 		})
 		s.withMenuTip(c, b, "新建收藏夹")
 		if b.Clicked() {
@@ -409,7 +405,8 @@ func (s *Shell) viewFavoriteCover(c *ui.Context, f app.Favorite) {
 		cover = s.app.FolderFallbackCover(app.CollectionRefOf(f))
 	}
 	if cover == "" {
-		defaultCover(c, favCoverSize)
+		// 兜底默认封面和真封面同一个圆角 R4（原型 `.fav-cover`，index.html:198）。
+		defaultCoverRadius(c, favCoverSize, tok.R4)
 		return
 	}
 	imgcache.ViewRadius(c, s.images, imgcache.CoverURL(cover, imgcache.ParamsSquare), favCoverSize, favCoverSize, tok.R4)

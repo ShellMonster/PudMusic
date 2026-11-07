@@ -44,7 +44,8 @@ func rateBarTester(t *testing.T, width int) (*mygoui.Tester, *app.App, *Shell) {
 
 // TestRateButtonShowsTheCurrentRate 盯按钮上的字就是当前倍率。
 func TestRateButtonShowsTheCurrentRate(t *testing.T) {
-	tt, a, _ := rateBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a, _ := rateBarTester(t, pbWideW)
 	if !tt.HasText("1×") {
 		t.Fatalf("默认是原速，按钮上却不是「1×」：%q", tt.Texts())
 	}
@@ -68,7 +69,7 @@ func TestRateButtonShowsTheCurrentRate(t *testing.T) {
 // 那个变量，别的一律不动——这一条验的正是「喂进来的东西一变，画面就跟着变」。
 func TestRateIsReadEveryFrame(t *testing.T) {
 	st := app.State{HasTrack: true, Title: "一首歌", Rate: 1}
-	b := newTestShell(t, at(760, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
+	b := newTestShell(t, at(pbWideW, coverWinH), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
 			s.wake.set(c)
 			s.viewPlayBar(c, st) // ← 闭包读的是外面那个变量
@@ -108,7 +109,8 @@ func TestRateIsReadEveryFrame(t *testing.T) {
 // 不认的值，按下去被吸到别的档位上，而按钮写的又是吸过去的那个——用户完全
 // 不知道自己刚才按的到底是什么。
 func TestRateMenuListsEveryStep(t *testing.T) {
-	tt, _, _ := rateBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, _, _ := rateBarTester(t, pbWideW)
 
 	// 没点开时，浮层里的档位不该出现在画面上（按钮上的那一档当然在）。
 	before := map[string]bool{}
@@ -131,7 +133,8 @@ func TestRateMenuListsEveryStep(t *testing.T) {
 
 // TestClickingAStepSetsTheRate 盯按档位之后状态真的改了、字也真的变了。
 func TestClickingAStepSetsTheRate(t *testing.T) {
-	tt, a, s := rateBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a, s := rateBarTester(t, pbWideW)
 
 	for _, r := range []float64{1.5, 0.5, 2, 1} {
 		if err := tt.Click("播放速率"); err != nil {
@@ -161,7 +164,8 @@ func TestClickingAStepSetsTheRate(t *testing.T) {
 // 播放条是固定 76 高的一行，右边多一格就往左挤。挤掉的正是歌名——而歌名挤没了
 // 之后**界面看不出坏了**：字还在那儿，只是一个字一行、或者被裁掉半个。
 func TestTheRateButtonDoesNotSquashTheTitle(t *testing.T) {
-	for _, width := range []int{760, 900, 1000, 1200, 1280} {
+	// 只量 > 1024 的几档：≤ 1024 时这枚键按原型藏起来了，不会再挤歌名（见 playbar_narrow_test.go）。
+	for _, width := range []int{1025, 1100, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			// 这里要的是一根很长的歌名，喂 State 比真开一首文件省事得多
 			// （真开的话标题是文件名，短得挤不出问题）。

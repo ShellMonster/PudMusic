@@ -36,6 +36,14 @@ func (s *Shell) viewNav(c *ui.Context) {
 	if !s.searchSuggest && !s.avatarMenuOpen {
 		nav = nav.DragWindow()
 	}
+	// 原型 index.html:219-220 / app.js:1686：平时下边框透明，内容区滚过 4 像素才露出 1 像素
+	// `line`。叠画在顶栏底边（不占高），回到顶上就消失。
+	if s.pageScrolled() {
+		line := tok.Of(c.Theme()).Line
+		nav = nav.DrawOver(func(pp *ui.Painter, r ui.Rect) {
+			pp.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, line, 0)
+		})
+	}
 	nav.Children(func() {
 		ui.Row(c).Key("nav-arrows").Gap(space.Px4).AlignItems(ui.Center).Children(func() {
 			s.viewNavBack(c, back)

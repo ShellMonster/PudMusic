@@ -70,7 +70,8 @@ func modeBarTesterWithState(t *testing.T, width int, st app.State) (*mygoui.Test
 // `icon`，档位那句话在 Tooltip 上）。所以断的换成**四档画出来四个不同的图形**——
 // 那才是「这一格在不在说谎」。
 func TestThePlayModeButtonSaysWhichModeItIs(t *testing.T) {
-	tt, a := modeBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a := modeBarTester(t, pbWideW)
 
 	seen := map[string]app.PlayMode{}
 	for _, m := range app.PlayModes {
@@ -108,7 +109,8 @@ func TestThePlayModeButtonSaysWhichModeItIs(t *testing.T) {
 // ⚠️ 断的是**按钮上的字跟着变了**，不只是 App 里的枚举变了：State 是每帧现读
 // 的，App 改了而界面没被叫醒的话，画面上还是旧的那一档。
 func TestClickingThePlayModeButtonWalksTheFourModes(t *testing.T) {
-	tt, a := modeBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a := modeBarTester(t, pbWideW)
 
 	a.SetPlayMode(app.PlayModeSequence)
 	tt.Frame()
@@ -151,7 +153,8 @@ func TestClickingThePlayModeButtonWalksTheFourModes(t *testing.T) {
 // ⚠️ 右键出来的是**系统菜单**而不是窗口里的一片元素，所以要经 `Menu()` 读、
 // 经 `ChooseMenuItem` 选（`Texts()` 里看不见它——这一点在写这一条时被坑过）。
 func TestThePlayModeMenuListsEveryMode(t *testing.T) {
-	tt, _ := modeBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, _ := modeBarTester(t, pbWideW)
 
 	// 没点开时，浮层里的档位不该出现在画面上（按钮上的那一档当然在）。
 	if tt.HasText(app.PlayModeRandom.Desc()) {
@@ -174,7 +177,8 @@ func TestThePlayModeMenuListsEveryMode(t *testing.T) {
 
 // TestChoosingAModeFromTheMenuTakesIt 盯从那一列里选一档真的会换。
 func TestChoosingAModeFromTheMenuTakesIt(t *testing.T) {
-	tt, a := modeBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a := modeBarTester(t, pbWideW)
 	a.SetPlayMode(app.PlayModeLoop)
 	tt.Frame()
 
@@ -207,7 +211,8 @@ func TestChoosingAModeFromTheMenuTakesIt(t *testing.T) {
 //   - **摆出来就真的能改**：只画一个开关而按下去没反应，比不画更糟——用户会
 //     以为「我按了，它坏了」。
 func TestTheKeepPagesOrderSwitchOnlyShowsUpWhileShuffling(t *testing.T) {
-	tt, a := modeBarTester(t, 760)
+	// 窗口 > 1024：≤ 1024 时这枚键按原型藏起来了（见 playbar_narrow_test.go）。
+	tt, a := modeBarTester(t, pbWideW)
 	const keep = "保持分集顺序"
 
 	a.SetPlayMode(app.PlayModeLoop)
@@ -253,7 +258,8 @@ func TestTheKeepPagesOrderSwitchOnlyShowsUpWhileShuffling(t *testing.T) {
 // 那一组现在是 **221 宽**、五个 8 的缝。
 // 那一组仍然满座——所以这条断言现在守的是「三枚新键挤进来了，歌名还在」。
 func TestThePlayModeButtonDoesNotSquashTheTitle(t *testing.T) {
-	for _, width := range []int{760, 900, 1000, 1200, 1280} {
+	// 只量 > 1024 的几档：≤ 1024 时这枚键按原型藏起来了，不会再挤歌名（见 playbar_narrow_test.go）。
+	for _, width := range []int{1025, 1100, 1200, 1280} {
 		t.Run(fmt.Sprint(width), func(t *testing.T) {
 			// 钉死的 State：这里要的是一根很长的歌名，喂 State 比真开一首文件
 			// 省事得多（真开的话标题是文件名，短得挤不出问题）。

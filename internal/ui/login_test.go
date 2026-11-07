@@ -151,7 +151,9 @@ func loginTester(t *testing.T, a *app.App) (*mygoui.Tester, *Shell) {
 	// 自动那一轮和测试手动 `BeginLogin` 的那一轮就挤在一起——先来的被取消、它
 	// 收尾的 `Lease.Discard` 把登录态代次涨掉，后来的 Commit 撞上 ErrStaleGeneration，
 	// 相位永远停在「已取消登录」。建在 Tester 之前设是**唯一**比那第一帧更早的点。
-	b := newTestShell(t, onApp(a), at(900, 600), withView(func(s *Shell) func(*mygoui.Context) {
+	// 窗口宽 1100：≤ 1024 时登录卡改单列（原型 index.html:943），600 高放不下，按钮会落到窗口外；
+	// 这一组测的是按钮行为，单列排法见 login_layout_test.go。
+	b := newTestShell(t, onApp(a), at(1100, 600), withView(func(s *Shell) func(*mygoui.Context) {
 		return func(c *mygoui.Context) {
 			ApplyTheme(c, app.DefaultSettings(""), c.Theme().Dark)
 			s.router.Push("/login")
@@ -428,7 +430,7 @@ func TestQRCodeReachesThePixels(t *testing.T) {
 	tt.Frame()
 
 	img := tt.Image()
-	if img.Bounds().Dx() != 900 || img.Bounds().Dy() != 600 {
+	if img.Bounds().Dx() != 1100 || img.Bounds().Dy() != 600 {
 		t.Fatalf("画面是 %dx%d", img.Bounds().Dx(), img.Bounds().Dy())
 	}
 

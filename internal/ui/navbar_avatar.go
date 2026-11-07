@@ -347,6 +347,9 @@ type avatarState struct {
 	face string
 	// note 是给用户看的一句交代。它是这一格的无障碍名，也是鼠标悬停时的那一行。
 	note string
+	// name 是 B 站给的昵称（和首页问候语同一份 `AccountNav.Name`），头像菜单头部用；
+	// 空串 = 没问出来或 B 站没给，菜单头部退回「已登录」。
+	name string
 }
 
 // snapshot 拿一份拷贝。**每一帧都调**，所以它只锁一次、只拷几个字段。
@@ -354,6 +357,13 @@ func (a *avatarState) snapshot() (look avatarLook, face, note string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.look, a.face, a.note
+}
+
+// nameNow 是此刻的昵称（空串 = 没有）。
+func (a *avatarState) nameNow() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.name
 }
 
 // avatarSync 让那一格追上此刻的登录态。**每一帧都会被叫到**
@@ -394,7 +404,7 @@ func (s *Shell) avatarSync() {
 	// 先摆成「还没问出来」的样子：登录了就是人形等着，登录都没登录是另一句
 	// 交代。**不摆一个错的**——退登那一刻界面上如果还挂着上一个账号的头像，
 	// 用户会以为退没退干净。
-	a.look, a.face = avatarSilhouette, ""
+	a.look, a.face, a.name = avatarSilhouette, "", ""
 	if loggedIn {
 		a.note = avatarNoteWaiting
 	} else {
@@ -437,6 +447,9 @@ func (s *Shell) fetchAvatarFace(gen uint64) {
 	if a.gen != gen {
 		a.mu.Unlock()
 		return
+	}
+	if err == nil && nav.LoggedIn {
+		a.name = nav.Name
 	}
 	switch {
 	case err != nil:
@@ -508,9 +521,10 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 	ui.Column(c).Key("avatar").Margin(space.None, space.None, space.None, space.Px4).Children(func() {
 		hit := ui.ButtonBase(c).Size(avatarHit, avatarHit).Padding(space.None).Radius(avatarHit / 2).
 			Label(avatarLabel)
-		// 原型 `.top-me`：悬停 2 像素 `line-strong` 环，展开 / 聚焦时 2 像素 `accent` 环。
+		// 原型 `.top-me`（index.html:256-258）：悬停 2 像素 `line-strong` 环，展开 / 聚焦时 2 像素
+		// `accent` 环；环是 36 按钮外面的 `box-shadow 0 0 0 2px`（36 → 40），和 32 头像之间空 2。
 		on := hit.Hovered()
-		hit = avatarRing(c, hit, on, s.avatarMenuOpen, float32(avatarSize))
+		hit = avatarRing(c, hit, on, s.avatarMenuOpen, float32(avatarSize), avatarRingGap)
 		hit.Children(func() {
 			// 那一枚圆：**裁成圆的**（里面的图要按圆裁）。
 			face := ui.Box(c).Size(avatarSize, avatarSize).Radius(avatarSize / 2).Clip()
@@ -533,9 +547,12 @@ func (s *Shell) viewAvatar(c *ui.Context) {
 	})
 }
 
+// avatarRingGap 是顶栏头像和外环之间空的那一圈（原型 36 按钮 − 32 头像 = 每边 2）。
+const avatarRingGap = 2
+
 // avatarRing 画头像外面那圈环（原型 `.top-me`）：悬停 `line-strong`，展开时 `accent`，
-// 都是 2 像素，贴着头像那枚圆的外沿。side 是那一枚圆多大。
-func avatarRing(c *ui.Context, e ui.Element, hover, open bool, side float32) ui.Element {
+// 都是 2 像素。side 是那一枚圆多大，gap 是圆外沿到环内沿空多少（0 = 贴着）。
+func avatarRing(c *ui.Context, e ui.Element, hover, open bool, side, gap float32) ui.Element {
 	p := tok.Of(c.Theme())
 	var col ui.Color
 	switch {
@@ -547,7 +564,7 @@ func avatarRing(c *ui.Context, e ui.Element, hover, open bool, side float32) ui.
 		return e
 	}
 	const width = float32(2)
-	d := side + 2*width
+	d := side + 2*gap + 2*width
 	return e.DrawOver(func(pp *ui.Painter, r ui.Rect) {
 		pp.Stroke(ui.Rect{X: r.X + (r.W-d)/2, Y: r.Y + (r.H-d)/2, W: d, H: d}, col, d/2, width)
 	})
@@ -581,17 +598,31 @@ func (s *Shell) viewAvatarMenu(c *ui.Context, anchor ui.Element) {
 	})
 }
 
-// viewAvatarMenuHead 是下拉最上面那一块（原型 `me` 的头部：状态 + 说明，下面一条分隔线）。
-// 原型的名字 / 「Hi-Res 可用」是假数据；本仓库拿得到的真数据只有登录态和 UID。
+// avatarMenuHeadSide 是头像菜单头部那枚头像的边长（原型 app.js:1007 `avatar('me', 40)`）。
+const avatarMenuHeadSide = 40
+
+// viewAvatarMenuHead 是下拉最上面那一块（原型 app.js:1007 `.pop-row`：40 头像 + 名字 600 +
+// 一行小字，缝 12，内边距 8/10；下面一条分隔线）。名字用 B 站昵称（和首页问候语同一份
+// `AccountNav.Name`），没有就写「已登录」；小字按 DESIGN §0′.T1 用 UID，不用原型的
+// 「Hi-Res 可用」假数据。
 func (s *Shell) viewAvatarMenuHead(c *ui.Context) {
 	p := tok.Of(c.Theme())
 	title, sub := "未登录", "登录后能看到收藏夹和动态"
 	if s.app.LoggedIn() {
 		title, sub = "已登录", "UID "+s.app.Session().DedeUserID
+		if name := s.avatar.nameNow(); name != "" {
+			title = name
+		}
 	}
-	ui.Column(c).FillWidth().Padding(space.Px8, space.Px10).Children(func() {
-		ui.Text(c, title).FontSize(scale.Font(c, scale.Size14)).FontWeight(600).SingleLine()
-		ui.Text(c, sub).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).SingleLine()
+	ui.Row(c).FillWidth().Gap(space.Px12).AlignItems(ui.Center).Padding(space.Px8, space.Px10).Children(func() {
+		side := float32(avatarMenuHeadSide)
+		ui.Box(c).Size(side, side).Radius(side / 2).Clip().Shrink(0).Children(func() {
+			s.viewAvatarFaceAt(c, side, false)
+		})
+		ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px2).Children(func() {
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size13)).FontWeight(600).SingleLine().Ellipsis("…")
+			ui.Text(c, sub).FontSize(scale.Font(c, scale.Size11)).TextColor(p.Text3).SingleLine()
+		})
 	})
 	pud.PopSep(c)
 }
@@ -742,14 +773,17 @@ func (s *Shell) viewAvatarLogoutConfirm(c *ui.Context) {
 // **封面**那一档尺寸定的（占位和失败态都是没有字的一格，见 imgcache/view.go 的
 // drawCover）。头像只有 40 宽，而且它要说的是「未登录 / 图没下来 / 在路上」
 // 三件不同的事，有自己的一套画法（见下面 drawAvatar）。
-func (s *Shell) viewAvatarFace(c *ui.Context) {
-	side := float32(avatarSize)
+func (s *Shell) viewAvatarFace(c *ui.Context) { s.viewAvatarFaceAt(c, avatarSize, true) }
+
+// viewAvatarFaceAt 按边长 side 画头像；labeled 为 false 时不挂无障碍名和悬停说明
+// （头像菜单头部那一枚：同一句交代顶栏那一枚已经说过了）。
+func (s *Shell) viewAvatarFaceAt(c *ui.Context, side float32, labeled bool) {
 	look, face, note := s.avatar.snapshot()
 
 	// 没有地址：这一格归状态那一层说，缓存压根不用问（它对空地址不表态，
 	// 而 `Get("")` 会拿空串当一个键去查——那是个永远下不下来的地址）。
 	if face == "" {
-		s.drawAvatar(c, look, note)
+		s.drawAvatarAt(c, look, note, side, labeled)
 		return
 	}
 
@@ -770,14 +804,14 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 		// ⚠️ **这一档不能摆成空白**——40 见方的一格空白在顶栏上是一个看不出是
 		// 什么的洞，而用户真正缺的不是那张图，是「为什么没有」。所以染成告警色
 		// 并且把那句话挂上去。
-		s.drawAvatar(c, avatarTrouble, avatarNoteNoPicture)
+		s.drawAvatarAt(c, avatarTrouble, avatarNoteNoPicture, side, labeled)
 	default:
 		// 有地址、在路上：人形 + **一道扫光**，说的是「在等」（不是「没有人」）。
-		s.drawAvatar(c, avatarLoading, avatarNoteWaiting)
+		s.drawAvatarAt(c, avatarLoading, avatarNoteWaiting, side, labeled)
 	}
 }
 
-// drawAvatar 按那一档的样子画。**三档都在这里定死**，view 不再插嘴。
+// drawAvatarAt 按那一档的样子画。**三档都在这里定死**，view 不再插嘴。
 //
 // ⚠️ **那一格不铺底色**（票 #241 / 报告 F-16）：原来占位那一档在圆里铺的是
 // `t.Surface`——在深色下那是 #27272a，而顶栏的底是 #18181b，**整块圆盘都是
@@ -794,12 +828,16 @@ func (s *Shell) viewAvatarFace(c *ui.Context) {
 //
 // ⚠️ **「出问题」那一档仍然铺底色**（危险色 18%）：那一档**要**是显眼的——
 // 它说的是「这儿出事了」，而那一档平时不出现。
-func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
+//
+// side 是边长；labeled 为 false 时不挂无障碍名和悬停说明（头像菜单头部那一枚）。
+func (s *Shell) drawAvatarAt(c *ui.Context, look avatarLook, note string, side float32, labeled bool) {
 	t := c.Theme()
-	side := float32(avatarSize)
 
 	ink := t.TextMuted
-	col := ui.Column(c).Size(side, side).Center().Label(note)
+	col := ui.Column(c).Size(side, side).Center()
+	if labeled {
+		col = col.Label(note)
+	}
 	if look == avatarTrouble {
 		ink = t.Danger
 		col = col.Background(t.Danger.Alpha(0.18))
@@ -828,6 +866,9 @@ func (s *Shell) drawAvatar(c *ui.Context, look avatarLook, note string) {
 	// 「这个账号没有头像」那几句；而这三样（无障碍名、悬停说明、测试点得到的
 	// 凭据）读的是同一件事，给它们三份不同的措辞只会让其中一份开始说谎。
 	col.Children(func() { avatarPerson(c, side, ink) })
+	if !labeled {
+		return
+	}
 	// ⚠️ **quiet**：锚点是外面那个头像菜单按钮里的子元素。普通的提示会问
 	// `Pressed()` / `Clicked()`（那会给元素打上可点标志），命中目标就从菜单
 	// 按钮变成它——头像下拉根本不开（见 withQuietTip）。
@@ -860,5 +901,5 @@ func avatarPerson(c *ui.Context, side float32, ink ui.Color) {
 // avatarHoverRing 是别处（收藏夹头图区的作者头像）用的悬停环：同顶栏头像，
 // 只画悬停那一档。
 func avatarHoverRing(c *ui.Context, e ui.Element, on bool, side float32) ui.Element {
-	return avatarRing(c, e, on, false, side)
+	return avatarRing(c, e, on, false, side, 0)
 }

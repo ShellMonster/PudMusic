@@ -51,3 +51,31 @@ func TestTheSleepTimerKindsReplaceEachOther(t *testing.T) {
 		t.Errorf("取消之后还有残留：%+v stopped=%d", st, stopped)
 	}
 }
+
+// TestTheSleepTimerRemembersWhichStepWasPicked 锁定 SleepFor：设了哪一档就报哪一档，
+// 换成「放完这首」、取消、到点之后都归零（界面靠它给睡眠弹层当前档打勾）。
+func TestTheSleepTimerRemembersWhichStepWasPicked(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	var fire func()
+	a.SetAfterForTest(func(_ time.Duration, fn func()) func() { fire = fn; return func() {} })
+
+	a.SetSleepTimer(45 * time.Minute)
+	if got := a.Snapshot().SleepFor; got != 45*time.Minute {
+		t.Fatalf("设了 45 分钟，SleepFor = %v", got)
+	}
+	a.SleepAfterTrack()
+	if got := a.Snapshot().SleepFor; got != 0 {
+		t.Errorf("换成放完这首后 SleepFor 没归零：%v", got)
+	}
+	a.SetSleepTimer(15 * time.Minute)
+	a.CancelSleepTimer()
+	if got := a.Snapshot().SleepFor; got != 0 {
+		t.Errorf("取消后 SleepFor 没归零：%v", got)
+	}
+	a.SetSleepTimer(30 * time.Minute)
+	fire()
+	if got := a.Snapshot().SleepFor; got != 0 {
+		t.Errorf("到点后 SleepFor 没归零：%v", got)
+	}
+}

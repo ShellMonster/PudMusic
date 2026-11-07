@@ -122,6 +122,9 @@ type State struct {
 	Rate float64
 	// SleepAt 是睡眠定时器到点的时刻，零值 = 没设按时长的那一档。
 	SleepAt time.Time
+	// SleepFor 是按时长那一档当初选的时长（`SleepTimerSteps` 里的一档），零值 = 没设。
+	// 界面靠它给睡眠弹层的当前档打勾（原型 app.js:984 `S.sleep.min === v`）。
+	SleepFor time.Duration
 	// SleepAfterTrack 是「放完这一首就停」那一档开着没有。
 	SleepAfterTrack bool
 	// Err 是最近一次打开文件的失败原因，显示在播放条上，直到下一次打开成功。
@@ -659,6 +662,7 @@ type App struct {
 	noAutoLyrics   bool
 
 	sleepAt         time.Time
+	sleepFor        time.Duration
 	sleepStop       func()
 	sleepAfterTrack bool
 
@@ -1323,6 +1327,7 @@ func (a *App) Snapshot() State {
 		Muted:           a.muted,
 		Rate:            a.rate,
 		SleepAt:         a.sleepAt,
+		SleepFor:        a.sleepFor,
 		SleepAfterTrack: a.sleepAfterTrack,
 		Err:             a.errText,
 		ErrDetail:       a.errDetail,
