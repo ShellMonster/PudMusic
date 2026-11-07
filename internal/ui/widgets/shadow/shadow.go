@@ -68,16 +68,6 @@ func TailwindMD(e ui.Element) ui.Element {
 		Shadow(0, 2, 4, -2, ui.RGBA(0, 0, 0, tailwindBlack10))
 }
 
-// TailwindLG 是上游的 `shadow-lg`：
-// `0 10px 15px -3px rgb(0 0 0/0.1), 0 4px 6px -4px rgb(0 0 0/0.1)`。
-//
-// ⚠️ 同样是**两层**。UP 空间那个 140 的头像带的就是这一档（上游
-// `user-profile/space-info.tsx:89`）。
-func TailwindLG(e ui.Element) ui.Element {
-	return e.Shadow(0, 10, 15, -3, ui.RGBA(0, 0, 0, tailwindBlack10)).
-		Shadow(0, 4, 6, -4, ui.RGBA(0, 0, 0, tailwindBlack10))
-}
-
 // Tailwind2XL 是上游的 `shadow-2xl`：`0 25px 50px -12px rgb(0 0 0/0.25)`。
 //
 // ⚠️ **只有一层，而且颜色是 25% 黑**（不是 10%）。网格卡片右下角那个主色圆播放钮

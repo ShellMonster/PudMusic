@@ -29,6 +29,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -128,11 +129,12 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 							})
 							// ⚠️ `Placeholder` 给眼睛看，`Label` 给读屏软件读。
 							name := ui.TextInput(c, &e.title).Placeholder("请输入收藏夹名称").
-								Disabled(busy).FillWidth().Height(40)
+								Disabled(busy).FillWidth().Height(40).Padding(space.None, space.Px12)
 							name.Label("名称")
 							if name.Changed() {
 								e.touched = true
 							}
+							formField(c, pl, name, !e.valid() && !busy && e.touched)
 							// ⚠️ **碰过之后才画**（理由见 touched 那个字段）。
 							if !e.valid() && !busy && e.touched {
 								ui.Text(c, "名称为必填项").FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Err)
@@ -142,8 +144,9 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 						ui.Column(c).Gap(space.Px6).Children(func() {
 							ui.Text(c, "简介").FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(pl.Text)
 							intro := ui.TextArea(c, &e.intro).Placeholder("可以不填").
-								Disabled(busy).FillWidth().Height(88)
+								Disabled(busy).FillWidth().Height(88).Padding(space.Px10, space.Px12).LineHeight(1.6)
 							intro.Label("简介")
+							formField(c, pl, intro, false)
 							typo.Mono(ui.Text(c, strconv.Itoa(utf8.RuneCountInString(e.intro))+" / 200")).
 								FontSize(scale.Font(c, scale.Size12)).TextColor(pl.Text3).AlignSelf(ui.End)
 						})
@@ -412,4 +415,20 @@ func (s *Shell) dispatchFolderResult(res app.FolderResult) {
 // 那个语义（见 `app.FolderDraftView.Public`）。
 func (e *folderEdit) applyDraft(d app.FolderDraftView) {
 	e.title, e.intro, e.cover, e.public = d.Title, d.Intro, d.Cover, d.Public
+}
+
+// formField 给对话框表单里的输入框 / 文本域上原型 `.field` 的样子（index.html:513 / 801）：圆角 8、
+// 1 像素 `line-strong` 描边、`surface-2` 底、14 号字；聚焦描边换 `accent`（:514），校验失败换 `err`
+// （:515）。内边距（输入框左右 12、文本域 10/12）和高度由调用方给。和设置「代理」表单的
+// `fieldInput` 同一套颜色（那一处另有自己的高度和行高，没并过来）。
+func formField(c *ui.Context, p tok.Palette, in ui.Element, invalid bool) {
+	border := p.LineStrong
+	switch {
+	case invalid:
+		border = p.Err
+	case in.Focused():
+		border = p.Accent
+	}
+	in.Radius(tok.R8).Background(p.Surface2).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text).
+		Border(1, border).Transition(motion.Fade)
 }

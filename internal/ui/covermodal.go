@@ -193,8 +193,10 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 		return
 	}
 	modal := ui.DialogBase(c, &crop.open, func(backdrop, panel ui.Element) {
-		dlgPanel(c, backdrop, panel, "裁剪封面", dlgW)
-		dlgBody(c, "裁剪封面", "拖动图片调整位置，滑块调整大小。方框内就是封面的样子。", func() {
+		// 原型 openCrop 走普通 sheet（app.js:1265-1267），宽 min(480, 窗口 − 32)（index.html:791）。
+		dlgPanel(c, backdrop, panel, "裁剪封面", dlgSheetW)
+		// 原型写的是「拖动图片 / 滑块调大小」（app.js:1267），这里的交互是拖框移动、拖四角缩放（`cornerAt` / `resizeCrop`），说明照实际写。
+		dlgBody(c, "裁剪封面", "拖动方框调整位置，拖动四角调整大小。方框内就是封面的样子。", func() {
 			// 原型 `.crop-stage { margin: 16px auto 12px }`：裁剪台在面板里居中，离说明 16、离脚 12。
 			ui.Row(c).FillWidth().Justify(ui.Center).Margin(space.Px16, space.None, space.Px12, space.None).
 				Children(func() { s.viewCropStage(c, crop) })

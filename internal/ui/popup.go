@@ -37,11 +37,11 @@ const popupRadius = tok.R12
 // 参数和框架 `stylePanel` 一样（没有 Padding：各处的间距不一样，调用方自己给）。
 // **别在调用处再抄一遍这几个字段**——漏一个就是下一处「有一处无」。
 //
-// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Pop`）：那一圈影的数不许写在调用处
-// （DESIGN.md §四·五「值只写一处」）。
+// ⚠️ **影的值从 `widgets/shadow` 取**（`shadow.Popover`，2026-11 起就是 `shadow.Pop` 那一档
+// `--shadow-pop`）：那一圈影的数不许写在调用处（DESIGN.md §四·五「值只写一处」）。
 func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
 	p := tok.Of(t)
-	return shadow.Pop(
+	return shadow.Popover(
 		panel.Radius(popupRadius).MinWidth(tok.PopMinW).
 			Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn),
 		t)
@@ -52,7 +52,7 @@ func popupPanel(t *ui.Theme, panel ui.Element) ui.Element {
 //
 // # 它和 `popupPanel` 是**两档料**，不是两个出口
 //
-//	浮层那一档（`popupPanel`）  原型 `.pop`：底 = surface、圆角 12、影 = shadow.Pop
+//	浮层那一档（`popupPanel`）  原型 `.pop`：底 = surface、圆角 12、影 = shadow.Popover（= Pop）
 //	卡片那一档（这一档）        底 = surface1、圆角 radiusLg、影 = shadow.Modal
 //
 // 卡片那一档是**设计规范 §零** 定的：登录页那张卡、弹窗面板（`dialogPanel`）
