@@ -38,8 +38,8 @@ func TestRenderAlignWidgetsShots(t *testing.T) {
 					mygoui.Row(c).Gap(12).AlignItems(mygoui.Center).Children(func() {
 						pud.IconBtn(c, "b1", "left", "后退（禁用）", pud.IconOpts{Disabled: true})
 						pud.IconBtn(c, "b2", "right", "前进", pud.IconOpts{})
-						pud.Button(c, "b3", pud.Ghost, pud.Std, "幽灵（后链禁用）", "").Disabled(true)
-						pud.Button(c, "b4", pud.Primary, pud.Std, "主色（禁用）", "").Disabled(true)
+						pud.ButtonDisabled(c, "b3", pud.Ghost, pud.Std, "幽灵（禁用）", "", true)
+						pud.ButtonDisabled(c, "b4", pud.Primary, pud.Std, "主色（禁用）", "", true)
 						pud.Button(c, "b5", pud.Primary, pud.Std, "主色", "")
 					})
 					// 全屏顶栏的评论键角标（透明底，app.js:1145）压在封面取色的底上，旁边是普通的（side 底）。
@@ -58,7 +58,7 @@ func TestRenderAlignWidgetsShots(t *testing.T) {
 			}, 720, 420)
 			tt.SetDark(dark)
 			tt.Frame()
-			if r, ok := tt.Find("幽灵（后链禁用）"); ok {
+			if r, ok := tt.Find("幽灵（禁用）"); ok {
 				tt.Move(r.X-10, r.Y+r.H/2)
 				for i := 0; i < 6; i++ {
 					tt.Advance(100 * time.Millisecond)

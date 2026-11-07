@@ -106,12 +106,8 @@ func (s *Shell) aboutUpdateButton(c *ui.Context, us app.UpdateState) {
 		busyButton(c, base, label, p.Text)
 		return
 	}
-	b := pud.Button(c, "set-update", pud.Ghost, pud.Std, label, icon)
-	if onClick == nil {
-		b.Disabled(true)
-		return
-	}
-	if b.Clicked() {
+	b := pud.ButtonDisabled(c, "set-update", pud.Ghost, pud.Std, label, icon, onClick == nil)
+	if onClick != nil && b.Clicked() {
 		onClick()
 	}
 }

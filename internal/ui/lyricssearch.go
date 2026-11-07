@@ -386,10 +386,8 @@ func (s *Shell) viewLyricSearchDialog(c *ui.Context) {
 			}
 			// ⚠️ **禁用的判据是底下那一层给的 `Adoptable`**（它把「拉失败 / 正在拉 / 没有歌词」三种都算成
 			// 不能采用）；还没点中任何一条结果时也是禁用的。
-			adopt := pud.Button(c, "lyrics:adopt", pud.Primary, pud.Std, lyricPreviewAdopt, "")
-			if !pv.Open || !pv.Adoptable || l.pick == "" {
-				adopt = adopt.Disabled(true)
-			}
+			adopt := pud.ButtonDisabled(c, "lyrics:adopt", pud.Primary, pud.Std, lyricPreviewAdopt, "",
+				!pv.Open || !pv.Adoptable || l.pick == "")
 			if adopt.Clicked() {
 				s.adoptLyricPreview()
 			}

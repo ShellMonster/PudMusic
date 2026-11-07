@@ -387,7 +387,7 @@ func (s *Shell) viewLikeBindPick(c *ui.Context, b *likeBind, backdrop, panel ui.
 		if b.submitting {
 			confirm = "提交中…"
 		}
-		if pud.Button(c, "likebind:ok", pud.Primary, pud.Std, confirm, "").Disabled(b.picked <= 0 || b.submitting).Clicked() {
+		if pud.ButtonDisabled(c, "likebind:ok", pud.Primary, pud.Std, confirm, "", b.picked <= 0 || b.submitting).Clicked() {
 			s.submitLikePick(b)
 		}
 	})
@@ -474,7 +474,7 @@ func (s *Shell) viewLikeBindCreate(c *ui.Context, b *likeBind, backdrop, panel u
 		})
 	})
 	dlgFoot(c, nil, func() {
-		if pud.Button(c, "likebind:create-cancel", pud.Ghost, pud.Std, "取消", "").Disabled(b.submitting).Clicked() {
+		if pud.ButtonDisabled(c, "likebind:create-cancel", pud.Ghost, pud.Std, "取消", "", b.submitting).Clicked() {
 			if s.likePending != nil {
 				b.step = likeBindChoose
 			} else {

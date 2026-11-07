@@ -266,10 +266,10 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 
 	ui.Row(c).Key("collection-ops").FillWidth().Wrap().AlignItems(ui.Center).Gap(space.Px12).
 		Padding(space.Px24, space.None, space.Px8, space.None).Children(func() {
-		if pud.Button(c, "col:play", pud.Primary, pud.Std, "播放全部", "play").Disabled(empty).Clicked() {
+		if pud.ButtonDisabled(c, "col:play", pud.Primary, pud.Std, "播放全部", "play", empty).Clicked() {
 			s.playWholeCollection(p)
 		}
-		if pud.Button(c, "col:shuffle", pud.Ghost, pud.Std, "随机播放", "shuffle").Disabled(empty).Clicked() {
+		if pud.ButtonDisabled(c, "col:shuffle", pud.Ghost, pud.Std, "随机播放", "shuffle", empty).Clicked() {
 			s.shuffleWholeCollection(p)
 		}
 		s.viewCollectionStar(c, p, info)

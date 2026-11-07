@@ -77,11 +77,11 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 		}
 		ui.Text(c, "全选").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text).Margin(space.None, space.None, space.None, -4)
 		none := chosen == 0
-		if pud.Button(c, "batch:queue", pud.Ghost, pud.Sm, "加入队列", "queue").Disabled(none).Clicked() {
+		if pud.ButtonDisabled(c, "batch:queue", pud.Ghost, pud.Sm, "加入队列", "queue", none).Clicked() {
 			s.enqueueCollectionPicked(p)
 		}
 		// 下载服务没挂上时键是灰的，悬停说清为什么（和从前一样）。
-		dl := pud.Button(c, "batch:dl", pud.Ghost, pud.Sm, "批量下载", "download").Disabled(none || !s.app.DownloaderMounted())
+		dl := pud.ButtonDisabled(c, "batch:dl", pud.Ghost, pud.Sm, "批量下载", "download", none || !s.app.DownloaderMounted())
 		if !s.app.DownloaderMounted() {
 			dl = s.withTip(c, dl, "这个应用没把下载服务挂上")
 		}
@@ -92,7 +92,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 		// `c.mine && !isLiked`；合集 / 系列也没有「从这里删内容」这个动作，见票 #683）。
 		// 批量下载按 bvid 走下载服务，和容器类型无关。
 		if p.ref.Type == bili.CollectionFavorite && s.collectionMine(info) && !info.Default {
-			del := pud.Button(c, "batch:del", pud.Ghost, pud.Sm, "批量删除", "trash").Disabled(none)
+			del := pud.ButtonDisabled(c, "batch:del", pud.Ghost, pud.Sm, "批量删除", "trash", none)
 			del = del.TextColor(pl.Err)
 			if del.Clicked() {
 				s.askConfirm(p, confirmDelete, chosen, true)

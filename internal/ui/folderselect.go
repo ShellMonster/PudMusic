@@ -247,7 +247,7 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 			ui.Text(c, "已选 "+strconv.Itoa(len(f.picked))+" 个收藏夹").FontSize(scale.Font(c, scale.Size12)).
 				TextColor(tok.Of(t).Text3).SingleLine().Ellipsis("…")
 		}, func() {
-			if pud.Button(c, "folderpick:cancel", pud.Ghost, pud.Std, "取消", "").Disabled(f.submitting).Clicked() {
+			if pud.ButtonDisabled(c, "folderpick:cancel", pud.Ghost, pud.Std, "取消", "", f.submitting).Clicked() {
 				s.closeFolderSelect()
 			}
 			// 提交中是「转起来 + 灰下去」（票 #178）。

@@ -223,18 +223,14 @@ func (s *Shell) viewFullTransport(c *ui.Context, st app.State) {
 		s.app.CyclePlayMode()
 		s.refreshMenuChecked(s.app.Snapshot())
 	}
-	prev := pud.IconBtn(c, "full:prev", "prev", "上一首", pud.IconOpts{Color: fullCtrlColor, HoverColor: tok.Full.Text, Size: 26})
-	if !s.app.CanPrev() {
-		prev = prev.Disabled(true)
-	}
+	prev := pud.IconBtn(c, "full:prev", "prev", "上一首", pud.IconOpts{Color: fullCtrlColor, HoverColor: tok.Full.Text, Size: 26,
+		Disabled: !s.app.CanPrev()})
 	if prev.Clicked() {
 		s.app.Prev()
 	}
 	s.viewFullPlay(c, st)
-	next := pud.IconBtn(c, "full:next", "next", "下一首", pud.IconOpts{Color: fullCtrlColor, HoverColor: tok.Full.Text, Size: 26})
-	if !s.app.CanNext() {
-		next = next.Disabled(true)
-	}
+	next := pud.IconBtn(c, "full:next", "next", "下一首", pud.IconOpts{Color: fullCtrlColor, HoverColor: tok.Full.Text, Size: 26,
+		Disabled: !s.app.CanNext()})
 	if next.Clicked() {
 		s.app.Next()
 	}

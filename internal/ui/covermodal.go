@@ -202,7 +202,7 @@ func (s *Shell) viewCoverCrop(c *ui.Context, crop *cropState) {
 				Children(func() { s.viewCropStage(c, crop) })
 		})
 		dlgFoot(c, nil, func() {
-			if pud.Button(c, "crop:cancel", pud.Ghost, pud.Std, "返回", "").Disabled(crop.uploading).Clicked() {
+			if pud.ButtonDisabled(c, "crop:cancel", pud.Ghost, pud.Std, "返回", "", crop.uploading).Clicked() {
 				s.closeCrop(crop)
 			}
 			// 上传中是「转起来 + 灰下去」（票 #178）。

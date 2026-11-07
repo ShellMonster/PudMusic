@@ -814,7 +814,7 @@ func (s *Shell) viewCommentsComposer(c *ui.Context) {
 			Border(1, pal.LineStrong).PaddingX(space.Px16).AlignItems(ui.Center).Opacity(0.5).Children(func() {
 			ui.Text(c, "说点什么…").FontSize(scale.Font(c, scale.Size14)).TextColor(pal.Text3).SingleLine()
 		})
-		send := pud.Button(c, "comments:send", pud.Primary, pud.Sm, "发送", "").Disabled(true)
+		send := pud.ButtonDisabled(c, "comments:send", pud.Primary, pud.Sm, "发送", "", true)
 		s.withTip(c, send, "发表评论还没接上（B 站的写接口），先到 B 站里发")
 	})
 }

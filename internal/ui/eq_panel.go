@@ -350,7 +350,7 @@ func (s *Shell) fullEQContent(c *ui.Context) {
 			TextColor(p.Text).FontSize(scale.Font(c, scale.Size13))
 		name := strings.TrimSpace(s.settings.eqName)
 		full := len(st.EQCustomPresets) >= audio.EQMaxCustomPresets && !eqHasCustomPreset(st, name)
-		if pud.Button(c, "full:eq:save", pud.Ghost, pud.Sm, "保存", "").Disabled(name == "" || full).Clicked() {
+		if pud.ButtonDisabled(c, "full:eq:save", pud.Ghost, pud.Sm, "保存", "", name == "" || full).Clicked() {
 			s.saveEQPreset(st)
 		}
 	})

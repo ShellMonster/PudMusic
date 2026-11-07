@@ -61,7 +61,7 @@ func showcaseView(s *Shell, on *bool, tab *int, search *string) func(*mygoui.Con
 						pud.Button(c, "b6", pud.Ghost, pud.Sm, "已关注", "check")
 						pud.RoundButton(c, "b7", pud.Primary, pud.Std, "play", "播放")
 						pud.RoundButton(c, "b8", pud.Ghost, pud.Sm, "plus", "新建")
-						pud.Button(c, "b9", pud.Primary, pud.Std, "禁用", "").Disabled(true)
+						pud.ButtonDisabled(c, "b9", pud.Primary, pud.Std, "禁用", "", true)
 					})
 
 					showcaseSection(c, "ICON-BTN  36 · row 32 · .on · .cnt  /  CHIP  /  BADGE  /  KBD  /  SWITCH")

@@ -470,10 +470,7 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 	rows := s.queueRows
 	p := tok.Of(t)
 	pud.DrawerHead(c, "播放列表", func() {
-		clear := pud.Button(c, "queue:clear", pud.Quiet, pud.Sm, "清空播放列表", "")
-		if len(rows) == 0 {
-			clear = clear.Disabled(true)
-		}
+		clear := pud.ButtonDisabled(c, "queue:clear", pud.Quiet, pud.Sm, "清空播放列表", "", len(rows) == 0)
 		if clear.Clicked() {
 			s.queueClearOpen = true
 		}
@@ -772,10 +769,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			}
 			ui.Row(c).Shrink(0).Children(func() {
 				up := pud.IconBtn(c, "queue:up", "up", s.queueRowOps.At(row.at, row.item.Title, queueUpLabel),
-					pud.IconOpts{Row: true})
-				if at == 0 {
-					up = up.Disabled(true)
-				}
+					pud.IconOpts{Row: true, Disabled: at == 0})
 				if up.Clicked() && s.app.Queue().MoveAtBefore(row.at, row.at-1) {
 					s.wake.invalidate()
 				}

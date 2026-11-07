@@ -170,7 +170,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 				})
 		})
 		dlgFoot(c, nil, func() {
-			if pud.Button(c, "folderedit:cancel", pud.Ghost, pud.Std, "取消", "").Disabled(e.submitting).Clicked() {
+			if pud.ButtonDisabled(c, "folderedit:cancel", pud.Ghost, pud.Std, "取消", "", e.submitting).Clicked() {
 				s.closeFolderEdit()
 			}
 			// 「提交中」是转圈的主色键；「还在拉封面」只是灰着，不转圈（两件事）。

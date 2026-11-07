@@ -50,20 +50,20 @@ func near(a, b uint8, tol int) bool {
 	return d >= -tol && d <= tol
 }
 
-// TestALateDisabledButtonDoesNotLightUpOnHover 锁住「返回之后才链 `.Disabled(true)` 的键，指针落上去
-// 不铺悬停底」（原型 `:hover:not(:disabled)`）。
+// TestADisabledButtonDoesNotLightUpOnHover 锁住「禁用的键指针落上去不铺悬停底」（原型
+// `:hover:not(:disabled)`）：禁用在建键时传（`ButtonDisabled` / `RoundButtonDisabled`）。
 //
-// 曾经出错的行为：悬停底是建键那一刻按 `Hovered() && !IsDisabled()` 铺的，而调用方是建完才链
-// `.Disabled(true)`（collectionhead / collectionbatch 那几处），那一刻还没禁用——于是禁用的幽灵键
-// 悬停时照样亮出 hover 底，看着像点得动。
-func TestALateDisabledButtonDoesNotLightUpOnHover(t *testing.T) {
+// 曾经出错的行为：悬停底是建键那一刻铺的，而调用方是建完才链 `.Disabled(true)`
+// （collectionhead / collectionbatch 那几处），那一刻还没禁用——于是禁用的幽灵键悬停时照样亮出
+// hover 底，看着像点得动。
+func TestADisabledButtonDoesNotLightUpOnHover(t *testing.T) {
 	for _, kind := range []struct {
 		name string
 		k    Kind
 	}{{"幽灵", Ghost}, {"安静", Quiet}, {"主色", Primary}} {
 		t.Run(kind.name, func(t *testing.T) {
 			tt := disabledScene(t, gray, func(c *ui.Context) {
-				Button(c, "late", kind.k, Std, "禁用的键", "").Disabled(true)
+				ButtonDisabled(c, "off", kind.k, Std, "禁用的键", "", true)
 			})
 			r, ok := tt.Find("禁用的键")
 			if !ok {
@@ -78,13 +78,29 @@ func TestALateDisabledButtonDoesNotLightUpOnHover(t *testing.T) {
 			}
 		})
 	}
+	t.Run("圆键", func(t *testing.T) {
+		tt := disabledScene(t, gray, func(c *ui.Context) {
+			RoundButtonDisabled(c, "off-round", Ghost, Std, "more", "更多", true)
+		})
+		r, ok := tt.Find("更多")
+		if !ok {
+			t.Fatal("没找到圆键")
+		}
+		edge := func() color.RGBA { return tt.Image().RGBAAt(int(r.X+6), int(r.Y+r.H/2)) }
+		idle := edge()
+		tt.Move(r.X+r.W/2, r.Y+r.H/2)
+		settle(tt)
+		if hot := edge(); hot != idle {
+			t.Errorf("禁用的圆键悬停后底色从 %v 变成了 %v", idle, hot)
+		}
+	})
 }
 
-// TestALateDisabledIconButtonDoesNotLightUpOnHover 同上，图标键那一份（顶栏后退 / 前进是在
-// 外面链 `.Disabled` 还是传 `IconOpts.Disabled`，都不能亮）。
-func TestALateDisabledIconButtonDoesNotLightUpOnHover(t *testing.T) {
+// TestADisabledIconButtonDoesNotLightUpOnHover 同上，图标键那一份（`IconOpts.Disabled`，
+// 如顶栏后退 / 前进、满屏上一首 / 下一首、队列「上移」）。
+func TestADisabledIconButtonDoesNotLightUpOnHover(t *testing.T) {
 	tt := disabledScene(t, gray, func(c *ui.Context) {
-		IconBtn(c, "late-icon", "left", "后退", IconOpts{}).Disabled(true)
+		IconBtn(c, "off-icon", "left", "后退", IconOpts{Disabled: true})
 	})
 	r, ok := tt.Find("后退")
 	if !ok {
@@ -96,6 +112,24 @@ func TestALateDisabledIconButtonDoesNotLightUpOnHover(t *testing.T) {
 	settle(tt)
 	if hot := corner(); hot != idle {
 		t.Errorf("禁用的图标键悬停后底色从 %v 变成了 %v", idle, hot)
+	}
+}
+
+// TestHoverStillLightsAnEnabledKey 是上面两条的对照：同一个场景里可用的键悬停**会**变底——
+// 不然「禁用的不变」可能只是因为悬停根本没推到（钟没走 / 坐标落空），那两条就是空的。
+func TestHoverStillLightsAnEnabledKey(t *testing.T) {
+	tt := disabledScene(t, gray, func(c *ui.Context) {
+		ButtonDisabled(c, "on", Ghost, Std, "可用的键", "", false)
+	})
+	r, ok := tt.Find("可用的键")
+	if !ok {
+		t.Fatal("没找到键")
+	}
+	idle := fillPixel(tt.Image(), r)
+	tt.Move(r.X-10, r.Y+r.H/2)
+	settle(tt)
+	if hot := fillPixel(tt.Image(), r); hot == idle {
+		t.Errorf("可用的幽灵键悬停后底色没变（%v）：场景推不出悬停，禁用那两条测不出东西", idle)
 	}
 }
 

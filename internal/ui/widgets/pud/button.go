@@ -34,7 +34,10 @@ const (
 )
 
 // Button 是一枚胶囊按钮（原型 `.btn`）。icon 是原型图标名（"" 不画），画在字的
-// 左边、16 号、和字隔 8。返回按钮本身：调用方照常问 `.Clicked()`、链 `.Disabled(…)`。
+// 左边、16 号、和字隔 8。返回按钮本身：调用方照常问 `.Clicked()`。
+//
+// ⚠️ 要禁用就用 `ButtonDisabled` / `RoundButtonDisabled`，不要在返回之后链 `.Disabled(…)`：
+// 悬停底、按下缩放和禁用半透明都是建的时候定的，后链的禁用只拦得住点击，指针落上去照样亮。
 //
 //	if pud.Button(c, "play-all", pud.Primary, pud.Std, "播放全部", "play").Clicked() { … }
 func Button(c *ui.Context, key string, kind Kind, size Size, label, icon string) ui.Element {
@@ -47,8 +50,8 @@ func ButtonMono(c *ui.Context, key string, kind Kind, size Size, label, mono, ic
 	return button(c, key, kind, size, label, mono, icon, false, false)
 }
 
-// ButtonDisabled 是 Button 加「禁用」（原型 `.btn:disabled { opacity:.45 }` 且 `:hover:not(:disabled)`）。
-// 返回之后再链 `.Disabled(true)` 也一样不亮悬停底（见 `disabledNow`），在建的时候给只是省掉那一帧。
+// ButtonDisabled 是 Button 加「禁用」（原型 `.btn:disabled { opacity:.45 }` 且 `:hover:not(:disabled)`）：
+// disabled 时没有悬停底 / 悬停色 / 按下缩放，画出来 45% 不透明。
 func ButtonDisabled(c *ui.Context, key string, kind Kind, size Size, label, icon string, disabled bool) ui.Element {
 	return button(c, key, kind, size, label, "", icon, false, disabled)
 }
@@ -57,6 +60,11 @@ func ButtonDisabled(c *ui.Context, key string, kind Kind, size Size, label, icon
 // 无障碍名字。
 func RoundButton(c *ui.Context, key string, kind Kind, size Size, icon, label string) ui.Element {
 	return button(c, key, kind, size, label, "", icon, true, false)
+}
+
+// RoundButtonDisabled 是 RoundButton 加「禁用」（同 `ButtonDisabled`）。
+func RoundButtonDisabled(c *ui.Context, key string, kind Kind, size Size, icon, label string, disabled bool) ui.Element {
+	return button(c, key, kind, size, label, "", icon, true, disabled)
 }
 
 func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon string, round, disabled bool) ui.Element {
@@ -75,7 +83,7 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon s
 	} else {
 		b = b.PaddingX(padX)
 	}
-	off := disabledNow(c, b)
+	off := disabled
 	hot := b.Hovered() && !off
 	var bg, fg, border ui.Color
 	switch kind {
@@ -139,8 +147,8 @@ type IconOpts struct {
 	// HoverColor 覆盖悬停时的图形色；零值 = 悬停换 text（原型 `.icon-btn:hover { color: var(--text) }`，
 	// 全屏播放器里 `.full-ctrl .icon-btn { color: #d8d7d4 }` 之上悬停仍然是 `#ecebe8`）。
 	HoverColor ui.Color
-	// Disabled 是禁用。在这里传和返回之后链 `.Disabled(true)` 效果一样（见 `disabledNow`）；
-	// 在这里传能省掉「先按可点画一帧」的那一帧。
+	// Disabled 是禁用：没有悬停底 / 悬停色 / 按下缩放，画出来 35% 不透明。必须在这里传——
+	// 返回之后再链 `.Disabled(true)` 只拦得住点击，悬停底照样亮（悬停是建的时候定的）。
 	Disabled bool
 }
 
@@ -158,61 +166,6 @@ const (
 	btnDisabledOpacity       = 0.45
 	frameworkDisabledOpacity = 0.5
 )
-
-// disabledProbe 记着一枚键**上一次绘制时**是不是禁用的。
-type disabledProbe struct {
-	el ui.Element
-	c  *ui.Context
-	// seen 是上一次绘制时真实的禁用态；built 是这一帧建的时候按哪一档画的。
-	// 两者不一样才重建——建的时候就知道禁用（`IconOpts.Disabled` / `ButtonDisabled`）的键
-	// 一帧都不多要，免得空闲的界面自己养一个唤醒循环。
-	seen, built bool
-	// probed 是至少看过一次绘制时的禁用态（第一帧必须看：后链禁用的键半透明要对）。
-	probed bool
-	draw   func(*ui.Painter, ui.Rect)
-}
-
-type disabledProbeKey struct{}
-
-// disabledNow 报这枚键这一帧该不该按禁用画（悬停底 / 悬停色 / 按下缩放 / 半透明）。
-//
-// 调用方常常在**拿到返回值之后**才链 `.Disabled(true)`（`pud.Button(...).Disabled(x)`），
-// 而悬停底是建的时候铺的——那一刻 `IsDisabled()` 还是假，禁用的键指针落上去照样亮、按下去照样缩
-// （原型是 `:hover:not(:disabled)` / `:active:not(:disabled)`）。这里在绘制回调里看一眼真实的禁用
-// 状态（绘制在整棵树建完之后，那时调用方链的 `.Disabled` 已经生效），记下来；和建的时候用的那一档不一样就
-// `Invalidate`，下一帧按真的那一档重建。于是调用方不用改链的顺序，最多差一帧（框架自己的
-// 点击判定也按「上一帧禁用了没有」算，同一个口径）。
-//
-// 绘制回调建一次存在元素状态里，之后每帧复用，不产生每帧分配。
-//
-// ⚠️ `b.Hovered()` 在建的时候就禁用了的键上报假，所以按真实禁用态判之前先问一下它、
-// 不影响结果（悬停底本来就要 `!off`）。
-func disabledNow(c *ui.Context, b ui.Element) bool {
-	s := ui.Local(b, disabledProbeKey{}, func() disabledProbe { return disabledProbe{} })
-	if s.draw == nil {
-		s.draw = func(*ui.Painter, ui.Rect) {
-			// 只重画不重建的帧里，这个回调拿着的是上一遍建的元素（框架不许再碰它）：
-			// 那一帧没有新的禁用态可看，跳过。
-			if !s.el.Valid() {
-				return
-			}
-			s.probed = true
-			s.seen = s.el.IsDisabled()
-			if s.seen != s.built {
-				s.c.Invalidate()
-			}
-		}
-	}
-	s.el, s.c = b, c
-	s.built = b.IsDisabled() || s.seen
-	// 绘制回调只在用得着的时候挂：还没看过一次、指针在上面 / 按着（悬停底和按下缩放要看真实
-	// 禁用态）、以及上一次看到是禁用的（要发现它重新可用）。一直可用、指针不在上面的键不挂，
-	// 省得满屏几百枚键每帧都多跑一个回调。
-	if !s.probed || s.seen || b.Hovered() || b.Pressed() {
-		b.Draw(s.draw)
-	}
-	return s.built
-}
 
 // IconBtn 是一枚只有图标的键（原型 `.icon-btn`）：圆角 8 的方块，平时次要色，
 // 悬停 hover 底 + 正文色，按下图形缩到 0.92，禁用 35% 不透明（index.html:228，
@@ -236,7 +189,7 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 	if o.Color.A != 0 {
 		fg = o.Color
 	}
-	off := disabledNow(c, b)
+	off := o.Disabled
 	hot := b.Hovered() && !off
 	if hot {
 		b = b.Background(p.Hover)

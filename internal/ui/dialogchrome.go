@@ -70,5 +70,5 @@ func dlgPrimary(c *ui.Context, key, label string, busy, disabled bool) bool {
 		busyPrimaryButton(c, label)
 		return false
 	}
-	return pud.Button(c, key, pud.Primary, pud.Std, label, "").Disabled(disabled).Clicked()
+	return pud.ButtonDisabled(c, key, pud.Primary, pud.Std, label, "", disabled).Clicked()
 }
