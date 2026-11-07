@@ -207,6 +207,9 @@ type localPage struct {
 	cache  *imgcache.Cache
 	acts   list.Actions
 	notify func(string, notice.Tone)
+	// onDrop 消费拖放区接住的路径。Shell 接上 handleFileDrop；单独造
+	// localPage 的测试可以留空，避免把窗口级副作用带进纯绘制测试。
+	onDrop func([]string)
 	// pickDir 弹系统框选一个文件夹。它必须从**后台 goroutine** 调，所以
 	// 调用方（`addDirectory`）自己起 goroutine，这里只管调。
 	pickDir func() (string, error)
@@ -602,28 +605,44 @@ func localFormatsText() string {
 
 // viewDropZone 是拖入区（原型 `.drop`）：1 像素虚线框、圆角 12、内边距 24、离上 24；左边
 // 48 的圆形图标位，中间两行字（16 号 / 13 号次要色），右边「选择文件夹」。
-//
-// ⚠️ **拖动悬停时的高亮（`.drop.over`）做不出来**：窗口级的文件拖入（`handleFileDrop`）只在
-// 松手时回调，框架没有「拖着文件悬停在某个元素上」的事件。
 func (p *localPage) viewDropZone(c *ui.Context, _ app.LocalMusicState) {
 	t := tok.Of(c.Theme())
-	ui.Row(c).Key("local:drop").FillWidth().AlignItems(ui.Center).Gap(space.Px20).Padding(space.Px24).
+	drop := ui.Row(c).Key("local:drop").FillWidth().AlignItems(ui.Center).Gap(space.Px20).Padding(space.Px24).
 		Margin(space.Px24, space.None, space.None, space.None).
-		Draw(func(pp *ui.Painter, r ui.Rect) { pp.StrokeDashed(r, t.LineStrong, tok.R12, 1) }).
-		Children(func() {
-			ui.Box(c).Size(48, 48).Radius(tok.Pill).Background(t.Surface2).Shrink(0).
-				AlignItems(ui.Center).Justify(ui.Center).Children(func() {
-				ui.Icon(c, pud.Icon("import")).FontSize(22).TextColor(t.Text2)
-			})
-			ui.Column(c).Grow(1).Shrink(1).Gap(space.Px2).Children(func() {
-				ui.Text(c, "把音频文件拖到这里").FontSize(scale.Font(c, scale.Size16)).FontWeight(700).TextColor(t.Text)
-				ui.Text(c, "也可以直接拖到程序坞图标上，或者在访达里双击音频文件打开。").
-					FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text2)
-			})
-			if pud.Button(c, "local:pick", pud.Ghost, pud.Std, "选择文件夹", "folder").Clicked() {
-				p.addDirectory()
-			}
+		Radius(tok.R12)
+	paths := drop.DroppedFiles()
+	if len(paths) > 0 && p.onDrop != nil {
+		p.onDrop(paths)
+	}
+	over := drop.FileDragOver()
+	border := t.LineStrong
+	borderWidth := float32(1)
+	background := t.Bg
+	iconColor := t.Text2
+	title := "把音频文件拖到这里"
+	if over {
+		border = t.Accent
+		borderWidth = 2
+		background = t.AccentSoft
+		iconColor = t.Accent
+		title = "松开鼠标以导入音频"
+	}
+	drop.Background(background).Draw(func(pp *ui.Painter, r ui.Rect) {
+		pp.StrokeDashed(r, border, tok.R12, borderWidth)
+	}).Children(func() {
+		ui.Box(c).Size(48, 48).Radius(tok.Pill).Background(t.Surface2).Shrink(0).
+			AlignItems(ui.Center).Justify(ui.Center).Children(func() {
+			ui.Icon(c, pud.Icon("import")).FontSize(22).TextColor(iconColor)
 		})
+		ui.Column(c).Grow(1).Shrink(1).Gap(space.Px2).Children(func() {
+			ui.Text(c, title).FontSize(scale.Font(c, scale.Size16)).FontWeight(700).TextColor(t.Text)
+			ui.Text(c, "也可以直接拖到程序坞图标上，或者在访达里双击音频文件打开。").
+				FontSize(scale.Font(c, scale.Size13)).TextColor(t.Text2)
+		})
+		if pud.Button(c, "local:pick", pud.Ghost, pud.Std, "选择文件夹", "folder").Clicked() {
+			p.addDirectory()
+		}
+	})
 }
 
 // viewToolbar 是拖入区下面那一行：目录筛选、移除目录、重新扫描。原型没有这一行，但目录

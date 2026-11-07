@@ -1371,6 +1371,7 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 只认在线的），所以「收藏」那一项在本地音乐这一页会走「说清楚为什么」
 	// 那一支——那也是对的答案。
 	s.local = newLocalPage(a, s.images, s.listActions(), s.addToast, s.pickDir, s.displayView)
+	s.local.onDrop = s.handleFileDrop
 	s.local.contentW = s.spaceContentWidth
 	// 听歌统计那一页的状态。
 	//
