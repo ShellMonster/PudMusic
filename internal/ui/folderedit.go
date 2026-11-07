@@ -29,6 +29,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -144,7 +145,7 @@ func (s *Shell) viewFolderEdit(c *ui.Context) {
 						ui.Column(c).Gap(space.Px6).Children(func() {
 							ui.Text(c, "简介").FontSize(scale.Font(c, scale.Size13)).FontWeight(500).TextColor(pl.Text)
 							intro := ui.TextArea(c, &e.intro).Placeholder("可以不填").
-								Disabled(busy).FillWidth().Height(88).Padding(space.Px10, space.Px12).LineHeight(1.6)
+								Disabled(busy).FillWidth().Height(88).Padding(space.Px10, space.Px12).LineHeight(leading.Field)
 							intro.Label("简介")
 							formField(c, pl, intro, false)
 							typo.Mono(ui.Text(c, strconv.Itoa(utf8.RuneCountInString(e.intro))+" / 200")).
