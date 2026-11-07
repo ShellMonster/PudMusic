@@ -710,3 +710,36 @@ func titlesOf(items []app.Item) []string {
 	}
 	return out
 }
+
+// TestQueueDrawerBodyIsInsetFromTheDrawerEdges 钉抽屉正文那一圈内边距：
+// 行的左右边各离抽屉边 12（原型 index.html:614 `.drawer-body { padding: 8px 12px }`），
+// 悬停底不铺到抽屉边。曾经出错的行为：列表没设内边距，行和悬停底贴着抽屉左右边。
+func TestQueueDrawerBodyIsInsetFromTheDrawerEdges(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	a := localSong(t, dir, "甲.flac")
+	enqueue(t, h, a)
+	h.app.Enqueue(localSong(t, dir, "乙.flac")) // 量没在放的乙：播放条上不会有同名的字
+	h.tt.Frame()
+	openDrawer(t, h)
+	r, ok := findRow(h, "乙")
+	if !ok {
+		t.Fatalf("抽屉里没有乙那一行，文字：%q", h.tt.Texts())
+	}
+	left := float32(winW - queueDrawerWidth)
+	if got := r.X - left; got < 11.5 {
+		t.Errorf("行左边离抽屉左边 %.1f，want ≥ 12", got)
+	}
+	if got := float32(winW) - (r.X + r.W); got < 11.5 {
+		t.Errorf("行右边离抽屉右边 %.1f，want ≥ 12", got)
+	}
+	// 悬停那一行：抽屉边那 6 像素仍是抽屉底色，不是悬停底。
+	h.tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	h.tt.Frame()
+	img := h.tt.Image()
+	edge := pixelAt(img, float32(winW)-4, r.Y+r.H/2)
+	inside := pixelAt(img, r.X+r.W-4, r.Y+r.H/2)
+	if edge == inside {
+		t.Errorf("悬停时抽屉边 %v 和行里 %v 同色：悬停底铺到了抽屉边", edge, inside)
+	}
+}
