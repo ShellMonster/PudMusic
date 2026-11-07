@@ -221,8 +221,8 @@ func TestTypingStopsTheHotWordRotation(t *testing.T) {
 	tt.Type("周")
 	tt.Frame()
 
-	if got := s.hotwordPlaceholder(); got != searchLabel {
-		t.Errorf("打了字占位词还是热词：%q，want %q", got, searchLabel)
+	if got := s.hotwordPlaceholder(); got != searchPlaceholder {
+		t.Errorf("打了字占位词还是热词：%q，want %q", got, searchPlaceholder)
 	}
 	if s.hotword.stop != nil {
 		t.Error("打了字轮换的定时器还醒着")
@@ -237,12 +237,12 @@ func TestTypingStopsTheHotWordRotation(t *testing.T) {
 }
 
 // TestTheHotWordPlaceholderFallsBackToSearch 钉没词的那一支：没挂上、或挂了
-// 还没拉到，占位词就是「搜索」，定时器不装。
+// 还没拉到，占位词就是原型那一句「搜索歌曲、视频、UP 主」（app.js:465），定时器不装。
 func TestTheHotWordPlaceholderFallsBackToSearch(t *testing.T) {
 	s, tt, _ := hotWordShell(t)
 	tt.Frame()
-	if got := s.hotwordPlaceholder(); got != searchLabel {
-		t.Errorf("没词池时占位词 = %q，want %q", got, searchLabel)
+	if got := s.hotwordPlaceholder(); got != searchPlaceholder {
+		t.Errorf("没词池时占位词 = %q，want %q", got, searchPlaceholder)
 	}
 	if s.hotword.stop != nil {
 		t.Error("没词池却装了轮换的定时器")
@@ -305,16 +305,16 @@ func TestAFailingNetEaseStaysSilentAndCheap(t *testing.T) {
 		defer mu.Unlock()
 		return calls > 0
 	})
-	if got := s.hotwordPlaceholder(); got != searchLabel {
-		t.Errorf("拉不到时占位词 = %q，want %q", got, searchLabel)
+	if got := s.hotwordPlaceholder(); got != searchPlaceholder {
+		t.Errorf("拉不到时占位词 = %q，want %q", got, searchPlaceholder)
 	}
 
 	for range 50 {
 		fc.Advance(searchHotWordRotate)
 		tt.Frame()
 	}
-	if got := s.hotwordPlaceholder(); got != searchLabel {
-		t.Errorf("推了五十档之后占位词 = %q，want 还是 %q", got, searchLabel)
+	if got := s.hotwordPlaceholder(); got != searchPlaceholder {
+		t.Errorf("推了五十档之后占位词 = %q，want 还是 %q", got, searchPlaceholder)
 	}
 	mu.Lock()
 	defer mu.Unlock()

@@ -117,7 +117,7 @@ func (s *Shell) stopHotword() {
 // 纯读。
 func (s *Shell) hotwordPlaceholder() string {
 	if s.hotword.shown == "" {
-		return searchLabel
+		return searchPlaceholder
 	}
 	return s.hotword.shown
 }
