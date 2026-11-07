@@ -117,8 +117,8 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 			Removable: sp.remove != nil,
 			Dim:       !m.CanPlay,
 			Menu:      func(mn *ui.Menu) { rows.menu(mn, i) },
-			Cover: func(c *ui.Context, cw, ch float32) {
-				imgcache.ViewTitled(c, s.images, m.Cover, m.Title, cw, ch)
+			Cover: func(c *ui.Context, cw, ch, radius float32) {
+				imgcache.ViewTitledRadius(c, s.images, m.Cover, m.Title, cw, ch, radius)
 			},
 		}
 		// ⚠️ 选中态只包**曲目行这一格**（`SelectedRow` 的 hover / 选中底都

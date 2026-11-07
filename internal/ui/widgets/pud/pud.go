@@ -90,4 +90,9 @@ func Full() bool { return fullMode }
 
 // Cover 是「在这个方框里画一张封面」：调用方用 imgcache 那套画图，组件只给框。
 // 传 nil 就只画 surface-2 的占位底（原型 `.cover` 的 background）。
-type Cover func(c *ui.Context, w, h float32)
+//
+// radius 是组件那个框的圆角（卡片 8、曲目行 4、头像半边长），**画图的那一层必须原样用上**：
+// GPU 后端嵌套裁剪只有最内层切圆角（mygo `internal/gpu/gpu.go` 的 markEnclosing），外框的
+// `Radius(r).Clip()` 只按矩形裁，图自己不带圆角在真机上就是直角（无头截图的 CPU 光栅把两层
+// 覆盖率相乘，看不出来）。
+type Cover func(c *ui.Context, w, h, radius float32)

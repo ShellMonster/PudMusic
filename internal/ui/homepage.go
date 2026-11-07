@@ -184,6 +184,10 @@ func (h *homePage) view(c *ui.Context, s *Shell) {
 			h.contentW = w
 		}
 	})
+
+	// 「回到顶部」那一枚（原型全局的 `.btt`，index.html 827 / app.js 1627：滚过 400 出现）。
+	// 首页滚的是整页这一个 `ui.Scroll`，位置就是 `h.scroll`（同设置页）。
+	list.BackToTop(c, h.scroll.Y, func() { h.scroll.Y = 0 })
 }
 
 // homeLayout 是首页随窗口宽度换挡的几个数。
@@ -355,11 +359,12 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 
 // ── 公共小件 ────────────────────────────────────────────────────────────────
 
-// coverOf 是「在方框里画这一张封面」。圆角由外面的框（`pud.CoverCard` 的 8）裁，这里不再
-// 自己给圆角。
+// coverOf 是「在方框里画这一张封面」。圆角是组件传进来的那一档（卡片 8、榜单行 4），
+// 必须落在 imgcache 最内层：GPU 后端嵌套裁剪只有最内层切圆角，外框的 `Radius().Clip()`
+// 只按矩形裁（见 `pud.Cover`）。
 func (h *homePage) coverOf(url string) pud.Cover {
-	return func(c *ui.Context, w, hh float32) {
-		imgcache.ViewRadius(c, h.cache, imgcache.FormatURLProtocol(url), w, hh, 0)
+	return func(c *ui.Context, w, hh, radius float32) {
+		imgcache.ViewRadius(c, h.cache, imgcache.FormatURLProtocol(url), w, hh, radius)
 	}
 }
 

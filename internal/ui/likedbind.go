@@ -411,7 +411,8 @@ func (s *Shell) viewLikeBindRow(c *ui.Context, b *likeBind, i int) {
 		ui.Box(c).Size(32, 32).Radius(tok.R4).Clip().Background(pl.Surface2).Shrink(0).
 			AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 			if item.Cover != "" {
-				s.collCoverDraw(item.Cover)(c, 32, 32)
+				// 圆角 r-4 落在最内层的图上（GPU 只有最内层裁剪切圆角，见 `pud.Cover`）。
+				s.collCoverDraw(item.Cover)(c, 32, 32, tok.R4)
 			} else {
 				ui.Icon(c, pud.Icon("folder")).FontSize(16).TextColor(pl.Text3)
 			}

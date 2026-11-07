@@ -177,3 +177,27 @@ func TestTheCollectionHasABackToTop(t *testing.T) {
 		t.Error("回到顶上之后头图区没有回来——回顶按钮回的不是顶")
 	}
 }
+
+// TestTheHomePageHasABackToTop 钉住**首页**有那一枚（原型全局的 `.btt`，app.js 1627：滚过 400 出现）。
+//
+// 曾经出错的行为：首页滚的是自己那一个 `ui.Scroll`，没接 `list.BackToTop`，滚多远都没有回顶键。
+func TestTheHomePageHasABackToTop(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	_, tt, _ := newHomeShell(t, b)
+	waitFrames(t, tt, "每日推荐拉回来了", func() bool { return showsText(tt, "每日推荐 1") })
+
+	if tt.HasText(backTopLabel) {
+		t.Fatalf("还没滚就出现回顶按钮了")
+	}
+	tt.Scroll(homeW/2, homeH/2, 0, 2000)
+	waitFrames(t, tt, "首页滚下去之后回顶按钮出现", func() bool {
+		return tt.HasText(backTopLabel)
+	})
+	if err := tt.Click(backTopLabel); err != nil {
+		t.Fatalf("点不到回顶按钮：%v", err)
+	}
+	waitFrames(t, tt, "回到顶上之后回顶按钮消失", func() bool {
+		return !tt.HasText(backTopLabel)
+	})
+}

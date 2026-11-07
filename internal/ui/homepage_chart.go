@@ -90,7 +90,8 @@ func (h *homePage) viewChartRow(c *ui.Context, s *Shell, songs []list.Music, i i
 			typo.Display(ui.Text(c, strconv.Itoa(i+1)), scale.Font(c, scale.Size32)).LineHeight(leading.Numeral).TextColor(numColor).SingleLine()
 		})
 		ui.Box(c).Size(56, 56).Radius(tok.R4).Background(p.Surface2).Clip().Shrink(0).Children(func() {
-			h.coverOf(m.Cover)(c, 56, 56)
+			// 原型 `.chart-row .t-cover` r-4（index.html 388），圆角落在最内层的图上。
+			h.coverOf(m.Cover)(c, 56, 56, tok.R4)
 		})
 		ui.Column(c).Grow(1).Shrink(1).Children(func() {
 			fg := p.Text

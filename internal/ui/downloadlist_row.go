@@ -36,7 +36,8 @@ func (d *downloadsPage) viewRow(c *ui.Context, s *Shell, r download.Snapshot, w,
 		}).
 		Children(func() {
 			ui.Box(c).Size(dlCover, dlCover).Radius(tok.R4).Background(p.Surface2).Clip().Shrink(0).
-				Children(func() { imgcache.ViewTitled(c, s.images, r.Cover, r.Title, dlCover, dlCover) })
+				// 原型 `.drow .t-cover` r-4（index.html 462）：圆角落在最内层的图上（不是主题那一档 8）。
+				Children(func() { imgcache.ViewTitledRadius(c, s.images, r.Cover, r.Title, dlCover, dlCover, tok.R4) })
 
 			ui.Column(c).Grow(2).Shrink(1).Children(func() {
 				ui.Text(c, r.Title).FontSize(scale.Font(c, scale.Size14)).FontWeight(500).TextColor(p.Text).

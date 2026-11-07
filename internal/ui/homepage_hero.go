@@ -156,7 +156,8 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 		cover := ui.Box(c).Key("home:hero:cover").Size(coverW, coverW).Radius(tok.R8).Background(p.Surface2).Shrink(0)
 		cover = shadow.LargeCover(cover, c.Theme())
 		cover.Clip().Children(func() {
-			imgcache.ViewRadius(c, h.cache, imgcache.FormatURLProtocol(top.Cover), coverW, coverW, 0)
+			// 原型 `.hero .cover` r-8（index.html 367）：圆角落在最内层的图上，外框的 Clip 在 GPU 上只裁矩形。
+			imgcache.ViewRadius(c, h.cache, imgcache.FormatURLProtocol(top.Cover), coverW, coverW, tok.R8)
 		})
 
 		ui.Column(c).Grow(1).Shrink(1).Children(func() {
