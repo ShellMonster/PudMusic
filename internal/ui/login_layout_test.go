@@ -48,6 +48,39 @@ func TestTheLoginCardStacksInANarrowWindow(t *testing.T) {
 	}
 }
 
+// TestTheScanStepPointsWhereTheQRCodeIs 锁住第二步的文案跟着二维码的位置走：单列（≤ 1024，
+// 二维码在上）写「扫描上方二维码」，两栏（二维码在左）写「扫描左侧二维码」。
+//
+// 曾经出错的行为：单列时二维码已经挪到文字上面，第二步还写「扫描左侧二维码」。
+func TestTheScanStepPointsWhereTheQRCodeIs(t *testing.T) {
+	for _, tc := range []struct {
+		w          int
+		want, lost string
+	}{
+		{960, "扫描上方二维码", "扫描左侧二维码"},
+		{1024, "扫描上方二维码", "扫描左侧二维码"},
+		{1280, "扫描左侧二维码", "扫描上方二维码"},
+	} {
+		_, tt := loginLayoutShell(t, tc.w)
+		step, ok := tt.Find(tc.want)
+		if !ok {
+			t.Errorf("%d 宽时第二步不是「%s」，文字有 %q", tc.w, tc.want, tt.Texts())
+			continue
+		}
+		if tt.HasText(tc.lost) {
+			t.Errorf("%d 宽时还写着「%s」", tc.w, tc.lost)
+		}
+		// 文案说的方位要和画面一致：二维码确实在第二步的上方 / 左侧。
+		qr, _ := tt.Find("登录二维码")
+		if tc.w <= loginNarrowMax && qr.Y+qr.H > step.Y {
+			t.Errorf("%d 宽时二维码（底 %.0f）不在第二步（顶 %.0f）上方", tc.w, qr.Y+qr.H, step.Y)
+		}
+		if tc.w > loginNarrowMax && qr.X+qr.W > step.X {
+			t.Errorf("%d 宽时二维码（右 %.0f）不在第二步（左 %.0f）左侧", tc.w, qr.X+qr.W, step.X)
+		}
+	}
+}
+
 // TestTheLoginSkipOnlyShowsWithSomewhereToGoBack 锁定原型 app.js:795：「暂不登录」只在有返回
 // 目标 / 历史时摆（曾经恒摆，登录页是第一页时点了也回不去）。
 func TestTheLoginSkipOnlyShowsWithSomewhereToGoBack(t *testing.T) {

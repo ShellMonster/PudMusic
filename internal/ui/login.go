@@ -265,8 +265,13 @@ func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState, narrow bool) {
 			Margin(space.Px8, space.None, space.None, space.None)
 
 		// `.steps`：上下各 24、步骤之间 12。
+		// 第二步写二维码在哪：单列时二维码在文字上面，写「上方」；两栏时在左边，写「左侧」。
+		scan := "扫描左侧二维码"
+		if narrow {
+			scan = "扫描上方二维码"
+		}
 		ui.Column(c).Key("login-steps").FillWidth().Gap(space.Px12).Margin(space.Px24, space.None, space.Px24, space.None).Children(func() {
-			for i, label := range []string{"打开手机上的 B 站 App", "扫描左侧二维码", "在手机上确认登录"} {
+			for i, label := range []string{"打开手机上的 B 站 App", scan, "在手机上确认登录"} {
 				s.loginStepRow(c, p, i+1, label, i == 0 || step >= i, narrow)
 			}
 		})
