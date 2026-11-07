@@ -179,7 +179,7 @@ type TrackEvents struct {
 // TrackRow 画一行曲目（原型 `.trow`，`app.js` 的 `trackRows`）。key 必须稳定且唯一
 // （铁律四：用曲目 ID，不用序号）。w 是列表宽。
 //
-// 悬停：整行 hover 底；序号换成播放键；心（没喜欢时）、移除、「⋯」这几枚平时隐藏、
+// 悬停：整行 hover 底；序号换成播放键；心（没喜欢时）、移除、「⋯」这几枚平时隐藏（仍占位）、
 // 悬停才出现。正在播放且没悬停时序号位置是 eq-bars。
 func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 	p := pal(c)
@@ -237,7 +237,9 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 				ui.Box(c).Size(tok.CoverRow, tok.CoverRow).Radius(tok.R4).Background(p.Surface2).
 					Clip().Shrink(0).Children(func() {
 					if t.Cover != nil {
-						t.Cover(c, tok.CoverRow, tok.CoverRow)
+						// 原型 `.trow .t-cover` 是 r-4（index.html 336）；圆角交给最内层的图，
+						// GPU 只有最内层裁剪切圆角（见 `Cover`）。
+						t.Cover(c, tok.CoverRow, tok.CoverRow, tok.R4)
 					}
 				})
 			}
@@ -306,16 +308,28 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 		typo.Mono(ui.Text(c, t.Duration)).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text3).
 			Width(colDur).TextAlign(ui.End).SingleLine()
 		// 操作。
+		// 原型 `.icon-btn.hide-idle`（index.html 344–346）是 opacity:0 **仍占位**：平时藏起来的键
+		// 也留着那一格，悬停时只是显形，已喜欢那颗常亮的心不会被右边冒出来的「⋯」挤走。
+		// 藏着的那一格画成空盒（`idleSlot`）：看不见、点不到、也不进 Tab 序——透明的按钮仍能
+		// 拿焦点、仍能被点中，框架没有「透明即不可交互」的开关。
 		ui.Row(c).Width(colAct).Gap(space.Px2).Justify(ui.End).AlignItems(ui.Center).Children(func() {
-			if t.Removable && hot {
-				ev.Remove = IconBtn(c, key+":remove", "x", "移除 "+t.Title, IconOpts{Row: true}).Clicked()
-			}
-			if t.CanLike && (t.Liked || hot) {
-				ic, label := "heart", "喜欢 "+t.Title
-				if t.Liked {
-					ic, label = "heart-on", "取消喜欢 "+t.Title
+			if t.Removable {
+				if hot {
+					ev.Remove = IconBtn(c, key+":remove", "x", "移除 "+t.Title, IconOpts{Row: true}).Clicked()
+				} else {
+					idleSlot(c, key+":remove:idle")
 				}
-				ev.Like = IconBtn(c, key+":like", ic, label, IconOpts{Row: true, On: t.Liked}).Clicked()
+			}
+			if t.CanLike {
+				if t.Liked || hot {
+					ic, label := "heart", "喜欢 "+t.Title
+					if t.Liked {
+						ic, label = "heart-on", "取消喜欢 "+t.Title
+					}
+					ev.Like = IconBtn(c, key+":like", ic, label, IconOpts{Row: true, On: t.Liked}).Clicked()
+				} else {
+					idleSlot(c, key+":like:idle")
+				}
 			}
 			if hot {
 				more := IconBtn(c, key+":more", "more", "更多操作："+t.Title, IconOpts{Row: true})
@@ -323,10 +337,18 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 					more = more.Menu(t.Menu)
 				}
 				ev.More = more.Clicked()
+			} else {
+				idleSlot(c, key+":more:idle")
 			}
 		})
 	})
 	return ev
+}
+
+// idleSlot 是行尾「平时藏着」那枚键的占位（原型 `.hide-idle` 的 opacity:0）：和行内图标键
+// 一样大（`tok.IconHitRow`），什么都不画、不接输入。
+func idleSlot(c *ui.Context, key string) {
+	ui.Box(c).Key(key).Size(tok.IconHitRow, tok.IconHitRow).Shrink(0)
 }
 
 // eqPeriod 是 eq-bars 一个来回（原型 `eqb 900ms … alternate`：去 900 回 900）。

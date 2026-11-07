@@ -65,6 +65,14 @@ func ViewTitled(c *ui.Context, cache *Cache, url, label string, w, h float32) ui
 	return ViewPlaceholderTitled(c, cache, url, label, w, h, c.Theme().Radius, placeholderIcon)
 }
 
+// ViewTitledRadius 是 ViewTitled 加上圆角（原型 `.t-cover` 是 R4，不是主题那一档 8）。
+//
+// ⚠️ **圆角必须由这一层给**：GPU 后端嵌套裁剪只有最内层切圆角，外面再套一个
+// `Radius(r).Clip()` 的框只按矩形裁——外框给 4、这里给 8，真机上就是 8。
+func ViewTitledRadius(c *ui.Context, cache *Cache, url, label string, w, h, radius float32) ui.Element {
+	return ViewPlaceholderTitled(c, cache, url, label, w, h, radius, placeholderIcon)
+}
+
 // ViewPlaceholderTitled 是 ViewPlaceholder 加上歌名。label 为空就和 ViewPlaceholder 一样
 // （画 empty 那枚图形）；不空且没有地址，就画首字渐变。
 func ViewPlaceholderTitled(c *ui.Context, cache *Cache, url, label string, w, h, radius float32, empty *ui.SVG) ui.Element {

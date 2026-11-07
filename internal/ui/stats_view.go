@@ -433,8 +433,8 @@ func (s *Shell) viewStatsLoop(c *ui.Context, st *statsPageState, rng statsRange,
 				// 拆键同一份口径）。拆不出来的行不算在放——它连是哪一首都认
 				// 不出。不标的话按了播放那一行什么变化都没有，像没按上。
 				Playing: statsRowPlaying(acts, r.Key, st.data.Tracks[r.Key]),
-				Cover: func(c *ui.Context, w, h float32) {
-					imgcache.ViewTitled(c, s.images, "", r.Title, w, h)
+				Cover: func(c *ui.Context, w, h, radius float32) {
+					imgcache.ViewTitledRadius(c, s.images, "", r.Title, w, h, radius)
 				},
 			}, listW)
 			if ev.Play {

@@ -66,7 +66,8 @@ func CoverCard(c *ui.Context, key, title, sub string, w float32, cover Cover, pl
 			Background(p.Surface2).Clip()
 		b.Children(func() {
 			if cover != nil {
-				cover(c, w, w)
+				// 圆角交给最内层的图（原型 `.cover` 的 r-8；GPU 只有最内层裁剪切圆角，见 `Cover`）。
+				cover(c, w, w, tok.R8)
 			}
 			ev.Play = coverPlay(c, key+":play", title, hot || playing)
 		})
@@ -79,18 +80,26 @@ func CoverCard(c *ui.Context, key, title, sub string, w float32, cover Cover, pl
 // coverPlay 是封面右下角那枚播放键（`.cover-play`）：shown 为假时透明、往下 6。
 func coverPlay(c *ui.Context, key, title string, shown bool) bool {
 	p := pal(c)
-	b := ui.ButtonBase(c).Key(key).Label("播放 "+title).Size(tok.CoverPlay, tok.CoverPlay).
-		Radius(tok.CoverPlay / 2).Background(p.Accent).AlignItems(ui.Center).Justify(ui.Center).
-		Absolute().Right(tok.CoverPlayInset).Bottom(tok.CoverPlayInset)
-	b = shadow.CoverPlay(b)
+	// 原型 `.cover-play`（index.html 312）：opacity 走 160ms、transform 走 240ms，两条过渡时长不同。
+	// 框架一个元素的 AnimatePose 只有一条 Animation，所以拆成两层：外层只淡（Fast），里层只位移（Med）。
 	// Pose.Fade 是「淡掉多少」（0 = 完全可见，1 = 全透明），和 CSS opacity 相反。
-	pose := ui.Pose{Y: 6, Fade: 1}
+	fade, lift := ui.Pose{Fade: 1}, ui.Pose{Y: 6}
 	if shown {
-		pose = ui.Pose{}
+		fade, lift = ui.Pose{}, ui.Pose{}
 	}
-	b = b.AnimatePose(pose, ui.Animation{Duration: motion.Med, Ease: motion.EaseOut})
-	b.Children(func() { glyph(c, "play", 20, p.AccentInk) })
-	return shown && b.Clicked()
+	var clicked bool
+	ui.Box(c).Key(key+":fade").Size(tok.CoverPlay, tok.CoverPlay).
+		Absolute().Right(tok.CoverPlayInset).Bottom(tok.CoverPlayInset).
+		AnimatePose(fade, ui.Animation{Duration: motion.Fast, Ease: motion.EaseOut}).
+		Children(func() {
+			b := ui.ButtonBase(c).Key(key).Label("播放 "+title).Size(tok.CoverPlay, tok.CoverPlay).
+				Radius(tok.CoverPlay / 2).Background(p.Accent).AlignItems(ui.Center).Justify(ui.Center)
+			b = shadow.CoverPlay(b)
+			b = b.AnimatePose(lift, ui.Animation{Duration: motion.Med, Ease: motion.EaseOut})
+			b.Children(func() { glyph(c, "play", 20, p.AccentInk) })
+			clicked = b.Clicked()
+		})
+	return shown && clicked
 }
 
 func cardText(c *ui.Context, title, sub string, p tok.Palette) {
@@ -111,7 +120,8 @@ func ColCard(c *ui.Context, key, title, sub string, w float32, cover Cover) (ope
 			Background(p.Surface2).Clip().AlignItems(ui.Center).Justify(ui.Center)
 		b.Children(func() {
 			if cover != nil {
-				cover(c, w, w)
+				// 同 CoverCard：圆角 r-8 交给最内层的图（原型 `colCard` 的 `.cover`）。
+				cover(c, w, w, tok.R8)
 			} else {
 				glyph(c, "folder", 40, p.Text3)
 			}
@@ -148,7 +158,8 @@ func VideoCard(c *ui.Context, key string, v Video, w float32) (open bool) {
 			Background(thumbBg).Clip()
 		b.Children(func() {
 			if v.Cover != nil {
-				v.Cover(c, w, h)
+				// 圆角 r-8 交给最内层的图（原型 `.vthumb`；GPU 只有最内层裁剪切圆角，见 `Cover`）。
+				v.Cover(c, w, h, tok.R8)
 			}
 			stat := func() ui.Element {
 				return ui.Row(c).Background(ui.RGBA(0, 0, 0, scrim.VideoChip)).Radius(tok.R6).Padding(space.Px3, space.Px8).Gap(space.Px10).
@@ -200,7 +211,7 @@ func Avatar(c *ui.Context, name string, size float32, tint ui.Color, image Cover
 	return ui.Box(c).Size(size, size).Radius(size / 2).Background(tint).Clip().Shrink(0).
 		AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 		if image != nil {
-			image(c, size, size)
+			image(c, size, size, size/2)
 			return
 		}
 		typo.Display(ui.Text(c, first), size*0.42).TextColor(ui.RGB(255, 255, 255))

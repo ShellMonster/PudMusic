@@ -21,8 +21,8 @@ import (
 
 // synthCover 是合成封面：一块纯色，上面一道浅色对角块，足够看出「完整显示、不裁切」。
 func synthCover(base color.RGBA) pud.Cover {
-	return func(c *mygoui.Context, w, h float32) {
-		mygoui.Box(c).Size(w, h).Background(mygoui.RGB(base.R, base.G, base.B)).Draw(
+	return func(c *mygoui.Context, w, h, radius float32) {
+		mygoui.Box(c).Size(w, h).Radius(radius).Clip().Background(mygoui.RGB(base.R, base.G, base.B)).Draw(
 			func(p *mygoui.Painter, r mygoui.Rect) {
 				p.Fill(mygoui.Rect{X: r.X + r.W*0.2, Y: r.Y + r.H*0.2, W: r.W * 0.6, H: r.H * 0.6},
 					mygoui.RGBA(255, 255, 255, 0.18), 6)

@@ -54,8 +54,9 @@ func (g *Grid) viewVideoCell(c *ui.Context, i int, cell float32) {
 		Plays:    g.countText.At(i, m.View, PlayCountText),
 		Duration: g.durText.At(i, m.Duration, formatDuration),
 		Playing:  isPlaying(g.acts, m.Item),
-		Cover: func(c *ui.Context, w, h float32) {
-			imgcache.ViewRadius(c, g.cache, m.Cover, w, h, 0)
+		// 圆角是 `pud.VideoCard` 传进来的 r-8，落在最内层的图上（GPU 只有最内层裁剪切圆角）。
+		Cover: func(c *ui.Context, w, h, radius float32) {
+			imgcache.ViewRadius(c, g.cache, m.Cover, w, h, radius)
 		},
 	}
 	ui.Column(c).Key("vcell:" + m.ID).

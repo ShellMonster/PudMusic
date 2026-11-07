@@ -355,11 +355,12 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 
 // ── 公共小件 ────────────────────────────────────────────────────────────────
 
-// coverOf 是「在方框里画这一张封面」。圆角由外面的框（`pud.CoverCard` 的 8）裁，这里不再
-// 自己给圆角。
+// coverOf 是「在方框里画这一张封面」。圆角是组件传进来的那一档（卡片 8、榜单行 4），
+// 必须落在 imgcache 最内层：GPU 后端嵌套裁剪只有最内层切圆角，外框的 `Radius().Clip()`
+// 只按矩形裁（见 `pud.Cover`）。
 func (h *homePage) coverOf(url string) pud.Cover {
-	return func(c *ui.Context, w, hh float32) {
-		imgcache.ViewRadius(c, h.cache, imgcache.FormatURLProtocol(url), w, hh, 0)
+	return func(c *ui.Context, w, hh, radius float32) {
+		imgcache.ViewRadius(c, h.cache, imgcache.FormatURLProtocol(url), w, hh, radius)
 	}
 }
 

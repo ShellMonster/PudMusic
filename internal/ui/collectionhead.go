@@ -65,9 +65,10 @@ func (s *Shell) tintBackgroundOr(c *ui.Context, cover string, mix float32, fallb
 }
 
 // collCoverDraw 把一个封面地址包成 `pud.Cover`（有地址的三态走 imgcache）。
+// 圆角由组件传进来、落在 imgcache 最内层（GPU 只有最内层裁剪切圆角，见 `pud.Cover`）。
 func (s *Shell) collCoverDraw(url string) pud.Cover {
-	return func(c *ui.Context, w, h float32) {
-		imgcache.ViewRadius(c, s.images, url, w, h, 0)
+	return func(c *ui.Context, w, h, radius float32) {
+		imgcache.ViewRadius(c, s.images, url, w, h, radius)
 	}
 }
 
@@ -76,10 +77,10 @@ func (s *Shell) upFaceDraw(url string) pud.Cover {
 	if url == "" {
 		return nil
 	}
-	return func(c *ui.Context, w, h float32) {
+	return func(c *ui.Context, w, h, radius float32) {
 		// 无障碍名字沿用头像地址（`spaceAvatar` 的老口径，无头测试靠它量头像的盒子）。
 		ui.Box(c).Size(w, h).Label(url).Children(func() {
-			imgcache.States(c, s.pageImages(), url, w, h, w/2, imgcache.AvatarShape())
+			imgcache.States(c, s.pageImages(), url, w, h, radius, imgcache.AvatarShape())
 		})
 	}
 }
@@ -115,21 +116,25 @@ func (s *Shell) viewCollectionHeader(c *ui.Context, p *collectionPage) {
 	}()
 	row.Children(func() {
 		// ① 封面。元信息没回来时画骨架（空地址在 imgcache 里是「本来就没有」，含义相反）。
+		// 原型 `.cover` r-8（index.html 306）：圆角落在最内层（图 / 心 / 骨架各自带圆角）——
+		// GPU 后端嵌套裁剪只有最内层切圆角，外框的 Clip 只按矩形裁（见 `pud.Cover`）。
 		box := ui.Box(c).Size(coverSide, coverSide).Radius(tok.R8).Clip().
 			Background(pl.Surface2).Shrink(0)
 		box = shadow.LargeCover(box, t)
 		box.Children(func() {
 			switch {
 			case !info.Loaded:
-				imgcache.Loading(c, coverSide, coverSide, imgcache.Shape{})
+				ui.Box(c).Size(coverSide, coverSide).Radius(tok.R8).Clip().Children(func() {
+					imgcache.Loading(c, coverSide, coverSide, imgcache.Shape{})
+				})
 			case cover == "" && info.Default:
 				// 默认收藏夹没有封面时是主色底 + 心（原型「我喜欢」）。
-				ui.Box(c).Size(coverSide, coverSide).Background(pl.Accent).
+				ui.Box(c).Size(coverSide, coverSide).Radius(tok.R8).Background(pl.Accent).
 					AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 					ui.Icon(c, pud.Icon("heart")).FontSize(72).TextColor(pl.AccentInk)
 				})
 			default:
-				imgcache.ViewRadius(c, s.images, cover, coverSide, coverSide, 0)
+				imgcache.ViewRadius(c, s.images, cover, coverSide, coverSide, tok.R8)
 			}
 		})
 
