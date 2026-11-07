@@ -2,7 +2,7 @@
 
 一款面向 macOS 和 Windows 的桌面音乐播放器。
 
-PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建，在 [Biu](https://github.com/wood3n/biu) 的基础上重新实现并扩展。界面不依赖 WebView，音频播放链路使用 Go 解码器和操作系统音频能力。
+PudMusic 使用 Go 和 [MyGo](https://github.com/egoist/mygo) 原生 UI 构建，在 [Biu](https://github.com/wood3n/biu) 的基础上重新实现并扩展。界面不依赖 WebView，音频播放链路使用 Go 解码器和操作系统音频能力，播放、下载与解码均为应用内实现，不依赖系统 ffmpeg 或其他外部解码组件。
 
 > 项目仍在持续开发中。功能、平台支持和安装包状态会随版本变化。
 
@@ -115,8 +115,6 @@ macOS 当前提供 DMG 安装包，首次打开未公证的应用时可能需要
 - `github.com/Eyevinn/mp4ff`：MP4/DASH 相关处理。
 - Ogg Vorbis 相关库：OGG Vorbis 音频处理。
 - 仓库内 vendor 的 `tphakala/go-mp3`：MP3 解码。
-
-播放、下载与解码均为应用内实现，不依赖系统 ffmpeg 或其他外部解码组件。
 
 完整依赖和许可证信息见 [`NOTICE`](NOTICE)、[`LICENSE`](LICENSE) 和 [`resources/licenses/THIRD-PARTY-NOTICES.txt`](resources/licenses/THIRD-PARTY-NOTICES.txt)。
 
