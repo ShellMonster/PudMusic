@@ -54,12 +54,12 @@ func (s *Shell) viewFullTop(c *ui.Context, st app.State, g fullGeo) {
 				b := pud.IconBtn(c, "full:comments", "comment", commentsKeyLabel(count),
 					pud.IconOpts{Color: p.Text, HoverColor: p.Text, Count: playbarCountText(count)})
 				if s.withTip(c, b, commentsKeyTip(count)).Clicked() {
-					s.commentsOpen = true
+					s.openCommentsDrawer()
 				}
 			}
 			if s.withTip(c, pud.IconBtn(c, "full:queue", "queue", "打开播放列表",
 				pud.IconOpts{Color: p.Text, HoverColor: p.Text}), drawerTip(s.drawerOpen)).Clicked() {
-				s.drawerOpen = !s.drawerOpen
+				s.toggleQueueDrawer()
 			}
 		})
 }

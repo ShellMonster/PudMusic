@@ -178,11 +178,9 @@ func (s *Shell) runShortcut(id string) {
 		// 开着时才有用」的命令。
 		s.toggleWindow()
 	case "toggleQueueDrawer":
-		// ⚠️ **翻转的是意图，不是阶段**：`drawerOpen` 是「用户想让它开还是关」，
-		// 而 `drawerPhase` 跟着它和动画走（`queue_drawer.go` 的 drawerPhase）。
-		// 直接写 `drawerPhase` 会把状态机推乱（退场那一帧写它等于把「关」
-		// 改成了「开」，而用户的意图那一栏没动）。
-		s.drawerOpen = !s.drawerOpen
+		// ⚠️ **翻转的是意图，不是阶段**：阶段跟着意图和动画走；
+		// `toggleQueueDrawer` 还会关掉评论抽屉，避免两个模态层叠加。
+		s.toggleQueueDrawer()
 	}
 }
 

@@ -488,10 +488,10 @@ type Shell struct {
 	// 理由和那一组状态机见 queue_drawer.go 的 drawerPhase。
 	drawerPhase drawerPhase
 
-	// commentsOpen 是评论抽屉开没开（票 #706）。
+	// commentsOpen 是评论抽屉开没开的用户意图（票 #706）。
 	//
-	// ⚠️ **它和 `drawerOpen`（队列抽屉）是两件事，各有一份**：两个抽屉可以同时
-	// 开——而它们的阶段是**各自的**（`commentsPhase`）。
+	// ⚠️ **它和 `drawerOpen`（队列抽屉）各有一份阶段状态，但打开入口互斥**：
+	// 打开评论会关闭队列，打开队列会关闭评论；阶段机仍各自处理退场。
 	//
 	// ⚠️ **它不进设置**：抽屉是「我现在要看评论」这一下的事，关掉窗口就该是关着
 	// 的（理由同 `drawerOpen`）。
