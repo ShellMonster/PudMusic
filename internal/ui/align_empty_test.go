@@ -33,13 +33,11 @@ func clickAfterScrollingIntoView(t *testing.T, tt *mygoui.Tester, label string) 
 	}
 	h := tt.Image().Bounds().Dy()
 	limit := float32(h) - 84 - 8
-	for i := 0; i < 10 && r.Y+r.H > limit; i++ {
-		tt.Scroll(600, 400, 0, 200)
-		tt.Frame()
-		r, _ = tt.Find(label)
-	}
 	if r.Y+r.H > limit {
-		t.Fatalf("「%s」滚不上来（y=%.0f），一直压在播放条底下", label, r.Y)
+		scrollToEnd(t, tt, 600, 400, "「"+label+"」滚到播放条上面", func() bool {
+			r, ok = tt.Find(label)
+			return ok && r.Y+r.H <= limit
+		})
 	}
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	tt.Frame()
