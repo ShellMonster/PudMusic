@@ -10,9 +10,9 @@
 //
 // 这一层把那两件事分开：
 //
-//   - **副作用**：收后台投回来的结果、起该起的那一拉、翻页、同步搜索框、起定时器
-//     ……**每一帧都要跑**，跟画不画没关系。跳过它们的话，后台的结果一直落在信箱里
-//     没人取，用户关掉满屏看到的是「打开那一刻的样子」。
+//   - **副作用**：全局状态、顶栏状态和浮层继续收后台结果；当前路由页在满屏期间
+//     暂停自己的同步，避免为不可见内容持续起请求、分页和状态处理。退出满屏后的
+//     第一帧会强制同步当前页。
 //   - **绘制**：画出来给人看的那一部分。满屏开着的时候**一个字都不建**。
 //
 // # 契约
@@ -133,10 +133,10 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 // 都不画（见 presence.go），那是另一件事。
 func (s *Shell) underlayHidden() bool { return s.full.open }
 
-// syncUnderlay 跑底层那一层的**每帧副作用**。
+// syncUnderlay 跑底层那一层的每帧副作用。
 //
-// ⚠️ **每一帧都调**，不管底层画不画（票 #161）。满屏开着的时候它照跑：后台的结果
-// 照落、该起的拉照起、该翻的页照翻——只是**不画**。
+// ⚠️ 全屏期间仍运行全局状态和可见抽屉的同步；当前隐藏路由页暂停，退出后的第一帧
+// 立即补一次，避免后台请求和隐藏页面状态机空转。
 func (s *Shell) syncUnderlay(c *ui.Context) {
 	// 顶栏那一摊：联想词那个防抖（`syncSuggestPending`）、红点那个轮询
 	//（`syncFeedDot`）、头像那个「登录态变了吗」（`avatarSync`）。它们原来在
@@ -165,11 +165,14 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 	// 只在当前路由是 `/login` 时才跑——放那儿就漏掉了那一半。
 	s.syncLoginSuccess()
 
-	// 当前这一页自己那一份。
+	// 当前这一页自己那一份。满屏期间页面不可见，跳过它；关闭满屏后的第一帧
+	// 强制补一次，保证用户看到的是最新状态。
 	if s.router.Path() != loginPath {
 		s.loginAutoStarted = false
 	}
-	s.syncCurrentPage(c)
+	if !s.full.open {
+		s.syncCurrentPage(c)
+	}
 
 	// 评论抽屉自己那一份（票 #706）。
 	//
