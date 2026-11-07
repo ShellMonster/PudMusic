@@ -35,9 +35,40 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo/ui"
 )
+
+// syncHiddenUnderlayState 收掉那些只在当前路由页可见时才有意义的短暂状态。
+// 满屏期间路由页不建，这些状态若继续保留，会让防抖钟持续唤醒窗口；快捷键录制
+// 则需要标记为仍在设置页上，避免 viewShortcuts 的兜底把它静默取消。
+func (s *Shell) syncHiddenUnderlayState() {
+	if !s.full.open || s.fullClosing() {
+		return
+	}
+	switch lookup(s.router.Path()).Match {
+	case laterPath, historyPath:
+		if p := s.libraryPageAt(s.router.Path()); p != nil {
+			p.pendingSince = time.Time{}
+		}
+	case collectionMatch:
+		if s.collection != nil {
+			s.collection.pendingSince = time.Time{}
+		}
+	case settingsPath:
+		if s.settings.tab == settingsTabShortcut {
+			s.recorderShown = true
+		}
+	}
+	if s.lyricSearch.open {
+		s.lyricSearch.pendingSince = time.Time{}
+	}
+	if s.terms.pendingSince != (time.Time{}) {
+		s.terms.pendingSince = time.Time{}
+	}
+}
 
 // drawUnderlay 画底层那一层：侧栏 + 顶栏 + 路由页 + 播放条。
 //
@@ -129,9 +160,9 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 
 // underlayHidden 报底层那一层此刻是不是被满屏盖住了。
 //
-// 判据是**满屏开着没有**，不是「窗口看得见没有」：窗口看不见的时候整个窗口
-// 都不画（见 presence.go），那是另一件事。
-func (s *Shell) underlayHidden() bool { return s.full.open }
+// 退场阶段满屏已经开始淡出，底层要及时画回来，用户才能在动画中看到当前页面。
+// 窗口看不见时整个窗口都不画（见 presence.go），那是另一件事。
+func (s *Shell) underlayHidden() bool { return s.full.open && !s.fullClosing() }
 
 // syncUnderlay 跑底层那一层的每帧副作用。
 //
@@ -170,7 +201,7 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 	if s.router.Path() != loginPath {
 		s.loginAutoStarted = false
 	}
-	if !s.full.open {
+	if !s.full.open || s.fullClosing() {
 		s.syncCurrentPage(c)
 	}
 

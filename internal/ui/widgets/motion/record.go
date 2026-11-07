@@ -84,11 +84,13 @@ var PageIn = ui.ElementTransition{
 	Enter: &ui.Motion{Y: 8, Opacity: 0},
 }
 
-// FullIn 是全屏播放器的进出场（原型 `full-in` / `full-out`：从下 24 淡入）。
+// FullIn 是全屏播放器的元素进场令牌（原型 `full-in`：从下 24 淡入）。
+// 当前满屏播放器的退场由 fullplayer.go 的 AnimatePose 管理：它要保留整棵
+// 子树，等弹幕、频谱和进度条完成退场后再拆掉，不能交给 Element.Transition 的
+// exit ghost。
 var FullIn = ui.ElementTransition{
 	Duration: Slow, Ease: EaseOut,
 	Enter: &ui.Motion{Y: 24, Opacity: 0},
-	Exit:  &ui.Motion{Y: 24, Opacity: 0},
 }
 
 // DrawerIn 是右侧抽屉的进出场（原型 `drawer-in`：从右边整块滑进来）。width 是

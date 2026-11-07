@@ -172,14 +172,18 @@ func TestEscapeReturnsFromTheFullPlayerAtOnce(t *testing.T) {
 	tt.Key(0, mygoui.KeyEscape)
 	tt.Frame()
 
-	if s.full.open {
-		t.Fatalf("按了 Esc 全屏还开着，文字有 %q", tt.Texts())
+	if !s.full.open || s.full.phase != fullOut {
+		t.Fatalf("按了 Esc 全屏没有进入退场：open=%v phase=%v，文字有 %q", s.full.open, s.full.phase, tt.Texts())
 	}
 	if !tt.HasText("第一首") {
 		t.Errorf("按了 Esc 之后的下一帧上，底下那一页还没画回来，文字有 %q", tt.Texts())
 	}
 	if s.pageBuilds <= before {
 		t.Error("按了 Esc 之后底下那一页没有被重新建过——它停在打开满屏之前的样子了")
+	}
+	settleFull(t, tt)
+	if s.full.open {
+		t.Error("退场动画完成后满屏还开着")
 	}
 }
 

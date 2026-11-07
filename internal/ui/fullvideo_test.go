@@ -116,8 +116,12 @@ func TestEscLeavesTheTheaterBeforeItClosesTheFullPlayer(t *testing.T) {
 	}
 	tt.Key(0, mygoui.KeyEscape)
 	tt.Frame()
+	if !s.full.open || s.full.phase != fullOut {
+		t.Fatalf("第二下 Esc 应该进入满屏退场：open=%v phase=%v", s.full.open, s.full.phase)
+	}
+	settleFull(t, tt)
 	if s.full.open {
-		t.Fatal("第二下 Esc 应该关掉满屏")
+		t.Fatal("退场动画完成后满屏还开着")
 	}
 }
 

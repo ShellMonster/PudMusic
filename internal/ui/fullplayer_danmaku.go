@@ -101,6 +101,7 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 		PassThrough().
 		// ⚠️ **弹幕是装饰**：读屏软件不该念它（报告 §4）。
 		Role(ui.RoleNone).
+		AnimatePose(ui.Pose{Fade: s.fullPose().Fade}, fullExitAnim).
 		// 🔴 **位移和字都在画的时候算**（见文件头那一段）：这一帧之后只重绘
 		// 的那些帧**不会重建 view**，所以回调里从 `d` 现算才是唯一的事实来源。
 		Draw(s.paintDanmaku)

@@ -208,6 +208,7 @@ func (s *Shell) viewMain(c *ui.Context) {
 	//
 	// 排在主题之后、其它每帧钩子之前：它自己不画任何东西，而放在最前面的话
 	// 「按了快捷键 → 顺带这一帧才生效」这件事和主题那条铁律不会互相干扰。
+	s.syncHiddenUnderlayState()
 	s.viewShortcuts(c)
 	// ⚠️ **这一帧只取一次快照**：底层那一层（`drawUnderlay`）和满屏播放器
 	//（`viewFullPlayer`）看的是同一份播放状态——两次取的话两者之间播放状态可能
