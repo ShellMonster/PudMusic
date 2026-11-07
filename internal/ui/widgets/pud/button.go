@@ -144,18 +144,8 @@ type IconOpts struct {
 	Disabled bool
 }
 
-const countBadgeFallbackTextW = 20
-
 // countBadgeFont 是 `.cnt` 的字号（index.html:740 `font: 600 10px/1`）。
 const countBadgeFont = 10
-
-// countBadgeWidth 是 `.cnt` 角标的宽：字宽 + 左右各 4（原型 index.html:740 `padding: 2px 4px`）。
-func countBadgeWidth(measured float32) float32 {
-	if measured <= 0 {
-		measured = countBadgeFallbackTextW
-	}
-	return measured + 2*space.Px4
-}
 
 // 禁用态的不透明度（原型 index.html:228 `.icon-btn:disabled { opacity: .35 }`、
 // index.html:289 `.btn:disabled { opacity: .45 }`）。
@@ -177,7 +167,9 @@ type disabledProbe struct {
 	// 两者不一样才重建——建的时候就知道禁用（`IconOpts.Disabled` / `ButtonDisabled`）的键
 	// 一帧都不多要，免得空闲的界面自己养一个唤醒循环。
 	seen, built bool
-	draw        func(*ui.Painter, ui.Rect)
+	// probed 是至少看过一次绘制时的禁用态（第一帧必须看：后链禁用的键半透明要对）。
+	probed bool
+	draw   func(*ui.Painter, ui.Rect)
 }
 
 type disabledProbeKey struct{}
@@ -192,10 +184,19 @@ type disabledProbeKey struct{}
 // 点击判定也按「上一帧禁用了没有」算，同一个口径）。
 //
 // 绘制回调建一次存在元素状态里，之后每帧复用，不产生每帧分配。
+//
+// ⚠️ `b.Hovered()` 在建的时候就禁用了的键上报假，所以按真实禁用态判之前先问一下它、
+// 不影响结果（悬停底本来就要 `!off`）。
 func disabledNow(c *ui.Context, b ui.Element) bool {
 	s := ui.Local(b, disabledProbeKey{}, func() disabledProbe { return disabledProbe{} })
 	if s.draw == nil {
 		s.draw = func(*ui.Painter, ui.Rect) {
+			// 只重画不重建的帧里，这个回调拿着的是上一遍建的元素（框架不许再碰它）：
+			// 那一帧没有新的禁用态可看，跳过。
+			if !s.el.Valid() {
+				return
+			}
+			s.probed = true
 			s.seen = s.el.IsDisabled()
 			if s.seen != s.built {
 				s.c.Invalidate()
@@ -204,7 +205,12 @@ func disabledNow(c *ui.Context, b ui.Element) bool {
 	}
 	s.el, s.c = b, c
 	s.built = b.IsDisabled() || s.seen
-	b.Draw(s.draw)
+	// 绘制回调只在用得着的时候挂：还没看过一次、指针在上面 / 按着（悬停底和按下缩放要看真实
+	// 禁用态）、以及上一次看到是禁用的（要发现它重新可用）。一直可用、指针不在上面的键不挂，
+	// 省得满屏几百枚键每帧都多跑一个回调。
+	if !s.probed || s.seen || b.Hovered() || b.Pressed() {
+		b.Draw(s.draw)
+	}
 	return s.built
 }
 
@@ -262,12 +268,13 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 			// `.cnt`（index.html:740）：右上角小角标，top 1、right -4、内边距 2/4、圆角 6、
 			// 600 10px/1 等宽 text-2。底色 side；全屏播放器里透明（app.js:1145 内联
 			// `background:transparent`——那里的底是封面取色，一块 side 色的方块会很突兀）。
-			textW, _ := c.MeasureText(0, ui.Span{Text: o.Count, Size: countBadgeFont, Weight: 600})
+			// 宽随字走（不先量字：量字用的是正文字体，等宽字体 + 「万」这类字更宽，按量出来的宽
+			// 会把「1.2万」截成「1.2…」）。
 			bg := p.Side
 			if fullMode {
 				bg = ui.Color{}
 			}
-			ui.Box(c).Width(countBadgeWidth(textW)).Height(countBadgeFont+2*space.Px2).Background(bg).
+			ui.Box(c).Height(countBadgeFont+2*space.Px2).Background(bg).
 				Padding(space.Px2, space.Px4).Radius(tok.R6).
 				Absolute().Top(space.Px1).Right(-space.Px4).Children(func() {
 				typo.Mono(ui.Text(c, o.Count)).FontSize(countBadgeFont).FixedLineHeight(countBadgeFont).

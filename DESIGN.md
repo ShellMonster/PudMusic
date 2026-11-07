@@ -152,6 +152,7 @@ conversion: "Tailwind 1 单位 = 4px；text-* 按标准刻度"
 
 - **禁用态**：`pud.Button` 画出来 45%、`pud.IconBtn` 35%（原型 index.html:289 / 228）。框架对 `Disabled(true)` 的元素绘制时再乘 0.5，所以组件自己给 0.9 / 0.7。
   禁用的键**没有悬停底 / 悬停色 / 按下缩放**（`:hover:not(:disabled)`）；调用方在返回之后链 `.Disabled(true)` 也一样——`disabledNow` 在绘制回调里看真实禁用态、变了就重建一帧，调用方不用改顺序。
+- **计数角标** `.cnt`：宽随字走（不先按正文字体量宽，否则「1.2万」会被截成「1.2…」）。
 - **弹层面板**：框架 `SelectBase` / `PopoverBase` 递进来的面板走 `popupPanel`（`popup.go`），和 `pud.PopPanel` 同一套 `.pop`：`surface` 底、`line` 描边、圆角 12、最小宽 200、`shadow.Pop`、进场 `PopIn`（原型 index.html:587-589）。
   `PopHeading` 12 号 text-3 **500**（`.pop h5`）；`PopOpt` 选中时只有名字变 `accent-text`，下面的说明小字仍是 text-3（`.pop-opt small`）。
 - **主按钮悬停色**：框架控件用的 `Theme.AccentHover` 和 `pud.Button` Primary 一样，深浅都是主色 88% 混正文色（index.html:283）。
