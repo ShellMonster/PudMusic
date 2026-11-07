@@ -85,12 +85,10 @@ func (s *Shell) viewFullLyHead(c *ui.Context, snap app.LyricsSnapshot, g fullGeo
 		if s.full.lyTrans && has {
 			label = "歌词翻译"
 		}
-		chip := pud.Chip(c, "full:ly-trans", label, "translate", s.full.lyTrans && has).
-			Height(26).Radius(tok.Pill)
 		// 原型：高 26、surface 8% 白底；选中 = 纸白底深字（`.ly-head .chip[aria-pressed]`）。
-		if !has {
-			chip = chip.Disabled(true)
-		}
+		// 没有译文时禁用——在建的时候传，悬停才不会亮底。
+		chip := pud.ChipDisabled(c, "full:ly-trans", label, "translate", s.full.lyTrans && has, !has).
+			Height(26).Radius(tok.Pill)
 		if chip.Clicked() {
 			s.full.lyTrans = !s.full.lyTrans
 		}

@@ -173,3 +173,54 @@ func TestDisabledOpacityMatchesThePrototype(t *testing.T) {
 		}
 	})
 }
+
+// TestADisabledChipDoesNotLightUpOnHover 锁住「禁用的 chip 指针落上去不换 press 底」：禁用在建的时候
+// 传（`ChipDisabled`）；同一场景里可用的 chip 悬停会换底，作对照。
+//
+// 曾经出错的行为：满屏歌词的「歌词原文」chip 没有译文时是建完才链 `.Disabled(true)`，悬停底在
+// 建的那一刻已经铺上，禁用的 chip 悬停照样亮，看着像点得动。
+func TestADisabledChipDoesNotLightUpOnHover(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		disabled bool
+	}{{"禁用", true}, {"可用", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			tt := disabledScene(t, gray, func(c *ui.Context) {
+				ChipDisabled(c, "chip", "歌词原文", "", false, tc.disabled)
+			})
+			r, ok := tt.Find("歌词原文")
+			if !ok {
+				t.Fatalf("没找到 chip，文字有 %q", tt.Texts())
+			}
+			idle := fillPixel(tt.Image(), r)
+			tt.Move(r.X-10, r.Y+r.H/2)
+			settle(tt)
+			hot := fillPixel(tt.Image(), r)
+			if tc.disabled && hot != idle {
+				t.Errorf("禁用的 chip 悬停后底色从 %v 变成了 %v——禁用的不该有悬停反馈", idle, hot)
+			}
+			if !tc.disabled && hot == idle {
+				t.Errorf("可用的 chip 悬停后底色没变（%v）：场景推不出悬停，禁用那一支测不出东西", idle)
+			}
+		})
+	}
+}
+
+// TestADisabledChipIsDrawnAtFortyFivePercent 锁住禁用 chip **画出来**的不透明度是 45%（框架对禁用元素
+// 再乘的 0.5 已经换算掉，不是 22.5%）。
+func TestADisabledChipIsDrawnAtFortyFivePercent(t *testing.T) {
+	var surface ui.Color
+	tt := disabledScene(t, ui.RGB(0, 0, 0), func(c *ui.Context) {
+		surface = pal(c).Surface2
+		ChipDisabled(c, "op-chip", "禁用", "", false, true)
+	})
+	r, ok := tt.Find("禁用")
+	if !ok {
+		t.Fatal("没找到 chip")
+	}
+	got := fillPixel(tt.Image(), r)
+	want := ui.RGB(0, 0, 0).Mix(surface, btnDisabledOpacity)
+	if !near(got.R, want.R, 6) || !near(got.G, want.G, 6) || !near(got.B, want.B, 6) {
+		t.Errorf("禁用 chip 底色 %v，want ≈ %v（surface-2 45%% 压黑底）", got, want)
+	}
+}

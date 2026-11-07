@@ -258,18 +258,35 @@ func IconBtn(c *ui.Context, key, icon, label string, o IconOpts) ui.Element {
 
 // Chip 是一枚小胶囊（原型 `.chip`）：高 30、左右 12、surface-2 底、次要色 13 号；
 // 悬停正文色 + press 底；pressed（选中）时反色（正文色底、bg 色字）。icon 可空，12 号。
+//
+// ⚠️ 要禁用就用 `ChipDisabled`，不要在返回之后链 `.Disabled(…)`：悬停底是建的时候定的，
+// 后链的禁用只拦得住点击，指针落上去照样亮（同 `Button`）。
 func Chip(c *ui.Context, key, label, icon string, pressed bool) ui.Element {
+	return chip(c, key, label, icon, pressed, false)
+}
+
+// ChipDisabled 是 Chip 加「禁用」（同 `ButtonDisabled`）：disabled 时没有悬停底 / 悬停色，
+// 画出来 45% 不透明（原型 `.chip` 没写禁用样式，跟 `.btn:disabled` 的 .45）。
+func ChipDisabled(c *ui.Context, key, label, icon string, pressed, disabled bool) ui.Element {
+	return chip(c, key, label, icon, pressed, disabled)
+}
+
+func chip(c *ui.Context, key, label, icon string, pressed, disabled bool) ui.Element {
 	p := pal(c)
 	b := ui.ButtonBase(c).Key(key).Height(tok.ChipH).PaddingX(space.Px12).Radius(tok.ChipH / 2).
-		Gap(space.Px6).AlignItems(ui.Center).Shrink(0)
+		Gap(space.Px6).AlignItems(ui.Center).Shrink(0).Disabled(disabled)
 	bg, fg := p.Surface2, p.Text2
 	switch {
 	case pressed:
 		bg, fg = p.Text, p.Bg
-	case b.Hovered():
+	case b.Hovered() && !disabled:
 		bg, fg = p.Press, p.Text
 	}
 	b = b.Background(bg).Transition(motion.Fade)
+	if disabled {
+		// 框架对禁用元素自己再乘 0.5，换算见 `frameworkDisabledOpacity`：0.9 × 0.5 = 0.45。
+		b = b.Opacity(btnDisabledOpacity / frameworkDisabledOpacity)
+	}
 	b.Children(func() {
 		if icon != "" {
 			glyph(c, icon, tok.IconXs, fg)
