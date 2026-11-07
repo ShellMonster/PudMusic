@@ -171,10 +171,13 @@ const (
 
 // disabledProbe 记着一枚键**上一次绘制时**是不是禁用的。
 type disabledProbe struct {
-	el   ui.Element
-	c    *ui.Context
-	seen bool
-	draw func(*ui.Painter, ui.Rect)
+	el ui.Element
+	c  *ui.Context
+	// seen 是上一次绘制时真实的禁用态；built 是这一帧建的时候按哪一档画的。
+	// 两者不一样才重建——建的时候就知道禁用（`IconOpts.Disabled` / `ButtonDisabled`）的键
+	// 一帧都不多要，免得空闲的界面自己养一个唤醒循环。
+	seen, built bool
+	draw        func(*ui.Painter, ui.Rect)
 }
 
 type disabledProbeKey struct{}
@@ -184,7 +187,7 @@ type disabledProbeKey struct{}
 // 调用方常常在**拿到返回值之后**才链 `.Disabled(true)`（`pud.Button(...).Disabled(x)`），
 // 而悬停底是建的时候铺的——那一刻 `IsDisabled()` 还是假，禁用的键指针落上去照样亮、按下去照样缩
 // （原型是 `:hover:not(:disabled)` / `:active:not(:disabled)`）。这里在绘制回调里看一眼真实的禁用
-// 状态（绘制在整棵树建完之后，那时调用方链的 `.Disabled` 已经生效），记下来；和上一次不一样就
+// 状态（绘制在整棵树建完之后，那时调用方链的 `.Disabled` 已经生效），记下来；和建的时候用的那一档不一样就
 // `Invalidate`，下一帧按真的那一档重建。于是调用方不用改链的顺序，最多差一帧（框架自己的
 // 点击判定也按「上一帧禁用了没有」算，同一个口径）。
 //
@@ -193,15 +196,16 @@ func disabledNow(c *ui.Context, b ui.Element) bool {
 	s := ui.Local(b, disabledProbeKey{}, func() disabledProbe { return disabledProbe{} })
 	if s.draw == nil {
 		s.draw = func(*ui.Painter, ui.Rect) {
-			if d := s.el.IsDisabled(); d != s.seen {
-				s.seen = d
+			s.seen = s.el.IsDisabled()
+			if s.seen != s.built {
 				s.c.Invalidate()
 			}
 		}
 	}
 	s.el, s.c = b, c
+	s.built = b.IsDisabled() || s.seen
 	b.Draw(s.draw)
-	return b.IsDisabled() || s.seen
+	return s.built
 }
 
 // IconBtn 是一枚只有图标的键（原型 `.icon-btn`）：圆角 8 的方块，平时次要色，

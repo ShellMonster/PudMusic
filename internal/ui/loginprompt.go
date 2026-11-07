@@ -74,8 +74,17 @@ var loginPromptWhat = map[string]string{
 	"home:recent:login":   "最近播放",
 }
 
+// loginPageHead 是整页未登录时登录提示**上面**那个页头（原型 app.js:699 / 709：`later()` / `history()`
+// 未登录时是 `head() + loginPrompt(...)`，页头在前）。键同 `loginPromptWhat`；首页「最近播放」那一块
+// 不是整页，没有页头。
+var loginPageHead = map[string]struct{ eyebrow, title, lede string }{
+	"page:" + laterPath:   {"Watch later", "稍后再看", "先存下来，等有空的时候再听。"},
+	"page:" + historyPath: {"History", "历史记录", ""},
+}
+
 // viewNeedsLogin 画「登录后查看」：原型 `loginPrompt`，也就是 T0 的 `pud.LoginPrompt`（虚线框 + 锁的
-// 插画 + 「登录后查看{what}」+ 主色「扫码登录」键）。点登录键去登录页，登录完回首页。
+// 插画 + 「登录后查看{what}」+ 主色「扫码登录」键）；整页那几处先画页头（`loginPageHead`）。
+// 点登录键去登录页，登录完回首页。
 //
 // e 是各页原来给的空状态文案（保留签名，免得别的页同时改）；这里只用 key 查出 what。
 func (s *Shell) viewNeedsLogin(c *ui.Context, key string, _ emptyState) {
@@ -89,8 +98,16 @@ func (s *Shell) viewNeedsLogin(c *ui.Context, key string, _ emptyState) {
 	// 内容最宽 1280（含边距）并居中。
 	padX := space.PageHorizontalForWindow(winW)
 	inner := min(winW-s.sideDrawnWidth(s.app.SettingsSnapshot()), space.PageMaxW)
+	head, isPage := loginPageHead[key]
+	top := float32(space.None)
+	if isPage {
+		top = space.PageTop
+	}
 	ui.Column(c).Key(key).Grow(1).FillWidth().AlignItems(ui.Center).Children(func() {
-		ui.Column(c).Width(inner).Padding(space.None, padX).Children(func() {
+		ui.Column(c).Width(inner).Padding(top, padX, space.None, padX).Children(func() {
+			if isPage {
+				pud.PageHead(c, head.eyebrow, head.title, head.lede, winW, nil)
+			}
 			if pud.LoginPrompt(c, key+":prompt", what) {
 				s.goLogin(homePath)
 			}

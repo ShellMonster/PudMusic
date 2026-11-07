@@ -117,39 +117,47 @@ type Tab struct {
 // 整排底下一条 line。selected 是当前选中的序号，点了就改它；返回这一帧是否改了。
 func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 	p := pal(c)
-	ui.Row(c).Key(key).FillWidth().Gap(space.Px28).AlignItems(ui.End).
+	row := ui.Row(c).Key(key).FillWidth().Gap(space.Px28).AlignItems(ui.End).
 		Draw(func(pp *ui.Painter, r ui.Rect) {
 			pp.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, p.Line, 0)
-		}).
-		Children(func() {
-			for i, tb := range tabs {
-				on := i == *selected
-				b := ui.ButtonBase(c).Key(key + ":" + tb.Label).PaddingY(space.Px12).Gap(space.Px4).
-					AlignItems(ui.Baseline).Label(tb.Label)
-				fg := p.Text2
-				if on || b.Hovered() {
-					fg = p.Text
-				}
-				b = b.Transition(motion.Fade)
-				b.Children(func() {
-					t := text(c, tb.Label, scale.Size16, fg).SingleLine()
-					if on {
-						t.FontWeight(600)
-					}
-					if tb.Count != "" {
-						typo.Mono(ui.Text(c, tb.Count)).FontSize(scale.Font(c, scale.Size12)).
-							TextColor(p.Text3).SingleLine()
-					}
-					if on {
-						tabBar(c, key+":bar", p.Accent)
-					}
-				})
-				if b.Clicked() && !on {
-					*selected = i
-					changed = true
-				}
-			}
 		})
+	// prev 是上一帧选中的那一项：只有**换了 Tab** 才播下划线进场，页面刚挂上时下划线直接在终点
+	// （原型的 `tab-in` 也只在点 Tab 重画时播；首帧就播的话测试钟不走时会一直要帧）。
+	prev := ui.Local(row, tabsPrevKey{}, func() int { return *selected })
+	cur := *selected
+	switched := *prev != cur
+	row.Children(func() {
+		for i, tb := range tabs {
+			on := i == *selected
+			b := ui.ButtonBase(c).Key(key + ":" + tb.Label).PaddingY(space.Px12).Gap(space.Px4).
+				AlignItems(ui.Baseline).Label(tb.Label)
+			fg := p.Text2
+			if on || b.Hovered() {
+				fg = p.Text
+			}
+			b = b.Transition(motion.Fade)
+			b.Children(func() {
+				t := text(c, tb.Label, scale.Size16, fg).SingleLine()
+				if on {
+					t.FontWeight(600)
+				}
+				if tb.Count != "" {
+					typo.Mono(ui.Text(c, tb.Count)).FontSize(scale.Font(c, scale.Size12)).
+						TextColor(p.Text3).SingleLine()
+				}
+				if on {
+					tabBar(c, key+":bar", p.Accent, switched)
+				}
+			})
+			if b.Clicked() && !on {
+				*selected = i
+				changed = true
+			}
+		}
+	})
+	// 记的是**这一遍开始时**的选中项：点击是在这一遍里改的 `*selected`，下一遍（新的下划线挂上那一遍）
+	// 才看得出「换了」。
+	*prev = cur
 	return changed
 }
 
@@ -157,15 +165,18 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 // `@keyframes tab-in { from { transform: scaleX(.3); opacity: 0 } }`）。
 const tabBarEnterScaleX = 0.3
 
-type tabBarScaleKey struct{}
+type (
+	tabBarScaleKey struct{}
+	tabsPrevKey    struct{}
+)
 
 // tabBar 画选中 Tab 下面那条 2 高的主色下划线，进场**只横向**从 30% 展开、同时淡入（240ms ease-out）。
 //
 // 框架的进场 `ui.Motion.Scale` 是横竖一起缩的（2 高的线会先变成 0.6 高再长回来），做不出原型的
 // `scaleX`；所以淡入交给 `Transition`，横向比例用 `AnimateTo` 自己推，再 `Scale(sx, 1)` 以中心为原点
-// 只缩横向。下划线换 Tab 时是新挂上的元素（在另一枚 Tab 里面），状态从头来，所以每次换 Tab 都重播。
-// 系统「减少动态效果」时 `AnimateTo` 直接到终点。
-func tabBar(c *ui.Context, key string, col ui.Color) ui.Element {
+// 只缩横向。下划线换 Tab 时是新挂上的元素（在另一枚 Tab 里面），状态从头来；enter 为真（这一帧
+// 换了 Tab）才从 30% 起步，否则直接在终点。系统「减少动态效果」时 `AnimateTo` 直接到终点。
+func tabBar(c *ui.Context, key string, col ui.Color, enter bool) ui.Element {
 	bar := ui.Box(c).Key(key).Absolute().Left(0).Right(0).Bottom(-1).Height(2).
 		Radius(tok.R2).Background(col).
 		Transition(ui.ElementTransition{
@@ -175,7 +186,9 @@ func tabBar(c *ui.Context, key string, col ui.Color) ui.Element {
 	fresh := ui.Local(bar, tabBarScaleKey{}, func() bool { return true })
 	if *fresh {
 		*fresh = false
-		bar.Jump(tabBarScaleKey{}, tabBarEnterScaleX)
+		if enter {
+			bar.Jump(tabBarScaleKey{}, tabBarEnterScaleX)
+		}
 	}
 	sx := bar.AnimateTo(tabBarScaleKey{}, 1, ui.Animation{Duration: motion.Med, Ease: motion.EaseOut})
 	if sx != 1 {
