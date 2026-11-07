@@ -90,5 +90,12 @@ func newLikedBindShell(t *testing.T, f *biliFixture, boundID int64) (*Shell, *my
 	if err := s.app.Enqueue(likeItem()); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}
+	// ⚠️ **等歌真的放起来**：`Enqueue` 把第一项放起来是异步的（`a.player`
+	// 要等 goroutine 装上），`Snapshot().HasTrack`（= `player != nil`）要等
+	// 那一趟回来才 true。播放条的封面、满屏的入口都拿 `HasTrack` 当门——
+	// 不等它的话，用例拿到的第一帧封面还没画出来，满屏那一条「点开全屏」
+	// 就找不到锚点。喜欢心摆出来靠 `Likeable()`（它看队列当前项，不看
+	// `HasTrack`），那一档不用等；这里等的是**封面 / 满屏**这一头。
+	waitFrames(t, tt, "歌放起来了", func() bool { return s.app.Snapshot().HasTrack })
 	return s, tt
 }
