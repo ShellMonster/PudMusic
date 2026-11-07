@@ -193,7 +193,9 @@ var knobMiniProgressLook = sliderLook{
 	knobWhenIdle: knobHoverLook.knobWhenIdle,
 	face:         knobHoverLook.face,
 	fill: func(t *ui.Theme) (ui.Color, ui.Color, ui.Color) {
-		return t.Accent, t.Accent, t.Accent
+		// 禁用时使用轨道色，避免时长暂时未知但旧的 scrub 值仍把
+		// 进度条画成一段看似有效的当前进度。
+		return t.Accent, t.Accent, rangeRail(t)
 	},
 }
 
