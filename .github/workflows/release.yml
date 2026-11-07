@@ -20,23 +20,40 @@ permissions:
 
 jobs:
   # ------------------------------------------------------------------
-  # build-<GOOS>：三个 job 并行——macOS / Windows / Linux 各打自己两个
-  # 架构的安装包和更新归档。MyGo 没有 cgo，任何平台都能从任何机器交叉；
-  # dmg / NSIS 需要 macOS，所以全部留在 macos runner 上，靠 job 并行抢
-  # 时间（原来 6 个平台串行 ~12 分钟 → 现在每组 ~4 分钟并行跑）。
+  # build-<target>：拆到单架构粒度——linux 两个 job 挪去 ubuntu（没有 dmg/
+  # NSIS/签名要 mac 的依赖，ubuntu 并发槽还不要钱）；darwin 两架构留同一
+  # job（dmg 打包本身便宜，拆开只多一遍 setup）；windows 两架构拆开，它
+  # 是 delta 生成最慢的一组。
   #
   # 产物经 actions/upload-artifact 交给最后的 publish job 统一挂到草稿
   # Release。SHA256SUMS 和 Release 说明也都在 publish job 拼——那时候
   # 全部资产齐了，名单才完整。
   # ------------------------------------------------------------------
   release:
-    name: Build ${{ matrix.goos }} assets
-    runs-on: macos-15-intel
+    name: Build ${{ matrix.target }} assets
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        goos: [darwin, windows, linux]
+        include:
+          # mac 并发槽要省着用：公开仓库上限 5 个。darwin 合一 + windows 拆
+          # 两个架构 = 3 个 mac job，剩下的 linux 两个上 ubuntu。
+          - target: darwin
+            os: macos-15-intel
+            platforms: darwin/amd64,darwin/arm64
+          - target: windows-amd64
+            os: macos-15-intel
+            platforms: windows/amd64
+          - target: windows-arm64
+            os: macos-15-intel
+            platforms: windows/arm64
+          - target: linux-amd64
+            os: ubuntu-latest
+            platforms: linux/amd64
+          - target: linux-arm64
+            os: ubuntu-latest
+            platforms: linux/arm64
     env:
       GH_TOKEN: ${{ github.token }}
       MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
@@ -44,7 +61,9 @@ jobs:
       - name: Check out the tagged commit
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          # tag push 时 tag 就是 HEAD，不需要历史；workflow_dispatch 要
+          # `git describe --tags` 找前一版说明范围，那时候才全量拉。
+          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 0 || 1 }}
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Go
@@ -54,6 +73,8 @@ jobs:
           cache: true
 
       - name: Install NSIS
+        # NSIS 只给 Windows 安装包用；darwin/linux 用不上，跳过省几秒。
+        if: startsWith(matrix.target, 'windows')
         run: brew install nsis
 
       - name: Resolve release tag
@@ -86,35 +107,38 @@ jobs:
             exit 1
           }
 
-      # 发版前必查、且每个 job 都要各查一遍的项：版本号对得上 tag、生成物
-      # 没和源码脱节。build/vet/test 全量那套在合并 PR 的 CI 里已经跑过同一
-      # 个提交，这里不重复（省 ~3 分钟）；licensing 和 generated resources
-      # 是 PR CI 不查的发布专属项，留。
+      # 发版前必查的项：版本号对得上 tag、生成物没和源码脱节。build/vet/test
+      # 全量那套在合并 PR 的 CI 里已经跑过同一个提交，这里不重复（省 ~3 分钟）；
+      # licensing 和 generated resources 是 PR CI 不查的发布专属项。
+      #
+      # 只在 darwin job 跑一次：gen-notices 对 darwin/windows 四个目标跑
+      # `go list`，换 OS 结果不变，没必要五个 job 各跑一遍。
       - name: Run release checks
+        if: matrix.target == 'darwin'
         run: |
           go test ./internal/licensing/
           go generate ./internal/platform/ ./internal/licensing/
           git diff --exit-code -- resources
 
-      - name: Build ${{ matrix.goos }} release assets
+      - name: Build ${{ matrix.target }} release assets
         run: |
-          go tool mygo build -platform ${{ matrix.goos }}/amd64,${{ matrix.goos }}/arm64
+          go tool mygo build -platform ${{ matrix.platforms }}
 
-      - name: Rename ${{ matrix.goos }} assets to platform-friendly names
-        run: scripts/rename-release-assets.sh ${{ matrix.goos }}/amd64 ${{ matrix.goos }}/arm64
+      - name: Rename ${{ matrix.target }} assets to platform-friendly names
+        run: scripts/rename-release-assets.sh ${{ matrix.platforms }}
 
-      - name: Verify ${{ matrix.goos }} release assets
-        run: scripts/verify-release-assets.sh ${{ matrix.goos }}/amd64 ${{ matrix.goos }}/arm64
+      - name: Verify ${{ matrix.target }} release assets
+        run: scripts/verify-release-assets.sh ${{ matrix.platforms }}
 
-      - name: Upload ${{ matrix.goos }} assets for the publish job
+      - name: Upload ${{ matrix.target }} assets for the publish job
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets-${{ matrix.goos }}
+          name: release-assets-${{ matrix.target }}
           # `build/<goos>-*` 一次匹配两个架构目录：通配的公共前缀是
           # `build/`，所以 artifact 里**保留 `<goos>-<arch>/` 这层目录名**，
           # publish job 靠它把产物归位（写成 `build/<goos>-amd64/*` 会把
           # 文件散到 artifact 根上）。
-          path: build/${{ matrix.goos }}-*
+          path: build/*
           if-no-files-found: error
           retention-days: 1
 
@@ -125,7 +149,7 @@ jobs:
   publish:
     name: Publish ${{ github.ref_name }}
     needs: release
-    runs-on: macos-15-intel
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
@@ -133,6 +157,8 @@ jobs:
       - name: Check out the tagged commit
         uses: actions/checkout@v4
         with:
+          # publish job 要写 release 说明，`generate-release-notes.sh` 靠
+          # `git describe --tags` 找上一版——浅 clone 没有别的 tag，拉不全。
           fetch-depth: 0
           ref: ${{ inputs.tag || github.ref }}
 
@@ -154,22 +180,23 @@ jobs:
           path: build
           merge-multiple: false
 
-      # artifact 展开成 build/release-assets-<goos>/<平台目录>/*，归位到
-      # build/<平台目录>/ 再统一验。
+      # 每个 artifact 解到 build/release-assets-<target>/，里面是
+      # `<goos>-<arch>/` 平台目录；归位到 build/<goos>-<arch>/ 再统一验。
       - name: Lay out assets and build SHA256SUMS
         shell: bash
         run: |
           set -euo pipefail
-          for goos in darwin windows linux; do
-            for arch in amd64 arm64; do
-              src="build/release-assets-${goos}/${goos}-${arch}"
-              dst="build/${goos}-${arch}"
-              [ -d "$src" ] || { echo "missing artifact dir $src" >&2; exit 1; }
-              mkdir -p "$dst"
-              mv "$src"/* "$dst"/
-            done
+          shopt -s nullglob
+          found=0
+          for d in build/release-assets-*/*/; do
+            # d 形如 build/release-assets-darwin/darwin-amd64/
+            name="$(basename "$d")"
+            mkdir -p "build/$name"
+            mv "$d"* "build/$name/"
+            found=$((found+1))
           done
           rm -rf build/release-assets-*
+          [ "$found" -eq 6 ] || { echo "expected 6 platform dirs, got $found" >&2; ls build >&2; exit 1; }
           # SHA256SUMS 原来由 mygo build 在最后一把全量写——拆 job 之后没人
           # 看得见全部文件，这里统一算：对每份发布资产 sha256 一份，写到
           # build/SHA256SUMS（和用户拿到手核的那一份同名）。
