@@ -194,9 +194,6 @@ const loginNarrowMax = 1024
 // loginNarrow 报登录页这一帧是不是单列（窗口宽 ≤ 1024）。
 func loginNarrow(winW float32) bool { return winW > 0 && winW <= loginNarrowMax }
 
-// loginTitleLH 是登录标题的行高（原型 `.h-page { line-height: 1.15 }`，index.html:268）。
-const loginTitleLH = 1.15
-
 const (
 	// loginQRSide / loginQRPad 是 `.qr`：240×240、内边距 16（二维码本身画在 208 的框里）。
 	loginQRSide = 240
@@ -257,11 +254,11 @@ func (s *Shell) viewLoginText(c *ui.Context, st app.LoginState, narrow bool) {
 	}
 	col.Children(func() {
 		typo.Eyebrow(c, "Sign in")
-		// 原型 `.h-page`（index.html:268）+ app.js:792 `font-size:40px`：行高 1.15、字距 .01em、上 8。
+		// 原型 `.h-page`（index.html:268）+ app.js:792 `font-size:40px`：行高 1.15（`leading.PageTitle`）、字距 .01em、上 8。
 		// 框架压不下宋体的自然行高，用 `typo.DisplayTrim` 的负外边距补回去（同 `pud.PageHead`）。
 		size := scale.Font(c, scale.Size40)
-		trim := typo.DisplayTrim(size, loginTitleLH)
-		typo.Display(ui.Text(c, "扫码登录"), size).LineHeight(loginTitleLH).LetterSpacing(size*0.01).
+		trim := typo.DisplayTrim(size, leading.PageTitle)
+		typo.Display(ui.Text(c, "扫码登录"), size).LineHeight(leading.PageTitle).LetterSpacing(size*0.01).
 			Margin(space.Px8-trim, space.None, -trim, space.None)
 		ui.Text(c, "继续你的音乐旅程：登录后同步收藏夹、关注和历史记录，并解锁 Hi-Res 无损音质。").
 			FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text2).Wrap().FillWidth().TextAlign(align).
