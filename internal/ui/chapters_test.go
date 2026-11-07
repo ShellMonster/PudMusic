@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -369,5 +370,31 @@ func TestRenderChapterDotsShots(t *testing.T) {
 		waitFrames(t, mt, "在线那首开始播", func() bool { return a.Snapshot().HasTrack })
 		waitFrames(t, mt, "章节问回来了", func() bool { return len(a.Snapshot().Chapters) == 2 })
 		saveCrop(t, dir, "02-迷你窗-章节点-"+name+".png", mt, 0, miniHeight)
+	}
+}
+
+// TestThePlayBarChapterMarkIsANarrowBar 锁定原型 index.html:854 `.chap`：主播放条上的章节
+// 标记是 4 宽的竖条（在轨道上切 4 宽的口），不是 7 像素的圆点——口的正中是缺口色，
+// 离中线 3.5 像素以外的轨道照旧（圆点那一版在那里也被切开）。
+func TestThePlayBarChapterMarkIsANarrowBar(t *testing.T) {
+	st := barState()
+	st.Chapters = []app.Chapter{{At: 30 * time.Second}, {At: 60 * time.Second}}
+	tt, s := playbarTester(t, st, 1200, 0, true)
+	bar, ok := tt.Find("播放进度")
+	if !ok {
+		t.Fatalf("画面上找不到进度条，文字有 %q", tt.Texts())
+	}
+	side := rgbaOf(tok.Of(BuildTheme(s.app.SettingsSnapshot(), true)).Side)
+	for _, frac := range []float32{0.3, 0.6} {
+		x := bar.X + 8 + (bar.W-16)*frac
+		cy := bar.Y + bar.H/2
+		if n := nearPixels(tt.Image(), mygoui.Rect{X: x - 1, Y: cy - 1, W: 2, H: 2}, side); n == 0 {
+			t.Errorf("frac %.1f 的标记正中没有缺口色", frac)
+		}
+		for _, dx := range []float32{-4, 3} {
+			if n := nearPixels(tt.Image(), mygoui.Rect{X: x + dx, Y: cy - 1, W: 1, H: 2}, side); n != 0 {
+				t.Errorf("frac %.1f 离中线 %.0f 处的轨道也被切开了（%d 个缺口色像素）——标记比 4 宽", frac, dx, n)
+			}
+		}
 	}
 }
