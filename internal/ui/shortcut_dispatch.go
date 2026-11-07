@@ -136,12 +136,16 @@ func (s *Shell) viewShortcuts(c *ui.Context) {
 // （`src/app.tsx:82`）。设置文件里手写一条 Biu 有而我们没有的命令时，按下去不该
 // 把界面弄坏。
 func (s *Shell) runShortcut(id string) {
-	// Dock 菜单可能在主窗口隐藏时被点击；这时没有下一帧 viewMain 兜底刷新，
-	// 所以播放控制命令完成后主动同步一次动态文案和可用态。
+	// Dock 菜单和状态栏菜单都可能在主窗口隐藏时被点击；这时没有下一帧
+	// viewMain 兜底刷新，所以播放控制命令完成后主动同步一次动态文案和
+	// 可用态。
 	if id == "togglePlay" || id == "prev" || id == "next" {
 		defer func() {
 			if s.dockMenuRef != nil {
 				s.refreshDockMenu(s.app.Snapshot())
+			}
+			if s.trayMenuRef != nil {
+				s.refreshTrayMenu(s.app.Snapshot())
 			}
 		}()
 	}

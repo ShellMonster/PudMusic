@@ -528,21 +528,21 @@ func TestTheCountDoesNotTouchTheProgressBar(t *testing.T) {
 //
 // 判据分两层：
 //
-//  1. 常量之间的账（`playbarActionsW` = 四枚 32 + 三道键间缝 3×3 = 137）；
+//  1. 常量之间的账（`playbarActionsW` = 两枚 32）；
 //  2. 注释里那个「最小宽度：**N**」要与 `playbarLeftMinW` 算出来的数一致。
 func TestTheCountsWidthMatchesTheCode(t *testing.T) {
-	// 🔴 **喜欢歌单原型之后**：第三段只剩「评论」一枚（32），赞 / 收藏两枚
-	// 连同角标一起去掉了。
-	if playbarActionsW != iconHitMd {
-		t.Errorf("playbarActionsW = %v，want %v（一枚 32）", playbarActionsW, iconHitMd)
+	// 🔴 **喜欢歌单原型之后**：第三段是「喜欢 + 评论」两枚（64），赞 / 收藏
+	// 两枚连同角标一起去掉了，心形摆回来之后这一段保底按**两枚都摆**算。
+	if playbarActionsW != 2*iconHitMd {
+		t.Errorf("playbarActionsW = %v，want %v（两枚 32）", playbarActionsW, 2*iconHitMd)
 	}
 	if playbarLeftMinW != coverSize+coverGap+trackTextMinW+coverGap+playbarActionsW {
 		t.Errorf("playbarLeftMinW = %v，want %v（52 + 8 + 76 + 8 + %v）",
 			playbarLeftMinW, coverSize+coverGap+trackTextMinW+coverGap+playbarActionsW,
 			playbarActionsW)
 	}
-	// 🔴 **900 宽下的余量**（左列右沿离滑块左沿）：左列保底 176，余量比角标
-	// 那一票（281 / 33.7）还大——门槛照旧 ≥ 5。
+	// 🔴 **900 宽下的余量**（左列右沿离滑块左沿）：左列保底 208（两枚键），
+	// 余量 330.7 − 20 − 208 = **102.7**——门槛照旧 ≥ 5。
 	const sliderLeft = 330.7
 	gap := sliderLeft - (playbarPadX + playbarLeftMinW)
 	if gap < 5 {

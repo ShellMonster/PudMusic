@@ -87,7 +87,9 @@ func (s *Shell) trayMenu() *mygo.Menu {
 		mygo.Separator(),
 		// ⚠️ **走 `s.onShortcut`**（不是直接调 `s.app.Toggle()`）——理由见
 		// 文件头。
-		{ID: trayCommandIDPrefix + "togglePlay", Label: "播放/暂停", Click: func(*mygo.MenuItem, *mygo.Window) {
+		// 初始文案写「播放」：菜单只建一次，真正的「正在放 → 暂停」由
+		// `refreshTrayMenu` 在运行期刷（同 Dock 那一项，`refreshDockMenu`）。
+		{ID: trayCommandIDPrefix + "togglePlay", Label: "播放", Click: func(*mygo.MenuItem, *mygo.Window) {
 			s.onShortcut("togglePlay")
 		}},
 		{ID: trayCommandIDPrefix + "prev", Label: "上一曲", Click: func(*mygo.MenuItem, *mygo.Window) {
@@ -154,15 +156,27 @@ func (s *Shell) refreshTrayMenu(st app.State) {
 	}
 	label := s.trayNowPlayingLabel(st)
 	hasTrack := st.HasTrack
+	playing := st.HasTrack && st.Playing
 
 	cur := s.trayState
-	if cur.label == label && cur.hasTrack == hasTrack {
+	if cur.label == label && cur.hasTrack == hasTrack && cur.playing == playing {
 		return
 	}
-	s.trayState = trayState{label: label, hasTrack: hasTrack}
+	s.trayState = trayState{label: label, hasTrack: hasTrack, playing: playing}
 
 	if it := s.trayMenuRef.ItemByID(trayNowPlayingID); it != nil {
 		it.SetLabel(label)
+	}
+	// 「播放/暂停」那一项的文案随状态走：正在放的时候是「暂停」，没放
+	// （或没歌）的时候是「播放」。和 Dock 菜单同一套说法（`refreshDockMenu`），
+	// 两处不一处的话，同一个动作在托盘叫「播放/暂停」、在 Dock 叫「暂停」，
+	// 用户会以为是两件事。
+	playLabel := "播放"
+	if playing {
+		playLabel = "暂停"
+	}
+	if it := s.trayMenuRef.ItemByID(trayCommandIDPrefix + "togglePlay"); it != nil {
+		it.SetLabel(playLabel)
 	}
 	// ⚠️ **没歌的时候那三项该是禁用的**：给一个按了没反应的键比不给更糟。
 	// 而应用菜单那边是这么做的（`refreshMenuChecked`）——**两处要一致**，
@@ -180,6 +194,7 @@ func (s *Shell) refreshTrayMenu(st app.State) {
 type trayState struct {
 	label    string
 	hasTrack bool
+	playing  bool
 }
 
 // trayNowPlayingLabel 是状态栏菜单最上面那一行：「正在播放：歌名 - 艺人」。

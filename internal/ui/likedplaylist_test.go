@@ -263,11 +263,22 @@ func likeItem2() app.Item {
 func TestTheSettingsShowAndChangeTheBinding(t *testing.T) {
 	s, tt, f := newLikedBoundEnv(t)
 
-	s.navigate(settingsPath)
+	// 「喜欢歌单」那一行在设置页的「菜单」Tab 里（`settings_tab_menu.go` 的
+	// `pickLikedFolder`）——默认停在「常规」，不切换永远找不到那一行。
+	s.goToSettingsTab(settingsTabMenu)
 	settleText(t, tt, "喜欢歌单")
 	if !tt.HasText("绑定的那一格") {
 		t.Fatalf("设置里没写着绑的是哪一格，文字有 %q", tt.Texts())
 	}
+	// 那一行在滚动容器里，800 高的窗口下「更换」在视口外——往下滚一截
+	// 把它带进视口再点（`Scroll` 的 dy 是滚动偏移，正数往下）。
+	if r, ok := tt.Find("更换"); ok && r.Y+r.H > likeWinH {
+		tt.Scroll(600, 400, 0, 600)
+	}
+	waitFrames(t, tt, "「更换」进视口了", func() bool {
+		r, ok := tt.Find("更换")
+		return ok && r.Y+r.H <= likeWinH
+	})
 	if err := tt.Click("更换"); err != nil {
 		t.Fatalf("点不了设置里的「更换」：%v，文字有 %q", err, tt.Texts())
 	}
@@ -277,8 +288,12 @@ func TestTheSettingsShowAndChangeTheBinding(t *testing.T) {
 	if err := tt.Click("第二格"); err != nil {
 		t.Fatalf("点不了「第二格」：%v，文字有 %q", err, tt.Texts())
 	}
-	if err := tt.Click("绑定并加入"); err != nil {
-		t.Fatalf("点不了「绑定并加入」：%v，文字有 %q", err, tt.Texts())
+	// ⚠️ **从设置进来换绑时确认钮是「绑定」，不是「绑定并加入」**：那一下
+	// `likePending` 是 nil（换绑定本身不收歌），`viewLikeBindPick` 里
+	// `pending` 为假时按钮文案就是「绑定」。「绑定并加入」只在「点喜欢时挑
+	// 歌单」那一条路上（那时候真有一首要收）。
+	if err := tt.Click("绑定"); err != nil {
+		t.Fatalf("点不了「绑定」：%v，文字有 %q", err, tt.Texts())
 	}
 
 	// 换绑之后下一次喜欢进新格（200），不再是 boundFolderID。
