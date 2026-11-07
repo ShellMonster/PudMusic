@@ -30,7 +30,7 @@ func TestTheTrayMenuHasThePlayerShape(t *testing.T) {
 	}
 	want := []string{
 		"没有在放", "---",
-		"播放/暂停", "上一曲", "下一曲", "---",
+		"播放", "上一曲", "下一曲", "---",
 		"显示/隐藏主窗口", "迷你播放器", "---",
 		"设置", "退出程序",
 	}
@@ -140,7 +140,10 @@ func TestTheTrayMenuKeepsEveryItemBiuHas(t *testing.T) {
 	for _, it := range m.Items() {
 		labels[it.Label] = true
 	}
-	for _, want := range []string{"播放/暂停", "上一曲", "下一曲", "显示/隐藏主窗口", "设置", "退出程序"} {
+	// ⚠️ **「播放」那一项的文案是初始值**：真正「正在放 → 暂停」由
+	// `refreshTrayMenu` 在运行期刷（和 Dock 那一项同一套说法）。这里钉的是
+	// **有没有这一项**（`tray.cmd.togglePlay`），不是它当下写哪两个字。
+	for _, want := range []string{"播放", "上一曲", "下一曲", "显示/隐藏主窗口", "设置", "退出程序"} {
 		if !labels[want] {
 			t.Errorf("状态栏菜单里没有 %q 这一项：上游 Biu 有（`tray.ts`）", want)
 		}
