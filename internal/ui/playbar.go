@@ -104,20 +104,22 @@ const (
 	// 的；760 是测试里的窄窗口，这一档是给它的。
 	artistMinW = 60
 
-	// playbarActionsW 是第三段那几枚键在**摆满**时有多宽：**32**。
+	// playbarActionsW 是第三段那几枚键在**摆满**时有多宽：**64**。
 	//
 	// 每一枚的盒子恒是 32（上游 HeroUI 的 `isIconOnly` 是 `w-[2rem] h-[2rem]`），
 	// 图形是 18（上游播放条上全部图标键都是 18，票 #219 / 报告 §3.6）。
 	//
-	// 🔴 **喜欢歌单原型之后只剩「评论」一枚**（条件摆：本地文件不摆，见
-	// `viewCommentsButton`）：「赞」「收藏」两枚键连同它们的数量角标一起
-	// 去掉了——喜欢/收藏走「喜欢」心形那一路（满屏左栏、列表行），不是
-	// B 站点赞。「分集」那枚挪在右列（`viewPlayBarRight`），不在这一段。
+	// 🔴 **喜欢歌单原型之后是「喜欢 + 评论」两枚**（都条件摆：本地文件不摆，
+	// 见 `viewTrackActions`）：「赞」「收藏」两枚键连同它们的数量角标一起
+	// 去掉了——喜欢/收藏走「喜欢」心形那一路，不是 B 站点赞。心形是**喜欢
+	// 歌单绑定入口**（`likeCurrent` → 绑定流程），和迷你窗、刘海、满屏、
+	// 列表行上那颗心是同一枚。「分集」那枚挪在右列（`viewPlayBarRight`），
+	// 不在这一段。
 	//
 	// 这个数取的是**摆满**那一档——它是左列的**保底宽**用的
 	// （见 `playbarLeftMinW`），而保底宽钉的是**最大**那一档，于是条件摆的
-	// 那一枚只让**歌名那一列**多出它自己那一格（理由同「有没有分集」那一条）。
-	playbarActionsW = iconHitMd
+	// 那两枚只让**歌名那一列**多出它们自己那两格（理由同「有没有分集」那一条）。
+	playbarActionsW = 2 * iconHitMd
 
 	// playbarActionsGap 是第三段那几枚键**两两之间**的缝（3）。
 	playbarActionsGap = space.Px3
@@ -141,7 +143,7 @@ const (
 
 	// playbarLeftMinW 是左边那一列的最小宽度。
 	//
-	//	封面 52 │ 缝 8 │ 文字列 76 │ 缝 8 │ 一枚键 32
+	//	封面 52 │ 缝 8 │ 文字列 76 │ 缝 8 │ 两枚键 64
 	//
 	// 🔴 **它钉的不是「好看」，是「多一 P 那一档和单 P 那一档一样宽」**。
 	//
@@ -153,8 +155,8 @@ const (
 	// 钉住之后，评论键摆不摆左列都是这个宽——条件摆的那一枚只让**歌名那一
 	// 列**多出它自己那一格（理由同原来「有没有分集」那一条）。
 	//
-	// ⚠️ **喜欢歌单原型之后它是 176**（一枚评论键）：赞 / 收藏两枚键连同
-	// 角标一起去掉了——`playbarActionsW` 跟着只剩 32。
+	// ⚠️ **喜欢歌单原型之后它是 208**（心 + 评论两枚）：赞 / 收藏两枚键连同
+	// 角标一起去掉了，心形摆回来之后这一段保底宽按**两枚都摆**算。
 	playbarLeftMinW = coverSize + coverGap + trackTextMinW + coverGap + playbarActionsW
 )
 
@@ -400,21 +402,42 @@ func (s *Shell) viewTrackStopped(c *ui.Context, st app.State, t *ui.Theme) {
 // 「歌名/UP 名」那一列的右边（上游 `playbar/left/index.tsx:85` 的
 // `<div className="flex items-center">`）。
 //
-// 🔴 **喜欢歌单原型之后只剩「评论」一枚**（条件摆：本地文件不摆）：原型把
-// 「赞」「收藏」两枚键连同数量角标一起去掉了——喜欢/收藏走「喜欢」心形
-// 那一路（满屏左栏、列表行、迷你窗、刘海），不是 B 站点赞。「分集」那枚
-// 挪在右列（`viewPlayBarRight`）。
+// 🔴 **喜欢歌单原型之后是「喜欢 + 评论」两枚**（都条件摆：本地文件不摆）：
+// 原型把「赞」「收藏」两枚键连同数量角标一起去掉了——喜欢/收藏走「喜欢」
+// 心形那一路（这里、满屏左栏、列表行、迷你窗、刘海），不是 B 站点赞。
+// 「分集」那枚挪在右列（`viewPlayBarRight`）。
 //
 // 没有歌时这一段一格都不画：给一个空的播放条摆几枚点不动的键，比不摆更让人
 // 以为它们坏了。
 func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 	// ⚠️ **一枚键都不摆的时候这一段整个不占宽**：评论键是条件摆的（本地文件
-	// 不摆），而它现在是这一段**唯一**的一枚——留着那一格（连它前面那道缝）
-	// 的话，歌名那一列会白白窄 44。
-	if !st.HasTrack || !s.app.CommentsWorthAsking() {
+	// 不摆），心形也是（`Likeable`：本地文件和没有 B 站身份的都不摆）——
+	// 留着那一格（连它前面那道缝）的话，歌名那一列会白白窄掉。
+	//
+	// ⚠️ **外层不拿 `st.HasTrack` 当门**：`HasTrack` 是「播放器装上没有」
+	// （`a.player != nil`），在线那首的 Open 是异步的——壳建好的那一帧它
+	// 还是 false，而 `Likeable` / `CommentsWorthAsking` 判的是「队列里那一
+	// 项能不能赞 / 问评论」，那一个帧早就是 true。拿 `HasTrack` 当门，歌
+	// 还在取流的那一段这两枚就都不摆——那是**闪烁**，不是「还没好」。
+	if !s.app.Likeable() && !s.app.CommentsWorthAsking() {
 		return
 	}
 	ui.Row(c).Gap(space.Px2).AlignItems(ui.Center).Shrink(0).Children(func() {
+		// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
+		// 点赞，也不是收藏夹多选框；实心 / 空心认「进没进收藏夹」。和迷你窗、
+		// 刘海、满屏、列表行上那颗心是同一枚（`IconOpts{Row: true}`：命中区
+		// 32，和这一段其他键一样大）。
+		if s.app.Likeable() {
+			faved := s.app.LikeState().Favorited
+			name, label := "heart", "喜欢"
+			if faved {
+				name, label = "heart-on", "已喜欢"
+			}
+			if s.withTip(c, pud.IconBtn(c, "pb-like", name, label, pud.IconOpts{Row: true, On: faved}),
+				favTooltip(faved)).Clicked() {
+				s.likeCurrent()
+			}
+		}
 		// ⚠️ **本地文件不摆**（`viewCommentsButton`）：一个点不动的键比不摆
 		// 更糟。
 		s.viewCommentsButton(c, st)
@@ -481,7 +504,7 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	if mid <= 0 {
 		// 没有编号时是**普通文字**：它在那一列里本来就是左对齐的（列是
 		// `AlignItems` 默认的 Stretch，文字从左沿起）。
-		ui.Text(c, name).Grow(1).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size12)).FixedLineHeight(18.6).
+		ui.Text(c, name).MinWidth(artistMinW).FontSize(scale.Font(c, scale.Size12)).FixedLineHeight(18.6).
 			TextColor(t.TextMuted).MaxLines(1).Ellipsis("…")
 		return
 	}
@@ -497,11 +520,19 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	// ⚠ **那句话是 `list.OwnerTipText` 给的**（票 #360）：列表里的 UP 名是同一
 	// 件事的另一个地方，两处各写一遍的话，改了一处另一处就安静地变成另一句
 	// 话——而那种错在画面上只是「提示里那句话怪怪的」。
-	if s.withTip(c, flatLink(c, name).Grow(1).MinWidth(artistMinW).
-		FontSize(scale.Font(c, scale.Size12)).FixedLineHeight(18.6).TextColor(t.TextMuted).
-		MaxLines(1).Ellipsis("…"), list.OwnerTipText(name)).Clicked() {
-		s.navigate(upPathPrefix + strconv.FormatInt(mid, 10))
-	}
+	//
+	// ⚠️ **命中区只到名字那么宽**（`Shrink(1)` 收缩、不 `Grow`）：链接铺满
+	// 整段时，指针从右边评论键往左挪、一进那一段的右沿就亮下划线——离名字
+	// 墨迹还有几十像素就说「可点」，是在说谎。列表行上同一枚链接（
+	// `widgets/pud/track.go` 的 owner 那一格）就是这么写的：按钮收缩成文字
+	// 宽，外层靠 `AlignItems(Start)` 保左沿。
+	ui.Column(c).MinWidth(0).AlignItems(ui.Start).Children(func() {
+		if s.withTip(c, flatLink(c, name).Shrink(1).MinWidth(artistMinW).
+			FontSize(scale.Font(c, scale.Size12)).FixedLineHeight(18.6).TextColor(t.TextMuted).
+			MaxLines(1).Ellipsis("…"), list.OwnerTipText(name)).Clicked() {
+			s.navigate(upPathPrefix + strconv.FormatInt(mid, 10))
+		}
+	})
 }
 
 // favTooltip 是「喜欢」心形悬停时那句话（满屏 / 收藏入口共用）。

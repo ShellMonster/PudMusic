@@ -220,6 +220,30 @@ func TestTheDockPlayItemSaysPauseWhilePlayingAndPlayWhilePaused(t *testing.T) {
 	}
 }
 
+// TestTheTrayPlayItemSaysPauseWhilePlayingAndPlayWhilePaused 断状态栏菜单上的
+// 播放项跟着实际播放状态变文案——和 Dock 菜单同一套说法（`refreshDockMenu`）。
+// 两处不一处的话，同一个动作在托盘叫「播放/暂停」、在 Dock 叫「暂停」，
+// 用户会以为是两件事。
+func TestTheTrayPlayItemSaysPauseWhilePlayingAndPlayWhilePaused(t *testing.T) {
+	b := newTestShell(t)
+	s := b.s
+	s.trayMenuRef = s.trayMenu()
+
+	s.refreshTrayMenu(app.State{HasTrack: true, Playing: true})
+	toggle := s.trayMenuRef.ItemByID(trayCommandIDPrefix + "togglePlay")
+	if toggle == nil {
+		t.Fatal("状态栏菜单里没有播放项")
+	}
+	if toggle.Label != "暂停" {
+		t.Errorf("播放中的状态栏菜单项是 %q，want %q", toggle.Label, "暂停")
+	}
+
+	s.refreshTrayMenu(app.State{HasTrack: true, Playing: false})
+	if got := toggle.Label; got != "播放" {
+		t.Errorf("暂停中的状态栏菜单项是 %q，want %q", got, "播放")
+	}
+}
+
 // TestTheDockMenuHasLikeAndPlayModeActions 断 Dock 菜单里有喜欢歌曲和播放模式
 // 子菜单，并且播放模式是四个互斥选项。
 func TestTheDockMenuHasLikeAndPlayModeActions(t *testing.T) {
