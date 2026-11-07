@@ -95,6 +95,9 @@ type homeLoads struct {
 // homeFeed 是取数那一摊的状态：四摊 + 信箱 + 昵称。
 type homeFeed struct {
 	sec [homeKindCount]homeSection
+	// revision 只在界面线程接收新内容或切换账号时递增。首页派生缓存
+	// 以它为失效边界，不把每帧的标题清洗和 Hero 选取绑在具体请求上。
+	revision uint64
 
 	forWho  int64 // 手上这一份是为哪个账号拉的（0 = 没登录）
 	haveWho bool
@@ -158,6 +161,7 @@ func (h *homePage) adopt() {
 	h.feed.box = nil
 	h.feed.boxMu.Unlock()
 
+	changed := false
 	for _, r := range box {
 		// 迟到的结果直接丢：这一趟是为另一个账号发的。
 		if r.selfMid != selfMidOf(h.loads) {
@@ -175,10 +179,14 @@ func (h *homePage) adopt() {
 		}
 		st.err = nil
 		st.songs = r.songs
+		changed = true
 		if r.dropped > 0 {
 			// 不画在界面上（用户看见的是一屏正常的歌），但留一条日志。
 			log.Printf("pudmusic: 首页第 %d 摊有 %d 条画不出来（没有身份，或者和前面那条重了）", r.kind, r.dropped)
 		}
+	}
+	if changed {
+		h.feed.revision++
 	}
 }
 
@@ -230,6 +238,7 @@ func (h *homePage) resetForAccount() {
 	h.feed.forWho = mid
 	h.feed.sec = [homeKindCount]homeSection{}
 	h.feed.name, h.feed.nameAsked = "", false
+	h.feed.revision++
 }
 
 // retry 让一摊再拉一次。人点了「重试」才走这里。

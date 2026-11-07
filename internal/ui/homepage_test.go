@@ -285,6 +285,29 @@ func TestHeroPickIsStableWithinADay(t *testing.T) {
 	}
 }
 
+// TestTheHeroRefreshesWhenFeedContentChanges 钉住首页派生缓存的失效边界：
+// 同一个 ID 的榜单条目刷新了标题后，今日一张也必须显示新内容。
+func TestTheHeroRefreshesWhenFeedContentChanges(t *testing.T) {
+	h := &homePage{day: time.Date(2026, 11, 4, 21, 0, 0, 0, time.Local)}
+	h.SetSongs(nil, []list.Music{{
+		ID: "same", Title: "旧标题", Cover: "https://f/c.jpg",
+		Item: app.Item{Bvid: "BVsame"},
+	}}, nil, nil)
+	first := h.heroSongs()
+	if len(first) != 1 || first[0].Title != "旧标题" {
+		t.Fatalf("第一次 Hero = %+v", first)
+	}
+
+	h.SetSongs(nil, []list.Music{{
+		ID: "same", Title: "新标题", Cover: "https://f/c.jpg",
+		Item: app.Item{Bvid: "BVsame"},
+	}}, nil, nil)
+	second := h.heroSongs()
+	if len(second) != 1 || second[0].Title != "新标题" {
+		t.Fatalf("feed 内容变化后 Hero 仍是旧值：%+v", second)
+	}
+}
+
 // TestTheSmallTextHelpers 钉问候语、日期、时长、上传时间、升降那几个纯函数的口径。
 func TestTheSmallTextHelpers(t *testing.T) {
 	at := func(h int) time.Time { return time.Date(2026, 11, 4, h, 30, 0, 0, time.Local) }
