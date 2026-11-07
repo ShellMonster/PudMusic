@@ -1069,7 +1069,7 @@ type App struct {
 
 	wake     func() // 界面层装：状态写完后叫它要一帧。装了就等于 `wakeAll`
 	done     chan struct{}
-	tickKick chan struct{} // 播放状态变化时，让低频 timer 立即采样一次
+	tickKick chan time.Duration // 播放状态变化时，让低频 timer 尽快采样一次
 	closed   bool
 
 	// wakes 是**逐窗口**的那一份唤醒句柄，见 AddWake。
@@ -1124,7 +1124,7 @@ type wakeEntry struct {
 // New 建一个空的应用状态，开后台时钟。
 func New() *App {
 	a := &App{volume: DefaultVolume, rate: audio.DefaultRate, queue: NewQueue(), done: make(chan struct{}),
-		tickKick:    make(chan struct{}, 1),
+		tickKick:    make(chan time.Duration, 1),
 		streamCache: map[string]*bili.StreamRef{}, after: afterFunc, playLog: defaultPlayLog, spaces: make(map[int64]*UpSpace),
 		finishers: map[string]*sourceFinisher{}}
 	// 🔴 **「启动那一段」从这儿开始**（票 #478）：应用一建起来就在启动，
@@ -2114,8 +2114,8 @@ func (a *App) tick() {
 		select {
 		case <-a.done:
 			return
-		case <-a.tickKick:
-			resetTickTimer(t, 0)
+		case d := <-a.tickKick:
+			resetTickTimer(t, d)
 			continue
 		case <-t.C:
 			now := time.Now()
@@ -2346,8 +2346,12 @@ func resetTickTimer(t *time.Timer, d time.Duration) {
 // kickTick 让低频 idle timer 立刻做一次内部采样。它不直接唤醒 UI，只负责避免
 // 从暂停切到播放后等完整个 idle interval 才更新位置。
 func (a *App) kickTick() {
+	a.kickTickAfter(0)
+}
+
+func (a *App) kickTickAfter(d time.Duration) {
 	select {
-	case a.tickKick <- struct{}{}:
+	case a.tickKick <- d:
 	default:
 	}
 }

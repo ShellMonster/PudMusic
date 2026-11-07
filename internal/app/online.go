@@ -1567,7 +1567,6 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	}
 	wake := a.wake
 	a.mu.Unlock()
-	a.kickTick()
 
 	// 🔴 **这一份的保护加上**（2026-11-02 审查②的 P1-1）：它正在写（或正在读）
 	// 盘上那一份，容量压力下不能被淘汰。
