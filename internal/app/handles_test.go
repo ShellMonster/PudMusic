@@ -162,6 +162,9 @@ func TestRapidSwitchingLeavesNoGoroutinesNorHandles(t *testing.T) {
 	if got := runtime.NumGoroutine(); got > grBefore+1 {
 		t.Errorf("切歌加关闭之后 goroutine 从 %d 涨到 %d，解码 goroutine 没退出", grBefore, got)
 	}
+	// fd 是整个进程的数，前面用例的后台收尾可能正短暂开着文件：等它回落，
+	// 真漏掉的句柄不会回落。
+	waitFor(t, 3*time.Second, "切歌留下的文件句柄被释放", func() bool { return openFDs(t) <= fdsBefore })
 	if after := openFDs(t); after > fdsBefore {
 		t.Errorf("切歌加关闭之后打开的 fd 从 %d 涨到 %d，文件句柄漏了", fdsBefore, after)
 	}

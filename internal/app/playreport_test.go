@@ -198,6 +198,9 @@ const testMid = "2333"
 func newReportRig(t *testing.T) (*App, *reportBili) {
 	t.Helper()
 	b := newReportBili(t)
+	// ⚠️ **临时目录要在 `a.Close` 登记之前建**：清理是后进先出，先建的目录才会
+	// 在应用关掉、后台写盘收尾之后再删。
+	tempDir, settingsDir := t.TempDir(), t.TempDir()
 
 	a := New()
 	t.Cleanup(a.Close)
@@ -214,9 +217,9 @@ func newReportRig(t *testing.T) (*App, *reportBili) {
 		t.Fatal(err)
 	}
 	a.MountLogin(store, cli)
-	a.MountStreaming(Streaming{Client: cli, Media: b.Client(), TempDir: t.TempDir()})
+	a.MountStreaming(Streaming{Client: cli, Media: b.Client(), TempDir: tempDir})
 
-	if err := a.MountSettings(filepath.Join(t.TempDir(), "settings.json")); err != nil {
+	if err := a.MountSettings(filepath.Join(settingsDir, "settings.json")); err != nil {
 		t.Fatal(err)
 	}
 	a.report.setInterval(20 * time.Millisecond)

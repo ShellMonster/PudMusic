@@ -441,6 +441,12 @@ func TestTheLikeIsAskedAgainAfterAFailure(t *testing.T) {
 
 	a.LikeState()
 	waitLike(t, "第一趟", func() bool { return n.Load() == 1 })
+	// 计数在请求发出时就加了，而原因和「在途」要等它回来才写：等它落地再看。
+	waitLike(t, "第一趟落地", func() bool {
+		a.likeMu.Lock()
+		defer a.likeMu.Unlock()
+		return !a.likeWanted
+	})
 	if a.LikeErr() == nil {
 		t.Error("问失败了却没记下原因")
 	}

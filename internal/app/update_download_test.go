@@ -401,9 +401,11 @@ func TestNoCheckSurvivesTheQuit(t *testing.T) {
 	f := newUpdFixture(t, "0.1.0", nil)
 	stop := f.app.StartAutoChecks()
 	stop()
-	before := f.snapshot()
 
 	f.app.Close() // 退出应用；Close 顺带把后台那个定时器也停了
+	// ⚠️ **快照要在 Close 之后取**：`stop()` 不等自动检查的第一趟，那一趟可能
+	// 还在查；Close 会取消并等它收尾（相位退回空闲），之后的状态才是定值。
+	before := f.snapshot()
 
 	f.app.mu.Lock()
 	u := f.app.updates
