@@ -80,8 +80,11 @@ type statsStore struct {
 	// lastErr 是最近一次落盘的错。
 	lastErr error
 
-	// wmu 只护着真正的写文件动作：两次写撞在一起，后 rename 的可能先落地。
-	wmu sync.Mutex
+	// wsem 把「拍快照 → 写文件」串成一次：后拍的快照一定后落地。容量为 1 的
+	// 通道而不是 sync.Mutex，是为了测试里 synctest.Wait 能认出「在等写」。
+	wsem chan struct{}
+	// afterSnapshot 只给测试用：拍完快照、写文件之前调一次。
+	afterSnapshot func()
 }
 
 // newStatsStore 开一个 store。
@@ -89,7 +92,7 @@ type statsStore struct {
 // ⚠️ **它不读盘**：读盘由 `loadInto` 显式调——因为读盘是阻塞 IO，而调用方
 // 需要决定在哪儿读（启动时同步读，还是在后台 goroutine 里读）。
 func newStatsStore(path string) *statsStore {
-	return &statsStore{path: path, tracker: newListeningTracker()}
+	return &statsStore{path: path, tracker: newListeningTracker(), wsem: make(chan struct{}, 1)}
 }
 
 // Path 是这个 store 的文件在哪。
@@ -180,20 +183,20 @@ func (s *statsStore) save(tr *listeningTracker) error {
 	if path == "" || readOnly || closed {
 		return nil
 	}
+	// 🔴 **快照和写文件在同一次 wsem 里**：快照放在锁外的话，定时那一次和退出
+	// 那一次撞在一起时，先拍的旧快照可能后落地，把新数据盖掉。
+	s.wsem <- struct{}{}
 	data := tr.toData()
-
-	// ⚠️ **编码在锁外面**：编码一份几百 KB 的 JSON 要几毫秒，而那把锁是
-	// 累加器的——累加是 20Hz 的热路径，不能被写盘堵住。
-	b, err := json.MarshalIndent(data, "", " ")
-	if err != nil {
-		s.setErr(err)
-		return err
+	if s.afterSnapshot != nil {
+		s.afterSnapshot()
 	}
-
-	// 🔴 **写文件要串行**：两次写撞在一起，后 rename 的可能先落地。
-	s.wmu.Lock()
-	err = diskcache.WriteAtomic(path, b)
-	s.wmu.Unlock()
+	// ⚠️ **编码在累加器的锁外面**：编码一份几百 KB 的 JSON 要几毫秒，而累加是
+	// 20Hz 的热路径，不能被写盘堵住。
+	b, err := json.MarshalIndent(data, "", " ")
+	if err == nil {
+		err = diskcache.WriteAtomic(path, b)
+	}
+	<-s.wsem
 
 	s.mu.Lock()
 	// ⚠️ **失败也更新 `lastSave`**：理由见 `saveIfDue` 那一段——不然下一拍

@@ -29,6 +29,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 const (
@@ -198,29 +200,9 @@ func (f *fileStore) writeFile(blob []byte) error {
 		return fmt.Errorf("%w: 收紧 %s 的权限: %v", ErrBackend, dir, err)
 	}
 
-	tmp, err := os.CreateTemp(dir, ".session-*.tmp")
-	if err != nil {
-		return fmt.Errorf("%w: 在 %s 里建临时文件: %v", ErrBackend, dir, err)
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // 改名成功之后这一步是空操作
-
-	if _, err := tmp.Write(blob); err != nil {
-		tmp.Close()
-		return fmt.Errorf("%w: 写 %s: %v", ErrBackend, tmpName, err)
-	}
-	// ⚠️ **权限要在写之前就定下来**：CreateTemp 建出来的是 0600，
-	// 但显式 chmod 一次是「不依赖默认值」——万一哪天默认值变了，
-	// 这里不会跟着变宽。
-	if err := tmp.Chmod(credentialsFileMode); err != nil {
-		tmp.Close()
-		return fmt.Errorf("%w: 收紧 %s 的权限: %v", ErrBackend, tmpName, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("%w: 关闭 %s: %v", ErrBackend, tmpName, err)
-	}
-	if err := os.Rename(tmpName, f.path); err != nil {
-		return fmt.Errorf("%w: 改名成 %s: %v", ErrBackend, f.path, err)
+	// 改名之前先 fsync：不然断电之后目录项指向的可能是空文件，用户照样被登出。
+	if err := diskcache.WriteAtomicMode(f.path, blob, credentialsFileMode); err != nil {
+		return fmt.Errorf("%w: 写 %s: %v", ErrBackend, f.path, err)
 	}
 	return nil
 }

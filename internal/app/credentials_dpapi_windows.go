@@ -33,6 +33,8 @@ import (
 	"syscall"
 	"time"
 	"unsafe"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 var (
@@ -121,16 +123,10 @@ func (d *dpapiStore) Save(_ context.Context, s Session) error {
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrBackend, err)
 	}
-	// 原子写：先写临时文件再 rename。
-	// 直接写的话，写到一半被杀进程 = 文件截断 = 下次启动解不开 =
-	// 用户莫名其妙掉登录。
-	tmp := d.path + ".tmp"
-	if err := os.WriteFile(tmp, cipher, 0o600); err != nil {
-		return fmt.Errorf("%w: 写 %s: %v", ErrBackend, tmp, err)
-	}
-	if err := os.Rename(tmp, d.path); err != nil {
-		_ = os.Remove(tmp)
-		return fmt.Errorf("%w: 落 %s: %v", ErrBackend, d.path, err)
+	// 原子写（临时文件 → fsync → rename）：写到一半被杀进程或断电 = 文件截断 =
+	// 下次启动解不开 = 用户莫名其妙掉登录。临时文件名是随机的，两次 Save 撞在一起不会互相踩。
+	if err := diskcache.WriteAtomicMode(d.path, cipher, 0o600); err != nil {
+		return fmt.Errorf("%w: 写 %s: %v", ErrBackend, d.path, err)
 	}
 	return nil
 }
