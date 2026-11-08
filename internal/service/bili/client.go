@@ -30,7 +30,7 @@
 // 不把它分类，调用方只能靠字符串匹配，那是最脆的一种。
 //
 //	ErrNotLoggedIn  -101，登录态没了。该提示用户重新登录。
-//	ErrRiskControl  -352/-412，B 站的风控。该提示但不该重试。
+//	ErrRiskControl  -352/-412 或 HTTP 412，B 站的风控。该提示但不该重试。
 //	ErrTooFrequent  -509，被限速。该提示，同样不该**立刻**重试。
 //	其它非 0 code  → *APIError，调用方自己判。
 //
@@ -55,7 +55,7 @@ import (
 var (
 	// ErrNotLoggedIn 是 -101：没有登录，或者登录态过期了。
 	ErrNotLoggedIn = errors.New("bili: 没有登录")
-	// ErrRiskControl 是 -352 / -412：B 站的风控拦下了请求。
+	// ErrRiskControl 是 -352 / -412（业务码）或 HTTP 412：B 站的风控拦下了请求。
 	ErrRiskControl = errors.New("bili: 被 B 站风控拦下")
 	// ErrTooFrequent 是 -509：请求太频繁。
 	ErrTooFrequent = errors.New("bili: 请求太频繁")
@@ -230,7 +230,15 @@ type Client struct {
 
 	buvidMu sync.Mutex
 	buvid   string
+	// buvidFailedUntil 之前不再去取 buvid：断网时每个取流请求都去等一次
+	// 超时，界面上就是「每点一首都卡十秒」。
+	buvidFailedUntil time.Time
+	// buvidFetching 是正在取的那一次，nil 表示没人在取。
+	buvidFetching chan struct{}
 }
+
+// buvidRetryAfter 是取 buvid 失败后多久内直接放弃、不再发请求。
+const buvidRetryAfter = time.Minute
 
 // cookieURL 是读写登录 cookie 用的地址。
 func (c *Client) cookieURL() *url.URL {
@@ -584,9 +592,23 @@ func cookieNameOf(part string) string {
 // 的 data 形状各不相同，在这一层统一成一个结构体只会造出一个什么都装
 // 下的空壳。
 func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
+	data, wbiKey, err := c.doOnce(ctx, call)
+	var api *APIError
+	if wbiKey != "" && errors.As(err, &api) && api.Code == -352 {
+		// B 站换了 WBI key 而缓存里还是旧的那一把时，签名接口回的是 -352。
+		// 作废那一把、重签再问**一次**；还是 -352 就是真风控，原样往上抛。
+		c.wbiState.invalidate(wbiKey)
+		data, _, err = c.doOnce(ctx, call)
+	}
+	return data, err
+}
+
+// doOnce 是 `Do` 的一趟：发请求、解外壳。第二个返回值是这一趟签名用的 WBI key
+// （没签就是空串）。
+func (c *Client) doOnce(ctx context.Context, call Call) (json.RawMessage, string, error) {
 	res, err := c.send(ctx, call)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var env envelope
@@ -600,21 +622,21 @@ func (c *Client) Do(ctx context.Context, call Call) (json.RawMessage, error) {
 		// 在 JSON 里面），而这一档是压根没拿到 JSON。混成一处的话，被截断的
 		// 响应会跟着风控一起被判成不可重试（票 #316 收窄了那一档）。
 		if !looksLikeHTML(res.body) {
-			return nil, fmt.Errorf("%w: %s %s: 响应被截断了: %w",
+			return nil, res.wbiKey, fmt.Errorf("%w: %s %s: 响应被截断了: %w",
 				ErrTruncatedResponse, res.method, res.path, err)
 		}
-		return nil, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）: %w",
+		return nil, res.wbiKey, fmt.Errorf("%w: %s %s: 响应不是 JSON（多半是被风控挡了）: %w",
 			ErrBadResponse, res.method, res.path, err)
 	}
 	if env.Code != 0 {
-		return nil, &APIError{
+		return nil, res.wbiKey, &APIError{
 			Code:     env.Code,
 			Message:  env.message(),
 			Endpoint: res.path,
 			Data:     env.Data,
 		}
 	}
-	return env.Data, nil
+	return env.Data, res.wbiKey, nil
 }
 
 // DoRaw 发一次请求，返回**响应体原文**（不解 JSON）。
@@ -639,11 +661,12 @@ func (c *Client) DoRaw(ctx context.Context, call Call) ([]byte, error) {
 	return res.body, nil
 }
 
-// rawResponse 是一次请求的结果：方法、路径、响应体原文。
+// rawResponse 是一次请求的结果：方法、路径、响应体原文，以及签名用的 WBI key。
 type rawResponse struct {
 	method string
 	path   string
 	body   []byte
+	wbiKey string
 }
 
 // send 发一次请求，把响应体读回来（**不解**）。
@@ -667,9 +690,10 @@ func (c *Client) send(ctx context.Context, call Call) (rawResponse, error) {
 			q.Set("csrf", csrf)
 		}
 	}
+	wbiKey := ""
 	if call.WBI {
 		var err error
-		q, err = c.signWBI(ctx, q)
+		q, wbiKey, err = c.signWBI(ctx, q)
 		if err != nil {
 			return rawResponse{}, err
 		}
@@ -750,13 +774,18 @@ func (c *Client) send(ctx context.Context, call Call) (rawResponse, error) {
 			ErrTruncatedResponse, method, endpoint.Path, err)
 	}
 
+	if resp.StatusCode == http.StatusPreconditionFailed {
+		// HTTP 412 是 B 站风控挡下来的那一页（见 danmaku.go 文件头），立刻再问
+		// 还是撞同一面墙——归风控，不归「网络没通」那一档可重试的。
+		return rawResponse{}, fmt.Errorf("%w: %s %s: HTTP %d", ErrRiskControl, method, endpoint.Path, resp.StatusCode)
+	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// 非 2xx 时 B 站有时仍然给 JSON 外壳，但绝大多数时候给的是
 		// 网关错误页。两种都报网络错——HTTP 层就没成，业务 code 没意义。
 		return rawResponse{}, fmt.Errorf("%w: %s %s: HTTP %d", ErrNetwork, method, endpoint.Path, resp.StatusCode)
 	}
 
-	return rawResponse{method: method, path: endpoint.Path, body: bodyBytes}, nil
+	return rawResponse{method: method, path: endpoint.Path, body: bodyBytes, wbiKey: wbiKey}, nil
 }
 
 // looksLikeHTML 报这个响应体是不是**一页 HTML**（而不是 JSON）。
@@ -833,16 +862,52 @@ func orDefault(v, fallback string) string {
 	return v
 }
 
-// buvidCookie 返回 `buvid3=…; buvid4=…`，没取到返回空串。第一次成功后缓存。
+// buvidCookie 返回 `buvid3=…; buvid4=…`，没取到返回空串。第一次成功后缓存；
+// 失败后 `buvidRetryAfter` 之内直接返回空串。
 //
 // 取流接口没有这两个 cookie 时，B 站常只回 v_voucher；Biu 上游跑在浏览器
 // 里，天然带着它们。
+//
+// 网络请求在锁外面发，同时来的调用方等那一次，不各发各的。
 func (c *Client) buvidCookie(ctx context.Context) string {
 	c.buvidMu.Lock()
-	defer c.buvidMu.Unlock()
-	if c.buvid != "" {
+	if c.buvid != "" || c.now().Before(c.buvidFailedUntil) {
+		defer c.buvidMu.Unlock()
 		return c.buvid
 	}
+	if wait := c.buvidFetching; wait != nil {
+		c.buvidMu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+			return ""
+		}
+		c.buvidMu.Lock()
+		defer c.buvidMu.Unlock()
+		return c.buvid
+	}
+	wait := make(chan struct{})
+	c.buvidFetching = wait
+	c.buvidMu.Unlock()
+
+	got := c.fetchBuvid(ctx)
+
+	c.buvidMu.Lock()
+	c.buvidFetching = nil
+	switch {
+	case got != "":
+		c.buvid = got
+	case ctx.Err() == nil:
+		// 调用方自己取消的不算失败：那一次没问完，不能让别的请求跟着等一分钟。
+		c.buvidFailedUntil = c.now().Add(buvidRetryAfter)
+	}
+	c.buvidMu.Unlock()
+	close(wait)
+	return got
+}
+
+// fetchBuvid 发一次 spi 把 buvid 取回来，没取到返回空串。**锁外面调用。**
+func (c *Client) fetchBuvid(ctx context.Context) string {
 	raw, err := c.Do(ctx, Call{URL: c.hostAPI + "/x/frontend/finger/spi"})
 	if err != nil {
 		return ""
@@ -854,9 +919,9 @@ func (c *Client) buvidCookie(ctx context.Context) string {
 	if json.Unmarshal(raw, &d) != nil || d.B3 == "" {
 		return ""
 	}
-	c.buvid = "buvid3=" + d.B3
+	b := "buvid3=" + d.B3
 	if d.B4 != "" {
-		c.buvid += "; buvid4=" + d.B4
+		b += "; buvid4=" + d.B4
 	}
-	return c.buvid
+	return b
 }

@@ -571,6 +571,30 @@ func TestHTTPErrorIsANetworkError(t *testing.T) {
 	}
 }
 
+// TestHTTP412IsRiskControlNotANetworkError 钉「HTTP 412 归风控」：界面上说的是风控那一句，
+// 也不给一个立刻再问还是撞墙的「重试」。
+func TestHTTP412IsRiskControlNotANetworkError(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusPreconditionFailed)
+		_, _ = w.Write([]byte("<html><body>412 Precondition Failed</body></html>"))
+	})
+	_, err := f.client(t, Options{}).Nav(context.Background())
+	if !errors.Is(err, ErrRiskControl) {
+		t.Fatalf("HTTP 412 返回 %v，want ErrRiskControl", err)
+	}
+	if errors.Is(err, ErrNetwork) {
+		t.Error("HTTP 412 还被当成网络错误")
+	}
+	if Recoverable(err) {
+		t.Error("HTTP 412 被判成可重试了")
+	}
+	if got := Friendly(err); got != codeMessages[-352] {
+		t.Errorf("HTTP 412 的话是 %q，want 风控那一句 %q", got, codeMessages[-352])
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 请求头、CSRF
 // ─────────────────────────────────────────────────────────────────────────────
