@@ -31,6 +31,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -255,31 +256,24 @@ func TestTheCompleteCallbackFiresOnlyWhenTheLengthIsKnown(t *testing.T) {
 //
 // # 判据
 //
-// 服务器把整首**一口气**倒出来（Content-Length 照给，`sizeKnown` 那道
-// 防线管不到这里），读循环转得飞快；测试盯着 `Filled()` 过半的那一刻
-// 当着泵的面把源关掉。**`OnComplete` 一次都不许响。**
+// 响应体（Content-Length 照给，`sizeKnown` 那道防线管不到这里）送到过半
+// 就停在下一次 Read 上；测试等 `Close` 把源标成关闭之后才放它交出下一块
+// 字节——泵于是**必然**带着「已关闭」走进读循环的下一圈，而整首永远下不完。
+// `Close` 会等泵退出，所以它返回时 **`OnComplete` 一次都不许响过。**
 func TestAClosedSourceNeverReportsComplete(t *testing.T) {
 	data := payload(4 << 20)
+	body := &gatedBody{
+		data:    data,
+		gateAt:  len(data) / 2,
+		chunk:   64 << 10,
+		parked:  make(chan struct{}),
+		release: make(chan struct{}),
+	}
 	var completed atomic.Bool
 	var completedSize atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
-		chunk := 4 << 10
-		for off := 0; off < len(data); off += chunk {
-			end := off + chunk
-			if end > len(data) {
-				end = len(data)
-			}
-			if _, err := w.Write(data[off:end]); err != nil {
-				return
-			}
-		}
-	}))
-	t.Cleanup(srv.Close)
-
 	s, err := NewStreamSource(StreamSourceOptions{
-		URLs:      []string{srv.URL},
-		Client:    srv.Client(),
+		URLs:      []string{"http://fixture.invalid/song"},
+		Client:    &http.Client{Transport: &onceTransport{body: body, size: int64(len(data))}},
 		CachePath: filepath.Join(t.TempDir(), "song.bin"),
 		OnComplete: func(size int64) {
 			completed.Store(true)
@@ -289,21 +283,74 @@ func TestAClosedSourceNeverReportsComplete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { body.open(); s.Close() })
 
-	// 下载推到一半，当着泵的面把源关掉。
-	deadline := time.Now().Add(10 * time.Second)
-	for s.Filled() < int64(len(data)/2) {
-		if time.Now().After(deadline) {
-			t.Fatalf("下载没推进到一半（%d / %d），测不了这个场景", s.Filled(), len(data))
-		}
+	select {
+	case <-body.parked:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("下载没推进到一半（%d / %d），测不了这个场景", s.Filled(), len(data))
 	}
-	s.Close()
+	closed := make(chan struct{})
+	go func() { s.Close(); close(closed) }()
+	<-s.ctx.Done()
+	body.open()
+	<-closed
 
-	// 给泵一点时间：如果它把「被关」当成「读完」，OnComplete 已经在路上了。
-	time.Sleep(300 * time.Millisecond)
 	if completed.Load() {
 		t.Fatalf("中途被关的源报了「下完了」（size=%d，总长 %d）——"+
 			"缓存会记下一首截断的歌，用户从此每次点这一首都播它",
 			completedSize.Load(), len(data))
 	}
 }
+
+// onceTransport 只答一次请求：200 + 明说的 Content-Length + 给定的响应体。
+// 不用 httptest：请求被 Close 取消后真连接的 Read 只会报取消错误，
+// 走不到读循环里「两次读之间发现源被关」那道判断。
+type onceTransport struct {
+	body *gatedBody
+	size int64
+	used atomic.Bool
+}
+
+func (t *onceTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.used.Swap(true) {
+		return nil, errors.New("fixture: 只答一次")
+	}
+	return &http.Response{
+		StatusCode:    http.StatusOK,
+		Header:        http.Header{"Content-Length": {fmt.Sprint(t.size)}},
+		ContentLength: t.size,
+		Body:          t.body,
+		Request:       req,
+	}, nil
+}
+
+// gatedBody 送到 gateAt 之后，在下一次 Read 上关闭 parked 并等 release。
+type gatedBody struct {
+	data    []byte
+	gateAt  int
+	chunk   int
+	off     int
+	parked  chan struct{}
+	release chan struct{}
+	gated   bool
+	once    sync.Once
+}
+
+func (b *gatedBody) open() { b.once.Do(func() { close(b.release) }) }
+
+func (b *gatedBody) Read(p []byte) (int, error) {
+	if b.off >= b.gateAt && !b.gated {
+		b.gated = true
+		close(b.parked)
+		<-b.release
+	}
+	if b.off >= len(b.data) {
+		return 0, io.EOF
+	}
+	n := copy(p[:min(len(p), b.chunk)], b.data[b.off:])
+	b.off += n
+	return n, nil
+}
+
+func (b *gatedBody) Close() error { b.open(); return nil }
