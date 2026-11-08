@@ -8,7 +8,7 @@ require (
 	github.com/egoist/mygo v0.7.4
 	github.com/mewkiz/flac v1.0.14
 	github.com/tphakala/go-m4a v0.8.0
-	golang.org/x/image v0.46.0
+	golang.org/x/image v0.47.0
 	golang.org/x/net v0.59.0
 )
 
