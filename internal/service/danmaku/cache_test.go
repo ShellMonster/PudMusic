@@ -272,3 +272,30 @@ func TestThePathRefusesAnIdentityThatIsNotAnID(t *testing.T) {
 		}
 	}
 }
+
+// TestSweepDropsOnlyExpiredDanmaku 锁定启动清扫删掉 7 天没用过的那一集，留下用过的。
+func TestSweepDropsOnlyExpiredDanmaku(t *testing.T) {
+	start := time.Now()
+	clock := start
+	c := NewCache(t.TempDir()).WithClock(func() time.Time { return clock })
+	for _, cid := range []string{"1", "2"} {
+		if err := c.Save("BV1", cid, Entry{Items: []bili.Danmaku{{Text: "x"}}, FetchedAt: start}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock = start.Add(3 * 24 * time.Hour)
+	if _, ok := c.Load("BV1", "2"); !ok {
+		t.Fatal("第 3 天读不到")
+	}
+
+	clock = start.Add(8 * 24 * time.Hour)
+	if n := c.Sweep(); n != 1 {
+		t.Errorf("删了 %d 份，want 1", n)
+	}
+	if _, err := os.Stat(c.Path("BV1", "1")); !os.IsNotExist(err) {
+		t.Error("8 天没用过的那一集还在盘上")
+	}
+	if _, ok := c.Load("BV1", "2"); !ok {
+		t.Error("第 3 天用过的那一集被清掉了")
+	}
+}

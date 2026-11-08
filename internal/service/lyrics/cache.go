@@ -93,6 +93,26 @@ func (c *Cache) WithClock(now func() time.Time) *Cache {
 // Dir 是缓存目录，空表示这个缓存不落盘。
 func (c *Cache) Dir() string { return c.dir }
 
+// Sweep 删掉盘上歌词已经过期、且没有用户调过的偏移或字号的那些，返回删了几份。
+// 会碰盘，别在界面线程上调。
+//
+// 🔴 带着用户调整的过期记录要留下：`Load` 过期时还要把那两样还给调用方，
+// 而这份文件是它们唯一的一份。
+func (c *Cache) Sweep() int { return diskcache.Sweep(c.dir, c.now(), TTL, holdsUserData) }
+
+// holdsUserData 报 path 那一份里有没有用户调过的值。读不出来就当没有。
+func holdsUserData(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var e Entry
+	if json.Unmarshal(b, &e) != nil {
+		return false
+	}
+	return e.OffsetMS != 0 || e.FontSize != 0
+}
+
 // Path 是 key 这一条在磁盘上的位置。空目录时是空串。
 //
 // ⚠️ 文件名是 key 的**哈希**，不是 key 本身：本地那一条的键是用户目录下的

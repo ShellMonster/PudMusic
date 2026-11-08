@@ -32,6 +32,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
@@ -116,6 +117,17 @@ func (c *Cache) WithClock(now func() time.Time) *Cache {
 
 // Dir 是缓存目录，空表示这个缓存不落盘。
 func (c *Cache) Dir() string { return c.dir }
+
+// Sweep 删掉盘上已经过期的评论，返回删了几份。会碰盘，别在界面线程上调。
+//
+// ⚠️ bvid → avid 的索引不会变，也不按评论那一小时算：它们按 `diskcache.TTL`
+// 从写下的时刻算起，免得每次重启都多一趟换 avid 的往返。
+func (c *Cache) Sweep() int {
+	now := c.now()
+	return diskcache.Sweep(c.dir, now, TTL, func(path string) bool {
+		return strings.HasPrefix(filepath.Base(path), "avid-") && diskcache.Fresh(path, now, diskcache.TTL)
+	})
+}
 
 // Key 是这一份缓存在盘上的键：`<type>-<oid>`。
 //
