@@ -327,6 +327,9 @@ func TestTheSeekCommandJumps(t *testing.T) {
 //
 // 夹住的理由不是「怕溢出」：进度比时长还长的话，系统那根进度条的最后一格
 // 是空的，而拖到末尾本来就是合法操作（放完这一首）。
+//
+// 先暂停再跳：在放的时候一跳到末尾这一首就放完了，位置马上回到 0，
+// 「停在末尾」只有一瞬间，轮询抓不抓得到全看运气。
 func TestASeekPastTheEndStopsAtTheEnd(t *testing.T) {
 	a, s := mountedApp(t)
 	if err := a.Open(flac(t)); err != nil {
@@ -334,13 +337,27 @@ func TestASeekPastTheEndStopsAtTheEnd(t *testing.T) {
 	}
 	s.await(t, 2, "打开一首歌")
 	dur := a.Snapshot().Duration
+	a.Pause()
+	from := s.count()
 
 	a.MediaCommand(media.CommandSeek, dur+time.Hour)
-	waitFor(t, 5*time.Second, "停在末尾", func() bool {
-		return a.Snapshot().Position >= dur-time.Second
+	if got := a.Snapshot().Position; got != dur {
+		t.Errorf("跳过头之后位置是 %v，want 夹在末尾 %v", got, dur)
+	}
+	if got := s.last().Position; got != dur {
+		t.Errorf("跳过头之后报给系统的位置是 %v，want %v", got, dur)
+	}
+
+	a.MediaCommand(media.CommandPlay, 0)
+	waitFor(t, 5*time.Second, "从末尾接着放就放完了", func() bool {
+		return s.last().State == media.StateStopped
 	})
-	if got := s.last().Position; got > dur {
-		t.Errorf("报给系统的位置是 %v，比时长 %v 还长", got, dur)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, n := range s.all[from:] {
+		if n.Position > dur {
+			t.Errorf("跳过头之后第 %d 份快照的位置是 %v，比时长 %v 还长", i, n.Position, dur)
+		}
 	}
 }
 
