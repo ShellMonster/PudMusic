@@ -20,8 +20,9 @@ func TestWindowsAACSpikeDoesNotCacheTheToolchain(t *testing.T) {
 	if strings.Contains(src, "runner.tool_cache") {
 		t.Error("windows-aac-spike.yml 又出现了 runner.tool_cache 路径——缓存 tool_cache 会让 setup-go 撞 EEXIST")
 	}
-	if !strings.Contains(src, "actions/setup-go@v5") {
-		t.Error("windows-aac-spike.yml 没有用 actions/setup-go@v5 安装 Go")
+	// action 锁在提交 SHA 上并由 dependabot 升级，所以只认 action 名，不认版本。
+	if !strings.Contains(src, "actions/setup-go@") {
+		t.Error("windows-aac-spike.yml 没有用 actions/setup-go 安装 Go")
 	}
 	if !strings.Contains(src, "go-version-file: go.mod") {
 		t.Error("windows-aac-spike.yml 没有按 go.mod 装 Go 版本")

@@ -43,3 +43,6 @@ mygo-update.key
 # 本地 spec / ticket 草稿，不上远端。
 docs/specs/
 .scratch/
+
+# 本地审查输出目录。
+.audit/

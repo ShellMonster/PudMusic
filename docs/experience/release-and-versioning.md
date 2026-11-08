@@ -99,6 +99,13 @@ MyGo 的更新源走**匿名** HTTPS 请求
 合并之后**永远不在 main 上**——标签指向一份 main 里根本不存在的代码。症状是发布出去的
 产物和 main 对不上，而哪一处都不报错。
 
+更要紧的是 `release.yml` **不跑 build/vet/test**，它假定标签指向的提交已经过了 PR CI。
+功能分支上的那个 SHA 从没以这个身份跑过 CI，所以 `scripts/release.sh` 发现 HEAD 不是
+`origin/main` 的祖先时**直接停下**，不推标签。
+
+确实要从别的提交发（你自己保证它测过），设 `PUDMUSIC_RELEASE_ALLOW_OFF_MAIN=1`，脚本
+只打一段警告就放行。
+
 要发布的是 main 上那一份，就切到 main 再跑一次。已经打过标签的话：
 
 ```sh

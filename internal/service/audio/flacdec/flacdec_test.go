@@ -215,9 +215,9 @@ func TestEOF(t *testing.T) {
 // were the whole track.
 func TestTruncated(t *testing.T) {
 	// 判据是「切掉尾巴之后不能干净地 io.EOF」：切点比例本身不进判据，
-	// 七个比例只是在给「切在哪都会报错」留余量。默认路径跑三个代表点
+	// 七个比例只是在给「切在哪都会报错」留余量。-short 只跑三个代表点
 	//（开头刚过 STREAMINFO、中间、几乎到底），已经够把「把半首歌当整首放」
-	// 那种回归钉死；本地不带 -short 跑全量七个。
+	// 那种回归钉死；默认（不带 -short）跑全量七个。
 	cuts := []float64{0.1, 0.5, 0.99}
 	if !testing.Short() {
 		cuts = []float64{0.1, 0.3, 0.5, 0.75, 0.9, 0.99, 0.999}

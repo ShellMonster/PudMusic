@@ -353,8 +353,8 @@ func TestLockRacesTwoFreshProcesses(t *testing.T) {
 
 	dir := t.TempDir()
 	// 10 轮不是凑数：修复前实测 20 轮里 17 轮两边都拿到锁，一轮三成的漏检率。
-	// 默认路径砍到 5 轮：坏实现五轮全放过的概率是 0.3^5 ≈ 0.24%，够低；而省下的
-	// 5 次子进程启动在 -race 下是最贵的部分。本地不带 -short 仍跑 10 轮。
+	// -short 砍到 5 轮：坏实现五轮全放过的概率是 0.3^5 ≈ 0.24%，够低；而省下的
+	// 5 次子进程启动在 -race 下是最贵的部分。默认（不带 -short）跑 10 轮。
 	rounds := 10
 	if testing.Short() {
 		rounds = 5
