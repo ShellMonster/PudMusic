@@ -298,9 +298,9 @@ func TestTheDiscardedPlayIsWrittenDown(t *testing.T) {
 	releaseOnce.Do(func() { close(release) })
 
 	waitFor(t, 30*time.Second, "日志里说清在途的播放被作废了", func() bool {
-		return strings.Contains(strings.Join(*lines, "\n"), "作废")
+		return strings.Contains(strings.Join(lines(), "\n"), "作废")
 	})
-	joined := strings.Join(*lines, "\n")
+	joined := strings.Join(lines(), "\n")
 	if !strings.Contains(joined, "代次") {
 		t.Errorf("日志里没说是「代次变了」：\n%s", joined)
 	}
@@ -331,9 +331,9 @@ func TestTheFailureIsWrittenDown(t *testing.T) {
 		return a.Snapshot().Err != ""
 	})
 	waitFor(t, 15*time.Second, "日志里写清这一次失败", func() bool {
-		return strings.Contains(strings.Join(*lines, "\n"), "播放失败")
+		return strings.Contains(strings.Join(lines(), "\n"), "播放失败")
 	})
-	joined := strings.Join(*lines, "\n")
+	joined := strings.Join(lines(), "\n")
 	for _, want := range []string{"放不出来的那一首", "取流", "代次"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("日志里没有 %q：\n%s", want, joined)

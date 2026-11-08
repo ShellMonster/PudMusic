@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,14 +100,14 @@ func TestAnOlderRequestDoesNotOverwriteTheRefresh(t *testing.T) {
 
 	calls := &commentCalls{}
 	release := make(chan struct{})
-	first := true
+	var first atomic.Bool
+	first.Store(true)
 	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		return bili.ArchiveStats{Aid: 12345}, nil
 	}
 	a.commentsListFetch = func(_ context.Context, typ, oid int64, mode int, next string) (bili.CommentPage, error) {
 		calls.addList(typ, oid, next)
-		if first {
-			first = false
+		if first.CompareAndSwap(true, false) {
 			// ⚠️ **首次加载那一趟卡在途**：刷新要在它还在路上的时候发生。
 			<-release
 			return commentPage([]bili.Comment{{Rpid: 1, Message: "旧的"}}, "", true), nil

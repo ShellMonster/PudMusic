@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -551,10 +552,10 @@ func TestPausedDoesNotWriteEveryTick(t *testing.T) {
 	a.Toggle() // 暂停
 
 	// 数 2 秒里界面被叫醒几次（一次叫醒 = 一帧）。
-	var wakes int
-	a.SetWake(func() { wakes++ })
+	var wakes atomic.Int32
+	a.SetWake(func() { wakes.Add(1) })
 	time.Sleep(2 * time.Second)
-	if wakes > 5 {
+	if wakes := wakes.Load(); wakes > 5 {
 		t.Errorf("暂停 2 秒里界面被叫醒了 %d 次，want ≤ 5（每一拍落一次盘就是 40 次）", wakes)
 	}
 }

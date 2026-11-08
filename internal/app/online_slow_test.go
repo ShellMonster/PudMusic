@@ -302,9 +302,9 @@ func TestTheThreeSegmentsAreWrittenDown(t *testing.T) {
 	playing(t, a, "量一量的那一首")
 
 	waitFor(t, 15*time.Second, "日志里写了分段耗时", func() bool {
-		return strings.Contains(strings.Join(*lines, "\n"), "取流分段耗时")
+		return strings.Contains(strings.Join(lines(), "\n"), "取流分段耗时")
 	})
-	joined := strings.Join(*lines, "\n")
+	joined := strings.Join(lines(), "\n")
 	// 🔴 **三段都要在**：缺一段就答不出「慢的是哪一段」。
 	for _, want := range []string{"① 问地址", "② 下音频", "③ 解码"} {
 		if !strings.Contains(joined, want) {
@@ -639,7 +639,7 @@ func TestMeasureTheThreeSegments(t *testing.T) {
 					t.Fatal(err)
 				}
 				playing(t, a, tc.name)
-				for _, l := range *lines {
+				for _, l := range lines() {
 					if strings.Contains(l, "取流分段耗时") {
 						t.Logf("%s（%d 字节，%d 字节/秒，%s）→ %s",
 							tc.name, len(data), tc.rate, shape.label, l)
@@ -952,9 +952,9 @@ func TestTheTimingIsWrittenDownEvenWhenItFails(t *testing.T) {
 	})
 
 	waitFor(t, 15*time.Second, "日志里写了分段耗时", func() bool {
-		return strings.Contains(strings.Join(*lines, "\n"), "取流分段耗时")
+		return strings.Contains(strings.Join(lines(), "\n"), "取流分段耗时")
 	})
-	joined := strings.Join(*lines, "\n")
+	joined := strings.Join(lines(), "\n")
 	for _, want := range []string{"① 问地址", "② 下音频", "③ 解码"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("失败那一趟的日志里没有 %q：\n%s", want, joined)
