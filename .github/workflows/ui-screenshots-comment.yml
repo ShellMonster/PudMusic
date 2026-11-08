@@ -32,6 +32,7 @@ jobs:
   comment:
     name: Update PR screenshot comment
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read
@@ -64,10 +65,11 @@ jobs:
 
             const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
             let run;
-            for (let attempt = 0; attempt < 40; attempt += 1) {
+            // 截图 run 自身限 20 分钟，但排队时间不算在内；等够 50 分钟。
+            for (let attempt = 0; attempt < 100; attempt += 1) {
               const runs = await github.paginate(
                 github.rest.actions.listWorkflowRunsForRepo,
-                { owner, repo, event: 'pull_request', per_page: 100 },
+                { owner, repo, event: 'pull_request', head_sha: pr.head.sha, per_page: 100 },
               );
               const matching = runs
                 .filter((item) =>
@@ -80,8 +82,8 @@ jobs:
               if (run && ['completed', 'cancelled', 'failure', 'timed_out', 'action_required'].includes(run.status)) {
                 break;
               }
-              if (attempt < 39) {
-                await sleep(15000);
+              if (attempt < 99) {
+                await sleep(30000);
               }
             }
 
@@ -93,6 +95,11 @@ jobs:
                 `No UI screenshot run found for PR #${prNumber} head ${pr.head.sha}; ` +
                 'skipping the comment without failing this job.',
               );
+              return;
+            }
+
+            if (run.status !== 'completed') {
+              core.info(`UI screenshot run ${run.id} is still ${run.status}; skipping the comment.`);
               return;
             }
 
