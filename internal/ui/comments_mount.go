@@ -29,7 +29,10 @@ import (
 
 // MountComments 把评论缓存挂上。
 func MountComments(a *app.App) {
-	a.MountComments(comments.NewCache(commentsCacheDir(appDataDir())))
+	cache := comments.NewCache(commentsCacheDir(appDataDir()))
+	a.MountComments(cache)
+	// 过期文件只在启动时清一次；放后台是因为它要扫整个目录，不能挡开窗口。
+	go cache.Sweep()
 }
 
 // commentsCacheDir 是评论缓存落在哪儿。**空目录进、空目录出**。

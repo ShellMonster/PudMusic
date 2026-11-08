@@ -75,6 +75,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 )
 
@@ -177,6 +178,43 @@ func WriteAtomic(path string, b []byte) (err error) {
 		return err
 	}
 	return SyncDir(dir)
+}
+
+// Sweep 删掉 dir 里按 `Fresh` 的判据已经过期的缓存文件，返回删了几份。
+//
+// 只认 dir 下第一层、名字以 `.json` 结尾、不以 `.` 开头的普通文件：子目录、
+// 符号链接、别人的文件、`WriteAtomic` 写到一半的临时文件（`.<名字>.tmp-*`）都不碰。
+// keep 不为 nil 时，过期但 keep 返回 true 的那一份留下（歌词里有用户调过的值）。
+//
+// ⚠️ 判过期和删除之间若恰好有一次写入，删掉的是刚写的那份（歌词则连那次调整）；
+// 而清扫只在启动时跑一次，那个窗口只有几毫秒。
+func Sweep(dir string, now time.Time, ttl time.Duration, keep func(path string) bool) int {
+	if dir == "" || ttl <= 0 {
+		return 0
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	removed := 0
+	for _, ent := range entries {
+		name := ent.Name()
+		// ReadDir 的类型来自 lstat，符号链接不算普通文件。
+		if !ent.Type().IsRegular() || strings.HasPrefix(name, ".") || filepath.Ext(name) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		if Fresh(path, now, ttl) {
+			continue
+		}
+		if keep != nil && keep(path) {
+			continue
+		}
+		if os.Remove(path) == nil {
+			removed++
+		}
+	}
+	return removed
 }
 
 // SyncDir 把目录项本身刷到盘上。Windows 上打不开目录句柄，直接跳过——

@@ -92,6 +92,9 @@ func (c *Cache) WithClock(now func() time.Time) *Cache {
 // Dir 是缓存目录，空表示这个缓存不落盘。
 func (c *Cache) Dir() string { return c.dir }
 
+// Sweep 删掉盘上已经过期的弹幕，返回删了几份。会碰盘，别在界面线程上调。
+func (c *Cache) Sweep() int { return diskcache.Sweep(c.dir, c.now(), TTL, nil) }
+
 // Path 是 bvid 的第 cid 集在磁盘上的位置。空目录、或身份不全时是空串。
 //
 // ⚠️ **文件名是 `<bvid>-<cid>.json`，不是哈希**（和歌词缓存不一样）：这一层的

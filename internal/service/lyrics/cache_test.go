@@ -313,3 +313,38 @@ func TestTheExpiryRollsWithEveryUse(t *testing.T) {
 		t.Error("离最后一次用到满 7 天了还不过期——用户不听了它就该被清掉")
 	}
 }
+
+// TestSweepKeepsExpiredLyricsTheUserAdjusted 锁定清扫只删没有用户调整的过期歌词；
+// 调过偏移的那份过期后仍能把偏移还给调用方。
+func TestSweepKeepsExpiredLyricsTheUserAdjusted(t *testing.T) {
+	start := time.Now()
+	clock := start
+	c := NewCache(t.TempDir()).WithClock(func() time.Time { return clock })
+	if err := c.Save("plain", Entry{Lyrics: "[00:01.00]a"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Save("adjusted", Entry{Lyrics: "[00:01.00]b", OffsetMS: 300}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Save("recent", Entry{Lyrics: "[00:01.00]c"}); err != nil {
+		t.Fatal(err)
+	}
+	clock = start.Add(3 * 24 * time.Hour)
+	if _, ok := c.Load("recent", "", ""); !ok {
+		t.Fatal("第 3 天读不到")
+	}
+
+	clock = start.Add(8 * 24 * time.Hour)
+	if n := c.Sweep(); n != 1 {
+		t.Errorf("删了 %d 份，want 1", n)
+	}
+	if _, err := os.Stat(c.Path("plain")); !os.IsNotExist(err) {
+		t.Error("过期且没调过的歌词还在盘上")
+	}
+	if e, ok := c.Load("adjusted", "", ""); !ok || e.OffsetMS != 300 {
+		t.Errorf("用户调过的偏移被清掉了：%+v ok=%v", e, ok)
+	}
+	if e, ok := c.Load("recent", "", ""); !ok || e.Lyrics == "" {
+		t.Error("第 3 天用过的歌词被清掉了")
+	}
+}

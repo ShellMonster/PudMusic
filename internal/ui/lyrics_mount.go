@@ -56,7 +56,10 @@ const lyricsDirName = "lyrics"
 // 那两个源压根不要目录。所以这里**不能 early return**——返回了就等于把「去找一份
 // 歌词」这件事整个关掉了，而界面上那个空状态恰恰在劝用户去找。
 func MountLyrics(a *app.App) {
-	a.MountLyrics(lyrics.NewCache(lyricsCacheDir(appDataDir())))
+	cache := lyrics.NewCache(lyricsCacheDir(appDataDir()))
+	a.MountLyrics(cache)
+	// 过期文件只在启动时清一次；放后台是因为它要扫整个目录，不能挡开窗口。
+	go cache.Sweep()
 	a.MountLyricSources(
 		lyrics.NewNetease(newCredentialTransport().Client(nil)),
 		lyrics.NewLRCLib(newCredentialTransport().Client(nil)),

@@ -220,3 +220,80 @@ func TestWriteAtomicFailsCleanlyOnABadPath(t *testing.T) {
 		t.Errorf("失败之后目录里留下了 %d 个文件", len(entries))
 	}
 }
+
+// TestSweepRemovesOnlyExpiredCacheFiles 锁定清扫只删过期的缓存文件：新的、被 Touch
+// 续过命的、写到一半的临时文件、子目录、符号链接和别人的文件都留着。
+func TestSweepRemovesOnlyExpiredCacheFiles(t *testing.T) {
+	now := time.Now()
+	ttl := 7 * 24 * time.Hour
+	dir := t.TempDir()
+	old := now.Add(-8 * 24 * time.Hour)
+
+	writeFile(t, filepath.Join(dir, "expired.json"), old)
+	writeFile(t, filepath.Join(dir, "fresh.json"), now.Add(-time.Hour))
+	writeFile(t, filepath.Join(dir, "touched.json"), old)
+	Touch(filepath.Join(dir, "touched.json"), now.Add(-24*time.Hour))
+	writeFile(t, filepath.Join(dir, ".expired.json.tmp-123"), old)
+	writeFile(t, filepath.Join(dir, "notes.txt"), old)
+	if err := os.Mkdir(filepath.Join(dir, "sub.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(filepath.Join(dir, "sub.json"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.json")
+	writeFile(t, target, old)
+	if err := os.Symlink(target, filepath.Join(dir, "link.json")); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := Sweep(dir, now, ttl, nil); n != 1 {
+		t.Errorf("删了 %d 份，want 1", n)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "expired.json")); !os.IsNotExist(err) {
+		t.Error("过期的那一份还在")
+	}
+	for _, name := range []string{"fresh.json", "touched.json", ".expired.json.tmp-123", "notes.txt", "sub.json", "link.json"} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s 不该被删：%v", name, err)
+		}
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Errorf("符号链接指向的目录外文件被删了：%v", err)
+	}
+}
+
+// TestSweepKeepsWhatTheCallerVetoes 锁定 keep 返回 true 的过期文件留下。
+func TestSweepKeepsWhatTheCallerVetoes(t *testing.T) {
+	now := time.Now()
+	dir := t.TempDir()
+	old := now.Add(-2 * time.Hour)
+	writeFile(t, filepath.Join(dir, "keep.json"), old)
+	writeFile(t, filepath.Join(dir, "drop.json"), old)
+
+	Sweep(dir, now, time.Hour, func(path string) bool { return filepath.Base(path) == "keep.json" })
+
+	if _, err := os.Stat(filepath.Join(dir, "keep.json")); err != nil {
+		t.Errorf("keep 说留的那一份被删了：%v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "drop.json")); !os.IsNotExist(err) {
+		t.Error("keep 没留的过期文件还在")
+	}
+}
+
+// TestSweepIsANoOpWithoutADirOrTTL 锁定目录不在、目录为空串、ttl <= 0 时什么都不删。
+func TestSweepIsANoOpWithoutADirOrTTL(t *testing.T) {
+	now := time.Now()
+	if n := Sweep(filepath.Join(t.TempDir(), "missing"), now, time.Hour, nil); n != 0 {
+		t.Errorf("目录不在却删了 %d 份", n)
+	}
+	if n := Sweep("", now, time.Hour, nil); n != 0 {
+		t.Errorf("空目录名却删了 %d 份", n)
+	}
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a.json"), now.Add(-365*24*time.Hour))
+	if n := Sweep(dir, now, 0, nil); n != 0 {
+		t.Errorf("永不过期的缓存删了 %d 份", n)
+	}
+}

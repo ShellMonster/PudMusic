@@ -37,7 +37,10 @@ const danmakuDirName = "danmaku"
 // ⚠️ **拿不到应用数据目录的时候照样挂**：缓存不落盘只是每次都要重新拉一遍，
 // 而弹幕那一摊（`App.Danmaku`）压根不需要缓存才能工作。
 func MountDanmaku(a *app.App) {
-	a.MountDanmaku(danmaku.NewCache(danmakuCacheDir(appDataDir())))
+	cache := danmaku.NewCache(danmakuCacheDir(appDataDir()))
+	a.MountDanmaku(cache)
+	// 过期文件只在启动时清一次；放后台是因为它要扫整个目录，不能挡开窗口。
+	go cache.Sweep()
 }
 
 // danmakuCacheDir 是弹幕缓存落在哪儿。**空目录进、空目录出**。

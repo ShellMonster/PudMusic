@@ -168,3 +168,41 @@ func TestTheAVIDIndexRemembersTheSwap(t *testing.T) {
 		t.Errorf("LoadAVID=%d ok=%v want 12345", got, ok)
 	}
 }
+
+// TestSweepDropsExpiredCommentsButKeepsTheAVIDIndex 锁定清扫删掉过期的评论，而
+// bvid → avid 索引按 7 天算，一小时后还在。
+func TestSweepDropsExpiredCommentsButKeepsTheAVIDIndex(t *testing.T) {
+	start := time.Now()
+	clock := start
+	c := NewCache(t.TempDir()).WithClock(func() time.Time { return clock })
+	if err := c.Save(1, 12345, Entry{FetchedAt: start.Unix(), Comments: []bili.Comment{{Rpid: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveAVID("BV1xx", 12345); err != nil {
+		t.Fatal(err)
+	}
+	old := start.Add(-2 * time.Hour)
+	if err := os.Chtimes(c.avidPath("BV1xx"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	clock = start.Add(2 * time.Hour)
+	if n := c.Sweep(); n != 1 {
+		t.Errorf("删了 %d 份，want 1", n)
+	}
+	if _, err := os.Stat(c.Path(Key(1, 12345))); !os.IsNotExist(err) {
+		t.Error("过期的评论还在盘上")
+	}
+	if avid, ok := c.LoadAVID("BV1xx"); !ok || avid != 12345 {
+		t.Error("一小时后 avid 索引被清掉了")
+	}
+
+	week := start.Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(c.avidPath("BV1xx"), week, week); err != nil {
+		t.Fatal(err)
+	}
+	c.Sweep()
+	if _, ok := c.LoadAVID("BV1xx"); ok {
+		t.Error("写下 8 天的 avid 索引还在")
+	}
+}
