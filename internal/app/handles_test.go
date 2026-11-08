@@ -102,7 +102,7 @@ func TestReopeningTheSameFileReleasesThePreviousOne(t *testing.T) {
 	if got := extaf.LiveSources(); got != 1 {
 		t.Fatalf("刚打开一个文件却挂着 %d 个解码器，want 1", got)
 	}
-	fdsBefore := openFDs(t)
+	fdsBefore := fdsOn(t, path)
 
 	// 同一个文件再开一次。
 	if err := a.Open(path); err != nil {
@@ -117,9 +117,9 @@ func TestReopeningTheSameFileReleasesThePreviousOne(t *testing.T) {
 	waitLive(t, 3*time.Second, "第一次那个解码器被释放", 1)
 
 	// 文件描述符那一半同样要回到原样。
-	waitFor(t, 3*time.Second, "第一次那个文件句柄被释放", func() bool { return openFDs(t) <= fdsBefore })
-	if got := openFDs(t); got > fdsBefore {
-		t.Errorf("重开之后打开的 fd 从 %d 涨到 %d，文件句柄漏了", fdsBefore, got)
+	waitFor(t, 3*time.Second, "第一次那个文件句柄被释放", func() bool { return fdsOn(t, path) <= fdsBefore })
+	if got := fdsOn(t, path); got > fdsBefore {
+		t.Errorf("重开之后指着这个文件的 fd 从 %d 涨到 %d，文件句柄漏了", fdsBefore, got)
 	}
 
 	a.Close()
@@ -138,7 +138,7 @@ func TestRapidSwitchingLeavesNoGoroutinesNorHandles(t *testing.T) {
 	noGC(t)
 
 	grBefore := runtime.NumGoroutine()
-	fdsBefore := openFDs(t)
+	fdsBefore := fdsOn(t, path)
 	a := newApp(t)
 	// 队列里放两首同名的，切 30 次会绕回来，最后落回队列第一项。
 	if err := a.Enqueue(items(path, path)...); err != nil {
@@ -162,10 +162,8 @@ func TestRapidSwitchingLeavesNoGoroutinesNorHandles(t *testing.T) {
 	if got := runtime.NumGoroutine(); got > grBefore+1 {
 		t.Errorf("切歌加关闭之后 goroutine 从 %d 涨到 %d，解码 goroutine 没退出", grBefore, got)
 	}
-	// fd 是整个进程的数，前面用例的后台收尾可能正短暂开着文件：等它回落，
-	// 真漏掉的句柄不会回落。
-	waitFor(t, 3*time.Second, "切歌留下的文件句柄被释放", func() bool { return openFDs(t) <= fdsBefore })
-	if after := openFDs(t); after > fdsBefore {
-		t.Errorf("切歌加关闭之后打开的 fd 从 %d 涨到 %d，文件句柄漏了", fdsBefore, after)
+	waitFor(t, 3*time.Second, "切歌留下的文件句柄被释放", func() bool { return fdsOn(t, path) <= fdsBefore })
+	if after := fdsOn(t, path); after > fdsBefore {
+		t.Errorf("切歌加关闭之后指着这个文件的 fd 从 %d 涨到 %d，文件句柄漏了", fdsBefore, after)
 	}
 }
