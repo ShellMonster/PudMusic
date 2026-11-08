@@ -3,6 +3,7 @@ package audio
 import (
 	"io"
 	"math"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -727,6 +728,64 @@ func TestPositionDoesNotWaitOnTheDecoder(t *testing.T) {
 	close(d.release) // 放它出来，后面的收尾才走得完
 }
 
+// TestPositionIsTheSeekTargetBeforeTheDecoderCatchesUp 盯 Seek 一返回，
+// Position() 就是跳到的地方，哪怕解码 goroutine 还没轮到这次 seek。
+//
+// 出错时 App.tick 正好在这段空档里读位置，把 0 写回去报给锁屏：拖完进度条，
+// 系统那根条弹回歌头，要等下一次校正才跳过去。
+func TestPositionIsTheSeekTargetBeforeTheDecoderCatchesUp(t *testing.T) {
+	const rate = 44100
+	d := &stallDec{
+		samples: tone(rate, 2, 440, 5), ch: 2, rate: rate,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	p := New(d)
+	defer p.Close()
+	defer close(d.release)
+	select {
+	case <-d.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("解码器压根没被读到")
+	}
+
+	p.Seek(2 * time.Second)
+	if got := p.Position(); got < 2*time.Second-time.Millisecond || got > 2*time.Second+time.Millisecond {
+		t.Errorf("Seek(2s) 之后 Position() 是 %v（解码器还卡在上一次 Read 里）", got)
+	}
+}
+
+// TestALateResetFromAnOlderSeekKeepsTheNewTarget 盯连拖两次时，前一次 seek
+// 迟到的 reset 不会把后一次的目标冲掉；轮到后一次之后位置照常按对照表走。
+func TestALateResetFromAnOlderSeekKeepsTheNewTarget(t *testing.T) {
+	const rate = 44100
+	v := newVarispeed(&memDec{samples: tone(rate, 1, 440, 6), ch: 1, rate: rate})
+	v.setRate(2)
+	drain(t, v, 1)
+
+	const first, second = int64(rate), int64(3 * rate)
+	v.expectSeek(first)
+	v.expectSeek(second)
+	if err := v.SetPosition(first); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.SourceAt(second); got != second {
+		t.Errorf("前一次 seek 的 reset 迟到之后，SourceAt 说的是第 %d 帧，want %d", got, second)
+	}
+
+	if err := v.SetPosition(second); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]float32, 4096)
+	if n, _ := v.Read(buf); n == 0 {
+		t.Fatal("一帧都没铺出来")
+	}
+	// 2 倍速下输出走 n 帧，源该走两倍；还按 seek 前的口径原样返回就只走了 n 帧。
+	if got := v.SourceAt(second + 4096); got < second+6000 {
+		t.Errorf("轮到这次 seek 之后 2 倍速铺了 4096 帧，源只到第 %d 帧", got)
+	}
+}
+
 // TestReadRejectsABufferTooSmallForAFrame 盯畸形缓冲是**报错**而不是 panic。
 //
 // MyGo 的约定是「buf 是整数个帧」，`stream.decode` 固定传
@@ -867,4 +926,32 @@ func TestPlayerSeekIsExactAtAnyRate(t *testing.T) {
 // rateLabel 是测试里用的档位名，和界面上那个一样（`1x` / `1.25x`）。
 func rateLabel(r float64) string {
 	return strconv.FormatFloat(r, 'g', -1, 64) + "x"
+}
+
+// TestAPendingSeekClearsOnceTheDecoderAppliesIt 盯真实 Player 上 seek 的等待态
+// 一定会被解码器那次 reset 清掉。清不掉时 SourceAt 一直按「没走」报位置，
+// 变速下进度条就停在 seek 目标上；seekFrame 和 MyGo 的取整一旦对不上就是这样。
+func TestAPendingSeekClearsOnceTheDecoderAppliesIt(t *testing.T) {
+	const rate = 44100
+	p := New(&memDec{samples: tone(rate, 2, 440, 6), ch: 2, rate: rate})
+	defer p.Close()
+	p.SetRate(2)
+
+	for _, at := range []time.Duration{1234577 * time.Microsecond, 0, time.Hour} {
+		p.Seek(at)
+		deadline := time.Now().Add(5 * time.Second)
+		for p.vs.seekPending() {
+			if time.Now().After(deadline) {
+				t.Fatalf("Seek(%v) 之后 5 秒解码器还没认领这次 seek：等待态清不掉", at)
+			}
+			runtime.Gosched()
+		}
+	}
+}
+
+// seekPending 只给测试看：是否还有一次 seek 等着解码器 reset。
+func (v *varispeed) seekPending() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.seekTo >= 0
 }

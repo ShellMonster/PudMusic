@@ -196,6 +196,7 @@ type varispeed struct {
 	outFrames  int64   // 一共铺出去多少输出帧了
 	bias       int64   // 见 SourceAt
 	marks      []mark
+	seekTo     int64 // 交给了 MyGo、还没轮到 reset 的那次 seek 的源帧；-1 是没有
 	eof        bool
 	err        error
 	flush      bool // 源到头了，停之前还得把上一帧的第二半放完
@@ -213,6 +214,7 @@ func newVarispeed(d mygoaudio.Decoder) *varispeed {
 		corr:   f / corrDivisor,
 		win:    hann(f),
 		marks:  make([]mark, 0, markCap),
+		seekTo: -1,
 	}
 	// 最远的读取是一次搜索的尾巴「a+分析跳+半径+比对长度」；铺满一帧要 a+2*hop。
 	// 分析跳最大时是 2*hop（2 倍速），两者取大就是这里这个数。
@@ -345,6 +347,11 @@ func (v *varispeed) SourceAt(voiceFrames int64) int64 {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
+	if v.seekTo >= 0 {
+		// MyGo 的 Seek 当场就把 voice 挪到了目标源帧，可 reset 要等解码 goroutine
+		// 轮到它才跑；这期间 voice 收不到新数据、不会走，它的帧号就是源帧。
+		return voiceFrames
+	}
 	p := voiceFrames + v.bias
 	if len(v.marks) == 0 {
 		// 一跳都还没铺：还在起点上。
@@ -656,6 +663,17 @@ func (v *varispeed) reset(frame int64) {
 	// 见 SourceAt 那段：outFrames 不清零，所以偏移要在这里对上。
 	v.bias = v.outFrames - frame
 	v.marks = v.marks[:0]
+	// 只认最近那一次：连拖两次时前一次的 reset 可能晚到。
+	if frame == v.seekTo {
+		v.seekTo = -1
+	}
+}
+
+// expectSeek 记下马上要交给 MyGo 的那次 seek 落在源的第 frame 帧。
+func (v *varispeed) expectSeek(frame int64) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.seekTo = frame
 }
 
 var (
