@@ -727,6 +727,33 @@ func TestPositionDoesNotWaitOnTheDecoder(t *testing.T) {
 	close(d.release) // 放它出来，后面的收尾才走得完
 }
 
+// TestPositionIsTheSeekTargetBeforeTheDecoderCatchesUp 盯 Seek 一返回，
+// Position() 就是跳到的地方，哪怕解码 goroutine 还没轮到这次 seek。
+//
+// 出错时 App.tick 正好在这段空档里读位置，把 0 写回去报给锁屏：拖完进度条，
+// 系统那根条弹回歌头，要等下一次校正才跳过去。
+func TestPositionIsTheSeekTargetBeforeTheDecoderCatchesUp(t *testing.T) {
+	const rate = 44100
+	d := &stallDec{
+		samples: tone(rate, 2, 440, 5), ch: 2, rate: rate,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	p := New(d)
+	defer p.Close()
+	defer close(d.release)
+	select {
+	case <-d.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("解码器压根没被读到")
+	}
+
+	p.Seek(2 * time.Second)
+	if got := p.Position(); got < 2*time.Second-time.Millisecond || got > 2*time.Second+time.Millisecond {
+		t.Errorf("Seek(2s) 之后 Position() 是 %v（解码器还卡在上一次 Read 里）", got)
+	}
+}
+
 // TestReadRejectsABufferTooSmallForAFrame 盯畸形缓冲是**报错**而不是 panic。
 //
 // MyGo 的约定是「buf 是整数个帧」，`stream.decode` 固定传
