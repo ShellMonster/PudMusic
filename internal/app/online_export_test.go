@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -34,7 +35,10 @@ func (a *App) SetAfterForTest(f func(time.Duration, func()) func()) { a.after = 
 // ⚠️ **它是这一个 App 的**：日志出口挂在 App 上（见 App.playLog），所以两个
 // 并行的测试不会互相看见对方的日志——而这一层的日志正是「哪一次播放出的事」
 // 的唯一凭据。
-func CapturePlayLog(a *App) (*[]string, func()) {
+//
+// 返回的是取快照的函数而不是切片指针：日志从播放 goroutine 写进来，测试侧
+// 必须拿同一把锁读，否则 -race 会报。
+func CapturePlayLog(a *App) (func() []string, func()) {
 	var mu sync.Mutex
 	var lines []string
 	a.playMu.Lock()
@@ -45,7 +49,12 @@ func CapturePlayLog(a *App) (*[]string, func()) {
 		mu.Unlock()
 	}
 	a.playMu.Unlock()
-	return &lines, func() {
+	snapshot := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(lines)
+	}
+	return snapshot, func() {
 		a.playMu.Lock()
 		a.playLog = old
 		a.playMu.Unlock()
