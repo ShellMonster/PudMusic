@@ -552,8 +552,8 @@ func TestRemountingDownloadsDoesNotLoseWhatWasAddedThisSession(t *testing.T) {
 		t.Fatal("本次会话加的那一条不在队列里")
 	}
 	if got := readQueueFile(t, queue); !strings.Contains(got, "fresh|2") {
-		// 现在还没落盘是对的——落盘只发生在退出时。这一条是为了钉住前提。
-		t.Logf("入队后文件里还没有本次会话那条（还没到落盘点）：%s", got)
+		// 自动落盘隔几秒才写一次，此刻还没写进去是可能的。这一条是为了钉住前提。
+		t.Logf("入队后文件里还没有本次会话那条（还没到自动落盘点）：%s", got)
 	}
 
 	// 换挂一次（导入完重新读队列走的就是这条路）。
@@ -629,6 +629,38 @@ func TestRemountingDownloadsDoesNotLoseWhatWasJustImported(t *testing.T) {
 			t.Errorf("落盘之后 %q 被抹掉了：\n%s", want, got)
 		}
 	}
+}
+
+// 会话中的队列变化不等退出就落盘：应用崩溃或被强退之后重开，本次会话加的任务还在，删掉的也不会回来。
+func TestTheQueueReachesDiskWithoutQuitting(t *testing.T) {
+	f := newStreamFixture(t)
+	dir, queue := t.TempDir(), filepath.Join(t.TempDir(), download.QueueFileName)
+	onDisk := func() string {
+		b, _ := os.ReadFile(queue)
+		return string(b)
+	}
+
+	a := newDownloadApp(t, f, dir, queue)
+	if _, err := a.Download(onlineItem("fresh", "2", "本次会话加的")); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 20*time.Second, "新任务写进队列文件", func() bool {
+		return strings.Contains(onDisk(), "fresh|2")
+	})
+
+	// 不关 a，直接用同一份文件起第二个应用：这就是强退之后重开看到的样子。
+	reopened := newDownloadApp(t, f, dir, queue)
+	if _, ok := reopened.DownloadSnapshot("fresh|2"); !ok {
+		t.Fatalf("重开之后本次会话加的任务没了：%+v", reopened.DownloadSnapshots())
+	}
+
+	if err := a.RemoveDownload("fresh|2"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 20*time.Second, "删掉的任务从队列文件里消失", func() bool {
+		s := onDisk()
+		return s != "" && !strings.Contains(s, "fresh|2")
+	})
 }
 
 // readQueueFile 读队列文件的内容，测试专用。

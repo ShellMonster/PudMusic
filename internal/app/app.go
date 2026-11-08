@@ -1010,11 +1010,17 @@ type App struct {
 
 	// 下载这一摊，见 downloads.go。挂上去之前是 nil，界面要判空。
 	downloads *download.Manager
-	// downloadQueueFile 是队列落盘的位置。退出时写、重开时读。
+	// downloadQueueFile 是队列落盘的位置。会话中按节奏写、退出时再写一次、重开时读。
 	downloadQueueFile string
 	// downloadFallbackDir 是设置里没选过下载目录时的去处（默认是「音乐」目录下的
 	// 应用子目录）。
 	downloadFallbackDir string
+	// downloadSaveMu 把写队列文件的几条路排成一队：会话中的自动落盘、退出落盘、
+	// 换挂时的「并进文件 → 新建 → 关旧的」。见 saveDownloadsIfDue。
+	// 它在 `a.mu` 外层拿，下面两格只在它底下读写。
+	downloadSaveMu   sync.Mutex
+	downloadSavedRev uint64
+	downloadSavedAt  time.Time
 
 	// updates 是自动更新那一摊，见 update.go。挂上去之前是 nil，界面要判空。
 	//
@@ -2083,7 +2089,9 @@ func (a *App) Close() {
 	// 写；落盘是因为队列文件是「下到哪儿了」的唯一一份，丢了用户重启就得
 	// 从头下。写失败不往上报错：退出路径上没有用户在看。
 	if dl != nil {
+		a.downloadSaveMu.Lock()
 		_ = dl.Close(dlPath)
+		a.downloadSaveMu.Unlock()
 	}
 	// 本地音乐的文件监听也要关：它每个根一个 goroutine，不关的话退出之后
 	// 还在那儿收着目录事件。
@@ -2211,6 +2219,7 @@ func (a *App) tick() {
 			// （见 savePlaybackIfDue）。**不在放的时候它落得更勤**——用户按了
 			// 暂停或者拖了进度条，那一下就该马上落（见那份文件里的那张表）。
 			a.savePlaybackIfDue(now)
+			a.saveDownloadsIfDue(now)
 
 			if publish || ended {
 				a.publishMedia()

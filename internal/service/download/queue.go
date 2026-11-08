@@ -450,6 +450,14 @@ func (m *Manager) SnapshotList() SnapshotList {
 	return SnapshotList{Revision: m.revision, Rows: m.snapshotCache}
 }
 
+// Revision 是队列状态的版本号，任何会改变快照的变化都会让它变。
+// 上层拿它判「上次落盘之后队列变过没有」。
+func (m *Manager) Revision() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.revision
+}
+
 // Get 返回一项的快照。
 func (m *Manager) Get(id string) (Snapshot, bool) {
 	m.mu.Lock()
