@@ -135,7 +135,7 @@ jobs:
           PLATFORMS: ${{ matrix.platforms }}
 
       - name: Upload ${{ matrix.target }} assets for the publish job
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-assets-${{ matrix.target }}
           # `build/<goos>-*` 一次匹配两个架构目录：通配的公共前缀是
