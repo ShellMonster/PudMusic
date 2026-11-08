@@ -48,7 +48,7 @@ func TestWarmWBIKeyFetchesTheKeyAheadOfTime(t *testing.T) {
 
 	// 🔴 **预热之后**：签名请求**不再**要那一次往返——密钥已经在手边了。
 	// 而这正是预热的全部价值：第一次取流回到**一次**往返。
-	if _, err := c.signWBI(context.Background(), map[string][]string{"foo": {"114"}}); err != nil {
+	if _, _, err := c.signWBI(context.Background(), map[string][]string{"foo": {"114"}}); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(f.requests()); n != 1 {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/url"
 	"sort"
@@ -170,7 +171,7 @@ func TestWBIKeysAreFetchedOnceAndCached(t *testing.T) {
 
 	var first string
 	for range 3 {
-		q, err := c.signWBI(context.Background(), url.Values{"foo": {"114"}})
+		q, _, err := c.signWBI(context.Background(), url.Values{"foo": {"114"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -205,11 +206,11 @@ func TestWBIKeyIsRefetchedAfterItExpires(t *testing.T) {
 	now := time.Unix(1702204169, 0)
 	c := f.client(t, Options{Now: func() time.Time { return now }})
 
-	if _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
+	if _, _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
 		t.Fatal(err)
 	}
 	// 还在有效期内：不重取。
-	if _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
+	if _, _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(f.requests()); n != 1 {
@@ -217,7 +218,7 @@ func TestWBIKeyIsRefetchedAfterItExpires(t *testing.T) {
 	}
 	// 过了有效期：重取。
 	now = now.Add(wbiKeyTTL + time.Second)
-	if _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
+	if _, _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
 		t.Fatal(err)
 	}
 	if n := len(f.requests()); n != 2 {
@@ -250,7 +251,7 @@ func TestConcurrentSigningsOnlyFetchTheKeyOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = c.signWBI(context.Background(), url.Values{"foo": {"114"}})
+			_, _, errs[i] = c.signWBI(context.Background(), url.Values{"foo": {"114"}})
 		}()
 	}
 	wg.Wait()
@@ -276,7 +277,7 @@ func TestSignWithoutAKeyPassesThrough(t *testing.T) {
 		writeJSON(w, jsonData(t, 0, "0", map[string]any{"wbi_img": map[string]string{}}))
 	})
 	c := f.client(t, Options{})
-	got, err := c.signWBI(context.Background(), url.Values{"foo": {"114"}})
+	got, _, err := c.signWBI(context.Background(), url.Values{"foo": {"114"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,6 +286,132 @@ func TestSignWithoutAKeyPassesThrough(t *testing.T) {
 	}
 	if got.Get("foo") != "114" {
 		t.Errorf("原参数被弄丢了：%v", got)
+	}
+}
+
+// navWithKeys 让 nav 依次给出 keys 里的 img/sub 对，给完之后一直给最后一对。
+func navWithKeys(t *testing.T, f *fakeBili, keys ...[2]string) {
+	t.Helper()
+	var mu sync.Mutex
+	n := 0
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		k := keys[min(n, len(keys)-1)]
+		n++
+		mu.Unlock()
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"wbi_img": map[string]string{
+				"img_url": "https://i0.hdslb.com/bfs/wbi/" + k[0] + ".png",
+				"sub_url": "https://i0.hdslb.com/bfs/wbi/" + k[1] + ".png",
+			},
+		}))
+	})
+}
+
+// countPath 数假服务器收到了几次 path。
+func countPath(f *fakeBili, path string) int {
+	n := 0
+	for _, rec := range f.requests() {
+		if rec.Path == path {
+			n++
+		}
+	}
+	return n
+}
+
+// TestWBIRiskCodeRefreshesTheKeyAndRetriesOnce 钉「签名接口回 -352 时换一把新 key 重签再问一次」：
+// B 站换了 key 而缓存还是旧的那两小时里，签名接口不该一直被挡。
+func TestWBIRiskCodeRefreshesTheKeyAndRetriesOnce(t *testing.T) {
+	f := newFakeBili(t)
+	navWithKeys(t, f, [2]string{sampleImgKey, sampleSubKey}, [2]string{sampleSubKey, sampleImgKey})
+	var mu sync.Mutex
+	var rids []string
+	f.on("/x/signed", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		rids = append(rids, r.URL.Query().Get("w_rid"))
+		first := len(rids) == 1
+		mu.Unlock()
+		if first {
+			writeJSON(w, jsonData(t, -352, "风控校验失败", nil))
+			return
+		}
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"ok": true}))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	if _, err := c.Do(context.Background(), Call{URL: c.hostAPI + "/x/signed", WBI: true}); err != nil {
+		t.Fatalf("换 key 重签之后还是失败：%v", err)
+	}
+	if n := countPath(f, pathNav); n != 2 {
+		t.Errorf("nav 问了 %d 次，want 2（旧 key 作废后重取一次）", n)
+	}
+	if len(rids) != 2 || rids[0] == rids[1] {
+		t.Errorf("两趟的 w_rid = %q，want 两趟、第二趟用新 key 重签", rids)
+	}
+}
+
+// TestPersistentWBIRiskCodeIsReportedAfterOneRetry 钉「换了 key 还是 -352 就是真风控」：
+// 只重试一次、不打转，报给用户的是风控。
+func TestPersistentWBIRiskCodeIsReportedAfterOneRetry(t *testing.T) {
+	f := newFakeBili(t)
+	navWithKeys(t, f, [2]string{sampleImgKey, sampleSubKey})
+	f.on("/x/signed", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, -352, "风控校验失败", nil))
+	})
+	c := f.client(t, Options{})
+
+	_, err := c.Do(context.Background(), Call{URL: c.hostAPI + "/x/signed", WBI: true})
+	if !errors.Is(err, ErrRiskControl) {
+		t.Fatalf("err = %v，want ErrRiskControl", err)
+	}
+	if n := countPath(f, "/x/signed"); n != 2 {
+		t.Errorf("签名接口问了 %d 次，want 2（原请求 + 一次重试）", n)
+	}
+}
+
+// TestUnsignedRiskCodeIsNotRetried 钉「没签名的调用回 -352 不重试」：那和 WBI key 无关。
+func TestUnsignedRiskCodeIsNotRetried(t *testing.T) {
+	f := newFakeBili(t)
+	f.on("/x/plain", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, -352, "风控校验失败", nil))
+	})
+	c := f.client(t, Options{})
+
+	if _, err := c.Do(context.Background(), Call{URL: c.hostAPI + "/x/plain"}); !errors.Is(err, ErrRiskControl) {
+		t.Fatalf("err = %v，want ErrRiskControl", err)
+	}
+	if n := countPath(f, "/x/plain"); n != 1 {
+		t.Errorf("没签名的接口问了 %d 次，want 1", n)
+	}
+	if n := countPath(f, pathNav); n != 0 {
+		t.Errorf("没签名的调用去问了 %d 次 nav", n)
+	}
+}
+
+// TestEmptyWBIKeyIsNotRefetchedOnEveryCall 钉「nav 给了空 key 之后一阵子内不再问」：
+// 否则每个签名请求都先打一次 nav，打多了就撞风控。
+func TestEmptyWBIKeyIsNotRefetchedOnEveryCall(t *testing.T) {
+	f := newFakeBili(t)
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{"wbi_img": map[string]string{}}))
+	})
+	now := time.Unix(1702204169, 0)
+	c := f.client(t, Options{Now: func() time.Time { return now }})
+
+	for range 3 {
+		if _, _, err := c.signWBI(context.Background(), url.Values{"foo": {"114"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := countPath(f, pathNav); n != 1 {
+		t.Errorf("空 key 之后签了三次，nav 问了 %d 次，want 1", n)
+	}
+	now = now.Add(wbiEmptyKeyTTL + time.Second)
+	if _, _, err := c.signWBI(context.Background(), url.Values{}); err != nil {
+		t.Fatal(err)
+	}
+	if n := countPath(f, pathNav); n != 2 {
+		t.Errorf("过了一阵子没有再问 nav（%d 次）", n)
 	}
 }
 

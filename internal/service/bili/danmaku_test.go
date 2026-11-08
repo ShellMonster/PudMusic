@@ -355,15 +355,18 @@ func TestDoRawHandsBackTheBytesUndecoded(t *testing.T) {
 // 「能不能重试」是按**哨兵**判的。`DoRaw` 自己造一套的话，弹幕那条路上
 // 的「重试」会给错——界面上那枚「重试」是立刻再问一次，给一个按了也没用
 // 的重试比不给更糟。
+//
+// HTTP 412 是风控挡下来的那一页：立刻再问还是撞墙，所以归风控、不给重试。
 func TestDoRawReportsTheSameErrorsAsDo(t *testing.T) {
 	for _, c := range []struct {
-		what  string
-		code  int
-		body  string
-		isErr error
+		what        string
+		code        int
+		body        string
+		isErr       error
+		recoverable bool
 	}{
-		{"网关错误", http.StatusBadGateway, "", ErrNetwork},
-		{"风控挡的一页 HTML", http.StatusPreconditionFailed, "<html>412</html>", ErrNetwork},
+		{"网关错误", http.StatusBadGateway, "", ErrNetwork, true},
+		{"风控挡的一页 HTML", http.StatusPreconditionFailed, "<html>412</html>", ErrRiskControl, false},
 	} {
 		f := newFakeBili(t)
 		f.on("/x/thing", func(w http.ResponseWriter, r *http.Request) {
@@ -376,8 +379,8 @@ func TestDoRawReportsTheSameErrorsAsDo(t *testing.T) {
 		if !errors.Is(err, c.isErr) {
 			t.Errorf("%s：DoRaw 返回 %v，want %v", c.what, err, c.isErr)
 		}
-		if !Recoverable(err) {
-			t.Errorf("%s：被判成不可重试了", c.what)
+		if Recoverable(err) != c.recoverable {
+			t.Errorf("%s：Recoverable = %v，want %v", c.what, Recoverable(err), c.recoverable)
 		}
 	}
 }

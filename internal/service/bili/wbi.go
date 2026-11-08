@@ -136,6 +136,12 @@ const pathNav = "/x/web-interface/nav"
 // 早上突然全体签名失败——所以宁可短。
 const wbiKeyTTL = 2 * time.Hour
 
+// wbiEmptyKeyTTL 是 nav 给了空 key 之后多久内不再去问。
+//
+// 不记下这次空 key 的话，每一个签名请求都会先打一次 nav，打多了就撞风控。
+// 取短是因为空 key 多半是 B 站那边一时的状态，过一会儿就该再问。
+const wbiEmptyKeyTTL = time.Minute
+
 // wbiKeyCache 缓存从 nav 拿到的两个 key。
 //
 // 并发安全：同一个 key 过期时可能有几十个请求同时来取，让它们都发一遍
@@ -154,15 +160,30 @@ type wbiKeyCache struct {
 // ⚠️ 这两个方法不加锁，而且锁在 `Client.wbiKey` 里统一管。
 // 早一版它们各自 Lock，然后又在一个已经拿着锁的地方被调用——
 // `sync.Mutex` 不可重入，于是并发签名那条测试直接死锁。
-func (w *wbiKeyCache) cached(now time.Time) string {
-	if w.key != "" && now.Before(w.expiry) {
-		return w.key
-	}
-	return ""
+//
+// 第二个返回值报缓存是否有效：有效而 key 是空串，说的是「nav 刚给过空 key」。
+func (w *wbiKeyCache) cached(now time.Time) (string, bool) {
+	return w.key, now.Before(w.expiry)
 }
 
 func (w *wbiKeyCache) store(key string, now time.Time) {
-	w.key, w.expiry = key, now.Add(wbiKeyTTL)
+	ttl := wbiKeyTTL
+	if key == "" {
+		ttl = wbiEmptyKeyTTL
+	}
+	w.key, w.expiry = key, now.Add(ttl)
+}
+
+// invalidate 作废缓存里的 key，**只在它还是 used 那一把时**。
+//
+// 并发的几个请求拿同一把旧 key 一起撞上 -352 时，第一个作废并重取；后面的
+// 不能把刚取回来的新 key 再作废一次，否则每个请求各打一次 nav。
+func (w *wbiKeyCache) invalidate(used string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.key == used {
+		w.key, w.expiry = "", time.Time{}
+	}
 }
 
 // navData 是 nav 接口里我们关心的那一小块。
@@ -249,11 +270,11 @@ func wbiKeyFromURL(raw string) string {
 	return name
 }
 
-// signWBI 拿 key、签名，把带签名的参数交回去。
-func (c *Client) signWBI(ctx context.Context, params url.Values) (url.Values, error) {
+// signWBI 拿 key、签名，把带签名的参数和用的那一把 key 交回去。
+func (c *Client) signWBI(ctx context.Context, params url.Values) (url.Values, string, error) {
 	key, err := c.wbiKey(ctx)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if key == "" {
 		// 拿不到 key 就**原样放行**（不加 wts/w_rid）。
@@ -261,9 +282,9 @@ func (c *Client) signWBI(ctx context.Context, params url.Values) (url.Values, er
 		// 这是 Biu 上游的做法，也是对的：不是每个接口都要签名，
 		// 为了一个没登录的用户去签名反而会把接口搞挂。真正要签名的接口
 		// 拿不到 key 时会返回 -403，调用方看错误码就知道该提示什么。
-		return params, nil
+		return params, "", nil
 	}
-	return wbiSign(params, key, c.now()), nil
+	return wbiSign(params, key, c.now()), key, nil
 }
 
 // wbiKey 取当前可用的混合密钥，带缓存。
@@ -273,7 +294,7 @@ func (c *Client) signWBI(ctx context.Context, params url.Values) (url.Values, er
 // 一起冻住，而那种卡住在界面上表现为「整个应用没反应」。
 func (c *Client) wbiKey(ctx context.Context) (string, error) {
 	c.wbiState.mu.Lock()
-	if k := c.wbiState.cached(c.now()); k != "" {
+	if k, ok := c.wbiState.cached(c.now()); ok {
 		c.wbiState.mu.Unlock()
 		return k, nil
 	}
@@ -296,7 +317,7 @@ func (c *Client) wbiKey(ctx context.Context) (string, error) {
 
 	c.wbiState.mu.Lock()
 	c.wbiState.fetching = nil
-	if err == nil && key != "" {
+	if err == nil {
 		c.wbiState.store(key, c.now())
 	}
 	c.wbiState.mu.Unlock()
