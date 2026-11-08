@@ -12,13 +12,14 @@
 //	3. **拿取流和拉字节的 http.Client 必须是同一个**，各建一套的话，
 //	   「凭据注入有明确边界」这条就漏了——漏在哪一天没人知道。
 //
-// # 保存队列的两条路，都要
+// # 保存队列的三条路，都要
 //
-//	`SaveDownloads`  由界面层挂在 `OnWillQuit` 上（退出前那一次）
-//	`App.Close`      测试和「窗口全关但进程还在」的收尾
+//	`saveDownloadsIfDue`  后台时钟每一拍看一次，队列变了就落盘（至少隔 downloadSaveEvery）
+//	`SaveDownloads`       由界面层挂在 `OnWillQuit` 上（退出前那一次）
+//	`App.Close`           测试和「窗口全关但进程还在」的收尾
 //
-// 只挂一条的话，另一条路上退出会丢掉队列：用户下次开应用看到空队列，
-// 盘上却躺着一堆 `.part`。
+// 只靠退出那两条的话，崩溃或强退会丢掉本次会话的全部任务：用户下次开应用
+// 看到空队列，盘上却躺着一堆 `.part`。
 
 package app
 
@@ -28,6 +29,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
@@ -86,10 +88,12 @@ type Downloads struct {
 //
 // ## 重复挂（导入完重新读队列）时的三步顺序
 //
-// 队列文件会话期间**只在退出时写一次**（`ui.MountDownloads` 挂的那个
-// `OnWillQuit → SaveDownloads`，加上 `App.Close` 那一道），全项目没有第三处。
-// 所以「换掉这个 Manager」这一步必须处理掉内存里那些**还没写进文件**的任务：
-// 用户在这次会话里点了下载，那一首此刻只在内存里，文件里没有。
+// 队列文件会话期间是**隔几秒才写一次**（`saveDownloadsIfDue`），加上退出时的
+// `SaveDownloads` 和 `App.Close`。所以「换掉这个 Manager」这一步必须处理掉内存里
+// 那些**还没写进文件**的任务：用户刚点了下载，那一首可能还只在内存里。
+//
+// 整个换挂拿着 `downloadSaveMu`：自动落盘要是插在 ① 和 ② 之间，旧 Manager 的
+// 内存快照会把刚并进文件的那几条盖掉。
 //
 // ⚠️ **三步的顺序是有讲究的**（下面的代码就是这个顺序，不要动）：
 //
@@ -109,6 +113,9 @@ func (a *App) MountDownloads(d Downloads) error {
 	if d.Media == nil {
 		return errDownloadsMissing
 	}
+
+	a.downloadSaveMu.Lock()
+	defer a.downloadSaveMu.Unlock()
 
 	old := a.downloadsSnapshot()
 	if old != nil {
@@ -140,6 +147,9 @@ func (a *App) MountDownloads(d Downloads) error {
 	if old != nil {
 		_ = old.Close("")
 	}
+
+	// 刚 Restore 出来的就是盘上那份，不用马上再写一遍。
+	a.downloadSavedRev = m.Revision()
 
 	a.mu.Lock()
 	a.downloads = m
@@ -378,6 +388,8 @@ func (a *App) ClearDownloads() {
 
 // SaveDownloads 把队列落盘。退出前调。
 func (a *App) SaveDownloads() error {
+	a.downloadSaveMu.Lock()
+	defer a.downloadSaveMu.Unlock()
 	a.mu.Lock()
 	m, path := a.downloads, a.downloadQueueFile
 	a.mu.Unlock()
@@ -385,6 +397,36 @@ func (a *App) SaveDownloads() error {
 		return nil
 	}
 	return m.Save(path)
+}
+
+// downloadSaveEvery 是会话中队列自动落盘的最小间隔。
+//
+// 进度在下载时一直在变，每一拍都写就是白花磁盘 IO；崩溃时最多丢这几秒的变化。
+const downloadSaveEvery = 3 * time.Second
+
+// saveDownloadsIfDue 在队列变过、且离上次自动落盘够久时写一次队列文件。
+// **后台时钟那一拍调**（见 app.go 的 tick）。
+//
+// 写失败只记日志：下一次变化或退出时还会再试。
+func (a *App) saveDownloadsIfDue(now time.Time) {
+	a.downloadSaveMu.Lock()
+	defer a.downloadSaveMu.Unlock()
+	a.mu.Lock()
+	m, path, closed := a.downloads, a.downloadQueueFile, a.closed
+	a.mu.Unlock()
+	if m == nil || path == "" || closed {
+		return
+	}
+	rev := m.Revision()
+	if rev == a.downloadSavedRev || now.Sub(a.downloadSavedAt) < downloadSaveEvery {
+		return
+	}
+	a.downloadSavedAt = now
+	if err := m.Save(path); err != nil {
+		log.Printf("app: 自动保存下载队列失败：%v", err)
+		return
+	}
+	a.downloadSavedRev = rev
 }
 
 // downloadsSnapshot 拿一份 Manager。没挂上是 nil。
