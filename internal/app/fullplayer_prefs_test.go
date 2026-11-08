@@ -917,6 +917,12 @@ func TestPartsAreAskedAgainAfterAFailure(t *testing.T) {
 		t.Fatalf("第一次就问出了 %d 集", len(got))
 	}
 	calls.wait(t, 1, "第一次那一趟")
+	// 计数在请求发出时就加了，而原因和「在途」要等它回来才写：等它落地再看。
+	waitUntil(t, "第一次那一趟落地", 2*time.Second, func() bool {
+		a.partsMu.Lock()
+		defer a.partsMu.Unlock()
+		return !a.partsWanted
+	})
 	if a.PartsErr() == nil {
 		t.Fatal("问失败了却没有记下原因")
 	}
@@ -941,6 +947,11 @@ func TestPartsAreAskedAgainAfterAFailure(t *testing.T) {
 	if got := calls.got(); got != 2 {
 		t.Fatalf("过了退避窗口发了 %d 趟，want 2 —— 失败之后就再也不问了", got)
 	}
+	waitUntil(t, "退避之后那一趟落地", 2*time.Second, func() bool {
+		a.partsMu.Lock()
+		defer a.partsMu.Unlock()
+		return !a.partsWanted
+	})
 
 	// 第三趟换成成功：这次就记住，不再问第四回。
 	ok := &fetchCalls{}

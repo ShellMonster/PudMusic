@@ -129,6 +129,12 @@ func TestChaptersFailQuietlyAndComeBackAfterTheBackoff(t *testing.T) {
 			t.Fatalf("第 %d 趟（失败）问出了 %+v", i, got)
 		}
 		calls.wait(t, int32(i), "失败那一趟")
+		// 计数在请求发出时就加了；还在途的话下一帧不会再问，得等它落地。
+		waitUntil(t, "失败那一趟落地", 2*time.Second, func() bool {
+			a.chaptersMu.Lock()
+			defer a.chaptersMu.Unlock()
+			return !a.chaptersWanted
+		})
 		// 退避之内再调不发。
 		_ = a.Snapshot().Chapters
 		if n := calls.got(); n != int32(i) {

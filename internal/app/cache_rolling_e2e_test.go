@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -74,17 +75,39 @@ func danmakuModTime(t *testing.T, dir, bvid, cid string) (time.Time, bool) {
 //
 // ⚠️ **假时钟装在缓存上**：应用层那一侧的时间（退避、序号那些）用的是真时钟，
 // 而**过期判据**走的是缓存那个时钟——所以只有「过期」这一件事被推进了。
-func rollingDanmakuApp(t *testing.T) (*App, *danmaku.Cache, string, *time.Time) {
+func rollingDanmakuApp(t *testing.T) (*App, *danmaku.Cache, string, *cacheClock) {
 	t.Helper()
-	now := time.Now()
-	clock := now
+	clock := newCacheClock(time.Now())
 	cacheDir := t.TempDir()
-	c := danmaku.NewCache(cacheDir).WithClock(func() time.Time { return clock })
+	c := danmaku.NewCache(cacheDir).WithClock(clock.Now)
 
 	a := New()
 	t.Cleanup(a.Close)
 	a.MountDanmaku(c)
-	return a, c, cacheDir, &clock
+	return a, c, cacheDir, clock
+}
+
+// cacheClock 是测试推进的缓存时钟。
+//
+// ⚠️ **要加锁**：缓存的读写跑在应用的后台 goroutine 里，测试推进时钟时它们
+// 可能正在读。
+type cacheClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newCacheClock(now time.Time) *cacheClock { return &cacheClock{now: now} }
+
+func (c *cacheClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *cacheClock) Set(now time.Time) {
+	c.mu.Lock()
+	c.now = now
+	c.mu.Unlock()
 }
 
 // TestTheDanmakuCacheExpiryRollsWhenTheAppReusesIt 盯「应用层用过之后，
@@ -122,7 +145,7 @@ func TestTheDanmakuCacheExpiryRollsWhenTheAppReusesIt(t *testing.T) {
 	}
 
 	// 🔴 **第 3 天**：用户又进了这一集。
-	*clock = first.FetchedAt.Add(3 * 24 * time.Hour)
+	clock.Set(first.FetchedAt.Add(3 * 24 * time.Hour))
 	// 换到另一集再换回来（那一趟会重新查缓存）。
 	putDanmakuCurrent(a, "BV1", "2")
 	a.Danmaku()
@@ -182,7 +205,7 @@ func TestTheDanmakuCacheIsNotRefetchedWhileItIsStillFresh(t *testing.T) {
 	first, _ := readDanmakuRecord(t, cacheDir, "BV1", "1")
 
 	// 第 3 天：换集再换回来。**这一集还在被用** ⇒ 不该重拉。
-	*clock = first.FetchedAt.Add(3 * 24 * time.Hour)
+	clock.Set(first.FetchedAt.Add(3 * 24 * time.Hour))
 	putDanmakuCurrent(a, "BV1", "2")
 	a.Danmaku()
 	waitRolling(t, "换到第二集", func() bool {
@@ -231,9 +254,9 @@ func waitRolling(t *testing.T, what string, cond func() bool) {
 // 而那件事只有走一遍应用层才算验过（缓存那一层只管「歌词文本过没过期」）。
 func TestTheUserLyricsValuesSurviveTheCacheExpiry(t *testing.T) {
 	now := time.Now()
-	clock := now
+	clock := newCacheClock(now)
 	cacheDir := t.TempDir()
-	c := lyrics.NewCache(cacheDir).WithClock(func() time.Time { return clock })
+	c := lyrics.NewCache(cacheDir).WithClock(clock.Now)
 
 	a := New()
 	t.Cleanup(a.Close)
@@ -259,7 +282,7 @@ func TestTheUserLyricsValuesSurviveTheCacheExpiry(t *testing.T) {
 	})
 
 	// 🔴 **第 8 天**：歌词文本过期了。
-	clock = now.Add(8 * 24 * time.Hour)
+	clock.Set(now.Add(8 * 24 * time.Hour))
 
 	// 🔴 **换一个应用实例**（模拟「重启之后又听了这一首」）。
 	//
@@ -306,9 +329,9 @@ func TestTheUserLyricsValuesSurviveTheCacheExpiry(t *testing.T) {
 // 除非他自己开搜索弹窗」。
 func TestTheLocalLyricsAreSearchedAgainAfterTheCacheExpires(t *testing.T) {
 	now := time.Now()
-	clock := now
+	clock := newCacheClock(now)
 	cacheDir := t.TempDir()
-	c := lyrics.NewCache(cacheDir).WithClock(func() time.Time { return clock })
+	c := lyrics.NewCache(cacheDir).WithClock(clock.Now)
 
 	// 本地文件那一支：键是 `local-<完整路径>`。
 	songPath := filepath.Join(t.TempDir(), "本地那首.mp3")
@@ -328,7 +351,7 @@ func TestTheLocalLyricsAreSearchedAgainAfterTheCacheExpires(t *testing.T) {
 	a.lyricSearch.sources = []lyrics.Source{countingLyricSource{searched: &searched}}
 
 	// 🔴 **第 8 天**：歌词缓存过期了。
-	clock = now.Add(8 * 24 * time.Hour)
+	clock.Set(now.Add(8 * 24 * time.Hour))
 	a.setLyricTrack(it)
 
 	// 等自动搜那一趟真的被触发了。

@@ -100,12 +100,16 @@ func TestTheCommentCountDoesNotCarryOverToTheNextSong(t *testing.T) {
 	t.Cleanup(a.Close)
 
 	trips := &archiveTrips{}
+	// 第二首那一趟先扣住：`CommentCount` 自己就会把它发出去，替身又是瞬时返回的，
+	// 不扣住的话机器一忙，它自己的 222 会赶在下一行读数之前落地。
+	releaseSecond := make(chan struct{})
 	a.commentsArchiveFetch = func(_ context.Context, bvid string) (bili.ArchiveStats, error) {
 		trips.add(bvid)
 		switch bvid {
 		case "BVfirst":
 			return bili.ArchiveStats{Aid: 1, Reply: 111}, nil
 		case "BVsecond":
+			<-releaseSecond
 			return bili.ArchiveStats{Aid: 2, Reply: 222}, nil
 		}
 		return bili.ArchiveStats{}, errors.New("哪一首？")
@@ -123,6 +127,7 @@ func TestTheCommentCountDoesNotCarryOverToTheNextSong(t *testing.T) {
 	if got := a.CommentCount(); got != 0 {
 		t.Errorf("刚换歌就报了 %d 条评论——那是上一首的（换歌那一刻应当是「还不知道」）", got)
 	}
+	close(releaseSecond)
 	waitCommentsFor(t, commentsWaitTimeout, "第二首的评论数到了", func() bool {
 		return a.CommentCount() == 222
 	})
