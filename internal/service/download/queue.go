@@ -93,6 +93,9 @@ type Manager struct {
 	resolve Resolver
 	now     func() int64
 
+	// idleTimeout 是分块请求多久不来字节就掐掉（见 `chunkIdleTimeout`）。测试改短它。
+	idleTimeout time.Duration
+
 	// canRetry 判一次失败能不能立刻再问一次（见 `Options.CanRetry`）。
 	canRetry func(error) bool
 
@@ -156,6 +159,8 @@ func New(opts Options, path string) (*Manager, error) {
 		resolve: opts.Resolve,
 		now:     now,
 		onDone:  opts.OnDone,
+
+		idleTimeout: chunkIdleTimeout,
 		// nil 是允许的：没装判据就按「能重试」算（见 `Options.CanRetry`）。
 		canRetry: opts.CanRetry,
 		ctx:      ctx,

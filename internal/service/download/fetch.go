@@ -36,6 +36,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/service/mux"
 )
@@ -63,7 +64,19 @@ var (
 	// **不算失败**：已经下完的其它分块留在账上，重试只会重来这一块。
 	// 它只是让当前这一次停下来。
 	ErrShortChunk = errors.New("download: 这一块没下全就断了")
+
+	// ErrStalled 是「连上了，但连续 idleTimeout 没再来一个字节」。
+	//
+	// ⚠️ 它**不能**包着 `context.Canceled`：`runOne` 把那个认成「暂停」，
+	// 而卡死是出错，要换备用地址、换完了落成可重试的失败。
+	ErrStalled = errors.New("download: 连接没有数据了")
 )
+
+// chunkIdleTimeout 是一个分块请求最长多久不来字节就掐掉。
+//
+// `Options.Client` 没有总超时，传输层只管到响应头为止；正文读到一半服务器
+// 不说话也不断开，没有它这一项就永远挂着，而队列是一项一项下的，后面全被堵住。
+const chunkIdleTimeout = 30 * time.Second
 
 // Source 是「这一段字节现在从哪儿下」。
 //
@@ -677,6 +690,8 @@ func (m *Manager) pullChunk(ctx context.Context, id string, companion bool, f *o
 // 把**整个文件**当正文发过来了，而这一块的位置在文件的中间——照写就是
 // 把整首歌的字节盖在文件中间，**长度还是对得上**。中止，别拼。
 func (m *Manager) pullFrom(ctx context.Context, id string, companion bool, f *os.File, rawURL string, start, end int64) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return fmt.Errorf("download: 发请求：%w", err)
@@ -710,8 +725,14 @@ func (m *Manager) pullFrom(ctx context.Context, id string, companion bool, f *os
 	// 包一层 countingReader：进度条要**边下边走**。只在一整块下完之后才
 	// 报的话，一个 30 MB 的歌在 10 MB 一块、网速一般的情况下，进度条
 	// 会先在 0% 站十几秒，然后一下跳到 33%——用户看到的是「卡住了」。
-	n, err := io.CopyN(&writerAt{f: f, off: start}, m.counting(id, resp.Body), end-start+1)
+	idle := time.AfterFunc(m.idleTimeout, func() { cancel(ErrStalled) })
+	defer idle.Stop()
+	body := &countingReader{r: resp.Body, onRead: func(int64) { idle.Reset(m.idleTimeout) }}
+	n, err := io.CopyN(&writerAt{f: f, off: start}, m.counting(id, body), end-start+1)
 	if err != nil {
+		if errors.Is(context.Cause(ctx), ErrStalled) {
+			return fmt.Errorf("%w：%d-%d 到第 %d 字节后 %s 没有新数据", ErrStalled, start, end, n, m.idleTimeout)
+		}
 		if errors.Is(err, io.EOF) {
 			return fmt.Errorf("%w：%d-%d 只到了 %d 字节", ErrShortChunk, start, end, n)
 		}
