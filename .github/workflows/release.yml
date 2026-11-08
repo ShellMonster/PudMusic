@@ -59,7 +59,7 @@ jobs:
       MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
     steps:
       - name: Check out the tagged commit
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # tag push 时 tag 就是 HEAD，不需要历史；workflow_dispatch 要
           # `git describe --tags` 找前一版说明范围，那时候才全量拉。
@@ -159,7 +159,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the tagged commit
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # publish job 要写 release 说明，`generate-release-notes.sh` 靠
           # `git describe --tags` 找上一版——浅 clone 没有别的 tag，拉不全。
