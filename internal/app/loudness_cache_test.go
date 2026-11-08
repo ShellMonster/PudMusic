@@ -36,8 +36,8 @@ func TestTheLoudnessCacheSkipsARemeasureOnTheSecondPlay(t *testing.T) {
 	if err := a.Open(song); err != nil {
 		t.Fatal(err)
 	}
-	// 第一放后台量完（等它落地）。
-	waitFor(t, 2*time.Second, "第一次测量完成", func() bool { return n.Load() == 1 })
+	// 第一放后台量完、结果进了缓存才算落地；只等计数器涨会抢在入表之前。
+	waitFor(t, 2*time.Second, "第一次测量结果入缓存", func() bool { return app.LoudnessCachedForTest(a, song) })
 	a.Close()
 
 	// 同一个 App 里第二放：应该从内存缓存拿，计数器不许动。
@@ -69,8 +69,8 @@ func TestTheLoudnessCacheSurvivesARestart(t *testing.T) {
 	if err := a.Open(song); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, 2*time.Second, "第一次测量完成", func() bool { return n.Load() == 1 })
-	// CloseSettings 把缓存落盘。
+	waitFor(t, 2*time.Second, "第一次测量结果入缓存", func() bool { return app.LoudnessCachedForTest(a, song) })
+	// CloseSettings 把缓存同步落盘；入表之前关的话盘上什么都没有。
 	_ = a.CloseSettings()
 	a.Close()
 
