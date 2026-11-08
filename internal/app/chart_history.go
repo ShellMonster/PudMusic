@@ -12,6 +12,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 const chartHistoryFile = "chart-history.json"
@@ -77,7 +79,7 @@ func (r *Recommend) noteChart(period int64, ids []string) {
 	}
 	b, err := json.Marshal(h)
 	if err == nil {
-		err = os.WriteFile(path, b, 0o600)
+		err = diskcache.WriteAtomicMode(path, b, 0o600)
 	}
 	if err != nil {
 		log.Printf("pudmusic: 保存热榜名次失败：%v", err)

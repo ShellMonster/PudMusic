@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -287,4 +289,52 @@ func TestAMissingFileIsNotAnError(t *testing.T) {
 	}
 	// 写一份也该不报错。
 	store.save(tr)
+}
+
+// TestAConcurrentOlderSaveDoesNotOverwriteANewerOne 钉住「定时落盘和退出落盘撞在
+// 一起时，盘上留下的是后拍的那份」：快照曾经在写锁外面拍，先拍的旧快照可能
+// 后落地，把退出前那几秒的统计盖掉。
+func TestAConcurrentOlderSaveDoesNotOverwriteANewerOne(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), statsFileName)
+		tr := newListeningTracker()
+		base := time.Date(2026, 11, 1, 10, 0, 0, 0, time.Local)
+		tr.Tick(mvIn("1", "c1", "一首歌", "某个UP", 42).withPos(0, 3*time.Minute).at(base))
+		tr.Tick(mvIn("1", "c1", "一首歌", "某个UP", 42).withPos(30*time.Second, 3*time.Minute).
+			at(base.Add(30 * time.Second)))
+
+		store := newStatsStore(path)
+		olderTaken := make(chan struct{})
+		releaseOlder := make(chan struct{})
+		var calls atomic.Int32
+		store.afterSnapshot = func() {
+			if calls.Add(1) == 1 {
+				close(olderTaken)
+				<-releaseOlder
+			}
+		}
+
+		olderDone := make(chan error)
+		go func() { olderDone <- store.save(tr) }()
+		<-olderTaken
+
+		tr.Tick(mvIn("1", "c1", "一首歌", "某个UP", 42).withPos(60*time.Second, 3*time.Minute).
+			at(base.Add(60 * time.Second)))
+		newerDone := make(chan error)
+		go func() { newerDone <- store.save(tr) }()
+		// 后开始的那次要么已经写完，要么在排队等写；放行旧的那次之后，盘上必须是新的。
+		synctest.Wait()
+
+		close(releaseOlder)
+		if err := <-olderDone; err != nil {
+			t.Fatalf("先开始的那次落盘：%v", err)
+		}
+		if err := <-newerDone; err != nil {
+			t.Fatalf("后开始的那次落盘：%v", err)
+		}
+
+		if got := readStatsFile(t, path).DayMs("2026-11-01"); got != 60_000 {
+			t.Errorf("盘上的当天时长 = %d 毫秒，want 60000（后拍的那份）", got)
+		}
+	})
 }

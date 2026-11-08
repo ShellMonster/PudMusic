@@ -145,7 +145,16 @@ func Touch(path string, now time.Time) {
 //
 // ⚠️ **每一步失败都把临时文件删掉**：留着的话缓存目录里会攒出一堆
 // 残骸（它们占地方，而用户看不出那是什么）。
-func WriteAtomic(path string, b []byte) (err error) {
+func WriteAtomic(path string, b []byte) error {
+	// 缓存里没有隐私，给成普通用户文件同样的权限，不然用户从访达里看一眼
+	// 缓存目录会以为坏了。
+	return WriteAtomicMode(path, b, 0o644)
+}
+
+// WriteAtomicMode 同 WriteAtomic，但落地文件的权限是 mode。
+//
+// ⚠️ 权限在 rename **之前**设到临时文件上：目标路径上从不出现比 mode 更宽的文件。
+func WriteAtomicMode(path string, b []byte, mode os.FileMode) (err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
 	if err != nil {
@@ -169,9 +178,7 @@ func WriteAtomic(path string, b []byte) (err error) {
 	if err = tmp.Close(); err != nil {
 		return err
 	}
-	// CreateTemp 建出来的是 0600。缓存里没有隐私，给成普通用户文件同样的
-	// 权限，不然用户从访达里看一眼缓存目录会以为坏了。
-	if err = os.Chmod(name, 0o644); err != nil {
+	if err = os.Chmod(name, mode); err != nil {
 		return err
 	}
 	if err = os.Rename(name, path); err != nil {

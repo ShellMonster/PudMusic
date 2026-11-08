@@ -3,10 +3,10 @@ package app
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"github.com/ShellMonster/PudMusic/internal/service/audio"
+	"github.com/ShellMonster/PudMusic/internal/service/diskcache"
 )
 
 // 响度缓存：每首歌**实时量出来**的 LUFS 按 `Item.Identity()` 记住，同一首
@@ -94,21 +94,7 @@ func (c *loudnessIdentityCache) flush() {
 	if err != nil {
 		return
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(c.path), "loudness-*.json")
-	if err != nil {
-		return
-	}
-	name := tmp.Name()
-	if _, err = tmp.Write(b); err == nil {
-		err = tmp.Close()
-	} else {
-		tmp.Close()
-	}
-	if err == nil {
-		err = os.Rename(name, c.path)
-	}
-	if err != nil {
-		os.Remove(name)
+	if diskcache.WriteAtomicMode(c.path, b, 0o600) != nil {
 		return
 	}
 	c.dirty = false
