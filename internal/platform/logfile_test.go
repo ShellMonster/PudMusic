@@ -1,8 +1,11 @@
 package platform
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -67,5 +70,75 @@ func TestTheLogFileIsAppendedTo(t *testing.T) {
 	text := string(b)
 	if !strings.Contains(text, "第一段") || !strings.Contains(text, "第二段") {
 		t.Errorf("第二段把第一段冲掉了：%q", text)
+	}
+}
+
+// TestTheLogFileRotatesOnceWhenASessionWritesPastTheLimit 盯运行中写过上限时
+// 只换一份：旧内容进 `main.log.1`，最新那行留在 `main.log`，活文件不超过上限。
+func TestTheLogFileRotatesOnceWhenASessionWritesPastTheLimit(t *testing.T) {
+	dir := t.TempDir()
+	old := log.Writer()
+	t.Cleanup(func() { log.SetOutput(old) })
+
+	path, err := OpenLogFileIn(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	log.Printf("pudmusic: 最早那一行")
+	filler := strings.Repeat("x", 1000)
+	for written := 0; written <= maxLogBytes; written += len(filler) {
+		log.Print(filler)
+	}
+	log.Printf("pudmusic: 最新那一行")
+
+	live, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := os.ReadFile(path + ".1")
+	if err != nil {
+		t.Fatalf("写过上限却没换出 main.log.1：%v", err)
+	}
+	if !strings.Contains(string(live), "最新那一行") {
+		t.Error("最新那一行不在 main.log 里")
+	}
+	if strings.Contains(string(live), "最早那一行") {
+		t.Error("main.log 没换：最早那一行还在活文件里")
+	}
+	// 换了两次的话，最早那一行会跟着第一份备份一起被删掉。
+	if !strings.Contains(string(backup), "最早那一行") {
+		t.Error("main.log.1 里没有最早那一行：换了不止一次")
+	}
+	if len(live) > maxLogBytes {
+		t.Errorf("main.log 有 %d 字节，超过上限 %d", len(live), maxLogBytes)
+	}
+}
+
+// TestAFatalPanicInAGoroutineLandsInTheCrashLog 盯一个没接住的 goroutine panic
+// 把堆栈写进 `crash.log`：子进程接上崩溃日志后崩掉，父进程去读那个文件。
+func TestAFatalPanicInAGoroutineLandsInTheCrashLog(t *testing.T) {
+	if dir := os.Getenv("PUDMUSIC_CRASH_CHILD_DIR"); dir != "" {
+		if _, err := OpenCrashLogIn(dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(3)
+		}
+		go panic("pudmusic-crash-marker")
+		select {}
+	}
+
+	dir := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestAFatalPanicInAGoroutineLandsInTheCrashLog$")
+	cmd.Env = append(os.Environ(), "PUDMUSIC_CRASH_CHILD_DIR="+dir)
+	out, err := cmd.CombinedOutput()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 2 {
+		t.Fatalf("子进程该以 panic 的退出码 2 结束，实际 %v；输出：%s", err, out)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "crash.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "panic: pudmusic-crash-marker") || !strings.Contains(string(b), "goroutine") {
+		t.Errorf("crash.log 里没有那次 panic 的堆栈：%q", b)
 	}
 }

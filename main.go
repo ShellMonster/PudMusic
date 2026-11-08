@@ -45,6 +45,9 @@ func main() {
 	if _, err := platform.OpenLogFile(); err != nil {
 		log.Printf("pudmusic: 接不上日志文件，这一次的日志只在 stderr 上：%v", err)
 	}
+	if _, err := platform.OpenCrashLog(); err != nil {
+		log.Printf("pudmusic: 接不上崩溃日志，崩溃堆栈只在 stderr 上：%v", err)
+	}
 
 	if _, err := bootstrap.Assemble(bootstrap.DefaultDependencies()); err != nil {
 		log.Fatal(err)
