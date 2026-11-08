@@ -378,7 +378,20 @@ func (p *Player) Playing() bool { return p.play.Playing() }
 //
 // t 是**歌里的时间**，和倍率无关：变速层报给上层的帧号就是源帧，所以这一句
 // 在 0.5 倍速和 2 倍速下拖到同一处都是同一处（见 rate.go 的类型注释）。
-func (p *Player) Seek(t time.Duration) { p.play.Seek(t) }
+func (p *Player) Seek(t time.Duration) {
+	p.vs.expectSeek(seekFrame(t, p.vs.SampleRate(), p.vs.Len()))
+	p.play.Seek(t)
+}
+
+// seekFrame 是 MyGo 的 `Player.Seek` 把 t 换成源帧的同一套算法（四舍五入、
+// 夹在 [0, Len]）；对不上的话 varispeed 认不出这次 seek 的 reset。
+func seekFrame(t time.Duration, rate int, length int64) int64 {
+	f := max(int64(math.Round(t.Seconds()*float64(rate))), 0)
+	if length >= 0 {
+		f = min(f, length)
+	}
+	return f
+}
 
 // Position 返回播到哪儿了——**歌里的时间**。
 //

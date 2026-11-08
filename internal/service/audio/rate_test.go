@@ -754,6 +754,37 @@ func TestPositionIsTheSeekTargetBeforeTheDecoderCatchesUp(t *testing.T) {
 	}
 }
 
+// TestALateResetFromAnOlderSeekKeepsTheNewTarget 盯连拖两次时，前一次 seek
+// 迟到的 reset 不会把后一次的目标冲掉；轮到后一次之后位置照常按对照表走。
+func TestALateResetFromAnOlderSeekKeepsTheNewTarget(t *testing.T) {
+	const rate = 44100
+	v := newVarispeed(&memDec{samples: tone(rate, 1, 440, 6), ch: 1, rate: rate})
+	v.setRate(2)
+	drain(t, v, 1)
+
+	const first, second = int64(rate), int64(3 * rate)
+	v.expectSeek(first)
+	v.expectSeek(second)
+	if err := v.SetPosition(first); err != nil {
+		t.Fatal(err)
+	}
+	if got := v.SourceAt(second); got != second {
+		t.Errorf("前一次 seek 的 reset 迟到之后，SourceAt 说的是第 %d 帧，want %d", got, second)
+	}
+
+	if err := v.SetPosition(second); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]float32, 4096)
+	if n, _ := v.Read(buf); n == 0 {
+		t.Fatal("一帧都没铺出来")
+	}
+	// 2 倍速下输出走 n 帧，源该走两倍；还按 seek 前的口径原样返回就只走了 n 帧。
+	if got := v.SourceAt(second + 4096); got < second+6000 {
+		t.Errorf("轮到这次 seek 之后 2 倍速铺了 4096 帧，源只到第 %d 帧", got)
+	}
+}
+
 // TestReadRejectsABufferTooSmallForAFrame 盯畸形缓冲是**报错**而不是 panic。
 //
 // MyGo 的约定是「buf 是整数个帧」，`stream.decode` 固定传
