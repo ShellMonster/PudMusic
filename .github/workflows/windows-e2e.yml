@@ -60,14 +60,14 @@ jobs:
     timeout-minutes: 25
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # ⚠️ 不要加「Cache Go toolchain」那种把 hostedtoolcache 下的 go 目录
       # 存进 actions/cache 的步骤：缓存命中时 tar 把它还原成符号链接，
       # 随后 setup-go 往同一位置写链接直接撞 EEXIST（windows-aac-spike
       # 在 PR #769 那次红的原因）。module / build 缓存由 setup-go 自带
       # 的 `cache: true` 负责。
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true

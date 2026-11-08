@@ -225,22 +225,28 @@ else
   fi
 fi
 
-# 1.4b HEAD 在默认分支上吗。**不在就提醒，不拦**——从发布分支发版是有人会做的事。
-#
-# 之所以值得提醒：这个仓库是 **squash 合并**（PR 的合并提交就是压过的那一个），
-# 所以在功能分支上打的标签，合并之后**永远不在 main 上**——标签指向一份 main 里
-# 根本不存在的代码。症状是发布出去的产物和 main 对不上，而哪一处都不报错。
-if ! git merge-base --is-ancestor "$head_sha" origin/main 2>/dev/null; then
-  printf '\n\033[33m⚠️  HEAD 不在 origin/main 上，标签会指向 main 里没有的提交。\033[0m\n'
-  cat <<EOF
-    标签 $tag 会打在 ${head_sha}，而它不是 origin/main 的祖先。
-    本仓库是 squash 合并，所以合完之后 main 会有另一个提交 SHA，而标签还指着这里。
+# 1.4b HEAD 必须在 origin/main 上。release.yml 不再跑 build/vet/test，它假定标签
+# 指向的提交已经过了 PR CI；而本仓库是 squash 合并，功能分支上的提交从没以这个
+# SHA 跑过 CI，标签打在那里就等于发出一份没测过的代码。
+# 确实要从别的分支发（那份代码自己保证测过），设 PUDMUSIC_RELEASE_ALLOW_OFF_MAIN=1。
+git fetch --quiet origin main || die "取不到 origin/main，没法确认 HEAD 在 main 上。"
+if ! git merge-base --is-ancestor "$head_sha" origin/main; then
+  off_main_msg="HEAD 不在 origin/main 上，标签会指向 main 里没有的提交。
+  标签 $tag 会打在 ${head_sha}，而它不是 origin/main 的祖先。
+  CI 发版时不再跑测试（它假定 main 上的提交已经过了 PR CI）；本仓库是 squash
+  合并，这个提交从没以这个 SHA 跑过 CI，发出去的是没测过的代码。
 
-    要发布的是 main 上那一份，就切到 main 再跑一次 scripts/release.sh；
-    已经打过标签的话，先把它挪走：
-      git tag -f $tag origin/main && git push -f origin $tag
-      gh release edit $tag --repo $publish_repo --target main
-EOF
+  要发布的是 main 上那一份，就切到 main 再跑一次 scripts/release.sh；
+  已经打过标签的话，先把它挪走：
+    git tag -f $tag origin/main && git push -f origin $tag
+    gh release edit $tag --repo $publish_repo --target main
+
+  确实要从这个提交发（你自己保证它测过）就加一句：
+    PUDMUSIC_RELEASE_ALLOW_OFF_MAIN=1 scripts/release.sh"
+  if [ "${PUDMUSIC_RELEASE_ALLOW_OFF_MAIN:-}" != "1" ]; then
+    die "$off_main_msg"
+  fi
+  printf '\n\033[33m⚠️  %s\033[0m\n' "$off_main_msg"
 fi
 
 # ============================================================ 2 打 tag 并推送

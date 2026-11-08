@@ -97,14 +97,34 @@ GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run '你改的那几个用�
 
 ### 不带 `-race`
 
-全量 `-race` 在这台 10 核机器上要十几到二十分钟（长板是 `internal/service/audio`、
+全量 `-race` 比普通测试慢好几倍（长板是 `internal/service/audio`、
 `internal/service/audio/flacdec`、`internal/platform`），放进验收命令会让**每一张票**的
-评审都跑到超时。曾经有一批票的验收行写着带 `-race`，agent 照着跑，评审全被拖死。
+评审都被拖长。并发包的 `-race` 由 CI 的 `nightly.yml` 每天跑一遍。
 
-**票面写什么就照什么改，不要照抄旧行。** 真要查并发就单独挑那几个包跑 `-race`，不要
-整包。
+**票面写什么就照什么改，不要照抄旧行。** 真要查并发就单独挑你改的那几个包跑 `-race`，
+不要整包。
 
 **什么时候用得上**：你要跑验收、或者你在改这条命令（改它的代价见上面《编译缓存与 `-trimpath`》）。
+
+---
+
+## CI 跑什么
+
+**出处**：`.github/workflows/`
+
+| workflow | 什么时候跑 | 跑什么 |
+|---|---|---|
+| `macos.yml` | PR、推 main | 改动文件的 `gofmt -l`、`go mod verify`、生成物比对、build、vet、非 UI 测试、原生 UI E2E、未签名包 |
+| `linux.yml` | PR、推 main | build、vet、非 UI 测试（排除 Linux 不支持的包）、生成物比对、E2E |
+| `windows-e2e.yml` | 动了 E2E、界面、平台、解码器的 PR | Windows 真窗口的启动、单实例、退出、文件关联 |
+| `windows-aac-spike.yml` | 动了音频、许可证的 PR | Windows 上 AAC 解码与音频包测试 |
+| `ui-screenshots.yml` | 动了界面相关目录的 PR | 截图并评论到 PR |
+| `nightly.yml` | 每天、手动 | 并发包的 `-race`、`govulncheck` |
+| `release.yml` | 推 `v*` 标签 | 构建、签名、挂草稿；**不跑 build/vet/test**，靠标签必须在 main 上 |
+
+action 都锁在提交 SHA 上，由 `.github/dependabot.yml` 每周提升级 PR。
+
+**什么时候用得上**：你想知道 PR 上的哪条 check 管什么，或者本地该补跑什么。
 
 ---
 
@@ -166,11 +186,9 @@ GOGC=10 go test ./internal/ui/ -count=3 -timeout 5m -run '你改的那几个用�
   真窗口一帧多少毫秒跟机器、跟显示器、跟后台负载都有关系，加进去它就在满载的 CI 上飘
   ——而它飘的时候和被测的逻辑一点关系都没有。
 
-- **改完 Go 文件要 `gofmt -w` 你改过的那些文件。** **为什么**：验收命令和 CI
-  （`.github/workflows/` 里只有 `windows-aac-spike.yml`）**都不查格式**，`go build` /
-  `go vet` / `go test` 也**一条都不查**——所以脏代码能一路合进 main，**没有任何一处会
-  报错**：`gofmt` 管的只是空格与对齐，编译照过、测试照过、界面上一个字都看不出来，混在
-  别的票里评审也看不出来。**怎么做**：改完一个 Go 文件就 `gofmt -w 那个文件`；收尾前拿
+- **改完 Go 文件要 `gofmt -w` 你改过的那些文件。** **为什么**：本地验收命令不查格式，
+  `go build` / `go vet` / `go test` 也**一条都不查**；只有 CI 的 `macos.yml` 对这次
+  改动的 Go 文件跑 `gofmt -l`，等到那里才红就要多推一轮。**怎么做**：改完一个 Go 文件就 `gofmt -w 那个文件`；收尾前拿
   `gofmt -l 你改的那几个文件` 查一遍，**输出为空**才算完。⚠️ **只跑自己改的那几个**——
   不要整仓 `gofmt -w .`，也不要 `go fmt ./...`（它是按包扫的，会把**别人正在改的文件**
   一起卷进来，把他们的半成品带进你的提交）；也别把跟本次改动无关的排版改动塞进这一票的

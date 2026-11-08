@@ -69,7 +69,7 @@ jobs:
       issues: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       # ⚠️ 这里**不许**再加「Cache Go toolchain」那种把 hostedtoolcache 下
       # 的 go 目录存进 actions/cache 的步骤：缓存命中时 tar 把它还原成
@@ -77,7 +77,7 @@ jobs:
       # 往同一位置写链接直接撞 EEXIST，go.mod 指定的版本装不上，spike
       # 根本没机会跑（PR #769 那次红）。Go module / build 缓存由 setup-go
       # 自带的 `cache: true` 负责，它不碰托管工具目录。
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -178,7 +178,7 @@ jobs:
       # 报告里引用的数字就在这两个日志里，所以**失败也要存**。
       - name: 存下 spike 的输出
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: windows-aac-spike-${{ github.run_number }}
           path: |
@@ -194,7 +194,7 @@ jobs:
       # 人看的是 PR——把数字放到 PR 上，才不用去翻 Actions 的日志。
       - name: 把真机数字贴到 PR 上
         if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7.1.0
         with:
           script: |
             const fs = require('fs');

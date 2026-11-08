@@ -59,7 +59,7 @@ jobs:
       MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
     steps:
       - name: Check out the tagged commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # tag push 时 tag 就是 HEAD，不需要历史；workflow_dispatch 要
           # `git describe --tags` 找前一版说明范围，那时候才全量拉。
@@ -67,7 +67,7 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
           cache: true
@@ -135,7 +135,7 @@ jobs:
           PLATFORMS: ${{ matrix.platforms }}
 
       - name: Upload ${{ matrix.target }} assets for the publish job
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-assets-${{ matrix.target }}
           # `build/<goos>-*` 一次匹配两个架构目录：通配的公共前缀是
@@ -159,7 +159,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out the tagged commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # publish job 要写 release 说明，`generate-release-notes.sh` 靠
           # `git describe --tags` 找上一版——浅 clone 没有别的 tag，拉不全。
@@ -178,7 +178,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Download all platform assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: release-assets-*
           path: build
