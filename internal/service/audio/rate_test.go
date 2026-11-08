@@ -3,6 +3,7 @@ package audio
 import (
 	"io"
 	"math"
+	"runtime"
 	"strconv"
 	"sync"
 	"testing"
@@ -925,4 +926,32 @@ func TestPlayerSeekIsExactAtAnyRate(t *testing.T) {
 // rateLabel 是测试里用的档位名，和界面上那个一样（`1x` / `1.25x`）。
 func rateLabel(r float64) string {
 	return strconv.FormatFloat(r, 'g', -1, 64) + "x"
+}
+
+// TestAPendingSeekClearsOnceTheDecoderAppliesIt 盯真实 Player 上 seek 的等待态
+// 一定会被解码器那次 reset 清掉。清不掉时 SourceAt 一直按「没走」报位置，
+// 变速下进度条就停在 seek 目标上；seekFrame 和 MyGo 的取整一旦对不上就是这样。
+func TestAPendingSeekClearsOnceTheDecoderAppliesIt(t *testing.T) {
+	const rate = 44100
+	p := New(&memDec{samples: tone(rate, 2, 440, 6), ch: 2, rate: rate})
+	defer p.Close()
+	p.SetRate(2)
+
+	for _, at := range []time.Duration{1234577 * time.Microsecond, 0, time.Hour} {
+		p.Seek(at)
+		deadline := time.Now().Add(5 * time.Second)
+		for p.vs.seekPending() {
+			if time.Now().After(deadline) {
+				t.Fatalf("Seek(%v) 之后 5 秒解码器还没认领这次 seek：等待态清不掉", at)
+			}
+			runtime.Gosched()
+		}
+	}
+}
+
+// seekPending 只给测试看：是否还有一次 seek 等着解码器 reset。
+func (v *varispeed) seekPending() bool {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.seekTo >= 0
 }
