@@ -320,14 +320,15 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 	}
 	ui.Row(c).FillWidth().AlignItems(ui.End).Justify(ui.SpaceBetween).Gap(space.Px24).
 		Padding(space.Px24, space.None, space.None, space.None).Children(func() {
-		ui.Column(c).Grow(1).Shrink(1).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 			typo.Eyebrow(c, homeDateText(now))
 			// 原型 `.h-page { line-height: 1.15; margin: 8px 0 0 }`：框架压不下宋体的自然行高，
 			// 用负外边距把多出来的那截补回去（见 `typo.DisplayNatural`）。
 			gs := scale.Font(c, scale.GreetTitleFluid(h.win))
 			trim := typo.DisplayTrim(gs, 1.15)
 			typo.Display(ui.Text(c, greeting), gs).LetterSpacing(gs*0.01).
-				Margin(space.Px8-trim, space.None, -trim, space.None)
+				Margin(space.Px8-trim, space.None, -trim, space.None).
+				SingleLine().Ellipsis("…").Tooltip(greeting)
 		})
 		ui.Column(c).Shrink(0).AlignItems(ui.End).Children(func() {
 			metaLine := func(pre, num, post string) {

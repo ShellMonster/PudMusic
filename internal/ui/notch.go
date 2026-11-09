@@ -941,13 +941,14 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 			// 和播放条同一份口径：`tclean.Clean` 洗掉视频宣传标签——不然
 			// 播放条上两个字的歌名到刘海上还是一整串。
 			ui.Text(c, tclean.Clean(st.Title).Title).FontSize(scale.Font(c, scale.Size16)).
-				FontWeight(notchTitleWeight).TextColor(tok.Full.Text).SingleLine()
+				FontWeight(notchTitleWeight).TextColor(tok.Full.Text).SingleLine().Ellipsis("…").Tooltip(st.Title)
 			sub := st.Artist
 			if st.Loading {
 				sub = "正在缓冲…"
 			}
 			if sub != "" {
-				ui.Text(c, sub).FontSize(scale.Font(c, scale.Size15)).TextColor(notchText2).SingleLine()
+				ui.Text(c, sub).FontSize(scale.Font(c, scale.Size15)).TextColor(notchText2).
+					SingleLine().Ellipsis("…").Tooltip(st.Artist)
 			}
 		})
 		// 右端「收藏 + 频谱」是一组，组内缝 14（原型 update-notch.html:93
