@@ -1008,7 +1008,7 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 				ui.Box(c).Absolute().Right(0).Bottom(0).Padding(space.Px2, space.Px4).
 					Background(ui.RGBA(0, 0, 0, scrim.Badge)).Radius(tok.R4).Children(func() {
 					typo.Mono(ui.Text(c, strconv.Itoa(g.Count))).FontSize(scale.Font(c, scale.Size11)).
-						TextColor(ui.RGBA(1, 1, 1, 0.92)).SingleLine()
+						TextColor(ui.RGBA(255, 255, 255, 0.92)).SingleLine()
 				})
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
