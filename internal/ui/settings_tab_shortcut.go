@@ -83,7 +83,8 @@ func (s *Shell) shortcutRow(c *ui.Context, in, global shortcutItem, all shortcut
 		ui.Box(c).Key("shortcut-div:" + in.ID).FillWidth().Height(1).Background(p.Line)
 	}
 	ui.Row(c).Key("shortcut:"+in.ID).FillWidth().Padding(space.Px14, setRowPadX).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text).Grow(1).Shrink(1).MinWidth(0)
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size14)).LineHeight(leading.Body).TextColor(p.Text).
+			Grow(1).Shrink(1).MinWidth(0).SingleLine().Ellipsis("…").Tooltip(name)
 
 		inSlot := shortcutSlot{id: in.ID}
 		globalSlot := shortcutSlot{global: true, id: in.ID}

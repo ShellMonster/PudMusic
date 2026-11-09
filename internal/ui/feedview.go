@@ -25,6 +25,8 @@ func (s *Shell) viewFeedHeader(c *ui.Context, f *dynamicFeed) {
 // feedChipLimit 是 chip 横排最多画几位 UP 主：横排会自动一页页往后拉，但不无限拉。
 const feedChipLimit = 40
 
+const feedAuthorChipMaxW = 240
+
 // visible 是这一帧要画的动态：筛了某位 UP 主就只留他的。
 func (f *dynamicFeed) visible() []app.Dynamic {
 	if f.filterMid == 0 {
@@ -101,7 +103,7 @@ func (s *Shell) feedAuthorChip(c *ui.Context, a app.FollowAuthor, on bool) ui.El
 	}
 	b := ui.ButtonBase(c).Key("feed:chip:"+strconv.FormatInt(a.Mid, 10)).Label(name).Height(tok.ChipH).
 		Padding(space.None, space.Px12, space.None, space.Px4).Radius(tok.ChipH / 2).Gap(space.Px6).
-		AlignItems(ui.Center).Shrink(0)
+		AlignItems(ui.Center).Shrink(0).MaxWidth(feedAuthorChipMaxW)
 	bg, fg := pl.Surface2, pl.Text2
 	switch {
 	case on:
@@ -112,9 +114,10 @@ func (s *Shell) feedAuthorChip(c *ui.Context, a app.FollowAuthor, on bool) ui.El
 	b = b.Background(bg).Transition(motion.Fade)
 	b.Children(func() {
 		pud.Avatar(c, name, 22, faceTint(a.Mid), s.upFaceDraw(a.Face))
-		ui.Text(c, name).FontSize(scale.Font(c, scale.Size13)).TextColor(fg).SingleLine()
+		ui.Text(c, name).FontSize(scale.Font(c, scale.Size13)).TextColor(fg).
+			SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 	})
-	return b
+	return b.Tooltip(name)
 }
 
 // feedEndNote 是「没有更多动态了」（原型：居中、13 号 text-3、上下 24）。

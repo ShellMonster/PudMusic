@@ -51,7 +51,8 @@ func PageHeadFn(c *ui.Context, eyebrow, title string, winW float32, ledeFn, acti
 					top += space.Px8
 				}
 				typo.Display(ui.Text(c, title), size).LineHeight(leading.PageTitle).LetterSpacing(size*0.01).
-					Margin(top, space.None, -trim, space.None)
+					Margin(top, space.None, -trim, space.None).
+					SingleLine().Ellipsis("…").Tooltip(title)
 				if ledeFn != nil {
 					ledeFn()
 				}

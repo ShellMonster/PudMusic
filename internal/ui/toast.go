@@ -470,12 +470,13 @@ func (s *Shell) viewToast(c *ui.Context, t toast) {
 	p := tok.Of(c.Theme())
 	e := ui.Row(c).Key("toast:"+strconv.FormatUint(t.id, 10)).
 		Padding(space.Px10, space.Px16).Gap(space.Px8).AlignItems(ui.Center).
-		Radius(tok.Pill / 2).Background(p.Text).Transition(motion.ToastIn).Shrink(0)
+		Radius(tok.Pill / 2).Background(p.Text).Transition(motion.ToastIn).Shrink(0).
+		MaxWidth(toastWidth)
 	e = shadow.Pop(e, c.Theme())
 	e.Children(func() {
 		ui.Icon(c, pud.Icon(toastIcon(t.tone))).FontSize(tok.IconSm).TextColor(p.Bg).PassThrough()
 		ui.Text(c, t.text).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).FixedLineHeight(20.15).
-			TextColor(p.Bg).SingleLine().PassThrough()
+			TextColor(p.Bg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0).Tooltip(t.text).PassThrough()
 	})
 	// 指针停在上面时先不收（`expire` 里读这一位）。
 	_, _, over := e.PointerPosition()

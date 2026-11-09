@@ -892,7 +892,8 @@ func (s *Shell) viewCommentRow(c *ui.Context, p *commentsPage, row commentRow) {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
 					// 🔴 **昵称可以拖选复制**（票 #685）；⚠️ 只加在昵称这一格上，不给整个 `Row` 加。
 					ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size13)).FontWeight(700).
-						TextColor(pal.Text).MaxLines(1).Ellipsis("…").Selectable()
+						TextColor(pal.Text).MaxLines(1).Ellipsis("…").Shrink(1).MinWidth(0).
+						Tooltip(cm.Uname).Selectable()
 					if row.levelText != "" {
 						ui.Text(c, row.levelText).FontSize(scale.Font(c, scale.Size11)).
 							TextColor(pal.Text3).MaxLines(1).
@@ -953,7 +954,8 @@ func (s *Shell) viewCommentReplyRow(c *ui.Context, p *commentsPage, row commentR
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(space.Px6).Children(func() {
 				// 楼中楼的昵称同样可以拖选复制（理由同 `viewCommentRow` 那一处）。
 				ui.Text(c, cm.Uname).FontSize(scale.Font(c, scale.Size12)).FontWeight(700).
-					TextColor(pal.Text2).MaxLines(1).Ellipsis("…").Selectable()
+					TextColor(pal.Text2).MaxLines(1).Ellipsis("…").Shrink(1).MinWidth(0).
+					Tooltip(cm.Uname).Selectable()
 				if cm.IsUpper {
 					s.viewCommentBadge(c, "UP 主", pal.Accent, pal.AccentInk)
 				}
