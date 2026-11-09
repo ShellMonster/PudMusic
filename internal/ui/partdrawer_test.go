@@ -89,6 +89,9 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 	if err := tt.Click("P3 · 第 3 集"); err != nil {
 		t.Fatalf("点不了第三集：%v（文字：%q）", err, tt.Texts())
 	}
+	if !s.app.Snapshot().HasTrack {
+		t.Fatal("切换合集分集时播放条左侧先被清空；新流未就绪前应保留原分集内容")
+	}
 	waitFrames(t, tt, "换到第三集", func() bool {
 		it, ok := s.app.CurrentItem()
 		return ok && it.Cid == "779"
@@ -96,10 +99,9 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 	// 选完就收：Biu 的 `onPressItem={onClose}`。
 	//
 	// ⚠️ 这里量的是**用户看得见的结果**，量不到 `viewPartRow` 里那一句关闭本身：
-	// `App.PlayPart` 会先 `ClearTrack()`，于是「没有歌就收掉」那句（`viewPartButton`
-	// 开头）顺手也把浮层关了，删掉前者这条照样绿。那一句由
+	// 换集保留旧播放器直到新流装好；浮层关闭由
 	// `TestPickingTheEpisodeAlreadyPlayingStillClosesTheDrawer` 单独钉——那一档
-	// `PlayPart` 提前返回、不清轨道，收掉浮层的就只剩它。
+	// `PlayPart` 提前返回，收掉浮层的就只剩行回调。
 	if s.partOpen {
 		t.Error("选完一集之后浮层还开着")
 	}
