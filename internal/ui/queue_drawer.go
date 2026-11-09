@@ -876,42 +876,49 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 		if s.queueDragging && s.queueDropAt == row.at {
 			s.queueDropLine(at, rowEl, p.Accent)
 		}
+		// 合集里的一集：行最左缘一条 accent 竖线（原型那条贯穿整组的
+		// `border-left`），行内容在竖线右边缩进——把手 ⠿ 还在（和散歌同一列），
+		// 竖线不在把手列里，它贴的是**行**的左缘。
+		if row.group != nil {
+			accent := p.Accent
+			if row.group.Limited {
+				accent = p.LineStrong
+			}
+			ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(2).Background(accent)
+			rowEl = rowEl.Margin(space.None, space.None, space.None, space.Px8)
+		}
 		rowEl.Children(func() {
-			// 合集里的一集：左边留一条 accent 竖线 + 缩进（原型 `.inner` 那条
-			// `border-left`），散歌照原来的把手 + 封面摆法。
-			if row.group != nil {
-				accent := p.Accent
-				if row.group.Limited {
-					accent = p.LineStrong
-				}
-				ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
-					ui.Box(c).Width(2).Height(queueCoverSize - 8).Background(accent).Radius(1)
-				})
-			} else {
-				ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
-					ui.Icon(c, pud.Icon("grip")).FontSize(14).TextColor(p.Text3)
-				})
-			}
-			// 封面 40、圆角 4、`surface-2` 占位底；合集行的封面缩到 32，让出
-			// 左边那根竖线的位置（原型 `.cbody .qrow` 的 26px 封面 + 竖线）。
+			// 把手（散歌和集行都有，原型展开里每行左边也是 ⠿）：20 那一列。
+			ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
+				ui.Icon(c, pud.Icon("grip")).FontSize(14).TextColor(p.Text3)
+			})
+			// 封面 40、圆角 4、`surface-2` 占位底。⚠️ **集行不缩**：竖线在
+			// 把手那一列里（2px），不抢封面的位置——封面缩了的话集行的歌名
+			// 比散歌右移 8，左侧三档对不齐。
 			coverSize := float32(queueCoverSize)
-			if row.group != nil {
-				coverSize = queueCoverSize - 8
-			}
 			ui.Box(c).Size(coverSize, coverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
 				imgcache.ViewFlat(c, s.images, row.item.Cover, coverSize, coverSize, tok.R4)
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
-				ui.Text(c, tclean.Clean(row.item.Title).Title).FontSize(scale.Font(c, scale.Size13)).
+				cleaned := tclean.Clean(row.item.Title)
+				ui.Text(c, cleaned.Title).FontSize(scale.Font(c, scale.Size13)).
 					FontWeight(500).TextColor(playlistTextColor(t, state)).SingleLine().Ellipsis("…")
 				// 合集行的副题：「第 N 集 · UP 主」——「这是第几集」比「这是谁」
 				// 更要紧（用户在这一摞里认的是集数）。
 				sub := s.queueRowSub(row, state)
 				if row.group != nil && row.item.GroupIndex > 0 {
 					sub = "第 " + strconv.Itoa(row.item.GroupIndex) + " 集"
-					if row.item.Artist != "" {
-						sub += " · " + row.item.Artist
+					// 歌名提取出的那一段（`Cleaned.Extra`：从方括号 / 破折号
+					// 里挪出来的歌手 / 专辑）优先于 `item.Artist`——合集里每集
+					// 的标题常带「合集名 · 歌手」，B 站接口的 owner 是整个合集
+					// 的 UP 主，不是这一集的歌手。
+					who := cleaned.Extra
+					if who == "" {
+						who = row.item.Artist
+					}
+					if who != "" {
+						sub += " · " + who
 					}
 					// 「仅播第 1 首」开着：第 2 集起要说「这一集不会被接着放」。
 					if row.group.Limited && row.item.GroupIndex > 1 {
@@ -981,16 +988,23 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 		rowEl.Children(func() {
 			// 开合箭头（原型 `.carat`）：开着是 ▸ 转 90°，收着是 ▸。它不是
 			// 图标，是「这一组收着还是开着」的那一个记号。
-			carat := ui.Text(c, "▸").FontSize(scale.Font(c, scale.Size11)).TextColor(p.Text3).SingleLine()
-			if open {
-				carat = carat.TextColor(p.Text)
-			}
+			//
+			// ⚠️ **占 `queueGripW` 那一列**：散歌行第一列是 20 的把手，集行
+			// 第一列是 20 的竖线——组头不给 ▸ 同一列宽的话，它的封面和
+			// 名字比别的行左移一截，左侧三档对不齐。
+			ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
+				carat := ui.Text(c, "▸").FontSize(scale.Font(c, scale.Size11)).TextColor(p.Text3).SingleLine()
+				if open {
+					carat.TextColor(p.Text)
+				}
+			})
 			// 封面 + 集数角标：和集行同一枚 40 封面，右下压一个「N」的小块
 			// （原型 `.g-cov .gcnt`），让用户一眼认出「这是一摞，不是一首」。
 			ui.Box(c).Size(queueCoverSize, queueCoverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
 				imgcache.ViewFlat(c, s.images, g.Cover, queueCoverSize, queueCoverSize, tok.R4)
-				// 集数角标：右下，mono 10，半透明黑底（原型 `.gcnt`）。
+				// 集数角标：右下，mono 10，半透明黑底（原型 `.gcnt`）——
+				// 原型就是这个黑块，不是主色。
 				ui.Box(c).Absolute().Right(0).Bottom(0).Padding(space.Px2, space.Px4).
 					Background(ui.RGBA(0, 0, 0, scrim.Badge)).Radius(tok.R4).Children(func() {
 					typo.Mono(ui.Text(c, strconv.Itoa(g.Count))).FontSize(scale.Font(c, scale.Size11)).

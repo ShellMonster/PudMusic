@@ -667,25 +667,59 @@ func collectionBatchToast(ok string, skipped int) string {
 // 🔴 **只在合集 / 系列页打**：收藏夹页（type=11）里的行不是合集，打了反而
 // 会把「同一收藏夹的歌」当成「同一合集」连起来。
 //
-// ⚠️ **GroupIndex 按`medias` 里的顺序打号**：合集入队时连着排，序号就是
-// 页面顺序。`GroupCount` 记的是**加载出来的这批有几首**（不是合集总数）——
-// 合集没全拉下来时，「最后一集」以这批为准。
+// ⚠️ **GroupIndex / GroupCount 按「已加载的列表」算**（见 `stampGroupItems`）：
+// 序号是那一行在列表里排第几，计数是已加载出来的总数——合集没全拉下来时，
+// 「最后一集」以已加载的这批为准。
 func (s *Shell) queueItemsOfMedias(p *collectionPage, medias []bili.Media) ([]app.Item, int) {
 	items, skipped := app.QueueItemsOfMediasCounting(medias)
+	s.stampGroupItems(p, items)
+	return items, skipped
+}
+
+// stampGroupItems 给「出自这个容器」的队列项打上组标（`Item.GroupKey` 那四栏），
+// 队列才知道「这些行是同一个合集、该连播」。
+//
+// 🔴 **只在合集 / 系列页打**：收藏夹页（type=11）里的行不是合集，打了反而
+// 会把「同一收藏夹的歌」当成「同一合集」连起来。
+//
+// ⚠️ **GroupIndex / GroupCount 按「已加载的列表」算**，不是按传进来的这
+// 一小把算：行级操作（双击一首、下一首播放）手里只有一首歌，它「是这一组
+// 的第几集」得看它在列表里排第几行——拿「这一把的长度」当 GroupCount 的
+// 话，单首入队就成了「1/1」，`nextGroupLocked` 在第一道判据就停下，
+// 「下一曲」永远走不出这一首。
+//
+// ⚠️ **行号认 `Identity` 反查**：传进来的 `Item` 和列表行里的 `Music.Item`
+// 是同一首（`ItemOfMedia` 那一份），判据和队列判重同一个口径。
+// 查不到行的项（不该出现）不打标——打上错的序号比不打更坏。
+func (s *Shell) stampGroupItems(p *collectionPage, items []app.Item) {
 	if p.ref.Type != bili.CollectionAlbum && p.ref.Type != bili.CollectionSeries {
-		return items, skipped
+		return
+	}
+	key := queueGroupKey(p.ref)
+	if key == "" {
+		return
 	}
 	// 组头那一行要合集名；元信息还没拉回来时，名字那一格留空——队列抽屉
 	// 那一句会自己兜（见 queueGroupTitle）。
 	title := s.app.Collection(p.ref).Title
-	key := queueGroupKey(p.ref)
+	l := p.list.List()
 	for i := range items {
-		items[i].GroupKey = key
-		items[i].GroupIndex = i + 1
-		items[i].GroupCount = len(items)
-		items[i].GroupTitle = title
+		id := items[i].Identity()
+		if id == "" {
+			continue
+		}
+		for row := 0; row < l.Len(); row++ {
+			m, ok := l.At(row)
+			if !ok || m.Item.Identity() != id {
+				continue
+			}
+			items[i].GroupKey = key
+			items[i].GroupIndex = row + 1
+			items[i].GroupCount = l.Len()
+			items[i].GroupTitle = title
+			break
+		}
 	}
-	return items, skipped
 }
 
 // queueGroupKey 是「这个容器在队列里的组键」——`season:<id>` / `series:<id>`。

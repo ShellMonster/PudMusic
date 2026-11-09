@@ -140,9 +140,9 @@ type Item struct {
 	// 🔴 **和 `CollectionID` 不是一回事**：`CollectionID` 是收藏夹里
 	// type=21 **容器行**自己的合集 id（那一行不是歌，是「打开这个合集」的
 	// 入口）；这里这一样是**容器里面某一首歌**带着的「我出自哪个合集」——
-	// 合集页「播放全部 / 加入队列」把每一集翻成普通队列项时顺手打上的
-	// （`ui.stampQueueGroup`，`ItemOfMedia` 不知道它出自哪个容器，所以不在
-	// 那里打）。
+	// 合集页入队的每一条（整批的「播放全部 / 加入队列」、行级的双击 /
+	// 下一首播放）都经 `ui.stampGroupItems` 打上（`ItemOfMedia` 不知道它
+	// 出自哪个容器，所以不在那里打）。
 	//
 	// **空串 = 不是合集里来的**。带上了它的项：
 	//
@@ -664,6 +664,33 @@ func (q *Queue) itemAt(i int) (Item, bool) {
 		return Item{}, false
 	}
 	return q.items[i], true
+}
+
+// MergeGroupFieldsAt 把传入项的组标合进队列里第 i 项——**只在队列那份没标、
+// 传入这份有标时**才动。
+//
+// 🔴 **为什么需要它**：`EnqueueAndPlayNow` 定位「已经在队列里」的那一项时，
+// 播的是**队列里那份**（理由见它的注释）——而那份可能是早先从搜索 /
+// 收藏夹进来的散歌（没组标）。这一次从合集页点进来的 `item` 带着组标，
+// 不合进去的话队列里那一项永远没有组：抽屉画不出组头，随机档也不接
+// 组内下一集。
+//
+// ⚠️ **队列那份有标时不覆盖**：它自己的标是对的（它出自哪个合集就是它
+// 那一份的事），新进来的这份是**另一趟**入队，不该把旧标抹掉。
+func (q *Queue) MergeGroupFieldsAt(i int, it Item) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i < 0 || i >= len(q.items) {
+		return
+	}
+	if q.items[i].GroupKey != "" || it.GroupKey == "" {
+		return
+	}
+	q.items[i].GroupKey = it.GroupKey
+	q.items[i].GroupIndex = it.GroupIndex
+	q.items[i].GroupCount = it.GroupCount
+	q.items[i].GroupTitle = it.GroupTitle
+	q.bumpRevisionLocked()
 }
 
 // CurrentIndex 返回正在放的那一项在队列里的下标，-1 是还没开始。
@@ -1593,7 +1620,7 @@ func (q *Queue) nextPageLocked() (int, bool) {
 // 第 1 首」就是「播完它，走队列的下一项」，那一项多半不是第 2 集。
 //
 // ⚠️ **判据是 `GroupIndex + 1` 落在队列里**，不是「队列顺序的下一行」：
-// 合集入队时连着排（`stampQueueGroup` 按页面顺序打号），但用户能拖动行
+// 合集入队时连着排（`stampGroupItems` 按列表行号打标），但用户能拖动行
 // 把第 3 集挪到第 1 集前面——挪完「下一集」是用户摆的那个位置，不是入队
 // 时的老位置。
 func (q *Queue) nextGroupLocked() (int, bool) {
@@ -1605,11 +1632,11 @@ func (q *Queue) nextGroupLocked() (int, bool) {
 	if q.groupLimitedLocked(cur.GroupKey) {
 		return 0, false
 	}
-	// GroupCount 是「这个合集一共几集」：播到最后一集就停（或者走队列
-	// 下一项，交给播放模式决定——见 advanceLocked）。
-	if cur.GroupCount > 0 && cur.GroupIndex >= cur.GroupCount {
-		return 0, false
-	}
+	// 🔴 **不拿 `GroupCount` 否**：那一栏是「入队那一刻已加载的行数」，
+	// 而队列里的项可能是**不同时间点**入的（先放了已加载的 3 首，又加了
+	// 新加载的第 4 首——旧那批的 `GroupCount` 还是 3，`GroupIndex >= 3`
+	// 会假报「最后一集」，把真在队列里的第 4 集挡掉）。判据只有「队列里
+	// 找不找得到下一集」——找不到那一趟循环自然回 false。
 	want := cur.GroupIndex + 1
 	for i, it := range q.items {
 		if it.GroupKey == cur.GroupKey && it.GroupIndex == want {
@@ -1919,6 +1946,9 @@ func (a *App) EnqueueAndPlayNow(item Item) error {
 	// 按 `Identity` 比是「未知 vs 确定 = 两首」，于是点同一首会**在队列里多出一份**。
 	// 判据见 `Queue.indexOfStreamTarget`。
 	if at, ok := a.queue.indexOfStreamTarget(item); ok {
+		// 队列里那份没组标、这次进来的带着：把组标合进队列里那一项
+		//（合集页行级入队补标之后，「同一首早已在队列里」的那一份也该有组）。
+		a.queue.MergeGroupFieldsAt(at, item)
 		queued, _ := a.queue.itemAt(at)
 		a.queue.selectAt(at)
 		if err := a.play(queued); err != nil {
