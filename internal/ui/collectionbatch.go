@@ -106,7 +106,7 @@ func (s *Shell) viewCollectionBatchBar(c *ui.Context, p *collectionPage) {
 
 // enqueueCollectionPicked 把勾上的歌追加到队列末尾（批量条上的「加入队列」）。
 func (s *Shell) enqueueCollectionPicked(p *collectionPage) {
-	items, skipped := app.QueueItemsOfMediasCounting(s.pickedMedias(p))
+	items, skipped := s.queueItemsOfMedias(p, s.pickedMedias(p))
 	if len(items) == 0 {
 		s.addToast("这几首都放不了或已失效", notice.Warning)
 		return
@@ -601,7 +601,7 @@ func (s *Shell) allMedias(p *collectionPage) []bili.Media {
 
 // playWholeCollection 播放全部：把队列**换成**已经加载出来的那些并从第一首起播。
 func (s *Shell) playWholeCollection(p *collectionPage) {
-	items, skipped := app.QueueItemsOfMediasCounting(s.allMedias(p))
+	items, skipped := s.queueItemsOfMedias(p, s.allMedias(p))
 	if len(items) == 0 {
 		if skipped > 0 {
 			s.addToast("这里还没有可以播的歌（这一页的都放不了或已失效）", notice.Warning)
@@ -624,7 +624,7 @@ func (s *Shell) playWholeCollection(p *collectionPage) {
 
 // addWholeCollectionToQueue 把已经加载出来的都追加到队列末尾。
 func (s *Shell) addWholeCollectionToQueue(p *collectionPage) {
-	items, skipped := app.QueueItemsOfMediasCounting(s.allMedias(p))
+	items, skipped := s.queueItemsOfMedias(p, s.allMedias(p))
 	if len(items) == 0 {
 		if skipped > 0 {
 			s.addToast("这里还没有可以加的歌（这一页的都放不了或已失效）", notice.Warning)
@@ -656,6 +656,60 @@ func collectionBatchToast(ok string, skipped int) string {
 		return ok
 	}
 	return ok + "（有 " + strconv.Itoa(skipped) + " 首放不了或已失效，没放进来）"
+}
+
+// queueItemsOfMedias 是「这一页的条目 → 队列项」**加打标**的那一份。
+//
+// `QueueItemsOfMediasCounting` 只知道「这条是什么」，不知道「它出自哪个
+// 容器」——合集（type=21 / 31）页入队的每一集都要打上「我出自这个合集、
+// 是第几集」，队列才知道「这些行是同一个合集、该连播」。
+//
+// 🔴 **只在合集 / 系列页打**：收藏夹页（type=11）里的行不是合集，打了反而
+// 会把「同一收藏夹的歌」当成「同一合集」连起来。
+//
+// ⚠️ **GroupIndex 按`medias` 里的顺序打号**：合集入队时连着排，序号就是
+// 页面顺序。`GroupCount` 记的是**加载出来的这批有几首**（不是合集总数）——
+// 合集没全拉下来时，「最后一集」以这批为准。
+func (s *Shell) queueItemsOfMedias(p *collectionPage, medias []bili.Media) ([]app.Item, int) {
+	items, skipped := app.QueueItemsOfMediasCounting(medias)
+	if p.ref.Type != bili.CollectionAlbum && p.ref.Type != bili.CollectionSeries {
+		return items, skipped
+	}
+	// 组头那一行要合集名；元信息还没拉回来时，名字那一格留空——队列抽屉
+	// 那一句会自己兜（见 queueGroupTitle）。
+	title := s.app.Collection(p.ref).Title
+	key := queueGroupKey(p.ref)
+	for i := range items {
+		items[i].GroupKey = key
+		items[i].GroupIndex = i + 1
+		items[i].GroupCount = len(items)
+		items[i].GroupTitle = title
+	}
+	return items, skipped
+}
+
+// queueGroupKey 是「这个容器在队列里的组键」——`season:<id>` / `series:<id>`。
+//
+// ⚠️ **收藏夹没有组键**（它不归「合集连播」管）：返回空串，调用方据此跳过打标。
+func queueGroupKey(ref app.CollectionRef) string {
+	switch ref.Type {
+	case bili.CollectionAlbum:
+		return "season:" + strconv.FormatInt(ref.ID, 10)
+	case bili.CollectionSeries:
+		return "series:" + strconv.FormatInt(ref.ID, 10)
+	}
+	return ""
+}
+
+// queueGroupTitle 是抽屉组头那一行要写的合集名。
+//
+// ⚠️ **元信息没拉回来时是空串**，界面上那一格就空着——不写「加载中」，因为
+// 队列项已经带着这个名字了，拉回来再改也只是「名字晚一步」，不是「没名字」。
+func queueGroupTitle(items []app.Item) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0].GroupTitle
 }
 
 // reloadCollection 重新拉这一页：清掉勾选、清掉旧内容、从第一页重来。

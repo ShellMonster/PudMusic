@@ -743,3 +743,106 @@ func TestQueueDrawerBodyIsInsetFromTheDrawerEdges(t *testing.T) {
 		t.Errorf("悬停时抽屉边 %v 和行里 %v 同色：悬停底铺到了抽屉边", edge, inside)
 	}
 }
+
+// groupSong 造一个**合集里的一集**（出自哪个合集 / 第几集）。
+//
+// ⚠️ **它是"能放出来"的本地项 + 组标记**：这个壳里没挂取流，`PlayAt` 对
+// 在线条目会打不开然后把下标退回去——所以测试用 `localSong` 造出文件，
+// 再补上 `GroupKey` 等字段（`PlayAt` 认的是路径，组标记只是画着用）。
+func groupSong(t *testing.T, dir, name, key string, idx, count int) app.Item {
+	it := localSong(t, dir, name)
+	it.GroupKey = key
+	it.GroupIndex = idx
+	it.GroupCount = count
+	it.GroupTitle = "「测试合集」"
+	return it
+}
+
+// TestQueueDrawerCollapsesACollectionIntoOneHeader 盯「合集在队列里收成
+// 一个组头」：合集的行不直接画，画出来的是组头行 + 收着的集行；点开组头
+// 才把集行放出来。
+func TestQueueDrawerCollapsesACollectionIntoOneHeader(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	enqueue(t, h, localSong(t, dir, "散歌.flac"))
+	h.app.Enqueue(
+		groupSong(t, dir, "第1集.flac", "season:1", 1, 3),
+		groupSong(t, dir, "第2集.flac", "season:1", 2, 3),
+		groupSong(t, dir, "第3集.flac", "season:1", 3, 3),
+	)
+	h.app.Enqueue(localSong(t, dir, "另一首.flac"))
+	h.tt.Frame()
+	openDrawer(t, h)
+
+	// 收着的时候：组头画着（合集名 + 「合集」tag + 「3 集」），集行不画。
+	if !h.tt.HasText("「测试合集」") {
+		t.Errorf("抽屉里没有组头（合集名），文字有 %q", h.tt.Texts())
+	}
+	for _, ep := range []string{"第1集", "第2集", "第3集"} {
+		if h.tt.HasText(ep) {
+			t.Errorf("收着的合集画出了 %q——集行不该画出来", ep)
+		}
+	}
+}
+
+// TestQueueDrawerGroupHeaderOpensToShowEpisodes 盯「点组头展开」：收着的
+// 组点开之后，那一集的每一行都画出来（可以点、可以拖、可以删）。
+func TestQueueDrawerGroupHeaderOpensToShowEpisodes(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	enqueue(t, h, localSong(t, dir, "散歌.flac"))
+	h.app.Enqueue(
+		groupSong(t, dir, "第1集.flac", "season:1", 1, 3),
+		groupSong(t, dir, "第2集.flac", "season:1", 2, 3),
+	)
+	h.tt.Frame()
+	openDrawer(t, h)
+
+	// 点组头那一行：合集名那一块。
+	if err := h.tt.Click("「测试合集」"); err != nil {
+		t.Fatalf("点不了组头：%v（画面上的字：%q）", err, h.tt.Texts())
+	}
+	h.tt.Frame()
+	for _, ep := range []string{"第1集", "第2集"} {
+		if !h.tt.HasText(ep) {
+			t.Errorf("展开之后没有 %q，文字有 %q", ep, h.tt.Texts())
+		}
+	}
+}
+
+// TestQueueDrawerGroupLimitButtonTogglesTheSingleGroup 盯组头上那枚
+// 「仅播第 1 首 / 恢复连播」：它是**单组**的临时开关，不动设置——点一下
+// 之后那个合集被限着（播完第 1 集就走队列下一项），别的合集照旧。
+func TestQueueDrawerGroupLimitButtonTogglesTheSingleGroup(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	enqueue(t, h, localSong(t, dir, "散歌.flac"))
+	h.app.Enqueue(
+		groupSong(t, dir, "第1集.flac", "season:1", 1, 2),
+		groupSong(t, dir, "第2集.flac", "season:1", 2, 2),
+		groupSong(t, dir, "别的第1集.flac", "season:2", 1, 2),
+		groupSong(t, dir, "别的第2集.flac", "season:2", 2, 2),
+	)
+	h.tt.Frame()
+	openDrawer(t, h)
+
+	// 先点组头展开，「仅播第 1 首」那一枚才点得着。
+	if err := h.tt.Click("「测试合集」"); err != nil {
+		t.Fatalf("点不了组头：%v", err)
+	}
+	h.tt.Frame()
+	if err := h.tt.Click("仅播第 1 首"); err != nil {
+		t.Fatalf("点不了「仅播第 1 首」：%v（画面上的字：%q）", err, h.tt.Texts())
+	}
+	h.tt.Frame()
+
+	if !h.app.CollectionGroupLimited("season:1") {
+		t.Error("点了「仅播第 1 首」之后 season:1 没被限着")
+	}
+	if h.app.CollectionGroupLimited("season:2") {
+		t.Error("season:2 被莫名限着了——单组那一枚只该动它自己")
+	}
+	if !h.app.AutoplayCollections() {
+		t.Error("全局设置被改了——单组那一枚不该动设置")
+	}
+}
