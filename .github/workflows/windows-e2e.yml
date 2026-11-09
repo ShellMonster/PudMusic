@@ -50,6 +50,10 @@ on:
       - ".github/workflows/windows-e2e.yml"
   workflow_dispatch:
 
+concurrency:
+  group: windows-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 permissions:
   contents: read
 
