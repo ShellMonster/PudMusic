@@ -135,20 +135,21 @@ func TestTheCollectionLeadEnqueueCarriesTheGroup(t *testing.T) {
 		mediaOf(1, "第一集"), mediaOf(2, "第二集"))
 	waitSongs(t, tt, s, 2)
 
-	first, ok := s.collection.list.First()
+	title, ok := tt.Find("一个合集")
 	if !ok {
-		t.Fatal("合集页第一行不在")
+		t.Fatalf("合集页头标题不在：%q", tt.Texts())
 	}
-	stamped := []app.Item{first.Item}
-	s.stampGroupItems(s.collection, stamped)
-	// 起播失败没关系（这个壳里没挂取流）——断言的是「进队列的那一项带
-	// 没带组标」，`EnqueueAndPlayNow` 起播失败也把项留在队列里（见
-	// stats_play_test.go 里那条钉它）。
-	_ = s.app.EnqueueAndPlayNow(stamped[0])
+	// 页头文字列内的空白也属于页头双击区域，走真实的 Lead.OnDoubleClick。
+	x, y := title.X+title.W+200, title.Y+title.H/2
+	tt.ClickAt(x, y)
+	tt.ClickAt(x, y)
+	for range 8 {
+		tt.Frame()
+	}
 
 	queueItems := s.app.Queue().Items()
 	last := queueItems[len(queueItems)-1]
 	if last.GroupKey == "" {
-		t.Errorf("页头双击入队的第一集 GroupKey = %q，队列里它该是合集的一集", last.GroupKey)
+		t.Errorf("页头双击真实回调入队的第一集 GroupKey = %q，队列里它该是合集的一集", last.GroupKey)
 	}
 }

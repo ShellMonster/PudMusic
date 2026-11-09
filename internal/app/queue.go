@@ -1646,25 +1646,22 @@ func (q *Queue) nextGroupLocked() (int, bool) {
 	return 0, false
 }
 
-// skipGroupLocked 是「仅播第 1 首」开着时的推进：跳过**同组剩下所有集**，
-// 落到这一组后面的第一项；组尾就是队尾时是 false（该停 / 该绕回交给档位）。
+// skipGroupLocked 是「仅播第 1 首」开着时的推进：跳过所有受限合集的非首集，
+// 落到下一首允许播放的队列项；队尾时是 false（该停 / 该绕回交给档位）。
 //
 // ⚠️ **顺序 / 循环两档要用它**：那两档默认「下一首 = 队列下一行」，而组的
 // 下一行多半就是第 2 集——「仅播第 1 首」开着时那一行得跳过去，否则那枚钮
 // 就成了摆设（画着「仅播第 1 首」，放的却是第 2 集）。
 //
-// ⚠️ **判据是 GroupKey 不同**，不是下标隔几格：用户能把别组的行拖进来，
-// 同组的行也未必连着——跳过的是「同一个合集」，不是「连续几行」。
+// ⚠️ **判据是「受限合集的非首集」**，不是相邻下标：用户能把别组的行拖进来，
+// 同组的行也未必连着，所有后续集都必须被跳过。
 func (q *Queue) skipGroupLocked() (int, bool) {
-	cur := q.items[q.cur]
-	key := cur.GroupKey
-	if key == "" || !q.groupLimitedLocked(key) {
-		return 0, false
-	}
 	for i := q.cur + 1; i < len(q.items); i++ {
-		if q.items[i].GroupKey != key {
-			return i, true
+		it := q.items[i]
+		if it.GroupKey != "" && it.GroupIndex > 1 && q.groupLimitedLocked(it.GroupKey) {
+			continue
 		}
+		return i, true
 	}
 	return 0, false
 }

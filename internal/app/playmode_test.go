@@ -526,6 +526,28 @@ func TestLoopSkipsTheRestOfALimitedGroup(t *testing.T) {
 	}
 }
 
+// TestLimitedGroupsSkipNonContiguousEpisodes 钉住「仅播第 1 首」对不连续队列也生效：
+// 同一合集的后续集被另一合集插开时，后续集仍不该再次播放。
+func TestLimitedGroupsSkipNonContiguousEpisodes(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeSequence)
+	q.Append(
+		group("season:1", "第1集", 1, 2),
+		group("season:2", "别的第1集", 1, 1),
+		group("season:1", "第2集", 2, 2),
+		items("散歌.mp3")[0],
+	)
+	q.SetGroupLimited("season:1", true)
+	at(q, 0)
+
+	if d := q.Advance(); d.Item.Title != "别的第1集" {
+		t.Fatalf("第一个合集限播后落到 %q，want 别的第1集", d.Item.Title)
+	}
+	if d := q.Advance(); d.Item.Title != "散歌" {
+		t.Errorf("不连续合集的第 2 集仍被播放为 %q，want 散歌", d.Item.Title)
+	}
+}
+
 // TestGlobalOffLimitsEveryGroup 盯设置里那一格**关掉**之后的行为：全局
 // 「自动连播合集」关了，就是「所有合集都只播第 1 首」——队列里每个合集
 // 都一样，不用再单组各点一次。
