@@ -994,11 +994,12 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 			ui.Box(c).Size(queueCoverSize, queueCoverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
 				imgcache.ViewFlat(c, s.images, g.Cover, queueCoverSize, queueCoverSize, tok.R4)
-				// 集数角标：右下，mono 10，半透明黑底（原型 `.gcnt`）。
+				// 集数角标：右下，主色底 + 主色上的字——黑底在 40 封面上太闷，
+				// 一眼认不出「这一摞有几首」。
 				ui.Box(c).Absolute().Right(0).Bottom(0).Padding(space.Px2, space.Px4).
-					Background(ui.RGBA(0, 0, 0, scrim.Badge)).Radius(tok.R4).Children(func() {
+					Background(p.Accent).Radius(tok.R4).Children(func() {
 					typo.Mono(ui.Text(c, strconv.Itoa(g.Count))).FontSize(scale.Font(c, scale.Size11)).
-						TextColor(ui.RGBA(1, 1, 1, 0.92)).SingleLine()
+						TextColor(p.AccentInk).SingleLine()
 				})
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
