@@ -590,8 +590,7 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
 		// 理由见 `widgets/list/selection.go` 的 KeyboardMode）。
 		//
-		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
-		// 焦点都还在。
+		// 观察回调不消费事件，方向键挪游标、点击选行、Tab 换焦点都还在。
 		ObserveInput(func(ev ui.InputEvent) { p.keys.Input(ev) }).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		//

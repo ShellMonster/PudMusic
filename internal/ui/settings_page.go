@@ -191,7 +191,7 @@ func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
 			on := s.settings.tab == i
 			b := ui.ButtonBase(c).Key("set-tab:"+tb.label).Label(tb.label).
 				Padding(space.Px10, space.Px12).Gap(iconGap).AlignItems(ui.Center).Justify(ui.Start).Radius(tok.R8).
-				Role(ui.RoleTab).AccessSelected(on)
+				Role(ui.RoleTab).AccessSelected(on).PositionInSet(i+1, len(settingsTabs))
 			fg := p.Text2
 			switch {
 			case on:

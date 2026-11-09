@@ -351,8 +351,7 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		spaceList := ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().PaddingX(s.upPadFor(c)).
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
-			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、
-			// Tab 换焦点都还在。
+			// 观察回调不消费事件，方向键挪游标、点击选行、Tab 换焦点都还在。
 			ObserveInput(func(ev ui.InputEvent) { sp.keys[tab].keys.Input(ev) }).
 			// 焦点环只留在「还没选中任何一行」的时候（和 `widgets/list` 同一档）。
 			FocusRing(sp.keys[tab].sel < 0).
