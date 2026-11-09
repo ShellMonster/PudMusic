@@ -590,8 +590,8 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		// ⚠️ **听一听输入**：只为了知道「上一次是键盘还是指针」（焦点环靠它，
 		// 理由见 `widgets/list/selection.go` 的 KeyboardMode）。
 		//
-		// 观察回调不消费事件，方向键挪游标、点击选行、Tab 换焦点都还在。
-		ObserveInput(func(ev ui.InputEvent) { p.keys.Input(ev) }).
+		// 这里只处理列表自身的目标事件；行内控件的 keyup 不能被当成列表导航。
+		HandleInput(func(ev ui.InputEvent) bool { p.keys.Input(ev); return false }).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		//
 		// ⚠️ **走的是「这一首」那一档**（`p.playNowOne` → `App.EnqueueAndPlayNow`，

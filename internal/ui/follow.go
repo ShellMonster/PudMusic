@@ -683,8 +683,8 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			// （`list.GridGap`）——那两样是**格子**上的事。
 			GapY(followRowGap).
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
-			// 观察回调不消费事件，方向键挪游标、点击选格、Tab 换焦点都还在。
-			ObserveInput(func(ev ui.InputEvent) { f.keys.keys.Input(ev) }).
+			// 这里只处理列表自身的目标事件；行内控件的 keyup 不能被当成列表导航。
+			HandleInput(func(ev ui.InputEvent) bool { f.keys.keys.Input(ev); return false }).
 			// 焦点环只留在「还没选中任何一行」的时候（和 `widgets/list` 同一档）。
 			FocusRing(f.keys.sel < 0).
 			// ⚠️ **挂上 `ScrollState`**：这一格自己滚（那些卡片是方的，行高跟着内容
