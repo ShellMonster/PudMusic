@@ -553,10 +553,12 @@ func (s *Shell) syncDrawerPhase() bool {
 // ⚠️ 原型的头下面还有一段总时长（`41 分钟`）和每一行的曲长；队列里的 `app.Item` 没有时长这一栏
 // （只有正在放的那一首知道），所以这里只有条数和播放模式，曲长只给正在放的那一行。
 func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
-	rows := s.queueRows
+	// 歌数按**队列项**算（`queueSongCount`），不是按画出来的行——组头行也
+	// 在 `s.queueRows` 里，数它会把「N 首」写成「N + 组头数」。
+	n := queueSongCount(s.queueRows)
 	p := tok.Of(t)
 	pud.DrawerHead(c, "播放列表", func() {
-		clear := pud.ButtonDisabled(c, "queue:clear", pud.Quiet, pud.Sm, "清空播放列表", "", len(rows) == 0)
+		clear := pud.ButtonDisabled(c, "queue:clear", pud.Quiet, pud.Sm, "清空播放列表", "", n == 0)
 		if clear.Clicked() {
 			s.queueClearOpen = true
 		}
@@ -565,7 +567,7 @@ func (s *Shell) viewQueueHeader(c *ui.Context, t *ui.Theme) {
 		}
 	})
 	pud.DrawerSub(c, func() {
-		typo.Mono(ui.Text(c, s.queueCountText(len(rows)))).FontSize(scale.Font(c, scale.Size12)).
+		typo.Mono(ui.Text(c, s.queueCountText(n))).FontSize(scale.Font(c, scale.Size12)).
 			TextColor(p.Text3).SingleLine()
 		ui.Spacer(c)
 		ui.Text(c, s.app.Snapshot().PlayMode.Desc()).FontSize(scale.Font(c, scale.Size12)).
@@ -601,7 +603,7 @@ func (s *Shell) viewQueueClearConfirm(c *ui.Context) {
 	switch confirmModal(c, &s.queueClearOpen, confirmSpec{
 		tone:    toneDanger,
 		title:   "清空播放列表吗？",
-		body:    queueClearBody(len(s.queueRows), s.app.Snapshot().HasTrack),
+		body:    queueClearBody(queueSongCount(s.queueRows), s.app.Snapshot().HasTrack),
 		confirm: "清空",
 		cancel:  "取消",
 	}) {
@@ -627,6 +629,23 @@ func queueClearBody(n int, playing bool) string {
 		what += "，正在放的那首也会停下来"
 	}
 	return what + "。"
+}
+
+// queueSongCount 是「队列里有几首歌」——**只数歌行，不数组头行**。
+//
+// ⚠️ **它和 `len(rows)` 不一样**：`s.queueRows` 里有组头行（它不是一首歌，
+// 是「这一摞是什么」），而「N 首」「队列里 N 首会清掉」数的都是**歌**。
+// 数错的症状是「队列里 9 首」画成「9 + 2 组头 = 11 首」。
+func queueSongCount(rows []queueRow) int {
+	n := 0
+	for _, r := range rows {
+		if r.item.GroupKey != "" || r.group == nil {
+			// 是歌行：要么带着组标记（是某一集），要么压根没组（散歌）。
+			// 组头行是「有 group、没 GroupKey」的那一行，跳过它。
+			n++
+		}
+	}
+	return n
 }
 
 // viewQueueBody 是抽屉下面那一块：有歌就是那一列，没有歌是一句空状态（分岔照
@@ -918,7 +937,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			}
 			ui.Row(c).Shrink(0).Children(func() {
 				up := pud.IconBtn(c, "queue:up", "up", s.queueRowOps.At(row.at, row.item.Title, queueUpLabel),
-					pud.IconOpts{Row: true, Disabled: at == 0})
+					pud.IconOpts{Row: true, Disabled: row.at == 0})
 				if up.Clicked() && s.app.Queue().MoveAtBefore(row.at, row.at-1) {
 					s.wake.invalidate()
 				}
