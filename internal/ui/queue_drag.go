@@ -72,10 +72,14 @@ func (s *Shell) queueDrop(v *queueDragValue) {
 		return
 	}
 	at := s.queueDropAt
-	if at < 0 || at >= len(s.queueRows) {
+	// at 就是**队列下标**（`viewQueueRow` 记的是 `row.at`，不是这一帧画出来
+	// 的行号——收起的合集不画行，行号和队列下标对不上）。直接拿它当
+	// 「挪到谁之前」就行，不用再到 `s.queueRows` 里查——`s.queueRows` 里
+	// 有组头行，按下标查会查到组头那一行。
+	if at < 0 || at >= s.app.Queue().Len() {
 		return
 	}
-	before := s.queueRows[at].at
+	before := at
 	if !s.queueDropUpper {
 		before = at + 1
 	}

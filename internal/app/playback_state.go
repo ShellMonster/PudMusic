@@ -115,6 +115,14 @@ type PlaybackEntry struct {
 	// `/collection/{id}?type=21`）。不存的话，任何一次经过这一格的搬运都会把它
 	// 丢掉，而症状是那一项在菜单里**摆不出来**——界面上看不出少了什么。
 	CollectionID int64 `json:"collectionId,omitempty"`
+	// GroupKey / GroupIndex / GroupCount / GroupTitle 是「这一条出自哪个合集」
+	// 那一份（见 `Item.GroupKey` 那段）。**也得存**：恢复出来的队列要认得
+	// 「这几行是一个合集」，连播和抽屉的组头才接得上——不存的话重启之后
+	// 合集就成了「几首不挨着的歌」，组头没了、连播也没了。
+	GroupKey   string `json:"groupKey,omitempty"`
+	GroupIndex int    `json:"groupIndex,omitempty"`
+	GroupCount int    `json:"groupCount,omitempty"`
+	GroupTitle string `json:"groupTitle,omitempty"`
 }
 
 // playbackEntryOf 把一项变成落盘用的那一格。
@@ -133,6 +141,10 @@ func playbackEntryOf(it Item) PlaybackEntry {
 		PageIndex:    it.PageIndex,
 		TotalPage:    it.TotalPage,
 		CollectionID: it.CollectionID,
+		GroupKey:     it.GroupKey,
+		GroupIndex:   it.GroupIndex,
+		GroupCount:   it.GroupCount,
+		GroupTitle:   it.GroupTitle,
 	}
 }
 
@@ -194,6 +206,10 @@ func itemOfPlaybackEntry(e PlaybackEntry) (Item, bool) {
 			PageIndex:    e.PageIndex,
 			TotalPage:    e.TotalPage,
 			CollectionID: e.CollectionID,
+			GroupKey:     e.GroupKey,
+			GroupIndex:   e.GroupIndex,
+			GroupCount:   e.GroupCount,
+			GroupTitle:   e.GroupTitle,
 		}, true
 
 	case strings.HasPrefix(e.ID, playbackIDAudio):
@@ -202,15 +218,19 @@ func itemOfPlaybackEntry(e PlaybackEntry) (Item, bool) {
 			return Item{}, false
 		}
 		return Item{
-			Source:    SourceOnline,
-			Type:      "audio",
-			Sid:       sid,
-			Title:     e.Title,
-			Cover:     e.Cover,
-			Artist:    e.Artist,
-			ArtistMid: e.ArtistMid,
-			PageIndex: e.PageIndex,
-			TotalPage: e.TotalPage,
+			Source:     SourceOnline,
+			Type:       "audio",
+			Sid:        sid,
+			Title:      e.Title,
+			Cover:      e.Cover,
+			Artist:     e.Artist,
+			ArtistMid:  e.ArtistMid,
+			PageIndex:  e.PageIndex,
+			TotalPage:  e.TotalPage,
+			GroupKey:   e.GroupKey,
+			GroupIndex: e.GroupIndex,
+			GroupCount: e.GroupCount,
+			GroupTitle: e.GroupTitle,
 		}, true
 	}
 	return Item{}, false
