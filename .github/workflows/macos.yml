@@ -44,17 +44,9 @@ jobs:
         run: go build -trimpath -p 4 ./...
 
   test:
-    name: Test non-UI packages
+    name: Test macOS-specific packages
     runs-on: macos-15-intel
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: core
-            pattern: '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service)(/|$)'
-          - name: supporting
-            pattern: '.*'
 
     steps:
       - name: Check out source
@@ -68,29 +60,23 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Test
-        env:
-          PACKAGE_PATTERN: ${{ matrix.pattern }}
-          TEST_GROUP: ${{ matrix.name }}
         run: |
           set -euo pipefail
-          all_packages=()
-          while IFS= read -r package; do
-            all_packages+=("$package")
-          done < <(go list ./... | grep -v '/internal/ui$')
-          if [ "$TEST_GROUP" = core ]; then
-            selected="$(printf '%s\n' "${all_packages[@]}" | grep -E "$PACKAGE_PATTERN" || true)"
-          else
-            selected="$(printf '%s\n' "${all_packages[@]}" | grep -Ev '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service)(/|$)' || true)"
-          fi
+          # Linux CI already tests every portable package. Keep only the
+          # packages Linux intentionally excludes: system audio/video and the
+          # macOS font package.
           packages=()
           while IFS= read -r package; do
             [ -n "$package" ] && packages+=("$package")
-          done <<< "$selected"
+          done < <(
+            go list ./... |
+              grep -E '^github.com/ShellMonster/PudMusic/internal/service/(audio|video)(/|$)|^github.com/ShellMonster/PudMusic/internal/ui/widgets/typo(/|$)'
+          )
           if [ "${#packages[@]}" -eq 0 ]; then
-            echo "No packages selected for $TEST_GROUP" >&2
+            echo "No macOS-specific packages selected" >&2
             exit 1
           fi
-          printf 'Testing %s:\n%s\n' "$TEST_GROUP" "${packages[*]}"
+          printf 'Testing macOS-specific packages:\n%s\n' "${packages[*]}"
           go test -p 4 "${packages[@]}"
 
   e2e:
