@@ -73,18 +73,17 @@ jobs:
           TEST_GROUP: ${{ matrix.name }}
         run: |
           set -euo pipefail
-          mapfile -t all_packages < <(go list ./... | grep -v '/internal/ui$')
           if [ "$TEST_GROUP" = core ]; then
-            mapfile -t packages < <(printf '%s\n' "${all_packages[@]}" | grep -E "$PACKAGE_PATTERN" || true)
+            packages="$(go list ./... | grep -v '/internal/ui$' | grep -E "$PACKAGE_PATTERN" || true)"
           else
-            mapfile -t packages < <(printf '%s\n' "${all_packages[@]}" | grep -Ev '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service)(/|$)' || true)
+            packages="$(go list ./... | grep -v '/internal/ui$' | grep -Ev '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service)(/|$)' || true)"
           fi
-          if [ "${#packages[@]}" -eq 0 ]; then
+          if [ -z "$packages" ]; then
             echo "No packages selected for $TEST_GROUP" >&2
             exit 1
           fi
-          printf 'Testing %s:\n%s\n' "$TEST_GROUP" "${packages[*]}"
-          go test -p 4 "${packages[@]}"
+          printf 'Testing %s:\n%s\n' "$TEST_GROUP" "$packages"
+          go test -p 4 $packages
 
   e2e:
     name: MyGo native UI E2E
