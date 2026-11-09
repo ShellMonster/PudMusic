@@ -892,12 +892,10 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 					ui.Icon(c, pud.Icon("grip")).FontSize(14).TextColor(p.Text3)
 				})
 			}
-			// 封面 40、圆角 4、`surface-2` 占位底；合集行的封面缩到 32，让出
-			// 左边那根竖线的位置（原型 `.cbody .qrow` 的 26px 封面 + 竖线）。
+			// 封面 40、圆角 4、`surface-2` 占位底。⚠️ **集行不缩**：竖线在
+			// 把手那一列里（2px），不抢封面的位置——封面缩了的话集行的歌名
+			// 比散歌右移 8，左侧三档对不齐。
 			coverSize := float32(queueCoverSize)
-			if row.group != nil {
-				coverSize = queueCoverSize - 8
-			}
 			ui.Box(c).Size(coverSize, coverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
 				imgcache.ViewFlat(c, s.images, row.item.Cover, coverSize, coverSize, tok.R4)
@@ -981,10 +979,16 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 		rowEl.Children(func() {
 			// 开合箭头（原型 `.carat`）：开着是 ▸ 转 90°，收着是 ▸。它不是
 			// 图标，是「这一组收着还是开着」的那一个记号。
-			carat := ui.Text(c, "▸").FontSize(scale.Font(c, scale.Size11)).TextColor(p.Text3).SingleLine()
-			if open {
-				carat = carat.TextColor(p.Text)
-			}
+			//
+			// ⚠️ **占 `queueGripW` 那一列**：散歌行第一列是 20 的把手，集行
+			// 第一列是 20 的竖线——组头不给 ▸ 同一列宽的话，它的封面和
+			// 名字比别的行左移一截，左侧三档对不齐。
+			ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
+				carat := ui.Text(c, "▸").FontSize(scale.Font(c, scale.Size11)).TextColor(p.Text3).SingleLine()
+				if open {
+					carat.TextColor(p.Text)
+				}
+			})
 			// 封面 + 集数角标：和集行同一枚 40 封面，右下压一个「N」的小块
 			// （原型 `.g-cov .gcnt`），让用户一眼认出「这是一摞，不是一首」。
 			ui.Box(c).Size(queueCoverSize, queueCoverSize).Shrink(0).Radius(tok.R4).Clip().
