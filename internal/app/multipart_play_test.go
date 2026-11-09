@@ -54,6 +54,30 @@ func TestPlayAtSwitchesBetweenTwoEpisodesOfOneVideo(t *testing.T) {
 	}
 }
 
+func TestPlayAtWithinACollectionKeepsTheCurrentTrackUntilReady(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = shortWav(120)
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.wav", 2*time.Hour), int(bili.QualityHigh192), 110836))
+
+	a := newOnlineApp(t, f, t.TempDir())
+	items := []app.Item{
+		{Source: "online", Type: "mv", Bvid: "BV1", Cid: "111", Title: "第一集", GroupKey: "season:1"},
+		{Source: "online", Type: "mv", Bvid: "BV1", Cid: "222", Title: "第二集", GroupKey: "season:1"},
+	}
+	if err := a.Enqueue(items...); err != nil {
+		t.Fatal(err)
+	}
+	playing(t, a, "第一集")
+
+	if err := a.PlayAt(1); err != nil {
+		t.Fatalf("PlayAt(1)：%v", err)
+	}
+	if st := a.Snapshot(); !st.HasTrack || st.Title != "第一集" {
+		t.Fatalf("合集切集时旧播放条内容丢失：%+v", st)
+	}
+	playing(t, a, "第二集")
+}
+
 // TestEnqueueAndPlayNowPlaysTheEpisodeAskedFor 钉住「点第二集放第二集」。
 //
 // 原来按 bvid 找到队列里的第一集，于是用户点第二集放的是

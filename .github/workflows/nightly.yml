@@ -15,18 +15,12 @@ permissions:
 jobs:
   race:
     name: Race detector on concurrent packages
-    runs-on: macos-15-intel
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -45,18 +39,12 @@ jobs:
 
   govulncheck:
     name: Known vulnerabilities
-    runs-on: macos-15-intel
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

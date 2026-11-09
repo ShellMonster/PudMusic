@@ -288,8 +288,8 @@ func (a *App) PlayPart(cid string) error {
 
 	cur.Cid = cid
 	a.queue.replaceAt(i, cur)
-	// 换集就是换歌：先把还在响的那首停掉，否则后台取流的那几百毫秒里，
-	// 界面上写的是新集、响的是旧集（理由同 `App.PlayAt`）。
-	a.ClearTrack()
+	// 分集属于同一条队列项，保留现有播放器直到新分集装好。这样播放条左侧的
+	// 封面、标题和作者不会在取流期间闪成空白；新播放器装好时会在
+	// `installOnlinePlayer` 里原子替换旧播放器。
 	return a.play(cur)
 }

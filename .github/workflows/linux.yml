@@ -4,14 +4,21 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
   push:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
   workflow_dispatch:
 
 concurrency:
   group: linux-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR 的新提交取消旧运行；main 上每个提交都必须完整验收。
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
@@ -37,6 +44,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          go mod verify
+          formatted="$(gofmt -l $(git ls-files '*.go'))"
+          if [ -n "$formatted" ]; then
+            printf 'These Go files are not formatted:\n%s\n' "$formatted" >&2
+            exit 1
+          fi
           go build -trimpath -p 4 ./...
           go vet -trimpath -p 4 ./...
           # Linux 最小可发行版本明确不实现的能力：AAC/M4A 解码

@@ -153,8 +153,8 @@ type queueRow struct {
 	//
 	// 🔴 **它不是 `item.GroupKey`**：那一栏是队列项自己带着的「我出自哪个
 	// 合集」；这里是**这一帧画出来的行**上的组信息——同一个 `Item` 在
-	// 队列里出现两份时，两份属于同一组，但**是同一个组头**（`GroupKey`
-	// 相同），只是两个不同的行。
+	// 队列里出现两份时，两份属于同一合集；如果它们不连续，则分属不同的
+	// UI 分段组头。
 	//
 	// ⚠️ **散歌是 nil**：不是合集的行没有它，画了也不该有那一根竖线。
 	group *queueGroup
@@ -189,6 +189,8 @@ type queueRow struct {
 type queueGroup struct {
 	// Key 是这一组的键（`Item.GroupKey`，形如 "season:<id>"）。
 	Key string
+	// RowKey 是这一段组头的 UI key。同一合集在队列里分成多段时，每段都要独立。
+	RowKey string
 	// Title 是组头那一行要写的合集名（`Item.GroupTitle`，空串时界面那一格留空）。
 	Title string
 	// Count 是这一组一共几集（`Item.GroupCount`，第一集带着的就是总数）。
@@ -310,6 +312,7 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 		if cur == nil || cur.Key != it.GroupKey {
 			cur = &queueGroup{
 				Key:     it.GroupKey,
+				RowKey:  "queue-group:" + it.GroupKey + "!" + strconv.Itoa(i),
 				Title:   it.GroupTitle,
 				Count:   it.GroupCount,
 				Cover:   it.Cover,
@@ -320,7 +323,7 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 			// 组头行：`at` 用组里第一集的队列下标，key 加 `!group` 前缀和集行分开。
 			rows = append(rows, queueRow{
 				at:    i,
-				key:   "queue-group:" + it.GroupKey,
+				key:   cur.RowKey,
 				group: cur,
 			})
 		}
@@ -328,6 +331,28 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 		rows = append(rows, row)
 	}
 	return rows
+}
+
+func queueRowsSameShape(a, b []queueRow) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].at != b[i].at || a[i].id != b[i].id {
+			return false
+		}
+		var aGroupKey, bGroupKey string
+		if a[i].group != nil {
+			aGroupKey = a[i].group.RowKey
+		}
+		if b[i].group != nil {
+			bGroupKey = b[i].group.RowKey
+		}
+		if aGroupKey != bGroupKey {
+			return false
+		}
+	}
+	return true
 }
 
 // queueGroupRows 是这一帧要画的**组头那一行**（Open 时它后面跟着各集）。
@@ -340,7 +365,7 @@ func queueGroupRows(rows []queueRow, open map[string]bool) []queueRow {
 	for i, r := range rows {
 		if r.group != nil && r.item.GroupKey != "" {
 			// 是某一集：组收着就不画。
-			if !open[r.group.Key] {
+			if !open[r.group.RowKey] {
 				continue
 			}
 			out = append(out, r)
@@ -380,13 +405,12 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	s.builds.drawer++
 	qSnapshot := s.app.Queue().Snapshot()
 	if s.queueRowsRevision != qSnapshot.Revision() {
-		s.queueRows = queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
-		s.queueRowsRevision = qSnapshot.Revision()
-		// 「开着哪些组」跟着队列走：队列整个换了，那些「开着的组」也就
-		// 不是队列里那一批了——留着的话新队列里碰巧同 key 的组会被莫名开着。
-		if s.queueGroupOpen == nil {
+		nextRows := queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
+		if !queueRowsSameShape(s.queueRows, nextRows) {
 			s.queueGroupOpen = map[string]bool{}
 		}
+		s.queueRows = nextRows
+		s.queueRowsRevision = qSnapshot.Revision()
 	}
 	t := c.Theme()
 	p := tok.Of(t)
@@ -770,12 +794,15 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 //
 // 当前播放项由队列下标定位；同一首歌重复出现时，只有当前项对应的那一行高亮。
 func currentRow(rows []queueRow, current int, playing bool) int {
-	if !playing || current < 0 || current >= len(rows) {
+	if !playing || current < 0 {
 		return -1
 	}
 	// 当前项在**队列**里的下标；这一帧画出来的行里，第 i 行的 `at` 记的就
 	// 是队列下标——收着的组里那一行没画出来，它的 `at` 照样能认出来。
 	for i := range rows {
+		if rows[i].group != nil && rows[i].item.GroupKey == "" {
+			continue
+		}
 		if rows[i].at == current {
 			return i
 		}
@@ -977,7 +1004,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 	p := tok.Of(t)
 	g := row.group
-	open := s.queueGroupOpen[g.Key]
+	open := s.queueGroupOpen[g.RowKey]
 	wrap := ui.Column(c).Key(row.key).FillWidth()
 	wrap.Children(func() {
 		rowEl := ui.Row(c).Key(queueRowInnerKey).FillWidth().Padding(queueRowPad).Gap(queueRowGap).
@@ -1035,7 +1062,7 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 		// 这个组头自己的事，播放要走「点这一行 = 从这儿听」那一套（那要按
 		// 到第一集的行上）。
 		if rowEl.Clicked() {
-			s.queueGroupOpen[g.Key] = !open
+			s.queueGroupOpen[g.RowKey] = !open
 			s.wake.invalidate()
 		}
 	})

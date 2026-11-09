@@ -54,6 +54,10 @@ on:
       - ".github/workflows/windows-aac-spike.yml"
   workflow_dispatch:
 
+concurrency:
+  group: windows-aac-spike-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   windows-aac-spike:
     name: Windows 真机跑 AAC spike

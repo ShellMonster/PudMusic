@@ -29,9 +29,7 @@ import (
 // 单 P 那条永远等不到——而它等的恰恰是「只有一集」这个状态。
 //
 // ⚠️ **`HasTrack` 和「问到几集」两个条件都要**：只等集数的话会量到「这一瞬」——
-// 换歌和 `App.PlayPart` 都要先 `ClearTrack()`（`online.go`），而那几百毫秒里
-// `HasTrack` 恒为 false，播放条上什么都不画（`viewTrackActions` 第一行就 return）。
-// 那时候量到的是一个空的播放条，不是坏了。
+// 新流还没装好时播放条展示的是上一集，直到新播放器替换完成才算切换稳定。
 func partsReady(t *testing.T, s *Shell, tt *ui.Tester, want int) {
 	t.Helper()
 	// ⚠️ **判据里要带上画面**：App 的状态是后台那一趟写回来的，而播放条上那个
@@ -89,6 +87,9 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 	if err := tt.Click("P3 · 第 3 集"); err != nil {
 		t.Fatalf("点不了第三集：%v（文字：%q）", err, tt.Texts())
 	}
+	if !s.app.Snapshot().HasTrack {
+		t.Fatal("切换合集分集时播放条左侧先被清空；新流未就绪前应保留原分集内容")
+	}
 	waitFrames(t, tt, "换到第三集", func() bool {
 		it, ok := s.app.CurrentItem()
 		return ok && it.Cid == "779"
@@ -96,10 +97,9 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 	// 选完就收：Biu 的 `onPressItem={onClose}`。
 	//
 	// ⚠️ 这里量的是**用户看得见的结果**，量不到 `viewPartRow` 里那一句关闭本身：
-	// `App.PlayPart` 会先 `ClearTrack()`，于是「没有歌就收掉」那句（`viewPartButton`
-	// 开头）顺手也把浮层关了，删掉前者这条照样绿。那一句由
+	// 换集保留旧播放器直到新流装好；浮层关闭由
 	// `TestPickingTheEpisodeAlreadyPlayingStillClosesTheDrawer` 单独钉——那一档
-	// `PlayPart` 提前返回、不清轨道，收掉浮层的就只剩它。
+	// `PlayPart` 提前返回，收掉浮层的就只剩行回调。
 	if s.partOpen {
 		t.Error("选完一集之后浮层还开着")
 	}
@@ -119,10 +119,9 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 // 一次关它的路。
 //
 // 🔴 **这一条是为 `viewPartRow` 里那句 `s.partOpen = false` 写的**：换到别的集
-// 那条路上，`App.PlayPart` 的 `ClearTrack()` 会让「没有歌就收掉」顺手把浮层收掉，
-// 于是**删掉 `viewPartRow` 里那一句，那一条照样绿**（变异验过）。而这一档
-// `PlayPart` 在 `cur.Cid == cid` 处提前返回、**不清轨道**，所以收掉浮层的只剩
-// `viewPartRow` 里那一句。
+// 时，`PlayPart` 会保留旧播放器，浮层不会因为播放状态变化而自动收掉；而这一档
+// `PlayPart` 在 `cur.Cid == cid` 处提前返回，所以收掉浮层的只剩 `viewPartRow` 里
+// 那一句。
 func TestPickingTheEpisodeAlreadyPlayingStillClosesTheDrawer(t *testing.T) {
 	s, tt := onlineTester(t, multiPages(), false)
 	partsReady(t, s, tt, 3)

@@ -1471,8 +1471,8 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 			d = Advance{Kind: AdvanceStop}
 			break
 		}
-		// 「仅播第 1 首」开着的合集：播完这一集跳过整组（见 skipGroupLocked）。
-		if next, ok := q.skipGroupLocked(); ok {
+		// 「仅播第 1 首」开着的合集：播完这一集跳过整组。
+		if next, ok := q.nextAllowedLocked(false); ok {
 			if commit {
 				q.cur = next
 				q.undo = stepUndo{ok: true, prevCur: oldCur}
@@ -1480,12 +1480,7 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 			d = Advance{Kind: AdvancePlay, Item: q.items[next]}
 			break
 		}
-		next := q.cur + 1
-		if commit {
-			q.cur = next
-			q.undo = stepUndo{ok: true, prevCur: oldCur}
-		}
-		d = Advance{Kind: AdvancePlay, Item: q.items[next]}
+		d = Advance{Kind: AdvanceStop}
 
 	case PlayModeSingle:
 		// 单曲循环：一步都不挪，同一首从头再来。
@@ -1540,8 +1535,12 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 
 	default:
 		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
-		// 「仅播第 1 首」开着的合集：播完这一集跳过整组（见 skipGroupLocked）。
-		if next, ok := q.skipGroupLocked(); ok {
+		// 「仅播第 1 首」开着的合集：播完这一集跳过整组。
+		if next, ok := q.nextAllowedLocked(true); ok {
+			if next == q.cur {
+				d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+				break
+			}
 			if commit {
 				q.cur = next
 				q.undo = stepUndo{ok: true, prevCur: oldCur}
@@ -1646,25 +1645,23 @@ func (q *Queue) nextGroupLocked() (int, bool) {
 	return 0, false
 }
 
-// skipGroupLocked 是「仅播第 1 首」开着时的推进：跳过**同组剩下所有集**，
-// 落到这一组后面的第一项；组尾就是队尾时是 false（该停 / 该绕回交给档位）。
-//
-// ⚠️ **顺序 / 循环两档要用它**：那两档默认「下一首 = 队列下一行」，而组的
-// 下一行多半就是第 2 集——「仅播第 1 首」开着时那一行得跳过去，否则那枚钮
-// 就成了摆设（画着「仅播第 1 首」，放的却是第 2 集）。
-//
-// ⚠️ **判据是 GroupKey 不同**，不是下标隔几格：用户能把别组的行拖进来，
-// 同组的行也未必连着——跳过的是「同一个合集」，不是「连续几行」。
-func (q *Queue) skipGroupLocked() (int, bool) {
-	cur := q.items[q.cur]
-	key := cur.GroupKey
-	if key == "" || !q.groupLimitedLocked(key) {
+func (q *Queue) nextAllowedLocked(wrap bool) (int, bool) {
+	for i := q.cur + 1; i < len(q.items); i++ {
+		it := q.items[i]
+		if it.GroupKey != "" && it.GroupIndex > 1 && q.groupLimitedLocked(it.GroupKey) {
+			continue
+		}
+		return i, true
+	}
+	if !wrap {
 		return 0, false
 	}
-	for i := q.cur + 1; i < len(q.items); i++ {
-		if q.items[i].GroupKey != key {
-			return i, true
+	for i := 0; i <= q.cur && i < len(q.items); i++ {
+		it := q.items[i]
+		if it.GroupKey != "" && it.GroupIndex > 1 && q.groupLimitedLocked(it.GroupKey) {
+			continue
 		}
+		return i, true
 	}
 	return 0, false
 }
@@ -2080,7 +2077,10 @@ func (a *App) PlayAt(i int) error {
 			a.queue.selectAt(i)
 			return nil
 		}
-		if target.isOnline() {
+		// 同一合集内换集沿用 `PlayPart` 的交接方式：播放条左侧先保留旧集，
+		// 新流装好后再由 `installOnlinePlayer` 替换播放器。
+		keepCurrentTrack := ok && playing.GroupKey != "" && playing.GroupKey == target.GroupKey
+		if target.isOnline() && !keepCurrentTrack {
 			// 换成在线的一首：**先把还在响的那首停掉**。在线流是后台建的（取流要
 			// 几百毫秒的网络往返），开它的那一刻界面上还没有新歌——**还响着的是上
 			// 一首**，而抽屉已经按新的当前项把高亮挪走了。用户看到的是「播放条上是

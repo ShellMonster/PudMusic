@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/rowkey"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -691,6 +692,71 @@ func TestQueueDrawerShowsEachEpisodeOfOneVideo(t *testing.T) {
 	}
 	if !h.tt.HasText("2 首") {
 		t.Errorf("顶上写的不是 (2)，文字有 %q", h.tt.Texts())
+	}
+}
+
+// TestCurrentRowIgnoresSyntheticGroupHeaders 钉住「当前播放」只能落在真实集行：
+// 组头和第一集共用队列下标时，组头不该抢走播放状态。
+func TestCurrentRowIgnoresSyntheticGroupHeaders(t *testing.T) {
+	rows := []queueRow{
+		{at: 0, group: &queueGroup{Key: "season:1"}},
+		{at: 0, item: app.Item{GroupKey: "season:1"}},
+		{at: 1, item: app.Item{Title: "散歌"}},
+	}
+
+	if got := currentRow(rows, 0, true); got != 1 {
+		t.Fatalf("当前队列项定位到第 %d 行，want 真实集行 1", got)
+	}
+}
+
+// TestCurrentRowFindsQueueItemsAfterCollapsedGroups 钉住「可见行数不等于队列下标」：
+// 收起合集后，后面的普通歌曲仍要能被当前播放定位。
+func TestCurrentRowFindsQueueItemsAfterCollapsedGroups(t *testing.T) {
+	rows := []queueRow{
+		{at: 0, group: &queueGroup{Key: "season:1"}},
+		{at: 3, item: app.Item{Title: "散歌"}},
+	}
+
+	if got := currentRow(rows, 3, true); got != 1 {
+		t.Fatalf("队列下标 3 定位到第 %d 行，want 可见行 1", got)
+	}
+}
+
+// TestQueueRowsUseDistinctKeysForSeparatedGroupSegments 钉住同一合集分成两段时，
+// 两个组头仍要有不同的 UI key。
+func TestQueueRowsUseDistinctKeysForSeparatedGroupSegments(t *testing.T) {
+	items := []app.Item{
+		{Source: "online", Type: "mv", Bvid: "A1", Cid: "1", GroupKey: "season:1", GroupIndex: 1},
+		{Source: "online", Type: "mv", Bvid: "B1", Cid: "1", GroupKey: "season:2", GroupIndex: 1},
+		{Source: "online", Type: "mv", Bvid: "A2", Cid: "1", GroupKey: "season:1", GroupIndex: 2},
+	}
+	rows := queueRowsFor(items, &rowkey.Memo[queueRowRaw, queueRowIdentity]{})
+
+	var keys []string
+	for _, row := range rows {
+		if row.group != nil && row.item.GroupKey == "" {
+			keys = append(keys, row.key)
+		}
+	}
+	if len(keys) != 3 || keys[0] == keys[2] {
+		t.Fatalf("分段组头 key = %q，want 每个组头唯一", keys)
+	}
+}
+
+// TestQueueDrawerDropsExpandedGroupsWhenTheQueueChanges 钉住队列替换后不继承旧展开状态：
+// 新队列即使复用同一个合集身份，也应从收起状态开始。
+func TestQueueDrawerDropsExpandedGroupsWhenTheQueueChanges(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	h.app.Queue().Append(
+		groupSong(t, dir, "第一集.flac", "season:1", 1, 2),
+		groupSong(t, dir, "第二集.flac", "season:1", 2, 2),
+	)
+	h.s.queueGroupOpen = map[string]bool{"queue-group:season:1!0": true}
+	openDrawer(t, h)
+
+	if len(h.s.queueGroupOpen) != 0 {
+		t.Fatalf("队列第一次建立后仍保留旧展开状态：%v", h.s.queueGroupOpen)
 	}
 }
 

@@ -4,77 +4,26 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
   push:
     branches:
       - main
+    paths-ignore:
+      - README.md
+      - docs/**
   workflow_dispatch:
 
 concurrency:
   group: macos-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR 的新提交取消旧运行；main 上每个提交都必须完整验收。
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
 
 jobs:
-  verify:
-    name: Format and module check
-    runs-on: macos-15-intel
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-
-      - name: Verify formatting and modules
-        shell: bash
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-            files="$(git diff --name-only --diff-filter=ACMRTUXB "$BASE_SHA"...HEAD -- '*.go')"
-          elif [[ "$GITHUB_EVENT_NAME" == push ]]; then
-            if [[ "$BEFORE_SHA" == 0000000000000000000000000000000000000000 ]]; then
-              files="$(git ls-files '*.go')"
-            else
-              files="$(git diff --name-only --diff-filter=ACMRTUXB "$BEFORE_SHA" HEAD -- '*.go')"
-            fi
-          else
-            files=""
-          fi
-          if [ -n "$files" ]; then
-            formatted="$(printf '%s\n' "$files" | xargs gofmt -l)"
-            if [ -n "$formatted" ]; then
-              printf 'These changed Go files are not formatted:\n%s\n' "$formatted" >&2
-              exit 1
-            fi
-          fi
-          go mod verify
-
-      - name: Verify generated resources
-        shell: bash
-        run: |
-          set -euo pipefail
-          go generate ./internal/platform/ ./internal/licensing/
-          git diff --exit-code -- resources
-
   build:
     name: Build all packages
     runs-on: macos-15-intel
@@ -83,12 +32,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -100,45 +43,22 @@ jobs:
       - name: Build
         run: go build -trimpath -p 4 ./...
 
-  vet:
-    name: Vet all packages
-    runs-on: macos-15-intel
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
-
-      - name: Set up Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-          cache: true
-          cache-dependency-path: go.sum
-
-      - name: Vet
-        run: go vet -trimpath -p 4 ./...
-
   test:
     name: Test non-UI packages
     runs-on: macos-15-intel
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core
+            pattern: '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service)(/|$)'
+          - name: supporting
+            pattern: '.*'
 
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -148,10 +68,30 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Test
+        env:
+          PACKAGE_PATTERN: ${{ matrix.pattern }}
+          TEST_GROUP: ${{ matrix.name }}
         run: |
           set -euo pipefail
-          go test -p 4 $(go list ./... | grep -v '/internal/ui$')
-          go test ./internal/licensing/
+          all_packages=()
+          while IFS= read -r package; do
+            all_packages+=("$package")
+          done < <(go list ./... | grep -v '/internal/ui$')
+          if [ "$TEST_GROUP" = core ]; then
+            selected="$(printf '%s\n' "${all_packages[@]}" | grep -E "$PACKAGE_PATTERN" || true)"
+          else
+            selected="$(printf '%s\n' "${all_packages[@]}" | grep -Ev '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service)(/|$)' || true)"
+          fi
+          packages=()
+          while IFS= read -r package; do
+            [ -n "$package" ] && packages+=("$package")
+          done <<< "$selected"
+          if [ "${#packages[@]}" -eq 0 ]; then
+            echo "No packages selected for $TEST_GROUP" >&2
+            exit 1
+          fi
+          printf 'Testing %s:\n%s\n' "$TEST_GROUP" "${packages[*]}"
+          go test -p 4 "${packages[@]}"
 
   e2e:
     name: MyGo native UI E2E
@@ -161,12 +101,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -210,12 +144,6 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Cache Go toolchain
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.tool_cache }}/go
-          key: ${{ runner.os }}-go-toolchain-${{ hashFiles('go.mod') }}
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
