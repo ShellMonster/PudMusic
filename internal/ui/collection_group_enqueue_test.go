@@ -62,6 +62,38 @@ func TestTheCollectionRowsCollapseIntoAGroupHeader(t *testing.T) {
 	}
 }
 
+// TestTheCollectionEnqueueMergesTheGroupOntoAnExistingRow 钉 CodeAnt 提的
+// 那一支：同一首歌**先**从散歌来源（没组标）进过队列，再从合集页点它——
+// `EnqueueAndPlayNow` 定位到队列里那一份（播它，不追加），而定位之后那一份
+// 该**带上组标**：不然它永远没有组，抽屉画不出组头、随机档也不接下一集。
+func TestTheCollectionEnqueueMergesTheGroupOntoAnExistingRow(t *testing.T) {
+	_, s, tt := collectionShellTyped(t, bili.CollectionAlbum, "1227671",
+		mediaOf(1, "第一集"), mediaOf(2, "第二集"))
+	waitSongs(t, tt, s, 2)
+
+	// 先入队一份**没组标**的同一首（模拟它早前从搜索/收藏夹进来过）。
+	m, ok := s.collection.list.List().At(0)
+	if !ok {
+		t.Fatal("合集页第 1 行不在")
+	}
+	loose := m.Item
+	loose.GroupKey, loose.GroupIndex, loose.GroupCount, loose.GroupTitle = "", 0, 0, ""
+	// 空队列的第一首会顺手起播（`Enqueue` 的 `wasEmpty` 分支），而这个壳里
+	// 没挂取流——起播失败也把项留在队列里（`Enqueue` 先 Append 再 play），
+	// 错可以忍。
+	_ = s.app.Enqueue(loose)
+
+	// 再从合集页点它（行级入口那一趟带着组标来定位）。
+	acts := s.collectionActions(s.collection)
+	acts.PlayNow(m.Item)
+
+	// 队列里那份（下标 0 是刚才那首散歌）该带上组标了。
+	it, _ := s.app.Queue().Items()[0], true
+	if it.GroupKey == "" {
+		t.Errorf("已在队列里的那首被合集页点过之后 GroupKey 还是空——它该是合集的一集")
+	}
+}
+
 // TestTheCollectionRowEnqueueCarriesTheGroup 钉「双击合集里的一行，
 // 进队列的那一项带着组标」——之前它走的是 `Actions.PlayNow` 那条路，
 // 裸 `Item` 进去，抽屉里就是一首散歌（没有组头、也没有「合集」标识）。
