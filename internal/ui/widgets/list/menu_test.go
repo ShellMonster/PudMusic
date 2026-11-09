@@ -60,7 +60,7 @@ func onlineSongs(n int) []Music {
 func TestRightClickOpensTheBiuMenu(t *testing.T) {
 	_, tt := newList(t, Actions{}, onlineSongs(3))
 
-	if err := tt.RightClick("在线的歌 B"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
@@ -80,7 +80,7 @@ func TestChoosingPlayNowHandsOverJustThatSong(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))
 
-	if err := tt.RightClick("在线的歌 C"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("立即播放"); err != nil {
@@ -113,7 +113,7 @@ func TestChoosingPlayQueuesThisSongAndTheRestAfterIt(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))
 
-	if err := tt.RightClick("在线的歌 B"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
@@ -147,7 +147,7 @@ func TestChoosingPlayNextHandsOverJustThatSong(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))
 
-	if err := tt.RightClick("在线的歌 C"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("下一首播放"); err != nil {
@@ -177,7 +177,7 @@ func TestPlayNextSaysSoWhenNothingIsWired(t *testing.T) {
 	// 只留 Notify：`PlayNext` 缺席就是「那一层没接线」的样子。
 	_, tt := newList(t, Actions{Notify: func(s string, _ notice.Tone) { rec.notices = append(rec.notices, s) }}, onlineSongs(3))
 
-	if err := tt.RightClick("在线的歌 B"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("下一首播放"); err != nil {
@@ -193,7 +193,7 @@ func TestChoosingAddAppendsJustThatSong(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(5))
 
-	if err := tt.RightClick("在线的歌 C"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("添加到队列"); err != nil {
@@ -216,7 +216,7 @@ func TestTheOpenItemOpensThatSong(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(3))
 
-	if err := tt.RightClick("在线的歌 C"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("在 B 站打开"); err != nil {
@@ -236,7 +236,7 @@ func TestALocalSongSaysFinderInsteadOfBili(t *testing.T) {
 		{ID: "l", Title: "本地的一首", Item: app.LocalItem("/music/本地的一首.mp3")},
 	})
 
-	if err := tt.RightClick("本地的一首"); err != nil {
+	if err := rightClickLabel(tt, "本地的一首"); err != nil {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
@@ -257,7 +257,7 @@ func TestTheUnwiredItemsSaySo(t *testing.T) {
 		rec := &recorded{}
 		_, tt := newList(t, rec.actions(), onlineSongs(3))
 
-		if err := tt.RightClick("在线的歌 A"); err != nil {
+		if err := rightClickLabel(tt, "在线的歌 A"); err != nil {
 			t.Fatal(err)
 		}
 		if err := tt.ChooseMenuItem(label); err != nil {
@@ -285,7 +285,7 @@ func TestTheMenuActsOnTheSongThatWasClicked(t *testing.T) {
 	l, tt := newList(t, rec.actions(), songs)
 
 	// 点**第一首**：头上插一行之后它挪到了下标 1。
-	if err := tt.RightClick("在线的歌 A"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 A"); err != nil {
 		t.Fatal(err)
 	}
 	l.SetSongs(append([]Music{{ID: "bv-new", Title: "新来的一首"}}, songs...))
@@ -332,7 +332,7 @@ func TestTheMenuIsWiredToTheRealQueue(t *testing.T) {
 	var notices []string
 	_, tt := newList(t, AppActions(a, func(s string, _ notice.Tone) { notices = append(notices, s) }), songs)
 
-	if err := tt.RightClick("第二首"); err != nil {
+	if err := rightClickLabel(tt, "第二首"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
@@ -354,7 +354,7 @@ func TestTheMenuIsWiredToTheRealQueue(t *testing.T) {
 	}
 
 	// 「添加到队列」接的是 App.Enqueue：追加一首，不打断正在放的那首。
-	if err := tt.RightClick("第一首"); err != nil {
+	if err := rightClickLabel(tt, "第一首"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("添加到队列"); err != nil {
@@ -442,7 +442,7 @@ func TestAnUnplayableSongHasNoPlayEntryBeforeYouPressIt(t *testing.T) {
 	}}
 	_, tt := newList(t, Actions{}, songs)
 
-	if err := tt.RightClick("没挂稿件的那一条"); err != nil {
+	if err := rightClickLabel(tt, "没挂稿件的那一条"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err == nil {
@@ -469,7 +469,7 @@ func TestALocalSongStillHasAPlayEntry(t *testing.T) {
 	songs := []Music{{ID: "a", Title: "第一首", Item: app.LocalItem(paths[0])}}
 	_, tt := newList(t, rec.actions(), songs)
 
-	if err := tt.RightClick("第一首"); err != nil {
+	if err := rightClickLabel(tt, "第一首"); err != nil {
 		t.Fatal(err)
 	}
 	// ⚠️ **菜单项要在点之前数**：点完菜单就关了，而 `tt.Menu()` 读的是
@@ -495,7 +495,7 @@ func TestChoosingCopyInfoPutsTitleOwnerAndLinkOnTheClipboard(t *testing.T) {
 	acts.Copy = func(text string) { copied = append(copied, text) }
 	_, tt := newList(t, acts, onlineSongs(3))
 
-	if err := tt.RightClick("在线的歌 B"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("复制歌曲信息"); err != nil {
@@ -513,7 +513,7 @@ func TestChoosingCopyInfoPutsTitleOwnerAndLinkOnTheClipboard(t *testing.T) {
 func TestCopyInfoSaysSoWhenNothingIsWired(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newList(t, rec.actions(), onlineSongs(2))
-	if err := tt.RightClick("在线的歌 A"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 A"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("复制歌曲信息"); err != nil {

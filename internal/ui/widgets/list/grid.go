@@ -628,6 +628,7 @@ func (g *Grid) View(c *ui.Context) {
 		//
 		// ⚠️ **返回 true 的是「这一下我吃掉了」**：吃掉方向键，滚动容器才不会
 		// 跟着滚——游标挪到哪一格，画面就停在哪一格。
+		ObserveInput(func(ev ui.InputEvent) { g.keys.Input(ev) }).
 		HandleInput(g.gridInput).
 		// 🔴 **网格这一档要能进键盘焦点**（票 #453）。
 		//
@@ -689,11 +690,8 @@ func (g *Grid) Hot() bool { return g.hot }
 
 // gridInput 是网格这一档的键盘输入。
 //
-// # ⚠️ **它和 `KeyboardMode.Input` 是同一个回调**
-//
-// 框架一个元素只挂一个 `HandleInput`（`mygo/ui/element.go` 的 `e.inputFn = fn`），
-// 所以两件事得在这里自己串起来：先让 `KeyboardMode` 听一听（它要记「键盘在管」
-// 和「指针在管」，焦点环靠这两个），再走这一档自己的键。
+// `KeyboardMode` 通过列表上的 `ObserveInput` 旁路观察输入；这里处理网格自己的
+// 复制和方向键行为。
 //
 // # ⚠️ **返回 true 是「这一下我吃掉了」**
 //
@@ -701,7 +699,6 @@ func (g *Grid) Hot() bool { return g.hot }
 // （框架那一层不画焦点环给输入框、也不替列表之外的控件挪游标，见
 // `mygo/ui/list.go` 的 `listInput`：它只在「这张列表有游标」时才导航。）
 func (g *Grid) gridInput(ev ui.InputEvent) bool {
-	g.keys.Input(ev)
 	// ⌘C 复制选中那一格的歌名（票 #685）。
 	//
 	// ⚠️ **列表那一档是同一件事**（`copy_title.go` 的 `copyCommand` /

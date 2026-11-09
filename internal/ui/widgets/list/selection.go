@@ -86,9 +86,8 @@ func SelectedRow(row ui.Element, t *ui.Theme, selected, hovered, ring bool) ui.E
 //
 // # 它是怎么知道「来了一按键」的
 //
-// `Element.HandleInput`（`mygo/ui/handler.go`）：元素有键盘焦点时的按键、以及指针
-// 在它身上时的按下，都交给那个回调。**返回 false 是刻意的**——自己不吃这个事件，
-// 引擎照常处理（方向键挪游标、点击选行、Tab 换焦点都还在）。
+// `Element.ObserveInput`（`mygo/ui/handler.go`）：元素及其后代收到的输入都会送到
+// 观察回调。它不消费事件，所以引擎照常处理方向键、点击选行和 Tab 换焦点。
 //
 // ⚠️ **不要改成「有焦点就画环」**：那会让鼠标点过之后那一行也挂着环，而上游点一行
 // 是不改变它的样子的。
@@ -142,9 +141,9 @@ type KeyboardMode struct {
 	passes int
 }
 
-// Input 是给框架的输入回调（`Element.HandleInput`）。
+// Input 是给框架的输入观察回调（`Element.ObserveInput`）。
 //
-// ⚠️ **永远返回 false**：这个回调只是「听一听」，不吃事件。
+// ⚠️ 返回值没有意义：观察回调只记录状态，不吃事件。
 //
 // ⚠️ **按键看 `InputKeyUp` 也算数**：方向键被框架自己的快捷键登记截走了
 // （`mygo/ui/list.go` 的 `f.navigate` 里 `o.Shortcut(0, k)` 登记了方向键，于是

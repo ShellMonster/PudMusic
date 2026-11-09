@@ -233,7 +233,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		// ⚠️ **不许给输入框加 Key**：Key 只能挂在「创建时没有处理输入」的控件上，
 		// 挂上去直接 panic（`ui/element.go:658`）。外面这一格有 Key 就够了。
 		field := ui.TextInputBase(c, &s.searchKeyword).
-			Label(searchLabel).Placeholder(searchPlaceholder).
+			Label(searchLabel).Role(ui.RoleSearch).Placeholder(searchPlaceholder).
 			// 原型 index.html:236 `input::placeholder { color: var(--text-3) }`；框架默认是 TextMuted（text-2）。
 			PlaceholderColor(tok.Of(t).Text3).
 			Grow(1).Shrink(0)

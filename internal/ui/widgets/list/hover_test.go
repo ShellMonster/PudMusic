@@ -390,7 +390,7 @@ func TestTheCardPlayButtonPlaysThatCardAndTheRestAfterIt(t *testing.T) {
 
 	hoverOn(t, tt, songs[1].Title)
 	settleFade(t, tt)
-	if err := tt.Click(hover.PlayLabel(songs[1].Title)); err != nil {
+	if err := clickLabel(tt, hover.PlayLabel(songs[1].Title)); err != nil {
 		t.Fatalf("点不了封面上那个播放钮：%v（画面：%q）", err, tt.Texts())
 	}
 

@@ -88,6 +88,32 @@ func TestTheTabUnderlineGrowsOnlySideways(t *testing.T) {
 	}
 }
 
+func TestTabsUseFrameworkKeyboardNavigation(t *testing.T) {
+	selected := 0
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Box(c).Size(400, 80).Children(func() {
+			Tabs(c, "tabs", &selected, []Tab{{Label: "推荐"}, {Label: "榜单"}, {Label: "动态"}})
+		})
+	}, 400, 80)
+
+	tt.Frame()
+	if err := tt.Click("推荐"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Key(0, ui.KeyRight)
+	if selected != 1 {
+		t.Fatalf("Right selected tab %d, want 1", selected)
+	}
+	tt.Key(0, ui.KeyEnd)
+	if selected != 2 {
+		t.Fatalf("End selected tab %d, want 2", selected)
+	}
+	tt.Key(0, ui.KeyHome)
+	if selected != 0 {
+		t.Fatalf("Home selected tab %d, want 0", selected)
+	}
+}
+
 func diff(a, b float64) float64 {
 	if a > b {
 		return a - b

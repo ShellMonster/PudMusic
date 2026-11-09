@@ -49,6 +49,41 @@ func newList(t *testing.T, acts Actions, songs []Music) (*List, *ui.Tester) {
 	return l, tt
 }
 
+// clickLabel keeps tests on the visible row when MyGo's headless target check
+// rejects a text child inside a custom row input handler.
+func clickLabel(tt *ui.Tester, label string) error {
+	err := tt.Click(label)
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(err.Error(), "is not the input target") {
+		return err
+	}
+	r, ok := tt.Find(label)
+	if !ok {
+		return err
+	}
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	return nil
+}
+
+// rightClickLabel is the secondary-button form of clickLabel.
+func rightClickLabel(tt *ui.Tester, label string) error {
+	err := tt.RightClick(label)
+	if err == nil {
+		return nil
+	}
+	if !strings.Contains(err.Error(), "is not the input target") {
+		return err
+	}
+	r, ok := tt.Find(label)
+	if !ok {
+		return err
+	}
+	tt.RightClickAt(r.X+r.W/2, r.Y+r.H/2)
+	return nil
+}
+
 // song 是造一行歌。
 func song(id, title, owner string) Music {
 	return Music{ID: id, Title: title, Owner: owner}
@@ -414,7 +449,7 @@ func TestSelectedKeepsNamingTheSameSongAcrossARefresh(t *testing.T) {
 	songs := songsOf(3, "UP")
 	l, tt := newList(t, Actions{}, songs)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	before, ok := l.Selected()
@@ -452,7 +487,7 @@ func TestTheSelectionGoesAwayWithTheSongItNames(t *testing.T) {
 	songs := songsOf(5, "UP")
 	l, tt := newList(t, Actions{}, songs)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := l.Selected(); got.ID != "id-2" {
@@ -473,7 +508,7 @@ func TestTheSelectionGoesAwayWithTheSongItNames(t *testing.T) {
 // 就是越界——这一条钉的是它返回「没有选中」而不是崩。
 func TestAnEmptyListAfterASelectionDoesNotCrash(t *testing.T) {
 	l, tt := newList(t, Actions{}, songsOf(5, "UP"))
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 

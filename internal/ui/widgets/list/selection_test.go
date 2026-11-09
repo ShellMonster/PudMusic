@@ -51,7 +51,7 @@ func TestClickingARowLeavesNoSolidAccentBlock(t *testing.T) {
 	th := ui.LightTheme()
 	accent := accentOf(th)
 
-	if err := tt.Click("歌 2"); err != nil {
+	if err := clickLabel(tt, "歌 2"); err != nil {
 		t.Fatal(err)
 	}
 	frame(tt)
@@ -165,7 +165,7 @@ func TestClickingARowLeavesNoFocusRing(t *testing.T) {
 	songs := songsOf(3, "UP")
 	_, tt := newList(t, Actions{}, songs)
 
-	if err := tt.Click("歌 2"); err != nil {
+	if err := clickLabel(tt, "歌 2"); err != nil {
 		t.Fatal(err)
 	}
 	frame(tt)
@@ -193,7 +193,7 @@ func TestTheKeyboardRingComesBackAfterAMouseClick(t *testing.T) {
 	l, tt := newList(t, Actions{}, songs)
 
 	// 点第二行：指针在管，那一行什么标记都没有。
-	if err := tt.Click("歌 2"); err != nil {
+	if err := clickLabel(tt, "歌 2"); err != nil {
 		t.Fatal(err)
 	}
 	frame(tt)
@@ -227,7 +227,7 @@ func TestClickingACardLeavesNoSolidAccentBlock(t *testing.T) {
 	th := ui.LightTheme()
 	accent := accentOf(th)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	frame(tt)
