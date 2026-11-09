@@ -49,7 +49,7 @@ var favGroupLabels = [favGroups]string{"收藏夹", "收藏的合集"}
 // 折叠态：不画小标题和说明，只画一列封面（行高 44）。登录前只有小标题和一句
 // 「登录后能看到收藏夹。去登录」（原型 `loggedOut` 那一支）。
 func (s *Shell) viewFavorites(c *ui.Context, st app.Settings, collapsed bool) {
-	hidden := hiddenMenuKeys(st)
+	hidden := hiddenMenuKeys(st.HiddenMenuKeys)
 	items := make([][]app.Favorite, favGroups)
 	for g := range favGroups {
 		items[g] = visibleFavorites(s.app.SideFavorites(app.FavoriteGroup(g)), hidden)
@@ -562,9 +562,9 @@ func (s *Shell) reportFavoritesRefresh() {
 
 // hiddenMenuKeys 是被藏起来的那些 ID。Biu 存的是十进制字符串
 // （`String(item.id)`），我们照抄——不然两边互导设置时对不上。
-func hiddenMenuKeys(st app.Settings) map[string]bool {
-	m := make(map[string]bool, len(st.HiddenMenuKeys))
-	for _, k := range st.HiddenMenuKeys {
+func hiddenMenuKeys(keys []string) map[string]bool {
+	m := make(map[string]bool, len(keys))
+	for _, k := range keys {
 		m[k] = true
 	}
 	return m

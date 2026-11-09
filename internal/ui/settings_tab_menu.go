@@ -90,7 +90,7 @@ func (s *Shell) pickMenuVisibility(cd *setCard, st app.Settings) {
 // 返回里的 id（在 B 站那边删了、或者换过账号）也摆出来，不然那几笔永远躺在设置文件里。
 func (s *Shell) pickFavoriteVisibility(cd *setCard, st app.Settings) {
 	c := cd.c
-	hidden := hiddenMenuKeys(st)
+	hidden := hiddenMenuKeys(st.HiddenMenuKeys)
 	seen := make(map[string]bool)
 	any := false
 	for g := range favGroups {

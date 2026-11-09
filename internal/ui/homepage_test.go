@@ -413,3 +413,28 @@ func TestTheHomePageUsesThePrototypePageMargins(t *testing.T) {
 		t.Errorf("首页的第一段墨从顶栏下缘往下 %d 像素开始，want 32 附近（页顶 8 + 问候区 24）", top)
 	}
 }
+
+// TestHiddenFavoritesStayOffTheHomeFolders 钉住「设置里藏起来的收藏夹」在首页
+// 「你的收藏夹」那一档同样不摆——和侧栏同一份 `hiddenMenuKeys`。
+//
+// 之前这一块把 `FavoritesOf().Snapshot` 原样摊开：侧栏滤掉了，首页还摆着，
+// 用户刚在设置里勾掉、回到首页它还在。
+func TestHiddenFavoritesStayOffTheHomeFolders(t *testing.T) {
+	b := newUIExplore(t)
+	homeArchives(b)
+	st := app.DefaultSettings("")
+	st.HiddenMenuKeys = []string{"42"}
+	_, tt, a := newHomeShell(t, b, withSettings(st))
+	a.TestOnlyAdoptLogin("7")
+	a.SetFavorites(app.FavoritesCreated, []app.Favorite{
+		{ID: 42, Title: "藏起来的"},
+		{ID: 7, Title: "看得见的"},
+	})
+
+	waitFrames(t, tt, "看得见的收藏夹摆出来了", func() bool { return showsText(tt, "看得见的") })
+
+	// 藏起来的那个一次都不摆——侧栏和首页都不摆。
+	if got := countText(tt, "藏起来的"); got != 0 {
+		t.Errorf("藏起来的收藏夹还在画面上出现了 %d 次，文字有 %q", got, tt.Texts())
+	}
+}
