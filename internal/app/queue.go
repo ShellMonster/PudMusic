@@ -134,6 +134,31 @@ type Item struct {
 	// 0 是「这一条不是合集」（或者查不清 id 是什么，比如电影 type=24）。
 	CollectionID int64
 
+	// GroupKey / GroupIndex / GroupCount / GroupTitle 是「这一条属于哪个合集」
+	// 那一份，给**队列里的连播**用。
+	//
+	// 🔴 **和 `CollectionID` 不是一回事**：`CollectionID` 是收藏夹里
+	// type=21 **容器行**自己的合集 id（那一行不是歌，是「打开这个合集」的
+	// 入口）；这里这一样是**容器里面某一首歌**带着的「我出自哪个合集」——
+	// 合集页「播放全部 / 加入队列」把每一集翻成普通队列项时顺手打上的
+	// （`ui.stampQueueGroup`，`ItemOfMedia` 不知道它出自哪个容器，所以不在
+	// 那里打）。
+	//
+	// **空串 = 不是合集里来的**。带上了它的项：
+	//
+	//	顺序 / 循环	播到第 i 集接着第 i+1 集（队列顺序本来就连着）
+	//	随机	播到组尾后，「下一首」优先走同组的下一集，**不洗牌**
+	//	          （和 `nextPageLocked` 的「保持分集顺序」同一件事：
+	//	          同合集的两集被随机打散，用户听得出「接错了」）
+	//
+	// ⚠️ **它不进 `Identity`**：判重认的是「这一首是什么」（bvid / sid /
+	// 路径），同一首歌从合集进队和从搜索进队是**同一首**——把来源打进
+	// 身份的话，同一首歌会画出两行、去重去不掉。
+	GroupKey   string // 形如 "season:<id>" / "series:<id>"
+	GroupIndex int    // 这一集在合集里的序号（1 起）
+	GroupCount int    // 这个合集一共几集
+	GroupTitle string // 合集的名字（队列抽屉组头那一行）
+
 	// Invalid 是「这一条已经失效」（稿件被 UP 主删了、或者换成了别的链接）。
 	//
 	// ⚠️ **它是从 B 站那个 `attr` 字段来的**（`bili.Media.Attr`，见
@@ -352,10 +377,11 @@ func (it Item) IsLocal() bool { return it.Source == "local" || it.Type == "local
 // items 只由 Queue 在 revision 变化时替换；调用方只能通过 Len 和 At 读取，不能
 // 把内部 slice 带出去。UI 因此可以在一帧里复用同一份视图，而不用每次复制整列。
 type QueueSnapshot struct {
-	revision uint64
-	items    []Item
-	current  int
-	mode     PlayMode
+	revision      uint64
+	items         []Item
+	current       int
+	mode          PlayMode
+	limitedGroups map[string]bool
 }
 
 // Revision 是这份视图的版本。版本不变时，队列形状、当前项和播放模式都不变。
@@ -377,6 +403,12 @@ func (s QueueSnapshot) CurrentIndex() int { return s.current }
 
 // PlayMode 返回这份视图里的播放模式。
 func (s QueueSnapshot) PlayMode() PlayMode { return s.mode }
+
+// GroupLimited 报这份视图里这个合集是不是被限成「仅播第 1 首」——单组那一道，
+// 和 Queue.GroupLimited 同一判据，但**读的是快照**，抽屉不用回队列再拿一次锁。
+func (s QueueSnapshot) GroupLimited(key string) bool {
+	return s.limitedGroups[key]
+}
 
 // Queue 是播放队列。零值不可用，请用 NewQueue。
 //
@@ -437,6 +469,13 @@ type Queue struct {
 	mode PlayMode
 	// keepPages 的默认是 true，照 Biu 的初始值（`play-list.ts:373`）。
 	keepPages bool
+	// autoplayGroups 是全局「自动连播合集」（设置里那一格）。默认开——
+	// 合集入队的意图多半是「连着听」，关掉是用户明确说了「别自动连播」。
+	// 它和单组那一道（`limitedGroups`）是两份，叠着判（见 groupLimitedLocked）。
+	autoplayGroups bool
+	// limitedGroups 是「这几个合集仅播第 1 首」的**单组**记录——队列抽屉
+	// 组头上那一枚点出来的。**内存态，不落盘**（理由见 SetGroupLimited）。
+	limitedGroups map[string]bool
 	// rnd 是随机模式挑歌用的随机源。见 RandSource 的注释——为什么不能
 	// 用包级的那个。
 	rnd RandSource
@@ -476,7 +515,7 @@ func NewQueue() *Queue {
 // 同一个源必然挑出同一串歌，所以「随机这一档下一首是 c」这种断言才能一次
 // 一次地钉死，而不是偶尔红一次。
 func NewQueueWithRand(r RandSource) *Queue {
-	return &Queue{cur: -1, mode: DefaultPlayMode, keepPages: true, rnd: r, revision: 1}
+	return &Queue{cur: -1, mode: DefaultPlayMode, keepPages: true, autoplayGroups: true, rnd: r, revision: 1}
 }
 
 // changed 告诉外面「队列变了」。**必须在 `q.mu` 外面调**（理由见 onChange）.
@@ -577,11 +616,19 @@ func (q *Queue) Snapshot() QueueSnapshot {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	if q.snapshot.revision != q.revision {
+		var limited map[string]bool
+		if len(q.limitedGroups) > 0 {
+			limited = make(map[string]bool, len(q.limitedGroups))
+			for k, v := range q.limitedGroups {
+				limited[k] = v
+			}
+		}
 		q.snapshot = QueueSnapshot{
-			revision: q.revision,
-			items:    append([]Item(nil), q.items...),
-			current:  q.cur,
-			mode:     q.mode,
+			revision:      q.revision,
+			items:         append([]Item(nil), q.items...),
+			current:       q.cur,
+			mode:          q.mode,
+			limitedGroups: limited,
 		}
 	}
 	return q.snapshot
@@ -900,6 +947,10 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 	q.bag = nil
 	q.history = q.history[:0]
 	q.undo = stepUndo{}
+	// 「仅播第 1 首」的单组记录跟着队列走：队列整个换了，「那个合集」
+	// 也就不是队列里那一个了——留着的话新队列里碰巧同 key 的合集会被
+	// 莫名限住。
+	q.limitedGroups = nil
 	q.bumpRevisionLocked()
 	if len(items) == 0 {
 		q.mu.Unlock()
@@ -1393,6 +1444,15 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 			d = Advance{Kind: AdvanceStop}
 			break
 		}
+		// 「仅播第 1 首」开着的合集：播完这一集跳过整组（见 skipGroupLocked）。
+		if next, ok := q.skipGroupLocked(); ok {
+			if commit {
+				q.cur = next
+				q.undo = stepUndo{ok: true, prevCur: oldCur}
+			}
+			d = Advance{Kind: AdvancePlay, Item: q.items[next]}
+			break
+		}
 		next := q.cur + 1
 		if commit {
 			q.cur = next
@@ -1408,6 +1468,16 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 		if next, ok := q.nextPageLocked(); ok {
 			// 跟着分集走（见 nextPageLocked）。这一首也算「放过」：压进历史栈，
 			// 「上一首」才回得去。
+			if commit {
+				pushed := q.setCurLocked(next, true)
+				q.undo = stepUndo{ok: true, prevCur: oldCur, popHist: pushed}
+			}
+			d = Advance{Kind: AdvancePlay, Item: q.items[next]}
+			break
+		}
+		if next, ok := q.nextGroupLocked(); ok {
+			// 跟着合集走（见 nextGroupLocked）：同合集的第 i 集接着第 i+1 集，
+			// 不洗牌——和分集同一个道理，用户听得出「接错了」。
 			if commit {
 				pushed := q.setCurLocked(next, true)
 				q.undo = stepUndo{ok: true, prevCur: oldCur, popHist: pushed}
@@ -1443,6 +1513,15 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 
 	default:
 		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
+		// 「仅播第 1 首」开着的合集：播完这一集跳过整组（见 skipGroupLocked）。
+		if next, ok := q.skipGroupLocked(); ok {
+			if commit {
+				q.cur = next
+				q.undo = stepUndo{ok: true, prevCur: oldCur}
+			}
+			d = Advance{Kind: AdvancePlay, Item: q.items[next]}
+			break
+		}
 		next := (q.cur + 1) % n
 		if next == q.cur {
 			// 绕回的还是它（队列里只有一首歌）：这一步没有挪，重头再放。
@@ -1502,6 +1581,136 @@ func (q *Queue) nextPageLocked() (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+// nextGroupLocked 找「同一个合集的下一集」在队列里的下标，没有是 false。
+//
+// 它和 `nextPageLocked` 是**同一族**：多 P 认 bvid，合集认 GroupKey——用户
+// 听得出「下一首是不是这一集的后一集」，所以随机那一档不该把同合集打散。
+//
+// 🔴 **它比 `nextPageLocked` 多一道**：合集有「仅播第 1 首」那一档
+// （单组临时关 + 全局开关关），那一档开着时**不走组内下一集**——「仅播
+// 第 1 首」就是「播完它，走队列的下一项」，那一项多半不是第 2 集。
+//
+// ⚠️ **判据是 `GroupIndex + 1` 落在队列里**，不是「队列顺序的下一行」：
+// 合集入队时连着排（`stampQueueGroup` 按页面顺序打号），但用户能拖动行
+// 把第 3 集挪到第 1 集前面——挪完「下一集」是用户摆的那个位置，不是入队
+// 时的老位置。
+func (q *Queue) nextGroupLocked() (int, bool) {
+	cur := q.items[q.cur]
+	if cur.GroupKey == "" || cur.GroupIndex <= 0 {
+		return 0, false
+	}
+	// 这个合集被临时限成「仅播第 1 首」：不走下一集，落回正常推进。
+	if q.groupLimitedLocked(cur.GroupKey) {
+		return 0, false
+	}
+	// GroupCount 是「这个合集一共几集」：播到最后一集就停（或者走队列
+	// 下一项，交给播放模式决定——见 advanceLocked）。
+	if cur.GroupCount > 0 && cur.GroupIndex >= cur.GroupCount {
+		return 0, false
+	}
+	want := cur.GroupIndex + 1
+	for i, it := range q.items {
+		if it.GroupKey == cur.GroupKey && it.GroupIndex == want {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// skipGroupLocked 是「仅播第 1 首」开着时的推进：跳过**同组剩下所有集**，
+// 落到这一组后面的第一项；组尾就是队尾时是 false（该停 / 该绕回交给档位）。
+//
+// ⚠️ **顺序 / 循环两档要用它**：那两档默认「下一首 = 队列下一行」，而组的
+// 下一行多半就是第 2 集——「仅播第 1 首」开着时那一行得跳过去，否则那枚钮
+// 就成了摆设（画着「仅播第 1 首」，放的却是第 2 集）。
+//
+// ⚠️ **判据是 GroupKey 不同**，不是下标隔几格：用户能把别组的行拖进来，
+// 同组的行也未必连着——跳过的是「同一个合集」，不是「连续几行」。
+func (q *Queue) skipGroupLocked() (int, bool) {
+	cur := q.items[q.cur]
+	key := cur.GroupKey
+	if key == "" || !q.groupLimitedLocked(key) {
+		return 0, false
+	}
+	for i := q.cur + 1; i < len(q.items); i++ {
+		if q.items[i].GroupKey != key {
+			return i, true
+		}
+	}
+	return 0, false
+}
+
+// groupLimitedLocked 报这个合集此刻是不是被限成「仅播第 1 首」。
+//
+// 两道开关，**任一道都限**：
+//
+//	全局	`autoplayGroups`（设置里那一格「自动连播合集」）：关了就是
+//		「所有合集都只播第 1 首」——用户不想合集自动连播。
+//	单组	`limitedGroups`（队列抽屉组头上那一枚）：只对这一个合集
+//		生效，不动设置。
+//
+// ⚠️ **只在「当前项属于这个组」时有意义**：散歌（GroupKey 为空）不归它管。
+func (q *Queue) groupLimitedLocked(key string) bool {
+	if key == "" {
+		return false
+	}
+	if !q.autoplayGroups {
+		return true
+	}
+	return q.limitedGroups[key]
+}
+
+// SetAutoplayGroups 设全局「自动连播合集」（设置里那一格）。
+//
+// ⚠️ **它和「单组限制」是两份状态**：全局关着时所有合集都只播第 1 首；
+// 全局开着的单组可以各自临时关——两份叠着判（见 groupLimitedLocked）。
+func (q *Queue) SetAutoplayGroups(v bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.autoplayGroups = v
+	q.bumpRevisionLocked()
+}
+
+// AutoplayGroups 报全局「自动连播合集」是不是开着。
+func (q *Queue) AutoplayGroups() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.autoplayGroups
+}
+
+// SetGroupLimited 记 / 清「这个合集仅播第 1 首」——单组那一道，不动全局。
+//
+// ⚠️ **它是内存态，不落盘**：用户是照着队列里那一个合集点的「仅播第 1 首」，
+// 下次启动队列都换了，没有「这一个合集」可恢复——落盘只会变成「某个没名的
+// 合集被限了」这种没头没尾的状态。
+func (q *Queue) SetGroupLimited(key string, limited bool) {
+	if key == "" {
+		return
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if limited {
+		if q.limitedGroups == nil {
+			q.limitedGroups = map[string]bool{}
+		}
+		q.limitedGroups[key] = true
+	} else {
+		delete(q.limitedGroups, key)
+	}
+	q.bumpRevisionLocked()
+}
+
+// GroupLimited 报「这一个合集」此刻是不是被限成「仅播第 1 首」——**只看单组
+// 那一道**（抽屉组头上那一枚画的是它），全局那一道是另一份（见 AutoplayGroups）。
+func (q *Queue) GroupLimited(key string) bool {
+	if key == "" {
+		return false
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.limitedGroups[key]
 }
 
 // PlayMode 是当前档位。
@@ -2089,6 +2298,45 @@ func (a *App) SetKeepPagesOrderInRandom(v bool) {
 	a.queue.SetKeepPagesOrderInRandom(v)
 	a.rememberPlayMode()
 	a.invalidate() // 理由同 SetPlayMode：那个开关在浮层里，点完得当场收起来。
+}
+
+// SetAutoplayCollections 设全局「自动连播合集」，并记进设置。
+func (a *App) SetAutoplayCollections(v bool) {
+	a.queue.SetAutoplayGroups(v)
+	a.rememberAutoplay()
+	// 下一首是谁变了（可能从「下一集」变成「队列下一项」），预取作废。
+	a.queue.invalidate()
+	a.invalidate()
+}
+
+// AutoplayCollections 报全局「自动连播合集」是不是开着——设置页画它，
+// 队列抽屉的组头画「它要不要灰」也读它。
+func (a *App) AutoplayCollections() bool { return a.queue.AutoplayGroups() }
+
+// SetCollectionGroupLimited 记 / 清「这个合集仅播第 1 首」——队列抽屉组头
+// 上那一枚。它**不动设置**（单组那一道是内存态，见 Queue.SetGroupLimited）。
+func (a *App) SetCollectionGroupLimited(key string, limited bool) {
+	a.queue.SetGroupLimited(key, limited)
+	// 下一首是谁可能变了（从「下一集」变成「跳整组」，或反过来），预取作废。
+	a.queue.invalidate()
+	a.invalidate()
+}
+
+// CollectionGroupLimited 报这个合集此刻**单组那一道**是不是限着——抽屉
+// 组头上那一枚画的是它。全局那一道另算（见 AutoplayCollections）。
+func (a *App) CollectionGroupLimited(key string) bool {
+	return a.queue.GroupLimited(key)
+}
+
+// rememberAutoplay 把「自动连播合集」落到设置里，下次启动还是这一档。
+//
+// 存不住不算错（同 rememberPlayMode）：设置层有入口说「这次没存上」，
+// 在这儿拦一次只会让开关本身失灵。
+func (a *App) rememberAutoplay() {
+	v := a.queue.AutoplayGroups()
+	_, _ = a.UpdateSettings(func(s *Settings) {
+		s.AutoplayCollections = &v
+	})
 }
 
 // rememberPlayMode 把这两个开关落到设置里，下次启动还是这一档。

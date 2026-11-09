@@ -374,6 +374,14 @@ type Settings struct {
 	// ShouldKeepPagesOrderInRandomPlayMode 是「随机时保持分集顺序」。
 	ShouldKeepPagesOrderInRandomPlayMode bool `json:"shouldKeepPagesOrderInRandomPlayMode"`
 
+	// AutoplayCollections 是「自动连播合集」开关。默认**开**。
+	//
+	// ⚠️ **它是指针**（`*bool`），和 `UpdateNotification` 同一个理由：默认开
+	// 的开关，零值 false 既是「没设过」（老版本写的文件）又是「用户关了」，
+	// 裸 bool 分不开——老用户升级上来不该被静默改掉合集连播的行为（他们
+	// 从没说过「不要连播」）。
+	AutoplayCollections *bool `json:"autoplayCollections"`
+
 	// Volume 是用户设的音量（0..1），1 是解码出来的原样。
 	//
 	// ⚠️ **用指针**：「这份设置里没有这一格」（老版本写的文件）和「用户把音量
@@ -628,6 +636,8 @@ func DefaultSettings(downloadPath string) Settings {
 	curtain := DefaultMiniLyricsCurtain
 	notchActivity := true
 	notchVirtual := false
+	// 「自动连播合集」默认开（见 `Settings.AutoplayCollections`）。
+	autoplayCollections := true
 	return Settings{
 		AutoStart:         false,
 		CloseWindowOption: CloseWindowHide,
@@ -683,6 +693,11 @@ func DefaultSettings(downloadPath string) Settings {
 		// 播放模式的两个默认值：默认循环播放，随机时保持分集顺序。
 		PlayMode:                             DefaultPlayMode,
 		ShouldKeepPagesOrderInRandomPlayMode: true,
+		// 「自动连播合集」：默认开（理由见 `Settings.AutoplayCollections`）。
+		// 它是指针，所以每一次调用都要新的一份——共用同一个指针的话，
+		// 有人改了 `*s.AutoplayCollections` 就把全局默认改了（和上面 `vol`
+		// 同一路数）。
+		AutoplayCollections: &autoplayCollections,
 	}
 }
 
@@ -698,6 +713,17 @@ func (s Settings) UpdateNotificationEnabled() bool {
 		return true
 	}
 	return *s.UpdateNotification
+}
+
+// AutoplayCollectionsEnabled 报「自动连播合集」要不要开。
+//
+// ⚠️ **它把「没设过」和「用户关了」分开**（理由见 `Settings.AutoplayCollections`
+// 那一格）：`nil`（老版本写的文件）按**默认开**算，`false` 是用户明确关了。
+func (s Settings) AutoplayCollectionsEnabled() bool {
+	if s.AutoplayCollections == nil {
+		return true
+	}
+	return *s.AutoplayCollections
 }
 
 // 当前版本设置文件的坏法分为损坏、版本不匹配和存储已关闭三类。
@@ -815,6 +841,11 @@ func (s *Settings) normalize() {
 	if s.MiniLyricsCurtain == nil {
 		v := DefaultMiniLyricsCurtain
 		s.MiniLyricsCurtain = &v
+	}
+	// 「自动连播合集」缺少时默认开启，用户明确关闭的值保持不变。
+	if s.AutoplayCollections == nil {
+		v := true
+		s.AutoplayCollections = &v
 	}
 	if audio.EQPresetByID(s.EQPreset).ID == "flat" {
 		s.EQPreset = ""

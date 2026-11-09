@@ -149,6 +149,15 @@ const (
 type queueRow struct {
 	item app.Item
 	at   int
+	// group 是「这一行属于哪个合集」那一份，**只有合集行有**。
+	//
+	// 🔴 **它不是 `item.GroupKey`**：那一栏是队列项自己带着的「我出自哪个
+	// 合集」；这里是**这一帧画出来的行**上的组信息——同一个 `Item` 在
+	// 队列里出现两份时，两份属于同一组，但**是同一个组头**（`GroupKey`
+	// 相同），只是两个不同的行。
+	//
+	// ⚠️ **散歌是 nil**：不是合集的行没有它，画了也不该有那一根竖线。
+	group *queueGroup
 	// key 是这一行的身份（铁律四）。见 queueRowKey。
 	key string
 	// id 是这一首的**判重标识**（Item.Identity），仅用于判断当前播放项；同一首歌的
@@ -163,6 +172,36 @@ type queueRow struct {
 	// 指针，尺寸类跳一级，**每帧多 16 个字节**（票 #319 的验收：每帧分配不许
 	// 涨）。状态跟着行走，这一条就不用多捕获任何东西。
 	state queueRowState
+}
+
+// queueGroup 是抽屉里**一个合集**的那一份：组头 + 它带的那些集。
+//
+// ⚠️ **它是「这一帧画出来的组」，不是「队列里的组」**：队列里没有「组」这
+// 个实体——合集只是几行带着同一个 `GroupKey` 的 `Item`，「它们是一组」是
+// 抽屉画的时候**按 `GroupKey` 归拢**出来的。所以这一个结构只活在这一帧
+// （`queueRowsForSnapshot` 顺手归拢），下一帧重新归。
+//
+// # 为什么归在行上而不是归在队列上
+//
+// 「这几行是一个合集」是**界面**的事（队列只管「下一首是谁」，那一层认
+// `GroupKey` 一个字段就够）。把「组」做成队列实体的话，删一行、拖一行都
+// 要顺手维护组的边界——而那一份在队列里用不上，白扛一份不变量。
+type queueGroup struct {
+	// Key 是这一组的键（`Item.GroupKey`，形如 "season:<id>"）。
+	Key string
+	// Title 是组头那一行要写的合集名（`Item.GroupTitle`，空串时界面那一格留空）。
+	Title string
+	// Count 是这一组一共几集（`Item.GroupCount`，第一集带着的就是总数）。
+	Count int
+	// Cover 是组头那一小枚封面（**第一集的封面**，和集行同一份来源）。
+	Cover string
+	// Owner 是组头副题那一段「UP 主」（第一集的 Artist——同一个合集里
+	// 各集的 UP 多半是同一位）。
+	Owner string
+	// FirstAt 是这一组第一集在**队列**里的下标（组头要点开时按它定位）。
+	FirstAt int
+	// Limited 是「仅播第 1 首」此刻开没开（**单组**那一道，读的是快照）。
+	Limited bool
 }
 
 // queueRowKey 是这一行的 key。
@@ -213,66 +252,108 @@ func packQueueRowIdentity(r queueRowRaw) queueRowIdentity {
 // 所以重复项仍有稳定且唯一的 key。
 //
 // ⚠️ **那两串身份是记好的那一份**（票 #339）：现拼的话每帧每行一到两次分配。
+// queueRowsFor 保留纯函数测试和旧调用方的整列接缝；绘制路径使用 revision 快照。
+func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
+	q := app.NewQueue()
+	q.Reset(items...)
+	return queueRowsForSnapshot(q.Snapshot(), ids)
+}
+
+// queueRowsForSnapshot 是抽屉这一帧要画的那几行：**队列里的每一项都保留一行**，
+// 合集项外加按 `GroupKey` 归拢出组头。
+//
+// ⚠️ **组是「按 GroupKey 归拢」出来的，不是「队列里有组」**：同一个合集的行
+// 在队列里可以分开（用户拖过、手动加过），归拢认的是**身份**不是「连续几行」——
+// 所以同一个合集的两段也会画成**两个组头**（它们是两段，不是一个组）。
 func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
 	rows := make([]queueRow, 0, snapshot.Len())
-	// occurrence 是「这一行是第几份同一首」：队列允许同一首歌重复入队，每
-	// 一份各占一行、各有各的 key。第 0/1/2… 份的出现序号进 `queueRowKey`，
-	// 行 key 才互不相同。
+	// groups 是「这一帧归出来的组」：按 GroupKey 记，**第一集出现的位置**
+	// 插组头，后面的集**插在它自己那行**（行序 = 队列序），不挪到一起。
 	//
-	// ⚠️ **用行 key 当指纹来数**（票：性能修正）：原来每行回扫前面所有行调
-	// `SameTrack`，500 项 ~12.5 万次比较。现在一行只算一次身份
-	// （`packQueueRowIdentity` 里的 `Item.Identity()`，被 `rowkey.Memo` 记
-	// 住），再拿「去掉了序号和下标的那一段 key」当 map 键前问一遍前面
-	// 有没有同 key 的行——判重语义不变（`SameTrack` 的口径就是
-	// `Identity()` 非空且相等），而**比较的是已算好的行 key**，不是两首的
-	// `Item`。
-	//
-	// ⚠️ **为什么不拿 `Item` 本身当 map 键**：`Item` 里有十几个字段，当键
-	// 的话比较一次是逐字段，而且得先拷贝一份 `it`（map 键不能是「指向队列
-	// 里那一格」的引用）。行 key 已经装好了「判重标识 + 序号 + 下标」那一
-	// 份，拿它当键**零新增字段、零新增拷贝**。
+	// ⚠️ **记的是 `*queueGroup`**：同一个合集的两段各自一份（它们的行不
+	// 连着），但**同一 GroupKey 只能归出一个组**——同一个合集在队列里出现
+	// 两段时，第二段会归进第一段那个组头底下，而「这一段从哪儿开始」按
+	// `FirstAt` 算不出来。所以这里用**「一段连续的同 key 行」当一个组**：
+	// key 变了就结一个组，同 key 续上。
+	var cur *queueGroup
 	seen := make(map[string]int, snapshot.Len())
 	for i := 0; i < snapshot.Len(); i++ {
 		it, ok := snapshot.At(i)
 		if !ok {
 			continue
 		}
-		// 先按「序号 0」拿一份身份（`rowkey.Memo` 记住 `Item.Identity()` 的
-		// 结果，同一首歌只拼一次）；再看这一首在前面几行里出现过几次——
-		// 出现的次数就是这一行的 occurrence。`ident.id` 是判重标识
-		// （空 = 认不出身份，那种项不进 seen），所以认不出身份的行各走各的
-		// 下标，不会凑成同一首。
 		raw := queueRowRaw{item: it}
 		ident := ids.At(i, raw, packQueueRowIdentity)
 		if ident.id == "" {
-			// 认不出身份的那一档照旧按下标当身份（`SameTrack(it,it)` 为假
-			// 时 `raw.at = i`——同一份行 key 形状）。
 			raw.at = i
 			ident = ids.At(i, raw, packQueueRowIdentity)
 			rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
+			cur = nil
 			continue
 		}
 		occurrence := seen[ident.id]
 		if occurrence > 0 {
-			// ⚠️ **换一份原料再问一次**：`occurrence` 变了，行 key 也要变——
-			// `queueRowKey` 里是「标识 + 序号 + 下标」三样拼起来的：序号是
-			// occurrence，下标给 0（认得出身份的这一档下标不进 key——
-			// 和 `packQueueRowIdentity` 第一次那一问同一形状）。
 			ident = ids.At(i, queueRowRaw{item: it, occurrence: occurrence}, packQueueRowIdentity)
 			seen[ident.id] = occurrence + 1
 		} else if ident.id != "" {
 			seen[ident.id] = 1
 		}
-		rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
+		row := queueRow{item: it, at: i, key: ident.key, id: ident.id}
+		// 不是合集行：散歌直接追加，顺手把「当前组」断掉——下一个同 key 的集
+		// 进来要新起一个组（它是一段，不接在前一段后面）。
+		if it.GroupKey == "" {
+			rows = append(rows, row)
+			cur = nil
+			continue
+		}
+		// 同组续上：cur 还是同一个 key 就并进它；换 key（或者刚断掉）就新起一个。
+		if cur == nil || cur.Key != it.GroupKey {
+			cur = &queueGroup{
+				Key:     it.GroupKey,
+				Title:   it.GroupTitle,
+				Count:   it.GroupCount,
+				Cover:   it.Cover,
+				Owner:   it.Artist,
+				FirstAt: i,
+				Limited: snapshot.GroupLimited(it.GroupKey),
+			}
+			// 组头行：`at` 用组里第一集的队列下标，key 加 `!group` 前缀和集行分开。
+			rows = append(rows, queueRow{
+				at:    i,
+				key:   "queue-group:" + it.GroupKey,
+				group: cur,
+			})
+		}
+		row.group = cur
+		rows = append(rows, row)
 	}
 	return rows
 }
 
-// queueRowsFor 保留纯函数测试和旧调用方的整列接缝；绘制路径使用 revision 快照。
-func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdentity]) []queueRow {
-	q := app.NewQueue()
-	q.Reset(items...)
-	return queueRowsForSnapshot(q.Snapshot(), ids)
+// queueGroupRows 是这一帧要画的**组头那一行**（Open 时它后面跟着各集）。
+//
+// ⚠️ **行数会跟着开合变**（收着的组头后面不画集行）：所以这一份是「行 →
+// 画什么」的**索引**——`queueRows` 装的是全部，`groupRows` 装的是「这一帧
+// 看得见的那几行」。
+func queueGroupRows(rows []queueRow, open map[string]bool) []queueRow {
+	out := make([]queueRow, 0, len(rows))
+	for i, r := range rows {
+		if r.group != nil && r.item.GroupKey != "" {
+			// 是某一集：组收着就不画。
+			if !open[r.group.Key] {
+				continue
+			}
+			out = append(out, r)
+			continue
+		}
+		// 是组头行：它自己画（后面的集归 `open` 管，不用在这儿记）。
+		if r.group != nil {
+			out = append(out, r)
+			continue
+		}
+		out = append(out, rows[i])
+	}
+	return out
 }
 
 // viewQueueDrawer 是播放列表抽屉。没开就一个字都不建。
@@ -301,6 +382,11 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	if s.queueRowsRevision != qSnapshot.Revision() {
 		s.queueRows = queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
 		s.queueRowsRevision = qSnapshot.Revision()
+		// 「开着哪些组」跟着队列走：队列整个换了，那些「开着的组」也就
+		// 不是队列里那一批了——留着的话新队列里碰巧同 key 的组会被莫名开着。
+		if s.queueGroupOpen == nil {
+			s.queueGroupOpen = map[string]bool{}
+		}
 	}
 	t := c.Theme()
 	p := tok.Of(t)
@@ -558,7 +644,13 @@ func (s *Shell) viewQueueBody(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 // viewQueueList 是播放列表抽屉里那一列队列。每个队列项都是一行，行高定死 64——
 // 「定位当前播放」滚到的 `targetIndex * 64` 靠的就是这个定值。
 func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnapshot) {
-	rows := s.queueRows
+	// rows 是**这一帧画出来的行**：合集收着的时候它的集行不画（组头还在），
+	// 所以这一份比 `s.queueRows`（队列里的全部）少那几行。
+	//
+	// ⚠️ **`s.queueRows` 不动**：`queueDrop` 的落点是「队列里的下标」，按全部
+	// 那份算才和队列对得上；这里另算一份「画出来的是哪几行」给它用。
+	all := s.queueRows
+	rows := queueGroupRows(all, s.queueGroupOpen)
 	// ⚠️ **这一帧只取一次快照**（`viewMain` 那条规矩：两次取的话两者之间状态
 	// 可能变了，而画出来的是两份不同的状态）。「当前这一首」和「停住了」都从
 	// 这一份里读。
@@ -595,12 +687,18 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	// 这一帧「当前行是第几行、在不在响、多长」交给每一行读（分段标签和正在放那一行用）。
 	s.queueCurrent, s.queuePlaying, s.queueDur = cur, st.Playing, st.Duration
 
-	// 行 key 包含判重标识和队列位置，重复项因此各自稳定且唯一。
+	// 行 key 包含判重标识和队列位置，重复项因此各自稳定且唯一；组头行
+	// 带着 `queue-group:` 前缀，和集行互不相撞。
 	s.queueList.Key = func(i int) any {
 		return s.queueRowKeys.At(i, rows[i].key, rowkey.Identity)
 	}
-	// Label 是这一行给无障碍和「打字选中」用的名字。
-	s.queueList.Label = func(i int) string { return rows[i].item.Title }
+	// Label 是这一行给无障碍和「打字选中」用的名字；组头行说合集名。
+	s.queueList.Label = func(i int) string {
+		if g := rows[i].group; g != nil && rows[i].item.GroupKey == "" {
+			return g.Title
+		}
+		return rows[i].item.Title
+	}
 
 	// 落点先清掉：**每一行自己记**（见下面 viewQueueRow 里那几句
 	// PointerPosition），指针不在任何一行上时它就该是「没有落点」。
@@ -656,7 +754,14 @@ func currentRow(rows []queueRow, current int, playing bool) int {
 	if !playing || current < 0 || current >= len(rows) {
 		return -1
 	}
-	return current
+	// 当前项在**队列**里的下标；这一帧画出来的行里，第 i 行的 `at` 记的就
+	// 是队列下标——收着的组里那一行没画出来，它的 `at` 照样能认出来。
+	for i := range rows {
+		if rows[i].at == current {
+			return i
+		}
+	}
+	return -1
 }
 
 // playingIdentity 是「正在放的那一首」的判重标识。没有歌在放、或者认不出是哪一首
@@ -712,6 +817,12 @@ func queueSectionLabel(at, current int) string {
 // 分段标签（「正在播放」等）在行本体**外面**——悬停、拖动、点击都只算行本体。
 func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	p := tok.Of(t)
+	// 组头行：这一行不是歌，是「这一组合集」的开合把和它的那一枚钮。
+	// 它不播、不拖、不进分段标签（那一套认的是「这一首」）。
+	if row.group != nil && row.item.GroupKey == "" {
+		s.viewQueueGroupRow(c, row, t)
+		return
+	}
 	state := row.state
 	label := queueSectionLabel(at, s.queueCurrent)
 	wrap := ui.Column(c).Key(row.key).FillWidth()
@@ -735,30 +846,68 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			// 都要新建一个闭包）。
 			s.queueDraggingNow = true
 		}
-		// 落点就记在这一行：指针在这一行的上半还是下半。
+		// 落点就记在这一行：指针在这一行的上半还是下半。落点认**队列下标**
+		//（`row.at`），不是这一帧画出来的行号——收起的组不画行，行号和队列
+		// 下标已经对不上（`queueDrop` 索引的是 `s.queueRows`）。
 		if _, py, over := rowEl.PointerPosition(); over {
-			s.queueDropAt = at
+			s.queueDropAt = row.at
 			s.queueDropUpper = py < rowEl.Bounds().H/2
 		}
 		// 拖着的时候在落点那一行画一条插入线：挪到哪儿得看得见（原型 `.qrow.drag-over`）。
-		if s.queueDragging && s.queueDropAt == at {
+		if s.queueDragging && s.queueDropAt == row.at {
 			s.queueDropLine(at, rowEl, p.Accent)
 		}
 		rowEl.Children(func() {
-			// 拖动把手（原型 `.grip`：14 的图标，text-3）。
-			ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
-				ui.Icon(c, pud.Icon("grip")).FontSize(14).TextColor(p.Text3)
-			})
-			// 封面 40、圆角 4、`surface-2` 占位底。
-			ui.Box(c).Size(queueCoverSize, queueCoverSize).Shrink(0).Radius(tok.R4).Clip().
+			// 合集里的一集：左边留一条 accent 竖线 + 缩进（原型 `.inner` 那条
+			// `border-left`），散歌照原来的把手 + 封面摆法。
+			if row.group != nil {
+				accent := p.Accent
+				if row.group.Limited {
+					accent = p.LineStrong
+				}
+				ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
+					ui.Box(c).Width(2).Height(queueCoverSize - 8).Background(accent).Radius(1)
+				})
+			} else {
+				ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
+					ui.Icon(c, pud.Icon("grip")).FontSize(14).TextColor(p.Text3)
+				})
+			}
+			// 封面 40、圆角 4、`surface-2` 占位底；合集行的封面缩到 32，让出
+			// 左边那根竖线的位置（原型 `.cbody .qrow` 的 26px 封面 + 竖线）。
+			coverSize := float32(queueCoverSize)
+			if row.group != nil {
+				coverSize = queueCoverSize - 8
+			}
+			ui.Box(c).Size(coverSize, coverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
-				imgcache.ViewFlat(c, s.images, row.item.Cover, queueCoverSize, queueCoverSize, tok.R4)
+				imgcache.ViewFlat(c, s.images, row.item.Cover, coverSize, coverSize, tok.R4)
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 				ui.Text(c, tclean.Clean(row.item.Title).Title).FontSize(scale.Font(c, scale.Size13)).
 					FontWeight(500).TextColor(playlistTextColor(t, state)).SingleLine().Ellipsis("…")
-				ui.Text(c, s.queueRowSub(row, state)).FontSize(scale.Font(c, scale.Size12)).
-					TextColor(p.Text2).SingleLine().Ellipsis("…")
+				// 合集行的副题：「第 N 集 · UP 主」——「这是第几集」比「这是谁」
+				// 更要紧（用户在这一摞里认的是集数）。
+				sub := s.queueRowSub(row, state)
+				if row.group != nil && row.item.GroupIndex > 0 {
+					sub = "第 " + strconv.Itoa(row.item.GroupIndex) + " 集"
+					if row.item.Artist != "" {
+						sub += " · " + row.item.Artist
+					}
+					// 「仅播第 1 首」开着：第 2 集起要说「这一集不会被接着放」。
+					if row.group.Limited && row.item.GroupIndex > 1 {
+						sub += " · 播完第 1 集就停"
+					}
+					if state == queueRowCurrent && s.queueDur > 0 {
+						sub += " · " + clock(s.queueDur)
+					}
+				}
+				subText := ui.Text(c, sub).FontSize(scale.Font(c, scale.Size12)).SingleLine().Ellipsis("…")
+				// 「仅播第 1 首」开着的组：第 2 集起整行变暗（原型 `.limited .qrow` 半透明）。
+				if row.group != nil && row.group.Limited && row.item.GroupIndex > 1 {
+					subText = subText.Opacity(0.5)
+				}
+				subText.TextColor(p.Text2)
 			})
 			// 操作：正在放的那一行是三根跳动的柱（右边空 12），别的行是上移 + 移除（32 的键）。
 			if state == queueRowCurrent {
@@ -790,6 +939,91 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	// 右键菜单挂在**整行**（含上面的分段标签）上：MyGo 取的是最里层那个带菜单的元素，整行这一层足够里面，
 	// 而在分段标签上按右键也出同一份菜单（行的无障碍名 / 测试按歌名找到的是整行的中心）。
 	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
+}
+
+// viewQueueGroupRow 是抽屉里一个合集的**组头行**（原型 `.chead`）。
+//
+// 它不是歌：不播、不拖、不进分段标签。点它开合（收着的组里那些集不画）；
+// 行尾那一枚「仅播第 1 首 / 恢复连播」是这个合集自己的临时开关，不动设置。
+//
+// ⚠️ **点它播的是这一组的第一集**（`row.at` 记的就是第一集的队列下标），
+// 和点集行里第 1 集是同一个动作——合集行不画「▶」，但点它照样从这儿听。
+func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
+	p := tok.Of(t)
+	g := row.group
+	open := s.queueGroupOpen[g.Key]
+	wrap := ui.Column(c).Key(row.key).FillWidth()
+	wrap.Children(func() {
+		rowEl := ui.Row(c).Key(queueRowInnerKey).FillWidth().Padding(queueRowPad).Gap(queueRowGap).
+			AlignItems(ui.Center).Radius(tok.R8)
+		if rowEl.Hovered() {
+			rowEl = rowEl.Background(p.Hover)
+		}
+		rowEl.Children(func() {
+			// 开合箭头（原型 `.carat`）：开着是 ▸ 转 90°，收着是 ▸。它不是
+			// 图标，是「这一组收着还是开着」的那一个记号。
+			carat := ui.Text(c, "▸").FontSize(scale.Font(c, scale.Size11)).TextColor(p.Text3).SingleLine()
+			if open {
+				carat = carat.TextColor(p.Text)
+			}
+			// 封面 + 集数角标：和集行同一枚 40 封面，右下压一个「N」的小块
+			// （原型 `.g-cov .gcnt`），让用户一眼认出「这是一摞，不是一首」。
+			ui.Box(c).Size(queueCoverSize, queueCoverSize).Shrink(0).Radius(tok.R4).Clip().
+				Background(p.Surface2).Children(func() {
+				imgcache.ViewFlat(c, s.images, g.Cover, queueCoverSize, queueCoverSize, tok.R4)
+				// 集数角标：右下，mono 10，半透明黑底（原型 `.gcnt`）。
+				ui.Box(c).Absolute().Right(0).Bottom(0).Padding(space.Px2, space.Px4).
+					Background(ui.RGBA(0, 0, 0, scrim.Badge)).Radius(tok.R4).Children(func() {
+					typo.Mono(ui.Text(c, strconv.Itoa(g.Count))).FontSize(scale.Font(c, scale.Size11)).
+						TextColor(ui.RGBA(1, 1, 1, 0.92)).SingleLine()
+				})
+			})
+			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+				ui.Text(c, tclean.Clean(g.Title).Title).FontSize(scale.Font(c, scale.Size13)).
+					FontWeight(500).TextColor(p.Text).SingleLine().Ellipsis("…")
+				ui.Text(c, queueGroupSub(g)).FontSize(scale.Font(c, scale.Size11)).
+					TextColor(p.Text2).SingleLine().Ellipsis("…")
+			})
+			// 「仅播第 1 首 / 恢复连播」这一枚：**单组**的临时开关，不动设置。
+			// 开着时它是 accent 描边 + 淡底（原型 `.sw.off`）。
+			label := "仅播第 1 首"
+			if g.Limited {
+				label = "恢复连播"
+			}
+			btn := pud.Button(c, "queue:grouplimit", pud.Quiet, pud.Sm, label, "")
+			if g.Limited {
+				btn = btn.BorderColor(p.Accent).TextColor(p.AccentText).Background(p.AccentSoft)
+			}
+			if btn.Clicked() {
+				s.app.SetCollectionGroupLimited(g.Key, !g.Limited)
+			}
+		})
+		// 点这一行 = 开合（收着的组不画集行）；⚠️ **不是播第一集**——开合是
+		// 这个组头自己的事，播放要走「点这一行 = 从这儿听」那一套（那要按
+		// 到第一集的行上）。
+		if rowEl.Clicked() {
+			s.queueGroupOpen[g.Key] = !open
+			s.wake.invalidate()
+		}
+	})
+	// 右键菜单挂在**整行**上：和集行同一份（那一行 `FirstAt` 就是这一组的
+	// 第一集，菜单里的动作按它办）。
+	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
+}
+
+// queueGroupSub 是组头副题那一行：「合集 · UP 主 · N 集」。
+//
+// ⚠️ **「合集」是一个小 tag**（原型 `.tag`）：它不是字，是「这一行不是一首
+// 歌」的那一个记号——没有它，组头和普通行只在「右上角多一枚钮」上差。
+func queueGroupSub(g *queueGroup) string {
+	sub := "合集"
+	if g.Owner != "" {
+		sub += " · " + g.Owner
+	}
+	if g.Count > 0 {
+		sub += " · " + strconv.Itoa(g.Count) + " 集"
+	}
+	return sub
 }
 
 // queueUpLabel / queueRemoveLabel 是两枚行内键的无障碍名字（原型 `上移 {歌名}`、

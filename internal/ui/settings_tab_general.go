@@ -102,6 +102,13 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 
 			cd.switchRow("report", "上报本机播放记录", "把播放进度同步到 B 站账号，换设备可以接着看", st.ReportPlayHistory,
 				func(cur *app.Settings, on bool) { cur.ReportPlayHistory = on })
+
+			cd.switchRow("autoplayCollection", "自动连播合集", "合集播完一集接着下一集；关闭时每个合集只播第一首",
+				st.AutoplayCollectionsEnabled(),
+				func(cur *app.Settings, on bool) {
+					v := on
+					cur.AutoplayCollections = &v
+				})
 		})
 	})
 

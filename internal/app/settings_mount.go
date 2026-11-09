@@ -76,6 +76,7 @@ func (a *App) MountSettings(path string) error {
 	s := store.Snapshot()
 	a.queue.SetPlayMode(s.PlayMode)
 	a.queue.SetKeepPagesOrderInRandom(s.ShouldKeepPagesOrderInRandomPlayMode)
+	a.queue.SetAutoplayGroups(s.AutoplayCollectionsEnabled())
 
 	// 音量：用户设过的那一档，重启之后还在（票 #311）。
 	//
@@ -334,6 +335,14 @@ func (a *App) UpdateSettings(fn func(*Settings)) (Settings, error) {
 	// 它自己的「没挂取流」早退挡住。
 	if q := PrefToBili(s.AudioQuality); a.AudioQuality() != q {
 		a.SetAudioQuality(q)
+	}
+	// 「自动连播合集」跟着这一笔设置走（理由同上）：设置页换档也是「换档」，
+	// 队列要立刻按新档算「下一首是不是下一集」——不然那一格只有重启才生效。
+	//
+	// ⚠️ **值没变就不调**：`SetAutoplayCollections` 自己会把值写回设置
+	//（`rememberAutoplay`），不拦的话换档 → 写设置 → 再换档绕圈。
+	if a.queue.AutoplayGroups() != s.AutoplayCollectionsEnabled() {
+		a.SetAutoplayCollections(s.AutoplayCollectionsEnabled())
 	}
 	a.invalidate()
 	return s, nil

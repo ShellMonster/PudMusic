@@ -542,7 +542,9 @@ type Shell struct {
 	// 每帧都要传一次拖动值（见 queue_drag.go 的说明）。
 	queueDrags rowkey.Memo[int, *queueDragValue]
 
-	// queueDropAt 是**落点那一行**在抽屉里的行号（-1 = 没有落点）。
+	// queueDropAt 是**落点那一行**在**队列**里的下标（-1 = 没有落点）。
+	// 收起的合集不画行，行号和队列下标对不上——所以记的是 `row.at`（队列
+	// 下标），不是这一帧画出来的行号。
 	//
 	// ⚠️ **它由每一行自己记**（见 queue_drawer.go 的 viewQueueRow）：每一行都
 	// 知道指针是不是在它身上、在它的哪一半——指针在谁身上，谁就是落点。
@@ -577,6 +579,17 @@ type Shell struct {
 	// queueRowsRevision 是 queueRows 对应的队列快照版本。revision 不变时复用
 	// 同一份派生行，当前/停止状态仍在绘制前按当前 State 更新。
 	queueRowsRevision uint64
+
+	// queueGroupOpen 是「这个合集此刻收着还是开着」——**默认收**（map 里
+	// 没有就是收着）。只由 view 在主线程上读写。
+	//
+	// ⚠️ **它记的是「开着的那些」**（`map[key]bool` 的语义是「开着」）：
+	// 默认收 = 不用记，点开才记一笔——合集少，记开的比记收的省。
+	//
+	// ⚠️ **它跟着队列走**（`Reset` 时清空）：队列整个换了，「那个合集」
+	// 也就不是队列里那一个了——留着的话新队列里碰巧同 key 的合集会被
+	// 莫名开着。
+	queueGroupOpen map[string]bool
 
 	// queueClearOpen 是「清空播放列表」那道二次确认开着没有（抽屉头右上角那枚
 	// 垃圾桶，见 queue_drawer.go 的 viewQueueClearConfirm）。

@@ -309,7 +309,7 @@ func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 
 // shuffleWholeCollection 随机播放：把已加载的条目洗牌后换成队列并开播。
 func (s *Shell) shuffleWholeCollection(p *collectionPage) {
-	items, skipped := app.QueueItemsOfMediasCounting(s.allMedias(p))
+	items, skipped := s.queueItemsOfMedias(p, s.allMedias(p))
 	if len(items) == 0 {
 		s.addToast("这里还没有可以播的歌", notice.Warning)
 		return

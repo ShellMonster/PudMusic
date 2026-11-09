@@ -441,3 +441,137 @@ func TestAdvanceOnAnEmptyOrUnstartedQueueStops(t *testing.T) {
 		}
 	}
 }
+
+// ---- 合集连播（「自动连播合集」/「仅播第 1 首」） ----
+
+// group 造一个合集里的一项（出自哪个合集 / 第几集 / 共几集）。
+//
+// ⚠️ **它认的是 `GroupKey`，不是 `Bvid`**：多 P（`PageIndex`/`TotalPage`）
+// 认的是同一个 bvid，合集是**不同 bvid**——所以这一份按 `season:<id>` 记。
+func group(key, title string, idx, count int) app.Item {
+	return app.Item{Source: "online", Type: "mv", Bvid: "BV" + title, Cid: "cid-" + title,
+		Title: title, GroupKey: key, GroupIndex: idx, GroupCount: count, GroupTitle: key}
+}
+
+// TestRandomKeepsTheGroupOrder 盯「自动连播合集」那个开关。
+//
+// 开着的意思（和「保持分集顺序」同一件事）：当前这首是合集的某一集、而且
+// **不是最后一集**时，接着放**同一个合集的下一集**，不洗牌。用户在听第 3 集，
+// 下一首跳到别的歌去，他一眼就看出来了。
+func TestRandomKeepsTheGroupOrder(t *testing.T) {
+	build := func() *app.Queue {
+		q := app.NewQueueWithRand(&fixedRand{n: 0})
+		q.SetPlayMode(app.PlayModeRandom)
+		// 全局默认开（NewQueue 就是 true），不用设。
+		q.Append(
+			group("season:1", "第1集", 1, 3),
+			group("season:1", "第2集", 2, 3),
+			group("season:1", "第3集", 3, 3),
+			items("散歌.mp3")[0],
+		)
+		at(q, 0) // 在第 1 集
+		return q
+	}
+
+	q := build()
+	if d := q.Advance(); d.Item.Title != "第2集" {
+		t.Errorf("开着的时候第 1 集放完落到 %q，want 第2集", d.Item.Title)
+	}
+	if d := q.Advance(); d.Item.Title != "第3集" {
+		t.Errorf("第 2 集放完落到 %q，want 第3集", d.Item.Title)
+	}
+	// 已经是最后一集了：后面没有可跟的，回到真的随机（散歌那一首）。
+	if d := q.Advance(); d.Item.Title == "第4集" {
+		t.Errorf("最后一集放完落到 %q，want 真随机（后面没有下一集可跟）", d.Item.Title)
+	}
+}
+
+// TestSequenceSkipsTheRestOfALimitedGroup 盯「仅播第 1 首」在**顺序播放**下
+// 的行为：这一档默认「下一首 = 队列下一行」，而下一行多半就是第 2 集——
+// 「仅播第 1 首」开着时那一行得跳过去，播完第 1 集直接落到组后的散歌。
+func TestSequenceSkipsTheRestOfALimitedGroup(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeSequence)
+	q.Append(
+		group("season:1", "第1集", 1, 3),
+		group("season:1", "第2集", 2, 3),
+		group("season:1", "第3集", 3, 3),
+		items("散歌.mp3")[0],
+	)
+	// 限这一个合集：「仅播第 1 首」。
+	q.SetGroupLimited("season:1", true)
+	at(q, 0)
+
+	if d := q.Advance(); d.Item.Title != "散歌" {
+		t.Errorf("「仅播第 1 首」开着时第 1 集放完落到 %q，want 散歌（跳过整组）", d.Item.Title)
+	}
+}
+
+// TestLoopSkipsTheRestOfALimitedGroup 盯同一枚钮在**循环播放**下的行为：
+// 循环默认「下一首 = 队列下一行，队尾绕回」——「仅播第 1 首」开着时同样
+// 跳过整组，播完第 1 集落到组后的散歌，不绕回第 2 集。
+func TestLoopSkipsTheRestOfALimitedGroup(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeLoop)
+	q.Append(
+		group("season:1", "第1集", 1, 3),
+		group("season:1", "第2集", 2, 3),
+		items("散歌.mp3")[0],
+	)
+	q.SetGroupLimited("season:1", true)
+	at(q, 0)
+
+	if d := q.Advance(); d.Item.Title != "散歌" {
+		t.Errorf("「仅播第 1 首」开着时第 1 集放完落到 %q，want 散歌（跳过整组）", d.Item.Title)
+	}
+}
+
+// TestGlobalOffLimitsEveryGroup 盯设置里那一格**关掉**之后的行为：全局
+// 「自动连播合集」关了，就是「所有合集都只播第 1 首」——队列里每个合集
+// 都一样，不用再单组各点一次。
+func TestGlobalOffLimitsEveryGroup(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeSequence)
+	q.SetAutoplayGroups(false)
+	q.Append(
+		group("season:1", "第1集", 1, 2),
+		group("season:1", "第2集", 2, 2),
+		group("season:2", "别的第1集", 1, 2),
+		group("season:2", "别的第2集", 2, 2),
+		items("散歌.mp3")[0],
+	)
+	at(q, 0)
+
+	// 全局关着：第 1 集播完跳过整个 season:1，落到 season:2 的第 1 集；
+	// 它自己也被限着，播完照样跳过 season:2，落到散歌。
+	if d := q.Advance(); d.Item.Title != "别的第1集" {
+		t.Errorf("全局关着时第 1 集放完落到 %q，want 别的第1集（跳过 season:1）", d.Item.Title)
+	}
+	if d := q.Advance(); d.Item.Title != "散歌" {
+		t.Errorf("season:2 也被限着：第 1 集放完落到 %q，want 散歌（跳过 season:2）", d.Item.Title)
+	}
+}
+
+// TestSingleGroupLimitDoesNotTouchTheSetting 盯**单组**那一枚：它只记
+// 「这一个合集」，不动全局设置——别的合集照旧连播，设置里那一格也还是开的。
+func TestSingleGroupLimitDoesNotTouchTheSetting(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeSequence)
+	q.Append(
+		group("season:1", "第1集", 1, 2),
+		group("season:1", "第2集", 2, 2),
+		group("season:2", "别的第1集", 1, 2),
+		group("season:2", "别的第2集", 2, 2),
+	)
+	// 只限 season:1，season:2 不动。
+	q.SetGroupLimited("season:1", true)
+	at(q, 0)
+
+	if d := q.Advance(); d.Item.Title != "别的第1集" {
+		t.Fatalf("season:1 被限着：第 1 集放完落到 %q，want 别的第1集", d.Item.Title)
+	}
+	// season:2 没被限：播完它的第 1 集照旧接第 2 集。
+	if d := q.Advance(); d.Item.Title != "别的第2集" {
+		t.Errorf("season:2 没被限：第 1 集放完落到 %q，want 别的第2集（单组不动设置）", d.Item.Title)
+	}
+}
