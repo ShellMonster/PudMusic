@@ -122,9 +122,16 @@ func button(c *ui.Context, key string, kind Kind, size Size, label, mono, icon s
 			glyph(c, icon, tok.IconSm, fg)
 		}
 		if !round {
-			ui.Text(c, label).FontSize(scale.Font(c, fs)).FontWeight(600).TextColor(fg).SingleLine()
 			if mono != "" {
-				typo.Mono(ui.Text(c, mono)).FontSize(scale.Font(c, fs)).FontWeight(600).TextColor(fg).SingleLine()
+				ui.Text(c, label).FontSize(scale.Font(c, fs)).FontWeight(600).TextColor(fg).
+					SingleLine().Ellipsis("…").Shrink(1).MinWidth(0)
+			} else {
+				ui.Text(c, label).FontSize(scale.Font(c, fs)).FontWeight(600).TextColor(fg).
+					SingleLine()
+			}
+			if mono != "" {
+				typo.Mono(ui.Text(c, mono)).FontSize(scale.Font(c, fs)).FontWeight(600).
+					TextColor(fg).SingleLine().Shrink(0)
 			}
 		}
 	})

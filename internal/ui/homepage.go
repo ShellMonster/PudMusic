@@ -348,7 +348,15 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 			if in.HasCurrent && !st.Playing && st.Position > 0 && st.Err == "" && st.Title != "" {
 				name := h.cleanTitle(st.Title)
 				ui.Box(c).Margin(space.Px8, space.None, space.None, space.None).Children(func() {
-					if pud.ButtonMono(c, "home:resume", pud.Ghost, pud.Sm, "继续播放「"+name+"」", clockText(st.Position), "play").Clicked() {
+					label := "继续播放「" + name + "」"
+					// 续播按钮的宽度不能由歌曲名无限撑开：右侧这块最多占内容区
+					// 的一半，并在宽窗口上封顶。完整标题交给悬停提示，按钮内只
+					// 保留单行可读的那一段。
+					resume := pud.ButtonMono(c, "home:resume", pud.Ghost, pud.Sm, label,
+						clockText(st.Position), "play").
+						MaxWidth(min(520, inner*0.46))
+					resume = s.withTip(c, resume, label)
+					if resume.Clicked() {
 						s.runShortcut("togglePlay")
 					}
 				})
