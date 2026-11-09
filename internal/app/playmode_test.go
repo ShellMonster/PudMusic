@@ -548,6 +548,36 @@ func TestLimitedGroupsSkipNonContiguousEpisodes(t *testing.T) {
 	}
 }
 
+func TestSequenceStopsWhenOnlyLimitedEpisodesRemain(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeSequence)
+	q.Append(
+		group("season:1", "第1集", 1, 2),
+		group("season:1", "第2集", 2, 2),
+	)
+	q.SetGroupLimited("season:1", true)
+	at(q, 0)
+
+	if d := q.Advance(); d.Kind != app.AdvanceStop {
+		t.Fatalf("后面只有受限分集时顺序播放结论是 %v，want AdvanceStop", d.Kind)
+	}
+}
+
+func TestLoopWrapsPastOnlyLimitedEpisodes(t *testing.T) {
+	q := app.NewQueue()
+	q.SetPlayMode(app.PlayModeLoop)
+	q.Append(
+		group("season:1", "第1集", 1, 2),
+		group("season:1", "第2集", 2, 2),
+	)
+	q.SetGroupLimited("season:1", true)
+	at(q, 0)
+
+	if d := q.Advance(); d.Kind != app.AdvancePlay || d.Item.Title != "第1集" {
+		t.Fatalf("循环播放遇到受限尾部时结论是 %v/%q，want AdvancePlay/第1集", d.Kind, d.Item.Title)
+	}
+}
+
 // TestGlobalOffLimitsEveryGroup 盯设置里那一格**关掉**之后的行为：全局
 // 「自动连播合集」关了，就是「所有合集都只播第 1 首」——队列里每个合集
 // 都一样，不用再单组各点一次。

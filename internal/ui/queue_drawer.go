@@ -333,6 +333,28 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 	return rows
 }
 
+func queueRowsSameShape(a, b []queueRow) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].at != b[i].at || a[i].id != b[i].id {
+			return false
+		}
+		var aGroupKey, bGroupKey string
+		if a[i].group != nil {
+			aGroupKey = a[i].group.RowKey
+		}
+		if b[i].group != nil {
+			bGroupKey = b[i].group.RowKey
+		}
+		if aGroupKey != bGroupKey {
+			return false
+		}
+	}
+	return true
+}
+
 // queueGroupRows 是这一帧要画的**组头那一行**（Open 时它后面跟着各集）。
 //
 // ⚠️ **行数会跟着开合变**（收着的组头后面不画集行）：所以这一份是「行 →
@@ -383,11 +405,12 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 	s.builds.drawer++
 	qSnapshot := s.app.Queue().Snapshot()
 	if s.queueRowsRevision != qSnapshot.Revision() {
-		s.queueRows = queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
+		nextRows := queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
+		if !queueRowsSameShape(s.queueRows, nextRows) {
+			s.queueGroupOpen = map[string]bool{}
+		}
+		s.queueRows = nextRows
 		s.queueRowsRevision = qSnapshot.Revision()
-		// 队列形状一变，组头的分段和 key 都可能变化。展开状态只属于这一帧
-		// 的队列，不能泄漏到替换后的同名合集。
-		s.queueGroupOpen = map[string]bool{}
 	}
 	t := c.Theme()
 	p := tok.Of(t)

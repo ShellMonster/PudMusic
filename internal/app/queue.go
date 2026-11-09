@@ -1471,8 +1471,8 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 			d = Advance{Kind: AdvanceStop}
 			break
 		}
-		// 「仅播第 1 首」开着的合集：播完这一集跳过整组（见 skipGroupLocked）。
-		if next, ok := q.skipGroupLocked(); ok {
+		// 「仅播第 1 首」开着的合集：播完这一集跳过整组。
+		if next, ok := q.nextAllowedLocked(false); ok {
 			if commit {
 				q.cur = next
 				q.undo = stepUndo{ok: true, prevCur: oldCur}
@@ -1480,12 +1480,7 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 			d = Advance{Kind: AdvancePlay, Item: q.items[next]}
 			break
 		}
-		next := q.cur + 1
-		if commit {
-			q.cur = next
-			q.undo = stepUndo{ok: true, prevCur: oldCur}
-		}
-		d = Advance{Kind: AdvancePlay, Item: q.items[next]}
+		d = Advance{Kind: AdvanceStop}
 
 	case PlayModeSingle:
 		// 单曲循环：一步都不挪，同一首从头再来。
@@ -1540,8 +1535,8 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 
 	default:
 		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
-		// 「仅播第 1 首」开着的合集：播完这一集跳过整组（见 skipGroupLocked）。
-		if next, ok := q.skipGroupLocked(); ok {
+		// 「仅播第 1 首」开着的合集：播完这一集跳过整组。
+		if next, ok := q.nextAllowedLocked(true); ok {
 			if commit {
 				q.cur = next
 				q.undo = stepUndo{ok: true, prevCur: oldCur}
@@ -1646,17 +1641,18 @@ func (q *Queue) nextGroupLocked() (int, bool) {
 	return 0, false
 }
 
-// skipGroupLocked 是「仅播第 1 首」开着时的推进：跳过所有受限合集的非首集，
-// 落到下一首允许播放的队列项；队尾时是 false（该停 / 该绕回交给档位）。
-//
-// ⚠️ **顺序 / 循环两档要用它**：那两档默认「下一首 = 队列下一行」，而组的
-// 下一行多半就是第 2 集——「仅播第 1 首」开着时那一行得跳过去，否则那枚钮
-// 就成了摆设（画着「仅播第 1 首」，放的却是第 2 集）。
-//
-// ⚠️ **判据是「受限合集的非首集」**，不是相邻下标：用户能把别组的行拖进来，
-// 同组的行也未必连着，所有后续集都必须被跳过。
-func (q *Queue) skipGroupLocked() (int, bool) {
+func (q *Queue) nextAllowedLocked(wrap bool) (int, bool) {
 	for i := q.cur + 1; i < len(q.items); i++ {
+		it := q.items[i]
+		if it.GroupKey != "" && it.GroupIndex > 1 && q.groupLimitedLocked(it.GroupKey) {
+			continue
+		}
+		return i, true
+	}
+	if !wrap {
+		return 0, false
+	}
+	for i := 0; i <= q.cur && i < len(q.items); i++ {
 		it := q.items[i]
 		if it.GroupKey != "" && it.GroupIndex > 1 && q.groupLimitedLocked(it.GroupKey) {
 			continue
