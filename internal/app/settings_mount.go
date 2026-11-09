@@ -218,6 +218,24 @@ func (a *App) CoverAccentEnabled() bool {
 	return false
 }
 
+// HiddenMenuKeySet 回「藏起来」的菜单键集合：侧栏菜单项的路由和收藏夹的
+// 十进制 id（`hiddenMenuKeys`）。
+//
+// ⚠️ **为什么单独一个窄接口**：和 `CoverAccentEnabled` 同一路数（理由见它
+// 那段注释）——首页「你的收藏夹」每帧都要拿它滤一遍卡片，为它整份拷贝
+// `Settings` 是把几十个字段连同指针、切片一起搬一次，而这里要的只是那
+// 一个字符串切片。
+//
+// ⚠️ **回的是切片本身，不是拷贝**：`Snapshot()` 已经把整份设置值拷贝出
+// 来，这份切片归调用方独有，不会被别人改到——所以不用再克隆一遍。
+func (a *App) HiddenMenuKeySet() []string {
+	settingsReads.Add(1)
+	if slot := a.settingsSlot(); slot != nil && slot.store != nil {
+		return slot.store.Snapshot().HiddenMenuKeys
+	}
+	return nil
+}
+
 // settingsReads 是「一共读了几次设置」的计数器。
 //
 // # 它数的是什么

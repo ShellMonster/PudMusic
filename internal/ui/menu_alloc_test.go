@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"testing"
 )
 
@@ -57,5 +58,17 @@ func TestTheMenuDisplayStateMatchesTheFullSnapshot(t *testing.T) {
 	}
 	if collapsed != full.SideMenuCollapsed {
 		t.Errorf("窄接口读到的侧栏折叠是 %v，整份设置里是 %v", collapsed, full.SideMenuCollapsed)
+	}
+}
+
+// TestTheHiddenMenuKeySetMatchesTheFullSnapshot 断 `HiddenMenuKeySet` 窄接口
+// 和 `SettingsSnapshot().HiddenMenuKeys` 读到的是同一份——判据同
+// `TestTheMenuDisplayStateMatchesTheFullSnapshot`：两处一样，而不是某一个值对。
+func TestTheHiddenMenuKeySetMatchesTheFullSnapshot(t *testing.T) {
+	b := newTestShell(t)
+	full := b.a.SettingsSnapshot()
+	got := b.a.HiddenMenuKeySet()
+	if !slices.Equal(got, full.HiddenMenuKeys) {
+		t.Errorf("窄接口读到 %v，整份设置里是 %v", got, full.HiddenMenuKeys)
 	}
 }
