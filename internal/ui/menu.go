@@ -501,6 +501,7 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 
 	// 播放模式。
 	mode := s.app.PlayMode()
+	playing := st.HasTrack && st.Playing
 	// 侧栏展开着 = 勾上了「显示/隐藏侧栏」。
 	sidebar := !sidebarCollapsed
 	// 迷你窗开着 = 勾上了「显示/隐藏迷你播放器」。
@@ -517,16 +518,24 @@ func (s *Shell) refreshMenuChecked(st app.State) {
 	hasArtist := hasTrack && st.ArtistMid > 0
 
 	cur := s.menuState
-	if cur.playMode == mode && cur.displayMode == display && cur.sidebar == sidebar &&
+	if cur.playing == playing && cur.playMode == mode && cur.displayMode == display && cur.sidebar == sidebar &&
 		cur.mini == mini && cur.notch == notch && cur.hasTrack == hasTrack && cur.hasArtist == hasArtist &&
 		cur.commentsWorthAsking == commentsWorthAsking {
 		// ⚠️ **一样就什么都不做**：每帧都往主线程投一次任务，是白花的钱。
 		return
 	}
 	s.menuState = menuState{
-		playMode: mode, displayMode: display, sidebar: sidebar,
+		playing: playing, playMode: mode, displayMode: display, sidebar: sidebar,
 		mini: mini, notch: notch, hasTrack: hasTrack, hasArtist: hasArtist,
 		commentsWorthAsking: commentsWorthAsking,
+	}
+
+	if it := s.menu.ItemByID(menuCommandIDPrefix + "togglePlay"); it != nil {
+		playLabel := "播放"
+		if playing {
+			playLabel = "暂停"
+		}
+		it.SetLabel(playLabel)
 	}
 
 	// 播放模式那一组。
@@ -615,6 +624,7 @@ func (s *Shell) refreshMenuAccel() {
 // 的来源。状态每次都现读（`app.Snapshot` / `SettingsSnapshot`），这一份只是
 // 用来判「变了没有」。
 type menuState struct {
+	playing     bool
 	playMode    app.PlayMode
 	displayMode app.DisplayMode
 	sidebar     bool

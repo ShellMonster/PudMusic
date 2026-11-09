@@ -141,12 +141,10 @@ func (s *Shell) runShortcut(id string) {
 	// 可用态。
 	if id == "togglePlay" || id == "prev" || id == "next" {
 		defer func() {
-			if s.dockMenuRef != nil {
-				s.refreshDockMenu(s.app.Snapshot())
-			}
-			if s.trayMenuRef != nil {
-				s.refreshTrayMenu(s.app.Snapshot())
-			}
+			st := s.app.Snapshot()
+			main := s.mainShell()
+			main.refreshMenuChecked(st)
+			main.refreshTrayMenu(st)
 		}()
 	}
 	switch id {
