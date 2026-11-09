@@ -2077,7 +2077,10 @@ func (a *App) PlayAt(i int) error {
 			a.queue.selectAt(i)
 			return nil
 		}
-		if target.isOnline() {
+		// 同一合集内换集沿用 `PlayPart` 的交接方式：播放条左侧先保留旧集，
+		// 新流装好后再由 `installOnlinePlayer` 替换播放器。
+		keepCurrentTrack := ok && playing.GroupKey != "" && playing.GroupKey == target.GroupKey
+		if target.isOnline() && !keepCurrentTrack {
 			// 换成在线的一首：**先把还在响的那首停掉**。在线流是后台建的（取流要
 			// 几百毫秒的网络往返），开它的那一刻界面上还没有新歌——**还响着的是上
 			// 一首**，而抽屉已经按新的当前项把高亮挪走了。用户看到的是「播放条上是
