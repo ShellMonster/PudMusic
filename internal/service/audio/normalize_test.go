@@ -78,6 +78,22 @@ func TestNormalizeNeverBoostsAQuietStream(t *testing.T) {
 	}
 }
 
+func TestUnknownStreamStartsConservativelyBeforeTheMeterSettles(t *testing.T) {
+	const rate = 48000
+	var n normState
+	raw := sine(2048, 0.5, 440, rate, 0)
+	buf := append([]float32(nil), raw...)
+
+	n.apply(buf, 2, rate, true)
+
+	if n.gain != normUnknownStartGain {
+		t.Fatalf("未知响度首块增益 %.3f，want %.3f", n.gain, normUnknownStartGain)
+	}
+	if got := float64(buf[2] / raw[2]); math.Abs(got-normUnknownStartGain) > 1e-6 {
+		t.Fatalf("未知响度首块增益比例 %.6f，want %.6f", got, normUnknownStartGain)
+	}
+}
+
 func TestNormalizeIsAbsentWhenOff(t *testing.T) {
 	_, gain := normalizedLUFS(0.9, false, nil)
 	if gain != 1 {
