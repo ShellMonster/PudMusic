@@ -1123,7 +1123,6 @@ func (s *Shell) viewNotchPlay(c *ui.Context, st app.State, ink ui.Color) {
 		Disabled(!st.HasTrack && !st.Playing)
 	b = s.withLoadHalo(c, b, st, tok.IconHit, st.HasTrack)
 	if b.Clicked() {
-		s.app.Toggle()
-		s.refreshDockMenuFromApp()
+		s.runShortcut("togglePlay")
 	}
 }

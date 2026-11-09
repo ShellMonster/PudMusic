@@ -213,7 +213,7 @@ func (s *Shell) viewPlayKey(c *ui.Context, st app.State) {
 	})
 	b = s.withLoadHalo(c, b, st, tok.PlayBtn, st.HasTrack)
 	if b.Clicked() {
-		s.app.Toggle()
+		s.runShortcut("togglePlay")
 	}
 }
 

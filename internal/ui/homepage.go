@@ -349,7 +349,7 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 				name := h.cleanTitle(st.Title)
 				ui.Box(c).Margin(space.Px8, space.None, space.None, space.None).Children(func() {
 					if pud.ButtonMono(c, "home:resume", pud.Ghost, pud.Sm, "继续播放「"+name+"」", clockText(st.Position), "play").Clicked() {
-						s.app.Toggle()
+						s.runShortcut("togglePlay")
 					}
 				})
 			}

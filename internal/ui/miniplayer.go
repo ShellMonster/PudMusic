@@ -938,8 +938,7 @@ func (s *Shell) viewMiniPlay(c *ui.Context, st app.State) {
 	// 不画（框架对禁用的控件整个乘 0.5 不透明度，见 loadhalo.go）。
 	b = s.withLoadHalo(c, b, st, miniPlayBtn, st.HasTrack)
 	if b.Clicked() {
-		s.app.Toggle()
-		s.refreshDockMenuFromApp()
+		s.runShortcut("togglePlay")
 	}
 }
 

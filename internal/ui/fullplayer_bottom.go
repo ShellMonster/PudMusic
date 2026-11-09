@@ -262,7 +262,7 @@ func (s *Shell) viewFullPlay(c *ui.Context, st app.State) {
 	// 🔴 取流的时候它外面多绕一圈光（票 #271）：它是**加**上去的，按钮照旧是播放 / 暂停。
 	b = s.withLoadHalo(c, b, st, fullPlayHit, !disabled)
 	if s.withTip(c, b, transportLabel(st.Playing)).Clicked() {
-		s.app.Toggle()
+		s.runShortcut("togglePlay")
 	}
 }
 
