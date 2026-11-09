@@ -63,14 +63,14 @@ jobs:
         run: |
           set -euo pipefail
           # Linux CI already tests every portable package. Keep only the
-          # platform-specific packages here: native app/platform/service code
-          # and the font package that Linux intentionally excludes.
+          # packages Linux intentionally excludes: system audio/video and the
+          # macOS font package.
           packages=()
           while IFS= read -r package; do
             [ -n "$package" ] && packages+=("$package")
           done < <(
             go list ./... |
-              grep -E '^github.com/ShellMonster/PudMusic/(internal/app|internal/platform|internal/service|internal/ui/widgets/typo)(/|$)'
+              grep -E '^github.com/ShellMonster/PudMusic/internal/service/(audio|video)(/|$)|^github.com/ShellMonster/PudMusic/internal/ui/widgets/typo(/|$)'
           )
           if [ "${#packages[@]}" -eq 0 ]; then
             echo "No macOS-specific packages selected" >&2
