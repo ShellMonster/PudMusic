@@ -41,7 +41,7 @@ func TestClickingTheOwnerNameOpensThatUpSpace(t *testing.T) {
 		ownerSong("a", "夜空中最亮的星", "逃跑计划"),
 	})
 
-	if err := tt.Click("逃跑计划"); err != nil {
+	if err := clickLabel(tt, "逃跑计划"); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 {
@@ -64,7 +64,7 @@ func TestClickingTheOwnerNameInACompactRowOpensThatUpSpace(t *testing.T) {
 	tt := ui.NewTester(l.View, testerW, testerH)
 	tt.Frame()
 
-	if err := tt.Click("逃跑计划"); err != nil {
+	if err := clickLabel(tt, "逃跑计划"); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 {
@@ -85,7 +85,7 @@ func TestClickingTheOwnerNameInAGridCellOpensThatUpSpace(t *testing.T) {
 		ownerSong("a", "夜空中最亮的星", "逃跑计划"),
 	}, 800, gridH)
 
-	if err := tt.Click("逃跑计划"); err != nil {
+	if err := clickLabel(tt, "逃跑计划"); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 1 {
@@ -122,7 +122,7 @@ func TestAnOwnerWithoutAMidDoesNothing(t *testing.T) {
 		{ID: "a", Title: "夜空中最亮的星", Owner: "逃跑计划"},
 	})
 
-	if err := tt.Click("逃跑计划"); err != nil {
+	if err := clickLabel(tt, "逃跑计划"); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {
@@ -145,7 +145,7 @@ func TestAnUnwiredListKeepsItsOwnerNames(t *testing.T) {
 	if !tt.HasText("逃跑计划") {
 		t.Errorf("没接上导航时 UP 名没画出来，文字有 %q", tt.Texts())
 	}
-	if err := tt.Click("逃跑计划"); err != nil {
+	if err := clickLabel(tt, "逃跑计划"); err != nil {
 		t.Fatal(err)
 	}
 	if !tt.HasText("逃跑计划") {
@@ -231,7 +231,7 @@ func TestAnOwnerNameThatIsOnlyTheTitlesArtistIsNotALink(t *testing.T) {
 	if !tt.HasText("周杰倫") {
 		t.Fatalf("那个歌手名没画出来，文字有 %q", tt.Texts())
 	}
-	if err := tt.Click("周杰倫"); err != nil {
+	if err := clickLabel(tt, "周杰倫"); err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 0 {

@@ -117,7 +117,7 @@ func TestBackToTopAppearsAfter400Pixels(t *testing.T) {
 	}
 
 	// 点它：回顶。
-	if err := tt.Click("返回顶部"); err != nil {
+	if err := clickLabel(tt, "返回顶部"); err != nil {
 		t.Fatalf("点不到回顶按钮：%v", err)
 	}
 	frame(tt)

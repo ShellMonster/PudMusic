@@ -832,6 +832,7 @@ func (l *List) View(c *ui.Context) {
 		//
 		// ⚠️ **只有真的复制了才吃掉事件**：其它一律返回 false，方向键挪游标、
 		// 点击选行、Tab 换焦点都还在。
+		ObserveInput(func(ev ui.InputEvent) { l.keys.Input(ev) }).
 		HandleInput(l.input).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击：
 		// `biu/src/components/music-list-item/index.tsx`）。

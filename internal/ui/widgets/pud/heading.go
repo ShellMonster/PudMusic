@@ -118,6 +118,8 @@ type Tab struct {
 func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 	p := pal(c)
 	row := ui.Row(c).Key(key).FillWidth().Gap(space.Px28).AlignItems(ui.End).
+		// MyGo moves focus among the tabs with Left/Right/Home/End.
+		FocusGroup(ui.Horizontal).
 		Draw(func(pp *ui.Painter, r ui.Rect) {
 			pp.Fill(ui.Rect{X: r.X, Y: r.Y + r.H - 1, W: r.W, H: 1}, p.Line, 0)
 		})
@@ -129,8 +131,9 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 	row.Children(func() {
 		for i, tb := range tabs {
 			on := i == *selected
-			b := ui.ButtonBase(c).Key(key + ":" + tb.Label).PaddingY(space.Px12).Gap(space.Px4).
-				AlignItems(ui.Baseline).Label(tb.Label)
+			b := ui.ButtonBase(c).Key(key+":"+tb.Label).PaddingY(space.Px12).Gap(space.Px4).
+				AlignItems(ui.Baseline).Role(ui.RoleTab).AccessSelected(on).
+				PositionInSet(i+1, len(tabs)).Label(tb.Label)
 			fg := p.Text2
 			if on || b.Hovered() {
 				fg = p.Text
@@ -149,7 +152,9 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 					tabBar(c, key+":bar", p.Accent, switched)
 				}
 			})
-			if b.Clicked() && !on {
+			// Mirror clicks and FocusGroup's keyboard choice into product state so
+			// both pointer and keyboard navigation change the page.
+			if (b.Clicked() || b.Focused()) && !on {
 				*selected = i
 				changed = true
 			}

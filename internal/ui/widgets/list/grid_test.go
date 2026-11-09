@@ -390,7 +390,7 @@ func TestDoubleClickingACardPlaysIt(t *testing.T) {
 // 建出来的，少建一项那一项就永远点不到。
 func TestRightClickOnACardOpensTheSameMenuAsAListRow(t *testing.T) {
 	_, tt := newGrid(t, Actions{}, onlineSongs(8), 1100, gridH) // 4 列
-	if err := tt.RightClick("在线的歌 C"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
 	got := tt.Menu()
@@ -407,7 +407,7 @@ func TestChoosingPlayOnACardQueuesThatCardAndTheRestAfterIt(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newGrid(t, rec.actions(), onlineSongs(8), 1100, gridH)
 
-	if err := tt.RightClick("在线的歌 C"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 C"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
@@ -431,7 +431,7 @@ func TestChoosingAddOnACardAppendsJustThatSong(t *testing.T) {
 	rec := &recorded{}
 	_, tt := newGrid(t, rec.actions(), onlineSongs(8), 1100, gridH)
 
-	if err := tt.RightClick("在线的歌 D"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 D"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("添加到队列"); err != nil {
@@ -464,7 +464,7 @@ func TestClickingACardChoosesThatSong(t *testing.T) {
 	const w, cols = 1100, 4
 	g, tt := newGrid(t, Actions{}, songsOf(8, "UP 主"), w, gridH)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := g.Selected()
@@ -494,7 +494,7 @@ func TestTheChosenSongSurvivesInsertingOneAtTheHead(t *testing.T) {
 	songs := songsOf(8, "UP 主")
 	g, tt := newGrid(t, Actions{}, songs, 1100, gridH)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	before, ok := g.Selected()
@@ -518,7 +518,7 @@ func TestTheChosenSongGoesAwayWithIt(t *testing.T) {
 	songs := songsOf(8, "UP 主")
 	g, tt := newGrid(t, Actions{}, songs, 1100, gridH)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	if got, ok := g.Selected(); !ok || got.Title != "歌 3" {

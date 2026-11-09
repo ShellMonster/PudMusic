@@ -66,13 +66,10 @@ func notifyCopied(acts Actions, what string) {
 	}
 }
 
-// input 是列表这一层的输入回调（`Element.HandleInput`）。
+// input 是列表这一层真正消费事件的回调（`Element.HandleInput`）。
 //
-// 它做两件事，顺序不能反：
-//
-//  1. **先让 `KeyboardMode` 听一听**——它记「上一次是键盘还是指针」，焦点环
-//     靠它（`selection.go`）。它永远返回 false（只记不吃）。
-//  2. **再认 ⌘C**：有文字选中就复制**整行**，没选中就复制选中那一行的歌名。
+// `KeyboardMode` 通过同一张列表上的 `ObserveInput` 旁路观察输入；这里只认 ⌘C：
+// 有文字选中就复制**整行**，没选中就复制选中那一行的歌名。
 //
 // ⚠️ **只有真的复制了才返回 true**（返回 true = 这一下我吃掉了）：没选中行、
 // 或者 `acts.Copy` 没接上时返回 false——列表不该在没东西可复制的时候把 ⌘C
@@ -81,9 +78,6 @@ func notifyCopied(acts Actions, what string) {
 // ⚠️ **复制的是「界面上显示的那个名字」**（`ShowOf` 清洗过的）：界面上写着
 // 「晴天」而复制出来是「【4K修复】晴天」，用户会以为复制错了行。
 func (l *List) input(ev ui.InputEvent) bool {
-	// ⚠️ **返回值不判**：`KeyboardMode.Input` 永远返回 false（它只记「键盘在管
-	// 还是指针在管」，不吃事件）。
-	l.keys.Input(ev)
 	if !copyCommand(ev) || l.acts.Copy == nil {
 		return false
 	}

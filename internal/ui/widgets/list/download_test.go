@@ -38,7 +38,7 @@ func TestTheDownloadItemReallyDownloads(t *testing.T) {
 	rec := &downloadRecorder{}
 	_, tt := newList(t, rec.actions(), onlineSongs(3))
 
-	if err := tt.RightClick("在线的歌 A"); err != nil {
+	if err := rightClickLabel(tt, "在线的歌 A"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("下载音频"); err != nil {

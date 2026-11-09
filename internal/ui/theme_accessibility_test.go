@@ -103,6 +103,14 @@ func TestHighContrastDarkensBordersAndSecondaryText(t *testing.T) {
 	}
 }
 
+func TestAccentRemainsStableWhenWindowIsInactive(t *testing.T) {
+	s := app.DefaultSettings("")
+	th := buildTheme(s, false, ui.Preferences{})
+	if th.InactiveAccent != th.Accent {
+		t.Fatalf("InactiveAccent = %v, Accent = %v; product accent should not fade on focus loss", th.InactiveAccent, th.Accent)
+	}
+}
+
 // luminanceRGBA 是 0~255 的亮度（只拿来比「更深」）。
 func luminanceRGBA(c color.RGBA) float64 {
 	return 0.2126*float64(c.R) + 0.7152*float64(c.G) + 0.0722*float64(c.B)
