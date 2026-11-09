@@ -1537,6 +1537,10 @@ func (q *Queue) advanceLocked(commit bool) (Advance, bool) {
 		// 循环播放（列表循环）：往后挪一格，**走到队尾绕回第一首**。
 		// 「仅播第 1 首」开着的合集：播完这一集跳过整组。
 		if next, ok := q.nextAllowedLocked(true); ok {
+			if next == q.cur {
+				d = Advance{Kind: AdvanceReplay, Item: q.items[q.cur]}
+				break
+			}
 			if commit {
 				q.cur = next
 				q.undo = stepUndo{ok: true, prevCur: oldCur}

@@ -573,8 +573,8 @@ func TestLoopWrapsPastOnlyLimitedEpisodes(t *testing.T) {
 	q.SetGroupLimited("season:1", true)
 	at(q, 0)
 
-	if d := q.Advance(); d.Kind != app.AdvancePlay || d.Item.Title != "第1集" {
-		t.Fatalf("循环播放遇到受限尾部时结论是 %v/%q，want AdvancePlay/第1集", d.Kind, d.Item.Title)
+	if d := q.Advance(); d.Kind != app.AdvanceReplay || d.Item.Title != "第1集" {
+		t.Fatalf("循环播放遇到受限尾部时结论是 %v/%q，want AdvanceReplay/第1集", d.Kind, d.Item.Title)
 	}
 }
 
