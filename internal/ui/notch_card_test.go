@@ -439,3 +439,23 @@ func TestNotchSetModeWithoutMainDoesNotPanic(t *testing.T) {
 		t.Fatalf("PlayMode 是 %v，want random", got)
 	}
 }
+
+// TestNotchTitleUsesTheCleanedName 断刘海那一行的歌名是**清洗过的**
+// （`tclean.Clean`），和播放条同一份口径——之前它直接画 `st.Title`，
+// B 站的「【4K修复】…(官方MV)」一整串原样挂在刘海上。
+func TestNotchTitleUsesTheCleanedName(t *testing.T) {
+	b := newTestShell(t, withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			s.applyFrameTheme(c)
+			s.viewNotchCardMain(c, app.State{HasTrack: true, Title: "【4K修复】晴天 (官方MV)", Artist: "周杰伦"})
+		}
+	}))
+	b.tt.Frame()
+
+	if !hasExactText(b.tt, "晴天") {
+		t.Fatalf("刘海上没有清洗后的歌名，文字有 %q", b.tt.Texts())
+	}
+	if countText(b.tt, "【4K修复】晴天 (官方MV)") != 0 {
+		t.Fatalf("刘海上还挂着原始标题，文字有 %q", b.tt.Texts())
+	}
+}

@@ -35,6 +35,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo"
@@ -937,8 +938,10 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 			imgcache.ViewTitled(c, s.images, st.CoverURL, st.Title, notchCardCover, notchCardCover)
 		})
 		ui.Column(c).Key("notch-info").Grow(1).MinWidth(0).Children(func() {
-			ui.Text(c, st.Title).FontSize(scale.Font(c, scale.Size16)).FontWeight(notchTitleWeight).
-				TextColor(tok.Full.Text).SingleLine()
+			// 和播放条同一份口径：`tclean.Clean` 洗掉视频宣传标签——不然
+			// 播放条上两个字的歌名到刘海上还是一整串。
+			ui.Text(c, tclean.Clean(st.Title).Title).FontSize(scale.Font(c, scale.Size16)).
+				FontWeight(notchTitleWeight).TextColor(tok.Full.Text).SingleLine()
 			sub := st.Artist
 			if st.Loading {
 				sub = "正在缓冲…"
