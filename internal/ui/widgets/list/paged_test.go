@@ -424,7 +424,7 @@ func TestAFailedPageUnlocksAndOffersARetry(t *testing.T) {
 
 	// 用户点一下就继续：这一页换成能成的答案。
 	st.serve(2, Page{Songs: pageSongs(2, 30), HasMore: true}, nil)
-	if err := tt.Click("加载失败，点此重试"); err != nil {
+	if err := clickLabel(tt, "加载失败，点此重试"); err != nil {
 		t.Fatalf("点不到重试：%v", err)
 	}
 	pump(t, tt, "重试之后第二页落地", func() bool { return p.Paged().Loaded == 230 && !p.Paged().Loading })
@@ -651,7 +651,7 @@ func TestAppendingPagesKeepsTheChosenSong(t *testing.T) {
 	p, tt := newPaged(t, st.fetch)
 
 	pump(t, tt, "第一页落地", func() bool { return p.Paged().Loaded == 200 })
-	if err := tt.Click("第 1 页 歌 5"); err != nil {
+	if err := clickLabel(tt, "第 1 页 歌 5"); err != nil {
 		t.Fatalf("点不到第 5 行：%v", err)
 	}
 	if m, ok := p.Selected(); !ok || m.ID != "p1-4" {

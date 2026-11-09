@@ -68,7 +68,7 @@ func TestClickingACardLeavesNoFocusRing(t *testing.T) {
 	_, tt := newGrid(t, Actions{}, songsOf(8, "UP 主"), gridFocusWidth, gridH)
 	before := snap(tt)
 
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	frame(tt)
@@ -97,7 +97,7 @@ func TestTheGridRingComesBackAfterAMouseClick(t *testing.T) {
 	g, tt := newGrid(t, Actions{}, songsOf(8, "UP 主"), gridFocusWidth, gridH)
 
 	// 点第三格：指针在管，那一格什么标记都没有。
-	if err := tt.Click("歌 3"); err != nil {
+	if err := clickLabel(tt, "歌 3"); err != nil {
 		t.Fatal(err)
 	}
 	frame(tt)

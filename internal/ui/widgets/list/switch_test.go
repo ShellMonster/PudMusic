@@ -269,7 +269,7 @@ func TestTheGridOffersTheRetryThatTheListOffers(t *testing.T) {
 
 	// 用户点一下就继续。
 	st.serve(2, Page{Songs: pageSongs(2, 10), HasMore: true}, nil)
-	if err := tt.Click("加载失败，点此重试"); err != nil {
+	if err := clickLabel(tt, "加载失败，点此重试"); err != nil {
 		t.Fatalf("点不到重试：%v", err)
 	}
 	pump(t, tt, "重试之后第二页落地", func() bool {

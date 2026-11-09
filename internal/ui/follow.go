@@ -685,7 +685,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
 			// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选格、
 			// Tab 换焦点都还在。
-			HandleInput(f.keys.keys.Input).
+			ObserveInput(func(ev ui.InputEvent) { f.keys.keys.Input(ev) }).
 			// 焦点环只留在「还没选中任何一行」的时候（和 `widgets/list` 同一档）。
 			FocusRing(f.keys.sel < 0).
 			// ⚠️ **挂上 `ScrollState`**：这一格自己滚（那些卡片是方的，行高跟着内容

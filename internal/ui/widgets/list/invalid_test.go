@@ -103,7 +103,7 @@ func TestTheInvalidFlagLivesOnTheItem(t *testing.T) {
 func TestAnInvalidSongHasNoPlayEntryBeforeYouPressIt(t *testing.T) {
 	_, tt := newList(t, Actions{}, invalidSongs())
 
-	if err := tt.RightClick("失效的一首"); err != nil {
+	if err := rightClickLabel(tt, "失效的一首"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("立即播放"); err == nil {
@@ -126,7 +126,7 @@ func TestAnInvalidSongHasNoPlayEntryBeforeYouPressIt(t *testing.T) {
 func TestANormalSongStillHasItsPlayEntry(t *testing.T) {
 	_, tt := newList(t, Actions{}, invalidSongs())
 
-	if err := tt.RightClick("正常的一首"); err != nil {
+	if err := rightClickLabel(tt, "正常的一首"); err != nil {
 		t.Fatal(err)
 	}
 	if err := tt.ChooseMenuItem("立即播放"); err != nil {

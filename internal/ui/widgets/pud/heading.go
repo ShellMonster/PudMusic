@@ -130,7 +130,7 @@ func Tabs(c *ui.Context, key string, selected *int, tabs []Tab) (changed bool) {
 		for i, tb := range tabs {
 			on := i == *selected
 			b := ui.ButtonBase(c).Key(key + ":" + tb.Label).PaddingY(space.Px12).Gap(space.Px4).
-				AlignItems(ui.Baseline).Label(tb.Label)
+				AlignItems(ui.Baseline).Role(ui.RoleTab).AccessSelected(on).Label(tb.Label)
 			fg := p.Text2
 			if on || b.Hovered() {
 				fg = p.Text

@@ -361,6 +361,9 @@ func applyAccent(t *ui.Theme, a ui.Color) {
 	white := ui.Color{R: 255, G: 255, B: 255, A: 255}
 
 	t.Accent = a
+	// MyGo fades Accent when the window is inactive unless this is set explicitly.
+	// Keep the product accent stable across focus changes.
+	t.InactiveAccent = a
 	// 主按钮悬停：主色 88% 混正文色（原型 index.html:283
 	// `color-mix(in srgb, var(--accent) 88%, var(--text))`），深浅一样，和 `pud.Button` 的 Primary
 	// 同一个算法——以前深色下是混白 20%，框架控件和 pud 主键悬停时两种颜色。

@@ -26,7 +26,7 @@ import (
 func TestTheOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 	// 右键这一行。
 	_, ttRight := newList(t, Actions{}, onlineSongs(3))
-	if err := ttRight.RightClick("在线的歌 B"); err != nil {
+	if err := rightClickLabel(ttRight, "在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
 	byRight := ttRight.Menu()
@@ -37,7 +37,7 @@ func TestTheOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 	// 悬停这一行，点行尾那枚「⋯」（pud 行的操作键悬停才出现）。
 	_, ttButton := newList(t, Actions{}, onlineSongs(3))
 	hoverRowOf(t, ttButton, "在线的歌 B")
-	if err := ttButton.Click(rowMoreLabel("在线的歌 B")); err != nil {
+	if err := clickLabel(ttButton, rowMoreLabel("在线的歌 B")); err != nil {
 		t.Fatalf("点不到行尾那枚「⋯」：%v", err)
 	}
 	byButton := ttButton.Menu()
@@ -56,7 +56,7 @@ func TestTheOperationButtonActsOnTheSongItSitsOn(t *testing.T) {
 	_, tt := newList(t, rec.actions(), onlineSongs(5))
 
 	hoverRowOf(t, tt, "在线的歌 C")
-	if err := tt.Click(rowMoreLabel("在线的歌 C")); err != nil {
+	if err := clickLabel(tt, rowMoreLabel("在线的歌 C")); err != nil {
 		t.Fatalf("点不到行尾那枚「⋯」：%v", err)
 	}
 	if err := tt.ChooseMenuItem("从这一首往后听"); err != nil {
@@ -120,7 +120,7 @@ func TestTheGridCellHasAnOperationButton(t *testing.T) {
 func TestTheGridOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 	// 右键那一格。
 	_, ttRight := newGrid(t, Actions{}, onlineSongs(6), 1100, gridH)
-	if err := ttRight.RightClick("在线的歌 B"); err != nil {
+	if err := rightClickLabel(ttRight, "在线的歌 B"); err != nil {
 		t.Fatal(err)
 	}
 	byRight := ttRight.Menu()
@@ -130,7 +130,7 @@ func TestTheGridOperationButtonOpensTheSameMenuAsTheRightClick(t *testing.T) {
 
 	// 点那一格右上角那枚「⋯」。
 	_, ttButton := newGrid(t, Actions{}, onlineSongs(6), 1100, gridH)
-	if err := ttButton.Click(OperationLabel("在线的歌 B")); err != nil {
+	if err := clickLabel(ttButton, OperationLabel("在线的歌 B")); err != nil {
 		t.Fatalf("点不到格子上角那枚「⋯」：%v", err)
 	}
 	byButton := ttButton.Menu()

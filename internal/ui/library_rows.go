@@ -592,7 +592,7 @@ func (p *pagedRows) drawList(c *ui.Context) {
 		//
 		// 返回 false 是刻意的：自己不吃这个事件，方向键挪游标、点击选行、Tab 换
 		// 焦点都还在。
-		HandleInput(p.keys.Input).
+		ObserveInput(func(ev ui.InputEvent) { p.keys.Input(ev) }).
 		// 双击这一行 = 播放它（Biu 的 `onDoubleClick`，不是单击）。
 		//
 		// ⚠️ **走的是「这一首」那一档**（`p.playNowOne` → `App.EnqueueAndPlayNow`，
