@@ -37,6 +37,10 @@ const (
 	normWindowSeconds = 15
 	// normWarmupSeconds 是量到多久才开始动手，太短的样本不可信。
 	normWarmupSeconds = 1
+	// normUnknownStartGain 是未知响度的流在测量完成前的保守起始增益。
+	// 开头样本可能比整首平均响度轻，先按 0.7 播放可以避免测量完成后
+	// 第一次修正表现成「先突然变大、再恢复」。
+	normUnknownStartGain = 0.7
 )
 
 // knownGain 由已知的响度算整首的增益。boost 为假时只压不抬。
@@ -83,14 +87,22 @@ func (n *normState) apply(buf []float32, channels, rate int, on bool) {
 		} else {
 			if n.meter == nil {
 				n.meter = newLoudnessMeter(rate, channels)
+				// 未知响度不能在第一秒按满增益出声：开头较轻时，
+				// 后面的整首修正会变成用户可听见的突然变小。
+				if n.gain == 1 {
+					n.gain = normUnknownStartGain
+				}
 			}
 			if n.meter.frames < int64(normWindowSeconds*rate) {
 				n.meter.add(buf)
 			}
 			target = n.gain
 			if n.meter.frames >= int64(normWarmupSeconds*rate) {
-				if l, ok := n.meter.result(); ok && l.LUFS > normTargetLUFS {
-					target = math.Max(math.Pow(10, (normTargetLUFS-l.LUFS)/20), normMinGain)
+				if l, ok := n.meter.result(); ok {
+					target = 1
+					if l.LUFS > normTargetLUFS {
+						target = math.Max(math.Pow(10, (normTargetLUFS-l.LUFS)/20), normMinGain)
+					}
 				}
 			}
 		}
