@@ -252,7 +252,7 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 // 换排序时整个换掉列表而不是换 fetcher，同一个道理（换 fetcher 还是闭包读
 // 字段）。
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
-	acts := s.collectionActions()
+	acts := s.collectionActions(p)
 	ref, sort, keyword, media := p.ref, p.sort, p.keyword, &p.media
 	l := list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
 		return s.fetchCollectionPage(ctx, ref, sort, keyword, pageNo, media)
@@ -307,9 +307,35 @@ func collectionGridSkeleton(c *ui.Context) {
 //
 // 搜索结果那一页**不换**，是有意的：它的条目同样只有 bvid，而那一页要如实
 // 拒绝「下不了」（见 `list.AppActions` 的注释）。
-func (s *Shell) collectionActions() list.Actions {
+func (s *Shell) collectionActions(p *collectionPage) list.Actions {
 	acts := s.listActions()
 	acts.Download = func(it app.Item) { s.downloadLater(it, false, "下载音频") }
+	// ⚠️ **行级入队也要打组标**（票：合集行级操作不带 GroupKey）：双击一首、
+	// 右键「下一首播放 / 从这一首往后听」走的是 `list.Actions` 那几条，
+	// 手里是裸 `Item`——不在这里补上组标的话，那一项进队列时 GroupKey 是
+	// 空的，抽屉没有组头、随机档也不接「同合集的下一集」（`nextGroupLocked`
+	// 第一道判据就是 `GroupKey == ""`）。
+	//
+	// 打标语义和批量入队同一份（`stampGroupItems`）：按「这一首在已加载
+	// 列表里排第几行」给 `GroupIndex`，按「已加载总数」给 `GroupCount`——
+	// 单首入队也是正确的集号，「下一曲」接得上组内下一集。
+	stamp := func(items []app.Item) []app.Item {
+		out := append([]app.Item(nil), items...)
+		s.stampGroupItems(p, out)
+		return out
+	}
+	if play := acts.Play; play != nil {
+		acts.Play = func(items []app.Item) { play(stamp(items)) }
+	}
+	if add := acts.Add; add != nil {
+		acts.Add = func(items []app.Item) { add(stamp(items)) }
+	}
+	if playNow := acts.PlayNow; playNow != nil {
+		acts.PlayNow = func(it app.Item) { playNow(stamp([]app.Item{it})[0]) }
+	}
+	if playNext := acts.PlayNext; playNext != nil {
+		acts.PlayNext = func(it app.Item) { playNext(stamp([]app.Item{it})[0]) }
+	}
 	return acts
 }
 
@@ -673,7 +699,13 @@ func (s *Shell) collectionLead(c *ui.Context, p *collectionPage) {
 			if !ok {
 				return
 			}
-			if err := s.app.EnqueueAndPlayNow(first.Item); err != nil {
+			// ⚠️ **打组标再入队**：这一颗绕开了 `list.Actions`（它自己调
+			// `EnqueueAndPlayNow`），不在 `collectionActions` 那一层——裸
+			// `Item` 进去的话 GroupKey 是空的，这一首就没有组头、也不接
+			// 组内下一集（见 collectionActions 里那段）。
+			items := []app.Item{first.Item}
+			s.stampGroupItems(p, items)
+			if err := s.app.EnqueueAndPlayNow(items[0]); err != nil {
 				s.addToast("放不了这一首："+err.Error(), notice.Danger)
 			}
 		},
