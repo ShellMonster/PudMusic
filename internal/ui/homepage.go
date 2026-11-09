@@ -626,9 +626,10 @@ type homeFolder struct {
 
 // viewFolders 画「你的收藏夹」：我创建的在前、我收藏的在后（原型 `mineIds` + `subscribed`）。
 func (h *homePage) viewFolders(c *ui.Context, s *Shell, inner float32, cols int, cw, gap float32) {
+	hidden := hiddenMenuKeys(s.app.SettingsSnapshot())
 	var folders []homeFolder
 	for _, g := range [...]app.FavoriteGroup{app.FavoritesCreated, app.FavoritesCollected} {
-		for _, f := range s.app.FavoritesOf().Snapshot(g) {
+		for _, f := range visibleFavorites(s.app.FavoritesOf().Snapshot(g), hidden) {
 			folders = append(folders, homeFolder{g, f})
 		}
 	}
