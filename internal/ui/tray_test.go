@@ -9,6 +9,7 @@ package ui
 import (
 	"testing"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo"
 )
 
@@ -55,6 +56,21 @@ func TestTheNowPlayingLineSaysWhatIsPlaying(t *testing.T) {
 	// 没有歌。
 	if got := s.trayNowPlayingLabel(s.app.Snapshot()); got != "没有在放" {
 		t.Errorf("没有歌的时候那一行是 %q，want %q", got, "没有在放")
+	}
+}
+
+// TestTheNowPlayingLineUsesTheCleanedTitle 断菜单栏上那一句用的是**清洗过的
+// 歌名**（`tclean.Clean`），和播放条 / 迷你播放器同一份口径。
+//
+// ⚠️ **之前它直接拼 `st.Title`**：B 站的原始标题带着「【4K修复】」「(官方
+// MV)」这一串，播放条上洗掉了、菜单栏上还挂着——同一首歌两处两个名字。
+func TestTheNowPlayingLineUsesTheCleanedTitle(t *testing.T) {
+	b := newTestShell(t)
+	s := b.s
+
+	st := app.State{HasTrack: true, Title: "【4K修复】晴天 (官方MV)", Artist: "周杰伦"}
+	if got := s.trayNowPlayingLabel(st); got != "正在播放：晴天 - 周杰伦" {
+		t.Errorf("那一行是 %q，want %q", got, "正在播放：晴天 - 周杰伦")
 	}
 }
 

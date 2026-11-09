@@ -40,6 +40,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/platform"
+	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/egoist/mygo"
 )
 
@@ -207,7 +208,9 @@ func (s *Shell) trayNowPlayingLabel(st app.State) string {
 	if !st.HasTrack {
 		return "没有在放"
 	}
-	title := st.Title
+	// 和播放条同一份口径：先 `tclean.Clean` 洗掉「【4K修复】」「(官方MV)」
+	// 这类视频宣传标签——不然播放条上两个字的歌名到菜单栏上还是一整串。
+	title := tclean.Clean(st.Title).Title
 	if title == "" {
 		title = "未知曲目"
 	}
