@@ -1793,10 +1793,8 @@ func (a *App) rememberParts(bvid string, items []bili.VideoPart) {
 // 分 P id 是 `withCid` 在取流那一趟补出来的，而补出来的那一份原来只喂给了两处
 // 局部读者——`runOnline` 的局部变量和 `pending`（弹幕用）。
 //
-// ⇒ **队列项自己一直是空的**。而分集抽屉认「正在放的是哪一集」比的是队列项的
-// cid（`partRowsFor` 的 `active: p.Cid == cur.Cid`）——于是一首多 P 从收藏夹放
-// 起来之后，抽屉里**一行都不亮**，用户不知道自己在听哪一集；要点一次别的集
-// 才恢复正常（那一次走的是 `PlayPart`，它本来就写队列项）。
+// ⇒ 现在会先把 cid 写回当前项，再用已缓存的完整 pagelist 原子升级页面组；
+// 分集抽屉能立即标出当前集，后续上一首 / 下一首也能看到真实分集行。
 //
 // # 判据链（和 `notePendingCid` 同一个道理，但要更严）
 //
