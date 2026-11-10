@@ -58,17 +58,23 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		s.partOpen = false
 		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", ""
 		s.partScrollToActive = false
+		s.partBox = partPanelBox{}
 		return
 	}
 
 	parts := s.app.Parts()
 	cur, _ := s.app.CurrentItem()
 	s.partRows = partRowsFor(parts, cur)
+	if len(s.partRows) == 0 {
+		// 还在问 / 问不出：这一档的框不是满列表的尺寸，量下来会把之后的分集压扁。
+		s.partBox = partPanelBox{}
+	}
 
 	if !partsWorthEntry(parts, s.app.PartsWorthAsking()) {
 		// 入口不摆的时候**必须把开着的那一列收掉**：否则这一刻开着的是上一首的
 		// 浮层状态，等下一首多 P 的歌放起来，它会自己弹出来——用户什么都没按。
 		s.partOpen = false
+		s.partBox = partPanelBox{}
 		return
 	}
 	if !s.partOpen {
@@ -76,11 +82,13 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		// 对成当前这首——否则「点开 → 换歌」那一档（下面那一条）会把一首新歌误认成
 		// 「浮层开着时换过去了」，而它要守的恰恰是那一档。
 		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", cur.Bvid
+		s.partBox = partPanelBox{}
 	} else if cur.Bvid != s.partQueryBvid {
 		// 浮层**开着**时歌自己切走了（队列自动进下一首）：旧词不能滤新一首的
 		// 分集——「第二」在新稿子里可能一个都滤不出来，而列表看着像坏了。
 		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", cur.Bvid
 		s.partScroll.Y = 0
+		s.partBox = partPanelBox{}
 	} else if s.partQuery != s.partQuerySeen {
 		// 刚敲了 / 刚清了：过滤出来的那一列从第一条看起（不滚动回顶的话，
 		// 停在中间的用户看到的可能是一段空白）。
@@ -111,6 +119,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 			s.partQuery, s.partQuerySeen = "", ""
 			s.partScroll.Y = 0
 			s.partScrollToActive = true
+			s.partBox = partPanelBox{}
 		}
 	}
 	// 「点外面关掉」是框架那个浮层自己管的（`mygo/ui/base.go` 的 `popover`），
@@ -219,6 +228,10 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 		return
 	}
 	rows := partRowsMatching(s.partRows, s.partQuery)
+	if s.partBox.w == 0 {
+		// 量的是满列表：刚点开 / 分集刚回来时哪怕词还在，也先按全部的行摆一帧。
+		rows = s.partRows
+	}
 	ui.Row(c).FillWidth().MaxWidth(partPopMaxW).AlignItems(ui.Center).Children(func() {
 		pud.PopHeading(c, "分集 · "+strconv.Itoa(len(s.partRows))+" 集").Grow(1)
 		in := pud.PopSearch(c, "part-pop:q", &s.partQuery, partSearchLabel, partSearchW)
@@ -249,39 +262,57 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 			return true
 		})
 	})
-	if len(rows) == 0 {
-		// 整个列表都被滤光了：说清楚是搜索滤的，不是这一首没有分集。
-		pud.PopText(c, "没有匹配的分集")
+	// ⚠️ **头留在被冻的那一块外面**：它不随搜索变，而把它一起套进下面这个 Column
+	// 会让它的固有宽度少算 4 像素左右（实测「分集 · 3 集」被挤成两行，外框跟着窄）。
+	// 头和列表加起来是外框：头不变、列表这一块冻住，外框就不动。
+	body := ui.Column(c).Key("part-pop:body")
+	// 量的是**布局框**：`Bounds` 带着进场那段 0.98 的缩放，量下来会把框缩掉 2%。
+	if b := body.LayoutBounds(); s.partBox.measure && b.W > 0 {
+		s.partBox.w, s.partBox.h = b.W, b.H
+		s.partBox.measure = false
 	}
-	// 外面这一层 Column 是必需的：滚动容器直接当别的容器的下一层时，里面文字的盒子量出来是 0×0
-	// （见 `viewSpaceList` 里同一条）。
-	ui.Column(c).Key("part-pop:list").MaxWidth(partPopMaxW).Children(func() {
-		// ⚠️ **key 里带上搜索词**：换词就换一个滚动容器，旧的进场滑动（`ScrollIntoView`
-		// 那条 wheelGlide）跟着旧容器一起丢掉。只把 `partScroll.Y` 写成 0 取消不掉
-		// 它——写进去的 0 和当时的位置一样时容器不认这是一次接管，滑行会继续把
-		// 过滤后的列表往旧目标带（实测：点开后马上敲「第 1」，Y 从 0 被带到 37）。
-		sc := ui.Scroll(c).Key("part-pop:scroll:" + s.partQuery).TrackScroll(&s.partScroll).
-			MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
-			for _, r := range rows {
-				label := "P" + strconv.Itoa(r.page) + " · " + r.title
-				el := pud.PopOpt(c, "part:"+r.key, label, "", r.active)
-				if r.active && s.partScrollToActive {
-					// 刚点开：把正在放的那一集滑到这一列的中间（`ScrollCenter` +
-					// `Smooth` 是一段动画，不是一跳到位——跳的话用户看不出「是它
-					// 滚过去的」，会以为本来就停在那儿）。
-					//
-					// ⚠️ **消费一次就完**：用户之后自己滚走时它不再拉回来；挂着
-					// 而那一行还没建出来（分集在路上）时它留着，问到那一帧再滚。
-					el.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter, Animation: &ui.Smooth})
-					s.partScrollToActive = false
+	if s.partBox.w > 0 {
+		body = body.Width(s.partBox.w).Height(s.partBox.h)
+	}
+	body.Children(func() {
+		if len(rows) == 0 {
+			// 整个列表都被滤光了：说清楚是搜索滤的，不是这一首没有分集。
+			pud.PopText(c, "没有匹配的分集")
+		}
+		// 外面这一层 Column 是必需的：滚动容器直接当别的容器的下一层时，里面文字的盒子量出来是 0×0
+		// （见 `viewSpaceList` 里同一条）。
+		ui.Column(c).Key("part-pop:list").MaxWidth(partPopMaxW).Children(func() {
+			// ⚠️ **key 里带上搜索词**：换词就换一个滚动容器，旧的进场滑动（`ScrollIntoView`
+			// 那条 wheelGlide）跟着旧容器一起丢掉。只把 `partScroll.Y` 写成 0 取消不掉
+			// 它——写进去的 0 和当时的位置一样时容器不认这是一次接管，滑行会继续把
+			// 过滤后的列表往旧目标带（实测：点开后马上敲「第 1」，Y 从 0 被带到 37）。
+			sc := ui.Scroll(c).Key("part-pop:scroll:" + s.partQuery).TrackScroll(&s.partScroll).
+				MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
+				for _, r := range rows {
+					label := "P" + strconv.Itoa(r.page) + " · " + r.title
+					el := pud.PopOpt(c, "part:"+r.key, label, "", r.active)
+					if r.active && s.partScrollToActive {
+						// 刚点开：把正在放的那一集滑到这一列的中间（`ScrollCenter` +
+						// `Smooth` 是一段动画，不是一跳到位——跳的话用户看不出「是它
+						// 滚过去的」，会以为本来就停在那儿）。
+						//
+						// ⚠️ **消费一次就完**：用户之后自己滚走时它不再拉回来；挂着
+						// 而那一行还没建出来（分集在路上）时它留着，问到那一帧再滚。
+						el.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter, Animation: &ui.Smooth})
+						s.partScrollToActive = false
+					}
+					if el.Clicked() {
+						s.choosePartRow(r)
+					}
 				}
-				if el.Clicked() {
-					s.choosePartRow(r)
-				}
-			}
+			})
+			s.trackScrollbar(sc)
 		})
-		s.trackScrollbar(sc)
 	})
+	if s.partBox.w == 0 && len(s.partRows) > 0 {
+		// 这一帧摆的就是满列表；下一帧量它的框，然后才冻住。
+		s.partBox.measure = true
+	}
 }
 
 // choosePartRow 是「定了要放这一集」的那一个出口：点一行、回车第一条都走它。
