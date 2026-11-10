@@ -123,6 +123,14 @@ type Shell struct {
 	// 3 秒后回首页」不用真睡 3 秒。
 	clock clockSource
 
+	// cursorPoint 报屏幕指针的位置（刘海轮询用）。
+	//
+	// ⚠️ **默认是空的**，空的时候走 `mygo.Screen.CursorScreenPoint`（生产那一档）。
+	// 无头 Tester 里那一档会去等事件循环（`mygo.Screen` 的实现），**直接调用
+	// 会挂住**——而刘海那条轮询 ticker 现在到点就在主线程里跑 `notchPoll`，
+	// 于是测试必须能把它换成固定点。cloudmusic 同一处用的是一份包级变量。
+	cursorPoint func() mygo.Point
+
 	// tint 是封面取色的状态（见 covertint.go）。
 	tint coverTint
 	// glowWake 是满屏光晕取色用的叫醒函数，建一次存着（每帧现写方法值会建闭包）。

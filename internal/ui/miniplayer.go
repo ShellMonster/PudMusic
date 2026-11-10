@@ -313,6 +313,18 @@ func (s *Shell) adoptShared(main *Shell) {
 	if main.notice != nil && main.notice != s.notice {
 		s.notice = main.notice
 	}
+	// 「投到主线程」那两档也接主窗口那一份：刘海 / 迷你都跑在同一个事件循环
+	// 上，而从后台 ticker 投递（`onMainBackground`）**必须**有主线程接住。
+	// 生产上两份都是 nil（`onMainBackground` 退回 `mygo.RunOnMain`，同一个
+	// 东西）；测试里主窗口那份被换成了假主线程——不接过去的话，刘海那条
+	// 轮询 ticker 会落到真的 `mygo.RunOnMain`，无头环境里没有事件循环来
+	// 排空队列，直接挂死。
+	if main.runOnMain != nil {
+		s.runOnMain = main.runOnMain
+	}
+	if main.runOnMainBackground != nil {
+		s.runOnMainBackground = main.runOnMainBackground
+	}
 }
 
 // openMiniPlayer 开出迷你播放器那个窗口，并把主窗口收起来。

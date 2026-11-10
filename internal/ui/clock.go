@@ -8,7 +8,13 @@
 // ⚠️ 用它的回调有一条硬规矩：**不许写 Shell 的字段**。定时器跑在后台 goroutine
 // 上（真时钟）或测试 goroutine 上（假时钟），而界面状态是主线程单点写入的
 // （铁律一）。两边同时动同一个字，`-race` 就会报。所以回调只调
-// `wakeHandle.invalidate`（它自己带锁），「到没到点」由 view 拿时钟现算。
+// `wakeHandle.invalidate`（它自己带锁）、只把段投到主线程
+// （`Shell.onMainBackground`）——「到没到点」由主线程拿时钟现算。
+//
+// ⚠️ **不要拿 `invalidate` 当「借一帧跑后台逻辑」的入口**：那一下会让整扇窗
+// 重建 / 重绘，而 mygo 的 GPU 工作集「2 秒无帧就 trim、下次重绘再分配」，
+// 每 100ms 借一帧会让它反复重新分配（刘海的轮询踩过这个坑，见
+// `notchPollAgain`）。不需要画的东西走 `onMainBackground`。
 package ui
 
 import (

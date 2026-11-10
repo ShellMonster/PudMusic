@@ -426,6 +426,21 @@ func (s *Shell) notchTarget() (w, h float32) {
 
 // ---- 指针轮询 ----
 
+// cursorPosition 报屏幕指针在哪，以及这一刻问不问得到。
+//
+// ⚠️ **默认走 `mygo.Screen`**；测试可以换一份固定的（`Shell.cursorPoint`）。
+// 无头 Tester 里 `mygo.Screen` 会去等事件循环，**直接调用会挂住**——所以
+// 没跑起应用时返回 false，调用方跳过这一跳而不是等下去。
+func (s *Shell) cursorPosition() (mygo.Point, bool) {
+	if s.cursorPoint != nil {
+		return s.cursorPoint(), true
+	}
+	if !mygo.App.IsReady() {
+		return mygo.Point{}, false
+	}
+	return mygo.Screen.CursorScreenPoint(), true
+}
+
 // notchPoll 是「指针现在在不在刘海触发区」那一次判断。
 //
 // 它是**事件驱动**的：`watchPointer` 报一次动它就跑一遍，而`pollAgain`
@@ -437,7 +452,10 @@ func (s *Shell) notchPoll() {
 		s.stopNotchPolling()
 		return
 	}
-	pt := mygo.Screen.CursorScreenPoint()
+	pt, ok := s.cursorPosition()
+	if !ok {
+		return
+	}
 	w, h := s.notchTarget()
 	x := n.screenX + (n.winW-w)/2
 	px, py := float32(pt.X), float32(pt.Y)
@@ -481,10 +499,21 @@ func (s *Shell) notchPoll() {
 // （跟上动画）；应用活跃或监听没挂上的时候 100ms；不然下一次指针动
 // 会自己再进来。
 //
+// ⚠️ **ticker 到点不借帧**：它把 poll 投到主线程直接跑
+// （`onMainBackground`），只有开 / 合状态真的变了 `notchPoll` 才
+// `wake.invalidate`（见上）。以前这里只递 `wake.invalidate`，等于每 100ms
+// 重绘一次——而 mygo 的 Metal 渲染器「2 秒没画帧就 trim 掉 drawable 和
+// 纹理」，下一次重绘又把那套工作集重新分配回来，于是刘海开着的时候
+// footprint 会周期性冒出 ~100MB 的尖刺（实测 45 秒里 4 次冲到 300MB；
+// 关掉刘海后 45 秒一条平线 166MB）。**poll 只是读指针、比状态，不需要
+// 重建界面**。同样的做法见 mygo-cloudmusic 的 `internal/app/ui_notch.go`
+// （`time.AfterFunc` + `mygo.RunOnMain(poll)`，只在 changed 时
+// `Invalidate`）。
+//
 // ⚠️ **整个刘海只活着一条 ticker**。1.0.1 的泄漏是回调里又 `EveryFunc`
 // 起新 ticker：旧的不停、新的又起，几条之后应用就被后台唤醒拖垮。这里
 // 反过来：重排先 `stopNotchPolling` 把旧 ticker 停掉，再装新的；后台回调
-// 只递 `wake.invalidate`，什么都不写——「是不是又该 poll 了」由
+// 只把 poll 投到主线程，不直接写 Shell 字段——「是不是又该 poll 了」由
 // `notchPollTick` 在界面线程拿 `pollAt` 现算，所以「停掉」只是把
 // `pollAt` 清掉并 `stop()`，那一刻之后旧 ticker 再叫也画不出 poll。
 func (s *Shell) notchPollAgain(inside bool) {
@@ -511,7 +540,13 @@ func (s *Shell) notchPollAgain(inside bool) {
 	n.pollEvery = d
 	n.pollAt = s.clock.Now().Add(d)
 	stop := s.clock.EveryFunc(d, func() {
-		s.wake.invalidate()
+		// ⚠️ **不在这里借帧**（`wake.invalidate`）：poll 到点直接在主线程
+		// 跑，开 / 合变了 `notchPoll` 自己会 invalidate（见上）。
+		s.onMainBackground(func() {
+			if s.notchPollTick() {
+				s.notchPoll()
+			}
+		})
 	})
 	s.setNotchPollStop(stop)
 }

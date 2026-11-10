@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/egoist/mygo"
 )
 
 // newNotchShell 建一个刘海外壳 + 它的主窗外壳，不建真窗（无头 Tester 里
@@ -39,6 +40,9 @@ func newNotchShellWith(t *testing.T, st app.Settings) (*Shell, *Shell) {
 	n.notchSt.winW, n.notchSt.winH = notchWinW, notchWinH
 	n.notchSt.w0, n.notchSt.h0 = 185, 32
 	n.notchSt.real = true
+	// 无头 Tester 里 `mygo.Screen` 会去等事件循环（调用会挂住）：指针固定
+	// 在屏幕原点，由各条测试自己摆 `screenX/screenY` 决定它在不在触发区。
+	n.cursorPoint = func() mygo.Point { return mygo.Point{} }
 	return n, main
 }
 
@@ -170,6 +174,16 @@ func TestNotchPollingKeepsOneScheduledTimer(t *testing.T) {
 	tc := &notchPollTestClock{fakeClock: fc}
 	n.clock = tc
 	n.notchSt.active = true
+	// ⚠️ **开关要开着**：`notchPoll` 在「关着且不在引导」那一档会顺手停掉
+	// 轮询（见 `notchPoll` 的开头）——而这一条量的是 ticker 的生命周期。
+	if _, err := n.app.UpdateSettings(func(set *app.Settings) {
+		set.NotchPlayer = boolPtr(true)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 把刘海摆到屏幕原点上：无头 Tester 里指针读数是 (0,0)，这样它正好
+	// 落在触发区里，poll 会保持 33ms 那一档（不然会切到 100ms）。
+	n.notchSt.screenX, n.notchSt.screenY = -250, -10
 
 	// 指针在触发区里：33ms 那一档，装一条 ticker。
 	n.notchPollAgain(true)
@@ -190,13 +204,19 @@ func TestNotchPollingKeepsOneScheduledTimer(t *testing.T) {
 	n.notchPollAgain(true)
 	n.notchPollAgain(true)
 
-	// 到点叫醒的是界面不是回调自己：推钟，tick 那一帧应该看见欠着一跳。
+	// ⚠️ **ticker 到点直接跑 poll，不借帧**（它以前只 `wake.invalidate`，
+	// 等于每 100ms 重绘一次整扇窗，把 GPU 工作集一直钉着）：推钟之后
+	// poll 已经把这一跳消费掉（`pollAt` 被拨到下一跳），所以这一帧不再
+	// 欠 poll；`lastInside` 被写上也证明确实跑到了 `notchPoll`。
 	fc.Advance(33 * time.Millisecond)
 	if got := tc.activeTimers(); got != 1 {
 		t.Fatalf("ticker 到点唤醒后有 %d 条 ticker，want 1", got)
 	}
-	if !n.notchPollTick() {
-		t.Fatal("推了 33ms 之后这一帧没认出 ticker 到点")
+	if n.notchSt.lastInside.IsZero() {
+		t.Fatal("推了 33ms 之后 poll 没跑：ticker 还只是借帧叫醒界面")
+	}
+	if n.notchPollTick() {
+		t.Fatal("ticker 到点后还欠着一跳：poll 没在回调里消费掉")
 	}
 
 	// 场景变掉重排还是一条：失焦以后切 100ms 那档，旧的停新的起。
