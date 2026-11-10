@@ -700,6 +700,7 @@ type App struct {
 	partsMu     sync.Mutex
 	parts       []bili.VideoPart
 	partsBvid   string
+	partsCache  map[string][]bili.VideoPart
 	partsErr    error
 	partsLoaded bool
 	partsWanted bool

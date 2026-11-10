@@ -11,6 +11,7 @@ package ui
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
@@ -174,7 +175,7 @@ type queueRow struct {
 	state queueRowState
 }
 
-// queueGroup 是抽屉里**一个合集**的那一份：组头 + 它带的那些集。
+// queueGroup 是抽屉里**一个分组**的那一份：组头 + 它带的那些集。
 //
 // ⚠️ **它是「这一帧画出来的组」，不是「队列里的组」**：队列里没有「组」这
 // 个实体——合集只是几行带着同一个 `GroupKey` 的 `Item`，「它们是一组」是
@@ -183,7 +184,7 @@ type queueRow struct {
 //
 // # 为什么归在行上而不是归在队列上
 //
-// 「这几行是一个合集」是**界面**的事（队列只管「下一首是谁」，那一层认
+// 「这几行是一个分组」是**界面**的事（队列只管「下一首是谁」，那一层认
 // `GroupKey` 一个字段就够）。把「组」做成队列实体的话，删一行、拖一行都
 // 要顺手维护组的边界——而那一份在队列里用不上，白扛一份不变量。
 type queueGroup struct {
@@ -204,6 +205,10 @@ type queueGroup struct {
 	FirstAt int
 	// Limited 是「仅播第 1 首」此刻开没开（**单组**那一道，读的是快照）。
 	Limited bool
+	// PageGroup 表示这是多 P 视频组，而不是合集/系列组。
+	PageGroup bool
+	// CurrentAt 是当前播放项在队列里的下标；收起时用于提示当前第几集。
+	CurrentAt int
 }
 
 // queueRowKey 是这一行的 key。
@@ -262,7 +267,7 @@ func queueRowsFor(items []app.Item, ids *rowkey.Memo[queueRowRaw, queueRowIdenti
 }
 
 // queueRowsForSnapshot 是抽屉这一帧要画的那几行：**队列里的每一项都保留一行**，
-// 合集项外加按 `GroupKey` 归拢出组头。
+// 分组项外加按 `GroupKey` 归拢出组头。
 //
 // ⚠️ **组是「按 GroupKey 归拢」出来的，不是「队列里有组」**：同一个合集的行
 // 在队列里可以分开（用户拖过、手动加过），归拢认的是**身份**不是「连续几行」——
@@ -311,14 +316,16 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 		// 同组续上：cur 还是同一个 key 就并进它；换 key（或者刚断掉）就新起一个。
 		if cur == nil || cur.Key != it.GroupKey {
 			cur = &queueGroup{
-				Key:     it.GroupKey,
-				RowKey:  "queue-group:" + it.GroupKey + "!" + strconv.Itoa(i),
-				Title:   it.GroupTitle,
-				Count:   it.GroupCount,
-				Cover:   it.Cover,
-				Owner:   it.Artist,
-				FirstAt: i,
-				Limited: snapshot.GroupLimited(it.GroupKey),
+				Key:       it.GroupKey,
+				RowKey:    "queue-group:" + it.GroupKey + "!" + strconv.Itoa(i),
+				Title:     it.GroupTitle,
+				Count:     it.GroupCount,
+				Cover:     it.Cover,
+				Owner:     it.Artist,
+				FirstAt:   i,
+				Limited:   snapshot.GroupLimited(it.GroupKey),
+				PageGroup: isPagesGroupKey(it.GroupKey),
+				CurrentAt: -1,
 			}
 			// 组头行：`at` 用组里第一集的队列下标，key 加 `!group` 前缀和集行分开。
 			rows = append(rows, queueRow{
@@ -328,6 +335,9 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 			})
 		}
 		row.group = cur
+		if i == snapshot.CurrentIndex() {
+			cur.CurrentAt = i
+		}
 		rows = append(rows, row)
 	}
 	return rows
@@ -713,6 +723,9 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	// ⚠️ **别的行谈不上停住**：它们压根没在放，所以只有当前那一行会被改。
 	if cur >= 0 {
 		rows[cur].state = queueRowCurrent
+		if rows[cur].group != nil {
+			rows[cur].group.CurrentAt = rows[cur].at
+		}
 		if st.Stopped {
 			rows[cur].state = queueRowStopped
 			// ⚠️ **两种停住要分得开**（票 #352）：「用户按了停止」和「队列自己
@@ -994,10 +1007,10 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
 }
 
-// viewQueueGroupRow 是抽屉里一个合集的**组头行**（原型 `.chead`）。
+// viewQueueGroupRow 是抽屉里一个分组的**组头行**（原型 `.chead`）。
 //
 // 它不是歌：不播、不拖、不进分段标签。点它开合（收着的组里那些集不画）；
-// 行尾那一枚「仅播第 1 首 / 恢复连播」是这个合集自己的临时开关，不动设置。
+// 行尾那一枚「仅播第 1 首 / 仅播第 1 集 / 恢复连播」是这个分组自己的临时开关，不动设置。
 //
 // ⚠️ **点它播的是这一组的第一集**（`row.at` 记的就是第一集的队列下标），
 // 和点集行里第 1 集是同一个动作——合集行不画「▶」，但点它照样从这儿听。
@@ -1047,6 +1060,9 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 			// 「仅播第 1 首 / 恢复连播」这一枚：**单组**的临时开关，不动设置。
 			// 开着时它是 accent 描边 + 淡底（原型 `.sw.off`）。
 			label := "仅播第 1 首"
+			if g.PageGroup {
+				label = "仅播第 1 集"
+			}
 			if g.Limited {
 				label = "恢复连播"
 			}
@@ -1071,12 +1087,21 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
 }
 
-// queueGroupSub 是组头副题那一行：「合集 · UP 主 · N 集」。
+// queueGroupSub 是组头副题那一行：「合集/分集 · UP 主 · N 集」。
 //
 // ⚠️ **「合集」是一个小 tag**（原型 `.tag`）：它不是字，是「这一行不是一首
 // 歌」的那一个记号——没有它，组头和普通行只在「右上角多一枚钮」上差。
 func queueGroupSub(g *queueGroup) string {
 	sub := "合集"
+	if g.PageGroup {
+		sub = "分集"
+		if g.CurrentAt >= 0 && g.Count > 0 && g.CurrentAt >= g.FirstAt {
+			page := g.CurrentAt - g.FirstAt + 1
+			if page > 0 && page <= g.Count {
+				sub += " · 当前第 " + strconv.Itoa(page) + " 集"
+			}
+		}
+	}
 	if g.Owner != "" {
 		sub += " · " + g.Owner
 	}
@@ -1084,6 +1109,10 @@ func queueGroupSub(g *queueGroup) string {
 		sub += " · " + strconv.Itoa(g.Count) + " 集"
 	}
 	return sub
+}
+
+func isPagesGroupKey(key string) bool {
+	return strings.HasPrefix(key, "pages:")
 }
 
 // queueUpLabel / queueRemoveLabel 是两枚行内键的无障碍名字（原型 `上移 {歌名}`、
