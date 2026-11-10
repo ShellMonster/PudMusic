@@ -165,3 +165,42 @@ func TestPartSearchClearButton(t *testing.T) {
 		t.Errorf("清空之后接着敲「3」没有重新滤，文字有 %q", tt.Texts())
 	}
 }
+
+// TestPartSearchEnterPlaysTheFirstMatch 断「回车放第一条命中」：敲「第二」按回车，
+// 切到 778（第二集），浮层收掉——和点那一行同一个结果。
+func TestPartSearchEnterPlaysTheFirstMatch(t *testing.T) {
+	s, tt := onlineTester(t, multiPages(), false)
+	partsReady(t, s, tt, 3)
+	openPartsDrawer(t, tt)
+
+	typeInPartSearch(t, tt, "第二")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+
+	if s.partOpen {
+		t.Error("回车之后浮层还开着")
+	}
+	waitFrames(t, tt, "换到第二集", func() bool {
+		it, ok := s.app.CurrentItem()
+		return ok && it.Cid == "778"
+	})
+}
+
+// TestPartSearchEnterWithNoMatchDoesNothing 断「一个都滤不到时回车不动作」：
+// 不换集、不收浮层——画面上唯一的变化是该没有。
+func TestPartSearchEnterWithNoMatchDoesNothing(t *testing.T) {
+	s, tt := onlineTester(t, multiPages(), false)
+	partsReady(t, s, tt, 3)
+	openPartsDrawer(t, tt)
+
+	typeInPartSearch(t, tt, "根本不存在的一集")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+
+	if !s.partOpen {
+		t.Error("没命中的时候回车把浮层收掉了")
+	}
+	if it, ok := s.app.CurrentItem(); !ok || it.Cid != "777" {
+		t.Errorf("没命中的时候回车换了集（当前 = %#v）", it)
+	}
+}

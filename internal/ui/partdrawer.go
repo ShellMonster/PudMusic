@@ -213,9 +213,30 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 		in := pud.MiniSearchClear(c, "part-pop:q", &s.partQuery, partSearchLabel, partSearchW)
 		// Esc 收浮层：浮层把键先给焦点链（`routeKeys`），而 `TextInputBase` 不吃
 		// Esc（顶栏那一处量过，`navbar_search.go` 文件头），所以 Esc 落到浮层
-		// 自己的「按 Esc 关」上——这里不用接管，回车 / 别的键的接管挂在下面的
-		// OnTextKey 上。
-		_ = in
+		// 自己的「按 Esc 关」上——不用接管。
+		//
+		// 回车放**第一条命中**：和「点一行」走同一个出口（`choosePartRow`）。
+		// 读的词是 `k.Text()`——`OnTextKey` 的文档说它可能**比绑定值快一帧**
+		// （`ui/textinput.go`），按 `s.partQuery` 滤会漏掉刚敲下的那个字。
+		in.OnTextKey(func(k ui.TextKey) bool {
+			if k.Key != ui.KeyEnter || k.Mods != 0 {
+				return false
+			}
+			q := k.Text()
+			if strings.TrimSpace(q) == "" {
+				// 空词放还给输入框自己：框架对单行输入框的 Enter 本来有它
+				// 的处理（提交 / 哔声），这儿没有「第一条」可选。
+				return false
+			}
+			hits := partRowsMatching(s.partRows, q)
+			if len(hits) == 0 {
+				// 一个都滤不到：吃掉这一次回车（不让它落下去干别的事），
+				// 画面上一行没换，用户看得懂「没命中」。
+				return true
+			}
+			s.choosePartRow(hits[0])
+			return true
+		})
 	})
 	if len(rows) == 0 {
 		// 整个列表都被滤光了：说清楚是搜索滤的，不是这一首没有分集。
