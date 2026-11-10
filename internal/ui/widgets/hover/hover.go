@@ -947,7 +947,7 @@ type waveStateKey struct{}
 // 而相位是钟算的，所以它在画的时候算。两者分开之后，`st` 这个指针是从建
 // 的那一刻起就**指着同一份**的（`ui.Local` 按 key 认元素，元素在，那一份就在）。
 func wavePhase(p *ui.Painter, st *waveState, visible bool) float32 {
-	return cyclePhase(p, st, visible, wavePeriod)
+	return cyclePhase(p, st, visible, wavePeriod, 0)
 }
 
 // Cycle 让一个元素按 period 一轮地循环动画，返回「画的时候问此刻相位（0~1）」的函数。
@@ -958,10 +958,30 @@ func wavePhase(p *ui.Painter, st *waveState, visible bool) float32 {
 func Cycle(box ui.Element, period time.Duration) func(p *ui.Painter) float32 {
 	st := ui.Local(box, waveStateKey{}, func() waveState { return waveState{} })
 	visible := frameVisible
-	return func(p *ui.Painter) float32 { return cyclePhase(p, st, visible.Load(), period) }
+	return func(p *ui.Painter) float32 { return cyclePhase(p, st, visible.Load(), period, 0) }
 }
 
-func cyclePhase(p *ui.Painter, st *waveState, visible bool, period time.Duration) float32 {
+// CycleRate 是 Cycle 加上「重绘最多要这么快」的那一档：fps > 0 时按 fps 要帧
+// （`p.AnimationFrameRate`），fps <= 0 时和 Cycle 一样（`p.AnimationFrame`）。
+//
+// 慢动画用它：侧栏左上角那枚唱片一圈 1.8 秒，按屏幕刷新率要帧等于为了几个
+// 像素每秒重画 60 次，而 ProMotion 上还会把屏幕叫醒 120 次。
+func CycleRate(box ui.Element, period time.Duration, fps float32) func(p *ui.Painter) float32 {
+	st := ui.Local(box, waveStateKey{}, func() waveState { return waveState{} })
+	visible := frameVisible
+	return func(p *ui.Painter) float32 { return cyclePhase(p, st, visible.Load(), period, fps) }
+}
+
+// RestartCycle 把这一格的相位清零。暂停再播时唱片从 12 点重新开始。
+//
+// ⚠️ **必须和 `Cycle` / `CycleRate` 用同一个键**（`waveStateKey{}`）：它清的就是
+// 那两档认下的那一份状态，否则下一轮还会接着旧相位走。
+func RestartCycle(box ui.Element) {
+	st := ui.Local(box, waveStateKey{}, func() waveState { return waveState{} })
+	*st = waveState{}
+}
+
+func cyclePhase(p *ui.Painter, st *waveState, visible bool, period time.Duration, fps float32) float32 {
 	now := p.Now()
 	if !st.started {
 		// 第一次看见这一格：相位的零点就是此刻。
@@ -981,7 +1001,11 @@ func cyclePhase(p *ui.Painter, st *waveState, visible bool, period time.Duration
 		// 「整棵元素树重建一遍」（`c.AnimationFrame()`）：波形是画出来的，而
 		// 重建那一帧要把整窗重排一遍——放歌时那是每秒 60 次（票 #392）。
 		if visible {
-			p.AnimationFrame()
+			if fps > 0 {
+				p.AnimationFrameRate(fps)
+			} else {
+				p.AnimationFrame()
+			}
 		}
 	}
 	return float32(now.Sub(st.start)%period) / float32(period)

@@ -197,7 +197,7 @@ type Shell struct {
 	// 侧栏比页面更需要这一层：它里面有拖拽、宽度动画和收藏夹列表，出事时
 	// 坏掉的是**整个窗口**（侧栏在外层布局里，一空就空一大块），而且出错
 	// 的地方往往不在页面上。
-	sideBody func(*ui.Context)
+	sideBody func(*ui.Context, app.State)
 
 	// navBody 是画顶栏的那一支，同样是为了能替掉它测崩溃。
 	//

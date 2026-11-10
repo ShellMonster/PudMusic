@@ -107,7 +107,21 @@ const (
 	// ⚠️ **它和上面那两个是一个数**：改 Period 或 Turn 时要连它一起改
 	// （`motion_test.go` 有一条测试钉着这三个数的关系）。
 	CoverSpinSpeed = 200.0
+
+	// BrandBeatsPerTurn 是那枚唱片转一圈打几拍。
+	//
+	// ⚠️ **画的地方也读它**（`drawSideBrandMark` 的 `phase × BrandBeatsPerTurn`）：
+	// 写成常量而不是在两处各写一个 3，改拍数时不会只改一半。
+	BrandBeatsPerTurn = 3
 )
+
+// BrandBeatPeriod 是侧栏左上角那枚唱片的鼓点：33⅓ rpm 的一圈里正好
+// `BrandBeatsPerTurn` 拍（100 BPM）。
+//
+// ⚠️ **它不是另一个独立的数**：那枚标志的慢转和鼓点共用一份相位
+// （`hover.CycleRate` 按 `CoverSpinPeriod` 循环，鼓点是相位 × BrandBeatsPerTurn），
+// 所以这里写的是一圈除以拍数——改圈长就是改 BPM。`motion_test.go` 钉着这两者的关系。
+const BrandBeatPeriod = CoverSpinPeriod / BrandBeatsPerTurn
 
 // CoverSpin 是满屏播放器封面那一圈的动画：**一条线性曲线**，走满一整圈。
 //

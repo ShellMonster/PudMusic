@@ -125,7 +125,9 @@ func (s *Shell) drawUnderlay(c *ui.Context, st app.State) {
 		ui.Row(c).Grow(1).Children(func() {
 			// 侧栏是**一整块** view，外面包一层 Guard（铁律三）。它坏了的
 			// 表现是整个窗口空一大块，连报错的地方都没有。
-			s.guardAt("侧栏", s.sideBody)(c)
+			// ⚠️ **快照从这一帧传进去，不再取第二份**：侧栏品牌标志要读「在不在
+			// 放」，再 `Snapshot()` 一次的话它和这一帧别处看到的可能不是同一份。
+			s.guardAt("侧栏", func(c *ui.Context) { s.sideBody(c, st) })(c)
 			// 内容区那一列：顶栏 + 路由页。
 			//
 			// ⚠️ **它要拉满高**（`AlignSelf(Stretch)`）：Row 是把子元素**垂直

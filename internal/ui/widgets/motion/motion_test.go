@@ -280,6 +280,24 @@ func numberIn(name, s string) (float64, bool) {
 	return v, true
 }
 
+// TestTheBrandBeatIsThreePerTurn 钉住「那枚唱片转一圈正好三拍」。
+//
+// ⚠️ **两个数共用一份相位**：侧栏标志的慢转按 `CoverSpinPeriod` 循环，鼓点取
+// 相位 × 3——所以 `BrandBeatPeriod` 必须正好是一圈的三分之一。改了圈长而没改
+// 它，鼓点就悄悄变成了四拍或两拍，而画面上只是「节奏有点怪」。
+func TestTheBrandBeatIsThreePerTurn(t *testing.T) {
+	if BrandBeatsPerTurn != 3 {
+		t.Errorf("一圈打 %d 拍，want 3（`BrandBeatsPerTurn` 就是画的那一处乘的那个数）", BrandBeatsPerTurn)
+	}
+	if got := CoverSpinPeriod / BrandBeatPeriod; got != 3 {
+		t.Errorf("一圈里有 %v 拍，want 3（一圈 %v ÷ 一拍 %v）",
+			got, CoverSpinPeriod, BrandBeatPeriod)
+	}
+	if got := BrandBeatPeriod.Seconds(); got != 0.6 {
+		t.Errorf("一拍是 %v 秒，want 0.6 秒（100 BPM）", got)
+	}
+}
+
 // TestTheCoverSpinNumbersAgree 把满屏封面那一圈的那几个数钉成**一家人**。
 //
 // ⚠️ **它们是同一个数的三种写法**：一圈 1.8 秒（`CoverSpinPeriod`）、一圈
