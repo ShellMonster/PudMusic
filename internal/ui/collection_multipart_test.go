@@ -77,9 +77,13 @@ func TestPlayingAMultiPartFromTheCollectionWritesTheCidBack(t *testing.T) {
 	if cur.Cid == "" {
 		t.Fatalf("起播补出来的 cid 没写回队列项（当前项：%+v）", cur)
 	}
-	// 队列里**还是那一项**：写回是就地补 cid，不是插一项新的。
-	if n := len(s.app.Queue().Items()); n != 1 {
-		t.Errorf("队列里有 %d 项，want 1（补 cid 不该改变队列形状）", n)
+	// 分集列表成功回来后，旧队列项会升级成真实分集组。
+	items := s.app.Queue().Items()
+	if n := len(items); n != 3 {
+		t.Errorf("队列里有 %d 项，want 3（当前视频的三集应展开成真实队列项）", n)
+	}
+	if items[0].GroupKey != "pages:BV11" || items[1].GroupIndex != 2 || items[2].GroupIndex != 3 {
+		t.Errorf("分集组元数据不完整：%+v", items)
 	}
 
 	active := 0
@@ -125,13 +129,13 @@ func TestWritingBackTheCidDoesNotSplitTheDrawerRow(t *testing.T) {
 	settleDrawer(t, s, tt)
 	tt.Frame()
 
-	if got := len(s.app.Queue().Items()); got != 1 {
-		t.Fatalf("队列里有 %d 项，want 1（补 cid 不该让队列多一项）", got)
+	if got := len(s.app.Queue().Items()); got != 3 {
+		t.Fatalf("队列里有 %d 项，want 3（多 P 视频应展开成三项）", got)
 	}
-	if got := len(s.queueRows); got != 1 {
-		t.Errorf("抽屉里画着 %d 行，want 1（补 cid 之后那一行还是同一行）：%+v", got, s.queueRows)
+	if got := len(s.queueRows); got != 4 {
+		t.Errorf("抽屉里画着 %d 行，want 4（组头 + 三集）：%+v", got, s.queueRows)
 	}
-	if !tt.HasText("1 首") {
-		t.Errorf("抽屉顶上写的不是「1 首」，文字有 %q", tt.Texts())
+	if !tt.HasText("3 首") {
+		t.Errorf("抽屉顶上写的不是「3 首」，文字有 %q", tt.Texts())
 	}
 }
