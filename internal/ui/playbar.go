@@ -994,26 +994,35 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 			}
 		}
 		sl := playbarProgressSliderLive(c, &s.scrub, 0, 1, live).Grow(1).Label("播放进度").Disabled(!known)
-		// 已缓冲和弹幕热度画在轨道之外（见 timeline.go）。只对「知道时长」
-		// 的那一档画：没有时长时比例是 0/0，画出来是一条不确定位置的线。
-		if known {
+		// 已缓冲和弹幕热度画在轨道之外（见 timeline.go），章节标记画在轨道
+		// 上（原型 index.html:854 `.chap`：宽 4、高 10、圆角 1、`side` 色的
+		// 竖条）。只对「知道时长」的那一档画：没有时长时比例是 0/0。
+		//
+		// ⚠️ **三层放进同一个 `DrawOver`**：框架那个 API 只存一个回调，连着
+		// 调两次后一次会顶掉前一次——症状是「有章节的歌，热度条整片消失」。
+		if known || len(chs) > 0 {
 			buffered := float32(0)
-			if st.Buffered > 0 {
+			if known && st.Buffered > 0 {
 				buffered = min(float32(float64(st.Buffered)/float64(st.Duration)), 1)
 			}
-			sl = withTimelineOverlays(sl, timelineOverlay{
+			ov := timelineOverlay{
 				buffered:    buffered,
 				heat:        s.heat.of(s.app.Danmaku().Items, st.Duration),
 				pad:         8,
 				trackW:      knobHoverLook.trackW,
 				bufferedCol: tok.Of(c.Theme()).Text3,
 				heatCol:     c.Theme().Accent.Alpha(0.45),
+			}
+			fracs := chapterDots(chs, st.Duration)
+			sl = sl.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				if known {
+					paintTimelineOverlays(p, r, ov)
+				}
+				if fracs != nil {
+					paintChapterBars(p, r, fracs, 8, 4, 10, 1, tok.Of(c.Theme()).Side)
+				}
 			})
 		}
-		// 章节标记画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
-		// 那半个宽 8）。原型 index.html:854 `.chap`：宽 4、高 10、圆角 1、`side` 色的竖条
-		// （在 4 高的轨道上切出一道 4 宽的口）。
-		sl = withChapterBars(sl, chs, st.Duration, 8, 4, 10, 1, tok.Of(c.Theme()).Side)
 		// ⚠️ 这里必须用 Pressed()，不能用 Dragging()。
 		//
 		// Dragging() 报的是「这个控件正在拖一个值 / 正在被拖动」（Drag 与

@@ -59,6 +59,41 @@ func TestHeatCacheOnlyRebuildsWhenTheBatchChanges(t *testing.T) {
 
 // TestTimelineOverlaysDrawOutsideTheTrack 出图验几何：
 // 已缓冲是轨道下面那条细线，热度是轨道上面的柱子，两者都不压在轨道上。
+// TestAChapterOverlayDoesNotEraseTheHeatStrip 钉住三层共用一次 `DrawOver`。
+//
+// 框架的 `DrawOver` 只存一个回调：热度一层、章节一层连着调两次的话，后一次
+// 会顶掉前一次——症状是「有章节的歌，热度条整片消失」，而两条测试各自单独
+// 都是绿的。
+func TestAChapterOverlayDoesNotEraseTheHeatStrip(t *testing.T) {
+	b := newTestShell(t, at(760, 140), systemIsDark(true), withView(func(s *Shell) func(*ui.Context) {
+		return func(c *ui.Context) {
+			ui.Column(c).Padding(20).Children(func() {
+				s.viewProgress(c, app.State{
+					HasTrack: true,
+					Duration: 100 * time.Second,
+					Position: 10 * time.Second,
+					Chapters: []app.Chapter{{At: 50 * time.Second, End: 60 * time.Second}},
+				})
+			})
+		}
+	}))
+	b.a.SetDanmakuForTest([]app.DanmakuItem{{ID: "a", TimeMS: 0}})
+	b.tt.Frame()
+	r, ok := b.tt.Find("播放进度")
+	if !ok || r.W <= 0 {
+		t.Fatalf("找不到进度条：%q", b.tt.Texts())
+	}
+	x, y := int(r.X)+8+10, int(r.Y)+2
+	hot := b.tt.Image().RGBAAt(x, y)
+
+	b.a.SetDanmakuForTest(nil)
+	b.tt.Frame()
+	cold := b.tt.Image().RGBAAt(x, y)
+	if hot == cold {
+		t.Fatalf("有章节时热度条和没有时是同一个颜色（%v）——章节那一层把热度盖掉了", hot)
+	}
+}
+
 func TestTimelineOverlaysDrawOutsideTheTrack(t *testing.T) {
 	const w, h = 200, 20
 	green := ui.RGB(10, 200, 10)

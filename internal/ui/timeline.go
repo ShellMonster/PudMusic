@@ -104,20 +104,13 @@ type timelineOverlay struct {
 	bufferedCol, heatCol ui.Color
 }
 
-// withTimelineOverlays 把已缓冲和热度画到滑块上。
+// paintTimelineOverlays 把已缓冲和热度画到滑块上。
 //
 // 两层都在轨道之外：已缓冲是轨道下面一条 2 像素的细线，热度是轨道上面
 // 5 像素的柱子。压在轨道上的话，进度那一截的颜色会被它们搅浑。
-func withTimelineOverlays(sl ui.Element, o timelineOverlay) ui.Element {
-	if o.buffered <= 0 && len(o.heat) == 0 {
-		return sl
-	}
-	return sl.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		paintTimelineOverlays(p, r, o)
-	})
-}
-
-// paintTimelineOverlays 是纯绘制：几何只依赖 r 和 o，方便单独出图验证。
+//
+// ⚠️ **它是纯绘制**：调用方（`playbar.go`）把它和章节标记放进**同一个**
+// `DrawOver`，因为框架那个 API 只存一个回调。
 func paintTimelineOverlays(p *ui.Painter, r ui.Rect, o timelineOverlay) {
 	x0, dx := r.X+o.pad, r.W-2*o.pad
 	if dx <= 0 {

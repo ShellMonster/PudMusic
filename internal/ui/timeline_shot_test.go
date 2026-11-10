@@ -25,6 +25,10 @@ func TestRenderTimelineShots(t *testing.T) {
 					Duration: 4 * time.Minute,
 					Position: time.Minute,
 					Buffered: 150 * time.Second,
+					Chapters: []app.Chapter{
+						{At: 45 * time.Second, End: 90 * time.Second, Title: "第一段"},
+						{At: 150 * time.Second, End: 210 * time.Second, Title: "第二段"},
+					},
 				})
 			})
 		}
