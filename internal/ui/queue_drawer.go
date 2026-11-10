@@ -44,8 +44,8 @@ const (
 	queueChildCoverSize = 32
 	queueChildGripW     = 16
 	queueChildRowPad    = space.Px6
-	queueChildRowGap    = space.Px8
-	queueChildIndent    = space.Px24
+	queueChildRowGap    = space.Px12
+	queueChildIndent    = space.Px14
 )
 
 // ---- 进出场（票 #298） ----
