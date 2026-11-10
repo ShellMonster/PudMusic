@@ -33,7 +33,6 @@ import (
 	"log"
 	"os"
 	"runtime/debug"
-	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/bootstrap"
 	"github.com/ShellMonster/PudMusic/internal/platform"
@@ -54,10 +53,18 @@ func main() {
 	}
 }
 
-// tuneMemory 收紧 Go 运行时的内存策略：播放器常驻后台，堆里大头是封面缓存
-// （上限 96MB）加解码缓冲，默认 GOGC=100 会让垃圾堆到和存活数据一样多才回收。
-// GOGC 降到 50 让峰值堆更低；每分钟主动 GC 一次并把空闲页还给系统，常驻内存会跟着回落；软上限 256MB 让接近上限时回收更积极（它是软的，
-// 超了也不会崩，只是回收更勤）。用户自己设了环境变量就尊重用户的。
+// tuneMemory 收紧 Go 运行时的内存策略：播放器常驻后台，堆里大头是按显示
+// 尺寸缓存的封面位图（`internal/ui/widgets/imgcache`，默认预算 32 MiB）加
+// 解码缓冲。默认 GOGC=100 会让垃圾堆到和存活数据一样多才回收，GOGC 降到 50
+// 让峰值堆更低；软上限 256MB 让接近上限时回收更积极（它是软的，超了也不会
+// 崩，只是回收更勤）。用户自己设了环境变量就尊重用户的。
+//
+// ⚠️ **这里不再每分钟 `debug.FreeOSMemory()`**：它只把 Go 堆的空闲页还给
+// 系统（实测 footprint 只降 2~3MB），而进程的大头是 Metal 渲染器的 GPU
+// 工作集（`owned unmapped (graphics)`，见 `internal/ui/notch.go` 的
+// `notchPollAgain`），它碰不到；反过来，每分钟一次强制 GC 在播放器这种
+// 长驻进程里只会制造周期性的停顿。要压内存，该减少的是重绘和常驻位图，
+// 不是更勤地 GC。
 func tuneMemory() {
 	if os.Getenv("GOGC") == "" {
 		debug.SetGCPercent(50)
@@ -65,9 +72,4 @@ func tuneMemory() {
 	if os.Getenv("GOMEMLIMIT") == "" {
 		debug.SetMemoryLimit(256 << 20)
 	}
-	go func() {
-		for range time.Tick(time.Minute) {
-			debug.FreeOSMemory()
-		}
-	}()
 }
