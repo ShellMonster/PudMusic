@@ -103,10 +103,13 @@ func TestThePlayBarOpensTheEpisodesAndSwitchesToOne(t *testing.T) {
 	if s.partOpen {
 		t.Error("选完一集之后浮层还开着")
 	}
-	// 队列里**还是那一项**（不是插了一首新的）：换集是同一项换了 cid（`Item.Identity()`
-	// 里 mv 带上 cid），插一项新的会让队列里多出一份同一集、抽屉画成两行。
-	if n := len(s.app.Queue().Items()); n != 1 {
-		t.Errorf("队列里有 %d 项，换集之后应该还是 1 项", n)
+	// 分集已展开成真实队列行，切到第三集后仍保持同一个页面组。
+	items := s.app.Queue().Items()
+	if n := len(items); n != 3 {
+		t.Errorf("队列里有 %d 项，换集之后应该保持三集", n)
+	}
+	if got, ok := s.app.CurrentItem(); !ok || got.Cid != "779" || got.PageIndex != 3 {
+		t.Errorf("当前队列项 = %#v，want 第三集", got)
 	}
 }
 

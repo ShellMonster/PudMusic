@@ -198,6 +198,14 @@ func (a *App) ensureParts(bvid string) {
 		a.partsBvid, a.parts, a.partsLoaded, a.partsWanted = bvid, nil, false, false
 		a.partsErr, a.partsTriedAt = nil, time.Time{}
 	}
+	if cached := a.partsCache[bvid]; len(cached) != 0 {
+		a.parts = append([]bili.VideoPart(nil), cached...)
+		a.partsLoaded = true
+		a.partsWanted = false
+		a.partsMu.Unlock()
+		a.adoptCurrentParts(bvid, cached)
+		return
+	}
 	if a.partsLoaded || a.partsWanted {
 		a.partsMu.Unlock()
 		return
@@ -241,12 +249,21 @@ func (a *App) ensureParts(bvid string) {
 // ⚠️ **只有成功才 `partsLoaded = true`**（理由见 ensureParts）。
 func (a *App) finishParts(bvid string, items []bili.VideoPart, err error) {
 	a.partsMu.Lock()
+	if err == nil && len(items) != 0 {
+		if a.partsCache == nil {
+			a.partsCache = make(map[string][]bili.VideoPart)
+		}
+		a.partsCache[bvid] = append([]bili.VideoPart(nil), items...)
+	}
 	if a.partsBvid == bvid {
-		a.parts, a.partsErr = items, err
+		a.parts, a.partsErr = append([]bili.VideoPart(nil), items...), err
 		a.partsLoaded, a.partsWanted = err == nil, false
 	}
 	a.partsMu.Unlock()
 
+	if err == nil && len(items) != 0 {
+		a.adoptCurrentParts(bvid, items)
+	}
 	a.mu.Lock()
 	wake := a.wake
 	a.mu.Unlock()
@@ -255,17 +272,50 @@ func (a *App) finishParts(bvid string, items []bili.VideoPart, err error) {
 	}
 }
 
+func (a *App) cachedParts(bvid string) []bili.VideoPart {
+	a.partsMu.Lock()
+	defer a.partsMu.Unlock()
+	if cached := a.partsCache[bvid]; len(cached) != 0 {
+		return append([]bili.VideoPart(nil), cached...)
+	}
+	return nil
+}
+
+func (a *App) adoptCurrentParts(bvid string, parts []bili.VideoPart) {
+	if len(parts) <= 1 || a.queue == nil {
+		return
+	}
+	cur, ok := a.queue.Current()
+	if !ok || cur.Bvid != bvid || !cur.isOnline() {
+		return
+	}
+	if adopter, ok := any(a.queue).(interface {
+		AdoptPages(Item, PageSet) (AdoptPagesResult, bool)
+	}); ok {
+		adopter.AdoptPages(cur, pageSetFor(cur, parts))
+	}
+}
+
+func pageSetFor(current Item, parts []bili.VideoPart) PageSet {
+	set := PageSet{Bvid: current.Bvid, VideoTitle: current.Title, Parts: make([]PageSpec, 0, len(parts))}
+	for i, part := range parts {
+		index := part.Page
+		if index <= 0 {
+			index = i + 1
+		}
+		set.Parts = append(set.Parts, PageSpec{Cid: part.Cid, Index: index, Title: part.Part})
+	}
+	return set
+}
+
 // PlayPart 换成放 bvid 的某一分集（cid）。
 //
-// **队列里那一项的 cid 就地改掉**，不是插一首新的。这是**同一项换集**的语义：
-// 用户是在「这一条」里挑一集，队列里那一条始终只有一项——「上一首 / 下一首」
-// 走的还是队列，用户换完集按「上一首」，期望回到刚才那一集去，而插新的会让他
-// 退回的是另一项。
+// 已展开的页面组直接定位到对应真实队列项；旧的未展开项保留就地改 cid 的兼容路径。
+// 页面组这样能让上一首 / 下一首、随机、撤销和持久化都沿用真实队列语义。
 //
 // ⚠️ **判重口径从票 #683 起带上 cid**（`Item.Identity` 是 `mv:<bvid>|<cid>`）：
-// 所以 `replaceAt` 之后那一项的**身份变了**。这是对的——抽屉要按身份画行，换了
-// 一集就是另一行了（同一 bvid 的两集在队列里各占一行，那是用户在历史记录里
-// 看到的那种形状）。别拿「身份不变」当这一层的保证。
+// 未展开兼容路径的 `replaceAt` 会让身份随 cid 变化；页面组路径则直接选择已存在的
+// 分集项，身份和队列位置都保持稳定。
 func (a *App) PlayPart(cid string) error {
 	cid = strings.TrimSpace(cid)
 	if cid == "" {
@@ -280,6 +330,17 @@ func (a *App) PlayPart(cid string) error {
 	}
 	if cur.Cid == cid {
 		return nil // 已经在放这一集
+	}
+	if strings.HasPrefix(cur.GroupKey, pageGroupPrefix) {
+		for i, item := range a.queue.Items() {
+			if item.Bvid != cur.Bvid || item.Cid != cid {
+				continue
+			}
+			if next, changed := a.queue.selectAt(i); changed {
+				return a.play(next)
+			}
+			break
+		}
 	}
 	i := a.queue.CurrentIndex()
 	if i < 0 {

@@ -1752,17 +1752,37 @@ func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) 
 	if s == nil || s.Client == nil {
 		return it, errStreamingMissing
 	}
-	cid, err := s.Client.FirstVideoCid(ctx, it.Bvid)
+	pages, err := s.Client.VideoPages(ctx, it.Bvid)
 	if err != nil {
 		// 包上 `ErrNoPart`：界面上要说清「问不出这一集」，而不是把它底下那个
 		// 网络错原样报出去（`bili.Friendly` 靠这个哨兵把两句话说开）。
 		return it, fmt.Errorf("%w（%s）：%w", bili.ErrNoPart, it.Bvid, err)
 	}
-	if cid == "" {
+	if len(pages) == 0 || pages[0].Cid == "" {
 		return it, fmt.Errorf("%w：%s 的分 P 列表里没有可用的分 P id", bili.ErrNoPart, it.Bvid)
 	}
-	it.Cid = cid
+	a.rememberParts(it.Bvid, pages)
+	it.Cid = pages[0].Cid
 	return it, nil
+}
+
+func (a *App) rememberParts(bvid string, items []bili.VideoPart) {
+	if bvid == "" || len(items) == 0 {
+		return
+	}
+	a.partsMu.Lock()
+	if a.partsCache == nil {
+		a.partsCache = make(map[string][]bili.VideoPart)
+	}
+	a.partsCache[bvid] = append([]bili.VideoPart(nil), items...)
+	if a.partsBvid == bvid {
+		a.parts = append([]bili.VideoPart(nil), items...)
+		a.partsLoaded = true
+		a.partsWanted = false
+		a.partsErr = nil
+	}
+	a.partsMu.Unlock()
+	a.adoptCurrentParts(bvid, items)
 }
 
 // writeBackCid 把起播时补出来的分 P id 写回队列的当前项（票 #683）。
@@ -1773,10 +1793,8 @@ func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) 
 // 分 P id 是 `withCid` 在取流那一趟补出来的，而补出来的那一份原来只喂给了两处
 // 局部读者——`runOnline` 的局部变量和 `pending`（弹幕用）。
 //
-// ⇒ **队列项自己一直是空的**。而分集抽屉认「正在放的是哪一集」比的是队列项的
-// cid（`partRowsFor` 的 `active: p.Cid == cur.Cid`）——于是一首多 P 从收藏夹放
-// 起来之后，抽屉里**一行都不亮**，用户不知道自己在听哪一集；要点一次别的集
-// 才恢复正常（那一次走的是 `PlayPart`，它本来就写队列项）。
+// ⇒ 现在会先把 cid 写回当前项，再用已缓存的完整 pagelist 原子升级页面组；
+// 分集抽屉能立即标出当前集，后续上一首 / 下一首也能看到真实分集行。
 //
 // # 判据链（和 `notePendingCid` 同一个道理，但要更严）
 //
@@ -1808,7 +1826,18 @@ func (a *App) writeBackCid(gen int, it Item) {
 	if cur.Bvid != it.Bvid || cur.Cid != "" {
 		return
 	}
-	a.queue.fillCidIf(cur, it.Cid)
+	if !a.queue.fillCidIf(cur, it.Cid) {
+		return
+	}
+	if pages := a.cachedParts(it.Bvid); len(pages) > 1 {
+		if now, ok := a.queue.Current(); ok {
+			if adopter, ok := any(a.queue).(interface {
+				AdoptPages(Item, PageSet) (AdoptPagesResult, bool)
+			}); ok {
+				adopter.AdoptPages(now, pageSetFor(now, pages))
+			}
+		}
+	}
 }
 
 // buildOnline 建一套「流引用 + 字节源 + 播放器」，**不往 App 上装**。
