@@ -8,6 +8,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -219,6 +220,49 @@ func manyPages() []any {
 	return pages
 }
 
+// TestRenderPartSearchShots 是视觉审查用的三张图（BIU_SHOT_DIR 指了目录才画）：
+// 全量、过滤中、一个都没命中。深浅各一套。
+//
+// ⚠️ 存图之前要**推钟**：浮层是 `PopIn` 渐变进场，光画帧的话透明度还是 0，
+// 存下来是一张看不见浮层的图。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui -run TestRenderPartSearchShots
+func TestRenderPartSearchShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{true, false} {
+		name := "light"
+		if dark {
+			name = "dark"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := onlineTester(t, multiPages(), false, at(1200, 800))
+			partsReady(t, s, tt, 3)
+			// onlineTester 自己会 `SetDark(true)`，所以深浅要在这儿覆盖一次。
+			tt.SetDark(dark)
+			openPartsDrawer(t, tt)
+			tt.Advance(400 * time.Millisecond)
+			tt.Frame()
+			save(t, dir, name+"-part-search.png", tt)
+
+			typeInPartSearch(t, tt, "第二")
+			tt.Advance(300 * time.Millisecond)
+			tt.Frame()
+			save(t, dir, name+"-part-search-filtered.png", tt)
+
+			if err := tt.Click("清空搜索"); err != nil {
+				t.Fatalf("点不了清空键：%v", err)
+			}
+			typeInPartSearch(t, tt, "根本没有")
+			tt.Advance(300 * time.Millisecond)
+			tt.Frame()
+			save(t, dir, name+"-part-search-empty.png", tt)
+		})
+	}
+}
+
 // TestPartsDrawerScrollsToTheEpisodeThatIsPlaying 断「点开时滚到正在放的那一集」：
 // 播到第 12 集再点开，那一列**滑过去**停在中间——不是一跳到位。
 //
@@ -300,5 +344,12 @@ func TestPartsDrawerScrollsToTheEpisodeThatIsPlaying(t *testing.T) {
 	if active.Y < panel.Y || active.Y+active.H > panel.Y+panel.H {
 		t.Errorf("正在放那一行的框是 %v，面板是 %v——它没有整行落在面板里",
 			active, panel)
+	}
+	// ScrollCenter 要的是**居中**：顶对齐（ScrollStart）也能过上面那一条，
+	// 但那会把上下文全丢在下面。面板中心比滚动区中心高半个表头，所以容差
+	// 取面板高的四分之一。
+	if gap := widthGap((active.Y + active.H/2) - (panel.Y + panel.H/2)); gap > panel.H/4 {
+		t.Errorf("正在放那一行的中线离面板中线 %.1f（面板高 %.1f）——没有居中，"+
+			"看起来是贴到了顶 / 底", gap, panel.H)
 	}
 }
