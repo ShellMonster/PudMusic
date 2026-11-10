@@ -300,6 +300,26 @@ func TestWordTimingSurvivesAReopen(t *testing.T) {
 	})
 }
 
+// TestYRCOnlyLyricsStillSaveTheUsersAdjustments 钉住「只有逐字原文也能落盘」。
+//
+// 落盘判据只看 `Entry.Lyrics` 的话，YRC-only 的那一首调完偏移再切回来就变回
+// 默认值——而界面上歌词一直在，用户看不出是哪一步丢了。
+func TestYRCOnlyLyricsStillSaveTheUsersAdjustments(t *testing.T) {
+	a, _ := lyricsApp(t)
+	song := onlineSong("BV7", "7")
+	a.setLyricTrack(song)
+	a.PutLyricsDoc(lyrics.Doc{YRC: "[1000,2000](1000,1000,0)路(2000,1000,0)灯"})
+	a.SetLyricsOffset(400)
+	flushLyricsNow(t, a)
+
+	a.setLyricTrack(onlineSong("BV6", "6"))
+	a.setLyricTrack(song)
+	waitLyrics(t, 2*time.Second, "切回来恢复偏移和逐字", func() bool {
+		ls := a.Lyrics()
+		return ls.OffsetMS == 400 && len(ls.Rows) == 1 && len(ls.Rows[0].Words) == 2
+	})
+}
+
 // flushLyricsNow 跳过那 500ms 的防抖窗口直接落盘。那道窗口本身由
 // `TestTheDebounceWindowHoldsTheWrite` 用假钟单独验，这里只关心落下去的是什么。
 func flushLyricsNow(t *testing.T, a *App) {

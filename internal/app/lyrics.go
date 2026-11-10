@@ -542,7 +542,7 @@ func (a *App) flushLyrics() {
 	}
 	a.mu.Unlock()
 
-	if c == nil || key == "" || entry.Lyrics == "" {
+	if c == nil || key == "" || (entry.Lyrics == "" && entry.YRC == "") {
 		// 没有歌词就不写。偏移和字号是**附着在歌词上的**用户值，一首歌都没有
 		// 歌词时它们无处可附——写下去就是一个只有 `{offset, fontSize}` 的空壳文件，
 		// 用户数据目录里每听一首就积一个，而界面上那个值根本没有出处。
