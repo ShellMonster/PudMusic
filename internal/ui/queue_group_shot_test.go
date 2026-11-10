@@ -32,7 +32,7 @@ func TestRenderQueueGroupShots(t *testing.T) {
 	save(t, dir, "queue-group-collapsed.png", h.tt)
 
 	// 点开组头：集行放出来。
-	if err := h.tt.Click("「测试合集」"); err != nil {
+	if err := h.tt.Click("测试合集"); err != nil {
 		t.Fatalf("点不到组头：%v（画面上的字：%q）", err, h.tt.Texts())
 	}
 	h.tt.Frame()

@@ -40,6 +40,12 @@ const (
 	queueGripW       = 20
 	queueRowPad      = space.Px8
 	queueRowGap      = space.Px12
+
+	queueChildCoverSize = 32
+	queueChildGripW     = 16
+	queueChildRowPad    = space.Px6
+	queueChildRowGap    = space.Px12
+	queueChildIndent    = space.Px14
 )
 
 // ---- 进出场（票 #298） ----
@@ -869,10 +875,13 @@ func queueSectionLabel(at, current int) string {
 	return ""
 }
 
-// viewQueueRow 是抽屉里的一行（原型 `.qrow`）：拖动把手 | 40 的封面 | 歌名和「歌手 · 时长」| 操作。
+// viewQueueRow 是抽屉里的一行：散歌使用标准行；合集/分集子行使用紧凑行，
+// 通过更小封面、缩进和左侧轨道表现父子层级。
 //
-// 行本体是 `20px 40px 1fr auto` 四列、缝 12、内边距 8、圆角 8；悬停 `hover` 底；正在放的歌名是
-// accent-text；拖着的那一行 40% 不透明，落点处一条 2 像素的主色线。点这一行 = 从这儿听。
+// 标准行是 `20px 40px 1fr auto` 四列、缝 12、内边距 8；子行收紧为
+// `16px 32px 1fr auto`、缝 12、内边距 6；两者都有圆角 8。悬停 `hover` 底；
+// 正在放的歌名是 accent-text；拖着的那一行 40% 不透明，落点处一条 2 像素的主色线。
+// 点这一行 = 从这儿听。
 // 分段标签（「正在播放」等）在行本体**外面**——悬停、拖动、点击都只算行本体。
 func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	p := tok.Of(t)
@@ -884,13 +893,24 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	}
 	state := row.state
 	label := queueSectionLabel(at, s.queueCurrent)
+	child := row.group != nil
+	rowPad, rowGap := float32(queueRowPad), float32(queueRowGap)
+	coverSize := float32(queueCoverSize)
+	gripWidth := float32(queueGripW)
+	titleSize, subtitleSize := float32(scale.Size13), float32(scale.Size12)
+	if child {
+		rowPad, rowGap = float32(queueChildRowPad), float32(queueChildRowGap)
+		coverSize = queueChildCoverSize
+		gripWidth = float32(queueChildGripW)
+		titleSize, subtitleSize = float32(scale.Size12), float32(scale.Size11)
+	}
 	wrap := ui.Column(c).Key(row.key).FillWidth()
 	wrap.Children(func() {
 		if label != "" {
 			ui.Text(c, label).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
 				Padding(space.Px12, space.Px8, space.Px4, space.Px8).SingleLine()
 		}
-		rowEl := ui.Row(c).Key(queueRowInnerKey).FillWidth().Padding(queueRowPad).Gap(queueRowGap).
+		rowEl := ui.Row(c).Key(queueRowInnerKey).FillWidth().Padding(rowPad).Gap(rowGap).
 			AlignItems(ui.Center).Radius(tok.R8)
 		// 悬停要读在 Children 之前：指针是在布局那一步才知道落在哪儿的。
 		hovered := rowEl.Hovered()
@@ -919,30 +939,31 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 		// 合集里的一集：行最左缘一条 accent 竖线（原型那条贯穿整组的
 		// `border-left`），行内容在竖线右边缩进——把手 ⠿ 还在（和散歌同一列），
 		// 竖线不在把手列里，它贴的是**行**的左缘。
-		if row.group != nil {
+		if child {
 			accent := p.Accent
 			if row.group.Limited {
 				accent = p.LineStrong
 			}
 			ui.Box(c).Absolute().Left(0).Top(0).Bottom(0).Width(2).Background(accent)
-			rowEl = rowEl.Margin(space.None, space.None, space.None, space.Px8)
+			rowEl = rowEl.Margin(space.None, space.None, space.None, queueChildIndent)
 		}
 		rowEl.Children(func() {
-			// 把手（散歌和集行都有，原型展开里每行左边也是 ⠿）：20 那一列。
-			ui.Box(c).Width(queueGripW).Shrink(0).Center().Children(func() {
-				ui.Icon(c, pud.Icon("grip")).FontSize(14).TextColor(p.Text3)
+			// 把手（散歌和集行都有）：标准行 20 宽，紧凑子行 16 宽。
+			ui.Box(c).Width(gripWidth).Shrink(0).Center().Children(func() {
+				gripSize := float32(14)
+				if child {
+					gripSize = 12
+				}
+				ui.Icon(c, pud.Icon("grip")).FontSize(gripSize).TextColor(p.Text3)
 			})
-			// 封面 40、圆角 4、`surface-2` 占位底。⚠️ **集行不缩**：竖线在
-			// 把手那一列里（2px），不抢封面的位置——封面缩了的话集行的歌名
-			// 比散歌右移 8，左侧三档对不齐。
-			coverSize := float32(queueCoverSize)
+			// 封面保持圆角 4 和 `surface-2` 占位底；父行 40，子行 32。
 			ui.Box(c).Size(coverSize, coverSize).Shrink(0).Radius(tok.R4).Clip().
 				Background(p.Surface2).Children(func() {
 				imgcache.ViewFlat(c, s.images, row.item.Cover, coverSize, coverSize, tok.R4)
 			})
 			ui.Column(c).Grow(1).MinWidth(0).Children(func() {
 				cleaned := tclean.Clean(row.item.Title)
-				ui.Text(c, cleaned.Title).FontSize(scale.Font(c, scale.Size13)).
+				ui.Text(c, cleaned.Title).FontSize(scale.Font(c, titleSize)).
 					FontWeight(500).TextColor(playlistTextColor(t, state)).SingleLine().Ellipsis("…")
 				// 合集行的副题：「第 N 集 · UP 主」——「这是第几集」比「这是谁」
 				// 更要紧（用户在这一摞里认的是集数）。
@@ -968,7 +989,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 						sub += " · " + clock(s.queueDur)
 					}
 				}
-				subText := ui.Text(c, sub).FontSize(scale.Font(c, scale.Size12)).SingleLine().Ellipsis("…")
+				subText := ui.Text(c, sub).FontSize(scale.Font(c, subtitleSize)).SingleLine().Ellipsis("…")
 				// 「仅播第 1 首」开着的组：第 2 集起整行变暗（原型 `.limited .qrow` 半透明）。
 				if row.group != nil && row.group.Limited && row.item.GroupIndex > 1 {
 					subText = subText.Opacity(0.5)
@@ -984,12 +1005,12 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 			}
 			ui.Row(c).Shrink(0).Children(func() {
 				up := pud.IconBtn(c, "queue:up", "up", s.queueRowOps.At(row.at, row.item.Title, queueUpLabel),
-					pud.IconOpts{Row: true, Disabled: row.at == 0})
+					pud.IconOpts{Row: true, Size: queueActionIconSize(child), Disabled: row.at == 0})
 				if up.Clicked() && s.app.Queue().MoveAtBefore(row.at, row.at-1) {
 					s.wake.invalidate()
 				}
 				if pud.IconBtn(c, "queue:remove", "x", s.queueRowRm.At(row.at, row.item.Title, queueRemoveLabel),
-					pud.IconOpts{Row: true}).Clicked() {
+					pud.IconOpts{Row: true, Size: queueActionIconSize(child)}).Clicked() {
 					s.removeQueueRow(row)
 				}
 			})
@@ -1005,6 +1026,13 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	// 右键菜单挂在**整行**（含上面的分段标签）上：MyGo 取的是最里层那个带菜单的元素，整行这一层足够里面，
 	// 而在分段标签上按右键也出同一份菜单（行的无障碍名 / 测试按歌名找到的是整行的中心）。
 	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
+}
+
+func queueActionIconSize(child bool) float32 {
+	if child {
+		return tok.IconSm
+	}
+	return tok.Icon
 }
 
 // viewQueueGroupRow 是抽屉里一个分组的**组头行**（原型 `.chead`）。
