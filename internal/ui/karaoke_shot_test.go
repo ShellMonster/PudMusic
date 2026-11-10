@@ -35,12 +35,17 @@ func TestRenderKaraokeShots(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := fullShotShell(t, dark, srv.URL)
 			defer b.Close()
+			// 先出同一位置的普通 LRC 那一张：逐字改动只该改颜色，不该改
+			// 字号、行高和位置。两张对着看，布局差一个像素都看得出来。
+			b.a.SeekTo(4 * time.Second)
+			settleFull(t, b.tt)
+			save(t, dir, name+"-karaoke-plain.png", b.tt)
+
 			b.a.PutLyricsDoc(lyrics.Doc{
 				LRC:        fullShotLRC,
 				Translated: fullShotTrans,
 				YRC:        karaokeShotYRC,
 			})
-			b.a.SeekTo(4 * time.Second)
 			waitFrames(t, b.tt, "逐字歌词进了画面", func() bool {
 				rows := b.a.Lyrics().Rows
 				return len(rows) > 0 && len(rows[0].Words) > 0
