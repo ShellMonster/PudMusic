@@ -1385,6 +1385,16 @@ func (a *App) Snapshot() State {
 // 不到声音的那几秒里播放条会以为自己在放本地文件，于是「下载」那一枚不见了。
 //
 // 空串 = 没有歌（`a.player == nil`）。
+func (a *App) sourceLocked() string {
+	if a.player == nil {
+		return ""
+	}
+	if a.path != "" {
+		return SourceLocal
+	}
+	return SourceOnline
+}
+
 // bufferedLocked 是当前这条流已经下到本地的部分折算成的时间。**必须在持 a.mu 时调**。
 //
 // 判据是字节数占整条流的比例：取流接口不保证给总长度，拿不到时返回 0（界面
@@ -1409,16 +1419,6 @@ func bufferedTime(dur time.Duration, filled, size int64) time.Duration {
 	}
 	filled = min(filled, size)
 	return time.Duration(float64(dur) * float64(filled) / float64(size))
-}
-
-func (a *App) sourceLocked() string {
-	if a.player == nil {
-		return ""
-	}
-	if a.path != "" {
-		return SourceLocal
-	}
-	return SourceOnline
 }
 
 // biliURLLocked 是播放条当前动作对应的 B 站地址。**必须在持锁时调**。
