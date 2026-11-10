@@ -1660,8 +1660,12 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	// 放在换上播放器**之后**——歌词区问的是「现在放的是哪一首」，那一刻
 	// 播放器已经换成新的了。
 	a.setLyricTrack(it)
-	// B 站自己带出来的那一份歌词：取流那一趟已经带回了它的地址，这里去下载、
-	// 存进缓存、装到界面上（见 lyrics.go 的 `fetchBiliSubtitle`）。
+	// B 站歌词的**兜底那一趟**：正常情况下 `startOnlineLyrics` 在取流之前就
+	// 已经发出去并取完了。这里再叫一次，是给「取流响应里才带字幕地址」和
+	// 「音乐库条目补完元信息之后才知道投稿身份」那两档留的路。
+	//
+	// searchWhenNoTarget=true 说的是「这是最后一趟」：确实没有可问的投稿时
+	// 才退到自动搜，早一趟不退（理由见 `fetchBiliSubtitle` 的注释）。
 	//
 	// ⚠️ **整个过程在后台**，而且**它不拦播放**：没有字幕的那一首歌，界面照旧
 	// 是「暂无歌词」加一个「找歌词」的入口。
