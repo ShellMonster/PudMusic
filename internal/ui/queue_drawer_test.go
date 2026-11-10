@@ -900,7 +900,7 @@ func TestQueueDrawerGroupHeaderOpensToShowEpisodes(t *testing.T) {
 	openDrawer(t, h)
 
 	// 点组头那一行：合集名那一块。
-	if err := h.tt.Click("「测试合集」"); err != nil {
+	if err := h.tt.Click("测试合集"); err != nil {
 		t.Fatalf("点不了组头：%v（画面上的字：%q）", err, h.tt.Texts())
 	}
 	h.tt.Frame()
@@ -928,7 +928,7 @@ func TestQueueDrawerGroupLimitButtonTogglesTheSingleGroup(t *testing.T) {
 	openDrawer(t, h)
 
 	// 先点组头展开，「仅播第 1 首」那一枚才点得着。
-	if err := h.tt.Click("「测试合集」"); err != nil {
+	if err := h.tt.Click("测试合集"); err != nil {
 		t.Fatalf("点不了组头：%v", err)
 	}
 	h.tt.Frame()
