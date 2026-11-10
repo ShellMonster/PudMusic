@@ -198,8 +198,9 @@ const partPopMaxW = 360
 // partSearchLabel 是弹层右上角那个搜索框的无障碍名字 / 占位字。
 const partSearchLabel = "搜索分集"
 
-// partSearchW 是那个搜索框里输入框的宽度。110 摆得下「搜索分集」四个字加几十个像素的词。
-const partSearchW = 110
+// partSearchW 是那个搜索框里输入框的宽度。88 摆得下「搜索分集」四个字，
+// 胶囊总宽约 146，和左边的标题合起来不把弹层撑宽。
+const partSearchW = 88
 
 // viewPartDrawer 是分集弹层里的内容（原型 `popHtml('parts')`）：
 // `<h5>分集 · N 集</h5>` 加每集一个 `pop-opt`（`P{n} · {标题}`，正在放的那集 accent-text 600 + 对勾）。
@@ -220,7 +221,7 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 	rows := partRowsMatching(s.partRows, s.partQuery)
 	ui.Row(c).FillWidth().MaxWidth(partPopMaxW).AlignItems(ui.Center).Children(func() {
 		pud.PopHeading(c, "分集 · "+strconv.Itoa(len(s.partRows))+" 集").Grow(1)
-		in := pud.MiniSearchClear(c, "part-pop:q", &s.partQuery, partSearchLabel, partSearchW)
+		in := pud.PopSearch(c, "part-pop:q", &s.partQuery, partSearchLabel, partSearchW)
 		// Esc 收浮层：浮层把键先给焦点链（`routeKeys`），而 `TextInputBase` 不吃
 		// Esc（顶栏那一处量过，`navbar_search.go` 文件头），所以 Esc 落到浮层
 		// 自己的「按 Esc 关」上——不用接管。
