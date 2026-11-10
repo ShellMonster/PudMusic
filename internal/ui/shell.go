@@ -610,11 +610,21 @@ type Shell struct {
 	// partOpen 不进设置，理由和 drawerOpen 一样：抽屉是「我现在要看分集」这一下
 	// 的事（而 Biu 那边是 Popover 的 `isOpen`，也不持久化）。
 	partOpen bool
-	// partList 是浮层里那一列的列表状态，partRows 是这一帧要画的那几行。
+	// partQuery 是浮层右上角那个搜索框里的词，partQuerySeen 是 view 上一帧
+	// 真的拿它过滤过的那一份——两者对不上说明刚敲 / 刚清过，滚动回第一条。
+	// partQueryBvid 记着这个词是**哪一首**的：浮层开着时歌换过去了，旧词不能
+	// 滤新一首的分集。
+	partQuery     string
+	partQuerySeen string
+	partQueryBvid string
+	// partScroll 是浮层里那一列滚到哪儿了，partRows 是这一帧要画的那几行。
 	// 两个字段和 `s.full` 那一组（fullplayer.go）同义不同份——两处是两个浮层，
 	// 各自记着自己滚到哪儿；行的**内容**是同一份（partRowsFor）。
-	partList ui.ListState
-	partRows []partRow
+	partScroll ui.ScrollState
+	partRows   []partRow
+	// partScrollToActive 是一次性的「滚到正在放的那一集」请求：点开浮层时挂上，
+	// 那一行建出来那一帧消费掉（分集还没问到时它留着，问到那帧再滚）。
+	partScrollToActive bool
 	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。

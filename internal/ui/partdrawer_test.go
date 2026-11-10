@@ -223,14 +223,38 @@ func TestTheDrawerMarksTheEpisodeThatIsPlaying(t *testing.T) {
 			if !ok {
 				t.Fatalf("浮层里没有「P2 · 第二集」，文字有 %q", tt.Texts())
 			}
-			img := tt.Image()
 			count := func(r ui.Rect) (n int) {
-				for _, px := range bandPixels(img, r) {
+				for _, px := range bandPixels(tt.Image(), r) {
 					if nearRGBA(px, accent, 4) {
 						n++
 					}
 				}
 				return n
+			}
+			// 🔴 **PopIn 从透明度 0 进场，钟不推就什么都量不到**：`tt.Find` 给的是
+			// 布局框，那时框早就有了，画面还是底下那一页——量到的 0 不是「颜色不对」，
+			// 是「还没画」。推到这一行的 accent 墨**连续十帧不变**为止，再量旁边
+			// 那一行（进场是单调变亮的，只有画完了才会这么久不变）。判据是量出来的
+			// 像素稳定，不是固定毫秒。
+			settled := false
+			last, calm := -1, 0
+			for range 120 {
+				n := count(cur)
+				if n > 0 && n == last {
+					if calm++; calm >= 10 {
+						settled = true
+						break
+					}
+				} else {
+					calm = 0
+				}
+				last = n
+				tt.Advance(16 * time.Millisecond)
+				tt.Frame()
+			}
+			if !settled {
+				t.Fatalf("%s：推了 120 帧，正在放那一行的 accent-text 像素一直没稳定下来（最后 %d 个）",
+					name, last)
 			}
 			curInk, sibInk := count(cur), count(sib)
 			t.Logf("%s：accent-text 像素 正在放 %d，旁边 %d", name, curInk, sibInk)

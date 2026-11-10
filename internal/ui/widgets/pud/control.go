@@ -59,17 +59,77 @@ func SelectBox(c *ui.Context, key, current string, w float32) ui.Element {
 // 胶囊、surface-2 底，14 的放大镜（text-3）加一个 13 号输入框（默认 140 宽）。
 // value 是输入框里的字；返回输入框本身，调用方问 `.Changed()`。
 func MiniSearch(c *ui.Context, key string, value *string, placeholder string, inputW float32) ui.Element {
-	p := pal(c)
 	if inputW == 0 {
 		inputW = 140
 	}
+	return miniSearch(c, key, value, placeholder, searchLook{
+		h: tok.MiniSearchH, padX: space.Px12, gap: space.Px8,
+		icon: 14, inputW: inputW, font: scale.Size13,
+	})
+}
+
+// popSearchH 是弹层里那档搜索的高。它和 12 号的小标题排在同一行：32 高的胶囊
+// 顶在旁边像一块砖，26 这一档才和标题同一量级。
+const popSearchH float32 = 26
+
+// PopSearch 是弹层头里那一档搜索：比 MiniSearch 小一号（26 高、12 号字、
+// 12 的放大镜、20 的叉点击区），右端带清空键。有字时才出现，没字时留着
+// 同宽的透明格，胶囊宽度不因叉的出现 / 消失而跳。
+func PopSearch(c *ui.Context, key string, value *string, placeholder string, inputW float32) ui.Element {
+	if inputW == 0 {
+		inputW = 88
+	}
+	return miniSearch(c, key, value, placeholder, searchLook{
+		h: popSearchH, padX: space.Px8, gap: space.Px5,
+		icon: 12, inputW: inputW, font: scale.Size12,
+		clearHit: 20, clearGlyph: 12, clearable: true,
+	})
+}
+
+// searchLook 是搜索胶囊的尺寸档。两种调用方只差这一组数，画法只有一份。
+type searchLook struct {
+	h, padX, gap, icon, inputW, font float32
+	clearHit, clearGlyph             float32
+	clearable                        bool
+}
+
+func miniSearch(c *ui.Context, key string, value *string, placeholder string, l searchLook) ui.Element {
+	p := pal(c)
 	var in ui.Element
-	ui.Row(c).Key(key).Height(tok.MiniSearchH).PaddingX(space.Px12).Gap(space.Px8).AlignItems(ui.Center).
-		Radius(tok.MiniSearchH / 2).Background(p.Surface2).Children(func() {
-		glyph(c, "search", 14, p.Text3)
+	ui.Row(c).Key(key).Height(l.h).PaddingX(l.padX).Gap(l.gap).AlignItems(ui.Center).
+		Radius(l.h / 2).Background(p.Surface2).Children(func() {
+		glyph(c, "search", l.icon, p.Text3)
 		c.Key(key + ":input")
 		in = ui.TextInputBase(c, value).Label(placeholder).Placeholder(placeholder).
-			Width(inputW).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text)
+			Width(l.inputW).FontSize(scale.Font(c, l.font)).TextColor(p.Text)
+		if !l.clearable {
+			return
+		}
+		// 叉的样式照顶栏搜索框那一枚（navbar_search.go）：平时 text-3、悬停正文色。
+		// 画面上是那个叉，无障碍名字仍是「清空搜索」——叉对读屏软件念出来是
+		// 「乘号」，听不出它在清什么。
+		if *value == "" {
+			// 透明占位：不挂 key，免得撤销 / 出现时和那个按钮的控件状态串了。
+			ui.Box(c).Size(l.clearHit, l.clearHit)
+			return
+		}
+		// ⚠️ **c.Key 要在建它之前调**：身份挂在下一个建的元素上，建在
+		// ButtonBase 之后的话这个 key 就落到别的元素头上了。
+		c.Key(key + ":clear")
+		btn := ui.ButtonBase(c).Label("清空搜索").Size(l.clearHit, l.clearHit).Shrink(0).
+			AlignItems(ui.Center).Justify(ui.Center)
+		btn.Children(func() {
+			col := p.Text3
+			if btn.Hovered() {
+				col = p.Text
+			}
+			glyph(c, "x", l.clearGlyph, col)
+		})
+		if btn.Clicked() {
+			*value = ""
+			// 焦点还给输入框：清完接着敲不用再点一下（叉是按钮，点完焦点在它身上）。
+			in.Focus()
+		}
 	})
 	return in
 }
