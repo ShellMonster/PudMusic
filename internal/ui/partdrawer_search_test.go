@@ -319,6 +319,71 @@ func TestPartSearchCancelsTheOpenScroll(t *testing.T) {
 	}
 }
 
+// TestPartSearchKeepsThePopoverSize 断「搜索的时候浮层不变大小」：敲词滤到一行、
+// 滤到一行都没有、再清空，「分集列表」那一块的位置和宽高都和刚点开时一样（差不过
+// 一个像素）。曾经出错的行为：面板贴着滤剩的行收缩，敲一个字宽高就跟着变一次。
+//
+// ⚠️ **每一步都先让进场 / 收缩那段过渡走完再量**：弹层的大小是带过渡的，刚敲完
+// 那一帧量到的是过渡的半路，差几像素也算「变了」的话，红的原因就分不清是代码没冻住
+// 尺寸还是断言量早了。
+func TestPartSearchKeepsThePopoverSize(t *testing.T) {
+	// 二十 P，标题长短差得开：第 12 集那条长到把面板撑到最宽。滤到只剩一条短标题
+	// 时，宽度有没有跟着缩才量得出来（都短的话宽度由头部那一行决定，看不出差别）。
+	pages := make([]any, 20)
+	for i := range pages {
+		title := fmt.Sprintf("第 %d 段", i+1)
+		switch {
+		case i == 11:
+			title += "：这是一条很长很长的分集标题，长到把浮层撑到最宽"
+		case i%5 == 0:
+			title += " 加一段中等长度的说明"
+		}
+		pages[i] = map[string]any{
+			"cid": 701 + i, "page": i + 1, "part": title, "duration": 200 + i,
+		}
+	}
+
+	s, tt := onlineTester(t, pages, false)
+	partsReady(t, s, tt, 20)
+	openPartsDrawer(t, tt)
+	settlePop(tt)
+
+	panel, ok := tt.Find("分集列表")
+	if !ok {
+		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
+	}
+	same := func(step string) {
+		t.Helper()
+		settlePop(tt)
+		got, ok := tt.Find("分集列表")
+		if !ok {
+			t.Fatalf("%s之后找不到「分集列表」这一块，文字有 %q", step, tt.Texts())
+		}
+		if widthGap(got.X-panel.X) > 1 || widthGap(got.Y-panel.Y) > 1 ||
+			widthGap(got.W-panel.W) > 1 || widthGap(got.H-panel.H) > 1 {
+			t.Errorf("%s之后面板的框从 %v 变成了 %v", step, panel, got)
+		}
+	}
+
+	typeInPartSearch(t, tt, "第 2 段")
+	if !tt.HasText("P2 · 第 2 段") || tt.HasText("P12 · 第 12 段") {
+		t.Fatalf("前提没立起来：敲了「第 2 段」之后列表没滤成一行，文字有 %q", tt.Texts())
+	}
+	same("滤成一行")
+
+	tt.Type("zzz")
+	tt.Frame()
+	if !tt.HasText("没有匹配的分集") {
+		t.Fatalf("前提没立起来：滤光之后没有说明，文字有 %q", tt.Texts())
+	}
+	same("一个都没命中")
+
+	if err := tt.Click("清空搜索"); err != nil {
+		t.Fatalf("点不了清空键：%v，文字有 %q", err, tt.Texts())
+	}
+	same("清空搜索")
+}
+
 // TestPartsDrawerScrollsToTheEpisodeThatIsPlaying 断「点开时滚到正在放的那一集」：
 // 播到第 12 集再点开，那一列**滑过去**停在中间——不是一跳到位。
 //

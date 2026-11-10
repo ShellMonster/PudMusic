@@ -38,6 +38,16 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
+// partPanelBox 是分集浮层里**随搜索变的那一块**（列表加空结果说明）在每一次
+// 打开时量一次的大小。头那一行不随搜索变，留在外面，见 `viewPartDrawer`。
+//
+// ⚠️ **它必须在整个打开期间不动**：浮层贴着内容收缩，而搜索会把行滤少——不冻住
+// 的话，敲一个字宽高就跟着变一次，面板在用户眼皮底下跳。
+type partPanelBox struct {
+	w, h    float32
+	measure bool // 下一帧量的是满列表那一次布局
+}
+
 // Shell 是一个窗口的全部东西：状态、画法、唤醒句柄。
 type Shell struct {
 	app *app.App
@@ -625,6 +635,8 @@ type Shell struct {
 	// partScrollToActive 是一次性的「滚到正在放的那一集」请求：点开浮层时挂上，
 	// 那一行建出来那一帧消费掉（分集还没问到时它留着，问到那帧再滚）。
 	partScrollToActive bool
+	// partBox 是浮层列表那一段这一次打开时的大小，见 `partPanelBox`。
+	partBox partPanelBox
 	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
