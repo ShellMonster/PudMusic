@@ -10,12 +10,15 @@ package ui
 
 import (
 	"image/color"
+	"math"
 	"testing"
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -184,6 +187,45 @@ func TestTheBrandMarkRestartsAtTwelveAfterPause(t *testing.T) {
 
 	if brandChanged(first, brandShot(tt, b.s)) {
 		t.Error("暂停再播之后的第一帧和最开始那一帧不一样——唱片没有从 12 点重开")
+	}
+}
+
+// TestTheBrandMarkStaysRoundWhilePlaying 锁住「绕圈的小点不啃外缘」。
+//
+// ⚠️ 这条是用户看见的：头点走到圆环外缘时，accent 会在黑 / 白圆上啃出
+// 一个缺口，整个唱片看起来不是正圆。判据是像素几何——从 r13.5 到外缘
+// r15 的那一圈不许出现 accent 色。轨道 11.0 + 头点 1.6 把最外压到 12.6；
+// 把它挪回 12.9 这条就红。
+func TestTheBrandMarkStaysRoundWhilePlaying(t *testing.T) {
+	b := newTestShell(t, brandStateView(app.State{Playing: true}), systemIsDark(false))
+	b.tt.Frame()
+	th := BuildTheme(b.a.SettingsSnapshot(), false)
+	accent := tok.Of(th).Accent
+	cx := float64(b.tt.Image().Bounds().Dx()) / 2
+	cy := float64(b.s.sideBrandTopPad()) + float64(space.Px16) + 16
+
+	for i := 0; i < 3; i++ {
+		if i > 0 {
+			b.tt.Advance(motion.BrandBeatPeriod)
+			b.tt.Frame()
+		}
+		img := b.tt.Image()
+		for y := img.Bounds().Min.Y; y < img.Bounds().Max.Y; y++ {
+			for x := img.Bounds().Min.X; x < img.Bounds().Max.X; x++ {
+				dx := float64(x) + 0.5 - cx
+				dy := float64(y) + 0.5 - cy
+				r := math.Hypot(dx, dy)
+				if r < 13.5 {
+					continue
+				}
+				c := img.RGBAAt(x, y)
+				if absInt(int(c.R)-int(accent.R))+
+					absInt(int(c.G)-int(accent.G))+
+					absInt(int(c.B)-int(accent.B)) < 60 {
+					t.Fatalf("第 %d 拍：r=%.2f 的外缘上出现了 accent 色 %v——头点贴外缘会把圆环啃出缺口", i, r, c)
+				}
+			}
+		}
 	}
 }
 
