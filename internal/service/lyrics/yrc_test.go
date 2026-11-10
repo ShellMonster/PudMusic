@@ -46,6 +46,15 @@ func TestParseYRCReadsWordsAndTimes(t *testing.T) {
 	}
 }
 
+// TestParseYRCDropsTimedCreditLines 钉住「带时间戳的署名行也不是歌词」。
+func TestParseYRCDropsTimedCreditLines(t *testing.T) {
+	raw := "[0,1000](0,1000,0)作词 : 某人\n[1000,1000](1000,1000,0)真的词\n"
+	lines := ParseYRC(raw)
+	if len(lines) != 1 || lines[0].Text != "真的词" {
+		t.Fatalf("署名行没被过滤掉：%+v", lines)
+	}
+}
+
 // TestParseYRCSortsByStart 钉住「乱序的 YRC 也会按时间排好」。
 func TestParseYRCSortsByStart(t *testing.T) {
 	raw := "[5000,1000](5000,500,0)后\n[0,1000](0,500,0)前\n"

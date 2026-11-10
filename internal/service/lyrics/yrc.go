@@ -73,7 +73,7 @@ func ParseYRC(raw string) []Line {
 			continue
 		}
 		text := wordsText(words)
-		if text == "" {
+		if text == "" || isCreditText(text) {
 			continue
 		}
 		end := words[len(words)-1].End
