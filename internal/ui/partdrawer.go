@@ -57,6 +57,7 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		// 没歌的时候连搜索词一起收：词是「这一首的分集里找」，歌都没了词不剩。
 		s.partOpen = false
 		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", ""
+		s.partScrollToActive = false
 		return
 	}
 
@@ -102,6 +103,15 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		partEntryTooltip(parts, cur, s.app.PartsWorthAsking(), s.app.PartsErr()))
 	if btn.Clicked() {
 		s.partOpen = !s.partOpen
+		if s.partOpen {
+			// 刚点开：回到第一屏（词清掉了，滚动跟着回顶），并挂上一次性的
+			// 「滚到正在放的那一集」——那一帧由 viewPartDrawer 消费，滑过去、
+			// 居中停住；分集还没问到（比如正播着而 pagelist 在路上）时它留着，
+			// 问到那一帧再滚。
+			s.partQuery, s.partQuerySeen = "", ""
+			s.partScroll.Y = 0
+			s.partScrollToActive = true
+		}
 	}
 	// 「点外面关掉」是框架那个浮层自己管的（`mygo/ui/base.go` 的 `popover`），
 	// 所以这里只管开关本身（和 `viewRate` 同一个写法）。
@@ -249,7 +259,18 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 			MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
 			for _, r := range rows {
 				label := "P" + strconv.Itoa(r.page) + " · " + r.title
-				if pud.PopOpt(c, "part:"+r.key, label, "", r.active).Clicked() {
+				el := pud.PopOpt(c, "part:"+r.key, label, "", r.active)
+				if r.active && s.partScrollToActive {
+					// 刚点开：把正在放的那一集滑到这一列的中间（`ScrollCenter` +
+					// `Smooth` 是一段动画，不是一跳到位——跳的话用户看不出「是它
+					// 滚过去的」，会以为本来就停在那儿）。
+					//
+					// ⚠️ **消费一次就完**：用户之后自己滚走时它不再拉回来；挂着
+					// 而那一行还没建出来（分集在路上）时它留着，问到那一帧再滚。
+					el.ScrollIntoView(ui.ScrollIntoViewOptions{Block: ui.ScrollCenter, Animation: &ui.Smooth})
+					s.partScrollToActive = false
+				}
+				if el.Clicked() {
 					s.choosePartRow(r)
 				}
 			}
@@ -264,6 +285,7 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 // 摆着上一集的行更让人以为换失败了。
 func (s *Shell) choosePartRow(r partRow) {
 	s.partOpen = false
+	s.partScrollToActive = false
 	if err := s.app.PlayPart(r.cid); err != nil {
 		s.addToast("换不了这一集："+err.Error(), notice.Danger)
 	}

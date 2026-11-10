@@ -7,7 +7,9 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -202,5 +204,101 @@ func TestPartSearchEnterWithNoMatchDoesNothing(t *testing.T) {
 	}
 	if it, ok := s.app.CurrentItem(); !ok || it.Cid != "777" {
 		t.Errorf("没命中的时候回车换了集（当前 = %#v）", it)
+	}
+}
+
+// manyPages 是一份**二十 P** 的回包（cids 701..720）：multiPages 只有三集，
+// 三集摆不满一屏，「滚到正在放的那一集」没有东西可滚。
+func manyPages() []any {
+	pages := make([]any, 20)
+	for i := range pages {
+		pages[i] = map[string]any{
+			"cid": 701 + i, "page": i + 1, "part": fmt.Sprintf("第 %d 段", i+1), "duration": 200 + i,
+		}
+	}
+	return pages
+}
+
+// TestPartsDrawerScrollsToTheEpisodeThatIsPlaying 断「点开时滚到正在放的那一集」：
+// 播到第 12 集再点开，那一列**滑过去**停在中间——不是一跳到位。
+//
+// 判的是**真的滑过**：`partScroll.Y` 在两帧之间要走一段又停一段（至少一帧
+// Y 是 0 和终点之间的中间值）——一跳到位的话永远量不到中间那一帧。
+// 落定之后，正在放那一行的框要**整行落在「分集列表」面板的垂直范围里**。
+//
+// ⚠️ **不等固定帧数**：滑多久是动画的事，判据是「在飞（Y 在途中）→ 落定
+// （Y 连停几帧）」这个顺序；200 帧 × 16ms 是给慢机器留的保险丝，不是成功判据。
+func TestPartsDrawerScrollsToTheEpisodeThatIsPlaying(t *testing.T) {
+	s, tt := onlineTester(t, manyPages(), false)
+	partsReady(t, s, tt, 20)
+
+	if err := s.app.PlayPart("712"); err != nil {
+		t.Fatalf("放第 12 集：%v", err)
+	}
+	waitFrames(t, tt, "换到第 12 集", func() bool {
+		it, ok := s.app.CurrentItem()
+		return ok && it.Cid == "712"
+	})
+
+	openPartsDrawer(t, tt)
+
+	// 先走到「Y 离开了 0」：滚动发生了。
+	// ⚠️ 判据是 Y 这个**可观察结果**，不是 `Scrolling()`——`ScrollIntoView` 的
+	// Smooth 走的是容器自己的 wheelGlide（`mygo/ui/wheel.go` 的 glideScroll），
+	// 不写进 TrackScroll 那份的 glide，`Scrolling()` 对它恒假。
+	moved := false
+	for range 200 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if s.partScroll.Y > 0 {
+			moved = true
+			break
+		}
+	}
+	if !moved {
+		t.Fatalf("200 帧之后 partScroll.Y 还是 %.1f——点开没有滚到正在放的那一集",
+			s.partScroll.Y)
+	}
+
+	// 等它落定：Y 连停 3 帧算稳（到位之后框架还要再花一帧才对得准，和
+	// settleLyrics 同一条）。中途记下 Y 走过的中间值——滑过去的话至少有一帧
+	// 既不是 0 也不是终点。
+	calm := 0
+	lastY, midY := s.partScroll.Y, float32(-1)
+	settled := false
+	for range 200 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if widthGap(s.partScroll.Y-lastY) > 0.5 {
+			midY = s.partScroll.Y
+			lastY, calm = s.partScroll.Y, 0
+			continue
+		}
+		if calm++; calm >= 3 {
+			settled = true
+			break
+		}
+	}
+	if !settled {
+		t.Fatalf("200 帧之后那一列还没落定（Y=%.1f）", s.partScroll.Y)
+	}
+	if midY < 0 {
+		t.Fatalf("partScroll.Y 从 0 直接落到 %.1f，一帧中间值都没量到——"+
+			"「滚到那一集」是一跳到位，不是滑过去的", s.partScroll.Y)
+	}
+
+	panel, ok := tt.Find("分集列表")
+	if !ok {
+		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
+	}
+	active, ok := tt.Find("P12 · 第 12 段")
+	if !ok {
+		t.Fatalf("浮层里没有正在放的那一行「P12 · 第 12 段」，文字有 %q", tt.Texts())
+	}
+	// 整行落在面板的**垂直范围**里（不是只露个顶）：ScrollCenter 要的是居中，
+	// 居中之后行的顶和底都在面板顶底之间。
+	if active.Y < panel.Y || active.Y+active.H > panel.Y+panel.H {
+		t.Errorf("正在放那一行的框是 %v，面板是 %v——它没有整行落在面板里",
+			active, panel)
 	}
 }

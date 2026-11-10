@@ -622,6 +622,9 @@ type Shell struct {
 	// 各自记着自己滚到哪儿；行的**内容**是同一份（partRowsFor）。
 	partScroll ui.ScrollState
 	partRows   []partRow
+	// partScrollToActive 是一次性的「滚到正在放的那一集」请求：点开浮层时挂上，
+	// 那一行建出来那一帧消费掉（分集还没问到时它留着，问到那帧再滚）。
+	partScrollToActive bool
 	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。
