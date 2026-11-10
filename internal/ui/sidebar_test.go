@@ -558,7 +558,7 @@ func TestTheSidebarPanicIsCaught(t *testing.T) {
 	if !tt.HasText("布丁音乐") {
 		t.Fatalf("侧栏没画出来，文字有 %q", tt.Texts())
 	}
-	s.sideBody = func(*mygoui.Context) { panic("侧栏画崩了") }
+	s.sideBody = func(*mygoui.Context, app.State) { panic("侧栏画崩了") }
 	tt.Frame()
 
 	if s.crash == nil {

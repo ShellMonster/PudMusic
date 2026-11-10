@@ -109,6 +109,14 @@ const (
 	CoverSpinSpeed = 200.0
 )
 
+// BrandBeatPeriod 是侧栏左上角那枚唱片的鼓点：33⅓ rpm 的一圈里正好三拍
+// （100 BPM）。
+//
+// ⚠️ **它不是另一个独立的数**：那枚标志的慢转和鼓点共用一份相位
+// （`hover.CycleRate` 按 `CoverSpinPeriod` 循环，鼓点是相位 × 3），所以这里写
+// 的是一圈除以三——改圈长就是改 BPM。`motion_test.go` 钉着这两者的关系。
+const BrandBeatPeriod = 600 * time.Millisecond
+
 // CoverSpin 是满屏播放器封面那一圈的动画：**一条线性曲线**，走满一整圈。
 //
 // ⚠️ **它不跟统一曲线**：匀速转不是一段过渡，没有 ease-out 可言——统一曲线

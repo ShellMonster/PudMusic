@@ -15,6 +15,7 @@
 package ui
 
 import (
+	"math"
 	"runtime"
 	"slices"
 	"strconv"
@@ -22,6 +23,8 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/service/download"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
@@ -66,11 +69,11 @@ func (s *Shell) sideDrawnWidth(st app.Settings) float32 {
 //
 // ⚠️ 必须自己拉满高：外层 Row 默认把子元素**居中**跨轴摆放，不写 `AlignSelf(Stretch)`
 // 的话这一栏会按内容高度浮在中间。
-func (s *Shell) viewSide(c *ui.Context) {
-	st := s.app.SettingsSnapshot()
+func (s *Shell) viewSide(c *ui.Context, st app.State) {
+	settings := s.app.SettingsSnapshot()
 	p := tok.Of(c.Theme())
 	winW, _ := c.Size()
-	collapsed := sideCollapsedAt(st, winW)
+	collapsed := sideCollapsedAt(settings, winW)
 	w := tok.SideW
 	if collapsed {
 		w = tok.SideCollapsedW
@@ -89,13 +92,13 @@ func (s *Shell) viewSide(c *ui.Context) {
 	side.Width(w).AlignSelf(ui.Stretch).Background(p.Side).
 		BorderWidth(0, 1, 0, 0).BorderColor(p.Line).
 		Children(func() {
-			s.viewSideBrand(c, collapsed)
+			s.viewSideBrand(c, st, collapsed)
 			// 导航和收藏夹一起滚（原型 `.side-scroll`：左右 12、下 16）。
 			sideScroll := ui.Scroll(c).Key("side-scroll").Grow(1).FillWidth()
 			sideScroll.Children(func() {
 				ui.Column(c).FillWidth().Padding(space.None, space.Px12, space.Px16, space.Px12).Children(func() {
-					s.viewSideMenu(c, st, collapsed)
-					s.viewFavorites(c, st, collapsed)
+					s.viewSideMenu(c, settings, collapsed)
+					s.viewFavorites(c, settings, collapsed)
 				})
 			})
 			s.trackScrollbar(sideScroll)
@@ -111,7 +114,11 @@ func (s *Shell) viewSide(c *ui.Context) {
 //
 // 唱片标志 32×32（原型 `brandMark`）+「布丁音乐」宋体 700 20 号、字距 0.04em +
 // `PUDMUSIC` 等宽 11 号 text-3、字距 0.18em。收起后只剩标志，居中。
-func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
+//
+// 放歌且窗口在前台时那枚唱片会跟着三拍鼓点胀缩、两道纹路亮一下、一颗小点
+// 绕一圈（见 `drawSideBrandMark`）；其余时候（暂停、没歌、窗口看不见、系统开了
+// 减弱动态）停在静态那一张，而且**一帧都不要**——判据在 `Draw` 里，不在建的时候。
+func (s *Shell) viewSideBrand(c *ui.Context, st app.State, collapsed bool) {
 	p := tok.Of(c.Theme())
 	top := s.sideBrandTopPad() + space.Px16
 	row := ui.Row(c).Key("side-brand").FillWidth().Gap(space.Px12).AlignItems(ui.Center).
@@ -120,18 +127,22 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 		row = row.Padding(top, space.None, space.Px20, space.None).Justify(ui.Center)
 	}
 	row.Children(func() {
-		ui.Box(c).Size(32, 32).Shrink(0).Draw(func(pp *ui.Painter, r ui.Rect) {
-			circle := func(inset, radius float32, col ui.Color) {
-				pp.Fill(ui.Rect{X: r.X + inset, Y: r.Y + inset, W: 2 * radius, H: 2 * radius}, col, radius)
+		mark := ui.Box(c).Key("side-brand-mark").Size(32, 32).Shrink(0)
+		moving := st.Playing && !motion.Reduced(c)
+		var phase func(*ui.Painter) float32
+		if moving {
+			phase = hover.CycleRate(mark, motion.CoverSpinPeriod, 30)
+		}
+		// ⚠️ **开关在建的时候认下、在画的时候读**：局部重绘那一帧不重建（见
+		// `hover.Cycle`），而可见性可能在两次 build 之间变——窗口失焦的那一刻
+		// 标志就得停，不能等到下一次重建。
+		visible := hover.VisibleFlag()
+		mark.Draw(func(pp *ui.Painter, r ui.Rect) {
+			if phase == nil || !visible.Load() {
+				drawSideBrandMark(pp, r, p, 0, false)
+				return
 			}
-			ring := func(inset, radius float32, col ui.Color) {
-				pp.Stroke(ui.Rect{X: r.X + inset, Y: r.Y + inset, W: 2 * radius, H: 2 * radius}, col, radius, 1)
-			}
-			circle(1, 15, p.Text)
-			ring(4, 12, p.Bg.Alpha(0.35))
-			ring(6.5, 9.5, p.Bg.Alpha(0.35))
-			circle(10, 6, p.Accent)
-			circle(14.4, 1.6, p.Text)
+			drawSideBrandMark(pp, r, p, phase(pp), true)
 		})
 		if collapsed {
 			return
@@ -142,6 +153,51 @@ func (s *Shell) viewSideBrand(c *ui.Context, collapsed bool) {
 				TextColor(p.Text3).SingleLine()
 		})
 	})
+}
+
+// drawSideBrandMark 画那枚 32×32 的唱片。
+//
+// moving 为假时是静态那五笔（和本票之前逐字节一样）。为真时 phase（0~1，
+// 一圈 33⅓ rpm）同时驱动三样：accent 那枚圆随三拍鼓点胀缩最多 1.2 DIP、两道
+// 纹路的底色透明度从 0.35 提到最多 0.55、一颗 accent 小点从 12 点起绕一圈。
+// 三样都压在 32×32 以内（最外是半径 14.6）。
+func drawSideBrandMark(p *ui.Painter, r ui.Rect, pal tok.Palette, phase float32, moving bool) {
+	circle := func(inset, radius float32, col ui.Color) {
+		p.Fill(ui.Rect{X: r.X + inset, Y: r.Y + inset, W: 2 * radius, H: 2 * radius}, col, radius)
+	}
+	ring := func(inset, radius float32, col ui.Color) {
+		p.Stroke(ui.Rect{X: r.X + inset, Y: r.Y + inset, W: 2 * radius, H: 2 * radius}, col, radius, 1)
+	}
+	circle(1, 15, pal.Text)
+	groove, disc := pal.Bg.Alpha(0.35), float32(6)
+	var pulse float32
+	if moving {
+		// beat 是这一圈里的第几拍（0~1），pulse 是这一拍的余量：拍点上 1，
+		// 到下一拍之前落到约 0.05——「打一下再松开」，不是正弦呼吸。
+		beat := phase*3 - float32(math.Floor(float64(phase*3)))
+		pulse = float32(math.Exp(-3 * float64(beat)))
+		groove = pal.Bg.Alpha(0.35 + 0.2*pulse)
+		disc = 6 + 1.2*pulse
+	}
+	ring(4, 12, groove)
+	ring(6.5, 9.5, groove)
+	circle(16-disc, disc, pal.Accent)
+	circle(14.4, 1.6, pal.Text)
+	if !moving {
+		return
+	}
+	// 12 点起、顺时针：相位 0 在正上方，随相位增大往右走。
+	ang := float64(phase) * 2 * math.Pi
+	const (
+		orbit = 13.2
+		dot   = 1.4
+	)
+	dx := float32(math.Sin(ang)) * orbit
+	dy := -float32(math.Cos(ang)) * orbit
+	p.Fill(ui.Rect{
+		X: r.X + 16 + dx - dot, Y: r.Y + 16 + dy - dot,
+		W: 2 * dot, H: 2 * dot,
+	}, pal.Accent, dot)
 }
 
 // sideBrandTopPad 是品牌区上面给 macOS 红黄绿让的那一格（原型 `.traffic` 高 44）；
