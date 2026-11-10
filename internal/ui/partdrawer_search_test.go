@@ -263,6 +263,62 @@ func TestRenderPartSearchShots(t *testing.T) {
 	}
 }
 
+// TestPartSearchCancelsTheOpenScroll 断「点开后马上敲词，进场那段滑动要停」。
+//
+// 打开弹层会滑到正在放的第 12 集。如果用户在滑行还没走起来时就开始敲词，只把
+// `partScroll.Y` 写成 0 取消不掉那条 wheelGlide：写进去的 0 和当时的位置一样，
+// 容器不认这是一次接管，滑行会继续把过滤后的列表带到旧目标（实测 Y 从 0 被带到
+// 37，第一条命中被滚出画面）。
+//
+// 判据是过滤之后 **Y 连续十帧停在 0**，并且第一条命中（P1）整行落在面板里。
+// 不是数固定帧数：进场滑行到底走没走，看的是 Y。
+func TestPartSearchCancelsTheOpenScroll(t *testing.T) {
+	s, tt := onlineTester(t, manyPages(), false)
+	partsReady(t, s, tt, 20)
+	if err := s.app.PlayPart("712"); err != nil {
+		t.Fatalf("放第 12 集：%v", err)
+	}
+	waitFrames(t, tt, "换到第 12 集", func() bool {
+		it, ok := s.app.CurrentItem()
+		return ok && it.Cid == "712"
+	})
+	openPartsDrawer(t, tt)
+
+	// 不推钟：敲词就发生在进场滑行的第一帧。敲「第 1」会留下 P1、P10 到 P19，
+	// 列表仍然滚得动——旧滑行要是没停，就会把它们带到第 12 集那个旧目标。
+	if err := tt.Click(partSearchLabel); err != nil {
+		t.Fatalf("点不到分集搜索框：%v，文字有 %q", err, tt.Texts())
+	}
+	tt.Type("第 1")
+
+	calm := 0
+	for range 120 {
+		tt.Advance(16 * time.Millisecond)
+		tt.Frame()
+		if s.partScroll.Y > 0.5 {
+			t.Fatalf("敲词之后列表被带到了 Y=%.1f：点开时那段滑行没被取消", s.partScroll.Y)
+		}
+		if calm++; calm >= 10 {
+			break
+		}
+	}
+	if calm < 10 {
+		t.Fatalf("120 帧里 Y 没有连续十帧停在 0（最后 %.2f）", s.partScroll.Y)
+	}
+
+	panel, ok := tt.Find("分集列表")
+	if !ok {
+		t.Fatalf("画面上找不到「分集列表」这一块，文字有 %q", tt.Texts())
+	}
+	first, ok := tt.Find("P1 · 第 1 段")
+	if !ok {
+		t.Fatalf("过滤后第一条命中不在画面上，文字有 %q", tt.Texts())
+	}
+	if first.Y < panel.Y || first.Y+first.H > panel.Y+panel.H {
+		t.Errorf("过滤后第一条命中的框是 %v，面板是 %v——它被滚出了面板", first, panel)
+	}
+}
+
 // TestPartsDrawerScrollsToTheEpisodeThatIsPlaying 断「点开时滚到正在放的那一集」：
 // 播到第 12 集再点开，那一列**滑过去**停在中间——不是一跳到位。
 //

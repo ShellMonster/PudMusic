@@ -256,7 +256,11 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 	// 外面这一层 Column 是必需的：滚动容器直接当别的容器的下一层时，里面文字的盒子量出来是 0×0
 	// （见 `viewSpaceList` 里同一条）。
 	ui.Column(c).Key("part-pop:list").MaxWidth(partPopMaxW).Children(func() {
-		sc := ui.Scroll(c).Key("part-pop:scroll").TrackScroll(&s.partScroll).
+		// ⚠️ **key 里带上搜索词**：换词就换一个滚动容器，旧的进场滑动（`ScrollIntoView`
+		// 那条 wheelGlide）跟着旧容器一起丢掉。只把 `partScroll.Y` 写成 0 取消不掉
+		// 它——写进去的 0 和当时的位置一样时容器不认这是一次接管，滑行会继续把
+		// 过滤后的列表往旧目标带（实测：点开后马上敲「第 1」，Y 从 0 被带到 37）。
+		sc := ui.Scroll(c).Key("part-pop:scroll:" + s.partQuery).TrackScroll(&s.partScroll).
 			MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
 			for _, r := range rows {
 				label := "P" + strconv.Itoa(r.page) + " · " + r.title
