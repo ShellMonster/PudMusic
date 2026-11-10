@@ -198,6 +198,14 @@ func (a *App) ensureParts(bvid string) {
 		a.partsBvid, a.parts, a.partsLoaded, a.partsWanted = bvid, nil, false, false
 		a.partsErr, a.partsTriedAt = nil, time.Time{}
 	}
+	if cached := a.partsCache[bvid]; len(cached) != 0 {
+		a.parts = append([]bili.VideoPart(nil), cached...)
+		a.partsLoaded = true
+		a.partsWanted = false
+		a.partsMu.Unlock()
+		a.adoptCurrentParts(bvid, cached)
+		return
+	}
 	if a.partsLoaded || a.partsWanted {
 		a.partsMu.Unlock()
 		return
@@ -241,18 +249,63 @@ func (a *App) ensureParts(bvid string) {
 // ⚠️ **只有成功才 `partsLoaded = true`**（理由见 ensureParts）。
 func (a *App) finishParts(bvid string, items []bili.VideoPart, err error) {
 	a.partsMu.Lock()
+	if err == nil && len(items) != 0 {
+		if a.partsCache == nil {
+			a.partsCache = make(map[string][]bili.VideoPart)
+		}
+		a.partsCache[bvid] = append([]bili.VideoPart(nil), items...)
+	}
 	if a.partsBvid == bvid {
-		a.parts, a.partsErr = items, err
+		a.parts, a.partsErr = append([]bili.VideoPart(nil), items...), err
 		a.partsLoaded, a.partsWanted = err == nil, false
 	}
 	a.partsMu.Unlock()
 
+	if err == nil && len(items) != 0 {
+		a.adoptCurrentParts(bvid, items)
+	}
 	a.mu.Lock()
 	wake := a.wake
 	a.mu.Unlock()
 	if wake != nil {
 		wake()
 	}
+}
+
+func (a *App) cachedParts(bvid string) []bili.VideoPart {
+	a.partsMu.Lock()
+	defer a.partsMu.Unlock()
+	if cached := a.partsCache[bvid]; len(cached) != 0 {
+		return append([]bili.VideoPart(nil), cached...)
+	}
+	return nil
+}
+
+func (a *App) adoptCurrentParts(bvid string, parts []bili.VideoPart) {
+	if len(parts) <= 1 || a.queue == nil {
+		return
+	}
+	cur, ok := a.queue.Current()
+	if !ok || cur.Bvid != bvid || !cur.isOnline() {
+		return
+	}
+	if adopter, ok := any(a.queue).(interface {
+		AdoptPages(Item, PageSet) (AdoptPagesResult, bool)
+	}); ok {
+		adopter.AdoptPages(cur, pageSetFor(cur, parts))
+	}
+}
+
+func pageSetFor(current Item, parts []bili.VideoPart) PageSet {
+	set := PageSet{Bvid: current.Bvid, VideoTitle: current.Title, Parts: make([]PageSpec, 0, len(parts))}
+	for i, part := range parts {
+		index := part.Page
+		if index <= 0 {
+			index = i + 1
+		}
+		set.Parts = append(set.Parts, PageSpec{Cid: part.Cid, Index: index, Title: part.Part})
+	}
+	return set
 }
 
 // PlayPart 换成放 bvid 的某一分集（cid）。
@@ -280,6 +333,24 @@ func (a *App) PlayPart(cid string) error {
 	}
 	if cur.Cid == cid {
 		return nil // 已经在放这一集
+	}
+	if adopter, ok := any(a.queue).(interface {
+		SelectPage(Item, string) (Item, bool)
+	}); ok {
+		if next, changed := adopter.SelectPage(cur, cid); changed {
+			return a.play(next)
+		}
+	}
+	if strings.HasPrefix(cur.GroupKey, pageGroupPrefix) {
+		for i, item := range a.queue.Items() {
+			if item.Bvid != cur.Bvid || item.Cid != cid {
+				continue
+			}
+			if next, changed := a.queue.selectAt(i); changed {
+				return a.play(next)
+			}
+			break
+		}
 	}
 	i := a.queue.CurrentIndex()
 	if i < 0 {

@@ -1752,17 +1752,37 @@ func (a *App) withCid(ctx context.Context, s *Streaming, it Item) (Item, error) 
 	if s == nil || s.Client == nil {
 		return it, errStreamingMissing
 	}
-	cid, err := s.Client.FirstVideoCid(ctx, it.Bvid)
+	pages, err := s.Client.VideoPages(ctx, it.Bvid)
 	if err != nil {
 		// 包上 `ErrNoPart`：界面上要说清「问不出这一集」，而不是把它底下那个
 		// 网络错原样报出去（`bili.Friendly` 靠这个哨兵把两句话说开）。
 		return it, fmt.Errorf("%w（%s）：%w", bili.ErrNoPart, it.Bvid, err)
 	}
-	if cid == "" {
+	if len(pages) == 0 || pages[0].Cid == "" {
 		return it, fmt.Errorf("%w：%s 的分 P 列表里没有可用的分 P id", bili.ErrNoPart, it.Bvid)
 	}
-	it.Cid = cid
+	a.rememberParts(it.Bvid, pages)
+	it.Cid = pages[0].Cid
 	return it, nil
+}
+
+func (a *App) rememberParts(bvid string, items []bili.VideoPart) {
+	if bvid == "" || len(items) == 0 {
+		return
+	}
+	a.partsMu.Lock()
+	if a.partsCache == nil {
+		a.partsCache = make(map[string][]bili.VideoPart)
+	}
+	a.partsCache[bvid] = append([]bili.VideoPart(nil), items...)
+	if a.partsBvid == bvid {
+		a.parts = append([]bili.VideoPart(nil), items...)
+		a.partsLoaded = true
+		a.partsWanted = false
+		a.partsErr = nil
+	}
+	a.partsMu.Unlock()
+	a.adoptCurrentParts(bvid, items)
 }
 
 // writeBackCid 把起播时补出来的分 P id 写回队列的当前项（票 #683）。
@@ -1808,7 +1828,18 @@ func (a *App) writeBackCid(gen int, it Item) {
 	if cur.Bvid != it.Bvid || cur.Cid != "" {
 		return
 	}
-	a.queue.fillCidIf(cur, it.Cid)
+	if !a.queue.fillCidIf(cur, it.Cid) {
+		return
+	}
+	if pages := a.cachedParts(it.Bvid); len(pages) > 1 {
+		if now, ok := a.queue.Current(); ok {
+			if adopter, ok := any(a.queue).(interface {
+				AdoptPages(Item, PageSet) (AdoptPagesResult, bool)
+			}); ok {
+				adopter.AdoptPages(now, pageSetFor(now, pages))
+			}
+		}
+	}
 }
 
 // buildOnline 建一套「流引用 + 字节源 + 播放器」，**不往 App 上装**。
