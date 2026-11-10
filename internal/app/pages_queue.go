@@ -102,6 +102,9 @@ func (q *Queue) adoptPagesLocked(expected Item, pages PageSet) (AdoptPagesResult
 		if q.items[i].Bvid != pages.Bvid {
 			continue
 		}
+		if q.items[i].GroupKey != "" && !strings.HasPrefix(q.items[i].GroupKey, pageGroupPrefix) {
+			continue
+		}
 		spec, hasSpec := specByCID[q.items[i].Cid]
 		if (hasSpec && q.items[i].Cid != "") || (q.items[i].Cid == "" && q.items[i].Identity() == oldID) {
 			if !hasSpec {

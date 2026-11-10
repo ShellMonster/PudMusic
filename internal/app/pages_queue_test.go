@@ -112,6 +112,39 @@ func TestAdoptPagesRejectsStaleCurrentAndExistingCollectionGroup(t *testing.T) {
 	}
 }
 
+func TestAdoptPagesLeavesOtherCollectionItemsUntouched(t *testing.T) {
+	q := NewQueue()
+	current := Item{Source: SourceOnline, Type: "mv", Bvid: "BV1", Title: "视频"}
+	collection := Item{
+		Source: SourceOnline, Type: "mv", Bvid: "BV1", Cid: "999",
+		Title: "合集中的同视频", GroupKey: "season:1", GroupIndex: 1,
+		GroupCount: 2, GroupTitle: "合集",
+	}
+	q.Append(current, collection)
+	q.Move(1)
+
+	if _, ok := q.AdoptPages(current, PageSet{
+		Bvid: "BV1",
+		Parts: []PageSpec{
+			{Cid: "101", Index: 1, Title: "第一集"},
+			{Cid: "202", Index: 2, Title: "第二集"},
+		},
+	}); !ok {
+		t.Fatal("AdoptPages returned false")
+	}
+	items := q.Items()
+	var found Item
+	for _, item := range items {
+		if item.GroupKey == "season:1" {
+			found = item
+			break
+		}
+	}
+	if found.GroupKey != "season:1" || found.Title != "合集中的同视频" || found.Cid != "999" {
+		t.Fatalf("existing collection item changed: %#v", found)
+	}
+}
+
 func TestAdoptPagesUpdatesUndoIndexWhenInsertingBeforeCurrent(t *testing.T) {
 	q := NewQueue()
 	first := LocalItem("first.mp3")
