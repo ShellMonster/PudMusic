@@ -103,7 +103,12 @@ type State struct {
 	QueueFinished bool
 	Position      time.Duration
 	Duration      time.Duration
-	Volume        float64
+	// Buffered 是当前这条流已经下到本地的部分（时间轴上的位置）。
+	//
+	// 0 = 不知道或没有可比的数据（本地文件、还在问地址的那一段）。界面只在
+	// 它大于 0 且小于 Duration 时画那一段浅色的已缓冲条。
+	Buffered time.Duration
+	Volume   float64
 	// Muted 是「静音」这一档。
 	//
 	// ⚠️ **它和 Volume 是两件事**（票 #311 / 报告 §3.3 的 B2）：Volume 记的是
@@ -1330,6 +1335,7 @@ func (a *App) Snapshot() State {
 		QueueFinished:   a.stopped && a.wantPlay,
 		Position:        a.position,
 		Duration:        a.duration,
+		Buffered:        a.bufferedLocked(),
 		Volume:          a.volume,
 		Muted:           a.muted,
 		Rate:            a.rate,
@@ -1379,6 +1385,32 @@ func (a *App) Snapshot() State {
 // 不到声音的那几秒里播放条会以为自己在放本地文件，于是「下载」那一枚不见了。
 //
 // 空串 = 没有歌（`a.player == nil`）。
+// bufferedLocked 是当前这条流已经下到本地的部分折算成的时间。**必须在持 a.mu 时调**。
+//
+// 判据是字节数占整条流的比例：取流接口不保证给总长度，拿不到时返回 0（界面
+// 就不画那一段），而不是猜一个看起来合理的数。
+//
+// ⚠️ **只认当前代次的那条源**：切歌时 `a.online` 还是旧的，拿它算出来的
+// 进度会画在新歌的进度条上。
+func (a *App) bufferedLocked() time.Duration {
+	tr := a.online
+	if tr == nil || tr.source == nil || tr.gen != a.onlineGen || a.duration <= 0 {
+		return 0
+	}
+	return bufferedTime(a.duration, tr.source.Filled(), tr.source.Size())
+}
+
+// bufferedTime 把「已下字节 / 总字节」折成时间轴上的位置。
+//
+// 任一输入不可用时返回 0（界面就不画），不猜。
+func bufferedTime(dur time.Duration, filled, size int64) time.Duration {
+	if dur <= 0 || size <= 0 || filled <= 0 {
+		return 0
+	}
+	filled = min(filled, size)
+	return time.Duration(float64(dur) * float64(filled) / float64(size))
+}
+
 func (a *App) sourceLocked() string {
 	if a.player == nil {
 		return ""

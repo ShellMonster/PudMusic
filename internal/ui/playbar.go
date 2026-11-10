@@ -994,6 +994,22 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 			}
 		}
 		sl := playbarProgressSliderLive(c, &s.scrub, 0, 1, live).Grow(1).Label("播放进度").Disabled(!known)
+		// 已缓冲和弹幕热度画在轨道之外（见 timeline.go）。只对「知道时长」
+		// 的那一档画：没有时长时比例是 0/0，画出来是一条不确定位置的线。
+		if known {
+			buffered := float32(0)
+			if st.Buffered > 0 {
+				buffered = min(float32(float64(st.Buffered)/float64(st.Duration)), 1)
+			}
+			sl = withTimelineOverlays(sl, timelineOverlay{
+				buffered:    buffered,
+				heat:        s.heat.of(s.app.Danmaku().Items, st.Duration),
+				pad:         8,
+				trackW:      knobHoverLook.trackW,
+				bufferedCol: tok.Of(c.Theme()).Text3,
+				heatCol:     c.Theme().Accent.Alpha(0.45),
+			})
+		}
 		// 章节标记画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
 		// 那半个宽 8）。原型 index.html:854 `.chap`：宽 4、高 10、圆角 1、`side` 色的竖条
 		// （在 4 高的轨道上切出一道 4 宽的口）。
