@@ -972,6 +972,15 @@ func CycleRate(box ui.Element, period time.Duration, fps float32) func(p *ui.Pai
 	return func(p *ui.Painter) float32 { return cyclePhase(p, st, visible.Load(), period, fps) }
 }
 
+// RestartCycle 把这一格的相位清零。暂停再播时唱片从 12 点重新开始。
+//
+// ⚠️ **必须和 `Cycle` / `CycleRate` 用同一个键**（`waveStateKey{}`）：它清的就是
+// 那两档认下的那一份状态，否则下一轮还会接着旧相位走。
+func RestartCycle(box ui.Element) {
+	st := ui.Local(box, waveStateKey{}, func() waveState { return waveState{} })
+	*st = waveState{}
+}
+
 func cyclePhase(p *ui.Painter, st *waveState, visible bool, period time.Duration, fps float32) float32 {
 	now := p.Now()
 	if !st.started {

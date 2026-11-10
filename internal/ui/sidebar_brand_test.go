@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	mygoui "github.com/egoist/mygo/ui"
@@ -153,6 +154,84 @@ func TestTheBrandMarkStopsForReduceMotion(t *testing.T) {
 	tt.Frame()
 	if brandChanged(before, brandShot(tt, b.s)) {
 		t.Error("开了减弱动态，唱片还在动")
+	}
+}
+
+// TestTheBrandMarkRestartsAtTwelveAfterPause 锁住「暂停再播时唱片从 12 点重开」。
+//
+// 判据是像素：暂停再播之后的第一帧必须和最开始那一帧**逐像素一样**——相位
+// 清零了才会一样；从暂停那一刻的相位接着走的话，那颗小点会落在半路上。
+func TestTheBrandMarkRestartsAtTwelveAfterPause(t *testing.T) {
+	b := playingShell(t)
+	tt := b.tt
+
+	first := brandShot(tt, b.s)
+	// 半拍：先确认这一条的前提——唱片真的在动。不动的话「再播后一样」是
+	// 白给的（前后都没变）。
+	tt.Advance(motion.BrandBeatPeriod / 2)
+	tt.Frame()
+	if !brandChanged(first, brandShot(tt, b.s)) {
+		t.Fatal("推进半拍之后品牌标志没动——这一条的前提不成立")
+	}
+
+	// 暂停，让时间白白走掉一秒（相位在停着的时候本来会「攒」起来），再播。
+	b.a.Toggle()
+	tt.Frame()
+	tt.Advance(time.Second)
+	tt.Frame()
+	b.a.Toggle()
+	tt.Frame()
+
+	if brandChanged(first, brandShot(tt, b.s)) {
+		t.Error("暂停再播之后的第一帧和最开始那一帧不一样——唱片没有从 12 点重开")
+	}
+}
+
+// brandStateView 只画收起态品牌区（只有那枚标志），播放状态由调用方给定。
+//
+// ⚠️ **`visibleFlag` 每帧装真的那一份并置为可见**：标志在建的时候认下开关，
+// 而 `withView` 绕过了 `Shell.View` 里那一次安装——不装的话，上一条测试留下的
+// 开关会让它一帧都不动，量出来的是静态那一档。
+func brandStateView(st app.State) shellOpt {
+	return withView(func(s *Shell) func(*mygoui.Context) {
+		return func(c *mygoui.Context) {
+			visible := s.visibleFlag()
+			visible.Store(true)
+			hover.SetVisibleFlag(visible)
+			s.applyFrameTheme(c)
+			s.viewSideBrand(c, st, true)
+		}
+	})
+}
+
+// TestTheBrandBeatStaysInsideItsFrameBudget 锁住「播放时那枚唱片每帧不多分配」。
+//
+// 判据是**播放态相对静态态**的增量：静态那一档是同一块界面不画动效时的成本，
+// 两者一比，动态路径自己的账就露出来了。上限只给 +1 次分配 / +48 字节——
+// 那一次是 `CycleRate` 的闭包（现有实现，不是这次加的）；十二个尾迹点必须
+// 一个字节都不多花（只有局部 float 和 `p.Fill`）。
+func TestTheBrandBeatStaysInsideItsFrameBudget(t *testing.T) {
+	staticShell := newTestShell(t, brandStateView(app.State{}))
+	staticShell.tt.Frame()
+	static := measureFrames(t, staticShell.tt, budgetFrames)
+
+	beatShell := newTestShell(t, brandStateView(app.State{Playing: true}))
+	// 先把相位零点定在第一帧，再走五分之一圈，让动态路径真的在画
+	// （零点那一帧的「动」和静态只差几个像素，量不出回归）。
+	beatShell.tt.Frame()
+	beatShell.tt.Advance(motion.CoverSpinPeriod / 5)
+	beat := measureFrames(t, beatShell.tt, budgetFrames)
+
+	t.Logf("品牌标志：静态每帧 %.0f 次分配 / %.0f 字节；播放每帧 %.0f 次分配 / %.0f 字节",
+		static.allocs, static.bytes, beat.allocs, beat.bytes)
+	if beat.allocs > static.allocs+1 {
+		t.Errorf("播放时每帧分配 %.0f 次，静态是 %.0f 次——动态路径多分配了"+
+			"（上限只许 +1，那是 `CycleRate` 的闭包）",
+			beat.allocs, static.allocs)
+	}
+	if beat.bytes > static.bytes+48 {
+		t.Errorf("播放时每帧分配 %.0f 字节，静态是 %.0f 字节——尾迹不该新分配任何东西"+
+			"（上限只许 +48 字节）", beat.bytes, static.bytes)
 	}
 }
 

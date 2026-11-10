@@ -132,6 +132,12 @@ func (s *Shell) viewSideBrand(c *ui.Context, st app.State, collapsed bool) {
 		var phase func(*ui.Painter) float32
 		if moving {
 			phase = hover.CycleRate(mark, motion.CoverSpinPeriod, 30)
+		} else {
+			// ⚠️ **停的时候把相位清零**：不清的话，下次播放的第一帧会从暂停那一刻
+			// 的相位接着画（小点凭空出现在半路上），而用户期待的是从 12 点重开。
+			// 失焦 / 隐藏不在这里——那两种情况画的时候由 `visible` 停下来，相位
+			// 留着是为了恢复可见时按真实时间续走（歌一直在放），而不是重置到 12 点。
+			hover.RestartCycle(mark)
 		}
 		// ⚠️ **开关在建的时候认下、在画的时候读**：局部重绘那一帧不重建（见
 		// `hover.Cycle`），而可见性可能在两次 build 之间变——窗口失焦的那一刻
@@ -157,10 +163,22 @@ func (s *Shell) viewSideBrand(c *ui.Context, st app.State, collapsed bool) {
 
 // drawSideBrandMark 画那枚 32×32 的唱片。
 //
-// moving 为假时是静态那五笔（和本票之前逐字节一样）。为真时 phase（0~1，
-// 一圈 33⅓ rpm）同时驱动三样：accent 那枚圆随三拍鼓点胀缩最多 1.2 DIP、两道
-// 纹路的底色透明度从 0.35 提到最多 0.55、一颗 accent 小点从 12 点起绕一圈。
-// 三样都压在 32×32 以内（最外是半径 14.6）。
+// moving 为假时是静态那五笔（和最开始的版本逐字节一样）。为真时 phase（0~1，
+// 一圈 33⅓ rpm）同时驱动三样：accent 那枚圆随三拍鼓点胀缩、两道纹路的底色
+// 透明度跟着亮、一颗 accent 光点拖着一串尾迹从 12 点起绕一圈。
+//
+// 动态这三样都压在 32×32 以内（最外是头点 12.9+1.6=14.5，没超出静态的 r15）。
+//
+// ⚠️ **尾迹是为了把 30fps 的步进连成光带**：标志按 30fps 要帧（`CycleRate`），
+// 一圈只有约 54 个位置（30fps × 1.8s）——只画一个头点的话，眼睛看到的是
+// 「一颗点一蹦一蹦地走」。十二个逐级变淡的点把那一蹦补成一段短光带，而它们
+// 只是 `p.Fill`，不进 slice/map、不新建可逃逸对象。
+//
+// ⚠️ **第一拍是强拍**：一圈三拍里只有第一拍 amp 是 1.2（另两拍 0.9）。三个
+// 一样重的话看不出小节，画面上是「匀速抽搐」而不是「咚-哒-哒」。
+//
+// ⚠️ **暂停时相位由调用方清零**（`hover.RestartCycle`）：这里只管画，不知道
+// 已经停了多久；不清零的话再播时小点从半路出现。
 func drawSideBrandMark(p *ui.Painter, r ui.Rect, pal tok.Palette, phase float32, moving bool) {
 	circle := func(inset, radius float32, col ui.Color) {
 		p.Fill(ui.Rect{X: r.X + inset, Y: r.Y + inset, W: 2 * radius, H: 2 * radius}, col, radius)
@@ -174,10 +192,17 @@ func drawSideBrandMark(p *ui.Painter, r ui.Rect, pal tok.Palette, phase float32,
 	if moving {
 		// beat 是这一圈里的第几拍（0~1），pulse 是这一拍的余量：拍点上 1，
 		// 到下一拍之前落到约 0.05——「打一下再松开」，不是正弦呼吸。
-		beat := phase*3 - float32(math.Floor(float64(phase*3)))
+		beatPos := phase * float32(motion.BrandBeatsPerTurn)
+		beatIndex := int(math.Floor(float64(beatPos))) % motion.BrandBeatsPerTurn
+		beat := beatPos - float32(math.Floor(float64(beatPos)))
 		pulse = float32(math.Exp(-3 * float64(beat)))
-		groove = pal.Bg.Alpha(0.35 + 0.2*pulse)
-		disc = 6 + 1.2*pulse
+		amp := float32(1.2)
+		if beatIndex != 0 {
+			amp = 0.9
+		}
+		glow := pulse * (amp / 1.2)
+		groove = pal.Bg.Alpha(0.35 + 0.18*glow)
+		disc = 6 + amp*pulse
 	}
 	ring(4, 12, groove)
 	ring(6.5, 9.5, groove)
@@ -187,17 +212,27 @@ func drawSideBrandMark(p *ui.Painter, r ui.Rect, pal tok.Palette, phase float32,
 		return
 	}
 	// 12 点起、顺时针：相位 0 在正上方，随相位增大往右走。
-	ang := float64(phase) * 2 * math.Pi
 	const (
-		orbit = 13.2
-		dot   = 1.4
+		orbit = 12.9
+		trail = 12
+		step  = 0.012
 	)
-	dx := float32(math.Sin(ang)) * orbit
-	dy := -float32(math.Cos(ang)) * orbit
-	p.Fill(ui.Rect{
-		X: r.X + 16 + dx - dot, Y: r.Y + 16 + dy - dot,
-		W: 2 * dot, H: 2 * dot,
-	}, pal.Accent, dot)
+	wrap := func(v float32) float32 { return v - float32(math.Floor(float64(v))) }
+	dotAt := func(ph float32) (float32, float32) {
+		ang := float64(ph) * 2 * math.Pi
+		return float32(math.Sin(ang)) * orbit, -float32(math.Cos(ang)) * orbit
+	}
+	for i := trail; i >= 1; i-- {
+		ph := wrap(phase - float32(i)*step)
+		k := float32(i) / trail
+		rad := 1.3 * (1 - 0.55*k)
+		alpha := 0.5*(1-k)*(1-k) + 0.02
+		dx, dy := dotAt(ph)
+		p.Fill(ui.Rect{X: r.X + 16 + dx - rad, Y: r.Y + 16 + dy - rad, W: 2 * rad, H: 2 * rad}, pal.Accent.Alpha(alpha), rad)
+	}
+	dx, dy := dotAt(phase)
+	rad := 1.4 + 0.2*pulse
+	p.Fill(ui.Rect{X: r.X + 16 + dx - rad, Y: r.Y + 16 + dy - rad, W: 2 * rad, H: 2 * rad}, pal.Accent, rad)
 }
 
 // sideBrandTopPad 是品牌区上面给 macOS 红黄绿让的那一格（原型 `.traffic` 高 44）；

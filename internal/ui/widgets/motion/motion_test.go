@@ -286,6 +286,9 @@ func numberIn(name, s string) (float64, bool) {
 // 相位 × 3——所以 `BrandBeatPeriod` 必须正好是一圈的三分之一。改了圈长而没改
 // 它，鼓点就悄悄变成了四拍或两拍，而画面上只是「节奏有点怪」。
 func TestTheBrandBeatIsThreePerTurn(t *testing.T) {
+	if BrandBeatsPerTurn != 3 {
+		t.Errorf("一圈打 %d 拍，want 3（`BrandBeatsPerTurn` 就是画的那一处乘的那个数）", BrandBeatsPerTurn)
+	}
 	if got := CoverSpinPeriod / BrandBeatPeriod; got != 3 {
 		t.Errorf("一圈里有 %v 拍，want 3（一圈 %v ÷ 一拍 %v）",
 			got, CoverSpinPeriod, BrandBeatPeriod)
