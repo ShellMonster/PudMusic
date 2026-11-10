@@ -695,6 +695,41 @@ func TestQueueDrawerShowsEachEpisodeOfOneVideo(t *testing.T) {
 	}
 }
 
+// TestQueueRowsMarkPagesAsEpisodes 钉住多 P 组头使用视频标题、分集文案，并在收起时提示当前集。
+func TestQueueRowsMarkPagesAsEpisodes(t *testing.T) {
+	q := app.NewQueue()
+	q.Reset(
+		app.Item{
+			Source: "online", Type: "mv", Bvid: "BV-pages", Cid: "101",
+			Title: "先导片", GroupKey: "pages:BV-pages", GroupIndex: 1,
+			GroupCount: 2, GroupTitle: "多 P 视频", Artist: "UP",
+		},
+		app.Item{
+			Source: "online", Type: "mv", Bvid: "BV-pages", Cid: "102",
+			Title: "正片", GroupKey: "pages:BV-pages", GroupIndex: 2,
+			GroupCount: 2, GroupTitle: "多 P 视频", Artist: "UP",
+		},
+	)
+	q.Move(1)
+	rows := queueRowsForSnapshot(q.Snapshot(), &rowkey.Memo[queueRowRaw, queueRowIdentity]{})
+	if len(rows) != 3 {
+		t.Fatalf("页面组抽屉行数 = %d，want 3（组头 + 2 集）", len(rows))
+	}
+	g := rows[0].group
+	if g == nil || !g.PageGroup {
+		t.Fatalf("第一行不是页面组头：%+v", rows[0])
+	}
+	if g.Title != "多 P 视频" || g.Count != 2 {
+		t.Fatalf("页面组头 = %+v，want 视频标题和 2 集", g)
+	}
+	if got := queueGroupSub(g); !strings.Contains(got, "分集") || !strings.Contains(got, "当前第 2 集") {
+		t.Fatalf("页面组副题 = %q，want 包含分集和当前第 2 集", got)
+	}
+	if rows[2].item.Title != "正片" {
+		t.Fatalf("第二集行标题 = %q，want 正片", rows[2].item.Title)
+	}
+}
+
 // TestCurrentRowIgnoresSyntheticGroupHeaders 钉住「当前播放」只能落在真实集行：
 // 组头和第一集共用队列下标时，组头不该抢走播放状态。
 func TestCurrentRowIgnoresSyntheticGroupHeaders(t *testing.T) {
@@ -910,5 +945,25 @@ func TestQueueDrawerGroupLimitButtonTogglesTheSingleGroup(t *testing.T) {
 	}
 	if !h.app.AutoplayCollections() {
 		t.Error("全局设置被改了——单组那一枚不该动设置")
+	}
+}
+
+// TestQueueDrawerPageGroupUsesEpisodeLimitLabel 钉住页面组按钮文案是「第 1 集」。
+func TestQueueDrawerPageGroupUsesEpisodeLimitLabel(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	first := groupSong(t, dir, "第1集.flac", "pages:BV-pages", 1, 2)
+	second := groupSong(t, dir, "第2集.flac", "pages:BV-pages", 2, 2)
+	first.GroupTitle = "多 P 视频"
+	second.GroupTitle = "多 P 视频"
+	h.app.Queue().Append(first, second)
+	h.tt.Frame()
+	openDrawer(t, h)
+
+	if !h.tt.HasText("仅播第 1 集") {
+		t.Fatalf("页面组没有「仅播第 1 集」按钮，文字有 %q", h.tt.Texts())
+	}
+	if h.tt.HasText("仅播第 1 首") {
+		t.Fatalf("页面组错误显示合集按钮文案，文字有 %q", h.tt.Texts())
 	}
 }
