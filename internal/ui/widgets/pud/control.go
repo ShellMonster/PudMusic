@@ -59,6 +59,17 @@ func SelectBox(c *ui.Context, key, current string, w float32) ui.Element {
 // 胶囊、surface-2 底，14 的放大镜（text-3）加一个 13 号输入框（默认 140 宽）。
 // value 是输入框里的字；返回输入框本身，调用方问 `.Changed()`。
 func MiniSearch(c *ui.Context, key string, value *string, placeholder string, inputW float32) ui.Element {
+	return miniSearch(c, key, value, placeholder, inputW, false)
+}
+
+// MiniSearchClear 是带清空键的 MiniSearch：有字时右端多一个 12 的叉（26 的点击区，
+// 和顶栏搜索框那个叉同一档），点它清字并把焦点还给输入框；没字时那一格留着一个
+// 透明的 26×26——胶囊的宽度不因「叉出现 / 消失」而一跳。
+func MiniSearchClear(c *ui.Context, key string, value *string, placeholder string, inputW float32) ui.Element {
+	return miniSearch(c, key, value, placeholder, inputW, true)
+}
+
+func miniSearch(c *ui.Context, key string, value *string, placeholder string, inputW float32, clearable bool) ui.Element {
 	p := pal(c)
 	if inputW == 0 {
 		inputW = 140
@@ -70,6 +81,34 @@ func MiniSearch(c *ui.Context, key string, value *string, placeholder string, in
 		c.Key(key + ":input")
 		in = ui.TextInputBase(c, value).Label(placeholder).Placeholder(placeholder).
 			Width(inputW).FontSize(scale.Font(c, scale.Size13)).TextColor(p.Text)
+		if !clearable {
+			return
+		}
+		// 叉的样式照顶栏搜索框那一枚（navbar_search.go）：12 的图形、26 的点击区、
+		// 平时 text-3、悬停正文色。画面上是那个叉，无障碍名字仍是「清空搜索」——
+		// 叉对读屏软件念出来是「乘号」，听不出它在清什么。
+		//
+		// ⚠️ **c.Key 要在建它之前调**：身份挂在下一个建的元素上，建在
+		// ButtonBase 之后的话这个 key 就落到别的元素头上了。
+		c.Key(key + ":clear")
+		if *value == "" {
+			ui.Box(c).Size(26, 26)
+			return
+		}
+		btn := ui.ButtonBase(c).Label("清空搜索").Size(26, 26).Shrink(0).
+			AlignItems(ui.Center).Justify(ui.Center)
+		btn.Children(func() {
+			col := p.Text3
+			if btn.Hovered() {
+				col = p.Text
+			}
+			glyph(c, "x", 12, col)
+		})
+		if btn.Clicked() {
+			*value = ""
+			// 焦点还给输入框：清完接着敲不用再点一下（叉是按钮，点完焦点在它身上）。
+			in.Focus()
+		}
 	})
 	return in
 }

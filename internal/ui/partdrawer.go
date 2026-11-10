@@ -29,6 +29,7 @@ package ui
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
@@ -53,7 +54,9 @@ import (
 // 调用方**留的（将来这个键要是被摆到别处去，它自己认得）。
 func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 	if !st.HasTrack {
+		// 没歌的时候连搜索词一起收：词是「这一首的分集里找」，歌都没了词不剩。
 		s.partOpen = false
+		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", ""
 		return
 	}
 
@@ -66,6 +69,22 @@ func (s *Shell) viewPartButton(c *ui.Context, st app.State) {
 		// 浮层状态，等下一首多 P 的歌放起来，它会自己弹出来——用户什么都没按。
 		s.partOpen = false
 		return
+	}
+	if !s.partOpen {
+		// 关着的浮层不留词：下次点开看到的永远是完整的那一列。bvid 也要在这一帧
+		// 对成当前这首——否则「点开 → 换歌」那一档（下面那一条）会把一首新歌误认成
+		// 「浮层开着时换过去了」，而它要守的恰恰是那一档。
+		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", cur.Bvid
+	} else if cur.Bvid != s.partQueryBvid {
+		// 浮层**开着**时歌自己切走了（队列自动进下一首）：旧词不能滤新一首的
+		// 分集——「第二」在新稿子里可能一个都滤不出来，而列表看着像坏了。
+		s.partQuery, s.partQuerySeen, s.partQueryBvid = "", "", cur.Bvid
+		s.partScroll.Y = 0
+	} else if s.partQuery != s.partQuerySeen {
+		// 刚敲了 / 刚清了：过滤出来的那一列从第一条看起（不滚动回顶的话，
+		// 停在中间的用户看到的可能是一段空白）。
+		s.partQuerySeen = s.partQuery
+		s.partScroll.Y = 0
 	}
 
 	// 🔴 **身份钉死**：这一枚是**逐帧问出来**的（单 P 的稿子不摆），它一出现，
@@ -166,38 +185,87 @@ const partPopMaxH = 360
 // partPopMaxW 是分集弹层的最宽：标题常是「某某合集 第 N 集」这种长句，超出就省略。
 const partPopMaxW = 360
 
+// partSearchLabel 是弹层右上角那个搜索框的无障碍名字 / 占位字。
+const partSearchLabel = "搜索分集"
+
+// partSearchW 是那个搜索框里输入框的宽度。110 摆得下「搜索分集」四个字加几十个像素的词。
+const partSearchW = 110
+
 // viewPartDrawer 是分集弹层里的内容（原型 `popHtml('parts')`）：
 // `<h5>分集 · N 集</h5>` 加每集一个 `pop-opt`（`P{n} · {标题}`，正在放的那集 accent-text 600 + 对勾）。
 // 面板本身（surface 底、1 像素描边、圆角 12、`--shadow-pop`、内边距 8、最小宽 200）由
 // `pbPopover` 按 `.pop` 画。
+//
+// 头部是**一行**：左边标题、右边搜索框（本地过滤，不发请求）。集数多的稿子（上百集）
+// 靠翻是翻不到的；「分集 · N 集」说的是**总数**，不是过滤后剩下几条——过滤中标题不跳。
 func (s *Shell) viewPartDrawer(c *ui.Context) {
 	_, winH := c.Size()
 	if len(s.partRows) == 0 {
 		// 一片空白和「这一首没有分集」长得一模一样；分集是问 B 站问来的，问不到是网络 / 风控
-		// 的事——三句话说开（`partsHowItIs`）。
+		// 的事——三句话说开（`partsHowItIs`）。这一支**没有搜索框**：没有东西可滤。
 		pud.PopHeading(c, "分集")
 		pud.PopText(c, s.partDrawerWhy())
 		return
 	}
-	pud.PopHeading(c, "分集 · "+strconv.Itoa(len(s.partRows))+" 集")
+	rows := partRowsMatching(s.partRows, s.partQuery)
+	ui.Row(c).FillWidth().MaxWidth(partPopMaxW).AlignItems(ui.Center).Children(func() {
+		pud.PopHeading(c, "分集 · "+strconv.Itoa(len(s.partRows))+" 集").Grow(1)
+		in := pud.MiniSearchClear(c, "part-pop:q", &s.partQuery, partSearchLabel, partSearchW)
+		// Esc 收浮层：浮层把键先给焦点链（`routeKeys`），而 `TextInputBase` 不吃
+		// Esc（顶栏那一处量过，`navbar_search.go` 文件头），所以 Esc 落到浮层
+		// 自己的「按 Esc 关」上——这里不用接管，回车 / 别的键的接管挂在下面的
+		// OnTextKey 上。
+		_ = in
+	})
+	if len(rows) == 0 {
+		// 整个列表都被滤光了：说清楚是搜索滤的，不是这一首没有分集。
+		pud.PopText(c, "没有匹配的分集")
+	}
 	// 外面这一层 Column 是必需的：滚动容器直接当别的容器的下一层时，里面文字的盒子量出来是 0×0
 	// （见 `viewSpaceList` 里同一条）。
 	ui.Column(c).Key("part-pop:list").MaxWidth(partPopMaxW).Children(func() {
-		sc := ui.Scroll(c).Key("part-pop:scroll").MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
-			for _, r := range s.partRows {
+		sc := ui.Scroll(c).Key("part-pop:scroll").TrackScroll(&s.partScroll).
+			MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
+			for _, r := range rows {
 				label := "P" + strconv.Itoa(r.page) + " · " + r.title
 				if pud.PopOpt(c, "part:"+r.key, label, "", r.active).Clicked() {
-					// 选完就收：收在换集**之前**——`PlayPart` 要清轨道再异步取流，那几百毫秒里
-					// 摆着上一集的行更让人以为换失败了。
-					s.partOpen = false
-					if err := s.app.PlayPart(r.cid); err != nil {
-						s.addToast("换不了这一集："+err.Error(), notice.Danger)
-					}
+					s.choosePartRow(r)
 				}
 			}
 		})
 		s.trackScrollbar(sc)
 	})
+}
+
+// choosePartRow 是「定了要放这一集」的那一个出口：点一行、回车第一条都走它。
+//
+// 选完就收：收在换集**之前**——`PlayPart` 要清轨道再异步取流，那几百毫秒里
+// 摆着上一集的行更让人以为换失败了。
+func (s *Shell) choosePartRow(r partRow) {
+	s.partOpen = false
+	if err := s.app.PlayPart(r.cid); err != nil {
+		s.addToast("换不了这一集："+err.Error(), notice.Danger)
+	}
+}
+
+// partRowsMatching 按搜索词滤出那一列。纯函数：词空着原样返回，有词时标题（小写）
+// 含词、或编号「12」/「P12」含词算命中；`s.partRows` 不被改。滤出来的是**新的一份**
+// ——行里的 `page` 还是原来的第几集，不重新编号（过滤后「P2」还叫「P2 · 第二集」）。
+func partRowsMatching(rows []partRow, query string) []partRow {
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return rows
+	}
+	out := make([]partRow, 0, len(rows))
+	for _, r := range rows {
+		page := strconv.Itoa(r.page)
+		if strings.Contains(strings.ToLower(r.title), q) ||
+			strings.Contains(page, q) ||
+			strings.Contains("p"+page, q) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // partDrawerWhy 是空状态那一行说的话（问到了就不画它）。
