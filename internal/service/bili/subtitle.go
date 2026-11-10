@@ -170,6 +170,10 @@ func (c *Client) playerInfo(ctx context.Context, bvid, cid string) (*playerInfoD
 		})
 		if err != nil {
 			lastErr = err
+			// 上下文已经取消/超时：再换两个地址也只是把同一个等待重演一遍。
+			if ctx.Err() != nil {
+				return nil, err
+			}
 			continue
 		}
 		var d playerInfoData
