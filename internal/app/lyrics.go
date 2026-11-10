@@ -627,7 +627,8 @@ func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cac
 	{
 		// 缓存里已经有词了就别再下载（理由见上面那一条）。
 		if cache != nil {
-			if e, ok := cache.Load(key, it.Title, it.Artist); ok && strings.TrimSpace(e.Lyrics) != "" {
+			if e, ok := cache.Load(key, it.Title, it.Artist); ok &&
+				(strings.TrimSpace(e.Lyrics) != "" || strings.TrimSpace(e.YRC) != "") {
 				return true
 			}
 		}
