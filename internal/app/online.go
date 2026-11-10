@@ -1274,6 +1274,10 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 		a.failPlay(gen, it, "取流零件没挂", errStreamingMissing)
 		return
 	}
+	// 歌词从这一刻就开始找，和取流并行（Biu 的 playId 一变就找词）。
+	// 队列项通常已经带着 cid，所以这里就能问字幕；搜索结果要等 `withSource`
+	// 补完 cid 之后再来一次。
+	a.startOnlineLyrics(it, s)
 
 	// 🔴 **⓪ 先看盘上有没有这一首的字节**（2026-10-30）：
 	//
@@ -1336,6 +1340,9 @@ func (a *App) runOnlineMaybe(it Item, gen int, at time.Duration, paused bool, us
 		a.failPlay(gen, it, "问哪一集/补元信息", err)
 		return
 	}
+	// cid / 音乐库背后的投稿身份到这一刻才齐；补完再叫一次，早一次因为缺
+	// 身份而跳过的那些在这里补上。
+	a.startOnlineLyrics(it, s)
 	// 🔴 **问出来的分 P id 记到 `pending` 上**（见 `App.notePendingCid` 的注释）。
 	//
 	// 弹幕这一摊要知道「当前这一集的 cid」，问的是 `pending`——而 `pending` 记
@@ -1658,7 +1665,7 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 	//
 	// ⚠️ **整个过程在后台**，而且**它不拦播放**：没有字幕的那一首歌，界面照旧
 	// 是「暂无歌词」加一个「找歌词」的入口。
-	a.fetchBiliSubtitle(context.Background(), it, ref, s)
+	a.fetchBiliSubtitle(context.Background(), it, ref, s, true)
 	// 弹幕也跟着换歌一起换（见 danmaku.go）：换歌就作废旧的，后台取新的那一份。
 	//
 	// ⚠️ **放在换上播放器之后**：弹幕区问的是「现在放的是哪一集」，而 `it` 里的

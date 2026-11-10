@@ -264,6 +264,47 @@ func TestNoSubtitleMeansTheSearchStaysAvailable(t *testing.T) {
 //
 // 这一条让 fixture **把那份字幕扣住**，然后看应用**照常 answering**：歌词快照
 // 拿得到、播放照旧。等放行之后歌词才到。
+// TestLyricsStartBeforeTheStreamIsReady 钉住「点歌之后歌词和取流并行」。
+//
+// 取流接口还扣着的时候，歌词那一趟就该已经跑完并上屏了。以前歌词挂在播放器
+// 装好之后，用户先等 playurl，再等建源和解码器，然后才看到词。
+func TestLyricsStartBeforeTheStreamIsReady(t *testing.T) {
+	f := newStreamFixture(t)
+	f.media = readFlac(t)
+	f.subtitleBody = subtitleFixtureBody
+	f.subtitleURL = f.URL + "/subtitle.json"
+	f.onPlayURL(dashFor(cdnURL(f.URL, "a.flac", 2*time.Hour), 30280, 110836))
+
+	gate := make(chan struct{})
+	f.on("/x/player/wbi/playurl", func(w http.ResponseWriter, r *http.Request) {
+		<-gate
+		f.servePlayURL(w, r.URL.Query())
+	})
+	t.Cleanup(func() {
+		select {
+		case <-gate:
+		default:
+			close(gate)
+		}
+	})
+
+	a := newOnlineApp(t, f, t.TempDir())
+	a.MountLyrics(lyrics.NewCache(t.TempDir()))
+	if err := a.Enqueue(onlineItem("BV1xx", "123", "在线的一首")); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, 10*time.Second, "取流还扣着，歌词先出来", func() bool {
+		return a.Lyrics().HasLyrics
+	})
+	if a.Snapshot().HasTrack {
+		t.Error("取流还扣着，播放器却已经装上了")
+	}
+
+	close(gate)
+	playing(t, a, "在线的一首")
+}
+
 func TestTheSubtitleIsFetchedInTheBackground(t *testing.T) {
 	f := newStreamFixture(t)
 	f.media = readFlac(t)

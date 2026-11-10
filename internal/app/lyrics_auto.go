@@ -115,6 +115,9 @@ func (a *App) TestOnlyAfter(f func(d time.Duration, fn func()) func()) {
 
 // autoSearchLyrics 在后台自动找一份歌词装上。key 是这一首的缓存键，title 是歌名。
 func (a *App) autoSearchLyrics(key, title string) {
+	// 字幕那一路已经没结果了：先把加载态收掉，别让转圈挂满这 25 秒。搜到了
+	// `putLyricsLocked` 会再把词装上去。
+	a.settleLyricLoading(key)
 	query := cleanLyricTitle(title)
 	if key == "" || query == "" {
 		return

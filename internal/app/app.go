@@ -590,6 +590,12 @@ type App struct {
 	// lyricEntry 是缓存里这一条原文+译文的**内容**（不含偏移和字号那两个
 	// 用户值，那两个在 flushLyrics 里现填）。写盘和换源都靠它。
 	lyricEntry lyrics.Entry
+	// lyricMem 是进程内的歌词 LRU（见 lyrics_memory.go）。切回上一首时同步
+	// 命中，不用等读盘。**只在持 a.mu 时访问**。
+	lyricMem lyricMemory
+	// lyricFetchKey 是正在取 B 站字幕的那一首的缓存键。换歌后另一首可以同时
+	// 取；同一首不重复发请求（早一次调用和装上播放器后那一趟会撞上）。
+	lyricFetchKey string
 	// lyricOrigin 是当前这一份歌词的**来路**（`lyrics.OriginBili` /
 	// `lyrics.OriginSearch` / 空串 = 不知道）。界面上那句话靠它说清「这份歌词
 	// 是自动来的还是搜来的」（见 `lyrics.go` 的 `LyricsSnapshot`）。

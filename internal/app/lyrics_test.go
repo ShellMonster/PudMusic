@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -271,6 +272,41 @@ func TestEachSongKeepsItsOwnOffset(t *testing.T) {
 	}
 	if got := a.Lyrics().Rows[0].Text; got != "甲的词" {
 		t.Errorf("切回甲读到的是 %q，want 甲的词（乙的缓存串了？）", got)
+	}
+}
+
+// TestSwitchingBackUsesTheMemoryWithoutDisk 钉住「切回上一首这一帧就有词」。
+//
+// 盘上那份文件被删掉之后还能读到，说明命中的是进程内缓存，不是又读了一次盘。
+// 用户来回比较两首歌时，读盘那一趟和加载态的闪烁都不该出现。
+func TestSwitchingBackUsesTheMemoryWithoutDisk(t *testing.T) {
+	a, c := lyricsApp(t)
+	first := onlineSong("BV1", "1")
+	second := onlineSong("BV2", "2")
+
+	a.setLyricTrack(first)
+	a.PutLyrics("[00:01.00]甲的词", "")
+	a.SetLyricsOffset(-900)
+	flushLyricsNow(t, a)
+
+	a.setLyricTrack(second)
+	a.PutLyrics("[00:01.00]乙的词", "")
+	flushLyricsNow(t, a)
+
+	if err := os.Remove(c.Path(lyricKeyOf(first))); err != nil {
+		t.Fatal(err)
+	}
+
+	a.setLyricTrack(first)
+	ls := a.Lyrics()
+	if len(ls.Rows) != 1 || ls.Rows[0].Text != "甲的词" {
+		t.Fatalf("切回来没有立刻拿到词：%+v", ls.Rows)
+	}
+	if ls.OffsetMS != -900 {
+		t.Errorf("切回来的偏移是 %d，want -900", ls.OffsetMS)
+	}
+	if ls.Loading {
+		t.Error("内存命中还停在加载态")
 	}
 }
 
