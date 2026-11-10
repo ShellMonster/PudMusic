@@ -1068,7 +1068,8 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.Lyrics
 	// 🔴 认换歌在这一帧的最开头，早于任何一句决定（同 lyrics.go 那一处）。
 	lv.onSong(snap.Key)
 
-	active := lyrics.ActiveAt(snap.Rows, lyricNow(st.Position, snap.OffsetMS))
+	at := lyricNow(st.Position, snap.OffsetMS)
+	active := lyrics.ActiveAt(snap.Rows, at)
 	if active < 0 {
 		lv.forget()
 	}
@@ -1089,7 +1090,7 @@ func (s *Shell) viewMiniCurtainBody(c *ui.Context, st app.State, snap app.Lyrics
 			s.viewMiniCurtainEmpty(c, p)
 			return
 		}
-		s.viewMiniCurtainLyrics(c, snap, active, t, p, viewH)
+		s.viewMiniCurtainLyrics(c, snap, active, at, t, p, viewH)
 	})
 
 	if active < 0 {

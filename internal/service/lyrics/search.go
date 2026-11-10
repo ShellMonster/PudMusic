@@ -50,6 +50,10 @@ const (
 type Doc struct {
 	LRC        string
 	Translated string
+	// YRC 是逐字歌词原文（网易云的 `yrc` / `klyric`）。空串表示这一份没有
+	// 逐字时间，界面按整句高亮。它和 LRC 可以同时有：LRC 给预览和回退用，
+	// YRC 给卡拉 OK 用。
+	YRC string
 }
 
 // Candidate 是搜出来的一条候选。
@@ -307,11 +311,15 @@ type neteaseLyricResp struct {
 	LRC struct {
 		Lyric string `json:"lyric"`
 	} `json:"lrc"`
-	// Klyric 是逐字歌词，**拿它当原文的备胎**（上游 `netease-tab.tsx:53` 那个
-	// `lrc?.lyric?.trim() || klyric?.lyric?.trim()`）：有些歌只有 klyric。
+	// Klyric 是旧一版的逐字歌词字段。有些歌只有它，所以同时当原文的备胎
+	// （上游 `netease-tab.tsx:53` 那个 `lrc?.lyric?.trim() || klyric?.lyric?.trim()`）。
 	Klyric struct {
 		Lyric string `json:"lyric"`
 	} `json:"klyric"`
+	// Yrc 是新一版的逐字歌词字段，格式是 `[开始,时长](词开始,词时长,0)词`。
+	Yrc struct {
+		Lyric string `json:"lyric"`
+	} `json:"yrc"`
 	// TLyric 是译文。
 	Tlyric struct {
 		Lyric string `json:"lyric"`
@@ -342,10 +350,24 @@ func (n *Netease) Preview(ctx context.Context, c Candidate) (Doc, error) {
 	if resp.Code != 200 {
 		return Doc{}, fmt.Errorf("lyrics: 网易云歌词返回 code %d", resp.Code)
 	}
+	lrc := strings.TrimSpace(firstNonEmpty(resp.LRC.Lyric, resp.Klyric.Lyric))
 	return Doc{
-		LRC:        strings.TrimSpace(firstNonEmpty(resp.LRC.Lyric, resp.Klyric.Lyric)),
+		LRC:        lrc,
 		Translated: strings.TrimSpace(resp.Tlyric.Lyric),
+		YRC:        yrcIfParsable(firstNonEmpty(resp.Yrc.Lyric, resp.Klyric.Lyric)),
 	}, nil
+}
+
+// yrcIfParsable 只留下真的是 YRC 的那一份。
+//
+// 网易云的 `klyric` 有些歌给的是普通 LRC——原样存进 `Entry.YRC` 的话，读的
+// 时候会白解析一遍再回退，缓存里也多一份重复的文本。
+func yrcIfParsable(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(ParseYRC(raw)) == 0 {
+		return ""
+	}
+	return raw
 }
 
 // ── LRCLib ───────────────────────────────────────────────────────────────

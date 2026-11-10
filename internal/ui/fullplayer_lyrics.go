@@ -111,7 +111,8 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnaps
 	// 🔴 认换歌在这一帧的最开头，早于任何一句决定（理由同 lyrics.go 那一处）。
 	lv.onSong(snap.Key)
 
-	active := lyrics.ActiveAt(snap.Rows, lyricNow(st.Position, snap.OffsetMS))
+	at := lyricNow(st.Position, snap.OffsetMS)
+	active := lyrics.ActiveAt(snap.Rows, at)
 	if active < 0 {
 		// 没有歌词：说清楚「没有」，而不是留一块空白（UX 报告 B3）。
 		lv.forget()
@@ -134,7 +135,7 @@ func (s *Shell) viewFullLyrics(c *ui.Context, st app.State, snap app.LyricsSnaps
 		lv.anim = &fullLyricScrollAnim
 		big := snap
 		big.FontSize += fullLyricBaseAdd
-		s.viewLyricLines(c, lv, big, active, lyricStyle{
+		s.viewLyricLines(c, lv, big, active, at, lyricStyle{
 			color:        fg,
 			activeColor:  cur,
 			muted:        tok.Full.Text3,

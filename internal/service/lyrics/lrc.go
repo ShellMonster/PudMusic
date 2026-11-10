@@ -42,10 +42,15 @@ import (
 	"time"
 )
 
-// Line 是一条歌词：什么时候开始唱、唱的是什么。
+// Line 是一条歌词：什么时候开始唱、什么时候唱完、唱的是什么。
+//
+// Words 只在 YRC 那一份里有值（见 yrc.go）；普通 LRC 只有整句的开始时刻，
+// 所以它是 nil。End 同理：LRC 不知道这一句唱到哪儿，零值表示不知道。
 type Line struct {
-	At   time.Duration
-	Text string
+	At    time.Duration
+	End   time.Duration
+	Text  string
+	Words []Word
 }
 
 // Row 是一条歌词，加上叠在它下面的那句翻译。
@@ -55,8 +60,12 @@ type Line struct {
 // 原文和译文的时间戳必须一模一样才叠得上。
 type Row struct {
 	At          time.Duration
+	End         time.Duration
 	Text        string
 	Translation string
+	// Words 是这一句的词级时间；空表示这一份歌词没有逐字信息，界面按整句
+	// 高亮（见 yrc.go 的 `SpreadWords`）。
+	Words []Word
 }
 
 // timeTag 认一个时间标签。
@@ -151,21 +160,79 @@ func atoi(s string) (int, bool) {
 // 译文按**时间戳**配对（见 Row.Translation）。原文为空时返回 nil——没有原文就没有
 // 行，译文自己飘着没有意义。
 func Rows(lrc, translated string) []Row {
-	base := Parse(lrc)
+	return rowsOfLines(Parse(lrc), Parse(translated), false)
+}
+
+// RowsOf 把原文（YRC 优先、LRC 兜底）和译文合成界面真正要画的一行行。
+//
+// YRC 解析不出东西时回退 LRC：源那边给了一个坏字段不该让整首歌没词。
+func RowsOf(lrc, translated, yrc string) []Row {
+	if strings.TrimSpace(yrc) != "" {
+		if lines := ParseYRC(yrc); len(lines) > 0 {
+			return rowsOfLines(lines, Parse(translated), true)
+		}
+	}
+	return Rows(lrc, translated)
+}
+
+// rowsOfLines 是 `Rows` 和 `RowsOf` 共用的装配。
+//
+// 普通 LRC 的译文按**时间戳精确**配对（上游 `map.set(item.time, …)`）；YRC
+// 那份译文仍是 LRC，而逐字行和译文的标签未必一个数字都不差——所以 YRC 这一
+// 支允许 ±1.5 秒内最近的译文（`yrcTranslationTolerance`）。精确的那一条仍然
+// 先找，改不了已有行为。
+func rowsOfLines(base, trans []Line, spread bool) []Row {
 	if len(base) == 0 {
 		return nil
 	}
 	// 后来的同一时刻覆盖先来的，和上游 `map.set` 一样。
-	byTime := make(map[time.Duration]string, len(base))
-	for _, l := range Parse(translated) {
+	byTime := make(map[time.Duration]string, len(trans))
+	for _, l := range trans {
 		byTime[l.At] = l.Text
 	}
 
 	out := make([]Row, len(base))
 	for i, l := range base {
-		out[i] = Row{At: l.At, Text: l.Text, Translation: byTime[l.At]}
+		words := l.Words
+		if spread && len(words) > 0 {
+			words = SpreadWords(words)
+		}
+		tr := byTime[l.At]
+		if tr == "" && spread && len(trans) > 0 {
+			tr = nearestText(trans, l.At)
+		}
+		out[i] = Row{At: l.At, End: l.End, Text: l.Text, Translation: tr, Words: words}
 	}
 	return out
+}
+
+// yrcTranslationTolerance 是 YRC 行和译文行允许差多少。
+//
+// 译文是整句的，逐字行的开始和它一般只差几十毫秒；1.5 秒足够盖住前奏里
+// 那些「(前奏)」和第一句的错位，又不会把隔壁那句的翻译抢过来。
+const yrcTranslationTolerance = 1500 * time.Millisecond
+
+// nearestText 找离 at 最近、且在容差内的译文。同一距离取早的那一条。
+func nearestText(trans []Line, at time.Duration) string {
+	i := sort.Search(len(trans), func(i int) bool { return trans[i].At >= at })
+	best := ""
+	bestD := yrcTranslationTolerance + 1
+	try := func(j int) {
+		if j < 0 || j >= len(trans) {
+			return
+		}
+		d := trans[j].At - at
+		if d < 0 {
+			d = -d
+		}
+		if d <= yrcTranslationTolerance && d < bestD {
+			best, bestD = trans[j].Text, d
+		}
+	}
+	try(i - 1)
+	try(i)
+	try(i + 1)
+	return best
 }
 
 // ActiveAt 报唱到 at 的时候该高亮哪一行。

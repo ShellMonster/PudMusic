@@ -95,8 +95,9 @@ type LyricPreviewState struct {
 	// Title 是弹窗顶上那一句：「歌名 - 歌手」（上游的
 	// `setLyricsTitle(\`${song.name}-${renderArtists(...)}\`)`）。
 	Title string
-	// LRC / Translated 是这次预览的那两份原文和译文。
+	// LRC / YRC / Translated 是这次预览的那几份原文和译文。
 	LRC        string
+	YRC        string
 	Translated string
 	// Loading 是「正在拉这一条」。
 	Loading bool
@@ -137,6 +138,7 @@ type lyricPreviewState struct {
 	open       bool
 	title      string
 	lrc        string
+	yrc        string
 	translated string
 	loading    bool
 	err        string
@@ -339,6 +341,7 @@ func (a *App) OpenLyricPreview(tab int, c lyrics.Candidate) {
 		a.lyricPreview.open = true
 		a.lyricPreview.title = title
 		a.lyricPreview.lrc = c.LRC
+		a.lyricPreview.yrc = ""
 		a.lyricPreview.translated = c.Translated
 		a.lyricPreview.loading = false
 		a.lyricPreview.err = ""
@@ -367,6 +370,7 @@ func (a *App) OpenLyricPreview(tab int, c lyrics.Candidate) {
 	a.lyricPreview.open = true
 	a.lyricPreview.title = title
 	a.lyricPreview.lrc = ""
+	a.lyricPreview.yrc = ""
 	a.lyricPreview.translated = ""
 	a.lyricPreview.loading = true
 	a.lyricPreview.err = ""
@@ -389,7 +393,7 @@ func (a *App) OpenLyricPreview(tab int, c lyrics.Candidate) {
 		switch {
 		case err != nil:
 			a.lyricPreview.err = lyricsErrText(src, "歌词拉不到", err)
-		case strings.TrimSpace(doc.LRC) == "":
+		case strings.TrimSpace(doc.LRC) == "" && strings.TrimSpace(doc.YRC) == "":
 			// ⚠️ **源返回了「成功」而正文是空的**：这是**第三种**情况，和「拉不到」
 			// 以及「这一条没有歌词」都要分开说。摆一个空弹窗的话，用户看到的是
 			// Tab 和两个按钮之间一片空白——那句话和「加载中」一样是在搪塞。
@@ -397,6 +401,7 @@ func (a *App) OpenLyricPreview(tab int, c lyrics.Candidate) {
 			a.lyricPreview.err = lyricsErrText(src, "歌词", lyrics.ErrNoLyrics)
 		default:
 			a.lyricPreview.lrc = doc.LRC
+			a.lyricPreview.yrc = doc.YRC
 			a.lyricPreview.translated = doc.Translated
 		}
 		wake := a.wake
@@ -416,10 +421,12 @@ func (a *App) LyricPreview() LyricPreviewState {
 		Open:       p.open,
 		Title:      p.title,
 		LRC:        p.lrc,
+		YRC:        p.yrc,
 		Translated: p.translated,
 		Loading:    p.loading,
 		Err:        p.err,
-		Adoptable:  p.open && !p.loading && p.err == "" && strings.TrimSpace(p.lrc) != "",
+		Adoptable: p.open && !p.loading && p.err == "" &&
+			(strings.TrimSpace(p.lrc) != "" || strings.TrimSpace(p.yrc) != ""),
 	}
 }
 
@@ -429,6 +436,7 @@ func (a *App) CloseLyricPreview() {
 	a.lyricPreview.gen++
 	a.lyricPreview.open = false
 	a.lyricPreview.lrc = ""
+	a.lyricPreview.yrc = ""
 	a.lyricPreview.translated = ""
 	a.lyricPreview.loading = false
 	a.lyricPreview.err = ""
@@ -458,7 +466,7 @@ func (a *App) AdoptLyricPreview() string {
 	case p.loading:
 		a.mu.Unlock()
 		return "这一条还在拉"
-	case strings.TrimSpace(p.lrc) == "":
+	case strings.TrimSpace(p.lrc) == "" && strings.TrimSpace(p.yrc) == "":
 		a.mu.Unlock()
 		return "这一条没有歌词"
 	}
@@ -472,12 +480,13 @@ func (a *App) AdoptLyricPreview() string {
 	key := a.lyricKey
 	// ⚠️ 在锁里把这两份拷出来：锁外读 `p.lrc` 是数据竞争（防抖落盘那个 goroutine 在
 	// 写同一份状态），撕裂读出来是一个野指针，`-race` 抓得到、产线上是随机崩。
-	lrc, translated := p.lrc, p.translated
+	lrc, yrc, translated := p.lrc, p.yrc, p.translated
 	a.lyricPreview.gen++
 	a.lyricPreview.open = false
 	a.lyricPreview.lrc = ""
+	a.lyricPreview.yrc = ""
 	a.lyricPreview.translated = ""
-	entry, c := a.putLyricsLocked(key, lrc, translated, lyrics.OriginSearch)
+	entry, c := a.putLyricsLocked(key, lrc, translated, yrc, lyrics.OriginSearch)
 	wake := a.wake
 	hook := a.hookBetweenAdoptStateAndSave
 	a.mu.Unlock()

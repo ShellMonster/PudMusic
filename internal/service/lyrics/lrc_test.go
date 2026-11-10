@@ -22,7 +22,7 @@ func TestOneLineSeveralTimeTagsBecomesSeveralLines(t *testing.T) {
 		t.Fatalf("一行三个时间标签应该出三行，出了 %d 行：%+v", len(got), got)
 	}
 	for i, w := range want {
-		if got[i] != w {
+		if got[i].At != w.At || got[i].Text != w.Text {
 			t.Errorf("第 %d 行是 %+v，want %+v", i, got[i], w)
 		}
 	}

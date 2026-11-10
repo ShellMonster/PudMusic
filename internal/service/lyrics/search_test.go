@@ -157,6 +157,32 @@ func TestNeteaseFallsBackToTheKaraokeLyric(t *testing.T) {
 	}
 }
 
+// TestNeteasePreviewKeepsTheWordTiming 钉住「逐字那一份不再被当普通 LRC 丢掉」。
+//
+// klyric 是 YRC 时，`Doc.YRC` 要带着词级时间；同时 `Doc.LRC` 仍然是那份普通
+// LRC（预览弹窗和回退都读它）。
+func TestNeteasePreviewKeepsTheWordTiming(t *testing.T) {
+	srv := fixtureServer(t, `{"code":200,
+	  "lrc":{"lyric":"[00:01.00]路灯"},
+	  "klyric":{"lyric":"[1000,2000](1000,1000,0)路(2000,1000,0)灯"}}`, nil, nil)
+	n := NewNetease(nil)
+	n.TestOnlyPointHostsAtFixture(srv.URL)
+
+	doc, err := n.Preview(context.Background(), Candidate{ID: "11"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.YRC != "[1000,2000](1000,1000,0)路(2000,1000,0)灯" {
+		t.Errorf("逐字那一份丢了：%q", doc.YRC)
+	}
+	if doc.LRC != "[00:01.00]路灯" {
+		t.Errorf("普通 LRC 被逐字那份顶掉了：%q", doc.LRC)
+	}
+	if rows := RowsOf(doc.LRC, "", doc.YRC); len(rows) != 1 || len(rows[0].Words) != 2 {
+		t.Errorf("拼出来的行没有逐字：%+v", rows)
+	}
+}
+
 // TestLRCLibPreviewIssuesNoRequest 钉住「预览不发请求」。
 //
 // 上游 `lrclib-tab.tsx:27-37` 直接读搜索结果里的 `syncedLyrics`：它的搜索响应

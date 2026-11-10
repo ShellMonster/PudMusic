@@ -151,7 +151,7 @@ func (a *App) autoSearchLyrics(key, title string) {
 						continue
 					}
 				}
-				if len(lyrics.Rows(doc.LRC, "")) == 0 {
+				if len(lyrics.RowsOf(doc.LRC, "", doc.YRC)) == 0 {
 					continue
 				}
 				a.installAutoLyrics(key, doc)
@@ -168,11 +168,11 @@ func (a *App) autoSearchLyrics(key, title string) {
 
 func (a *App) installAutoLyrics(key string, doc lyrics.Doc) {
 	a.mu.Lock()
-	if a.lyricKey != key || a.closed || a.lyricEntry.Lyrics != "" {
+	if a.lyricKey != key || a.closed || a.lyricEntry.Lyrics != "" || a.lyricEntry.YRC != "" {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, lyrics.OriginSearch)
+	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, lyrics.OriginSearch)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)

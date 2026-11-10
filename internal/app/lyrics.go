@@ -343,7 +343,7 @@ func (a *App) loadLyrics(key string, gen int) {
 			hook(key)
 		}
 		entry, ok := c.Load(key, title, artist)
-		rows := lyrics.Rows(entry.Lyrics, entry.TLyrics)
+		rows := lyrics.RowsOf(entry.Lyrics, entry.TLyrics, entry.YRC)
 
 		a.mu.Lock()
 		if a.lyricKey != key || a.lyricGen != gen || a.closed {
@@ -363,7 +363,7 @@ func (a *App) loadLyrics(key string, gen int) {
 		// B 站字幕那一路，歌词全靠自动搜。所以判据要是「ok」，本地文件的那份
 		// 歌词过期之后就**永远搜不回来了**——用户看到的现象是「这一首的歌词
 		// 永久消失，除非他自己开搜索弹窗」。
-		hasLyrics := strings.TrimSpace(entry.Lyrics) != ""
+		hasLyrics := strings.TrimSpace(entry.Lyrics) != "" || strings.TrimSpace(entry.YRC) != ""
 		if !hasLyrics {
 			if title, local := localLyricTitle(key); local {
 				defer a.autoSearchLyrics(key, title)
@@ -437,13 +437,25 @@ func (a *App) PutLyrics(lrc, translated string) {
 // origin 是这一份歌词的来路（`lyrics.OriginBili` / `lyrics.OriginSearch`）。
 // 界面上那一句「这份词是自动来的还是搜来的」靠它（见 `LyricsSnapshot.Origin`）。
 func (a *App) PutLyricsFrom(origin, lrc, translated string) {
+	a.PutLyricsDocFrom(origin, lyrics.Doc{LRC: lrc, Translated: translated})
+}
+
+// PutLyricsDoc 把一份歌词（含逐字原文）写进缓存并立刻显示出来。
+//
+// 逐字那一份走 `Doc.YRC`；没有它时行为与 `PutLyrics` 完全一致。
+func (a *App) PutLyricsDoc(doc lyrics.Doc) {
+	a.PutLyricsDocFrom(lyrics.OriginSearch, doc)
+}
+
+// PutLyricsDocFrom 是上两条共用的落点。
+func (a *App) PutLyricsDocFrom(origin string, doc lyrics.Doc) {
 	a.mu.Lock()
 	key := a.lyricKey
 	if key == "" {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, lrc, translated, origin)
+	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, origin)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)
@@ -458,7 +470,7 @@ func (a *App) PutLyricsFrom(origin, lrc, translated string) {
 // 空串（成功）。写成「验一次、放锁、再调一个现读 key 的函数」正好就是那个窗口。
 //
 // origin 是这一份歌词的来路（`lyrics.OriginBili` / `lyrics.OriginSearch`）。
-func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry, *lyrics.Cache) {
+func (a *App) putLyricsLocked(key, lrc, translated, yrc, origin string) (lyrics.Entry, *lyrics.Cache) {
 	// 代次加一：正在回来的那次后台读盘（见 loadLyrics 的注释）到这时候已经过时了，
 	// 它要是回来就会把刚换的这一份盖掉。
 	a.lyricGen++
@@ -466,6 +478,7 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 	// `setLyrics`/`setTranslatedLyrics`，不动这两个，见 `index.tsx:269-278`）。
 	entry := lyrics.Entry{
 		Lyrics:   lrc,
+		YRC:      yrc,
 		TLyrics:  translated,
 		OffsetMS: a.lyricOffsetMS,
 		FontSize: a.lyricFontSize,
@@ -478,7 +491,7 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 	}
 	a.lyricEntry = entry
 	a.lyricOrigin = origin
-	a.lyricRows = lyrics.Rows(lrc, translated)
+	a.lyricRows = lyrics.RowsOf(lrc, translated, yrc)
 	// 🔴 **拿到词了，就不是「加载中」**（2026-10-27）：这一趟可能来自自动找歌词、
 	// 用户手动换源、或者从缓存读回来的那一份。三种都算「有着落了」。
 	a.lyricLoading = false
@@ -675,11 +688,11 @@ func (a *App) installBiliLyrics(key, lrc string) {
 		return
 	}
 	// 用户自己找来的那一份**不该**被盖掉（见 fetchBiliSubtitle 那一条）。
-	if a.lyricEntry.Lyrics != "" && a.lyricOrigin != lyrics.OriginBili {
+	if (a.lyricEntry.Lyrics != "" || a.lyricEntry.YRC != "") && a.lyricOrigin != lyrics.OriginBili {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, lrc, "", lyrics.OriginBili)
+	entry, c := a.putLyricsLocked(key, lrc, "", "", lyrics.OriginBili)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)

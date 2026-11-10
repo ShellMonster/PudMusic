@@ -274,6 +274,32 @@ func TestEachSongKeepsItsOwnOffset(t *testing.T) {
 	}
 }
 
+// TestWordTimingSurvivesAReopen 钉住逐字时间跟着歌词缓存一起落盘、读回来还在。
+//
+// 只存普通 LRC 的话，重开应用之后同一首歌会退化成整句高亮——而歌词文本
+// 一个字不差，用户只会觉得「逐字效果时有时无」。
+func TestWordTimingSurvivesAReopen(t *testing.T) {
+	a, _ := lyricsApp(t)
+	song := onlineSong("BV9", "9")
+	a.setLyricTrack(song)
+	a.PutLyricsDoc(lyrics.Doc{
+		LRC: "[00:01.00]路灯",
+		YRC: "[1000,2000](1000,1000,0)路(2000,1000,0)灯",
+	})
+	rows := a.Lyrics().Rows
+	if len(rows) != 1 || len(rows[0].Words) != 2 {
+		t.Fatalf("刚装上的行 = %+v，want 两个逐字片段", rows)
+	}
+	flushLyricsNow(t, a)
+
+	a.setLyricTrack(onlineSong("BV8", "8"))
+	a.setLyricTrack(song)
+	waitLyrics(t, 2*time.Second, "切回来读到逐字时间", func() bool {
+		rows := a.Lyrics().Rows
+		return len(rows) == 1 && len(rows[0].Words) == 2
+	})
+}
+
 // flushLyricsNow 跳过那 500ms 的防抖窗口直接落盘。那道窗口本身由
 // `TestTheDebounceWindowHoldsTheWrite` 用假钟单独验，这里只关心落下去的是什么。
 func flushLyricsNow(t *testing.T, a *App) {

@@ -654,7 +654,8 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	// 🔴 认换歌在这一帧的最开头，早于任何一句决定。
 	lv.onSong(snap.Key)
 
-	active := lyrics.ActiveAt(snap.Rows, lyricNow(pos, snap.OffsetMS))
+	at := lyricNow(pos, snap.OffsetMS)
+	active := lyrics.ActiveAt(snap.Rows, at)
 	if active < 0 {
 		lv.forget()
 		if snap.Loading {
@@ -678,7 +679,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 	}
 
 	t := c.Theme()
-	s.viewLyricLines(c, lv, snap, active, lyricStyle{
+	s.viewLyricLines(c, lv, snap, active, at, lyricStyle{
 		color: t.Text,
 		muted: t.TextMuted,
 		fade:  t.Background,
@@ -715,7 +716,7 @@ func (s *Shell) viewLyrics(c *ui.Context, snap app.LyricsSnapshot, pos time.Dura
 // 直接 Column + `Grow(1)` 就对：主轴是竖的，高度由外层分给它，而框架**不会**
 // 给 `Grow` 的那一个套上「不许比内容矮」这条下限（`mygo/ui/layout.go:720` 的
 // `c.grow == 0`），所以内容再长也只是一个可滚动的容器。
-func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSnapshot, active int, st lyricStyle) {
+func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSnapshot, active int, at time.Duration, st lyricStyle) {
 	pad := lv.centerPad()
 
 	ui.Column(c).Key(st.area).Grow(1).FillWidth().AlignItems(ui.Center).
@@ -774,7 +775,7 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 				}
 				content.Children(func() {
 					for i, row := range snap.Rows {
-						line := s.lyricLine(c, lv, i, active, row, snap.FontSize, st)
+						line := s.lyricLine(c, lv, i, active, at, row, snap.FontSize, st)
 						if i == active {
 							lv.line = line.Bounds()
 						}
@@ -856,7 +857,7 @@ func (s *Shell) viewLyricOrigin(c *ui.Context, snap app.LyricsSnapshot, st lyric
 // 是不是在唱」：满屏那一屏还按「离它多远」把两头的行压暗（见 `lyricRamp`）。
 //
 // st 是这一屏的画法（字色、行键前缀、居中还是左对齐），见 `lyricStyle`。
-func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
+func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, at time.Duration, row lyrics.Row, fontSize float32, st lyricStyle) ui.Element {
 	padY := float32(lyricsLinePadY)
 	if st.padY > 0 {
 		padY = st.padY
@@ -951,14 +952,27 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, row lyri
 	if st.activeColor.A != 0 {
 		ink = st.color.Mix(st.activeColor, presence)
 	}
+	family := ""
+	if st.face != nil {
+		family, weight = st.face(i == active)
+	}
+	// 逐字上色只给当前句；没有词级时间、或者词和整句对不上时回退整句高亮。
+	// 未唱的那一截统一压暗：满屏那一屏的 `activeColor` 和正文色都是白，
+	// 不压暗的话两段根本看不出差别。
+	unlit := st.color.Alpha(lyricKaraokeIdleAlpha)
+	var spans []ui.Span
+	if i == active {
+		spans, _ = karaokeSpans(row, at, scale.Font(c, size), weight, family, ink, unlit)
+	}
 	line = line.Opacity(opacity).Children(func() {
-		txt := ui.Text(c, row.Text).
-			FontSize(scale.Font(c, size)).FontWeight(weight).LineHeight(leading.Lyrics).
-			TextColor(ink)
-		if st.face != nil {
-			family, w := st.face(i == active)
-			txt = txt.Font(family).FontWeight(w)
+		var txt ui.Element
+		if spans != nil {
+			txt = ui.RichText(c, spans...).LineHeight(leading.Lyrics)
+		} else {
+			txt = ui.Text(c, row.Text).Font(family).FontWeight(weight).
+				LineHeight(leading.Lyrics).TextColor(ink)
 		}
+		txt = txt.FontSize(scale.Font(c, size)).FontWeight(weight)
 		if st.lineMul > 0 {
 			txt = txt.FixedLineHeight(scale.Font(c, size) * st.lineMul)
 		}
