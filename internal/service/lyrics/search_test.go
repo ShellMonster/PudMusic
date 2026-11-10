@@ -183,6 +183,26 @@ func TestNeteasePreviewKeepsTheWordTiming(t *testing.T) {
 	}
 }
 
+// TestNeteasePreviewMakesPlainLRCFromYRC 钉住「只有逐字那一份时，预览里看到的
+// 是正常歌词而不是 `[1000,2000](…)` 标记」。
+func TestNeteasePreviewMakesPlainLRCFromYRC(t *testing.T) {
+	srv := fixtureServer(t, `{"code":200,"lrc":{"lyric":""},
+	  "yrc":{"lyric":"[1000,2000](1000,1000,0)路(2000,1000,0)灯"}}`, nil, nil)
+	n := NewNetease(nil)
+	n.TestOnlyPointHostsAtFixture(srv.URL)
+
+	doc, err := n.Preview(context.Background(), Candidate{ID: "11"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.LRC != "[00:01.000]路灯\n" {
+		t.Errorf("预览用的普通 LRC = %q，want [00:01.000]路灯", doc.LRC)
+	}
+	if doc.YRC == "" {
+		t.Error("逐字那一份没留下")
+	}
+}
+
 // TestLRCLibPreviewIssuesNoRequest 钉住「预览不发请求」。
 //
 // 上游 `lrclib-tab.tsx:27-37` 直接读搜索结果里的 `syncedLyrics`：它的搜索响应

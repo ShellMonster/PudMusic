@@ -351,10 +351,16 @@ func (n *Netease) Preview(ctx context.Context, c Candidate) (Doc, error) {
 		return Doc{}, fmt.Errorf("lyrics: 网易云歌词返回 code %d", resp.Code)
 	}
 	lrc := strings.TrimSpace(firstNonEmpty(resp.LRC.Lyric, resp.Klyric.Lyric))
+	yrc := yrcIfParsable(firstNonEmpty(resp.Yrc.Lyric, resp.Klyric.Lyric))
+	// 只有逐字那一份时，预览弹窗不能把 `[1000,2000](…)` 这种标记原样摆给
+	// 用户看——用行开始时刻编一份普通 LRC，它仍然能被 `Parse` 读回去。
+	if lrc == "" && yrc != "" {
+		lrc = ToLRC(ParseYRC(yrc))
+	}
 	return Doc{
 		LRC:        lrc,
 		Translated: strings.TrimSpace(resp.Tlyric.Lyric),
-		YRC:        yrcIfParsable(firstNonEmpty(resp.Yrc.Lyric, resp.Klyric.Lyric)),
+		YRC:        yrc,
 	}, nil
 }
 
