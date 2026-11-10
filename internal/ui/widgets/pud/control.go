@@ -88,13 +88,14 @@ func miniSearch(c *ui.Context, key string, value *string, placeholder string, in
 		// 平时 text-3、悬停正文色。画面上是那个叉，无障碍名字仍是「清空搜索」——
 		// 叉对读屏软件念出来是「乘号」，听不出它在清什么。
 		//
-		// ⚠️ **c.Key 要在建它之前调**：身份挂在下一个建的元素上，建在
-		// ButtonBase 之后的话这个 key 就落到别的元素头上了。
-		c.Key(key + ":clear")
 		if *value == "" {
+			// 透明占位：不挂 key，免得撤销 / 出现时和那个按钮的控件状态串了。
 			ui.Box(c).Size(26, 26)
 			return
 		}
+		// ⚠️ **c.Key 要在建它之前调**：身份挂在下一个建的元素上，建在
+		// ButtonBase 之后的话这个 key 就落到别的元素头上了。
+		c.Key(key + ":clear")
 		btn := ui.ButtonBase(c).Label("清空搜索").Size(26, 26).Shrink(0).
 			AlignItems(ui.Center).Justify(ui.Center)
 		btn.Children(func() {
