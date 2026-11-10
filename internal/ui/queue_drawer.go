@@ -878,8 +878,10 @@ func queueSectionLabel(at, current int) string {
 // viewQueueRow 是抽屉里的一行：散歌使用标准行；合集/分集子行使用紧凑行，
 // 通过更小封面、缩进和左侧轨道表现父子层级。
 //
-// 行本体是 `20px 40px 1fr auto` 四列、缝 12、内边距 8、圆角 8；悬停 `hover` 底；正在放的歌名是
-// accent-text；拖着的那一行 40% 不透明，落点处一条 2 像素的主色线。点这一行 = 从这儿听。
+// 标准行是 `20px 40px 1fr auto` 四列、缝 12、内边距 8；子行收紧为
+// `16px 32px 1fr auto`、缝 12、内边距 6；两者都有圆角 8。悬停 `hover` 底；
+// 正在放的歌名是 accent-text；拖着的那一行 40% 不透明，落点处一条 2 像素的主色线。
+// 点这一行 = 从这儿听。
 // 分段标签（「正在播放」等）在行本体**外面**——悬停、拖动、点击都只算行本体。
 func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	p := tok.Of(t)
