@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -126,6 +127,62 @@ func TestRenderProgressFillShots(t *testing.T) {
 		tt.Advance(300 * time.Millisecond)
 		tt.Frame()
 		save(t, dir, "218-进度条-填过的那一段-悬停-"+name+".png", tt)
+	}
+}
+
+// TestTheBufferedPartIsDrawnOnTheTrack 钉住「已缓冲」画在轨道上、在已播那一段
+// 后面，未加载的那一截仍是轨道色。
+//
+// 三段式（已播 / 已缓冲 / 未加载）是播放器的通行画法：已缓冲用第三档中性色，
+// 比轨道亮、比已播暗。原来它挂在轨道下面，只有 2 像素高——用户实测
+// 「非常不明显」。
+func TestTheBufferedPartIsDrawnOnTheTrack(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			st := barState()
+			st.Position = 10 * time.Second
+			st.Buffered = 60 * time.Second
+			tt, s := playbarTester(t, st, 1200, 0, dark)
+			// 位置是上一帧写进 `s.scrub` 的，再画一帧（同 `filledSpot` 那条注释）。
+			tt.Frame()
+
+			bar, ok := tt.Find("播放进度")
+			if !ok {
+				t.Fatalf("画面上找不到进度条，文字有 %q", tt.Texts())
+			}
+			th := BuildTheme(s.app.SettingsSnapshot(), dark)
+			buffered := rgbaOf(tok.Of(th).Text3)
+			rail := rgbaOf(tok.Of(th).LineStrong)
+
+			// 40% 在已播（10%）和已缓冲（60%）之间：这一段该是已缓冲色。
+			if n := nearPixels(tt.Image(), trackSpot(bar, 0.4), buffered); n == 0 {
+				t.Errorf("40%% 处没有已缓冲色的像素——已缓冲那一截没画在轨道上")
+			}
+			// 80% 已经超过已缓冲：仍是轨道色，不该出现已缓冲色。
+			if n := nearPixels(tt.Image(), trackSpot(bar, 0.8), buffered); n != 0 {
+				t.Errorf("80%% 处有 %d 个已缓冲色的像素——画过了已缓冲的位置", n)
+			}
+			if n := nearPixels(tt.Image(), trackSpot(bar, 0.8), rail); n == 0 {
+				t.Errorf("80%% 处没有轨道色的像素——未加载那一截被盖掉了")
+			}
+		})
+	}
+}
+
+// trackSpot 是轨道上某个比例处的一小块（采样任一处颜色用）。
+func trackSpot(bar mygoui.Rect, frac float32) mygoui.Rect {
+	kw := knobHoverLook.knobW
+	x := bar.X + kw/2 + (bar.W-kw)*frac
+	cy := bar.Y + bar.H/2
+	return mygoui.Rect{
+		X: x - 4,
+		Y: cy - knobHoverLook.trackW/2,
+		W: 8,
+		H: knobHoverLook.trackW,
 	}
 }
 
