@@ -246,7 +246,9 @@ func (s *Shell) toggleWindow() {
 		s.openWindow()
 		return
 	}
-	if s.win.IsVisible() {
+	// MyGo v0.9.0 起 `IsVisible` 把最小化也算作可见（Windows/Linux 一直如此），
+	// 而最小化的窗口不是用户看得见的那一个：这一档要恢复，不是再藏一次。
+	if s.win.IsVisible() && !s.win.IsMinimized() {
 		platform.HideToBackground(s.win)
 		return
 	}

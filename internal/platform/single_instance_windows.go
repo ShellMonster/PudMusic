@@ -28,6 +28,8 @@ func HideToBackground(w *mygo.Window) {
 func RestoreFromBackground(w *mygo.Window) {
 	mygo.App.Show()
 	if w != nil && !w.IsDestroyed() {
+		// 最小化的窗口先还原（理由见 `tray.go` 的 `toggleWindow`）。
+		w.Restore()
 		w.Show()
 		w.Focus()
 	}
