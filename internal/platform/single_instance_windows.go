@@ -8,9 +8,10 @@
 // 于是什么都不剩——和 Biu 收进托盘之后的样子一致，只是回来的入口不一样：
 // 托盘图标这时还没有，唤起靠再启动一个实例（单实例锁会把请求转给这个进程）。
 //
-// `RestoreFromBackground` 里那两步必须都有：`App.Hide` 记下的窗口是用
+// `RestoreFromBackground` 里这几步必须都有：`App.Hide` 记下的窗口是用
 // `ShowInactive`（不着焦）叫回来的，只调 `App.Show` 的话窗口回来了却拿不到
-// 焦点，用户还得再点一下。
+// 焦点，用户还得再点一下；最小化的窗口还要先 `Restore`，`Show` 不会把它从
+// 任务栏还原。
 package platform
 
 import "github.com/egoist/mygo"
