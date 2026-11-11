@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"os"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
@@ -76,4 +77,23 @@ func TestPlayingInsideACollectionGroupKeepsItOpen(t *testing.T) {
 	if it, ok := s.app.CurrentItem(); !ok || it.Title != "第二集" {
 		t.Fatalf("当前项 = %+v，want 第二集", it)
 	}
+}
+
+// TestRenderQueueGroupAfterPlayingShot 出「组内播了一首之后」的图：
+// 合集组仍然展开、当前行是点的那一首。
+//
+//	BIU_SHOT_DIR=/some/dir go test ./internal/ui -run TestRenderQueueGroupAfterPlayingShot
+func TestRenderQueueGroupAfterPlayingShot(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	s, tt := openPlayedCollectionGroup(t)
+	clickDrawerText(t, tt, "第二集")
+	waitFrames(t, tt, "第二集放起来且分 P id 写回", func() bool {
+		it, ok := s.app.CurrentItem()
+		return ok && it.Title == "第二集" && it.Cid != ""
+	})
+	tt.Frame()
+	save(t, dir, "queue-group-after-playing.png", tt)
 }
