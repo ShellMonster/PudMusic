@@ -47,7 +47,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -303,9 +302,6 @@ type List struct {
 	// emptyView 是「一行都没有时那一格」的画法（见 SetEmptyView）。nil 是没装，
 	// 那一格走 emptyText() 那句话。
 	emptyView func(c *ui.Context)
-
-	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
-	hot bool
 
 	// view 是这一份歌此刻摆成什么样，见 SetView。
 	//
@@ -889,10 +885,6 @@ func (l *List) View(c *ui.Context) {
 		l.width = max(bw-2*l.insetX, 1)
 	}
 
-	// 量滚动条的悬停。界面层下一帧据此把主题的滚动条色换深一档（`Hot` 的
-	// 注释；框架只有一个滚动条颜色）。
-	l.hot = scrollbar.Hot(list)
-
 	// ⚠️ **读当帧那一段文字选中**（票 #703 的 A）：行标题那一列现在可选中了，
 	// 而框架全局只有一段选中——⌘C 要复制的是它（整行），不是选中行。
 	//
@@ -906,12 +898,6 @@ func (l *List) View(c *ui.Context) {
 	// 用户拖选到按键的那些帧，拿到的就是「用户最后看到的那一段」——够新。
 	l.rowSelection(c)
 }
-
-// Hot 报上一次 View 时指针是不是压在这个列表的滚动条上。
-//
-// 页面每帧在 `View` 之后把它交给壳（`Shell.noteScrollbar`）——主题是下一帧
-// 开头装的，所以读的正是这个「上一帧」的值。
-func (l *List) Hot() bool { return l.hot }
 
 // viewRow 画一行。
 //

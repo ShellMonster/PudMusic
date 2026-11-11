@@ -181,7 +181,6 @@ func (s *Shell) viewHistory(c *ui.Context, _ *ui.Route) {
 
 		// 原型的历史记录是 `noHead` 的分组列表：没有表头，每组只有组头。
 		p.rows.View(c)
-		s.noteScrollbar(p.rows.Hot())
 	})
 }
 

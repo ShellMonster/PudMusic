@@ -162,12 +162,6 @@ type Shell struct {
 	// 搜索正是它——不挡一下，用户回来时键盘焦点就在一个他没打开过的框里。
 	lastPath string
 
-	// scrollbarHot / scrollbarHotNow 是「指针压在某个滚动条上」的上一帧与这一帧
-	// （见 scrollbar.go）。主题每帧开头只能知道上一帧的：滚动容器这一帧还没建
-	// 出来。两个字段都是主线程单点写，和别的界面状态一样。
-	scrollbarHot    bool
-	scrollbarHotNow bool
-
 	// theme 是主题的缓存（见 theme.go 的 `themeCache`）。
 	//
 	// ⚠️ **逐窗口一份**：主题本身是全局的那一套（设置 + 系统深浅 + 桌面偏好），
@@ -1437,7 +1431,6 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 	// 字段的注释。
 	s.local.focusSink = s.registerContentFocus
 	s.local.focusSide = s.focusSide
-	s.local.noteScrollbar = s.noteScrollbar
 	s.local.tip = s.tip
 	// 「刚进这一页的第一帧」那一问（框架切页时会把焦点还给离开时有焦点的那个
 	// 元素——这一页的「会展开的搜索」正是它，见 `Shell.pageJustShown`）。

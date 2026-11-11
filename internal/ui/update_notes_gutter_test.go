@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 )
 
@@ -28,8 +27,8 @@ func TestTheUpdateNotesLeaveRoomForTheScrollbar(t *testing.T) {
 	}
 
 	// 日志正文的宽 = 弹窗宽减两侧 24 的内边距。滚动条轨道占右缘往里的
-	// scrollbar.HotZone 那一条，正文必须让开它。
-	limit := float32(updateDialogWidth-2*space.Px24) - float32(scrollbar.HotZone)
+	// scrollbarGutter 那一条，正文必须让开它。
+	limit := float32(updateDialogWidth-2*space.Px24) - float32(scrollbarGutter)
 	if para.W > limit+0.5 {
 		t.Errorf("更新日志正文宽 %.1f，滚动条槽只留出 %.1f，正文压进了 %.1f",
 			para.W, limit, para.W-limit)

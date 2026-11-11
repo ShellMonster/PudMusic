@@ -231,11 +231,10 @@ func (s *Shell) viewFolderSelect(c *ui.Context) {
 					Margin(space.Px16, space.None, space.None, space.None)
 			default:
 				// `.pick-list`：离说明 16，最高 280，行距 4。
-				pickScroll := ui.Scroll(c).FillWidth().MaxHeight(280).Margin(space.Px16, space.None, space.None, space.None).
+				ui.Scroll(c).FillWidth().MaxHeight(280).Margin(space.Px16, space.None, space.None, space.None).
 					Children(func() {
 						ui.List(c, &f.ls, len(f.list), func(i int) { s.viewFolderPickRow(c, f, i) }).GapY(space.Px4)
 					})
-				s.trackScrollbar(pickScroll)
 			}
 		})
 		// 脚：左边是「全选 / 已选 N 个」（原型没有，保留的是多选能力），右边取消 + 确定。

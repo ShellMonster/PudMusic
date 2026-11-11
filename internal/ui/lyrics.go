@@ -788,7 +788,6 @@ func (s *Shell) viewLyricLines(c *ui.Context, lv *lyricsView, snap app.LyricsSna
 					st.overlay(c)
 				}
 			})
-			s.trackScrollbar(scroll)
 		})
 }
 

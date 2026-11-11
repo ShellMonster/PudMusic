@@ -487,10 +487,9 @@ func (s *Shell) viewLyricCandidates(c *ui.Context, srcs []app.LyricSource, st ap
 		l.ls.Label = func(i int) string {
 			return lyricCell(st.Candidates[i].Title)
 		}
-		e := ui.List(c, &l.ls, len(st.Candidates), func(i int) {
+		ui.List(c, &l.ls, len(st.Candidates), func(i int) {
 			s.viewLyricCandidateRow(c, i, id, st.Tab, st.Candidates[i], srcs)
 		}).FillWidth().Height(lyricSearchListH).GapY(space.Px4)
-		s.trackScrollbar(e)
 	}
 }
 
@@ -689,7 +688,6 @@ func (s *Shell) viewLyricPreviewBody(c *ui.Context, pv app.LyricPreviewState) {
 					}
 				})
 			})
-			s.trackScrollbar(preview)
 		}
 	})
 }

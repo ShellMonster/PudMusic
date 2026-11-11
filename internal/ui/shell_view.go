@@ -190,9 +190,6 @@ func (s *Shell) viewMain(c *ui.Context) {
 	// ⚠️ **只有主窗口记**：迷你窗口画的是 `viewMini`，不经过这里——而
 	// 「应用的首帧」说的就是主窗口那一帧。
 	s.app.NoteFirstFrame()
-	// 滚动条的悬停状态交接：上一帧量到的这一帧用，这一帧重新量（各容器在
-	// `viewMain` 后半段把它们建出来）。必须排在 `applyFrameTheme` 之前。
-	s.scrollbarHot, s.scrollbarHotNow = s.scrollbarHotNow, false
 	// 🔴 铁律二：每帧第一件事就是装主题，而且必须在最开头——SetTheme 只影响
 	// 它之后创建的控件。不装的话 MyGo 在帧开头重置好的那份跟随系统的主题
 	// 就是这一帧真正用的那份，用户选了深色也只在这一帧是对的。

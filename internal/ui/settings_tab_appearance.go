@@ -238,7 +238,7 @@ func (s *Shell) fontList(c *ui.Context, st app.Settings, ro bool) {
 	n := min(len(options), fontRows)
 	h := float32(n)*fontRowH + float32(n-1)*2
 	ui.Column(c).Key("set-font-list").Label("字体").FillWidth().Padding(space.Px8).Children(func() {
-		lst := ui.List(c, &s.settings.fontList, len(options)).FillWidth().Height(h).
+		ui.List(c, &s.settings.fontList, len(options)).FillWidth().Height(h).
 			ItemKey(func(i int) any { return options[i].family }).
 			Rows(func(r ui.ListRow) {
 				opt := options[r.Index]
@@ -266,6 +266,5 @@ func (s *Shell) fontList(c *ui.Context, st app.Settings, ro bool) {
 					s.applySetting("字体", func(cur *app.Settings) { cur.FontFamily = fam })
 				}
 			})
-		s.trackScrollbar(lst)
 	})
 }

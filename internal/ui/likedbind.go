@@ -365,11 +365,10 @@ func (s *Shell) viewLikeBindPick(c *ui.Context, b *likeBind, backdrop, panel ui.
 			ui.Text(c, "你还没有创建收藏夹").FontSize(scale.Font(c, scale.Size13)).TextColor(pl.Text3).
 				Margin(space.Px16, space.None, space.None, space.None)
 		default:
-			pickScroll := ui.Scroll(c).FillWidth().MaxHeight(280).Margin(space.Px16, space.None, space.None, space.None).
+			ui.Scroll(c).FillWidth().MaxHeight(280).Margin(space.Px16, space.None, space.None, space.None).
 				Children(func() {
 					ui.List(c, &b.ls, len(b.list), func(i int) { s.viewLikeBindRow(c, b, i) }).GapY(space.Px4)
 				})
-			s.trackScrollbar(pickScroll)
 		}
 	})
 	dlgFoot(c, nil, func() {

@@ -8,7 +8,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/egoist/mygo/ui"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -186,21 +185,24 @@ func TestTheDisabledThemeButtonsStayReadable(t *testing.T) {
 
 // TestTheScrollbarIsTenPixelsAndDeepensOnHover 是滚动条那一条。
 //
-// 上游是 10 像素、指针压上去再深一档（`--os-handle-bg-hover`）。框架只有一个
-// 滚动条颜色，也没有悬停档——所以这一票把宽度设成 10，并自己接了「指针在滚动条
-// 那一带时换深一档」（`scrollbar.go` + `widgets/scrollbar`）。
+// 上游是 10 像素、指针压上去再深一档（`--os-handle-bg-hover`）。宽度由
+// `Theme.ScrollbarWidth` 定，悬停那一档由 v0.9.0 的 `Theme.ScrollbarStyle.Hover`
+// 给，框架按指针位置自己切。
 func TestTheScrollbarIsTenPixelsAndDeepensOnHover(t *testing.T) {
 	s := app.DefaultSettings("")
-	if got := BuildTheme(s, false).ScrollbarWidth; got != scrollbar.Width {
-		t.Fatalf("滚动条宽 %v，want %v（上游 --os-size: 10px）", got, scrollbar.Width)
+	theme := BuildTheme(s, false)
+	if got := theme.ScrollbarWidth; got != scrollbarWidth {
+		t.Fatalf("滚动条宽 %v，want %v（上游 --os-size: 10px）", got, scrollbarWidth)
 	}
-	if scrollbar.Width != 10 {
-		t.Errorf("scrollbar.Width = %d，want 10", scrollbar.Width)
+	if scrollbarWidth != 10 {
+		t.Errorf("scrollbarWidth = %d，want 10", scrollbarWidth)
+	}
+	if theme.ScrollbarStyle.Hover == (ui.Color{}) {
+		t.Error("主题没给 ScrollbarStyle.Hover，悬停时不会变深")
 	}
 
-	// 🔴 **走真实外壳**，不是自己模拟一段：`applyFrameTheme` 读 `s.scrollbarHot`
-	// 那一句正是要验的东西，复制一份到测试里就永远抓不住它掉了（实测：把
-	// theme.go 里那一段删掉，自模拟的版本照样绿）。设置页够长、有滚动条。
+	// 🔴 **走真实外壳**：滚动条由框架画，指针位置也在框架里量——只有跑一帧才验得到
+	// 「指针压上去就换色」，自己拼一段视图复制不出这一路。设置页够长、有滚动条。
 	b := newTestShell(t, at(900, 600), withSettings(s))
 	b.s.navigate(settingsPath)
 	tt := b.tt
@@ -217,9 +219,9 @@ func TestTheScrollbarIsTenPixelsAndDeepensOnHover(t *testing.T) {
 			barX, barY)
 	}
 
-	tt.Move(barX, barY) // 压在滚动条那一带
-	tt.Frame()          // 这一帧末尾 `trackScrollbar` 才记下 hot
-	tt.Frame()          // 这一帧 `applyFrameTheme` 用上深色
+	// 指针落到轨道上，框架当帧就按指针位置选 Hover 那一档，一帧足够。
+	tt.Move(barX, barY)
+	tt.Frame()
 	hot := tt.Image().RGBAAt(barX, barY)
 
 	if maxDiff(hot, idle) < 20 {

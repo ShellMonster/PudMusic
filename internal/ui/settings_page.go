@@ -165,7 +165,6 @@ func (s *Shell) viewSettings(c *ui.Context, _ *ui.Route) {
 			})
 		})
 	})
-	s.trackScrollbar(scroll)
 
 	// 「回到顶部」那一枚（原型 `.btt`）：滚过 400 像素才出现。这一页滚的是整页（外面那个
 	// `ui.Scroll`），位置就是那一个 `ScrollState`。

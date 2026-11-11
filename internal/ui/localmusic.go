@@ -312,11 +312,6 @@ type localPage struct {
 	// 为零时（单独造这一页的测试）退回框架那枚。
 	tip tipFunc
 
-	// noteScrollbar 把「指针压在滚动条上」转告给壳（主题下一帧据此换深一档，
-	// 见 scrollbar.go）。由 Shell 在构造之后接上；为零时（测试里单独造这一页）
-	// 什么也不做。
-	noteScrollbar func(bool)
-
 	// contentW 报内容区有多宽（由 Shell 接上；页头据此决定标题字号和页边距）。
 	contentW func(c *ui.Context) float32
 
@@ -722,9 +717,6 @@ func (p *localPage) viewBody(c *ui.Context, t *ui.Theme, st app.LocalMusicState)
 		// 表格那一档走的是上面那个 `case`（`ui.Table` 自带表头，`localColumns`），所以
 		// 走不到这里来。
 		p.cards.View(c)
-		if p.noteScrollbar != nil {
-			p.noteScrollbar(p.cards.Hot())
-		}
 	}
 }
 

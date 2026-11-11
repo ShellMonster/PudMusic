@@ -584,7 +584,6 @@ func (s *Shell) viewSuggest(c *ui.Context, anchor ui.Element) {
 			// reveal 是「刚用方向键挪到一条」的一次性信号：画的时候 ScrollIntoView 读过
 			// 一次就清，不然后面每一帧都在往那条滚（用户自己往下翻会被拽回去）。
 			s.nav.reveal = false
-			s.trackScrollbar(suggestScroll)
 		})
 	})
 }

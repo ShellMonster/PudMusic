@@ -582,9 +582,6 @@ func (p *PagedList) TakeFocus() { p.surf.TakeFocus() }
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) SelectFirst() { p.surf.SelectFirst() }
 
-// Hot 报指针是不是压在底下那一对控件的滚动条上（见 `List.Hot`）。
-func (p *PagedList) Hot() bool { return p.surf.Hot() }
-
 func (p *PagedList) View(c *ui.Context) { p.draw(c) }
 
 // onPanic 记一笔并要一帧。

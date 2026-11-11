@@ -14,7 +14,6 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/hover"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	mygoui "github.com/egoist/mygo/ui"
 )
@@ -134,8 +133,8 @@ func TestClickingABrokenStatsLoopRowSaysItCannotPlay(t *testing.T) {
 // TestTheStatsArtistMinutesStayClearOfTheScrollbar 钉住验收第二条：
 // 「最常听的歌手」行尾那列「N 分钟」不许压在 overlay 滚动条底下。
 //
-// 滚动条画在滚动容器右缘往里 16 像素那条竖带上（`scrollbar.HotZone`：
-// 轨道 10 + 左侧 6，见 `widgets/scrollbar`）。行原来左右零内边距，分钟数
+// 滚动条画在滚动容器右缘往里 16 像素那条竖带上（`scrollbarGutter`：
+// 轨道 10 + 左侧 6）。行原来左右零内边距，分钟数
 // 右对齐到容器右缘——指针一压上去，最后那几个像素就被盖住。
 //
 // 判据是**分钟数字形离容器右缘至少一条热区**：用窗口几何算容器右缘
@@ -149,9 +148,9 @@ func TestTheStatsArtistMinutesStayClearOfTheScrollbar(t *testing.T) {
 	}
 	// 内容区在窗口里居中：右缘 = 窗口宽 − 页边距（`pudPage` 的布局）。
 	edge := float32(1200) - space.PageHorizontalForWindow(1200)
-	if got, limit := r.X+r.W, edge-scrollbar.HotZone; got > limit {
+	if got, limit := r.X+r.W, edge-scrollbarGutter; got > limit {
 		t.Errorf("分钟数右缘 x=%.1f，压在滚动条带里（容器右缘 %.1f，热区 %d）——"+
-			"指针一悬停它就看不见", got, edge, scrollbar.HotZone)
+			"指针一悬停它就看不见", got, edge, scrollbarGutter)
 	}
 }
 

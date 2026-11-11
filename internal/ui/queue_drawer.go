@@ -796,7 +796,6 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 		// 行的悬停底、拖动落点线收在这一圈里面，不铺到抽屉边。
 		PaddingY(space.Px8).PaddingX(space.Px12).
 		Grow(1).FillWidth()
-	s.trackScrollbar(e)
 
 	// 这一列是**拖动的落点**（框架把落点交给指针底下最里层那个肯收拖动值的
 	// 元素——行里的封面、字、⋯ 都不收，所以收到的是这一列）。
