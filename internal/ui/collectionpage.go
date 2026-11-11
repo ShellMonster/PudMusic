@@ -572,7 +572,6 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			// 页边距给列表自己（见页根那段），页内头部照样铺满。
 			p.list.SetInsetX(padX)
 			p.list.View(c)
-			s.noteScrollbar(p.list.Hot())
 			if p.multi {
 				ui.Column(c).FillWidth().PaddingX(padX).Children(func() {
 					s.viewCollectionBatchBar(c, p)

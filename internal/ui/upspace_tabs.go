@@ -214,11 +214,6 @@ func (s *Shell) viewSpaceVideos(c *ui.Context, sp *upSpace) {
 	ui.Column(c).Grow(1).FillHeight().Children(func() {
 		sp.videos.View(c)
 	})
-	// 投稿这一张的滚动条悬停也要转告给壳（`PagedList` 的容器在包里面，页面
-	// 拿不到那个 `ui.Element`，走 `noteScrollbar` 这一路和收藏夹页、历史
-	// 页同一条）——少了它，指针压在投稿列表的滚动条上时它不换深一档，
-	// 和另外三张 Tab 是两种反馈。
-	s.noteScrollbar(sp.videos.Hot())
 }
 
 // viewSpaceList 画「动态 / 收藏夹 / 合集」这三张之一。
@@ -393,7 +388,6 @@ func (s *Shell) viewSpaceList(c *ui.Context, sp *upSpace, tab int) {
 		if tab == upTabDynamic {
 			spaceList = spaceList.GapY(space.Px8)
 		}
-		s.trackScrollbar(spaceList)
 	})
 
 	// ②滚到底 ③加载后再查一遍。

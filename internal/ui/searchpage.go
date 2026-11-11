@@ -334,7 +334,6 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 		t.list.Header(c, "search:header:"+strconv.Itoa(tab))
 	}
 	t.list.View(c)
-	s.noteScrollbar(t.list.Hot())
 }
 
 func searchErrorOf(err error) (*app.SearchError, bool) {

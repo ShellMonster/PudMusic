@@ -41,7 +41,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/ink"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/skeleton"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
@@ -111,9 +110,6 @@ type pagedRows struct {
 	// state 是这一份列表的滚动位置和选中项（铁律四的关键，见 view）。
 	state ui.ListState
 	sel   int
-
-	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
-	hot bool
 
 	// render 画这一行并**把它交回来**（菜单要挂在它身上，见 viewRow）。收整个
 	// ListRow 而不是光一个下标，是为了让页面能看见 `r.Selected()`——选中的那一行要
@@ -633,14 +629,7 @@ func (p *pagedRows) drawList(c *ui.Context) {
 	if bw := e.Bounds().W; bw > 0 {
 		p.width = bw
 	}
-
-	// 量滚动条的悬停（界面层下一帧据此换深一档，见 scrollbar.go）。
-	p.hot = scrollbar.Hot(e)
 }
-
-// Hot 报上一次画时指针是不是压在这个列表的滚动条上。见 `widgets/list` 的
-// `List.Hot`。
-func (p *pagedRows) Hot() bool { return p.hot }
 
 // drawGrid 画网格那一档：一行几首。
 //
@@ -682,8 +671,6 @@ func (p *pagedRows) drawGrid(c *ui.Context) {
 	if bw := e.Bounds().W; bw > 0 {
 		p.width = bw
 	}
-
-	p.hot = scrollbar.Hot(e)
 }
 
 // columns 是这一帧排几列。头一帧还没量到容器时先拿**列表那一块**的宽（`c.Size`

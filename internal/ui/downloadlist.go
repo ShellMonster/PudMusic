@@ -180,7 +180,6 @@ func (s *Shell) viewDownloadList(c *ui.Context, _ *ui.Route) {
 	var content func()
 	s.pudPage(c, "page:"+downloadListPath, func(winW, listW float32) {
 		scroll := ui.Scroll(c).Key("downloads:scroll").Grow(1).TrackScroll(&d.scroll)
-		d.trackScrollbar(s, scroll)
 		scroll.Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Stretch).Padding(space.None, space.None, space.PageBottom, space.None).
 				Children(func() {
@@ -272,9 +271,6 @@ func (s *Shell) syncDownloads(c *ui.Context) {
 
 // scrollTop 回到顶上。
 func (d *downloadsPage) scrollTop() { d.scroll.Y = 0 }
-
-// trackScrollbar 把滚动条的悬停转告给壳（主题下一帧据此换深一档）。
-func (d *downloadsPage) trackScrollbar(s *Shell, e ui.Element) { s.trackScrollbar(e) }
 
 // downloadsEmptyState 是这一页空着的时候说的那两句话。
 //

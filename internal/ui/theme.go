@@ -109,22 +109,11 @@ func effectiveDark(s app.Settings, systemDark bool) bool {
 // 主题只在**设置变了 / 系统深浅变了 / 桌面偏好变了**的时候才变——而那三样
 // 全在 `themeKey` 里，于是「键一样就复用」就等于「变了立刻生效」（下一帧
 // 就是新的）。
-//
-// ## 为什么备两份（热 / 不热）
-//
-// 滚动条的悬停档是**装上去之前**改一个字段的（`scrollbarHot`，见
-// `applyFrameTheme`），而缓存下来的那份是**跨帧共用**的——在它身上改字段的话，
-// 改的是缓存本身，下一帧「不热」的那一档也变成热的了（滚动条一直是深的那一档，
-// 而且没有症状：只是深了一档）。
-//
-// 所以热的那一档是**另建的一份**（值拷贝一份，字段改在那一份上）。
 type themeCache struct {
 	// key 是这一份是按哪几样拼出来的。
 	key themeKey
-	// base 是不热的那一份。
+	// base 是缓存下来的那一份。
 	base *ui.Theme
-	// hotTheme 是指针压在滚动条上的那一档。
-	hotTheme *ui.Theme
 	// card 是「卡片那一档」的三个值（底色 / 圆角 / 悬停底）。
 	//
 	// ⚠️ **它和主题是同一层的东西**（理由见 `cardPalette` 顶上那一段）：三个值
@@ -153,27 +142,18 @@ func (c *themeCache) of(s app.Settings, systemDark bool, p ui.Preferences) *ui.T
 	}
 	if !c.valid || c.key != key {
 		base := buildTheme(s, systemDark, p)
-		// 热的那一档是**值拷贝**一份：改的是拷贝，缓存里那一份不动。
-		hot := *base
-		hot.Scrollbar = scrollbarHot(&hot)
 		// 卡片那三个值跟主题一起算（理由见 `themeCache.card`）。
 		c.card = cardPaletteOf(base)
-		c.key, c.base, c.hotTheme, c.valid = key, base, &hot, true
+		c.key, c.base, c.valid = key, base, true
 	}
 	return c.base
 }
 
-// hot 取出「指针压在滚动条上」的那一档。
-//
-// ⚠️ **它必须是另建的一份**：见 `themeCache` 顶上那一段——在缓存的那一份上
-// 改字段的话，改的是缓存本身。
-func (c *themeCache) hot() *ui.Theme { return c.hotTheme }
-
 // applyFrameTheme 是**每帧开头装主题**的那一处，生产上唯一会走到的入口。
 //
-// ⚠️ 它直接调 `themeCache.of` + `c.SetTheme`，不再转一手 `ApplyTheme`：滚动条的
-// 悬停档要在装上去之前换一份（`scrollbarHot`），而那个状态只在 Shell 上。
-// `ApplyTheme` 因此只剩测试和预览在用（`grep ApplyTheme` 只有定义和测试文件），
+// ⚠️ 它直接调 `themeCache.of` + `c.SetTheme`，不再转一手 `ApplyTheme`：`ApplyTheme`
+// 不缓存，每帧会重算一遍。`ApplyTheme` 因此只剩测试和预览在用
+// （`grep ApplyTheme` 只有定义和测试文件），
 // **改 `ApplyTheme` 不会影响外壳**——要改生产行为，改这里和 `buildTheme`。
 //
 // ⚠️ **先读 `c.Theme().Dark` 再设**：读到的是 MyGo 刚在帧开头重置好的、跟随
@@ -223,14 +203,6 @@ func (s *Shell) applyFrameThemeMode(c *ui.Context, force app.ThemeMode) {
 	}
 	scale.SetUser(st.FontScale.Factor())
 	t := s.theme.of(st, systemDark, c.Preferences())
-	// 指针压在滚动条上时深一档（上游 `--os-handle-bg-hover`）。框架的绘制
-	// 只在**指针落在容器上**时画滚动条，所以这里只管「出现之后更明显」。
-	//
-	// ⚠️ 读的是**上一帧**量到的状态（`scrollbarHot`）：这一帧的容器还没建出来，
-	// 问不到。指针一移动就会有一帧，所以看上去是「移上去就变深」，不会晚。
-	if s.scrollbarHot {
-		t = s.theme.hot()
-	}
 	c.SetTheme(t)
 }
 
@@ -336,15 +308,18 @@ func buildTheme(s app.Settings, systemDark bool, p ui.Preferences) *ui.Theme {
 
 	// 滚动条宽度照上游 `--os-size: 10px`。框架默认 6。
 	t.ScrollbarWidth = scrollbarWidth
+	// 悬停/拖动那一档：上游 `--os-handle-bg-hover`。v0.9.0 的 ScrollbarStyle
+	// 有了第二档颜色，框架按指针压在轨道上自己切，界面层不再每帧量。
+	t.ScrollbarStyle.Hover = scrollbarHot(t)
+	t.ScrollbarStyle.Active = scrollbarHot(t)
 	return t
 }
 
 // scrollbarHot 是「指针压在滚动条上」那一档的颜色。
 //
 // 上游那里是 `--os-handle-bg-hover`（比默认那档深一级，`app.css:58-59`），
-// 提示用户「这根能拖」。框架没有第二档颜色，只有 `Theme.Scrollbar` 一个字段
-// ——所以由界面层在**每帧开头**按上一帧量到的悬停状态选这一档（见
-// `scrollbar.go` 与 `Shell.applyFrameTheme`）。
+// 提示用户「这根能拖」。v0.9.0 起框架的 `ScrollbarStyle` 有 Hover / Active
+// 两档，这里只负责算出那个颜色，什么时候切由框架按指针位置决定。
 //
 // 「深夜唱片行」的滚动条是不透明的 `--line-strong`，提不透明度不起作用，所以
 // 悬停那一档往次要字色推一半：深色下更亮、浅色下更深，都是「更显眼」。

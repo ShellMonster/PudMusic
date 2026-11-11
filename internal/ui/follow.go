@@ -669,7 +669,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		s.registerContentFocus(&f.keys)
 		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
 		f.keys.wire(c, st, s.focusSide)
-		e := ui.List(c, st, n).Grow(1).FillWidth().
+		ui.List(c, st, n).Grow(1).FillWidth().
 			// ⚠️ **行间距由列表给**（上游 `virtual-grid-page-list` 的
 			// `ROW_GAP = 16`，见 `followRowGap`）：每一行是**一排卡**，而行与行
 			// 之间原来一点缝都没有——卡片背靠背（用户 2026-10-25 的截图）。
@@ -693,7 +693,6 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			//（理由见 `homepage.go` 里「切 Tab 的滚动位置」那一段）。
 			TrackScroll(&f.scroll).
 			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, cols) })
-		s.trackScrollbar(e)
 	})
 	// 量外层网格容器，而不是 List 自己的内容盒子。List 的内容宽会受首行
 	// 卡片 intrinsic size 影响，拿它反过来算 cell 宽会形成反馈：首帧变窄后，

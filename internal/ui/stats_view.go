@@ -23,7 +23,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
@@ -86,7 +85,6 @@ func (s *Shell) viewStats(c *ui.Context, _ *ui.Route) {
 					s.viewStatsLoop(c, st, rng, winW, listW)
 				})
 		})
-		s.trackScrollbar(scroll)
 	})
 }
 
@@ -358,9 +356,9 @@ func (s *Shell) viewStatsArtistBars(c *ui.Context, rows []statsArtistRow) {
 		}
 		ui.Row(c).Key("stats-artist:"+strconv.FormatInt(r.Mid, 10)).FillWidth().Gap(space.Px12).
 			// ⚠️ **右边留一条滚动条的热区**：行尾那列「N 分钟」右对齐到内容右缘，
-			// 而 overlay 滚动条就画在那一条竖带上（`scrollbar.HotZone`：轨道 10 +
-			// 左边 6）——零内边距的话，指针一压上去分钟数就被盖住。
-			Padding(space.Px8, scrollbar.HotZone, space.Px8, space.None).AlignItems(ui.Center).Children(func() {
+			// 而 overlay 滚动条就画在那一条竖带上（`scrollbarGutter`：thumb 10 +
+			// 两侧各 3）——零内边距的话，指针一压上去分钟数就被盖住。
+			Padding(space.Px8, scrollbarGutter, space.Px8, space.None).AlignItems(ui.Center).Children(func() {
 			typo.Mono(ui.Text(c, strconv.Itoa(i+1))).FontSize(scale.Font(c, scale.Size12)).TextColor(p.Text3).
 				Width(24).Shrink(0)
 			ui.Text(c, r.Name).FontSize(scale.Font(c, scale.Size14)).TextColor(p.Text).Width(120).Shrink(0).

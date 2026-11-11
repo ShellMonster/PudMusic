@@ -385,7 +385,7 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		s.registerContentFocus(&f.keys)
 		// 键盘接线：游标 + 「↑ 到顶回侧栏」（票 #245 的 E4）。
 		f.keys.wire(c, st, s.focusSide)
-		dynList := ui.List(c, st, rows).
+		ui.List(c, st, rows).
 			Grow(1).FillHeight().FillWidth().
 			// ⚠️ **听一听输入**：为了知道「键盘往回走到顶上了」。
 			// 这里只处理列表自身的目标事件；行内控件的 keyup 不能被当成列表导航。
@@ -420,7 +420,6 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 					f.keys.selected(itemIndex+headerRows), f.keys.ring(r.Context))
 			})
 		// 原型 `.post` 自己带上下 24 和底线，行间不再留缝。
-		s.trackScrollbar(dynList)
 	})
 
 	// 滚到底就拉下一页；容器没填满也拉（首屏那一拉在 view 开头已经发过了）。

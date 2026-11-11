@@ -23,14 +23,16 @@ func HideToBackground(w *mygo.Window) {
 
 // RestoreFromBackground 把收起来的窗口叫回来，并把它放到前台。
 //
-// 三步的顺序不能换：先 unhide 整个应用（用户可能按过 ⌘H），再 Show 窗口
-// （窗口对藏着的应用 orderFront 是没用的），最后 Focus。
+// 四步的顺序不能换：先 unhide 整个应用（用户可能按过 ⌘H），再 Restore
+// 最小化的窗口，再 Show 窗口（窗口对藏着的应用 orderFront 是没用的），最后 Focus。
 // 已经关掉的窗口直接跳过：拿一个销毁了的窗口调原生方法会在 Cocoa 那边炸。
 func RestoreFromBackground(w *mygo.Window) {
 	if mygo.App.IsHidden() {
 		mygo.App.Show()
 	}
 	if w != nil && !w.IsDestroyed() {
+		// 最小化的窗口先还原（顺序与理由见 `tray.go` 的 `toggleWindow`）。
+		w.Restore()
 		w.Show()
 	}
 	mygo.App.Focus()

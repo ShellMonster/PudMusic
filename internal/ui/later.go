@@ -276,7 +276,6 @@ func (s *Shell) viewLater(c *ui.Context, _ *ui.Route) {
 			pud.TrackHeadMode(c, p.rows.width, pud.AlbumModeFor(winW))
 		}
 		p.rows.View(c)
-		s.noteScrollbar(p.rows.Hot())
 	})
 
 	// 弹窗画在这一列**外面**：它盖的是整个窗口，一个 `Grow(1)` 的页面列里放它

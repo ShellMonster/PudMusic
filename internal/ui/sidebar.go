@@ -101,7 +101,6 @@ func (s *Shell) viewSide(c *ui.Context, st app.State) {
 					s.viewFavorites(c, settings, collapsed)
 				})
 			})
-			s.trackScrollbar(sideScroll)
 		})
 }
 

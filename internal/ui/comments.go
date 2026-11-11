@@ -548,7 +548,6 @@ func (s *Shell) viewCommentsContent(c *ui.Context, t *ui.Theme) {
 			rowIdx = r.Index
 			guarded(r.Context)
 		})
-	s.trackScrollbar(lst)
 
 	// 🔴 **登记焦点**（`focus.go` 的 `registerContentFocus`）：这一页自己画列表，所以登记也得自己写一遍。
 	s.registerContentFocus(list.HandleFocus(&p.state.Handle))

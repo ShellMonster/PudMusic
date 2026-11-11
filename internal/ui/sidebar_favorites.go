@@ -260,10 +260,9 @@ func (s *Shell) viewFavoriteList(c *ui.Context, g app.FavoriteGroup, items []app
 		s.reorderFavorite(g, items, rows, to)
 	}
 
-	e := ui.List(c, ls, len(items), func(i int) {
+	ui.List(c, ls, len(items), func(i int) {
 		s.viewFavoriteRow(c, g, items[i], collapsed)
 	})
-	s.trackScrollbar(e)
 }
 
 // reorderFavorite 是拖完那一刻把顺序落下去。

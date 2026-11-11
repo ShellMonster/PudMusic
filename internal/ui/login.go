@@ -185,7 +185,6 @@ func (s *Shell) viewLogin(c *ui.Context, _ *ui.Route) {
 			})
 		})
 	})
-	s.trackScrollbar(loginScroll)
 }
 
 // loginNarrowMax 是登录页改单列的窗口宽上限（原型 `@media (max-width: 1024px)`）。

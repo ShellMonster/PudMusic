@@ -29,7 +29,6 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
-	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scrollbar"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/egoist/mygo/ui"
 )
@@ -204,9 +203,6 @@ type Grid struct {
 	// 窗口边正是一帧一帧跨过去的——6→5→4→3→2 丢四次，用户盯着的那首就整个掉
 	// 出画面了（实测拖 1600→500 漂 6 首，一步跳到同一个宽度则漂 0 首）。
 	anchorID string
-
-	// hot 是上一帧画完后量到的「指针压在滚动条那一带」（见 `Hot`）。
-	hot bool
 
 	// footer 是末尾多出来的那一格的画法（转圈 / 重试），为 nil 时没有。
 	//
@@ -672,17 +668,11 @@ func (g *Grid) View(c *ui.Context) {
 		g.width = max(bw-2*g.insetX, 1)
 	}
 
-	// 量滚动条的悬停（理由同 `List.View` 末尾那一行）。
-	g.hot = scrollbar.Hot(e)
-
 	// ⚠️ **读当帧那一段文字选中**（票 #703 的 A）：理由同 `List` 那一档——
 	// 🔴 **必须排在 `ui.List` 构建**之后****：句柄是画格的时候绑的，排在前面
 	// 读到的永远是「无效」（理由见 `list.go` 那一段）。
 	g.rowSelection(c)
 }
-
-// Hot 报上一次 View 时指针是不是压在这个网格的滚动条上。见 `List.Hot`。
-func (g *Grid) Hot() bool { return g.hot }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 键盘那一路：方向键挪游标、回车放歌、焦点环落在游标那一格

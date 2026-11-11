@@ -132,7 +132,7 @@ func feedEndNote(c *ui.Context) {
 func (s *Shell) viewLoggedOutPage(c *ui.Context, key, eyebrow, title, lede, what, back string) {
 	w := windowW(c)
 	// 窗口矮的时候「扫码登录」会落到播放条下面：页面要能滚（原型的 `.page` 就是滚动容器）。
-	scroll := ui.Scroll(c).Key(key).Grow(1).FillHeight().Children(func() {
+	ui.Scroll(c).Key(key).Grow(1).FillHeight().Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Width(s.pageBodyW(c)).
 				Padding(space.PageTop, space.PageHorizontalForWindow(w), space.PageBottomForWindow(w), space.PageHorizontalForWindow(w)).Children(func() {
@@ -143,7 +143,6 @@ func (s *Shell) viewLoggedOutPage(c *ui.Context, key, eyebrow, title, lede, what
 			})
 		})
 	})
-	s.trackScrollbar(scroll)
 }
 
 // feedMoreAuthors 在作者那一拉有下一页时自动接着拉：chip 横排没有滚动可以「滚到底」，

@@ -36,7 +36,8 @@
     "webview": false,
     "comment": "B 站音乐播放器",
     "categories": ["Audio", "Music"],
-    "depends": ["libayatana-appindicator3-1"]
+    "depends": ["libayatana-appindicator3-1"],
+    "formats": ["deb", "pkgbuild"]
   },
   "updates": {
     "publicKey": "oJyYKaPIGn5RA8yPM/I395n6D+wn/PdaZv58jqBDrO0=",

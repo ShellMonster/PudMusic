@@ -286,7 +286,7 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 			// 那条 wheelGlide）跟着旧容器一起丢掉。只把 `partScroll.Y` 写成 0 取消不掉
 			// 它——写进去的 0 和当时的位置一样时容器不认这是一次接管，滑行会继续把
 			// 过滤后的列表往旧目标带（实测：点开后马上敲「第 1」，Y 从 0 被带到 37）。
-			sc := ui.Scroll(c).Key("part-pop:scroll:" + s.partQuery).TrackScroll(&s.partScroll).
+			ui.Scroll(c).Key("part-pop:scroll:" + s.partQuery).TrackScroll(&s.partScroll).
 				MaxHeight(min(winH*0.6, partPopMaxH)).Children(func() {
 				for _, r := range rows {
 					label := "P" + strconv.Itoa(r.page) + " · " + r.title
@@ -306,7 +306,6 @@ func (s *Shell) viewPartDrawer(c *ui.Context) {
 					}
 				}
 			})
-			s.trackScrollbar(sc)
 		})
 	})
 	if s.partBox.w == 0 && len(s.partRows) > 0 {
