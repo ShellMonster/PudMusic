@@ -359,7 +359,7 @@ func (p *Player) Play() {
 	// 那一帧必须是静的——否则「一上来就全速」照旧（斜坡是之后才走的）。
 	p.setGain(0)
 	p.gainMu.Lock()
-	d := rampDuration
+	d := playFadeInDuration
 	if p.fadeIn > 0 {
 		d, p.fadeIn = p.fadeIn, 0
 	}
@@ -465,8 +465,8 @@ func (p *Player) SetLoudness(l Loudness) *Player {
 	return p
 }
 
-// SetFadeIn 让**下一次**开始放时的淡入走 d（默认 150ms）。只管一次：放起来之后
-// 就恢复默认，暂停后再恢复不会再淡 d 那么久。
+// SetFadeIn 让**下一次**开始放时的淡入走 d（默认 200ms，见 playFadeInDuration）。
+// 只管一次：放起来之后就恢复默认，暂停后再恢复不会再淡 d 那么久。
 func (p *Player) SetFadeIn(d time.Duration) *Player {
 	p.gainMu.Lock()
 	p.fadeIn = d

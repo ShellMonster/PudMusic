@@ -35,15 +35,25 @@
 // 淡出去。报告 §3.3 的 B27 把那一档列为「观察」而不是「采纳」，所以这一票没做。
 package audio
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 const (
-	// rampDuration 是一次增益斜坡要走多久。
+	// rampDuration 是调音量、静音、取消静音时一次增益斜坡要走多久。
 	//
 	// 150 毫秒：报告 §3.3 的 C2 说 100~200ms（MusicPlayer2 的 BASS 默认 500ms
 	// 偏长——拖滑块会「粘」；jellyfin-web 固定 100ms），取中间那个——短到听不出
 	// 是渐变，长到不像「咔」一声。
 	rampDuration = 150 * time.Millisecond
+
+	// playFadeInDuration 是开始放 / 恢复时默认的淡入时长（见 Player.Play）。
+	//
+	// 200 毫秒：比调音量的斜坡长一点——它从完全无声起步，而前半段又被
+	// rampEase 压慢了；150 毫秒听起来像「突然接上」。仍然是 C2 那个
+	// 100~200ms 区间的上沿。
+	playFadeInDuration = 200 * time.Millisecond
 
 	// rampStep 是斜坡的步长。
 	//
@@ -51,6 +61,22 @@ const (
 	//（`mygo/audio/mixer.go` 的 `rampFrames`），两级叠起来是平滑的。
 	rampStep = 10 * time.Millisecond
 )
+
+// rampEase 把线性的进度 t（0..1）换成余弦缓动后的进度。
+//
+// 这就是 0.5 - 0.5*cos(πt) 的等价写法（cos(θ+π/2) = -sin θ）：写成 sin 是为了
+// 浮点上两端和中点仍然精确——math.Cos(math.Pi/2) 不等于 0，直接按那条式子算
+// 的话 t=0.5 会落在 0.5 的下一个可表示值上。两端和中点都必须精确：斜坡的第一步
+// 贴着起点、最后一步正好到位。
+func rampEase(t float64) float64 {
+	if t <= 0 {
+		return 0
+	}
+	if t >= 1 {
+		return 1
+	}
+	return min(max(0.5*(1+math.Sin(math.Pi*(t-0.5))), 0), 1)
+}
 
 // setGain 设当前生效的增益，**立刻**。
 func (p *Player) setGain(g float64) {
@@ -91,7 +117,10 @@ func (p *Player) startRamp(target float64, d time.Duration) {
 				return
 			case <-time.After(rampStep):
 			}
-			if !p.applyRampGain(stop, from+(target-from)*float64(i)/float64(steps)) {
+			// 每一步的进度走余弦缓动：起步和收尾都比线性慢，听感上更稳。
+			// 最后一步 t=1、rampEase(1)=1，所以它仍然正好落在 target 上。
+			t := float64(i) / float64(steps)
+			if !p.applyRampGain(stop, from+(target-from)*rampEase(t)) {
 				return
 			}
 		}

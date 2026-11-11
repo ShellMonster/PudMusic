@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -272,6 +273,87 @@ func TestEachSongKeepsItsOwnOffset(t *testing.T) {
 	if got := a.Lyrics().Rows[0].Text; got != "甲的词" {
 		t.Errorf("切回甲读到的是 %q，want 甲的词（乙的缓存串了？）", got)
 	}
+}
+
+// TestSwitchingBackUsesTheMemoryWithoutDisk 钉住「切回上一首这一帧就有词」。
+//
+// 盘上那份文件被删掉之后还能读到，说明命中的是进程内缓存，不是又读了一次盘。
+// 用户来回比较两首歌时，读盘那一趟和加载态的闪烁都不该出现。
+func TestSwitchingBackUsesTheMemoryWithoutDisk(t *testing.T) {
+	a, c := lyricsApp(t)
+	first := onlineSong("BV1", "1")
+	second := onlineSong("BV2", "2")
+
+	a.setLyricTrack(first)
+	a.PutLyrics("[00:01.00]甲的词", "")
+	a.SetLyricsOffset(-900)
+	flushLyricsNow(t, a)
+
+	a.setLyricTrack(second)
+	a.PutLyrics("[00:01.00]乙的词", "")
+	flushLyricsNow(t, a)
+
+	if err := os.Remove(c.Path(lyricKeyOf(first))); err != nil {
+		t.Fatal(err)
+	}
+
+	a.setLyricTrack(first)
+	ls := a.Lyrics()
+	if len(ls.Rows) != 1 || ls.Rows[0].Text != "甲的词" {
+		t.Fatalf("切回来没有立刻拿到词：%+v", ls.Rows)
+	}
+	if ls.OffsetMS != -900 {
+		t.Errorf("切回来的偏移是 %d，want -900", ls.OffsetMS)
+	}
+	if ls.Loading {
+		t.Error("内存命中还停在加载态")
+	}
+}
+
+// TestWordTimingSurvivesAReopen 钉住逐字时间跟着歌词缓存一起落盘、读回来还在。
+//
+// 只存普通 LRC 的话，重开应用之后同一首歌会退化成整句高亮——而歌词文本
+// 一个字不差，用户只会觉得「逐字效果时有时无」。
+func TestWordTimingSurvivesAReopen(t *testing.T) {
+	a, _ := lyricsApp(t)
+	song := onlineSong("BV9", "9")
+	a.setLyricTrack(song)
+	a.PutLyricsDoc(lyrics.Doc{
+		LRC: "[00:01.00]路灯",
+		YRC: "[1000,2000](1000,1000,0)路(2000,1000,0)灯",
+	})
+	rows := a.Lyrics().Rows
+	if len(rows) != 1 || len(rows[0].Words) != 2 {
+		t.Fatalf("刚装上的行 = %+v，want 两个逐字片段", rows)
+	}
+	flushLyricsNow(t, a)
+
+	a.setLyricTrack(onlineSong("BV8", "8"))
+	a.setLyricTrack(song)
+	waitLyrics(t, 2*time.Second, "切回来读到逐字时间", func() bool {
+		rows := a.Lyrics().Rows
+		return len(rows) == 1 && len(rows[0].Words) == 2
+	})
+}
+
+// TestYRCOnlyLyricsStillSaveTheUsersAdjustments 钉住「只有逐字原文也能落盘」。
+//
+// 落盘判据只看 `Entry.Lyrics` 的话，YRC-only 的那一首调完偏移再切回来就变回
+// 默认值——而界面上歌词一直在，用户看不出是哪一步丢了。
+func TestYRCOnlyLyricsStillSaveTheUsersAdjustments(t *testing.T) {
+	a, _ := lyricsApp(t)
+	song := onlineSong("BV7", "7")
+	a.setLyricTrack(song)
+	a.PutLyricsDoc(lyrics.Doc{YRC: "[1000,2000](1000,1000,0)路(2000,1000,0)灯"})
+	a.SetLyricsOffset(400)
+	flushLyricsNow(t, a)
+
+	a.setLyricTrack(onlineSong("BV6", "6"))
+	a.setLyricTrack(song)
+	waitLyrics(t, 2*time.Second, "切回来恢复偏移和逐字", func() bool {
+		ls := a.Lyrics()
+		return ls.OffsetMS == 400 && len(ls.Rows) == 1 && len(ls.Rows[0].Words) == 2
+	})
 }
 
 // flushLyricsNow 跳过那 500ms 的防抖窗口直接落盘。那道窗口本身由

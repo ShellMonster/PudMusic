@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -251,5 +252,181 @@ func TestSubtitleURLsAsksThePlayerInfoEndpoint(t *testing.T) {
 	f.mu.Unlock()
 	if after != before {
 		t.Errorf("没有 bvid 时还是发了 %d 个请求", after-before)
+	}
+}
+
+// 下面这几条盯的是「字幕地址问不到时不要静悄悄地当成没有字幕」。
+
+// playerInfoFixture 建一台答播放器信息接口的假 B 站，并注册好 WBI key 的 nav。
+func playerInfoFixture(t *testing.T) *fakeBili {
+	t.Helper()
+	f := newFakeBili(t)
+	f.on(pathNav, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, 0, "0", map[string]any{
+			"wbi_img": map[string]string{
+				"img_url": "https://i0.hdslb.com/bfs/wbi/" + sampleImgKey + ".png",
+				"sub_url": "https://i0.hdslb.com/bfs/wbi/" + sampleSubKey + ".png",
+			},
+		}))
+	})
+	return f
+}
+
+// playerInfoBody 造一份播放器信息接口的返回：身份字段 + 可选字幕。
+func playerInfoBody(bvid string, cid any, subtitle any) string {
+	data := map[string]any{"aid": 123456, "bvid": bvid, "cid": cid}
+	if subtitle != nil {
+		data["subtitle"] = subtitle
+	}
+	b, err := json.Marshal(map[string]any{"code": 0, "message": "0", "ttl": 1, "data": data})
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+// oneSubtitle 造一段只带一个地址的字幕。
+func oneSubtitle(url string) map[string]any {
+	return map[string]any{"subtitles": []any{map[string]any{"subtitle_url": url}}}
+}
+
+// TestSubtitleURLsRejectsAResponseForAnotherVideo 盯「返回的 bvid / cid 对不上
+// 就不要那份字幕」。
+//
+// ⚠️ 这是这一层的身份核对：B 站把请求导到另一条视频上时，`subtitle` 里是
+// **别人的**词。原样交出去的话，用户看到一段对不上的字，而日志里一句错都没有。
+func TestSubtitleURLsRejectsAResponseForAnotherVideo(t *testing.T) {
+	for _, tc := range []struct {
+		what string
+		bvid string
+		cid  any
+	}{
+		{"bvid 对不上", "BV1xx411c7m0B", testCid},
+		{"cid 对不上", testBvid, 999},
+	} {
+		t.Run(tc.what, func(t *testing.T) {
+			f := playerInfoFixture(t)
+			f.on("/x/player/wbi/v2", func(w http.ResponseWriter, r *http.Request) {
+				writeJSON(w, playerInfoBody(tc.bvid, tc.cid, oneSubtitle("//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/wrong.json")))
+			})
+			c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+			urls, err := c.SubtitleURLs(context.Background(), testBvid, testCid)
+			if err == nil {
+				t.Fatalf("身份对不上还是交了字幕：%q", urls)
+			}
+			if !strings.Contains(err.Error(), testBvid) {
+				t.Errorf("错误里没有说问的是哪一条：%v", err)
+			}
+			// 核对失败是「这个响应用不了」，不是「这个地址不通」——不往下一趟试。
+			if n := countPath(f, "/x/player/wbi/v2"); n != 1 {
+				t.Errorf("播放器信息问了 %d 次，want 1", n)
+			}
+			if n := countPath(f, "/x/player/v2"); n != 0 {
+				t.Errorf("身份对不上还是问了旧接口 %d 次", n)
+			}
+		})
+	}
+}
+
+// TestSubtitleURLsAcceptsTheMatchingVideo 盯「bvid / cid 都对得上就正常交字幕」。
+func TestSubtitleURLsAcceptsTheMatchingVideo(t *testing.T) {
+	f := playerInfoFixture(t)
+	f.on("/x/player/wbi/v2", func(w http.ResponseWriter, r *http.Request) {
+		// cid 用数字给：B 站两种形态都可能，核对不能只认字符串。
+		writeJSON(w, playerInfoBody(testBvid, 29165486316, oneSubtitle("//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/ok.json")))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	urls, err := c.SubtitleURLs(context.Background(), testBvid, testCid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/ok.json"
+	if len(urls) != 1 || urls[0] != want {
+		t.Errorf("字幕地址 = %q，want %q", urls, want)
+	}
+}
+
+// TestSubtitleURLsFallsBackWhenTheSignedAttemptFails 盯「签名那一趟报错时退到
+// 不签名的那一趟」。
+//
+// ⚠️ **只有请求报错才退**：签名成功但没有字幕是「这一条没有字幕」，换一个
+// 地址问也问不出别的来（见下一条）。
+func TestSubtitleURLsFallsBackWhenTheSignedAttemptFails(t *testing.T) {
+	f := playerInfoFixture(t)
+	f.on("/x/player/wbi/v2", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("w_rid") != "" {
+			writeJSON(w, jsonData(t, -400, "请求错误", nil))
+			return
+		}
+		writeJSON(w, playerInfoBody(testBvid, testCid, oneSubtitle("//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/unsigned.json")))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	urls, err := c.SubtitleURLs(context.Background(), testBvid, testCid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/unsigned.json"
+	if len(urls) != 1 || urls[0] != want {
+		t.Errorf("字幕地址 = %q，want %q", urls, want)
+	}
+	if n := countPath(f, "/x/player/wbi/v2"); n != 2 {
+		t.Errorf("播放器信息问了 %d 次，want 2（签名一次、不签名一次）", n)
+	}
+}
+
+// TestSubtitleURLsFallsBackToTheLegacyEndpoint 盯「前两趟都报错时退到旧接口」。
+func TestSubtitleURLsFallsBackToTheLegacyEndpoint(t *testing.T) {
+	f := playerInfoFixture(t)
+	f.on("/x/player/wbi/v2", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, jsonData(t, -404, "啥都木有", nil))
+	})
+	f.on("/x/player/v2", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, playerInfoBody(testBvid, testCid, oneSubtitle("//aisubtitle.hdslb.com/bfs/ai_subtitle/prod/legacy.json")))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	urls, err := c.SubtitleURLs(context.Background(), testBvid, testCid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://aisubtitle.hdslb.com/bfs/ai_subtitle/prod/legacy.json"
+	if len(urls) != 1 || urls[0] != want {
+		t.Errorf("字幕地址 = %q，want %q", urls, want)
+	}
+	if n := countPath(f, "/x/player/wbi/v2"); n != 2 {
+		t.Errorf("新接口问了 %d 次，want 2", n)
+	}
+	if n := countPath(f, "/x/player/v2"); n != 1 {
+		t.Errorf("旧接口问了 %d 次，want 1", n)
+	}
+}
+
+// TestSubtitleURLsStopsWhenTheSignedResponseHasNoSubtitle 盯「签名那一趟成功但
+// 没有字幕时不再往下试」。
+//
+// ⚠️ 空列表 = 这一条没有字幕，是正常的一种；换成不签名的地址问一次，得到的
+// 还是同一份「没有」。
+func TestSubtitleURLsStopsWhenTheSignedResponseHasNoSubtitle(t *testing.T) {
+	f := playerInfoFixture(t)
+	f.on("/x/player/wbi/v2", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, playerInfoBody(testBvid, testCid, nil))
+	})
+	c := f.client(t, Options{Now: func() time.Time { return time.Unix(1702204169, 0) }})
+
+	urls, err := c.SubtitleURLs(context.Background(), testBvid, testCid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(urls) != 0 {
+		t.Errorf("字幕地址 = %q，want 空", urls)
+	}
+	if n := countPath(f, "/x/player/wbi/v2"); n != 1 {
+		t.Errorf("播放器信息问了 %d 次，want 1（没有字幕不算失败）", n)
+	}
+	if n := countPath(f, "/x/player/v2"); n != 0 {
+		t.Errorf("没有字幕还是问了旧接口 %d 次", n)
 	}
 }

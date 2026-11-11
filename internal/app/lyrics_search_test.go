@@ -352,6 +352,35 @@ func TestAdoptingLandsOnTheSongThatIsPlaying(t *testing.T) {
 	}
 }
 
+// TestAdoptingKeepsTheWordTiming 钉住「预览里那份逐字原文采用之后还在」。
+//
+// 只在预览那一层解了 YRC、采用时又退回普通 LRC 的话，用户点完「采用」看到
+// 的是整句高亮——而预览里明明有逐字。
+func TestAdoptingKeepsTheWordTiming(t *testing.T) {
+	src := sourceOf("netease")
+	src.doc = lyrics.Doc{
+		LRC: "[00:01.00]路灯",
+		YRC: "[1000,2000](1000,1000,0)路(2000,1000,0)灯",
+	}
+	a, c := searchApp(t, src)
+	it := onlineSong("BV1", "1")
+	a.setLyricTrack(it)
+
+	a.OpenLyricPreview(0, lyrics.Candidate{ID: "11"})
+	waitSearch(t, 2*time.Second, "预览拉回来", func() bool { return a.LyricPreview().YRC != "" })
+	if msg := a.AdoptLyricPreview(); msg != "" {
+		t.Fatalf("采用失败：%s", msg)
+	}
+	rows := a.Lyrics().Rows
+	if len(rows) != 1 || len(rows[0].Words) != 2 {
+		t.Fatalf("采用之后的行 = %+v，want 两个逐字片段", rows)
+	}
+	got, ok := c.Load(lyricKeyOf(it), "", "")
+	if !ok || got.YRC == "" {
+		t.Errorf("缓存里没有逐字原文：%+v（有没有=%v）", got, ok)
+	}
+}
+
 // TestAdoptingRefusesAfterTheSongChanged 🔴 换歌之后不许采用。
 //
 // 预览是给「按下预览那一刻在放的那首歌」看的，而这中间用户可能切了歌。照着当前这一首

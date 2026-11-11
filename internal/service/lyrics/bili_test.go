@@ -58,7 +58,7 @@ func TestTheBiliSubtitleIsParsedTheWayUpstreamDoes(t *testing.T) {
 		t.Fatalf("解析出 %d 行，want %d 行：%+v", len(got), len(want), got)
 	}
 	for i, w := range want {
-		if got[i] != w {
+		if got[i].At != w.At || got[i].Text != w.Text {
 			t.Errorf("第 %d 行是 %+v，want %+v", i, got[i], w)
 		}
 	}
@@ -146,7 +146,7 @@ func TestTheBiliSubtitleSurvivesTheRoundTripThroughLRC(t *testing.T) {
 		t.Fatalf("转回来 %d 行，原来的 %d 行", len(back), len(lines))
 	}
 	for i := range lines {
-		if back[i] != lines[i] {
+		if back[i].At != lines[i].At || back[i].Text != lines[i].Text {
 			t.Errorf("第 %d 行转回来是 %+v，原来的 %+v", i, back[i], lines[i])
 		}
 	}

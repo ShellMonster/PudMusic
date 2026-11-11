@@ -128,23 +128,22 @@ func snappedScrub(sl ui.Element, val float64, pressX float32, pressPos time.Dura
 	return float64(at) / float64(dur)
 }
 
-// withChapterBars 是主播放条那条进度的章节标记：竖条而不是圆点（原型 index.html:854
-// `.chap { width: 4px; height: 10px; border-radius: 1px; background: var(--side) }`）。
-// 跨在 4 高的轨道上，就是在轨道上切一道 4 宽的口。位置映射同 `withChapterDots`（pad 是
-// 旋钮留在轨道里的半个宽）。迷你窗 / 刘海仍走 `withChapterDotsCore` 的圆点，不受影响。
-func withChapterBars(sl ui.Element, chapters []app.Chapter, dur time.Duration, pad, w, h, radius float32, col ui.Color) ui.Element {
-	fracs := chapterDots(chapters, dur)
-	if fracs == nil {
-		return sl
+// paintChapterBars 画主播放条那条进度的章节标记：竖条而不是圆点
+// （原型 index.html:854 `.chap { width: 4px; height: 10px; border-radius: 1px;
+// background: var(--side) }`）。跨在 4 高的轨道上，就是在轨道上切一道 4 宽的口。
+// 位置映射同 `withChapterDots`（pad 是旋钮留在轨道里的半个宽）。迷你窗 / 刘海
+// 仍走 `withChapterDotsCore` 的圆点，不受影响。
+//
+// ⚠️ **它是纯绘制**：调用方把这一层和已缓冲 / 弹幕热度放进**同一个**
+// `DrawOver`。框架的 `DrawOver` 只存一个回调，连着调两次后一次会顶掉前一次
+// （症状是「有章节的歌，热度条整片消失」）。
+func paintChapterBars(p *ui.Painter, r ui.Rect, fracs []float32, pad, w, h, radius float32, col ui.Color) {
+	cy := r.Y + r.H/2
+	x0, dx := r.X+pad, r.W-2*pad
+	for _, f := range fracs {
+		x := x0 + dx*f
+		p.Fill(ui.Rect{X: x - w/2, Y: cy - h/2, W: w, H: h}, col, radius)
 	}
-	return sl.DrawOver(func(p *ui.Painter, r ui.Rect) {
-		cy := r.Y + r.H/2
-		x0, dx := r.X+pad, r.W-2*pad
-		for _, f := range fracs {
-			x := x0 + dx*f
-			p.Fill(ui.Rect{X: x - w/2, Y: cy - h/2, W: w, H: h}, col, radius)
-		}
-	})
 }
 
 // withChapterDotsCore 给**框架那颗 `ui.Slider`**（迷你窗那条进度）画章节点。

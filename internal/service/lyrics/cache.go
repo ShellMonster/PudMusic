@@ -41,6 +41,9 @@ const TTL = diskcache.TTL
 type Entry struct {
 	// Lyrics 是原文的 LRC 文本。
 	Lyrics string `json:"lyrics,omitempty"`
+	// YRC 是原文的逐字版本（网易云的 `yrc` / `klyric`），格式见 yrc.go。
+	// 空串表示这一份没有逐字时间。老缓存没有这一栏，读出来就是空串。
+	YRC string `json:"yrc,omitempty"`
 	// TLyrics 是译文的 LRC 文本，空串表示这份歌词没有翻译。
 	TLyrics string `json:"tLyrics,omitempty"`
 	// OffsetMS 是歌词偏移（毫秒），正数 = 歌词整体往后挪。
@@ -195,6 +198,7 @@ func (c *Cache) Load(key, wantTitle, wantArtist string) (Entry, bool) {
 		// **用户调过的偏移和字号**——那两样是用户数据，不该跟着歌词文本一起
 		// 过期（见上面那段）。
 		e.Lyrics = ""
+		e.YRC = ""
 		e.TLyrics = ""
 		return e, true
 	}

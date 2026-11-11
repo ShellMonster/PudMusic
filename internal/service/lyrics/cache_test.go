@@ -12,6 +12,7 @@ func TestCacheRoundTrip(t *testing.T) {
 	c := NewCache(t.TempDir())
 	want := Entry{
 		Lyrics:   "[00:01.00]Hello",
+		YRC:      "[0,1000](0,1000,0)Hello",
 		TLyrics:  "[00:01.00]你好",
 		OffsetMS: -250,
 		FontSize: 26,
@@ -28,7 +29,7 @@ func TestCacheRoundTrip(t *testing.T) {
 	}
 	// ⚠️ **只比内容那一部分**：那两个时刻是**缓存层自己记的**（落盘那一刻、
 	// 以及「刚刚用过」），而调用方给的那一份里它们是零值。
-	if got.Lyrics != want.Lyrics || got.TLyrics != want.TLyrics ||
+	if got.Lyrics != want.Lyrics || got.YRC != want.YRC || got.TLyrics != want.TLyrics ||
 		got.OffsetMS != want.OffsetMS || got.FontSize != want.FontSize ||
 		got.Origin != want.Origin || got.Title != want.Title || got.Artist != want.Artist {
 		t.Errorf("读回来是 %+v，want %+v", got, want)
@@ -227,6 +228,7 @@ func TestTheUserValuesSurviveTheExpiry(t *testing.T) {
 	// 用户调过的：偏移 +250ms，字号 26。
 	if err := c.Save("歌", Entry{
 		Lyrics:   "[00:01.00]词",
+		YRC:      "[0,1000](0,500,0)词",
 		OffsetMS: 250,
 		FontSize: 26,
 	}); err != nil {
@@ -238,8 +240,8 @@ func TestTheUserValuesSurviveTheExpiry(t *testing.T) {
 	if !ok {
 		t.Fatal("过期的那一份记录都不在了——用户自己的值就跟着没了")
 	}
-	if e.Lyrics != "" {
-		t.Errorf("过期的那一份还带着歌词（%q）——它该重新拉一份", e.Lyrics)
+	if e.Lyrics != "" || e.YRC != "" {
+		t.Errorf("过期的那一份还带着歌词（lrc=%q yrc=%q）——它该重新拉一份", e.Lyrics, e.YRC)
 	}
 	if e.OffsetMS != 250 {
 		t.Errorf("过期之后用户调过的偏移变成了 %d，want 250——"+
