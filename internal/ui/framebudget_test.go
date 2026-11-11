@@ -554,9 +554,13 @@ func budgetScreens() []budgetScreen {
 				bytes:  1500,
 				floor:  20,
 			},
-			setup: func(t *testing.T, s *Shell, _ *mygoui.Tester) {
+			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
 				s.app.Queue().Reset(queueItems(20)...)
 				s.drawerOpen = true
+				// 遮罩的淡入是 ReduceMotion 下仍然保留的 opacity 过渡（框架只折叠
+				// 位移，不折叠淡入淡出）。Tester 的钟站着不动，不推一下它会一直
+				// 要帧，稳态就没法量。
+				settleEnterTransition(tt)
 			},
 			draw: func(s *Shell) func(*mygoui.Context) {
 				return func(c *mygoui.Context) {
@@ -1599,9 +1603,10 @@ func TestEachScreenIsBuiltOncePerFrame(t *testing.T) {
 		{
 			// 抽屉开着：它由 `viewMain` 建，建一遍。
 			name: "队列抽屉",
-			setup: func(t *testing.T, s *Shell, _ *mygoui.Tester) {
+			setup: func(t *testing.T, s *Shell, tt *mygoui.Tester) {
 				s.app.Queue().Reset(queueItems(20)...)
 				s.drawerOpen = true
+				settleEnterTransition(tt)
 			},
 			want: buildTally{home: 1, playbar: 1, drawer: 1},
 		},
@@ -1628,6 +1633,7 @@ func TestEachScreenIsBuiltOncePerFrame(t *testing.T) {
 				loadPausedTrack(t, s, tt)
 				s.full.open = true
 				s.drawerOpen = true
+				settleEnterTransition(tt)
 			},
 			want: buildTally{home: 0, playbar: 0, drawer: 1, full: 1},
 		},
@@ -1792,6 +1798,14 @@ func (b buildTally) describe() string {
 // 它只改「值怎么过去」，不改「建了什么」——所以不影响这一组要量的任何数。
 func reduceMotion() shellOpt {
 	return withPrefs(mygoui.Preferences{ReduceMotion: true})
+}
+
+// settleEnterTransition 推完一次进场淡入。ReduceMotion 只折叠位移，不折叠
+// 淡入淡出，而 Tester 的钟站着不动——不推这一下，遮罩之类的过渡会一直要帧。
+func settleEnterTransition(tt *mygoui.Tester) {
+	tt.Frame()
+	tt.Advance(time.Second)
+	tt.Frame()
 }
 
 // budgetReadsPerPass 把「这一帧读了几次设置」归一成「**画一遍**读了几次」。
