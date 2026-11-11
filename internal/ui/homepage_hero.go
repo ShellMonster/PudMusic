@@ -36,6 +36,49 @@ import (
 // heroTrackCount 是主视觉上摆几首曲目（原型 `heroIds = ['t1', 't2']`）。
 const heroTrackCount = 2
 
+// heroTitleShrinkFloor 是主视觉标题为了留在一行最多能让掉的比例：标题最多缩 15%；
+// 再小下去它就不再读作这一页的展示句，不如老老实实排成均衡的两行。
+const heroTitleShrinkFloor = 0.85
+
+// heroTitleSize 给「今日一张」的歌名挑字号：在标题列可用的宽 avail 里放得下就用 base，
+// 放不下就按量到的宽度等比收，但不低于 base 的 heroTitleShrinkFloor。
+//
+// 两个不显然的地方：
+//
+//   - 这里用 `MeasureText` 量，而不是自己按字数估：它和真正画 `Text` 走的是同一套排版，
+//     所以量到的宽就是画出来的宽。
+//   - 缩到地板以下就宁可要 base：下限存在的意义是让长标题退回两行，而不是把它缩成
+//     一行读不清的小字。
+func heroTitleSize(c *ui.Context, name string, base, avail float32) float32 {
+	if name == "" || avail <= 0 || base <= 0 {
+		return base
+	}
+	// 量之前先把随包宋体注册好：这一趟排版和 `Display` 画的是同一套字体，没注册
+	// 就会量到回退字体。
+	_ = typo.Register()
+	span := ui.Span{Text: name, Font: typo.DisplayFamily, Size: base, Weight: 700, LetterSpacing: base * 0.02}
+	w, _ := c.MeasureText(0, span)
+	if w <= avail {
+		return base
+	}
+	floor := base * heroTitleShrinkFloor
+	fit := base * avail / w
+	// 字宽随字号近似线性，但字体在整数像素上的取整会让第一次算出的字号还差一点；
+	// 按量到的宽度再收两轮。收不进就退回两行，别让最后一行掉成一个字。
+	for range 3 {
+		if fit < floor {
+			return base
+		}
+		span.Size, span.LetterSpacing = fit, fit*0.02
+		w, _ = c.MeasureText(0, span)
+		if w <= avail {
+			return fit
+		}
+		fit *= avail / w
+	}
+	return base
+}
+
 // heroPlayable 报一条能当「今日一张」的候选：有封面、放得了。
 func heroPlayable(m list.Music) bool { return m.Cover != "" && m.Item.Bvid != "" }
 
@@ -131,6 +174,11 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 		cw = inner
 	}
 	coverW, gap, pad, stacked := heroMetrics(h.win)
+	// 标题列拿到的宽：内边距之内，横排时再让出封面和那道缝。
+	avail := inner - 2*pad
+	if !stacked {
+		avail -= coverW + gap
+	}
 
 	if len(hero) == 0 {
 		// 还在拉：摆一块和成品一样高的骨架，免得拉到之后整页往下跳。
@@ -165,8 +213,10 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 			name := h.cleanTitle(top.Title)
 			// 原型 `.hero-title { line-height: 1.05; margin: 12px 0 8px }`（补回行高见 `typo.DisplayNatural`）。
 			hs := scale.Font(c, scale.HeroTitleFluid(h.win))
+			hs = heroTitleSize(c, name, hs, avail)
 			trim := typo.DisplayTrim(hs, 1.05)
-			typo.Display(ui.Text(c, name), hs).LetterSpacing(hs*0.02).MaxLines(2).
+			// Balance 让缩不下、只能两行的长标题排成 4+3，而不是 6+1 的孤字行。
+			typo.Display(ui.Text(c, name), hs).LetterSpacing(hs*0.02).Balance().MaxLines(2).
 				Margin(space.Px12-trim, space.None, space.Px8-trim, space.None)
 			if top.Owner != "" {
 				ui.Text(c, top.Owner).FontSize(scale.Font(c, scale.Size16)).LineHeight(leading.Body).TextColor(p.Text2).SingleLine().Ellipsis("…")
