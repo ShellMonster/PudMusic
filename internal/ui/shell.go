@@ -601,6 +601,18 @@ type Shell struct {
 	// queueRowsRevision 是 queueRows 对应的队列快照版本。revision 不变时复用
 	// 同一份派生行，当前/停止状态仍在绘制前按当前 State 更新。
 	queueRowsRevision uint64
+	// queueRowsShown 是 queueRows 按合集开合过滤之后、这一帧真正画的那几行。
+	// 缓存起来是因为 queueGroupRows 每帧复制一份 20 行的切片是 12 KB 的分配；
+	// revision 或开合状态不变时复用同一份。
+	queueRowsShown    []queueRow
+	queueRowsShownOK  bool
+	queueRowsShownRev uint64
+	queueRowsShownGen int
+	// queueMenus 缓存每一行的右键菜单构造器。构造器只捕获下标，打开时再读
+	// 当下那一行；不缓存的话每帧每行一个新闭包，还会把整行结构复制进去。
+	queueMenus []func(*ui.Menu)
+	// queueGroupGen 在合集开合状态或队列形状变化时加一，给上面的缓存做失效。
+	queueGroupGen int
 
 	// queueGroupOpen 是「这个合集此刻收着还是开着」——**默认收**（map 里
 	// 没有就是收着）。只由 view 在主线程上读写。

@@ -424,6 +424,7 @@ func (s *Shell) viewQueueDrawer(c *ui.Context) {
 		nextRows := queueRowsForSnapshot(qSnapshot, &s.queueRowIDs)
 		if !queueRowsSameShape(s.queueRows, nextRows) {
 			s.queueGroupOpen = map[string]bool{}
+			s.queueGroupGen++
 		}
 		s.queueRows = nextRows
 		s.queueRowsRevision = qSnapshot.Revision()
@@ -708,8 +709,21 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	//
 	// ⚠️ **`s.queueRows` 不动**：`queueDrop` 的落点是「队列里的下标」，按全部
 	// 那份算才和队列对得上；这里另算一份「画出来的是哪几行」给它用。
-	all := s.queueRows
-	rows := queueGroupRows(all, s.queueGroupOpen)
+	if !s.queueRowsShownOK ||
+		s.queueRowsShownRev != s.queueRowsRevision ||
+		s.queueRowsShownGen != s.queueGroupGen {
+		s.queueRowsShown = queueGroupRows(s.queueRows, s.queueGroupOpen)
+		s.queueRowsShownOK = true
+		s.queueRowsShownRev, s.queueRowsShownGen = s.queueRowsRevision, s.queueGroupGen
+	}
+	rows := s.queueRowsShown
+	// 这一份跨帧复用，先把上一帧写上的状态清掉；不变量是「每帧都从普通行算起」。
+	for i := range rows {
+		rows[i].state = queueRowPlain
+		if rows[i].group != nil {
+			rows[i].group.CurrentAt = 0
+		}
+	}
 	// ⚠️ **这一帧只取一次快照**（`viewMain` 那条规矩：两次取的话两者之间状态
 	// 可能变了，而画出来的是两份不同的状态）。「当前这一首」和「停住了」都从
 	// 这一份里读。
@@ -1025,7 +1039,7 @@ func (s *Shell) viewQueueRow(c *ui.Context, row queueRow, at int, t *ui.Theme) {
 	})
 	// 右键菜单挂在**整行**（含上面的分段标签）上：MyGo 取的是最里层那个带菜单的元素，整行这一层足够里面，
 	// 而在分段标签上按右键也出同一份菜单（行的无障碍名 / 测试按歌名找到的是整行的中心）。
-	wrap.ContextMenu(func(m *ui.Menu) { s.queueMenu(m, row) })
+	wrap.ContextMenu(s.queueMenuFor(at))
 }
 
 func queueActionIconSize(child bool) float32 {
@@ -1107,6 +1121,7 @@ func (s *Shell) viewQueueGroupRow(c *ui.Context, row queueRow, t *ui.Theme) {
 		// 到第一集的行上）。
 		if rowEl.Clicked() {
 			s.queueGroupOpen[g.RowKey] = !open
+			s.queueGroupGen++
 			s.wake.invalidate()
 		}
 	})
@@ -1308,6 +1323,24 @@ func queueMenuItems(item app.Item) []queueMenuItem {
 // 地址（`list.SongInfoText`），这个只复制歌名——同一句字用在两处的话，用户
 // 粘出来才发现多了一半东西。
 const queueCopyLabel = "复制歌名"
+
+// queueMenuFor 返回第 i 行的右键菜单构造器，同一个下标只造一次。
+//
+// 打开时读 `queueRowsShown[i]` 而不是捕获整行：这一行每帧都重画，捕获值
+// 会把整个 `queueRow` 复制进闭包；读当下那一份还能跟上队列变化。
+func (s *Shell) queueMenuFor(i int) func(*ui.Menu) {
+	for len(s.queueMenus) <= i {
+		s.queueMenus = append(s.queueMenus, nil)
+	}
+	if s.queueMenus[i] == nil {
+		s.queueMenus[i] = func(m *ui.Menu) {
+			if i >= 0 && i < len(s.queueRowsShown) {
+				s.queueMenu(m, s.queueRowsShown[i])
+			}
+		}
+	}
+	return s.queueMenus[i]
+}
 
 // queueMenu 建这一行的菜单。
 //
