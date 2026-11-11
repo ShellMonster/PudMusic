@@ -113,6 +113,24 @@ func TestAnEnglishContinuationGetsASpace(t *testing.T) {
 	}
 }
 
+// TestAnEnglishWordAfterAChineseLineGetsASpace 钉住中英断行也补空格。
+func TestAnEnglishWordAfterAChineseLineGetsASpace(t *testing.T) {
+	got := Parse("[00:01.00]前半句\nworld")
+	if len(got) != 1 || got[0].Text != "前半句 world" {
+		t.Fatalf("中英续行 = %+v，want「前半句 world」", got)
+	}
+}
+
+// TestADigitAfterAChineseLineStaysJoined 钉住数字不补空格。
+//
+// 「第」+「3章」是同一个中文词组，补空格会读成「第 3章」。
+func TestADigitAfterAChineseLineStaysJoined(t *testing.T) {
+	got := Parse("[00:01.00]第\n3章")
+	if len(got) != 1 || got[0].Text != "第3章" {
+		t.Fatalf("中文数字续行 = %+v，want「第3章」", got)
+	}
+}
+
 // TestMetadataAndSectionMarkersAreNotContinuations 钉住元数据和段落标记不并句。
 func TestMetadataAndSectionMarkersAreNotContinuations(t *testing.T) {
 	got := Parse("[00:01.00]词\n[ti:歌名]\n[ar:歌手]\n[Chorus]\n[00:02.00]下一句")

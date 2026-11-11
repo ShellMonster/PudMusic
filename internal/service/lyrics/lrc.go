@@ -198,14 +198,26 @@ func joinContinuation(prev, next string) string {
 	}
 	last, _ := utf8.DecodeLastRuneInString(prev)
 	first, _ := utf8.DecodeRuneInString(next)
-	if isASCIIWordRune(first) && last < utf8.RuneSelf && !unicode.IsSpace(last) {
-		return prev + " " + next
+	if !unicode.IsSpace(last) {
+		// 上一行以 ASCII 词字符结尾、下一行又以 ASCII 词开头：补一个空格。
+		if last < utf8.RuneSelf && isASCIIWordRune(first) {
+			return prev + " " + next
+		}
+		// 上一行以 CJK 结尾、下一行以英文单词开头：也补空格。中文句子后面直接
+		// 贴一个英文词读起来是连在一起的。数字不补（「第」+「3章」还是「第3章」）。
+		if isCJK(last) && isASCIILetterRune(first) {
+			return prev + " " + next
+		}
 	}
 	return prev + next
 }
 
 func isASCIIWordRune(r rune) bool {
 	return r < utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_')
+}
+
+func isASCIILetterRune(r rune) bool {
+	return r < utf8.RuneSelf && unicode.IsLetter(r)
 }
 
 // timeOf 从一个时间标签的三段里算出时间。
