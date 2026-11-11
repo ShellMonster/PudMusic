@@ -1,34 +1,41 @@
 # 发版与版本
 
-> 原文在 `README.md`《版本》，以及 `scripts/release.sh` / `CHANGELOG.md` 顶上那几段
-> （它们是「为什么这么写」的部分）。
+> 原文在 `scripts/release.sh` 与 `.github/workflows/release.yml` 的注释、`CHANGELOG.md`
+> 顶上那几段（它们是「为什么这么写」的部分）。
 
 **什么时候用得上**：你要发一个版本、升版本号、升 MyGo；或者你在改 `CHANGELOG.md` /
-`mygo.json` 的 `version`。
+`RELEASE-NOTES.md` / `mygo.json` 的 `version`。
 
 ---
 
-## 版本号三处对上
+## 版本号、两份说明和标签对上
 
-**出处**：`CHANGELOG.md` 顶上两段（+ `scripts/release.sh` 的第 1.3 步）
+**出处**：`CHANGELOG.md` 顶上两段（+ `scripts/release.sh` 的前置检查、`release.yml` 的
+`Resolve release tag`）
 
-发一版要改**三个地方**，缺一个都会在某一步停住：
+发一版要让**下面四处**对上，缺一个都会在某一步停住：
 
 | 地方 | 内容 | 不对会怎样 |
 |---|---|---|
-| `mygo.json` 的 `version` | `0.1.0` 这样的版本号 | 标签与清单都对不上 |
-| `CHANGELOG.md` 的 `## <版本>` 段落 | 这一版的更新日志 | `mygo build` **直接失败**，报 `<文件> has no notes for <版本>` |
-| git 标签 | `v<版本>`（前缀来自 `mygo.json` 的 `updates.tagPrefix`，默认 `v`） | 应用查不到更新 |
+| `mygo.json` 的 `version` | `0.1.0` 这样的版本号 | 标签与清单都对不上；`release.yml` 的 `Resolve release tag` 直接失败 |
+| `CHANGELOG.md` 的 `## <版本>` 段落 | 开发者账，也是 GitHub Release 说明的来源 | `generate-release-notes.sh` 报「CHANGELOG.md 中没有 ## <版本> 段落」 |
+| `RELEASE-NOTES.md` 的 `## <版本>` 段落 | 应用内「有新版本」弹窗的说明 | `mygo build` **直接失败**（`mygo.json` 的 `updates.changelog` 指着它） |
+| git 标签 | `v<版本>`（前缀来自 `mygo.json` 的 `updates.tagPrefix`，默认 `v`） | 应用查不到更新；`release.sh` 也会核标签与版本 |
 
-⚠️ **段落标题必须正好是 `## <版本>`**：MyGo 按那个切段落，把那一段原样显示在「有新
-版本」弹窗里。**空段落和没有段落对应用是一回事**——弹窗里一片空白。
+⚠️ **两份说明的段落标题都必须正好是 `## <版本>`**：`mygo build` 按这个切
+`RELEASE-NOTES.md`，把那一段原样显示在「有新版本」弹窗里；`generate-release-notes.sh`
+按同一条规则切 `CHANGELOG.md`。**空段落和没有段落对应用是一回事**——弹窗里一片空白。
 
-### CHANGELOG 的两个读者
+### 两份说明的分工
 
-- **装上应用的人**：看到的是「有新版本」弹窗里那段 Markdown。
-- **改这份代码的人**：发下一个版本时，照这一版的写法加一段。
+- `CHANGELOG.md`：给改代码的人看的版本账，也是 GitHub Release 页面的说明来源
+  （`scripts/generate-release-notes.sh`）。
+- `RELEASE-NOTES.md`：给装应用的人看的更新说明，`mygo build` 把它写进更新清单，
+  应用内弹窗渲染的就是它。怎么写见那份文件开头的「怎么写」。
+- 两边**不互相复制**：用户感知得到的变化写给 `RELEASE-NOTES.md`，内部重构、测试、
+  依赖升级写给 `CHANGELOG.md`。
 
-所以 CHANGELOG 里**不要写「还没做」**（见
+两份里都**不要写「还没做」**（见
 [git-and-workflow.md](git-and-workflow.md)《注释的纪律》），也不要重复 README「已知
 边界」那一节——那边写得比这里细，重复会让两边各说各话。
 
@@ -36,27 +43,31 @@
 
 ---
 
-## 发版五步
+## 发版：本地两步 + CI 构建
 
-**出处**：`scripts/release.sh` 的五步（+ 它顶上那段「真正干活的还是 MyGo 自带的 CLI」）
+**出处**：`scripts/release.sh` 顶上那段注释与前置检查、`.github/workflows/release.yml`
 
 ```sh
-scripts/release.sh                 # 六个首发目标（macOS ×2、Windows ×2、Linux ×2）
-scripts/release.sh darwin/arm64    # 只发一个
-scripts/release.sh linux/amd64     # 只发 Linux x86_64
+scripts/release.sh
 ```
 
-脚本做的是 MyGo 的 CLI **不做、而漏了不会报错**的那几件。五个步骤：
+脚本**不收平台参数**：六个目标（macOS ×2、Windows ×2、Linux ×2）由 `release.yml`
+的 matrix 构建。本地只负责「标签打在对的代码上、该核的都核过」；构建、签名、
+挂草稿全在 CI。
 
-| 步 | 做什么 | 拦住了什么 |
-|---|---|---|
-| 1 | 前置检查 | 工作区脏、`gh` 没登录、CHANGELOG 缺段落、标签打错提交、**私钥读不到**、Windows 缺 NSIS、仓库是私有的 |
-| 2 | 跑验收 | `go build` / `go vet` / `go test`（**不带 `-race`**） |
-| 3 | 重新生成图标与第三方许可清单 | 「改了图案 / 依赖却忘了重新生成」——检查 `git diff` |
-| 4 | 打带签名的更新包 | **清单缺失**（多半是没私钥）、**签名是空的**、清单版本对不上 |
-| 5 | 推标签并挂**草稿** Release | 标签打错、release 已经发过 |
+| 阶段 | 在哪 | 做什么 | 拦住了什么 |
+|---|---|---|---|
+| 1 | 本地 | 前置检查 | 工作区脏、`gh` 没登录、版本号与说明对不上、标签打错提交、HEAD 不在 `origin/main` 的祖先里、没有更新源或公钥、更新源仓库不可见 |
+| 2 | 本地 | 打 `v<版本>` 标签并推送 | 标签冲突在推之前撞出来 |
+| 3 | CI | 按 matrix 构建六套目标 | 版本号与 tag 不一致、`MYGO_UPDATER_PRIVATE_KEY` 缺失 |
+| 4 | CI | 发布专属检查：`internal/licensing` 测试、重新生成图标与许可清单并核 `git diff` | 改了图案或依赖却忘了重新生成 |
+| 5 | CI | 重命名、校验资产、算 `SHA256SUMS`、从 `CHANGELOG.md` 生成 GitHub Release 说明 | 缺资产、文件名不对 |
+| 6 | CI | 挂**草稿** Release | 已发布的版本被重传 |
 
-### ⚠️ 第 5 步挂的是草稿，不是发布
+⚠️ **`release.yml` 不跑 `go build` / `go vet` / `go test` 全量**：它假定标签指向的
+提交已经过了 PR CI。所以标签必须打在 `origin/main` 上的提交（见下）。
+
+### ⚠️ 脚本跑完还不算发完：草稿要人转正式
 
 草稿里的资产**匿名取不到**，而 MyGo 的更新源是从**正式发布**的 release 里读清单的。所以
 这个脚本跑完**还不算发完**——人看过之后要把草稿转正式：
@@ -67,31 +78,35 @@ gh release edit "$tag" --draft=false
 
 **那一步才是应用开始看得到新版本的那一刻。**
 
-### ⚠️ 私钥丢了就再也发不了更新
+### ⚠️ 私钥在 CI secret 里，丢了就再也发不了更新
 
-签名私钥在脚本算出来的默认路径下（`~/.config/biu-mygo/` 里那个 `mygo-update.key`，
-能用 `MYGO_UPDATE_KEY_FILE` 改路径），**它不在仓库里**。
+CI 从仓库 secret **`MYGO_UPDATER_PRIVATE_KEY`** 读私钥（内容是 `mygo-update.key`
+本身）。缺了它 `release.yml` 的 `Verify update signing key` 会直接失败，不会打出
+没有更新清单的包。
 
-**丢了它就再也发不了更新，而且已经装出去的老版本会验不过之后的每一个版本**——那时只能
-让所有人重新下载安装。所以**备份在哪要写在发版说明里**，别只放在本机。
-
-还没有就生成一对（私钥别进仓库）：
+本机只在打本地包时需要私钥：`mygo.json` 的 `updates.privateKey` 指向文件路径，
+环境变量 `MYGO_UPDATER_PRIVATE_KEY` 的内容优先于路径。还没有就生成一对
+（默认写到 `os.UserConfigDir()/mygo/update-keys`，`-o` 可改；私钥别进仓库）：
 
 ```sh
-go tool mygo keygen -o ~/.config/biu-mygo/
+go tool mygo keygen -o ~/.config/pudmusic/update-keys
 ```
 
 公钥（同一目录的 `mygo-update.pub`）要写进 `mygo.json` 的 `updates.publicKey`。
 
-### ⚠️ 仓库是私有的 ⇒ 发出去的版本别人拿不到更新
+**丢了它就再也发不了更新，而且已经装出去的老版本会验不过之后的每一个版本**——那时只能
+让所有人重新下载安装。所以**备份在哪要写在发版说明里**，别只放在本机。
+
+### ⚠️ 更新源仓库必须是公开的
 
 MyGo 的更新源走**匿名** HTTPS 请求
 （`https://github.com/<owner>/<repo>/releases/latest/download/update-<平台>.json`），
 **私有仓库的资产匿名取不到**，而应用和日志**都不会报错**——它只是一直查不到更新。
 
-脚本在这里是**警告不是拦住**（源码仓库现在还是私有，用户已定「就用它本身，以后转
-公开」）。确实要发就设 `MYGO_RELEASE_ALLOW_PRIVATE=1`。**仓库转公开之后什么都不用改**，
-同一条配置自己就通了。
+当前更新源 `ShellMonster/PudMusic` 是公开的。脚本仍保留这项检查，防止将来把更新源
+切回私有仓库后发出版本：`gh repo view` 取不到可见性，或者仓库是 PRIVATE / INTERNAL
+时会停下。确实要发就设 `MYGO_RELEASE_ALLOW_PRIVATE=1`；仓库转公开之后同一条配置
+自己就通了。
 
 ### ⚠️ 标签要打在 main 上
 
@@ -119,7 +134,7 @@ gh release edit "$tag" --repo <owner>/<repo> --target main
 字节并进变量名——`$变量` + 全角逗号会解析成一个不存在的 `变量…`，`set -u` 下当场崩在
 那一行。
 
-**危险的不是崩，是崩在哪**：第 5 步崩之前已经把标签推出去了，于是留下一个
+**危险的不是崩，是崩在哪**：如果崩在标签已经推出去之后，就留下一个
 「**有标签、没有 release**」的半截发版，而 `bash -n` 查不出来（语法是对的）。
 
 脚本自己在动手之前先扫一遍（用 `LC_ALL=C grep -n '\$[A-Za-z_][A-Za-z0-9_]*[^ -~]'`），
@@ -136,7 +151,7 @@ gh release edit "$tag" --repo <owner>/<repo> --target main
 ### 打包
 
 ```sh
-scripts/build.sh              # 打 macOS dmg + Windows NSIS 安装包
+scripts/build.sh              # 六个目标（macOS dmg、Windows NSIS、Linux tar.gz/deb）
 scripts/build.sh darwin/arm64 # 只打一个目标
 ```
 
@@ -162,8 +177,8 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 要彻底消除它们需要 Apple 开发者计划的 Developer ID 并走公证流程，以及一张代码签名证书
 ——本项目**明确不做 / 没有买**（用户已定）。
 
-⚠️ **注意：更新包的签名是另一回事，它有**——见上面《发版五步》里那个私钥。安装包本身
-不签名，不影响自动更新。
+⚠️ **注意：更新包的签名是另一回事，它有**——见上面《发版：本地两步 + CI 构建》里
+那个私钥。安装包本身不签名，不影响自动更新。
 
 **什么时候用得上**：你在打包、或者用户第一次装上说「打不开 / 被拦了」。
 
@@ -171,9 +186,10 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 
 ## MyGo 版本基线
 
-**出处**：`README.md`《版本》
+**出处**：`go.mod` 的 `require` 与 `tool` 指令
 
-MyGo 记在 `go.mod` 里，当前基线 **v0.7.3**（2026-10-29 发布；本项目从 v0.7.1 升级）。
+MyGo 记在 `go.mod` 里，当前基线 **v0.8.3**（2026-11-09 升上来）。升级时以 `go.mod`
+为准，不要照抄这里的数字。
 
 **不锁死**：MyGo 是 pre-1.0、发布很快、**没有兼容性承诺**。升级前请重跑这里的探针
 （本仓库的测试、维护者本机的 `library/t-0018/` 探针、音频实验），确认计划依赖的 API 还在。
