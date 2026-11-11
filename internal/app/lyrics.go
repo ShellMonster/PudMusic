@@ -265,11 +265,32 @@ func (a *App) setLyricTrack(it Item) {
 	// ⚠️ **没有键（本地文件还没有可用信息）就不算在等**：那种情况下这一趟
 	// 压根不会发生，说「加载中」会永远转下去。
 	a.lyricLoading = key != ""
+	a.stopLyricLoadingTimer()
+	// 同步重置到默认值。恢复要等读盘回来，中间这一段界面上是默认值——
+	// 见文件头「切歌时先重置、再从缓存恢复」那一节。
+	a.lyricOffsetMS = 0
+	a.lyricFontSize = DefaultLyricsFontSize
+	// 🔴 **进程内命中的话这一帧就有了**（2026-11-11）：切回上一首不该再等
+	// 一次读盘，也不该重新进加载态。内存里的 rows 是只读的，和界面上那一份
+	// 是同一个切片。
+	if mem, ok := a.lyricMem.get(key, it.Title, it.Artist); ok {
+		a.lyricEntry = mem.entry
+		a.lyricRows = mem.rows
+		a.lyricOrigin = mem.entry.Origin
+		a.lyricOffsetMS = clampLyricsOffset(mem.entry.OffsetMS)
+		a.lyricFontSize = ClampLyricsFontSize(mem.entry.FontSize)
+		a.lyricLoading = false
+		wake := a.wake
+		a.mu.Unlock()
+		if wake != nil {
+			wake()
+		}
+		return
+	}
 	// ⚠️ **另排一道兜底**：这一首要是既没缓存、又没字幕地址、也不跑自动找
 	// （没配歌词源 / 已经试过同一首），那就**没有任何东西会回来**——加载态会
 	// 一直转到下一首。所以排一个「过一会儿收掉」的窗口，到点还没词就落到
 	// 「暂无歌词」。窗口比自动找那 25 秒长一点（它是最慢的那条路）。
-	a.stopLyricLoadingTimer()
 	if key != "" {
 		a.lyricLoadingTimer = a.after(lyricsLoadingGrace, func() {
 			// ⚠️ **一次取锁把该做的都做完**（判断还在不在这一首、清 loading、
@@ -294,10 +315,6 @@ func (a *App) setLyricTrack(it Item) {
 			}
 		})
 	}
-	// 同步重置到默认值。恢复要等读盘回来，中间这一段界面上是默认值——
-	// 见文件头「切歌时先重置为默认值」那一节讲的是哪一条。
-	a.lyricOffsetMS = 0
-	a.lyricFontSize = DefaultLyricsFontSize
 	a.mu.Unlock()
 
 	a.loadLyrics(key, gen)
@@ -343,7 +360,7 @@ func (a *App) loadLyrics(key string, gen int) {
 			hook(key)
 		}
 		entry, ok := c.Load(key, title, artist)
-		rows := lyrics.Rows(entry.Lyrics, entry.TLyrics)
+		rows := lyrics.RowsOf(entry.Lyrics, entry.TLyrics, entry.YRC)
 
 		a.mu.Lock()
 		if a.lyricKey != key || a.lyricGen != gen || a.closed {
@@ -363,7 +380,7 @@ func (a *App) loadLyrics(key string, gen int) {
 		// B 站字幕那一路，歌词全靠自动搜。所以判据要是「ok」，本地文件的那份
 		// 歌词过期之后就**永远搜不回来了**——用户看到的现象是「这一首的歌词
 		// 永久消失，除非他自己开搜索弹窗」。
-		hasLyrics := strings.TrimSpace(entry.Lyrics) != ""
+		hasLyrics := strings.TrimSpace(entry.Lyrics) != "" || strings.TrimSpace(entry.YRC) != ""
 		if !hasLyrics {
 			if title, local := localLyricTitle(key); local {
 				defer a.autoSearchLyrics(key, title)
@@ -392,6 +409,11 @@ func (a *App) loadLyrics(key string, gen int) {
 		// 来路跟着缓存里那一栏走：老记录没有这一栏，那就是「不知道」，
 		// 而**不知道不该被当成「搜索来的」**（界面上那句话会因此说错）。
 		a.lyricOrigin = entry.Origin
+		if len(rows) > 0 {
+			a.lyricMem.put(key, lyricMemoryEntry{
+				entry: entry, rows: rows, title: title, artist: artist,
+			})
+		}
 		// 🔴 **读盘回来了，这一趟就结束了**（2026-10-27）：
 		//
 		//   缓存里有词   → 有结论了（`lyricRows` 非空）
@@ -437,13 +459,25 @@ func (a *App) PutLyrics(lrc, translated string) {
 // origin 是这一份歌词的来路（`lyrics.OriginBili` / `lyrics.OriginSearch`）。
 // 界面上那一句「这份词是自动来的还是搜来的」靠它（见 `LyricsSnapshot.Origin`）。
 func (a *App) PutLyricsFrom(origin, lrc, translated string) {
+	a.PutLyricsDocFrom(origin, lyrics.Doc{LRC: lrc, Translated: translated})
+}
+
+// PutLyricsDoc 把一份歌词（含逐字原文）写进缓存并立刻显示出来。
+//
+// 逐字那一份走 `Doc.YRC`；没有它时行为与 `PutLyrics` 完全一致。
+func (a *App) PutLyricsDoc(doc lyrics.Doc) {
+	a.PutLyricsDocFrom(lyrics.OriginSearch, doc)
+}
+
+// PutLyricsDocFrom 是上两条共用的落点。
+func (a *App) PutLyricsDocFrom(origin string, doc lyrics.Doc) {
 	a.mu.Lock()
 	key := a.lyricKey
 	if key == "" {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, lrc, translated, origin)
+	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, origin)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)
@@ -458,7 +492,7 @@ func (a *App) PutLyricsFrom(origin, lrc, translated string) {
 // 空串（成功）。写成「验一次、放锁、再调一个现读 key 的函数」正好就是那个窗口。
 //
 // origin 是这一份歌词的来路（`lyrics.OriginBili` / `lyrics.OriginSearch`）。
-func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry, *lyrics.Cache) {
+func (a *App) putLyricsLocked(key, lrc, translated, yrc, origin string) (lyrics.Entry, *lyrics.Cache) {
 	// 代次加一：正在回来的那次后台读盘（见 loadLyrics 的注释）到这时候已经过时了，
 	// 它要是回来就会把刚换的这一份盖掉。
 	a.lyricGen++
@@ -466,6 +500,7 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 	// `setLyrics`/`setTranslatedLyrics`，不动这两个，见 `index.tsx:269-278`）。
 	entry := lyrics.Entry{
 		Lyrics:   lrc,
+		YRC:      yrc,
 		TLyrics:  translated,
 		OffsetMS: a.lyricOffsetMS,
 		FontSize: a.lyricFontSize,
@@ -478,7 +513,12 @@ func (a *App) putLyricsLocked(key, lrc, translated, origin string) (lyrics.Entry
 	}
 	a.lyricEntry = entry
 	a.lyricOrigin = origin
-	a.lyricRows = lyrics.Rows(lrc, translated)
+	a.lyricRows = lyrics.RowsOf(lrc, translated, yrc)
+	if len(a.lyricRows) > 0 {
+		a.lyricMem.put(key, lyricMemoryEntry{
+			entry: entry, rows: a.lyricRows, title: a.lyricTitle, artist: a.lyricArtist,
+		})
+	}
 	// 🔴 **拿到词了，就不是「加载中」**（2026-10-27）：这一趟可能来自自动找歌词、
 	// 用户手动换源、或者从缓存读回来的那一份。三种都算「有着落了」。
 	a.lyricLoading = false
@@ -526,10 +566,11 @@ func (a *App) flushLyrics() {
 		entry.OffsetMS = a.lyricOffsetMS
 		entry.FontSize = a.lyricFontSize
 		a.lyricEntry = entry
+		a.lyricMem.updateEntry(key, entry)
 	}
 	a.mu.Unlock()
 
-	if c == nil || key == "" || entry.Lyrics == "" {
+	if c == nil || key == "" || (entry.Lyrics == "" && entry.YRC == "") {
 		// 没有歌词就不写。偏移和字号是**附着在歌词上的**用户值，一首歌都没有
 		// 歌词时它们无处可附——写下去就是一个只有 `{offset, fontSize}` 的空壳文件，
 		// 用户数据目录里每听一首就积一个，而界面上那个值根本没有出处。
@@ -575,10 +616,15 @@ func (a *App) stopLyricsSave() {
 // `getLyricsByBili`，从**取流那一趟**的响应里拿地址）和用户在搜索里找的
 // （`lyrics-search-modal/`）。这一条是前者，那一条是 `lyrics_search.go`。
 //
-// # ⚠️ **整个过程在后台**
+// # ⚠️ **整个过程在后台，而且比播放器早**
 //
 // 下载是一次网络往返、写盘是一次磁盘 IO——两样都不许在界面线程上做（铁律三）。
-// 这一条是**放歌那一刻**触发的，而放歌那条路本身就在后台（`runOnline`）。
+// 这一条现在**知道 cid 那一刻**就触发（`startOnlineLyrics`），和取流并行；
+// 以前挂在播放器装好之后，用户先等完 playurl 才看到词。
+//
+// searchWhenNoTarget 是「这一趟已经是最后一趟了」：没有 bvid/cid、取流响应里
+// 也没有字幕地址时，装上播放器之后那一趟才退到自动搜。早一趟退的话，音乐库
+// 条目会在 `withSongInfo` 补出投稿身份之前就把结论定成「没有字幕」。
 //
 // # ⚠️ **它不拦播放**
 //
@@ -590,7 +636,7 @@ func (a *App) stopLyricsSave() {
 //
 // 缓存里已经有词了就不下载：那一份是他在两个源里挑的，而 B 站那份「自动」的
 // 不该把他挑的那份顶掉。
-func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRef, s *Streaming) {
+func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRef, s *Streaming, searchWhenNoTarget bool) {
 	if s == nil || s.Client == nil {
 		return
 	}
@@ -598,15 +644,84 @@ func (a *App) fetchBiliSubtitle(ctx context.Context, it Item, ref *bili.StreamRe
 	if key == "" {
 		return
 	}
+	// 没有 bvid/cid、取流响应里也没有地址时，这一层问不出任何东西。**早一趟
+	// 不能**在这里落空并触发自动搜：音乐库条目在 `withSongInfo` 之前就是这个
+	// 样子，那时搜到的是没有投稿字幕可用的结论，而补完元信息之后 B 站那份才是
+	// 首选。装上播放器之后那一趟（searchWhenNoTarget）才可以退到自动搜。
+	if _, _, ok := subtitleTarget(it); !ok && (ref == nil || len(ref.SubtitleURLs) == 0) {
+		if searchWhenNoTarget {
+			a.settleLyricLoading(key)
+			a.autoSearchLyrics(key, it.Title)
+		}
+		return
+	}
 	a.mu.Lock()
+	if a.lyricFetchKey == key {
+		// 同一首已经有一趟在取（早一次调用和装上播放器后那一趟会撞上）。
+		a.mu.Unlock()
+		return
+	}
+	a.lyricFetchKey = key
 	cache := a.lyricCache
 	a.mu.Unlock()
 
 	go func() {
+		defer a.clearLyricFetch(key)
 		if !a.fetchBiliSubtitleNow(ctx, it, key, cache, ref, s) {
 			a.autoSearchLyrics(key, it.Title)
 		}
 	}()
+}
+
+// clearLyricFetch 解除「这一首正在取字幕」的标记。**锁外调**。
+func (a *App) clearLyricFetch(key string) {
+	a.mu.Lock()
+	if a.lyricFetchKey == key {
+		a.lyricFetchKey = ""
+	}
+	a.mu.Unlock()
+}
+
+// settleLyricLoading 把「这一首还在加载歌词」收掉，界面落到「暂无歌词」。
+//
+// 自动找歌词最长 25 秒；那 25 秒里一直转圈，用户读到的是「应用卡住了」。
+// 字幕那一路没有结果就先说没有，搜到了再换上去。
+func (a *App) settleLyricLoading(key string) {
+	a.mu.Lock()
+	if a.lyricKey != key || !a.lyricLoading {
+		a.mu.Unlock()
+		return
+	}
+	a.stopLyricLoadingTimer()
+	a.lyricLoading = false
+	wake := a.wake
+	a.mu.Unlock()
+	if wake != nil {
+		wake()
+	}
+}
+
+// startOnlineLyrics 在「这一首已经知道是谁」的那一刻就开始找歌词，和取流并行。
+//
+// 之前它挂在播放器装好之后：先等 playurl、再建源和解码器，歌词才出发。Biu 是
+// playId 一变就找词，所以点歌看起来「立马就有词」。这里提前到取流之前。
+func (a *App) startOnlineLyrics(it Item, s *Streaming) {
+	if lyricKeyOf(it) == "" {
+		return
+	}
+	a.setLyricTrack(it)
+	if _, _, ok := subtitleTarget(it); ok {
+		a.fetchBiliSubtitle(context.Background(), it, nil, s, false)
+	}
+}
+
+// subtitleTarget 报这一条背后有没有可问字幕的投稿身份。
+func subtitleTarget(it Item) (bvid, cid string, ok bool) {
+	bvid, cid = it.SubtitleBvid, it.SubtitleCid
+	if bvid == "" || cid == "" {
+		bvid, cid = it.Bvid, it.Cid
+	}
+	return bvid, cid, bvid != "" && cid != ""
 }
 
 // fetchBiliSubtitleNow 去取 B 站字幕。返回 false 表示「没装上，该试试自动搜」。
@@ -614,7 +729,8 @@ func (a *App) fetchBiliSubtitleNow(ctx context.Context, it Item, key string, cac
 	{
 		// 缓存里已经有词了就别再下载（理由见上面那一条）。
 		if cache != nil {
-			if e, ok := cache.Load(key, it.Title, it.Artist); ok && strings.TrimSpace(e.Lyrics) != "" {
+			if e, ok := cache.Load(key, it.Title, it.Artist); ok &&
+				(strings.TrimSpace(e.Lyrics) != "" || strings.TrimSpace(e.YRC) != "") {
 				return true
 			}
 		}
@@ -675,11 +791,11 @@ func (a *App) installBiliLyrics(key, lrc string) {
 		return
 	}
 	// 用户自己找来的那一份**不该**被盖掉（见 fetchBiliSubtitle 那一条）。
-	if a.lyricEntry.Lyrics != "" && a.lyricOrigin != lyrics.OriginBili {
+	if (a.lyricEntry.Lyrics != "" || a.lyricEntry.YRC != "") && a.lyricOrigin != lyrics.OriginBili {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, lrc, "", lyrics.OriginBili)
+	entry, c := a.putLyricsLocked(key, lrc, "", "", lyrics.OriginBili)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)

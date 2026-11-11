@@ -22,7 +22,7 @@ func TestOneLineSeveralTimeTagsBecomesSeveralLines(t *testing.T) {
 		t.Fatalf("一行三个时间标签应该出三行，出了 %d 行：%+v", len(got), got)
 	}
 	for i, w := range want {
-		if got[i] != w {
+		if got[i].At != w.At || got[i].Text != w.Text {
 			t.Errorf("第 %d 行是 %+v，want %+v", i, got[i], w)
 		}
 	}
@@ -68,6 +68,95 @@ func TestLinesWithoutTimeOrWordsProduceNothing(t *testing.T) {
 	}
 	if got[0].Text != "真的词" || got[0].At != time.Second {
 		t.Errorf("剩下的是 %+v，want {1s 真的词}", got[0])
+	}
+}
+
+// TestCreditLinesAreNotLyrics 盯住「署名行不是唱出来的词」。
+//
+// NetEase 把「作词 : 唐恬」也写成带时间戳的行；不过滤的话歌一开头就是一屏
+// 署名和版权声明，用户要往下翻好几行才看到第一句词。
+func TestCreditLinesAreNotLyrics(t *testing.T) {
+	got := Parse("[00:00.00]作词 : 唐恬\n[00:00.00]作曲 : 钱雷\n" +
+		"[00:01.00]制作人：钱雷\n[00:02.00]词版权管理方：某公司\n" +
+		"[00:12.00]故事的小黄花")
+	if len(got) != 1 || got[0].Text != "故事的小黄花" {
+		t.Fatalf("署名行没被过滤掉：%+v", got)
+	}
+}
+
+// TestACreditWordWithoutAColonStays 盯住「只认角色词加冒号」。
+//
+// 「作词人的话」是一句真正的歌词，不能因为以「作词」开头就删掉。
+func TestACreditWordWithoutAColonStays(t *testing.T) {
+	got := Parse("[00:01.00]作词人的话")
+	if len(got) != 1 || got[0].Text != "作词人的话" {
+		t.Fatalf("真正的歌词被当成署名删了：%+v", got)
+	}
+}
+
+// TestATaglessContinuationJoinsThePreviousLine 钉住「行内换行不再丢后半句」。
+func TestATaglessContinuationJoinsThePreviousLine(t *testing.T) {
+	got := Parse("[00:01.00]前半句\n后半句\n[00:05.00]下一句")
+	if len(got) != 2 {
+		t.Fatalf("解析出 %d 行，want 2：%+v", len(got), got)
+	}
+	if got[0].Text != "前半句后半句" {
+		t.Errorf("续行没并回去：%q", got[0].Text)
+	}
+}
+
+// TestAnEnglishContinuationGetsASpace 钉住英文断行补空格。
+func TestAnEnglishContinuationGetsASpace(t *testing.T) {
+	got := Parse("[00:01.00]Hello\nworld")
+	if len(got) != 1 || got[0].Text != "Hello world" {
+		t.Fatalf("英文续行 = %+v，want「Hello world」", got)
+	}
+}
+
+// TestAnEnglishWordAfterAChineseLineGetsASpace 钉住中英断行也补空格。
+func TestAnEnglishWordAfterAChineseLineGetsASpace(t *testing.T) {
+	got := Parse("[00:01.00]前半句\nworld")
+	if len(got) != 1 || got[0].Text != "前半句 world" {
+		t.Fatalf("中英续行 = %+v，want「前半句 world」", got)
+	}
+}
+
+// TestADigitAfterAChineseLineStaysJoined 钉住数字不补空格。
+//
+// 「第」+「3章」是同一个中文词组，补空格会读成「第 3章」。
+func TestADigitAfterAChineseLineStaysJoined(t *testing.T) {
+	got := Parse("[00:01.00]第\n3章")
+	if len(got) != 1 || got[0].Text != "第3章" {
+		t.Fatalf("中文数字续行 = %+v，want「第3章」", got)
+	}
+}
+
+// TestMetadataAndSectionMarkersAreNotContinuations 钉住元数据和段落标记不并句。
+func TestMetadataAndSectionMarkersAreNotContinuations(t *testing.T) {
+	got := Parse("[00:01.00]词\n[ti:歌名]\n[ar:歌手]\n[Chorus]\n[00:02.00]下一句")
+	if len(got) != 2 || got[0].Text != "词" || got[1].Text != "下一句" {
+		t.Fatalf("元数据/段落标记被并进歌词了：%+v", got)
+	}
+}
+
+// TestAContinuationJoinsEveryTimestampOfTheGroup 钉住多时间标签那一组也一起并。
+func TestAContinuationJoinsEveryTimestampOfTheGroup(t *testing.T) {
+	got := Parse("[00:01.00][00:10.00]前半\n后半")
+	if len(got) != 2 {
+		t.Fatalf("出 %d 行，want 2：%+v", len(got), got)
+	}
+	for i, want := range []string{"前半后半", "前半后半"} {
+		if got[i].Text != want {
+			t.Errorf("第 %d 行 = %q，want %q", i, got[i].Text, want)
+		}
+	}
+}
+
+// TestAContinuationBeforeAnyLyricIsDropped 钉住「文件头部的无标签行不凭空成句」。
+func TestAContinuationBeforeAnyLyricIsDropped(t *testing.T) {
+	got := Parse("孤零零的一行\n[00:01.00]真的词")
+	if len(got) != 1 || got[0].Text != "真的词" {
+		t.Fatalf("没有上一句时冒出一行：%+v", got)
 	}
 }
 

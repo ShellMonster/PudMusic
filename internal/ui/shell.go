@@ -38,6 +38,16 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 )
 
+// partPanelBox 是分集浮层里**随搜索变的那一块**（列表加空结果说明）在每一次
+// 打开时量一次的大小。头那一行不随搜索变，留在外面，见 `viewPartDrawer`。
+//
+// ⚠️ **它必须在整个打开期间不动**：浮层贴着内容收缩，而搜索会把行滤少——不冻住
+// 的话，敲一个字宽高就跟着变一次，面板在用户眼皮底下跳。
+type partPanelBox struct {
+	w, h    float32
+	measure bool // 下一帧量的是满列表那一次布局
+}
+
 // Shell 是一个窗口的全部东西：状态、画法、唤醒句柄。
 type Shell struct {
 	app *app.App
@@ -288,6 +298,10 @@ type Shell struct {
 	// （`adoptShared`），因为落盘的磁盘缓存目录只能有一个 writer/一本账，
 	// 两个实例同时写同一个目录会各算各的字节数，上限就守不住了。
 	images *imgcache.Cache
+
+	// heat 是弹幕热度条的跨帧缓存（见 timeline.go）。界面每帧都会问一次，
+	// 只有弹幕这一批或时长变了才重新分桶。
+	heat timelineHeat
 
 	// imagesWakeRemove 是摘掉「封面好了，叫醒这一扇窗」那条登记的动作。
 	//
@@ -587,6 +601,18 @@ type Shell struct {
 	// queueRowsRevision 是 queueRows 对应的队列快照版本。revision 不变时复用
 	// 同一份派生行，当前/停止状态仍在绘制前按当前 State 更新。
 	queueRowsRevision uint64
+	// queueRowsShown 是 queueRows 按合集开合过滤之后、这一帧真正画的那几行。
+	// 缓存起来是因为 queueGroupRows 每帧复制一份 20 行的切片是 12 KB 的分配；
+	// revision 或开合状态不变时复用同一份。
+	queueRowsShown    []queueRow
+	queueRowsShownOK  bool
+	queueRowsShownRev uint64
+	queueRowsShownGen int
+	// queueMenus 缓存每一行的右键菜单构造器。构造器只捕获下标，打开时再读
+	// 当下那一行；不缓存的话每帧每行一个新闭包，还会把整行结构复制进去。
+	queueMenus []func(*ui.Menu)
+	// queueGroupGen 在合集开合状态或队列形状变化时加一，给上面的缓存做失效。
+	queueGroupGen int
 
 	// queueGroupOpen 是「这个合集此刻收着还是开着」——**默认收**（map 里
 	// 没有就是收着）。只由 view 在主线程上读写。
@@ -625,6 +651,8 @@ type Shell struct {
 	// partScrollToActive 是一次性的「滚到正在放的那一集」请求：点开浮层时挂上，
 	// 那一行建出来那一帧消费掉（分集还没问到时它留着，问到那帧再滚）。
 	partScrollToActive bool
+	// partBox 是浮层列表那一段这一次打开时的大小，见 `partPanelBox`。
+	partBox partPanelBox
 	// partRowKeys 记着分集抽屉里每一行的身份（**预先装箱好的那一份**）。
 	//
 	// ⚠️ 理由同 `sideRowKeys`（票 #313）。

@@ -25,6 +25,8 @@ package ui
 // 那几句是历史、下面那几句是未来，上下两条渐隐和满屏那一屏同一张表。
 
 import (
+	"time"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/lyrics"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
@@ -58,7 +60,7 @@ const miniCurtainLyricsKey = "mini:curtain:lyrics"
 // 800 字重（上游的样子，`lyrics.go` 归全屏播放器那一票），而这里要的是原型的
 // 「变色 + 放大 1.08」。⇒ 另起一个 `miniCurtainLine`，`lyrics.go` 一个字都不动。
 // 字体用系统正文字体：随包的宋体只有 Bold 一档，整屏歌词都用它会变成一屏粗体。
-func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, active int, t *ui.Theme, p tok.Palette, viewH float32) {
+func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, active int, at time.Duration, t *ui.Theme, p tok.Palette, viewH float32) {
 	lv := &s.miniLyric
 	fade := s.coverWash(t, p.Surface)
 
@@ -76,7 +78,7 @@ func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, ac
 			AlignItems(ui.Start)
 		content.Children(func() {
 			for i, row := range snap.Rows {
-				line := s.miniCurtainLine(c, i, active, row, p)
+				line := s.miniCurtainLine(c, i, active, at, row, p)
 				if i == active {
 					lv.line = line.Bounds()
 				}
@@ -97,7 +99,7 @@ func (s *Shell) viewMiniCurtainLyrics(c *ui.Context, snap app.LyricsSnapshot, ac
 //
 // 「这一句正在唱」在这一行上是一个 0/1 的值，换句时由 240ms 的 ease-out 推过去
 // （原型 `.ly` 的 `transition: color var(--t-med), transform var(--t-slow)`）。
-func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, row lyrics.Row, p tok.Palette) ui.Element {
+func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, at time.Duration, row lyrics.Row, p tok.Palette) ui.Element {
 	line := ui.Column(c).Key(lyricLineKey{ns: miniCurtainNS, at: row.At, i: i}).
 		Padding(miniCurtainLinePadY, space.None)
 	target := float32(0)
@@ -121,6 +123,15 @@ func (s *Shell) miniCurtainLine(c *ui.Context, i, active int, row lyrics.Row, p 
 		// 原型 `.curtain .ly` 继承 `.ly` 的宋体：非当前句常规，当前句 700（`.ly.cur`）。
 		// 字体的取值和满屏歌词是同一处（`fullLyricFace`）。
 		family, weight := fullLyricFace(i == active)
+		var spans []ui.Span
+		if i == active {
+			spans, _ = karaokeSpans(row, at, scale.Font(c, size), weight, family, col,
+				col.Alpha(lyricKaraokeIdleAlpha))
+		}
+		if spans != nil {
+			ui.RichText(c, spans...).FixedLineHeight(miniCurtainLineH)
+			return
+		}
 		ui.Text(c, row.Text).Font(family).FontWeight(weight).FontSize(scale.Font(c, size)).
 			FixedLineHeight(miniCurtainLineH).TextColor(col)
 	})

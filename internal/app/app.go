@@ -103,7 +103,12 @@ type State struct {
 	QueueFinished bool
 	Position      time.Duration
 	Duration      time.Duration
-	Volume        float64
+	// Buffered 是当前这条流已经下到本地的部分（时间轴上的位置）。
+	//
+	// 0 = 不知道或没有可比的数据（本地文件、还在问地址的那一段）。界面只在
+	// 它大于 0 且小于 Duration 时画那一段浅色的已缓冲条。
+	Buffered time.Duration
+	Volume   float64
 	// Muted 是「静音」这一档。
 	//
 	// ⚠️ **它和 Volume 是两件事**（票 #311 / 报告 §3.3 的 B2）：Volume 记的是
@@ -570,11 +575,15 @@ type App struct {
 	// lyricLoading 是「这一首的歌词还在路上」。
 	//
 	// 🔴 **它是「还没好」，不是「没有」**（2026-10-27）：换歌那一下 `lyricRows`
-	// 被清空，而歌词要先读一次盘（`loadLyrics`）、B 站字幕还要等取流回来那一趟
-	// 网络，全都没有之后还有一次自动找歌词（最长 25 秒，见 `lyrics_auto.go`）。
+	// 被清空，而歌词要先读一次盘（`loadLyrics`）、B 站字幕还要等取流和下载。
 	// 这段时间里界面上一直写着「暂无歌词」——用户读到的是**结论**，而真相是
 	// **过程**（上游那三选一里就有「歌词加载中...」这一档，见 `empty.go` 的
 	// 注释）。所以这一栏单独记着，界面据此画加载态。
+	//
+	// ⚠️ **自动找歌词不再挂在这一栏上**（2026-11-11）：字幕那一路没有结果时
+	// 先收掉加载态、界面落到「暂无歌词」，25 秒的自动搜在后台继续；搜到了
+	// `putLyricsLocked` 再把词装上去（见 `lyrics_auto.go` 的
+	// `settleLyricLoading`）。
 	//
 	// ⚠️ **它和 `HasLyrics` 不是一回事**：有词的时候它也可能是真的（换源、重新
 	// 取一份），而界面那一档只在**一条都没有**的时候才画。
@@ -585,6 +594,12 @@ type App struct {
 	// lyricEntry 是缓存里这一条原文+译文的**内容**（不含偏移和字号那两个
 	// 用户值，那两个在 flushLyrics 里现填）。写盘和换源都靠它。
 	lyricEntry lyrics.Entry
+	// lyricMem 是进程内的歌词 LRU（见 lyrics_memory.go）。切回上一首时同步
+	// 命中，不用等读盘。**只在持 a.mu 时访问**。
+	lyricMem lyricMemory
+	// lyricFetchKey 是正在取 B 站字幕的那一首的缓存键。换歌后另一首可以同时
+	// 取；同一首不重复发请求（早一次调用和装上播放器后那一趟会撞上）。
+	lyricFetchKey string
 	// lyricOrigin 是当前这一份歌词的**来路**（`lyrics.OriginBili` /
 	// `lyrics.OriginSearch` / 空串 = 不知道）。界面上那句话靠它说清「这份歌词
 	// 是自动来的还是搜来的」（见 `lyrics.go` 的 `LyricsSnapshot`）。
@@ -1330,6 +1345,7 @@ func (a *App) Snapshot() State {
 		QueueFinished:   a.stopped && a.wantPlay,
 		Position:        a.position,
 		Duration:        a.duration,
+		Buffered:        a.bufferedLocked(),
 		Volume:          a.volume,
 		Muted:           a.muted,
 		Rate:            a.rate,
@@ -1387,6 +1403,32 @@ func (a *App) sourceLocked() string {
 		return SourceLocal
 	}
 	return SourceOnline
+}
+
+// bufferedLocked 是当前这条流已经下到本地的部分折算成的时间。**必须在持 a.mu 时调**。
+//
+// 判据是字节数占整条流的比例：取流接口不保证给总长度，拿不到时返回 0（界面
+// 就不画那一段），而不是猜一个看起来合理的数。
+//
+// ⚠️ **只认当前代次的那条源**：切歌时 `a.online` 还是旧的，拿它算出来的
+// 进度会画在新歌的进度条上。
+func (a *App) bufferedLocked() time.Duration {
+	tr := a.online
+	if tr == nil || tr.source == nil || tr.gen != a.onlineGen || a.duration <= 0 {
+		return 0
+	}
+	return bufferedTime(a.duration, tr.source.Filled(), tr.source.Size())
+}
+
+// bufferedTime 把「已下字节 / 总字节」折成时间轴上的位置。
+//
+// 任一输入不可用时返回 0（界面就不画），不猜。
+func bufferedTime(dur time.Duration, filled, size int64) time.Duration {
+	if dur <= 0 || size <= 0 || filled <= 0 {
+		return 0
+	}
+	filled = min(filled, size)
+	return time.Duration(float64(dur) * float64(filled) / float64(size))
 }
 
 // biliURLLocked 是播放条当前动作对应的 B 站地址。**必须在持锁时调**。

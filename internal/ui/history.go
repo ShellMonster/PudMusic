@@ -273,9 +273,7 @@ func (s *Shell) drawHistoryCell(c *ui.Context, i int, cell float32, selected boo
 		// 格子右上角那枚「⋯」。点开的是**这一格的菜单**，和右键同一份
 		//（理由见 `drawLaterCell` 里那一处）。
 		// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同上面那一处。
-		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), func(m *ui.Menu) {
-			rows.menu(m, i)
-		})
+		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), rows.cellMenu(i))
 
 		// 封面 + 它上面那圈 hover 反馈：右下角一个 40 的主色圆播放钮，封面底部一条
 		// black/90 的渐变。**左边那一半空着**：历史记录的接口不给播放量（见

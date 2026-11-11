@@ -46,6 +46,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -113,6 +114,80 @@ func absoluteSubtitleURL(raw string) string {
 	return raw
 }
 
+// playerInfoData 是播放器信息接口的 `data` 段。
+//
+// 除了取流响应里那几段（字幕就在 `subtitle` 里），它还带着这一条数据属于
+// 哪一支投稿。B 站偶尔会把请求导到另一条视频上；不核对的话，拿回来的就是
+// 别人的字幕——用户看到的是一段对不上的字，而日志里一句错都没有。
+type playerInfoData struct {
+	playurlData
+	// Aid 是投稿的 av 号。字幕不靠它判断，但接口给了就读出来。
+	Aid flexInt `json:"aid"`
+	// Bvid / Cid 用来核对返回的是不是刚刚问的那一条。
+	Bvid flexString `json:"bvid"`
+	Cid  flexInt    `json:"cid"`
+}
+
+// checkIdentity 核对返回的是不是刚刚问的那一条。
+//
+// ⚠️ **空字段不算错**：老 fixture 和某些接口变体不带 `bvid` / `cid`，那只是
+// 「没法核对」，不是「核对失败」。只有字段非空且对不上时才拒绝。
+func (d *playerInfoData) checkIdentity(bvid, cid string) error {
+	if got := d.Bvid.String(); got != "" && got != bvid {
+		return fmt.Errorf("bili: 播放器信息问的是 %s，回的却是另一条投稿（bvid=%s）", bvid, got)
+	}
+	if got := d.Cid.Int64(); got != 0 && strconv.FormatInt(got, 10) != cid {
+		return fmt.Errorf("bili: 播放器信息问的是 %s 的 cid %s，回的却是 cid %d", bvid, cid, got)
+	}
+	return nil
+}
+
+// playerInfoAttempts 是播放器信息接口的尝试顺序。
+//
+// 签名的那一趟优先（登录后它还会带 AI 字幕）。只有**请求本身报错**才往下
+// 试——签名成功但没有字幕是「这一条没有字幕」，不是错误，换一个地址问也
+// 问不出别的来。
+var playerInfoAttempts = []struct {
+	path string
+	wbi  bool
+}{
+	{"/x/player/wbi/v2", true},
+	{"/x/player/wbi/v2", false},
+	{"/x/player/v2", false},
+}
+
+// playerInfo 按 playerInfoAttempts 的顺序问播放器信息接口，返回第一条能被
+// 核对上的响应。全都失败时返回最后一个错误。
+func (c *Client) playerInfo(ctx context.Context, bvid, cid string) (*playerInfoData, error) {
+	var lastErr error
+	for _, a := range playerInfoAttempts {
+		raw, err := c.Do(ctx, Call{
+			Method: "GET",
+			URL:    c.hostAPI + a.path,
+			Query:  url.Values{"bvid": {bvid}, "cid": {cid}},
+			WBI:    a.wbi,
+			Buvid:  true,
+		})
+		if err != nil {
+			lastErr = err
+			// 上下文已经取消/超时：再换两个地址也只是把同一个等待重演一遍。
+			if ctx.Err() != nil {
+				return nil, err
+			}
+			continue
+		}
+		var d playerInfoData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return nil, fmt.Errorf("bili: 播放器信息的返回读不懂：%w", err)
+		}
+		if err := d.checkIdentity(bvid, cid); err != nil {
+			return nil, err
+		}
+		return &d, nil
+	}
+	return nil, lastErr
+}
+
 // SubtitleURLs 问 B 站要一个 bvid+cid 的字幕地址（**按该试的顺序**）。
 //
 // ⚠️ **它是给「音乐库那一路」用的**：音乐库的取流走的是另一个接口
@@ -132,19 +207,9 @@ func (c *Client) SubtitleURLs(ctx context.Context, bvid, cid string) ([]string, 
 	}
 	// 字幕不在取流响应里，要问播放器信息接口（上游 `web-player.ts` 的
 	// `/x/player/wbi/v2`）；登录后会带 AI 字幕。
-	raw, err := c.Do(ctx, Call{
-		Method: "GET",
-		URL:    c.hostAPI + "/x/player/wbi/v2",
-		Query:  url.Values{"bvid": {bvid}, "cid": {cid}},
-		WBI:    true,
-		Buvid:  true,
-	})
+	d, err := c.playerInfo(ctx, bvid, cid)
 	if err != nil {
 		return nil, err
 	}
-	var d playurlData
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("bili: 播放器信息的返回读不懂：%w", err)
-	}
-	return subtitleURLsOf(&d), nil
+	return subtitleURLsOf(&d.playurlData), nil
 }

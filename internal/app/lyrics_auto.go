@@ -115,6 +115,9 @@ func (a *App) TestOnlyAfter(f func(d time.Duration, fn func()) func()) {
 
 // autoSearchLyrics 在后台自动找一份歌词装上。key 是这一首的缓存键，title 是歌名。
 func (a *App) autoSearchLyrics(key, title string) {
+	// 字幕那一路已经没结果了：先把加载态收掉，别让转圈挂满这 25 秒。搜到了
+	// `putLyricsLocked` 会再把词装上去。
+	a.settleLyricLoading(key)
 	query := cleanLyricTitle(title)
 	if key == "" || query == "" {
 		return
@@ -151,7 +154,7 @@ func (a *App) autoSearchLyrics(key, title string) {
 						continue
 					}
 				}
-				if len(lyrics.Rows(doc.LRC, "")) == 0 {
+				if len(lyrics.RowsOf(doc.LRC, "", doc.YRC)) == 0 {
 					continue
 				}
 				a.installAutoLyrics(key, doc)
@@ -168,11 +171,11 @@ func (a *App) autoSearchLyrics(key, title string) {
 
 func (a *App) installAutoLyrics(key string, doc lyrics.Doc) {
 	a.mu.Lock()
-	if a.lyricKey != key || a.closed || a.lyricEntry.Lyrics != "" {
+	if a.lyricKey != key || a.closed || a.lyricEntry.Lyrics != "" || a.lyricEntry.YRC != "" {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, lyrics.OriginSearch)
+	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, lyrics.OriginSearch)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)

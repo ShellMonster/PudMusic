@@ -22,6 +22,23 @@ func fadePlayer(t *testing.T) *Player {
 	return p
 }
 
+// TestRampEaseIsACosineCurve 验斜坡的缓动曲线：两端和中点精确，前四分之一
+// 慢于线性。曲线被换回线性的话，「起步不抢耳」那一半就没了。
+func TestRampEaseIsACosineCurve(t *testing.T) {
+	if got := rampEase(0); got != 0 {
+		t.Errorf("rampEase(0) = %v，want 0", got)
+	}
+	if got := rampEase(1); got != 1 {
+		t.Errorf("rampEase(1) = %v，want 1", got)
+	}
+	if got := rampEase(0.5); got != 0.5 {
+		t.Errorf("rampEase(0.5) = %v，want 0.5", got)
+	}
+	if got := rampEase(0.25); got >= 0.25 {
+		t.Errorf("rampEase(0.25) = %v，want < 0.25（余弦应当起步慢于线性）", got)
+	}
+}
+
 // TestTheVolumeFadesInOnStart 验「开始放的那一下是淡入的」。
 //
 // 三件事：
