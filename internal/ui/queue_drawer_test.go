@@ -730,6 +730,30 @@ func TestQueueRowsMarkPagesAsEpisodes(t *testing.T) {
 	}
 }
 
+// TestQueueDrawerCollapsedPageGroupKeepsTheCurrentEpisode 钉住收起的分集组头
+// 仍然显示当前第几集。当前集藏在收起的组里、不在这一帧画出的行里时，组头的
+// 提示靠的是组自己记下的 CurrentAt，不能在每帧重置时清掉。
+func TestQueueDrawerCollapsedPageGroupKeepsTheCurrentEpisode(t *testing.T) {
+	h := newHarness(t)
+	dir := t.TempDir()
+	h.app.Enqueue(
+		groupSong(t, dir, "先导片.flac", "pages:BV-x", 1, 2),
+		groupSong(t, dir, "正片.flac", "pages:BV-x", 2, 2),
+	)
+	if _, ok := h.app.Queue().Move(1); !ok {
+		t.Fatal("挪不到第 2 集")
+	}
+	h.tt.Frame()
+	openDrawer(t, h)
+
+	for _, txt := range h.tt.Texts() {
+		if strings.Contains(txt, "当前第 2 集") {
+			return
+		}
+	}
+	t.Fatalf("收起的分集组头没有「当前第 2 集」，文字有 %q", h.tt.Texts())
+}
+
 // TestCurrentRowIgnoresSyntheticGroupHeaders 钉住「当前播放」只能落在真实集行：
 // 组头和第一集共用队列下标时，组头不该抢走播放状态。
 func TestCurrentRowIgnoresSyntheticGroupHeaders(t *testing.T) {

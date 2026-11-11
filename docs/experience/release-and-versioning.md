@@ -24,7 +24,8 @@
 
 ⚠️ **两份说明的段落标题都必须正好是 `## <版本>`**：`mygo build` 按这个切
 `RELEASE-NOTES.md`，把那一段原样显示在「有新版本」弹窗里；`generate-release-notes.sh`
-按同一条规则切 `CHANGELOG.md`。**空段落和没有段落对应用是一回事**——弹窗里一片空白。
+按同一条规则切 `CHANGELOG.md`。**空段落和没有段落对应用是一回事**——弹窗里只剩一句
+「暂无更新日志」。
 
 ### 两份说明的分工
 
@@ -104,9 +105,9 @@ MyGo 的更新源走**匿名** HTTPS 请求
 **私有仓库的资产匿名取不到**，而应用和日志**都不会报错**——它只是一直查不到更新。
 
 当前更新源 `ShellMonster/PudMusic` 是公开的。脚本仍保留这项检查，防止将来把更新源
-切回私有仓库后发出版本：`gh repo view` 取不到可见性，或者仓库是 PRIVATE / INTERNAL
-时会停下。确实要发就设 `MYGO_RELEASE_ALLOW_PRIVATE=1`；仓库转公开之后同一条配置
-自己就通了。
+切回私有仓库后发出版本。两种情况分开处理：`gh repo view` **取不到可见性**（仓库名
+写错或没有权限）时脚本直接停下，没有放行开关；仓库存在但可见性是 PRIVATE / INTERNAL
+时，设 `MYGO_RELEASE_ALLOW_PRIVATE=1` 才能继续。仓库转公开之后同一条配置自己就通了。
 
 ### ⚠️ 标签要打在 main 上
 
@@ -117,8 +118,10 @@ main 的祖先链里，脚本的检查会通过，但那不代表可以继续在
 打在 main 上。
 
 更要紧的是 `release.yml` **不跑 build/vet/test**，它假定标签指向的提交已经过了 PR CI。
-功能分支上的那个 SHA 从没以这个身份跑过 CI，所以 `scripts/release.sh` 发现 HEAD 不是
-`origin/main` 的祖先时**直接停下**，不推标签。
+squash 合并后，只有 main 上那个压过的提交是跑过 PR CI 的；功能分支的 SHA 不在 main
+里，所以 `scripts/release.sh` 发现 HEAD 不是 `origin/main` 的祖先时**直接停下**，不推
+标签。merge commit 合并时分支 head 仍在 main 的祖先链里，脚本不会拦，但发版标签仍应
+打在 main 上。
 
 确实要从别的提交发（你自己保证它测过），设 `PUDMUSIC_RELEASE_ALLOW_OFF_MAIN=1`，脚本
 只打一段警告就放行。

@@ -969,8 +969,13 @@ func (s *Shell) lyricLine(c *ui.Context, lv *lyricsView, i, active int, at time.
 		if spans != nil {
 			txt = ui.RichText(c, spans...).LineHeight(leading.Lyrics)
 		} else {
-			txt = ui.Text(c, row.Text).Font(family).FontWeight(weight).
+			txt = ui.Text(c, row.Text).FontWeight(weight).
 				LineHeight(leading.Lyrics).TextColor(ink)
+			// `family` 只在 `st.face` 给了字体时非空；空串交给主题继承。
+			// 显式 `.Font("")` 会覆盖用户在设置里选的字体，退回系统 UI 字体。
+			if family != "" {
+				txt = txt.Font(family)
+			}
 		}
 		txt = txt.FontSize(scale.Font(c, size)).FontWeight(weight)
 		if st.lineMul > 0 {

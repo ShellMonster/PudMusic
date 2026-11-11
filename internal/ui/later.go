@@ -424,9 +424,7 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 		//（理由见 `widgets/list` 的 `operation.go`）。
 		// ⚠️ **无障碍名字是记好的那一份**（`rows.opText`）：理由同 `drawLaterRow`
 		// 里那一处。
-		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), func(m *ui.Menu) {
-			rows.menu(m, i)
-		})
+		list.OperationCorner(c, rows.opText.At(i, m.Title, list.OperationLabel), rows.cellMenu(i))
 
 		// 封面按**格子宽**画，不写死：`list.CellWidth` 给的就是这一格实际拿到的
 		// 宽（`widgets/list` 的网格卡片同一个做法）。写死 160 的话，窗口一窄到
@@ -474,7 +472,7 @@ func (s *Shell) drawLaterCell(c *ui.Context, i int, cell float32, selected bool)
 				// ⚠️ 理由同上面那几处（`rows.countText`）。
 				ui.Text(c, rows.countText.At(i, m.View, playCountText)).Grow(1).
 					TextColor(metaColor).MaxLines(1)
-				ui.Text(c, dayText(m.ViewedAt)).TextColor(metaColor).MaxLines(1)
+				ui.Text(c, rows.dayText.At(i, m.ViewedAt, dayText)).TextColor(metaColor).MaxLines(1)
 			})
 		})
 	})
