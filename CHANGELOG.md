@@ -17,6 +17,24 @@
 
 ---
 
+## 1.2.1
+
+MyGo 升到 v0.9.0，托盘最小化和滚动条悬停跟着框架改。
+
+### 托盘
+
+- 主窗口最小化后点菜单栏 / 托盘的「显示/隐藏主窗口」会恢复窗口。MyGo v0.9.0 在 macOS 上把最小化窗口算作可见，旧判据会再 Hide 一次，要点两下（#860）。
+
+### 滚动条
+
+- 删除 `widgets/scrollbar` 与 `trackScrollbar` / `noteScrollbar`，改用 `Theme.ScrollbarStyle` 的 Hover / Active；悬停只加深指针所在的那一根，横向滚动条也有反馈，拖动色和悬停一致（#860）。
+- 右侧让位常量改为 `scrollbarGutter = 16`，对应 v0.9.0 的 thumb 10 + 两侧各 3（#860）。
+
+### 工程
+
+- `github.com/egoist/mygo` v0.8.3 → v0.9.0；新增的间接依赖只进 `tool mygo`，安装包依赖集合不变（#860）。
+- `linux.formats` 钉成 deb + PKGBUILD，不构建发布链不处理的 rpm；第三方许可清单重新生成到 v0.9.0（#860）。
+
 ## 1.2.0
 
 歌词逐字、播放条时间轴和一批界面修复。
