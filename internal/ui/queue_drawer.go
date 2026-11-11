@@ -718,13 +718,12 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	}
 	rows := s.queueRowsShown
 	// 这一份跨帧复用，先把上一帧写上的状态清掉；不变量是「每帧都从普通行算起」。
+	//
+	// ⚠️ `group.CurrentAt` 不在这里清：当前集可能藏在收起的组里（不在 `rows`
+	// 里），而组头仍然要显示「当前第 N 集」。那个值由 `queueRowsForSnapshot`
+	// 按队列下标设好，这里清掉就丢了。
 	for i := range rows {
 		rows[i].state = queueRowPlain
-		if rows[i].group != nil {
-			// -1 是「这一组里没有当前项」；0 是第一个队列下标，写成 0 会让
-			// 收起的组头把第 1 集说成正在放（见 `viewQueueGroupRow` 那一句）。
-			rows[i].group.CurrentAt = -1
-		}
 	}
 	// ⚠️ **这一帧只取一次快照**（`viewMain` 那条规矩：两次取的话两者之间状态
 	// 可能变了，而画出来的是两份不同的状态）。「当前这一首」和「停住了」都从
