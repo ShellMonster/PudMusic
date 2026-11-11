@@ -173,6 +173,26 @@ func TestTheBufferedPartIsDrawnOnTheTrack(t *testing.T) {
 	}
 }
 
+// TestAFullyBufferedTrackHasNoBufferedSegment 钉住 `app.State.Buffered` 的契约：
+// 全长都下来了（Buffered == Duration）就不再铺已缓冲色——没有「未加载」那一段
+// 可分，整条轨道换色只是多余的一层。
+func TestAFullyBufferedTrackHasNoBufferedSegment(t *testing.T) {
+	st := barState()
+	st.Position = 10 * time.Second
+	st.Buffered = st.Duration
+	tt, s := playbarTester(t, st, 1200, 0, true)
+	tt.Frame()
+
+	bar, ok := tt.Find("播放进度")
+	if !ok {
+		t.Fatalf("画面上找不到进度条，文字有 %q", tt.Texts())
+	}
+	th := BuildTheme(s.app.SettingsSnapshot(), true)
+	if n := nearPixels(tt.Image(), trackSpot(bar, 0.4), rgbaOf(tok.Of(th).Text3)); n != 0 {
+		t.Errorf("40%% 处有 %d 个已缓冲色的像素——全长已缓冲时不该再铺那一段", n)
+	}
+}
+
 // trackSpot 是轨道上某个比例处的一小块（采样任一处颜色用）。
 func trackSpot(bar mygoui.Rect, frac float32) mygoui.Rect {
 	kw := knobHoverLook.knobW

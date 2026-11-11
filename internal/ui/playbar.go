@@ -994,10 +994,12 @@ func (s *Shell) viewProgress(c *ui.Context, st app.State) {
 			}
 		}
 		// 已缓冲那一段画在滑块自己的轨道上（见 knobslider.go 的 `sliderLook.buffered`），
-		// 这里只把比例交给它：知道时长才画，不知道时比例是 0/0。
+		// 这里只把比例交给它。`Buffered` 的契约是「大于 0 且小于 Duration 才画」
+		// （见 `app.State`）：全长都缓冲了就没有「未加载」那一段可分，整条轨道
+		// 铺成已缓冲色只是多余的一层。
 		look := knobHoverLook
-		if known && st.Buffered > 0 {
-			look.buffered = min(float32(float64(st.Buffered)/float64(st.Duration)), 1)
+		if known && st.Buffered > 0 && st.Buffered < st.Duration {
+			look.buffered = float32(float64(st.Buffered) / float64(st.Duration))
 		}
 		sl := playbarProgressSliderLive(c, &s.scrub, 0, 1, look, live).Grow(1).Label("播放进度").Disabled(!known)
 		// 章节标记画在滑块自己的画法之上（`DrawOver`；pad 是旋钮留在轨道里的
