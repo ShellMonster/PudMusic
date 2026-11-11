@@ -299,10 +299,6 @@ type Shell struct {
 	// 两个实例同时写同一个目录会各算各的字节数，上限就守不住了。
 	images *imgcache.Cache
 
-	// heat 是弹幕热度条的跨帧缓存（见 timeline.go）。界面每帧都会问一次，
-	// 只有弹幕这一批或时长变了才重新分桶。
-	heat timelineHeat
-
 	// imagesWakeRemove 是摘掉「封面好了，叫醒这一扇窗」那条登记的动作。
 	//
 	// 和 `wakeRemove` 同一个理由：借来的那一份缓存活得比这一扇窗久，

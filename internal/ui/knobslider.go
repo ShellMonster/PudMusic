@@ -70,6 +70,13 @@ type sliderLook struct {
 	// hotTrackW 非 0 时，悬停 / 按下 / 有焦点的轨道粗从 trackW 长到它（设计规范 v0.1：4 → 6）。
 	hotTrackW float32
 
+	// buffered 是「已经下到本地」的比例（0~1）；0 表示不画。
+	//
+	// 非 0 时轨道上先铺一段到 buffered 的中性色，已播那一段再盖上去——就是
+	// YouTube 那套三段式（已播 / 已缓冲 / 未加载）。铺在轨道里而不是轨道下面，
+	// 是因为轨道下面那条 2 像素细线的面积和对比度都不够。
+	buffered float32
+
 	// knobW / knobH 是旋钮的宽和高（横着的时候宽是直径，高是胶囊的高）。
 	knobW, knobH float32
 
@@ -262,10 +269,11 @@ func playbarProgressSlider(c *ui.Context, value *float64, lo, hi float64) ui.Ele
 // playbarProgressSliderLive 是 `playbarProgressSlider` 加「那根线自己走」
 // （`live` 的来历见 `selfSliderLive`）。
 //
-// 播放条和满屏播放器那两根都用它：它们是**一直在放**的那一根，而以前它们
-// 靠整窗 20Hz 重建来走。
-func playbarProgressSliderLive(c *ui.Context, value *float64, lo, hi float64, live sliderLive) ui.Element {
-	return selfSliderLive(c, value, lo, hi, knobHoverLook, live).
+// 它画的是主播放条那根：那是**一直在放**的一根，而以前靠整窗 20Hz 重建来走。
+// `look` 由调用方传：播放条会在 `knobHoverLook` 上带上已缓冲的比例
+// （`sliderLook.buffered`）；满屏播放器那根走 `knobSliderLive`。
+func playbarProgressSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLook, live sliderLive) ui.Element {
+	return selfSliderLive(c, value, lo, hi, look, live).
 		Height(20).MinWidth(16)
 }
 
@@ -442,6 +450,17 @@ func selfSliderLive(c *ui.Context, value *float64, lo, hi float64, look sliderLo
 			// 轨道里（那个 `PaddingX` 就是为它留的）。
 			cx = r.X + look.knobW/2 + (r.W-look.knobW)*frac
 			p.Fill(track, rangeRail(t), trackW/2)
+			// 已缓冲：先铺到 buffered，已播那一段再盖在上面——三段于是是
+			// 「已播 / 已缓冲 / 未加载」。接缝压在已播那一段底下，未加载那一截
+			// 仍是轨道色；圆角用轨道自己的半径，右端和轨道一样收圆。
+			if look.buffered > 0 {
+				bf := min(max(look.buffered, 0), 1)
+				bx := r.X + look.knobW/2 + (r.W-look.knobW)*bf
+				if bx > track.X {
+					p.Fill(ui.Rect{X: track.X, Y: track.Y, W: bx - track.X, H: trackW},
+						tok.Of(t).Text3, trackW/2)
+				}
+			}
 			p.Fill(ui.Rect{X: track.X, Y: track.Y, W: cx - track.X, H: trackW},
 				fill, trackW/2)
 		}
