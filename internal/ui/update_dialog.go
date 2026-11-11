@@ -300,7 +300,7 @@ func (s *Shell) updateNotes(c *ui.Context, st app.UpdateState) {
 		s.update.notes = &markdown.Options{}
 	}
 	// ⚠️ 右边留出滚动条槽：框架的滚动条是 overlay，画在容器右缘往里的
-	// `scrollbarGutter` 那一条上（轨道 10 + 左边 6），正文铺满整行会被它盖住；
+	// `scrollbarGutter` 那一条上（thumb 10 + 两侧各 3），正文铺满整行会被它盖住；
 	// 右边这 16 像素内边距就是让给它的。
 	ui.Scroll(c).Key("update-notes").FillWidth().MaxHeight(updateNotesMaxH).
 		Padding(space.None, scrollbarGutter, space.None, space.None).

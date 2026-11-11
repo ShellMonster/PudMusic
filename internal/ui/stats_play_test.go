@@ -134,7 +134,7 @@ func TestClickingABrokenStatsLoopRowSaysItCannotPlay(t *testing.T) {
 // 「最常听的歌手」行尾那列「N 分钟」不许压在 overlay 滚动条底下。
 //
 // 滚动条画在滚动容器右缘往里 16 像素那条竖带上（`scrollbarGutter`：
-// 轨道 10 + 左侧 6）。行原来左右零内边距，分钟数
+// thumb 10 + 两侧各 3）。行原来左右零内边距，分钟数
 // 右对齐到容器右缘——指针一压上去，最后那几个像素就被盖住。
 //
 // 判据是**分钟数字形离容器右缘至少一条热区**：用窗口几何算容器右缘
