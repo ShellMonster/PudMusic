@@ -1,7 +1,7 @@
 // UP 空间 Tab 条的命中区域。
 //
 // 这一组验的是**点得到**：空/加载中那一块比正文区高，会从中缝溢到 Tab 条上，
-// 把 Tab 的点击接走（票：切到空收藏夹之后就点不动合集 / 投稿）。
+// 把 Tab 的点击接走：切到空的收藏夹 / 合集之后点不动别的 Tab。
 package ui
 
 import (
@@ -28,8 +28,8 @@ func clickUpTab(t *testing.T, tt *mygoui.Tester, name string) {
 // TestTheTabBarTakesClicksWhenTheTabsHaveNoRows 钉住用户那条路：投稿、收藏夹、
 // 合集都空着时，依次点每一张 Tab，页面真的跟着切。
 //
-// 曾经出错：空的正文块（1200×800 下从 y≈345 起）盖住了 Tab 文字（y 334..383），
-// 只有最上面一条 12 像素的留白点得动。用户在收藏夹里点合集 / 投稿看着像卡死。
+// 曾经出错：空的正文块（1200×800 下从 y≈345 起）盖住 Tab 文字（y 334..383），
+// 只有最上面十几像素的留白点得动，看着像卡死。
 func TestTheTabBarTakesClicksWhenTheTabsHaveNoRows(t *testing.T) {
 	b := newUIExplore(t)
 	uiSpaceData(b, "空的 UP", 0, 1)
