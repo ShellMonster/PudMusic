@@ -180,6 +180,14 @@ type pagedRows struct {
 	opText    rowkey.Memo[string, string]
 	countText rowkey.Memo[int64, string]
 	durText   rowkey.Memo[time.Duration, string]
+	// dayText 是「稍后再看」网格格子底部那个日期。绝对日期不跨零点过期，
+	// 可以按 ViewedAt 记（`time.Time.Format` 每帧每格一次就是一次分配）。
+	dayText rowkey.Memo[time.Time, string]
+
+	// cellMenus 缓存每一格「⋯」的菜单构造器。构造器只捕获 `p` 和格子的下标，
+	// 而 `menu` 每次都用当下那一格的行走，所以数据换了也不用重造。不缓存的话
+	// 每帧每格一个新闭包，一屏十二格就是十二次分配。
+	cellMenus []func(*ui.Menu)
 
 	// ownerTip 记着每一行那句「打开 X 的空间」（票 #360）。
 	//
@@ -198,6 +206,17 @@ type pagedRows struct {
 	// 翻页结果由共享 pager 自己收取；这里仅保留删除与清除操作的结果。
 	mu  sync.Mutex
 	box []mailboxItem
+}
+
+// cellMenu 返回第 i 格的菜单构造器，同一个下标只造一次。
+func (p *pagedRows) cellMenu(i int) func(*ui.Menu) {
+	for len(p.cellMenus) <= i {
+		p.cellMenus = append(p.cellMenus, nil)
+	}
+	if p.cellMenus[i] == nil {
+		p.cellMenus[i] = func(m *ui.Menu) { p.menu(m, i) }
+	}
+	return p.cellMenus[i]
 }
 
 // newPagedRows 建一个会自己翻页的行列表。
