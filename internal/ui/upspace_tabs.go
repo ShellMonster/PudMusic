@@ -81,9 +81,14 @@ func (s *Shell) viewSpaceLead(c *ui.Context, sp *upSpace) {
 }
 
 // viewSpaceFlat 画「没有列表可挂」的那几种状态：头图区 + Tab 条在上，状态在下。
+//
+// ⚠️ **正文那一块必须裁边**：空状态 / 骨架屏都比「头图 + Tab 条之后剩下的高度」
+// 高，而空状态那一列是居中的（`drawEmpty` 的 `Center()`）——不裁的话它会从正文区
+// 上沿溢到 Tab 条上。它比 Tab 条后画，命中检测又按绘制顺序倒着找，于是 Tab 文字区
+// 的点击全被它接走：收藏夹 / 合集空着时，用户点了 Tab 看着像卡死。
 func (s *Shell) viewSpaceFlat(c *ui.Context, sp *upSpace, body func()) {
 	s.viewSpaceLead(c, sp)
-	ui.Row(c).Key("space-body").Grow(1).FillHeight().Children(body)
+	ui.Row(c).Key("space-body").Grow(1).FillHeight().Clip().Children(body)
 }
 
 // upLeadKey 是页内头部那一行的身份（类型撞不上 B 站的 id）。
