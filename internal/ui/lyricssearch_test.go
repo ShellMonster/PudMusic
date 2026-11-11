@@ -313,7 +313,11 @@ func TestPreviewThenAdoptPutsTheLyricsOnScreen(t *testing.T) {
 	waitFrames(t, tt, "把候选搜出来", func() bool { return tt.HasText("候选甲") })
 
 	// 点一条候选 → 预览弹窗，看得到完整歌词。
-	if err := tt.Click("候选甲"); err != nil {
+	//
+	// 点副题而不是标题：候选表的行标签（`l.ls.Label`）和标题都是「候选甲」，
+	// 而框架按注册顺序取第一条同名字，先取到的是不可点的行外框。
+	// 副题在同一行的可点区域里，且只有这一条。
+	if err := tt.Click("歌手1 · 3:34 · 来自网易云"); err != nil {
 		t.Fatalf("点不到那一条候选：%v（文字有 %q）", err, tt.Texts())
 	}
 	waitFrames(t, tt, "把这一条的歌词拉到预览里", func() bool {
