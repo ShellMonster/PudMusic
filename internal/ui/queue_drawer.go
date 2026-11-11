@@ -721,7 +721,9 @@ func (s *Shell) viewQueueList(c *ui.Context, t *ui.Theme, snapshot app.QueueSnap
 	for i := range rows {
 		rows[i].state = queueRowPlain
 		if rows[i].group != nil {
-			rows[i].group.CurrentAt = 0
+			// -1 是「这一组里没有当前项」；0 是第一个队列下标，写成 0 会让
+			// 收起的组头把第 1 集说成正在放（见 `viewQueueGroupRow` 那一句）。
+			rows[i].group.CurrentAt = -1
 		}
 	}
 	// ⚠️ **这一帧只取一次快照**（`viewMain` 那条规矩：两次取的话两者之间状态
