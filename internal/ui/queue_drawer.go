@@ -167,9 +167,6 @@ type queueRow struct {
 	group *queueGroup
 	// key 是这一行的身份（铁律四）。见 queueRowKey。
 	key string
-	// id 是这一首的**判重标识**（Item.Identity），仅用于判断当前播放项；同一首歌的
-	// 多份队列项各自保留自己的行。
-	id string
 	// state 是这一行处在哪一档（见 queueRowState）。**每帧重算**：这些行是
 	// `viewQueueDrawer` 每帧现造的（`queueRowsFor`），所以写在上面的状态不会
 	// 留到下一帧。
@@ -300,7 +297,7 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 		if ident.id == "" {
 			raw.at = i
 			ident = ids.At(i, raw, packQueueRowIdentity)
-			rows = append(rows, queueRow{item: it, at: i, key: ident.key, id: ident.id})
+			rows = append(rows, queueRow{item: it, at: i, key: ident.key})
 			cur = nil
 			continue
 		}
@@ -311,7 +308,7 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 		} else if ident.id != "" {
 			seen[ident.id] = 1
 		}
-		row := queueRow{item: it, at: i, key: ident.key, id: ident.id}
+		row := queueRow{item: it, at: i, key: ident.key}
 		// 不是合集行：散歌直接追加，顺手把「当前组」断掉——下一个同 key 的集
 		// 进来要新起一个组（它是一段，不接在前一段后面）。
 		if it.GroupKey == "" {
@@ -349,12 +346,18 @@ func queueRowsForSnapshot(snapshot app.QueueSnapshot, ids *rowkey.Memo[queueRowR
 	return rows
 }
 
+// queueRowsSameShape 报告两帧画出来的行是不是同一副骨架：行数、行位置和
+// 分组边界。只有骨架变了才该丢掉合集的展开状态。
 func queueRowsSameShape(a, b []queueRow) bool {
 	if len(a) != len(b) {
 		return false
 	}
+	// ⚠️ 这里**不比 `Item.Identity`**：cid 写回只是一次原地补充——首播时
+	// `mv:<bvid>` 变成 `mv:<bvid>|<cid>`，行数、布局和分组边界都没动，而
+	// Identity 变了却会让这里判成「换了」，把用户展开的合集全收起来。
+	// 判骨架靠的是 `at` 和组的 `RowKey`。
 	for i := range a {
-		if a[i].at != b[i].at || a[i].id != b[i].id {
+		if a[i].at != b[i].at {
 			return false
 		}
 		var aGroupKey, bGroupKey string
