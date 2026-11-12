@@ -2,6 +2,7 @@ package lyrics
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -24,26 +25,43 @@ func TestLiveNeteaseReturnsWordTiming(t *testing.T) {
 	defer cancel()
 
 	n := NewNetease(nil)
-	cands, err := n.Search(ctx, "孤勇者 陈奕迅")
+	candidates, err := n.Search(ctx, "孤勇者 陈奕迅")
 	if err != nil {
 		t.Fatalf("搜索失败：%v", err)
 	}
-	if len(cands) == 0 {
+	if len(candidates) == 0 {
 		t.Fatal("没搜到候选")
 	}
 	var lastErr error
-	for _, c := range cands {
+	for _, c := range candidates {
 		doc, err := n.Preview(ctx, c)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		if lines := ParseYRC(doc.YRC); len(lines) > 0 {
-			if len(lines[0].Words) == 0 {
-				t.Fatalf("逐字那份解析出来没有词：%+v", lines[0])
-			}
+		lines := ParseYRC(doc.YRC)
+		if len(lines) == 0 {
+			continue
+		}
+		// ⚠️ **「解析出了行」不算数**：没有词标记的 YRC 行会被 `parseYRCWords`
+		// 当成一个整句词，`len(Words) > 0` 照样成立。要的是**一行里有两个以上
+		// 词标记**，只有真拿到了逐字那份才可能这样。
+		if wordMarksIn(lines) {
 			return
 		}
+		lastErr = fmt.Errorf("%s 的 YRC 每行只有一个词", c.Title)
 	}
 	t.Fatalf("搜到的候选都没有逐字那份（最后一次错误：%v）", lastErr)
+}
+
+// wordMarksIn 报这些行里有没有一行是**真逐字**的。
+//
+// 一行里两个以上的词只可能来自两个以上的词标记：合成词那条路每行只造一个。
+func wordMarksIn(lines []Line) bool {
+	for _, l := range lines {
+		if len(l.Words) > 1 {
+			return true
+		}
+	}
+	return false
 }
