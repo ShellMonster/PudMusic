@@ -601,8 +601,9 @@ type App struct {
 	// 取；同一首不重复发请求（早一次调用和装上播放器后那一趟会撞上）。
 	lyricFetchKey string
 	// lyricOrigin 是当前这一份歌词的**来路**（`lyrics.OriginBili` /
-	// `lyrics.OriginSearch` / 空串 = 不知道）。界面上那句话靠它说清「这份歌词
-	// 是自动来的还是搜来的」（见 `lyrics.go` 的 `LyricsSnapshot`）。
+	// `lyrics.OriginAuto` / `lyrics.OriginSearch` / 空串 = 不知道）。界面上那句
+	// 话靠它说清「这份歌词是自动来的还是搜来的」（见 `lyrics.go` 的
+	// `LyricsSnapshot`）。
 	//
 	// ⚠️ **它跟着 `lyricEntry` 一起换**：换一份歌词就要换它的来路，而
 	// `lyricEntry` 是从缓存里读回来的（那一栏也在缓存里，见 `lyrics.Entry`）。
@@ -675,6 +676,10 @@ type App struct {
 	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
 	autoLyricTried map[string]bool
 	noAutoLyrics   bool
+	// preferYRCTried 记着这次运行里已经问过网易云逐字歌词的歌（见
+	// lyrics_prefer.go）。**和 autoLyricTried 分开**：那一条是「B 站没字幕时的
+	// 兜底」，不挑逐字；这一条没找到逐字，不该让那条兜底也跟着放弃。
+	preferYRCTried map[string]bool
 
 	sleepAt         time.Time
 	sleepFor        time.Duration

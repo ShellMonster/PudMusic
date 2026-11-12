@@ -26,7 +26,8 @@ func TestTheLyricsSayWhereTheyCameFrom(t *testing.T) {
 		want   string
 	}{
 		{"B 站自动带出来的", lyrics.OriginBili, "歌词来自 B 站"},
-		{"用户搜来的", lyrics.OriginSearch, "歌词来自搜索"},
+		{"应用自己搜来的", lyrics.OriginAuto, "歌词来自搜索"},
+		{"用户挑来的", lyrics.OriginSearch, "歌词来自搜索"},
 	} {
 		t.Run(c.what, func(t *testing.T) {
 			s, tt := lyricShell(t)
