@@ -113,11 +113,11 @@ func TestBothSourcesCanSearch(t *testing.T) {
 	}
 }
 
-// TestNeteasePreviewSendsThoseFiveParams 钉住预览那一次请求的参数。
+// TestNeteasePreviewAsksForEveryLyricTrack 钉住预览那一次请求的参数。
 //
-// 那五个 `-1` 和 `_nmclfl` 是逐字抄上游的：少 `_nmclfl` 的话译文那一栏是空的，
-// 而空译文在界面上长得和「这首歌没有翻译」一模一样。
-func TestNeteasePreviewSendsThoseFiveParams(t *testing.T) {
+// 少 `_nmclfl` 的话译文那一栏是空的，而空译文在界面上长得和「这首歌没有翻译」
+// 一模一样；少 `yv` 的话接口根本不返回逐字那一份。
+func TestNeteasePreviewAsksForEveryLyricTrack(t *testing.T) {
 	var q url.Values
 	srv := fixtureServer(t, `{"code":200,"lrc":{"lyric":"[00:01.00]词"},
 	  "tlyric":{"lyric":"[00:01.00]word"}}`, nil, &q)
@@ -129,7 +129,7 @@ func TestNeteasePreviewSendsThoseFiveParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	for k, want := range map[string]string{
-		"id": "11", "tv": "-1", "lv": "-1", "rv": "-1", "kv": "-1", "_nmclfl": "1",
+		"id": "11", "tv": "-1", "lv": "-1", "rv": "-1", "kv": "-1", "yv": "-1", "_nmclfl": "1",
 	} {
 		if got := q.Get(k); got != want {
 			t.Errorf("预览请求的 %s 是 %q，want %q", k, got, want)
