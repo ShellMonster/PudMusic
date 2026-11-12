@@ -2241,7 +2241,7 @@ var Items = []Item{
 		Spec: "歌词两个源各自的接口与参数：网易云搜（s/type=1/limit=20/offset=0）与取词（那五个 -1 加 _nmclfl）、LRCLib 搜（q）；LRCLib 的预览一个请求都不发；两个源都不带 B 站凭据",
 		Tests: []string{
 			"TestBothSourcesCanSearch",
-			"TestNeteasePreviewSendsThoseFiveParams",
+			"TestNeteasePreviewAsksForEveryLyricTrack",
 			"TestNeteaseFallsBackToTheKaraokeLyric",
 			"TestLRCLibPreviewIssuesNoRequest",
 			"TestAnEmptyWordSendsNothing",

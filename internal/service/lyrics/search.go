@@ -333,15 +333,19 @@ func (n *Netease) Preview(ctx context.Context, c Candidate) (Doc, error) {
 		return Doc{}, errors.New("lyrics: 这一条没有歌曲 id")
 	}
 	var resp neteaseLyricResp
-	// 那五个参数逐字照上游（`netease-lyric.ts`）：`-1` 是「都要」，`_nmclfl` 是要
-	// 那个「含翻译标记」的版本。少一个的话译文那一栏是空的，而空译文在界面上长得
-	// 和「这首歌没有翻译」一模一样。
+	// 那几个 `-1` 都是「都要」：`tv` 译文、`lv` 原文、`rv` 罗马音、`kv` 旧版逐字。
+	// `_nmclfl` 是要那个「含翻译标记」的版本，少了它译文那一栏是空的。
+	//
+	// 🔴 **`yv` 是逐字那一份的开关**（实测 2026-11-12）：少了它，接口根本不返回
+	// `yrc` 字段——逐字歌词在真机上一份都拿不到，而测试喂的是现成的 JSON，看不出
+	// 这个缺口。
 	err := n.http.get(ctx, "/api/song/lyric", url.Values{
 		"id":      {c.ID},
 		"tv":      {"-1"},
 		"lv":      {"-1"},
 		"rv":      {"-1"},
 		"kv":      {"-1"},
+		"yv":      {"-1"},
 		"_nmclfl": {"1"},
 	}, &resp)
 	if err != nil {
