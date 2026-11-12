@@ -38,17 +38,26 @@ type fakeLyricSource struct {
 	searchErr error
 	// hold 是 Search 卡住多久。0 = 不卡。
 	hold time.Duration
+	// gate 不是 nil 时 Search 卡到它被关上才返回（自动找歌词的测试要卡一个
+	// 确定的先后顺序，hold 那种按时间卡的做法在慢机器上说不清）。
+	gate <-chan struct{}
+	// queries 是 Search 收到的每一个词，按调用顺序。
+	queries []string
 }
 
 func (f *fakeLyricSource) ID() string   { return f.id }
 func (f *fakeLyricSource) Name() string { return f.name }
 
-func (f *fakeLyricSource) Search(_ context.Context, _ string) ([]lyrics.Candidate, error) {
+func (f *fakeLyricSource) Search(_ context.Context, query string) ([]lyrics.Candidate, error) {
 	f.mu.Lock()
 	f.calls++
-	hold, err, cands := f.hold, f.searchErr, f.cands
+	f.queries = append(f.queries, query)
+	hold, gate, err, cands := f.hold, f.gate, f.searchErr, f.cands
 	f.mu.Unlock()
 
+	if gate != nil {
+		<-gate
+	}
 	if hold > 0 {
 		time.Sleep(hold)
 	}
@@ -69,6 +78,14 @@ func (f *fakeLyricSource) count() (searches, previews int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.calls, f.previews
+}
+
+// seenQueries 返回 Search 收到过的词（拷贝）。自动找歌词那条路的判据是
+// 「发出去的是不是洗过的歌名」，所以得能把它捞出来看。
+func (f *fakeLyricSource) seenQueries() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.queries...)
 }
 
 // waitSearch 轮询到 cond 成立。搜索在后台，只能这样等。

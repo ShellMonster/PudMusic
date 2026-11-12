@@ -285,6 +285,8 @@ func (a *App) setLyricTrack(it Item) {
 		if wake != nil {
 			wake()
 		}
+		// 这一首的歌词已经在内存里了，照样问一次逐字（见 lyrics_prefer.go）。
+		a.preferNeteaseYRC(key, it.Title)
 		return
 	}
 	// ⚠️ **另排一道兜底**：这一首要是既没缓存、又没字幕地址、也不跑自动找
@@ -318,6 +320,9 @@ func (a *App) setLyricTrack(it Item) {
 	a.mu.Unlock()
 
 	a.loadLyrics(key, gen)
+	// 顺带问一次网易云的逐字歌词：本地文件和在线两路都从这里过（见
+	// lyrics_prefer.go）。它在后台跑，不挡播放，也不改加载态。
+	a.preferNeteaseYRC(key, it.Title)
 }
 
 // loadLyrics 在后台读缓存，读回来装上状态并叫醒界面。

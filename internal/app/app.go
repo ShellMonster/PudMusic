@@ -675,6 +675,10 @@ type App struct {
 	// autoLyricTried 记着这次运行里已经自动找过歌词的歌（见 lyrics_auto.go）。
 	autoLyricTried map[string]bool
 	noAutoLyrics   bool
+	// preferYRCTried 记着这次运行里已经问过网易云逐字歌词的歌（见
+	// lyrics_prefer.go）。**和 autoLyricTried 分开**：那一条是「B 站没字幕时的
+	// 兜底」，不挑逐字；这一条没找到逐字，不该让那条兜底也跟着放弃。
+	preferYRCTried map[string]bool
 
 	sleepAt         time.Time
 	sleepFor        time.Duration
