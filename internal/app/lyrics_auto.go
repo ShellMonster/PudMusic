@@ -175,7 +175,7 @@ func (a *App) installAutoLyrics(key string, doc lyrics.Doc) {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, lyrics.OriginSearch)
+	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, lyrics.OriginAuto)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)

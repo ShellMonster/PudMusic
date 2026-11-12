@@ -97,9 +97,11 @@ func neteaseLyricSource(srcs []lyrics.Source) lyrics.Source {
 
 // installNeteaseYRC 把找到的逐字那一份装上并落盘。
 //
-// 🔴 **只允许顶掉 B 站那一份**：用户自己挑的（`OriginSearch`）和来路不明的
-// 老记录都不动。B 站那份先到也照样换——这正是这一条路的目的。反过来，这一份
-// 先到的话 `installBiliLyrics` 的守卫会挡住 B 站那份。
+// 🔴 **只允许顶掉自动来的那两份**（`OriginBili` / `OriginAuto`）：用户自己挑的
+// （`OriginSearch`）和来路不明的老记录都不动。B 站那份先到也照样换——这正是
+// 这一条路的目的；兜底自动搜先装上的整句歌词也照样换，否则「优先逐字」会输给
+// 一场它本来就该赢的竞速。反过来，这一份先到的话 `installBiliLyrics` 的守卫会
+// 挡住 B 站那份。
 func (a *App) installNeteaseYRC(key string, gen int, title string, doc lyrics.Doc) {
 	// 用户挑的那份可能还在后台读（`loadLyrics` 比这一趟网络先发，但不保证先
 	// 落）。它一回来就会把词装上去；这一份要是抢在前面，读盘那趟会因为代次
@@ -111,7 +113,8 @@ func (a *App) installNeteaseYRC(key string, gen int, title string, doc lyrics.Do
 	a.mu.Unlock()
 	if cache != nil {
 		if e, ok := cache.Load(key, title, artist); ok &&
-			(e.Lyrics != "" || e.YRC != "") && e.Origin != lyrics.OriginBili {
+			(e.Lyrics != "" || e.YRC != "") &&
+			e.Origin != lyrics.OriginBili && e.Origin != lyrics.OriginAuto {
 			return
 		}
 	}
@@ -121,9 +124,9 @@ func (a *App) installNeteaseYRC(key string, gen int, title string, doc lyrics.Do
 		a.mu.Unlock()
 		return
 	}
-	// 代次变了 = 这一首的歌词已经被别的东西换过。只有 B 站那一份值得被
-	// 逐字顶掉；用户的词、以及换歌留下的新代次都不碰。
-	if a.lyricGen != gen && a.lyricOrigin != lyrics.OriginBili {
+	// 代次变了 = 这一首的歌词已经被别的东西换过。B 站那份和兜底搜来的那份
+	// 都值得被逐字顶掉；用户的词、以及换歌留下的新代次都不碰。
+	if a.lyricGen != gen && a.lyricOrigin != lyrics.OriginBili && a.lyricOrigin != lyrics.OriginAuto {
 		a.mu.Unlock()
 		return
 	}
@@ -133,11 +136,11 @@ func (a *App) installNeteaseYRC(key string, gen int, title string, doc lyrics.Do
 		return
 	}
 	hasLyrics := a.lyricEntry.Lyrics != "" || a.lyricEntry.YRC != ""
-	if hasLyrics && a.lyricOrigin != lyrics.OriginBili {
+	if hasLyrics && a.lyricOrigin != lyrics.OriginBili && a.lyricOrigin != lyrics.OriginAuto {
 		a.mu.Unlock()
 		return
 	}
-	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, lyrics.OriginSearch)
+	entry, c := a.putLyricsLocked(key, doc.LRC, doc.Translated, doc.YRC, lyrics.OriginAuto)
 	wake := a.wake
 	a.mu.Unlock()
 	a.saveLyrics(c, key, entry, wake)

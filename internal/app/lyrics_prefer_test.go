@@ -49,8 +49,8 @@ func TestANonStandardTitleGetsNeteaseWordTiming(t *testing.T) {
 		rows := a.Lyrics().Rows
 		return len(rows) > 0 && len(rows[0].Words) > 0
 	})
-	if got := a.Lyrics().Origin; got != lyrics.OriginSearch {
-		t.Errorf("来路 = %q，want %q", got, lyrics.OriginSearch)
+	if got := a.Lyrics().Origin; got != lyrics.OriginAuto {
+		t.Errorf("来路 = %q，want %q", got, lyrics.OriginAuto)
 	}
 	qs := src.seenQueries()
 	if len(qs) == 0 || qs[0] != wantQuery {
@@ -119,8 +119,42 @@ func TestWordTimingReplacesASubtitleThatArrivedFirst(t *testing.T) {
 		rows := a.Lyrics().Rows
 		return len(rows) > 0 && len(rows[0].Words) > 0
 	})
-	if got := a.Lyrics().Origin; got != lyrics.OriginSearch {
-		t.Errorf("来路 = %q，want %q", got, lyrics.OriginSearch)
+	if got := a.Lyrics().Origin; got != lyrics.OriginAuto {
+		t.Errorf("来路 = %q，want %q", got, lyrics.OriginAuto)
+	}
+}
+
+// TestWordTimingReplacesAnAutomaticallyFoundLyric 盯「兜底自动搜先装上的整句
+// 歌词也要被逐字那份顶掉」。这两条搜索是并行的，兜底那条可能在逐字那条之前
+// 落盘；它装出来的也是 `OriginSearch` 的话，用户挑的词和自动搜来的词就分不开，
+// 「优先逐字」会在最需要它的那一场上输掉。
+func TestWordTimingReplacesAnAutomaticallyFoundLyric(t *testing.T) {
+	gate := make(chan struct{})
+	src := sourceOf(lyrics.SourceNetease, lyrics.Candidate{ID: "1", Title: "千秋岁引"})
+	src.gate = gate
+	src.doc = lyrics.Doc{
+		LRC: "[00:01.00]千秋岁引",
+		YRC: "[1000,2000](1000,1000,0)千(2000,1000,0)秋",
+	}
+	a, _ := searchApp(t, src)
+
+	it := onlineSong("BV1", "1")
+	it.Title = "千秋岁引"
+	a.setLyricTrack(it)
+	waitSearch(t, 2*time.Second, "网易云那一趟真的发出去了", func() bool {
+		n, _ := src.count()
+		return n == 1
+	})
+
+	a.PutLyricsFrom(lyrics.OriginAuto, "[00:01.00]兜底搜来的整句", "")
+	close(gate)
+
+	waitSearch(t, 2*time.Second, "逐字那份顶掉了兜底那份", func() bool {
+		rows := a.Lyrics().Rows
+		return len(rows) > 0 && len(rows[0].Words) > 0
+	})
+	if got := a.Lyrics().Origin; got != lyrics.OriginAuto {
+		t.Errorf("来路 = %q，want %q", got, lyrics.OriginAuto)
 	}
 }
 

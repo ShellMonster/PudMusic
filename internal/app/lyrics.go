@@ -107,7 +107,8 @@ type LyricsSnapshot struct {
 	// 手上那一份——不闪回加载态。
 	Loading bool
 	// Origin 是这一份歌词的**来路**：`lyrics.OriginBili`（B 站自动带出来的）/
-	// `lyrics.OriginSearch`（用户在歌词搜索里找来的）/ 空串 = 不知道。
+	// `lyrics.OriginAuto`（应用自己按歌名搜来的）/ `lyrics.OriginSearch`
+	// （用户在歌词搜索里挑的）/ 空串 = 不知道。
 	//
 	// ⚠️ **空串和「没有歌词」是两件事**：没有歌词时这一栏也是空串，而界面要
 	// 靠它说清「这份词是自动来的还是搜来的」。
