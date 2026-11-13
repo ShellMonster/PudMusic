@@ -56,6 +56,15 @@ func TestRenderCollectionInvalidShots(t *testing.T) {
 				tt2.Frame()
 			}
 			save(t, dir, "171-收藏夹页-滚下去之后-"+name+".png", tt2)
+
+			// 「隐藏失效内容」开着：失效行不在列表里，表头还是 3 首 + 「已隐藏 1 首」。
+			_, s3, tt3 := collectionShellOpts(t, []shellOpt{systemIsDark(dark), withHideInvalid()},
+				"", "12345", medias...)
+			waitFrames(t, tt3, "隐藏失效内容开着、三行都收到", func() bool {
+				return s3.collection != nil && s3.collection.list.Paged().Received() == 3
+			})
+			tt3.Frame()
+			save(t, dir, "172-收藏夹页-隐藏失效内容-"+name+".png", tt3)
 		})
 	}
 }

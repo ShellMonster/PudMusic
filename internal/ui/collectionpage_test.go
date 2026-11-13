@@ -82,6 +82,16 @@ type favBili struct {
 	// 落进「没有结果」那一支，而**列表的失败态（那个重试按钮）就画不出来了**
 	// （那一格只在 `p.list.View` 里画，而那一支不调它）。
 	failList int
+	// failPage 非 0 时，**只有那一页**回 -400（造「翻页翻到一半失败」）。
+	// 和 failList 分开：failList 是「这趟请求整个不行」，failPage 是「第 N 页
+	// 不行、前面的页还好好的」——全失效页 + 下一页失败那个场景要的就是后者。
+	failPage int
+	// pageSize 非 0 时，内容列表按它分页（`pn` / `page_size`）。0 是**旧行为**：
+	// 一次回全部、`has_more` false——已有测试一个都不动。
+	pageSize int
+	// pages 记下每一次内容列表请求带的 `pn`（分页开了才记，开了之后「第 N
+	// 页真的被问过了」本身就是一条断言）。
+	pages []int
 	// playURLCalls 数**取流接口被问了几次**。
 	//
 	// ⚠️ **它是为了验「失效的条目不白跑一趟取流」**（票 #624）：光断
@@ -133,16 +143,45 @@ func newCollectionBili(t *testing.T) *favBili {
 				"upper":       b.infos["upper"],
 			})
 		case "/x/v3/fav/resource/list":
+			// ⚠️ **分页开着的按页切**：`pn` 从 1 起，越界就是空页（`has_more`
+			// 由「后面还有没有」定）。`pageSize == 0` 照旧一次回全部。
+			pn, _ := strconv.Atoi(r.URL.Query().Get("pn"))
+			// ⚠️ **真接口的参数名是 `ps`**（`bili.CollectionMedias`），不是
+			// `page_size`——那是合集那一支的叫法，两边不一样（见
+			// `collection.go` 顶上那段说明）。
+			if b.pageSize > 0 {
+				b.pages = append(b.pages, pn)
+			}
 			// ⚠️ **造「拉不到」**：回一个业务错，让这一趟失败。
 			if b.failList != 0 {
 				writeCollectionJSON(t, w, b.failList, "拉不到", nil)
 				return
 			}
+			if b.failPage != 0 && pn == b.failPage {
+				writeCollectionJSON(t, w, -400, "拉不到", nil)
+				return
+			}
 			b.orders = append(b.orders, r.URL.Query().Get("order"))
 			kw := r.URL.Query().Get("keyword")
 			b.keywords = append(b.keywords, kw)
+			medias := b.filterByKeyword(kw)
+			hasMore := false
+			if b.pageSize > 0 && pn > 0 {
+				// ⚠️ **切片按 `b.pageSize`**（夹具自己说的一页几条），不是请求
+				// 里那个 `ps`——客户端永远发 `pageSizeLimit`（20），而测试要的
+				// 是一页 N 条的小步翻页。`ps` 只用来认「这一趟是不是内容请求」
+				// 之外的场景这里没有。
+				start := (pn - 1) * b.pageSize
+				if start >= len(medias) {
+					medias = nil
+				} else {
+					end := min(start+b.pageSize, len(medias))
+					hasMore = end < len(medias)
+					medias = medias[start:end]
+				}
+			}
 			writeCollectionJSON(t, w, 0, "0", map[string]any{
-				"medias": b.filterByKeyword(kw), "has_more": false,
+				"medias": medias, "has_more": hasMore,
 			})
 		case "/x/polymer/web-space/seasons_archives_list", "/x/series/archives":
 			// 🔴 **合集 / 系列走的是另外两个接口**（票 #683，缺陷 C）：收藏夹那个
@@ -323,6 +362,28 @@ func (b *favBili) seenKeywords() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return append([]string(nil), b.keywords...)
+}
+
+// setPaging 打开分页：内容列表按 `pn` / `page_size` 切片，`has_more` 按
+// 「后面还有没有」算。调了它之后 `seenPages` 才有数。
+func (b *favBili) setPaging(pageSize int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.pageSize = pageSize
+}
+
+// failOnPage 让第 pn 页（只有那一页）回一个业务错。
+func (b *favBili) failOnPage(pn int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.failPage = pn
+}
+
+// seenPages 是每一次内容列表请求带的 `pn`，按顺序。分页没开时是空的。
+func (b *favBili) seenPages() []int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([]int(nil), b.pages...)
 }
 
 // mediaOf 造一条内容。id 决定身份，title 是界面上能看见的那一行。

@@ -181,6 +181,14 @@ type collectionPage struct {
 	sort     bili.CollectionSort
 	listSort bili.CollectionSort
 
+	// hideInvalid 是**这个列表是拿哪个「隐藏失效内容」建的**。
+	//
+	// ⚠️ 它和 `listSort` 是同一个道理的第三格：设置改的是全局那一格，而
+	// 列表是拿建它当时那个值建的（过滤器在建的时候就定死了，见
+	// `list.NewPagedFiltered`）——不分开存就没有一个地方能判出「设置变了、
+	// 列表还没跟上」。判据在 `syncCollection`：对不上就 `reloadCollection`。
+	hideInvalid bool
+
 	// search 是那一枚会展开的搜索此刻是收着还是开着。
 	search searchButtonState
 
@@ -231,7 +239,8 @@ type collectionPage struct {
 // ⚠️ **不在这里拉第一页**（同 `list.NewPaged` 的理由）：它可能在界面线程
 // 之外被调，那时候既没有唤醒句柄也没有画面。第一页由第一帧的 view 拉。
 func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
-	p := &collectionPage{ref: ref, picked: map[string]bool{}}
+	p := &collectionPage{ref: ref, picked: map[string]bool{},
+		hideInvalid: s.app.SettingsSnapshot().HideInvalidMedias}
 	p.list = s.newCollectionList(p)
 	p.listSort = p.sort
 	// 元信息在后台拉，头图区这一帧先画占位（见 viewCollectionHeader）。
@@ -253,10 +262,12 @@ func (s *Shell) newCollectionPage(ref app.CollectionRef) *collectionPage {
 // 字段）。
 func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	acts := s.collectionActions(p)
-	ref, sort, keyword, media := p.ref, p.sort, p.keyword, &p.media
-	l := list.NewPaged(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
+	// hideInvalid 和 sort / keyword 一样拷进局部变量：过滤器在建的时候就
+	// 定死，而字段是界面线程的——闭包直接读它就是后台 goroutine 读界面状态。
+	ref, sort, keyword, media, hide := p.ref, p.sort, p.keyword, &p.media, p.hideInvalid
+	l := list.NewPagedFiltered(s.images, acts, func(ctx context.Context, pageNo int) (list.Page, error) {
 		return s.fetchCollectionPage(ctx, ref, sort, keyword, pageNo, media)
-	})
+	}, collectionRowFilter(hide))
 	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 	// 13px 淡灰缩在列表左上角，而这一页的「没有收藏夹」是居中 15pt 两行。
 	l.SetEmptyView(func(c *ui.Context) {
@@ -277,6 +288,76 @@ func (s *Shell) newCollectionList(p *collectionPage) *list.PagedList {
 	})
 	// 行和表头画原型样式（`pud.TrackRow` / `pud.TrackHead`，多选态序号格换成勾选框）。
 	return l
+}
+
+// collectionRowFilter 把设置那一格翻成列表要的过滤器。
+//
+// 设置关着的时候回 nil（每行都留，和现在一样的行为），开着的时候只留
+// 没失效的行。这一层不认识 `bili`——判的是行模型自己的 `Item.Invalid`，
+// 和行级那一枚「已失效」标签是**同一份口径**（`app.ItemOfMedia`）。
+func collectionRowFilter(hideInvalid bool) func(list.Music) bool {
+	if !hideInvalid {
+		return nil
+	}
+	return func(m list.Music) bool { return !m.Item.Invalid }
+}
+
+// collectionSummary 是这一页「数」的唯一派生：头图区的条数、总时长、操作条
+// 的禁用、空状态判据都读它——不再各自拿 `MediaCount` 和 `l.Len()` 对账。
+//
+// 它每帧从**当前这份列表**的 `Paged` 算一次，重建列表就是新的一份数。
+type collectionSummary struct {
+	// Known 是容器元信息（`CollectionInfo.Loaded`）回来没有。
+	Known bool
+	// Total 是 B 站给的条数（`media_count`）。**不从 Visible+Hidden 反推**：
+	// 表头承诺的是「B 站说这个容器里有几首」，那个数可能过期、搜索也只筛
+	// 当前查询的页——两句各自有出处。
+	Total int
+	// Visible 是画出去的行数；Hidden 是被「隐藏失效内容」滤掉的行数；
+	// Received 是收到过的总数（Visible + Hidden）。
+	Visible, Hidden, Received int
+	// Duration 是**收到过的**每一行的时长之和（被滤掉的也算），见
+	// `list.Paged.Duration`。
+	Duration time.Duration
+	// Settled 是「这一份停稳了」（见 `list.Paged.Settled`）。
+	Settled bool
+}
+
+// collectionSummary 把「元信息 + 这份列表」摊成上面那份数。
+func (p *collectionPage) summary(info app.CollectionInfo) collectionSummary {
+	pg := p.list.Paged()
+	return collectionSummary{
+		Known: info.Loaded, Total: info.MediaCount,
+		Visible: pg.Loaded, Hidden: pg.Hidden, Received: pg.Received(),
+		Duration: pg.Duration, Settled: pg.Settled(),
+	}
+}
+
+// Complete 报「收到过的行已经凑齐了 B 站说的总数」：总时长只在齐了才画，
+// 不齐的话那是个偏小的假数。
+func (c collectionSummary) Complete() bool {
+	return c.Known && c.Total > 0 && c.Received >= c.Total
+}
+
+// HiddenText 是表头那句「已隐藏 N 首失效内容」；一个都没藏时是空串（那一格
+// 不画）。
+func (c collectionSummary) HiddenText() string {
+	if c.Hidden <= 0 {
+		return ""
+	}
+	return "已隐藏 " + strconv.Itoa(c.Hidden) + " 首失效内容"
+}
+
+// NoPlayable 报「播放全部 / 随机播放」该不该灰。
+//
+// 两档算灰：B 站明说这一夹是空的（`Known && Total == 0`），或者这一份**停稳了**
+// 而一行可见的都没有（全被滤掉了）。**有一趟在途的不算**——扫到一半先把按钮
+// 灰掉，用户看着的就是「播不了」，而下一页可能就有能播的。
+func (c collectionSummary) NoPlayable() bool {
+	if c.Known && c.Total == 0 {
+		return true
+	}
+	return c.Settled && c.Visible == 0
 }
 
 func collectionGridSkeleton(c *ui.Context) {
@@ -510,6 +591,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 		// 🔴 **不这么分的后果**（票 #624 评审的评论第 1 条）：失败落进
 		// 「没有结果」那一支，而那一支不调 `p.list.View`——于是那个重试按钮
 		// 永远画不出来，用户看到的是「暂无内容」而**没有重试的入口**。
+		//
+		// ⚠️ **「全都失效」落在外面那一支是对的**：它的判据里有 `Settled`——
+		// 停稳了列表才不再拉，这时候列表不画也不影响翻页（`Sync` 那一半照走）。
 		if empty == collectionEmptyNone || empty == collectionEmptyFailed {
 			s.collectionLead(c, p)
 		} else {
@@ -529,9 +613,9 @@ func (s *Shell) viewCollection(c *ui.Context, r *ui.Route) {
 			})
 		}
 
-		// 两种「拉回来了但是空的」已经画在上面的滚动区里；其余档由列表自己画。
+		// 三种「拉回来了但是空的」已经画在上面的滚动区里；其余档由列表自己画。
 		switch empty {
-		case collectionEmptyNoFavorites, collectionEmptyNoResults:
+		case collectionEmptyNoFavorites, collectionEmptyNoResults, collectionEmptyAllHidden:
 			// 已经画在上面那个滚动区里（`viewCollectionEmpty`）。
 		default:
 			// ⚠️ **这一支是「列表自己画」**（`collectionEmptyNone` 和
@@ -615,11 +699,19 @@ const (
 	// 用户看到的是「暂无内容」，**没有重试的入口**——而网络类的失败等一会儿
 	// 自己就好了，用户却只能去改搜索词。
 	collectionEmptyFailed
+	// collectionEmptyAllHidden 是「**收得到，但每一行都被滤掉了**」（隐藏
+	// 失效内容开着、而这份里一条可见的都没有）。
+	//
+	// 🔴 **它和「没有结果」是两件事**：NoResults 是「词发出去之后 B 站真的一
+	// 行都没回」（`Received == 0`），AllHidden 是「回了几行、全被滤掉」
+	// （`Received > 0`、`Visible == 0`、`Hidden > 0`）。落进 NoResults 那一支
+	// 用户会以为「这个词不存在」——它是被滤掉的，不是不存在。
+	collectionEmptyAllHidden
 )
 
 // collectionEmpty 报这一页是**哪一种**空。
 //
-// ⚠️ **判据是 MediaCount 为 0**，不是「列表此刻一行都没有」：后者在翻页加载的
+// ⚠️ **判据是元信息说的总数为 0**，不是「列表此刻一行都没有」：后者在翻页加载的
 // 那一瞬间也为真，那样会让整页内容闪一下空状态（用户点进收藏夹、列表转了
 // 两帧、中间整个内容区变成一句「暂无内容」）。
 //
@@ -627,7 +719,8 @@ const (
 // 的**共同条件**是「列表一行都没有且不在拉」，而失败之后 `Loading` 也是
 // false——不把失败单独挑出来，它就会落进「没有结果」那一支。
 func collectionEmpty(p *collectionPage, info app.CollectionInfo) collectionEmptyKind {
-	if info.Loaded && info.MediaCount == 0 {
+	sum := p.summary(info)
+	if sum.Known && sum.Total == 0 {
 		return collectionEmptyNoFavorites
 	}
 	pg := p.list.Paged()
@@ -636,9 +729,21 @@ func collectionEmpty(p *collectionPage, info app.CollectionInfo) collectionEmpty
 	if pg.Err != nil {
 		return collectionEmptyFailed
 	}
-	// 搜了、词已经发出去了、一条都没有：也是空的（画的是「换个词再搜一次」）。
-	if p.keyword != "" && pg.Loaded == 0 && !pg.Loading {
+	// 搜了、词已经发出去了、**一行都没回来**：也是空的（画的是「换个词再搜
+	// 一次」）。⚠️ **判的是 Received（收到过的原始行数），不是 Visible**——
+	// 开着隐藏失效的时候，「词真的不存在」（Received 0）和「词命中了但全是
+	// 失效的」（Received > 0 全滤掉）是两种空，后者落下面那一支。
+	if p.keyword != "" && pg.Received() == 0 && !pg.Loading {
 		return collectionEmptyNoResults
+	}
+	// 「全部失效」排在**失败和真零结果之后**：有失败时用户要的是重试入口
+	// （画的是列表自己的失败态），真零结果时词本身就不存在，都不是「全都
+	// 失效了」。
+	//
+	// ⚠️ **要等这一份停稳**（`Settled`）：还在一页页扫的时候不能先说「全都
+	// 失效」——后面那几页可能就有没失效的。
+	if p.hideInvalid && sum.Settled && sum.Visible == 0 && sum.Hidden > 0 {
+		return collectionEmptyAllHidden
 	}
 	return collectionEmptyNone
 }
@@ -781,6 +886,16 @@ func (s *Shell) syncCollection(c *ui.Context) {
 
 	// 后台攒下的话发成 Toast（取走而不是读）。
 	s.flushCollectionNotice(p)
+
+	// 「隐藏失效内容」那一格变了：列表是拿建它当时那个值建的（过滤器定死在
+	// 建的时候），对不上就重建——和换排序、换搜索词是同一条现有路。
+	//
+	// ⚠️ **判断用快照，不用页面上的开关**：设置页和这一页是两条路由，用户
+	// 改完回来的时候这里拿快照对一眼就知道要不要重来。
+	if hide := s.app.SettingsSnapshot().HideInvalidMedias; hide != p.hideInvalid {
+		p.hideInvalid = hide
+		s.reloadCollection(p)
+	}
 
 	// 🔴 设置里的「数据显示样式」在这一帧生效（理由同搜索页那一处）。
 	p.list.SetView(s.displayView())
@@ -960,38 +1075,6 @@ func collectionTitleText(typ bili.CollectionType, info app.CollectionInfo) strin
 		return "（没名字的收藏夹）"
 	}
 	return info.Title
-}
-
-// collectionKindText 是头图区第三行那句话的前半截。
-//
-// ⚠️ 收藏夹要带上公开 / 私密（Biu 的 `isPrivateFav(attr) ? "私密" : "公开"`），
-// 合集和系列那边上游不写这两个字，照抄。
-func collectionKindText(typ bili.CollectionType, private bool) string {
-	if typ != bili.CollectionFavorite {
-		return typ.Label()
-	}
-	if private {
-		return "私密收藏夹"
-	}
-	return "公开收藏夹"
-}
-
-// collectionHeaderKindText 是头图区第三行那整句话：类型 + 条目数。
-//
-// 🔴 **元信息没回来时不写数**（2026-10-27）：`CollectionInfo` 在 `!Loaded` 时
-// 是零值，`MediaCount` 就是 0——照写出来是**「公开收藏夹 • 0 条视频」**，
-// 而那个 0 是**假数**（真实值可能是几百上千）。用户会相信它，而且它看起来
-// 完全正常。和 UP 空间那边「粉丝数 0」是同一种错（见 `SpaceHeader.StatOK`
-// 那一段的账）。
-//
-// ⚠️ **类型这一半照画**：那是从路由上就能确定的（这一页是收藏夹还是合集），
-// 不依赖接口——把它也藏掉的话那一行在加载中只剩一段空白。
-func collectionHeaderKindText(typ bili.CollectionType, info app.CollectionInfo) string {
-	kind := collectionKindText(typ, info.Private)
-	if !info.Loaded {
-		return kind
-	}
-	return kind + " • " + strconv.Itoa(info.MediaCount) + " 条视频"
 }
 
 // ── 操作条 ─────────────────────────────────────────────────────────────────
@@ -1199,6 +1282,18 @@ func (s *Shell) viewCollectionEmpty(c *ui.Context, p *collectionPage, info app.C
 		e.Hint = "没有和「" + p.keyword + "」匹配的歌曲。"
 		e.Action = &emptyAction{Label: "清空搜索", Do: func() { s.clearCollectionSearch(p) }}
 		s.viewEmpty(c, "collection:no-results", e)
+	case collectionEmptyAllHidden:
+		e := onlyInvalid
+		// ⚠️ **搜着的时候换一套话术**：「这里的条目都失效了」说的是整个
+		// 收藏夹，而用户搜出来的那一批全是失效的是另一件事——同一句话会让
+		// 用户以为「整夹都坏了」，或者以为「这个词不存在」。
+		if p.keyword != "" {
+			e = onlyInvalidInSearch
+		}
+		e.Action = &emptyAction{Label: "显示失效内容", Do: func() {
+			s.applySetting("隐藏失效内容", func(cur *app.Settings) { cur.HideInvalidMedias = false })
+		}}
+		s.viewEmpty(c, "collection:all-hidden", e)
 	}
 }
 

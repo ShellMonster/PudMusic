@@ -455,6 +455,23 @@ var noSearchResults = emptyState{
 	Icon:  iconEmptySearch,
 }
 
+// onlyInvalid 是「这一夹收得到、但每一行都被滤掉了」（隐藏失效内容开着）。
+// 收藏夹页给它挂「显示失效内容」键——那一个按钮直接替用户把开关拨回去，
+// 不用让他自己跑到设置页再找一次。
+var onlyInvalid = emptyState{
+	Title: "这里的歌都已失效",
+	Hint:  "点下面的「显示失效内容」就能看见它们；也可以在 ⋯ 菜单里清除。",
+	Icon:  iconEmptyFolder,
+}
+
+// onlyInvalidInSearch 是同一件事的搜索版：搜出来的那一批全是失效的，不是
+// 「整夹都失效」也不是「这个词不存在」——两句话说混了用户会对错地方。
+var onlyInvalidInSearch = emptyState{
+	Title: "搜到的歌都已失效",
+	Hint:  "换个词再搜一次，或者点「显示失效内容」看看。",
+	Icon:  iconEmptySearch,
+}
+
 // noDownloads 是「没有下载记录」。
 //
 // 标题抄上游 `pages/download-list/index.tsx:155` 的 `emptyContent`。
