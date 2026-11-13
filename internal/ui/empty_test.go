@@ -417,6 +417,8 @@ func TestEmptyStateCopySaysWhyAndHow(t *testing.T) {
 	check("没有搜索结果", noSearchResults)
 	check("没有下载记录", noDownloads)
 	check("没有歌词", noLyrics)
+	check("全都失效", onlyInvalid)
+	check("搜到的全失效", onlyInvalidInSearch)
 }
 
 // waitCollectionHeader 等歌单内容页把容器拉回来（头图区第一帧是「正在加载…」）。
