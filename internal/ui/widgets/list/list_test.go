@@ -566,6 +566,31 @@ func TestARowThatCannotBeDrawnDoesNotTakeTheRestDown(t *testing.T) {
 	}
 }
 
+// TestAFailedRowKeepsThePageBackgroundOnHover 钉住失败占位是布局行：
+// 指针落在「这一行画不出来」上时，整行仍是页面底色。
+//
+// 曾经出错的行为：失败占位没盖回页面底色，指针压上去就铺一层 `SurfaceHover`。
+func TestAFailedRowKeepsThePageBackgroundOnHover(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	l := New(nil, Actions{})
+	l.SetSongs([]Music{
+		{ID: "bad", Title: "画不出来的一首", Cover: "https://example.invalid/bad.png"},
+		{ID: "good", Title: "画得出来的一首"},
+	})
+	tt := ui.NewTester(l.View, testerW, testerH)
+	tt.Frame()
+
+	hoverOff(t, tt)
+	idle := rowPixel(t, tt, "这一行画不出来")
+	hoverOn(t, tt, "这一行画不出来")
+	if got := rowPixel(t, tt, "这一行画不出来"); got != idle {
+		t.Errorf("鼠标移到「这一行画不出来」上后，那一行从 %v 变成 %v——整行被当成了列表条目", idle, got)
+	}
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 基准
 // ─────────────────────────────────────────────────────────────────────────────
