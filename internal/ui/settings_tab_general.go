@@ -112,6 +112,20 @@ func (s *Shell) settingsGeneral(c *ui.Context, st app.Settings, ro bool) {
 		})
 	})
 
+	s.setGroup(c, "collection-content", "收藏夹内容", func() {
+		s.card(c, "collection-content", ro, func(cd *setCard) {
+			// ⚠️ 这一格**不在 `hiddenMenuKeys` 那套机制里**：那是「哪些入口
+			// 看得见」的名单，而这一格是「列表里滤不滤」的开关，是两件事。
+			cd.switchRow(
+				"hide-invalid",
+				"隐藏失效内容",
+				"收藏夹里已失效的条目不再显示；表头会同时显示总数和已隐藏数量。",
+				st.HideInvalidMedias,
+				func(cur *app.Settings, on bool) { cur.HideInvalidMedias = on },
+			)
+		})
+	})
+
 	s.setGroup(c, "system", "系统", func() {
 		s.card(c, "system", ro, func(cd *setCard) {
 			cd.row("autostart", "开机自启", "登录后会自动打开", func() { s.autoStartSwitch(c, st, ro) })
