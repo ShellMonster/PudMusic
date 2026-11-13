@@ -4,10 +4,12 @@ package ui
 //
 //	BIU_SHOT_DIR=/some/dir go test ./internal/ui/ -run TestRenderCollectionInvalidShots
 //
-// 出两套图（深浅各一套）：
+// 出四套图（深浅各一套）：
 //
 //	① 失效条目的那一行	标签、灰掉的歌名
 //	② 歌单页滚下去之后	头图区滚走了、右下角回顶按钮
+//	③ 隐藏失效内容	失效行不在列表里，表头写总数和隐藏数
+//	④ 全部失效	空状态、恢复键
 //
 // ⚠️ **一个字都不许打真 B 站接口**：内容是内存夹具（`favBili`）。
 
@@ -56,6 +58,28 @@ func TestRenderCollectionInvalidShots(t *testing.T) {
 				tt2.Frame()
 			}
 			save(t, dir, "171-收藏夹页-滚下去之后-"+name+".png", tt2)
+
+			// 「隐藏失效内容」开着：失效行不在列表里，表头还是 3 首 + 「已隐藏 1 首」。
+			_, s3, tt3 := collectionShellOpts(t, []shellOpt{systemIsDark(dark), withHideInvalid()},
+				"", "12345", medias...)
+			waitFrames(t, tt3, "隐藏失效内容开着、三行都收到", func() bool {
+				return s3.collection != nil && s3.collection.list.Paged().Received() == 3
+			})
+			tt3.Frame()
+			save(t, dir, "172-收藏夹页-隐藏失效内容-"+name+".png", tt3)
+
+			// 全都失效：空状态要说清发生了什么，并给一条恢复路。
+			allInvalid := []map[string]any{
+				invalidMediaOf(1, "失效的那首"),
+				invalidMediaOf(2, "也失效的那首"),
+			}
+			_, s4, tt4 := collectionShellOpts(t, []shellOpt{systemIsDark(dark), withHideInvalid()},
+				"", "12345", allInvalid...)
+			waitFrames(t, tt4, "全部失效、列表停稳", func() bool {
+				return s4.collection != nil && s4.collection.list.Paged().Settled()
+			})
+			tt4.Frame()
+			save(t, dir, "173-收藏夹页-全部失效-"+name+".png", tt4)
 		})
 	}
 }
