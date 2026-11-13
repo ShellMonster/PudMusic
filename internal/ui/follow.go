@@ -269,14 +269,11 @@ type followPage struct {
 	// 框架写回来。
 	scroll ui.ScrollState
 
-	// width 是这一帧量出来的**容器**宽，cols 是按它算出来的列数。
+	// cols 是上一帧排出来的列数，用来算换列数时的滚动锚点。
 	//
-	// ⚠️ 判据是容器不是窗口（页面左边有侧栏，差一档就是差一列，理由同
-	// `widgets/list/grid.go`）。量的是这个列表元素自己的盒子，而 `Bounds()`
-	// 报的是**上一帧**的盒子——所以改窗口大小之后列数晚一帧换，和 Biu 那边
-	// ResizeObserver 改 state 再重画是同一个节奏。
-	width float32
-	cols  int
+	// ⚠️ **它不参与这一帧的格子宽计算**：宽度只有 `followGridLayout` 一个
+	// 来源，否则首帧和后续帧会拿两份不同的宽。
+	cols int
 	// keys 是这一页那张列表的键盘接线（游标 + 「↑ 到顶回侧栏」）。
 	//
 	// ⚠️ **这一页的内容区是裸的 `ui.List`**（卡片是自己画的，走不了
@@ -599,7 +596,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		// （两列人像卡）差太远——回来那一帧行高、列宽一起跳，加上关注卡自己的
 		// 入场过渡就是「关注图标叠加 / 加载卡顿」那一票。骨架和真卡对齐之后，
 		// 数据回来只是「灰块换真人」，版面一步不挪（画法见 `followview.go`）。
-		s.viewFollowSkeleton(c, f)
+		s.viewFollowSkeleton(c, s.followGridLayout(c))
 		return
 	}
 	// 🔴 **「一格都没有」也分几种**：见下面 `followEmpty`。合成一句的话，用户
@@ -610,14 +607,8 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 		return
 	}
 
-	w := f.width
-	if w <= 0 {
-		// 头一帧还没量出容器（`Bounds` 量的是上一帧的盒子），先拿窗口的宽顶着。
-		// 那一帧的列数是**估的**，下一帧量到真的就换过去了——和 Biu 那边
-		// ResizeObserver 晚一帧是同一个节奏。
-		w, _ = c.Size()
-	}
-	cols := followColumnsFor(w)
+	layout := s.followGridLayout(c)
+	cols := layout.cols
 	// ⚠️ 必须在换掉 `f.cols` **之前**算锚点：keepFollowAnchor 里的行号是用**旧**
 	// 的列数换算的。`f.cols = cols` 在这一段的末尾（画完之后），不在这里。
 	s.keepFollowAnchor(f, cols)
@@ -659,8 +650,7 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 	}
 
 	// ⚠️ Key 挂在外面的 Column 上，理由见 `dynamicfeed.go`。
-	grid := ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth()
-	grid.Children(func() {
+	ui.Column(c).Key("follow-grid").Grow(1).FillHeight().FillWidth().Children(func() {
 		// 登记「内容区里当前那一个能被方向键走位的」（票 #245 的 E4）。
 		// 网格是这一页里唯一的走位对象（分组栏已收成页头下拉，见票 #367 改版）。
 		//
@@ -692,15 +682,8 @@ func (s *Shell) viewFollowGrid(c *ui.Context, f *followPage) {
 			// 这一页**没有 Tab**，列表不会被换掉，所以挂着它不会和行锚点打架
 			//（理由见 `homepage.go` 里「切 Tab 的滚动位置」那一段）。
 			TrackScroll(&f.scroll).
-			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, cols) })
+			Rows(func(r ui.ListRow) { s.viewFollowRow(r.Context, f, r.Index, layout) })
 	})
-	// 量外层网格容器，而不是 List 自己的内容盒子。List 的内容宽会受首行
-	// 卡片 intrinsic size 影响，拿它反过来算 cell 宽会形成反馈：首帧变窄后，
-	// 下一帧继续按窄宽摆卡，最终出现真实环境里卡片压成竖条、文字互相覆盖。
-	// 外层容器的宽度才是右侧布局实际分到的宽。
-	if bw := grid.Bounds().W; bw > 0 {
-		f.width = bw
-	}
 	f.cols, f.started = cols, true
 
 	// 滚到底就拉下一页；容器没填满也拉（首屏那一拉在 view 开头已经发过了）。
@@ -805,14 +788,13 @@ func followIndexOfMid(users []app.FollowUser, mid int64) int {
 // ⚠️ **每一格自己兜一层**（viewFollowCardGuarded）：格子里 panic 会一路穿出
 // Cocoa 事件循环把整个进程带走。按行兜的话一行有六格，一张坏头像要带走五张
 // 好的（理由同 `widgets/list/grid.go` 的 `viewRow`）。
-func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
-	first := i * cols
+func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i int, layout followGridLayout) {
+	first := i * layout.cols
 	if first >= len(f.users) {
 		s.viewFollowSentinel(c, f)
 		return
 	}
 	gap := followCardGap
-	cell := pud.CellWidth(max(f.width, 0), cols, gap)
 	// Stretch cards to the tallest item in the row. Follow users can have
 	// different sign/verification text, but the prototype keeps each row's
 	// cards on one baseline instead of letting neighboring cards end at
@@ -823,13 +805,13 @@ func (s *Shell) viewFollowRow(c *ui.Context, f *followPage, i, cols int) {
 	// 一整块灰色背景（截图中的问题）。卡片自己的 hover 反馈仍由 UCard 负责。
 	row = list.LayoutRow(row, c.Theme())
 	row.Children(func() {
-		for k := range cols {
+		for k := range layout.cols {
 			j := first + k
 			if j >= len(f.users) {
 				// 最后一行不满：剩下的格子空着。
 				return
 			}
-			s.viewFollowCardGuarded(c, f, j, cols, cell)
+			s.viewFollowCardGuarded(c, f, j, layout.cols, layout.cell)
 		}
 	})
 }
