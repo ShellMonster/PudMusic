@@ -22,8 +22,14 @@ func (s *Shell) viewFeedHeader(c *ui.Context, f *dynamicFeed) {
 	s.viewFeedFilter(c, f)
 }
 
-// feedChipLimit 是 chip 横排最多画几位 UP 主：横排会自动一页页往后拉，但不无限拉。
-const feedChipLimit = 40
+const (
+	// feedChipLimit 是 chip 横排最多画几位 UP 主：横排会自动一页页往后拉，但不无限拉。
+	feedChipLimit = 40
+	// feedAuthorPreview 是收起态露出的作者数（两排，每排 6 位）。
+	feedAuthorPreview = 12
+	// feedAuthorRowSize 是收起态每一排的作者数。
+	feedAuthorRowSize = 6
+)
 
 const feedAuthorChipMaxW = 240
 
@@ -51,35 +57,36 @@ func (s *Shell) viewFeedFilter(c *ui.Context, f *dynamicFeed) {
 		if len(authors) > feedChipLimit {
 			authors = authors[:feedChipLimit]
 		}
-		if !f.authorsExpanded && len(authors) > 12 {
-			s.viewFeedAuthorRow(c, f, authors[:6], true)
-			remaining := len(authors) - 12
-			ui.Row(c).Key("feed:authors-row:second").FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center).
-				Children(func() {
-					for _, a := range authors[6:12] {
-						if s.feedAuthorChip(c, a, f.filterMid == a.Mid).Clicked() {
-							f.filterMid = a.Mid
-						}
-					}
-					if pud.Chip(c, "feed:authors-expand", "+"+strconv.Itoa(remaining), "", false).Clicked() {
-						f.authorsExpanded = true
-					}
-				})
+		if len(authors) <= feedAuthorPreview {
+			s.viewFeedAuthorRow(c, f, "all", authors, true, nil)
 			return
 		}
-		s.viewFeedAuthorRow(c, f, authors, true)
-		if f.authorsExpanded && len(authors) > 12 {
-			ui.Row(c).Key("feed:authors-collapse").FillWidth().Justify(ui.End).Children(func() {
+
+		// 「+N」和「收起」是同一枚开关：都接在第 12 位作者后面。展开时它原地
+		// 变成「收起」，收起时再变回「+N」，用户不用在整块作者流里重新找它。
+		toggle := func() {
+			if f.authorsExpanded {
 				if pud.Chip(c, "feed:authors-collapse", "收起", "", false).Clicked() {
 					f.authorsExpanded = false
 				}
-			})
+				return
+			}
+			remaining := len(authors) - feedAuthorPreview
+			if pud.Chip(c, "feed:authors-expand", "+"+strconv.Itoa(remaining), "", false).Clicked() {
+				f.authorsExpanded = true
+			}
+		}
+		s.viewFeedAuthorRow(c, f, "first", authors[:feedAuthorRowSize], true, nil)
+		s.viewFeedAuthorRow(c, f, "preview",
+			authors[feedAuthorRowSize:feedAuthorPreview], false, toggle)
+		if f.authorsExpanded {
+			s.viewFeedAuthorRow(c, f, "more", authors[feedAuthorPreview:], false, nil)
 		}
 	})
 }
 
-func (s *Shell) viewFeedAuthorRow(c *ui.Context, f *dynamicFeed, authors []app.FollowAuthor, includeAll bool) {
-	ui.Row(c).Key("feed:authors-row:" + strconv.FormatBool(includeAll)).FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center).
+func (s *Shell) viewFeedAuthorRow(c *ui.Context, f *dynamicFeed, slot string, authors []app.FollowAuthor, includeAll bool, tail func()) {
+	ui.Row(c).Key("feed:authors-row:" + slot).FillWidth().Wrap().Gap(space.Px8).AlignItems(ui.Center).
 		Children(func() {
 			if includeAll {
 				if pud.Chip(c, "feed:chip:all", "全部", "", f.filterMid == 0).Clicked() {
@@ -90,6 +97,9 @@ func (s *Shell) viewFeedAuthorRow(c *ui.Context, f *dynamicFeed, authors []app.F
 				if s.feedAuthorChip(c, a, f.filterMid == a.Mid).Clicked() {
 					f.filterMid = a.Mid
 				}
+			}
+			if tail != nil {
+				tail()
 			}
 		})
 }
