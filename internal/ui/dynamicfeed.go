@@ -368,6 +368,17 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		return feedRowLabel(items[i])
 	}
 
+	// 第 0 行是页头，不是一条动态。`TakeFocus` 先把游标摆到 0，这里挪到第一条；
+	// 否则选中态会给标题换 `AccentText`，而页头自己盖了页面底色（同 `upspace_tabs.go`）。
+	if f.keys.started && f.keys.sel >= 0 && f.keys.sel < headerRows {
+		if len(items) > 0 {
+			f.keys.sel = headerRows
+			st.ScrollIntoView(f.keys.sel)
+		} else {
+			f.keys.sel = -1
+		}
+	}
+
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
 		// 「有 N 条我们画不出来」那一行（理由同 upspace_tabs.go 那一处）。
