@@ -7,11 +7,13 @@ package ui
 
 import (
 	"bytes"
+	"errors"
 	"image"
 	"image/jpeg"
 	"sync"
 	"testing"
 
+	"github.com/egoist/mygo"
 	mygoui "github.com/egoist/mygo/ui"
 )
 
@@ -275,6 +277,32 @@ func TestPickingACoverOpensTheCropDialog(t *testing.T) {
 	if want := float32(60); absF32(b.H-want) > 0.5 {
 		t.Errorf("初始框的高 = %v%%，want %v%%（80 宽的 16:9）", b.H, want)
 	}
+}
+
+// TestAFailingCoverDialogSaysSo 封面文件框打不开时要说一句。
+//
+// ⚠️ 取消是空列表 + nil，打不开才带错。把两者都当成取消，用户会以为
+// 「点击上传图片」坏了。
+func TestAFailingCoverDialogSaysSo(t *testing.T) {
+	f := newFolderBili(t, nil)
+	s, tt := folderShell(t, f)
+	seedAndSettle(s, tt, 42)
+	s.pickImage = func(*mygo.Window) ([]string, error) {
+		return nil, errors.New("没有权限打开文件框")
+	}
+
+	if err := tt.Click("新建收藏夹"); err != nil {
+		t.Fatal(err)
+	}
+	settleFrame(tt)
+	if err := tt.Click("点击上传图片"); err != nil {
+		t.Fatalf("点不到「点击上传图片」：%v（文字 %q）", err, tt.Texts())
+	}
+
+	waitFor(t, "封面文件框打不开要说一句", func() bool {
+		tt.Frame()
+		return tt.HasText("打不开文件框")
+	})
 }
 
 // TestTheUploadedCoverIsSixteenByNine 按 DPR 上传的那张真的是 16:9。

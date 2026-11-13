@@ -215,6 +215,9 @@ func TestTheClearAllButtonShowsATrashBin(t *testing.T) {
 	if n := len(s.hist.list()); n != 0 {
 		t.Errorf("点了「%s」之后历史里还有 %d 条", suggestClearLabel, n)
 	}
+	if !tt.HasText("已清空搜索历史") {
+		t.Errorf("清空之后没有说一句，文字有 %q", tt.Texts())
+	}
 }
 
 // ---- 这一组用的小工具 ----

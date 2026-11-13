@@ -509,11 +509,14 @@ func (s *Shell) viewAccountFooter(c *ui.Context, st app.LoginState) {
 
 // logoutAndStartOver 退登，并把界面收回「未登录」的样子。
 func (s *Shell) logoutAndStartOver() {
-	if err := s.app.Logout(); err != nil {
+	err := s.app.Logout()
+	// 先清掉上一页的提示，再报这一次的结果。反过来的话，失败那一句会被
+	// 紧接着的 clearToasts 一起擦掉。
+	s.clearToasts()
+	if err != nil {
 		// 退不干净要**说出来**：内存和 cookie 已经清了（应用层保证的），
 		// 只有系统存储那边可能还留着。悄悄吞掉的话，用户会以为退登
 		// 成功了，下次打开发现还在。
 		s.addToast("退出登录："+err.Error(), notice.Danger)
 	}
-	s.clearToasts()
 }

@@ -274,6 +274,8 @@ func TestDeletingAFolderSaysWhichOneAndLeavesThePage(t *testing.T) {
 	waitFrames(t, tt, "离开被删掉的那一页", func() bool {
 		return s.router.Path() == "/empty"
 	})
+	// 删完那一句要活过导航：`navigate` 会清提示，所以它必须在跳完之后再说。
+	wantSaid(t, tt, "已删掉「通勤路上」")
 }
 
 // TestDeletingFromThePageIsTheSameCallTheSidebarMakes 页面上删和侧栏删发出去

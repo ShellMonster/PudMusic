@@ -228,7 +228,7 @@ func (s *Shell) saveEQPreset(st app.Settings) {
 		}
 	}
 	gains := st.EQGains()
-	s.applySetting("均衡器", func(cur *app.Settings) {
+	if !s.applySettingOK("均衡器", func(cur *app.Settings) {
 		entry := audio.EQPreset{ID: eqCustomPresetValue(name), Name: name, Gains: gains}
 		replaced := false
 		for i, p := range cur.EQCustomPresets {
@@ -243,14 +243,17 @@ func (s *Shell) saveEQPreset(st app.Settings) {
 		cur.EQCustomOn = true
 		cur.EQCustomGains = gains
 		cur.EQCustomName = name
-	})
+	}) {
+		return
+	}
 	s.settings.eqName = ""
+	s.addToast("已保存预设「"+name+"」", notice.Success)
 }
 
 // deleteEQPreset 删掉这套名字的自定义预设；删掉的正好是当前那套时，
 // 当前增益保留成未命名自定义（用户听到的声音不变，只是它不再叫那个名字）。
 func (s *Shell) deleteEQPreset(name string) {
-	s.applySetting("均衡器", func(cur *app.Settings) {
+	if !s.applySettingOK("均衡器", func(cur *app.Settings) {
 		kept := cur.EQCustomPresets[:0]
 		for _, p := range cur.EQCustomPresets {
 			if p.Name != name {
@@ -261,7 +264,10 @@ func (s *Shell) deleteEQPreset(name string) {
 		if cur.EQCustomName == name {
 			cur.EQCustomName = ""
 		}
-	})
+	}) {
+		return
+	}
+	s.addToast("已删除预设「"+name+"」", notice.Success)
 }
 
 // ---- 满屏播放器里的均衡器弹层（原型 `popHtml('eq')`）----
