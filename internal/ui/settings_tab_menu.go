@@ -33,19 +33,6 @@ func (s *Shell) settingsMenu(c *ui.Context, st app.Settings, ro bool) {
 	s.setGroup(c, "folders", "收藏夹显示", func() {
 		s.card(c, "folders", ro, func(cd *setCard) { s.pickFavoriteVisibility(cd, st) })
 	})
-	s.setGroup(c, "collection-content", "收藏夹内容", func() {
-		s.card(c, "collection-content", ro, func(cd *setCard) {
-			// ⚠️ 这一格**不在 `hiddenMenuKeys` 那套机制里**：那是「哪些入口
-			// 看得见」的名单，而这一格是「列表里滤不滤」的开关，是两件事。
-			cd.switchRow(
-				"hide-invalid",
-				"隐藏失效内容",
-				"收藏夹里已经失效的条目不再显示；表头会说清藏了几首。",
-				st.HideInvalidMedias,
-				func(cur *app.Settings, on bool) { cur.HideInvalidMedias = on },
-			)
-		})
-	})
 	s.setGroup(c, "liked", "喜欢歌单", func() {
 		s.card(c, "liked", ro, func(cd *setCard) { s.pickLikedFolder(cd, st) })
 	})

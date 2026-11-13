@@ -317,14 +317,14 @@ func TestHidingAMenuItemLeavesOtherGroupsAlone(t *testing.T) {
 	}
 }
 
-// TestTheMenuTabStoresHideInvalidMedias 验「收藏夹内容」组那一行开关：
+// TestTheGeneralTabStoresHideInvalidMedias 验「收藏夹内容」组那一行开关：
 // 默认关、点一下写进设置、再点一下写回来。
-func TestTheMenuTabStoresHideInvalidMedias(t *testing.T) {
+func TestTheGeneralTabStoresHideInvalidMedias(t *testing.T) {
 	tt, s, a, _ := shellOnSettings(t, app.DefaultSettings(""))
 	if got := a.SettingsSnapshot().HideInvalidMedias; got {
 		t.Fatalf("默认就该是关的，Snapshot = %v", got)
 	}
-	openSettingsTab(t, tt, "菜单")
+	openSettingsTab(t, tt, "常规")
 	wantText(t, tt, "收藏夹内容")
 	clickSetting(t, tt, s, "开关：隐藏失效内容")
 	if got := a.SettingsSnapshot().HideInvalidMedias; !got {
