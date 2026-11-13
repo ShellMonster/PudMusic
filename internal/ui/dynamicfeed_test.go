@@ -577,6 +577,52 @@ func TestTheFeedHeaderKeepsThePageBackgroundOnHover(t *testing.T) {
 	}
 }
 
+// TestTheFeedHeaderIsNotTheKeyboardCursor 钉住键盘焦点进内容区时游标落在第一条动态上。
+//
+// 曾经出错的行为：游标先落在第 0 行的页头，选中状态给标题换了 `AccentText`；
+// 页头盖回页面底色后，标题在浅色下就淡得读不出来。
+func TestTheFeedHeaderIsNotTheKeyboardCursor(t *testing.T) {
+	b := newUIExplore(t)
+	b.on("/x/polymer/web-dynamic/v1/feed/all", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"items": []any{uiDynamic("1", "第一条正文")}, "has_more": false})
+	})
+	b.on("/x/relation/followings", func(w http.ResponseWriter, r *http.Request) {
+		uiExploreJSON(w, 0, map[string]any{"total": 1, "list": []any{
+			map[string]any{"mid": 11, "uname": "第一个 UP"},
+		}})
+	})
+
+	s, tt, _ := newSpaceShell(t, b, true, "77", systemIsDark(false))
+	s.navigate(dynamicFeedPath)
+	tt.Frame()
+	f := s.dynamicFeedOf()
+	waitFrames(t, tt, "动态到了", func() bool { return len(f.items) == 1 })
+	tt.Frame()
+
+	f.keys.TakeFocus()
+	tt.Frame()
+	tt.Frame()
+	if f.keys.sel == 0 {
+		t.Errorf("键盘焦点进来后游标停在页头（sel=0），want 第一条动态")
+	}
+
+	lede, ok := tt.Find("关注的 UP 主最近分享了什么。")
+	if !ok {
+		t.Fatalf("画面上找不到页头导语，文字有 %q", tt.Texts())
+	}
+	img := tt.Image()
+	darkest := 255 * 3
+	for y := max(int(lede.Y)-60, 0); y < max(int(lede.Y)-4, 0); y++ {
+		for x := max(int(lede.X), 0); x < min(int(lede.X)+260, img.Rect.Max.X); x++ {
+			p := img.RGBAAt(x, y)
+			darkest = min(darkest, int(p.R)+int(p.G)+int(p.B))
+		}
+	}
+	if darkest > 450 {
+		t.Errorf("页头标题区域最暗像素亮度和 = %d，want < 450（标题不该被选中态染成浅色）", darkest)
+	}
+}
+
 // fullWidthRule 在一段竖向范围里找一条**几乎贯穿整宽**的水平线，返回它的 y。
 //
 // 判据是「这一行 95% 以上的采样点都不等于底色」：正文、头像这些也会比底色深，
