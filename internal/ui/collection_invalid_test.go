@@ -347,6 +347,7 @@ func TestSearchingForOnlyInvalidRowsShowsAllHiddenNotNoResults(t *testing.T) {
 	tt.Frame()
 
 	wantText(t, tt, onlyInvalidInSearch.Title)
+	wantText(t, tt, "本次搜索隐藏 1 首失效内容")
 	dontWantText(t, tt, noSearchResults.Title)
 }
 
@@ -430,8 +431,9 @@ func TestTurningHidingOffRebuildsTheListAndRevealsInvalidRows(t *testing.T) {
 // 新列表——计数是跟着实例走的，重建就是新的一份。
 func TestAPageFromTheOldQueryDoesNotPolluteTheNewList(t *testing.T) {
 	b := newCollectionBili(t)
-	// ⚠️ **holdList 只建一次**：夹具读到非 nil 就等，我们放行之后清掉它
-	// （重建的那一趟还会走同一个 handler，留着的话第二趟也卡住了）。
+	// ⚠️ **holdList 只建一次**：夹具读到非 nil 就等。放行靠关闭它——关闭之后
+	// 重建的那一趟再收到同一个 channel 会立刻返回，不会把第二趟也卡住，
+	// 所以这里不用（也不该）把它写回 nil。
 	b.holdList = make(chan struct{})
 	b.setMedias(invalidMediaOf(1, "失效的一首"), mediaOf(2, "正常的一首"))
 
@@ -447,7 +449,6 @@ func TestAPageFromTheOldQueryDoesNotPolluteTheNewList(t *testing.T) {
 	tt.Frame()
 	// 现在放行旧列表那趟在途请求——它回来的时候新列表已经换过 gen 了。
 	close(b.holdList)
-	b.holdList = nil
 	waitFrames(t, tt, "新列表把两行都拉回来", func() bool {
 		return s.collection != nil && s.collection.list.Paged().Loaded == 2
 	})

@@ -199,7 +199,7 @@ func (s *Shell) viewCollectionMeta(c *ui.Context, p *collectionPage, info app.Co
 				Margin(space.None, space.None, space.None, space.Px8)
 		}
 		mono(strconv.Itoa(info.MediaCount) + " 首")
-		if txt := sum.HiddenText(); txt != "" {
+		if txt := sum.HiddenText(p.keyword != ""); txt != "" {
 			item(txt)
 		}
 		if sum.Complete() && sum.Duration > 0 {

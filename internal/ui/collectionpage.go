@@ -341,9 +341,16 @@ func (c collectionSummary) Complete() bool {
 
 // HiddenText 是表头那句「已隐藏 N 首失效内容」；一个都没藏时是空串（那一格
 // 不画）。
-func (c collectionSummary) HiddenText() string {
+//
+// ⚠️ **搜索时要换一个说法**：`Total` 是整个收藏夹的条数，而 `Hidden` 只是
+// 这次搜索结果里被滤掉的那几首——两个数不同口径，拼成一句会让用户以为
+// 「整夹只藏了这么多」。
+func (c collectionSummary) HiddenText(searching bool) string {
 	if c.Hidden <= 0 {
 		return ""
+	}
+	if searching {
+		return "本次搜索隐藏 " + strconv.Itoa(c.Hidden) + " 首失效内容"
 	}
 	return "已隐藏 " + strconv.Itoa(c.Hidden) + " 首失效内容"
 }
@@ -1260,7 +1267,7 @@ func (s *Shell) applyCollectionKeyword(p *collectionPage, kw string) bool {
 	return true
 }
 
-// viewCollectionEmpty 画这一页「拉回来了、但是空的」那两种空状态。
+// viewCollectionEmpty 画这一页「拉回来了、但是空的」那三种空状态。
 //
 // ⚠️ 判据是 **MediaCount 为 0** 而不是「列表此刻一行都没有」：后者在翻页加载的那一瞬间也为真，
 // 那样会让整页内容闪一下空状态。搜了没结果的判据是「**词已经发出去了**」（换词的这一瞬间列表
