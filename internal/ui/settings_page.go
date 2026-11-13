@@ -218,7 +218,7 @@ func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
 	})
 }
 
-// syncSettings 是设置页每帧的副作用：切走就停录、换 Tab 就回到顶上。
+// syncSettings 是设置页每帧的副作用：切走就停录、切 Tab 时保留当前视口。
 //
 // ⚠️ 它们不在 `viewSettings` 里：设置页在满屏开着的时候不画（票 #161），不挪出来的话
 // 「正在录快捷键」那一格会一直记着上一次录到一半的东西。
@@ -233,9 +233,9 @@ func (s *Shell) syncSettings(c *ui.Context) {
 		s.recorderShown = true
 	}
 
-	// 按 Tab 时回到顶上。
+	// 按 Tab 时保留滚动位置；内容较短时由滚动容器自然夹紧到有效范围。
 	if last, tab := s.settings.shownTab, s.settings.tab; last != tab {
-		s.settings.shownTab, s.settings.scroll.Y = tab, 0
+		s.settings.shownTab = tab
 		// 指着的那一项只在它所在的那一格：换走就没东西可指了。
 		if s.settings.focus != settingsFocusNone && tab != settingsTabGeneral {
 			s.settings.focus = settingsFocusNone

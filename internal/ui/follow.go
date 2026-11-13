@@ -374,7 +374,7 @@ func (s *Shell) resetFollowIfAccountChanged(f *followPage) {
 	f.gen++
 }
 
-// resetUsers 清掉右边那一格：行、翻页闸门、代次、回顶。
+// resetUsers 清掉右边那一格：行、翻页闸门、代次；切分组时保留当前视口。
 //
 // ⚠️ **必须在换分组 / 换词之后调，而且行也要一起清**：`pager.stop` 只是让在途
 // 的那一页不落地（`upPager` 那段的注释），已经拿到的行还留在 `users` 里，
@@ -390,7 +390,6 @@ func (f *followPage) resetUsers() {
 	f.users = nil
 	f.seen = nil
 	f.pager = upPager{}
-	f.state.ScrollTo(0, ui.Start)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

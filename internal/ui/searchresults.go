@@ -104,6 +104,9 @@ type searchState struct {
 	// lists 是每个 Tab 那一份分页列表。
 	lists [searchTabCount]searchTab
 
+	// scroll 由三个结果列表共享；行状态仍各自独立，切 Tab 时保留视口锚点。
+	scroll ui.ScrollState
+
 	// fetch 拉一页。测试可以替换这一层，但生产实现只调用应用搜索边界。
 	fetch func(tab int, ctx context.Context, page int) (list.Page, error)
 }
@@ -167,6 +170,7 @@ func (st *searchState) init(s *Shell) {
 	st.fetch = s.fetchSearchTab
 	for i := range st.lists {
 		st.lists[i].list = list.NewPaged(s.images, s.searchActions(i), s.searchFetcher(i))
+		st.lists[i].list.SetScroll(&st.scroll)
 		// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 		// 13px 淡灰缩在列表左上角，而这一页的「没有结果」是居中 15pt 两行——
 		// 等的那几秒里那行字和回来之后那一格对不上。

@@ -226,6 +226,8 @@ type upSpace struct {
 	// 「同一个 ListState 被两个 List 显示」时 panic（`ui/list.go` 的
 	// buildList），而共用还会把两张 Tab 的滚动位置搅在一起。
 	state [upTabCount]ui.ListState
+	// scroll 由四个 Tab 内容区共享，切换时不以重新测量出的偏移替换当前视口。
+	scroll ui.ScrollState
 	// keys 是每一张 Tab 那张列表的键盘接线（游标 + 「↑ 到顶回侧栏」）。
 	//
 	// ⚠️ **一张 Tab 一份**：列表状态本来就是一张 Tab 一份的（`state` 那个
@@ -314,6 +316,7 @@ func (s *Shell) upSpaceFor(mid int64) *upSpace {
 		func(ctx context.Context, page int) (list.Page, error) {
 			return s.fetchVideos(ctx, sp, page)
 		})
+	sp.videos.SetScroll(&sp.scroll)
 	// ⚠️ **「正在加载」那一格由外面递进去**（票 #138）：分页列表自己那一句是
 	// 13px 淡灰缩在列表左上角，而「暂无投稿」是居中 15pt 两行。
 	sp.videos.SetEmptyView(loadingCell("正在加载…"))
