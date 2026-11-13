@@ -169,7 +169,8 @@ func TestLoginSuccessClearsTheLoginPagesTemporaryState(t *testing.T) {
 		t.Fatal("二维码出来了，位图却是 nil——这一条没验到东西")
 	}
 
-	loginSucceeds(t, tt, a)
+	waitLogin(t, a, app.LoginDone)
+	tt.Frame()
 
 	if s.qrBitmap != nil || s.qrDimBitmap != nil || s.qrFor != nil {
 		t.Errorf("登录成功之后登录页的位图还留着（bitmap %p / dim %p / 码 %p）——"+
