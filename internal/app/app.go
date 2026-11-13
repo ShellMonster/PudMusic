@@ -1131,6 +1131,13 @@ type App struct {
 	// 窗口状态——那一头是带锁的，所以跨 goroutine 调它不违反铁律一。
 	downloadNotifier func(taskID, title string)
 
+	// downloadFailedNotifier 是「某一首下载坏了」的那只手。
+	//
+	// ⚠️ **它和 `downloadNotifier` 是两个通道**：完成是「歌已经能听了」，
+	// 失败是「这首下不成了」。分开之后界面层可以只给失败补一条提示，
+	// 而不用把「完成」那一套「用户不在才发」的规矩套过来。
+	downloadFailedNotifier func(taskID, title, reason string)
+
 	// updateNotifier 是「查到了新版本，去看看」的那只手，由界面层装一次。
 	//
 	// ⚠️ **它和 `downloadNotifier` 是两件事**：下载完成是**后台发生**的（用户

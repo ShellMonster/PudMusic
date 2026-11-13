@@ -196,7 +196,9 @@ func (a *App) downloadFinished(s download.Snapshot) {
 	case download.StatusError:
 		// ⚠️ **剥掉内部前缀**（"download: "）：那是我们自己的说法，读屏软件
 		// 是逐字念的（理由见 `announce.go` 的 `announceErrTextOf`）。
-		a.announce("《" + s.Title + "》下载失败：" + announceErrTextOf(s.Err))
+		reason := announceErrTextOf(s.Err)
+		a.announce("《" + s.Title + "》下载失败：" + reason)
+		a.notifyDownloadFailed(s.ID, s.Title, reason)
 	}
 }
 
@@ -214,6 +216,16 @@ func (a *App) SetDownloadNotifier(fn func(taskID, title string)) {
 	a.mu.Unlock()
 }
 
+// SetDownloadFailedNotifier 装上「某一首下载坏了」的那只手，由界面层装一次。
+//
+// ⚠️ **失败和完成走两个通道**：完成只需要在用户离开时发系统通知；失败在
+// 用户还在应用里时也该说一句，因为下载记录页以外看不到那一行红字。
+func (a *App) SetDownloadFailedNotifier(fn func(taskID, title, reason string)) {
+	a.mu.Lock()
+	a.downloadFailedNotifier = fn
+	a.mu.Unlock()
+}
+
 // notifyDownloadDone 把「下载下完了」告诉界面层。
 //
 // ⚠️ **不在 `a.mu` 底下调界面层那一头**：那一头会读窗口状态（它自己带锁），
@@ -225,6 +237,16 @@ func (a *App) notifyDownloadDone(taskID, title string) {
 	a.mu.Unlock()
 	if notifier != nil {
 		notifier(taskID, title)
+	}
+}
+
+// notifyDownloadFailed 把「某一首下载坏了」告诉界面层。
+func (a *App) notifyDownloadFailed(taskID, title, reason string) {
+	a.mu.Lock()
+	notifier := a.downloadFailedNotifier
+	a.mu.Unlock()
+	if notifier != nil {
+		notifier(taskID, title, reason)
 	}
 }
 

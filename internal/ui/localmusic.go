@@ -325,6 +325,11 @@ type localPage struct {
 	style int
 	// dirLabel 是目录筛选里选中那一档的**显示名**（不是路径，见 dirLabels）。
 	dirLabel string
+	// rescanAsked 是「用户按了重新扫描，还没说结果」。
+	//
+	// ⚠️ **不要求先见到 `Scanning=true`**：扫描很快的时候（目录里只有几首），
+	// 它可能在下一帧之前就跑完了，那个中间态一帧都没有。
+	rescanAsked bool
 	// search 是搜索框里正在敲的字，searchBox 是那一枚会展开的搜索收着还是开着。
 	search    string
 	searchBox searchButtonState
@@ -475,6 +480,7 @@ func (p *localPage) view(c *ui.Context) {
 	p.begin(c)
 
 	st := p.app.LocalMusicState()
+	p.settleRescan(st)
 	// 🔴 **选中的那一首跟着**那一首**走**（铁律四）：行换了之后按 ID 重新对位。
 	//
 	// ⚠️ **为什么自己扛这一件**：框架本来会做（「游标跟着它的项走」，靠
@@ -664,9 +670,35 @@ func (p *localPage) viewToolbar(c *ui.Context, st app.LocalMusicState) {
 			}
 		}
 		if p.tipWith(c, pud.IconBtn(c, "local:rescan", "refresh", "重新扫描", pud.IconOpts{}), "重新扫描").Clicked() {
-			p.app.RescanLocalMusic()
+			p.askRescan()
 		}
 	})
+}
+
+// askRescan 处理「重新扫描」那一下：先说要开始了，再等扫描收尾说结果。
+//
+// ⚠️ **列表非空时这一页没有任何「正在扫」的标志**（那一句只在空列表上画），
+// 所以按下之后不说一句，用户会以为按钮是死的。
+func (p *localPage) askRescan() {
+	p.rescanAsked = true
+	p.say("正在重新扫描…", notice.Plain)
+	p.app.RescanLocalMusic()
+}
+
+// settleRescan 在扫描收尾时补一句结果。
+func (p *localPage) settleRescan(st app.LocalMusicState) {
+	if !p.rescanAsked {
+		return
+	}
+	if st.Scanning {
+		return
+	}
+	p.rescanAsked = false
+	if len(st.Tracks) == 0 {
+		p.say("扫描完成，没有找到音频文件", notice.Success)
+		return
+	}
+	p.say("扫描完成，共 "+strconv.Itoa(len(st.Tracks))+" 首", notice.Success)
 }
 
 // viewWarnings 把「有目录读不到」和「有格式我们放不了」摆出来。

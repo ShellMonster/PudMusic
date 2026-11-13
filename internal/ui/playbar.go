@@ -19,6 +19,7 @@ import (
 	tclean "github.com/ShellMonster/PudMusic/internal/ui/widgets/title"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -924,13 +925,26 @@ func (s *Shell) viewPlayMode(c *ui.Context, st app.State) {
 // 在主线程里等就是死等，事件循环会卡死。
 func (s *Shell) pickAndEnqueue() {
 	win := s.win
+	pick := s.pickAudio
 	go func() {
-		paths, err := platform.PickAudioFile(win)
-		if err != nil || len(paths) == 0 {
+		paths, err := pick(win)
+		if err != nil {
+			// 文件框打不开不是「用户取消」：取消返回的是空列表和 nil。
+			// 两件事混成一件，症状就是按了「加歌」什么也没发生。
+			s.addToast("打不开文件框："+err.Error(), notice.Danger)
+			return
+		}
+		if len(paths) == 0 {
 			return
 		}
 		s.enqueuePicked(paths)
 	}()
+}
+
+// pickAudioFile 是真的那一份文件框。抽成函数是为了让 `New` 里那一行赋值
+// 和 `pickImageFile` 长得一样，测试换桩时也只需要换一个地方。
+func pickAudioFile(win *mygo.Window) ([]string, error) {
+	return platform.PickAudioFile(win)
 }
 
 // viewProgress 是那一行进度。

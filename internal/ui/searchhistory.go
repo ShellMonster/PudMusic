@@ -139,17 +139,21 @@ func (h *searchHistory) remove(value string) {
 	h.signal()
 }
 
-// clear 清空全部搜索历史。
-func (h *searchHistory) clear() {
+// clear 清空全部搜索历史，返回这一次真的清掉了东西没有。
+//
+// ⚠️ **返回值是给「说一句话」那一层用的**：本来就没有历史时不该弹
+// 「已清空」——那句话会让用户以为自己刚刚删掉了什么。
+func (h *searchHistory) clear() bool {
 	h.mu.Lock()
 	if len(h.items) == 0 {
 		h.mu.Unlock()
-		return
+		return false
 	}
 	h.items = nil
 	h.dirty = true
 	h.mu.Unlock()
 	h.signal()
+	return true
 }
 
 // list 是浮层上要摆的那几条：最近的在前，最多 searchHistoryShown 条。

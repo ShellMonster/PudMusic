@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/notice"
 )
 
 const sleepMenuW = 140
@@ -19,4 +20,21 @@ func sleepRemaining(st app.State) string {
 	}
 	m := int(time.Until(st.SleepAt)/time.Minute) + 1
 	return fmt.Sprintf("还剩约 %d 分钟", max(m, 1))
+}
+
+// 三个设置动作各说一句话。目标是同一件事：定上之后图标只换颜色，
+// 「定的是哪一种」要重新点开浮层才知道。
+func (s *Shell) setSleepTimer(d time.Duration) {
+	s.app.SetSleepTimer(d)
+	s.addToast(fmt.Sprintf("将在 %d 分钟后暂停播放", int(d/time.Minute)), notice.Success)
+}
+
+func (s *Shell) sleepAfterTrack() {
+	s.app.SleepAfterTrack()
+	s.addToast("放完这一首就暂停播放", notice.Success)
+}
+
+func (s *Shell) cancelSleepTimer() {
+	s.app.CancelSleepTimer()
+	s.addToast("已关闭睡眠定时", notice.Success)
 }

@@ -436,11 +436,14 @@ func (s *Shell) startCollectionClearInvalid(p *collectionPage) {
 func (s *Shell) startCollectionDeleteFolder(p *collectionPage) {
 	ref, title := p.ref, collectionTitleText(p.ref.Type, s.app.Collection(p.ref))
 	s.app.DeleteCollectionFolder(ref, title, func(msg string, ok bool, tone notice.Tone) {
-		s.sayFolderDone(msg, tone)
 		if !ok {
-			return // 收藏夹还在，这一页留着，提示也留着
+			// 收藏夹还在，这一页留着，提示也留着。
+			s.sayFolderDone(msg, tone)
+			return
 		}
-		s.leave.put(ref)
+		// 成功这一句要等走开之后再说：`navigate` 开头会 `clearToasts`，
+		// 先说就会被擦掉，用户只看见一个空页面。
+		s.leave.put(ref, msg, tone)
 		s.wake.invalidate()
 	})
 }
@@ -464,23 +467,25 @@ func (s *Shell) startCollectionForgetFolder(p *collectionPage) {
 type pendingLeave struct {
 	mu   sync.Mutex
 	ref  app.CollectionRef
+	msg  string
+	tone notice.Tone
 	have bool
 }
 
 // put 记下「该走开了」。同一时刻只有一个（收藏夹页一次只处理一个确认框）。
-func (l *pendingLeave) put(ref app.CollectionRef) {
+func (l *pendingLeave) put(ref app.CollectionRef, msg string, tone notice.Tone) {
 	l.mu.Lock()
-	l.ref, l.have = ref, true
+	l.ref, l.msg, l.tone, l.have = ref, msg, tone, true
 	l.mu.Unlock()
 }
 
 // take 取走。取过就没有了——不走第二遍（理由同 `collectionNotice`）。
-func (l *pendingLeave) take() (app.CollectionRef, bool) {
+func (l *pendingLeave) take() (app.CollectionRef, string, notice.Tone, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	ref, have := l.ref, l.have
+	ref, msg, tone, have := l.ref, l.msg, l.tone, l.have
 	l.have = false
-	return ref, have
+	return ref, msg, tone, have
 }
 
 // takeLeave 是「刚被删掉的那个容器，该走开了」那一趟的出口。
@@ -488,7 +493,7 @@ func (l *pendingLeave) take() (app.CollectionRef, bool) {
 // **每帧开头调一次，而且取走**：取过就不会再说第二遍（理由同
 // `flushCollectionNotice`）。
 func (s *Shell) takeLeave() {
-	gone, ok := s.leave.take()
+	gone, msg, tone, ok := s.leave.take()
 	if !ok {
 		return
 	}
@@ -501,6 +506,9 @@ func (s *Shell) takeLeave() {
 	// 而那时候再把人家从别的页面踢走，是这一层最不该干的那种事。
 	if s.router.Path() == collectionPath(gone.ID) {
 		s.navigate("/empty")
+	}
+	if msg != "" {
+		s.addToast(msg, tone)
 	}
 }
 

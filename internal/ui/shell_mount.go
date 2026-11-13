@@ -118,7 +118,13 @@ func (s *Shell) enqueuePicked(paths []string) {
 	for i, p := range paths {
 		items[i] = app.LocalItem(p)
 	}
-	s.app.Enqueue(items...)
+	if err := s.app.Enqueue(items...); err != nil {
+		// 空队列时这一步会顺手起播；起播失败（格式不支持、文件坏了）和
+		// 「选中的全都不可入队」都从这里返回。不说一句，用户看到的是
+		// 选完文件什么都没发生。
+		s.addToast("放不了这些文件："+err.Error(), notice.Danger)
+		return
+	}
 	// ⚠️ **随机档要说一句**：那一档的洗牌袋是**池子**——加进来的歌立刻在池中，
 	// 这一轮就轮到它（见 app/queue_shuffle.go）。用户看不见池子里有什么。
 	if n := s.app.PlayMode().EnqueueNotice(); n != "" {

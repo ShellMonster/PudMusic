@@ -230,6 +230,9 @@ func TestTheSleepPopListsTheTimerStepsLikeThePrototype(t *testing.T) {
 	if st := s.app.Snapshot(); st.SleepAt.IsZero() {
 		t.Error("点了 15 分钟之后没定上睡眠")
 	}
+	if !tt.HasText("将在 15 分钟后暂停播放") {
+		t.Errorf("满屏里设了定时没说一句，文字有 %q", tt.Texts())
+	}
 }
 
 // TestThePrefsPopTogglesEveryPrototypeSwitch：偏好弹层里的开关真的管画面。

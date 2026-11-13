@@ -11,6 +11,7 @@ package ui
 // `~/.herdr-projects/reports/Biu_MyGo/125/report.md`，只查不改）。
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
@@ -159,5 +160,21 @@ func TestChangingTheDownloadDirectorySaysWhereItTakesEffect(t *testing.T) {
 	})
 	waitFor(t, "说清楚它在哪儿生效", func() bool {
 		return tt.HasText("下载记录页上写的就是它")
+	})
+}
+
+// TestAFailingPathDialogSaysSo 文件框打不开时要说一句。
+//
+// ⚠️ **它和「用户取消」不是一件事**：取消返回空串和 nil，真的打不开才带错。
+// 两件事混成一件，症状是按了「更改」什么也没发生。
+func TestAFailingPathDialogSaysSo(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+
+	s.picker = &fakePicker{err: errors.New("没有权限打开文件框")}
+	clickSetting(t, tt, s, "更改")
+
+	waitFor(t, "文件框打不开要说一句", func() bool {
+		tt.Frame()
+		return tt.HasText("选下载目录失败")
 	})
 }

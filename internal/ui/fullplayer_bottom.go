@@ -395,17 +395,17 @@ func (s *Shell) viewFullSleep(c *ui.Context, st app.State) {
 			d := d
 			if pud.PopOpt(c, "full:sl:"+d.String(), strconv.Itoa(int(d/time.Minute))+" 分钟后暂停", "", false).Clicked() {
 				s.closeFullPops()
-				s.app.SetSleepTimer(d)
+				s.setSleepTimer(d)
 			}
 		}
 		if pud.PopOpt(c, "full:sl:track", "放完这一首就停", "", st.SleepAfterTrack).Clicked() {
 			s.closeFullPops()
-			s.app.SleepAfterTrack()
+			s.sleepAfterTrack()
 		}
 		if active {
 			if pud.PopItem(c, "full:sl:off", "关闭定时", false).Clicked() {
 				s.closeFullPops()
-				s.app.CancelSleepTimer()
+				s.cancelSleepTimer()
 			}
 		}
 	})

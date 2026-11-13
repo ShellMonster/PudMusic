@@ -313,17 +313,17 @@ func (s *Shell) viewSleep(c *ui.Context, st app.State) {
 			// 原型 app.js:984：当前那一档打勾（`S.sleep.min === v`）。
 			if pud.PopOpt(c, "pb-sleep:"+label, label, "", st.SleepFor == d).Label("睡眠定时 " + label).Clicked() {
 				s.sleepOpen = false
-				s.app.SetSleepTimer(d)
+				s.setSleepTimer(d)
 			}
 		}
 		if pud.PopOpt(c, "pb-sleep:track", "放完这一首就暂停", "", st.SleepAfterTrack).Label("睡眠定时 放完这一首就停").Clicked() {
 			s.sleepOpen = false
-			s.app.SleepAfterTrack()
+			s.sleepAfterTrack()
 		}
 		if sleepActive(st) {
 			if pud.PopItem(c, "pb-sleep:off", "关闭定时", true).Label("睡眠定时 关闭定时").Clicked() {
 				s.sleepOpen = false
-				s.app.CancelSleepTimer()
+				s.cancelSleepTimer()
 			}
 		}
 	})

@@ -67,6 +67,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -711,7 +712,9 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 			ui.Text(c, suggestClearLabel).FontSize(scale.Font(c, scale.Size12)).TextColor(fg).SingleLine()
 		})
 		if s.withTip(c, clear, clearHistoryTip).Clicked() {
-			s.hist.clear()
+			if s.hist.clear() {
+				s.addToast("已清空搜索历史", notice.Success)
+			}
 		}
 	})
 }

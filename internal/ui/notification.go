@@ -563,6 +563,8 @@ func MountNotifications(a *app.App) {
 	// 指向的是主窗里的下载记录页。所以真正去弹的那一句得由**主窗口那个外壳**
 	// 来做（它才有那一页）。
 	a.SetDownloadNotifier(notifyDownloadDone)
+	// 失败走另一条：用户还在应用里时不再沉默，离开时发系统通知。
+	a.SetDownloadFailedNotifier(notifyDownloadFailed)
 	// 更新那一条**走同一套出口**：同样的活跃态判定、同样的稳定 ID 规矩、
 	// 同样的路由（点它跳到设置页的更新弹窗）。
 	//
@@ -716,17 +718,22 @@ func swapNotifyStub(fn func(id, title, body string) error) func(id, title, body 
 
 // sendNotification 发一条系统通知（真的，或者桩）。
 func sendNotification(id, title, body string) {
+	sendNotificationTone(id, title, body, notice.Success)
+}
+
+// sendNotificationTone 是带语义的那一版：发不出去时降级成同语义的应用内提示。
+func sendNotificationTone(id, title, body string, tone notice.Tone) {
 	notifyStub.mu.Lock()
 	stub := notifyStub.fn
 	notifyStub.mu.Unlock()
 	if stub != nil {
 		if err := stub(id, title, body); err != nil {
-			notifyFallback(title, body, err)
+			notifyFallbackTone(title, body, tone, err)
 		}
 		return
 	}
 	if err := platform.Notify(id, title, body); err != nil {
-		notifyFallback(title, body, err)
+		notifyFallbackTone(title, body, tone, err)
 	}
 }
 
@@ -758,6 +765,36 @@ func notifyDownloadDone(taskID, title string) {
 	})
 }
 
+// notifyDownloadFailed 是「某一首下载坏了」那一段。
+//
+// ⚠️ **它和 `notifyDownloadDone` 的判据不一样**：完成时用户看得见那一条
+// 变成绿勾，所以只在用户离开时才发系统通知；失败时用户可能正在别的页面，
+// 下载记录页上那行红字他看不见，所以**人在应用里也要弹一条**。
+//
+// ⚠️ **它从任何 goroutine 都能调**（应用层在下载那条后台线上调它）。读的
+// 那本账带锁，写提示走 `addToast`（自己带锁），都不碰界面状态。
+func notifyDownloadFailed(taskID, title, reason string) {
+	if taskID == "" {
+		return
+	}
+	body := "《" + title + "》下载失败：" + reason
+	if !tracker().snapshot().idle() {
+		if s := currentMainShell(); s != nil {
+			s.addToast(body, notice.Danger)
+		}
+		return
+	}
+	afterNotifyGrace(func() {
+		if !tracker().snapshot().idle() {
+			if s := currentMainShell(); s != nil {
+				s.addToast(body, notice.Danger)
+			}
+			return
+		}
+		sendNotificationTone(notifyDownloadID(taskID)+"-failed", "下载失败", body, notice.Danger)
+	})
+}
+
 // notifyFallback 是「系统通知发不出去」时的那句应用内提示。
 //
 // ⚠️ **它不许丢事件**（票面第 5 条）：权限被拒 / 没打包 / 不支持——这三种都
@@ -766,6 +803,11 @@ func notifyDownloadDone(taskID, title string) {
 // ⚠️ **而「记住，不再反复请求」是平台层的事**（见 `platform.Notify`）：
 // 这一层只管把这一次说清楚。
 func notifyFallback(title, body string, err error) {
+	notifyFallbackTone(title, body, notice.Success, err)
+}
+
+// notifyFallbackTone 是带语义的那一版：成功用绿、失败用红。
+func notifyFallbackTone(title, body string, tone notice.Tone, err error) {
 	log.Printf("pudmusic: 系统通知用不了，改用应用内提示（%s）：%v", title, err)
 	// 这一句由**主窗口那个外壳**弹（提示卡片是逐窗口的，见 `toast.go`）——
 	// 迷你播放器画的是「正在放什么」，它没有放提示卡片的地方。
@@ -783,6 +825,6 @@ func notifyFallback(title, body string, err error) {
 	// 而**下载记录页上那一列「下载完成」是常驻的**——那才是这一档真正不会丢的
 	// 证据。
 	if s := currentMainShell(); s != nil {
-		s.addStickyToast(body, notice.Success)
+		s.addStickyToast(body, tone)
 	}
 }
