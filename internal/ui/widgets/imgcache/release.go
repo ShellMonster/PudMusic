@@ -1,5 +1,11 @@
 package imgcache
 
+import (
+	"weak"
+
+	"github.com/egoist/mygo/ui"
+)
+
 // 票 #673：把长期没人要的封面像素放掉，需要的时候再解回来。
 //
 // # 为什么不是 `ui.Bitmap.ReleasePixels`
@@ -132,6 +138,7 @@ func (c *Cache) takePixelsLocked(e *entry) bool {
 	if e.bm == nil || e.dropped || e.fetching {
 		return false
 	}
+	e.weakBm = weak.Make(e.bm)
 	e.bm = nil
 	e.err = nil
 	e.done = false
@@ -202,6 +209,15 @@ func (c *Cache) reloadReleased(e *entry) {
 	e.mu.Lock()
 	if !e.released || e.fetching || e.dropped || e.done {
 		e.mu.Unlock()
+		return
+	}
+	if bm := e.weakBm.Value(); bm != nil {
+		// 别处还拿着放掉的那个 Bitmap：当帧复活，像素和 mipmap 本来就在内存里。
+		e.bm, e.err, e.done, e.released = bm, nil, true, false
+		e.weakBm = weak.Pointer[ui.Bitmap]{}
+		e.mu.Unlock()
+		c.forgetReleased(e)
+		c.account(e, bm)
 		return
 	}
 	e.fetching = true

@@ -44,6 +44,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"weak"
 
 	"github.com/ShellMonster/PudMusic/internal/perf"
 	"github.com/egoist/mygo/ui"
@@ -890,6 +891,10 @@ type entry struct {
 
 	// released 报「像素已经放掉、记录还留着」（票 #673，见 `release.go`）。
 	released bool
+
+	// weakBm 在放掉像素时指向那个 Bitmap：别处（正在播放、迷你窗口）还拿着它的话，
+	// 再要时直接复活，不重新解码、不闪占位。只是弱引用，不拖住内存。
+	weakBm weak.Pointer[ui.Bitmap]
 
 	// born 是这一条**第一次被要**的帧号。`drawn` 为 0（`BeginFrame` 之前建的）
 	// 时 `idleFrames` 拿它当底（见 `release.go`）。
