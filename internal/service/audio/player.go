@@ -71,6 +71,9 @@ type Player struct {
 	// fadeIn 是下一次 Play 的淡入时长，0 = 默认（见 SetFadeIn）。
 	fadeIn time.Duration
 
+	// seek 是播放中 seek 的状态（见 seek.go）。
+	seek seekState
+
 	// closers 是这个播放器**自己**占着的资源，目前只有在线字节源。
 	//
 	// ⚠️ 它们必须由 Close **同步**关掉，不能指望解码 goroutine 醒来之后
@@ -369,7 +372,13 @@ func (p *Player) Play() {
 }
 
 // Pause 暂停在原地。
-func (p *Player) Pause() { p.play.Pause() }
+func (p *Player) Pause() {
+	// 用户在 Seek 的静音间隙里按了暂停：落地之后不许替他接着放。
+	p.seek.mu.Lock()
+	p.seek.resume = false
+	p.seek.mu.Unlock()
+	p.play.Pause()
+}
 
 // Playing 报告当前是不是在出声。暂停、播完、关闭后都是 false。
 func (p *Player) Playing() bool { return p.play.Playing() }
@@ -378,9 +387,42 @@ func (p *Player) Playing() bool { return p.play.Playing() }
 //
 // t 是**歌里的时间**，和倍率无关：变速层报给上层的帧号就是源帧，所以这一句
 // 在 0.5 倍速和 2 倍速下拖到同一处都是同一处（见 rate.go 的类型注释）。
+//
+// ⚠️ **在放的时候不能直接跳**：MyGo 的 Seek 是 reset 声部、清环，5ms 的斜坡
+// 只管音量和暂停，管不到 reset，输出会在一个样本之内从原波形掉到静音（咔）。
+// 所以在放就先 Pause（混音器 5ms 淡出），等 seekGap 让淡出走完，跳，再 Play
+// （混音器 5ms 淡入）。等的时候有更新的 Seek 顶上来，这一次作废（见 seek.go）。
+//
+// ⚠️ 这一步在放时会阻塞调用方 seekGap；不在放时立刻跳。
 func (p *Player) Seek(t time.Duration) {
+	s := &p.seek
+	s.mu.Lock()
+	s.gen++
+	gen := s.gen
+	if p.play.Playing() {
+		s.resume = true
+		p.play.Pause()
+	}
+	paused := s.resume
+	s.mu.Unlock()
+
+	if paused {
+		s.sleep(seekGap)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gen != gen {
+		return
+	}
 	p.vs.expectSeek(seekFrame(t, p.vs.SampleRate(), p.vs.Len()))
 	p.play.Seek(t)
+	if s.resume {
+		s.resume = false
+		// 直接用 MyGo 的 Play：它自己会 5ms 淡入；Player.Play 的 200ms 淡入
+		// 是「开始放」用的，拖一下进度条声音就没了。
+		p.play.Play()
+	}
 }
 
 // seekFrame 是 MyGo 的 `Player.Seek` 把 t 换成源帧的同一套算法（四舍五入、
