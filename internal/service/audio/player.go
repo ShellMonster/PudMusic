@@ -354,6 +354,15 @@ func (c *closingDecoder) Close() error {
 // ⚠️ **已经在放的时候不淡**：拖进度条松手那一下也会调 Play（`App.ScrubEnd`），
 // 那时候淡一下是「拖一下声音就没了」。
 func (p *Player) Play() {
+	// Seek 的静音间隙里按播放：不能现在就放（会在 reset 之前出声），记下来
+	// 让落地之后放。
+	p.seek.mu.Lock()
+	if p.seek.pending {
+		p.seek.resume = true
+		p.seek.mu.Unlock()
+		return
+	}
+	p.seek.mu.Unlock()
 	if p.play.Playing() {
 		p.play.Play()
 		return
@@ -381,40 +390,67 @@ func (p *Player) Pause() {
 }
 
 // Playing 报告当前是不是在出声。暂停、播完、关闭后都是 false。
-func (p *Player) Playing() bool { return p.play.Playing() }
+//
+// Seek 的静音间隙里报「用户眼里的」状态：是 Seek 替他暂停的就还是 true，
+// 否则 tick 会把这 30ms 当成「从在放变成不在放」。
+func (p *Player) Playing() bool {
+	s := &p.seek
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pending {
+		return s.resume
+	}
+	return p.play.Playing()
+}
 
-// Seek 跳到从头算起的 t。位置会被夹在 [0, Duration] 里，拖到末尾是合法的。
+// Seek 跳到 t。
 //
 // t 是**歌里的时间**，和倍率无关：变速层报给上层的帧号就是源帧，所以这一句
 // 在 0.5 倍速和 2 倍速下拖到同一处都是同一处（见 rate.go 的类型注释）。
 //
 // ⚠️ **在放的时候不能直接跳**：MyGo 的 Seek 是 reset 声部、清环，5ms 的斜坡
 // 只管音量和暂停，管不到 reset，输出会在一个样本之内从原波形掉到静音（咔）。
-// 所以在放就先 Pause（混音器 5ms 淡出），等 seekGap 让淡出走完，跳，再 Play
-// （混音器 5ms 淡入）。等的时候有更新的 Seek 顶上来，这一次作废（见 seek.go）。
+// 所以在放就先 Pause（混音器 5ms 淡出），seekGap 之后由定时器跳，再 Play
+// （混音器 5ms 淡入）。状态机见 seek.go。
 //
-// ⚠️ 这一步在放时会阻塞调用方 seekGap；不在放时立刻跳。
+// ⚠️ **Seek 不阻塞调用方**（界面 goroutine 会调它，键盘连发也走这里）：在放时
+// 立刻返回，落地在 seekGap 之后。间隙里 Position 报 target，Playing 报 resume，
+// Play 只记「落地后要放」，更新的 Seek 只改 target。不在放时立刻跳。
 func (p *Player) Seek(t time.Duration) {
 	s := &p.seek
 	s.mu.Lock()
-	s.gen++
-	gen := s.gen
-	if p.play.Playing() {
-		s.resume = true
-		p.play.Pause()
-	}
-	paused := s.resume
-	s.mu.Unlock()
-
-	if paused {
-		s.sleep(seekGap)
-	}
-
-	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.gen != gen {
+	if s.closed {
 		return
 	}
+	if s.pending {
+		s.target = t
+		return
+	}
+	if !p.play.Playing() {
+		p.landSeek(t)
+		return
+	}
+	s.pending, s.resume, s.target = true, true, t
+	p.play.Pause()
+	s.schedule(seekGap, p.finishSeek)
+}
+
+// finishSeek 是间隙到了的落地（定时器 goroutine）。
+func (p *Player) finishSeek() {
+	s := &p.seek
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || !s.pending {
+		return
+	}
+	s.pending = false
+	p.landSeek(s.target)
+}
+
+// landSeek 真的跳，持有 seek.mu 调用。resume 为真就接着放。
+func (p *Player) landSeek(t time.Duration) {
+	s := &p.seek
 	p.vs.expectSeek(seekFrame(t, p.vs.SampleRate(), p.vs.Len()))
 	p.play.Seek(t)
 	if s.resume {
@@ -442,6 +478,17 @@ func seekFrame(t time.Duration, rate int, length int64) int64 {
 // 回源帧，见 `varispeed.SourceAt`。
 func (p *Player) Position() time.Duration {
 	rate := p.vs.SampleRate()
+	// Seek 的静音间隙里播放头已经在目标上了，别让界面回弹 30ms。
+	p.seek.mu.Lock()
+	if p.seek.pending {
+		t := p.seek.target
+		p.seek.mu.Unlock()
+		if rate <= 0 {
+			return t
+		}
+		return framesToTime(seekFrame(t, rate, p.vs.Len()), rate)
+	}
+	p.seek.mu.Unlock()
 	if rate <= 0 {
 		return p.play.Position()
 	}
@@ -543,6 +590,13 @@ func (p *Player) Rate() float64 { return p.vs.rate() }
 
 // Close 停掉并释放解码器、字节源和文件句柄。可以重复调用。
 func (p *Player) Close() {
+	// 等着落地的 Seek 作废：落地不能打在关掉的播放器上。
+	p.seek.mu.Lock()
+	p.seek.closed, p.seek.pending = true, false
+	if p.seek.stop != nil {
+		p.seek.stop()
+	}
+	p.seek.mu.Unlock()
 	// 正在跑的那一趟斜坡先停掉：它还在往一个已经关掉的播放器上写增益。
 	p.stopRamp()
 	// 先放字节源，再停 MyGo：反过来的话，MyGo 那边的解码 goroutine 还会

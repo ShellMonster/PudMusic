@@ -114,7 +114,7 @@ func seekedTone(t *testing.T) float64 {
 	p := New(&toneDec{})
 	defer p.Close()
 	rec := &recorder{}
-	p.seek.wait = func(d time.Duration) { rec.render(int(d.Seconds() * mixRate)) }
+	clk := newSeekClock(p, rec)
 
 	p.play.Play()
 	rec.pumpUntilSound(t)
@@ -124,6 +124,7 @@ func seekedTone(t *testing.T) float64 {
 	}
 
 	p.Seek(10 * time.Second)
+	clk.advance(seekGap)
 
 	rec.pumpUntilSound(t)
 	rec.render(mixRate / 50)
@@ -145,31 +146,108 @@ func TestSeekWhilePlayingHasNoDiscontinuity(t *testing.T) {
 	}
 }
 
-// playingTone 起一个在放的播放器（混音器手动推进），返回它和录音机。
-func playingTone(t *testing.T) (*Player, *recorder) {
+// seekClock 是注入给 seekState.after 的手动时钟：只有 advance 才会让间隙
+// 过去，期间混音器照真实时长推进（淡出走完才算数）。
+type seekClock struct {
+	rec     *recorder
+	pending []*seekTimer
+}
+
+type seekTimer struct {
+	left    time.Duration
+	f       func()
+	stopped bool
+}
+
+func newSeekClock(p *Player, rec *recorder) *seekClock {
+	c := &seekClock{rec: rec}
+	p.seek.after = func(d time.Duration, f func()) func() {
+		tm := &seekTimer{left: d, f: f}
+		c.pending = append(c.pending, tm)
+		return func() { tm.stopped = true }
+	}
+	return c
+}
+
+func (c *seekClock) advance(d time.Duration) {
+	c.rec.render(int(d.Seconds() * mixRate))
+	for _, tm := range c.pending {
+		if tm.stopped || tm.left <= 0 {
+			continue
+		}
+		if tm.left -= d; tm.left <= 0 {
+			tm.f()
+		}
+	}
+}
+
+// playingTone 起一个在放的播放器（混音器手动推进），返回它、录音机和时钟。
+func playingTone(t *testing.T) (*Player, *recorder, *seekClock) {
 	t.Helper()
 	manualMixer(t)
 	p := New(&toneDec{})
 	t.Cleanup(p.Close)
 	rec := &recorder{}
+	clk := newSeekClock(p, rec)
 	p.play.Play()
 	rec.pumpUntilSound(t)
-	return p, rec
+	return p, rec, clk
 }
 
-// TestStaleSeekIsDropped 锁住：等静音间隙时有更新的 Seek 顶上来，旧的那次
-// 不落地，最终位置是新的那次，而且接着放。
-func TestStaleSeekIsDropped(t *testing.T) {
-	p, rec := playingTone(t)
-	nested := false
-	p.seek.wait = func(d time.Duration) {
-		rec.render(int(d.Seconds() * mixRate))
-		if !nested {
-			nested = true
-			p.Seek(20 * time.Second)
-		}
-	}
+// TestSeekWhilePlayingDoesNotBlock 锁住：播放中 Seek 立刻返回、时钟没走，
+// 此时还没落地；时钟走完 seekGap 才落地并接着放。
+// 曾经出错的行为：Seek 在界面 goroutine 里睡 30ms，连发的键盘 seek 掉帧。
+func TestSeekWhilePlayingDoesNotBlock(t *testing.T) {
+	p, _, clk := playingTone(t)
+	before := p.play.Position()
 	p.Seek(10 * time.Second)
+	if got := p.play.Position(); got >= 5*time.Second {
+		t.Fatalf("时钟没走 Seek 就落地了：%v（之前 %v）", got, before)
+	}
+	clk.advance(seekGap)
+	if got := p.play.Position(); got < 10*time.Second || got > 11*time.Second {
+		t.Errorf("落地位置 %v，want 10s 附近", got)
+	}
+	if !p.Playing() {
+		t.Error("落地后没有接着放")
+	}
+}
+
+// TestSeekGapReportsUserView 锁住：间隙里 Position 是目标、Playing 是 true，
+// 界面不会回弹也不会把这 30ms 当成停了。
+func TestSeekGapReportsUserView(t *testing.T) {
+	p, _, _ := playingTone(t)
+	p.Seek(10 * time.Second)
+	if got := p.Position(); got != 10*time.Second {
+		t.Errorf("间隙里 Position = %v，want 目标 10s", got)
+	}
+	if !p.Playing() {
+		t.Error("间隙里 Playing = false，tick 会误判成停了")
+	}
+}
+
+// TestPlayDuringSeekGapWaitsForLanding 锁住：ScrubEnd 在 Seek 之后马上 Play，
+// 不能在落地之前把声音放出来，只是记下落地后要放。
+func TestPlayDuringSeekGapWaitsForLanding(t *testing.T) {
+	p, _, clk := playingTone(t)
+	p.Seek(10 * time.Second)
+	p.Play()
+	if p.play.Playing() {
+		t.Error("间隙里 Play 提前放起来了")
+	}
+	clk.advance(seekGap)
+	if !p.play.Playing() || p.play.Position() < 10*time.Second {
+		t.Errorf("落地后 playing=%v pos=%v", p.play.Playing(), p.play.Position())
+	}
+}
+
+// TestStaleSeekIsDropped 锁住：间隙里更新的 Seek 顶上来，只落地新的那次，
+// 并且接着放。
+func TestStaleSeekIsDropped(t *testing.T) {
+	p, _, clk := playingTone(t)
+	p.Seek(10 * time.Second)
+	p.Seek(20 * time.Second)
+	clk.advance(seekGap)
 	if got := p.play.Position(); got < 20*time.Second || got > 21*time.Second {
 		t.Errorf("Position = %v，want 新的那次（20s）而不是旧的（10s）", got)
 	}
@@ -179,25 +257,44 @@ func TestStaleSeekIsDropped(t *testing.T) {
 }
 
 // TestPauseDuringSeekGapStaysPaused 锁住：用户在 Seek 的静音间隙里按了暂停，
-// 落地之后不许替他接着放。
+// 落地之后不许替他接着放，但位置仍然落到目标。
 func TestPauseDuringSeekGapStaysPaused(t *testing.T) {
-	p, rec := playingTone(t)
-	p.seek.wait = func(d time.Duration) {
-		rec.render(int(d.Seconds() * mixRate))
-		p.Pause()
-	}
+	p, _, clk := playingTone(t)
 	p.Seek(10 * time.Second)
+	p.Pause()
+	if p.Playing() {
+		t.Error("间隙里按暂停之后 Playing 还是 true")
+	}
+	clk.advance(seekGap)
 	if p.Playing() {
 		t.Error("间隙里按了暂停，Seek 落地后又自己放起来了")
+	}
+	if got := p.play.Position(); got < 10*time.Second {
+		t.Errorf("暂停后落地位置 %v，want >= 10s", got)
+	}
+}
+
+// TestCloseDuringSeekGap 锁住：间隙里 Close，定时器到了也不落地、不 panic，
+// 之后的 Seek 也是空操作。
+func TestCloseDuringSeekGap(t *testing.T) {
+	p, _, clk := playingTone(t)
+	p.Seek(10 * time.Second)
+	p.Close()
+	clk.advance(seekGap)
+	p.Seek(5 * time.Second)
+	if p.seek.pending {
+		t.Error("Close 之后 seek 还挂着")
 	}
 }
 
 // TestSeekWhilePausedIsImmediate 锁住：没在放时 Seek 不等间隙，也不开声。
 func TestSeekWhilePausedIsImmediate(t *testing.T) {
-	p, _ := playingTone(t)
+	p, _, _ := playingTone(t)
 	p.play.Pause()
-	p.seek.wait = func(time.Duration) { t.Error("暂停中的 Seek 不该等间隙") }
 	p.Seek(10 * time.Second)
+	if p.seek.pending {
+		t.Error("暂停中的 Seek 不该等间隙")
+	}
 	if p.Playing() {
 		t.Error("暂停中 Seek 后开始放了")
 	}
