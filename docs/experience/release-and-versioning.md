@@ -193,11 +193,27 @@ scripts/build.sh darwin/arm64 # 只打一个目标
 
 **出处**：`go.mod` 的 `require` 与 `tool` 指令
 
-MyGo 记在 `go.mod` 里，当前基线 **v0.9.0**（2026-11-11 升上来）。升级时以 `go.mod`
+MyGo 记在 `go.mod` 里，当前基线 **v0.9.1**（2026-11-15 升上来）。升级时以 `go.mod`
 为准，不要照抄这里的数字。
 
 **不锁死**：MyGo 是 pre-1.0、发布很快、**没有兼容性承诺**。升级前请重跑这里的探针
 （本仓库的测试、维护者本机的 `library/t-0018/` 探针、音频实验），确认计划依赖的 API 还在。
+
+### 升级步骤
+
+1. 从 `origin/main` 切 `upgrade/mygo-v<版本>`。不要直接改主工作树。
+2. 跑 `go get github.com/egoist/mygo@v<版本>`，再跑 `go mod tidy`。`require` 和
+   `tool` 用同一个版本；`tool` 跟着 `require` 走，不用单独改。
+3. 跑 `go generate ./internal/licensing/`，重生成
+   `resources/licenses/THIRD-PARTY-NOTICES.txt`。发布 CI 会重新生成这份清单并核
+   `git diff`，漏了会红。
+4. 改这一节的基线版本和日期。
+5. 跑默认验收。默认验收不包含 `internal/ui`，所以再跑受影响页面的 UI 用例。
+   跨版本升级时，先在同一平台跑旧版本的同一组用例，比对失败集合，别把既有红
+   当成这次引入的。框架改过播放器内部实现，`go test ./internal/service/audio/...`
+   也要跑。
+6. 跑 `go tool mygo build -platform <一个目标>`，确认 `mygo.json` 仍通过构建期校验。
+7. 发下一个版本时，把依赖升级写进 `CHANGELOG.md` 的对应版本段。
 
 ⚠️ `library/` 那一份**不在版本库里**（和 `docs/research/` 一样是维护者本机的东西）——找不到
 它不等于「没有探针」，是**没在仓库里**。
