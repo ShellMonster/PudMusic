@@ -127,7 +127,7 @@ func (s *Shell) feedAuthorChip(c *ui.Context, a app.FollowAuthor, on bool) ui.El
 		ui.Text(c, name).FontSize(scale.Font(c, scale.Size13)).TextColor(fg).
 			SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
 	})
-	return b.Tooltip(name)
+	return s.withTip(c, b, name)
 }
 
 // feedEndNote 是「没有更多动态了」（原型：居中、13 号 text-3、上下 24）。
