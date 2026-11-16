@@ -3,12 +3,12 @@ module github.com/ShellMonster/PudMusic
 go 1.27.3
 
 require (
-	github.com/Eyevinn/mp4ff v0.62.0
+	github.com/Eyevinn/mp4ff v0.62.1
 	github.com/ebitengine/purego v0.11.3
 	github.com/egoist/mygo v0.9.1
 	github.com/mewkiz/flac v1.0.14
 	github.com/tphakala/go-m4a v0.8.0
-	golang.org/x/image v0.47.0
+	golang.org/x/image v0.48.0
 	golang.org/x/net v0.62.0
 )
 
@@ -25,8 +25,8 @@ require (
 	github.com/ulikunitz/xz v0.5.15 // indirect
 	go.digitalxero.dev/rpm v0.3.4 // indirect
 	golang.org/x/crypto v0.58.0 // indirect
-	golang.org/x/sys v0.49.0 // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/sys v0.50.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 )
 
 tool github.com/egoist/mygo/cmd/mygo
