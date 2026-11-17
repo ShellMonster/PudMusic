@@ -57,6 +57,13 @@ func (s *Shell) viewFullTop(c *ui.Context, st app.State, g fullGeo) {
 					s.openCommentsDrawer()
 				}
 			}
+			if vp := s.app.VideoPhase(); st.HasTrack && vp != app.VideoLoading && vp != app.VideoOn {
+				on := s.full.wall.open
+				if s.withTip(c, pud.IconBtn(c, "full:wall", "wall", wallKeyLabel(on),
+					pud.IconOpts{On: on, Color: p.Text, HoverColor: p.Text}), wallKeyLabel(on)).Clicked() {
+					s.full.wall.toggle()
+				}
+			}
 			if s.withTip(c, pud.IconBtn(c, "full:queue", "queue", "打开播放列表",
 				pud.IconOpts{Color: p.Text, HoverColor: p.Text}), drawerTip(s.drawerOpen)).Clicked() {
 				s.toggleQueueDrawer()
