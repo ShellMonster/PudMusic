@@ -149,8 +149,19 @@ type UserHit struct {
 	// Fans 是粉丝数。
 	Fans int64
 	// Level 是 Lv 等级，零值是 B 站没给。
-	Level int
+	Level            int
+	Verification     Verification
+	VerificationDesc string
 }
+
+// Verification distinguishes absent certification from personal and organization verification.
+type Verification uint8
+
+const (
+	VerificationNone Verification = iota
+	VerificationPersonal
+	VerificationOrganization
+)
 
 // VideoPage 是一页视频 / 歌曲结果。
 type VideoPage struct {
@@ -208,11 +219,15 @@ type searchItem struct {
 	Duration json.RawMessage `json:"duration"`
 
 	// —— 用户那几项 ——
-	Uname string `json:"uname"`
-	Usign string `json:"usign"`
-	Fans  int64  `json:"fans"`
-	Level int    `json:"level"`
-	Upic  string `json:"upic"`
+	Uname          string `json:"uname"`
+	Usign          string `json:"usign"`
+	Fans           int64  `json:"fans"`
+	Level          int    `json:"level"`
+	Upic           string `json:"upic"`
+	OfficialVerify *struct {
+		Type *int   `json:"type"`
+		Desc string `json:"desc"`
+	} `json:"official_verify"`
 }
 
 // SearchVideos 查一页视频 / 歌曲结果。
@@ -277,14 +292,24 @@ func (c *Client) SearchUsers(ctx context.Context, q UserQuery) (UserPage, error)
 		if it.Mid == 0 {
 			continue // 和视频那边同一个理由：没有 mid 的没法当一行
 		}
-		out.Hits = append(out.Hits, UserHit{
+		hit := UserHit{
 			Mid:    it.Mid,
 			Name:   it.Uname,
 			Sign:   it.Usign,
 			Avatar: normalizeImageURL(it.Upic),
 			Fans:   it.Fans,
 			Level:  it.Level,
-		})
+		}
+		if it.OfficialVerify != nil && it.OfficialVerify.Type != nil {
+			switch *it.OfficialVerify.Type {
+			case 0:
+				hit.Verification = VerificationPersonal
+			case 1:
+				hit.Verification = VerificationOrganization
+			}
+			hit.VerificationDesc = it.OfficialVerify.Desc
+		}
+		out.Hits = append(out.Hits, hit)
 	}
 	out.HasMore = searchHasMore(q.Page, len(out.Hits), raw.NumResults)
 	out.Total = raw.NumResults

@@ -88,6 +88,7 @@ const searchUserItemType = app.ItemTypeUser
 // ⚠️ 挂在 Shell 上而不是建成局部变量：即时模式每一帧都重画一遍，局部变量下一帧
 // 就没了。三个 Tab 的滚动位置、已加载的行、代次全靠它跨帧活着。
 type searchState struct {
+	creators creatorPreview
 	// tab 是当前选中的 Tab（`ui.Tabs` 直接写它）。
 	tab int
 

@@ -482,3 +482,34 @@ func TestSearchVideoHitsCarryNoCidWhenBiliSendsNone(t *testing.T) {
 		t.Errorf("B 站没给 cid，这一层却读出了 %q", got)
 	}
 }
+
+// TestSearchUsersPreservesVerification distinguishes missing data from personal and organization certification.
+func TestSearchUsersPreservesVerification(t *testing.T) {
+	personal := userItem(1, "个人")
+	personal["official_verify"] = map[string]any{"type": 0, "desc": "音乐人"}
+	organization := userItem(2, "机构")
+	organization["official_verify"] = map[string]any{"type": 1, "desc": "机构"}
+	missing := userItem(3, "无认证")
+	unknown := userItem(4, "未知")
+	unknown["official_verify"] = map[string]any{"type": -1, "desc": "旧说明"}
+	noType := userItem(5, "缺少类型")
+	noType["official_verify"] = map[string]any{"desc": "认证说明"}
+	unverified := userItem(6, "未认证")
+	unverified["official_verify"] = map[string]any{"type": 127}
+	_, c, _ := searchFixture(t, map[string]any{"numResults": 6, "result": []any{personal, organization, missing, unknown, noType, unverified}})
+	pg, err := c.SearchUsers(context.Background(), UserQuery{Keyword: "音乐"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pg.Hits) != 6 {
+		t.Fatalf("got %d users", len(pg.Hits))
+	}
+	for i, want := range []Verification{VerificationPersonal, VerificationOrganization, VerificationNone, VerificationNone, VerificationNone, VerificationNone} {
+		if pg.Hits[i].Verification != want {
+			t.Errorf("用户 %d 的认证 = %v，want %v", i, pg.Hits[i].Verification, want)
+		}
+	}
+	if pg.Hits[0].VerificationDesc != "音乐人" || pg.Hits[1].VerificationDesc != "机构" {
+		t.Fatalf("认证说明没有保留: %+v", pg.Hits)
+	}
+}

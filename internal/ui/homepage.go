@@ -67,6 +67,9 @@ const (
 
 // homePage 是首页这一屏自己的状态。建一次，每一帧调 view。
 type homePage struct {
+	artistRevision uint64
+	artistReady    bool
+	artists        []string
 	// acts 是这一屏会做的操作（播放、加入队列）。
 	acts list.Actions
 	// cache 是封面缓存（整个窗口共用一个）。
@@ -468,6 +471,7 @@ func (h *homePage) cleanTitle(raw string) string {
 
 // viewRec 画「推荐」这一档：每日推荐、最近播放、你的收藏夹。
 func (h *homePage) viewRec(c *ui.Context, s *Shell, inner float32) {
+	h.viewHotArtists(c, s)
 	lay := homeLayoutFor(h.win)
 	gap := float32(space.GridGap)
 	if h.win <= 760 {

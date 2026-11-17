@@ -885,6 +885,10 @@ func (s *Shell) submitSearch(keyword string) {
 	// sel 还指着一条用户没选的词）。Esc 和失焦那两条已经清了，这里是
 	// 点选 / 回车 / 清空 × 这三条共用的关面板点。
 	s.nav.sel, s.nav.armed = -1, false
+	if p := &s.search.creators; p.keyword == keyword && p.err != nil {
+		p.keyword = ""
+		s.wake.invalidate()
+	}
 	target := searchPath + "?" + searchQuery + "=" + url.QueryEscape(keyword)
 	if s.router.Location() == target {
 		return

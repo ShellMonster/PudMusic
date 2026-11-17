@@ -53,9 +53,11 @@ type SearchItem struct {
 	View     int64
 	PubTime  time.Time
 	// Fans / Level 只有「用户」那一档有（UP 主卡上的「N 粉丝」和 LV 角标）。
-	Fans  int64
-	Level int
-	Item  Item
+	Fans             int64
+	Level            int
+	Verification     bili.Verification
+	VerificationDesc string
+	Item             Item
 }
 
 // SearchPage is one application-level page of search results.
@@ -213,7 +215,7 @@ func userItems(hits []bili.UserHit) []SearchItem {
 		mid := strconv.FormatInt(hit.Mid, 10)
 		items = append(items, SearchItem{
 			ID: searchUserIDPrefix + mid, Title: hit.Name, Cover: hit.Avatar,
-			Owner: hit.Sign, Fans: hit.Fans, Level: hit.Level, Item: Item{
+			Owner: hit.Sign, Fans: hit.Fans, Level: hit.Level, Verification: hit.Verification, VerificationDesc: hit.VerificationDesc, Item: Item{
 				Source: SourceOnline, Type: ItemTypeUser, Bvid: mid,
 				Title: hit.Name, Cover: hit.Avatar,
 			},

@@ -32,6 +32,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -117,6 +118,7 @@ func (s *Shell) viewSearch(c *ui.Context, r *ui.Route) {
 func (s *Shell) syncSearch(c *ui.Context) {
 	st := &s.search
 	keyword := strings.TrimSpace(s.router.Query(searchQuery))
+	s.syncCreatorPreview(keyword)
 
 	cur := st.tab
 	// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
@@ -208,11 +210,26 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string, winW float32) {
 	st := &s.search
 
 	ui.Column(c).Key("search:results").Grow(1).AlignItems(ui.Stretch).Children(func() {
-		pud.PageHead(c, "搜索结果", "「"+keyword+"」", "", winW, nil)
+		hasCreators := s.viewSearchCreators(c, keyword, winW)
+		if !hasCreators {
+			pud.PageHead(c, "搜索结果", "「"+keyword+"」", "", winW, nil)
+			if p := &s.search.creators; p.keyword == keyword && p.err != nil {
+				if ui.ButtonBase(c).Label("重试加载相关 UP 主").Padding(space.Px8).Children(func() {
+					ui.Text(c, "相关 UP 主加载失败，点击重试").TextColor(tok.Of(c.Theme()).Text2)
+				}).Clicked() {
+					p.keyword = ""
+					s.wake.invalidate()
+				}
+			}
+		}
 
 		// 🔴 **Tab 要在 `current` 之前画**：它是建到的时候才写 `st.tab`（理由见 `mygo/ui` 的
 		// `tabsParts.Tab`）；顺序反过来的表现是点了 Tab 画面先抖一下才换。
-		ui.Column(c).FillWidth().Margin(space.Px32, space.None, space.None, space.None).Children(func() {
+		tabGap := float32(space.Px32)
+		if hasCreators {
+			tabGap = space.Px12
+		}
+		ui.Column(c).FillWidth().Margin(tabGap, space.None, space.None, space.None).Children(func() {
 			tabs := make([]pud.Tab, searchTabCount)
 			for i := range tabs {
 				tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
