@@ -1,15 +1,17 @@
 package ui
 
 import (
+	"os"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 )
 
-// TestBareSlashFocusesNavbarSearch 锁定焦点不在搜索框时按裸斜杠会聚焦搜索框，后续文字落入搜索词。
+// TestBareSlashFocusesNavbarSearch 防止裸斜杠只聚焦搜索框却不显示搜索历史。
 func TestBareSlashFocusesNavbarSearch(t *testing.T) {
 	b := newTestShell(t)
 	b.tt.SetFocused(true)
+	b.s.hist.add("周杰伦")
 	b.tt.Frame()
 	if b.tt.Focused(searchLabel) {
 		t.Fatal("搜索框初始就有焦点，无法验证裸斜杠聚焦行为")
@@ -19,6 +21,10 @@ func TestBareSlashFocusesNavbarSearch(t *testing.T) {
 	b.tt.Frame()
 	if !b.tt.Focused(searchLabel) {
 		t.Fatal("按裸斜杠后搜索框没有获得焦点")
+	}
+
+	if !b.tt.HasText("周杰伦") {
+		t.Fatal("按裸斜杠后没有显示搜索历史")
 	}
 
 	b.tt.Type("hello")
@@ -66,5 +72,64 @@ func TestModifiedSlashDoesNotFocusNavbarSearch(t *testing.T) {
 	b.tt.Frame()
 	if b.tt.Focused(searchLabel) {
 		t.Fatal("按 Cmd+/ 后搜索框获得了焦点")
+	}
+}
+
+// TestSlashSearchPanelCloses 验证快捷键打开的面板可用 Esc 和点击其他位置关闭。
+func TestSlashSearchPanelCloses(t *testing.T) {
+	for _, closePanel := range []string{"escape", "outside"} {
+		t.Run(closePanel, func(t *testing.T) {
+			s, tt := newShell(t)
+			tt.SetFocused(true)
+			s.hist.add("周杰伦")
+			tt.Frame()
+			tt.Key(0, ui.KeySlash)
+			tt.Frame()
+			if !tt.HasText("周杰伦") {
+				t.Fatal("按斜杠后搜索历史未显示")
+			}
+			if closePanel == "escape" {
+				tt.Key(0, ui.KeyEscape)
+			} else if err := tt.Click("本地音乐"); err != nil {
+				t.Fatal(err)
+			}
+			tt.Frame()
+			if tt.HasText("周杰伦") {
+				t.Fatal("关闭后搜索历史仍然显示")
+			}
+			tt.Frame()
+			if tt.HasText("周杰伦") {
+				t.Fatal("搜索历史关闭后重新出现")
+			}
+		})
+	}
+}
+
+// TestRenderSlashSearchShots 用搜索历史呈现斜杠打开的面板，供深浅主题视觉检查。
+func TestRenderSlashSearchShots(t *testing.T) {
+	dir := os.Getenv("BIU_SHOT_DIR")
+	if dir == "" {
+		t.Skip("设 BIU_SHOT_DIR 才会存图")
+	}
+	for _, dark := range []bool{false, true} {
+		name := "浅色"
+		if dark {
+			name = "深色"
+		}
+		t.Run(name, func(t *testing.T) {
+			s, tt := newShell(t, systemIsDark(dark))
+			tt.SetFocused(true)
+			s.hist.add("周杰伦")
+			s.hist.add("林俊杰")
+			s.hist.add("五月天 温柔")
+			tt.Frame()
+			tt.Key(0, ui.KeySlash)
+			tt.Frame()
+			if !tt.HasText("周杰伦") {
+				t.Fatal("按斜杠后搜索历史未显示")
+			}
+			settleSuggestEnter(t, tt)
+			save(t, dir, "斜杠搜索历史-"+name+".png", tt)
+		})
 	}
 }
