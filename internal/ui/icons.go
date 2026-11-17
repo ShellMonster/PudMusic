@@ -491,6 +491,8 @@ const (
 	// pudVolLow 是 vol 去掉外面那一道弧（原型只有 vol / mute 两档，音量小那一档由 T0 从 vol 派生）。
 	pudVolLow = "Pud/vol-low.svg"
 	pudX      = "Pud/x.svg"
+	// pudWall 是满屏播放器「封面墙」键：三格错缝。
+	pudWall = "Pud/wall.svg"
 )
 
 var iconNames = []string{
@@ -558,7 +560,7 @@ var iconNames = []string{
 	iconLyricFontSize, iconLyricOffset, iconLyricSearch,
 
 	// 原型图标（Pud/）
-	pudBell, pudCalendar, pudCheck, pudCmd, pudComment, pudCopy, pudDanmaku, pudDisc, pudDown, pudDownload, pudEq, pudExpand, pudFolder, pudGlobe, pudGrip, pudHeart, pudHeartOn, pudHistory, pudImage, pudImport, pudInfo, pudKeyboard, pudLater, pudLeft, pudLink, pudLock, pudLogout, pudLyrics, pudMenu, pudMini, pudMinus, pudMoon, pudMore, pudMute, pudNext, pudNext1, pudOpen, pudOrder, pudPalette, pudParts, pudPause, pudPlay, pudPlus, pudPrev, pudQueue, pudRefresh, pudRepeat, pudRepeat1, pudRight, pudSearch, pudSelect, pudSettings, pudShuffle, pudSort, pudStar, pudStarOn, pudStats, pudSun, pudThumb, pudThumbOn, pudTranslate, pudTrash, pudUp, pudUser, pudUsers, pudVideo, pudVol, pudVolLow, pudX,
+	pudBell, pudCalendar, pudCheck, pudCmd, pudComment, pudCopy, pudDanmaku, pudDisc, pudDown, pudDownload, pudEq, pudExpand, pudFolder, pudGlobe, pudGrip, pudHeart, pudHeartOn, pudHistory, pudImage, pudImport, pudInfo, pudKeyboard, pudLater, pudLeft, pudLink, pudLock, pudLogout, pudLyrics, pudMenu, pudMini, pudMinus, pudMoon, pudMore, pudMute, pudNext, pudNext1, pudOpen, pudOrder, pudPalette, pudParts, pudPause, pudPlay, pudPlus, pudPrev, pudQueue, pudRefresh, pudRepeat, pudRepeat1, pudRight, pudSearch, pudSelect, pudSettings, pudShuffle, pudSort, pudStar, pudStarOn, pudStats, pudSun, pudThumb, pudThumbOn, pudTranslate, pudTrash, pudUp, pudUser, pudUsers, pudVideo, pudVol, pudVolLow, pudWall, pudX,
 }
 
 // icons 是上面那批图标**启动时一次解析好**的结果。

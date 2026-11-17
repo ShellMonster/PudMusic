@@ -67,6 +67,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -237,6 +238,9 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			// 原型 index.html:236 `input::placeholder { color: var(--text-3) }`；框架默认是 TextMuted（text-2）。
 			PlaceholderColor(tok.Of(t).Text3).
 			Grow(1).Shrink(0)
+		if c.Shortcut(0, ui.KeySlash) && !field.Focused() {
+			field.Focus()
+		}
 
 		// Esc 收浮层。浮层开着就吃掉这一次 Esc（字留着），浮层没开就还回
 		// 输入框——那一次 Esc 该清字。
@@ -405,7 +409,8 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 		if s.searchKeyword != "" {
 			s.viewSearchClear(c)
 		}
-		// 原型 `.search-box .kbd`：右边一枚「/」键帽（装饰，读屏不念）。
+		// 原型 `.search-box .kbd`：右边一枚「/」键帽；焦点不在文本输入框时按裸 `/`
+		// 会聚焦搜索框。输入框和模态浮层优先处理输入，所以框内的 `/` 仍是文本。
 		pud.Kbd(c, "/").Shrink(0)
 		s.viewSuggest(c, row)
 	})
@@ -711,7 +716,9 @@ func (s *Shell) viewSuggestHeader(c *ui.Context) {
 			ui.Text(c, suggestClearLabel).FontSize(scale.Font(c, scale.Size12)).TextColor(fg).SingleLine()
 		})
 		if s.withTip(c, clear, clearHistoryTip).Clicked() {
-			s.hist.clear()
+			if s.hist.clear() {
+				s.addToast("已清空搜索历史", notice.Success)
+			}
 		}
 	})
 }

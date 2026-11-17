@@ -84,7 +84,7 @@ func TestDraggingAnEQBandTurnsOnCustom(t *testing.T) {
 // TestSavingACustomEQPreset 验「存为预设」把当前增益记成一套命名预设，
 // 重启之后还在下拉里。
 func TestSavingACustomEQPreset(t *testing.T) {
-	tt, _, a, path := shellWithEQPanel(t, app.DefaultSettings(""))
+	tt, s, a, path := shellWithEQPanel(t, app.DefaultSettings(""))
 
 	dragEQSlider(t, tt, 0, 1.0)
 	r, ok := tt.Find("均衡器预设名称")
@@ -106,6 +106,9 @@ func TestSavingACustomEQPreset(t *testing.T) {
 	}
 	if st.EQCustomName != "深夜" || st.EQCustomGains[0] != 12 {
 		t.Errorf("存完之后该选中「深夜」：name=%q gains=%v", st.EQCustomName, st.EQCustomGains)
+	}
+	if !hasToast(s, "已保存预设「深夜」") {
+		t.Errorf("存了一套预设没说一句，提示有 %q", dropToastTexts(s))
 	}
 
 	if err := a.CloseSettings(); err != nil {

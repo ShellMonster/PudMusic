@@ -5,7 +5,7 @@ go 1.27.3
 require (
 	github.com/Eyevinn/mp4ff v0.62.0
 	github.com/ebitengine/purego v0.11.3
-	github.com/egoist/mygo v0.9.0
+	github.com/egoist/mygo v0.9.1
 	github.com/mewkiz/flac v1.0.14
 	github.com/tphakala/go-m4a v0.8.0
 	golang.org/x/image v0.47.0

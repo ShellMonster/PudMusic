@@ -10,8 +10,7 @@
 package ui
 
 import (
-	"log"
-
+	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/platform"
 	"github.com/egoist/mygo"
 )
@@ -51,7 +50,8 @@ func (s *Shell) pickPath(what string, dir bool, apply func(string)) {
 	go func() {
 		path, err := picker.pick(parent, dir, title, message)
 		if err != nil {
-			log.Printf("pudmusic: 选%s失败：%v", what, err)
+			s.addToast("选"+what+"失败："+err.Error(), notice.Danger)
+			return
 		}
 		if path == "" {
 			return // 用户取消：什么都不改，也什么都不说

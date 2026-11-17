@@ -980,6 +980,10 @@ type Shell struct {
 	// 而那个参数以后会有人传错。
 	pickImage func(*mygo.Window) ([]string, error)
 
+	// pickAudio 是「弹文件框选音频」那个接缝（playbar.go 的 pickAndEnqueue）。
+	// 理由和 pickImage 一样：真实现要系统事件循环，无头测试里调不了。
+	pickAudio func(*mygo.Window) ([]string, error)
+
 	// keys 是快捷键。和 hist 一样是单独一份文件（见 shortcuts.go）。没挂上盘时
 	// 是内存里的一份：设置页照常能录，只是关掉之后不记得。
 	keys *shortcutKeys
@@ -1350,6 +1354,7 @@ func newShellWithImages(a *app.App, imagesDir string) *Shell {
 		}),
 		autostart: systemAutoStart{},
 		pickImage: pickImageFile,
+		pickAudio: pickAudioFile,
 		hotkeys:   nilGlobalShortcuts{},
 		// 「看得见」的默认值（见 newWindowPresence）：无头 Tester 没有窗口，
 		// 还没建出窗口的那段启动路径也一样——它们都得照常画动画。

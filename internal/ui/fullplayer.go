@@ -318,6 +318,9 @@ type fullPlayer struct {
 
 	// eqSel 是均衡器弹层里的预设下拉展开了没有。
 	eqSel bool
+
+	// wall 是封面墙（见 fullplayer_wall.go）：开着时它顶替中间的封面和歌词。
+	wall queueWall
 }
 
 // partRow 是分集列表里的一行。
@@ -387,16 +390,20 @@ func (s *Shell) viewFullPlayer(c *ui.Context, st app.State) {
 				root.Children(func() {
 					s.viewFullTop(c, st, g)
 					cinema := s.full.theater && videoOn
-					if cinema {
+					wall := s.full.wall.open && !videoOn
+					switch {
+					case cinema:
 						s.viewFullCinema(c, st, g, phase)
-					} else {
+					case wall:
+						s.viewQueueWall(c, st, g)
+					default:
 						s.viewFullLeft(c, st, g, phase, prefs)
 					}
 					s.viewFullBottom(c, st, g)
 					// 🔴 右栏排在底栏**之后**（后建的在上）：旋钮行和歌词下沿落在底栏的地盘里
 					// （1200×800 时旋钮行 y=646，底栏从 591 起，频谱 / 章节名 / 进度那几行是透明的
 					// 盒子），排在前面的话旋钮点不到。
-					if !cinema && !g.narrow && prefs.ShowLyrics {
+					if !cinema && !wall && !g.narrow && prefs.ShowLyrics {
 						s.viewFullRight(c, st, g)
 					}
 				})

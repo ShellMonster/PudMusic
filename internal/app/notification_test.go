@@ -44,21 +44,37 @@ func TestADownloadThatFinishedReachesTheNotifier(t *testing.T) {
 	}
 }
 
-// TestAFailedDownloadDoesNotNotify 钉住「下载**失败**不弹通知」。
+// TestAFailedDownloadGoesToTheFailureChannel 钉住「下载失败走失败那一条」。
 //
-// ⚠️ **失败不是「下载完成」**：用户不需要一条「下载失败」的系统通知——
-// 而且那一档界面上的提示已经有了（读屏软件也念过了）。
-func TestAFailedDownloadDoesNotNotify(t *testing.T) {
+// 🔴 **失败不是「下载完成」**：它不能走完成那一条（那一条的规矩是「用户不在
+// 才发」）。但失败也不能沉默：用户可能正在别的页面，下载记录页上那行红字他
+// 看不见。所以它有自己的通道，由界面层决定弹提示还是发系统通知。
+func TestAFailedDownloadGoesToTheFailureChannel(t *testing.T) {
 	a := New()
 	t.Cleanup(a.Close)
 
-	calls := 0
-	a.SetDownloadNotifier(func(string, string) { calls++ })
+	doneCalls := 0
+	a.SetDownloadNotifier(func(string, string) { doneCalls++ })
+	var gotID, gotTitle, gotReason string
+	failedCalls := 0
+	a.SetDownloadFailedNotifier(func(taskID, title, reason string) {
+		failedCalls++
+		gotID, gotTitle, gotReason = taskID, title, reason
+	})
 
 	a.downloadFinished(download.Snapshot{ID: "BV1x|cid1", Title: "晴天", Status: download.StatusError, Err: "网断了"})
 
-	if calls != 0 {
-		t.Errorf("下载失败却通知了 %d 次，want 0 次", calls)
+	if doneCalls != 0 {
+		t.Errorf("下载失败走了「完成」那一条 %d 次，want 0 次", doneCalls)
+	}
+	if failedCalls != 1 {
+		t.Fatalf("下载失败通知了 %d 次，want 1 次", failedCalls)
+	}
+	if gotID != "BV1x|cid1" || gotTitle != "晴天" {
+		t.Errorf("递过去的是 %q / %q，want BV1x|cid1 / 晴天", gotID, gotTitle)
+	}
+	if gotReason == "" {
+		t.Error("失败通知没有带原因")
 	}
 }
 

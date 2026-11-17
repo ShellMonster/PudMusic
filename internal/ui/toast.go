@@ -475,9 +475,9 @@ func (s *Shell) viewToast(c *ui.Context, t toast) {
 	e = shadow.Pop(e, c.Theme())
 	e.Children(func() {
 		ui.Icon(c, pud.Icon(toastIcon(t.tone))).FontSize(tok.IconSm).TextColor(p.Bg).PassThrough()
-		text := ui.Text(c, t.text).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).FixedLineHeight(20.15).
-			TextColor(p.Bg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0).PassThrough()
-		s.withTip(c, text, t.text).PassThrough()
+		toastText := ui.Text(c, t.text).FontSize(scale.Font(c, scale.Size13)).FontWeight(500).FixedLineHeight(20.15).
+			TextColor(p.Bg).SingleLine().Ellipsis("…").Grow(1).MinWidth(0)
+		s.withTip(c, toastText, t.text).PassThrough()
 	})
 	// 指针停在上面时先不收（`expire` 里读这一位）。
 	_, _, over := e.PointerPosition()
