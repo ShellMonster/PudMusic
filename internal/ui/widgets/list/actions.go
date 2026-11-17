@@ -87,16 +87,22 @@ type Actions struct {
 	// 入口——那一份在 `internal/ui/folderselect.go`。
 	FavSelect func(item app.Item)
 
-	// Liked 是行上那颗「喜欢」心做的事（`pud.TrackRow` 的 `ev.Like`）。
+	// FavoriteInBound 报这一条在不在**绑定的那个喜欢歌单**里。菜单拿它决定
+	// 写「喜欢」还是「取消喜欢」；不知道时按「喜欢」画。
 	//
-	// ⚠️ **和 `FavSelect` 是两条路**：喜欢进**绑定的**那个收藏夹
-	// （没绑过先问一次，见 `internal/ui/likedbind.go`）；收藏弹
-	// 「放进哪些收藏夹」的多选框。两条路最后都落在 `resource/deal`，
-	// 区别只在放进哪一个格子。
+	// 它为 nil 时不摆「喜欢」那一项（`ToggleFavorite` 也为 nil 的那一份接线）。
+	FavoriteInBound func(item app.Item) bool
+
+	// ToggleFavorite 是菜单「喜欢」/「取消喜欢」那一下：已经喜欢就拿出去，
+	// 否则加进去。走的是喜欢歌单绑定流程，和「收藏」（`FavSelect` 的多选框）
+	// 是两条路。
+	ToggleFavorite func(item app.Item)
+
+	// PrefetchFavorite 在指针悬停某一行时调：让 App 提前问出这一条的喜欢状态。
 	//
-	// 为 nil 时行上的心退回到 `FavSelect` 那一条（`pudrow.go` 里的兜底）：
-	// 没接「喜欢」那一摊的地方（测试里随手拼的 Actions）照旧能用。
-	Liked func(item app.Item)
+	// 🔴 **菜单是打开那一刻一次建出来的**，到那时再问就来不及了——悬停预取，
+	// 打开时读缓存。App 那边按内容去重，重复调用是便宜的。
+	PrefetchFavorite func(item app.Item)
 
 	// Download 把这一首排进下载队列。
 	//

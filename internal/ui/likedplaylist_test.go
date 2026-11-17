@@ -307,26 +307,31 @@ func TestTheSettingsShowAndChangeTheBinding(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 绑定丢失：退回原收藏夹选择
+// 绑定丢失：重新选喜欢歌单
 // ─────────────────────────────────────────────────────────────────────────────
 
-// TestALostBindingFallsBackToFolderPicker 断「绑定那格没了 → 回原选择」。
+// TestALostBindingReopensTheLikePicker 断「绑定那格没了 → 重新选喜欢歌单」。
 //
-// 「没了」造的是 B 站那一端：deal 回一个业务错误（收藏夹被删 / 无权限）。
-// 用户看到的不该是「喜欢失败」一句就完——他**还是要收藏这首**，所以落回原
-// 来那个「放到哪些收藏夹」多选弹窗，让他自己挑一格。
-func TestALostBindingFallsBackToFolderPicker(t *testing.T) {
+// 「没了」造的是 B 站那一端：deal 回 -400（收藏夹不存在）。用户看到的不该是
+// 「喜欢失败」一句就完，也不是绕回收藏夹多选框——应用解绑并重新打开**喜欢
+// 歌单选择**，让他挑一个新歌单；加进去那一趟没做完，选中之后顺手补上。
+func TestALostBindingReopensTheLikePicker(t *testing.T) {
 	_, tt, f := newLikedBoundEnv(t)
 	// 绑定那一格在 B 站那边「没了」：写它会被拒。
-	f.failDeal(-403)
+	f.failDeal(-400)
 
 	likeTheSong(t, tt)
 
-	// 那一趟写发出去了、被拒了，然后界面落回原收藏夹选择。
+	// 那一趟写发出去了、被拒了，然后界面重新打开喜欢歌单选择。
 	waitFramesFor(t, tt, 30*time.Second, "写那一趟发出去了", func() bool {
 		return len(f.dealCalls()) > 0
 	})
-	waitFrames(t, tt, "落回了原收藏夹选择", func() bool { return tt.HasText("添加到收藏夹") })
+	waitFrames(t, tt, "重新打开喜欢歌单选择", func() bool {
+		return tt.HasText("选择喜欢歌单")
+	})
+	if tt.HasText("添加到收藏夹") {
+		t.Error("绑定失效落回了收藏夹多选框：该重新选喜欢歌单")
+	}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

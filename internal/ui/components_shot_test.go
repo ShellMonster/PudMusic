@@ -98,11 +98,11 @@ func showcaseView(s *Shell, on *bool, tab *int, search *string) func(*mygoui.Con
 						}
 					})
 
-					showcaseSection(c, "TRACK LIST  head · normal · playing · hover-less · liked · HI-RES · SQ")
+					showcaseSection(c, "TRACK LIST  head · normal · playing · hover-less · HI-RES · SQ")
 					pud.TrackHead(c, 1020)
 					tracks := []pud.Track{
-						{Index: "1", Title: "晴天", Artist: "周杰伦", Album: "叶惠美", Owner: "杰伦官方", Quality: "HI-RES", Plays: "1.2亿", Danmaku: "34万", Duration: "4:29", Cover: synthCover(covers[0]), CanLike: true, Liked: true},
-						{Index: "2", Title: "夜航星", Artist: "不才", Album: "夜航星", Owner: "夜航电台", Quality: "SQ", Plays: "823万", Danmaku: "5.1万", Duration: "3:47", Cover: synthCover(covers[1]), Playing: true, CanLike: true},
+						{Index: "1", Title: "晴天", Artist: "周杰伦", Album: "叶惠美", Owner: "杰伦官方", Quality: "HI-RES", Plays: "1.2亿", Danmaku: "34万", Duration: "4:29", Cover: synthCover(covers[0])},
+						{Index: "2", Title: "夜航星", Artist: "不才", Album: "夜航星", Owner: "夜航电台", Quality: "SQ", Plays: "823万", Danmaku: "5.1万", Duration: "3:47", Cover: synthCover(covers[1]), Playing: true},
 						{Index: "3", Title: "本地文件.mp3", Artist: "未知艺术家", Album: "本地文件", Duration: "2:58", Cover: synthCover(covers[2])},
 					}
 					for i, t := range tracks {

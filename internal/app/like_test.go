@@ -565,28 +565,34 @@ func TestLikeStateAsksCollResourceCheckForAudio(t *testing.T) {
 	}
 }
 
-// TestLikingAnAudioSongFillsTheHeart 钉「audio 收进绑定歌单成功之后，当前
-// 这一首的心形要变实心」——「问过了、没收过」和「问过之后收过」在界面上是
-// 两种长相，而写成功那一趟**自己知道答案**，不必再等一次 relation。
-func TestLikingAnAudioSongFillsTheHeart(t *testing.T) {
+// TestLikingAnAudioSongFillsTheBoundHeart 钉「audio 加进绑定歌单成功之后，
+// 这一首的喜欢状态要变成实心」——写成功那一趟**自己知道答案**，不必再等一次
+// 会员查询。
+func TestLikingAnAudioSongFillsTheBoundHeart(t *testing.T) {
 	f := newFolderFixture(t)
 	a := likedApp(t, f)
-	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"})
+	it := Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"}
+	a.Queue().Append(it)
 	a.queue.selectAt(0)
-	a.collCheck = func(context.Context, int64, int) (bool, error) { return false, nil }
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
-	a.LikeState()
-	waitLike(t, "问过收没收藏了", a.LikeAsked)
-	if a.LikeState().Favorited {
-		t.Fatal("没收过却显示收过")
+	// 第一次问是「还不知道」，那一趟回来之后才是「不在里面」。
+	if _, known := a.FavoriteInBound(it); known {
+		t.Fatal("第一次问就说知道了")
+	}
+	waitUntil(t, "喜欢状态问回来", 2*time.Second, func() bool {
+		_, known := a.FavoriteInBound(it)
+		return known
+	})
+	if fav, _ := a.FavoriteInBound(it); fav {
+		t.Fatal("还没加进去却显示喜欢")
 	}
 
-	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(it, 77, bili.MediaAudio, true)
 	waitLikedResult(t, a, 2*time.Second)
 
-	if !a.LikeState().Favorited {
-		t.Error("收进绑定歌单那一趟成了，心形还是空心——写成功的答案没记进关系缓存")
+	if fav, known := a.FavoriteInBound(it); !known || !fav {
+		t.Error("加进绑定歌单那一趟成了，喜欢状态还是空的——写成功的答案没记进缓存")
 	}
 }
 
@@ -618,41 +624,39 @@ func TestLikeStateForAudioBelongsToItsOwnSid(t *testing.T) {
 	}
 }
 
-// TestAStaleAudioCheckCannotUnfillTheHeart 钉「写成功之后、早发出的那一趟
-// 收藏态检查才回来」这个时序：LikeState 触发 coll-resource-check 的瞬间
-// 用户就点了喜欢，`FavoriteIntoBound` 先一步把 Favorited 标实——随后才回
-// 来的 check 说的是「收之前问过时的答案（没收）」，不许把它当成「问过
-// 之后还是没收」把实心抹掉。曾经出过这病：心形在写成功的下一帧又变回
-// 空心，直到换歌重进才亮。
-func TestAStaleAudioCheckCannotUnfillTheHeart(t *testing.T) {
+// TestAStaleFavoriteQueryCannotOverwriteALaterWrite 钉「写成功之后、早发出的
+// 那一趟会员查询才回来」这个时序：旧答案不许把刚写进去的状态抹掉。
+func TestAStaleFavoriteQueryCannotOverwriteALaterWrite(t *testing.T) {
 	f := newFolderFixture(t)
 	a := likedApp(t, f)
-	a.Queue().Append(Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"})
+	it := Item{Source: "online", Type: "audio", Sid: "77", Title: "音乐库的一首"}
+	a.Queue().Append(it)
 	a.queue.selectAt(0)
-
-	// 卡住那一趟「收没收藏」——它回来得比写成功晚。
-	release := make(chan struct{})
-	a.collCheck = func(context.Context, int64, int) (bool, error) {
-		<-release
-		return false, nil // 问过那一刻它确实还没收
-	}
-	a.LikeState() // 发出 check，卡住
-
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+
+	// 卡住会员查询——它回来得比写成功晚。
+	release := make(chan struct{})
+	a.favMember = func(context.Context, int64, int, int64) (bool, error) {
+		<-release
+		return false, nil // 问过那一刻它确实还没加进去
+	}
+	a.FavoriteInBound(it) // 发出查询，卡住
+
+	a.SetBoundFavorite(it, 77, bili.MediaAudio, true)
 	waitLikedResult(t, a, 2*time.Second)
-	if !a.LikeState().Favorited {
-		t.Fatal("收进绑定歌单那一趟成了，心形却是空心——markAudioFavorited 没生效")
+	if fav, known := a.FavoriteInBound(it); !known || !fav {
+		t.Fatal("加进绑定歌单那一趟成了，喜欢状态却是空的")
 	}
 
-	close(release) // 放走卡住的那一趟 check
-	waitLike(t, "迟到的 check 落完账", func() bool {
-		a.likeMu.Lock()
-		defer a.likeMu.Unlock()
-		return !a.likeWanted && a.likeLoaded
+	close(release) // 放走卡住的那一趟查询
+	waitUntil(t, "迟到的查询落完账", 2*time.Second, func() bool {
+		a.favMu.Lock()
+		defer a.favMu.Unlock()
+		e := a.fav[favoriteKey(it)]
+		return e != nil && !e.wanted
 	})
 
-	if !a.LikeState().Favorited {
-		t.Error("写成功之后才回来的收藏态检查把心形改回了空心——旧答案盖了新答案")
+	if fav, known := a.FavoriteInBound(it); !known || !fav {
+		t.Error("写成功之后才回来的查询把喜欢状态改回了空的——旧答案盖了新答案")
 	}
 }

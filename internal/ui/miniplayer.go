@@ -715,6 +715,9 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 其它每帧钩子之前）。不登记的话，设置页那句「应用内那一列：窗口在前台时按它
 	// 就有用」在迷你窗口在前台时就是假的。
 	s.viewShortcuts(c)
+	// 主窗口收起来时不画帧：替它把后台的喜欢结果收一次（见
+	// `drainMainLikedResults`）。
+	s.drainMainLikedResults()
 
 	st := s.app.Snapshot()
 	t := c.Theme()
@@ -899,10 +902,10 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 			// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
 			// 点赞，也不是收藏夹多选框；实心 / 空心认「进没进收藏夹」。
 			if st.HasTrack && s.app.Likeable() {
-				faved := s.app.LikeState().Favorited
+				faved := s.playingFavorite()
 				name, label := "heart", "喜欢"
 				if faved {
-					name, label = "heart-on", "已喜欢"
+					name, label = "heart-on", "取消喜欢"
 				}
 				if pud.IconBtn(c, "mini-like", name, label, pud.IconOpts{On: faved}).Clicked() {
 					s.likeCurrent()

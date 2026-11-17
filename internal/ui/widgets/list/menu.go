@@ -84,7 +84,7 @@ var menuSeparator = menuItem{sep: true}
 // ⚠️ **别改成「按了才说」**：那就是把一句应用内部的判断甩给用户，而用户
 // 分不清「真没有音频流」和「没取到」（这两件事要走的路正好相反，见
 // `internal/app/unplayable.go`）。
-func menuItems(m Music) []menuItem {
+func menuItems(m Music, acts Actions) []menuItem {
 	// ⚠️ **「播放」那一项在用户行上是另一个动作**：搜索页「用户」那一档的行
 	// 不是歌（`app.ItemTypeUser`），它那一项的「播放」是**进 UP 主空间**
 	// （上游 `user-card.tsx:51`）。所以那一档的行仍旧写「播放」——写成
@@ -103,10 +103,24 @@ func menuItems(m Music) []menuItem {
 		{key: "copy-info", label: "复制歌曲信息"},
 		menuSeparator,
 		{key: "favorite", label: "收藏"},
-		{key: "download-audio", label: "下载音频"},
 	}
+	// 「喜欢」紧挨着「收藏」，但走的是**绑定歌单**那条路（不是多选框）。
+	// 状态是悬停时预取好的：App 那边按内容缓存，知道就写「取消喜欢」，
+	// 还不知道就按「喜欢」画（第一下加进去）。
+	if acts.ToggleFavorite != nil && app.CanFavorite(m.Item) {
+		items = append(items, menuItem{key: "like-bound", label: favoriteMenuLabel(acts, m.Item)})
+	}
+	items = append(items, menuItem{key: "download-audio", label: "下载音频"})
 	items = addCollectionEntry(items, m.Item)
 	return markUnplayable(items, m.Item)
+}
+
+// favoriteMenuLabel 是「喜欢」那一项此刻该写的字。
+func favoriteMenuLabel(acts Actions, it app.Item) string {
+	if acts.FavoriteInBound != nil && acts.FavoriteInBound(it) {
+		return "取消喜欢"
+	}
+	return "喜欢"
 }
 
 // addCollectionEntry 给**合集那一行**加一项「打开这个合集」（票 #683，缺陷 B）。
@@ -207,7 +221,7 @@ func buildSongMenu(menu *ui.Menu, songs []Music, acts Actions, i int, playFrom f
 	}
 	song := songs[i]
 
-	for _, item := range menuItems(song) {
+	for _, item := range menuItems(song, acts) {
 		if item.sep {
 			menu.Separator()
 			continue
@@ -291,6 +305,14 @@ func doAction(item menuItem, i int, song Music, acts Actions, playFrom func(int)
 			return
 		}
 		acts.FavSelect(song.Item)
+	case "like-bound":
+		// 「喜欢 / 取消喜欢」：走绑定歌单那条路，状态由 `FavoriteInBound`
+		// 预取缓存放着。没接时说清（和别的那几项同一个规矩）。
+		if acts.ToggleFavorite == nil {
+			notify(acts, "「"+item.label+"」现在还不能用", notice.Warning)
+			return
+		}
+		acts.ToggleFavorite(song.Item)
 	case "download-audio":
 		if acts.Download == nil {
 			// 同上。Biu 对本地项和「用户不是歌」那几种是把这一项藏起来的，

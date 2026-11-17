@@ -113,8 +113,8 @@ const (
 	// 🔴 **喜欢歌单原型之后是「喜欢 + 评论」两枚**（都条件摆：本地文件不摆，
 	// 见 `viewTrackActions`）：「赞」「收藏」两枚键连同它们的数量角标一起
 	// 去掉了——喜欢/收藏走「喜欢」心形那一路，不是 B 站点赞。心形是**喜欢
-	// 歌单绑定入口**（`likeCurrent` → 绑定流程），和迷你窗、刘海、满屏、
-	// 列表行上那颗心是同一枚。「分集」那枚挪在右列（`viewPlayBarRight`），
+	// 歌单绑定入口**（`likeCurrent` → 加 / 拿绑定歌单），和迷你窗、刘海、满屏
+	// 上那颗心是同一枚。「分集」那枚挪在右列（`viewPlayBarRight`），
 	// 不在这一段。
 	//
 	// 这个数取的是**摆满**那一档——它是左列的**保底宽**用的
@@ -424,15 +424,15 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 		return
 	}
 	ui.Row(c).Gap(space.Px2).AlignItems(ui.Center).Shrink(0).Children(func() {
-		// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
-		// 点赞，也不是收藏夹多选框；实心 / 空心认「进没进收藏夹」。和迷你窗、
-		// 刘海、满屏、列表行上那颗心是同一枚（`IconOpts{Row: true}`：命中区
+		// 心形是**喜欢歌单入口**（`likeCurrent` → 第一下加、第二下拿），不是
+		// B 站点赞，也不是收藏夹多选框；实心 / 空心认「在不在绑定的歌单里」。
+		// 和迷你窗、刘海、满屏上那颗心是同一枚（`IconOpts{Row: true}`：命中区
 		// 32，和这一段其他键一样大）。
 		if s.app.Likeable() {
-			faved := s.app.LikeState().Favorited
+			faved := s.playingFavorite()
 			name, label := "heart", "喜欢"
 			if faved {
-				name, label = "heart-on", "已喜欢"
+				name, label = "heart-on", "取消喜欢"
 			}
 			if s.withTip(c, pud.IconBtn(c, "pb-like", name, label, pud.IconOpts{Row: true, On: faved}),
 				favTooltip(faved)).Clicked() {
@@ -536,15 +536,20 @@ func (s *Shell) viewArtist(c *ui.Context, name string, mid int64, t *ui.Theme) {
 	})
 }
 
+// heartLabel 是心形的无障碍名字 / 提示：按下去会把这一首加进去还是拿出来。
+func heartLabel(faved bool) string {
+	if faved {
+		return "取消喜欢"
+	}
+	return "喜欢"
+}
+
 // favTooltip 是「喜欢」心形悬停时那句话（满屏 / 收藏入口共用）。
 //
 // ⚠️ **它说的是「我」收藏了没有**（那一枚键自己的状态），不是「整个稿件
 // 被收藏了多少次」——那个数是 B 站稿件维度的读数，跟这枚键无关。
 func favTooltip(faved bool) string {
-	if faved {
-		return "已喜欢"
-	}
-	return "喜欢"
+	return heartLabel(faved)
 }
 
 // qualitySwitchToast 在用户**切到无损 / 杜比**的那一下说一句降档规矩（票 #581）。

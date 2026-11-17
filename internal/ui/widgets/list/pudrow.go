@@ -69,7 +69,6 @@ func (l *List) viewPudRow(r ui.ListRow) {
 		Chosen:    r.Selected(),
 		Highlight: l.hl,
 		Dim:       m.Item.Invalid,
-		CanLike:   !user && l.acts.FavSelect != nil,
 		Menu:      func(mn *ui.Menu) { l.buildMenu(mn, i) },
 		// 圆角是 `pud.TrackRow` 传进来的 r-4（原型 `.t-cover`），落在最内层的图上。
 		Cover: func(c *ui.Context, cw, ch, radius float32) {
@@ -104,20 +103,16 @@ func (l *List) viewPudRow(r ui.ListRow) {
 	}
 
 	ev := pud.TrackRow(c, "row:"+m.ID, tr, l.RowWidth())
+	// 悬停时预取这一首在绑定歌单里的状态：右键菜单是打开那一刻一次建出来的，
+	// 到那时再问就来不及了（App 那边按内容去重、失败后退避）。
+	if ev.Hovered && l.acts.PrefetchFavorite != nil {
+		l.acts.PrefetchFavorite(m.Item)
+	}
 	switch {
 	case ev.Check && l.sel2.Toggle != nil:
 		l.sel2.Toggle(i)
 	case ev.Play:
 		l.rowPlay(i)
-	case ev.Like && (l.acts.Liked != nil || l.acts.FavSelect != nil):
-		// ⚠️ **喜欢是 `Liked` 那一条**（绑定歌单），`FavSelect` 是兜底
-		// （没接喜欢那一摊的地方照旧开多选框）。见 `actions.go` 里
-		// `Liked` 的注释。
-		if l.acts.Liked != nil {
-			l.acts.Liked(m.Item)
-		} else {
-			l.acts.FavSelect(m.Item)
-		}
 	case ev.Owner && l.acts.OpenOwner != nil && m.Item.ArtistMid > 0:
 		l.acts.OpenOwner(m.Item.ArtistMid, m.Owner)
 	}

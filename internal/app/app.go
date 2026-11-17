@@ -766,7 +766,7 @@ type App struct {
 	likeWanted bool
 	// likeGen 是「第几次开始问这一首」的代次：`ensureLike` 发起一趟问先
 	// 领一个号，回来的结果拿号对——号已经变了说明这趟问之后**有人更新
-	// 过缓存**（写成功就地改答案：`setAskedLike` / `markAudioFavorited`），
+	// 过缓存**（写成功就地改答案：`setAskedLike`），
 	// 旧问的那一句「问过时是空的」不许盖新答案。
 	likeGen uint64
 	// likeTriedAt 是上一次**发起**那一问的时刻，问失败之后拿它算退避
@@ -783,6 +783,18 @@ type App struct {
 	// 和 `likeFetch` 同一条规矩：**只由界面那一侧读写**（`ensureLike` 在那里
 	// 把它取出来递给那个 goroutine）。生产上永远是 nil。
 	collCheck func(context.Context, int64, int) (bool, error)
+
+	// fav 是按内容身份缓存的「在不在绑定的那个歌单里」，favMu 护着它。
+	//
+	// ⚠️ **它自己的锁**：写它的是问会员那一趟的 goroutine，读它的是界面每一帧。
+	// 混进 `a.mu` 的话，一次网络往返会去抢播放器每帧都要的那把锁（同 `likeMu`）。
+	favMu sync.Mutex
+	fav   map[string]*favoriteEntry
+	// favMember 是问「这一条在不在绑定的那一格」的那一趟（上下文、内容 id、
+	// 内容类型、歌单 id）。nil = 走收藏夹零件上的 `bili.Client`。
+	//
+	// 和 `likeFetch` 同一条规矩：只由界面那一侧读写；生产上永远是 nil。
+	favMember func(context.Context, int64, int, int64) (bool, error)
 
 	// comments 是当前这一首的评论，commentsSlot 是它属于哪一个对象。见 comments.go。
 	//

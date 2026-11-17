@@ -254,23 +254,24 @@ func (s *Shell) viewFullStats(c *ui.Context, p tok.Palette) {
 }
 
 // viewFullHeart 是「喜欢」键（原型 `[data-act="like"]`，心形）：用户自己的
-// **喜欢歌单绑定入口**——和列表行、迷你窗、刘海上那颗心是同一条绑定流程
+// **喜欢歌单绑定入口**——和播放条、迷你窗、刘海上那颗心是同一条绑定流程
 // （`likeCurrent` → `likeItem`），不是收藏夹多选框。
 //
 // ⚠️ **它不是 B 站的点赞**（喜欢歌单原型把「赞」从播放器上去掉了）：实心 /
-// 空心说的是「这一首进没进收藏夹」（`LikeState().Favorited`），标签是「喜欢」。
+// 空心说的是「这一首在不在绑定的喜欢歌单里」（`playingFavorite`），标签是
+// 「喜欢」/「取消喜欢」。
 //
 // ⚠️ **点它走 `likeCurrent`，不是 `openFolderSelect`**：那一半在
 // `likedbind.go`——它负责把弹窗路由回主壳、收掉满屏（满屏盖在弹窗上，
 // 票 #706 的坑），再进绑定三档。
 func (s *Shell) viewFullHeart(c *ui.Context) {
 	p := tok.OfFull(c.Theme())
-	faved := s.app.LikeState().Favorited
+	faved := s.playingFavorite()
 	ic := "heart"
 	if faved {
 		ic = "heart-on"
 	}
-	b := pud.IconBtn(c, "full:heart", ic, "喜欢", pud.IconOpts{On: faved, Color: p.Text2})
+	b := pud.IconBtn(c, "full:heart", ic, heartLabel(faved), pud.IconOpts{On: faved, Color: p.Text2})
 	if s.withTip(c, b, favTooltip(faved)).Clicked() {
 		s.likeCurrent()
 	}

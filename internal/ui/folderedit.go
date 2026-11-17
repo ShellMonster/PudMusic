@@ -377,7 +377,8 @@ func (s *Shell) dispatchFolderResult(res app.FolderResult) {
 		s.app.BindLikedFolder(app.LikedFolder{ID: res.Folder, Title: title, Private: private})
 		if s.likePending != nil {
 			lb.submitting = true
-			s.app.FavoriteIntoBound(lb.rid, lb.contentType)
+			p := s.likePending
+			s.app.SetBoundFavorite(p.item, lb.rid, lb.contentType, true)
 			break
 		}
 		s.closeLikeBind()
