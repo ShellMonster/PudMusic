@@ -280,6 +280,8 @@ type PagedList struct {
 	// scrollState 报这一份要不要挂那个 ScrollState（见 SetScrollState）。
 	// 默认要。
 	scrollState bool
+	// externalScroll 让同页列表共享像素偏移，同时保持各自的行锚点和选中状态。
+	externalScroll *ui.ScrollState
 
 	// rev 是 items 每变一次 +1。View 只在它变了才 SetSongs（SetSongs 要扫一遍
 	// 查重复 ID，几千行每帧扫一遍是白花的开销）。
@@ -478,12 +480,21 @@ func (p *PagedList) SetFailureNotice(on bool) { p.failureNotice = on }
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) SetScrollState(on bool) { p.scrollState = on }
 
+// SetScroll 绑定外部像素滚动状态。传 nil 恢复列表自己的状态；行锚点仍属于本列表。
+func (p *PagedList) SetScroll(s *ui.ScrollState) {
+	p.externalScroll = s
+	p.scrollState = true
+}
+
 // ScrollOffset 是这一屏滚过了多少像素。回顶按钮判断「滚过 400 像素没有」用它。
 //
 // ⚠️ **没挂 ScrollState 的那些（见 SetScrollState）按行换算**：列表那一档的
 // 行高是定死的 64，网格那一档是估的（见 `SwitchView.ScrollOffset`）。
 func (p *PagedList) ScrollOffset() float32 {
 	if p.scrollState {
+		if p.externalScroll != nil {
+			return p.externalScroll.Y
+		}
 		return p.scroll.Y
 	}
 	return p.surf.ScrollOffset()
@@ -569,6 +580,12 @@ func (p *PagedList) Reload() {
 	p.pager.Reload()
 }
 
+// ReloadKeepingScroll 首次加载新标签时不向列表发回顶请求。
+func (p *PagedList) ReloadKeepingScroll() {
+	p.reset(false)
+	p.pager.Reload()
+}
+
 // Reset 清空已加载的行，让这一份从第一页重来——**但不当场拉**。
 //
 // ⚠️ **它和 Reload 的分界就在「当场拉不拉」**：Reload 当场拉（调用方知道要什么），
@@ -580,6 +597,10 @@ func (p *PagedList) Reload() {
 //
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) Reset() {
+	p.reset(true)
+}
+
+func (p *PagedList) reset(scrollTop bool) {
 	p.pager.Reset()
 
 	p.items = nil
@@ -591,7 +612,9 @@ func (p *PagedList) Reset() {
 	p.blocked = false
 	p.lastEndShown = false
 	p.rev++
-	p.ScrollTop()
+	if scrollTop {
+		p.ScrollTop()
+	}
 }
 
 // ScrollTop 回到顶上。切路由和点回顶按钮都走它。
@@ -606,7 +629,11 @@ func (p *PagedList) Reset() {
 //
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) ScrollTop() {
-	p.scroll.Y = 0
+	if p.externalScroll != nil {
+		p.externalScroll.Y = 0
+	} else {
+		p.scroll.Y = 0
+	}
 	p.surf.scrollTop()
 }
 
@@ -759,7 +786,11 @@ func (p *PagedList) syncList() {
 	//
 	// ⚠️ **没挂的那几份不写**（见 SetScrollState）：它们各自按行锚点记位置。
 	if p.scrollState {
-		p.surf.SetScroll(&p.scroll)
+		if p.externalScroll != nil {
+			p.surf.SetScroll(p.externalScroll)
+		} else {
+			p.surf.SetScroll(&p.scroll)
+		}
 	}
 }
 

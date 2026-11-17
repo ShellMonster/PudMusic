@@ -124,7 +124,7 @@ func (s *Shell) syncSearch(c *ui.Context) {
 	// ⚠️ **判的是上一帧的那张 Tab**：这一层的副作用跑在画的前面，而 Tab 是
 	// 画的时候才写的。画的那一半里还有一次 `current`（用这一帧的 Tab），两次
 	// 各管各的：`current` 自己认得出「已经重置过了」，所以跑两遍不重来。
-	st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]})
+	st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]}, &st.scroll)
 
 	// 🔴 设置里的「数据显示样式」在这一帧生效（`s.displayView` 的注释写了为什么
 	// 每帧都要调）。
@@ -223,7 +223,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string, winW float32) {
 		s.viewSearchToolbar(c, cur)
 
 		// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
-		st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]})
+		st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]}, &st.scroll)
 
 		s.viewSearchResultsBody(c, cur, keyword)
 	})
@@ -283,6 +283,14 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()
+
+	if t.restoreScroll && pg.Loaded > 0 {
+		s.search.scroll.Y = t.pendingScroll
+		t.restoreScroll = false
+	}
+	if t.restoreScroll && !pg.Loading && pg.Loaded == 0 {
+		t.restoreScroll = false
+	}
 
 	if pg.Err != nil && pg.Loaded == 0 {
 		retry := func() { t.list.Reload() }
