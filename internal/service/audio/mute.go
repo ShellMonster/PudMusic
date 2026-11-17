@@ -26,9 +26,13 @@ import (
 	mygoaudio "github.com/egoist/mygo/audio"
 )
 
+// unmuteForTest 让测试在混音器被手动驱动、不碰设备的前提下拿到真实输出
+// （见 seek_declick_test.go）。只有那种测试可以打开它。
+var unmuteForTest bool
+
 // New 之上包的那一层：测试之下返回哑的最后一级。
 func maybeMuted(src mygoaudio.Decoder) mygoaudio.Decoder {
-	if testing.Testing() {
+	if testing.Testing() && !unmuteForTest {
 		return muteDecoder{src}
 	}
 	return src
