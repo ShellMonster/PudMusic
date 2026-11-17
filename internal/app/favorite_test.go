@@ -6,6 +6,7 @@ package app
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -220,6 +221,117 @@ func TestFavoriteCacheDoesNotMixItems(t *testing.T) {
 	}
 	if fav := waitFavoriteKnown(t, a, audioFavItem(222)); fav {
 		t.Error("第二条不在里面，却拿到了第一条的答案")
+	}
+}
+
+// TestAStaleQueryCannotFillTheNewEntryAfterABindingChange 钉「清缓存之后，旧
+// 查询回来不许把新绑定那一份填上」。
+//
+// 清 map 之后同一个 key 会有一份新 entry，代次又从 1 开始；只比 key + gen 的
+// 话，旧答案会被当成新答案。entry 指针不同就必须丢。
+func TestAStaleQueryCannotFillTheNewEntryAfterABindingChange(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+	it := audioFavItem(77)
+	key := favoriteKey(it)
+
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
+	old := &favoriteEntry{gen: 1}
+	a.favMu.Lock()
+	a.fav = map[string]*favoriteEntry{key: old}
+	a.favMu.Unlock()
+
+	a.BindLikedFolder(LikedFolder{ID: 43, Title: "新的"})
+	fresh := &favoriteEntry{gen: 1}
+	a.favMu.Lock()
+	a.fav = map[string]*favoriteEntry{key: fresh}
+	a.favMu.Unlock()
+
+	a.finishFavorite(key, old, 1, true, nil)
+
+	a.favMu.Lock()
+	filled := fresh.known || fresh.favorited
+	a.favMu.Unlock()
+	if filled {
+		t.Error("换绑清缓存之后，旧查询把新绑定的那一份填上了")
+	}
+}
+
+// TestAccountChangeClearsTheFavoriteCache 换账号之后旧账号的喜欢答案不许留。
+func TestAccountChangeClearsTheFavoriteCache(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.favMember = func(context.Context, int64, int, int64) (bool, error) { return true, nil }
+
+	it := audioFavItem(77)
+	if fav := waitFavoriteKnown(t, a, it); !fav {
+		t.Fatal("第一份账号的答案没回来")
+	}
+
+	a.onAccountChanged()
+	if _, known := a.FavoriteInBound(it); known {
+		t.Error("换账号之后还拿上一个账号的答案")
+	}
+}
+
+// TestChangingTheBoundFolderContentsClearsTheHeartCache 从「收藏」多选框把
+// 一条加进 / 拿出绑定歌单之后，红心缓存必须作废重问。
+func TestChangingTheBoundFolderContentsClearsTheHeartCache(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.favMember = func(context.Context, int64, int, int64) (bool, error) { return true, nil }
+
+	it := audioFavItem(77)
+	if fav := waitFavoriteKnown(t, a, it); !fav {
+		t.Fatal("最初的答案没回来")
+	}
+
+	// 让重新查询卡住，才看得到「缓存已作废、还没问回来」那一段。
+	release := make(chan struct{})
+	a.favMember = func(context.Context, int64, int, int64) (bool, error) {
+		<-release
+		return true, nil
+	}
+	a.DealFolderMedias(77, bili.MediaAudio, []int64{42}, nil)
+	if res := waitFolderResult(t, a, 2*time.Second); !res.OK {
+		t.Fatalf("改绑定歌单失败：%q", res.Text)
+	}
+
+	if _, known := a.FavoriteInBound(it); known {
+		t.Error("绑定歌单里的内容变了，心形缓存还留着旧答案")
+	}
+	close(release)
+}
+
+// TestMountingCollectionsClearsTheFailedBackoff 钉「收藏夹挂上 / 登录成功之后，
+// 之前失败留下的退避要作废」。
+//
+// 没挂上时那一问会失败并退避 15 秒；挂上之后如果不作废，心形会一直空心到
+// 退避到点，而用户看到的是「明明登录了却点不亮」。
+func TestMountingCollectionsClearsTheFailedBackoff(t *testing.T) {
+	a := New()
+	t.Cleanup(a.Close)
+	if err := a.MountSettings(filepath.Join(t.TempDir(), SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	it := audioFavItem(77)
+	key := favoriteKey(it)
+
+	a.FavoriteInBound(it) // 还没挂收藏夹：这一问会失败
+	waitUntil(t, "那次失败落完", 2*time.Second, func() bool {
+		a.favMu.Lock()
+		defer a.favMu.Unlock()
+		e := a.fav[key]
+		return e != nil && !e.wanted
+	})
+
+	a.MountCollections(CollectionRefs{Client: bili.NewClient(bili.Options{})})
+	a.favMember = func(context.Context, int64, int, int64) (bool, error) { return true, nil }
+	if fav := waitFavoriteKnown(t, a, it); !fav {
+		t.Error("收藏夹挂上之后没有重新问，还停在失败退避里")
 	}
 }
 

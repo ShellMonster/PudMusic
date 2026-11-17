@@ -98,17 +98,18 @@ func (a *App) FavoriteInBound(it Item) (favorited, known bool) {
 	e.triedAt = time.Now()
 	e.gen++
 	gen := e.gen
+	entry := e
 	hook := a.favMember
 	a.favMu.Unlock()
 
-	go a.queryFavorite(key, it, bound.ID, gen, hook)
+	go a.queryFavorite(key, it, bound.ID, gen, entry, hook)
 	return false, false
 }
 
 // queryFavorite 是后台那一趟「这一条在不在绑定歌单里」。
-func (a *App) queryFavorite(key string, it Item, folderID int64, gen uint64, hook func(context.Context, int64, int, int64) (bool, error)) {
+func (a *App) queryFavorite(key string, it Item, folderID int64, gen uint64, entry *favoriteEntry, hook func(context.Context, int64, int, int64) (bool, error)) {
 	fav, err := a.favoriteMember(context.Background(), it, folderID, hook)
-	a.finishFavorite(key, gen, fav, err)
+	a.finishFavorite(key, entry, gen, fav, err)
 }
 
 // favoriteMember 问一次会员：先解析内容 id（audio 的 sid 本身；mv 有 sid 就
@@ -173,11 +174,14 @@ func favoriteQueryTarget(ctx context.Context, it Item, cli *bili.Client) (int64,
 	return 0, 0, errors.New("这一首还没有可以收藏的身份")
 }
 
-// finishFavorite 记下一次查询的结果。代次对不上就丢：期间写操作已经
-// 自己把答案改过了。
-func (a *App) finishFavorite(key string, gen uint64, fav bool, err error) {
+// finishFavorite 记下一次查询的结果。**条目身份和代次都对得上才落账**：
+//
+//   - 条目指针管「换绑 / 换账号清过缓存」：清过之后同一个 key 会有一份新的
+//     entry，代次又都从 1 开始，只比 key + gen 的话旧答案会被当成新答案；
+//   - gen 管「同一份缓存、问过之后又写过」。
+func (a *App) finishFavorite(key string, entry *favoriteEntry, gen uint64, fav bool, err error) {
 	a.favMu.Lock()
-	if e := a.fav[key]; e != nil && e.gen == gen {
+	if e := a.fav[key]; e != nil && e == entry && e.gen == gen {
 		e.wanted = false
 		if err == nil {
 			e.known, e.favorited = true, fav
@@ -213,10 +217,69 @@ func (a *App) markFavorite(it Item, on bool) {
 	a.favMu.Unlock()
 }
 
-// clearFavorites 扔掉整份缓存：绑定换了 / 没了之后，旧答案说的都是另一个
-// 歌单里的事。
+// clearFavorites 扔掉整份缓存：绑定换了 / 没了 / 换了账号之后，旧答案说的都是
+// 另一份绑定或另一个账号里的事。
+//
+// 代次一起 +1：已经发出去的写请求回来时，光比绑定 id 拦不住「换了账号但 id
+// 碰巧一样」那一档，得拿这个代次对号（见 `SetBoundFavorite`）。
 func (a *App) clearFavorites() {
 	a.favMu.Lock()
 	a.fav = nil
+	a.favEpoch++
 	a.favMu.Unlock()
+}
+
+// favoriteEpoch 是缓存生命周期代号，清一次 +1。写请求发出去时领一个，成功
+// 回填前对号。
+func (a *App) favoriteEpoch() uint64 {
+	a.favMu.Lock()
+	defer a.favMu.Unlock()
+	return a.favEpoch
+}
+
+// forgetFavoritesIfBound 在 add / del 里有绑定那一格时作废缓存。
+//
+// 其它收藏入口（「收藏」多选框、收藏夹页删内容）改的是同一份绑定歌单；
+// 不作废的话，红心会一直保留改之前那个答案。返回有没有清。
+func (a *App) forgetFavoritesIfBound(add, del []int64) bool {
+	bound, ok := a.LikedFolder()
+	if !ok {
+		return false
+	}
+	for _, ids := range [][]int64{add, del} {
+		for _, id := range ids {
+			if id == bound.ID {
+				a.clearFavorites()
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// forgetFavoritesIfFolder 在改的正是绑定歌单时作废缓存。返回有没有清。
+func (a *App) forgetFavoritesIfFolder(id int64) bool {
+	bound, ok := a.LikedFolder()
+	if !ok || bound.ID != id {
+		return false
+	}
+	a.clearFavorites()
+	return true
+}
+
+// boundFolderListed 报侧栏那份「我创建的」里还有没有绑定这一格。
+//
+// 只在**列表已经拉过**时才算数：「还没拉」不是「真没有」（AGENTS.md 的同一
+// 条判据）。它用来把 deal 的 `-400` 分开：列表里还摆着这一格时，-400 更可能
+// 是容量满或参数问题，不该把用户的绑定解掉。
+func (a *App) boundFolderListed(id int64) bool {
+	if st := a.FavoriteState(FavoritesCreated); !st.Loaded {
+		return false
+	}
+	for _, f := range a.SideFavorites(FavoritesCreated) {
+		if f.ID == id {
+			return true
+		}
+	}
+	return false
 }

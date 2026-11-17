@@ -790,6 +790,9 @@ type App struct {
 	// 混进 `a.mu` 的话，一次网络往返会去抢播放器每帧都要的那把锁（同 `likeMu`）。
 	favMu sync.Mutex
 	fav   map[string]*favoriteEntry
+	// favEpoch 是这份缓存的生命周期代号：换绑 / 解绑 / 换账号时 +1。写请求
+	// 发出去时领一个，回来时对不上就不回填（见 clearFavorites）。
+	favEpoch uint64
 	// favMember 是问「这一条在不在绑定的那一格」的那一趟（上下文、内容 id、
 	// 内容类型、歌单 id）。nil = 走收藏夹零件上的 `bili.Client`。
 	//

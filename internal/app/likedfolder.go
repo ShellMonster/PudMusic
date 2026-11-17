@@ -243,6 +243,7 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 		}
 	}
 
+	epoch := a.favoriteEpoch()
 	go func() {
 		var add, del []int64
 		if on {
@@ -251,12 +252,20 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 			del = []int64{bound.ID}
 		}
 		err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, add, del)
+		failText := func() string {
+			if on {
+				return "收藏不了：" + bili.Friendly(err)
+			}
+			return "取消不了喜欢：" + bili.Friendly(err)
+		}
 		switch {
 		case err == nil:
-			// 写成功了：**最终状态我们知道了**。只在绑定没在这期间被换掉时
-			// 才记进缓存——换绑会清空缓存，旧歌单里的答案对新绑定是错的。
-			if cur, ok := a.LikedFolder(); ok && cur.ID == bound.ID {
-				a.markFavorite(item, on)
+			// 写成功了：**最终状态我们知道了**。只在缓存生命周期和绑定都没在这
+			// 期间变过时才记进去——换绑 / 换账号会清空缓存，旧答案对新绑定是错的。
+			if a.favoriteEpoch() == epoch {
+				if cur, ok := a.LikedFolder(); ok && cur.ID == bound.ID {
+					a.markFavorite(item, on)
+				}
 			}
 			text := "已加入「" + bound.Title + "」"
 			if !on {
@@ -266,7 +275,7 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 				Token: token, Rid: rid, Type: contentType,
 				Folder: bound.ID, OK: true, Text: text,
 			})
-		case likedFolderGone(err):
+		case likedFolderGone(err) && !a.boundFolderListed(bound.ID):
 			log.Printf("pudmusic: 绑定的收藏夹 %d 已经没了：%v", bound.ID, err)
 			c.likedResult.add(LikedResult{
 				Token:   token,
@@ -277,14 +286,13 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 				Missing: true,
 			})
 		default:
+			// 走到这里有两档：普通失败，以及 `-400` 但侧栏列表里**还摆着**
+			// 绑定那一格（容量满、参数问题）。后者不能解绑——绑定是用户的
+			// 配置，没丢的东西不该被我们收走。
 			log.Printf("pudmusic: 改绑定歌单 %d 的内容失败：%v", bound.ID, err)
-			text := "收藏不了：" + bili.Friendly(err)
-			if !on {
-				text = "取消不了喜欢：" + bili.Friendly(err)
-			}
 			c.likedResult.add(LikedResult{
 				Token: token, Rid: rid, Type: contentType,
-				Folder: bound.ID, Text: text,
+				Folder: bound.ID, Text: failText(),
 			})
 		}
 		a.wakeUI()

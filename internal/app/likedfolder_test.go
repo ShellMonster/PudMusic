@@ -365,6 +365,35 @@ func TestUnbindWhileARequestIsFlyingDropsItsResult(t *testing.T) {
 	}
 }
 
+// TestAFullBoundFolderIsNotUnbound 钉「-400 但侧栏列表里还摆着绑定那一格时，
+// 不许把它当『收藏夹没了』解绑」。
+//
+// -400 不只表示收藏夹不存在：容量满、参数问题也回它。绑定是用户配的东西，
+// 没丢就不能收走。
+func TestAFullBoundFolderIsNotUnbound(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	// 侧栏列表拉过，而且里面**有**绑定那一格。
+	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "我的喜欢"}})
+	markFavoritesLoaded(a)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	f.failDeal(-400, "收藏夹容量已满")
+	it := audioFavItem(77)
+	a.SetBoundFavorite(it, 77, bili.MediaAudio, true)
+
+	res := waitLikedResult(t, a, 2*time.Second)
+	if res.Missing {
+		t.Error("列表里还摆着这一格，-400 却被当成「收藏夹没了」")
+	}
+	if res.OK {
+		t.Error("-400 被当成了成功")
+	}
+	if bound, ok := a.LikedFolder(); !ok || bound.ID != 42 {
+		t.Errorf("绑定 = %+v，want 42 还在", bound)
+	}
+}
+
 // markFavoritesLoaded 把「我创建的」那一组标成「拉过、且拉到了」。测试用：
 // 绑定的失效判据里有一条是「列表拉过了、里面没有」。
 func markFavoritesLoaded(a *App) {

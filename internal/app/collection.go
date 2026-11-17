@@ -358,6 +358,10 @@ func (a *App) MountCollections(refs CollectionRefs) {
 	a.mu.Lock()
 	a.collections = &collections{refs: refs}
 	a.mu.Unlock()
+	// 挂上之前问过的那几趟都失败了（`errCollectionsMissing`），带着退避；
+	// 挂上这一刻作废掉，下一帧重新问，不是等退避到点。
+	a.clearFavorites()
+	a.wakeUI()
 }
 
 // CollectionsMounted 报告歌单这一摊挂上没有。
@@ -604,6 +608,10 @@ func (a *App) RemoveMedias(ctx context.Context, ref CollectionRef, medias []bili
 	if err := c.refs.Client.RemoveCollectionMedias(ctx, ref.ID, ref.Type, medias); err != nil {
 		return err
 	}
+	// 删的若是绑定的喜欢歌单，红心那份缓存已经旧了。
+	if a.forgetFavoritesIfFolder(ref.ID) {
+		a.wakeUI()
+	}
 	// 删完了要刷新两样：条目数（头图区写着「N 条视频」）和列表本身。
 	// 列表由界面收到通知之后重新拉，这里只负责把元信息拉回来。
 	go a.LoadCollection(ref)
@@ -647,6 +655,8 @@ func (a *App) ClearInvalidMedias(ref CollectionRef) {
 		//
 		// ⚠️ Kind 是 `NoticeCollectionChanged`：界面拿到这一条时除了发 Toast
 		// 还要把列表从第一页重来。刷新的时机由这一趟说了算（理由见那个常量）。
+		// 绑定的那一格若被清过，红心缓存也作废；末尾那次 wake 会把画面带过去。
+		a.forgetFavoritesIfFolder(ref.ID)
 		c.notice.add(ref, "失效内容已清除", NoticeCollectionChanged, notice.Success)
 		go a.LoadCollection(ref)
 		a.wakeUI()

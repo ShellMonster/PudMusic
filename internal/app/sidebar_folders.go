@@ -194,6 +194,9 @@ func (a *App) deleteCreatedFolder(id int64, title string, done func(text string,
 			a.wakeUI()
 			return
 		}
+		// 删掉的若是绑定的喜欢歌单，红心那份缓存也作废；下一次点心形会走
+		// 「绑定没了」那条并重新选。末尾那次 wake 会把画面带过去。
+		a.forgetFavoritesIfFolder(id)
 		a.forgetFavorite(FavoritesCreated, id)
 		sayFolderDone(done, "已删掉「"+title+"」", true, notice.Success)
 		a.wakeUI()
