@@ -119,6 +119,9 @@ type searchTab struct {
 
 	// kw 是「现在这些结果对应的是哪一条查询」。**只由界面线程读写。**
 	kw string
+	// 首次切入时列表还在加载；等结果到达后恢复切换前的偏移，避免空列表将其夹到零。
+	pendingScroll float32
+	restoreScroll bool
 
 	// mu 护着下面两样：拉页在后台 goroutine 里，界面线程同时在画、在点「全部播放」，
 	// 不加锁就是竞态（`go test -race` 会当场报出来）。
@@ -244,11 +247,14 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 	return list.Page{Songs: songs, HasMore: pg.HasMore}, nil
 }
 
-func (t *searchTab) current(q searchQuerySpec) {
+func (t *searchTab) current(q searchQuerySpec, scroll *ui.ScrollState) {
 	key := searchSpecKey(q)
 	if t.kw == key {
 		return
 	}
+	firstVisit := t.kw == ""
+	offset := scroll.Y
+	t.pendingScroll, t.restoreScroll = offset, firstVisit && offset > 0
 	t.kw = key
 	t.mu.Lock()
 	t.gen++
@@ -256,7 +262,11 @@ func (t *searchTab) current(q searchQuerySpec) {
 	t.total = 0
 	t.announced = false
 	t.mu.Unlock()
-	t.list.Reload()
+	if firstVisit {
+		t.list.ReloadKeepingScroll()
+	} else {
+		t.list.Reload()
+	}
 }
 
 func (t *searchTab) searchTotal() int {

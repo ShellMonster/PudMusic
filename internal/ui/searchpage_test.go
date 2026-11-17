@@ -778,3 +778,25 @@ func TestClickingAUserCardGoesToTheirSpace(t *testing.T) {
 		t.Errorf("点了 UP 主卡之后在 %q，want 他的空间", got)
 	}
 }
+
+// TestFirstSearchTabVisitKeepsViewport 锁定首次切到结果足够多的标签时不应跳回顶部。
+func TestFirstSearchTabVisitKeepsViewport(t *testing.T) {
+	s, tt := newSearchPage(t, "周杰伦", newSearchStub(72, 72))
+	settleText(t, tt, "第 1 页 第 1 首")
+	tt.Scroll(searchScrollX, searchScrollY, 0, 300)
+	tt.Frame()
+	before := s.search.scroll.Y
+	if before <= 0 {
+		t.Fatal("搜索结果没有滚动")
+	}
+	if err := tt.Click("视频"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "视频结果加载完", loadedTo(s, searchTabVideo, 1))
+	if got := s.search.scroll.Y; got != before {
+		t.Fatalf("首次切换搜索标签后位置从 %v 变为 %v", before, got)
+	}
+	if _, ok := tt.Find("第 1 页 第 1 首"); ok {
+		t.Fatal("切换后第一条结果回到了视口中")
+	}
+}

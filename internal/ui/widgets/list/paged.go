@@ -580,6 +580,12 @@ func (p *PagedList) Reload() {
 	p.pager.Reload()
 }
 
+// ReloadKeepingScroll 首次加载新标签时不向列表发回顶请求。
+func (p *PagedList) ReloadKeepingScroll() {
+	p.reset(false)
+	p.pager.Reload()
+}
+
 // Reset 清空已加载的行，让这一份从第一页重来——**但不当场拉**。
 //
 // ⚠️ **它和 Reload 的分界就在「当场拉不拉」**：Reload 当场拉（调用方知道要什么），
@@ -591,6 +597,10 @@ func (p *PagedList) Reload() {
 //
 // ⚠️ 只能由界面线程调。
 func (p *PagedList) Reset() {
+	p.reset(true)
+}
+
+func (p *PagedList) reset(scrollTop bool) {
 	p.pager.Reset()
 
 	p.items = nil
@@ -602,7 +612,9 @@ func (p *PagedList) Reset() {
 	p.blocked = false
 	p.lastEndShown = false
 	p.rev++
-	p.ScrollTop()
+	if scrollTop {
+		p.ScrollTop()
+	}
 }
 
 // ScrollTop 回到顶上。切路由和点回顶按钮都走它。
