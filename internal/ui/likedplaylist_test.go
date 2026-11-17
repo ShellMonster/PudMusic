@@ -318,7 +318,7 @@ func TestTheSettingsShowAndChangeTheBinding(t *testing.T) {
 func TestALostBindingFallsBackToFolderPicker(t *testing.T) {
 	_, tt, f := newLikedBoundEnv(t)
 	// 绑定那一格在 B 站那边「没了」：写它会被拒。
-	f.failDeal(-400)
+	f.failDeal(-403)
 
 	likeTheSong(t, tt)
 

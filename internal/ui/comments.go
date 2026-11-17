@@ -1168,6 +1168,8 @@ func (s *Shell) syncCommentsData(c *ui.Context) {
 	// 读到的是上一帧的那一次点击。
 	if p.sortIdx != commentsSortIndex(cur) {
 		s.app.SetCommentsSort(commentsSortAt(p.sortIdx))
+		// 换档之后**第一屏重新从第一条开始**（验收项）。
+		p.state.ScrollTo(0, ui.Start)
 		p.bodies = nil
 		p.srcLen = -1
 		p.rows = nil
@@ -1204,14 +1206,14 @@ func (s *Shell) syncCommentsData(c *ui.Context) {
 		}
 	}
 
-	// 🔴 **筛选开关变了**：重建一遍行，并保留列表当前锚点；没有对应行时由列表
-	// 自然夹紧到有效范围。
+	// 🔴 **筛选开关变了**：重建一遍行（筛完的行数变了），并回到第一条。
 	//
 	// ⚠️ **它读到的是上一帧的那一次点击**（框架在**建到的时候**才写那个
 	// bool，理由同 `sortIdx`）。
 	if p.mentionOnly != p.srcMention {
 		p.srcMention = p.mentionOnly
 		p.srcLen = -1
+		p.state.ScrollTo(0, ui.Start)
 	}
 
 	// 评论列表：问一次（`Comments()` 自己会保证在问），顺便把楼中楼也问上。

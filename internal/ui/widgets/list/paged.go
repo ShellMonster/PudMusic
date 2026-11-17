@@ -483,7 +483,7 @@ func (p *PagedList) SetScrollState(on bool) { p.scrollState = on }
 // SetScroll 绑定外部像素滚动状态。传 nil 恢复列表自己的状态；行锚点仍属于本列表。
 func (p *PagedList) SetScroll(s *ui.ScrollState) {
 	p.externalScroll = s
-	p.scrollState = s != nil
+	p.scrollState = true
 }
 
 // ScrollOffset 是这一屏滚过了多少像素。回顶按钮判断「滚过 400 像素没有」用它。

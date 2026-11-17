@@ -201,7 +201,9 @@ func TestTheCommentsDrawerIsModal(t *testing.T) {
 	s, tt := newCommentsShell(t, b, mvItem(), 1400, 900)
 
 	// 开着的时候：底下那一页点不动。
-	_ = tt.Click("本地音乐")
+	if err := tt.Click("本地音乐"); err != nil {
+		t.Fatalf("点不了侧栏的「本地音乐」：%v（文字：%q）", err, tt.Texts())
+	}
 	tt.Frame()
 	if got := s.router.Location(); got == "/local-music" {
 		t.Fatal("抽屉开着的时候底下那一页点得动——蒙版没盖住")

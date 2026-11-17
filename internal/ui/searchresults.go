@@ -192,7 +192,7 @@ func searchUserSkeleton(c *ui.Context) {
 				Children(func() {
 					for col := 0; col < 2; col++ {
 						ui.Row(c).Grow(1).MinWidth(0).Padding(space.Px16).Gap(space.Px16).
-							AlignItems(ui.Center).Radius(tok.R12).Border(1, tok.Of(c.Theme()).Line).Children(func() {
+							AlignItems(ui.Center).Radius(12).Border(1, tok.Of(c.Theme()).Line).Children(func() {
 							skeleton.Block(c, fmt.Sprintf("search:user:sk:%d:%d:avatar", row, col), 56, 56, 28).
 								Label(fmt.Sprintf("搜索用户占位:%d:%d:头像", row, col))
 							ui.Column(c).Grow(1).MinWidth(0).Gap(space.Px6).Children(func() {

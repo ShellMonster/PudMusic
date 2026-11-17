@@ -406,3 +406,18 @@ func TestTheSettingsPageUsesThePageHead(t *testing.T) {
 		t.Errorf("页头上没有 Eyebrow「Preferences」：%q", tt.Texts())
 	}
 }
+
+// TestSettingsTabSwitchKeepsScrollPosition 锁定设置内容足够长时切换分类保留滚动位置。
+func TestSettingsTabSwitchKeepsScrollPosition(t *testing.T) {
+	tt, s, _, _ := shellOnSettings(t, app.DefaultSettings(""))
+	tt.Scroll(700, 400, 0, 180)
+	tt.Frame()
+	before := s.settings.scroll.Y
+	if before <= 0 {
+		t.Fatal("设置页没有滚动，无法验证切换分类后的视口")
+	}
+	openSettingsTab(t, tt, "快捷键")
+	if got := s.settings.scroll.Y; got != before {
+		t.Fatalf("切换设置分类后滚动位置从 %v 变为 %v", before, got)
+	}
+}
