@@ -1006,8 +1006,12 @@ func (l *List) viewFooter(c *ui.Context) {
 
 // failedRowText 是「这一行画不出来」那一行的占位。
 func (l *List) failedRowText(c *ui.Context) {
-	ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
-		Padding(cardPadY, cardPadX).MaxLines(1)
+	row := ui.Row(c).FillWidth()
+	row = LayoutRow(row, c.Theme())
+	row.Children(func() {
+		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
+			Padding(cardPadY, cardPadX).MaxLines(1)
+	})
 }
 
 // playFrom 把队列**换成**第 i 首往后的那一段并开始播。

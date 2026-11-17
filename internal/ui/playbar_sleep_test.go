@@ -19,6 +19,9 @@ func TestTheSleepMenuSetsAndClearsTheTimer(t *testing.T) {
 		t.Fatalf("选完之后：SleepAt=%v open=%v", a.Snapshot().SleepAt, s.sleepOpen)
 	}
 	tt.Frame()
+	if !hasToast(s, "将在 30 分钟后暂停播放") {
+		t.Fatalf("设了定时没说一句，提示有 %q", dropToastTexts(s))
+	}
 
 	if err := tt.Click("睡眠定时"); err != nil {
 		t.Fatal(err)
@@ -31,5 +34,9 @@ func TestTheSleepMenuSetsAndClearsTheTimer(t *testing.T) {
 	}
 	if !a.Snapshot().SleepAt.IsZero() {
 		t.Error("点了关闭定时，定时器还在")
+	}
+	tt.Frame()
+	if !hasToast(s, "已关闭睡眠定时") {
+		t.Errorf("关了定时没说一句，提示有 %q", dropToastTexts(s))
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/leading"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/motion"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
@@ -200,8 +201,8 @@ func faceTint(mid int64) ui.Color {
 //
 // ⚠️ **它是算出来的，不是量的**：骨架画出来的时候网格容器还没被 `Bounds()`
 // 量到（要下一帧），等它量到骨架已经不在了——所以和 `pageBodyW` 一样按
-// 「内容区 − 固定的那几项」算，首帧就对。量出来的 `f.width`（上一帧的网格
-// 容器）优先级仍高于它：窗口拖宽拖到一半时它是真值。
+// 「内容区 − 固定的那几项」算，首帧就对。真网格也用这一份，不再拿 `List`
+// 的内容宽反推，避免首帧的反馈把卡片压窄。
 func (s *Shell) followCardLaneWidth(c *ui.Context) float32 {
 	winW := windowW(c)
 	pad := space.PageHorizontalForWindow(winW)
@@ -210,6 +211,22 @@ func (s *Shell) followCardLaneWidth(c *ui.Context) float32 {
 		lane -= followGroupW + space.Px40
 	}
 	return lane
+}
+
+// followGridLayout 是这一帧关注卡网格的全部几何输入：列数和格子宽。
+//
+// ⚠️ **骨架和真网格必须从这里取**：两份各自算的话，首帧还没有测量值的那
+// 一侧会掉进另一份兜底，数据一到整格就换宽。这里只认一个来源：
+// `followCardLaneWidth`（内容区减去侧栏、页边距和分组栏）。
+type followGridLayout struct {
+	cols int
+	cell float32
+}
+
+func (s *Shell) followGridLayout(c *ui.Context) followGridLayout {
+	lane := max(s.followCardLaneWidth(c), 0)
+	cols := followColumnsFor(lane)
+	return followGridLayout{cols: cols, cell: pud.CellWidth(lane, cols, followCardGap)}
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,15 +261,22 @@ func followSkeletonCard(c *ui.Context, idx string, w float32) {
 		Border(1, p.Line).
 		Children(func() {
 			skeleton.Block(c, key+":av", 56, 56, 28).Label(followSkeletonLabel(idx, "头像"))
-			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Gap(space.Px6).Children(func() {
+			ui.Column(c).Grow(1).Shrink(1).MinWidth(0).Children(func() {
 				// ⚠️ **字条宽按真卡的份数给，不按卡宽比例**：真卡上「名字 16 /
 				// 签名 13 / 认证 12」是三行不同长的字，骨架用三根不同长的条
 				// 模拟；拿卡宽乘比例的话窄卡里字条会比真字短一截、宽卡里长一截。
 				// `.Shrink(1)` 允许窄卡把它们压短——真卡的字也是 `Shrink(1)`
 				// 让位给按钮。
-				skeleton.Block(c, key+":n", 140, 14, tok.R4).Shrink(1)
-				skeleton.Block(c, key+":s", 200, 12, tok.R4).Shrink(1)
-				skeleton.Block(c, key+":o", 120, 12, tok.R4).Shrink(1)
+				//
+				// ⚠️ **高度按真卡的行高给**：14/12/12 那种估法让占位卡比真卡
+				// 矮十像素，数据回来整行还会往上跳一下。这里用同一套字号 ×
+				// `leading.Body`，下面两行再补真卡那 2 像素的上边距。
+				line := func(size float32) float32 { return scale.Font(c, size) * leading.Body }
+				skeleton.Block(c, key+":n", 140, line(scale.Size16), tok.R4).Shrink(1)
+				skeleton.Block(c, key+":s", 200, line(scale.Size13), tok.R4).
+					Margin(space.Px2, space.None, space.None, space.None).Shrink(1)
+				skeleton.Block(c, key+":o", 120, line(scale.Size12), tok.R4).
+					Margin(space.Px2, space.None, space.None, space.None).Shrink(1)
 			})
 			// 按钮占位取「已关注」那一枚的 Sm 档（32 高），宽按那一枚的实测
 			// （三个 13px 字 + 左右 14 内边距 ≈ 66）。Shrink(0) 不许它被压：
@@ -273,32 +297,15 @@ func followSkeletonCard(c *ui.Context, idx string, w float32) {
 //
 // ⚠️ **Label 挂在外层那一格上**（「正在加载关注的人…」）：读屏软件和 Tester
 // 靠它认出「这一格在拉」，和 `drawSkeletonRows` 那一档同一句话。
-func (s *Shell) viewFollowSkeleton(c *ui.Context, f *followPage) {
-	w := f.width
-	if w <= 0 {
-		// 头一帧还没量出网格容器，按「内容区 − 页边距 − 分组栏 − 缝」算
-		//（`followCardLaneWidth`）——**不能拿内容区宽直接当容器**：它比右格
-		// 多出页边距 + 分组栏 + 缝共三百多像素，两列算出来的 cell 就虚胖，
-		// 第二列整张越出卡道（按钮占位也跟着冲出卡片右缘）。
-		w = s.followCardLaneWidth(c)
-	}
-	cols := followColumnsFor(w)
-	// ⚠️ **占位卡宽按「右边那一格的宽」算，不许拿内容区宽凑**：上一帧量到
-	// 的 `f.width` 是真值；估算值不许大过它（拖宽窗口的半路，`f.width` 还
-	// 停在旧值，算出来的 lane 会比它宽——那一帧宁可窄，不溢出）。
-	contW := s.followCardLaneWidth(c)
-	if w > 0 && w < contW {
-		contW = w
-	}
-	cell := pud.CellWidth(max(contW, 0), cols, followCardGap)
+func (s *Shell) viewFollowSkeleton(c *ui.Context, layout followGridLayout) {
 	ui.Column(c).Key("follow:skeleton").Label("正在加载关注的人…").FillWidth().
 		Gap(followRowGap).Children(func() {
 		for i := range 4 {
 			row := ui.Row(c).Key("follow:skel:row:" + strconv.Itoa(i)).FillWidth().Gap(space.Px16)
 			row = list.LayoutRow(row, c.Theme())
 			row.Children(func() {
-				for k := range cols {
-					followSkeletonCard(c, strconv.Itoa(i*cols+k), cell)
+				for k := range layout.cols {
+					followSkeletonCard(c, strconv.Itoa(i*layout.cols+k), layout.cell)
 				}
 			})
 		}

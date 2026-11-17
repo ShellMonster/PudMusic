@@ -917,8 +917,12 @@ func (g *Grid) viewRow(r ui.ListRow, cols int, cell float32) {
 	// 的 ID，第一格崩了记的就是第一首的 ID，共用一张表的话下一帧行先短路成
 	// 「这一行画不出来」，同行里另外几首好的也跟着没了。
 	if g.failedRow[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
-			Padding(cardPadY, cardPadX).MaxLines(1)
+		row := ui.Row(c).FillWidth()
+		row = LayoutRow(row, c.Theme())
+		row.Children(func() {
+			ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
+				Padding(cardPadY, cardPadX).MaxLines(1)
+		})
 		return
 	}
 	guardFailed(&g.failedRow, "网格行", m.ID, func() {

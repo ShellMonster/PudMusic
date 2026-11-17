@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	mygoui "github.com/egoist/mygo/ui"
@@ -167,6 +168,9 @@ func TestTheFollowSkeletonMatchesTheRealCardLayout(t *testing.T) {
 	}
 	if d := absF(real.Y - sCard.Y); d > 0.5 {
 		t.Errorf("真卡顶边在 %.1f，骨架在 %.1f——数据一到整格竖着跳了", real.Y, sCard.Y)
+	}
+	if d := absF(real.H - sCard.H); d > 2 {
+		t.Errorf("真卡高 %.1f，骨架高 %.1f——数据一到行高还差 %.1f", real.H, sCard.H, d)
 	}
 	if _, ok := tt.Find("关注占位:0"); ok {
 		t.Error("数据回来了骨架占位还挂着")
@@ -323,5 +327,48 @@ func TestTheFollowSkeletonStaysInsideTheCardLane(t *testing.T) {
 	if d := absF((real.X + real.W) - (second.X + second.W)); d > 0.5 {
 		t.Errorf("第二列真卡右缘在 %.1f，骨架在 %.1f——数据一到整列横着挪了",
 			real.X+real.W, second.X+second.W)
+	}
+}
+
+// TestTheFirstFollowGridFrameNeverSqueezesCards 钉住「数据第一次落地那一帧
+// 就按右边那一格的真实宽度摆卡」。
+//
+// # 曾经出错的行为
+//
+// 骨架屏阶段没有量过网格容器，真数据回来时首帧没有可用宽度。按 0 算格子
+// 宽，卡片被压成三十来像素，两个 56 像素的头像叠在一起；下一帧量到宽度才
+// 恢复。用户看到的就是首次打开「两个 UP 主的头像叠住」。
+//
+// 这一条在**第一次画**之前就把状态摆成「数据已经到了」，于是它量的正是那个
+// 还没有任何测量值的首帧。
+func TestTheFirstFollowGridFrameNeverSqueezesCards(t *testing.T) {
+	b := newUIExplore(t)
+	uiFollowTags(b, map[int]any{0: "默认分组"})
+	s, tt, a := newSpaceShell(t, b, true, "77", at(1400, 900))
+
+	f := s.followPageOf()
+	f.account, f.selfMid = a.AccountSnapshot(), a.SelfMid()
+	f.tagStarted = true
+	f.tags = []app.FollowTag{{ID: 0, Name: "默认分组", Count: 8}}
+	f.total = 8
+	f.pager.started = true
+	f.users = budgetFollowUsers(8)
+
+	s.navigate(followPath)
+	tt.Frame()
+
+	first, ok := tt.Find("打开 第 1 个 UP 的空间")
+	if !ok {
+		t.Fatalf("首帧没有画出第一张卡，文字有 %q", tt.Texts())
+	}
+	second, ok := tt.Find("打开 第 2 个 UP 的空间")
+	if !ok {
+		t.Fatalf("首帧没有画出第二张卡，文字有 %q", tt.Texts())
+	}
+	if first.W < 300 {
+		t.Errorf("首帧第一张卡只有 %.1f 宽——它被按没量到的容器宽压扁了", first.W)
+	}
+	if first.X+first.W > second.X {
+		t.Errorf("首帧两列叠住了：第一张右边 %.1f，第二张左边 %.1f", first.X+first.W, second.X)
 	}
 }

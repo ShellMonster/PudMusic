@@ -523,8 +523,8 @@ func TestAFetcherThatPanicDoesNotTakeTheProcessDown(t *testing.T) {
 	if p.Paged().Loading {
 		t.Fatalf("拉页器崩了之后还在 Loading，界面会永远转圈")
 	}
-	if !errors.Is(p.Paged().Err, errFetcherPanic) {
-		t.Errorf("Err = %v，want 含有 %v", p.Paged().Err, errFetcherPanic)
+	if !errors.Is(p.Paged().Err, ErrPagerPanic) {
+		t.Errorf("Err = %v，want 含有 %v", p.Paged().Err, ErrPagerPanic)
 	}
 	if !tt.HasText("加载失败，点此重试") {
 		t.Errorf("拉页器崩了之后没有给人一条重试的路，文字有 %q", tt.Texts())
@@ -626,11 +626,11 @@ func TestEveryWindowThatDrewItGetsWoken(t *testing.T) {
 // TestTheLogSaysWhoAskedForThePage 是排查用的小钉子：用户点的重试不能被记成
 // 「容器没填满叫的」——那句话会把人往错的方向引。
 func TestTheLogSaysWhoAskedForThePage(t *testing.T) {
-	want := map[trigger]string{
-		trigFirstRender: "首次渲染检查叫的",
-		trigScrollEnd:   "滚到底叫的",
-		trigRefill:      "容器没填满叫的",
-		trigRetry:       "用户点了重试",
+	want := map[PagerTrigger]string{
+		PagerFirstRender: "首次渲染检查叫的",
+		PagerScrollEnd:   "滚到底叫的",
+		PagerRefill:      "容器没填满叫的",
+		PagerRetry:       "用户点了重试",
 	}
 	for got, text := range want {
 		if got.String() != text {
@@ -642,6 +642,136 @@ func TestTheLogSaysWhoAskedForThePage(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 // 行身份（铁律四）
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 行过滤器（NewPagedFiltered）
+// ─────────────────────────────────────────────────────────────────────────────
+
+// hideOdd 是这一组用的过滤器：留下 id 里带偶数位的行。
+func keepEven(m Music) bool {
+	last := m.ID[len(m.ID)-1]
+	return (last-'0')%2 == 0
+}
+
+// TestAFilteredPageStillCountsAsPagingProgress 钉住这一票最关键的一条：
+//
+// 🔴 **一页全被滤掉的行也算翻页进展**。apply 返回的是过滤前的行数（Pager
+// 去重后的那一批），返回 0 的话 Pager 当场判「这一页没带来新行」停手——
+// 后面那一页的可见行就永远翻不到了。
+func TestAFilteredPageStillCountsAsPagingProgress(t *testing.T) {
+	st := newStub().
+		withSongs(1, []Music{{ID: "x-1", Title: "滤掉的"}, {ID: "x-3", Title: "也滤掉"}}, true).
+		withSongs(2, []Music{{ID: "x-2", Title: "留下来的"}}, false)
+
+	p := NewPagedFiltered(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, st.fetch, keepEven)
+	tt := ui.NewTester(p.View, testerW, testerH)
+
+	pump(t, tt, "全滤掉的那一页翻过之后，下一页的行落地", func() bool { return p.Paged().Loaded == 1 })
+
+	pg := p.Paged()
+	if pg.Page != 2 {
+		t.Errorf("停在第 %d 页，want 2：全滤掉的那一页被当成「没进展」停了手", pg.Page)
+	}
+	if pg.Hidden != 2 {
+		t.Errorf("Hidden = %d，want 2（第一页那两行都被滤掉了）", pg.Hidden)
+	}
+	if pg.Received() != 3 {
+		t.Errorf("Received = %d，want 3（2 滤掉 + 1 留下）", pg.Received())
+	}
+	if pg.HasMore {
+		t.Errorf("第二页说没有了，却还在 HasMore")
+	}
+	if !tt.HasText("留下来的") {
+		t.Errorf("第二页那一行没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestAFilteredListReportsHiddenRowsAndDuration 钉住摘要的两个数：
+// Hidden 数的是滤掉的行，Duration 算的是**收到过的**每一行（滤掉的也算）。
+func TestAFilteredListReportsHiddenRowsAndDuration(t *testing.T) {
+	st := newStub().withSongs(1, []Music{
+		{ID: "d-1", Title: "滤掉的", Duration: 2 * time.Minute},
+		{ID: "d-2", Title: "留下的", Duration: 3 * time.Minute},
+	}, false)
+
+	p := NewPagedFiltered(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, st.fetch, keepEven)
+	tt := ui.NewTester(p.View, testerW, testerH)
+
+	pump(t, tt, "一页落地", func() bool { return p.Paged().Loaded == 1 })
+
+	pg := p.Paged()
+	if pg.Hidden != 1 {
+		t.Errorf("Hidden = %d，want 1", pg.Hidden)
+	}
+	if pg.Received() != 2 {
+		t.Errorf("Received = %d，want 2", pg.Received())
+	}
+	if pg.Duration != 5*time.Minute {
+		t.Errorf("Duration = %v，want 5m（滤掉的那两分钟也得算进去）", pg.Duration)
+	}
+	if !pg.Settled() {
+		t.Error("一页落地、后面也没有了，Settled 却是假")
+	}
+}
+
+// TestAnAllHiddenPageKeepsPagingUntilAVisibleRowArrives 钉住「高页内头部
+// 挡住哨兵」那一支：一行可见的都没有、哨兵在画面外，照样要往下翻——
+// 不能等「用户滚过去」，因为用户面前根本没有一行能滚。
+func TestAnAllHiddenPageKeepsPagingUntilAVisibleRowArrives(t *testing.T) {
+	// 三页都装得满满的（每页 200 行）才逼得动「哨兵在画面外」这一支；
+	// 前两页全滤掉（id 末位都是奇数），第三页才有可见行。
+	hiddenPage := func(page int) []Music {
+		out := make([]Music, 200)
+		for i := range out {
+			out[i] = Music{ID: fmt.Sprintf("h%d-%d", page, 2*i+1), Title: fmt.Sprintf("滤掉的 %d-%d", page, i)}
+		}
+		return out
+	}
+	page3 := []Music{{ID: "v-2", Title: "终于看得见的"}}
+	st := newStub().
+		withSongs(1, hiddenPage(1), true).
+		withSongs(2, hiddenPage(2), true).
+		withSongs(3, page3, false)
+
+	p := NewPagedFiltered(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, st.fetch, keepEven)
+	tt := ui.NewTester(p.View, testerW, testerH)
+
+	pump(t, tt, "翻过两页全滤掉的，拉到一行可见的", func() bool { return p.Paged().Loaded == 1 })
+
+	if got := st.callsOf(); len(got) != 3 {
+		t.Errorf("叫了 %v 页，want [1 2 3]：全滤掉的页照样要往下翻", got)
+	}
+	if p.Paged().Hidden != 400 {
+		t.Errorf("Hidden = %d，want 400（两页各 200 行全被滤掉）", p.Paged().Hidden)
+	}
+	if !tt.HasText("终于看得见的") {
+		t.Errorf("可见那一行没画出来，文字有 %q", tt.Texts())
+	}
+}
+
+// TestOverlappingPagesCountHiddenOnce 钉住「翻页重叠」那一支：同一行出现在
+// 两页里时（B 站的翻页本来就可能重叠），Pager 去重之后只算一次——Hidden
+// 不能跟着页数翻倍。
+func TestOverlappingPagesCountHiddenOnce(t *testing.T) {
+	st := newStub().
+		withSongs(1, []Music{{ID: "o-1", Title: "滤掉的"}, {ID: "o-2", Title: "留下的"}}, true).
+		// 第二页把第一页那两行原样重复一遍，再加一行新的：Pager 应该去掉重复的，
+		// hidden 只数到 1 而不是 2。
+		withSongs(2, []Music{{ID: "o-1", Title: "滤掉的"}, {ID: "o-2", Title: "留下的"}, {ID: "o-4", Title: "新留下的"}}, false)
+
+	p := NewPagedFiltered(newCache(t), Actions{Notify: func(string, notice.Tone) {}}, st.fetch, keepEven)
+	tt := ui.NewTester(p.View, testerW, testerH)
+
+	pump(t, tt, "第二页落地", func() bool { return p.Paged().Loaded == 2 })
+
+	pg := p.Paged()
+	if pg.Hidden != 1 {
+		t.Errorf("Hidden = %d，want 1（重叠的那一行被数了两次）", pg.Hidden)
+	}
+	if pg.Received() != 3 {
+		t.Errorf("Received = %d，want 3", pg.Received())
+	}
+}
 
 // TestAppendingPagesKeepsTheChosenSong 是铁律四在翻页上的验收点：
 // **追加是在尾部插 key**，而筛选后重建是在头部插——两条规则不一样。翻完页，

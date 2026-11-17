@@ -704,8 +704,12 @@ func (p *pagedRows) viewGridRow(r ui.ListRow, cols int) {
 	}
 	m := p.rows[first]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
-			Padding(space.Px8).MaxLines(1)
+		row := ui.Row(c).FillWidth()
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
+			ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
+				Padding(space.Px8).MaxLines(1)
+		})
 		return
 	}
 	// ⚠️ **格子宽度要算出来交给页面**：封面按格子宽画（`widgets/list` 的
@@ -796,8 +800,12 @@ func (p *pagedRows) viewRow(r ui.ListRow) {
 	}
 	m := p.rows[i]
 	if p.failed[m.ID] {
-		ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
-			Padding(space.Px8).MaxLines(1)
+		row := ui.Row(c).FillWidth()
+		row = list.LayoutRow(row, c.Theme())
+		row.Children(func() {
+			ui.Text(c, "这一行画不出来").FontSize(scale.Font(c, scale.Size13)).TextColor(c.Theme().TextMuted).
+				Padding(space.Px8).MaxLines(1)
+		})
 		return
 	}
 	guard.Wrap(func(c *ui.Context) {

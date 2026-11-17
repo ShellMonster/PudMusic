@@ -368,6 +368,17 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 		return feedRowLabel(items[i])
 	}
 
+	// 第 0 行是页头，不是一条动态。`TakeFocus` 先把游标摆到 0，这里挪到第一条；
+	// 否则选中态会给标题换 `AccentText`，而页头自己盖了页面底色（同 `upspace_tabs.go`）。
+	if f.keys.started && f.keys.sel >= 0 && f.keys.sel < headerRows {
+		if len(items) > 0 {
+			f.keys.sel = headerRows
+			st.ScrollIntoView(f.keys.sel)
+		} else {
+			f.keys.sel = -1
+		}
+	}
+
 	// ⚠️ Key 挂在外面的 Column 上，理由见上面那一处。
 	ui.Column(c).Key("feed-dynamic-list").Grow(1).FillHeight().Children(func() {
 		// 「有 N 条我们画不出来」那一行（理由同 upspace_tabs.go 那一处）。
@@ -399,7 +410,12 @@ func (s *Shell) viewFeedItems(c *ui.Context, f *dynamicFeed) {
 					}
 				}()
 				if r.Index == 0 {
-					s.viewFeedHeader(r.Context, f)
+					// 页头是布局，不是一条动态。框架会给指针所在行铺
+					// `SurfaceHover`，不盖回页面底色的话鼠标碰到 chip 时整块
+					// 页头（展开作者后很高）都会变灰。
+					row := ui.Column(r.Context).Key("feed:header-row").FillWidth()
+					row = list.LayoutRow(row, r.Context.Theme())
+					row.Children(func() { s.viewFeedHeader(r.Context, f) })
 					return
 				}
 				itemIndex := r.Index - headerRows

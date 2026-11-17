@@ -169,13 +169,15 @@ func collectionEyebrow(typ bili.CollectionType, info app.CollectionInfo) string 
 // 被收藏数、仅自己可见；13 号次要色，缝 8/16，放不下就换行。
 //
 // **数据取法**（原型里全是假数）：
-//   - 作者、首数：容器元信息（`folder/info`、合集 / 系列接口）。
+//   - 作者、首数：容器元信息（`folder/info`、合集 / 系列接口）；首数那一行后面
+//     跟着「已隐藏 N 首失效内容」（`collectionSummary`，隐藏失效内容开着才说）。
 //   - 播放量、被收藏数：`folder/info` 的 `cnt_info`；合集 / 系列接口不给，不画那一格（不画 0）。
-//   - 总时长：已加载的条目时长之和——**只在条目都加载完（数量等于首数）时才画**，
-//     否则那是个偏小的假数。
+//   - 总时长：**收到过的**条目时长之和——只在收到数凑齐 B 站首数时才画，
+//     否则那是个偏小的假数（`collectionSummary.Complete`）。
 func (s *Shell) viewCollectionMeta(c *ui.Context, p *collectionPage, info app.CollectionInfo) {
 	pl := tok.Of(c.Theme())
 	fs := scale.Font(c, scale.Size13)
+	sum := p.summary(info)
 	ui.Row(c).Wrap().AlignItems(ui.Center).Gap(space.Px8).Selectable().Children(func() {
 		// 作者：元信息没回来时一道骨架，数据到了不跳高。
 		if !info.Loaded {
@@ -197,8 +199,11 @@ func (s *Shell) viewCollectionMeta(c *ui.Context, p *collectionPage, info app.Co
 				Margin(space.None, space.None, space.None, space.Px8)
 		}
 		mono(strconv.Itoa(info.MediaCount) + " 首")
-		if d, ok := s.collectionTotalDuration(p, info); ok {
-			item(collectionDurationText(d))
+		if txt := sum.HiddenText(p.keyword != ""); txt != "" {
+			item(txt)
+		}
+		if sum.Complete() && sum.Duration > 0 {
+			item(collectionDurationText(sum.Duration))
 		}
 		if n := list.PlayCountText(info.PlayCount); n != "" {
 			mono(n + " 播放")
@@ -213,24 +218,6 @@ func (s *Shell) viewCollectionMeta(c *ui.Context, p *collectionPage, info app.Co
 			})
 		}
 	})
-}
-
-// collectionTotalDuration 是已加载条目的时长之和；条目没加载全时 ok 为假。
-func (s *Shell) collectionTotalDuration(p *collectionPage, info app.CollectionInfo) (time.Duration, bool) {
-	if info.MediaCount <= 0 {
-		return 0, false
-	}
-	l := p.list.List()
-	if l.Len() < info.MediaCount {
-		return 0, false
-	}
-	var sum time.Duration
-	for i := range l.Len() {
-		if m, ok := l.At(i); ok {
-			sum += m.Duration
-		}
-	}
-	return sum, sum > 0
 }
 
 // collectionDurationText 是总时长的口语写法：「41 分钟」「2 小时 5 分钟」。
@@ -262,14 +249,14 @@ func (s *Shell) collectionMine(info app.CollectionInfo) bool {
 func (s *Shell) viewCollectionOps(c *ui.Context, p *collectionPage) {
 	pl := tok.Of(c.Theme())
 	info := s.app.Collection(p.ref)
-	empty := info.Loaded && info.MediaCount == 0
+	noPlayable := p.summary(info).NoPlayable()
 
 	ui.Row(c).Key("collection-ops").FillWidth().Wrap().AlignItems(ui.Center).Gap(space.Px12).
 		Padding(space.Px24, space.None, space.Px8, space.None).Children(func() {
-		if pud.ButtonDisabled(c, "col:play", pud.Primary, pud.Std, "播放全部", "play", empty).Clicked() {
+		if pud.ButtonDisabled(c, "col:play", pud.Primary, pud.Std, "播放全部", "play", noPlayable).Clicked() {
 			s.playWholeCollection(p)
 		}
-		if pud.ButtonDisabled(c, "col:shuffle", pud.Ghost, pud.Std, "随机播放", "shuffle", empty).Clicked() {
+		if pud.ButtonDisabled(c, "col:shuffle", pud.Ghost, pud.Std, "随机播放", "shuffle", noPlayable).Clicked() {
 			s.shuffleWholeCollection(p)
 		}
 		s.viewCollectionStar(c, p, info)

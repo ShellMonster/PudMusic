@@ -458,6 +458,12 @@ type Settings struct {
 	// CoverAccent 是「封面取色」开关：主色跟着当前封面的色相走。默认关。
 	CoverAccent bool `json:"coverAccent"`
 
+	// HideInvalidMedias 是「隐藏失效内容」开关：收藏夹里已经失效的条目不再
+	// 画出来（表头会说清已经藏了几首）。默认**关**——零值 false 就是用户要
+	// 的默认，「没设过」和「用户关了」是同一档，所以是裸 bool 不是指针，
+	// normalize 也不用动。
+	HideInvalidMedias bool `json:"hideInvalidMedias"`
+
 	// UpdateNotification 是「有更新了弹系统通知」开关（票 #559）。默认**开**。
 	//
 	// ⚠️ **它默认开，而它的零值是 false**：所以「这一格不存在」（老版本写的

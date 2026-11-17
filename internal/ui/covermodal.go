@@ -120,7 +120,12 @@ func (s *Shell) pickCover() {
 	pick := s.pickImage
 	go func() {
 		paths, err := pick(win)
-		if err != nil || len(paths) == 0 {
+		if err != nil {
+			// 和「用户取消」分开：取消返回空列表和 nil，真的打不开才带错。
+			s.addToast("打不开文件框："+err.Error(), notice.Danger)
+			return
+		}
+		if len(paths) == 0 {
 			// 用户取消：什么都不用说，也不用叫醒界面。
 			return
 		}

@@ -35,12 +35,12 @@ package list
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/guard"
@@ -78,8 +78,13 @@ type Fetcher func(ctx context.Context, page int) (Page, error)
 type Paged struct {
 	// Page 是已经拿到的最后一页。0 是还一页都没有。
 	Page int
-	// Loaded 是已经拿到的行数。
+	// Loaded 是已经拿到、而且画出去的行数（过了过滤器的那几行）。
 	Loaded int
+	// Hidden 是这一份过滤器拒掉的行数。没装过滤器的列表恒为 0。
+	Hidden int
+	// Duration 是**收到过的**每一行的时长之和，被滤掉的行也算——表头那个
+	// 「总时长」说的是这个容器的总量，不是「当前可见的那一部分」。
+	Duration time.Duration
 	// HasMore 后面还有没有。
 	HasMore bool
 	// Loading 是「正在拉」。**失败、超时、返回不对、拉页器崩了都必须是
@@ -87,6 +92,21 @@ type Paged struct {
 	Loading bool
 	// Err 是上一次拉页的错，成功时为 nil。
 	Err error
+}
+
+// Received 是这一份已经收到过的行数（画出去的 + 滤掉的）。
+//
+// ⚠️ **翻页进不进展看的是它，不是 Loaded**：一页全是被滤掉的行也算进展
+// （Pager 的 added==0 停手规则看的是过滤前的行数，见 `NewPagedFiltered`）。
+func (p Paged) Received() int { return p.Loaded + p.Hidden }
+
+// Settled 报「这一份已经停稳」：拿到过至少一页、没有一趟在途、后面也没有了
+// （或者上一趟失败了——那一步之后等的是人点重试，不是列表自己再拉）。
+//
+// 它是「全部行都被滤掉了」这个结论的前置闸：只要后面还有页、或者还有一趟
+// 在途，就不能先说「这里全是失效内容」。
+func (p Paged) Settled() bool {
+	return p.Page > 0 && !p.Loading && (!p.HasMore || p.Err != nil)
 }
 
 // # 三重保障的判据（这一份是共享的）
@@ -194,18 +214,28 @@ type PagedList struct {
 	//
 	// 名字用 surf（surface，「面」）而不是 view：这一层已经有 `view` 那个方法了。
 	surf  *SwitchView
-	fetch Fetcher
 	pager *Pager[Music, struct{}]
 
 	// ── 下面这一摊只由界面线程读写（铁律一）────────────────────────────────
 
-	// items 是已经拿到的全部行。**追加在尾部**，所以每次翻页接的是新的一截，
+	// items 是已经拿到、**画出去**的行。**追加在尾部**，所以每次翻页接的是新的一截，
 	// 不会动到上面那些行的身份（铁律四，见 apply）。
+	//
+	// ⚠️ **被 keep 滤掉的行不进来**（装了过滤器的时候）：List / Grid 拿到的
+	// 就是可见行，选择、批量、播放全部都不用认识「隐藏」这回事。
 	items []Music
-	// seen 是 items 里已有的 ID。翻页时两页返回同一首歌很常见（B 站的翻页
-	// 本来就可能重叠），不去重就是同一个 ID 出现两次：行身份直接串在一起
-	//（Tester 当场 panic，真窗口里那两行共用一份状态——选中一个另一个也亮）。
-	seen map[string]bool
+
+	// keep 是这一份的行过滤器（nil = 每行都留，和现在一样的行为）。
+	//
+	// ⚠️ **建的时候定死**（见 `NewPagedFiltered`）：换策略就是换一份列表，
+	// 和换排序、换搜索词是同一条现有路——所以没有 setter。
+	keep func(Music) bool
+
+	// hidden 是这一份滤掉的行数；duration 是**收到过的**每一行的时长之和
+	// （被滤掉的也算）。两个都只由界面线程写，跟着这一份实例走——重建列表
+	// 就是新的一份，旧实例的在途结果写不到新实例上。
+	hidden   int
+	duration time.Duration
 
 	page    int
 	hasMore bool
@@ -241,13 +271,6 @@ type PagedList struct {
 	// failureNotice 报「拉页失败时要不要说一句」（见 SetFailureNotice）。默认要。
 	failureNotice bool
 
-	// gen 是代次。每次换查询 +1：在途请求的结果回来时代次对不上就扔掉。
-	// 这是 PLAN 点名要补的「旧查询结果作废」——Biu 只靠组件重建挡着。
-	gen    uint64
-	cancel context.CancelFunc
-	// why 是当前这一页是被哪条保障叫起来的（见 trigger）。
-	why trigger
-
 	// scroll 是这个列表滚到哪儿了。TrackScroll 每帧把偏移写回来，我们要靠它
 	// 判断「滚过 400 像素没有」，也要靠它切路由时回顶。
 	//
@@ -275,10 +298,6 @@ type PagedList struct {
 	wakes  []wakeEntry
 	// frame 是登记了几次，用来认出「最久没画的那一个」。
 	frame uint64
-
-	// mu 只护着信箱：后台往里投，界面线程在 view 开头取。
-	mu  sync.Mutex
-	box []pageResult
 }
 
 // wakeEntry 是一个窗口的唤醒句柄。
@@ -290,15 +309,6 @@ type wakeEntry struct {
 	seen uint64
 }
 
-// pageResult 是后台拉完一页之后投进信箱的东西。
-type pageResult struct {
-	// gen 是发这一页时的代次。对不上就是换查询之前的那个请求，作废。
-	gen  uint64
-	page int
-	pg   Page
-	err  error
-}
-
 // NewPaged 建一个会自己翻页的列表。
 //
 // cache 和 acts 的意思同 New（封面缓存、这一页会做的操作）。fetch 是拉页的
@@ -307,9 +317,22 @@ type pageResult struct {
 // ⚠️ **不在这里拉第一页**：NewPaged 可能在界面线程之外被调（页面的状态在
 // 构造器里建），那时候还没有唤醒句柄也没有画面。第一页由第一帧的 view 拉。
 func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
+	return NewPagedFiltered(cache, acts, fetch, nil)
+}
+
+// NewPagedFiltered 是 NewPaged 加一个**建的时候就定死的**行过滤器。
+//
+// keep 在**界面线程**上跑，位置在 Pager 去重之后、List 看到之前。被它拒掉的
+// 行记进 `Paged.Hidden`、不进 `items`，但**仍然算翻页进展**（apply 返回的是
+// 过滤前的行数，Pager 的 added==0 停手规则看的就是那个数）——于是一页全是
+// 被滤掉的行不会把自动补屏钉死。
+//
+// ⚠️ **没有 setter**：换策略就是换一份列表，和换排序、换搜索词是同一条现有
+// 路（调用方重建 `PagedList`）。隐藏数天然属于一份列表实例。
+func NewPagedFiltered(cache *imgcache.Cache, acts Actions, fetch Fetcher, keep func(Music) bool) *PagedList {
 	p := &PagedList{
-		surf: NewSwitchView(cache, acts), fetch: fetch,
-		hasMore: true, seen: map[string]bool{}, failureNotice: true, scrollState: true,
+		surf: NewSwitchView(cache, acts), keep: keep,
+		hasMore: true, failureNotice: true, scrollState: true,
 	}
 	p.pager = NewPager[Music, struct{}](func(ctx context.Context, page, _ int, _ struct{}) (PagerPage[Music], error) {
 		pg, err := fetch(ctx, page)
@@ -317,6 +340,11 @@ func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 	}, func(m Music) string { return m.ID }, func() struct{} { return struct{}{} })
 	p.pager.SetApply(func(pg PagerPage[Music]) int {
 		for _, m := range pg.Items {
+			p.duration += m.Duration
+			if p.keep != nil && !p.keep(m) {
+				p.hidden++
+				continue
+			}
 			p.items = append(p.items, m)
 		}
 		p.page = p.pager.Status().Page
@@ -325,6 +353,9 @@ func NewPaged(cache *imgcache.Cache, acts Actions, fetch Fetcher) *PagedList {
 		p.err = nil
 		p.blocked = false
 		p.rev++
+		// 🔴 **返回过滤前的行数**：Pager 把 0 当「这一页没带来新行」当场停手。
+		// 一页全被滤掉的行**也是进展**——后面可能还有没被滤掉的，滤成 0 返回
+		// 就把「继续翻」停在了这一页上。
 		return len(pg.Items)
 	})
 	p.pager.SetFailureHandler(func(page int, why PagerTrigger, err error) {
@@ -468,11 +499,20 @@ func (p *PagedList) ScrollOffset() float32 {
 //
 // ⚠️ 只能由界面线程调，同 Reload。
 func (p *PagedList) SetSongs(songs []Music) {
-	p.items = append([]Music(nil), songs...)
-	p.seen = make(map[string]bool, len(p.items))
-	for _, m := range p.items {
-		p.seen[m.ID] = true
+	// ⚠️ **种进 pager 的是原始行**（含被滤掉的）：它们的 key 以后翻页照样算
+	// 见过。而 items 只收可见行，hidden / duration 跟着这一份实例重新算。
+	visible := make([]Music, 0, len(songs))
+	p.hidden = 0
+	p.duration = 0
+	for _, m := range songs {
+		p.duration += m.Duration
+		if p.keep != nil && !p.keep(m) {
+			p.hidden++
+			continue
+		}
+		visible = append(visible, m)
 	}
+	p.items = visible
 	p.pager.Seed(songs)
 	p.page = 1
 	p.hasMore = false
@@ -492,7 +532,8 @@ func (p *PagedList) Layout() View { return p.surf.Layout() }
 // Paged 返回这一页分页列表此刻的状态。
 func (p *PagedList) Paged() Paged {
 	return Paged{
-		Page: p.page, Loaded: len(p.items), HasMore: p.hasMore,
+		Page: p.page, Loaded: len(p.items), Hidden: p.hidden, Duration: p.duration,
+		HasMore: p.hasMore,
 		Loading: p.loading, Err: p.err,
 	}
 }
@@ -542,7 +583,8 @@ func (p *PagedList) Reset() {
 	p.pager.Reset()
 
 	p.items = nil
-	p.seen = map[string]bool{}
+	p.hidden = 0
+	p.duration = 0
 	p.page = 0
 	p.hasMore = true
 	p.err = nil
@@ -721,109 +763,6 @@ func (p *PagedList) syncList() {
 	}
 }
 
-// adopt 取走信箱里的结果，一条一条落到界面的状态上。只能由界面线程调。
-func (p *PagedList) adopt() {
-	p.mu.Lock()
-	box := p.box
-	p.box = nil
-	p.mu.Unlock()
-
-	for _, r := range box {
-		p.apply(r)
-	}
-}
-
-// apply 落一页结果。
-//
-// 🔴 **锁在这一行解开，而且只有这一行解**（`p.loading = false`）：请求失败、
-// 超时、返回格式不对、拉页器自己崩了（fetchOne 把 panic 变成了错），全走这一
-// 条。漏了它就是「界面永远转圈」——验收里点名要钉住的那一条。
-func (p *PagedList) apply(r pageResult) {
-	if r.gen != p.gen {
-		// 换查询之前发出去的那一页。作废，别让它盖掉新条件的结果。
-		return
-	}
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-	p.loading = false
-
-	if r.err != nil {
-		// 解了锁，但**不再自动重试**：不然就是自己打自己（见 blocked）。
-		p.err = r.err
-		p.blocked = true
-		log.Printf("pudmusic: 第 %d 页拉失败（%s）：%v", r.page, p.why, r.err)
-		// ⚠️ **说一声是可选的**（见 SetFailureNotice）：页面自己有一整块失败态的
-		// 页把它关掉——同一件事说两遍是噪音，而这一句还带着原始的错。
-		//
-		// ⚠️ **话术用 main 那一份**（`loadFailToast`：它说清是第几页、为什么，
-		// 而不只是「加载更多失败」）。
-		if p.failureNotice {
-			notify(p.surf.List().acts, loadFailToast(r.page, r.err), notice.Danger)
-		}
-		return
-	}
-
-	p.err = nil
-	p.blocked = false
-	p.page = r.page
-	p.hasMore = r.pg.HasMore
-	// 🔴 铁律四：追加是**尾部**插 key（筛选后重建才是头部插，两条规则不一样），
-	// 尾部追加不动已有行的位置，所以「选中的那一首」翻完页还是它。
-	//
-	// 重了的在这里去掉：翻页重叠是常事（同一首歌挪了名次就会出现在两页里），
-	// 两个一样的 ID 就是两行共用一份状态——选中一个另一个也亮。
-	added := 0
-	for _, m := range r.pg.Songs {
-		if p.seen[m.ID] {
-			continue
-		}
-		p.seen[m.ID] = true
-		p.items = append(p.items, m)
-		added++
-	}
-	// ⚠️ **这一页没有带来新歌就是到底了**（两件事合成一条判据）：
-	//
-	//   - 一页空的还说「还有」：接口在骗人，或者已经到头了（原来的判据）。
-	//   - 一页**全是重样的**：接口在重复给同一批（翻页翻不动了），而「还有」
-	//     会让自动补屏一直拉下去——那是空转（而拉页器每一次都要一个往返）。
-	//
-	// 两条的坏处一样（转圈转到天荒地老），所以合成一条：**加不进去就是没有**。
-	if added == 0 {
-		p.hasMore = false
-	}
-	p.rev++
-}
-
-// trigger 是「这次翻页是被哪一条叫起来的」。三条保障走的是同一段代码，记下来
-// 只是为了**出错时说得清是哪一条**（见 apply 的那行日志）。
-type trigger uint8
-
-const (
-	// trigFirstRender 是①首次渲染检查：这一页刚建起来，先要有东西看。
-	trigFirstRender trigger = iota
-	// trigScrollEnd 是②滚到底：末尾那一行进画面了，而且用户是滚过去的。
-	trigScrollEnd
-	// trigRefill 是③加载结束后再检一次（顺带也是拖窗口变高变矮之后的那次）。
-	trigRefill
-	// trigRetry 是用户点了页脚那行的「重试」。它不是保障，是人。
-	trigRetry
-)
-
-func (t trigger) String() string {
-	switch t {
-	case trigFirstRender:
-		return "首次渲染检查叫的"
-	case trigScrollEnd:
-		return "滚到底叫的"
-	case trigRetry:
-		return "用户点了重试"
-	default:
-		return "容器没填满叫的"
-	}
-}
-
 // pagingState 把这一份此刻的状态摊成判据要的形状。
 //
 // ⚠️ **Fetched 是「已经拿到过至少一页」**（`page > 0`）：而「一页是空的」也
@@ -848,6 +787,15 @@ func (p *PagedList) afterFrame() {
 		return
 	}
 
+	// 🔴 **一行可见的都没有、但已经收到过行**：哨兵行被页内头部推到画面外了，
+	// 而下面没有任何一行能把它顶上来——等用户滚过去也等不到，因为他面前连
+	// 一行都没得看（装了过滤器的列表一页全被滤掉就是这样）。这时候不等
+	// 几何判据，直接补屏——拉到一行可见的落地、或者后面真的没有为止。
+	if len(p.items) == 0 && p.hidden > 0 {
+		p.pager.Load(PagerRefill)
+		return
+	}
+
 	first, last := p.surf.visible()
 	n := p.surf.rows()
 	d := DecideNextPage(st, first, last, n)
@@ -867,34 +815,6 @@ func (p *PagedList) afterFrame() {
 	p.pager.Load(PagerRefill)
 
 }
-
-// load 拉下一页。三重保障和用户点重试最后都走这里。
-//
-// 🔴 防重入就是第二行那把锁：三条保障会在同一帧里先后命中（Biu 那三个 effect
-// 也是挨着跑的），没有它就是一次滚动三个请求。
-func (p *PagedList) load(why trigger) {
-	if p.loading || p.blocked || p.fetch == nil {
-		return
-	}
-	// 第一页（page == 0）还没有「还有没有」可问，一律拉；往后由 hasMore 说。
-	if p.page > 0 && !p.hasMore {
-		return
-	}
-
-	next := p.page + 1
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancel, p.loading, p.err, p.why = cancel, true, nil, why
-	gen := p.gen // 代次只在界面线程上写，这里取一份给后台
-
-	go func() {
-		defer cancel()
-		pg, err := p.fetchOne(ctx, next)
-		p.deliver(pageResult{gen: gen, page: next, pg: pg, err: err})
-	}()
-}
-
-// errFetcherPanic 是拉页器自己崩了之后变成的那个错。
-var errFetcherPanic = ErrPagerPanic
 
 // loadFailToast 是拉页失败时弹的那一句。
 //
@@ -919,38 +839,6 @@ func loadFailToast(page int, err error) string {
 		return "加载失败：" + msg
 	}
 	return "加载更多失败：" + msg
-}
-
-// fetchOne 调 fetch，**崩了也变成一个错**。
-//
-// 🔴 不包这一层就是进程当场没了：fetch 跑在后台 goroutine 里，界面那一层的
-// recover（行级的、页级的、这个 view 自己的）一个都接不到它——Go 里没人在
-// 跑那个 goroutine。而 Fetcher 正是「解析接口返回」的那一段，接口一变就在
-// 这里炸（Biu 的三个 effect 里没有这一层，它是同步的所以碰不到）。
-//
-// 变成错之后就走 apply 那条正常路：解锁、记一笔、页脚上出现重试——
-// 正好是「返回格式不对」那一条要的行为。
-func (p *PagedList) fetchOne(ctx context.Context, page int) (pg Page, err error) {
-	defer func() {
-		if rec := recover(); rec != nil {
-			log.Printf("pudmusic: 第 %d 页的拉页器崩了：%v\n%s", page, rec, debug.Stack())
-			pg, err = Page{}, fmt.Errorf("%w：%v", errFetcherPanic, rec)
-		}
-	}()
-	return p.fetch(ctx, page)
-}
-
-// deliver 把一页结果投进信箱，然后叫醒界面。任何 goroutine 都能调。
-//
-// 🔴 铁律三：投递完**必须**唤醒。不唤醒就是「结果到了、画面停在旧帧」
-// （实测 0 帧刷新）；只唤醒一个窗口就是另一个窗口停在旧帧，所以是逐窗口
-// 通知。
-func (p *PagedList) deliver(r pageResult) {
-	p.mu.Lock()
-	p.box = append(p.box, r)
-	p.mu.Unlock()
-
-	p.invalidate()
 }
 
 // setWake 登记这一帧的窗口（每个窗口一条，见 wakes）。只能由界面线程调。
@@ -994,16 +882,6 @@ func (p *PagedList) invalidate() {
 			w.wake()
 		}
 	}
-}
-
-// stop 停掉在途的那一页。它只是**不让结果落地**：真正的作废靠 gen（Reload 里
-// bump 的那个）。停请求是为了别让服务端白做一遍。
-func (p *PagedList) stop() {
-	if p.cancel != nil {
-		p.cancel()
-		p.cancel = nil
-	}
-	p.loading = false
 }
 
 // footerView 画末尾那一行：还有就拉，没在拉就空着（但**占位**），拉失败就让人
