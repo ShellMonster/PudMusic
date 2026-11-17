@@ -692,6 +692,9 @@ func (s *Shell) flushLikedResults() {
 func (s *Shell) reopenLikePick(keep *likePending) {
 	b := &likeBind{open: true, name: "我的喜欢"}
 	if keep != nil && keep.on {
+		// 主窗口已经叫回来了，补收那一趟该让用户看见提示——不能留着迷你 /
+		// 刘海那一档的静音。
+		keep.quiet = false
 		b.rid, b.contentType = keep.rid, keep.typ
 		s.likePending = keep
 	}
