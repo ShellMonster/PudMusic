@@ -274,18 +274,14 @@ func TestThePlaybarHeartAddsThenRemoves(t *testing.T) {
 	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
 	tt.Frame()
 
-	if err := tt.Click("喜欢"); err != nil {
-		t.Fatalf("点「喜欢」：%v（文字有 %q）", err, tt.Texts())
-	}
+	clickStable(t, tt, "喜欢")
 	waitFrames(t, tt, "加进绑定歌单", func() bool { return len(env.dealBili.deals()) == 1 })
 	waitFrames(t, tt, "心形变实心", func() bool {
 		_, ok := tt.Find("取消喜欢")
 		return ok
 	})
 
-	if err := tt.Click("取消喜欢"); err != nil {
-		t.Fatalf("点「取消喜欢」：%v（文字有 %q）", err, tt.Texts())
-	}
+	clickStable(t, tt, "取消喜欢")
 	waitFrames(t, tt, "从绑定歌单移除", func() bool { return len(env.dealBili.deals()) == 2 })
 	waitFrames(t, tt, "心形回到空心", func() bool {
 		_, ok := tt.Find("喜欢")

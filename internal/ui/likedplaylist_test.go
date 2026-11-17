@@ -69,8 +69,28 @@ func newLikedBoundEnv(t *testing.T) (*Shell, *mygoui.Tester, *biliFixture) {
 // 走，留的入口叫「喜欢」（心形——把这首放进歌单，原「收藏」那一键的职责）。
 func likeTheSong(t *testing.T, tt *mygoui.Tester) {
 	t.Helper()
-	if err := tt.Click("喜欢"); err != nil {
-		t.Fatalf("点不了「喜欢」：%v（文字：%q）", err, tt.Texts())
+	clickStable(t, tt, "喜欢")
+}
+
+// clickStable 等这个标签的位置连续两帧不动再点。
+//
+// 播放条左列会随着评论键 / 评论数异步到达而变宽，心形跟着横移三十几个像素；
+// 按上一帧的坐标点，下一帧它已经挪开了——点空，测试等十秒都等不到弹窗。
+func clickStable(t *testing.T, tt *mygoui.Tester, label string) {
+	t.Helper()
+	var lastX, lastY float32
+	first := true
+	waitFrames(t, tt, "「"+label+"」的位置稳住", func() bool {
+		r, ok := tt.Find(label)
+		if !ok {
+			return false
+		}
+		stable := !first && r.X == lastX && r.Y == lastY
+		lastX, lastY, first = r.X, r.Y, false
+		return stable
+	})
+	if err := tt.Click(label); err != nil {
+		t.Fatalf("点不了「%s」：%v（文字：%q）", label, err, tt.Texts())
 	}
 }
 
