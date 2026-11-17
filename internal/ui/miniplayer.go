@@ -374,6 +374,26 @@ func (s *Shell) closeMiniPlayer() {
 	}
 }
 
+// detachMiniSoon 把迷你从主壳上摘掉、叫回主窗口，窗口的 Close 推到下一拍。
+//
+// ⚠️ **它是给「迷你自己那一帧里」用的**（点红心 / 收喜欢结果）：`Close` 在
+// 主线程上是**当场**销毁窗口（`mygo` 的 `onMain`），而这一帧还在用那一扇的
+// native 窗口画。`dropMini` 留在「别的窗口发起的关闭」那几条路上。
+func (s *Shell) detachMiniSoon() {
+	mini := s.mini
+	var w *mygo.Window
+	if mini != nil {
+		s.mini = nil
+		mini.main = nil
+		w = mini.win
+	}
+	s.restoreMainWindow()
+	if w != nil {
+		// 交给下一拍的主线程：`Close` 自己会 `onMain`，这会儿是 goroutine。
+		go w.Close()
+	}
+}
+
 // dropMini 关掉迷你播放器那个窗口（真的 Close），返回「刚才确实开着」。
 //
 // 「把主窗口叫回来」那一步没有算在这里：它要走系统（`RestoreFromBackground`，

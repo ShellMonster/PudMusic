@@ -255,7 +255,7 @@ func (s *Shell) viewFullStats(c *ui.Context, p tok.Palette) {
 
 // viewFullHeart 是「喜欢」键（原型 `[data-act="like"]`，心形）：用户自己的
 // **喜欢歌单绑定入口**——和播放条、迷你窗、刘海上那颗心是同一条绑定流程
-// （`likeCurrent` → `likeItem`），不是收藏夹多选框。
+// （`likeCurrent` → `toggleLike`），不是收藏夹多选框。
 //
 // ⚠️ **它不是 B 站的点赞**（喜欢歌单原型把「赞」从播放器上去掉了）：实心 /
 // 空心说的是「这一首在不在绑定的喜欢歌单里」（`playingFavorite`），标签是

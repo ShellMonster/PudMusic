@@ -167,6 +167,7 @@ func (a *App) BindLikedFolder(f LikedFolder) {
 	}
 	// 绑定换了：缓存里每一条说的都是另一个歌单里的事。
 	a.clearFavorites()
+	a.wakeUI()
 }
 
 // UnbindLikedFolder 解绑：回到「喜欢时选收藏夹」。
@@ -175,6 +176,7 @@ func (a *App) UnbindLikedFolder() {
 		log.Printf("pudmusic: 解喜欢歌单绑定失败：%v", err)
 	}
 	a.clearFavorites()
+	a.wakeUI()
 }
 
 // SetBoundFavorite 把这一条加进 / 拿出**绑定的**那个收藏夹。**立刻返回**，

@@ -115,9 +115,6 @@ type likePending struct {
 // likeItem 是「加进绑定歌单」那一条路（菜单第一下 / 直接调用）。
 func (s *Shell) likeItem(item app.Item) { s.askLike(item, true, false) }
 
-// unlikeItem 是「从绑定歌单里拿出来」那一条。
-func (s *Shell) unlikeItem(item app.Item) { s.askLike(item, false, false) }
-
 // toggleLike 是界面上所有心形共用的那一下：**已经喜欢就拿出去，否则加进去**。
 //
 // quiet 只给迷你 / 刘海那一档：成功和普通失败都不弹 toast（那一扇不画 toast，
@@ -232,8 +229,10 @@ func (s *Shell) likeCurrent() {
 	// 要回主窗口选歌单，那时候主窗口在前面，提示也该让用户看见。
 	quiet := side
 	if _, bound := s.app.LikedFolder(); !bound && side {
-		target.dropMini()
-		target.restoreMainWindow()
+		// ⚠️ **不能当场 Close 迷你**：这一支是从迷你 / 刘海自己那一帧里调进来的，
+		// 那一扇的 native 窗口还在画这一帧。`detachMiniSoon` 只摘状态、把关闭
+		// 推到下一拍。
+		target.detachMiniSoon()
 		quiet = false
 	}
 	target.toggleLike(it, quiet)
@@ -660,12 +659,16 @@ func (s *Shell) flushLikedResults() {
 		// 多选框）。加进去那一趟没做完，pending 留着，选中新歌单之后顺手补上。
 		//
 		// 选择弹窗只在主壳上画，而这一趟可能是迷你 / 刘海发起的——把那两扇
-		// 收掉、把主窗口叫回来，用户才看得见下一步。
+		// 收掉、把主窗口叫回来，用户才看得见下一步。迷你窗若还在画自己那一帧，
+		// 它的关闭要推到下一拍（`detachMiniSoon`）。
 		p := s.likePending
 		s.app.UnbindLikedFolder()
 		s.addToast(res.Text, notice.Warning)
-		s.dropMini()
-		s.restoreMainWindow()
+		if s.mini != nil {
+			s.detachMiniSoon()
+		} else {
+			s.restoreMainWindow()
+		}
 		s.likeBind = nil
 		s.likePending = nil
 		s.reopenLikePick(p)
