@@ -58,6 +58,36 @@ func CanFavorite(it Item) bool {
 	return it.isOnline() && it.likeTarget() != 0
 }
 
+// favoriteCacheMax 是喜欢缓存最多留多少条。
+//
+// 它不是「内存会爆」的保险，而是「浏览搜索结果时不能无限长」。超过之后按
+// 最早问过的挤掉一条；被挤掉的那一条下次问回来就好。
+const favoriteCacheMax = 1024
+
+// favoriteEntryLocked 取这一格；没有就建一条，超过上限先挤掉最旧的一条。
+// 调用方必须拿着 favMu。
+func (a *App) favoriteEntryLocked(key string) *favoriteEntry {
+	if e := a.fav[key]; e != nil {
+		return e
+	}
+	if a.fav == nil {
+		a.fav = map[string]*favoriteEntry{}
+	}
+	if len(a.fav) >= favoriteCacheMax {
+		oldestKey := ""
+		var oldest time.Time
+		for k, e := range a.fav {
+			if oldestKey == "" || e.triedAt.Before(oldest) {
+				oldestKey, oldest = k, e.triedAt
+			}
+		}
+		delete(a.fav, oldestKey)
+	}
+	e := &favoriteEntry{}
+	a.fav[key] = e
+	return e
+}
+
 // FavoriteInBound 返回这一条在不在绑定的那个歌单里。**不阻塞**。
 //
 // 第二个返回值是「知道了没有」：第一次问、那一趟还没回来时是 false，界面上
@@ -77,14 +107,7 @@ func (a *App) FavoriteInBound(it Item) (favorited, known bool) {
 	}
 
 	a.favMu.Lock()
-	if a.fav == nil {
-		a.fav = map[string]*favoriteEntry{}
-	}
-	e := a.fav[key]
-	if e == nil {
-		e = &favoriteEntry{}
-		a.fav[key] = e
-	}
+	e := a.favoriteEntryLocked(key)
 	if e.known {
 		v := e.favorited
 		a.favMu.Unlock()
@@ -193,28 +216,26 @@ func (a *App) finishFavorite(key string, entry *favoriteEntry, gen uint64, fav b
 	}
 }
 
-// markFavorite 是一次写成功之后把答案记进缓存。
+// markFavoriteIfEpoch 是一次写成功之后把答案记进缓存。
 //
 // 写操作自己知道最终状态（加成功 = 在里面，删成功 = 不在），不必再等一趟
-// 查询。换代次是为了让还在路上的旧查询作废（同 `setAskedLike`）。
-func (a *App) markFavorite(it Item, on bool) {
+// 查询。**代次检查和回填在同一把锁里**：分开做的话，换绑 / 换账号正好卡在
+// 中间时，缓存已经清过、这里又把旧答案写回去了。
+func (a *App) markFavoriteIfEpoch(it Item, on bool, epoch uint64) bool {
 	key := favoriteKey(it)
 	if key == "" {
-		return
+		return false
 	}
 	a.favMu.Lock()
-	if a.fav == nil {
-		a.fav = map[string]*favoriteEntry{}
+	defer a.favMu.Unlock()
+	if a.favEpoch != epoch {
+		return false
 	}
-	e := a.fav[key]
-	if e == nil {
-		e = &favoriteEntry{}
-		a.fav[key] = e
-	}
+	e := a.favoriteEntryLocked(key)
 	e.known, e.favorited = true, on
 	e.wanted = false
 	e.gen++
-	a.favMu.Unlock()
+	return true
 }
 
 // clearFavorites 扔掉整份缓存：绑定换了 / 没了 / 换了账号之后，旧答案说的都是

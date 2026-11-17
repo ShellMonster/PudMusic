@@ -335,6 +335,86 @@ func TestMountingCollectionsClearsTheFailedBackoff(t *testing.T) {
 	}
 }
 
+// TestAStaleEpochCannotMarkTheCache 钉「代次检查和回填在同一把锁里」：
+// 清过缓存之后，旧代次的写回执不许把旧答案写回去。
+func TestAStaleEpochCannotMarkTheCache(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	it := audioFavItem(77)
+	key := favoriteKey(it)
+
+	old := a.favoriteEpoch()
+	a.clearFavorites()
+	if a.markFavoriteIfEpoch(it, true, old) {
+		t.Error("旧代次回填成功了：清过缓存之后旧答案又被写回去")
+	}
+	a.favMu.Lock()
+	_, exists := a.fav[key]
+	a.favMu.Unlock()
+	if exists {
+		t.Error("旧代次回填还是建了缓存条目")
+	}
+
+	if !a.markFavoriteIfEpoch(it, true, a.favoriteEpoch()) {
+		t.Error("当前代次回填失败")
+	}
+	if fav, known := a.FavoriteInBound(it); !known || !fav {
+		t.Errorf("当前代次回填之后 = %v,%v，want true,true", fav, known)
+	}
+}
+
+// TestAAccountChangeDropsALateMissing 钉「换账号之后，旧账号那条迟到的
+// Missing 不许解掉新账号的绑定」。
+//
+// 本地绑定 id 可能没变，光比 Folder 拦不住；回执带的是发出那一趟的缓存
+// 代次，换账号会让代次 +1。
+func TestAAccountChangeDropsALateMissing(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 1, Title: "别的"}})
+	markFavoritesLoaded(a)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	// 侧栏列表里没有 42：这一趟当场判 Missing，结果在邮箱里。
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
+	a.onAccountChanged()
+	if res, ok := a.TakeLikedResult(); ok {
+		t.Errorf("换账号之后旧账号的 Missing 被交给界面了：%+v", res)
+	}
+}
+
+// TestTheFavoriteCacheIsBounded 钉「浏览搜索结果时这份缓存不会无限长」：
+// 超过上限先挤掉最旧的一条。
+func TestTheFavoriteCacheIsBounded(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+	a.favMember = func(context.Context, int64, int, int64) (bool, error) { return false, nil }
+
+	a.favMu.Lock()
+	a.fav = map[string]*favoriteEntry{}
+	for i := 0; i < favoriteCacheMax; i++ {
+		a.fav["mv|BVold"+strconv.Itoa(i)] = &favoriteEntry{
+			known: true, triedAt: time.Unix(int64(i), 0),
+		}
+	}
+	a.favMu.Unlock()
+
+	a.FavoriteInBound(mvFavItem("BVnew", ""))
+
+	a.favMu.Lock()
+	n := len(a.fav)
+	_, hasNew := a.fav["mv|BVnew"]
+	a.favMu.Unlock()
+	if n > favoriteCacheMax {
+		t.Errorf("缓存有 %d 条，超过上限 %d", n, favoriteCacheMax)
+	}
+	if !hasNew {
+		t.Error("新条目没进缓存：挤掉的不该是刚问的这一条")
+	}
+}
+
 // TestCanFavoriteMatchesTheUsableIdentities 菜单的摆法判据：在线的 mv / audio
 // 可以，本地文件和用户行不行。
 func TestCanFavoriteMatchesTheUsableIdentities(t *testing.T) {

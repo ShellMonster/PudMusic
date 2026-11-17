@@ -110,6 +110,10 @@ type LikedResult struct {
 	// 结果是旧绑定的回执——`TakeLikedResult` 拿它对照**此刻**的绑定，
 	// 对不上就丢，不让一条旧结果去拆新绑定（见 `TakeLikedResult` 注释）。
 	Folder int64
+	// Epoch 是发出那一趟时喜欢缓存的生命周期代号。换账号 / 重新挂载 / 重新
+	// 登录都会让它 +1；光比 Folder 拦不住「换了账号但本地绑定 id 没变」，
+	// 那一条迟到的 Missing 会把新账号的设置解掉。
+	Epoch uint64
 	// OK 是成了没有。
 	OK bool
 	// Text 是要跟用户说的那句话（成了是「已加入『我的喜欢』」）。
@@ -125,23 +129,25 @@ type LikedResult struct {
 // 理由同 `TakeFolderResult`。
 //
 // ⚠️ **过期的结果在这里丢**：一趟写请求发出去之后绑定可能已经被换掉
-// （设置页换绑）或解掉（绑定失效回多选框）。这时候才回来的结果属于
-// **旧绑定**——界面的 Missing 分支会解绑此刻的绑定、弹回多选框，把一
-// 条旧回执当成新绑定的判决是最坏的那一种错；旧成功那句「已加入『旧
-// 的』」同样是错话。所以每条结果都带上「发请求时的绑定 id」，取走时
-// 和此刻的绑定对不上就丢（顺带记进 dropped，给同包测试观察）。
+// （设置页换绑）或解掉（绑定失效回多选框），账号也可能已经换人。这时候才
+// 回来的结果属于**旧绑定或旧账号**——界面的 Missing 分支会解绑此刻的绑定、
+// 弹回多选框，把一条旧回执当成新绑定的判决是最坏的那一种错；旧成功那句
+// 「已加入『旧的』」同样是错话。所以每条结果都带上「发请求时的绑定 id 和
+// 缓存代次」，取走时和此刻对不上就丢（顺带记进 dropped，给同包测试观察）。
 func (a *App) TakeLikedResult() (LikedResult, bool) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return LikedResult{}, false
 	}
-	current, _ := a.LikedFolder()
 	for {
 		res, ok := c.likedResult.take()
 		if !ok {
 			return LikedResult{}, false
 		}
-		if res.Folder == current.ID {
+		// 每条都拿**此刻**的绑定和代次对：排队期间换绑 / 换账号的话，前一条
+		// 过了不代表后面那条还是同一个生命周期里的。
+		current, _ := a.LikedFolder()
+		if res.Folder == current.ID && res.Epoch == a.favoriteEpoch() {
 			return res, true
 		}
 		c.likedResult.mu.Lock()
@@ -200,6 +206,10 @@ func (a *App) UnbindLikedFolder() {
 // ⚠️ **普通失败不清绑定**：断网时回 `OK=false, Missing=false`，绑定留着，
 // 用户重试就好——一次断网就把用户配好的歌单弄丢是最坏的那一种。
 func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) uint64 {
+	// 先领代次，再读绑定：这一趟的写回执只属于「这个代次 + 这个绑定」。
+	// 取反顺序的话，换绑正好卡在两步之间时，写用的是新绑定、回执却带着旧
+	// 代次，缓存回填会错。
+	epoch := a.favoriteEpoch()
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return 0
@@ -210,6 +220,7 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 			Token:   c.likedResult.token(),
 			Rid:     rid,
 			Type:    contentType,
+			Epoch:   epoch,
 			Missing: true,
 		})
 		a.wakeUI()
@@ -235,6 +246,7 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 				Rid:     rid,
 				Type:    contentType,
 				Folder:  bound.ID,
+				Epoch:   epoch,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
@@ -243,7 +255,6 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 		}
 	}
 
-	epoch := a.favoriteEpoch()
 	go func() {
 		var add, del []int64
 		if on {
@@ -260,20 +271,16 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 		}
 		switch {
 		case err == nil:
-			// 写成功了：**最终状态我们知道了**。只在缓存生命周期和绑定都没在这
-			// 期间变过时才记进去——换绑 / 换账号会清空缓存，旧答案对新绑定是错的。
-			if a.favoriteEpoch() == epoch {
-				if cur, ok := a.LikedFolder(); ok && cur.ID == bound.ID {
-					a.markFavorite(item, on)
-				}
-			}
+			// 写成功了：**最终状态我们知道了**。代次检查和回填在同一把锁里
+			// 完成，换绑 / 换账号正好卡在中间时也不会把旧答案写回去。
+			a.markFavoriteIfEpoch(item, on, epoch)
 			text := "已加入「" + bound.Title + "」"
 			if !on {
 				text = "已从「" + bound.Title + "」移除"
 			}
 			c.likedResult.add(LikedResult{
 				Token: token, Rid: rid, Type: contentType,
-				Folder: bound.ID, OK: true, Text: text,
+				Folder: bound.ID, Epoch: epoch, OK: true, Text: text,
 			})
 		case likedFolderGone(err) && !a.boundFolderListed(bound.ID):
 			log.Printf("pudmusic: 绑定的收藏夹 %d 已经没了：%v", bound.ID, err)
@@ -282,6 +289,7 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 				Rid:     rid,
 				Type:    contentType,
 				Folder:  bound.ID,
+				Epoch:   epoch,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
@@ -292,7 +300,7 @@ func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) u
 			log.Printf("pudmusic: 改绑定歌单 %d 的内容失败：%v", bound.ID, err)
 			c.likedResult.add(LikedResult{
 				Token: token, Rid: rid, Type: contentType,
-				Folder: bound.ID, Text: failText(),
+				Folder: bound.ID, Epoch: epoch, Text: failText(),
 			})
 		}
 		a.wakeUI()
