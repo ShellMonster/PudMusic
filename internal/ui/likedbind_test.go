@@ -309,6 +309,50 @@ func TestGoneBoundFolderReopensTheLikePicker(t *testing.T) {
 	}
 }
 
+// TestGoneBoundFolderCanCreateANewOneAndFinish 钉「绑定失效后从『创建新的』
+// 补收这一首」：新建那一趟也要把新请求的 token 写回 pending，否则成功回执
+// 对不上旧号，弹窗会一直停在「提交中」。
+func TestGoneBoundFolderCanCreateANewOneAndFinish(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.pages = [][]map[string]any{folderPage(1, 3)}
+	s, tt := likedPageShell(t, f)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "没了的那个"})
+	s.app.RefreshFavorites()
+	waitFrames(t, tt, "侧栏收藏夹拉完", func() bool {
+		return s.app.FavoriteState(app.FavoritesCreated).Loaded
+	})
+
+	likeRowHeart(t, tt, "歌 一")
+	waitFrames(t, tt, "重新打开喜欢歌单选择", func() bool {
+		return s.likeBind != nil && s.likeBind.step == likeBindPick
+	})
+	settleFrame(tt)
+
+	// 回到三选一，走「创建新的」。
+	if err := tt.Click("返回"); err != nil {
+		t.Fatalf("没有「返回」：%v（文字 %q）", err, tt.Texts())
+	}
+	settleFrame(tt)
+	if err := tt.Click("创建新的"); err != nil {
+		t.Fatalf("没有「创建新的」：%v（文字 %q）", err, tt.Texts())
+	}
+	settleFrame(tt)
+	if err := tt.Click("创建并加入"); err != nil {
+		t.Fatalf("没有「创建并加入」：%v（文字 %q）", err, tt.Texts())
+	}
+
+	waitFrames(t, tt, "新建之后补收这一首", func() bool {
+		return len(f.deals()) == 1
+	})
+	if got := f.deals()[0].get("add_media_ids"); got != "999" {
+		t.Errorf("add_media_ids = %q，want 999（新建的那一格）", got)
+	}
+	// 成功回执必须对回这一趟的 pending：弹窗关掉、pending 清掉。
+	waitFrames(t, tt, "弹窗收场", func() bool {
+		return s.likeBind == nil && s.likePending == nil
+	})
+}
+
 // TestSettingsShowsAndChangesTheBinding 设置页「菜单」Tab 能看绑定、能
 // 更换。
 func TestSettingsShowsAndChangesTheBinding(t *testing.T) {
