@@ -36,18 +36,22 @@ func (h *homePage) viewHotArtists(c *ui.Context, s *Shell) {
 	if len(artists) == 0 {
 		return
 	}
+	itemWidth, avatarSize := float32(126), float32(108)
+	if h.win <= 760 {
+		itemWidth, avatarSize = 100, 84
+	}
 	h.section(c, func() {
 		pud.SecHead(c, "home:artists", "热门歌手", "来自本周热榜", "")
 		ui.ScrollHorizontal(c).Key("home:artists:rail").FillWidth().Gap(space.Px24).Children(func() {
 			for _, name := range artists {
 				name := name
-				button := ui.ButtonBase(c).Key("home:artist:" + name).Label("搜索 " + name).Width(126).Shrink(0).AlignItems(ui.Center).Radius(tok.R12)
+				button := ui.ButtonBase(c).Key("home:artist:" + name).Label("搜索 " + name).Width(itemWidth).Shrink(0).AlignItems(ui.Center).Radius(tok.R12)
 				if button.Hovered() {
 					button = button.Background(tok.Of(c.Theme()).Hover)
 				}
 				if button.Children(func() {
 					ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(space.Px8).Children(func() {
-						pud.Avatar(c, name, 108, ui.RGB(75, 79, 84), nil)
+						pud.Avatar(c, name, avatarSize, ui.RGB(75, 79, 84), nil)
 						ui.Text(c, name).FontSize(scale.Font(c, scale.Size15)).TextColor(tok.Of(c.Theme()).Text).SingleLine().Ellipsis("…")
 					})
 				}).Clicked() {

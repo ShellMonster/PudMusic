@@ -76,6 +76,13 @@ func TestRenderHotArtistsShots(t *testing.T) {
 				if !ok {
 					t.Fatal("找不到第二位歌手")
 				}
+				wantWidth := float32(126)
+				if width <= 760 {
+					wantWidth = 100
+				}
+				if first.W != wantWidth {
+					t.Fatalf("歌手项宽 %.1f，want %.1f", first.W, wantWidth)
+				}
 				t.Logf("歌手项宽 %.1f，横向间距 %.1f", first.W, second.X-first.X-first.W)
 				save(t, dir, name+".png", b.tt)
 			})
