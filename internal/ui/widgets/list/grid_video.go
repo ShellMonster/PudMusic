@@ -59,7 +59,7 @@ func (g *Grid) viewVideoCell(c *ui.Context, i int, cell float32) {
 			imgcache.ViewRadius(c, g.cache, m.Cover, w, h, radius)
 		},
 	}
-	ui.Column(c).Key("vcell:" + m.ID).
+	box := ui.Column(c).Key("vcell:" + m.ID).
 		ContextMenu(func(menu *ui.Menu) { buildSongMenu(menu, g.songs, g.acts, i, g.playFrom) }).
 		Children(func() {
 			if pud.VideoCard(c, "vcard:"+m.ID, v, cell) {
@@ -67,4 +67,8 @@ func (g *Grid) viewVideoCell(c *ui.Context, i int, cell float32) {
 				g.rowPlay(i)
 			}
 		})
+	// 右键菜单里的「喜欢」读预取好的状态（菜单打开那一刻一次建出来）。
+	if box.Hovered() && g.acts.PrefetchFavorite != nil {
+		g.acts.PrefetchFavorite(m.Item)
+	}
 }

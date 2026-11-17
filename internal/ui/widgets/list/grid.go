@@ -1138,6 +1138,11 @@ func (g *Grid) viewCell(c *ui.Context, i int, cell float32) {
 	// ⚠️ **hover 要在 `Children` 之前问**（同 `card.go` 里那一处）：它报的是这一帧指针
 	// 在不在这一格上，而封面上面那圈反馈要等 Children 才建得出来。
 	onCell := box.Hovered()
+	// 右键菜单里的「喜欢」读预取好的状态：打开那一刻一次建出来，那时候再问
+	// 就来不及了。App 那边按内容去重，重复调用是便宜的。
+	if onCell && !isUserItem(m) && g.acts.PrefetchFavorite != nil {
+		g.acts.PrefetchFavorite(m.Item)
+	}
 
 	// 双击这一格 = 放这一首，和列表双击那一行是一个意思
 	//（Biu 的 `onDoubleClick`）。两个视图别一个能双击播放一个不能。
