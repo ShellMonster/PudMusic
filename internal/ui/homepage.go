@@ -328,7 +328,7 @@ func (h *homePage) viewGreet(c *ui.Context, s *Shell, inner float32, in pageInpu
 			trim := typo.DisplayTrim(gs, 1.15)
 			typo.Display(ui.Text(c, greeting), gs).LetterSpacing(gs*0.01).
 				Margin(space.Px8-trim, space.None, -trim, space.None).
-				SingleLine().Ellipsis("…").Tooltip(greeting)
+				SingleLine().Ellipsis("…")
 		})
 		ui.Column(c).Shrink(0).AlignItems(ui.End).Children(func() {
 			metaLine := func(pre, num, post string) {
