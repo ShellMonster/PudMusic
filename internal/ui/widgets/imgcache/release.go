@@ -212,12 +212,8 @@ func (c *Cache) reloadReleased(e *entry) {
 		return
 	}
 	if bm := e.weakBm.Value(); bm != nil {
-		// 别处还拿着放掉的那个 Bitmap：当帧复活，像素和 mipmap 本来就在内存里。
-		e.bm, e.err, e.done, e.released = bm, nil, true, false
-		e.weakBm = weak.Pointer[ui.Bitmap]{}
 		e.mu.Unlock()
-		c.forgetReleased(e)
-		c.account(e, bm)
+		c.reviveReleased(e, bm)
 		return
 	}
 	e.fetching = true
@@ -232,6 +228,33 @@ func (c *Cache) reloadReleased(e *entry) {
 		e.done = true
 		e.err = ErrClosed
 		e.mu.Unlock()
+	}
+}
+
+// reviveReleased 将恢复、从释放账本摘除和内存记账作为一个原子操作。
+func (c *Cache) reviveReleased(e *entry, bm *ui.Bitmap) {
+	c.mu.Lock()
+	e.mu.Lock()
+	current, ok := c.entries.Load(e.url)
+	if !ok || current != e || !e.released || e.fetching || e.dropped || e.done {
+		e.mu.Unlock()
+		c.mu.Unlock()
+		return
+	}
+	e.bm, e.err, e.done, e.released = bm, nil, true, false
+	e.weakBm = weak.Pointer[ui.Bitmap]{}
+	e.mu.Unlock()
+	if el, ok := c.released[e]; ok {
+		c.relOrder.Remove(el)
+		delete(c.released, e)
+	}
+	evicted := c.lru.resize(e, bytesOf(bm), c.frame.Load())
+	for _, victim := range evicted {
+		c.entries.CompareAndDelete(victim.url, victim)
+	}
+	c.mu.Unlock()
+	for _, victim := range evicted {
+		victim.discard()
 	}
 }
 
