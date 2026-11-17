@@ -240,6 +240,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			Grow(1).Shrink(0)
 		if c.Shortcut(0, ui.KeySlash) && !field.Focused() {
 			field.Focus()
+			s.searchSuggest = true
 		}
 
 		// Esc 收浮层。浮层开着就吃掉这一次 Esc（字留着），浮层没开就还回
@@ -324,7 +325,7 @@ func (s *Shell) viewSearchBox(c *ui.Context) {
 			return false
 		})
 
-		// 浮层什么时候开：**敲了一个字**、**点了一下这个框**——照 Biu 的
+		// 浮层什么时候开：按 /、**敲了一个字**、**点了一下这个框**。后两条照 Biu 的
 		// onValueChange 和 onClick 两条（`search/index.tsx:86-90`）。
 		//
 		// ⚠️ Biu 还有第三条 onFocus，**这里故意不要**：见下面「失焦」那一支的
