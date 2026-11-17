@@ -57,6 +57,9 @@ func (s *Shell) syncCreatorPreview(keyword string) {
 			}
 			go func() {
 				items, err := fetch(ctx, keyword)
+				if ctx.Err() != nil {
+					return
+				}
 				ch <- creatorResult{items: items, err: err}
 				s.wake.invalidate()
 			}()

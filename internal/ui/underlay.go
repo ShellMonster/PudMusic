@@ -223,6 +223,10 @@ func (s *Shell) syncUnderlay(c *ui.Context) {
 // （满屏那层是模态的，底下的路由动不了），而关掉满屏之后的第一帧要画的就是
 // 当前这一页，它的状态必须是**此刻**的。
 func (s *Shell) syncCurrentPage(c *ui.Context) {
+	if p := &s.search.creators; s.router.Path() != searchPath && p.result != nil {
+		p.stop()
+		p.keyword = ""
+	}
 	fn, ok := pageSyncs[lookup(s.router.Path()).Match]
 	if !ok {
 		return

@@ -68,6 +68,36 @@ func TestSearchCreatorPreviewIgnoresStaleResults(t *testing.T) {
 	}
 }
 
+// TestLeavingSearchCancelsCreatorRequest prevents a hidden page from keeping its lookup alive.
+func TestLeavingSearchCancelsCreatorRequest(t *testing.T) {
+	s, tt := newSearchPage(t, "音乐", newSearchStub(24, 24))
+	started, canceled := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	s.search.creators.fetch = func(ctx context.Context, _ string) ([]app.SearchItem, error) {
+		if calls.Add(1) > 1 {
+			return []app.SearchItem{creatorItem("42", "重新进入的UP", "", 0)}, nil
+		}
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		return nil, ctx.Err()
+	}
+	tt.Frame()
+	<-started
+	s.navigate(localMusicPath)
+	tt.Frame()
+	waitFor(t, "离开搜索页后取消查询", func() bool {
+		select {
+		case <-canceled:
+			return true
+		default:
+			return false
+		}
+	})
+	s.submitSearch("音乐")
+	waitFrames(t, tt, "重新进入的UP", func() bool { return tt.HasText("重新进入的UP") })
+}
+
 // TestSearchCreatorFailureDoesNotHideSongs locks the independent failure behavior.
 func TestSearchCreatorFailureDoesNotHideSongs(t *testing.T) {
 	s, tt := newSearchPage(t, "音乐", newSearchStub(24, 24))
