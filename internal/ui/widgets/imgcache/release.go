@@ -1,5 +1,11 @@
 package imgcache
 
+import (
+	"weak"
+
+	"github.com/egoist/mygo/ui"
+)
+
 // 票 #673：把长期没人要的封面像素放掉，需要的时候再解回来。
 //
 // # 为什么不是 `ui.Bitmap.ReleasePixels`
@@ -132,6 +138,7 @@ func (c *Cache) takePixelsLocked(e *entry) bool {
 	if e.bm == nil || e.dropped || e.fetching {
 		return false
 	}
+	e.weakBm = weak.Make(e.bm)
 	e.bm = nil
 	e.err = nil
 	e.done = false
@@ -204,6 +211,11 @@ func (c *Cache) reloadReleased(e *entry) {
 		e.mu.Unlock()
 		return
 	}
+	if bm := e.weakBm.Value(); bm != nil {
+		e.mu.Unlock()
+		c.reviveReleased(e, bm)
+		return
+	}
 	e.fetching = true
 	e.mu.Unlock()
 
@@ -216,6 +228,33 @@ func (c *Cache) reloadReleased(e *entry) {
 		e.done = true
 		e.err = ErrClosed
 		e.mu.Unlock()
+	}
+}
+
+// reviveReleased 将恢复、从释放账本摘除和内存记账作为一个原子操作。
+func (c *Cache) reviveReleased(e *entry, bm *ui.Bitmap) {
+	c.mu.Lock()
+	e.mu.Lock()
+	current, ok := c.entries.Load(e.url)
+	if !ok || current != e || !e.released || e.fetching || e.dropped || e.done {
+		e.mu.Unlock()
+		c.mu.Unlock()
+		return
+	}
+	e.bm, e.err, e.done, e.released = bm, nil, true, false
+	e.weakBm = weak.Pointer[ui.Bitmap]{}
+	e.mu.Unlock()
+	if el, ok := c.released[e]; ok {
+		c.relOrder.Remove(el)
+		delete(c.released, e)
+	}
+	evicted := c.lru.resize(e, bytesOf(bm), c.frame.Load())
+	for _, victim := range evicted {
+		c.entries.CompareAndDelete(victim.url, victim)
+	}
+	c.mu.Unlock()
+	for _, victim := range evicted {
+		victim.discard()
 	}
 }
 

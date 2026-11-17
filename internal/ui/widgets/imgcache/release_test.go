@@ -64,6 +64,10 @@ func advanceFrames(c *Cache, now time.Time, n int) time.Time {
 		now = now.Add(16 * time.Millisecond)
 		c.BeginFrame(now)
 	}
+	// 放掉的位图只有被 GC 回收才算真的没人持有（否则弱引用会把它复活，见
+	// revive_test.go）；测试里的「没人要」靠这一步变得确定。
+	runtime.GC()
+	runtime.GC()
 	return now
 }
 
