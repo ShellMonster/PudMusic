@@ -928,7 +928,7 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 					name, label = "heart-on", "取消喜欢"
 				}
 				if pud.IconBtn(c, "mini-like", name, label, pud.IconOpts{On: faved}).Clicked() {
-					s.likeCurrent()
+					s.likeCurrentSet(!faved)
 				}
 			}
 			// 歌词：和点封面是同一个开关；卷帘展开时 accent-text（`aria-pressed`）。

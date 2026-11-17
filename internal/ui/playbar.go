@@ -436,7 +436,7 @@ func (s *Shell) viewTrackActions(c *ui.Context, st app.State) {
 			}
 			if s.withTip(c, pud.IconBtn(c, "pb-like", name, label, pud.IconOpts{Row: true, On: faved}),
 				favTooltip(faved)).Clicked() {
-				s.likeCurrent()
+				s.likeCurrentSet(!faved)
 			}
 		}
 		// ⚠️ **本地文件不摆**（`viewCommentsButton`）：一个点不动的键比不摆

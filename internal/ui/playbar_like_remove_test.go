@@ -200,6 +200,15 @@ func TestTheFullPlayerHeartGoesStraightIntoTheBoundFolder(t *testing.T) {
 // 一份——写到副壳上等于开了一个看不见的窗。
 func miniLikeEnv(t *testing.T) (*Shell, *Shell, *folderBili) {
 	t.Helper()
+	return miniLikeEnvWith(t, app.Item{
+		Source: "online", Type: "mv", Bvid: "BVmini", Cid: "1", Sid: "7",
+		Title: "迷你里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
+	})
+}
+
+// miniLikeEnvWith 是 `miniLikeEnv` 换一首正在放的歌。
+func miniLikeEnvWith(t *testing.T, item app.Item) (*Shell, *Shell, *folderBili) {
+	t.Helper()
 	// ⚠️ **走 `main.newMiniShell` 那条生产路**：`NewMini` 自己不会把
 	// `mini.main` 接回主壳（那一半在 `newMiniShell` 里），直接 `NewMini`
 	// 的话弹窗路由不到主壳上（`s.main` 是 nil，`likeCurrent` 落回副壳）。
@@ -234,10 +243,7 @@ func miniLikeEnv(t *testing.T) (*Shell, *Shell, *folderBili) {
 	})).s
 	s := main.newMiniShell()
 	t.Cleanup(s.closePerWindow)
-	if err := a.Enqueue(app.Item{
-		Source: "online", Type: "mv", Bvid: "BVmini", Cid: "1", Sid: "7",
-		Title: "迷你里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
-	}); err != nil {
+	if err := a.Enqueue(item); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}
 	waitFor(t, "在线那首开始播", func() bool { return a.Snapshot().HasTrack })
@@ -297,6 +303,34 @@ func TestThePlaybarHeartAddsThenRemoves(t *testing.T) {
 	}
 	if got := ds[1].get("del_media_ids"); got != "42" {
 		t.Errorf("第二次 del_media_ids = %q，want 42", got)
+	}
+}
+
+// TestTheMiniHeartResolvesAnItemWithoutSidWhileTheMainWindowIsHidden 钉「迷你
+// 里点一首只有 bvid 的歌」：avid 解析结果不能等主窗口回到前台才被收走。
+//
+// 缺 Sid 时 `askLikeIDThen` 只登记解析回调，这时还没有 pending；主窗口收起来
+// 又不画帧，所以迷你 / 刘海那一帧必须自己把解析结果收掉。
+func TestTheMiniHeartResolvesAnItemWithoutSidWhileTheMainWindowIsHidden(t *testing.T) {
+	s, main, fb := miniLikeEnvWith(t, app.Item{
+		Source: "online", Type: "mv", Bvid: "BVminiNoSid", Cid: "1",
+		Title: "没有 sid 的那一首", Artist: "UP", ArtistMid: 12345,
+	})
+	main.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	tt := miniTester(s)
+	s.likeCurrent()
+
+	waitFor(t, "缺 Sid 的那一趟解析完、写进绑定歌单", func() bool {
+		tt.Frame()
+		return len(fb.deals()) == 1
+	})
+	ds := fb.deals()
+	if got := ds[0].get("add_media_ids"); got != "42" {
+		t.Errorf("add_media_ids = %q，want 42（绑定的那一格）", got)
+	}
+	if got := ds[0].get("rid"); got != "999" {
+		t.Errorf("deal 的 rid = %q，want 999（fixture 解出来的 avid）", got)
 	}
 }
 

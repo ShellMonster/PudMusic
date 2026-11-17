@@ -115,13 +115,47 @@ type likePending struct {
 // likeItem 是「加进绑定歌单」那一条路（菜单第一下 / 直接调用）。
 func (s *Shell) likeItem(item app.Item) { s.askLike(item, true, false) }
 
-// toggleLike 是界面上所有心形共用的那一下：**已经喜欢就拿出去，否则加进去**。
+// likeCurrent 是「这一首按当前状态切一下」的入口（测试和没有画面上那一帧
+// 状态可用的调用方用）。四枚心形自己会带上**这一帧看到的**方向，见
+// `likeCurrentSet`。
+func (s *Shell) likeCurrent() {
+	s.likeCurrentSet(!s.playingFavorite())
+}
+
+// likeCurrentSet 是播放器上那颗心真正做的事，on 是这一帧心形显示的状态反过来：
+// 空心按下去是加，实心按下去是拿。
 //
-// quiet 只给迷你 / 刘海那一档：成功和普通失败都不弹 toast（那一扇不画 toast，
-// 唯一的反馈是 `pud.IconBtn` 按下的缩放和实心 / 空心）。
-func (s *Shell) toggleLike(item app.Item, quiet bool) {
-	fav, known := s.app.FavoriteInBound(item)
-	s.askLike(item, !(known && fav), quiet)
+// ⚠️ **方向由调用方定**：状态在「画这一帧」和「处理点击」之间可能刚回来，
+// 重新读一次会把用户看到的空心做成「拿出去」。按这一帧看到的来。
+func (s *Shell) likeCurrentSet(on bool) {
+	target := s
+	side := s.main != nil
+	if side {
+		target = s.main
+	}
+	it, ok := s.app.PlayingItem()
+	if !ok {
+		target.addToast("这一首还没有取回来，收藏不了", notice.Warning)
+		return
+	}
+	// ⚠️ **主窗的满屏要收掉**：绑定弹窗排在 `viewFullPlayer` **之前**建，
+	// 满屏盖在它上面——满屏开着时这个弹窗用户看不见（票 #706 的坑）。
+	// 这是弹窗交接，不走满屏的退场动画；必须在同一帧释放模态层。
+	if target.full.open {
+		target.finishFullPlayer()
+	}
+
+	// 迷你 / 刘海上的心形默认静音（那一扇不画 toast）。**没绑定的时候例外**：
+	// 要回主窗口选歌单，那时候主窗口在前面，提示也该让用户看见。
+	quiet := side
+	if _, bound := s.app.LikedFolder(); !bound && side {
+		// ⚠️ **不能当场 Close 迷你**：这一支是从迷你 / 刘海自己那一帧里调进来的，
+		// 那一扇的 native 窗口还在画这一帧。`detachMiniSoon` 只摘状态、把关闭
+		// 推到下一拍。
+		target.detachMiniSoon()
+		quiet = false
+	}
+	target.askLike(it, on, quiet)
 }
 
 // askLike 是加 / 拿共用的前半段：没挂收藏夹、身份认不出、要问 avid 的都在这。
@@ -184,60 +218,6 @@ func (s *Shell) flushFavoriteResolutions() {
 	}
 }
 
-// likeCurrent 是播放器上那颗「喜欢」心做的事：满屏、迷你窗、刘海上的
-// 同一枚心形都走它——和列表右键菜单的「喜欢」是**同一个动作**
-// （`toggleLike`：已在绑定歌单里就拿出去，否则加进去），不是「添加到收藏夹」
-// 那个多选框（`favoriteCurrent`）。
-//
-// # 它和 `favoriteCurrent` 是两条路
-//
-//   - `likeCurrent`（这颗心）→ **绑定歌单**：第一下加、第二下拿；未绑先
-//     三选一、绑定失效重新选歌单；
-//   - `favoriteCurrent`（菜单「添加到收藏夹…」/ 快捷键）→ **收藏夹多选框**。
-//
-// ⚠️ **弹窗要落在主壳上**：`viewFolderDialogs` 只在主窗口那一支调——从
-// 迷你 / 刘海那一扇直接开弹窗会把 `likeBind` 写进副壳自己那一份，
-// 那一扇永远不画它（静默失败）。所以下面路由到主壳（`s.main`，主壳自己
-// 调时 `s.main` 是 nil、落回 `s`），理由同 `favoriteCurrent` 那段。
-//
-// ⚠️ **迷你 / 刘海那一档静音**：加 / 拿的成败都不弹 toast（那一扇不画 toast，
-// 反馈只有按下缩放和心形实心 / 空心）。但**没绑定的时候要回主窗口**——那时
-// 用户要在主窗口里选歌单，也得看见提示，所以先 `dropMini` + `restoreMainWindow`
-// 并取消静音。
-//
-// ⚠️ **提示也要落在画 toast 的那一扇上**（同 `favoriteCurrent`）：迷你窗
-// 和刘海窗都不画 toast，「还没有取回来」那句得写进主壳的 toasts。
-func (s *Shell) likeCurrent() {
-	target := s
-	side := s.main != nil
-	if side {
-		target = s.main
-	}
-	it, ok := s.app.PlayingItem()
-	if !ok {
-		target.addToast("这一首还没有取回来，收藏不了", notice.Warning)
-		return
-	}
-	// ⚠️ **主窗的满屏要收掉**：绑定弹窗排在 `viewFullPlayer` **之前**建，
-	// 满屏盖在它上面——满屏开着时这个弹窗用户看不见（票 #706 的坑）。
-	// 这是弹窗交接，不走满屏的退场动画；必须在同一帧释放模态层。
-	if target.full.open {
-		target.finishFullPlayer()
-	}
-
-	// 迷你 / 刘海上的心形默认静音（那一扇不画 toast）。**没绑定的时候例外**：
-	// 要回主窗口选歌单，那时候主窗口在前面，提示也该让用户看见。
-	quiet := side
-	if _, bound := s.app.LikedFolder(); !bound && side {
-		// ⚠️ **不能当场 Close 迷你**：这一支是从迷你 / 刘海自己那一帧里调进来的，
-		// 那一扇的 native 窗口还在画这一帧。`detachMiniSoon` 只摘状态、把关闭
-		// 推到下一拍。
-		target.detachMiniSoon()
-		quiet = false
-	}
-	target.toggleLike(it, quiet)
-}
-
 // playingFavorite 报「正在放的这一首」在不在绑定的喜欢歌单里。
 //
 // 界面每一帧问一次（App 那边顺手把没问过的那一趟发出去，见
@@ -254,11 +234,19 @@ func (s *Shell) playingFavorite() bool {
 // drainMainLikedResults 是给迷你 / 刘海那一帧用的。
 //
 // 主窗口被收起来时**不画帧**（收在后台的窗把帧丢掉），而喜欢结果是在
-// `viewFolderDialogs` 里取的——不替它收一次的话，「绑定没了」那一档会一直
-// 躺在邮箱里，直到用户自己回到主窗口。同一个事件循环、同一份界面线程状态，
-// 在这里取走是安全的；只有真有一趟在飞时才动。
+// `viewFolderDialogs` 里取的。不替它收的话，两样都会一直躺在邮箱里：
+//
+//   - **avid 解析结果**（`askLikeIDThen`）：缺 Sid 的那一首点下去，这一步
+//     没走完就还没有 pending，所以不能拿 pending 当门槛；
+//   - 写入结果（`likedResult`），只有真有 pending 时才可能有。
+//
+// 同一个事件循环、同一份界面线程状态，在这里取走是安全的。
 func (s *Shell) drainMainLikedResults() {
-	if s.main != nil && s.main.likePending != nil {
+	if s.main == nil {
+		return
+	}
+	s.main.flushFavoriteResolutions()
+	if s.main.likePending != nil {
 		s.main.flushLikedResults()
 	}
 }
@@ -274,13 +262,18 @@ func (s *Shell) likeItemResolved(item app.Item, rid int64, typ int, on, quiet bo
 		s.likePending = p
 		return
 	}
+	// 没绑定时「拿出去」没有意义（空心才点得出来，红心意味着刚解绑的那一帧）。
+	// 不为它开绑定弹窗。
+	if !on {
+		return
+	}
 	s.openLikeBind(&likePending{item: item, rid: rid, typ: typ, on: on, quiet: quiet})
 }
 
 // askLikeIDThen 是「favTarget 认不出来」那一条：先在后台问一次稿件 id，
 // 认得出来了再走 `likeItemResolved`。
 //
-// ⚠️ **回调里不许调 `likeItem` / `toggleLike`**——同 `askFavoriteIDThen`
+// ⚠️ **回调里不许调 `likeItem` / `likeCurrentSet`**——同 `askFavoriteIDThen`
 // 那段：递归的保证是**结构**给的（这里调的是不带兜底的 `likeItemResolved`），
 // 不是靠判据。死循环的教训见 `askFavoriteIDThen` 的文件头。
 func (s *Shell) askLikeIDThen(item app.Item, on, quiet bool) {

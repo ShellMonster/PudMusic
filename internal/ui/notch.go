@@ -1003,7 +1003,7 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 				}
 				if pud.IconBtn(c, "notch-like", name, label, pud.IconOpts{
 					Color: tok.Full.Text, HoverColor: tok.Full.Text, On: faved}).Clicked() {
-					s.likeCurrent()
+					s.likeCurrentSet(!faved)
 				}
 			}
 			s.viewNotchSpectrum(c, st)

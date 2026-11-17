@@ -523,3 +523,35 @@ func TestCopyInfoSaysSoWhenNothingIsWired(t *testing.T) {
 		t.Errorf("说的话 = %q", rec.notices)
 	}
 }
+
+// TestAStaleLikeMenuChoiceDoesNotRunTheOppositeAction 钉「菜单打开期间喜欢
+// 状态翻了，点旧文字不许做成反方向的操作」。
+//
+// 菜单项把方向写进 key：菜单建出来时是「喜欢」（加），状态回来之后变成
+// 「取消喜欢」（拿）。原生菜单按 key / 位置 + 文字回放，这一下对不上，于是
+// 什么都不做。宁可没反应，也不要把用户点的「喜欢」做成「取消」。
+func TestAStaleLikeMenuChoiceDoesNotRunTheOppositeAction(t *testing.T) {
+	faved := false
+	known := true
+	set := 0
+	acts := Actions{
+		FavoriteInBound: func(app.Item) (bool, bool) { return faved, known },
+		SetFavorite:     func(app.Item, bool) { set++ },
+	}
+	_, tt := newList(t, acts, onlineSongs(1))
+	if err := rightClickLabel(tt, "在线的歌 A"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(tt.Menu(), "喜欢") {
+		t.Fatalf("菜单里没有「喜欢」：%q", tt.Menu())
+	}
+
+	faved = true
+	if err := tt.ChooseMenuItem("喜欢"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if set != 0 {
+		t.Errorf("菜单打开期间状态变了，点「喜欢」却执行了 %d 次（可能做成了反方向）", set)
+	}
+}

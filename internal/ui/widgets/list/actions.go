@@ -87,16 +87,15 @@ type Actions struct {
 	// 入口——那一份在 `internal/ui/folderselect.go`。
 	FavSelect func(item app.Item)
 
-	// FavoriteInBound 报这一条在不在**绑定的那个喜欢歌单**里。菜单拿它决定
-	// 写「喜欢」还是「取消喜欢」；不知道时按「喜欢」画。
-	//
-	// 它为 nil 时不摆「喜欢」那一项（`ToggleFavorite` 也为 nil 的那一份接线）。
-	FavoriteInBound func(item app.Item) bool
+	// FavoriteInBound 报这一条在不在**绑定的那个喜欢歌单**里，以及这个答案
+	// 知道了没有。菜单拿它决定写「喜欢」还是「取消喜欢」，并**把方向定死
+	// 在这一项上**：菜单打开期间状态变了，这一下不做，而不是反过来做。
+	FavoriteInBound func(item app.Item) (favorited, known bool)
 
-	// ToggleFavorite 是菜单「喜欢」/「取消喜欢」那一下：已经喜欢就拿出去，
-	// 否则加进去。走的是喜欢歌单绑定流程，和「收藏」（`FavSelect` 的多选框）
-	// 是两条路。
-	ToggleFavorite func(item app.Item)
+	// SetFavorite 是菜单「喜欢」/「取消喜欢」那一下，on 是菜单建出来时定的
+	// 方向。走的是喜欢歌单绑定流程，和「收藏」（`FavSelect` 的多选框）是
+	// 两条路。
+	SetFavorite func(item app.Item, on bool)
 
 	// PrefetchFavorite 在指针悬停某一行时调：让 App 提前问出这一条的喜欢状态。
 	//

@@ -118,11 +118,10 @@ func (s *Shell) listActions() list.Actions {
 	// 「收藏」照旧走 `FavSelect` 那个多选框——两条路的区别见 `likedbind.go`
 	// 的文件头。行上不再画心（列表行尾只留「移除」/「⋯」），状态改由菜单项
 	// 承载：悬停预取，打开菜单时读缓存。
-	acts.FavoriteInBound = func(it app.Item) bool {
-		fav, _ := s.app.FavoriteInBound(it)
-		return fav
+	acts.FavoriteInBound = func(it app.Item) (bool, bool) {
+		return s.app.FavoriteInBound(it)
 	}
-	acts.ToggleFavorite = func(it app.Item) { s.toggleLike(it, false) }
+	acts.SetFavorite = func(it app.Item, on bool) { s.askLike(it, on, false) }
 	acts.PrefetchFavorite = func(it app.Item) { s.app.FavoriteInBound(it) }
 	// 🔴 **复制走 `s.copyText`，不是 `s.wake.writeClipboard`**（票 #685 的对抗性
 	// 审查）：后者**不取号**，于是在途的封面那一趟（后台编 PNG，慢）跑完时问
