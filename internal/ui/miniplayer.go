@@ -391,6 +391,10 @@ func (s *Shell) detachMiniSoon() {
 	if w != nil {
 		// 交给下一拍的主线程：`Close` 自己会 `onMain`，这会儿是 goroutine。
 		go w.Close()
+	} else if mini != nil {
+		// 窗还没挂上就摘掉了（极小的一段启动窗口）：`Close` 不会跑，但外壳
+		// 自己的唤醒登记和定时器还得收，否则一直醒到进程退出。
+		mini.closePerWindow()
 	}
 }
 

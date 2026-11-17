@@ -160,6 +160,8 @@ func (s *Shell) likeCurrentSet(on bool) {
 
 // askLike 是加 / 拿共用的前半段：没挂收藏夹、身份认不出、要问 avid 的都在这。
 func (s *Shell) askLike(item app.Item, on, quiet bool) {
+	// 记下最近一次的目标：缺 Sid 的解析可能比下一次点击晚回来。
+	s.likeIntent = item
 	if !s.app.CollectionsMounted() {
 		// ⚠️ **不许说「还没接接口」**（票 #242）。
 		if !quiet {
@@ -256,6 +258,11 @@ func (s *Shell) drainMainLikedResults() {
 // 单独一个函数和 `openFolderSelectNow` 同一条理由：回调里调的必须是它，
 // 递归在结构上就不成立（见 `askFavoriteIDThen` 文件头那段）。
 func (s *Shell) likeItemResolved(item app.Item, rid int64, typ int, on, quiet bool) {
+	// 更晚的一次喜欢已经顶上来了：这一趟解析回来的旧目标不许再改 pending /
+	// 开弹窗。同一首重复点不受影响（身份一样）。
+	if s.likeIntent.Identity() != item.Identity() {
+		return
+	}
 	if _, bound := s.app.LikedFolder(); bound {
 		p := &likePending{item: item, rid: rid, typ: typ, on: on, quiet: quiet}
 		p.token = s.app.SetBoundFavorite(item, rid, typ, on)

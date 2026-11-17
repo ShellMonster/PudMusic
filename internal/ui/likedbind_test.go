@@ -353,6 +353,22 @@ func TestGoneBoundFolderCanCreateANewOneAndFinish(t *testing.T) {
 	})
 }
 
+// TestAnOlderResolveDoesNotReplaceANewerPending 钉「缺 Sid 的旧解析结果回来
+// 得比下一次点击还晚时，不许把新一次喜欢的 pending / 弹窗顶掉」。
+func TestAnOlderResolveDoesNotReplaceANewerPending(t *testing.T) {
+	s := newTestShell(t).s
+	older := app.Item{Source: "online", Type: "mv", Bvid: "BVold", Title: "旧的目标"}
+	newer := app.Item{Source: "online", Type: "mv", Bvid: "BVnew", Title: "新的目标"}
+
+	// 用户已经点了新的那一首，旧那一趟这时才回来。
+	s.likeIntent = newer
+	s.likeItemResolved(older, 1, 2, true, false)
+
+	if s.likeBind != nil || s.likePending != nil {
+		t.Error("旧目标的解析结果改动了新一次喜欢的 pending / 弹窗")
+	}
+}
+
 // TestSettingsShowsAndChangesTheBinding 设置页「菜单」Tab 能看绑定、能
 // 更换。
 func TestSettingsShowsAndChangesTheBinding(t *testing.T) {
