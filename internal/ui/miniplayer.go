@@ -374,6 +374,30 @@ func (s *Shell) closeMiniPlayer() {
 	}
 }
 
+// detachMiniSoon 把迷你从主壳上摘掉、叫回主窗口，窗口的 Close 推到下一拍。
+//
+// ⚠️ **它是给「迷你自己那一帧里」用的**（点红心 / 收喜欢结果）：`Close` 在
+// 主线程上是**当场**销毁窗口（`mygo` 的 `onMain`），而这一帧还在用那一扇的
+// native 窗口画。`dropMini` 留在「别的窗口发起的关闭」那几条路上。
+func (s *Shell) detachMiniSoon() {
+	mini := s.mini
+	var w *mygo.Window
+	if mini != nil {
+		s.mini = nil
+		mini.main = nil
+		w = mini.win
+	}
+	s.restoreMainWindow()
+	if w != nil {
+		// 交给下一拍的主线程：`Close` 自己会 `onMain`，这会儿是 goroutine。
+		go w.Close()
+	} else if mini != nil {
+		// 窗还没挂上就摘掉了（极小的一段启动窗口）：`Close` 不会跑，但外壳
+		// 自己的唤醒登记和定时器还得收，否则一直醒到进程退出。
+		mini.closePerWindow()
+	}
+}
+
 // dropMini 关掉迷你播放器那个窗口（真的 Close），返回「刚才确实开着」。
 //
 // 「把主窗口叫回来」那一步没有算在这里：它要走系统（`RestoreFromBackground`，
@@ -715,6 +739,9 @@ func (s *Shell) viewMini(c *ui.Context) {
 	// 其它每帧钩子之前）。不登记的话，设置页那句「应用内那一列：窗口在前台时按它
 	// 就有用」在迷你窗口在前台时就是假的。
 	s.viewShortcuts(c)
+	// 主窗口收起来时不画帧：替它把后台的喜欢结果收一次（见
+	// `drainMainLikedResults`）。
+	s.drainMainLikedResults()
 
 	st := s.app.Snapshot()
 	t := c.Theme()
@@ -899,13 +926,13 @@ func (s *Shell) viewMiniControls(c *ui.Context, st app.State, p tok.Palette, cur
 			// 心形是**喜欢歌单绑定入口**（`likeCurrent` → 绑定流程），不是 B 站
 			// 点赞，也不是收藏夹多选框；实心 / 空心认「进没进收藏夹」。
 			if st.HasTrack && s.app.Likeable() {
-				faved := s.app.LikeState().Favorited
+				faved := s.playingFavorite()
 				name, label := "heart", "喜欢"
 				if faved {
-					name, label = "heart-on", "已喜欢"
+					name, label = "heart-on", "取消喜欢"
 				}
 				if pud.IconBtn(c, "mini-like", name, label, pud.IconOpts{On: faved}).Clicked() {
-					s.likeCurrent()
+					s.likeCurrentSet(!faved)
 				}
 			}
 			// 歌词：和点封面是同一个开关；卷帘展开时 accent-text（`aria-pressed`）。

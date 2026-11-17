@@ -728,6 +728,9 @@ func (s *Shell) viewNotch(c *ui.Context) {
 // viewNotchFrame 是 `viewNotch` 装好主题之后那一帧的内容。
 func (s *Shell) viewNotchFrame(c *ui.Context) {
 	s.images.BeginFrame(c.Now())
+	// 主窗口收起来时不画帧：替它把后台的喜欢结果收一次（见
+	// `drainMainLikedResults`）。
+	s.drainMainLikedResults()
 	// 后台那条 ticker 叫醒了这一帧：把欠下的那次 poll 在主线程跑掉。
 	// 其余唤醒（指针动、播放状态变）由事件自己调 `notchPoll`，这里不重跑——
 	// 每帧都跑会变成「每画一帧读一次屏幕指针」的白花钱。
@@ -993,14 +996,14 @@ func (s *Shell) viewNotchCardMain(c *ui.Context, st app.State) {
 			// （`likeCurrent` → 绑定流程），不是 B 站点赞（主行右端那枚 ♡）。
 			// 平时 #ecebe8（原型 :93-94 `.playing-actions` 的 color，`.heart` 不另设色）。
 			if s.app.Likeable() {
-				faved := s.app.LikeState().Favorited
+				faved := s.playingFavorite()
 				name, label := "heart", "喜欢"
 				if faved {
-					name, label = "heart-on", "已喜欢"
+					name, label = "heart-on", "取消喜欢"
 				}
 				if pud.IconBtn(c, "notch-like", name, label, pud.IconOpts{
 					Color: tok.Full.Text, HoverColor: tok.Full.Text, On: faved}).Clicked() {
-					s.likeCurrent()
+					s.likeCurrentSet(!faved)
 				}
 			}
 			s.viewNotchSpectrum(c, st)

@@ -198,7 +198,16 @@ func TestTheFullPlayerHeartGoesStraightIntoTheBoundFolder(t *testing.T) {
 // ⚠️ **弹窗画在主壳那一支**（`viewFolderDialogs` 只在主窗口那一支调），
 // 所以断言看的是 `main.likeBind` / `main.folderSelect`，不是迷你自己那
 // 一份——写到副壳上等于开了一个看不见的窗。
-func miniLikeEnv(t *testing.T) (*Shell, *Shell) {
+func miniLikeEnv(t *testing.T) (*Shell, *Shell, *folderBili) {
+	t.Helper()
+	return miniLikeEnvWith(t, app.Item{
+		Source: "online", Type: "mv", Bvid: "BVmini", Cid: "1", Sid: "7",
+		Title: "迷你里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
+	})
+}
+
+// miniLikeEnvWith 是 `miniLikeEnv` 换一首正在放的歌。
+func miniLikeEnvWith(t *testing.T, item app.Item) (*Shell, *Shell, *folderBili) {
 	t.Helper()
 	// ⚠️ **走 `main.newMiniShell` 那条生产路**：`NewMini` 自己不会把
 	// `mini.main` 接回主壳（那一半在 `newMiniShell` 里），直接 `NewMini`
@@ -234,20 +243,17 @@ func miniLikeEnv(t *testing.T) (*Shell, *Shell) {
 	})).s
 	s := main.newMiniShell()
 	t.Cleanup(s.closePerWindow)
-	if err := a.Enqueue(app.Item{
-		Source: "online", Type: "mv", Bvid: "BVmini", Cid: "1", Sid: "7",
-		Title: "迷你里要喜欢的那一首", Artist: "UP", ArtistMid: 12345,
-	}); err != nil {
+	if err := a.Enqueue(item); err != nil {
 		t.Fatalf("把在线的那首放进队列：%v", err)
 	}
 	waitFor(t, "在线那首开始播", func() bool { return a.Snapshot().HasTrack })
-	return s, main
+	return s, main, fb
 }
 
 // TestTheMiniHeartRunsTheLikeBindingFlow 断迷你窗那枚心形走的是**绑定
 // 流程**（没绑过 → 主壳上的三选一），不是绕回旧多选框。
 func TestTheMiniHeartRunsTheLikeBindingFlow(t *testing.T) {
-	s, main := miniLikeEnv(t)
+	s, main, _ := miniLikeEnv(t)
 
 	s.likeCurrent()
 
@@ -259,6 +265,145 @@ func TestTheMiniHeartRunsTheLikeBindingFlow(t *testing.T) {
 	}
 	if s.likeBind != nil || s.folderSelect != nil {
 		t.Error("弹窗写进了迷你外壳自己那一份：那一扇不画它，用户永远看不见")
+	}
+	if main.mini != nil {
+		t.Error("没绑定时点心形该收掉迷你窗口、把主窗口叫回来")
+	}
+}
+
+// TestThePlaybarHeartAddsThenRemoves 断「第一下加进绑定歌单、第二下拿出来」：
+// 心形在两次成功之后分别是实心（标签「取消喜欢」）和空心（标签「喜欢」），
+// 发的 deal 分别是 add 42 和 del 42。
+func TestThePlaybarHeartAddsThenRemoves(t *testing.T) {
+	env := favEnv(t)
+	s, tt := env.s, env.tt
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+	tt.Frame()
+
+	clickStable(t, tt, "喜欢")
+	waitFrames(t, tt, "加进绑定歌单", func() bool { return len(env.dealBili.deals()) == 1 })
+	waitFrames(t, tt, "心形变实心", func() bool {
+		_, ok := tt.Find("取消喜欢")
+		return ok
+	})
+
+	clickStable(t, tt, "取消喜欢")
+	waitFrames(t, tt, "从绑定歌单移除", func() bool { return len(env.dealBili.deals()) == 2 })
+	waitFrames(t, tt, "心形回到空心", func() bool {
+		_, ok := tt.Find("喜欢")
+		return ok && !tt.HasText("取消喜欢")
+	})
+
+	ds := env.dealBili.deals()
+	if len(ds) != 2 {
+		t.Fatalf("deal 发了两趟 of %d", len(ds))
+	}
+	if got := ds[0].get("add_media_ids"); got != "42" {
+		t.Errorf("第一次 add_media_ids = %q，want 42", got)
+	}
+	if got := ds[1].get("del_media_ids"); got != "42" {
+		t.Errorf("第二次 del_media_ids = %q，want 42", got)
+	}
+}
+
+// TestTheMiniHeartResolvesAnItemWithoutSidWhileTheMainWindowIsHidden 钉「迷你
+// 里点一首只有 bvid 的歌」：avid 解析结果不能等主窗口回到前台才被收走。
+//
+// 缺 Sid 时 `askLikeIDThen` 只登记解析回调，这时还没有 pending；主窗口收起来
+// 又不画帧，所以迷你 / 刘海那一帧必须自己把解析结果收掉。
+func TestTheMiniHeartResolvesAnItemWithoutSidWhileTheMainWindowIsHidden(t *testing.T) {
+	s, main, fb := miniLikeEnvWith(t, app.Item{
+		Source: "online", Type: "mv", Bvid: "BVminiNoSid", Cid: "1",
+		Title: "没有 sid 的那一首", Artist: "UP", ArtistMid: 12345,
+	})
+	main.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	tt := miniTester(s)
+	s.likeCurrent()
+
+	waitFor(t, "缺 Sid 的那一趟解析完、写进绑定歌单", func() bool {
+		tt.Frame()
+		return len(fb.deals()) == 1
+	})
+	ds := fb.deals()
+	if got := ds[0].get("add_media_ids"); got != "42" {
+		t.Errorf("add_media_ids = %q，want 42（绑定的那一格）", got)
+	}
+	if got := ds[0].get("rid"); got != "999" {
+		t.Errorf("deal 的 rid = %q，want 999（fixture 解出来的 avid）", got)
+	}
+}
+
+// TestTheMiniHeartIsQuietWhenBound 断迷你窗上的心形在「已绑定」时不弹 toast：
+// 成功和普通失败都只靠心形 / 按下反馈。
+func TestTheMiniHeartIsQuietWhenBound(t *testing.T) {
+	s, main, _ := miniLikeEnv(t)
+	main.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	s.likeCurrent()
+
+	if main.likePending == nil {
+		t.Fatal("迷你心形没有把这一趟记进主壳的 pending")
+	}
+	if !main.likePending.quiet {
+		t.Error("迷你心形的 pending 不是静音的：成功之后会弹一句它看不见的 toast")
+	}
+	if got := notchToastTexts(main); len(got) != 0 {
+		t.Errorf("迷你心形弹出了提示 %q：那一扇不画 toast", got)
+	}
+}
+
+// TestTheMiniHeartBringsTheMainWindowBackWhenTheBindingIsGone 断迷你点心形、
+// 而绑定的歌单在 B 站那边没了时：主壳收下那条 Missing、把迷你收掉、主窗口
+// 叫回来，并重新打开喜欢歌单选择。
+func TestTheMiniHeartBringsTheMainWindowBackWhenTheBindingIsGone(t *testing.T) {
+	s, main, fb := miniLikeEnv(t)
+	main.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "没了的那一格"})
+	fb.failDeals(-400, "收藏夹不存在")
+
+	s.likeCurrent()
+
+	// 主窗口收起来时不画帧：迷你那一帧会替它把后台结果收掉
+	// （`drainMainLikedResults`）。
+	waitFor(t, "主壳重新打开喜欢歌单选择", func() bool {
+		s.drainMainLikedResults()
+		return main.likeBind != nil && main.likeBind.step == likeBindPick
+	})
+	if main.mini != nil {
+		t.Error("绑定没了之后该收掉迷你窗口、把主窗口叫回来")
+	}
+	if got := notchToastTexts(main); len(got) == 0 {
+		t.Error("没有告诉用户绑定没了")
+	}
+}
+
+// TestTheNotchHeartIsQuietWhenBound 同迷你：刘海上的心形在已绑定时静音。
+func TestTheNotchHeartIsQuietWhenBound(t *testing.T) {
+	n, main := newNotchShell(t)
+	f := newBiliFixture(t, 1)
+	fb := newFolderBili(t, nil)
+	main.app.MountStreaming(app.Streaming{
+		Client: f.client(), Media: f.Client(), TempDir: t.TempDir(),
+	})
+	main.app.MountCollections(app.CollectionRefs{Client: fixtureClient(t, fb), Settle: 0})
+	main.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	// 放一首在线歌，让心形有东西可点。
+	if err := main.app.Enqueue(likeItem()); err != nil {
+		t.Fatalf("把在线的那首放进队列：%v", err)
+	}
+	waitFor(t, "在线那首开始播", func() bool { return main.app.Snapshot().HasTrack })
+
+	n.likeCurrent()
+
+	if main.likePending == nil {
+		t.Fatal("刘海心形没有把这一趟记进主壳的 pending")
+	}
+	if !main.likePending.quiet {
+		t.Error("刘海心形的 pending 不是静音的：成功之后会弹一句它看不见的 toast")
+	}
+	if got := notchToastTexts(main); len(got) != 0 {
+		t.Errorf("刘海心形弹出了提示 %q：那一扇不画 toast", got)
 	}
 }
 

@@ -140,8 +140,6 @@ type Track struct {
 	// Playing 是正在放这一首：歌名 accent-text、序号换成跳动的 eq-bars。
 	// Paused 时 eq-bars 停住（原型 `.paused .eq-bars i { animation-play-state: paused }`）。
 	Playing, Paused bool
-	// Liked 是喜欢过：心常亮、填满、accent-text。CanLike 为假就不画心（本地文件）。
-	Liked, CanLike bool
 	// Selected 是批量选择里选中了：整行 accent-soft 底。
 	Selected bool
 	// Chosen 是列表里「键盘 / 指针选中」的那一行（框架会给它铺一块实心主色底，调用方用 `RowWire`
@@ -169,7 +167,7 @@ type Track struct {
 
 // TrackEvents 是这一帧在这一行上发生的事。
 type TrackEvents struct {
-	Play, Like, More, Owner, Remove bool
+	Play, More, Owner, Remove bool
 	// Check 是批量选择态下勾选框被点了。
 	Check bool
 	// Hovered 是指针在这一行上（调用方要做右键菜单、拖动时可用）。
@@ -179,7 +177,7 @@ type TrackEvents struct {
 // TrackRow 画一行曲目（原型 `.trow`，`app.js` 的 `trackRows`）。key 必须稳定且唯一
 // （铁律四：用曲目 ID，不用序号）。w 是列表宽。
 //
-// 悬停：整行 hover 底；序号换成播放键；心（没喜欢时）、移除、「⋯」这几枚平时隐藏（仍占位）、
+// 悬停：整行 hover 底；序号换成播放键；移除、「⋯」这几枚平时隐藏（仍占位）、
 // 悬停才出现。正在播放且没悬停时序号位置是 eq-bars。
 func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 	p := pal(c)
@@ -309,7 +307,7 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 			Width(colDur).TextAlign(ui.End).SingleLine()
 		// 操作。
 		// 原型 `.icon-btn.hide-idle`（index.html 344–346）是 opacity:0 **仍占位**：平时藏起来的键
-		// 也留着那一格，悬停时只是显形，已喜欢那颗常亮的心不会被右边冒出来的「⋯」挤走。
+		// 也留着那一格，悬停时只是显形，行尾的「⋯」不会因为旁边冒出一枚键而挪位。
 		// 藏着的那一格画成空盒（`idleSlot`）：看不见、点不到、也不进 Tab 序——透明的按钮仍能
 		// 拿焦点、仍能被点中，框架没有「透明即不可交互」的开关。
 		ui.Row(c).Width(colAct).Gap(space.Px2).Justify(ui.End).AlignItems(ui.Center).Children(func() {
@@ -318,17 +316,6 @@ func TrackRow(c *ui.Context, key string, t Track, w float32) (ev TrackEvents) {
 					ev.Remove = IconBtn(c, key+":remove", "x", "移除 "+t.Title, IconOpts{Row: true}).Clicked()
 				} else {
 					idleSlot(c, key+":remove:idle")
-				}
-			}
-			if t.CanLike {
-				if t.Liked || hot {
-					ic, label := "heart", "喜欢 "+t.Title
-					if t.Liked {
-						ic, label = "heart-on", "取消喜欢 "+t.Title
-					}
-					ev.Like = IconBtn(c, key+":like", ic, label, IconOpts{Row: true, On: t.Liked}).Clicked()
-				} else {
-					idleSlot(c, key+":like:idle")
 				}
 			}
 			if hot {

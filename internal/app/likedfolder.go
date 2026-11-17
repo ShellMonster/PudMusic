@@ -2,12 +2,13 @@
 //
 // # 「喜欢」和「收藏」在这里是同一个动作
 //
-// 列表行上那颗心是「喜欢」，播放条上那颗星是「收藏」——两边最终都是把这一
-// 首放进一个收藏夹（`resource/deal`）。区别只在**放进哪一个**：
+// 所有心形和右键菜单的「喜欢」都是「喜欢」，右键菜单的「收藏」是另一条
+// 多选弹窗——两边最终都是把这一首放进一个收藏夹（`resource/deal`）。区别只在
+// **放进哪一个**：
 //
 //   - 收藏 → 弹「放进哪些收藏夹」的多选框（`folderselect.go`）；
-//   - 喜欢 → 有绑定时直接进绑定的那一格；没绑过先问一次（三选一，见
-//     `ui/likedbind.go`），问出来的那一格就记下来。
+//   - 喜欢 → 有绑定时直接进绑定的那一格（再点一下拿出来）；没绑过先问一次
+//     （三选一，见 `ui/likedbind.go`），问出来的那一格就记下来。
 //
 // # 绑定记在哪儿
 //
@@ -18,13 +19,13 @@
 //
 // ⚠️ **存的是收藏夹 id + 一份名字副本**。名字是为了设置页能直接显示
 // 「我的喜欢 · 私密」而不用先发一次请求；它只是**显示用的副本**，判断
-// 「绑定还在不在」靠 id（见 `FavoriteIntoBound`）。
+// 「绑定还在不在」靠 id（见 `SetBoundFavorite`）。
 //
 // # 「绑定失效」和「这次没写进去」是两件事
 //
 // 绑定的那一格可能已经没了：用户在 B 站网页上删了它、或者换了一个账号。
 // 这一档必须和普通失败（断网、风控）分开——前者要解绑并回到「选哪个
-// 收藏夹」，后者重试就好、绑定要留着。判据两层（见 `FavoriteIntoBound`）。
+// 收藏夹」，后者重试就好、绑定要留着。判据两层（见 `SetBoundFavorite`）。
 package app
 
 import (
@@ -54,7 +55,7 @@ type LikedFolder struct {
 type likedResult struct {
 	mu     sync.Mutex
 	nextID uint64
-	// nextToken 是「第几趟写请求」的流水号：`FavoriteIntoBound` 发出去
+	// nextToken 是「第几趟写请求」的流水号：`SetBoundFavorite` 发出去
 	// 一趟就先取一个号，回来的结果带着它——界面拿它认「这条结果
 	// 是替哪一首收歌那一趟回的」，不是「最新那条 pending」。
 	nextToken uint64
@@ -94,7 +95,7 @@ func (r *likedResult) take() (LikedResult, bool) {
 // LikedResult 是「收进绑定歌单」那一趟的回执。
 type LikedResult struct {
 	ID uint64
-	// Token 是「这是第几趟写请求的回执」：`FavoriteIntoBound` 发出去
+	// Token 是「这是第几趟写请求的回执」：`SetBoundFavorite` 发出去
 	// 之前先领一个号，同一趟回来的结果带同一个号。界面拿它把回执
 	// 对回发出那一趟的 pending——多首快速喜欢、旧结果乱序回来时，
 	// 不能用「最新那条 pending」去处理一条早发出的回执。
@@ -109,6 +110,10 @@ type LikedResult struct {
 	// 结果是旧绑定的回执——`TakeLikedResult` 拿它对照**此刻**的绑定，
 	// 对不上就丢，不让一条旧结果去拆新绑定（见 `TakeLikedResult` 注释）。
 	Folder int64
+	// Epoch 是发出那一趟时喜欢缓存的生命周期代号。换账号 / 重新挂载 / 重新
+	// 登录都会让它 +1；光比 Folder 拦不住「换了账号但本地绑定 id 没变」，
+	// 那一条迟到的 Missing 会把新账号的设置解掉。
+	Epoch uint64
 	// OK 是成了没有。
 	OK bool
 	// Text 是要跟用户说的那句话（成了是「已加入『我的喜欢』」）。
@@ -124,23 +129,25 @@ type LikedResult struct {
 // 理由同 `TakeFolderResult`。
 //
 // ⚠️ **过期的结果在这里丢**：一趟写请求发出去之后绑定可能已经被换掉
-// （设置页换绑）或解掉（绑定失效回多选框）。这时候才回来的结果属于
-// **旧绑定**——界面的 Missing 分支会解绑此刻的绑定、弹回多选框，把一
-// 条旧回执当成新绑定的判决是最坏的那一种错；旧成功那句「已加入『旧
-// 的』」同样是错话。所以每条结果都带上「发请求时的绑定 id」，取走时
-// 和此刻的绑定对不上就丢（顺带记进 dropped，给同包测试观察）。
+// （设置页换绑）或解掉（绑定失效回多选框），账号也可能已经换人。这时候才
+// 回来的结果属于**旧绑定或旧账号**——界面的 Missing 分支会解绑此刻的绑定、
+// 弹回多选框，把一条旧回执当成新绑定的判决是最坏的那一种错；旧成功那句
+// 「已加入『旧的』」同样是错话。所以每条结果都带上「发请求时的绑定 id 和
+// 缓存代次」，取走时和此刻对不上就丢（顺带记进 dropped，给同包测试观察）。
 func (a *App) TakeLikedResult() (LikedResult, bool) {
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return LikedResult{}, false
 	}
-	current, _ := a.LikedFolder()
 	for {
 		res, ok := c.likedResult.take()
 		if !ok {
 			return LikedResult{}, false
 		}
-		if res.Folder == current.ID {
+		// 每条都拿**此刻**的绑定和代次对：排队期间换绑 / 换账号的话，前一条
+		// 过了不代表后面那条还是同一个生命周期里的。
+		current, _ := a.LikedFolder()
+		if res.Folder == current.ID && res.Epoch == a.favoriteEpoch() {
 			return res, true
 		}
 		c.likedResult.mu.Lock()
@@ -164,6 +171,9 @@ func (a *App) BindLikedFolder(f LikedFolder) {
 	if _, err := a.UpdateSettings(func(s *Settings) { s.LikedFolder = f }); err != nil {
 		log.Printf("pudmusic: 记喜欢歌单绑定失败：%v", err)
 	}
+	// 绑定换了：缓存里每一条说的都是另一个歌单里的事。
+	a.clearFavorites()
+	a.wakeUI()
 }
 
 // UnbindLikedFolder 解绑：回到「喜欢时选收藏夹」。
@@ -171,15 +181,19 @@ func (a *App) UnbindLikedFolder() {
 	if _, err := a.UpdateSettings(func(s *Settings) { s.LikedFolder = LikedFolder{} }); err != nil {
 		log.Printf("pudmusic: 解喜欢歌单绑定失败：%v", err)
 	}
+	a.clearFavorites()
+	a.wakeUI()
 }
 
-// FavoriteIntoBound 把这一条收进**绑定的**那个收藏夹。**立刻返回**，结果走
-// `TakeLikedResult`；返回值是这一趟的 token——调用方把它存进 pending，
+// SetBoundFavorite 把这一条加进 / 拿出**绑定的**那个收藏夹。**立刻返回**，
+// 结果走 `TakeLikedResult`；返回值是这一趟的 token——调用方把它存进 pending，
 // 回来的结果才能对上号（见 `LikedResult.Token`）。
+//
+// on 为 true 是加入，false 是移除；两者共用同一个结果出口和同一条失效判据。
 //
 // rid / contentType 是这一条在 B 站那边的身份（和选择弹窗用的同一对，
 // 见 `favTarget`）——调用方负责先把稿件 id 问出来，这一层不做 bvid → avid
-// 的换算。
+// 的换算。item 只用于写成功之后把喜欢缓存标好（key = `favoriteKey(item)`）。
 //
 // # 绑定失效的两层判据
 //
@@ -191,7 +205,11 @@ func (a *App) UnbindLikedFolder() {
 //
 // ⚠️ **普通失败不清绑定**：断网时回 `OK=false, Missing=false`，绑定留着，
 // 用户重试就好——一次断网就把用户配好的歌单弄丢是最坏的那一种。
-func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
+func (a *App) SetBoundFavorite(item Item, rid int64, contentType int, on bool) uint64 {
+	// 先领代次，再读绑定：这一趟的写回执只属于「这个代次 + 这个绑定」。
+	// 取反顺序的话，换绑正好卡在两步之间时，写用的是新绑定、回执却带着旧
+	// 代次，缓存回填会错。
+	epoch := a.favoriteEpoch()
 	c := a.collectionsSnapshot()
 	if c == nil {
 		return 0
@@ -202,6 +220,7 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
 			Token:   c.likedResult.token(),
 			Rid:     rid,
 			Type:    contentType,
+			Epoch:   epoch,
 			Missing: true,
 		})
 		a.wakeUI()
@@ -227,6 +246,7 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
 				Rid:     rid,
 				Type:    contentType,
 				Folder:  bound.ID,
+				Epoch:   epoch,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
@@ -236,34 +256,51 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
 	}
 
 	go func() {
-		err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, []int64{bound.ID}, nil)
+		var add, del []int64
+		if on {
+			add = []int64{bound.ID}
+		} else {
+			del = []int64{bound.ID}
+		}
+		err := c.refs.Client.DealFolderMedias(context.Background(), rid, contentType, add, del)
+		failText := func() string {
+			if on {
+				return "收藏不了：" + bili.Friendly(err)
+			}
+			return "取消不了喜欢：" + bili.Friendly(err)
+		}
 		switch {
 		case err == nil:
-			// 写成功了：**「收没收藏」的答案我们知道了**——当前正在播的
-			// 那首 audio 若就是这一条，把它的心形标实（`markAudioFavorited`
-			// 自己对号；对不上的话它什么也不做）。
-			if contentType == bili.MediaAudio {
-				a.markAudioFavorited(rid)
+			// 写成功了：**最终状态我们知道了**。代次检查和回填在同一把锁里
+			// 完成，换绑 / 换账号正好卡在中间时也不会把旧答案写回去。
+			a.markFavoriteIfEpoch(item, on, epoch)
+			text := "已加入「" + bound.Title + "」"
+			if !on {
+				text = "已从「" + bound.Title + "」移除"
 			}
 			c.likedResult.add(LikedResult{
 				Token: token, Rid: rid, Type: contentType,
-				Folder: bound.ID, OK: true, Text: "已加入「" + bound.Title + "」",
+				Folder: bound.ID, Epoch: epoch, OK: true, Text: text,
 			})
-		case likedFolderGone(err):
+		case likedFolderGone(err) && !a.boundFolderListed(bound.ID):
 			log.Printf("pudmusic: 绑定的收藏夹 %d 已经没了：%v", bound.ID, err)
 			c.likedResult.add(LikedResult{
 				Token:   token,
 				Rid:     rid,
 				Type:    contentType,
 				Folder:  bound.ID,
+				Epoch:   epoch,
 				Text:    "绑定的歌单已经不在了，重新选一个",
 				Missing: true,
 			})
 		default:
-			log.Printf("pudmusic: 收进绑定歌单 %d 失败：%v", bound.ID, err)
+			// 走到这里有两档：普通失败，以及 `-400` 但侧栏列表里**还摆着**
+			// 绑定那一格（容量满、参数问题）。后者不能解绑——绑定是用户的
+			// 配置，没丢的东西不该被我们收走。
+			log.Printf("pudmusic: 改绑定歌单 %d 的内容失败：%v", bound.ID, err)
 			c.likedResult.add(LikedResult{
 				Token: token, Rid: rid, Type: contentType,
-				Folder: bound.ID, Text: "收藏不了：" + bili.Friendly(err),
+				Folder: bound.ID, Epoch: epoch, Text: failText(),
 			})
 		}
 		a.wakeUI()
@@ -283,7 +320,7 @@ func (a *App) FavoriteIntoBound(rid int64, contentType int) uint64 {
 //   - **rid 非法**：在调用方已经挡掉（`favTarget` 只收 rid > 0 的；
 //     `DealFolderMedias` 自己又验一遍）——走到这里 rid 一定合法，
 //     所以 -400 落在「收藏夹那一侧出问题」上。
-//   - **add / del 两个列表都空**：`FavoriteIntoBound` 永远只发
+//   - **add / del 两个列表都空**：`SetBoundFavorite` 永远只发
 //     `add = [bound.ID]`——「两个都空」那一档在结构上走不到这里。
 //   - **收藏夹容量满了**：B 站同样回 -400。这一档**有意当成
 //     「绑定的这一格装不下它」**——界面同样是「解绑 + 回到多选框

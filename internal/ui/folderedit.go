@@ -377,7 +377,11 @@ func (s *Shell) dispatchFolderResult(res app.FolderResult) {
 		s.app.BindLikedFolder(app.LikedFolder{ID: res.Folder, Title: title, Private: private})
 		if s.likePending != nil {
 			lb.submitting = true
-			s.app.FavoriteIntoBound(lb.rid, lb.contentType)
+			p := s.likePending
+			// 这一趟领的号要写回 pending：绑定失效重选之后，pending 里还是上一趟
+			// （失败那趟）的旧号，拿旧号去对这条成功回执会对不上，弹窗会一直
+			// 停在「提交中」。
+			p.token = s.app.SetBoundFavorite(p.item, lb.rid, lb.contentType, true)
 			break
 		}
 		s.closeLikeBind()

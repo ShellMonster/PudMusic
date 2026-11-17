@@ -386,6 +386,8 @@ func (a *App) DealFolderMedias(rid int64, contentType int, add, del []int64) {
 			a.wakeUI()
 			return
 		}
+		// 改的若是绑定的喜欢歌单，红心那份缓存已经旧了：清掉，下一帧重问。
+		a.forgetFavoritesIfBound(add, del)
 		c.folderResult.add(FolderResult{Op: FolderOpSelect, OK: true, Text: dealDoneText(len(add), len(del))})
 		a.wakeUI()
 	}()

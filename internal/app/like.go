@@ -257,9 +257,9 @@ func (a *App) askAudioLike(it Item, key string, gen uint64) {
 // finishLike 记下一次问赞藏的结果并叫醒界面。
 //
 // gen 是发出这一趟时领的代次号：回来之后号已经对不上，说明这趟问发出的
-// 那一刻之后**写操作自己改过答案**（`setAskedLike` / `markAudioFavorited`
-// 都换代次）——旧答案不许盖新答案。这和「键对不上就丢」是同一条规矩的
-// 另一半：键管「换歌」，代次管「同一首、问过之后又写过」。
+// 那一刻之后**写操作自己改过答案**（`setAskedLike` 换代次）——旧答案不许
+// 盖新答案。这和「键对不上就丢」是同一条规矩的另一半：键管「换歌」，代次管
+// 「同一首、问过之后又写过」。
 //
 // gen == 0 是写操作自己记的（`TripleLike` 那次三连）：它不是一趟「问」，
 // 答案是最新的，无条件落账。
@@ -337,43 +337,6 @@ func (a *App) SetLike(want bool, done func(error)) {
 			done(nil)
 		}
 	}()
-}
-
-// markAudioFavorited 是「收进绑定歌单那一趟成了」之后把关系缓存里的
-// Favorited 标上：**只对当前这首 audio**。
-//
-// rid 是那一趟收歌的内容 id（audio 的 sid 本身）。它和当前项的 sid
-// 对得上才改：多首快速喜欢时，歌 A 的成功不许把歌 B 的心形点亮。
-//
-// ⚠️ 它只在**问过之后**把那一栏置上（`likeLoaded` 已经为 true 才动）：
-// 没问过就写，等于把「还没问」写成「问过了、收过」——而写成功本身
-// 确实就是答案，所以更确切的做法是「只要缓存还是这首就把 loaded
-// 立上、Favorited 置上」：这和 `setAskedLike` 是同一个理由（写成功 =
-// 答案已知，不必再等一问）。
-func (a *App) markAudioFavorited(rid int64) {
-	it, ok := a.CurrentItem()
-	if !ok || it.Type != "audio" {
-		return
-	}
-	sid, err := strconv.ParseInt(it.Sid, 10, 64)
-	if err != nil || sid != rid {
-		return
-	}
-	key := likeKey(it)
-	a.likeMu.Lock()
-	if a.likeKey == key {
-		a.like.Favorited = true
-		a.likeLoaded = true
-		a.likeWanted = false
-		// 换代次：写成功这一刻起，之前发出去还没回来的「收没收藏」那
-		// 一趟已经是旧答案——它回来时键还是这首，拿键拦不住，得拿代次
-		// 拦（见 `finishLike`）。不然它会把这颗刚点亮的心抹回去。
-		a.likeGen++
-	}
-	a.likeMu.Unlock()
-	if wake := a.currentWake(); wake != nil {
-		wake()
-	}
 }
 
 // setAskedLike 是一次成功的写之后把答案记进缓存，并叫醒界面。

@@ -113,7 +113,6 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 			Playing:   rows.isPlaying(m),
 			Compact:   rows.Layout() == list.ViewCompact,
 			AlbumCol:  pud.AlbumModeFor(winW),
-			CanLike:   rows.acts.FavSelect != nil,
 			Removable: sp.remove != nil,
 			Dim:       !m.CanPlay,
 			Menu:      func(mn *ui.Menu) { rows.menu(mn, i) },
@@ -130,11 +129,12 @@ func (s *Shell) drawLibraryPudRow(c *ui.Context, r ui.ListRow, rows *pagedRows, 
 		track.Children(func() {
 			ev = pud.TrackRow(c, sp.key+"t:"+m.ID, tr, w)
 		})
+		if ev.Hovered && rows.acts.PrefetchFavorite != nil {
+			rows.acts.PrefetchFavorite(m.Item)
+		}
 		switch {
 		case ev.Play:
 			rows.playFrom(i)
-		case ev.Like:
-			rows.actions().FavSelect(i)
 		case ev.Remove && sp.remove != nil:
 			sp.remove(i)
 		case ev.Owner && rows.acts.OpenOwner != nil && m.Item.ArtistMid > 0:

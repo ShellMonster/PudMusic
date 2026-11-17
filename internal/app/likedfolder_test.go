@@ -94,19 +94,19 @@ func TestLikedFolderBindingSurvivesARestart(t *testing.T) {
 	}
 }
 
-// TestFavoriteIntoBoundWritesToTheBoundFolder 绑定时喜欢这一首，直接写进
+// TestSetBoundFavoriteWritesToTheBoundFolder 绑定时喜欢这一首，直接写进
 // 绑定的那一格，不弹选择框。
 //
 // 🔴 钉的是「写的那一份 add_media_ids 是**绑定的那一个**」：默认收藏夹
 // 那一套（`FavoriteSong` 挑第一格）在这儿是错的——用户绑定的是「我的喜欢」，
 // 歌却进了一个他没选的格子，而界面上还说是「已加入我的喜欢」。
-func TestFavoriteIntoBoundWritesToTheBoundFolder(t *testing.T) {
+func TestSetBoundFavoriteWritesToTheBoundFolder(t *testing.T) {
 	f := newFolderFixture(t)
 	a := likedApp(t, f)
 	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "我的喜欢"}})
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	res := waitLikedResult(t, a, 2*time.Second)
 	if !res.OK {
 		t.Fatalf("收进绑定歌单失败了：%q", res.Text)
@@ -120,17 +120,17 @@ func TestFavoriteIntoBoundWritesToTheBoundFolder(t *testing.T) {
 	}
 }
 
-// TestFavoriteIntoBoundDetectsAGoneFolder 绑定的那一格已经没了（B 站上删
+// TestSetBoundFavoriteDetectsAGoneFolder 绑定的那一格已经没了（B 站上删
 // 了，或者换过账号）时，要报「绑定失效」，**不能**只报「收藏失败」。
 //
 // 🔴 这一档和普通失败是两件事：普通失败（断网）重试就好，绑定失效要让
 // 界面回到「选哪个收藏夹」——分不清的话，用户每次喜欢都收到一句「收藏
 // 失败」，却不知道自己该去设置里解绑。
 //
-// 判据是两层（见 `FavoriteIntoBound` 的注释）：
+// 判据是两层（见 `SetBoundFavorite` 的注释）：
 //   - 侧栏那份列表**已经拉过**、里面没有绑定的那一个 id → 当场判失效；
 //   - 列表还没拉过，就照写——B 站说「这一格不存在」（-400）也算失效。
-func TestFavoriteIntoBoundDetectsAGoneFolder(t *testing.T) {
+func TestSetBoundFavoriteDetectsAGoneFolder(t *testing.T) {
 	f := newFolderFixture(t)
 	a := likedApp(t, f)
 	// 侧栏「我创建的」拉完了，里面没有 42 → 绑定的那个已经不在了。
@@ -138,7 +138,7 @@ func TestFavoriteIntoBoundDetectsAGoneFolder(t *testing.T) {
 	markFavoritesLoaded(a)
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	res := waitLikedResult(t, a, 2*time.Second)
 	if res.OK {
 		t.Fatal("绑定的是个已经不存在的歌单，不该成功")
@@ -152,16 +152,16 @@ func TestFavoriteIntoBoundDetectsAGoneFolder(t *testing.T) {
 	}
 }
 
-// TestFavoriteIntoBoundStillWritesWhenSidebarHasNotLoaded 侧栏列表还没拉
+// TestSetBoundFavoriteStillWritesWhenSidebarHasNotLoaded 侧栏列表还没拉
 // 过时不能先判失效——「还没拉」和「真没有」是两件事（AGENTS.md §4）。照写，
 // B 站说不存在才算失效。
-func TestFavoriteIntoBoundStillWritesWhenSidebarHasNotLoaded(t *testing.T) {
+func TestSetBoundFavoriteStillWritesWhenSidebarHasNotLoaded(t *testing.T) {
 	f := newFolderFixture(t)
 	f.failDeal(-400, "收藏夹不存在")
 	a := likedApp(t, f)
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	res := waitLikedResult(t, a, 2*time.Second)
 	if res.OK || !res.Missing {
 		t.Fatalf("结果 = %+v，want 失败且 Missing", res)
@@ -171,16 +171,16 @@ func TestFavoriteIntoBoundStillWritesWhenSidebarHasNotLoaded(t *testing.T) {
 	}
 }
 
-// TestFavoriteIntoBoundNetworkFailureKeepsTheBinding 网络坏了只是「这次没
+// TestSetBoundFavoriteNetworkFailureKeepsTheBinding 网络坏了只是「这次没
 // 收进去」，不是「绑定失效」——不能顺手把绑定解了，不然一次断网就把用户
 // 配好的歌单弄丢。
-func TestFavoriteIntoBoundNetworkFailureKeepsTheBinding(t *testing.T) {
+func TestSetBoundFavoriteNetworkFailureKeepsTheBinding(t *testing.T) {
 	f := newFolderFixture(t)
 	f.failDeal(-500, "服务器开小差了")
 	a := likedApp(t, f)
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	res := waitLikedResult(t, a, 2*time.Second)
 	if res.OK {
 		t.Fatal("服务器回 -500，不该算成功")
@@ -225,7 +225,7 @@ func TestStaleLikedMissingDoesNotReachTheUI(t *testing.T) {
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
 
 	gate := f.gateDeals()
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	waitUntil(t, "写那一趟发出去", 2*time.Second, func() bool {
 		return f.dealArrivals() == 1
 	})
@@ -259,7 +259,7 @@ func TestStaleLikedSuccessDoesNotReachTheUI(t *testing.T) {
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
 
 	gate := f.gateDeals()
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	waitUntil(t, "写那一趟发出去", 2*time.Second, func() bool {
 		return f.dealArrivals() == 1
 	})
@@ -290,8 +290,8 @@ func TestPendingLikesForTheSameBindingDoNotPolluteEachOther(t *testing.T) {
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
 	gate := f.gateDeals()
-	a.FavoriteIntoBound(77, bili.MediaAudio)
-	a.FavoriteIntoBound(78, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
+	a.SetBoundFavorite(audioFavItem(78), 78, bili.MediaAudio, true)
 	waitUntil(t, "两趟都发出去", 2*time.Second, func() bool {
 		return f.dealArrivals() == 2
 	})
@@ -313,8 +313,8 @@ func TestEachLikedResultCarriesItsRequest(t *testing.T) {
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
 
 	gate := f.gateDeals()
-	a.FavoriteIntoBound(77, bili.MediaAudio)
-	a.FavoriteIntoBound(78, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
+	a.SetBoundFavorite(audioFavItem(78), 78, bili.MediaAudio, true)
 	waitUntil(t, "两趟都发出去", 2*time.Second, func() bool {
 		return f.dealArrivals() == 2
 	})
@@ -343,7 +343,7 @@ func TestUnbindWhileARequestIsFlyingDropsItsResult(t *testing.T) {
 	a.BindLikedFolder(LikedFolder{ID: 42, Title: "旧的"})
 
 	gate := f.gateDeals()
-	a.FavoriteIntoBound(77, bili.MediaAudio)
+	a.SetBoundFavorite(audioFavItem(77), 77, bili.MediaAudio, true)
 	waitUntil(t, "写那一趟发出去", 2*time.Second, func() bool {
 		return f.dealArrivals() == 1
 	})
@@ -362,6 +362,35 @@ func TestUnbindWhileARequestIsFlyingDropsItsResult(t *testing.T) {
 	}
 	if n := len(a.collectionsSnapshot().likedResult.dropped); n != 1 {
 		t.Errorf("dropped = %d，want 1（解绑后回来的结果同样过期）", n)
+	}
+}
+
+// TestAFullBoundFolderIsNotUnbound 钉「-400 但侧栏列表里还摆着绑定那一格时，
+// 不许把它当『收藏夹没了』解绑」。
+//
+// -400 不只表示收藏夹不存在：容量满、参数问题也回它。绑定是用户配的东西，
+// 没丢就不能收走。
+func TestAFullBoundFolderIsNotUnbound(t *testing.T) {
+	f := newFolderFixture(t)
+	a := likedApp(t, f)
+	// 侧栏列表拉过，而且里面**有**绑定那一格。
+	a.SetFavorites(FavoritesCreated, []Favorite{{ID: 42, Title: "我的喜欢"}})
+	markFavoritesLoaded(a)
+	a.BindLikedFolder(LikedFolder{ID: 42, Title: "我的喜欢"})
+
+	f.failDeal(-400, "收藏夹容量已满")
+	it := audioFavItem(77)
+	a.SetBoundFavorite(it, 77, bili.MediaAudio, true)
+
+	res := waitLikedResult(t, a, 2*time.Second)
+	if res.Missing {
+		t.Error("列表里还摆着这一格，-400 却被当成「收藏夹没了」")
+	}
+	if res.OK {
+		t.Error("-400 被当成了成功")
+	}
+	if bound, ok := a.LikedFolder(); !ok || bound.ID != 42 {
+		t.Errorf("绑定 = %+v，want 42 还在", bound)
 	}
 }
 

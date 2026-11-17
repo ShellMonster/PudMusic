@@ -21,17 +21,19 @@ import (
 	mygoui "github.com/egoist/mygo/ui"
 )
 
-// likeRowHeart 悬停到那一行上，点那颗心。
+// likeRowHeart 右键那一行，选菜单里的「喜欢」。
+//
+// 列表行本身不再画心：喜欢状态在右键菜单那一项上（悬停预取、打开菜单时读缓存）。
 func likeRowHeart(t *testing.T, tt *mygoui.Tester, title string) {
 	t.Helper()
-	r, ok := tt.Find(title)
-	if !ok {
+	if _, ok := tt.Find(title); !ok {
 		t.Fatalf("画面上找不到「%s」，文字有 %q", title, tt.Texts())
 	}
-	tt.Move(r.X+r.W/2, r.Y+r.H/2)
-	tt.Frame()
-	if err := tt.Click("喜欢 " + title); err != nil {
-		t.Fatalf("行尾没有那颗心：%v（文字 %q）", err, tt.Texts())
+	if err := tt.RightClick(title); err != nil {
+		t.Fatalf("右键不了「%s」：%v", title, err)
+	}
+	if err := tt.ChooseMenuItem("喜欢"); err != nil {
+		t.Fatalf("菜单里没有「喜欢」：%v（文字 %q）", err, tt.Texts())
 	}
 }
 
@@ -248,9 +250,10 @@ func TestSkipBindingFallsBackToFolderSelect(t *testing.T) {
 	}
 }
 
-// TestGoneBoundFolderFallsBackToSelect 绑定的歌单已经没了 → 解绑 + 回到
-// 多选框，不能让喜欢变成一个永远失败的按钮。
-func TestGoneBoundFolderFallsBackToSelect(t *testing.T) {
+// TestGoneBoundFolderReopensTheLikePicker 绑定的歌单已经没了 → 解绑 + 重新
+// 打开**喜欢歌单选择**（不是收藏夹多选框）；加进去那一趟没做完，pending 留着，
+// 选中新歌单之后把它补进去。
+func TestGoneBoundFolderReopensTheLikePicker(t *testing.T) {
 	f := newFolderBili(t, nil)
 	// 侧栏那份列表里**没有** 42：created/list 只给 1~3 号。要让 app 层
 	// 第一层判据生效（列表拉过了、里面没有），得真拉一遍——`SetFavorites`
@@ -266,17 +269,104 @@ func TestGoneBoundFolderFallsBackToSelect(t *testing.T) {
 	likeRowHeart(t, tt, "歌 一")
 
 	// 失效这一趟不走网络（侧栏列表拉过了），结果从 `TakeLikedResult` 回来；
-	// 而 `flushLikedResults` 每帧都在取走它——所以这里等的是**多选框开出来**
-	// （失效 → 解绑 → 回多选框），不是那条结果本身。
-	waitFrames(t, tt, "回到多选框", func() bool {
-		return s.folderSelect != nil
+	// 而 `flushLikedResults` 每帧都在取走它——所以这里等的是**喜欢歌单选择**
+	// 重新开出来。
+	waitFrames(t, tt, "重新打开喜欢歌单选择", func() bool {
+		return s.likeBind != nil && s.likeBind.step == likeBindPick
 	})
 	settleFrame(tt)
 
+	if s.folderSelect != nil {
+		t.Error("绑定失效落回了收藏夹多选框：该重新选喜欢歌单")
+	}
 	if _, ok := s.app.LikedFolder(); ok {
 		t.Error("绑定失效后该解绑")
 	}
+	if s.likePending == nil || !s.likePending.on {
+		t.Fatalf("pending = %+v，want 留着这一首等新歌单", s.likePending)
+	}
 
+	// 挑一个新歌单：这一首要跟着补进去。
+	waitFrames(t, tt, "收藏夹列表拉回来", func() bool {
+		return s.likeBind != nil && len(s.likeBind.list) == 3
+	})
+	if err := tt.Click("收藏夹 1"); err != nil {
+		t.Fatalf("列表里没有那一行：%v（文字 %q）", err, tt.Texts())
+	}
+	settleFrame(tt)
+	if err := tt.Click("绑定并加入"); err != nil {
+		t.Fatalf("没有「绑定并加入」：%v（文字 %q）", err, tt.Texts())
+	}
+	waitFrames(t, tt, "补收那一趟写出去", func() bool {
+		return len(f.deals()) == 1
+	})
+	ds := f.deals()
+	if len(ds) != 1 || ds[0].get("add_media_ids") != "1" {
+		t.Fatalf("deal = %v，want 把这一首补进新歌单 1", ds)
+	}
+	if bound, _ := s.app.LikedFolder(); bound.ID != 1 {
+		t.Errorf("绑定 = %+v，want id 1", bound)
+	}
+}
+
+// TestGoneBoundFolderCanCreateANewOneAndFinish 钉「绑定失效后从『创建新的』
+// 补收这一首」：新建那一趟也要把新请求的 token 写回 pending，否则成功回执
+// 对不上旧号，弹窗会一直停在「提交中」。
+func TestGoneBoundFolderCanCreateANewOneAndFinish(t *testing.T) {
+	f := newFolderBili(t, nil)
+	f.pages = [][]map[string]any{folderPage(1, 3)}
+	s, tt := likedPageShell(t, f)
+	s.app.BindLikedFolder(app.LikedFolder{ID: 42, Title: "没了的那个"})
+	s.app.RefreshFavorites()
+	waitFrames(t, tt, "侧栏收藏夹拉完", func() bool {
+		return s.app.FavoriteState(app.FavoritesCreated).Loaded
+	})
+
+	likeRowHeart(t, tt, "歌 一")
+	waitFrames(t, tt, "重新打开喜欢歌单选择", func() bool {
+		return s.likeBind != nil && s.likeBind.step == likeBindPick
+	})
+	settleFrame(tt)
+
+	// 回到三选一，走「创建新的」。
+	if err := tt.Click("返回"); err != nil {
+		t.Fatalf("没有「返回」：%v（文字 %q）", err, tt.Texts())
+	}
+	settleFrame(tt)
+	if err := tt.Click("创建新的"); err != nil {
+		t.Fatalf("没有「创建新的」：%v（文字 %q）", err, tt.Texts())
+	}
+	settleFrame(tt)
+	if err := tt.Click("创建并加入"); err != nil {
+		t.Fatalf("没有「创建并加入」：%v（文字 %q）", err, tt.Texts())
+	}
+
+	waitFrames(t, tt, "新建之后补收这一首", func() bool {
+		return len(f.deals()) == 1
+	})
+	if got := f.deals()[0].get("add_media_ids"); got != "999" {
+		t.Errorf("add_media_ids = %q，want 999（新建的那一格）", got)
+	}
+	// 成功回执必须对回这一趟的 pending：弹窗关掉、pending 清掉。
+	waitFrames(t, tt, "弹窗收场", func() bool {
+		return s.likeBind == nil && s.likePending == nil
+	})
+}
+
+// TestAnOlderResolveDoesNotReplaceANewerPending 钉「缺 Sid 的旧解析结果回来
+// 得比下一次点击还晚时，不许把新一次喜欢的 pending / 弹窗顶掉」。
+func TestAnOlderResolveDoesNotReplaceANewerPending(t *testing.T) {
+	s := newTestShell(t).s
+	older := app.Item{Source: "online", Type: "mv", Bvid: "BVold", Title: "旧的目标"}
+	newer := app.Item{Source: "online", Type: "mv", Bvid: "BVnew", Title: "新的目标"}
+
+	// 用户已经点了新的那一首，旧那一趟这时才回来。
+	s.likeIntent = newer
+	s.likeItemResolved(older, 1, 2, true, false)
+
+	if s.likeBind != nil || s.likePending != nil {
+		t.Error("旧目标的解析结果改动了新一次喜欢的 pending / 弹窗")
+	}
 }
 
 // TestSettingsShowsAndChangesTheBinding 设置页「菜单」Tab 能看绑定、能
@@ -545,9 +635,8 @@ func TestRebindSilencesTheOldSuccessToast(t *testing.T) {
 	}
 }
 
-// TestUnbindIgnoresTheLateMissing 钉「绑定失效 → 解绑回多选框」之后，
-// 再回来的旧结果不许把刚开的多选框弄乱：多选框要留着，提示也不能再来
-// 一遍。
+// TestUnbindIgnoresTheLateMissing 钉「绑定失效 → 解绑回喜欢歌单选择」之后，
+// 再回来的旧结果不许把刚开的弹窗弄乱：弹窗要留着，提示也不能再来一遍。
 func TestUnbindIgnoresTheLateMissing(t *testing.T) {
 	f := newFolderBili(t, nil)
 	s, tt := likedPageShell(t, f)
@@ -565,21 +654,21 @@ func TestUnbindIgnoresTheLateMissing(t *testing.T) {
 	})
 	f.ungateDeals()
 
-	// 失效 → 解绑 → 回多选框。
-	waitFrames(t, tt, "回到多选框", func() bool {
-		return s.folderSelect != nil
+	// 失效 → 解绑 → 重新打开喜欢歌单选择。
+	waitFrames(t, tt, "重新打开喜欢歌单选择", func() bool {
+		return s.likeBind != nil && s.likeBind.step == likeBindPick
 	})
 	if _, ok := s.app.LikedFolder(); ok {
 		t.Fatal("绑定失效后该解绑")
 	}
 
 	// 再塞一条「旧绑定」的迟到结果（同一份绑定已经解了，它同样是旧
-	// 结果）：多选框不该被动、提示不该重发。
-	s.app.FavoriteIntoBound(77, 12)
+	// 结果）：弹窗不该被动、提示不该重发。
+	s.app.SetBoundFavorite(app.Item{Source: "online", Type: "audio", Sid: "77"}, 77, 12, true)
 	settleFrame(tt)
 
-	if s.folderSelect == nil {
-		t.Error("迟到的旧结果把多选框弄没了")
+	if s.likeBind == nil {
+		t.Error("迟到的旧结果把喜欢歌单选择弄没了")
 	}
 }
 
@@ -620,10 +709,13 @@ func TestAStaleMissingDoesNotOpenThePickerForTheWrongSong(t *testing.T) {
 	f.ungateDeals()
 	settleFrame(tt)
 
-	// 歌 A 的旧 Missing **不许**拿歌 B 的 pending 去开多选框——
-	// 多选框一出来用户会以为是在替歌 A 选，提交就把歌 B 收进去。
+	// 歌 A 的旧 Missing **不许**拿歌 B 的 pending 去开喜欢歌单选择——
+	// 弹窗一出来用户会以为是在替歌 A 选，提交就把歌 B 收进去。
+	if s.likeBind != nil {
+		t.Error("歌 A 的旧 Missing 拿歌 B 的 pending 开了喜欢歌单选择")
+	}
 	if s.folderSelect != nil {
-		t.Error("歌 A 的旧 Missing 拿歌 B 的 pending 开了多选框")
+		t.Error("歌 A 的旧 Missing 开了收藏夹多选框")
 	}
 	if tt.HasText("绑定的歌单已经不在了") {
 		t.Error("歌 A 的旧 Missing 发出了「绑定失效」提示——它不属于此刻的 pending")

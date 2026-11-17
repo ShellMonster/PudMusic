@@ -938,6 +938,10 @@ type Shell struct {
 	// 新绑的格子；从设置进来换绑定时它是 nil（只换绑定不收歌）。
 	likeBind    *likeBind
 	likePending *likePending
+	// likeIntent 是**最近一次**用户点喜欢的目标（按内容身份比）。缺 Sid 的
+	// 那一趟要问 avid，问回来可能比下一次点击还晚；拿它挡住旧目标，不许旧
+	// 解析结果把新 pending 顶掉。
+	likeIntent app.Item
 
 	// resolveCallbacks 是「问 avid 那一趟」的回调表：key 是发出那一趟
 	// 领的号（`app.ResolveFavoriteID` 的返回），值是这一趟的 done。

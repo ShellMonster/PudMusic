@@ -239,6 +239,9 @@ func (a *App) MountLogin(store Store, cli *bili.Client) {
 // 下拉里按「刷新数据」——那是一个没人会自己想到的操作，而侧栏上长期空着
 // 会被当成「我没有收藏夹」。
 func (a *App) onLoginSucceeded() {
+	// 登录之前问过的喜欢状态都失败过（自 mid 是 0），带着退避；登录这一刻
+	// 作废掉，下一帧重新问。
+	a.clearFavorites()
 	a.AutoRefreshFavorites()
 }
 
@@ -262,6 +265,9 @@ func (a *App) onLoginSucceeded() {
 // 账号的收藏夹，直到下一件别的事把它画出来。
 func (a *App) onAccountChanged() {
 	a.FavoritesOf().forgetAccount()
+	// 喜欢状态也属于上一个账号：换人之后旧答案一条都不能留。已经发出去的
+	// 写请求靠 `favEpoch` 拦（见 `SetBoundFavorite`）。
+	a.clearFavorites()
 	a.wakeUI()
 }
 
