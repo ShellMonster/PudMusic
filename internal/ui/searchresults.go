@@ -88,6 +88,7 @@ const searchUserItemType = app.ItemTypeUser
 // ⚠️ 挂在 Shell 上而不是建成局部变量：即时模式每一帧都重画一遍，局部变量下一帧
 // 就没了。三个 Tab 的滚动位置、已加载的行、代次全靠它跨帧活着。
 type searchState struct {
+	creators creatorPreview
 	// tab 是当前选中的 Tab（`ui.Tabs` 直接写它）。
 	tab int
 
@@ -225,6 +226,15 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 	q, gen := t.query, t.gen
 	t.mu.Unlock()
 
+	// 「用户」那一档的第 1 页（默认排序）和页头那排相关 UP 主打的是同一个请求：
+	// 预览已经替它拉过一次，这里直接用，不再发第二遍（见 `creatorPreview.takePage`）。
+	// 换了排序就不复用——那一页的顺序和预览的不是一回事。
+	if tab == searchTabUser && page == 1 && q.sort == int(app.SearchSortDefault) {
+		if preview, ok := s.search.creators.takePage(q.keyword); ok {
+			return t.applyPage(gen, packUserPairs(searchItemsOf(preview.Items)), preview.Total, preview.HasMore), nil
+		}
+	}
+
 	pg, err := s.app.SearchOf().Page(ctx, app.SearchQuery{
 		Tab:     app.SearchTab(tab),
 		Keyword: q.keyword,
@@ -238,13 +248,19 @@ func (s *Shell) fetchSearchTab(tab int, ctx context.Context, page int) (list.Pag
 	if tab == searchTabUser {
 		songs = packUserPairs(songs)
 	}
+	return t.applyPage(gen, songs, pg.Total, pg.HasMore), nil
+}
+
+// applyPage 把一页行记进「已经拿到手的全部行」，代次对不上就只回给列表、不记账
+// （旧查询迟到的页不能进「全部播放」）。
+func (t *searchTab) applyPage(gen uint64, songs []list.Music, total int, hasMore bool) list.Page {
 	t.mu.Lock()
 	if gen == t.gen {
 		t.loaded = append(t.loaded, songs...)
-		t.total = pg.Total
+		t.total = total
 	}
 	t.mu.Unlock()
-	return list.Page{Songs: songs, HasMore: pg.HasMore}, nil
+	return list.Page{Songs: songs, HasMore: hasMore}
 }
 
 func (t *searchTab) current(q searchQuerySpec, scroll *ui.ScrollState) {

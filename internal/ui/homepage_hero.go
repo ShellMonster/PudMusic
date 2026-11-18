@@ -193,13 +193,14 @@ func (h *homePage) viewHero(c *ui.Context, s *Shell, inner float32, hero []list.
 	// 背景：封面取色按 22% 混进底色；取不到色时用 #333（和收藏夹头部同一个混色入口）。
 	bg := s.tintBackgroundOr(c, imgcache.FormatURLProtocol(top.Cover), tok.TintHero, ui.RGB(0x33, 0x33, 0x33))
 
-	box := ui.Row(c).Key("home:hero").FillWidth().Radius(tok.R12).Background(bg).Clip().
-		Padding(pad).Gap(gap).AlignItems(ui.Center)
+	var box ui.Element
 	if stacked {
-		box = ui.Column(c).Key("home:hero").FillWidth().Radius(tok.R12).Background(bg).Clip().
-			Padding(pad).Gap(gap).AlignItems(ui.Start)
+		box = ui.Column(c).AlignItems(ui.Start)
+	} else {
+		box = ui.Row(c).AlignItems(ui.Center)
 	}
-	box = box.Margin(space.Px32, space.None, space.None, space.None)
+	box = box.Key("home:hero").FillWidth().Radius(tok.R12).Background(bg).Clip().
+		Padding(pad).Gap(gap).Margin(space.Px32, space.None, space.None, space.None)
 	box.Children(func() {
 		cover := ui.Box(c).Key("home:hero:cover").Size(coverW, coverW).Radius(tok.R8).Background(p.Surface2).Shrink(0)
 		cover = shadow.LargeCover(cover, c.Theme())

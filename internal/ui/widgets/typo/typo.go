@@ -141,7 +141,15 @@ const (
 // 字号**不**乘系统缩放：它是装饰性小标，和图标一样跟着固定像素走（原型里它在
 // 页头那一行的位置是按 11 排的）。
 func Eyebrow(c *ui.Context, text string) ui.Element {
-	return Mono(ui.Text(c, strings.ToUpper(text))).
+	return EyebrowText(c, strings.ToUpper(text))
+}
+
+// EyebrowText 是 Eyebrow 不转大写的那一半：排版一样，但文字原样画。
+//
+// 用在大小写本身有意义的场合——搜索词、用户名、标题。小写词被转成全大写，
+// 用户看到的是另一个词（`Taylor Swift` → `TAYLOR SWIFT`）。
+func EyebrowText(c *ui.Context, text string) ui.Element {
+	return Mono(ui.Text(c, text)).
 		FontSize(EyebrowSize).FontWeight(400).LetterSpacing(EyebrowTracking).LineHeight(leading.Body).
 		TextColor(tok.Of(c.Theme()).Text3).SingleLine()
 }

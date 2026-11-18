@@ -39,7 +39,7 @@ func TestSearchReturnsApplicationPagesForEveryTab(t *testing.T) {
 			searchType := r.URL.Query().Get("search_type")
 			result := map[string]any{"bvid": "BV-app-row", "title": "应用层歌曲", "author": "某 UP", "mid": 42, "pic": "//i0.hdslb.com/a.jpg", "duration": "4:20", "play": 17, "pubdate": 1700000000}
 			if searchType == "bili_user" {
-				result = map[string]any{"mid": 9527, "uname": "应用层用户", "usign": "签名", "upic": "//i0.hdslb.com/u.jpg", "fans": 99, "level": 6}
+				result = map[string]any{"mid": 9527, "uname": "应用层用户", "usign": "签名", "upic": "//i0.hdslb.com/u.jpg", "fans": 99, "level": 6, "official_verify": map[string]any{"type": 1, "desc": "机构"}}
 			}
 			writeSearchJSON(w, map[string]any{"code": 0, "data": map[string]any{
 				"numResults": 73, "numPages": 3, "result": []any{result},
@@ -84,6 +84,9 @@ func TestSearchReturnsApplicationPagesForEveryTab(t *testing.T) {
 			if tc.tab == app.SearchTabUser {
 				if row.ID != "u:9527" || row.Item.Type != app.ItemTypeUser || row.Item.Bvid != "9527" {
 					t.Fatalf("user row=%+v", row)
+				}
+				if row.Cover != "https://i0.hdslb.com/u.jpg" || row.Verification != bili.VerificationOrganization || row.VerificationDesc != "机构" {
+					t.Fatalf("user avatar or verification lost: %+v", row)
 				}
 			} else if row.ID != "BV-app-row" {
 				t.Fatalf("video row id=%q", row.ID)

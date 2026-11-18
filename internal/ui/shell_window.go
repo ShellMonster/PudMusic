@@ -100,6 +100,7 @@ func (s *Shell) closePerWindow() {
 	// 是这一段——它收完就该和主窗口那个一样「不再装任何定时器」，哪怕之后还有一帧
 	// 画到（无头 Tester 里关掉之后再 `Frame()` 就会，见 `close_while_loading_test.go`）。
 	s.closed = true
+	s.search.creators.stop()
 
 	// 四个定时器。全是「窗口没了之后唤醒对它是 no-op，留着不致命，但会一直醒到
 	// 进程退出」那一类。
