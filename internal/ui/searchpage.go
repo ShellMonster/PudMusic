@@ -213,7 +213,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string, winW float32) {
 		hasCreators := s.viewSearchCreators(c, keyword, winW)
 		if !hasCreators {
 			pud.PageHead(c, "搜索结果", "「"+keyword+"」", "", winW, nil)
-			if p := &s.search.creators; p.keyword == keyword && p.err != nil {
+			if p := &s.search.creators; p.keyword == keyword && creatorRetryAvailable(p.err) {
 				if ui.ButtonBase(c).Label("重试加载相关 UP 主").Padding(space.Px8).Children(func() {
 					ui.Text(c, "相关 UP 主加载失败，点击重试").TextColor(tok.Of(c.Theme()).Text2)
 				}).Clicked() {

@@ -36,6 +36,41 @@ func TestHotArtistSearchOpensResults(t *testing.T) {
 	}
 }
 
+// TestHotArtistsReserveSpaceWhileChartLoads locks that the recommendation page does
+// not jump when the chart (and the singer rail derived from it) lands: the rail used
+// to draw nothing while waiting, so 每日推荐 slid down by its whole height.
+func TestHotArtistsReserveSpaceWhileChartLoads(t *testing.T) {
+	b := newTestShell(t)
+	h := b.s.home
+	h.loads.mounted = func() bool { return true }
+	h.feed.sec[homeChart] = homeSection{started: true, loading: true}
+	b.tt.Frame()
+	before, ok := b.tt.Find("每日推荐")
+	if !ok {
+		t.Fatalf("等榜单时没有每日推荐：%q", b.tt.Texts())
+	}
+	if !b.tt.HasText("热门歌手") {
+		t.Fatalf("等榜单时没有画热门歌手的占位：%q", b.tt.Texts())
+	}
+	h.SetSongs(nil, []list.Music{
+		{ID: "one", Title: "歌一", Owner: "陈奕迅", Item: app.Item{Bvid: "BV1"}},
+	}, nil, nil)
+	b.tt.Frame()
+	after, ok := b.tt.Find("每日推荐")
+	if !ok {
+		t.Fatalf("榜单回来后没有每日推荐：%q", b.tt.Texts())
+	}
+	if !b.tt.HasText("陈奕迅") {
+		t.Fatalf("榜单回来后没有歌手：%q", b.tt.Texts())
+	}
+	// 留 4px 余量：骨架里名字那一块是固定高的方块，真名字的行盒由字体度量算出来
+	// （13 / 15 号字各差 2px 左右，其它 rail 骨架也一样）。这里锁的是「整块预留住」——
+	// 没有它，歌手排出现时下面会整片挪两百多像素。
+	if jump := after.Y - before.Y; jump > 4 || jump < -4 {
+		t.Errorf("每日推荐的 y 从 %.1f 跳到 %.1f", before.Y, after.Y)
+	}
+}
+
 // TestRenderHotArtistsShots renders the chart artist row in both themes and window widths.
 func TestRenderHotArtistsShots(t *testing.T) {
 	dir := os.Getenv("BIU_SHOT_DIR")

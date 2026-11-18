@@ -36,18 +36,29 @@ func PageHead(c *ui.Context, eyebrow, title, lede string, winW float32, actions 
 // PageHeadFn 是 `PageHead` 的一般形式：导语由调用方画（里面要放链接、等宽数字之类）。
 // ledeFn 里的内容会摆在标题下面；上边距 8 由调用方自己给。
 func PageHeadFn(c *ui.Context, eyebrow, title string, winW float32, ledeFn, actions func()) {
+	var eyebrowFn func()
+	if eyebrow != "" {
+		eyebrowFn = func() { typo.Eyebrow(c, eyebrow) }
+	}
+	PageHeadFnEyebrow(c, eyebrowFn, title, winW, ledeFn, actions)
+}
+
+// PageHeadFnEyebrow 让调用方自己画小标，几何与 `PageHeadFn` 逐像素一致。
+// 用在字面不能转大写的场合（搜索词、用户名）：`typo.EyebrowText` 画，外面套这一层，
+// 页头才和别的页面同高、同起点。
+func PageHeadFnEyebrow(c *ui.Context, eyebrowFn func(), title string, winW float32, ledeFn, actions func()) {
 	ui.Row(c).FillWidth().AlignItems(ui.End).Gap(space.Px24).Padding(space.Px24, space.None, space.Px8, space.None).
 		Children(func() {
 			ui.Column(c).Grow(1).Shrink(1).Children(func() {
-				if eyebrow != "" {
-					typo.Eyebrow(c, eyebrow)
+				if eyebrowFn != nil {
+					eyebrowFn()
 				}
 				// 原型 `.h-page { line-height: 1.15; letter-spacing: .01em; margin: 8px 0 0 }`：框架压不下
 				// 宋体的自然行高（1.437），用负外边距把多出来的那截补回去（见 `typo.DisplayTrim`）。
 				size := scale.Font(c, scale.PageTitleFluid(winW))
 				trim := typo.DisplayTrim(size, leading.PageTitle)
 				top := -trim
-				if eyebrow != "" {
+				if eyebrowFn != nil {
 					top += space.Px8
 				}
 				typo.Display(ui.Text(c, title), size).LineHeight(leading.PageTitle).LetterSpacing(size*0.01).

@@ -40,6 +40,17 @@ type SearchQuery struct {
 	Page    int
 }
 
+// SearchVerification is the application-level user certification kind. It is an
+// alias so UI code can branch on it without importing the service package, the
+// same way SearchErrorCategory hides notice.
+type SearchVerification = bili.Verification
+
+const (
+	SearchVerificationNone         = bili.VerificationNone
+	SearchVerificationPersonal     = bili.VerificationPersonal
+	SearchVerificationOrganization = bili.VerificationOrganization
+)
+
 // SearchItem is one stable application search row. Item contains the action
 // data used by playback and navigation, while the remaining fields are safe
 // for presentation.
@@ -55,7 +66,7 @@ type SearchItem struct {
 	// Fans / Level 只有「用户」那一档有（UP 主卡上的「N 粉丝」和 LV 角标）。
 	Fans             int64
 	Level            int
-	Verification     bili.Verification
+	Verification     SearchVerification
 	VerificationDesc string
 	Item             Item
 }
