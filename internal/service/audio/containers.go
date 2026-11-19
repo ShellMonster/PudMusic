@@ -67,24 +67,14 @@ func openExtAudioFile(r io.ReadSeeker) (mygoaudio.Decoder, error) {
 	return platformDecoderOpen(r)
 }
 
-// mediaFoundationDecoderOpen 是「Windows 自带的解码器」的入口。
-//
-// 生产代码里它就是 `mfadec.Open`（Media Foundation 的 AAC MFT）。做成变量
-// 只有一个理由：**测试要模拟「这台机器没有 Media Foundation」**——真 Windows
-// 上它恒可用，macOS 上恒不可用，不注入的话这条路径在唯一能跑测试的这个平台上
-// **一条都测不到**（和 `platformDecoderOpen` 同一个道理）。
+// systemAACDecoderOpen 让测试能在任意平台模拟系统 AAC 后端成功或失败。
 //
 // ⚠️ 它是**包级变量**：换掉它的那条测试必须自己串行（不要 `t.Parallel`），
 // 同包其它测试会看见换掉之后的值。
-var mediaFoundationDecoderOpen = openWithMediaFoundation
+var systemAACDecoderOpen = openWithSystemAAC
 
-// openWithMediaFoundation 用 Windows 的 Media Foundation 打开 r。
-//
-// 它解两种容器：MP4 家族（`.m4a` / `.m4s`，B 站有损流那种）和裸 ADTS
-// （`.aac`）。别的平台上没有 Media Foundation，`mfadec.Open` 会返回
-// `mfadec.ErrUnsupported`——那一层是平台无关的，所以这一行在 macOS 上也
-// 编得过、也跑得起来（只是永远走不到成功那一支）。
-func openWithMediaFoundation(r io.ReadSeeker) (mygoaudio.Decoder, error) {
+// openWithSystemAAC 用 Windows Media Foundation 或 Android MediaCodec 解 AAC。
+func openWithSystemAAC(r io.ReadSeeker) (mygoaudio.Decoder, error) {
 	d, err := mfadec.Open(r)
 	if err != nil {
 		return nil, err

@@ -8,26 +8,51 @@ import (
 )
 
 func TestMainDelegatesApplicationAssemblyToBootstrap(t *testing.T) {
-	f, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
-	if err != nil {
-		t.Fatalf("parse main.go: %v", err)
+	calls := functionCalls(t, "main.go", "main")
+	if !containsCall(calls, "bootstrap.Assemble") || !containsCall(calls, "platformDependencies") {
+		t.Fatalf("main does not delegate to bootstrap.Assemble with platform dependencies: %v", calls)
 	}
-	var mainFn *ast.FuncDecl
+	for file, want := range map[string]string{
+		"entry_desktop.go": "bootstrap.DefaultDependencies",
+		"entry_mobile.go":  "bootstrap.MobileDependencies",
+	} {
+		if calls := functionCalls(t, file, "platformDependencies"); !containsCall(calls, want) {
+			t.Fatalf("%s does not use %s: %v", file, want, calls)
+		}
+	}
+	for _, name := range calls {
+		if name == "app.New" || name == "platform.PinUserDataDir" || name == "ui.MountSettings" || name == "ui.Run" {
+			t.Fatalf("main owns application assembly call %s; keep assembly in bootstrap: %v", name, calls)
+		}
+	}
+}
+
+func functionCalls(t *testing.T, path, name string) []string {
+	t.Helper()
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	var body *ast.BlockStmt
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if ok && fn.Name.Name == "main" {
-			mainFn = fn
+		if ok && fn.Name.Name == name {
+			body = fn.Body
 			break
 		}
 	}
-	if mainFn == nil {
-		t.Fatal("main.go has no func main")
+	if body == nil {
+		t.Fatalf("%s has no func %s", path, name)
 	}
 
 	var calls []string
-	ast.Inspect(mainFn.Body, func(node ast.Node) bool {
+	ast.Inspect(body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok {
+			return true
+		}
+		if id, ok := call.Fun.(*ast.Ident); ok {
+			calls = append(calls, id.Name)
 			return true
 		}
 		sel, ok := call.Fun.(*ast.SelectorExpr)
@@ -41,17 +66,7 @@ func TestMainDelegatesApplicationAssemblyToBootstrap(t *testing.T) {
 		return true
 	})
 
-	if !containsCall(calls, "bootstrap.Assemble") {
-		t.Fatalf("main does not delegate to bootstrap.Assemble: %v", calls)
-	}
-	if !containsCall(calls, "bootstrap.DefaultDependencies") {
-		t.Fatalf("main does not use production bootstrap dependencies: %v", calls)
-	}
-	for _, name := range calls {
-		if name == "app.New" || name == "platform.PinUserDataDir" || name == "ui.MountSettings" || name == "ui.Run" {
-			t.Fatalf("main owns application assembly call %s; keep assembly in bootstrap: %v", name, calls)
-		}
-	}
+	return calls
 }
 
 func containsCall(calls []string, want string) bool {

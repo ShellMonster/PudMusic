@@ -1,4 +1,4 @@
-//go:build (!darwin && !windows) || (windows && !amd64 && !arm64)
+//go:build (!darwin && !windows && !android) || (windows && !amd64 && !arm64)
 
 package media
 

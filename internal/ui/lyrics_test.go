@@ -1446,7 +1446,7 @@ func TestMountLyricsIsWiredBeforeTheWindow(t *testing.T) {
 	if strings.Index(bootstrapText, "MountLyrics:          ui.MountLyrics") < 0 {
 		t.Fatalf("bootstrap.go 里没有 ui.MountLyrics 的默认装配")
 	}
-	if strings.Index(mainText, "bootstrap.Assemble(bootstrap.DefaultDependencies())") < 0 {
+	if strings.Index(mainText, "bootstrap.Assemble(platformDependencies())") < 0 {
 		t.Fatalf("main.go 里没有通过 bootstrap.Assemble 启动")
 	}
 	if strings.Index(bootstrapText, "d.MountLyrics(a)") < 0 {

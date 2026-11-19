@@ -960,6 +960,10 @@ func (q *Queue) setCurLocked(i int, pushHist bool) bool {
 
 // Reset 把队列换成给定的几项并从第一首开始，返回第一项。给空就是清空。
 func (q *Queue) Reset(items ...Item) (Item, bool) {
+	return q.resetAt(items, 0)
+}
+
+func (q *Queue) resetAt(items []Item, index int) (Item, bool) {
 	q.mu.Lock()
 	q.items = items
 	q.cur = -1
@@ -979,8 +983,8 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 		q.invalidate()
 		return Item{}, false
 	}
-	q.cur = 0
-	it := items[0]
+	q.cur = index
+	it := items[index]
 	q.mu.Unlock()
 	q.changed()
 	q.invalidate()
@@ -2018,10 +2022,26 @@ func (a *App) PlayFrom(items ...Item) error {
 		}
 		return nil
 	}
+	return a.replaceQueueAndPlay(items, 0)
+}
+
+// PlayFromIndex starts a list at the selected row while retaining the preceding tracks.
+func (a *App) PlayFromIndex(items []Item, index int) error {
+	if index < 0 || index >= len(items) {
+		return fmt.Errorf("queue: index %d out of range", index)
+	}
+	if !CanQueue(items[index]) {
+		return unplayableOf(UnplayableInvalid)
+	}
+	_, skipped := filterQueueable(items[:index])
+	playable, _ := filterQueueable(items)
+	return a.replaceQueueAndPlay(playable, index-skipped)
+}
+
+func (a *App) replaceQueueAndPlay(items []Item, index int) error {
 	old := a.queue.Items()
 	cur, hadCur := a.queue.Current()
-	// 给空已经在上面挡掉了，Reset 这里一定放得下（它返回的第一项就是 items[0]）。
-	item, _ := a.queue.Reset(items...)
+	item, _ := a.queue.resetAt(items, index)
 	if err := a.play(item); err != nil {
 		// 换回去：Reset 把 cur 落在 0，Move 把当前项挪回它原来在的位置。
 		//

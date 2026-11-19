@@ -1160,6 +1160,10 @@ func (s *SettingsStore) LastError() error {
 // 不是只服务设置——名字带 settings 是历史，改叫通用名是为了让 `upgrade.go` 那边的
 // 调用读起来诚实（它写的是标记和备份，不是设置）。
 func writeFileAtomic(path string, b []byte) (err error) {
+	return writeFileAtomicMode(path, b, 0o644)
+}
+
+func writeFileAtomicMode(path string, b []byte, mode os.FileMode) (err error) {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".settings-*.tmp")
 	if err != nil {
@@ -1185,7 +1189,7 @@ func writeFileAtomic(path string, b []byte) (err error) {
 	}
 	// CreateTemp 建出来的是 0600。设置文件本身不是秘密，但里面有下载目录、
 	// 代理地址这些隐私，给成普通用户配置同样的权限。
-	if err = os.Chmod(name, 0o644); err != nil {
+	if err = os.Chmod(name, mode); err != nil {
 		return err
 	}
 	if err = os.Rename(name, path); err != nil {

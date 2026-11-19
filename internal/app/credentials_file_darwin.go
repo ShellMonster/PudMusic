@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && !ios
 
 // macOS 的凭据后端：应用数据目录里的一个普通文件。
 //

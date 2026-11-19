@@ -1,0 +1,155 @@
+package mobileui
+
+import (
+	"runtime"
+	"strconv"
+	"time"
+
+	"github.com/ShellMonster/PudMusic/internal/app"
+	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/netimage"
+)
+
+type palette struct {
+	surface, fill, field, text, muted, accent, soft, line ui.Color
+}
+
+func phonePalette(c *ui.Context) palette {
+	tokens := tok.Of(c.Theme())
+	return palette{tokens.Surface, tokens.Bg, tokens.Surface2, tokens.Text, tokens.Text2, tokens.AccentText, tokens.AccentSoft, tokens.Line}
+}
+
+func touchSize() float32 {
+	if runtime.GOOS == "android" {
+		return 48
+	}
+	return 44
+}
+
+func glyph(c *ui.Context, name string, size float32, color ui.Color) ui.Element {
+	return ui.Icon(c, iconset.Must("Pud/"+name+".svg")).Size(size, size).TextColor(color).Shrink(0)
+}
+
+func iconButton(c *ui.Context, name, label string) ui.Element {
+	return ui.Box(c).Role(ui.RoleButton).Label(label).Size(touchSize(), touchSize()).Shrink(0).Radius(touchSize() / 2).Center().Children(func() {
+		glyph(c, name, 18, c.Theme().Text)
+	})
+}
+
+func brand(c *ui.Context) {
+	ui.Box(c).Size(24, 24).Radius(12).Background(ui.Hex("#17181b")).Center().Children(func() {
+		glyph(c, "disc", 19, ui.Hex("#f26449"))
+	})
+}
+
+func cover(c *ui.Context, url string, size, radius float32) ui.Element {
+	if url == "" {
+		palette := phonePalette(c)
+		return ui.Box(c).Size(size, size).Shrink(0).Radius(radius).Background(palette.field).Center().Children(func() {
+			glyph(c, "disc", min(size*.46, 44), palette.muted)
+		})
+	}
+	return netimage.Image(c, imgcache.FormatURLProtocol(url), netimage.Options{MaxSide: int(size * 3)}).Size(size, size).Radius(radius).Shrink(0)
+}
+
+func sectionHeading(c *ui.Context, title, action string) bool {
+	clicked := false
+	ui.Row(c).AlignItems(ui.Center).MinHeight(32).FillWidth().Children(func() {
+		ui.Text(c, title).FontSize(16).FontWeight(600).Grow(1).Basis(0)
+		if action != "" {
+			clicked = ui.Row(c).Role(ui.RoleButton).Label(action).MinHeight(touchSize()).Gap(4).AlignItems(ui.Center).Children(func() {
+				color := phonePalette(c).muted
+				ui.Text(c, action).FontSize(13).TextColor(color)
+				glyph(c, "right", 12, color)
+			}).Clicked()
+		}
+	})
+	return clicked
+}
+
+func (s *shell) trackList(c *ui.Context, items []app.Item) {
+	coverSize, height := float32(48), float32(58)
+	if s.current().kind == pageCollection {
+		coverSize, height = 38, 54
+	}
+	textSize := interfaceTextSize(s.app.SettingsSnapshot().FontScale)
+	occurrences := make(map[string]int, len(items))
+	active, activeOK := s.app.Queue().Current()
+	for index, item := range items {
+		id := item.Identity()
+		occurrences[id]++
+		key := c.Key(id + ":" + strconv.Itoa(occurrences[id]))
+		ui.Row(key).FillWidth().MinHeight(height).Gap(4).AlignItems(ui.Center).Children(func() {
+			first := ui.Row(c).Grow(1).Basis(0).MinHeight(touchSize()).Gap(12).AlignItems(ui.Center).Role(ui.RoleButton).Label(item.Title).Disabled(!app.CanQueue(item)).Children(func() {
+				cover(c, item.Cover, coverSize, 7)
+				trackLabel(c, item.Title, item.Artist, textSize, activeOK && active.Identity() == id)
+			})
+			first.OnClick(func() { s.play(items, index) })
+			more := iconButton(c, "more", "更多操作："+item.Title)
+			if first.LongPressed() || more.Clicked() {
+				s.player.target = item
+				s.player.show(sheetTrack)
+			}
+		})
+	}
+}
+
+func interfaceTextSize(scale app.FontScale) float32 {
+	switch scale {
+	case app.FontScaleSmall:
+		return 12
+	case app.FontScaleLarge:
+		return 17
+	default:
+		return 13
+	}
+}
+
+func trackLabel(c *ui.Context, title, subtitle string, size float32, current bool) {
+	palette := phonePalette(c)
+	ink := palette.text
+	if current {
+		ink = palette.accent
+	}
+	ui.Column(c).Grow(1).Basis(0).Gap(2).Children(func() {
+		ui.Text(c, title).FontSize(size).FontWeight(500).MaxLines(1).Ellipsis("…").TextColor(ink)
+		if subtitle != "" {
+			ui.Text(c, subtitle).FontSize(max(size-1, 12)).MaxLines(1).Ellipsis("…").TextColor(palette.muted)
+		}
+	})
+}
+
+func (s *shell) play(items []app.Item, index int) {
+	if len(items) == 0 {
+		return
+	}
+	s.report(s.app.PlayFromIndex(items, index))
+}
+
+func (s *shell) report(err error) {
+	if err != nil {
+		s.notice = err.Error()
+	}
+}
+
+func timeLabel(value time.Duration) string {
+	seconds := int(max(value, 0) / time.Second)
+	minutes := strconv.Itoa(seconds / 60)
+	rest := strconv.Itoa(seconds % 60)
+	if len(rest) == 1 {
+		rest = "0" + rest
+	}
+	return minutes + ":" + rest
+}
+
+func completedSwipe(element ui.Element) (float32, float32, bool) {
+	touches := element.Touches()
+	if len(touches) != 1 || touches[0].Phase != ui.TouchEnded {
+		return 0, 0, false
+	}
+	touch := touches[0]
+	return touch.X - touch.StartX, touch.Y - touch.StartY, true
+}

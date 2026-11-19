@@ -104,6 +104,9 @@ func TestListeningTimeCountsThePositionDelta(t *testing.T) {
 	if got.DayMs("2026-11-01") != 30_000 {
 		t.Errorf("当天时长 = %d 毫秒，want 30000", got.DayMs("2026-11-01"))
 	}
+	if elapsed := got.Days["2026-11-01"].HourlyMs[10]; elapsed != 30_000 {
+		t.Errorf("10 点时段时长 = %d 毫秒，want 30000", elapsed)
+	}
 }
 
 // TestListeningTimeDoesNotCountWhilePaused 钉住「暂停不算时间」。

@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build (!darwin && !windows) || ios
 
 // Linux（以及别的还没发的平台）上的「收起来 / 叫回来」。
 //

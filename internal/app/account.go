@@ -109,7 +109,8 @@ type Account struct {
 	mu    sync.Mutex
 	state LoginState
 	// stop 是当前那一轮登录的取消函数。再开一轮之前先调它。
-	stop context.CancelFunc
+	stop       context.CancelFunc
+	loginLease *Lease
 	// runID 是「当前是第几轮登录」。每次开始或取消都 +1。
 	//
 	// 它的用处是让**上一轮的 goroutine 闭嘴**：取消只是把 ctx 掐掉，
@@ -265,6 +266,9 @@ func (a *App) onLoginSucceeded() {
 // 账号的收藏夹，直到下一件别的事把它画出来。
 func (a *App) onAccountChanged() {
 	a.FavoritesOf().forgetAccount()
+	a.commentsMu.Lock()
+	a.resetCommentsLocked("")
+	a.commentsMu.Unlock()
 	// 喜欢状态也属于上一个账号：换人之后旧答案一条都不能留。已经发出去的
 	// 写请求靠 `favEpoch` 拦（见 `SetBoundFavorite`）。
 	a.clearFavorites()
@@ -320,12 +324,8 @@ func (a *Account) restore(cli *bili.Client) error {
 // 那个 goroutine 会一直等在 ctx 上。
 func (a *Account) Close() {
 	a.mu.Lock()
-	stop := a.stop
-	a.stop = nil
+	a.stopLoginLocked()
 	a.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 }
 
 // httpCookiesOf 把落盘的 cookie 变成 net/http 认的形式。
@@ -354,9 +354,7 @@ func (a *App) BeginLogin() {
 
 func (a *Account) beginLogin() {
 	a.mu.Lock()
-	if a.stop != nil {
-		a.stop()
-	}
+	a.stopLoginLocked()
 	ctx, cancel := context.WithCancel(context.Background())
 	a.stop = cancel
 	a.runID++
@@ -365,6 +363,7 @@ func (a *Account) beginLogin() {
 	// **代次在这时候拿**。它记的是「用户按下登录那一刻」的登录态版本。
 	// 扫码成功要写回时对不上（最常见的是中间退了登），Lease 会挡住。
 	lease := a.mgr.BeginRenew()
+	a.loginLease = lease
 	a.state = LoginState{Phase: LoginWaiting, Hint: "正在向 B 站申请二维码…"}
 	a.mu.Unlock()
 	a.wakeUp()
@@ -389,16 +388,20 @@ func (a *App) CancelLogin() {
 
 func (a *Account) cancel() {
 	a.mu.Lock()
-	stop := a.stop
-	a.stop = nil
+	a.stopLoginLocked()
 	// +1 让在途的那一轮闭嘴：它回来之后写的任何状态都会被挡掉。
 	a.runID++
 	a.state = LoginState{Phase: LoginIdle}
 	a.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 	a.wakeUp()
+}
+
+func (a *Account) stopLoginLocked() {
+	if a.stop != nil {
+		a.stop()
+		a.loginLease.revoked.Store(true)
+		a.stop, a.loginLease = nil, nil
+	}
 }
 
 // wakeUp 叫醒界面。回调可能在 setWake 之前还没装上，所以判空。
@@ -413,7 +416,7 @@ func (a *Account) wakeUp() {
 
 // run 是那一轮登录的完整流程：申请 → 画 → 循环轮询 → 落盘。
 func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
-	defer lease.Discard() // 没走到 Commit 的路径一律作废代次
+	defer lease.revoked.Store(true)
 
 	qr, err := a.cli.NewQRCode(ctx)
 	if err != nil {
@@ -626,14 +629,10 @@ func (a *App) Logout() error {
 
 func (a *Account) logout() error {
 	a.mu.Lock()
-	stop := a.stop
-	a.stop = nil
+	a.stopLoginLocked()
 	a.runID++
 	a.state = LoginState{Phase: LoginIdle}
 	a.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 
 	// 先让 B 站那边把这个会话也作废，**然后**再清本地的。
 	//

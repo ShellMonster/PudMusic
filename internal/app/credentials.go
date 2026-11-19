@@ -46,6 +46,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -473,8 +474,9 @@ func (m *Manager) Logout(ctx context.Context) error {
 //
 // 一次操作一个 Lease，不复用。忘了 Discard 只是代次白涨一次，没有别的后果。
 type Lease struct {
-	m   *Manager
-	gen uint64
+	m       *Manager
+	gen     uint64
+	revoked atomic.Bool
 }
 
 // BeginRenew 拿一张租约，声明「我要在后台动登录态了」。
@@ -488,7 +490,7 @@ func (m *Manager) BeginRenew() *Lease {
 // **不写**。调用方看到这个错误就直接收工，不要重试。
 func (l *Lease) Commit(ctx context.Context, fn func(*Session) error) error {
 	l.m.mu.Lock()
-	if l.m.gen != l.gen {
+	if l.revoked.Load() || l.m.gen != l.gen {
 		l.m.mu.Unlock()
 		return ErrStaleGeneration
 	}

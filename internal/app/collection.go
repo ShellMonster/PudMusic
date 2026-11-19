@@ -89,6 +89,8 @@ type CollectionRef struct {
 	ID int64
 	// Type 是哪一类容器。
 	Type bili.CollectionType
+	// OwnerMid 是来源已知的合集或系列创建者。
+	OwnerMid int64
 }
 
 // Key 是这一份状态属于哪个容器。界面拿它认出「换容器了，该重建了」。
@@ -521,6 +523,9 @@ func (a *App) fetchCollection(ref CollectionRef) (CollectionInfo, error) {
 // ⚠️ **它只看缓存、不问网络**：`fetchCollection` 自己就在拉元信息，再在这儿问
 // 一次就是自己叫自己（`collectionOwnerMid` 的「当场问一次」会绕回来）。
 func (a *App) collectionMidHint(ref CollectionRef) int64 {
+	if ref.OwnerMid > 0 {
+		return ref.OwnerMid
+	}
 	return a.Collection(ref).OwnerMid
 }
 
@@ -772,10 +777,8 @@ func DownloaderMissing(err error) bool { return errors.Is(err, errDownloaderMiss
 // 列表（或者一句 -400）——界面上是**一页空白，一个错都没有**。用户看到的是
 // 「点进合集，里面什么都没有」。
 //
-// ⚠️ **合集 / 系列要 `mid`**，而 `CollectionRef` 只有 ID 和 Type——mid 从
-// 元信息缓存里拿（`CollectionInfo.OwnerMid`，见 `fetchCollection`）。**没拉到
-// 元信息时 mid 是 0**：文档说这个参数「也可以是任意的非负整数」，所以 0 是
-// 能发的（真网验证不了，但发 0 比不发强——不发的话 B 站回 -400）。
+// ⚠️ **合集 / 系列要 `mid`**。从来源传入的创建者 ID 优先，否则读取或查询
+// 容器元信息。两处都拿不到时发送 0。
 //
 // ⚠️ **keyword 只对收藏夹有意义**：那两个接口没有 `keyword` 参数。合集 / 系列
 // 里按歌名找是把这一页筛掉吗？不——**本地筛不能筛没拉下来的页**（理由见
@@ -866,7 +869,7 @@ var errCollectionSearchUnsupported = errors.New("pudmusic: 合集和系列里还
 // ⚠️ **问不到也照发 0**：不发的话 B 站回 -400，界面上是「这个合集打不开」，
 // 而发 0 至少还有「B 站接受任意 mid」那一半的机会。两害相权，发。
 func (a *App) collectionOwnerMid(ref CollectionRef) int64 {
-	if mid := a.Collection(ref).OwnerMid; mid > 0 {
+	if mid := a.collectionMidHint(ref); mid > 0 {
 		return mid
 	}
 	info, err := a.fetchCollection(ref)

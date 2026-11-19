@@ -162,8 +162,7 @@ func userDataBlob(rate, chans int, v inputVariant, asc []byte) []byte {
 
 // aacDecoder 是解码器要提供的那一点。
 //
-// 这一层（容器、码流）是平台无关的，而解码器本身只在 Windows 上有——
-// 所以这里用接口而不是具体类型，`codec.go` 才能在没有 Windows 的机器上编译。
+// 容器和码流逻辑通过这个接口将帧交给系统解码器。
 type aacDecoder interface {
 	// Feed 喂一帧 AAC，返回这一次解出来的 PCM。
 	Feed(frame []byte) ([]float32, error)

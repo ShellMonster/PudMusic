@@ -108,7 +108,8 @@ type StatsDayStat struct {
 	// Plays 是这一天起播的次数。
 	Plays int64 `json:"plays"`
 	// Completed 是这一天「听完」的次数。
-	Completed int64 `json:"completed"`
+	Completed int64     `json:"completed"`
+	HourlyMs  [24]int64 `json:"hourlyMs,omitzero"`
 	// Tracks 是这一天每一首的明细。
 	//
 	// ⚠️ **它是必要的**：Top 歌要按「这一段时间内」排，而全局那份是「所有
@@ -751,6 +752,7 @@ func (tr *listeningTracker) Tick(in statsTickIn) {
 	if ms := delta.Milliseconds(); ms > 0 {
 		d := tr.dayStatLocked(day)
 		d.Ms += ms
+		d.HourlyMs[in.At.Hour()] += ms
 		dt := tr.dayTrackLocked(d, tr.st.key)
 		dt.Ms += ms
 

@@ -301,9 +301,9 @@ func stubPlatformDecoder(t *testing.T, open func(io.ReadSeeker) (mygoaudio.Decod
 // ⚠️ 和 `stubPlatformDecoder` 一样：换掉的是包级变量，所以不能 `t.Parallel`。
 func stubMediaFoundation(t *testing.T, open func(io.ReadSeeker) (mygoaudio.Decoder, error)) {
 	t.Helper()
-	old := mediaFoundationDecoderOpen
-	mediaFoundationDecoderOpen = open
-	t.Cleanup(func() { mediaFoundationDecoderOpen = old })
+	old := systemAACDecoderOpen
+	systemAACDecoderOpen = open
+	t.Cleanup(func() { systemAACDecoderOpen = old })
 }
 
 // platformFakeDecoder 是「平台解码器成功」时的占位解码器。

@@ -24,6 +24,7 @@ package platform
 import (
 	"fmt"
 	"path/filepath"
+	"runtime"
 
 	"github.com/egoist/mygo"
 )
@@ -37,7 +38,8 @@ import (
 // （AGENTS.md §5）。这一件是第四件：**新下载落哪儿**。
 const DownloadsDirName = "PudMusic"
 
-// DefaultDownloadsDir 返回默认下载目录的路径：**音乐**目录下的应用子目录。
+// DefaultDownloadsDir 返回默认下载目录。移动端使用应用数据目录中的
+// downloads 子目录，桌面端使用**音乐**目录下的应用子目录。
 //
 // # 各平台上它是哪一条路径
 //
@@ -64,6 +66,16 @@ const DownloadsDirName = "PudMusic"
 // `ensureDir`）——不是开应用的时候。开应用就建的话，**光是打开应用就会在用户
 // 的磁盘上留下一个文件夹**，测试里也一样（那不是临时的目录，是用户自己的）。
 func DefaultDownloadsDir() (string, error) {
+	if runtime.GOOS == "ios" || runtime.GOOS == "android" {
+		dir, err := mygo.App.Path(mygo.PathUserData)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(dir) {
+			return "", fmt.Errorf("应用数据目录不是绝对路径（%q），无法保存下载文件", dir)
+		}
+		return filepath.Join(dir, "downloads"), nil
+	}
 	music, musicErr := musicRoot()
 	if musicErr == nil {
 		return filepath.Join(music, DownloadsDirName), nil

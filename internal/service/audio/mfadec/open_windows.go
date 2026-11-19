@@ -2,6 +2,8 @@
 
 package mfadec
 
+const codecKeepsPriming = false
+
 // Windows 这一半：解码器是 Media Foundation 的 AAC MFT。
 //
 // 这里是**唯一**碰平台的地方。`decoder.go` 那一层只看得见 `aacCodec` 这
