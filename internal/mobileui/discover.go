@@ -37,8 +37,10 @@ type browseMusic struct {
 
 type browseMixes struct {
 	cards   []browseCollection
+	owners  []browseOwner
 	started bool
 	loading bool
+	guest   bool
 	err     error
 }
 
@@ -90,14 +92,17 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 	state.daily.started, state.daily.loading = true, true
 	state.mixes.started, state.mixes.loading = true, true
 	state.guest = !s.app.LoggedIn()
+	state.mixes.guest = state.guest
 	recovering := state.daily.err != nil || state.mixes.err != nil || state.refresh.Refreshing
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
 		defer cancel()
 		rows, _, dailyErr := s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
 		var cards []browseCollection
+		var owners []browseOwner
 		err := dailyErr
 		if dailyErr == nil {
+			owners = recommendOwners(rows)
 			s.update(func() {
 				if state.daily.err != nil {
 					state.mixes.err = nil
@@ -105,11 +110,16 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 				state.daily.loading, state.daily.err = false, nil
 				state.daily.rows = rows
 			})
-			cards, err = s.publicMusicCollections(ctx, recommendOwners(rows), "")
+			cards, err = s.publicMusicCollections(ctx, owners, "")
 		}
 		s.update(func() {
 			if dailyErr != nil {
 				state.daily.loading, state.daily.err = false, dailyErr
+				if s.current().data == state && (len(state.daily.rows) > 0 || len(state.mixes.cards) > 0) {
+					s.notice = "刷新失败，已保留上次加载的内容"
+				}
+			} else {
+				state.mixes.owners = owners
 			}
 			state.mixes.loading, state.mixes.err = false, err
 			if err == nil {
@@ -190,6 +200,8 @@ func (s *shell) discover(c *ui.Context, page *route) {
 	state := s.discoverHomeState(page)
 	if !state.daily.started || (state.guest && s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn)) {
 		s.loadDiscoverHome(state)
+	} else if state.mixes.guest && s.app.LoggedIn() && state.daily.err == nil && errors.Is(state.mixes.err, bili.ErrNotLoggedIn) {
+		s.loadDiscoverMixes(&state.mixes)
 	}
 	palette := tok.Of(c.Theme())
 	ui.Column(c).FillWidth().Gap(18).Children(func() {
@@ -231,18 +243,10 @@ func (s *shell) discover(c *ui.Context, page *route) {
 				}
 			}
 		})
-		if state.daily.err != nil {
-			discoverNotice(c.Key("discover-refresh-error"), "刷新失败", "已保留上次加载的内容。", "重试刷新", state.daily.loading || state.mixes.loading, retry)
-		}
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			if state.daily.err == nil && state.mixes.err != nil {
+			if state.daily.err == nil && state.mixes.err != nil && len(state.mixes.cards) == 0 {
 				sectionHeading(c, "推荐歌单", "")
-				discoverNotice(c.Key("discover-mixes-error"), "推荐歌单暂时不可用", "其他推荐仍可浏览。", "重试歌单", state.mixes.loading, func() {
-					s.loadMixesForOwners(&state.mixes, recommendOwners(state.daily.rows))
-				})
-				if len(state.mixes.cards) > 0 {
-					s.collectionGrid(c, state.mixes.cards[:min(3, len(state.mixes.cards))])
-				}
+				s.discoverMixesNotice(c.Key("discover-mixes-error"), &state.mixes)
 				return
 			}
 			if sectionHeading(c, "推荐歌单", "更多") {
@@ -303,7 +307,29 @@ func (s *shell) discover(c *ui.Context, page *route) {
 				browseStatus(c, false, state.daily.err, "暂无推荐歌曲", retry)
 			}
 		})
+		if state.daily.err != nil {
+			s.discoverRetryNotice(c.Key("discover-refresh-error"), state.daily.err, "刷新失败", "已保留上次加载的内容。", "重试刷新", state.daily.loading || state.mixes.loading, retry)
+		} else if state.mixes.err != nil && len(state.mixes.cards) > 0 {
+			s.discoverMixesNotice(c.Key("discover-mixes-error"), &state.mixes)
+		}
 	})
+}
+
+func (s *shell) discoverMixesNotice(c *ui.Context, mixes *browseMixes) {
+	detail := "其他推荐仍可浏览。"
+	if len(mixes.cards) > 0 {
+		detail = "已保留上次加载的歌单。"
+	}
+	s.discoverRetryNotice(c, mixes.err, "推荐歌单暂时不可用", detail, "重试歌单", mixes.loading, func() { s.loadDiscoverMixes(mixes) })
+}
+
+func (s *shell) discoverRetryNotice(c *ui.Context, err error, title, detail, action string, busy bool, retry func()) {
+	icon := "network"
+	if !s.app.LoggedIn() && errors.Is(err, bili.ErrNotLoggedIn) {
+		icon, title, action = "lock", "登录后可查看推荐", "去登录"
+		retry = func() { s.push(route{kind: pageLogin, title: "登录"}) }
+	}
+	discoverNotice(c, icon, title, detail, action, busy, retry)
 }
 
 func (s *shell) discoverUnavailable(c *ui.Context, state *discoverState, retry func()) {
@@ -334,10 +360,14 @@ func (s *shell) discoverUnavailable(c *ui.Context, state *discoverState, retry f
 	})
 }
 
-func discoverNotice(c *ui.Context, title, detail, action string, busy bool, retry func()) {
+func discoverNotice(c *ui.Context, icon, title, detail, action string, busy bool, retry func()) {
 	palette := phonePalette(c)
 	ui.Row(c).FillWidth().Padding(8, 10).Gap(8).Radius(12).Background(palette.fill).AlignItems(ui.Center).Children(func() {
-		networkUnavailableIcon(c, palette.muted)
+		if icon == "lock" {
+			glyph(c, icon, 18, palette.muted)
+		} else {
+			networkUnavailableIcon(c, palette.muted)
+		}
 		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
 			ui.Text(c, title).FontSize(14).FontWeight(600).Role(ui.RoleStatus)
 			ui.Text(c, detail).FontSize(12).TextColor(palette.muted)
@@ -346,7 +376,7 @@ func discoverNotice(c *ui.Context, title, detail, action string, busy bool, retr
 		if busy {
 			text = "正在重试…"
 		}
-		if ui.ButtonBase(c).Key(action).Label(action).MinHeight(touchSize()).PaddingX(4).Shrink(0).
+		if ui.ButtonBase(c).Key(action).Label(action).MinHeight(touchSize()).MinWidth(touchSize()).PaddingX(4).Shrink(0).
 			Disabled(busy).Center().Children(func() { ui.Text(c, text).FontSize(13).FontWeight(600).TextColor(palette.accent) }).Clicked() {
 			retry()
 		}
@@ -491,8 +521,15 @@ func (s *shell) discoverSubpage(c *ui.Context, page *route) {
 		if state.mixes == nil {
 			state.mixes = &browseMixes{}
 		}
-		if !state.mixes.started {
+		if !state.mixes.started || (state.mixes.guest && s.app.LoggedIn() && errors.Is(state.mixes.err, bili.ErrNotLoggedIn)) {
 			s.loadDiscoverMixes(state.mixes)
+		}
+		if state.mixes.err != nil {
+			if len(state.mixes.cards) > 0 {
+				s.collectionGrid(c, state.mixes.cards)
+			}
+			s.discoverMixesNotice(c, state.mixes)
+			return
 		}
 		s.renderMixes(c, state.mixes, len(state.mixes.cards), func() { s.loadDiscoverMixes(state.mixes) })
 		return
@@ -574,14 +611,12 @@ func (s *shell) discoverRankedTracks(c *ui.Context, tracks []app.Item) {
 }
 
 func (s *shell) loadDiscoverMixes(mixes *browseMixes) {
-	s.loadMixesForOwners(mixes, nil)
-}
-
-func (s *shell) loadMixesForOwners(mixes *browseMixes, owners []browseOwner) {
 	if mixes.loading {
 		return
 	}
 	mixes.started, mixes.loading = true, true
+	mixes.guest = !s.app.LoggedIn()
+	owners := mixes.owners
 	recovering := mixes.err != nil
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
@@ -598,6 +633,7 @@ func (s *shell) loadMixesForOwners(mixes *browseMixes, owners []browseOwner) {
 		}
 		s.update(func() {
 			mixes.loading, mixes.err = false, err
+			mixes.owners = owners
 			if err == nil {
 				mixes.cards = cards
 				if recovering {
@@ -740,7 +776,7 @@ func browseAction(c *ui.Context, icon, label string, primary bool) bool {
 	if primary {
 		background, foreground = palette.Accent, palette.AccentInk
 	}
-	return ui.ButtonBase(c).Label(label).MinHeight(touchSize()).Padding(0, 12).Radius(22).Background(background).Children(func() {
+	return ui.ButtonBase(c).Label(label).MinHeight(touchSize()).MinWidth(touchSize()).Padding(0, 12).Radius(22).Background(background).Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			if icon != "" {
 				glyph(c, icon, 15, foreground)

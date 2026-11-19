@@ -272,7 +272,7 @@ func (s *shell) dynamicRows(c *ui.Context, state *dynamicLibraryState, mid int64
 		if len(seen) > 0 {
 			title, detail = "暂时无法加载更多动态", "已加载的动态仍可查看。"
 		}
-		discoverNotice(c.Key("dynamic-load-error"), title, detail, "重试", false, func() { s.loadDynamicFeed(state, mid, false) })
+		discoverNotice(c.Key("dynamic-load-error"), "network", title, detail, "重试", false, func() { s.loadDynamicFeed(state, mid, false) })
 	} else if state.pages.more || state.pages.loading {
 		libraryMore(c, state.pages.loading, func() { s.loadDynamicFeed(state, mid, false) })
 	} else if len(seen) == 0 {

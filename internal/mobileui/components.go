@@ -102,7 +102,7 @@ func networkUnavailableIcon(c *ui.Context, ink ui.Color) {
 			MoveTo(x+7, y+12).QuadTo(x+9, y+10, x+11, y+12)
 		p.StrokePath(path, 1.2, ink)
 		p.Fill(ui.Rect{X: x + 8, Y: y + 14, W: 2, H: 2}, ink, 1)
-		p.Line(x+3, y+3, x+15, y+15, 1.4, ink)
+		p.StrokePath((&ui.Path{}).MoveTo(x+3, y+3).LineTo(x+15, y+15), 1.4, ink)
 	})
 }
 
