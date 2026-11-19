@@ -100,10 +100,17 @@ func (s LoginState) ConfirmationURL() string {
 		return ""
 	}
 	link, err := url.Parse(s.qrURL)
-	if err != nil || link.Scheme != "https" || !strings.EqualFold(link.Host, "passport.bilibili.com") || link.User != nil {
+	if err != nil || link.Scheme != "https" || link.User != nil {
 		return ""
 	}
-	return s.qrURL
+	switch {
+	case strings.EqualFold(link.Host, "passport.bilibili.com") && link.EscapedPath() == "/h5-app/passport/login/scan":
+		return s.qrURL
+	case strings.EqualFold(link.Host, "account.bilibili.com") && link.EscapedPath() == "/h5/account-h5/auth/scan-web":
+		return s.qrURL
+	default:
+		return ""
+	}
 }
 
 // pollInterval 是轮询二维码状态的间隔。
