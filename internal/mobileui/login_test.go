@@ -107,6 +107,9 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	tester.Frame()
+	if code, found := tester.Find("B 站登录二维码"); !found || code.X+code.W/2 != 195 {
+		t.Fatalf("QR code is not centered in the 390-point login page: %v", code)
+	}
 	if path := os.Getenv("PUDMUSIC_MOBILE_LOGIN_SCREENSHOT"); path != "" {
 		file, err := os.Create(path)
 		if err != nil {
