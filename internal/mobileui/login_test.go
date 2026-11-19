@@ -107,6 +107,9 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	tester.Frame()
+	if code, found := tester.Find("B 站登录二维码"); !found || code.X+code.W/2 != 195 {
+		t.Fatalf("QR code is not centered in the 390-point login page: %v", code)
+	}
 	if path := os.Getenv("PUDMUSIC_MOBILE_LOGIN_SCREENSHOT"); path != "" {
 		file, err := os.Create(path)
 		if err != nil {
@@ -129,7 +132,7 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 	if err := tester.Click("在 B 站 App 中确认"); err != nil {
 		t.Fatal(err)
 	}
-	const wantLink = "https://passport.bilibili.com/h5-app/passport/login/scan?qrcode_key=test-3"
+	const wantLink = "bilibili://browser/?url=https%3A%2F%2Fpassport.bilibili.com%2Fh5-app%2Fpassport%2Flogin%2Fscan%3Fqrcode_key%3Dtest-3"
 	if links := tester.OpenedURLs(); len(links) == 0 || links[len(links)-1] != wantLink || requests.Load() != 3 {
 		t.Fatal("same-device login did not open the current QR session")
 	}

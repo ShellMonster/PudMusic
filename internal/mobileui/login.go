@@ -1,6 +1,8 @@
 package mobileui
 
 import (
+	"net/url"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -105,7 +107,7 @@ func (s *shell) login(c *ui.Context, page *route) {
 			}
 			if settingsAction(c, "在 B 站 App 中确认", true, true).Clicked() {
 				data.openFailed = false
-				c.OpenURLThen(link, func(err error) {
+				c.OpenURLThen("bilibili://browser/?url="+url.QueryEscape(link), func(err error) {
 					if page.data == data && s.app.LoginState().ConfirmationURL() == link {
 						data.openFailed = err != nil
 					}
@@ -132,7 +134,7 @@ func (data *loginPageData) drawCode(c *ui.Context, code *bili.Code, expired bool
 			data.bitmap = ui.NewBitmap(code.Image(moduleSize)).Pixelated()
 		}
 	}
-	ui.Box(c).Key("login-qr-card").Size(160, 160).Radius(8).
+	ui.Box(c).Key("login-qr-card").Size(160, 160).Radius(8).AlignSelf(ui.Center).
 		Background(ui.RGB(255, 255, 255)).AlignItems(ui.Center).Justify(ui.Center).Children(func() {
 		if data.bitmap != nil && !expired {
 			width, height := data.bitmap.Size()
