@@ -374,7 +374,7 @@ func (s *shell) playCollection(state *collectionState, ref app.CollectionRef, sh
 	state.working = true
 	s.collectionPlayRequest++
 	request := s.collectionPlayRequest
-	queueRevision := s.app.Queue().Snapshot().Revision()
+	intent := s.app.PlaybackIntent()
 	account := s.app.AccountSnapshot()
 	order, query := state.sort, state.query
 	items, more, next := slices.Clone(state.pages.items), state.pages.more, state.pages.next
@@ -396,7 +396,7 @@ func (s *shell) playCollection(state *collectionState, ref app.CollectionRef, sh
 		}
 		s.update(func() {
 			state.working = false
-			if s.app.AccountSnapshot() != account || s.collectionPlayRequest != request || s.app.Queue().Snapshot().Revision() != queueRevision {
+			if s.app.AccountSnapshot() != account || s.collectionPlayRequest != request || s.app.PlaybackIntent() != intent {
 				return
 			}
 			if err != nil {

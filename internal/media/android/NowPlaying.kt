@@ -25,13 +25,15 @@ private const val NOTIFICATION = 4101
 
 class PudMusicMediaPlugin : MyGoPlugin {
     override fun call(method: String, args: JSONObject, reply: PluginReply) {
-        if (method != "publish") {
-            reply.failure(PluginFailure("NoMethod", method))
-            return
-        }
         try {
-            PudMusicPlayback.publish(PluginHost.context, args)
-            reply.success(null)
+            when (method) {
+                "publish" -> {
+                    PudMusicPlayback.publish(PluginHost.context, args)
+                    reply.success(null)
+                }
+                "requestFocus" -> reply.success(JSONObject().put("Granted", PudMusicPlayback.requestFocus(PluginHost.context)))
+                else -> reply.failure(PluginFailure("NoMethod", method))
+            }
         } catch (e: RuntimeException) {
             reply.failure(PluginFailure("MediaSession", e.message ?: e.javaClass.simpleName))
         }
@@ -77,7 +79,7 @@ private object PudMusicPlayback {
     fun publish(context: Context, args: JSONObject) {
         val previousState = state
         state = args.optString("state", "none")
-        if (state != "playing") abandonFocus(context)
+        if (state == "none" || state == "stopped" || (state == "paused" && previousState == "playing")) abandonFocus(context)
         if (state == "none") {
             session?.release()
             session = null
@@ -132,10 +134,9 @@ private object PudMusicPlayback {
         } else if (foreground != null && (metadataChanged || previousState != state)) {
             notification(context)?.let { manager(context).notify(NOTIFICATION, it) }
         }
-        if (state == "playing" && !requestFocus(context)) command("pause")
     }
 
-    private fun requestFocus(context: Context): Boolean {
+    fun requestFocus(context: Context): Boolean {
         if (focus != null) return true
         val manager = context.getSystemService(AudioManager::class.java)
         val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)

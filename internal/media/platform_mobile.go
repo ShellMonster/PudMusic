@@ -14,6 +14,13 @@ import (
 
 const mobileMediaPlugin = "pudmusic_media"
 
+func RequestAudioFocus() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var response struct{ Granted bool }
+	return mygo.Native(mobileMediaPlugin).Call(ctx, "requestFocus", nil, &response) == nil && response.Granted
+}
+
 type mobilePlatform struct {
 	native *mygo.NativePlugin
 	fetch  func(string) ([]byte, error)

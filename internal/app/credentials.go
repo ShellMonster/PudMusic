@@ -458,9 +458,16 @@ func StoreUnavailable(err error) bool {
 //
 // 后端清不掉时内存也会清（返回错误），宁可不彻底也不能让用户退不出去。
 func (m *Manager) Logout(ctx context.Context) error {
+	return m.logout(ctx, nil)
+}
+
+func (m *Manager) logout(ctx context.Context, clearClient func()) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.cur, m.gen = Session{}, m.gen+1
+	if clearClient != nil {
+		clearClient()
+	}
 	if err := m.store.Clear(ctx); err != nil {
 		return fmt.Errorf("app: 退出登录: %w", err)
 	}
@@ -489,10 +496,10 @@ func (m *Manager) BeginRenew() *Lease {
 // Commit 把续期结果写回去。登录态在这期间变过就返回 ErrStaleGeneration，
 // **不写**。调用方看到这个错误就直接收工，不要重试。
 func (l *Lease) Commit(ctx context.Context, fn func(*Session) error) error {
-	return l.commit(ctx, fn, false)
+	return l.commit(ctx, fn, false, nil)
 }
 
-func (l *Lease) commit(ctx context.Context, fn func(*Session) error, acceptMemoryOnly bool) error {
+func (l *Lease) commit(ctx context.Context, fn func(*Session) error, acceptMemoryOnly bool, publishClient func()) error {
 	l.m.mu.Lock()
 	defer l.m.mu.Unlock()
 	if l.settled.Load() || l.m.gen != l.gen || ctx.Err() != nil {
@@ -519,6 +526,9 @@ func (l *Lease) commit(ctx context.Context, fn func(*Session) error, acceptMemor
 		return fmt.Errorf("app: 保存续期结果: %w", err)
 	}
 	l.m.cur, l.m.gen = next, l.m.gen+1
+	if publishClient != nil {
+		publishClient()
+	}
 	return err
 }
 

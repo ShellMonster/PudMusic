@@ -357,7 +357,10 @@ func (s *shell) playFeatured(feature browseCollection, busy *bool, enqueue bool)
 		return
 	}
 	*busy = true
-	revision := s.app.Queue().Snapshot().Revision()
+	if !enqueue {
+		s.collectionPlayRequest++
+	}
+	request, intent := s.collectionPlayRequest, s.app.PlaybackIntent()
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
 		defer cancel()
@@ -375,7 +378,7 @@ func (s *shell) playFeatured(feature browseCollection, busy *bool, enqueue bool)
 		s.update(func() {
 			*busy = false
 			switch {
-			case !enqueue && s.app.Queue().Snapshot().Revision() != revision:
+			case !enqueue && (s.collectionPlayRequest != request || s.app.PlaybackIntent() != intent):
 				return
 			case err != nil:
 				s.notice = "暂时无法加载这张歌单"

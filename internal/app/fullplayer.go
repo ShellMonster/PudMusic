@@ -317,6 +317,7 @@ func pageSetFor(current Item, parts []bili.VideoPart) PageSet {
 // 未展开兼容路径的 `replaceAt` 会让身份随 cid 变化；页面组路径则直接选择已存在的
 // 分集项，身份和队列位置都保持稳定。
 func (a *App) PlayPart(cid string) error {
+	a.playbackIntent.Add(1)
 	cid = strings.TrimSpace(cid)
 	if cid == "" {
 		return errors.New("没认出来要放哪一集")

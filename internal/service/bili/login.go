@@ -177,6 +177,13 @@ type ScanResult struct {
 	LoggedInAt time.Time
 }
 
+func (c *Client) NewLoginClient() *Client {
+	login := NewClient(Options{Transport: c.http.Transport, UserAgent: c.ua, Referer: c.referer, Now: c.now, OnRequest: c.onReq})
+	login.hostAPI, login.hostPassport, login.hostMember = c.hostAPI, c.hostPassport, c.hostMember
+	login.hostWWW, login.hostSearch, login.sessionBase = c.hostWWW, c.hostSearch, c.sessionBase
+	return login
+}
+
 // PollScan 问一次「这张二维码扫得怎么样了」。
 //
 // **这是协议层**：它只发一次请求就返回，不循环、不等。

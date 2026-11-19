@@ -4,6 +4,7 @@ package bootstrap
 
 import (
 	"log"
+	"runtime"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/media"
@@ -16,6 +17,9 @@ func MobileDependencies(run func(*app.App, *media.Session) error) Dependencies {
 	d.MountNotifications = nil
 	noteMounted := d.NoteMounted
 	d.NoteMounted = func(a *app.App) {
+		if runtime.GOOS == "android" {
+			a.SetPlaybackGate(media.RequestAudioFocus)
+		}
 		mygo.App.OnSaveState(func() []byte {
 			a.SavePlayback()
 			if err := a.FlushSettings(); err != nil {

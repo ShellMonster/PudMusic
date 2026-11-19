@@ -555,7 +555,7 @@ func (a *App) restreamOnline(tr *onlineTrack, q bili.AudioQuality, pos time.Dura
 			p.Seek(pos)
 		}
 		if want {
-			p.Play()
+			a.startPlayer(p)
 		}
 		if wake != nil {
 			wake()
@@ -650,7 +650,7 @@ func (a *App) restreamFromByteCache(tr *onlineTrack, rec streamaudio.Bytes,
 		p.Seek(pos)
 	}
 	if want {
-		p.Play()
+		a.startPlayer(p)
 	}
 	if wake != nil {
 		wake()
@@ -1653,7 +1653,7 @@ func (a *App) installOnlinePlayer(it Item, gen int, ref *bili.StreamRef,
 		if pos > 0 {
 			p.Seek(pos)
 		}
-		p.Play()
+		a.startPlayer(p)
 	}
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
@@ -2900,7 +2900,7 @@ func (a *App) refreshOnlineNowFor(cause error, p *audio.Player, tr *onlineTrack,
 			nextPlayer.Seek(pos)
 		}
 		if want {
-			nextPlayer.Play()
+			a.startPlayer(nextPlayer)
 		}
 		a.publishMedia()
 		if wake != nil {

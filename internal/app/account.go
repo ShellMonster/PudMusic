@@ -431,7 +431,8 @@ func (a *Account) wakeUp() {
 func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 	defer lease.settled.Store(true)
 
-	qr, err := a.cli.NewQRCode(ctx)
+	login := a.cli.NewLoginClient()
+	qr, err := login.NewQRCode(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return // 用户取消了，这不是错误
@@ -462,7 +463,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			res, err := a.cli.PollScan(ctx, qr.Key)
+			res, err := login.PollScan(ctx, qr.Key)
 			switch {
 			case ctx.Err() != nil:
 				return
@@ -483,7 +484,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 				a.hint(id, LoginExpired, bili.ScanExpired.String())
 				return
 			case bili.ScanConfirmed:
-				a.finish(ctx, lease, res, id)
+				a.finish(ctx, lease, res, login.IssuedCookies(), id)
 				return
 			}
 		}
@@ -491,7 +492,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 }
 
 // finish 把扫成功的凭据存进去。
-func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult, id uint64) {
+func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult, cookies []*http.Cookie, id uint64) {
 	sess := Session{RefreshToken: res.RefreshToken}
 	if !res.LoggedInAt.IsZero() {
 		sess.SavedAt = res.LoggedInAt
@@ -500,7 +501,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	// session.go 里 isOwnHost 的注释：按 cookie 自己的域过滤会把登录凭据滤掉）。
 	// 这里全都收下——SESSDATA / bili_jct / DedeUserID 三个都在里面，
 	// 少一个都会让「登录成功之后第一个要用的接口」失败。
-	for _, c := range a.cli.IssuedCookies() {
+	for _, c := range cookies {
 		sess.Cookies = append(sess.Cookies, CookieFromHTTP(c))
 	}
 	sess.Normalize(sess.SavedAt)
@@ -522,7 +523,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	err := lease.commit(ctx, func(cur *Session) error {
 		*cur = sess
 		return nil
-	}, true)
+	}, true, func() { _ = a.cli.SeedCookies(cookies) })
 	switch {
 	case errors.Is(err, ErrStaleGeneration):
 		// 用户在这中间退了登。**什么都不写**，安静收工——
@@ -668,8 +669,7 @@ func (a *Account) logout() error {
 	// 然后清 jar：Manager.Logout 可能失败（后端解不开、写不了），
 	// 但**内存里的 cookie 无论如何都得清掉**——
 	// 宁可不彻底，也不能让用户退不出去。
-	_ = a.cli.SeedCookies(nil)
-	err := a.mgr.Logout(context.Background())
+	err := a.mgr.logout(context.Background(), func() { _ = a.cli.SeedCookies(nil) })
 	a.wakeUp()
 	return err
 }
