@@ -191,6 +191,7 @@ func (s *shell) draw(c *ui.Context) {
 	if (s.player.visible || s.player.sheet != sheetNone || s.tab != 0 || len(s.stacks[s.tab]) > 1) && c.Shortcut(0, ui.KeyBack) {
 		s.back()
 	}
+	s.finishExternalLogin()
 	if s.notice != "" {
 		c.Toast(s.notice)
 		s.notice = ""

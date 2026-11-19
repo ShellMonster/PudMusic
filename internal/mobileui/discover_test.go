@@ -2,10 +2,14 @@ package mobileui
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,7 +34,7 @@ func TestMobileDiscoverOpensLiveCollectionAndDailyRoutes(t *testing.T) {
 		})
 	}, 390, 740)
 	wait(tester, "公开音乐合集")
-	mobileLibraryShot(t, tester, "discover-fixture.png")
+	mobileLibraryShot(t, tester, "guest-discover.png")
 	for _, label := range []string{"每日推荐", "排行榜", "新歌速递", "歌单", "播放今日一张"} {
 		if _, ok := tester.Find(label); !ok {
 			t.Fatalf("missing Discover action %q", label)
@@ -60,9 +64,428 @@ func TestMobileDiscoverOpensLiveCollectionAndDailyRoutes(t *testing.T) {
 	}
 }
 
+// TestMobileDiscoverRetryKeepsAvailableContent covers a shared outage, a partial outage, and a failed refresh of cached content.
+func TestMobileDiscoverRetryKeepsAvailableContent(t *testing.T) {
+	var failFeed, failMixes atomic.Bool
+	var feedRequests atomic.Int32
+	refreshReleased := make(chan struct{})
+	var holdRefresh atomic.Bool
+	failFeed.Store(true)
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/x/web-interface/region/feed/rcmd" {
+			feedRequests.Add(1)
+			if holdRefresh.Load() {
+				select {
+				case <-refreshReleased:
+				case <-r.Context().Done():
+				}
+			}
+		}
+		if (r.URL.Path == "/x/web-interface/region/feed/rcmd" && failFeed.Load()) ||
+			(r.URL.Path == "/x/polymer/web-space/seasons_series_list" && failMixes.Load()) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	tester := ui.NewTester(s.view, 390, 844)
+	wait(tester, "暂时无法加载推荐")
+	mobileLibraryShot(t, tester, "discover-recovery-light.png")
+	tester.SetDark(true)
+	mobileLibraryShot(t, tester, "discover-recovery-dark.png")
+	tester.SetSize(320, 740)
+	mobileLibraryShot(t, tester, "discover-recovery-dark-narrow.png")
+	tester.SetSize(390, 844)
+	tester.SetDark(false)
+	for _, label := range []string{"搜索歌曲、歌手、歌单", "本地音乐", "下载记录", "重新加载"} {
+		if _, found := tester.Find(label); !found {
+			t.Fatalf("discover outage hid %q", label)
+		}
+	}
+	for _, label := range []string{"本地音乐", "下载记录"} {
+		if err := tester.Click(label); err != nil {
+			t.Fatal(err)
+		}
+		if s.current().title != label {
+			t.Fatalf("%q opened %q", label, s.current().title)
+		}
+		if err := tester.Click("返回"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if slices.Contains(tester.Texts(), "暂时没加载出来") {
+		t.Fatal("shared outage also rendered a section-level failure")
+	}
+	failFeed.Store(false)
+	failMixes.Store(true)
+	if err := tester.Click("重新加载"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "推荐歌单暂时不可用")
+	mobileLibraryShot(t, tester, "discover-recovery-partial.png")
+	if !tester.HasText("推荐曲目") || tester.HasText("暂时无法加载推荐") {
+		t.Fatal("a collection outage hid the available recommendations")
+	}
+	failMixes.Store(false)
+	before := feedRequests.Load()
+	if err := tester.Click("重试歌单"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "公开音乐合集")
+	if feedRequests.Load() != before {
+		t.Fatal("retrying only playlists also refetched the available tracks")
+	}
+	localAudio := filepath.Join(t.TempDir(), "local-track.wav")
+	const sampleRate, seconds = 44100, 30
+	wav := make([]byte, 44+sampleRate*seconds*2)
+	copy(wav, "RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00")
+	binary.LittleEndian.PutUint32(wav[4:], uint32(len(wav)-8))
+	binary.LittleEndian.PutUint32(wav[24:], sampleRate)
+	binary.LittleEndian.PutUint32(wav[28:], sampleRate*2)
+	copy(wav[32:], "\x02\x00\x10\x00data")
+	binary.LittleEndian.PutUint32(wav[40:], uint32(len(wav)-44))
+	if err := os.WriteFile(localAudio, wav, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.app.TestOnlyNoAutoLyrics()
+	if err := s.app.Open(localAudio); err != nil {
+		t.Fatal(err)
+	}
+	playing := s.app.Snapshot()
+	failFeed.Store(true)
+	holdRefresh.Store(true)
+	tester.SetSize(320, 568)
+	s.loadDiscoverHome(s.discoverHomeState(s.current()))
+	tester.Frame()
+	tester.Scroll(100, 300, 0, 245)
+	tester.Frame()
+	const feature = "打开今日一张 公开音乐合集"
+	position, found := tester.Find(feature)
+	close(refreshReleased)
+	if !found {
+		t.Fatal("missing featured collection during refresh")
+	}
+	wait(tester, "重试刷新")
+	if after, found := tester.Find(feature); !found || after.Y != position.Y {
+		t.Fatalf("failed refresh shifted the featured collection from %v to %v", position.Y, after.Y)
+	}
+	tester.SetSize(390, 844)
+	tester.Scroll(100, 450, 0, 900)
+	mobileLibraryShot(t, tester, "discover-recovery-refresh.png")
+	if !tester.HasText("公开音乐合集") || !tester.HasText("推荐曲目") || tester.HasText("暂时无法加载推荐") {
+		t.Fatal("a refresh error replaced cached recommendations")
+	}
+	if current := s.app.Snapshot(); current.Path != playing.Path || !current.Playing || current.Position < playing.Position {
+		t.Fatal("refresh failure interrupted the current playback")
+	}
+}
+
+// TestMobileDiscoverPreservesGuestContentWhenLoginIsRequired covers both a cached refresh and a partial playlist failure.
+func TestMobileDiscoverPreservesGuestContentWhenLoginIsRequired(t *testing.T) {
+	for _, deniedPath := range []string{"/x/web-interface/region/feed/rcmd", "/x/polymer/web-space/seasons_series_list"} {
+		t.Run(deniedPath, func(t *testing.T) {
+			var deny atomic.Bool
+			deny.Store(deniedPath != "/x/web-interface/region/feed/rcmd")
+			s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+				if r.URL.Path != deniedPath || !deny.Load() {
+					return false
+				}
+				fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+				return true
+			})
+			tester := ui.NewTester(s.view, 390, 844)
+			if !deny.Load() {
+				wait(tester, "公开音乐合集")
+				deny.Store(true)
+				s.loadDiscoverHome(s.discoverHomeState(s.current()))
+			}
+			wait(tester, "去登录")
+			if !tester.HasText("推荐曲目") {
+				t.Fatal("the account requirement hid available tracks")
+			}
+			tester.Scroll(100, 450, 0, 900)
+			if err := tester.Click("去登录"); err != nil {
+				t.Fatal(err)
+			}
+			if s.current().kind != pageLogin {
+				t.Fatal("recovery did not open login")
+			}
+		})
+	}
+}
+
+// TestMobilePlaylistPageRetriesWithoutRefetchingRecommendations covers retry after leaving the partially loaded home page.
+func TestMobilePlaylistPageRetriesWithoutRefetchingRecommendations(t *testing.T) {
+	var denyPlaylists, denyFeed atomic.Bool
+	denyPlaylists.Store(true)
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if (r.URL.Path == "/x/polymer/web-space/seasons_series_list" && denyPlaylists.Load()) ||
+			(r.URL.Path == "/x/web-interface/region/feed/rcmd" && denyFeed.Load()) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	tester := ui.NewTester(s.view, 390, 844)
+	wait(tester, "重试歌单")
+	if err := tester.Click("歌单"); err != nil {
+		t.Fatal(err)
+	}
+	denyFeed.Store(true)
+	denyPlaylists.Store(false)
+	if err := tester.Click("重试歌单"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "公开音乐合集")
+}
+
+// TestMobileStandalonePlaylistsRetryAfterFeedFailure verifies that a failed first load can recover from My.
+func TestMobileStandalonePlaylistsRetryAfterFeedFailure(t *testing.T) {
+	var unavailable atomic.Bool
+	unavailable.Store(true)
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/x/web-interface/region/feed/rcmd" && unavailable.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	s.switchTab(2)
+	tester := ui.NewTester(s.view, 390, 844)
+	if err := tester.Click("逛逛公开歌单"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "重试歌单")
+	unavailable.Store(false)
+	if err := tester.Click("重试歌单"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "公开音乐合集")
+}
+
+// TestMobileCachedPlaylistRefreshFailureShowsFeedback verifies that an offscreen retry still gives immediate feedback.
+func TestMobileCachedPlaylistRefreshFailureShowsFeedback(t *testing.T) {
+	var failMixes atomic.Bool
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/x/polymer/web-space/seasons_series_list" && failMixes.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	tester := ui.NewTester(s.view, 320, 568)
+	wait(tester, "公开音乐合集")
+	failMixes.Store(true)
+	s.loadDiscoverHome(s.discoverHomeState(s.current()))
+	wait(tester, "歌单刷新失败，已保留上次加载的歌单")
+	if !tester.HasText("公开音乐合集") {
+		t.Fatal("failed refresh removed cached playlists")
+	}
+}
+
+// TestMobileDiscoverOffersLoginWhenRequired verifies the action when Bilibili explicitly requires an account.
+func TestMobileDiscoverOffersLoginWhenRequired(t *testing.T) {
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/x/web-interface/region/feed/rcmd" {
+			return false
+		}
+		fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+		return true
+	})
+	tester := ui.NewTester(s.view, 390, 844)
+	wait(tester, "登录后可查看推荐")
+	if err := tester.Click("去登录"); err != nil {
+		t.Fatal(err)
+	}
+	if s.current().kind != pageLogin {
+		t.Fatal("the account requirement did not lead to login")
+	}
+}
+
+// TestMobileDiscoverRefreshesAfterLogin covers an expired session and a visitor request that failed with a generic error.
+func TestMobileDiscoverRefreshesAfterLogin(t *testing.T) {
+	t.Run("expired session", func(t *testing.T) { testMobileDiscoverLoginRecovery(t, true) })
+	t.Run("visitor request failed", func(t *testing.T) { testMobileDiscoverLoginRecovery(t, false) })
+}
+
+func testMobileDiscoverLoginRecovery(t *testing.T, expired bool) {
+	t.Helper()
+	var rejected, accepted atomic.Int32
+	var confirmed atomic.Bool
+	initial := app.Session{}
+	if expired {
+		initial.SESSDATA = "expired"
+	}
+	s, wait := mobileBrowseFixtureForSession(t, initial, func(w http.ResponseWriter, r *http.Request) bool {
+		switch r.URL.Path {
+		case "/x/web-interface/region/feed/rcmd":
+			cookie, err := r.Cookie("SESSDATA")
+			if err == nil && cookie.Value == "renewed" {
+				accepted.Add(1)
+				return false
+			}
+			rejected.Add(1)
+			if expired {
+				fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+			} else {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			}
+		case "/x/passport-login/web/qrcode/generate":
+			fmt.Fprint(w, `{"code":0,"data":{"url":"https://account.bilibili.com/h5/account-h5/auth/scan-web?qrcode_key=demo","qrcode_key":"demo"}}`)
+		case "/x/passport-login/web/qrcode/poll":
+			if !confirmed.Load() {
+				fmt.Fprint(w, `{"code":0,"data":{"code":86101}}`)
+				break
+			}
+			http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "renewed", Path: "/"})
+			fmt.Fprint(w, `{"code":0,"data":{"code":0}}`)
+		default:
+			return false
+		}
+		return true
+	})
+	s.app.SetLoginPollInterval(2 * time.Millisecond)
+	tester := ui.NewTester(s.view, 390, 844)
+	entry := "去登录"
+	if expired {
+		wait(tester, entry)
+		for _, action := range []string{entry, "暂不登录"} {
+			if err := tester.Click(action); err != nil {
+				t.Fatal(err)
+			}
+		}
+	} else {
+		wait(tester, "暂时无法加载推荐")
+		if err := tester.Click("我的"); err != nil {
+			t.Fatal(err)
+		}
+		entry = "登录"
+	}
+	for _, action := range []string{entry, "继续登录"} {
+		if err := tester.Click(action); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait(tester, "在 B 站 App 中确认")
+	if err := tester.Click("在 B 站 App 中确认"); err != nil {
+		t.Fatal(err)
+	}
+	confirmed.Store(true)
+	wait(tester, "登录成功")
+	if !expired {
+		if err := tester.Click("发现"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait(tester, "公开音乐合集")
+	if rejected.Load() != 1 || accepted.Load() != 1 {
+		t.Fatalf("expected one rejected request and one recovery request, got %d and %d", rejected.Load(), accepted.Load())
+	}
+}
+
+// TestMobileGuestFeedLoginReturnsToFeed verifies login recovery and that failed pagination keeps the previous posts.
+func TestMobileGuestFeedLoginReturnsToFeed(t *testing.T) {
+	var failInitial, failNext atomic.Bool
+	failInitial.Store(true)
+	failNext.Store(true)
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		switch r.URL.Path {
+		case "/x/passport-login/web/qrcode/generate":
+			fmt.Fprint(w, `{"code":0,"data":{"url":"https://account.bilibili.com/h5/account-h5/auth/scan-web?qrcode_key=demo","qrcode_key":"demo"}}`)
+		case "/x/passport-login/web/qrcode/poll":
+			http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "synthetic-feed-session", Path: "/"})
+			http.SetCookie(w, &http.Cookie{Name: "DedeUserID", Value: "42", Path: "/"})
+			fmt.Fprint(w, `{"code":0,"data":{"code":0}}`)
+		case "/x/relation/followings":
+			fmt.Fprint(w, `{"code":0,"data":{"list":[],"total":0}}`)
+		case "/x/v3/fav/folder/created/list-all", "/x/v3/fav/folder/created/list", "/x/v3/fav/folder/collected/list":
+			fmt.Fprint(w, `{"code":0,"data":{"list":[],"count":0,"has_more":false}}`)
+		case "/x/polymer/web-dynamic/v1/feed/all":
+			next := r.URL.Query().Get("offset") != ""
+			if (!next && failInitial.Load()) || (next && failNext.Load()) {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				break
+			}
+			id, text, offset := "first", "第一条动态", "next"
+			if next {
+				id, text, offset = "second", "第二条动态", ""
+			}
+			fmt.Fprintf(w, `{"code":0,"data":{"items":[{"id_str":%q,"type":"DYNAMIC_TYPE_WORD","modules":{"module_author":{"mid":42,"name":"音乐 UP 主"},"module_dynamic":{"desc":{"text":%q}}}}],"has_more":%t,"offset":%q}}`, id, text, !next, offset)
+		default:
+			return false
+		}
+		return true
+	})
+	s.app.SetLoginPollInterval(2 * time.Millisecond)
+	s.switchTab(2)
+	tester := ui.NewTester(s.view, 390, 844)
+	mobileLibraryShot(t, tester, "guest-my.png")
+	for _, label := range []string{"访客", "最近播放", "本地音乐", "下载", "逛逛公开歌单", "我的关注", "关注动态", "稍后再看", "听歌统计", "B 站账号"} {
+		if _, ok := tester.Find(label); !ok {
+			t.Fatalf("guest My page is missing %q", label)
+		}
+	}
+	for _, action := range []string{"关注动态", "去登录", "继续登录"} {
+		if err := tester.Click(action); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait(tester, "登录成功")
+	if err := tester.Click("返回"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "网络连接异常")
+	checkRetryTarget := func() {
+		t.Helper()
+		if button, ok := tester.AccessByRole(ui.RoleButton, "重试"); !ok || button.Bounds.W < touchSize() || button.Bounds.H < touchSize() {
+			t.Fatalf("activity retry touch target is too small: %+v", button.Bounds)
+		}
+	}
+	checkRetryTarget()
+	mobileLibraryShot(t, tester, "feed-recovery-initial.png")
+	heading, foundHeading := tester.Find("用户动态")
+	description, foundDescription := tester.Find("关注的 UP 主最近分享了什么。")
+	errorTitle, foundTitle := tester.Find("网络连接异常")
+	if !foundHeading || !foundDescription || !foundTitle || heading.X != description.X || errorTitle.X+errorTitle.W/2 != 195 {
+		t.Fatalf("feed header and recovery alignment: heading=%v description=%v error=%v", heading, description, errorTitle)
+	}
+	failInitial.Store(false)
+	if err := tester.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "第一条动态")
+	if err := tester.Click("加载更多"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "暂时无法加载更多动态")
+	checkRetryTarget()
+	if !tester.HasText("第一条动态") {
+		t.Fatal("loading the next page hid the first post")
+	}
+	mobileLibraryShot(t, tester, "feed-recovery-pagination.png")
+	failNext.Store(false)
+	if err := tester.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "第二条动态")
+}
+
 func mobileBrowseFixture(t *testing.T) (*shell, func(*ui.Tester, string)) {
 	t.Helper()
+	return mobileBrowseFixtureWith(t, nil)
+}
+
+func mobileBrowseFixtureWith(t *testing.T, intercept func(http.ResponseWriter, *http.Request) bool) (*shell, func(*ui.Tester, string)) {
+	t.Helper()
+	return mobileBrowseFixtureForSession(t, app.Session{}, intercept)
+}
+
+func mobileBrowseFixtureForSession(t *testing.T, initial app.Session, intercept func(http.ResponseWriter, *http.Request) bool) (*shell, func(*ui.Tester, string)) {
+	t.Helper()
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if intercept != nil && intercept(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		q := r.URL.Query()
 		var data string
@@ -110,7 +533,13 @@ func mobileBrowseFixture(t *testing.T) (*shell, func(*ui.Tester, string)) {
 	t.Cleanup(a.Close)
 	client := bili.NewClient(bili.Options{Transport: fixture.Client().Transport})
 	client.TestOnlyPointHostsAtFixture(fixture.URL)
-	a.MountLogin(app.NewMemoryStore("mobile fixture"), client)
+	store := app.NewMemoryStore("mobile fixture")
+	if initial.LoggedIn() {
+		if err := store.Save(t.Context(), initial); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.MountLogin(store, client)
 	a.MountSearch(client)
 	a.MountRecommend(client)
 	a.MountExplore(client)

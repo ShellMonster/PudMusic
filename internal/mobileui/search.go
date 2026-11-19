@@ -481,7 +481,7 @@ func (s *shell) mobileSearchResults(c *ui.Context, state *mobileSearchState) {
 			if tab == state.tab {
 				color, line = palette.AccentText, palette.Accent
 			}
-			if ui.ButtonBase(c).Key("search:result-tab:" + name).Label(name).Selected(tab == state.tab).Grow(1).Width(0).MinHeight(touchSize()).Children(func() {
+			if ui.ButtonBase(c).Key("search:result-tab:" + name).Role(ui.RoleTab).Label(name).AccessSelected(tab == state.tab).Grow(1).Width(0).MinHeight(touchSize()).Children(func() {
 				ui.Column(c).FillWidth().Children(func() {
 					ui.Box(c).FillWidth().MinHeight(touchSize() - 2).Center().Children(func() { ui.Text(c, name).FontSize(13).Bold().TextColor(color) })
 					ui.Box(c).FillWidth().Height(2).Background(line)

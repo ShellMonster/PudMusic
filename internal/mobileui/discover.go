@@ -2,6 +2,7 @@ package mobileui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -35,8 +37,10 @@ type browseMusic struct {
 
 type browseMixes struct {
 	cards   []browseCollection
+	owners  []browseOwner
 	started bool
 	loading bool
+	account uint64
 	err     error
 }
 
@@ -45,6 +49,7 @@ type discoverState struct {
 	mixes     browseMixes
 	refresh   ui.RefreshState
 	albumBusy bool
+	account   uint64
 }
 
 type discoverDetail struct {
@@ -72,7 +77,11 @@ func (s *shell) discoverRefresh(page *route, scroll ui.Element) {
 	}
 	state := s.discoverHomeState(page)
 	if scroll.PullToRefresh(&state.refresh) {
-		s.loadDiscoverHome(state)
+		if state.daily.loading || state.mixes.loading {
+			state.refresh.Refreshing = false
+		} else {
+			s.loadDiscoverHome(state)
+		}
 	}
 }
 
@@ -82,28 +91,45 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 	}
 	state.daily.started, state.daily.loading = true, true
 	state.mixes.started, state.mixes.loading = true, true
-	refreshing := state.refresh.Refreshing
+	state.account = s.app.AccountSnapshot().Generation
+	state.mixes.account = state.account
+	recovering := state.daily.err != nil || state.mixes.err != nil || state.refresh.Refreshing
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
 		defer cancel()
 		rows, _, dailyErr := s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
-		s.update(func() {
-			state.daily.loading, state.daily.err = false, dailyErr
-			if dailyErr == nil {
-				state.daily.rows = rows
-			}
-		})
 		var cards []browseCollection
+		var owners []browseOwner
 		err := dailyErr
-		if err == nil {
-			cards, err = s.publicMusicCollections(ctx, recommendOwners(rows), "")
+		if dailyErr == nil {
+			owners = recommendOwners(rows)
+			s.update(func() {
+				if state.daily.err != nil {
+					state.mixes.err = nil
+				}
+				state.daily.loading, state.daily.err = false, nil
+				state.daily.rows = rows
+			})
+			cards, err = s.publicMusicCollections(ctx, owners, "")
 		}
 		s.update(func() {
+			if dailyErr != nil {
+				state.daily.loading, state.daily.err = false, dailyErr
+				if s.current().data == state && (len(state.daily.rows) > 0 || len(state.mixes.cards) > 0) {
+					s.notice = "刷新失败，已保留上次加载的内容"
+				}
+			} else {
+				state.mixes.owners = owners
+				if err != nil && len(state.mixes.cards) > 0 && s.current().data == state {
+					s.notice = "歌单刷新失败，已保留上次加载的歌单"
+				}
+			}
 			state.mixes.loading, state.mixes.err = false, err
 			if err == nil {
 				state.mixes.cards = cards
-			} else if refreshing {
-				s.notice = "暂时无法刷新推荐"
+				if recovering {
+					s.notice = "已刷新推荐"
+				}
 			}
 			state.refresh.Refreshing = false
 		})
@@ -175,8 +201,10 @@ func (s *shell) discover(c *ui.Context, page *route) {
 		return
 	}
 	state := s.discoverHomeState(page)
-	if !state.daily.started {
+	if !state.daily.started || s.discoverAccountChanged(state.account, state.daily.err) {
 		s.loadDiscoverHome(state)
+	} else if state.daily.err == nil && s.discoverAccountChanged(state.mixes.account, state.mixes.err) {
+		s.loadDiscoverMixes(&state.mixes)
 	}
 	palette := tok.Of(c.Theme())
 	ui.Column(c).FillWidth().Gap(18).Children(func() {
@@ -188,6 +216,12 @@ func (s *shell) discover(c *ui.Context, page *route) {
 			})
 		}).Clicked() {
 			s.openSearch()
+		}
+		tracks := recommendTracks(state.daily.rows)
+		retry := func() { s.loadDiscoverHome(state) }
+		if state.daily.err != nil && len(tracks) == 0 && len(state.mixes.cards) == 0 {
+			s.discoverUnavailable(c, state, retry)
+			return
 		}
 		ui.Row(c).FillWidth().Gap(4).Children(func() {
 			for _, item := range []struct {
@@ -213,12 +247,18 @@ func (s *shell) discover(c *ui.Context, page *route) {
 			}
 		})
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
+			if state.daily.err == nil && state.mixes.err != nil && len(state.mixes.cards) == 0 {
+				sectionHeading(c, "推荐歌单", "")
+				s.discoverMixesNotice(c.Key("discover-mixes-error"), &state.mixes)
+				return
+			}
 			if sectionHeading(c, "推荐歌单", "更多") {
 				s.push(route{kind: pageMixes, title: "推荐歌单", data: &discoverDetail{mixes: &state.mixes}})
 			}
-			s.renderMixes(c, &state.mixes, 3, func() { s.loadDiscoverHome(state) })
+			if state.daily.err == nil || len(state.mixes.cards) > 0 {
+				s.renderMixes(c, &state.mixes, 3, retry)
+			}
 		})
-		tracks := recommendTracks(state.daily.rows)
 		feature, single := discoverFeatured(state.mixes.cards, tracks)
 		if feature.title != "" || state.mixes.loading {
 			ui.Column(c).FillWidth().Gap(8).Children(func() {
@@ -266,10 +306,87 @@ func (s *shell) discover(c *ui.Context, page *route) {
 				s.trackList(c, tracks[:min(3, len(tracks))])
 			} else if state.daily.loading {
 				browseTrackPlaceholders(c, 3)
-			} else {
-				browseStatus(c, state.daily.loading, state.daily.err, "暂无推荐歌曲", func() { s.loadDiscoverHome(state) })
+			} else if state.daily.err == nil {
+				browseStatus(c, false, state.daily.err, "暂无推荐歌曲", retry)
 			}
 		})
+		if state.daily.err != nil {
+			s.discoverRetryNotice(c.Key("discover-refresh-error"), state.daily.err, "刷新失败", "已保留上次加载的内容。", "重试刷新", state.daily.loading || state.mixes.loading, retry)
+		} else if state.mixes.err != nil && len(state.mixes.cards) > 0 {
+			s.discoverMixesNotice(c.Key("discover-mixes-error"), &state.mixes)
+		}
+	})
+}
+
+func (s *shell) discoverAccountChanged(generation uint64, err error) bool {
+	return err != nil && s.app.LoggedIn() && s.app.AccountSnapshot().Generation != generation
+}
+
+func (s *shell) discoverMixesNotice(c *ui.Context, mixes *browseMixes) {
+	detail := "其他推荐仍可浏览。"
+	if len(mixes.cards) > 0 {
+		detail = "已保留上次加载的歌单。"
+	}
+	s.discoverRetryNotice(c, mixes.err, "推荐歌单暂时不可用", detail, "重试歌单", mixes.loading, func() { s.loadDiscoverMixes(mixes) })
+}
+
+func (s *shell) discoverRetryNotice(c *ui.Context, err error, title, detail, action string, busy bool, retry func()) {
+	icon := "network"
+	if errors.Is(err, bili.ErrNotLoggedIn) {
+		icon, title, action = "lock", "登录后可查看推荐", "去登录"
+		retry = func() { s.push(route{kind: pageLogin, title: "登录"}) }
+	}
+	discoverNotice(c, icon, title, detail, action, busy, retry)
+}
+
+func (s *shell) discoverUnavailable(c *ui.Context, state *discoverState, retry func()) {
+	requiresLogin := errors.Is(state.daily.err, bili.ErrNotLoggedIn)
+	icon, title, detail, action := "network", "暂时无法加载推荐", "检查网络后重试，也可以搜索公开音乐。", "重新加载"
+	if requiresLogin {
+		icon, title, detail, action = "lock", "登录后可查看推荐", "也可以继续搜索公开音乐。", "去登录"
+		retry = func() { s.push(route{kind: pageLogin, title: "登录"}) }
+	}
+	palette := phonePalette(c)
+	ui.Column(c.Key("discover-unavailable")).FillWidth().Padding(20, 12, 22).Radius(16).
+		Background(palette.fill).Gap(10).AlignItems(ui.Center).Children(func() {
+		statusArtwork(c, icon)
+		typo.Display(ui.Text(c, title), 19).Role(ui.RoleHeading)
+		ui.Text(c, detail).FontSize(13).TextColor(palette.muted).TextAlign(ui.Center)
+		label := action
+		if state.daily.loading || state.mixes.loading {
+			label = "正在加载…"
+		}
+		if settingsAction(c, label, true, false).Disabled(label != action).Clicked() {
+			retry()
+		}
+	})
+	ui.Column(c.Key("discover-local")).FillWidth().Gap(6).Children(func() {
+		sectionHeading(c, "本机可用", "")
+		libraryRow(c.Key("local"), "", "disc", "本地音乐", "打开设备里的音频文件", func() { s.openLibraryPage(libraryDestinations[1]) })
+		libraryRow(c.Key("downloads"), "", "download", "下载记录", "播放已下载的音乐", func() { s.openLibraryPage(libraryDestinations[2]) })
+	})
+}
+
+func discoverNotice(c *ui.Context, icon, title, detail, action string, busy bool, retry func()) {
+	palette := phonePalette(c)
+	ui.Row(c).FillWidth().Padding(8, 10).Gap(8).Radius(12).Background(palette.fill).AlignItems(ui.Center).Children(func() {
+		if icon == "lock" {
+			glyph(c, icon, 18, palette.muted)
+		} else {
+			networkUnavailableIcon(c, palette.muted)
+		}
+		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
+			ui.Text(c, title).FontSize(14).FontWeight(600).Role(ui.RoleStatus)
+			ui.Text(c, detail).FontSize(12).TextColor(palette.muted)
+		})
+		text := action
+		if busy {
+			text = "正在重试…"
+		}
+		if ui.ButtonBase(c).Key(action).Label(action).MinHeight(touchSize()).MinWidth(touchSize()).PaddingX(4).Shrink(0).
+			Disabled(busy).Center().Children(func() { ui.Text(c, text).FontSize(13).FontWeight(600).TextColor(palette.accent) }).Clicked() {
+			retry()
+		}
 	})
 }
 
@@ -281,6 +398,10 @@ func discoverFeatured(cards []browseCollection, tracks []app.Item) (browseCollec
 		if track.Cover != "" {
 			return browseCollection{title: track.Title, cover: track.Cover, owner: track.Artist, count: 1}, track
 		}
+	}
+	if len(tracks) > 0 {
+		track := tracks[0]
+		return browseCollection{title: track.Title, owner: track.Artist, count: 1}, track
 	}
 	return browseCollection{}, app.Item{}
 }
@@ -407,8 +528,15 @@ func (s *shell) discoverSubpage(c *ui.Context, page *route) {
 		if state.mixes == nil {
 			state.mixes = &browseMixes{}
 		}
-		if !state.mixes.started {
+		if !state.mixes.started || s.discoverAccountChanged(state.mixes.account, state.mixes.err) {
 			s.loadDiscoverMixes(state.mixes)
+		}
+		if state.mixes.err != nil {
+			if len(state.mixes.cards) > 0 {
+				s.collectionGrid(c, state.mixes.cards)
+			}
+			s.discoverMixesNotice(c, state.mixes)
+			return
 		}
 		s.renderMixes(c, state.mixes, len(state.mixes.cards), func() { s.loadDiscoverMixes(state.mixes) })
 		return
@@ -494,18 +622,32 @@ func (s *shell) loadDiscoverMixes(mixes *browseMixes) {
 		return
 	}
 	mixes.started, mixes.loading = true, true
+	mixes.account = s.app.AccountSnapshot().Generation
+	owners := mixes.owners
+	recovering := mixes.err != nil
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
 		defer cancel()
-		rows, _, err := s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
+		var err error
+		if owners == nil {
+			var rows []app.RecommendItem
+			rows, _, err = s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
+			if err == nil {
+				owners = recommendOwners(rows)
+			}
+		}
 		var cards []browseCollection
 		if err == nil {
-			cards, err = s.publicMusicCollections(ctx, recommendOwners(rows), "")
+			cards, err = s.publicMusicCollections(ctx, owners, "")
 		}
 		s.update(func() {
 			mixes.loading, mixes.err = false, err
+			mixes.owners = owners
 			if err == nil {
 				mixes.cards = cards
+				if recovering {
+					s.notice = "已刷新推荐歌单"
+				}
 			}
 		})
 	}()
@@ -576,20 +718,38 @@ func appendBrowseTracks(existing, incoming []app.Item) []app.Item {
 }
 
 func browseStatus(c *ui.Context, loading bool, err error, empty string, retry func()) {
+	if !loading && err != nil {
+		browseStatusRow(c, "暂时没加载出来", "重试", retry)
+		return
+	}
 	palette := tok.Of(c.Theme())
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(8).Padding(18, 8).Children(func() {
 		switch {
 		case loading:
 			ui.Text(c, "正在加载…").FontSize(13).TextColor(palette.Text2)
-		case err != nil:
-			ui.Text(c, "加载失败，请重试").FontSize(13).TextColor(palette.Text2)
-			if retry != nil && browseAction(c, "refresh", "重试", false) {
-				retry()
-			}
 		default:
 			ui.Text(c, empty).FontSize(13).TextColor(palette.Text2)
 		}
 	})
+}
+
+func browseStatusRow(c *ui.Context, message, action string, run func()) {
+	palette := phonePalette(c)
+	ui.Row(c).FillWidth().MinHeight(touchSize()+12).Padding(6, 8, 6, 14).Gap(8).
+		Radius(12).Background(palette.fill).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, message).FontSize(13).TextColor(palette.muted).Grow(1).MinWidth(0).Role(ui.RoleStatus)
+		if run != nil {
+			browseStatusButton(c, action, action, run)
+		}
+	})
+}
+
+func browseStatusButton(c *ui.Context, text, label string, run func()) {
+	if ui.ButtonBase(c).Label(label).MinHeight(touchSize()).MinWidth(touchSize()).PaddingX(8).Shrink(0).Center().Children(func() {
+		ui.Text(c, text).FontSize(13).FontWeight(600).TextColor(phonePalette(c).accent)
+	}).Clicked() {
+		run()
+	}
 }
 
 func browseMore(c *ui.Context, loading bool, err error, load func()) {
@@ -625,7 +785,7 @@ func browseAction(c *ui.Context, icon, label string, primary bool) bool {
 	if primary {
 		background, foreground = palette.Accent, palette.AccentInk
 	}
-	return ui.ButtonBase(c).Label(label).MinHeight(touchSize()).Padding(0, 12).Radius(22).Background(background).Children(func() {
+	return ui.ButtonBase(c).Label(label).MinHeight(touchSize()).MinWidth(touchSize()).Padding(0, 12).Radius(22).Background(background).Children(func() {
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			if icon != "" {
 				glyph(c, icon, 15, foreground)

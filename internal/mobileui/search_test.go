@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	desktop "github.com/ShellMonster/PudMusic/internal/ui"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -12,6 +13,7 @@ func TestMobileSearchSubmitsAndShowsDistinctResultTypes(t *testing.T) {
 	s, wait := mobileBrowseFixture(t)
 	s.openSearch()
 	tester := ui.NewTester(func(c *ui.Context) {
+		desktop.ApplyTheme(c, s.app.SettingsSnapshot(), c.Theme().Dark)
 		ui.Scroll(c).Fill().Children(func() {
 			ui.Column(c).FillWidth().Padding(8, 16).Children(func() {
 				page := s.current()
@@ -51,6 +53,15 @@ func TestMobileSearchSubmitsAndShowsDistinctResultTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 		wait(tester, tab.want)
+		if access, found := tester.AccessByRole(ui.RoleTab, tab.label); !found || !access.Selected {
+			t.Fatalf("%q is not marked as the selected result tab", tab.label)
+		}
+		if tab.label == "歌单" {
+			mobileLibraryShot(t, tester, "search-playlist-selected-light.png")
+			tester.SetDark(true)
+			mobileLibraryShot(t, tester, "search-playlist-selected-dark.png")
+			tester.SetDark(false)
+		}
 	}
 	if err := tester.Click("清除搜索词"); err != nil {
 		t.Fatal(err)

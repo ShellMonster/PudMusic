@@ -9,6 +9,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 )
@@ -161,7 +162,7 @@ type feedLibraryState struct {
 
 func (s *shell) feedLibrary(c *ui.Context, page *route) {
 	if !s.app.LoggedIn() {
-		s.libraryLogin(c, "动态")
+		s.libraryLogin(c, "关注动态")
 		return
 	}
 	account := s.app.AccountSnapshot()
@@ -172,9 +173,13 @@ func (s *shell) feedLibrary(c *ui.Context, page *route) {
 		s.loadDynamicFeed(&state.feed, 0, true)
 		s.loadFeedAuthors(state, true)
 	}
-	ui.Text(c, "关注的 UP 主最近分享了什么。").FontSize(13).TextColor(c.Theme().TextMuted)
-	ui.ScrollHorizontal(c).FillWidth().Height(44).Gap(6).Children(func() {
-		librarySegment(c, "全部", state.author == 0, func() {
+	palette := phonePalette(c)
+	ui.Column(c).FillWidth().Gap(6).Padding(8, 0, 10).Children(func() {
+		ui.Text(c, "用户动态").FontSize(21).Bold().Role(ui.RoleHeading)
+		ui.Text(c, "关注的 UP 主最近分享了什么。").FontSize(13).TextColor(palette.muted)
+	})
+	ui.ScrollHorizontal(c).FillWidth().Height(touchSize()).Gap(8).Children(func() {
+		feedAuthorChip(c, "全部", state.author == 0, func() {
 			state.author = 0
 			s.loadDynamicFeed(&state.feed, 0, true)
 		})
@@ -184,7 +189,7 @@ func (s *shell) feedLibrary(c *ui.Context, page *route) {
 				continue
 			}
 			seen[author.Mid] = true
-			librarySegment(c.Key(author.Mid), author.Name, state.author == author.Mid, func() {
+			feedAuthorChip(c.Key(author.Mid), author.Name, state.author == author.Mid, func() {
 				state.author = author.Mid
 				s.loadDynamicFeed(&state.feed, author.Mid, true)
 			})
@@ -194,10 +199,33 @@ func (s *shell) feedLibrary(c *ui.Context, page *route) {
 			if state.authors.err != nil {
 				label = "重试加载 UP 主"
 			}
-			librarySegment(c, label, false, func() { s.loadFeedAuthors(state, false) })
+			feedAuthorChip(c, label, false, func() { s.loadFeedAuthors(state, false) })
 		}
 	})
+	if state.feed.pages.err != nil && len(state.feed.pages.items) == 0 {
+		ui.Column(c.Key("feed-network-error")).FillWidth().Padding(60, 12, 24).Gap(10).AlignItems(ui.Center).Children(func() {
+			statusArtwork(c, "network")
+			typo.Display(ui.Text(c, "网络连接异常"), 18).Role(ui.RoleStatus)
+			ui.Text(c, "检查网络连接后重试。").FontSize(13).TextColor(palette.muted)
+			if browseAction(c, "refresh", "重试", false) {
+				s.loadDynamicFeed(&state.feed, state.author, false)
+			}
+		})
+		return
+	}
 	s.dynamicRows(c, &state.feed, state.author)
+}
+
+func feedAuthorChip(c *ui.Context, label string, selected bool, tap func()) {
+	palette := phonePalette(c)
+	fill, ink := palette.field, palette.muted
+	if selected {
+		fill, ink = palette.text, palette.surface
+	}
+	ui.ButtonBase(c).Label(label).AccessSelected(selected).Height(touchSize()).PaddingX(12).Radius(touchSize() / 2).
+		Background(fill).Center().OnClick(tap).Children(func() {
+		ui.Text(c, label).FontSize(13).TextColor(ink).SingleLine()
+	})
 }
 
 func (s *shell) loadFeedAuthors(state *feedLibraryState, reset bool) {
@@ -240,7 +268,11 @@ func (s *shell) dynamicRows(c *ui.Context, state *dynamicLibraryState, mid int64
 		}
 	}
 	if state.pages.err != nil {
-		libraryFailure(c, func() { s.loadDynamicFeed(state, mid, false) })
+		title, detail := "暂时无法加载动态", "检查网络连接后重试。"
+		if len(seen) > 0 {
+			title, detail = "暂时无法加载更多动态", "已加载的动态仍可查看。"
+		}
+		discoverNotice(c.Key("dynamic-load-error"), "network", title, detail, "重试", false, func() { s.loadDynamicFeed(state, mid, false) })
 	} else if state.pages.more || state.pages.loading {
 		libraryMore(c, state.pages.loading, func() { s.loadDynamicFeed(state, mid, false) })
 	} else if len(seen) == 0 {
@@ -253,7 +285,7 @@ func (s *shell) dynamicCard(c *ui.Context, state *dynamicLibraryState, dynamic a
 	if !changed {
 		liked = dynamic.Liked
 	}
-	ui.Column(c).Radius(12).Background(c.Theme().Surface).Padding(12).Gap(8).Children(func() {
+	ui.Column(c).FillWidth().Radius(12).Background(c.Theme().Surface).Padding(12).Gap(8).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).MinHeight(44).Role(ui.RoleButton).Label(dynamic.Author.Name).
 			OnClick(func() { s.openCreator(dynamic.Author.Mid, dynamic.Author.Name) }).Children(func() {
 			cover(c, dynamic.Author.Face, 34, 17)

@@ -70,6 +70,42 @@ func sectionHeading(c *ui.Context, title, action string) bool {
 	return clicked
 }
 
+func statusArtwork(c *ui.Context, icon string) {
+	palette := phonePalette(c)
+	ui.Box(c).Size(104, 92).Draw(func(p *ui.Painter, r ui.Rect) {
+		ink := palette.muted
+		p.Stroke(ui.Rect{X: r.X + 35, Y: r.Y + 13, W: 56, H: 56}, ink, 28, 1.3)
+		p.Stroke(ui.Rect{X: r.X + 43, Y: r.Y + 21, W: 40, H: 40}, palette.line, 20, 1.2)
+		cover := ui.Rect{X: r.X + 6, Y: r.Y + 12, W: 58, H: 64}
+		p.Fill(cover, palette.fill, 3)
+		p.Stroke(cover, ink, 3, 1.3)
+		p.Line(r.X+15, r.Y+58, r.X+35, r.Y+58, 1.3, ink)
+		p.Line(r.X+15, r.Y+64, r.X+45, r.Y+64, 1.3, ink)
+	}).Children(func() {
+		ui.Row(c).FillWidth().Justify(ui.End).Padding(12, 5, 0, 0).Children(func() {
+			ui.Box(c).Size(28, 28).Radius(14).Background(palette.surface).Border(1, palette.muted).Center().Children(func() {
+				if icon == "lock" {
+					glyph(c, icon, 15, palette.muted)
+				} else {
+					networkUnavailableIcon(c, palette.muted)
+				}
+			})
+		})
+	})
+}
+
+func networkUnavailableIcon(c *ui.Context, ink ui.Color) {
+	ui.Box(c).Size(18, 18).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+		x, y := r.X, r.Y
+		path := (&ui.Path{}).MoveTo(x+2, y+6).QuadTo(x+9, y, x+16, y+6).
+			MoveTo(x+4, y+9).QuadTo(x+9, y+5, x+14, y+9).
+			MoveTo(x+7, y+12).QuadTo(x+9, y+10, x+11, y+12)
+		p.StrokePath(path, 1.2, ink)
+		p.Fill(ui.Rect{X: x + 8, Y: y + 14, W: 2, H: 2}, ink, 1)
+		p.StrokePath((&ui.Path{}).MoveTo(x+3, y+3).LineTo(x+15, y+15), 1.4, ink)
+	})
+}
+
 func (s *shell) trackList(c *ui.Context, items []app.Item) {
 	coverSize, height := float32(48), float32(58)
 	if s.current().kind == pageCollection {
