@@ -11,6 +11,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -74,7 +75,11 @@ func (s *shell) discoverRefresh(page *route, scroll ui.Element) {
 	}
 	state := s.discoverHomeState(page)
 	if scroll.PullToRefresh(&state.refresh) {
-		s.loadDiscoverHome(state)
+		if state.daily.loading || state.mixes.loading {
+			state.refresh.Refreshing = false
+		} else {
+			s.loadDiscoverHome(state)
+		}
 	}
 }
 
@@ -85,6 +90,7 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 	state.daily.started, state.daily.loading = true, true
 	state.mixes.started, state.mixes.loading = true, true
 	state.guest = !s.app.LoggedIn()
+	recovering := state.daily.err != nil || state.mixes.err != nil || state.refresh.Refreshing
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
 		defer cancel()
@@ -93,6 +99,9 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 		err := dailyErr
 		if dailyErr == nil {
 			s.update(func() {
+				if state.daily.err != nil {
+					state.mixes.err = nil
+				}
 				state.daily.loading, state.daily.err = false, nil
 				state.daily.rows = rows
 			})
@@ -105,6 +114,9 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 			state.mixes.loading, state.mixes.err = false, err
 			if err == nil {
 				state.mixes.cards = cards
+				if recovering {
+					s.notice = "已刷新推荐"
+				}
 			}
 			state.refresh.Refreshing = false
 		})
@@ -190,6 +202,12 @@ func (s *shell) discover(c *ui.Context, page *route) {
 		}).Clicked() {
 			s.openSearch()
 		}
+		tracks := recommendTracks(state.daily.rows)
+		retry := func() { s.loadDiscoverHome(state) }
+		if state.daily.err != nil && len(tracks) == 0 && len(state.mixes.cards) == 0 {
+			s.discoverUnavailable(c, state, retry)
+			return
+		}
 		ui.Row(c).FillWidth().Gap(4).Children(func() {
 			for _, item := range []struct {
 				kind  pageKind
@@ -213,28 +231,26 @@ func (s *shell) discover(c *ui.Context, page *route) {
 				}
 			}
 		})
-		tracks := recommendTracks(state.daily.rows)
-		retry := func() { s.loadDiscoverHome(state) }
-		if state.daily.err != nil && state.mixes.err != nil && !state.daily.loading && !state.mixes.loading &&
-			len(tracks) == 0 && len(state.mixes.cards) == 0 {
-			if !s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn) {
-				browseStatusRow(c, "登录后可查看推荐", "去登录", func() {
-					s.push(route{kind: pageLogin, title: "登录"})
-				})
-			} else {
-				browseStatusRow(c, "推荐暂时没加载出来", "重试", retry)
-			}
-			return
+		if state.daily.err != nil {
+			discoverNotice(c.Key("discover-refresh-error"), "刷新失败", "已保留上次加载的内容。", "重试刷新", state.daily.loading || state.mixes.loading, retry)
 		}
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			var retryCached func()
-			if len(state.mixes.cards) > 0 && state.mixes.err != nil && !state.mixes.loading {
-				retryCached = retry
+			if state.daily.err == nil && state.mixes.err != nil {
+				sectionHeading(c, "推荐歌单", "")
+				discoverNotice(c.Key("discover-mixes-error"), "推荐歌单暂时不可用", "其他推荐仍可浏览。", "重试歌单", state.mixes.loading, func() {
+					s.loadMixesForOwners(&state.mixes, recommendOwners(state.daily.rows))
+				})
+				if len(state.mixes.cards) > 0 {
+					s.collectionGrid(c, state.mixes.cards[:min(3, len(state.mixes.cards))])
+				}
+				return
 			}
-			if sectionHeadingWithRetry(c, "推荐歌单", "更多", retryCached) {
+			if sectionHeading(c, "推荐歌单", "更多") {
 				s.push(route{kind: pageMixes, title: "推荐歌单", data: &discoverDetail{mixes: &state.mixes}})
 			}
-			s.renderMixes(c, &state.mixes, 3, retry)
+			if state.daily.err == nil || len(state.mixes.cards) > 0 {
+				s.renderMixes(c, &state.mixes, 3, retry)
+			}
 		})
 		feature, single := discoverFeatured(state.mixes.cards, tracks)
 		if feature.title != "" || state.mixes.loading {
@@ -276,21 +292,64 @@ func (s *shell) discover(c *ui.Context, page *route) {
 			})
 		}
 		ui.Column(c).FillWidth().Gap(8).Children(func() {
-			var retryCached func()
-			if len(tracks) > 0 && state.daily.err != nil && !state.daily.loading {
-				retryCached = retry
-			}
-			if sectionHeadingWithRetry(c, "挑一首听", "查看全部", retryCached) {
+			if sectionHeading(c, "挑一首听", "查看全部") {
 				s.push(route{kind: pageDaily, title: "每日推荐"})
 			}
 			if len(tracks) > 0 {
 				s.trackList(c, tracks[:min(3, len(tracks))])
 			} else if state.daily.loading {
 				browseTrackPlaceholders(c, 3)
-			} else {
+			} else if state.daily.err == nil {
 				browseStatus(c, false, state.daily.err, "暂无推荐歌曲", retry)
 			}
 		})
+	})
+}
+
+func (s *shell) discoverUnavailable(c *ui.Context, state *discoverState, retry func()) {
+	requiresLogin := !s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn)
+	icon, title, detail, action := "network", "暂时无法加载推荐", "检查网络后重试，也可以搜索公开音乐。", "重新加载"
+	if requiresLogin {
+		icon, title, detail, action = "lock", "登录后可查看推荐", "也可以继续搜索公开音乐。", "去登录"
+		retry = func() { s.push(route{kind: pageLogin, title: "登录"}) }
+	}
+	palette := phonePalette(c)
+	ui.Column(c.Key("discover-unavailable")).FillWidth().Padding(20, 12, 22).Radius(16).
+		Background(palette.fill).Gap(10).AlignItems(ui.Center).Children(func() {
+		statusArtwork(c, icon)
+		typo.Display(ui.Text(c, title), 19).Role(ui.RoleHeading)
+		ui.Text(c, detail).FontSize(13).TextColor(palette.muted).TextAlign(ui.Center)
+		label := action
+		if state.daily.loading || state.mixes.loading {
+			label = "正在加载…"
+		}
+		if settingsAction(c, label, true, false).Disabled(label != action).Clicked() {
+			retry()
+		}
+	})
+	ui.Column(c.Key("discover-local")).FillWidth().Gap(6).Children(func() {
+		sectionHeading(c, "本机可用", "")
+		libraryRow(c.Key("local"), "", "disc", "本地音乐", "打开设备里的音频文件", func() { s.openLibraryPage(libraryDestinations[1]) })
+		libraryRow(c.Key("downloads"), "", "download", "下载记录", "播放已下载的音乐", func() { s.openLibraryPage(libraryDestinations[2]) })
+	})
+}
+
+func discoverNotice(c *ui.Context, title, detail, action string, busy bool, retry func()) {
+	palette := phonePalette(c)
+	ui.Row(c).FillWidth().Padding(8, 10).Gap(8).Radius(12).Background(palette.fill).AlignItems(ui.Center).Children(func() {
+		networkUnavailableIcon(c, palette.muted)
+		ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
+			ui.Text(c, title).FontSize(14).FontWeight(600).Role(ui.RoleStatus)
+			ui.Text(c, detail).FontSize(12).TextColor(palette.muted)
+		})
+		text := action
+		if busy {
+			text = "正在重试…"
+		}
+		if ui.ButtonBase(c).Key(action).Label(action).MinHeight(touchSize()).PaddingX(4).Shrink(0).
+			Disabled(busy).Center().Children(func() { ui.Text(c, text).FontSize(13).FontWeight(600).TextColor(palette.accent) }).Clicked() {
+			retry()
+		}
 	})
 }
 
@@ -302,6 +361,10 @@ func discoverFeatured(cards []browseCollection, tracks []app.Item) (browseCollec
 		if track.Cover != "" {
 			return browseCollection{title: track.Title, cover: track.Cover, owner: track.Artist, count: 1}, track
 		}
+	}
+	if len(tracks) > 0 {
+		track := tracks[0]
+		return browseCollection{title: track.Title, owner: track.Artist, count: 1}, track
 	}
 	return browseCollection{}, app.Item{}
 }
@@ -511,22 +574,35 @@ func (s *shell) discoverRankedTracks(c *ui.Context, tracks []app.Item) {
 }
 
 func (s *shell) loadDiscoverMixes(mixes *browseMixes) {
+	s.loadMixesForOwners(mixes, nil)
+}
+
+func (s *shell) loadMixesForOwners(mixes *browseMixes, owners []browseOwner) {
 	if mixes.loading {
 		return
 	}
 	mixes.started, mixes.loading = true, true
+	recovering := mixes.err != nil
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
 		defer cancel()
-		rows, _, err := s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
+		var err error
+		if owners == nil {
+			var rows []app.RecommendItem
+			rows, _, err = s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
+			owners = recommendOwners(rows)
+		}
 		var cards []browseCollection
 		if err == nil {
-			cards, err = s.publicMusicCollections(ctx, recommendOwners(rows), "")
+			cards, err = s.publicMusicCollections(ctx, owners, "")
 		}
 		s.update(func() {
 			mixes.loading, mixes.err = false, err
 			if err == nil {
 				mixes.cards = cards
+				if recovering {
+					s.notice = "已刷新推荐歌单"
+				}
 			}
 		})
 	}()

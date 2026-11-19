@@ -11,6 +11,7 @@ import (
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/notice"
 	"github.com/ShellMonster/PudMusic/internal/ui/iconset"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/mobile"
 )
@@ -137,30 +138,34 @@ func (s *shell) myLibrary(c *ui.Context, page *route) {
 	}
 	ui.Row(c).FillWidth().Height(52).AlignItems(ui.Center).Gap(8).Children(func() {
 		ui.Text(c, "我的").Grow(1).FontSize(21).Bold()
-		label := "登录"
 		if loggedIn {
-			label = state.nav.Name
+			label := state.nav.Name
 			if label == "" {
 				label = "我的账号"
 			}
-		}
-		ui.Row(c).Gap(6).AlignItems(ui.Center).MinHeight(44).Role(ui.RoleButton).Label(label).OnClick(func() {
-			if loggedIn {
+			ui.Row(c).Gap(6).AlignItems(ui.Center).MinHeight(44).Role(ui.RoleButton).Label(label).OnClick(func() {
 				state.menu = true
-			} else {
-				s.push(route{kind: pageLogin, title: "登录"})
-			}
-		}).Children(func() {
-			if loggedIn {
+			}).Children(func() {
 				cover(c, state.nav.Face, 32, 16)
-			} else {
-				glyph(c, "user", 20, c.Theme().Text)
-			}
-			ui.Text(c, label).MaxLines(1).MaxWidth(118).FontSize(13)
-			glyph(c, "right", 13, c.Theme().TextMuted)
-		})
+				ui.Text(c, label).MaxLines(1).MaxWidth(118).FontSize(13)
+				glyph(c, "right", 13, c.Theme().TextMuted)
+			})
+		}
 		iconButton(c, "settings", "设置").OnClick(func() { s.push(route{kind: pageSettings, title: "设置"}) })
 	})
+	if !loggedIn {
+		palette := phonePalette(c)
+		ui.Row(c.Key("guest-account")).FillWidth().Padding(10, 12).Gap(12).Radius(16).Background(palette.fill).AlignItems(ui.Center).Children(func() {
+			ui.Box(c).Size(36, 36).Radius(18).Shrink(0).Background(palette.field).Center().Children(func() { glyph(c, "user", 19, palette.muted) })
+			ui.Column(c).Grow(1).Basis(0).MinWidth(0).Gap(3).Children(func() {
+				ui.Text(c, "访客").FontSize(14).Bold()
+				ui.Text(c, "登录后同步收藏和关注").FontSize(12).TextColor(palette.muted)
+			})
+			if settingsAction(c, "登录", true, false).Clicked() {
+				s.push(route{kind: pageLogin, title: "登录"})
+			}
+		})
+	}
 	ui.Row(c).FillWidth().Gap(8).Children(func() {
 		for _, item := range libraryDestinations[:4] {
 			if slices.Contains(hidden, item.path) || item.requiresLogin && !loggedIn {
@@ -182,7 +187,7 @@ func (s *shell) myLibrary(c *ui.Context, page *route) {
 		if discover, ok := s.stacks[0][0].data.(*discoverState); ok && len(discover.mixes.cards) > 0 {
 			artwork = discover.mixes.cards[0].cover
 		}
-		s.libraryFeature(c, "folder", "逛逛公开歌单", "登录后可同步喜欢与收藏", artwork, func() { s.push(route{kind: pageMixes, title: "推荐歌单"}) }, nil)
+		s.libraryFeature(c, "folder", "逛逛公开歌单", "查看其他听众分享的歌单", artwork, func() { s.push(route{kind: pageMixes, title: "推荐歌单"}) }, nil)
 	} else {
 		s.likedFeature(c, state)
 		s.myFolders(c, state, hidden)
@@ -208,9 +213,12 @@ func (s *shell) myLibrary(c *ui.Context, page *route) {
 		}
 	}
 	for _, item := range libraryDestinations[4:] {
-		if !slices.Contains(hidden, item.path) && (item.kind != pageFeed || !slices.Contains(hidden, "/follow")) && (!item.requiresLogin || loggedIn) {
+		if !slices.Contains(hidden, item.path) && (item.kind != pageFeed || !slices.Contains(hidden, "/follow")) {
 			libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
 		}
+	}
+	if item := libraryDestinations[3]; !loggedIn && !slices.Contains(hidden, item.path) {
+		libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
 	}
 	libraryActionSheet(c, &state.menu, mobile.ActionSheetOptions{Title: state.nav.Name, Cancel: "取消"},
 		mobile.Action{Label: "刷新收藏夹", OnTap: s.app.RefreshFavorites},
@@ -657,14 +665,18 @@ func libraryHistorySubtitle(item app.LibraryItem, later bool) string {
 
 func (s *shell) libraryLogin(c *ui.Context, name string) {
 	palette := phonePalette(c)
-	ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(38, 16, 24).Gap(12).Children(func() {
-		ui.Box(c).Size(48, 48).Radius(12).Background(palette.field).Center().Children(func() {
-			glyph(c, "disc", 24, palette.muted)
+	ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(64, 12, 24).Gap(10).Children(func() {
+		statusArtwork(c, "lock")
+		typo.Display(ui.Text(c, "登录后查看"+name), 19).Role(ui.RoleHeading)
+		ui.Text(c, "登录 B 站账号即可同步"+name+"。").FontSize(13).TextColor(palette.muted)
+		ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+			if settingsAction(c, "去登录", true, false).Clicked() {
+				s.push(route{kind: pageLogin, title: "登录"})
+			}
+			if settingsAction(c, "返回上一页", false, false).Clicked() {
+				s.back()
+			}
 		})
-		ui.Text(c, "登录后查看"+name).FontSize(16).FontWeight(600).Role(ui.RoleHeading)
-		if settingsAction(c, "去登录", true, false).Clicked() {
-			s.push(route{kind: pageLogin, title: "登录"})
-		}
 	})
 }
 

@@ -161,7 +161,7 @@ type feedLibraryState struct {
 
 func (s *shell) feedLibrary(c *ui.Context, page *route) {
 	if !s.app.LoggedIn() {
-		s.libraryLogin(c, "动态")
+		s.libraryLogin(c, "关注动态")
 		return
 	}
 	account := s.app.AccountSnapshot()
@@ -240,7 +240,11 @@ func (s *shell) dynamicRows(c *ui.Context, state *dynamicLibraryState, mid int64
 		}
 	}
 	if state.pages.err != nil {
-		libraryFailure(c, func() { s.loadDynamicFeed(state, mid, false) })
+		title, detail := "暂时无法加载动态", "检查网络连接后重试。"
+		if len(seen) > 0 {
+			title, detail = "暂时无法加载更多动态", "已加载的动态仍可查看。"
+		}
+		discoverNotice(c.Key("dynamic-load-error"), title, detail, "重试", false, func() { s.loadDynamicFeed(state, mid, false) })
 	} else if state.pages.more || state.pages.loading {
 		libraryMore(c, state.pages.loading, func() { s.loadDynamicFeed(state, mid, false) })
 	} else if len(seen) == 0 {
