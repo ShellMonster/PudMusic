@@ -226,6 +226,50 @@ func TestMobilePlaylistPageRetriesWithoutRefetchingRecommendations(t *testing.T)
 	wait(tester, "公开音乐合集")
 }
 
+// TestMobileStandalonePlaylistsRetryAfterFeedFailure verifies that a failed first load can recover from My.
+func TestMobileStandalonePlaylistsRetryAfterFeedFailure(t *testing.T) {
+	var unavailable atomic.Bool
+	unavailable.Store(true)
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/x/web-interface/region/feed/rcmd" && unavailable.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	s.switchTab(2)
+	tester := ui.NewTester(s.view, 390, 844)
+	if err := tester.Click("逛逛公开歌单"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "重试歌单")
+	unavailable.Store(false)
+	if err := tester.Click("重试歌单"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "公开音乐合集")
+}
+
+// TestMobileCachedPlaylistRefreshFailureShowsFeedback verifies that an offscreen retry still gives immediate feedback.
+func TestMobileCachedPlaylistRefreshFailureShowsFeedback(t *testing.T) {
+	var failMixes atomic.Bool
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/x/polymer/web-space/seasons_series_list" && failMixes.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	tester := ui.NewTester(s.view, 320, 568)
+	wait(tester, "公开音乐合集")
+	failMixes.Store(true)
+	s.loadDiscoverHome(s.discoverHomeState(s.current()))
+	wait(tester, "歌单刷新失败，已保留上次加载的歌单")
+	if !tester.HasText("公开音乐合集") {
+		t.Fatal("failed refresh removed cached playlists")
+	}
+}
+
 // TestMobileDiscoverOffersLoginWhenRequired verifies the action when Bilibili explicitly requires an account.
 func TestMobileDiscoverOffersLoginWhenRequired(t *testing.T) {
 	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {

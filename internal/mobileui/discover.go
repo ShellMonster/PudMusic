@@ -120,6 +120,9 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 				}
 			} else {
 				state.mixes.owners = owners
+				if err != nil && len(state.mixes.cards) > 0 && s.current().data == state {
+					s.notice = "歌单刷新失败，已保留上次加载的歌单"
+				}
 			}
 			state.mixes.loading, state.mixes.err = false, err
 			if err == nil {
@@ -625,7 +628,9 @@ func (s *shell) loadDiscoverMixes(mixes *browseMixes) {
 		if owners == nil {
 			var rows []app.RecommendItem
 			rows, _, err = s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
-			owners = recommendOwners(rows)
+			if err == nil {
+				owners = recommendOwners(rows)
+			}
 		}
 		var cards []browseCollection
 		if err == nil {
