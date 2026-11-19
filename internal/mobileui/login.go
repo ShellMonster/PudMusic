@@ -1,6 +1,8 @@
 package mobileui
 
 import (
+	"net/url"
+
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
@@ -105,7 +107,7 @@ func (s *shell) login(c *ui.Context, page *route) {
 			}
 			if settingsAction(c, "在 B 站 App 中确认", true, true).Clicked() {
 				data.openFailed = false
-				c.OpenURLThen(link, func(err error) {
+				c.OpenURLThen("bilibili://browser/?url="+url.QueryEscape(link), func(err error) {
 					if page.data == data && s.app.LoginState().ConfirmationURL() == link {
 						data.openFailed = err != nil
 					}
