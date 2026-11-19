@@ -40,7 +40,7 @@ type browseMixes struct {
 	owners  []browseOwner
 	started bool
 	loading bool
-	guest   bool
+	account uint64
 	err     error
 }
 
@@ -49,7 +49,7 @@ type discoverState struct {
 	mixes     browseMixes
 	refresh   ui.RefreshState
 	albumBusy bool
-	guest     bool
+	account   uint64
 }
 
 type discoverDetail struct {
@@ -91,8 +91,8 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 	}
 	state.daily.started, state.daily.loading = true, true
 	state.mixes.started, state.mixes.loading = true, true
-	state.guest = !s.app.LoggedIn()
-	state.mixes.guest = state.guest
+	state.account = s.app.AccountSnapshot().Generation
+	state.mixes.account = state.account
 	recovering := state.daily.err != nil || state.mixes.err != nil || state.refresh.Refreshing
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
@@ -201,9 +201,9 @@ func (s *shell) discover(c *ui.Context, page *route) {
 		return
 	}
 	state := s.discoverHomeState(page)
-	if !state.daily.started || (state.guest && s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn)) {
+	if !state.daily.started || s.discoverAccountChanged(state.account, state.daily.err) {
 		s.loadDiscoverHome(state)
-	} else if state.mixes.guest && s.app.LoggedIn() && state.daily.err == nil && errors.Is(state.mixes.err, bili.ErrNotLoggedIn) {
+	} else if state.daily.err == nil && s.discoverAccountChanged(state.mixes.account, state.mixes.err) {
 		s.loadDiscoverMixes(&state.mixes)
 	}
 	palette := tok.Of(c.Theme())
@@ -318,6 +318,10 @@ func (s *shell) discover(c *ui.Context, page *route) {
 	})
 }
 
+func (s *shell) discoverAccountChanged(generation uint64, err error) bool {
+	return errors.Is(err, bili.ErrNotLoggedIn) && s.app.LoggedIn() && s.app.AccountSnapshot().Generation != generation
+}
+
 func (s *shell) discoverMixesNotice(c *ui.Context, mixes *browseMixes) {
 	detail := "其他推荐仍可浏览。"
 	if len(mixes.cards) > 0 {
@@ -328,7 +332,7 @@ func (s *shell) discoverMixesNotice(c *ui.Context, mixes *browseMixes) {
 
 func (s *shell) discoverRetryNotice(c *ui.Context, err error, title, detail, action string, busy bool, retry func()) {
 	icon := "network"
-	if !s.app.LoggedIn() && errors.Is(err, bili.ErrNotLoggedIn) {
+	if errors.Is(err, bili.ErrNotLoggedIn) {
 		icon, title, action = "lock", "登录后可查看推荐", "去登录"
 		retry = func() { s.push(route{kind: pageLogin, title: "登录"}) }
 	}
@@ -336,7 +340,7 @@ func (s *shell) discoverRetryNotice(c *ui.Context, err error, title, detail, act
 }
 
 func (s *shell) discoverUnavailable(c *ui.Context, state *discoverState, retry func()) {
-	requiresLogin := !s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn)
+	requiresLogin := errors.Is(state.daily.err, bili.ErrNotLoggedIn)
 	icon, title, detail, action := "network", "暂时无法加载推荐", "检查网络后重试，也可以搜索公开音乐。", "重新加载"
 	if requiresLogin {
 		icon, title, detail, action = "lock", "登录后可查看推荐", "也可以继续搜索公开音乐。", "去登录"
@@ -524,7 +528,7 @@ func (s *shell) discoverSubpage(c *ui.Context, page *route) {
 		if state.mixes == nil {
 			state.mixes = &browseMixes{}
 		}
-		if !state.mixes.started || (state.mixes.guest && s.app.LoggedIn() && errors.Is(state.mixes.err, bili.ErrNotLoggedIn)) {
+		if !state.mixes.started || s.discoverAccountChanged(state.mixes.account, state.mixes.err) {
 			s.loadDiscoverMixes(state.mixes)
 		}
 		if state.mixes.err != nil {
@@ -618,7 +622,7 @@ func (s *shell) loadDiscoverMixes(mixes *browseMixes) {
 		return
 	}
 	mixes.started, mixes.loading = true, true
-	mixes.guest = !s.app.LoggedIn()
+	mixes.account = s.app.AccountSnapshot().Generation
 	owners := mixes.owners
 	recovering := mixes.err != nil
 	go func() {

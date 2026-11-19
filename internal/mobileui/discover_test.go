@@ -289,6 +289,53 @@ func TestMobileDiscoverOffersLoginWhenRequired(t *testing.T) {
 	}
 }
 
+// TestMobileDiscoverRenewsExpiredSession verifies recovery when a stored cookie is rejected by Bilibili.
+func TestMobileDiscoverRenewsExpiredSession(t *testing.T) {
+	var rejected, accepted atomic.Int32
+	s, wait := mobileBrowseFixtureForSession(t, app.Session{SESSDATA: "expired"}, func(w http.ResponseWriter, r *http.Request) bool {
+		switch r.URL.Path {
+		case "/x/web-interface/region/feed/rcmd":
+			cookie, err := r.Cookie("SESSDATA")
+			if err == nil && cookie.Value == "renewed" {
+				accepted.Add(1)
+				return false
+			}
+			rejected.Add(1)
+			fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+		case "/x/passport-login/web/qrcode/generate":
+			fmt.Fprint(w, `{"code":0,"data":{"url":"https://account.bilibili.com/h5/account-h5/auth/scan-web?qrcode_key=demo","qrcode_key":"demo"}}`)
+		case "/x/passport-login/web/qrcode/poll":
+			http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "renewed", Path: "/"})
+			fmt.Fprint(w, `{"code":0,"data":{"code":0}}`)
+		default:
+			return false
+		}
+		return true
+	})
+	s.app.SetLoginPollInterval(2 * time.Millisecond)
+	tester := ui.NewTester(s.view, 390, 844)
+	wait(tester, "去登录")
+	for _, action := range []string{"去登录", "暂不登录"} {
+		if err := tester.Click(action); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait(tester, "去登录")
+	for _, action := range []string{"去登录", "继续登录"} {
+		if err := tester.Click(action); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait(tester, "登录成功")
+	if err := tester.Click("返回"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "公开音乐合集")
+	if rejected.Load() != 1 || accepted.Load() != 1 {
+		t.Fatalf("expected one rejected request and one recovery request, got %d and %d", rejected.Load(), accepted.Load())
+	}
+}
+
 // TestMobileGuestFeedLoginReturnsToFeed verifies login recovery and that failed pagination keeps the previous posts.
 func TestMobileGuestFeedLoginReturnsToFeed(t *testing.T) {
 	var failInitial, failNext atomic.Bool
@@ -383,6 +430,11 @@ func mobileBrowseFixture(t *testing.T) (*shell, func(*ui.Tester, string)) {
 
 func mobileBrowseFixtureWith(t *testing.T, intercept func(http.ResponseWriter, *http.Request) bool) (*shell, func(*ui.Tester, string)) {
 	t.Helper()
+	return mobileBrowseFixtureForSession(t, app.Session{}, intercept)
+}
+
+func mobileBrowseFixtureForSession(t *testing.T, initial app.Session, intercept func(http.ResponseWriter, *http.Request) bool) (*shell, func(*ui.Tester, string)) {
+	t.Helper()
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if intercept != nil && intercept(w, r) {
 			return
@@ -434,7 +486,13 @@ func mobileBrowseFixtureWith(t *testing.T, intercept func(http.ResponseWriter, *
 	t.Cleanup(a.Close)
 	client := bili.NewClient(bili.Options{Transport: fixture.Client().Transport})
 	client.TestOnlyPointHostsAtFixture(fixture.URL)
-	a.MountLogin(app.NewMemoryStore("mobile fixture"), client)
+	store := app.NewMemoryStore("mobile fixture")
+	if initial.LoggedIn() {
+		if err := store.Save(t.Context(), initial); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.MountLogin(store, client)
 	a.MountSearch(client)
 	a.MountRecommend(client)
 	a.MountExplore(client)
