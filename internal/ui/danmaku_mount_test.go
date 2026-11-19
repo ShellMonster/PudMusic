@@ -78,7 +78,7 @@ func TestMountDanmakuIsWiredBeforeTheWindow(t *testing.T) {
 	if mount < 0 {
 		t.Fatalf("bootstrap.go 里没有 ui.MountDanmaku 的默认装配")
 	}
-	assemble := strings.Index(mainText, "bootstrap.Assemble(bootstrap.DefaultDependencies())")
+	assemble := strings.Index(mainText, "bootstrap.Assemble(platformDependencies())")
 	if assemble < 0 {
 		t.Fatalf("main.go 里没有通过 bootstrap.Assemble 启动")
 	}

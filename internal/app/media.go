@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/media"
+	"github.com/ShellMonster/PudMusic/internal/service/audio"
 )
 
 // mediaPublishEvery 是「在放的时候多久校正一次锁屏上的进度」。
@@ -77,6 +78,7 @@ func (a *App) mediaSnapshotLocked() media.NowPlaying {
 		ArtworkURL: a.cover,
 		Duration:   a.duration,
 		Position:   a.position,
+		Rate:       a.rate,
 	}
 }
 
@@ -157,13 +159,16 @@ func (a *App) SeekTo(t time.Duration) {
 // ⚠️ 它**不是** Toggle。用户在控制中心点了「播放」而歌本来就在放的时候，
 // 按切换会把它按停——那是「按了播放反而停了」，比按了没反应更糟。
 func (a *App) Play() {
+	a.playbackIntent.Add(1)
 	a.mu.Lock()
 	p := a.player
 	a.mu.Unlock()
 	if p == nil || p.Playing() {
 		return
 	}
-	p.Play()
+	if !a.startPlayer(p) {
+		return
+	}
 
 	a.mu.Lock()
 	a.playing, a.wantPlay, a.stopped = true, true, false
@@ -175,8 +180,42 @@ func (a *App) Play() {
 	}
 }
 
+func (a *App) PlaybackIntent() uint64 { return a.playbackIntent.Load() }
+
+func (a *App) SetPlaybackGate(gate func() bool) {
+	a.mu.Lock()
+	a.beforePlayback = gate
+	a.mu.Unlock()
+}
+
+func (a *App) startPlayer(p *audio.Player) bool {
+	a.mu.Lock()
+	gate, intent := a.beforePlayback, a.PlaybackIntent()
+	a.mu.Unlock()
+	allowed := gate == nil || p.Playing() || gate()
+	a.mu.Lock()
+	if a.player != p || a.PlaybackIntent() != intent {
+		a.mu.Unlock()
+		return false
+	}
+	if allowed {
+		p.Play()
+		a.mu.Unlock()
+		return true
+	}
+	a.playing, a.wantPlay = false, false
+	wake := a.wake
+	a.mu.Unlock()
+	a.publishMedia()
+	if wake != nil {
+		wake()
+	}
+	return false
+}
+
 // Pause 确保停着。本来就停着就什么都不做。
 func (a *App) Pause() {
+	a.playbackIntent.Add(1)
 	a.mu.Lock()
 	p := a.player
 	a.mu.Unlock()
@@ -203,6 +242,7 @@ func (a *App) Pause() {
 // 原地、按钮回到「播放」；停止之后进度条回到开头——用户按停止的意思是
 // 「这首到此为止」，不是「就停在这儿」。
 func (a *App) Stop() {
+	a.playbackIntent.Add(1)
 	a.mu.Lock()
 	p := a.player
 	if p == nil {

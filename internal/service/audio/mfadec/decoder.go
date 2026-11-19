@@ -2,8 +2,8 @@ package mfadec
 
 // 解码器这一层：把「一串 AAC 帧」变成「MyGo 的 audio 包能播的交织 float32」。
 //
-// 这一层是**平台无关**的：拆帧在 `source.go`，解码在 Windows 上是 Media
-// Foundation（`transform_windows.go`），而这里只管把两者接起来、把采样交出去。
+// 这一层是**平台无关**的：拆帧在 `source.go`，解码由 Windows 的 Media
+// Foundation 或 Android 的 MediaCodec 完成，这里负责接合两者、把采样交出去。
 // 平台无关的意思是**这一层在 macOS 上也能编译、也能测**——用一个假的解码器
 // 就能验「采样怎么数、丢多少、跳到哪」这些算术，而那些算术错了症状是
 // 「播出来的东西错位几百毫秒」，在真机上极难看出来。
@@ -22,12 +22,12 @@ import (
 
 // 这一包返回的错误。
 var (
-	// ErrUnsupported 是「这个平台没有 Media Foundation」时 Open 返回的错误。
+	// ErrUnsupported 是「这个构建没有 AAC 后端」时 Open 返回的错误。
 	//
 	// 它和「文件解不了」是两回事：前者是平台没能力，后者是文件本身不对，
 	// 两者在界面上要显示不同的提示，所以分开（和 `extaf.ErrUnsupported` 同一个
 	// 道理）。
-	ErrUnsupported = errors.New("mfadec: this platform has no Media Foundation audio decoder")
+	ErrUnsupported = errors.New("mfadec: no system AAC decoder backend in this build")
 
 	// ErrFormat 是「这串字节不是 AAC」——不是 MP4 家族里的 AAC，也不是裸 ADTS。
 	ErrFormat = errors.New("mfadec: not an AAC stream")
@@ -40,9 +40,7 @@ var (
 
 // aacCodec 是「解码器」那一半，Decoder 只看得见这五个方法。
 //
-// 真正的实现是 `*Codec`（Media Foundation 的 `IMFTransform`），只在 Windows
-// 上编译。这一层用接口而不是具体类型，`decoder.go` 才能在没有 Windows 的
-// 机器上编译——而这一层恰恰是最需要被测的那一层（见文件顶上那段）。
+// Windows 的 `*Codec` 和 Android 的 `*androidCodec` 都实现这一接口。
 type aacCodec interface {
 	aacDecoder
 	// SampleRate 是输出采样率。
@@ -72,7 +70,8 @@ type Decoder struct {
 	//
 	// 生产代码里它就是 `openCodec`；测试换成假的——没有这一层，跳位置那条路
 	// 在没有 Windows 的机器上**一条都测不到**。
-	newCodec func(*frameSource) (aacCodec, error)
+	newCodec     func(*frameSource) (aacCodec, error)
+	keepsPriming bool
 
 	// buf 是解出来还没交出去的 PCM（交织），head 是下一个要交出去的采样。
 	buf  []float32
@@ -86,11 +85,7 @@ type Decoder struct {
 	pos int64
 	// skip 是还要丢掉多少个采样（每声道）才轮到交出去。
 	//
-	// ⚠️ **它只有一个来源：seek**（跳过去的那一段）。
-	//
-	// 它**不是**容器的 `EncoderDelay`——解码器的输出本来就从呈现音频的开头起
-	//（解码器自己吞掉了它输出的第一帧，也就是编码器的预热），按 `EncoderDelay`
-	// 再丢一遍就是丢了两遍。理由见 `Open` 里那段。
+	// 跳转时丢弃预滚，保留首帧的后端也用它裁掉 MP4 的编码器预热。
 	skip int
 	// drained 记着「已经 drain 过了」——流读完只 drain 一次。
 	drained bool
@@ -116,6 +111,10 @@ func Open(r io.ReadSeeker) (*Decoder, error) {
 	if err := platformAvailable(); err != nil {
 		return nil, err
 	}
+	return open(r, openCodec, codecKeepsPriming)
+}
+
+func open(r io.ReadSeeker, newCodec func(*frameSource) (aacCodec, error), keepsPriming bool) (*Decoder, error) {
 	start, err := r.Seek(0, io.SeekCurrent)
 	if err != nil {
 		return nil, err
@@ -130,7 +129,17 @@ func Open(r io.ReadSeeker) (*Decoder, error) {
 		}
 		return nil, err
 	}
-	codec, err := openCodec(src)
+	var skip int
+	if keepsPriming && src.payloadType == aacPayloadRaw {
+		skip, err = src.seek(0, keepsPriming)
+		if err != nil {
+			if _, serr := r.Seek(start, io.SeekStart); serr != nil {
+				return nil, errors.Join(err, serr)
+			}
+			return nil, err
+		}
+	}
+	codec, err := newCodec(src)
 	if err != nil {
 		if _, serr := r.Seek(start, io.SeekStart); serr != nil {
 			return nil, errors.Join(err, serr)
@@ -138,29 +147,14 @@ func Open(r io.ReadSeeker) (*Decoder, error) {
 		return nil, err
 	}
 	return &Decoder{
-		src:      src,
-		codec:    codec,
-		newCodec: openCodec,
-		rate:     codec.SampleRate(),
-		chans:    codec.Channels(),
-		total:    src.total,
-		// ⚠️ **这里不丢容器的 `EncoderDelay`**——丢两遍就把音频挪早了。
-		//
-		// 理由（issue #128 的评审 + 本仓库量过的数）：**解码器的输出本来就从
-		// 呈现音频的开头起**。AAC 的 MDCT 是有重叠的，解码器**自己吞掉**第一帧
-		// 那半个重叠（那一帧是「不完整的」，也就是编码器的预热），所以：
-		//
-		//   - 原始输出 = 173 帧 = 177152 个采样，**正好等于** ffmpeg 解同一份
-		//     .m4a 的结果（`fixture_test.go` 的 `refFrames`）；
-		//   - macOS 的 AudioToolbox 给 176400 帧，而它和参考 WAV 的**前 176400
-		//     个采样**逐样本对齐（平均差 29/32768、最大 2313/32768）。
-		//
-		// 也就是说：那 1024 个预热采样**根本不在解码输出里**。再按
-		// `EncoderDelay` 丢一遍，就等于**凭空砍掉 1024 个真实采样**：音频比
-		// 参考晚 23 毫秒，而且比容器说的呈现长度少 272 个采样。
-		//
-		// 详见 `mfadec/decoder_test.go` 的 `TestTheDecoderDoesNotDropTheEncoderDelayTwice`。
-		skip: 0,
+		src:          src,
+		codec:        codec,
+		newCodec:     newCodec,
+		keepsPriming: keepsPriming,
+		rate:         codec.SampleRate(),
+		chans:        codec.Channels(),
+		total:        src.total,
+		skip:         skip,
 	}, nil
 }
 
@@ -180,7 +174,7 @@ func (d *Decoder) Channels() int { return d.chans }
 // 进度条），扫完把游标拨回原处，解码不受影响。
 func (d *Decoder) Len() int64 {
 	if d.total < 0 && d.src.measure != nil {
-		d.total = d.src.measure()
+		d.total = d.src.measure(d.keepsPriming)
 	}
 	return d.total
 }
@@ -333,12 +327,18 @@ func (d *Decoder) SetPosition(frame int64) error {
 	if d.total >= 0 && frame > d.total {
 		return fmt.Errorf("mfadec: frame %d 超出 [0, %d]: %w", frame, d.total, ErrSeekRange)
 	}
-	skip, err := d.src.seek(frame)
-	if err != nil {
-		return err
+	if d.total >= 0 && frame == d.total {
+		d.pos = frame
+		d.atEnd = true
+		return nil
 	}
 	codec, err := d.newCodec(d.src)
 	if err != nil {
+		return err
+	}
+	skip, err := d.src.seek(frame, d.keepsPriming)
+	if err != nil {
+		codec.Close()
 		return err
 	}
 	d.codec.Close()

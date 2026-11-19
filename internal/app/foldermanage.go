@@ -186,15 +186,17 @@ func (a *App) LoadCreatedFolders(rid int64) {
 // 而那一页是空的——表现是界面在收藏夹后面多出一行「空白的收藏夹」，
 // 勾它等于往一个不存在的收藏夹里放东西。
 func (a *App) fetchCreatedFolders(c *collections, rid int64) ([]bili.CreatedFolder, error) {
-	cli := c.refs.Client
-	mid := cli.SelfMid()
+	return fetchCreatedFolders(context.Background(), c.refs.Client, c.refs.Client.SelfMid(), rid)
+}
+
+func fetchCreatedFolders(ctx context.Context, cli *bili.Client, mid, rid int64) ([]bili.CreatedFolder, error) {
 	if mid <= 0 {
 		return nil, errNotLoggedInForFolders
 	}
 
 	var all []bili.CreatedFolder
 	for page := 1; ; page++ {
-		batch, hasMore, err := cli.CreatedFolders(context.Background(), mid, rid, page)
+		batch, hasMore, err := cli.CreatedFolders(ctx, mid, rid, page)
 		if err != nil {
 			return nil, err
 		}

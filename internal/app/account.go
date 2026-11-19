@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -86,11 +87,23 @@ type LoginState struct {
 	Err string
 	// LoggedIn 是此刻有没有登录态。登录成功后为 true。
 	LoggedIn bool
+	qrURL    string
 }
 
 // Busy 报登录流程是不是还在跑。
 func (s LoginState) Busy() bool {
 	return s.Phase == LoginWaiting || s.Phase == LoginScanned
+}
+
+func (s LoginState) ConfirmationURL() string {
+	if !s.Busy() || s.QR == nil {
+		return ""
+	}
+	link, err := url.Parse(s.qrURL)
+	if err != nil || link.Scheme != "https" || !strings.EqualFold(link.Host, "passport.bilibili.com") || link.User != nil {
+		return ""
+	}
+	return s.qrURL
 }
 
 // pollInterval 是轮询二维码状态的间隔。
@@ -109,7 +122,8 @@ type Account struct {
 	mu    sync.Mutex
 	state LoginState
 	// stop 是当前那一轮登录的取消函数。再开一轮之前先调它。
-	stop context.CancelFunc
+	stop       context.CancelFunc
+	loginLease *Lease
 	// runID 是「当前是第几轮登录」。每次开始或取消都 +1。
 	//
 	// 它的用处是让**上一轮的 goroutine 闭嘴**：取消只是把 ctx 掐掉，
@@ -265,6 +279,9 @@ func (a *App) onLoginSucceeded() {
 // 账号的收藏夹，直到下一件别的事把它画出来。
 func (a *App) onAccountChanged() {
 	a.FavoritesOf().forgetAccount()
+	a.commentsMu.Lock()
+	a.resetCommentsLocked("")
+	a.commentsMu.Unlock()
 	// 喜欢状态也属于上一个账号：换人之后旧答案一条都不能留。已经发出去的
 	// 写请求靠 `favEpoch` 拦（见 `SetBoundFavorite`）。
 	a.clearFavorites()
@@ -320,12 +337,8 @@ func (a *Account) restore(cli *bili.Client) error {
 // 那个 goroutine 会一直等在 ctx 上。
 func (a *Account) Close() {
 	a.mu.Lock()
-	stop := a.stop
-	a.stop = nil
+	a.stopLoginLocked()
 	a.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 }
 
 // httpCookiesOf 把落盘的 cookie 变成 net/http 认的形式。
@@ -354,9 +367,7 @@ func (a *App) BeginLogin() {
 
 func (a *Account) beginLogin() {
 	a.mu.Lock()
-	if a.stop != nil {
-		a.stop()
-	}
+	a.stopLoginLocked()
 	ctx, cancel := context.WithCancel(context.Background())
 	a.stop = cancel
 	a.runID++
@@ -365,6 +376,7 @@ func (a *Account) beginLogin() {
 	// **代次在这时候拿**。它记的是「用户按下登录那一刻」的登录态版本。
 	// 扫码成功要写回时对不上（最常见的是中间退了登），Lease 会挡住。
 	lease := a.mgr.BeginRenew()
+	a.loginLease = lease
 	a.state = LoginState{Phase: LoginWaiting, Hint: "正在向 B 站申请二维码…"}
 	a.mu.Unlock()
 	a.wakeUp()
@@ -389,16 +401,20 @@ func (a *App) CancelLogin() {
 
 func (a *Account) cancel() {
 	a.mu.Lock()
-	stop := a.stop
-	a.stop = nil
+	a.stopLoginLocked()
 	// +1 让在途的那一轮闭嘴：它回来之后写的任何状态都会被挡掉。
 	a.runID++
 	a.state = LoginState{Phase: LoginIdle}
 	a.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 	a.wakeUp()
+}
+
+func (a *Account) stopLoginLocked() {
+	if a.stop != nil {
+		a.loginLease.settled.Store(true)
+		a.stop()
+		a.stop, a.loginLease = nil, nil
+	}
 }
 
 // wakeUp 叫醒界面。回调可能在 setWake 之前还没装上，所以判空。
@@ -413,9 +429,10 @@ func (a *Account) wakeUp() {
 
 // run 是那一轮登录的完整流程：申请 → 画 → 循环轮询 → 落盘。
 func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
-	defer lease.Discard() // 没走到 Commit 的路径一律作废代次
+	defer lease.settled.Store(true)
 
-	qr, err := a.cli.NewQRCode(ctx)
+	login := a.cli.NewLoginClient()
+	qr, err := login.NewQRCode(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
 			return // 用户取消了，这不是错误
@@ -434,7 +451,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 		a.mu.Unlock() // 已经被取消了
 		return
 	}
-	a.state = LoginState{Phase: LoginWaiting, QR: code, Hint: bili.ScanWaiting.String()}
+	a.state = LoginState{Phase: LoginWaiting, QR: code, Hint: bili.ScanWaiting.String(), qrURL: qr.URL}
 	interval := a.interval
 	a.mu.Unlock()
 	a.wakeUp()
@@ -446,7 +463,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			res, err := a.cli.PollScan(ctx, qr.Key)
+			res, err := login.PollScan(ctx, qr.Key)
 			switch {
 			case ctx.Err() != nil:
 				return
@@ -467,7 +484,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 				a.hint(id, LoginExpired, bili.ScanExpired.String())
 				return
 			case bili.ScanConfirmed:
-				a.finish(ctx, lease, res, id)
+				a.finish(ctx, lease, res, login.IssuedCookies(), id)
 				return
 			}
 		}
@@ -475,7 +492,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 }
 
 // finish 把扫成功的凭据存进去。
-func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult, id uint64) {
+func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult, cookies []*http.Cookie, id uint64) {
 	sess := Session{RefreshToken: res.RefreshToken}
 	if !res.LoggedInAt.IsZero() {
 		sess.SavedAt = res.LoggedInAt
@@ -484,7 +501,7 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	// session.go 里 isOwnHost 的注释：按 cookie 自己的域过滤会把登录凭据滤掉）。
 	// 这里全都收下——SESSDATA / bili_jct / DedeUserID 三个都在里面，
 	// 少一个都会让「登录成功之后第一个要用的接口」失败。
-	for _, c := range a.cli.IssuedCookies() {
+	for _, c := range cookies {
 		sess.Cookies = append(sess.Cookies, CookieFromHTTP(c))
 	}
 	sess.Normalize(sess.SavedAt)
@@ -503,10 +520,10 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	// 得在拉新账号的那一趟**之前**作废掉（见 `App.onAccountChanged`）。
 	prev := a.mgr.Current()
 
-	err := lease.Commit(ctx, func(cur *Session) error {
+	err := lease.commit(ctx, func(cur *Session) error {
 		*cur = sess
 		return nil
-	})
+	}, true, func() { _ = a.cli.SeedCookies(cookies) })
 	switch {
 	case errors.Is(err, ErrStaleGeneration):
 		// 用户在这中间退了登。**什么都不写**，安静收工——
@@ -520,7 +537,6 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 		// 还是同样的结果。正确的做法是让他登进去用着，同时**明说**存不住：
 		// 界面上那一行「凭据后端不可用，登录态关掉应用就没了」就是干这个的。
 		log.Printf("pudmusic: 这次登录没能存下来，先只在内存里用着：%v", err)
-		a.mgr.Adopt(sess)
 		a.notifyAccountChanged(prev, sess)
 		a.setStateFor(id, LoginState{
 			Phase: LoginDone,
@@ -626,14 +642,10 @@ func (a *App) Logout() error {
 
 func (a *Account) logout() error {
 	a.mu.Lock()
-	stop := a.stop
-	a.stop = nil
+	a.stopLoginLocked()
 	a.runID++
 	a.state = LoginState{Phase: LoginIdle}
 	a.mu.Unlock()
-	if stop != nil {
-		stop()
-	}
 
 	// 先让 B 站那边把这个会话也作废，**然后**再清本地的。
 	//
@@ -657,8 +669,7 @@ func (a *Account) logout() error {
 	// 然后清 jar：Manager.Logout 可能失败（后端解不开、写不了），
 	// 但**内存里的 cookie 无论如何都得清掉**——
 	// 宁可不彻底，也不能让用户退不出去。
-	_ = a.cli.SeedCookies(nil)
-	err := a.mgr.Logout(context.Background())
+	err := a.mgr.logout(context.Background(), func() { _ = a.cli.SeedCookies(nil) })
 	a.wakeUp()
 	return err
 }

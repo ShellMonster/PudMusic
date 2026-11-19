@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin && !ios
 
 // macOS 上的「收起来 / 叫回来」。
 //

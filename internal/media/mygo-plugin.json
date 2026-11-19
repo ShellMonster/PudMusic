@@ -1,0 +1,20 @@
+{
+  "mobile": {
+    "id": "pudmusic_media",
+    "ios": {
+      "sources": ["ios/NowPlaying.swift"],
+      "class": "PudMusicMediaPlugin",
+      "frameworks": ["AVFoundation", "MediaPlayer"],
+      "infoPlist": {"UIBackgroundModes": ["audio"]},
+      "entitlements": {"application-identifier": "PUDMUSIC00.io.github.shellmonster.biu"}
+    },
+    "android": {
+      "sources": ["android/NowPlaying.kt"],
+      "class": "PudMusicMediaPlugin",
+      "permissions": ["FOREGROUND_SERVICE", "FOREGROUND_SERVICE_MEDIA_PLAYBACK"],
+      "application": [
+        "<service android:name=\"dev.mygo.PudMusicPlaybackService\" android:foregroundServiceType=\"mediaPlayback\" android:exported=\"false\" />"
+      ]
+    }
+  }
+}

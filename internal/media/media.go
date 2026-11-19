@@ -140,6 +140,7 @@ type NowPlaying struct {
 
 	// Position 是已经播到哪儿了。
 	Position time.Duration
+	Rate     float64
 }
 
 // position 是这个快照里**不算**语义变化的那一项：它每 50ms 都变一次。

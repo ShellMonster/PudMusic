@@ -84,6 +84,43 @@ func mountedApp(t *testing.T) (*app.App, *spy) {
 // 说了什么
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TestPlaybackSpeedReachesTheSystem checks that changing playback speed updates the now-playing snapshot immediately.
+func TestPlaybackSpeedReachesTheSystem(t *testing.T) {
+	application, observer := mountedApp(t)
+	if err := application.Open(filepath.Join("..", "service", "audio", "testdata", "gapless.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	application.SetRate(1.75)
+	if rate := observer.last().Rate; rate != 1.75 {
+		t.Fatalf("system playback rate = %g, want 1.75", rate)
+	}
+}
+
+// TestPlaybackWaitsForAudioFocus covers the Android focus gate before opening starts playback.
+func TestPlaybackWaitsForAudioFocus(t *testing.T) {
+	application, observer := mountedApp(t)
+	var allowed bool
+	var attempts int
+	application.SetPlaybackGate(func() bool {
+		attempts++
+		if observer.last().State == media.StatePlaying {
+			t.Error("reported playback before requesting audio focus")
+		}
+		return allowed
+	})
+	if err := application.Open(filepath.Join("..", "service", "audio", "testdata", "gapless.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || application.Snapshot().Playing || observer.last().State == media.StatePlaying {
+		t.Fatal("opening a track started playback without audio focus")
+	}
+	allowed = true
+	application.Play()
+	if attempts != 2 || !application.Snapshot().Playing {
+		t.Fatal("playback did not start after audio focus was granted")
+	}
+}
+
 // TestOpeningATrackReachesTheSystem 盯「打开一首歌要说一声」。
 //
 // 不说的话，锁屏上永远没有歌名——而这一票要的就是那个。

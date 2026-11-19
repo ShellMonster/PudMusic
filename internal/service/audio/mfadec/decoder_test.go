@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"slices"
 	"testing"
 )
 
@@ -120,6 +121,20 @@ func (c *fakeCodec) Drain() ([]float32, error) {
 func (c *fakeCodec) SampleRate() int { return c.rate }
 func (c *fakeCodec) Channels() int   { return c.chans }
 func (c *fakeCodec) Close() error    { c.closed++; return nil }
+
+type primingCodec struct {
+	fakeCodec
+	frameIndex map[string]int
+}
+
+func (c *primingCodec) Feed(frame []byte) ([]float32, error) {
+	index := c.frameIndex[string(frame)]
+	pcm := make([]float32, c.perFrame*c.chans)
+	for sample := range pcm {
+		pcm[sample] = float32(index*len(pcm) + sample)
+	}
+	return pcm, nil
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 工具
@@ -347,6 +362,65 @@ func TestTheDecoderCountsHowLongTheADTSStreamIs(t *testing.T) {
 	t.Logf("数出来 %d 帧，解出来 %d 帧", got, frames)
 	if int64(frames) != got {
 		t.Errorf("数出来 %d 帧，解出来 %d 帧", got, frames)
+	}
+}
+
+// TestKeepingThePrimingFramePreservesPresentation verifies length and sample-accurate seeks with a codec that outputs every access unit.
+func TestKeepingThePrimingFramePreservesPresentation(t *testing.T) {
+	for _, fixture := range []struct {
+		name   string
+		first  int
+		length int64
+	}{
+		{name: "aaclc-stereo.m4a", first: fakeUnitLen, length: 176400},
+		{name: "aaclc-stereo.aac", length: 178176},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			data := readFixture(t, fixture.name)
+			src, err := openFrameSource(bytes.NewReader(data))
+			if err != nil {
+				t.Fatal(err)
+			}
+			frameIndex := make(map[string]int)
+			for index := 0; ; index++ {
+				frame, err := src.next()
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				frameIndex[string(frame)] = index
+			}
+			factory := func(src *frameSource) (aacCodec, error) {
+				return &primingCodec{
+					fakeCodec:  fakeCodec{rate: src.rate, chans: src.chans, perFrame: fakeUnitLen},
+					frameIndex: frameIndex,
+				}, nil
+			}
+			decoder, err := open(bytes.NewReader(data), factory, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { decoder.Close() })
+			if got := decoder.Len(); got != fixture.length {
+				t.Fatalf("length = %d, want %d", got, fixture.length)
+			}
+			all := readAll(t, decoder)
+			chans := decoder.Channels()
+			if len(all) != int(fixture.length)*chans || all[0] != float32(fixture.first*chans) {
+				t.Fatalf("decoded %d samples, want %d with first sample %d", len(all), int(fixture.length)*chans, fixture.first*chans)
+			}
+			for _, frame := range []int64{fixture.length, fakeUnitLen - 1, fakeUnitLen + 9, fixture.length - 1, 0} {
+				if err := decoder.SetPosition(frame); err != nil {
+					t.Fatalf("seek to %d: %v", frame, err)
+				}
+				got := readAll(t, decoder)
+				if !slices.Equal(got, all[int(frame)*chans:]) {
+					t.Errorf("seek to %d: remaining samples differ from sequential decode", frame)
+				}
+			}
+		})
 	}
 }
 

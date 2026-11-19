@@ -1,4 +1,4 @@
-//go:build !darwin && !windows
+//go:build !darwin && !windows && !android
 
 // 没有系统保护存储的平台（Linux、FreeBSD…）。
 //

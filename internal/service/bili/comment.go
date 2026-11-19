@@ -341,7 +341,8 @@ type Comment struct {
 	// RCount 是这条评论下的**楼中楼条数**（不含「查看更多回复」那几层）。
 	RCount int64
 	// Like 是点赞数。
-	Like int64
+	Like  int64
+	Liked bool `json:"-"`
 	// Ctime 是发表时间（Unix 秒）。
 	Ctime int64
 
@@ -495,6 +496,7 @@ type commentReply struct {
 	Count  int64 `json:"count"`
 	RCount int64 `json:"rcount"`
 	Like   int64 `json:"like"`
+	Action int   `json:"action"`
 	Ctime  int64 `json:"ctime"`
 
 	Member struct {
@@ -548,6 +550,7 @@ type commentSubReplyData struct {
 // 主发的」就靠它**（理由见 `Comment.IsUpper`）。
 func (r commentReply) toComment(upperMid int64) Comment {
 	c := Comment{
+		Liked:  r.Action == 1,
 		Rpid:   r.Rpid,
 		Mid:    r.Mid,
 		Root:   r.Root,

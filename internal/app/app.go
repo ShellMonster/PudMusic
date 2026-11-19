@@ -986,6 +986,8 @@ type App struct {
 	// ⚠️ **它让进度条不必靠整树重建来走**：没有这一栏时，界面只能从 `State`
 	// 里拿到建树那一刻的位置，于是「让那根线往前走」只能靠每 50ms 重建整棵树。
 	playPositionNS atomic.Int64
+	playbackIntent atomic.Uint64
+	beforePlayback func() bool
 	// danmakuSeq 是**在途序号**。每发起一趟取弹幕就加一（**不管是哪一集**）。
 	//
 	// 🔴 **它挡的是「同一个 key 上慢的那一趟把新的盖掉」**：代次
@@ -1507,7 +1509,10 @@ func (a *App) setCover(url string) {
 }
 
 // Open 打开一个本地音频文件并开始播放，上一首连同它的文件句柄一起关掉。
-func (a *App) Open(path string) error { return a.openLocal(path, 0, openPlay) }
+func (a *App) Open(path string) error {
+	a.playbackIntent.Add(1)
+	return a.openLocal(path, 0, openPlay)
+}
 
 // openMode 是「打开一个本地文件」时的那一档。
 //
@@ -1730,7 +1735,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 		if pos > 0 {
 			p.Seek(pos)
 		}
-		p.Play()
+		a.startPlayer(p)
 	}
 	a.publishMedia()
 	// 歌词跟着换歌一起换：先重置成默认值，再从缓存恢复（见 lyrics.go）。
@@ -1747,6 +1752,7 @@ func (a *App) openLocal(path string, at time.Duration, mode openMode) error {
 
 // Toggle 在播放和暂停之间切换。播放到头之后按它是重头播。
 func (a *App) Toggle() {
+	a.playbackIntent.Add(1)
 	a.mu.Lock()
 	p, wake := a.player, a.wake
 	a.mu.Unlock()
@@ -1756,7 +1762,7 @@ func (a *App) Toggle() {
 	if p.Playing() {
 		p.Pause()
 	} else {
-		p.Play()
+		a.startPlayer(p)
 	}
 
 	a.mu.Lock()
@@ -1906,6 +1912,7 @@ func (a *App) SetRate(r float64) {
 		p.SetRate(r)
 	}
 	_, _ = a.UpdateSettings(func(s *Settings) { s.PlaybackRate = r })
+	a.publishMedia()
 	if wake != nil {
 		wake()
 	}
@@ -1929,7 +1936,7 @@ func (a *App) ScrubEnd(fraction float64) {
 	t := min(time.Duration(fraction*float64(dur)), dur)
 	p.Seek(t)
 	if wantPlay {
-		p.Play()
+		a.startPlayer(p)
 	}
 
 	// 立刻把位置改过来：暂停状态下 tick 不跑，界面下一帧读的就是这里写的值。

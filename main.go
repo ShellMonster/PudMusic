@@ -48,7 +48,7 @@ func main() {
 		log.Printf("pudmusic: 接不上崩溃日志，崩溃堆栈只在 stderr 上：%v", err)
 	}
 
-	if _, err := bootstrap.Assemble(bootstrap.DefaultDependencies()); err != nil {
+	if _, err := bootstrap.Assemble(platformDependencies()); err != nil {
 		log.Fatal(err)
 	}
 }

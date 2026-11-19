@@ -123,7 +123,10 @@ func (s *Shell) drawFullDanmaku(c *ui.Context, st app.State, area ui.Rect) {
 // 时间索引和窗口二分仍然是 #647 交付的那一份（`d.itemsByTime` + `sort.Search`，
 // 见 `danmakuLayer.rewind`）——这一票没有重新实现它，只是不再每帧都二分。
 func (s *Shell) paintDanmaku(p *ui.Painter, r ui.Rect) {
-	d := &s.full.danmaku
+	s.full.danmaku.paint(p, r, s.presence.seen())
+}
+
+func (d *danmakuLayer) paint(p *ui.Painter, r ui.Rect, visible bool) {
 	if !d.ready || len(d.itemsByTime) == 0 {
 		return
 	}
@@ -174,8 +177,23 @@ func (s *Shell) paintDanmaku(p *ui.Painter, r ui.Rect) {
 	//	没开减动效   那个偏好下不逐帧重画（位置仍旧跟着整窗重建走）
 	//	窗口看得见  失焦/最小化时框架自己不管，链子会在绘制路径里续下去
 	//	            （票 #156，和波形、频谱、播放条那根线同一条纪律）
-	if d.playing && d.animate && s.presence.seen() {
+	if d.playing && d.animate && visible {
 		d.requests++
 		p.AnimationFrame()
 	}
 }
+
+type VideoDanmaku struct {
+	layer danmakuLayer
+}
+
+func (d *VideoDanmaku) Draw(c *ui.Context, surface ui.Element, state app.State, items []app.DanmakuItem, width, height float32) {
+	if len(items) == 0 || width <= 0 || height <= 0 {
+		d.Reset()
+		return
+	}
+	d.layer.sync(c, state, items, ui.Rect{W: width, H: height})
+	surface.DrawOver(func(painter *ui.Painter, bounds ui.Rect) { d.layer.paint(painter, bounds, true) })
+}
+
+func (d *VideoDanmaku) Reset() { d.layer.reset() }

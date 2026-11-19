@@ -960,6 +960,10 @@ func (q *Queue) setCurLocked(i int, pushHist bool) bool {
 
 // Reset 把队列换成给定的几项并从第一首开始，返回第一项。给空就是清空。
 func (q *Queue) Reset(items ...Item) (Item, bool) {
+	return q.resetAt(items, 0)
+}
+
+func (q *Queue) resetAt(items []Item, index int) (Item, bool) {
 	q.mu.Lock()
 	q.items = items
 	q.cur = -1
@@ -979,8 +983,8 @@ func (q *Queue) Reset(items ...Item) (Item, bool) {
 		q.invalidate()
 		return Item{}, false
 	}
-	q.cur = 0
-	it := items[0]
+	q.cur = index
+	it := items[index]
 	q.mu.Unlock()
 	q.changed()
 	q.invalidate()
@@ -1912,6 +1916,7 @@ func filterQueueable(items []Item) (out []Item, skipped int) {
 // 抽屉里点正在放的那一行，用户想的是「把指针挪回来」；列表里点一首歌，用户想的是
 // 「放它」——重播一遍是对的。
 func (a *App) EnqueueAndPlayNow(item Item) error {
+	a.playbackIntent.Add(1)
 	// 🔴 **失效的条目进不来**（票 #624）：这一条是行级入口（双击 / 回车 / 封面
 	// 播放钮）走的路，而它要是放进去了，应用会为一条已经不存在的稿件白跑一趟
 	// 带签名的取流往返（实测 200~400ms），而那一趟注定失败。
@@ -2002,6 +2007,7 @@ func (a *App) EnqueueNext(item Item) error {
 // 打头一项打不开就把队列原样换回去，错误返回：播不了的歌不该把用户原来的
 // 队列弄丢，也不该让播放条停在一首放不了的歌上（和 step 里同一个道理）。
 func (a *App) PlayFrom(items ...Item) error {
+	a.playbackIntent.Add(1)
 	if len(items) == 0 {
 		return nil
 	}
@@ -2018,10 +2024,27 @@ func (a *App) PlayFrom(items ...Item) error {
 		}
 		return nil
 	}
+	return a.replaceQueueAndPlay(items, 0)
+}
+
+// PlayFromIndex starts a list at the selected row while retaining the preceding tracks.
+func (a *App) PlayFromIndex(items []Item, index int) error {
+	a.playbackIntent.Add(1)
+	if index < 0 || index >= len(items) {
+		return fmt.Errorf("queue: index %d out of range", index)
+	}
+	if !CanQueue(items[index]) {
+		return unplayableOf(UnplayableInvalid)
+	}
+	_, skipped := filterQueueable(items[:index])
+	playable, _ := filterQueueable(items)
+	return a.replaceQueueAndPlay(playable, index-skipped)
+}
+
+func (a *App) replaceQueueAndPlay(items []Item, index int) error {
 	old := a.queue.Items()
 	cur, hadCur := a.queue.Current()
-	// 给空已经在上面挡掉了，Reset 这里一定放得下（它返回的第一项就是 items[0]）。
-	item, _ := a.queue.Reset(items...)
+	item, _ := a.queue.resetAt(items, index)
 	if err := a.play(item); err != nil {
 		// 换回去：Reset 把 cur 落在 0，Move 把当前项挪回它原来在的位置。
 		//
@@ -2055,6 +2078,7 @@ func (a *App) PlayFrom(items ...Item) error {
 //     （第一份），而正在放的可能正是**第二份**；按下标认，这一行会被当成「另一首」
 //     而从头重播——用户点的就是他正在听的那一行。
 func (a *App) PlayAt(i int) error {
+	a.playbackIntent.Add(1)
 	if i < 0 || i >= a.queue.Len() {
 		return fmt.Errorf("队列里没有第 %d 首", i+1)
 	}
@@ -2209,7 +2233,7 @@ func (a *App) play(item Item) error {
 	if item.isOnline() {
 		err = a.playOnline(item)
 	} else {
-		err = a.Open(item.Path)
+		err = a.openLocal(item.Path, 0, openPlay)
 	}
 	if err != nil {
 		return err
@@ -2228,7 +2252,7 @@ func (a *App) play(item Item) error {
 //   - **随机那一档**：从**洗牌袋**里抽（不重复、不遗漏，见 queue_shuffle.go）。
 //
 // 队列空的时候什么都不做。
-func (a *App) Next() { a.step(1) }
+func (a *App) Next() { a.playbackIntent.Add(1); a.step(1) }
 
 // Prev 放上一首。**上一首是谁也看播放模式**（见 Queue.MovePrev）：
 //
@@ -2237,7 +2261,7 @@ func (a *App) Next() { a.step(1) }
 //     退回按索引退一格——见 Queue.MovePrev 的注释）。
 //
 // 队列空的时候什么都不做。
-func (a *App) Prev() { a.step(-1) }
+func (a *App) Prev() { a.playbackIntent.Add(1); a.step(-1) }
 
 // step 在队列里挪 delta 格并放那一首。
 //
@@ -2432,7 +2456,9 @@ func (a *App) onTrackFinished() {
 		// 这里再显式 seek 一次：界面上的进度条读的是 `a.position`，不等解码
 		// goroutine 回过劲来的那一帧。
 		p.Seek(0)
-		p.Play()
+		if !a.startPlayer(p) {
+			return
+		}
 		a.mu.Lock()
 		a.setPositionLocked(0)
 		a.playing, a.wantPlay = true, true
@@ -2575,6 +2601,7 @@ func (a *App) playNextAfterCurrent() error {
 // 停了还得把当前曲目清干净（见 ClearTrack）：只停声的话，播放条上还是那首歌的名字，
 // 队列里已经空了。
 func (a *App) ClearQueue() {
+	a.playbackIntent.Add(1)
 	a.queue.Reset()
 	a.ClearTrack()
 }
