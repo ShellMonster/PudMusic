@@ -28,7 +28,7 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 		switch r.URL.Path {
 		case "/x/passport-login/web/qrcode/generate":
 			key := requests.Add(1)
-			fmt.Fprintf(w, `{"code":0,"data":{"url":"https://passport.bilibili.com/h5-app/passport/login/scan?qrcode_key=test-%d","qrcode_key":"test-%d"}}`, key, key)
+			fmt.Fprintf(w, `{"code":0,"data":{"url":"https://account.bilibili.com/h5/account-h5/auth/scan-web?navhide=1&qrcode_key=test-%d&from=web","qrcode_key":"test-%d"}}`, key, key)
 		case "/x/passport-login/web/qrcode/poll":
 			code := status.Load()
 			if code == 0 && r.URL.Query().Get("qrcode_key") != "test-3" {
@@ -132,7 +132,7 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 	if err := tester.Click("在 B 站 App 中确认"); err != nil {
 		t.Fatal(err)
 	}
-	const wantLink = "bilibili://browser/?url=https%3A%2F%2Fpassport.bilibili.com%2Fh5-app%2Fpassport%2Flogin%2Fscan%3Fqrcode_key%3Dtest-3"
+	const wantLink = "bilibili://browser/?url=https%3A%2F%2Faccount.bilibili.com%2Fh5%2Faccount-h5%2Fauth%2Fscan-web%3Fnavhide%3D1%26qrcode_key%3Dtest-3%26from%3Dweb"
 	if links := tester.OpenedURLs(); len(links) == 0 || links[len(links)-1] != wantLink || requests.Load() != 3 {
 		t.Fatal("same-device login did not open the current QR session")
 	}
