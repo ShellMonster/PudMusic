@@ -212,13 +212,14 @@ func (s *shell) myLibrary(c *ui.Context, page *route) {
 			})
 		}
 	}
-	for _, item := range libraryDestinations[4:] {
-		if !slices.Contains(hidden, item.path) && (item.kind != pageFeed || !slices.Contains(hidden, "/follow")) {
-			libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
+	if loggedIn {
+		for _, item := range libraryDestinations[4:] {
+			if !slices.Contains(hidden, item.path) && (item.kind != pageFeed || !slices.Contains(hidden, "/follow")) {
+				libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
+			}
 		}
-	}
-	if item := libraryDestinations[3]; !loggedIn && !slices.Contains(hidden, item.path) {
-		libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
+	} else {
+		s.guestLibrarySections(c, hidden)
 	}
 	libraryActionSheet(c, &state.menu, mobile.ActionSheetOptions{Title: state.nav.Name, Cancel: "取消"},
 		mobile.Action{Label: "刷新收藏夹", OnTap: s.app.RefreshFavorites},
@@ -240,6 +241,23 @@ func (s *shell) myLibrary(c *ui.Context, page *route) {
 	)
 	s.bindLikedFolderSheet(c, state)
 	s.renderFolderEditor(c, &state.editor, func() { s.notice = "已新建收藏夹" })
+}
+
+func (s *shell) guestLibrarySections(c *ui.Context, hidden []string) {
+	if item := libraryDestinations[6]; !slices.Contains(hidden, item.path) {
+		libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
+	}
+	if slices.Contains(hidden, "/follow") && slices.Contains(hidden, "/later") {
+		return
+	}
+	ui.Column(c.Key("guest-bilibili-features")).FillWidth().Margin(12, 0, 0).Gap(4).Children(func() {
+		sectionHeading(c, "B 站账号", "")
+		for _, item := range []libraryDestination{libraryDestinations[4], libraryDestinations[5], libraryDestinations[3]} {
+			if !slices.Contains(hidden, item.path) && (item.kind != pageFeed || !slices.Contains(hidden, "/follow")) {
+				libraryRow(c.Key(item.path), "", item.icon, item.label, "", func() { s.openLibraryPage(item) })
+			}
+		}
+	})
 }
 
 func (s *shell) openLibraryPage(item libraryDestination) {

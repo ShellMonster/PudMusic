@@ -213,8 +213,14 @@ func TestMobileGuestFeedLoginReturnsToFeed(t *testing.T) {
 	if err := tester.Click("返回"); err != nil {
 		t.Fatal(err)
 	}
-	wait(tester, "暂时无法加载动态")
+	wait(tester, "网络连接异常")
 	mobileLibraryShot(t, tester, "feed-recovery-initial.png")
+	heading, foundHeading := tester.Find("用户动态")
+	description, foundDescription := tester.Find("关注的 UP 主最近分享了什么。")
+	errorTitle, foundTitle := tester.Find("网络连接异常")
+	if !foundHeading || !foundDescription || !foundTitle || heading.X != description.X || errorTitle.X+errorTitle.W/2 != 195 {
+		t.Fatalf("feed header and recovery alignment: heading=%v description=%v error=%v", heading, description, errorTitle)
+	}
 	failInitial.Store(false)
 	if err := tester.Click("重试"); err != nil {
 		t.Fatal(err)
