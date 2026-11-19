@@ -16,6 +16,21 @@ import org.json.JSONObject
 
 class PudMusicDocumentsPlugin : MyGoPlugin {
     override fun call(method: String, args: JSONObject, reply: PluginReply) {
+        if (method == "openLoginConfirmation") {
+            val activity = PluginHost.activity
+            val uri = Uri.parse(args.optString("URL"))
+            if (activity == null || uri.scheme != "bilibili" || uri.host != "browser") {
+                reply.failure(PluginFailure("OpenLogin", "Bilibili confirmation is unavailable"))
+                return
+            }
+            try {
+                activity.startActivity(Intent(Intent.ACTION_VIEW, uri))
+                reply.success(null)
+            } catch (error: RuntimeException) {
+                reply.failure(PluginFailure("OpenLogin", "Could not open Bilibili"))
+            }
+            return
+        }
         if (method == "takeShares") {
             reply.success(PudMusicShareActivity.takeShares())
             return

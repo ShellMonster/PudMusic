@@ -1,13 +1,17 @@
 package mobileui
 
 import (
+	"context"
 	"net/url"
+	"runtime"
+	"time"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/service/bili"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/tok"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/typo"
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -16,6 +20,20 @@ type loginPageData struct {
 	code       *bili.Code
 	bitmap     *ui.Bitmap
 	openFailed bool
+	external   bool
+}
+
+func (s *shell) finishExternalLogin() {
+	if page := s.current(); page.kind == pageLogin {
+		if data, ok := page.data.(*loginPageData); ok && data.external {
+			state := s.app.LoginState()
+			if state.Phase == app.LoginDone && state.Err == "" {
+				s.leaveLogin(page)
+				s.stacks[s.tab] = s.stacks[s.tab][:len(s.stacks[s.tab])-1]
+				s.notice = "登录成功"
+			}
+		}
+	}
 }
 
 func (s *shell) leaveLogin(page *route) {
@@ -81,7 +99,10 @@ func (s *shell) login(c *ui.Context, page *route) {
 		link := snapshot.ConfirmationURL()
 		description := "请用另一台已登录 B 站的手机扫码。"
 		if link != "" {
-			description = "在本机打开 B 站确认，或用另一台设备扫码。"
+			description = "在 B 站确认后切回布丁音乐，也可以用另一台设备扫码。"
+			if data.external {
+				description = "在 B 站确认后，若没有自动返回，请切回布丁音乐。"
+			}
 		}
 		loginHeading(c, "扫码登录", description)
 		data.drawCode(c, snapshot.QR, snapshot.Phase == app.LoginExpired)
@@ -107,16 +128,30 @@ func (s *shell) login(c *ui.Context, page *route) {
 			}
 			if settingsAction(c, "在 B 站 App 中确认", true, true).Clicked() {
 				data.openFailed = false
-				c.OpenURLThen("bilibili://browser/?url="+url.QueryEscape(link), func(err error) {
+				data.external = true
+				opened := func(err error) {
 					if page.data == data && s.app.LoginState().ConfirmationURL() == link {
 						data.openFailed = err != nil
+						data.external = err == nil
 					}
-				})
+				}
+				handoff := "bilibili://browser/?url=" + url.QueryEscape(link)
+				if runtime.GOOS == "android" && s.win != nil {
+					go func() {
+						ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+						defer cancel()
+						err := mygo.Native("pudmusic_documents").Call(ctx, "openLoginConfirmation", struct{ URL string }{handoff}, nil)
+						s.update(func() { opened(err) })
+					}()
+				} else {
+					c.OpenURLThen(handoff, opened)
+				}
 			}
 		}
 		if settingsAction(c, "刷新二维码", false, true).
 			Disabled(snapshot.Phase == app.LoginWaiting && snapshot.QR == nil).Clicked() {
 			data.openFailed = false
+			data.external = false
 			s.app.RefreshLoginCode()
 		}
 		if loginQuietAction(c, "暂不登录").Clicked() {

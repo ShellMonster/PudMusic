@@ -2,9 +2,11 @@ package mobileui
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"sync/atomic"
@@ -133,7 +135,18 @@ func TestMobileDiscoverRetryKeepsAvailableContent(t *testing.T) {
 	if feedRequests.Load() != before {
 		t.Fatal("retrying only playlists also refetched the available tracks")
 	}
-	localAudio := filepath.Join("..", "service", "audio", "testdata", "gapless.mp3")
+	localAudio := filepath.Join(t.TempDir(), "local-track.wav")
+	const sampleRate, seconds = 44100, 30
+	wav := make([]byte, 44+sampleRate*seconds*2)
+	copy(wav, "RIFF\x00\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00")
+	binary.LittleEndian.PutUint32(wav[4:], uint32(len(wav)-8))
+	binary.LittleEndian.PutUint32(wav[24:], sampleRate)
+	binary.LittleEndian.PutUint32(wav[28:], sampleRate*2)
+	copy(wav[32:], "\x02\x00\x10\x00data")
+	binary.LittleEndian.PutUint32(wav[40:], uint32(len(wav)-44))
+	if err := os.WriteFile(localAudio, wav, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	s.app.TestOnlyNoAutoLyrics()
 	if err := s.app.Open(localAudio); err != nil {
 		t.Fatal(err)
@@ -289,10 +302,21 @@ func TestMobileDiscoverOffersLoginWhenRequired(t *testing.T) {
 	}
 }
 
-// TestMobileDiscoverRenewsExpiredSession verifies recovery when a stored cookie is rejected by Bilibili.
-func TestMobileDiscoverRenewsExpiredSession(t *testing.T) {
+// TestMobileDiscoverRefreshesAfterLogin covers an expired session and a visitor request that failed with a generic error.
+func TestMobileDiscoverRefreshesAfterLogin(t *testing.T) {
+	t.Run("expired session", func(t *testing.T) { testMobileDiscoverLoginRecovery(t, true) })
+	t.Run("visitor request failed", func(t *testing.T) { testMobileDiscoverLoginRecovery(t, false) })
+}
+
+func testMobileDiscoverLoginRecovery(t *testing.T, expired bool) {
+	t.Helper()
 	var rejected, accepted atomic.Int32
-	s, wait := mobileBrowseFixtureForSession(t, app.Session{SESSDATA: "expired"}, func(w http.ResponseWriter, r *http.Request) bool {
+	var confirmed atomic.Bool
+	initial := app.Session{}
+	if expired {
+		initial.SESSDATA = "expired"
+	}
+	s, wait := mobileBrowseFixtureForSession(t, initial, func(w http.ResponseWriter, r *http.Request) bool {
 		switch r.URL.Path {
 		case "/x/web-interface/region/feed/rcmd":
 			cookie, err := r.Cookie("SESSDATA")
@@ -301,10 +325,18 @@ func TestMobileDiscoverRenewsExpiredSession(t *testing.T) {
 				return false
 			}
 			rejected.Add(1)
-			fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+			if expired {
+				fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+			} else {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			}
 		case "/x/passport-login/web/qrcode/generate":
 			fmt.Fprint(w, `{"code":0,"data":{"url":"https://account.bilibili.com/h5/account-h5/auth/scan-web?qrcode_key=demo","qrcode_key":"demo"}}`)
 		case "/x/passport-login/web/qrcode/poll":
+			if !confirmed.Load() {
+				fmt.Fprint(w, `{"code":0,"data":{"code":86101}}`)
+				break
+			}
 			http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "renewed", Path: "/"})
 			fmt.Fprint(w, `{"code":0,"data":{"code":0}}`)
 		default:
@@ -314,21 +346,36 @@ func TestMobileDiscoverRenewsExpiredSession(t *testing.T) {
 	})
 	s.app.SetLoginPollInterval(2 * time.Millisecond)
 	tester := ui.NewTester(s.view, 390, 844)
-	wait(tester, "去登录")
-	for _, action := range []string{"去登录", "暂不登录"} {
+	entry := "去登录"
+	if expired {
+		wait(tester, entry)
+		for _, action := range []string{entry, "暂不登录"} {
+			if err := tester.Click(action); err != nil {
+				t.Fatal(err)
+			}
+		}
+	} else {
+		wait(tester, "暂时无法加载推荐")
+		if err := tester.Click("我的"); err != nil {
+			t.Fatal(err)
+		}
+		entry = "登录"
+	}
+	for _, action := range []string{entry, "继续登录"} {
 		if err := tester.Click(action); err != nil {
 			t.Fatal(err)
 		}
 	}
-	wait(tester, "去登录")
-	for _, action := range []string{"去登录", "继续登录"} {
-		if err := tester.Click(action); err != nil {
-			t.Fatal(err)
-		}
-	}
-	wait(tester, "登录成功")
-	if err := tester.Click("返回"); err != nil {
+	wait(tester, "在 B 站 App 中确认")
+	if err := tester.Click("在 B 站 App 中确认"); err != nil {
 		t.Fatal(err)
+	}
+	confirmed.Store(true)
+	wait(tester, "登录成功")
+	if !expired {
+		if err := tester.Click("发现"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	wait(tester, "公开音乐合集")
 	if rejected.Load() != 1 || accepted.Load() != 1 {

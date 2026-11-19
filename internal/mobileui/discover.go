@@ -319,7 +319,7 @@ func (s *shell) discover(c *ui.Context, page *route) {
 }
 
 func (s *shell) discoverAccountChanged(generation uint64, err error) bool {
-	return errors.Is(err, bili.ErrNotLoggedIn) && s.app.LoggedIn() && s.app.AccountSnapshot().Generation != generation
+	return err != nil && s.app.LoggedIn() && s.app.AccountSnapshot().Generation != generation
 }
 
 func (s *shell) discoverMixesNotice(c *ui.Context, mixes *browseMixes) {
