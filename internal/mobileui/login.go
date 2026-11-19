@@ -10,9 +10,10 @@ import (
 )
 
 type loginPageData struct {
-	started bool
-	code    *bili.Code
-	bitmap  *ui.Bitmap
+	started    bool
+	code       *bili.Code
+	bitmap     *ui.Bitmap
+	openFailed bool
 }
 
 func (s *shell) leaveLogin(page *route) {
@@ -42,7 +43,7 @@ func (s *shell) login(c *ui.Context, page *route) {
 			if s.app.Account() == nil {
 				settingsText(c, "当前无法申请二维码，请稍后重试。", 13, palette.Err).Role(ui.RoleStatus)
 			}
-			if settingsAction(c, "使用另一台设备扫码", true, true).Disabled(s.app.Account() == nil).Clicked() {
+			if settingsAction(c, "继续登录", true, true).Disabled(s.app.Account() == nil).Clicked() {
 				data.started = true
 				s.app.BeginLogin()
 			}
@@ -75,7 +76,12 @@ func (s *shell) login(c *ui.Context, page *route) {
 			}
 			return
 		}
-		loginHeading(c, "扫码登录", "请用另一台已登录 B 站的手机扫码。")
+		link := snapshot.ConfirmationURL()
+		description := "请用另一台已登录 B 站的手机扫码。"
+		if link != "" {
+			description = "在本机打开 B 站确认，或用另一台设备扫码。"
+		}
+		loginHeading(c, "扫码登录", description)
 		data.drawCode(c, snapshot.QR, snapshot.Phase == app.LoginExpired)
 		message, color := snapshot.Hint, palette.Text2
 		switch snapshot.Phase {
@@ -93,8 +99,22 @@ func (s *shell) login(c *ui.Context, page *route) {
 			message, color = "未能完成登录，请检查网络后刷新二维码。", palette.Err
 		}
 		settingsText(c, message, 14, color).Role(ui.RoleStatus)
+		if link != "" {
+			if data.openFailed {
+				settingsText(c, "未能打开链接，请重试或使用另一台设备扫码。", 13, palette.Warn).Role(ui.RoleStatus)
+			}
+			if settingsAction(c, "在 B 站 App 中确认", true, true).Clicked() {
+				data.openFailed = false
+				c.OpenURLThen(link, func(err error) {
+					if page.data == data && s.app.LoginState().ConfirmationURL() == link {
+						data.openFailed = err != nil
+					}
+				})
+			}
+		}
 		if settingsAction(c, "刷新二维码", false, true).
 			Disabled(snapshot.Phase == app.LoginWaiting && snapshot.QR == nil).Clicked() {
+			data.openFailed = false
 			s.app.RefreshLoginCode()
 		}
 		if loginQuietAction(c, "暂不登录").Clicked() {

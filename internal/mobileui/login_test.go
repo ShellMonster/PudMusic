@@ -2,9 +2,12 @@ package mobileui
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"sync/atomic"
 	"testing"
@@ -15,7 +18,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// TestMobileQRLoginPollsAndRefreshes exercises scan, expiry, cancel and confirmation against a local service.
+// TestMobileQRLoginPollsAndRefreshes covers expiry, cancellation and same-device confirmation on the current QR session.
 func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 	var requests atomic.Int32
 	var status atomic.Int32
@@ -25,10 +28,12 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 		switch r.URL.Path {
 		case "/x/passport-login/web/qrcode/generate":
 			key := requests.Add(1)
-			fmt.Fprintf(w, `{"code":0,"data":{"url":"https://example.test/login/%d","qrcode_key":"test-%d"}}`, key, key)
+			fmt.Fprintf(w, `{"code":0,"data":{"url":"https://passport.bilibili.com/h5-app/passport/login/scan?qrcode_key=test-%d","qrcode_key":"test-%d"}}`, key, key)
 		case "/x/passport-login/web/qrcode/poll":
 			code := status.Load()
-			if code == 0 {
+			if code == 0 && r.URL.Query().Get("qrcode_key") != "test-3" {
+				code = 86101
+			} else if code == 0 {
 				http.SetCookie(w, &http.Cookie{Name: "SESSDATA", Value: "synthetic-mobile-session", Path: "/"})
 			}
 			fmt.Fprintf(w, `{"code":0,"data":{"code":%d}}`, code)
@@ -51,7 +56,7 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 			ui.Column(c).FillWidth().PaddingX(16).Children(func() { s.login(c, page) })
 		}
 	}, 390, 700)
-	if err := tester.Click("使用另一台设备扫码"); err != nil {
+	if err := tester.Click("继续登录"); err != nil {
 		t.Fatal(err)
 	}
 	waitForMobileLogin(t, a, app.LoginScanned)
@@ -65,6 +70,9 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 	if !slices.Contains(tester.Texts(), "二维码已过期，请刷新二维码") {
 		t.Fatalf("missing expired status in %q", tester.Texts())
 	}
+	if slices.Contains(tester.Texts(), "在 B 站 App 中确认") {
+		t.Fatal("expired QR session still offers same-device confirmation")
+	}
 	status.Store(86101)
 	if err := tester.Click("刷新二维码"); err != nil {
 		t.Fatal(err)
@@ -76,6 +84,7 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
+	tester.Frame()
 	if err := tester.Click("暂不登录"); err != nil {
 		t.Fatal(err)
 	}
@@ -85,12 +94,46 @@ func TestMobileQRLoginPollsAndRefreshes(t *testing.T) {
 	if phase := a.LoginState().Phase; phase != app.LoginIdle {
 		t.Fatalf("login phase after leaving the route = %v, want idle", phase)
 	}
-	status.Store(0)
 	s.push(route{kind: pageLogin, title: "登录"})
 	tester.Frame()
-	if err := tester.Click("使用另一台设备扫码"); err != nil {
+	if err := tester.Click("继续登录"); err != nil {
 		t.Fatal(err)
 	}
+	deadline = time.Now().Add(3 * time.Second)
+	for a.LoginState().QR == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("same-device login did not receive a QR code")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	tester.Frame()
+	if path := os.Getenv("PUDMUSIC_MOBILE_LOGIN_SCREENSHOT"); path != "" {
+		file, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encodeErr := png.Encode(file, tester.Image())
+		if err := errors.Join(encodeErr, file.Close()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tester.FailOpenURL(errors.New("no handler"))
+	if err := tester.Click("在 B 站 App 中确认"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if !slices.Contains(tester.Texts(), "未能打开链接，请重试或使用另一台设备扫码。") {
+		t.Fatal("failed launch did not show the scan fallback")
+	}
+	tester.FailOpenURL(nil)
+	if err := tester.Click("在 B 站 App 中确认"); err != nil {
+		t.Fatal(err)
+	}
+	const wantLink = "https://passport.bilibili.com/h5-app/passport/login/scan?qrcode_key=test-3"
+	if links := tester.OpenedURLs(); len(links) == 0 || links[len(links)-1] != wantLink || requests.Load() != 3 {
+		t.Fatal("same-device login did not open the current QR session")
+	}
+	status.Store(0)
 	waitForMobileLogin(t, a, app.LoginDone)
 	tester.Frame()
 	if !slices.Contains(tester.Texts(), "登录成功") {

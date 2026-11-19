@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -86,11 +87,23 @@ type LoginState struct {
 	Err string
 	// LoggedIn 是此刻有没有登录态。登录成功后为 true。
 	LoggedIn bool
+	qrURL    string
 }
 
 // Busy 报登录流程是不是还在跑。
 func (s LoginState) Busy() bool {
 	return s.Phase == LoginWaiting || s.Phase == LoginScanned
+}
+
+func (s LoginState) ConfirmationURL() string {
+	if !s.Busy() || s.QR == nil {
+		return ""
+	}
+	link, err := url.Parse(s.qrURL)
+	if err != nil || link.Scheme != "https" || !strings.EqualFold(link.Host, "passport.bilibili.com") || link.User != nil {
+		return ""
+	}
+	return s.qrURL
 }
 
 // pollInterval 是轮询二维码状态的间隔。
@@ -437,7 +450,7 @@ func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
 		a.mu.Unlock() // 已经被取消了
 		return
 	}
-	a.state = LoginState{Phase: LoginWaiting, QR: code, Hint: bili.ScanWaiting.String()}
+	a.state = LoginState{Phase: LoginWaiting, QR: code, Hint: bili.ScanWaiting.String(), qrURL: qr.URL}
 	interval := a.interval
 	a.mu.Unlock()
 	a.wakeUp()
