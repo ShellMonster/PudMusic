@@ -56,9 +56,16 @@ func cover(c *ui.Context, url string, size, radius float32) ui.Element {
 }
 
 func sectionHeading(c *ui.Context, title, action string) bool {
+	return sectionHeadingWithRetry(c, title, action, nil)
+}
+
+func sectionHeadingWithRetry(c *ui.Context, title, action string, retry func()) bool {
 	clicked := false
 	ui.Row(c).AlignItems(ui.Center).MinHeight(32).FillWidth().Children(func() {
 		ui.Text(c, title).FontSize(16).FontWeight(600).Grow(1).Basis(0)
+		if retry != nil {
+			browseStatusButton(c, "重试", "重试"+title, retry)
+		}
 		if action != "" {
 			clicked = ui.Row(c).Role(ui.RoleButton).Label(action).MinHeight(touchSize()).Gap(4).AlignItems(ui.Center).Children(func() {
 				color := phonePalette(c).muted

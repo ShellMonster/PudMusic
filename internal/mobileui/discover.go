@@ -2,6 +2,7 @@ package mobileui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,6 +46,7 @@ type discoverState struct {
 	mixes     browseMixes
 	refresh   ui.RefreshState
 	albumBusy bool
+	guest     bool
 }
 
 type discoverDetail struct {
@@ -82,28 +84,27 @@ func (s *shell) loadDiscoverHome(state *discoverState) {
 	}
 	state.daily.started, state.daily.loading = true, true
 	state.mixes.started, state.mixes.loading = true, true
-	refreshing := state.refresh.Refreshing
+	state.guest = !s.app.LoggedIn()
 	go func() {
 		ctx, cancel := context.WithTimeout(s.ctx, 20*time.Second)
 		defer cancel()
 		rows, _, dailyErr := s.app.RecommendOf().Feed(ctx, app.HomeTabMusic, 1)
-		s.update(func() {
-			state.daily.loading, state.daily.err = false, dailyErr
-			if dailyErr == nil {
-				state.daily.rows = rows
-			}
-		})
 		var cards []browseCollection
 		err := dailyErr
-		if err == nil {
+		if dailyErr == nil {
+			s.update(func() {
+				state.daily.loading, state.daily.err = false, nil
+				state.daily.rows = rows
+			})
 			cards, err = s.publicMusicCollections(ctx, recommendOwners(rows), "")
 		}
 		s.update(func() {
+			if dailyErr != nil {
+				state.daily.loading, state.daily.err = false, dailyErr
+			}
 			state.mixes.loading, state.mixes.err = false, err
 			if err == nil {
 				state.mixes.cards = cards
-			} else if refreshing {
-				s.notice = "暂时无法刷新推荐"
 			}
 			state.refresh.Refreshing = false
 		})
@@ -175,7 +176,7 @@ func (s *shell) discover(c *ui.Context, page *route) {
 		return
 	}
 	state := s.discoverHomeState(page)
-	if !state.daily.started {
+	if !state.daily.started || (state.guest && s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn)) {
 		s.loadDiscoverHome(state)
 	}
 	palette := tok.Of(c.Theme())
@@ -212,13 +213,29 @@ func (s *shell) discover(c *ui.Context, page *route) {
 				}
 			}
 		})
+		tracks := recommendTracks(state.daily.rows)
+		retry := func() { s.loadDiscoverHome(state) }
+		if state.daily.err != nil && state.mixes.err != nil && !state.daily.loading && !state.mixes.loading &&
+			len(tracks) == 0 && len(state.mixes.cards) == 0 {
+			if !s.app.LoggedIn() && errors.Is(state.daily.err, bili.ErrNotLoggedIn) {
+				browseStatusRow(c, "登录后可查看推荐", "去登录", func() {
+					s.push(route{kind: pageLogin, title: "登录"})
+				})
+			} else {
+				browseStatusRow(c, "推荐暂时没加载出来", "重试", retry)
+			}
+			return
+		}
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			if sectionHeading(c, "推荐歌单", "更多") {
+			var retryCached func()
+			if len(state.mixes.cards) > 0 && state.mixes.err != nil && !state.mixes.loading {
+				retryCached = retry
+			}
+			if sectionHeadingWithRetry(c, "推荐歌单", "更多", retryCached) {
 				s.push(route{kind: pageMixes, title: "推荐歌单", data: &discoverDetail{mixes: &state.mixes}})
 			}
-			s.renderMixes(c, &state.mixes, 3, func() { s.loadDiscoverHome(state) })
+			s.renderMixes(c, &state.mixes, 3, retry)
 		})
-		tracks := recommendTracks(state.daily.rows)
 		feature, single := discoverFeatured(state.mixes.cards, tracks)
 		if feature.title != "" || state.mixes.loading {
 			ui.Column(c).FillWidth().Gap(8).Children(func() {
@@ -259,7 +276,11 @@ func (s *shell) discover(c *ui.Context, page *route) {
 			})
 		}
 		ui.Column(c).FillWidth().Gap(8).Children(func() {
-			if sectionHeading(c, "挑一首听", "查看全部") {
+			var retryCached func()
+			if len(tracks) > 0 && state.daily.err != nil && !state.daily.loading {
+				retryCached = retry
+			}
+			if sectionHeadingWithRetry(c, "挑一首听", "查看全部", retryCached) {
 				s.push(route{kind: pageDaily, title: "每日推荐"})
 			}
 			if len(tracks) > 0 {
@@ -267,7 +288,7 @@ func (s *shell) discover(c *ui.Context, page *route) {
 			} else if state.daily.loading {
 				browseTrackPlaceholders(c, 3)
 			} else {
-				browseStatus(c, state.daily.loading, state.daily.err, "暂无推荐歌曲", func() { s.loadDiscoverHome(state) })
+				browseStatus(c, false, state.daily.err, "暂无推荐歌曲", retry)
 			}
 		})
 	})
@@ -576,20 +597,38 @@ func appendBrowseTracks(existing, incoming []app.Item) []app.Item {
 }
 
 func browseStatus(c *ui.Context, loading bool, err error, empty string, retry func()) {
+	if !loading && err != nil {
+		browseStatusRow(c, "暂时没加载出来", "重试", retry)
+		return
+	}
 	palette := tok.Of(c.Theme())
 	ui.Column(c).FillWidth().AlignItems(ui.Center).Gap(8).Padding(18, 8).Children(func() {
 		switch {
 		case loading:
 			ui.Text(c, "正在加载…").FontSize(13).TextColor(palette.Text2)
-		case err != nil:
-			ui.Text(c, "加载失败，请重试").FontSize(13).TextColor(palette.Text2)
-			if retry != nil && browseAction(c, "refresh", "重试", false) {
-				retry()
-			}
 		default:
 			ui.Text(c, empty).FontSize(13).TextColor(palette.Text2)
 		}
 	})
+}
+
+func browseStatusRow(c *ui.Context, message, action string, run func()) {
+	palette := phonePalette(c)
+	ui.Row(c).FillWidth().MinHeight(touchSize()+12).Padding(6, 8, 6, 14).Gap(8).
+		Radius(12).Background(palette.fill).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, message).FontSize(13).TextColor(palette.muted).Grow(1).MinWidth(0).Role(ui.RoleStatus)
+		if run != nil {
+			browseStatusButton(c, action, action, run)
+		}
+	})
+}
+
+func browseStatusButton(c *ui.Context, text, label string, run func()) {
+	if ui.ButtonBase(c).Label(label).MinHeight(touchSize()).MinWidth(touchSize()).PaddingX(8).Shrink(0).Center().Children(func() {
+		ui.Text(c, text).FontSize(13).FontWeight(600).TextColor(phonePalette(c).accent)
+	}).Clicked() {
+		run()
+	}
 }
 
 func browseMore(c *ui.Context, loading bool, err error, load func()) {

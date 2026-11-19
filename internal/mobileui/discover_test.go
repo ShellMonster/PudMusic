@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -60,9 +61,84 @@ func TestMobileDiscoverOpensLiveCollectionAndDailyRoutes(t *testing.T) {
 	}
 }
 
+// TestMobileDiscoverRetryKeepsAvailableContent covers a shared outage, a partial outage, and a failed refresh of cached content.
+func TestMobileDiscoverRetryKeepsAvailableContent(t *testing.T) {
+	var failFeed, failMixes atomic.Bool
+	failFeed.Store(true)
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if (r.URL.Path == "/x/web-interface/region/feed/rcmd" && failFeed.Load()) ||
+			(r.URL.Path == "/x/polymer/web-space/seasons_series_list" && failMixes.Load()) {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return true
+		}
+		return false
+	})
+	tester := ui.NewTester(s.view, 390, 844)
+	wait(tester, "推荐暂时没加载出来")
+	mobileLibraryShot(t, tester, "discover-recovery-light.png")
+	tester.SetDark(true)
+	mobileLibraryShot(t, tester, "discover-recovery-dark.png")
+	tester.SetDark(false)
+	for _, label := range []string{"搜索歌曲、歌手、歌单", "排行榜", "重试"} {
+		if _, found := tester.Find(label); !found {
+			t.Fatalf("discover outage hid %q", label)
+		}
+	}
+	if slices.Contains(tester.Texts(), "暂时没加载出来") {
+		t.Fatal("shared outage also rendered a section-level failure")
+	}
+	failFeed.Store(false)
+	failMixes.Store(true)
+	if err := tester.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "暂时没加载出来")
+	if !tester.HasText("推荐曲目") || tester.HasText("推荐暂时没加载出来") {
+		t.Fatal("a collection outage hid the available recommendations")
+	}
+	failMixes.Store(false)
+	if err := tester.Click("重试"); err != nil {
+		t.Fatal(err)
+	}
+	wait(tester, "公开音乐合集")
+	failFeed.Store(true)
+	s.loadDiscoverHome(s.discoverHomeState(s.current()))
+	wait(tester, "重试推荐歌单")
+	if !tester.HasText("公开音乐合集") || !tester.HasText("推荐曲目") || tester.HasText("推荐暂时没加载出来") {
+		t.Fatal("a refresh error replaced cached recommendations")
+	}
+}
+
+// TestMobileDiscoverOffersLoginWhenRequired verifies the action when Bilibili explicitly requires an account.
+func TestMobileDiscoverOffersLoginWhenRequired(t *testing.T) {
+	s, wait := mobileBrowseFixtureWith(t, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/x/web-interface/region/feed/rcmd" {
+			return false
+		}
+		fmt.Fprint(w, `{"code":-101,"message":"账号未登录"}`)
+		return true
+	})
+	tester := ui.NewTester(s.view, 390, 844)
+	wait(tester, "登录后可查看推荐")
+	if err := tester.Click("去登录"); err != nil {
+		t.Fatal(err)
+	}
+	if s.current().kind != pageLogin {
+		t.Fatal("the account requirement did not lead to login")
+	}
+}
+
 func mobileBrowseFixture(t *testing.T) (*shell, func(*ui.Tester, string)) {
 	t.Helper()
+	return mobileBrowseFixtureWith(t, nil)
+}
+
+func mobileBrowseFixtureWith(t *testing.T, intercept func(http.ResponseWriter, *http.Request) bool) (*shell, func(*ui.Tester, string)) {
+	t.Helper()
 	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if intercept != nil && intercept(w, r) {
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		q := r.URL.Query()
 		var data string

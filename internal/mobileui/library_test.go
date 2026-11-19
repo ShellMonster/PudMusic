@@ -20,6 +20,32 @@ import (
 	"github.com/egoist/mygo/ui/mobile"
 )
 
+// TestMobileGuestFollowingOffersLogin keeps the original private page when a guest backs out of login.
+func TestMobileGuestFollowingOffersLogin(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	s := newShell(t.Context(), a)
+	s.switchTab(2)
+	s.push(route{kind: pageFollowing, title: "关注"})
+	tester := ui.NewTester(s.view, 390, 844)
+	if !tester.HasText("登录后查看关注") || tester.HasText("暂时没加载出来") {
+		t.Fatalf("unexpected guest following state: %q", tester.Texts())
+	}
+	mobileLibraryShot(t, tester, "guest-following-login.png")
+	if err := tester.Click("去登录"); err != nil {
+		t.Fatal(err)
+	}
+	if s.current().kind != pageLogin {
+		t.Fatal("login action did not open the login page")
+	}
+	if err := tester.Click("暂不登录"); err != nil {
+		t.Fatal(err)
+	}
+	if s.current().kind != pageFollowing {
+		t.Fatal("cancelling login did not return to following")
+	}
+}
+
 // TestMobileMyRespectsSavedEntriesAndOpensGuestLibrary exercises the My tab's guest navigation and saved menu visibility.
 func TestMobileMyRespectsSavedEntriesAndOpensGuestLibrary(t *testing.T) {
 	a := app.New()

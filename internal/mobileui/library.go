@@ -656,8 +656,16 @@ func libraryHistorySubtitle(item app.LibraryItem, later bool) string {
 }
 
 func (s *shell) libraryLogin(c *ui.Context, name string) {
-	libraryMessage(c, "登录后查看"+name, "登录 B 站账号即可同步内容。")
-	libraryButton(c, "user", "去登录", true, false, func() { s.push(route{kind: pageLogin, title: "登录"}) })
+	palette := phonePalette(c)
+	ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(38, 16, 24).Gap(12).Children(func() {
+		ui.Box(c).Size(48, 48).Radius(12).Background(palette.field).Center().Children(func() {
+			glyph(c, "disc", 24, palette.muted)
+		})
+		ui.Text(c, "登录后查看"+name).FontSize(16).FontWeight(600).Role(ui.RoleHeading)
+		if settingsAction(c, "去登录", true, false).Clicked() {
+			s.push(route{kind: pageLogin, title: "登录"})
+		}
+	})
 }
 
 func libraryMessage(c *ui.Context, title, subtitle string) {
