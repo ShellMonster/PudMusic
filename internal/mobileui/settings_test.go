@@ -51,6 +51,36 @@ func TestMobileSettingsOpensSubpage(t *testing.T) {
 	}
 }
 
+// TestTabletSettingsKeepsTheIndexBesideTheDetail verifies that switching sections uses the master list and that Back returns to Settings.
+func TestTabletSettingsKeepsTheIndexBesideTheDetail(t *testing.T) {
+	a := app.New()
+	t.Cleanup(a.Close)
+	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
+		t.Fatal(err)
+	}
+	s := newShell(t.Context(), a)
+	s.switchTab(2)
+	s.push(route{kind: pageSettings, title: "设置"})
+	tester := ui.NewTester(s.view, 780, 844)
+	for _, label := range []string{"外观", "网络代理"} {
+		if err := tester.Click(label); err != nil {
+			t.Fatal(err)
+		}
+	}
+	index, foundIndex := tester.Find("播放与下载")
+	detail, foundDetail := tester.Find("使用系统代理")
+	if !foundIndex || !foundDetail || index.X+index.W > detail.X || detail.Y > index.Y+160 {
+		t.Fatalf("settings list and detail did not appear side by side: %v, %v", index, detail)
+	}
+	mobileLibraryShot(t, tester, "tablet-settings.png")
+	if err := tester.Click("返回"); err != nil {
+		t.Fatal(err)
+	}
+	if _, found := tester.Find("使用系统代理"); found {
+		t.Fatal("Back left the settings detail open")
+	}
+}
+
 // TestMobileSettingsVisibilityPersists checks that hiding and restoring a My page entry changes the saved preference.
 func TestMobileSettingsVisibilityPersists(t *testing.T) {
 	a := app.New()

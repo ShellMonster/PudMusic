@@ -138,6 +138,9 @@ func (s *shell) importLocalMusic(state *localLibraryState, directory bool) {
 			Parent: s.win, Title: "导入音频", Multiple: true,
 			Filters: []mygo.FileFilter{{Name: "音频文件", Extensions: localmusic.Extensions, MIMETypes: []string{"audio/*"}}},
 		})
+		if len(files) == 0 {
+			files = nil
+		}
 		s.finishLocalImport(state, files, 0, err)
 	}()
 }

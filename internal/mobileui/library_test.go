@@ -31,6 +31,13 @@ func TestMobileMyRespectsSavedEntriesAndOpensGuestLibrary(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.MountLocalMusic(app.LocalMusic{})
+	localUpdates := make(chan func(), 1)
+	t.Cleanup(a.AddLocalWake(func() {
+		select {
+		case localUpdates <- func() {}:
+		default:
+		}
+	}))
 	s := newShell(t.Context(), a)
 	s.switchTab(2)
 	tester := ui.NewTester(s.view, 390, 844)
@@ -54,9 +61,7 @@ func TestMobileMyRespectsSavedEntriesAndOpensGuestLibrary(t *testing.T) {
 	if err := tester.Click("本地音乐"); err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(tester.Texts(), "还没有打开文件") {
-		t.Fatalf("local music does not show the empty library: %q", tester.Texts())
-	}
+	waitLibrary(t, tester, localUpdates, func() bool { return slices.Contains(tester.Texts(), "还没有打开文件") })
 }
 
 // TestMobileCollectionUsesServerRowsAndSearchQuery checks that a guest can open a real collection and submit a server-backed search.

@@ -79,6 +79,11 @@ func Run(application *app.App, session *media.Session) error {
 		defer session.Close()
 	}
 	s := newShell(ctx, application)
+	if runtime.GOOS == "ios" {
+		if err := restoreMobileImportPaths(application, mobileImportBase()); err != nil {
+			log.Printf("pudmusic: restore mobile import paths: %v", err)
+		}
+	}
 	if err := application.RestorePlayback(); err != nil {
 		log.Printf("pudmusic: restore mobile playback: %v", err)
 	}
@@ -88,7 +93,8 @@ func Run(application *app.App, session *media.Session) error {
 			Title: "布丁音乐", Width: 390, Height: 844, Content: ui.View(s.view),
 		})
 		remove := application.AddWake(s.win.Invalidate)
-		s.win.OnClosed(remove)
+		removeLocal := application.AddLocalWake(s.win.Invalidate)
+		s.win.OnClosed(func() { removeLocal(); remove() })
 	})
 	defer s.watchDocumentShares()()
 	return mygo.App.Run()
@@ -205,23 +211,38 @@ func (s *shell) draw(c *ui.Context) {
 		}
 		page := s.current()
 		s.topBar(c, page)
-		scroll := ui.Scroll(c.Key(page.key)).Grow(1).Basis(0).FillWidth()
-		if page.kind == pageDiscover || page.kind == pageDaily || page.kind == pageChart || page.kind == pageNews || page.kind == pageMixes || page.kind == pageAlbum {
-			s.discoverRefresh(page, scroll)
-		} else {
-			s.libraryRefresh(page, scroll)
-		}
-		scroll.Children(func() {
-			ui.Column(c).FillWidth().Padding(8, 16, 24, 16).Gap(8).Children(func() {
-				s.drawPage(c, page)
+		width, _ := c.Size()
+		if width >= 600 && page.kind == pageSetting {
+			ui.Row(c).FillWidth().Grow(1).Basis(0).AlignItems(ui.Stretch).Children(func() {
+				ui.Scroll(c.Key("tablet-settings-index")).Width(244).Shrink(0).FillHeight().Children(func() {
+					ui.Column(c).FillWidth().Padding(8, 16, 24, 16).Children(func() { s.settingsIndex(c, page.id) })
+				})
+				ui.Box(c).Width(1).FillHeight().Background(palette.line)
+				s.pageBody(c, page)
 			})
-		})
+		} else {
+			s.pageBody(c, page)
+		}
 		if state.HasTrack || state.Loading || state.Err != "" {
 			s.miniPlayer(c, state)
 		}
 		s.tabs(c)
 	})
 	s.playerSheet(c, state)
+}
+
+func (s *shell) pageBody(c *ui.Context, page *route) {
+	scroll := ui.Scroll(c.Key(page.key)).Grow(1).Basis(0).FillWidth()
+	if page.kind == pageDiscover || page.kind == pageDaily || page.kind == pageChart || page.kind == pageNews || page.kind == pageMixes || page.kind == pageAlbum {
+		s.discoverRefresh(page, scroll)
+	} else {
+		s.libraryRefresh(page, scroll)
+	}
+	scroll.Children(func() {
+		ui.Column(c).FillWidth().Padding(8, 16, 24, 16).Gap(8).Children(func() {
+			s.drawPage(c, page)
+		})
+	})
 }
 
 func (s *shell) drawPage(c *ui.Context, page *route) {

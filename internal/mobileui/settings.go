@@ -56,17 +56,7 @@ type proxyDraft struct {
 
 func (s *shell) settings(c *ui.Context, page *route) {
 	if page.kind == pageSettings {
-		settingsPageHeading(c, "设置")
-		settingsPanel(c, "settings-index", func() {
-			for index, link := range settingsLinks {
-				if index > 0 {
-					settingsDivider(c)
-				}
-				if settingsLink(c, link.id, link.title, link.icon) {
-					s.push(route{kind: pageSetting, title: link.title, id: link.id})
-				}
-			}
-		})
+		s.settingsIndex(c, "")
 		return
 	}
 	if page.title != "" {
@@ -114,6 +104,28 @@ func (s *shell) settings(c *ui.Context, page *route) {
 	case "licenses":
 		s.licenseSettings(c, state)
 	}
+}
+
+func (s *shell) settingsIndex(c *ui.Context, selected string) {
+	settingsPageHeading(c, "设置")
+	settingsPanel(c, "settings-index", func() {
+		for index, link := range settingsLinks {
+			if index > 0 {
+				settingsDivider(c)
+			}
+			if !settingsLink(c, link.id, link.title, link.icon) || link.id == selected {
+				continue
+			}
+			stack := s.stacks[s.tab]
+			for position := len(stack) - 1; position >= 0; position-- {
+				if stack[position].kind == pageSettings {
+					s.stacks[s.tab] = stack[:position+1]
+					break
+				}
+			}
+			s.push(route{kind: pageSetting, title: link.title, id: link.id})
+		}
+	})
 }
 
 func (s *shell) saveSetting(state *settingsPageData, change func(*app.Settings)) bool {
