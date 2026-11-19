@@ -18,6 +18,7 @@ var playerSheetTitles = [...]string{
 	sheetCover: "当前封面的操作", sheetVideoQuality: "视频画质", sheetLyricsOptions: "歌词设置",
 	sheetPrefs: "满屏播放器", sheetEQ: "均衡器", sheetLyricsSearch: "找歌词",
 	sheetTrackFolders: "添加到收藏夹", sheetDownload: "下载选项",
+	sheetPlaybackError: "打不开这一首",
 }
 
 func (s *shell) playerSheet(c *ui.Context, state app.State) {
@@ -191,6 +192,25 @@ func (s *shell) playerSheetBody(c *ui.Context, kind playerSheetKind, state app.S
 		s.playerFolderChoices(c)
 	case sheetDownload:
 		s.playerDownloadOptions(c)
+	case sheetPlaybackError:
+		if state.Err == "" {
+			ui.Text(c, "播放已恢复").FontSize(13)
+			return
+		}
+		reason := state.ErrDetail
+		if reason == "" {
+			reason = state.Err
+		}
+		ui.Text(c, reason).FontSize(13).Wrap()
+		if state.CanRetry {
+			sheetAction(c, "refresh", "重试播放", "", false, finish(func() { s.report(s.app.Retry()) }))
+		}
+		if state.BiliURL != "" {
+			sheetAction(c, "open", "在 B 站打开", "", false, func() { c.OpenURL(state.BiliURL) })
+		}
+		if s.app.Queue().Len() > 1 {
+			sheetAction(c, "next", "播放下一首", "", false, finish(s.app.Next))
+		}
 	}
 }
 

@@ -35,6 +35,7 @@ const (
 	sheetLyricsSearch
 	sheetTrackFolders
 	sheetDownload
+	sheetPlaybackError
 )
 
 type playerView struct {
@@ -99,7 +100,10 @@ func (s *shell) miniPlayer(c *ui.Context, state app.State) {
 		title = item.Title
 	}
 	if title == "" {
-		title = "正在加载"
+		title = state.FailedTitle
+		if title == "" {
+			title = "正在加载"
+		}
 	}
 	ui.Column(c.Key("mini-player")).Margin(0, 12, 3, 12).Height(60).Shrink(0).Radius(16).Clip().Background(palette.fill).Children(func() {
 		ui.Box(c).FillWidth().Height(2).Draw(func(p *ui.Painter, bounds ui.Rect) {
@@ -115,7 +119,11 @@ func (s *shell) miniPlayer(c *ui.Context, state app.State) {
 				trackLabel(c, title, item.Artist, 13, false)
 			}).OnClick(func() { s.player.visible = true })
 			icon, label := playGlyph(state)
-			iconButton(c, icon, label).OnClick(s.app.Toggle)
+			if state.Err != "" && !state.HasTrack {
+				iconButton(c, "info", "查看播放失败原因").OnClick(func() { s.player.show(sheetPlaybackError) })
+			} else {
+				iconButton(c, icon, label).OnClick(s.app.Toggle)
+			}
 			iconButton(c, "queue", "播放列表").OnClick(func() { s.player.show(sheetQueue) })
 		})
 	})
@@ -276,7 +284,7 @@ func (s *shell) playerControls(c *ui.Context, state app.State, prefs app.FullPla
 			}
 		})
 		if state.Err != "" {
-			ui.Text(c, state.Err).FontSize(12).TextColor(palette.accent).MaxLines(2)
+			playerTool(c, "info", "打不开这一首").OnClick(func() { s.player.show(sheetPlaybackError) })
 		}
 		s.playerProgress(c, state)
 		ui.Row(c).FillWidth().Height(66).Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {

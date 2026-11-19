@@ -2,11 +2,38 @@ package mobileui
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/egoist/mygo/ui"
 )
+
+// TestMobilePlaybackErrorShowsTheFailureReason checks that a file which vanished can be diagnosed from the mini player.
+func TestMobilePlaybackErrorShowsTheFailureReason(t *testing.T) {
+	application := app.New()
+	t.Cleanup(application.Close)
+	if err := application.Open(filepath.Join(t.TempDir(), "missing.mp3")); err == nil {
+		t.Fatal("opening missing fixture succeeded")
+	}
+	state := application.Snapshot()
+	s := newShell(t.Context(), application)
+	s.switchTab(2)
+	tester := ui.NewTester(s.view, 390, 844)
+	if err := tester.Click("查看播放失败原因"); err != nil {
+		t.Fatal(err)
+	}
+	reason := state.ErrDetail
+	if reason == "" {
+		reason = state.Err
+	}
+	if reason == "" || !slices.Contains(tester.Texts(), reason) {
+		t.Fatalf("playback error sheet did not show the failure: %q", tester.Texts())
+	}
+	if _, exists := tester.Find("重试播放"); exists {
+		t.Fatal("missing local file was offered an online retry")
+	}
+}
 
 // TestMobilePlayerKeepsEarlierTracksInQueue verifies that opening a list at the second song retains the first song as a selectable entry.
 func TestMobilePlayerKeepsEarlierTracksInQueue(t *testing.T) {
