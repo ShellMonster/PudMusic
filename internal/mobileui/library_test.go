@@ -206,6 +206,37 @@ func TestMobileImportCopiesMatchingNamesSeparately(t *testing.T) {
 	}
 }
 
+// TestMobileDocumentSelectionKeepsPlayableCopies verifies that a mixed import keeps the good file and reports the failed file.
+func TestMobileDocumentSelectionKeepsPlayableCopies(t *testing.T) {
+	application := app.New()
+	t.Cleanup(application.Close)
+	settings := filepath.Join(t.TempDir(), app.SettingsFileName)
+	if err := application.MountSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	application.MountLocalMusic(app.LocalMusic{})
+	s := newShell(t.Context(), application)
+	s.dispatch = func(apply func()) { apply() }
+	state := &localLibraryState{base: filepath.Join(t.TempDir(), "imports"), working: true}
+	s.finishLocalImport(state, []string{
+		filepath.Join("..", "service", "audio", "testdata", "tone.mp3"),
+		filepath.Join(t.TempDir(), "missing.mp3"),
+	}, 0, nil)
+	if state.working || state.status != "已导入 1 个文件，1 个文件未能导入" {
+		t.Fatalf("import status = %q, working = %t", state.status, state.working)
+	}
+	if err := application.FlushSettings(); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := app.LoadSettings(settings)
+	if err != nil || len(saved.LocalMusicDirs) != 1 {
+		t.Fatalf("saved import roots = %v, err = %v", saved.LocalMusicDirs, err)
+	}
+	if err := application.Open(filepath.Join(saved.LocalMusicDirs[0], "tone.mp3")); err != nil {
+		t.Fatalf("open imported file: %v", err)
+	}
+}
+
 // TestMobileCoverCropUsesPanAndZoom verifies that the exported square reflects the crop preview's translation and scale.
 func TestMobileCoverCropUsesPanAndZoom(t *testing.T) {
 	source := image.NewRGBA(image.Rect(0, 0, 120, 80))

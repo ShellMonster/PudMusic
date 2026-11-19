@@ -1,0 +1,12 @@
+{
+  "mobile": {
+    "id": "pudmusic_documents",
+    "android": {
+      "class": "PudMusicDocumentsPlugin",
+      "sources": ["android/Documents.kt"],
+      "application": [
+        "<activity android:name=\"dev.mygo.PudMusicShareActivity\" android:exported=\"true\"><intent-filter><action android:name=\"android.intent.action.SEND\"/><action android:name=\"android.intent.action.SEND_MULTIPLE\"/><category android:name=\"android.intent.category.DEFAULT\"/><data android:mimeType=\"audio/*\"/></intent-filter></activity>"
+      ]
+    }
+  }
+}

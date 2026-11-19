@@ -90,6 +90,7 @@ func Run(application *app.App, session *media.Session) error {
 		remove := application.AddWake(s.win.Invalidate)
 		s.win.OnClosed(remove)
 	})
+	defer s.watchDocumentShares()()
 	return mygo.App.Run()
 }
 

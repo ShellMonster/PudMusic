@@ -1,11 +1,13 @@
 package mobileui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -29,10 +31,7 @@ type localLibraryState struct {
 func (s *shell) localMusic(c *ui.Context, page *route) {
 	state, _ := page.data.(*localLibraryState)
 	if state == nil {
-		state = &localLibraryState{}
-		if dir, err := mygo.App.Path(mygo.PathUserData); err == nil && filepath.IsAbs(dir) {
-			state.base = filepath.Join(dir, localImportDirectory)
-		}
+		state = &localLibraryState{base: mobileImportBase()}
 		page.data = state
 		s.app.SetLocalRoots(s.app.SettingsSnapshot().LocalMusicDirs)
 		s.app.RescanLocalMusic()
@@ -46,7 +45,10 @@ func (s *shell) localMusic(c *ui.Context, page *route) {
 	}
 	ui.Text(c, fmt.Sprintf("%d 个文件 · FLAC、MP3、M4A、WAV 等", len(snapshot.Tracks))).TextColor(c.Theme().TextMuted).FontSize(13)
 	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-		libraryButton(c, "plus", "添加文件", true, state.working || state.base == "" || !s.app.LocalMusicMounted(), func() { s.importLocalMusic(state) })
+		libraryButton(c, "plus", "添加文件", true, state.working || state.base == "" || !s.app.LocalMusicMounted(), func() { s.importLocalMusic(state, false) })
+		if runtime.GOOS == "android" {
+			iconButton(c, "folder", "添加文件夹").Disabled(state.working || state.base == "" || !s.app.LocalMusicMounted()).OnClick(func() { s.importLocalMusic(state, true) })
+		}
 		libraryButton(c, "play", "播放全部", false, len(items) == 0, func() { s.play(items, 0) })
 		iconButton(c, "refresh", "重新扫描").Disabled(snapshot.Scanning).OnClick(s.app.RescanLocalMusic)
 	})
@@ -101,55 +103,82 @@ func (s *shell) localMusic(c *ui.Context, page *route) {
 	)
 }
 
+func mobileImportBase() string {
+	if dir, err := mygo.App.Path(mygo.PathUserData); err == nil && filepath.IsAbs(dir) {
+		return filepath.Join(dir, localImportDirectory)
+	}
+	return ""
+}
+
 func localTrackItem(track localmusic.Track) app.Item {
 	item := app.LocalItem(track.Path)
 	item.Title = track.Title
 	return item
 }
 
-func (s *shell) importLocalMusic(state *localLibraryState) {
+func (s *shell) importLocalMusic(state *localLibraryState, directory bool) {
 	if state.working || s.win == nil {
 		return
 	}
 	state.working, state.status = true, ""
 	go func() {
-		files, err := mygo.Dialog.Open(mygo.OpenDialogOptions{
+		var files []string
+		var err error
+		if directory {
+			var selection mobileDocumentSelection
+			err = mygo.Native("pudmusic_documents").Call(context.WithoutCancel(s.ctx), "pickDirectory", struct{ Extensions []string }{localmusic.Extensions}, &selection)
+			if selection.Directory != "" {
+				defer os.RemoveAll(selection.Directory)
+			}
+			files = selection.Files
+			s.finishLocalImport(state, files, selection.Failed, err)
+			return
+		}
+		files, err = mygo.Dialog.Open(mygo.OpenDialogOptions{
 			Parent: s.win, Title: "导入音频", Multiple: true,
 			Filters: []mygo.FileFilter{{Name: "音频文件", Extensions: localmusic.Extensions, MIMETypes: []string{"audio/*"}}},
 		})
-		var imported []string
-		var failed int
-		if err == nil {
-			for _, file := range files {
-				root, copyErr := copyMobileImport(state.base, file)
-				if copyErr != nil {
-					failed++
-				} else {
-					imported = append(imported, root)
-				}
+		s.finishLocalImport(state, files, 0, err)
+	}()
+}
+
+func (s *shell) finishLocalImport(state *localLibraryState, files []string, failed int, err error) {
+	var imported []string
+	if err == nil {
+		for _, file := range files {
+			root, copyErr := copyMobileImport(state.base, file)
+			if copyErr != nil {
+				failed++
+			} else {
+				imported = append(imported, root)
 			}
 		}
-		s.update(func() {
-			state.working = false
-			switch {
-			case err != nil:
-				state.status = "无法打开文件选择器，请重试。"
-			case len(imported) != 0:
-				if s.updateLocalRoots(state, func(roots []string) []string { return append(roots, imported...) }) {
-					state.status = fmt.Sprintf("已导入 %d 个文件", len(imported))
-					if failed > 0 {
-						state.status += fmt.Sprintf("，%d 个文件未能导入", failed)
-					}
-				} else {
-					for _, root := range imported {
-						_ = os.RemoveAll(root)
-					}
+	}
+	s.update(func() {
+		state.working = false
+		switch {
+		case err != nil:
+			state.status = "无法打开文件选择器，请重试。"
+		case len(imported) != 0:
+			if s.updateLocalRoots(state, func(roots []string) []string { return append(roots, imported...) }) {
+				state.status = fmt.Sprintf("已导入 %d 个文件", len(imported))
+				if failed > 0 {
+					state.status += fmt.Sprintf("，%d 个文件未能导入", failed)
 				}
-			case failed > 0:
-				state.status = "没有可导入的音频文件。"
+			} else {
+				for _, root := range imported {
+					_ = os.RemoveAll(root)
+				}
 			}
-		})
-	}()
+		case failed > 0:
+			state.status = "无法读取选中的音频文件。"
+		case files != nil:
+			state.status = "没有可导入的音频文件。"
+		}
+		if page := s.current(); page.data != state && state.status != "" {
+			s.notice = state.status
+		}
+	})
 }
 
 func copyMobileImport(base, source string) (string, error) {

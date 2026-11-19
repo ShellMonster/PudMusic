@@ -29,6 +29,18 @@
       ]
     }
   },
+  "ios": {
+    "infoPlist": {
+      "LSSupportsOpeningDocumentsInPlace": false,
+      "CFBundleDocumentTypes": [
+        {
+          "CFBundleTypeName": "音频文件",
+          "CFBundleTypeRole": "Viewer",
+          "LSItemContentTypes": ["public.audio"]
+        }
+      ]
+    }
+  },
   "windows": {
     "installerInclude": "resources/windows/fileassoc.nsh"
   },
