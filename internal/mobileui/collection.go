@@ -203,9 +203,13 @@ func (s *shell) collection(c *ui.Context, page *route) {
 		if len(playable) == len(medias) {
 			ui.Column(c).Gap(2).Children(func() { s.trackList(c, playable) })
 		} else {
+			playIndex := 0
+			textSize := interfaceTextSize(s.app.SettingsSnapshot().FontScale)
+			active, activeOK := s.app.Queue().Current()
 			for _, item := range medias {
 				if item.Playable() && !item.Invalid() {
-					s.trackList(c.Key(mediaKey(item)), []app.Item{app.ItemOfMedia(item)})
+					s.trackRow(c.Key(mediaKey(item)), playable, playIndex, 38, 54, textSize, activeOK && active.Identity() == playable[playIndex].Identity())
+					playIndex++
 				} else {
 					itemRef := app.ItemOfMedia(item)
 					if itemRef.CollectionID > 0 && !item.Invalid() {
@@ -368,6 +372,9 @@ func (s *shell) playCollection(state *collectionState, ref app.CollectionRef, sh
 		return
 	}
 	state.working = true
+	s.collectionPlayRequest++
+	request := s.collectionPlayRequest
+	queueRevision := s.app.Queue().Snapshot().Revision()
 	account := s.app.AccountSnapshot()
 	order, query := state.sort, state.query
 	items, more, next := slices.Clone(state.pages.items), state.pages.more, state.pages.next
@@ -389,7 +396,7 @@ func (s *shell) playCollection(state *collectionState, ref app.CollectionRef, sh
 		}
 		s.update(func() {
 			state.working = false
-			if s.app.AccountSnapshot() != account {
+			if s.app.AccountSnapshot() != account || s.collectionPlayRequest != request || s.app.Queue().Snapshot().Revision() != queueRevision {
 				return
 			}
 			if err != nil {

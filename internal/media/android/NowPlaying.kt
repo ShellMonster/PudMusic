@@ -9,6 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
@@ -69,10 +72,12 @@ private object PudMusicPlayback {
     private var duration = 0L
     private var artworkURL = ""
     private var artwork: Bitmap? = null
+    private var focus: AudioFocusRequest? = null
 
     fun publish(context: Context, args: JSONObject) {
         val previousState = state
         state = args.optString("state", "none")
+        if (state != "playing") abandonFocus(context)
         if (state == "none") {
             session?.release()
             session = null
@@ -116,7 +121,7 @@ private object PudMusicPlayback {
         if (duration > 0) actions = actions or PlaybackState.ACTION_SEEK_TO
         media.setPlaybackState(PlaybackState.Builder().setActions(actions).setState(
             playbackState, (args.optDouble("position", 0.0) * 1000).toLong(),
-            if (state == "playing") 1f else 0f).build())
+            if (state == "playing") args.optDouble("rate", 1.0).toFloat() else 0f).build())
         media.isActive = state != "stopped"
 
         if (state == "stopped") {
@@ -127,6 +132,29 @@ private object PudMusicPlayback {
         } else if (foreground != null && (metadataChanged || previousState != state)) {
             notification(context)?.let { manager(context).notify(NOTIFICATION, it) }
         }
+        if (state == "playing" && !requestFocus(context)) command("pause")
+    }
+
+    private fun requestFocus(context: Context): Boolean {
+        if (focus != null) return true
+        val manager = context.getSystemService(AudioManager::class.java)
+        val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes)
+            .setWillPauseWhenDucked(true)
+            .setOnAudioFocusChangeListener { change ->
+                if (change < 0 && state == "playing") command("pause")
+            }.build()
+        if (manager.requestAudioFocus(request) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) return false
+        focus = request
+        return true
+    }
+
+    private fun abandonFocus(context: Context) {
+        val request = focus ?: return
+        focus = null
+        context.getSystemService(AudioManager::class.java).abandonAudioFocusRequest(request)
     }
 
     private fun stopService(context: Context) {

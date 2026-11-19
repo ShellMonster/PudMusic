@@ -398,8 +398,8 @@ func (a *Account) cancel() {
 
 func (a *Account) stopLoginLocked() {
 	if a.stop != nil {
+		a.loginLease.settled.Store(true)
 		a.stop()
-		a.loginLease.revoked.Store(true)
 		a.stop, a.loginLease = nil, nil
 	}
 }
@@ -416,7 +416,7 @@ func (a *Account) wakeUp() {
 
 // run 是那一轮登录的完整流程：申请 → 画 → 循环轮询 → 落盘。
 func (a *Account) run(ctx context.Context, lease *Lease, id uint64) {
-	defer lease.revoked.Store(true)
+	defer lease.settled.Store(true)
 
 	qr, err := a.cli.NewQRCode(ctx)
 	if err != nil {
@@ -506,10 +506,10 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 	// 得在拉新账号的那一趟**之前**作废掉（见 `App.onAccountChanged`）。
 	prev := a.mgr.Current()
 
-	err := lease.Commit(ctx, func(cur *Session) error {
+	err := lease.commit(ctx, func(cur *Session) error {
 		*cur = sess
 		return nil
-	})
+	}, true)
 	switch {
 	case errors.Is(err, ErrStaleGeneration):
 		// 用户在这中间退了登。**什么都不写**，安静收工——
@@ -523,7 +523,6 @@ func (a *Account) finish(ctx context.Context, lease *Lease, res bili.ScanResult,
 		// 还是同样的结果。正确的做法是让他登进去用着，同时**明说**存不住：
 		// 界面上那一行「凭据后端不可用，登录态关掉应用就没了」就是干这个的。
 		log.Printf("pudmusic: 这次登录没能存下来，先只在内存里用着：%v", err)
-		a.mgr.Adopt(sess)
 		a.notifyAccountChanged(prev, sess)
 		a.setStateFor(id, LoginState{
 			Phase: LoginDone,

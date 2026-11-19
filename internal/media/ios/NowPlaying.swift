@@ -75,7 +75,7 @@ final class PudMusicMediaPlugin: MyGoPlugin {
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: args["title"] as? String ?? "",
             MPNowPlayingInfoPropertyElapsedPlaybackTime: position,
-            MPNowPlayingInfoPropertyPlaybackRate: state == "playing" ? 1.0 : 0.0,
+            MPNowPlayingInfoPropertyPlaybackRate: state == "playing" ? (args["rate"] as? Double ?? 1.0) : 0.0,
         ]
         if let artist = args["artist"] as? String, !artist.isEmpty {
             info[MPMediaItemPropertyArtist] = artist

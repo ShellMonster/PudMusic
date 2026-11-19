@@ -459,8 +459,8 @@ func StoreUnavailable(err error) bool {
 // 后端清不掉时内存也会清（返回错误），宁可不彻底也不能让用户退不出去。
 func (m *Manager) Logout(ctx context.Context) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.cur, m.gen = Session{}, m.gen+1
-	m.mu.Unlock()
 	if err := m.store.Clear(ctx); err != nil {
 		return fmt.Errorf("app: 退出登录: %w", err)
 	}
@@ -476,7 +476,7 @@ func (m *Manager) Logout(ctx context.Context) error {
 type Lease struct {
 	m       *Manager
 	gen     uint64
-	revoked atomic.Bool
+	settled atomic.Bool
 }
 
 // BeginRenew 拿一张租约，声明「我要在后台动登录态了」。
@@ -489,25 +489,37 @@ func (m *Manager) BeginRenew() *Lease {
 // Commit 把续期结果写回去。登录态在这期间变过就返回 ErrStaleGeneration，
 // **不写**。调用方看到这个错误就直接收工，不要重试。
 func (l *Lease) Commit(ctx context.Context, fn func(*Session) error) error {
+	return l.commit(ctx, fn, false)
+}
+
+func (l *Lease) commit(ctx context.Context, fn func(*Session) error, acceptMemoryOnly bool) error {
 	l.m.mu.Lock()
-	if l.revoked.Load() || l.m.gen != l.gen {
-		l.m.mu.Unlock()
+	defer l.m.mu.Unlock()
+	if l.settled.Load() || l.m.gen != l.gen || ctx.Err() != nil {
 		return ErrStaleGeneration
 	}
 	next := l.m.cur
 	err := fn(&next)
 	if err != nil {
-		l.m.mu.Unlock()
 		return err
 	}
 	next.Normalize(time.Now())
-	if err := l.m.store.Save(ctx, next); err != nil {
-		l.m.mu.Unlock()
+	err = l.m.store.Save(ctx, next)
+	if !l.settled.CompareAndSwap(false, true) || ctx.Err() != nil {
+		if err != nil {
+			return ErrStaleGeneration
+		}
+		restoreCtx := context.WithoutCancel(ctx)
+		if l.m.cur.LoggedIn() {
+			return errors.Join(ErrStaleGeneration, l.m.store.Save(restoreCtx, l.m.cur))
+		}
+		return errors.Join(ErrStaleGeneration, l.m.store.Clear(restoreCtx))
+	}
+	if err != nil && !(acceptMemoryOnly && StoreUnavailable(err)) {
 		return fmt.Errorf("app: 保存续期结果: %w", err)
 	}
 	l.m.cur, l.m.gen = next, l.m.gen+1
-	l.m.mu.Unlock()
-	return nil
+	return err
 }
 
 // Discard 放弃这次操作。什么都写不了，只把代次退回去——

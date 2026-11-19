@@ -124,9 +124,13 @@ func (s *shell) importLocalMusic(state *localLibraryState, directory bool) {
 	go func() {
 		var files []string
 		var err error
-		if directory {
+		if runtime.GOOS == "android" {
 			var selection mobileDocumentSelection
-			err = mygo.Native("pudmusic_documents").Call(context.WithoutCancel(s.ctx), "pickDirectory", struct{ Extensions []string }{localmusic.Extensions}, &selection)
+			method := "pickFiles"
+			if directory {
+				method = "pickDirectory"
+			}
+			err = mygo.Native("pudmusic_documents").Call(context.WithoutCancel(s.ctx), method, struct{ Extensions []string }{localmusic.Extensions}, &selection)
 			if selection.Directory != "" {
 				defer os.RemoveAll(selection.Directory)
 			}

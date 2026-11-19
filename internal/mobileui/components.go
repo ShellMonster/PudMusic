@@ -82,19 +82,24 @@ func (s *shell) trackList(c *ui.Context, items []app.Item) {
 		id := item.Identity()
 		occurrences[id]++
 		key := c.Key(id + ":" + strconv.Itoa(occurrences[id]))
-		ui.Row(key).FillWidth().MinHeight(height).Gap(4).AlignItems(ui.Center).Children(func() {
-			first := ui.Row(c).Grow(1).Basis(0).MinHeight(touchSize()).Gap(12).AlignItems(ui.Center).Role(ui.RoleButton).Label(item.Title).Disabled(!app.CanQueue(item)).Children(func() {
-				cover(c, item.Cover, coverSize, 7)
-				trackLabel(c, item.Title, item.Artist, textSize, activeOK && active.Identity() == id)
-			})
-			first.OnClick(func() { s.play(items, index) })
-			more := iconButton(c, "more", "更多操作："+item.Title)
-			if first.LongPressed() || more.Clicked() {
-				s.player.target = item
-				s.player.show(sheetTrack)
-			}
-		})
+		s.trackRow(key, items, index, coverSize, height, textSize, activeOK && active.Identity() == id)
 	}
+}
+
+func (s *shell) trackRow(c *ui.Context, items []app.Item, index int, coverSize, height, textSize float32, active bool) {
+	item := items[index]
+	ui.Row(c).FillWidth().MinHeight(height).Gap(4).AlignItems(ui.Center).Children(func() {
+		first := ui.Row(c).Grow(1).Basis(0).MinHeight(touchSize()).Gap(12).AlignItems(ui.Center).Role(ui.RoleButton).Label(item.Title).Disabled(!app.CanQueue(item)).Children(func() {
+			cover(c, item.Cover, coverSize, 7)
+			trackLabel(c, item.Title, item.Artist, textSize, active)
+		})
+		first.OnClick(func() { s.play(items, index) })
+		more := iconButton(c, "more", "更多操作："+item.Title)
+		if first.LongPressed() || more.Clicked() {
+			s.player.target = item
+			s.player.show(sheetTrack)
+		}
+	})
 }
 
 func interfaceTextSize(scale app.FontScale) float32 {

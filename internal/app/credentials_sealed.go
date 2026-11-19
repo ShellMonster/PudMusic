@@ -83,6 +83,9 @@ func (s sealedSessionStore) Save(ctx context.Context, session Session) error {
 	if err != nil {
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
 		return mobileCredentialError("创建登录态目录", err)
 	}
@@ -104,7 +107,11 @@ func (s sealedSessionStore) Clear(ctx context.Context) error {
 	if errors.Is(fileErr, os.ErrNotExist) {
 		fileErr = nil
 	}
-	if err := errors.Join(legacyErr, fileErr); err != nil {
+	keyErr := s.secrets.Delete(mobileCipherKey)
+	if errors.Is(keyErr, mygo.ErrSecretNotFound) {
+		keyErr = nil
+	}
+	if err := errors.Join(legacyErr, fileErr, keyErr); err != nil {
 		return mobileCredentialError("清除登录态", err)
 	}
 	return nil
@@ -112,15 +119,15 @@ func (s sealedSessionStore) Clear(ctx context.Context) error {
 
 func (s sealedSessionStore) sessionCipher(create bool) (cipher.AEAD, error) {
 	key, err := s.secrets.Get(mobileCipherKey)
-	if errors.Is(err, mygo.ErrSecretNotFound) {
-		if !create {
-			return nil, fmt.Errorf("%w: 登录态密钥已丢失", ErrCorrupt)
-		}
+	if create && (err != nil || len(key) != 32) {
 		key = make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {
 			return nil, mobileCredentialError("生成登录态密钥", err)
 		}
 		err = s.secrets.Set(mobileCipherKey, key)
+	}
+	if errors.Is(err, mygo.ErrSecretNotFound) {
+		return nil, fmt.Errorf("%w: 登录态密钥已丢失", ErrCorrupt)
 	}
 	if err != nil {
 		return nil, mobileCredentialError("读取登录态密钥", err)

@@ -77,6 +77,7 @@ func (a *App) mediaSnapshotLocked() media.NowPlaying {
 		ArtworkURL: a.cover,
 		Duration:   a.duration,
 		Position:   a.position,
+		Rate:       a.rate,
 	}
 }
 

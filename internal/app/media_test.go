@@ -84,6 +84,18 @@ func mountedApp(t *testing.T) (*app.App, *spy) {
 // 说了什么
 // ─────────────────────────────────────────────────────────────────────────────
 
+// TestPlaybackSpeedReachesTheSystem checks that changing playback speed updates the now-playing snapshot immediately.
+func TestPlaybackSpeedReachesTheSystem(t *testing.T) {
+	application, observer := mountedApp(t)
+	if err := application.Open(filepath.Join("..", "service", "audio", "testdata", "gapless.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	application.SetRate(1.75)
+	if rate := observer.last().Rate; rate != 1.75 {
+		t.Fatalf("system playback rate = %g, want 1.75", rate)
+	}
+}
+
 // TestOpeningATrackReachesTheSystem 盯「打开一首歌要说一声」。
 //
 // 不说的话，锁屏上永远没有歌名——而这一票要的就是那个。

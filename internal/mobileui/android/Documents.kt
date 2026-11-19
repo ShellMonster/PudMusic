@@ -20,19 +20,30 @@ class PudMusicDocumentsPlugin : MyGoPlugin {
             reply.success(PudMusicShareActivity.takeShares())
             return
         }
-        if (method != "pickDirectory") {
+        if (method != "pickDirectory" && method != "pickFiles") {
             reply.failure(PluginFailure("NoMethod", method))
             return
         }
         val extensions = args.optJSONArray("Extensions") ?: JSONArray()
         val supported = (0 until extensions.length()).map { extensions.getString(it) }.toSet()
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val directory = method == "pickDirectory"
+        val intent = if (directory) Intent(Intent.ACTION_OPEN_DOCUMENT_TREE) else Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "audio/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         PluginHost.startForResult(intent) { result, data ->
-            val tree = data?.data
-            if (result != Activity.RESULT_OK || tree == null) {
+            if (result != Activity.RESULT_OK || data == null) {
                 reply.success(JSONObject())
+            } else if (directory) {
+                val tree = data.data
+                if (tree == null) reply.success(JSONObject()) else Thread { importTree(tree, supported, reply) }.start()
             } else {
-                Thread { importTree(tree, supported, reply) }.start()
+                val documents = data.clipData?.let { clip -> (0 until clip.itemCount).mapNotNull { clip.getItemAt(it).uri } }
+                    ?: listOfNotNull(data.data)
+                val context = PluginHost.context
+                Thread { reply.success(stageSelection(context, documents, "pudmusic-pick-")) }.start()
             }
         }
     }
@@ -113,6 +124,25 @@ private fun stageDocument(resolver: ContentResolver, uri: Uri, name: String, dir
     }
 }
 
+private fun stageSelection(context: android.content.Context, documents: List<Uri>, prefix: String): JSONObject {
+    val staging = runCatching { Files.createTempDirectory(context.cacheDir.toPath(), prefix).toFile() }.getOrNull()
+    val files = JSONArray()
+    var failed = 0
+    for (uri in documents) {
+        try {
+            if (staging == null || uri.scheme != ContentResolver.SCHEME_CONTENT) throw IOException("Document unavailable")
+            val resolver = context.contentResolver
+            val name = resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            } ?: throw IOException("Document has no name")
+            files.put(stageDocument(resolver, uri, name, staging))
+        } catch (error: Exception) {
+            failed++
+        }
+    }
+    return JSONObject().put("Directory", staging?.absolutePath ?: "").put("Files", files).put("Failed", failed)
+}
+
 class PudMusicShareActivity : Activity() {
     companion object {
         private val pending = ArrayDeque<JSONObject>()
@@ -135,21 +165,7 @@ class PudMusicShareActivity : Activity() {
         }
         if (uris.isEmpty()) { finish(); return }
         Thread {
-            val staging = runCatching { Files.createTempDirectory(cacheDir.toPath(), "pudmusic-share-").toFile() }.getOrNull()
-            val files = JSONArray()
-            var failed = 0
-            for (uri in uris) {
-                try {
-                    if (staging == null || uri.scheme != ContentResolver.SCHEME_CONTENT) throw IOException("Document unavailable")
-                    val name = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                        if (it.moveToFirst()) it.getString(0) else null
-                    } ?: throw IOException("Document has no name")
-                    files.put(stageDocument(contentResolver, uri, name, staging))
-                } catch (error: Exception) {
-                    failed++
-                }
-            }
-            val result = JSONObject().put("Directory", staging?.absolutePath ?: "").put("Files", files).put("Failed", failed)
+            val result = stageSelection(this, uris, "pudmusic-share-")
             synchronized(pending) { pending.add(result) }
             runOnUiThread {
                 packageManager.getLaunchIntentForPackage(packageName)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)) }

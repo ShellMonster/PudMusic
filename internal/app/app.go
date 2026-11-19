@@ -1906,6 +1906,7 @@ func (a *App) SetRate(r float64) {
 		p.SetRate(r)
 	}
 	_, _ = a.UpdateSettings(func(s *Settings) { s.PlaybackRate = r })
+	a.publishMedia()
 	if wake != nil {
 		wake()
 	}

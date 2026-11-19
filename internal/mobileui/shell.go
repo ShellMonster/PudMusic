@@ -49,15 +49,16 @@ type route struct {
 }
 
 type shell struct {
-	app      *app.App
-	win      *mygo.Window
-	ctx      context.Context
-	tab      int
-	stacks   [3][]*route
-	serial   uint64
-	player   playerView
-	notice   string
-	dispatch func(func())
+	app                   *app.App
+	win                   *mygo.Window
+	ctx                   context.Context
+	tab                   int
+	stacks                [3][]*route
+	serial                uint64
+	player                playerView
+	notice                string
+	dispatch              func(func())
+	collectionPlayRequest uint64
 }
 
 func newShell(ctx context.Context, application *app.App) *shell {
@@ -212,10 +213,20 @@ func (s *shell) draw(c *ui.Context) {
 		page := s.current()
 		s.topBar(c, page)
 		width, _ := c.Size()
-		if width >= 600 && page.kind == pageSetting {
+		var siblings []browseCollection
+		if width >= 600 && page.kind == pageCollection {
+			siblings = s.collectionSiblings()
+		}
+		if width >= 600 && (page.kind == pageSetting || len(siblings) > 0) {
 			ui.Row(c).FillWidth().Grow(1).Basis(0).AlignItems(ui.Stretch).Children(func() {
-				ui.Scroll(c.Key("tablet-settings-index")).Width(244).Shrink(0).FillHeight().Children(func() {
-					ui.Column(c).FillWidth().Padding(8, 16, 24, 16).Children(func() { s.settingsIndex(c, page.id) })
+				ui.Scroll(c.Key("tablet-index")).Width(244).Shrink(0).FillHeight().Children(func() {
+					ui.Column(c).FillWidth().Padding(8, 16, 24, 16).Children(func() {
+						if page.kind == pageSetting {
+							s.settingsIndex(c, page.id)
+						} else {
+							s.collectionIndex(c, page.ref, siblings)
+						}
+					})
 				})
 				ui.Box(c).Width(1).FillHeight().Background(palette.line)
 				s.pageBody(c, page)

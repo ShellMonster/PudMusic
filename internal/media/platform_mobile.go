@@ -33,6 +33,7 @@ type mobileNowPlaying struct {
 	Artist     string  `json:"artist"`
 	Duration   float64 `json:"duration"`
 	Position   float64 `json:"position"`
+	Rate       float64 `json:"rate"`
 	ArtworkURL string  `json:"artworkURL"`
 	Artwork    []byte  `json:"artwork,omitempty"`
 }
@@ -102,7 +103,7 @@ func (p *mobilePlatform) publish() {
 		n := p.latest
 		info := mobileNowPlaying{
 			State: n.State.String(), Title: n.Title, Artist: n.Artist,
-			Duration: n.Duration.Seconds(), Position: n.Position.Seconds(),
+			Duration: n.Duration.Seconds(), Position: n.Position.Seconds(), Rate: n.Rate,
 			ArtworkURL: n.ArtworkURL, Artwork: p.artwork,
 		}
 		p.dirty = false
