@@ -148,7 +148,9 @@ func TestSequenceStopsAfterTheLastSong(t *testing.T) {
 // 走完三遍还是同一首：前两遍换新播放器，第三遍（重放）不换——换了的症状是
 // 进度条从头开始闪一下、句柄来回收去，而这是同一首从头再放，本来就该那样。
 func TestSingleReplaysWithoutMovingOn(t *testing.T) {
-	paths := shorts(t, 3)
+	paths := shorts(t, 2)
+	first := shortenWAV(t, readFile(t, fixturePath(t, "stereo16.wav")), 0.75)
+	paths[0] = writeBytes(t, t.TempDir(), "a.wav", first)
 
 	a := newApp(t)
 	if err := a.MountSettings(filepath.Join(t.TempDir(), app.SettingsFileName)); err != nil {
@@ -159,18 +161,15 @@ func TestSingleReplaysWithoutMovingOn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// a 放完 → 还是 a（从头再放）→ 还是 a ……连着三轮，标题一次都不许变。
-	//
-	// ⚠️ 每一轮都要**真的看见这一首放完**：只断「标题是 a 且在放」的话，
-	// 起播那一瞬间就成立了，整条等于没跑。判据是位置——先等它走到末尾
-	// （reachedEnd），再等它回到开头（重放过了）。
+	// 自然结束时进度直接回到开头。用跨过中点后回到前半段的进度验证重播。
 	for round := range 3 {
-		waitFor(t, 6*time.Second, "单曲没有放到头", func() bool {
-			return reachedEnd(a.Snapshot())
-		})
-		waitFor(t, 3*time.Second, "单曲没有从头再放", func() bool {
+		waitFor(t, 6*time.Second, "单曲没有播放到后半段", func() bool {
 			st := a.Snapshot()
-			return st.Title == "a" && st.Playing && st.Position < 40*time.Millisecond
+			return st.Title == "a" && st.Playing && st.Position > st.Duration/2
+		})
+		waitFor(t, 6*time.Second, "单曲没有从头再放", func() bool {
+			st := a.Snapshot()
+			return st.Title == "a" && st.Playing && st.Position > 0 && st.Position < st.Duration/2
 		})
 		if got := a.Queue().CurrentIndex(); got != 0 {
 			t.Fatalf("第 %d 轮之后当前项在下标 %d，want 0（单曲播放一步都不挪）", round+1, got)

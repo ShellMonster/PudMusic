@@ -326,8 +326,8 @@ func (a *App) persistPlayback() {
 		return
 	}
 
-	snap, pos := a.playbackSnapshot()
 	a.mu.Lock()
+	pos := a.position
 	a.playbackDirty = false
 	a.playbackSavedAt = time.Now()
 	// ⚠️ **存的是那个精确的纳秒位置**，不是落盘那个毫秒值：这一格是拿来跟
@@ -335,6 +335,7 @@ func (a *App) persistPlayback() {
 	a.playbackSavedPos = pos
 	a.mu.Unlock()
 
+	snap := a.playbackSnapshot(pos)
 	if _, err := a.UpdateSettings(func(s *Settings) { s.Playback = snap }); err != nil {
 		// 存不住不算错（理由同 `rememberPlayMode`）：设置层自己有入口能看到
 		// 「这次改的设置存不住」（见 App.TakeSettingsError），在这儿拦一次只会
@@ -357,28 +358,21 @@ func (a *App) SavePlayback() {
 
 // playbackSnapshot 拼出现在的队列、当前项和位置。
 //
-// 第二个返回值是**那个精确的纳秒位置**：落盘那一格是毫秒（那是给文件看的），
-// 而落盘那一格的判据要拿它跟 `a.position` 比（见 savePlaybackIfDue）——单位
-// 不一样的话永远不相等。
-//
 // ⚠️ **当前项存的是标识，不是下标**（见 PlaybackSnapshot.Current）。
-func (a *App) playbackSnapshot() (PlaybackSnapshot, time.Duration) {
-	a.mu.Lock()
-	pos := a.position
-	a.mu.Unlock()
-
-	items := a.queue.Items()
+func (a *App) playbackSnapshot(pos time.Duration) PlaybackSnapshot {
+	queue := a.queue.Snapshot()
 	out := PlaybackSnapshot{
-		Items:    make([]PlaybackEntry, 0, len(items)),
+		Items:    make([]PlaybackEntry, 0, queue.Len()),
 		Position: pos.Milliseconds(),
 	}
-	for _, it := range items {
+	for index := range queue.Len() {
+		it, _ := queue.At(index)
 		out.Items = append(out.Items, playbackEntryOf(it))
 	}
-	if cur, ok := a.queue.Current(); ok {
-		out.Current = cur.Identity()
+	if current, ok := queue.At(queue.CurrentIndex()); ok {
+		out.Current = current.Identity()
 	}
-	return out, pos
+	return out
 }
 
 // ---- 恢复 ----
