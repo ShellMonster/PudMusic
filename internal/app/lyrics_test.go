@@ -700,14 +700,10 @@ func TestASearchedLyricRecordsTheIdentity(t *testing.T) {
 // 界面上一直写「暂无歌词」——那是一句**结论**，而真相是**过程**（上游那三选一里
 // 就有「歌词加载中...」这一档，见 `empty.go` 的注释）。
 //
-// 三件事都要成立：
-//
-//	① 换歌那一刻 `Loading` 是真
-//	② 这一首真的没有词时，最后还是落到 `Loading=false`（不能一直转）
-//	③ 拿到了词之后 `Loading` 也是 false
+// 有缓存时，第一次快照可能已读到歌词。歌词到达前不能显示「暂无歌词」，
+// 到达后必须结束加载。
 func TestLyricsReportLoadingUntilTheyHaveSomething(t *testing.T) {
 	a, c := lyricsApp(t)
-	// 这一首没有缓存：读盘回来就是「没有」。
 	if err := c.Save(lyricKeyOf(onlineSong("BV9", "9")), lyrics.Entry{
 		Lyrics: "[00:01.00]有的那一首", OffsetMS: 0, FontSize: DefaultLyricsFontSize,
 	}); err != nil {
@@ -715,9 +711,8 @@ func TestLyricsReportLoadingUntilTheyHaveSomething(t *testing.T) {
 	}
 
 	a.setLyricTrack(onlineSong("BV9", "9"))
-	if !a.Lyrics().Loading {
-		t.Fatal("换歌那一刻 `Loading` 是 false——界面会立刻写「暂无歌词」，" +
-			"而那是一个结论（这一刻什么都还不知道）")
+	if state := a.Lyrics(); !state.Loading && !state.HasLyrics {
+		t.Fatal("换歌后还没有歌词，也没有显示正在加载")
 	}
 	waitLyrics(t, 2*time.Second, "有词那一首读回来", func() bool {
 		return a.Lyrics().HasLyrics
@@ -725,7 +720,6 @@ func TestLyricsReportLoadingUntilTheyHaveSomething(t *testing.T) {
 	if a.Lyrics().Loading {
 		t.Error("词已经到了，`Loading` 还是真——界面那一档会一直转着")
 	}
-
 }
 
 // TestLyricsLoadingFallsBackWhenNothingWillEverArrive 钉住兜底：一首**注定没有词**
