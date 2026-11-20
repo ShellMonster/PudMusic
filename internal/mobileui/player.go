@@ -327,9 +327,18 @@ func (s *shell) playerProgress(c *ui.Context, state app.State) {
 	if state.Duration > 0 {
 		s.player.seek = float64(state.Position) / float64(state.Duration)
 	}
-	ui.Slider(c, &s.player.seek, 0, 1).FillWidth().Height(26).Label("播放进度").Disabled(state.Duration <= 0).OnChange(func() {
-		s.app.SeekTo(time.Duration(s.player.seek * float64(state.Duration)))
-	})
+	slider := ui.Slider(c, &s.player.seek, 0, 1).FillWidth().Height(26).Label("播放进度").Disabled(state.Duration <= 0)
+	slider.OnChange(func() { s.app.ScrubEnd(s.player.seek) })
+	if slider.Clicked() {
+		x, _, _ := slider.PointerPosition()
+		padding := c.Theme().Space(5) / 2
+		if width := slider.LayoutBounds().W - 2*padding; width > 0 {
+			fraction := float64(max(0, min(1, (x-padding)/width)))
+			if state.Position != time.Duration(fraction*float64(state.Duration)) {
+				s.app.ScrubEnd(fraction)
+			}
+		}
+	}
 	ui.Row(c).FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).Children(func() {
 		muted := phonePalette(c).muted
 		ui.Text(c, timeLabel(state.Position)).FontSize(12).TextColor(muted)

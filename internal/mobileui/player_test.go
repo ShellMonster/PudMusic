@@ -35,6 +35,33 @@ func TestMobilePlaybackErrorShowsTheFailureReason(t *testing.T) {
 	}
 }
 
+// TestMobileProgressTapSeeksWhilePaused covers a finger tap away from the progress thumb.
+func TestMobileProgressTapSeeksWhilePaused(t *testing.T) {
+	application := app.New()
+	t.Cleanup(application.Close)
+	application.TestOnlyNoAutoLyrics()
+	application.SetVolume(0)
+	if err := application.Open(filepath.Join("..", "service", "audio", "testdata", "gapless.mp3")); err != nil {
+		t.Fatal(err)
+	}
+	application.Pause()
+	application.SeekTo(0)
+	s := newShell(t.Context(), application)
+	s.player.visible = true
+	tester := ui.NewTester(s.view, 390, 844)
+	progress, found := tester.Find("播放进度")
+	if !found {
+		t.Fatal("playback progress was missing")
+	}
+	x, y := progress.X+progress.W*.75, progress.Y+progress.H/2
+	tester.FingerDown(x, y)
+	tester.FingerUp(x, y)
+	state := application.Snapshot()
+	if state.Playing || state.Position < state.Duration/2 {
+		t.Fatalf("touch did not seek while paused: position=%v duration=%v playing=%v", state.Position, state.Duration, state.Playing)
+	}
+}
+
 // TestMobilePlayerKeepsEarlierTracksInQueue verifies that opening a list at the second song retains the first song as a selectable entry.
 func TestMobilePlayerKeepsEarlierTracksInQueue(t *testing.T) {
 	a := app.New()
