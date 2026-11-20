@@ -1,6 +1,6 @@
 module github.com/ShellMonster/PudMusic
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/Eyevinn/mp4ff v0.62.0
