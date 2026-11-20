@@ -35,12 +35,12 @@ package main
 // （id 100）——这是「已绑定」那一档，喜欢不再问。
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -70,9 +70,16 @@ func main() {
 	}
 
 	a := app.New()
+	if err := ui2.MountSettings(a); err != nil {
+		log.Fatalf("加载喜欢歌单设置：%v", err)
+	}
 	cli := bili.NewClient(bili.Options{Transport: srv.Client().Transport})
 	cli.TestOnlyPointHostsAtFixture(srv.URL)
-	a.MountLogin(app.NewMemoryStore("liked-fixture"), cli)
+	store := app.NewMemoryStore("liked-fixture")
+	if err := store.Save(context.Background(), app.Session{SESSDATA: "fixture", DedeUserID: "9527"}); err != nil {
+		log.Fatalf("设置测试登录态：%v", err)
+	}
+	a.MountLogin(store, cli)
 	tmp, err := os.MkdirTemp("", "liked-fixture-")
 	if err != nil {
 		log.Fatalf("造临时目录：%v", err)
@@ -103,13 +110,16 @@ func main() {
 // seedLikedSettings 往数据目录写一份「已绑定喜欢歌单」的 settings.json。
 //
 // ⚠️ **信封是设置文件的真形状**（`schemaVersion` + `appSettings`），只多写
-// `likedPlaylist` 那一格——其余键让 `DefaultSettings` 补上。
+// `likedFolder` 那一格——其余键让 `DefaultSettings` 补上。
 func seedLikedSettings(dataDir string) {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		log.Fatalf("创建测试数据目录：%v", err)
+	}
 	settings := map[string]any{
 		"schemaVersion": 1,
 		"appSettings": map[string]any{
 			"isMuted": true,
-			"likedPlaylist": map[string]any{
+			"likedFolder": map[string]any{
 				"folderId": boundFolderID,
 				"title":    "绑定的那一格",
 			},
@@ -236,21 +246,7 @@ func serveMedia(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "读不到 FLAC 素材: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	start := 0
-	if h := r.Header.Get("Range"); strings.HasPrefix(h, "bytes=") {
-		start, _ = strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(h, "bytes="), "-"))
-	}
-	if start > len(data) {
-		http.Error(w, "越界", http.StatusRequestedRangeNotSatisfiable)
-		return
-	}
-	w.Header().Set("Content-Length", fmt.Sprint(len(data)-start))
-	if start > 0 {
-		w.Header().Set("Content-Range",
-			fmt.Sprintf("bytes %d-%d/%d", start, len(data)-1, len(data)))
-		w.WriteHeader(http.StatusPartialContent)
-	}
-	_, _ = w.Write(data[start:])
+	http.ServeContent(w, r, "a.flac", time.Time{}, bytes.NewReader(data))
 }
 
 // fixtureRoot 是仓库根（E2E 测试在仓库根下 `go build` 这台 fixture）。
@@ -268,6 +264,3 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(v)
 }
-
-// _ = url 引着它防未使用报错：r.PostForm 的形状靠它。
-var _ = url.Values{}

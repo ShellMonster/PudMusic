@@ -55,8 +55,7 @@ func TestThePlayerHasOnlyTheLikeEntry(t *testing.T) {
 		t.Skip("设置 BIU_RUN_MYGO_E2E=1 才运行真窗口 E2E")
 	}
 
-	client, window, stop := startLikedFixture(t)
-	defer stop()
+	client, window := startLikedFixture(t)
 
 	// 「喜欢」在：fixture 里「赞没赞」那一问已经回了（relation 里 like=false）。
 	if !waitForTree(t, client, window, "喜欢", 20*time.Second) {
@@ -88,8 +87,8 @@ func TestThePlayerHasOnlyTheLikeEntry(t *testing.T) {
 
 // startLikedFixture 编起 `fixture_liked`，等 automation socket 起来。
 //
-// 返回 automation 客户端、第一个内容窗口的 id，和收尾。
-func startLikedFixture(t *testing.T) (*automationClient, int, func()) {
+// 返回 automation 客户端和第一个内容窗口的 id。
+func startLikedFixture(t *testing.T) (*automationClient, int) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	socketDir, socket, err := makeAutomationSocket()
@@ -124,30 +123,31 @@ func startLikedFixture(t *testing.T) (*automationClient, int, func()) {
 		_ = os.RemoveAll(socketDir)
 		t.Fatalf("启动喜欢歌单 fixture：%v", err)
 	}
-	stop := func() {
+	t.Cleanup(func() {
 		cancel()
 		waitForFixtureExit(t, cmd)
 		_ = os.RemoveAll(socketDir)
-	}
+	})
 
 	conn := waitForAutomationSocket(t, socket, cmd, &stdout, &stderr)
+	t.Cleanup(func() { _ = conn.Close() })
 	client := &automationClient{conn: conn, enc: json.NewEncoder(conn), dec: bufio.NewReader(conn)}
 	window := firstContentWindow(t, client)
-	return client, window, stop
+	return client, window
 }
 
-// openFullWindow 点开满屏播放器：按播放条上那张封面（`当前封面`那一项）。
-//
-// ⚠️ **按 id 按**：封面的无障碍名「当前封面」在树上有，但它不是一枚
-// `act` 按得动的 `button`（它是一张照片）。`act` 的 press 对任何节点都是
-// 「对它中心点按一下」——和 `tt.ClickAt` 在无头版里开满屏是同一路。
+// openFullWindow 通过原生无障碍树中可点击的封面容器打开满屏播放器。
 func openFullWindow(t *testing.T, client *automationClient, window int) {
 	t.Helper()
+	const coverLabel = "当前封面的操作"
+	if !waitForTree(t, client, window, coverLabel, 20*time.Second) {
+		t.Fatalf("树上找不到 %q：\n%s", coverLabel, treeDump(t, client, window))
+	}
 	id := findNodeID(t, client, window, func(n navNode) bool {
-		return n.Label == "当前封面"
+		return n.Label == coverLabel
 	})
 	if id == "" {
-		t.Fatalf("树上找不到「当前封面」：\n%s", treeDump(t, client, window))
+		t.Fatalf("树上找不到 %q：\n%s", coverLabel, treeDump(t, client, window))
 	}
 	if err := automationCall(client, 610, "act", map[string]any{
 		"window": window,
