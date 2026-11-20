@@ -24,6 +24,7 @@ on:
   pull_request:
     paths:
       - "internal/e2e/**"
+      - "internal/app/**"
       - "internal/ui/**"
       - "internal/platform/**"
       # 解码器在这里：AAC/M4A（mfadec）、FLAC（flacdec）、MP3（mp3dec）、
@@ -43,6 +44,7 @@ on:
       - "work/**"
     paths:
       - "internal/e2e/**"
+      - "internal/app/**"
       - "internal/ui/**"
       - "internal/platform/**"
       - "internal/service/**"

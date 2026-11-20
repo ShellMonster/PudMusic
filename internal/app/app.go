@@ -347,6 +347,7 @@ type App struct {
 
 	// playbackDirty 是「播放状态变了，该落盘了」。见 playback_state.go。
 	playbackDirty bool
+	scrubRevision uint64
 	// playbackSavedAt 是上一次落盘的时刻，playbackSavedPos 是那一次的位置。
 	//
 	// 两者是用来**限速**的：位置一直在变（在放的时候每一拍都在变），而不限速
@@ -1942,6 +1943,8 @@ func (a *App) ScrubEnd(fraction float64) {
 	// 立刻把位置改过来：暂停状态下 tick 不跑，界面下一帧读的就是这里写的值。
 	a.mu.Lock()
 	a.setPositionLocked(t)
+	a.scrubRevision++
+	a.playbackDirty = true
 	a.playing = p.Playing()
 	// 用户动过时间线了，「停到开头」这件事就过去了。系统那边跟着回到
 	// playing / paused——它看到的进度条此刻在 t 上，状态却说「停在开头」，
@@ -1950,11 +1953,6 @@ func (a *App) ScrubEnd(fraction float64) {
 	wake := a.wake
 	a.mu.Unlock()
 	a.kickTick()
-	// 用户拖了进度条 → 落盘那一格该跟着变（见 playback_state.go）。
-	//
-	// ⚠️ **这一格算「用户动了一下」**：它走的是那条「尽快写、但至少隔半秒」的
-	// 路（见 savePlaybackIfDue），所以拖完不用等 5 秒那个窗口。
-	a.markPlaybackDirty()
 	// 锁屏上那根进度条和界面上这根是同一根：不报的话它在原地漂着，
 	// 直到下一次校正（mediaPublishEvery）才跟上。
 	a.publishMedia()
@@ -2213,6 +2211,7 @@ func (a *App) tick() {
 			p := a.player
 			live := a.wantPlay || a.playing
 			dur := a.duration
+			scrubRevision := a.scrubRevision
 			wake := a.wake
 			a.mu.Unlock()
 
@@ -2244,9 +2243,8 @@ func (a *App) tick() {
 			// ⚠️ 它要认准「是这一台播放器」：换歌时锁里就把 `a.player` 换成
 			// 新的了，拿旧那台的「不在放」去判新歌放完了，是白报一次。
 			ended := false
-			// 位置和 playing 是**这一台播放器**的：这中间换歌了（换歌在锁里把
-			// `a.player` 换成新的），就不能把旧那台的位置写到新歌头上。
-			if p != nil && live && a.player == p {
+			// 换歌或拖动进度后，这一拍读到的位置和播放状态已经过期。
+			if p != nil && live && a.player == p && a.scrubRevision == scrubRevision {
 				ended = a.playing && !playing
 				if finished {
 					// ⚠️ **放完了就把位置报成 0**：这一串放完了之后进度条该
