@@ -81,7 +81,7 @@ jobs:
       # 往同一位置写链接直接撞 EEXIST，go.mod 指定的版本装不上，spike
       # 根本没机会跑（PR #769 那次红）。Go module / build 缓存由 setup-go
       # 自带的 `cache: true` 负责，它不碰托管工具目录。
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true

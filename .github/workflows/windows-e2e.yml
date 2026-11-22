@@ -79,7 +79,7 @@ jobs:
       # 随后 setup-go 往同一位置写链接直接撞 EEXIST（windows-aac-spike
       # 在 PR #769 那次红的原因）。module / build 缓存由 setup-go 自带
       # 的 `cache: true` 负责。
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache: true
