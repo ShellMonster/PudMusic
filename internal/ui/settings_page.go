@@ -180,7 +180,9 @@ func (s *Shell) settingsNav(c *ui.Context, p tok.Palette, stacked bool) {
 	var nav ui.Element
 	iconGap := float32(space.Px10)
 	if stacked {
-		nav = ui.ScrollHorizontal(c).Key("set-nav").FillWidth().Gap(space.Px8)
+		nav = ui.ScrollHorizontal(c).Key("set-nav").FillWidth().Height(52).
+			Gap(space.Px8).Padding(space.None, space.None, space.Px8, space.None).
+			ScrollbarStyle(horizontalRailScrollbarStyle())
 		iconGap = space.Px8
 	} else {
 		nav = ui.Column(c).Key("set-nav").Width(setNavW).Shrink(0).Gap(space.Px2)

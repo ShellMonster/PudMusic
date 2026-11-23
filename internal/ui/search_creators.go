@@ -8,6 +8,7 @@ import (
 
 	"github.com/ShellMonster/PudMusic/internal/app"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/imgcache"
+	"github.com/ShellMonster/PudMusic/internal/ui/widgets/list"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/pud"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/scale"
 	"github.com/ShellMonster/PudMusic/internal/ui/widgets/space"
@@ -39,6 +40,10 @@ type creatorPreview struct {
 	pageKeyword string
 	pageValid   bool
 }
+
+// verificationBadgeRadius keeps the certification badge circular while matching
+// its 21px diameter.
+const verificationBadgeRadius = 10.5
 
 // storePage 记下预览那一次请求的整页（`uniqueCreators` 截断之前的那一份）。
 func (p *creatorPreview) storePage(keyword string, page app.SearchPage) {
@@ -146,19 +151,35 @@ func creatorRetryAvailable(err error) bool {
 	return !ok || searchErr.Retryable
 }
 
-// viewSearchCreators 画搜索页头那一排相关 UP 主，返回 true 表示这一帧占了页头。
-//
-// 预览还在路上时画页头 + 骨架：结果回来时页头几何不变（同一支
-// `pud.PageHeadFnEyebrow`），只有骨架换成真人，下面的 Tab 不会往下跳。没有匹配用户
-// （空结果 / 失败）时返回 false，由调用方画普通的「搜索结果」页头。
-func (s *Shell) viewSearchCreators(c *ui.Context, keyword string, winW float32) bool {
+func (s *Shell) searchCreatorLead(keyword string, tab int) *list.Lead {
 	p := &s.search.creators
+	pg := s.search.lists[tab].list.Paged()
 	if p.keyword != keyword || (len(p.items) == 0 && p.result == nil) {
-		return false
+		return nil
 	}
+	if pg.Loaded == 0 && !pg.Loading {
+		return nil
+	}
+	return &list.Lead{
+		Label: "搜索结果页头",
+		Height: func() float32 {
+			if tab == searchTabUser {
+				return 300
+			}
+			return 340
+		},
+		Draw: func(c *ui.Context) {
+			s.viewSearchLead(c, keyword, tab)
+		},
+	}
+}
+
+func (s *Shell) viewSearchLead(c *ui.Context, keyword string, tab int) {
+	winW, _ := c.Size()
 	ty := tok.Of(c.Theme())
+	p := &s.search.creators
+
 	pud.PageHeadFnEyebrow(c, func() {
-		// 关键词原样画：`typo.Eyebrow` 会转全大写，搜索词的大小写是有意义的。
 		typo.EyebrowText(c, "搜索「"+keyword+"」").SingleLine().Ellipsis("…")
 	}, "相关 UP 主", winW, nil, func() {
 		if ui.ButtonBase(c).Label("查看全部 UP 主").Padding(space.Px8).Children(func() {
@@ -169,10 +190,33 @@ func (s *Shell) viewSearchCreators(c *ui.Context, keyword string, winW float32) 
 	})
 	if len(p.items) == 0 {
 		s.viewCreatorSkeleton(c)
-		return true
+	} else {
+		s.viewCreatorRail(c, p.items)
 	}
-	ui.ScrollHorizontal(c).Key("search:creators").FillWidth().Gap(space.Px16).Margin(space.Px16, space.None, space.None, space.None).Children(func() {
-		for _, item := range p.items {
+
+	ui.Column(c).FillWidth().Margin(space.Px12, space.None, space.None, space.None).Children(func() {
+		tabs := make([]pud.Tab, searchTabCount)
+		for i := range tabs {
+			tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
+		}
+		pud.Tabs(c, "search:tabs", &s.search.tab, tabs)
+	})
+	s.viewSearchToolbar(c, tab)
+
+	t := &s.search.lists[tab]
+	if t.list.Layout() != list.ViewCard && tab != searchTabUser && t.list.Paged().Loaded > 0 {
+		ui.Box(c).Height(space.Px8)
+		t.list.Header(c, "search:header:"+fmt.Sprint(tab))
+	}
+}
+
+func (s *Shell) viewCreatorRail(c *ui.Context, items []app.SearchItem) {
+	ty := tok.Of(c.Theme())
+	ui.ScrollHorizontal(c).Key("search:creators").FillWidth().Height(112).
+		Gap(space.Px16).Padding(space.None, space.None, space.Px16, space.None).
+		Margin(space.Px16, space.None, space.None, space.None).
+		ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
+		for _, item := range items {
 			item := item
 			button := ui.ButtonBase(c).Key("search:creator:" + item.Item.Bvid).Label("打开 " + item.Title + " 的空间").Width(116).Shrink(0).
 				AlignItems(ui.Center).Radius(tok.R8)
@@ -197,7 +241,7 @@ func (s *Shell) viewSearchCreators(c *ui.Context, keyword string, winW float32) 
 							if item.Verification == app.SearchVerificationOrganization {
 								color, label = ui.RGB(48, 142, 204), "机构认证"
 							}
-							ui.Box(c).Absolute().Right(0).Bottom(0).Size(21, 21).Radius(10.5).Background(color).Border(2, ty.Bg).Center().Label(label).Children(func() { ui.Text(c, "V").FontSize(11).TextColor(ui.RGB(255, 255, 255)) })
+							ui.Box(c).Absolute().Right(0).Bottom(0).Size(21, 21).Radius(verificationBadgeRadius).Background(color).Border(2, ty.Bg).Center().Label(label).Children(func() { ui.Text(c, "V").FontSize(11).TextColor(ui.RGB(255, 255, 255)) })
 						}
 					})
 					ui.Text(c, item.Title).FontSize(scale.Font(c, scale.Size13)).TextColor(ty.Text).SingleLine().Ellipsis("…")
@@ -207,13 +251,15 @@ func (s *Shell) viewSearchCreators(c *ui.Context, keyword string, winW float32) 
 			}
 		}
 	})
-	return true
 }
 
 // viewCreatorSkeleton 是相关 UP 主那一排在预览路上的样子：几何和真的一模一样
 // （头像 72、项宽 116、缝 16、上边距 16），所以结果回来时下面的 Tab 不动。
 func (s *Shell) viewCreatorSkeleton(c *ui.Context) {
-	ui.ScrollHorizontal(c).Key("search:creators:sk").FillWidth().Gap(space.Px16).Margin(space.Px16, space.None, space.None, space.None).Children(func() {
+	ui.ScrollHorizontal(c).Key("search:creators:sk").FillWidth().Height(112).
+		Gap(space.Px16).Padding(space.None, space.None, space.Px16, space.None).
+		Margin(space.Px16, space.None, space.None, space.None).
+		ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
 		for i := 0; i < 8; i++ {
 			ui.Column(c).Key(fmt.Sprintf("search:creator:sk:%d", i)).Width(116).Shrink(0).
 				AlignItems(ui.Center).Gap(space.Px8).Children(func() {

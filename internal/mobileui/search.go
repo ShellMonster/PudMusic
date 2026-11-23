@@ -299,7 +299,9 @@ func (s *shell) mobileSearchHistoryView(c *ui.Context, state *mobileSearchState)
 				s.saveMobileSearchHistory(&state.history)
 			}
 		})
-		ui.ScrollHorizontal(c.Key("search:history")).FillWidth().Gap(8).Children(func() {
+		ui.ScrollHorizontal(c.Key("search:history")).FillWidth().Height(touchSize()+8).
+			Gap(8).Padding(0, 0, 8, 0).
+			ScrollbarStyle(ui.ScrollbarStyle{TrackWidth: 6, ThumbWidth: 6, MinLength: 24}).Children(func() {
 			for _, word := range state.history.words {
 				ui.Row(c).Key("history:" + word).MinHeight(touchSize()).Shrink(0).Radius(24).Background(palette.Surface2).Children(func() {
 					if ui.ButtonBase(c).Label(word).Padding(0, 0, 0, 10).Children(func() {

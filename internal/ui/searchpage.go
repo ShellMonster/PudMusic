@@ -210,7 +210,11 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string, winW float32) {
 	st := &s.search
 
 	ui.Column(c).Key("search:results").Grow(1).AlignItems(ui.Stretch).Children(func() {
-		hasCreators := s.viewSearchCreators(c, keyword, winW)
+		cur := st.tab
+		lead := s.searchCreatorLead(keyword, cur)
+		st.lists[cur].list.SetLead(lead)
+
+		hasCreators := lead != nil
 		if !hasCreators {
 			pud.PageHead(c, "搜索结果", "「"+keyword+"」", "", winW, nil)
 			if p := &s.search.creators; p.keyword == keyword && creatorRetryAvailable(p.err) {
@@ -223,26 +227,24 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string, winW float32) {
 			}
 		}
 
-		// 🔴 **Tab 要在 `current` 之前画**：它是建到的时候才写 `st.tab`（理由见 `mygo/ui` 的
-		// `tabsParts.Tab`）；顺序反过来的表现是点了 Tab 画面先抖一下才换。
-		tabGap := float32(space.Px32)
-		if hasCreators {
-			tabGap = space.Px12
+		if !hasCreators {
+			// 🔴 **Tab 要在 `current` 之前画**：它是建到的时候才写 `st.tab`（理由见 `mygo/ui` 的
+			// `tabsParts.Tab`）；顺序反过来的表现是点了 Tab 画面先抖一下才换。
+			ui.Column(c).FillWidth().Margin(space.Px32, space.None, space.None, space.None).Children(func() {
+				tabs := make([]pud.Tab, searchTabCount)
+				for i := range tabs {
+					tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
+				}
+				pud.Tabs(c, "search:tabs", &st.tab, tabs)
+			})
+			s.viewSearchToolbar(c, cur)
 		}
-		ui.Column(c).FillWidth().Margin(tabGap, space.None, space.None, space.None).Children(func() {
-			tabs := make([]pud.Tab, searchTabCount)
-			for i := range tabs {
-				tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
-			}
-			pud.Tabs(c, "search:tabs", &st.tab, tabs)
-		})
-		cur := st.tab
-		s.viewSearchToolbar(c, cur)
 
-		// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
+		cur = st.tab
 		st.lists[cur].current(searchQuerySpec{keyword: keyword, sort: st.sorts[cur]}, &st.scroll)
-
-		s.viewSearchResultsBody(c, cur, keyword)
+		lead = s.searchCreatorLead(keyword, cur)
+		st.lists[cur].list.SetLead(lead)
+		s.viewSearchResultsBody(c, cur, keyword, lead != nil)
 	})
 }
 
@@ -297,7 +299,7 @@ func (s *Shell) viewSearchToolbar(c *ui.Context, tab int) {
 //
 // ⚠️ **加载的时候列表照画，不 return**：后台回来的结果是在列表的 `View` 里收的
 // （`adopt`），不画它这一页就永远停在「正在加载」。
-func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
+func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string, lead bool) {
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()
 
@@ -354,7 +356,7 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string) {
 	// `searchHeaderSpec`。
 	winW, _ := c.Size()
 	t.list.SetAlbumMode(pud.AlbumModeFor(winW))
-	if v := t.list.Layout(); v != list.ViewCard && tab != searchTabUser {
+	if !lead && t.list.Layout() != list.ViewCard && tab != searchTabUser {
 		ui.Box(c).Height(space.Px8)
 		t.list.Header(c, "search:header:"+strconv.Itoa(tab))
 	}

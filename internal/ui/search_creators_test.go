@@ -230,6 +230,26 @@ func TestSearchCreatorHeaderKeepsPageGeometry(t *testing.T) {
 	}
 }
 
+// TestSearchCreatorPreviewScrollsWithResults locks the related creator strip inside the
+// result list instead of leaving it fixed above the scrolling rows.
+func TestSearchCreatorPreviewScrollsWithResults(t *testing.T) {
+	s, tt := newSearchPage(t, "音乐", newSearchStub(24, 24), at(1200, 800))
+	s.search.creators.fetch = func(context.Context, string) ([]app.SearchItem, error) {
+		return []app.SearchItem{creatorItem("42", "滚动测试UP", "", 0)}, nil
+	}
+	waitFrames(t, tt, "滚动测试UP出现", func() bool { return tt.HasText("滚动测试UP") })
+	before, ok := tt.Find("滚动测试UP")
+	if !ok {
+		t.Fatal("画面上找不到相关 UP 主")
+	}
+	tt.Scroll(700, 400, 0, 300)
+	tt.Frame()
+	after, ok := tt.Find("滚动测试UP")
+	if ok && after.Y >= before.Y-100 {
+		t.Fatalf("滚动 300 后相关 UP 主仍固定在原位，y 从 %.1f 变成 %.1f", before.Y, after.Y)
+	}
+}
+
 // TestSearchCreatorKeywordKeepsItsCase locks that the eyebrow shows the keyword as
 // typed: `typo.Eyebrow` upper-cases, and 「Taylor Swift」 used to render as
 // 「TAYLOR SWIFT」.
