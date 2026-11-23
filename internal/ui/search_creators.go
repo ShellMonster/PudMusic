@@ -164,9 +164,9 @@ func (s *Shell) searchCreatorLead(keyword string, tab int) *list.Lead {
 		Label: "搜索结果页头",
 		Height: func() float32 {
 			if tab == searchTabUser {
-				return 300
+				return 252
 			}
-			return 340
+			return 292
 		},
 		Draw: func(c *ui.Context) {
 			s.viewSearchLead(c, keyword, tab)
@@ -175,13 +175,12 @@ func (s *Shell) searchCreatorLead(keyword string, tab int) *list.Lead {
 }
 
 func (s *Shell) viewSearchLead(c *ui.Context, keyword string, tab int) {
-	winW, _ := c.Size()
 	ty := tok.Of(c.Theme())
 	p := &s.search.creators
 
-	pud.PageHeadFnEyebrow(c, func() {
-		typo.EyebrowText(c, "搜索「"+keyword+"」").SingleLine().Ellipsis("…")
-	}, "相关 UP 主", winW, nil, func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).
+		Padding(space.Px24, space.None, space.Px8, space.None).Children(func() {
+		typo.EyebrowText(c, "搜索「"+keyword+"」").SingleLine().Ellipsis("…").Grow(1)
 		if ui.ButtonBase(c).Label("查看全部 UP 主").Padding(space.Px8).Children(func() {
 			ui.Text(c, "查看全部 ›").TextColor(ty.Text2)
 		}).Clicked() {
