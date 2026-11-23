@@ -796,8 +796,27 @@ func TestSearchUserCardsKeepClearanceBelowTheToolbar(t *testing.T) {
 	if !ok {
 		t.Fatal("找不到第一张 UP 主卡")
 	}
-	if gap := card.Y - (toolbar.Y + toolbar.H); gap < 8 {
-		t.Fatalf("排序控件和第一张 UP 主卡之间只有 %.1fpx，至少需要 8px", gap)
+	if gap := card.Y - (toolbar.Y + toolbar.H); gap < 16 {
+		t.Fatalf("排序控件和第一张 UP 主卡之间只有 %.1fpx，至少需要 16px", gap)
+	}
+}
+
+// TestChangingSearchKeywordReturnsToSongs locks the default result type for a new search.
+func TestChangingSearchKeywordReturnsToSongs(t *testing.T) {
+	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
+	settleText(t, tt, "第 1 页 第 1 首")
+	if err := tt.Click("UP 主"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("林俊杰"))
+	waitFrames(t, tt, "新搜索结果出现", func() bool { return tt.HasText("第 1 页 第 1 首") })
+	if s.search.tab != searchTabSong {
+		t.Fatalf("新搜索默认 Tab = %d，want 歌曲(%d)", s.search.tab, searchTabSong)
+	}
+	if !tt.HasText("歌曲") {
+		t.Fatalf("新搜索没有回到歌曲 Tab，文字有 %q", tt.Texts())
 	}
 }
 
