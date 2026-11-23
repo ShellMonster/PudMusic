@@ -121,6 +121,11 @@ func (s *Shell) syncSearch(c *ui.Context) {
 	s.syncCreatorPreview(keyword)
 
 	cur := st.tab
+	if st.tabKeyword != keyword {
+		st.tab = searchTabSong
+		st.tabKeyword = keyword
+		cur = searchTabSong
+	}
 	// 🔴 换查询 → 重置到第 1 页（理由见 searchTab.current）。
 	//
 	// ⚠️ **判的是上一帧的那张 Tab**：这一层的副作用跑在画的前面，而 Tab 是
@@ -235,7 +240,7 @@ func (s *Shell) viewSearchResults(c *ui.Context, keyword string, winW float32) {
 				for i := range tabs {
 					tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
 				}
-				pud.Tabs(c, "search:tabs", &st.tab, tabs)
+				pud.Tabs(c, "search:tabs:"+keyword, &st.tab, tabs)
 			})
 			s.viewSearchToolbar(c, cur)
 		}

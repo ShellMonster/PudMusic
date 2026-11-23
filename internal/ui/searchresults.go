@@ -91,6 +91,9 @@ type searchState struct {
 	creators creatorPreview
 	// tab 是当前选中的 Tab（`ui.Tabs` 直接写它）。
 	tab int
+	// tabKeyword 是当前 Tab 选择对应的搜索词。换词时默认回到歌曲结果，用户在
+	// 同一个词里手动切换到视频或 UP 主则保留当前 Tab。
+	tabKeyword string
 
 	// sortOpen 是排序下拉此刻是不是展开的（一次只会展开一个）。
 	sortOpen bool

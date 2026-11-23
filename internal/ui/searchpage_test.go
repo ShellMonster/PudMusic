@@ -801,6 +801,25 @@ func TestSearchUserCardsKeepClearanceBelowTheToolbar(t *testing.T) {
 	}
 }
 
+// TestChangingSearchKeywordReturnsToSongs locks the default result type for a new search.
+func TestChangingSearchKeywordReturnsToSongs(t *testing.T) {
+	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
+	settleText(t, tt, "第 1 页 第 1 首")
+	if err := tt.Click("UP 主"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "用户那一页进来", loadedTo(s, searchTabUser, 1))
+
+	s.navigate(searchPath + "?" + searchQuery + "=" + url.QueryEscape("林俊杰"))
+	waitFrames(t, tt, "新搜索结果出现", func() bool { return tt.HasText("第 1 页 第 1 首") })
+	if s.search.tab != searchTabSong {
+		t.Fatalf("新搜索默认 Tab = %d，want 歌曲(%d)", s.search.tab, searchTabSong)
+	}
+	if !tt.HasText("歌曲") {
+		t.Fatalf("新搜索没有回到歌曲 Tab，文字有 %q", tt.Texts())
+	}
+}
+
 // TestFirstSearchTabVisitKeepsViewport 锁定首次切到结果足够多的标签时不应跳回顶部。
 func TestFirstSearchTabVisitKeepsViewport(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(72, 72))

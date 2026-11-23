@@ -198,7 +198,7 @@ func (s *Shell) viewSearchLead(c *ui.Context, keyword string, tab int) {
 		for i := range tabs {
 			tabs[i] = pud.Tab{Label: searchTabLabels[i], Count: s.searchTabCountText(i)}
 		}
-		pud.Tabs(c, "search:tabs", &s.search.tab, tabs)
+		pud.Tabs(c, "search:tabs:"+keyword, &s.search.tab, tabs)
 	})
 	s.viewSearchToolbar(c, tab)
 
