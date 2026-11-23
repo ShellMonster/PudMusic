@@ -26,7 +26,7 @@ func TestSearchCreatorsAreClickable(t *testing.T) {
 	s.search.creators.fetch = func(context.Context, string) ([]app.SearchItem, error) {
 		return []app.SearchItem{creatorItem("42", "测试UP", "", bili.VerificationPersonal), creatorItem("43", "另一个UP", "", bili.VerificationOrganization)}, nil
 	}
-	waitFrames(t, tt, "相关UP主", func() bool { return tt.HasText("测试UP") && tt.HasText("另一个UP") })
+	waitFrames(t, tt, "搜索结果 UP 主", func() bool { return tt.HasText("测试UP") && tt.HasText("另一个UP") })
 	if err := tt.Click("打开 测试UP 的空间"); err != nil {
 		t.Fatal(err)
 	}
@@ -186,9 +186,7 @@ func TestSearchCreatorViewAllOpensUserTab(t *testing.T) {
 	}
 }
 
-// TestSearchCreatorHeaderKeepsPageGeometry locks that the creator preview does not
-// move the page: the eyebrow keeps the page-head offset and the tabs stay put when
-// the preview lands (they used to jump ~50px and the header dropped its 24px pad).
+// TestSearchCreatorHeaderKeepsPageGeometry locks the search row and tabs when the creator preview lands.
 func TestSearchCreatorHeaderKeepsPageGeometry(t *testing.T) {
 	s, tt := newSearchPage(t, "音乐", newSearchStub(24, 24))
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -215,16 +213,26 @@ func TestSearchCreatorHeaderKeepsPageGeometry(t *testing.T) {
 	if !ok {
 		t.Fatalf("预览还在路上时没有 Tab：%q", tt.Texts())
 	}
+	actionBefore, ok := tt.Find("查看全部 UP 主")
+	if !ok {
+		t.Fatalf("预览还在路上时没有查看全部操作：%q", tt.Texts())
+	}
 	close(release)
 	waitFrames(t, tt, "示例UP出现", func() bool { return tt.HasText("示例UP") })
 	headAfter, _ := tt.Find("搜索「音乐」")
 	tabAfter, _ := tt.Find("UP 主")
+	actionAfter, _ := tt.Find("查看全部 UP 主")
 	if headBefore.Y != headAfter.Y {
-		t.Errorf("页头小标的 y 从 %.1f 跳到 %.1f", headBefore.Y, headAfter.Y)
+		t.Errorf("搜索词行的 y 从 %.1f 跳到 %.1f", headBefore.Y, headAfter.Y)
+	}
+	if beforeCenter, actionCenter := headBefore.Y+headBefore.H/2, actionBefore.Y+actionBefore.H/2; abs32(beforeCenter-actionCenter) > 12 {
+		t.Errorf("查看全部没有和搜索词同行：中心 y=%.1f / %.1f", beforeCenter, actionCenter)
+	}
+	if afterCenter, actionCenter := headAfter.Y+headAfter.H/2, actionAfter.Y+actionAfter.H/2; abs32(afterCenter-actionCenter) > 12 {
+		t.Errorf("结果回来后查看全部没有和搜索词同行：中心 y=%.1f / %.1f", afterCenter, actionCenter)
 	}
 	// 留 4px 余量：骨架里名字那一块固定高，真名字的行盒按字体度量算（差 2px 上下，
-	// 其它 rail 骨架也一样）。这里锁的是页头几何和那一排的高度都被占住了——改之前
-	// Tab 一下挪约 50px。
+	// 其它 rail 骨架也一样）。
 	if jump := tabAfter.Y - tabBefore.Y; jump > 4 || jump < -4 {
 		t.Errorf("Tab 的 y 从 %.1f 跳到 %.1f", tabBefore.Y, tabAfter.Y)
 	}
