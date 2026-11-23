@@ -593,15 +593,15 @@ func (h *homePage) rail(c *ui.Context, songs []list.Music, inner float32, s *She
 	pad := homeLayoutFor(h.win).pad
 	ui.ScrollHorizontal(c).Key("home:rail").Width(inner+2*pad).Gap(space.Px20).
 		Margin(space.None, -pad, space.None, -pad).Padding(space.None, pad, space.Px8, pad).
-		Children(func() {
-			for i, m := range songs {
-				ev := pud.CoverCard(c, "home:recent:card:"+m.ID, h.cleanTitle(m.Title),
-					m.Owner, homeRailCardW, h.coverOf(m.Cover), h.isCur(m))
-				if ev.Open || ev.Play {
-					h.playFrom(s, songs, i)
-				}
+		ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
+		for i, m := range songs {
+			ev := pud.CoverCard(c, "home:recent:card:"+m.ID, h.cleanTitle(m.Title),
+				m.Owner, homeRailCardW, h.coverOf(m.Cover), h.isCur(m))
+			if ev.Open || ev.Play {
+				h.playFrom(s, songs, i)
 			}
-		})
+		}
+	})
 }
 
 // skeletonRail 是 rail 的骨架。

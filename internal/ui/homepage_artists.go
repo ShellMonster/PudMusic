@@ -53,7 +53,7 @@ func (h *homePage) viewHotArtists(c *ui.Context, s *Shell) {
 		pud.SecHead(c, "home:artists", "热门歌手", "来自本周热榜", "")
 		ui.ScrollHorizontal(c).Key("home:artists:rail").FillWidth().Height(avatarSize+38).
 			Gap(space.Px24).Padding(space.None, space.None, space.Px12, space.None).
-			ScrollbarStyle(ui.ScrollbarStyle{TrackWidth: 6, ThumbWidth: 6, MinLength: 24}).Children(func() {
+			ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
 			for _, name := range artists {
 				name := name
 				button := ui.ButtonBase(c).Key("home:artist:" + name).Label("搜索 " + name).Width(itemWidth).Shrink(0).AlignItems(ui.Center).Radius(tok.R12)
@@ -82,7 +82,7 @@ func (h *homePage) skeletonArtists(c *ui.Context) {
 	}
 	ui.ScrollHorizontal(c).Key("home:artists:sk:rail").FillWidth().Height(avatarSize+38).
 		Gap(space.Px24).Padding(space.None, space.None, space.Px12, space.None).
-		ScrollbarStyle(ui.ScrollbarStyle{TrackWidth: 6, ThumbWidth: 6, MinLength: 24}).Children(func() {
+		ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
 		// 6 是这一排的上限（`hotArtists` 取到 6 就停）。
 		for i := 0; i < 6; i++ {
 			ui.Column(c).Key(fmt.Sprintf("home:artist:sk:%d", i)).Width(itemWidth).Shrink(0).

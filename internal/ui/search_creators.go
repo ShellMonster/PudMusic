@@ -215,7 +215,7 @@ func (s *Shell) viewCreatorRail(c *ui.Context, items []app.SearchItem) {
 	ui.ScrollHorizontal(c).Key("search:creators").FillWidth().Height(112).
 		Gap(space.Px16).Padding(space.None, space.None, space.Px16, space.None).
 		Margin(space.Px16, space.None, space.None, space.None).
-		ScrollbarStyle(ui.ScrollbarStyle{TrackWidth: 6, ThumbWidth: 6, MinLength: 24}).Children(func() {
+		ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
 		for _, item := range items {
 			item := item
 			button := ui.ButtonBase(c).Key("search:creator:" + item.Item.Bvid).Label("打开 " + item.Title + " 的空间").Width(116).Shrink(0).
@@ -259,7 +259,7 @@ func (s *Shell) viewCreatorSkeleton(c *ui.Context) {
 	ui.ScrollHorizontal(c).Key("search:creators:sk").FillWidth().Height(112).
 		Gap(space.Px16).Padding(space.None, space.None, space.Px16, space.None).
 		Margin(space.Px16, space.None, space.None, space.None).
-		ScrollbarStyle(ui.ScrollbarStyle{TrackWidth: 6, ThumbWidth: 6, MinLength: 24}).Children(func() {
+		ScrollbarStyle(horizontalRailScrollbarStyle()).Children(func() {
 		for i := 0; i < 8; i++ {
 			ui.Column(c).Key(fmt.Sprintf("search:creator:sk:%d", i)).Width(116).Shrink(0).
 				AlignItems(ui.Center).Gap(space.Px8).Children(func() {
