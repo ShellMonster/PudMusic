@@ -19,8 +19,8 @@ import (
 func PopPanel(c *ui.Context, key string) ui.Element {
 	p := pal(c)
 	e := ui.Column(c).Key(key).MinWidth(tok.PopMinW).Padding(space.Px8).Radius(tok.R12).
-		Background(p.Surface).Border(1, p.Line).Transition(motion.PopIn)
-	return shadow.Pop(e, c.Theme())
+		Background(p.Surface).Border(1, p.Line.Alpha(0.7)).Transition(motion.PopIn)
+	return shadow.PopQuiet(e, c.Theme())
 }
 
 // PopStyle 给一块**别处建好的面板**（框架 `PopoverBase` 递进回调的那一块）上 `.pop` 的外观：surface 底、
