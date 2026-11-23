@@ -105,6 +105,16 @@ func Pop(e ui.Element, t *ui.Theme) ui.Element {
 		Shadow(0, 2, 8, 0, ui.RGBA(20, 22, 26, 0.08))
 }
 
+// PopQuiet 是轻量下拉菜单的影。它保留浮层层级，但不把小菜单画成一张大卡片。
+func PopQuiet(e ui.Element, t *ui.Theme) ui.Element {
+	if t.Dark {
+		return e.Shadow(0, 10, 28, 0, ui.RGBA(0, 0, 0, 0.4)).
+			Shadow(0, 2, 6, 0, ui.RGBA(0, 0, 0, 0.28))
+	}
+	return e.Shadow(0, 10, 28, 0, ui.RGBA(20, 22, 26, 0.12)).
+		Shadow(0, 2, 6, 0, ui.RGBA(20, 22, 26, 0.06))
+}
+
 // LargeCover 是「深夜唱片行」的 `--shadow-cover`（原型 index.html 89 / 112 行，
 // `.cover.lg`）：「今日一张」那张大封面。
 //
