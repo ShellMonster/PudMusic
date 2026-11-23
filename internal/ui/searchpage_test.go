@@ -779,6 +779,28 @@ func TestClickingAUserCardGoesToTheirSpace(t *testing.T) {
 	}
 }
 
+// TestSearchUserCardsKeepClearanceBelowTheToolbar locks the user result cards below
+// the sorting toolbar instead of letting the first row touch it.
+func TestSearchUserCardsKeepClearanceBelowTheToolbar(t *testing.T) {
+	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
+	settleText(t, tt, "第 1 页 第 1 首")
+	if err := tt.Click("UP 主"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "用户结果加载完", loadedTo(s, searchTabUser, 1))
+	toolbar, ok := tt.Find("默认排序")
+	if !ok {
+		t.Fatal("找不到 UP 主排序控件")
+	}
+	card, ok := tt.Find("打开 " + stubTitle(1, 0) + " 的空间")
+	if !ok {
+		t.Fatal("找不到第一张 UP 主卡")
+	}
+	if gap := card.Y - (toolbar.Y + toolbar.H); gap < 8 {
+		t.Fatalf("排序控件和第一张 UP 主卡之间只有 %.1fpx，至少需要 8px", gap)
+	}
+}
+
 // TestFirstSearchTabVisitKeepsViewport 锁定首次切到结果足够多的标签时不应跳回顶部。
 func TestFirstSearchTabVisitKeepsViewport(t *testing.T) {
 	s, tt := newSearchPage(t, "周杰伦", newSearchStub(72, 72))

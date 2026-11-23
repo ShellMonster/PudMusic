@@ -360,6 +360,9 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string, le
 		ui.Box(c).Height(space.Px8)
 		t.list.Header(c, "search:header:"+strconv.Itoa(tab))
 	}
+	if tab == searchTabUser {
+		ui.Box(c).Height(space.Px8)
+	}
 	t.list.View(c)
 }
 
