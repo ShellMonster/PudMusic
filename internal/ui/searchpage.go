@@ -186,6 +186,9 @@ var searchTabLabels = [searchTabCount]string{"歌曲", "视频", "UP 主"}
 func (s *Shell) searchTabCountText(tab int) string {
 	t := &s.search.lists[tab]
 	pg := t.list.Paged()
+	if tab == searchTabUser && s.search.creators.total > 0 {
+		return strconv.Itoa(s.search.creators.total)
+	}
 	if pg.Loaded == 0 && !pg.Loading && pg.Err == nil && t.kw == "" {
 		return ""
 	}
@@ -205,6 +208,9 @@ func (s *Shell) searchTabCountText(tab int) string {
 				}
 			}
 		}
+	}
+	if n == 0 {
+		return ""
 	}
 	return strconv.Itoa(n)
 }
@@ -365,8 +371,8 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string, le
 		ui.Box(c).Height(space.Px8)
 		t.list.Header(c, "search:header:"+strconv.Itoa(tab))
 	}
-	if tab == searchTabUser {
-		ui.Box(c).Height(space.Px16)
+	if tab == searchTabUser && !lead {
+		ui.Box(c).Height(space.Px24)
 	}
 	t.list.View(c)
 }

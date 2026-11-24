@@ -19,6 +19,7 @@ import (
 
 type creatorResult struct {
 	items []app.SearchItem
+	total int
 	err   error
 }
 
@@ -27,6 +28,7 @@ type creatorPreview struct {
 	cancel  context.CancelFunc
 	result  <-chan creatorResult
 	items   []app.SearchItem
+	total   int
 	err     error
 	fetch   func(context.Context, string) ([]app.SearchItem, error)
 
@@ -77,7 +79,7 @@ func (s *Shell) syncCreatorPreview(keyword string) {
 	keyword = strings.TrimSpace(keyword)
 	if p.keyword != keyword {
 		p.stop()
-		p.keyword, p.items, p.err = keyword, nil, nil
+		p.keyword, p.items, p.total, p.err = keyword, nil, 0, nil
 		if keyword != "" && !s.closed {
 			ctx, cancel := context.WithCancel(context.Background())
 			p.cancel = cancel
@@ -103,7 +105,7 @@ func (s *Shell) syncCreatorPreview(keyword string) {
 				if err == nil {
 					p.storePage(keyword, app.SearchPage{Items: items, HasMore: page.HasMore, Total: page.Total})
 				}
-				ch <- creatorResult{items: items, err: err}
+				ch <- creatorResult{items: items, total: page.Total, err: err}
 				s.wake.invalidate()
 			}()
 		}
@@ -112,6 +114,7 @@ func (s *Shell) syncCreatorPreview(keyword string) {
 		select {
 		case result := <-p.result:
 			p.items = uniqueCreators(result.items)
+			p.total = result.total
 			p.err = result.err
 			p.result = nil
 			if p.cancel != nil {
@@ -201,6 +204,9 @@ func (s *Shell) viewSearchLead(c *ui.Context, keyword string, tab int) {
 		pud.Tabs(c, "search:tabs:"+keyword, &s.search.tab, tabs)
 	})
 	s.viewSearchToolbar(c, tab)
+	if tab == searchTabUser {
+		ui.Box(c).Height(space.Px24)
+	}
 
 	t := &s.search.lists[tab]
 	if t.list.Layout() != list.ViewCard && tab != searchTabUser && t.list.Paged().Loaded > 0 {
