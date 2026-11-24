@@ -796,8 +796,8 @@ func TestSearchUserCardsKeepClearanceBelowTheToolbar(t *testing.T) {
 	if !ok {
 		t.Fatal("找不到第一张 UP 主卡")
 	}
-	if gap := card.Y - (toolbar.Y + toolbar.H); gap < 16 {
-		t.Fatalf("排序控件和第一张 UP 主卡之间只有 %.1fpx，至少需要 16px", gap)
+	if gap := card.Y - (toolbar.Y + toolbar.H); gap < 24 {
+		t.Fatalf("排序控件和第一张 UP 主卡之间只有 %.1fpx，至少需要 24px", gap)
 	}
 }
 

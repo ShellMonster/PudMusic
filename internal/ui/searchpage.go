@@ -366,7 +366,7 @@ func (s *Shell) viewSearchResultsBody(c *ui.Context, tab int, keyword string, le
 		t.list.Header(c, "search:header:"+strconv.Itoa(tab))
 	}
 	if tab == searchTabUser {
-		ui.Box(c).Height(space.Px16)
+		ui.Box(c).Height(space.Px24)
 	}
 	t.list.View(c)
 }
