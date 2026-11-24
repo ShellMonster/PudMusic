@@ -36,6 +36,30 @@ func TestSearchCreatorsAreClickable(t *testing.T) {
 	}
 }
 
+// TestSearchUserCardsKeepClearanceAfterCreatorPreview locks spacing inside the combined search lead.
+func TestSearchUserCardsKeepClearanceAfterCreatorPreview(t *testing.T) {
+	s, tt := newSearchPage(t, "音乐", newSearchStub(24, 24))
+	s.search.creators.fetch = func(context.Context, string) ([]app.SearchItem, error) {
+		return []app.SearchItem{creatorItem("42", "测试UP", "", bili.VerificationPersonal)}, nil
+	}
+	waitFrames(t, tt, "相关UP主出现", func() bool { return tt.HasText("测试UP") })
+	if err := tt.Click("UP 主"); err != nil {
+		t.Fatal(err)
+	}
+	waitFrames(t, tt, "用户卡片出现", func() bool { return tt.HasText("打开 测试UP 的空间") })
+	toolbar, ok := tt.Find("默认排序")
+	if !ok {
+		t.Fatal("找不到 UP 主排序控件")
+	}
+	card, ok := tt.Find("打开 第 1 页 第 1 首 的空间")
+	if !ok {
+		t.Fatal("找不到第一张 UP 主卡")
+	}
+	if gap := card.Y - (toolbar.Y + toolbar.H); gap < 24 {
+		t.Fatalf("排序控件和第一张 UP 主卡之间只有 %.1fpx，至少需要 24px", gap)
+	}
+}
+
 // TestSearchCreatorPreviewIgnoresStaleResults locks the current query against a delayed previous result.
 func TestSearchCreatorPreviewIgnoresStaleResults(t *testing.T) {
 	s, tt := newSearchPage(t, "旧词", newSearchStub(24, 24))

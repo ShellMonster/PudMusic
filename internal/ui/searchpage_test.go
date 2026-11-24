@@ -447,6 +447,17 @@ func TestTheThreeTypesAndTheirSorts(t *testing.T) {
 	}
 }
 
+// TestSearchUserTabShowsPreviewTotalBeforeOpeningIt locks the preview count into the tab.
+func TestSearchUserTabShowsPreviewTotalBeforeOpeningIt(t *testing.T) {
+	s, tt := newSearchPage(t, "周杰伦", newSearchStub(24, 24))
+	waitFrames(t, tt, "搜索结果标签", func() bool { return tt.HasText("UP 主") })
+	s.search.creators.total = 1000
+	tt.Frame()
+	if !tt.HasText("1000") {
+		t.Fatalf("UP 主标签没有显示预览总数，文字有 %q", tt.Texts())
+	}
+}
+
 // TestEachSortStaysItsOwn 盯「排序是每个 Tab 各自的」。Biu 的两个列表各有一份排序
 // 状态（`video-list` 一个 `order`、`user-list` 一个 `sortKey`）；做成一个全局值的话，
 // 在「用户」里按过排序再切回「视频」，视频那边的排序被改了——而他刚点的明明是用户
