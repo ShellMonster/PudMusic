@@ -2,7 +2,7 @@
   "name": "布丁音乐",
   "slug": "pudmusic",
   "identifier": "io.github.shellmonster.biu",
-  "version": "1.2.8",
+  "version": "1.2.9",
   "out": "build",
   "urlSchemes": ["pudmusic"],
   "fileAssociations": [
