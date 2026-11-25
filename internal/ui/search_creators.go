@@ -224,7 +224,7 @@ func (s *Shell) viewCreatorRail(c *ui.Context, items []app.SearchItem) {
 		for _, item := range items {
 			item := item
 			button := ui.ButtonBase(c).Key("search:creator:" + item.Item.Bvid).Label("打开 " + item.Title + " 的空间").Width(116).Shrink(0).
-				AlignItems(ui.Center).Radius(tok.R8)
+				PaddingY(space.Px6).AlignItems(ui.Center).Radius(tok.R8)
 			if button.Hovered() {
 				button = button.Background(ty.Hover)
 			}
